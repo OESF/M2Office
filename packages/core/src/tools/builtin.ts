@@ -1,0 +1,92 @@
+import { randomUUID } from 'node:crypto';
+import type { Tool } from './registry.js';
+
+/**
+ * プロトタイプで用いる内蔵ツール。
+ *
+ * @remarks
+ * 危険度は仕様書 第7.4節の区分に従う。
+ * `external-send` 以上のツールは、定義に承認ゲートが無ければ実行前に拒否される
+ * （{@link ../engine/run-engine.js} の検証）。
+ */
+
+/** 組織知識を検索する。出典を伴って返す（仕様書 第9.7節）。 */
+export const knowledgeSearch: Tool = {
+  name: 'knowledge.search',
+  risk: 'read',
+  description: '組織知識を検索し、出典つきで返す',
+  async invoke(args, ctx) {
+    const query = String(args['query'] ?? '');
+    const hits = await ctx.repo.searchKnowledge(ctx.tenantId, query, ctx.compartment);
+    return {
+      query,
+      hits: hits.map((h) => ({ title: h.title, source: h.source, body: h.body })),
+      found: hits.length,
+    };
+  },
+};
+
+/** 会議の記録を取得する。プロトタイプでは入力に貼り付けた本文を用いる。 */
+export const meetingGetTranscript: Tool = {
+  name: 'meeting.get_transcript',
+  risk: 'read',
+  description: '会議の文字起こしを取得する',
+  async invoke(args) {
+    const text = String(args['transcript'] ?? '');
+    if (!text.trim()) {
+      // 取得できなかった値を推測で埋めない（仕様書 第7.2節）
+      return { available: false, reason: '文字起こしを取得できませんでした' };
+    }
+    return { available: true, text };
+  },
+};
+
+/** 文書を生成して成果物として保存する。 */
+export const documentCreate: Tool = {
+  name: 'document.create',
+  risk: 'draft',
+  description: '文書を作成し、成果物として保存する',
+  async invoke(args, ctx) {
+    const id = randomUUID();
+    await ctx.repo.createArtifact({
+      id,
+      runId: ctx.runId,
+      tenantId: ctx.tenantId,
+      kind: String(args['kind'] ?? 'document'),
+      title: String(args['title'] ?? '無題'),
+      body: String(args['body'] ?? ''),
+      createdAt: new Date().toISOString(),
+    });
+    return { artifactId: id, title: args['title'] };
+  },
+};
+
+/** ToDo を起票する。社内への書き込みのため既定で承認を要する。 */
+export const tasksCreate: Tool = {
+  name: 'tasks.create',
+  risk: 'write-internal',
+  description: 'Google Tasks に ToDo を起票する',
+  async invoke(args) {
+    // Phase 1 で Google Tasks へ接続する。現時点は記録のみ。
+    return { created: true, title: args['title'] ?? '', due: args['due'] ?? null };
+  },
+};
+
+/** チャットへ投稿する。対外送信にあたるため承認が必須。 */
+export const chatPost: Tool = {
+  name: 'chat.post',
+  risk: 'external-send',
+  description: 'Google Chat のスペースへ投稿する',
+  async invoke(args) {
+    // Phase 1 で Google Chat へ接続する。現時点は記録のみ。
+    return { posted: true, space: args['space'] ?? '', text: args['text'] ?? '' };
+  },
+};
+
+export const BUILTIN_TOOLS: Tool[] = [
+  knowledgeSearch,
+  meetingGetTranscript,
+  documentCreate,
+  tasksCreate,
+  chatPost,
+];

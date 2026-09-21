@@ -1,0 +1,15 @@
+{
+  "name": "@m2office/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "ドメインロジック。実行エンジン、承認、ツール、知識、LLM 抽象化層",
+  "main": "./src/index.ts",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": { "typecheck": "tsc -b" },
+  "dependencies": {
+    "@m2office/shared": "*",
+    "pg": "^8.13.0"
+  },
+  "devDependencies": { "@types/pg": "^8.11.0" }
+}
