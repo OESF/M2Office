@@ -1,6 +1,16 @@
-# プロダクト概要資料の生成
+# プレゼン資料の生成
 
-`M2Office_プロダクト概要.pptx` を作ります。PowerPoint でも Google スライドでも開けます。
+2 種類あります。読み手が違うので分けています。
+
+| 資料 | 読み手 | 生成 |
+|---|---|---|
+| `M2Office_プロダクト概要.pptx`（19 枚） | 顧客・パートナー・出資者 | `node tools/deck/build.mjs` |
+| `M2Office_開発キックオフ.pptx`（22 枚） | 開発に参加するメンバー | `node tools/deck/build-kickoff.mjs` |
+
+プロダクト概要は「何ができるか」、キックオフは「技術的に何が面白いか」と
+「もう動いている」ことを中心に据えています。
+
+どちらも PowerPoint でも Google スライドでも開けます。
 
 ## 前提
 
@@ -13,10 +23,9 @@ npm install pptxgenjs
 ## 使い方
 
 ```bash
-node tools/deck/build.mjs
+node tools/deck/build.mjs           # プロダクト概要
+node tools/deck/build-kickoff.mjs   # 開発キックオフ
 ```
-
-`M2Office_プロダクト概要.pptx` が生成されます。
 
 ## Google スライドで開く
 
@@ -42,7 +51,7 @@ Google スライドは `.pptx` をそのまま読み込めます。
 
 ## 直すとき
 
-`build.mjs` の該当ブロックを編集します。配色は冒頭の `C`、
+該当する `.mjs` のブロックを編集します。配色は冒頭の `C`、
 余白と用紙は `W` / `H` / `M` にまとめてあります。
 
 `s.addNotes()` が発表者ノートです。
