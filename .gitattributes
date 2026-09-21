@@ -1,0 +1,7 @@
+# 改行コードを LF に統一する
+* text=auto eol=lf
+
+# バイナリとして扱う
+*.png binary
+*.pdf binary
+*.ico binary
