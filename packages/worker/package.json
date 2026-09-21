@@ -1,0 +1,16 @@
+{
+  "name": "@m2office/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "ジョブ実行。承認による中断と再開を担う常駐プロセス",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "@m2office/core": "*",
+    "@m2office/shared": "*"
+  }
+}
