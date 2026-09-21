@@ -27,3 +27,6 @@ __pycache__/
 # Claude Code の個人設定（launch.json は共有する）
 .claude/settings.local.json
 .claude/*.local.json
+
+# プレゼン資料（生成物。tools/deck で再生成する）
+M2Office_プロダクト概要.pptx
