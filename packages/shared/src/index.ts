@@ -1,0 +1,10 @@
+/**
+ * `@m2office/shared` の公開窓口。
+ *
+ * 画面・API・ワーカーが共通で参照する型と定数のみを置く。
+ * 実装（ドメインロジック）は `@m2office/core` に置き、ここには含めない。
+ */
+export * from './types/agent.js';
+export * from './types/run.js';
+export * from './types/tenant.js';
+export * from './types/audit.js';
