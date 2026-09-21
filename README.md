@@ -105,6 +105,7 @@ docs/            開発規約・リリース規定・設計判断記録
 |---|---|
 | [specification.md](specification.md) | システム仕様の全体 |
 | [CLAUDE.md](CLAUDE.md) | 開発時に守ること（要点） |
+| [docs/google-setup.md](docs/google-setup.md) | Google Workspace と Google Cloud の設定手順 |
 | [docs/coding-standards.md](docs/coding-standards.md) | コードの書き方、JSDoc、README |
 | [docs/release-process.md](docs/release-process.md) | バージョンとリリース |
 | [docs/adr/](docs/adr/) | 設計判断の記録 |
