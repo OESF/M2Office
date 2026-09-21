@@ -181,6 +181,44 @@ function card(s, x, y, w, h, fill = C.tealLt) {
   s.addNotes('3 つの柱で説明する。');
 }
 
+/* 5b. 共通基盤と拡張 */
+{
+  const s = lightSlide('共通の土台に、必要なものだけを積む', '会社ごとの事情に、フルスクラッチではなく積み上げで応える');
+  const layers = [
+    { h: '拡張', t: '業種特化・個社固有の業務', sub: '必要なものだけ足す', bg: C.tealLt, hc: C.teal, who: '運営・第三者・顧客自身' },
+    { h: 'M2Office 基盤', t: '秘書・承認・権限・記録・知識', sub: 'どの会社も同じ', bg: 'F7F8F8', hc: C.ink, who: '運営が提供' },
+    { h: 'Google Workspace', t: 'メール・予定・文書・会議', sub: 'どの会社も同じ', bg: 'F7F8F8', hc: C.ink, who: '顧客が既に持っている' },
+  ];
+  layers.forEach((v, i) => {
+    const y = 2.05 + i * 1.12;
+    s.addShape(p.ShapeType.roundRect, {
+      x: M, y, w: 9.0, h: 0.95, rectRadius: 0.07,
+      fill: { color: v.bg }, line: { color: v.bg },
+    });
+    s.addText(v.h, {
+      x: M + 0.4, y: y + 0.13, w: 3.0, h: 0.35, isTextBox: true, margin: 0,
+      fontFace: F, fontSize: 17, bold: true, color: v.hc,
+    });
+    s.addText(v.t, {
+      x: M + 0.4, y: y + 0.5, w: 5.2, h: 0.33, isTextBox: true, margin: 0,
+      fontFace: F, fontSize: 13, color: C.muted,
+    });
+    s.addText(v.sub, {
+      x: M + 5.9, y: y + 0.13, w: 2.7, h: 0.35, isTextBox: true, margin: 0,
+      fontFace: F, fontSize: 13, bold: true, color: v.hc, align: 'right',
+    });
+    s.addText(v.who, {
+      x: M + 9.3, y: y + 0.28, w: 2.6, h: 0.4, isTextBox: true, margin: 0,
+      fontFace: F, fontSize: 12, color: C.muted, valign: 'middle',
+    });
+  });
+  s.addText('違いは一番上の層だけに現れる。土台は作り直さない。', {
+    x: M, y: 5.55, w: 11.9, h: 0.4, isTextBox: true, margin: 0,
+    fontFace: F, fontSize: 16, bold: true, color: C.teal,
+  });
+  s.addNotes('受託開発では高すぎ、汎用パッケージでは届かない。その間を埋める形。');
+}
+
 /* 6. 特徴1 秘書 */
 {
   const s = lightSlide('特徴 1 ｜ 専属の秘書が「いつものあれ」で通じる', '過去のやり取りを踏まえて、省略した指示を解決する');
@@ -325,39 +363,90 @@ function card(s, x, y, w, h, fill = C.tealLt) {
   s.addNotes('社内は Google に一本化。社外接点は将来 LINE も。');
 }
 
-/* 11. 特徴6 拡張 */
+/* 11. 特徴6 GUI で拡張 */
 {
-  const s = lightSlide('特徴 6 ｜ 提供側だけで作らない', '業種や個社の事情は、第三者と顧客自身が埋められる構造にする');
-  const layers = [
-    { n: 'L1', h: '業務の手順', t: '業務知識だけで作れる。\n士業や業務担当者が提供できる。' },
-    { n: 'L2', h: '外部システム接続', t: '会計・販売管理などを\n標準の規格でつなぐ。' },
-    { n: 'L3', h: '外部アプリ', t: '公開 API を使って、\n既存システムから呼び出す。' },
+  const s = lightSlide('特徴 6 ｜ スキルを画面から足せる', '同じ「スキルを足す」でも、その作業が誰にできるかで価値が変わる');
+  const rows = [
+    ['スキルの実体', 'リポジトリ内のファイル', 'データベース上の定義'],
+    ['導入', 'コマンドで取り込む', '画面から選んで有効化'],
+    ['設定の変更', 'ファイルを書き換える', '画面から編集する'],
+    ['誰に扱えるか', '技術者', '業務担当者'],
+    ['権限の割当', '環境の権限に従う', '画面で人ごとに割り当てる'],
   ];
-  layers.forEach((v, i) => {
-    const x = M + i * 4.1;
-    card(s, x, 2.1, 3.7, 2.8);
-    s.addShape(p.ShapeType.roundRect, {
-      x: x + 0.4, y: 2.45, w: 0.85, h: 0.45, rectRadius: 0.06,
-      fill: { color: C.teal }, line: { color: C.teal },
-    });
-    s.addText(v.n, {
-      x: x + 0.4, y: 2.45, w: 0.85, h: 0.45, isTextBox: true, margin: 0,
-      fontFace: F, fontSize: 15, bold: true, color: C.white, align: 'center', valign: 'middle',
-    });
-    s.addText(v.h, {
-      x: x + 1.4, y: 2.48, w: 2.1, h: 0.42, isTextBox: true, margin: 0,
-      fontFace: F, fontSize: 17, bold: true, color: C.ink, valign: 'middle',
-    });
-    s.addText(v.t, {
-      x: x + 0.4, y: 3.15, w: 2.95, h: 1.4, isTextBox: true, margin: 0,
+  s.addText('従来の方式', {
+    x: M + 4.0, y: 1.95, w: 3.6, h: 0.35, isTextBox: true, margin: 0,
+    fontFace: F, fontSize: 14, bold: true, color: C.muted, align: 'center',
+  });
+  s.addText('M2Office', {
+    x: M + 7.9, y: 1.95, w: 4.0, h: 0.35, isTextBox: true, margin: 0,
+    fontFace: F, fontSize: 14, bold: true, color: C.teal, align: 'center',
+  });
+  rows.forEach((r, i) => {
+    const y = 2.4 + i * 0.6;
+    s.addText(r[0], {
+      x: M + 0.1, y: y + 0.08, w: 3.7, h: 0.35, isTextBox: true, margin: 0,
       fontFace: F, fontSize: 14, color: C.ink,
     });
+    s.addShape(p.ShapeType.roundRect, {
+      x: M + 4.0, y, w: 3.6, h: 0.5, rectRadius: 0.06,
+      fill: { color: 'F3F4F6' }, line: { color: 'F3F4F6' },
+    });
+    s.addText(r[1], {
+      x: M + 4.15, y: y + 0.08, w: 3.3, h: 0.35, isTextBox: true, margin: 0,
+      fontFace: F, fontSize: 13, color: C.muted, align: 'center',
+    });
+    s.addShape(p.ShapeType.roundRect, {
+      x: M + 7.9, y, w: 4.0, h: 0.5, rectRadius: 0.06,
+      fill: { color: C.tealLt }, line: { color: C.tealLt },
+    });
+    s.addText(r[2], {
+      x: M + 8.05, y: y + 0.08, w: 3.7, h: 0.35, isTextBox: true, margin: 0,
+      fontFace: F, fontSize: 13, bold: true, color: C.teal, align: 'center',
+    });
   });
-  s.addText('第三者のコードを M2Office の中で動かさない。安全性を保ったまま開く。', {
-    x: M, y: 5.25, w: 11.9, h: 0.4, isTextBox: true, margin: 0,
-    fontFace: F, fontSize: 14, color: C.muted,
+  s.addText('ファイルを書ける人しか扱えないなら、拡張の速度はその人数で頭打ちになる。', {
+    x: M, y: 5.55, w: 11.9, h: 0.4, isTextBox: true, margin: 0,
+    fontFace: F, fontSize: 15, bold: true, color: C.ink,
   });
-  s.addNotes('サンドボックスを自前で作らずに済む設計。');
+  s.addNotes('ここが生産性の差。作る人は技術者でも、入れる人は業務担当者でよい。');
+}
+
+/* 11b. パートナー制度 */
+{
+  const s = lightSlide('だから、外部に作ってもらえる', '運営がすべての業種を作ることはできない');
+  const roles = [
+    { n: 1, h: '作る', w: 'インテグレーター\nSaaS ベンダー\n士業・業界団体', need: '業務知識、または API 開発' },
+    { n: 2, h: '届ける', w: 'マーケット\nパートナー', need: '販路' },
+    { n: 3, h: '入れる', w: '顧客の管理者', need: '不要。画面の操作だけ' },
+    { n: 4, h: '使う', w: '顧客の従業員', need: '不要' },
+  ];
+  roles.forEach((v, i) => {
+    const x = M + i * 3.05;
+    const hi = i >= 2;
+    card(s, x, 2.05, 2.75, 2.95, hi ? C.tealLt : 'F7F8F8');
+    numberCircle(s, v.n, x + 0.3, 2.3, 0.46, hi ? C.teal : '9AA5A3');
+    s.addText(v.h, {
+      x: x + 0.9, y: 2.33, w: 1.7, h: 0.42, isTextBox: true, margin: 0,
+      fontFace: F, fontSize: 18, bold: true, color: hi ? C.teal : C.ink, valign: 'middle',
+    });
+    s.addText(v.w, {
+      x: x + 0.3, y: 3.0, w: 2.15, h: 1.1, isTextBox: true, margin: 0,
+      fontFace: F, fontSize: 13, color: C.ink,
+    });
+    s.addText(v.need, {
+      x: x + 0.3, y: 4.25, w: 2.15, h: 0.6, isTextBox: true, margin: 0,
+      fontFace: F, fontSize: 12, bold: hi, color: hi ? C.amber : C.muted,
+    });
+  });
+  s.addText('「入れる」に技術力が要らないから、作ったものがそのまま顧客に届く。', {
+    x: M, y: 5.3, w: 11.9, h: 0.4, isTextBox: true, margin: 0,
+    fontFace: F, fontSize: 16, bold: true, color: C.ink,
+  });
+  s.addText('士業と業界団体が鍵になる。業務知識と販路の両方を持ち、手順の定義はプログラミングなしで作れる。', {
+    x: M, y: 5.72, w: 11.9, h: 0.4, isTextBox: true, margin: 0,
+    fontFace: F, fontSize: 13, color: C.muted,
+  });
+  s.addNotes('提供できる範囲を、運営の開発力から切り離す。');
 }
 
 /* 12. 安全性 */
@@ -535,11 +624,12 @@ function card(s, x, y, w, h, fill = C.tealLt) {
   });
   const pts = [
     ['組織として導入できる形にした', '権限・承認・記録を最初から備える'],
+    ['共通の土台に、必要な分だけ積む', '画面から足せるから、外部にも作ってもらえる'],
     ['日本の制度に合わせてある', 'インボイス、電帳法、日本の商習慣'],
     ['使うほど会社の資産になる', '個人の経験が形式知として残る'],
   ];
   pts.forEach((v, i) => {
-    const y = 2.6 + i * 1.1;
+    const y = 2.45 + i * 0.95;
     numberCircle(s, i + 1, M, y, 0.55, '13514E');
     s.addText(v[0], {
       x: M + 0.85, y: y - 0.02, w: 9.5, h: 0.42, isTextBox: true, margin: 0,
