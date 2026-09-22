@@ -20,6 +20,8 @@ import type {
 export interface Repository {
   /** サブドメインからテナントを解決する。見つからなければ `null`。 */
   findTenantBySubdomain(subdomain: string): Promise<Tenant | null>;
+  /** ID でテナントを引く。サブドメインを持たない要求（Google からの戻りなど）で状態を確かめるのに使う。 */
+  findTenantById(tenantId: string): Promise<Tenant | null>;
   findUserByEmail(tenantId: string, email: string): Promise<User | null>;
   findUserById(tenantId: string, userId: string): Promise<User | null>;
   listUsers(tenantId: string): Promise<User[]>;

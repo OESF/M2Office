@@ -17,7 +17,7 @@ import {
   type GeminiModels, type GeminiSettingsMeta,
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
-import { requireRole, type AppEnv } from '../middleware/tenant.js';
+import { isOperational, requireRole, type AppEnv } from '../middleware/tenant.js';
 
 const MODEL_KEYS: (keyof GeminiModels)[] = ['fast', 'standard', 'advanced', 'research', 'live'];
 
@@ -313,6 +313,9 @@ export function oauthCallbackRoute(deps: AppDeps) {
     if (c.req.query('error')) return back('cancelled');
     const code = c.req.query('code');
     if (!code) return back('failed');
+    // 要求のあとに停止された会社では接続を保存しない。停止中は Google との接続を受け付けない（仕様書 第23.8.6節）
+    const tenant = await deps.repo.findTenantById(pending.tenantId);
+    if (!tenant || !isOperational(tenant)) return back('failed');
     try {
       const client = await googleClient(deps, pending.tenantId);
       if (!client) return back('failed');

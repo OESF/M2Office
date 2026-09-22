@@ -57,12 +57,63 @@ export function resolveTenant(deps: AppDeps) {
     if (!tenant) {
       return c.json({ error: `テナントが見つかりません: ${subdomain}` }, 404);
     }
-    if (tenant.status === 'suspended' || tenant.status === 'cancelled') {
-      return c.json({ error: 'このテナントは現在ご利用いただけません' }, 403);
+    // 緊急停止はログインを含めてすべて止める。理由は返さない（仕様書 第23.8.6節）
+    if (tenant.status === 'locked') {
+      return c.json({ error: 'この会社のご利用は、現在停止しています。管理者にお問い合わせください' }, 403);
+    }
+    // 解約済みは「エクスポートのみ」だが、持ち出しが未実装のためすべて拒否する（第23.3節）
+    if (tenant.status === 'cancelled') {
+      return c.json({ error: 'この会社のご契約は終了しています' }, 403);
+    }
+    // 通常の停止は閲覧のみ。業務の依頼・承認・設定の変更は受け付けない（第23.8.6節）
+    if (tenant.status === 'suspended' && !allowedWhileSuspended(c.req.method, c.req.path)) {
+      return c.json({ error: SUSPENDED_MESSAGE, suspended: true }, 403);
     }
     c.set('tenant', tenant);
     await next();
   };
+}
+
+/** 通常の停止の間に、閲覧以外の操作を断るときの文。 */
+export const SUSPENDED_MESSAGE = 'この会社のご利用は停止中のため、閲覧だけができます。業務の依頼・承認・設定の変更は、再開のあとに行ってください';
+
+/**
+ * 通常の停止（`suspended`）の間に受け付ける書き込み。閲覧（`GET` など）は別にすべて受け付ける。
+ *
+ * @remarks 仕様書 第23.8.6節「通常の停止で受け付ける書き込み」の表と一致させる。
+ */
+const WRITES_WHILE_SUSPENDED: { method: string; path: RegExp }[] = [
+  // ログインとログアウト。閲覧にはログインが要る
+  { method: 'POST', path: /^\/v1\/auth\/(dev-login|logout)$/ },
+  // お知らせの既読。業務のデータを変えない
+  { method: 'POST', path: /^\/v1\/notifications\/[^/]+\/read$/ },
+  // ログイン中の端末のログアウト。乗っ取りへの備え（R-13）
+  { method: 'DELETE', path: /^\/v1\/me\/sessions\/[^/]+$/ },
+];
+
+/**
+ * 通常の停止の間に、この要求を受け付けるか。
+ *
+ * @param method HTTP メソッド
+ * @param path 要求のパス（`/v1/...`）
+ * @returns 閲覧か、停止中でも受け付ける書き込みなら `true`
+ *
+ * @remarks
+ * `GET` でも状態を変える入口（Google のログインの開始）は、閲覧とみなさず断る。
+ * Google からの戻り（`/v1/oauth/...`）はテナントの判定より前に受けるため、その経路で別に状態を確かめる。
+ */
+export function allowedWhileSuspended(method: string, path: string): boolean {
+  if (SAFE_METHODS.has(method)) return path !== '/v1/auth/google/start';
+  return WRITES_WHILE_SUSPENDED.some((w) => w.method === method && w.path.test(path));
+}
+
+/**
+ * テナントが業務を受け付ける状態か（試用・稼働中）。
+ *
+ * @remarks 停止中・緊急停止・解約済みでは、Google との接続のような書き込みを行わない。
+ */
+export function isOperational(tenant: Pick<Tenant, 'status'>): boolean {
+  return tenant.status === 'trial' || tenant.status === 'active';
 }
 
 /** 状態を変えない HTTP メソッド。CSRF の確認を要しない。 */

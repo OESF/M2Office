@@ -265,6 +265,8 @@ pre.body { white-space: pre-wrap; background: var(--subtle-bg); border: 1px soli
 .link { color: var(--accent); font-size: 13px; text-decoration: none; }
 .link:hover { text-decoration: underline; }
 .badge.warn { background: var(--warn-soft); color: var(--warn); }
+/* 通常の停止の案内（仕様書 第23.8.6節） */
+.suspended-banner { padding: 8px 16px; font-size: 13px; background: var(--warn-soft); color: var(--warn); border-bottom: 1px solid var(--warn-line); }
 .row { display: flex; gap: 8px; margin-top: 10px; }
 .notice.unread { border-color: var(--accent); }
 .me-summary {

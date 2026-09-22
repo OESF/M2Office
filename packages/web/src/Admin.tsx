@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { AuditEvent } from '@m2office/shared';
 import { api, type AdminRun, type Me } from './api.js';
-import { statusLabel } from './components.js';
+import { statusLabel, SuspendedBanner } from './components.js';
 import {
   AgentSettings, CompanySettings, KnowledgeSettings, UserSettings,
 } from './AdminSettings.js';
@@ -63,6 +63,7 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
         <span className="badge">{me.user.displayName}</span>
         <button className="btn ghost small" onClick={onLogout}>ログアウト</button>
       </header>
+      <SuspendedBanner status={me.tenant.status} />
       {!isAdmin ? (
         <main className="canvas"><p className="error">管理者ページは管理者のみが開けます。</p></main>
       ) : (

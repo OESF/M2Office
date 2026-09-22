@@ -7,7 +7,23 @@
 import { useState } from 'react';
 import type { Approval, Artifact, RunStep } from '@m2office/shared';
 import { api, describeError, type AgentSummary, type JsonSchemaField, type RunDetail } from './api.js';
-import { AgentHelpPanel } from './help.js';
+import { AgentHelpPanel, openHelp } from './help.js';
+
+/**
+ * 通常の停止の間、画面の上部に出す案内（仕様書 第23.8.6節）。停止していなければ何も出さない。
+ *
+ * @remarks 閲覧のみできることと、解除の方法をヘルプの記事で示す。停止の理由は運営が管理者へ別に知らせる
+ */
+export function SuspendedBanner({ status }: { status: string }) {
+  if (status !== 'suspended') return null;
+  return (
+    <div className="suspended-banner" role="status">
+      <strong>ご利用を停止しています。閲覧のみできます。</strong>
+      {' '}業務の依頼・承認・設定の変更は、再開のあとに行えます。
+      {' '}<button className="link-btn" onClick={() => openHelp('faq-suspended')}>解除の方法</button>
+    </div>
+  );
+}
 
 /**
  * 入力スキーマからフォームを自動生成する（仕様書 FR-202）。

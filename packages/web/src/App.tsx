@@ -12,7 +12,7 @@ import {
   api, describeError, type AgentSummary, type Me, type RunDetail, type ScheduleView, type SecretaryReply,
 } from './api.js';
 import { HelpCenter, HelpTip, Tour, openHelp, useOpenHelp } from './help.js';
-import { AgentForm, ApprovalTray, Evidence, RunView, statusLabel } from './components.js';
+import { AgentForm, ApprovalTray, Evidence, RunView, statusLabel, SuspendedBanner } from './components.js';
 import { Settings, orderAgents } from './Settings.js';
 import { NavHeading, NavItem, NavUserCard, SideNavLayout, ThemeToggle, agentIcon } from './nav.js';
 
@@ -127,6 +127,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
         <span className="badge">{me.user.displayName}</span>
         <button className="btn ghost small" onClick={onLogout}>ログアウト</button>
       </header>
+      <SuspendedBanner status={me.tenant.status} />
 
       <SideNavLayout
         extraClass={showSash ? 'with-sash' : ''}

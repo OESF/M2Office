@@ -123,6 +123,15 @@ export class PostgresRepository implements Repository {
     return rows[0] ?? null;
   }
 
+  async findTenantById(tenantId: string): Promise<Tenant | null> {
+    const rows = await this.q<Tenant>(null,
+      `select id, subdomain, name, workspace_domain as "workspaceDomain", status
+         from tenants where id = $1`,
+      [tenantId],
+    );
+    return rows[0] ?? null;
+  }
+
   async findUserByEmail(tenantId: string, email: string): Promise<User | null> {
     const rows = await this.q<User>(tenantId, 
       `select id, tenant_id as "tenantId", email, display_name as "displayName",

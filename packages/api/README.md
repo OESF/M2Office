@@ -34,6 +34,20 @@ curl -H 'x-tenant: a' -H 'x-user: member@alpha.example.jp' http://localhost:3101
 ```
 
 Cookie は `HttpOnly`・`SameSite=Lax` で、`Domain` 属性を付けません。
+
+### テナントの状態による制御
+
+テナントの状態（`tenants.status`）で、受け付ける要求を変えます（仕様書 第23.8.6節）。判定は `resolveTenant()` にあります。
+
+| 状態 | 受け付けるもの |
+|---|---|
+| `trial`・`active` | すべて |
+| `suspended`（通常の停止） | 閲覧（`GET`。Google のログインの開始を除く）と、ログイン・ログアウト・お知らせの既読・端末のログアウト。ほかは 403（`suspended: true`） |
+| `locked`（緊急停止） | なし。理由は返さない |
+| `cancelled`（解約済み） | なし（持ち出しの実装までは） |
+
+停止中に受け付ける書き込みを増やすときは、`allowedWhileSuspended()` の表と仕様書の表を同じコミットで直してください。
+ワーカーは、試用・稼働中でない会社の待ち行列の実行と定時実行を取りません（移行 020）。
 A 社のサブドメインで発行した Cookie は B 社へ送られず、持ち込んでも拒否します。
 データベースには Cookie の値ではなくハッシュを保存します。
 

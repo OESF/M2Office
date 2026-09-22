@@ -1359,6 +1359,49 @@ console.log('\n■ 33. 許可がなくなったときの業務の扱い（第6.5
     ? ok('止めたことを依頼した本人に知らせる') : ng('本人に知らせない');
 }
 
+console.log('\n■ 34. 会社の利用の停止（第23.8.6節）');
+{
+  // 状態はマスター管理画面ができるまでデータベースで変える。所有者のロールでつなぐ（アプリのロールは tenants を変えられない）
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const setStatus = (status) => owner.query(`update tenants set status = $1 where subdomain = 'b'`, [status]);
+
+  // 停止の前に、承認の無い業務を 1 つ終えておく（あとで待ち行列に戻して、ワーカーが始めないことを確かめる）
+  const { body: qa } = await call('b', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: 'knowledge-qa', input: { question: '有給休暇' } }) });
+  await waitFor('b', qa.runId, ['completed', 'failed']);
+  try {
+    await setStatus('suspended');
+    const { status: meStatus, body: me } = await call('b', '/v1/me');
+    const { status: runStatus } = await call('b', `/v1/runs/${qa.runId}`);
+    meStatus === 200 && me.tenant?.status === 'suspended' && runStatus === 200
+      ? ok('通常の停止の間も、画面と業務の結果を閲覧できる') : ng(`閲覧できない（${meStatus}・${runStatus}）`);
+
+    const { status: jobStatus, body: jobBody } = await call('b', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: 'knowledge-qa', input: { question: '経費' } }) });
+    const { status: apStatus } = await call('b', '/v1/approvals/unknown', { method: 'POST', body: JSON.stringify({ decision: 'approved' }) });
+    const { status: setStatusCode } = await call('b', '/v1/me/settings/notifications', { method: 'PUT', body: JSON.stringify({}) });
+    jobStatus === 403 && jobBody.suspended === true && apStatus === 403 && setStatusCode === 403
+      ? ok('業務の依頼・承認・設定の変更は、停止中であることを返して断る') : ng(`断らない（依頼 ${jobStatus}・承認 ${apStatus}・設定 ${setStatusCode}）`);
+    const { status: outStatus } = await call('b', '/v1/auth/logout', { method: 'POST' });
+    outStatus === 200 ? ok('ログアウトは受け付ける') : ng(`ログアウトできない（${outStatus}）`);
+
+    // 待ち行列に戻しても、停止中はワーカーが始めない
+    await owner.query(`update runs set status = 'queued', ended_at = null where id = $1`, [qa.runId]);
+    await sleep(3000);
+    const { body: held } = await call('b', `/v1/runs/${qa.runId}`);
+    held.run?.status === 'queued' ? ok('停止中は、待ち行列の業務を始めない') : ng(`始めてしまう（${held.run?.status}）`);
+
+    await setStatus('locked');
+    const { status: lockedStatus } = await call('b', '/v1/me');
+    lockedStatus === 403 ? ok('緊急停止は、閲覧を含めてすべて断る') : ng(`断らない（${lockedStatus}）`);
+  } finally {
+    await setStatus('active');
+  }
+  const resumed = await waitFor('b', qa.runId, ['completed', 'failed']);
+  resumed.run?.status === 'completed' ? ok('再開すると、待っていた業務が動く') : ng(`再開しても動かない（${resumed.run?.status}）`);
+  await owner.end();
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

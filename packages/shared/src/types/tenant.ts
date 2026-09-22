@@ -11,7 +11,10 @@ export interface Tenant {
   name: string;
   /** Google Workspace のドメイン。ログイン時に照合する。 */
   workspaceDomain: string | null;
-  status: 'trial' | 'active' | 'suspended' | 'cancelled';
+  /**
+   * 状態（仕様書 第23.8.6節）。`suspended` は通常の停止（閲覧のみ）、`locked` は緊急停止（ログインを含めてすべて拒否）。
+   */
+  status: 'trial' | 'active' | 'suspended' | 'locked' | 'cancelled';
 }
 
 export type Role = 'admin' | 'approver' | 'member' | 'external' | 'developer';
