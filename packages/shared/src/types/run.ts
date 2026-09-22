@@ -75,7 +75,8 @@ export interface Approval {
   /** 判断できる利用者。`approver: requester` の承認では依頼した本人。それ以外は `null`。 */
   approverUserId: string | null;
   present: string;
-  decision: 'approved' | 'rejected' | null;
+  /** `expired` は、承認待ちのまま期限（30 日）を過ぎて止めたもの（仕様書 第14.3.2節）。 */
+  decision: 'approved' | 'rejected' | 'expired' | null;
   decidedBy: string | null;
   comment: string | null;
   decidedAt: string | null;

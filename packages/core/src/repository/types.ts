@@ -58,6 +58,20 @@ export interface Repository {
   listRunApprovals(tenantId: string, runId: string): Promise<Approval[]>;
   /** 入力にそのファイルの ID を含む依頼の実行の承認（判断済みを含む）。利用者が上げたファイルを開ける人の判定に使う。 */
   listApprovalsForFileInput(tenantId: string, fileId: string): Promise<Approval[]>;
+  /** 指定した時刻より前から承認待ちの承認（期限切れの見回り。仕様書 第14.3.2節）。 */
+  listStaleApprovals(tenantId: string, createdBefore: string): Promise<Approval[]>;
+
+  /** すべての会社の ID（保持期間の見回りのため。テナント台帳の参照）。 */
+  listTenantIds(): Promise<string[]>;
+  /** 終わった実行のうち、保持期間の処理がまだで、指定した時刻より前に終わったもの（古い順）。 */
+  listRunsForRetention(tenantId: string, endedBefore: string, limit: number): Promise<Run[]>;
+  /** その人が依頼した終わった実行のうち、Google 由来の中身をまだ消していないもの（連携の解除のとき）。 */
+  listUserRunsForPurge(tenantId: string, userId: string): Promise<Run[]>;
+  /**
+   * 保持期間の処理を済ませたことを記録する。`steps` を渡せば、1 つのトランザクションでステップの中身を置き換え、
+   * 承認の表示（`present`）も消す。`null` なら、消すものが無かったとして記録だけする。
+   */
+  markRunRetention(tenantId: string, runId: string, steps: RunStep[] | null, redactedPresent: string, at: string): Promise<void>;
   updateApproval(approval: Approval): Promise<void>;
 
   createArtifact(artifact: Artifact): Promise<void>;

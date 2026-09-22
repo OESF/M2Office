@@ -1275,6 +1275,43 @@ console.log('\n■ 31. 実行の中身を見られる人（第6.2.1節）');
   }
 }
 
+console.log('\n■ 32. Google から取得したデータの保持（第14.3.2節）');
+{
+  const setDays = (d, who = 'admin') =>
+    call('a', '/v1/admin/settings/privacy', { method: 'PUT', body: JSON.stringify({ googleDataRetentionDays: d }) }, who);
+  const tooLong = await setDays(8);
+  const member = await setDays(0, 'member');
+  tooLong.status === 400 && member.status === 403
+    ? ok('残す日数は 7 日より長くできず、管理者だけが変えられる') : ng(`設定の検証が違う（8 日: ${tooLong.status}、一般: ${member.status}）`);
+
+  const saved = await setDays(0);
+  const { body: job } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: 'inbox-triage' }) }, 'member');
+  const done = await waitFor('a', job.runId, ['completed', 'failed'], 20000, 'member');
+  const before = JSON.stringify(done.steps);
+  const { body: kbJob } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: 'knowledge-qa', input: { question: '有給休暇の付与日数は' } }) }, 'member');
+  await waitFor('a', kbJob.runId, ['completed', 'failed'], 20000, 'member');
+
+  // ワーカーの見回り（開発では 15 秒ごと）を待つ
+  let after = null;
+  for (let i = 0; i < 40; i++) {
+    const { body: r } = await call('a', `/v1/runs/${job.runId}`, {}, 'member');
+    if ((r.steps ?? []).some((st) => st.output?.redacted)) { after = r; break; }
+    await new Promise((res) => setTimeout(res, 1000));
+  }
+  const toolNames = (after?.steps ?? []).flatMap((st) => (st.output?.tools ?? []).map((t) => t.name));
+  saved.status === 200 && after && toolNames.includes('gmail.list') && after.steps.every((st) => st.input === null)
+    && before.length > JSON.stringify(after.steps).length
+    ? ok(`日数を 0 にすると、終わった実行の中身を消し、ツール名だけを残す（${[...new Set(toolNames)].join('・')}）`)
+    : ng('中身が消えない', JSON.stringify(after?.steps ?? done.steps).slice(0, 200));
+
+  const { body: kb } = await call('a', `/v1/runs/${kbJob.runId}`, {}, 'member');
+  (kb.steps ?? []).every((st) => !st.output?.redacted) ? ok('Google のツールを使わない実行（社内ナレッジ Q&A）の中身は消さない') : ng('Google を使わない実行まで消している');
+
+  const { body: audits } = await call('a', '/v1/admin/audit-events');
+  !JSON.stringify(audits).includes('見積') ? ok('監査ログにメールの中身は入らない') : ng('監査ログにメールの中身が入っている');
+  await setDays(7);
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

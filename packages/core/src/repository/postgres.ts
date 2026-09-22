@@ -17,6 +17,11 @@ import type { CompartmentAssignment, CredentialKind, GoogleConnection, TenantCre
 import { SPLIT_VERSION, citationOf, splitKnowledge } from '../knowledge/sections.js';
 import { SEARCH_CANDIDATES, bigrams, expandTerms, extractTerms, normalizeForSearch, rankSections, rewritesOf } from '../knowledge/search.js';
 
+/** 実行の列（別名 `r` の表から、`Run` の形で取り出す）。 */
+const RUN_COLUMNS = `r.id, r.job_id as "jobId", r.tenant_id as "tenantId", r.status, r.cursor,
+  r.started_at as "startedAt", r.ended_at as "endedAt", r.tokens_used as "tokensUsed", r.cost_jpy as "costJpy",
+  r.saved_minutes as "savedMinutes", r.failure_reason as "failureReason"`;
+
 /** `LIKE` の特別な文字を、文字そのものとして扱うように逃がす。 */
 function escapeLike(s: string): string {
   return s.replace(/[\\%_]/g, (c) => `\\${c}`);
@@ -380,6 +385,64 @@ export class PostgresRepository implements Repository {
       [tenantId, fileId]);
   }
 
+  async listStaleApprovals(tenantId: string, createdBefore: string): Promise<Approval[]> {
+    return this.q<Approval>(tenantId,
+      `select id, run_step_id as "runStepId", tenant_id as "tenantId",
+              approver_role as "approverRole", approver_user_id as "approverUserId", present, decision,
+              decided_by as "decidedBy", comment, decided_at as "decidedAt", created_at as "createdAt"
+         from approvals
+        where tenant_id = $1 and decision is null and created_at < $2 order by created_at`,
+      [tenantId, createdBefore]);
+  }
+
+  async listTenantIds(): Promise<string[]> {
+    const rows = await this.q<{ id: string }>(null, `select id from tenants order by id`);
+    return rows.map((r) => r.id);
+  }
+
+  async listRunsForRetention(tenantId: string, endedBefore: string, limit: number): Promise<Run[]> {
+    return this.q<Run>(tenantId,
+      `select ${RUN_COLUMNS} from runs r
+        where r.tenant_id = $1 and r.status in ('completed', 'failed', 'cancelled', 'expired')
+          and r.ended_at is not null and r.ended_at < $2 and r.google_data_checked_at is null
+        order by r.ended_at limit $3`,
+      [tenantId, endedBefore, limit]);
+  }
+
+  async listUserRunsForPurge(tenantId: string, userId: string): Promise<Run[]> {
+    return this.q<Run>(tenantId,
+      `select ${RUN_COLUMNS} from runs r
+         join jobs j on j.id = r.job_id and j.tenant_id = r.tenant_id
+        where r.tenant_id = $1 and j.requested_by = $2
+          and r.status in ('completed', 'failed', 'cancelled', 'expired')
+          and r.google_data_redacted_at is null`,
+      [tenantId, userId]);
+  }
+
+  async markRunRetention(
+    tenantId: string, runId: string, steps: RunStep[] | null, redactedPresent: string, at: string,
+  ): Promise<void> {
+    await this.inTenant(tenantId, async (client) => {
+      if (steps) {
+        for (const s of steps) {
+          await client.query(
+            `update run_steps set input = $3, output = $4
+              where id = $2 and run_id in (select id from runs where tenant_id = $1)`,
+            [tenantId, s.id, s.input === null ? null : JSON.stringify(s.input), s.output === null ? null : JSON.stringify(s.output)]);
+        }
+        await client.query(
+          `update approvals set present = $3
+            where tenant_id = $1 and run_step_id in (select id from run_steps where run_id = $2)`,
+          [tenantId, runId, redactedPresent]);
+      }
+      await client.query(
+        `update runs set google_data_checked_at = $3,
+                         google_data_redacted_at = case when $4 then $3::timestamptz else google_data_redacted_at end
+          where tenant_id = $1 and id = $2`,
+        [tenantId, runId, at, steps !== null]);
+    });
+  }
+
   async updateApproval(a: Approval): Promise<void> {
     await this.q(a.tenantId, 
       `update approvals set decision=$3, decided_by=$4, comment=$5, decided_at=$6
@@ -642,8 +705,8 @@ export class PostgresRepository implements Repository {
       automation: TenantSettings['automation'] | null; agents: TenantSettings['agents'] | null;
       effect: TenantSettings['effect'] | null; onboarding: TenantSettings['onboarding'] | null;
       access: TenantSettings['access'] | null; slides: TenantSettings['slides'] | null;
-      knowledge: TenantSettings['knowledge'] | null;
-    }>(tenantId, `select company, writing_style, automation, agents, effect, onboarding, access, slides, knowledge
+      knowledge: TenantSettings['knowledge'] | null; privacy: TenantSettings['privacy'] | null;
+    }>(tenantId, `select company, writing_style, automation, agents, effect, onboarding, access, slides, knowledge, privacy
                     from tenant_settings where tenant_id = $1`,
       [tenantId]);
     const r = rows[0];
@@ -661,6 +724,7 @@ export class PostgresRepository implements Repository {
         standardSynonyms: r?.knowledge?.standardSynonyms ?? d.knowledge.standardSynonyms,
         synonyms: [...(r?.knowledge?.synonyms ?? [])],
       },
+      privacy: { ...d.privacy, ...(r?.privacy ?? {}) },
     };
   }
 
@@ -669,7 +733,7 @@ export class PostgresRepository implements Repository {
   ): Promise<void> {
     const column = ({
       company: 'company', writingStyle: 'writing_style', automation: 'automation', agents: 'agents',
-      effect: 'effect', onboarding: 'onboarding', access: 'access', slides: 'slides', knowledge: 'knowledge',
+      effect: 'effect', onboarding: 'onboarding', access: 'access', slides: 'slides', knowledge: 'knowledge', privacy: 'privacy',
     } as const)[section];
     // 列名は上の固定の対応表からのみ取る。利用者の入力を SQL に埋め込まない
     await this.q(tenantId,

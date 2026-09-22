@@ -6,6 +6,7 @@
  * 秘密の値は画面に出さない。登録済みかどうかと日時だけを示し、上書きと削除だけができる。
  *
  * @see 仕様書 第14.3.3節 接続の設定
+ * @see 仕様書 第14.3.2節 Google から取得したデータの保持
  * @see ADR-0007 接続の設定
  */
 
@@ -40,7 +41,41 @@ export function Connections() {
       <p className="lead">業務の推論に使う Gemini と、メール・予定などを扱う Google Workspace への接続を設定します。</p>
       <GeminiCard data={data.gemini} onSaved={() => void load()} />
       <GoogleCard data={data.google} onSaved={() => void load()} />
+      <RetentionCard />
     </>
+  );
+}
+
+/**
+ * Google から取得したデータを残す日数（仕様書 第14.3.2節）。7 日より長くはできない。
+ */
+function RetentionCard() {
+  const [days, setDays] = useState<number | null>(null);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  useEffect(() => {
+    api.admin.settings().then((s) => setDays(s.privacy.googleDataRetentionDays)).catch(() => setDays(null));
+  }, []);
+  if (days === null) return null;
+  return (
+    <div className="card">
+      <h3>取得したデータを残す日数 <HelpTip article="admin-connectors">業務が Google から読んだメールや文書の中身と、そこから作った文を、業務が終わってから何日残すかです。過ぎると中身を消し、使ったツールの名前と件数だけを残します。</HelpTip></h3>
+      <p className="muted small">業務が終わってから、この日数が過ぎると、読んだメール・文書の中身と、そこから作った要約などを消します。作った成果物（下書き・議事録など）は消しません。承認待ちの間は残します。</p>
+      <div className="field">
+        <label>残す日数</label>
+        <select value={days} onChange={(e) => setDays(Number(e.target.value))}>
+          {[7, 3, 1, 0].map((d) => <option key={d} value={d}>{d === 0 ? '業務が終わったらすぐ消す' : `${d} 日${d === 7 ? '（上限）' : ''}`}</option>)}
+        </select>
+      </div>
+      <div className="row">
+        <button className="btn" onClick={() => {
+          setMsg(null);
+          api.admin.saveSettings('privacy', { googleDataRetentionDays: days })
+            .then(() => setMsg({ ok: true, text: '保存しました' }))
+            .catch((e) => setMsg({ ok: false, text: describeError(e, '保存できませんでした') }));
+        }}>保存する</button>
+      </div>
+      {msg && <p className={msg.ok ? 'ok-msg' : 'error'}>{msg.text}</p>}
+    </div>
   );
 }
 

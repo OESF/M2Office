@@ -100,7 +100,7 @@ OAuth クライアントが整うまでは、`GET /v1/auth/google/start` は 503
 | `GET /v1/admin/dashboard/live` | 管理者: ダッシュボードの「いま」（数値・業務の流れ・承認の滞留・出来事）。中身は返さない |
 | `GET /v1/admin/dashboard/stats?days=1\|7\|30` | 管理者: ダッシュボードの集計（日ごと・時間帯・業務ごと・秘書の層・削減時間） |
 | `GET /v1/admin/settings` | 管理者: 会社の設定（会社情報・自社の書き方・自動化ポリシー・業務の有効化） |
-| `PUT /v1/admin/settings/:section` | 管理者: 設定の 1 区分を保存（`company`・`writingStyle`・`automation`・`agents`・`effect`・`slides`・`knowledge`。`knowledge` は言い換え） |
+| `PUT /v1/admin/settings/:section` | 管理者: 設定の 1 区分を保存（`company`・`writingStyle`・`automation`・`agents`・`effect`・`slides`・`knowledge`・`privacy`。`knowledge` は言い換え、`privacy` は Google から取得したデータを残す日数） |
 | `POST /v1/admin/users` | 管理者: 利用者の招待（Workspace のドメインのみ） |
 | `PATCH /v1/admin/users/:id` | 管理者: 表示名・ロール・状態（管理者が 0 人になる変更は 409） |
 | `GET /v1/admin/knowledge` | 管理者: 組織知識の一覧 |

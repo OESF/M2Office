@@ -175,6 +175,14 @@ export function parseSynonymLines(text: string): { groups: string[][] } | { erro
   return { groups };
 }
 
+/**
+ * プライバシーの設定（仕様書 第14.3.2節）。
+ */
+export interface PrivacySettings {
+  /** Google から取得したデータを、実行が終わってから残す日数（0〜7）。0 は実行が終わったらすぐ消す。 */
+  googleDataRetentionDays: number;
+}
+
 export interface TenantSettings {
   company: CompanyInfo;
   writingStyle: WritingStyle;
@@ -188,6 +196,8 @@ export interface TenantSettings {
   slides: SlidesSettings;
   /** 組織知識の言い換え（第11.7.7節）。 */
   knowledge: KnowledgeSettings;
+  /** Google から取得したデータの保持（第14.3.2節）。 */
+  privacy: PrivacySettings;
 }
 
 /** 設定が未保存の会社に使う既定値。 */
@@ -208,6 +218,8 @@ export const DEFAULT_TENANT_SETTINGS: TenantSettings = {
   slides: { templates: [] },
   // 標準の言い換えは既定で使う（第11.7.7節）
   knowledge: { standardSynonyms: true, synonyms: [] },
+  // 上限の 7 日。会社は短くできるが、長くはできない（第14.3.2節）
+  privacy: { googleDataRetentionDays: 7 },
 };
 
 /**

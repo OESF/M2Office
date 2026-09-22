@@ -158,6 +158,7 @@ docs/            開発規約・リリース規定・設計判断記録
 | `SESSION_TTL_HOURS` | 168 | ログイン状態の有効時間 |
 | `COOKIE_SECURE` | false | HTTPS で配信する環境では true |
 | `SCHEDULE_INTERVAL_MS` | 15000 | 定時実行の見回り間隔 |
+| `RETENTION_INTERVAL_MS` | 本番 600000 / 開発 15000 | Google から取得したデータの保持期間の見回り間隔（仕様書 第14.3.2節） |
 | `LOG_LEVEL` | 開発 debug / 本番 info | アプリログのレベル（`error`・`warn`・`info`・`debug`） |
 | `LOG_FORMAT` | 開発 pretty / 本番 json | アプリログの形式 |
 

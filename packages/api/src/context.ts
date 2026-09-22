@@ -9,7 +9,7 @@
  */
 
 import {
-  PostgresRepository, StubLlmProvider, OpenAiCompatibleProvider, ToolRegistry, BUILTIN_TOOLS,
+  PostgresRepository, StubLlmProvider, OpenAiCompatibleProvider, ToolRegistry, BUILTIN_TOOLS, GoogleDataRetention,
   RunEngine, Secretary, OFFICIAL_AGENTS, buildConnector, LocalFileStore,
   createLoggerFromEnv, HelpCatalog, parseArticle, ExtensionHub, HttpMcpClient, loadExtensions,
   GeminiResearchProvider, MockResearchProvider, TenantAiResolver, secretBoxFromEnv, type ResearchProvider,
@@ -37,6 +37,8 @@ export interface AppDeps {
   log: Logger;
   /** ヘルプの記事（仕様書 第6.10節）。 */
   help: HelpCatalog;
+  /** Google から取得したデータの保持（仕様書 第14.3.2節）。連携の解除のときに中身を消す。 */
+  retention: GoogleDataRetention;
   /** 拡張機能（公式の配布元と、会社が取り込んだもの）。会社ごとの見え方は {@link tenantView} で引く。 */
   hub: ExtensionHub;
   /** 会社から見た拡張機能・業務エージェント・ツールの全体（仕様書 第12.10節）。 */
@@ -122,8 +124,10 @@ export function buildDeps(): AppDeps {
   });
   const help = new HelpCatalog(loadHelpArticles(helpDir(), log), OFFICIAL_AGENTS, registry);
   const secretary = new Secretary({ repo, llm, connector, agents: OFFICIAL_AGENTS, help, agentsFor, llmFor: (t) => ai.llmFor(t) });
+  // Google のデータを扱うツールは、内蔵のツールのうち権限（google）を宣言しているもの（第9.4.4節）
+  const retention = new GoogleDataRetention({ repo, isGoogleTool: (name) => !!registry.get(name)?.google, logger: log });
   return {
-    repo, llm, connector, files, registry, engine, secretary, auth: loadAuthConfig(), log, help,
+    repo, llm, connector, files, registry, engine, secretary, auth: loadAuthConfig(), log, help, retention,
     hub, tenantView, agentsFor, canUse, isAvailable, box, ai,
     oauth: {
       // Google は http の戻り先を localhost にしか認めないため、開発では localhost の画面の転送を通す（ADR-0007）

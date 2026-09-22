@@ -12,7 +12,7 @@ import {
   isValidInvoiceNumber, parsePresentationId, parseSynonymLines, type AutomationPolicy, type CompanyInfo, type Role, type SlideTemplate, type TenantSettings,
   type User, type WritingStyle,
 } from '@m2office/shared';
-import { DEFAULT_STANDARD_MINUTES, KNOWLEDGE_MAX_CHARS } from '@m2office/core';
+import { DEFAULT_STANDARD_MINUTES, GOOGLE_DATA_RETENTION_DAYS, KNOWLEDGE_MAX_CHARS } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { requireRole, type AppEnv } from '../middleware/tenant.js';
 
@@ -408,6 +408,14 @@ function validateSection(
       const first = templates.findIndex((x) => x.isDefault);
       templates.forEach((x, i) => { x.isDefault = i === (first === -1 ? 0 : first); });
       return { section: 'slides', value: { templates } };
+    }
+    case 'privacy': {
+      // Google から取得したデータを残す日数（仕様書 第14.3.2節）。短くはできるが、7 日より長くはできない
+      const days = Number(o['googleDataRetentionDays']);
+      if (!Number.isInteger(days) || days < 0 || days > GOOGLE_DATA_RETENTION_DAYS) {
+        return { error: `残す日数は 0〜${GOOGLE_DATA_RETENTION_DAYS} 日で指定してください` };
+      }
+      return { section: 'privacy', value: { googleDataRetentionDays: days } };
     }
     case 'knowledge': {
       // 言い換え（仕様書 第11.7.7節）。1 行に 1 組の文でも、組の配列でも受け付ける

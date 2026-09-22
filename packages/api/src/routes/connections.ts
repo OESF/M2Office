@@ -241,8 +241,10 @@ export function myGoogleRoute(deps: AppDeps) {
     if (!conn) return c.json({ error: 'Google と接続していません' }, 404);
     const revoked = await revokeGoogleToken(deps.box.decrypt(conn.refreshTokenEnc));
     await deps.repo.deleteGoogleConnection(tenant.id, user.id);
-    await audit(deps, tenant.id, user.id, 'connection.google.disconnect', user.id, { revokedAtGoogle: revoked });
-    return c.json({ ok: true, revokedAtGoogle: revoked });
+    // 連携を解除したら、その人の終わった実行から Google 由来の中身を消す（期間を待たない。仕様書 第14.3.2節）
+    const purgedRuns = await deps.retention.purgeUser(tenant.id, user.id, new Date());
+    await audit(deps, tenant.id, user.id, 'connection.google.disconnect', user.id, { revokedAtGoogle: revoked, purgedRuns });
+    return c.json({ ok: true, revokedAtGoogle: revoked, purgedRuns });
   });
 
   return app;

@@ -11,7 +11,7 @@
 
 import {
   PostgresRepository, StubLlmProvider, OpenAiCompatibleProvider, ToolRegistry, BUILTIN_TOOLS,
-  RunEngine, Scheduler, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient,
+  RunEngine, Scheduler, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention,
   loadExtensions, OFFICIAL_AGENTS, GeminiResearchProvider, MockResearchProvider, TenantAiResolver, secretBoxFromEnv,
   type LlmProvider,
 } from '@m2office/core';
@@ -69,12 +69,19 @@ const engine = new RunEngine({
   registryFor: async (tenantId) => (await hub.forTenant(tenantId)).registry,
 });
 const scheduler = new Scheduler({ repo, resolveDefinition, isAvailable, logger: log });
+// Google から取得したデータの保持（仕様書 第14.3.2節）。Google のツールは、内蔵のツールのうち権限を宣言しているもの
+const retention = new GoogleDataRetention({ repo, isGoogleTool: (name) => !!registry.get(name)?.google, logger: log });
 
 const POLL_INTERVAL_MS = 1000;
 /** 定時実行の見回り間隔。分単位の指定に対して十分に短くする。 */
 const SCHEDULE_INTERVAL_MS = Number(process.env['SCHEDULE_INTERVAL_MS'] ?? 15_000);
+/** 保持期間の見回り間隔。本番は 10 分、開発は確かめやすいよう 15 秒。 */
+const RETENTION_INTERVAL_MS = Number(
+  process.env['RETENTION_INTERVAL_MS'] ?? (process.env['NODE_ENV'] === 'production' ? 600_000 : 15_000),
+);
 let running = true;
 let lastScheduleCheck = 0;
+let lastRetentionCheck = 0;
 
 process.on('SIGINT', () => { running = false; });
 process.on('SIGTERM', () => { running = false; });
@@ -93,6 +100,16 @@ while (running) {
       for (const runId of started) log.info('定時実行を起動しました', { runId });
     } catch (err) {
       log.error('定時実行の見回りで例外が発生しました', { err });
+    }
+  }
+
+  if (Date.now() - lastRetentionCheck >= RETENTION_INTERVAL_MS) {
+    lastRetentionCheck = Date.now();
+    try {
+      const r = await retention.sweep(new Date());
+      if (r.expired > 0 || r.redacted > 0) log.info('保持期間の見回りを行いました', r);
+    } catch (err) {
+      log.error('保持期間の見回りで例外が発生しました', { err });
     }
   }
 

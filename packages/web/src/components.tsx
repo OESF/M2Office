@@ -211,10 +211,21 @@ export function statusLabel(status: string): string {
 export function Evidence({ steps }: { steps: RunStep[] }) {
   const calls = steps.flatMap((s) => {
     const out = s.output as { tools?: { name: string; risk?: string }[] } | null;
-    return (out?.tools ?? []).map((t) => ({ step: s.stepId, ...t }));
+    return (out?.tools ?? []).map((t) => ({ step: s.stepId, name: t.name, risk: t.risk }));
   });
-  if (calls.length === 0) return <p className="muted">まだ根拠はありません。</p>;
+  // 保存期間を過ぎて中身を消した実行（仕様書 第14.3.2節）。ツールの名前だけが残っている
+  const redacted = steps.find((s) => (s.output as { redacted?: boolean } | null)?.redacted);
+  const note = redacted && (
+    <p className="muted small">
+      {(redacted.output as { reason?: string }).reason === 'disconnect'
+        ? 'Google との連携を解除したため、読んだメールや文書の中身を消しました。使ったツールの名前だけを残しています。'
+        : '保存期間を過ぎたため、読んだメールや文書の中身を消しました。使ったツールの名前だけを残しています。'}
+    </p>
+  );
+  if (calls.length === 0) return <>{note}<p className="muted">まだ根拠はありません。</p></>;
   return (
+    <>
+    {note}
     <dl className="kv">
       {calls.map((c, i) => (
         <div key={i} style={{ display: 'contents' }}>
@@ -223,5 +234,6 @@ export function Evidence({ steps }: { steps: RunStep[] }) {
         </div>
       ))}
     </dl>
+    </>
   );
 }
