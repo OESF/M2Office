@@ -4,14 +4,16 @@
  * @see 仕様書 第6.6節 管理者ページ
  */
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { AuditEvent } from '@m2office/shared';
 import { api, type AdminRun, type Me } from './api.js';
 import { statusLabel } from './components.js';
 import { AgentSettings, CompanySettings, KnowledgeSettings, UserSettings } from './AdminSettings.js';
 import { Dashboard } from './Dashboard.js';
+import { HelpCenter, useOpenHelp } from './help.js';
 
-type Tab = 'dashboard' | 'usage' | 'runs' | 'company' | 'agents' | 'users' | 'knowledge' | 'audit' | 'connectors';
+type Tab =
+  | 'dashboard' | 'usage' | 'runs' | 'company' | 'agents' | 'users' | 'knowledge' | 'audit' | 'connectors' | 'help';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'dashboard', label: 'ダッシュボード' },
@@ -23,6 +25,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'knowledge', label: '知識' },
   { id: 'audit', label: '監査ログ' },
   { id: 'connectors', label: '接続' },
+  { id: 'help', label: 'ヘルプ' },
 ];
 
 /**
@@ -37,6 +40,8 @@ const TABS: { id: Tab; label: string }[] = [
  */
 export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [tab, setTab] = useState<Tab>('dashboard');
+  const [helpArticle, setHelpArticle] = useState<string | null>(null);
+  useOpenHelp(useCallback((id: string | null) => { setHelpArticle(id); setTab('help'); }, []));
   const isAdmin = me.user.roles.includes('admin');
 
   return (
@@ -62,7 +67,8 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
             ))}
           </nav>
           <main className="canvas">
-            {tab === 'dashboard' && <Dashboard />}
+            {tab === 'dashboard' && <Dashboard onGo={(t) => setTab(t as Tab)} />}
+            {tab === 'help' && <HelpCenter initial={helpArticle} />}
             {tab === 'usage' && <Usage />}
             {tab === 'runs' && <Runs />}
             {tab === 'company' && <CompanySettings />}

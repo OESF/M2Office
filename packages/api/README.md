@@ -84,6 +84,14 @@ OAuth クライアントが整うまでは、`GET /v1/auth/google/start` は 503
 | `GET /v1/me/sessions` | ログイン中の端末 |
 | `DELETE /v1/me/sessions/:id` | 端末を個別にログアウト |
 | `GET /v1/me/usage` | 本人の利用状況 |
+| `GET /v1/help/articles` | ヘルプの記事の一覧（役割と有効な業務で出し分け） |
+| `GET /v1/help/articles/:id` | 記事の本文。見られない記事は 404 |
+| `GET /v1/help/search?q=` | 記事の検索 |
+| `GET /v1/help/agents/:agentId` | 業務の説明（定義から自動で作る） |
+| `GET /v1/onboarding/tour` | 本人の初回の案内の状態 |
+| `POST /v1/onboarding/tour` | 案内を見終えた記録。`{ "reset": true }` で見直し |
+| `GET /v1/onboarding/checklist` | 管理者: 初期設定のチェックリスト |
+| `POST /v1/onboarding/checklist/notified` | 管理者: 従業員へ知らせたことの記録 |
 | `POST /v1/files` | ファイルの受け取り（multipart の `file`。10 MB まで） |
 | `GET /v1/files/:id` | メタデータ。所有者と承認者のみ |
 | `GET /v1/files/:id/content` | 中身。必ず保存させる（`attachment`） |

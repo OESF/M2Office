@@ -36,6 +36,16 @@ export interface Tool {
   /** 危険度。承認の要否を決める。 */
   risk: RiskLevel;
   description: string;
+  /**
+   * 活動の表示名。ダッシュボードで「いま何をしているか」を業務の言葉で示す（仕様書 第6.7.7節）。
+   * 例: 「社内の知識を調べています（リサーチ中）」
+   */
+  activityLabel: string;
+  /**
+   * すること。ヘルプの「この業務がすること」に使う（仕様書 第6.10.5節）。
+   * 送信しない・承認のあとに行う、のような利用者が気にする点を必ず書く。
+   */
+  helpText: string;
   invoke(args: Record<string, unknown>, ctx: ToolContext): Promise<unknown>;
 }
 

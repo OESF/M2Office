@@ -32,6 +32,8 @@ async function open(ctx: ToolContext, fileId: string) {
 export const sheetRead: Tool = {
   name: 'sheet.read',
   risk: 'read',
+  activityLabel: '書類を読んでいます',
+  helpText: 'Excel・CSV を表として読みます',
   description: 'Excel・CSV を表として読む',
   async invoke(args, ctx) {
     const f = await open(ctx, str(args['fileId']));
@@ -57,6 +59,8 @@ export const sheetRead: Tool = {
 export const pdfExtract: Tool = {
   name: 'pdf.extract',
   risk: 'read',
+  activityLabel: '書類を読んでいます',
+  helpText: 'PDF から文字を読み取ります。画像だけのページは読めません',
   description: 'PDF から文字を取り出す（画像だけのページは OCR 未対応）',
   async invoke(args, ctx) {
     const f = await open(ctx, str(args['fileId']));
@@ -95,6 +99,8 @@ async function publish(
 export const sheetRender: Tool = {
   name: 'sheet.render',
   risk: 'draft',
+  activityLabel: '資料を作成しています',
+  helpText: '表を Excel・CSV として作り、成果物として保存します',
   description: '表を Excel または CSV として出力する',
   async invoke(args, ctx) {
     const title = str(args['title'], '一覧');
@@ -119,6 +125,8 @@ export const sheetRender: Tool = {
 export const docxRender: Tool = {
   name: 'docx.render',
   risk: 'draft',
+  activityLabel: '資料を作成しています',
+  helpText: 'Word 形式の文書を作り、成果物として保存します',
   description: 'Word 形式で文書を出力する',
   async invoke(args, ctx) {
     const title = str(args['title'], '文書');

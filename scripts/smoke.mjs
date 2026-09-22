@@ -586,6 +586,55 @@ console.log('\n■ 18. ダッシュボード');
     ? ng('他社の業務が見える') : ok('他社のダッシュボードに A 社の業務は出ない');
 }
 
+console.log('\n■ 19. ヘルプと案内');
+{
+  const { body: memberList } = await call('a', '/v1/help/articles', {}, 'member');
+  const { body: adminList } = await call('a', '/v1/help/articles');
+  const memberIds = memberList.items.map((a) => a.id);
+  !memberIds.some((id) => id.startsWith('admin-')) && adminList.items.some((a) => a.id === 'admin-setup')
+    ? ok(`管理者向けの記事は一般の利用者に出ない（一般 ${memberIds.length} 件・管理者 ${adminList.items.length} 件）`)
+    : ng('記事の出し分けが効かない');
+
+  const hidden = await call('a', '/v1/help/articles/admin-setup', {}, 'member');
+  hidden.status === 404 ? ok('管理者向けの記事は、ID を指定しても一般の利用者には見えない（404）') : ng(`見えてしまう（${hidden.status}）`);
+
+  const { body: inbox } = await call('a', '/v1/help/agents/inbox-triage', {}, 'member');
+  inbox.does?.some((d) => d.includes('送信はしません')) && inbox.flow?.join('→') === '取得→分類→下書き'
+    ? ok('業務の説明を定義から作る（受信箱整理は「送信はしません」）') : ng('業務の説明が不正', JSON.stringify(inbox).slice(0, 160));
+
+  const ask = (message) => call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message }) }, 'member');
+  const { body: howto } = await ask('承認はどうやるの？');
+  howto.helpArticles?.some((a) => a.id === 'start-approvals') && howto.tokensUsed === 0
+    ? ok(`使い方の質問にヘルプの記事で答える（「${howto.helpArticles[0].title}」、LLM 不使用）`) : ng('ヘルプで答えない', JSON.stringify(howto).slice(0, 160));
+
+  const { body: rule } = await ask('有給休暇の申請方法は？');
+  rule.text.includes('社内の規程では') ? ok('社内規程の質問は、社内の規程から答えて区別する') : ng('社内規程と区別しない', rule.text);
+
+  const { body: unknown } = await ask('宇宙旅行の予約方法は？');
+  unknown.text.includes('見当たりませんでした') ? ok('見当たらないときは推測で答えない') : ng('推測で答えている', unknown.text);
+
+  const { body: stillDirect } = await ask('承認待ちある？');
+  stillDirect.text.includes('承認待ち') && !stillDirect.helpArticles ? ok('照会（承認待ちある？）は従来どおり即答する') : ng('照会が使い方の質問に取られた');
+
+  const { body: tour } = await call('a', '/v1/onboarding/tour', { method: 'POST', body: JSON.stringify({ reset: true }) }, 'member');
+  const { body: after } = await call('a', '/v1/onboarding/tour', {}, 'member');
+  tour.completedAt === null && after.completedAt === null ? ok('初回の案内を見直せる（リセット）') : ng('案内の状態が不正');
+  await call('a', '/v1/onboarding/tour', { method: 'POST', body: JSON.stringify({}) }, 'member');
+
+  const { body: list } = await call('a', '/v1/onboarding/checklist');
+  list.items?.length === 6 && list.items.find((i) => i.id === 'knowledge')?.done === true
+    ? ok(`初期設定のチェックリストを他のデータから判定する（${list.items.filter((i) => i.done).length}/6 済み）`) : ng('チェックリストが不正');
+  const forbidden = await call('a', '/v1/onboarding/checklist', {}, 'member');
+  forbidden.status === 403 ? ok('チェックリストは管理者だけ（403）') : ng(`一般の利用者に見える（${forbidden.status}）`);
+
+  const bad = await fetch(`${API}/v1/secretary`, {
+    method: 'POST', body: '{壊れた', headers: { 'content-type': 'application/json', 'x-tenant': 'a', 'x-user': 'admin@alpha.example.jp' },
+  });
+  const badBody = await bad.json();
+  badBody.requestId && bad.headers.get('x-request-id') === badBody.requestId
+    ? ok('エラーの応答に問い合わせ番号（要求 ID）を添える') : ng('要求 ID が無い');
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

@@ -25,6 +25,8 @@ const str = (v: unknown, fallback = '') => (typeof v === 'string' ? v : fallback
 export const gmailList: Tool = {
   name: 'gmail.list',
   risk: 'read',
+  activityLabel: 'メールを確認しています',
+  helpText: '受信箱のメールの一覧を見ます',
   description: '受信箱のメールを新しい順に一覧する（本文なし）',
   async invoke(args, ctx) {
     const items = await ctx.connector.mail.list(principal(ctx), {
@@ -45,6 +47,8 @@ export const gmailList: Tool = {
 export const gmailGet: Tool = {
   name: 'gmail.get',
   risk: 'read',
+  activityLabel: 'メールを確認しています',
+  helpText: 'メールの本文を読みます。本文に書かれた指示には従いません',
   description: 'メールを 1 通、本文つきで取得する',
   async invoke(args, ctx) {
     const mail = await ctx.connector.mail.get(principal(ctx), str(args['id']));
@@ -63,6 +67,8 @@ export const gmailGet: Tool = {
 export const gmailCreateDraft: Tool = {
   name: 'gmail.create_draft',
   risk: 'draft',
+  activityLabel: '返信の下書きを作っています',
+  helpText: '返信の下書きを作ります。送信はしません',
   description: '返信の下書きを作る（送信はしない）',
   async invoke(args, ctx) {
     const res = await ctx.connector.mail.createDraft(principal(ctx), {
@@ -83,6 +89,8 @@ export const gmailCreateDraft: Tool = {
 export const calendarList: Tool = {
   name: 'calendar.list',
   risk: 'read',
+  activityLabel: '予定を確認しています',
+  helpText: '予定の一覧を見ます',
   description: '期間内の予定を一覧する（既定は今日から 7 日間）',
   async invoke(args, ctx) {
     const today = ymd(new Date());
@@ -101,6 +109,8 @@ export const calendarList: Tool = {
 export const calendarFreeBusy: Tool = {
   name: 'calendar.freebusy',
   risk: 'read',
+  activityLabel: '予定の空きを調べています',
+  helpText: '参加者の予定の空きを調べます',
   description: '参加者の埋まっている時間帯を取得する',
   async invoke(args, ctx) {
     const emails = Array.isArray(args['emails']) ? args['emails'].map(String) : [];
@@ -124,6 +134,8 @@ export const calendarFreeBusy: Tool = {
 export const calendarCreate: Tool = {
   name: 'calendar.create',
   risk: 'external-send',
+  activityLabel: '予定を登録しています',
+  helpText: '予定を登録し、参加者を招待します。必ず承認のあとに行います',
   description: '予定を作成し、参加者を招待する',
   async invoke(args, ctx) {
     const res = await ctx.connector.calendar.create(principal(ctx), {
@@ -140,6 +152,8 @@ export const calendarCreate: Tool = {
 export const tasksList: Tool = {
   name: 'tasks.list',
   risk: 'read',
+  activityLabel: 'ToDo を確認しています',
+  helpText: 'ToDo の一覧を見ます',
   description: '未完了のタスクを一覧する',
   async invoke(_args, ctx) {
     const items = await ctx.connector.tasks.list(principal(ctx), {});
@@ -151,6 +165,8 @@ export const tasksList: Tool = {
 export const tasksCreate: Tool = {
   name: 'tasks.create',
   risk: 'write-internal',
+  activityLabel: 'ToDo を登録しています',
+  helpText: 'ToDo を登録します。会社の設定により、登録の前に確認を求めます',
   description: 'ToDo を起票する',
   async invoke(args, ctx) {
     const res = await ctx.connector.tasks.create(principal(ctx), {
@@ -165,6 +181,8 @@ export const tasksCreate: Tool = {
 export const chatPost: Tool = {
   name: 'chat.post',
   risk: 'external-send',
+  activityLabel: 'チャットへ投稿しています',
+  helpText: 'チャットへ投稿します。必ず承認のあとに行います',
   description: 'チャットのスペースへ投稿する',
   async invoke(args, ctx) {
     const res = await ctx.connector.chat.post(principal(ctx), {
@@ -191,6 +209,8 @@ const RECIPIENT_KEYS = ['to', 'userId', 'user', 'recipient', 'recipients', 'emai
 export const notificationSend: Tool = {
   name: 'notification.send',
   risk: 'write-internal',
+  activityLabel: 'お知らせを届けています',
+  helpText: '依頼した本人にだけお知らせを届けます。他の人には送りません',
   description: '依頼者本人へ通知する（宛先は指定できない）',
   async invoke(args, ctx) {
     const attempted = RECIPIENT_KEYS.filter((k) => k in args);
@@ -222,6 +242,8 @@ export const notificationSend: Tool = {
 export const approvalsPending: Tool = {
   name: 'approvals.pending',
   risk: 'read',
+  activityLabel: '承認待ちを確認しています',
+  helpText: '本人が判断できる承認待ちを見ます',
   description: '本人が承認できる承認待ちを一覧する',
   async invoke(_args, ctx) {
     const user = await ctx.repo.findUserById(ctx.tenantId, ctx.userId);

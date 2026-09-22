@@ -251,3 +251,50 @@ pre.body { white-space: pre-wrap; background: #fbfcfc; border: 1px solid var(--l
 .num-input { width: 90px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; font: inherit; text-align: right; }
 tr.muted td { color: var(--muted); }
 @media (max-width: 900px) { .dash-grid, .dash-grid.three { grid-template-columns: 1fr; } }
+
+/* ヘルプ（仕様書 第6.10節） */
+.helptip { position: relative; display: inline-block; font-size: 14px; font-weight: 400; vertical-align: middle; }
+.helptip-btn { width: 20px; height: 20px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel);
+  color: var(--muted); font-size: 12px; padding: 0; line-height: 18px; }
+.helptip-btn:hover { color: var(--accent); border-color: var(--accent); }
+.helptip-pop { position: absolute; z-index: 20; top: 26px; left: -10px; width: 280px; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; box-shadow: 0 4px 16px rgba(0,0,0,.08);
+  font-size: 13px; line-height: 1.6; color: var(--ink); }
+.link-btn { background: none; border: none; color: var(--accent); padding: 4px 0; font-size: 13px; display: block; }
+.link-btn:hover { text-decoration: underline; }
+.help-search { display: flex; gap: 8px; margin-bottom: 14px; }
+.help-search input { flex: 1; padding: 8px 12px; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+.help-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.help-item { display: block; width: 100%; text-align: left; background: none; border: none; padding: 6px 0;
+  color: var(--accent); font-size: 14px; border-bottom: 1px dashed var(--line); }
+.help-item:hover { text-decoration: underline; }
+.help-item .sub { display: block; color: var(--muted); font-size: 12px; }
+.article { line-height: 1.8; }
+.article h1 { margin-bottom: 12px; }
+.article h2 { font-size: 16px; margin: 20px 0 6px; }
+.article p { color: var(--ink); }
+.article ul, .article ol { padding-left: 1.4em; }
+.related { margin-top: 20px; border-top: 1px solid var(--line); padding-top: 10px; }
+.agent-help .summary { color: var(--ink); font-size: 15px; margin-bottom: 10px; }
+.agent-help h4 { font-size: 12px; color: var(--muted); margin: 6px 0; }
+.agent-help ul { margin: 0 0 8px; padding-left: 1.2em; font-size: 13px; line-height: 1.7; }
+.agent-help-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.flow-mini { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 8px 0; }
+.examples { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0; }
+.agent-help details { font-size: 13px; margin: 4px 0; }
+.agent-help details p { margin: 4px 0 8px 1em; }
+.notes { font-size: 13px; }
+.tour-backdrop { position: fixed; inset: 0; background: rgba(15, 30, 30, .35); display: grid; place-items: center; z-index: 50; padding: 16px; }
+.tour { background: var(--panel); border-radius: 10px; padding: 22px 24px; width: min(460px, 100%); box-shadow: 0 10px 40px rgba(0,0,0,.2); }
+.tour h2 { font-size: 18px; margin: 6px 0 8px; }
+.tour p { line-height: 1.7; }
+.tour .spacer { flex: 1; }
+.checklist ul { list-style: none; padding: 0; margin: 8px 0 0; }
+.checklist li { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px dashed var(--line); font-size: 14px; }
+.checklist li .label { flex: 1; }
+.checklist li.done { color: var(--muted); }
+.checklist li.done .mark { color: #166534; font-weight: 600; }
+.checklist li.important .label { font-weight: 600; }
+.checklist .link-btn { display: inline; }
+.warn-text { color: var(--warn); }
+@media (max-width: 680px) { .agent-help-cols { grid-template-columns: 1fr; } }

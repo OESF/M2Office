@@ -79,6 +79,23 @@ export interface Limits {
   timeoutSec: number;
 }
 
+/**
+ * 利用者向けのヘルプの補足（仕様書 第9.2.5節）。
+ *
+ * @remarks
+ * 業務のヘルプの大部分は定義の他の項目から自動で作る（第6.10.5節）。
+ * ここには定義から読み取れないことだけを書く。
+ */
+export interface AgentHelp {
+  /** 1〜2 文の概要。業務のカードに出す。 */
+  summary: string;
+  /** 実行例。押すと入力欄に入る。 */
+  examples?: { title: string; input: Record<string, unknown> }[];
+  /** 注意点。止まる条件や、できないこと。 */
+  notes?: string[];
+  faq?: { q: string; a: string }[];
+}
+
 /** 品質検証用のテストケース（仕様書 第18.2節）。 */
 export interface EvalCase {
   name: string;
@@ -115,4 +132,6 @@ export interface AgentDefinition {
   constraints: string[];
   limits: Limits;
   evals?: EvalCase[];
+  /** 利用者向けのヘルプの補足。拡張機能では必須（仕様書 第9.2.5節）。 */
+  help?: AgentHelp;
 }

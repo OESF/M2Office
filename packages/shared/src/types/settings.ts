@@ -66,12 +66,23 @@ export interface EffectSettings {
   minutesPerRun: Record<string, number>;
 }
 
+/**
+ * 管理者の初期設定の進み具合のうち、他のデータから判定できないもの（仕様書 第6.10.3節）。
+ */
+export interface TenantOnboarding {
+  /** 「業務と承認」を一度保存した日時。 */
+  agentsReviewedAt: string | null;
+  /** 従業員へダッシュボードの見える範囲を知らせたと、管理者が記録した日時。 */
+  employeesNotifiedAt: string | null;
+}
+
 export interface TenantSettings {
   company: CompanyInfo;
   writingStyle: WritingStyle;
   automation: AutomationPolicy;
   agents: AgentSettings;
   effect: EffectSettings;
+  onboarding: TenantOnboarding;
 }
 
 /** 設定が未保存の会社に使う既定値。 */
@@ -85,6 +96,7 @@ export const DEFAULT_TENANT_SETTINGS: TenantSettings = {
   automation: { writeInternal: 'require', perAgent: { 'weekly-brief': 'allow' } },
   agents: { disabled: [] },
   effect: { minutesPerRun: {} },
+  onboarding: { agentsReviewedAt: null, employeesNotifiedAt: null },
 };
 
 /**
@@ -136,6 +148,8 @@ export interface UserSettings {
     /** 並び順。載っていない業務は後ろに既定の順で並ぶ。 */
     order: string[];
   };
+  /** 初回の案内を見終えた（または飛ばした）日時。`null` なら次のログインで案内する（第6.10.3節）。 */
+  onboarding: { tourCompletedAt: string | null };
 }
 
 export const DEFAULT_USER_SETTINGS: UserSettings = {
@@ -143,4 +157,5 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   secretary: { name: '', callMe: '', style: 'polite', proactivity: 'normal' },
   notifications: { kinds: { brief: true, run: true, approval: true, failure: true }, quietHours: null },
   menu: { hidden: [], order: [] },
+  onboarding: { tourCompletedAt: null },
 };

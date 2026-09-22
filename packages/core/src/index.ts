@@ -27,6 +27,7 @@ export type {
 } from './connectors/types.js';
 
 export * from './files/index.js';
+export * from './help/index.js';
 
 export { ToolRegistry } from './tools/registry.js';
 export type { Tool, ToolContext } from './tools/registry.js';

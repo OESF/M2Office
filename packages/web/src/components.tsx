@@ -6,7 +6,8 @@
 
 import { useState } from 'react';
 import type { Approval, Artifact, RunStep } from '@m2office/shared';
-import { api, type AgentSummary, type JsonSchemaField, type RunDetail } from './api.js';
+import { api, describeError, type AgentSummary, type JsonSchemaField, type RunDetail } from './api.js';
+import { AgentHelpPanel } from './help.js';
 
 /**
  * 入力スキーマからフォームを自動生成する（仕様書 FR-202）。
@@ -33,13 +34,16 @@ export function AgentForm({
       const { runId } = await api.createJob(agent.id, values);
       onSubmitted(runId);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '実行を開始できませんでした');
+      setError(describeError(err, '実行を開始できませんでした'));
     } finally {
       setBusy(false);
     }
   }
 
   return (
+    <>
+    <AgentHelpPanel agentId={agent.id} onExample={(input) =>
+      setValues(Object.fromEntries(Object.entries(input).map(([k, v]) => [k, String(v ?? '')])))} />
     <div className="card">
       <h3>{agent.name}</h3>
       <p>{agent.description}</p>
@@ -61,6 +65,7 @@ export function AgentForm({
         {busy ? '開始しています…' : '実行する'}
       </button>
     </div>
+    </>
   );
 }
 
@@ -153,7 +158,11 @@ export function ApprovalTray({
   }
 
   if (items.length === 0) {
-    return <div className="card"><p className="muted">承認待ちはありません。</p></div>;
+    return (
+      <div className="card">
+        <p className="muted">承認待ちはありません。承認が必要な業務を実行すると、判断できる人のここに届きます。</p>
+      </div>
+    );
   }
 
   return (

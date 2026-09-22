@@ -567,8 +567,8 @@ export class PostgresRepository implements Repository {
     const rows = await this.q<{
       company: TenantSettings['company'] | null; writing_style: TenantSettings['writingStyle'] | null;
       automation: TenantSettings['automation'] | null; agents: TenantSettings['agents'] | null;
-      effect: TenantSettings['effect'] | null;
-    }>(tenantId, `select company, writing_style, automation, agents, effect
+      effect: TenantSettings['effect'] | null; onboarding: TenantSettings['onboarding'] | null;
+    }>(tenantId, `select company, writing_style, automation, agents, effect, onboarding
                     from tenant_settings where tenant_id = $1`,
       [tenantId]);
     const r = rows[0];
@@ -579,6 +579,7 @@ export class PostgresRepository implements Repository {
       automation: r?.automation ?? d.automation,
       agents: { ...d.agents, ...(r?.agents ?? {}) },
       effect: { minutesPerRun: { ...(r?.effect?.minutesPerRun ?? {}) } },
+      onboarding: { ...d.onboarding, ...(r?.onboarding ?? {}) },
     };
   }
 
@@ -587,7 +588,7 @@ export class PostgresRepository implements Repository {
   ): Promise<void> {
     const column = ({
       company: 'company', writingStyle: 'writing_style', automation: 'automation', agents: 'agents',
-      effect: 'effect',
+      effect: 'effect', onboarding: 'onboarding',
     } as const)[section];
     // 列名は上の固定の対応表からのみ取る。利用者の入力を SQL に埋め込まない
     await this.q(tenantId,
@@ -644,7 +645,7 @@ export class PostgresRepository implements Repository {
 
   async getUserSettings(tenantId: string, userId: string): Promise<UserSettings> {
     const rows = await this.q<Partial<Record<keyof UserSettings, unknown>>>(tenantId,
-      `select profile, secretary, notifications, menu from user_settings
+      `select profile, secretary, notifications, menu, onboarding from user_settings
         where tenant_id = $1 and user_id = $2`, [tenantId, userId]);
     const r = rows[0] ?? {};
     const d = DEFAULT_USER_SETTINGS;
@@ -657,6 +658,7 @@ export class PostgresRepository implements Repository {
         quietHours: n.quietHours ?? d.notifications.quietHours,
       },
       menu: { ...d.menu, ...(r.menu ?? {}) },
+      onboarding: { ...d.onboarding, ...(r.onboarding ?? {}) },
     };
   }
 
@@ -665,6 +667,7 @@ export class PostgresRepository implements Repository {
   ): Promise<void> {
     const column = ({
       profile: 'profile', secretary: 'secretary', notifications: 'notifications', menu: 'menu',
+      onboarding: 'onboarding',
     } as const)[section];
     await this.q(tenantId,
       `insert into user_settings (tenant_id, user_id, ${column}, updated_at)

@@ -11,9 +11,11 @@
 import {
   PostgresRepository, StubLlmProvider, OpenAiCompatibleProvider, ToolRegistry, BUILTIN_TOOLS,
   RunEngine, Secretary, OFFICIAL_AGENTS, resolveOfficialAgent, buildConnector, LocalFileStore,
-  createLoggerFromEnv,
-  type FileStore, type LlmProvider, type Logger, type Repository, type WorkspaceConnector,
+  createLoggerFromEnv, HelpCatalog, parseArticle,
+  type FileStore, type HelpArticle, type LlmProvider, type Logger, type Repository, type WorkspaceConnector,
 } from '@m2office/core';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadAuthConfig, type AuthConfig } from './auth/config.js';
 
@@ -29,6 +31,8 @@ export interface AppDeps {
   auth: AuthConfig;
   /** アプリログ（開発規約 第7章）。 */
   log: Logger;
+  /** ヘルプの記事（仕様書 第6.10節）。 */
+  help: HelpCatalog;
 }
 
 /**
@@ -53,8 +57,41 @@ export function buildDeps(): AppDeps {
   const engine = new RunEngine({
     repo, llm, registry, connector, files, resolveDefinition: resolveOfficialAgent, logger: log,
   });
-  const secretary = new Secretary({ repo, llm, connector, agents: OFFICIAL_AGENTS });
-  return { repo, llm, connector, files, registry, engine, secretary, auth: loadAuthConfig(), log };
+  const help = new HelpCatalog(loadHelpArticles(helpDir(), log), OFFICIAL_AGENTS, registry);
+  const secretary = new Secretary({ repo, llm, connector, agents: OFFICIAL_AGENTS, help });
+  return { repo, llm, connector, files, registry, engine, secretary, auth: loadAuthConfig(), log, help };
+}
+
+/** 公式のヘルプの記事の置き場。既定はリポジトリ直下の `docs/help`。 */
+function helpDir(): string {
+  return process.env['HELP_DIR'] ?? fileURLToPath(new URL('../../../docs/help', import.meta.url));
+}
+
+/**
+ * 公式のヘルプの記事を読み込む。
+ *
+ * @remarks
+ * 読めない記事があっても起動は止めず、記録して飛ばす。ヘルプの誤りで業務を止めないため。
+ * 記事の形式の誤りは `npm test` で検出する。
+ */
+export function loadHelpArticles(dir: string, log: Logger): HelpArticle[] {
+  const articles: HelpArticle[] = [];
+  let files: string[] = [];
+  try {
+    files = readdirSync(dir).filter((f) => f.endsWith('.md') && f !== 'README.md');
+  } catch (err) {
+    log.warn('ヘルプの記事を読み込めませんでした', { dir, err });
+    return articles;
+  }
+  for (const f of files) {
+    try {
+      articles.push(parseArticle(readFileSync(join(dir, f), 'utf8')));
+    } catch (err) {
+      log.warn('ヘルプの記事の形式が不正です', { file: f, err });
+    }
+  }
+  log.info('ヘルプの記事を読み込みました', { count: articles.length });
+  return articles;
 }
 
 /**

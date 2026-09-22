@@ -106,6 +106,14 @@ export function adminRoute(deps: AppDeps) {
     if ('error' in checked) return c.json({ error: checked.error }, 400);
 
     await deps.repo.saveTenantSettings(tenant.id, checked.section, checked.value as never, user.id);
+    if (checked.section === 'agents' || checked.section === 'automation') {
+      // 初期設定の「使う業務を選ぶ」を済みにする（仕様書 第6.10.3節）
+      const current = await deps.repo.getTenantSettings(tenant.id);
+      if (!current.onboarding.agentsReviewedAt) {
+        await deps.repo.saveTenantSettings(tenant.id, 'onboarding',
+          { ...current.onboarding, agentsReviewedAt: new Date().toISOString() }, user.id);
+      }
+    }
     await audit(deps, tenant.id, user.id, 'settings.update', 'tenant_settings', checked.section,
       { section: checked.section });
     return c.json({ ok: true });

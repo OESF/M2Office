@@ -71,6 +71,7 @@ src/Admin.tsx       管理者ページ（参照の画面）
 src/Dashboard.tsx   ダッシュボード（いま・集計）
 src/AdminSettings.tsx  管理者ページ（会社情報・業務と承認・ユーザー・知識の編集）
 src/Settings.tsx    個人設定
+src/help.tsx        ヘルプ（ヘルプセンター・記事・画面の「？」・初回の案内・業務の説明）
 src/components.tsx  フォーム・実行詳細・承認トレイ
 src/styles.css      3 ペインの配置
 ```

@@ -16,6 +16,8 @@ import { FILE_TOOLS } from './files.js';
 export const knowledgeSearch: Tool = {
   name: 'knowledge.search',
   risk: 'read',
+  activityLabel: '社内の知識を調べています（リサーチ中）',
+  helpText: '社内の知識（規程・議事録など）を調べます。区画の外の人には区画内の文書を見せません',
   description: '組織知識を検索し、出典つきで返す',
   async invoke(args, ctx) {
     const query = String(args['query'] ?? '');
@@ -32,6 +34,8 @@ export const knowledgeSearch: Tool = {
 export const meetingGetTranscript: Tool = {
   name: 'meeting.get_transcript',
   risk: 'read',
+  activityLabel: '会議の記録を読んでいます',
+  helpText: '会議の記録（文字起こし）を読みます',
   description: '会議の文字起こしを取得する',
   async invoke(args) {
     const text = String(args['transcript'] ?? '');
@@ -47,6 +51,8 @@ export const meetingGetTranscript: Tool = {
 export const documentCreate: Tool = {
   name: 'document.create',
   risk: 'draft',
+  activityLabel: '資料を作成しています',
+  helpText: '文書を作り、成果物として保存します。社外へは出しません',
   description: '文書を作成し、成果物として保存する',
   async invoke(args, ctx) {
     const id = randomUUID();

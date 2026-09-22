@@ -8,17 +8,22 @@
  */
 
 import { useEffect, useState } from 'react';
-import { api, type DashboardLive, type DashboardStats } from './api.js';
+import { api, describeError, type ChecklistItem, type DashboardLive, type DashboardStats } from './api.js';
+import { HelpTip, openHelp } from './help.js';
 
 /** 「いま」を取り直す間隔（ミリ秒）。 */
 const LIVE_INTERVAL_MS = 5000;
 
-export function Dashboard() {
+/**
+ * @param onGo 初期設定のチェックリストから、管理者ページの別のタブへ移る
+ */
+export function Dashboard({ onGo }: { onGo?: (tab: string) => void }) {
   const [tab, setTab] = useState<'live' | 'stats'>('live');
   return (
     <>
+      <Checklist onGo={onGo} />
       <div className="dash-head">
-        <h1>ダッシュボード</h1>
+        <h1>ダッシュボード <HelpTip article="admin-dashboard">業務の流れと承認の滞留を見る画面です。会話や業務の中身、個人の勤務時間は出ません。</HelpTip></h1>
         <div className="seg">
           <button className={tab === 'live' ? 'on' : ''} onClick={() => setTab('live')}>いま</button>
           <button className={tab === 'stats' ? 'on' : ''} onClick={() => setTab('stats')}>集計</button>
@@ -26,6 +31,43 @@ export function Dashboard() {
       </div>
       {tab === 'live' ? <Live /> : <Stats />}
     </>
+  );
+}
+
+/**
+ * 管理者の初期設定チェックリスト（仕様書 第6.10.3節）。すべて済むと出さない。
+ */
+function Checklist({ onGo }: { onGo?: (tab: string) => void }) {
+  const [items, setItems] = useState<ChecklistItem[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const load = () => api.onboarding.checklist()
+    .then((r) => setItems(r.done ? null : r.items)).catch((e) => setError(describeError(e)));
+  useEffect(() => { void load(); }, []);
+  if (error) return <p className="error">{error}</p>;
+  if (!items) return null;
+  const done = items.filter((i) => i.done).length;
+  return (
+    <section className="card checklist">
+      <h3>はじめに行う設定（{done} / {items.length}）</h3>
+      <div className="hbar"><span style={{ width: `${(done / items.length) * 100}%` }} /></div>
+      <ul>
+        {items.map((i) => (
+          <li key={i.id} className={i.done ? 'done' : i.important ? 'important' : ''}>
+            <span className="mark" aria-hidden>{i.done ? '済' : '・'}</span>
+            <span className="label">
+              {i.label}
+              {i.note && <span className="muted small">（{i.note}）</span>}
+              {!i.done && i.important && <span className="small warn-text"> 空のままだと秘書が答えられません</span>}
+            </span>
+            {!i.done && i.go && <button className="btn ghost small" onClick={() => onGo?.(i.go!)}>設定する</button>}
+            {!i.done && i.id === 'notify' && (
+              <button className="btn ghost small" onClick={() => void api.onboarding.notified().then(load)}>知らせた</button>
+            )}
+            <button className="link-btn" onClick={() => openHelp(i.help)}>説明</button>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

@@ -57,17 +57,61 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: '通信に失敗しました' }));
     if (res.status === 401 && body.login) onUnauthorized?.();
-    throw new ApiError(body.error ?? `エラー (${res.status})`, res.status, !!body.login);
+    throw new ApiError(
+      body.error ?? `エラー (${res.status})`, res.status, !!body.login,
+      body.requestId ?? res.headers.get('x-request-id'),
+    );
   }
   return res.json() as Promise<T>;
 }
 
 /** API が返した業務上のエラー。画面では平易な文言として表示する。 */
 export class ApiError extends Error {
-  constructor(message: string, readonly status: number, readonly needsLogin = false) {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly needsLogin = false,
+    /** 要求の ID。問い合わせのときにログと突き合わせる（開発規約 第7.4節）。 */
+    readonly requestId: string | null = null,
+  ) {
     super(message);
     this.name = 'ApiError';
   }
+}
+
+/**
+ * エラーを画面に出す文にする。要求の ID があれば問い合わせ番号として添える。
+ *
+ * @remarks 利用者が管理者へ問い合わせるときに、この番号で何が起きたかを調べられる（仕様書 第6.10.4節）。
+ */
+export function describeError(err: unknown, fallback = 'うまくいきませんでした'): string {
+  if (err instanceof ApiError) {
+    return err.requestId ? `${err.message}（問い合わせ番号: ${err.requestId.slice(0, 8)}）` : err.message;
+  }
+  return err instanceof Error ? err.message : fallback;
+}
+
+/** ヘルプの記事の一覧の 1 件。 */
+export interface HelpArticleMeta {
+  id: string; title: string; audience: string; category: string; related: string[]; source: 'official' | 'agent';
+}
+
+/** 業務の説明（仕様書 第6.10.5節）。 */
+export interface AgentHelpView {
+  agentId: string; name: string; summary: string;
+  inputs: { key: string; title: string; required: boolean }[];
+  flow: string[];
+  approvals: { step: string; who: string }[];
+  does: string[];
+  safeguards: string[];
+  examples: { title: string; input: Record<string, unknown> }[];
+  notes: string[];
+  faq: { q: string; a: string }[];
+}
+
+/** 管理者の初期設定チェックリストの 1 項目。 */
+export interface ChecklistItem {
+  id: string; label: string; done: boolean; go: string | null; help: string; note?: string | null; important?: boolean;
 }
 
 export interface Me {
@@ -163,6 +207,8 @@ export interface SecretaryReply {
   text: string;
   evidence: { label: string; value: string }[];
   suggestedAgent?: { id: string; version: number; name: string };
+  /** 使い方の質問に答えたとき、材料にしたヘルプの記事。 */
+  helpArticles?: { id: string; title: string }[];
   tokensUsed: number;
   elapsedMs: number;
 }
@@ -189,6 +235,20 @@ async function download(fileId: string, name: string): Promise<void> {
 
 export const api = {
   download,
+  help: {
+    list: () => call<{ items: HelpArticleMeta[] }>('/help/articles'),
+    get: (id: string) => call<HelpArticleMeta & { body: string }>(`/help/articles/${encodeURIComponent(id)}`),
+    search: (q: string) => call<{ items: { id: string; title: string; category: string; excerpt: string }[] }>(
+      `/help/search?q=${encodeURIComponent(q)}`),
+    agent: (agentId: string) => call<AgentHelpView>(`/help/agents/${encodeURIComponent(agentId)}`),
+  },
+  onboarding: {
+    tour: () => call<{ completedAt: string | null }>('/onboarding/tour'),
+    finishTour: () => call('/onboarding/tour', { method: 'POST', body: JSON.stringify({}) }),
+    resetTour: () => call('/onboarding/tour', { method: 'POST', body: JSON.stringify({ reset: true }) }),
+    checklist: () => call<{ items: ChecklistItem[]; done: boolean }>('/onboarding/checklist'),
+    notified: () => call('/onboarding/checklist/notified', { method: 'POST', body: JSON.stringify({}) }),
+  },
   me: async () => {
     const me = await call<Me>('/me');
     csrfToken = me.csrfToken;

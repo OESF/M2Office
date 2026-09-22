@@ -25,6 +25,8 @@ import { adminRoute } from './routes/admin.js';
 import { meRoute } from './routes/me.js';
 import { filesRoute } from './routes/files.js';
 import { dashboardRoute } from './routes/dashboard.js';
+import { helpRoute } from './routes/help.js';
+import { onboardingRoute } from './routes/onboarding.js';
 
 /**
  * API サーバー。
@@ -85,6 +87,8 @@ app.route('/v1/schedules', schedulesRoute(deps));
 app.route('/v1/admin/dashboard', dashboardRoute(deps));
 app.route('/v1/admin', adminRoute(deps));
 app.route('/v1/files', filesRoute(deps));
+app.route('/v1/help', helpRoute(deps));
+app.route('/v1/onboarding', onboardingRoute(deps));
 
 const port = Number(process.env['API_PORT'] ?? 3101);
 serve({ fetch: app.fetch, port }, (info) => {

@@ -9,8 +9,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Approval, Notification } from '@m2office/shared';
 import {
-  api, type AgentSummary, type Me, type RunDetail, type ScheduleView, type SecretaryReply,
+  api, describeError, type AgentSummary, type Me, type RunDetail, type ScheduleView, type SecretaryReply,
 } from './api.js';
+import { HelpCenter, HelpTip, Tour, openHelp, useOpenHelp } from './help.js';
 import { AgentForm, ApprovalTray, Evidence, RunView, statusLabel } from './components.js';
 import { Settings, orderAgents } from './Settings.js';
 
@@ -23,7 +24,8 @@ type View =
   | { kind: 'history' }
   | { kind: 'notifications' }
   | { kind: 'schedules' }
-  | { kind: 'settings' };
+  | { kind: 'settings' }
+  | { kind: 'help'; articleId: string | null };
 
 /**
  * ワークスペースの画面。
@@ -40,6 +42,14 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [reply, setReply] = useState<SecretaryReply | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [showTour, setShowTour] = useState(false);
+  // 初回の案内（仕様書 第6.10.3節）。見終えていなければ出す
+  useEffect(() => {
+    api.onboarding.tour().then((t) => setShowTour(t.completedAt === null)).catch(() => undefined);
+  }, []);
+  const finishTour = () => { setShowTour(false); void api.onboarding.finishTour().catch(() => undefined); };
+  // 画面のどこからでもヘルプの記事を開けるようにする
+  useOpenHelp(useCallback((articleId: string | null) => setView({ kind: 'help', articleId }), []));
   const [menu, setMenu] = useState<{ hidden: string[]; order: string[] }>({ hidden: [], order: [] });
   const loadMenu = useCallback(() => {
     api.mySettings().then((s) => setMenu(s.menu)).catch(() => undefined);
@@ -57,7 +67,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
       setNotifications(n.items);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '読み込みに失敗しました');
+      setError(describeError(err, '読み込みに失敗しました'));
     }
   }, []);
 
@@ -138,6 +148,12 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
             定時実行
           </button>
           <button
+            className={`item${view.kind === 'help' ? ' active' : ''}`}
+            onClick={() => setView({ kind: 'help', articleId: null })}
+          >
+            ヘルプ
+          </button>
+          <button
             className={`me-summary${view.kind === 'settings' ? ' active' : ''}`}
             onClick={() => setView({ kind: 'settings' })}
           >
@@ -166,7 +182,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
           )}
           {view.kind === 'approvals' && (
             <>
-              <h1>承認トレイ</h1>
+              <h1>承認トレイ <HelpTip article="start-approvals">承認すると業務が続きから進み、却下するとそこで終わります。送信や登録は承認のあとにだけ行います。</HelpTip></h1>
               <p className="lead">内容を確認してから承認してください。</p>
               <ApprovalTray items={approvals} onDecided={() => void refresh()} />
             </>
@@ -180,23 +196,29 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
           )}
           {view.kind === 'schedules' && (
             <>
-              <h1>定時実行</h1>
+              <h1>定時実行 <HelpTip article="start-schedules">決まった時刻に、あなたの権限で業務を自動で実行します。「今すぐ実行」で動きを確かめられます。</HelpTip></h1>
               <p className="lead">決まった時刻に、あなたの権限で業務を実行します。</p>
               <Schedules agents={agents} />
             </>
           )}
           {view.kind === 'settings' && (
             <>
-              <h1>個人設定</h1>
+              <h1>個人設定 <HelpTip article="start-settings">ここでの設定は、あなたにだけ効きます。管理者も変更できません。</HelpTip></h1>
               <p className="lead">あなただけに関わる設定です。管理者も変更できません。</p>
               <Settings me={me} agents={agents} onChanged={loadMenu} />
             </>
+          )}
+          {view.kind === 'help' && (
+            <HelpCenter initial={view.articleId} onReplayTour={() => {
+              void api.onboarding.resetTour().catch(() => undefined);
+              setShowTour(true);
+            }} />
           )}
           {view.kind === 'history' && (
             <>
               <h1>実行履歴</h1>
               <p className="lead">過去の依頼と結果を確認できます。</p>
-              {history.length === 0 && <p className="muted">まだ履歴はありません。</p>}
+              {history.length === 0 && <p className="muted">まだ履歴はありません。左のメニューから業務を選ぶか、秘書に頼んでみてください。</p>}
               {history.map(({ run, job }) => (
                 <div className="card" key={run.id}>
                   <h3>
@@ -233,6 +255,14 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
                     {reply.suggestedAgent.name} を開く
                   </button>
                 )}
+                {reply.helpArticles && reply.helpArticles.length > 0 && (
+                  <>
+                    <h3 style={{ marginTop: 16 }}>ヘルプの記事</h3>
+                    {reply.helpArticles.map((a) => (
+                      <button key={a.id} className="help-item" onClick={() => openHelp(a.id)}>{a.title}</button>
+                    ))}
+                  </>
+                )}
                 {reply.evidence.length > 0 && (
                   <>
                     <h3 style={{ marginTop: 16 }}>根拠</h3>
@@ -259,6 +289,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
       </div>
 
       <SecretaryBar onReply={setReply} />
+      {showTour && <Tour onDone={finishTour} />}
     </div>
   );
 }
@@ -296,7 +327,7 @@ function SecretaryBar({ onReply }: { onReply: (r: SecretaryReply) => void }) {
       setHint(`${layerLabel(reply.layer)}・${reply.elapsedMs}ms`);
       setText('');
     } catch (err) {
-      setHint(err instanceof Error ? err.message : '応答できませんでした');
+      setHint(describeError(err, '応答できませんでした'));
     } finally {
       setBusy(false);
     }
@@ -307,7 +338,7 @@ function SecretaryBar({ onReply }: { onReply: (r: SecretaryReply) => void }) {
       <span className="muted">秘書</span>
       <input
         value={text}
-        placeholder="例: 今日の予定は？ / 承認待ちある？ / 会議の議事録をまとめて"
+        placeholder="例: 今日の予定は？ / 会議の議事録をまとめて / 承認はどうやるの？"
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
           // 日本語入力の変換確定の Enter では送らない
@@ -326,7 +357,7 @@ function SecretaryBar({ onReply }: { onReply: (r: SecretaryReply) => void }) {
 /** 本人宛の通知の一覧。開くと既読になる。 */
 function Notifications({ items, onRead }: { items: Notification[]; onRead: () => void }) {
   const [open, setOpen] = useState<string | null>(null);
-  if (items.length === 0) return <p className="muted">お知らせはありません。</p>;
+  if (items.length === 0) return <p className="muted">お知らせはありません。週次ブリーフや業務の結果が、ここに届きます。</p>;
   return (
     <>
       {items.map((n) => (

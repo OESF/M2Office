@@ -10,6 +10,7 @@ import type { AgentDefinition } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { LlmProvider } from '../llm/provider.js';
 import type { WorkspaceConnector } from '../connectors/types.js';
+import type { HelpCatalog } from '../help/articles.js';
 import { DIRECT_QUERIES, type DirectAnswer } from './catalog.js';
 
 /** 秘書がどの層で応答したか。計測と表示に使う（仕様書 第10.9.1節）。 */
@@ -21,6 +22,8 @@ export interface SecretaryReply {
   evidence: { label: string; value: string }[];
   /** 業務エージェントの起動を提案する場合、その候補。 */
   suggestedAgent?: { id: string; version: number; name: string };
+  /** 使い方の質問に答えた場合、材料にしたヘルプの記事（仕様書 第6.10.6節）。 */
+  helpArticles?: { id: string; title: string }[];
   tokensUsed: number;
 }
 
@@ -29,6 +32,8 @@ export interface SecretaryDeps {
   llm: LlmProvider;
   connector: WorkspaceConnector;
   agents: AgentDefinition[];
+  /** ヘルプの記事。あれば使い方の質問に答える（仕様書 第6.10.6節）。 */
+  help?: HelpCatalog;
 }
 
 /**
@@ -53,6 +58,11 @@ export class Secretary {
    * @returns 応答と、用いた層
    */
   async respond(tenantId: string, userId: string, message: string): Promise<SecretaryReply> {
+    // 使い方の質問は、定型の照会より先に見る。「承認はどうやるの？」を承認待ちの照会と取り違えないため
+    if (this.deps.help && HOW_TO.test(message)) {
+      return this.answerHowTo(tenantId, userId, message, this.deps.help);
+    }
+
     // 層 1: パターン一致で定型の照会に該当するか（LLM を使わない）
     const direct = this.matchDirect(message);
     if (direct) {
@@ -98,6 +108,54 @@ export class Secretary {
     });
     await this.audit(tenantId, userId, 'secretary.chat', 'full');
     return { layer: 'full', text: res.text, evidence: [], tokensUsed: res.tokensUsed };
+  }
+
+  /**
+   * 使い方の質問に、ヘルプの記事から答える（仕様書 第6.10.6節）。
+   *
+   * @remarks
+   * LLM を使わない。記事の抜粋と出典を返す。
+   * 社内規程も検索し、「M2Office の使い方」と「社内の決まり」を分けて示す（方針 h5）。
+   * どちらにも見当たらなければ、推測で答えずにそう伝える。
+   */
+  private async answerHowTo(
+    tenantId: string, userId: string, message: string, help: HelpCatalog,
+  ): Promise<SecretaryReply> {
+    const [user, settings] = await Promise.all([
+      this.deps.repo.findUserById(tenantId, userId),
+      this.deps.repo.getTenantSettings(tenantId),
+    ]);
+    const ctx = {
+      roles: user?.roles ?? [], disabledAgents: settings.agents.disabled, automation: settings.automation,
+    };
+    const hits = help.search(message, ctx, 3);
+    // 区画の外として検索する。区画内の文書を使い方の答えに混ぜない
+    const rules = (await this.deps.repo.searchKnowledge(tenantId, message, null)).slice(0, 2);
+
+    const parts: string[] = [];
+    const top = hits[0];
+    if (top) parts.push(`M2Office の使い方（「${top.article.title}」より）: ${top.excerpt}`);
+    if (rules.length > 0) {
+      parts.push(`社内の規程では、${rules.map((r) => `「${r.title}」（${r.source}）`).join('、')}に記載があります。`);
+    }
+    if (parts.length === 0) {
+      parts.push('ヘルプと社内の規程のどちらにも見当たりませんでした。言い方を変えて聞き直すか、社内の管理者に問い合わせてください。');
+    }
+
+    const agentId = top?.article.id.startsWith('agent-') ? top.article.id.slice('agent-'.length) : null;
+    const agent = agentId ? this.deps.agents.find((a) => a.id === agentId) : undefined;
+    await this.audit(tenantId, userId, 'secretary.help', top?.article.id ?? 'none');
+    return {
+      layer: 'direct',
+      text: parts.join('\n'),
+      evidence: [
+        ...hits.map((h) => ({ label: 'ヘルプ', value: h.article.title })),
+        ...rules.map((r) => ({ label: '社内の規程', value: `${r.title}（${r.source}）` })),
+      ],
+      helpArticles: hits.map((h) => ({ id: h.article.id, title: h.article.title })),
+      ...(agent ? { suggestedAgent: { id: agent.id, version: agent.version, name: agent.name } } : {}),
+      tokensUsed: 0,
+    };
   }
 
   private matchDirect(message: string) {
@@ -169,3 +227,10 @@ export class Secretary {
 }
 
 export type { DirectAnswer };
+
+/**
+ * 使い方の質問に多い言い回し。
+ *
+ * @remarks 「今日の予定は？」のような照会や、「議事録をまとめて」のような依頼には当たらないようにする。
+ */
+const HOW_TO = /どうやって|どうすれば|どうやる|どうなる[？?]?$|どうなりますか|やり方|使い方|方法は|って何|とは[？?]?$|何ができ|できますか|どこで|どこから|ヘルプ|わからない|分からない|勝手に|見られ/;
