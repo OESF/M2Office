@@ -18,6 +18,7 @@ src/connectors/  メール・予定・タスク・チャットへの接続口（
 src/files/       ファイルの置き場と、PDF・Excel・CSV・Word の読み書き
 src/log/         アプリログのロガー（レベル・JSON・伏せ字）
 src/help/        ヘルプ（業務の説明の自動生成、記事の出し分けと検索）
+src/extensions/  拡張機能の読み込みと検証
 src/scheduler/   定時実行の規則と起動役
 src/llm/         LLM 抽象化層（スタブ／OpenAI 互換）
 src/repository/  永続化。テナント境界の絞り込みを伴う
@@ -105,6 +106,12 @@ decideApproval(...)  →  承認を記録し、待ち行列へ戻す
 機械的に作るため、定義を追加するだけで正しい説明が出ます。
 `HelpCatalog` は公式の記事（`docs/help/`）と業務の記事を合わせ、役割と有効な業務で出し分けて検索します。
 ツールを追加するときは、`activityLabel`（ダッシュボードの活動の表示名）と `helpText`（すること）を必ず書きます。
+
+### 拡張機能と業務エージェントの目録
+
+`loadExtensions()` が `extensions/` の下を読み込み、検証を通ったものだけを返します（仕様書 第12.9.2節）。
+`AgentCatalog` は公式の業務エージェントと拡張機能の業務エージェントをまとめ、
+`forTenant()` でその会社が導入したものだけに絞ります。作り方は開発者マニュアル（`docs/developer/`）を参照してください。
 
 ### 定時実行（`Scheduler`）
 

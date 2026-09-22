@@ -63,6 +63,11 @@ test('ヘルプの概要が無い定義は拒否する（第9.2.5節）', () => 
   assert.ok(p.some((x) => x.includes('help.summary')), p.join('\n'));
 });
 
+test('業務エージェントの ID の形式の誤りは拒否する', () => {
+  const p = variant((d) => rewrite(join(d, 'agents/hello.json'), (j) => { j.id = 'Hello World'; }));
+  assert.ok(p.some((x) => x.includes('英小文字・数字・ハイフン')), p.join('\n'));
+});
+
 test('マニフェストの形式の誤りは拒否する', () => {
   const p = variant((d) => rewrite(join(d, 'manifest.json'), (j) => { j.id = 'HelloWorld'; j.version = 'v1'; }));
   assert.ok(p.some((x) => x.includes('逆ドメイン名')));

@@ -124,6 +124,10 @@ export function loadExtension(
       continue;
     }
     const localId = raw.id;
+    if (typeof localId !== 'string' || !/^[a-z0-9][a-z0-9-]*$/.test(localId)) {
+      problems.push(`agents/${f}: id は英小文字・数字・ハイフンで書いてください（例: hello）`);
+      continue;
+    }
     const def: AgentDefinition = {
       ...raw,
       id: `${manifest.id}:${localId}`,
