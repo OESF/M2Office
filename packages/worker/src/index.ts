@@ -12,7 +12,7 @@
 import {
   PostgresRepository, StubLlmProvider, OpenAiCompatibleProvider, ToolRegistry, BUILTIN_TOOLS,
   RunEngine, Scheduler, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient,
-  loadExtensions, OFFICIAL_AGENTS, type LlmProvider,
+  loadExtensions, OFFICIAL_AGENTS, GeminiResearchProvider, MockResearchProvider, type LlmProvider,
 } from '@m2office/core';
 import { fileURLToPath } from 'node:url';
 
@@ -46,6 +46,10 @@ const isAvailable = async (tenantId: string, agentId: string) => (await hub.forT
 
 const engine = new RunEngine({
   repo, llm: buildLlm(), registry, connector, files, resolveDefinition, isAvailable, logger: log,
+  // Web の調査（第9.4.2節）。鍵があれば Gemini の Google 検索、無ければ見本。API と同じ判定
+  research: process.env['LLM_PROVIDER'] === 'gemini' && process.env['GEMINI_API_KEY']
+    ? new GeminiResearchProvider(process.env['GEMINI_API_KEY'], process.env['MODEL_RESEARCH'] ?? process.env['MODEL_STANDARD'] ?? 'gemini-flash-latest')
+    : new MockResearchProvider(),
   registryFor: async (tenantId) => (await hub.forTenant(tenantId)).registry,
 });
 const scheduler = new Scheduler({ repo, resolveDefinition, isAvailable, logger: log });

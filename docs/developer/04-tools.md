@@ -33,10 +33,12 @@
 | `pdf.extract` | read | PDF から文字を読み取ります。画像だけのページは読めません |
 | `sheet.read` | read | Excel・CSV を表として読みます |
 | `tasks.list` | read | ToDo の一覧を見ます |
+| `web.research` | read | テーマを Google 検索で調べ、出典つきでまとめます。調べる言葉は Google に送られますが、どこにも書き込みません |
 | `document.create` | draft | 文書を作り、成果物として保存します。社外へは出しません |
 | `docx.render` | draft | Word 形式の文書を作り、成果物として保存します |
 | `gmail.create_draft` | draft | 返信の下書きを作ります。送信はしません |
 | `sheet.render` | draft | 表を Excel・CSV として作り、成果物として保存します |
+| `slides.create` | draft | 調べた内容をスライドにまとめ、あなたのドライブに作ります。PowerPoint 形式でも取り出せます。共有はしません |
 | `notification.send` | write-internal | 依頼した本人にだけお知らせを届けます。他の人には送りません |
 | `tasks.create` | write-internal | ToDo を登録します。会社の設定により、登録の前に確認を求めます |
 | `calendar.create` | external-send | 予定を登録し、参加者を招待します。必ず承認のあとに行います |
@@ -68,6 +70,8 @@
 | `pdf.extract` | `fileId` |
 | `sheet.render` | `title`、`format`（`xlsx` か `csv`）、`columns`: 列名の配列、`rows`: 行の配列 |
 | `docx.render` | `title`、`blocks`: `{ "heading": "…" }` か `{ "text": "…" }` の配列 |
+| `web.research` | `topic`: 調べるテーマ、`focus`: 特に知りたいこと（任意） |
+| `slides.create` | `title`、`subtitle`（任意）、`slides`: スライドの配列（第4.5節）、`sources`: 出典の配列（`title`・`url`） |
 
 ## 4.4 ツールについての決まり
 
@@ -79,7 +83,34 @@
 | 読めるファイル | 依頼した本人のファイルだけ。ID を知っていても他人のファイルは読めない |
 | Google との接続 | いまはダミーデータ（見本のデータ）で動く。返す値に `source: "mock"` が付く |
 
-## 4.5 ツールを増やしたいとき
+## 4.5 調べてスライドにまとめる
+
+`web.research` と `slides.create` を組み合わせると、「〇〇について調べて、8 ページほどのスライドにまとめて」という業務を作れます。
+サンプルは [extensions/research-slides](../../extensions/research-slides/) です（仕様書 第9.4.2節）。
+
+| 段 | 書き方 |
+|---|---|
+| 1. 調べる | ステップで `web.research` を呼ぶ |
+| 2. 構成を決めて組み立てる | 次のステップで、調べた結果から構成を決めて `slides.create` を 1 回呼ぶ |
+
+**1 と 2 は別のステップに分けてください**（Gemini は Google 検索と構造化出力を 1 回の要求で同時に使えないため）。
+**見た目（座標・色・書体）は指示に書きません。** 見た目はテンプレートが決め、推論は内容と構成だけを決めます。
+`web.research` は、権限区画に属する業務では使えません（区画のデータを社外の検索に送らないため）。
+
+`slides` の各要素:
+
+| `layout` | 使う場面 | 書く項目 |
+|---|---|---|
+| `BULLET` | 説明 | `title`、`body`（改行区切りで 6 行・150 文字まで） |
+| `COMPARISON` | 2 つの対比 | `compareLeftTitle`・`compareLeftBody`・`compareRightTitle`・`compareRightBody` |
+| `KPI` | 重要な数値の強調 | `stats`: `{ "value", "label" }` の配列（3 件まで） |
+| `CHART` | 数値の比較・推移 | `chartType`（`COLUMN`・`BAR`・`LINE`・`AREA`・`SCATTER`・`PIE`）、`chartCategories`、`chartSeries`（`name`・`values`、2 系列まで） |
+| `IMAGE` | 写真・情景 | `imagePrompt`（画像の説明）、`caption` |
+
+どのレイアウトも `title`（20 文字まで）が要り、`takeaway`（伝えたいこと 1 文）を書けます。本文のスライドは 12 枚まで（表紙を除く）。
+上限を超えた文字は切り詰められ、そのことが結果に残ります。
+
+## 4.6 ツールを増やしたいとき
 
 内蔵ツールは M2Office 本体の開発で追加します（その場合は開発規約に従い、`activityLabel` と `helpText` を必ず書く）。
 **外部のシステムを操作するツールは、コネクタとして作ります**（第7章）。

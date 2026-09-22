@@ -1,0 +1,108 @@
+{
+  "agent": "research-slides",
+  "cases": [
+    {
+      "name": "ローカル LLM の製品動向（8 ページ）",
+      "input": {
+        "topic": "ローカルで動く LLM の最近の製品動向",
+        "pages": "8"
+      },
+      "expect": "Web で調べた結果から、表紙を含む 8 ページほどの出典つきのスライドを作る。数値は調査結果にあるものだけを使う",
+      "stub": {
+        "research": [
+          {
+            "name": "web.research",
+            "args": {
+              "topic": "ローカルで動く LLM の最近の製品動向"
+            }
+          }
+        ],
+        "build": [
+          {
+            "name": "slides.create",
+            "args": {
+              "title": "ローカル LLM の最近の製品動向",
+              "subtitle": "見本の構成（鍵が無い環境のため、実際には調べていません）",
+              "slides": [
+                {
+                  "layout": "BULLET",
+                  "title": "この資料について",
+                  "body": "これは鍵が無い環境で作った見本の構成です\n実際の調査結果は入っていません\n鍵を設定すると、調べた内容で作られます",
+                  "takeaway": "本物の資料は、調査の結果から作られます"
+                },
+                {
+                  "layout": "BULLET",
+                  "title": "調べる観点（見本）",
+                  "body": "主な製品と発売時期\n動かすのに必要な機器\n性能の比べ方\n価格と使い方の違い",
+                  "takeaway": "観点は調査の結果に合わせて変わります"
+                },
+                {
+                  "layout": "COMPARISON",
+                  "title": "比べ方の例（見本）",
+                  "compareLeftTitle": "手元で動かす",
+                  "compareLeftBody": "データを社外に出さずに使える、という観点で比べます",
+                  "compareRightTitle": "クラウドで使う",
+                  "compareRightBody": "性能と手軽さ、という観点で比べます",
+                  "takeaway": "対比のレイアウトの見本です"
+                },
+                {
+                  "layout": "KPI",
+                  "title": "数値の見せ方（見本）",
+                  "stats": [
+                    {
+                      "value": "（数値）",
+                      "label": "主な製品の数"
+                    },
+                    {
+                      "value": "（数値）",
+                      "label": "必要なメモリ"
+                    },
+                    {
+                      "value": "（数値）",
+                      "label": "価格の幅"
+                    }
+                  ],
+                  "takeaway": "強調する数値は、調査結果にあるものだけを使います"
+                },
+                {
+                  "layout": "CHART",
+                  "title": "グラフの例（見本）",
+                  "chartType": "COLUMN",
+                  "chartCategories": [
+                    "項目 1",
+                    "項目 2",
+                    "項目 3"
+                  ],
+                  "chartSeries": [
+                    {
+                      "name": "見本の値（実際のデータではありません）",
+                      "values": [
+                        1,
+                        2,
+                        3
+                      ]
+                    }
+                  ],
+                  "takeaway": "グラフのレイアウトの見本です"
+                },
+                {
+                  "layout": "BULLET",
+                  "title": "まとめ方の例（見本）",
+                  "body": "分かったこと\n分からなかったこと（不明と書く）\n次に調べること",
+                  "takeaway": "分からない点は推測で埋めません"
+                },
+                {
+                  "layout": "BULLET",
+                  "title": "出典について",
+                  "body": "調べた結果の出典を最後に載せます\n見本のため、出典はありません",
+                  "takeaway": "出典は Google 検索の結果から付きます"
+                }
+              ],
+              "sources": []
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

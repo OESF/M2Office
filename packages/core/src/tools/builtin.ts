@@ -11,6 +11,7 @@ import { randomUUID } from 'node:crypto';
 import type { Tool } from './registry.js';
 import { WORKSPACE_TOOLS } from './workspace.js';
 import { FILE_TOOLS } from './files.js';
+import { RESEARCH_TOOLS } from './research.js';
 
 /** 組織知識を検索する。出典を伴って返す（仕様書 第11.7節）。 */
 export const knowledgeSearch: Tool = {
@@ -76,4 +77,5 @@ export const BUILTIN_TOOLS: Tool[] = [
   documentCreate,
   ...WORKSPACE_TOOLS,
   ...FILE_TOOLS,
+  ...RESEARCH_TOOLS,
 ];

@@ -90,8 +90,11 @@ decideApproval(...)  →  承認を記録し、待ち行列へ戻す
 | `sheet.render` | draft | 表を Excel・CSV（BOM 付き UTF-8）で出力する |
 | `pdf.extract` | read | PDF から文字を取り出す。画像だけのページは明示する（OCR 未対応） |
 | `docx.render` | draft | Word 形式で文書を出力する |
+| `web.research` | read | テーマを Google 検索（Gemini のグラウンディング）で調べ、出典つきで返す。鍵が無ければ見本 |
+| `slides.create` | draft | スライドの構成（JSON）から Google スライドを作る。見本の接続口ではアウトラインを成果物に残す |
 
 エージェントが読めるのは依頼した本人のファイルだけです。ライブラリの選定は ADR-0004 を参照してください。
+`web.research` と `slides.create` は AI Radio の秘書の実装を移植したものです（ADR-0006）。構成の検証は `normalizeSlidePlan()` です。
 
 ### 削減時間の推計
 

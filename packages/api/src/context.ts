@@ -12,6 +12,7 @@ import {
   PostgresRepository, StubLlmProvider, OpenAiCompatibleProvider, ToolRegistry, BUILTIN_TOOLS,
   RunEngine, Secretary, OFFICIAL_AGENTS, buildConnector, LocalFileStore,
   createLoggerFromEnv, HelpCatalog, parseArticle, ExtensionHub, HttpMcpClient, loadExtensions,
+  GeminiResearchProvider, MockResearchProvider, type ResearchProvider,
   type FileStore, type TenantExtensions, type HelpArticle, type LlmProvider, type Logger, type Repository, type WorkspaceConnector,
 } from '@m2office/core';
 import { canRunAgent, type AgentDefinition } from '@m2office/shared';
@@ -96,7 +97,7 @@ export function buildDeps(): AppDeps {
 
   const files = new LocalFileStore(fileStorageDir());
   const engine = new RunEngine({
-    repo, llm, registry, connector, files, logger: log,
+    repo, llm, registry, connector, files, logger: log, research: buildResearch(),
     resolveDefinition: async (id, version, tenantId) => (await tenantView(tenantId)).resolve(id, version),
     registryFor: async (tenantId) => (await tenantView(tenantId)).registry,
     isAvailable,
@@ -170,6 +171,19 @@ export function loadHelpArticles(dir: string, log: Logger): HelpArticle[] {
  */
 export function fileStorageDir(): string {
   return process.env['FILE_STORAGE_DIR'] ?? fileURLToPath(new URL('../../../.data/files', import.meta.url));
+}
+
+/**
+ * 設定に応じて Web の調査の提供者を選ぶ（仕様書 第9.4.2節）。
+ *
+ * @remarks LLM と同じく、Gemini の鍵があれば Google 検索グラウンディングで調べ、無ければ見本を返す。ワーカーと同じ判定。
+ */
+export function buildResearch(): ResearchProvider {
+  const key = process.env['GEMINI_API_KEY'] ?? '';
+  if ((process.env['LLM_PROVIDER'] ?? 'stub') === 'gemini' && key) {
+    return new GeminiResearchProvider(key, process.env['MODEL_RESEARCH'] ?? process.env['MODEL_STANDARD'] ?? 'gemini-flash-latest');
+  }
+  return new MockResearchProvider();
 }
 
 /**

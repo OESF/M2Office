@@ -49,6 +49,11 @@ export function validateDefinition(def: AgentDefinition, registry: ToolRegistry)
     );
   }
 
+  // 2b. 権限区画に属する業務は、Web の調査を使えない。区画のデータが検索の言葉に混ざって社外へ出ないように（第9.4.2節）
+  if (def.compartment && def.tools.includes('web.research')) {
+    throw new DefinitionInvalidError('権限区画に属する業務では web.research を使えません（区画のデータを社外の検索に送らないため）');
+  }
+
   // 3. ステップ ID の重複と、restartFrom の参照先
   const ids = new Set<string>();
   for (const step of def.steps) {

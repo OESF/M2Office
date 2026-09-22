@@ -8,6 +8,7 @@ import type { RiskLevel } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { WorkspaceConnector } from '../connectors/types.js';
 import type { FileStore } from '../files/store.js';
+import type { ResearchProvider } from '../research/provider.js';
 
 /** ツール呼び出しの文脈。テナント境界と実行の同一性を持ち回る。 */
 export interface ToolContext {
@@ -22,6 +23,8 @@ export interface ToolContext {
   connector: WorkspaceConnector;
   /** ファイルの中身の置き場。 */
   files: FileStore;
+  /** Web での調査の提供者（`web.research` が使う。仕様書 第9.4.2節）。 */
+  research?: ResearchProvider;
 }
 
 /**

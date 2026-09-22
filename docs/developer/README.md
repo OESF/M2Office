@@ -29,6 +29,7 @@ M2Office に**業務を追加する人**のための手引きです。拡張機�
 |---|---|---|
 | あいさつ | [extensions/hello-world](../../extensions/hello-world/) | いちばん小さい拡張機能（第2章） |
 | リポジトリ調査（DeepWiki） | [extensions/deepwiki-research](../../extensions/deepwiki-research/) | コネクタ（MCP）を使う拡張機能（第7章） |
+| 調べてスライドにまとめる | [extensions/research-slides](../../extensions/research-slides/) | Web で調べてスライドにまとめる（第4.5節） |
 | 週報の下書き | [examples/extensions/weekly-report](../../examples/extensions/weekly-report/) | 内蔵ツールを組み合わせた実務の例。ファイルにして取り込む自社専用の拡張機能（第6章） |
 
 ## 1 冊の PDF で読む

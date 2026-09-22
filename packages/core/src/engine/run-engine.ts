@@ -21,6 +21,7 @@ import type { LlmProvider } from '../llm/provider.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { WorkspaceConnector } from '../connectors/types.js';
 import type { FileStore } from '../files/store.js';
+import type { ResearchProvider } from '../research/provider.js';
 import { silentLogger, type Logger } from '../log/logger.js';
 import { ApprovalForbiddenError, RunNotResumableError } from './errors.js';
 import { standardMinutes } from '../agents/index.js';
@@ -43,6 +44,8 @@ export interface RunEngineDeps {
   files: FileStore;
   /** アプリログ。省略時は何も書かない（開発規約 第7章）。 */
   logger?: Logger;
+  /** Web での調査の提供者。`web.research` に渡す（仕様書 第9.4.2節）。 */
+  research?: ResearchProvider;
   /**
    * エージェント定義を解決する。
    *
@@ -392,13 +395,13 @@ export class RunEngine {
   private async invokeTool(
     run: Run, def: AgentDefinition, call: ToolCall, requestedBy: string, registry: ToolRegistry,
   ): Promise<unknown> {
-    const { repo, connector, files } = this.deps;
+    const { repo, connector, files, research } = this.deps;
     const tool = registry.get(call.name);
     if (!tool) return { name: call.name, error: '許可されていないツールです' };
     this.log.debug('ツールを呼び出し', { runId: run.id, tenantId: run.tenantId, tool: call.name, risk: tool.risk });
     const out = await tool.invoke(call.args, {
       tenantId: run.tenantId, userId: requestedBy, runId: run.id,
-      compartment: def.compartment, repo, connector, files,
+      compartment: def.compartment, repo, connector, files, research,
     });
     await repo.appendAudit({
       id: randomUUID(), tenantId: run.tenantId, actorType: 'agent', actorId: def.id,

@@ -7,6 +7,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import type { SlidePlan } from '../slides/plan.js';
 import type {
   BusySlot, CalendarEvent, ConnectorPrincipal, MailMessage, TaskItem, WorkspaceConnector,
 } from './types.js';
@@ -30,7 +31,7 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
   private readonly createdEvents = new Map<string, CalendarEvent[]>();
 
   /** 下書き・投稿の記録。動作確認で参照する。 */
-  readonly outbox: { kind: 'draft' | 'chat'; principal: ConnectorPrincipal; body: unknown }[] = [];
+  readonly outbox: { kind: 'draft' | 'chat' | 'slides'; principal: ConnectorPrincipal; body: unknown }[] = [];
 
   constructor(private readonly now: () => Date = () => new Date()) {}
 
@@ -50,6 +51,14 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
     ) => {
       this.outbox.push({ kind: 'draft', principal: p, body: draft });
       return { draftId: `mock-draft-${randomUUID().slice(0, 8)}` };
+    },
+  };
+
+  /** Google スライドは作らない。構成を記録し、リンクの無い ID を返す（仕様書 第9.4.2節「鍵・接続が無い環境」）。 */
+  slides = {
+    createPresentation: async (p: ConnectorPrincipal, input: { title: string; plan: SlidePlan }) => {
+      this.outbox.push({ kind: 'slides', principal: p, body: input });
+      return { presentationId: `mock-deck-${randomUUID().slice(0, 8)}`, url: null, pptxUrl: null };
     },
   };
 

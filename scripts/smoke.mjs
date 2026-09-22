@@ -907,6 +907,26 @@ console.log('\n■ 23. 権限区画をグループで割り当てる');
   await call('a', `/v1/admin/groups/${legal.id}`, { method: 'DELETE' });
 }
 
+console.log('\n■ 24. 調べてスライドにまとめる（web.research・slides.create）');
+{
+  const EXT = 'jp.m2office.samples.research-slides';
+  const AG = `${EXT}:research-slides`;
+  const input = { topic: 'ローカルで動く LLM の最近の製品動向', pages: '8' };
+  await call('a', `/v1/admin/extensions/${EXT}/install`, { method: 'POST', body: JSON.stringify({ consent: true }) });
+  const { body: job } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: AG, input }) }, 'member');
+  const done = await waitFor('a', job.runId, ['completed', 'failed'], 20000, 'member');
+  const research = done.steps?.find((x) => x.stepId === 'research')?.output?.tools?.[0]?.result;
+  research?.source === 'mock' && /実際には調べていません/.test(research.text)
+    ? ok('鍵が無い環境の調査は、見本であることを明示する') : ng('見本の調査の扱いが違う', JSON.stringify(research));
+  const art = done.artifacts?.find((x) => x.kind === 'slides');
+  done.run?.status === 'completed' && art && (art.body.match(/^## \d+\./gm) ?? []).length === 7
+    ? ok('構成を検証し、表紙を含む 8 ページのアウトラインを成果物に残す') : ng('スライドの成果物が無い', JSON.stringify(done.run));
+  const { body: tools } = await call('a', `/v1/help/agents/${encodeURIComponent(AG)}`, {}, 'member');
+  JSON.stringify(tools).includes('Google に送られます')
+    ? ok('業務の説明に、調べる言葉が Google に送られることが出る') : ng('説明に外部送信の注意が無い');
+  await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

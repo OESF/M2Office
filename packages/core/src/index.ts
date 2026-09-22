@@ -33,6 +33,13 @@ export type {
 } from './connectors/types.js';
 
 export * from './files/index.js';
+export {
+  GeminiResearchProvider, MockResearchProvider, type ResearchProvider, type ResearchResult,
+} from './research/provider.js';
+export {
+  normalizeSlidePlan, planOutline, SLIDE_LAYOUTS, CHART_TYPES, MAX_SLIDES,
+  type SlidePlan, type SlideSpec, type SlideLayout, type ChartType,
+} from './slides/plan.js';
 export * from './help/index.js';
 export * from './extensions/index.js';
 

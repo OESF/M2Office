@@ -9,6 +9,8 @@
  * @see 仕様書 第24.2節 第 6 項
  */
 
+import type { SlidePlan } from '../slides/plan.js';
+
 /** 値の出どころ。画面と監査ログで区別して表示する。 */
 export type DataSource = 'mock' | 'google';
 
@@ -92,6 +94,18 @@ export interface ChatConnector {
   post(p: ConnectorPrincipal, msg: { space: string; text: string }): Promise<{ messageId: string }>;
 }
 
+/** Google スライドへの接続口（仕様書 第9.4.2節）。 */
+export interface SlidesConnector {
+  /**
+   * スライドの構成から、本人のドライブにプレゼンテーションを作る。**共有はしない。**
+   *
+   * @returns 作ったものの ID と、開くリンク・PowerPoint 形式の取り出しリンク。見本の接続口では `null`
+   */
+  createPresentation(
+    p: ConnectorPrincipal, input: { title: string; plan: SlidePlan },
+  ): Promise<{ presentationId: string; url: string | null; pptxUrl: string | null }>;
+}
+
 /**
  * 業務システムへの接続口の全体。
  *
@@ -105,4 +119,5 @@ export interface WorkspaceConnector {
   calendar: CalendarConnector;
   tasks: TaskConnector;
   chat: ChatConnector;
+  slides: SlidesConnector;
 }
