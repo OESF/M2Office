@@ -372,6 +372,46 @@ console.log('\n■ 13. ログイン（Cookie と CSRF）');
   after.status === 401 ? ok('ログアウト後は同じ Cookie が使えない') : ng(`使えてしまう（${after.status}）`);
 }
 
+console.log('\n■ 14. データベース側のテナント分離（RLS）');
+{
+  // アプリと同じロールで直接つなぎ、SQL の条件を書き漏らした場合を再現する
+  const { default: pg } = await import('pg');
+  const url = process.env.DATABASE_URL ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office';
+  const db = new pg.Client({ connectionString: url });
+  await db.connect();
+  const count = async (tenant) => {
+    await db.query('begin');
+    if (tenant) await db.query(`select set_config('app.tenant_id', $1, true)`, [tenant]);
+    const { rows } = await db.query('select count(*)::int as n, count(distinct tenant_id)::int as t from runs');
+    await db.query('commit');
+    return rows[0];
+  };
+  const none = await count(null);
+  none.n === 0 ? ok('テナント未設定では、条件なしの SELECT でも 1 行も見えない') : ng(`見えてしまう（${none.n} 行）`);
+  const a = await count('t-alpha');
+  a.n > 0 && a.t === 1 ? ok(`A 社を設定すると A 社の行だけが見える（${a.n} 行）`) : ng('A 社以外の行が混ざる', JSON.stringify(a));
+
+  await db.query('begin');
+  await db.query(`select set_config('app.tenant_id', 't-alpha', true)`);
+  const cross = await db.query(
+    `insert into audit_events (id, tenant_id, actor_type, actor_id, action, target_type, target_id)
+     values ('rls-test', 't-beta', 'system', 'smoke', 'test', 'test', 'test')`,
+  ).then(() => 'inserted', (e) => e.message);
+  await db.query('rollback');
+  cross !== 'inserted' ? ok('他社の tenant_id での書き込みは拒否される') : ng('他社の行を書き込めてしまう');
+
+  await db.query('begin');
+  await db.query(`select set_config('app.tenant_id', 't-alpha', true)`);
+  const tamper = await db.query(`update audit_events set action = 'x'`).then(() => 'updated', (e) => e.message);
+  await db.query('rollback');
+  /permission denied/.test(tamper) ? ok('監査ログは更新できない（追記のみ）') : ng('監査ログを書き換えられる', tamper);
+
+  const role = await db.query(`select rolbypassrls, rolsuper from pg_roles where rolname = current_user`);
+  !role.rows[0].rolbypassrls && !role.rows[0].rolsuper
+    ? ok('アプリのロールは RLS を迂回できない') : ng('アプリのロールが RLS を迂回できる');
+  await db.end();
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

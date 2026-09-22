@@ -26,7 +26,7 @@ export interface AppDeps {
  */
 export function buildDeps(): AppDeps {
   const repo = new PostgresRepository(
-    process.env['DATABASE_URL'] ?? 'postgres://m2office:m2office@localhost:3105/m2office',
+    process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office',
   );
   const llm = buildLlm();
   const connector = buildConnector(process.env['CONNECTOR_MODE'] ?? 'mock');

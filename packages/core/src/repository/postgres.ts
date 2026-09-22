@@ -59,16 +59,57 @@ export class PostgresRepository implements Repository {
     await this.pool.end();
   }
 
+  /**
+   * テナントの範囲で問い合わせる。
+   *
+   * @param tenantId 対象のテナント。`null` はテナント台帳（`tenants`）の参照に限る
+   * @param text SQL
+   * @param params パラメーター
+   *
+   * @remarks
+   * テナント境界: 1 件ごとにトランザクションを張り、その中だけで
+   * `app.tenant_id` を設定する（`set_config(..., true)`）。データベースの
+   * 行レベルセキュリティがこの値で行を絞るため、SQL の条件を書き漏らしても
+   * 他社の行は返らない（仕様書 第8.5.5節）。
+   *
+   * セッション変数（`set` のみ）にしないのは、接続プールで接続が使い回されたときに
+   * 前のテナントの値が残るためである。`null` のときは何も設定しないので、
+   * テナントのデータは 1 行も見えない（閉じた側に倒れる）。
+   */
   private async q<T extends pg.QueryResultRow>(
+    tenantId: string | null,
     text: string,
     params: unknown[] = [],
   ): Promise<T[]> {
-    const res = await this.pool.query<T>(text, params as never[]);
-    return res.rows;
+    if (tenantId === null) {
+      const res = await this.pool.query<T>(text, params as never[]);
+      return res.rows;
+    }
+    return this.inTenant(tenantId, async (client) => {
+      const res = await client.query<T>(text, params as never[]);
+      return res.rows;
+    });
+  }
+
+  /** テナントを設定したトランザクションの中で処理する。 */
+  private async inTenant<R>(tenantId: string, fn: (client: pg.PoolClient) => Promise<R>): Promise<R> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      await client.query(`select set_config('app.tenant_id', $1, true)`, [tenantId]);
+      const result = await fn(client);
+      await client.query('commit');
+      return result;
+    } catch (err) {
+      await client.query('rollback').catch(() => undefined);
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
   async findTenantBySubdomain(subdomain: string): Promise<Tenant | null> {
-    const rows = await this.q<Tenant>(
+    const rows = await this.q<Tenant>(null, 
       `select id, subdomain, name, workspace_domain as "workspaceDomain", status
          from tenants where subdomain = $1`,
       [subdomain],
@@ -77,7 +118,7 @@ export class PostgresRepository implements Repository {
   }
 
   async findUserByEmail(tenantId: string, email: string): Promise<User | null> {
-    const rows = await this.q<User>(
+    const rows = await this.q<User>(tenantId, 
       `select id, tenant_id as "tenantId", email, display_name as "displayName",
               roles, status
          from users where tenant_id = $1 and email = $2`,
@@ -87,7 +128,7 @@ export class PostgresRepository implements Repository {
   }
 
   async findUserById(tenantId: string, userId: string): Promise<User | null> {
-    const rows = await this.q<User>(
+    const rows = await this.q<User>(tenantId, 
       `select id, tenant_id as "tenantId", email, display_name as "displayName",
               roles, status
          from users where tenant_id = $1 and id = $2`,
@@ -97,7 +138,7 @@ export class PostgresRepository implements Repository {
   }
 
   async listUsers(tenantId: string): Promise<User[]> {
-    return this.q<User>(
+    return this.q<User>(tenantId, 
       `select id, tenant_id as "tenantId", email, display_name as "displayName",
               roles, status
          from users where tenant_id = $1 order by email`,
@@ -106,7 +147,7 @@ export class PostgresRepository implements Repository {
   }
 
   async createJob(job: Job): Promise<void> {
-    await this.q(
+    await this.q(job.tenantId, 
       `insert into jobs (id, tenant_id, agent_id, agent_version, requested_by,
                          origin, input, created_at)
        values ($1,$2,$3,$4,$5,$6,$7,$8)`,
@@ -116,7 +157,7 @@ export class PostgresRepository implements Repository {
   }
 
   async getJob(tenantId: string, jobId: string): Promise<Job | null> {
-    const rows = await this.q<Job>(
+    const rows = await this.q<Job>(tenantId, 
       `select id, tenant_id as "tenantId", agent_id as "agentId",
               agent_version as "agentVersion", requested_by as "requestedBy",
               origin, input, created_at as "createdAt"
@@ -127,7 +168,7 @@ export class PostgresRepository implements Repository {
   }
 
   async createRun(run: Run): Promise<void> {
-    await this.q(
+    await this.q(run.tenantId, 
       `insert into runs (id, job_id, tenant_id, status, cursor, started_at,
                          ended_at, tokens_used, cost_jpy, failure_reason)
        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
@@ -137,7 +178,7 @@ export class PostgresRepository implements Repository {
   }
 
   async getRun(tenantId: string, runId: string): Promise<Run | null> {
-    const rows = await this.q<Run>(
+    const rows = await this.q<Run>(tenantId, 
       `select id, job_id as "jobId", tenant_id as "tenantId", status, cursor,
               started_at as "startedAt", ended_at as "endedAt",
               tokens_used as "tokensUsed", cost_jpy as "costJpy",
@@ -149,7 +190,7 @@ export class PostgresRepository implements Repository {
   }
 
   async updateRun(run: Run): Promise<void> {
-    await this.q(
+    await this.q(run.tenantId, 
       `update runs set status=$3, cursor=$4, ended_at=$5, tokens_used=$6,
                        cost_jpy=$7, failure_reason=$8
          where tenant_id=$1 and id=$2`,
@@ -159,7 +200,7 @@ export class PostgresRepository implements Repository {
   }
 
   async listRuns(tenantId: string, limit: number): Promise<Run[]> {
-    return this.q<Run>(
+    return this.q<Run>(tenantId, 
       `select id, job_id as "jobId", tenant_id as "tenantId", status, cursor,
               started_at as "startedAt", ended_at as "endedAt",
               tokens_used as "tokensUsed", cost_jpy as "costJpy",
@@ -173,7 +214,7 @@ export class PostgresRepository implements Repository {
     tenantId: string,
     opts: { limit: number; requestedBy?: string },
   ): Promise<{ run: Run; job: Job }[]> {
-    const rows = await this.q<{ run: Run; job: Job }>(
+    const rows = await this.q<{ run: Run; job: Job }>(tenantId, 
       `select json_build_object(
                 'id', r.id, 'jobId', r.job_id, 'tenantId', r.tenant_id, 'status', r.status,
                 'cursor', r.cursor, 'startedAt', r.started_at, 'endedAt', r.ended_at,
@@ -198,7 +239,7 @@ export class PostgresRepository implements Repository {
   async usageByAgent(
     tenantId: string,
   ): Promise<{ agentId: string; runs: number; tokens: number; costJpy: number }[]> {
-    return this.q(
+    return this.q(tenantId, 
       `select j.agent_id as "agentId", count(*)::int as runs,
               coalesce(sum(r.tokens_used), 0)::int as tokens,
               coalesce(sum(r.cost_jpy), 0)::float8 as "costJpy"
@@ -217,22 +258,21 @@ export class PostgresRepository implements Repository {
    * 同じ実行を二重に処理しない（仕様書 第15章 二重実行防止）。
    */
   async claimNextRun(): Promise<Run | null> {
+    // テナントを横断して待ち行列を見るのはこの関数だけであり、
+    // データベース側の関数（security definer）に閉じ込めている
     const rows = await this.q<Run>(
-      `update runs set status = 'running'
-         where id = (
-           select id from runs where status = 'queued'
-            order by started_at asc for update skip locked limit 1
-         )
-       returning id, job_id as "jobId", tenant_id as "tenantId", status, cursor,
-                 started_at as "startedAt", ended_at as "endedAt",
-                 tokens_used as "tokensUsed", cost_jpy as "costJpy",
-                 failure_reason as "failureReason"`,
+      null,
+      `select id, job_id as "jobId", tenant_id as "tenantId", status, cursor,
+              started_at as "startedAt", ended_at as "endedAt",
+              tokens_used as "tokensUsed", cost_jpy as "costJpy",
+              failure_reason as "failureReason"
+         from m2o_claim_next_run()`,
     );
     return rows[0] ?? null;
   }
 
-  async appendRunStep(step: RunStep): Promise<void> {
-    await this.q(
+  async appendRunStep(tenantId: string, step: RunStep): Promise<void> {
+    await this.q(tenantId, 
       `insert into run_steps (id, run_id, seq, step_id, kind, status, input,
                               output, started_at, ended_at)
        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
@@ -242,15 +282,15 @@ export class PostgresRepository implements Repository {
     );
   }
 
-  async updateRunStep(step: RunStep): Promise<void> {
-    await this.q(
+  async updateRunStep(tenantId: string, step: RunStep): Promise<void> {
+    await this.q(tenantId, 
       `update run_steps set status=$2, output=$3, ended_at=$4 where id=$1`,
       [step.id, step.status, JSON.stringify(step.output ?? null), step.endedAt],
     );
   }
 
   async listRunSteps(tenantId: string, runId: string): Promise<RunStep[]> {
-    return this.q<RunStep>(
+    return this.q<RunStep>(tenantId, 
       `select s.id, s.run_id as "runId", s.seq, s.step_id as "stepId", s.kind,
               s.status, s.input, s.output, s.started_at as "startedAt",
               s.ended_at as "endedAt"
@@ -261,7 +301,7 @@ export class PostgresRepository implements Repository {
   }
 
   async getRunStepById(tenantId: string, runStepId: string): Promise<RunStep | null> {
-    const rows = await this.q<RunStep>(
+    const rows = await this.q<RunStep>(tenantId, 
       `select s.id, s.run_id as "runId", s.seq, s.step_id as "stepId", s.kind,
               s.status, s.input, s.output, s.started_at as "startedAt",
               s.ended_at as "endedAt"
@@ -273,7 +313,7 @@ export class PostgresRepository implements Repository {
   }
 
   async createApproval(a: Approval): Promise<void> {
-    await this.q(
+    await this.q(a.tenantId, 
       `insert into approvals (id, run_step_id, tenant_id, approver_role, approver_user_id,
                               present, decision, decided_by, comment, decided_at, created_at)
        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
@@ -283,7 +323,7 @@ export class PostgresRepository implements Repository {
   }
 
   async getApproval(tenantId: string, id: string): Promise<Approval | null> {
-    const rows = await this.q<Approval>(
+    const rows = await this.q<Approval>(tenantId, 
       `select id, run_step_id as "runStepId", tenant_id as "tenantId",
               approver_role as "approverRole",
               approver_user_id as "approverUserId", present, decision,
@@ -296,7 +336,7 @@ export class PostgresRepository implements Repository {
   }
 
   async listPendingApprovals(tenantId: string): Promise<Approval[]> {
-    return this.q<Approval>(
+    return this.q<Approval>(tenantId, 
       `select id, run_step_id as "runStepId", tenant_id as "tenantId",
               approver_role as "approverRole",
               approver_user_id as "approverUserId", present, decision,
@@ -309,7 +349,7 @@ export class PostgresRepository implements Repository {
   }
 
   async updateApproval(a: Approval): Promise<void> {
-    await this.q(
+    await this.q(a.tenantId, 
       `update approvals set decision=$3, decided_by=$4, comment=$5, decided_at=$6
          where tenant_id=$1 and id=$2`,
       [a.tenantId, a.id, a.decision, a.decidedBy, a.comment, a.decidedAt],
@@ -317,7 +357,7 @@ export class PostgresRepository implements Repository {
   }
 
   async createArtifact(a: Artifact): Promise<void> {
-    await this.q(
+    await this.q(a.tenantId, 
       `insert into artifacts (id, run_id, tenant_id, kind, title, body, created_at)
        values ($1,$2,$3,$4,$5,$6,$7)`,
       [a.id, a.runId, a.tenantId, a.kind, a.title, a.body, a.createdAt],
@@ -325,7 +365,7 @@ export class PostgresRepository implements Repository {
   }
 
   async listArtifacts(tenantId: string, runId: string): Promise<Artifact[]> {
-    return this.q<Artifact>(
+    return this.q<Artifact>(tenantId, 
       `select id, run_id as "runId", tenant_id as "tenantId", kind, title, body,
               created_at as "createdAt"
          from artifacts where tenant_id = $1 and run_id = $2 order by created_at`,
@@ -348,7 +388,7 @@ export class PostgresRepository implements Repository {
     const terms = tokenize(query);
     if (terms.length === 0) return [];
     const patterns = terms.map((t) => `%${t}%`);
-    return this.q<KnowledgeHit>(
+    return this.q<KnowledgeHit>(tenantId, 
       `select id, title, body, source, compartment
          from knowledge_items
         where tenant_id = $1
@@ -360,7 +400,7 @@ export class PostgresRepository implements Repository {
   }
 
   async appendAudit(e: AuditEvent): Promise<void> {
-    await this.q(
+    await this.q(e.tenantId, 
       `insert into audit_events (id, tenant_id, actor_type, actor_id, action,
                                  target_type, target_id, detail, occurred_at)
        values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
@@ -370,7 +410,7 @@ export class PostgresRepository implements Repository {
   }
 
   async listAudit(tenantId: string, limit: number): Promise<AuditEvent[]> {
-    return this.q<AuditEvent>(
+    return this.q<AuditEvent>(tenantId, 
       `select id, tenant_id as "tenantId", actor_type as "actorType",
               actor_id as "actorId", action, target_type as "targetType",
               target_id as "targetId", detail, occurred_at as "occurredAt"
@@ -381,7 +421,7 @@ export class PostgresRepository implements Repository {
   }
 
   async createNotification(n: Notification): Promise<void> {
-    await this.q(
+    await this.q(n.tenantId, 
       `insert into notifications (id, tenant_id, user_id, kind, title, body, run_id,
                                   read_at, created_at)
        values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
@@ -390,7 +430,7 @@ export class PostgresRepository implements Repository {
   }
 
   async listNotifications(tenantId: string, userId: string, limit: number): Promise<Notification[]> {
-    return this.q<Notification>(
+    return this.q<Notification>(tenantId, 
       `select id, tenant_id as "tenantId", user_id as "userId", kind, title, body,
               run_id as "runId", read_at as "readAt", created_at as "createdAt"
          from notifications where tenant_id = $1 and user_id = $2
@@ -400,7 +440,7 @@ export class PostgresRepository implements Repository {
   }
 
   async markNotificationRead(tenantId: string, userId: string, id: string): Promise<boolean> {
-    const rows = await this.q<{ id: string }>(
+    const rows = await this.q<{ id: string }>(tenantId, 
       `update notifications set read_at = coalesce(read_at, now())
         where tenant_id = $1 and user_id = $2 and id = $3 returning id`,
       [tenantId, userId, id],
@@ -409,7 +449,7 @@ export class PostgresRepository implements Repository {
   }
 
   async createSchedule(s: Schedule): Promise<void> {
-    await this.q(
+    await this.q(s.tenantId, 
       `insert into schedules (id, tenant_id, user_id, agent_id, agent_version, input, rule,
                               timezone, enabled, next_run_at, last_run_at, created_by, created_at)
        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
@@ -420,7 +460,7 @@ export class PostgresRepository implements Repository {
   }
 
   async listSchedules(tenantId: string, userId: string | null): Promise<Schedule[]> {
-    return this.q<Schedule>(
+    return this.q<Schedule>(tenantId, 
       `select ${SCHEDULE_COLUMNS} from schedules
         where tenant_id = $1 and ($2::text is null or user_id = $2)
         order by created_at`,
@@ -429,7 +469,7 @@ export class PostgresRepository implements Repository {
   }
 
   async getSchedule(tenantId: string, id: string): Promise<Schedule | null> {
-    const rows = await this.q<Schedule>(
+    const rows = await this.q<Schedule>(tenantId, 
       `select ${SCHEDULE_COLUMNS} from schedules where tenant_id = $1 and id = $2`,
       [tenantId, id],
     );
@@ -437,7 +477,7 @@ export class PostgresRepository implements Repository {
   }
 
   async updateSchedule(s: Schedule): Promise<void> {
-    await this.q(
+    await this.q(s.tenantId, 
       `update schedules set input=$3, rule=$4, timezone=$5, enabled=$6, next_run_at=$7,
                             last_run_at=$8
          where tenant_id=$1 and id=$2`,
@@ -450,36 +490,34 @@ export class PostgresRepository implements Repository {
     now: Date,
     computeNext: (s: Schedule) => string,
   ): Promise<Schedule | null> {
-    const client = await this.pool.connect();
-    try {
-      await client.query('begin');
-      const res = await client.query<Schedule>(
-        `select ${SCHEDULE_COLUMNS} from schedules
-          where enabled and next_run_at <= $1
-          order by next_run_at for update skip locked limit 1`,
-        [now.toISOString()],
-      );
-      const due = res.rows[0];
-      if (!due) {
-        await client.query('commit');
-        return null;
-      }
-      await client.query(
-        `update schedules set next_run_at = $2, last_run_at = $3 where id = $1`,
-        [due.id, computeNext(due), now.toISOString()],
-      );
-      await client.query('commit');
-      return due;
-    } catch (err) {
-      await client.query('rollback');
-      throw err;
-    } finally {
-      client.release();
+    // 候補の一覧だけはテナントを横断して取る（security definer の関数）。
+    // 確保と更新は、そのテナントの範囲のトランザクションで行う
+    const candidates = await this.q<{ id: string; tenant_id: string }>(
+      null, `select id, tenant_id from m2o_due_schedules($1, 20)`, [now.toISOString()],
+    );
+    for (const c of candidates) {
+      const claimed = await this.inTenant(c.tenant_id, async (client) => {
+        const res = await client.query<Schedule>(
+          `select ${SCHEDULE_COLUMNS} from schedules
+            where id = $1 and enabled and next_run_at <= $2
+            for update skip locked`,
+          [c.id, now.toISOString()],
+        );
+        const due = res.rows[0];
+        if (!due) return null;
+        await client.query(
+          `update schedules set next_run_at = $2, last_run_at = $3 where id = $1`,
+          [due.id, computeNext(due), now.toISOString()],
+        );
+        return due;
+      });
+      if (claimed) return claimed;
     }
+    return null;
   }
 
   async createSession(s: Session): Promise<void> {
-    await this.q(
+    await this.q(s.tenantId, 
       `insert into sessions (id, tenant_id, user_id, csrf_token, provider, user_agent,
                              created_at, last_seen_at, expires_at, revoked_at)
        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
@@ -488,8 +526,8 @@ export class PostgresRepository implements Repository {
     );
   }
 
-  async findActiveSession(id: string, now: Date): Promise<Session | null> {
-    const rows = await this.q<Session>(
+  async findActiveSession(tenantId: string, id: string, now: Date): Promise<Session | null> {
+    const rows = await this.q<Session>(tenantId, 
       `select id, tenant_id as "tenantId", user_id as "userId", csrf_token as "csrfToken",
               provider, user_agent as "userAgent", created_at as "createdAt",
               last_seen_at as "lastSeenAt", expires_at as "expiresAt",
@@ -500,12 +538,12 @@ export class PostgresRepository implements Repository {
     return rows[0] ?? null;
   }
 
-  async touchSession(id: string, now: Date): Promise<void> {
-    await this.q(`update sessions set last_seen_at = $2 where id = $1`, [id, now.toISOString()]);
+  async touchSession(tenantId: string, id: string, now: Date): Promise<void> {
+    await this.q(tenantId, `update sessions set last_seen_at = $2 where id = $1`, [id, now.toISOString()]);
   }
 
-  async revokeSession(id: string, now: Date): Promise<void> {
-    await this.q(
+  async revokeSession(tenantId: string, id: string, now: Date): Promise<void> {
+    await this.q(tenantId, 
       `update sessions set revoked_at = coalesce(revoked_at, $2) where id = $1`,
       [id, now.toISOString()],
     );

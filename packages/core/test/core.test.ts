@@ -31,8 +31,8 @@ class MemoryRepo {
   async getRun(t: string, id: string) { return this.runs.find((r) => r.tenantId === t && r.id === id) ?? null; }
   async updateRun(run: Run) { this.runs = this.runs.map((r) => (r.id === run.id ? run : r)); }
   async listRunSteps(_t: string, runId: string) { return this.steps.filter((s) => s.runId === runId); }
-  async appendRunStep(s: RunStep) { this.steps.push(s); }
-  async updateRunStep(s: RunStep) { this.steps = this.steps.map((x) => (x.id === s.id ? s : x)); }
+  async appendRunStep(_t: string, s: RunStep) { this.steps.push(s); }
+  async updateRunStep(_t: string, s: RunStep) { this.steps = this.steps.map((x) => (x.id === s.id ? s : x)); }
   async getRunStepById(_t: string, id: string) { return this.steps.find((s) => s.id === id) ?? null; }
   async createApproval(a: Approval) { this.approvals.push(a); }
   async getApproval(t: string, id: string) { return this.approvals.find((a) => a.tenantId === t && a.id === id) ?? null; }

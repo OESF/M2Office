@@ -83,12 +83,12 @@ export function authRoute(deps: AppDeps) {
 
   /** ログアウト。ログイン状態を失効させ、Cookie を消す。 */
   app.post('/logout', async (c) => {
-    const session = await readSession(c, deps.repo);
+    const session = await readSession(c, deps.repo, c.get('tenant').id);
     if (session) {
       if (c.req.header('x-csrf-token') !== session.csrfToken) {
         return c.json({ error: '画面を再読み込みしてから、もう一度お試しください' }, 403);
       }
-      await deps.repo.revokeSession(session.id, new Date());
+      await deps.repo.revokeSession(session.tenantId, session.id, new Date());
       await deps.repo.appendAudit({
         id: randomUUID(), tenantId: session.tenantId, actorType: 'user', actorId: session.userId,
         action: 'auth.logout', targetType: 'session', targetId: session.id.slice(0, 16),

@@ -145,7 +145,7 @@ export class RunEngine {
     await repo.updateApproval({
       ...approval, decision, decidedBy, comment, decidedAt: now,
     });
-    await repo.updateRunStep({
+    await repo.updateRunStep(tenantId, {
       ...stepRow,
       status: decision === 'approved' ? 'succeeded' : 'rejected',
       output: { decision, decidedBy, comment },
@@ -182,7 +182,7 @@ export class RunEngine {
       kind: 'approval', status: 'awaiting', input: { present: step.present },
       output: null, startedAt: now, endedAt: null,
     };
-    await repo.appendRunStep(runStep);
+    await repo.appendRunStep(run.tenantId, runStep);
 
     const approval: Approval = {
       id: randomUUID(), runStepId: runStep.id, tenantId: run.tenantId,
@@ -221,7 +221,7 @@ export class RunEngine {
       kind: 'agent', status: 'running', input: { instruction: step.instruction },
       output: null, startedAt: now, endedAt: null,
     };
-    await repo.appendRunStep(runStep);
+    await repo.appendRunStep(run.tenantId, runStep);
 
     try {
       const tools = registry.allowed(def.tools);
@@ -271,7 +271,7 @@ export class RunEngine {
       }
 
       const output = { text: res.text, tools: toolResults };
-      await repo.updateRunStep({
+      await repo.updateRunStep(run.tenantId, {
         ...runStep, status: 'succeeded', output, endedAt: new Date().toISOString(),
       });
 
@@ -282,7 +282,7 @@ export class RunEngine {
       return { kind: 'ok', tokensUsed: res.tokensUsed };
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
-      await repo.updateRunStep({
+      await repo.updateRunStep(run.tenantId, {
         ...runStep, status: 'failed', output: { error: reason },
         endedAt: new Date().toISOString(),
       });

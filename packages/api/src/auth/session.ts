@@ -62,11 +62,19 @@ export async function issueSession(
   return session;
 }
 
-/** Cookie から有効なログイン状態を探す。無ければ `null`。 */
-export async function readSession(c: Context, repo: Repository): Promise<Session | null> {
+/**
+ * Cookie から有効なログイン状態を探す。無ければ `null`。
+ *
+ * @remarks 探すのは要求先のテナントの中だけである。他社で発行された Cookie は見つからない。
+ */
+export async function readSession(
+  c: Context,
+  repo: Repository,
+  tenantId: string,
+): Promise<Session | null> {
   const token = getCookie(c, SESSION_COOKIE);
   if (!token) return null;
-  return repo.findActiveSession(sessionIdOf(token), new Date());
+  return repo.findActiveSession(tenantId, sessionIdOf(token), new Date());
 }
 
 /** Cookie を消す。ログイン状態の失効は呼び出し側で行う。 */

@@ -23,7 +23,8 @@ function nextJst(weekday, hour, minute) {
   return new Date(now + 86_400_000).toISOString();
 }
 
-const url = process.env.DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office';
+// 初期データはテナントを横断して入れるため、所有者のロールで接続する
+const url = process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office';
 const c = new pg.Client({ connectionString: url });
 await c.connect();
 

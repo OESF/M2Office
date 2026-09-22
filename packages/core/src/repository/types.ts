@@ -39,8 +39,8 @@ export interface Repository {
   /** 実行待ちのジョブを 1 件取り出して `running` にする（ワーカー用）。 */
   claimNextRun(): Promise<Run | null>;
 
-  appendRunStep(step: RunStep): Promise<void>;
-  updateRunStep(step: RunStep): Promise<void>;
+  appendRunStep(tenantId: string, step: RunStep): Promise<void>;
+  updateRunStep(tenantId: string, step: RunStep): Promise<void>;
   listRunSteps(tenantId: string, runId: string): Promise<RunStep[]>;
   /** ステップ ID から 1 件取得する。テナントを跨いだ取得は `null` を返す。 */
   getRunStepById(tenantId: string, runStepId: string): Promise<RunStep | null>;
@@ -86,9 +86,9 @@ export interface Repository {
 
   createSession(s: Session): Promise<void>;
   /** 有効なログイン状態を返す。失効・期限切れは `null`。 */
-  findActiveSession(id: string, now: Date): Promise<Session | null>;
-  touchSession(id: string, now: Date): Promise<void>;
-  revokeSession(id: string, now: Date): Promise<void>;
+  findActiveSession(tenantId: string, id: string, now: Date): Promise<Session | null>;
+  touchSession(tenantId: string, id: string, now: Date): Promise<void>;
+  revokeSession(tenantId: string, id: string, now: Date): Promise<void>;
 
   /** 監査ログを追記する。更新と削除は用意しない（仕様書 第16.6節）。 */
   appendAudit(event: AuditEvent): Promise<void>;

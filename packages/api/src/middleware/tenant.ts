@@ -67,7 +67,7 @@ export function authenticate(deps: AppDeps) {
   return async (c: Context<AppEnv>, next: Next) => {
     const tenant = c.get('tenant');
 
-    const session = await readSession(c, deps.repo);
+    const session = await readSession(c, deps.repo, tenant.id);
     if (session) {
       if (session.tenantId !== tenant.id) {
         return c.json({ error: 'ログインが必要です', login: true }, 401);
@@ -79,7 +79,7 @@ export function authenticate(deps: AppDeps) {
       if (!SAFE_METHODS.has(c.req.method) && c.req.header('x-csrf-token') !== session.csrfToken) {
         return c.json({ error: '画面を再読み込みしてから、もう一度お試しください' }, 403);
       }
-      await deps.repo.touchSession(session.id, new Date());
+      await deps.repo.touchSession(tenant.id, session.id, new Date());
       c.set('ctx', { tenant, user });
       c.set('auth', { method: 'session', sessionId: session.id, csrfToken: session.csrfToken });
       return next();
