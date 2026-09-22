@@ -1312,6 +1312,33 @@ console.log('\n■ 32. Google から取得したデータの保持（第14.3.2�
   await setDays(7);
 }
 
+console.log('\n■ 33. 許可がなくなったときの業務の扱い（第6.5.2.1節）');
+{
+  // 一般利用者が、承認待ちの議事録（Google のツールを使う）と、社内ナレッジ Q&A（使わない）を依頼する
+  const { body: m } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: 'minutes', input: { title: '許可の確認', transcript: 'A 案で決定。', space: 'general' } }) }, 'member');
+  await waitFor('a', m.runId, ['awaiting_approval', 'failed', 'completed'], 20000, 'member');
+
+  const { body: impact } = await call('a', '/v1/me/google/impact', {}, 'member');
+  impact.runs?.some((r) => r.runId === m.runId && r.agentName === '議事録作成・共有')
+    ? ok(`取り消す前に、止まる業務を示す（${impact.runs.length} 件、定時実行 ${impact.schedules} 件）`) : ng('止まる業務を示さない', JSON.stringify(impact));
+  const { body: clientImpact, status: ciStatus } = await call('a', '/v1/admin/connections/google/impact');
+  ciStatus === 200 && typeof clientImpact.users === 'number' ? ok(`OAuth クライアントを消す前に、影響する人数を示す（${clientImpact.users} 人）`) : ng(`影響を示さない（${ciStatus}）`);
+
+  // 利用を停止すると、Google を使う動いている途中の業務が止まる
+  const { body: users } = await call('a', '/v1/admin/users');
+  const memberId = (users.items ?? users).find((u) => u.email === 'member@alpha.example.jp')?.id;
+  const { body: patched } = await call('a', `/v1/admin/users/${memberId}`, { method: 'PATCH', body: JSON.stringify({ status: 'disabled' }) });
+  const { body: after } = await call('a', `/v1/runs/${m.runId}`);
+  const { body: tray } = await call('a', '/v1/approvals');
+  const stillPending = (tray.items ?? []).some((a) => (after.steps ?? []).some((st) => st.id === a.runStepId));
+  await call('a', `/v1/admin/users/${memberId}`, { method: 'PATCH', body: JSON.stringify({ status: 'active' }) });
+  const { body: notes } = await call('a', '/v1/notifications', {}, 'member');
+  after.run?.status === 'cancelled' && /利用が停止/.test(after.run.failureReason ?? '') && !stillPending && patched.stoppedRuns >= 1
+    ? ok('利用を停止すると、Google を使う承認待ちの業務を止め、承認トレイから外す') : ng('業務が止まらない', JSON.stringify({ status: after.run?.status, stillPending, stopped: patched.stoppedRuns }));
+  (notes.items ?? notes).some((n) => n.title === '業務を止めました' && n.runId === m.runId)
+    ? ok('止めたことを依頼した本人に知らせる') : ng('本人に知らせない');
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

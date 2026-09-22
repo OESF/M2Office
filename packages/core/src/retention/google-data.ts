@@ -156,6 +156,15 @@ export class GoogleDataRetention {
     return n;
   }
 
+  /**
+   * 1 つの実行の中身を、期間を待たずに消す（止めた実行の後から書き込まれた中身を含めて消すため）。
+   *
+   * @returns Google のツールを使っていて、中身を消したら `true`
+   */
+  async purgeRun(run: Run, reason: RedactedOutput['reason'], now: Date): Promise<boolean> {
+    return this.process(run, reason, now);
+  }
+
   /** 1 つの実行を処理する。Google のツールを使っていれば中身を消す。 */
   private async process(run: Run, reason: RedactedOutput['reason'], now: Date): Promise<boolean> {
     const steps = await this.deps.repo.listRunSteps(run.tenantId, run.id);

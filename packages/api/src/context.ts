@@ -9,7 +9,7 @@
  */
 
 import {
-  PostgresRepository, StubLlmProvider, OpenAiCompatibleProvider, ToolRegistry, BUILTIN_TOOLS, GoogleDataRetention,
+  PostgresRepository, StubLlmProvider, OpenAiCompatibleProvider, ToolRegistry, BUILTIN_TOOLS, GoogleDataRetention, GoogleRevocation, agentUsesGoogle,
   RunEngine, Secretary, OFFICIAL_AGENTS, buildConnector, LocalFileStore,
   createLoggerFromEnv, HelpCatalog, parseArticle, ExtensionHub, HttpMcpClient, loadExtensions,
   GeminiResearchProvider, MockResearchProvider, TenantAiResolver, secretBoxFromEnv, type ResearchProvider,
@@ -39,6 +39,8 @@ export interface AppDeps {
   help: HelpCatalog;
   /** Google から取得したデータの保持（仕様書 第14.3.2節）。連携の解除のときに中身を消す。 */
   retention: GoogleDataRetention;
+  /** Google の許可がなくなったとき（取り消し・OAuth クライアントの削除・利用者の停止）の後始末（仕様書 第6.5.2.1節）。 */
+  revocation: GoogleRevocation;
   /** 拡張機能（公式の配布元と、会社が取り込んだもの）。会社ごとの見え方は {@link tenantView} で引く。 */
   hub: ExtensionHub;
   /** 会社から見た拡張機能・業務エージェント・ツールの全体（仕様書 第12.10節）。 */
@@ -106,6 +108,8 @@ export function buildDeps(): AppDeps {
   const isAvailable = async (tenantId: string, agentId: string) => (await tenantView(tenantId)).isAvailable(agentId);
 
   const files = new LocalFileStore(fileStorageDir());
+  // Google のデータを扱うツールは、内蔵のツールのうち権限（google）を宣言しているもの（第9.4.4節）
+  const retentionRef = new GoogleDataRetention({ repo, isGoogleTool: (name) => !!registry.get(name)?.google, logger: log });
   const research = buildResearch();
   const { box, devKey } = secretBoxFromEnv();
   if (devKey) log.warn('M2OFFICE_SECRET_KEY が未設定のため、開発用の固定の鍵で秘密の値を暗号化しています（本番では起動しません）');
@@ -121,13 +125,24 @@ export function buildDeps(): AppDeps {
     resolveDefinition: async (id, version, tenantId) => (await tenantView(tenantId)).resolve(id, version),
     registryFor: async (tenantId) => (await tenantView(tenantId)).registry,
     isAvailable,
+    // 止めた実行に後から書き込まれた中身も消す（仕様書 第6.5.2.1節）
+    onCancelled: async (run) => { await retentionRef.purgeRun(run, 'disconnect', new Date()); },
   });
   const help = new HelpCatalog(loadHelpArticles(helpDir(), log), OFFICIAL_AGENTS, registry);
   const secretary = new Secretary({ repo, llm, connector, agents: OFFICIAL_AGENTS, help, agentsFor, llmFor: (t) => ai.llmFor(t) });
   // Google のデータを扱うツールは、内蔵のツールのうち権限（google）を宣言しているもの（第9.4.4節）
-  const retention = new GoogleDataRetention({ repo, isGoogleTool: (name) => !!registry.get(name)?.google, logger: log });
+  const retention = retentionRef;
+  // 許可がなくなったときの後始末（仕様書 第6.5.2.1節）
+  const revocation = new GoogleRevocation({
+    repo, logger: log,
+    usesGoogle: async (tenantId, agentId, version) => {
+      const view = await tenantView(tenantId);
+      const def = view.resolve(agentId, version);
+      return !!def && agentUsesGoogle(def, view.registry);
+    },
+  });
   return {
-    repo, llm, connector, files, registry, engine, secretary, auth: loadAuthConfig(), log, help, retention,
+    repo, llm, connector, files, registry, engine, secretary, auth: loadAuthConfig(), log, help, retention, revocation,
     hub, tenantView, agentsFor, canUse, isAvailable, box, ai,
     oauth: {
       // Google は http の戻り先を localhost にしか認めないため、開発では localhost の画面の転送を通す（ADR-0007）

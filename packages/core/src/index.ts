@@ -24,6 +24,7 @@ export type {
 export { PostgresRepository } from './repository/postgres.js';
 export { canViewRun, type RunViewer } from './engine/run-access.js';
 export * from './retention/google-data.js';
+export * from './retention/revocation.js';
 export * from './knowledge/index.js';
 
 export { buildConnector, MockWorkspaceConnector } from './connectors/index.js';
@@ -65,7 +66,7 @@ export { RunEngine, estimateCostJpy } from './engine/run-engine.js';
 export type { AdvanceResult, RunEngineDeps } from './engine/run-engine.js';
 export { validateDefinition } from './engine/validate.js';
 export { enqueueJob } from './engine/enqueue.js';
-export { Scheduler } from './scheduler/scheduler.js';
+export { Scheduler, SCHEDULE_SKIP_TITLE } from './scheduler/scheduler.js';
 export { nextRunAt, validateRule, describeRule } from './scheduler/rule.js';
 export { parseToolCalls } from './engine/tool-protocol.js';
 export {

@@ -198,9 +198,16 @@ export function adminRoute(deps: AppDeps) {
     }
 
     await deps.repo.updateUser(next);
+    // 利用を停止したら、その人の Google を使う動いている途中の業務を止める（仕様書 第6.5.2.1節）
+    let stoppedRuns = 0;
+    if (target.status === 'active' && next.status === 'disabled') {
+      const now = new Date();
+      stoppedRuns = (await deps.revocation.stopUserRuns(tenant.id, next.id, 'user-suspended', now)).length;
+      await deps.retention.purgeUser(tenant.id, next.id, now);
+    }
     await audit(deps, tenant.id, user.id, 'user.update', 'user', next.id,
-      { roles: next.roles, status: next.status });
-    return c.json(next);
+      { roles: next.roles, status: next.status, ...(stoppedRuns > 0 ? { stoppedRuns } : {}) });
+    return c.json({ ...next, stoppedRuns });
   });
 
   /** 組織知識の一覧と、区画の選択肢（第6.6.6節）。 */

@@ -368,7 +368,9 @@ export const api = {
   myGoogle: () => call<MyGoogle>('/me/google'),
   connectGoogle: () => call<{ url: string }>('/me/google/connect', { method: 'POST' }),
   checkGoogle: () => call<{ ok: boolean; error?: string }>('/me/google/check', { method: 'POST' }),
-  disconnectGoogle: () => call<{ ok: true; revokedAtGoogle: boolean }>('/me/google', { method: 'DELETE' }),
+  disconnectGoogle: () => call<{ ok: true; revokedAtGoogle: boolean; stoppedRuns: number; purgedRuns: number }>('/me/google', { method: 'DELETE' }),
+  /** 取り消すと止まる業務と、飛ばす定時実行の数（仕様書 第6.5.2.1節）。 */
+  googleImpact: () => call<{ runs: { runId: string; agentName: string; status: string }[]; schedules: number }>('/me/google/impact'),
   myUsage: () => call<{
     seat: string; thisMonth: { runs: number; costJpy: number }; availableAgents: number;
     compartments: string[]; groups: string[]; plan: null;
@@ -396,7 +398,9 @@ export const api = {
       call<{ ok: boolean; ms: number; error?: string; source: string; model: string }>('/admin/connections/gemini/test', { method: 'POST', body: JSON.stringify({ kind }) }),
     saveGoogleClient: (v: { clientId: string; clientSecret?: string }) =>
       call('/admin/connections/google', { method: 'PUT', body: JSON.stringify(v) }),
-    deleteGoogleClient: () => call('/admin/connections/google', { method: 'DELETE' }),
+    deleteGoogleClient: () => call<{ ok: true; users: number; stoppedRuns: number }>('/admin/connections/google', { method: 'DELETE' }),
+    /** OAuth クライアントを削除する（クライアント ID を替える）と影響する人数と業務の数（仕様書 第6.5.2.1節）。 */
+    googleClientImpact: () => call<{ users: number; runs: number }>('/admin/connections/google/impact'),
     googlePermissions: () => call<{ items: { scope: string; level: string; tools: string[]; agents: string[] }[] }>('/admin/google-permissions'),
     connectors: () => call<{ workspace: { source: string; label: string }; llm: { provider: string } }>(
       '/admin/connectors',

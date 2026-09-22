@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react';
 import type { UserSettings } from '@m2office/shared';
 import { api, describeError, type AgentSummary, type Me, type MyGoogle } from './api.js';
 import { useTheme, type ThemeChoice } from './theme.js';
+import { statusLabel } from './components.js';
 
 /**
  * 個人設定（仕様書 第6.5節）。左ペインの最下部の利用者のカードの歯車のボタンから開く。
@@ -241,9 +242,9 @@ function GoogleSettings() {
       setBusy(false);
     }
   };
-  const act = async (fn: () => Promise<unknown>, done: string) => {
+  const act = async <R,>(fn: () => Promise<R>, done: string | ((r: R) => string)) => {
     setBusy(true); setMsg(null);
-    try { await fn(); setMsg({ ok: true, text: done }); await load(); }
+    try { const r = await fn(); setMsg({ ok: true, text: typeof done === 'function' ? done(r) : done }); await load(); }
     catch (e) { setMsg({ ok: false, text: describeError(e) }); }
     finally { setBusy(false); }
   };
@@ -278,11 +279,20 @@ function GoogleSettings() {
                   const r = await api.checkGoogle();
                   if (!r.ok) throw new Error(r.error ?? '確かめられませんでした');
                 }, '許可の状況を確かめました')}>許可の状況を確かめる</button>
-                <button className="btn danger" disabled={busy} onClick={() => {
-                  if (confirm('Google との接続を取り消しますか。メールや予定を扱う業務が使えなくなります。')) {
-                    void act(() => api.disconnectGoogle(), '接続を取り消しました');
+                <button className="btn danger" disabled={busy} onClick={() => void (async () => {
+                  // 取り消す前に、止まる業務と飛ばす定時実行を示して確かめる（仕様書 第6.5.2.1節）
+                  const impact = await api.googleImpact().catch(() => null);
+                  const lines = ['Google との接続を取り消しますか。許可はまとめて取り消されます。メールや予定を扱う業務が使えなくなります。'];
+                  if (impact === null) lines.push('', '止まる業務を確かめられませんでした。');
+                  else {
+                    if (impact.runs.length > 0) lines.push('', `次の ${impact.runs.length} 件の業務が止まります:`, ...impact.runs.map((r) => `・${r.agentName}（${statusLabel(r.status)}）`));
+                    if (impact.schedules > 0) lines.push('', `定時実行 ${impact.schedules} 件は、接続し直すまで飛ばします（設定は残ります）。`);
                   }
-                }}>接続を取り消す</button>
+                  lines.push('', '業務が読んだメールや文書の中身も、すぐに消します。一部の許可だけを外したいときは、取り消してから、必要な許可だけで接続し直してください。');
+                  if (!confirm(lines.join('\n'))) return;
+                  await act(() => api.disconnectGoogle(),
+                    (r) => (r.stoppedRuns > 0 ? `接続を取り消し、業務 ${r.stoppedRuns} 件を止めました` : '接続を取り消しました'));
+                })()}>接続を取り消す</button>
               </>
             )}
           </div>

@@ -11,7 +11,7 @@
 
 import {
   PostgresRepository, StubLlmProvider, OpenAiCompatibleProvider, ToolRegistry, BUILTIN_TOOLS,
-  RunEngine, Scheduler, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention,
+  RunEngine, Scheduler, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, agentUsesGoogle,
   loadExtensions, OFFICIAL_AGENTS, GeminiResearchProvider, MockResearchProvider, TenantAiResolver, secretBoxFromEnv,
   type LlmProvider,
 } from '@m2office/core';
@@ -63,14 +63,24 @@ const ai = new TenantAiResolver({
   },
   baseUrl: process.env['GEMINI_BASE_URL'] ?? 'https://generativelanguage.googleapis.com/v1beta/openai',
 });
+// Google から取得したデータの保持（仕様書 第14.3.2節）。Google のツールは、内蔵のツールのうち権限を宣言しているもの
+const retention = new GoogleDataRetention({ repo, isGoogleTool: (name) => !!registry.get(name)?.google, logger: log });
 const engine = new RunEngine({
   repo, llm, registry, connector, files, resolveDefinition, isAvailable, logger: log, research,
   llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId),
   registryFor: async (tenantId) => (await hub.forTenant(tenantId)).registry,
+  // 止めた実行に後から書き込まれた中身も消す（仕様書 第6.5.2.1節）
+  onCancelled: async (run) => { await retention.purgeRun(run, 'disconnect', new Date()); },
 });
-const scheduler = new Scheduler({ repo, resolveDefinition, isAvailable, logger: log });
-// Google から取得したデータの保持（仕様書 第14.3.2節）。Google のツールは、内蔵のツールのうち権限を宣言しているもの
-const retention = new GoogleDataRetention({ repo, isGoogleTool: (name) => !!registry.get(name)?.google, logger: log });
+const scheduler = new Scheduler({
+  repo, resolveDefinition, isAvailable, logger: log,
+  // 本物の Google の接続口で動かすときだけ、接続の無い人の Google を使う定時実行を飛ばす（仕様書 第6.5.2.1節）
+  missingGoogleConnection: async (tenantId, userId, def) => {
+    if (connector.source !== 'google') return false;
+    if (!agentUsesGoogle(def, (await hub.forTenant(tenantId)).registry)) return false;
+    return !(await repo.getGoogleConnection(tenantId, userId));
+  },
+});
 
 const POLL_INTERVAL_MS = 1000;
 /** 定時実行の見回り間隔。分単位の指定に対して十分に短くする。 */
@@ -132,6 +142,9 @@ while (running) {
         case 'failed':
           // 失敗の詳細はエンジンが warn で記録している
           runLog.info('実行を終了（失敗）', { ms });
+          break;
+        case 'cancelled':
+          runLog.info('実行を終了（途中で止められた）', { ms, reason: result.reason });
           break;
       }
     }

@@ -32,7 +32,9 @@ import { parseToolCalls } from './tool-protocol.js';
 export type AdvanceResult =
   | { outcome: 'completed' }
   | { outcome: 'awaiting_approval'; approvalId: string }
-  | { outcome: 'failed'; reason: string };
+  | { outcome: 'failed'; reason: string }
+  /** 途中で止められた（Google の許可がなくなった、利用者が停止されたなど。仕様書 第6.5.2.1節）。 */
+  | { outcome: 'cancelled'; reason: string };
 
 export interface RunEngineDeps {
   repo: Repository;
@@ -68,6 +70,12 @@ export interface RunEngineDeps {
    * 省略時は、解決できる定義はすべて使えるものとする。
    */
   isAvailable?(tenantId: string, agentId: string): Promise<boolean>;
+  /**
+   * 実行が途中で止められたことに気づいたときに呼ぶ（仕様書 第6.5.2.1節）。
+   *
+   * @remarks 止めた後に書き込んだステップの中身を消すために使う。止めた側はその時点の中身しか消せないため
+   */
+  onCancelled?(run: Run): Promise<void>;
 }
 
 /**
@@ -140,6 +148,9 @@ export class RunEngine {
     while (current.cursor < def.steps.length) {
       const step = def.steps[current.cursor];
       if (!step) break;
+      // 手順の区切りごとに、止められていないかを確かめる（仕様書 第6.5.2.1節）
+      const stopped = await this.cancelledNow(current);
+      if (stopped) return stopped;
 
       if (current.cursor >= def.limits.maxSteps) {
         return this.fail(current, 'ステップ数の上限に達しました');
@@ -160,6 +171,9 @@ export class RunEngine {
         current, def, step, job.input, job.requestedBy, settings, registry, ai,
       );
       stepLog.debug('ステップを終了', { outcome: result.kind, ms: Date.now() - startedAt });
+      // 手順の途中で止められていれば、消費だけを記録し、止めた状態を上書きしない
+      const stoppedDuring = await this.cancelledNow(current, 'tokensUsed' in result ? result.tokensUsed : 0);
+      if (stoppedDuring) return stoppedDuring;
       if (result.kind === 'failed') return this.fail(current, result.reason);
 
       if (result.kind === 'confirm') {
@@ -489,7 +503,29 @@ export class RunEngine {
    *
    * @param savedMinutes 削減時間の推計（分）。途中で終了した場合は 0 とする
    */
+  /**
+   * 保存されている実行の状態を読み直し、止められていれば、その結果を返す。
+   *
+   * @param extraTokens 止められる前に使い終えたトークン（消費の記録に足す）
+   * @returns 止められていなければ `null`
+   */
+  private async cancelledNow(run: Run, extraTokens = 0): Promise<AdvanceResult | null> {
+    const latest = await this.deps.repo.getRun(run.tenantId, run.id);
+    if (latest?.status !== 'cancelled') return null;
+    const reason = latest.failureReason ?? '止められました';
+    if (extraTokens > 0) {
+      await this.deps.repo.updateRun({
+        ...latest, tokensUsed: latest.tokensUsed + extraTokens, costJpy: latest.costJpy + estimateCostJpy(extraTokens),
+      });
+    }
+    this.log.info('止められた実行の続きを行いません', { runId: run.id, tenantId: run.tenantId, reason });
+    await this.deps.onCancelled?.(latest);
+    return { outcome: 'cancelled', reason };
+  }
+
   private async complete(run: Run, note: string | null, savedMinutes = 0): Promise<AdvanceResult> {
+    const stopped = await this.cancelledNow(run);
+    if (stopped) return stopped;
     const now = new Date().toISOString();
     await this.deps.repo.updateRun({
       ...run, status: 'completed', endedAt: now, failureReason: note, savedMinutes,

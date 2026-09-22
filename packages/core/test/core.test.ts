@@ -384,3 +384,22 @@ test('途中で終了した実行は、削減時間を 0 とする', async () =>
   assert.equal(run.status, 'completed');
   assert.equal(run.savedMinutes, 0);
 });
+
+test('手順の途中で止められた実行は、次の手順を行わず、止めた状態を上書きしない（仕様書 第6.5.2.1節）', async () => {
+  const { repo, engine, run } = setup(SHARE_DEF, { name: 'noop', args: {} });
+  let cancelledSeen: Run | null = null;
+  // 最初の手順の推論の間に、別の処理（連携の解除）が実行を止めたことにする
+  (engine as unknown as { deps: { llm: LlmProvider; onCancelled: (r: Run) => Promise<void> } }).deps.llm = {
+    name: 'stop-during', async complete() {
+      await repo.updateRun({ ...repo.runs[0]!, status: 'cancelled', endedAt: new Date().toISOString(), failureReason: 'Google との連携を解除したため止めました' });
+      return { text: '準備しました', tokensUsed: 7 };
+    },
+  };
+  (engine as unknown as { deps: { onCancelled: (r: Run) => Promise<void> } }).deps.onCancelled = async (r) => { cancelledSeen = r; };
+  const res = await engine.advance(run);
+  assert.deepEqual(res, { outcome: 'cancelled', reason: 'Google との連携を解除したため止めました' });
+  assert.equal(repo.runs[0]!.status, 'cancelled', '止めた状態のまま');
+  assert.equal(repo.runs[0]!.tokensUsed, 7, '止められる前に使い終えたトークンは記録する');
+  assert.equal(repo.approvals.length, 0, '次の手順（承認）へ進まない');
+  assert.ok(cancelledSeen, '止められたことを知らせる（後から書き込まれた中身を消すため）');
+});

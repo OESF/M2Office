@@ -27,6 +27,19 @@ const LEVEL: Record<string, { text: string; cls: string }> = {
 
 const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }) : '');
 
+/** OAuth クライアントを消す・替えるときの確認の文（仕様書 第6.5.2.1節）。 */
+function clientChangeText(impact: { users: number; runs: number } | null, what: string): string {
+  const lines = [`${what}。よろしいですか。`];
+  if (impact === null) lines.push('', '影響する人数を確かめられませんでした。');
+  else if (impact.users > 0) {
+    lines.push('', `接続している ${impact.users} 人の許可が使えなくなります。`);
+    if (impact.runs > 0) lines.push(`動いている業務 ${impact.runs} 件が止まります。`);
+    lines.push('業務が読んだメールや文書の中身も消します。従業員は、新しい設定で接続し直す必要があります。');
+  }
+  lines.push('', 'クライアント シークレットだけを替える場合は、従業員の接続に影響しません。');
+  return lines.join('\n');
+}
+
 /** 管理者ページ「接続」。 */
 export function Connections() {
   const [data, setData] = useState<ConnectionSettings | null>(null);
@@ -215,11 +228,20 @@ function GoogleCard({ data, onSaved }: { data: ConnectionSettings['google']; onS
           </div>
         </div>
         <div className="row">
-          <button className="btn" disabled={busy} onClick={() => void run(() => api.admin.saveGoogleClient({ clientId, clientSecret: secret || undefined }), '保存しました')}>保存</button>
+          <button className="btn" disabled={busy} onClick={() => void (async () => {
+            // クライアント ID を替えると、全員の接続が使えなくなる。先に確かめる（仕様書 第6.5.2.1節）
+            if (registered && data.clientId && clientId.trim() !== data.clientId) {
+              const impact = await api.admin.googleClientImpact().catch(() => null);
+              if (impact && impact.users > 0 && !confirm(clientChangeText(impact, 'クライアント ID を替えます'))) return;
+            }
+            await run(() => api.admin.saveGoogleClient({ clientId, clientSecret: secret || undefined }), '保存しました');
+          })()}>保存</button>
           {registered && (
-            <button className="btn danger" disabled={busy} onClick={() => {
-              if (confirm('OAuth クライアントの登録を消しますか。従業員の接続も使えなくなります。')) void run(() => api.admin.deleteGoogleClient(), '登録を消しました');
-            }}>登録を消す</button>
+            <button className="btn danger" disabled={busy} onClick={() => void (async () => {
+              const impact = await api.admin.googleClientImpact().catch(() => null);
+              if (!confirm(clientChangeText(impact, 'OAuth クライアントの登録を消します'))) return;
+              await run(() => api.admin.deleteGoogleClient(), '登録を消しました');
+            })()}>登録を消す</button>
           )}
         </div>
         {msg && <p className={msg.ok ? 'ok-msg' : 'error'}>{msg.text}</p>}

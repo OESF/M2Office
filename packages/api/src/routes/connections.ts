@@ -164,19 +164,52 @@ export function connectionsRoute(deps: AppDeps) {
     await deps.repo.saveTenantCredential({
       tenantId: tenant.id, kind: 'google_oauth', secretEnc, meta: { clientId }, updatedBy: user.id, updatedAt: new Date().toISOString(),
     });
-    await audit(deps, tenant.id, user.id, 'connection.google.update', 'google_oauth', { clientId, secretChanged: !!secret });
-    return c.json({ ok: true });
+    // クライアント ID を替えると、これまでの接続（トークン）は使えない。全員について後始末する。シークレットだけなら影響しない
+    const previousId = (current?.meta as { clientId?: string } | undefined)?.clientId;
+    const cleanup = previousId && previousId !== clientId ? await disconnectEveryone(deps, tenant.id, 'client-removed') : { users: 0, stoppedRuns: 0 };
+    await audit(deps, tenant.id, user.id, 'connection.google.update', 'google_oauth', { clientId, secretChanged: !!secret, ...cleanup });
+    return c.json({ ok: true, ...cleanup });
   });
 
-  /** 会社の OAuth クライアントの登録を消す。利用者の接続も使えなくなる。 */
+  /**
+   * OAuth クライアントを削除する（またはクライアント ID を替える）と影響するもの。削除の前の確認に使う（仕様書 第6.5.2.1節）。
+   */
+  app.get('/google/impact', async (c) => {
+    const { tenant } = c.get('ctx');
+    const conns = await deps.repo.listGoogleConnections(tenant.id);
+    let runs = 0;
+    for (const conn of conns) runs += (await deps.revocation.impact(tenant.id, conn.userId)).runs.length;
+    return c.json({ users: conns.length, runs });
+  });
+
+  /** 会社の OAuth クライアントの登録を消す。接続している全員の許可が使えなくなるため、全員について後始末する。 */
   app.delete('/google', async (c) => {
     const { tenant, user } = c.get('ctx');
     if (!(await deps.repo.deleteTenantCredential(tenant.id, 'google_oauth'))) return c.json({ error: '登録されていません' }, 404);
-    await audit(deps, tenant.id, user.id, 'connection.google.delete', 'google_oauth');
-    return c.json({ ok: true });
+    const cleanup = await disconnectEveryone(deps, tenant.id, 'client-removed');
+    await audit(deps, tenant.id, user.id, 'connection.google.delete', 'google_oauth', cleanup);
+    return c.json({ ok: true, ...cleanup });
   });
 
   return app;
+}
+
+/**
+ * 会社の全員の Google の接続を消し、後始末をする（OAuth クライアントの削除・クライアント ID の変更。仕様書 第6.5.2.1節）。
+ *
+ * @remarks トークンを Google 側でも取り消してから消す。取り消しに失敗しても、M2Office からは消す。
+ */
+async function disconnectEveryone(deps: AppDeps, tenantId: string, cause: 'client-removed') {
+  const now = new Date();
+  let stoppedRuns = 0;
+  const conns = await deps.repo.listGoogleConnections(tenantId);
+  for (const conn of conns) {
+    await revokeGoogleToken(deps.box.decrypt(conn.refreshTokenEnc)).catch(() => false);
+    await deps.repo.deleteGoogleConnection(tenantId, conn.userId);
+    stoppedRuns += (await deps.revocation.stopUserRuns(tenantId, conn.userId, cause, now)).length;
+    await deps.retention.purgeUser(tenantId, conn.userId, now);
+  }
+  return { users: conns.length, stoppedRuns };
 }
 
 /** 本人の Google 連携。`/v1/me/google` に置く（仕様書 第6.5.2節）。 */
@@ -198,6 +231,19 @@ export function myGoogleRoute(deps: AppDeps) {
       checkedAt: conn?.checkedAt ?? null,
       scopes: required.map((r) => ({ scope: r.scope, label: googleScopeLabel(r.scope), granted: !!conn?.scopes.includes(r.scope) })),
       needsReconnect: !!conn && required.some((r) => !conn.scopes.includes(r.scope)),
+    });
+  });
+
+  /**
+   * 取り消すと止まる業務と、飛ばす定時実行の数。取り消す前の確認に使う（仕様書 第6.5.2.1節）。
+   */
+  app.get('/impact', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const { allAgents } = await deps.tenantView(tenant.id);
+    const impact = await deps.revocation.impact(tenant.id, user.id);
+    return c.json({
+      runs: impact.runs.map((r) => ({ ...r, agentName: allAgents.find((a) => a.id === r.agentId)?.name ?? r.agentId })),
+      schedules: impact.schedules,
     });
   });
 
@@ -241,10 +287,12 @@ export function myGoogleRoute(deps: AppDeps) {
     if (!conn) return c.json({ error: 'Google と接続していません' }, 404);
     const revoked = await revokeGoogleToken(deps.box.decrypt(conn.refreshTokenEnc));
     await deps.repo.deleteGoogleConnection(tenant.id, user.id);
-    // 連携を解除したら、その人の終わった実行から Google 由来の中身を消す（期間を待たない。仕様書 第14.3.2節）
-    const purgedRuns = await deps.retention.purgeUser(tenant.id, user.id, new Date());
-    await audit(deps, tenant.id, user.id, 'connection.google.disconnect', user.id, { revokedAtGoogle: revoked, purgedRuns });
-    return c.json({ ok: true, revokedAtGoogle: revoked, purgedRuns });
+    // Google を使う動いている途中の業務を止め（仕様書 第6.5.2.1節）、終わった実行から Google 由来の中身を消す（第14.3.2節）
+    const now = new Date();
+    const stoppedRuns = (await deps.revocation.stopUserRuns(tenant.id, user.id, 'disconnect', now)).length;
+    const purgedRuns = await deps.retention.purgeUser(tenant.id, user.id, now);
+    await audit(deps, tenant.id, user.id, 'connection.google.disconnect', user.id, { revokedAtGoogle: revoked, stoppedRuns, purgedRuns });
+    return c.json({ ok: true, revokedAtGoogle: revoked, stoppedRuns, purgedRuns });
   });
 
   return app;

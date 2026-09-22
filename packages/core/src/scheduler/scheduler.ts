@@ -23,7 +23,16 @@ export interface SchedulerDeps {
   logger?: Logger;
   /** その会社で業務エージェントを使えるか（拡張機能を導入しているか）。 */
   isAvailable?(tenantId: string, agentId: string): Promise<boolean>;
+  /**
+   * 業務が Google のツールを使うのに、対象者が Google と接続していないか（仕様書 第6.5.2.1節）。
+   *
+   * @remarks 見本の接続口で動かしている間は、接続が無くても動くため、常に `false` を返す。
+   */
+  missingGoogleConnection?(tenantId: string, userId: string, def: AgentDefinition): Promise<boolean>;
 }
+
+/** 接続が無いために定時実行を飛ばしたときの知らせの題名。未読の同じ知らせがあれば重ねて知らせない。 */
+export const SCHEDULE_SKIP_TITLE = 'Google と接続していないため、定時実行を飛ばしました';
 
 /**
  * 定時実行の起動役。ワーカーの中で定期的に呼ぶ。
@@ -67,6 +76,9 @@ export class Scheduler {
           ? '対象者がこの業務の利用範囲の外です'
         : def.compartment && !(await repo.listUserCompartments(due.tenantId, due.userId)).includes(def.compartment)
           ? '対象者がこの業務の権限区画に割り当てられていません'
+        // 許可がない間は飛ばす。設定は残し、接続し直せば次から起動する（仕様書 第6.5.2.1節）
+        : this.deps.missingGoogleConnection && (await this.deps.missingGoogleConnection(due.tenantId, due.userId, def))
+          ? GOOGLE_MISSING
         : null;
       if (!def || reason) {
         (this.deps.logger ?? silentLogger).warn('定時実行を見送りました', {
@@ -78,6 +90,7 @@ export class Scheduler {
           detail: { reason },
           occurredAt: now.toISOString(),
         });
+        if (reason === GOOGLE_MISSING) await this.notifySkipOnce(due.tenantId, due.userId, def?.name ?? due.agentId, now);
         continue;
       }
 
@@ -89,4 +102,18 @@ export class Scheduler {
     }
     return started;
   }
+
+  /** 接続が無いために飛ばしたことを本人に知らせる。未読の同じ知らせがあれば重ねない（「一度だけ」）。 */
+  private async notifySkipOnce(tenantId: string, userId: string, agentName: string, now: Date): Promise<void> {
+    const { repo } = this.deps;
+    const recent = await repo.listNotifications(tenantId, userId, 50);
+    if (recent.some((n) => n.title === SCHEDULE_SKIP_TITLE && !n.readAt)) return;
+    await repo.createNotification({
+      id: randomUUID(), tenantId, userId, kind: 'failure', title: SCHEDULE_SKIP_TITLE,
+      body: `「${agentName}」などの定時実行は、Google と接続し直すと、次の回から自動で動きます。個人設定の「Google 連携」から接続してください。`,
+      runId: null, readAt: null, createdAt: now.toISOString(),
+    });
+  }
 }
+
+const GOOGLE_MISSING = '対象者が Google と接続していません';

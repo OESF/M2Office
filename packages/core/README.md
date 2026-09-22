@@ -21,7 +21,7 @@ src/help/        ヘルプ（業務の説明の自動生成、記事の出し分
 src/knowledge/   組織知識の節への分割（章・条・見出し）と、検索の言葉の取り出し・並べ替え
 src/extensions/  拡張機能の読み込みと検証、.m2ext の作成と展開、コネクタの宣言、会社ごとの見え方
 src/scheduler/   定時実行の規則と起動役
-src/retention/   Google から取得したデータの保持（期間を過ぎた実行の中身を消す、承認待ちの期限切れ）
+src/retention/   Google から取得したデータの保持（期間を過ぎた実行の中身を消す、承認待ちの期限切れ）と、許可がなくなったときの業務の後始末
 src/llm/         LLM 抽象化層（スタブ／OpenAI 互換）
 src/repository/  永続化。テナント境界の絞り込みを伴う
 src/agents/      公式エージェントの定義（AG-01〜05）
