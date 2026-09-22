@@ -113,6 +113,7 @@ export interface Repository {
   /** 本人の実行件数と費用（期間内）。 */
   usageForUser(tenantId: string, userId: string, since: string): Promise<{ runs: number; costJpy: number }>;
   /** 本人が所属する権限区画の名前。 */
+  /** 本人が入れる権限区画の名前。個別の割当と、割り当てたグループへの所属の両方を含む（第16.7.5節）。 */
   listUserCompartments(tenantId: string, userId: string): Promise<string[]>;
 
   /** 会社が導入した拡張機能（仕様書 第12.9.3節）。 */
@@ -120,6 +121,14 @@ export interface Repository {
   installExtension(record: InstalledExtension): Promise<void>;
   /** 導入をやめる。導入していなければ `false`。 */
   uninstallExtension(tenantId: string, extensionId: string): Promise<boolean>;
+  /** 権限区画と、その割当（グループと個人）。管理者ページで使う。無効な区画も含む。 */
+  listCompartmentAssignments(tenantId: string): Promise<CompartmentAssignment[]>;
+  /** 権限区画を作る。名前は会社の中で重ならない。 */
+  createCompartment(c: { id: string; tenantId: string; name: string; description: string }): Promise<void>;
+  /** 権限区画の割当を丸ごと置き換える。その会社のグループと利用者だけを入れる。 */
+  setCompartmentAssignment(
+    tenantId: string, compartmentId: string, a: { groups: string[]; users: string[] }, assignedBy: string,
+  ): Promise<void>;
   /** 会社のグループ（仕様書 第16.7節）。所属する人の ID を含む。名前の順。 */
   listGroups(tenantId: string): Promise<UserGroup[]>;
   /** グループを作る、または名前と説明を変える。 */
@@ -212,6 +221,18 @@ export interface RunStatRow {
   savedMinutes: number;
   /** 終了した実行の所要時間の合計（秒）。 */
   durationSec: number;
+}
+
+/** 権限区画と、その割当。 */
+export interface CompartmentAssignment {
+  id: string;
+  name: string;
+  description: string | null;
+  enabled: boolean;
+  /** 割り当てたグループの ID。 */
+  groups: string[];
+  /** 個別に割り当てた利用者の ID。 */
+  users: string[];
 }
 
 /** 会社が導入した拡張機能の記録。同意した権限を残す（不変則 I-8）。 */

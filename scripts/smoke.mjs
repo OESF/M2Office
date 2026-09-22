@@ -858,6 +858,55 @@ console.log('\n■ 22. グループと利用範囲');
   await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
 }
 
+console.log('\n■ 23. 権限区画をグループで割り当てる');
+{
+  for (const g of (await call('a', '/v1/admin/groups')).body.items ?? []) {
+    if (g.name.startsWith('確認用')) await call('a', `/v1/admin/groups/${g.id}`, { method: 'DELETE' });
+  }
+  const { body: users } = await call('a', '/v1/admin/users');
+  const memberId = users.items.find((u) => u.email.startsWith('member@')).id;
+
+  const bad = await call('a', '/v1/admin/compartments', { method: 'POST', body: JSON.stringify({ name: '法務' }) });
+  bad.status === 400 ? ok('区画の名前は英小文字・数字・ハイフンに限る') : ng(`受け付けてしまう（${bad.status}）`);
+  let comp = (await call('a', '/v1/admin/compartments')).body.items.find((x) => x.name === 'smoke-legal');
+  if (!comp) comp = (await call('a', '/v1/admin/compartments', { method: 'POST', body: JSON.stringify({ name: 'smoke-legal', description: '確認用の法務' }) })).body;
+  comp?.id ? ok('区画を作れる') : ng('区画を作れない');
+
+  const memberAssign = await call('a', `/v1/admin/compartments/${comp.id}/assignment`, { method: 'PUT', body: JSON.stringify({ groups: [], users: [memberId] }) }, 'member');
+  memberAssign.status === 403 ? ok('一般の利用者は区画の割当を変えられない（403）') : ng(`変えられてしまう（${memberAssign.status}）`);
+
+  const { body: legal } = await call('a', '/v1/admin/groups', { method: 'POST', body: JSON.stringify({ name: '確認用-法務' }) });
+  await call('a', `/v1/admin/compartments/${comp.id}/assignment`, { method: 'PUT', body: JSON.stringify({ groups: [legal.id], users: [] }) });
+  const before = (await call('a', '/v1/me/usage', {}, 'member')).body.compartments;
+  !before.includes('smoke-legal') ? ok('グループに所属していなければ区画に入れない') : ng('所属していないのに区画に入れる');
+
+  const since = new Date().toISOString();
+  await call('a', `/v1/admin/groups/${legal.id}/members`, { method: 'PUT', body: JSON.stringify({ userIds: [memberId] }) });
+  const after = (await call('a', '/v1/me/usage', {}, 'member')).body.compartments;
+  after.includes('smoke-legal') ? ok('区画に割り当てたグループに入ると、区画に入れる') : ng('区画に入れない', JSON.stringify(after));
+
+  const { body: notes } = await call('a', '/v1/notifications');
+  (notes.items ?? []).some((n) => n.kind === 'security' && n.createdAt >= since && n.body.includes('確認用の法務'))
+    ? ok('区画に入れる人が変わると、管理者に通知する') : ng('管理者に通知されない');
+
+  const { body: groups } = await call('a', '/v1/admin/groups');
+  groups.items.find((g) => g.id === legal.id)?.usedBy?.compartments.includes('確認用の法務')
+    ? ok('グループがどの区画に割り当てられているかを示す') : ng('割り当て先が示されない');
+
+  await call('a', `/v1/admin/groups/${legal.id}/members`, { method: 'PUT', body: JSON.stringify({ userIds: [] }) });
+  const out = (await call('a', '/v1/me/usage', {}, 'member')).body.compartments;
+  const { body: audit } = await call('a', '/v1/admin/audit-events');
+  const acts = (audit.items ?? []).filter((e) => e.targetId === comp.id).map((e) => e.action);
+  !out.includes('smoke-legal') && acts.includes('compartment.enter') && acts.includes('compartment.leave')
+    ? ok('所属から外すと区画から出る。出入りを監査ログに残す') : ng('出入りの扱いが違う', acts.join(', '));
+
+  const { body: bComp } = await call('b', '/v1/admin/compartments');
+  !(bComp.items ?? []).some((x) => x.name === 'smoke-legal') ? ok('区画と割当はほかの会社から見えない') : ng('ほかの会社から見える');
+
+  await call('a', `/v1/admin/compartments/${comp.id}/assignment`, { method: 'PUT', body: JSON.stringify({ groups: [], users: [] }) });
+  await call('a', `/v1/admin/groups/${legal.id}`, { method: 'DELETE' });
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

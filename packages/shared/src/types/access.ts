@@ -57,3 +57,20 @@ export function canUseAgent(
   if (!scope) return true;
   return scope.users.includes(userId) || scope.groups.some((g) => groupIds.includes(g));
 }
+
+/**
+ * 利用者が業務エージェントを実行できるか。利用範囲の中で、かつ区画に属する業務なら区画に入れる人か。
+ *
+ * @param def 業務エージェント（ID と、属する権限区画の名前）
+ * @param compartments その利用者が入れる権限区画の名前（個別の割当とグループへの所属から求めたもの）
+ *
+ * @see 仕様書 第16.3.6節（区画に属するエージェントは、区画に割り当てられた者しか実行できない）
+ * @see 仕様書 第16.7.5節
+ */
+export function canRunAgent(
+  access: AccessSettings, def: { id: string; compartment: string | null }, userId: string,
+  groupIds: readonly string[], compartments: readonly string[],
+): boolean {
+  if (!canUseAgent(access, def.id, userId, groupIds)) return false;
+  return def.compartment === null || compartments.includes(def.compartment);
+}

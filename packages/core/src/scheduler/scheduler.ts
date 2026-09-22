@@ -65,6 +65,8 @@ export class Scheduler {
         // 利用範囲から外れた人の定時実行は起動しない（仕様書 第16.7.4節）
         : !canUseAgent(settings.access, def.id, due.userId, await repo.listUserGroupIds(due.tenantId, due.userId))
           ? '対象者がこの業務の利用範囲の外です'
+        : def.compartment && !(await repo.listUserCompartments(due.tenantId, due.userId)).includes(def.compartment)
+          ? '対象者がこの業務の権限区画に割り当てられていません'
         : null;
       if (!def || reason) {
         (this.deps.logger ?? silentLogger).warn('定時実行を見送りました', {

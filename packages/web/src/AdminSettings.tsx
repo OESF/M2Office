@@ -13,7 +13,7 @@ import type {
 } from '@m2office/shared';
 import { api, describeError, type KnowledgeItemView } from './api.js';
 import { HelpTip } from './help.js';
-import { GroupSettings, ScopeField, useAccessOptions } from './Scope.js';
+import { CompartmentSettings, GroupSettings, ScopeField, useAccessOptions } from './Scope.js';
 
 type Catalog = {
   id: string; name: string; description: string; usesWriteInternal: boolean; defaultMinutes: number;
@@ -299,6 +299,8 @@ const ROLE_LABELS: Record<Role, string> = {
 export function UserSettings({ meId }: { meId: string }) {
   const [users, setUsers] = useState<User[]>([]);
   const [invite, setInvite] = useState({ email: '', displayName: '' });
+  // グループと区画は互いの表示（割り当て先・入れる人）に効くため、片方を変えたら両方を読み直す
+  const [version, setVersion] = useState({ g: 0, c: 0 });
   const saver = useSaver();
   const load = () => api.admin.users().then((r) => setUsers(r.items));
   useEffect(() => { void load(); }, []);
@@ -358,7 +360,8 @@ export function UserSettings({ meId }: { meId: string }) {
           一般ロールで招待する
         </button>
       </div>
-      <GroupSettings users={users} />
+      <GroupSettings users={users} key={`g-${version.c}`} onChanged={() => setVersion((v) => ({ ...v, g: v.g + 1 }))} />
+      <CompartmentSettings key={`c-${version.g}`} onChanged={() => setVersion((v) => ({ ...v, c: v.c + 1 }))} />
       {saver.view}
     </>
   );

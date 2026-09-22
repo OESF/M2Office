@@ -13,7 +13,7 @@ import type {
   StoredFile, Tenant, TenantSettings, User, UserGroup, UserSettings,
 } from '@m2office/shared';
 import { DEFAULT_TENANT_SETTINGS, DEFAULT_USER_SETTINGS } from '@m2office/shared';
-import type { InstalledExtension, PrivateExtension, KnowledgeHit, KnowledgeItem, Repository, RunStatRow } from './types.js';
+import type { CompartmentAssignment, InstalledExtension, PrivateExtension, KnowledgeHit, KnowledgeItem, Repository, RunStatRow } from './types.js';
 
 /**
  * 問い合わせ文を検索語に分割する。
@@ -700,8 +700,13 @@ export class PostgresRepository implements Repository {
 
   async listUserCompartments(tenantId: string, userId: string): Promise<string[]> {
     const rows = await this.q<{ name: string }>(tenantId,
-      `select c.name from compartment_members m join compartments c on c.id = m.compartment_id
-        where c.tenant_id = $1 and m.user_id = $2 and c.enabled order by c.name`,
+      `select c.name from compartments c
+        where c.tenant_id = $1 and c.enabled
+          and (exists (select 1 from compartment_members m where m.compartment_id = c.id and m.user_id = $2)
+            or exists (select 1 from compartment_groups g
+                         join user_group_members gm on gm.group_id = g.group_id and gm.tenant_id = g.tenant_id
+                        where g.compartment_id = c.id and g.tenant_id = $1 and gm.user_id = $2))
+        order by c.name`,
       [tenantId, userId]);
     return rows.map((r) => r.name);
   }
@@ -820,6 +825,47 @@ export class PostgresRepository implements Repository {
       `delete from tenant_extensions where tenant_id = $1 and extension_id = $2 returning extension_id`,
       [tenantId, extensionId]);
     return rows.length > 0;
+  }
+
+  async listCompartmentAssignments(tenantId: string): Promise<CompartmentAssignment[]> {
+    const rows = await this.q<Omit<CompartmentAssignment, 'groups' | 'users'> & { groups: string[] | null; users: string[] | null }>(tenantId,
+      `select c.id, c.name, c.description, c.enabled,
+              (select array_agg(g.group_id order by g.group_id) from compartment_groups g
+                where g.compartment_id = c.id and g.tenant_id = c.tenant_id) as groups,
+              (select array_agg(m.user_id order by m.user_id) from compartment_members m
+                where m.compartment_id = c.id) as users
+         from compartments c where c.tenant_id = $1 order by c.name`,
+      [tenantId]);
+    return rows.map((r) => ({ ...r, groups: r.groups ?? [], users: r.users ?? [] }));
+  }
+
+  async createCompartment(c: { id: string; tenantId: string; name: string; description: string }): Promise<void> {
+    await this.q(c.tenantId,
+      `insert into compartments (id, tenant_id, name, description) values ($1,$2,$3,$4)`,
+      [c.id, c.tenantId, c.name, c.description]);
+  }
+
+  async setCompartmentAssignment(
+    tenantId: string, compartmentId: string, a: { groups: string[]; users: string[] }, assignedBy: string,
+  ): Promise<void> {
+    // 区画がこの会社のものかを先に確かめる。compartment_members は親の表を通じて RLS がかかる
+    const own = await this.q<{ id: string }>(tenantId,
+      `select id from compartments where tenant_id = $1 and id = $2`, [tenantId, compartmentId]);
+    if (own.length === 0) return;
+    await this.q(tenantId, `delete from compartment_groups where tenant_id = $1 and compartment_id = $2`, [tenantId, compartmentId]);
+    await this.q(tenantId, `delete from compartment_members where compartment_id = $1`, [compartmentId]);
+    if (a.groups.length > 0) {
+      await this.q(tenantId,
+        `insert into compartment_groups (tenant_id, compartment_id, group_id, assigned_by)
+         select $1, $2, g.id, $4 from user_groups g where g.tenant_id = $1 and g.id = any($3::text[])`,
+        [tenantId, compartmentId, a.groups, assignedBy]);
+    }
+    if (a.users.length > 0) {
+      await this.q(tenantId,
+        `insert into compartment_members (compartment_id, user_id, assigned_by)
+         select $2, u.id, $4 from users u where u.tenant_id = $1 and u.id = any($3::text[])`,
+        [tenantId, compartmentId, a.users, assignedBy]);
+    }
   }
 
   async listGroups(tenantId: string): Promise<UserGroup[]> {

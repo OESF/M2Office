@@ -28,7 +28,7 @@ import { dashboardRoute } from './routes/dashboard.js';
 import { helpRoute } from './routes/help.js';
 import { onboardingRoute } from './routes/onboarding.js';
 import { extensionsRoute } from './routes/extensions.js';
-import { accessRoute, groupsRoute } from './routes/access.js';
+import { accessRoute, compartmentsRoute, groupsRoute } from './routes/access.js';
 
 /**
  * API サーバー。
@@ -90,6 +90,7 @@ app.route('/v1/admin/dashboard', dashboardRoute(deps));
 app.route('/v1/admin/extensions', extensionsRoute(deps));
 app.route('/v1/admin/groups', groupsRoute(deps));
 app.route('/v1/admin/access', accessRoute(deps));
+app.route('/v1/admin/compartments', compartmentsRoute(deps));
 app.route('/v1/admin', adminRoute(deps));
 app.route('/v1/files', filesRoute(deps));
 app.route('/v1/help', helpRoute(deps));

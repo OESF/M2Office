@@ -237,6 +237,13 @@ export interface AccessOptions {
 /** グループ（仕様書 第16.7.2節）。 */
 export interface GroupView {
   id: string; name: string; description: string; memberIds: string[];
+  /** 割り当てられている権限区画と業務（第16.7.5節）。所属を変える前に影響を示す。 */
+  usedBy?: { compartments: string[]; agents: string[] };
+}
+
+/** 権限区画と、その割当（第16.3節・第16.7.5節）。 */
+export interface CompartmentView {
+  id: string; name: string; description: string | null; enabled: boolean; groups: string[]; users: string[];
 }
 
 /** コネクタの接続の確認の結果。 */
@@ -384,6 +391,11 @@ export const api = {
     deleteGroup: (id: string) =>
       call<{ ok: true; emptied: string[] }>(`/admin/groups/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     access: () => call<AccessOptions>('/admin/access'),
+    compartments: () => call<{ items: CompartmentView[] }>('/admin/compartments'),
+    createCompartment: (name: string, description: string) =>
+      call<CompartmentView>('/admin/compartments', { method: 'POST', body: JSON.stringify({ name, description }) }),
+    setCompartmentAssignment: (id: string, a: { groups: string[]; users: string[] }) =>
+      call<CompartmentView>(`/admin/compartments/${encodeURIComponent(id)}/assignment`, { method: 'PUT', body: JSON.stringify(a) }),
     setScope: (target: string, scope: ScopeValue) =>
       call(`/admin/access/${encodeURIComponent(target)}`, { method: 'PUT', body: JSON.stringify({ scope }) }),
     uninstallExtension: (id: string) => call(`/admin/extensions/${encodeURIComponent(id)}`, { method: 'DELETE' }),

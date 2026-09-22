@@ -117,6 +117,10 @@ export class RunEngine {
     if (!canUseAgent(settings.access, def.id, job.requestedBy, groups)) {
       return this.fail(run, '依頼者がこの業務の利用範囲の外です');
     }
+    // 権限区画に属する業務は、区画に入れる人だけが実行できる（仕様書 第16.3.6節）
+    if (def.compartment && !(await repo.listUserCompartments(run.tenantId, job.requestedBy)).includes(def.compartment)) {
+      return this.fail(run, '依頼者がこの業務の権限区画に割り当てられていません');
+    }
 
     // 操作の確認（第9.4節）で承認された操作が残っていれば、先に実行する
     await this.executeConfirmedCalls(run, def, job.requestedBy, registry);

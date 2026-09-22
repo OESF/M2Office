@@ -4,7 +4,11 @@
  * 利用範囲の対象は、公式の業務エージェントの ID か、拡張機能の ID（その業務すべてに効く）である。
  * 対象の設定が無い業務は全員が使える。範囲の外の人には、業務を無いものとして扱う（仕様書 第16.7.4節）。
  *
+ * 権限区画の割当も同じ形（グループと個別の人）で行う。区画に入れる人が変わったら、
+ * 監査ログに区画への出入りとして残し、管理者全員に通知する（第16.7.5節）。
+ *
  * @see 仕様書 第16.7節 グループと利用範囲
+ * @see 仕様書 第16.3節 権限区画
  */
 
 import { randomUUID } from 'node:crypto';
@@ -65,14 +69,81 @@ export async function parseScope(
   return { scope: { groups, users } };
 }
 
+/** 区画ごとの、入れる人（個別の割当と、割り当てたグループの所属者）。 */
+async function compartmentMembers(deps: AppDeps, tenantId: string): Promise<Map<string, { name: string; users: Set<string> }>> {
+  const [compartments, groups] = await Promise.all([
+    deps.repo.listCompartmentAssignments(tenantId), deps.repo.listGroups(tenantId),
+  ]);
+  const out = new Map<string, { name: string; users: Set<string> }>();
+  for (const c of compartments) {
+    const users = new Set(c.users);
+    for (const g of groups.filter((x) => c.groups.includes(x.id))) for (const u of g.memberIds) users.add(u);
+    out.set(c.id, { name: c.description ?? c.name, users });
+  }
+  return out;
+}
+
+/**
+ * 変更の前後で区画に入れる人を比べ、出入りを記録して管理者全員に通知する（第16.7.5節）。
+ *
+ * @param change 何の変更による出入りか（通知の文に使う）
+ */
+async function reportCompartmentChanges(
+  deps: AppDeps, tenantId: string, actorId: string,
+  before: Map<string, { name: string; users: Set<string> }>, change: string,
+): Promise<void> {
+  const after = await compartmentMembers(deps, tenantId);
+  const users = await deps.repo.listUsers(tenantId);
+  const nameOf = (id: string) => users.find((u) => u.id === id)?.displayName ?? id;
+  const now = new Date().toISOString();
+  const lines: string[] = [];
+  for (const [id, cur] of after) {
+    const prev = before.get(id)?.users ?? new Set<string>();
+    const entered = [...cur.users].filter((u) => !prev.has(u));
+    const left = [...prev].filter((u) => !cur.users.has(u));
+    for (const [action, list] of [['compartment.enter', entered], ['compartment.leave', left]] as const) {
+      for (const u of list) {
+        await deps.repo.appendAudit({
+          id: randomUUID(), tenantId, actorType: 'user', actorId, action, targetType: 'compartment', targetId: id,
+          detail: { userId: u, change }, occurredAt: now,
+        });
+      }
+    }
+    if (entered.length > 0) lines.push(`「${cur.name}」に入った人: ${entered.map(nameOf).join('、')}`);
+    if (left.length > 0) lines.push(`「${cur.name}」から出た人: ${left.map(nameOf).join('、')}`);
+  }
+  if (lines.length === 0) return;
+  const body = [`${nameOf(actorId)}さんの操作（${change}）により、権限区画に入れる人が変わりました。`, '', ...lines].join('\n');
+  for (const admin of users.filter((u) => u.status === 'active' && u.roles.includes('admin'))) {
+    await deps.repo.createNotification({
+      id: randomUUID(), tenantId, userId: admin.id, kind: 'security', title: '権限区画に入れる人が変わりました',
+      body, runId: null, readAt: null, createdAt: now,
+    });
+  }
+}
+
 /** グループの API。`/v1/admin/groups` に置く。 */
 export function groupsRoute(deps: AppDeps) {
   const app = new Hono<AppEnv>();
   app.use('*', requireRole('admin'));
 
+  /** グループの一覧。どの区画・どの業務に割り当てられているか（`usedBy`）を添える（第16.7.5節 規定 4）。 */
   app.get('/', async (c) => {
     const { tenant } = c.get('ctx');
-    return c.json({ items: await deps.repo.listGroups(tenant.id) });
+    const [groups, compartments, settings, targets] = await Promise.all([
+      deps.repo.listGroups(tenant.id), deps.repo.listCompartmentAssignments(tenant.id),
+      deps.repo.getTenantSettings(tenant.id), targetsOf(deps, tenant.id),
+    ]);
+    return c.json({
+      items: groups.map((g) => ({
+        ...g,
+        usedBy: {
+          compartments: compartments.filter((x) => x.groups.includes(g.id)).map((x) => x.description ?? x.name),
+          agents: Object.entries(settings.access.scopes).filter(([, sc]) => sc.groups.includes(g.id))
+            .map(([t]) => targets.find((x) => x.id === t)?.name ?? t),
+        },
+      })),
+    });
   });
 
   /** グループを作る。名前は会社の中で重ならない。 */
@@ -116,11 +187,13 @@ export function groupsRoute(deps: AppDeps) {
     const users = await deps.repo.listUsers(tenant.id);
     const unknown = ids.filter((id) => !users.some((u) => u.id === id));
     if (unknown.length > 0) return c.json({ error: `利用者が見つかりません: ${unknown.join(', ')}` }, 400);
+    const before = await compartmentMembers(deps, tenant.id);
     await deps.repo.setGroupMembers(tenant.id, target.id, ids);
     await audit(deps, tenant.id, user.id, 'group.members', target.id, {
       added: ids.filter((id) => !target.memberIds.includes(id)),
       removed: target.memberIds.filter((id) => !ids.includes(id)),
     });
+    await reportCompartmentChanges(deps, tenant.id, user.id, before, `グループ「${target.name}」の所属の変更`);
     return c.json({ ...target, memberIds: ids });
   });
 
@@ -134,6 +207,8 @@ export function groupsRoute(deps: AppDeps) {
   app.delete('/:id', async (c) => {
     const { tenant, user } = c.get('ctx');
     const id = c.req.param('id');
+    const before = await compartmentMembers(deps, tenant.id);
+    const name = (await deps.repo.listGroups(tenant.id)).find((g) => g.id === id)?.name ?? id;
     if (!(await deps.repo.deleteGroup(tenant.id, id))) return c.json({ error: 'グループが見つかりません' }, 404);
     const settings = await deps.repo.getTenantSettings(tenant.id);
     const scopes: TenantSettings['access']['scopes'] = {};
@@ -145,6 +220,7 @@ export function groupsRoute(deps: AppDeps) {
     }
     await deps.repo.saveTenantSettings(tenant.id, 'access', { scopes }, user.id);
     await audit(deps, tenant.id, user.id, 'group.delete', id, { emptied });
+    await reportCompartmentChanges(deps, tenant.id, user.id, before, `グループ「${name}」の削除`);
     return c.json({ ok: true, emptied });
   });
 
@@ -183,6 +259,66 @@ export function accessRoute(deps: AppDeps) {
     if ('error' in parsed) return c.json({ error: parsed.error }, 400);
     await saveScope(deps, tenant.id, user.id, target, parsed.scope);
     return c.json({ ok: true, scope: parsed.scope ?? 'all' });
+  });
+
+  return app;
+}
+
+/** 権限区画の API。`/v1/admin/compartments` に置く。区画の作成と、入れるグループと人の割当。 */
+export function compartmentsRoute(deps: AppDeps) {
+  const app = new Hono<AppEnv>();
+  app.use('*', requireRole('admin'));
+
+  app.get('/', async (c) => {
+    const { tenant } = c.get('ctx');
+    return c.json({ items: await deps.repo.listCompartmentAssignments(tenant.id) });
+  });
+
+  /** 区画を作る。名前は英小文字・数字・ハイフン（知識と業務の定義から参照するため）。 */
+  app.post('/', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const body = await c.req.json<{ name?: string; description?: string }>().catch(() => ({} as { name?: string; description?: string }));
+    const name = (body.name ?? '').trim();
+    if (!/^[a-z0-9][a-z0-9-]{0,29}$/.test(name)) return c.json({ error: '区画の名前は英小文字・数字・ハイフンで書いてください（例: legal）' }, 400);
+    if ((await deps.repo.listCompartmentAssignments(tenant.id)).some((x) => x.name === name)) {
+      return c.json({ error: `区画「${name}」はすでにあります` }, 409);
+    }
+    const id = `c-${randomUUID()}`;
+    const description = (body.description ?? '').trim().slice(0, 100) || name;
+    await deps.repo.createCompartment({ id, tenantId: tenant.id, name, description });
+    await deps.repo.appendAudit({
+      id: randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id, action: 'compartment.create',
+      targetType: 'compartment', targetId: id, detail: { name }, occurredAt: new Date().toISOString(),
+    });
+    return c.json({ id, name, description, enabled: true, groups: [], users: [] }, 201);
+  });
+
+  /**
+   * 入れるグループと人を丸ごと置き換える。本文 `{ groups, users }`。
+   *
+   * @remarks 区画は「全員」を持たない。空にすると誰も入れない（第16.3.2節「既定は区画外」）。
+   */
+  app.put('/:id/assignment', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const id = c.req.param('id');
+    const target = (await deps.repo.listCompartmentAssignments(tenant.id)).find((x) => x.id === id);
+    if (!target) return c.json({ error: '区画が見つかりません' }, 404);
+    const body = await c.req.json<{ groups?: unknown; users?: unknown }>().catch(() => ({} as { groups?: unknown; users?: unknown }));
+    const groups = Array.isArray(body.groups) ? [...new Set(body.groups.map(String))] : [];
+    const users = Array.isArray(body.users) ? [...new Set(body.users.map(String))] : [];
+    const [known, members] = await Promise.all([deps.repo.listGroups(tenant.id), deps.repo.listUsers(tenant.id)]);
+    const badGroup = groups.find((g) => !known.some((k) => k.id === g));
+    if (badGroup) return c.json({ error: `グループが見つかりません: ${badGroup}` }, 400);
+    const badUser = users.find((u) => !members.some((m) => m.id === u));
+    if (badUser) return c.json({ error: `利用者が見つかりません: ${badUser}` }, 400);
+    const before = await compartmentMembers(deps, tenant.id);
+    await deps.repo.setCompartmentAssignment(tenant.id, id, { groups, users }, user.id);
+    await deps.repo.appendAudit({
+      id: randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id, action: 'compartment.assign',
+      targetType: 'compartment', targetId: id, detail: { groups, users }, occurredAt: new Date().toISOString(),
+    });
+    await reportCompartmentChanges(deps, tenant.id, user.id, before, `区画「${target.description ?? target.name}」の割当の変更`);
+    return c.json({ ...target, groups, users });
   });
 
   return app;

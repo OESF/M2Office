@@ -75,11 +75,14 @@ OAuth クライアントが整うまでは、`GET /v1/auth/google/start` は 503
 | `PUT /v1/admin/extensions/:id/enabled` | 管理者: 有効・無効の切り替え（本文に `enabled`）。権限が増えた版は 409 |
 | `POST /v1/admin/extensions/:id/connectors/:connectorId/check` | 管理者: コネクタの接続の確認（宣言したツールが提供されているか） |
 | `DELETE /v1/admin/extensions/:id` | 管理者: 削除する。自社専用のものは取り込んだファイルも消す |
-| `GET /v1/admin/groups` | 管理者: グループの一覧（所属する人を含む。第16.7節） |
+| `GET /v1/admin/groups` | 管理者: グループの一覧（所属する人と、割り当て先の区画・業務を含む。第16.7節） |
 | `POST /v1/admin/groups` | 管理者: グループを作る（名前は会社の中で重ならない） |
 | `PATCH /v1/admin/groups/:id` | 管理者: グループの名前・説明を変える |
 | `PUT /v1/admin/groups/:id/members` | 管理者: 所属を丸ごと置き換える（本文に `userIds`） |
 | `DELETE /v1/admin/groups/:id` | 管理者: グループを消す。範囲に誰も残らなくなった業務を `emptied` で返す |
+| `GET /v1/admin/compartments` | 管理者: 権限区画と、その割当（グループと個人） |
+| `POST /v1/admin/compartments` | 管理者: 権限区画を作る（名前は英小文字・数字・ハイフン） |
+| `PUT /v1/admin/compartments/:id/assignment` | 管理者: 区画に入れるグループと人を置き換える。入れる人が変われば記録し、管理者全員に通知する |
 | `GET /v1/admin/access` | 管理者: 業務・拡張機能ごとの利用範囲と、選択肢（グループ・利用者・対象） |
 | `PUT /v1/admin/access/:target` | 管理者: 1 つの業務（または拡張機能）の利用範囲。本文 `{ scope: "all" \| { groups, users } }` |
 | `GET /v1/admin/dashboard/live` | 管理者: ダッシュボードの「いま」（数値・業務の流れ・承認の滞留・出来事）。中身は返さない |

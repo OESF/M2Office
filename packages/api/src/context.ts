@@ -14,7 +14,7 @@ import {
   createLoggerFromEnv, HelpCatalog, parseArticle, ExtensionHub, HttpMcpClient, loadExtensions,
   type FileStore, type TenantExtensions, type HelpArticle, type LlmProvider, type Logger, type Repository, type WorkspaceConnector,
 } from '@m2office/core';
-import { canUseAgent, type AgentDefinition } from '@m2office/shared';
+import { canRunAgent, type AgentDefinition } from '@m2office/shared';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -75,18 +75,23 @@ export function buildDeps(): AppDeps {
   const llm = buildLlm(hub);
   const tenantView = (tenantId: string) => hub.forTenant(tenantId);
   /** その人の利用範囲の判定を作る。会社の設定と、その人の所属するグループを読む。 */
+  // 利用範囲（第16.7節）と権限区画（第16.3.6節）の両方を見る
   const scopeOf = async (tenantId: string, userId: string) => {
-    const [settings, groups] = await Promise.all([repo.getTenantSettings(tenantId), repo.listUserGroupIds(tenantId, userId)]);
-    return (agentId: string) => canUseAgent(settings.access, agentId, userId, groups);
+    const [settings, groups, compartments] = await Promise.all([
+      repo.getTenantSettings(tenantId), repo.listUserGroupIds(tenantId, userId), repo.listUserCompartments(tenantId, userId),
+    ]);
+    return (def: AgentDefinition) => canRunAgent(settings.access, def, userId, groups, compartments);
   };
   const agentsFor = async (tenantId: string, userId?: string) => {
     const { agents } = await tenantView(tenantId);
     if (!userId) return agents;
     const allowed = await scopeOf(tenantId, userId);
-    return agents.filter((a) => allowed(a.id));
+    return agents.filter(allowed);
   };
-  const canUse = async (tenantId: string, userId: string, agentId: string) =>
-    (await tenantView(tenantId)).isAvailable(agentId) && (await scopeOf(tenantId, userId))(agentId);
+  const canUse = async (tenantId: string, userId: string, agentId: string) => {
+    const def = (await tenantView(tenantId)).agents.find((a) => a.id === agentId);
+    return !!def && (await scopeOf(tenantId, userId))(def);
+  };
   const isAvailable = async (tenantId: string, agentId: string) => (await tenantView(tenantId)).isAvailable(agentId);
 
   const files = new LocalFileStore(fileStorageDir());

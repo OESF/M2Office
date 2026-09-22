@@ -306,3 +306,13 @@ test('利用範囲: 設定が無ければ全員、指定ならグループか個
   assert.equal(canUseAgent(access, ext, 'u-any', ['g-sales']), false);
   assert.equal(canUseAgent(access, 'minutes', 'u-sato', ['g-dev']), false, '拡張機能の範囲は公式の業務に効かない');
 });
+
+test('実行できるか: 利用範囲の中で、かつ区画に属する業務なら区画に入れる人だけ（第16.7.5節）', async () => {
+  const { canRunAgent } = await import('@m2office/shared');
+  const access = { scopes: { 'hr-agent': { groups: ['g-hr'], users: ['u-ceo'] } } };
+  const def = { id: 'hr-agent', compartment: 'hr' };
+  assert.equal(canRunAgent(access, def, 'u-a', ['g-hr'], ['hr']), true);
+  assert.equal(canRunAgent(access, def, 'u-a', ['g-hr'], []), false, '範囲の中でも区画に入れなければ不可');
+  assert.equal(canRunAgent(access, def, 'u-b', ['g-sales'], ['hr']), false, '区画に入れても範囲の外なら不可');
+  assert.equal(canRunAgent(access, { id: 'minutes', compartment: null }, 'u-b', [], []), true);
+});

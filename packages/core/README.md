@@ -128,6 +128,8 @@ decideApproval(...)  →  承認を記録し、待ち行列へ戻す
 判定は `@m2office/shared` の `canUseAgent()` で、対象は公式の業務エージェントの ID か拡張機能の ID です（`scopeTargetOf()`）。
 画面・API での絞り込みに加え、`RunEngine` は実行を進める時点で、`Scheduler` は定時実行を起動する時点で、
 依頼者が範囲の中かを自分で確かめます。依存の渡し忘れで素通りしないようにするためです。
+権限区画に属する業務（定義の `compartment`）は、区画に入れる人だけが実行できます（`canRunAgent()`）。
+区画に入れる人は、個別の割当と、区画に割り当てたグループの所属者です（`listUserCompartments()`）。
 
 ### 定時実行（`Scheduler`）
 

@@ -5,10 +5,11 @@
  * 個別に選んだ人が使える（「開発部門プラス誰か」）。
  *
  * @see 仕様書 第16.7節 グループと利用範囲
+ * @see 仕様書 第16.3節 権限区画
  */
 
 import { useEffect, useState } from 'react';
-import { api, describeError, type AccessOptions, type GroupView, type ScopeValue } from './api.js';
+import { api, describeError, type AccessOptions, type CompartmentView, type GroupView, type ScopeValue } from './api.js';
 
 /** 利用範囲の画面の選択肢（グループ・利用者・現在の範囲）を読む。 */
 export function useAccessOptions() {
@@ -30,9 +31,14 @@ export function scopeSummary(scope: ScopeValue | undefined, options: Pick<Access
   return users.length === 0 ? head : users.length <= 2 ? `${head}、${users.join('・')}` : `${head}、ほか ${users.length} 人`;
 }
 
-/** 利用範囲の編集。全員／指定を選び、指定ならグループと人を選ぶ。 */
-export function ScopeEditor({ value, onChange, options }: {
+/**
+ * 利用範囲の編集。全員／指定を選び、指定ならグループと人を選ぶ。
+ *
+ * @param allowAll `false` なら「全員」を出さない（権限区画は全員を持たない。第16.3.2節）
+ */
+export function ScopeEditor({ value, onChange, options, allowAll = true }: {
   value: ScopeValue; onChange: (v: ScopeValue) => void; options: Pick<AccessOptions, 'groups' | 'users'>;
+  allowAll?: boolean;
 }) {
   const picked = value === 'all' ? { groups: [], users: [] } : value;
   const toggle = (kind: 'groups' | 'users', id: string) => {
@@ -41,12 +47,16 @@ export function ScopeEditor({ value, onChange, options }: {
   };
   return (
     <div className="scope-editor">
-      <label className="check">
-        <input type="radio" checked={value === 'all'} onChange={() => onChange('all')} /> 全員
-      </label>
-      <label className="check">
-        <input type="radio" checked={value !== 'all'} onChange={() => onChange(picked)} /> 指定したグループと人だけ
-      </label>
+      {allowAll && (
+        <>
+          <label className="check">
+            <input type="radio" checked={value === 'all'} onChange={() => onChange('all')} /> 全員
+          </label>
+          <label className="check">
+            <input type="radio" checked={value !== 'all'} onChange={() => onChange(picked)} /> 指定したグループと人だけ
+          </label>
+        </>
+      )}
       {value !== 'all' && (
         <div className="scope-pick">
           <div>
@@ -68,7 +78,7 @@ export function ScopeEditor({ value, onChange, options }: {
               </label>
             ))}
           </div>
-          {picked.groups.length === 0 && picked.users.length === 0 && (
+          {allowAll && picked.groups.length === 0 && picked.users.length === 0 && (
             <p className="warn-msg small">グループか人を 1 つ以上選んでください。</p>
           )}
         </div>
@@ -160,6 +170,19 @@ export function GroupSettings({ users, onChanged }: {
               <td>
                 <strong>{g.name}</strong> <span className="muted small">{g.memberIds.length} 人</span>
                 <div className="small muted">{g.memberIds.map(nameOf).join('・') || '所属する人はいません'}</div>
+                {g.usedBy && (g.usedBy.compartments.length > 0 || g.usedBy.agents.length > 0) && (
+                  <div className="small">
+                    割り当て先:{' '}
+                    {g.usedBy.compartments.map((c) => <span key={c} className="badge warn">区画「{c}」</span>)}{' '}
+                    {g.usedBy.agents.map((a) => <span key={a} className="badge">{a}</span>)}
+                  </div>
+                )}
+                {open === g.id && g.usedBy && g.usedBy.compartments.length > 0 && (
+                  <p className="warn-msg small">
+                    このグループは権限区画（{g.usedBy.compartments.join('、')}）に割り当てられています。
+                    所属を変えると、その区画のデータを見られる人が変わります。変更は記録され、管理者全員に通知されます。
+                  </p>
+                )}
                 {open === g.id && (
                   <div className="scope-pick">
                     {users.filter((u) => u.status === 'active').map((u) => (
@@ -199,6 +222,91 @@ export function GroupSettings({ users, onChanged }: {
           await api.admin.createGroup(name.trim());
           setName('');
         }, `「${name.trim()}」を作りました`)}>グループを作る</button>
+      </div>
+      {msg && <p className={msg.ok ? 'ok-msg' : 'error'}>{msg.text}</p>}
+    </div>
+  );
+}
+
+/**
+ * 権限区画の割当（管理者ページ「ユーザーと権限」）。区画ごとに、入れるグループと人を決める。
+ *
+ * @remarks 区画は「全員」を持たない。誰も割り当てなければ誰も入れない（第16.3.2節「既定は区画外」）。
+ */
+export function CompartmentSettings({ onChanged }: { onChanged?: () => void }) {
+  const access = useAccessOptions();
+  const [items, setItems] = useState<CompartmentView[]>([]);
+  const [editing, setEditing] = useState<{ id: string; value: { groups: string[]; users: string[] } } | null>(null);
+  const [draft, setDraft] = useState({ name: '', description: '' });
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const load = () => api.admin.compartments().then((r) => setItems(r.items));
+  useEffect(() => { void load(); }, []);
+
+  const act = async (fn: () => Promise<unknown>, done: string) => {
+    setMsg(null);
+    try {
+      await fn();
+      setMsg({ ok: true, text: done });
+      await Promise.all([load(), access.reload()]);
+      onChanged?.();
+    } catch (e) {
+      setMsg({ ok: false, text: describeError(e, '保存できませんでした') });
+    }
+  };
+  const options = access.options;
+
+  return (
+    <div className="card" style={{ marginTop: 16 }}>
+      <h3>権限区画</h3>
+      <p className="small">
+        人事の給与・評価のような機微なデータを隔てる単位です。区画に入れるのは、割り当てたグループに所属する人と、個別に割り当てた人だけです。
+        区画に入れる人が変わると記録され、管理者全員に通知されます。
+      </p>
+      {!options && <p className="muted small">読み込んでいます…</p>}
+      {options && (
+        <table className="table">
+          <tbody>
+            {items.map((c) => (
+              <tr key={c.id}>
+                <td>
+                  <strong>{c.description ?? c.name}</strong> <span className="muted small">{c.name}</span>
+                  {editing?.id === c.id ? (
+                    <>
+                      <ScopeEditor
+                        value={editing.value} allowAll={false} options={options}
+                        onChange={(v) => setEditing({ id: c.id, value: v === 'all' ? { groups: [], users: [] } : v })}
+                      />
+                      <div className="row">
+                        <button className="btn small" onClick={() => void act(async () => {
+                          await api.admin.setCompartmentAssignment(c.id, editing.value);
+                          setEditing(null);
+                        }, `「${c.description ?? c.name}」の割当を保存しました`)}>保存する</button>
+                        <button className="btn small ghost" onClick={() => setEditing(null)}>やめる</button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="small">
+                      入れる人: {c.groups.length + c.users.length === 0 ? '誰もいません' : scopeSummary(c, options)}
+                    </div>
+                  )}
+                </td>
+                <td className="num">
+                  {editing?.id !== c.id && (
+                    <button className="link small" onClick={() => setEditing({ id: c.id, value: { groups: c.groups, users: c.users } })}>割当の変更</button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <div className="row">
+        <input value={draft.name} placeholder="区画の名前（英小文字。例: legal）" onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+        <input value={draft.description} placeholder="表示名（例: 法務）" onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
+        <button className="btn" disabled={!draft.name.trim()} onClick={() => void act(async () => {
+          await api.admin.createCompartment(draft.name.trim(), draft.description.trim());
+          setDraft({ name: '', description: '' });
+        }, '区画を作りました')}>区画を作る</button>
       </div>
       {msg && <p className={msg.ok ? 'ok-msg' : 'error'}>{msg.text}</p>}
     </div>

@@ -55,6 +55,8 @@ class MemoryRepo {
   settings: TenantSettings = structuredClone(DEFAULT_TENANT_SETTINGS);
   async getTenantSettings() { return this.settings; }
   groupsOf: Record<string, string[]> = {};
+  compartmentsOf: Record<string, string[]> = {};
+  async listUserCompartments(_t: string, u: string) { return this.compartmentsOf[u] ?? []; }
   async listUserGroupIds(_t: string, u: string) { return this.groupsOf[u] ?? []; }
   userSettings = structuredClone(DEFAULT_USER_SETTINGS);
   async getUserSettings() { return this.userSettings; }
@@ -134,6 +136,17 @@ test('利用範囲のグループに所属していれば実行できる', async
   repo.settings.access = { scopes: { 'share-test': { groups: ['g-dev'], users: [] } } };
   repo.groupsOf['u-member'] = ['g-dev'];
   assert.equal((await engine.advance(run)).outcome, 'awaiting_approval');
+});
+
+test('権限区画に属する業務は、区画に入れない依頼者では実行しない（第16.3.6節）', async () => {
+  const def = { ...SHARE_DEF, id: 'hr-test', compartment: 'hr' };
+  const { repo, engine, run } = setup(def, { name: 'chat.post', args: {} });
+  const res = await engine.advance(run);
+  assert.equal(res.outcome, 'failed');
+  assert.match(res.outcome === 'failed' ? res.reason : '', /権限区画/);
+  repo.runs = repo.runs.map((r) => ({ ...r, status: 'running', endedAt: null, failureReason: null }));
+  repo.compartmentsOf['u-member'] = ['hr'];
+  assert.equal((await engine.advance((await repo.getRun('t', 'r1'))!)).outcome, 'awaiting_approval', '区画に入れる人なら進む');
 });
 
 test('承認者のロールを持たない利用者は、承認も却下もできない', async () => {
