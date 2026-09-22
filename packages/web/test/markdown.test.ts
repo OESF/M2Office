@@ -6,7 +6,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseMarkdown } from '../src/markdown.js';
+import { parseInline, parseMarkdown } from '../src/markdown.js';
 
 test('見出しのすぐ次の行に箇条書きが続いても、見出しと箇条書きに分ける（業務の説明の書き方）', () => {
   const md = [
@@ -38,4 +38,32 @@ test('空行で区切った書き方（人が書く記事）も、これまで�
 test('段落のすぐ次の箇条書き、### の見出し、箇条書きの種類の切り替わりも分ける', () => {
   const md = ['説明の文', '- 項目 1', '### 小見出し', '1. 番号', '- 記号'].join('\n');
   assert.deepEqual(parseMarkdown(md).map((b) => b.kind), ['p', 'ul', 'h3', 'ol', 'ul']);
+});
+
+test('表は、見出しの行と区切りの行があるときだけ表にし、コードの中の | では分けない', () => {
+  const md = ['| ツール | すること |', '|---|---|', '| `a|b` | 読む |', '| `document.create` | 書く |', '', '| 区切りのない | 行 |'].join('\n');
+  const b = parseMarkdown(md);
+  assert.deepEqual(b[0], { kind: 'table', header: ['ツール', 'すること'], rows: [['`a|b`', '読む'], ['`document.create`', '書く']] });
+  assert.equal(b[1]!.kind, 'p', '区切りの行が無ければ表にしない');
+});
+
+test('コードの囲みの中は、見出しや箇条書きとして読まない', () => {
+  const b = parseMarkdown(['```bash', 'npm run ext:validate x', '# 見出しではない', '```', '次の段落'].join('\n'));
+  assert.deepEqual(b, [
+    { kind: 'code', lang: 'bash', text: 'npm run ext:validate x\n# 見出しではない' },
+    { kind: 'p', text: '次の段落' },
+  ]);
+});
+
+test('行の中のコード・リンク・太字を読み、相対のリンクは文字だけにする', () => {
+  assert.deepEqual(parseInline('[DeepWiki](https://deepwiki.com/) で `**x**` を **調べる**。[第7章](../../docs/07.md)'), [
+    { kind: 'link', text: 'DeepWiki', href: 'https://deepwiki.com/' },
+    { kind: 'text', text: ' で ' },
+    { kind: 'code', text: '**x**' },
+    { kind: 'text', text: ' を ' },
+    { kind: 'strong', text: '調べる' },
+    { kind: 'text', text: '。' },
+    { kind: 'text', text: '第7章' },
+  ]);
+  assert.ok(!parseInline('[危ない](javascript:alert(1))').some((n) => n.kind === 'link'), 'http(s) 以外は押せるリンクにしない');
 });

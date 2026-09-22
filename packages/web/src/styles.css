@@ -538,3 +538,12 @@ code.uri { background: var(--subtle-bg); border: 1px solid var(--line); border-r
 /* 知識の分け方の確認（仕様書 第11.7.2節） */
 .table tr.sub-row td { background: var(--subtle-bg); }
 .section-list { margin: 4px 0; padding-left: 1.6em; max-height: 320px; overflow-y: auto; font-size: 13px; line-height: 1.7; }
+
+/* ヘルプの記事・拡張機能の説明の Markdown（表・コード） */
+.md-table-wrap { overflow-x: auto; margin: 8px 0 12px; }
+.md-table td, .md-table th { vertical-align: top; }
+.md-code { font-family: Menlo, Consolas, monospace; font-size: 0.9em; background: var(--neutral-soft); border-radius: 3px; padding: 1px 4px; }
+.md-pre { background: var(--subtle-bg); border: 1px solid var(--line); border-radius: 4px; padding: 10px 12px; overflow-x: auto; font-size: 13px; line-height: 1.5; }
+.md-pre code { font-family: Menlo, Consolas, monospace; white-space: pre; }
+.md-table th, .md-table td { min-width: 6em; }
+.md-table .md-code { overflow-wrap: anywhere; }

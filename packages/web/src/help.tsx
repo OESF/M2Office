@@ -8,7 +8,7 @@
  */
 
 import { Fragment, useEffect, useState, type ReactNode } from 'react';
-import { parseMarkdown } from './markdown.js';
+import { parseInline, parseMarkdown } from './markdown.js';
 import { api, describeError, type AgentHelpView, type HelpArticleMeta } from './api.js';
 
 /** ヘルプセンターで記事を開く合図の名前。 */
@@ -156,7 +156,7 @@ function ArticleView({ id, items, onOpen, onBack }: {
  * ヘルプの記事の本文を表示する。
  *
  * @remarks
- * 見出し（#・##・###）・段落・箇条書き・番号付きの箇条書き・太字だけを扱う（docs/help/README.md）。
+ * 見出し（#・##・###）・段落・箇条書き・番号付きの箇条書き・表・コードの囲み・行の中のコード・リンク・太字を扱う（docs/help/README.md）。
  * 行ごとに読むため、見出しのすぐ次の行に箇条書きが続いても崩れない（`parseMarkdown`）。
  * HTML としては解釈せず、React の要素として組み立てる。記事に書かれたタグは文字のまま出る。
  */
@@ -169,6 +169,15 @@ export function Markdown({ text }: { text: string }) {
           case 'h3': return <h3 key={i}>{inline(b.text)}</h3>;
           case 'ul': return <ul key={i}>{b.items.map((t, j) => <li key={j}>{inline(t)}</li>)}</ul>;
           case 'ol': return <ol key={i}>{b.items.map((t, j) => <li key={j}>{inline(t)}</li>)}</ol>;
+          case 'table': return (
+            <div key={i} className="md-table-wrap">
+              <table className="table md-table">
+                <thead><tr>{b.header.map((h, j) => <th key={j}>{inline(h)}</th>)}</tr></thead>
+                <tbody>{b.rows.map((r, j) => <tr key={j}>{r.map((c, k) => <td key={k}>{inline(c)}</td>)}</tr>)}</tbody>
+              </table>
+            </div>
+          );
+          case 'code': return <pre key={i} className="md-pre"><code>{b.text}</code></pre>;
           default: return <p key={i}>{inline(b.text)}</p>;
         }
       })}
@@ -176,11 +185,16 @@ export function Markdown({ text }: { text: string }) {
   );
 }
 
-/** 太字（**…**）だけを解釈する。 */
+/** 行の中の書式（コード・リンク・太字）を React の要素にする。HTML としては解釈しない。 */
 function inline(s: string): ReactNode {
-  const parts = s.split(/(\*\*[^*]+\*\*)/g);
-  return parts.map((p, i) =>
-    p.startsWith('**') && p.endsWith('**') ? <strong key={i}>{p.slice(2, -2)}</strong> : <Fragment key={i}>{p}</Fragment>);
+  return parseInline(s).map((n, i) => {
+    switch (n.kind) {
+      case 'strong': return <strong key={i}>{n.text}</strong>;
+      case 'code': return <code key={i} className="md-code">{n.text}</code>;
+      case 'link': return <a key={i} className="link" href={n.href} target="_blank" rel="noreferrer noopener">{n.text}</a>;
+      default: return <Fragment key={i}>{n.text}</Fragment>;
+    }
+  });
 }
 
 /**
