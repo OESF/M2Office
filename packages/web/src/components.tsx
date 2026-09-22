@@ -195,7 +195,7 @@ export function statusLabel(status: string): string {
   return table[status] ?? status;
 }
 
-/** サッシパネルに出す根拠（仕様書 第18.2節）。 */
+/** サッシパネルに出す根拠（仕様書 第6.2節）。 */
 export function Evidence({ steps }: { steps: RunStep[] }) {
   const calls = steps.flatMap((s) => {
     const out = s.output as { tools?: { name: string; risk?: string }[] } | null;

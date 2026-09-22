@@ -29,7 +29,7 @@ export interface ToolContext {
  *
  * @remarks
  * 危険度は基盤側が持つ。エージェント定義から上書きできない
- * （仕様書 第7.2.2節、第7.4節）。
+ * （仕様書 第9.2.2節、第9.4節）。
  */
 export interface Tool {
   name: string;

@@ -19,13 +19,13 @@ export interface LlmMessage {
 export interface LlmRequest {
   tier: ModelTier;
   messages: LlmMessage[];
-  /** 生成の上限。実行の上限管理に使う（仕様書 第7.2節 limits）。 */
+  /** 生成の上限。実行の上限管理に使う（仕様書 第9.2節 limits）。 */
   maxOutputTokens?: number;
 }
 
 export interface LlmResponse {
   text: string;
-  /** 消費トークン。原価の記録に使う（仕様書 第22.4節）。 */
+  /** 消費トークン。原価の記録に使う（仕様書 第21.4節）。 */
   tokensUsed: number;
 }
 

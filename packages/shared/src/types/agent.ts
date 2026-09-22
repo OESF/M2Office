@@ -7,7 +7,7 @@
  * @see 仕様書 第9.2節 エージェント定義のスキーマ
  */
 
-/** ツールの危険度。承認の要否を決める（仕様書 第7.4節）。 */
+/** ツールの危険度。承認の要否を決める（仕様書 第9.4節）。 */
 export const RISK_LEVELS = [
   'read',
   'draft',
@@ -75,7 +75,7 @@ export interface Limits {
   timeoutSec: number;
 }
 
-/** 品質検証用のテストケース（仕様書 第20.2節）。 */
+/** 品質検証用のテストケース（仕様書 第18.2節）。 */
 export interface EvalCase {
   name: string;
   input: Record<string, unknown>;
@@ -86,7 +86,7 @@ export interface EvalCase {
  * エージェント定義の本体。
  *
  * @remarks
- * 定義から指定できないものがある（仕様書 第7.2.2節）。
+ * 定義から指定できないものがある（仕様書 第9.2.2節）。
  * モデル階層・ツールの危険度・承認ゲートの省略は基盤側が決め、
  * 定義から上書きできない。
  */

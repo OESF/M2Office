@@ -12,7 +12,7 @@ import type { Tool } from './registry.js';
 import { WORKSPACE_TOOLS } from './workspace.js';
 import { FILE_TOOLS } from './files.js';
 
-/** 組織知識を検索する。出典を伴って返す（仕様書 第9.7節）。 */
+/** 組織知識を検索する。出典を伴って返す（仕様書 第11.7節）。 */
 export const knowledgeSearch: Tool = {
   name: 'knowledge.search',
   risk: 'read',
@@ -36,7 +36,7 @@ export const meetingGetTranscript: Tool = {
   async invoke(args) {
     const text = String(args['transcript'] ?? '');
     if (!text.trim()) {
-      // 取得できなかった値を推測で埋めない（仕様書 第7.2節）
+      // 取得できなかった値を推測で埋めない（仕様書 第9.2節）
       return { available: false, reason: '文字起こしを取得できませんでした' };
     }
     return { available: true, text };

@@ -21,7 +21,7 @@ src/types/audit.ts    監査ログ
 
 | 名前 | 内容 |
 |---|---|
-| `AgentDefinition` | エージェント定義。条件分岐を持たない（仕様書 第7.2.1節） |
+| `AgentDefinition` | エージェント定義。条件分岐を持たない（仕様書 第9.2.1節） |
 | `RiskLevel` | ツールの危険度。承認の要否を決める |
 | `alwaysRequiresApproval()` | `external-send` 以上かどうかを判定する |
 | `RunStatus` | 実行の状態。`awaiting_approval` が中断を表す |
@@ -29,5 +29,5 @@ src/types/audit.ts    監査ログ
 
 ## 関連文書
 
-- 仕様書 [第7.2節 エージェント定義のスキーマ](../../specification.md)
-- 仕様書 第13.1節 主要エンティティ
+- 仕様書 [第9.2節 エージェント定義のスキーマ](../../specification.md)
+- 仕様書 第19.1節 主要エンティティ

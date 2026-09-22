@@ -49,7 +49,7 @@ export interface RunEngineDeps {
  * 承認ゲートで中断し、承認後に別のプロセスから再開できることが要件である。
  * そのため**状態はすべて永続化層から読み直す**。メモリ上の文脈に依存しない。
  *
- * @see 仕様書 第7.3節 実行ライフサイクル
+ * @see 仕様書 第9.3節 実行ライフサイクル
  */
 export class RunEngine {
   constructor(private readonly deps: RunEngineDeps) {}

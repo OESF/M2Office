@@ -6,7 +6,7 @@
 
 import type { LlmProvider, LlmRequest, LlmResponse, ModelTier } from './provider.js';
 
-/** 役割ごとのモデル名。設定で差し替えられる（仕様書 第21.2節）。 */
+/** 役割ごとのモデル名。設定で差し替えられる（仕様書 第20.2節）。 */
 export interface GeminiModelMap {
   fast: string;
   standard: string;
@@ -23,9 +23,9 @@ export interface GeminiModelMap {
  * @remarks
  * 共通形式を OpenAI 互換としたため、この実装は他の互換提供者にも流用できる。
  * ただしツール呼び出し・構造化出力・ストリーミングの対応範囲は
- * 提供者ごとに差があるため、利用前に確認すること（仕様書 第21.2.1節）。
+ * 提供者ごとに差があるため、利用前に確認すること（仕様書 第20.2.1節）。
  *
- * @see 仕様書 第21.2節 LLM 抽象化層
+ * @see 仕様書 第20.2節 LLM 抽象化層
  */
 export class OpenAiCompatibleProvider implements LlmProvider {
   readonly name: string;

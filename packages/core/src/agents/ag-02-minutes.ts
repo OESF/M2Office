@@ -15,7 +15,7 @@ import type { AgentDefinition } from '@m2office/shared';
  *
  * @remarks
  * `chat.post` が `external-send` にあたるため、承認ゲートが必須である。
- * 承認ゲートを外した定義は導入時の検証で拒否される（第7.4節）。
+ * 承認ゲートを外した定義は導入時の検証で拒否される（第9.4節）。
  *
  * @see 仕様書 第24.3.3節
  */

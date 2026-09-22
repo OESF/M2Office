@@ -28,7 +28,7 @@ import { filesRoute } from './routes/files.js';
  * API サーバー。
  *
  * @remarks
- * 画面が使う API と外部公開 API は同じものである（仕様書 第11.1節 A-1・A-2）。
+ * 画面が使う API と外部公開 API は同じものである（仕様書 第13.1節 A-1・A-2）。
  * 画面専用の抜け道を作らない。SPA 構成により、これは構造として保たれる。
  */
 const deps = buildDeps();

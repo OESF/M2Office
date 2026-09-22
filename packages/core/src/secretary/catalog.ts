@@ -11,13 +11,13 @@ import type { WorkspaceConnector } from '../connectors/types.js';
 import { addDays, jst, ymd } from '../connectors/mock.js';
 
 /**
- * 層 1 の照会カタログ（仕様書 第8.9.2節）。
+ * 層 1 の照会カタログ（仕様書 第10.9.2節）。
  *
  * LLM を介さずにデータを整形して返す定型の照会を、宣言的に定義する。
  * カタログの追加に実装の変更を伴わせないことが狙いである。
  *
  * @remarks
- * 層 1 は推論を通らないため、事実の誤りが混入しない（第8.9.4節）。
+ * 層 1 は推論を通らないため、事実の誤りが混入しない（第10.9.4節）。
  * 頻度の高い照会ほど正確になるという性質は、信頼の獲得に直接効く。
  */
 export interface DirectQuery {
@@ -47,7 +47,7 @@ export interface DirectQueryContext {
 
 export interface DirectAnswer {
   text: string;
-  /** 根拠。サッシパネルに表示する（仕様書 第18.2節）。 */
+  /** 根拠。サッシパネルに表示する（仕様書 第6.2節）。 */
   evidence: { label: string; value: string }[];
 }
 

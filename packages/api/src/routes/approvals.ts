@@ -15,7 +15,7 @@ import type { AppEnv } from '../middleware/tenant.js';
  * 承認トレイ。承認待ちの一覧と、承認・却下の受付。
  *
  * @remarks
- * 承認の API 化は慎重に扱う（仕様書 第11.3節）。
+ * 承認の API 化は慎重に扱う（仕様書 第13.3節）。
  * 外部アプリからの承認は既定で禁止とし、ここでは画面からの操作だけを受ける。
  * `external-send` と `financial` は恒久的に API 承認を禁止する。
  */
