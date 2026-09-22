@@ -6,6 +6,23 @@
  */
 import pg from 'pg';
 
+/**
+ * 日本時間で次に来る「曜日・時刻」を ISO 形式で返す。
+ *
+ * @param weekday 0（日）〜6（土）。`null` なら毎日
+ */
+function nextJst(weekday, hour, minute) {
+  const JST = 9 * 3_600_000;
+  const now = Date.now();
+  for (let d = 0; d <= 7; d++) {
+    const local = new Date(now + JST + d * 86_400_000);
+    if (weekday !== null && local.getUTCDay() !== weekday) continue;
+    const at = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate(), hour, minute) - JST;
+    if (at > now) return new Date(at).toISOString();
+  }
+  return new Date(now + 86_400_000).toISOString();
+}
+
 const url = process.env.DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office';
 const c = new pg.Client({ connectionString: url });
 await c.connect();
@@ -54,6 +71,29 @@ for (const [id, tid, kind, title, body, source, comp] of knowledge) {
     `insert into knowledge_items (id, tenant_id, kind, title, body, source, compartment)
      values ($1,$2,$3,$4,$5,$6,$7) on conflict (id) do nothing`,
     [id, tid, kind, title, body, source, comp],
+  );
+}
+
+// 定時実行。週次ブリーフ（毎週月曜 8:00）を全員に、受信箱整理（毎朝 8:30）を管理者に置く。
+// 次回の時刻は「今」から最も近い該当日時にする（日本時間）
+for (const t of tenants) {
+  for (const who of ['admin', 'member']) {
+    await c.query(
+      `insert into schedules (id, tenant_id, user_id, agent_id, agent_version, input, rule,
+                              timezone, next_run_at, created_by)
+       values ($1,$2,$3,'weekly-brief',1,'{}',$4,'Asia/Tokyo',$5,$3)
+       on conflict (id) do nothing`,
+      [`s-${t.sub}-${who}-brief`, t.id, `u-${t.sub}-${who}`,
+       JSON.stringify({ kind: 'weekly', weekday: 1, hour: 8, minute: 0 }), nextJst(1, 8, 0)],
+    );
+  }
+  await c.query(
+    `insert into schedules (id, tenant_id, user_id, agent_id, agent_version, input, rule,
+                            timezone, next_run_at, created_by)
+     values ($1,$2,$3,'inbox-triage',1,'{}',$4,'Asia/Tokyo',$5,$3)
+     on conflict (id) do nothing`,
+    [`s-${t.sub}-admin-inbox`, t.id, `u-${t.sub}-admin`,
+     JSON.stringify({ kind: 'daily', hour: 8, minute: 30 }), nextJst(null, 8, 30)],
   );
 }
 

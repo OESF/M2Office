@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
-import type { RequestContext } from '@m2office/shared';
-import { RunNotResumableError } from '@m2office/core';
+import { ApprovalForbiddenError, RunNotResumableError } from '@m2office/core';
 import type { AppDeps } from '../context.js';
+import type { AppEnv } from '../middleware/tenant.js';
 
 /**
  * 承認トレイ。承認待ちの一覧と、承認・却下の受付。
@@ -12,11 +12,13 @@ import type { AppDeps } from '../context.js';
  * `external-send` と `financial` は恒久的に API 承認を禁止する。
  */
 export function approvalsRoute(deps: AppDeps) {
-  const app = new Hono<{ Variables: { ctx: RequestContext } }>();
+  const app = new Hono<AppEnv>();
 
+  /** 本人のロールで判断できる承認待ちだけを返す。 */
   app.get('/', async (c) => {
     const ctx = c.get('ctx');
-    const items = await deps.repo.listPendingApprovals(ctx.tenant.id);
+    const items = (await deps.repo.listPendingApprovals(ctx.tenant.id))
+      .filter((a) => a.approverRole.some((r) => (ctx.user.roles as string[]).includes(r)));
     return c.json({ items });
   });
 
@@ -31,10 +33,14 @@ export function approvalsRoute(deps: AppDeps) {
 
     try {
       const result = await deps.engine.decideApproval(
-        ctx.tenant.id, id, body.decision, ctx.user.id, body.comment ?? null,
+        ctx.tenant.id, id, body.decision, { id: ctx.user.id, roles: ctx.user.roles },
+        body.comment ?? null,
       );
       return c.json({ runId: result.runId, decision: body.decision });
     } catch (err) {
+      if (err instanceof ApprovalForbiddenError) {
+        return c.json({ error: err.message }, 403);
+      }
       if (err instanceof RunNotResumableError) {
         return c.json({ error: err.message }, 409);
       }

@@ -131,6 +131,40 @@ pre.body { white-space: pre-wrap; background: #fbfcfc; border: 1px solid var(--l
   }
   .left .item .sub { display: none; }
   .left .count { float: none; margin-left: 6px; }
+  .left .me-summary { display: none; }
+  .topbar { flex-wrap: wrap; row-gap: 6px; }
   .canvas { grid-row: 2; padding: 16px; }
   .panes.with-sash .sash { grid-row: 3; max-height: 45vh; }
 }
+
+/* ログイン画面（仕様書 第16.1節） */
+.center { text-align: center; margin-top: 20vh; }
+.login { min-height: 100vh; display: grid; place-items: center; padding: 16px; }
+.login-card { width: min(420px, 100%); padding: 28px; }
+.login-card h1 { margin: 0 0 4px; font-size: 22px; }
+.login-card .lead { color: var(--muted); margin: 0 0 20px; }
+.btn.google { width: 100%; padding: 10px; }
+.dev-login { margin-top: 24px; border-top: 1px dashed var(--line); padding-top: 16px; }
+.dev-login h3 { font-size: 13px; margin: 0 0 4px; }
+.btn.wide { display: block; width: 100%; text-align: left; margin-bottom: 8px; padding: 8px 12px; }
+.btn.wide .sub { display: block; font-size: 11px; color: var(--muted); }
+.btn.small { padding: 3px 10px; font-size: 12px; }
+.small { font-size: 12px; }
+.link { color: var(--accent); font-size: 13px; text-decoration: none; }
+.link:hover { text-decoration: underline; }
+.badge.warn { background: #fdf3e3; color: var(--warn); }
+.row { display: flex; gap: 8px; margin-top: 10px; }
+.notice.unread { border-color: var(--accent); }
+.me-summary { margin: 16px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 13px; }
+.me-summary .sub { display: block; font-size: 11px; color: var(--muted); }
+
+/* 管理者ページ（仕様書 第6.6節） */
+.stats { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.stat { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px 16px; min-width: 160px; }
+.stat span { display: block; font-size: 12px; color: var(--muted); }
+.stat strong { font-size: 22px; }
+.table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); font-size: 13px; }
+.table th, .table td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; }
+.table th { font-size: 12px; color: var(--muted); font-weight: 600; background: #fafbfb; }
+.table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.canvas:has(.table) { overflow-x: auto; }

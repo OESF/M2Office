@@ -15,14 +15,19 @@ const ng = (label, detail) => {
   process.exitCode = 1;
 };
 
-/** テナントと利用者を指定して API を呼ぶ。 */
-async function call(tenant, path, init = {}) {
+/**
+ * テナントと利用者を指定して API を呼ぶ。
+ *
+ * 開発用の `X-User` ヘッダーを使う（`AUTH_DEV_HEADERS=true` が前提）。
+ * Cookie によるログインは「■ 9. ログイン」で別に確かめる。
+ */
+async function call(tenant, path, init = {}, who = 'admin') {
   const res = await fetch(`${API}${path}`, {
     ...init,
     headers: {
       'content-type': 'application/json',
       'x-tenant': tenant,
-      'x-user': `admin@${tenant === 'a' ? 'alpha' : 'beta'}.example.jp`,
+      'x-user': `${who}@${tenant === 'a' ? 'alpha' : 'beta'}.example.jp`,
       ...(init.headers ?? {}),
     },
   });
@@ -51,8 +56,8 @@ console.log('\n■ 1. 疎通と一覧');
   health.ok ? ok('API が応答する') : ng('API が応答しない');
 
   const { body } = await call('a', '/v1/agents');
-  body.agents?.length === 2
-    ? ok(`エージェントが 2 件（${body.agents.map((a) => a.name).join(' / ')}）`)
+  body.agents?.length === 5
+    ? ok(`エージェントが 5 件（${body.agents.map((a) => a.name).join(' / ')}）`)
     : ng('エージェントの一覧が取得できない', JSON.stringify(body));
 }
 
@@ -175,7 +180,7 @@ console.log('\n■ 5. テナント分離');
 
 console.log('\n■ 6. 監査ログ');
 {
-  const { body } = await call('a', '/v1/audit-events');
+  const { body } = await call('a', '/v1/admin/audit-events');
   const actions = new Set((body.items ?? []).map((e) => e.action));
   const required = ['job.create', 'tool.invoke', 'run.await_approval', 'approval.decide', 'run.complete'];
   const missing = required.filter((a) => !actions.has(a));
@@ -201,6 +206,163 @@ console.log('\n■ 7. 秘書の応答（3 層）');
   routed.suggestedAgent
     ? ok(`業務エージェントへ取り次いだ（${routed.suggestedAgent.name}）`)
     : ng('取次ができない', JSON.stringify(routed).slice(0, 120));
+}
+
+console.log('\n■ 8. ダミー接続による照会（Google 未接続）');
+{
+  for (const [message, expect] of [
+    ['今日の予定は？', /予定/], ['未読のメールある？', /メール/], ['今日のタスクは？', /タスク/],
+  ]) {
+    const { body } = await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message }) });
+    const marked = body.evidence?.[0]?.value?.includes('ダミー');
+    body.layer === 'direct' && expect.test(body.text) && marked
+      ? ok(`「${message}」→ 層 1（${body.elapsedMs}ms）: ${body.text}（ダミーと明示）`)
+      : ng(`「${message}」に層 1 で答えない、またはダミーの明示が無い`, JSON.stringify(body).slice(0, 160));
+  }
+  const { body: routed } = await call('a', '/v1/secretary', {
+    method: 'POST', body: JSON.stringify({ message: 'メールの返信を下書きして' }),
+  });
+  routed.suggestedAgent?.id === 'inbox-triage'
+    ? ok('作業の依頼は照会と取り違えず、受信箱整理へ取り次いだ')
+    : ng('依頼を照会として処理してしまう', JSON.stringify(routed).slice(0, 160));
+}
+
+console.log('\n■ 9. AG-01 受信箱整理（承認なし・送信しない）');
+{
+  const { body } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: 'inbox-triage' }) });
+  const run = await waitFor('a', body.runId, ['completed', 'failed', 'awaiting_approval']);
+  run.run.status === 'completed' ? ok('承認を挟まずに完了した') : ng(`完了しない（${run.run.status}）`, run.run.failureReason);
+  const draft = run.steps.flatMap((s) => s.output?.tools ?? []).find((t) => t.name === 'gmail.create_draft');
+  draft?.result?.sent === false && draft?.result?.draftId
+    ? ok(`下書きを作った（${draft.result.draftId}、送信はしていない）`)
+    : ng('下書きが作られていない');
+  run.artifacts?.length ? ok(`分類の一覧を成果物に残した（${run.artifacts[0].title}）`) : ng('分類の一覧が無い');
+}
+
+console.log('\n■ 10. AG-03 日程調整（招待の前に承認）');
+{
+  const { body } = await call('a', '/v1/jobs', {
+    method: 'POST',
+    body: JSON.stringify({ agentId: 'scheduling', input: { title: '企画会議', attendees: 'member@alpha.example.jp' } }),
+  });
+  const run = await waitFor('a', body.runId, ['awaiting_approval', 'completed', 'failed']);
+  const invitedEarly = run.steps.flatMap((s) => s.output?.tools ?? []).some((t) => t.name === 'calendar.create' && !t.error);
+  run.run.status === 'awaiting_approval' && !invitedEarly
+    ? ok('空きを取得し、招待の前で止まった')
+    : ng(`承認待ちにならない（${run.run.status}）`);
+
+  // 一般利用者は承認できない
+  const { body: pending } = await call('a', '/v1/approvals');
+  const approval = pending.items.find((a) => a.present.includes('招待'));
+  const denied = await call('a', `/v1/approvals/${approval.id}`, {
+    method: 'POST', body: JSON.stringify({ decision: 'approved' }),
+  }, 'member');
+  denied.status === 403 ? ok('承認者でない利用者の承認は拒否される（403）') : ng(`拒否されない（${denied.status}）`);
+
+  await call('a', `/v1/approvals/${approval.id}`, { method: 'POST', body: JSON.stringify({ decision: 'approved' }) });
+  const done = await waitFor('a', body.runId, ['completed', 'failed']);
+  const attempts = done.steps.flatMap((s) => s.output?.tools ?? []).filter((t) => t.name === 'calendar.create');
+  const created = attempts.find((t) => t.result);
+  done.run.status === 'completed' && created?.result?.eventId
+    ? ok(`承認後に予定を作成した（${created.result.eventId}）`)
+    : ng(`予定が作られない（${done.run.status}）`, done.run.failureReason);
+}
+
+console.log('\n■ 11. AG-05 週次ブリーフ（定時実行 → 本人へ通知）');
+{
+  const { body: list } = await call('a', '/v1/schedules', {}, 'member');
+  const brief = list.items?.find((s) => s.agentId === 'weekly-brief');
+  brief ? ok(`定時実行が登録されている（${brief.label}）`) : ng('週次ブリーフの定時実行が無い');
+
+  const { body: before } = await call('a', '/v1/notifications', {}, 'member');
+  await call('a', `/v1/schedules/${brief.id}/trigger`, { method: 'POST' }, 'member');
+  ok('次の回を今にした（ワーカーの見回りを待つ）');
+
+  const deadline = Date.now() + 40000;
+  let after;
+  while (Date.now() < deadline) {
+    ({ body: after } = await call('a', '/v1/notifications', {}, 'member'));
+    if (after.items.length > before.items.length) break;
+    await sleep(1000);
+  }
+  const latest = after.items[0];
+  after.items.length > before.items.length && latest.kind === 'brief'
+    ? ok(`本人に届いた「${latest.title}」`)
+    : ng('通知が届かない');
+  /予定: \d+ 件/.test(latest?.body ?? '') ? ok('予定・タスク・受信箱・承認待ちを集めて要約した') : ng('要約に件数が無い', latest?.body);
+
+  const { body: adminInbox } = await call('a', '/v1/notifications');
+  adminInbox.items.every((n) => n.id !== latest?.id) ? ok('他の利用者の受信箱には入らない') : ng('他人に届いている');
+
+  const { body: again } = await call('a', '/v1/schedules', {}, 'member');
+  const next = again.items.find((s) => s.id === brief.id);
+  Date.parse(next.nextRunAt) > Date.now() ? ok(`次回は ${new Date(next.nextRunAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}`) : ng('次回の時刻が進んでいない');
+}
+
+console.log('\n■ 12. 権限');
+{
+  const admin = await call('a', '/v1/admin/usage', {}, 'member');
+  admin.status === 403 ? ok('一般利用者は管理者 API を使えない（403）') : ng(`使えてしまう（${admin.status}）`);
+
+  const { body: mine } = await call('a', '/v1/jobs', {}, 'member');
+  mine.items.every((i) => i.job?.requestedBy === 'u-a-member')
+    ? ok(`実行履歴は本人の分だけ（${mine.items.length} 件）`)
+    : ng('他人の実行が履歴に見える');
+
+  const other = await call('a', `/v1/runs/${runId}`, {}, 'member');
+  other.status === 404 ? ok('他人の実行の中身は見えない（404）') : ng(`見えてしまう（${other.status}）`);
+
+  const { body: usage } = await call('a', '/v1/admin/usage');
+  usage.total?.runs > 0 ? ok(`管理者は利用量を見られる（${usage.total.runs} 件、${usage.total.costJpy} 円）`) : ng('利用量が取れない');
+}
+
+console.log('\n■ 13. ログイン（Cookie と CSRF）');
+{
+  /** Cookie だけで API を呼ぶ。開発用ヘッダーは付けない。 */
+  // fetch では Host ヘッダーを差し替えられないため、サブドメインの URL を直接呼ぶ
+  const port = new URL(API).port || '3101';
+  const raw = (host, path, init = {}) =>
+    fetch(`http://${host}:${port}${path}`, {
+      ...init, headers: { 'content-type': 'application/json', ...(init.headers ?? {}) },
+    });
+
+  const anon = await raw('a.lvh.me', '/v1/me');
+  anon.status === 401 ? ok('ログインしていなければ 401（管理者として扱わない）') : ng(`401 にならない（${anon.status}）`);
+
+  const login = await raw('a.lvh.me', '/v1/auth/dev-login', {
+    method: 'POST', body: JSON.stringify({ email: 'member@alpha.example.jp' }),
+  });
+  const setCookie = login.headers.get('set-cookie') ?? '';
+  const cookie = setCookie.split(';')[0];
+  /httponly/i.test(setCookie) && /samesite=lax/i.test(setCookie) && !/domain=/i.test(setCookie)
+    ? ok('HttpOnly・SameSite=Lax・Domain 無しの Cookie を発行した')
+    : ng('Cookie の属性が不適切', setCookie);
+  const { csrfToken } = await login.json();
+
+  const me = await raw('a.lvh.me', '/v1/me', { headers: { cookie } }).then((r) => r.json());
+  me.user?.email === 'member@alpha.example.jp' ? ok('Cookie で本人として扱われる') : ng('Cookie が効かない');
+
+  const noCsrf = await raw('a.lvh.me', '/v1/secretary', {
+    method: 'POST', headers: { cookie }, body: JSON.stringify({ message: '承認待ちある？' }),
+  });
+  noCsrf.status === 403 ? ok('CSRF トークンの無い書き込みは拒否（403）') : ng(`拒否されない（${noCsrf.status}）`);
+
+  const withCsrf = await raw('a.lvh.me', '/v1/secretary', {
+    method: 'POST', headers: { cookie, 'x-csrf-token': csrfToken }, body: JSON.stringify({ message: '承認待ちある？' }),
+  });
+  withCsrf.status === 200 ? ok('CSRF トークンがあれば通る') : ng(`通らない（${withCsrf.status}）`);
+
+  const cross = await raw('b.lvh.me', '/v1/me', { headers: { cookie } });
+  cross.status === 401 ? ok('A 社の Cookie を B 社に持ち込んでも通らない（401）') : ng(`通ってしまう（${cross.status}）`);
+
+  const wrongDomain = await raw('a.lvh.me', '/v1/auth/dev-login', {
+    method: 'POST', body: JSON.stringify({ email: 'admin@beta.example.jp' }),
+  });
+  wrongDomain.status === 403 ? ok('他社のドメインではログインできない（403）') : ng(`ログインできてしまう（${wrongDomain.status}）`);
+
+  await raw('a.lvh.me', '/v1/auth/logout', { method: 'POST', headers: { cookie, 'x-csrf-token': csrfToken } });
+  const after = await raw('a.lvh.me', '/v1/me', { headers: { cookie } });
+  after.status === 401 ? ok('ログアウト後は同じ Cookie が使えない') : ng(`使えてしまう（${after.status}）`);
 }
 
 console.log('');

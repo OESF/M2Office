@@ -1,4 +1,6 @@
-import type { Approval, Run, RunStep, Artifact, Tenant, User } from '@m2office/shared';
+import type {
+  Approval, Artifact, AuditEvent, Notification, Run, RunStep, Schedule, ScheduleRule, Tenant, User,
+} from '@m2office/shared';
 
 /**
  * API の呼び出し口。
@@ -7,11 +9,11 @@ import type { Approval, Run, RunStep, Artifact, Tenant, User } from '@m2office/s
  * 画面は API を経由する以外にデータへ到達する手段を持たない
  * （仕様書 第11.1節 A-2）。ここが唯一の入口である。
  *
- * 認証は Google アカウントに一本化する（第16.1節）。プロトタイプでは
- * 開発用に利用者を `x-user` で指定する。
+ * 認証は Google アカウントに一本化する（第16.1節）。ログイン状態は
+ * HttpOnly の Cookie で持ち、画面の JavaScript からは読めない（第20.7節）。
+ * 状態を変える要求には、`/v1/me` で受け取った CSRF トークンを添える。
  */
 const params = new URLSearchParams(location.search);
-const devUser = params.get('user');
 /**
  * 開発用のテナント指定。
  *
@@ -22,29 +24,63 @@ const devUser = params.get('user');
  */
 const devTenant = params.get('tenant');
 
+/** CSRF トークン。ログイン直後と `/v1/me` の応答で更新する。 */
+let csrfToken: string | null = null;
+
+/** ログインが切れたときに呼ぶ。画面はログイン画面へ戻す。 */
+let onUnauthorized: (() => void) | null = null;
+export function setUnauthorizedHandler(fn: () => void): void {
+  onUnauthorized = fn;
+}
+
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/v1${path}`, {
     ...init,
+    credentials: 'same-origin',
     headers: {
       'content-type': 'application/json',
       ...(devTenant ? { 'x-tenant': devTenant } : {}),
-      ...(devUser ? { 'x-user': devUser } : {}),
+      ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}),
       ...(init?.headers ?? {}),
     },
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: '通信に失敗しました' }));
-    throw new ApiError(body.error ?? `エラー (${res.status})`, res.status);
+    if (res.status === 401 && body.login) onUnauthorized?.();
+    throw new ApiError(body.error ?? `エラー (${res.status})`, res.status, !!body.login);
   }
   return res.json() as Promise<T>;
 }
 
 /** API が返した業務上のエラー。画面では平易な文言として表示する。 */
 export class ApiError extends Error {
-  constructor(message: string, readonly status: number) {
+  constructor(message: string, readonly status: number, readonly needsLogin = false) {
     super(message);
     this.name = 'ApiError';
   }
+}
+
+export interface Me {
+  tenant: Tenant;
+  user: User;
+  auth: { method: 'session' | 'dev-header' };
+  csrfToken: string | null;
+  /** 予定やメールの出どころ。`mock` の間は画面にダミーであることを示す。 */
+  workspaceSource: 'mock' | 'google';
+}
+
+export interface LoginProviders {
+  tenant: { name: string; subdomain: string };
+  google: { enabled: boolean; reason?: string };
+  dev: { enabled: boolean; users: { email: string; displayName: string; roles: string[] }[] };
+}
+
+export type ScheduleView = Schedule & { label: string };
+
+export interface AdminRun {
+  id: string; status: string; startedAt: string; endedAt: string | null;
+  tokensUsed: number; costJpy: number; agentId: string; agentName: string; origin: string;
+  requestedBy: string;
 }
 
 export interface AgentSummary {
@@ -81,7 +117,42 @@ export interface SecretaryReply {
 }
 
 export const api = {
-  me: () => call<{ tenant: Tenant; user: User }>('/me'),
+  me: async () => {
+    const me = await call<Me>('/me');
+    csrfToken = me.csrfToken;
+    return me;
+  },
+  providers: () => call<LoginProviders>('/auth/providers'),
+  devLogin: async (email: string) => {
+    const res = await call<{ csrfToken: string }>('/auth/dev-login', {
+      method: 'POST', body: JSON.stringify({ email }),
+    });
+    csrfToken = res.csrfToken;
+  },
+  logout: async () => {
+    await call('/auth/logout', { method: 'POST' });
+    csrfToken = null;
+  },
+  notifications: () => call<{ items: Notification[]; unread: number }>('/notifications'),
+  readNotification: (id: string) => call(`/notifications/${id}/read`, { method: 'POST' }),
+  schedules: () => call<{ items: ScheduleView[] }>('/schedules'),
+  createSchedule: (agentId: string, rule: ScheduleRule) =>
+    call<ScheduleView>('/schedules', { method: 'POST', body: JSON.stringify({ agentId, rule }) }),
+  updateSchedule: (id: string, patch: { enabled?: boolean; rule?: ScheduleRule }) =>
+    call<ScheduleView>(`/schedules/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  triggerSchedule: (id: string) => call(`/schedules/${id}/trigger`, { method: 'POST' }),
+  admin: {
+    usage: () => call<{
+      items: { agentId: string; name: string; runs: number; costJpy: number; tokens: number }[];
+      total: { runs: number; costJpy: number }; note: string | null;
+    }>('/admin/usage'),
+    runs: () => call<{ items: AdminRun[] }>('/admin/runs'),
+    users: () => call<{ items: User[] }>('/admin/users'),
+    audit: () => call<{ items: AuditEvent[] }>('/admin/audit-events'),
+    connectors: () => call<{ workspace: { source: string; label: string }; llm: { provider: string } }>(
+      '/admin/connectors',
+    ),
+  },
   agents: () => call<{ agents: AgentSummary[] }>('/agents'),
   createJob: (agentId: string, input: Record<string, unknown>, origin = 'menu') =>
     call<{ jobId: string; runId: string }>('/jobs', {

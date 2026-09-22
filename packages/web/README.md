@@ -27,7 +27,16 @@ npm run preview   # ビルド結果の確認（3103）
 | 株式会社ベータ工業 | http://b.lvh.me:3100 |
 
 `lvh.me` が使えない環境では `http://localhost:3100/?tenant=a` でも開けます。
-利用者は `?user=member@alpha.example.jp` で切り替えます。
+
+## ログイン
+
+開くとログイン画面になります。Google ログインは準備中のため、
+開発用ログインで利用者を選びます（本番では表示されません）。
+ログイン状態は HttpOnly の Cookie で持ち、画面の JavaScript からは読めません。
+状態を変える要求には、`/v1/me` で受け取った CSRF トークンを添えます（`src/api.ts`）。
+
+管理者は `/admin` で管理者ページを開けます（利用状況・実行の一覧・ユーザー・監査ログ・接続）。
+表示の出し分けは利便のためであり、権限の判定は API 側で行います。
 
 ## 画面の構成
 
@@ -55,7 +64,10 @@ npm run preview   # ビルド結果の確認（3103）
 
 ```
 src/api.ts          API の呼び出し口。ここが唯一の入口
-src/App.tsx         画面全体と秘書バー
+src/main.tsx        入口。ログインの状態でワークスペース／管理者ページ／ログイン画面を出し分ける
+src/Login.tsx       ログイン画面
+src/App.tsx         ワークスペース（3 ペイン、秘書バー、お知らせ、定時実行）
+src/Admin.tsx       管理者ページ（参照のみ）
 src/components.tsx  フォーム・実行詳細・承認トレイ
 src/styles.css      3 ペインの配置
 ```

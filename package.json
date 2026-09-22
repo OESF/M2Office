@@ -21,7 +21,7 @@
     "db:seed": "node scripts/seed.mjs",
     "db:reset": "docker compose down -v && npm run db:up && npm run db:migrate && npm run db:seed",
     "typecheck": "tsc -b",
-    "test": "node --test packages/*/test/*.test.ts",
+    "test": "node --import tsx --test packages/*/test/*.test.ts",
     "smoke": "node scripts/smoke.mjs"
   },
   "devDependencies": {

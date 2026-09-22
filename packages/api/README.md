@@ -16,30 +16,59 @@ npm run dev     # 監視付き
 npm run start   # 単発
 ```
 
-## テナントの指定
+## テナントの指定と認証
 
 ホスト名からテナントを解決します（`a.lvh.me:3101` → `a`）。
-開発と外部からの確認のため、ヘッダーでの指定も受け付けます。
+
+利用者は次の順で確認します。どちらでも確認できなければ 401 を返します。
+**利用者の指定が無いときに管理者として扱うことはしません。**
+
+| 順 | 手段 | 条件 |
+|---|---|---|
+| 1 | ログイン状態の Cookie（`m2o_session`） | テナントが一致すること。書き込みには `X-CSRF-Token` が必要 |
+| 2 | `X-User` ヘッダー | **開発用**。`AUTH_DEV_HEADERS=true` のときだけ |
 
 ```bash
-curl -H 'x-tenant: a' http://localhost:3101/v1/agents
+# 開発用ヘッダーでの確認（AUTH_DEV_HEADERS=true）
 curl -H 'x-tenant: a' -H 'x-user: member@alpha.example.jp' http://localhost:3101/v1/me
 ```
+
+Cookie は `HttpOnly`・`SameSite=Lax` で、`Domain` 属性を付けません。
+A 社のサブドメインで発行した Cookie は B 社へ送られず、持ち込んでも拒否します。
+データベースには Cookie の値ではなくハッシュを保存します。
+
+正式なログインは Google アカウントのみです（仕様書 第16.1節）。
+OAuth クライアントが整うまでは、`GET /v1/auth/google/start` は 503 を返し、
+開発用ログイン（`POST /v1/auth/dev-login`）で動かします。
+開発用の手段は `NODE_ENV=production` で有効にすると起動を拒否します。
 
 ## 主なエンドポイント
 
 | メソッド・パス | 内容 |
 |---|---|
 | `GET /health` | 生存確認。テナント不要 |
-| `GET /v1/me` | テナントと利用者 |
+| `GET /v1/auth/providers` | 使えるログイン手段。認証不要 |
+| `POST /v1/auth/dev-login` | 開発用ログイン。認証不要 |
+| `POST /v1/auth/logout` | ログアウト |
+| `GET /v1/me` | テナント・利用者・CSRF トークン・接続の状態 |
 | `GET /v1/agents` | 利用できるエージェントと入力スキーマ |
 | `POST /v1/jobs` | ジョブを作成し待ち行列へ入れる。実行はワーカーが担う |
-| `GET /v1/jobs` | 実行の一覧 |
-| `GET /v1/runs/:id` | 実行の詳細、ステップ、成果物 |
-| `GET /v1/approvals` | 承認待ちの一覧 |
-| `POST /v1/approvals/:id` | 承認または却下 |
+| `GET /v1/jobs` | **本人が依頼した**実行の一覧 |
+| `GET /v1/runs/:id` | 実行の詳細。依頼者本人と承認者だけが見られる |
+| `GET /v1/approvals` | 本人のロールで判断できる承認待ち |
+| `POST /v1/approvals/:id` | 承認または却下。ロールが無ければ 403 |
 | `POST /v1/secretary` | 秘書への依頼。どの層で答えたかを返す |
-| `GET /v1/audit-events` | 監査ログ |
+| `GET /v1/notifications` | 本人宛の通知 |
+| `POST /v1/notifications/:id/read` | 既読にする |
+| `GET /v1/schedules` | 本人の定時実行 |
+| `POST /v1/schedules` | 定時実行を作る（毎日／毎週） |
+| `PATCH /v1/schedules/:id` | 停止・再開、規則の変更 |
+| `POST /v1/schedules/:id/trigger` | 次の回を今にする（動作確認用） |
+| `GET /v1/admin/usage` | 管理者: エージェント別の利用量 |
+| `GET /v1/admin/runs` | 管理者: 全利用者の実行の状態（中身は返さない） |
+| `GET /v1/admin/users` | 管理者: 利用者の一覧 |
+| `GET /v1/admin/audit-events` | 管理者: 監査ログ |
+| `GET /v1/admin/connectors` | 管理者: 接続の状態 |
 
 ## 承認の扱い
 
@@ -51,8 +80,9 @@ curl -H 'x-tenant: a' -H 'x-user: member@alpha.example.jp' http://localhost:3101
 
 ```
 src/index.ts          サーバーの組み立て
-src/context.ts        依存の構築（永続化・LLM・ツール・エンジン・秘書）
-src/middleware/       テナント解決
+src/context.ts        依存の構築（永続化・LLM・接続口・ツール・エンジン・秘書）
+src/auth/             認証の設定とログイン状態（Cookie）
+src/middleware/       テナント解決、利用者の確認、ロールの確認
 src/routes/           エンドポイント
 ```
 
