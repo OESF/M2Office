@@ -14,6 +14,7 @@ import {
 import { HelpCenter, HelpTip, Tour, openHelp, useOpenHelp } from './help.js';
 import { AgentForm, ApprovalTray, Evidence, RunView, statusLabel } from './components.js';
 import { Settings, orderAgents } from './Settings.js';
+import { NavHeading, NavItem, SideNavLayout, ThemeToggle, agentIcon } from './nav.js';
 
 /** 中央キャンバスに何を表示しているか。 */
 type View =
@@ -103,66 +104,42 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
         )}
         <span className="spacer" />
         {isAdmin && <a className="link" href={`/admin${location.search}`}>管理者ページ</a>}
+        <ThemeToggle />
         <span className="badge">{me.user.displayName}</span>
         <button className="btn ghost small" onClick={onLogout}>ログアウト</button>
       </header>
 
-      <div className={`panes${showSash ? ' with-sash' : ''}`}>
-        <nav className="left">
-          <h2>業務</h2>
-          {orderAgents(agents, menu.order).filter((a) => !menu.hidden.includes(a.id)).map((a) => (
-            <button
-              key={a.id}
-              className={`item${view.kind === 'agent' && view.agent.id === a.id ? ' active' : ''}`}
-              onClick={() => setView({ kind: 'agent', agent: a })}
-            >
-              {a.name}
-              <span className="sub">{a.description}</span>
-            </button>
-          ))}
-          <h2>自分の状況</h2>
-          <button
-            className={`item${view.kind === 'approvals' ? ' active' : ''}`}
-            onClick={() => setView({ kind: 'approvals' })}
-          >
-            承認トレイ
-            {approvals.length > 0 && <span className="count">{approvals.length}</span>}
-          </button>
-          <button
-            className={`item${view.kind === 'history' ? ' active' : ''}`}
-            onClick={() => setView({ kind: 'history' })}
-          >
-            実行履歴
-          </button>
-          <button
-            className={`item${view.kind === 'notifications' ? ' active' : ''}`}
-            onClick={() => setView({ kind: 'notifications' })}
-          >
-            お知らせ
-            {unread > 0 && <span className="count">{unread}</span>}
-          </button>
-          <button
-            className={`item${view.kind === 'schedules' ? ' active' : ''}`}
-            onClick={() => setView({ kind: 'schedules' })}
-          >
-            定時実行
-          </button>
-          <button
-            className={`item${view.kind === 'help' ? ' active' : ''}`}
-            onClick={() => setView({ kind: 'help', articleId: null })}
-          >
-            ヘルプ
-          </button>
-          <button
-            className={`me-summary${view.kind === 'settings' ? ' active' : ''}`}
-            onClick={() => setView({ kind: 'settings' })}
-          >
-            <strong>{me.user.displayName}</strong>
-            <span className="sub">{me.user.roles.map(roleLabel).join('・')}</span>
-            <span className="sub">使える業務 {agents.length} 件 ・ 個人設定</span>
-          </button>
-        </nav>
-
+      <SideNavLayout
+        extraClass={showSash ? 'with-sash' : ''}
+        nav={(
+          <>
+            <NavHeading>業務</NavHeading>
+            {orderAgents(agents, menu.order).filter((a) => !menu.hidden.includes(a.id)).map((a) => (
+              <NavItem
+                key={a.id} icon={agentIcon(a.category)} label={a.name} description={a.description}
+                active={view.kind === 'agent' && view.agent.id === a.id}
+                onClick={() => setView({ kind: 'agent', agent: a })}
+              />
+            ))}
+            <NavHeading>自分の状況</NavHeading>
+            <NavItem icon="approvals" label="承認トレイ" description="あなたが判断する承認と、操作の確認" count={approvals.length}
+              active={view.kind === 'approvals'} onClick={() => setView({ kind: 'approvals' })} />
+            <NavItem icon="history" label="実行履歴" description="過去の依頼と結果"
+              active={view.kind === 'history'} onClick={() => setView({ kind: 'history' })} />
+            <NavItem icon="notifications" label="お知らせ" description="あなた宛ての通知。週次ブリーフもここに届きます" count={unread}
+              active={view.kind === 'notifications'} onClick={() => setView({ kind: 'notifications' })} />
+            <NavItem icon="schedules" label="定時実行" description="決まった時刻に、あなたの権限で業務を実行します"
+              active={view.kind === 'schedules'} onClick={() => setView({ kind: 'schedules' })} />
+            <NavItem icon="help" label="ヘルプ" description="使い方の記事と検索"
+              active={view.kind === 'help'} onClick={() => setView({ kind: 'help', articleId: null })} />
+            <NavItem
+              className="me-summary" icon="user" label={me.user.displayName}
+              description={`${me.user.roles.map(roleLabel).join('・')}・使える業務 ${agents.length} 件・個人設定を開く`}
+              active={view.kind === 'settings'} onClick={() => setView({ kind: 'settings' })}
+            />
+          </>
+        )}
+      >
         <main className="canvas">
           {error && <p className="error">{error}</p>}
           {view.kind === 'home' && <Home approvals={approvals.length} agents={agents.length} />}
@@ -286,7 +263,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
             )}
           </aside>
         )}
-      </div>
+      </SideNavLayout>
 
       <SecretaryBar onReply={setReply} />
       {showTour && <Tour onDone={finishTour} />}

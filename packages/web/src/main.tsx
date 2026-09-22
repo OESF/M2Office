@@ -11,6 +11,10 @@ import { Admin } from './Admin.js';
 import { Login } from './Login.js';
 import { api, ApiError, setUnauthorizedHandler, type Me } from './api.js';
 import './styles.css';
+import { applyTheme } from './theme.js';
+
+// 読み込みの途中で明るさが変わらないよう、描画の前に反映する（仕様書 第6.1.2節）
+applyTheme();
 
 /**
  * 画面の入口。ログインの状態を確かめ、ワークスペースか管理者ページを出す。

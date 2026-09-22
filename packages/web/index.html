@@ -4,6 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>M2Office</title>
+    <script>
+      // 画面の明るさを描画の前に反映する（読み込みの途中で白く光らないように。仕様書 第6.1.2節）
+      try {
+        var t = localStorage.getItem('m2office.theme');
+        if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -1,5 +1,5 @@
 /**
- * @file 個人設定の画面（プロフィール・秘書・通知・メニューの並び・セキュリティ・利用状況）。
+ * @file 個人設定の画面（プロフィール・秘書・通知・表示・メニューの並び・セキュリティ・利用状況）。
  *
  * @see 仕様書 第6.5節 個人設定
  */
@@ -7,6 +7,7 @@
 import { useEffect, useState } from 'react';
 import type { UserSettings } from '@m2office/shared';
 import { api, type AgentSummary, type Me } from './api.js';
+import { useTheme, type ThemeChoice } from './theme.js';
 
 /**
  * 個人設定（仕様書 第6.5節）。左ペイン下部から開く。
@@ -129,6 +130,7 @@ export function Settings({ me, agents, onChanged }: {
         </div>
       </div>
 
+      <DisplaySettings />
       <div className="card">
         <h3>メニューの並び</h3>
         <p>使える業務のうち、メニューに並べるものと順番を決めます。使える業務を増やすことはできません。</p>
@@ -195,4 +197,24 @@ export function orderAgents<T extends { id: string }>(agents: T[], order: string
     return i === -1 ? order.length + agents.findIndex((a) => a.id === id) : i;
   };
   return [...agents].sort((a, b) => rank(a.id) - rank(b.id));
+}
+
+/** 表示（画面の明るさ）。端末ごとに覚え、保存の操作は要らない（仕様書 第6.1.2節）。 */
+function DisplaySettings() {
+  const { choice, set } = useTheme();
+  const options: [ThemeChoice, string][] = [['system', '端末の設定に合わせる'], ['light', 'ライト'], ['dark', 'ダーク']];
+  return (
+    <div className="card">
+      <h3>表示</h3>
+      <p>画面の明るさを選びます。この端末（ブラウザ）にだけ効き、すぐに変わります。上部のボタンでも切り替えられます。</p>
+      <div className="row">
+        {options.map(([v, label]) => (
+          <label key={v} className="check">
+            <input type="radio" name="theme" checked={choice === v} onChange={() => set(v)} /> {label}
+          </label>
+        ))}
+      </div>
+      <p className="muted small">左のメニューは、上の端のボタンで狭く（アイコンだけに）できます。これもこの端末に覚えます。</p>
+    </div>
+  );
 }

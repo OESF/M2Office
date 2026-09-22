@@ -14,23 +14,25 @@ import {
 import { Dashboard } from './Dashboard.js';
 import { ExtensionSettings } from './Extensions.js';
 import { HelpCenter, useOpenHelp } from './help.js';
+import { NavHeading, NavItem, SideNavLayout, ThemeToggle, type IconName } from './nav.js';
 
 type Tab =
   | 'dashboard' | 'usage' | 'runs' | 'company' | 'agents' | 'extensions' | 'users' | 'knowledge' | 'audit'
   | 'connectors' | 'help';
 
-const TABS: { id: Tab; label: string }[] = [
-  { id: 'dashboard', label: 'ダッシュボード' },
-  { id: 'usage', label: '利用状況' },
-  { id: 'runs', label: '実行の一覧' },
-  { id: 'company', label: '会社情報' },
-  { id: 'agents', label: '業務と承認' },
-  { id: 'extensions', label: '拡張機能' },
-  { id: 'users', label: 'ユーザーと権限' },
-  { id: 'knowledge', label: '知識' },
-  { id: 'audit', label: '監査ログ' },
-  { id: 'connectors', label: '接続' },
-  { id: 'help', label: 'ヘルプ' },
+/** 管理者ページの左ペインの項目。説明はマウスを重ねたときに出す（仕様書 第6.1.1節）。 */
+const TABS: { id: Tab; label: string; icon: IconName; description: string }[] = [
+  { id: 'dashboard', label: 'ダッシュボード', icon: 'dashboard', description: 'いまの状況と集計、はじめに行う設定' },
+  { id: 'usage', label: '利用状況', icon: 'usage', description: '業務ごとの実行の件数と費用' },
+  { id: 'runs', label: '実行の一覧', icon: 'runs', description: '全員の実行の状態と費用（中身は見られません）' },
+  { id: 'company', label: '会社情報', icon: 'company', description: '会社の情報、自社の書き方、スライドのテンプレート' },
+  { id: 'agents', label: '業務と承認', icon: 'sliders', description: '使う業務、承認の決まり、利用できる人' },
+  { id: 'extensions', label: '拡張機能', icon: 'extensions', description: '業務や外部とのつながりを追加する' },
+  { id: 'users', label: 'ユーザーと権限', icon: 'users', description: '招待・ロール・グループ・権限区画' },
+  { id: 'knowledge', label: '知識', icon: 'knowledge', description: '就業規則などの社内の規程' },
+  { id: 'audit', label: '監査ログ', icon: 'audit', description: '誰が何をしたかの記録' },
+  { id: 'connectors', label: '接続', icon: 'connectors', description: 'Google と LLM への接続、業務が求める Google の権限' },
+  { id: 'help', label: 'ヘルプ', icon: 'help', description: '管理者向けの記事と検索' },
 ];
 
 /**
@@ -56,21 +58,22 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
         <span className="tenant">{me.tenant.name}</span>
         <span className="spacer" />
         <a className="link" href={`/${location.search}`}>ワークスペースへ戻る</a>
+        <ThemeToggle />
         <span className="badge">{me.user.displayName}</span>
         <button className="btn ghost small" onClick={onLogout}>ログアウト</button>
       </header>
       {!isAdmin ? (
         <main className="canvas"><p className="error">管理者ページは管理者のみが開けます。</p></main>
       ) : (
-        <div className="panes">
-          <nav className="left">
-            <h2>管理</h2>
+        <SideNavLayout nav={(
+          <>
+            <NavHeading>管理</NavHeading>
             {TABS.map((t) => (
-              <button key={t.id} className={`item${tab === t.id ? ' active' : ''}`} onClick={() => setTab(t.id)}>
-                {t.label}
-              </button>
+              <NavItem key={t.id} icon={t.icon} label={t.label} description={t.description}
+                active={tab === t.id} onClick={() => setTab(t.id)} />
             ))}
-          </nav>
+          </>
+        )}>
           <main className="canvas">
             {tab === 'dashboard' && <Dashboard onGo={(t) => setTab(t as Tab)} />}
             {tab === 'help' && <HelpCenter initial={helpArticle} />}
@@ -84,7 +87,7 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
             {tab === 'audit' && <Audit />}
             {tab === 'connectors' && <Connectors />}
           </main>
-        </div>
+        </SideNavLayout>
       )}
     </div>
   );
