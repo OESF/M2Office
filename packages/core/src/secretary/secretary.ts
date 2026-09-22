@@ -97,15 +97,21 @@ export class Secretary {
     }
 
     // 層 3: 完全な対話。本人が決めた名前・呼ばれ方・応対スタイルに合わせる（仕様書 第6.5.3節）
-    const [prefs, user] = await Promise.all([
+    const [prefs, user, memories] = await Promise.all([
       this.deps.repo.getUserSettings(tenantId, userId),
       this.deps.repo.findUserById(tenantId, userId),
+      // 個人記憶は本人との対話でだけ使う。ほかの利用者と業務エージェントには渡さない（仕様書 第11.1節）
+      this.deps.repo.listMemories(tenantId, userId),
     ]);
     const s = prefs.secretary;
     const persona = [
       `あなたは中小企業の従業員に付く秘書${s.name ? `「${s.name}」` : ''}です。`,
       `相手を「${s.callMe || `${user?.displayName ?? ''}さん`}」と呼びます。`,
       s.style === 'concise' ? '要点だけを短く答えます。' : '丁寧な日本語で、要点を先に答えます。',
+      ...(memories.length > 0
+        ? ['\n本人から覚えておくよう言われたこと（本人にだけ使う。ほかの人に伝えない）:',
+          ...memories.slice(0, 20).map((m) => `- ${m.text}`)]
+        : []),
     ].join('');
     const res = await llm.complete({
       tier: 'standard',

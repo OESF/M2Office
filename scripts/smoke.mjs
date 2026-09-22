@@ -1456,6 +1456,53 @@ console.log('\n■ 35. 通知（画面内のお知らせと、Chat・メール�
   if (registered) await call('a', `/v1/admin/knowledge/${registered.id}`, { method: 'DELETE' });
 }
 
+console.log('\n■ 36. 記憶とデータ（第6.5.4・11.5.1節）');
+{
+  const who = 'member';
+  await call('a', '/v1/me/memories', { method: 'DELETE' }, who);
+  await call('a', '/v1/me/settings/memory', { method: 'PUT', body: JSON.stringify({ learning: true, excludes: [] }) }, who);
+
+  const say = async (message) => (await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message }) }, who)).body;
+  const remembered = await say('山田さんは経理の担当だと覚えておいて');
+  const { body: mine } = await call('a', '/v1/me/memories', {}, who);
+  remembered.layer === 'direct' && (mine.items ?? []).some((m) => m.text === '山田さんは経理の担当だ')
+    ? ok('「覚えておいて」と頼むと覚える（LLM 不使用）') : ng('覚えない', JSON.stringify(mine));
+
+  // 本人以外には見えない（不変則 I-10）
+  const { body: others } = await call('a', '/v1/me/memories', {}, 'admin');
+  (others.items ?? []).every((m) => m.text !== '山田さんは経理の担当だ')
+    ? ok('ほかの人（管理者）には見えない') : ng('他人の記憶が見えている');
+
+  const credential = await say('社内システムのパスワードは abc123 だと覚えておいて');
+  const { body: afterCred } = await call('a', '/v1/me/memories', {}, who);
+  /パスワードや鍵/.test(credential.text) && (afterCred.items ?? []).length === 1
+    ? ok('認証情報らしきものは覚えない') : ng('認証情報を覚えてしまう', credential.text);
+
+  const excluded = await say('人事評価のことは覚えないで');
+  const { body: settings } = await call('a', '/v1/me/settings', {}, who);
+  /覚えないようにします/.test(excluded.text) && settings.memory.excludes.includes('人事評価')
+    ? ok('「覚えないで」は対象外の言葉として残る') : ng('対象外にならない', JSON.stringify(settings.memory));
+
+  await say('人事評価は 3 月だと覚えておいて');
+  const { body: afterExclude } = await call('a', '/v1/me/memories', {}, who);
+  (afterExclude.items ?? []).length === 1 ? ok('対象外の言葉を含む指示は覚えない') : ng('覚えてしまう');
+
+  const asked = await say('私について何を覚えてる？');
+  /1 件/.test(asked.text) ? ok('覚えていることを秘書が答える') : ng('答えない', asked.text);
+
+  const target = (afterExclude.items ?? [])[0];
+  await call('a', `/v1/me/memories/${target.id}`, { method: 'DELETE' }, who);
+  const { body: afterDelete } = await call('a', '/v1/me/memories', {}, who);
+  (afterDelete.items ?? []).length === 0 ? ok('個別に消せる') : ng('消えない');
+
+  // 後片付け: 対象外の指定を戻す
+  await call('a', '/v1/me/settings/memory', { method: 'PUT', body: JSON.stringify({ learning: true, excludes: [] }) }, who);
+  const { body: audits } = await call('a', '/v1/admin/audit-events');
+  const created = (audits.items ?? []).find((e) => e.action === 'memory.create');
+  created && !JSON.stringify(created).includes('山田')
+    ? ok('監査ログに操作は残り、記憶の中身は残らない') : ng('監査ログの扱いが規定と違う', JSON.stringify(created ?? null));
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

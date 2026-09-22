@@ -184,6 +184,11 @@ export interface KnowledgeSectionView {
   heading: string; path: string[]; chars: number;
 }
 
+/** 個人記憶の 1 件（仕様書 第11.5.1節）。 */
+export interface MemoryView {
+  id: string; text: string; source: string; createdAt: string;
+}
+
 export interface AdminRun {
   id: string; status: string; startedAt: string; endedAt: string | null;
   tokensUsed: number; costJpy: number; agentId: string; agentName: string; origin: string;
@@ -361,6 +366,10 @@ export const api = {
   mySettings: () => call<UserSettings>('/me/settings'),
   saveMySettings: <K extends keyof UserSettings>(section: K, value: UserSettings[K]) =>
     call(`/me/settings/${section}`, { method: 'PUT', body: JSON.stringify(value) }),
+  /** 記憶とデータ（仕様書 第6.5.4節）。本人の記憶だけが返る。 */
+  myMemories: () => call<{ items: MemoryView[] }>('/me/memories'),
+  deleteMemory: (id: string) => call(`/me/memories/${id}`, { method: 'DELETE' }),
+  clearMemories: () => call<{ removed: number }>('/me/memories', { method: 'DELETE' }),
   saveDisplayName: (displayName: string) =>
     call('/me/profile', { method: 'PATCH', body: JSON.stringify({ displayName }) }),
   mySessions: () => call<{ items: {

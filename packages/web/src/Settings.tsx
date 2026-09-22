@@ -6,7 +6,7 @@
 
 import { useEffect, useState } from 'react';
 import type { UserSettings } from '@m2office/shared';
-import { api, describeError, type AgentSummary, type Me, type MyGoogle } from './api.js';
+import { api, describeError, type AgentSummary, type Me, type MemoryView, type MyGoogle } from './api.js';
 import { useTheme, type ThemeChoice } from './theme.js';
 import { statusLabel } from './components.js';
 
@@ -14,7 +14,7 @@ import { statusLabel } from './components.js';
  * 個人設定（仕様書 第6.5節）。左ペインの最下部の利用者のカードの歯車のボタンから開く。
  *
  * @remarks
- * 記憶とデータ（第6.5.4節）は個人記憶の実装とあわせて追加する。
+ * 昇華の履歴と会話ログ（第6.5.4節）は、昇華と会話ログの実装とあわせて追加する（Phase 2）。
  */
 export function Settings({ me, agents, onChanged }: {
   me: Me; agents: AgentSummary[]; onChanged: () => void;
@@ -161,6 +161,9 @@ export function Settings({ me, agents, onChanged }: {
         </div>
       </div>
 
+      <MemorySettings settings={s} onChange={(v) => set('memory', v)}
+        onSave={() => void save(() => api.saveMySettings('memory', { ...s.memory }))} />
+
       <DisplaySettings />
       <div className="card">
         <h3>メニューの並び</h3>
@@ -222,6 +225,79 @@ export function Settings({ me, agents, onChanged }: {
  * @param agents 使える業務（管理者が有効にしたもの）
  * @param order 本人が決めた並び順
  */
+/**
+ * 記憶とデータ（仕様書 第6.5.4節）。秘書が自分について覚えていることを見て、消せるようにする。
+ *
+ * @remarks
+ * 「何を覚えているか分からない AI」にしないための画面である（第11.5節）。
+ * 覚えるのは、本人が秘書に「〜を覚えておいて」と頼んだときだけ（第11.5.1節）。
+ */
+function MemorySettings({ settings, onChange, onSave }: {
+  settings: UserSettings;
+  onChange: (v: UserSettings['memory']) => void;
+  onSave: () => void;
+}) {
+  const [items, setItems] = useState<MemoryView[]>([]);
+  const [msg, setMsg] = useState<string | null>(null);
+  const load = () => api.myMemories().then((r) => setItems(r.items)).catch((e) => setMsg(describeError(e)));
+  useEffect(() => { void load(); }, []);
+
+  return (
+    <div className="card">
+      <h3>記憶とデータ</h3>
+      <p>
+        秘書が自分について覚えていることです。覚えるのは、秘書に「〜を覚えておいて」と頼んだときだけです。
+        覚えていることを見られるのは本人だけで、管理者にも見えません。
+      </p>
+      <label className="check">
+        <input type="checkbox" checked={settings.memory.learning}
+          onChange={(e) => onChange({ ...settings.memory, learning: e.target.checked })} />
+        覚えることを許す（切ると、頼んでも覚えません）
+      </label>
+      <div className="field">
+        <label>覚えない言葉（1 行に 1 つ）</label>
+        <textarea rows={3} value={settings.memory.excludes.join('\n')}
+          onChange={(e) => onChange({ ...settings.memory, excludes: e.target.value.split('\n') })} />
+        <p className="muted small">ここに書いた言葉を含む指示は覚えません。秘書に「〜は覚えないで」と言っても増えます。</p>
+      </div>
+      <div className="row">
+        <button className="btn" onClick={onSave}>保存する</button>
+      </div>
+
+      <h4>覚えていること（{items.length} 件）</h4>
+      {items.length === 0 ? (
+        <p className="muted small">まだ何も覚えていません。秘書に「〜を覚えておいて」とお伝えください。</p>
+      ) : (
+        <table className="table">
+          <tbody>
+            {items.map((m) => (
+              <tr key={m.id}>
+                <td>{m.text}</td>
+                <td className="num">
+                  <button className="btn danger small"
+                    onClick={() => void api.deleteMemory(m.id).then(load).then(() => setMsg('消しました')).catch((e) => setMsg(describeError(e)))}>
+                    消す
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {items.length > 0 && (
+        <div className="row">
+          <button className="btn danger"
+            onClick={() => {
+              if (!confirm('覚えていることをすべて消しますか。元に戻せません。')) return;
+              void api.clearMemories().then((r) => setMsg(`${r.removed} 件を消しました`)).then(load).catch((e) => setMsg(describeError(e)));
+            }}>すべて消す</button>
+        </div>
+      )}
+      {msg && <p className="muted small">{msg}</p>}
+    </div>
+  );
+}
+
 export function orderAgents<T extends { id: string }>(agents: T[], order: string[]): T[] {
   const rank = (id: string) => {
     const i = order.indexOf(id);

@@ -13,7 +13,7 @@ import type {
   StoredFile, Tenant, TenantSettings, User, UserGroup, UserSettings,
 } from '@m2office/shared';
 import { DEFAULT_TENANT_SETTINGS, DEFAULT_USER_SETTINGS, STANDARD_SYNONYMS } from '@m2office/shared';
-import type { CompartmentAssignment, CredentialKind, GoogleConnection, TenantCredential, InstalledExtension, PrivateExtension, KnowledgeItem, KnowledgeSearchResult, KnowledgeSectionView, Repository, RunStatRow } from './types.js';
+import type { CompartmentAssignment, CredentialKind, GoogleConnection, TenantCredential, InstalledExtension, PrivateExtension, KnowledgeItem, KnowledgeSearchResult, KnowledgeSectionView, Memory, Repository, RunStatRow } from './types.js';
 import { SPLIT_VERSION, citationOf, splitKnowledge } from '../knowledge/sections.js';
 import { SEARCH_CANDIDATES, bigrams, expandTerms, extractTerms, normalizeForSearch, rankSections, rewritesOf } from '../knowledge/search.js';
 
@@ -840,9 +840,38 @@ export class PostgresRepository implements Repository {
       [tenantId]);
   }
 
+  async listMemories(tenantId: string, userId: string): Promise<Memory[]> {
+    return this.q<Memory>(tenantId,
+      `select id, tenant_id as "tenantId", user_id as "userId", text, source,
+              created_at as "createdAt"
+         from memories where tenant_id = $1 and user_id = $2 order by created_at desc`,
+      [tenantId, userId]);
+  }
+
+  async createMemory(m: Memory): Promise<void> {
+    await this.q(m.tenantId,
+      `insert into memories (id, tenant_id, user_id, text, source, created_at)
+       values ($1,$2,$3,$4,$5,$6)`,
+      [m.id, m.tenantId, m.userId, m.text, m.source, m.createdAt]);
+  }
+
+  async deleteMemory(tenantId: string, userId: string, id: string): Promise<boolean> {
+    const rows = await this.q<{ id: string }>(tenantId,
+      `delete from memories where tenant_id = $1 and user_id = $2 and id = $3 returning id`,
+      [tenantId, userId, id]);
+    return rows.length > 0;
+  }
+
+  async clearMemories(tenantId: string, userId: string): Promise<number> {
+    const rows = await this.q<{ id: string }>(tenantId,
+      `delete from memories where tenant_id = $1 and user_id = $2 returning id`,
+      [tenantId, userId]);
+    return rows.length;
+  }
+
   async getUserSettings(tenantId: string, userId: string): Promise<UserSettings> {
     const rows = await this.q<Partial<Record<keyof UserSettings, unknown>>>(tenantId,
-      `select profile, secretary, notifications, menu, onboarding from user_settings
+      `select profile, secretary, notifications, memory, menu, onboarding from user_settings
         where tenant_id = $1 and user_id = $2`, [tenantId, userId]);
     const r = rows[0] ?? {};
     const d = DEFAULT_USER_SETTINGS;
@@ -855,6 +884,7 @@ export class PostgresRepository implements Repository {
         quietHours: n.quietHours ?? d.notifications.quietHours,
         channels: { ...d.notifications.channels, ...(n.channels ?? {}) },
       },
+      memory: { ...d.memory, ...(r.memory ?? {}) },
       menu: { ...d.menu, ...(r.menu ?? {}) },
       onboarding: { ...d.onboarding, ...(r.onboarding ?? {}) },
     };
@@ -864,8 +894,8 @@ export class PostgresRepository implements Repository {
     tenantId: string, userId: string, section: K, value: UserSettings[K],
   ): Promise<void> {
     const column = ({
-      profile: 'profile', secretary: 'secretary', notifications: 'notifications', menu: 'menu',
-      onboarding: 'onboarding',
+      profile: 'profile', secretary: 'secretary', notifications: 'notifications', memory: 'memory',
+      menu: 'menu', onboarding: 'onboarding',
     } as const)[section];
     await this.q(tenantId,
       `insert into user_settings (tenant_id, user_id, ${column}, updated_at)

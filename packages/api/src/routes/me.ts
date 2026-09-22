@@ -46,6 +46,35 @@ export function meRoute(deps: AppDeps) {
     return c.json({ ok: true });
   });
 
+  /**
+   * 記憶とデータ（第6.5.4節）。秘書が自分について覚えていることの一覧。
+   *
+   * @remarks 本人のものだけを返す。管理者であっても他人の記憶は見られない（不変則 I-10、第11.1節）。
+   */
+  app.get('/memories', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const items = await deps.repo.listMemories(tenant.id, user.id);
+    return c.json({ items });
+  });
+
+  /** 記憶を 1 件消す。 */
+  app.delete('/memories/:id', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const ok = await deps.repo.deleteMemory(tenant.id, user.id, c.req.param('id'));
+    if (!ok) return c.json({ error: '記憶が見つかりません' }, 404);
+    // 消した中身は監査ログに入れない（第11.5.1節）
+    await audit(deps, tenant.id, user.id, 'memory.delete', c.req.param('id'));
+    return c.json({ ok: true });
+  });
+
+  /** 記憶をすべて消す（第11.5節「全削除」）。 */
+  app.delete('/memories', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const removed = await deps.repo.clearMemories(tenant.id, user.id);
+    await audit(deps, tenant.id, user.id, 'memory.clear', String(removed));
+    return c.json({ ok: true, removed });
+  });
+
   /** ログイン中の端末（第6.5.8節）。いま使っているものに印を付ける。 */
   app.get('/sessions', async (c) => {
     const { tenant, user } = c.get('ctx');
@@ -137,6 +166,15 @@ function validate(
       const ch = (o['channels'] ?? {}) as Record<string, unknown>;
       const channels = { chat: ch['chat'] === true, email: ch['email'] === true };
       return { section, value: { kinds, quietHours: q ? { from: q.from, to: q.to } : null, channels } };
+    }
+    case 'memory': {
+      // 記憶とデータ（第6.5.4節）。対象外の言葉は 1 行に 1 つ、空行は落とす
+      const list = Array.isArray(o['excludes']) ? o['excludes'] : [];
+      const excludes = [...new Set(list.map((x) => String(x).trim()).filter(Boolean))].slice(0, 50);
+      if (excludes.some((w) => w.length > 50)) {
+        return { error: '覚えない言葉は 1 つ 50 字までにしてください' };
+      }
+      return { section, value: { learning: o['learning'] !== false, excludes } };
     }
     case 'menu': {
       const ids = agentIds;

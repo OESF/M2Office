@@ -144,6 +144,14 @@ export interface Repository {
 
   /** 本人の設定を返す。未保存の区分は既定値で補う。 */
   getUserSettings(tenantId: string, userId: string): Promise<UserSettings>;
+
+  /** 本人の個人記憶（新しい順。仕様書 第11.5.1節）。本人以外に渡さない。 */
+  listMemories(tenantId: string, userId: string): Promise<Memory[]>;
+  createMemory(memory: Memory): Promise<void>;
+  /** 1 件を消す。本人のものでなければ消さず `false` を返す。 */
+  deleteMemory(tenantId: string, userId: string, id: string): Promise<boolean>;
+  /** 本人の記憶をすべて消す。 */
+  clearMemories(tenantId: string, userId: string): Promise<number>;
   saveUserSettings<K extends keyof UserSettings>(
     tenantId: string, userId: string, section: K, value: UserSettings[K],
   ): Promise<void>;
@@ -273,6 +281,22 @@ export interface KnowledgeSectionView {
 }
 
 /** 組織知識の 1 件（管理用）。 */
+/**
+ * 個人記憶の 1 件（仕様書 第11.1・11.5.1節）。
+ *
+ * @remarks 参照できるのは本人だけである。ほかの利用者にも業務エージェントにも渡さない。
+ */
+export interface Memory {
+  id: string;
+  tenantId: string;
+  userId: string;
+  /** 覚えた一文。本人が指示したそのまま。 */
+  text: string;
+  /** きっかけ（`secretary`: 秘書への指示）。 */
+  source: string;
+  createdAt: string;
+}
+
 export interface KnowledgeItem {
   id: string;
   tenantId: string;

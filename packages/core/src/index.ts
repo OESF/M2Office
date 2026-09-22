@@ -81,3 +81,6 @@ export {
 export { Secretary } from './secretary/secretary.js';
 export type { SecretaryReply, ResponseLayer } from './secretary/secretary.js';
 export { DIRECT_QUERIES } from './secretary/catalog.js';
+export {
+  MEMORY_MAX_CHARS, memoryTextOf, refuseToRemember, refusalMessage,
+} from './secretary/memory.js';

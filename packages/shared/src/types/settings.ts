@@ -271,6 +271,13 @@ export interface UserSettings {
      */
     channels: { chat: boolean; email: boolean };
   };
+  /** 記憶とデータ（第6.5.4節）。本人だけが変えられる。 */
+  memory: {
+    /** 覚えることを許すか。止めている間は、頼まれても覚えない（第11.5.1節）。 */
+    learning: boolean;
+    /** 対象外の言葉。これを含む指示は覚えない（「この件は覚えないで」）。 */
+    excludes: string[];
+  };
   menu: {
     /** メニューに出さない業務。使える業務を増やすことはできない（第6.5.6節）。 */
     hidden: string[];
@@ -289,6 +296,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
     quietHours: null,
     channels: { chat: false, email: false },
   },
+  memory: { learning: true, excludes: [] },
   menu: { hidden: [], order: [] },
   onboarding: { tourCompletedAt: null },
 };

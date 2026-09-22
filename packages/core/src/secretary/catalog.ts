@@ -6,9 +6,21 @@
  * @see 仕様書 第10.9.2節 層 1 の照会カタログ
  */
 
+import { randomUUID } from 'node:crypto';
 import type { Repository } from '../repository/types.js';
 import type { WorkspaceConnector } from '../connectors/types.js';
 import { addDays, jst, ymd } from '../connectors/mock.js';
+import {
+  DO_NOT_REMEMBER, REMEMBER, WHAT_REMEMBERED, memoryTextOf, refusalMessage, refuseToRemember,
+} from './memory.js';
+
+/** 「〜は覚えないで」から、覚えない言葉を取り出す。 */
+function excludeWordOf(message: string): string {
+  return message
+    .replace(/[、。,.\s]*(は|を|って|の件は|のことは)?\s*(覚え(ないで(ください)?|なくて(いい|よい|大丈夫)(です)?|ないように(してください)?)|記憶しないで(ください)?)\s*[。．!！]*\s*$/, '')
+    .replace(/^\s*(この件は|それは|これは)\s*/, '')
+    .trim();
+}
 
 /**
  * 層 1 の照会カタログ（仕様書 第10.9.2節）。
@@ -152,6 +164,91 @@ const todayTasks: DirectQuery = {
 };
 
 /** 承認待ちの件数と一覧を返す。 */
+/**
+ * 「〜を覚えておいて」に応える（仕様書 第11.5.1節、ADR-0012）。
+ *
+ * @remarks
+ * 推論を通さず、本人が言った一文をそのまま覚える。覚えないもの（学習の停止・対象外の言葉・
+ * 認証情報らしき語・長すぎるもの）は覚えず、その理由を答える。監査ログに中身は残さない。
+ */
+const memoryRemember: DirectQuery = {
+  id: 'memory-remember',
+  label: '覚えておく',
+  patterns: [REMEMBER],
+  // 「覚えないで」と「何を覚えてる？」は別の照会で扱う
+  excludes: [DO_NOT_REMEMBER, WHAT_REMEMBERED],
+  compartment: null,
+  async answer(ctx) {
+    const settings = await ctx.repo.getUserSettings(ctx.tenantId, ctx.userId);
+    const text = memoryTextOf(ctx.message);
+    const refusal = refuseToRemember(text, settings.memory);
+    if (refusal) return { text: refusalMessage(refusal), evidence: [] };
+
+    const now = new Date().toISOString();
+    const id = randomUUID();
+    await ctx.repo.createMemory({
+      id, tenantId: ctx.tenantId, userId: ctx.userId, text, source: 'secretary', createdAt: now,
+    });
+    // 覚えた中身は監査ログに入れない。記憶は本人のものである（第11.5.1節）
+    await ctx.repo.appendAudit({
+      id: randomUUID(), tenantId: ctx.tenantId, actorType: 'user', actorId: ctx.userId,
+      action: 'memory.create', targetType: 'memory', targetId: id, detail: { source: 'secretary' },
+      occurredAt: now,
+    });
+    return {
+      text: `覚えました: ${text}\n個人設定の「記憶とデータ」で、覚えていることの確認と削除ができます。`,
+      evidence: [{ label: '覚えたこと', value: text }],
+    };
+  },
+};
+
+/**
+ * 「〜は覚えないで」に応える。対象外の言葉として残す（仕様書 第11.5節「対象外の指定」）。
+ */
+const memoryForget: DirectQuery = {
+  id: 'memory-forget',
+  label: '覚えない指定',
+  patterns: [DO_NOT_REMEMBER],
+  compartment: null,
+  async answer(ctx) {
+    const settings = await ctx.repo.getUserSettings(ctx.tenantId, ctx.userId);
+    const word = excludeWordOf(ctx.message);
+    if (!word) {
+      return { text: '何を覚えないでおくか分かりませんでした。「〜は覚えないで」の形でお伝えください。', evidence: [] };
+    }
+    const excludes = settings.memory.excludes.includes(word)
+      ? settings.memory.excludes : [...settings.memory.excludes, word];
+    await ctx.repo.saveUserSettings(ctx.tenantId, ctx.userId, 'memory', { ...settings.memory, excludes });
+    await ctx.repo.appendAudit({
+      id: randomUUID(), tenantId: ctx.tenantId, actorType: 'user', actorId: ctx.userId,
+      action: 'me.settings.update', targetType: 'user_settings', targetId: 'memory', detail: {},
+      occurredAt: new Date().toISOString(),
+    });
+    return {
+      text: `「${word}」は覚えないようにします。この指定は個人設定の「記憶とデータ」で変えられます。`,
+      evidence: [{ label: '覚えない言葉', value: word }],
+    };
+  },
+};
+
+/** 「何を覚えてる？」に応える。本人の記憶だけを返す（仕様書 第11.5節）。 */
+const memoryList: DirectQuery = {
+  id: 'memory-list',
+  label: '覚えていることの確認',
+  patterns: [WHAT_REMEMBERED],
+  compartment: null,
+  async answer(ctx) {
+    const items = await ctx.repo.listMemories(ctx.tenantId, ctx.userId);
+    if (items.length === 0) {
+      return { text: 'いまは何も覚えていません。「〜を覚えておいて」とお伝えいただければ覚えます。', evidence: [] };
+    }
+    return {
+      text: `${items.length} 件を覚えています。個人設定の「記憶とデータ」で削除できます。`,
+      evidence: items.slice(0, 10).map((m) => ({ label: '覚えていること', value: m.text })),
+    };
+  },
+};
+
 const pendingApprovals: DirectQuery = {
   id: 'pending-approvals',
   label: '承認待ちの確認',
@@ -198,5 +295,6 @@ const recentRuns: DirectQuery = {
  * 根拠にその旨を示す（仕様書 第10.9.2節の表）。
  */
 export const DIRECT_QUERIES: DirectQuery[] = [
+  memoryForget, memoryRemember, memoryList,
   pendingApprovals, schedule, unreadMail, todayTasks, recentRuns,
 ];
