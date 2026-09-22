@@ -161,6 +161,26 @@ console.log('\n■ 4. 承認による再開（最重要）');
   final.run.status === 'completed'
     ? ok(`最後まで完了した（${final.steps.length} ステップ、${final.run.costJpy} 円）`)
     : ng(`完了しない（状態: ${final.run.status}）`, final.run.failureReason);
+
+  // 手順 7: 承認②のあと、承認①で見た議事録をそのまま組織知識に登録する（仕様書 第9.5.2節）
+  const { body: kb } = await call('a', '/v1/admin/knowledge');
+  const registered = (kb.items ?? []).find((k) => k.originRunId === runId);
+  registered && registered.body === final.artifacts?.[0]?.body && registered.googleDerived === false
+    ? ok(`議事録が組織知識に登録された（${registered.title}、${registered.sectionCount} 節）`)
+    : ng('議事録が組織知識に登録されていない', JSON.stringify(registered ?? null).slice(0, 120));
+
+  const { body: qa } = await call('a', '/v1/jobs', {
+    method: 'POST',
+    body: JSON.stringify({ agentId: 'knowledge-qa', input: { question: '販促' } }),
+  });
+  const qaRun = await waitFor('a', qa.runId, ['completed', 'failed']);
+  const qaHits = qaRun.steps.find((s) => s.stepId === 'search')?.output?.tools?.[0]?.result?.hits ?? [];
+  qaHits.some((h) => h.title === registered?.title)
+    ? ok('登録した議事録を社内ナレッジ Q&A が引ける')
+    : ng('登録した議事録が検索に出ない', qaHits.map((h) => h.title).join('、'));
+
+  // 後片付け: 以降の確認（B 社との分離など）に影響させないよう、登録した議事録を消す
+  if (registered) await call('a', `/v1/admin/knowledge/${registered.id}`, { method: 'DELETE' });
 }
 
 console.log('\n■ 5. テナント分離');

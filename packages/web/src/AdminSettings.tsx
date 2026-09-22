@@ -486,7 +486,8 @@ export function KnowledgeSettings() {
         <div className="row">
           <button className="btn" disabled={saver.busy}
             onClick={() => void saver.run(async () => {
-              const { id: _id, version: _v, sectionCount: _n, updatedAt: _u, ...rest } = draft as KnowledgeItemView;
+              // 由来は保存し直しても変わらない（仕様書 第9.5.2節）。送らない
+              const { id: _id, version: _v, sectionCount: _n, updatedAt: _u, originRunId: _r, googleDerived: _g, ...rest } = draft as KnowledgeItemView;
               const saved = await api.admin.saveKnowledge(draft.id, rest);
               setDraft(empty);
               await load();
@@ -503,7 +504,14 @@ export function KnowledgeSettings() {
           {items.map((k) => (
             <Fragment key={k.id}>
             <tr>
-              <td>{k.title}</td><td>{k.source}</td><td>{k.compartment ?? '—'}</td>
+              <td>{k.title}</td>
+              <td>
+                {k.source}
+                {/* 業務から登録した知識の由来。Google 由来のものを探して消せるようにする（第9.5.2節） */}
+                {k.originRunId && <>{' '}<span className="badge muted-badge" title="2 回の承認のあとに、業務が登録しました">業務から登録</span></>}
+                {k.googleDerived && <>{' '}<span className="badge muted-badge" title="Google から読んだ記録（会議の文字起こしなど）から作りました">Google 由来</span></>}
+              </td>
+              <td>{k.compartment ?? '—'}</td>
               <td>
                 <button className="link-btn" onClick={() => toggle(k.id)} title="本文をどう分けたかを見る">
                   {k.sectionCount ?? 0} 節{open?.id === k.id ? '（閉じる）' : ''}

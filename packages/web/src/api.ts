@@ -175,6 +175,8 @@ export interface KnowledgeItemView {
   compartment: string | null; updatedAt: string;
   /** 版と、分けた節の数（一覧でだけ返る）。 */
   version?: number; sectionCount?: number;
+  /** 業務から登録した場合、登録した実行の ID。Google から読んだデータで作ったか（仕様書 第9.5.2節）。 */
+  originRunId?: string | null; googleDerived?: boolean;
 }
 
 /** 知識の節（分け方の確認用。仕様書 第11.7.2節）。 */
@@ -421,7 +423,7 @@ export const api = {
     knowledge: () => call<{
       items: KnowledgeItemView[]; compartments: { id: string; name: string; description: string | null }[];
     }>('/admin/knowledge'),
-    saveKnowledge: (id: string | 'new', item: Omit<KnowledgeItemView, 'id' | 'updatedAt' | 'version' | 'sectionCount'>) =>
+    saveKnowledge: (id: string | 'new', item: Omit<KnowledgeItemView, 'id' | 'updatedAt' | 'version' | 'sectionCount' | 'originRunId' | 'googleDerived'>) =>
       call<{ id: string; sections: KnowledgeSectionView[] }>(`/admin/knowledge/${id}`, { method: 'PUT', body: JSON.stringify(item) }),
     knowledgeSections: (id: string) =>
       call<{ sections: KnowledgeSectionView[] }>(`/admin/knowledge/${id}/sections`),

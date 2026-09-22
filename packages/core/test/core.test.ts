@@ -11,14 +11,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   DEFAULT_TENANT_SETTINGS, DEFAULT_USER_SETTINGS,
-  type AgentDefinition, type Approval, type AuditEvent, type Job, type Notification, type Run,
+  type AgentDefinition, type Approval, type Artifact, type AuditEvent, type Job, type Notification, type Run,
   type RunStep, type TenantSettings,
 } from '@m2office/shared';
 import {
   RunEngine, ToolRegistry, BUILTIN_TOOLS, MockWorkspaceConnector, MemoryFileStore, nextRunAt,
   saveFile, readSheet, renderSheet, parseCsv,
-  ApprovalForbiddenError, DefinitionInvalidError, validateDefinition,
-  type LlmProvider, type Repository,
+  ApprovalForbiddenError, DefinitionInvalidError, validateDefinition, OFFICIAL_AGENTS,
+  type LlmProvider, type LlmRequest, type Repository, type KnowledgeItem,
 } from '../src/index.js';
 
 /** 実行エンジンが使う操作だけを持つ、記憶上の永続化層。 */
@@ -53,8 +53,16 @@ class MemoryRepo {
   async appendAudit(e: AuditEvent) { this.audits.push(e); }
   async createNotification(n: Notification) { this.notifications.push(n); }
   async findUserById(t: string, id: string) { return this.users.find((u) => u.tenantId === t && u.id === id) ?? null; }
-  artifacts: { title: string; fileId?: string | null }[] = [];
-  async createArtifact(a: { title: string; fileId?: string | null }) { this.artifacts.push(a); }
+  artifacts: Artifact[] = [];
+  async createArtifact(a: Artifact) { this.artifacts.push(a); }
+  async listArtifacts(t: string, runId: string) { return this.artifacts.filter((a) => a.tenantId === t && a.runId === runId); }
+  knowledge: KnowledgeItem[] = [];
+  async saveKnowledge(k: KnowledgeItem) {
+    const prev = this.knowledge.find((x) => x.id === k.id);
+    // 由来は最初の登録のときだけ書く（postgres.ts と同じ）
+    const next = prev ? { ...k, originRunId: prev.originRunId, googleDerived: prev.googleDerived } : k;
+    this.knowledge = [...this.knowledge.filter((x) => x.id !== k.id), next];
+  }
   fileRows: Record<string, unknown>[] = [];
   async createFile(f: Record<string, unknown>) { this.fileRows.push(f); }
   async getFile(t: string, id: string) { return this.fileRows.find((f) => f['tenantId'] === t && f['id'] === id) ?? null; }
@@ -402,4 +410,131 @@ test('手順の途中で止められた実行は、次の手順を行わず、�
   assert.equal(repo.runs[0]!.tokensUsed, 7, '止められる前に使い終えたトークンは記録する');
   assert.equal(repo.approvals.length, 0, '次の手順（承認）へ進まない');
   assert.ok(cancelledSeen, '止められたことを知らせる（後から書き込まれた中身を消すため）');
+});
+
+const AG02_MINUTES = OFFICIAL_AGENTS.find((a) => a.id === 'minutes')!;
+
+/**
+ * AG-02 の手順ごとに決まったツールを呼ぶ推論。成果物の ID は記憶上の永続化層から拾う。
+ *
+ * @param extra 手順ごとに足すツール呼び出し（承認②の手前で登録を試みる場合など）
+ */
+function minutesLlm(repo: MemoryRepo, extra: Record<string, { name: string; args: Record<string, unknown> }[]> = {}): LlmProvider {
+  return {
+    name: 'minutes-script',
+    async complete(req: LlmRequest) {
+      const stepId = req.context?.stepId ?? '';
+      const artifactId = repo.artifacts[0]?.id ?? 'none';
+      const base: Record<string, { name: string; args: Record<string, unknown> }[]> = {
+        fetch: [{ name: 'meeting.get_transcript', args: { transcript: '販促は A 案で進めることを決定。' } }],
+        draft: [{ name: 'document.create', args: { kind: 'minutes', title: '営業定例の議事録', body: '## 決定事項\n販促は A 案で進める。' } }],
+        tasks: [{ name: 'tasks.create', args: { title: 'A 案の準備' } }],
+        share: [{ name: 'chat.post', args: { space: 'general', text: '議事録を共有します' } },
+          { name: 'knowledge.register', args: { artifactId } }],
+      };
+      const calls = [...(base[stepId] ?? []), ...(extra[stepId] ?? [])];
+      return { text: calls.map((c) => '```tool\n' + JSON.stringify(c) + '\n```').join('\n'), tokensUsed: 10 };
+    },
+  };
+}
+
+/** AG-02 を、承認を 2 回通して最後まで進める。`rejectShare` なら承認②を却下する。 */
+async function runMinutes(opts: { rejectShare?: boolean; extra?: Parameters<typeof minutesLlm>[1] } = {}) {
+  const ctx = setup(AG02_MINUTES, { name: 'noop', args: {} });
+  (ctx.engine as unknown as { deps: { llm: LlmProvider } }).deps.llm = minutesLlm(ctx.repo, opts.extra);
+  const admin = { id: 'u-admin', roles: ['admin', 'approver'] };
+  const first = await ctx.engine.advance(ctx.run);
+  if (first.outcome !== 'awaiting_approval') assert.fail(`承認①で止まらない: ${first.outcome}`);
+  await ctx.engine.decideApproval('t', first.approvalId, 'approved', admin, null);
+  const second = await ctx.engine.advance({ ...(await ctx.repo.getRun('t', 'r1'))!, status: 'running' });
+  if (second.outcome !== 'awaiting_approval') assert.fail(`承認②で止まらない: ${second.outcome}`);
+  await ctx.engine.decideApproval('t', second.approvalId, opts.rejectShare ? 'rejected' : 'approved', admin, null);
+  if (!opts.rejectShare) {
+    assert.equal((await ctx.engine.advance({ ...(await ctx.repo.getRun('t', 'r1'))!, status: 'running' })).outcome, 'completed');
+  }
+  return ctx;
+}
+
+/** ステップの出力から、指定したツールの結果を集める。 */
+function resultsOf(repo: MemoryRepo, stepId: string, tool: string): Record<string, unknown>[] {
+  return repo.steps.filter((s) => s.stepId === stepId).flatMap((s) =>
+    ((s.output as { tools?: { name: string; result?: Record<string, unknown> }[] } | null)?.tools ?? [])
+      .filter((t) => t.name === tool).map((t) => t.result ?? {}));
+}
+
+test('AG-02 は承認②のあと、承認①で見た議事録をそのまま組織知識に登録する（第9.5.2節）', async () => {
+  const { repo } = await runMinutes();
+  assert.equal(repo.knowledge.length, 1);
+  const k = repo.knowledge[0]!;
+  assert.equal(k.id, 'run-r1', '知識の ID は実行から決める');
+  assert.equal(k.body, repo.artifacts[0]!.body, '成果物の本文をそのまま登録する');
+  assert.match(k.title, /^営業定例の議事録（\d{4}-\d{2}-\d{2}）$/, '題名に日付を添える');
+  assert.equal(k.kind, 'minutes');
+  assert.equal(k.compartment, null);
+  assert.equal(k.originRunId, 'r1');
+  assert.equal(k.googleDerived, false, '貼り付けた記録は Google 由来ではない（ToDo・投稿は数えない）');
+  const audit = repo.audits.find((a) => a.action === 'knowledge.register');
+  assert.equal(audit?.actorId, 'u-member', '登録者は依頼した本人');
+  assert.deepEqual(audit?.detail, { runId: 'r1', artifactId: repo.artifacts[0]!.id, googleDerived: false });
+});
+
+test('承認②の手前（承認①の直後）では、知識に登録しない', async () => {
+  const { repo } = await runMinutes({ rejectShare: true, extra: { tasks: [{ name: 'knowledge.register', args: { artifactId: 'x' } }] } });
+  const early = resultsOf(repo, 'tasks', 'knowledge.register');
+  assert.equal(early[0]?.['registered'], false);
+  assert.match(String(early[0]?.['reason']), /すべての承認/);
+  assert.equal(repo.knowledge.length, 0, '承認②を却下したら知識に入らない');
+});
+
+test('承認のあとに作り直した成果物は、知識に登録しない', async () => {
+  // 承認①の直後の手順で、推論が別の議事録を作り、それを登録させようとする
+  const ctx = setup(AG02_MINUTES, { name: 'noop', args: {} });
+  const llm = minutesLlm(ctx.repo, {
+    tasks: [{ name: 'document.create', args: { kind: 'minutes', title: '差し替え', body: '承認していない内容' } }],
+  });
+  (ctx.engine as unknown as { deps: { llm: LlmProvider } }).deps.llm = {
+    name: 'swap',
+    async complete(req: LlmRequest) {
+      if (req.context?.stepId !== 'share') return llm.complete(req);
+      const swapped = ctx.repo.artifacts.find((a) => a.title === '差し替え')!.id;
+      return { text: '```tool\n' + JSON.stringify({ name: 'knowledge.register', args: { artifactId: swapped } }) + '\n```', tokensUsed: 1 };
+    },
+  };
+  const admin = { id: 'u-admin', roles: ['admin', 'approver'] };
+  for (let i = 0; i < 2; i++) {
+    const r = await ctx.engine.advance({ ...(await ctx.repo.getRun('t', 'r1'))!, status: 'running' });
+    if (r.outcome !== 'awaiting_approval') assert.fail(r.outcome);
+    await ctx.engine.decideApproval('t', r.approvalId, 'approved', admin, null);
+  }
+  await ctx.engine.advance({ ...(await ctx.repo.getRun('t', 'r1'))!, status: 'running' });
+  // 承認②の前に作られていても、承認①で見ていないため登録しない。承認②の後に承認は無い
+  const res = resultsOf(ctx.repo, 'share', 'knowledge.register')[0];
+  assert.equal(ctx.repo.knowledge.length, 0);
+  assert.match(String(res?.['reason']), /承認で確かめた成果物ではない/);
+});
+
+test('ほかの実行の成果物と、Google から読んだ記録で作った議事録の扱い', async () => {
+  const { repo } = await runMinutes();
+  // 同じ実行で呼び直しても増えない（ワーカーが落ちて手順をやり直した場合）
+  const tool = BUILTIN_TOOLS.find((t) => t.name === 'knowledge.register')!;
+  const base = {
+    tenantId: 't', userId: 'u-member', runId: 'r1', compartment: null,
+    repo: repo as unknown as Repository, connector: new MockWorkspaceConnector(), files: new MemoryFileStore(),
+    approvalsAhead: 0,
+  };
+  await tool.invoke({ artifactId: repo.artifacts[0]!.id }, base);
+  assert.equal(repo.knowledge.length, 1, '1 回の実行で 1 件');
+
+  const other = await tool.invoke({ artifactId: repo.artifacts[0]!.id }, { ...base, runId: 'r2' }) as { registered: boolean; reason: string };
+  assert.equal(other.registered, false, 'ほかの実行の成果物は登録しない');
+
+  const noCtx = await tool.invoke({ artifactId: repo.artifacts[0]!.id }, { ...base, approvalsAhead: undefined }) as { registered: boolean };
+  assert.equal(noCtx.registered, false, '実行エンジンの外からは登録しない');
+
+  // Google の権限を持つ読み取りのツールを呼んでいれば、Google 由来として記録する
+  repo.knowledge = [];
+  repo.steps.push({ id: 'g', runId: 'r1', seq: 0, stepId: 'fetch', kind: 'agent', status: 'succeeded', input: null,
+    output: { tools: [{ name: 'meet.transcript', risk: 'read', result: {} }] }, startedAt: '2026-01-01T00:00:00Z', endedAt: null });
+  await tool.invoke({ artifactId: repo.artifacts[0]!.id }, { ...base, isGoogleTool: (n) => n === 'meet.transcript' });
+  assert.equal(repo.knowledge[0]?.googleDerived, true);
 });

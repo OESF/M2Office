@@ -128,6 +128,17 @@ Google を使うツールは `google`（必要な権限と段階）を持ちま�
 分け方を変えたら `SPLIT_VERSION` を 1 つ上げてください。保存済みの知識は、次の検索の前に分け直されます。
 言い換え（標準の `STANDARD_SYNONYMS` と会社の設定 `knowledge.synonyms`）は `expandTerms()` で足し、組はまとめて 1 つの言葉として数えます（第11.7.7節）。
 
+### 業務からの知識の登録（`knowledge.register`）
+
+AG-02 議事録作成・共有は、承認②のあとに `knowledge.register` で議事録を組織知識に登録します（仕様書 第9.5.2節、ADR-0010）。
+ツールは成果物の ID だけを受け取り、次をすべて満たすときに限って、成果物の本文をそのまま登録します。
+
+- 呼んだステップより後に承認ステップが残っていない（実行エンジンが `ToolContext.approvalsAhead` で渡す）
+- 同じ実行の成果物で、最初の承認で止めた時点にあった（承認ステップの記録の `input.artifactIds` に含まれる）
+
+知識の ID は `run-<実行の ID>` で、同じ実行で呼び直しても増えません。
+登録した実行（`originRunId`）と、Google の読み取りのツールを呼んだか（`googleDerived`）は最初の登録のときだけ書き、管理者が本文を直しても変わりません。
+
 ### 拡張機能（`ExtensionHub`）
 
 拡張機能は「ファイルの集まり」として検証します（`loadExtensionFiles()`）。ディレクトリから読んでも（`loadExtension()`）、

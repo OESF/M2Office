@@ -761,6 +761,7 @@ export class PostgresRepository implements Repository {
     return this.q<KnowledgeItem>(tenantId,
       `select id, tenant_id as "tenantId", kind, title, body, source, compartment,
               updated_at as "updatedAt", version,
+              origin_run_id as "originRunId", google_derived as "googleDerived",
               (select count(*)::int from knowledge_sections s
                 where s.tenant_id = k.tenant_id and s.item_id = k.id) as "sectionCount"
          from knowledge_items k where tenant_id = $1 order by updated_at desc`,
@@ -770,13 +771,16 @@ export class PostgresRepository implements Repository {
   async saveKnowledge(k: KnowledgeItem): Promise<void> {
     await this.inTenant(k.tenantId, async (client) => {
       const res = await client.query(
-        `insert into knowledge_items (id, tenant_id, kind, title, body, source, compartment, updated_at)
-         values ($1,$2,$3,$4,$5,$6,$7,$8)
+        `insert into knowledge_items
+           (id, tenant_id, kind, title, body, source, compartment, updated_at, origin_run_id, google_derived)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
          on conflict (id) do update set kind = excluded.kind, title = excluded.title,
            body = excluded.body, source = excluded.source, compartment = excluded.compartment,
            updated_at = excluded.updated_at, version = knowledge_items.version + 1
          where knowledge_items.tenant_id = excluded.tenant_id`,
-        [k.id, k.tenantId, k.kind, k.title, k.body, k.source, k.compartment, k.updatedAt]);
+        // 由来（origin_run_id・google_derived）は最初の登録のときだけ書く。上書きの対象に入れない（第9.5.2節）
+        [k.id, k.tenantId, k.kind, k.title, k.body, k.source, k.compartment, k.updatedAt,
+          k.originRunId ?? null, k.googleDerived ?? false]);
       // 他社の同じ ID には書かない（上の where で更新されない）。その場合は節も作らない
       if (res.rowCount === 0) return;
       await this.writeSections(client, k.tenantId, k);

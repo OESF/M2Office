@@ -25,6 +25,16 @@ export interface ToolContext {
   files: FileStore;
   /** Web での調査の提供者（`web.research` が使う。仕様書 第9.4.2節）。 */
   research?: ResearchProvider;
+  /**
+   * 呼び出したステップより後に、定義に残っている承認ステップの数。
+   *
+   * @remarks
+   * すべての承認を通ってからでなければ行わない操作（`knowledge.register`。仕様書 第9.5.2節）が使う。
+   * 実行エンジンの外から呼ぶ場合は持たない。持たないときは、そうした操作を行わない。
+   */
+  approvalsAhead?: number;
+  /** ツール名から、Google の権限を持つツールか（`Tool.google` の宣言があるか）を返す。 */
+  isGoogleTool?: (name: string) => boolean;
 }
 
 /** 引数 1 つの定義（JSON Schema の一部）。 */

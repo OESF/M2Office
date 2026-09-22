@@ -54,6 +54,7 @@
 | `sheet.render` | draft | — | 表を Excel・CSV として作り、成果物として保存します |
 | `sheets.create` | draft | `drive.file`（機密でない） | あなたのドライブに Google スプレッドシートを作ります。共有はしません |
 | `slides.create` | draft | `drive.file`（機密でない） | 調べた内容をスライドにまとめ、あなたのドライブに作ります。PowerPoint 形式でも取り出せます。共有はしません |
+| `knowledge.register` | write-internal | — | 承認された議事録などを、そのまま社内の知識に登録します。すべての承認のあとに行い、承認した人が見た内容だけを登録します |
 | `notification.send` | write-internal | — | 依頼した本人にだけお知らせを届けます。他の人には送りません |
 | `sheets.append` | write-internal | `drive.file`（機密でない） | M2Office で作った表に行を足します。会社の設定により、その前に確認を求めます |
 | `tasks.complete` | write-internal | `tasks`（機密） | ToDo を完了にします。会社の設定により、その前に確認を求めます |
@@ -99,6 +100,7 @@
 | `sheet.render` | `title`（必須）: 題名、`format`: 形式（xlsx・csv）、`columns`（必須）: 列名、`rows`（必須）: 行の配列（各行は値の配列） |
 | `sheets.create` | `title`（必須）: 題名、`columns`（必須）: 列名、`rows`: 行の配列（各行は値の配列）、`folderId`: 入れるフォルダの ID（任意） |
 | `slides.create` | `title`（必須）: 表紙の題名、`subtitle`: 副題（任意）、`slides`（必須）: 本文のスライドの配列（layout・title ほか。12 枚まで）、`sources`: 出典（title・url）の配列、`template`: 会社が登録したテンプレートの名前（任意） |
+| `knowledge.register` | `artifactId`（必須）: 登録する成果物の ID（document.create の結果） |
 | `notification.send` | `kind`: 種類（brief・run）、`title`（必須）: 題名、`body`（必須）: 本文 |
 | `sheets.append` | `spreadsheetId`（必須）: スプレッドシートの ID、`rows`（必須）: 足す行の配列（各行は値の配列） |
 | `tasks.complete` | `taskId`（必須）: ToDo の ID |

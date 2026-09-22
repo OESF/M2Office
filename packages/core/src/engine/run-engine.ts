@@ -283,9 +283,11 @@ export class RunEngine {
   ): Promise<string> {
     const { repo } = this.deps;
     const now = new Date().toISOString();
+    // この時点の成果物。承認した人が見たものの記録で、組織知識への登録が照らす（仕様書 第9.5.2節）
+    const artifactIds = (await repo.listArtifacts(run.tenantId, run.id)).map((a) => a.id);
     const runStep: RunStep = {
       id: randomUUID(), runId: run.id, seq: run.cursor, stepId: step.id,
-      kind: 'approval', status: 'awaiting', input: { present: step.present },
+      kind: 'approval', status: 'awaiting', input: { present: step.present, artifactIds },
       output: null, startedAt: now, endedAt: null,
     };
     await repo.appendRunStep(run.tenantId, runStep);
@@ -392,7 +394,7 @@ export class RunEngine {
           toolResults.push({ name: call.name, risk: tool.risk, pending: '本人の確認を待っています' });
           continue;
         }
-        toolResults.push(await this.invokeTool(run, def, call, requestedBy, registry, ai.research));
+        toolResults.push(await this.invokeTool(run, def, run.cursor, call, requestedBy, registry, ai.research));
       }
 
       const output = { text: res.text, tools: toolResults };
@@ -421,18 +423,24 @@ export class RunEngine {
     }
   }
 
-  /** ツールを 1 つ呼び、監査ログに残す。 */
+  /**
+   * ツールを 1 つ呼び、監査ログに残す。
+   *
+   * @param stepIndex 呼び出したステップの、定義の中の位置。後に残る承認ステップの数を数えるのに使う
+   */
   private async invokeTool(
-    run: Run, def: AgentDefinition, call: ToolCall, requestedBy: string, registry: ToolRegistry,
+    run: Run, def: AgentDefinition, stepIndex: number, call: ToolCall, requestedBy: string, registry: ToolRegistry,
     research: ResearchProvider | undefined = this.deps.research,
   ): Promise<unknown> {
     const { repo, connector, files } = this.deps;
     const tool = registry.get(call.name);
     if (!tool) return { name: call.name, error: '許可されていないツールです' };
     this.log.debug('ツールを呼び出し', { runId: run.id, tenantId: run.tenantId, tool: call.name, risk: tool.risk });
+    const approvalsAhead = def.steps.slice(stepIndex + 1).filter((s) => s.type === 'approval').length;
     const out = await tool.invoke(call.args, {
       tenantId: run.tenantId, userId: requestedBy, runId: run.id,
       compartment: def.compartment, repo, connector, files, research,
+      approvalsAhead, isGoogleTool: (name) => !!registry.get(name)?.google,
     });
     await repo.appendAudit({
       id: randomUUID(), tenantId: run.tenantId, actorType: 'agent', actorId: def.id,
@@ -491,7 +499,10 @@ export class RunEngine {
       const output = s.output as { executed?: boolean } | null;
       if (s.kind !== 'approval' || s.status !== 'succeeded' || !input?.toolCalls || output?.executed) continue;
       const results = [];
-      for (const call of input.toolCalls) results.push(await this.invokeTool(run, def, call, requestedBy, registry, research));
+      // 操作の確認は、確認を求めたステップの直後に置かれた承認とみなす。そのステップは承認で進めた cursor の 1 つ手前
+      for (const call of input.toolCalls) {
+        results.push(await this.invokeTool(run, def, run.cursor - 1, call, requestedBy, registry, research));
+      }
       await repo.updateRunStep(run.tenantId, {
         ...s, output: { ...(s.output as object), executed: true, tools: results },
       });

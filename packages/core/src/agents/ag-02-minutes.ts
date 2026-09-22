@@ -11,7 +11,7 @@ import type { AgentDefinition } from '@m2office/shared';
  *
  * プロトタイプで危険度の全レンジを 1 つで通す役割を持つ。
  * `read` → `draft` → 承認 → `write-internal` → 承認 → `external-send`
- * と進み、最後に組織知識へ登録される。
+ * と進み、最後に組織知識へ登録される。登録は共有と同じく承認②で認める（仕様書 第9.5.2節、ADR-0010）。
  *
  * @remarks
  * `chat.post` が `external-send` にあたるため、承認ゲートが必須である。
@@ -25,7 +25,7 @@ export const AG02_MINUTES: AgentDefinition = {
   version: 1,
   name: '議事録作成・共有',
   category: 'meeting',
-  description: '会議の記録から議事録を作り、タスクを起票して共有します',
+  description: '会議の記録から議事録を作り、タスクを起票して共有し、社内の知識に登録します',
   locale: 'ja-JP',
   compartment: null,
   inputs: {
@@ -37,7 +37,7 @@ export const AG02_MINUTES: AgentDefinition = {
       space: { type: 'string', title: '共有先のスペース' },
     },
   },
-  tools: ['meeting.get_transcript', 'document.create', 'tasks.create', 'chat.post'],
+  tools: ['meeting.get_transcript', 'document.create', 'tasks.create', 'chat.post', 'knowledge.register'],
   knowledge: { collections: ['minutes'] },
   steps: [
     {
@@ -57,6 +57,7 @@ export const AG02_MINUTES: AgentDefinition = {
       label: '作成',
       instruction: [
         '記録から議題・決定事項・保留事項・担当と期限を構造化し、議事録を作成する。',
+        '議事録は「## 決定事項」のように Markdown の見出しで分けて書く（組織知識では見出しごとに引かれる）。',
         '決まっていないことを決まったように書かない。',
       ].join('\n'),
     },
@@ -79,14 +80,17 @@ export const AG02_MINUTES: AgentDefinition = {
       type: 'approval',
       label: '共有の承認',
       approverRole: ['admin', 'approver'],
-      present: '共有先のスペースと、投稿する本文',
+      present: '共有先のスペースと、投稿する本文。承認すると、議事録を社内の知識にも登録します',
       onReject: 'stop',
     },
     {
       id: 'share',
       type: 'agent',
       label: '共有',
-      instruction: '承認された内容をチャットへ投稿する。',
+      instruction: [
+        '承認された内容をチャットへ投稿する。',
+        'あわせて、作成した議事録を組織知識として登録する（artifactId には作成の手順で得た成果物の ID を渡す）。',
+      ].join('\n'),
     },
   ],
   constraints: [
@@ -103,7 +107,7 @@ export const AG02_MINUTES: AgentDefinition = {
     },
   ],
   help: {
-    summary: '会議の記録から議事録を作り、決定事項を ToDo にして、承認のあとにチャットで共有します。',
+    summary: '会議の記録から議事録を作り、決定事項を ToDo にして、承認のあとにチャットで共有し、社内の知識に登録します。',
     examples: [{
       title: '定例会議の議事録を作る',
       input: { title: '営業定例', transcript: '（会議の記録を貼り付けてください）', space: '営業部' },
@@ -111,11 +115,14 @@ export const AG02_MINUTES: AgentDefinition = {
     notes: [
       '記録が空のときは、議事録を作らずに止まります',
       '承認は 2 回あります。議事録の内容と、共有する先と本文です',
+      '2 回目の承認のあと、議事録を社内の知識に登録します。以後、秘書や「社内ナレッジ Q&A」が議事録から答えます',
+      '知識に登録するのは、1 回目の承認で確かめた議事録そのものです。あとから書き換えられた文は登録しません',
       '会議の記録は、文字起こしを貼り付ければ使えます',
     ],
     faq: [
       { q: '決まっていないことまで決定として書かれませんか', a: '決定と保留を分けて書きます。決まっていないことを決定として書かないよう指示しています' },
-      { q: '承認しないとどうなりますか', a: '却下すると、そこで止まります。ToDo の登録もチャットへの共有も行いません' },
+      { q: '承認しないとどうなりますか', a: '却下すると、そこで止まります。1 回目で却下すれば何も行いません。2 回目で却下すれば、ToDo は登録済みですが、チャットへの共有と社内の知識への登録は行いません' },
+      { q: '登録した議事録を消したいときは', a: '管理者が、管理者ページの「知識」から消せます' },
     ],
   },
 };

@@ -169,7 +169,13 @@ function chooseTools(tools: string[], prompt: string): Call[] {
     return [{ name: 'gmail.list', args: { limit: 20 } }];
   }
   if (has('chat.post') && /投稿|共有/.test(instruction)) {
-    return [{ name: 'chat.post', args: { space: 'general', text: '議事録を共有します。' } }];
+    const calls: Call[] = [{ name: 'chat.post', args: { space: 'general', text: '議事録を共有します。' } }];
+    // 共有とあわせて知識へ登録する（AG-02。仕様書 第9.5.2節）。成果物の ID は作成の手順の結果から拾う
+    const artifactId = /"artifactId":\s*"([^"]+)"/.exec(previous)?.[1];
+    if (has('knowledge.register') && /知識/.test(instruction) && artifactId) {
+      calls.push({ name: 'knowledge.register', args: { artifactId } });
+    }
+    return calls;
   }
   if (has('tasks.create') && /起票|タスク|ToDo/.test(instruction)) {
     return [{ name: 'tasks.create', args: { title: '決定事項の対応', due: null } }];
@@ -181,8 +187,8 @@ function chooseTools(tools: string[], prompt: string): Call[] {
       args: isInbox
         ? { kind: 'inbox-triage', title: '受信箱の分類（スタブ生成）',
             body: '［スタブ］要返信・要対応・情報共有のみ・不要の一覧をここにまとめます。' }
-        : { kind: 'minutes', title: '議事録（スタブ生成）',
-            body: '［スタブ］議題・決定事項・保留事項・担当と期限をここにまとめます。' },
+        : { kind: 'minutes', title: `${extractField(prompt, 'title') || '会議'}の議事録（スタブ生成）`,
+            body: minutesStub(previous) },
     }];
   }
   if (has('meeting.get_transcript') && /取得/.test(instruction)) {
@@ -224,6 +230,24 @@ function summarizeForBrief(previous: string): string {
     `- 未完了のタスク: ${count('tasks.list')}`,
     `- 受信箱: ${count('gmail.list')}`,
     `- 承認待ち: ${count('approvals.pending')}`,
+  ].join('\n');
+}
+
+/**
+ * 議事録の見本。取得の手順で得た記録をそのまま「記録」の節に入れる。
+ *
+ * @remarks 推論をしないため、決定事項を取り出したふりはしない。記録が無ければそう書く
+ */
+function minutesStub(previous: string): string {
+  // 推論の応答文（同じ "text" の名前を持つ）ではなく、会議の記録のツールの結果から拾う
+  const text = /"name":\s*"meeting\.get_transcript"[\s\S]*?"result":\s*\{[\s\S]*?"text":\s*"((?:[^"\\]|\\.)*)"/.exec(previous)?.[1];
+  const record = text ? (JSON.parse(`"${text}"`) as string) : '（記録を取得できませんでした）';
+  return [
+    '## 決定事項',
+    '［スタブ］推論を行っていないため、取り出していません。',
+    '',
+    '## 記録',
+    record,
   ].join('\n');
 }
 

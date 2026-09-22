@@ -270,6 +270,18 @@ export interface KnowledgeItem {
   version?: number;
   /** 分けた節の数。一覧でだけ返す。 */
   sectionCount?: number;
+  /**
+   * 業務から登録した場合、登録した実行の ID（仕様書 第9.5.2節）。管理者が登録したものは `null`。
+   *
+   * @remarks 最初に登録したときだけ書く。管理者が本文を直しても変わらない。
+   */
+  originRunId?: string | null;
+  /**
+   * Google から読んだデータで作ったか（第9.5.2節・第14.3.2節）。会社の求めに応じて探して消せるようにするための印。
+   *
+   * @remarks `originRunId` と同じく、最初に登録したときだけ書く。
+   */
+  googleDerived?: boolean;
 }
 
 /** 実行の集計の 1 行（日・時・エージェント・状態で束ねたもの）。 */

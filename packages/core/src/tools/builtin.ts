@@ -1,5 +1,5 @@
 /**
- * @file 基盤が提供するツールの全体と、知識検索・会議の記録・文書作成のツール。
+ * @file 基盤が提供するツールの全体と、知識の検索と登録・会議の記録・文書作成のツール。
  *
  * 危険度は仕様書 第9.4節の区分に従う。
  * `external-send` 以上のツールは、定義に承認ゲートが無ければ実行前に拒否される。
@@ -82,9 +82,84 @@ export const documentCreate: Tool = {
   },
 };
 
+/** 業務から登録した知識の出典。業務の名前を添えて、どこから来た知識かを示す。 */
+const REGISTER_SOURCE = '業務「議事録作成・共有」で作成';
+
+/**
+ * 日本時間の日付（YYYY-MM-DD）。
+ *
+ * @remarks 知識の題名に添える。同じ会議名の議事録（毎週の定例など）を見分けるため
+ */
+function jstDate(iso: string): string {
+  return new Date(Date.parse(iso) + 9 * 3_600_000).toISOString().slice(0, 10);
+}
+
+/**
+ * 実行で作った成果物を、そのまま組織知識として登録する（仕様書 第9.5.2節の手順 7、ADR-0010）。
+ *
+ * @remarks
+ * 危険度 write-internal。社内の全員の秘書と業務から引けるようになる。
+ * 本文は受け取らず、承認より前に作られていた成果物の本文を使う。記録に紛れ込んだ指示で、
+ * 承認した人が見ていない文を知識に入れさせないため（不変則 I-6）。
+ * 定義の承認ステップをすべて通ったあとでなければ登録しない。知識の ID は実行から決め、1 回の実行で 1 件とする。
+ */
+export const knowledgeRegister: Tool = {
+  name: 'knowledge.register',
+  risk: 'write-internal',
+  activityLabel: '社内の知識に登録しています',
+  helpText: '承認された議事録などを、そのまま社内の知識に登録します。すべての承認のあとに行い、承認した人が見た内容だけを登録します',
+  description: 'この実行で作った成果物（承認で確かめたもの）を、本文を変えずに組織知識へ登録する。artifactId には document.create の結果の artifactId をそのまま渡す',
+  args: { properties: { artifactId: { type: 'string', description: '登録する成果物の ID（document.create の結果）' } }, required: ['artifactId'] },
+  async invoke(args, ctx) {
+    const artifactId = String(args['artifactId'] ?? '');
+    // 後に承認が残っていれば登録しない。承認②を却下したら知識に入らないようにする
+    if (ctx.approvalsAhead === undefined || ctx.approvalsAhead > 0) {
+      return { registered: false, reason: 'すべての承認を通ったあとでなければ、知識に登録できません' };
+    }
+    const artifact = (await ctx.repo.listArtifacts(ctx.tenantId, ctx.runId)).find((a) => a.id === artifactId);
+    if (!artifact) {
+      return { registered: false, reason: 'この実行で作った成果物が見つかりません' };
+    }
+    if (!artifact.body.trim()) {
+      return { registered: false, reason: '本文のない成果物は、知識に登録できません' };
+    }
+    // すべての承認で承認した人が見た成果物か。最初の承認で止めた時点にあったものでなければならない。
+    // 承認①の後に推論が作り直したものを登録させないため。操作の確認（`:confirm`）は内容の承認とみなさない
+    const steps = await ctx.repo.listRunSteps(ctx.tenantId, ctx.runId);
+    const firstGate = steps
+      .filter((s) => s.kind === 'approval' && s.status === 'succeeded' && !s.stepId.endsWith(':confirm'))
+      .sort((a, b) => a.seq - b.seq)[0];
+    const shown = (firstGate?.input as { artifactIds?: unknown } | null)?.artifactIds;
+    if (!Array.isArray(shown) || !shown.includes(artifact.id)) {
+      return { registered: false, reason: '承認で確かめた成果物ではないため、知識に登録できません' };
+    }
+    // Google から読んだデータで作ったか。書き込み（ToDo の起票・投稿）は中身の出どころではないため数えない
+    const isGoogleTool = ctx.isGoogleTool ?? (() => false);
+    const googleDerived = steps.some((s) => {
+      const tools = (s.output as { tools?: { name?: string; risk?: string }[] } | null)?.tools;
+      return Array.isArray(tools) && tools.some((t) => t.risk === 'read' && !!t.name && isGoogleTool(t.name));
+    });
+    const id = `run-${ctx.runId}`;
+    const title = `${artifact.title}（${jstDate(artifact.createdAt)}）`;
+    await ctx.repo.saveKnowledge({
+      id, tenantId: ctx.tenantId, kind: artifact.kind, title, body: artifact.body,
+      source: REGISTER_SOURCE, compartment: ctx.compartment, updatedAt: new Date().toISOString(),
+      originRunId: ctx.runId, googleDerived,
+    });
+    // 登録者は依頼した本人とする（第11.3節の「出典と登録者を記録」）。業務が代わりに行ったことは実行の ID で辿れる
+    await ctx.repo.appendAudit({
+      id: randomUUID(), tenantId: ctx.tenantId, actorType: 'user', actorId: ctx.userId,
+      action: 'knowledge.register', targetType: 'knowledge', targetId: id,
+      detail: { runId: ctx.runId, artifactId, googleDerived }, occurredAt: new Date().toISOString(),
+    });
+    return { registered: true, knowledgeId: id, title };
+  },
+};
+
 /** 基盤が提供するツールの全体。エージェント定義はここから選ぶ。 */
 export const BUILTIN_TOOLS: Tool[] = [
   knowledgeSearch,
+  knowledgeRegister,
   meetingGetTranscript,
   documentCreate,
   ...WORKSPACE_TOOLS,
