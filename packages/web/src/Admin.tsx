@@ -183,8 +183,16 @@ function Audit() {
   );
 }
 
+/** Google の権限の段階の表示（仕様書 第14.3.1節）。 */
+const LEVEL_LABEL: Record<string, { text: string; className: string }> = {
+  restricted: { text: '制限付き（公開の前に CASA が必要）', className: 'badge warn' },
+  sensitive: { text: '機密（公開の前に Google の審査）', className: 'badge' },
+  'non-sensitive': { text: '機密でない', className: 'badge muted-badge' },
+};
+
 function Connectors() {
   const { data, error } = useLoad(api.admin.connectors);
+  const perms = useLoad(api.admin.googlePermissions);
   return (
     <>
       <h1>接続</h1>
@@ -198,6 +206,29 @@ function Connectors() {
           </dl>
         </div>
       )}
+      <div className="card">
+        <h3>この会社の業務が求める Google の権限</h3>
+        <p className="small">
+          使える業務のツールから集めた一覧です。Google との接続では、使う業務の分だけ許可を求めます。
+          「制限付き」の権限は、一般公開の前に第三者のセキュリティ評価（CASA）が必要です。段階は見込みで、申請の前に Google の一覧で確かめます。
+        </p>
+        {perms.error && <p className="error">{perms.error}</p>}
+        {perms.data && (
+          <table className="table">
+            <thead><tr><th>権限</th><th>段階</th><th>ツール</th><th>業務</th></tr></thead>
+            <tbody>
+              {perms.data.items.map((p) => (
+                <tr key={p.scope}>
+                  <td><code>{p.scope}</code></td>
+                  <td><span className={LEVEL_LABEL[p.level]?.className ?? 'badge'}>{LEVEL_LABEL[p.level]?.text ?? p.level}</span></td>
+                  <td className="small">{p.tools.join('、')}</td>
+                  <td className="small">{p.agents.join('、')}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
     </>
   );
 }

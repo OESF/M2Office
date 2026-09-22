@@ -255,6 +255,34 @@ export function adminRoute(deps: AppDeps) {
     }),
   );
 
+  /**
+   * この会社の業務が求める Google の権限（仕様書 第14.3.2節 規定 1・2）。
+   *
+   * @remarks
+   * 使える業務（公式と、導入済み・有効な拡張機能。無効にした業務は除く）のツールから集める。
+   * 段階的な認可で求める権限の一覧であり、どの業務が制限付きの権限（CASA の対象）を招くかを示す。
+   */
+  app.get('/google-permissions', async (c) => {
+    const { tenant } = c.get('ctx');
+    const [view, settings] = await Promise.all([deps.tenantView(tenant.id), deps.repo.getTenantSettings(tenant.id)]);
+    const byScope = new Map<string, { scope: string; level: string; tools: Set<string>; agents: Set<string> }>();
+    for (const agent of view.agents.filter((a) => !settings.agents.disabled.includes(a.id))) {
+      for (const tool of view.registry.allowed(agent.tools)) {
+        if (!tool.google) continue;
+        const e = byScope.get(tool.google.scope) ?? { scope: tool.google.scope, level: tool.google.level, tools: new Set(), agents: new Set() };
+        e.tools.add(tool.name);
+        e.agents.add(agent.name);
+        byScope.set(tool.google.scope, e);
+      }
+    }
+    const order = { restricted: 0, sensitive: 1, 'non-sensitive': 2 } as Record<string, number>;
+    return c.json({
+      items: [...byScope.values()]
+        .sort((a, b) => (order[a.level] ?? 3) - (order[b.level] ?? 3) || a.scope.localeCompare(b.scope))
+        .map((e) => ({ scope: e.scope, level: e.level, tools: [...e.tools].sort(), agents: [...e.agents].sort() })),
+    });
+  });
+
   return app;
 }
 

@@ -29,7 +29,7 @@ export {
 } from './connectors/mcp.js';
 export type {
   WorkspaceConnector, ConnectorPrincipal, DataSource, MailSummary, MailMessage,
-  CalendarEvent, TaskItem, BusySlot,
+  CalendarEvent, TaskItem, BusySlot, DriveFile,
 } from './connectors/types.js';
 
 export * from './files/index.js';
@@ -43,8 +43,8 @@ export {
 export * from './help/index.js';
 export * from './extensions/index.js';
 
-export { ToolRegistry } from './tools/registry.js';
-export type { Tool, ToolContext } from './tools/registry.js';
+export { ToolRegistry, validateToolArgs } from './tools/registry.js';
+export type { Tool, ToolContext, ArgSpec, ToolArgsSchema, GoogleScope, GoogleScopeLevel } from './tools/registry.js';
 export { BUILTIN_TOOLS } from './tools/builtin.js';
 
 export { RunEngine, estimateCostJpy } from './engine/run-engine.js';

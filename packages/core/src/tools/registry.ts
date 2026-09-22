@@ -27,6 +27,34 @@ export interface ToolContext {
   research?: ResearchProvider;
 }
 
+/** 引数 1 つの定義（JSON Schema の一部）。 */
+export interface ArgSpec {
+  type: 'string' | 'number' | 'boolean' | 'array' | 'object';
+  /** 推論と開発者に見せる説明。 */
+  description: string;
+  /** 取りうる値（文字列のとき）。 */
+  enum?: string[];
+  /** 配列の要素の定義。 */
+  items?: ArgSpec;
+}
+
+/** ツールの引数の定義（JSON Schema の `type: object` の一部。仕様書 第9.4.4節）。 */
+export interface ToolArgsSchema {
+  properties: Record<string, ArgSpec>;
+  required?: string[];
+}
+
+/** Google の権限の段階（仕様書 第14.3.1節）。 */
+export type GoogleScopeLevel = 'non-sensitive' | 'sensitive' | 'restricted';
+
+/** ツールが必要とする Google の権限（仕様書 第14.3.2節 規定 1）。 */
+export interface GoogleScope {
+  /** スコープの名前（`https://www.googleapis.com/auth/` の後ろ。例: `gmail.readonly`）。 */
+  scope: string;
+  /** 段階。申請の前に Google の公式の一覧で確かめる（見込み）。 */
+  level: GoogleScopeLevel;
+}
+
 /**
  * ツールの定義。
  *
@@ -49,6 +77,10 @@ export interface Tool {
    * 送信しない・承認のあとに行う、のような利用者が気にする点を必ず書く。
    */
   helpText: string;
+  /** 引数の定義。推論への説明・呼び出しの検証・開発者マニュアルの一覧に使う（仕様書 第9.4.4節）。 */
+  args?: ToolArgsSchema;
+  /** 必要な Google の権限。Google を使わないツールは持たない（仕様書 第14.3.2節）。 */
+  google?: GoogleScope;
   invoke(args: Record<string, unknown>, ctx: ToolContext): Promise<unknown>;
 }
 
@@ -93,4 +125,43 @@ export class ToolRegistry {
   allowed(names: string[]): Tool[] {
     return names.map((n) => this.tools.get(n)).filter((t): t is Tool => !!t);
   }
+}
+
+/**
+ * 引数を定義に照らして確かめる。
+ *
+ * @returns 見つかった問題。空なら呼んでよい
+ *
+ * @remarks
+ * 定義に無い引数は拒否しない（ツールの側で無視するか、`notification.send` のように理由を返す）。
+ * 数値は、数字だけの文字列も受け付ける（推論が文字列で返すことがあるため）。
+ */
+export function validateToolArgs(schema: ToolArgsSchema, args: Record<string, unknown>): string[] {
+  const problems: string[] = [];
+  for (const key of schema.required ?? []) {
+    const v = args[key];
+    if (v === undefined || v === null || (typeof v === 'string' && v.trim() === '')) problems.push(`${key} がありません`);
+  }
+  for (const [key, spec] of Object.entries(schema.properties)) {
+    const v = args[key];
+    if (v === undefined || v === null) continue;
+    if (!matches(spec, v)) problems.push(`${key} は ${typeName(spec)} で渡してください`);
+    else if (spec.enum && !spec.enum.includes(String(v))) problems.push(`${key} は ${spec.enum.join('・')} のいずれかです`);
+  }
+  return problems;
+}
+
+function matches(spec: ArgSpec, v: unknown): boolean {
+  switch (spec.type) {
+    case 'string': return typeof v === 'string';
+    case 'number': return typeof v === 'number' ? Number.isFinite(v) : typeof v === 'string' && /^-?\d+(\.\d+)?$/.test(v.trim());
+    case 'boolean': return typeof v === 'boolean';
+    case 'array': return Array.isArray(v) && (!spec.items || v.every((x) => matches(spec.items!, x)));
+    case 'object': return typeof v === 'object' && !Array.isArray(v);
+  }
+}
+
+function typeName(spec: ArgSpec): string {
+  const names = { string: '文字列', number: '数値', boolean: 'true か false', array: '配列', object: 'オブジェクト' } as const;
+  return spec.type === 'array' && spec.items ? `${names[spec.items.type]}の配列` : names[spec.type];
 }

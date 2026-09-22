@@ -1,5 +1,5 @@
 /**
- * @file 業務システムへの接続口（コネクタ）の型。メール・予定・タスク・チャットの操作を定める。
+ * @file 業務システムへの接続口（コネクタ）の型。メール・予定・タスク・チャット・ドライブ・ドキュメント・スプレッドシート・スライドの操作を定める。
  *
  * ツール層はこのインターフェースだけを見て、Google の API を直接呼ばない。
  * 実装は `mock`（ダミー）と `google`（B-2 の完了後）の 2 つ。
@@ -57,11 +57,28 @@ export interface TaskItem {
   completed: boolean;
 }
 
+/** ドライブのファイル。M2Office が作ったか、利用者が選んだものだけが見える（`drive.file`。仕様書 第14.3.2節）。 */
+export interface DriveFile {
+  id: string;
+  name: string;
+  kind: 'document' | 'spreadsheet' | 'presentation' | 'pdf' | 'folder' | 'other';
+  modifiedAt: string;
+  /** 開くリンク。見本の接続口では `null`。 */
+  url: string | null;
+}
+
 export interface MailConnector {
   /** 受信箱のメールを新しい順に返す。 */
   list(p: ConnectorPrincipal, opts: { since?: string; limit?: number }): Promise<MailSummary[]>;
   /** 1 通を本文つきで返す。見つからなければ `null`。 */
   get(p: ConnectorPrincipal, id: string): Promise<MailMessage | null>;
+  /** 検索の条件（Gmail の検索の書き方）で探す。本文は返さない。 */
+  search(p: ConnectorPrincipal, q: { query: string; limit?: number }): Promise<MailSummary[]>;
+  /** メールを送る。承認ステップの直後でしか呼ばれない（危険度 external-send。仕様書 第9.4節）。 */
+  send(
+    p: ConnectorPrincipal,
+    mail: { to: string[]; cc: string[]; subject: string; body: string; replyTo: string | null },
+  ): Promise<{ messageId: string }>;
   /** 返信の下書きを作る。**送信はしない**（仕様書 第9.5.1節）。 */
   createDraft(
     p: ConnectorPrincipal,
@@ -82,11 +99,47 @@ export interface CalendarConnector {
     p: ConnectorPrincipal,
     ev: { title: string; start: string; end: string; attendees: string[] },
   ): Promise<{ eventId: string }>;
+  /** 予定を変える。参加者に変更の通知が届く。見つからなければ `null`。 */
+  update(
+    p: ConnectorPrincipal,
+    ev: { eventId: string; title?: string; start?: string; end?: string; attendees?: string[] },
+  ): Promise<{ eventId: string } | null>;
+  /** 予定を取り消す。参加者に取り消しの通知が届く。見つからなければ `null`。 */
+  cancel(p: ConnectorPrincipal, ev: { eventId: string }): Promise<{ eventId: string } | null>;
 }
 
 export interface TaskConnector {
   list(p: ConnectorPrincipal, opts: { includeCompleted?: boolean }): Promise<TaskItem[]>;
   create(p: ConnectorPrincipal, t: { title: string; due: string | null }): Promise<{ taskId: string }>;
+  /** 完了にする。見つからなければ `null`。 */
+  complete(p: ConnectorPrincipal, t: { taskId: string }): Promise<{ taskId: string } | null>;
+}
+
+/** ドライブ（`drive.file` の範囲。仕様書 第9.4.4節）。 */
+export interface DriveConnector {
+  /** 名前で探す。見えるのは M2Office が作ったか、利用者が選んだファイルだけ。 */
+  search(p: ConnectorPrincipal, q: { query: string; limit?: number }): Promise<DriveFile[]>;
+  /** 中身を文字で読む（ドキュメント・スプレッドシート・スライド・PDF）。見つからなければ `null`。 */
+  read(p: ConnectorPrincipal, fileId: string): Promise<{ file: DriveFile; text: string } | null>;
+  createFolder(p: ConnectorPrincipal, f: { name: string; parentId: string | null }): Promise<DriveFile>;
+}
+
+/** Google ドキュメント。 */
+export interface DocsConnector {
+  create(p: ConnectorPrincipal, d: { title: string; body: string; folderId: string | null }): Promise<DriveFile>;
+  /** 末尾に追記する。M2Office が作った文書だけ（見つからなければ `null`）。 */
+  append(p: ConnectorPrincipal, d: { documentId: string; text: string }): Promise<{ documentId: string } | null>;
+}
+
+/** Google スプレッドシート。 */
+export interface SheetsConnector {
+  create(
+    p: ConnectorPrincipal, s: { title: string; columns: string[]; rows: string[][]; folderId: string | null },
+  ): Promise<DriveFile>;
+  /** 値を読む。1 行目は見出し。見つからなければ `null`。 */
+  read(p: ConnectorPrincipal, s: { spreadsheetId: string; maxRows: number }): Promise<{ file: DriveFile; values: string[][] } | null>;
+  /** 末尾に行を足す。見つからなければ `null`。 */
+  append(p: ConnectorPrincipal, s: { spreadsheetId: string; rows: string[][] }): Promise<{ appended: number } | null>;
 }
 
 export interface ChatConnector {
@@ -125,4 +178,7 @@ export interface WorkspaceConnector {
   tasks: TaskConnector;
   chat: ChatConnector;
   slides: SlidesConnector;
+  drive: DriveConnector;
+  docs: DocsConnector;
+  sheets: SheetsConnector;
 }

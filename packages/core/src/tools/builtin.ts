@@ -12,6 +12,7 @@ import type { Tool } from './registry.js';
 import { WORKSPACE_TOOLS } from './workspace.js';
 import { FILE_TOOLS } from './files.js';
 import { RESEARCH_TOOLS } from './research.js';
+import { GOOGLE_TOOLS } from './google.js';
 
 /** 組織知識を検索する。出典を伴って返す（仕様書 第11.7節）。 */
 export const knowledgeSearch: Tool = {
@@ -20,6 +21,7 @@ export const knowledgeSearch: Tool = {
   activityLabel: '社内の知識を調べています（リサーチ中）',
   helpText: '社内の知識（規程・議事録など）を調べます。区画の外の人には区画内の文書を見せません',
   description: '組織知識を検索し、出典つきで返す',
+  args: { properties: { query: { type: 'string', description: '調べる言葉' } }, required: ['query'] },
   async invoke(args, ctx) {
     const query = String(args['query'] ?? '');
     const hits = await ctx.repo.searchKnowledge(ctx.tenantId, query, ctx.compartment);
@@ -38,6 +40,7 @@ export const meetingGetTranscript: Tool = {
   activityLabel: '会議の記録を読んでいます',
   helpText: '会議の記録（文字起こし）を読みます',
   description: '会議の文字起こしを取得する',
+  args: { properties: { transcript: { type: 'string', description: '会議の記録（文字起こし）' } }, required: ['transcript'] },
   async invoke(args) {
     const text = String(args['transcript'] ?? '');
     if (!text.trim()) {
@@ -55,6 +58,7 @@ export const documentCreate: Tool = {
   activityLabel: '資料を作成しています',
   helpText: '文書を作り、成果物として保存します。社外へは出しません',
   description: '文書を作成し、成果物として保存する',
+  args: { properties: { kind: { type: 'string', description: '種類（例: minutes・reply）' }, title: { type: 'string', description: '題名' }, body: { type: 'string', description: '本文' } }, required: ['title', 'body'] },
   async invoke(args, ctx) {
     const id = randomUUID();
     await ctx.repo.createArtifact({
@@ -78,4 +82,5 @@ export const BUILTIN_TOOLS: Tool[] = [
   ...WORKSPACE_TOOLS,
   ...FILE_TOOLS,
   ...RESEARCH_TOOLS,
+  ...GOOGLE_TOOLS,
 ];

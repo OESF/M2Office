@@ -25,6 +25,7 @@ export const webResearch: Tool = {
   activityLabel: 'Web で調べています（リサーチ中）',
   helpText: 'テーマを Google 検索で調べ、出典つきでまとめます。調べる言葉は Google に送られますが、どこにも書き込みません',
   description: 'テーマを Web で調べ、出典つきの文章を返す。引数: topic（調べるテーマ）、focus（特に知りたいこと。任意）',
+  args: { properties: { topic: { type: 'string', description: '調べるテーマ' }, focus: { type: 'string', description: '特に知りたいこと（任意）' } }, required: ['topic'] },
   async invoke(args, ctx) {
     const topic = String(args['topic'] ?? '').trim().slice(0, 300);
     if (!topic) return { error: '調べるテーマ（topic）がありません' };
@@ -58,6 +59,8 @@ export const slidesCreate: Tool = {
     + 'KPI は stats（value と label、3 件まで）、CHART は chartType・chartCategories・chartSeries（name と values、2 系列まで）、'
     + 'IMAGE は imagePrompt と caption。takeaway は伝えたいこと 1 文。本文のスライドは 12 枚まで。'
     + 'template に会社が登録したテンプレートの名前を渡せばそれを、無ければ既定のテンプレートを使う',
+  args: { properties: { title: { type: 'string', description: '表紙の題名' }, subtitle: { type: 'string', description: '副題（任意）' }, slides: { type: 'array', description: '本文のスライドの配列（layout・title ほか。12 枚まで）' }, sources: { type: 'array', description: '出典（title・url）の配列' }, template: { type: 'string', description: '会社が登録したテンプレートの名前（任意）' } }, required: ['title', 'slides'] },
+  google: { scope: 'drive.file', level: 'non-sensitive' },
   async invoke(args, ctx) {
     const checked = normalizeSlidePlan(args);
     if ('error' in checked) return { error: `スライドを作れませんでした: ${checked.error}` };

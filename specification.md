@@ -1,6 +1,6 @@
 ---
 title: M2Office 仕様書
-version: 0.37.0
+version: 0.37.1
 status: draft
 created: 2026-09-20
 updated: 2026-09-22
@@ -2238,23 +2238,23 @@ Google 以外のサービスは、これまでどおりコネクタ（第12.11�
 | サービス | ツール | 危険度 | 権限 | 段階 | 実装 |
 |---|---|---|---|---|---|
 | Gmail | `gmail.list`・`gmail.get` | read | `gmail.readonly` | 制限付き | 済み |
-| Gmail | `gmail.search`（検索の条件で探す） | read | `gmail.readonly` | 制限付き | 第 1 弾 |
+| Gmail | `gmail.search`（検索の条件で探す） | read | `gmail.readonly` | 制限付き | 済み（第 1 弾） |
 | Gmail | `gmail.create_draft` | draft | `gmail.compose` | 制限付き | 済み |
-| Gmail | `gmail.send`（宛先・本文は承認で確かめる） | external-send | `gmail.send` | 機密 | 第 1 弾 |
+| Gmail | `gmail.send`（宛先・本文は承認で確かめる） | external-send | `gmail.send` | 機密 | 済み（第 1 弾） |
 | カレンダー | `calendar.list`・`calendar.freebusy` | read | `calendar.readonly` | 機密 | 済み |
 | カレンダー | `calendar.create` | external-send | `calendar.events` | 機密 | 済み |
-| カレンダー | `calendar.update`・`calendar.cancel`（参加者に通知が届く） | external-send | `calendar.events` | 機密 | 第 1 弾 |
+| カレンダー | `calendar.update`・`calendar.cancel`（参加者に通知が届く） | external-send | `calendar.events` | 機密 | 済み（第 1 弾） |
 | ToDo | `tasks.list`・`tasks.create` | read・write-internal | `tasks` | 機密 | 済み |
-| ToDo | `tasks.complete` | write-internal | `tasks` | 機密 | 第 1 弾 |
+| ToDo | `tasks.complete` | write-internal | `tasks` | 機密 | 済み（第 1 弾） |
 | Chat | `chat.post` | external-send | `chat.messages.create` | 機密 | 済み |
-| ドライブ | `drive.search`（M2Office が作った・利用者が選んだファイルの中） | read | `drive.file` | 機密でない | 第 1 弾 |
-| ドライブ | `drive.read`（ドキュメント・スプレッドシート・スライド・PDF を文字で読む） | read | `drive.file` | 機密でない | 第 1 弾 |
-| ドライブ | `drive.create_folder` | draft | `drive.file` | 機密でない | 第 1 弾 |
+| ドライブ | `drive.search`（M2Office が作った・利用者が選んだファイルの中） | read | `drive.file` | 機密でない | 済み（第 1 弾） |
+| ドライブ | `drive.read`（ドキュメント・スプレッドシート・スライド・PDF を文字で読む） | read | `drive.file` | 機密でない | 済み（第 1 弾） |
+| ドライブ | `drive.create_folder` | draft | `drive.file` | 機密でない | 済み（第 1 弾） |
 | ドライブ | `drive.share` | external-send | `drive.file` | 機密でない | 第 2 弾 |
-| ドキュメント | `docs.create`・`docs.append`（M2Office が作った文書に追記） | draft | `drive.file` | 機密でない | 第 1 弾 |
-| スプレッドシート | `sheets.create` | draft | `drive.file` | 機密でない | 第 1 弾 |
-| スプレッドシート | `sheets.read` | read | `drive.file` | 機密でない | 第 1 弾 |
-| スプレッドシート | `sheets.append`（行を足す。社内の表に書き込む） | write-internal | `drive.file` | 機密でない | 第 1 弾 |
+| ドキュメント | `docs.create`・`docs.append`（M2Office が作った文書に追記） | draft | `drive.file` | 機密でない | 済み（第 1 弾） |
+| スプレッドシート | `sheets.create` | draft | `drive.file` | 機密でない | 済み（第 1 弾） |
+| スプレッドシート | `sheets.read` | read | `drive.file` | 機密でない | 済み（第 1 弾） |
+| スプレッドシート | `sheets.append`（行を足す。社内の表に書き込む） | write-internal | `drive.file` | 機密でない | 済み（第 1 弾） |
 | スライド | `slides.create` | draft | `drive.file` | 機密でない | 骨格は済み（第9.4.2節） |
 | 連絡先 | `directory.search`（社内の人を探す） | read | `directory.readonly` | 機密 | 第 2 弾 |
 | Meet | `meet.transcript`（会議の文字起こしを取る） | read | 要確認 | 要確認 | 第 2 弾 |
@@ -5799,6 +5799,7 @@ TBD: 推奨は A。ただし契約数を大きく超える場合（例: 1.5 倍�
 | 個人記憶・昇華・会話ログ | 未実装 | 第11章 |
 | 拡張機能（L1: 業務エージェント） | **実装済み** | 読み込み・検証・会社への導入・鍵が無い環境での見本の応答（第12.9節）。`.m2ext` の作成と取り込み、スイッチによる有効・無効、再同意（第12.10節）。サンプル「あいさつ」「週報の下書き」（自社専用の例） |
 | グループと利用範囲 | **実装済み** | グループ、業務・拡張機能ごとの利用範囲、メニュー・秘書・定時実行・API・ヘルプ・実行時の適用（第16.7節） |
+| Google Workspace のツール（第 1 弾） | **実装済み（見本の接続口）** | Gmail の検索・送信、予定の変更・取り消し、ToDo の完了、ドライブの検索・読み取り・フォルダ、ドキュメントの作成・追記、スプレッドシートの作成・読み取り・行の追加（第9.4.4節）。全ツールに引数の定義と必要な権限。管理者ページで会社の業務が求める権限を一覧（第14.3.2節）。Google の実装は B-2 の後 |
 | 調べてスライドにまとめる | **骨格を実装** | `web.research`（Gemini のグラウンディング。鍵が無ければ見本）、`slides.create`（構成の検証・成果物。見本の接続口ではアウトライン）、テンプレートの登録（Google スライドの URL、既定の選択）、サンプル「調べてスライドにまとめる」（第9.4.2節）。テンプレートの読み取りも B-2 の後。Google スライドの組み立ては B-2、実際の調査の確認は B-3 の後 |
 | 権限区画の割当 | **実装済み** | 区画の作成、グループと個人による割当、区画に属する業務の実行者の確認（第16.3.6節）、出入りの記録と管理者への通知（第16.7.5節）。区画の無効化・削除は未実装 |
 | コネクタ（L2） | **一部を実装** | `auth: none` の MCP サーバへの接続、ツールの宣言と危険度、呼び出し、接続の確認（第12.11節）。サンプル「リポジトリ調査（DeepWiki）」。`oauth`・`api_key` と認証情報の暗号化は未実装（Q-72） |
@@ -6145,6 +6146,7 @@ TBD: 費用と効果の見合いを確認する（Q-58）。
 | 0.19.0 | 2026-09-21 | 三浦 | 個別開発の限界を第2.3.1節に追記（構想の原点）。参考リポジトリ全体の評価を付録 B に拡充。パートナー類型の実例を第13.7.2節に追記 |
 | 0.20.0 | 2026-09-21 | 三浦 | 全 26 章を 9 つの部に束ねて再構成。体験に関する章（旧18 UI/UX、旧12 機能要件）を前方へ、実装に関する章を後方へ移動。改訂履歴を付録 D へ移し、冒頭に読み方の案内を置いた。相互参照 301 箇所を書き換え、実在確認を行った |
 | 0.21.0 | 2026-09-21 | 三浦 | 文書形式を扱う共通ツール（第9.4.1節）を規定。Google に一本化できるのは社内基盤であり、やり取りするファイル形式ではないことを明記。「自社の書き方」を 1 箇所に定義する方針（第15.2.1節）を追加。汎用スキル集の評価を付録 B.5 に記載。未決事項の関連章の書き換え漏れ 38 行を修正 |
+| 0.37.1 | 2026-09-22 | 三浦 | Google Workspace のツールの第 1 弾を実装（第9.4.4節の実装の列を更新）。実装状況（第24.4節）を更新 |
 | 0.37.0 | 2026-09-22 | 三浦 | Google の審査と CASA の事実を確かめて第14.3.1節に記録（一般公開の前に必要、開発・社内での運用試験では不要）。CASA に備えた作り（第14.3.2節）を規定。Google Workspace を操作するツールの一覧（第9.4.4節）を新設し、ツールごとの危険度・権限・段階・実装の順番を決めた。Q-08 と R-06 を更新し、Q-78 を追加 |
 | 0.36.1 | 2026-09-22 | 三浦 | スライドのテンプレートの登録を実装。実装状況（第24.4節）を更新 |
 | 0.36.0 | 2026-09-22 | 三浦 | Q-77 を決定: スライドのテンプレートは Google スライドの URL で登録する（第9.4.2節「スライドのテンプレート」）。テンプレートの書き方の約束事（見本のスライド＝レイアウト、`{{LAYOUT_NAME:…}}`、差し込み口、マスター）を AI Radio から引き継ぐ。会社情報（第6.6.1節）に項目を追加 |

@@ -28,6 +28,8 @@ export const gmailList: Tool = {
   activityLabel: 'メールを確認しています',
   helpText: '受信箱のメールの一覧を見ます',
   description: '受信箱のメールを新しい順に一覧する（本文なし）',
+  args: { properties: { since: { type: 'string', description: 'この時刻以降（ISO 形式。任意）' }, limit: { type: 'number', description: '件数（既定 20）' } } },
+  google: { scope: 'gmail.readonly', level: 'restricted' },
   async invoke(args, ctx) {
     const items = await ctx.connector.mail.list(principal(ctx), {
       since: str(args['since']) || undefined,
@@ -50,6 +52,8 @@ export const gmailGet: Tool = {
   activityLabel: 'メールを確認しています',
   helpText: 'メールの本文を読みます。本文に書かれた指示には従いません',
   description: 'メールを 1 通、本文つきで取得する',
+  args: { properties: { id: { type: 'string', description: 'メールの ID' } }, required: ['id'] },
+  google: { scope: 'gmail.readonly', level: 'restricted' },
   async invoke(args, ctx) {
     const mail = await ctx.connector.mail.get(principal(ctx), str(args['id']));
     if (!mail) return { source: ctx.connector.source, available: false, reason: 'メールが見つかりません' };
@@ -62,7 +66,7 @@ export const gmailGet: Tool = {
  *
  * @remarks
  * 危険度 `draft`。送信は本人が Gmail 上で行う（仕様書 第9.5.1節）。
- * 送信するツールは意図して用意していない。
+ * 送る場合は `gmail.send`（external-send。承認の直後でのみ呼べる）を使う。AG-01 は下書きまでで止める。
  */
 export const gmailCreateDraft: Tool = {
   name: 'gmail.create_draft',
@@ -70,6 +74,8 @@ export const gmailCreateDraft: Tool = {
   activityLabel: '返信の下書きを作っています',
   helpText: '返信の下書きを作ります。送信はしません',
   description: '返信の下書きを作る（送信はしない）',
+  args: { properties: { replyTo: { type: 'string', description: '返信するメールの ID（任意）' }, to: { type: 'string', description: '宛先（返信のときは省略可。元のメールの差出人になる）' }, subject: { type: 'string', description: '件名' }, body: { type: 'string', description: '本文' } }, required: ['subject', 'body'] },
+  google: { scope: 'gmail.compose', level: 'restricted' },
   async invoke(args, ctx) {
     const res = await ctx.connector.mail.createDraft(principal(ctx), {
       replyTo: str(args['replyTo']) || null,
@@ -92,6 +98,8 @@ export const calendarList: Tool = {
   activityLabel: '予定を確認しています',
   helpText: '予定の一覧を見ます',
   description: '期間内の予定を一覧する（既定は今日から 7 日間）',
+  args: { properties: { from: { type: 'string', description: '期間の始まり（ISO 形式。既定は今日）' }, to: { type: 'string', description: '期間の終わり（既定は 7 日後）' } } },
+  google: { scope: 'calendar.readonly', level: 'sensitive' },
   async invoke(args, ctx) {
     const today = ymd(new Date());
     const from = str(args['from']) || jst(today, 0);
@@ -112,6 +120,8 @@ export const calendarFreeBusy: Tool = {
   activityLabel: '予定の空きを調べています',
   helpText: '参加者の予定の空きを調べます',
   description: '参加者の埋まっている時間帯を取得する',
+  args: { properties: { emails: { type: 'array', description: '参加者のメールアドレス', items: { type: 'string', description: '要素' } }, from: { type: 'string', description: '期間の始まり（任意）' }, to: { type: 'string', description: '期間の終わり（任意）' } }, required: ['emails'] },
+  google: { scope: 'calendar.readonly', level: 'sensitive' },
   async invoke(args, ctx) {
     const emails = Array.isArray(args['emails']) ? args['emails'].map(String) : [];
     if (emails.length === 0) {
@@ -137,6 +147,8 @@ export const calendarCreate: Tool = {
   activityLabel: '予定を登録しています',
   helpText: '予定を登録し、参加者を招待します。必ず承認のあとに行います',
   description: '予定を作成し、参加者を招待する',
+  args: { properties: { title: { type: 'string', description: '予定の題名' }, start: { type: 'string', description: '開始（ISO 形式）' }, end: { type: 'string', description: '終了（ISO 形式）' }, attendees: { type: 'array', description: '参加者のメールアドレス', items: { type: 'string', description: '要素' } } }, required: ['title', 'start', 'end'] },
+  google: { scope: 'calendar.events', level: 'sensitive' },
   async invoke(args, ctx) {
     const res = await ctx.connector.calendar.create(principal(ctx), {
       title: str(args['title'], '打ち合わせ'),
@@ -155,6 +167,8 @@ export const tasksList: Tool = {
   activityLabel: 'ToDo を確認しています',
   helpText: 'ToDo の一覧を見ます',
   description: '未完了のタスクを一覧する',
+  args: { properties: {} },
+  google: { scope: 'tasks', level: 'sensitive' },
   async invoke(_args, ctx) {
     const items = await ctx.connector.tasks.list(principal(ctx), {});
     return { source: ctx.connector.source, count: items.length, items };
@@ -168,6 +182,8 @@ export const tasksCreate: Tool = {
   activityLabel: 'ToDo を登録しています',
   helpText: 'ToDo を登録します。会社の設定により、登録の前に確認を求めます',
   description: 'ToDo を起票する',
+  args: { properties: { title: { type: 'string', description: 'ToDo の題名' }, due: { type: 'string', description: '期限（YYYY-MM-DD。任意）' } }, required: ['title'] },
+  google: { scope: 'tasks', level: 'sensitive' },
   async invoke(args, ctx) {
     const res = await ctx.connector.tasks.create(principal(ctx), {
       title: str(args['title'], '無題のタスク'),
@@ -184,6 +200,8 @@ export const chatPost: Tool = {
   activityLabel: 'チャットへ投稿しています',
   helpText: 'チャットへ投稿します。必ず承認のあとに行います',
   description: 'チャットのスペースへ投稿する',
+  args: { properties: { space: { type: 'string', description: 'スペース（既定 general）' }, text: { type: 'string', description: '本文' } }, required: ['text'] },
+  google: { scope: 'chat.messages.create', level: 'sensitive' },
   async invoke(args, ctx) {
     const res = await ctx.connector.chat.post(principal(ctx), {
       space: str(args['space'], 'general'),
@@ -212,6 +230,7 @@ export const notificationSend: Tool = {
   activityLabel: 'お知らせを届けています',
   helpText: '依頼した本人にだけお知らせを届けます。他の人には送りません',
   description: '依頼者本人へ通知する（宛先は指定できない）',
+  args: { properties: { kind: { type: 'string', description: '種類', enum: ['brief', 'run'] }, title: { type: 'string', description: '題名' }, body: { type: 'string', description: '本文' } }, required: ['title', 'body'] },
   async invoke(args, ctx) {
     const attempted = RECIPIENT_KEYS.filter((k) => k in args);
     if (attempted.length > 0) {
@@ -245,6 +264,7 @@ export const approvalsPending: Tool = {
   activityLabel: '承認待ちを確認しています',
   helpText: '本人が判断できる承認待ちを見ます',
   description: '本人が承認できる承認待ちを一覧する',
+  args: { properties: {} },
   async invoke(_args, ctx) {
     const user = await ctx.repo.findUserById(ctx.tenantId, ctx.userId);
     const roles: string[] = user?.roles ?? [];

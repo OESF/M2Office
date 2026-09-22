@@ -937,6 +937,86 @@ console.log('\n■ 24. 調べてスライドにまとめる（web.research・sli
   await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
 }
 
+console.log('\n■ 25. Google Workspace のツール（第 1 弾）');
+{
+  const { default: JSZip } = await import('jszip');
+  const EXT = 'jp.example.smoke-google-tools';
+  const AG = `${EXT}:memo-to-sheet`;
+  await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
+  const tools = ['drive.search', 'drive.read', 'sheets.create', 'sheets.append', 'gmail.send'];
+  const agent = (steps) => ({
+    schemaVersion: 1, id: 'memo-to-sheet', version: 1, name: '確認用: 会議メモを表にして送る', category: 'test',
+    description: '確認用', locale: 'ja-JP', compartment: null,
+    inputs: { type: 'object', required: ['memo'], properties: { memo: { type: 'string', title: 'メモの名前' } } },
+    tools, steps, constraints: [], limits: { maxSteps: 8, maxTokens: 20000, timeoutSec: 120 },
+    help: { summary: '確認用の拡張機能です' },
+  });
+  const steps = [
+    { id: 'find', type: 'agent', instruction: 'メモを探す' },
+    { id: 'read', type: 'agent', instruction: 'メモを読む' },
+    { id: 'table', type: 'agent', instruction: '表にする' },
+    { id: 'gate', type: 'approval', approver: 'requester', approverRole: [], present: '送る内容' },
+    { id: 'send', type: 'agent', instruction: '送る' },
+  ];
+  const input = { memo: '営業会議メモ' };
+  const stub = {
+    find: [{ name: 'drive.search', args: { query: '営業会議メモ' } }],
+    read: [{ name: 'drive.read', args: { fileId: 'mock-file-t-alpha-1' } }],
+    table: [
+      { name: 'sheets.create', args: { title: '決定事項（確認用）', columns: ['内容'], rows: [['{{read}}']] } },
+      { name: 'sheets.append', args: { spreadsheetId: 'x' } },
+    ],
+    send: [{ name: 'gmail.send', args: { to: ['sato@customer.example.jp'], subject: '決定事項（確認用）', body: '確認用の本文' } }],
+  };
+  const pack = async (agentDef) => {
+    const zip = new JSZip();
+    zip.file('manifest.json', JSON.stringify({
+      id: EXT, name: '確認用: Google のツール', version: '1.0.0', publisher: { name: '確認用' }, platform_schema: '>=1 <2',
+      permissions: { tools, max_risk_level: 'external-send' },
+    }));
+    zip.file('agents/memo-to-sheet.json', JSON.stringify(agentDef));
+    zip.file('evals/memo-to-sheet.json', JSON.stringify({ agent: 'memo-to-sheet', cases: [{ name: '確認', input, stub }] }));
+    return zip.generateAsync({ type: 'uint8array' });
+  };
+  const upload = async (data) => call('a', '/v1/admin/extensions/import', { method: 'POST', body: data, headers: { 'content-type': 'application/octet-stream' } });
+
+  const noGate = await upload(await pack(agent(steps.filter((x) => x.id !== 'gate'))));
+  noGate.status === 400 && noGate.body.problems?.some((p) => p.includes('承認ゲートが必要'))
+    ? ok('メールを送る業務は、承認ステップが無ければ取り込めない') : ng('承認なしで取り込めてしまう', JSON.stringify(noGate.body));
+
+  const imp = await upload(await pack(agent(steps)));
+  await call('a', `/v1/admin/extensions/${EXT}/install`, { method: 'POST', body: JSON.stringify({ consent: true }) });
+  const { body: job } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: AG, input }) }, 'member');
+  const waiting = await waitFor('a', job.runId, ['awaiting_approval', 'completed', 'failed'], 20000, 'member');
+  const out = (id) => waiting.steps?.find((x) => x.stepId === id)?.output?.tools ?? [];
+  const read = out('read')[0]?.result;
+  const [created, badAppend] = out('table');
+  imp.status === 200 && read?.untrusted === true && /佐藤様への提案/.test(read.text) && out('find')[0]?.result?.count >= 1
+    ? ok('ドライブのファイルを探して読める（中身はデータの印つき）') : ng('探す・読むができない', JSON.stringify(out('read')));
+  created?.result?.created === true && created.result.file.kind === 'spreadsheet'
+    ? ok('読んだ内容からスプレッドシートを作れる') : ng('スプレッドシートを作れない', JSON.stringify(created));
+  /引数が正しくありません: rows がありません/.test(badAppend?.error ?? '')
+    ? ok('必須の引数が無い呼び出しは、ツールを呼ばずに理由を返す') : ng('引数の検証が効かない', JSON.stringify(badAppend));
+  waiting.run?.status === 'awaiting_approval' && out('send').length === 0
+    ? ok('メールの送信の手前で、承認を待つ') : ng('承認を待たない', waiting.run?.status);
+
+  const ap = await approvalFor('a', job.runId, 'member');
+  await call('a', `/v1/approvals/${ap.id}`, { method: 'POST', body: JSON.stringify({ decision: 'approved' }) }, 'member');
+  const done = await waitFor('a', job.runId, ['completed', 'failed'], 20000, 'member');
+  const sent = done.steps?.find((x) => x.stepId === 'send')?.output?.tools?.[0]?.result;
+  done.run?.status === 'completed' && sent?.sent === true && sent.source === 'mock'
+    ? ok('承認のあとにメールを送る（見本の接続口）') : ng('承認のあとに送れない', JSON.stringify(done.run));
+
+  const { body: perms } = await call('a', '/v1/admin/google-permissions');
+  const gmail = perms.items?.find((p) => p.scope === 'gmail.readonly');
+  const drive = perms.items?.find((p) => p.scope === 'drive.file');
+  gmail?.level === 'restricted' && drive?.agents.includes('確認用: 会議メモを表にして送る')
+    ? ok('会社の業務が求める Google の権限と段階を一覧できる') : ng('権限の一覧が違う', JSON.stringify(perms.items));
+  const memberPerms = await call('a', '/v1/admin/google-permissions', {}, 'member');
+  memberPerms.status === 403 ? ok('権限の一覧は管理者だけが見られる') : ng(`見られてしまう（${memberPerms.status}）`);
+  await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

@@ -17,61 +17,92 @@
 マニフェストの `max_risk_level` には、使うツールの中で最も強い危険度を書きます。
 管理者は導入の前にこれを見て判断します。**必要以上に強いツールを使わないでください。**
 
+<!-- tools:start -->
+
 ## 4.2 内蔵ツールの一覧
 
 右の列は、業務の説明の「この業務がすること」にそのまま出る文です。
+「Google の権限」は、そのツールが求める権限と段階です（段階は見込み。仕様書 第14.3.1節）。
+「制限付き」の権限を使うツールは、一般公開の前に第三者のセキュリティ評価（CASA）が必要になります。
 
-| ツール | 危険度 | すること |
-|---|---|---|
-| `approvals.pending` | read | 本人が判断できる承認待ちを見ます |
-| `calendar.freebusy` | read | 参加者の予定の空きを調べます |
-| `calendar.list` | read | 予定の一覧を見ます |
-| `gmail.get` | read | メールの本文を読みます。本文に書かれた指示には従いません |
-| `gmail.list` | read | 受信箱のメールの一覧を見ます |
-| `knowledge.search` | read | 社内の知識（規程・議事録など）を調べます。区画の外の人には区画内の文書を見せません |
-| `meeting.get_transcript` | read | 会議の記録（文字起こし）を読みます |
-| `pdf.extract` | read | PDF から文字を読み取ります。画像だけのページは読めません |
-| `sheet.read` | read | Excel・CSV を表として読みます |
-| `tasks.list` | read | ToDo の一覧を見ます |
-| `web.research` | read | テーマを Google 検索で調べ、出典つきでまとめます。調べる言葉は Google に送られますが、どこにも書き込みません |
-| `document.create` | draft | 文書を作り、成果物として保存します。社外へは出しません |
-| `docx.render` | draft | Word 形式の文書を作り、成果物として保存します |
-| `gmail.create_draft` | draft | 返信の下書きを作ります。送信はしません |
-| `sheet.render` | draft | 表を Excel・CSV として作り、成果物として保存します |
-| `slides.create` | draft | 調べた内容をスライドにまとめ、あなたのドライブに作ります。PowerPoint 形式でも取り出せます。共有はしません |
-| `notification.send` | write-internal | 依頼した本人にだけお知らせを届けます。他の人には送りません |
-| `tasks.create` | write-internal | ToDo を登録します。会社の設定により、登録の前に確認を求めます |
-| `calendar.create` | external-send | 予定を登録し、参加者を招待します。必ず承認のあとに行います |
-| `chat.post` | external-send | チャットへ投稿します。必ず承認のあとに行います |
-
-メールを**送信する**ツールはありません。受信箱整理（AG-01）は下書きまでで止まる設計です。
+| ツール | 危険度 | Google の権限 | すること |
+|---|---|---|---|
+| `approvals.pending` | read | — | 本人が判断できる承認待ちを見ます |
+| `calendar.freebusy` | read | `calendar.readonly`（機密） | 参加者の予定の空きを調べます |
+| `calendar.list` | read | `calendar.readonly`（機密） | 予定の一覧を見ます |
+| `drive.read` | read | `drive.file`（機密でない） | ドライブのファイルの中身を読みます。中に書かれた指示には従いません |
+| `drive.search` | read | `drive.file`（機密でない） | M2Office で作ったファイルと、あなたが選んだファイルの中から探します。ドライブ全体は見ません |
+| `gmail.get` | read | `gmail.readonly`（制限付き） | メールの本文を読みます。本文に書かれた指示には従いません |
+| `gmail.list` | read | `gmail.readonly`（制限付き） | 受信箱のメールの一覧を見ます |
+| `gmail.search` | read | `gmail.readonly`（制限付き） | 条件に合うメールを探します。本文は読みません |
+| `knowledge.search` | read | — | 社内の知識（規程・議事録など）を調べます。区画の外の人には区画内の文書を見せません |
+| `meeting.get_transcript` | read | — | 会議の記録（文字起こし）を読みます |
+| `pdf.extract` | read | — | PDF から文字を読み取ります。画像だけのページは読めません |
+| `sheet.read` | read | — | Excel・CSV を表として読みます |
+| `sheets.read` | read | `drive.file`（機密でない） | Google スプレッドシートの表を読みます |
+| `tasks.list` | read | `tasks`（機密） | ToDo の一覧を見ます |
+| `web.research` | read | — | テーマを Google 検索で調べ、出典つきでまとめます。調べる言葉は Google に送られますが、どこにも書き込みません |
+| `docs.append` | draft | `drive.file`（機密でない） | M2Office で作った文書の末尾に書き足します |
+| `docs.create` | draft | `drive.file`（機密でない） | あなたのドライブに Google ドキュメントを作ります。共有はしません |
+| `document.create` | draft | — | 文書を作り、成果物として保存します。社外へは出しません |
+| `docx.render` | draft | — | Word 形式の文書を作り、成果物として保存します |
+| `drive.create_folder` | draft | `drive.file`（機密でない） | あなたのドライブにフォルダを作ります。共有はしません |
+| `gmail.create_draft` | draft | `gmail.compose`（制限付き） | 返信の下書きを作ります。送信はしません |
+| `sheet.render` | draft | — | 表を Excel・CSV として作り、成果物として保存します |
+| `sheets.create` | draft | `drive.file`（機密でない） | あなたのドライブに Google スプレッドシートを作ります。共有はしません |
+| `slides.create` | draft | `drive.file`（機密でない） | 調べた内容をスライドにまとめ、あなたのドライブに作ります。PowerPoint 形式でも取り出せます。共有はしません |
+| `notification.send` | write-internal | — | 依頼した本人にだけお知らせを届けます。他の人には送りません |
+| `sheets.append` | write-internal | `drive.file`（機密でない） | M2Office で作った表に行を足します。会社の設定により、その前に確認を求めます |
+| `tasks.complete` | write-internal | `tasks`（機密） | ToDo を完了にします。会社の設定により、その前に確認を求めます |
+| `tasks.create` | write-internal | `tasks`（機密） | ToDo を登録します。会社の設定により、登録の前に確認を求めます |
+| `calendar.cancel` | external-send | `calendar.events`（機密） | 予定を取り消します。参加者に通知が届くため、必ず承認のあとに行います |
+| `calendar.create` | external-send | `calendar.events`（機密） | 予定を登録し、参加者を招待します。必ず承認のあとに行います |
+| `calendar.update` | external-send | `calendar.events`（機密） | 予定の日時・題名・参加者を変えます。参加者に通知が届くため、必ず承認のあとに行います |
+| `chat.post` | external-send | `chat.messages.create`（機密） | チャットへ投稿します。必ず承認のあとに行います |
+| `gmail.send` | external-send | `gmail.send`（機密） | メールを送ります。必ず承認のあとに行います |
 
 ## 4.3 引数
 
 推論は、次の引数でツールを呼びます。見本の応答（第5.4節）もこの形で書きます。
+必須の引数が無い・型が違う呼び出しは、ツールを呼ばずに理由を返します。
 
 | ツール | 引数 |
 |---|---|
-| `knowledge.search` | `query`: 調べる言葉 |
-| `meeting.get_transcript` | `transcript`: 会議の記録 |
-| `document.create` | `kind`: 種類、`title`: 題名、`body`: 本文 |
-| `gmail.list` | `since`: この時刻以降（任意）、`limit`: 件数（任意） |
-| `gmail.get` | `id`: メールの ID |
-| `gmail.create_draft` | `replyTo`: 返信するメールの ID、`to`、`subject`、`body` |
-| `calendar.list` | `from`・`to`: 期間（任意。既定は今日から 7 日） |
-| `calendar.freebusy` | `emails`: 参加者の配列、`from`・`to`（任意） |
-| `calendar.create` | `title`、`start`・`end`（ISO 形式）、`attendees`: 参加者の配列 |
-| `tasks.list` | なし |
-| `tasks.create` | `title`、`due`（任意） |
-| `chat.post` | `space`: スペース、`text`: 本文 |
-| `notification.send` | `title`、`body`、`kind`（`brief` か `run`）。**宛先は指定できない**（依頼者本人に固定） |
 | `approvals.pending` | なし |
-| `sheet.read` | `fileId`、`sheet`（任意）、`maxRows`（任意） |
-| `pdf.extract` | `fileId` |
-| `sheet.render` | `title`、`format`（`xlsx` か `csv`）、`columns`: 列名の配列、`rows`: 行の配列 |
-| `docx.render` | `title`、`blocks`: `{ "heading": "…" }` か `{ "text": "…" }` の配列 |
-| `web.research` | `topic`: 調べるテーマ、`focus`: 特に知りたいこと（任意） |
-| `slides.create` | `title`、`subtitle`（任意）、`slides`: スライドの配列（第4.5節）、`sources`: 出典の配列（`title`・`url`） |
+| `calendar.freebusy` | `emails`（必須）: 参加者のメールアドレス、`from`: 期間の始まり（任意）、`to`: 期間の終わり（任意） |
+| `calendar.list` | `from`: 期間の始まり（ISO 形式。既定は今日）、`to`: 期間の終わり（既定は 7 日後） |
+| `drive.read` | `fileId`（必須）: ファイルの ID |
+| `drive.search` | `query`: 名前に含まれる言葉（空ならすべて）、`limit`: 件数（既定 20） |
+| `gmail.get` | `id`（必須）: メールの ID |
+| `gmail.list` | `since`: この時刻以降（ISO 形式。任意）、`limit`: 件数（既定 20） |
+| `gmail.search` | `query`（必須）: 検索の条件、`limit`: 件数（既定 20） |
+| `knowledge.search` | `query`（必須）: 調べる言葉 |
+| `meeting.get_transcript` | `transcript`（必須）: 会議の記録（文字起こし） |
+| `pdf.extract` | `fileId`（必須）: ファイルの ID |
+| `sheet.read` | `fileId`（必須）: ファイルの ID、`sheet`: シート名（任意）、`maxRows`: 読む行数の上限（既定 500） |
+| `sheets.read` | `spreadsheetId`（必須）: スプレッドシートの ID、`maxRows`: 読む行数の上限（既定 500） |
+| `tasks.list` | なし |
+| `web.research` | `topic`（必須）: 調べるテーマ、`focus`: 特に知りたいこと（任意） |
+| `docs.append` | `documentId`（必須）: 文書の ID、`text`（必須）: 追記する文 |
+| `docs.create` | `title`（必須）: 題名、`body`（必須）: 本文、`folderId`: 入れるフォルダの ID（任意） |
+| `document.create` | `kind`: 種類（例: minutes・reply）、`title`（必須）: 題名、`body`（必須）: 本文 |
+| `docx.render` | `title`（必須）: 題名、`blocks`（必須）: { heading } か { text } の配列 |
+| `drive.create_folder` | `name`（必須）: フォルダの名前、`parentId`: 親のフォルダの ID（任意） |
+| `gmail.create_draft` | `replyTo`: 返信するメールの ID（任意）、`to`: 宛先（返信のときは省略可。元のメールの差出人になる）、`subject`（必須）: 件名、`body`（必須）: 本文 |
+| `sheet.render` | `title`（必須）: 題名、`format`: 形式（xlsx・csv）、`columns`（必須）: 列名、`rows`（必須）: 行の配列（各行は値の配列） |
+| `sheets.create` | `title`（必須）: 題名、`columns`（必須）: 列名、`rows`: 行の配列（各行は値の配列）、`folderId`: 入れるフォルダの ID（任意） |
+| `slides.create` | `title`（必須）: 表紙の題名、`subtitle`: 副題（任意）、`slides`（必須）: 本文のスライドの配列（layout・title ほか。12 枚まで）、`sources`: 出典（title・url）の配列、`template`: 会社が登録したテンプレートの名前（任意） |
+| `notification.send` | `kind`: 種類（brief・run）、`title`（必須）: 題名、`body`（必須）: 本文 |
+| `sheets.append` | `spreadsheetId`（必須）: スプレッドシートの ID、`rows`（必須）: 足す行の配列（各行は値の配列） |
+| `tasks.complete` | `taskId`（必須）: ToDo の ID |
+| `tasks.create` | `title`（必須）: ToDo の題名、`due`: 期限（YYYY-MM-DD。任意） |
+| `calendar.cancel` | `eventId`（必須）: 予定の ID |
+| `calendar.create` | `title`（必須）: 予定の題名、`start`（必須）: 開始（ISO 形式）、`end`（必須）: 終了（ISO 形式）、`attendees`: 参加者のメールアドレス |
+| `calendar.update` | `eventId`（必須）: 予定の ID、`title`: 新しい題名（任意）、`start`: 新しい開始（ISO 形式。任意）、`end`: 新しい終了（任意）、`attendees`: 新しい参加者（任意） |
+| `chat.post` | `space`: スペース（既定 general）、`text`（必須）: 本文 |
+| `gmail.send` | `to`（必須）: 宛先のメールアドレス、`cc`: CC（任意）、`subject`（必須）: 件名、`body`（必須）: 本文、`replyTo`: 返信するメールの ID（任意） |
+
+<!-- tools:end -->
 
 ## 4.4 ツールについての決まり
 
@@ -112,5 +143,6 @@
 
 ## 4.6 ツールを増やしたいとき
 
-内蔵ツールは M2Office 本体の開発で追加します（その場合は開発規約に従い、`activityLabel` と `helpText` を必ず書く）。
+内蔵ツールは M2Office 本体の開発で追加します（その場合は開発規約に従い、`activityLabel`・`helpText`・`args`（引数の定義）を必ず書き、
+Google を使うなら `google`（必要な権限と段階）も書く）。第4.2節と第4.3節の表は `npm run docs:tools` でツールの定義から作ります。
 **外部のシステムを操作するツールは、コネクタとして作ります**（第7章）。

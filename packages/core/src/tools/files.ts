@@ -35,6 +35,7 @@ export const sheetRead: Tool = {
   activityLabel: '書類を読んでいます',
   helpText: 'Excel・CSV を表として読みます',
   description: 'Excel・CSV を表として読む',
+  args: { properties: { fileId: { type: 'string', description: 'ファイルの ID' }, sheet: { type: 'string', description: 'シート名（任意）' }, maxRows: { type: 'number', description: '読む行数の上限（既定 500）' } }, required: ['fileId'] },
   async invoke(args, ctx) {
     const f = await open(ctx, str(args['fileId']));
     if (!f) return { available: false, reason: 'ファイルが見つかりません' };
@@ -62,6 +63,7 @@ export const pdfExtract: Tool = {
   activityLabel: '書類を読んでいます',
   helpText: 'PDF から文字を読み取ります。画像だけのページは読めません',
   description: 'PDF から文字を取り出す（画像だけのページは OCR 未対応）',
+  args: { properties: { fileId: { type: 'string', description: 'ファイルの ID' } }, required: ['fileId'] },
   async invoke(args, ctx) {
     const f = await open(ctx, str(args['fileId']));
     if (!f) return { available: false, reason: 'ファイルが見つかりません' };
@@ -102,6 +104,7 @@ export const sheetRender: Tool = {
   activityLabel: '資料を作成しています',
   helpText: '表を Excel・CSV として作り、成果物として保存します',
   description: '表を Excel または CSV として出力する',
+  args: { properties: { title: { type: 'string', description: '題名' }, format: { type: 'string', description: '形式', enum: ['xlsx', 'csv'] }, columns: { type: 'array', description: '列名', items: { type: 'string', description: '要素' } }, rows: { type: 'array', description: '行の配列（各行は値の配列）' } }, required: ['title', 'columns', 'rows'] },
   async invoke(args, ctx) {
     const title = str(args['title'], '一覧');
     const format = args['format'] === 'csv' ? 'csv' : 'xlsx';
@@ -128,6 +131,7 @@ export const docxRender: Tool = {
   activityLabel: '資料を作成しています',
   helpText: 'Word 形式の文書を作り、成果物として保存します',
   description: 'Word 形式で文書を出力する',
+  args: { properties: { title: { type: 'string', description: '題名' }, blocks: { type: 'array', description: '{ heading } か { text } の配列' } }, required: ['title', 'blocks'] },
   async invoke(args, ctx) {
     const title = str(args['title'], '文書');
     const blocks: DocBlock[] = (Array.isArray(args['blocks']) ? args['blocks'] : [])

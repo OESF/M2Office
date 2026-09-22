@@ -18,7 +18,7 @@ import {
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { LlmProvider } from '../llm/provider.js';
-import type { ToolRegistry } from '../tools/registry.js';
+import { validateToolArgs, type Tool, type ToolRegistry } from '../tools/registry.js';
 import type { WorkspaceConnector } from '../connectors/types.js';
 import type { FileStore } from '../files/store.js';
 import type { ResearchProvider } from '../research/provider.js';
@@ -319,7 +319,7 @@ export class RunEngine {
         messages: [
           {
             role: 'system',
-            content: buildSystemPrompt(def, tools.map((t) => t.name), settings.writingStyle),
+            content: buildSystemPrompt(def, tools, settings.writingStyle),
           },
           { role: 'user', content: buildStepPrompt(step, input, previous) },
         ],
@@ -351,6 +351,12 @@ export class RunEngine {
             detail: { runId: run.id, risk: tool.risk, stepId: step.id },
             occurredAt: new Date().toISOString(),
           });
+          continue;
+        }
+        // 引数を定義に照らして確かめる。誤りは呼ばずに理由を返す。承認の手前の送信の阻止（上）は引数によらず先に行い、確認を求める前には行う（仕様書 第9.4.4節）
+        const argProblems = tool.args ? validateToolArgs(tool.args, call.args) : [];
+        if (argProblems.length > 0) {
+          toolResults.push({ name: call.name, error: `引数が正しくありません: ${argProblems.join('、')}` });
           continue;
         }
         if (
@@ -530,7 +536,19 @@ function writingStyleLines(w: WritingStyle): string[] {
   return lines.length > 0 ? ['', '自社の書き方（必ず従う）:', ...lines] : [];
 }
 
-function buildSystemPrompt(def: AgentDefinition, toolNames: string[], style: WritingStyle): string {
+/** ツールの説明と引数を、推論に渡す文にする（仕様書 第9.4.4節）。 */
+function describeTools(tools: Tool[]): string[] {
+  return tools.map((t) => {
+    const props = Object.entries(t.args?.properties ?? {});
+    const req = new Set(t.args?.required ?? []);
+    const argText = props.length === 0 ? '引数なし'
+      : props.map(([k, v]) => `${k}（${v.type}${req.has(k) ? '・必須' : ''}${v.enum ? `・${v.enum.join('|')}` : ''}）: ${v.description}`).join('、');
+    return `- ${t.name}（${t.risk}）: ${t.description}。${argText}`;
+  });
+}
+
+function buildSystemPrompt(def: AgentDefinition, tools: Tool[], style: WritingStyle): string {
+  const toolNames = tools.map((t) => t.name);
   return [
     `あなたは「${def.name}」として業務を遂行します。`,
     `目的: ${def.description}`,
@@ -542,6 +560,7 @@ function buildSystemPrompt(def: AgentDefinition, toolNames: string[], style: Wri
     ...writingStyleLines(style),
     ``,
     `使えるツール: ${toolNames.join(', ') || 'なし'}`,
+    ...(tools.length > 0 ? ['', 'ツールの説明:', ...describeTools(tools)] : []),
     `ツールを使うときは、次の形式のブロックを出力してください。`,
     '```tool',
     '{"name": "ツール名", "args": { ... }}',

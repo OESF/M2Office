@@ -9,7 +9,7 @@
 import { randomUUID } from 'node:crypto';
 import type { SlidePlan } from '../slides/plan.js';
 import type {
-  BusySlot, CalendarEvent, ConnectorPrincipal, MailMessage, TaskItem, WorkspaceConnector,
+  BusySlot, CalendarEvent, ConnectorPrincipal, DriveFile, MailMessage, TaskItem, WorkspaceConnector,
 } from './types.js';
 
 /**
@@ -31,7 +31,18 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
   private readonly createdEvents = new Map<string, CalendarEvent[]>();
 
   /** 下書き・投稿の記録。動作確認で参照する。 */
-  readonly outbox: { kind: 'draft' | 'chat' | 'slides'; principal: ConnectorPrincipal; body: unknown }[] = [];
+  readonly outbox: {
+    kind: 'draft' | 'chat' | 'slides' | 'mail' | 'event.update' | 'event.cancel';
+    principal: ConnectorPrincipal; body: unknown;
+  }[] = [];
+  /** 完了にした ToDo（見本の ToDo にも効かせる）。 */
+  private readonly completedTasks = new Set<string>();
+  /** 取り消した予定。 */
+  private readonly cancelledEvents = new Set<string>();
+  /** 変更して、作った予定の側に置き換えた見本の予定。 */
+  private readonly replacedEvents = new Set<string>();
+  /** M2Office が作ったドライブのファイル（文書は本文、表は値を持つ）。 */
+  private readonly driveFiles = new Map<string, { file: DriveFile; owner: string; text?: string; values?: string[][] }>();
 
   constructor(private readonly now: () => Date = () => new Date()) {}
 
@@ -45,6 +56,21 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
     },
     get: async (p: ConnectorPrincipal, id: string) =>
       this.mails(p).find((m) => m.id === id) ?? null,
+    search: async (p: ConnectorPrincipal, q: { query: string; limit?: number }) => {
+      // 見本では、件名・差出人・本文の部分一致で探す（Gmail の検索の書き方のうち、言葉だけを見る）
+      const words = q.query.replace(/\b(from|subject|is|in|label):\S+/g, ' ').split(/\s+/).filter(Boolean);
+      return this.mails(p)
+        .filter((m) => words.every((w) => `${m.from} ${m.subject} ${m.body}`.includes(w)))
+        .slice(0, q.limit ?? 20)
+        .map(({ body: _body, ...summary }) => summary);
+    },
+    send: async (
+      p: ConnectorPrincipal,
+      mail: { to: string[]; cc: string[]; subject: string; body: string; replyTo: string | null },
+    ) => {
+      this.outbox.push({ kind: 'mail', principal: p, body: mail });
+      return { messageId: `mock-sent-${randomUUID().slice(0, 8)}` };
+    },
     createDraft: async (
       p: ConnectorPrincipal,
       draft: { replyTo: string | null; to: string; subject: string; body: string },
@@ -69,7 +95,8 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
     list: async (p: ConnectorPrincipal, range: { from: string; to: string }) => {
       const from = Date.parse(range.from);
       const to = Date.parse(range.to);
-      return [...this.events(p), ...(this.createdEvents.get(key(p)) ?? [])]
+      return [...this.events(p).filter((e) => !this.replacedEvents.has(e.id)), ...(this.createdEvents.get(key(p)) ?? [])]
+        .filter((e) => !this.cancelledEvents.has(e.id))
         .filter((e) => Date.parse(e.start) < to && Date.parse(e.end) > from)
         .sort((a, b) => a.start.localeCompare(b.start));
     },
@@ -97,13 +124,39 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
       this.createdEvents.set(key(p), list);
       return { eventId: id };
     },
+    update: async (
+      p: ConnectorPrincipal,
+      ev: { eventId: string; title?: string; start?: string; end?: string; attendees?: string[] },
+    ) => {
+      const created = this.createdEvents.get(key(p)) ?? [];
+      const target = created.find((e) => e.id === ev.eventId) ?? this.events(p).find((e) => e.id === ev.eventId);
+      if (!target || this.cancelledEvents.has(ev.eventId)) return null;
+      const next: CalendarEvent = {
+        ...target,
+        ...(ev.title !== undefined ? { title: ev.title } : {}),
+        ...(ev.start !== undefined ? { start: ev.start } : {}),
+        ...(ev.end !== undefined ? { end: ev.end } : {}),
+        ...(ev.attendees !== undefined ? { attendees: ev.attendees } : {}),
+      };
+      this.createdEvents.set(key(p), [...created.filter((e) => e.id !== ev.eventId), next]);
+      this.replacedEvents.add(ev.eventId);
+      this.outbox.push({ kind: 'event.update', principal: p, body: ev });
+      return { eventId: ev.eventId };
+    },
+    cancel: async (p: ConnectorPrincipal, ev: { eventId: string }) => {
+      const exists = [...this.events(p), ...(this.createdEvents.get(key(p)) ?? [])].some((e) => e.id === ev.eventId);
+      if (!exists || this.cancelledEvents.has(ev.eventId)) return null;
+      this.cancelledEvents.add(ev.eventId);
+      this.outbox.push({ kind: 'event.cancel', principal: p, body: ev });
+      return { eventId: ev.eventId };
+    },
   };
 
   tasks = {
     list: async (p: ConnectorPrincipal, opts: { includeCompleted?: boolean }) =>
-      [...this.baseTasks(p), ...(this.createdTasks.get(key(p)) ?? [])].filter(
-        (t) => opts.includeCompleted || !t.completed,
-      ),
+      [...this.baseTasks(p), ...(this.createdTasks.get(key(p)) ?? [])]
+        .map((t) => (this.completedTasks.has(t.id) ? { ...t, completed: true } : t))
+        .filter((t) => opts.includeCompleted || !t.completed),
     create: async (p: ConnectorPrincipal, t: { title: string; due: string | null }) => {
       const id = `mock-task-${randomUUID().slice(0, 8)}`;
       const list = this.createdTasks.get(key(p)) ?? [];
@@ -111,7 +164,77 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
       this.createdTasks.set(key(p), list);
       return { taskId: id };
     },
+    complete: async (p: ConnectorPrincipal, t: { taskId: string }) => {
+      const exists = [...this.baseTasks(p), ...(this.createdTasks.get(key(p)) ?? [])].some((x) => x.id === t.taskId);
+      if (!exists) return null;
+      this.completedTasks.add(t.taskId);
+      return { taskId: t.taskId };
+    },
   };
+
+  /** ドライブ。見本のファイルと、この接続口で作ったファイルが見える（`drive.file` の範囲を模す）。 */
+  drive = {
+    search: async (p: ConnectorPrincipal, q: { query: string; limit?: number }) =>
+      this.visibleFiles(p).filter((f) => q.query.trim() === '' || f.file.name.includes(q.query.trim()))
+        .slice(0, q.limit ?? 20).map((f) => f.file),
+    read: async (p: ConnectorPrincipal, fileId: string) => {
+      const f = this.visibleFiles(p).find((x) => x.file.id === fileId);
+      if (!f || f.file.kind === 'folder') return null;
+      const text = f.values ? f.values.map((r) => r.join('\t')).join('\n') : f.text ?? '';
+      return { file: f.file, text };
+    },
+    createFolder: async (p: ConnectorPrincipal, input: { name: string; parentId: string | null }) =>
+      this.addFile(p, input.name, 'folder', {}),
+  };
+
+  docs = {
+    create: async (p: ConnectorPrincipal, d: { title: string; body: string; folderId: string | null }) =>
+      this.addFile(p, d.title, 'document', { text: d.body }),
+    append: async (p: ConnectorPrincipal, d: { documentId: string; text: string }) => {
+      const f = this.driveFiles.get(d.documentId);
+      // 追記できるのは M2Office が作った文書だけ（見本のファイルには追記しない）
+      if (!f || f.owner !== key(p) || f.file.kind !== 'document') return null;
+      f.text = `${f.text ?? ''}\n${d.text}`;
+      f.file = { ...f.file, modifiedAt: this.now().toISOString() };
+      return { documentId: d.documentId };
+    },
+  };
+
+  sheets = {
+    create: async (p: ConnectorPrincipal, s: { title: string; columns: string[]; rows: string[][]; folderId: string | null }) =>
+      this.addFile(p, s.title, 'spreadsheet', { values: [s.columns, ...s.rows] }),
+    read: async (p: ConnectorPrincipal, s: { spreadsheetId: string; maxRows: number }) => {
+      const f = this.visibleFiles(p).find((x) => x.file.id === s.spreadsheetId && x.file.kind === 'spreadsheet');
+      return f ? { file: f.file, values: (f.values ?? []).slice(0, s.maxRows + 1) } : null;
+    },
+    append: async (p: ConnectorPrincipal, s: { spreadsheetId: string; rows: string[][] }) => {
+      const f = this.driveFiles.get(s.spreadsheetId);
+      if (!f || f.owner !== key(p) || f.file.kind !== 'spreadsheet') return null;
+      f.values = [...(f.values ?? []), ...s.rows];
+      return { appended: s.rows.length };
+    },
+  };
+
+  private addFile(
+    p: ConnectorPrincipal, name: string, kind: DriveFile['kind'], content: { text?: string; values?: string[][] },
+  ): DriveFile {
+    const file: DriveFile = { id: `mock-file-${randomUUID().slice(0, 8)}`, name, kind, modifiedAt: this.now().toISOString(), url: null };
+    this.driveFiles.set(file.id, { file, owner: key(p), ...content });
+    return file;
+  }
+
+  /** 見えるファイル。見本のファイル（テナントごと）と、本人が作ったファイル。 */
+  private visibleFiles(p: ConnectorPrincipal) {
+    const today = ymd(this.now());
+    const id = (n: number) => `mock-file-${p.tenantId}-${n}`;
+    const samples = [
+      { file: { id: id(1), name: '営業会議メモ（見本）', kind: 'document' as const, modifiedAt: jst(today, 9), url: null },
+        text: '見本の文書です。\n議題: 来月の重点顧客\n決定: 佐藤様への提案を来週までに準備する' },
+      { file: { id: id(2), name: '顧客一覧（見本）', kind: 'spreadsheet' as const, modifiedAt: jst(addDays(today, -1), 17), url: null },
+        values: [['会社名', '担当', '状況'], ['見本商事', '佐藤', '提案中'], ['見本工業', '田中', '契約済み']] },
+    ];
+    return [...samples, ...[...this.driveFiles.values()].filter((f) => f.owner === key(p))];
+  }
 
   chat = {
     post: async (p: ConnectorPrincipal, msg: { space: string; text: string }) => {

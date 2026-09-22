@@ -69,6 +69,7 @@ OAuth クライアントが整うまでは、`GET /v1/auth/google/start` は 503
 | `GET /v1/admin/users` | 管理者: 利用者の一覧 |
 | `GET /v1/admin/audit-events` | 管理者: 監査ログ |
 | `GET /v1/admin/connectors` | 管理者: 接続の状態 |
+| `GET /v1/admin/google-permissions` | 管理者: この会社の業務が求める Google の権限と段階（制限付きかどうか）、使うツールと業務 |
 | `GET /v1/admin/extensions` | 管理者: 拡張機能の一覧（公式・自社専用）、構成要素、必要な権限の説明、導入と有効・無効の状態 |
 | `POST /v1/admin/extensions/import` | 管理者: `.m2ext` を取り込む（本文はファイルのバイト列。5 MB まで）。検証を通らなければ `problems` を返す |
 | `POST /v1/admin/extensions/:id/install` | 管理者: 同意して導入（本文に `consent: true`）。導入すると有効になる |

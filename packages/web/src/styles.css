@@ -339,3 +339,5 @@ button.link.danger { color: #b91c1c; }
 .note p { margin: 6px 0; }
 .template-row { border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; margin-bottom: 10px; }
 .template-row .row input { flex: 1; }
+
+.badge.muted-badge { background: #eef1f2; color: var(--muted); }

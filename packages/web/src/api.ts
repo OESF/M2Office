@@ -356,6 +356,7 @@ export const api = {
     runs: () => call<{ items: AdminRun[] }>('/admin/runs'),
     users: () => call<{ items: User[] }>('/admin/users'),
     audit: () => call<{ items: AuditEvent[] }>('/admin/audit-events'),
+    googlePermissions: () => call<{ items: { scope: string; level: string; tools: string[]; agents: string[] }[] }>('/admin/google-permissions'),
     connectors: () => call<{ workspace: { source: string; label: string }; llm: { provider: string } }>(
       '/admin/connectors',
     ),
