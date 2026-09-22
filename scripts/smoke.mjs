@@ -1073,6 +1073,51 @@ console.log('\n■ 26. Google Workspace のツール（第 2 弾）');
   await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
 }
 
+console.log('\n■ 27. Google Workspace のツール（第 3 弾: フォームの回答）');
+{
+  const { default: JSZip } = await import('jszip');
+  const EXT = 'jp.example.smoke-google-tools-3';
+  const AG = `${EXT}:survey-summary`;
+  await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
+  const tools = ['drive.search', 'forms.responses', 'sheets.create'];
+  const def = {
+    schemaVersion: 1, id: 'survey-summary', version: 1, name: '確認用: アンケートを表にまとめる', category: 'test',
+    description: '確認用', locale: 'ja-JP', compartment: null,
+    inputs: { type: 'object', required: ['form'], properties: { form: { type: 'string', title: 'フォームの名前' } } },
+    tools, constraints: [], limits: { maxSteps: 6, maxTokens: 20000, timeoutSec: 120 }, help: { summary: '確認用の拡張機能です' },
+    steps: [
+      { id: 'find', type: 'agent', instruction: 'フォームを探す' },
+      { id: 'collect', type: 'agent', instruction: '回答を集める' },
+      { id: 'table', type: 'agent', instruction: '表にまとめる' },
+    ],
+  };
+  const input = { form: '研修のアンケート' };
+  const stub = {
+    find: [{ name: 'drive.search', args: { query: 'アンケート' } }],
+    collect: [{ name: 'forms.responses', args: { formId: 'mock-file-t-alpha-3' } }],
+    table: [{ name: 'sheets.create', args: { title: 'アンケートの集計（確認用）', columns: ['回答'], rows: [['{{collect}}']] } }],
+  };
+  const zip = new JSZip();
+  zip.file('manifest.json', JSON.stringify({
+    id: EXT, name: '確認用: 第 3 弾', version: '1.0.0', publisher: { name: '確認用' }, platform_schema: '>=1 <2',
+    permissions: { tools, max_risk_level: 'draft' },
+  }));
+  zip.file('agents/survey-summary.json', JSON.stringify(def));
+  zip.file('evals/survey-summary.json', JSON.stringify({ agent: 'survey-summary', cases: [{ name: '確認', input, stub }] }));
+  await call('a', '/v1/admin/extensions/import', { method: 'POST', body: await zip.generateAsync({ type: 'uint8array' }), headers: { 'content-type': 'application/octet-stream' } });
+  await call('a', `/v1/admin/extensions/${EXT}/install`, { method: 'POST', body: JSON.stringify({ consent: true }) });
+  const { body: job } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: AG, input }) }, 'member');
+  const done = await waitFor('a', job.runId, ['completed', 'failed'], 20000, 'member');
+  const out = (id) => done.steps?.find((x) => x.stepId === id)?.output?.tools?.[0]?.result;
+  out('find')?.items?.[0]?.kind === 'form' ? ok('ドライブの検索でフォームが見つかる') : ng('フォームが見つからない', JSON.stringify(out('find')));
+  const r = out('collect');
+  r?.untrusted === true && r.count === 3 && r.form?.questions?.includes('満足度')
+    ? ok('フォームの回答を、質問の文つきで取れる（データの印つき）') : ng('回答を取れない', JSON.stringify(r));
+  done.run?.status === 'completed' && out('table')?.created === true
+    ? ok('回答を表（スプレッドシート）にまとめる') : ng('表にまとめられない', JSON.stringify(done.run));
+  await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

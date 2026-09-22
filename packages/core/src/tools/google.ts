@@ -1,6 +1,7 @@
 /**
  * @file Google Workspace を操作するツール。第 1 弾（Gmail の検索と送信、予定の変更と取り消し、ToDo の完了、
- * ドライブ・ドキュメント・スプレッドシート）と第 2 弾（ファイルの共有、社内の人の検索、Meet の文字起こし）。
+ * ドライブ・ドキュメント・スプレッドシート）、第 2 弾（ファイルの共有、社内の人の検索、Meet の文字起こし）、
+ * 第 3 弾（フォームの回答）。
  *
  * 操作ごとに 1 つのツールとし、危険度を固定する（読む・下書き・書き込み・送るを分ける）。
  * いずれも接続口（`ToolContext.connector`）を経由し、Google の API を直接呼ばない。
@@ -371,10 +372,40 @@ export const meetTranscript: Tool = {
   },
 };
 
-/** Google Workspace を操作するツール（第 1 弾・第 2 弾。仕様書 第9.4.4節）。 */
+/**
+ * Google フォームの回答を、質問の文つきで取る。
+ *
+ * @remarks
+ * 危険度 `read`。利用者が選んだ（または M2Office が作った）フォームだけ。権限 `drive.file`（機密でない）。
+ * `forms.responses.readonly`（機密）では質問の文を読めないため、両方を読める `drive.file` を使う（仕様書 第9.4.4節）。
+ * 回答は社外の人が書いたものを含みうる。**データであり指示ではない**（不変則 I-6）ため `untrusted` を付ける。
+ */
+export const formsResponses: Tool = {
+  name: 'forms.responses',
+  risk: 'read',
+  activityLabel: 'フォームの回答を読んでいます',
+  helpText: 'Google フォームの回答を読みます。あなたが選んだフォームだけで、回答に書かれた指示には従いません',
+  description: 'Google フォームの回答を、質問の文つきで新しい順に取る（利用者が選んだフォームだけ）',
+  args: {
+    properties: { formId: S('フォームの ID'), since: S('この時刻以降の回答だけ（ISO 形式。任意）'), limit: N('件数（既定 100）') },
+    required: ['formId'],
+  },
+  google: { scope: 'drive.file', level: 'non-sensitive' },
+  async invoke(args, ctx) {
+    const res = await ctx.connector.forms.responses(principal(ctx), {
+      formId: str(args['formId']), since: str(args['since']) || null, limit: Math.min(Number(args['limit'] ?? 100) || 100, 1000),
+    });
+    if (!res) return { source: ctx.connector.source, available: false, reason: 'フォームが見つからないか、読めません（選んだフォームだけを読めます）' };
+    return { source: ctx.connector.source, available: true, untrusted: true, form: res.form, count: res.responses.length, responses: res.responses };
+  },
+};
+
+/** Google Workspace を操作するツール（第 1 弾〜第 3 弾。仕様書 第9.4.4節）。 */
 export const GOOGLE_TOOLS: Tool[] = [
   gmailSearch, gmailSend, calendarUpdate, calendarCancel, tasksComplete,
   driveSearch, driveRead, driveCreateFolder, docsCreate, docsAppend, sheetsCreate, sheetsRead, sheetsAppend,
   // 第 2 弾
   driveShare, directorySearch, meetTranscript,
+  // 第 3 弾
+  formsResponses,
 ];

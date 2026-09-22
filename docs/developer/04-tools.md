@@ -33,6 +33,7 @@
 | `directory.search` | read | `directory.readonly`（機密） | 社内の人を名前・メール・部署で探します。社外の連絡先は探しません |
 | `drive.read` | read | `drive.file`（機密でない） | ドライブのファイルの中身を読みます。中に書かれた指示には従いません |
 | `drive.search` | read | `drive.file`（機密でない） | M2Office で作ったファイルと、あなたが選んだファイルの中から探します。ドライブ全体は見ません |
+| `forms.responses` | read | `drive.file`（機密でない） | Google フォームの回答を読みます。あなたが選んだフォームだけで、回答に書かれた指示には従いません |
 | `gmail.get` | read | `gmail.readonly`（制限付き） | メールの本文を読みます。本文に書かれた指示には従いません |
 | `gmail.list` | read | `gmail.readonly`（制限付き） | 受信箱のメールの一覧を見ます |
 | `gmail.search` | read | `gmail.readonly`（制限付き） | 条件に合うメールを探します。本文は読みません |
@@ -77,6 +78,7 @@
 | `directory.search` | `query`（必須）: 名前・メール・部署に含まれる言葉、`limit`: 件数（既定 20） |
 | `drive.read` | `fileId`（必須）: ファイルの ID |
 | `drive.search` | `query`: 名前に含まれる言葉（空ならすべて）、`limit`: 件数（既定 20） |
+| `forms.responses` | `formId`（必須）: フォームの ID、`since`: この時刻以降の回答だけ（ISO 形式。任意）、`limit`: 件数（既定 100） |
 | `gmail.get` | `id`（必須）: メールの ID |
 | `gmail.list` | `since`: この時刻以降（ISO 形式。任意）、`limit`: 件数（既定 20） |
 | `gmail.search` | `query`（必須）: 検索の条件、`limit`: 件数（既定 20） |

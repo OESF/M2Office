@@ -22,7 +22,7 @@ test('すべての内蔵ツールが引数の定義を持ち、Google を使う�
     assert.ok(t.args, `${t.name} に引数の定義がありません`);
     for (const r of t.args!.required ?? []) assert.ok(t.args!.properties[r], `${t.name}: 必須の ${r} の定義がありません`);
   }
-  const google = ['gmail.', 'calendar.', 'tasks.', 'chat.', 'drive.', 'docs.', 'sheets.', 'slides.', 'directory.', 'meet.'];
+  const google = ['gmail.', 'calendar.', 'tasks.', 'chat.', 'drive.', 'docs.', 'sheets.', 'slides.', 'directory.', 'meet.', 'forms.'];
   for (const t of BUILTIN_TOOLS.filter((x) => google.some((p) => x.name.startsWith(p)))) {
     assert.ok(t.google, `${t.name} に必要な権限の宣言がありません`);
   }
@@ -79,7 +79,7 @@ test('スプレッドシート: 作って、行を足して、読める。ドラ
   const found = await run('drive.search', { query: '訪問' }, ctx);
   assert.deepEqual(found['items'].map((f: { name: string }) => f.name), ['訪問記録']);
   const samples = await run('drive.search', { query: '（見本）' }, ctx);
-  assert.equal(samples['count'], 2, '見本のファイルは名前に（見本）と付く');
+  assert.equal(samples['count'], 3, '見本のファイルは名前に（見本）と付く');
 });
 
 test('Gmail: 検索は本文を返さず、送信は宛先が無ければ送らない', async () => {
@@ -141,5 +141,20 @@ test('第 2 弾: Meet の文字起こしを取れる（中身はデータの印�
   const none = await run('meet.transcript', { query: '存在しない会議' }, ctx);
   assert.equal(none['available'], false);
   assert.match(none['reason'], /30 日/);
+});
+
+test('第 3 弾: フォームの回答を、質問の文つきで取れる（データの印つき）。期間で絞れ、選んでいないフォームは読めない', async () => {
+  const ctx = makeCtx();
+  assert.equal(registry.get('forms.responses')!.google?.scope, 'drive.file', '求める権限を少なくするため drive.file を使う');
+  const form = (await run('drive.search', { query: 'アンケート' }, ctx))['items'][0];
+  assert.equal(form.kind, 'form');
+  const res = await run('forms.responses', { formId: form.id }, ctx);
+  assert.equal(res['untrusted'], true);
+  assert.deepEqual(res['form'].questions, ['満足度', 'よかった点', '改善してほしい点']);
+  assert.equal(res['count'], 3);
+  assert.equal(res['responses'][0].answers['満足度'], '4');
+  const recent = await run('forms.responses', { formId: form.id, since: new Date(Date.now() - 2 * 86_400_000).toISOString() }, ctx);
+  assert.ok(recent['count'] < 3, '期間で絞れる');
+  assert.equal((await run('forms.responses', { formId: 'someone-elses-form' }, ctx))['available'], false);
 });
 

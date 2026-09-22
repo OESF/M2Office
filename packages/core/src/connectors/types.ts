@@ -61,7 +61,7 @@ export interface TaskItem {
 export interface DriveFile {
   id: string;
   name: string;
-  kind: 'document' | 'spreadsheet' | 'presentation' | 'pdf' | 'folder' | 'other';
+  kind: 'document' | 'spreadsheet' | 'presentation' | 'pdf' | 'form' | 'folder' | 'other';
   modifiedAt: string;
   /** 開くリンク。見本の接続口では `null`。 */
   url: string | null;
@@ -150,6 +150,21 @@ export interface MeetTranscript {
   entries: { speaker: string; text: string; at: string }[];
 }
 
+/** Google フォームの回答。答えは質問の文をキーにする。 */
+export interface FormResponses {
+  form: { id: string; title: string; questions: string[] };
+  responses: { id: string; submittedAt: string; respondent: string | null; answers: Record<string, string> }[];
+}
+
+export interface FormsConnector {
+  /**
+   * 利用者が選んだ（または M2Office が作った）フォームの回答を、新しい順に返す。見つからなければ `null`。
+   *
+   * @param since この時刻以降に送られた回答だけ（任意）
+   */
+  responses(p: ConnectorPrincipal, q: { formId: string; since: string | null; limit: number }): Promise<FormResponses | null>;
+}
+
 export interface MeetConnector {
   /**
    * 題名に言葉を含む、いちばん新しい会議の文字起こし。本人が主催者か参加者だった会議だけ。
@@ -217,4 +232,5 @@ export interface WorkspaceConnector {
   sheets: SheetsConnector;
   directory: DirectoryConnector;
   meet: MeetConnector;
+  forms: FormsConnector;
 }

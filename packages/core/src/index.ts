@@ -29,7 +29,7 @@ export {
 } from './connectors/mcp.js';
 export type {
   WorkspaceConnector, ConnectorPrincipal, DataSource, MailSummary, MailMessage,
-  CalendarEvent, TaskItem, BusySlot, DriveFile, DirectoryPerson, MeetTranscript,
+  CalendarEvent, TaskItem, BusySlot, DriveFile, DirectoryPerson, MeetTranscript, FormResponses,
 } from './connectors/types.js';
 
 export * from './files/index.js';

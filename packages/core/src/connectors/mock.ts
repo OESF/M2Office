@@ -207,6 +207,24 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
     },
   };
 
+  /** フォームの回答。見本のフォームを 1 つ持つ（題名に（見本））。 */
+  forms = {
+    responses: async (p: ConnectorPrincipal, q: { formId: string; since: string | null; limit: number }) => {
+      if (q.formId !== `mock-file-${p.tenantId}-3`) return null;
+      const today = ymd(this.now());
+      const all = [
+        { id: 'r3', submittedAt: jst(today, 11), respondent: null, answers: { '満足度': '4', 'よかった点': '見本の回答: 説明が分かりやすかった', '改善してほしい点': '見本の回答: 資料を事前にほしい' } },
+        { id: 'r2', submittedAt: jst(addDays(today, -1), 16), respondent: null, answers: { '満足度': '5', 'よかった点': '見本の回答: 質問に丁寧に答えてもらえた', '改善してほしい点': '' } },
+        { id: 'r1', submittedAt: jst(addDays(today, -3), 10), respondent: null, answers: { '満足度': '3', 'よかった点': '見本の回答: 時間どおりに終わった', '改善してほしい点': '見本の回答: 会場が狭かった' } },
+      ];
+      const since = q.since ? Date.parse(q.since) : 0;
+      return {
+        form: { id: q.formId, title: '研修のアンケート（見本）', questions: ['満足度', 'よかった点', '改善してほしい点'] },
+        responses: all.filter((r) => Date.parse(r.submittedAt) >= since).slice(0, q.limit),
+      };
+    },
+  };
+
   /** Meet の文字起こし。見本の会議を 1 つ持つ（題名に（見本））。 */
   meet = {
     transcript: async (_p: ConnectorPrincipal, q: { query: string }) => {
@@ -270,6 +288,8 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
         text: '見本の文書です。\n議題: 来月の重点顧客\n決定: 佐藤様への提案を来週までに準備する' },
       { file: { id: id(2), name: '顧客一覧（見本）', kind: 'spreadsheet' as const, modifiedAt: jst(addDays(today, -1), 17), url: null },
         values: [['会社名', '担当', '状況'], ['見本商事', '佐藤', '提案中'], ['見本工業', '田中', '契約済み']] },
+      { file: { id: id(3), name: '研修のアンケート（見本）', kind: 'form' as const, modifiedAt: jst(addDays(today, -3), 9), url: null },
+        text: '見本のフォームです。質問: 満足度、よかった点、改善してほしい点' },
     ];
     return [...samples, ...[...this.driveFiles.values()].filter((f) => f.owner === key(p))];
   }
