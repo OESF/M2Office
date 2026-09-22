@@ -108,6 +108,73 @@ export function parsePresentationId(input: string): string | null {
   return /^[A-Za-z0-9_-]{20,}$/.test(s) ? s : null;
 }
 
+/**
+ * 組織知識の言い換え（仕様書 第11.7.7節）。同じ意味の言葉の組で、言葉による検索（段階 2）を補う。
+ */
+export interface KnowledgeSettings {
+  /** 標準の言い換え（`STANDARD_SYNONYMS`）を使うか。既定は使う。 */
+  standardSynonyms: boolean;
+  /** 自社の言い換えの組。1 組に 2〜10 語。 */
+  synonyms: string[][];
+}
+
+/** 言い換えの上限（第11.7.7節）。 */
+export const SYNONYM_LIMITS = { groups: 300, wordsPerGroup: 10, minChars: 2, maxChars: 30 } as const;
+
+/**
+ * 標準の言い換え。労務と経費でよく使う組（第11.7.7節の表）。
+ *
+ * @remarks 会社の設定でまとめて無効にできる。一部だけ直すときは、無効にして自社の組として登録し直す。
+ */
+export const STANDARD_SYNONYMS: readonly (readonly string[])[] = [
+  ['育休', '育児休業'],
+  ['産休', '産前産後休業'],
+  ['介護休業', '介護休み'],
+  ['有休', '有給', '年休', '年次有給休暇'],
+  ['忌引', '忌引き', '慶弔休暇'],
+  ['残業', '時間外労働', '時間外勤務'],
+  ['休日出勤', '休日労働'],
+  ['在宅勤務', 'テレワーク', 'リモートワーク'],
+  ['給料', '給与', '賃金'],
+  ['ボーナス', '賞与'],
+  ['退職金', '退職手当'],
+  ['宿代', 'ホテル代', '宿泊費'],
+  ['日当', '出張手当'],
+  ['立替', '立て替え', '経費精算'],
+];
+
+/**
+ * 管理者が書いた言い換えの文（1 行に 1 組）を、組の並びにする。
+ *
+ * @param text 1 行に 1 組。語は「、」「,」「=」のどれで区切ってもよい
+ * @returns 組の並び。規則（第11.7.7節）に合わない行があれば、その行番号と理由
+ *
+ * @example parseSynonymLines('育休、育児休業\n残業 = 時間外労働') // { groups: [['育休','育児休業'],['残業','時間外労働']] }
+ */
+export function parseSynonymLines(text: string): { groups: string[][] } | { error: string } {
+  const groups: string[][] = [];
+  const seen = new Map<string, number>();
+  const lines = text.split(/\r?\n/);
+  for (const [i, line] of lines.entries()) {
+    if (!line.trim()) continue;
+    const words = [...new Set(line.split(/[、,，=＝]/).map((w) => w.trim()).filter(Boolean))];
+    const at = `${i + 1} 行目`;
+    if (words.length < 2) return { error: `${at}: 2 語以上を「、」で区切って書いてください` };
+    if (words.length > SYNONYM_LIMITS.wordsPerGroup) return { error: `${at}: 1 組は ${SYNONYM_LIMITS.wordsPerGroup} 語までです` };
+    for (const w of words) {
+      if (w.length < SYNONYM_LIMITS.minChars || w.length > SYNONYM_LIMITS.maxChars) {
+        return { error: `${at}: 「${w}」は ${SYNONYM_LIMITS.minChars}〜${SYNONYM_LIMITS.maxChars} 字で書いてください` };
+      }
+      const dup = seen.get(w);
+      if (dup !== undefined) return { error: `${at}: 「${w}」は ${dup} 行目の組にもあります。1 つの組にまとめてください` };
+      seen.set(w, i + 1);
+    }
+    groups.push(words);
+  }
+  if (groups.length > SYNONYM_LIMITS.groups) return { error: `言い換えは ${SYNONYM_LIMITS.groups} 組までです` };
+  return { groups };
+}
+
 export interface TenantSettings {
   company: CompanyInfo;
   writingStyle: WritingStyle;
@@ -119,6 +186,8 @@ export interface TenantSettings {
   access: AccessSettings;
   /** スライドのテンプレート（第9.4.2節）。 */
   slides: SlidesSettings;
+  /** 組織知識の言い換え（第11.7.7節）。 */
+  knowledge: KnowledgeSettings;
 }
 
 /** 設定が未保存の会社に使う既定値。 */
@@ -137,6 +206,8 @@ export const DEFAULT_TENANT_SETTINGS: TenantSettings = {
   access: { scopes: {} },
   // 登録が無ければ標準のテンプレートを使う
   slides: { templates: [] },
+  // 標準の言い換えは既定で使う（第11.7.7節）
+  knowledge: { standardSynonyms: true, synonyms: [] },
 };
 
 /**

@@ -3,12 +3,15 @@
  *
  * @see 仕様書 第11.7.2節 取り込み時の分割
  * @see 仕様書 第11.7.3節 検索と並べ替え
+ * @see 仕様書 第11.7.7節 言い換えの登録
  */
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { STANDARD_SYNONYMS, parseSynonymLines } from '@m2office/shared';
 import {
-  SECTION_MAX_CHARS, citationOf, extractTerms, rankSections, splitKnowledge,
+  SECTION_MAX_CHARS, citationOf, expandTerms, extractTerms, rankSections, rewriteNote, rewritesOf, scoreSection,
+  splitKnowledge, toConcepts,
 } from '../src/knowledge/index.js';
 
 const RULES = [
@@ -101,4 +104,44 @@ test('返す節は 5 節まで、本文の合計は 8,000 字まで', () => {
   const r = rankSections(extractTerms('休暇'), cands);
   assert.ok(r.length <= 5);
   assert.ok(r.reduce((n, x) => n + x.body.length, 0) <= 8_000);
+});
+
+const AT = '2026-09-01T00:00:00.000Z';
+const IKUJI = { heading: '第34条（育児休業）', path: ['第5章 休暇'], body: '子が 1 歳に達するまで育児休業を取得できる。', updatedAt: AT };
+const ZANGYO = { heading: '第16条（時間外労働）', path: ['第3章 労働時間'], body: '時間外労働は事前に承認を得る。', updatedAt: AT };
+
+test('言い換えがなければ見つからない言葉が、標準の言い換えで見つかる', () => {
+  const terms = extractTerms('育休はいつまで取れますか');
+  assert.deepEqual(rankSections(toConcepts(terms), [IKUJI, ZANGYO]), [], '言い換えなしでは見つからない');
+  const concepts = expandTerms(terms, STANDARD_SYNONYMS);
+  const r = rankSections(concepts, [IKUJI, ZANGYO]);
+  assert.deepEqual(r.map((x) => x.heading), ['第34条（育児休業）']);
+  assert.deepEqual(rewritesOf(concepts, r), [{ from: '育休', to: ['育児休業'] }]);
+  assert.equal(rewriteNote(rewritesOf(concepts, r)), '「育休」を「育児休業」と読み替えて探しました');
+});
+
+test('言い換えは、言葉が組の語を含むときにも効き、組の中はどの語からでも探す', () => {
+  assert.ok(expandTerms(['育休中'], STANDARD_SYNONYMS)[0]!.alternatives.includes('育児休業'));
+  assert.ok(expandTerms(['時間外労働'], STANDARD_SYNONYMS)[0]!.alternatives.includes('残業'));
+  assert.deepEqual(expandTerms(['宇宙'], STANDARD_SYNONYMS)[0]!.alternatives, ['宇宙']);
+  const own = expandTerms(['営推'], [['営推', '営業推進部']]);
+  assert.deepEqual(own[0]!.alternatives, ['営推', '営業推進部'], '自社の組も使う');
+});
+
+test('言い換えの組はまとめて 1 つの言葉として数え、点が薄まらない', () => {
+  const plain = scoreSection(toConcepts(['育児休業']), IKUJI);
+  const expanded = scoreSection(expandTerms(['育児休業'], STANDARD_SYNONYMS), IKUJI);
+  assert.equal(expanded, plain, '言い換えを足しても、元の言葉で当たる節の点は変わらない');
+  const r = rankSections(expandTerms(['育児休業'], STANDARD_SYNONYMS), [IKUJI]);
+  assert.deepEqual(rewritesOf(expandTerms(['育児休業'], STANDARD_SYNONYMS), r), [], '元の言葉で見つかったときは読み替えを示さない');
+});
+
+test('言い換えの文を組に分け、規則に合わない行は行番号とともに断る', () => {
+  assert.deepEqual(parseSynonymLines('育休、育児休業\n\n残業 = 時間外労働, 時間外勤務'), {
+    groups: [['育休', '育児休業'], ['残業', '時間外労働', '時間外勤務']],
+  });
+  assert.match((parseSynonymLines('育休') as { error: string }).error, /1 行目: 2 語以上/);
+  assert.match((parseSynonymLines('育休、育児休業\n育休、育児') as { error: string }).error, /2 行目: 「育休」は 1 行目/);
+  assert.match((parseSynonymLines('あ、育児休業') as { error: string }).error, /「あ」は 2〜30 字/);
+  assert.match((parseSynonymLines(Array.from({ length: 301 }, (_, i) => `語${i}a、語${i}b`).join('\n')) as { error: string }).error, /300 組まで/);
 });

@@ -9,7 +9,7 @@
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import {
-  isValidInvoiceNumber, parsePresentationId, type AutomationPolicy, type CompanyInfo, type Role, type SlideTemplate, type TenantSettings,
+  isValidInvoiceNumber, parsePresentationId, parseSynonymLines, type AutomationPolicy, type CompanyInfo, type Role, type SlideTemplate, type TenantSettings,
   type User, type WritingStyle,
 } from '@m2office/shared';
 import { DEFAULT_STANDARD_MINUTES, KNOWLEDGE_MAX_CHARS } from '@m2office/core';
@@ -117,8 +117,15 @@ export function adminRoute(deps: AppDeps) {
           { ...current.onboarding, agentsReviewedAt: new Date().toISOString() }, user.id);
       }
     }
-    await audit(deps, tenant.id, user.id, 'settings.update', 'tenant_settings', checked.section,
-      { section: checked.section });
+    if (checked.section === 'knowledge') {
+      // 言い換えの登録と変更は、専用の操作として残す（第11.7.7節）
+      const v = checked.value as TenantSettings['knowledge'];
+      await audit(deps, tenant.id, user.id, 'knowledge.synonyms.save', 'tenant_settings', 'knowledge',
+        { standardSynonyms: v.standardSynonyms, groups: v.synonyms.length });
+    } else {
+      await audit(deps, tenant.id, user.id, 'settings.update', 'tenant_settings', checked.section,
+        { section: checked.section });
+    }
     return c.json({ ok: true });
   });
 
@@ -401,6 +408,16 @@ function validateSection(
       const first = templates.findIndex((x) => x.isDefault);
       templates.forEach((x, i) => { x.isDefault = i === (first === -1 ? 0 : first); });
       return { section: 'slides', value: { templates } };
+    }
+    case 'knowledge': {
+      // 言い換え（仕様書 第11.7.7節）。1 行に 1 組の文でも、組の配列でも受け付ける
+      const raw = o['synonyms'];
+      const text = typeof raw === 'string'
+        ? raw
+        : Array.isArray(raw) ? raw.map((g) => (Array.isArray(g) ? g.map(String).join('、') : String(g))).join('\n') : '';
+      const parsed = parseSynonymLines(text);
+      if ('error' in parsed) return { error: parsed.error };
+      return { section: 'knowledge', value: { standardSynonyms: o['standardSynonyms'] !== false, synonyms: parsed.groups } };
     }
     default:
       return { error: `不明な設定の区分です: ${section}` };

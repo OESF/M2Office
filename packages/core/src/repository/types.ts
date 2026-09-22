@@ -68,7 +68,7 @@ export interface Repository {
     tenantId: string,
     query: string,
     compartment: string | null,
-  ): Promise<KnowledgeHit[]>;
+  ): Promise<KnowledgeSearchResult>;
 
   /** 本人宛の通知を保存する。宛先の決定はツール側で行う。 */
   createNotification(n: Notification): Promise<void>;
@@ -221,6 +221,13 @@ export interface KnowledgeHit {
   compartment: string | null;
   /** 並べ替えの点数（第11.7.3節）。 */
   score: number;
+}
+
+/** 知識検索の結果。 */
+export interface KnowledgeSearchResult {
+  hits: KnowledgeHit[];
+  /** 言い換えで読み替えて見つけた言葉（第11.7.7節）。答えに「読み替えて探しました」と示す。 */
+  rewrites: { from: string; to: string[] }[];
 }
 
 /** 知識の節の見え方（管理者の確認用）。 */

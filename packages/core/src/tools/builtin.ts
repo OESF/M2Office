@@ -13,6 +13,7 @@ import { WORKSPACE_TOOLS } from './workspace.js';
 import { FILE_TOOLS } from './files.js';
 import { RESEARCH_TOOLS } from './research.js';
 import { GOOGLE_TOOLS } from './google.js';
+import { rewriteNote } from '../knowledge/search.js';
 
 /**
  * 組織知識を検索する。関係の深い節（条など）を、出典を伴って返す（仕様書 第11.7.4節）。
@@ -28,11 +29,14 @@ export const knowledgeSearch: Tool = {
   args: { properties: { query: { type: 'string', description: '調べる言葉' } }, required: ['query'] },
   async invoke(args, ctx) {
     const query = String(args['query'] ?? '');
-    const hits = await ctx.repo.searchKnowledge(ctx.tenantId, query, ctx.compartment);
+    const { hits, rewrites } = await ctx.repo.searchKnowledge(ctx.tenantId, query, ctx.compartment);
     return {
       query,
       hits: hits.map((h) => ({ citation: h.citation, title: h.title, heading: h.heading, source: h.source, body: h.body })),
       found: hits.length,
+      // 言い換えで読み替えた言葉。答えに「〜と読み替えて探しました」と示す（第11.7.7節）
+      rewrites,
+      ...(rewrites.length > 0 ? { note: rewriteNote(rewrites) } : {}),
     };
   },
 };

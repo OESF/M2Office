@@ -11,6 +11,7 @@ import { Fragment, useEffect, useState } from 'react';
 import type {
   AutomationPolicy, CompanyInfo, Role, SlideTemplate, TenantSettings, User, WritingStyle,
 } from '@m2office/shared';
+import { STANDARD_SYNONYMS, SYNONYM_LIMITS } from '@m2office/shared';
 import { api, describeError, type KnowledgeItemView, type KnowledgeSectionView } from './api.js';
 import { HelpTip } from './help.js';
 import { CompartmentSettings, GroupSettings, ScopeField, useAccessOptions } from './Scope.js';
@@ -472,7 +473,7 @@ export function KnowledgeSettings() {
         <h3>{draft.id === 'new' ? '新しく登録する' : '編集する'}</h3>
         <Text label="題名" value={draft.title} onChange={(v) => setDraft({ ...draft, title: v })} />
         <Text label="出典（条番号など）" value={draft.source} onChange={(v) => setDraft({ ...draft, source: v })}
-          hint="回答に添える出典。例: 就業規則 第32条" />
+          hint="文書の出どころ。例: 就業規則（2024 年 4 月改定）、ファイル名やリンク。条は本文の見出しから自動で示します" />
         <Text label="本文" value={draft.body} onChange={(v) => setDraft({ ...draft, body: v })} multiline
           hint="長い規程も 1 件で登録できます（50 万字まで）。「第○章」「第○条」や「## 見出し」で、検索と出典の単位（節）に自動で分けます" />
         <div className="field">
@@ -537,6 +538,55 @@ export function KnowledgeSettings() {
           ))}
         </tbody>
       </table>
+      <SynonymSettings />
     </>
   );
 }
+
+/**
+ * 言い換えの登録（仕様書 第11.7.7節）。同じ意味の言葉の組で、知識の検索を補う。
+ *
+ * @remarks 自社の組は 1 行に 1 組の文で編集し、保存のときにサーバーが組に分けて検証する。
+ */
+function SynonymSettings() {
+  const [standard, setStandard] = useState(true);
+  const [text, setText] = useState('');
+  const [loaded, setLoaded] = useState(false);
+  const saver = useSaver();
+  useEffect(() => {
+    api.admin.settings().then((s) => {
+      setStandard(s.knowledge.standardSynonyms);
+      setText(s.knowledge.synonyms.map((g) => g.join('、')).join('\n'));
+      setLoaded(true);
+    }).catch(() => setLoaded(true));
+  }, []);
+
+  return (
+    <div className="card">
+      <h3>言い換え <HelpTip article="admin-knowledge">「育休」と聞かれたら「育児休業」でも探す、というように、同じ意味の言葉を結び付けます。</HelpTip></h3>
+      <p className="muted small">質問の言葉が規程の言葉と違っても見つかるようにします。言い換えで見つけたときは、答えに「読み替えて探しました」と示します。</p>
+      <div className="field">
+        <label className="check">
+          <input type="checkbox" checked={standard} onChange={(e) => setStandard(e.target.checked)} />
+          標準の言い換えを使う（労務・経費でよく使う {STANDARD_SYNONYMS.length} 組）
+        </label>
+        <details>
+          <summary className="small">標準の言い換えを見る</summary>
+          <ul className="small">{STANDARD_SYNONYMS.map((g) => <li key={g[0]}>{g.join('、')}</li>)}</ul>
+          <p className="muted small">一部だけ直したいときは、標準を使わない設定にして、下の自社の言い換えに書き直してください。</p>
+        </details>
+      </div>
+      <Text label="自社の言い換え" value={text} onChange={setText} multiline
+        hint={`1 行に 1 組。語は「、」で区切ります（例: 営推、営業推進部）。1 組 ${SYNONYM_LIMITS.wordsPerGroup} 語まで、${SYNONYM_LIMITS.groups} 組まで`} />
+      <div className="row">
+        <button className="btn" disabled={saver.busy || !loaded}
+          onClick={() => void saver.run(async () => {
+            // 文のまま送る。サーバーが組に分けて検証し、誤りは画面の行番号で返す
+            await api.admin.saveSettings('knowledge', { standardSynonyms: standard, synonyms: text as unknown as string[][] });
+          })}>保存する</button>
+      </div>
+      {saver.view}
+    </div>
+  );
+}
+

@@ -1204,6 +1204,38 @@ console.log('\n■ 29. 組織知識の節（章・条で分けて、条の単位
   gone.status === 404 ? ok('知識を削除すると節も消える') : ng('節が残っている');
 }
 
+console.log('\n■ 30. 言い換えの登録（第11.7.7節）');
+{
+  const qa = async (question, tenant = 'a') => {
+    const { body: job } = await call(tenant, '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: 'knowledge-qa', input: { question } }) });
+    const run = await waitFor(tenant, job.runId, ['completed', 'failed']);
+    return run.steps.find((x) => x.stepId === 'search')?.output?.tools?.[0]?.result ?? {};
+  };
+  const put = (value, tenant = 'a', who = 'admin') =>
+    call(tenant, '/v1/admin/settings/knowledge', { method: 'PUT', body: JSON.stringify(value) }, who);
+
+  const std = await qa('育休はいつまで？');
+  std.hits?.[0]?.heading === '第34条（育児休業）' && std.note === '「育休」を「育児休業」と読み替えて探しました'
+    ? ok('標準の言い換えで「育休」から「育児休業」の条を見つけ、読み替えを示す') : ng('標準の言い換えが効かない', JSON.stringify(std).slice(0, 200));
+
+  const bad = await put({ standardSynonyms: true, synonyms: '育休、育児休業\n育休、育児' });
+  bad.status === 400 && /2 行目/.test(bad.body.error ?? '') ? ok('同じ語を 2 つの組に入れると、行番号とともに断る') : ng(`断らない（${bad.status}）`);
+  const member = await put({ standardSynonyms: true, synonyms: '' }, 'a', 'member');
+  member.status === 403 ? ok('言い換えは管理者だけが変えられる') : ng(`管理者以外が変えられる（${member.status}）`);
+
+  const saved = await put({ standardSynonyms: false, synonyms: '始業、出社の時刻' });
+  const off = await qa('育休はいつまで？');
+  const own = await qa('出社の時刻は何時？');
+  saved.status === 200 && (off.hits ?? []).length === 0 && own.hits?.[0]?.heading === '第15条（始業・終業の時刻）'
+    ? ok('標準を無効にすると使わず、自社の組は使う') : ng('設定が効いていない', JSON.stringify({ off: off.hits?.length, own: own.hits?.[0] }));
+  const bOwn = await qa('出社の時刻は何時？', 'b');
+  !(bOwn.hits ?? []).some((h) => h.heading?.includes('始業')) ? ok('言い換えはほかの会社に効かない') : ng('ほかの会社に効いている');
+
+  const { body: audits } = await call('a', '/v1/admin/audit-events');
+  (audits.items ?? []).some((e) => e.action === 'knowledge.synonyms.save') ? ok('言い換えの変更を監査ログに残す') : ng('監査ログに残らない');
+  await put({ standardSynonyms: true, synonyms: '' });
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

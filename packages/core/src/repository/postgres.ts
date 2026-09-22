@@ -12,10 +12,10 @@ import type {
   Approval, Artifact, AuditEvent, Job, Notification, Run, RunStep, Schedule, Session,
   StoredFile, Tenant, TenantSettings, User, UserGroup, UserSettings,
 } from '@m2office/shared';
-import { DEFAULT_TENANT_SETTINGS, DEFAULT_USER_SETTINGS } from '@m2office/shared';
-import type { CompartmentAssignment, CredentialKind, GoogleConnection, TenantCredential, InstalledExtension, PrivateExtension, KnowledgeHit, KnowledgeItem, KnowledgeSectionView, Repository, RunStatRow } from './types.js';
+import { DEFAULT_TENANT_SETTINGS, DEFAULT_USER_SETTINGS, STANDARD_SYNONYMS } from '@m2office/shared';
+import type { CompartmentAssignment, CredentialKind, GoogleConnection, TenantCredential, InstalledExtension, PrivateExtension, KnowledgeItem, KnowledgeSearchResult, KnowledgeSectionView, Repository, RunStatRow } from './types.js';
 import { SPLIT_VERSION, citationOf, splitKnowledge } from '../knowledge/sections.js';
-import { SEARCH_CANDIDATES, bigrams, extractTerms, normalizeForSearch, rankSections } from '../knowledge/search.js';
+import { SEARCH_CANDIDATES, bigrams, expandTerms, extractTerms, normalizeForSearch, rankSections, rewritesOf } from '../knowledge/search.js';
 
 /** `LIKE` の特別な文字を、文字そのものとして扱うように逃がす。 */
 function escapeLike(s: string): string {
@@ -392,11 +392,14 @@ export class PostgresRepository implements Repository {
     tenantId: string,
     query: string,
     compartment: string | null,
-  ): Promise<KnowledgeHit[]> {
+  ): Promise<KnowledgeSearchResult> {
     const terms = extractTerms(query);
-    if (terms.length === 0) return [];
+    if (terms.length === 0) return { hits: [], rewrites: [] };
     await this.resplitStaleKnowledge(tenantId);
-    const patterns = [...new Set(terms.flatMap(bigrams))].map((g) => `%${escapeLike(g)}%`);
+    // 言い換え（標準と自社）を足す（第11.7.7節）
+    const { knowledge } = await this.getTenantSettings(tenantId);
+    const concepts = expandTerms(terms, [...(knowledge.standardSynonyms ? STANDARD_SYNONYMS : []), ...knowledge.synonyms]);
+    const patterns = [...new Set(concepts.flatMap((c) => c.alternatives.flatMap(bigrams)))].map((g) => `%${escapeLike(g)}%`);
     const rows = await this.q<{
       id: string; title: string; heading: string; path: string[]; body: string; source: string;
       compartment: string | null; updatedAt: string;
@@ -413,10 +416,14 @@ export class PostgresRepository implements Repository {
         limit $4`,
       [tenantId, patterns, compartment, SEARCH_CANDIDATES],
     );
-    return rankSections(terms, rows).map((r) => ({
-      id: r.id, title: r.title, heading: r.heading, path: r.path, citation: citationOf(r.title, r),
-      body: r.body, source: r.source, compartment: r.compartment, score: Math.round(r.score * 100) / 100,
-    }));
+    const ranked = rankSections(concepts, rows);
+    return {
+      hits: ranked.map((r) => ({
+        id: r.id, title: r.title, heading: r.heading, path: r.path, citation: citationOf(r.title, r),
+        body: r.body, source: r.source, compartment: r.compartment, score: Math.round(r.score * 100) / 100,
+      })),
+      rewrites: rewritesOf(concepts, ranked),
+    };
   }
 
   /** 古い分け方で分けた（または、まだ分けていない）知識を分け直す（第11.7.5節）。 */
@@ -608,7 +615,8 @@ export class PostgresRepository implements Repository {
       automation: TenantSettings['automation'] | null; agents: TenantSettings['agents'] | null;
       effect: TenantSettings['effect'] | null; onboarding: TenantSettings['onboarding'] | null;
       access: TenantSettings['access'] | null; slides: TenantSettings['slides'] | null;
-    }>(tenantId, `select company, writing_style, automation, agents, effect, onboarding, access, slides
+      knowledge: TenantSettings['knowledge'] | null;
+    }>(tenantId, `select company, writing_style, automation, agents, effect, onboarding, access, slides, knowledge
                     from tenant_settings where tenant_id = $1`,
       [tenantId]);
     const r = rows[0];
@@ -622,6 +630,10 @@ export class PostgresRepository implements Repository {
       onboarding: { ...d.onboarding, ...(r?.onboarding ?? {}) },
       access: { scopes: { ...(r?.access?.scopes ?? {}) } },
       slides: { templates: [...(r?.slides?.templates ?? [])] },
+      knowledge: {
+        standardSynonyms: r?.knowledge?.standardSynonyms ?? d.knowledge.standardSynonyms,
+        synonyms: [...(r?.knowledge?.synonyms ?? [])],
+      },
     };
   }
 
@@ -630,7 +642,7 @@ export class PostgresRepository implements Repository {
   ): Promise<void> {
     const column = ({
       company: 'company', writingStyle: 'writing_style', automation: 'automation', agents: 'agents',
-      effect: 'effect', onboarding: 'onboarding', access: 'access', slides: 'slides',
+      effect: 'effect', onboarding: 'onboarding', access: 'access', slides: 'slides', knowledge: 'knowledge',
     } as const)[section];
     // 列名は上の固定の対応表からのみ取る。利用者の入力を SQL に埋め込まない
     await this.q(tenantId,

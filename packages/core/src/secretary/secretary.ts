@@ -12,6 +12,7 @@ import type { LlmProvider } from '../llm/provider.js';
 import type { WorkspaceConnector } from '../connectors/types.js';
 import type { HelpCatalog } from '../help/articles.js';
 import { DIRECT_QUERIES, type DirectAnswer } from './catalog.js';
+import { rewriteNote } from '../knowledge/search.js';
 
 /** 秘書がどの層で応答したか。計測と表示に使う（仕様書 第10.9.1節）。 */
 export type ResponseLayer = 'direct' | 'light' | 'full';
@@ -138,13 +139,16 @@ export class Secretary {
     };
     const hits = help.search(message, ctx, 3);
     // 区画の外として検索する。区画内の文書を使い方の答えに混ぜない
-    const rules = (await this.deps.repo.searchKnowledge(tenantId, message, null)).slice(0, 2);
+    const found = await this.deps.repo.searchKnowledge(tenantId, message, null);
+    const rules = found.hits.slice(0, 2);
 
     const parts: string[] = [];
     const top = hits[0];
     if (top) parts.push(`M2Office の使い方（「${top.article.title}」より）: ${top.excerpt}`);
     if (rules.length > 0) {
       parts.push(`社内の規程では、${rules.map((r) => `「${r.citation}」`).join('、')}に記載があります。`);
+      // 言い換えで見つけたときは、なぜその条が出たかを示す（第11.7.7節）
+      if (found.rewrites.length > 0) parts.push(`（${rewriteNote(found.rewrites)}）`);
     }
     if (parts.length === 0) {
       parts.push('ヘルプと社内の規程のどちらにも見当たりませんでした。言い方を変えて聞き直すか、社内の管理者に問い合わせてください。');
