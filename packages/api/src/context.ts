@@ -12,7 +12,8 @@ import {
   PostgresRepository, StubLlmProvider, OpenAiCompatibleProvider, ToolRegistry, BUILTIN_TOOLS,
   RunEngine, Secretary, OFFICIAL_AGENTS, buildConnector, LocalFileStore,
   createLoggerFromEnv, HelpCatalog, parseArticle, ExtensionHub, HttpMcpClient, loadExtensions,
-  GeminiResearchProvider, MockResearchProvider, type ResearchProvider,
+  GeminiResearchProvider, MockResearchProvider, TenantAiResolver, secretBoxFromEnv, type ResearchProvider,
+  type SecretBox, type GeminiModels,
   type FileStore, type TenantExtensions, type HelpArticle, type LlmProvider, type Logger, type Repository, type WorkspaceConnector,
 } from '@m2office/core';
 import { canRunAgent, type AgentDefinition } from '@m2office/shared';
@@ -20,6 +21,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadAuthConfig, type AuthConfig } from './auth/config.js';
+import { OAuthStateStore } from './auth/oauth-state.js';
 
 /** API プロセス全体で共有する依存。 */
 export interface AppDeps {
@@ -53,6 +55,12 @@ export interface AppDeps {
   canUse(tenantId: string, userId: string, agentId: string): Promise<boolean>;
   /** その会社で業務エージェントを使えるか。 */
   isAvailable(tenantId: string, agentId: string): Promise<boolean>;
+  /** 秘密の値の暗号化（仕様書 第14.3.3節「保存」）。 */
+  box: SecretBox;
+  /** 会社ごとの Gemini（自社の鍵か運営の設定）。 */
+  ai: TenantAiResolver;
+  /** Google の OAuth。戻り先の URI と、使い捨ての state の置き場。 */
+  oauth: { redirectUri: string; states: OAuthStateStore };
 }
 
 /**
@@ -96,17 +104,32 @@ export function buildDeps(): AppDeps {
   const isAvailable = async (tenantId: string, agentId: string) => (await tenantView(tenantId)).isAvailable(agentId);
 
   const files = new LocalFileStore(fileStorageDir());
+  const research = buildResearch();
+  const { box, devKey } = secretBoxFromEnv();
+  if (devKey) log.warn('M2OFFICE_SECRET_KEY が未設定のため、開発用の固定の鍵で秘密の値を暗号化しています（本番では起動しません）');
+  const ai = new TenantAiResolver({
+    repo, box, fallbackLlm: llm, fallbackResearch: research,
+    platformKey: (process.env['LLM_PROVIDER'] ?? 'stub') === 'gemini' ? process.env['GEMINI_API_KEY'] || null : null,
+    defaults: defaultGeminiModels(),
+    baseUrl: process.env['GEMINI_BASE_URL'] ?? 'https://generativelanguage.googleapis.com/v1beta/openai',
+  });
   const engine = new RunEngine({
-    repo, llm, registry, connector, files, logger: log, research: buildResearch(),
+    repo, llm, registry, connector, files, logger: log, research,
+    llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId),
     resolveDefinition: async (id, version, tenantId) => (await tenantView(tenantId)).resolve(id, version),
     registryFor: async (tenantId) => (await tenantView(tenantId)).registry,
     isAvailable,
   });
   const help = new HelpCatalog(loadHelpArticles(helpDir(), log), OFFICIAL_AGENTS, registry);
-  const secretary = new Secretary({ repo, llm, connector, agents: OFFICIAL_AGENTS, help, agentsFor });
+  const secretary = new Secretary({ repo, llm, connector, agents: OFFICIAL_AGENTS, help, agentsFor, llmFor: (t) => ai.llmFor(t) });
   return {
     repo, llm, connector, files, registry, engine, secretary, auth: loadAuthConfig(), log, help,
-    hub, tenantView, agentsFor, canUse, isAvailable,
+    hub, tenantView, agentsFor, canUse, isAvailable, box, ai,
+    oauth: {
+      // Google は http の戻り先を localhost にしか認めないため、開発では localhost の画面の転送を通す（ADR-0007）
+      redirectUri: process.env['GOOGLE_OAUTH_REDIRECT_URI'] ?? 'http://localhost:3100/v1/oauth/google/callback',
+      states: new OAuthStateStore(),
+    },
   };
 }
 
@@ -184,6 +207,18 @@ export function buildResearch(): ResearchProvider {
     return new GeminiResearchProvider(key, process.env['MODEL_RESEARCH'] ?? process.env['MODEL_STANDARD'] ?? 'gemini-flash-latest');
   }
   return new MockResearchProvider();
+}
+
+/** 既定のモデル（会社が指定しなければこれを使う）。ワーカーと同じ。 */
+export function defaultGeminiModels(): GeminiModels {
+  const standard = process.env['MODEL_STANDARD'] ?? 'gemini-flash-latest';
+  return {
+    fast: process.env['MODEL_FAST'] ?? 'gemini-flash-latest',
+    standard,
+    advanced: process.env['MODEL_ADVANCED'] ?? 'gemini-pro-latest',
+    research: process.env['MODEL_RESEARCH'] ?? standard,
+    live: process.env['MODEL_LIVE'] ?? 'gemini-3.1-flash-live-preview',
+  };
 }
 
 /**

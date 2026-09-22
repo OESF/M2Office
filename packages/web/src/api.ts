@@ -223,6 +223,27 @@ export interface ExtensionView {
   scope: ScopeValue;
 }
 
+/** 管理者ページ「接続」の設定（仕様書 第14.3.3節）。秘密の値は含まない。 */
+export interface ConnectionSettings {
+  gemini: {
+    mode: 'platform' | 'byok'; keyRegistered: boolean; updatedAt: string | null;
+    models: Record<string, string>; defaults: Record<string, string>;
+    effective: 'tenant' | 'platform' | 'none'; platformKeyAvailable: boolean;
+  };
+  google: {
+    clientId: string; secretRegistered: boolean; updatedAt: string | null; redirectUri: string;
+    requiredScopes: { scope: string; level: string; label: string }[];
+    workspaceSource: string;
+    users: { userId: string; name: string; email: string; connected: boolean; googleEmail: string | null; connectedAt: string | null; missing: string[] }[];
+  };
+}
+
+/** 本人の Google 連携（仕様書 第6.5.2節）。 */
+export interface MyGoogle {
+  available: boolean; connected: boolean; googleEmail: string | null; connectedAt: string | null; checkedAt: string | null;
+  scopes: { scope: string; label: string; granted: boolean }[]; needsReconnect: boolean;
+}
+
 /** 利用範囲（仕様書 第16.7節）。`'all'` は全員。 */
 export type ScopeValue = 'all' | { groups: string[]; users: string[] };
 
@@ -337,6 +358,10 @@ export const api = {
     id: string; provider: string; userAgent: string | null; createdAt: string; lastSeenAt: string; current: boolean;
   }[] }>('/me/sessions'),
   revokeSession: (id: string) => call(`/me/sessions/${id}`, { method: 'DELETE' }),
+  myGoogle: () => call<MyGoogle>('/me/google'),
+  connectGoogle: () => call<{ url: string }>('/me/google/connect', { method: 'POST' }),
+  checkGoogle: () => call<{ ok: boolean; error?: string }>('/me/google/check', { method: 'POST' }),
+  disconnectGoogle: () => call<{ ok: true; revokedAtGoogle: boolean }>('/me/google', { method: 'DELETE' }),
   myUsage: () => call<{
     seat: string; thisMonth: { runs: number; costJpy: number }; availableAgents: number;
     compartments: string[]; groups: string[]; plan: null;
@@ -356,6 +381,15 @@ export const api = {
     runs: () => call<{ items: AdminRun[] }>('/admin/runs'),
     users: () => call<{ items: User[] }>('/admin/users'),
     audit: () => call<{ items: AuditEvent[] }>('/admin/audit-events'),
+    connections: () => call<ConnectionSettings>('/admin/connections'),
+    saveGemini: (v: { mode: 'platform' | 'byok'; apiKey?: string; models?: Record<string, string> }) =>
+      call('/admin/connections/gemini', { method: 'PUT', body: JSON.stringify(v) }),
+    deleteGeminiKey: () => call('/admin/connections/gemini/key', { method: 'DELETE' }),
+    testGemini: (kind: 'text' | 'live') =>
+      call<{ ok: boolean; ms: number; error?: string; source: string; model: string }>('/admin/connections/gemini/test', { method: 'POST', body: JSON.stringify({ kind }) }),
+    saveGoogleClient: (v: { clientId: string; clientSecret?: string }) =>
+      call('/admin/connections/google', { method: 'PUT', body: JSON.stringify(v) }),
+    deleteGoogleClient: () => call('/admin/connections/google', { method: 'DELETE' }),
     googlePermissions: () => call<{ items: { scope: string; level: string; tools: string[]; agents: string[] }[] }>('/admin/google-permissions'),
     connectors: () => call<{ workspace: { source: string; label: string }; llm: { provider: string } }>(
       '/admin/connectors',

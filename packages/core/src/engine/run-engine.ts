@@ -46,6 +46,10 @@ export interface RunEngineDeps {
   logger?: Logger;
   /** Web での調査の提供者。`web.research` に渡す（仕様書 第9.4.2節）。 */
   research?: ResearchProvider;
+  /** 会社ごとの推論（会社が自社の鍵を登録していればその鍵。仕様書 第14.3.3節）。省略時は `llm`。 */
+  llmFor?(tenantId: string): Promise<LlmProvider>;
+  /** 会社ごとの Web の調査。省略時は `research`。 */
+  researchFor?(tenantId: string): Promise<ResearchProvider>;
   /**
    * エージェント定義を解決する。
    *
@@ -100,6 +104,10 @@ export class RunEngine {
     const def = await this.deps.resolveDefinition(job.agentId, job.agentVersion, run.tenantId);
     if (!def) return this.fail(run, `エージェント定義が見つかりません: ${job.agentId}`);
     const registry = this.deps.registryFor ? await this.deps.registryFor(run.tenantId) : this.deps.registry;
+    const ai = {
+      llm: this.deps.llmFor ? await this.deps.llmFor(run.tenantId) : this.deps.llm,
+      research: this.deps.researchFor ? await this.deps.researchFor(run.tenantId) : this.deps.research,
+    };
 
     try {
       validateDefinition(def, registry);
@@ -126,7 +134,7 @@ export class RunEngine {
     }
 
     // 操作の確認（第9.4節）で承認された操作が残っていれば、先に実行する
-    await this.executeConfirmedCalls(run, def, job.requestedBy, registry);
+    await this.executeConfirmedCalls(run, def, job.requestedBy, registry, ai.research);
 
     let current = run;
     while (current.cursor < def.steps.length) {
@@ -149,7 +157,7 @@ export class RunEngine {
       const startedAt = Date.now();
       stepLog.debug('ステップを開始', { agentId: def.id, cursor: current.cursor });
       const result = await this.runAgentStep(
-        current, def, step, job.input, job.requestedBy, settings, registry,
+        current, def, step, job.input, job.requestedBy, settings, registry, ai,
       );
       stepLog.debug('ステップを終了', { outcome: result.kind, ms: Date.now() - startedAt });
       if (result.kind === 'failed') return this.fail(current, result.reason);
@@ -293,12 +301,14 @@ export class RunEngine {
     requestedBy: string,
     settings: TenantSettings,
     registry: ToolRegistry,
+    ai: { llm: LlmProvider; research?: ResearchProvider },
   ): Promise<
     | { kind: 'ok' | 'stopped'; tokensUsed: number }
     | { kind: 'confirm'; tokensUsed: number; calls: ToolCall[] }
     | { kind: 'failed'; reason: string }
   > {
-    const { repo, llm } = this.deps;
+    const { repo } = this.deps;
+    const { llm } = ai;
     // 文脈はメモリではなく永続化層から読み直す。承認後に別のワーカーが続けても同じ結果になる
     const previous = await repo.listRunSteps(run.tenantId, run.id);
     const gatedByApproval = def.steps[run.cursor - 1]?.type === 'approval';
@@ -368,7 +378,7 @@ export class RunEngine {
           toolResults.push({ name: call.name, risk: tool.risk, pending: '本人の確認を待っています' });
           continue;
         }
-        toolResults.push(await this.invokeTool(run, def, call, requestedBy, registry));
+        toolResults.push(await this.invokeTool(run, def, call, requestedBy, registry, ai.research));
       }
 
       const output = { text: res.text, tools: toolResults };
@@ -400,8 +410,9 @@ export class RunEngine {
   /** ツールを 1 つ呼び、監査ログに残す。 */
   private async invokeTool(
     run: Run, def: AgentDefinition, call: ToolCall, requestedBy: string, registry: ToolRegistry,
+    research: ResearchProvider | undefined = this.deps.research,
   ): Promise<unknown> {
-    const { repo, connector, files, research } = this.deps;
+    const { repo, connector, files } = this.deps;
     const tool = registry.get(call.name);
     if (!tool) return { name: call.name, error: '許可されていないツールです' };
     this.log.debug('ツールを呼び出し', { runId: run.id, tenantId: run.tenantId, tool: call.name, risk: tool.risk });
@@ -457,7 +468,7 @@ export class RunEngine {
 
   /** 承認済みで未実行の「操作の確認」があれば、記録した操作を実行する。 */
   private async executeConfirmedCalls(
-    run: Run, def: AgentDefinition, requestedBy: string, registry: ToolRegistry,
+    run: Run, def: AgentDefinition, requestedBy: string, registry: ToolRegistry, research?: ResearchProvider,
   ): Promise<void> {
     const { repo } = this.deps;
     const steps = await repo.listRunSteps(run.tenantId, run.id);
@@ -466,7 +477,7 @@ export class RunEngine {
       const output = s.output as { executed?: boolean } | null;
       if (s.kind !== 'approval' || s.status !== 'succeeded' || !input?.toolCalls || output?.executed) continue;
       const results = [];
-      for (const call of input.toolCalls) results.push(await this.invokeTool(run, def, call, requestedBy, registry));
+      for (const call of input.toolCalls) results.push(await this.invokeTool(run, def, call, requestedBy, registry, research));
       await repo.updateRunStep(run.tenantId, {
         ...s, output: { ...(s.output as object), executed: true, tools: results },
       });

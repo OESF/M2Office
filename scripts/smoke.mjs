@@ -1118,6 +1118,58 @@ console.log('\n■ 27. Google Workspace のツール（第 3 弾: フォーム�
   await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
 }
 
+console.log('\n■ 28. 接続の設定（Gemini・Google Workspace）');
+{
+  const key = 'AIzaSySMOKE_TEST_ONLY_0000000000000';
+  const memberPut = await call('a', '/v1/admin/connections/gemini', { method: 'PUT', body: JSON.stringify({ mode: 'byok', apiKey: key }) }, 'member');
+  memberPut.status === 403 ? ok('一般の利用者は接続の設定を変えられない（403）') : ng(`変えられてしまう（${memberPut.status}）`);
+
+  await call('a', '/v1/admin/connections/gemini', { method: 'PUT', body: JSON.stringify({ mode: 'byok', apiKey: key, models: { standard: 'gemini-2.5-flash' } }) });
+  const { body: conn } = await call('a', '/v1/admin/connections');
+  conn.gemini.keyRegistered && conn.gemini.effective === 'tenant' && !JSON.stringify(conn).includes(key)
+    ? ok('自社の鍵を登録でき、登録後は値を返さない') : ng('鍵の扱いが違う', JSON.stringify(conn.gemini));
+  const { body: audit } = await call('a', '/v1/admin/audit-events');
+  const ev = (audit.items ?? []).find((e) => e.action === 'connection.gemini.update');
+  ev && !JSON.stringify(ev).includes(key) ? ok('鍵の登録を監査ログに残す（値は残さない）') : ng('監査ログの扱いが違う', JSON.stringify(ev));
+  const bad = await call('a', '/v1/admin/connections/gemini', { method: 'PUT', body: JSON.stringify({ mode: 'byok', apiKey: 'short' }) });
+  bad.status === 400 ? ok('形式の違う鍵は登録できない') : ng(`登録できてしまう（${bad.status}）`);
+  await call('a', '/v1/admin/connections/gemini/key', { method: 'DELETE' });
+  const { body: after } = await call('a', '/v1/admin/connections');
+  !after.gemini.keyRegistered && after.gemini.mode === 'platform' ? ok('鍵を削除すると運営一括に戻る') : ng('削除できない');
+
+  const badClient = await call('a', '/v1/admin/connections/google', { method: 'PUT', body: JSON.stringify({ clientId: 'x', clientSecret: 'y' }) });
+  badClient.status === 400 ? ok('形式の違う OAuth クライアント ID は登録できない') : ng(`登録できてしまう（${badClient.status}）`);
+  const before = await call('a', '/v1/me/google/connect', { method: 'POST' }, 'member');
+  await call('a', '/v1/admin/connections/google', { method: 'DELETE' });
+  const none = await call('a', '/v1/me/google/connect', { method: 'POST' }, 'member');
+  none.status === 409 ? ok('会社の OAuth クライアントが無ければ、利用者は接続を始められない') : ng(`始められてしまう（${none.status}）`);
+  void before;
+  await call('a', '/v1/admin/connections/google', { method: 'PUT', body: JSON.stringify({ clientId: '123456-smoke.apps.googleusercontent.com', clientSecret: 'GOCSPX-smoke-secret' }) });
+  const { body: g } = await call('a', '/v1/admin/connections');
+  g.google.secretRegistered && !JSON.stringify(g).includes('GOCSPX-smoke-secret') && g.google.redirectUri.endsWith('/v1/oauth/google/callback')
+    ? ok('OAuth クライアントを登録でき、シークレットは返さず、登録するリダイレクト URI を示す') : ng('OAuth クライアントの扱いが違う', JSON.stringify(g.google));
+
+  const { body: start } = await call('a', '/v1/me/google/connect', { method: 'POST' }, 'member');
+  const q = new URL(start.url).searchParams;
+  const scope = q.get('scope') ?? '';
+  q.get('client_id') === '123456-smoke.apps.googleusercontent.com' && q.get('code_challenge_method') === 'S256' && q.get('state')
+    && scope.includes('gmail.readonly') && scope.startsWith('openid email')
+    ? ok('接続の URL に、会社のクライアント・PKCE・state・業務が求める権限を付ける') : ng('接続の URL が違う', start.url);
+  const cb = await fetch(`${API}/v1/oauth/google/callback?state=forged&code=x`);
+  cb.status === 400 ? ok('照合できない戻り（偽の state）では何もしない') : ng(`受け付けてしまう（${cb.status}）`);
+  const cancel = await fetch(`${API}/v1/oauth/google/callback?state=${q.get('state')}&error=access_denied`, { redirect: 'manual' });
+  (cancel.headers.get('location') ?? '').includes('google=cancelled') ? ok('利用者が取りやめたら、取りやめたことを画面に戻す') : ng('取りやめの扱いが違う', cancel.headers.get('location'));
+  const reuse = await fetch(`${API}/v1/oauth/google/callback?state=${q.get('state')}&code=x`);
+  reuse.status === 400 ? ok('state は 1 回しか使えない') : ng(`2 回使えてしまう（${reuse.status}）`);
+
+  const { body: mine } = await call('a', '/v1/me/google', {}, 'member');
+  mine.available && !mine.connected && mine.scopes.some((x) => x.label === 'メールを読む')
+    ? ok('本人の Google 連携に、業務の言葉で許可の一覧を出す') : ng('本人の連携の表示が違う', JSON.stringify(mine));
+  const { body: bConn } = await call('b', '/v1/admin/connections');
+  !bConn.google.secretRegistered ? ok('接続の設定はほかの会社から見えない') : ng('ほかの会社から見える');
+  await call('a', '/v1/admin/connections/google', { method: 'DELETE' });
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

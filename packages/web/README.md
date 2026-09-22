@@ -72,6 +72,7 @@ src/Dashboard.tsx   ダッシュボード（いま・集計）
 src/AdminSettings.tsx  管理者ページ（会社情報・業務と承認・ユーザー・知識の編集）
 src/Extensions.tsx     管理者ページ「拡張機能」（取り込み・同意・スイッチ・接続の確認・削除）
 src/Scope.tsx          グループの管理、業務・拡張機能ごとの「利用できる人」、権限区画の割当
+src/Connections.tsx    管理者ページ「接続」（Gemini の鍵・モデル・接続の確認、Google の OAuth クライアント・従業員の接続状況）
 src/nav.tsx            左ペインの共通部品（アイコン・折りたたみ・項目）と明るさの切り替えボタン
 src/theme.ts           画面の明るさ（ライト・ダーク・端末に合わせる）の選択と反映
 public/icons.svg       画面のアイコン（モノクロの線画。文字の色を引き継ぐ）

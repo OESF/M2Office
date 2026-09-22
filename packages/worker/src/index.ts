@@ -12,7 +12,8 @@
 import {
   PostgresRepository, StubLlmProvider, OpenAiCompatibleProvider, ToolRegistry, BUILTIN_TOOLS,
   RunEngine, Scheduler, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient,
-  loadExtensions, OFFICIAL_AGENTS, GeminiResearchProvider, MockResearchProvider, type LlmProvider,
+  loadExtensions, OFFICIAL_AGENTS, GeminiResearchProvider, MockResearchProvider, TenantAiResolver, secretBoxFromEnv,
+  type LlmProvider,
 } from '@m2office/core';
 import { fileURLToPath } from 'node:url';
 
@@ -44,12 +45,27 @@ const resolveDefinition = async (id: string, version: number, tenantId: string) 
   (await hub.forTenant(tenantId)).resolve(id, version);
 const isAvailable = async (tenantId: string, agentId: string) => (await hub.forTenant(tenantId)).isAvailable(agentId);
 
+const llm = buildLlm();
+// Web の調査（第9.4.2節）。鍵があれば Gemini の Google 検索、無ければ見本。API と同じ判定
+const research = process.env['LLM_PROVIDER'] === 'gemini' && process.env['GEMINI_API_KEY']
+  ? new GeminiResearchProvider(process.env['GEMINI_API_KEY'], process.env['MODEL_RESEARCH'] ?? process.env['MODEL_STANDARD'] ?? 'gemini-flash-latest')
+  : new MockResearchProvider();
+// 会社ごとの Gemini（会社が自社の鍵を登録していればその鍵。仕様書 第14.3.3節）
+const { box } = secretBoxFromEnv();
+const standardModel = process.env['MODEL_STANDARD'] ?? 'gemini-flash-latest';
+const ai = new TenantAiResolver({
+  repo, box, fallbackLlm: llm, fallbackResearch: research,
+  platformKey: process.env['LLM_PROVIDER'] === 'gemini' ? process.env['GEMINI_API_KEY'] || null : null,
+  defaults: {
+    fast: process.env['MODEL_FAST'] ?? 'gemini-flash-latest', standard: standardModel,
+    advanced: process.env['MODEL_ADVANCED'] ?? 'gemini-pro-latest', research: process.env['MODEL_RESEARCH'] ?? standardModel,
+    live: process.env['MODEL_LIVE'] ?? 'gemini-3.1-flash-live-preview',
+  },
+  baseUrl: process.env['GEMINI_BASE_URL'] ?? 'https://generativelanguage.googleapis.com/v1beta/openai',
+});
 const engine = new RunEngine({
-  repo, llm: buildLlm(), registry, connector, files, resolveDefinition, isAvailable, logger: log,
-  // Web の調査（第9.4.2節）。鍵があれば Gemini の Google 検索、無ければ見本。API と同じ判定
-  research: process.env['LLM_PROVIDER'] === 'gemini' && process.env['GEMINI_API_KEY']
-    ? new GeminiResearchProvider(process.env['GEMINI_API_KEY'], process.env['MODEL_RESEARCH'] ?? process.env['MODEL_STANDARD'] ?? 'gemini-flash-latest')
-    : new MockResearchProvider(),
+  repo, llm, registry, connector, files, resolveDefinition, isAvailable, logger: log, research,
+  llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId),
   registryFor: async (tenantId) => (await hub.forTenant(tenantId)).registry,
 });
 const scheduler = new Scheduler({ repo, resolveDefinition, isAvailable, logger: log });

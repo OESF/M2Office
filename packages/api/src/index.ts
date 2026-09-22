@@ -29,6 +29,7 @@ import { helpRoute } from './routes/help.js';
 import { onboardingRoute } from './routes/onboarding.js';
 import { extensionsRoute } from './routes/extensions.js';
 import { accessRoute, compartmentsRoute, groupsRoute } from './routes/access.js';
+import { connectionsRoute, myGoogleRoute, oauthCallbackRoute } from './routes/connections.js';
 
 /**
  * API サーバー。
@@ -62,6 +63,8 @@ app.use('*', cors({
 app.get('/health', (c) => c.json({ ok: true, service: 'api' }));
 
 // テナントの解決はすべてに、利用者の確認はログイン以外のすべてに掛ける
+// Google からの戻りは、テナントの判定とログインより前に受ける（state で照合する。仕様書 第14.3.3節）
+app.route('/v1/oauth', oauthCallbackRoute(deps));
 app.use('/v1/*', resolveTenant(deps));
 app.route('/v1/auth', authRoute(deps));
 app.use('/v1/*', async (c, next) =>
@@ -78,6 +81,7 @@ app.get('/v1/me', (c) => {
     workspaceSource: deps.connector.source,
   });
 });
+app.route('/v1/me/google', myGoogleRoute(deps));
 app.route('/v1/me', meRoute(deps));
 app.route('/v1/agents', agentsRoute(deps));
 app.route('/v1/jobs', jobsRoute(deps));
@@ -91,6 +95,7 @@ app.route('/v1/admin/extensions', extensionsRoute(deps));
 app.route('/v1/admin/groups', groupsRoute(deps));
 app.route('/v1/admin/access', accessRoute(deps));
 app.route('/v1/admin/compartments', compartmentsRoute(deps));
+app.route('/v1/admin/connections', connectionsRoute(deps));
 app.route('/v1/admin', adminRoute(deps));
 app.route('/v1/files', filesRoute(deps));
 app.route('/v1/help', helpRoute(deps));

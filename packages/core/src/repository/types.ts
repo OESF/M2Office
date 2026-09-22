@@ -129,6 +129,16 @@ export interface Repository {
   setCompartmentAssignment(
     tenantId: string, compartmentId: string, a: { groups: string[]; users: string[] }, assignedBy: string,
   ): Promise<void>;
+  /** 会社の接続の設定（仕様書 第14.3.3節）。秘密の値は暗号化されたまま返す。無ければ `null`。 */
+  getTenantCredential(tenantId: string, kind: CredentialKind): Promise<TenantCredential | null>;
+  saveTenantCredential(c: TenantCredential): Promise<void>;
+  deleteTenantCredential(tenantId: string, kind: CredentialKind): Promise<boolean>;
+  /** 利用者の Google の接続。無ければ `null`。 */
+  getGoogleConnection(tenantId: string, userId: string): Promise<GoogleConnection | null>;
+  /** 会社の全員の Google の接続（管理者の一覧に使う。トークンは画面に出さない）。 */
+  listGoogleConnections(tenantId: string): Promise<GoogleConnection[]>;
+  saveGoogleConnection(c: GoogleConnection): Promise<void>;
+  deleteGoogleConnection(tenantId: string, userId: string): Promise<boolean>;
   /** 会社のグループ（仕様書 第16.7節）。所属する人の ID を含む。名前の順。 */
   listGroups(tenantId: string): Promise<UserGroup[]>;
   /** グループを作る、または名前と説明を変える。 */
@@ -221,6 +231,31 @@ export interface RunStatRow {
   savedMinutes: number;
   /** 終了した実行の所要時間の合計（秒）。 */
   durationSec: number;
+}
+
+/** 接続の設定の種類。 */
+export type CredentialKind = 'gemini' | 'google_oauth';
+
+/** 会社の接続の設定。`secretEnc` は暗号化した秘密の値、`meta` は秘密でない値。 */
+export interface TenantCredential {
+  tenantId: string;
+  kind: CredentialKind;
+  secretEnc: string | null;
+  meta: Record<string, unknown>;
+  updatedBy: string;
+  updatedAt: string;
+}
+
+/** 利用者の Google の接続。`refreshTokenEnc` は暗号化したリフレッシュ トークン。 */
+export interface GoogleConnection {
+  tenantId: string;
+  userId: string;
+  refreshTokenEnc: string;
+  googleEmail: string | null;
+  /** Google に実際に許可された範囲（短い名前）。最後に確かめたとき。 */
+  scopes: string[];
+  connectedAt: string;
+  checkedAt: string;
 }
 
 /** 権限区画と、その割当。 */

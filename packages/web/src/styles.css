@@ -521,3 +521,16 @@ button.link.danger { color: var(--danger); }
   .user-card .avatar { width: 24px; height: 24px; }
   .user-card .user-text { flex-direction: row; gap: 6px; align-items: baseline; white-space: nowrap; }
 }
+
+/* 接続の設定（仕様書 第14.3.3節） */
+.steps-guide { padding-left: 20px; margin: 8px 0 12px; }
+.steps-guide li { margin: 4px 0; }
+code.uri { background: var(--subtle-bg); border: 1px solid var(--line); border-radius: 4px; padding: 4px 8px; word-break: break-all; }
+.warn-inline { color: var(--warn); }
+.grant-list { list-style: none; padding: 0; margin: 8px 0; }
+.grant-list li { padding: 2px 0; }
+.grant-list li.granted span:first-child { color: var(--ok); }
+.grant-list li.missing { color: var(--muted); }
+/* 入力欄の幅の決まりを、ラジオボタンとチェックボックスには掛けない */
+.field input[type="radio"], .field input[type="checkbox"] { width: auto; }
+.field label.check { display: flex; align-items: center; gap: 6px; color: var(--ink); font-size: 14px; margin: 4px 0; }

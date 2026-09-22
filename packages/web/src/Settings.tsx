@@ -1,12 +1,12 @@
 /**
- * @file 個人設定の画面（プロフィール・秘書・通知・表示・メニューの並び・セキュリティ・利用状況）。
+ * @file 個人設定の画面（プロフィール・Google 連携・秘書・通知・表示・メニューの並び・セキュリティ・利用状況）。
  *
  * @see 仕様書 第6.5節 個人設定
  */
 
 import { useEffect, useState } from 'react';
 import type { UserSettings } from '@m2office/shared';
-import { api, type AgentSummary, type Me } from './api.js';
+import { api, describeError, type AgentSummary, type Me, type MyGoogle } from './api.js';
 import { useTheme, type ThemeChoice } from './theme.js';
 
 /**
@@ -14,7 +14,6 @@ import { useTheme, type ThemeChoice } from './theme.js';
  *
  * @remarks
  * 記憶とデータ（第6.5.4節）は個人記憶の実装とあわせて追加する。
- * Google 連携の許可（第6.5.2節）は Google との接続の実装とあわせて追加する。
  */
 export function Settings({ me, agents, onChanged }: {
   me: Me; agents: AgentSummary[]; onChanged: () => void;
@@ -93,6 +92,8 @@ export function Settings({ me, agents, onChanged }: {
           await api.saveMySettings('profile', s.profile);
         })}>保存する</button>
       </div>
+
+      <GoogleSettings />
 
       <div className="card">
         <h3>秘書</h3>
@@ -215,6 +216,79 @@ function DisplaySettings() {
         ))}
       </div>
       <p className="muted small">左のメニューは、上の端のボタンで狭く（アイコンだけに）できます。これもこの端末に覚えます。</p>
+    </div>
+  );
+}
+
+/**
+ * Google 連携（仕様書 第6.5.2節）。本人が許可し、本人が取り消す。
+ *
+ * @remarks 「鍵」「トークン」という言葉を使わない。業務の言葉で、何を許可しているかを示す。
+ */
+function GoogleSettings() {
+  const [g, setG] = useState<MyGoogle | null>(null);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const load = () => api.myGoogle().then(setG).catch((e) => setMsg({ ok: false, text: describeError(e, '読み込めませんでした') }));
+  useEffect(() => { void load(); }, []);
+  const connect = async () => {
+    setBusy(true);
+    try {
+      const { url } = await api.connectGoogle();
+      location.href = url;
+    } catch (e) {
+      setMsg({ ok: false, text: describeError(e, '接続を始められませんでした') });
+      setBusy(false);
+    }
+  };
+  const act = async (fn: () => Promise<unknown>, done: string) => {
+    setBusy(true); setMsg(null);
+    try { await fn(); setMsg({ ok: true, text: done }); await load(); }
+    catch (e) { setMsg({ ok: false, text: describeError(e) }); }
+    finally { setBusy(false); }
+  };
+  if (!g) return null;
+  return (
+    <div className="card">
+      <h3>Google 連携</h3>
+      {!g.available ? (
+        <p>会社の管理者が Google との接続を設定すると、ここから接続できます。</p>
+      ) : (
+        <>
+          <p>
+            {g.connected
+              ? <>接続しています（{g.googleEmail ?? 'アカウントを確かめられませんでした'}・{g.connectedAt ? new Date(g.connectedAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }) : ''}）。</>
+              : 'まだ接続していません。接続すると、業務があなたのメール・予定・ToDo などを扱えるようになります。'}
+            あなたの Google アカウントで許可し、あなたのデータだけを扱います。
+          </p>
+          <ul className="grant-list">
+            {g.scopes.map((s) => (
+              <li key={s.scope} className={s.granted ? 'granted' : 'missing'}>
+                <span aria-hidden="true">{s.granted ? '✓' : '・'}</span> {s.label}
+                {!s.granted && g.connected && <span className="warn-inline small">（未許可）</span>}
+              </li>
+            ))}
+          </ul>
+          {g.needsReconnect && <p className="warn-msg small">使える業務が増えて、新しい許可が要ります。「接続し直す」を押してください。</p>}
+          <div className="row">
+            <button className="btn" disabled={busy} onClick={() => void connect()}>{g.connected ? '接続し直す' : 'Google と接続する'}</button>
+            {g.connected && (
+              <>
+                <button className="btn ghost" disabled={busy} onClick={() => void act(async () => {
+                  const r = await api.checkGoogle();
+                  if (!r.ok) throw new Error(r.error ?? '確かめられませんでした');
+                }, '許可の状況を確かめました')}>許可の状況を確かめる</button>
+                <button className="btn danger" disabled={busy} onClick={() => {
+                  if (confirm('Google との接続を取り消しますか。メールや予定を扱う業務が使えなくなります。')) {
+                    void act(() => api.disconnectGoogle(), '接続を取り消しました');
+                  }
+                }}>接続を取り消す</button>
+              </>
+            )}
+          </div>
+        </>
+      )}
+      {msg && <p className={msg.ok ? 'ok-msg' : 'error'}>{msg.text}</p>}
     </div>
   );
 }

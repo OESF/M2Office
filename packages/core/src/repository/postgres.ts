@@ -13,7 +13,7 @@ import type {
   StoredFile, Tenant, TenantSettings, User, UserGroup, UserSettings,
 } from '@m2office/shared';
 import { DEFAULT_TENANT_SETTINGS, DEFAULT_USER_SETTINGS } from '@m2office/shared';
-import type { CompartmentAssignment, InstalledExtension, PrivateExtension, KnowledgeHit, KnowledgeItem, Repository, RunStatRow } from './types.js';
+import type { CompartmentAssignment, CredentialKind, GoogleConnection, TenantCredential, InstalledExtension, PrivateExtension, KnowledgeHit, KnowledgeItem, Repository, RunStatRow } from './types.js';
 
 /**
  * 問い合わせ文を検索語に分割する。
@@ -828,6 +828,55 @@ export class PostgresRepository implements Repository {
     return rows.length > 0;
   }
 
+  async getTenantCredential(tenantId: string, kind: CredentialKind): Promise<TenantCredential | null> {
+    const rows = await this.q<TenantCredential>(tenantId,
+      `select tenant_id as "tenantId", kind, secret_enc as "secretEnc", meta, updated_by as "updatedBy", updated_at as "updatedAt"
+         from tenant_credentials where tenant_id = $1 and kind = $2`, [tenantId, kind]);
+    return rows[0] ?? null;
+  }
+
+  async saveTenantCredential(c: TenantCredential): Promise<void> {
+    await this.q(c.tenantId,
+      `insert into tenant_credentials (tenant_id, kind, secret_enc, meta, updated_by, updated_at)
+       values ($1,$2,$3,$4,$5,$6)
+       on conflict (tenant_id, kind) do update
+         set secret_enc = excluded.secret_enc, meta = excluded.meta, updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
+      [c.tenantId, c.kind, c.secretEnc, JSON.stringify(c.meta), c.updatedBy, c.updatedAt]);
+  }
+
+  async deleteTenantCredential(tenantId: string, kind: CredentialKind): Promise<boolean> {
+    const rows = await this.q<{ kind: string }>(tenantId,
+      `delete from tenant_credentials where tenant_id = $1 and kind = $2 returning kind`, [tenantId, kind]);
+    return rows.length > 0;
+  }
+
+  async getGoogleConnection(tenantId: string, userId: string): Promise<GoogleConnection | null> {
+    const rows = await this.q<GoogleConnection>(tenantId,
+      `select ${GOOGLE_CONNECTION_COLUMNS} from user_google_connections where tenant_id = $1 and user_id = $2`, [tenantId, userId]);
+    return rows[0] ?? null;
+  }
+
+  async listGoogleConnections(tenantId: string): Promise<GoogleConnection[]> {
+    return this.q<GoogleConnection>(tenantId,
+      `select ${GOOGLE_CONNECTION_COLUMNS} from user_google_connections where tenant_id = $1 order by connected_at`, [tenantId]);
+  }
+
+  async saveGoogleConnection(c: GoogleConnection): Promise<void> {
+    await this.q(c.tenantId,
+      `insert into user_google_connections (tenant_id, user_id, refresh_token_enc, google_email, scopes, connected_at, checked_at)
+       values ($1,$2,$3,$4,$5,$6,$7)
+       on conflict (tenant_id, user_id) do update
+         set refresh_token_enc = excluded.refresh_token_enc, google_email = excluded.google_email,
+             scopes = excluded.scopes, connected_at = excluded.connected_at, checked_at = excluded.checked_at`,
+      [c.tenantId, c.userId, c.refreshTokenEnc, c.googleEmail, c.scopes, c.connectedAt, c.checkedAt]);
+  }
+
+  async deleteGoogleConnection(tenantId: string, userId: string): Promise<boolean> {
+    const rows = await this.q<{ user_id: string }>(tenantId,
+      `delete from user_google_connections where tenant_id = $1 and user_id = $2 returning user_id`, [tenantId, userId]);
+    return rows.length > 0;
+  }
+
   async listCompartmentAssignments(tenantId: string): Promise<CompartmentAssignment[]> {
     const rows = await this.q<Omit<CompartmentAssignment, 'groups' | 'users'> & { groups: string[] | null; users: string[] | null }>(tenantId,
       `select c.id, c.name, c.description, c.enabled,
@@ -946,6 +995,9 @@ export class PostgresRepository implements Repository {
 function iso(v: string | null): string | null {
   return v ? new Date(v).toISOString() : null;
 }
+
+const GOOGLE_CONNECTION_COLUMNS = `tenant_id as "tenantId", user_id as "userId", refresh_token_enc as "refreshTokenEnc",
+  google_email as "googleEmail", scopes, connected_at as "connectedAt", checked_at as "checkedAt"`;
 
 const SCHEDULE_COLUMNS = `id, tenant_id as "tenantId", user_id as "userId", agent_id as "agentId",
   agent_version as "agentVersion", input, rule, timezone, enabled, next_run_at as "nextRunAt",

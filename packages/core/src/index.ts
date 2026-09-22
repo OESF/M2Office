@@ -19,6 +19,7 @@ export type { GeminiModelMap } from './llm/gemini.js';
 
 export type {
   Repository, KnowledgeHit, KnowledgeItem, RunStatRow, InstalledExtension, PrivateExtension, CompartmentAssignment,
+  CredentialKind, TenantCredential, GoogleConnection,
 } from './repository/types.js';
 export { PostgresRepository } from './repository/postgres.js';
 
@@ -33,6 +34,16 @@ export type {
 } from './connectors/types.js';
 
 export * from './files/index.js';
+export { SecretBox, secretBoxFromEnv } from './secrets/box.js';
+export {
+  TenantAiResolver, type GeminiModels, type GeminiSettingsMeta, type ResolvedGemini, type TenantAiResolverDeps,
+} from './secrets/tenant-ai.js';
+export { checkGeminiText, checkGeminiLive, type CheckResult } from './secrets/gemini-check.js';
+export {
+  GOOGLE_OAUTH_ENDPOINTS, GOOGLE_LOGIN_SCOPES, googleScopeUrl, googleScopeLabel, createPkce, buildGoogleAuthUrl,
+  exchangeGoogleCode, refreshGoogleAccessToken, googleGrantedScopes, googleUserEmail, revokeGoogleToken, GoogleOAuthError,
+  type GoogleOAuthEndpoints,
+} from './google/oauth.js';
 export {
   GeminiResearchProvider, MockResearchProvider, type ResearchProvider, type ResearchResult,
 } from './research/provider.js';

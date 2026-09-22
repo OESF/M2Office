@@ -36,6 +36,8 @@ export interface SecretaryDeps {
   help?: HelpCatalog;
   /** その会社で使える業務エージェント（公式と導入した拡張機能）。省略時は `agents`。 */
   agentsFor?(tenantId: string, userId?: string): Promise<AgentDefinition[]>;
+  /** 会社ごとの推論（会社が自社の鍵を登録していればその鍵。仕様書 第14.3.3節）。省略時は `llm`。 */
+  llmFor?(tenantId: string): Promise<LlmProvider>;
 }
 
 /**
@@ -80,7 +82,8 @@ export class Secretary {
     // 本人の利用範囲（第16.7節）の外の業務には取り次がない
     const available = this.deps.agentsFor ? await this.deps.agentsFor(tenantId, userId) : this.deps.agents;
     const enabled = available.filter((a) => !agents.disabled.includes(a.id));
-    const routed = await this.route(message, enabled);
+    const llm = this.deps.llmFor ? await this.deps.llmFor(tenantId) : this.deps.llm;
+    const routed = await this.route(message, enabled, llm);
     if (routed.agent) {
       await this.audit(tenantId, userId, 'secretary.route', routed.agent.id);
       return {
@@ -103,7 +106,7 @@ export class Secretary {
       `相手を「${s.callMe || `${user?.displayName ?? ''}さん`}」と呼びます。`,
       s.style === 'concise' ? '要点だけを短く答えます。' : '丁寧な日本語で、要点を先に答えます。',
     ].join('');
-    const res = await this.deps.llm.complete({
+    const res = await llm.complete({
       tier: 'standard',
       messages: [
         { role: 'system', content: persona },
@@ -179,6 +182,7 @@ export class Secretary {
   private async route(
     message: string,
     candidates: AgentDefinition[],
+    llm: LlmProvider = this.deps.llm,
   ): Promise<{ agent?: AgentDefinition; reason: string; tokensUsed: number }> {
     const byKeyword = candidates.find(
       (a) =>
@@ -193,7 +197,7 @@ export class Secretary {
 
     if (candidates.length === 0) return { reason: '使える業務がありません', tokensUsed: 0 };
     const list = candidates.map((a) => `${a.id}: ${a.name} — ${a.description}`).join('\n');
-    const res = await this.deps.llm.complete({
+    const res = await llm.complete({
       tier: 'fast',
       maxOutputTokens: 50,
       messages: [

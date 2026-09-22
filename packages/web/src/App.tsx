@@ -16,6 +16,25 @@ import { AgentForm, ApprovalTray, Evidence, RunView, statusLabel } from './compo
 import { Settings, orderAgents } from './Settings.js';
 import { NavHeading, NavItem, NavUserCard, SideNavLayout, ThemeToggle, agentIcon } from './nav.js';
 
+/**
+ * Google との接続から戻ってきたときの結果（`?google=connected` など。仕様書 第14.3.3節）。
+ * 一度だけ読み、アドレスから取り除く（再読み込みで同じ知らせを出さないため）。
+ */
+const googleReturn: string | null = (() => {
+  const q = new URLSearchParams(location.search);
+  const v = q.get('google');
+  if (!v) return null;
+  q.delete('google');
+  history.replaceState(null, '', `${location.pathname}${q.toString() ? `?${q}` : ''}`);
+  return v;
+})();
+
+const GOOGLE_RETURN_TEXT: Record<string, { ok: boolean; text: string }> = {
+  connected: { ok: true, text: 'Google と接続しました。下の「Google 連携」で許可の状況を確かめられます。' },
+  cancelled: { ok: false, text: 'Google との接続を取りやめました。' },
+  failed: { ok: false, text: 'Google と接続できませんでした。もう一度試すか、管理者に設定を確かめてもらってください。' },
+};
+
 /** 中央キャンバスに何を表示しているか。 */
 type View =
   | { kind: 'home' }
@@ -38,7 +57,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [history, setHistory] = useState<{ run: { id: string; status: string }; job: { agentId: string } | null }[]>([]);
-  const [view, setView] = useState<View>({ kind: 'home' });
+  const [view, setView] = useState<View>(() => (googleReturn ? { kind: 'settings' } : { kind: 'home' }));
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [reply, setReply] = useState<SecretaryReply | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -184,6 +203,9 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
             <>
               <h1>個人設定 <HelpTip article="start-settings">ここでの設定は、あなたにだけ効きます。管理者も変更できません。</HelpTip></h1>
               <p className="lead">あなただけに関わる設定です。管理者も変更できません。</p>
+              {googleReturn && GOOGLE_RETURN_TEXT[googleReturn] && (
+                <p className={GOOGLE_RETURN_TEXT[googleReturn]!.ok ? 'ok-msg' : 'error'}>{GOOGLE_RETURN_TEXT[googleReturn]!.text}</p>
+              )}
               <Settings me={me} agents={agents} onChanged={loadMenu} />
             </>
           )}

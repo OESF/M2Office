@@ -13,6 +13,7 @@ import {
 } from './AdminSettings.js';
 import { Dashboard } from './Dashboard.js';
 import { ExtensionSettings } from './Extensions.js';
+import { Connections } from './Connections.js';
 import { HelpCenter, useOpenHelp } from './help.js';
 import { NavHeading, NavItem, SideNavLayout, ThemeToggle, type IconName } from './nav.js';
 
@@ -85,7 +86,7 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
             {tab === 'users' && <UserSettings meId={me.user.id} />}
             {tab === 'knowledge' && <KnowledgeSettings />}
             {tab === 'audit' && <Audit />}
-            {tab === 'connectors' && <Connectors />}
+            {tab === 'connectors' && <><Connections /><Connectors /></>}
           </main>
         </SideNavLayout>
       )}
@@ -198,14 +199,13 @@ function Connectors() {
   const perms = useLoad(api.admin.googlePermissions);
   return (
     <>
-      <h1>接続</h1>
-      <p className="lead">業務システムと LLM への接続の状態です。</p>
       {error && <p className="error">{error}</p>}
       {data && (
         <div className="card">
+          <h3>接続の状態</h3>
           <dl className="kv">
             <dt>Google Workspace</dt><dd>{data.workspace.label}</dd>
-            <dt>LLM</dt><dd>{data.llm.provider === 'stub' ? 'スタブ（推論を行わない開発用）' : data.llm.provider}</dd>
+            <dt>LLM（既定）</dt><dd>{data.llm.provider === 'stub' ? 'スタブ（推論を行わない開発用）' : data.llm.provider}</dd>
           </dl>
         </div>
       )}
