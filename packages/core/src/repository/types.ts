@@ -115,6 +115,12 @@ export interface Repository {
   /** 本人が所属する権限区画の名前。 */
   listUserCompartments(tenantId: string, userId: string): Promise<string[]>;
 
+  /** 会社が導入した拡張機能（仕様書 第12.9.3節）。 */
+  listInstalledExtensions(tenantId: string): Promise<InstalledExtension[]>;
+  installExtension(record: InstalledExtension): Promise<void>;
+  /** 導入をやめる。導入していなければ `false`。 */
+  uninstallExtension(tenantId: string, extensionId: string): Promise<boolean>;
+
   createFile(file: StoredFile): Promise<void>;
   getFile(tenantId: string, id: string): Promise<StoredFile | null>;
 
@@ -188,4 +194,14 @@ export interface RunStatRow {
   savedMinutes: number;
   /** 終了した実行の所要時間の合計（秒）。 */
   durationSec: number;
+}
+
+/** 会社が導入した拡張機能の記録。同意した権限を残す（不変則 I-8）。 */
+export interface InstalledExtension {
+  tenantId: string;
+  extensionId: string;
+  version: string;
+  consentedPermissions: { tools: string[]; max_risk_level: string };
+  installedBy: string;
+  installedAt: string;
 }

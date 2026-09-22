@@ -27,6 +27,7 @@ import { filesRoute } from './routes/files.js';
 import { dashboardRoute } from './routes/dashboard.js';
 import { helpRoute } from './routes/help.js';
 import { onboardingRoute } from './routes/onboarding.js';
+import { extensionsRoute } from './routes/extensions.js';
 
 /**
  * API サーバー。
@@ -85,6 +86,7 @@ app.route('/v1/secretary', secretaryRoute(deps));
 app.route('/v1/notifications', notificationsRoute(deps));
 app.route('/v1/schedules', schedulesRoute(deps));
 app.route('/v1/admin/dashboard', dashboardRoute(deps));
+app.route('/v1/admin/extensions', extensionsRoute(deps));
 app.route('/v1/admin', adminRoute(deps));
 app.route('/v1/files', filesRoute(deps));
 app.route('/v1/help', helpRoute(deps));

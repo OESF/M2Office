@@ -17,7 +17,9 @@ export { StubLlmProvider } from './llm/stub.js';
 export { OpenAiCompatibleProvider, LlmRequestError } from './llm/gemini.js';
 export type { GeminiModelMap } from './llm/gemini.js';
 
-export type { Repository, KnowledgeHit, KnowledgeItem, RunStatRow } from './repository/types.js';
+export type {
+  Repository, KnowledgeHit, KnowledgeItem, RunStatRow, InstalledExtension,
+} from './repository/types.js';
 export { PostgresRepository } from './repository/postgres.js';
 
 export { buildConnector, MockWorkspaceConnector } from './connectors/index.js';
@@ -28,6 +30,8 @@ export type {
 
 export * from './files/index.js';
 export * from './help/index.js';
+export * from './extensions/index.js';
+export { AgentCatalog } from './agents/catalog.js';
 
 export { ToolRegistry } from './tools/registry.js';
 export type { Tool, ToolContext } from './tools/registry.js';

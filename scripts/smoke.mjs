@@ -73,8 +73,10 @@ console.log('\n■ 1. 疎通と一覧');
   health.ok ? ok('API が応答する') : ng('API が応答しない');
 
   const { body } = await call('a', '/v1/agents');
-  body.agents?.length === 5
-    ? ok(`エージェントが 5 件（${body.agents.map((a) => a.name).join(' / ')}）`)
+  // 拡張機能を導入している場合はその分が増えるため、公式の業務エージェントだけを数える
+  const official = (body.agents ?? []).filter((a) => !a.extension);
+  official.length === 5
+    ? ok(`公式の業務エージェントが 5 件（${official.map((a) => a.name).join(' / ')}）`)
     : ng('エージェントの一覧が取得できない', JSON.stringify(body));
 }
 
@@ -633,6 +635,46 @@ console.log('\n■ 19. ヘルプと案内');
   const badBody = await bad.json();
   badBody.requestId && bad.headers.get('x-request-id') === badBody.requestId
     ? ok('エラーの応答に問い合わせ番号（要求 ID）を添える') : ng('要求 ID が無い');
+}
+
+console.log('\n■ 20. 拡張機能（サンプル「あいさつ」）');
+{
+  const EXT = 'jp.m2office.samples.hello-world';
+  const AG = `${EXT}:hello`;
+  await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
+
+  const { body: list } = await call('a', '/v1/admin/extensions');
+  list.items?.some((x) => x.id === EXT) ? ok('サンプルの拡張機能が読み込まれている') : ng('拡張機能が読み込まれていない（API を再起動したか）');
+
+  const before = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: AG, input: { message: 'こんにちは' } }) }, 'member');
+  before.status === 404 ? ok('導入していない会社では実行できない（404）') : ng(`実行できてしまう（${before.status}）`);
+
+  const noConsent = await call('a', `/v1/admin/extensions/${EXT}/install`, { method: 'POST', body: JSON.stringify({}) });
+  noConsent.status === 400 ? ok('同意なしでは導入できない（400）') : ng(`同意なしで導入できる（${noConsent.status}）`);
+  const member = await call('a', `/v1/admin/extensions/${EXT}/install`, { method: 'POST', body: JSON.stringify({ consent: true }) }, 'member');
+  member.status === 403 ? ok('一般の利用者は導入できない（403）') : ng(`導入できてしまう（${member.status}）`);
+
+  await call('a', `/v1/admin/extensions/${EXT}/install`, { method: 'POST', body: JSON.stringify({ consent: true }) });
+  const { body: menu } = await call('a', '/v1/agents', {}, 'member');
+  menu.agents.some((x) => x.id === AG && x.extension?.id === EXT) ? ok('導入すると、その会社のメニューに現れる') : ng('メニューに現れない');
+
+  const { body: job } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: AG, input: { message: 'こんにちは' } }) }, 'member');
+  const done = await waitFor('a', job.runId, ['completed', 'failed'], 20000, 'member');
+  done.artifacts?.[0]?.body === 'Hello World'
+    ? ok('「こんにちは」に「Hello World」と返す（見本の応答を再生）') : ng('返事が違う', JSON.stringify(done.artifacts));
+
+  const { body: bMenu } = await call('b', '/v1/agents');
+  const bRun = await call('b', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: AG, input: { message: 'こんにちは' } }) });
+  !bMenu.agents.some((x) => x.id === AG) && bRun.status === 404
+    ? ok('他の会社には現れず、実行もできない') : ng('他の会社から使えてしまう');
+
+  const { body: helpText } = await call('a', `/v1/help/agents/${encodeURIComponent(AG)}`, {}, 'member');
+  helpText.safeguards?.some((x) => x.includes('送ることはありません'))
+    ? ok('拡張機能の業務にも、説明が定義から自動で付く') : ng('説明が付かない');
+
+  await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
+  const after = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: AG, input: { message: 'こんにちは' } }) }, 'member');
+  after.status === 404 ? ok('削除すると使えなくなる') : ng(`削除後も使える（${after.status}）`);
 }
 
 console.log('');

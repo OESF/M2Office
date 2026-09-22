@@ -1,0 +1,25 @@
+{
+  "agent": "hello",
+  "cases": [
+    {
+      "name": "こんにちは",
+      "input": { "message": "こんにちは" },
+      "expect": "本文が「Hello World」の返事を保存する",
+      "stub": {
+        "reply": [
+          { "name": "document.create", "args": { "kind": "reply", "title": "返事", "body": "Hello World" } }
+        ]
+      }
+    },
+    {
+      "name": "おはようございます",
+      "input": { "message": "おはようございます" },
+      "expect": "「Good morning」のような短い英語の返事を保存する",
+      "stub": {
+        "reply": [
+          { "name": "document.create", "args": { "kind": "reply", "title": "返事", "body": "Good morning" } }
+        ]
+      }
+    }
+  ]
+}

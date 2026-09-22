@@ -45,6 +45,11 @@ export interface RunEngineDeps {
   logger?: Logger;
   /** エージェント定義を解決する。 */
   resolveDefinition(agentId: string, version: number): AgentDefinition | undefined;
+  /**
+   * その会社で業務エージェントを使えるか（拡張機能を導入しているか。仕様書 第12.9.3節）。
+   * 省略時は、解決できる定義はすべて使えるものとする。
+   */
+  isAvailable?(tenantId: string, agentId: string): Promise<boolean>;
 }
 
 /**
@@ -85,6 +90,10 @@ export class RunEngine {
       validateDefinition(def, this.deps.registry);
     } catch (err) {
       return this.fail(run, err instanceof Error ? err.message : String(err));
+    }
+
+    if (this.deps.isAvailable && !(await this.deps.isAvailable(run.tenantId, def.id))) {
+      return this.fail(run, 'この業務は、この会社に導入されていません');
     }
 
     const settings = await repo.getTenantSettings(run.tenantId);
@@ -281,6 +290,7 @@ export class RunEngine {
       const res = await llm.complete({
         tier: 'standard',
         maxOutputTokens: 2000,
+        context: { agentId: def.id, stepId: step.id, input },
         messages: [
           {
             role: 'system',

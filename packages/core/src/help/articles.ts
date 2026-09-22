@@ -94,7 +94,7 @@ export class HelpCatalog {
   /** 見られる記事の一覧。 */
   list(ctx: HelpContext): HelpArticle[] {
     const allowed = new Set(audiencesFor(ctx.roles));
-    const agentArticles = this.agents
+    const agentArticles = (ctx.agents ?? this.agents)
       .filter((a) => !ctx.disabledAgents.includes(a.id))
       .map((a): HelpArticle => ({
         id: `agent-${a.id}`, title: a.name, audience: 'all', category: 'agents', related: ['start-agents'],
@@ -150,6 +150,8 @@ export interface HelpContext {
   disabledAgents: string[];
   /** その会社の自動化ポリシー。業務の説明の「確認を求めるか」に効く。 */
   automation: AutomationPolicy;
+  /** その会社で使える業務エージェント（公式と導入した拡張機能）。省略時は目録の既定。 */
+  agents?: AgentDefinition[];
 }
 
 /** 使い方の質問に多く、検索の手がかりにならない語。 */

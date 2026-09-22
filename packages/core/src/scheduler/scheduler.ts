@@ -18,6 +18,8 @@ export interface SchedulerDeps {
   resolveDefinition(agentId: string, version: number): AgentDefinition | undefined;
   /** アプリログ。省略時は何も書かない。 */
   logger?: Logger;
+  /** その会社で業務エージェントを使えるか（拡張機能を導入しているか）。 */
+  isAvailable?(tenantId: string, agentId: string): Promise<boolean>;
 }
 
 /**
@@ -56,6 +58,7 @@ export class Scheduler {
       const reason = !def ? '定義が見つかりません'
         : !user || user.status !== 'active' ? '対象者が利用できません'
         : settings.agents.disabled.includes(def.id) ? '管理者がこの業務を無効にしています'
+        : this.deps.isAvailable && !(await this.deps.isAvailable(due.tenantId, def.id)) ? 'この業務の拡張機能が導入されていません'
         : null;
       if (!def || reason) {
         (this.deps.logger ?? silentLogger).warn('定時実行を見送りました', {

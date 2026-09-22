@@ -1,0 +1,12 @@
+{
+  "id": "jp.m2office.samples.hello-world",
+  "name": "あいさつ（サンプル）",
+  "version": "1.0.0",
+  "description": "「こんにちは」と入力すると「Hello World」と返す、拡張機能の作り方を確かめるためのサンプルです。",
+  "publisher": { "name": "株式会社M2ホールディングス", "verified": true },
+  "platform_schema": ">=1 <2",
+  "permissions": {
+    "tools": ["document.create"],
+    "max_risk_level": "draft"
+  }
+}

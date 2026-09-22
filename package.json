@@ -24,7 +24,8 @@
     "test": "node scripts/check-headers.mjs && node scripts/check-help.mjs && node --import tsx --test packages/*/test/*.test.ts",
     "smoke": "node --env-file-if-exists=.env scripts/smoke.mjs",
     "lint:headers": "node scripts/check-headers.mjs",
-    "lint:help": "node scripts/check-help.mjs"
+    "lint:help": "node scripts/check-help.mjs",
+    "ext:validate": "node --import tsx scripts/validate-extension.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

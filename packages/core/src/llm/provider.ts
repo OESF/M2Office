@@ -21,6 +21,11 @@ export interface LlmRequest {
   messages: LlmMessage[];
   /** 生成の上限。実行の上限管理に使う（仕様書 第9.2節 limits）。 */
   maxOutputTokens?: number;
+  /**
+   * どの業務エージェントのどのステップか。**提供者へは送らない。**
+   * 開発用のスタブが見本の応答を探すために使う（仕様書 第12.9.4節）。
+   */
+  context?: { agentId: string; stepId: string; input: Record<string, unknown> };
 }
 
 export interface LlmResponse {

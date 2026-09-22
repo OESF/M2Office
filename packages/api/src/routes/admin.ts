@@ -12,7 +12,7 @@ import {
   isValidInvoiceNumber, type AutomationPolicy, type CompanyInfo, type Role, type TenantSettings,
   type User, type WritingStyle,
 } from '@m2office/shared';
-import { DEFAULT_STANDARD_MINUTES, OFFICIAL_AGENTS } from '@m2office/core';
+import { DEFAULT_STANDARD_MINUTES } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { requireRole, type AppEnv } from '../middleware/tenant.js';
 
@@ -45,7 +45,7 @@ export function adminRoute(deps: AppDeps) {
     const items = rows.map(({ run: r, job }) => ({
       id: r.id, status: r.status, startedAt: r.startedAt, endedAt: r.endedAt,
       tokensUsed: r.tokensUsed, costJpy: r.costJpy,
-      agentId: job.agentId, agentName: OFFICIAL_AGENTS.find((a) => a.id === job.agentId)?.name ?? job.agentId,
+      agentId: job.agentId, agentName: deps.catalog.all().find((a) => a.id === job.agentId)?.name ?? job.agentId,
       origin: job.origin, requestedBy: job.requestedBy,
     }));
     return c.json({ items });
@@ -57,7 +57,7 @@ export function adminRoute(deps: AppDeps) {
     const rows = await deps.repo.usageByAgent(tenant.id);
     const items = rows.map((r) => ({
       ...r,
-      name: OFFICIAL_AGENTS.find((a) => a.id === r.agentId)?.name ?? r.agentId,
+      name: deps.catalog.all().find((a) => a.id === r.agentId)?.name ?? r.agentId,
       costJpy: Math.round(r.costJpy * 100) / 100,
     }));
     return c.json({
@@ -83,7 +83,7 @@ export function adminRoute(deps: AppDeps) {
     const settings = await deps.repo.getTenantSettings(tenant.id);
     return c.json({
       ...settings,
-      catalog: OFFICIAL_AGENTS.map((a) => ({
+      catalog: (await deps.agentsFor(tenant.id)).map((a) => ({
         id: a.id, name: a.name, description: a.description,
         usesWriteInternal: a.tools.some((t) => deps.registry.get(t)?.risk === 'write-internal'),
         defaultMinutes: DEFAULT_STANDARD_MINUTES[a.id] ?? 0,
@@ -102,7 +102,7 @@ export function adminRoute(deps: AppDeps) {
     const { tenant, user } = c.get('ctx');
     const section = c.req.param('section');
     const body = await c.req.json<unknown>();
-    const checked = validateSection(section, body);
+    const checked = validateSection(section, body, deps.catalog.all().map((a) => a.id));
     if ('error' in checked) return c.json({ error: checked.error }, 400);
 
     await deps.repo.saveTenantSettings(tenant.id, checked.section, checked.value as never, user.id);
@@ -271,6 +271,7 @@ type Section = keyof TenantSettings;
 function validateSection(
   section: string,
   body: unknown,
+  agentIds: string[],
 ): { section: Section; value: TenantSettings[Section] } | { error: string } {
   const o = (body ?? {}) as Record<string, unknown>;
   const str = (k: string, max = 2000) => String(o[k] ?? '').slice(0, max);
@@ -312,7 +313,7 @@ function validateSection(
       if (!ok(o['writeInternal'])) return { error: 'writeInternal は require か allow です' };
       const perAgent: Record<string, 'require' | 'allow'> = {};
       for (const [k, v] of Object.entries((o['perAgent'] ?? {}) as Record<string, unknown>)) {
-        if (!OFFICIAL_AGENTS.some((a) => a.id === k)) return { error: `不明なエージェントです: ${k}` };
+        if (!agentIds.includes(k)) return { error: `不明なエージェントです: ${k}` };
         if (!ok(v)) return { error: `${k} の値は require か allow です` };
         perAgent[k] = v as 'require' | 'allow';
       }
@@ -321,7 +322,7 @@ function validateSection(
     }
     case 'agents': {
       const disabled = Array.isArray(o['disabled']) ? o['disabled'].map(String) : [];
-      const unknown = disabled.filter((id) => !OFFICIAL_AGENTS.some((a) => a.id === id));
+      const unknown = disabled.filter((id) => !agentIds.includes(id));
       if (unknown.length > 0) return { error: `不明なエージェントです: ${unknown.join(', ')}` };
       return { section: 'agents', value: { disabled: [...new Set(disabled)] } };
     }
@@ -330,7 +331,7 @@ function validateSection(
       const input = (o['minutesPerRun'] ?? {}) as Record<string, unknown>;
       const minutesPerRun: Record<string, number> = {};
       for (const [k, v] of Object.entries(input)) {
-        if (!OFFICIAL_AGENTS.some((a) => a.id === k)) return { error: `不明なエージェントです: ${k}` };
+        if (!agentIds.includes(k)) return { error: `不明なエージェントです: ${k}` };
         const n = Number(v);
         if (!Number.isFinite(n) || n < 0 || n > 600) return { error: '標準所要時間は 0〜600 分で入力してください' };
         minutesPerRun[k] = Math.round(n * 10) / 10;

@@ -101,6 +101,14 @@ export interface EvalCase {
   name: string;
   input: Record<string, unknown>;
   expect: string;
+  /**
+   * 見本の応答。ステップ ID ごとの、ツールの呼び出し（仕様書 第12.9.4節）。
+   *
+   * @remarks
+   * LLM の鍵が無い開発環境で、スタブが入力の一致したケースの見本を再生する。
+   * 本物の LLM は使わない。定義の一部ではなく、開発と試験のためのもの。
+   */
+  stub?: Record<string, { name: string; args: Record<string, unknown> }[]>;
 }
 
 /**

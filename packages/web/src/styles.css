@@ -298,3 +298,5 @@ tr.muted td { color: var(--muted); }
 .checklist .link-btn { display: inline; }
 .warn-text { color: var(--warn); }
 @media (max-width: 680px) { .agent-help-cols { grid-template-columns: 1fr; } }
+.consent { background: #fdf6ea; border: 1px solid #f0c78a; border-radius: 6px; padding: 10px 14px; margin-top: 8px; }
+.consent h4 { margin: 0 0 6px; font-size: 13px; }

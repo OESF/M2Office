@@ -187,6 +187,17 @@ export interface AgentSummary {
   inputs: { required?: string[]; properties?: Record<string, JsonSchemaField> };
   hasApproval: boolean;
   stepCount: number;
+  /** 拡張機能の業務エージェントなら、その拡張機能と提供者。公式なら `null`。 */
+  extension: { id: string; name: string; publisher: string } | null;
+}
+
+/** 導入できる拡張機能（仕様書 第12.9.3節）。 */
+export interface ExtensionView {
+  id: string; name: string; version: string; description: string;
+  publisher: { name: string; verified?: boolean };
+  agents: { id: string; name: string; summary: string }[];
+  permissions: { maxRisk: string; maxRiskText: string; tools: { name: string; does: string }[] };
+  installed: { version: string; installedAt: string } | null;
 }
 
 export interface JsonSchemaField {
@@ -316,6 +327,10 @@ export const api = {
     saveKnowledge: (id: string | 'new', item: Omit<KnowledgeItemView, 'id' | 'updatedAt'>) =>
       call<{ id: string }>(`/admin/knowledge/${id}`, { method: 'PUT', body: JSON.stringify(item) }),
     deleteKnowledge: (id: string) => call(`/admin/knowledge/${id}`, { method: 'DELETE' }),
+    extensions: () => call<{ items: ExtensionView[] }>('/admin/extensions'),
+    installExtension: (id: string) =>
+      call(`/admin/extensions/${encodeURIComponent(id)}/install`, { method: 'POST', body: JSON.stringify({ consent: true }) }),
+    uninstallExtension: (id: string) => call(`/admin/extensions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   },
   agents: () => call<{ agents: AgentSummary[] }>('/agents'),
   createJob: (agentId: string, input: Record<string, unknown>, origin = 'menu') =>

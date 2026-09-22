@@ -4,6 +4,7 @@
  * 指示文の語句からツール呼び出しを組み立てて返す。本番では使わない。
  */
 
+import type { EvalCase } from '@m2office/shared';
 import type { LlmProvider, LlmRequest, LlmResponse } from './provider.js';
 
 /**
@@ -19,7 +20,16 @@ import type { LlmProvider, LlmRequest, LlmResponse } from './provider.js';
 export class StubLlmProvider implements LlmProvider {
   readonly name = 'stub';
 
+  /**
+   * @param evalsFor 業務エージェントの評価のケース（見本の応答を含む）を引く。
+   *   拡張機能の業務エージェントを鍵なしで動かすために使う（仕様書 第12.9.4節）
+   */
+  constructor(private readonly evalsFor?: (agentId: string) => EvalCase[] | undefined) {}
+
   async complete(req: LlmRequest): Promise<LlmResponse> {
+    const replay = this.replay(req);
+    if (replay) return replay;
+
     const system = req.messages.find((m) => m.role === 'system')?.content ?? '';
     const user = req.messages.at(-1)?.content ?? '';
     const tools = extractToolNames(system);
@@ -31,6 +41,40 @@ export class StubLlmProvider implements LlmProvider {
     }
     return { text: lines.join('\n'), tokensUsed: Math.ceil(user.length / 4) + 64 };
   }
+
+  /**
+   * 見本の応答を再生する。見本を持たない業務エージェントなら `null`（従来の推測に任せる）。
+   *
+   * @remarks
+   * 見本を持つ業務エージェントでは、入力が一致しないときも推測でツールを呼ばない。
+   * 拡張機能の業務の中身をスタブは知らないため、それらしい誤った成果物を作らないようにする。
+   */
+  private replay(req: LlmRequest): LlmResponse | null {
+    const ctx = req.context;
+    const cases = ctx ? (this.evalsFor?.(ctx.agentId) ?? []).filter((c) => c.stub) : [];
+    if (!ctx || cases.length === 0) return null;
+    const hit = cases.find((c) => stableJson(c.input) === stableJson(ctx.input));
+    const tokensUsed = Math.ceil(JSON.stringify(ctx.input).length / 4) + 32;
+    if (!hit) {
+      return {
+        text: `［スタブ応答］この入力に対する見本の応答がありません（評価のケース: ${cases.map((c) => c.name).join('、')}）。`,
+        tokensUsed,
+      };
+    }
+    const calls = hit.stub?.[ctx.stepId] ?? [];
+    const lines = [`［スタブ応答］見本の応答を再生しています（評価のケース「${hit.name}」）。`];
+    for (const call of calls) lines.push('', '```tool', JSON.stringify(call), '```');
+    return { text: lines.join('\n'), tokensUsed };
+  }
+}
+
+/** キーの順序によらず同じ文字列になる JSON。入力の一致を比べるために使う。 */
+function stableJson(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(stableJson).join(',')}]`;
+  if (v && typeof v === 'object') {
+    return `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${stableJson((v as Record<string, unknown>)[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(v);
 }
 
 /** システムプロンプトの「使えるツール:」行からツール名を取り出す。 */

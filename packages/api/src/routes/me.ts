@@ -7,7 +7,6 @@
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import type { UserSettings } from '@m2office/shared';
-import { OFFICIAL_AGENTS } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 
@@ -28,7 +27,7 @@ export function meRoute(deps: AppDeps) {
 
   app.put('/settings/:section', async (c) => {
     const { tenant, user } = c.get('ctx');
-    const checked = validate(c.req.param('section'), await c.req.json<unknown>());
+    const checked = validate(c.req.param('section'), await c.req.json<unknown>(), deps.catalog.all().map((a) => a.id));
     if ('error' in checked) return c.json({ error: checked.error }, 400);
     await deps.repo.saveUserSettings(tenant.id, user.id, checked.section, checked.value as never);
     await audit(deps, tenant.id, user.id, 'me.settings.update', checked.section);
@@ -76,15 +75,16 @@ export function meRoute(deps: AppDeps) {
       new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo' }).format(new Date()).slice(0, 8) +
         '01T00:00:00+09:00',
     ).toISOString();
-    const [usage, settings, compartments] = await Promise.all([
+    const [usage, settings, compartments, agents] = await Promise.all([
       deps.repo.usageForUser(tenant.id, user.id, monthStart),
       deps.repo.getTenantSettings(tenant.id),
       deps.repo.listUserCompartments(tenant.id, user.id),
+      deps.agentsFor(tenant.id),
     ]);
     return c.json({
       seat: user.roles.includes('admin') ? '管理者' : user.roles.includes('external') ? '外部協力者' : '一般',
       thisMonth: { runs: usage.runs, costJpy: Math.round(usage.costJpy * 100) / 100 },
-      availableAgents: OFFICIAL_AGENTS.filter((a) => !settings.agents.disabled.includes(a.id)).length,
+      availableAgents: agents.filter((a) => !settings.agents.disabled.includes(a.id)).length,
       compartments,
       // プランと標準利用量は課金の実装とあわせて出す（第21章）
       plan: null,
@@ -96,7 +96,9 @@ export function meRoute(deps: AppDeps) {
 
 type Section = keyof UserSettings;
 
-function validate(section: string, body: unknown): { section: Section; value: unknown } | { error: string } {
+function validate(
+  section: string, body: unknown, agentIds: string[],
+): { section: Section; value: unknown } | { error: string } {
   const o = (body ?? {}) as Record<string, unknown>;
   const str = (v: unknown, max: number) => String(v ?? '').trim().slice(0, max);
   switch (section) {
@@ -129,7 +131,7 @@ function validate(section: string, body: unknown): { section: Section; value: un
       return { section, value: { kinds, quietHours: q ? { from: q.from, to: q.to } : null } };
     }
     case 'menu': {
-      const ids = OFFICIAL_AGENTS.map((a) => a.id);
+      const ids = agentIds;
       const list = (v: unknown) => (Array.isArray(v) ? v.map(String).filter((x) => ids.includes(x)) : []);
       return { section, value: { hidden: [...new Set(list(o['hidden']))], order: [...new Set(list(o['order']))] } };
     }

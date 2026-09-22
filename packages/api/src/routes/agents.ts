@@ -5,7 +5,6 @@
  */
 
 import { Hono } from 'hono';
-import { OFFICIAL_AGENTS } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 
@@ -23,7 +22,9 @@ export function agentsRoute(deps: AppDeps) {
   app.get('/', async (c) => {
     const { tenant } = c.get('ctx');
     const { agents: setting } = await deps.repo.getTenantSettings(tenant.id);
-    const agents = OFFICIAL_AGENTS.filter((a) => !setting.disabled.includes(a.id)).map((a) => ({
+    // 公式と、この会社が導入した拡張機能の業務エージェント（仕様書 第12.9.3節）
+    const available = await deps.agentsFor(tenant.id);
+    const agents = available.filter((a) => !setting.disabled.includes(a.id)).map((a) => ({
       id: a.id,
       version: a.version,
       name: a.name,
@@ -33,6 +34,11 @@ export function agentsRoute(deps: AppDeps) {
       /** 承認ゲートを持つかどうか。画面での説明に使う。 */
       hasApproval: a.steps.some((s) => s.type === 'approval'),
       stepCount: a.steps.length,
+      /** 拡張機能の業務エージェントなら、その提供者。公式なら `null`。 */
+      extension: (() => {
+        const ext = deps.catalog.extensionOf(a.id);
+        return ext ? { id: ext.manifest.id, name: ext.manifest.name, publisher: ext.manifest.publisher.name } : null;
+      })(),
     }));
     return c.json({ agents });
   });

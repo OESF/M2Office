@@ -13,7 +13,7 @@ import type {
   StoredFile, Tenant, TenantSettings, User, UserSettings,
 } from '@m2office/shared';
 import { DEFAULT_TENANT_SETTINGS, DEFAULT_USER_SETTINGS } from '@m2office/shared';
-import type { KnowledgeHit, KnowledgeItem, Repository, RunStatRow } from './types.js';
+import type { InstalledExtension, KnowledgeHit, KnowledgeItem, Repository, RunStatRow } from './types.js';
 
 /**
  * 問い合わせ文を検索語に分割する。
@@ -792,6 +792,32 @@ export class PostgresRepository implements Repository {
     const rows = await this.q<{ n: number }>(tenantId,
       `select count(*)::int as n from knowledge_items where tenant_id = $1`, [tenantId]);
     return rows[0]?.n ?? 0;
+  }
+
+  async listInstalledExtensions(tenantId: string): Promise<InstalledExtension[]> {
+    return this.q<InstalledExtension>(tenantId,
+      `select tenant_id as "tenantId", extension_id as "extensionId", version,
+              consented_permissions as "consentedPermissions", installed_by as "installedBy",
+              installed_at as "installedAt"
+         from tenant_extensions where tenant_id = $1 order by installed_at`,
+      [tenantId]);
+  }
+
+  async installExtension(r: InstalledExtension): Promise<void> {
+    await this.q(r.tenantId,
+      `insert into tenant_extensions (tenant_id, extension_id, version, consented_permissions, installed_by, installed_at)
+       values ($1,$2,$3,$4,$5,$6)
+       on conflict (tenant_id, extension_id) do update
+         set version = excluded.version, consented_permissions = excluded.consented_permissions,
+             installed_by = excluded.installed_by, installed_at = excluded.installed_at`,
+      [r.tenantId, r.extensionId, r.version, JSON.stringify(r.consentedPermissions), r.installedBy, r.installedAt]);
+  }
+
+  async uninstallExtension(tenantId: string, extensionId: string): Promise<boolean> {
+    const rows = await this.q<{ extension_id: string }>(tenantId,
+      `delete from tenant_extensions where tenant_id = $1 and extension_id = $2 returning extension_id`,
+      [tenantId, extensionId]);
+    return rows.length > 0;
   }
 }
 

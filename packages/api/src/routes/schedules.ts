@@ -7,7 +7,7 @@
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import type { Schedule, ScheduleRule } from '@m2office/shared';
-import { describeRule, nextRunAt, resolveOfficialAgent, validateRule } from '@m2office/core';
+import { describeRule, nextRunAt, validateRule } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 
@@ -35,8 +35,10 @@ export function schedulesRoute(deps: AppDeps) {
       agentId: string; agentVersion?: number; input?: Record<string, unknown>;
       rule: ScheduleRule; timezone?: string;
     }>();
-    const def = resolveOfficialAgent(body.agentId, body.agentVersion ?? 1);
-    if (!def) return c.json({ error: `エージェントが見つかりません: ${body.agentId}` }, 404);
+    const def = deps.catalog.resolve(body.agentId, body.agentVersion ?? 1);
+    if (!def || !(await deps.isAvailable(tenant.id, def.id))) {
+      return c.json({ error: `エージェントが見つかりません: ${body.agentId}` }, 404);
+    }
     try {
       validateRule(body.rule);
     } catch (err) {

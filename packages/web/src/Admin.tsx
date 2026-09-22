@@ -8,12 +8,15 @@ import { useCallback, useEffect, useState } from 'react';
 import type { AuditEvent } from '@m2office/shared';
 import { api, type AdminRun, type Me } from './api.js';
 import { statusLabel } from './components.js';
-import { AgentSettings, CompanySettings, KnowledgeSettings, UserSettings } from './AdminSettings.js';
+import {
+  AgentSettings, CompanySettings, ExtensionSettings, KnowledgeSettings, UserSettings,
+} from './AdminSettings.js';
 import { Dashboard } from './Dashboard.js';
 import { HelpCenter, useOpenHelp } from './help.js';
 
 type Tab =
-  | 'dashboard' | 'usage' | 'runs' | 'company' | 'agents' | 'users' | 'knowledge' | 'audit' | 'connectors' | 'help';
+  | 'dashboard' | 'usage' | 'runs' | 'company' | 'agents' | 'extensions' | 'users' | 'knowledge' | 'audit'
+  | 'connectors' | 'help';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'dashboard', label: 'ダッシュボード' },
@@ -21,6 +24,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'runs', label: '実行の一覧' },
   { id: 'company', label: '会社情報' },
   { id: 'agents', label: '業務と承認' },
+  { id: 'extensions', label: '拡張機能' },
   { id: 'users', label: 'ユーザーと権限' },
   { id: 'knowledge', label: '知識' },
   { id: 'audit', label: '監査ログ' },
@@ -73,6 +77,7 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
             {tab === 'runs' && <Runs />}
             {tab === 'company' && <CompanySettings />}
             {tab === 'agents' && <AgentSettings />}
+            {tab === 'extensions' && <ExtensionSettings />}
             {tab === 'users' && <UserSettings meId={me.user.id} />}
             {tab === 'knowledge' && <KnowledgeSettings />}
             {tab === 'audit' && <Audit />}

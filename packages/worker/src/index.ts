@@ -11,8 +11,8 @@
 
 import {
   PostgresRepository, StubLlmProvider, OpenAiCompatibleProvider, ToolRegistry, BUILTIN_TOOLS,
-  RunEngine, Scheduler, resolveOfficialAgent, buildConnector, LocalFileStore, createLoggerFromEnv,
-  type LlmProvider,
+  RunEngine, Scheduler, buildConnector, LocalFileStore, createLoggerFromEnv, AgentCatalog, loadExtensions,
+  OFFICIAL_AGENTS, type LlmProvider,
 } from '@m2office/core';
 import { fileURLToPath } from 'node:url';
 
@@ -29,10 +29,21 @@ const connector = buildConnector(process.env['CONNECTOR_MODE'] ?? 'mock');
 const files = new LocalFileStore(
   process.env['FILE_STORAGE_DIR'] ?? fileURLToPath(new URL('../../../.data/files', import.meta.url)),
 );
+// API と同じく拡張機能を読み込む（仕様書 第12.9.2節）。検証を通らないものは使わない
+const extensions = loadExtensions(
+  process.env['EXTENSIONS_DIR'] ?? fileURLToPath(new URL('../../../extensions', import.meta.url)),
+  registry, OFFICIAL_AGENTS.map((a) => a.id),
+);
+for (const e of extensions.errors) log.warn('拡張機能を読み込めませんでした', { dir: e.dir, problems: e.problems });
+const catalog = new AgentCatalog(OFFICIAL_AGENTS, extensions.packages);
+const resolveDefinition = (id: string, version: number) => catalog.resolve(id, version);
+const isAvailable = async (tenantId: string, agentId: string) =>
+  catalog.availableFor(agentId, (await repo.listInstalledExtensions(tenantId)).map((e) => e.extensionId));
+
 const engine = new RunEngine({
-  repo, llm: buildLlm(), registry, connector, files, resolveDefinition: resolveOfficialAgent, logger: log,
+  repo, llm: buildLlm(), registry, connector, files, resolveDefinition, isAvailable, logger: log,
 });
-const scheduler = new Scheduler({ repo, resolveDefinition: resolveOfficialAgent, logger: log });
+const scheduler = new Scheduler({ repo, resolveDefinition, isAvailable, logger: log });
 
 const POLL_INTERVAL_MS = 1000;
 /** 定時実行の見回り間隔。分単位の指定に対して十分に短くする。 */
@@ -112,5 +123,6 @@ function buildLlm(): LlmProvider {
         'https://generativelanguage.googleapis.com/v1beta/openai',
     );
   }
-  return new StubLlmProvider();
+  // 鍵が無い開発環境では、拡張機能の評価のケースにある見本の応答を再生する（仕様書 第12.9.4節）
+  return new StubLlmProvider((agentId) => catalog.all().find((a) => a.id === agentId)?.evals);
 }

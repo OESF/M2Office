@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "id": "hello",
+  "version": 1,
+  "name": "あいさつ（サンプル）",
+  "category": "sample",
+  "description": "あいさつに英語で返事をします。「こんにちは」には「Hello World」と返します",
+  "locale": "ja-JP",
+  "compartment": null,
+  "inputs": {
+    "type": "object",
+    "required": ["message"],
+    "properties": {
+      "message": { "type": "string", "title": "あいさつ" }
+    }
+  },
+  "tools": ["document.create"],
+  "steps": [
+    {
+      "id": "reply",
+      "type": "agent",
+      "label": "返事",
+      "instruction": "入力されたあいさつ（message）に、英語で短く返事をする。「こんにちは」には「Hello World」と返す。返事は document.create で、種類を reply、題名を「返事」、本文を返事の文として保存する。",
+      "onEmpty": "stop",
+      "onError": "stop"
+    }
+  ],
+  "constraints": [
+    "返事は 1 行の英語にする",
+    "あいさつ以外の依頼には応じない"
+  ],
+  "limits": { "maxSteps": 3, "maxTokens": 5000, "timeoutSec": 60 },
+  "help": {
+    "summary": "あいさつを入力すると、英語で返事をします。「こんにちは」には「Hello World」と返します。拡張機能の作り方を確かめるためのサンプルです。",
+    "examples": [
+      { "title": "「こんにちは」と言ってみる", "input": { "message": "こんにちは" } },
+      { "title": "「おはようございます」と言ってみる", "input": { "message": "おはようございます" } }
+    ],
+    "notes": [
+      "返事は成果物として保存され、実行の詳細で見られます",
+      "LLM の鍵が無い開発環境では、評価のケースにある入力だけに返事をします"
+    ]
+  }
+}

@@ -34,6 +34,8 @@ export interface SecretaryDeps {
   agents: AgentDefinition[];
   /** ヘルプの記事。あれば使い方の質問に答える（仕様書 第6.10.6節）。 */
   help?: HelpCatalog;
+  /** その会社で使える業務エージェント（公式と導入した拡張機能）。省略時は `agents`。 */
+  agentsFor?(tenantId: string): Promise<AgentDefinition[]>;
 }
 
 /**
@@ -75,7 +77,8 @@ export class Secretary {
 
     // 層 2: 高速モデルで業務エージェントへの取次を判定する。無効にされた業務には取り次がない
     const { agents } = await this.deps.repo.getTenantSettings(tenantId);
-    const enabled = this.deps.agents.filter((a) => !agents.disabled.includes(a.id));
+    const available = this.deps.agentsFor ? await this.deps.agentsFor(tenantId) : this.deps.agents;
+    const enabled = available.filter((a) => !agents.disabled.includes(a.id));
     const routed = await this.route(message, enabled);
     if (routed.agent) {
       await this.audit(tenantId, userId, 'secretary.route', routed.agent.id);
@@ -125,8 +128,9 @@ export class Secretary {
       this.deps.repo.findUserById(tenantId, userId),
       this.deps.repo.getTenantSettings(tenantId),
     ]);
+    const agents = this.deps.agentsFor ? await this.deps.agentsFor(tenantId) : this.deps.agents;
     const ctx = {
-      roles: user?.roles ?? [], disabledAgents: settings.agents.disabled, automation: settings.automation,
+      roles: user?.roles ?? [], disabledAgents: settings.agents.disabled, automation: settings.automation, agents,
     };
     const hits = help.search(message, ctx, 3);
     // 区画の外として検索する。区画内の文書を使い方の答えに混ぜない
@@ -143,7 +147,7 @@ export class Secretary {
     }
 
     const agentId = top?.article.id.startsWith('agent-') ? top.article.id.slice('agent-'.length) : null;
-    const agent = agentId ? this.deps.agents.find((a) => a.id === agentId) : undefined;
+    const agent = agentId ? agents.find((a) => a.id === agentId) : undefined;
     await this.audit(tenantId, userId, 'secretary.help', top?.article.id ?? 'none');
     return {
       layer: 'direct',

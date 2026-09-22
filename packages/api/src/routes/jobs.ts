@@ -8,7 +8,7 @@
 
 import { Hono } from 'hono';
 import type { Job } from '@m2office/shared';
-import { enqueueJob, resolveOfficialAgent } from '@m2office/core';
+import { enqueueJob } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 
@@ -35,8 +35,9 @@ export function jobsRoute(deps: AppDeps) {
       origin?: Job['origin'];
     }>();
 
-    const def = resolveOfficialAgent(body.agentId, body.agentVersion ?? 1);
-    if (!def) {
+    const def = deps.catalog.resolve(body.agentId, body.agentVersion ?? 1);
+    // 導入していない拡張機能の業務エージェントは、存在を示さない（仕様書 第12.9.3節）
+    if (!def || !(await deps.isAvailable(ctx.tenant.id, def.id))) {
       return c.json({ error: `エージェントが見つかりません: ${body.agentId}` }, 404);
     }
     const { agents } = await deps.repo.getTenantSettings(ctx.tenant.id);

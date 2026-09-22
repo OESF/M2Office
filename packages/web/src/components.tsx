@@ -46,6 +46,9 @@ export function AgentForm({
       setValues(Object.fromEntries(Object.entries(input).map(([k, v]) => [k, String(v ?? '')])))} />
     <div className="card">
       <h3>{agent.name}</h3>
+      {agent.extension && (
+        <p className="muted small">拡張機能「{agent.extension.name}」・提供: {agent.extension.publisher}</p>
+      )}
       <p>{agent.description}</p>
       {agent.hasApproval && (
         <p className="muted">この業務には承認の確認が入ります（全 {agent.stepCount} 段階）。</p>

@@ -7,7 +7,7 @@
  */
 
 import { Hono } from 'hono';
-import { resolveOfficialAgent, type HelpContext } from '@m2office/core';
+import type { HelpContext } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 
@@ -16,8 +16,8 @@ export function helpRoute(deps: AppDeps) {
 
   /** 要求ごとの出し分けの文脈（役割・無効にした業務・自動化ポリシー）。 */
   async function contextOf(tenantId: string, roles: readonly string[]): Promise<HelpContext> {
-    const settings = await deps.repo.getTenantSettings(tenantId);
-    return { roles, disabledAgents: settings.agents.disabled, automation: settings.automation };
+    const [settings, agents] = await Promise.all([deps.repo.getTenantSettings(tenantId), deps.agentsFor(tenantId)]);
+    return { roles, disabledAgents: settings.agents.disabled, automation: settings.automation, agents };
   }
 
   /** 記事の一覧。本文は含めない。 */
@@ -48,7 +48,7 @@ export function helpRoute(deps: AppDeps) {
   app.get('/agents/:agentId', async (c) => {
     const { tenant, user } = c.get('ctx');
     const ctx = await contextOf(tenant.id, user.roles);
-    const def = resolveOfficialAgent(c.req.param('agentId'), 1);
+    const def = ctx.agents?.find((a) => a.id === c.req.param('agentId'));
     if (!def || ctx.disabledAgents.includes(def.id)) return c.json({ error: '業務が見つかりません' }, 404);
     return c.json(deps.help.agentHelp(def, ctx));
   });
