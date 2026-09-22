@@ -65,12 +65,13 @@ body {
 .toc ul ul li { font-size: 8.5pt; color: #555; }
 .toc a { color: #1a1a1a; text-decoration: none; }
 /* 見出し */
-h1, h2, h3, h4 { font-weight: 600; line-height: 1.4; text-align: left; }
+h1, h2, h3, h4, h5 { font-weight: 600; line-height: 1.4; text-align: left; }
 h2 { font-size: 17pt; margin: 0 0 18px; padding: 0 0 8px; border-bottom: 2.5px solid #0f766e;
      page-break-before: always; page-break-after: avoid; }
 h3 { font-size: 12.5pt; margin: 22px 0 9px; padding-left: 9px; border-left: 4px solid #0f766e;
      page-break-after: avoid; }
 h4 { font-size: 10.5pt; margin: 16px 0 7px; color: #0f766e; page-break-after: avoid; }
+h5 { font-size: 10pt; margin: 14px 0 6px; color: #334155; page-break-after: avoid; }
 p { margin: 8px 0; orphans: 2; widows: 2; }
 strong { font-weight: 600; }
 /* 表 */
