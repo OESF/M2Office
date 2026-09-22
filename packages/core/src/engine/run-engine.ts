@@ -22,6 +22,7 @@ import type { ToolRegistry } from '../tools/registry.js';
 import type { WorkspaceConnector } from '../connectors/types.js';
 import type { FileStore } from '../files/store.js';
 import { ApprovalForbiddenError, RunNotResumableError } from './errors.js';
+import { standardMinutes } from '../agents/index.js';
 import { validateDefinition } from './validate.js';
 import { parseToolCalls } from './tool-protocol.js';
 
@@ -135,7 +136,8 @@ export class RunEngine {
       }
     }
 
-    return this.complete(current, null);
+    // 最後まで完了した実行だけ、削減時間の推計を記録する（仕様書 第6.7.12節）
+    return this.complete(current, null, standardMinutes(settings.effect.minutesPerRun, def.id));
   }
 
   /**
@@ -410,15 +412,20 @@ export class RunEngine {
     }
   }
 
-  private async complete(run: Run, note: string | null): Promise<AdvanceResult> {
+  /**
+   * 実行を完了にする。
+   *
+   * @param savedMinutes 削減時間の推計（分）。途中で終了した場合は 0 とする
+   */
+  private async complete(run: Run, note: string | null, savedMinutes = 0): Promise<AdvanceResult> {
     const now = new Date().toISOString();
     await this.deps.repo.updateRun({
-      ...run, status: 'completed', endedAt: now, failureReason: note,
+      ...run, status: 'completed', endedAt: now, failureReason: note, savedMinutes,
     });
     await this.deps.repo.appendAudit({
       id: randomUUID(), tenantId: run.tenantId, actorType: 'system', actorId: 'engine',
       action: 'run.complete', targetType: 'run', targetId: run.id,
-      detail: { tokensUsed: run.tokensUsed, costJpy: run.costJpy }, occurredAt: now,
+      detail: { tokensUsed: run.tokensUsed, costJpy: run.costJpy, savedMinutes }, occurredAt: now,
     });
     return { outcome: 'completed' };
   }

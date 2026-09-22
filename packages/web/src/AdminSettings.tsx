@@ -13,7 +13,9 @@ import type {
 } from '@m2office/shared';
 import { api, type KnowledgeItemView } from './api.js';
 
-type Catalog = { id: string; name: string; description: string; usesWriteInternal: boolean }[];
+type Catalog = {
+  id: string; name: string; description: string; usesWriteInternal: boolean; defaultMinutes: number;
+}[];
 type Loaded = TenantSettings & { catalog: Catalog };
 
 /** 設定を読み込み、保存後に読み直す。 */
@@ -154,8 +156,14 @@ export function CompanySettings() {
 export function AgentSettings() {
   const { data, error, reload } = useSettings();
   const [policy, setPolicy] = useState<AutomationPolicy | null>(null);
+  const [minutes, setMinutes] = useState<Record<string, string>>({});
   const saver = useSaver();
-  useEffect(() => { if (data) setPolicy(data.automation); }, [data]);
+  useEffect(() => {
+    if (!data) return;
+    setPolicy(data.automation);
+    setMinutes(Object.fromEntries(data.catalog.map((a) =>
+      [a.id, String(data.effect.minutesPerRun[a.id] ?? a.defaultMinutes)])));
+  }, [data]);
   if (error) return <p className="error">{error}</p>;
   if (!data || !policy) return <p className="muted">読み込み中…</p>;
   const disabled = new Set(data.agents.disabled);
@@ -228,6 +236,33 @@ export function AgentSettings() {
             ))}
           </tbody>
         </table>
+      </div>
+      <div className="card">
+        <h3>効果の推計（手作業での標準所要時間）</h3>
+        <p>
+          「手作業なら 1 件に何分かかるか」を業務ごとに決めます。ダッシュボードの推計の削減時間は、
+          完了した件数にこの値を掛けて求めます。実態に合わせて控えめに設定してください。
+        </p>
+        <table className="table">
+          <thead><tr><th>業務</th><th className="num">標準所要時間（分）</th><th className="num">公式の既定値</th></tr></thead>
+          <tbody>
+            {data.catalog.map((a) => (
+              <tr key={a.id}>
+                <td>{a.name}</td>
+                <td className="num">
+                  <input className="num-input" type="number" min={0} max={600} value={minutes[a.id] ?? ''}
+                    onChange={(e) => setMinutes({ ...minutes, [a.id]: e.target.value })} />
+                </td>
+                <td className="num muted">{a.defaultMinutes} 分</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="muted small">変更は、これから完了する実行から反映されます。過去の実行の推計は変わりません。</p>
+        <button className="btn" disabled={saver.busy}
+          onClick={() => void saver.run(() => api.admin.saveSettings('effect', {
+            minutesPerRun: Object.fromEntries(Object.entries(minutes).map(([k, v]) => [k, Number(v)])),
+          }))}>保存する</button>
       </div>
       {saver.view}
     </>

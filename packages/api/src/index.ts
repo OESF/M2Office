@@ -23,6 +23,7 @@ import { schedulesRoute } from './routes/schedules.js';
 import { adminRoute } from './routes/admin.js';
 import { meRoute } from './routes/me.js';
 import { filesRoute } from './routes/files.js';
+import { dashboardRoute } from './routes/dashboard.js';
 
 /**
  * API サーバー。
@@ -77,6 +78,7 @@ app.route('/v1/approvals', approvalsRoute(deps));
 app.route('/v1/secretary', secretaryRoute(deps));
 app.route('/v1/notifications', notificationsRoute(deps));
 app.route('/v1/schedules', schedulesRoute(deps));
+app.route('/v1/admin/dashboard', dashboardRoute(deps));
 app.route('/v1/admin', adminRoute(deps));
 app.route('/v1/files', filesRoute(deps));
 

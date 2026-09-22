@@ -68,6 +68,7 @@ src/main.tsx        入口。ログインの状態でワークスペース／管
 src/Login.tsx       ログイン画面
 src/App.tsx         ワークスペース（3 ペイン、秘書バー、お知らせ、定時実行）
 src/Admin.tsx       管理者ページ（参照の画面）
+src/Dashboard.tsx   ダッシュボード（いま・集計）
 src/AdminSettings.tsx  管理者ページ（会社情報・業務と承認・ユーザー・知識の編集）
 src/Settings.tsx    個人設定
 src/components.tsx  フォーム・実行詳細・承認トレイ

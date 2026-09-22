@@ -42,6 +42,11 @@ export interface Run {
   endedAt: string | null;
   tokensUsed: number;
   costJpy: number;
+  /**
+   * 削減時間の推計（分）。完了した時点の標準所要時間を記録する。
+   * 完了しなかった実行は 0（仕様書 第6.7.12節）。
+   */
+  savedMinutes: number;
   failureReason: string | null;
 }
 

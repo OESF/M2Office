@@ -53,6 +53,20 @@ async function waitFor(tenant, runId, statuses, timeoutMs = 20000, who = 'admin'
   }
 }
 
+/**
+ * その実行が止まっている承認を探す。
+ *
+ * 承認トレイには他の実行の承認も並ぶため、「先頭の承認」を選ぶと別の実行を承認してしまう。
+ * 実行の詳細で承認待ちのステップを見つけ、それに対応する承認を返す。
+ */
+async function approvalFor(tenant, runId, who = 'admin') {
+  const { body: run } = await call(tenant, `/v1/runs/${runId}`, {}, who);
+  const waiting = run.steps?.find((s) => s.status === 'awaiting');
+  if (!waiting) return null;
+  const { body: tray } = await call(tenant, '/v1/approvals', {}, who);
+  return tray.items?.find((a) => a.runStepId === waiting.id) ?? null;
+}
+
 console.log('\n■ 1. 疎通と一覧');
 {
   const health = await fetch(`${API}/health`).then((r) => r.json());
@@ -113,9 +127,8 @@ let runId;
 
 console.log('\n■ 4. 承認による再開（最重要）');
 {
-  const { body: pending } = await call('a', '/v1/approvals');
-  const first = pending.items?.[0];
-  first ? ok(`承認待ちが ${pending.items.length} 件（${first.present}）`) : ng('承認待ちが無い');
+  const first = await approvalFor('a', runId);
+  first ? ok(`この実行の承認待ちを見つけた（${first.present}）`) : ng('承認待ちが無い');
 
   const before = await call('a', `/v1/runs/${runId}`);
   const cursorBefore = before.body.run.cursor;
@@ -132,9 +145,9 @@ console.log('\n■ 4. 承認による再開（最重要）');
     : ng('再開していない');
 
   // 2 つ目の承認ゲート（共有範囲の確認）
-  const { body: pending2 } = await call('a', '/v1/approvals');
-  if (pending2.items?.length) {
-    await call('a', `/v1/approvals/${pending2.items[0].id}`, {
+  const second = await approvalFor('a', runId);
+  if (second) {
+    await call('a', `/v1/approvals/${second.id}`, {
       method: 'POST',
       body: JSON.stringify({ decision: 'approved', comment: null }),
     });
@@ -255,8 +268,7 @@ console.log('\n■ 10. AG-03 日程調整（招待の前に本人が承認）');
     ? ok('空きを取得し、招待の前で止まった')
     : ng(`承認待ちにならない（${run.run.status}）`);
 
-  const { body: mine } = await call('a', '/v1/approvals', {}, 'member');
-  const approval = mine.items.find((a) => a.present.includes('招待'));
+  const approval = await approvalFor('a', body.runId, 'member');
   approval?.approverUserId === 'u-a-member'
     ? ok('依頼した本人の承認トレイに出た') : ng('本人の承認トレイに出ない');
 
@@ -541,6 +553,37 @@ console.log('\n■ 17. ファイルの受け取りと取り出し');
 
   const b = await fetch(`${API}/v1/files/${up.body.id}`, { headers: { 'x-tenant': 'b', 'x-user': 'admin@beta.example.jp' } });
   b.status === 404 ? ok('他社からは見えない（404）') : ng(`他社から見えてしまう（${b.status}）`);
+}
+
+console.log('\n■ 18. ダッシュボード');
+{
+  const { status, body } = await call('a', '/v1/admin/dashboard/live');
+  status === 200 && typeof body.counts?.activeUsers === 'number'
+    ? ok(`いまの数値を返す（ログイン中 ${body.counts.activeUsers} 人、承認待ち ${body.counts.awaitingApproval} 件）`)
+    : ng(`取れない（${status}）`);
+  const text = JSON.stringify(body);
+  !/"input":\{[^}]/.test(text) && !text.includes('来月の販促') && !text.includes('transcript')
+    ? ok('業務の入力や記録の中身を含まない') : ng('中身が含まれている');
+  body.flows?.every((f) => Array.isArray(f.steps) && f.steps.every((x) => x.label))
+    ? ok(`業務の流れを段階の表示名つきで返す（${body.flows.length} 件）`) : ng('流れの形が不正');
+
+  const member = await call('a', '/v1/admin/dashboard/live', {}, 'member');
+  member.status === 403 ? ok('一般利用者は見られない（403）') : ng(`見えてしまう（${member.status}）`);
+
+  const { body: stats } = await call('a', '/v1/admin/dashboard/stats?days=7');
+  stats.daily?.length === 7 && stats.hourly?.length === 24
+    ? ok(`集計を返す（7 日分、推計の削減時間 ${stats.totals.savedMinutes} 分）`) : ng('集計の形が不正');
+
+  // 完了した実行に削減時間が記録される（AG-04 の既定値は 10 分）
+  const { body: job } = await call('a', '/v1/jobs', {
+    method: 'POST', body: JSON.stringify({ agentId: 'knowledge-qa', input: { question: '有給休暇の付与日数は' } }),
+  });
+  const done = await waitFor('a', job.runId, ['completed', 'failed']);
+  done.run.savedMinutes === 10 ? ok('完了した実行に標準所要時間（10 分）が記録される') : ng(`記録されない（${done.run.savedMinutes}）`);
+
+  const { body: b } = await call('b', '/v1/admin/dashboard/live', {}, 'admin');
+  JSON.stringify(b).includes('管理者さんが「議事録作成') && b.flows.some((f) => f.runId === job.runId)
+    ? ng('他社の業務が見える') : ok('他社のダッシュボードに A 社の業務は出ない');
 }
 
 console.log('');

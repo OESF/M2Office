@@ -9,10 +9,12 @@ import type { AuditEvent } from '@m2office/shared';
 import { api, type AdminRun, type Me } from './api.js';
 import { statusLabel } from './components.js';
 import { AgentSettings, CompanySettings, KnowledgeSettings, UserSettings } from './AdminSettings.js';
+import { Dashboard } from './Dashboard.js';
 
-type Tab = 'usage' | 'runs' | 'company' | 'agents' | 'users' | 'knowledge' | 'audit' | 'connectors';
+type Tab = 'dashboard' | 'usage' | 'runs' | 'company' | 'agents' | 'users' | 'knowledge' | 'audit' | 'connectors';
 
 const TABS: { id: Tab; label: string }[] = [
+  { id: 'dashboard', label: 'ダッシュボード' },
   { id: 'usage', label: '利用状況' },
   { id: 'runs', label: '実行の一覧' },
   { id: 'company', label: '会社情報' },
@@ -34,7 +36,7 @@ const TABS: { id: Tab; label: string }[] = [
  * 実行の一覧は状態と費用だけを表示する。
  */
 export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
-  const [tab, setTab] = useState<Tab>('usage');
+  const [tab, setTab] = useState<Tab>('dashboard');
   const isAdmin = me.user.roles.includes('admin');
 
   return (
@@ -60,6 +62,7 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
             ))}
           </nav>
           <main className="canvas">
+            {tab === 'dashboard' && <Dashboard />}
             {tab === 'usage' && <Usage />}
             {tab === 'runs' && <Runs />}
             {tab === 'company' && <CompanySettings />}

@@ -129,6 +129,24 @@ export interface Repository {
   /** 権限区画の一覧。 */
   listCompartments(tenantId: string): Promise<{ id: string; name: string; description: string | null }[]>;
 
+  /** 最近操作した利用者の人数（ダッシュボードの「ログイン中」。仕様書 第6.7.4節）。 */
+  countActiveUsers(tenantId: string, since: Date): Promise<number>;
+  /**
+   * 動いている実行（待機・実行中・承認待ち）と、指定時刻以降に失敗した実行を返す。
+   *
+   * @remarks ジョブの入力（`job.input`）は空で返す。ダッシュボードは中身を見る画面ではない。
+   */
+  listLiveRuns(tenantId: string, failedSince: string): Promise<{ run: Run; job: Job }[]>;
+  /** 実行を日（日本時間）・時・エージェント・状態で束ねた集計。 */
+  runStats(tenantId: string, since: string): Promise<RunStatRow[]>;
+  /** 監査ログの操作を種類と対象で数える。 */
+  countAuditActions(
+    tenantId: string, since: string, actions: string[],
+  ): Promise<{ action: string; targetId: string; n: number }[]>;
+  /** 指定した種類の監査ログを新しい順に返す。 */
+  listAuditSince(tenantId: string, actions: string[], limit: number): Promise<AuditEvent[]>;
+  countKnowledge(tenantId: string): Promise<number>;
+
   /** 監査ログを追記する。更新と削除は用意しない（仕様書 第16.6節）。 */
   appendAudit(event: AuditEvent): Promise<void>;
   listAudit(tenantId: string, limit: number): Promise<AuditEvent[]>;
@@ -154,4 +172,20 @@ export interface KnowledgeItem {
   /** 権限区画。区画外は `null`（仕様書 第16.3節）。 */
   compartment: string | null;
   updatedAt: string;
+}
+
+/** 実行の集計の 1 行（日・時・エージェント・状態で束ねたもの）。 */
+export interface RunStatRow {
+  /** 日本時間の日付（YYYY-MM-DD）。 */
+  day: string;
+  /** 日本時間の時（0〜23）。 */
+  hour: number;
+  agentId: string;
+  status: string;
+  runs: number;
+  costJpy: number;
+  tokens: number;
+  savedMinutes: number;
+  /** 終了した実行の所要時間の合計（秒）。 */
+  durationSec: number;
 }

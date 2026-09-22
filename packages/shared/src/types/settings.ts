@@ -56,11 +56,22 @@ export interface AgentSettings {
   disabled: string[];
 }
 
+/**
+ * 効果の推計の設定（仕様書 第6.7.12節）。
+ *
+ * @remarks 値が無いエージェントは、公式の既定値を使う。
+ */
+export interface EffectSettings {
+  /** エージェントごとの標準所要時間（分）。手作業なら 1 件に何分かかるか。 */
+  minutesPerRun: Record<string, number>;
+}
+
 export interface TenantSettings {
   company: CompanyInfo;
   writingStyle: WritingStyle;
   automation: AutomationPolicy;
   agents: AgentSettings;
+  effect: EffectSettings;
 }
 
 /** 設定が未保存の会社に使う既定値。 */
@@ -73,6 +84,7 @@ export const DEFAULT_TENANT_SETTINGS: TenantSettings = {
   // AG-05 の本人宛通知は既定で承認なし（Q-53）
   automation: { writeInternal: 'require', perAgent: { 'weekly-brief': 'allow' } },
   agents: { disabled: [] },
+  effect: { minutesPerRun: {} },
 };
 
 /**

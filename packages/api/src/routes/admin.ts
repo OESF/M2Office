@@ -12,7 +12,7 @@ import {
   isValidInvoiceNumber, type AutomationPolicy, type CompanyInfo, type Role, type TenantSettings,
   type User, type WritingStyle,
 } from '@m2office/shared';
-import { OFFICIAL_AGENTS } from '@m2office/core';
+import { DEFAULT_STANDARD_MINUTES, OFFICIAL_AGENTS } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { requireRole, type AppEnv } from '../middleware/tenant.js';
 
@@ -86,6 +86,7 @@ export function adminRoute(deps: AppDeps) {
       catalog: OFFICIAL_AGENTS.map((a) => ({
         id: a.id, name: a.name, description: a.description,
         usesWriteInternal: a.tools.some((t) => deps.registry.get(t)?.risk === 'write-internal'),
+        defaultMinutes: DEFAULT_STANDARD_MINUTES[a.id] ?? 0,
       })),
     });
   });
@@ -315,6 +316,18 @@ function validateSection(
       const unknown = disabled.filter((id) => !OFFICIAL_AGENTS.some((a) => a.id === id));
       if (unknown.length > 0) return { error: `不明なエージェントです: ${unknown.join(', ')}` };
       return { section: 'agents', value: { disabled: [...new Set(disabled)] } };
+    }
+    case 'effect': {
+      // 標準所要時間（分）。削減時間の推計に使う（仕様書 第6.7.12節）
+      const input = (o['minutesPerRun'] ?? {}) as Record<string, unknown>;
+      const minutesPerRun: Record<string, number> = {};
+      for (const [k, v] of Object.entries(input)) {
+        if (!OFFICIAL_AGENTS.some((a) => a.id === k)) return { error: `不明なエージェントです: ${k}` };
+        const n = Number(v);
+        if (!Number.isFinite(n) || n < 0 || n > 600) return { error: '標準所要時間は 0〜600 分で入力してください' };
+        minutesPerRun[k] = Math.round(n * 10) / 10;
+      }
+      return { section: 'effect', value: { minutesPerRun } };
     }
     default:
       return { error: `不明な設定の区分です: ${section}` };

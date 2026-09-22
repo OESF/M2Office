@@ -40,6 +40,7 @@ export const AG01_INBOX: AgentDefinition = {
     {
       id: 'fetch',
       type: 'agent',
+      label: '取得',
       instruction: '受信箱から未処理のメールを取得する。',
       onEmpty: 'stop',
       onError: 'stop',
@@ -47,6 +48,7 @@ export const AG01_INBOX: AgentDefinition = {
     {
       id: 'classify',
       type: 'agent',
+      label: '分類',
       instruction: [
         '取得したメールを「要返信」「要対応」「情報共有のみ」「不要」に分類する。',
         '分類の結果を一覧として作成し、成果物に保存する。',
@@ -56,6 +58,7 @@ export const AG01_INBOX: AgentDefinition = {
     {
       id: 'draft',
       type: 'agent',
+      label: '下書き',
       instruction: [
         '「要返信」のメールに返信の下書きを作る。送信はしない。',
         '社内の規程や価格に触れる場合は組織知識を確認し、確認できない数値は書かない。',

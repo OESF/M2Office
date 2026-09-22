@@ -81,7 +81,7 @@ function setup(def: AgentDefinition, call: { name: string; args: Record<string, 
   repo.jobs.push({ id: 'j1', tenantId: 't', agentId: def.id, agentVersion: 1, requestedBy: 'u-member',
     origin: 'menu', input: {}, createdAt: now });
   const run: Run = { id: 'r1', jobId: 'j1', tenantId: 't', status: 'running', cursor: 0, startedAt: now,
-    endedAt: null, tokensUsed: 0, costJpy: 0, failureReason: null };
+    endedAt: null, tokensUsed: 0, costJpy: 0, savedMinutes: 0, failureReason: null };
   repo.runs.push(run);
   return { repo, connector, engine, run, files };
 }
@@ -313,4 +313,37 @@ test('sheet.render の Excel を sheet.read で読み戻すと同じ表になる
 
   const csv = await renderSheet('入金一覧', ['取引先'], [['a,b']], 'csv');
   assert.deepEqual([...csv.slice(0, 3)], [0xef, 0xbb, 0xbf], 'CSV は BOM 付き UTF-8');
+});
+
+// ---- 削減時間の推計（仕様書 第6.7.12節）----
+
+test('最後まで完了した実行に、標準所要時間を削減時間として記録する', async () => {
+  const def = { ...TASK_DEF, id: 'weekly-brief' }; // 既定値 20 分、承認なし（Q-53）
+  const { repo, engine, run } = setup(def, { name: 'tasks.create', args: { title: 'x' } });
+  await engine.advance(run);
+  assert.equal((await repo.getRun('t', 'r1'))!.savedMinutes, 20);
+});
+
+test('会社が標準所要時間を変えていれば、その値を使う', async () => {
+  const def = { ...TASK_DEF, id: 'weekly-brief' };
+  const { repo, engine, run } = setup(def, { name: 'tasks.create', args: { title: 'x' } });
+  repo.settings.effect = { minutesPerRun: { 'weekly-brief': 45 } };
+  await engine.advance(run);
+  assert.equal((await repo.getRun('t', 'r1'))!.savedMinutes, 45);
+});
+
+test('途中で終了した実行は、削減時間を 0 とする', async () => {
+  const def: AgentDefinition = {
+    ...TASK_DEF, id: 'weekly-brief',
+    steps: [{ id: 'x', type: 'agent', instruction: '何もしない', onEmpty: 'stop' }, ...TASK_DEF.steps],
+  };
+  // 空の応答を返す推論で、onEmpty: stop により終了させる
+  const probe = setup(def, { name: 'noop', args: {} });
+  (probe.engine as unknown as { deps: { llm: LlmProvider } }).deps.llm = {
+    name: 'empty', complete: async () => ({ text: '', tokensUsed: 1 }),
+  };
+  await probe.engine.advance(probe.run);
+  const run = (await probe.repo.getRun('t', 'r1'))!;
+  assert.equal(run.status, 'completed');
+  assert.equal(run.savedMinutes, 0);
 });

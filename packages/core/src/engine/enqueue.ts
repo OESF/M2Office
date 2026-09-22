@@ -39,7 +39,7 @@ export async function enqueueJob(
   };
   const run: Run = {
     id: randomUUID(), jobId: job.id, tenantId: p.tenantId, status: 'queued', cursor: 0,
-    startedAt: now, endedAt: null, tokensUsed: 0, costJpy: 0, failureReason: null,
+    startedAt: now, endedAt: null, tokensUsed: 0, costJpy: 0, savedMinutes: 0, failureReason: null,
   };
   await repo.createJob(job);
   await repo.createRun(run);

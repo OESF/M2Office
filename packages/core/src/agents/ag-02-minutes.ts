@@ -43,6 +43,7 @@ export const AG02_MINUTES: AgentDefinition = {
     {
       id: 'fetch',
       type: 'agent',
+      label: '取得',
       instruction: [
         '会議の記録を取得する。',
         '取得できない場合は推測で補わず、取得不可として報告する。',
@@ -53,6 +54,7 @@ export const AG02_MINUTES: AgentDefinition = {
     {
       id: 'draft',
       type: 'agent',
+      label: '作成',
       instruction: [
         '記録から議題・決定事項・保留事項・担当と期限を構造化し、議事録を作成する。',
         '決まっていないことを決まったように書かない。',
@@ -61,6 +63,7 @@ export const AG02_MINUTES: AgentDefinition = {
     {
       id: 'gate-content',
       type: 'approval',
+      label: '内容の承認',
       approverRole: ['admin', 'approver'],
       present: '議事録の内容と、抽出した決定事項',
       onReject: 'stop',
@@ -68,11 +71,13 @@ export const AG02_MINUTES: AgentDefinition = {
     {
       id: 'tasks',
       type: 'agent',
+      label: '起票',
       instruction: '承認された決定事項を ToDo として起票する。',
     },
     {
       id: 'gate-share',
       type: 'approval',
+      label: '共有の承認',
       approverRole: ['admin', 'approver'],
       present: '共有先のスペースと、投稿する本文',
       onReject: 'stop',
@@ -80,6 +85,7 @@ export const AG02_MINUTES: AgentDefinition = {
     {
       id: 'share',
       type: 'agent',
+      label: '共有',
       instruction: '承認された内容をチャットへ投稿する。',
     },
   ],

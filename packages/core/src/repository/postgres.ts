@@ -13,7 +13,7 @@ import type {
   StoredFile, Tenant, TenantSettings, User, UserSettings,
 } from '@m2office/shared';
 import { DEFAULT_TENANT_SETTINGS, DEFAULT_USER_SETTINGS } from '@m2office/shared';
-import type { KnowledgeHit, KnowledgeItem, Repository } from './types.js';
+import type { KnowledgeHit, KnowledgeItem, Repository, RunStatRow } from './types.js';
 
 /**
  * 問い合わせ文を検索語に分割する。
@@ -180,10 +180,10 @@ export class PostgresRepository implements Repository {
   async createRun(run: Run): Promise<void> {
     await this.q(run.tenantId, 
       `insert into runs (id, job_id, tenant_id, status, cursor, started_at,
-                         ended_at, tokens_used, cost_jpy, failure_reason)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+                         ended_at, tokens_used, cost_jpy, saved_minutes, failure_reason)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
       [run.id, run.jobId, run.tenantId, run.status, run.cursor, run.startedAt,
-       run.endedAt, run.tokensUsed, run.costJpy, run.failureReason],
+       run.endedAt, run.tokensUsed, run.costJpy, run.savedMinutes ?? 0, run.failureReason],
     );
   }
 
@@ -192,6 +192,7 @@ export class PostgresRepository implements Repository {
       `select id, job_id as "jobId", tenant_id as "tenantId", status, cursor,
               started_at as "startedAt", ended_at as "endedAt",
               tokens_used as "tokensUsed", cost_jpy as "costJpy",
+              saved_minutes as "savedMinutes",
               failure_reason as "failureReason"
          from runs where tenant_id = $1 and id = $2`,
       [tenantId, runId],
@@ -202,10 +203,10 @@ export class PostgresRepository implements Repository {
   async updateRun(run: Run): Promise<void> {
     await this.q(run.tenantId, 
       `update runs set status=$3, cursor=$4, ended_at=$5, tokens_used=$6,
-                       cost_jpy=$7, failure_reason=$8
+                       cost_jpy=$7, failure_reason=$8, saved_minutes=$9
          where tenant_id=$1 and id=$2`,
       [run.tenantId, run.id, run.status, run.cursor, run.endedAt,
-       run.tokensUsed, run.costJpy, run.failureReason],
+       run.tokensUsed, run.costJpy, run.failureReason, run.savedMinutes ?? 0],
     );
   }
 
@@ -214,6 +215,7 @@ export class PostgresRepository implements Repository {
       `select id, job_id as "jobId", tenant_id as "tenantId", status, cursor,
               started_at as "startedAt", ended_at as "endedAt",
               tokens_used as "tokensUsed", cost_jpy as "costJpy",
+              saved_minutes as "savedMinutes",
               failure_reason as "failureReason"
          from runs where tenant_id = $1 order by started_at desc limit $2`,
       [tenantId, limit],
@@ -229,6 +231,7 @@ export class PostgresRepository implements Repository {
                 'id', r.id, 'jobId', r.job_id, 'tenantId', r.tenant_id, 'status', r.status,
                 'cursor', r.cursor, 'startedAt', r.started_at, 'endedAt', r.ended_at,
                 'tokensUsed', r.tokens_used, 'costJpy', r.cost_jpy::float8,
+                'savedMinutes', r.saved_minutes::float8,
                 'failureReason', r.failure_reason) as run,
               json_build_object(
                 'id', j.id, 'tenantId', j.tenant_id, 'agentId', j.agent_id,
@@ -275,6 +278,7 @@ export class PostgresRepository implements Repository {
       `select id, job_id as "jobId", tenant_id as "tenantId", status, cursor,
               started_at as "startedAt", ended_at as "endedAt",
               tokens_used as "tokensUsed", cost_jpy as "costJpy",
+              saved_minutes as "savedMinutes",
               failure_reason as "failureReason"
          from m2o_claim_next_run()`,
     );
@@ -563,7 +567,9 @@ export class PostgresRepository implements Repository {
     const rows = await this.q<{
       company: TenantSettings['company'] | null; writing_style: TenantSettings['writingStyle'] | null;
       automation: TenantSettings['automation'] | null; agents: TenantSettings['agents'] | null;
-    }>(tenantId, `select company, writing_style, automation, agents from tenant_settings where tenant_id = $1`,
+      effect: TenantSettings['effect'] | null;
+    }>(tenantId, `select company, writing_style, automation, agents, effect
+                    from tenant_settings where tenant_id = $1`,
       [tenantId]);
     const r = rows[0];
     const d = DEFAULT_TENANT_SETTINGS;
@@ -572,6 +578,7 @@ export class PostgresRepository implements Repository {
       writingStyle: { ...d.writingStyle, ...(r?.writing_style ?? {}) },
       automation: r?.automation ?? d.automation,
       agents: { ...d.agents, ...(r?.agents ?? {}) },
+      effect: { minutesPerRun: { ...(r?.effect?.minutesPerRun ?? {}) } },
     };
   }
 
@@ -580,6 +587,7 @@ export class PostgresRepository implements Repository {
   ): Promise<void> {
     const column = ({
       company: 'company', writingStyle: 'writing_style', automation: 'automation', agents: 'agents',
+      effect: 'effect',
     } as const)[section];
     // 列名は上の固定の対応表からのみ取る。利用者の入力を SQL に埋め込まない
     await this.q(tenantId,
@@ -709,6 +717,78 @@ export class PostgresRepository implements Repository {
          from files where tenant_id = $1 and id = $2`,
       [tenantId, id]);
     return rows[0] ?? null;
+  }
+
+  async countActiveUsers(tenantId: string, since: Date): Promise<number> {
+    const rows = await this.q<{ n: number }>(tenantId,
+      `select count(distinct user_id)::int as n from sessions
+        where tenant_id = $1 and revoked_at is null and expires_at > now() and last_seen_at >= $2`,
+      [tenantId, since.toISOString()]);
+    return rows[0]?.n ?? 0;
+  }
+
+  async listLiveRuns(tenantId: string, failedSince: string): Promise<{ run: Run; job: Job }[]> {
+    const rows = await this.q<{ run: Run; job: Job }>(tenantId,
+      `select json_build_object(
+                'id', r.id, 'jobId', r.job_id, 'tenantId', r.tenant_id, 'status', r.status,
+                'cursor', r.cursor, 'startedAt', r.started_at, 'endedAt', r.ended_at,
+                'tokensUsed', r.tokens_used, 'costJpy', r.cost_jpy::float8,
+                'savedMinutes', r.saved_minutes::float8, 'failureReason', r.failure_reason) as run,
+              json_build_object(
+                'id', j.id, 'tenantId', j.tenant_id, 'agentId', j.agent_id,
+                'agentVersion', j.agent_version, 'requestedBy', j.requested_by,
+                'origin', j.origin, 'input', '{}'::jsonb, 'createdAt', j.created_at) as job
+         from runs r join jobs j on j.id = r.job_id and j.tenant_id = r.tenant_id
+        where r.tenant_id = $1
+          and (r.status in ('queued', 'running', 'awaiting_approval')
+               or (r.status = 'failed' and r.started_at >= $2))
+        order by r.started_at desc limit 50`,
+      [tenantId, failedSince]);
+    return rows.map(({ run, job }) => ({
+      run: { ...run, startedAt: iso(run.startedAt)!, endedAt: iso(run.endedAt) },
+      job: { ...job, createdAt: iso(job.createdAt)! },
+    }));
+  }
+
+  async runStats(tenantId: string, since: string): Promise<RunStatRow[]> {
+    // 日本時間の日付と時刻で束ねる。画面の「今日」「時間帯」と一致させるため
+    return this.q<RunStatRow>(tenantId,
+      `select to_char(r.started_at at time zone 'Asia/Tokyo', 'YYYY-MM-DD') as day,
+              extract(hour from r.started_at at time zone 'Asia/Tokyo')::int as hour,
+              j.agent_id as "agentId", r.status,
+              count(*)::int as runs,
+              coalesce(sum(r.cost_jpy), 0)::float8 as "costJpy",
+              coalesce(sum(r.tokens_used), 0)::int as tokens,
+              coalesce(sum(r.saved_minutes), 0)::float8 as "savedMinutes",
+              coalesce(sum(extract(epoch from (r.ended_at - r.started_at)))
+                filter (where r.ended_at is not null), 0)::float8 as "durationSec"
+         from runs r join jobs j on j.id = r.job_id and j.tenant_id = r.tenant_id
+        where r.tenant_id = $1 and r.started_at >= $2
+        group by 1, 2, 3, 4`,
+      [tenantId, since]);
+  }
+
+  async countAuditActions(tenantId: string, since: string, actions: string[]) {
+    return this.q<{ action: string; targetId: string; n: number }>(tenantId,
+      `select action, target_id as "targetId", count(*)::int as n from audit_events
+        where tenant_id = $1 and occurred_at >= $2 and action = any($3)
+        group by 1, 2`,
+      [tenantId, since, actions]);
+  }
+
+  async listAuditSince(tenantId: string, actions: string[], limit: number): Promise<AuditEvent[]> {
+    return this.q<AuditEvent>(tenantId,
+      `select id, tenant_id as "tenantId", actor_type as "actorType", actor_id as "actorId", action,
+              target_type as "targetType", target_id as "targetId", detail, occurred_at as "occurredAt"
+         from audit_events where tenant_id = $1 and action = any($2)
+        order by occurred_at desc limit $3`,
+      [tenantId, actions, limit]);
+  }
+
+  async countKnowledge(tenantId: string): Promise<number> {
+    const rows = await this.q<{ n: number }>(tenantId,
+      `select count(*)::int as n from knowledge_items where tenant_id = $1`, [tenantId]);
+    return rows[0]?.n ?? 0;
   }
 }
 

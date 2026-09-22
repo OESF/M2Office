@@ -34,12 +34,14 @@ export const AG05_WEEKLY_BRIEF: AgentDefinition = {
     {
       id: 'collect',
       type: 'agent',
+      label: '収集',
       instruction: '今週の予定・未完了のタスク・承認待ち・未読のメールを収集する。',
       onError: 'continue',
     },
     {
       id: 'deliver',
       type: 'agent',
+      label: '配信',
       instruction: [
         '収集した内容に優先度をつけて要約し、本人へ通知する。',
         '期限を過ぎたもの、今日が期限のもの、承認待ちを先頭に置く。',

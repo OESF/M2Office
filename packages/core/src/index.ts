@@ -12,7 +12,7 @@ export { StubLlmProvider } from './llm/stub.js';
 export { OpenAiCompatibleProvider, LlmRequestError } from './llm/gemini.js';
 export type { GeminiModelMap } from './llm/gemini.js';
 
-export type { Repository, KnowledgeHit, KnowledgeItem } from './repository/types.js';
+export type { Repository, KnowledgeHit, KnowledgeItem, RunStatRow } from './repository/types.js';
 export { PostgresRepository } from './repository/postgres.js';
 
 export { buildConnector, MockWorkspaceConnector } from './connectors/index.js';
@@ -38,7 +38,9 @@ export {
   RunNotResumableError, DefinitionInvalidError, TenantBoundaryError, ApprovalForbiddenError,
 } from './engine/errors.js';
 
-export { OFFICIAL_AGENTS, resolveOfficialAgent } from './agents/index.js';
+export {
+  OFFICIAL_AGENTS, resolveOfficialAgent, DEFAULT_STANDARD_MINUTES, standardMinutes, stepLabel,
+} from './agents/index.js';
 export { Secretary } from './secretary/secretary.js';
 export type { SecretaryReply, ResponseLayer } from './secretary/secretary.js';
 export { DIRECT_QUERIES } from './secretary/catalog.js';

@@ -37,6 +37,7 @@ export const AG04_KNOWLEDGE_QA: AgentDefinition = {
     {
       id: 'search',
       type: 'agent',
+      label: '検索',
       instruction: [
         '利用者の質問に答えるため、組織知識を検索する。',
         '該当する知識が見つからない場合は、推測せず「見つからない」と報告する。',
@@ -47,6 +48,7 @@ export const AG04_KNOWLEDGE_QA: AgentDefinition = {
     {
       id: 'answer',
       type: 'agent',
+      label: '回答',
       instruction: [
         '検索結果をもとに回答をまとめる。',
         '必ず参照した文書名を添えること。出典のない断定をしない。',

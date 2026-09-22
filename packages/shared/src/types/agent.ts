@@ -41,6 +41,8 @@ export function alwaysRequiresApproval(risk: RiskLevel): boolean {
 export interface AgentStep {
   id: string;
   type: 'agent';
+  /** 画面に出す短い名前（例: 取得）。省略時はステップ ID（仕様書 第9.2.4節）。 */
+  label?: string;
   /** 推論に与える指示。Markdown で記述する。 */
   instruction: string;
   /** 結果が空だった場合の扱い。既定は `continue`。 */
@@ -53,6 +55,8 @@ export interface AgentStep {
 export interface ApprovalStep {
   id: string;
   type: 'approval';
+  /** 画面に出す短い名前。省略時は「承認」（仕様書 第9.2.4節）。 */
+  label?: string;
   /**
    * 誰が判断するか。既定は `role`（仕様書 第9.2.3節）。
    * `requester` では実行を依頼した本人だけが判断でき、`approverRole` は使わない。

@@ -87,6 +87,42 @@ export interface LoginProviders {
 
 export type ScheduleView = Schedule & { label: string };
 
+/** ダッシュボードの「いま」（仕様書 第6.7.3節）。 */
+export interface DashboardLive {
+  generatedAt: string;
+  counts: {
+    activeUsers: number; running: number; awaitingApproval: number; failedToday: number;
+    todayRuns: number; todayCostJpy: number; todaySavedMinutes: number;
+  };
+  flows: {
+    runId: string; agentName: string; status: string; requester: string; origin: string; startedAt: string;
+    steps: { label: string; state: 'done' | 'current' | 'waiting' | 'failed' | 'todo' }[];
+    waitingFor: { who: string; since: string; kind: 'approval' | 'confirm' } | null;
+    failureReason: string | null;
+  }[];
+  backlog: { approvalId: string; agentName: string; what: string; requester: string; approver: string; since: string }[];
+  events: { at: string; kind: 'start' | 'done' | 'fail' | 'wait'; text: string }[];
+}
+
+/** ダッシュボードの「集計」（仕様書 第6.7.8節）。 */
+export interface DashboardStats {
+  days: number;
+  totals: {
+    runs: number; completed: number; failed: number; successRate: number | null;
+    avgDurationSec: number | null; savedMinutes: number; costJpy: number; tokens: number;
+  };
+  daily: { day: string; runs: number; completed: number; failed: number; costJpy: number; savedMinutes: number }[];
+  hourly: number[];
+  byAgent: {
+    agentId: string; name: string; enabled: boolean; runs: number; completed: number;
+    successRate: number | null; avgDurationSec: number | null; savedMinutes: number; costJpy: number; tokens: number;
+  }[];
+  secretary: { direct: number; route: number; chat: number };
+  backlog: { pending: number; oldestSince: string | null };
+  knowledge: { items: number; searches: number };
+  health: { workspace: string; llm: string };
+}
+
 export interface KnowledgeItemView {
   id: string; kind: string; title: string; body: string; source: string;
   compartment: string | null; updatedAt: string;
@@ -202,8 +238,12 @@ export const api = {
       '/admin/connectors',
     ),
     settings: () => call<TenantSettings & {
-      catalog: { id: string; name: string; description: string; usesWriteInternal: boolean }[];
+      catalog: {
+        id: string; name: string; description: string; usesWriteInternal: boolean; defaultMinutes: number;
+      }[];
     }>('/admin/settings'),
+    dashboardLive: () => call<DashboardLive>('/admin/dashboard/live'),
+    dashboardStats: (days: 1 | 7 | 30) => call<DashboardStats>(`/admin/dashboard/stats?days=${days}`),
     saveSettings: <K extends keyof TenantSettings>(section: K, value: TenantSettings[K]) =>
       call(`/admin/settings/${section}`, { method: 'PUT', body: JSON.stringify(value) }),
     inviteUser: (email: string, displayName: string, roles: string[]) =>

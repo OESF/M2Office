@@ -43,6 +43,7 @@ export const AG03_SCHEDULING: AgentDefinition = {
     {
       id: 'freebusy',
       type: 'agent',
+      label: '空き確認',
       instruction: '参加者全員の空きを取得する。',
       onEmpty: 'stop',
       onError: 'stop',
@@ -50,6 +51,7 @@ export const AG03_SCHEDULING: AgentDefinition = {
     {
       id: 'propose',
       type: 'agent',
+      label: '候補作成',
       instruction: [
         '全員が空いている時間帯から候補を 3 つ挙げ、招待の文面を用意する。',
         '空きが見つからない場合は候補を作らず、その旨を報告する。',
@@ -58,6 +60,7 @@ export const AG03_SCHEDULING: AgentDefinition = {
     {
       id: 'gate-invite',
       type: 'approval',
+      label: '承認',
       // 本人の用件なので本人が最終確認する（仕様書 第9.2.3節）
       approver: 'requester',
       approverRole: [],
@@ -67,6 +70,7 @@ export const AG03_SCHEDULING: AgentDefinition = {
     {
       id: 'create',
       type: 'agent',
+      label: '招待',
       instruction: '承認された候補の第一案で予定を作成し、参加者を招待する。',
     },
   ],
