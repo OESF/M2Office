@@ -6,7 +6,7 @@ import type { AgentDefinition } from '@m2office/shared';
  * 承認ゲートを持たない最短の経路であり、プロトタイプでは
  * 秘書 → 知識検索 → 応答の流れを検証する役割を持つ。
  *
- * @see 仕様書 第7.5節 初期エージェントカタログ
+ * @see 仕様書 第9.5節 初期エージェントカタログ
  * @see 仕様書 第24.3.3節 プロトタイプで実装するエージェント
  */
 export const AG04_KNOWLEDGE_QA: AgentDefinition = {

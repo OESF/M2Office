@@ -1,5 +1,5 @@
 -- M2Office 初期スキーマ
--- 仕様書 第13.1節 主要エンティティに対応する。
+-- 仕様書 第19.1節 主要エンティティに対応する。
 -- すべての業務テーブルは tenant_id を持ち、問い合わせは必ずこれで絞る（不変則 I-2）。
 
 create table if not exists tenants (
@@ -108,7 +108,7 @@ create table if not exists artifacts (
 );
 create index if not exists artifacts_run_idx on artifacts (tenant_id, run_id);
 
--- 組織知識（仕様書 第9.1節）。compartment が区画を表し、null は区画外。
+-- 組織知識（仕様書 第11.1節）。compartment が区画を表し、null は区画外。
 create table if not exists knowledge_items (
   id           text primary key,
   tenant_id    text not null references tenants(id) on delete cascade,

@@ -9,7 +9,7 @@
  * @remarks
  * 提供者ごとの native なツール呼び出し機能に依存せず、
  * 文字列の約束だけで成立させている。これにより抽象化層
- * （仕様書 第21.2節）を通る提供者すべてで同じ挙動になる。
+ * （仕様書 第20.2節）を通る提供者すべてで同じ挙動になる。
  * native 対応へ切り替える場合も、この関数の置き換えで済む。
  */
 export function parseToolCalls(text: string): { name: string; args: Record<string, unknown> }[] {

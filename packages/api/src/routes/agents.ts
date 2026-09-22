@@ -5,7 +5,7 @@ import type { RequestContext } from '@m2office/shared';
 /**
  * 利用できるエージェントの一覧を返す。
  *
- * 画面のコマンドメニュー（仕様書 第18.1節）は、この応答から
+ * 画面のコマンドメニュー（仕様書 第6.1節）は、この応答から
  * カードと入力フォームを組み立てる。
  */
 export const agentsRoute = new Hono<{ Variables: { ctx: RequestContext } }>();

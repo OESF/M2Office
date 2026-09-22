@@ -7,7 +7,7 @@ import react from '@vitejs/plugin-react';
  * ポートは 3100 番台に統一する。
  * `/v1` への要求は API（3101）へ転送し、**Host ヘッダーをそのまま渡す**。
  * これにより `a.lvh.me:3100` で開いたときに A 社のテナントとして解決される
- * （仕様書 第6.5.1節）。
+ * （仕様書 第20.4.1節）。
  */
 export default defineConfig({
   plugins: [react()],

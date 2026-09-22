@@ -5,7 +5,7 @@ import type { LlmProvider } from '../llm/provider.js';
 import type { WorkspaceConnector } from '../connectors/types.js';
 import { DIRECT_QUERIES, type DirectAnswer } from './catalog.js';
 
-/** 秘書がどの層で応答したか。計測と表示に使う（仕様書 第8.9.1節）。 */
+/** 秘書がどの層で応答したか。計測と表示に使う（仕様書 第10.9.1節）。 */
 export type ResponseLayer = 'direct' | 'light' | 'full';
 
 export interface SecretaryReply {
@@ -27,7 +27,7 @@ export interface SecretaryDeps {
 /**
  * 秘書エージェント。従業員とシステムの間に立つ窓口。
  *
- * 依頼を 3 層に振り分ける（仕様書 第8.9節）。
+ * 依頼を 3 層に振り分ける（仕様書 第10.9節）。
  * 層 1 は LLM を介さず、層 2 は高速モデルで判定し、層 3 で完全な対話を行う。
  *
  * @remarks

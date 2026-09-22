@@ -13,10 +13,10 @@ import type { ToolRegistry } from '../tools/registry.js';
  *
  * @remarks
  * 最も重要なのは 2 点目である。危険度 `external-send` 以上のツールを
- * 使う定義に承認ゲートが無ければ、導入も実行も認めない（仕様書 第7.4節）。
+ * 使う定義に承認ゲートが無ければ、導入も実行も認めない（仕様書 第9.4節）。
  *
- * @see 仕様書 第7.4節 ツールと承認の対応
- * @see 仕様書 第10.5節 審査の観点
+ * @see 仕様書 第9.4節 ツールと承認の対応
+ * @see 仕様書 第12.5節 審査の観点
  */
 export function validateDefinition(def: AgentDefinition, registry: ToolRegistry): void {
   if (def.schemaVersion !== 1) {

@@ -5,7 +5,7 @@ import type { AppDeps } from '../context.js';
 /**
  * 秘書への依頼を受け付ける。
  *
- * 応答は 3 層に振り分けられ、どの層で答えたかを返す（仕様書 第8.9節）。
+ * 応答は 3 層に振り分けられ、どの層で答えたかを返す（仕様書 第10.9節）。
  * 層 1 は LLM を介さないため、費用も遅延も発生しない。
  */
 export function secretaryRoute(deps: AppDeps) {

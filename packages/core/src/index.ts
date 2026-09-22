@@ -2,7 +2,7 @@
  * `@m2office/core` の公開窓口。
  *
  * ドメインロジックのみを置く。HTTP・フレームワーク・画面に依存しない
- * （仕様書 第21.5節）。API とワーカーの双方から同じロジックを呼ぶ。
+ * （仕様書 第20.5節）。API とワーカーの双方から同じロジックを呼ぶ。
  */
 export * from './llm/provider.js';
 export { StubLlmProvider } from './llm/stub.js';

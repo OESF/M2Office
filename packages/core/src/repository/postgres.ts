@@ -11,7 +11,7 @@ import type { KnowledgeHit, Repository } from './types.js';
  * @remarks
  * テナント境界: すべての問い合わせに `tenant_id` の条件を含める。
  * 接続プールを使うため、**トランザクション単位で**テナントを設定する方針をとる
- * （仕様書 第6.5.5節）。行レベルセキュリティの有効化は次段階で行う。
+ * （仕様書 第8.5.5節）。行レベルセキュリティの有効化は次段階で行う。
  */
 /**
  * PostgreSQL が返す値を、型定義どおりの JavaScript の値に揃える。
@@ -30,7 +30,7 @@ import type { KnowledgeHit, Repository } from './types.js';
  * @remarks
  * 日本語は分かち書きをしないため、文全体で部分一致を取ると何も当たらない。
  * プロトタイプでは助詞と記号で区切る簡易な方法を用いる。
- * 本格的な検索は、全文検索と意味的検索の併用に置き換える（仕様書 第9.7節）。
+ * 本格的な検索は、全文検索と意味的検索の併用に置き換える（仕様書 第11.7節）。
  */
 function tokenize(query: string): string[] {
   const separators = /[\s、。，．,.?？!！「」『』（）()：:；;・/]|[はがをにでとのへやもからまでより]/g;
@@ -214,7 +214,7 @@ export class PostgresRepository implements Repository {
    *
    * @remarks
    * `for update skip locked` により、ワーカーを複数動かしても
-   * 同じ実行を二重に処理しない（仕様書 第15章 二重実行防止）。
+   * 同じ実行を二重に処理しない（仕様書 第17章 二重実行防止）。
    */
   async claimNextRun(): Promise<Run | null> {
     const rows = await this.q<Run>(

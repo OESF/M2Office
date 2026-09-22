@@ -100,7 +100,7 @@ AG-01（受信箱整理）は下書きを作るエージェントであり、
 
 **必ず設定する。** 想定を超えた利用に気づけるようにする。
 
-仕様書 第22.2節で変動原価の管理を設計しているが、その実測値を取る土台がここにある。
+仕様書 第21.2節で変動原価の管理を設計しているが、その実測値を取る土台がここにある。
 Phase 1 で AG-01〜05 の実コストを測ることが、そのまま価格設計（Q-05、Q-49）の材料になる。
 
 ### 4-3. Gemini の鍵を取得する
@@ -144,7 +144,7 @@ GEMINI_API_KEY=<取得した鍵>
 | リダイレクト URI | `http://localhost:3101/v1/auth/google/callback` |
 
 **ポートは 3101（API）である。** 画面（3100）ではない。
-認証は API が処理し、画面は API を経由する（仕様書 第11.1節 A-2）。
+認証は API が処理し、画面は API を経由する（仕様書 第13.1節 A-2）。
 
 既存の個人用エージェントが `localhost:3000` を使っていても、
 別のクライアントとして登録されるため共存する。
@@ -240,5 +240,5 @@ npm run smoke
 |---|---|
 | [specification.md](../specification.md) 第14章 | Google プラットフォーム連携 |
 | [specification.md](../specification.md) 第16.1節 | 認証。Google アカウントへの一本化 |
-| [specification.md](../specification.md) 第19.2節 | Google 連携ウィザード |
+| [specification.md](../specification.md) 第22.2節 | Google 連携ウィザード |
 | [README.md](../README.md) | 開発環境の立ち上げ |

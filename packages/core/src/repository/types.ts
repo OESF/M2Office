@@ -9,7 +9,7 @@ import type {
  * @remarks
  * テナント境界: 取得系はすべて `tenantId` を引数に取る。
  * 実装側では、さらにデータベースの行レベルセキュリティで二重に守る
- * （仕様書 第6.5.5節、不変則 I-2）。
+ * （仕様書 第8.5.5節、不変則 I-2）。
  */
 export interface Repository {
   /** サブドメインからテナントを解決する。見つからなければ `null`。 */
@@ -95,7 +95,7 @@ export interface Repository {
   listAudit(tenantId: string, limit: number): Promise<AuditEvent[]>;
 }
 
-/** 知識検索の結果。出典を必ず伴う（仕様書 第9.7節）。 */
+/** 知識検索の結果。出典を必ず伴う（仕様書 第11.7節）。 */
 export interface KnowledgeHit {
   id: string;
   title: string;

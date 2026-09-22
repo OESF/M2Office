@@ -19,7 +19,7 @@ type View =
  * ワークスペースの画面。
  *
  * 左にコマンドメニュー、中央にキャンバス、右に必要時のサッシパネル、
- * 下部に常駐の秘書バーを置く（仕様書 第18.1節）。
+ * 下部に常駐の秘書バーを置く（仕様書 第6.1節）。
  */
 export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [agents, setAgents] = useState<AgentSummary[]>([]);
@@ -256,7 +256,7 @@ function Home({ approvals, agents }: { approvals: number; agents: number }) {
   );
 }
 
-/** 常駐の秘書バー。どの画面からでも呼び出せる（仕様書 第8.4節）。 */
+/** 常駐の秘書バー。どの画面からでも呼び出せる（仕様書 第10.4節）。 */
 function SecretaryBar({ onReply }: { onReply: (r: SecretaryReply) => void }) {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
@@ -377,7 +377,7 @@ function roleLabel(role: string): string {
   return ({ admin: '管理者', approver: '承認者', member: '一般', external: '外部協力者', developer: '開発者' } as Record<string, string>)[role] ?? role;
 }
 
-/** どの層で応答したかを表示用の言葉にする（仕様書 第8.9.1節）。 */
+/** どの層で応答したかを表示用の言葉にする（仕様書 第10.9.1節）。 */
 function layerLabel(layer: SecretaryReply['layer']): string {
   return { direct: '直接応答', light: '取次', full: '対話' }[layer];
 }

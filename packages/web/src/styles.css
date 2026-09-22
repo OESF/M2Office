@@ -1,4 +1,4 @@
-/* 3 ペイン＋秘書バー（仕様書 第18.1節） */
+/* 3 ペイン＋秘書バー（仕様書 第6.1節） */
 :root {
   --bg: #f6f7f8;
   --panel: #ffffff;
@@ -99,7 +99,7 @@ button { font: inherit; cursor: pointer; }
 pre.body { white-space: pre-wrap; background: #fbfcfc; border: 1px solid var(--line); padding: 12px; border-radius: 4px; }
 
 /* 画面幅に応じた調整。
-   3 ペインは PC を前提とするが、狭い幅でも読めるようにする（仕様書 第18.6節）。 */
+   3 ペインは PC を前提とするが、狭い幅でも読めるようにする（仕様書 第6.9節）。 */
 @media (max-width: 1200px) {
   .panes { grid-template-columns: 200px 1fr; }
   .panes.with-sash { grid-template-columns: 200px 1fr 280px; }
