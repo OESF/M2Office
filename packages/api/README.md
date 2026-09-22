@@ -100,7 +100,7 @@ OAuth クライアントが整うまでは、`GET /v1/auth/google/start` は 503
 src/index.ts          サーバーの組み立て
 src/context.ts        依存の構築（永続化・LLM・接続口・ツール・エンジン・秘書）
 src/auth/             認証の設定とログイン状態（Cookie）
-src/middleware/       テナント解決、利用者の確認、ロールの確認
+src/middleware/       テナント解決、利用者の確認、ロールの確認、要求のログと想定外のエラーの処理
 src/routes/           エンドポイント
 ```
 

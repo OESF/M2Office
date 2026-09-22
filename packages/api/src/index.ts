@@ -12,6 +12,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { buildDeps } from './context.js';
 import { authenticate, resolveTenant, type AppEnv } from './middleware/tenant.js';
+import { onUnexpectedError, requestLogger } from './middleware/logging.js';
 import { agentsRoute } from './routes/agents.js';
 import { jobsRoute } from './routes/jobs.js';
 import { runsRoute } from './routes/runs.js';
@@ -45,10 +46,13 @@ const app = new Hono<AppEnv>();
  */
 const baseDomain = (process.env['BASE_DOMAIN'] ?? 'lvh.me').replace(/\./g, '\\.');
 const allowedOrigin = new RegExp(`^https?://[a-z0-9-]+\\.(${baseDomain}|localhost)(:\\d+)?$`);
+app.use('*', requestLogger(deps.log));
+app.onError(onUnexpectedError(deps.log));
 app.use('*', cors({
   origin: (origin) => (allowedOrigin.test(origin) ? origin : null),
   credentials: true,
-  allowHeaders: ['content-type', 'x-csrf-token', 'x-tenant', 'x-user'],
+  allowHeaders: ['content-type', 'x-csrf-token', 'x-tenant', 'x-user', 'x-request-id'],
+  exposeHeaders: ['x-request-id'],
 }));
 
 app.get('/health', (c) => c.json({ ok: true, service: 'api' }));
@@ -84,9 +88,14 @@ app.route('/v1/files', filesRoute(deps));
 
 const port = Number(process.env['API_PORT'] ?? 3101);
 serve({ fetch: app.fetch, port }, (info) => {
-  console.log(`[api] http://localhost:${info.port} で待ち受けています`);
-  console.log(`[api] 業務システムへの接続: ${deps.connector.source === 'mock' ? 'ダミーデータ' : 'Google'}`);
+  deps.log.info('待ち受けを開始しました', {
+    port: info.port,
+    connector: deps.connector.source,
+    llm: deps.llm.name,
+    devLogin: deps.auth.devLogin,
+    devHeaders: deps.auth.devHeaders,
+  });
   if (deps.auth.devLogin || deps.auth.devHeaders) {
-    console.log('[api] 開発用ログインが有効です（本番では起動を拒否します）');
+    deps.log.warn('開発用ログインが有効です（本番では起動を拒否します）');
   }
 });

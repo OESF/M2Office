@@ -21,6 +21,7 @@ import type { LlmProvider } from '../llm/provider.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { WorkspaceConnector } from '../connectors/types.js';
 import type { FileStore } from '../files/store.js';
+import { silentLogger, type Logger } from '../log/logger.js';
 import { ApprovalForbiddenError, RunNotResumableError } from './errors.js';
 import { standardMinutes } from '../agents/index.js';
 import { validateDefinition } from './validate.js';
@@ -40,6 +41,8 @@ export interface RunEngineDeps {
   connector: WorkspaceConnector;
   /** ファイルの中身の置き場。文書を扱うツールに渡す。 */
   files: FileStore;
+  /** アプリログ。省略時は何も書かない（開発規約 第7章）。 */
+  logger?: Logger;
   /** エージェント定義を解決する。 */
   resolveDefinition(agentId: string, version: number): AgentDefinition | undefined;
 }
@@ -53,7 +56,11 @@ export interface RunEngineDeps {
  * @see 仕様書 第9.3節 実行ライフサイクル
  */
 export class RunEngine {
-  constructor(private readonly deps: RunEngineDeps) {}
+  private readonly log: Logger;
+
+  constructor(private readonly deps: RunEngineDeps) {
+    this.log = deps.logger ?? silentLogger;
+  }
 
   /**
    * 実行を、完了するか承認待ちになるまで進める。
@@ -105,9 +112,13 @@ export class RunEngine {
         return { outcome: 'awaiting_approval', approvalId };
       }
 
+      const stepLog = this.log.child({ runId: current.id, tenantId: current.tenantId, stepId: step.id });
+      const startedAt = Date.now();
+      stepLog.debug('ステップを開始', { agentId: def.id, cursor: current.cursor });
       const result = await this.runAgentStep(
         current, def, step, job.input, job.requestedBy, settings,
       );
+      stepLog.debug('ステップを終了', { outcome: result.kind, ms: Date.now() - startedAt });
       if (result.kind === 'failed') return this.fail(current, result.reason);
 
       if (result.kind === 'confirm') {
@@ -296,6 +307,9 @@ export class RunEngine {
           toolResults.push({
             name: call.name, error: '承認の直後のステップでのみ実行できます', risk: tool.risk,
           });
+          this.log.warn('承認の手前で対外送信のツールを止めました', {
+            runId: run.id, tenantId: run.tenantId, stepId: step.id, tool: call.name, risk: tool.risk,
+          });
           await repo.appendAudit({
             id: randomUUID(), tenantId: run.tenantId, actorType: 'agent', actorId: def.id,
             action: 'tool.blocked', targetType: 'tool', targetId: call.name,
@@ -330,6 +344,9 @@ export class RunEngine {
       return { kind: 'ok', tokensUsed: res.tokensUsed };
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
+      this.log.warn('ステップで例外が発生しました', {
+        runId: run.id, tenantId: run.tenantId, stepId: step.id, onError: step.onError ?? 'stop', err,
+      });
       await repo.updateRunStep(run.tenantId, {
         ...runStep, status: 'failed', output: { error: reason },
         endedAt: new Date().toISOString(),
@@ -346,6 +363,7 @@ export class RunEngine {
     const { repo, registry, connector, files } = this.deps;
     const tool = registry.get(call.name);
     if (!tool) return { name: call.name, error: '許可されていないツールです' };
+    this.log.debug('ツールを呼び出し', { runId: run.id, tenantId: run.tenantId, tool: call.name, risk: tool.risk });
     const out = await tool.invoke(call.args, {
       tenantId: run.tenantId, userId: requestedBy, runId: run.id,
       compartment: def.compartment, repo, connector, files,
@@ -432,6 +450,7 @@ export class RunEngine {
 
   private async fail(run: Run, reason: string): Promise<AdvanceResult> {
     const now = new Date().toISOString();
+    this.log.warn('実行が失敗しました', { runId: run.id, tenantId: run.tenantId, reason });
     await this.deps.repo.updateRun({
       ...run, status: 'failed', endedAt: now, failureReason: reason,
     });

@@ -11,9 +11,12 @@
 
 import {
   PostgresRepository, StubLlmProvider, OpenAiCompatibleProvider, ToolRegistry, BUILTIN_TOOLS,
-  RunEngine, Scheduler, resolveOfficialAgent, buildConnector, LocalFileStore, type LlmProvider,
+  RunEngine, Scheduler, resolveOfficialAgent, buildConnector, LocalFileStore, createLoggerFromEnv,
+  type LlmProvider,
 } from '@m2office/core';
 import { fileURLToPath } from 'node:url';
+
+const log = createLoggerFromEnv('worker');
 
 const repo = new PostgresRepository(
   process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office',
@@ -27,9 +30,9 @@ const files = new LocalFileStore(
   process.env['FILE_STORAGE_DIR'] ?? fileURLToPath(new URL('../../../.data/files', import.meta.url)),
 );
 const engine = new RunEngine({
-  repo, llm: buildLlm(), registry, connector, files, resolveDefinition: resolveOfficialAgent,
+  repo, llm: buildLlm(), registry, connector, files, resolveDefinition: resolveOfficialAgent, logger: log,
 });
-const scheduler = new Scheduler({ repo, resolveDefinition: resolveOfficialAgent });
+const scheduler = new Scheduler({ repo, resolveDefinition: resolveOfficialAgent, logger: log });
 
 const POLL_INTERVAL_MS = 1000;
 /** 定時実行の見回り間隔。分単位の指定に対して十分に短くする。 */
@@ -40,8 +43,9 @@ let lastScheduleCheck = 0;
 process.on('SIGINT', () => { running = false; });
 process.on('SIGTERM', () => { running = false; });
 
-console.log('[worker] 待ち行列の監視を開始しました');
-console.log(`[worker] 業務システムへの接続: ${connector.source === 'mock' ? 'ダミーデータ' : 'Google'}`);
+log.info('待ち行列の監視を開始しました', {
+  connector: connector.source, scheduleIntervalMs: SCHEDULE_INTERVAL_MS,
+});
 
 while (running) {
   let handled = false;
@@ -50,9 +54,9 @@ while (running) {
     lastScheduleCheck = Date.now();
     try {
       const started = await scheduler.tick(new Date());
-      for (const id of started) console.log(`[worker] 定時実行を起動: ${id.slice(0, 8)}`);
+      for (const runId of started) log.info('定時実行を起動しました', { runId });
     } catch (err) {
-      console.error('[worker] 定時実行の見回りで例外が発生しました:', err);
+      log.error('定時実行の見回りで例外が発生しました', { err });
     }
   }
 
@@ -60,29 +64,32 @@ while (running) {
     const run = await repo.claimNextRun();
     if (run) {
       handled = true;
-      const label = `${run.id.slice(0, 8)} (${run.tenantId})`;
-      console.log(`[worker] 実行を開始: ${label} cursor=${run.cursor}`);
+      const runLog = log.child({ runId: run.id, tenantId: run.tenantId });
+      const startedAt = Date.now();
+      runLog.info('実行を開始', { cursor: run.cursor });
       const result = await engine.advance(run);
+      const ms = Date.now() - startedAt;
       switch (result.outcome) {
         case 'completed':
-          console.log(`[worker] 完了: ${label}`);
+          runLog.info('実行が完了', { ms });
           break;
         case 'awaiting_approval':
-          console.log(`[worker] 承認待ちで中断: ${label} approval=${result.approvalId.slice(0, 8)}`);
+          runLog.info('承認待ちで中断', { approvalId: result.approvalId, ms });
           break;
         case 'failed':
-          console.log(`[worker] 失敗: ${label} 理由=${result.reason}`);
+          // 失敗の詳細はエンジンが warn で記録している
+          runLog.info('実行を終了（失敗）', { ms });
           break;
       }
     }
   } catch (err) {
     // 個別の実行の失敗でワーカー全体を落とさない
-    console.error('[worker] 実行中に例外が発生しました:', err);
+    log.error('実行中に例外が発生しました', { err });
   }
   if (!handled) await sleep(POLL_INTERVAL_MS);
 }
 
-console.log('[worker] 停止しました');
+log.info('停止しました');
 await repo.close();
 
 function sleep(ms: number): Promise<void> {

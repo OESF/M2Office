@@ -11,10 +11,13 @@ import type { AgentDefinition } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import { enqueueJob } from '../engine/enqueue.js';
 import { nextRunAt } from './rule.js';
+import { silentLogger, type Logger } from '../log/logger.js';
 
 export interface SchedulerDeps {
   repo: Repository;
   resolveDefinition(agentId: string, version: number): AgentDefinition | undefined;
+  /** アプリログ。省略時は何も書かない。 */
+  logger?: Logger;
 }
 
 /**
@@ -55,6 +58,9 @@ export class Scheduler {
         : settings.agents.disabled.includes(def.id) ? '管理者がこの業務を無効にしています'
         : null;
       if (!def || reason) {
+        (this.deps.logger ?? silentLogger).warn('定時実行を見送りました', {
+          scheduleId: due.id, tenantId: due.tenantId, reason,
+        });
         await repo.appendAudit({
           id: randomUUID(), tenantId: due.tenantId, actorType: 'system', actorId: 'scheduler',
           action: 'schedule.skip', targetType: 'schedule', targetId: due.id,

@@ -11,7 +11,8 @@
 import {
   PostgresRepository, StubLlmProvider, OpenAiCompatibleProvider, ToolRegistry, BUILTIN_TOOLS,
   RunEngine, Secretary, OFFICIAL_AGENTS, resolveOfficialAgent, buildConnector, LocalFileStore,
-  type FileStore, type LlmProvider, type Repository, type WorkspaceConnector,
+  createLoggerFromEnv,
+  type FileStore, type LlmProvider, type Logger, type Repository, type WorkspaceConnector,
 } from '@m2office/core';
 import { fileURLToPath } from 'node:url';
 import { loadAuthConfig, type AuthConfig } from './auth/config.js';
@@ -26,6 +27,8 @@ export interface AppDeps {
   engine: RunEngine;
   secretary: Secretary;
   auth: AuthConfig;
+  /** アプリログ（開発規約 第7章）。 */
+  log: Logger;
 }
 
 /**
@@ -45,12 +48,13 @@ export function buildDeps(): AppDeps {
   const registry = new ToolRegistry();
   for (const tool of BUILTIN_TOOLS) registry.register(tool);
 
+  const log = createLoggerFromEnv('api');
   const files = new LocalFileStore(fileStorageDir());
   const engine = new RunEngine({
-    repo, llm, registry, connector, files, resolveDefinition: resolveOfficialAgent,
+    repo, llm, registry, connector, files, resolveDefinition: resolveOfficialAgent, logger: log,
   });
   const secretary = new Secretary({ repo, llm, connector, agents: OFFICIAL_AGENTS });
-  return { repo, llm, connector, files, registry, engine, secretary, auth: loadAuthConfig() };
+  return { repo, llm, connector, files, registry, engine, secretary, auth: loadAuthConfig(), log };
 }
 
 /**

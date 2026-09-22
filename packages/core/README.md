@@ -16,6 +16,7 @@ src/engine/      実行エンジン。承認による中断と再開、ジョブ
 src/tools/       ツールの登録簿と内蔵ツール
 src/connectors/  メール・予定・タスク・チャットへの接続口（ダミー実装を含む）
 src/files/       ファイルの置き場と、PDF・Excel・CSV・Word の読み書き
+src/log/         アプリログのロガー（レベル・JSON・伏せ字）
 src/scheduler/   定時実行の規則と起動役
 src/llm/         LLM 抽象化層（スタブ／OpenAI 互換）
 src/repository/  永続化。テナント境界の絞り込みを伴う

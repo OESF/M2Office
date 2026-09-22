@@ -10,6 +10,7 @@
 
 import type { Context, Next } from 'hono';
 import type { RequestContext, Tenant } from '@m2office/shared';
+import type { Logger } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { readSession } from '../auth/session.js';
 
@@ -20,7 +21,15 @@ export type AuthInfo =
 
 /** API 全体で共有する要求ごとの変数。 */
 export interface AppEnv {
-  Variables: { tenant: Tenant; ctx: RequestContext; auth: AuthInfo };
+  Variables: {
+    tenant: Tenant;
+    ctx: RequestContext;
+    auth: AuthInfo;
+    /** 要求ごとの ID。応答の `X-Request-Id` と同じ（開発規約 第7.4節）。 */
+    requestId: string;
+    /** 要求 ID を固定したロガー。 */
+    log: Logger;
+  };
 }
 
 /**

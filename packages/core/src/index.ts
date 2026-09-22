@@ -7,6 +7,11 @@
  * @see 仕様書 第20.5節 リポジトリ構成
  */
 
+export {
+  createLogger, createLoggerFromEnv, silentLogger, LOG_LEVELS,
+  type Logger, type LogLevel, type LogFields, type LoggerOptions,
+} from './log/logger.js';
+
 export * from './llm/provider.js';
 export { StubLlmProvider } from './llm/stub.js';
 export { OpenAiCompatibleProvider, LlmRequestError } from './llm/gemini.js';
