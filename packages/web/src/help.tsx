@@ -8,6 +8,7 @@
  */
 
 import { Fragment, useEffect, useState, type ReactNode } from 'react';
+import { parseMarkdown } from './markdown.js';
 import { api, describeError, type AgentHelpView, type HelpArticleMeta } from './api.js';
 
 /** ヘルプセンターで記事を開く合図の名前。 */
@@ -155,25 +156,21 @@ function ArticleView({ id, items, onOpen, onBack }: {
  * ヘルプの記事の本文を表示する。
  *
  * @remarks
- * 見出し（##）・段落・箇条書き・番号付きの箇条書き・太字だけを扱う（docs/help/README.md）。
+ * 見出し（#・##・###）・段落・箇条書き・番号付きの箇条書き・太字だけを扱う（docs/help/README.md）。
+ * 行ごとに読むため、見出しのすぐ次の行に箇条書きが続いても崩れない（`parseMarkdown`）。
  * HTML としては解釈せず、React の要素として組み立てる。記事に書かれたタグは文字のまま出る。
  */
 export function Markdown({ text }: { text: string }) {
-  const blocks = text.split(/\n\s*\n/);
   return (
     <>
-      {blocks.map((block, i) => {
-        const lines = block.split('\n').filter((l) => l.trim() !== '');
-        if (lines.length === 0) return null;
-        const h = /^(#{2,3})\s+(.*)$/.exec(lines[0]!);
-        if (h && lines.length === 1) return h[1] === '##' ? <h2 key={i}>{inline(h[2]!)}</h2> : <h3 key={i}>{inline(h[2]!)}</h3>;
-        if (lines.every((l) => /^- /.test(l))) {
-          return <ul key={i}>{lines.map((l, j) => <li key={j}>{inline(l.slice(2))}</li>)}</ul>;
+      {parseMarkdown(text).map((b, i) => {
+        switch (b.kind) {
+          case 'h2': return <h2 key={i}>{inline(b.text)}</h2>;
+          case 'h3': return <h3 key={i}>{inline(b.text)}</h3>;
+          case 'ul': return <ul key={i}>{b.items.map((t, j) => <li key={j}>{inline(t)}</li>)}</ul>;
+          case 'ol': return <ol key={i}>{b.items.map((t, j) => <li key={j}>{inline(t)}</li>)}</ol>;
+          default: return <p key={i}>{inline(b.text)}</p>;
         }
-        if (lines.every((l) => /^\d+\. /.test(l))) {
-          return <ol key={i}>{lines.map((l, j) => <li key={j}>{inline(l.replace(/^\d+\. /, ''))}</li>)}</ol>;
-        }
-        return <p key={i}>{inline(lines.join(''))}</p>;
       })}
     </>
   );
