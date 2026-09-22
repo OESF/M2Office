@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { AgentDefinition } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { LlmProvider } from '../llm/provider.js';
+import type { WorkspaceConnector } from '../connectors/types.js';
 import { DIRECT_QUERIES, type DirectAnswer } from './catalog.js';
 
 /** 秘書がどの層で応答したか。計測と表示に使う（仕様書 第8.9.1節）。 */
@@ -19,6 +20,7 @@ export interface SecretaryReply {
 export interface SecretaryDeps {
   repo: Repository;
   llm: LlmProvider;
+  connector: WorkspaceConnector;
   agents: AgentDefinition[];
 }
 
@@ -47,7 +49,9 @@ export class Secretary {
     // 層 1: パターン一致で定型の照会に該当するか（LLM を使わない）
     const direct = this.matchDirect(message);
     if (direct) {
-      const answer = await direct.answer({ tenantId, userId, repo: this.deps.repo });
+      const answer = await direct.answer({
+        tenantId, userId, message, repo: this.deps.repo, connector: this.deps.connector,
+      });
       await this.audit(tenantId, userId, 'secretary.direct', direct.id);
       return { layer: 'direct', ...answer, tokensUsed: 0 };
     }
@@ -78,7 +82,9 @@ export class Secretary {
   }
 
   private matchDirect(message: string) {
-    return DIRECT_QUERIES.find((q) => q.patterns.some((p) => p.test(message)));
+    return DIRECT_QUERIES.find(
+      (q) => q.patterns.some((p) => p.test(message)) && !q.excludes?.some((p) => p.test(message)),
+    );
   }
 
   /**
@@ -95,7 +101,10 @@ export class Secretary {
       (a) =>
         message.includes(a.name) ||
         a.category === 'meeting' && /議事録|会議/.test(message) ||
-        a.category === 'knowledge' && /規程|ルール|決まり|教えて/.test(message),
+        a.category === 'knowledge' && /規程|ルール|決まり|教えて/.test(message) ||
+        a.category === 'mail' && /返信|下書き|受信箱/.test(message) ||
+        a.category === 'calendar' && /日程|調整|空いて/.test(message) ||
+        a.category === 'briefing' && /ブリーフ|まとめて|今週/.test(message),
     );
     if (byKeyword) return { agent: byKeyword, reason: '語句の一致', tokensUsed: 0 };
 

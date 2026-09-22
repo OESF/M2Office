@@ -1,6 +1,7 @@
 import pg from 'pg';
 import type {
-  Approval, Artifact, AuditEvent, Job, Run, RunStep, Tenant, User,
+  Approval, Artifact, AuditEvent, Job, Notification, Run, RunStep, Schedule, Session,
+  Tenant, User,
 } from '@m2office/shared';
 import type { KnowledgeHit, Repository } from './types.js';
 
@@ -85,6 +86,16 @@ export class PostgresRepository implements Repository {
     return rows[0] ?? null;
   }
 
+  async findUserById(tenantId: string, userId: string): Promise<User | null> {
+    const rows = await this.q<User>(
+      `select id, tenant_id as "tenantId", email, display_name as "displayName",
+              roles, status
+         from users where tenant_id = $1 and id = $2`,
+      [tenantId, userId],
+    );
+    return rows[0] ?? null;
+  }
+
   async listUsers(tenantId: string): Promise<User[]> {
     return this.q<User>(
       `select id, tenant_id as "tenantId", email, display_name as "displayName",
@@ -155,6 +166,46 @@ export class PostgresRepository implements Repository {
               failure_reason as "failureReason"
          from runs where tenant_id = $1 order by started_at desc limit $2`,
       [tenantId, limit],
+    );
+  }
+
+  async listRunsWithJobs(
+    tenantId: string,
+    opts: { limit: number; requestedBy?: string },
+  ): Promise<{ run: Run; job: Job }[]> {
+    const rows = await this.q<{ run: Run; job: Job }>(
+      `select json_build_object(
+                'id', r.id, 'jobId', r.job_id, 'tenantId', r.tenant_id, 'status', r.status,
+                'cursor', r.cursor, 'startedAt', r.started_at, 'endedAt', r.ended_at,
+                'tokensUsed', r.tokens_used, 'costJpy', r.cost_jpy::float8,
+                'failureReason', r.failure_reason) as run,
+              json_build_object(
+                'id', j.id, 'tenantId', j.tenant_id, 'agentId', j.agent_id,
+                'agentVersion', j.agent_version, 'requestedBy', j.requested_by,
+                'origin', j.origin, 'input', j.input, 'createdAt', j.created_at) as job
+         from runs r join jobs j on j.id = r.job_id and j.tenant_id = r.tenant_id
+        where r.tenant_id = $1 and ($2::text is null or j.requested_by = $2)
+        order by r.started_at desc limit $3`,
+      [tenantId, opts.requestedBy ?? null, opts.limit],
+    );
+    // json_build_object は時刻を ISO 形式の文字列で返すが、タイムゾーン表記を揃える
+    return rows.map(({ run, job }) => ({
+      run: { ...run, startedAt: iso(run.startedAt)!, endedAt: iso(run.endedAt) },
+      job: { ...job, createdAt: iso(job.createdAt)! },
+    }));
+  }
+
+  async usageByAgent(
+    tenantId: string,
+  ): Promise<{ agentId: string; runs: number; tokens: number; costJpy: number }[]> {
+    return this.q(
+      `select j.agent_id as "agentId", count(*)::int as runs,
+              coalesce(sum(r.tokens_used), 0)::int as tokens,
+              coalesce(sum(r.cost_jpy), 0)::float8 as "costJpy"
+         from runs r join jobs j on j.id = r.job_id and j.tenant_id = r.tenant_id
+        where r.tenant_id = $1
+        group by j.agent_id order by runs desc`,
+      [tenantId],
     );
   }
 
@@ -326,4 +377,143 @@ export class PostgresRepository implements Repository {
       [tenantId, limit],
     );
   }
+
+  async createNotification(n: Notification): Promise<void> {
+    await this.q(
+      `insert into notifications (id, tenant_id, user_id, kind, title, body, run_id,
+                                  read_at, created_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [n.id, n.tenantId, n.userId, n.kind, n.title, n.body, n.runId, n.readAt, n.createdAt],
+    );
+  }
+
+  async listNotifications(tenantId: string, userId: string, limit: number): Promise<Notification[]> {
+    return this.q<Notification>(
+      `select id, tenant_id as "tenantId", user_id as "userId", kind, title, body,
+              run_id as "runId", read_at as "readAt", created_at as "createdAt"
+         from notifications where tenant_id = $1 and user_id = $2
+        order by created_at desc limit $3`,
+      [tenantId, userId, limit],
+    );
+  }
+
+  async markNotificationRead(tenantId: string, userId: string, id: string): Promise<boolean> {
+    const rows = await this.q<{ id: string }>(
+      `update notifications set read_at = coalesce(read_at, now())
+        where tenant_id = $1 and user_id = $2 and id = $3 returning id`,
+      [tenantId, userId, id],
+    );
+    return rows.length > 0;
+  }
+
+  async createSchedule(s: Schedule): Promise<void> {
+    await this.q(
+      `insert into schedules (id, tenant_id, user_id, agent_id, agent_version, input, rule,
+                              timezone, enabled, next_run_at, last_run_at, created_by, created_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+      [s.id, s.tenantId, s.userId, s.agentId, s.agentVersion, JSON.stringify(s.input),
+       JSON.stringify(s.rule), s.timezone, s.enabled, s.nextRunAt, s.lastRunAt,
+       s.createdBy, s.createdAt],
+    );
+  }
+
+  async listSchedules(tenantId: string, userId: string | null): Promise<Schedule[]> {
+    return this.q<Schedule>(
+      `select ${SCHEDULE_COLUMNS} from schedules
+        where tenant_id = $1 and ($2::text is null or user_id = $2)
+        order by created_at`,
+      [tenantId, userId],
+    );
+  }
+
+  async getSchedule(tenantId: string, id: string): Promise<Schedule | null> {
+    const rows = await this.q<Schedule>(
+      `select ${SCHEDULE_COLUMNS} from schedules where tenant_id = $1 and id = $2`,
+      [tenantId, id],
+    );
+    return rows[0] ?? null;
+  }
+
+  async updateSchedule(s: Schedule): Promise<void> {
+    await this.q(
+      `update schedules set input=$3, rule=$4, timezone=$5, enabled=$6, next_run_at=$7,
+                            last_run_at=$8
+         where tenant_id=$1 and id=$2`,
+      [s.tenantId, s.id, JSON.stringify(s.input), JSON.stringify(s.rule), s.timezone,
+       s.enabled, s.nextRunAt, s.lastRunAt],
+    );
+  }
+
+  async claimDueSchedule(
+    now: Date,
+    computeNext: (s: Schedule) => string,
+  ): Promise<Schedule | null> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      const res = await client.query<Schedule>(
+        `select ${SCHEDULE_COLUMNS} from schedules
+          where enabled and next_run_at <= $1
+          order by next_run_at for update skip locked limit 1`,
+        [now.toISOString()],
+      );
+      const due = res.rows[0];
+      if (!due) {
+        await client.query('commit');
+        return null;
+      }
+      await client.query(
+        `update schedules set next_run_at = $2, last_run_at = $3 where id = $1`,
+        [due.id, computeNext(due), now.toISOString()],
+      );
+      await client.query('commit');
+      return due;
+    } catch (err) {
+      await client.query('rollback');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  async createSession(s: Session): Promise<void> {
+    await this.q(
+      `insert into sessions (id, tenant_id, user_id, csrf_token, provider, user_agent,
+                             created_at, last_seen_at, expires_at, revoked_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      [s.id, s.tenantId, s.userId, s.csrfToken, s.provider, s.userAgent, s.createdAt,
+       s.lastSeenAt, s.expiresAt, s.revokedAt],
+    );
+  }
+
+  async findActiveSession(id: string, now: Date): Promise<Session | null> {
+    const rows = await this.q<Session>(
+      `select id, tenant_id as "tenantId", user_id as "userId", csrf_token as "csrfToken",
+              provider, user_agent as "userAgent", created_at as "createdAt",
+              last_seen_at as "lastSeenAt", expires_at as "expiresAt",
+              revoked_at as "revokedAt"
+         from sessions where id = $1 and revoked_at is null and expires_at > $2`,
+      [id, now.toISOString()],
+    );
+    return rows[0] ?? null;
+  }
+
+  async touchSession(id: string, now: Date): Promise<void> {
+    await this.q(`update sessions set last_seen_at = $2 where id = $1`, [id, now.toISOString()]);
+  }
+
+  async revokeSession(id: string, now: Date): Promise<void> {
+    await this.q(
+      `update sessions set revoked_at = coalesce(revoked_at, $2) where id = $1`,
+      [id, now.toISOString()],
+    );
+  }
 }
+
+function iso(v: string | null): string | null {
+  return v ? new Date(v).toISOString() : null;
+}
+
+const SCHEDULE_COLUMNS = `id, tenant_id as "tenantId", user_id as "userId", agent_id as "agentId",
+  agent_version as "agentVersion", input, rule, timezone, enabled, next_run_at as "nextRunAt",
+  last_run_at as "lastRunAt", created_by as "createdBy", created_at as "createdAt"`;

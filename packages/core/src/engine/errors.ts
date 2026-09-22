@@ -21,3 +21,11 @@ export class TenantBoundaryError extends Error {
     this.name = 'TenantBoundaryError';
   }
 }
+
+/** 承認の権限を持たない利用者が判断しようとしたことを表す。 */
+export class ApprovalForbiddenError extends Error {
+  constructor(readonly approvalId: string, readonly approverRole: string[]) {
+    super(`この承認を判断する権限がありません（必要なロール: ${approverRole.join('、')}）`);
+    this.name = 'ApprovalForbiddenError';
+  }
+}

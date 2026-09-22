@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Tool } from './registry.js';
+import { WORKSPACE_TOOLS } from './workspace.js';
 
 /**
  * プロトタイプで用いる内蔵ツール。
@@ -61,32 +62,10 @@ export const documentCreate: Tool = {
   },
 };
 
-/** ToDo を起票する。社内への書き込みのため既定で承認を要する。 */
-export const tasksCreate: Tool = {
-  name: 'tasks.create',
-  risk: 'write-internal',
-  description: 'Google Tasks に ToDo を起票する',
-  async invoke(args) {
-    // Phase 1 で Google Tasks へ接続する。現時点は記録のみ。
-    return { created: true, title: args['title'] ?? '', due: args['due'] ?? null };
-  },
-};
-
-/** チャットへ投稿する。対外送信にあたるため承認が必須。 */
-export const chatPost: Tool = {
-  name: 'chat.post',
-  risk: 'external-send',
-  description: 'Google Chat のスペースへ投稿する',
-  async invoke(args) {
-    // Phase 1 で Google Chat へ接続する。現時点は記録のみ。
-    return { posted: true, space: args['space'] ?? '', text: args['text'] ?? '' };
-  },
-};
-
+/** 基盤が提供するツールの全体。エージェント定義はここから選ぶ。 */
 export const BUILTIN_TOOLS: Tool[] = [
   knowledgeSearch,
   meetingGetTranscript,
   documentCreate,
-  tasksCreate,
-  chatPost,
+  ...WORKSPACE_TOOLS,
 ];

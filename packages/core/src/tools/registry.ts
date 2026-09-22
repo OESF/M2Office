@@ -1,14 +1,18 @@
 import type { RiskLevel } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
+import type { WorkspaceConnector } from '../connectors/types.js';
 
 /** ツール呼び出しの文脈。テナント境界と実行の同一性を持ち回る。 */
 export interface ToolContext {
   tenantId: string;
+  /** 実行を依頼した利用者。ツールはこの利用者の権限で動く（不変則 I-9）。 */
   userId: string;
   runId: string;
   /** 実行中のエージェントが属する権限区画。区画外は `null`。 */
   compartment: string | null;
   repo: Repository;
+  /** メール・予定・タスク・チャットへの接続口。Google を直接呼ばない。 */
+  connector: WorkspaceConnector;
 }
 
 /**

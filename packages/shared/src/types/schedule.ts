@@ -1,0 +1,72 @@
+/**
+ * 定時実行・通知・ログインの型。
+ *
+ * @see 仕様書 第9.5.5節 AG-05 週次ブリーフ
+ * @see 仕様書 第6.5.5節 通知
+ * @see 仕様書 第20.7節 認証の実装方針
+ */
+
+/**
+ * 定時実行の規則。
+ *
+ * @remarks
+ * 利用者が画面で選べる粒度にとどめる（毎日／毎週）。
+ * cron 式は利用者に見せない（原則 u1）。月次は Phase 2 で追加する。
+ */
+export type ScheduleRule =
+  | { kind: 'daily'; hour: number; minute: number }
+  | { kind: 'weekly'; weekday: number; hour: number; minute: number };
+
+export interface Schedule {
+  id: string;
+  tenantId: string;
+  /** 対象者。実行はこの利用者の権限で行う。 */
+  userId: string;
+  agentId: string;
+  agentVersion: number;
+  input: Record<string, unknown>;
+  rule: ScheduleRule;
+  /** 規則を解釈する基準。既定は Asia/Tokyo（仕様書 第6.5.1節）。 */
+  timezone: string;
+  enabled: boolean;
+  nextRunAt: string;
+  lastRunAt: string | null;
+  createdBy: string;
+  createdAt: string;
+}
+
+/** 通知の種類（仕様書 第6.5.5節「受け取る種類」）。 */
+export type NotificationKind = 'brief' | 'run' | 'approval' | 'failure';
+
+/**
+ * 本人宛の通知。
+ *
+ * @remarks
+ * 宛先は常に 1 人であり、ツール `notification.send` からは
+ * 実行を依頼した本人にしか届かない（仕様書 第9.5.5節）。
+ */
+export interface Notification {
+  id: string;
+  tenantId: string;
+  userId: string;
+  kind: NotificationKind;
+  title: string;
+  body: string;
+  runId: string | null;
+  readAt: string | null;
+  createdAt: string;
+}
+
+/** ログインの状態。Cookie の値は保存せず、ハッシュを `id` とする。 */
+export interface Session {
+  id: string;
+  tenantId: string;
+  userId: string;
+  csrfToken: string;
+  provider: 'google' | 'dev';
+  userAgent: string | null;
+  createdAt: string;
+  lastSeenAt: string;
+  expiresAt: string;
+  revokedAt: string | null;
+}
