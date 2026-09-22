@@ -9,3 +9,4 @@ export * from './types/run.js';
 export * from './types/tenant.js';
 export * from './types/audit.js';
 export * from './types/schedule.js';
+export * from './types/approval.js';

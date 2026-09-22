@@ -63,8 +63,10 @@ export interface Approval {
   id: string;
   runStepId: string;
   tenantId: string;
-  /** 承認できるロール。 */
+  /** 承認できるロール。`approverUserId` があるときは使わない。 */
   approverRole: string[];
+  /** 判断できる利用者。`approver: requester` の承認では依頼した本人。それ以外は `null`。 */
+  approverUserId: string | null;
   present: string;
   decision: 'approved' | 'rejected' | null;
   decidedBy: string | null;

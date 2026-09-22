@@ -7,6 +7,7 @@ import type { AgentDefinition } from '@m2office/shared';
  *
  * @remarks
  * 招待は相手に届くため `external-send` にあたり、承認を省略できない。
+ * 承認は**依頼した本人**が行う（`approver: requester`）。承認者や管理者の手は煩わせない。
  * **Phase 1 は社内の参加者のみを対象とする**（Q-52 で決定）。
  * 社外の参加者は空きが見えず、相手の返事を待つ別の仕組みが要るため。
  *
@@ -51,7 +52,9 @@ export const AG03_SCHEDULING: AgentDefinition = {
     {
       id: 'gate-invite',
       type: 'approval',
-      approverRole: ['admin', 'approver'],
+      // 本人の用件なので本人が最終確認する（仕様書 第9.2.3節）
+      approver: 'requester',
+      approverRole: [],
       present: '予定の候補と招待の文面',
       onReject: 'stop',
     },

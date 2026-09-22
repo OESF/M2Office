@@ -54,7 +54,12 @@ export interface AgentStep {
 export interface ApprovalStep {
   id: string;
   type: 'approval';
-  /** 承認できるロール。 */
+  /**
+   * 誰が判断するか。既定は `role`（仕様書 第9.2.3節）。
+   * `requester` では実行を依頼した本人だけが判断でき、`approverRole` は使わない。
+   */
+  approver?: 'role' | 'requester';
+  /** 承認できるロール。`approver` が `role` のときに使う。 */
   approverRole: string[];
   /** 承認画面に提示する内容の説明。 */
   present: string;

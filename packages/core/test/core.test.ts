@@ -11,7 +11,8 @@ import type {
 } from '@m2office/shared';
 import {
   RunEngine, ToolRegistry, BUILTIN_TOOLS, MockWorkspaceConnector, nextRunAt,
-  ApprovalForbiddenError, type LlmProvider, type Repository,
+  ApprovalForbiddenError, DefinitionInvalidError, validateDefinition,
+  type LlmProvider, type Repository,
 } from '../src/index.js';
 
 /** 実行エンジンが使う操作だけを持つ、記憶上の永続化層。 */
@@ -112,6 +113,36 @@ test('承認者のロールを持たない利用者は、承認も却下もで�
       ApprovalForbiddenError,
     );
   }
+});
+
+test('approver: requester の承認は、依頼した本人だけが判断できる', async () => {
+  const def: AgentDefinition = {
+    ...SHARE_DEF, id: 'requester-test',
+    steps: SHARE_DEF.steps.map((s) =>
+      s.type === 'approval' ? { ...s, approver: 'requester' as const, approverRole: [] } : s),
+  };
+  const { repo, engine, run } = setup(def, { name: 'chat.post', args: {} });
+  const first = await engine.advance(run);
+  if (first.outcome !== 'awaiting_approval') assert.fail('承認待ちにならない');
+  assert.equal(repo.approvals[0]!.approverUserId, 'u-member', '依頼者が承認者として記録される');
+
+  // 承認者・管理者のロールを持っていても、本人でなければ判断できない
+  await assert.rejects(
+    engine.decideApproval('t', first.approvalId, 'approved', { id: 'u-admin', roles: ['admin', 'approver'] }, null),
+    ApprovalForbiddenError,
+  );
+  await engine.decideApproval('t', first.approvalId, 'approved', { id: 'u-member', roles: ['member'] }, null);
+  assert.equal((await repo.getRun('t', 'r1'))!.status, 'queued', '本人の承認で再開できる');
+});
+
+test('ロールで判断する承認に、ロールの指定が無い定義は拒否する', () => {
+  const registry = new ToolRegistry();
+  for (const t of BUILTIN_TOOLS) registry.register(t);
+  const def: AgentDefinition = {
+    ...SHARE_DEF,
+    steps: SHARE_DEF.steps.map((s) => (s.type === 'approval' ? { ...s, approverRole: [] } : s)),
+  };
+  assert.throws(() => validateDefinition(def, registry), DefinitionInvalidError);
 });
 
 test('notification.send は依頼者本人にだけ届き、宛先の指定を拒む', async () => {

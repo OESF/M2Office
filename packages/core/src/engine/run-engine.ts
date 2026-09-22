@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
-  alwaysRequiresApproval,
+  alwaysRequiresApproval, canDecide,
   type AgentDefinition, type AgentStep, type ApprovalStep, type Approval, type Run,
   type RunStep, type Step,
 } from '@m2office/shared';
@@ -77,7 +77,7 @@ export class RunEngine {
       }
 
       if (step.type === 'approval') {
-        const approvalId = await this.suspendForApproval(current, step);
+        const approvalId = await this.suspendForApproval(current, step, job.requestedBy);
         return { outcome: 'awaiting_approval', approvalId };
       }
 
@@ -127,9 +127,9 @@ export class RunEngine {
     const approval = await repo.getApproval(tenantId, approvalId);
     if (!approval) throw new RunNotResumableError(approvalId, '承認が見つかりません');
     if (approval.decision) throw new RunNotResumableError(approvalId, '判断済み');
-    // 定義が指定したロールを持つ者だけが判断できる。却下も同じ扱いとする
-    if (!approval.approverRole.some((r) => decider.roles.includes(r))) {
-      throw new ApprovalForbiddenError(approvalId, approval.approverRole);
+    // 定義が指定した者だけが判断できる。却下も同じ扱いとする（仕様書 第9.2.3節）
+    if (!canDecide(approval, decider)) {
+      throw new ApprovalForbiddenError(approvalId, approval);
     }
 
     const stepRow = await repo.getRunStepById(tenantId, approval.runStepId);
@@ -170,7 +170,11 @@ export class RunEngine {
     return { runId: run.id };
   }
 
-  private async suspendForApproval(run: Run, step: ApprovalStep): Promise<string> {
+  private async suspendForApproval(
+    run: Run,
+    step: ApprovalStep,
+    requestedBy: string,
+  ): Promise<string> {
     const { repo } = this.deps;
     const now = new Date().toISOString();
     const runStep: RunStep = {
@@ -182,7 +186,9 @@ export class RunEngine {
 
     const approval: Approval = {
       id: randomUUID(), runStepId: runStep.id, tenantId: run.tenantId,
-      approverRole: step.approverRole, present: step.present, decision: null,
+      approverRole: step.approver === 'requester' ? [] : step.approverRole,
+      approverUserId: step.approver === 'requester' ? requestedBy : null,
+      present: step.present, decision: null,
       decidedBy: null, comment: null, decidedAt: null, createdAt: now,
     };
     await repo.createApproval(approval);

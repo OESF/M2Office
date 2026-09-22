@@ -58,6 +58,18 @@ export function validateDefinition(def: AgentDefinition, registry: ToolRegistry)
     }
   }
 
+  // 4. 承認者の指定。ロールで判断する承認には、ロールが 1 つ以上要る
+  for (const step of def.steps) {
+    if (step.type !== 'approval') continue;
+    const mode = step.approver ?? 'role';
+    if (mode !== 'role' && mode !== 'requester') {
+      throw new DefinitionInvalidError(`approver の値が不正です: ${String(mode)}`);
+    }
+    if (mode === 'role' && step.approverRole.length === 0) {
+      throw new DefinitionInvalidError(`承認できるロールが指定されていません: ${step.id}`);
+    }
+  }
+
   if (def.steps.length === 0) {
     throw new DefinitionInvalidError('ステップが 1 つもありません');
   }

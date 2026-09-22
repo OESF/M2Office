@@ -274,10 +274,10 @@ export class PostgresRepository implements Repository {
 
   async createApproval(a: Approval): Promise<void> {
     await this.q(
-      `insert into approvals (id, run_step_id, tenant_id, approver_role, present,
-                              decision, decided_by, comment, decided_at, created_at)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-      [a.id, a.runStepId, a.tenantId, a.approverRole, a.present, a.decision,
+      `insert into approvals (id, run_step_id, tenant_id, approver_role, approver_user_id,
+                              present, decision, decided_by, comment, decided_at, created_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [a.id, a.runStepId, a.tenantId, a.approverRole, a.approverUserId, a.present, a.decision,
        a.decidedBy, a.comment, a.decidedAt, a.createdAt],
     );
   }
@@ -285,7 +285,8 @@ export class PostgresRepository implements Repository {
   async getApproval(tenantId: string, id: string): Promise<Approval | null> {
     const rows = await this.q<Approval>(
       `select id, run_step_id as "runStepId", tenant_id as "tenantId",
-              approver_role as "approverRole", present, decision,
+              approver_role as "approverRole",
+              approver_user_id as "approverUserId", present, decision,
               decided_by as "decidedBy", comment, decided_at as "decidedAt",
               created_at as "createdAt"
          from approvals where tenant_id = $1 and id = $2`,
@@ -297,7 +298,8 @@ export class PostgresRepository implements Repository {
   async listPendingApprovals(tenantId: string): Promise<Approval[]> {
     return this.q<Approval>(
       `select id, run_step_id as "runStepId", tenant_id as "tenantId",
-              approver_role as "approverRole", present, decision,
+              approver_role as "approverRole",
+              approver_user_id as "approverUserId", present, decision,
               decided_by as "decidedBy", comment, decided_at as "decidedAt",
               created_at as "createdAt"
          from approvals

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Tool, ToolContext } from './registry.js';
+import { canDecide } from '@m2office/shared';
 import { addDays, jst, ymd } from '../connectors/mock.js';
 
 /**
@@ -211,7 +212,7 @@ export const notificationSend: Tool = {
 /**
  * 本人が承認できる承認待ちを一覧する。
  *
- * @remarks 危険度 `read`。本人のロールで承認できるものだけを返す。
+ * @remarks 危険度 `read`。本人が判断できるもの（ロール、または依頼者本人）だけを返す。
  */
 export const approvalsPending: Tool = {
   name: 'approvals.pending',
@@ -221,7 +222,7 @@ export const approvalsPending: Tool = {
     const user = await ctx.repo.findUserById(ctx.tenantId, ctx.userId);
     const roles: string[] = user?.roles ?? [];
     const items = (await ctx.repo.listPendingApprovals(ctx.tenantId))
-      .filter((a) => a.approverRole.some((r) => roles.includes(r)))
+      .filter((a) => canDecide(a, { id: ctx.userId, roles }))
       .map((a) => ({ id: a.id, present: a.present, since: a.createdAt }));
     return { count: items.length, items };
   },

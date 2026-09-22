@@ -151,7 +151,8 @@ export function ApprovalTray({
           <h3>承認の依頼</h3>
           <p>{a.present}</p>
           <p className="muted">
-            承認できる役割: {a.approverRole.join(' / ')}
+            {a.approverUserId ? 'あなたが依頼した業務です。内容を確認してください。'
+              : `承認できる役割: ${a.approverRole.join(' / ')}`}
           </p>
           <button className="btn" disabled={busy === a.id} onClick={() => decide(a.id, 'approved')}>
             承認する

@@ -24,8 +24,15 @@ export class TenantBoundaryError extends Error {
 
 /** 承認の権限を持たない利用者が判断しようとしたことを表す。 */
 export class ApprovalForbiddenError extends Error {
-  constructor(readonly approvalId: string, readonly approverRole: string[]) {
-    super(`この承認を判断する権限がありません（必要なロール: ${approverRole.join('、')}）`);
+  constructor(
+    readonly approvalId: string,
+    approval: { approverRole: string[]; approverUserId: string | null },
+  ) {
+    super(
+      approval.approverUserId
+        ? 'この承認は、依頼した本人だけが判断できます'
+        : `この承認を判断する権限がありません（必要なロール: ${approval.approverRole.join('、')}）`,
+    );
     this.name = 'ApprovalForbiddenError';
   }
 }

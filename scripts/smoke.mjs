@@ -40,10 +40,10 @@ async function call(tenant, path, init = {}, who = 'admin') {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** 実行が指定した状態になるまで待つ。 */
-async function waitFor(tenant, runId, statuses, timeoutMs = 20000) {
+async function waitFor(tenant, runId, statuses, timeoutMs = 20000, who = 'admin') {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const { body } = await call(tenant, `/v1/runs/${runId}`);
+    const { body } = await call(tenant, `/v1/runs/${runId}`, {}, who);
     if (body?.run && statuses.includes(body.run.status)) return body;
     if (Date.now() > deadline) return body;
     await sleep(500);
@@ -239,28 +239,35 @@ console.log('\n■ 9. AG-01 受信箱整理（承認なし・送信しない）'
   run.artifacts?.length ? ok(`分類の一覧を成果物に残した（${run.artifacts[0].title}）`) : ng('分類の一覧が無い');
 }
 
-console.log('\n■ 10. AG-03 日程調整（招待の前に承認）');
+console.log('\n■ 10. AG-03 日程調整（招待の前に本人が承認）');
 {
+  // 一般利用者が依頼する。承認は依頼した本人が行う（仕様書 第9.2.3節）
   const { body } = await call('a', '/v1/jobs', {
     method: 'POST',
-    body: JSON.stringify({ agentId: 'scheduling', input: { title: '企画会議', attendees: 'member@alpha.example.jp' } }),
-  });
-  const run = await waitFor('a', body.runId, ['awaiting_approval', 'completed', 'failed']);
+    body: JSON.stringify({ agentId: 'scheduling', input: { title: '企画会議', attendees: 'admin@alpha.example.jp' } }),
+  }, 'member');
+  const run = await waitFor('a', body.runId, ['awaiting_approval', 'completed', 'failed'], 20000, 'member');
   const invitedEarly = run.steps.flatMap((s) => s.output?.tools ?? []).some((t) => t.name === 'calendar.create' && !t.error);
   run.run.status === 'awaiting_approval' && !invitedEarly
     ? ok('空きを取得し、招待の前で止まった')
     : ng(`承認待ちにならない（${run.run.status}）`);
 
-  // 一般利用者は承認できない
-  const { body: pending } = await call('a', '/v1/approvals');
-  const approval = pending.items.find((a) => a.present.includes('招待'));
+  const { body: mine } = await call('a', '/v1/approvals', {}, 'member');
+  const approval = mine.items.find((a) => a.present.includes('招待'));
+  approval?.approverUserId === 'u-a-member'
+    ? ok('依頼した本人の承認トレイに出た') : ng('本人の承認トレイに出ない');
+
+  const { body: adminTray } = await call('a', '/v1/approvals');
+  adminTray.items.every((a) => a.id !== approval.id)
+    ? ok('管理者の承認トレイには出ない') : ng('他人の承認トレイに出ている');
+
   const denied = await call('a', `/v1/approvals/${approval.id}`, {
     method: 'POST', body: JSON.stringify({ decision: 'approved' }),
-  }, 'member');
-  denied.status === 403 ? ok('承認者でない利用者の承認は拒否される（403）') : ng(`拒否されない（${denied.status}）`);
+  });
+  denied.status === 403 ? ok('管理者でも本人以外は承認できない（403）') : ng(`拒否されない（${denied.status}）`);
 
-  await call('a', `/v1/approvals/${approval.id}`, { method: 'POST', body: JSON.stringify({ decision: 'approved' }) });
-  const done = await waitFor('a', body.runId, ['completed', 'failed']);
+  await call('a', `/v1/approvals/${approval.id}`, { method: 'POST', body: JSON.stringify({ decision: 'approved' }) }, 'member');
+  const done = await waitFor('a', body.runId, ['completed', 'failed'], 20000, 'member');
   const attempts = done.steps.flatMap((s) => s.output?.tools ?? []).filter((t) => t.name === 'calendar.create');
   const created = attempts.find((t) => t.result);
   done.run.status === 'completed' && created?.result?.eventId

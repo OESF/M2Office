@@ -55,8 +55,10 @@ decideApproval(...)  →  承認を記録し、待ち行列へ戻す
 定義に承認ステップがあっても、その手前で推論が送信を試みれば送られてしまうためです。
 メール本文に紛れた指示（不変則 I-6）で起こりえます。
 
-承認・却下は、承認ステップの `approverRole` のロールを持つ者だけが行えます
-（持たない場合は `ApprovalForbiddenError`）。
+承認・却下は、承認ステップが指定した者だけが行えます（仕様書 第9.2.3節）。
+既定はロールで判断し（`approverRole`）、`approver: 'requester'` では依頼した本人だけが判断できます。
+判定は `@m2office/shared` の `canDecide()` 1 か所にまとめています。
+判断できない場合は `ApprovalForbiddenError` です。
 
 ### 接続口（`WorkspaceConnector`）
 
