@@ -10,7 +10,8 @@ import { cpSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  AgentCatalog, BUILTIN_TOOLS, OFFICIAL_AGENTS, StubLlmProvider, ToolRegistry, loadExtension, loadExtensions,
+  BUILTIN_TOOLS, ExtensionHub, OFFICIAL_AGENTS, StubLlmProvider, ToolRegistry, loadExtension, loadExtensions,
+  type InstalledExtension, type Repository,
 } from '../src/index.js';
 
 const registry = new ToolRegistry();
@@ -93,15 +94,28 @@ test('同じ ID の拡張機能は 2 つ目を拒否する', () => {
   assert.ok(errors[0]!.problems.some((x) => x.includes('すでに使われています')));
 });
 
-test('会社が導入した拡張機能の業務エージェントだけが、その会社で使える', () => {
+test('会社が導入した拡張機能の業務エージェントだけが、その会社で使える', async () => {
   const { pkg } = loadExtension(SAMPLE, registry);
-  const catalog = new AgentCatalog(OFFICIAL_AGENTS, [pkg!]);
+  const installed: InstalledExtension[] = [];
+  const repo = {
+    listInstalledExtensions: async () => installed,
+    listPrivateExtensions: async () => [],
+  } as unknown as Repository;
+  const hub = new ExtensionHub({ repo, registry, official: OFFICIAL_AGENTS, packages: [pkg!] });
   const id = 'jp.m2office.samples.hello-world:hello';
-  assert.ok(!catalog.forTenant([]).some((a) => a.id === id));
-  assert.ok(catalog.forTenant(['jp.m2office.samples.hello-world']).some((a) => a.id === id));
-  assert.equal(catalog.availableFor(id, []), false);
-  assert.equal(catalog.availableFor('minutes', []), true, '公式は常に使える');
-  assert.equal(catalog.resolve(id, 1)?.name, 'あいさつ（サンプル）');
+  let view = await hub.forTenant('t1');
+  assert.ok(!view.agents.some((a) => a.id === id));
+  assert.equal(view.isAvailable(id), false);
+  assert.equal(view.isAvailable('minutes'), true, '公式は常に使える');
+  assert.equal(view.resolve(id, 1)?.name, 'あいさつ（サンプル）', '名前を引くために、未導入でも解決はできる');
+  installed.push({
+    tenantId: 't1', extensionId: 'jp.m2office.samples.hello-world', version: '1.0.0',
+    consentedPermissions: { tools: ['document.create'], max_risk_level: 'draft', connectors: [] },
+    installedBy: 'u', installedAt: new Date().toISOString(), enabled: true,
+  });
+  view = await hub.forTenant('t1');
+  assert.ok(view.agents.some((a) => a.id === id));
+  assert.equal(view.entryOf(id)?.active, true);
 });
 
 test('スタブは入力の一致する評価のケースの見本を再生し、一致しなければツールを呼ばない', async () => {

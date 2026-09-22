@@ -16,8 +16,11 @@ export function helpRoute(deps: AppDeps) {
 
   /** 要求ごとの出し分けの文脈（役割・無効にした業務・自動化ポリシー）。 */
   async function contextOf(tenantId: string, roles: readonly string[]): Promise<HelpContext> {
-    const [settings, agents] = await Promise.all([deps.repo.getTenantSettings(tenantId), deps.agentsFor(tenantId)]);
-    return { roles, disabledAgents: settings.agents.disabled, automation: settings.automation, agents };
+    const [settings, view] = await Promise.all([deps.repo.getTenantSettings(tenantId), deps.tenantView(tenantId)]);
+    return {
+      roles, disabledAgents: settings.agents.disabled, automation: settings.automation,
+      agents: view.agents, registry: view.registry,
+    };
   }
 
   /** 記事の一覧。本文は含めない。 */

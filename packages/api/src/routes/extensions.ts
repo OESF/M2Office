@@ -1,16 +1,21 @@
 /**
- * @file 拡張機能の導入の API（管理者向け）。導入できる拡張機能の一覧、同意して導入、削除。
+ * @file 拡張機能の API（管理者向け）。一覧、ファイルからの取り込み、同意して導入、スイッチ、接続の確認、削除。
  *
- * 導入の前に必要な権限を平易な言葉で示し、管理者の同意を得て、同意した権限を記録する（不変則 I-8）。
- * 読み込まれた拡張機能でも、導入していない会社では使えない。
+ * 導入の前に必要な権限を構成要素ごとに平易な言葉で示し、管理者の同意を得て、同意した権限を記録する（不変則 I-8）。
+ * スイッチの切り替えに同意のやり直しは要らない。ただし権限が増えた版では再同意を求める。
+ * ファイルから取り込んだ拡張機能（自社専用）は、取り込んだ会社にだけ見える。
  *
- * @see 仕様書 第12.9.3節 会社への導入
+ * @see 仕様書 第12.10節 持ち運べる拡張機能
+ * @see 仕様書 第12.11節 コネクタ（L2）の実装
  */
 
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import type { RiskLevel } from '@m2office/shared';
-import type { ExtensionPackage } from '@m2office/core';
+import {
+  consentSnapshot, encodeFiles, unpackExtension, EXTENSION_FILE_MAX_BYTES,
+  type ExtensionEntry, type ExtensionPackage, type TenantExtensions,
+} from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { requireRole, type AppEnv } from '../middleware/tenant.js';
 
@@ -23,72 +28,186 @@ const RISK_WORDS: Record<RiskLevel, string> = {
   financial: 'お金に関わる処理をする（必ず承認のあと）',
 };
 
+/** 認証の方式を利用者向けの言葉にする。 */
+const AUTH_WORDS: Record<string, string> = {
+  none: '認証なし（公開されている情報だけを扱います）',
+  oauth: '利用者ごとの認可',
+  api_key: '管理者が登録する鍵',
+};
+
 export function extensionsRoute(deps: AppDeps) {
   const app = new Hono<AppEnv>();
   app.use('*', requireRole('admin'));
 
-  /** 必要な権限を、ツールの「すること」と最大の危険度で説明する。 */
-  function describe(pkg: ExtensionPackage) {
+  /** 拡張機能の中身と、必要な権限を構成要素ごとに説明する（第12.10.5節）。 */
+  function describe(pkg: ExtensionPackage, view: TenantExtensions | null) {
     const { tools, max_risk_level } = pkg.manifest.permissions;
+    const connectorTools = pkg.connectors.flatMap((c) => c.tools.map((t) => ({ connector: c, tool: t })));
     return {
       id: pkg.manifest.id,
       name: pkg.manifest.name,
       version: pkg.manifest.version,
       description: pkg.manifest.description ?? '',
       publisher: pkg.manifest.publisher,
+      icon: pkg.icon,
+      readme: pkg.readme,
+      counts: { agents: pkg.agents.length, connectors: pkg.connectors.length, tools: connectorTools.length },
       agents: pkg.agents.map((a) => ({ id: a.id, name: a.name, summary: a.help?.summary ?? a.description })),
+      connectors: pkg.connectors.map((c) => ({
+        id: c.id, name: c.name, description: c.description ?? '', url: c.url,
+        auth: c.auth.type, authText: AUTH_WORDS[c.auth.type] ?? c.auth.type,
+        tools: c.tools.map((t) => ({
+          name: `${c.id}.${t.name}`, description: t.description, risk: t.risk, riskText: RISK_WORDS[t.risk],
+        })),
+      })),
       permissions: {
         maxRisk: max_risk_level,
         maxRiskText: RISK_WORDS[max_risk_level],
-        tools: tools.map((t) => ({ name: t, does: deps.registry.get(t)?.helpText ?? '（不明なツール）' })),
+        tools: tools.map((t) => {
+          const tool = view?.registry.get(t) ?? deps.registry.get(t);
+          const fromConnector = connectorTools.find(({ connector, tool: ct }) => `${connector.id}.${ct.name}` === t);
+          return {
+            name: t,
+            does: tool?.helpText ?? (fromConnector ? `${fromConnector.tool.description}（外部のサービス「${fromConnector.connector.name}」を使います）` : '（不明なツール）'),
+            risk: tool?.risk ?? fromConnector?.tool.risk ?? null,
+          };
+        }),
       },
     };
   }
 
+  /** 会社から見た状態（区分・導入・有効・再同意）。 */
+  function stateOf(e: ExtensionEntry) {
+    return {
+      origin: e.origin,
+      originText: e.origin === 'official' ? '公式' : '自社専用',
+      installed: e.installed ? { version: e.installed.version, installedAt: e.installed.installedAt } : null,
+      enabled: e.installed?.enabled ?? false,
+      needsReconsent: e.needsReconsent,
+      active: e.active,
+    };
+  }
+
+  const find = (view: TenantExtensions, id: string) => view.entries.find((e) => e.pkg.manifest.id === id);
+
   app.get('/', async (c) => {
     const { tenant } = c.get('ctx');
-    const installed = await deps.repo.listInstalledExtensions(tenant.id);
-    const items = deps.catalog.extensions().map((pkg) => {
-      const rec = installed.find((i) => i.extensionId === pkg.manifest.id);
-      return { ...describe(pkg), installed: rec ? { version: rec.version, installedAt: rec.installedAt } : null };
-    });
-    return c.json({ items });
+    const view = await deps.tenantView(tenant.id);
+    return c.json({ items: view.entries.map((e) => ({ ...describe(e.pkg, view), ...stateOf(e) })) });
   });
 
   /**
-   * 同意して導入する。
+   * ファイル（`.m2ext`）から取り込む（第12.10.2節）。本文は ZIP のバイト列。
    *
-   * @remarks 本文に `consent: true` が無ければ導入しない。同意した権限の一覧を記録する。
+   * @remarks
+   * 取り込むだけで、導入（権限への同意）は別に行う。検証を通らなければ、問題の一覧を返して保存しない。
+   * 同じ ID の自社専用の拡張機能があれば置き換える。権限が増えていれば、使う前に再同意が要る。
+   */
+  app.post('/import', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const declared = Number(c.req.header('content-length') ?? 0);
+    if (declared > EXTENSION_FILE_MAX_BYTES) return c.json({ error: 'ファイルが大きすぎます（5 MB まで）' }, 413);
+    const data = new Uint8Array(await c.req.arrayBuffer());
+    if (data.length === 0) return c.json({ error: 'ファイルが空です' }, 400);
+
+    const unpacked = await unpackExtension(data);
+    if (unpacked.problems.length > 0) {
+      return c.json({ error: '取り込めませんでした', problems: unpacked.problems }, 400);
+    }
+    const { pkg, problems } = await deps.hub.validateImport(tenant.id, unpacked.files);
+    if (!pkg || problems.length > 0) {
+      return c.json({ error: '検証を通りませんでした', problems }, 400);
+    }
+    const now = new Date().toISOString();
+    await deps.repo.savePrivateExtension({
+      tenantId: tenant.id, extensionId: pkg.manifest.id, version: pkg.manifest.version,
+      files: encodeFiles(unpacked.files), sizeBytes: data.length, importedBy: user.id, importedAt: now,
+    });
+    await deps.repo.appendAudit({
+      id: randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id, action: 'extension.import',
+      targetType: 'extension', targetId: pkg.manifest.id,
+      detail: { version: pkg.manifest.version, sizeBytes: data.length }, occurredAt: now,
+    });
+    const view = await deps.tenantView(tenant.id);
+    const entry = find(view, pkg.manifest.id);
+    return c.json({ ok: true, item: entry ? { ...describe(entry.pkg, view), ...stateOf(entry) } : null });
+  });
+
+  /**
+   * 同意して導入する。導入すると有効（スイッチが入った状態）になる。
+   *
+   * @remarks 本文に `consent: true` が無ければ導入しない。同意した権限（コネクタの接続先と危険度を含む）を記録する。
    */
   app.post('/:id/install', async (c) => {
     const { tenant, user } = c.get('ctx');
-    const pkg = deps.catalog.extensions().find((p) => p.manifest.id === c.req.param('id'));
-    if (!pkg) return c.json({ error: '拡張機能が見つかりません' }, 404);
+    const entry = find(await deps.tenantView(tenant.id), c.req.param('id'));
+    if (!entry) return c.json({ error: '拡張機能が見つかりません' }, 404);
     const body = await c.req.json<{ consent?: boolean }>().catch(() => ({ consent: false }));
     if (body.consent !== true) {
       return c.json({ error: '必要な権限を確認し、同意してから導入してください' }, 400);
     }
+    const { pkg } = entry;
     const now = new Date().toISOString();
+    const consented = consentSnapshot(pkg);
     await deps.repo.installExtension({
       tenantId: tenant.id, extensionId: pkg.manifest.id, version: pkg.manifest.version,
-      consentedPermissions: pkg.manifest.permissions, installedBy: user.id, installedAt: now,
+      consentedPermissions: consented, installedBy: user.id, installedAt: now, enabled: true,
     });
     await deps.repo.appendAudit({
       id: randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id, action: 'extension.install',
       targetType: 'extension', targetId: pkg.manifest.id,
-      detail: { version: pkg.manifest.version, permissions: pkg.manifest.permissions }, occurredAt: now,
+      detail: { version: pkg.manifest.version, origin: entry.origin, permissions: consented }, occurredAt: now,
     });
     return c.json({ ok: true });
   });
 
-  /** 導入をやめる。業務エージェントは使えなくなるが、実行の記録は残る。 */
+  /**
+   * 有効・無効を切り替える（スイッチ。第12.10.4節）。すぐに反映し、監査ログに残す。
+   *
+   * @remarks 権限が増えた版を有効にするときは、先に再同意（導入）を求める。
+   */
+  app.put('/:id/enabled', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const id = c.req.param('id');
+    const body = await c.req.json<{ enabled?: unknown }>().catch(() => ({ enabled: undefined }));
+    if (typeof body.enabled !== 'boolean') return c.json({ error: 'enabled に true か false を指定してください' }, 400);
+    const entry = find(await deps.tenantView(tenant.id), id);
+    if (!entry?.installed) return c.json({ error: '導入されていません' }, 404);
+    if (body.enabled && entry.needsReconsent) {
+      return c.json({ error: '新しい版で必要な権限が増えています。内容を確認して、もう一度同意してください' }, 409);
+    }
+    await deps.repo.setExtensionEnabled(tenant.id, id, body.enabled);
+    await deps.repo.appendAudit({
+      id: randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id,
+      action: body.enabled ? 'extension.enable' : 'extension.disable',
+      targetType: 'extension', targetId: id, detail: {}, occurredAt: new Date().toISOString(),
+    });
+    return c.json({ ok: true, enabled: body.enabled });
+  });
+
+  /** コネクタの接続を確かめる（第12.11.3節）。宣言したツールを MCP サーバが提供しているかを返す。 */
+  app.post('/:id/connectors/:connectorId/check', async (c) => {
+    const { tenant } = c.get('ctx');
+    const entry = find(await deps.tenantView(tenant.id), c.req.param('id'));
+    const connector = entry?.pkg.connectors.find((x) => x.id === c.req.param('connectorId'));
+    if (!connector) return c.json({ error: 'コネクタが見つかりません' }, 404);
+    return c.json(await deps.hub.checkConnector(connector));
+  });
+
+  /**
+   * 削除する。業務エージェントは使えなくなるが、実行の記録は残る。
+   *
+   * @remarks 自社専用の拡張機能は、取り込んだファイルも消す。使うには取り込み直す。
+   */
   app.delete('/:id', async (c) => {
     const { tenant, user } = c.get('ctx');
-    const ok = await deps.repo.uninstallExtension(tenant.id, c.req.param('id'));
-    if (!ok) return c.json({ error: '導入されていません' }, 404);
+    const id = c.req.param('id');
+    const uninstalled = await deps.repo.uninstallExtension(tenant.id, id);
+    const removed = await deps.repo.deletePrivateExtension(tenant.id, id);
+    if (!uninstalled && !removed) return c.json({ error: '導入されていません' }, 404);
     await deps.repo.appendAudit({
       id: randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id, action: 'extension.uninstall',
-      targetType: 'extension', targetId: c.req.param('id'), detail: {}, occurredAt: new Date().toISOString(),
+      targetType: 'extension', targetId: id, detail: { removedPackage: removed }, occurredAt: new Date().toISOString(),
     });
     return c.json({ ok: true });
   });

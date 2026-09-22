@@ -9,9 +9,10 @@ import type { AuditEvent } from '@m2office/shared';
 import { api, type AdminRun, type Me } from './api.js';
 import { statusLabel } from './components.js';
 import {
-  AgentSettings, CompanySettings, ExtensionSettings, KnowledgeSettings, UserSettings,
+  AgentSettings, CompanySettings, KnowledgeSettings, UserSettings,
 } from './AdminSettings.js';
 import { Dashboard } from './Dashboard.js';
+import { ExtensionSettings } from './Extensions.js';
 import { HelpCenter, useOpenHelp } from './help.js';
 
 type Tab =

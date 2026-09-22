@@ -1,18 +1,23 @@
 /**
- * @file 拡張機能（L1: 業務エージェント）の読み込みと検証。
+ * @file 拡張機能の読み込みと検証。業務エージェント（L1）とコネクタ（L2）の宣言を読む。
  *
- * `extensions/<名前>/` のディレクトリを 1 つの拡張機能として読み、検証を通ったものだけを返す。
- * 第三者のコードは読み込まない。読むのは宣言的な定義（JSON）だけである（不変則 I-7）。
+ * 拡張機能は「ファイルの集まり」として検証する。ディレクトリ（公式の配布元）から読んでも、
+ * `.m2ext` ファイル（管理者の取り込み）から読んでも、同じ検証を通る。
+ * 第三者のコードは読み込まない。読むのは宣言的な定義（JSON）と説明（Markdown・画像）だけである（不変則 I-7）。
  *
  * @see 仕様書 第12.9節 拡張機能の読み込みと導入
+ * @see 仕様書 第12.10節 持ち運べる拡張機能
  * @see 開発者マニュアル docs/developer/
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import { RISK_LEVELS, RISK_ORDER, type AgentDefinition, type EvalCase, type RiskLevel } from '@m2office/shared';
 import type { ToolRegistry } from '../tools/registry.js';
 import { validateDefinition } from '../engine/validate.js';
+import {
+  checkConnector, connectorToolName, connectorTools, type ConnectorDeclaration,
+} from './connectors.js';
 
 /** 拡張機能のマニフェスト（仕様書 第12.3節）。 */
 export interface ExtensionManifest {
@@ -26,20 +31,29 @@ export interface ExtensionManifest {
   /** 対応するエージェント定義スキーマの版の範囲（例: `>=1 <2`）。 */
   platform_schema: string;
   permissions: {
-    /** 使ってよいツール。定義はこの中のツールだけを使える。 */
+    /** 使ってよいツール。定義はこの中のツールだけを使える。コネクタのツールは `<コネクタの ID>.<名前>`。 */
     tools: string[];
-    /** 扱う最大の危険度。定義のツールはこれを超えられない。 */
+    /** 扱う最大の危険度。定義のツールもコネクタのツールもこれを超えられない。 */
     max_risk_level: RiskLevel;
   };
 }
+
+/** 拡張機能を構成するファイル。キーはパッケージの中のパス（`/` 区切り）。 */
+export type ExtensionFiles = Map<string, Uint8Array>;
 
 /** 読み込んだ拡張機能。 */
 export interface ExtensionPackage {
   manifest: ExtensionManifest;
   /** 業務エージェント。ID は `<拡張機能の ID>:<定義の ID>` に置き換え済み。 */
   agents: AgentDefinition[];
-  /** 読み込んだディレクトリ。 */
-  dir: string;
+  /** コネクタの宣言（仕様書 第12.11節）。 */
+  connectors: ConnectorDeclaration[];
+  /** 管理者向けの説明（`README.md`）。 */
+  readme: string | null;
+  /** アイコン（`icon.png`）。`data:` URL。 */
+  icon: string | null;
+  /** 読み込んだディレクトリ。ファイルから取り込んだものは `null`。 */
+  dir: string | null;
 }
 
 /** 読み込みの結果。検証を通らなかった拡張機能は `errors` に入る。 */
@@ -48,24 +62,53 @@ export interface LoadResult {
   errors: { dir: string; problems: string[] }[];
 }
 
+/** 読み込みの条件。 */
+export interface LoadOptions {
+  /** すでに使われている業務エージェントの ID（公式の業務エージェントと、ほかの拡張機能）。 */
+  takenAgents?: Iterable<string>;
+  /** すでに使われているコネクタの ID（ほかの拡張機能）。 */
+  takenConnectors?: Iterable<string>;
+}
+
+/** パッケージに入れてよいファイル（仕様書 第12.10.2節）。これ以外は拒否する。 */
+const ALLOWED_FILES = [
+  /^manifest\.json$/,
+  /^agents\/[^/]+\.json$/,
+  /^connectors\/[^/]+\.json$/,
+  /^evals\/[^/]+\.json$/,
+  /^help\/[^/]+\.md$/,
+  /^README\.md$/,
+  /^icon\.png$/,
+];
+
+/** アイコンの大きさの上限。 */
+const ICON_MAX_BYTES = 256 * 1024;
+
+/** パッケージに入れてよいファイルか。 */
+export function isAllowedExtensionFile(path: string): boolean {
+  return ALLOWED_FILES.some((re) => re.test(path));
+}
+
 /**
  * ディレクトリの下の拡張機能をすべて読み込む。
  *
  * @param root 拡張機能を置くディレクトリ（例: リポジトリ直下の `extensions`）
- * @param registry ツールの登録簿。定義のツールの存在と危険度を確かめる
+ * @param registry 内蔵のツールの登録簿。定義のツールの存在と危険度を確かめる
  * @param takenIds すでに使われている業務エージェントの ID（公式の業務エージェント）
  */
 export function loadExtensions(root: string, registry: ToolRegistry, takenIds: Iterable<string>): LoadResult {
   const result: LoadResult = { packages: [], errors: [] };
   if (!existsSync(root)) return result;
-  const taken = new Set(takenIds);
+  const takenAgents = new Set(takenIds);
+  const takenConnectors = new Set<string>();
   for (const name of readdirSync(root).sort()) {
     const dir = join(root, name);
     if (!statSync(dir).isDirectory() || name.startsWith('.')) continue;
-    const { pkg, problems } = loadExtension(dir, registry, taken);
+    const { pkg, problems } = loadExtension(dir, registry, { takenAgents, takenConnectors });
     if (pkg && problems.length === 0) {
       result.packages.push(pkg);
-      for (const a of pkg.agents) taken.add(a.id);
+      for (const a of pkg.agents) takenAgents.add(a.id);
+      for (const c of pkg.connectors) takenConnectors.add(c.id);
     } else {
       result.errors.push({ dir, problems });
     }
@@ -73,75 +116,142 @@ export function loadExtensions(root: string, registry: ToolRegistry, takenIds: I
   return result;
 }
 
+/** ディレクトリの中のファイルを読み集める。`.` で始まるものは飛ばす。 */
+export function readExtensionDir(dir: string): ExtensionFiles {
+  const files: ExtensionFiles = new Map();
+  const walk = (d: string) => {
+    for (const name of readdirSync(d).sort()) {
+      if (name.startsWith('.')) continue;
+      const full = join(d, name);
+      if (statSync(full).isDirectory()) walk(full);
+      else files.set(relative(dir, full).split(sep).join('/'), readFileSync(full));
+    }
+  };
+  walk(dir);
+  return files;
+}
+
 /**
- * 1 つの拡張機能を読み込み、検証する。
+ * 1 つの拡張機能をディレクトリから読み込み、検証する。
  *
  * @returns 読み込んだ拡張機能と、検証で見つかった問題。問題があれば使ってはならない
  */
 export function loadExtension(
   dir: string,
   registry: ToolRegistry,
-  taken: Set<string> = new Set(),
+  options: LoadOptions | Set<string> = {},
+): { pkg: ExtensionPackage | null; problems: string[] } {
+  if (!existsSync(join(dir, 'manifest.json'))) return { pkg: null, problems: ['manifest.json がありません'] };
+  const opts = options instanceof Set ? { takenAgents: options } : options;
+  const res = loadExtensionFiles(readExtensionDir(dir), registry, opts);
+  return { pkg: res.pkg ? { ...res.pkg, dir } : null, problems: res.problems };
+}
+
+/**
+ * ファイルの集まりから拡張機能を読み込み、検証する（仕様書 第12.9.2節、第12.10.2節）。
+ *
+ * @remarks ディレクトリからも `.m2ext` からも、この関数で同じ検証を行う。
+ */
+export function loadExtensionFiles(
+  files: ExtensionFiles,
+  registry: ToolRegistry,
+  options: LoadOptions = {},
 ): { pkg: ExtensionPackage | null; problems: string[] } {
   const problems: string[] = [];
-  const manifestPath = join(dir, 'manifest.json');
-  if (!existsSync(manifestPath)) return { pkg: null, problems: ['manifest.json がありません'] };
+  const text = (path: string) => new TextDecoder().decode(files.get(path));
+  const json = <T>(path: string): T | null => {
+    try {
+      return JSON.parse(text(path)) as T;
+    } catch (err) {
+      problems.push(`${path}: JSON として読めません: ${(err as Error).message}`);
+      return null;
+    }
+  };
+  const under = (folder: string, ext: string) =>
+    [...files.keys()].filter((k) => k.startsWith(`${folder}/`) && k.endsWith(ext)).sort();
 
-  let manifest: ExtensionManifest;
-  try {
-    manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as ExtensionManifest;
-  } catch (err) {
-    return { pkg: null, problems: [`manifest.json を JSON として読めません: ${(err as Error).message}`] };
+  const disallowed = [...files.keys()].filter((k) => !isAllowedExtensionFile(k));
+  if (disallowed.length > 0) {
+    problems.push(`入れてはならないファイルがあります（プログラムなどは入れられません）: ${disallowed.join(', ')}`);
   }
+  if (!files.has('manifest.json')) return { pkg: null, problems: [...problems, 'manifest.json がありません'] };
+  const manifest = json<ExtensionManifest>('manifest.json');
+  if (!manifest) return { pkg: null, problems };
   problems.push(...checkManifest(manifest));
   if (problems.length > 0) return { pkg: null, problems };
 
-  // 評価のケース（見本の応答を含む）を、業務エージェントごとに集める
-  const evals = new Map<string, EvalCase[]>();
-  const evalsDir = join(dir, 'evals');
-  if (existsSync(evalsDir)) {
-    for (const f of readdirSync(evalsDir).filter((f) => f.endsWith('.json'))) {
-      try {
-        const e = JSON.parse(readFileSync(join(evalsDir, f), 'utf8')) as { agent?: string; cases?: EvalCase[] };
-        if (!e.agent || !Array.isArray(e.cases)) { problems.push(`evals/${f}: agent と cases が必要です`); continue; }
-        evals.set(e.agent, [...(evals.get(e.agent) ?? []), ...e.cases]);
-      } catch (err) {
-        problems.push(`evals/${f}: JSON として読めません: ${(err as Error).message}`);
+  // コネクタ。ID は内蔵のツールの名前の頭の部分や、ほかの拡張機能のコネクタと重なってはならない
+  const reserved = new Set([...registry.names().map((n) => n.split('.')[0]!), ...(options.takenConnectors ?? [])]);
+  const connectors: ConnectorDeclaration[] = [];
+  for (const f of under('connectors', '.json')) {
+    const c = json<ConnectorDeclaration>(f);
+    if (!c) continue;
+    const p = checkConnector(c, reserved);
+    problems.push(...p.map((x) => `${f}: ${x}`));
+    if (p.length > 0) continue;
+    reserved.add(c.id);
+    connectors.push(c);
+    for (const t of c.tools) {
+      const name = connectorToolName(c.id, t.name);
+      if (RISK_ORDER[t.risk] > RISK_ORDER[manifest.permissions.max_risk_level]) {
+        problems.push(`${f}: ${name} の危険度（${t.risk}）が max_risk_level（${manifest.permissions.max_risk_level}）を超えています`);
       }
     }
   }
+  // この拡張機能の中で使えるツール = 内蔵のツール + この拡張機能のコネクタのツール
+  const local = registry.extend(connectors.flatMap((c) => connectorTools(c)));
+  const unknown = manifest.permissions.tools.filter((t) => !local.get(t));
+  if (unknown.length > 0) {
+    problems.push(`manifest.json: permissions.tools に、内蔵のツールにもこの拡張機能のコネクタにも無いツールがあります: ${unknown.join(', ')}`);
+  }
+
+  // 評価のケース（見本の応答を含む）を、業務エージェントごとに集める
+  const evals = new Map<string, EvalCase[]>();
+  for (const f of under('evals', '.json')) {
+    const e = json<{ agent?: string; cases?: EvalCase[] }>(f);
+    if (!e) continue;
+    if (!e.agent || !Array.isArray(e.cases)) { problems.push(`${f}: agent と cases が必要です`); continue; }
+    evals.set(e.agent, [...(evals.get(e.agent) ?? []), ...e.cases]);
+  }
 
   const agents: AgentDefinition[] = [];
-  const agentsDir = join(dir, 'agents');
-  const files = existsSync(agentsDir) ? readdirSync(agentsDir).filter((f) => f.endsWith('.json')) : [];
-  if (files.length === 0) problems.push('agents/ に業務エージェントの定義（.json）が 1 つもありません');
-  for (const f of files) {
-    let raw: AgentDefinition;
-    try {
-      raw = JSON.parse(readFileSync(join(agentsDir, f), 'utf8')) as AgentDefinition;
-    } catch (err) {
-      problems.push(`agents/${f}: JSON として読めません: ${(err as Error).message}`);
-      continue;
-    }
+  const localIds = new Set<string>();
+  const takenAgents = new Set(options.takenAgents ?? []);
+  const agentFiles = under('agents', '.json');
+  if (agentFiles.length === 0 && connectors.length === 0) {
+    problems.push('業務エージェント（agents/*.json）かコネクタ（connectors/*.json）が 1 つ以上必要です');
+  }
+  for (const f of agentFiles) {
+    const raw = json<AgentDefinition>(f);
+    if (!raw) continue;
     const localId = raw.id;
     if (typeof localId !== 'string' || !/^[a-z0-9][a-z0-9-]*$/.test(localId)) {
-      problems.push(`agents/${f}: id は英小文字・数字・ハイフンで書いてください（例: hello）`);
+      problems.push(`${f}: id は英小文字・数字・ハイフンで書いてください（例: hello）`);
       continue;
     }
+    localIds.add(localId);
     const def: AgentDefinition = {
       ...raw,
       id: `${manifest.id}:${localId}`,
       evals: [...(raw.evals ?? []), ...(evals.get(localId) ?? [])],
     };
-    problems.push(...checkAgent(def, manifest, registry, taken).map((p) => `agents/${f}: ${p}`));
+    problems.push(...checkAgent(def, manifest, local, takenAgents).map((p) => `${f}: ${p}`));
     agents.push(def);
   }
   for (const agentId of evals.keys()) {
-    if (!files.some((f) => JSON.parse(readFileSync(join(agentsDir, f), 'utf8')).id === agentId)) {
-      problems.push(`evals: 業務エージェント ${agentId} の定義がありません`);
-    }
+    if (!localIds.has(agentId)) problems.push(`evals: 業務エージェント ${agentId} の定義がありません`);
   }
-  return { pkg: { manifest, agents, dir }, problems };
+
+  let icon: string | null = null;
+  const png = files.get('icon.png');
+  if (png) {
+    const isPng = png.length > 8 && png[0] === 0x89 && png[1] === 0x50 && png[2] === 0x4e && png[3] === 0x47;
+    if (!isPng) problems.push('icon.png が PNG の画像ではありません');
+    else if (png.length > ICON_MAX_BYTES) problems.push('icon.png は 256 KB までです');
+    else icon = `data:image/png;base64,${Buffer.from(png).toString('base64')}`;
+  }
+  const readme = files.has('README.md') ? text('README.md') : null;
+  return { pkg: { manifest, agents, connectors, readme, icon, dir: null }, problems };
 }
 
 /** マニフェストの必須項目を確かめる（仕様書 第12.9.2節 検証 1）。 */

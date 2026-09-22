@@ -69,9 +69,12 @@ OAuth クライアントが整うまでは、`GET /v1/auth/google/start` は 503
 | `GET /v1/admin/users` | 管理者: 利用者の一覧 |
 | `GET /v1/admin/audit-events` | 管理者: 監査ログ |
 | `GET /v1/admin/connectors` | 管理者: 接続の状態 |
-| `GET /v1/admin/extensions` | 管理者: 導入できる拡張機能と、必要な権限の説明 |
-| `POST /v1/admin/extensions/:id/install` | 管理者: 同意して導入（本文に `consent: true`） |
-| `DELETE /v1/admin/extensions/:id` | 管理者: 導入をやめる |
+| `GET /v1/admin/extensions` | 管理者: 拡張機能の一覧（公式・自社専用）、構成要素、必要な権限の説明、導入と有効・無効の状態 |
+| `POST /v1/admin/extensions/import` | 管理者: `.m2ext` を取り込む（本文はファイルのバイト列。5 MB まで）。検証を通らなければ `problems` を返す |
+| `POST /v1/admin/extensions/:id/install` | 管理者: 同意して導入（本文に `consent: true`）。導入すると有効になる |
+| `PUT /v1/admin/extensions/:id/enabled` | 管理者: 有効・無効の切り替え（本文に `enabled`）。権限が増えた版は 409 |
+| `POST /v1/admin/extensions/:id/connectors/:connectorId/check` | 管理者: コネクタの接続の確認（宣言したツールが提供されているか） |
+| `DELETE /v1/admin/extensions/:id` | 管理者: 削除する。自社専用のものは取り込んだファイルも消す |
 | `GET /v1/admin/dashboard/live` | 管理者: ダッシュボードの「いま」（数値・業務の流れ・承認の滞留・出来事）。中身は返さない |
 | `GET /v1/admin/dashboard/stats?days=1\|7\|30` | 管理者: ダッシュボードの集計（日ごと・時間帯・業務ごと・秘書の層・削減時間） |
 | `GET /v1/admin/settings` | 管理者: 会社の設定（会社情報・自社の書き方・自動化ポリシー・業務の有効化） |

@@ -35,9 +35,10 @@ export function jobsRoute(deps: AppDeps) {
       origin?: Job['origin'];
     }>();
 
-    const def = deps.catalog.resolve(body.agentId, body.agentVersion ?? 1);
-    // 導入していない拡張機能の業務エージェントは、存在を示さない（仕様書 第12.9.3節）
-    if (!def || !(await deps.isAvailable(ctx.tenant.id, def.id))) {
+    const view = await deps.tenantView(ctx.tenant.id);
+    const def = view.resolve(body.agentId, body.agentVersion ?? 1);
+    // 導入していない・無効にした拡張機能の業務エージェントは、存在を示さない（仕様書 第12.10.4節）
+    if (!def || !view.isAvailable(def.id)) {
       return c.json({ error: `エージェントが見つかりません: ${body.agentId}` }, 404);
     }
     const { agents } = await deps.repo.getTenantSettings(ctx.tenant.id);

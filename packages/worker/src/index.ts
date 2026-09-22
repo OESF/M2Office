@@ -11,8 +11,8 @@
 
 import {
   PostgresRepository, StubLlmProvider, OpenAiCompatibleProvider, ToolRegistry, BUILTIN_TOOLS,
-  RunEngine, Scheduler, buildConnector, LocalFileStore, createLoggerFromEnv, AgentCatalog, loadExtensions,
-  OFFICIAL_AGENTS, type LlmProvider,
+  RunEngine, Scheduler, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient,
+  loadExtensions, OFFICIAL_AGENTS, type LlmProvider,
 } from '@m2office/core';
 import { fileURLToPath } from 'node:url';
 
@@ -35,13 +35,18 @@ const extensions = loadExtensions(
   registry, OFFICIAL_AGENTS.map((a) => a.id),
 );
 for (const e of extensions.errors) log.warn('拡張機能を読み込めませんでした', { dir: e.dir, problems: e.problems });
-const catalog = new AgentCatalog(OFFICIAL_AGENTS, extensions.packages);
-const resolveDefinition = (id: string, version: number) => catalog.resolve(id, version);
-const isAvailable = async (tenantId: string, agentId: string) =>
-  catalog.availableFor(agentId, (await repo.listInstalledExtensions(tenantId)).map((e) => e.extensionId));
+// 会社ごとの見え方（公式の配布元と、会社がファイルから取り込んだもの。仕様書 第12.10節）。
+// コネクタのツールは、このワーカーから MCP サーバを呼ぶ（第12.11.3節）
+const hub = new ExtensionHub({
+  repo, registry, official: OFFICIAL_AGENTS, packages: extensions.packages, mcp: new HttpMcpClient(), logger: log,
+});
+const resolveDefinition = async (id: string, version: number, tenantId: string) =>
+  (await hub.forTenant(tenantId)).resolve(id, version);
+const isAvailable = async (tenantId: string, agentId: string) => (await hub.forTenant(tenantId)).isAvailable(agentId);
 
 const engine = new RunEngine({
   repo, llm: buildLlm(), registry, connector, files, resolveDefinition, isAvailable, logger: log,
+  registryFor: async (tenantId) => (await hub.forTenant(tenantId)).registry,
 });
 const scheduler = new Scheduler({ repo, resolveDefinition, isAvailable, logger: log });
 
@@ -124,5 +129,6 @@ function buildLlm(): LlmProvider {
     );
   }
   // 鍵が無い開発環境では、拡張機能の評価のケースにある見本の応答を再生する（仕様書 第12.9.4節）
-  return new StubLlmProvider((agentId) => catalog.all().find((a) => a.id === agentId)?.evals);
+  // 実行エンジンは実行中の定義の評価のケースを渡す。ここでは公式の配布元の分を予備として引く
+  return new StubLlmProvider((agentId) => hub.officialAgents().find((a) => a.id === agentId)?.evals);
 }

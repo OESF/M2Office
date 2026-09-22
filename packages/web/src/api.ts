@@ -60,6 +60,7 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(
       body.error ?? `エラー (${res.status})`, res.status, !!body.login,
       body.requestId ?? res.headers.get('x-request-id'),
+      Array.isArray(body.problems) ? body.problems : [],
     );
   }
   return res.json() as Promise<T>;
@@ -73,6 +74,8 @@ export class ApiError extends Error {
     readonly needsLogin = false,
     /** 要求の ID。問い合わせのときにログと突き合わせる（開発規約 第7.4節）。 */
     readonly requestId: string | null = null,
+    /** 検証で見つかった問題の一覧（拡張機能の取り込みなど）。 */
+    readonly problems: string[] = [],
   ) {
     super(message);
     this.name = 'ApiError';
@@ -192,13 +195,36 @@ export interface AgentSummary {
 }
 
 /** 導入できる拡張機能（仕様書 第12.9.3節）。 */
+/** 拡張機能 1 つ分の表示（仕様書 第12.10.5節）。 */
 export interface ExtensionView {
   id: string; name: string; version: string; description: string;
   publisher: { name: string; verified?: boolean };
+  icon: string | null;
+  readme: string | null;
+  counts: { agents: number; connectors: number; tools: number };
   agents: { id: string; name: string; summary: string }[];
-  permissions: { maxRisk: string; maxRiskText: string; tools: { name: string; does: string }[] };
+  connectors: {
+    id: string; name: string; description: string; url: string; auth: string; authText: string;
+    tools: { name: string; description: string; risk: string; riskText: string }[];
+  }[];
+  permissions: {
+    maxRisk: string; maxRiskText: string;
+    tools: { name: string; does: string; risk: string | null }[];
+  };
+  /** 公式の配布元か、ファイルから取り込んだもの（自社専用）か。 */
+  origin: 'official' | 'private';
+  originText: string;
   installed: { version: string; installedAt: string } | null;
+  enabled: boolean;
+  /** 権限が増えた版。有効にする前に再同意が要る。 */
+  needsReconsent: boolean;
+  active: boolean;
 }
+
+/** コネクタの接続の確認の結果。 */
+export type ConnectorCheck =
+  | { ok: true; tools: { name: string; provided: boolean }[] }
+  | { ok: false; error: string };
 
 export interface JsonSchemaField {
   type: string;
@@ -331,6 +357,18 @@ export const api = {
     installExtension: (id: string) =>
       call(`/admin/extensions/${encodeURIComponent(id)}/install`, { method: 'POST', body: JSON.stringify({ consent: true }) }),
     uninstallExtension: (id: string) => call(`/admin/extensions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    /** `.m2ext` を取り込む。本文はファイルのバイト列そのもの。 */
+    importExtension: (file: Blob) =>
+      call<{ ok: true; item: ExtensionView | null }>('/admin/extensions/import', {
+        method: 'POST', body: file, headers: { 'content-type': 'application/octet-stream' },
+      }),
+    setExtensionEnabled: (id: string, enabled: boolean) =>
+      call(`/admin/extensions/${encodeURIComponent(id)}/enabled`, { method: 'PUT', body: JSON.stringify({ enabled }) }),
+    checkConnector: (id: string, connectorId: string) =>
+      call<ConnectorCheck>(
+        `/admin/extensions/${encodeURIComponent(id)}/connectors/${encodeURIComponent(connectorId)}/check`,
+        { method: 'POST' },
+      ),
   },
   agents: () => call<{ agents: AgentSummary[] }>('/agents'),
   createJob: (agentId: string, input: Record<string, unknown>, origin = 'menu') =>

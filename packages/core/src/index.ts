@@ -18,11 +18,15 @@ export { OpenAiCompatibleProvider, LlmRequestError } from './llm/gemini.js';
 export type { GeminiModelMap } from './llm/gemini.js';
 
 export type {
-  Repository, KnowledgeHit, KnowledgeItem, RunStatRow, InstalledExtension,
+  Repository, KnowledgeHit, KnowledgeItem, RunStatRow, InstalledExtension, PrivateExtension,
 } from './repository/types.js';
 export { PostgresRepository } from './repository/postgres.js';
 
 export { buildConnector, MockWorkspaceConnector } from './connectors/index.js';
+export {
+  HttpMcpClient, MCP_TIMEOUT_MS, MCP_RESULT_LIMIT,
+  type McpClient, type McpToolInfo, type McpCallResult,
+} from './connectors/mcp.js';
 export type {
   WorkspaceConnector, ConnectorPrincipal, DataSource, MailSummary, MailMessage,
   CalendarEvent, TaskItem, BusySlot,
@@ -31,7 +35,6 @@ export type {
 export * from './files/index.js';
 export * from './help/index.js';
 export * from './extensions/index.js';
-export { AgentCatalog } from './agents/catalog.js';
 
 export { ToolRegistry } from './tools/registry.js';
 export type { Tool, ToolContext } from './tools/registry.js';

@@ -1,5 +1,5 @@
 /**
- * @file 管理者ページの編集画面（会社情報・業務と承認・ユーザー・知識）。
+ * @file 管理者ページの編集画面（会社情報・業務と承認・ユーザー・知識）。拡張機能は Extensions.tsx。
  *
  * 保存のたびに API が値を検証する。画面側の入力制限は利便のためであり、
  * 規則の強制は API 側で行う。
@@ -11,7 +11,7 @@ import { useEffect, useState } from 'react';
 import type {
   AutomationPolicy, CompanyInfo, Role, TenantSettings, User, WritingStyle,
 } from '@m2office/shared';
-import { api, describeError, type ExtensionView, type KnowledgeItemView } from './api.js';
+import { api, describeError, type KnowledgeItemView } from './api.js';
 import { HelpTip } from './help.js';
 
 type Catalog = {
@@ -398,59 +398,6 @@ export function KnowledgeSettings() {
           ))}
         </tbody>
       </table>
-    </>
-  );
-}
-
-/**
- * 拡張機能の導入（仕様書 第12.9.3節）。必要な権限を平易な言葉で示し、同意を得てから導入する。
- */
-export function ExtensionSettings() {
-  const [items, setItems] = useState<ExtensionView[]>([]);
-  const [consenting, setConsenting] = useState<string | null>(null);
-  const saver = useSaver();
-  const load = () => api.admin.extensions().then((r) => setItems(r.items));
-  useEffect(() => { void load(); }, []);
-
-  return (
-    <>
-      <h1>拡張機能 <HelpTip article="admin-extensions">業務エージェントを追加します。導入の前に、その拡張機能が何をするかと、扱う最大の危険度を確かめてください。</HelpTip></h1>
-      <p className="lead">導入すると、この会社のメニュー・秘書・定時実行に業務が加わります。</p>
-      {items.length === 0 && <p className="muted">導入できる拡張機能はありません。</p>}
-      {items.map((x) => (
-        <div className="card" key={x.id}>
-          <h3>
-            {x.name} <span className="muted small">{x.version}・提供: {x.publisher.name}</span>{' '}
-            {x.installed && <span className="status succeeded">導入済み</span>}
-          </h3>
-          <p>{x.description}</p>
-          <ul className="small">
-            {x.agents.map((a) => <li key={a.id}><strong>{a.name}</strong>: {a.summary}</li>)}
-          </ul>
-          {consenting === x.id ? (
-            <div className="consent">
-              <h4>この拡張機能に許可すること</h4>
-              <p className="small">扱う最大の危険度: <strong>{x.permissions.maxRiskText}</strong></p>
-              <ul className="small">{x.permissions.tools.map((t) => <li key={t.name}>{t.does}</li>)}</ul>
-              <div className="row">
-                <button className="btn" disabled={saver.busy} onClick={() => void saver.run(async () => {
-                  await api.admin.installExtension(x.id); setConsenting(null); await load();
-                }, '導入しました。左のメニューに業務が加わります')}>同意して導入する</button>
-                <button className="btn ghost" onClick={() => setConsenting(null)}>やめる</button>
-              </div>
-            </div>
-          ) : x.installed ? (
-            <button className="btn danger small" disabled={saver.busy} onClick={() => {
-              if (confirm(`「${x.name}」を削除しますか。業務は使えなくなります（実行の記録は残ります）`)) {
-                void saver.run(async () => { await api.admin.uninstallExtension(x.id); await load(); }, '削除しました');
-              }
-            }}>削除する</button>
-          ) : (
-            <button className="btn" onClick={() => setConsenting(x.id)}>導入する</button>
-          )}
-        </div>
-      ))}
-      {saver.view}
     </>
   );
 }

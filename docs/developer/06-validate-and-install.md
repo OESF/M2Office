@@ -3,62 +3,100 @@
 ## 6.1 検証する
 
 ```bash
-npm run ext:validate                          # extensions/ の下をすべて
-npm run ext:validate extensions/hello-world   # 1 つだけ
+npm run ext:validate                                          # extensions/ の下をすべて
+npm run ext:validate extensions/hello-world                   # 1 つだけ
+npm run ext:validate dist/extensions/jp.example.weekly-report-1.0.0.m2ext   # 作ったファイル
 ```
 
-API が起動時に行う検証と同じものです（仕様書 第12.9.2節）。
+API が読み込み・取り込みの時点で行う検証と同じものです（仕様書 第12.9.2節、第12.10.2節）。
 
 | # | 確かめること |
 |---|---|
-| 1 | マニフェストの必須項目と形式 |
-| 2 | 定義が基盤の規則を満たす（承認ゲート、登録されたツール、ステップ ID の重複など） |
-| 3 | 定義のツールが `permissions.tools` の中にある |
-| 4 | 定義のツールの危険度が `max_risk_level` を超えない |
-| 5 | `help.summary` がある |
-| 6 | 業務エージェントの ID が他と重ならない |
+| 1 | 入れてよいファイルだけでできている（プログラムが入っていない） |
+| 2 | マニフェストの必須項目と形式 |
+| 3 | コネクタの宣言（ID の重なり、`http` の方式、`https` の接続先、認証の方式、ツールの危険度。第7章） |
+| 4 | 定義が基盤の規則を満たす（承認ゲート、登録されたツール、ステップ ID の重複など） |
+| 5 | 定義のツールが `permissions.tools` の中にあり、`permissions.tools` のツールがすべて存在する |
+| 6 | 定義とコネクタのツールの危険度が `max_risk_level` を超えない |
+| 7 | `help.summary` がある |
+| 8 | 業務エージェントの ID が他と重ならない |
 
 見本の応答が 1 つも無いと、「鍵が無い環境では動作を確かめられません」と注意が出ます。
 
 ## 6.2 導入して動かす
 
+### 公式の配布元（`extensions/`）に置いた場合
+
 1. `npm run dev` を起動し直す（ログに `拡張機能を読み込みました` と出る）
-2. 管理者ページの「拡張機能」で「導入する」→ 権限を確かめて「同意して導入する」
+2. 管理者ページの「拡張機能」で「配布元から追加」→「内容を確認して導入する」→「同意して導入する」
 3. ワークスペースのメニューに現れた業務を実行する
 4. 実行の詳細で、ステップの記録と成果物を確かめる
 
-API で確かめることもできます（開発用のヘッダーを使う例）。
+### ファイル（`.m2ext`）で渡す場合
+
+1. `npm run ext:pack <ディレクトリ>` でファイルを作る
+2. 管理者ページの「拡張機能」で「ファイルから追加」を押してファイルを選ぶ（画面へドラッグしてもよい）
+3. 検証を通ると、そのまま「この拡張機能に許可すること」が出る。「同意して導入する」を押す
+4. 取り込んだ拡張機能には「自社専用」と表示される。ほかの会社には見えない
+
+### 有効・無効（スイッチ）
+
+導入済みの拡張機能は、カードの右のスイッチで有効と無効を切り替えます。
+
+| 状態 | 業務エージェント | コネクタ |
+|---|---|---|
+| 有効 | メニュー・秘書・定時実行に出る | 接続する |
+| 無効 | 出ない。実行できない | 接続しない |
+
+切り替えに同意のやり直しは要りません。ただし、新しい版で必要な権限が増えた場合は、
+「内容を確認して同意する」を押すまでスイッチを入れられません（仕様書 第12.10.4節）。
+同じ ID のファイルを取り込み直すと、新しい版に置き換わります。
+
+### API で確かめる（開発用のヘッダーを使う例）
 
 ```bash
-# 導入（管理者）
+# ファイルを取り込む（管理者）
+curl -X POST -H 'x-tenant: a' -H 'x-user: admin@alpha.example.jp' -H 'content-type: application/octet-stream' \
+  --data-binary @dist/extensions/jp.example.weekly-report-1.0.0.m2ext http://localhost:3101/v1/admin/extensions/import
+
+# 同意して導入する（管理者）
 curl -X POST -H 'x-tenant: a' -H 'x-user: admin@alpha.example.jp' -H 'content-type: application/json' \
-  -d '{"consent":true}' http://localhost:3101/v1/admin/extensions/jp.m2office.samples.hello-world/install
+  -d '{"consent":true}' http://localhost:3101/v1/admin/extensions/jp.example.weekly-report/install
+
+# スイッチを切る・入れる（管理者）
+curl -X PUT -H 'x-tenant: a' -H 'x-user: admin@alpha.example.jp' -H 'content-type: application/json' \
+  -d '{"enabled":false}' http://localhost:3101/v1/admin/extensions/jp.example.weekly-report/enabled
 
 # 実行
 curl -X POST -H 'x-tenant: a' -H 'x-user: member@alpha.example.jp' -H 'content-type: application/json' \
-  -d '{"agentId":"jp.m2office.samples.hello-world:hello","input":{"message":"こんにちは"}}' \
-  http://localhost:3101/v1/jobs
+  -d '{"agentId":"jp.example.weekly-report:weekly","input":{"week":"今週"}}' http://localhost:3101/v1/jobs
 
 # 結果（runId は上の応答のもの）
 curl -H 'x-tenant: a' -H 'x-user: member@alpha.example.jp' http://localhost:3101/v1/runs/<runId>
 ```
 
-`npm run smoke` の「■ 20. 拡張機能」は、この流れ（導入していない会社で使えない、同意なしで導入できない、
-他の会社には現れない、削除すると使えない）を毎回確かめています。
+`npm run smoke` の「■ 20」と「■ 21」は、この流れ（導入していない会社で使えない、同意なしで導入できない、
+プログラムを含むファイルを取り込めない、取り込んだものは他の会社に見えない、スイッチを切ると使えない、削除すると使えない）を
+毎回確かめています。`SMOKE_EXTERNAL=1 npm run smoke` とすると、DeepWiki への実際の問い合わせも確かめます。
 
 ## 6.3 よくあるエラーと直し方
 
 | 出るメッセージ | 原因 | 直し方 |
 |---|---|---|
-| `manifest.json がありません` | ディレクトリの直下に無い | `extensions/<名前>/manifest.json` に置く |
+| `manifest.json がありません` | 直下に無い | パッケージの直下に `manifest.json` を置く |
+| `入れてはならないファイルがあります` | プログラムや、決まった場所以外のファイルがある | 第5.1節の 7 種類だけにする。処理はコネクタとして外に作る |
+| `ZIP として読めません` | `.m2ext` が壊れているか、ZIP でない | `npm run ext:pack` で作り直す |
+| `公式の拡張機能と同じ ID です` | 取り込むファイルの `id` が、公式の配布元のものと同じ | 自社用の `id`（例: `jp.example.…`）にする |
 | `id は逆ドメイン名の形で書いてください` | 大文字や記号が入っている | `jp.example.my-agent` のように書く |
 | `マニフェストの permissions.tools に無いツールを使っています` | 定義の `tools` に、宣言していないツールがある | マニフェストに足すか、定義から外す |
+| `permissions.tools に、内蔵のツールにもこの拡張機能のコネクタにも無いツールがあります` | ツールの名前の誤りか、コネクタで宣言していない | 名前を直すか、コネクタの `tools` に足す |
 | `max_risk_level（draft）を超えるツールを使っています` | 宣言より強いツールを使っている | 本当に必要か見直す。必要なら `max_risk_level` を上げる（管理者の判断が重くなる） |
 | `承認ゲートが必要です` | `external-send` 以上のツールを使うのに承認ステップが無い | 送信するステップの**直前**に承認ステップを置く |
 | `help.summary がありません` | ヘルプの概要が無い | 定義に `help.summary` を書く |
 | `未登録のツールを要求しています` | ツールの名前の誤り | 第4章の一覧の名前にする |
-| `ID … はすでに使われています` | 他の拡張機能と ID が重なる | 拡張機能の `id` を変える |
-| 実行が「この業務は、この会社に導入されていません」で失敗 | 実行の途中で導入をやめた | 導入し直す |
+| `ID … はすでに使われています` | 他の拡張機能と ID が重なる | 拡張機能やコネクタの `id` を変える |
+| スイッチを入れられず「権限が増えています」と出る | 新しい版で権限が増えた | 「内容を確認して同意する」を押す |
+| 実行が「この業務は、この会社に導入されていません」で失敗 | 実行の途中で無効にしたか、導入をやめた | スイッチを入れるか、導入し直す |
 | 成果物が無く「見本の応答がありません」と記録される | 見本に無い入力で実行した（鍵が無い環境） | `evals` に、その入力のケースを足す |
 
 ## 6.4 本物の LLM で確かめる

@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "id": "weekly",
+  "version": 1,
+  "name": "週報の下書き",
+  "category": "report",
+  "description": "今週の予定と未完了の ToDo から、週報の下書きを作ります",
+  "locale": "ja-JP",
+  "compartment": null,
+  "inputs": {
+    "type": "object",
+    "required": ["week"],
+    "properties": {
+      "week": { "type": "string", "title": "対象の週（例: 今週）" }
+    }
+  },
+  "tools": ["calendar.list", "tasks.list", "document.create"],
+  "steps": [
+    {
+      "id": "collect",
+      "type": "agent",
+      "label": "収集",
+      "instruction": "calendar.list で対象の週の予定を、tasks.list で未完了の ToDo を取得する。",
+      "onEmpty": "stop",
+      "onError": "stop"
+    },
+    {
+      "id": "write",
+      "type": "agent",
+      "label": "下書き",
+      "instruction": "集めた予定と ToDo から週報の下書きを作り、document.create で種類を weekly-report、題名を「週報の下書き（対象の週）」として保存する。本文は「今週やったこと」「来週の予定」「持ち越しの ToDo」「相談したいこと」の 4 つの見出しで書く。「相談したいこと」は空欄にして、本人が書き足すようにする。",
+      "onEmpty": "stop",
+      "onError": "stop"
+    }
+  ],
+  "constraints": [
+    "予定と ToDo に無いことを書き足さない",
+    "送信しない。下書きを作るだけにする"
+  ],
+  "limits": { "maxSteps": 4, "maxTokens": 15000, "timeoutSec": 120 },
+  "help": {
+    "summary": "今週の予定と未完了の ToDo を集めて、週報の下書きを作ります。下書きを作るだけで、誰にも送りません。",
+    "examples": [
+      { "title": "今週の週報を下書きする", "input": { "week": "今週" } }
+    ],
+    "notes": [
+      "「相談したいこと」は空欄で作ります。自分で書き足してから提出してください",
+      "LLM の鍵が無い開発環境では、例の入力（今週）だけを受け付けます"
+    ]
+  }
+}

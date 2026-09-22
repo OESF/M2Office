@@ -8,6 +8,8 @@
  * @see 仕様書 第20.2節 LLM 抽象化層
  */
 
+import type { EvalCase } from '@m2office/shared';
+
 /** モデルの役割。実際のモデル名は設定で解決する。 */
 export type ModelTier = 'fast' | 'standard' | 'advanced';
 
@@ -25,7 +27,15 @@ export interface LlmRequest {
    * どの業務エージェントのどのステップか。**提供者へは送らない。**
    * 開発用のスタブが見本の応答を探すために使う（仕様書 第12.9.4節）。
    */
-  context?: { agentId: string; stepId: string; input: Record<string, unknown> };
+  context?: {
+    agentId: string;
+    stepId: string;
+    input: Record<string, unknown>;
+    /** 業務エージェントの評価のケース。スタブが見本の応答を再生するのに使う（仕様書 第12.9.4節）。 */
+    evals?: EvalCase[];
+    /** 終わったステップのツールの結果（ステップ ID → 文字列）。見本の応答の `{{ステップ ID}}` に差し込む。 */
+    stepResults?: Record<string, string>;
+  };
 }
 
 export interface LlmResponse {

@@ -17,13 +17,19 @@ M2Office に**業務を追加する人**のための手引きです。拡張機�
 | 2 | [はじめての拡張機能](02-quickstart.md) | **「こんにちは」に「Hello World」と返す**サンプルを作り、動かすまで |
 | 3 | [業務エージェントの定義](03-agent-definition.md) | 定義の全項目のリファレンス |
 | 4 | [ツールと危険度](04-tools.md) | 使えるツールの一覧と、承認の決まり |
-| 5 | [拡張機能パッケージ](05-package.md) | マニフェスト・評価のケース・見本の応答の書式 |
-| 6 | [検証・導入・動作確認](06-validate-and-install.md) | 手元での検証、会社への導入、よくあるエラーと直し方 |
-| 7 | [コネクタの作り方（freee を例に）](07-connectors.md) | 外部の業務システムとつなぐ方法（設計と見通し） |
+| 5 | [拡張機能パッケージ](05-package.md) | マニフェスト・評価のケース・見本の応答の書式、持ち運べるファイル（.m2ext） |
+| 6 | [検証・導入・動作確認](06-validate-and-install.md) | 手元での検証、ファイルからの取り込み、スイッチ、よくあるエラーと直し方 |
+| 7 | [コネクタの作り方（DeepWiki を例に）](07-connectors.md) | MCP サーバをつないで、外部のサービスのツールを使う方法 |
 | 8 | [良い業務エージェントの書き方](08-writing-good-agents.md) | 指示・止める条件・承認の置き場所・ヘルプの書き方 |
 | 9 | [公開の前の点検](09-review.md) | 審査で確かめること |
 
-**はじめての人は、第1章と第2章から読んでください。** サンプルは [extensions/hello-world](../../extensions/hello-world/) にあります。
+**はじめての人は、第1章と第2章から読んでください。**
+
+| サンプル | 置き場所 | 見どころ |
+|---|---|---|
+| あいさつ | [extensions/hello-world](../../extensions/hello-world/) | いちばん小さい拡張機能（第2章） |
+| リポジトリ調査（DeepWiki） | [extensions/deepwiki-research](../../extensions/deepwiki-research/) | コネクタ（MCP）を使う拡張機能（第7章） |
+| 週報の下書き | [examples/extensions/weekly-report](../../examples/extensions/weekly-report/) | 内蔵ツールを組み合わせた実務の例。ファイルにして取り込む自社専用の拡張機能（第6章） |
 
 ## 前提
 
@@ -33,4 +39,4 @@ M2Office に**業務を追加する人**のための手引きです。拡張機�
 
 ## この文書の版
 
-M2Office の仕様書 第 0.31.0 版に対応します。定義の形式は `schema_version: 1` です。
+M2Office の仕様書 第 0.32.1 版に対応します。定義の形式は `schema_version: 1` です。

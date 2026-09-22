@@ -107,7 +107,7 @@ export class HelpCatalog {
    * 業務の説明を組み立てる。会社の自動化ポリシーに合わせて「安心して使えるように」を書く。
    */
   agentHelp(def: AgentDefinition, ctx: HelpContext): AgentHelpView {
-    return buildAgentHelp(def, this.registry, {
+    return buildAgentHelp(def, ctx.registry ?? this.registry, {
       writeInternalNeedsApproval: writeInternalNeedsApproval(ctx.automation, def.id),
     });
   }
@@ -152,6 +152,8 @@ export interface HelpContext {
   automation: AutomationPolicy;
   /** その会社で使える業務エージェント（公式と導入した拡張機能）。省略時は目録の既定。 */
   agents?: AgentDefinition[];
+  /** その会社で使えるツール（コネクタのツールを含む）。省略時は内蔵のツール。 */
+  registry?: ToolRegistry;
 }
 
 /** 使い方の質問に多く、検索の手がかりにならない語。 */

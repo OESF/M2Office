@@ -43,8 +43,19 @@ export interface RunEngineDeps {
   files: FileStore;
   /** アプリログ。省略時は何も書かない（開発規約 第7章）。 */
   logger?: Logger;
-  /** エージェント定義を解決する。 */
-  resolveDefinition(agentId: string, version: number): AgentDefinition | undefined;
+  /**
+   * エージェント定義を解決する。
+   *
+   * @param tenantId 実行する会社。自社専用の拡張機能（仕様書 第12.10.3節）はその会社でしか解決できない
+   */
+  resolveDefinition(
+    agentId: string, version: number, tenantId: string,
+  ): AgentDefinition | undefined | Promise<AgentDefinition | undefined>;
+  /**
+   * その会社で使えるツールの登録簿（内蔵と、使える拡張機能のコネクタのツール。仕様書 第12.11節）。
+   * 省略時は `registry` を使う。
+   */
+  registryFor?(tenantId: string): Promise<ToolRegistry>;
   /**
    * その会社で業務エージェントを使えるか（拡張機能を導入しているか。仕様書 第12.9.3節）。
    * 省略時は、解決できる定義はすべて使えるものとする。
@@ -83,11 +94,12 @@ export class RunEngine {
     const job = await repo.getJob(run.tenantId, run.jobId);
     if (!job) return this.fail(run, 'ジョブが見つかりません');
 
-    const def = this.deps.resolveDefinition(job.agentId, job.agentVersion);
+    const def = await this.deps.resolveDefinition(job.agentId, job.agentVersion, run.tenantId);
     if (!def) return this.fail(run, `エージェント定義が見つかりません: ${job.agentId}`);
+    const registry = this.deps.registryFor ? await this.deps.registryFor(run.tenantId) : this.deps.registry;
 
     try {
-      validateDefinition(def, this.deps.registry);
+      validateDefinition(def, registry);
     } catch (err) {
       return this.fail(run, err instanceof Error ? err.message : String(err));
     }
@@ -102,7 +114,7 @@ export class RunEngine {
     }
 
     // 操作の確認（第9.4節）で承認された操作が残っていれば、先に実行する
-    await this.executeConfirmedCalls(run, def, job.requestedBy);
+    await this.executeConfirmedCalls(run, def, job.requestedBy, registry);
 
     let current = run;
     while (current.cursor < def.steps.length) {
@@ -125,7 +137,7 @@ export class RunEngine {
       const startedAt = Date.now();
       stepLog.debug('ステップを開始', { agentId: def.id, cursor: current.cursor });
       const result = await this.runAgentStep(
-        current, def, step, job.input, job.requestedBy, settings,
+        current, def, step, job.input, job.requestedBy, settings, registry,
       );
       stepLog.debug('ステップを終了', { outcome: result.kind, ms: Date.now() - startedAt });
       if (result.kind === 'failed') return this.fail(current, result.reason);
@@ -268,12 +280,13 @@ export class RunEngine {
     input: Record<string, unknown>,
     requestedBy: string,
     settings: TenantSettings,
+    registry: ToolRegistry,
   ): Promise<
     | { kind: 'ok' | 'stopped'; tokensUsed: number }
     | { kind: 'confirm'; tokensUsed: number; calls: ToolCall[] }
     | { kind: 'failed'; reason: string }
   > {
-    const { repo, llm, registry } = this.deps;
+    const { repo, llm } = this.deps;
     // 文脈はメモリではなく永続化層から読み直す。承認後に別のワーカーが続けても同じ結果になる
     const previous = await repo.listRunSteps(run.tenantId, run.id);
     const gatedByApproval = def.steps[run.cursor - 1]?.type === 'approval';
@@ -290,7 +303,7 @@ export class RunEngine {
       const res = await llm.complete({
         tier: 'standard',
         maxOutputTokens: 2000,
-        context: { agentId: def.id, stepId: step.id, input },
+        context: { agentId: def.id, stepId: step.id, input, evals: def.evals, stepResults: stepResults(previous) },
         messages: [
           {
             role: 'system',
@@ -337,7 +350,7 @@ export class RunEngine {
           toolResults.push({ name: call.name, risk: tool.risk, pending: '本人の確認を待っています' });
           continue;
         }
-        toolResults.push(await this.invokeTool(run, def, call, requestedBy));
+        toolResults.push(await this.invokeTool(run, def, call, requestedBy, registry));
       }
 
       const output = { text: res.text, tools: toolResults };
@@ -368,9 +381,9 @@ export class RunEngine {
 
   /** ツールを 1 つ呼び、監査ログに残す。 */
   private async invokeTool(
-    run: Run, def: AgentDefinition, call: ToolCall, requestedBy: string,
+    run: Run, def: AgentDefinition, call: ToolCall, requestedBy: string, registry: ToolRegistry,
   ): Promise<unknown> {
-    const { repo, registry, connector, files } = this.deps;
+    const { repo, connector, files } = this.deps;
     const tool = registry.get(call.name);
     if (!tool) return { name: call.name, error: '許可されていないツールです' };
     this.log.debug('ツールを呼び出し', { runId: run.id, tenantId: run.tenantId, tool: call.name, risk: tool.risk });
@@ -425,7 +438,9 @@ export class RunEngine {
   }
 
   /** 承認済みで未実行の「操作の確認」があれば、記録した操作を実行する。 */
-  private async executeConfirmedCalls(run: Run, def: AgentDefinition, requestedBy: string): Promise<void> {
+  private async executeConfirmedCalls(
+    run: Run, def: AgentDefinition, requestedBy: string, registry: ToolRegistry,
+  ): Promise<void> {
     const { repo } = this.deps;
     const steps = await repo.listRunSteps(run.tenantId, run.id);
     for (const s of steps) {
@@ -433,7 +448,7 @@ export class RunEngine {
       const output = s.output as { executed?: boolean } | null;
       if (s.kind !== 'approval' || s.status !== 'succeeded' || !input?.toolCalls || output?.executed) continue;
       const results = [];
-      for (const call of input.toolCalls) results.push(await this.invokeTool(run, def, call, requestedBy));
+      for (const call of input.toolCalls) results.push(await this.invokeTool(run, def, call, requestedBy, registry));
       await repo.updateRunStep(run.tenantId, {
         ...s, output: { ...(s.output as object), executed: true, tools: results },
       });
@@ -520,6 +535,26 @@ function buildSystemPrompt(def: AgentDefinition, toolNames: string[], style: Wri
     '{"name": "ツール名", "args": { ... }}',
     '```',
   ].join('\n');
+}
+
+/**
+ * 終わったステップごとの、ツールの結果の文字列。見本の応答の `{{ステップ ID}}` に差し込む（仕様書 第12.11.4節）。
+ *
+ * @remarks 結果が文字列ならそのまま、コネクタの応答なら本文を、それ以外は JSON にして使う。
+ */
+function stepResults(previous: RunStep[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const s of previous) {
+    if (s.kind !== 'agent' || s.status !== 'succeeded') continue;
+    const tools = (s.output as { tools?: { result?: unknown; error?: string }[] } | null)?.tools ?? [];
+    out[s.stepId] = tools.map((t) => {
+      const r = t.result as { text?: unknown } | string | undefined;
+      if (typeof r === 'string') return r;
+      if (r && typeof r === 'object' && typeof r.text === 'string') return r.text;
+      return t.error ?? JSON.stringify(r ?? null);
+    }).join('\n\n');
+  }
+  return out;
 }
 
 /** 前のステップの結果として推論に渡す量の上限（文字数）。 */

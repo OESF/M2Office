@@ -120,6 +120,14 @@ export interface Repository {
   installExtension(record: InstalledExtension): Promise<void>;
   /** 導入をやめる。導入していなければ `false`。 */
   uninstallExtension(tenantId: string, extensionId: string): Promise<boolean>;
+  /** 導入した拡張機能の有効・無効を切り替える（第12.10.4節）。導入していなければ `false`。 */
+  setExtensionEnabled(tenantId: string, extensionId: string, enabled: boolean): Promise<boolean>;
+  /** ファイルから取り込んだ拡張機能（自社専用。第12.10.3節）。 */
+  listPrivateExtensions(tenantId: string): Promise<PrivateExtension[]>;
+  /** 取り込んだ拡張機能を保存する。同じ ID があれば置き換える。 */
+  savePrivateExtension(record: PrivateExtension): Promise<void>;
+  /** 取り込んだ拡張機能を消す。無ければ `false`。 */
+  deletePrivateExtension(tenantId: string, extensionId: string): Promise<boolean>;
 
   createFile(file: StoredFile): Promise<void>;
   getFile(tenantId: string, id: string): Promise<StoredFile | null>;
@@ -201,7 +209,22 @@ export interface InstalledExtension {
   tenantId: string;
   extensionId: string;
   version: string;
-  consentedPermissions: { tools: string[]; max_risk_level: string };
+  /** 同意した権限。コネクタの接続先とツールの危険度を含む（第12.11.2節）。 */
+  consentedPermissions: { tools: string[]; max_risk_level: string; connectors?: unknown[] };
   installedBy: string;
   installedAt: string;
+  /** 有効か（スイッチ）。無効なら業務エージェントもコネクタも使えない。 */
+  enabled: boolean;
+}
+
+/** ファイルから取り込んだ拡張機能（自社専用）。 */
+export interface PrivateExtension {
+  tenantId: string;
+  extensionId: string;
+  version: string;
+  /** パッケージの中のパス → 中身（Base64）。 */
+  files: Record<string, string>;
+  sizeBytes: number;
+  importedBy: string;
+  importedAt: string;
 }

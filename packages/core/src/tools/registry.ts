@@ -67,6 +67,25 @@ export class ToolRegistry {
     return this.tools.get(name);
   }
 
+  /** 登録済みのツールの名前。 */
+  names(): string[] {
+    return [...this.tools.keys()];
+  }
+
+  /**
+   * この登録簿に、ツールを足した新しい登録簿を作る。元の登録簿は変えない。
+   *
+   * @remarks
+   * 拡張機能のコネクタが提供するツールを、会社ごとに足すために使う（仕様書 第12.11節）。
+   * 同じ名前のツールがすでにあれば、足さずに元のものを残す。内蔵のツールを上書きさせないため。
+   */
+  extend(tools: Iterable<Tool>): ToolRegistry {
+    const next = new ToolRegistry();
+    for (const t of this.tools.values()) next.register(t);
+    for (const t of tools) if (!next.get(t.name)) next.register(t);
+    return next;
+  }
+
   /** 定義が許可したツールのうち、登録済みのものだけを返す。 */
   allowed(names: string[]): Tool[] {
     return names.map((n) => this.tools.get(n)).filter((t): t is Tool => !!t);

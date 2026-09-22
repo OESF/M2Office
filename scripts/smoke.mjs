@@ -5,6 +5,7 @@
  * あわせてテナント分離・権限・ログイン・データベースの分離・設定・ファイルも確かめる。
  *
  * 使い方: `npm run dev` を起動した状態で `npm run smoke`
+ * 外部の MCP サーバ（DeepWiki）への実際の問い合わせも確かめるときは `SMOKE_EXTERNAL=1 npm run smoke`
  *
  * @see 仕様書 第24.3.2節 通すべき一本の流れ
  */
@@ -675,6 +676,102 @@ console.log('\n■ 20. 拡張機能（サンプル「あいさつ」）');
   await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
   const after = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: AG, input: { message: 'こんにちは' } }) }, 'member');
   after.status === 404 ? ok('削除すると使えなくなる') : ng(`削除後も使える（${after.status}）`);
+}
+
+console.log('\n■ 21. 持ち運べる拡張機能（ファイルからの取り込み・スイッチ・コネクタ）');
+{
+  const EXT = 'jp.example.weekly-report';
+  const AG = `${EXT}:weekly`;
+  const DIR = new URL('../examples/extensions/weekly-report/', import.meta.url).pathname;
+  await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
+
+  /** ディレクトリを ZIP にする（npm run ext:pack と同じ形）。extra でファイルを足せる。 */
+  async function zipDir(dir, extra = {}) {
+    const { default: JSZip } = await import('jszip');
+    const { readdirSync, readFileSync, statSync } = await import('node:fs');
+    const { join, relative } = await import('node:path');
+    const zip = new JSZip();
+    const walk = (d) => {
+      for (const n of readdirSync(d)) {
+        const f = join(d, n);
+        if (statSync(f).isDirectory()) walk(f); else zip.file(relative(dir, f), readFileSync(f));
+      }
+    };
+    walk(dir);
+    for (const [k, v] of Object.entries(extra)) zip.file(k, v);
+    return zip.generateAsync({ type: 'uint8array' });
+  }
+  const upload = async (tenant, data) => call(tenant, '/v1/admin/extensions/import', {
+    method: 'POST', body: data, headers: { 'content-type': 'application/octet-stream' },
+  });
+
+  const bad = await upload('a', await zipDir(DIR, { 'tools/run.js': 'console.log(1)' }));
+  bad.status === 400 && bad.body.problems?.some((x) => x.includes('入れてはならないファイル'))
+    ? ok('プログラムを含むファイルは取り込めない（400）') : ng(`取り込めてしまう（${bad.status}）`, JSON.stringify(bad.body));
+
+  const official = await upload('a', await zipDir(new URL('../extensions/hello-world/', import.meta.url).pathname));
+  official.status === 400 && official.body.problems?.some((x) => x.includes('公式の拡張機能と同じ ID'))
+    ? ok('公式の拡張機能と同じ ID のファイルは取り込めない') : ng(`取り込めてしまう（${official.status}）`);
+
+  const imp = await upload('a', await zipDir(DIR));
+  imp.status === 200 && imp.body.item?.origin === 'private' && !imp.body.item.installed
+    ? ok('ファイルから取り込むと、自社専用として一覧に出る（まだ導入はされない）') : ng('取り込めない', JSON.stringify(imp.body));
+
+  const notYet = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: AG, input: { week: '今週' } }) });
+  notYet.status === 404 ? ok('取り込んだだけでは使えない（同意して導入が必要）') : ng(`使えてしまう（${notYet.status}）`);
+
+  const { body: bList } = await call('b', '/v1/admin/extensions');
+  !bList.items?.some((x) => x.id === EXT) ? ok('取り込んだファイルは、ほかの会社には見えない') : ng('ほかの会社に見える');
+
+  await call('a', `/v1/admin/extensions/${EXT}/install`, { method: 'POST', body: JSON.stringify({ consent: true }) });
+  const { body: job } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: AG, input: { week: '今週' } }) }, 'member');
+  const done = await waitFor('a', job.runId, ['completed', 'failed'], 20000, 'member');
+  done.run?.status === 'completed' && done.artifacts?.[0]?.title === '週報の下書き（今週）'
+    ? ok('同意して導入すると、取り込んだ業務が動く（週報の下書き）') : ng('動かない', JSON.stringify(done.run));
+
+  const off = await call('a', `/v1/admin/extensions/${EXT}/enabled`, { method: 'PUT', body: JSON.stringify({ enabled: false }) });
+  const { body: menuOff } = await call('a', '/v1/agents', {}, 'member');
+  const runOff = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: AG, input: { week: '今週' } }) }, 'member');
+  off.status === 200 && !menuOff.agents.some((x) => x.id === AG) && runOff.status === 404
+    ? ok('スイッチを切ると、メニューから消えて実行できない') : ng('無効にしても使える');
+
+  const memberToggle = await call('a', `/v1/admin/extensions/${EXT}/enabled`, { method: 'PUT', body: JSON.stringify({ enabled: true }) }, 'member');
+  memberToggle.status === 403 ? ok('一般の利用者はスイッチを切り替えられない（403）') : ng(`切り替えられる（${memberToggle.status}）`);
+
+  await call('a', `/v1/admin/extensions/${EXT}/enabled`, { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+  const { body: menuOn } = await call('a', '/v1/agents', {}, 'member');
+  menuOn.agents.some((x) => x.id === AG) ? ok('スイッチを入れると、同意をやり直さずに戻る') : ng('戻らない');
+
+  const { body: audit } = await call('a', '/v1/admin/audit-events');
+  const actions = (audit.items ?? []).filter((e) => e.targetId === EXT).map((e) => e.action);
+  ['extension.import', 'extension.install', 'extension.disable', 'extension.enable'].every((x) => actions.includes(x))
+    ? ok('取り込み・導入・無効・有効を監査ログに残す') : ng('監査ログに無い', actions.join(', '));
+
+  await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
+  const { body: gone } = await call('a', '/v1/admin/extensions');
+  !gone.items?.some((x) => x.id === EXT) ? ok('削除すると、取り込んだファイルも消える') : ng('一覧に残る');
+
+  // コネクタ（MCP）。DeepWiki への実際の問い合わせは、ネットワークに依存するため SMOKE_EXTERNAL=1 のときだけ行う
+  const DW = 'jp.m2office.samples.deepwiki-research';
+  const { body: list } = await call('a', '/v1/admin/extensions');
+  const dw = list.items?.find((x) => x.id === DW);
+  dw?.connectors?.[0]?.url === 'https://mcp.deepwiki.com/mcp' && dw.counts.tools === 2
+    ? ok('コネクタを持つ拡張機能（DeepWiki）が読み込まれている') : ng('DeepWiki の拡張機能が無い');
+  if (process.env.SMOKE_EXTERNAL === '1') {
+    const check = await call('a', `/v1/admin/extensions/${DW}/connectors/deepwiki/check`, { method: 'POST' });
+    check.body.ok && check.body.tools.every((t) => t.provided)
+      ? ok('コネクタの接続を確かめられる（宣言したツールが提供されている）') : ng('接続を確かめられない', JSON.stringify(check.body));
+    await call('a', `/v1/admin/extensions/${DW}/install`, { method: 'POST', body: JSON.stringify({ consent: true }) });
+    const input = { repo: 'modelcontextprotocol/typescript-sdk', question: 'このリポジトリは何をするものですか？' };
+    const { body: j } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: `${DW}:research`, input }) }, 'member');
+    const r = await waitFor('a', j.runId, ['completed', 'failed'], 90000, 'member');
+    const body = r.artifacts?.[0]?.body ?? '';
+    r.run?.status === 'completed' && body.length > 50 && !body.startsWith('取得できませんでした')
+      ? ok('コネクタで外部に問い合わせ、その結果を資料に残す（鍵なし）') : ng('問い合わせの結果が残らない', body.slice(0, 200));
+    await call('a', `/v1/admin/extensions/${DW}`, { method: 'DELETE' });
+  } else {
+    console.log('  - DeepWiki への実際の問い合わせは省略（SMOKE_EXTERNAL=1 で実行）');
+  }
 }
 
 console.log('');

@@ -51,7 +51,7 @@ export class StubLlmProvider implements LlmProvider {
    */
   private replay(req: LlmRequest): LlmResponse | null {
     const ctx = req.context;
-    const cases = ctx ? (this.evalsFor?.(ctx.agentId) ?? []).filter((c) => c.stub) : [];
+    const cases = ctx ? (ctx.evals ?? this.evalsFor?.(ctx.agentId) ?? []).filter((c) => c.stub) : [];
     if (!ctx || cases.length === 0) return null;
     const hit = cases.find((c) => stableJson(c.input) === stableJson(ctx.input));
     const tokensUsed = Math.ceil(JSON.stringify(ctx.input).length / 4) + 32;
@@ -61,11 +61,29 @@ export class StubLlmProvider implements LlmProvider {
         tokensUsed,
       };
     }
-    const calls = hit.stub?.[ctx.stepId] ?? [];
+    const calls = (hit.stub?.[ctx.stepId] ?? []).map((c) => ({
+      ...c, args: fillPlaceholders(c.args, ctx.stepResults ?? {}) as Record<string, unknown>,
+    }));
     const lines = [`［スタブ応答］見本の応答を再生しています（評価のケース「${hit.name}」）。`];
     for (const call of calls) lines.push('', '```tool', JSON.stringify(call), '```');
     return { text: lines.join('\n'), tokensUsed };
   }
+}
+
+/**
+ * 見本の応答の引数にある `{{ステップ ID}}` を、そのステップのツールの結果に置き換える（仕様書 第12.11.4節）。
+ *
+ * @remarks 結果が無いステップを指していれば「（取得できませんでした）」に置き換える。推測で埋めない。
+ */
+function fillPlaceholders(v: unknown, results: Record<string, string>): unknown {
+  if (typeof v === 'string') {
+    return v.replace(/\{\{\s*([a-z0-9][a-z0-9-]*)\s*\}\}/g, (_, id: string) => results[id] ?? '（取得できませんでした）');
+  }
+  if (Array.isArray(v)) return v.map((x) => fillPlaceholders(x, results));
+  if (v && typeof v === 'object') {
+    return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, fillPlaceholders(x, results)]));
+  }
+  return v;
 }
 
 /** キーの順序によらず同じ文字列になる JSON。入力の一致を比べるために使う。 */

@@ -41,11 +41,12 @@ export function adminRoute(deps: AppDeps) {
   app.get('/runs', async (c) => {
     const { tenant } = c.get('ctx');
     const rows = await deps.repo.listRunsWithJobs(tenant.id, { limit: 100 });
+    const { allAgents } = await deps.tenantView(tenant.id);
     // 入力（job.input）と成果物は返さない。状態を見るためのものであり、中身を見るためではない
     const items = rows.map(({ run: r, job }) => ({
       id: r.id, status: r.status, startedAt: r.startedAt, endedAt: r.endedAt,
       tokensUsed: r.tokensUsed, costJpy: r.costJpy,
-      agentId: job.agentId, agentName: deps.catalog.all().find((a) => a.id === job.agentId)?.name ?? job.agentId,
+      agentId: job.agentId, agentName: allAgents.find((a) => a.id === job.agentId)?.name ?? job.agentId,
       origin: job.origin, requestedBy: job.requestedBy,
     }));
     return c.json({ items });
@@ -55,9 +56,10 @@ export function adminRoute(deps: AppDeps) {
   app.get('/usage', async (c) => {
     const { tenant } = c.get('ctx');
     const rows = await deps.repo.usageByAgent(tenant.id);
+    const { allAgents } = await deps.tenantView(tenant.id);
     const items = rows.map((r) => ({
       ...r,
-      name: deps.catalog.all().find((a) => a.id === r.agentId)?.name ?? r.agentId,
+      name: allAgents.find((a) => a.id === r.agentId)?.name ?? r.agentId,
       costJpy: Math.round(r.costJpy * 100) / 100,
     }));
     return c.json({
@@ -81,11 +83,12 @@ export function adminRoute(deps: AppDeps) {
   app.get('/settings', async (c) => {
     const { tenant } = c.get('ctx');
     const settings = await deps.repo.getTenantSettings(tenant.id);
+    const view = await deps.tenantView(tenant.id);
     return c.json({
       ...settings,
-      catalog: (await deps.agentsFor(tenant.id)).map((a) => ({
+      catalog: view.agents.map((a) => ({
         id: a.id, name: a.name, description: a.description,
-        usesWriteInternal: a.tools.some((t) => deps.registry.get(t)?.risk === 'write-internal'),
+        usesWriteInternal: a.tools.some((t) => view.registry.get(t)?.risk === 'write-internal'),
         defaultMinutes: DEFAULT_STANDARD_MINUTES[a.id] ?? 0,
       })),
     });
@@ -102,7 +105,7 @@ export function adminRoute(deps: AppDeps) {
     const { tenant, user } = c.get('ctx');
     const section = c.req.param('section');
     const body = await c.req.json<unknown>();
-    const checked = validateSection(section, body, deps.catalog.all().map((a) => a.id));
+    const checked = validateSection(section, body, (await deps.tenantView(tenant.id)).allAgents.map((a) => a.id));
     if ('error' in checked) return c.json({ error: checked.error }, 400);
 
     await deps.repo.saveTenantSettings(tenant.id, checked.section, checked.value as never, user.id);

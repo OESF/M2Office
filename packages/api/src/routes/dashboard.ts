@@ -9,7 +9,7 @@
 
 import { Hono } from 'hono';
 import type { Approval, AuditEvent, Job, Run, User } from '@m2office/shared';
-import { stepLabel, type AgentCatalog } from '@m2office/core';
+import { stepLabel, type TenantExtensions } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { requireRole, type AppEnv } from '../middleware/tenant.js';
 
@@ -32,12 +32,13 @@ type StepState = 'done' | 'current' | 'waiting' | 'failed' | 'todo';
  */
 export function dashboardRoute(deps: AppDeps) {
   const app = new Hono<AppEnv>();
-  const agentName = (id: string) => nameOfAgent(deps.catalog, id);
   app.use('*', requireRole('admin'));
 
   /** いまの状態。上部の数値・業務の流れ・承認の滞留・出来事（第6.7.3節）。 */
   app.get('/live', async (c) => {
     const { tenant } = c.get('ctx');
+    const view = await deps.tenantView(tenant.id);
+    const agentName = (id: string) => nameOfAgent(view, id);
     const now = new Date();
     const todayStart = jstDayStart(now, 0);
 
@@ -70,7 +71,7 @@ export function dashboardRoute(deps: AppDeps) {
         requester: nameOf(job.requestedBy),
         origin: job.origin,
         startedAt: run.startedAt,
-        steps: flowSteps(deps.catalog, job, run, confirming),
+        steps: flowSteps(view, job, run, confirming),
         waitingFor: approval
           ? { who: approverText(approval, nameOf), since: approval.createdAt, kind: confirming ? 'confirm' : 'approval' }
           : null,
@@ -221,8 +222,8 @@ export function dashboardRoute(deps: AppDeps) {
 }
 
 /** 定義の段階を並べ、実行の位置から各段階の状態を決める（第6.7.5節）。 */
-function flowSteps(catalog: AgentCatalog, job: Job, run: Run, confirming: boolean) {
-  const def = catalog.resolve(job.agentId, job.agentVersion);
+function flowSteps(view: TenantExtensions, job: Job, run: Run, confirming: boolean) {
+  const def = view.resolve(job.agentId, job.agentVersion);
   if (!def) return [];
   const out: { label: string; state: StepState }[] = [];
   def.steps.forEach((step, i) => {
@@ -286,8 +287,8 @@ function names(users: User[]): (id: string | null | undefined) => string {
   return (id) => (id ? m.get(id) ?? '不明な利用者' : '—');
 }
 
-function nameOfAgent(catalog: AgentCatalog, id: string): string {
-  return catalog.all().find((a) => a.id === id)?.name ?? (id || '不明な業務');
+function nameOfAgent(view: TenantExtensions, id: string): string {
+  return view.allAgents.find((a) => a.id === id)?.name ?? (id || '不明な業務');
 }
 
 function firstLine(text: string): string {

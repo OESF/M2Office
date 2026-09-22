@@ -35,8 +35,9 @@ export function schedulesRoute(deps: AppDeps) {
       agentId: string; agentVersion?: number; input?: Record<string, unknown>;
       rule: ScheduleRule; timezone?: string;
     }>();
-    const def = deps.catalog.resolve(body.agentId, body.agentVersion ?? 1);
-    if (!def || !(await deps.isAvailable(tenant.id, def.id))) {
+    const view = await deps.tenantView(tenant.id);
+    const def = view.resolve(body.agentId, body.agentVersion ?? 1);
+    if (!def || !view.isAvailable(def.id)) {
       return c.json({ error: `エージェントが見つかりません: ${body.agentId}` }, 404);
     }
     try {

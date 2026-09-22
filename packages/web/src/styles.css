@@ -300,3 +300,30 @@ tr.muted td { color: var(--muted); }
 @media (max-width: 680px) { .agent-help-cols { grid-template-columns: 1fr; } }
 .consent { background: #fdf6ea; border: 1px solid #f0c78a; border-radius: 6px; padding: 10px 14px; margin-top: 8px; }
 .consent h4 { margin: 0 0 6px; font-size: 13px; }
+
+/* 拡張機能（仕様書 第12.10.5節） */
+.ext-page { position: relative; }
+.ext-page.dragging { outline: 2px dashed var(--accent); outline-offset: 6px; border-radius: 8px; }
+.ext-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.ext-head h1 { margin-bottom: 0; }
+.ext-add { background: var(--accent-soft); border-radius: 8px; padding: 4px 14px 12px; margin-bottom: 16px; }
+.ext-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.ext-card.off { opacity: .72; }
+.ext-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ext-title { display: flex; align-items: center; gap: 10px; }
+.ext-icon { width: 36px; height: 36px; border-radius: 8px; flex: none; }
+.ext-icon.blank { display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); font-weight: bold; }
+.ext-details { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 4px; }
+.ext-details h4 { margin: 10px 0 4px; font-size: 13px; }
+.ext-readme { font-size: 13px; background: var(--bg); border-radius: 6px; padding: 4px 12px; }
+.switch-label { display: flex; align-items: center; gap: 8px; flex: none; }
+.switch { position: relative; width: 44px; height: 24px; border-radius: 999px; border: none; background: #c9d0d4; padding: 0; transition: background .15s; }
+.switch span { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: left .15s; }
+.switch.on { background: var(--accent); }
+.switch.on span { left: 23px; }
+.switch:disabled { cursor: not-allowed; opacity: .6; }
+.switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button.link { background: none; border: none; padding: 0; }
+button.link.danger { color: #b91c1c; }
+.warn-msg { background: #fdf3e3; color: var(--warn); border-radius: 6px; padding: 6px 10px; }
+.ok-inline { color: var(--accent); }

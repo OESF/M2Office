@@ -1,0 +1,12 @@
+{
+  "id": "jp.example.weekly-report",
+  "name": "週報の下書き",
+  "version": "1.0.0",
+  "description": "今週の予定と未完了の ToDo を集めて、週報の下書きを作ります。会社が自分で作ってファイルで取り込む、自社専用の拡張機能のサンプルです。",
+  "publisher": { "name": "サンプル株式会社" },
+  "platform_schema": ">=1 <2",
+  "permissions": {
+    "tools": ["calendar.list", "tasks.list", "document.create"],
+    "max_risk_level": "draft"
+  }
+}

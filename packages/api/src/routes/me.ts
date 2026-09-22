@@ -27,7 +27,8 @@ export function meRoute(deps: AppDeps) {
 
   app.put('/settings/:section', async (c) => {
     const { tenant, user } = c.get('ctx');
-    const checked = validate(c.req.param('section'), await c.req.json<unknown>(), deps.catalog.all().map((a) => a.id));
+    const { allAgents } = await deps.tenantView(tenant.id);
+    const checked = validate(c.req.param('section'), await c.req.json<unknown>(), allAgents.map((a) => a.id));
     if ('error' in checked) return c.json({ error: checked.error }, 400);
     await deps.repo.saveUserSettings(tenant.id, user.id, checked.section, checked.value as never);
     await audit(deps, tenant.id, user.id, 'me.settings.update', checked.section);

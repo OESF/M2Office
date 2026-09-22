@@ -1,0 +1,12 @@
+{
+  "id": "deepwiki",
+  "name": "DeepWiki",
+  "description": "GitHub で公開されているリポジトリの説明文書を調べます。認証は要りません",
+  "transport": "http",
+  "url": "https://mcp.deepwiki.com/mcp",
+  "auth": { "type": "none" },
+  "tools": [
+    { "name": "ask_wiki_question", "description": "公開リポジトリについて質問し、答えを得ます", "risk": "read" },
+    { "name": "read_wiki_structure", "description": "公開リポジトリの説明文書の目次を得ます", "risk": "read" }
+  ]
+}

@@ -23,7 +23,8 @@ export function agentsRoute(deps: AppDeps) {
     const { tenant } = c.get('ctx');
     const { agents: setting } = await deps.repo.getTenantSettings(tenant.id);
     // 公式と、この会社が導入した拡張機能の業務エージェント（仕様書 第12.9.3節）
-    const available = await deps.agentsFor(tenant.id);
+    const view = await deps.tenantView(tenant.id);
+    const available = view.agents;
     const agents = available.filter((a) => !setting.disabled.includes(a.id)).map((a) => ({
       id: a.id,
       version: a.version,
@@ -36,7 +37,7 @@ export function agentsRoute(deps: AppDeps) {
       stepCount: a.steps.length,
       /** 拡張機能の業務エージェントなら、その提供者。公式なら `null`。 */
       extension: (() => {
-        const ext = deps.catalog.extensionOf(a.id);
+        const ext = view.entryOf(a.id)?.pkg;
         return ext ? { id: ext.manifest.id, name: ext.manifest.name, publisher: ext.manifest.publisher.name } : null;
       })(),
     }));

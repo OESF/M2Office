@@ -1,0 +1,24 @@
+{
+  "agent": "research",
+  "cases": [
+    {
+      "name": "MCP の TypeScript SDK",
+      "input": { "repo": "modelcontextprotocol/typescript-sdk", "question": "このリポジトリは何をするものですか？" },
+      "expect": "DeepWiki の答えをもとに、SDK の目的と主な機能を資料に保存する",
+      "stub": {
+        "ask": [
+          {
+            "name": "deepwiki.ask_wiki_question",
+            "args": { "repoName": "modelcontextprotocol/typescript-sdk", "question": "このリポジトリは何をするものですか？" }
+          }
+        ],
+        "save": [
+          {
+            "name": "document.create",
+            "args": { "kind": "research", "title": "リポジトリ調査: modelcontextprotocol/typescript-sdk", "body": "{{ask}}" }
+          }
+        ]
+      }
+    }
+  ]
+}

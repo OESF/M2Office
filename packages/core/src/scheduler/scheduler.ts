@@ -15,7 +15,10 @@ import { silentLogger, type Logger } from '../log/logger.js';
 
 export interface SchedulerDeps {
   repo: Repository;
-  resolveDefinition(agentId: string, version: number): AgentDefinition | undefined;
+  /** エージェント定義を解決する。自社専用の拡張機能はその会社でしか解決できない（仕様書 第12.10.3節）。 */
+  resolveDefinition(
+    agentId: string, version: number, tenantId: string,
+  ): AgentDefinition | undefined | Promise<AgentDefinition | undefined>;
   /** アプリログ。省略時は何も書かない。 */
   logger?: Logger;
   /** その会社で業務エージェントを使えるか（拡張機能を導入しているか）。 */
@@ -52,7 +55,7 @@ export class Scheduler {
       const due = await repo.claimDueSchedule(now, (s) => nextRunAt(s.rule, s.timezone, now));
       if (!due) break;
 
-      const def = this.deps.resolveDefinition(due.agentId, due.agentVersion);
+      const def = await this.deps.resolveDefinition(due.agentId, due.agentVersion, due.tenantId);
       const user = await repo.findUserById(due.tenantId, due.userId);
       const settings = await repo.getTenantSettings(due.tenantId);
       const reason = !def ? '定義が見つかりません'
