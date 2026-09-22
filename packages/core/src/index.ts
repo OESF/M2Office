@@ -22,6 +22,7 @@ export type {
   CredentialKind, TenantCredential, GoogleConnection,
 } from './repository/types.js';
 export { PostgresRepository } from './repository/postgres.js';
+export { canViewRun, type RunViewer } from './engine/run-access.js';
 export * from './knowledge/index.js';
 
 export { buildConnector, MockWorkspaceConnector } from './connectors/index.js';

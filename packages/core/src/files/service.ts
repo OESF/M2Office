@@ -5,9 +5,10 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto';
-import type { StoredFile } from '@m2office/shared';
+import { canDecide, type StoredFile } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { FileStore } from './store.js';
+import { canViewRun, type RunViewer } from '../engine/run-access.js';
 import { MIME, type FileKind } from './formats.js';
 
 /**
@@ -37,6 +38,28 @@ export async function saveFile(
 }
 
 /**
+ * その利用者がファイルを開けるかを返す（仕様書 第6.2.1節）。
+ *
+ * @remarks
+ * 上げた本人（または業務を依頼した本人）は開ける。業務が作ったファイルは、その実行を見られる人が開ける。
+ * 利用者が上げたファイルは、それを入力にした実行の承認を判断できる人も開ける。
+ * 承認者の役割を持つだけでは開けない。
+ */
+async function canOpenFile(
+  repo: Repository, tenantId: string, meta: StoredFile, who: RunViewer,
+): Promise<boolean> {
+  if (meta.ownerUserId === who.id) return true;
+  if (meta.runId) {
+    const run = await repo.getRun(tenantId, meta.runId);
+    const job = run ? await repo.getJob(tenantId, run.jobId) : null;
+    if (!run || !job) return false;
+    return canViewRun(repo, tenantId, job, run.id, who);
+  }
+  const approvals = await repo.listApprovalsForFileInput(tenantId, meta.id);
+  return approvals.some((a) => canDecide(a, who));
+}
+
+/**
  * 利用者が扱ってよいファイルを読み出す。
  *
  * @param who 読もうとしている利用者。所有者か、判断のために中身を見る承認者だけが読める
@@ -51,7 +74,7 @@ export async function loadFile(
 ): Promise<{ meta: StoredFile; bytes: Uint8Array } | null> {
   const meta = await repo.getFile(tenantId, id);
   if (!meta) return null;
-  if (meta.ownerUserId !== who.id && !who.roles.includes('approver')) return null;
+  if (!(await canOpenFile(repo, tenantId, meta, who))) return null;
   const bytes = await store.get(tenantId, id);
   return bytes ? { meta, bytes } : null;
 }

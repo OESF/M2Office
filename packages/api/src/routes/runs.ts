@@ -5,6 +5,7 @@
  */
 
 import { Hono } from 'hono';
+import { canViewRun } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 
@@ -14,8 +15,8 @@ import type { AppEnv } from '../middleware/tenant.js';
  * 画面のサッシパネル（仕様書 第6.2節）はこの応答を表示する。
  *
  * @remarks
- * 見られるのは、依頼した本人と、承認者のロールを持つ者である。
- * 承認者は判断のために中身を見る必要があるため。
+ * 見られるのは、依頼した本人と、その実行に自分が判断できる承認がある人だけである（仕様書 第6.2.1節）。
+ * 承認者の役割を持つだけでは見られない。中身には Google から取得したメールなどが入るため。
  * それ以外の利用者には、存在自体を示さず 404 を返す。
  */
 export function runsRoute(deps: AppDeps) {
@@ -29,8 +30,7 @@ export function runsRoute(deps: AppDeps) {
     if (!run) return c.json({ error: '実行が見つかりません' }, 404);
 
     const job = await deps.repo.getJob(ctx.tenant.id, run.jobId);
-    const isApprover = ctx.user.roles.includes('approver');
-    if (job?.requestedBy !== ctx.user.id && !isApprover) {
+    if (!job || !(await canViewRun(deps.repo, ctx.tenant.id, job, run.id, ctx.user))) {
       return c.json({ error: '実行が見つかりません' }, 404);
     }
     const [steps, artifacts] = await Promise.all([

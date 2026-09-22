@@ -353,6 +353,33 @@ export class PostgresRepository implements Repository {
     );
   }
 
+  async listRunApprovals(tenantId: string, runId: string): Promise<Approval[]> {
+    return this.q<Approval>(tenantId,
+      `select a.id, a.run_step_id as "runStepId", a.tenant_id as "tenantId",
+              a.approver_role as "approverRole", a.approver_user_id as "approverUserId", a.present,
+              a.decision, a.decided_by as "decidedBy", a.comment, a.decided_at as "decidedAt",
+              a.created_at as "createdAt"
+         from approvals a join run_steps s on s.id = a.run_step_id
+        where a.tenant_id = $1 and s.run_id = $2`,
+      [tenantId, runId]);
+  }
+
+  async listApprovalsForFileInput(tenantId: string, fileId: string): Promise<Approval[]> {
+    // 依頼の入力（JSON）の値にファイルの ID がそのまま入っているものを探す。ID は利用者の入力ではなく M2Office が付けたもの
+    return this.q<Approval>(tenantId,
+      `select a.id, a.run_step_id as "runStepId", a.tenant_id as "tenantId",
+              a.approver_role as "approverRole", a.approver_user_id as "approverUserId", a.present,
+              a.decision, a.decided_by as "decidedBy", a.comment, a.decided_at as "decidedAt",
+              a.created_at as "createdAt"
+         from approvals a
+         join run_steps s on s.id = a.run_step_id
+         join runs r on r.id = s.run_id and r.tenant_id = a.tenant_id
+         join jobs j on j.id = r.job_id and j.tenant_id = a.tenant_id
+        where a.tenant_id = $1
+          and exists (select 1 from jsonb_each_text(j.input) e where e.value = $2)`,
+      [tenantId, fileId]);
+  }
+
   async updateApproval(a: Approval): Promise<void> {
     await this.q(a.tenantId, 
       `update approvals set decision=$3, decided_by=$4, comment=$5, decided_at=$6

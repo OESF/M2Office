@@ -54,6 +54,10 @@ export interface Repository {
   createApproval(approval: Approval): Promise<void>;
   getApproval(tenantId: string, approvalId: string): Promise<Approval | null>;
   listPendingApprovals(tenantId: string): Promise<Approval[]>;
+  /** 1 つの実行の承認（判断済みを含む）。実行の中身を見られる人の判定に使う（仕様書 第6.2.1節）。 */
+  listRunApprovals(tenantId: string, runId: string): Promise<Approval[]>;
+  /** 入力にそのファイルの ID を含む依頼の実行の承認（判断済みを含む）。利用者が上げたファイルを開ける人の判定に使う。 */
+  listApprovalsForFileInput(tenantId: string, fileId: string): Promise<Approval[]>;
   updateApproval(approval: Approval): Promise<void>;
 
   createArtifact(artifact: Artifact): Promise<void>;

@@ -1236,6 +1236,45 @@ console.log('\n■ 30. 言い換えの登録（第11.7.7節）');
   await put({ standardSynonyms: true, synonyms: '' });
 }
 
+console.log('\n■ 31. 実行の中身を見られる人（第6.2.1節）');
+{
+  // 一般利用者が依頼した実行を、承認者の役割を持つ管理者が開けるか
+  const run = async (agentId, input) => {
+    const { body } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId, input }) }, 'member');
+    for (let i = 0; i < 60; i++) {
+      const { body: r } = await call('a', `/v1/runs/${body.runId}`, {}, 'member');
+      if (['completed', 'failed', 'awaiting_approval'].includes(r.run?.status)) return body.runId;
+      await new Promise((ok) => setTimeout(ok, 250));
+    }
+    return body.runId;
+  };
+  const inbox = await run('inbox-triage', {});
+  const own = await call('a', `/v1/runs/${inbox}`, {}, 'member');
+  const other = await call('a', `/v1/runs/${inbox}`, {}, 'admin');
+  own.status === 200 && other.status === 404
+    ? ok('承認のない実行（受信箱整理）は、承認者の役割があっても依頼した本人しか開けない') : ng(`見えてしまう（本人 ${own.status}、ほかの人 ${other.status}）`);
+
+  const minutes = await run('minutes', { title: '閲覧の確認', transcript: 'A 案で進めることを決定。', space: 'general' });
+  const approver = await call('a', `/v1/runs/${minutes}`, {}, 'admin');
+  approver.status === 200 ? ok('自分が判断できる承認がある実行は、承認する人が開ける') : ng(`承認する人が開けない（${approver.status}）`);
+
+  const form = new FormData();
+  form.append('file', new Blob(['日付,金額\n2026-09-01,1000\n']), '経費.csv');
+  const up = await fetch(`${API}/v1/files`, { method: 'POST', body: form, headers: { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' } });
+  const file = await up.json();
+  const fileByOther = await fetch(`${API}/v1/files/${file.id}`, { headers: { 'x-tenant': 'a', 'x-user': 'admin@alpha.example.jp' } });
+  fileByOther.status === 404 ? ok('ほかの人が上げたファイルは、承認者の役割があっても開けない') : ng(`開けてしまう（${fileByOther.status}）`);
+
+  // 後片付け: 承認待ちの議事録を却下して止める
+  const { body: pend } = await call('a', '/v1/approvals', {}, 'admin');
+  for (const a of (pend.items ?? [])) {
+    const { body: r } = await call('a', `/v1/runs/${minutes}`, {}, 'member');
+    if ((r.steps ?? []).some((st) => st.id === a.runStepId)) {
+      await call('a', `/v1/approvals/${a.id}`, { method: 'POST', body: JSON.stringify({ decision: 'rejected', comment: '閲覧の確認' }) }, 'admin');
+    }
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');
