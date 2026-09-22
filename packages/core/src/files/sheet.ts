@@ -1,3 +1,10 @@
+/**
+ * @file Excel・CSV の読み書き。Shift_JIS の CSV を読み、CSV は BOM 付き UTF-8 で書く。
+ *
+ * @see 仕様書 第9.4.1節 文書を扱う共通ツール
+ * @see ADR-0004 文書形式を扱うライブラリの選定
+ */
+
 import ExcelJS from 'exceljs';
 
 /** 表として読んだ結果。値はすべて文字列・数値・真偽値・空（null）のいずれか。 */

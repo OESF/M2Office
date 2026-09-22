@@ -1,3 +1,9 @@
+/**
+ * @file 秘書への依頼を受け付ける API。どの層（直接応答・取次・対話）で答えたかも返す。
+ *
+ * @see 仕様書 第10.9節 応答の経路
+ */
+
 import { Hono } from 'hono';
 import type { RequestContext } from '@m2office/shared';
 import type { AppDeps } from '../context.js';

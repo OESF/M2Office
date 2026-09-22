@@ -1,3 +1,12 @@
+/**
+ * @file ログインとログアウトの API。
+ *
+ * 正式なログインは Google アカウントのみ。OAuth クライアントが整うまでは、
+ * 開発用ログイン（利用者を選ぶ）で骨格を動かす。
+ *
+ * @see 仕様書 第16.1節 認証
+ */
+
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import type { AppDeps } from '../context.js';

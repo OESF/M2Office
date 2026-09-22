@@ -1,3 +1,9 @@
+/**
+ * @file 推論を行わないスタブの LLM。鍵が無くても全体の流れを確かめるためのもの。
+ *
+ * 指示文の語句からツール呼び出しを組み立てて返す。本番では使わない。
+ */
+
 import type { LlmProvider, LlmRequest, LlmResponse } from './provider.js';
 
 /**

@@ -54,7 +54,7 @@ npm run dev
 ## 動作確認
 
 ```bash
-npm test        # 単体テスト（DB 不要）
+npm test        # ファイルヘッダーの確認と単体テスト（DB 不要）
 npm run smoke   # 通しの確認（npm run dev を起動した状態で）
 ```
 

@@ -1,9 +1,11 @@
 /**
- * `@m2office/shared` の公開窓口。
+ * @file `@m2office/shared` の公開窓口。画面・API・ワーカーが共通で使う型と定数を書き出す。
  *
- * 画面・API・ワーカーが共通で参照する型と定数のみを置く。
  * 実装（ドメインロジック）は `@m2office/core` に置き、ここには含めない。
+ *
+ * @see 仕様書 第20.5節 リポジトリ構成
  */
+
 export * from './types/agent.js';
 export * from './types/run.js';
 export * from './types/tenant.js';

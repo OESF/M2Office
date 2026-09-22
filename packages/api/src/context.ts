@@ -1,3 +1,13 @@
+/**
+ * @file API プロセスが共有する依存（永続化・LLM・接続口・ファイル・エンジン・秘書）を組み立てる。
+ *
+ * LLM の提供者と業務システムへの接続口は設定で切り替える。
+ * 鍵や OAuth クライアントが無い開発環境では、スタブとダミー接続で動く。
+ *
+ * @see 仕様書 第20.2節 LLM 抽象化層
+ * @see ADR-0003 外部接続の手前に接続口を設ける
+ */
+
 import {
   PostgresRepository, StubLlmProvider, OpenAiCompatibleProvider, ToolRegistry, BUILTIN_TOOLS,
   RunEngine, Secretary, OFFICIAL_AGENTS, resolveOfficialAgent, buildConnector, LocalFileStore,

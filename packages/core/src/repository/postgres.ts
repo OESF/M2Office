@@ -1,3 +1,12 @@
+/**
+ * @file PostgreSQL による永続化層の実装。
+ *
+ * 問い合わせごとにトランザクションを張って `app.tenant_id` を設定し、
+ * データベースの行レベルセキュリティでテナントを分離する。
+ *
+ * @see 仕様書 第8.5.5節 RLS 実装上の注意
+ */
+
 import pg from 'pg';
 import type {
   Approval, Artifact, AuditEvent, Job, Notification, Run, RunStep, Schedule, Session,
@@ -6,22 +15,6 @@ import type {
 import { DEFAULT_TENANT_SETTINGS, DEFAULT_USER_SETTINGS } from '@m2office/shared';
 import type { KnowledgeHit, KnowledgeItem, Repository } from './types.js';
 
-/**
- * PostgreSQL による永続化。
- *
- * @remarks
- * テナント境界: すべての問い合わせに `tenant_id` の条件を含める。
- * 接続プールを使うため、**トランザクション単位で**テナントを設定する方針をとる
- * （仕様書 第6.5.5節）。行レベルセキュリティの有効化は次段階で行う。
- */
-/**
- * PostgreSQL が返す値を、型定義どおりの JavaScript の値に揃える。
- *
- * @remarks
- * 既定では `numeric` は文字列、`timestamptz` は `Date` で返る。
- * 型定義（`@m2office/shared`）は数値と ISO 文字列を宣言しているため、
- * ここで合わせておかないと、加算が文字列連結になるなどの不整合が起きる。
- */
 /**
  * 問い合わせ文を検索語に分割する。
  *
@@ -38,6 +31,14 @@ function tokenize(query: string): string[] {
   return [...new Set(query.split(separators).filter((t) => t.length >= 2))];
 }
 
+/**
+ * PostgreSQL が返す値を、型定義どおりの JavaScript の値に揃える。
+ *
+ * @remarks
+ * 既定では `numeric` は文字列、`timestamptz` は `Date` で返る。
+ * 型定義（`@m2office/shared`）は数値と ISO 文字列を宣言しているため、
+ * ここで合わせておかないと、加算が文字列連結になるなどの不整合が起きる。
+ */
 function configureTypeParsers(): void {
   const NUMERIC = 1700;
   const TIMESTAMPTZ = 1184;
@@ -48,6 +49,14 @@ function configureTypeParsers(): void {
 }
 configureTypeParsers();
 
+/**
+ * PostgreSQL による永続化。
+ *
+ * @remarks
+ * テナント境界: すべての問い合わせに `tenant_id` の条件を含めたうえで、
+ * 問い合わせごとのトランザクションで `app.tenant_id` を設定し、
+ * データベースの行レベルセキュリティでも二重に絞る（仕様書 第8.5.5節）。
+ */
 export class PostgresRepository implements Repository {
   private readonly pool: pg.Pool;
 

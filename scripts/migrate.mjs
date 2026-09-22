@@ -1,10 +1,13 @@
 /**
- * `db/migrations` の SQL を順に適用する。
+ * @file データベースのスキーマ変更（`db/migrations` の SQL）を順に適用する。
  *
  * スキーマ変更は所有者のロール（`MIGRATION_DATABASE_URL`）で行う。
- * アプリが使うロール（`DATABASE_URL` の利用者、`m2office_app`）が無ければ先に作る。
- * アプリのロールは表の所有者にせず、行レベルセキュリティを迂回させない（仕様書 第8.5.5節）。
+ * アプリが使うロール（`m2office_app`）が無ければ先に作る。
+ * アプリのロールは表の所有者にせず、行レベルセキュリティを迂回させない。
+ *
+ * @see 仕様書 第8.5.5節 RLS 実装上の注意
  */
+
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import pg from 'pg';

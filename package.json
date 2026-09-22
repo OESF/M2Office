@@ -21,8 +21,9 @@
     "db:seed": "node --env-file-if-exists=.env scripts/seed.mjs",
     "db:reset": "docker compose down -v && npm run db:up && npm run db:migrate && npm run db:seed",
     "typecheck": "tsc -b",
-    "test": "node --import tsx --test packages/*/test/*.test.ts",
-    "smoke": "node --env-file-if-exists=.env scripts/smoke.mjs"
+    "test": "node scripts/check-headers.mjs && node --import tsx --test packages/*/test/*.test.ts",
+    "smoke": "node --env-file-if-exists=.env scripts/smoke.mjs",
+    "lint:headers": "node scripts/check-headers.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

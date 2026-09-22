@@ -1,3 +1,9 @@
+/**
+ * @file 画面の部品。入力フォームの自動生成・実行の詳細・承認トレイ・根拠の表示。
+ *
+ * @see 仕様書 第6章 ユーザー体験
+ */
+
 import { useState } from 'react';
 import type { Approval, Artifact, RunStep } from '@m2office/shared';
 import { api, type AgentSummary, type JsonSchemaField, type RunDetail } from './api.js';

@@ -1,18 +1,18 @@
+/**
+ * @file メール・予定・タスク・チャット・通知を扱うツール。
+ *
+ * いずれも接続口（`ToolContext.connector`）を経由し、Google の API を直接呼ばない。
+ * 返す値には必ず `source` を含め、ダミーの値が本物として扱われないようにする。
+ * 危険度は仕様書 第9.4節の区分に従う。
+ *
+ * @see 仕様書 第9.4節 ツールと承認の対応
+ * @see 仕様書 第24.2節 第 6 項
+ */
+
 import { randomUUID } from 'node:crypto';
 import type { Tool, ToolContext } from './registry.js';
 import { canDecide } from '@m2office/shared';
 import { addDays, jst, ymd } from '../connectors/mock.js';
-
-/**
- * メール・予定・タスク・チャット・通知を扱うツール。
- *
- * いずれも {@link ToolContext.connector} を経由し、Google の API を直接呼ばない
- * （仕様書 第24.2節 第 6 項）。返す値には必ず `source` を含め、
- * ダミーの値が本物として扱われないようにする。
- *
- * @remarks
- * 危険度は仕様書 第9.4節の区分に従う。
- */
 
 const principal = (ctx: ToolContext) => ({ tenantId: ctx.tenantId, userId: ctx.userId });
 const str = (v: unknown, fallback = '') => (typeof v === 'string' ? v : fallback);

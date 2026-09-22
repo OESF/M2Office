@@ -1,3 +1,9 @@
+/**
+ * @file 個人設定の API。本人の設定・表示名・ログイン中の端末・利用状況を扱う。
+ *
+ * @see 仕様書 第6.5節 個人設定
+ */
+
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import type { UserSettings } from '@m2office/shared';

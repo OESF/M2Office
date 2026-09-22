@@ -1,3 +1,11 @@
+/**
+ * @file 業務の実行を依頼する API と、本人の実行履歴を返す API。
+ *
+ * 依頼は待ち行列へ入れるだけで、実行はワーカーが担う。
+ *
+ * @see 仕様書 第8.4節 同期・非同期の境界
+ */
+
 import { Hono } from 'hono';
 import type { Job } from '@m2office/shared';
 import { enqueueJob, resolveOfficialAgent } from '@m2office/core';

@@ -1,3 +1,9 @@
+/**
+ * @file 実行の詳細（ステップ・根拠・成果物）を返す API。画面のサッシパネルが表示する。
+ *
+ * @see 仕様書 第6.2節 サッシパネルの表示内容
+ */
+
 import { Hono } from 'hono';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';

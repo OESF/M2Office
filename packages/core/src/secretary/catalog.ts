@@ -1,3 +1,11 @@
+/**
+ * @file 秘書の層 1（LLM を使わない直接応答）で答える定型の照会の一覧。
+ *
+ * 承認待ち・予定・未読メール・今日のタスク・実行状況を、データから直接整形して返す。
+ *
+ * @see 仕様書 第10.9.2節 層 1 の照会カタログ
+ */
+
 import type { Repository } from '../repository/types.js';
 import type { WorkspaceConnector } from '../connectors/types.js';
 import { addDays, jst, ymd } from '../connectors/mock.js';

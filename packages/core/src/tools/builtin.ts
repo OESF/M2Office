@@ -1,16 +1,16 @@
+/**
+ * @file 基盤が提供するツールの全体と、知識検索・会議の記録・文書作成のツール。
+ *
+ * 危険度は仕様書 第9.4節の区分に従う。
+ * `external-send` 以上のツールは、定義に承認ゲートが無ければ実行前に拒否される。
+ *
+ * @see 仕様書 第9.4節 ツールと承認の対応
+ */
+
 import { randomUUID } from 'node:crypto';
 import type { Tool } from './registry.js';
 import { WORKSPACE_TOOLS } from './workspace.js';
 import { FILE_TOOLS } from './files.js';
-
-/**
- * プロトタイプで用いる内蔵ツール。
- *
- * @remarks
- * 危険度は仕様書 第7.4節の区分に従う。
- * `external-send` 以上のツールは、定義に承認ゲートが無ければ実行前に拒否される
- * （{@link ../engine/run-engine.js} の検証）。
- */
 
 /** 組織知識を検索する。出典を伴って返す（仕様書 第9.7節）。 */
 export const knowledgeSearch: Tool = {

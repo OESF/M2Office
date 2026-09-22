@@ -1,3 +1,12 @@
+/**
+ * @file ログイン状態（Cookie）の発行・読み出し・削除。
+ *
+ * Cookie の値そのものは保存せず、ハッシュだけをデータベースに持つ。
+ * Cookie は HttpOnly・SameSite=Lax で、他のテナントのサブドメインへは送られない。
+ *
+ * @see 仕様書 第20.7節 認証の実装方針
+ */
+
 import { createHash, randomBytes } from 'node:crypto';
 import type { Context } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';

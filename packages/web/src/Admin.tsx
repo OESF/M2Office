@@ -1,3 +1,9 @@
+/**
+ * @file 管理者ページの枠と、参照の画面（利用状況・実行の一覧・監査ログ・接続）。
+ *
+ * @see 仕様書 第6.6節 管理者ページ
+ */
+
 import { useEffect, useState } from 'react';
 import type { AuditEvent } from '@m2office/shared';
 import { api, type AdminRun, type Me } from './api.js';

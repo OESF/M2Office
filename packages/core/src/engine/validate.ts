@@ -1,3 +1,12 @@
+/**
+ * @file エージェント定義が基盤の規則（承認ゲート・ツール・承認者の指定）を満たすかを検証する。
+ *
+ * 導入時と実行開始時の両方で呼ぶ。定義側の記述で規則を緩めることはできない。
+ *
+ * @see 仕様書 第9.2節 エージェント定義のスキーマ
+ * @see 仕様書 第9.4節 ツールと承認の対応
+ */
+
 import { alwaysRequiresApproval, type AgentDefinition } from '@m2office/shared';
 import { DefinitionInvalidError } from './errors.js';
 import type { ToolRegistry } from '../tools/registry.js';

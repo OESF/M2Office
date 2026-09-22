@@ -1,3 +1,12 @@
+/**
+ * @file 画面から API を呼ぶ唯一の入口。Cookie と CSRF トークンを扱い、ログイン切れを画面に知らせる。
+ *
+ * 画面は API を経由する以外にデータへ到達する手段を持たない（A-2）。
+ *
+ * @see 仕様書 第13.1節 公開の方針
+ * @see 仕様書 第20.7節 認証の実装方針
+ */
+
 import type {
   Approval, Artifact, AuditEvent, Notification, Run, RunStep, Schedule, ScheduleRule, Tenant,
   TenantSettings, User, UserSettings,

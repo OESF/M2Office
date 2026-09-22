@@ -1,3 +1,10 @@
+/**
+ * @file 秘書エージェント。依頼を 3 層（直接応答・取次・対話）に振り分けて応答する。
+ *
+ * @see 仕様書 第10章 秘書エージェント
+ * @see 仕様書 第10.9節 応答の経路
+ */
+
 import { randomUUID } from 'node:crypto';
 import type { AgentDefinition } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';

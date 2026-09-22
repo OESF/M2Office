@@ -1,3 +1,11 @@
+/**
+ * @file 開発メンバー向けキックオフ資料のスライド（PowerPoint）を生成する。
+ *
+ * プロダクト概要（build.mjs）とは読み手が違う。
+ * 「何が技術的に面白いか」と「もう動いている」ことを中心に据える。
+ * 使い方は `tools/deck/README.md` を参照。
+ */
+
 import pptxgen from 'pptxgenjs';
 
 /**

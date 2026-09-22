@@ -1,3 +1,11 @@
+/**
+ * @file 定時実行の起動役。時刻を過ぎた定時実行を見つけ、待ち行列へ入れる。
+ *
+ * ワーカーの中から定期的に呼ぶ。止まっていた間に過ぎた回はまとめて 1 回だけ起動する。
+ *
+ * @see 仕様書 第9.5.5節 AG-05 週次ブリーフ
+ */
+
 import { randomUUID } from 'node:crypto';
 import type { AgentDefinition } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';

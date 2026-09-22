@@ -1,9 +1,12 @@
 /**
- * `@m2office/core` の単体テスト。
+ * @file `@m2office/core` の単体テスト。承認ゲート・操作の確認・通知の宛先・ファイル処理などを確かめる。
  *
  * データベースを使わず、必要な操作だけを持つ記憶上の永続化層で確かめる。
  * 通しの確認は `npm run smoke` が担う。
+ *
+ * @see 開発規約 第8章 テスト
  */
+
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {

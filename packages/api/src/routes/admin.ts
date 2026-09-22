@@ -1,3 +1,11 @@
+/**
+ * @file 管理者ページ（`/admin`）が使う API。利用状況・実行の一覧・設定・ユーザー・知識を扱う。
+ *
+ * 管理者ロールを持つ者だけが呼べる。管理者でも、他人の会話や実行の中身は見られない（不変則 I-10）。
+ *
+ * @see 仕様書 第6.6節 管理者ページ
+ */
+
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import {

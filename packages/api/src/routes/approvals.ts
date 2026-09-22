@@ -1,3 +1,10 @@
+/**
+ * @file 承認トレイの API。本人が判断できる承認待ちの一覧と、承認・却下の受付。
+ *
+ * @see 仕様書 第9.2.3節 承認者の指定
+ * @see 仕様書 第9.3節 実行ライフサイクル
+ */
+
 import { Hono } from 'hono';
 import { canDecide } from '@m2office/shared';
 import { ApprovalForbiddenError, RunNotResumableError } from '@m2office/core';

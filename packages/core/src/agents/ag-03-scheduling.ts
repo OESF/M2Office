@@ -1,3 +1,9 @@
+/**
+ * @file AG-03 日程調整のエージェント定義。
+ *
+ * @see 仕様書 第9.5.3節
+ */
+
 import type { AgentDefinition } from '@m2office/shared';
 
 /**

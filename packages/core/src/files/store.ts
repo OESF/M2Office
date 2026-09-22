@@ -1,3 +1,11 @@
+/**
+ * @file ファイルの中身の置き場。テナントごとに保存先を分ける。
+ *
+ * 開発ではローカルのディレクトリ、本番ではオブジェクトストレージに差し替える。
+ *
+ * @see 仕様書 第20.4.2節 本番環境
+ */
+
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 

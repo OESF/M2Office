@@ -1,3 +1,9 @@
+/**
+ * @file 定時実行の規則（毎日・毎週）から、次回の実行時刻を利用者の地域の時刻で求める。
+ *
+ * @see 仕様書 第6.5.1節 プロフィール（タイムゾーン）
+ */
+
 import type { ScheduleRule } from '@m2office/shared';
 
 /**

@@ -1,3 +1,9 @@
+/**
+ * @file 業務システムへの接続口を、設定（`mock` / `google`）に応じて組み立てる。
+ *
+ * @see ADR-0003 外部接続の手前に接続口を設ける
+ */
+
 import type { WorkspaceConnector } from './types.js';
 import { MockWorkspaceConnector } from './mock.js';
 

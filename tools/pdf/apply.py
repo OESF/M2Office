@@ -1,10 +1,14 @@
 # -*- coding: utf-8 -*-
-import io, sys, unicodedata
-sys.path.insert(0, '/private/tmp/claude-501/-Users-miuramasataka-project-M2Office/61c7ce7b-6a08-4cea-b39c-a69f3484b280/scratchpad/pdf')
+"""生成した図版（build_diagrams.py）で、specification.md の罫線の図を置き換える。
+
+図版の数と仕様書中の図のブロック数が一致しなければ止める。
+"""
+import io, os, sys, unicodedata
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from build_diagrams import D
 from diagrams import W
 
-MD = '/Users/miuramasataka/project/M2Office/specification.md'
+MD = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'specification.md')
 lines = io.open(MD, encoding='utf-8').read().split('\n')
 BOX = set('─│┌┐└┘├┤┬┴┼▼▲◀▶')
 

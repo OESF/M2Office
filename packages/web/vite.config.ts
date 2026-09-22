@@ -1,3 +1,11 @@
+/**
+ * @file 画面の開発サーバーの設定。ポートは 3100 番台、`/v1` は API へ転送する。
+ *
+ * Host ヘッダーをそのまま渡し、サブドメインでテナントを解決できるようにする。
+ *
+ * @see 仕様書 第20.4.1節 ローカル開発環境
+ */
+
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 

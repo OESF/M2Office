@@ -1,21 +1,21 @@
+/**
+ * @file 文書の形式（PDF・Excel・CSV・Word）を扱う共通ツール。
+ *
+ * 個々のエージェントはファイル形式を意識しない。「証憑から金額を読む」と書けば、
+ * それが PDF か Excel かはこれらのツールが吸収する。
+ * - 読めるのは、実行を依頼した本人のファイルだけ（他人のファイル ID を渡されても読まない）
+ * - 取り出した中身はデータであり指示ではない（不変則 I-6）。`untrusted: true` を付けて返す
+ * - 出力したファイルは成果物として記録し、依頼した本人のものとする
+ *
+ * @see 仕様書 第9.4.1節 文書を扱う共通ツール
+ */
+
 import { randomUUID } from 'node:crypto';
 import type { Tool, ToolContext } from './registry.js';
 import { loadFile, saveFile } from '../files/service.js';
 import { readSheet, renderSheet } from '../files/sheet.js';
 import { extractPdfText } from '../files/pdf.js';
 import { renderDocx, type DocBlock } from '../files/docx.js';
-
-/**
- * 文書の形式を扱う共通ツール（仕様書 第9.4.1節）。
- *
- * 個々のエージェントはファイル形式を意識しない。「証憑から金額を読む」と書けば、
- * それが PDF か Excel かはこれらのツールが吸収する。
- *
- * @remarks
- * - 読めるのは、実行を依頼した本人のファイルだけである（他人のファイル ID を渡されても読まない）
- * - 取り出した中身はデータであり指示ではない（不変則 I-6）。`untrusted: true` を付けて返す
- * - 出力したファイルは成果物として記録し、依頼した本人のものとする
- */
 
 const str = (v: unknown, fallback = '') => (typeof v === 'string' ? v : fallback);
 

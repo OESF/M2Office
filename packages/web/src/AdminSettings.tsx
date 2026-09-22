@@ -1,15 +1,17 @@
+/**
+ * @file 管理者ページの編集画面（会社情報・業務と承認・ユーザー・知識）。
+ *
+ * 保存のたびに API が値を検証する。画面側の入力制限は利便のためであり、
+ * 規則の強制は API 側で行う。
+ *
+ * @see 仕様書 第6.6節 管理者ページ
+ */
+
 import { useEffect, useState } from 'react';
 import type {
   AutomationPolicy, CompanyInfo, Role, TenantSettings, User, WritingStyle,
 } from '@m2office/shared';
 import { api, type KnowledgeItemView } from './api.js';
-
-/**
- * 管理者ページの編集画面（仕様書 第6.6節）。
- *
- * 保存のたびに API が値を検証する。画面側の入力制限は利便のためであり、
- * 規則の強制は API 側で行う。
- */
 
 type Catalog = { id: string; name: string; description: string; usesWriteInternal: boolean }[];
 type Loaded = TenantSettings & { catalog: Catalog };

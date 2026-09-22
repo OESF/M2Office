@@ -1,3 +1,9 @@
+/**
+ * @file 実行エンジンが投げる例外の型。
+ *
+ * @see 仕様書 第9.3節 実行ライフサイクル
+ */
+
 /** 実行が再開できない状態にあることを表す。 */
 export class RunNotResumableError extends Error {
   constructor(readonly runId: string, readonly status: string) {

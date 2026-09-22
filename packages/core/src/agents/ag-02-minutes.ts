@@ -1,3 +1,9 @@
+/**
+ * @file AG-02 議事録作成・共有のエージェント定義。
+ *
+ * @see 仕様書 第9.5.2節
+ */
+
 import type { AgentDefinition } from '@m2office/shared';
 
 /**

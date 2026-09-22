@@ -1,3 +1,9 @@
+/**
+ * @file ツールの型と、エージェントが呼べるツールの登録簿。
+ *
+ * @see 仕様書 第9.4節 ツールと承認の対応
+ */
+
 import type { RiskLevel } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { WorkspaceConnector } from '../connectors/types.js';

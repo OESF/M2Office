@@ -1,3 +1,9 @@
+/**
+ * @file 利用できるエージェントの一覧を返す API。画面のメニューと入力フォームの元になる。
+ *
+ * @see 仕様書 第6.1節 ワークスペースの画面構造
+ */
+
 import { Hono } from 'hono';
 import { OFFICIAL_AGENTS } from '@m2office/core';
 import type { AppDeps } from '../context.js';

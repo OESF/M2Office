@@ -1,3 +1,11 @@
+/**
+ * @file 開発用のダミー接続。メール・予定・タスク・チャットについて決まった値を返す。
+ *
+ * Google の OAuth クライアントが整う前に骨格を作るためのもので、本番では使わない。
+ *
+ * @see ADR-0003 外部接続の手前に接続口を設ける
+ */
+
 import { randomUUID } from 'node:crypto';
 import type {
   BusySlot, CalendarEvent, ConnectorPrincipal, MailMessage, TaskItem, WorkspaceConnector,

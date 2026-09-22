@@ -1,3 +1,9 @@
+/**
+ * @file ファイルの保存（メタデータと SHA-256 の記録）と、権限を確かめたうえでの読み出し。
+ *
+ * @see 仕様書 第9.4.1節 文書を扱う共通ツール
+ */
+
 import { createHash, randomUUID } from 'node:crypto';
 import type { StoredFile } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';

@@ -1,3 +1,9 @@
+/**
+ * @file 画面の入口。ログインの状態を確かめ、ワークスペース・管理者ページ・ログイン画面を出し分ける。
+ *
+ * @see 仕様書 第6章 ユーザー体験
+ */
+
 import { StrictMode, useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App.js';

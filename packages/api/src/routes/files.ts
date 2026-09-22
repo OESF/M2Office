@@ -1,3 +1,11 @@
+/**
+ * @file ファイルの受け取り（アップロード）と取り出し（ダウンロード）の API。
+ *
+ * 形式は拡張子と中身の先頭の両方で確かめる。取り出せるのは所有者本人と承認者だけ。
+ *
+ * @see 仕様書 第9.4.1節 文書を扱う共通ツール
+ */
+
 import { Hono } from 'hono';
 import { detectKind, loadFile, MAX_FILE_BYTES, saveFile } from '@m2office/core';
 import type { AppDeps } from '../context.js';

@@ -1,3 +1,9 @@
+/**
+ * @file OpenAI 互換のエンドポイントを使う LLM アダプタ。既定は Gemini の互換エンドポイント。
+ *
+ * @see 仕様書 第20.2節 LLM 抽象化層
+ */
+
 import type { LlmProvider, LlmRequest, LlmResponse, ModelTier } from './provider.js';
 
 /** 役割ごとのモデル名。設定で差し替えられる（仕様書 第21.2節）。 */

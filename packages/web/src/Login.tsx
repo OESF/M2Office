@@ -1,3 +1,9 @@
+/**
+ * @file ログイン画面。Google ログインと、準備中の間だけ使う開発用ログインを出す。
+ *
+ * @see 仕様書 第16.1節 認証
+ */
+
 import { useEffect, useState } from 'react';
 import { api, type LoginProviders } from './api.js';
 

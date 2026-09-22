@@ -1,3 +1,13 @@
+/**
+ * @file 要求ごとに、テナントの解決・利用者の確認・ロールの確認を行うミドルウェア。
+ *
+ * ここで確定したテナントを、以降のすべてのデータアクセスに持ち回る（不変則 I-2）。
+ * 利用者を確認できない要求は、誰でもないものとして 401 を返す。
+ *
+ * @see 仕様書 第8.5節 マルチテナントの分離方式
+ * @see 仕様書 第20.7節 認証の実装方針
+ */
+
 import type { Context, Next } from 'hono';
 import type { RequestContext, Tenant } from '@m2office/shared';
 import type { AppDeps } from '../context.js';

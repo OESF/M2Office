@@ -1,3 +1,9 @@
+/**
+ * @file 個人設定の画面（プロフィール・秘書・通知・メニューの並び・セキュリティ・利用状況）。
+ *
+ * @see 仕様書 第6.5節 個人設定
+ */
+
 import { useEffect, useState } from 'react';
 import type { UserSettings } from '@m2office/shared';
 import { api, type AgentSummary, type Me } from './api.js';

@@ -1,3 +1,11 @@
+/**
+ * @file ワークスペースの画面。左にメニュー、中央にキャンバス、右にサッシパネル、下に秘書バーを置く。
+ *
+ * お知らせ・定時実行・個人設定もここから開く。
+ *
+ * @see 仕様書 第6.1節 ワークスペースの画面構造
+ */
+
 import { useCallback, useEffect, useState } from 'react';
 import type { Approval, Notification } from '@m2office/shared';
 import {

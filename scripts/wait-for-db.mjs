@@ -1,4 +1,7 @@
-/** データベースが接続を受け付けるまで待つ。`npm run db:up` から呼ばれる。 */
+/**
+ * @file データベースが接続を受け付けるまで待つ。`npm run db:up` から呼ばれる。
+ */
+
 import { execSync } from 'node:child_process';
 
 const DEADLINE = Date.now() + 60_000;

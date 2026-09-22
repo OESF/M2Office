@@ -1,3 +1,9 @@
+/**
+ * @file 永続化層のインターフェース。取得系はすべてテナント ID を引数に取る。
+ *
+ * @see 仕様書 第19章 データモデル
+ */
+
 import type {
   Approval, Artifact, AuditEvent, Job, Notification, Run, RunStep, Schedule, Session,
   StoredFile, Tenant, TenantSettings, User, UserSettings,

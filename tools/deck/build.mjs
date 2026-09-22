@@ -1,3 +1,9 @@
+/**
+ * @file プロダクト概要のスライド（PowerPoint）を生成する。
+ *
+ * 使い方は `tools/deck/README.md` を参照。
+ */
+
 import pptxgen from 'pptxgenjs';
 
 /** 配色。深い緑青を主役に、数字だけ暖色で引き立てる。 */

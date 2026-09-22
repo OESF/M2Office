@@ -1,3 +1,9 @@
+/**
+ * @file 本人宛の通知（お知らせ）の一覧と既読の API。
+ *
+ * @see 仕様書 第6.5.5節 通知
+ */
+
 import { Hono } from 'hono';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';

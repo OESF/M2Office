@@ -1,3 +1,12 @@
+/**
+ * @file API サーバーの起動口。ルートと認証・テナント解決の順序を組み立てる。
+ *
+ * 画面が使う API と外部公開 API は同じものであり、画面専用の抜け道を作らない。
+ * テナントの解決はすべての要求に、利用者の確認はログイン以外のすべてに掛ける。
+ *
+ * @see 仕様書 第13.1節 公開の方針（A-1・A-2）
+ */
+
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';

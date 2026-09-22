@@ -1,3 +1,9 @@
+/**
+ * @file AG-05 週次ブリーフのエージェント定義。
+ *
+ * @see 仕様書 第9.5.5節
+ */
+
 import type { AgentDefinition } from '@m2office/shared';
 
 /**

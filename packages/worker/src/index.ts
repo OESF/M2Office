@@ -1,24 +1,19 @@
+/**
+ * @file ジョブ実行ワーカーの起動口。待ち行列の実行を進め、定時実行を見回る常駐プロセス。
+ *
+ * 承認による中断と再開は数分から数十分にまたがるため、常駐プロセスとして動かす。
+ * 承認待ちで中断した実行は状態を永続化してワーカーの担当を離れ、承認後は
+ * **別のワーカーが文脈を読み直して**続きを実行する。
+ *
+ * @see 仕様書 第20.6節 配備上の制約
+ * @see 仕様書 第24.3.2節 通すべき一本の流れ（段階 5 と 7）
+ */
+
 import {
   PostgresRepository, StubLlmProvider, OpenAiCompatibleProvider, ToolRegistry, BUILTIN_TOOLS,
   RunEngine, Scheduler, resolveOfficialAgent, buildConnector, LocalFileStore, type LlmProvider,
 } from '@m2office/core';
 import { fileURLToPath } from 'node:url';
-
-/**
- * ジョブ実行ワーカー。
- *
- * 待ち行列から実行を 1 件ずつ取り出し、完了するか承認待ちになるまで進める。
- * あわせて、定時実行の時刻を見回り、時刻を過ぎたものを待ち行列へ入れる。
- *
- * @remarks
- * **常駐プロセスとして動かす**（仕様書 第20.6節）。
- * 承認による中断と再開は数分から数十分にまたがるため、
- * リクエスト単位で終了する実行環境では実装できない。
- *
- * 承認待ちで中断した実行は、状態が永続化されたうえでワーカーの担当を離れる。
- * 承認後は待ち行列へ戻り、**別のワーカーが文脈を読み直して**続きを実行する
- * （仕様書 第24.3.2節 段階 5 と 7）。
- */
 
 const repo = new PostgresRepository(
   process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office',

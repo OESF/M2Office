@@ -1,3 +1,10 @@
+/**
+ * @file Word（docx）形式の文書を作る。
+ *
+ * @see 仕様書 第9.4.1節 文書を扱う共通ツール
+ * @see ADR-0004 文書形式を扱うライブラリの選定
+ */
+
 import { Document, HeadingLevel, Packer, Paragraph, TextRun } from 'docx';
 
 /** 文書の 1 ブロック。見出しか段落。 */

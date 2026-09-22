@@ -1,3 +1,9 @@
+/**
+ * @file 定時実行の設定の API。作成・停止と再開・規則の変更・今すぐ実行。
+ *
+ * @see 仕様書 第9.5.5節 AG-05 週次ブリーフ
+ */
+
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import type { Schedule, ScheduleRule } from '@m2office/shared';

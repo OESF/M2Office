@@ -1,3 +1,14 @@
+/**
+ * @file 実行エンジン。業務を 1 ステップずつ進め、承認で中断し、別のワーカーから再開する。
+ *
+ * 状態はすべて永続化層から読み直し、メモリ上の文脈に依存しない。
+ * 対外送信以上のツールは承認の直後のステップでのみ実行し、社内への書き込みは
+ * 会社の設定に応じて本人の確認を求める。
+ *
+ * @see 仕様書 第9.3節 実行ライフサイクル
+ * @see 仕様書 第9.4節 ツールと承認の対応
+ */
+
 import { randomUUID } from 'node:crypto';
 import {
   alwaysRequiresApproval, canDecide, writeInternalNeedsApproval,

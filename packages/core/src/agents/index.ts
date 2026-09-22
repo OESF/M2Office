@@ -1,3 +1,9 @@
+/**
+ * @file 公式エージェントのカタログと、ID・版から定義を引く関数。
+ *
+ * @see 仕様書 第9.5節 初期エージェントカタログ
+ */
+
 import type { AgentDefinition } from '@m2office/shared';
 import { AG01_INBOX } from './ag-01-inbox.js';
 import { AG02_MINUTES } from './ag-02-minutes.js';

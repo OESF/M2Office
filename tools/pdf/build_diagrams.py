@@ -1,5 +1,9 @@
 # -*- coding: utf-8 -*-
-import sys; sys.path.insert(0, '/private/tmp/claude-501/-Users-miuramasataka-project-M2Office/61c7ce7b-6a08-4cea-b39c-a69f3484b280/scratchpad/pdf')
+"""仕様書に載せる罫線の図（アスキーアート）を、桁を揃えて組み立てる。
+
+組み立てた図は D[番号] に入れ、apply.py が仕様書へ差し込む。
+"""
+import os, sys; sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from diagrams import W, pad, at, frame, rowline, textrow, sidebyside, simplebox, ctr, runto
 
 D = {}

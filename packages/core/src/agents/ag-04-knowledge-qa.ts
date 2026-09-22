@@ -1,3 +1,9 @@
+/**
+ * @file AG-04 社内ナレッジ Q&A のエージェント定義。
+ *
+ * @see 仕様書 第9.5.4節
+ */
+
 import type { AgentDefinition } from '@m2office/shared';
 
 /**

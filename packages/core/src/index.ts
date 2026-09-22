@@ -1,9 +1,12 @@
 /**
- * `@m2office/core` の公開窓口。
+ * @file `@m2office/core` の公開窓口。外から使うものをここでまとめて書き出す。
  *
- * ドメインロジックのみを置く。HTTP・フレームワーク・画面に依存しない
- * （仕様書 第21.5節）。API とワーカーの双方から同じロジックを呼ぶ。
+ * ドメインロジックのみを置く。HTTP・フレームワーク・画面に依存しない。
+ * API とワーカーの双方から同じロジックを呼ぶ。
+ *
+ * @see 仕様書 第20.5節 リポジトリ構成
  */
+
 export * from './llm/provider.js';
 export { StubLlmProvider } from './llm/stub.js';
 export { OpenAiCompatibleProvider, LlmRequestError } from './llm/gemini.js';

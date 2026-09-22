@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
-"""specification.md を印刷用 HTML に変換する。"""
+"""specification.md を印刷用 HTML に変換する。
+
+使い方: python build.py <入力の Markdown> <出力の HTML>
+"""
 import io, os, re, sys, html, datetime
 import markdown
 

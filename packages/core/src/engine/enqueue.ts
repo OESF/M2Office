@@ -1,3 +1,9 @@
+/**
+ * @file ジョブを作り、実行を待ち行列へ入れる。画面・秘書・定時実行・API の共通の入口。
+ *
+ * @see 仕様書 第8.4節 同期・非同期の境界
+ */
+
 import { randomUUID } from 'node:crypto';
 import type { AgentDefinition, Job, Run } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';

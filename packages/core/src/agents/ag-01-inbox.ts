@@ -1,3 +1,9 @@
+/**
+ * @file AG-01 受信箱整理・返信起案のエージェント定義。
+ *
+ * @see 仕様書 第9.5.1節
+ */
+
 import type { AgentDefinition } from '@m2office/shared';
 
 /**
