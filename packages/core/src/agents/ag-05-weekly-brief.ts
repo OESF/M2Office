@@ -9,7 +9,7 @@ import type { AgentDefinition } from '@m2office/shared';
  * @remarks
  * 配信には `notification.send`（宛先は本人に固定、`write-internal`）を使う。
  * `chat.post`（`external-send`）を使うと自分宛の通知に毎週承認が要り、筋が通らない。
- * この扱いは推奨であり、要確認である（Q-53）。
+ * この扱いは Q-53 で決定した。承認なしで配信できるのは、宛先が本人に固定されているためである。
  *
  * @see 仕様書 第9.5.5節
  */

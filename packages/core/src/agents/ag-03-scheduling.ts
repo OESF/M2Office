@@ -7,7 +7,7 @@ import type { AgentDefinition } from '@m2office/shared';
  *
  * @remarks
  * 招待は相手に届くため `external-send` にあたり、承認を省略できない。
- * **Phase 1 は社内の参加者のみを対象とする**（推奨。要確認 Q-52）。
+ * **Phase 1 は社内の参加者のみを対象とする**（Q-52 で決定）。
  * 社外の参加者は空きが見えず、相手の返事を待つ別の仕組みが要るため。
  *
  * @see 仕様書 第9.5.3節

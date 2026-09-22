@@ -95,7 +95,7 @@ export const calendarList: Tool = {
 /**
  * 参加者の埋まっている時間帯を取得する。
  *
- * @remarks 危険度 `read`。Phase 1 は社内の参加者のみを対象とする（Q-52）。
+ * @remarks 危険度 `read`。Phase 1 は社内の参加者のみを対象とする（Q-52 で決定）。
  */
 export const calendarFreeBusy: Tool = {
   name: 'calendar.freebusy',
