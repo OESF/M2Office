@@ -14,7 +14,7 @@ import {
 import { HelpCenter, HelpTip, Tour, openHelp, useOpenHelp } from './help.js';
 import { AgentForm, ApprovalTray, Evidence, RunView, statusLabel } from './components.js';
 import { Settings, orderAgents } from './Settings.js';
-import { NavHeading, NavItem, SideNavLayout, ThemeToggle, agentIcon } from './nav.js';
+import { NavHeading, NavItem, NavUserCard, SideNavLayout, ThemeToggle, agentIcon } from './nav.js';
 
 /** 中央キャンバスに何を表示しているか。 */
 type View =
@@ -132,13 +132,15 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
               active={view.kind === 'schedules'} onClick={() => setView({ kind: 'schedules' })} />
             <NavItem icon="help" label="ヘルプ" description="使い方の記事と検索"
               active={view.kind === 'help'} onClick={() => setView({ kind: 'help', articleId: null })} />
-            <NavItem
-              className="me-summary" icon="user" label={me.user.displayName}
-              description={`${me.user.roles.map(roleLabel).join('・')}・使える業務 ${agents.length} 件・個人設定を開く`}
-              active={view.kind === 'settings'} onClick={() => setView({ kind: 'settings' })}
-            />
           </>
         )}
+        navFooter={(
+          <NavUserCard
+            name={me.user.displayName} role={primaryRole(me.user.roles)}
+            active={view.kind === 'settings'} onOpenSettings={() => setView({ kind: 'settings' })}
+          />
+        )}
+        footer={<SecretaryBar onReply={setReply} />}
       >
         <main className="canvas">
           {error && <p className="error">{error}</p>}
@@ -264,8 +266,6 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
           </aside>
         )}
       </SideNavLayout>
-
-      <SecretaryBar onReply={setReply} />
       {showTour && <Tour onDone={finishTour} />}
     </div>
   );
@@ -413,4 +413,10 @@ function roleLabel(role: string): string {
 /** どの層で応答したかを表示用の言葉にする（仕様書 第10.9.1節）。 */
 function layerLabel(layer: SecretaryReply['layer']): string {
   return { direct: '直接応答', light: '取次', full: '対話' }[layer];
+}
+
+/** 利用者のカードに出す属性。ロールのうち最も強いもの（仕様書 第6.1.1節）。 */
+function primaryRole(roles: readonly string[]): string {
+  for (const r of ['admin', 'approver', 'member', 'external', 'developer']) if (roles.includes(r)) return roleLabel(r);
+  return '一般';
 }

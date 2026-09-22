@@ -10,7 +10,7 @@ import { api, type AgentSummary, type Me } from './api.js';
 import { useTheme, type ThemeChoice } from './theme.js';
 
 /**
- * 個人設定（仕様書 第6.5節）。左ペイン下部から開く。
+ * 個人設定（仕様書 第6.5節）。左ペインの最下部の利用者のカードの歯車のボタンから開く。
  *
  * @remarks
  * 記憶とデータ（第6.5.4節）は個人記憶の実装とあわせて追加する。

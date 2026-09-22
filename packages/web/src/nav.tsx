@@ -15,7 +15,7 @@ import { useTheme } from './theme.js';
 /** アイコンの名前（public/icons.svg の symbol の id）。 */
 export type IconName =
   | 'mail' | 'calendar' | 'knowledge' | 'meeting' | 'briefing' | 'research' | 'report' | 'sample' | 'agent'
-  | 'approvals' | 'history' | 'notifications' | 'schedules' | 'help' | 'user'
+  | 'approvals' | 'history' | 'notifications' | 'schedules' | 'help' | 'user' | 'settings'
   | 'dashboard' | 'usage' | 'runs' | 'company' | 'sliders' | 'extensions' | 'users' | 'audit' | 'connectors'
   | 'nav-collapse' | 'nav-expand' | 'sun' | 'moon' | 'logout';
 
@@ -53,10 +53,15 @@ function useCollapsed(): [boolean, (v: boolean) => void] {
 
 /**
  * 折りたためる左ペインと、その右の領域。`panes` の格子の列の幅を、折りたたみに合わせて変える。
+ * 左ペインは画面の下端まで伸ばし、`footer`（秘書バー）は左ペインの右側に置く（仕様書 第6.1節）。
  *
+ * @param navFooter 左ペインの最下部に固定するもの（利用者のカード）
+ * @param footer 右側の下端に置くもの（秘書バー）
  * @param extraClass `panes` に足すクラス（サッシパネルを開くときの `with-sash` など）
  */
-export function SideNavLayout({ nav, children, extraClass = '' }: { nav: ReactNode; children: ReactNode; extraClass?: string }) {
+export function SideNavLayout({ nav, navFooter, footer, children, extraClass = '' }: {
+  nav: ReactNode; navFooter?: ReactNode; footer?: ReactNode; children: ReactNode; extraClass?: string;
+}) {
   const [collapsed, setCollapsed] = useCollapsed();
   return (
     <div className={`panes${collapsed ? ' nav-collapsed' : ''}${extraClass ? ` ${extraClass}` : ''}`}>
@@ -68,9 +73,13 @@ export function SideNavLayout({ nav, children, extraClass = '' }: { nav: ReactNo
         >
           <Icon name={collapsed ? 'nav-expand' : 'nav-collapse'} />
         </button>
-        <Collapsed.Provider value={collapsed}>{nav}</Collapsed.Provider>
+        <Collapsed.Provider value={collapsed}>
+          <div className="nav-scroll">{nav}</div>
+          {navFooter && <div className="nav-footer">{navFooter}</div>}
+        </Collapsed.Provider>
       </nav>
       {children}
+      {footer && <div className="pane-footer">{footer}</div>}
     </div>
   );
 }
@@ -106,6 +115,33 @@ export function NavItem({ icon, label, description, active, count, onClick, clas
       <span className="nav-label">{label}</span>
       {count ? <span className="count">{count}</span> : null}
     </button>
+  );
+}
+
+/**
+ * 左ペインの最下部の利用者のカード。名前と属性を並べ、右端の歯車のボタンで個人設定を開く（仕様書 第6.1.1節）。
+ * 折りたたんだときは歯車のボタンだけを示す。
+ *
+ * @param role 属性（例: 管理者）
+ */
+export function NavUserCard({ name, role, active, onOpenSettings }: {
+  name: string; role: string; active?: boolean; onOpenSettings: () => void;
+}) {
+  const tip = `${name}（${role}）\n個人設定を開く`;
+  return (
+    <div className={`user-card${active ? ' active' : ''}`}>
+      <button className="user-card-main" onClick={onOpenSettings} title={tip} tabIndex={-1} aria-hidden="true">
+        <span className="avatar"><Icon name="user" /></span>
+        <span className="user-text">
+          <strong>{name}</strong>
+          <span className="role">{role}</span>
+        </span>
+      </button>
+      <button className="gear" onClick={onOpenSettings} title={tip} aria-label={`個人設定（${name}・${role}）`}
+        aria-current={active ? 'page' : undefined}>
+        <Icon name="settings" />
+      </button>
+    </div>
   );
 }
 

@@ -125,10 +125,15 @@ button { font: inherit; cursor: pointer; }
   border-radius: 999px; padding: 2px 10px; font-size: 12px;
 }
 
-.panes { flex: 1; display: grid; grid-template-columns: 240px 1fr; min-height: 0; }
+/* 左ペインは画面の下端まで伸ばし、秘書バー（.pane-footer）は左ペインの右側に置く（仕様書 第6.1節） */
+.panes { flex: 1; display: grid; grid-template-columns: 240px 1fr; grid-template-rows: minmax(0, 1fr) auto; min-height: 0; }
 .panes.with-sash { grid-template-columns: 240px 1fr 320px; }
 
-.left { background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; padding: 12px 0; }
+.left { grid-row: 1 / -1; grid-column: 1; background: var(--panel); border-right: 1px solid var(--line); padding: 12px 0 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.left .nav-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.left .nav-footer { flex: none; border-top: 1px solid var(--line); padding: 8px; }
+.canvas, .sash { grid-row: 1; }
+.pane-footer { grid-row: 2; grid-column: 2 / -1; min-width: 0; }
 .left h2 { font-size: 11px; color: var(--muted); margin: 12px 16px 6px; letter-spacing: .08em; }
 .left .item {
   display: block; width: 100%; text-align: left; background: none; border: none;
@@ -203,23 +208,29 @@ pre.body { white-space: pre-wrap; background: var(--subtle-bg); border: 1px soli
 @media (max-width: 960px) {
   .panes, .panes.with-sash { grid-template-columns: 180px 1fr; }
   /* サッシパネルはキャンバスの下へ回す */
-  .panes.with-sash { grid-template-rows: 1fr auto; }
+  .panes.with-sash { grid-template-rows: minmax(0, 1fr) auto auto; }
   .panes.with-sash .sash {
-    grid-column: 1 / -1; border-left: none; border-top: 1px solid var(--line);
+    grid-row: 2; grid-column: 2 / -1; border-left: none; border-top: 1px solid var(--line);
     max-height: 40vh;
   }
+  .panes.with-sash .pane-footer { grid-row: 3; }
 }
 @media (max-width: 680px) {
   /* 左メニューを隠すと業務へ到達できなくなるため、上部の横並びに変える */
   .panes, .panes.with-sash {
     grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr;
+    grid-template-rows: auto minmax(0, 1fr) auto;
   }
+  .panes.with-sash { grid-template-rows: auto minmax(0, 1fr) auto auto; }
   .left {
-    grid-row: 1; display: flex; gap: 6px; padding: 8px;
+    grid-row: 1; grid-column: 1; flex-direction: row; gap: 6px; padding: 8px;
     overflow-x: auto; overflow-y: hidden;
     border-right: none; border-bottom: 1px solid var(--line);
   }
+  .left .nav-scroll { display: flex; gap: 6px; flex: none; overflow: visible; }
+  .left .nav-footer { border-top: none; padding: 0; }
+  .pane-footer { grid-column: 1; grid-row: 3; }
+  .panes.with-sash .pane-footer { grid-row: 4; }
   .left h2 { display: none; }
   .left .item {
     width: auto; white-space: nowrap; border: 1px solid var(--line);
@@ -235,7 +246,7 @@ pre.body { white-space: pre-wrap; background: var(--subtle-bg); border: 1px soli
   .left .me-summary .sub { display: none; }
   .topbar { flex-wrap: wrap; row-gap: 6px; }
   .canvas { grid-row: 2; padding: 16px; }
-  .panes.with-sash .sash { grid-row: 3; max-height: 45vh; }
+  .panes.with-sash .sash { grid-row: 3; grid-column: 1; max-height: 45vh; }
 }
 
 /* ログイン画面（仕様書 第16.1節） */
@@ -478,4 +489,35 @@ button.link.danger { color: var(--danger); }
   .left.collapsed .nav-label, .left.collapsed .count { display: inline; }
   .left.collapsed .nav-dot { display: none; }
   .left .nav-heading, .left.collapsed .nav-heading { display: none; }
+}
+
+/* 左ペインの最下部の利用者のカード（仕様書 第6.1.1節） */
+.user-card { display: flex; align-items: center; gap: 6px; border-radius: 6px; }
+.user-card.active { background: var(--accent-soft); }
+.user-card-main {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; text-align: left;
+  background: none; border: none; padding: 6px 4px; color: var(--ink); border-radius: 6px;
+}
+.user-card-main:hover { background: var(--accent-soft); }
+.user-card .avatar {
+  flex: none; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--neutral-soft); color: var(--muted);
+}
+.user-card .user-text { min-width: 0; display: flex; flex-direction: column; line-height: 1.3; }
+.user-card .user-text strong { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.user-card .user-text .role { font-size: 11px; color: var(--muted); }
+.user-card .gear {
+  flex: none; width: 32px; height: 32px; display: grid; place-items: center; border-radius: 6px;
+  background: none; border: none; color: var(--muted);
+}
+.user-card .gear:hover, .user-card.active .gear { color: var(--accent); background: var(--accent-soft); }
+.user-card .gear .icon { width: 20px; height: 20px; }
+.left.collapsed .nav-footer { padding: 8px 0; }
+.left.collapsed .user-card { justify-content: center; }
+.left.collapsed .user-card-main { display: none; }
+@media (max-width: 680px) {
+  .left.collapsed .user-card-main { display: flex; }
+  .user-card { border: 1px solid var(--line); border-radius: 999px; padding: 0 4px 0 2px; }
+  .user-card .avatar { width: 24px; height: 24px; }
+  .user-card .user-text { flex-direction: row; gap: 6px; align-items: baseline; white-space: nowrap; }
 }
