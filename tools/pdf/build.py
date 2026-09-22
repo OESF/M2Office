@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""specification.md を印刷用 HTML に変換する。
+"""Markdown（仕様書・開発者マニュアル）を印刷用 HTML に変換する。
 
 使い方: python build.py <入力の Markdown> <出力の HTML>
 """
@@ -35,6 +35,8 @@ version  = meta.get('version', '')
 updated  = meta.get('updated', '')
 owner    = meta.get('owner', '')
 status   = meta.get('status', '')
+subtitle = meta.get('subtitle', '中小企業向け AI エージェントシステム')
+version_text = f'{version}（{status}）' if status else version
 
 CSS = """
 @page { size: A4; margin: 18mm 16mm 18mm 16mm; }
@@ -107,6 +109,11 @@ hr { display: none; }
 a { color: #0f766e; text-decoration: none; }
 """
 
+# 図の無い文書（開発者マニュアル）では、はみ出すコードの行を折り返す。
+# 仕様書は図の桁を保つため折り返さない（はみ出さない幅で図を書いている）
+if meta.get('wrap_code') == 'true':
+    CSS += "pre { white-space: pre-wrap; overflow-wrap: anywhere; text-align: left; }\n"
+
 doc = f"""<!DOCTYPE html>
 <html lang="ja"><head><meta charset="utf-8">
 <title>{html.escape(title)}</title>
@@ -114,9 +121,9 @@ doc = f"""<!DOCTYPE html>
 <section class="cover">
   <div class="rule"></div>
   <h1>{html.escape(title)}</h1>
-  <div class="sub">中小企業向け AI エージェントシステム</div>
+  <div class="sub">{html.escape(subtitle)}</div>
   <dl>
-    <dt>版</dt><dd>{html.escape(version)}（{html.escape(status)}）</dd>
+    <dt>版</dt><dd>{html.escape(version_text)}</dd>
     <dt>最終更新</dt><dd>{html.escape(updated)}</dd>
     <dt>作成</dt><dd>{html.escape(owner)}</dd>
   </dl>

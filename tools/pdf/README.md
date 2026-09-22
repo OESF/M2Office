@@ -1,6 +1,6 @@
-# 仕様書の PDF 生成
+# 仕様書・開発者マニュアルの PDF 生成
 
-`specification.md` から印刷用の PDF を作ります。
+`specification.md` と開発者マニュアル（`docs/developer/*.md`）から印刷用の PDF を作ります。
 
 ## 前提
 
@@ -23,11 +23,30 @@ python3 tools/pdf/build.py specification.md /tmp/specification.html
 
 生成された `specification.pdf` は版管理の対象外です（生成物のため）。
 
+## 開発者マニュアルを 1 冊の PDF にする
+
+```bash
+npm run docs:manual-pdf    # → docs/developer/developer-manual.pdf
+```
+
+Markdown は章ごとに分けたまま保守し、配布と通読のときだけ 1 本にまとめます。
+`build_manual.py` が次を行ってから `build.py` と Chrome で PDF にします。
+
+| 処理 | 内容 |
+|---|---|
+| つなぐ | README（「はじめに」）と `01-`〜`09-` の章を番号順につなぐ。章を足せば自動で入る |
+| 見出し | 1 段下げて、章ごとに改ページする |
+| リンク | 章どうしのリンクは PDF の中のリンクに、リポジトリのファイルへのリンクはパスの表記に直す |
+| コード | はみ出す行を折り返す（仕様書は図の桁を保つため折り返さない） |
+
+生成された `developer-manual.pdf` も版管理の対象外です。
+
 ## ファイル
 
 | ファイル | 役割 |
 |---|---|
 | `build.py` | Markdown を印刷用 HTML に変換する。表紙・目次・CSS を含む |
+| `build_manual.py` | 開発者マニュアルの各章を 1 冊にまとめて PDF にする |
 | `diagrams.py` | アスキーアートを桁を揃えて組むための補助 |
 | `build_diagrams.py` | 仕様書に載せる図版の定義 |
 | `apply.py` | 組み直した図版を `specification.md` へ反映する |

@@ -13,6 +13,8 @@ dist/
 # 生成物
 # specification.pdf は specification.md から作る。tools/pdf/ を参照
 specification.pdf
+# 開発者マニュアルの PDF は docs/developer/*.md から作る（npm run docs:manual-pdf）
+docs/developer/developer-manual.pdf
 *.log
 
 # エディタと OS

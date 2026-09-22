@@ -26,7 +26,8 @@
     "lint:headers": "node scripts/check-headers.mjs",
     "lint:help": "node scripts/check-help.mjs",
     "ext:validate": "node --import tsx scripts/validate-extension.mjs",
-    "ext:pack": "node --import tsx scripts/pack-extension.mjs"
+    "ext:pack": "node --import tsx scripts/pack-extension.mjs",
+    "docs:manual-pdf": "python3 tools/pdf/build_manual.py"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

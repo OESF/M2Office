@@ -31,6 +31,14 @@ M2Office に**業務を追加する人**のための手引きです。拡張機�
 | リポジトリ調査（DeepWiki） | [extensions/deepwiki-research](../../extensions/deepwiki-research/) | コネクタ（MCP）を使う拡張機能（第7章） |
 | 週報の下書き | [examples/extensions/weekly-report](../../examples/extensions/weekly-report/) | 内蔵ツールを組み合わせた実務の例。ファイルにして取り込む自社専用の拡張機能（第6章） |
 
+## 1 冊の PDF で読む
+
+配布や通読には、全章を 1 冊にまとめた PDF を使えます。
+
+```bash
+npm run docs:manual-pdf    # → docs/developer/developer-manual.pdf
+```
+
 ## 前提
 
 - M2Office の開発環境が動いていること（リポジトリ直下の README の「セットアップ」と「起動」）
