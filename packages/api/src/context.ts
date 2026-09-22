@@ -1,8 +1,9 @@
 import {
   PostgresRepository, StubLlmProvider, OpenAiCompatibleProvider, ToolRegistry, BUILTIN_TOOLS,
-  RunEngine, Secretary, OFFICIAL_AGENTS, resolveOfficialAgent, buildConnector,
-  type LlmProvider, type Repository, type WorkspaceConnector,
+  RunEngine, Secretary, OFFICIAL_AGENTS, resolveOfficialAgent, buildConnector, LocalFileStore,
+  type FileStore, type LlmProvider, type Repository, type WorkspaceConnector,
 } from '@m2office/core';
+import { fileURLToPath } from 'node:url';
 import { loadAuthConfig, type AuthConfig } from './auth/config.js';
 
 /** API プロセス全体で共有する依存。 */
@@ -10,6 +11,7 @@ export interface AppDeps {
   repo: Repository;
   llm: LlmProvider;
   connector: WorkspaceConnector;
+  files: FileStore;
   registry: ToolRegistry;
   engine: RunEngine;
   secretary: Secretary;
@@ -33,11 +35,21 @@ export function buildDeps(): AppDeps {
   const registry = new ToolRegistry();
   for (const tool of BUILTIN_TOOLS) registry.register(tool);
 
+  const files = new LocalFileStore(fileStorageDir());
   const engine = new RunEngine({
-    repo, llm, registry, connector, resolveDefinition: resolveOfficialAgent,
+    repo, llm, registry, connector, files, resolveDefinition: resolveOfficialAgent,
   });
   const secretary = new Secretary({ repo, llm, connector, agents: OFFICIAL_AGENTS });
-  return { repo, llm, connector, registry, engine, secretary, auth: loadAuthConfig() };
+  return { repo, llm, connector, files, registry, engine, secretary, auth: loadAuthConfig() };
+}
+
+/**
+ * ファイルの置き場（開発用のローカルディレクトリ）。
+ *
+ * @remarks 既定はリポジトリ直下の `.data/files`。本番はオブジェクトストレージに差し替える。
+ */
+export function fileStorageDir(): string {
+  return process.env['FILE_STORAGE_DIR'] ?? fileURLToPath(new URL('../../../.data/files', import.meta.url));
 }
 
 /**

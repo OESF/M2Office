@@ -15,6 +15,7 @@ Node.js 22 以上。PostgreSQL への接続が必要です（`DATABASE_URL`）�
 src/engine/      実行エンジン。承認による中断と再開、ジョブの投入
 src/tools/       ツールの登録簿と内蔵ツール
 src/connectors/  メール・予定・タスク・チャットへの接続口（ダミー実装を含む）
+src/files/       ファイルの置き場と、PDF・Excel・CSV・Word の読み書き
 src/scheduler/   定時実行の規則と起動役
 src/llm/         LLM 抽象化層（スタブ／OpenAI 互換）
 src/repository/  永続化。テナント境界の絞り込みを伴う
@@ -65,6 +66,29 @@ decideApproval(...)  →  承認を記録し、待ち行列へ戻す
 ツールは Google の API を直接呼ばず、接続口だけを呼びます（仕様書 第24.2節 第 6 項）。
 `buildConnector('mock')` はダミーデータを返し、戻り値に `source: 'mock'` を含めます。
 `google` は B-2 の完了後に実装します（ADR-0003）。
+
+### 社内への書き込みの操作確認
+
+`write-internal` のツールは、会社の自動化ポリシーで承認が必要なら実行の直前で止まり、
+依頼した本人に確認を求めます（仕様書 第9.4節）。承認されると**記録した操作そのもの**を
+実行し、推論をやり直しません。直前が承認ステップなら確認は不要です。
+
+### データベースの行レベルセキュリティ
+
+`PostgresRepository` は問い合わせごとにトランザクションを張り、`app.tenant_id` を設定します。
+接続は `m2office_app` ロールで行い、RLS を迂回できません。テナントを横断するのは
+待ち行列の確保と定時実行の候補の列挙だけで、データベース関数に閉じ込めています。
+
+### 文書を扱う共通ツール
+
+| ツール | 危険度 | 内容 |
+|---|---|---|
+| `sheet.read` | read | Excel・CSV を表として読む。Shift_JIS の CSV も読む |
+| `sheet.render` | draft | 表を Excel・CSV（BOM 付き UTF-8）で出力する |
+| `pdf.extract` | read | PDF から文字を取り出す。画像だけのページは明示する（OCR 未対応） |
+| `docx.render` | draft | Word 形式で文書を出力する |
+
+エージェントが読めるのは依頼した本人のファイルだけです。ライブラリの選定は ADR-0004 を参照してください。
 
 ### 定時実行（`Scheduler`）
 

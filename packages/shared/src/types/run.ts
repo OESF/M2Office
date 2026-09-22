@@ -82,5 +82,23 @@ export interface Artifact {
   kind: string;
   title: string;
   body: string;
+  /** 成果物がファイルの場合、その ID。 */
+  fileId?: string | null;
+  createdAt: string;
+}
+
+/** ファイルのメタデータ（仕様書 第9.4.1節）。中身はファイルの置き場にある。 */
+export interface StoredFile {
+  id: string;
+  tenantId: string;
+  ownerUserId: string;
+  name: string;
+  kind: 'pdf' | 'xlsx' | 'csv' | 'docx' | 'png' | 'jpeg';
+  mime: string;
+  size: number;
+  sha256: string;
+  /** `upload` は利用者が上げたもの、`generated` は業務が作ったもの。 */
+  origin: 'upload' | 'generated';
+  runId: string | null;
   createdAt: string;
 }

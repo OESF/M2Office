@@ -12,7 +12,8 @@ import {
   type RunStep, type TenantSettings,
 } from '@m2office/shared';
 import {
-  RunEngine, ToolRegistry, BUILTIN_TOOLS, MockWorkspaceConnector, nextRunAt,
+  RunEngine, ToolRegistry, BUILTIN_TOOLS, MockWorkspaceConnector, MemoryFileStore, nextRunAt,
+  saveFile, readSheet, renderSheet, parseCsv,
   ApprovalForbiddenError, DefinitionInvalidError, validateDefinition,
   type LlmProvider, type Repository,
 } from '../src/index.js';
@@ -43,7 +44,11 @@ class MemoryRepo {
   async appendAudit(e: AuditEvent) { this.audits.push(e); }
   async createNotification(n: Notification) { this.notifications.push(n); }
   async findUserById(t: string, id: string) { return this.users.find((u) => u.tenantId === t && u.id === id) ?? null; }
-  async createArtifact() {}
+  artifacts: { title: string; fileId?: string | null }[] = [];
+  async createArtifact(a: { title: string; fileId?: string | null }) { this.artifacts.push(a); }
+  fileRows: Record<string, unknown>[] = [];
+  async createFile(f: Record<string, unknown>) { this.fileRows.push(f); }
+  async getFile(t: string, id: string) { return this.fileRows.find((f) => f['tenantId'] === t && f['id'] === id) ?? null; }
   settings: TenantSettings = structuredClone(DEFAULT_TENANT_SETTINGS);
   async getTenantSettings() { return this.settings; }
   userSettings = structuredClone(DEFAULT_USER_SETTINGS);
@@ -64,8 +69,9 @@ function setup(def: AgentDefinition, call: { name: string; args: Record<string, 
   const connector = new MockWorkspaceConnector();
   const registry = new ToolRegistry();
   for (const t of BUILTIN_TOOLS) registry.register(t);
+  const files = new MemoryFileStore();
   const engine = new RunEngine({
-    repo: repo as unknown as Repository, llm: new AlwaysCallLlm(call), registry, connector,
+    repo: repo as unknown as Repository, llm: new AlwaysCallLlm(call), registry, connector, files,
     resolveDefinition: () => def,
   });
   const now = new Date().toISOString();
@@ -74,7 +80,7 @@ function setup(def: AgentDefinition, call: { name: string; args: Record<string, 
   const run: Run = { id: 'r1', jobId: 'j1', tenantId: 't', status: 'running', cursor: 0, startedAt: now,
     endedAt: null, tokensUsed: 0, costJpy: 0, failureReason: null };
   repo.runs.push(run);
-  return { repo, connector, engine, run };
+  return { repo, connector, engine, run, files };
 }
 
 const SHARE_DEF: AgentDefinition = {
@@ -240,4 +246,68 @@ test('定時実行の次回時刻は、日本時間の壁時計で求める', ()
 
   const exact = nextRunAt({ kind: 'daily', hour: 10, minute: 0 }, 'Asia/Tokyo', tue);
   assert.equal(exact, '2026-09-23T01:00:00.000Z', 'ちょうどの時刻は含めず次の回');
+});
+
+// ---- 文書を扱う共通ツール（仕様書 第9.4.1節）----
+
+import { readFileSync } from 'node:fs';
+
+const FILE_DEF = (tools: string[]): AgentDefinition => ({
+  ...SHARE_DEF, id: 'file-test', tools, steps: [{ id: 'x', type: 'agent', instruction: '読む' }],
+});
+
+test('pdf.extract は日本語の PDF から文字を取り出し、部首の文字を通常の漢字に直す', async () => {
+  const bytes = new Uint8Array(readFileSync(new URL('./fixtures/invoice-ja.pdf', import.meta.url)));
+  const probe = setup(FILE_DEF(['pdf.extract']), { name: 'noop', args: {} });
+  const meta = await saveFile(probe.repo as unknown as Repository, probe.files, {
+    tenantId: 't', ownerUserId: 'u-member', name: '請求書.pdf', kind: 'pdf', bytes, origin: 'upload', runId: null,
+  });
+  // 同じ永続化層とファイル置き場を使うため、呼び出しだけを差し替える
+  const call = { name: 'pdf.extract', args: { fileId: meta.id } };
+  (probe.engine as unknown as { deps: { llm: LlmProvider } }).deps.llm = new AlwaysCallLlm(call);
+  await probe.engine.advance(probe.run);
+  const out = (probe.repo.steps[0]!.output as { tools: { result: { pages: { text: string }[]; pageCount: number } }[] })
+    .tools[0]!.result;
+  assert.equal(out.pageCount, 2);
+  assert.match(out.pages[0]!.text, /請求金額 110,000 円/);
+  assert.match(out.pages[1]!.text, /銀行/);
+});
+
+test('他人がアップロードしたファイルは、ID を知っていても読めない', async () => {
+  const probe = setup(FILE_DEF(['sheet.read']), { name: 'noop', args: {} });
+  const meta = await saveFile(probe.repo as unknown as Repository, probe.files, {
+    tenantId: 't', ownerUserId: 'u-admin', name: 'secret.csv', kind: 'csv',
+    bytes: new TextEncoder().encode('a,b\n1,2\n'), origin: 'upload', runId: null,
+  });
+  (probe.engine as unknown as { deps: { llm: LlmProvider } }).deps.llm =
+    new AlwaysCallLlm({ name: 'sheet.read', args: { fileId: meta.id } });
+  await probe.engine.advance(probe.run); // 依頼者は u-member
+  const out = (probe.repo.steps[0]!.output as { tools: { result: { available: boolean } }[] }).tools[0]!.result;
+  assert.equal(out.available, false);
+});
+
+test('Shift_JIS の CSV を読める', async () => {
+  // 「取引先,金額」「株式会社サンプル,110000」を Shift_JIS で表したもの
+  const sjis = new Uint8Array([
+    0x8e, 0xe6, 0x88, 0xf8, 0x90, 0xe6, 0x2c, 0x8b, 0xe0, 0x8a, 0x7a, 0x0d, 0x0a,
+    0x8a, 0x94, 0x8e, 0xae, 0x89, 0xef, 0x8e, 0xd0, 0x83, 0x54, 0x83, 0x93, 0x83, 0x76, 0x83, 0x8b,
+    0x2c, 0x31, 0x31, 0x30, 0x30, 0x30, 0x30, 0x0d, 0x0a,
+  ]);
+  const data = await readSheet(sjis, 'csv');
+  assert.equal(data.encoding, 'shift_jis');
+  assert.deepEqual(data.rows, [['取引先', '金額'], ['株式会社サンプル', '110000']]);
+});
+
+test('CSV の引用符・改行・カンマを正しく分ける', () => {
+  assert.deepEqual(parseCsv('a,"b,c","d""e"\r\n"改\n行",x\n'), [['a', 'b,c', 'd"e'], ['改\n行', 'x']]);
+});
+
+test('sheet.render の Excel を sheet.read で読み戻すと同じ表になる', async () => {
+  const bytes = await renderSheet('入金一覧', ['取引先', '金額'], [['株式会社サンプル', 110000]], 'xlsx');
+  const data = await readSheet(bytes, 'xlsx');
+  assert.equal(data.sheet, '入金一覧');
+  assert.deepEqual(data.rows, [['取引先', '金額'], ['株式会社サンプル', 110000]]);
+
+  const csv = await renderSheet('入金一覧', ['取引先'], [['a,b']], 'csv');
+  assert.deepEqual([...csv.slice(0, 3)], [0xef, 0xbb, 0xbf], 'CSV は BOM 付き UTF-8');
 });

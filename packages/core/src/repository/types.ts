@@ -1,6 +1,6 @@
 import type {
   Approval, Artifact, AuditEvent, Job, Notification, Run, RunStep, Schedule, Session,
-  Tenant, TenantSettings, User, UserSettings,
+  StoredFile, Tenant, TenantSettings, User, UserSettings,
 } from '@m2office/shared';
 
 /**
@@ -108,6 +108,9 @@ export interface Repository {
   usageForUser(tenantId: string, userId: string, since: string): Promise<{ runs: number; costJpy: number }>;
   /** 本人が所属する権限区画の名前。 */
   listUserCompartments(tenantId: string, userId: string): Promise<string[]>;
+
+  createFile(file: StoredFile): Promise<void>;
+  getFile(tenantId: string, id: string): Promise<StoredFile | null>;
 
   createUser(user: User): Promise<void>;
   /** 表示名・ロール・状態を更新する。メールアドレスは変えない（Google 側で管理する）。 */

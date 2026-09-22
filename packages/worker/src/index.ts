@@ -1,7 +1,8 @@
 import {
   PostgresRepository, StubLlmProvider, OpenAiCompatibleProvider, ToolRegistry, BUILTIN_TOOLS,
-  RunEngine, Scheduler, resolveOfficialAgent, buildConnector, type LlmProvider,
+  RunEngine, Scheduler, resolveOfficialAgent, buildConnector, LocalFileStore, type LlmProvider,
 } from '@m2office/core';
+import { fileURLToPath } from 'node:url';
 
 /**
  * ジョブ実行ワーカー。
@@ -26,8 +27,12 @@ const registry = new ToolRegistry();
 for (const tool of BUILTIN_TOOLS) registry.register(tool);
 const connector = buildConnector(process.env['CONNECTOR_MODE'] ?? 'mock');
 
+// API と同じ置き場を使う。既定はリポジトリ直下の .data/files
+const files = new LocalFileStore(
+  process.env['FILE_STORAGE_DIR'] ?? fileURLToPath(new URL('../../../.data/files', import.meta.url)),
+);
 const engine = new RunEngine({
-  repo, llm: buildLlm(), registry, connector, resolveDefinition: resolveOfficialAgent,
+  repo, llm: buildLlm(), registry, connector, files, resolveDefinition: resolveOfficialAgent,
 });
 const scheduler = new Scheduler({ repo, resolveDefinition: resolveOfficialAgent });
 

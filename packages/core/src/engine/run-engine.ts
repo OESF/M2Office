@@ -9,6 +9,7 @@ import type { Repository } from '../repository/types.js';
 import type { LlmProvider } from '../llm/provider.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { WorkspaceConnector } from '../connectors/types.js';
+import type { FileStore } from '../files/store.js';
 import { ApprovalForbiddenError, RunNotResumableError } from './errors.js';
 import { validateDefinition } from './validate.js';
 import { parseToolCalls } from './tool-protocol.js';
@@ -25,6 +26,8 @@ export interface RunEngineDeps {
   registry: ToolRegistry;
   /** メール・予定などへの接続口。ツールに渡す。 */
   connector: WorkspaceConnector;
+  /** ファイルの中身の置き場。文書を扱うツールに渡す。 */
+  files: FileStore;
   /** エージェント定義を解決する。 */
   resolveDefinition(agentId: string, version: number): AgentDefinition | undefined;
 }
@@ -327,12 +330,12 @@ export class RunEngine {
   private async invokeTool(
     run: Run, def: AgentDefinition, call: ToolCall, requestedBy: string,
   ): Promise<unknown> {
-    const { repo, registry, connector } = this.deps;
+    const { repo, registry, connector, files } = this.deps;
     const tool = registry.get(call.name);
     if (!tool) return { name: call.name, error: '許可されていないツールです' };
     const out = await tool.invoke(call.args, {
       tenantId: run.tenantId, userId: requestedBy, runId: run.id,
-      compartment: def.compartment, repo, connector,
+      compartment: def.compartment, repo, connector, files,
     });
     await repo.appendAudit({
       id: randomUUID(), tenantId: run.tenantId, actorType: 'agent', actorId: def.id,

@@ -115,6 +115,12 @@ export function RunView({ detail }: { detail: RunDetail }) {
         <div className="card" key={a.id}>
           <h3>成果物: {a.title}</h3>
           <pre className="body">{a.body}</pre>
+          {a.fileId && (
+            <button className="btn ghost small"
+              onClick={() => void api.download(a.fileId!, a.body.replace(/（.*）$/, ''))}>
+              ダウンロード
+            </button>
+          )}
         </div>
       ))}
     </>

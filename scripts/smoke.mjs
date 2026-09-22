@@ -511,6 +511,35 @@ console.log('\n■ 16. 個人設定');
   typeof usage.thisMonth?.runs === 'number' ? ok(`今月の実行件数を返す（${usage.thisMonth.runs} 件）`) : ng('利用状況が取れない');
 }
 
+console.log('\n■ 17. ファイルの受け取りと取り出し');
+{
+  const { readFileSync } = await import('node:fs');
+  const upload = async (name, bytes, who = 'member') => {
+    const form = new FormData();
+    form.append('file', new Blob([bytes]), name);
+    const res = await fetch(`${API}/v1/files`, {
+      method: 'POST', body: form,
+      headers: { 'x-tenant': 'a', 'x-user': `${who}@alpha.example.jp` },
+    });
+    return { status: res.status, body: await res.json() };
+  };
+  const pdf = readFileSync(new URL('../packages/core/test/fixtures/invoice-ja.pdf', import.meta.url));
+  const up = await upload('請求書.pdf', pdf);
+  up.status === 201 && up.body.kind === 'pdf' && up.body.sha256?.length === 64
+    ? ok(`PDF を受け取った（${up.body.size} バイト、SHA-256 を記録）`) : ng(`受け取れない（${up.status}）`, JSON.stringify(up.body));
+
+  const fake = await upload('偽物.pdf', new TextEncoder().encode('これは PDF ではない'));
+  fake.status === 415 ? ok('拡張子と中身が一致しないファイルは拒否する（415）') : ng(`拒否されない（${fake.status}）`);
+
+  const own = await fetch(`${API}/v1/files/${up.body.id}/content`, { headers: { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' } });
+  const same = Buffer.from(await own.arrayBuffer()).equals(pdf);
+  own.status === 200 && same && /attachment/.test(own.headers.get('content-disposition') ?? '')
+    ? ok('本人は同じ中身を取り出せる（画面に埋め込まず保存させる）') : ng('取り出せない、または中身が違う');
+
+  const b = await fetch(`${API}/v1/files/${up.body.id}`, { headers: { 'x-tenant': 'b', 'x-user': 'admin@beta.example.jp' } });
+  b.status === 404 ? ok('他社からは見えない（404）') : ng(`他社から見えてしまう（${b.status}）`);
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

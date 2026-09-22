@@ -31,3 +31,6 @@ __pycache__/
 # プレゼン資料（生成物。tools/deck で再生成する）
 M2Office_プロダクト概要.pptx
 M2Office_開発キックオフ.pptx
+
+# 開発用のファイルの置き場（FILE_STORAGE_DIR の既定）
+.data/

@@ -18,6 +18,8 @@ export type {
   CalendarEvent, TaskItem, BusySlot,
 } from './connectors/types.js';
 
+export * from './files/index.js';
+
 export { ToolRegistry } from './tools/registry.js';
 export type { Tool, ToolContext } from './tools/registry.js';
 export { BUILTIN_TOOLS } from './tools/builtin.js';

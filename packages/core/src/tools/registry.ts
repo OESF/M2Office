@@ -1,6 +1,7 @@
 import type { RiskLevel } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { WorkspaceConnector } from '../connectors/types.js';
+import type { FileStore } from '../files/store.js';
 
 /** ツール呼び出しの文脈。テナント境界と実行の同一性を持ち回る。 */
 export interface ToolContext {
@@ -13,6 +14,8 @@ export interface ToolContext {
   repo: Repository;
   /** メール・予定・タスク・チャットへの接続口。Google を直接呼ばない。 */
   connector: WorkspaceConnector;
+  /** ファイルの中身の置き場。 */
+  files: FileStore;
 }
 
 /**

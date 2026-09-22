@@ -69,6 +69,22 @@ OAuth クライアントが整うまでは、`GET /v1/auth/google/start` は 503
 | `GET /v1/admin/users` | 管理者: 利用者の一覧 |
 | `GET /v1/admin/audit-events` | 管理者: 監査ログ |
 | `GET /v1/admin/connectors` | 管理者: 接続の状態 |
+| `GET /v1/admin/settings` | 管理者: 会社の設定（会社情報・自社の書き方・自動化ポリシー・業務の有効化） |
+| `PUT /v1/admin/settings/:section` | 管理者: 設定の 1 区分を保存（`company`・`writingStyle`・`automation`・`agents`） |
+| `POST /v1/admin/users` | 管理者: 利用者の招待（Workspace のドメインのみ） |
+| `PATCH /v1/admin/users/:id` | 管理者: 表示名・ロール・状態（管理者が 0 人になる変更は 409） |
+| `GET /v1/admin/knowledge` | 管理者: 組織知識の一覧 |
+| `PUT /v1/admin/knowledge/:id` | 管理者: 登録（`new`）・更新 |
+| `DELETE /v1/admin/knowledge/:id` | 管理者: 削除 |
+| `GET /v1/me/settings` | 本人の個人設定 |
+| `PUT /v1/me/settings/:section` | 個人設定の 1 区分を保存（`profile`・`secretary`・`notifications`・`menu`） |
+| `PATCH /v1/me/profile` | 表示名の変更 |
+| `GET /v1/me/sessions` | ログイン中の端末 |
+| `DELETE /v1/me/sessions/:id` | 端末を個別にログアウト |
+| `GET /v1/me/usage` | 本人の利用状況 |
+| `POST /v1/files` | ファイルの受け取り（multipart の `file`。10 MB まで） |
+| `GET /v1/files/:id` | メタデータ。所有者と承認者のみ |
+| `GET /v1/files/:id/content` | 中身。必ず保存させる（`attachment`） |
 
 ## 承認の扱い
 

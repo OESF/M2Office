@@ -1,7 +1,7 @@
 import pg from 'pg';
 import type {
   Approval, Artifact, AuditEvent, Job, Notification, Run, RunStep, Schedule, Session,
-  Tenant, TenantSettings, User, UserSettings,
+  StoredFile, Tenant, TenantSettings, User, UserSettings,
 } from '@m2office/shared';
 import { DEFAULT_TENANT_SETTINGS, DEFAULT_USER_SETTINGS } from '@m2office/shared';
 import type { KnowledgeHit, KnowledgeItem, Repository } from './types.js';
@@ -359,16 +359,16 @@ export class PostgresRepository implements Repository {
 
   async createArtifact(a: Artifact): Promise<void> {
     await this.q(a.tenantId, 
-      `insert into artifacts (id, run_id, tenant_id, kind, title, body, created_at)
-       values ($1,$2,$3,$4,$5,$6,$7)`,
-      [a.id, a.runId, a.tenantId, a.kind, a.title, a.body, a.createdAt],
+      `insert into artifacts (id, run_id, tenant_id, kind, title, body, file_id, created_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [a.id, a.runId, a.tenantId, a.kind, a.title, a.body, a.fileId ?? null, a.createdAt],
     );
   }
 
   async listArtifacts(tenantId: string, runId: string): Promise<Artifact[]> {
     return this.q<Artifact>(tenantId, 
       `select id, run_id as "runId", tenant_id as "tenantId", kind, title, body,
-              created_at as "createdAt"
+              file_id as "fileId", created_at as "createdAt"
          from artifacts where tenant_id = $1 and run_id = $2 order by created_at`,
       [tenantId, runId],
     );
@@ -682,6 +682,24 @@ export class PostgresRepository implements Repository {
         where c.tenant_id = $1 and m.user_id = $2 and c.enabled order by c.name`,
       [tenantId, userId]);
     return rows.map((r) => r.name);
+  }
+
+  async createFile(f: StoredFile): Promise<void> {
+    await this.q(f.tenantId,
+      `insert into files (id, tenant_id, owner_user_id, name, kind, mime, size, sha256, origin,
+                          run_id, created_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [f.id, f.tenantId, f.ownerUserId, f.name, f.kind, f.mime, f.size, f.sha256, f.origin,
+       f.runId, f.createdAt]);
+  }
+
+  async getFile(tenantId: string, id: string): Promise<StoredFile | null> {
+    const rows = await this.q<StoredFile>(tenantId,
+      `select id, tenant_id as "tenantId", owner_user_id as "ownerUserId", name, kind, mime, size,
+              sha256, origin, run_id as "runId", created_at as "createdAt"
+         from files where tenant_id = $1 and id = $2`,
+      [tenantId, id]);
+    return rows[0] ?? null;
   }
 }
 

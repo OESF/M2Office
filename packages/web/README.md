@@ -67,7 +67,9 @@ src/api.ts          API の呼び出し口。ここが唯一の入口
 src/main.tsx        入口。ログインの状態でワークスペース／管理者ページ／ログイン画面を出し分ける
 src/Login.tsx       ログイン画面
 src/App.tsx         ワークスペース（3 ペイン、秘書バー、お知らせ、定時実行）
-src/Admin.tsx       管理者ページ（参照のみ）
+src/Admin.tsx       管理者ページ（参照の画面）
+src/AdminSettings.tsx  管理者ページ（会社情報・業務と承認・ユーザー・知識の編集）
+src/Settings.tsx    個人設定
 src/components.tsx  フォーム・実行詳細・承認トレイ
 src/styles.css      3 ペインの配置
 ```

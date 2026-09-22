@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Tool } from './registry.js';
 import { WORKSPACE_TOOLS } from './workspace.js';
+import { FILE_TOOLS } from './files.js';
 
 /**
  * プロトタイプで用いる内蔵ツール。
@@ -68,4 +69,5 @@ export const BUILTIN_TOOLS: Tool[] = [
   meetingGetTranscript,
   documentCreate,
   ...WORKSPACE_TOOLS,
+  ...FILE_TOOLS,
 ];

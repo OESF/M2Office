@@ -13,6 +13,7 @@ import { notificationsRoute } from './routes/notifications.js';
 import { schedulesRoute } from './routes/schedules.js';
 import { adminRoute } from './routes/admin.js';
 import { meRoute } from './routes/me.js';
+import { filesRoute } from './routes/files.js';
 
 /**
  * API サーバー。
@@ -68,6 +69,7 @@ app.route('/v1/secretary', secretaryRoute(deps));
 app.route('/v1/notifications', notificationsRoute(deps));
 app.route('/v1/schedules', schedulesRoute(deps));
 app.route('/v1/admin', adminRoute(deps));
+app.route('/v1/files', filesRoute(deps));
 
 const port = Number(process.env['API_PORT'] ?? 3101);
 serve({ fetch: app.fetch, port }, (info) => {

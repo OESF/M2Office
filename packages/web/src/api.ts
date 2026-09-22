@@ -122,7 +122,28 @@ export interface SecretaryReply {
   elapsedMs: number;
 }
 
+/**
+ * ファイルを取り出して保存させる。
+ *
+ * @remarks
+ * リンクで直接開かず、API と同じ経路（Cookie・テナントの指定）で取り出してから保存させる。
+ */
+async function download(fileId: string, name: string): Promise<void> {
+  const res = await fetch(`/v1/files/${fileId}/content`, {
+    credentials: 'same-origin',
+    headers: devTenant ? { 'x-tenant': devTenant } : {},
+  });
+  if (!res.ok) throw new ApiError('ファイルを取り出せませんでした', res.status);
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export const api = {
+  download,
   me: async () => {
     const me = await call<Me>('/me');
     csrfToken = me.csrfToken;
