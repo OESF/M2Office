@@ -60,8 +60,35 @@ for (const t of tenants) {
 
 // 組織知識。テナントごとに内容を変え、分離が効いていることを確認しやすくする
 const knowledge = [
-  ['k-alpha-1', 't-alpha', 'rule', '就業規則（抜粋）',
-   '年次有給休暇は、入社から 6 か月継続勤務した従業員に 10 日を付与する。', '就業規則 第32条', null],
+  // 章・条で書いた規程の見本。保存時に条ごとの節に分かれる（仕様書 第11.7.2節）
+  ['k-alpha-1', 't-alpha', 'rule', '就業規則',
+   [
+     'この規則は、アルファ商事株式会社の従業員の労働条件と服務の規律を定める。',
+     '',
+     '第1章 総則',
+     '（目的）',
+     '第1条 この規則は、従業員の就業に関する事項を定めることを目的とする。',
+     '（適用範囲）',
+     '第2条 この規則は、正社員に適用する。パートタイム従業員には別に定める規程を適用する。',
+     '',
+     '第3章 労働時間',
+     '第15条（始業・終業の時刻）',
+     '始業は午前 9 時、終業は午後 6 時とする。休憩は正午から 1 時間とする。',
+     '第16条（時間外労働）',
+     '業務の都合により、所定の時間を超えて労働させることがある。時間外労働は、事前に上長の承認を得る。',
+     '',
+     '第5章 休暇',
+     '（年次有給休暇）',
+     '第32条 年次有給休暇は、入社から 6 か月継続勤務した従業員に 10 日を付与する。',
+     '２ 前項の休暇は、1 年間に限り繰り越すことができる。',
+     '（年次有給休暇の申請）',
+     '第33条 年次有給休暇を取得するときは、取得する日の 3 日前までに勤怠システムで申請する。',
+     '（育児休業）',
+     '第34条 子を養育する従業員は、子が 1 歳に達するまで育児休業を取得できる。手続きは育児・介護休業規程による。',
+     '',
+     '附則',
+     'この規則は、2024 年 4 月 1 日から施行する。',
+   ].join('\n'), '就業規則（2024 年 4 月改定）', null],
   ['k-alpha-2', 't-alpha', 'rule', '経費規程（抜粋）',
    '交通費は実費を精算する。1 件 1 万円を超える場合は事前に稟議を要する。', '経費規程 第5条', null],
   ['k-alpha-3', 't-alpha', 'hr', '給与テーブル（区画内）',
@@ -71,8 +98,12 @@ const knowledge = [
 ];
 for (const [id, tid, kind, title, body, source, comp] of knowledge) {
   await c.query(
+    // 本文を変えたら節を作り直させる（split_version を 0 に戻す。仕様書 第11.7.5節）
     `insert into knowledge_items (id, tenant_id, kind, title, body, source, compartment)
-     values ($1,$2,$3,$4,$5,$6,$7) on conflict (id) do nothing`,
+     values ($1,$2,$3,$4,$5,$6,$7)
+     on conflict (id) do update set title = excluded.title, body = excluded.body, source = excluded.source,
+       split_version = 0
+     where knowledge_items.body is distinct from excluded.body or knowledge_items.title is distinct from excluded.title`,
     [id, tid, kind, title, body, source, comp],
   );
 }

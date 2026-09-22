@@ -14,20 +14,24 @@ import { FILE_TOOLS } from './files.js';
 import { RESEARCH_TOOLS } from './research.js';
 import { GOOGLE_TOOLS } from './google.js';
 
-/** 組織知識を検索する。出典を伴って返す（仕様書 第11.7節）。 */
+/**
+ * 組織知識を検索する。関係の深い節（条など）を、出典を伴って返す（仕様書 第11.7.4節）。
+ *
+ * @remarks 危険度 read。区画の外の人には区画内の節を返さない。見つからなければ `found: 0` を返し、推測させない。
+ */
 export const knowledgeSearch: Tool = {
   name: 'knowledge.search',
   risk: 'read',
   activityLabel: '社内の知識を調べています（リサーチ中）',
   helpText: '社内の知識（規程・議事録など）を調べます。区画の外の人には区画内の文書を見せません',
-  description: '組織知識を検索し、出典つきで返す',
+  description: '組織知識を検索し、関係の深い節（条など）を出典つきで返す。出典は citation をそのまま示す',
   args: { properties: { query: { type: 'string', description: '調べる言葉' } }, required: ['query'] },
   async invoke(args, ctx) {
     const query = String(args['query'] ?? '');
     const hits = await ctx.repo.searchKnowledge(ctx.tenantId, query, ctx.compartment);
     return {
       query,
-      hits: hits.map((h) => ({ title: h.title, source: h.source, body: h.body })),
+      hits: hits.map((h) => ({ citation: h.citation, title: h.title, heading: h.heading, source: h.source, body: h.body })),
       found: hits.length,
     };
   },

@@ -1170,6 +1170,40 @@ console.log('\n■ 28. 接続の設定（Gemini・Google Workspace）');
   await call('a', '/v1/admin/connections/google', { method: 'DELETE' });
 }
 
+console.log('\n■ 29. 組織知識の節（章・条で分けて、条の単位で引く）');
+{
+  const rules = ['第1章 総則', '第1条（目的）', 'この規程は出張の扱いを定める。', '第2章 旅費',
+    '（日当）', '第5条 出張の日当は 1 日 2,000 円とする。', '第6条（宿泊費）', '宿泊費は 1 泊 1 万円を上限に実費を精算する。'].join('\n');
+  const { status, body: saved } = await call('a', '/v1/admin/knowledge/new', {
+    method: 'PUT', body: JSON.stringify({ title: '出張旅費規程', body: rules, source: '出張旅費規程（見本）' }),
+  });
+  const heads = (saved.sections ?? []).map((x) => x.heading);
+  status === 200 && heads.join('|') === '第1条（目的）|第5条（日当）|第6条（宿泊費）' && saved.sections[1].path[0] === '第2章 旅費'
+    ? ok('保存すると条ごとの節に分け、分けた結果を返す') : ng('分け方が違う', JSON.stringify(saved));
+
+  const { body: list } = await call('a', '/v1/admin/knowledge');
+  list.items?.find((k) => k.id === saved.id)?.sectionCount === 3 ? ok('一覧に節の数を出す') : ng('節の数が違う');
+
+  const { body: job } = await call('a', '/v1/jobs', {
+    method: 'POST', body: JSON.stringify({ agentId: 'knowledge-qa', input: { question: '出張の日当はいくら？' } }),
+  });
+  const qa = await waitFor('a', job.runId, ['completed', 'failed']);
+  const hits = qa.steps.find((x) => x.stepId === 'search')?.output?.tools?.[0]?.result?.hits ?? [];
+  hits[0]?.citation === '出張旅費規程 › 第2章 旅費 › 第5条（日当）' && !hits[0].body.includes('宿泊費')
+    ? ok(`条の単位で引き、出典に条を示す（${hits[0].citation}）`) : ng('条の単位で引けていない', JSON.stringify(hits[0]));
+
+  const other = await call('b', `/v1/admin/knowledge/${saved.id}/sections`);
+  other.status === 404 ? ok('ほかの会社の知識の節は見えない') : ng(`見えてしまう（${other.status}）`);
+  const tooLong = await call('a', '/v1/admin/knowledge/new', {
+    method: 'PUT', body: JSON.stringify({ title: '長すぎる', body: 'あ'.repeat(500_001) }),
+  });
+  tooLong.status === 400 ? ok('50 万字を超える本文は断る') : ng(`受け付けてしまう（${tooLong.status}）`);
+
+  await call('a', `/v1/admin/knowledge/${saved.id}`, { method: 'DELETE' });
+  const gone = await call('a', `/v1/admin/knowledge/${saved.id}/sections`);
+  gone.status === 404 ? ok('知識を削除すると節も消える') : ng('節が残っている');
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

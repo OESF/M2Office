@@ -12,7 +12,7 @@ import {
   isValidInvoiceNumber, parsePresentationId, type AutomationPolicy, type CompanyInfo, type Role, type SlideTemplate, type TenantSettings,
   type User, type WritingStyle,
 } from '@m2office/shared';
-import { DEFAULT_STANDARD_MINUTES } from '@m2office/core';
+import { DEFAULT_STANDARD_MINUTES, KNOWLEDGE_MAX_CHARS } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { requireRole, type AppEnv } from '../middleware/tenant.js';
 
@@ -219,7 +219,9 @@ export function adminRoute(deps: AppDeps) {
     const title = (body.title ?? '').trim();
     const text = (body.body ?? '').trim();
     if (!title || !text) return c.json({ error: '題名と本文を入力してください' }, 400);
-    if (text.length > 100_000) return c.json({ error: '本文が長すぎます（10 万字まで）' }, 400);
+    if (text.length > KNOWLEDGE_MAX_CHARS) {
+      return c.json({ error: `本文が長すぎます（${KNOWLEDGE_MAX_CHARS.toLocaleString('ja-JP')} 字まで）。章などで分けて登録してください` }, 400);
+    }
     const compartment = body.compartment || null;
     if (compartment) {
       const names = (await deps.repo.listCompartments(tenant.id)).map((x) => x.name);
@@ -231,7 +233,17 @@ export function adminRoute(deps: AppDeps) {
       source: (body.source ?? '').trim() || title, compartment, updatedAt: new Date().toISOString(),
     });
     await audit(deps, tenant.id, user.id, 'knowledge.save', 'knowledge', id, { compartment });
-    return c.json({ id });
+    // 分け方を管理者が確かめられるように、分けた節を返す（第11.7.2節）
+    const sections = (await deps.repo.listKnowledgeSections(tenant.id, id)) ?? [];
+    return c.json({ id, sections });
+  });
+
+  /** 1 件の知識を、どう節に分けたか（第6.6.6節「分け方の確認」）。 */
+  app.get('/knowledge/:id/sections', async (c) => {
+    const { tenant } = c.get('ctx');
+    const sections = await deps.repo.listKnowledgeSections(tenant.id, c.req.param('id'));
+    if (!sections) return c.json({ error: '知識が見つかりません' }, 404);
+    return c.json({ sections });
   });
 
   app.delete('/knowledge/:id', async (c) => {

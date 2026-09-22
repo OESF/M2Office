@@ -13,22 +13,13 @@ import type {
   StoredFile, Tenant, TenantSettings, User, UserGroup, UserSettings,
 } from '@m2office/shared';
 import { DEFAULT_TENANT_SETTINGS, DEFAULT_USER_SETTINGS } from '@m2office/shared';
-import type { CompartmentAssignment, CredentialKind, GoogleConnection, TenantCredential, InstalledExtension, PrivateExtension, KnowledgeHit, KnowledgeItem, Repository, RunStatRow } from './types.js';
+import type { CompartmentAssignment, CredentialKind, GoogleConnection, TenantCredential, InstalledExtension, PrivateExtension, KnowledgeHit, KnowledgeItem, KnowledgeSectionView, Repository, RunStatRow } from './types.js';
+import { SPLIT_VERSION, citationOf, splitKnowledge } from '../knowledge/sections.js';
+import { SEARCH_CANDIDATES, bigrams, extractTerms, normalizeForSearch, rankSections } from '../knowledge/search.js';
 
-/**
- * 問い合わせ文を検索語に分割する。
- *
- * @param query 利用者の問い合わせ文
- * @returns 2 文字以上の検索語。助詞と記号は区切りとして扱う
- *
- * @remarks
- * 日本語は分かち書きをしないため、文全体で部分一致を取ると何も当たらない。
- * プロトタイプでは助詞と記号で区切る簡易な方法を用いる。
- * 本格的な検索は、全文検索と意味的検索の併用に置き換える（仕様書 第11.7節）。
- */
-function tokenize(query: string): string[] {
-  const separators = /[\s、。，．,.?？!！「」『』（）()：:；;・/]|[はがをにでとのへやもからまでより]/g;
-  return [...new Set(query.split(separators).filter((t) => t.length >= 2))];
+/** `LIKE` の特別な文字を、文字そのものとして扱うように逃がす。 */
+function escapeLike(s: string): string {
+  return s.replace(/[\\%_]/g, (c) => `\\${c}`);
 }
 
 /**
@@ -388,29 +379,77 @@ export class PostgresRepository implements Repository {
   }
 
   /**
-   * 組織知識を検索する。
+   * 組織知識を検索する（仕様書 第11.7.3節）。
    *
    * @remarks
-   * 権限区画: 区画外の利用者には区画内の文書を返さない。
+   * 権限区画: 区画外の利用者には区画内の節を返さない。
    * 「権限がない」ではなく、候補にも出さない（仕様書 第16.3.5節）。
+   *
+   * データベースでは、質問の言葉の 2 文字の組を 1 つでも含む節を候補として絞るだけにし、
+   * 並べ方は `rankSections` で決める。pg_bigm の索引を足しても結果は変わらない（ADR-0008）。
    */
   async searchKnowledge(
     tenantId: string,
     query: string,
     compartment: string | null,
   ): Promise<KnowledgeHit[]> {
-    const terms = tokenize(query);
+    const terms = extractTerms(query);
     if (terms.length === 0) return [];
-    const patterns = terms.map((t) => `%${t}%`);
-    return this.q<KnowledgeHit>(tenantId, 
-      `select id, title, body, source, compartment
-         from knowledge_items
-        where tenant_id = $1
-          and (compartment is null or compartment = $3)
-          and (title ilike any($2) or body ilike any($2))
-        order by updated_at desc limit 5`,
-      [tenantId, patterns, compartment],
+    await this.resplitStaleKnowledge(tenantId);
+    const patterns = [...new Set(terms.flatMap(bigrams))].map((g) => `%${escapeLike(g)}%`);
+    const rows = await this.q<{
+      id: string; title: string; heading: string; path: string[]; body: string; source: string;
+      compartment: string | null; updatedAt: string;
+    }>(tenantId,
+      `select s.item_id as id, k.title, s.heading, s.path, s.body, k.source, s.compartment,
+              k.updated_at as "updatedAt"
+         from knowledge_sections s
+         join knowledge_items k on k.id = s.item_id and k.tenant_id = s.tenant_id
+        where s.tenant_id = $1
+          and (s.compartment is null or s.compartment = $3)
+          and s.search_text like any($2)
+        order by (select count(*) from unnest($2::text[]) p where s.search_text like p) desc,
+                 k.updated_at desc
+        limit $4`,
+      [tenantId, patterns, compartment, SEARCH_CANDIDATES],
     );
+    return rankSections(terms, rows).map((r) => ({
+      id: r.id, title: r.title, heading: r.heading, path: r.path, citation: citationOf(r.title, r),
+      body: r.body, source: r.source, compartment: r.compartment, score: Math.round(r.score * 100) / 100,
+    }));
+  }
+
+  /** 古い分け方で分けた（または、まだ分けていない）知識を分け直す（第11.7.5節）。 */
+  private async resplitStaleKnowledge(tenantId: string): Promise<void> {
+    const stale = await this.q<{ id: string; title: string; body: string; compartment: string | null }>(tenantId,
+      `select id, title, body, compartment from knowledge_items
+        where tenant_id = $1 and split_version < $2`, [tenantId, SPLIT_VERSION]);
+    for (const k of stale) {
+      await this.inTenant(tenantId, (client) => this.writeSections(client, tenantId, k));
+    }
+  }
+
+  /** 1 件の知識の節を作り直す。呼び出し側のトランザクションの中で使う。 */
+  private async writeSections(
+    client: pg.PoolClient, tenantId: string,
+    k: { id: string; title: string; body: string; compartment: string | null },
+  ): Promise<void> {
+    const sections = splitKnowledge(k.body);
+    await client.query(`delete from knowledge_sections where tenant_id = $1 and item_id = $2`, [tenantId, k.id]);
+    if (sections.length > 0) {
+      await client.query(
+        `insert into knowledge_sections (tenant_id, item_id, ordinal, heading, path, body, search_text, compartment)
+         select $1, $2, t.ordinal, t.heading, array(select jsonb_array_elements_text(t.path)),
+                t.body, t.search_text, $3
+           from jsonb_to_recordset($4::jsonb)
+             as t(ordinal int, heading text, path jsonb, body text, search_text text)`,
+        [tenantId, k.id, k.compartment, JSON.stringify(sections.map((x) => ({
+          ...x, search_text: normalizeForSearch([...x.path, x.heading, x.body].join('\n')),
+        })))],
+      );
+    }
+    await client.query(`update knowledge_items set split_version = $3 where tenant_id = $1 and id = $2`,
+      [tenantId, k.id, SPLIT_VERSION]);
   }
 
   async appendAudit(e: AuditEvent): Promise<void> {
@@ -618,20 +657,37 @@ export class PostgresRepository implements Repository {
   async listKnowledge(tenantId: string): Promise<KnowledgeItem[]> {
     return this.q<KnowledgeItem>(tenantId,
       `select id, tenant_id as "tenantId", kind, title, body, source, compartment,
-              updated_at as "updatedAt"
-         from knowledge_items where tenant_id = $1 order by updated_at desc`,
+              updated_at as "updatedAt", version,
+              (select count(*)::int from knowledge_sections s
+                where s.tenant_id = k.tenant_id and s.item_id = k.id) as "sectionCount"
+         from knowledge_items k where tenant_id = $1 order by updated_at desc`,
       [tenantId]);
   }
 
   async saveKnowledge(k: KnowledgeItem): Promise<void> {
-    await this.q(k.tenantId,
-      `insert into knowledge_items (id, tenant_id, kind, title, body, source, compartment, updated_at)
-       values ($1,$2,$3,$4,$5,$6,$7,$8)
-       on conflict (id) do update set kind = excluded.kind, title = excluded.title,
-         body = excluded.body, source = excluded.source, compartment = excluded.compartment,
-         updated_at = excluded.updated_at
-       where knowledge_items.tenant_id = excluded.tenant_id`,
-      [k.id, k.tenantId, k.kind, k.title, k.body, k.source, k.compartment, k.updatedAt]);
+    await this.inTenant(k.tenantId, async (client) => {
+      const res = await client.query(
+        `insert into knowledge_items (id, tenant_id, kind, title, body, source, compartment, updated_at)
+         values ($1,$2,$3,$4,$5,$6,$7,$8)
+         on conflict (id) do update set kind = excluded.kind, title = excluded.title,
+           body = excluded.body, source = excluded.source, compartment = excluded.compartment,
+           updated_at = excluded.updated_at, version = knowledge_items.version + 1
+         where knowledge_items.tenant_id = excluded.tenant_id`,
+        [k.id, k.tenantId, k.kind, k.title, k.body, k.source, k.compartment, k.updatedAt]);
+      // 他社の同じ ID には書かない（上の where で更新されない）。その場合は節も作らない
+      if (res.rowCount === 0) return;
+      await this.writeSections(client, k.tenantId, k);
+    });
+  }
+
+  async listKnowledgeSections(tenantId: string, itemId: string): Promise<KnowledgeSectionView[] | null> {
+    const found = await this.q<{ id: string }>(tenantId,
+      `select id from knowledge_items where tenant_id = $1 and id = $2`, [tenantId, itemId]);
+    if (found.length === 0) return null;
+    await this.resplitStaleKnowledge(tenantId);
+    return this.q<KnowledgeSectionView>(tenantId,
+      `select heading, path, char_length(body) as chars from knowledge_sections
+        where tenant_id = $1 and item_id = $2 order by ordinal`, [tenantId, itemId]);
   }
 
   async deleteKnowledge(tenantId: string, id: string): Promise<boolean> {

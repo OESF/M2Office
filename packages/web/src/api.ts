@@ -173,6 +173,13 @@ export interface DashboardStats {
 export interface KnowledgeItemView {
   id: string; kind: string; title: string; body: string; source: string;
   compartment: string | null; updatedAt: string;
+  /** 版と、分けた節の数（一覧でだけ返る）。 */
+  version?: number; sectionCount?: number;
+}
+
+/** 知識の節（分け方の確認用。仕様書 第11.7.2節）。 */
+export interface KnowledgeSectionView {
+  heading: string; path: string[]; chars: number;
 }
 
 export interface AdminRun {
@@ -410,8 +417,10 @@ export const api = {
     knowledge: () => call<{
       items: KnowledgeItemView[]; compartments: { id: string; name: string; description: string | null }[];
     }>('/admin/knowledge'),
-    saveKnowledge: (id: string | 'new', item: Omit<KnowledgeItemView, 'id' | 'updatedAt'>) =>
-      call<{ id: string }>(`/admin/knowledge/${id}`, { method: 'PUT', body: JSON.stringify(item) }),
+    saveKnowledge: (id: string | 'new', item: Omit<KnowledgeItemView, 'id' | 'updatedAt' | 'version' | 'sectionCount'>) =>
+      call<{ id: string; sections: KnowledgeSectionView[] }>(`/admin/knowledge/${id}`, { method: 'PUT', body: JSON.stringify(item) }),
+    knowledgeSections: (id: string) =>
+      call<{ sections: KnowledgeSectionView[] }>(`/admin/knowledge/${id}/sections`),
     deleteKnowledge: (id: string) => call(`/admin/knowledge/${id}`, { method: 'DELETE' }),
     extensions: () => call<{ items: ExtensionView[] }>('/admin/extensions'),
     installExtension: (id: string, scope: ScopeValue = 'all') =>

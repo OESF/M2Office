@@ -144,7 +144,7 @@ export class Secretary {
     const top = hits[0];
     if (top) parts.push(`M2Office の使い方（「${top.article.title}」より）: ${top.excerpt}`);
     if (rules.length > 0) {
-      parts.push(`社内の規程では、${rules.map((r) => `「${r.title}」（${r.source}）`).join('、')}に記載があります。`);
+      parts.push(`社内の規程では、${rules.map((r) => `「${r.citation}」`).join('、')}に記載があります。`);
     }
     if (parts.length === 0) {
       parts.push('ヘルプと社内の規程のどちらにも見当たりませんでした。言い方を変えて聞き直すか、社内の管理者に問い合わせてください。');
@@ -158,7 +158,7 @@ export class Secretary {
       text: parts.join('\n'),
       evidence: [
         ...hits.map((h) => ({ label: 'ヘルプ', value: h.article.title })),
-        ...rules.map((r) => ({ label: '社内の規程', value: `${r.title}（${r.source}）` })),
+        ...rules.map((r) => ({ label: '社内の規程', value: r.source && r.source !== r.title ? `${r.citation}（${r.source}）` : r.citation })),
       ],
       helpArticles: hits.map((h) => ({ id: h.article.id, title: h.article.title })),
       ...(agent ? { suggestedAgent: { id: agent.id, version: agent.version, name: agent.name } } : {}),

@@ -7,11 +7,11 @@
  * @see 仕様書 第6.6節 管理者ページ
  */
 
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import type {
   AutomationPolicy, CompanyInfo, Role, SlideTemplate, TenantSettings, User, WritingStyle,
 } from '@m2office/shared';
-import { api, describeError, type KnowledgeItemView } from './api.js';
+import { api, describeError, type KnowledgeItemView, type KnowledgeSectionView } from './api.js';
 import { HelpTip } from './help.js';
 import { CompartmentSettings, GroupSettings, ScopeField, useAccessOptions } from './Scope.js';
 
@@ -33,11 +33,11 @@ function useSettings() {
 function useSaver() {
   const [state, setState] = useState<{ busy: boolean; message: string | null; error: string | null }>(
     { busy: false, message: null, error: null });
-  const run = async (fn: () => Promise<unknown>, done = '保存しました') => {
+  const run = async <R,>(fn: () => Promise<R>, done: string | ((r: R) => string) = '保存しました') => {
     setState({ busy: true, message: null, error: null });
     try {
-      await fn();
-      setState({ busy: false, message: done, error: null });
+      const r = await fn();
+      setState({ busy: false, message: typeof done === 'function' ? done(r) : done, error: null });
     } catch (e) {
       setState({ busy: false, message: null, error: describeError(e, '保存できませんでした') });
     }
@@ -454,8 +454,14 @@ export function KnowledgeSettings() {
   const [compartments, setCompartments] = useState<{ name: string; description: string | null }[]>([]);
   const empty = { id: 'new', kind: 'rule', title: '', body: '', source: '', compartment: null as string | null };
   const [draft, setDraft] = useState(empty);
+  // 分け方を開いている知識と、その節（第11.7.2節）
+  const [open, setOpen] = useState<{ id: string; sections: KnowledgeSectionView[] } | null>(null);
   const saver = useSaver();
   const load = () => api.admin.knowledge().then((r) => { setItems(r.items); setCompartments(r.compartments); });
+  const toggle = (id: string) => {
+    if (open?.id === id) { setOpen(null); return; }
+    api.admin.knowledgeSections(id).then((r) => setOpen({ id, sections: r.sections })).catch(() => setOpen(null));
+  };
   useEffect(() => { void load(); }, []);
 
   return (
@@ -467,7 +473,8 @@ export function KnowledgeSettings() {
         <Text label="題名" value={draft.title} onChange={(v) => setDraft({ ...draft, title: v })} />
         <Text label="出典（条番号など）" value={draft.source} onChange={(v) => setDraft({ ...draft, source: v })}
           hint="回答に添える出典。例: 就業規則 第32条" />
-        <Text label="本文" value={draft.body} onChange={(v) => setDraft({ ...draft, body: v })} multiline />
+        <Text label="本文" value={draft.body} onChange={(v) => setDraft({ ...draft, body: v })} multiline
+          hint="長い規程も 1 件で登録できます（50 万字まで）。「第○章」「第○条」や「## 見出し」で、検索と出典の単位（節）に自動で分けます" />
         <div className="field">
           <label>権限区画</label>
           <select value={draft.compartment ?? ''} onChange={(e) => setDraft({ ...draft, compartment: e.target.value || null })}>
@@ -478,21 +485,29 @@ export function KnowledgeSettings() {
         <div className="row">
           <button className="btn" disabled={saver.busy}
             onClick={() => void saver.run(async () => {
-              const { id: _id, ...rest } = draft;
-              await api.admin.saveKnowledge(draft.id, rest);
+              const { id: _id, version: _v, sectionCount: _n, updatedAt: _u, ...rest } = draft as KnowledgeItemView;
+              const saved = await api.admin.saveKnowledge(draft.id, rest);
               setDraft(empty);
               await load();
-            })}>保存する</button>
+              setOpen({ id: saved.id, sections: saved.sections });
+              return saved.sections.length;
+            }, (n) => `保存しました。本文を ${n} の節に分けました。下の一覧で分け方を確かめられます`)}>保存する</button>
           {draft.id !== 'new' && <button className="btn ghost" onClick={() => setDraft(empty)}>やめる</button>}
         </div>
       </div>
       {saver.view}
       <table className="table">
-        <thead><tr><th>題名</th><th>出典</th><th>区画</th><th /></tr></thead>
+        <thead><tr><th>題名</th><th>出典</th><th>区画</th><th>節</th><th /></tr></thead>
         <tbody>
           {items.map((k) => (
-            <tr key={k.id}>
+            <Fragment key={k.id}>
+            <tr>
               <td>{k.title}</td><td>{k.source}</td><td>{k.compartment ?? '—'}</td>
+              <td>
+                <button className="link-btn" onClick={() => toggle(k.id)} title="本文をどう分けたかを見る">
+                  {k.sectionCount ?? 0} 節{open?.id === k.id ? '（閉じる）' : ''}
+                </button>
+              </td>
               <td className="num">
                 <button className="btn ghost small" onClick={() => setDraft({ ...k })}>編集</button>{' '}
                 <button className="btn danger small" disabled={saver.busy}
@@ -501,6 +516,24 @@ export function KnowledgeSettings() {
                 </button>
               </td>
             </tr>
+            {open?.id === k.id && (
+              <tr className="sub-row">
+                <td colSpan={5}>
+                  {open.sections.length === 0 ? <p className="muted small">節がありません（本文が空です）。</p> : (
+                    <ol className="section-list">
+                      {open.sections.map((x, i) => (
+                        <li key={i}>
+                          {x.path.length > 0 && <span className="muted">{x.path.join(' › ')} › </span>}
+                          {x.heading || '（見出しなし）'}
+                          <span className="muted small">　{x.chars.toLocaleString('ja-JP')} 字</span>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                </td>
+              </tr>
+            )}
+            </Fragment>
           ))}
         </tbody>
       </table>

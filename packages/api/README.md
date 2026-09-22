@@ -104,7 +104,8 @@ OAuth クライアントが整うまでは、`GET /v1/auth/google/start` は 503
 | `POST /v1/admin/users` | 管理者: 利用者の招待（Workspace のドメインのみ） |
 | `PATCH /v1/admin/users/:id` | 管理者: 表示名・ロール・状態（管理者が 0 人になる変更は 409） |
 | `GET /v1/admin/knowledge` | 管理者: 組織知識の一覧 |
-| `PUT /v1/admin/knowledge/:id` | 管理者: 登録（`new`）・更新 |
+| `PUT /v1/admin/knowledge/:id` | 管理者: 登録（`new`）・更新。本文を節に分け、分けた節を返す（50 万字まで） |
+| `GET /v1/admin/knowledge/:id/sections` | 管理者: 1 件の知識の節（見出しの経路と字数） |
 | `DELETE /v1/admin/knowledge/:id` | 管理者: 削除 |
 | `GET /v1/me/settings` | 本人の個人設定 |
 | `PUT /v1/me/settings/:section` | 個人設定の 1 区分を保存（`profile`・`secretary`・`notifications`・`menu`） |

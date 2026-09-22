@@ -69,7 +69,7 @@ src/Login.tsx       ログイン画面
 src/App.tsx         ワークスペース（3 ペイン、秘書バー、お知らせ、定時実行）
 src/Admin.tsx       管理者ページ（参照の画面）
 src/Dashboard.tsx   ダッシュボード（いま・集計）
-src/AdminSettings.tsx  管理者ページ（会社情報・業務と承認・ユーザー・知識の編集）
+src/AdminSettings.tsx  管理者ページ（会社情報・業務と承認・ユーザー・知識の編集と、知識の分け方の確認）
 src/Extensions.tsx     管理者ページ「拡張機能」（取り込み・同意・スイッチ・接続の確認・削除）
 src/Scope.tsx          グループの管理、業務・拡張機能ごとの「利用できる人」、権限区画の割当
 src/Connections.tsx    管理者ページ「接続」（Gemini の鍵・モデル・接続の確認、Google の OAuth クライアント・従業員の接続状況）

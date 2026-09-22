@@ -59,7 +59,11 @@ export interface Repository {
   createArtifact(artifact: Artifact): Promise<void>;
   listArtifacts(tenantId: string, runId: string): Promise<Artifact[]>;
 
-  /** 組織知識を全文で検索する。区画外の利用者には区画内の文書を返さない。 */
+  /**
+   * 組織知識を検索し、関係の深い節を返す（仕様書 第11.7.3節）。区画外の利用者には区画内の節を返さない。
+   *
+   * @remarks 古い分け方で分けた知識があれば、検索の前に分け直す（第11.7.5節）。
+   */
   searchKnowledge(
     tenantId: string,
     query: string,
@@ -167,7 +171,10 @@ export interface Repository {
 
   /** 組織知識の一覧（管理用）。本文を含む。 */
   listKnowledge(tenantId: string): Promise<KnowledgeItem[]>;
+  /** 保存し、本文を節に分け直す。古い節と新しい節は 1 つのトランザクションで入れ替える（第11.7.5節）。 */
   saveKnowledge(item: KnowledgeItem): Promise<void>;
+  /** 1 件の知識の節（見出しと字数）。分け方の確認に使う（第6.6.6節）。知識が無ければ `null`。 */
+  listKnowledgeSections(tenantId: string, itemId: string): Promise<KnowledgeSectionView[] | null>;
   deleteKnowledge(tenantId: string, id: string): Promise<boolean>;
   /** 権限区画の一覧。 */
   listCompartments(tenantId: string): Promise<{ id: string; name: string; description: string | null }[]>;
@@ -195,13 +202,32 @@ export interface Repository {
   listAudit(tenantId: string, limit: number): Promise<AuditEvent[]>;
 }
 
-/** 知識検索の結果。出典を必ず伴う（仕様書 第11.7節）。 */
+/** 知識検索の結果の 1 節。出典を必ず伴う（仕様書 第11.7.4節）。 */
 export interface KnowledgeHit {
+  /** 知識（文書）の ID。 */
   id: string;
+  /** 文書の題名。 */
   title: string;
+  /** 節の見出し（例: `第23条（年次有給休暇）`）。見出しのない短い文書では空。 */
+  heading: string;
+  /** 上位の見出しの経路。 */
+  path: string[];
+  /** 出典（`文書名 › 見出しの経路`）。 */
+  citation: string;
+  /** 節の本文。文書の全文ではない。 */
   body: string;
+  /** 登録時の出典（リンク・ファイル名など）。 */
   source: string;
   compartment: string | null;
+  /** 並べ替えの点数（第11.7.3節）。 */
+  score: number;
+}
+
+/** 知識の節の見え方（管理者の確認用）。 */
+export interface KnowledgeSectionView {
+  heading: string;
+  path: string[];
+  chars: number;
 }
 
 /** 組織知識の 1 件（管理用）。 */
@@ -215,6 +241,10 @@ export interface KnowledgeItem {
   /** 権限区画。区画外は `null`（仕様書 第16.3節）。 */
   compartment: string | null;
   updatedAt: string;
+  /** 版。保存のたびに 1 つ上がる。一覧でだけ返す。 */
+  version?: number;
+  /** 分けた節の数。一覧でだけ返す。 */
+  sectionCount?: number;
 }
 
 /** 実行の集計の 1 行（日・時・エージェント・状態で束ねたもの）。 */
