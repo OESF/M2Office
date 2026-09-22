@@ -1,6 +1,6 @@
 import type {
   Approval, Artifact, AuditEvent, Notification, Run, RunStep, Schedule, ScheduleRule, Tenant,
-  TenantSettings, User,
+  TenantSettings, User, UserSettings,
 } from '@m2office/shared';
 
 /**
@@ -140,6 +140,19 @@ export const api = {
     csrfToken = null;
   },
   notifications: () => call<{ items: Notification[]; unread: number }>('/notifications'),
+  mySettings: () => call<UserSettings>('/me/settings'),
+  saveMySettings: <K extends keyof UserSettings>(section: K, value: UserSettings[K]) =>
+    call(`/me/settings/${section}`, { method: 'PUT', body: JSON.stringify(value) }),
+  saveDisplayName: (displayName: string) =>
+    call('/me/profile', { method: 'PATCH', body: JSON.stringify({ displayName }) }),
+  mySessions: () => call<{ items: {
+    id: string; provider: string; userAgent: string | null; createdAt: string; lastSeenAt: string; current: boolean;
+  }[] }>('/me/sessions'),
+  revokeSession: (id: string) => call(`/me/sessions/${id}`, { method: 'DELETE' }),
+  myUsage: () => call<{
+    seat: string; thisMonth: { runs: number; costJpy: number }; availableAgents: number;
+    compartments: string[]; plan: null;
+  }>('/me/usage'),
   readNotification: (id: string) => call(`/notifications/${id}/read`, { method: 'POST' }),
   schedules: () => call<{ items: ScheduleView[] }>('/schedules'),
   createSchedule: (agentId: string, rule: ScheduleRule) =>

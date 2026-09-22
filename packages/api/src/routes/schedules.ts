@@ -36,7 +36,8 @@ export function schedulesRoute(deps: AppDeps) {
     } catch (err) {
       return c.json({ error: (err as Error).message }, 400);
     }
-    const timezone = body.timezone ?? 'Asia/Tokyo';
+    // 既定は本人の個人設定のタイムゾーン（仕様書 第6.5.1節）
+    const timezone = body.timezone ?? (await deps.repo.getUserSettings(tenant.id, user.id)).profile.timezone;
     const now = new Date();
     const schedule: Schedule = {
       id: randomUUID(), tenantId: tenant.id, userId: user.id, agentId: def.id,

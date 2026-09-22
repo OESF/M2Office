@@ -4,6 +4,7 @@ import {
   api, type AgentSummary, type Me, type RunDetail, type ScheduleView, type SecretaryReply,
 } from './api.js';
 import { AgentForm, ApprovalTray, Evidence, RunView, statusLabel } from './components.js';
+import { Settings, orderAgents } from './Settings.js';
 
 /** 中央キャンバスに何を表示しているか。 */
 type View =
@@ -13,7 +14,8 @@ type View =
   | { kind: 'approvals' }
   | { kind: 'history' }
   | { kind: 'notifications' }
-  | { kind: 'schedules' };
+  | { kind: 'schedules' }
+  | { kind: 'settings' };
 
 /**
  * ワークスペースの画面。
@@ -30,6 +32,11 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [reply, setReply] = useState<SecretaryReply | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [menu, setMenu] = useState<{ hidden: string[]; order: string[] }>({ hidden: [], order: [] });
+  const loadMenu = useCallback(() => {
+    api.mySettings().then((s) => setMenu(s.menu)).catch(() => undefined);
+  }, []);
+  useEffect(loadMenu, [loadMenu]);
 
   const refresh = useCallback(async () => {
     try {
@@ -85,7 +92,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
       <div className={`panes${showSash ? ' with-sash' : ''}`}>
         <nav className="left">
           <h2>業務</h2>
-          {agents.map((a) => (
+          {orderAgents(agents, menu.order).filter((a) => !menu.hidden.includes(a.id)).map((a) => (
             <button
               key={a.id}
               className={`item${view.kind === 'agent' && view.agent.id === a.id ? ' active' : ''}`}
@@ -122,11 +129,14 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
           >
             定時実行
           </button>
-          <div className="me-summary">
+          <button
+            className={`me-summary${view.kind === 'settings' ? ' active' : ''}`}
+            onClick={() => setView({ kind: 'settings' })}
+          >
             <strong>{me.user.displayName}</strong>
             <span className="sub">{me.user.roles.map(roleLabel).join('・')}</span>
-            <span className="sub">使える業務 {agents.length} 件</span>
-          </div>
+            <span className="sub">使える業務 {agents.length} 件 ・ 個人設定</span>
+          </button>
         </nav>
 
         <main className="canvas">
@@ -165,6 +175,13 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
               <h1>定時実行</h1>
               <p className="lead">決まった時刻に、あなたの権限で業務を実行します。</p>
               <Schedules agents={agents} />
+            </>
+          )}
+          {view.kind === 'settings' && (
+            <>
+              <h1>個人設定</h1>
+              <p className="lead">あなただけに関わる設定です。管理者も変更できません。</p>
+              <Settings me={me} agents={agents} onChanged={loadMenu} />
             </>
           )}
           {view.kind === 'history' && (

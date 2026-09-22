@@ -71,11 +71,21 @@ export class Secretary {
       };
     }
 
-    // 層 3: 完全な対話
+    // 層 3: 完全な対話。本人が決めた名前・呼ばれ方・応対スタイルに合わせる（仕様書 第6.5.3節）
+    const [prefs, user] = await Promise.all([
+      this.deps.repo.getUserSettings(tenantId, userId),
+      this.deps.repo.findUserById(tenantId, userId),
+    ]);
+    const s = prefs.secretary;
+    const persona = [
+      `あなたは中小企業の従業員に付く秘書${s.name ? `「${s.name}」` : ''}です。`,
+      `相手を「${s.callMe || `${user?.displayName ?? ''}さん`}」と呼びます。`,
+      s.style === 'concise' ? '要点だけを短く答えます。' : '丁寧な日本語で、要点を先に答えます。',
+    ].join('');
     const res = await this.deps.llm.complete({
       tier: 'standard',
       messages: [
-        { role: 'system', content: 'あなたは中小企業の従業員に付く秘書です。簡潔な日本語で答えます。' },
+        { role: 'system', content: persona },
         { role: 'user', content: message },
       ],
     });

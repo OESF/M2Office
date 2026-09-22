@@ -12,6 +12,7 @@ import { authRoute } from './routes/auth.js';
 import { notificationsRoute } from './routes/notifications.js';
 import { schedulesRoute } from './routes/schedules.js';
 import { adminRoute } from './routes/admin.js';
+import { meRoute } from './routes/me.js';
 
 /**
  * API サーバー。
@@ -58,6 +59,7 @@ app.get('/v1/me', (c) => {
     workspaceSource: deps.connector.source,
   });
 });
+app.route('/v1/me', meRoute(deps));
 app.route('/v1/agents', agentsRoute(deps));
 app.route('/v1/jobs', jobsRoute(deps));
 app.route('/v1/runs', runsRoute(deps));

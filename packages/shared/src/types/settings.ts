@@ -85,3 +85,46 @@ export function writeInternalNeedsApproval(policy: AutomationPolicy, agentId: st
 export function isValidInvoiceNumber(v: string): boolean {
   return v === '' || /^T\d{13}$/.test(v);
 }
+
+/**
+ * 本人が編集する設定（仕様書 第6.5節）。
+ *
+ * @remarks 管理者であっても他人の個人設定は編集しない。
+ */
+export interface UserSettings {
+  profile: {
+    /** ふりがな。並び順と読み上げに使う。 */
+    furigana: string;
+    /** 役職・所属。文書の署名に使う。 */
+    title: string;
+    /** 予定と定時実行の基準（第6.5.1節）。 */
+    timezone: string;
+  };
+  secretary: {
+    /** 秘書の名前。呼びかけに使う。 */
+    name: string;
+    /** 自分の呼ばれ方。空なら表示名に「さん」を付ける。 */
+    callMe: string;
+    style: 'polite' | 'concise';
+    proactivity: 'low' | 'normal' | 'high';
+  };
+  notifications: {
+    /** 受け取る種類（第6.5.5節）。`false` にしたものは届けない。 */
+    kinds: Record<'brief' | 'run' | 'approval' | 'failure', boolean>;
+    /** 通知しない時間帯（例: 22:00〜7:00）。`null` は指定なし。 */
+    quietHours: { from: string; to: string } | null;
+  };
+  menu: {
+    /** メニューに出さない業務。使える業務を増やすことはできない（第6.5.6節）。 */
+    hidden: string[];
+    /** 並び順。載っていない業務は後ろに既定の順で並ぶ。 */
+    order: string[];
+  };
+}
+
+export const DEFAULT_USER_SETTINGS: UserSettings = {
+  profile: { furigana: '', title: '', timezone: 'Asia/Tokyo' },
+  secretary: { name: '', callMe: '', style: 'polite', proactivity: 'normal' },
+  notifications: { kinds: { brief: true, run: true, approval: true, failure: true }, quietHours: null },
+  menu: { hidden: [], order: [] },
+};

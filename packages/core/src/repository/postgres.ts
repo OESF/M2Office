@@ -1,9 +1,9 @@
 import pg from 'pg';
 import type {
   Approval, Artifact, AuditEvent, Job, Notification, Run, RunStep, Schedule, Session,
-  Tenant, TenantSettings, User,
+  Tenant, TenantSettings, User, UserSettings,
 } from '@m2office/shared';
-import { DEFAULT_TENANT_SETTINGS } from '@m2office/shared';
+import { DEFAULT_TENANT_SETTINGS, DEFAULT_USER_SETTINGS } from '@m2office/shared';
 import type { KnowledgeHit, KnowledgeItem, Repository } from './types.js';
 
 /**
@@ -623,6 +623,65 @@ export class PostgresRepository implements Repository {
     return this.q<{ id: string; name: string; description: string | null }>(tenantId,
       `select id, name, description from compartments where tenant_id = $1 and enabled order by name`,
       [tenantId]);
+  }
+
+  async getUserSettings(tenantId: string, userId: string): Promise<UserSettings> {
+    const rows = await this.q<Partial<Record<keyof UserSettings, unknown>>>(tenantId,
+      `select profile, secretary, notifications, menu from user_settings
+        where tenant_id = $1 and user_id = $2`, [tenantId, userId]);
+    const r = rows[0] ?? {};
+    const d = DEFAULT_USER_SETTINGS;
+    const n = (r.notifications ?? {}) as Partial<UserSettings['notifications']>;
+    return {
+      profile: { ...d.profile, ...(r.profile ?? {}) },
+      secretary: { ...d.secretary, ...(r.secretary ?? {}) },
+      notifications: {
+        kinds: { ...d.notifications.kinds, ...(n.kinds ?? {}) },
+        quietHours: n.quietHours ?? d.notifications.quietHours,
+      },
+      menu: { ...d.menu, ...(r.menu ?? {}) },
+    };
+  }
+
+  async saveUserSettings<K extends keyof UserSettings>(
+    tenantId: string, userId: string, section: K, value: UserSettings[K],
+  ): Promise<void> {
+    const column = ({
+      profile: 'profile', secretary: 'secretary', notifications: 'notifications', menu: 'menu',
+    } as const)[section];
+    await this.q(tenantId,
+      `insert into user_settings (tenant_id, user_id, ${column}, updated_at)
+       values ($1, $2, $3, now())
+       on conflict (tenant_id, user_id) do update set ${column} = excluded.${column}, updated_at = now()`,
+      [tenantId, userId, JSON.stringify(value)]);
+  }
+
+  async listSessions(tenantId: string, userId: string, now: Date): Promise<Session[]> {
+    return this.q<Session>(tenantId,
+      `select id, tenant_id as "tenantId", user_id as "userId", csrf_token as "csrfToken",
+              provider, user_agent as "userAgent", created_at as "createdAt",
+              last_seen_at as "lastSeenAt", expires_at as "expiresAt", revoked_at as "revokedAt"
+         from sessions
+        where tenant_id = $1 and user_id = $2 and revoked_at is null and expires_at > $3
+        order by last_seen_at desc`,
+      [tenantId, userId, now.toISOString()]);
+  }
+
+  async usageForUser(tenantId: string, userId: string, since: string) {
+    const rows = await this.q<{ runs: number; costJpy: number }>(tenantId,
+      `select count(*)::int as runs, coalesce(sum(r.cost_jpy), 0)::float8 as "costJpy"
+         from runs r join jobs j on j.id = r.job_id
+        where r.tenant_id = $1 and j.requested_by = $2 and r.started_at >= $3`,
+      [tenantId, userId, since]);
+    return rows[0] ?? { runs: 0, costJpy: 0 };
+  }
+
+  async listUserCompartments(tenantId: string, userId: string): Promise<string[]> {
+    const rows = await this.q<{ name: string }>(tenantId,
+      `select c.name from compartment_members m join compartments c on c.id = m.compartment_id
+        where c.tenant_id = $1 and m.user_id = $2 and c.enabled order by c.name`,
+      [tenantId, userId]);
+    return rows.map((r) => r.name);
   }
 }
 

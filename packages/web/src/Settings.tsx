@@ -1,0 +1,191 @@
+import { useEffect, useState } from 'react';
+import type { UserSettings } from '@m2office/shared';
+import { api, type AgentSummary, type Me } from './api.js';
+
+/**
+ * 個人設定（仕様書 第6.5節）。左ペイン下部から開く。
+ *
+ * @remarks
+ * 記憶とデータ（第6.5.4節）は個人記憶の実装とあわせて追加する。
+ * Google 連携の許可（第6.5.2節）は Google との接続の実装とあわせて追加する。
+ */
+export function Settings({ me, agents, onChanged }: {
+  me: Me; agents: AgentSummary[]; onChanged: () => void;
+}) {
+  const [s, setS] = useState<UserSettings | null>(null);
+  const [name, setName] = useState(me.user.displayName);
+  const [usage, setUsage] = useState<Awaited<ReturnType<typeof api.myUsage>> | null>(null);
+  const [sessions, setSessions] = useState<Awaited<ReturnType<typeof api.mySessions>>['items']>([]);
+  const [msg, setMsg] = useState<{ ok?: string; error?: string }>({});
+
+  const loadSessions = () => api.mySessions().then((r) => setSessions(r.items));
+  useEffect(() => {
+    api.mySettings().then(setS).catch((e) => setMsg({ error: e.message }));
+    api.myUsage().then(setUsage).catch(() => undefined);
+    void loadSessions();
+  }, []);
+
+  async function save(fn: () => Promise<unknown>) {
+    setMsg({});
+    try {
+      await fn();
+      setMsg({ ok: '保存しました' });
+      onChanged();
+    } catch (e) {
+      setMsg({ error: e instanceof Error ? e.message : '保存できませんでした' });
+    }
+  }
+
+  if (!s) return <p className="muted">読み込み中…</p>;
+  const set = <K extends keyof UserSettings>(k: K, v: Partial<UserSettings[K]>) =>
+    setS({ ...s, [k]: { ...s[k], ...v } });
+
+  const ordered = orderAgents(agents, s.menu.order);
+  const move = (id: string, d: -1 | 1) => {
+    const ids = ordered.map((a) => a.id);
+    const i = ids.indexOf(id);
+    const j = i + d;
+    if (j < 0 || j >= ids.length) return;
+    [ids[i], ids[j]] = [ids[j]!, ids[i]!];
+    set('menu', { order: ids });
+  };
+
+  return (
+    <>
+      {msg.ok && <p className="ok-msg">{msg.ok}</p>}
+      {msg.error && <p className="error">{msg.error}</p>}
+
+      <div className="card">
+        <h3>利用状況</h3>
+        <dl className="kv">
+          <dt>区分</dt><dd>{usage?.seat ?? '—'}</dd>
+          <dt>使える業務</dt><dd>{usage ? `${usage.availableAgents} 件` : '—'}</dd>
+          <dt>今月の実行</dt><dd>{usage ? `${usage.thisMonth.runs} 件` : '—'}</dd>
+          <dt>権限区画</dt><dd>{usage?.compartments.length ? usage.compartments.join('、') : '所属なし'}</dd>
+        </dl>
+      </div>
+
+      <div className="card">
+        <h3>プロフィール</h3>
+        <div className="grid2">
+          <div className="field"><label>表示名</label><input value={name} onChange={(e) => setName(e.target.value)} /></div>
+          <div className="field"><label>ふりがな</label>
+            <input value={s.profile.furigana} onChange={(e) => set('profile', { furigana: e.target.value })} /></div>
+        </div>
+        <div className="grid2">
+          <div className="field"><label>役職・所属</label>
+            <input value={s.profile.title} onChange={(e) => set('profile', { title: e.target.value })} /></div>
+          <div className="field"><label>タイムゾーン</label>
+            <input value={s.profile.timezone} onChange={(e) => set('profile', { timezone: e.target.value })} /></div>
+        </div>
+        <div className="field"><label>メールアドレス</label>
+          <input value={me.user.email} disabled /><span className="muted small">Google 側で管理しているため変更できません</span></div>
+        <button className="btn" onClick={() => void save(async () => {
+          if (name !== me.user.displayName) await api.saveDisplayName(name);
+          await api.saveMySettings('profile', s.profile);
+        })}>保存する</button>
+      </div>
+
+      <div className="card">
+        <h3>秘書</h3>
+        <div className="grid2">
+          <div className="field"><label>秘書の名前</label>
+            <input value={s.secretary.name} placeholder="未設定" onChange={(e) => set('secretary', { name: e.target.value })} /></div>
+          <div className="field"><label>自分の呼ばれ方</label>
+            <input value={s.secretary.callMe} placeholder={`${me.user.displayName}さん`} onChange={(e) => set('secretary', { callMe: e.target.value })} /></div>
+        </div>
+        <div className="grid2">
+          <div className="field"><label>応対スタイル</label>
+            <select value={s.secretary.style} onChange={(e) => set('secretary', { style: e.target.value as 'polite' | 'concise' })}>
+              <option value="polite">丁寧</option><option value="concise">簡潔</option>
+            </select></div>
+          <div className="field"><label>提案の積極性</label>
+            <select value={s.secretary.proactivity} onChange={(e) => set('secretary', { proactivity: e.target.value as 'low' | 'normal' | 'high' })}>
+              <option value="low">控えめ</option><option value="normal">標準</option><option value="high">積極的</option>
+            </select></div>
+        </div>
+        <button className="btn" onClick={() => void save(() => api.saveMySettings('secretary', s.secretary))}>保存する</button>
+      </div>
+
+      <div className="card">
+        <h3>通知</h3>
+        <p>受け取る種類を選びます。現在の受け取り方は画面内の「お知らせ」のみです。</p>
+        {([['brief', '週次ブリーフ'], ['run', '実行の完了'], ['approval', '承認の依頼'], ['failure', '失敗']] as const).map(([k, label]) => (
+          <label key={k} className="check">
+            <input type="checkbox" checked={s.notifications.kinds[k]}
+              onChange={(e) => set('notifications', { kinds: { ...s.notifications.kinds, [k]: e.target.checked } })} />
+            {label}
+          </label>
+        ))}
+        <div style={{ marginTop: 12 }}>
+          <button className="btn" onClick={() => void save(() => api.saveMySettings('notifications', s.notifications))}>保存する</button>
+        </div>
+      </div>
+
+      <div className="card">
+        <h3>メニューの並び</h3>
+        <p>使える業務のうち、メニューに並べるものと順番を決めます。使える業務を増やすことはできません。</p>
+        <table className="table">
+          <tbody>
+            {ordered.map((a, i) => (
+              <tr key={a.id}>
+                <td>
+                  <label className="check">
+                    <input type="checkbox" checked={!s.menu.hidden.includes(a.id)}
+                      onChange={(e) => set('menu', {
+                        hidden: e.target.checked ? s.menu.hidden.filter((x) => x !== a.id) : [...s.menu.hidden, a.id],
+                      })} />
+                    {a.name}
+                  </label>
+                </td>
+                <td className="num">
+                  <button className="btn ghost small" disabled={i === 0} onClick={() => move(a.id, -1)}>↑</button>{' '}
+                  <button className="btn ghost small" disabled={i === ordered.length - 1} onClick={() => move(a.id, 1)}>↓</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div style={{ marginTop: 12 }}>
+          <button className="btn" onClick={() => void save(() => api.saveMySettings('menu', { ...s.menu, order: ordered.map((a) => a.id) }))}>保存する</button>
+        </div>
+      </div>
+
+      <div className="card">
+        <h3>セキュリティ</h3>
+        <p>2 段階認証は Google アカウント側で設定します。M2Office では設定しません。</p>
+        <table className="table">
+          <thead><tr><th>ログインした日時</th><th>最後の利用</th><th>端末</th><th /></tr></thead>
+          <tbody>
+            {sessions.map((x) => (
+              <tr key={x.id}>
+                <td>{new Date(x.createdAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}</td>
+                <td>{new Date(x.lastSeenAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}</td>
+                <td className="small">{x.userAgent ?? '不明'}{x.current && '（この端末）'}</td>
+                <td className="num">
+                  {!x.current && <button className="btn ghost small"
+                    onClick={() => void api.revokeSession(x.id).then(loadSessions)}>ログアウトさせる</button>}
+                </td>
+              </tr>
+            ))}
+            {sessions.length === 0 && <tr><td colSpan={4} className="muted">開発用ヘッダーでの接続のため、表示できる端末はありません</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
+/**
+ * 本人の並び順で業務を並べる。並び順に無い業務は後ろに既定の順で並べる。
+ *
+ * @param agents 使える業務（管理者が有効にしたもの）
+ * @param order 本人が決めた並び順
+ */
+export function orderAgents<T extends { id: string }>(agents: T[], order: string[]): T[] {
+  const rank = (id: string) => {
+    const i = order.indexOf(id);
+    return i === -1 ? order.length + agents.findIndex((a) => a.id === id) : i;
+  };
+  return [...agents].sort((a, b) => rank(a.id) - rank(b.id));
+}

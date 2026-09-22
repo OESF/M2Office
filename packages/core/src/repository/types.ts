@@ -1,6 +1,6 @@
 import type {
   Approval, Artifact, AuditEvent, Job, Notification, Run, RunStep, Schedule, Session,
-  Tenant, TenantSettings, User,
+  Tenant, TenantSettings, User, UserSettings,
 } from '@m2office/shared';
 
 /**
@@ -96,6 +96,18 @@ export interface Repository {
   saveTenantSettings<K extends keyof TenantSettings>(
     tenantId: string, section: K, value: TenantSettings[K], updatedBy: string,
   ): Promise<void>;
+
+  /** 本人の設定を返す。未保存の区分は既定値で補う。 */
+  getUserSettings(tenantId: string, userId: string): Promise<UserSettings>;
+  saveUserSettings<K extends keyof UserSettings>(
+    tenantId: string, userId: string, section: K, value: UserSettings[K],
+  ): Promise<void>;
+  /** 本人の有効なログイン状態の一覧（第6.5.8節）。 */
+  listSessions(tenantId: string, userId: string, now: Date): Promise<Session[]>;
+  /** 本人の実行件数と費用（期間内）。 */
+  usageForUser(tenantId: string, userId: string, since: string): Promise<{ runs: number; costJpy: number }>;
+  /** 本人が所属する権限区画の名前。 */
+  listUserCompartments(tenantId: string, userId: string): Promise<string[]>;
 
   createUser(user: User): Promise<void>;
   /** 表示名・ロール・状態を更新する。メールアドレスは変えない（Google 側で管理する）。 */

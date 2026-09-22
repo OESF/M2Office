@@ -199,6 +199,11 @@ export const notificationSend: Tool = {
     }
     const id = randomUUID();
     const kind = args['kind'] === 'brief' ? 'brief' : 'run';
+    // 本人が受け取らないと決めた種類は届けない（仕様書 第6.5.5節）
+    const prefs = await ctx.repo.getUserSettings(ctx.tenantId, ctx.userId);
+    if (!prefs.notifications.kinds[kind]) {
+      return { sent: false, reason: '本人の設定により、この種類の通知は受け取りません' };
+    }
     await ctx.repo.createNotification({
       id, tenantId: ctx.tenantId, userId: ctx.userId, kind,
       title: str(args['title'], 'お知らせ'),

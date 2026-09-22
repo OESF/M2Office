@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  DEFAULT_TENANT_SETTINGS,
+  DEFAULT_TENANT_SETTINGS, DEFAULT_USER_SETTINGS,
   type AgentDefinition, type Approval, type AuditEvent, type Job, type Notification, type Run,
   type RunStep, type TenantSettings,
 } from '@m2office/shared';
@@ -46,6 +46,8 @@ class MemoryRepo {
   async createArtifact() {}
   settings: TenantSettings = structuredClone(DEFAULT_TENANT_SETTINGS);
   async getTenantSettings() { return this.settings; }
+  userSettings = structuredClone(DEFAULT_USER_SETTINGS);
+  async getUserSettings() { return this.userSettings; }
 }
 
 /** 常に同じツール呼び出しを出力する推論。承認の手前で送信を試みる場合を再現する。 */
@@ -164,6 +166,12 @@ test('notification.send は依頼者本人にだけ届き、宛先の指定を�
   ng.repo.settings.automation.writeInternal = 'allow';
   await ng.engine.advance(ng.run);
   assert.equal(ng.repo.notifications.length, 0, '宛先を指定した通知は送らない');
+
+  const off = setup(def, { name: 'notification.send', args: { kind: 'brief', title: '週次' } });
+  off.repo.settings.automation.writeInternal = 'allow';
+  off.repo.userSettings.notifications.kinds.brief = false;
+  await off.engine.advance(off.run);
+  assert.equal(off.repo.notifications.length, 0, '本人が受け取らないと決めた種類は届けない');
 });
 
 const TASK_DEF: AgentDefinition = {

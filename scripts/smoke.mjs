@@ -474,6 +474,43 @@ console.log('\n■ 15. 管理者ページの設定');
   await call('a', `/v1/admin/knowledge/${saved2.id}`, { method: 'DELETE' });
 }
 
+console.log('\n■ 16. 個人設定');
+{
+  const put = (section, value, who = 'member') =>
+    call('a', `/v1/me/settings/${section}`, { method: 'PUT', body: JSON.stringify(value) }, who);
+  const bad = await put('profile', { timezone: 'Mars/Olympus' });
+  bad.status === 400 ? ok('存在しないタイムゾーンは拒否する') : ng(`拒否されない（${bad.status}）`);
+
+  await put('menu', { hidden: ['minutes'], order: ['weekly-brief'] });
+  const { body: mine } = await call('a', '/v1/me/settings', {}, 'member');
+  const { body: others } = await call('a', '/v1/me/settings', {}, 'admin');
+  mine.menu.hidden.includes('minutes') && !others.menu.hidden.includes('minutes')
+    ? ok('メニューの設定は本人だけに効く') : ng('設定が本人以外にも効いている');
+  await put('menu', { hidden: [], order: [] });
+
+  // 週次ブリーフを受け取らない設定にすると届かない
+  await put('notifications', { kinds: { brief: false, run: true, approval: true, failure: true }, quietHours: null });
+  const { body: sched } = await call('a', '/v1/schedules', {}, 'member');
+  const brief = sched.items.find((x) => x.agentId === 'weekly-brief');
+  const { body: before } = await call('a', '/v1/notifications', {}, 'member');
+  await call('a', `/v1/schedules/${brief.id}/trigger`, { method: 'POST' }, 'member');
+  const deadline = Date.now() + 40000;
+  let done = false;
+  while (Date.now() < deadline && !done) {
+    const { body: j } = await call('a', '/v1/jobs', {}, 'member');
+    const latest = j.items.find((i) => i.job.agentId === 'weekly-brief');
+    done = latest && Date.parse(latest.run.startedAt) > Date.now() - 45000 && latest.run.status === 'completed';
+    if (!done) await sleep(1000);
+  }
+  const { body: after } = await call('a', '/v1/notifications', {}, 'member');
+  done && after.items.length === before.items.length
+    ? ok('受け取らないと決めた種類の通知は届かない') : ng('設定に反して届いた、または実行が終わらない');
+  await put('notifications', { kinds: { brief: true, run: true, approval: true, failure: true }, quietHours: null });
+
+  const { body: usage } = await call('a', '/v1/me/usage', {}, 'member');
+  typeof usage.thisMonth?.runs === 'number' ? ok(`今月の実行件数を返す（${usage.thisMonth.runs} 件）`) : ng('利用状況が取れない');
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');
