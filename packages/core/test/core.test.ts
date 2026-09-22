@@ -44,6 +44,12 @@ class MemoryRepo {
   async getApproval(t: string, id: string) { return this.approvals.find((a) => a.tenantId === t && a.id === id) ?? null; }
   async updateApproval(a: Approval) { this.approvals = this.approvals.map((x) => (x.id === a.id ? a : x)); }
   async listPendingApprovals(t: string) { return this.approvals.filter((a) => a.tenantId === t && !a.decision); }
+  async listRunApprovals(t: string, runId: string) {
+    const ids = new Set(this.steps.filter((x) => x.runId === runId).map((x) => x.id));
+    return this.approvals.filter((a) => a.tenantId === t && ids.has(a.runStepId));
+  }
+  // 見本の依頼の入力にはファイルを入れないため、承認は無い
+  async listApprovalsForFileInput() { return []; }
   async appendAudit(e: AuditEvent) { this.audits.push(e); }
   async createNotification(n: Notification) { this.notifications.push(n); }
   async findUserById(t: string, id: string) { return this.users.find((u) => u.tenantId === t && u.id === id) ?? null; }
