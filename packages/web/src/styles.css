@@ -327,3 +327,9 @@ button.link { background: none; border: none; padding: 0; }
 button.link.danger { color: #b91c1c; }
 .warn-msg { background: #fdf3e3; color: var(--warn); border-radius: 6px; padding: 6px 10px; }
 .ok-inline { color: var(--accent); }
+
+/* 利用範囲（仕様書 第16.7節） */
+.scope-editor { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
+.scope-pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px 16px; margin: 6px 0 4px 20px; }
+.scope-pick .check { display: block; }
+.scope-pick .warn-msg { grid-column: 1 / -1; }

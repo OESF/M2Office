@@ -37,7 +37,7 @@ export function schedulesRoute(deps: AppDeps) {
     }>();
     const view = await deps.tenantView(tenant.id);
     const def = view.resolve(body.agentId, body.agentVersion ?? 1);
-    if (!def || !view.isAvailable(def.id)) {
+    if (!def || !(await deps.canUse(tenant.id, user.id, def.id))) {
       return c.json({ error: `エージェントが見つかりません: ${body.agentId}` }, 404);
     }
     try {

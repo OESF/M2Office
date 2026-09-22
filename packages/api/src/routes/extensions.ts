@@ -18,6 +18,7 @@ import {
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { requireRole, type AppEnv } from '../middleware/tenant.js';
+import { parseScope, saveScope } from './access.js';
 
 /** 危険度を利用者向けの言葉にする。 */
 const RISK_WORDS: Record<RiskLevel, string> = {
@@ -92,8 +93,14 @@ export function extensionsRoute(deps: AppDeps) {
 
   app.get('/', async (c) => {
     const { tenant } = c.get('ctx');
-    const view = await deps.tenantView(tenant.id);
-    return c.json({ items: view.entries.map((e) => ({ ...describe(e.pkg, view), ...stateOf(e) })) });
+    const [view, settings] = await Promise.all([deps.tenantView(tenant.id), deps.repo.getTenantSettings(tenant.id)]);
+    return c.json({
+      items: view.entries.map((e) => ({
+        ...describe(e.pkg, view), ...stateOf(e),
+        // 利用できる人（第16.7節）。設定が無ければ全員
+        scope: settings.access.scopes[e.pkg.manifest.id] ?? 'all',
+      })),
+    });
   });
 
   /**
@@ -142,10 +149,13 @@ export function extensionsRoute(deps: AppDeps) {
     const { tenant, user } = c.get('ctx');
     const entry = find(await deps.tenantView(tenant.id), c.req.param('id'));
     if (!entry) return c.json({ error: '拡張機能が見つかりません' }, 404);
-    const body = await c.req.json<{ consent?: boolean }>().catch(() => ({ consent: false }));
+    const body = await c.req.json<{ consent?: boolean; scope?: unknown }>().catch(() => ({ consent: false, scope: undefined }));
     if (body.consent !== true) {
       return c.json({ error: '必要な権限を確認し、同意してから導入してください' }, 400);
     }
+    // 利用できる人（第16.7節）。省略時は全員
+    const parsed = body.scope === undefined ? null : await parseScope(deps, tenant.id, body.scope);
+    if (parsed && 'error' in parsed) return c.json({ error: parsed.error }, 400);
     const { pkg } = entry;
     const now = new Date().toISOString();
     const consented = consentSnapshot(pkg);
@@ -158,6 +168,7 @@ export function extensionsRoute(deps: AppDeps) {
       targetType: 'extension', targetId: pkg.manifest.id,
       detail: { version: pkg.manifest.version, origin: entry.origin, permissions: consented }, occurredAt: now,
     });
+    if (parsed) await saveScope(deps, tenant.id, user.id, pkg.manifest.id, parsed.scope);
     return c.json({ ok: true });
   });
 
@@ -205,6 +216,8 @@ export function extensionsRoute(deps: AppDeps) {
     const uninstalled = await deps.repo.uninstallExtension(tenant.id, id);
     const removed = await deps.repo.deletePrivateExtension(tenant.id, id);
     if (!uninstalled && !removed) return c.json({ error: '導入されていません' }, 404);
+    // 利用範囲の設定も消す（第16.7.9節）
+    if ((await deps.repo.getTenantSettings(tenant.id)).access.scopes[id]) await saveScope(deps, tenant.id, user.id, id, null);
     await deps.repo.appendAudit({
       id: randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id, action: 'extension.uninstall',
       targetType: 'extension', targetId: id, detail: { removedPackage: removed }, occurredAt: new Date().toISOString(),

@@ -54,6 +54,8 @@ class MemoryRepo {
   async getFile(t: string, id: string) { return this.fileRows.find((f) => f['tenantId'] === t && f['id'] === id) ?? null; }
   settings: TenantSettings = structuredClone(DEFAULT_TENANT_SETTINGS);
   async getTenantSettings() { return this.settings; }
+  groupsOf: Record<string, string[]> = {};
+  async listUserGroupIds(_t: string, u: string) { return this.groupsOf[u] ?? []; }
   userSettings = structuredClone(DEFAULT_USER_SETTINGS);
   async getUserSettings() { return this.userSettings; }
 }
@@ -116,6 +118,22 @@ test('承認の直後のステップでは、対外送信のツールを呼べ�
   const second = await engine.advance({ ...resumed, status: 'running' });
   assert.equal(second.outcome, 'completed');
   assert.equal(connector.outbox.filter((o) => o.kind === 'chat').length, 1);
+});
+
+test('依頼者が利用範囲の外なら、実行を進めずに止める（第16.7.4節）', async () => {
+  const { repo, connector, engine, run } = setup(SHARE_DEF, { name: 'chat.post', args: {} });
+  repo.settings.access = { scopes: { 'share-test': { groups: ['g-dev'], users: [] } } };
+  const res = await engine.advance(run);
+  assert.equal(res.outcome, 'failed');
+  assert.match(res.outcome === 'failed' ? res.reason : '', /利用範囲の外/);
+  assert.equal(connector.outbox.length, 0);
+});
+
+test('利用範囲のグループに所属していれば実行できる', async () => {
+  const { repo, engine, run } = setup(SHARE_DEF, { name: 'chat.post', args: {} });
+  repo.settings.access = { scopes: { 'share-test': { groups: ['g-dev'], users: [] } } };
+  repo.groupsOf['u-member'] = ['g-dev'];
+  assert.equal((await engine.advance(run)).outcome, 'awaiting_approval');
 });
 
 test('承認者のロールを持たない利用者は、承認も却下もできない', async () => {

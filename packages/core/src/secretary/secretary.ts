@@ -35,7 +35,7 @@ export interface SecretaryDeps {
   /** ヘルプの記事。あれば使い方の質問に答える（仕様書 第6.10.6節）。 */
   help?: HelpCatalog;
   /** その会社で使える業務エージェント（公式と導入した拡張機能）。省略時は `agents`。 */
-  agentsFor?(tenantId: string): Promise<AgentDefinition[]>;
+  agentsFor?(tenantId: string, userId?: string): Promise<AgentDefinition[]>;
 }
 
 /**
@@ -77,7 +77,8 @@ export class Secretary {
 
     // 層 2: 高速モデルで業務エージェントへの取次を判定する。無効にされた業務には取り次がない
     const { agents } = await this.deps.repo.getTenantSettings(tenantId);
-    const available = this.deps.agentsFor ? await this.deps.agentsFor(tenantId) : this.deps.agents;
+    // 本人の利用範囲（第16.7節）の外の業務には取り次がない
+    const available = this.deps.agentsFor ? await this.deps.agentsFor(tenantId, userId) : this.deps.agents;
     const enabled = available.filter((a) => !agents.disabled.includes(a.id));
     const routed = await this.route(message, enabled);
     if (routed.agent) {
@@ -128,7 +129,7 @@ export class Secretary {
       this.deps.repo.findUserById(tenantId, userId),
       this.deps.repo.getTenantSettings(tenantId),
     ]);
-    const agents = this.deps.agentsFor ? await this.deps.agentsFor(tenantId) : this.deps.agents;
+    const agents = this.deps.agentsFor ? await this.deps.agentsFor(tenantId, userId) : this.deps.agents;
     const ctx = {
       roles: user?.roles ?? [], disabledAgents: settings.agents.disabled, automation: settings.automation, agents,
     };

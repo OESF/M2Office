@@ -76,17 +76,21 @@ export function meRoute(deps: AppDeps) {
       new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo' }).format(new Date()).slice(0, 8) +
         '01T00:00:00+09:00',
     ).toISOString();
-    const [usage, settings, compartments, agents] = await Promise.all([
+    const [usage, settings, compartments, agents, groups, groupIds] = await Promise.all([
       deps.repo.usageForUser(tenant.id, user.id, monthStart),
       deps.repo.getTenantSettings(tenant.id),
       deps.repo.listUserCompartments(tenant.id, user.id),
-      deps.agentsFor(tenant.id),
+      deps.agentsFor(tenant.id, user.id),
+      deps.repo.listGroups(tenant.id),
+      deps.repo.listUserGroupIds(tenant.id, user.id),
     ]);
     return c.json({
       seat: user.roles.includes('admin') ? '管理者' : user.roles.includes('external') ? '外部協力者' : '一般',
       thisMonth: { runs: usage.runs, costJpy: Math.round(usage.costJpy * 100) / 100 },
       availableAgents: agents.filter((a) => !settings.agents.disabled.includes(a.id)).length,
       compartments,
+      // 本人が所属するグループ（第16.7.7節）。他の人の所属は返さない
+      groups: groups.filter((g) => groupIds.includes(g.id)).map((g) => g.name),
       // プランと標準利用量は課金の実装とあわせて出す（第21章）
       plan: null,
     });

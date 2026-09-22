@@ -9,8 +9,9 @@
  */
 
 import { useEffect, useRef, useState, type DragEvent } from 'react';
-import { api, ApiError, describeError, type ConnectorCheck, type ExtensionView } from './api.js';
+import { api, ApiError, describeError, type AccessOptions, type ConnectorCheck, type ExtensionView, type ScopeValue } from './api.js';
 import { HelpTip, Markdown } from './help.js';
+import { ScopeEditor, ScopeField, useAccessOptions } from './Scope.js';
 
 /** 画面の下に出す知らせ。 */
 type Notice = { kind: 'ok' | 'error'; text: string; problems?: string[] } | null;
@@ -23,6 +24,7 @@ export function ExtensionSettings() {
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const access = useAccessOptions();
 
   const load = () => api.admin.extensions().then((r) => setItems(r.items))
     .catch((e) => setNotice({ kind: 'error', text: describeError(e, '読み込めませんでした') }));
@@ -35,7 +37,7 @@ export function ExtensionSettings() {
     try {
       await fn();
       setNotice({ kind: 'ok', text: done });
-      await load();
+      await Promise.all([load(), access.reload()]);
     } catch (e) {
       setNotice({
         kind: 'error', text: describeError(e, 'うまくいきませんでした'),
@@ -106,10 +108,10 @@ export function ExtensionSettings() {
 
       {consentItem && (
         <Consent
-          item={consentItem} busy={busy}
+          item={consentItem} busy={busy} options={access.options}
           onCancel={() => setConsenting(null)}
-          onAgree={() => void act(async () => {
-            await api.admin.installExtension(consentItem.id);
+          onAgree={(scope) => void act(async () => {
+            await api.admin.installExtension(consentItem.id, scope);
             setConsenting(null);
           }, `「${consentItem.name}」を導入しました。左のメニューに業務が加わります`)}
         />
@@ -137,7 +139,7 @@ export function ExtensionSettings() {
       )}
       {installed.map((x) => (
         <InstalledCard
-          key={x.id} item={x} busy={busy}
+          key={x.id} item={x} busy={busy} options={access.options} onScopeSaved={() => void Promise.all([load(), access.reload()])}
           onToggle={(on) => void act(
             () => api.admin.setExtensionEnabled(x.id, on),
             on ? `「${x.name}」を有効にしました` : `「${x.name}」を無効にしました。業務はメニューから消えます`,
@@ -177,8 +179,8 @@ function Title({ item: x }: { item: ExtensionView }) {
 }
 
 /** 導入済みの拡張機能のカード。スイッチ・詳細・削除。 */
-function InstalledCard({ item: x, busy, onToggle, onReconsent, onDelete }: {
-  item: ExtensionView; busy: boolean;
+function InstalledCard({ item: x, busy, options, onScopeSaved, onToggle, onReconsent, onDelete }: {
+  item: ExtensionView; busy: boolean; options: AccessOptions | null; onScopeSaved: () => void;
   onToggle: (on: boolean) => void; onReconsent: () => void; onDelete: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -201,6 +203,9 @@ function InstalledCard({ item: x, busy, onToggle, onReconsent, onDelete }: {
           新しい版で必要な権限が増えています。内容を確認して同意するまで使えません。{' '}
           <button className="btn small" onClick={onReconsent}>内容を確認して同意する</button>
         </p>
+      )}
+      {options && (
+        <div className="small">利用できる人: <ScopeField target={x.id} options={options} onSaved={onScopeSaved} /></div>
       )}
       <div className="row small">
         <button className="link" onClick={() => setOpen(!open)}>{open ? '詳細を閉じる' : '詳細'}</button>
@@ -266,9 +271,12 @@ function Details({ item: x }: { item: ExtensionView }) {
 }
 
 /** 導入の同意。構成要素ごとに、何をするかと危険度を平易な言葉で並べる（第12.10.5節）。 */
-function Consent({ item: x, busy, onAgree, onCancel }: {
-  item: ExtensionView; busy: boolean; onAgree: () => void; onCancel: () => void;
+function Consent({ item: x, busy, options, onAgree, onCancel }: {
+  item: ExtensionView; busy: boolean; options: AccessOptions | null;
+  onAgree: (scope: ScopeValue) => void; onCancel: () => void;
 }) {
+  const [scope, setScope] = useState<ScopeValue>(x.scope ?? 'all');
+  const empty = scope !== 'all' && scope.groups.length === 0 && scope.users.length === 0;
   return (
     <div className="card consent">
       <Title item={x} />
@@ -291,8 +299,14 @@ function Consent({ item: x, busy, onAgree, onCancel }: {
       <p className="small"><strong>使う操作</strong></p>
       <ul className="small">{x.permissions.tools.map((t) => <li key={t.name}>{t.does}</li>)}</ul>
       <p className="small">扱う最大の危険度: <strong>{x.permissions.maxRiskText}</strong></p>
+      {options && (
+        <>
+          <h4>利用できる人</h4>
+          <ScopeEditor value={scope} onChange={setScope} options={options} />
+        </>
+      )}
       <div className="row">
-        <button className="btn" disabled={busy} onClick={onAgree}>同意して導入する</button>
+        <button className="btn" disabled={busy || empty} onClick={() => onAgree(scope)}>同意して導入する</button>
         <button className="btn ghost" onClick={onCancel}>やめる</button>
       </div>
     </div>

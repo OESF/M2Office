@@ -10,7 +10,7 @@
 import pg from 'pg';
 import type {
   Approval, Artifact, AuditEvent, Job, Notification, Run, RunStep, Schedule, Session,
-  StoredFile, Tenant, TenantSettings, User, UserSettings,
+  StoredFile, Tenant, TenantSettings, User, UserGroup, UserSettings,
 } from '@m2office/shared';
 import { DEFAULT_TENANT_SETTINGS, DEFAULT_USER_SETTINGS } from '@m2office/shared';
 import type { InstalledExtension, PrivateExtension, KnowledgeHit, KnowledgeItem, Repository, RunStatRow } from './types.js';
@@ -568,7 +568,8 @@ export class PostgresRepository implements Repository {
       company: TenantSettings['company'] | null; writing_style: TenantSettings['writingStyle'] | null;
       automation: TenantSettings['automation'] | null; agents: TenantSettings['agents'] | null;
       effect: TenantSettings['effect'] | null; onboarding: TenantSettings['onboarding'] | null;
-    }>(tenantId, `select company, writing_style, automation, agents, effect, onboarding
+      access: TenantSettings['access'] | null;
+    }>(tenantId, `select company, writing_style, automation, agents, effect, onboarding, access
                     from tenant_settings where tenant_id = $1`,
       [tenantId]);
     const r = rows[0];
@@ -580,6 +581,7 @@ export class PostgresRepository implements Repository {
       agents: { ...d.agents, ...(r?.agents ?? {}) },
       effect: { minutesPerRun: { ...(r?.effect?.minutesPerRun ?? {}) } },
       onboarding: { ...d.onboarding, ...(r?.onboarding ?? {}) },
+      access: { scopes: { ...(r?.access?.scopes ?? {}) } },
     };
   }
 
@@ -588,7 +590,7 @@ export class PostgresRepository implements Repository {
   ): Promise<void> {
     const column = ({
       company: 'company', writingStyle: 'writing_style', automation: 'automation', agents: 'agents',
-      effect: 'effect', onboarding: 'onboarding',
+      effect: 'effect', onboarding: 'onboarding', access: 'access',
     } as const)[section];
     // 列名は上の固定の対応表からのみ取る。利用者の入力を SQL に埋め込まない
     await this.q(tenantId,
@@ -818,6 +820,47 @@ export class PostgresRepository implements Repository {
       `delete from tenant_extensions where tenant_id = $1 and extension_id = $2 returning extension_id`,
       [tenantId, extensionId]);
     return rows.length > 0;
+  }
+
+  async listGroups(tenantId: string): Promise<UserGroup[]> {
+    const rows = await this.q<Omit<UserGroup, 'memberIds'> & { memberIds: string[] | null }>(tenantId,
+      `select g.id, g.tenant_id as "tenantId", g.name, g.description,
+              array_remove(array_agg(m.user_id order by m.user_id), null) as "memberIds"
+         from user_groups g left join user_group_members m on m.group_id = g.id and m.tenant_id = g.tenant_id
+        where g.tenant_id = $1
+        group by g.id order by g.name`,
+      [tenantId]);
+    return rows.map((r) => ({ ...r, memberIds: r.memberIds ?? [] }));
+  }
+
+  async saveGroup(g: Omit<UserGroup, 'memberIds'>): Promise<void> {
+    await this.q(g.tenantId,
+      `insert into user_groups (id, tenant_id, name, description) values ($1,$2,$3,$4)
+       on conflict (id) do update set name = excluded.name, description = excluded.description
+       where user_groups.tenant_id = excluded.tenant_id`,
+      [g.id, g.tenantId, g.name, g.description]);
+  }
+
+  async deleteGroup(tenantId: string, groupId: string): Promise<boolean> {
+    const rows = await this.q<{ id: string }>(tenantId,
+      `delete from user_groups where tenant_id = $1 and id = $2 returning id`, [tenantId, groupId]);
+    return rows.length > 0;
+  }
+
+  async setGroupMembers(tenantId: string, groupId: string, userIds: string[]): Promise<void> {
+    // 所属を丸ごと置き換える。同じテナントの利用者だけを入れる（RLS と users の絞り込みの両方で守る）
+    await this.q(tenantId, `delete from user_group_members where tenant_id = $1 and group_id = $2`, [tenantId, groupId]);
+    if (userIds.length === 0) return;
+    await this.q(tenantId,
+      `insert into user_group_members (tenant_id, group_id, user_id)
+       select $1, $2, u.id from users u where u.tenant_id = $1 and u.id = any($3::text[])`,
+      [tenantId, groupId, userIds]);
+  }
+
+  async listUserGroupIds(tenantId: string, userId: string): Promise<string[]> {
+    const rows = await this.q<{ group_id: string }>(tenantId,
+      `select group_id from user_group_members where tenant_id = $1 and user_id = $2`, [tenantId, userId]);
+    return rows.map((r) => r.group_id);
   }
 
   async setExtensionEnabled(tenantId: string, extensionId: string, enabled: boolean): Promise<boolean> {

@@ -13,6 +13,7 @@ import type {
 } from '@m2office/shared';
 import { api, describeError, type KnowledgeItemView } from './api.js';
 import { HelpTip } from './help.js';
+import { GroupSettings, ScopeField, useAccessOptions } from './Scope.js';
 
 type Catalog = {
   id: string; name: string; description: string; usesWriteInternal: boolean; defaultMinutes: number;
@@ -156,6 +157,7 @@ export function CompanySettings() {
 /** 業務の有効化と自動化ポリシー（第6.6.5節、第9.4節）。 */
 export function AgentSettings() {
   const { data, error, reload } = useSettings();
+  const access = useAccessOptions();
   const [policy, setPolicy] = useState<AutomationPolicy | null>(null);
   const [minutes, setMinutes] = useState<Record<string, string>>({});
   const saver = useSaver();
@@ -237,6 +239,25 @@ export function AgentSettings() {
             ))}
           </tbody>
         </table>
+      </div>
+      <div className="card">
+        <h3>利用できる人 <HelpTip article="admin-groups">業務ごとに、使える人を全員か、指定したグループと人に絞ります。範囲の外の人のメニュー・秘書には、その業務が出ません。</HelpTip></h3>
+        <p>業務ごとに、使える人を決めます。指定したグループに所属する人と、個別に加えた人だけが使えます。</p>
+        {access.error && <p className="error">{access.error}</p>}
+        {access.options && (
+          <table className="table">
+            <thead><tr><th>業務</th><th>利用できる人</th></tr></thead>
+            <tbody>
+              {data.catalog.filter((a) => !a.id.includes(':')).map((a) => (
+                <tr key={a.id}>
+                  <td>{a.name}</td>
+                  <td><ScopeField target={a.id} options={access.options!} onSaved={() => void access.reload()} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        <p className="muted small">拡張機能の業務は、「拡張機能」の画面で拡張機能ごとに設定します。</p>
       </div>
       <div className="card">
         <h3>効果の推計（手作業での標準所要時間）</h3>
@@ -337,6 +358,7 @@ export function UserSettings({ meId }: { meId: string }) {
           一般ロールで招待する
         </button>
       </div>
+      <GroupSettings users={users} />
       {saver.view}
     </>
   );

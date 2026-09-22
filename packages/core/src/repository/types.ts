@@ -6,7 +6,7 @@
 
 import type {
   Approval, Artifact, AuditEvent, Job, Notification, Run, RunStep, Schedule, Session,
-  StoredFile, Tenant, TenantSettings, User, UserSettings,
+  StoredFile, Tenant, TenantSettings, User, UserGroup, UserSettings,
 } from '@m2office/shared';
 
 /**
@@ -120,6 +120,16 @@ export interface Repository {
   installExtension(record: InstalledExtension): Promise<void>;
   /** 導入をやめる。導入していなければ `false`。 */
   uninstallExtension(tenantId: string, extensionId: string): Promise<boolean>;
+  /** 会社のグループ（仕様書 第16.7節）。所属する人の ID を含む。名前の順。 */
+  listGroups(tenantId: string): Promise<UserGroup[]>;
+  /** グループを作る、または名前と説明を変える。 */
+  saveGroup(group: Omit<UserGroup, 'memberIds'>): Promise<void>;
+  /** グループを消す。所属も消える。無ければ `false`。 */
+  deleteGroup(tenantId: string, groupId: string): Promise<boolean>;
+  /** グループの所属を丸ごと置き換える。その会社の利用者だけを入れる。 */
+  setGroupMembers(tenantId: string, groupId: string, userIds: string[]): Promise<void>;
+  /** 利用者が所属するグループの ID。利用範囲の判定に使う。 */
+  listUserGroupIds(tenantId: string, userId: string): Promise<string[]>;
   /** 導入した拡張機能の有効・無効を切り替える（第12.10.4節）。導入していなければ `false`。 */
   setExtensionEnabled(tenantId: string, extensionId: string, enabled: boolean): Promise<boolean>;
   /** ファイルから取り込んだ拡張機能（自社専用。第12.10.3節）。 */

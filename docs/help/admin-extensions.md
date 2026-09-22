@@ -3,7 +3,7 @@ id: admin-extensions
 title: 拡張機能を追加する・切り替える（管理者）
 audience: admin
 category: admin
-related: [admin-agents, faq-sending, faq-privacy]
+related: [admin-agents, admin-groups, faq-sending, faq-privacy]
 ---
 拡張機能は、M2Office に業務や外部のサービスとのつながりを追加するものです。管理者ページの「拡張機能」で扱います。
 ブラウザの拡張機能と同じように、追加して、スイッチで有効と無効を切り替えます。
@@ -21,6 +21,7 @@ related: [admin-agents, faq-sending, faq-privacy]
 2. 問題がなければ「同意して導入する」を押します
 
 導入すると、この会社のメニュー・秘書・定時実行に業務が加わります。
+同意の画面の「利用できる人」で、使える人を全員か、指定したグループと人だけに絞れます（あとからカードで変えられます）。
 
 ## 有効と無効（スイッチ）
 

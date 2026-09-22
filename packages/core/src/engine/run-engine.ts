@@ -11,7 +11,7 @@
 
 import { randomUUID } from 'node:crypto';
 import {
-  alwaysRequiresApproval, canDecide, writeInternalNeedsApproval,
+  alwaysRequiresApproval, canDecide, canUseAgent, writeInternalNeedsApproval,
   type TenantSettings, type WritingStyle,
   type AgentDefinition, type AgentStep, type ApprovalStep, type Approval, type Run,
   type RunStep, type Step,
@@ -111,6 +111,11 @@ export class RunEngine {
     const settings = await repo.getTenantSettings(run.tenantId);
     if (settings.agents.disabled.includes(def.id)) {
       return this.fail(run, 'この業務は管理者によって無効にされています');
+    }
+    // 依頼者が利用範囲の中か。依頼のあとに範囲が変わった場合も、進める時点で確かめる（仕様書 第16.7.4節）
+    const groups = await repo.listUserGroupIds(run.tenantId, job.requestedBy);
+    if (!canUseAgent(settings.access, def.id, job.requestedBy, groups)) {
+      return this.fail(run, '依頼者がこの業務の利用範囲の外です');
     }
 
     // 操作の確認（第9.4節）で承認された操作が残っていれば、先に実行する

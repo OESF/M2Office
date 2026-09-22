@@ -7,7 +7,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { AgentDefinition } from '@m2office/shared';
+import { canUseAgent, type AgentDefinition } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import { enqueueJob } from '../engine/enqueue.js';
 import { nextRunAt } from './rule.js';
@@ -62,6 +62,9 @@ export class Scheduler {
         : !user || user.status !== 'active' ? '対象者が利用できません'
         : settings.agents.disabled.includes(def.id) ? '管理者がこの業務を無効にしています'
         : this.deps.isAvailable && !(await this.deps.isAvailable(due.tenantId, def.id)) ? 'この業務の拡張機能が導入されていません'
+        // 利用範囲から外れた人の定時実行は起動しない（仕様書 第16.7.4節）
+        : !canUseAgent(settings.access, def.id, due.userId, await repo.listUserGroupIds(due.tenantId, due.userId))
+          ? '対象者がこの業務の利用範囲の外です'
         : null;
       if (!def || reason) {
         (this.deps.logger ?? silentLogger).warn('定時実行を見送りました', {

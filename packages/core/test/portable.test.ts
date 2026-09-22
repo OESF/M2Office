@@ -286,3 +286,23 @@ test('見本の応答の {{ステップ ID}} に、前のステップのツー�
   });
   assert.match(res.text, /"body":"SDK の答え"/);
 });
+
+// ---- 利用範囲（第16.7節） ----
+
+test('利用範囲: 設定が無ければ全員、指定ならグループか個人の指定に当たる人だけ', async () => {
+  const { canUseAgent, scopeTargetOf } = await import('@m2office/shared');
+  const access = {
+    scopes: {
+      'jp.m2office.samples.deepwiki-research': { groups: ['g-dev'], users: ['u-sato'] },
+      minutes: { groups: ['g-mgr'], users: [] },
+    },
+  };
+  assert.equal(scopeTargetOf('jp.m2office.samples.deepwiki-research:research'), 'jp.m2office.samples.deepwiki-research');
+  assert.equal(scopeTargetOf('minutes'), 'minutes');
+  const ext = 'jp.m2office.samples.deepwiki-research:research';
+  assert.equal(canUseAgent(access, 'knowledge-qa', 'u-any', []), true, '設定の無い業務は全員');
+  assert.equal(canUseAgent(access, ext, 'u-any', ['g-dev']), true, 'グループで当たる');
+  assert.equal(canUseAgent(access, ext, 'u-sato', []), true, '個人の指定で当たる（開発部門プラス誰か）');
+  assert.equal(canUseAgent(access, ext, 'u-any', ['g-sales']), false);
+  assert.equal(canUseAgent(access, 'minutes', 'u-sato', ['g-dev']), false, '拡張機能の範囲は公式の業務に効かない');
+});

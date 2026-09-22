@@ -4,7 +4,10 @@
  * @see 仕様書 第6.5節 個人設定
  * @see 仕様書 第6.6節 管理者ページ
  * @see 仕様書 第9.4節 会社ごとの自動化ポリシー
+ * @see 仕様書 第16.7節 グループと利用範囲
  */
+
+import type { AccessSettings } from './access.js';
 
 /** 会社情報（仕様書 第6.6.1節）。帳票とメールの署名に使う。 */
 export interface CompanyInfo {
@@ -83,6 +86,8 @@ export interface TenantSettings {
   agents: AgentSettings;
   effect: EffectSettings;
   onboarding: TenantOnboarding;
+  /** 業務ごとの利用範囲（第16.7節）。 */
+  access: AccessSettings;
 }
 
 /** 設定が未保存の会社に使う既定値。 */
@@ -97,6 +102,8 @@ export const DEFAULT_TENANT_SETTINGS: TenantSettings = {
   agents: { disabled: [] },
   effect: { minutesPerRun: {} },
   onboarding: { agentsReviewedAt: null, employeesNotifiedAt: null },
+  // 対象の設定が無い業務は全員が使える
+  access: { scopes: {} },
 };
 
 /**

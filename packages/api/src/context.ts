@@ -14,7 +14,7 @@ import {
   createLoggerFromEnv, HelpCatalog, parseArticle, ExtensionHub, HttpMcpClient, loadExtensions,
   type FileStore, type TenantExtensions, type HelpArticle, type LlmProvider, type Logger, type Repository, type WorkspaceConnector,
 } from '@m2office/core';
-import type { AgentDefinition } from '@m2office/shared';
+import { canUseAgent, type AgentDefinition } from '@m2office/shared';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -41,8 +41,15 @@ export interface AppDeps {
   /**
    * その会社で使える業務エージェント（公式と、導入済み・有効な拡張機能）。
    * 管理者が業務と承認の画面で無効にしたもの（第6.6.5節）は含む。
+   *
+   * @param userId 指定すると、その人の利用範囲（第16.7節）の中のものだけに絞る。管理者ページの一覧では省く
    */
-  agentsFor(tenantId: string): Promise<AgentDefinition[]>;
+  agentsFor(tenantId: string, userId?: string): Promise<AgentDefinition[]>;
+  /**
+   * その人がその業務を使えるか（導入済み・有効、かつ利用範囲の中。第16.7.4節）。
+   * 範囲の外の業務は、起動の API で「見つからない」として扱う。
+   */
+  canUse(tenantId: string, userId: string, agentId: string): Promise<boolean>;
   /** その会社で業務エージェントを使えるか。 */
   isAvailable(tenantId: string, agentId: string): Promise<boolean>;
 }
@@ -67,7 +74,19 @@ export function buildDeps(): AppDeps {
   const hub = buildHub(repo, registry, log);
   const llm = buildLlm(hub);
   const tenantView = (tenantId: string) => hub.forTenant(tenantId);
-  const agentsFor = async (tenantId: string) => (await tenantView(tenantId)).agents;
+  /** その人の利用範囲の判定を作る。会社の設定と、その人の所属するグループを読む。 */
+  const scopeOf = async (tenantId: string, userId: string) => {
+    const [settings, groups] = await Promise.all([repo.getTenantSettings(tenantId), repo.listUserGroupIds(tenantId, userId)]);
+    return (agentId: string) => canUseAgent(settings.access, agentId, userId, groups);
+  };
+  const agentsFor = async (tenantId: string, userId?: string) => {
+    const { agents } = await tenantView(tenantId);
+    if (!userId) return agents;
+    const allowed = await scopeOf(tenantId, userId);
+    return agents.filter((a) => allowed(a.id));
+  };
+  const canUse = async (tenantId: string, userId: string, agentId: string) =>
+    (await tenantView(tenantId)).isAvailable(agentId) && (await scopeOf(tenantId, userId))(agentId);
   const isAvailable = async (tenantId: string, agentId: string) => (await tenantView(tenantId)).isAvailable(agentId);
 
   const files = new LocalFileStore(fileStorageDir());
@@ -81,7 +100,7 @@ export function buildDeps(): AppDeps {
   const secretary = new Secretary({ repo, llm, connector, agents: OFFICIAL_AGENTS, help, agentsFor });
   return {
     repo, llm, connector, files, registry, engine, secretary, auth: loadAuthConfig(), log, help,
-    hub, tenantView, agentsFor, isAvailable,
+    hub, tenantView, agentsFor, canUse, isAvailable,
   };
 }
 

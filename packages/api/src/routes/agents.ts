@@ -24,7 +24,8 @@ export function agentsRoute(deps: AppDeps) {
     const { agents: setting } = await deps.repo.getTenantSettings(tenant.id);
     // 公式と、この会社が導入した拡張機能の業務エージェント（仕様書 第12.9.3節）
     const view = await deps.tenantView(tenant.id);
-    const available = view.agents;
+    // 本人の利用範囲（第16.7節）の中の業務だけを出す
+    const available = await deps.agentsFor(tenant.id, c.get('ctx').user.id);
     const agents = available.filter((a) => !setting.disabled.includes(a.id)).map((a) => ({
       id: a.id,
       version: a.version,

@@ -37,8 +37,8 @@ export function jobsRoute(deps: AppDeps) {
 
     const view = await deps.tenantView(ctx.tenant.id);
     const def = view.resolve(body.agentId, body.agentVersion ?? 1);
-    // 導入していない・無効にした拡張機能の業務エージェントは、存在を示さない（仕様書 第12.10.4節）
-    if (!def || !view.isAvailable(def.id)) {
+    // 導入していない・無効にした拡張機能の業務と、利用範囲の外の業務は、存在を示さない（第12.10.4節・第16.7.4節）
+    if (!def || !(await deps.canUse(ctx.tenant.id, ctx.user.id, def.id))) {
       return c.json({ error: `エージェントが見つかりません: ${body.agentId}` }, 404);
     }
     const { agents } = await deps.repo.getTenantSettings(ctx.tenant.id);

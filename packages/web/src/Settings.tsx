@@ -67,6 +67,7 @@ export function Settings({ me, agents, onChanged }: {
           <dt>区分</dt><dd>{usage?.seat ?? '—'}</dd>
           <dt>使える業務</dt><dd>{usage ? `${usage.availableAgents} 件` : '—'}</dd>
           <dt>今月の実行</dt><dd>{usage ? `${usage.thisMonth.runs} 件` : '—'}</dd>
+          <dt>グループ</dt><dd>{usage?.groups?.length ? usage.groups.join('、') : '所属なし'}</dd>
           <dt>権限区画</dt><dd>{usage?.compartments.length ? usage.compartments.join('、') : '所属なし'}</dd>
         </dl>
       </div>

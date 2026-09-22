@@ -219,6 +219,24 @@ export interface ExtensionView {
   /** 権限が増えた版。有効にする前に再同意が要る。 */
   needsReconsent: boolean;
   active: boolean;
+  /** 利用できる人（第16.7節）。 */
+  scope: ScopeValue;
+}
+
+/** 利用範囲（仕様書 第16.7節）。`'all'` は全員。 */
+export type ScopeValue = 'all' | { groups: string[]; users: string[] };
+
+/** 利用範囲の画面の選択肢。 */
+export interface AccessOptions {
+  scopes: Record<string, { groups: string[]; users: string[] }>;
+  targets: { id: string; name: string; kind: 'agent' | 'extension' }[];
+  groups: { id: string; name: string; memberCount: number }[];
+  users: { id: string; displayName: string; email: string }[];
+}
+
+/** グループ（仕様書 第16.7.2節）。 */
+export interface GroupView {
+  id: string; name: string; description: string; memberIds: string[];
 }
 
 /** コネクタの接続の確認の結果。 */
@@ -314,7 +332,7 @@ export const api = {
   revokeSession: (id: string) => call(`/me/sessions/${id}`, { method: 'DELETE' }),
   myUsage: () => call<{
     seat: string; thisMonth: { runs: number; costJpy: number }; availableAgents: number;
-    compartments: string[]; plan: null;
+    compartments: string[]; groups: string[]; plan: null;
   }>('/me/usage'),
   readNotification: (id: string) => call(`/notifications/${id}/read`, { method: 'POST' }),
   schedules: () => call<{ items: ScheduleView[] }>('/schedules'),
@@ -354,8 +372,20 @@ export const api = {
       call<{ id: string }>(`/admin/knowledge/${id}`, { method: 'PUT', body: JSON.stringify(item) }),
     deleteKnowledge: (id: string) => call(`/admin/knowledge/${id}`, { method: 'DELETE' }),
     extensions: () => call<{ items: ExtensionView[] }>('/admin/extensions'),
-    installExtension: (id: string) =>
-      call(`/admin/extensions/${encodeURIComponent(id)}/install`, { method: 'POST', body: JSON.stringify({ consent: true }) }),
+    installExtension: (id: string, scope: ScopeValue = 'all') =>
+      call(`/admin/extensions/${encodeURIComponent(id)}/install`, { method: 'POST', body: JSON.stringify({ consent: true, scope }) }),
+    groups: () => call<{ items: GroupView[] }>('/admin/groups'),
+    createGroup: (name: string, description = '') =>
+      call<GroupView>('/admin/groups', { method: 'POST', body: JSON.stringify({ name, description }) }),
+    updateGroup: (id: string, patch: { name?: string; description?: string }) =>
+      call<GroupView>(`/admin/groups/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    setGroupMembers: (id: string, userIds: string[]) =>
+      call<GroupView>(`/admin/groups/${encodeURIComponent(id)}/members`, { method: 'PUT', body: JSON.stringify({ userIds }) }),
+    deleteGroup: (id: string) =>
+      call<{ ok: true; emptied: string[] }>(`/admin/groups/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    access: () => call<AccessOptions>('/admin/access'),
+    setScope: (target: string, scope: ScopeValue) =>
+      call(`/admin/access/${encodeURIComponent(target)}`, { method: 'PUT', body: JSON.stringify({ scope }) }),
     uninstallExtension: (id: string) => call(`/admin/extensions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     /** `.m2ext` を取り込む。本文はファイルのバイト列そのもの。 */
     importExtension: (file: Blob) =>

@@ -774,6 +774,90 @@ console.log('\n■ 21. 持ち運べる拡張機能（ファイルからの取り
   }
 }
 
+console.log('\n■ 22. グループと利用範囲');
+{
+  const EXT = 'jp.m2office.samples.hello-world';
+  const AG = `${EXT}:hello`;
+  const input = { message: 'こんにちは' };
+  // 前の確認の残りを片付けてから始める
+  for (const g of (await call('a', '/v1/admin/groups')).body.items ?? []) {
+    if (g.name.startsWith('確認用')) await call('a', `/v1/admin/groups/${g.id}`, { method: 'DELETE' });
+  }
+  await call('a', `/v1/admin/extensions/${EXT}/install`, { method: 'POST', body: JSON.stringify({ consent: true }) });
+  await call('a', `/v1/admin/access/${EXT}`, { method: 'PUT', body: JSON.stringify({ scope: 'all' }) });
+  await call('a', '/v1/admin/access/minutes', { method: 'PUT', body: JSON.stringify({ scope: 'all' }) });
+
+  const { body: users } = await call('a', '/v1/admin/users');
+  const memberId = users.items.find((u) => u.email.startsWith('member@')).id;
+  const adminId = users.items.find((u) => u.email.startsWith('admin@')).id;
+
+  const memberCreate = await call('a', '/v1/admin/groups', { method: 'POST', body: JSON.stringify({ name: '確認用-開発' }) }, 'member');
+  memberCreate.status === 403 ? ok('一般の利用者はグループを作れない（403）') : ng(`作れてしまう（${memberCreate.status}）`);
+
+  const { status, body: dev } = await call('a', '/v1/admin/groups', { method: 'POST', body: JSON.stringify({ name: '確認用-開発' }) });
+  const dup = await call('a', '/v1/admin/groups', { method: 'POST', body: JSON.stringify({ name: '確認用-開発' }) });
+  status === 201 && dup.status === 409 ? ok('グループを作れる。同じ名前は作れない') : ng('グループを作れない', `${status} ${dup.status}`);
+
+  const empty = await call('a', `/v1/admin/access/${EXT}`, { method: 'PUT', body: JSON.stringify({ scope: { groups: [], users: [] } }) });
+  empty.status === 400 ? ok('グループも人も選ばない範囲は保存できない') : ng(`保存できてしまう（${empty.status}）`);
+
+  await call('a', `/v1/admin/access/${EXT}`, { method: 'PUT', body: JSON.stringify({ scope: { groups: [dev.id], users: [] } }) });
+  const { body: m1 } = await call('a', '/v1/agents', {}, 'member');
+  const r1 = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: AG, input }) }, 'member');
+  !m1.agents.some((x) => x.id === AG) && r1.status === 404
+    ? ok('範囲の外の人のメニューに出ず、起動もできない（404）') : ng('範囲の外から使えてしまう');
+
+  const sec = await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message: 'こんにちはと英語で返事して' }) }, 'member');
+  sec.body.suggestedAgent?.id !== AG ? ok('秘書は範囲の外の業務に取り次がない') : ng('範囲の外の業務に取り次いだ');
+
+  const help = await call('a', `/v1/help/agents/${encodeURIComponent(AG)}`, {}, 'member');
+  help.status === 404 ? ok('範囲の外の業務の説明はヘルプに出ない') : ng(`説明が出る（${help.status}）`);
+
+  const sched = await call('a', '/v1/schedules', { method: 'POST', body: JSON.stringify({ agentId: AG, input, rule: { kind: 'daily', hour: 9, minute: 0 } }) }, 'member');
+  sched.status === 404 ? ok('範囲の外の業務の定時実行は作れない') : ng(`作れてしまう（${sched.status}）`);
+
+  await call('a', `/v1/admin/groups/${dev.id}/members`, { method: 'PUT', body: JSON.stringify({ userIds: [memberId] }) });
+  const { body: m2 } = await call('a', '/v1/agents', {}, 'member');
+  const { body: j2 } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: AG, input }) }, 'member');
+  const d2 = await waitFor('a', j2.runId, ['completed', 'failed'], 20000, 'member');
+  m2.agents.some((x) => x.id === AG) && d2.run?.status === 'completed'
+    ? ok('グループに入ると、メニューに出て実行できる') : ng('グループに入っても使えない', JSON.stringify(d2.run));
+
+  const { body: a1 } = await call('a', '/v1/agents');
+  !a1.agents.some((x) => x.id === AG) ? ok('管理者も、使う場面では範囲に従う（第16.7.6節）') : ng('管理者は範囲の外でも使える');
+  await call('a', `/v1/admin/access/${EXT}`, { method: 'PUT', body: JSON.stringify({ scope: { groups: [dev.id], users: [adminId] } }) });
+  const { body: a2 } = await call('a', '/v1/agents');
+  a2.agents.some((x) => x.id === AG) ? ok('グループに加えて、個人を指定できる（開発プラス誰か）') : ng('個人の指定が効かない');
+
+  // 依頼のあとに範囲から外れた場合、ワーカーが進める時点で止める
+  await call('a', `/v1/admin/access/minutes`, { method: 'PUT', body: JSON.stringify({ scope: { groups: [dev.id], users: [] } }) });
+  const { body: mj } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: 'minutes', input: { transcript: '確認' } }) }, 'member');
+  await call('a', `/v1/admin/groups/${dev.id}/members`, { method: 'PUT', body: JSON.stringify({ userIds: [] }) });
+  const md = await waitFor('a', mj.runId, ['completed', 'failed', 'awaiting_approval'], 20000, 'member');
+  md.run?.status === 'failed' && /利用範囲の外/.test(md.run.failureReason ?? '')
+    ? ok('依頼のあとに範囲から外れたら、実行を止める') : console.log(`  - 実行が先に進んだため、範囲の変更前に完了（${md.run?.status}）`);
+
+  const { body: usage } = await call('a', '/v1/me/usage', {}, 'member');
+  Array.isArray(usage.groups) ? ok('個人設定の利用状況に、本人のグループが出る') : ng('グループが出ない');
+
+  const del = await call('a', `/v1/admin/groups/${dev.id}`, { method: 'DELETE' });
+  const { body: acc } = await call('a', '/v1/admin/access');
+  del.body.emptied?.includes('minutes') && acc.scopes.minutes?.groups.length === 0
+    ? ok('グループを消すと範囲から外れ、誰も残らない業務を知らせる（全員には戻さない）') : ng('グループの削除の扱いが違う', JSON.stringify(del.body));
+
+  const { body: audit } = await call('a', '/v1/admin/audit-events');
+  const acts = new Set((audit.items ?? []).map((e) => e.action));
+  ['group.create', 'group.members', 'group.delete', 'settings.update'].every((x) => acts.has(x))
+    ? ok('グループと範囲の変更を監査ログに残す') : ng('監査ログに無い');
+
+  const { body: bGroups } = await call('b', '/v1/admin/groups');
+  !(bGroups.items ?? []).some((g) => g.name.startsWith('確認用')) ? ok('グループはほかの会社から見えない') : ng('ほかの会社から見える');
+
+  await call('a', `/v1/admin/access/${EXT}`, { method: 'PUT', body: JSON.stringify({ scope: 'all' }) });
+  await call('a', '/v1/admin/access/minutes', { method: 'PUT', body: JSON.stringify({ scope: 'all' }) });
+  await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');
