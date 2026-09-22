@@ -1,9 +1,10 @@
 import pg from 'pg';
 import type {
   Approval, Artifact, AuditEvent, Job, Notification, Run, RunStep, Schedule, Session,
-  Tenant, User,
+  Tenant, TenantSettings, User,
 } from '@m2office/shared';
-import type { KnowledgeHit, Repository } from './types.js';
+import { DEFAULT_TENANT_SETTINGS } from '@m2office/shared';
+import type { KnowledgeHit, KnowledgeItem, Repository } from './types.js';
 
 /**
  * PostgreSQL による永続化。
@@ -547,6 +548,81 @@ export class PostgresRepository implements Repository {
       `update sessions set revoked_at = coalesce(revoked_at, $2) where id = $1`,
       [id, now.toISOString()],
     );
+  }
+
+  async getTenantSettings(tenantId: string): Promise<TenantSettings> {
+    const rows = await this.q<{
+      company: TenantSettings['company'] | null; writing_style: TenantSettings['writingStyle'] | null;
+      automation: TenantSettings['automation'] | null; agents: TenantSettings['agents'] | null;
+    }>(tenantId, `select company, writing_style, automation, agents from tenant_settings where tenant_id = $1`,
+      [tenantId]);
+    const r = rows[0];
+    const d = DEFAULT_TENANT_SETTINGS;
+    return {
+      company: { ...d.company, ...(r?.company ?? {}) },
+      writingStyle: { ...d.writingStyle, ...(r?.writing_style ?? {}) },
+      automation: r?.automation ?? d.automation,
+      agents: { ...d.agents, ...(r?.agents ?? {}) },
+    };
+  }
+
+  async saveTenantSettings<K extends keyof TenantSettings>(
+    tenantId: string, section: K, value: TenantSettings[K], updatedBy: string,
+  ): Promise<void> {
+    const column = ({
+      company: 'company', writingStyle: 'writing_style', automation: 'automation', agents: 'agents',
+    } as const)[section];
+    // 列名は上の固定の対応表からのみ取る。利用者の入力を SQL に埋め込まない
+    await this.q(tenantId,
+      `insert into tenant_settings (tenant_id, ${column}, updated_by, updated_at)
+       values ($1, $2, $3, now())
+       on conflict (tenant_id) do update
+         set ${column} = excluded.${column}, updated_by = excluded.updated_by, updated_at = now()`,
+      [tenantId, JSON.stringify(value), updatedBy]);
+  }
+
+  async createUser(u: User): Promise<void> {
+    await this.q(u.tenantId,
+      `insert into users (id, tenant_id, email, display_name, roles, status)
+       values ($1,$2,$3,$4,$5,$6)`,
+      [u.id, u.tenantId, u.email, u.displayName, u.roles, u.status]);
+  }
+
+  async updateUser(u: User): Promise<void> {
+    await this.q(u.tenantId,
+      `update users set display_name = $3, roles = $4, status = $5 where tenant_id = $1 and id = $2`,
+      [u.tenantId, u.id, u.displayName, u.roles, u.status]);
+  }
+
+  async listKnowledge(tenantId: string): Promise<KnowledgeItem[]> {
+    return this.q<KnowledgeItem>(tenantId,
+      `select id, tenant_id as "tenantId", kind, title, body, source, compartment,
+              updated_at as "updatedAt"
+         from knowledge_items where tenant_id = $1 order by updated_at desc`,
+      [tenantId]);
+  }
+
+  async saveKnowledge(k: KnowledgeItem): Promise<void> {
+    await this.q(k.tenantId,
+      `insert into knowledge_items (id, tenant_id, kind, title, body, source, compartment, updated_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8)
+       on conflict (id) do update set kind = excluded.kind, title = excluded.title,
+         body = excluded.body, source = excluded.source, compartment = excluded.compartment,
+         updated_at = excluded.updated_at
+       where knowledge_items.tenant_id = excluded.tenant_id`,
+      [k.id, k.tenantId, k.kind, k.title, k.body, k.source, k.compartment, k.updatedAt]);
+  }
+
+  async deleteKnowledge(tenantId: string, id: string): Promise<boolean> {
+    const rows = await this.q<{ id: string }>(tenantId,
+      `delete from knowledge_items where tenant_id = $1 and id = $2 returning id`, [tenantId, id]);
+    return rows.length > 0;
+  }
+
+  async listCompartments(tenantId: string) {
+    return this.q<{ id: string; name: string; description: string | null }>(tenantId,
+      `select id, name, description from compartments where tenant_id = $1 and enabled order by name`,
+      [tenantId]);
   }
 }
 

@@ -16,7 +16,7 @@ export interface SchedulerDeps {
  * 実行そのものは行わない。起動の経路が違うだけで、以降は画面からの依頼と同じ扱いになる。
  *
  * @remarks
- * - 対象者の権限で実行する。停止された利用者の定時実行は起動しない
+ * - 対象者の権限で実行する。停止された利用者と、無効にされた業務の定時実行は起動しない
  * - ワーカーが止まっていた間に過ぎた回は、**まとめて 1 回だけ**起動する。
  *   週次ブリーフが 3 通届くような事態を避けるため
  *
@@ -41,11 +41,16 @@ export class Scheduler {
 
       const def = this.deps.resolveDefinition(due.agentId, due.agentVersion);
       const user = await repo.findUserById(due.tenantId, due.userId);
-      if (!def || !user || user.status !== 'active') {
+      const settings = await repo.getTenantSettings(due.tenantId);
+      const reason = !def ? '定義が見つかりません'
+        : !user || user.status !== 'active' ? '対象者が利用できません'
+        : settings.agents.disabled.includes(def.id) ? '管理者がこの業務を無効にしています'
+        : null;
+      if (!def || reason) {
         await repo.appendAudit({
           id: randomUUID(), tenantId: due.tenantId, actorType: 'system', actorId: 'scheduler',
           action: 'schedule.skip', targetType: 'schedule', targetId: due.id,
-          detail: { reason: !def ? '定義が見つかりません' : '対象者が利用できません' },
+          detail: { reason },
           occurredAt: now.toISOString(),
         });
         continue;

@@ -1,14 +1,18 @@
 import { useEffect, useState } from 'react';
-import type { AuditEvent, User } from '@m2office/shared';
+import type { AuditEvent } from '@m2office/shared';
 import { api, type AdminRun, type Me } from './api.js';
 import { statusLabel } from './components.js';
+import { AgentSettings, CompanySettings, KnowledgeSettings, UserSettings } from './AdminSettings.js';
 
-type Tab = 'usage' | 'runs' | 'users' | 'audit' | 'connectors';
+type Tab = 'usage' | 'runs' | 'company' | 'agents' | 'users' | 'knowledge' | 'audit' | 'connectors';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'usage', label: '利用状況' },
   { id: 'runs', label: '実行の一覧' },
+  { id: 'company', label: '会社情報' },
+  { id: 'agents', label: '業務と承認' },
   { id: 'users', label: 'ユーザーと権限' },
+  { id: 'knowledge', label: '知識' },
   { id: 'audit', label: '監査ログ' },
   { id: 'connectors', label: '接続' },
 ];
@@ -16,8 +20,8 @@ const TABS: { id: Tab; label: string }[] = [
 /**
  * 管理者ページ（`/admin`。仕様書 第6.6節）。
  *
- * 現時点は参照だけを用意する。設定の変更（会社情報、LLM、エージェントの有効化など）は
- * 項目が確定したものから順に足す。
+ * 会社情報・業務と承認・ユーザー・知識は編集できる。
+ * LLM の設定（鍵の登録）とコネクタの設定は、秘匿情報の暗号化とあわせて追加する。
  *
  * @remarks
  * 管理者でも、他人の会話ログと実行の中身は見られない（不変則 I-10）。
@@ -52,7 +56,10 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
           <main className="canvas">
             {tab === 'usage' && <Usage />}
             {tab === 'runs' && <Runs />}
-            {tab === 'users' && <Users />}
+            {tab === 'company' && <CompanySettings />}
+            {tab === 'agents' && <AgentSettings />}
+            {tab === 'users' && <UserSettings meId={me.user.id} />}
+            {tab === 'knowledge' && <KnowledgeSettings />}
             {tab === 'audit' && <Audit />}
             {tab === 'connectors' && <Connectors />}
           </main>
@@ -125,28 +132,6 @@ function Runs() {
               <td>{originLabel(r.origin)}</td>
               <td><span className={`status ${r.status}`}>{statusLabel(r.status)}</span></td>
               <td className="num">{r.costJpy} 円</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </>
-  );
-}
-
-function Users() {
-  const { data, error } = useLoad(api.admin.users);
-  return (
-    <>
-      <h1>ユーザーと権限</h1>
-      <p className="lead">招待・停止とロールの変更は、Google ログインの実装とあわせて追加します。</p>
-      {error && <p className="error">{error}</p>}
-      <table className="table">
-        <thead><tr><th>名前</th><th>メールアドレス</th><th>ロール</th><th>状態</th></tr></thead>
-        <tbody>
-          {data?.items.map((u: User) => (
-            <tr key={u.id}>
-              <td>{u.displayName}</td><td>{u.email}</td><td>{u.roles.map(roleLabel).join('・')}</td>
-              <td>{u.status === 'active' ? '利用中' : '停止'}</td>
             </tr>
           ))}
         </tbody>

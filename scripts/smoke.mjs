@@ -412,6 +412,68 @@ console.log('\n■ 14. データベース側のテナント分離（RLS）');
   await db.end();
 }
 
+console.log('\n■ 15. 管理者ページの設定');
+{
+  const put = (section, value, who = 'admin') =>
+    call('a', `/v1/admin/settings/${section}`, { method: 'PUT', body: JSON.stringify(value) }, who);
+
+  // 業務の無効化
+  await put('agents', { disabled: ['scheduling'] });
+  const { body: menu } = await call('a', '/v1/agents', {}, 'member');
+  const blocked = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: 'scheduling' }) }, 'member');
+  !menu.agents.some((a) => a.id === 'scheduling') && blocked.status === 403
+    ? ok('無効にした業務はメニューに出ず、起動もできない（403）')
+    : ng('無効化が効かない', `${menu.agents.length} / ${blocked.status}`);
+  await put('agents', { disabled: [] });
+
+  // 入力の検証
+  const badInvoice = await put('company', {
+    legalName: '株式会社アルファ商事', fiscalYearStartMonth: 4, invoiceRegistrationNumber: 'T123',
+    taxRounding: 'floor', closingDay: 'end',
+  });
+  badInvoice.status === 400 ? ok('登録番号の形式の誤りを拒否する（T＋13 桁）') : ng(`拒否されない（${badInvoice.status}）`);
+  const goodInvoice = await put('company', {
+    legalName: '株式会社アルファ商事', fiscalYearStartMonth: 4, invoiceRegistrationNumber: 'T1234567890123',
+    taxRounding: 'floor', closingDay: 'end', address: '東京都', phone: '03-0000-0000', paymentTerms: '翌月末払い',
+  });
+  goodInvoice.status === 200 ? ok('会社情報を保存できる') : ng(`保存できない（${goodInvoice.status}）`);
+
+  const extSend = await put('automation', { writeInternal: 'allow', perAgent: {}, externalSend: 'allow' });
+  const { body: saved } = await call('a', '/v1/admin/settings');
+  !('externalSend' in saved.automation)
+    ? ok('対外送信の承認を省略する設定は保存されない') : ng('externalSend が保存されてしまう');
+  await put('automation', { writeInternal: 'require', perAgent: { 'weekly-brief': 'allow' } });
+  void extSend;
+
+  const notAdmin = await put('agents', { disabled: [] }, 'member');
+  notAdmin.status === 403 ? ok('一般利用者は設定を変えられない（403）') : ng(`変えられてしまう（${notAdmin.status}）`);
+
+  // 最後の管理者を守る
+  const { body: users } = await call('a', '/v1/admin/users');
+  const admin = users.items.find((u) => u.email === 'admin@alpha.example.jp');
+  const demote = await call('a', `/v1/admin/users/${admin.id}`, { method: 'PATCH', body: JSON.stringify({ roles: ['member'] }) });
+  demote.status === 409 ? ok('管理者が 1 人もいなくなる変更は拒否する（409）') : ng(`拒否されない（${demote.status}）`);
+
+  const invite = await call('a', '/v1/admin/users', {
+    method: 'POST', body: JSON.stringify({ email: 'someone@beta.example.jp', roles: ['member'] }),
+  });
+  invite.status === 400 ? ok('他社のドメインのアドレスは招待できない') : ng(`招待できてしまう（${invite.status}）`);
+
+  // 規程の登録 → AG-04 で答えられる
+  const { body: saved2 } = await call('a', '/v1/admin/knowledge/new', {
+    method: 'PUT',
+    body: JSON.stringify({ title: '慶弔休暇規程', body: '慶弔休暇は、本人の結婚の場合 5 日を付与する。', source: '慶弔休暇規程 第3条' }),
+  });
+  const { body: job } = await call('a', '/v1/jobs', {
+    method: 'POST', body: JSON.stringify({ agentId: 'knowledge-qa', input: { question: '慶弔休暇' } }),
+  });
+  const qa = await waitFor('a', job.runId, ['completed', 'failed']);
+  const hits = qa.steps.find((x) => x.stepId === 'search')?.output?.tools?.[0]?.result?.hits ?? [];
+  hits.some((h) => h.source === '慶弔休暇規程 第3条')
+    ? ok('管理者ページで登録した規程を AG-04 が出典つきで見つける') : ng('登録した規程が検索されない');
+  await call('a', `/v1/admin/knowledge/${saved2.id}`, { method: 'DELETE' });
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

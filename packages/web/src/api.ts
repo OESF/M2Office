@@ -1,5 +1,6 @@
 import type {
-  Approval, Artifact, AuditEvent, Notification, Run, RunStep, Schedule, ScheduleRule, Tenant, User,
+  Approval, Artifact, AuditEvent, Notification, Run, RunStep, Schedule, ScheduleRule, Tenant,
+  TenantSettings, User,
 } from '@m2office/shared';
 
 /**
@@ -77,6 +78,11 @@ export interface LoginProviders {
 
 export type ScheduleView = Schedule & { label: string };
 
+export interface KnowledgeItemView {
+  id: string; kind: string; title: string; body: string; source: string;
+  compartment: string | null; updatedAt: string;
+}
+
 export interface AdminRun {
   id: string; status: string; startedAt: string; endedAt: string | null;
   tokensUsed: number; costJpy: number; agentId: string; agentName: string; origin: string;
@@ -152,6 +158,21 @@ export const api = {
     connectors: () => call<{ workspace: { source: string; label: string }; llm: { provider: string } }>(
       '/admin/connectors',
     ),
+    settings: () => call<TenantSettings & {
+      catalog: { id: string; name: string; description: string; usesWriteInternal: boolean }[];
+    }>('/admin/settings'),
+    saveSettings: <K extends keyof TenantSettings>(section: K, value: TenantSettings[K]) =>
+      call(`/admin/settings/${section}`, { method: 'PUT', body: JSON.stringify(value) }),
+    inviteUser: (email: string, displayName: string, roles: string[]) =>
+      call<User>('/admin/users', { method: 'POST', body: JSON.stringify({ email, displayName, roles }) }),
+    updateUser: (id: string, patch: { displayName?: string; roles?: string[]; status?: string }) =>
+      call<User>(`/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    knowledge: () => call<{
+      items: KnowledgeItemView[]; compartments: { id: string; name: string; description: string | null }[];
+    }>('/admin/knowledge'),
+    saveKnowledge: (id: string | 'new', item: Omit<KnowledgeItemView, 'id' | 'updatedAt'>) =>
+      call<{ id: string }>(`/admin/knowledge/${id}`, { method: 'PUT', body: JSON.stringify(item) }),
+    deleteKnowledge: (id: string) => call(`/admin/knowledge/${id}`, { method: 'DELETE' }),
   },
   agents: () => call<{ agents: AgentSummary[] }>('/agents'),
   createJob: (agentId: string, input: Record<string, unknown>, origin = 'menu') =>

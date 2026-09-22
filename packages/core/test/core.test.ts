@@ -6,8 +6,10 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import type {
-  AgentDefinition, Approval, AuditEvent, Job, Notification, Run, RunStep,
+import {
+  DEFAULT_TENANT_SETTINGS,
+  type AgentDefinition, type Approval, type AuditEvent, type Job, type Notification, type Run,
+  type RunStep, type TenantSettings,
 } from '@m2office/shared';
 import {
   RunEngine, ToolRegistry, BUILTIN_TOOLS, MockWorkspaceConnector, nextRunAt,
@@ -42,6 +44,8 @@ class MemoryRepo {
   async createNotification(n: Notification) { this.notifications.push(n); }
   async findUserById(t: string, id: string) { return this.users.find((u) => u.tenantId === t && u.id === id) ?? null; }
   async createArtifact() {}
+  settings: TenantSettings = structuredClone(DEFAULT_TENANT_SETTINGS);
+  async getTenantSettings() { return this.settings; }
 }
 
 /** 常に同じツール呼び出しを出力する推論。承認の手前で送信を試みる場合を再現する。 */
@@ -149,14 +153,65 @@ test('notification.send は依頼者本人にだけ届き、宛先の指定を�
   const def: AgentDefinition = { ...SHARE_DEF, id: 'notify-test', tools: ['notification.send'],
     steps: [{ id: 'n', type: 'agent', instruction: '通知する' }] };
 
+  // 宛先の扱いだけを確かめるため、操作の確認は省略する設定にする
   const ok = setup(def, { name: 'notification.send', args: { title: '週次', body: '本文' } });
+  ok.repo.settings.automation.writeInternal = 'allow';
   await ok.engine.advance(ok.run);
   assert.equal(ok.repo.notifications.length, 1);
   assert.equal(ok.repo.notifications[0]!.userId, 'u-member', '依頼者本人に届く');
 
   const ng = setup(def, { name: 'notification.send', args: { to: 'u-admin', title: '他人宛' } });
+  ng.repo.settings.automation.writeInternal = 'allow';
   await ng.engine.advance(ng.run);
   assert.equal(ng.repo.notifications.length, 0, '宛先を指定した通知は送らない');
+});
+
+const TASK_DEF: AgentDefinition = {
+  ...SHARE_DEF, id: 'task-test', tools: ['tasks.create'],
+  steps: [
+    { id: 'make', type: 'agent', instruction: '起票する' },
+    { id: 'after', type: 'agent', instruction: '後片付け' },
+  ],
+};
+
+test('社内への書き込みは、既定では実行前に本人の確認を求める', async () => {
+  const { repo, connector, engine, run } = setup(TASK_DEF, { name: 'tasks.create', args: { title: '確認後に起票' } });
+  const first = await engine.advance(run);
+  assert.equal(first.outcome, 'awaiting_approval');
+  if (first.outcome !== 'awaiting_approval') return;
+  const listed = async () => connector.tasks.list({ tenantId: 't', userId: 'u-member' }, {});
+  assert.ok((await listed()).every((t) => t.title !== '確認後に起票'), '確認前は起票しない');
+  assert.equal(repo.approvals[0]!.approverUserId, 'u-member', '確認するのは依頼した本人');
+
+  await engine.decideApproval('t', first.approvalId, 'approved', { id: 'u-member', roles: ['member'] }, null);
+  const resumed = (await repo.getRun('t', 'r1'))!;
+  // 再開後は推論の出力に関係なく、記録した操作を実行する
+  await engine.advance({ ...resumed, status: 'running' });
+  const created = (await listed()).filter((t) => t.title === '確認後に起票');
+  assert.ok(created.length >= 1, '承認した操作が実行される');
+});
+
+test('会社の設定で「承認なし」にすると、社内への書き込みをそのまま実行する', async () => {
+  const { repo, engine, run } = setup(TASK_DEF, { name: 'tasks.create', args: { title: 'すぐ起票' } });
+  repo.settings.automation = { writeInternal: 'allow', perAgent: {} };
+  const res = await engine.advance(run);
+  assert.equal(res.outcome, 'completed');
+  assert.equal(repo.approvals.length, 0);
+});
+
+test('AG-05 の例外: エージェントごとの設定が全体の設定より優先される', async () => {
+  const def = { ...TASK_DEF, id: 'weekly-brief' };
+  const { repo, engine, run } = setup(def, { name: 'tasks.create', args: { title: '例外' } });
+  assert.equal(repo.settings.automation.writeInternal, 'require');
+  const res = await engine.advance(run);
+  assert.equal(res.outcome, 'completed', '既定で weekly-brief は承認なし（Q-53）');
+});
+
+test('無効にされた業務は実行しない', async () => {
+  const { repo, engine, run } = setup(TASK_DEF, { name: 'tasks.create', args: {} });
+  repo.settings.agents.disabled = ['task-test'];
+  const res = await engine.advance(run);
+  assert.equal(res.outcome, 'failed');
 });
 
 test('ダミー接続は、テナントと利用者ごとに書き込みを分ける', async () => {

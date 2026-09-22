@@ -149,7 +149,7 @@ export function ApprovalTray({
       {items.map((a) => (
         <div className="card" key={a.id}>
           <h3>承認の依頼</h3>
-          <p>{a.present}</p>
+          <p className="reply">{a.present}</p>
           <p className="muted">
             {a.approverUserId ? 'あなたが依頼した業務です。内容を確認してください。'
               : `承認できる役割: ${a.approverRole.join(' / ')}`}

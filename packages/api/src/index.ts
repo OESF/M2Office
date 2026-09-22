@@ -58,7 +58,7 @@ app.get('/v1/me', (c) => {
     workspaceSource: deps.connector.source,
   });
 });
-app.route('/v1/agents', agentsRoute);
+app.route('/v1/agents', agentsRoute(deps));
 app.route('/v1/jobs', jobsRoute(deps));
 app.route('/v1/runs', runsRoute(deps));
 app.route('/v1/approvals', approvalsRoute(deps));

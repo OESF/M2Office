@@ -31,6 +31,10 @@ export function jobsRoute(deps: AppDeps) {
     if (!def) {
       return c.json({ error: `エージェントが見つかりません: ${body.agentId}` }, 404);
     }
+    const { agents } = await deps.repo.getTenantSettings(ctx.tenant.id);
+    if (agents.disabled.includes(def.id)) {
+      return c.json({ error: 'この業務は管理者によって無効にされています' }, 403);
+    }
     const origin = body.origin && USER_ORIGINS.includes(body.origin) ? body.origin : 'menu';
 
     const { jobId, runId } = await enqueueJob(deps.repo, {

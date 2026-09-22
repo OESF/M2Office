@@ -56,8 +56,10 @@ export class Secretary {
       return { layer: 'direct', ...answer, tokensUsed: 0 };
     }
 
-    // 層 2: 高速モデルで業務エージェントへの取次を判定する
-    const routed = await this.route(message);
+    // 層 2: 高速モデルで業務エージェントへの取次を判定する。無効にされた業務には取り次がない
+    const { agents } = await this.deps.repo.getTenantSettings(tenantId);
+    const enabled = this.deps.agents.filter((a) => !agents.disabled.includes(a.id));
+    const routed = await this.route(message, enabled);
     if (routed.agent) {
       await this.audit(tenantId, userId, 'secretary.route', routed.agent.id);
       return {
@@ -96,8 +98,9 @@ export class Secretary {
    */
   private async route(
     message: string,
+    candidates: AgentDefinition[],
   ): Promise<{ agent?: AgentDefinition; reason: string; tokensUsed: number }> {
-    const byKeyword = this.deps.agents.find(
+    const byKeyword = candidates.find(
       (a) =>
         message.includes(a.name) ||
         a.category === 'meeting' && /議事録|会議/.test(message) ||
@@ -108,7 +111,8 @@ export class Secretary {
     );
     if (byKeyword) return { agent: byKeyword, reason: '語句の一致', tokensUsed: 0 };
 
-    const list = this.deps.agents.map((a) => `${a.id}: ${a.name} — ${a.description}`).join('\n');
+    if (candidates.length === 0) return { reason: '使える業務がありません', tokensUsed: 0 };
+    const list = candidates.map((a) => `${a.id}: ${a.name} — ${a.description}`).join('\n');
     const res = await this.deps.llm.complete({
       tier: 'fast',
       maxOutputTokens: 50,
@@ -125,7 +129,7 @@ export class Secretary {
         { role: 'user', content: message },
       ],
     });
-    const picked = this.deps.agents.find((a) => res.text.includes(a.id));
+    const picked = candidates.find((a) => res.text.includes(a.id));
     return picked
       ? { agent: picked, reason: '推論による判定', tokensUsed: res.tokensUsed }
       : { reason: '該当なし', tokensUsed: res.tokensUsed };

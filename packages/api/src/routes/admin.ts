@@ -1,4 +1,9 @@
+import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
+import {
+  isValidInvoiceNumber, type AutomationPolicy, type CompanyInfo, type Role, type TenantSettings,
+  type User, type WritingStyle,
+} from '@m2office/shared';
 import { OFFICIAL_AGENTS } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { requireRole, type AppEnv } from '../middleware/tenant.js';
@@ -64,6 +69,159 @@ export function adminRoute(deps: AppDeps) {
     return c.json({ items });
   });
 
+  /** 会社の設定をまとめて返す（第6.6.1節、第6.6.5節、第15.2.1節）。 */
+  app.get('/settings', async (c) => {
+    const { tenant } = c.get('ctx');
+    const settings = await deps.repo.getTenantSettings(tenant.id);
+    return c.json({
+      ...settings,
+      catalog: OFFICIAL_AGENTS.map((a) => ({
+        id: a.id, name: a.name, description: a.description,
+        usesWriteInternal: a.tools.some((t) => deps.registry.get(t)?.risk === 'write-internal'),
+      })),
+    });
+  });
+
+  /**
+   * 会社の設定の 1 区分を保存する。
+   *
+   * @remarks
+   * 区分ごとに値を検証してから保存する。`external-send` 以上の承認を省略する項目は
+   * 受け付けない（自動化ポリシーは `write-internal` だけを持つ。第9.4節）。
+   */
+  app.put('/settings/:section', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const section = c.req.param('section');
+    const body = await c.req.json<unknown>();
+    const checked = validateSection(section, body);
+    if ('error' in checked) return c.json({ error: checked.error }, 400);
+
+    await deps.repo.saveTenantSettings(tenant.id, checked.section, checked.value as never, user.id);
+    await audit(deps, tenant.id, user.id, 'settings.update', 'tenant_settings', checked.section,
+      { section: checked.section });
+    return c.json({ ok: true });
+  });
+
+  /**
+   * 利用者を招待する（第6.6.4節）。
+   *
+   * @remarks
+   * Workspace のドメインと一致するアドレスだけを受け付ける（第16.1節「テナント判定」）。
+   * ログインは Google アカウントで行うため、パスワードは持たない。
+   */
+  app.post('/users', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const body = await c.req.json<{ email?: string; displayName?: string; roles?: string[] }>();
+    const email = (body.email ?? '').trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+$/.test(email)) return c.json({ error: 'メールアドレスの形式が正しくありません' }, 400);
+    if (tenant.workspaceDomain && email.split('@')[1] !== tenant.workspaceDomain) {
+      return c.json({ error: `${tenant.workspaceDomain} のアドレスだけを招待できます` }, 400);
+    }
+    const roles = normalizeRoles(body.roles ?? ['member']);
+    if ('error' in roles) return c.json({ error: roles.error }, 400);
+    if (await deps.repo.findUserByEmail(tenant.id, email)) {
+      return c.json({ error: 'すでに登録されています' }, 409);
+    }
+    const created: User = {
+      id: `u-${randomUUID()}`, tenantId: tenant.id, email,
+      displayName: (body.displayName ?? '').trim() || email.split('@')[0]!,
+      roles: roles.value, status: 'active',
+    };
+    await deps.repo.createUser(created);
+    await audit(deps, tenant.id, user.id, 'user.invite', 'user', created.id, { roles: created.roles });
+    return c.json(created, 201);
+  });
+
+  /**
+   * 表示名・ロール・状態を変える（第6.6.4節）。
+   *
+   * @remarks
+   * 利用中の管理者が 1 人もいなくなる変更は拒否する。
+   * 管理者を失うと、テナントの設定を誰も変えられなくなるため（第16.1節「運用上の前提」）。
+   */
+  app.patch('/users/:id', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const target = await deps.repo.findUserById(tenant.id, c.req.param('id'));
+    if (!target) return c.json({ error: '利用者が見つかりません' }, 404);
+    const body = await c.req.json<{ displayName?: string; roles?: string[]; status?: string }>();
+
+    const next: User = { ...target };
+    if (body.displayName !== undefined) {
+      if (!body.displayName.trim()) return c.json({ error: '表示名を入力してください' }, 400);
+      next.displayName = body.displayName.trim();
+    }
+    if (body.roles !== undefined) {
+      const roles = normalizeRoles(body.roles);
+      if ('error' in roles) return c.json({ error: roles.error }, 400);
+      next.roles = roles.value;
+    }
+    if (body.status !== undefined) {
+      if (body.status !== 'active' && body.status !== 'disabled') {
+        return c.json({ error: '状態は active か disabled を指定してください' }, 400);
+      }
+      next.status = body.status;
+    }
+
+    const users = await deps.repo.listUsers(tenant.id);
+    const admins = users
+      .map((u) => (u.id === next.id ? next : u))
+      .filter((u) => u.status === 'active' && u.roles.includes('admin'));
+    if (admins.length === 0) {
+      return c.json({ error: '利用中の管理者が 1 人もいなくなるため、変更できません' }, 409);
+    }
+
+    await deps.repo.updateUser(next);
+    await audit(deps, tenant.id, user.id, 'user.update', 'user', next.id,
+      { roles: next.roles, status: next.status });
+    return c.json(next);
+  });
+
+  /** 組織知識の一覧と、区画の選択肢（第6.6.6節）。 */
+  app.get('/knowledge', async (c) => {
+    const { tenant } = c.get('ctx');
+    const [items, compartments] = await Promise.all([
+      deps.repo.listKnowledge(tenant.id), deps.repo.listCompartments(tenant.id),
+    ]);
+    return c.json({ items, compartments });
+  });
+
+  /**
+   * 規程などを組織知識として登録・更新する（第6.6.6節「規程の登録」）。
+   *
+   * @remarks
+   * 導入時の初期投入に使う（第22.2節）。AG-04 はここに登録したものから答える。
+   */
+  app.put('/knowledge/:id', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const body = await c.req.json<{
+      kind?: string; title?: string; body?: string; source?: string; compartment?: string | null;
+    }>();
+    const title = (body.title ?? '').trim();
+    const text = (body.body ?? '').trim();
+    if (!title || !text) return c.json({ error: '題名と本文を入力してください' }, 400);
+    if (text.length > 100_000) return c.json({ error: '本文が長すぎます（10 万字まで）' }, 400);
+    const compartment = body.compartment || null;
+    if (compartment) {
+      const names = (await deps.repo.listCompartments(tenant.id)).map((x) => x.name);
+      if (!names.includes(compartment)) return c.json({ error: `区画が見つかりません: ${compartment}` }, 400);
+    }
+    const id = c.req.param('id') === 'new' ? `k-${randomUUID()}` : c.req.param('id');
+    await deps.repo.saveKnowledge({
+      id, tenantId: tenant.id, kind: (body.kind ?? 'rule').trim() || 'rule', title, body: text,
+      source: (body.source ?? '').trim() || title, compartment, updatedAt: new Date().toISOString(),
+    });
+    await audit(deps, tenant.id, user.id, 'knowledge.save', 'knowledge', id, { compartment });
+    return c.json({ id });
+  });
+
+  app.delete('/knowledge/:id', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const ok = await deps.repo.deleteKnowledge(tenant.id, c.req.param('id'));
+    if (!ok) return c.json({ error: '知識が見つかりません' }, 404);
+    await audit(deps, tenant.id, user.id, 'knowledge.delete', 'knowledge', c.req.param('id'), {});
+    return c.json({ ok: true });
+  });
+
   /** 接続の状態（第6.6.3節）。Google 未接続の間はダミーであることを示す。 */
   app.get('/connectors', (c) =>
     c.json({
@@ -78,4 +236,89 @@ export function adminRoute(deps: AppDeps) {
   );
 
   return app;
+}
+
+const ROLES: Role[] = ['admin', 'approver', 'member', 'external', 'developer'];
+
+function normalizeRoles(input: string[]): { value: Role[] } | { error: string } {
+  const roles = [...new Set(input)];
+  const unknown = roles.filter((r) => !ROLES.includes(r as Role));
+  if (unknown.length > 0) return { error: `不明なロールです: ${unknown.join(', ')}` };
+  if (roles.length === 0) return { error: 'ロールを 1 つ以上指定してください' };
+  return { value: roles as Role[] };
+}
+
+type Section = keyof TenantSettings;
+
+/** 設定の区分ごとに値を検証し、保存できる形に整える。 */
+function validateSection(
+  section: string,
+  body: unknown,
+): { section: Section; value: TenantSettings[Section] } | { error: string } {
+  const o = (body ?? {}) as Record<string, unknown>;
+  const str = (k: string, max = 2000) => String(o[k] ?? '').slice(0, max);
+  switch (section) {
+    case 'company': {
+      const month = Number(o['fiscalYearStartMonth']);
+      if (!Number.isInteger(month) || month < 1 || month > 12) return { error: '会計年度の開始月は 1〜12 です' };
+      const invoice = str('invoiceRegistrationNumber', 20).trim();
+      if (!isValidInvoiceNumber(invoice)) return { error: '登録番号は T に続く 13 桁の数字です' };
+      const rounding = o['taxRounding'];
+      if (rounding !== 'floor' && rounding !== 'round' && rounding !== 'ceil') {
+        return { error: '端数処理は切り捨て・四捨五入・切り上げのいずれかです' };
+      }
+      const closing = o['closingDay'] === 'end' ? 'end' : Number(o['closingDay']);
+      if (closing !== 'end' && (!Number.isInteger(closing) || closing < 1 || closing > 28)) {
+        return { error: '締め日は 1〜28 日、または月末です' };
+      }
+      const value: CompanyInfo = {
+        legalName: str('legalName', 200), address: str('address', 300), phone: str('phone', 50),
+        fiscalYearStartMonth: month, invoiceRegistrationNumber: invoice, taxRounding: rounding,
+        closingDay: closing, paymentTerms: str('paymentTerms', 200),
+      };
+      return { section: 'company', value };
+    }
+    case 'writingStyle': {
+      const terms = Array.isArray(o['terms']) ? o['terms'] : [];
+      const value: WritingStyle = {
+        selfReference: str('selfReference', 20), greeting: str('greeting', 500),
+        closing: str('closing', 500), signature: str('signature', 1000), notes: str('notes', 2000),
+        terms: terms.slice(0, 50)
+          .map((t) => ({ use: String((t as Record<string, unknown>)['use'] ?? '').trim(),
+                         avoid: String((t as Record<string, unknown>)['avoid'] ?? '').trim() }))
+          .filter((t) => t.use && t.avoid),
+      };
+      return { section: 'writingStyle', value };
+    }
+    case 'automation': {
+      const ok = (v: unknown) => v === 'require' || v === 'allow';
+      if (!ok(o['writeInternal'])) return { error: 'writeInternal は require か allow です' };
+      const perAgent: Record<string, 'require' | 'allow'> = {};
+      for (const [k, v] of Object.entries((o['perAgent'] ?? {}) as Record<string, unknown>)) {
+        if (!OFFICIAL_AGENTS.some((a) => a.id === k)) return { error: `不明なエージェントです: ${k}` };
+        if (!ok(v)) return { error: `${k} の値は require か allow です` };
+        perAgent[k] = v as 'require' | 'allow';
+      }
+      const value: AutomationPolicy = { writeInternal: o['writeInternal'] as 'require' | 'allow', perAgent };
+      return { section: 'automation', value };
+    }
+    case 'agents': {
+      const disabled = Array.isArray(o['disabled']) ? o['disabled'].map(String) : [];
+      const unknown = disabled.filter((id) => !OFFICIAL_AGENTS.some((a) => a.id === id));
+      if (unknown.length > 0) return { error: `不明なエージェントです: ${unknown.join(', ')}` };
+      return { section: 'agents', value: { disabled: [...new Set(disabled)] } };
+    }
+    default:
+      return { error: `不明な設定の区分です: ${section}` };
+  }
+}
+
+async function audit(
+  deps: AppDeps, tenantId: string, userId: string, action: string, targetType: string,
+  targetId: string, detail: Record<string, unknown>,
+) {
+  await deps.repo.appendAudit({
+    id: randomUUID(), tenantId, actorType: 'user', actorId: userId, action, targetType, targetId,
+    detail, occurredAt: new Date().toISOString(),
+  });
 }

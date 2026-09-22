@@ -168,3 +168,13 @@ pre.body { white-space: pre-wrap; background: #fbfcfc; border: 1px solid var(--l
 .table th { font-size: 12px; color: var(--muted); font-weight: 600; background: #fafbfb; }
 .table .num { text-align: right; font-variant-numeric: tabular-nums; }
 .canvas:has(.table) { overflow-x: auto; }
+
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+.field select { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 4px; font: inherit; background: #fff; }
+.field .small { display: block; margin-top: 4px; }
+.row input { flex: 1; padding: 6px 8px; border: 1px solid var(--line); border-radius: 4px; font: inherit; }
+.row { align-items: center; }
+.check { display: inline-flex; align-items: center; gap: 4px; margin-right: 10px; white-space: nowrap; }
+.ok-msg { color: #166534; background: #e7f4ec; border: 1px solid #bfe3cc; padding: 8px 12px; border-radius: 4px; }
+.table select { padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; font: inherit; }
+@media (max-width: 680px) { .grid2 { grid-template-columns: 1fr; } }

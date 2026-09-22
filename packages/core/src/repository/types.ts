@@ -1,6 +1,6 @@
 import type {
   Approval, Artifact, AuditEvent, Job, Notification, Run, RunStep, Schedule, Session,
-  Tenant, User,
+  Tenant, TenantSettings, User,
 } from '@m2office/shared';
 
 /**
@@ -90,6 +90,24 @@ export interface Repository {
   touchSession(tenantId: string, id: string, now: Date): Promise<void>;
   revokeSession(tenantId: string, id: string, now: Date): Promise<void>;
 
+  /** 会社の設定を返す。未保存の区分は既定値で補う。 */
+  getTenantSettings(tenantId: string): Promise<TenantSettings>;
+  /** 会社の設定の 1 区分を保存する。 */
+  saveTenantSettings<K extends keyof TenantSettings>(
+    tenantId: string, section: K, value: TenantSettings[K], updatedBy: string,
+  ): Promise<void>;
+
+  createUser(user: User): Promise<void>;
+  /** 表示名・ロール・状態を更新する。メールアドレスは変えない（Google 側で管理する）。 */
+  updateUser(user: User): Promise<void>;
+
+  /** 組織知識の一覧（管理用）。本文を含む。 */
+  listKnowledge(tenantId: string): Promise<KnowledgeItem[]>;
+  saveKnowledge(item: KnowledgeItem): Promise<void>;
+  deleteKnowledge(tenantId: string, id: string): Promise<boolean>;
+  /** 権限区画の一覧。 */
+  listCompartments(tenantId: string): Promise<{ id: string; name: string; description: string | null }[]>;
+
   /** 監査ログを追記する。更新と削除は用意しない（仕様書 第16.6節）。 */
   appendAudit(event: AuditEvent): Promise<void>;
   listAudit(tenantId: string, limit: number): Promise<AuditEvent[]>;
@@ -102,4 +120,17 @@ export interface KnowledgeHit {
   body: string;
   source: string;
   compartment: string | null;
+}
+
+/** 組織知識の 1 件（管理用）。 */
+export interface KnowledgeItem {
+  id: string;
+  tenantId: string;
+  kind: string;
+  title: string;
+  body: string;
+  source: string;
+  /** 権限区画。区画外は `null`（仕様書 第16.3節）。 */
+  compartment: string | null;
+  updatedAt: string;
 }
