@@ -69,7 +69,9 @@ export function buildAgentHelp(
   if (sends.length === 0) {
     safeguards.push('社外や他の人へ、メールや投稿を送ることはありません');
   } else {
-    safeguards.push(`送る前に、必ず承認を求めます（${approvals.map((a) => a.who).join('、') || '承認者'}）`);
+    // 承認が複数あっても、同じ役割は 1 度だけ書く（「管理者・承認者、管理者・承認者」としない）
+    const approvers = [...new Set(approvals.map((a) => a.who))];
+    safeguards.push(`送る前に、必ず承認を求めます（${approvers.join('、') || '承認者'}）`);
   }
   if (tools.some((t) => t.risk === 'write-internal')) {
     safeguards.push(opts.writeInternalNeedsApproval

@@ -48,6 +48,11 @@ test('議事録の説明は、送る前に承認を求めることと承認者�
   assert.deepEqual(h.flow, ['取得', '作成', '内容の承認', '起票', '共有の承認', '共有']);
 });
 
+test('承認が 2 回あっても、同じ役割を繰り返して書かない', () => {
+  const h = help('minutes');
+  assert.ok(h.safeguards.includes('送る前に、必ず承認を求めます（管理者・承認者）'), h.safeguards.join(' / '));
+});
+
 test('日程調整の承認者は「依頼したあなた」と書く（approver: requester）', () => {
   assert.deepEqual(help('scheduling').approvals, [{ step: '承認', who: '依頼したあなた' }]);
 });

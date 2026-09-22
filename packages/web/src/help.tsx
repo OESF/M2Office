@@ -218,7 +218,7 @@ export function AgentHelpPanel({ agentId, onExample }: {
         ))}
       </div>
       {help.approvals.length > 0 && (
-        <p className="small">承認: {help.approvals.map((a) => `「${a.step}」は${a.who}が判断します`).join('。')}</p>
+        <p className="small">承認: {approvalSummary(help.approvals)}</p>
       )}
       {help.examples.length > 0 && (
         <div className="examples">
@@ -276,4 +276,15 @@ export function Tour({ onDone }: { onDone: () => void }) {
       </div>
     </div>
   );
+}
+
+/**
+ * 承認の段階を、判断する人ごとにまとめた 1 文にする。
+ *
+ * @remarks 同じ人が判断する段階は「「内容の承認」と「共有の承認」は管理者・承認者が判断します」のように 1 つにまとめ、役割を繰り返さない。
+ */
+function approvalSummary(approvals: AgentHelpView['approvals']): string {
+  const byWho = new Map<string, string[]>();
+  for (const a of approvals) byWho.set(a.who, [...(byWho.get(a.who) ?? []), `「${a.step}」`]);
+  return [...byWho].map(([who, steps]) => `${steps.join('と')}は${who}が判断します`).join('。');
 }
