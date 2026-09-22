@@ -9,7 +9,8 @@
 |---|---|---|
 | [specification.md](specification.md) | システム仕様の全体 | **設計の正** |
 | [docs/coding-standards.md](docs/coding-standards.md) | コードの書き方、JSDoc、README | **実装の正** |
-| [docs/release-process.md](docs/release-process.md) | バージョンとリリース | リリース時に参照 |
+| [docs/release-process.md](docs/release-process.md) | バージョンとリリース | リリース時に参照。作業は `/release` スキル |
+| [CHANGELOG.md](CHANGELOG.md) | 版ごとの変更（開発者向け） | `/release` で追記 |
 | [docs/adr/](docs/adr/) | 設計判断の記録と理由 | 判断の経緯 |
 
 ## 守ること
