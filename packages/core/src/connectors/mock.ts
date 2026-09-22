@@ -32,7 +32,7 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
 
   /** 下書き・投稿の記録。動作確認で参照する。 */
   readonly outbox: {
-    kind: 'draft' | 'chat' | 'slides' | 'mail' | 'event.update' | 'event.cancel';
+    kind: 'draft' | 'chat' | 'slides' | 'mail' | 'event.update' | 'event.cancel' | 'drive.share';
     principal: ConnectorPrincipal; body: unknown;
   }[] = [];
   /** 完了にした ToDo（見本の ToDo にも効かせる）。 */
@@ -185,6 +185,44 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
     },
     createFolder: async (p: ConnectorPrincipal, input: { name: string; parentId: string | null }) =>
       this.addFile(p, input.name, 'folder', {}),
+    share: async (p: ConnectorPrincipal, s: { fileId: string; emails: string[]; role: 'reader' | 'commenter' | 'writer' }) => {
+      const f = this.driveFiles.get(s.fileId);
+      // 共有できるのは本人が M2Office で作ったファイルだけ（drive.file の範囲を模す）
+      if (!f || f.owner !== key(p)) return null;
+      this.outbox.push({ kind: 'drive.share', principal: p, body: s });
+      return { fileId: s.fileId, sharedWith: s.emails };
+    },
+  };
+
+  /** 社内の人。見本の人はテナントのドメインではなく example.jp を使い、名前に（見本）を付ける。 */
+  directory = {
+    search: async (p: ConnectorPrincipal, q: { query: string; limit?: number }) => {
+      const people = [
+        { name: '山田 花子（見本）', email: `yamada@${p.tenantId}.example.jp`, department: '営業部', title: '課長' },
+        { name: '鈴木 次郎（見本）', email: `suzuki@${p.tenantId}.example.jp`, department: '開発部', title: null },
+        { name: '高橋 三郎（見本）', email: `takahashi@${p.tenantId}.example.jp`, department: '人事部', title: '部長' },
+      ];
+      const w = q.query.trim();
+      return people.filter((x) => !w || `${x.name} ${x.email} ${x.department ?? ''}`.includes(w)).slice(0, q.limit ?? 20);
+    },
+  };
+
+  /** Meet の文字起こし。見本の会議を 1 つ持つ（題名に（見本））。 */
+  meet = {
+    transcript: async (_p: ConnectorPrincipal, q: { query: string }) => {
+      const today = ymd(this.now());
+      const conference = {
+        id: 'mock-conf-1', title: '営業定例（見本）', startedAt: jst(addDays(today, -1), 14), endedAt: jst(addDays(today, -1), 15),
+      };
+      if (q.query.trim() && !conference.title.includes(q.query.trim())) return null;
+      return {
+        conference,
+        entries: [
+          { speaker: '山田 花子（見本）', text: 'これは見本の文字起こしです。来月の重点顧客を確認します。', at: jst(addDays(today, -1), 14, 1) },
+          { speaker: '鈴木 次郎（見本）', text: '佐藤様への提案は来週までに準備します。', at: jst(addDays(today, -1), 14, 5) },
+        ],
+      };
+    },
   };
 
   docs = {

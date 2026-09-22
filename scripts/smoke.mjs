@@ -299,19 +299,20 @@ console.log('\n■ 11. AG-05 週次ブリーフ（定時実行 → 本人へ通�
   const brief = list.items?.find((s) => s.agentId === 'weekly-brief');
   brief ? ok(`定時実行が登録されている（${brief.label}）`) : ng('週次ブリーフの定時実行が無い');
 
-  const { body: before } = await call('a', '/v1/notifications', {}, 'member');
+  // 一覧には件数の上限があるため、件数ではなく「呼び出したあとに作られた通知」で判定する
+  const since = new Date().toISOString();
   await call('a', `/v1/schedules/${brief.id}/trigger`, { method: 'POST' }, 'member');
   ok('次の回を今にした（ワーカーの見回りを待つ）');
 
   const deadline = Date.now() + 40000;
-  let after;
+  let latest;
   while (Date.now() < deadline) {
-    ({ body: after } = await call('a', '/v1/notifications', {}, 'member'));
-    if (after.items.length > before.items.length) break;
+    const { body: after } = await call('a', '/v1/notifications', {}, 'member');
+    latest = after.items.find((n) => n.kind === 'brief' && n.createdAt >= since);
+    if (latest) break;
     await sleep(1000);
   }
-  const latest = after.items[0];
-  after.items.length > before.items.length && latest.kind === 'brief'
+  latest
     ? ok(`本人に届いた「${latest.title}」`)
     : ng('通知が届かない');
   /予定: \d+ 件/.test(latest?.body ?? '') ? ok('予定・タスク・受信箱・承認待ちを集めて要約した') : ng('要約に件数が無い', latest?.body);
@@ -1014,6 +1015,61 @@ console.log('\n■ 25. Google Workspace のツール（第 1 弾）');
     ? ok('会社の業務が求める Google の権限と段階を一覧できる') : ng('権限の一覧が違う', JSON.stringify(perms.items));
   const memberPerms = await call('a', '/v1/admin/google-permissions', {}, 'member');
   memberPerms.status === 403 ? ok('権限の一覧は管理者だけが見られる') : ng(`見られてしまう（${memberPerms.status}）`);
+  await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
+}
+
+console.log('\n■ 26. Google Workspace のツール（第 2 弾）');
+{
+  const { default: JSZip } = await import('jszip');
+  const EXT = 'jp.example.smoke-google-tools-2';
+  const AG = `${EXT}:meeting-share`;
+  await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
+  const tools = ['meet.transcript', 'directory.search', 'docs.create', 'drive.share'];
+  const def = {
+    schemaVersion: 1, id: 'meeting-share', version: 1, name: '確認用: 会議の記録を共有する', category: 'test',
+    description: '確認用', locale: 'ja-JP', compartment: null,
+    inputs: { type: 'object', required: ['meeting'], properties: { meeting: { type: 'string', title: '会議の題名' } } },
+    tools, constraints: [], limits: { maxSteps: 8, maxTokens: 20000, timeoutSec: 120 }, help: { summary: '確認用の拡張機能です' },
+    steps: [
+      { id: 'fetch', type: 'agent', instruction: '文字起こしを取る' },
+      { id: 'who', type: 'agent', instruction: '共有する相手を探す' },
+      { id: 'write', type: 'agent', instruction: '記録を作る' },
+      { id: 'gate', type: 'approval', approver: 'requester', approverRole: [], present: '共有する相手と文書' },
+      { id: 'share', type: 'agent', instruction: '共有する' },
+    ],
+  };
+  const input = { meeting: '営業定例' };
+  const stub = {
+    fetch: [{ name: 'meet.transcript', args: { query: '営業定例' } }],
+    who: [{ name: 'directory.search', args: { query: '営業部' } }],
+    write: [{ name: 'docs.create', args: { title: '営業定例の記録（確認用）', body: '{{fetch}}' } }],
+  };
+  const zip = new JSZip();
+  zip.file('manifest.json', JSON.stringify({
+    id: EXT, name: '確認用: 第 2 弾', version: '1.0.0', publisher: { name: '確認用' }, platform_schema: '>=1 <2',
+    permissions: { tools, max_risk_level: 'external-send' },
+  }));
+  zip.file('agents/meeting-share.json', JSON.stringify(def));
+  zip.file('evals/meeting-share.json', JSON.stringify({ agent: 'meeting-share', cases: [{ name: '確認', input, stub }] }));
+  await call('a', '/v1/admin/extensions/import', { method: 'POST', body: await zip.generateAsync({ type: 'uint8array' }), headers: { 'content-type': 'application/octet-stream' } });
+  await call('a', `/v1/admin/extensions/${EXT}/install`, { method: 'POST', body: JSON.stringify({ consent: true }) });
+  const { body: job } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: AG, input }) }, 'member');
+  const w = await waitFor('a', job.runId, ['awaiting_approval', 'completed', 'failed'], 20000, 'member');
+  const out = (id) => w.steps?.find((x) => x.stepId === id)?.output?.tools?.[0]?.result;
+  out('fetch')?.untrusted === true && /佐藤様への提案/.test(out('fetch')?.text ?? '')
+    ? ok('Meet の会議の文字起こしを取れる（中身はデータの印つき）') : ng('文字起こしを取れない', JSON.stringify(out('fetch')));
+  out('who')?.people?.[0]?.department === '営業部' ? ok('社内の人を部署で探せる') : ng('社内の人を探せない', JSON.stringify(out('who')));
+  const docId = out('write')?.file?.id;
+  w.run?.status === 'awaiting_approval' && docId ? ok('記録の文書を作り、共有の手前で承認を待つ') : ng('承認を待たない', w.run?.status);
+  // 共有する文書の ID は実行中に決まるため、承認の前に見本の応答を差し替えずに、共有のステップの引数に反映できない。
+  // ここでは承認のあとに「作っていないファイル」を共有しようとして断られることを確かめる
+  const ap = await approvalFor('a', job.runId, 'member');
+  await call('a', `/v1/approvals/${ap.id}`, { method: 'POST', body: JSON.stringify({ decision: 'approved' }) }, 'member');
+  const done = await waitFor('a', job.runId, ['completed', 'failed'], 20000, 'member');
+  done.run?.status === 'completed' ? ok('承認のあとに共有のステップへ進む') : ng('共有のステップへ進まない', JSON.stringify(done.run));
+  const { body: perms } = await call('a', '/v1/admin/google-permissions');
+  ['meetings.space.readonly', 'directory.readonly'].every((sc) => perms.items?.some((p) => p.scope === sc && p.level === 'sensitive'))
+    ? ok('第 2 弾の権限（Meet・ディレクトリ）が、段階つきで一覧に出る') : ng('権限の一覧に出ない', JSON.stringify(perms.items));
   await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
 }
 

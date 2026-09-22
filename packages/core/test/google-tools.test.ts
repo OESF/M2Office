@@ -22,7 +22,7 @@ test('すべての内蔵ツールが引数の定義を持ち、Google を使う�
     assert.ok(t.args, `${t.name} に引数の定義がありません`);
     for (const r of t.args!.required ?? []) assert.ok(t.args!.properties[r], `${t.name}: 必須の ${r} の定義がありません`);
   }
-  const google = ['gmail.', 'calendar.', 'tasks.', 'chat.', 'drive.', 'docs.', 'sheets.', 'slides.'];
+  const google = ['gmail.', 'calendar.', 'tasks.', 'chat.', 'drive.', 'docs.', 'sheets.', 'slides.', 'directory.', 'meet.'];
   for (const t of BUILTIN_TOOLS.filter((x) => google.some((p) => x.name.startsWith(p)))) {
     assert.ok(t.google, `${t.name} に必要な権限の宣言がありません`);
   }
@@ -113,3 +113,33 @@ test('カレンダーと ToDo: 変更・取り消し・完了が一覧に反映�
   const open = await ctx.connector.tasks.list({ tenantId: 't', userId: 'u1' }, {});
   assert.ok(!open.some((t) => t.id === tasks[0]!.id));
 });
+
+test('第 2 弾: ファイルの共有は M2Office が作ったファイルだけ。相手がいなければ共有しない。危険度は external-send', async () => {
+  const ctx = makeCtx();
+  assert.equal(registry.get('drive.share')!.risk, 'external-send');
+  const doc = await run('docs.create', { title: '提案書', body: '本文' }, ctx);
+  const shared = await run('drive.share', { fileId: doc['file'].id, emails: ['sato@customer.example.jp'], role: 'commenter' }, ctx);
+  assert.equal(shared['shared'], true);
+  assert.equal(shared['roleLabel'], 'コメント');
+  assert.equal((await run('drive.share', { fileId: 'mock-file-t-1', emails: ['x@y.jp'] }, ctx))['shared'], false, '見本のファイル（M2Office が作っていない）は共有しない');
+  assert.equal((await run('drive.share', { fileId: doc['file'].id, emails: [] }, ctx))['shared'], false);
+  assert.ok(validateToolArgs(registry.get('drive.share')!.args!, { fileId: 'f', emails: ['a@b.jp'], role: 'anyone' }).some((p) => p.includes('reader')), 'リンクによる一般公開のような役割は受け付けない');
+});
+
+test('第 2 弾: 社内の人を探せる', async () => {
+  const res = await run('directory.search', { query: '人事' }, makeCtx());
+  assert.equal(res['count'], 1);
+  assert.equal(res['people'][0].department, '人事部');
+});
+
+test('第 2 弾: Meet の文字起こしを取れる（中身はデータの印つき）。見つからなければ 30 日で消えることを伝える', async () => {
+  const ctx = makeCtx();
+  const t = await run('meet.transcript', { query: '営業定例' }, ctx);
+  assert.equal(t['available'], true);
+  assert.equal(t['untrusted'], true);
+  assert.match(t['text'], /佐藤様への提案/);
+  const none = await run('meet.transcript', { query: '存在しない会議' }, ctx);
+  assert.equal(none['available'], false);
+  assert.match(none['reason'], /30 日/);
+});
+

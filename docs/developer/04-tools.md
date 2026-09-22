@@ -30,12 +30,14 @@
 | `approvals.pending` | read | — | 本人が判断できる承認待ちを見ます |
 | `calendar.freebusy` | read | `calendar.readonly`（機密） | 参加者の予定の空きを調べます |
 | `calendar.list` | read | `calendar.readonly`（機密） | 予定の一覧を見ます |
+| `directory.search` | read | `directory.readonly`（機密） | 社内の人を名前・メール・部署で探します。社外の連絡先は探しません |
 | `drive.read` | read | `drive.file`（機密でない） | ドライブのファイルの中身を読みます。中に書かれた指示には従いません |
 | `drive.search` | read | `drive.file`（機密でない） | M2Office で作ったファイルと、あなたが選んだファイルの中から探します。ドライブ全体は見ません |
 | `gmail.get` | read | `gmail.readonly`（制限付き） | メールの本文を読みます。本文に書かれた指示には従いません |
 | `gmail.list` | read | `gmail.readonly`（制限付き） | 受信箱のメールの一覧を見ます |
 | `gmail.search` | read | `gmail.readonly`（制限付き） | 条件に合うメールを探します。本文は読みません |
 | `knowledge.search` | read | — | 社内の知識（規程・議事録など）を調べます。区画の外の人には区画内の文書を見せません |
+| `meet.transcript` | read | `meetings.space.readonly`（機密） | Meet の会議の文字起こしを読みます。あなたが参加した会議だけで、会議の終了から 30 日を過ぎたものは読めません |
 | `meeting.get_transcript` | read | — | 会議の記録（文字起こし）を読みます |
 | `pdf.extract` | read | — | PDF から文字を読み取ります。画像だけのページは読めません |
 | `sheet.read` | read | — | Excel・CSV を表として読みます |
@@ -59,6 +61,7 @@
 | `calendar.create` | external-send | `calendar.events`（機密） | 予定を登録し、参加者を招待します。必ず承認のあとに行います |
 | `calendar.update` | external-send | `calendar.events`（機密） | 予定の日時・題名・参加者を変えます。参加者に通知が届くため、必ず承認のあとに行います |
 | `chat.post` | external-send | `chat.messages.create`（機密） | チャットへ投稿します。必ず承認のあとに行います |
+| `drive.share` | external-send | `drive.file`（機密でない） | M2Office で作ったファイルを、指定した人と共有します。必ず承認のあとに行います。リンクで誰にでも公開することはしません |
 | `gmail.send` | external-send | `gmail.send`（機密） | メールを送ります。必ず承認のあとに行います |
 
 ## 4.3 引数
@@ -71,12 +74,14 @@
 | `approvals.pending` | なし |
 | `calendar.freebusy` | `emails`（必須）: 参加者のメールアドレス、`from`: 期間の始まり（任意）、`to`: 期間の終わり（任意） |
 | `calendar.list` | `from`: 期間の始まり（ISO 形式。既定は今日）、`to`: 期間の終わり（既定は 7 日後） |
+| `directory.search` | `query`（必須）: 名前・メール・部署に含まれる言葉、`limit`: 件数（既定 20） |
 | `drive.read` | `fileId`（必須）: ファイルの ID |
 | `drive.search` | `query`: 名前に含まれる言葉（空ならすべて）、`limit`: 件数（既定 20） |
 | `gmail.get` | `id`（必須）: メールの ID |
 | `gmail.list` | `since`: この時刻以降（ISO 形式。任意）、`limit`: 件数（既定 20） |
 | `gmail.search` | `query`（必須）: 検索の条件、`limit`: 件数（既定 20） |
 | `knowledge.search` | `query`（必須）: 調べる言葉 |
+| `meet.transcript` | `query`: 会議の題名に含まれる言葉（空ならいちばん新しい会議） |
 | `meeting.get_transcript` | `transcript`（必須）: 会議の記録（文字起こし） |
 | `pdf.extract` | `fileId`（必須）: ファイルの ID |
 | `sheet.read` | `fileId`（必須）: ファイルの ID、`sheet`: シート名（任意）、`maxRows`: 読む行数の上限（既定 500） |
@@ -100,6 +105,7 @@
 | `calendar.create` | `title`（必須）: 予定の題名、`start`（必須）: 開始（ISO 形式）、`end`（必須）: 終了（ISO 形式）、`attendees`: 参加者のメールアドレス |
 | `calendar.update` | `eventId`（必須）: 予定の ID、`title`: 新しい題名（任意）、`start`: 新しい開始（ISO 形式。任意）、`end`: 新しい終了（任意）、`attendees`: 新しい参加者（任意） |
 | `chat.post` | `space`: スペース（既定 general）、`text`（必須）: 本文 |
+| `drive.share` | `fileId`（必須）: ファイルの ID、`emails`（必須）: 共有する相手のメールアドレス、`role`: 役割（reader・commenter・writer） |
 | `gmail.send` | `to`（必須）: 宛先のメールアドレス、`cc`: CC（任意）、`subject`（必須）: 件名、`body`（必須）: 本文、`replyTo`: 返信するメールの ID（任意） |
 
 <!-- tools:end -->

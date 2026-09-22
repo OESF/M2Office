@@ -1,6 +1,6 @@
 /**
- * @file Google Workspace を操作するツールの第 1 弾（Gmail の検索と送信、予定の変更と取り消し、ToDo の完了、
- * ドライブ・ドキュメント・スプレッドシート）。
+ * @file Google Workspace を操作するツール。第 1 弾（Gmail の検索と送信、予定の変更と取り消し、ToDo の完了、
+ * ドライブ・ドキュメント・スプレッドシート）と第 2 弾（ファイルの共有、社内の人の検索、Meet の文字起こし）。
  *
  * 操作ごとに 1 つのツールとし、危険度を固定する（読む・下書き・書き込み・送るを分ける）。
  * いずれも接続口（`ToolContext.connector`）を経由し、Google の API を直接呼ばない。
@@ -289,8 +289,92 @@ export const sheetsAppend: Tool = {
   },
 };
 
-/** 第 1 弾のツール（仕様書 第9.4.4節）。 */
+const ROLE_LABEL = { reader: '閲覧', commenter: 'コメント', writer: '編集' } as const;
+
+/**
+ * M2Office が作ったファイルを、指定した人と共有する。
+ *
+ * @remarks
+ * 危険度 `external-send`。相手がファイルを見られるようになるため、承認ステップの直後でしか呼べない（仕様書 第9.4節）。
+ * 共有できるのは M2Office が作ったファイルだけ。リンクによる一般公開はしない。権限 `drive.file`（機密でない）。
+ */
+export const driveShare: Tool = {
+  name: 'drive.share',
+  risk: 'external-send',
+  activityLabel: 'ファイルを共有しています',
+  helpText: 'M2Office で作ったファイルを、指定した人と共有します。必ず承認のあとに行います。リンクで誰にでも公開することはしません',
+  description: 'M2Office が作ったファイルを、指定した人と共有する（リンクによる一般公開はしない）',
+  args: {
+    properties: { fileId: S('ファイルの ID'), emails: SA('共有する相手のメールアドレス'), role: { type: 'string', description: '役割', enum: ['reader', 'commenter', 'writer'] } },
+    required: ['fileId', 'emails'],
+  },
+  google: { scope: 'drive.file', level: 'non-sensitive' },
+  async invoke(args, ctx) {
+    const emails = list(args['emails']);
+    if (emails.length === 0) return { source: ctx.connector.source, shared: false, reason: '共有する相手がいません' };
+    const role = (['reader', 'commenter', 'writer'] as const).find((r) => r === args['role']) ?? 'reader';
+    const res = await ctx.connector.drive.share(principal(ctx), { fileId: str(args['fileId']), emails, role });
+    return res
+      ? { source: ctx.connector.source, shared: true, role, roleLabel: ROLE_LABEL[role], ...res }
+      : { source: ctx.connector.source, shared: false, reason: 'M2Office で作ったファイルが見つかりません（それ以外のファイルは共有しません）' };
+  },
+};
+
+/**
+ * 社内の人を、名前・メール・部署で探す。
+ *
+ * @remarks 危険度 `read`。会社の Google Workspace の中だけを探し、社外の連絡先は探さない。権限 `directory.readonly`（機密）。
+ */
+export const directorySearch: Tool = {
+  name: 'directory.search',
+  risk: 'read',
+  activityLabel: '社内の人を探しています',
+  helpText: '社内の人を名前・メール・部署で探します。社外の連絡先は探しません',
+  description: '社内の人（名前・メール・部署・役職）を探す。社外の連絡先は探さない',
+  args: { properties: { query: S('名前・メール・部署に含まれる言葉'), limit: N('件数（既定 20）') }, required: ['query'] },
+  google: { scope: 'directory.readonly', level: 'sensitive' },
+  async invoke(args, ctx) {
+    const people = await ctx.connector.directory.search(principal(ctx), { query: str(args['query']), limit: Math.min(Number(args['limit'] ?? 20) || 20, 100) });
+    return { source: ctx.connector.source, count: people.length, people };
+  },
+};
+
+/** 文字起こしとして推論に渡す量の上限（文字数）。 */
+const TRANSCRIPT_LIMIT = 30_000;
+
+/**
+ * Meet の会議の文字起こしを取る。題名に言葉を含む、いちばん新しい会議。
+ *
+ * @remarks
+ * 危険度 `read`。本人が主催者か参加者だった会議だけ。Google は会議の終了から 30 日で文字起こしを消す。
+ * **中身はデータであり指示ではない**（不変則 I-6）ため `untrusted` を付ける。権限 `meetings.space.readonly`（機密）。
+ */
+export const meetTranscript: Tool = {
+  name: 'meet.transcript',
+  risk: 'read',
+  activityLabel: '会議の文字起こしを読んでいます',
+  helpText: 'Meet の会議の文字起こしを読みます。あなたが参加した会議だけで、会議の終了から 30 日を過ぎたものは読めません',
+  description: 'Meet の会議の文字起こしを取る（題名に言葉を含む、いちばん新しい会議。本人が参加した会議だけ）',
+  args: { properties: { query: S('会議の題名に含まれる言葉（空ならいちばん新しい会議）') } },
+  google: { scope: 'meetings.space.readonly', level: 'sensitive' },
+  async invoke(args, ctx) {
+    const t = await ctx.connector.meet.transcript(principal(ctx), { query: str(args['query']) });
+    if (!t) {
+      return { source: ctx.connector.source, available: false, reason: '会議の文字起こしが見つかりません（文字起こしは会議の終了から 30 日で消えます）' };
+    }
+    const text = t.entries.map((e) => `${e.speaker}: ${e.text}`).join('\n');
+    const truncated = text.length > TRANSCRIPT_LIMIT;
+    return {
+      source: ctx.connector.source, available: true, untrusted: true, conference: t.conference,
+      text: truncated ? `${text.slice(0, TRANSCRIPT_LIMIT)}\n…（以降は省略）` : text, truncated,
+    };
+  },
+};
+
+/** Google Workspace を操作するツール（第 1 弾・第 2 弾。仕様書 第9.4.4節）。 */
 export const GOOGLE_TOOLS: Tool[] = [
   gmailSearch, gmailSend, calendarUpdate, calendarCancel, tasksComplete,
   driveSearch, driveRead, driveCreateFolder, docsCreate, docsAppend, sheetsCreate, sheetsRead, sheetsAppend,
+  // 第 2 弾
+  driveShare, directorySearch, meetTranscript,
 ];

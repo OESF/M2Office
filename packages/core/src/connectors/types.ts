@@ -122,6 +122,40 @@ export interface DriveConnector {
   /** 中身を文字で読む（ドキュメント・スプレッドシート・スライド・PDF）。見つからなければ `null`。 */
   read(p: ConnectorPrincipal, fileId: string): Promise<{ file: DriveFile; text: string } | null>;
   createFolder(p: ConnectorPrincipal, f: { name: string; parentId: string | null }): Promise<DriveFile>;
+  /**
+   * M2Office が作ったファイルを、指定した人と共有する。リンクによる一般公開はしない（仕様書 第9.4.4節）。
+   * M2Office が作ったファイルでなければ `null`。
+   */
+  share(
+    p: ConnectorPrincipal, s: { fileId: string; emails: string[]; role: 'reader' | 'commenter' | 'writer' },
+  ): Promise<{ fileId: string; sharedWith: string[] } | null>;
+}
+
+/** 会社の中の人（Google Workspace のディレクトリ）。 */
+export interface DirectoryPerson {
+  name: string;
+  email: string;
+  department: string | null;
+  title: string | null;
+}
+
+export interface DirectoryConnector {
+  /** 名前・メール・部署で社内の人を探す。社外の連絡先は探さない。 */
+  search(p: ConnectorPrincipal, q: { query: string; limit?: number }): Promise<DirectoryPerson[]>;
+}
+
+/** Meet の会議の文字起こし。 */
+export interface MeetTranscript {
+  conference: { id: string; title: string; startedAt: string; endedAt: string };
+  entries: { speaker: string; text: string; at: string }[];
+}
+
+export interface MeetConnector {
+  /**
+   * 題名に言葉を含む、いちばん新しい会議の文字起こし。本人が主催者か参加者だった会議だけ。
+   * 見つからなければ `null`（Google は会議の終了から 30 日で文字起こしを消す）。
+   */
+  transcript(p: ConnectorPrincipal, q: { query: string }): Promise<MeetTranscript | null>;
 }
 
 /** Google ドキュメント。 */
@@ -181,4 +215,6 @@ export interface WorkspaceConnector {
   drive: DriveConnector;
   docs: DocsConnector;
   sheets: SheetsConnector;
+  directory: DirectoryConnector;
+  meet: MeetConnector;
 }
