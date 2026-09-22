@@ -913,6 +913,14 @@ console.log('\n■ 24. 調べてスライドにまとめる（web.research・sli
   const AG = `${EXT}:research-slides`;
   const input = { topic: 'ローカルで動く LLM の最近の製品動向', pages: '8' };
   await call('a', `/v1/admin/extensions/${EXT}/install`, { method: 'POST', body: JSON.stringify({ consent: true }) });
+  const badTpl = await call('a', '/v1/admin/settings/slides', { method: 'PUT', body: JSON.stringify({ templates: [{ name: 'x', presentationId: 'https://example.com/' }] }) });
+  badTpl.status === 400 ? ok('Google スライドの URL でないものは、テンプレートとして登録できない') : ng(`登録できてしまう（${badTpl.status}）`);
+  const url = 'https://docs.google.com/presentation/d/1EVrKerODrfy5b3iKJDfLUCi4pvJZbal0l8uM-0uKqUc/edit';
+  await call('a', '/v1/admin/settings/slides', { method: 'PUT', body: JSON.stringify({ templates: [{ name: '確認用テンプレート', presentationId: url }] }) });
+  const { body: st } = await call('a', '/v1/admin/settings');
+  const tpl = st.slides?.templates?.[0];
+  tpl?.presentationId === '1EVrKerODrfy5b3iKJDfLUCi4pvJZbal0l8uM-0uKqUc' && tpl.isDefault
+    ? ok('URL からファイルの ID を取り出して登録し、1 件目を既定にする') : ng('テンプレートの登録が違う', JSON.stringify(tpl));
   const { body: job } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: AG, input }) }, 'member');
   const done = await waitFor('a', job.runId, ['completed', 'failed'], 20000, 'member');
   const research = done.steps?.find((x) => x.stepId === 'research')?.output?.tools?.[0]?.result;
@@ -921,6 +929,8 @@ console.log('\n■ 24. 調べてスライドにまとめる（web.research・sli
   const art = done.artifacts?.find((x) => x.kind === 'slides');
   done.run?.status === 'completed' && art && (art.body.match(/^## \d+\./gm) ?? []).length === 7
     ? ok('構成を検証し、表紙を含む 8 ページのアウトラインを成果物に残す') : ng('スライドの成果物が無い', JSON.stringify(done.run));
+  /テンプレート: 確認用テンプレート/.test(art?.body ?? '') ? ok('登録した既定のテンプレートで作る') : ng('既定のテンプレートが使われない');
+  await call('a', '/v1/admin/settings/slides', { method: 'PUT', body: JSON.stringify({ templates: [] }) });
   const { body: tools } = await call('a', `/v1/help/agents/${encodeURIComponent(AG)}`, {}, 'member');
   JSON.stringify(tools).includes('Google に送られます')
     ? ok('業務の説明に、調べる言葉が Google に送られることが出る') : ng('説明に外部送信の注意が無い');

@@ -102,7 +102,12 @@ export interface SlidesConnector {
    * @returns 作ったものの ID と、開くリンク・PowerPoint 形式の取り出しリンク。見本の接続口では `null`
    */
   createPresentation(
-    p: ConnectorPrincipal, input: { title: string; plan: SlidePlan },
+    p: ConnectorPrincipal,
+    input: {
+      title: string; plan: SlidePlan;
+      /** 会社が登録したテンプレート（第9.4.2節）。`null` なら標準のテンプレート。 */
+      template: { presentationId: string; name: string } | null;
+    },
   ): Promise<{ presentationId: string; url: string | null; pptxUrl: string | null }>;
 }
 

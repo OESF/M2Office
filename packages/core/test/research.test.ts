@@ -48,11 +48,16 @@ test('上限を超えた文字は切り詰め、そのことを注意として�
   assert.ok(r.warnings.some((w) => w.includes('題名')) && r.warnings.some((w) => w.includes('6 行')));
 });
 
+let settingsTemplates: { id: string; name: string; presentationId: string; description: string; isDefault: boolean }[] = [];
+
 function ctx(): ToolContext & { artifacts: { title: string; body: string; kind: string }[]; connector: MockWorkspaceConnector } {
   const artifacts: { title: string; body: string; kind: string }[] = [];
   return {
     tenantId: 't', userId: 'u', runId: 'r', compartment: null, artifacts,
-    repo: { createArtifact: async (a: { title: string; body: string; kind: string }) => { artifacts.push(a); } } as never,
+    repo: {
+      createArtifact: async (a: { title: string; body: string; kind: string }) => { artifacts.push(a); },
+      getTenantSettings: async () => ({ slides: { templates: settingsTemplates } }),
+    } as never,
     connector: new MockWorkspaceConnector(), files: {} as never, research: new MockResearchProvider(),
   };
 }
@@ -66,6 +71,33 @@ test('slides.create: 見本の接続口では、スライドを作らず構成�
   assert.equal(c.artifacts[0]!.kind, 'slides');
   assert.match(c.artifacts[0]!.body, /Google スライドは作っていません/);
   assert.equal(c.connector.outbox.filter((o) => o.kind === 'slides').length, 1);
+});
+
+test('slides.create: 会社が登録したテンプレートを使う。名前の指定が無ければ既定、見つからなければ既定にして注意を残す', async () => {
+  settingsTemplates = [
+    { id: 'a', name: '社内向け', presentationId: 'p-inner-0000000000000000', description: '', isDefault: true },
+    { id: 'b', name: '提案書', presentationId: 'p-proposal-00000000000000', description: '', isDefault: false },
+  ];
+  try {
+    const c = ctx();
+    const tool = registry.get('slides.create')!;
+    await tool.invoke({ ...SAMPLE_PLAN, template: '提案書' }, c);
+    await tool.invoke(SAMPLE_PLAN, c);
+    const out = await tool.invoke({ ...SAMPLE_PLAN, template: '無い名前' }, c) as { warnings: string[] };
+    const used = c.connector.outbox.map((o) => (o.body as { template: { name: string } | null }).template?.name);
+    assert.deepEqual(used, ['提案書', '社内向け', '社内向け']);
+    assert.ok(out.warnings.some((w) => w.includes('無い名前')));
+    assert.match(c.artifacts[0]!.body, /テンプレート: 提案書/);
+  } finally {
+    settingsTemplates = [];
+  }
+});
+
+test('Google スライドの URL からファイルの ID を取り出す', async () => {
+  const { parsePresentationId } = await import('@m2office/shared');
+  assert.equal(parsePresentationId('https://docs.google.com/presentation/d/1EVrKerODrfy5b3iKJDfLUCi4pvJZbal0l8uM-0uKqUc/edit#slide=id.p'), '1EVrKerODrfy5b3iKJDfLUCi4pvJZbal0l8uM-0uKqUc');
+  assert.equal(parsePresentationId('1EVrKerODrfy5b3iKJDfLUCi4pvJZbal0l8uM-0uKqUc'), '1EVrKerODrfy5b3iKJDfLUCi4pvJZbal0l8uM-0uKqUc');
+  assert.equal(parsePresentationId('https://example.com/slides'), null);
 });
 
 test('web.research: 見本の調査は、見本であることを明示して返す', async () => {

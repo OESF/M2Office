@@ -56,13 +56,21 @@ export const slidesCreate: Tool = {
     + 'slides[] の各要素は layout（BULLET・COMPARISON・KPI・CHART・IMAGE）と title（20 文字まで）、'
     + 'BULLET は body（改行区切りで 6 行まで）、COMPARISON は compareLeftTitle・compareLeftBody・compareRightTitle・compareRightBody、'
     + 'KPI は stats（value と label、3 件まで）、CHART は chartType・chartCategories・chartSeries（name と values、2 系列まで）、'
-    + 'IMAGE は imagePrompt と caption。takeaway は伝えたいこと 1 文。本文のスライドは 12 枚まで',
+    + 'IMAGE は imagePrompt と caption。takeaway は伝えたいこと 1 文。本文のスライドは 12 枚まで。'
+    + 'template に会社が登録したテンプレートの名前を渡せばそれを、無ければ既定のテンプレートを使う',
   async invoke(args, ctx) {
     const checked = normalizeSlidePlan(args);
     if ('error' in checked) return { error: `スライドを作れませんでした: ${checked.error}` };
     const { plan, warnings } = checked;
+    // 会社が登録したテンプレート（第9.4.2節）。名前の指定が無い・見つからなければ既定、登録が無ければ標準
+    const { templates } = (await ctx.repo.getTenantSettings(ctx.tenantId)).slides;
+    const wanted = typeof args['template'] === 'string' ? args['template'].trim() : '';
+    const named = wanted ? templates.find((t) => t.name === wanted) : undefined;
+    if (wanted && !named) warnings.push(`テンプレート「${wanted}」が登録されていないため、既定のテンプレートを使いました`);
+    const chosen = named ?? templates.find((t) => t.isDefault) ?? null;
+    const template = chosen ? { presentationId: chosen.presentationId, name: chosen.name } : null;
     const created = await ctx.connector.slides.createPresentation(
-      { tenantId: ctx.tenantId, userId: ctx.userId }, { title: plan.title, plan },
+      { tenantId: ctx.tenantId, userId: ctx.userId }, { title: plan.title, plan, template },
     );
     const mock = ctx.connector.source === 'mock';
     const links = created.url
@@ -71,12 +79,12 @@ export const slidesCreate: Tool = {
     const id = randomUUID();
     await ctx.repo.createArtifact({
       id, runId: ctx.runId, tenantId: ctx.tenantId, kind: 'slides', title: plan.title,
-      body: [...links, '', planOutline(plan), ...(warnings.length ? ['', '---', ...warnings.map((w) => `注意: ${w}`)] : [])].join('\n'),
+      body: [...links, `テンプレート: ${template ? template.name : '標準のテンプレート'}`, '', planOutline(plan), ...(warnings.length ? ['', '---', ...warnings.map((w) => `注意: ${w}`)] : [])].join('\n'),
       createdAt: new Date().toISOString(),
     });
     return {
       artifactId: id, presentationId: created.presentationId, url: created.url, pptxUrl: created.pptxUrl,
-      slideCount: plan.slides.length + 1, warnings, ...(mock ? { source: 'mock' } : {}),
+      slideCount: plan.slides.length + 1, template: template?.name ?? '標準', warnings, ...(mock ? { source: 'mock' } : {}),
     };
   },
 };

@@ -568,8 +568,8 @@ export class PostgresRepository implements Repository {
       company: TenantSettings['company'] | null; writing_style: TenantSettings['writingStyle'] | null;
       automation: TenantSettings['automation'] | null; agents: TenantSettings['agents'] | null;
       effect: TenantSettings['effect'] | null; onboarding: TenantSettings['onboarding'] | null;
-      access: TenantSettings['access'] | null;
-    }>(tenantId, `select company, writing_style, automation, agents, effect, onboarding, access
+      access: TenantSettings['access'] | null; slides: TenantSettings['slides'] | null;
+    }>(tenantId, `select company, writing_style, automation, agents, effect, onboarding, access, slides
                     from tenant_settings where tenant_id = $1`,
       [tenantId]);
     const r = rows[0];
@@ -582,6 +582,7 @@ export class PostgresRepository implements Repository {
       effect: { minutesPerRun: { ...(r?.effect?.minutesPerRun ?? {}) } },
       onboarding: { ...d.onboarding, ...(r?.onboarding ?? {}) },
       access: { scopes: { ...(r?.access?.scopes ?? {}) } },
+      slides: { templates: [...(r?.slides?.templates ?? [])] },
     };
   }
 
@@ -590,7 +591,7 @@ export class PostgresRepository implements Repository {
   ): Promise<void> {
     const column = ({
       company: 'company', writingStyle: 'writing_style', automation: 'automation', agents: 'agents',
-      effect: 'effect', onboarding: 'onboarding', access: 'access',
+      effect: 'effect', onboarding: 'onboarding', access: 'access', slides: 'slides',
     } as const)[section];
     // 列名は上の固定の対応表からのみ取る。利用者の入力を SQL に埋め込まない
     await this.q(tenantId,

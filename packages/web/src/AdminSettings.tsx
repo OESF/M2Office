@@ -9,7 +9,7 @@
 
 import { useEffect, useState } from 'react';
 import type {
-  AutomationPolicy, CompanyInfo, Role, TenantSettings, User, WritingStyle,
+  AutomationPolicy, CompanyInfo, Role, SlideTemplate, TenantSettings, User, WritingStyle,
 } from '@m2office/shared';
 import { api, describeError, type KnowledgeItemView } from './api.js';
 import { HelpTip } from './help.js';
@@ -67,13 +67,13 @@ function Text({ label, value, onChange, hint, multiline }: {
 
 /** 会社情報と自社の書き方（第6.6.1節、第15.2.1節）。 */
 export function CompanySettings() {
-  const { data, error } = useSettings();
+  const { data, error, reload } = useSettings();
   const [company, setCompany] = useState<CompanyInfo | null>(null);
   const [style, setStyle] = useState<WritingStyle | null>(null);
   const saver = useSaver();
   useEffect(() => { if (data) { setCompany(data.company); setStyle(data.writingStyle); } }, [data]);
   if (error) return <p className="error">{error}</p>;
-  if (!company || !style) return <p className="muted">読み込み中…</p>;
+  if (!data || !company || !style) return <p className="muted">読み込み中…</p>;
   const c = (k: keyof CompanyInfo) => (v: string) => setCompany({ ...company, [k]: v });
   const w = (k: keyof WritingStyle) => (v: string) => setStyle({ ...style, [k]: v });
 
@@ -149,8 +149,89 @@ export function CompanySettings() {
         <button className="btn" disabled={saver.busy}
           onClick={() => void saver.run(() => api.admin.saveSettings('writingStyle', style))}>保存する</button>
       </div>
+      <SlideTemplateSettings initial={data.slides.templates} onSaved={() => void reload()} />
       {saver.view}
     </>
+  );
+}
+
+/** 画面で編集中のテンプレート。`url` には URL か ID をそのまま持つ。 */
+type TemplateDraft = { id: string; name: string; url: string; description: string; isDefault: boolean };
+
+/**
+ * スライドのテンプレート（仕様書 第9.4.2節）。Google スライドの URL を貼るだけで登録する。
+ *
+ * @remarks 中身（レイアウト・差し込み口）の読み取りは Google 連携の後。いまは登録と既定の選択だけを行う。
+ */
+function SlideTemplateSettings({ initial, onSaved }: { initial: SlideTemplate[]; onSaved: () => void }) {
+  const toDraft = (t: SlideTemplate): TemplateDraft => ({
+    id: t.id, name: t.name, url: t.presentationId, description: t.description, isDefault: t.isDefault,
+  });
+  const [items, setItems] = useState<TemplateDraft[]>(initial.map(toDraft));
+  const saver = useSaver();
+  useEffect(() => { setItems(initial.map(toDraft)); }, [initial]);
+  const set = (i: number, patch: Partial<TemplateDraft>) => setItems(items.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+  const idOf = (url: string) => /\/presentation\/d\/([A-Za-z0-9_-]{20,})/.exec(url)?.[1] ?? (/^[A-Za-z0-9_-]{20,}$/.test(url.trim()) ? url.trim() : null);
+
+  return (
+    <div className="card">
+      <h3>スライドのテンプレート <HelpTip article="admin-slides">Google スライドで作った自社のファイルを、スライドを作るときの見本として使います。URL を貼るだけで登録できます。</HelpTip></h3>
+      <div className="note small">
+        <p>Google スライドで作った<strong>自社のファイル</strong>を、スライド作成の見本として使います。URL を貼るだけで登録できます。</p>
+        <p>
+          中身は Google スライドの画面で自由に作り直せます。見本のスライドを 1 枚足せばレイアウトが 1 つ増え、M2Office の変更は要りません。
+          ロゴ・フッター・背景は<strong>マスター</strong>に置くと全スライドに入ります。
+          差し込みたい場所は <code>{'{{見出し}}'}</code>、図の場所は <code>{'{{CHART}}'}</code>・<code>{'{{IMAGE}}'}</code>、
+          レイアウトの名前は画面の外に <code>{'{{LAYOUT_NAME:3カード比較}}'}</code> と書きます。
+        </p>
+        <p>1 つも登録していない間は、M2Office の標準のテンプレートで作ります。使う人が見られるように、ファイルは会社の中で共有してください。</p>
+      </div>
+      {items.map((t, i) => {
+        const id = idOf(t.url);
+        return (
+          <div className="template-row" key={t.id || i}>
+            <div className="grid2">
+              <div className="field">
+                <label>名前</label>
+                <input value={t.name} placeholder="例: 社内向け" onChange={(e) => set(i, { name: e.target.value })} />
+              </div>
+              <div className="field">
+                <label>説明（どんな資料に使うか）</label>
+                <input value={t.description} placeholder="例: 提案書・社外向け" onChange={(e) => set(i, { description: e.target.value })} />
+              </div>
+            </div>
+            <div className="field">
+              <label>Google スライドの URL</label>
+              <div className="row">
+                <input value={t.url} placeholder="https://docs.google.com/presentation/d/…/edit" onChange={(e) => set(i, { url: e.target.value })} />
+                {id
+                  ? <a className="btn ghost small" href={`https://docs.google.com/presentation/d/${id}/edit`} target="_blank" rel="noreferrer">開く</a>
+                  : t.url && <span className="error-inline small">URL を確認してください</span>}
+                <button className="btn danger small" onClick={() => setItems(items.filter((_, j) => j !== i))}>削除</button>
+              </div>
+            </div>
+            <label className="check">
+              <input type="radio" name="default-template" checked={t.isDefault}
+                onChange={() => setItems(items.map((x, j) => ({ ...x, isDefault: j === i })))} /> 既定にする
+            </label>
+          </div>
+        );
+      })}
+      <div className="row">
+        <button className="btn ghost" disabled={items.length >= 10}
+          onClick={() => setItems([...items, { id: '', name: '', url: '', description: '', isDefault: items.length === 0 }])}>
+          ＋ テンプレートを追加
+        </button>
+        <button className="btn" disabled={saver.busy} onClick={() => void saver.run(async () => {
+          await api.admin.saveSettings('slides', {
+            templates: items.map((t) => ({ id: t.id, name: t.name, presentationId: t.url, description: t.description, isDefault: t.isDefault })),
+          });
+          onSaved();
+        })}>保存</button>
+      </div>
+      <p className="muted small">中身（レイアウトと差し込み口）の読み取りは、Google との接続ができてから行います。いまは登録と既定の選択だけが効きます。</p>
+      {saver.view}
+    </div>
   );
 }
 

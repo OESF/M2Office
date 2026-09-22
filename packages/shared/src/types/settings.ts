@@ -79,6 +79,35 @@ export interface TenantOnboarding {
   employeesNotifiedAt: string | null;
 }
 
+/**
+ * スライドのテンプレート（仕様書 第9.4.2節「スライドのテンプレート」）。Google スライドのファイルを URL で登録する。
+ */
+export interface SlideTemplate {
+  id: string;
+  name: string;
+  /** Google スライドのファイルの ID（URL の `/presentation/d/<ID>/` の部分）。 */
+  presentationId: string;
+  description: string;
+  /** 既定のテンプレートか。登録があれば 1 つだけが既定になる。 */
+  isDefault: boolean;
+}
+
+export interface SlidesSettings {
+  templates: SlideTemplate[];
+}
+
+/**
+ * Google スライドの URL か ID から、ファイルの ID を取り出す。取り出せなければ `null`。
+ *
+ * @example parsePresentationId('https://docs.google.com/presentation/d/1EVrKer.../edit') // '1EVrKer...'
+ */
+export function parsePresentationId(input: string): string | null {
+  const s = input.trim();
+  const fromUrl = /\/presentation\/d\/([A-Za-z0-9_-]{20,})/.exec(s);
+  if (fromUrl) return fromUrl[1]!;
+  return /^[A-Za-z0-9_-]{20,}$/.test(s) ? s : null;
+}
+
 export interface TenantSettings {
   company: CompanyInfo;
   writingStyle: WritingStyle;
@@ -88,6 +117,8 @@ export interface TenantSettings {
   onboarding: TenantOnboarding;
   /** 業務ごとの利用範囲（第16.7節）。 */
   access: AccessSettings;
+  /** スライドのテンプレート（第9.4.2節）。 */
+  slides: SlidesSettings;
 }
 
 /** 設定が未保存の会社に使う既定値。 */
@@ -104,6 +135,8 @@ export const DEFAULT_TENANT_SETTINGS: TenantSettings = {
   onboarding: { agentsReviewedAt: null, employeesNotifiedAt: null },
   // 対象の設定が無い業務は全員が使える
   access: { scopes: {} },
+  // 登録が無ければ標準のテンプレートを使う
+  slides: { templates: [] },
 };
 
 /**

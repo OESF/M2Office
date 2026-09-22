@@ -9,7 +9,7 @@
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import {
-  isValidInvoiceNumber, type AutomationPolicy, type CompanyInfo, type Role, type TenantSettings,
+  isValidInvoiceNumber, parsePresentationId, type AutomationPolicy, type CompanyInfo, type Role, type SlideTemplate, type TenantSettings,
   type User, type WritingStyle,
 } from '@m2office/shared';
 import { DEFAULT_STANDARD_MINUTES } from '@m2office/core';
@@ -340,6 +340,27 @@ function validateSection(
         minutesPerRun[k] = Math.round(n * 10) / 10;
       }
       return { section: 'effect', value: { minutesPerRun } };
+    }
+    case 'slides': {
+      // スライドのテンプレート（仕様書 第9.4.2節）。URL から ID を取り出し、名前の重なりと既定を整える
+      const input = Array.isArray(o['templates']) ? o['templates'] : [];
+      if (input.length > 10) return { error: 'テンプレートは 10 件までです' };
+      const templates: SlideTemplate[] = [];
+      for (const [i, raw] of input.entries()) {
+        const t = (raw ?? {}) as Record<string, unknown>;
+        const presentationId = parsePresentationId(String(t['url'] ?? t['presentationId'] ?? ''));
+        if (!presentationId) return { error: `${i + 1} 件目: Google スライドの URL（または ID）を確認してください` };
+        const name = String(t['name'] ?? '').trim().slice(0, 40) || `テンプレート ${i + 1}`;
+        if (templates.some((x) => x.name === name)) return { error: `名前「${name}」が重なっています` };
+        templates.push({
+          id: String(t['id'] ?? '') || `st-${randomUUID()}`, name, presentationId,
+          description: String(t['description'] ?? '').trim().slice(0, 200), isDefault: t['isDefault'] === true,
+        });
+      }
+      // 既定はちょうど 1 つ。指定が無ければ先頭、複数なら最初のものだけを既定にする
+      const first = templates.findIndex((x) => x.isDefault);
+      templates.forEach((x, i) => { x.isDefault = i === (first === -1 ? 0 : first); });
+      return { section: 'slides', value: { templates } };
     }
     default:
       return { error: `不明な設定の区分です: ${section}` };

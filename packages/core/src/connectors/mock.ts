@@ -56,7 +56,10 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
 
   /** Google スライドは作らない。構成を記録し、リンクの無い ID を返す（仕様書 第9.4.2節「鍵・接続が無い環境」）。 */
   slides = {
-    createPresentation: async (p: ConnectorPrincipal, input: { title: string; plan: SlidePlan }) => {
+    createPresentation: async (
+      p: ConnectorPrincipal,
+      input: { title: string; plan: SlidePlan; template: { presentationId: string; name: string } | null },
+    ) => {
       this.outbox.push({ kind: 'slides', principal: p, body: input });
       return { presentationId: `mock-deck-${randomUUID().slice(0, 8)}`, url: null, pptxUrl: null };
     },
