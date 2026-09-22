@@ -12,6 +12,7 @@
 import { writeInternalNeedsApproval, type AgentDefinition, type AutomationPolicy } from '@m2office/shared';
 import type { ToolRegistry } from '../tools/registry.js';
 import { agentHelpMarkdown, buildAgentHelp, type AgentHelpView } from './agent-help.js';
+import { extractTerms, matchConcepts, normalizeForSearch, type SearchConcept } from '../knowledge/search.js';
 
 /** 記事の読み手。`all` は全員、`approver` は承認者と管理者、`admin` は管理者だけ。 */
 export type HelpAudience = 'all' | 'approver' | 'admin';
@@ -122,24 +123,29 @@ export class HelpCatalog {
    *
    * @param query 利用者の問い合わせ文
    * @param limit 返す件数の上限
-   * @remarks 題名に当たる語を本文より重く数える。語が 1 つも当たらない記事は返さない。
+   * @remarks
+   * 言葉の取り出しと点数は組織知識の検索と同じもの（第11.7.3節）を使う。題名に当たる言葉を本文より重く数える。
+   * **題名に言葉が 1 つも当たらない記事は、2 つ以上の言葉をすべて本文で満たすときだけ返す。**
+   * 「有給休暇は何日？」のような社内規程の質問に、本文の例に「有給」とあるだけの記事を返さないため（第6.10.6節）。
+   * 最上位の 3 割に満たない記事も返さない。
    */
   search(query: string, ctx: HelpContext, limit = 3): HelpHit[] {
-    const terms = helpTerms(query);
-    if (terms.length === 0) return [];
-    return this.list(ctx)
+    const concepts = helpConcepts(query);
+    if (concepts.length === 0) return [];
+    const terms = concepts.flatMap((c) => c.alternatives);
+    const scored = this.list(ctx)
       .map((article) => {
-        let score = 0;
-        for (const t of terms) {
-          if (variants(t).some((v) => article.title.includes(v))) score += 5;
-          const n = Math.max(...variants(t).map((v) => article.body.split(v).length - 1));
-          score += Math.min(n, 3);
-        }
-        return { article, score, excerpt: excerpt(article.body, terms, article.title) };
+        const m = matchConcepts(concepts, { heading: article.title, path: [], body: article.body });
+        const relevant = m.inHeading > 0 || (m.total >= 2 && m.matched === m.total);
+        return { article, score: relevant ? Math.round(m.score * 100) / 100 : 0 };
       })
-      .filter((h) => h.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, limit);
+      .filter((h) => h.score >= 1)
+      .sort((a, b) => b.score - a.score);
+    const top = scored[0]?.score ?? 0;
+    return scored
+      .filter((h) => h.score >= top * 0.3)
+      .slice(0, limit)
+      .map((h) => ({ ...h, excerpt: excerpt(h.article.body, terms, h.article.title) }));
   }
 }
 
@@ -158,18 +164,33 @@ export interface HelpContext {
 
 /** 使い方の質問に多く、検索の手がかりにならない語。 */
 const STOP_WORDS = new Set([
-  'どうやって', 'どうすれば', 'やり方', '使い方', '方法', 'できる', 'できます', 'ますか', 'ですか',
-  'したい', 'ください', '教えて', 'これ', 'それ', 'どこ', 'なに', '何', 'M2Office',
+  '方法', '使い方', 'やり方', '使い', '教え', '知り', '聞き', '場合', 'm2office',
 ]);
 
-/** 問い合わせ文を検索語に分ける。助詞と記号で区切る簡易な方法（仕様書 第11.7節）。 */
+/** 漢字 1 文字に送り仮名が続く語（「見られ」「止め」「取れ」）。助詞で始まる送り仮名は除く。 */
+const KANJI_STEM = /(?<![\p{Script=Han}])\p{Script=Han}(?![はがをにでとのへやもか])[\p{Script=Hiragana}]{1,2}/gu;
+
+/**
+ * 問い合わせ文を、ヘルプの記事の検索の言葉にする。
+ *
+ * @remarks
+ * 組織知識と同じ取り出し方（`extractTerms`）に、漢字 1 文字の動詞の語幹（「見られ」など）を足す。
+ * 長い言葉に含まれる短い言葉（「定時実行」の「定時」「実行」）は、長い言葉の言い換えとしてまとめ、
+ * 同じ言葉を二重に数えないようにする。
+ *
+ * @example helpConcepts('定時実行を止めたい') // → [{ term: '定時実行', alternatives: ['定時実行', '定時', '実行'] }, { term: '止め', … }]
+ */
+export function helpConcepts(query: string): SearchConcept[] {
+  const q = normalizeForSearch(query);
+  const stems = [...q.matchAll(KANJI_STEM)].map((m) => m[0]);
+  const raw = [...new Set([...extractTerms(query), ...stems])].filter((t) => !STOP_WORDS.has(t));
+  const longs = raw.filter((t) => !raw.some((u) => u !== t && u.includes(t)));
+  return longs.map((t) => ({ term: t, alternatives: [t, ...raw.filter((u) => u !== t && t.includes(u))] }));
+}
+
+/** 問い合わせ文を検索語に分ける（`helpConcepts` の言葉を平らにしたもの）。 */
 export function helpTerms(query: string): string[] {
-  const parts = query
-    .replace(/[？?！!。、，,.「」『』（）()：:・/\s]/g, ' ')
-    .split(/\s+|[はがをにでとのへやもか]|から|まで|って|には/)
-    .map((t) => t.trim())
-    .filter((t) => t.length >= 2 && !STOP_WORDS.has(t));
-  return [...new Set(parts)];
+  return [...new Set(helpConcepts(query).flatMap((c) => c.alternatives))];
 }
 
 /**

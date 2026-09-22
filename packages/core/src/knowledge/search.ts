@@ -162,23 +162,37 @@ function count(text: string, term: string): number {
 export function scoreSection(
   concepts: SearchConcept[] | string[], s: Pick<ScoredCandidate, 'heading' | 'path' | 'body'>,
 ): number {
+  return matchConcepts(concepts, s).score;
+}
+
+/**
+ * 節と言葉の当たり方の詳細。点数に加え、見出しに当たった言葉の数と、満たした言葉の数を返す。
+ *
+ * @remarks ヘルプの記事の検索は、題名に当たらない記事を厳しく絞るためにこの詳細を使う（第6.10.6節）。
+ */
+export function matchConcepts(
+  concepts: SearchConcept[] | string[], s: Pick<ScoredCandidate, 'heading' | 'path' | 'body'>,
+): { score: number; inHeading: number; matched: number; total: number } {
   const cs = concepts.map((c) => (typeof c === 'string' ? { term: c, alternatives: [c] } : c));
-  if (cs.length === 0) return 0;
+  if (cs.length === 0) return { score: 0, inHeading: 0, matched: 0, total: 0 };
   const head = normalizeForSearch([...s.path, s.heading].join(' '));
   const body = normalizeForSearch(s.body);
   let score = 0;
   let matched = 0;
+  let inHeading = 0;
   for (const c of cs) {
     let best = 0;
     let full = false;
+    let headHit = false;
     for (const t of c.alternatives) {
       const inHead = head.includes(t);
       const n = count(body, t);
       let p = 0;
-      if (inHead) p += 3;
+      if (inHead) { p += 3; headHit = true; }
       if (n > 0) p += 1 + Math.min(1, Math.log2(n) / 3);
       if (inHead || n > 0) { full = true; best = Math.max(best, p); }
     }
+    if (headHit) inHeading++;
     if (full) { score += best; matched++; continue; }
     for (const t of c.alternatives) {
       const grams = bigrams(t);
@@ -186,7 +200,7 @@ export function scoreSection(
       if (grams.length > 1 && hit / grams.length >= 0.5) { score += 0.5; matched += 0.5; break; }
     }
   }
-  return score + (matched / cs.length) * 2;
+  return { score: score + (matched / cs.length) * 2, inHeading, matched, total: cs.length };
 }
 
 /**

@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import {
-  OFFICIAL_AGENTS, ToolRegistry, BUILTIN_TOOLS, HelpCatalog, buildAgentHelp, parseArticle,
+  OFFICIAL_AGENTS, ToolRegistry, BUILTIN_TOOLS, HelpCatalog, buildAgentHelp, helpConcepts, parseArticle,
   resolveOfficialAgent, type HelpContext,
 } from '../src/index.js';
 import { DEFAULT_TENANT_SETTINGS } from '@m2office/shared';
@@ -101,4 +101,54 @@ test('題名に当たる記事を先に返す', () => {
   const catalog = new HelpCatalog(ARTICLES, OFFICIAL_AGENTS, registry);
   const hits = catalog.search('承認はどうやるの？', ctx(['member']));
   assert.equal(hits[0]?.article.id, 'a1');
+});
+
+/** 公式の記事（`docs/help/`）をすべて読み込んだ目録。 */
+function officialCatalog(): HelpCatalog {
+  const dir = new URL('../../../docs/help/', import.meta.url);
+  const articles = readdirSync(dir).filter((f) => f.endsWith('.md') && f !== 'README.md')
+    .map((f) => parseArticle(readFileSync(new URL(f, dir), 'utf8')));
+  return new HelpCatalog(articles, OFFICIAL_AGENTS, registry);
+}
+
+test('使い方の質問には、その記事を最初に返す（公式の記事で確かめる）', () => {
+  const catalog = officialCatalog();
+  const cases: [string, string, string[]][] = [
+    ['承認はどうやるの？', 'start-approvals', ['member']],
+    ['定時実行を止めたい', 'start-schedules', ['member']],
+    ['勝手にメールが送られることはある？', 'faq-sending', ['member']],
+    ['ダミーデータって何？', 'faq-dummy', ['member']],
+    ['間違った内容が作られたらどうすればいい？', 'faq-mistakes', ['member']],
+    ['誰に何が見られますか', 'faq-privacy', ['member']],
+    ['秘書の使い方を教えて', 'start-secretary', ['member']],
+    ['個人設定はどこで変える？', 'start-settings', ['member']],
+    ['業務を実行するにはどうすればいい？', 'start-agents', ['member']],
+    ['議事録作成・共有は何をする？', 'agent-minutes', ['member']],
+    ['画面の見方を教えて', 'start-screen', ['member']],
+    ['困ったときの問い合わせ先は？', 'contact', ['member']],
+    ['ユーザーを招待するには？', 'admin-users', ['admin']],
+    ['規程を登録する方法は？', 'admin-knowledge', ['admin']],
+    ['スライドのテンプレートを登録したい', 'admin-slides', ['admin']],
+    ['Gemini の鍵はどこで設定する？', 'admin-connectors', ['admin']],
+  ];
+  for (const [q, want, roles] of cases) {
+    assert.equal(catalog.search(q, ctx(roles))[0]?.article.id, want, q);
+  }
+});
+
+test('社内規程の質問や、ヘルプに無いことには、関係のない記事を返さない', () => {
+  const catalog = officialCatalog();
+  for (const q of ['育休はいつまで取れますか？どうすればいい？', '有給休暇は何日もらえますか', '経費はどう申請する？', '宇宙旅行の予約方法は？']) {
+    assert.deepEqual(catalog.search(q, ctx(['member'])).map((h) => h.article.id), [], q);
+  }
+});
+
+test('長い言葉に含まれる短い言葉は、長い言葉とまとめて 1 つに数える', () => {
+  const c = helpConcepts('定時実行を止めたい');
+  assert.equal(c.length, 2, '「定時」「実行」を別の言葉として数えない');
+  assert.equal(c[0]!.term, '定時実行');
+  assert.ok(c[0]!.alternatives.includes('実行'));
+  assert.ok(c[1]!.alternatives.includes('止め'), '「止めたい」から「止める」にも当たる語幹を持つ');
+  assert.ok(helpConcepts('誰に見られますか').some((x) => x.term === '見られ'), '漢字 1 文字の動詞の語幹を拾う');
+  assert.ok(!helpConcepts('承認はどうやるの？').some((x) => x.term.endsWith('は')), '助詞で始まる送り仮名は拾わない');
 });
