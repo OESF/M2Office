@@ -591,10 +591,32 @@ export class PostgresRepository implements Repository {
   async listNotifications(tenantId: string, userId: string, limit: number): Promise<Notification[]> {
     return this.q<Notification>(tenantId, 
       `select id, tenant_id as "tenantId", user_id as "userId", kind, title, body,
-              run_id as "runId", read_at as "readAt", created_at as "createdAt"
+              run_id as "runId", read_at as "readAt", created_at as "createdAt",
+              delivered_at as "deliveredAt"
          from notifications where tenant_id = $1 and user_id = $2
         order by created_at desc limit $3`,
       [tenantId, userId, limit],
+    );
+  }
+
+  async listUndeliveredNotifications(tenantId: string, limit: number): Promise<Notification[]> {
+    return this.q<Notification>(tenantId,
+      `select id, tenant_id as "tenantId", user_id as "userId", kind, title, body,
+              run_id as "runId", read_at as "readAt", created_at as "createdAt",
+              delivered_at as "deliveredAt", delivery_note as "deliveryNote"
+         from notifications where tenant_id = $1 and delivered_at is null
+        order by created_at limit $2`,
+      [tenantId, limit],
+    );
+  }
+
+  async markNotificationDelivered(
+    tenantId: string, id: string, deliveredAt: string | null, note: string,
+  ): Promise<void> {
+    await this.q(tenantId,
+      `update notifications set delivered_at = $3, delivery_note = $4
+        where tenant_id = $1 and id = $2`,
+      [tenantId, id, deliveredAt, note],
     );
   }
 
@@ -831,6 +853,7 @@ export class PostgresRepository implements Repository {
       notifications: {
         kinds: { ...d.notifications.kinds, ...(n.kinds ?? {}) },
         quietHours: n.quietHours ?? d.notifications.quietHours,
+        channels: { ...d.notifications.channels, ...(n.channels ?? {}) },
       },
       menu: { ...d.menu, ...(r.menu ?? {}) },
       onboarding: { ...d.onboarding, ...(r.onboarding ?? {}) },

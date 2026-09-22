@@ -264,6 +264,12 @@ export interface UserSettings {
     kinds: Record<'brief' | 'run' | 'approval' | 'failure', boolean>;
     /** 通知しない時間帯（例: 22:00〜7:00）。`null` は指定なし。 */
     quietHours: { from: string; to: string } | null;
+    /**
+     * 画面内のお知らせに加えて控えを届ける先（第6.5.5.2節）。既定はどちらも切（画面内のみ）。
+     *
+     * @remarks 画面内は切れない。控えには種類・題名・画面へのリンクだけを載せる
+     */
+    channels: { chat: boolean; email: boolean };
   };
   menu: {
     /** メニューに出さない業務。使える業務を増やすことはできない（第6.5.6節）。 */
@@ -278,7 +284,11 @@ export interface UserSettings {
 export const DEFAULT_USER_SETTINGS: UserSettings = {
   profile: { furigana: '', title: '', timezone: 'Asia/Tokyo' },
   secretary: { name: '', callMe: '', style: 'polite', proactivity: 'normal' },
-  notifications: { kinds: { brief: true, run: true, approval: true, failure: true }, quietHours: null },
+  notifications: {
+    kinds: { brief: true, run: true, approval: true, failure: true },
+    quietHours: null,
+    channels: { chat: false, email: false },
+  },
   menu: { hidden: [], order: [] },
   onboarding: { tourCompletedAt: null },
 };

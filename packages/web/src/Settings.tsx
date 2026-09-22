@@ -119,11 +119,40 @@ export function Settings({ me, agents, onChanged }: {
 
       <div className="card">
         <h3>通知</h3>
-        <p>受け取る種類を選びます。現在の受け取り方は画面内の「お知らせ」のみです。</p>
+        <p>受け取る種類と、受け取り方を選びます。切った種類は画面内にも届きません。</p>
         {([['brief', '週次ブリーフ'], ['run', '実行の完了'], ['approval', '承認の依頼'], ['failure', '失敗']] as const).map(([k, label]) => (
           <label key={k} className="check">
             <input type="checkbox" checked={s.notifications.kinds[k]}
               onChange={(e) => set('notifications', { kinds: { ...s.notifications.kinds, [k]: e.target.checked } })} />
+            {label}
+          </label>
+        ))}
+        <h4>通知しない時間帯</h4>
+        <p className="muted small">
+          この時間帯は Chat とメールへ送りません。時間帯が明けてから送ります。画面内のお知らせはその場で届きます。
+        </p>
+        <div className="row">
+          <input type="time" value={s.notifications.quietHours?.from ?? ''}
+            onChange={(e) => set('notifications', {
+              quietHours: e.target.value ? { from: e.target.value, to: s.notifications.quietHours?.to ?? '07:00' } : null,
+            })} />
+          <span>〜</span>
+          <input type="time" value={s.notifications.quietHours?.to ?? ''}
+            onChange={(e) => set('notifications', {
+              quietHours: e.target.value ? { from: s.notifications.quietHours?.from ?? '22:00', to: e.target.value } : null,
+            })} />
+          <button className="btn ghost small" onClick={() => set('notifications', { quietHours: null })}>指定しない</button>
+        </div>
+
+        <h4>受け取り方</h4>
+        <p className="muted small">
+          画面内のお知らせは必ず残ります。Chat とメールには控えとして、種類・題名と画面へのリンクだけを送ります（本文は送りません）。
+          いまは送信口が見本のため、実際には届きません。
+        </p>
+        {([['chat', 'Chat（本人への個別メッセージ）'], ['email', 'メール（会社のアドレス）']] as const).map(([k, label]) => (
+          <label key={k} className="check">
+            <input type="checkbox" checked={s.notifications.channels[k]}
+              onChange={(e) => set('notifications', { channels: { ...s.notifications.channels, [k]: e.target.checked } })} />
             {label}
           </label>
         ))}

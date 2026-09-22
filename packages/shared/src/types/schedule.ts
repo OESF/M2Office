@@ -58,6 +58,10 @@ export interface Notification {
   runId: string | null;
   readAt: string | null;
   createdAt: string;
+  /** Chat とメールへ届け終えた時刻。まだ届けていなければ `null`（仕様書 第6.5.5.2節）。 */
+  deliveredAt?: string | null;
+  /** 届け先と、送れなかったときの理由。画面には出さない。 */
+  deliveryNote?: string | null;
 }
 
 /** ログインの状態。Cookie の値は保存せず、ハッシュを `id` とする。 */

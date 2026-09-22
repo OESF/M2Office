@@ -95,6 +95,21 @@ export interface Repository {
   /** 本人の通知を新しい順に返す。他人の通知は返さない。 */
   listNotifications(tenantId: string, userId: string, limit: number): Promise<Notification[]>;
   /** 既読にする。本人の通知でなければ `false`。 */
+  /**
+   * まだ控えを届けていない通知（仕様書 第6.5.5.2節）。古い順に返す。
+   *
+   * @param limit 1 回の見回りで扱う数
+   */
+  listUndeliveredNotifications(tenantId: string, limit: number): Promise<Notification[]>;
+  /**
+   * 控えの届け先と結果を記録する。
+   *
+   * @param deliveredAt 届け終えた時刻。`null` なら次の見回りでもう一度試す
+   * @param note 届け先、または送れなかった理由
+   */
+  markNotificationDelivered(
+    tenantId: string, id: string, deliveredAt: string | null, note: string,
+  ): Promise<void>;
   markNotificationRead(tenantId: string, userId: string, id: string): Promise<boolean>;
 
   createSchedule(s: Schedule): Promise<void>;

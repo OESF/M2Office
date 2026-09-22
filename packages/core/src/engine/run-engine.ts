@@ -160,7 +160,7 @@ export class RunEngine {
       }
 
       if (step.type === 'approval') {
-        const approvalId = await this.suspendForApproval(current, step, job.requestedBy);
+        const approvalId = await this.suspendForApproval(current, def, step, job.requestedBy);
         return { outcome: 'awaiting_approval', approvalId };
       }
 
@@ -278,6 +278,7 @@ export class RunEngine {
 
   private async suspendForApproval(
     run: Run,
+    def: AgentDefinition,
     step: ApprovalStep,
     requestedBy: string,
   ): Promise<string> {
@@ -306,7 +307,55 @@ export class RunEngine {
       action: 'run.await_approval', targetType: 'run', targetId: run.id,
       detail: { stepId: step.id, approvalId: approval.id }, occurredAt: now,
     });
+    // 判断できる人に知らせる（仕様書 第6.5.5.1節）。気づかれずに承認待ちのまま止まることを防ぐ
+    for (const user of await repo.listUsers(run.tenantId)) {
+      if (user.status !== 'active' || !canDecide(approval, user)) continue;
+      await this.notify(run.tenantId, user.id, {
+        kind: 'approval', title: `承認をお願いします: ${def.name}`,
+        body: step.present, runId: run.id, at: now,
+      });
+    }
     return approval.id;
+  }
+
+  /**
+   * 本人宛ての通知を作る。本人が受け取らないと決めた種類は作らない（仕様書 第6.5.5節）。
+   *
+   * @remarks 画面内のお知らせが正であり、Chat とメールへの控えはワーカーが後から届ける（第6.5.5.2節）。
+   */
+  private async notify(
+    tenantId: string, userId: string,
+    n: { kind: 'approval' | 'run' | 'failure'; title: string; body: string; runId: string; at: string },
+  ): Promise<void> {
+    const prefs = await this.deps.repo.getUserSettings(tenantId, userId);
+    if (!prefs.notifications.kinds[n.kind]) return;
+    await this.deps.repo.createNotification({
+      id: randomUUID(), tenantId, userId, kind: n.kind, title: n.title, body: n.body,
+      runId: n.runId, readAt: null, createdAt: n.at,
+    });
+  }
+
+  /**
+   * 実行が終わったことを、依頼した本人に知らせる（仕様書 第6.5.5.1節）。
+   *
+   * @remarks
+   * その実行がすでに本人へ知らせていれば重ねない。週次ブリーフのように、
+   * 業務自身が `notification.send` で知らせるものが 2 通になることを避ける。
+   */
+  private async notifyFinished(run: Run, kind: 'run' | 'failure', body: string, at: string): Promise<void> {
+    const { repo } = this.deps;
+    const job = await repo.getJob(run.tenantId, run.jobId);
+    if (!job) return;
+    const already = (await repo.listNotifications(run.tenantId, job.requestedBy, 50))
+      .some((x) => x.runId === run.id && x.kind !== 'approval');
+    if (already) return;
+    const def = await this.deps.resolveDefinition(job.agentId, job.agentVersion, run.tenantId);
+    const name = def?.name ?? job.agentId;
+    await this.notify(run.tenantId, job.requestedBy, {
+      kind,
+      title: kind === 'run' ? `業務が終わりました: ${name}` : `業務が終わりませんでした: ${name}`,
+      body, runId: run.id, at,
+    });
   }
 
   private async runAgentStep(
@@ -541,6 +590,7 @@ export class RunEngine {
     await this.deps.repo.updateRun({
       ...run, status: 'completed', endedAt: now, failureReason: note, savedMinutes,
     });
+    await this.notifyFinished(run, 'run', note ?? '依頼した業務が最後まで終わりました。', now);
     await this.deps.repo.appendAudit({
       id: randomUUID(), tenantId: run.tenantId, actorType: 'system', actorId: 'engine',
       action: 'run.complete', targetType: 'run', targetId: run.id,
@@ -555,6 +605,7 @@ export class RunEngine {
     await this.deps.repo.updateRun({
       ...run, status: 'failed', endedAt: now, failureReason: reason,
     });
+    await this.notifyFinished(run, 'failure', reason, now);
     await this.deps.repo.appendAudit({
       id: randomUUID(), tenantId: run.tenantId, actorType: 'system', actorId: 'engine',
       action: 'run.fail', targetType: 'run', targetId: run.id,

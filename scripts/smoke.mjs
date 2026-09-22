@@ -1402,6 +1402,60 @@ console.log('\n■ 34. 会社の利用の停止（第23.8.6節）');
   await owner.end();
 }
 
+console.log('\n■ 35. 通知（画面内のお知らせと、Chat・メールへの控え。第6.5.5節）');
+{
+  // 依頼した本人（member）が控えを受け取る設定にする
+  const settings = { kinds: { brief: true, run: true, approval: true, failure: true }, quietHours: null, channels: { chat: true, email: true } };
+  await call('a', '/v1/me/settings/notifications', { method: 'PUT', body: JSON.stringify(settings) }, 'member');
+
+  const { body: job } = await call('a', '/v1/jobs', {
+    method: 'POST',
+    body: JSON.stringify({ agentId: 'minutes', input: { title: '通知の確認', transcript: 'A 案で決定。', space: 'general' } }),
+  }, 'member');
+  await waitFor('a', job.runId, ['awaiting_approval'], 20000, 'member');
+
+  // 承認待ちになったら、判断できる人（管理者）に承認依頼が届く
+  const { body: adminNotes } = await call('a', '/v1/notifications');
+  const approval = (adminNotes.items ?? []).find((n) => n.runId === job.runId && n.kind === 'approval');
+  approval ? ok(`承認待ちを、判断できる人に知らせる（${approval.title}）`) : ng('承認依頼が届かない');
+
+  // 依頼した本人には、この時点では完了の通知が無い
+  const { body: before } = await call('a', '/v1/notifications', {}, 'member');
+  (before.items ?? []).every((n) => n.runId !== job.runId || n.kind === 'approval')
+    ? ok('依頼した本人には、終わるまで完了を知らせない') : ng('終わる前に完了を知らせている');
+
+  // 承認して最後まで進め、完了の通知と、控えを届けたことを確かめる
+  for (let i = 0; i < 2; i++) {
+    const a = await approvalFor('a', job.runId);
+    if (!a) break;
+    await call('a', `/v1/approvals/${a.id}`, { method: 'POST', body: JSON.stringify({ decision: 'approved', comment: null }) });
+    await waitFor('a', job.runId, ['awaiting_approval', 'completed', 'failed'], 20000, 'member');
+  }
+  const done = await waitFor('a', job.runId, ['completed', 'failed'], 20000, 'member');
+  done.run?.status === 'completed' ? ok('承認を通して最後まで進んだ') : ng(`完了しない（${done.run?.status}）`, done.run?.failureReason);
+
+  let finished = null;
+  for (let i = 0; i < 40 && !finished?.deliveredAt; i++) {
+    const { body: notes } = await call('a', '/v1/notifications', {}, 'member');
+    finished = (notes.items ?? []).find((n) => n.runId === job.runId && n.kind === 'run');
+    if (!finished?.deliveredAt) await sleep(500);
+  }
+  finished ? ok(`実行の完了を本人に知らせた（${finished.title}）`) : ng('完了の通知が無い');
+  finished?.deliveredAt
+    ? ok('Chat とメールへの控えを、ワーカーが届けた（見本の送信口）') : ng('控えが届かない', JSON.stringify(finished));
+
+  // 後片付け: 控えの設定を既定（画面内のみ）に戻す
+  await call('a', '/v1/me/settings/notifications', {
+    method: 'PUT',
+    body: JSON.stringify({ ...settings, channels: { chat: false, email: false } }),
+  }, 'member');
+
+  // 登録された議事録を消す（以降の確認に影響させない）
+  const { body: kb } = await call('a', '/v1/admin/knowledge');
+  const registered = (kb.items ?? []).find((k) => k.originRunId === job.runId);
+  if (registered) await call('a', `/v1/admin/knowledge/${registered.id}`, { method: 'DELETE' });
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

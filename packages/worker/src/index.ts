@@ -12,6 +12,7 @@
 import {
   PostgresRepository, StubLlmProvider, OpenAiCompatibleProvider, ToolRegistry, BUILTIN_TOOLS,
   RunEngine, Scheduler, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, agentUsesGoogle,
+  NotificationDelivery, MockNotificationSender,
   loadExtensions, OFFICIAL_AGENTS, GeminiResearchProvider, MockResearchProvider, TenantAiResolver, secretBoxFromEnv,
   type LlmProvider,
 } from '@m2office/core';
@@ -82,9 +83,26 @@ const scheduler = new Scheduler({
   },
 });
 
+// 通知の控えを Chat とメールへ届ける（仕様書 第6.5.5.2節）。送信口は B-2 と Q-86 のあとに差し替える
+/**
+ * 会社の画面のアドレス。通知の控えに載せるリンクに使う（仕様書 第6.5.5.2節）。
+ *
+ * @remarks `APP_BASE_URL` の `{tenant}` をサブドメインに置き換える。開発では `http://{tenant}.lvh.me:3100`
+ */
+const appUrl = (subdomain: string): string =>
+  (process.env['APP_BASE_URL'] ?? `http://{tenant}.${process.env['BASE_DOMAIN'] ?? 'lvh.me'}:${process.env['WEB_PORT'] ?? 3100}`)
+    .replace('{tenant}', subdomain);
+
+const notifier = new NotificationDelivery({
+  repo, sender: new MockNotificationSender(log), logger: log,
+  linkFor: (tenant) => appUrl(tenant.subdomain),
+});
+
 const POLL_INTERVAL_MS = 1000;
 /** 定時実行の見回り間隔。分単位の指定に対して十分に短くする。 */
 const SCHEDULE_INTERVAL_MS = Number(process.env['SCHEDULE_INTERVAL_MS'] ?? 15_000);
+/** 通知の控えの見回り間隔。通知しない時間帯が明けたときの遅れを、この間隔に収める。 */
+const NOTIFY_INTERVAL_MS = Number(process.env['NOTIFY_INTERVAL_MS'] ?? 10_000);
 /** 保持期間の見回り間隔。本番は 10 分、開発は確かめやすいよう 15 秒。 */
 const RETENTION_INTERVAL_MS = Number(
   process.env['RETENTION_INTERVAL_MS'] ?? (process.env['NODE_ENV'] === 'production' ? 600_000 : 15_000),
@@ -92,6 +110,7 @@ const RETENTION_INTERVAL_MS = Number(
 let running = true;
 let lastScheduleCheck = 0;
 let lastRetentionCheck = 0;
+let lastNotifyCheck = 0;
 
 process.on('SIGINT', () => { running = false; });
 process.on('SIGTERM', () => { running = false; });
@@ -110,6 +129,16 @@ while (running) {
       for (const runId of started) log.info('定時実行を起動しました', { runId });
     } catch (err) {
       log.error('定時実行の見回りで例外が発生しました', { err });
+    }
+  }
+
+  if (Date.now() - lastNotifyCheck >= NOTIFY_INTERVAL_MS) {
+    lastNotifyCheck = Date.now();
+    try {
+      const r = await notifier.sweep(new Date());
+      if (r.sent > 0) log.info('通知の控えを届けました', r);
+    } catch (err) {
+      log.error('通知の控えの見回りで例外が発生しました', { err });
     }
   }
 

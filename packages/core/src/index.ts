@@ -23,6 +23,8 @@ export type {
 } from './repository/types.js';
 export { PostgresRepository } from './repository/postgres.js';
 export { canViewRun, type RunViewer } from './engine/run-access.js';
+export * from './notify/sender.js';
+export * from './notify/delivery.js';
 export * from './retention/google-data.js';
 export * from './retention/revocation.js';
 export * from './knowledge/index.js';

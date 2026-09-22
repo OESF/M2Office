@@ -53,6 +53,10 @@ class MemoryRepo {
   async appendAudit(e: AuditEvent) { this.audits.push(e); }
   async createNotification(n: Notification) { this.notifications.push(n); }
   async findUserById(t: string, id: string) { return this.users.find((u) => u.tenantId === t && u.id === id) ?? null; }
+  async listUsers(t: string) { return this.users.filter((u) => u.tenantId === t); }
+  async listNotifications(t: string, userId: string) {
+    return this.notifications.filter((n) => n.tenantId === t && n.userId === userId);
+  }
   artifacts: Artifact[] = [];
   async createArtifact(a: Artifact) { this.artifacts.push(a); }
   async listArtifacts(t: string, runId: string) { return this.artifacts.filter((a) => a.tenantId === t && a.runId === runId); }
@@ -219,13 +223,15 @@ test('notification.send は依頼者本人にだけ届き、宛先の指定を�
   const ng = setup(def, { name: 'notification.send', args: { to: 'u-admin', title: '他人宛' } });
   ng.repo.settings.automation.writeInternal = 'allow';
   await ng.engine.advance(ng.run);
-  assert.equal(ng.repo.notifications.length, 0, '宛先を指定した通知は送らない');
+  // 実行が終わったことの通知（第6.5.5.1節）とは別に、ツールの通知が作られていないことを見る
+  assert.equal(ng.repo.notifications.filter((n) => n.title === '他人宛').length, 0, '宛先を指定した通知は送らない');
+  assert.deepEqual(ng.repo.notifications.map((n) => n.userId), ['u-member'], '他人には届かない');
 
   const off = setup(def, { name: 'notification.send', args: { kind: 'brief', title: '週次' } });
   off.repo.settings.automation.writeInternal = 'allow';
   off.repo.userSettings.notifications.kinds.brief = false;
   await off.engine.advance(off.run);
-  assert.equal(off.repo.notifications.length, 0, '本人が受け取らないと決めた種類は届けない');
+  assert.equal(off.repo.notifications.filter((n) => n.kind === 'brief').length, 0, '本人が受け取らないと決めた種類は届けない');
 });
 
 const TASK_DEF: AgentDefinition = {
@@ -537,4 +543,49 @@ test('ほかの実行の成果物と、Google から読んだ記録で作った�
     output: { tools: [{ name: 'meet.transcript', risk: 'read', result: {} }] }, startedAt: '2026-01-01T00:00:00Z', endedAt: null });
   await tool.invoke({ artifactId: repo.artifacts[0]!.id }, { ...base, isGoogleTool: (n) => n === 'meet.transcript' });
   assert.equal(repo.knowledge[0]?.googleDerived, true);
+});
+
+test('承認待ちになったら、判断できる人に知らせる（仕様書 第6.5.5.1節）', async () => {
+  const { repo, engine, run } = setup(SHARE_DEF, { name: 'chat.post', args: {} });
+  const res = await engine.advance(run);
+  assert.equal(res.outcome, 'awaiting_approval');
+  const notes = repo.notifications.filter((n) => n.kind === 'approval');
+  assert.deepEqual(notes.map((n) => n.userId), ['u-admin'], '承認のロールを持つ人だけに知らせる');
+  assert.equal(notes[0]!.title, '承認をお願いします: テスト');
+  assert.equal(notes[0]!.runId, 'r1');
+});
+
+test('実行が終わったら依頼した本人に知らせ、失敗も知らせる', async () => {
+  const done = setup(SHARE_DEF, { name: 'chat.post', args: { text: '共有' } });
+  const first = await done.engine.advance(done.run);
+  if (first.outcome !== 'awaiting_approval') assert.fail('承認待ちにならない');
+  await done.engine.decideApproval('t', first.approvalId, 'approved', { id: 'u-admin', roles: ['admin', 'approver'] }, null);
+  await done.engine.advance({ ...(await done.repo.getRun('t', 'r1'))!, status: 'running' });
+  const finished = done.repo.notifications.filter((n) => n.userId === 'u-member');
+  assert.deepEqual(finished.map((n) => n.kind), ['run']);
+  assert.equal(finished[0]!.title, '業務が終わりました: テスト');
+
+  // 失敗したときは種類 failure で知らせる
+  const failed = setup({ ...SHARE_DEF, id: 'fail-test' }, { name: 'chat.post', args: {} });
+  failed.repo.settings.agents = { disabled: ['fail-test'] };
+  assert.equal((await failed.engine.advance(failed.run)).outcome, 'failed');
+  assert.deepEqual(failed.repo.notifications.map((n) => n.kind), ['failure']);
+});
+
+test('本人が受け取らない種類は作らず、業務自身が知らせた実行には完了を重ねない', async () => {
+  const off = setup(SHARE_DEF, { name: 'chat.post', args: {} });
+  off.repo.userSettings.notifications.kinds.approval = false;
+  await off.engine.advance(off.run);
+  assert.equal(off.repo.notifications.length, 0, '切った種類は画面内にも作らない');
+
+  const brief = setup(SHARE_DEF, { name: 'chat.post', args: {} });
+  brief.repo.notifications.push({
+    id: 'n-brief', tenantId: 't', userId: 'u-member', kind: 'brief', title: '今週のブリーフ',
+    body: '', runId: 'r1', readAt: null, createdAt: new Date().toISOString(),
+  });
+  const gate = await brief.engine.advance(brief.run);
+  if (gate.outcome !== 'awaiting_approval') assert.fail('承認待ちにならない');
+  await brief.engine.decideApproval('t', gate.approvalId, 'approved', { id: 'u-admin', roles: ['admin', 'approver'] }, null);
+  await brief.engine.advance({ ...(await brief.repo.getRun('t', 'r1'))!, status: 'running' });
+  assert.equal(brief.repo.notifications.filter((n) => n.kind === 'run').length, 0, '週次ブリーフが 2 通にならない');
 });
