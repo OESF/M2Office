@@ -112,6 +112,22 @@ function Field({
   );
 }
 
+/**
+ * 実行の答え（仕様書 第6.2.2節）。
+ *
+ * @remarks
+ * **最後に文を返した段**の応答を使う。途中の段の文には道具の呼び出しが混じるため、
+ * その囲みは落とす。落とした結果が空なら、答えは無いものとして扱う。
+ */
+function answerOf(steps: RunStep[]): string {
+  for (let i = steps.length - 1; i >= 0; i--) {
+    const raw = (steps[i]?.output as { text?: string } | null)?.text ?? '';
+    const text = raw.replace(/```tool[\s\S]*?```/g, '').trim();
+    if (text) return text;
+  }
+  return '';
+}
+
 /** 途中で止められる状態（仕様書 第9.3.1節）。終わった実行は止められない。 */
 const CANCELLABLE = ['queued', 'running', 'awaiting_approval'];
 
@@ -133,6 +149,8 @@ export function RunView({
   const [error, setError] = useState<string | null>(null);
   const [leftover, setLeftover] = useState<string[] | null>(null);
   const canCancel = detail.job?.requestedBy === viewerId && CANCELLABLE.includes(run.status);
+  const done = run.status === 'completed' || run.status === 'failed';
+  const answer = answerOf(steps);
 
   async function cancel() {
     // 中止は、すでに起きたことを取り消さない。押す前に伝える（第9.3.1節）
@@ -183,6 +201,15 @@ export function RunView({
           </p>
         )}
       </div>
+      {/* 終わった実行の答えを必ず出す（仕様書 第6.2.2節）。成果物を作らない業務もある */}
+      {done && (
+        <div className="card">
+          <h3>結果</h3>
+          {answer
+            ? <p className="reply">{answer}</p>
+            : <p className="muted">結果がありません。ステップと根拠をご確認ください。</p>}
+        </div>
+      )}
       <div className="card">
         <h3>ステップ</h3>
         <ul className="steps">

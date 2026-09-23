@@ -94,6 +94,12 @@ let qaRunId;
     ? ok(`完了した（ステップ ${run.steps.length} 件、${run.run.tokensUsed} トークン、${run.run.costJpy} 円）`)
     : ng(`完了しない（状態: ${run.run.status}）`, run.run.failureReason);
 
+  // 答えるだけの業務でも、結果が読める（第6.2.2節）。成果物は作らない
+  const last = [...run.steps].reverse().find((s) => (s.output?.text ?? '').replace(/```tool[\s\S]*?```/g, '').trim());
+  last ? ok('成果物を作らない業務でも、最後の段に答えが残る') : ng('答えがどこにも無い', JSON.stringify(run.steps.map((s) => s.stepId)));
+  (run.artifacts ?? []).length === 0
+    ? ok('この業務は成果物を作らない（結果は段から読む）') : ng('成果物ができている');
+
   const searched = run.steps.find((s) => s.stepId === 'search');
   const hits = searched?.output?.tools?.[0]?.result?.hits ?? [];
   hits.length > 0
@@ -2009,6 +2015,7 @@ console.log('\n■ 42. 音声の対話（第10.5.5節）');
     await owner.query(`update tenants set status = 'active' where subdomain = 'b'`);
     await owner.end();
   }
+
 }
 
 console.log('\n■ 43. 実行の中止と、知識の登録（第9.3.1節、第13.3節・ADR-0019）');
