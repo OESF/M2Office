@@ -199,6 +199,23 @@ export interface KnowledgeSectionView {
   heading: string; path: string[]; chars: number;
 }
 
+/** 昇華の提案（仕様書 第11.3.1節）。 */
+export interface PromotionView {
+  id: string; text: string; status: 'proposed' | 'pending' | 'approved' | 'rejected' | 'withdrawn';
+  comment: string | null; createdAt: string; decidedAt: string | null;
+}
+
+/** 記憶の候補（仕様書 第11.5.2節）。 */
+export interface MemoryCandidateView {
+  id: string; text: string; sourceDay: string; createdAt: string;
+}
+
+/** 会話ログの 1 往復（仕様書 第11.9.4.1節）。 */
+export interface ConversationView {
+  id: string; message: string; reply: string; layer: 'direct' | 'light' | 'full';
+  agentId: string | null; runId: string | null; createdAt: string;
+}
+
 /** 個人記憶の 1 件（仕様書 第11.5.1節）。 */
 export interface MemoryView {
   id: string; text: string; source: string; createdAt: string;
@@ -381,6 +398,23 @@ export const api = {
   mySettings: () => call<UserSettings>('/me/settings'),
   saveMySettings: <K extends keyof UserSettings>(section: K, value: UserSettings[K]) =>
     call(`/me/settings/${section}`, { method: 'PUT', body: JSON.stringify(value) }),
+  /** 記憶を会社の知識にする提案（昇華。仕様書 第11.3.1節）。 */
+  promoteMemory: (id: string) => call<{ id: string; status: string }>(`/me/memories/${id}/promote`, { method: 'POST', body: '{}' }),
+  /** 自分の昇華の履歴。 */
+  myPromotions: () => call<{ items: PromotionView[] }>('/me/promotions'),
+  /** 記憶の候補（仕様書 第11.5.2節）。対話から作られ、本人が採ると記憶になる。 */
+  myMemoryCandidates: () => call<{ items: MemoryCandidateView[] }>('/me/memory-candidates'),
+  acceptMemoryCandidate: (id: string) =>
+    call(`/me/memory-candidates/${id}/accept`, { method: 'POST', body: '{}' }),
+  dismissMemoryCandidate: (id: string) =>
+    call(`/me/memory-candidates/${id}/dismiss`, { method: 'POST', body: '{}' }),
+  /** 会話の要約（仕様書 第11.9.6節）。 */
+  myConversationDigests: () => call<{ items: { day: string; summary: string }[] }>('/me/conversation-digests'),
+  /** 会話ログ（仕様書 第11.9.4.1節）。本人のやり取りだけが返る。 */
+  myConversations: (query = '') =>
+    call<{ items: ConversationView[] }>(`/me/conversations${query ? `?q=${encodeURIComponent(query)}` : ''}`),
+  deleteConversation: (id: string) => call(`/me/conversations/${id}`, { method: 'DELETE' }),
+  clearConversations: () => call<{ removed: number }>('/me/conversations', { method: 'DELETE' }),
   /** 管理者のダッシュボードでの自分の見え方（仕様書 第6.7.10節 規定 4）。 */
   myPresence: () => call<{
     presence: PresenceView; granularity: 'names' | 'counts'; shown: string[]; hidden: string[];
@@ -440,6 +474,14 @@ export const api = {
         id: string; name: string; description: string; usesWriteInternal: boolean; defaultMinutes: number;
       }[];
     }>('/admin/settings'),
+    /** 昇華の承認待ち（仕様書 第11.3.1節）。 */
+    promotions: () => call<{
+      items: { id: string; text: string; proposedBy: string; createdAt: string; canDecide: boolean }[];
+    }>('/admin/promotions'),
+    decidePromotion: (id: string, decision: 'approved' | 'rejected', comment: string | null) =>
+      call<{ status: string }>(`/admin/promotions/${id}`, {
+        method: 'POST', body: JSON.stringify({ decision, comment }),
+      }),
     dashboardLive: () => call<DashboardLive>('/admin/dashboard/live'),
     /**
      * ダッシュボードの状態を受け取り続ける（SSE。仕様書 第6.7.9節）。

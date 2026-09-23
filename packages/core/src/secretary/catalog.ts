@@ -59,6 +59,12 @@ export interface DirectQueryContext {
 
 export interface DirectAnswer {
   text: string;
+  /**
+   * 会話ログに残すか（仕様書 第11.9.4.1節）。省略時は残す。
+   *
+   * @remarks 「この会話は残さないで」のように、残さないこと自体が答えである照会で `false` にする。
+   */
+  keep?: boolean;
   /** 根拠。サッシパネルに表示する（仕様書 第6.2節）。 */
   evidence: { label: string; value: string }[];
 }
@@ -164,6 +170,35 @@ const todayTasks: DirectQuery = {
 };
 
 /** 承認待ちの件数と一覧を返す。 */
+/**
+ * 「この会話は残さないで」に応える（仕様書 第11.9.4.1節、ADR-0014）。
+ *
+ * @remarks
+ * 直近 1 時間の自分の会話を消す。「いまの話」の範囲を、本人にも実装にも分かる形で決めている。
+ * 以後も残さないようにするのは、個人設定の「会話を残す」の役目である。
+ */
+const conversationForget: DirectQuery = {
+  id: 'conversation-forget',
+  label: '会話を残さない',
+  patterns: [/(この|今の|いまの|さっきの)(会話|話|やり取り|やりとり)[はを]?\s*(残さないで|記録しないで|保存しないで|消して)/],
+  compartment: null,
+  async answer(ctx) {
+    const since = new Date(Date.now() - 60 * 60_000).toISOString();
+    const removed = await ctx.repo.clearConversations(ctx.tenantId, ctx.userId, since);
+    await ctx.repo.appendAudit({
+      id: randomUUID(), tenantId: ctx.tenantId, actorType: 'user', actorId: ctx.userId,
+      action: 'conversation.clear', targetType: 'conversation', targetId: 'recent',
+      detail: { removed, scope: '直近 1 時間' }, occurredAt: new Date().toISOString(),
+    });
+    return {
+      text: `直近 1 時間の会話を消しました（${removed} 件）。以後も残さないようにするには、個人設定の「記憶とデータ」で「会話を残す」を切ってください。`,
+      evidence: [{ label: '消した会話', value: `${removed} 件` }],
+      // 消してほしいという指示そのものも残さない
+      keep: false,
+    };
+  },
+};
+
 /**
  * 「〜を覚えておいて」に応える（仕様書 第11.5.1節、ADR-0012）。
  *
@@ -295,6 +330,6 @@ const recentRuns: DirectQuery = {
  * 根拠にその旨を示す（仕様書 第10.9.2節の表）。
  */
 export const DIRECT_QUERIES: DirectQuery[] = [
-  memoryForget, memoryRemember, memoryList,
+  conversationForget, memoryForget, memoryRemember, memoryList,
   pendingApprovals, schedule, unreadMail, todayTasks, recentRuns,
 ];

@@ -1568,6 +1568,140 @@ console.log('\n■ 37. ダッシュボードの人の状態と SSE（第6.7.4.1�
     ? ok('表示されないものを本人に示す') : ng('示さない');
 }
 
+console.log('\n■ 38. 会話ログ（第11.9.4.1節）');
+{
+  const who = 'member';
+  await call('a', '/v1/me/conversations', { method: 'DELETE' }, who);
+  const say = async (message) => (await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message }) }, who)).body;
+
+  // 依頼した人を見分けられるよう、この確認だけの言い方にする
+  const mark = '会話ログの確認です。承認待ちある？';
+  await say(mark);
+  const { body: mine } = await call('a', '/v1/me/conversations', {}, who);
+  (mine.items ?? []).some((c) => c.message === mark && c.reply && c.layer === 'direct')
+    ? ok('秘書とのやり取りを 1 往復ずつ残す') : ng('残らない', JSON.stringify(mine.items ?? []).slice(0, 150));
+
+  // 本人以外には見えない（不変則 I-10）
+  const { body: admin } = await call('a', '/v1/me/conversations', {}, 'admin');
+  (admin.items ?? []).every((c) => c.message !== mark)
+    ? ok('ほかの人（管理者）には見えない') : ng('他人の会話が見えている');
+
+  await say('経費の規程を教えて');
+  const { body: found } = await call('a', '/v1/me/conversations?q=経費', {}, who);
+  (found.items ?? []).length === 1 && found.items[0].message.includes('経費')
+    ? ok('言葉で探せる') : ng('探せない', String((found.items ?? []).length));
+
+  const target = (found.items ?? [])[0];
+  await call('a', `/v1/me/conversations/${target.id}`, { method: 'DELETE' }, who);
+  const { body: afterDelete } = await call('a', '/v1/me/conversations?q=経費', {}, who);
+  (afterDelete.items ?? []).length === 0 ? ok('1 件ずつ消せる') : ng('消えない');
+
+  const forgotten = await say('この会話は残さないで');
+  const { body: afterForget } = await call('a', '/v1/me/conversations', {}, who);
+  /直近 1 時間の会話を消しました/.test(forgotten.text) && (afterForget.items ?? []).length === 0
+    ? ok('「この会話は残さないで」で直近 1 時間を消す') : ng('消えない', forgotten.text);
+
+  // 「会話を残す」を切ると 1 件も残らない
+  const settings = { learning: true, excludes: [], keepConversations: false };
+  await call('a', '/v1/me/settings/memory', { method: 'PUT', body: JSON.stringify(settings) }, who);
+  await say('今日の予定は？');
+  const { body: off } = await call('a', '/v1/me/conversations', {}, who);
+  (off.items ?? []).length === 0 ? ok('「会話を残す」を切ると残らない') : ng('残ってしまう');
+  await call('a', '/v1/me/settings/memory', { method: 'PUT', body: JSON.stringify({ ...settings, keepConversations: true }) }, who);
+
+  const { body: audits } = await call('a', '/v1/admin/audit-events');
+  const cleared = (audits.items ?? []).find((e) => e.action === 'conversation.clear');
+  cleared && !JSON.stringify(cleared).includes('承認待ちある')
+    ? ok('監査ログに操作は残り、会話の中身は残らない') : ng('監査ログの扱いが規定と違う', JSON.stringify(cleared ?? null));
+  await call('a', '/v1/me/conversations', { method: 'DELETE' }, who);
+}
+
+console.log('\n■ 39. 対話からの学習（記憶の候補。第11.5.2節）');
+{
+  const who = 'member';
+  // 候補を作るのは夜間のワーカーで、鍵の無い環境では作らない。ここでは候補の採否を確かめる
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const { rows: [user] } = await owner.query(`select id from users where email = 'member@alpha.example.jp'`);
+  const { rows: [tenant] } = await owner.query(`select id from tenants where subdomain = 'a'`);
+  const ids = ['smoke-cand-1', 'smoke-cand-2'];
+  await owner.query(`delete from memory_candidates where id = any($1)`, [ids]);
+  for (const [i, id] of ids.entries()) {
+    await owner.query(
+      `insert into memory_candidates (id, tenant_id, user_id, text, status, source_day)
+       values ($1,$2,$3,$4,'pending','2026-09-22')`,
+      [id, tenant.id, user.id, `確認用の候補 ${i + 1}`]);
+  }
+
+  const { body: pending } = await call('a', '/v1/me/memory-candidates', {}, who);
+  (pending.items ?? []).length === 2 ? ok('記憶の候補を本人に示す') : ng('候補が出ない', String((pending.items ?? []).length));
+
+  const { body: other } = await call('a', '/v1/me/memory-candidates', {}, 'admin');
+  (other.items ?? []).every((c) => !c.text.startsWith('確認用の候補'))
+    ? ok('ほかの人の候補は見えない') : ng('他人の候補が見えている');
+
+  await call('a', `/v1/me/memory-candidates/${ids[0]}/accept`, { method: 'POST', body: '{}' }, who);
+  await call('a', `/v1/me/memory-candidates/${ids[1]}/dismiss`, { method: 'POST', body: '{}' }, who);
+  const [{ body: memories }, { body: left }] = await Promise.all([
+    call('a', '/v1/me/memories', {}, who),
+    call('a', '/v1/me/memory-candidates', {}, who),
+  ]);
+  (memories.items ?? []).some((m) => m.text === '確認用の候補 1' && m.source === 'conversation')
+    ? ok('「覚える」を押した候補だけが記憶になる') : ng('記憶にならない', JSON.stringify(memories.items ?? []).slice(0, 120));
+  (left.items ?? []).length === 0 ? ok('判断した候補は一覧から消える') : ng('候補が残る');
+
+  const { rows: [dismissed] } = await owner.query(`select status from memory_candidates where id = $1`, [ids[1]]);
+  dismissed?.status === 'dismissed'
+    ? ok('「不要」とした文は、同じ文を再び候補にしないために残す') : ng('残らない', JSON.stringify(dismissed ?? null));
+
+  // 後片付け
+  await call('a', '/v1/me/memories', { method: 'DELETE' }, who);
+  await owner.query(`delete from memory_candidates where id = any($1)`, [ids]);
+  await owner.end();
+}
+
+console.log('\n■ 40. 昇華（個人の記憶を会社の知識へ。第11.3.1節）');
+{
+  const who = 'member';
+  await call('a', '/v1/me/memories', { method: 'DELETE' }, who);
+  await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message: '経費の精算は佐藤さんに出すと覚えておいて' }) }, who);
+  const { body: memories } = await call('a', '/v1/me/memories', {}, who);
+  const memory = (memories.items ?? [])[0];
+
+  const { status: promoted } = await call('a', `/v1/me/memories/${memory.id}/promote`, { method: 'POST', body: '{}' }, who);
+  const { body: pending } = await call('a', '/v1/admin/promotions');
+  const proposal = (pending.items ?? []).find((p) => p.text === memory.text);
+  promoted === 200 && proposal?.canDecide
+    ? ok(`提案が管理者の承認待ちに並ぶ（${proposal.proposedBy}さんの提案）`) : ng('承認待ちに並ばない', JSON.stringify(pending.items ?? []));
+
+  // 提案した本人は判断できない（二重の承認）
+  const { status: bySelf } = await call('a', `/v1/admin/promotions/${proposal.id}`, { method: 'POST', body: JSON.stringify({ decision: 'approved' }) }, who);
+  bySelf === 403 ? ok('提案した本人は判断できない') : ng(`判断できてしまう（${bySelf}）`);
+
+  await call('a', `/v1/admin/promotions/${proposal.id}`, { method: 'POST', body: JSON.stringify({ decision: 'approved', comment: null }) });
+  const { body: knowledge } = await call('a', '/v1/admin/knowledge');
+  const registered = (knowledge.items ?? []).find((k) => k.body === memory.text);
+  registered && /昇華/.test(registered.source)
+    ? ok(`承認すると、その文のまま会社の知識になる（${registered.source}）`) : ng('知識にならない', JSON.stringify(registered ?? null));
+
+  const { body: history } = await call('a', '/v1/me/promotions', {}, who);
+  (history.items ?? []).some((p) => p.status === 'approved')
+    ? ok('本人は昇華の履歴を見られる') : ng('履歴が見えない');
+
+  const { body: notes } = await call('a', '/v1/notifications', {}, who);
+  (notes.items ?? []).some((n) => n.title === '提案が会社の知識になりました')
+    ? ok('判断を本人に知らせる') : ng('知らせない');
+
+  const { body: mine } = await call('a', '/v1/me/memories', {}, who);
+  (mine.items ?? []).length === 1 ? ok('昇華しても、本人の記憶は残る') : ng('記憶が消えている');
+
+  // 後片付け
+  if (registered) await call('a', `/v1/admin/knowledge/${registered.id}`, { method: 'DELETE' });
+  await call('a', '/v1/me/memories', { method: 'DELETE' }, who);
+  await call('a', '/v1/me/conversations', { method: 'DELETE' }, who);
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

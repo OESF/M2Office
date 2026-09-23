@@ -289,6 +289,8 @@ export interface UserSettings {
     learning: boolean;
     /** 対象外の言葉。これを含む指示は覚えない（「この件は覚えないで」）。 */
     excludes: string[];
+    /** 秘書とのやり取りを会話ログに残すか（第11.9.4.1節）。切ると 1 件も残さない。 */
+    keepConversations: boolean;
   };
   menu: {
     /** メニューに出さない業務。使える業務を増やすことはできない（第6.5.6節）。 */
@@ -308,7 +310,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
     quietHours: null,
     channels: { chat: false, email: false },
   },
-  memory: { learning: true, excludes: [] },
+  memory: { learning: true, excludes: [], keepConversations: true },
   menu: { hidden: [], order: [] },
   onboarding: { tourCompletedAt: null },
 };

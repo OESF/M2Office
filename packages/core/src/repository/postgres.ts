@@ -13,7 +13,7 @@ import type {
   StoredFile, Tenant, TenantSettings, User, UserGroup, UserSettings,
 } from '@m2office/shared';
 import { DEFAULT_TENANT_SETTINGS, DEFAULT_USER_SETTINGS, STANDARD_SYNONYMS } from '@m2office/shared';
-import type { CompartmentAssignment, CredentialKind, GoogleConnection, TenantCredential, InstalledExtension, PrivateExtension, KnowledgeItem, KnowledgeSearchResult, KnowledgeSectionView, Memory, Repository, RunStatRow } from './types.js';
+import type { CompartmentAssignment, Conversation, ConversationDigest, MemoryCandidate, Promotion, CredentialKind, GoogleConnection, TenantCredential, InstalledExtension, PrivateExtension, KnowledgeItem, KnowledgeSearchResult, KnowledgeSectionView, Memory, Repository, RunStatRow } from './types.js';
 import { SPLIT_VERSION, citationOf, splitKnowledge } from '../knowledge/sections.js';
 import { SEARCH_CANDIDATES, bigrams, expandTerms, extractTerms, normalizeForSearch, rankSections, rewritesOf } from '../knowledge/search.js';
 
@@ -841,6 +841,183 @@ export class PostgresRepository implements Repository {
     return this.q<{ id: string; name: string; description: string | null }>(tenantId,
       `select id, name, description from compartments where tenant_id = $1 and enabled order by name`,
       [tenantId]);
+  }
+
+  async appendConversation(c: Conversation): Promise<void> {
+    await this.q(c.tenantId,
+      `insert into conversations
+         (id, tenant_id, user_id, message, reply, layer, agent_id, run_id, search_text, created_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      [c.id, c.tenantId, c.userId, c.message, c.reply, c.layer, c.agentId, c.runId,
+        normalizeForSearch(`${c.message} ${c.reply}`), c.createdAt]);
+  }
+
+  async listConversations(
+    tenantId: string, userId: string, opts: { query?: string; limit: number },
+  ): Promise<Conversation[]> {
+    const query = (opts.query ?? '').trim();
+    const like = `%${escapeLike(normalizeForSearch(query))}%`;
+    return this.q<Conversation>(tenantId,
+      `select id, tenant_id as "tenantId", user_id as "userId", message, reply, layer,
+              agent_id as "agentId", run_id as "runId", created_at as "createdAt"
+         from conversations
+        where tenant_id = $1 and user_id = $2 and ($3 = '' or search_text like $4 escape '\\')
+        order by created_at desc limit $5`,
+      [tenantId, userId, query, like, opts.limit]);
+  }
+
+  async deleteConversation(tenantId: string, userId: string, id: string): Promise<boolean> {
+    const rows = await this.q<{ id: string }>(tenantId,
+      `delete from conversations where tenant_id = $1 and user_id = $2 and id = $3 returning id`,
+      [tenantId, userId, id]);
+    return rows.length > 0;
+  }
+
+  async clearConversations(tenantId: string, userId: string, since?: string): Promise<number> {
+    const rows = await this.q<{ id: string }>(tenantId,
+      `delete from conversations
+        where tenant_id = $1 and user_id = $2 and ($3::timestamptz is null or created_at >= $3)
+        returning id`,
+      [tenantId, userId, since ?? null]);
+    return rows.length;
+  }
+
+  async linkConversationRun(
+    tenantId: string, userId: string, runId: string, since: string,
+  ): Promise<void> {
+    await this.q(tenantId,
+      `update conversations set run_id = $3
+        where id = (select id from conversations
+                     where tenant_id = $1 and user_id = $2 and run_id is null and created_at >= $4
+                     order by created_at desc limit 1)`,
+      [tenantId, userId, runId, since]);
+  }
+
+  async deleteConversationsBefore(tenantId: string, before: string): Promise<number> {
+    const rows = await this.q<{ id: string }>(tenantId,
+      `delete from conversations where tenant_id = $1 and created_at < $2 returning id`,
+      [tenantId, before]);
+    return rows.length;
+  }
+
+  async listConversationsOfDay(
+    tenantId: string, userId: string, day: { from: string; to: string },
+  ): Promise<Conversation[]> {
+    return this.q<Conversation>(tenantId,
+      `select id, tenant_id as "tenantId", user_id as "userId", message, reply, layer,
+              agent_id as "agentId", run_id as "runId", created_at as "createdAt"
+         from conversations
+        where tenant_id = $1 and user_id = $2 and created_at >= $3 and created_at < $4
+        order by created_at`,
+      [tenantId, userId, day.from, day.to]);
+  }
+
+  async listConversationUserIds(tenantId: string, day: { from: string; to: string }): Promise<string[]> {
+    const rows = await this.q<{ userId: string }>(tenantId,
+      `select distinct user_id as "userId" from conversations
+        where tenant_id = $1 and created_at >= $2 and created_at < $3`,
+      [tenantId, day.from, day.to]);
+    return rows.map((r) => r.userId);
+  }
+
+  async saveConversationDigest(d: ConversationDigest): Promise<void> {
+    await this.q(d.tenantId,
+      `insert into conversation_digests (tenant_id, user_id, day, summary, compartment, created_at)
+       values ($1,$2,$3,$4,$5,$6)
+       on conflict (tenant_id, user_id, day)
+         do update set summary = excluded.summary, compartment = excluded.compartment`,
+      [d.tenantId, d.userId, d.day, d.summary, d.compartment, d.createdAt]);
+  }
+
+  async listConversationDigests(
+    tenantId: string, userId: string, limit: number,
+  ): Promise<ConversationDigest[]> {
+    return this.q<ConversationDigest>(tenantId,
+      `select tenant_id as "tenantId", user_id as "userId", day, summary, compartment,
+              created_at as "createdAt"
+         from conversation_digests where tenant_id = $1 and user_id = $2
+        order by day desc limit $3`,
+      [tenantId, userId, limit]);
+  }
+
+  async listMemoryCandidates(
+    tenantId: string, userId: string, status: 'pending' | 'dismissed',
+  ): Promise<MemoryCandidate[]> {
+    return this.q<MemoryCandidate>(tenantId,
+      `select id, tenant_id as "tenantId", user_id as "userId", text, status,
+              source_day as "sourceDay", created_at as "createdAt"
+         from memory_candidates where tenant_id = $1 and user_id = $2 and status = $3
+        order by created_at desc`,
+      [tenantId, userId, status]);
+  }
+
+  async createMemoryCandidate(c: MemoryCandidate): Promise<void> {
+    await this.q(c.tenantId,
+      `insert into memory_candidates (id, tenant_id, user_id, text, status, source_day, created_at)
+       values ($1,$2,$3,$4,$5,$6,$7)`,
+      [c.id, c.tenantId, c.userId, c.text, c.status, c.sourceDay, c.createdAt]);
+  }
+
+  async updateMemoryCandidate(
+    tenantId: string, userId: string, id: string, status: 'dismissed',
+  ): Promise<boolean> {
+    const rows = await this.q<{ id: string }>(tenantId,
+      `update memory_candidates set status = $4
+        where tenant_id = $1 and user_id = $2 and id = $3 returning id`,
+      [tenantId, userId, id, status]);
+    return rows.length > 0;
+  }
+
+  async deleteMemoryCandidate(
+    tenantId: string, userId: string, id: string,
+  ): Promise<MemoryCandidate | null> {
+    const rows = await this.q<MemoryCandidate>(tenantId,
+      `delete from memory_candidates where tenant_id = $1 and user_id = $2 and id = $3
+        returning id, tenant_id as "tenantId", user_id as "userId", text, status,
+                  source_day as "sourceDay", created_at as "createdAt"`,
+      [tenantId, userId, id]);
+    return rows[0] ?? null;
+  }
+
+  async createPromotion(p: Promotion): Promise<void> {
+    await this.q(p.tenantId,
+      `insert into promotions (id, tenant_id, user_id, memory_id, text, status, knowledge_id,
+                               decided_by, comment, created_at, decided_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [p.id, p.tenantId, p.userId, p.memoryId, p.text, p.status, p.knowledgeId,
+        p.decidedBy, p.comment, p.createdAt, p.decidedAt]);
+  }
+
+  async listPromotions(
+    tenantId: string, opts: { status?: Promotion['status']; userId?: string },
+  ): Promise<Promotion[]> {
+    return this.q<Promotion>(tenantId,
+      `select id, tenant_id as "tenantId", user_id as "userId", memory_id as "memoryId", text, status,
+              knowledge_id as "knowledgeId", decided_by as "decidedBy", comment,
+              created_at as "createdAt", decided_at as "decidedAt"
+         from promotions
+        where tenant_id = $1
+          and ($2::text is null or status = $2)
+          and ($3::text is null or user_id = $3)
+        order by created_at desc`,
+      [tenantId, opts.status ?? null, opts.userId ?? null]);
+  }
+
+  async getPromotion(tenantId: string, id: string): Promise<Promotion | null> {
+    const rows = await this.q<Promotion>(tenantId,
+      `select id, tenant_id as "tenantId", user_id as "userId", memory_id as "memoryId", text, status,
+              knowledge_id as "knowledgeId", decided_by as "decidedBy", comment,
+              created_at as "createdAt", decided_at as "decidedAt"
+         from promotions where tenant_id = $1 and id = $2`,
+      [tenantId, id]);
+    return rows[0] ?? null;
+  }
+
+  async updatePromotion(p: Promotion): Promise<void> {
+    await this.q(p.tenantId,
+      `update promotions set status = $3, knowledge_id = $4, decided_by = $5, comment = $6, decided_at = $7
+        where tenant_id = $1 and id = $2`,
+      [p.tenantId, p.id, p.status, p.knowledgeId, p.decidedBy, p.comment, p.decidedAt]);
   }
 
   async listMemories(tenantId: string, userId: string): Promise<Memory[]> {

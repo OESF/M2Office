@@ -63,9 +63,44 @@ export class Secretary {
    * @returns 応答と、用いた層
    */
   async respond(tenantId: string, userId: string, message: string): Promise<SecretaryReply> {
+    const { reply, keep } = await this.reply(tenantId, userId, message);
+    if (keep) await this.record(tenantId, userId, message, reply);
+    return reply;
+  }
+
+  /**
+   * やり取りを会話ログに残す（仕様書 第11.9.4.1節、ADR-0014）。
+   *
+   * @remarks
+   * 本人が「会話を残す」を切っていれば残さない。残せなくても応答は返す
+   * （会話ログの不具合で秘書が使えなくなることを避ける）。
+   */
+  private async record(
+    tenantId: string, userId: string, message: string, reply: SecretaryReply,
+  ): Promise<void> {
+    try {
+      const prefs = await this.deps.repo.getUserSettings(tenantId, userId);
+      if (!prefs.memory.keepConversations) return;
+      await this.deps.repo.appendConversation({
+        id: randomUUID(), tenantId, userId, message, reply: reply.text, layer: reply.layer,
+        agentId: reply.suggestedAgent?.id ?? null, runId: null, createdAt: new Date().toISOString(),
+      });
+    } catch {
+      // 会話ログに残せなくても、応答は返す
+    }
+  }
+
+  /**
+   * 依頼に応答する（会話ログに残す前の本体）。
+   *
+   * @returns 応答と、それを会話ログに残すか
+   */
+  private async reply(
+    tenantId: string, userId: string, message: string,
+  ): Promise<{ reply: SecretaryReply; keep: boolean }> {
     // 使い方の質問は、定型の照会より先に見る。「承認はどうやるの？」を承認待ちの照会と取り違えないため
     if (this.deps.help && HOW_TO.test(message)) {
-      return this.answerHowTo(tenantId, userId, message, this.deps.help);
+      return { reply: await this.answerHowTo(tenantId, userId, message, this.deps.help), keep: true };
     }
 
     // 層 1: パターン一致で定型の照会に該当するか（LLM を使わない）
@@ -75,7 +110,8 @@ export class Secretary {
         tenantId, userId, message, repo: this.deps.repo, connector: this.deps.connector,
       });
       await this.audit(tenantId, userId, 'secretary.direct', direct.id);
-      return { layer: 'direct', ...answer, tokensUsed: 0 };
+      const { keep = true, ...rest } = answer;
+      return { reply: { layer: 'direct', ...rest, tokensUsed: 0 }, keep };
     }
 
     // 層 2: 高速モデルで業務エージェントへの取次を判定する。無効にされた業務には取り次がない
@@ -88,11 +124,14 @@ export class Secretary {
     if (routed.agent) {
       await this.audit(tenantId, userId, 'secretary.route', routed.agent.id);
       return {
-        layer: 'light',
-        text: `「${routed.agent.name}」で対応できます。実行してよろしいですか。`,
-        evidence: [{ label: '判定', value: routed.reason }],
-        suggestedAgent: { id: routed.agent.id, version: routed.agent.version, name: routed.agent.name },
-        tokensUsed: routed.tokensUsed,
+        reply: {
+          layer: 'light',
+          text: `「${routed.agent.name}」で対応できます。実行してよろしいですか。`,
+          evidence: [{ label: '判定', value: routed.reason }],
+          suggestedAgent: { id: routed.agent.id, version: routed.agent.version, name: routed.agent.name },
+          tokensUsed: routed.tokensUsed,
+        },
+        keep: true,
       };
     }
 
@@ -121,7 +160,7 @@ export class Secretary {
       ],
     });
     await this.audit(tenantId, userId, 'secretary.chat', 'full');
-    return { layer: 'full', text: res.text, evidence: [], tokensUsed: res.tokensUsed };
+    return { reply: { layer: 'full', text: res.text, evidence: [], tokensUsed: res.tokensUsed }, keep: true };
   }
 
   /**

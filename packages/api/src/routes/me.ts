@@ -7,7 +7,7 @@
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import type { UserSettings } from '@m2office/shared';
-import { buildPresence } from '@m2office/core';
+import { buildPresence, proposePromotion } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 
@@ -48,6 +48,37 @@ export function meRoute(deps: AppDeps) {
   });
 
   /**
+   * 会話ログ（仕様書 第11.9.4.1節）。本人のやり取りだけを、新しい順に返す。
+   *
+   * @remarks 管理者も運営も見られない（不変則 I-10）。`q` で語句を絞り込める。
+   */
+  app.get('/conversations', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const items = await deps.repo.listConversations(tenant.id, user.id, {
+      query: c.req.query('q') ?? '', limit: 50,
+    });
+    return c.json({ items });
+  });
+
+  /** 会話ログを 1 件消す。 */
+  app.delete('/conversations/:id', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const ok = await deps.repo.deleteConversation(tenant.id, user.id, c.req.param('id'));
+    if (!ok) return c.json({ error: '会話が見つかりません' }, 404);
+    // 消した中身は監査ログに入れない（第11.9.4.1節）
+    await audit(deps, tenant.id, user.id, 'conversation.delete', c.req.param('id'));
+    return c.json({ ok: true });
+  });
+
+  /** 会話ログをすべて消す。 */
+  app.delete('/conversations', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const removed = await deps.repo.clearConversations(tenant.id, user.id);
+    await audit(deps, tenant.id, user.id, 'conversation.clear', String(removed));
+    return c.json({ ok: true, removed });
+  });
+
+  /**
    * 記憶とデータ（第6.5.4節）。秘書が自分について覚えていることの一覧。
    *
    * @remarks 本人のものだけを返す。管理者であっても他人の記憶は見られない（不変則 I-10、第11.1節）。
@@ -55,6 +86,68 @@ export function meRoute(deps: AppDeps) {
   app.get('/memories', async (c) => {
     const { tenant, user } = c.get('ctx');
     const items = await deps.repo.listMemories(tenant.id, user.id);
+    return c.json({ items });
+  });
+
+  /**
+   * 記憶を会社の知識にする提案（昇華。仕様書 第11.3.1節）。
+   *
+   * @remarks 本人が出し、管理者または承認者の役割を持つ人が判断する（二重の承認）。
+   */
+  app.post('/memories/:id/promote', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const promotion = await proposePromotion(
+      { repo: deps.repo, notify: (t, u, title, body) => notify(deps, t, u, title, body) },
+      tenant.id, user, c.req.param('id'), new Date(),
+    );
+    if (!promotion) return c.json({ error: '記憶が見つかりません' }, 404);
+    return c.json({ id: promotion.id, status: promotion.status });
+  });
+
+  /** 自分の昇華の履歴（第6.5.4節「昇華の履歴」）。 */
+  app.get('/promotions', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const items = await deps.repo.listPromotions(tenant.id, { userId: user.id });
+    return c.json({ items });
+  });
+
+  /**
+   * 記憶の候補（仕様書 第11.5.2節）。対話から作った候補を、本人が採るか捨てるか決める。
+   */
+  app.get('/memory-candidates', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const items = await deps.repo.listMemoryCandidates(tenant.id, user.id, 'pending');
+    return c.json({ items });
+  });
+
+  /** 候補を採る。個人記憶になる。 */
+  app.post('/memory-candidates/:id/accept', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const candidate = await deps.repo.deleteMemoryCandidate(tenant.id, user.id, c.req.param('id'));
+    if (!candidate) return c.json({ error: '候補が見つかりません' }, 404);
+    const id = randomUUID();
+    await deps.repo.createMemory({
+      id, tenantId: tenant.id, userId: user.id, text: candidate.text, source: 'conversation',
+      createdAt: new Date().toISOString(),
+    });
+    // 覚えた中身は監査ログに入れない（第11.5.1節）
+    await audit(deps, tenant.id, user.id, 'memory.create', id);
+    return c.json({ ok: true, memoryId: id });
+  });
+
+  /** 候補を捨てる。同じ文は再び候補にしない（第11.5.2節）。 */
+  app.post('/memory-candidates/:id/dismiss', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const ok = await deps.repo.updateMemoryCandidate(tenant.id, user.id, c.req.param('id'), 'dismissed');
+    if (!ok) return c.json({ error: '候補が見つかりません' }, 404);
+    await audit(deps, tenant.id, user.id, 'memory.candidate.dismiss', c.req.param('id'));
+    return c.json({ ok: true });
+  });
+
+  /** 会話の要約（第11.9.6節）。逐語が消えた後も残る。 */
+  app.get('/conversation-digests', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const items = await deps.repo.listConversationDigests(tenant.id, user.id, 30);
     return c.json({ items });
   });
 
@@ -225,7 +318,14 @@ function validate(
       if (excludes.some((w) => w.length > 50)) {
         return { error: '覚えない言葉は 1 つ 50 字までにしてください' };
       }
-      return { section, value: { learning: o['learning'] !== false, excludes } };
+      return {
+        section,
+        value: {
+          learning: o['learning'] !== false,
+          excludes,
+          keepConversations: o['keepConversations'] !== false,
+        },
+      };
     }
     case 'menu': {
       const ids = agentIds;
@@ -235,6 +335,22 @@ function validate(
     default:
       return { error: `不明な設定の区分です: ${section}` };
   }
+}
+
+/**
+ * 本人宛ての通知を作る（仕様書 第6.5.5.1節）。昇華の提案と判断を知らせるのに使う。
+ *
+ * @remarks 本人が受け取らないと決めた種類は作らない。
+ */
+async function notify(
+  deps: AppDeps, tenantId: string, userId: string, title: string, body: string,
+): Promise<void> {
+  const prefs = await deps.repo.getUserSettings(tenantId, userId);
+  if (!prefs.notifications.kinds.approval) return;
+  await deps.repo.createNotification({
+    id: randomUUID(), tenantId, userId, kind: 'approval', title, body,
+    runId: null, readAt: null, createdAt: new Date().toISOString(),
+  });
 }
 
 async function audit(deps: AppDeps, tenantId: string, userId: string, action: string, target: string) {

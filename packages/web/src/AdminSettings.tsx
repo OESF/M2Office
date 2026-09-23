@@ -546,8 +546,61 @@ export function KnowledgeSettings() {
           ))}
         </tbody>
       </table>
+      <PromotionApprovals />
       <SynonymSettings />
     </>
+  );
+}
+
+/**
+ * 昇華の承認（仕様書 第11.3.1節）。個人の記憶を会社の知識にする提案を判断する。
+ *
+ * @remarks 判断できるのは管理者と承認者の役割を持つ人で、提案した本人は判断できない（二重の承認）。
+ */
+function PromotionApprovals() {
+  const [items, setItems] = useState<Awaited<ReturnType<typeof api.admin.promotions>>['items']>([]);
+  const saver = useSaver();
+  const load = () => api.admin.promotions().then((r) => setItems(r.items)).catch(() => setItems([]));
+  useEffect(() => { void load(); }, []);
+  if (items.length === 0) return null;
+
+  const decide = (id: string, decision: 'approved' | 'rejected') => void saver.run(async () => {
+    const comment = decision === 'rejected' ? (prompt('見送る理由（任意）') ?? '') : '';
+    await api.admin.decidePromotion(id, decision, comment || null);
+    await load();
+  }, decision === 'approved' ? '会社の知識に登録しました' : '見送りにしました');
+
+  return (
+    <div className="card">
+      <h3>会社の知識にする提案（{items.length} 件）</h3>
+      <p>
+        従業員が、秘書に覚えさせたことを会社の知識にしたいと提案しています。
+        承認すると、そのままの文で知識に登録され、全員の秘書と業務が参照します。
+      </p>
+      {saver.view}
+      <table className="table">
+        <tbody>
+          {items.map((p) => (
+            <tr key={p.id}>
+              <td>
+                <div>{p.text}</div>
+                <div className="muted small">{p.proposedBy}さんの提案</div>
+              </td>
+              <td className="num">
+                {p.canDecide ? (
+                  <>
+                    <button className="btn small" disabled={saver.busy}
+                      onClick={() => decide(p.id, 'approved')}>会社の知識にする</button>{' '}
+                    <button className="btn ghost small" disabled={saver.busy}
+                      onClick={() => decide(p.id, 'rejected')}>見送る</button>
+                  </>
+                ) : <span className="muted small">自分の提案は判断できません</span>}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 

@@ -6,7 +6,11 @@
 
 import { useEffect, useState } from 'react';
 import type { UserSettings } from '@m2office/shared';
-import { api, describeError, type AgentSummary, type Me, type MemoryView, type MyGoogle } from './api.js';
+import {
+  api, describeError,
+  type AgentSummary, type ConversationView, type Me, type MemoryCandidateView, type MemoryView,
+  type MyGoogle, type PromotionView,
+} from './api.js';
 import { useTheme, type ThemeChoice } from './theme.js';
 import { statusLabel } from './components.js';
 
@@ -166,6 +170,9 @@ export function Settings({ me, agents, onChanged }: {
       <MemorySettings settings={s} onChange={(v) => set('memory', v)}
         onSave={() => void save(() => api.saveMySettings('memory', { ...s.memory }))} />
 
+      <ConversationSettings settings={s} onChange={(v) => set('memory', v)}
+        onSave={() => void save(() => api.saveMySettings('memory', { ...s.memory }))} />
+
       <DisplaySettings />
       <div className="card">
         <h3>メニューの並び</h3>
@@ -228,6 +235,107 @@ export function Settings({ me, agents, onChanged }: {
  * @param order 本人が決めた並び順
  */
 /**
+ * 会話ログ（仕様書 第11.9.4.1節）。自分のやり取りを探して消せるようにする。
+ *
+ * @remarks 読めるのは本人だけである（不変則 I-10）。逐語は 4 週で消える。
+ */
+function ConversationSettings({ settings, onChange, onSave }: {
+  settings: UserSettings;
+  onChange: (v: UserSettings['memory']) => void;
+  onSave: () => void;
+}) {
+  const [items, setItems] = useState<ConversationView[]>([]);
+  const [query, setQuery] = useState('');
+  const [msg, setMsg] = useState<string | null>(null);
+  const load = (q = query) => api.myConversations(q)
+    .then((r) => setItems(r.items)).catch((e) => setMsg(describeError(e)));
+  useEffect(() => { void load(''); }, []);
+
+  return (
+    <div className="card">
+      <h3>会話ログ</h3>
+      <p>
+        秘書とのやり取りです。読めるのは自分だけで、管理者にも運営にも見えません。
+        逐語は 4 週で消えます。秘書に「この会話は残さないで」と言うと、直近 1 時間の会話を消します。
+      </p>
+      <label className="check">
+        <input type="checkbox" checked={settings.memory.keepConversations}
+          onChange={(e) => onChange({ ...settings.memory, keepConversations: e.target.checked })} />
+        会話を残す（切ると、以後 1 件も残しません）
+      </label>
+      <div className="row">
+        <button className="btn" onClick={onSave}>保存する</button>
+      </div>
+
+      <div className="row">
+        <input value={query} placeholder="言葉で探す" onChange={(e) => setQuery(e.target.value)} />
+        <button className="btn ghost" onClick={() => void load()}>探す</button>
+        {items.length > 0 && (
+          <button className="btn danger" onClick={() => {
+            if (!confirm('会話ログをすべて消しますか。元に戻せません。')) return;
+            void api.clearConversations()
+              .then((r) => setMsg(`${r.removed} 件を消しました`))
+              .then(() => load(''))
+              .catch((e) => setMsg(describeError(e)));
+          }}>すべて消す</button>
+        )}
+      </div>
+      {items.length === 0 ? (
+        <p className="muted small">会話はありません。</p>
+      ) : (
+        <table className="table">
+          <tbody>
+            {items.map((c) => (
+              <tr key={c.id}>
+                <td>
+                  <div>{c.message}</div>
+                  <div className="muted small">{c.reply.slice(0, 120)}{c.reply.length > 120 ? '…' : ''}</div>
+                  <div className="muted small">{new Date(c.createdAt).toLocaleString('ja-JP')}</div>
+                </td>
+                <td className="num">
+                  <button className="btn danger small"
+                    onClick={() => void api.deleteConversation(c.id).then(() => load()).catch((e) => setMsg(describeError(e)))}>
+                    消す
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {msg && <p className="muted small">{msg}</p>}
+      <PromotionHistory />
+    </div>
+  );
+}
+
+/** 昇華の履歴（仕様書 第6.5.4節）。自分の提案がどうなったかを示す。 */
+function PromotionHistory() {
+  const [items, setItems] = useState<PromotionView[]>([]);
+  useEffect(() => { api.myPromotions().then((r) => setItems(r.items)).catch(() => setItems([])); }, []);
+  if (items.length === 0) return null;
+  const label = (s: PromotionView['status']) => ({
+    proposed: '本人の確認待ち', pending: '会社の確認待ち', approved: '会社の知識になりました',
+    rejected: '見送りになりました', withdrawn: '取り下げました',
+  }[s]);
+  return (
+    <>
+      <h4>会社の知識にする提案（{items.length} 件）</h4>
+      <table className="table">
+        <tbody>
+          {items.map((p) => (
+            <tr key={p.id}>
+              <td>{p.text}</td>
+              <td className="num muted small">{label(p.status)}{p.comment ? `（${p.comment}）` : ''}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </>
+  );
+}
+
+/**
  * 管理者のダッシュボードでの自分の見え方（仕様書 第6.7.10節 規定 4）。
  *
  * @remarks
@@ -254,6 +362,44 @@ function PresenceNotice() {
         個人の状態の履歴は残しません。後から見られるのは、監査ログ（誰が何を実行したか）と実行の記録だけです。
       </p>
     </div>
+  );
+}
+
+/**
+ * 記憶の候補（仕様書 第11.5.2節）。対話から作られた候補を、本人が採るか捨てるか決める。
+ *
+ * @remarks 採ったものだけが記憶になる。黙って覚えることはしない（ADR-0015）。
+ */
+function MemoryCandidates({ onAccepted }: { onAccepted: () => void }) {
+  const [items, setItems] = useState<MemoryCandidateView[]>([]);
+  const load = () => api.myMemoryCandidates().then((r) => setItems(r.items)).catch(() => setItems([]));
+  useEffect(() => { void load(); }, []);
+  if (items.length === 0) return null;
+  return (
+    <>
+      <h4>覚える候補（{items.length} 件）</h4>
+      <p className="muted small">
+        秘書が会話から見つけた、覚えておくとよさそうなことです。「覚える」を押したものだけを覚えます。
+      </p>
+      <table className="table">
+        <tbody>
+          {items.map((c) => (
+            <tr key={c.id}>
+              <td>
+                <div>{c.text}</div>
+                <div className="muted small">{c.sourceDay} の会話から</div>
+              </td>
+              <td className="num">
+                <button className="btn small"
+                  onClick={() => void api.acceptMemoryCandidate(c.id).then(load).then(onAccepted)}>覚える</button>{' '}
+                <button className="btn ghost small"
+                  onClick={() => void api.dismissMemoryCandidate(c.id).then(load)}>不要</button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </>
   );
 }
 
@@ -296,6 +442,8 @@ function MemorySettings({ settings, onChange, onSave }: {
         <button className="btn" onClick={onSave}>保存する</button>
       </div>
 
+      <MemoryCandidates onAccepted={load} />
+
       <h4>覚えていること（{items.length} 件）</h4>
       {items.length === 0 ? (
         <p className="muted small">まだ何も覚えていません。秘書に「〜を覚えておいて」とお伝えください。</p>
@@ -306,6 +454,12 @@ function MemorySettings({ settings, onChange, onSave }: {
               <tr key={m.id}>
                 <td>{m.text}</td>
                 <td className="num">
+                  <button className="btn ghost small" title="管理者・承認者の確認を経て、会社の知識になります"
+                    onClick={() => void api.promoteMemory(m.id)
+                      .then(() => setMsg('会社の知識にする提案を出しました。管理者か承認者の確認を待ちます'))
+                      .catch((e) => setMsg(describeError(e)))}>
+                    会社の知識にする
+                  </button>{' '}
                   <button className="btn danger small"
                     onClick={() => void api.deleteMemory(m.id).then(load).then(() => setMsg('消しました')).catch((e) => setMsg(describeError(e)))}>
                     消す

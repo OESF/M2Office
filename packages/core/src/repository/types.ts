@@ -145,6 +145,56 @@ export interface Repository {
   /** 本人の設定を返す。未保存の区分は既定値で補う。 */
   getUserSettings(tenantId: string, userId: string): Promise<UserSettings>;
 
+  /**
+   * 会話ログを 1 往復ぶん残す（仕様書 第11.9.4.1節）。
+   *
+   * @remarks 本人が「会話を残す」を切っている場合、呼び出し側が呼ばない。
+   */
+  appendConversation(c: Conversation): Promise<void>;
+  /**
+   * 本人の会話ログ（新しい順）。本人以外に渡さない（不変則 I-10）。
+   *
+   * @param query 語句。空なら絞り込まない
+   */
+  listConversations(
+    tenantId: string, userId: string, opts: { query?: string; limit: number },
+  ): Promise<Conversation[]>;
+  /** 1 件を消す。本人のものでなければ消さず `false`。 */
+  deleteConversation(tenantId: string, userId: string, id: string): Promise<boolean>;
+  /**
+   * 本人の会話を消す。
+   *
+   * @param since この時刻より後のものだけを消す（「この会話は残さないで」）。省略ならすべて
+   */
+  clearConversations(tenantId: string, userId: string, since?: string): Promise<number>;
+  /** 直近の会話に、そこから始まった実行を結び付ける（評価を引くため。第11.9.5節 第 4 項）。 */
+  linkConversationRun(tenantId: string, userId: string, runId: string, since: string): Promise<void>;
+  /** 保持期間（4 週）を過ぎた逐語を消す。テナントを横断して呼ぶ（第11.9.6節）。 */
+  deleteConversationsBefore(tenantId: string, before: string): Promise<number>;
+
+  /** ある日の会話（要約と候補を作るために読む。仕様書 第11.5.2節）。 */
+  listConversationsOfDay(tenantId: string, userId: string, day: { from: string; to: string }): Promise<Conversation[]>;
+  /** 会話ログを持つ利用者の ID（その日ぶん）。 */
+  listConversationUserIds(tenantId: string, day: { from: string; to: string }): Promise<string[]>;
+  /** その日の会話の要約を保存する（長期に持つ。第11.9.6節）。 */
+  saveConversationDigest(d: ConversationDigest): Promise<void>;
+  /** 本人の会話の要約（新しい順）。 */
+  listConversationDigests(tenantId: string, userId: string, limit: number): Promise<ConversationDigest[]>;
+
+  /** 記憶の候補（第11.5.2節）。`status` で絞る。 */
+  listMemoryCandidates(tenantId: string, userId: string, status: 'pending' | 'dismissed'): Promise<MemoryCandidate[]>;
+  createMemoryCandidate(c: MemoryCandidate): Promise<void>;
+  /** 候補の判断を記録する。採ったものは呼び出し側が記憶にしてから消す。 */
+  updateMemoryCandidate(tenantId: string, userId: string, id: string, status: 'dismissed'): Promise<boolean>;
+  deleteMemoryCandidate(tenantId: string, userId: string, id: string): Promise<MemoryCandidate | null>;
+
+  /** 昇華の提案を作る（仕様書 第11.3.1節）。 */
+  createPromotion(p: Promotion): Promise<void>;
+  /** 会社の昇華の提案。`status` で絞る（組織の承認待ちの一覧などに使う）。 */
+  listPromotions(tenantId: string, opts: { status?: Promotion['status']; userId?: string }): Promise<Promotion[]>;
+  getPromotion(tenantId: string, id: string): Promise<Promotion | null>;
+  updatePromotion(p: Promotion): Promise<void>;
+
   /** 本人の個人記憶（新しい順。仕様書 第11.5.1節）。本人以外に渡さない。 */
   listMemories(tenantId: string, userId: string): Promise<Memory[]>;
   createMemory(memory: Memory): Promise<void>;
@@ -287,6 +337,74 @@ export interface KnowledgeSectionView {
 }
 
 /** 組織知識の 1 件（管理用）。 */
+/**
+ * 会話ログの 1 往復（仕様書 第11.9.4.1節）。
+ *
+ * @remarks 読めるのは本人だけである。管理者にも運営にも渡さない（不変則 I-10）。
+ */
+export interface Conversation {
+  id: string;
+  tenantId: string;
+  userId: string;
+  /** 本人の依頼。 */
+  message: string;
+  /** 秘書の応答。 */
+  reply: string;
+  /** 応答の層（仕様書 第10.9節）。 */
+  layer: 'direct' | 'light' | 'full';
+  /** 取り次いだ業務。 */
+  agentId: string | null;
+  /** そこから始まった実行。評価はこの実行の承認から引く。 */
+  runId: string | null;
+  createdAt: string;
+}
+
+/** その日の会話の要約（仕様書 第11.9.6節）。逐語が消えた後も残る。 */
+export interface ConversationDigest {
+  tenantId: string;
+  userId: string;
+  /** 日本時間の `YYYY-MM-DD`。 */
+  day: string;
+  summary: string;
+  compartment: string | null;
+  createdAt: string;
+}
+
+/**
+ * 昇華の提案（仕様書 第11.3.1節）。個人の記憶を組織知識へ引き上げる。
+ *
+ * @remarks 二重の承認を経る。`proposed`（本人の判断待ち）→ `pending`（組織の承認待ち）→ `approved`。
+ */
+export interface Promotion {
+  id: string;
+  tenantId: string;
+  /** 記憶の持ち主（提案者）。 */
+  userId: string;
+  memoryId: string | null;
+  /** 昇華する一文。記憶を消しても判断できるよう写しを持つ。 */
+  text: string;
+  status: 'proposed' | 'pending' | 'approved' | 'rejected' | 'withdrawn';
+  /** 承認して登録した組織知識。 */
+  knowledgeId: string | null;
+  decidedBy: string | null;
+  comment: string | null;
+  createdAt: string;
+  decidedAt: string | null;
+}
+
+/** 記憶の候補（仕様書 第11.5.2節）。本人が採ると個人記憶になる。 */
+export interface MemoryCandidate {
+  id: string;
+  tenantId: string;
+  userId: string;
+  text: string;
+  /** `pending`: 判断待ち、`dismissed`: 不要（同じ文を再び候補にしないために残す）。 */
+  status: 'pending' | 'dismissed';
+  /** 元にした日（日本時間の `YYYY-MM-DD`）。 */
+  sourceDay: string;
+  createdAt: string;
+}
+
 /**
  * 個人記憶の 1 件（仕様書 第11.1・11.5.1節）。
  *

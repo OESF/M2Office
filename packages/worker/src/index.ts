@@ -12,7 +12,7 @@
 import {
   PostgresRepository, StubLlmProvider, OpenAiCompatibleProvider, ToolRegistry, BUILTIN_TOOLS,
   RunEngine, Scheduler, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, agentUsesGoogle,
-  NotificationDelivery, MockNotificationSender,
+  NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning,
   loadExtensions, OFFICIAL_AGENTS, GeminiResearchProvider, MockResearchProvider, TenantAiResolver, secretBoxFromEnv,
   type LlmProvider,
 } from '@m2office/core';
@@ -98,11 +98,18 @@ const notifier = new NotificationDelivery({
   linkFor: (tenant) => appUrl(tenant.subdomain),
 });
 
+// 会話ログ（逐語）の入れ替え。4 週を過ぎたものを消す（仕様書 第11.9.6節）
+const conversations = new ConversationRotation({ repo, logger: log });
+// 対話からの学習。前日の会話から、その日の要約と記憶の候補を作る（仕様書 第11.5.2節）
+const learning = new MemoryLearning({ repo, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log });
+
 const POLL_INTERVAL_MS = 1000;
 /** 定時実行の見回り間隔。分単位の指定に対して十分に短くする。 */
 const SCHEDULE_INTERVAL_MS = Number(process.env['SCHEDULE_INTERVAL_MS'] ?? 15_000);
 /** 通知の控えの見回り間隔。通知しない時間帯が明けたときの遅れを、この間隔に収める。 */
 const NOTIFY_INTERVAL_MS = Number(process.env['NOTIFY_INTERVAL_MS'] ?? 10_000);
+/** 会話ログの入れ替えの間隔。1 日 1 回で足りる（開発では確かめやすいよう短くできる）。 */
+const CONVERSATION_INTERVAL_MS = Number(process.env['CONVERSATION_INTERVAL_MS'] ?? 24 * 3_600_000);
 /** 保持期間の見回り間隔。本番は 10 分、開発は確かめやすいよう 15 秒。 */
 const RETENTION_INTERVAL_MS = Number(
   process.env['RETENTION_INTERVAL_MS'] ?? (process.env['NODE_ENV'] === 'production' ? 600_000 : 15_000),
@@ -111,6 +118,7 @@ let running = true;
 let lastScheduleCheck = 0;
 let lastRetentionCheck = 0;
 let lastNotifyCheck = 0;
+let lastConversationCheck = 0;
 
 process.on('SIGINT', () => { running = false; });
 process.on('SIGTERM', () => { running = false; });
@@ -139,6 +147,17 @@ while (running) {
       if (r.sent > 0) log.info('通知の控えを届けました', r);
     } catch (err) {
       log.error('通知の控えの見回りで例外が発生しました', { err });
+    }
+  }
+
+  if (Date.now() - lastConversationCheck >= CONVERSATION_INTERVAL_MS) {
+    lastConversationCheck = Date.now();
+    try {
+      await conversations.sweep(new Date());
+      const learned = await learning.sweep(new Date());
+      if (learned.candidates > 0 || learned.digests > 0) log.info('対話からの学習を行いました', learned);
+    } catch (err) {
+      log.error('会話ログの入れ替えで例外が発生しました', { err });
     }
   }
 

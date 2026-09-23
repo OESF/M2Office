@@ -51,6 +51,11 @@ export function jobsRoute(deps: AppDeps) {
       tenantId: ctx.tenant.id, requestedBy: ctx.user.id, def, input: body.input ?? {},
       origin, actor: { type: 'user', id: ctx.user.id },
     });
+    // 秘書から始めた実行は、直前の会話に結び付ける。評価（承認されたか）を引くため（仕様書 第11.9.5節 第 4 項）
+    if (origin === 'secretary') {
+      const since = new Date(Date.now() - 10 * 60_000).toISOString();
+      await deps.repo.linkConversationRun(ctx.tenant.id, ctx.user.id, runId, since);
+    }
     return c.json({ jobId, runId, status: 'queued' }, 201);
   });
 
