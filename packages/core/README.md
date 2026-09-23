@@ -178,6 +178,15 @@ AG-02 議事録作成・共有は、承認②のあとに `knowledge.register` �
 - 「活動中」は、実行エンジンがツールを呼ぶ直前にステップへ書く活動の表示名（`Tool.activityLabel`）を読みます
 - `summarizePresence()` は、個人名を出さない会社（`TenantSettings.dashboard.people = 'counts'`）向けに人数と業務名だけにします
 
+### 音声の対話（`voice/`）
+
+音声は「音声の対話」の接続口 1 つの後ろに閉じています（仕様書 第10.5.4節、Q-35、ADR-0018）。
+
+- `VoiceProvider.open()` が返すのは、音を送る・文字と音を受け取る・終わる、だけの口です。画面と中継は提供者を知りません
+- `GeminiLiveProvider` が Gemini Live 固有の形（`setup`・`realtimeInput`・`serverContent`）を担います。鍵はサーバーだけが持ちます
+- 鍵が無い環境では `MockVoiceProvider` に切り替わり、音声を返さず文字だけを返します
+- 音は通すだけで、どこにも書き出しません（第10.5.3節）。会話ログに残すのは文字だけです
+
 ### 通知と、その控え（`notify/`）
 
 画面内のお知らせが正で、Chat とメールはその控えです（仕様書 第6.5.5.2節、ADR-0011）。

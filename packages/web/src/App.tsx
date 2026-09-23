@@ -12,6 +12,7 @@ import {
   api, describeError, type AgentSummary, type Me, type RunDetail, type ScheduleView, type SecretaryReply,
 } from './api.js';
 import { HelpCenter, HelpTip, Tour, openHelp, useOpenHelp } from './help.js';
+import { startVoice, type VoiceCall } from './voice.js';
 import { AgentForm, ApprovalTray, Evidence, RunView, statusLabel, SuspendedBanner } from './components.js';
 import { Settings, orderAgents } from './Settings.js';
 import { NavHeading, NavItem, NavUserCard, SideNavLayout, ThemeToggle, agentIcon } from './nav.js';
@@ -312,11 +313,33 @@ function Home({ approvals, agents }: { approvals: number; agents: number }) {
   );
 }
 
-/** 常駐の秘書バー。どの画面からでも呼び出せる（仕様書 第10.4節）。 */
+/** 常駐の秘書バー。どの画面からでも呼び出せる（仕様書 第10.4節）。音声でも話しかけられる（第10.5節）。 */
 function SecretaryBar({ onReply }: { onReply: (r: SecretaryReply) => void }) {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
+  // 音声の対話（第10.5.5節）。聞こえた文字と応答は、その場で画面にも出す（併記）
+  const [call, setCall] = useState<VoiceCall | null>(null);
+  const [voice, setVoice] = useState<{ heard: string; reply: string } | null>(null);
+
+  async function toggleVoice() {
+    if (call) {
+      call.stop();
+      setCall(null);
+      return;
+    }
+    setVoice({ heard: '', reply: '' });
+    setHint('マイクの許可を確かめています…');
+    const started = await startVoice({
+      onHeard: (t) => setVoice((v) => ({ heard: (v?.heard ?? '') + t, reply: v?.reply ?? '' })),
+      onReply: (t) => setVoice((v) => ({ heard: v?.heard ?? '', reply: (v?.reply ?? '') + t })),
+      onState: (state, note) => {
+        setHint(note ?? { connecting: 'つないでいます…', listening: '聞いています（もう一度押すと終わります）', closed: '音声を終わりました' }[state]);
+        if (state === 'closed') setCall(null);
+      },
+    });
+    setCall(started);
+  }
 
   async function send() {
     if (!text.trim() || busy) return;
@@ -349,7 +372,17 @@ function SecretaryBar({ onReply }: { onReply: (r: SecretaryReply) => void }) {
       <button className="btn" onClick={() => void send()} disabled={busy}>
         {busy ? '…' : '聞く'}
       </button>
+      <button className={`btn ghost${call ? ' danger' : ''}`} onClick={() => void toggleVoice()}
+        title="音声で話しかけます。話した内容と応答は画面にも出ます">
+        {call ? '音声を終わる' : '音声で話す'}
+      </button>
       {hint && <span className="layer">{hint}</span>}
+      {voice && (voice.heard || voice.reply) && (
+        <div className="voice-transcript">
+          {voice.heard && <p><span className="muted small">聞こえた内容</span> {voice.heard}</p>}
+          {voice.reply && <p><span className="muted small">秘書</span> {voice.reply}</p>}
+        </div>
+      )}
     </div>
   );
 }

@@ -315,7 +315,14 @@ function validate(
       const style = o['style'] === 'concise' ? 'concise' : 'polite';
       const p = o['proactivity'];
       const proactivity = p === 'low' || p === 'high' ? p : 'normal';
-      return { section, value: { name: str(o['name'], 30), callMe: str(o['callMe'], 30), style, proactivity } };
+      return {
+        section,
+        value: {
+          name: str(o['name'], 30), callMe: str(o['callMe'], 30), style, proactivity,
+          // 読み上げの入り切り（第10.5.2節）
+          speak: o['speak'] !== false,
+        },
+      };
     }
     case 'notifications': {
       const k = (o['kinds'] ?? {}) as Record<string, unknown>;

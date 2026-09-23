@@ -8,10 +8,12 @@
  */
 
 import { serve } from '@hono/node-server';
+import type { Server as HttpServer } from 'node:http';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { buildDeps } from './context.js';
 import { authenticate, resolveTenant, type AppEnv } from './middleware/tenant.js';
+import { attachVoiceRelay } from './voice/relay.js';
 import { onUnexpectedError, requestLogger } from './middleware/logging.js';
 import { agentsRoute } from './routes/agents.js';
 import { jobsRoute } from './routes/jobs.js';
@@ -102,7 +104,7 @@ app.route('/v1/help', helpRoute(deps));
 app.route('/v1/onboarding', onboardingRoute(deps));
 
 const port = Number(process.env['API_PORT'] ?? 3101);
-serve({ fetch: app.fetch, port }, (info) => {
+const server = serve({ fetch: app.fetch, port }, (info) => {
   deps.log.info('待ち受けを開始しました', {
     port: info.port,
     connector: deps.connector.source,
@@ -114,3 +116,6 @@ serve({ fetch: app.fetch, port }, (info) => {
     deps.log.warn('開発用ログインが有効です（本番では起動を拒否します）');
   }
 });
+
+// 音声の対話の中継（仕様書 第10.5.5節）。WebSocket は Hono の外側で受ける
+attachVoiceRelay(deps, server as unknown as HttpServer);

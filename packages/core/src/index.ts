@@ -24,6 +24,9 @@ export type {
 export { PostgresRepository } from './repository/postgres.js';
 export { canViewRun, type RunViewer } from './engine/run-access.js';
 export * from './conversations/rotation.js';
+export * from './voice/provider.js';
+export { GeminiLiveProvider } from './voice/gemini-live.js';
+export { MockVoiceProvider } from './voice/mock.js';
 export * from './memory/learn.js';
 export * from './memory/promotion.js';
 export * from './dashboard/presence.js';

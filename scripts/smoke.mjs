@@ -1808,6 +1808,78 @@ console.log('\n■ 41. 帳票の PDF（第9.4.1節、Q-59）');
   await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
 }
 
+console.log('\n■ 42. 音声の対話（第10.5.5節）');
+{
+  const who = 'member';
+  await call('a', '/v1/me/conversations', { method: 'DELETE' }, who);
+  const { default: WebSocket } = await import('ws');
+  const ws = new WebSocket(`${API.replace('http', 'ws')}/v1/secretary/voice`, {
+    headers: { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' },
+  });
+  const messages = [];
+  let binary = 0;
+  ws.on('message', (data, isBinary) => {
+    if (isBinary) { binary++; return; }
+    messages.push(JSON.parse(data.toString('utf8')));
+  });
+  const closed = new Promise((resolve) => ws.on('close', resolve));
+  const opened = await new Promise((resolve) => {
+    ws.on('open', () => resolve(true));
+    ws.on('error', () => resolve(false));
+  });
+  opened ? ok('ログイン状態で音声の中継につながる') : ng('つながらない');
+
+  for (let i = 0; i < 40 && !messages.some((m) => m.type === 'ready'); i++) await sleep(50);
+  const ready = messages.find((m) => m.type === 'ready');
+  ready?.provider === 'mock'
+    ? ok('鍵が無い環境では見本の相手につなぐ（それらしい音声を作らない）') : ng('見本にならない', JSON.stringify(ready ?? null));
+
+  // マイクの音を送ると、聞こえた内容と応答が文字で返る（併記）
+  ws.send(Buffer.alloc(320), { binary: true });
+  for (let i = 0; i < 60 && !messages.some((m) => m.type === 'reply'); i++) await sleep(50);
+  const heard = messages.find((m) => m.type === 'heard');
+  const reply = messages.find((m) => m.type === 'reply');
+  heard && reply ? ok('聞こえた内容と応答が文字でも返る（併記）') : ng('文字が返らない', JSON.stringify(messages));
+  binary === 0 ? ok('見本では音声を返さない') : ng(`音声が返る（${binary}）`);
+
+  ws.close();
+  await closed;
+  await sleep(500);
+
+  // 終わったら会話ログに 1 往復だけ残り、録音は残らない
+  const { body: logs } = await call('a', '/v1/me/conversations', {}, who);
+  const item = (logs.items ?? [])[0];
+  (logs.items ?? []).length === 1 && item.reply.includes('見本の応答')
+    ? ok('音声の対話が会話ログに 1 往復として残る') : ng('残らない', JSON.stringify(logs.items ?? []));
+
+  const { body: audits } = await call('a', '/v1/admin/audit-events');
+  const voiceAudit = (audits.items ?? []).filter((e) => e.action === 'secretary.voice');
+  voiceAudit.length >= 2 && !JSON.stringify(voiceAudit).includes('見本の応答')
+    ? ok('監査ログに開始と終了だけが残る（話した中身は残らない）') : ng('監査ログの扱いが規定と違う', JSON.stringify(voiceAudit));
+
+  await call('a', '/v1/me/conversations', { method: 'DELETE' }, who);
+
+  // 停止中の会社では開けない（第23.8.6節）
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  try {
+    await owner.query(`update tenants set status = 'suspended' where subdomain = 'b'`);
+    const blocked = new WebSocket(`${API.replace('http', 'ws')}/v1/secretary/voice`, {
+      headers: { 'x-tenant': 'b', 'x-user': 'member@beta.example.jp' },
+    });
+    const refused = await new Promise((resolve) => {
+      blocked.on('open', () => resolve(false));
+      blocked.on('error', () => resolve(true));
+    });
+    refused ? ok('停止中の会社では音声を開けない') : ng('開けてしまう');
+    try { blocked.close(); } catch { /* 開いていない */ }
+  } finally {
+    await owner.query(`update tenants set status = 'active' where subdomain = 'b'`);
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

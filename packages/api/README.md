@@ -35,6 +35,13 @@ curl -H 'x-tenant: a' -H 'x-user: member@alpha.example.jp' http://localhost:3101
 
 Cookie は `HttpOnly`・`SameSite=Lax` で、`Domain` 属性を付けません。
 
+### 音声の中継（WebSocket）
+
+`/v1/secretary/voice` は WebSocket で、ブラウザと音声の提供者のあいだを中継します（仕様書 第10.5.5節、ADR-0018）。
+Hono の外側（Node のサーバーの `upgrade`）で受け、ログイン状態の Cookie（動作確認では開発用ヘッダー）で相手を確かめます。
+停止中の会社では開けません。送りは 16 kHz、受けは 24 kHz の PCM で、**音はどこにも書き出しません**。
+終わったときに、聞こえた文字と応答を会話ログへ 1 往復として残します。
+
 ### ダッシュボードの SSE
 
 `GET /v1/admin/dashboard/stream` は `text/event-stream` で「いま」の中身を送ります（仕様書 第6.7.9節、ADR-0013）。

@@ -13,6 +13,9 @@ import type { LlmProvider } from '../llm/provider.js';
 import { OpenAiCompatibleProvider } from '../llm/gemini.js';
 import { GeminiResearchProvider, type ResearchProvider } from '../research/provider.js';
 import type { SecretBox } from './box.js';
+import type { VoiceProvider } from '../voice/provider.js';
+import { GeminiLiveProvider } from '../voice/gemini-live.js';
+import { MockVoiceProvider } from '../voice/mock.js';
 
 /** 役割ごとのモデル名。 */
 export interface GeminiModels {
@@ -79,6 +82,17 @@ export class TenantAiResolver {
   /** 会社の推論。会社の鍵があればその鍵、無ければ既定。 */
   async llmFor(tenantId: string): Promise<LlmProvider> {
     return (await this.entry(tenantId))?.llm ?? this.deps.fallbackLlm;
+  }
+
+  /**
+   * 会社の音声の対話（仕様書 第10.5節、ADR-0018）。
+   *
+   * @remarks 鍵があれば Gemini Live、無ければ見本の実装を返す。呼び出し側は違いを知らない。
+   */
+  async voiceFor(tenantId: string): Promise<VoiceProvider> {
+    const g = await this.geminiFor(tenantId);
+    if (!g.apiKey) return new MockVoiceProvider();
+    return new GeminiLiveProvider({ apiKey: g.apiKey, model: g.models.live });
   }
 
   /** 会社の Web の調査。 */

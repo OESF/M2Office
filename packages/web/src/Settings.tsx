@@ -117,6 +117,11 @@ export function Settings({ me, agents, onChanged }: {
             <select value={s.secretary.proactivity} onChange={(e) => set('secretary', { proactivity: e.target.value as 'low' | 'normal' | 'high' })}>
               <option value="low">控えめ</option><option value="normal">標準</option><option value="high">積極的</option>
             </select></div>
+          <label className="check">
+            <input type="checkbox" checked={s.secretary.speak}
+              onChange={(e) => set('secretary', { speak: e.target.checked })} />
+            音声で読み上げる（切ると、音声で話しかけても文字だけで答えます）
+          </label>
         </div>
         <button className="btn" onClick={() => void save(() => api.saveMySettings('secretary', s.secretary))}>保存する</button>
       </div>

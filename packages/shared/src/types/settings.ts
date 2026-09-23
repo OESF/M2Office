@@ -270,6 +270,8 @@ export interface UserSettings {
     callMe: string;
     style: 'polite' | 'concise';
     proactivity: 'low' | 'normal' | 'high';
+    /** 音声で読み上げるか（仕様書 第10.5.2節）。切ると、音声の対話でも文字だけを返す。 */
+    speak: boolean;
   };
   notifications: {
     /** 受け取る種類（第6.5.5節）。`false` にしたものは届けない。 */
@@ -304,7 +306,7 @@ export interface UserSettings {
 
 export const DEFAULT_USER_SETTINGS: UserSettings = {
   profile: { furigana: '', title: '', timezone: 'Asia/Tokyo' },
-  secretary: { name: '', callMe: '', style: 'polite', proactivity: 'normal' },
+  secretary: { name: '', callMe: '', style: 'polite', proactivity: 'normal', speak: true },
   notifications: {
     kinds: { brief: true, run: true, approval: true, failure: true },
     quietHours: null,
