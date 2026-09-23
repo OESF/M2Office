@@ -80,7 +80,8 @@ export function ExtensionSettings() {
         <h1>
           拡張機能{' '}
           <HelpTip article="admin-extensions">
-            業務エージェントや、外部のサービスとのつながり（コネクタ）を追加します。スイッチで有効と無効を切り替えられます。
+            業務エージェントや、外部のサービスとのつながり（コネクタ。MCP サーバ）を追加します。スイッチで有効と無効を切り替えられます。
+            Gemini と Google Workspace への接続は、左の「接続」で設定します。
           </HelpTip>
         </h1>
         <div className="row">
