@@ -78,7 +78,9 @@ src/theme.ts           画面の明るさ（ライト・ダーク・端末に合
 public/icons.svg       画面のアイコン（モノクロの線画。文字の色を引き継ぐ）
 src/Settings.tsx    個人設定
 src/help.tsx        ヘルプ（ヘルプセンター・記事・画面の「？」・初回の案内・業務の説明）
-src/components.tsx  フォーム・実行詳細・承認トレイ
+src/components.tsx  フォーム・実行詳細（中止）・承認トレイ
+src/voice.ts        音声の対話（マイクの取り込み・再生・中継との WebSocket）
+src/markdown.ts     ヘルプと説明の Markdown の描画
 src/styles.css      3 ペインの配置
 ```
 

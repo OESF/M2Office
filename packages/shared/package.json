@@ -1,10 +1,14 @@
 {
   "name": "@m2office/shared",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "型定義と定数。画面・API・ワーカーが共通で参照する",
   "main": "./src/index.ts",
-  "exports": { ".": "./src/index.ts" },
-  "scripts": { "typecheck": "tsc -b" }
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -b"
+  }
 }
