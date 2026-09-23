@@ -191,11 +191,12 @@ function chooseTools(tools: string[], prompt: string): Call[] {
             body: minutesStub(previous) },
     }];
   }
-  if (has('meeting.get_transcript') && /取得/.test(instruction)) {
-    return [{
-      name: 'meeting.get_transcript',
-      args: { transcript: extractField(prompt, 'transcript') },
-    }];
+  if (/取得/.test(instruction)) {
+    // 記録の取り方は、ファイル → 貼り付け → Meet の順（仕様書 第9.5.2節）
+    const fileId = extractField(prompt, 'fileId');
+    if (has('file.read_text') && fileId) return [{ name: 'file.read_text', args: { fileId } }];
+    const transcript = extractField(prompt, 'transcript');
+    if (has('meeting.get_transcript')) return [{ name: 'meeting.get_transcript', args: { transcript } }];
   }
   if (has('knowledge.search') && /検索|照会|探す|調べ/.test(instruction)) {
     return [{
@@ -239,8 +240,11 @@ function summarizeForBrief(previous: string): string {
  * @remarks 推論をしないため、決定事項を取り出したふりはしない。記録が無ければそう書く
  */
 function minutesStub(previous: string): string {
-  // 推論の応答文（同じ "text" の名前を持つ）ではなく、会議の記録のツールの結果から拾う
-  const text = /"name":\s*"meeting\.get_transcript"[\s\S]*?"result":\s*\{[\s\S]*?"text":\s*"((?:[^"\\]|\\.)*)"/.exec(previous)?.[1];
+  // 推論の応答文（同じ "text" の名前を持つ）ではなく、記録を取ったツールの結果から拾う。
+  // 記録は、渡されたファイル（file.read_text）か Meet（meeting.get_transcript）から来る（仕様書 第9.5.2節）
+  const from = (tool: string) =>
+    new RegExp(`"name":\\s*"${tool}"[\\s\\S]*?"result":\\s*\\{[\\s\\S]*?"text":\\s*"((?:[^"\\\\]|\\\\.)*)"`).exec(previous)?.[1];
+  const text = from('file\\.read_text') ?? from('meeting\\.get_transcript');
   const record = text ? (JSON.parse(`"${text}"`) as string) : '（記録を取得できませんでした）';
   return [
     '## 決定事項',

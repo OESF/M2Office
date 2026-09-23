@@ -222,6 +222,21 @@ export interface Repository {
    */
   listDisabledConnectorTools(tenantId: string): Promise<DisabledConnectorTool[]>;
   /**
+   * 上げたファイルを実行に紐づける（仕様書 第10.10.5節）。
+   *
+   * @returns 紐づけたら `true`。本人のファイルでなければ `false`
+   * @remarks
+   * 紐づけたファイルは、実行の成果物として扱い、4 週の入れ替えでは消さない。
+   */
+  attachFileToRun(tenantId: string, fileId: string, runId: string, ownerUserId: string): Promise<boolean>;
+  /**
+   * 秘書に渡しただけのファイル（実行に紐づかない、利用者が上げたもの）を消す（仕様書 第10.10.5節）。
+   *
+   * @param before この時刻より前に上げたものを消す
+   * @returns 消したファイルの ID。呼び出し側が実体も消す
+   */
+  deleteLooseUploadsBefore(tenantId: string, before: string): Promise<string[]>;
+  /**
    * コネクタのツールを 1 つ、有効または無効にする。
    *
    * @param by 決めた管理者。監査のために残す

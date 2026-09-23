@@ -6,7 +6,7 @@
  * @see 仕様書 第6.1節 ワークスペースの画面構造
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Approval, Notification } from '@m2office/shared';
 import {
   api, describeError, type AgentSummary, type Me, type RunDetail, type ScheduleView, type SecretaryReply,
@@ -39,7 +39,7 @@ const GOOGLE_RETURN_TEXT: Record<string, { ok: boolean; text: string }> = {
 /** 中央キャンバスに何を表示しているか。 */
 type View =
   | { kind: 'home' }
-  | { kind: 'agent'; agent: AgentSummary }
+  | { kind: 'agent'; agent: AgentSummary; fileId?: string }
   | { kind: 'run'; runId: string }
   | { kind: 'approvals' }
   | { kind: 'history' }
@@ -61,6 +61,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [view, setView] = useState<View>(() => (googleReturn ? { kind: 'settings' } : { kind: 'home' }));
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [reply, setReply] = useState<SecretaryReply | null>(null);
+  // 秘書に渡したファイル。取り次いだ業務の入力へ引き継ぐ（仕様書 第10.10.3節）
+  const [replyFileId, setReplyFileId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [showTour, setShowTour] = useState(false);
@@ -161,7 +163,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
             active={view.kind === 'settings'} onOpenSettings={() => setView({ kind: 'settings' })}
           />
         )}
-        footer={<SecretaryBar onReply={setReply} />}
+        footer={<SecretaryBar onReply={(r, fid) => { setReply(r); setReplyFileId(fid); }} />}
       >
         <main className="canvas">
           {error && <p className="error">{error}</p>}
@@ -170,7 +172,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
             <>
               <h1>{view.agent.name}</h1>
               <p className="lead">必要な項目を入力して実行します。</p>
-              <AgentForm agent={view.agent} onSubmitted={(runId) => setView({ kind: 'run', runId })} />
+              <AgentForm agent={view.agent} initial={view.fileId ? { fileId: view.fileId } : undefined}
+                onSubmitted={(runId) => setView({ kind: 'run', runId })} />
             </>
           )}
           {view.kind === 'run' && (
@@ -248,12 +251,19 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
                 <p className="muted" style={{ fontSize: 12 }}>
                   {layerLabel(reply.layer)} / {reply.elapsedMs}ms / {reply.tokensUsed} トークン
                 </p>
+                {reply.file && (
+                  <p className="muted" style={{ fontSize: 12 }}>
+                    読んだファイル: {reply.file.name}
+                    {reply.file.note && <>（{reply.file.note}）</>}
+                  </p>
+                )}
                 {reply.suggestedAgent && (
                   <button
                     className="btn"
                     onClick={() => {
                       const hit = agents.find((a) => a.id === reply.suggestedAgent?.id);
-                      if (hit) setView({ kind: 'agent', agent: hit });
+                      // 秘書に渡したファイルを、そのまま業務の入力へ引き継ぐ（第10.10.3節）
+                      if (hit) setView({ kind: 'agent', agent: hit, ...(replyFileId ? { fileId: replyFileId } : {}) });
                       setReply(null);
                     }}
                   >
@@ -315,11 +325,33 @@ function Home({ approvals, agents }: { approvals: number; agents: number }) {
   );
 }
 
-/** 常駐の秘書バー。どの画面からでも呼び出せる（仕様書 第10.4節）。音声でも話しかけられる（第10.5節）。 */
-function SecretaryBar({ onReply }: { onReply: (r: SecretaryReply) => void }) {
+/**
+ * 常駐の秘書バー。どの画面からでも呼び出せる（仕様書 第10.4節）。
+ * 音声でも話しかけられ（第10.5節）、手元のファイルを 1 つ渡せる（第10.10節）。
+ */
+function SecretaryBar({ onReply }: { onReply: (r: SecretaryReply, fileId: string | null) => void }) {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
+  // 渡すファイルは 1 つだけ（第10.10.2節）。選んだ時点で上げ、ID を持っておく
+  const [file, setFile] = useState<{ id: string; name: string } | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  async function attach(chosen: File | undefined) {
+    if (!chosen) return;
+    setBusy(true);
+    setHint(`「${chosen.name}」を渡しています…`);
+    try {
+      const up = await api.uploadFile(chosen);
+      setFile({ id: up.id, name: up.name });
+      setHint(`「${up.name}」を渡しました。この書類について聞いてください`);
+    } catch (err) {
+      setHint(describeError(err, 'ファイルを渡せませんでした'));
+    } finally {
+      setBusy(false);
+      if (fileInput.current) fileInput.current.value = '';
+    }
+  }
   // 音声の対話（第10.5.5節）。聞こえた文字と応答は、その場で画面にも出す（併記）
   const [call, setCall] = useState<VoiceCall | null>(null);
   const [voice, setVoice] = useState<{ heard: string; reply: string } | null>(null);
@@ -347,10 +379,15 @@ function SecretaryBar({ onReply }: { onReply: (r: SecretaryReply) => void }) {
     if (!text.trim() || busy) return;
     setBusy(true);
     try {
-      const reply = await api.ask(text);
-      onReply(reply);
-      setHint(`${layerLabel(reply.layer)}・${reply.elapsedMs}ms`);
+      const reply = await api.ask(text, file?.id);
+      onReply(reply, file?.id ?? null);
+      setHint([
+        layerLabel(reply.layer), `${reply.elapsedMs}ms`,
+        reply.file ? `「${reply.file.name}」を読みました` : '',
+      ].filter(Boolean).join('・'));
       setText('');
+      // 渡したファイルは 1 回の依頼ごとに外す。次の依頼に持ち越さない
+      setFile(null);
     } catch (err) {
       setHint(describeError(err, '応答できませんでした'));
     } finally {
@@ -378,6 +415,19 @@ function SecretaryBar({ onReply }: { onReply: (r: SecretaryReply) => void }) {
         title="音声で話しかけます。話した内容と応答は画面にも出ます">
         {call ? '音声を終わる' : '音声で話す'}
       </button>
+      <input ref={fileInput} type="file" hidden
+        accept=".pdf,.xlsx,.csv,.docx,.png,.jpg,.jpeg"
+        onChange={(e) => void attach(e.target.files?.[0])} />
+      <button className="btn ghost" disabled={busy} onClick={() => fileInput.current?.click()}
+        title="手元のファイルを渡して、それについて聞けます（PDF・Word・Excel・CSV・画像。10 MB まで）">
+        書類を渡す
+      </button>
+      {file && (
+        <span className="attached">
+          {file.name}
+          <button className="link" onClick={() => setFile(null)} title="渡すのをやめる">×</button>
+        </span>
+      )}
       {hint && <span className="layer">{hint}</span>}
       {voice && (voice.heard || voice.reply) && (
         <div className="voice-transcript">

@@ -1229,6 +1229,25 @@ export class PostgresRepository implements Repository {
       [tenantId]);
   }
 
+  async attachFileToRun(tenantId: string, fileId: string, runId: string, ownerUserId: string): Promise<boolean> {
+    // 本人のファイルだけを紐づける。他人の ID を書かれても触らない（仕様書 第9.4.1節）
+    const rows = await this.q<{ id: string }>(tenantId,
+      `update files set run_id = $3
+        where tenant_id = $1 and id = $2 and owner_user_id = $4 and run_id is null
+        returning id`,
+      [tenantId, fileId, runId, ownerUserId]);
+    return rows.length > 0;
+  }
+
+  async deleteLooseUploadsBefore(tenantId: string, before: string): Promise<string[]> {
+    const rows = await this.q<{ id: string }>(tenantId,
+      `delete from files
+        where tenant_id = $1 and origin = 'upload' and run_id is null and created_at < $2
+        returning id`,
+      [tenantId, before]);
+    return rows.map((r) => r.id);
+  }
+
   async listDisabledConnectorTools(tenantId: string): Promise<DisabledConnectorTool[]> {
     return this.q<DisabledConnectorTool>(tenantId,
       `select connector_id as "connectorId", tool_name as "toolName",

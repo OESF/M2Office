@@ -566,3 +566,19 @@ code.uri { background: var(--subtle-bg); border: 1px solid var(--line); border-r
 .md-pre code { font-family: Menlo, Consolas, monospace; white-space: pre; }
 .md-table th, .md-table td { min-width: 6em; }
 .md-table .md-code { overflow-wrap: anywhere; }
+
+/* 秘書バーに渡したファイル（仕様書 第10.10節） */
+.secretary .attached {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 12px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.secretary .attached .link { padding: 0; line-height: 1; }

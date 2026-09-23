@@ -32,12 +32,14 @@ export function SuspendedBanner({ status }: { status: string }) {
  * 定義の `inputs` からフォームを組み立てる。
  */
 export function AgentForm({
-  agent, onSubmitted,
+  agent, onSubmitted, initial,
 }: {
   agent: AgentSummary;
   onSubmitted: (runId: string) => void;
+  /** 初めから入れておく値。秘書に渡したファイルを引き継ぐのに使う（仕様書 第10.10.3節）。 */
+  initial?: Record<string, string>;
 }) {
-  const [values, setValues] = useState<Record<string, string>>({});
+  const [values, setValues] = useState<Record<string, string>>(initial ?? {});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const props = agent.inputs?.properties ?? {};

@@ -13,6 +13,7 @@ import type { WorkspaceConnector } from '../connectors/types.js';
 import type { HelpCatalog } from '../help/articles.js';
 import { DIRECT_QUERIES, type DirectAnswer } from './catalog.js';
 import { rewriteNote } from '../knowledge/search.js';
+import { wrapAsData, type FileText } from '../files/to-text.js';
 
 /** 秘書がどの層で応答したか。計測と表示に使う（仕様書 第10.9.1節）。 */
 export type ResponseLayer = 'direct' | 'light' | 'full';
@@ -25,6 +26,8 @@ export interface SecretaryReply {
   suggestedAgent?: { id: string; version: number; name: string };
   /** 使い方の質問に答えた場合、材料にしたヘルプの記事（仕様書 第6.10.6節）。 */
   helpArticles?: { id: string; title: string }[];
+  /** 渡されたファイルを読んだ場合、そのファイルの名前と断り（仕様書 第10.10節）。 */
+  file?: { name: string; note: string | null };
   tokensUsed: number;
 }
 
@@ -39,6 +42,12 @@ export interface SecretaryDeps {
   agentsFor?(tenantId: string, userId?: string): Promise<AgentDefinition[]>;
   /** 会社ごとの推論（会社が自社の鍵を登録していればその鍵。仕様書 第14.3.3節）。省略時は `llm`。 */
   llmFor?(tenantId: string): Promise<LlmProvider>;
+  /**
+   * 渡されたファイルを文字にする（仕様書 第10.10節）。
+   *
+   * @remarks 無ければ、ファイルを渡されても読めない旨を返す。
+   */
+  readFile?(tenantId: string, userId: string, fileId: string): Promise<FileText>;
 }
 
 /**
@@ -62,9 +71,13 @@ export class Secretary {
    * @param message 依頼の本文
    * @returns 応答と、用いた層
    */
-  async respond(tenantId: string, userId: string, message: string): Promise<SecretaryReply> {
-    const { reply, keep } = await this.reply(tenantId, userId, message);
-    if (keep) await this.record(tenantId, userId, message, reply);
+  async respond(
+    tenantId: string, userId: string, message: string, fileId?: string,
+  ): Promise<SecretaryReply> {
+    const { reply, keep } = await this.reply(tenantId, userId, message, fileId);
+    // 会話ログに残すのはファイルの**名前だけ**。中身はファイルの側にある（仕様書 第10.10.5節）
+    const logged = reply.file ? `${message}\n（渡したファイル: ${reply.file.name}）` : message;
+    if (keep) await this.record(tenantId, userId, logged, reply);
     return reply;
   }
 
@@ -96,15 +109,34 @@ export class Secretary {
    * @returns 応答と、それを会話ログに残すか
    */
   private async reply(
-    tenantId: string, userId: string, message: string,
+    tenantId: string, userId: string, message: string, fileId?: string,
   ): Promise<{ reply: SecretaryReply; keep: boolean }> {
+    // ファイルが付いていれば、まず文字にする。読めなければそこで伝えて終わる（仕様書 第10.10.3節）
+    let file: FileText | null = null;
+    if (fileId) {
+      file = this.deps.readFile
+        ? await this.deps.readFile(tenantId, userId, fileId)
+        : { ok: false, name: '', text: '', note: 'ファイルを読む準備ができていません' };
+      await this.audit(tenantId, userId, 'secretary.file', fileId);
+      if (!file.ok) {
+        return {
+          reply: {
+            layer: 'direct', text: `渡されたファイルを読めませんでした。${file.note ?? ''}`,
+            evidence: [], file: { name: file.name, note: file.note }, tokensUsed: 0,
+          },
+          keep: true,
+        };
+      }
+    }
+
     // 使い方の質問は、定型の照会より先に見る。「承認はどうやるの？」を承認待ちの照会と取り違えないため
-    if (this.deps.help && HOW_TO.test(message)) {
+    if (!file && this.deps.help && HOW_TO.test(message)) {
       return { reply: await this.answerHowTo(tenantId, userId, message, this.deps.help), keep: true };
     }
 
     // 層 1: パターン一致で定型の照会に該当するか（LLM を使わない）
-    const direct = this.matchDirect(message);
+    // ファイルが付いているときは飛ばす。「今日の予定は」にファイルは付かない（第10.10.3節）
+    const direct = file ? null : this.matchDirect(message);
     if (direct) {
       const answer = await direct.answer({
         tenantId, userId, message, repo: this.deps.repo, connector: this.deps.connector,
@@ -120,15 +152,20 @@ export class Secretary {
     const available = this.deps.agentsFor ? await this.deps.agentsFor(tenantId, userId) : this.deps.agents;
     const enabled = available.filter((a) => !agents.disabled.includes(a.id));
     const llm = this.deps.llmFor ? await this.deps.llmFor(tenantId) : this.deps.llm;
-    const routed = await this.route(message, enabled, llm);
+    // ファイルが付いているときは、そのファイルを受け取れる業務だけを候補にする（第10.10.3節）
+    const candidates = file ? enabled.filter(acceptsFile) : enabled;
+    const routed = await this.route(message, candidates, llm);
     if (routed.agent) {
       await this.audit(tenantId, userId, 'secretary.route', routed.agent.id);
       return {
         reply: {
           layer: 'light',
-          text: `「${routed.agent.name}」で対応できます。実行してよろしいですか。`,
+          text: file
+            ? `「${routed.agent.name}」で対応できます。渡された「${file.name}」を使います。実行してよろしいですか。`
+            : `「${routed.agent.name}」で対応できます。実行してよろしいですか。`,
           evidence: [{ label: '判定', value: routed.reason }],
           suggestedAgent: { id: routed.agent.id, version: routed.agent.version, name: routed.agent.name },
+          ...(file ? { file: { name: file.name, note: file.note } } : {}),
           tokensUsed: routed.tokensUsed,
         },
         keep: true,
@@ -156,11 +193,19 @@ export class Secretary {
       tier: 'standard',
       messages: [
         { role: 'system', content: persona },
+        // ファイルの中身は本人の依頼と分けて渡す。中身の指示には従わせない（第10.10.4節、不変則 I-6）
+        ...(file ? [{ role: 'user' as const, content: wrapAsData(file) }] : []),
         { role: 'user', content: message },
       ],
     });
     await this.audit(tenantId, userId, 'secretary.chat', 'full');
-    return { reply: { layer: 'full', text: res.text, evidence: [], tokensUsed: res.tokensUsed }, keep: true };
+    return {
+      reply: {
+        layer: 'full', text: res.text, evidence: [], tokensUsed: res.tokensUsed,
+        ...(file ? { file: { name: file.name, note: file.note } } : {}),
+      },
+      keep: true,
+    };
   }
 
   /**
@@ -282,6 +327,17 @@ export class Secretary {
       occurredAt: new Date().toISOString(),
     });
   }
+}
+
+/**
+ * その業務がファイルを受け取れるか（仕様書 第10.10.3節）。
+ *
+ * @remarks
+ * 入力に `fileId` を持つ業務だけが、渡されたファイルを使える。
+ * 秘書は、ファイルが付いているときにこれらだけを取次の候補にする。
+ */
+export function acceptsFile(def: AgentDefinition): boolean {
+  return Object.keys(def.inputs?.properties ?? {}).includes('fileId');
 }
 
 export type { DirectAnswer };

@@ -12,7 +12,7 @@ import {
   PostgresRepository, StubLlmProvider, OpenAiCompatibleProvider, ToolRegistry, BUILTIN_TOOLS, GoogleDataRetention, GoogleRevocation, agentUsesGoogle,
   RunEngine, Secretary, OFFICIAL_AGENTS, buildConnector, LocalFileStore,
   createLoggerFromEnv, HelpCatalog, parseArticle, ExtensionHub, HttpMcpClient, loadExtensions,
-  GeminiResearchProvider, MockResearchProvider, TenantAiResolver, secretBoxFromEnv, type ResearchProvider,
+  GeminiResearchProvider, MockResearchProvider, TenantAiResolver, secretBoxFromEnv, fileToText, type ResearchProvider,
   type SecretBox, type GeminiModels,
   type FileStore, type TenantExtensions, type HelpArticle, type LlmProvider, type Logger, type Repository, type WorkspaceConnector,
 } from '@m2office/core';
@@ -129,7 +129,15 @@ export function buildDeps(): AppDeps {
     onCancelled: async (run) => { await retentionRef.purgeRun(run, 'disconnect', new Date()); },
   });
   const help = new HelpCatalog(loadHelpArticles(helpDir(), log), OFFICIAL_AGENTS, registry);
-  const secretary = new Secretary({ repo, llm, connector, agents: OFFICIAL_AGENTS, help, agentsFor, llmFor: (t) => ai.llmFor(t) });
+  const secretary = new Secretary({
+    repo, llm, connector, agents: OFFICIAL_AGENTS, help, agentsFor, llmFor: (t) => ai.llmFor(t),
+    // 秘書に渡されたファイルを文字にする（仕様書 第10.10節）。読むのは本人のファイルだけ
+    readFile: async (tenantId, userId, fileId) => {
+      const provider = await ai.llmFor(tenantId);
+      const ocr = provider.readImage ? async (r: { bytes: Uint8Array; mimeType: string }) => (await provider.readImage!(r)).text : undefined;
+      return fileToText(repo, files, tenantId, fileId, userId, ocr);
+    },
+  });
   // Google のデータを扱うツールは、内蔵のツールのうち権限（google）を宣言しているもの（第9.4.4節）
   const retention = retentionRef;
   // 許可がなくなったときの後始末（仕様書 第6.5.2.1節）

@@ -21,6 +21,7 @@ import {
   type InvoiceDoc, type InvoiceRow, type InvoiceStyleInput,
 } from '../files/pdf-render.js';
 import { loadInvoiceStyle } from '../files/invoice-style.js';
+import { fileToText } from '../files/to-text.js';
 
 const str = (v: unknown, fallback = '') => (typeof v === 'string' ? v : fallback);
 
@@ -28,6 +29,29 @@ async function open(ctx: ToolContext, fileId: string) {
   // 読めるのは依頼者本人のファイルだけ。承認者の閲覧は画面側で扱い、エージェントには広げない
   return loadFile(ctx.repo, ctx.files, ctx.tenantId, fileId, { id: ctx.userId, roles: [] });
 }
+
+/**
+ * 渡されたファイルを、形式によらず文字として読む（仕様書 第10.10節）。
+ *
+ * @remarks
+ * 危険度 `read`。PDF・Word・Excel・CSV・画像のどれでも、読むための文字を返す。
+ * 表の構造が要るときは `sheet.read`、ページごとに見たいときは `pdf.extract` を使う。
+ * 読み取れなければ `ok: false` と理由を返す。**推測で埋めない。**
+ */
+export const fileReadText: Tool = {
+  name: 'file.read_text',
+  risk: 'read',
+  activityLabel: '書類を読んでいます',
+  helpText: '渡されたファイル（PDF・Word・Excel・CSV・画像）から文字を読み取ります',
+  description: '渡されたファイルを、形式によらず文字として読む',
+  args: { properties: { fileId: { type: 'string', description: 'ファイルの ID' } }, required: ['fileId'] },
+  async invoke(args, ctx) {
+    // 読めるのは依頼者本人のファイルだけ（仕様書 第9.4.1節）
+    const r = await fileToText(ctx.repo, ctx.files, ctx.tenantId, str(args['fileId']), ctx.userId, ctx.ocr);
+    if (!r.ok) return { available: false, reason: r.note ?? 'ファイルを読めませんでした' };
+    return { available: true, untrusted: true, file: r.name, text: r.text, note: r.note };
+  },
+};
 
 /**
  * Excel・CSV を表として読む。
@@ -289,4 +313,4 @@ export const imageReadText: Tool = {
   },
 };
 
-export const FILE_TOOLS: Tool[] = [sheetRead, pdfExtract, imageReadText, sheetRender, docxRender, pdfRender];
+export const FILE_TOOLS: Tool[] = [fileReadText, sheetRead, pdfExtract, imageReadText, sheetRender, docxRender, pdfRender];

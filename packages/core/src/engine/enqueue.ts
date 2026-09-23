@@ -43,6 +43,12 @@ export async function enqueueJob(
   };
   await repo.createJob(job);
   await repo.createRun(run);
+  // 入力で渡されたファイルは、この実行のものとする（仕様書 第10.10.5節）。
+  // 実行に紐づいたファイルは、秘書へ渡しただけのものの入れ替え（4 週）では消さない
+  const fileId = p.input['fileId'];
+  if (typeof fileId === 'string' && fileId) {
+    await repo.attachFileToRun(p.tenantId, fileId, run.id, p.requestedBy);
+  }
   await repo.appendAudit({
     id: randomUUID(), tenantId: p.tenantId, actorType: p.actor.type, actorId: p.actor.id,
     action: 'job.create', targetType: 'job', targetId: job.id,

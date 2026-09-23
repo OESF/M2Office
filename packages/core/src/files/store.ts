@@ -6,7 +6,7 @@
  * @see 仕様書 第20.4.2節 本番環境
  */
 
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
 /**
@@ -22,6 +22,8 @@ export interface FileStore {
   put(tenantId: string, key: string, bytes: Uint8Array): Promise<void>;
   /** 中身を返す。無ければ `null`。 */
   get(tenantId: string, key: string): Promise<Uint8Array | null>;
+  /** 中身を消す。無くても例外にしない（何度呼んでも同じ結果になる）。 */
+  remove(tenantId: string, key: string): Promise<void>;
 }
 
 /** 開発用。`<root>/<tenantId>/<key>` に保存する。 */
@@ -43,6 +45,10 @@ export class LocalFileStore implements FileStore {
     }
   }
 
+  async remove(tenantId: string, key: string): Promise<void> {
+    await rm(this.pathOf(tenantId, key), { force: true });
+  }
+
   private dirOf(tenantId: string): string {
     return join(resolve(this.root), safe(tenantId));
   }
@@ -57,6 +63,7 @@ export class MemoryFileStore implements FileStore {
   private readonly data = new Map<string, Uint8Array>();
   async put(tenantId: string, key: string, bytes: Uint8Array) { this.data.set(`${tenantId}/${key}`, bytes); }
   async get(tenantId: string, key: string) { return this.data.get(`${tenantId}/${key}`) ?? null; }
+  async remove(tenantId: string, key: string) { this.data.delete(`${tenantId}/${key}`); }
 }
 
 /** パスの区切りや `..` を含む名前を拒否する。ディレクトリの外へ出させない。 */

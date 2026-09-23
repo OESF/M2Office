@@ -104,7 +104,8 @@ const notifier = new NotificationDelivery({
 });
 
 // 会話ログ（逐語）の入れ替え。4 週を過ぎたものを消す（仕様書 第11.9.6節）
-const conversations = new ConversationRotation({ repo, logger: log });
+// ファイルの実体も消す（仕様書 第10.10.5節）
+const conversations = new ConversationRotation({ repo, files, logger: log });
 // 対話からの学習。前日の会話から、その日の要約と記憶の候補を作る（仕様書 第11.5.2節）
 const learning = new MemoryLearning({ repo, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log });
 

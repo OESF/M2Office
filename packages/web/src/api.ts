@@ -338,6 +338,8 @@ export interface SecretaryReply {
   suggestedAgent?: { id: string; version: number; name: string };
   /** 使い方の質問に答えたとき、材料にしたヘルプの記事。 */
   helpArticles?: { id: string; title: string }[];
+  /** 渡したファイルを読んだとき、その名前と断り（仕様書 第10.10節）。 */
+  file?: { name: string; note: string | null };
   tokensUsed: number;
   elapsedMs: number;
 }
@@ -634,9 +636,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ decision, comment: comment ?? null }),
     }),
-  ask: (message: string) =>
+  /** 秘書に聞く。手元のファイルを 1 つ添えられる（仕様書 第10.10節）。 */
+  ask: (message: string, fileId?: string) =>
     call<SecretaryReply>('/secretary', {
       method: 'POST',
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ message, ...(fileId ? { fileId } : {}) }),
     }),
 };

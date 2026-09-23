@@ -2048,6 +2048,72 @@ console.log('\n■ 43. 実行の中止と、知識の登録（第9.3.1節、第1
   await call('a', `/v1/admin/knowledge/${k.id}`, { method: 'DELETE' });
 }
 
+console.log('\n■ 44. 秘書にファイルを渡す（第10.10節）');
+{
+  const upload = async (name, bytes, who = 'member') => {
+    const form = new FormData();
+    form.append('file', new Blob([bytes]), name);
+    const res = await fetch(`${API}/v1/files`, {
+      method: 'POST', body: form,
+      headers: { 'x-tenant': 'a', 'x-user': `${who}@alpha.example.jp` },
+    });
+    return { status: res.status, body: await res.json() };
+  };
+  const csv = new TextEncoder().encode('品目,金額\nりんご,100\nみかん,200\n');
+  const up = await upload('売上.csv', csv);
+  up.status === 201 ? ok('秘書に渡すファイルを受け取れる') : ng(`受け取れない（${up.status}）`, JSON.stringify(up.body));
+  const fileId = up.body.id;
+
+  // ファイルが付いていれば、層 1（定型の照会）を飛ばす
+  const asked = await call('a', '/v1/secretary', {
+    method: 'POST', body: JSON.stringify({ message: '今日の予定は', fileId }),
+  }, 'member');
+  asked.body.layer !== 'direct'
+    ? ok(`ファイルが付くと層 1 を飛ばす（${asked.body.layer}）`) : ng('層 1 で答えてしまう');
+  asked.body.file?.name === '売上.csv'
+    ? ok('読んだファイルの名前を返す') : ng('名前を返さない', JSON.stringify(asked.body.file ?? null));
+
+  // 他人のファイルは読まない（第9.4.1節）。ここではまだ実行に紐づいていない
+  const theirs = await call('a', '/v1/secretary', {
+    method: 'POST', body: JSON.stringify({ message: 'これを読んで', fileId }),
+  }, 'admin');
+  /読めませんでした/.test(theirs.body.text ?? '')
+    ? ok('他人のファイルは読まない') : ng('他人のファイルを読んでしまう', theirs.body.text ?? '');
+
+  // 監査ログに残る
+  const { body: audits } = await call('a', '/v1/admin/audit-events');
+  (audits.items ?? []).some((e) => e.action === 'secretary.file' && e.targetId === fileId)
+    ? ok('監査ログに secretary.file が残る') : ng('監査ログに残らない');
+
+  // ファイルを受け取れる業務へ渡すと、その実行のものになる（4 週の入れ替えで消さない）
+  const { body: job } = await call('a', '/v1/jobs', {
+    method: 'POST',
+    body: JSON.stringify({ agentId: 'minutes', input: { title: 'ファイルからの議事録', fileId } }),
+  }, 'member');
+  const run = await waitFor('a', job.runId, ['awaiting_approval', 'completed', 'failed'], 20000, 'member');
+  run.run.status === 'awaiting_approval'
+    ? ok('渡したファイルから議事録を作り、承認待ちになる') : ng(`進まない（${run.run.status}）`, run.run.failureReason);
+  const fetched = run.steps?.find((s) => s.stepId === 'fetch');
+  (fetched?.output?.tools ?? []).some((t) => t.name === 'file.read_text')
+    ? ok('取得の段で file.read_text を使う') : ng('ファイルを読んでいない', JSON.stringify(fetched?.output?.tools ?? []));
+  // 読んだ中身が成果物まで届く（読むだけで終わらない）
+  const body = run.artifacts?.[0]?.body ?? '';
+  /りんご/.test(body) && /みかん/.test(body)
+    ? ok('読んだ中身が議事録の成果物に入る') : ng('中身が届いていない', body.slice(0, 200));
+
+  // 業務に渡したファイルは、その実行のものになる（4 週の入れ替えで消さない。第10.10.5節）
+  const meta = await call('a', `/v1/files/${fileId}`, {}, 'member');
+  meta.body.runId === job.runId
+    ? ok('業務に渡したファイルは、その実行のものになる') : ng('実行に紐づかない', JSON.stringify(meta.body.runId ?? null));
+
+  // 判断できる承認がある人は、そのファイルを見られるようになる（第6.2.1節）
+  const byApprover = await call('a', `/v1/files/${fileId}`, {}, 'admin');
+  byApprover.status === 200
+    ? ok('判断する承認がある人は、業務に渡したファイルを見られる') : ng(`見られない（${byApprover.status}）`);
+
+  await call('a', `/v1/runs/${job.runId}/cancel`, { method: 'POST' }, 'member');
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

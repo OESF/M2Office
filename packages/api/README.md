@@ -91,7 +91,7 @@ OAuth クライアントが整うまでは、`GET /v1/auth/google/start` は 503
 | `POST /v1/runs/:id/cancel` | 実行の中止（仕様書 第9.3.1節）。**依頼した本人だけ**。承認する人は 403、終わった実行は 409。作りかけの文書のリンクを返す |
 | `GET /v1/approvals` | 本人のロールで判断できる承認待ち |
 | `POST /v1/approvals/:id` | 承認または却下。ロールが無ければ 403 |
-| `POST /v1/secretary` | 秘書への依頼。どの層で答えたかを返す |
+| `POST /v1/secretary` | 秘書への依頼。どの層で答えたかを返す。`fileId` で手元のファイルを 1 つ渡せる（仕様書 第10.10節）。読めるのは本人のファイルだけ |
 | `GET /v1/notifications` | 本人宛の通知 |
 | `POST /v1/notifications/:id/read` | 既読にする |
 | `GET /v1/schedules` | 本人の定時実行 |

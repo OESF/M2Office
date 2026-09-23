@@ -87,7 +87,7 @@ export {
 export {
   OFFICIAL_AGENTS, resolveOfficialAgent, DEFAULT_STANDARD_MINUTES, standardMinutes, stepLabel,
 } from './agents/index.js';
-export { Secretary } from './secretary/secretary.js';
+export { Secretary, acceptsFile } from './secretary/secretary.js';
 export type { SecretaryReply, ResponseLayer } from './secretary/secretary.js';
 export { DIRECT_QUERIES } from './secretary/catalog.js';
 export {
