@@ -110,9 +110,50 @@ function Field({
   );
 }
 
-/** 実行の詳細。進捗とステップを表示する（仕様書 FR-305）。 */
-export function RunView({ detail }: { detail: RunDetail }) {
+/** 途中で止められる状態（仕様書 第9.3.1節）。終わった実行は止められない。 */
+const CANCELLABLE = ['queued', 'running', 'awaiting_approval'];
+
+/**
+ * 実行の詳細。進捗とステップを表示する（仕様書 FR-305）。
+ *
+ * @param viewerId 見ている人。依頼した本人にだけ「中止」を出す（第9.3.1節）
+ * @param onCancelled 中止したあとに呼ぶ。呼び出し側が読み直す
+ */
+export function RunView({
+  detail, viewerId, onCancelled,
+}: {
+  detail: RunDetail;
+  viewerId: string;
+  onCancelled: () => void;
+}) {
   const { run, steps, artifacts } = detail;
+  const [cancelling, setCancelling] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [leftover, setLeftover] = useState<string[] | null>(null);
+  const canCancel = detail.job?.requestedBy === viewerId && CANCELLABLE.includes(run.status);
+
+  async function cancel() {
+    // 中止は、すでに起きたことを取り消さない。押す前に伝える（第9.3.1節）
+    const ok = window.confirm(
+      'この業務を止めます。\n\n'
+      + 'すでに送ったメールや、作った文書、書き込んだ予定は戻りません。'
+      + '呼び出している最中の処理も、途中では止まりません。\n\n'
+      + '止めてよろしいですか。',
+    );
+    if (!ok) return;
+    setCancelling(true);
+    setError(null);
+    try {
+      const res = await api.cancelRun(run.id);
+      setLeftover(res.leftoverLinks);
+      onCancelled();
+    } catch (err) {
+      setError(describeError(err, '止められませんでした'));
+    } finally {
+      setCancelling(false);
+    }
+  }
+
   return (
     <>
       <div className="card">
@@ -125,6 +166,20 @@ export function RunView({ detail }: { detail: RunDetail }) {
           <dt>消費</dt><dd>{run.tokensUsed} トークン（約 {run.costJpy} 円）</dd>
           {run.failureReason && (<><dt>理由</dt><dd>{run.failureReason}</dd></>)}
         </dl>
+        {canCancel && (
+          <button className="btn ghost small" onClick={() => void cancel()} disabled={cancelling}>
+            {cancelling ? '止めています…' : '中止'}
+          </button>
+        )}
+        {error && <p className="error">{error}</p>}
+        {leftover && leftover.length > 0 && (
+          <p className="muted">
+            作りかけの文書がドライブに残っています:{' '}
+            {leftover.map((url) => (
+              <a key={url} href={url} target="_blank" rel="noreferrer">{url}</a>
+            ))}
+          </p>
+        )}
       </div>
       <div className="card">
         <h3>ステップ</h3>

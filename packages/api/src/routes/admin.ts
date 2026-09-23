@@ -7,7 +7,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import {
   isValidInvoiceNumber, parsePresentationId, parseSynonymLines, type AutomationPolicy, type CompanyInfo, type Role, type SlideTemplate, type TenantSettings,
   type User, type WritingStyle,
@@ -225,10 +225,12 @@ export function adminRoute(deps: AppDeps) {
   /**
    * 規程などを組織知識として登録・更新する（第6.6.6節「規程の登録」）。
    *
+   * @param newId ID を発行するか。`POST`（新規の登録）のときだけ真
+   *
    * @remarks
    * 導入時の初期投入に使う（第22.2節）。AG-04 はここに登録したものから答える。
    */
-  app.put('/knowledge/:id', async (c) => {
+  const saveKnowledge = (newId: boolean) => async (c: Context<AppEnv>) => {
     const { tenant, user } = c.get('ctx');
     const body = await c.req.json<{
       kind?: string; title?: string; body?: string; source?: string; compartment?: string | null;
@@ -244,7 +246,7 @@ export function adminRoute(deps: AppDeps) {
       const names = (await deps.repo.listCompartments(tenant.id)).map((x) => x.name);
       if (!names.includes(compartment)) return c.json({ error: `区画が見つかりません: ${compartment}` }, 400);
     }
-    const id = c.req.param('id') === 'new' ? `k-${randomUUID()}` : c.req.param('id');
+    const id = newId || c.req.param('id') === 'new' ? `k-${randomUUID()}` : c.req.param('id')!;
     await deps.repo.saveKnowledge({
       id, tenantId: tenant.id, kind: (body.kind ?? 'rule').trim() || 'rule', title, body: text,
       source: (body.source ?? '').trim() || title, compartment, updatedAt: new Date().toISOString(),
@@ -252,8 +254,12 @@ export function adminRoute(deps: AppDeps) {
     await audit(deps, tenant.id, user.id, 'knowledge.save', 'knowledge', id, { compartment });
     // 分け方を管理者が確かめられるように、分けた節を返す（第11.7.2節）
     const sections = (await deps.repo.listKnowledgeSections(tenant.id, id)) ?? [];
-    return c.json({ id, sections });
-  });
+    return c.json({ id, sections }, newId ? 201 : 200);
+  };
+
+  // 新規は ID を発行する。更新は呼ぶ側が ID を指す（仕様書 第13.3節、ADR-0019）
+  app.post('/knowledge', saveKnowledge(true));
+  app.put('/knowledge/:id', saveKnowledge(false));
 
   /**
    * 昇華の提案の一覧（仕様書 第11.3.1節）。組織の承認待ちだけを返す。

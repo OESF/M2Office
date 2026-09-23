@@ -326,7 +326,7 @@ export interface JsonSchemaField {
 
 export interface RunDetail {
   run: Run;
-  job: { agentId: string; input: Record<string, unknown> } | null;
+  job: { agentId: string; input: Record<string, unknown>; requestedBy: string } | null;
   steps: RunStep[];
   artifacts: Artifact[];
 }
@@ -612,6 +612,9 @@ export const api = {
     }),
   jobs: () => call<{ items: { run: Run; job: { agentId: string } | null }[] }>('/jobs'),
   run: (id: string) => call<RunDetail>(`/runs/${id}`),
+  /** 実行を途中で止める（仕様書 第9.3.1節）。止められるのは依頼した本人だけ。 */
+  cancelRun: (id: string) =>
+    call<{ ok: true; leftoverLinks: string[] }>(`/runs/${id}/cancel`, { method: 'POST' }),
   approvals: () => call<{ items: Approval[] }>('/approvals'),
   decide: (id: string, decision: 'approved' | 'rejected', comment?: string) =>
     call<{ runId: string }>(`/approvals/${id}`, {

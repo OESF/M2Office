@@ -75,6 +75,8 @@ export { RunEngine, estimateCostJpy } from './engine/run-engine.js';
 export type { AdvanceResult, RunEngineDeps } from './engine/run-engine.js';
 export { validateDefinition } from './engine/validate.js';
 export { enqueueJob } from './engine/enqueue.js';
+export { cancelRun, createdDriveLinks, CANCELLABLE } from './engine/cancel.js';
+export type { CancelActor, CancelOutcome } from './engine/cancel.js';
 export { Scheduler, SCHEDULE_SKIP_TITLE } from './scheduler/scheduler.js';
 export { nextRunAt, validateRule, describeRule } from './scheduler/rule.js';
 export { parseToolCalls } from './engine/tool-protocol.js';

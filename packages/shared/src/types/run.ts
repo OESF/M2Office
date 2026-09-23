@@ -51,7 +51,8 @@ export interface Run {
 }
 
 export type StepKind = 'agent' | 'approval';
-export type StepStatus = 'running' | 'succeeded' | 'failed' | 'awaiting' | 'rejected';
+/** ステップの状態。`cancelled` は、承認待ちのまま実行が止められたとき（仕様書 第9.3.1節）。 */
+export type StepStatus = 'running' | 'succeeded' | 'failed' | 'awaiting' | 'rejected' | 'cancelled';
 
 export interface RunStep {
   id: string;

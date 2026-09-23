@@ -177,7 +177,9 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
             <>
               <h1>実行の詳細</h1>
               <p className="lead">進捗は自動で更新されます。</p>
-              {detail ? <RunView detail={detail} /> : <p className="muted">読み込み中…</p>}
+              {detail ? (
+                <RunView detail={detail} viewerId={me.user.id} onCancelled={() => void api.run(view.runId).then(setDetail)} />
+              ) : <p className="muted">読み込み中…</p>}
             </>
           )}
           {view.kind === 'approvals' && (

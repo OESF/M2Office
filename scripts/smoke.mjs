@@ -1948,6 +1948,64 @@ console.log('\n■ 42. 音声の対話（第10.5.5節）');
   }
 }
 
+console.log('\n■ 43. 実行の中止と、知識の登録（第9.3.1節、第13.3節・ADR-0019）');
+{
+  // 承認で止まる業務を作り、承認待ちのまま止める
+  const { body: started } = await call('a', '/v1/jobs', {
+    method: 'POST',
+    body: JSON.stringify({
+      agentId: 'minutes', origin: 'menu',
+      input: { title: '中止の確認', attendees: '三浦', meetingId: 'm-smoke-cancel' },
+    }),
+  });
+  const runId = started.runId;
+  const before = await waitFor('a', runId, ['awaiting_approval', 'completed', 'failed']);
+  before.run.status === 'awaiting_approval'
+    ? ok('承認待ちで止まった') : ng(`承認待ちにならない（${before.run.status}）`, before.run.failureReason);
+  // 止める前に、この実行の承認を控えておく（承認トレイには他の実行の分も並ぶ）
+  const pending = await approvalFor('a', runId);
+  pending ? ok('承認トレイに載っている') : ng('承認が見つからない');
+
+  // 依頼していない人は止められない（第9.3.1節）
+  const other = await call('a', `/v1/runs/${runId}/cancel`, { method: 'POST' }, 'member');
+  other.status === 404 || other.status === 403
+    ? ok(`依頼していない人は止められない（${other.status}）`) : ng(`止められてしまう（${other.status}）`);
+
+  const { status, body: cancelled } = await call('a', `/v1/runs/${runId}/cancel`, { method: 'POST' });
+  status === 200 ? ok('依頼した本人が止められる') : ng(`止められない（${status}）`, JSON.stringify(cancelled));
+  Array.isArray(cancelled.leftoverLinks)
+    ? ok('作りかけの文書のリンクを返す') : ng('リンクを返さない', JSON.stringify(cancelled));
+
+  const { body: after } = await call('a', `/v1/runs/${runId}`);
+  after.run.status === 'cancelled' && after.run.failureReason === '依頼した人が止めました'
+    ? ok('状態が「中止」になり、理由が残る') : ng('中止になっていない', JSON.stringify(after.run));
+
+  // 控えておいた承認が、承認トレイから外れている
+  const { body: tray } = await call('a', '/v1/approvals');
+  pending && !(tray.items ?? []).some((a) => a.id === pending.id)
+    ? ok('承認トレイから外れる') : ng('承認が残っている', pending?.id);
+
+  // 監査ログに残る
+  const { body: audits } = await call('a', '/v1/admin/audit-events');
+  (audits.items ?? []).some((e) => e.action === 'run.cancel' && e.targetId === runId && e.actorType === 'user')
+    ? ok('監査ログに run.cancel が残る（止めた人つき）') : ng('監査ログに残らない');
+
+  // 終わった実行は止められない
+  const again = await call('a', `/v1/runs/${runId}/cancel`, { method: 'POST' });
+  again.status === 409 ? ok('終わった実行は止められない（409）') : ng(`止められてしまう（${again.status}）`);
+
+  // 知識の登録は ID を発行する（ADR-0019 決定 6）
+  const { status: created, body: k } = await call('a', '/v1/admin/knowledge', {
+    method: 'POST',
+    body: JSON.stringify({ kind: 'rule', title: '通しの確認で作った規程', body: '第1条 これは確認用である。' }),
+  });
+  created === 201 && typeof k.id === 'string' && k.id.startsWith('k-')
+    ? ok(`知識を登録すると ID が発行される（${k.id}）`) : ng(`発行されない（${created}）`, JSON.stringify(k));
+  (k.sections ?? []).length > 0
+    ? ok('登録と同時に節へ分ける') : ng('節に分かれない', JSON.stringify(k.sections ?? []));
+  await call('a', `/v1/admin/knowledge/${k.id}`, { method: 'DELETE' });
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

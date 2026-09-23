@@ -88,6 +88,7 @@ OAuth クライアントが整うまでは、`GET /v1/auth/google/start` は 503
 | `POST /v1/jobs` | ジョブを作成し待ち行列へ入れる。実行はワーカーが担う |
 | `GET /v1/jobs` | **本人が依頼した**実行の一覧 |
 | `GET /v1/runs/:id` | 実行の詳細。依頼者本人と、その実行に自分が判断できる承認がある人だけが見られる（仕様書 第6.2.1節）。ほかの人には 404 |
+| `POST /v1/runs/:id/cancel` | 実行の中止（仕様書 第9.3.1節）。**依頼した本人だけ**。承認する人は 403、終わった実行は 409。作りかけの文書のリンクを返す |
 | `GET /v1/approvals` | 本人のロールで判断できる承認待ち |
 | `POST /v1/approvals/:id` | 承認または却下。ロールが無ければ 403 |
 | `POST /v1/secretary` | 秘書への依頼。どの層で答えたかを返す |
@@ -139,7 +140,8 @@ OAuth クライアントが整うまでは、`GET /v1/auth/google/start` は 503
 | `POST /v1/admin/users` | 管理者: 利用者の招待（Workspace のドメインのみ） |
 | `PATCH /v1/admin/users/:id` | 管理者: 表示名・ロール・状態（管理者が 0 人になる変更は 409） |
 | `GET /v1/admin/knowledge` | 管理者: 組織知識の一覧 |
-| `PUT /v1/admin/knowledge/:id` | 管理者: 登録（`new`）・更新。本文を節に分け、分けた節を返す（50 万字まで） |
+| `POST /v1/admin/knowledge` | 管理者: 新規の登録。ID を発行して 201 で返す（ADR-0019） |
+| `PUT /v1/admin/knowledge/:id` | 管理者: 更新（`new` を指すと新規）。本文を節に分け、分けた節を返す（50 万字まで） |
 | `GET /v1/admin/knowledge/:id/sections` | 管理者: 1 件の知識の節（見出しの経路と字数） |
 | `DELETE /v1/admin/knowledge/:id` | 管理者: 削除 |
 | `GET /v1/me/settings` | 本人の個人設定 |
