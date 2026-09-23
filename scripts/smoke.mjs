@@ -2016,6 +2016,26 @@ console.log('\n■ 42. 音声の対話（第10.5.5節）');
     await owner.end();
   }
 
+  // 開いた直後に送った音を捨てない（第10.5.5節）。
+  // 画面はつながった時点から音を送り始める。相手を開くまでの待ちの間に届いた分を
+  // 捨てると、話し始めのひと言が欠ける。登録の順を誤って API ごと落とした（2026-09-24）
+  {
+    const early = new WebSocket(`${API.replace('http', 'ws')}/v1/secretary/voice`, {
+      headers: { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' },
+    });
+    const got = [];
+    early.on('message', (data, isBinary) => { if (!isBinary) got.push(JSON.parse(data.toString('utf8'))); });
+    // 待たずに、つながったその場で送る
+    early.on('open', () => early.send(Buffer.alloc(320), { binary: true }));
+    const gone = new Promise((resolve) => early.on('close', resolve));
+    for (let i = 0; i < 80 && !got.some((m) => m.type === 'heard'); i++) await sleep(50);
+    got.some((m) => m.type === 'heard')
+      ? ok('開いた直後に送った音も届く（話し始めが欠けない）') : ng('開始直後の音が捨てられる', JSON.stringify(got));
+    early.close();
+    await gone;
+    await sleep(300);
+    await call('a', '/v1/me/conversations', { method: 'DELETE' }, who);
+  }
 }
 
 console.log('\n■ 43. 実行の中止と、知識の登録（第9.3.1節、第13.3節・ADR-0019）');

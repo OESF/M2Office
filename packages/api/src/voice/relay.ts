@@ -28,6 +28,13 @@ export const VOICE_PATH = '/v1/secretary/voice';
 /** 話した文字が長くなりすぎたときの上限（字）。会話ログに残す分の上限でもある。 */
 const TRANSCRIPT_LIMIT = 4000;
 
+/**
+ * 対話が開くまでに貯める音の区切りの上限。
+ *
+ * @remarks 1 区切り 40 ミリ秒として、およそ 8 秒ぶん。それ以上は捨てる（際限なく貯めない）。
+ */
+const EARLY_AUDIO_MAX = 200;
+
 /** 終わった調べものを探す間隔（ミリ秒）。実行はワーカー（別のプロセス）で進むため、見に行く。 */
 const LOOKUP_POLL_MS = 3000;
 
@@ -197,14 +204,52 @@ async function start(
     if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(payload));
   };
 
-  const prefs = await deps.repo.getUserSettings(tenantId, userId);
-  const speak = prefs.secretary.speak !== false;
-  const provider = await deps.ai.voiceFor(tenantId);
+  /**
+   * 対話が開くまでに届いた音。
+   *
+   * @remarks
+   * **接続はここへ来る前に開いている。** 画面は開いた直後から音を送り始めるため、
+   * 相手（Gemini Live）を開くまでの待ちの間に届いた音を貯めておき、開いたら渡す。
+   * 捨てると、話し始めのひと言が欠ける。
+   */
+  let early: Uint8Array[] | null = [];
+
+  /**
+   * 相手（音声の提供元）との対話。開くまでは `null`。
+   *
+   * @remarks
+   * **宣言は、音を受け取る登録より前に置く。** 後ろに置くと、開くのを待っている間に
+   * 届いた音で初期化前の参照となり、API ごと落ちる（2026-09-24 に実際に落とした）。
+   */
+  let session: VoiceSession | null = null;
 
   // 話している最中は伝えず、話し終わりを待つ（仕様書 第10.11.7節）
   const gate = new TurnGate((note) => session?.sendSystemNote(note));
 
-  let session: VoiceSession | null = null;
+  ws.on('message', (data: Buffer, isBinary: boolean) => {
+    if (isBinary) {
+      // マイクの音。渡すだけで、書き出さない
+      const pcm = new Uint8Array(data);
+      if (session) session.sendAudio(pcm);
+      // まだ相手が開いていない。貯めておき、開いたら渡す
+      else if (early && early.length < EARLY_AUDIO_MAX) early.push(pcm);
+      return;
+    }
+    try {
+      const message = JSON.parse(data.toString('utf8')) as { type?: string; text?: string };
+      if (message.type === 'text' && message.text) session?.sendText(message.text);
+      if (message.type === 'stop') ws.close();
+    } catch {
+      // 読めない指示は無視する
+    }
+  });
+
+
+
+  const prefs = await deps.repo.getUserSettings(tenantId, userId);
+  const speak = prefs.secretary.speak !== false;
+  const provider = await deps.ai.voiceFor(tenantId);
+
   try {
     session = await provider.open({
       speak,
@@ -273,6 +318,10 @@ async function start(
     }
   }
 
+  // 開くまでに届いていた音を、順に渡す
+  for (const pcm of early ?? []) session.sendAudio(pcm);
+  early = null;
+
   send({ type: 'ready', provider: provider.name, speak });
   // 押したら、秘書から先に声をかける（仕様書 第6.1.4節）
   gate.tell(greetingNote(
@@ -284,21 +333,6 @@ async function start(
     id: randomUUID(), tenantId, actorType: 'user', actorId: userId,
     action: 'secretary.voice', targetType: 'session', targetId: 'start',
     detail: { provider: provider.name, speak }, occurredAt: new Date().toISOString(),
-  });
-
-  ws.on('message', (data: Buffer, isBinary: boolean) => {
-    if (isBinary) {
-      // マイクの音。渡すだけで、書き出さない
-      session?.sendAudio(new Uint8Array(data));
-      return;
-    }
-    try {
-      const message = JSON.parse(data.toString('utf8')) as { type?: string; text?: string };
-      if (message.type === 'text' && message.text) session?.sendText(message.text);
-      if (message.type === 'stop') ws.close();
-    } catch {
-      // 読めない指示は無視する
-    }
   });
 
   ws.on('close', () => {
