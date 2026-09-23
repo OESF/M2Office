@@ -1,5 +1,5 @@
 /**
- * @file 通知の控えを Chat とメールへ届ける見回り役。
+ * @file 通知の控えを Chat へ届ける見回り役。
  *
  * 画面内のお知らせはすぐ作り、控えはここが後から届ける（仕様書 第6.5.5.2節、ADR-0011）。
  * 通知しない時間帯の間は送らず、時間帯が明けてから 1 件ずつ送る。
@@ -51,7 +51,7 @@ export function localHm(now: Date, timeZone: string): string {
 /** 本人の設定から、控えを届ける先を決める。 */
 export function channelsOf(settings: UserSettings): NotificationChannel[] {
   const c = settings.notifications.channels;
-  return [...(c.chat ? ['chat' as const] : []), ...(c.email ? ['email' as const] : [])];
+  return c.chat ? ['chat'] : [];
 }
 
 export interface NotificationDeliveryDeps {
@@ -134,7 +134,6 @@ export class NotificationDelivery {
     try {
       for (const channel of channels) {
         if (channel === 'chat') await this.deps.sender.chat(envelope);
-        else await this.deps.sender.email(envelope);
       }
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);

@@ -340,7 +340,7 @@ function validate(
       }
       // 控えの届け先（第6.5.5.2節）。既定はどちらも切で、画面内は切れない
       const ch = (o['channels'] ?? {}) as Record<string, unknown>;
-      const channels = { chat: ch['chat'] === true, email: ch['email'] === true };
+      const channels = { chat: ch['chat'] === true };
       return { section, value: { kinds, quietHours: q ? { from: q.from, to: q.to } : null, channels } };
     }
     case 'memory': {

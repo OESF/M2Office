@@ -62,6 +62,24 @@ export interface InvoiceRow {
   amount?: number | null;
 }
 
+/**
+ * 会社の帳票の体裁（仕様書 第15.2.2節、Q-57）。会社情報と設定から組み立てて渡す。
+ *
+ * @remarks 値が無ければ、その欄を出さない。
+ */
+export interface InvoiceStyleInput {
+  /** ロゴの画像（PNG・JPEG）。 */
+  logo?: { bytes: Uint8Array; kind: 'png' | 'jpeg' } | null;
+  /** 差出人の各行（正式な会社名・住所・電話・登録番号）。 */
+  from?: string[];
+  /** 振込先。 */
+  bankAccount?: string;
+  /** 備考の定型文。 */
+  notes?: string;
+  /** 印の欄を出すか。 */
+  sealBox?: boolean;
+}
+
 /** 帳票の中身。金額の計算と体裁だけを扱い、制度の判断はしない。 */
 export interface InvoiceDoc {
   /** 表題（例: 請求書）。 */
@@ -78,6 +96,8 @@ export interface InvoiceDoc {
   totals?: { label: string; value: string }[];
   /** 備考。 */
   notes?: string[];
+  /** 会社の体裁（ロゴ・差出人・振込先・備考の定型文・印の欄）。 */
+  style?: InvoiceStyleInput;
 }
 
 /** 明細 1 行の金額。指定が無ければ数量×単価。 */
@@ -199,6 +219,15 @@ export async function renderPdf(doc: InvoiceDoc): Promise<Uint8Array> {
   };
 
   write(doc.title, MARGIN, y, { size: 20, bold: true });
+  // ロゴは右上に出す（第15.2.2節）。無ければ出さない
+  const logo = doc.style?.logo
+    ? await (doc.style.logo.kind === 'png' ? pdf.embedPng(doc.style.logo.bytes) : pdf.embedJpg(doc.style.logo.bytes))
+    : null;
+  if (logo) {
+    const width = 120;
+    const height = (logo.height / logo.width) * width;
+    page.drawImage(logo, { x: right - width, y: y - height + 14, width, height });
+  }
   y -= LINE * 2;
 
   for (const f of doc.fields ?? []) {
@@ -210,9 +239,20 @@ export async function renderPdf(doc: InvoiceDoc): Promise<Uint8Array> {
     write(doc.to, MARGIN, y, { size: 12, bold: true });
     y -= LINE;
   }
-  for (const line of doc.from ?? []) {
+  // 差出人は、会社の体裁（会社情報）から出す。帳票ごとに書かない（第15.2.2節）
+  const from = (doc.from ?? []).length > 0 ? doc.from ?? [] : doc.style?.from ?? [];
+  for (const line of from) {
     write(line, 0, y, { right, size: 9 });
     y -= LINE * 0.9;
+  }
+  if (doc.style?.sealBox) {
+    const box = 48;
+    page.drawRectangle({
+      x: right - box, y: y - box + LINE, width: box, height: box,
+      borderColor: rgb(0.6, 0.6, 0.6), borderWidth: 0.5,
+    });
+    write('印', 0, y - box / 2, { right: right - box / 2 + 5, size: 8 });
+    y -= box;
   }
 
   // 明細の表。列は 品目・数量・単価・金額 の 4 つに固定する（最小限の体裁）
@@ -249,12 +289,18 @@ export async function renderPdf(doc: InvoiceDoc): Promise<Uint8Array> {
     y -= LINE;
   }
 
-  if ((doc.notes ?? []).length > 0) {
+  // 振込先と、会社の備考の定型文を、帳票ごとの備考の前に出す（第15.2.2節）
+  const notes = [
+    ...(doc.style?.bankAccount ? [`お振込先: ${doc.style.bankAccount}`] : []),
+    ...(doc.notes ?? []),
+    ...(doc.style?.notes ? [doc.style.notes] : []),
+  ];
+  if (notes.length > 0) {
     y -= LINE;
     feed();
     write('備考', MARGIN, y, { bold: true });
     y -= LINE;
-    for (const note of doc.notes ?? []) {
+    for (const note of notes) {
       feed();
       write(note, MARGIN, y, { size: 9 });
       y -= LINE * 0.9;

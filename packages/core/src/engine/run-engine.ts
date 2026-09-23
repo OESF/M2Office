@@ -321,7 +321,7 @@ export class RunEngine {
   /**
    * 本人宛ての通知を作る。本人が受け取らないと決めた種類は作らない（仕様書 第6.5.5節）。
    *
-   * @remarks 画面内のお知らせが正であり、Chat とメールへの控えはワーカーが後から届ける（第6.5.5.2節）。
+   * @remarks 画面内のお知らせが正であり、Chat への控えはワーカーが後から届ける（第6.5.5.2節）。
    */
   private async notify(
     tenantId: string, userId: string,

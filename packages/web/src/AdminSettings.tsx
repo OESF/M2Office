@@ -150,9 +150,75 @@ export function CompanySettings() {
         <button className="btn" disabled={saver.busy}
           onClick={() => void saver.run(() => api.admin.saveSettings('writingStyle', style))}>保存する</button>
       </div>
+      <InvoiceStyleSettings initial={data.invoice} onSaved={() => void reload()} />
       <SlideTemplateSettings initial={data.slides.templates} onSaved={() => void reload()} />
       {saver.view}
     </>
+  );
+}
+
+/**
+ * 帳票の体裁（仕様書 第15.2.2節、Q-57）。請求書などの PDF に使う。
+ *
+ * @remarks
+ * 自社の書き方（文章の規則）とは分けて持つ。ここで決めるのは、帳票を描くための値だけである。
+ * 差出人は会社情報から組み立てるため、ここでは指定しない。
+ */
+function InvoiceStyleSettings({ initial, onSaved }: {
+  initial: TenantSettings['invoice']; onSaved: () => void;
+}) {
+  const [style, setStyle] = useState(initial);
+  const saver = useSaver();
+  const set = (v: Partial<TenantSettings['invoice']>) => setStyle({ ...style, ...v });
+
+  return (
+    <div className="card">
+      <h3>帳票の体裁</h3>
+      <p>
+        請求書などの PDF に使います。差出人（会社名・住所・電話・登録番号）は、上の会社情報から出します。
+        設定しない項目は、帳票に出しません。
+      </p>
+      <div className="field">
+        <label>ロゴ</label>
+        <input type="file" accept="image/png,image/jpeg"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            void saver.run(async () => {
+              const up = await api.uploadFile(file);
+              set({ logoFileId: up.id });
+              await api.admin.saveSettings('invoice', { ...style, logoFileId: up.id });
+              onSaved();
+            }, 'ロゴを登録しました');
+          }} />
+        <span className="muted small">
+          PNG か JPEG。帳票の右上に出します。{style.logoFileId ? '（登録済み）' : '（未登録）'}
+        </span>
+        {style.logoFileId && (
+          <div className="row">
+            <button className="btn ghost small" onClick={() => set({ logoFileId: null })}>ロゴを外す</button>
+          </div>
+        )}
+      </div>
+      <Text label="振込先" value={style.bankAccount} onChange={(v) => set({ bankAccount: v })}
+        hint="例: ○○銀行 △△支店 普通 1234567 カ）エムツーホールディングス" />
+      <Text label="支払期限の既定" value={style.paymentDue} onChange={(v) => set({ paymentDue: v })}
+        hint="例: 翌月末。帳票の項目に出します" />
+      <Text label="備考の定型文" value={style.notes} onChange={(v) => set({ notes: v })} multiline
+        hint="毎回入れる断り書き。例: 振込手数料は貴社にてご負担ください" />
+      <label className="check">
+        <input type="checkbox" checked={style.sealBox} onChange={(e) => set({ sealBox: e.target.checked })} />
+        印の欄を出す（差出人の下に枠を置きます）
+      </label>
+      <div className="row">
+        <button className="btn" disabled={saver.busy}
+          onClick={() => void saver.run(async () => {
+            await api.admin.saveSettings('invoice', style);
+            onSaved();
+          })}>保存する</button>
+      </div>
+      {saver.view}
+    </div>
   );
 }
 

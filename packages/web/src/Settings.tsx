@@ -157,7 +157,7 @@ export function Settings({ me, agents, onChanged }: {
         ))}
         <h4>通知しない時間帯</h4>
         <p className="muted small">
-          この時間帯は Chat とメールへ送りません。時間帯が明けてから送ります。画面内のお知らせはその場で届きます。
+          この時間帯は Chat へ送りません。時間帯が明けてから送ります。画面内のお知らせはその場で届きます。
         </p>
         <div className="row">
           <input type="time" value={s.notifications.quietHours?.from ?? ''}
@@ -174,16 +174,14 @@ export function Settings({ me, agents, onChanged }: {
 
         <h4>受け取り方</h4>
         <p className="muted small">
-          画面内のお知らせは必ず残ります。Chat とメールには控えとして、種類・題名と画面へのリンクだけを送ります（本文は送りません）。
-          いまは送信口が見本のため、実際には届きません。
+          画面内のお知らせは必ず残ります。Chat には控えとして、種類・題名と画面へのリンクだけを送ります（本文は送りません）。
+          メールは送りません。いまは送信口が見本のため、Chat にも実際には届きません。
         </p>
-        {([['chat', 'Chat（本人への個別メッセージ）'], ['email', 'メール（会社のアドレス）']] as const).map(([k, label]) => (
-          <label key={k} className="check">
-            <input type="checkbox" checked={s.notifications.channels[k]}
-              onChange={(e) => set('notifications', { channels: { ...s.notifications.channels, [k]: e.target.checked } })} />
-            {label}
-          </label>
-        ))}
+        <label className="check">
+          <input type="checkbox" checked={s.notifications.channels.chat}
+            onChange={(e) => set('notifications', { channels: { chat: e.target.checked } })} />
+          Chat（本人への個別メッセージ）
+        </label>
         <div style={{ marginTop: 12 }}>
           <button className="btn" onClick={() => void save(() => api.saveMySettings('notifications', s.notifications))}>保存する</button>
         </div>

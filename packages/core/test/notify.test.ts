@@ -1,5 +1,5 @@
 /**
- * @file 通知の控え（Chat・メール）の単体テスト。
+ * @file 通知の控え（Chat）の単体テスト。
  *
  * 届け先の選び方、通知しない時間帯、1 回しか送らないこと、停止中の会社へ送らないことを確かめる。
  *
@@ -69,12 +69,12 @@ test('既定では控えを送らない（画面内のみ）', async () => {
   assert.equal(repo.notifications[0]!.deliveryNote, '画面内のみ', '見回りの対象から外す');
 });
 
-test('Chat とメールを選んだ人には、種類・題名・リンクだけを送り、二度と送らない', async () => {
+test('Chat を選んだ人には、種類・題名・リンクだけを送り、二度と送らない', async () => {
   const { repo, sender, delivery } = setup();
-  repo.settings.notifications.channels = { chat: true, email: true };
+  repo.settings.notifications.channels = { chat: true };
   const r = await delivery.sweep(new Date('2026-09-23T01:10:00.000Z'));
   assert.deepEqual(r, { sent: 1, held: 0 });
-  assert.deepEqual(sender.outbox.map((x) => x.channel), ['chat', 'email']);
+  assert.deepEqual(sender.outbox.map((x) => x.channel), ['chat']);
   const sent = sender.outbox[0]!;
   assert.equal(sent.kindLabel, '承認依頼');
   assert.equal(sent.title, '承認をお願いします: 議事録作成・共有');
@@ -83,12 +83,12 @@ test('Chat とメールを選んだ人には、種類・題名・リンクだけ
   assert.ok(repo.audits.some((a) => a.action === 'notification.deliver'));
 
   await delivery.sweep(new Date('2026-09-23T01:20:00.000Z'));
-  assert.equal(sender.outbox.length, 2, '送り終えた通知は送り直さない');
+  assert.equal(sender.outbox.length, 1, '送り終えた通知は送り直さない');
 });
 
 test('通知しない時間帯は送らず、明けてから送る', async () => {
   const { repo, sender, delivery } = setup();
-  repo.settings.notifications.channels = { chat: true, email: false };
+  repo.settings.notifications.channels = { chat: true };
   repo.settings.notifications.quietHours = { from: '22:00', to: '07:00' };
   // 日本時間 23:00
   const r = await delivery.sweep(new Date('2026-09-23T14:00:00.000Z'));
@@ -104,7 +104,7 @@ test('通知しない時間帯は送らず、明けてから送る', async () =>
 
 test('停止中の会社と、使えない利用者には送らない', async () => {
   const { repo, sender, delivery } = setup();
-  repo.settings.notifications.channels = { chat: true, email: false };
+  repo.settings.notifications.channels = { chat: true };
   repo.tenants[0]!.status = 'suspended';
   assert.deepEqual(await delivery.sweep(new Date('2026-09-23T01:10:00.000Z')), { sent: 0, held: 0 });
   assert.equal(sender.outbox.length, 0);
@@ -119,10 +119,10 @@ test('停止中の会社と、使えない利用者には送らない', async ()
 
 test('送れなかった通知は、あきらめる時刻まで送り直す', async () => {
   const { repo } = setup();
-  repo.settings.notifications.channels = { chat: true, email: false };
+  repo.settings.notifications.channels = { chat: true };
   const failing = new NotificationDelivery({
     repo: repo as unknown as Repository,
-    sender: { source: 'mock', chat: async () => { throw new Error('接続できません'); }, email: async () => undefined },
+    sender: { source: 'mock', chat: async () => { throw new Error('接続できません'); } },
     linkFor: () => 'http://a.lvh.me:3100',
   });
   assert.deepEqual(await failing.sweep(new Date('2026-09-23T01:10:00.000Z')), { sent: 0, held: 1 });

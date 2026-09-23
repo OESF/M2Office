@@ -466,6 +466,21 @@ function validateSection(
       }
       return { section: 'privacy', value: { googleDataRetentionDays: days } };
     }
+    case 'invoice': {
+      // 帳票の体裁（仕様書 第15.2.2節、Q-57）。ロゴは会社が上げた画像のファイル ID
+      const text = (v: unknown, max: number) => String(v ?? '').trim().slice(0, max);
+      const logoFileId = text(o['logoFileId'], 100) || null;
+      return {
+        section: 'invoice',
+        value: {
+          logoFileId,
+          bankAccount: text(o['bankAccount'], 200),
+          paymentDue: text(o['paymentDue'], 50),
+          notes: text(o['notes'], 300),
+          sealBox: o['sealBox'] === true,
+        },
+      };
+    }
     case 'knowledge': {
       // 言い換え（仕様書 第11.7.7節）。1 行に 1 組の文でも、組の配列でも受け付ける
       const raw = o['synonyms'];

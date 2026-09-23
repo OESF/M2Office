@@ -21,7 +21,7 @@ src/help/        ヘルプ（業務の説明の自動生成、記事の出し分
 src/knowledge/   組織知識の節への分割（章・条・見出し）と、検索の言葉の取り出し・並べ替え
 src/extensions/  拡張機能の読み込みと検証、.m2ext の作成と展開、コネクタの宣言、会社ごとの見え方
 src/scheduler/   定時実行の規則と起動役
-src/notify/      通知の控え（Chat・メール）の送信口と、届ける見回り役
+src/notify/      通知の控え（Chat）の送信口と、届ける見回り役
 src/retention/   Google から取得したデータの保持（期間を過ぎた実行の中身を消す、承認待ちの期限切れ）と、許可がなくなったときの業務の後始末
 src/llm/         LLM 抽象化層（スタブ／OpenAI 互換）
 src/repository/  永続化。テナント境界の絞り込みを伴う
@@ -93,7 +93,7 @@ decideApproval(...)  →  承認を記録し、待ち行列へ戻す
 | `sheet.render` | draft | 表を Excel・CSV（BOM 付き UTF-8）で出力する |
 | `pdf.extract` | read | PDF から文字を取り出す。文字の無いページは、そのページだけを抜き出した PDF を読み取りへ送る（10 ページまで。Q-56） |
 | `docx.render` | draft | Word 形式で文書を出力する |
-| `pdf.render` | draft | 帳票（請求書など）を PDF で出力する。日本語の一部に絞った Noto Sans JP を同梱し（`assets/fonts/README.md`）、使った文字だけを埋め込む。範囲の外の字は `〓` に置き換えて返す（Q-59、ADR-0017） |
+| `pdf.render` | draft | 帳票（請求書など）を PDF で出力する。日本語の一部に絞った Noto Sans JP を同梱し（`assets/fonts/README.md`）、使った文字だけを埋め込む。範囲の外の字は `〓` に置き換えて返す（Q-59、ADR-0017）。会社の帳票の体裁（第15.2.2節）は `loadInvoiceStyle()` で読み、ロゴ・差出人・振込先・備考の定型文・印の欄を出す |
 | `image.read_text` | read | 画像（PNG・JPEG）から文字を読み取る（OCR）。推論を使うため確かな値ではなく、鍵が無い環境では読み取らない（Q-56） |
 | `web.research` | read | テーマを Google 検索（Gemini のグラウンディング）で調べ、出典つきで返す。鍵が無ければ見本 |
 | `slides.create` | draft | スライドの構成（JSON）から Google スライドを作る。見本の接続口ではアウトラインを成果物に残す |
@@ -190,11 +190,11 @@ AG-02 議事録作成・共有は、承認②のあとに `knowledge.register` �
 
 ### 通知と、その控え（`notify/`）
 
-画面内のお知らせが正で、Chat とメールはその控えです（仕様書 第6.5.5.2節、ADR-0011）。
+画面内のお知らせが正で、Chat はその控えです（仕様書 第6.5.5.2節、ADR-0011）。メールは送りません（Q-86）。
 
 - 通知を作るのは実行エンジン（承認依頼・完了・失敗）と `notification.send`（週次ブリーフ）です。本人が受け取らないと決めた種類は作りません
 - 控えを届けるのは `NotificationDelivery.sweep()` で、ワーカーが一定の間隔で呼びます。送るのは種類・題名・画面へのリンクだけです
-- 送信口は `NotificationSender`。いまは `MockNotificationSender`（送ったことにして控える）で、会社の Chat アプリ（B-2）とメールの送信サービス（Q-86）の後に差し替えます
+- 送信口は `NotificationSender`。いまは `MockNotificationSender`（送ったことにして控える）で、会社の Chat アプリ（B-2）の後に差し替えます
 - 通知しない時間帯の間は送らず、`delivered_at` を空のままにして次の見回りで送ります。送れないまま 24 時間たったらあきらめます（画面内のお知らせは残ります）
 
 ### 拡張機能（`ExtensionHub`）

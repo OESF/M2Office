@@ -405,6 +405,27 @@ export const api = {
   withdrawPromotion: (id: string) => call(`/me/promotions/${id}/withdraw`, { method: 'POST', body: '{}' }),
   /** 自分の昇華の履歴。 */
   myPromotions: () => call<{ items: PromotionView[] }>('/me/promotions'),
+  /**
+   * ファイルを上げる（帳票のロゴなど）。
+   *
+   * @remarks 受け付ける形式と大きさはサーバーが確かめる（仕様書 第9.4.1節）。
+   */
+  uploadFile: async (file: File): Promise<{ id: string; name: string }> => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch('/v1/files', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        ...(devTenant ? { 'x-tenant': devTenant } : {}),
+        ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}),
+      },
+      body: form,
+    });
+    const body = await res.json().catch(() => ({ error: '通信に失敗しました' }));
+    if (!res.ok) throw new ApiError(body.error ?? `エラー (${res.status})`, res.status, false);
+    return body as { id: string; name: string };
+  },
   /** 記憶の候補（仕様書 第11.5.2節）。対話から作られ、本人が採ると記憶になる。 */
   myMemoryCandidates: () => call<{ items: MemoryCandidateView[] }>('/me/memory-candidates'),
   acceptMemoryCandidate: (id: string) =>

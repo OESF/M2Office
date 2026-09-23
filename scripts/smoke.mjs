@@ -1434,7 +1434,7 @@ console.log('\n■ 34. 会社の利用の停止（第23.8.6節）');
 console.log('\n■ 35. 通知（画面内のお知らせと、Chat・メールへの控え。第6.5.5節）');
 {
   // 依頼した本人（member）が控えを受け取る設定にする
-  const settings = { kinds: { brief: true, run: true, approval: true, failure: true }, quietHours: null, channels: { chat: true, email: true } };
+  const settings = { kinds: { brief: true, run: true, approval: true, failure: true }, quietHours: null, channels: { chat: true } };
   await call('a', '/v1/me/settings/notifications', { method: 'PUT', body: JSON.stringify(settings) }, 'member');
 
   const { body: job } = await call('a', '/v1/jobs', {
@@ -1476,7 +1476,7 @@ console.log('\n■ 35. 通知（画面内のお知らせと、Chat・メール�
   // 後片付け: 控えの設定を既定（画面内のみ）に戻す
   await call('a', '/v1/me/settings/notifications', {
     method: 'PUT',
-    body: JSON.stringify({ ...settings, channels: { chat: false, email: false } }),
+    body: JSON.stringify({ ...settings, channels: { chat: false } }),
   }, 'member');
 
   // 登録された議事録を消す（以降の確認に影響させない）
@@ -1761,8 +1761,17 @@ console.log('\n■ 40. 昇華（個人の記憶を会社の知識へ。第11.3.1
   await call('a', '/v1/me/conversations', { method: 'DELETE' }, who);
 }
 
-console.log('\n■ 41. 帳票の PDF（第9.4.1節、Q-59）');
+console.log('\n■ 41. 帳票の PDF（第9.4.1節、Q-59・Q-57）');
 {
+  // 会社の帳票の体裁を設定しておく（第15.2.2節）
+  await call('a', '/v1/admin/settings/invoice', {
+    method: 'PUT',
+    body: JSON.stringify({
+      logoFileId: null, bankAccount: '○○銀行 △△支店 普通 1234567',
+      paymentDue: '翌月末', notes: '振込手数料は貴社にてご負担ください', sealBox: true,
+    }),
+  });
+
   // 公式の業務はまだ pdf.render を使わないため、見本の応答つきの小さな拡張機能で通しで確かめる
   const EXT = 'jp.example.invoice-draft';
   const AG = `${EXT}:invoice`;
@@ -1832,9 +1841,17 @@ console.log('\n■ 41. 帳票の PDF（第9.4.1節、Q-59）');
     head === '%PDF-' && text.includes('請求書') && text.includes('株式会社アルファ 御中') && pdf.length < 1_000_000
       ? ok(`取り出した PDF から日本語を読み返せる（${Math.ceil(pdf.length / 1024)} KB）`)
       : ng('読み返せない', `${head} ${text.slice(0, 60)}`);
+    text.includes('お振込先: ○○銀行') && text.includes('振込手数料は貴社にてご負担ください') && text.includes('印')
+      ? ok('会社の帳票の体裁（振込先・備考の定型文・印の欄）が帳票に出る')
+      : ng('体裁が出ない', text.slice(0, 160));
   }
 
   await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
+  // 後片付け: 帳票の体裁を戻す
+  await call('a', '/v1/admin/settings/invoice', {
+    method: 'PUT',
+    body: JSON.stringify({ logoFileId: null, bankAccount: '', paymentDue: '', notes: '', sealBox: false }),
+  });
 }
 
 console.log('\n■ 42. 音声の対話（第10.5.5節）');

@@ -191,6 +191,26 @@ export interface DashboardSettings {
   people: 'names' | 'counts';
 }
 
+/**
+ * 帳票の体裁（仕様書 第15.2.2節、Q-57）。
+ *
+ * @remarks
+ * 自社の書き方（{@link WritingStyle}）は文章の規則で、推論に渡す指示文に差し込まれる。
+ * こちらは帳票を描くための値であり、推論を通さない。混ぜないために分けて持つ。
+ */
+export interface InvoiceStyle {
+  /** ロゴの画像（PNG・JPEG）のファイル ID。未設定なら出さない。 */
+  logoFileId: string | null;
+  /** 振込先（銀行名・支店・種別・番号・名義）。1 つの文として持つ。 */
+  bankAccount: string;
+  /** 支払期限の既定（例: 翌月末）。 */
+  paymentDue: string;
+  /** 備考の定型文。毎回入れる断り書き。 */
+  notes: string;
+  /** 印の欄を出すか。 */
+  sealBox: boolean;
+}
+
 export interface TenantSettings {
   company: CompanyInfo;
   writingStyle: WritingStyle;
@@ -208,6 +228,8 @@ export interface TenantSettings {
   privacy: PrivacySettings;
   /** ダッシュボードの見せ方（第6.7.4.1節）。 */
   dashboard: DashboardSettings;
+  /** 帳票の体裁（第15.2.2節）。 */
+  invoice: InvoiceStyle;
 }
 
 /** 設定が未保存の会社に使う既定値。 */
@@ -232,6 +254,8 @@ export const DEFAULT_TENANT_SETTINGS: TenantSettings = {
   privacy: { googleDataRetentionDays: 7 },
   // 承認の滞留が誰の判断待ちかを示すため、既定は個人名（Q-64）
   dashboard: { people: 'names' },
+  // 帳票の体裁。未設定でも帳票は出せる（無い欄は出さない）
+  invoice: { logoFileId: null, bankAccount: '', paymentDue: '', notes: '', sealBox: false },
 };
 
 /**
@@ -287,11 +311,13 @@ export interface UserSettings {
     /** 通知しない時間帯（例: 22:00〜7:00）。`null` は指定なし。 */
     quietHours: { from: string; to: string } | null;
     /**
-     * 画面内のお知らせに加えて控えを届ける先（第6.5.5.2節）。既定はどちらも切（画面内のみ）。
+     * 画面内のお知らせに加えて控えを届ける先（第6.5.5.2節）。既定は切（画面内のみ）。
      *
-     * @remarks 画面内は切れない。控えには種類・題名・画面へのリンクだけを載せる
+     * @remarks
+     * 画面内は切れない。控えには種類・題名・画面へのリンクだけを載せる。
+     * メールは送らない（Q-86）。届けるのは Google Chat だけである
      */
-    channels: { chat: boolean; email: boolean };
+    channels: { chat: boolean };
   };
   /** 記憶とデータ（第6.5.4節）。本人だけが変えられる。 */
   memory: {
@@ -318,7 +344,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   notifications: {
     kinds: { brief: true, run: true, approval: true, failure: true },
     quietHours: null,
-    channels: { chat: false, email: false },
+    channels: { chat: false },
   },
   memory: { learning: true, excludes: [], keepConversations: true },
   menu: { hidden: [], order: [] },

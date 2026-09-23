@@ -91,3 +91,43 @@ test('読めないページだけを抜き出す（第9.4.1節）', async () => 
   const many = await extractPages(whole, Array.from({ length: OCR_MAX_PAGES + 5 }, (_, i) => i + 1));
   assert.equal((await extractPdfText(many!)).pageCount, Math.min(OCR_MAX_PAGES, pageCount));
 });
+
+test('会社の帳票の体裁を帳票に出す（第15.2.2節、Q-57）', async () => {
+  // 1×1 の PNG（ロゴの代わり）
+  const logo = new Uint8Array([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+    0x89, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
+    0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
+    0x42, 0x60, 0x82,
+  ]);
+  const bytes = await renderPdf({
+    title: '請求書',
+    rows: [{ name: '月額利用料', quantity: 1, unitPrice: 30000 }],
+    notes: ['この帳票だけの備考'],
+    style: {
+      logo: { bytes: logo, kind: 'png' },
+      from: ['M2ホールディングス株式会社', '東京都…', '登録番号 T1234567890123'],
+      bankAccount: '○○銀行 △△支店 普通 1234567',
+      notes: '振込手数料は貴社にてご負担ください',
+      sealBox: true,
+    },
+  });
+  const text = (await extractPdfText(bytes)).pages[0]?.text ?? '';
+  for (const expected of [
+    'M2ホールディングス株式会社', '登録番号 T1234567890123', '印',
+    'お振込先: ○○銀行 △△支店 普通 1234567', 'この帳票だけの備考', '振込手数料は貴社にてご負担ください',
+  ]) {
+    assert.ok(text.includes(expected), `${expected} が出ていない: ${text}`);
+  }
+  // 振込先は、帳票ごとの備考より前に出す
+  assert.ok(text.indexOf('お振込先') < text.indexOf('この帳票だけの備考'));
+});
+
+test('体裁が未設定でも帳票は出せる（無い欄は出さない）', async () => {
+  const text = (await extractPdfText(await renderPdf({ title: '請求書', rows: [{ name: '品目', amount: 100 }] })))
+    .pages[0]?.text ?? '';
+  assert.ok(text.includes('請求書'));
+  assert.equal(text.includes('お振込先'), false);
+  assert.equal(text.includes('印'), false);
+});

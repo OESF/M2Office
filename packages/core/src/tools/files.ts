@@ -18,8 +18,9 @@ import { extractPdfText } from '../files/pdf.js';
 import { renderDocx, type DocBlock } from '../files/docx.js';
 import {
   extractPages, missingCharacters, renderPdf, OCR_MAX_PAGES, REPLACEMENT,
-  type InvoiceDoc, type InvoiceRow,
+  type InvoiceDoc, type InvoiceRow, type InvoiceStyleInput,
 } from '../files/pdf-render.js';
+import { loadInvoiceStyle } from '../files/invoice-style.js';
 
 const str = (v: unknown, fallback = '') => (typeof v === 'string' ? v : fallback);
 
@@ -219,8 +220,11 @@ export const pdfRender: Tool = {
       }));
     if (rows.length === 0) return { created: false, reason: '明細がありません' };
 
+    // 会社の体裁（ロゴ・差出人・振込先・備考の定型文・印の欄。第15.2.2節）
+    const style: InvoiceStyleInput = await loadInvoiceStyle(ctx);
     const doc: InvoiceDoc = {
       title,
+      style,
       ...(str(args['to']) ? { to: str(args['to']) } : {}),
       from: list(args['from']).map(String).slice(0, 8),
       fields: pairs(args['fields']).slice(0, 10),
