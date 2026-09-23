@@ -12,7 +12,7 @@ import {
   PostgresRepository, StubLlmProvider, OpenAiCompatibleProvider, ToolRegistry, BUILTIN_TOOLS, GoogleDataRetention, GoogleRevocation, agentUsesGoogle,
   RunEngine, Secretary, OFFICIAL_AGENTS, buildConnector, LocalFileStore,
   createLoggerFromEnv, HelpCatalog, parseArticle, ExtensionHub, HttpMcpClient, loadExtensions,
-  GeminiResearchProvider, MockResearchProvider, TenantAiResolver, secretBoxFromEnv, fileToText, type ResearchProvider,
+  GeminiResearchProvider, MockResearchProvider, TenantAiResolver, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID, type ResearchProvider,
   type SecretBox, type GeminiModels,
   type FileStore, type TenantExtensions, type HelpArticle, type LlmProvider, type Logger, type Repository, type WorkspaceConnector,
 } from '@m2office/core';
@@ -131,11 +131,26 @@ export function buildDeps(): AppDeps {
   const help = new HelpCatalog(loadHelpArticles(helpDir(), log), OFFICIAL_AGENTS, registry);
   const secretary = new Secretary({
     repo, llm, connector, agents: OFFICIAL_AGENTS, help, agentsFor, llmFor: (t) => ai.llmFor(t),
-    // 秘書に渡されたファイルを文字にする（仕様書 第10.10節）。読むのは本人のファイルだけ
-    readFile: async (tenantId, userId, fileId) => {
-      const provider = await ai.llmFor(tenantId);
-      const ocr = provider.readImage ? async (r: { bytes: Uint8Array; mimeType: string }) => (await provider.readImage!(r)).text : undefined;
-      return fileToText(repo, files, tenantId, fileId, userId, ocr);
+    // 渡されたファイルの名前だけを引く。中身は読まない（後ろへ回すため。仕様書 第10.11.3節）
+    fileName: async (tenantId, userId, fileId) => {
+      const f = await repo.getFile(tenantId, fileId);
+      // 本人のファイルでなければ、存在も示さない（第9.4.1節）
+      return f && f.ownerUserId === userId ? f.name : null;
+    },
+    // 時間のかかる依頼を、読むだけの業務として後ろへ回す（仕様書 第10.11.4節）
+    startLookup: async (tenantId, userId, request, fileId) => {
+      const view = await tenantView(tenantId);
+      const def = view.resolve(LOOKUP_AGENT_ID, 1);
+      if (!def || !view.isAvailable(LOOKUP_AGENT_ID)) return null;
+      // 同じ依頼が動いている間は、新しく起こさない（第10.11.4節）
+      const same = await repo.findActiveJobByInput(tenantId, userId, LOOKUP_AGENT_ID, 'request', request);
+      if (same) return { runId: same, already: true };
+      const { runId } = await enqueueJob(repo, {
+        tenantId, requestedBy: userId, def,
+        input: { request, ...(fileId ? { fileId } : {}) },
+        origin: 'secretary', actor: { type: 'user', id: userId },
+      });
+      return { runId, already: false };
     },
   });
   // Google のデータを扱うツールは、内蔵のツールのうち権限（google）を宣言しているもの（第9.4.4節）

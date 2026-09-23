@@ -222,18 +222,25 @@ export interface Repository {
    */
   listDisabledConnectorTools(tenantId: string): Promise<DisabledConnectorTool[]>;
   /**
-   * 上げたファイルを実行に紐づける（仕様書 第10.10.5節）。
+   * 同じ依頼で動いている調べものを探す（仕様書 第10.11.4節）。
    *
-   * @returns 紐づけたら `true`。本人のファイルでなければ `false`
+   * @returns 動いていればその実行の ID。無ければ `null`
    * @remarks
-   * 紐づけたファイルは、実行の成果物として扱い、4 週の入れ替えでは消さない。
+   * 同じ依頼を二度起こさないために使う。推論は結果が返らないと
+   * 「まだ実行できていない」と解釈して同じ依頼を繰り返す性質がある。
    */
-  attachFileToRun(tenantId: string, fileId: string, runId: string, ownerUserId: string): Promise<boolean>;
+  findActiveJobByInput(
+    tenantId: string, userId: string, agentId: string, key: string, value: string,
+  ): Promise<string | null>;
   /**
-   * 秘書に渡しただけのファイル（実行に紐づかない、利用者が上げたもの）を消す（仕様書 第10.10.5節）。
+   * 秘書に渡しただけのファイルを消す（仕様書 第10.10.5節）。
    *
    * @param before この時刻より前に上げたものを消す
    * @returns 消したファイルの ID。呼び出し側が実体も消す
+   *
+   * @remarks
+   * **どの依頼の入力にも使われていないもの**だけを消す。
+   * 1 つのファイルは複数の実行で使われうるため、実行との 1 対 1 の紐づけは持たない。
    */
   deleteLooseUploadsBefore(tenantId: string, before: string): Promise<string[]>;
   /**

@@ -1229,21 +1229,29 @@ export class PostgresRepository implements Repository {
       [tenantId]);
   }
 
-  async attachFileToRun(tenantId: string, fileId: string, runId: string, ownerUserId: string): Promise<boolean> {
-    // 本人のファイルだけを紐づける。他人の ID を書かれても触らない（仕様書 第9.4.1節）
+  async findActiveJobByInput(
+    tenantId: string, userId: string, agentId: string, key: string, value: string,
+  ): Promise<string | null> {
     const rows = await this.q<{ id: string }>(tenantId,
-      `update files set run_id = $3
-        where tenant_id = $1 and id = $2 and owner_user_id = $4 and run_id is null
-        returning id`,
-      [tenantId, fileId, runId, ownerUserId]);
-    return rows.length > 0;
+      `select r.id
+         from runs r join jobs j on j.id = r.job_id and j.tenant_id = r.tenant_id
+        where r.tenant_id = $1 and j.requested_by = $2 and j.agent_id = $3
+          and j.input ->> $4 = $5
+          and r.status in ('queued', 'running')
+        order by r.started_at desc limit 1`,
+      [tenantId, userId, agentId, key, value]);
+    return rows[0]?.id ?? null;
   }
 
   async deleteLooseUploadsBefore(tenantId: string, before: string): Promise<string[]> {
+    // どの依頼の入力にも現れないものだけを消す。1 つのファイルは複数の実行で使われうる
     const rows = await this.q<{ id: string }>(tenantId,
-      `delete from files
-        where tenant_id = $1 and origin = 'upload' and run_id is null and created_at < $2
-        returning id`,
+      `delete from files f
+        where f.tenant_id = $1 and f.origin = 'upload' and f.run_id is null and f.created_at < $2
+          and not exists (
+            select 1 from jobs j, jsonb_each_text(j.input) e
+             where j.tenant_id = f.tenant_id and e.value = f.id)
+        returning f.id`,
       [tenantId, before]);
     return rows.map((r) => r.id);
   }

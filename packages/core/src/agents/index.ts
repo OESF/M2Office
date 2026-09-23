@@ -10,6 +10,7 @@ import { AG02_MINUTES } from './ag-02-minutes.js';
 import { AG03_SCHEDULING } from './ag-03-scheduling.js';
 import { AG04_KNOWLEDGE_QA } from './ag-04-knowledge-qa.js';
 import { AG05_WEEKLY_BRIEF } from './ag-05-weekly-brief.js';
+import { AG16_LOOKUP } from './ag-16-lookup.js';
 
 /**
  * 公式エージェントのカタログ。
@@ -20,8 +21,15 @@ import { AG05_WEEKLY_BRIEF } from './ag-05-weekly-brief.js';
  * 並びは画面のメニューの既定順であり、実装の順序（第9.5.7節）ではない。
  */
 export const OFFICIAL_AGENTS: AgentDefinition[] = [
-  AG04_KNOWLEDGE_QA, AG02_MINUTES, AG01_INBOX, AG03_SCHEDULING, AG05_WEEKLY_BRIEF,
+  AG04_KNOWLEDGE_QA, AG02_MINUTES, AG01_INBOX, AG03_SCHEDULING, AG05_WEEKLY_BRIEF, AG16_LOOKUP,
 ];
+
+/**
+ * 秘書が、時間のかかる依頼を後ろへ回すときに使う業務の ID（仕様書 第10.11.4節）。
+ *
+ * @remarks 読むだけの業務であり、承認を経ずに秘書が自分で起こしてよい。
+ */
+export const LOOKUP_AGENT_ID = AG16_LOOKUP.id;
 
 /**
  * エージェント定義を ID と版で解決する。
@@ -37,7 +45,7 @@ export function resolveOfficialAgent(
   return OFFICIAL_AGENTS.find((a) => a.id === agentId && a.version === version);
 }
 
-export { AG01_INBOX, AG02_MINUTES, AG03_SCHEDULING, AG04_KNOWLEDGE_QA, AG05_WEEKLY_BRIEF };
+export { AG01_INBOX, AG02_MINUTES, AG03_SCHEDULING, AG04_KNOWLEDGE_QA, AG05_WEEKLY_BRIEF, AG16_LOOKUP };
 
 /**
  * 公式エージェントの標準所要時間（分）の既定値。手作業なら 1 件に何分かかるか。

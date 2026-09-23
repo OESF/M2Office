@@ -13,7 +13,7 @@ import type { WorkspaceConnector } from '../connectors/types.js';
 import type { HelpCatalog } from '../help/articles.js';
 import { DIRECT_QUERIES, type DirectAnswer } from './catalog.js';
 import { rewriteNote } from '../knowledge/search.js';
-import { wrapAsData, type FileText } from '../files/to-text.js';
+import { LOOKUP_AGENT_ID } from '../agents/index.js';
 
 /** 秘書がどの層で応答したか。計測と表示に使う（仕様書 第10.9.1節）。 */
 export type ResponseLayer = 'direct' | 'light' | 'full';
@@ -26,8 +26,15 @@ export interface SecretaryReply {
   suggestedAgent?: { id: string; version: number; name: string };
   /** 使い方の質問に答えた場合、材料にしたヘルプの記事（仕様書 第6.10.6節）。 */
   helpArticles?: { id: string; title: string }[];
-  /** 渡されたファイルを読んだ場合、そのファイルの名前と断り（仕様書 第10.10節）。 */
+  /** 渡されたファイルを受け取った場合、その名前（仕様書 第10.10節）。 */
   file?: { name: string; note: string | null };
+  /**
+   * 後ろへ回した調べもの（仕様書 第10.11節）。
+   *
+   * @remarks
+   * **これがあるときは、まだ結果が出ていない。** 画面は処理中として示す。
+   */
+  lookup?: { runId: string; request: string };
   tokensUsed: number;
 }
 
@@ -43,11 +50,17 @@ export interface SecretaryDeps {
   /** 会社ごとの推論（会社が自社の鍵を登録していればその鍵。仕様書 第14.3.3節）。省略時は `llm`。 */
   llmFor?(tenantId: string): Promise<LlmProvider>;
   /**
-   * 渡されたファイルを文字にする（仕様書 第10.10節）。
+   * 時間のかかる依頼を後ろへ回す（仕様書 第10.11節）。
    *
-   * @remarks 無ければ、ファイルを渡されても読めない旨を返す。
+   * @returns 起こした実行の ID。すでに同じ依頼が動いていれば、その実行の ID と `already: true`
+   * @remarks
+   * 無ければ後ろへ回さず、秘書がその場で答える（読むだけの業務が使えない会社など）。
    */
-  readFile?(tenantId: string, userId: string, fileId: string): Promise<FileText>;
+  startLookup?(
+    tenantId: string, userId: string, request: string, fileId?: string,
+  ): Promise<{ runId: string; already: boolean } | null>;
+  /** 渡されたファイルの名前だけを引く。中身は読まない（後ろへ回すため）。 */
+  fileName?(tenantId: string, userId: string, fileId: string): Promise<string | null>;
 }
 
 /**
@@ -111,32 +124,20 @@ export class Secretary {
   private async reply(
     tenantId: string, userId: string, message: string, fileId?: string,
   ): Promise<{ reply: SecretaryReply; keep: boolean }> {
-    // ファイルが付いていれば、まず文字にする。読めなければそこで伝えて終わる（仕様書 第10.10.3節）
-    let file: FileText | null = null;
+    // ファイルが付いていれば、この応答の中では読まない。後ろへ回す（仕様書 第10.11.3節）。
+    // 大きさで分けない。小さいものだけここで読む、という例外を作らない（第10.11.2節）
     if (fileId) {
-      file = this.deps.readFile
-        ? await this.deps.readFile(tenantId, userId, fileId)
-        : { ok: false, name: '', text: '', note: 'ファイルを読む準備ができていません' };
       await this.audit(tenantId, userId, 'secretary.file', fileId);
-      if (!file.ok) {
-        return {
-          reply: {
-            layer: 'direct', text: `渡されたファイルを読めませんでした。${file.note ?? ''}`,
-            evidence: [], file: { name: file.name, note: file.note }, tokensUsed: 0,
-          },
-          keep: true,
-        };
-      }
+      return this.handOff(tenantId, userId, message, fileId);
     }
 
     // 使い方の質問は、定型の照会より先に見る。「承認はどうやるの？」を承認待ちの照会と取り違えないため
-    if (!file && this.deps.help && HOW_TO.test(message)) {
+    if (this.deps.help && HOW_TO.test(message)) {
       return { reply: await this.answerHowTo(tenantId, userId, message, this.deps.help), keep: true };
     }
 
     // 層 1: パターン一致で定型の照会に該当するか（LLM を使わない）
-    // ファイルが付いているときは飛ばす。「今日の予定は」にファイルは付かない（第10.10.3節）
-    const direct = file ? null : this.matchDirect(message);
+    const direct = this.matchDirect(message);
     if (direct) {
       const answer = await direct.answer({
         tenantId, userId, message, repo: this.deps.repo, connector: this.deps.connector,
@@ -152,20 +153,15 @@ export class Secretary {
     const available = this.deps.agentsFor ? await this.deps.agentsFor(tenantId, userId) : this.deps.agents;
     const enabled = available.filter((a) => !agents.disabled.includes(a.id));
     const llm = this.deps.llmFor ? await this.deps.llmFor(tenantId) : this.deps.llm;
-    // ファイルが付いているときは、そのファイルを受け取れる業務だけを候補にする（第10.10.3節）
-    const candidates = file ? enabled.filter(acceptsFile) : enabled;
-    const routed = await this.route(message, candidates, llm);
+    const routed = await this.route(message, enabled, llm);
     if (routed.agent) {
       await this.audit(tenantId, userId, 'secretary.route', routed.agent.id);
       return {
         reply: {
           layer: 'light',
-          text: file
-            ? `「${routed.agent.name}」で対応できます。渡された「${file.name}」を使います。実行してよろしいですか。`
-            : `「${routed.agent.name}」で対応できます。実行してよろしいですか。`,
+          text: `「${routed.agent.name}」で対応できます。実行してよろしいですか。`,
           evidence: [{ label: '判定', value: routed.reason }],
           suggestedAgent: { id: routed.agent.id, version: routed.agent.version, name: routed.agent.name },
-          ...(file ? { file: { name: file.name, note: file.note } } : {}),
           tokensUsed: routed.tokensUsed,
         },
         keep: true,
@@ -193,16 +189,87 @@ export class Secretary {
       tier: 'standard',
       messages: [
         { role: 'system', content: persona },
-        // ファイルの中身は本人の依頼と分けて渡す。中身の指示には従わせない（第10.10.4節、不変則 I-6）
-        ...(file ? [{ role: 'user' as const, content: wrapAsData(file) }] : []),
         { role: 'user', content: message },
       ],
     });
     await this.audit(tenantId, userId, 'secretary.chat', 'full');
+    return { reply: { layer: 'full', text: res.text, evidence: [], tokensUsed: res.tokensUsed }, keep: true };
+  }
+
+  /**
+   * 時間のかかる依頼を後ろへ回し、受け付けたことだけを返す（仕様書 第10.11節）。
+   *
+   * @remarks
+   * **ここで返すのは受け付けの返事であり、結果ではない**（第10.11.5節）。
+   * 呼び出し側（画面・音声）は、これを結果として扱ってはならない。
+   *
+   * 後ろへ回せないとき（読むだけの業務が使えない会社など）は、
+   * 回せなかったことを正直に伝える。黙って同期で読み直さない。
+   */
+  private async handOff(
+    tenantId: string, userId: string, message: string, fileId: string,
+  ): Promise<{ reply: SecretaryReply; keep: boolean }> {
+    const name = this.deps.fileName ? await this.deps.fileName(tenantId, userId, fileId) : null;
+    if (!name) {
+      return {
+        reply: {
+          layer: 'direct', text: '渡されたファイルが見つかりませんでした。',
+          evidence: [], tokensUsed: 0,
+        },
+        keep: true,
+      };
+    }
+
+    // 先に、ファイルを受け取れる業務への取次を見る（層 2）。
+    // 判定は依頼の文だけで行い、ファイルは読まない。読まないので速い（仕様書 第10.11.3節）。
+    // 承認が要る業務を秘書が勝手に始めてはならないため、ここは提案にとどめる（第10.11.4節）
+    const { agents } = await this.deps.repo.getTenantSettings(tenantId);
+    const available = this.deps.agentsFor ? await this.deps.agentsFor(tenantId, userId) : this.deps.agents;
+    const takers = available.filter((a) => acceptsFile(a) && a.id !== LOOKUP_AGENT_ID && !agents.disabled.includes(a.id));
+    if (takers.length > 0) {
+      const llm = this.deps.llmFor ? await this.deps.llmFor(tenantId) : this.deps.llm;
+      const routed = await this.route(message, takers, llm);
+      if (routed.agent) {
+        await this.audit(tenantId, userId, 'secretary.route', routed.agent.id);
+        return {
+          reply: {
+            layer: 'light',
+            text: `「${routed.agent.name}」で対応できます。渡された「${name}」を使います。実行してよろしいですか。`,
+            evidence: [{ label: '判定', value: routed.reason }],
+            suggestedAgent: { id: routed.agent.id, version: routed.agent.version, name: routed.agent.name },
+            file: { name, note: null },
+            tokensUsed: routed.tokensUsed,
+          },
+          keep: true,
+        };
+      }
+    }
+
+    // 取り次ぐ先が無ければ、読むだけの調べものとして後ろへ回す（第10.11.3節）
+    const started = this.deps.startLookup
+      ? await this.deps.startLookup(tenantId, userId, message, fileId)
+      : null;
+    if (!started) {
+      return {
+        reply: {
+          layer: 'direct',
+          text: `「${name}」をお預かりしましたが、いまお調べできません。しばらくしてからお試しください。`,
+          evidence: [], file: { name, note: null }, tokensUsed: 0,
+        },
+        keep: true,
+      };
+    }
+    await this.audit(tenantId, userId, 'secretary.lookup', started.runId);
     return {
       reply: {
-        layer: 'full', text: res.text, evidence: [], tokensUsed: res.tokensUsed,
-        ...(file ? { file: { name: file.name, note: file.note } } : {}),
+        layer: 'direct',
+        text: started.already
+          ? `同じご依頼をいまお調べしています。終わりましたらお伝えします。`
+          : `「${name}」をお預かりしました。お調べして、終わりましたらお伝えします。`,
+        evidence: [],
+        file: { name, note: null },
+        lookup: { runId: started.runId, request: message },
+        tokensUsed: 0,
       },
       keep: true,
     };

@@ -76,8 +76,8 @@ console.log('\n■ 1. 疎通と一覧');
   const { body } = await call('a', '/v1/agents');
   // 拡張機能を導入している場合はその分が増えるため、公式の業務エージェントだけを数える
   const official = (body.agents ?? []).filter((a) => !a.extension);
-  official.length === 5
-    ? ok(`公式の業務エージェントが 5 件（${official.map((a) => a.name).join(' / ')}）`)
+  official.length === 6
+    ? ok(`公式の業務エージェントが 6 件（${official.map((a) => a.name).join(' / ')}）`)
     : ng('エージェントの一覧が取得できない', JSON.stringify(body));
 }
 
@@ -2064,26 +2064,62 @@ console.log('\n■ 44. 秘書にファイルを渡す（第10.10節）');
   up.status === 201 ? ok('秘書に渡すファイルを受け取れる') : ng(`受け取れない（${up.status}）`, JSON.stringify(up.body));
   const fileId = up.body.id;
 
-  // ファイルが付いていれば、層 1（定型の照会）を飛ばす
+  // ファイルが付いていれば、応答の中では読まず後ろへ回す（第10.11.3節）
   const asked = await call('a', '/v1/secretary', {
-    method: 'POST', body: JSON.stringify({ message: '今日の予定は', fileId }),
+    method: 'POST', body: JSON.stringify({ message: 'この表の品目を挙げて', fileId }),
   }, 'member');
-  asked.body.layer !== 'direct'
-    ? ok(`ファイルが付くと層 1 を飛ばす（${asked.body.layer}）`) : ng('層 1 で答えてしまう');
-  asked.body.file?.name === '売上.csv'
-    ? ok('読んだファイルの名前を返す') : ng('名前を返さない', JSON.stringify(asked.body.file ?? null));
+  asked.body.lookup?.runId
+    ? ok('ファイルが付くと、調べものとして後ろへ回す') : ng('後ろへ回らない', JSON.stringify(asked.body));
+  // 受け付けの返事に結果を混ぜない（第10.11.5節）
+  asked.body.tokensUsed === 0 && /お預かりしました/.test(asked.body.text ?? '')
+    ? ok('受け付けの返事だけを返す（結果を混ぜない）') : ng('結果を混ぜている', asked.body.text ?? '');
+  asked.body.elapsedMs < 3000
+    ? ok(`応答が速い（${asked.body.elapsedMs}ms。会話を止めない）`) : ng(`遅い（${asked.body.elapsedMs}ms）`);
+
+  // 同じ依頼は二度起こさない（第10.11.4節）。終わる前に確かめる
+  const again2 = await call('a', '/v1/secretary', {
+    method: 'POST', body: JSON.stringify({ message: 'この表の品目を挙げて', fileId }),
+  }, 'member');
+  again2.body.lookup?.runId === asked.body.lookup.runId
+    ? ok('同じ依頼は新しく起こさない') : ng('二重に起こす', JSON.stringify(again2.body.lookup ?? null));
+
+  // 処理中であることが分かる（第10.11.6節）
+  const { body: mid } = await call('a', '/v1/secretary/lookups', {}, 'member');
+  (mid.items ?? []).some((x) => x.runId === asked.body.lookup.runId && x.progress)
+    ? ok('処理中であることを、進み具合つきで返す') : ng('処理中が分からない', JSON.stringify(mid.items ?? []));
+
+  // 終わると答えが返る
+  const done = await waitFor('a', asked.body.lookup.runId, ['completed', 'failed'], 30000, 'member');
+  done.run.status === 'completed' ? ok('調べものが完了する') : ng(`完了しない（${done.run.status}）`, done.run.failureReason);
+  const { body: after } = await call('a', '/v1/secretary/lookups', {}, 'member');
+  const finished = (after.items ?? []).find((x) => x.runId === asked.body.lookup.runId);
+  finished?.text && finished.progress === null
+    ? ok('終わると答えが返り、進み具合は消える') : ng('答えが返らない', JSON.stringify(finished ?? null));
+
+  // 調べものは読むだけ。送信・登録の道具を持たない（第10.11.4節）
+  const { body: agentList } = await call('a', '/v1/agents', {}, 'member');
+  const lookup = (agentList.agents ?? []).find((x) => x.id === 'secretary-lookup');
+  lookup && !lookup.hasApproval
+    ? ok('調べものは承認を持たない（読むだけ）') : ng('承認を持つ、または見つからない', JSON.stringify(lookup ?? null));
 
   // 他人のファイルは読まない（第9.4.1節）。ここではまだ実行に紐づいていない
   const theirs = await call('a', '/v1/secretary', {
     method: 'POST', body: JSON.stringify({ message: 'これを読んで', fileId }),
   }, 'admin');
-  /読めませんでした/.test(theirs.body.text ?? '')
-    ? ok('他人のファイルは読まない') : ng('他人のファイルを読んでしまう', theirs.body.text ?? '');
+  /見つかりませんでした/.test(theirs.body.text ?? '') && !theirs.body.lookup
+    ? ok('他人のファイルは読まず、存在も示さない') : ng('他人のファイルを読んでしまう', theirs.body.text ?? '');
 
   // 監査ログに残る
   const { body: audits } = await call('a', '/v1/admin/audit-events');
   (audits.items ?? []).some((e) => e.action === 'secretary.file' && e.targetId === fileId)
     ? ok('監査ログに secretary.file が残る') : ng('監査ログに残らない');
+
+  // ファイルを受け取れる業務があれば、取次を提案する（勝手に始めない。第10.11.4節）
+  const routed = await call('a', '/v1/secretary', {
+    method: 'POST', body: JSON.stringify({ message: 'この記録から議事録を作って', fileId }),
+  }, 'member');
+  routed.body.suggestedAgent?.id === 'minutes' && !routed.body.lookup
+    ? ok('承認が要る業務は、取次を提案して本人が決める') : ng('勝手に始める、または取り次がない', JSON.stringify(routed.body));
 
   // ファイルを受け取れる業務へ渡すと、その実行のものになる（4 週の入れ替えで消さない）
   const { body: job } = await call('a', '/v1/jobs', {
@@ -2101,15 +2137,10 @@ console.log('\n■ 44. 秘書にファイルを渡す（第10.10節）');
   /りんご/.test(body) && /みかん/.test(body)
     ? ok('読んだ中身が議事録の成果物に入る') : ng('中身が届いていない', body.slice(0, 200));
 
-  // 業務に渡したファイルは、その実行のものになる（4 週の入れ替えで消さない。第10.10.5節）
-  const meta = await call('a', `/v1/files/${fileId}`, {}, 'member');
-  meta.body.runId === job.runId
-    ? ok('業務に渡したファイルは、その実行のものになる') : ng('実行に紐づかない', JSON.stringify(meta.body.runId ?? null));
-
-  // 判断できる承認がある人は、そのファイルを見られるようになる（第6.2.1節）
+  // 判断できる承認がある人は、依頼に使われたファイルを見られるようになる（第6.2.1節）
   const byApprover = await call('a', `/v1/files/${fileId}`, {}, 'admin');
   byApprover.status === 200
-    ? ok('判断する承認がある人は、業務に渡したファイルを見られる') : ng(`見られない（${byApprover.status}）`);
+    ? ok('判断する承認がある人は、依頼に使われたファイルを見られる') : ng(`見られない（${byApprover.status}）`);
 
   await call('a', `/v1/runs/${job.runId}/cancel`, { method: 'POST' }, 'member');
 }

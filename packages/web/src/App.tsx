@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Approval, Notification } from '@m2office/shared';
 import {
-  api, describeError, type AgentSummary, type Me, type RunDetail, type ScheduleView, type SecretaryReply,
+  api, describeError, type AgentSummary, type Lookup, type Me, type RunDetail, type ScheduleView, type SecretaryReply,
 } from './api.js';
 import { HelpCenter, HelpTip, Tour, openHelp, useOpenHelp } from './help.js';
 import { startVoice, type VoiceCall } from './voice.js';
@@ -63,6 +63,10 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [reply, setReply] = useState<SecretaryReply | null>(null);
   // 秘書に渡したファイル。取り次いだ業務の入力へ引き継ぐ（仕様書 第10.10.3節）
   const [replyFileId, setReplyFileId] = useState<string | null>(null);
+  // 後ろへ回した調べもの（仕様書 第10.11節）。動いているものは処理中として見せる
+  const [lookups, setLookups] = useState<Lookup[]>([]);
+  // すでに伝えた調べもの。同じ結果を二度伝えない
+  const announced = useRef<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [showTour, setShowTour] = useState(false);
@@ -81,13 +85,29 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
 
   const refresh = useCallback(async () => {
     try {
-      const [a, p, j, n] = await Promise.all([
-        api.agents(), api.approvals(), api.jobs(), api.notifications(),
+      const [a, p, j, n, l] = await Promise.all([
+        api.agents(), api.approvals(), api.jobs(), api.notifications(), api.lookups(),
       ]);
       setAgents(a.agents);
       setApprovals(p.items);
       setHistory(j.items as never);
       setNotifications(n.items);
+      setLookups(l.items);
+      // 終わった調べものを、秘書の応答として伝える（仕様書 第10.11.7節）。一度だけ
+      for (const x of l.items) {
+        if (x.status !== 'completed' && x.status !== 'failed') continue;
+        if (announced.current.has(x.runId)) continue;
+        announced.current.add(x.runId);
+        setReply({
+          layer: 'full',
+          // 秘書が自分で調べたものとして伝える。裏で別のものが動いていることは話さない（第10.11.7節）
+          text: x.status === 'completed'
+            ? (x.text || 'お調べしましたが、お伝えできる内容がありませんでした。')
+            : `お調べできませんでした。${x.failureReason ?? ''}`,
+          evidence: [{ label: 'ご依頼', value: x.request }],
+          tokensUsed: 0, elapsedMs: 0,
+        });
+      }
       setError(null);
     } catch (err) {
       setError(describeError(err, '読み込みに失敗しました'));
@@ -163,7 +183,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
             active={view.kind === 'settings'} onOpenSettings={() => setView({ kind: 'settings' })}
           />
         )}
-        footer={<SecretaryBar onReply={(r, fid) => { setReply(r); setReplyFileId(fid); }} />}
+        footer={<SecretaryBar lookups={lookups} onReply={(r, fid) => { setReply(r); setReplyFileId(fid); }} />}
       >
         <main className="canvas">
           {error && <p className="error">{error}</p>}
@@ -329,7 +349,11 @@ function Home({ approvals, agents }: { approvals: number; agents: number }) {
  * 常駐の秘書バー。どの画面からでも呼び出せる（仕様書 第10.4節）。
  * 音声でも話しかけられ（第10.5節）、手元のファイルを 1 つ渡せる（第10.10節）。
  */
-function SecretaryBar({ onReply }: { onReply: (r: SecretaryReply, fileId: string | null) => void }) {
+function SecretaryBar({ lookups, onReply }: {
+  /** 後ろで動いている調べもの。処理中であることを常に見せる（仕様書 第10.11.6節） */
+  lookups: Lookup[];
+  onReply: (r: SecretaryReply, fileId: string | null) => void;
+}) {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
@@ -375,6 +399,9 @@ function SecretaryBar({ onReply }: { onReply: (r: SecretaryReply, fileId: string
     setCall(started);
   }
 
+  // 終わったものは出さない。終わったことは秘書が応答として伝える（第10.11.7節）
+  const running = lookups.filter((x) => x.status !== 'completed' && x.status !== 'failed');
+
   async function send() {
     if (!text.trim() || busy) return;
     setBusy(true);
@@ -383,7 +410,7 @@ function SecretaryBar({ onReply }: { onReply: (r: SecretaryReply, fileId: string
       onReply(reply, file?.id ?? null);
       setHint([
         layerLabel(reply.layer), `${reply.elapsedMs}ms`,
-        reply.file ? `「${reply.file.name}」を読みました` : '',
+        reply.file ? `「${reply.file.name}」を受け取りました` : '',
       ].filter(Boolean).join('・'));
       setText('');
       // 渡したファイルは 1 回の依頼ごとに外す。次の依頼に持ち越さない
@@ -429,6 +456,17 @@ function SecretaryBar({ onReply }: { onReply: (r: SecretaryReply, fileId: string
         </span>
       )}
       {hint && <span className="layer">{hint}</span>}
+      {/* 秘書が黙り込んだように見せない。動いているものを必ず出す（第10.11.6節） */}
+      {running.length > 0 && (
+        <div className="lookups">
+          {running.map((x) => (
+            <span key={x.runId} className="lookup" title={x.request}>
+              <span className="spin" aria-hidden="true" />
+              {x.progress ?? 'お調べしています'}: {x.request}
+            </span>
+          ))}
+        </div>
+      )}
       {voice && (voice.heard || voice.reply) && (
         <div className="voice-transcript">
           {voice.heard && <p><span className="muted small">聞こえた内容</span> {voice.heard}</p>}

@@ -331,6 +331,18 @@ export interface RunDetail {
   artifacts: Artifact[];
 }
 
+/** 後ろへ回した調べもの 1 件（仕様書 第10.11節）。 */
+export interface Lookup {
+  runId: string;
+  request: string;
+  status: string;
+  /** 何をしているか。終わっていれば `null`。見込みの時間は出さない（第10.11.5節）。 */
+  progress: string | null;
+  /** 答え。終わるまでは `null`。 */
+  text: string | null;
+  failureReason: string | null;
+}
+
 export interface SecretaryReply {
   layer: 'direct' | 'light' | 'full';
   text: string;
@@ -338,8 +350,14 @@ export interface SecretaryReply {
   suggestedAgent?: { id: string; version: number; name: string };
   /** 使い方の質問に答えたとき、材料にしたヘルプの記事。 */
   helpArticles?: { id: string; title: string }[];
-  /** 渡したファイルを読んだとき、その名前と断り（仕様書 第10.10節）。 */
+  /** 渡したファイルを受け取ったとき、その名前（仕様書 第10.10節）。 */
   file?: { name: string; note: string | null };
+  /**
+   * 後ろへ回した調べもの（仕様書 第10.11節）。
+   *
+   * @remarks **これがあるときは、まだ結果が出ていない。** 結果として扱わないこと。
+   */
+  lookup?: { runId: string; request: string };
   tokensUsed: number;
   elapsedMs: number;
 }
@@ -636,6 +654,8 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ decision, comment: comment ?? null }),
     }),
+  /** 後ろへ回した調べものの状態（仕様書 第10.11.6節）。画面が定期的に読む。 */
+  lookups: () => call<{ items: Lookup[] }>('/secretary/lookups'),
   /** 秘書に聞く。手元のファイルを 1 つ添えられる（仕様書 第10.10節）。 */
   ask: (message: string, fileId?: string) =>
     call<SecretaryReply>('/secretary', {

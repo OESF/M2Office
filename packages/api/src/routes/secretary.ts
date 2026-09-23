@@ -8,6 +8,7 @@
 
 import { Hono } from 'hono';
 import type { RequestContext } from '@m2office/shared';
+import { LOOKUP_AGENT_ID } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 
 /**
@@ -30,6 +31,54 @@ export function secretaryRoute(deps: AppDeps) {
     const reply = await deps.secretary.respond(ctx.tenant.id, ctx.user.id, message, fileId?.trim() || undefined);
     return c.json({ ...reply, elapsedMs: Date.now() - started });
   });
+
+  /**
+   * 後ろへ回した調べものの状態（仕様書 第10.11.6・10.11.7節）。
+   *
+   * @remarks
+   * 画面はこれを定期的に読み、**動いているものを処理中として見せる**。
+   * 秘書が黙り込んだように見えることを防ぐ、いちばん効く手当てである。
+   *
+   * 画面を開き直したときも同じものが返る。進み具合は変化したときにしか
+   * 変わらないため、送り直しが無いと、途中から見た人には何も動いていないように見える。
+   */
+  app.get('/lookups', async (c) => {
+    const ctx = c.get('ctx');
+    const rows = await deps.repo.listRunsWithJobs(ctx.tenant.id, {
+      limit: 20, requestedBy: ctx.user.id,
+    });
+    const items = [];
+    for (const { run, job } of rows) {
+      if (job.agentId !== LOOKUP_AGENT_ID) continue;
+      items.push({
+        runId: run.id,
+        request: String(job.input['request'] ?? ''),
+        status: run.status,
+        // 何をしているか。段の見出しをそのまま使う（見込みの時間は出さない。第10.11.5節）
+        progress: run.status === 'completed' || run.status === 'failed'
+          ? null
+          : await stepLabelOf(ctx.tenant.id, run.id),
+        // 終わったものだけ中身を返す。動いている間は結果が無い
+        text: run.status === 'completed' ? await answerOf(ctx.tenant.id, run.id) : null,
+        failureReason: run.failureReason,
+      });
+    }
+    return c.json({ items });
+  });
+
+  /** いま動いている段の見出し。分からなければ「お調べしています」。 */
+  async function stepLabelOf(tenantId: string, runId: string): Promise<string> {
+    const steps = await deps.repo.listRunSteps(tenantId, runId);
+    const current = [...steps].reverse().find((s) => s.status === 'running') ?? steps.at(-1);
+    return current?.stepId === 'answer' ? 'まとめています' : 'お調べしています';
+  }
+
+  /** 調べものの答え。最後の段の応答の文を使う。 */
+  async function answerOf(tenantId: string, runId: string): Promise<string> {
+    const steps = await deps.repo.listRunSteps(tenantId, runId);
+    const last = [...steps].reverse().find((s) => (s.output as { text?: string } | null)?.text);
+    return (last?.output as { text?: string } | null)?.text ?? '';
+  }
 
   return app;
 }

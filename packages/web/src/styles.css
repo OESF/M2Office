@@ -582,3 +582,36 @@ code.uri { background: var(--subtle-bg); border: 1px solid var(--line); border-r
   white-space: nowrap;
 }
 .secretary .attached .link { padding: 0; line-height: 1; }
+
+/* 後ろで動いている調べもの（仕様書 第10.11.6節） */
+.secretary .lookups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex-basis: 100%;
+}
+.secretary .lookup {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.secretary .lookup .spin {
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: m2o-spin 0.9s linear infinite;
+  flex: none;
+}
+@keyframes m2o-spin { to { transform: rotate(360deg); } }
+/* 動きを抑える設定の端末では回さない */
+@media (prefers-reduced-motion: reduce) {
+  .secretary .lookup .spin { animation: none; }
+}

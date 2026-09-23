@@ -85,7 +85,7 @@ export {
 } from './engine/errors.js';
 
 export {
-  OFFICIAL_AGENTS, resolveOfficialAgent, DEFAULT_STANDARD_MINUTES, standardMinutes, stepLabel,
+  OFFICIAL_AGENTS, LOOKUP_AGENT_ID, resolveOfficialAgent, DEFAULT_STANDARD_MINUTES, standardMinutes, stepLabel,
 } from './agents/index.js';
 export { Secretary, acceptsFile } from './secretary/secretary.js';
 export type { SecretaryReply, ResponseLayer } from './secretary/secretary.js';
