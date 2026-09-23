@@ -10,13 +10,15 @@ import { cpSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  BUILTIN_TOOLS, ExtensionHub, OFFICIAL_AGENTS, StubLlmProvider, ToolRegistry, loadExtension, loadExtensions,
-  type InstalledExtension, type Repository,
+  BUILTIN_TOOLS, ExtensionHub, OFFICIAL_AGENTS, StubLlmProvider, ToolRegistry, blockedByDisabledTool,
+  loadExtension, loadExtensions,
+  type DisabledConnectorTool, type InstalledExtension, type Repository,
 } from '../src/index.js';
 
 const registry = new ToolRegistry();
 for (const t of BUILTIN_TOOLS) registry.register(t);
 const SAMPLE = new URL('../../../extensions/hello-world', import.meta.url).pathname;
+const DEEPWIKI = new URL('../../../extensions/deepwiki-research', import.meta.url).pathname;
 
 /** サンプルを一時ディレクトリへ写し、一部を書き換えて検証する。 */
 function variant(edit: (dir: string) => void): string[] {
@@ -97,8 +99,10 @@ test('同じ ID の拡張機能は 2 つ目を拒否する', () => {
 test('会社が導入した拡張機能の業務エージェントだけが、その会社で使える', async () => {
   const { pkg } = loadExtension(SAMPLE, registry);
   const installed: InstalledExtension[] = [];
+  const disabledTools: DisabledConnectorTool[] = [];
   const repo = {
     listInstalledExtensions: async () => installed,
+    listDisabledConnectorTools: async () => disabledTools,
     listPrivateExtensions: async () => [],
   } as unknown as Repository;
   const hub = new ExtensionHub({ repo, registry, official: OFFICIAL_AGENTS, packages: [pkg!] });
@@ -131,4 +135,62 @@ test('スタブは入力の一致する評価のケースの見本を再生し�
   const miss = await ask('やあ');
   assert.ok(!miss.text.includes('```tool'), '見本が無い入力では推測でツールを呼ばない');
   assert.match(miss.text, /見本の応答がありません/);
+});
+
+test('管理者が止めたコネクタのツールは、その会社のツールの一覧から消える（第6.6.3.1節）', async () => {
+  const { pkg } = loadExtension(DEEPWIKI, registry);
+  const disabledTools: DisabledConnectorTool[] = [];
+  const installed: InstalledExtension[] = [{
+    tenantId: 't1', extensionId: 'jp.m2office.samples.deepwiki-research', version: '1.0.0',
+    consentedPermissions: {
+      tools: ['deepwiki.ask_wiki_question', 'deepwiki.read_wiki_structure', 'document.create'],
+      max_risk_level: 'draft',
+      connectors: [{
+        id: 'deepwiki', url: 'https://mcp.deepwiki.com/mcp', auth: 'none',
+        tools: [{ name: 'ask_wiki_question', risk: 'read' }, { name: 'read_wiki_structure', risk: 'read' }],
+      }],
+    },
+    installedBy: 'u', installedAt: new Date().toISOString(), enabled: true,
+  }];
+  const repo = {
+    listInstalledExtensions: async () => installed,
+    listDisabledConnectorTools: async () => disabledTools,
+    listPrivateExtensions: async () => [],
+  } as unknown as Repository;
+  const hub = new ExtensionHub({ repo, registry, official: OFFICIAL_AGENTS, packages: [pkg!] });
+  const agentId = 'jp.m2office.samples.deepwiki-research:research';
+
+  // 止める前は、ツールも業務も使える
+  let view = await hub.forTenant('t1');
+  assert.ok(view.registry.get('deepwiki.ask_wiki_question'), '止める前はツールがある');
+  assert.equal(view.isAvailable(agentId), true, '止める前は業務が使える');
+  assert.equal(view.disabledTools.size, 0);
+
+  disabledTools.push({
+    connectorId: 'deepwiki', toolName: 'ask_wiki_question',
+    disabledBy: 'u-admin', disabledAt: new Date().toISOString(),
+  });
+  view = await hub.forTenant('t1');
+  assert.equal(view.registry.get('deepwiki.ask_wiki_question'), undefined, '止めたツールは一覧から消える');
+  assert.ok(view.registry.get('deepwiki.read_wiki_structure'), '止めていないツールは残る');
+  assert.ok(view.disabledTools.has('deepwiki.ask_wiki_question'));
+
+  // そのツールを使う業務は、メニュー・秘書・定時実行・API から消える
+  assert.equal(view.isAvailable(agentId), false, '止めたツールを使う業務は使えない');
+  assert.ok(!view.agents.some((a) => a.id === agentId));
+  assert.equal(view.resolve(agentId, 1)?.id, agentId, '名前を引くために、解決はできる');
+  assert.equal(view.isAvailable('minutes'), true, '関係のない公式の業務は使える');
+
+  // 戻せば、ツールも業務も戻る
+  disabledTools.length = 0;
+  view = await hub.forTenant('t1');
+  assert.ok(view.registry.get('deepwiki.ask_wiki_question'));
+  assert.equal(view.isAvailable(agentId), true);
+});
+
+test('業務が止められたツールを使うかを、名前で判定する', () => {
+  const def = { tools: ['deepwiki.ask_wiki_question', 'document.create'] } as never;
+  assert.equal(blockedByDisabledTool(def, new Set(['deepwiki.ask_wiki_question'])), true);
+  assert.equal(blockedByDisabledTool(def, new Set(['deepwiki.read_wiki_structure'])), false);
+  assert.equal(blockedByDisabledTool(def, new Set()), false);
 });

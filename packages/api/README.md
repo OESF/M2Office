@@ -122,6 +122,8 @@ OAuth クライアントが整うまでは、`GET /v1/auth/google/start` は 503
 | `POST /v1/admin/extensions/:id/install` | 管理者: 同意して導入（本文に `consent: true`）。導入すると有効になる |
 | `PUT /v1/admin/extensions/:id/enabled` | 管理者: 有効・無効の切り替え（本文に `enabled`）。権限が増えた版は 409 |
 | `POST /v1/admin/extensions/:id/connectors/:connectorId/check` | 管理者: コネクタの接続の確認（宣言したツールが提供されているか） |
+| `GET /v1/admin/extensions/:id/connectors/:connectorId/tools/:tool/impact` | 管理者: そのツールを止めると使えなくなる業務の名前と、飛ばす定時実行の数（仕様書 第6.6.3.1節） |
+| `PUT /v1/admin/extensions/:id/connectors/:connectorId/tools/:tool/enabled` | 管理者: コネクタのツールを 1 つ、有効または無効にする。止めたツールを使う業務はメニュー・秘書・定時実行・API から消える。動いている実行は止めない |
 | `DELETE /v1/admin/extensions/:id` | 管理者: 削除する。自社専用のものは取り込んだファイルも消す |
 | `GET /v1/admin/groups` | 管理者: グループの一覧（所属する人と、割り当て先の区画・業務を含む。第16.7節） |
 | `POST /v1/admin/groups` | 管理者: グループを作る（名前は会社の中で重ならない） |

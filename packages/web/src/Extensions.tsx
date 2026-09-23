@@ -140,7 +140,7 @@ export function ExtensionSettings() {
       )}
       {installed.map((x) => (
         <InstalledCard
-          key={x.id} item={x} busy={busy} options={access.options} onScopeSaved={() => void Promise.all([load(), access.reload()])}
+          key={x.id} item={x} busy={busy} options={access.options} onChanged={() => void Promise.all([load(), access.reload()])}
           onToggle={(on) => void act(
             () => api.admin.setExtensionEnabled(x.id, on),
             on ? `「${x.name}」を有効にしました` : `「${x.name}」を無効にしました。業務はメニューから消えます`,
@@ -180,8 +180,10 @@ function Title({ item: x }: { item: ExtensionView }) {
 }
 
 /** 導入済みの拡張機能のカード。スイッチ・詳細・削除。 */
-function InstalledCard({ item: x, busy, options, onScopeSaved, onToggle, onReconsent, onDelete }: {
-  item: ExtensionView; busy: boolean; options: AccessOptions | null; onScopeSaved: () => void;
+function InstalledCard({ item: x, busy, options, onChanged, onToggle, onReconsent, onDelete }: {
+  item: ExtensionView; busy: boolean; options: AccessOptions | null;
+  /** 利用範囲の保存と、ツールの入り切りのあとに呼ぶ。一覧を読み直す */
+  onChanged: () => void;
   onToggle: (on: boolean) => void; onReconsent: () => void; onDelete: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -206,26 +208,58 @@ function InstalledCard({ item: x, busy, options, onScopeSaved, onToggle, onRecon
         </p>
       )}
       {options && (
-        <div className="small">利用できる人: <ScopeField target={x.id} options={options} onSaved={onScopeSaved} /></div>
+        <div className="small">利用できる人: <ScopeField target={x.id} options={options} onSaved={onChanged} /></div>
       )}
       <div className="row small">
         <button className="link" onClick={() => setOpen(!open)}>{open ? '詳細を閉じる' : '詳細'}</button>
         <button className="link danger" disabled={busy} onClick={onDelete}>削除</button>
       </div>
-      {open && <Details item={x} />}
+      {open && <Details item={x} onChanged={onChanged} />}
     </div>
   );
 }
 
-/** 詳細。業務エージェント、コネクタ（接続の確認）、ツールの危険度、説明。 */
-function Details({ item: x }: { item: ExtensionView }) {
+/**
+ * 詳細。業務エージェント、コネクタ（接続の確認）、ツールの危険度と入り切り、説明。
+ *
+ * @param onChanged ツールの入り切りを変えたら呼ぶ。一覧を読み直す
+ */
+function Details({ item: x, onChanged }: { item: ExtensionView; onChanged: () => void }) {
   const [checks, setChecks] = useState<Record<string, ConnectorCheck | 'busy'>>({});
+  const [busyTool, setBusyTool] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const check = async (id: string) => {
     setChecks((c) => ({ ...c, [id]: 'busy' }));
     const res = await api.admin.checkConnector(x.id, id)
       .catch((e): ConnectorCheck => ({ ok: false, error: describeError(e) }));
     setChecks((c) => ({ ...c, [id]: res }));
   };
+
+  /** ツールを 1 つ入り切りする。止めるときは、使えなくなる業務を先に示す（第6.6.3.1節）。 */
+  async function toggleTool(connectorId: string, toolName: string, enabled: boolean) {
+    setBusyTool(toolName);
+    setError(null);
+    try {
+      if (!enabled) {
+        const impact = await api.admin.connectorToolImpact(x.id, connectorId, toolName);
+        const names = impact.agents.map((a) => `・${a.name}`).join('\n');
+        const ok = window.confirm(
+          impact.agents.length === 0
+            ? `ツール「${toolName}」を止めます。\n\nいま止まる業務はありません。\n\n止めてよろしいですか。`
+            : `ツール「${toolName}」を止めます。\n\n次の業務が使えなくなります。\n${names}\n`
+              + (impact.schedules > 0 ? `\nこれらの定時実行 ${impact.schedules} 件も、次の回から飛ばします。\n` : '')
+              + '\n動いている業務は最後まで進みます。いつでも戻せます。\n\n止めてよろしいですか。',
+        );
+        if (!ok) return;
+      }
+      await api.admin.setConnectorToolEnabled(x.id, connectorId, toolName, enabled);
+      onChanged();
+    } catch (err) {
+      setError(describeError(err, enabled ? '戻せませんでした' : '止められませんでした'));
+    } finally {
+      setBusyTool(null);
+    }
+  }
   return (
     <div className="ext-details">
       {x.agents.length > 0 && (
@@ -243,11 +277,18 @@ function Details({ item: x }: { item: ExtensionView }) {
             <ul className="small">
               {c.tools.map((t) => {
                 const provided = st && st !== 'busy' && st.ok ? st.tools.find((x) => `${c.id}.${x.name}` === t.name)?.provided : undefined;
+                // ツールの名前は `<コネクタの ID>.<ツールの名前>`。API には後ろだけを渡す
+                const bare = t.name.slice(t.name.indexOf('.') + 1);
                 return (
                   <li key={t.name}>
                     {t.description}（<code>{t.name}</code>・{t.riskText}）
                     {provided === true && <span className="status succeeded">提供あり</span>}
                     {provided === false && <span className="status failed">提供なし</span>}
+                    {!t.enabled && <span className="status cancelled">止めています</span>}{' '}
+                    <button className="link" disabled={busyTool === bare}
+                      onClick={() => void toggleTool(c.id, bare, !t.enabled)}>
+                      {busyTool === bare ? '…' : t.enabled ? '止める' : '戻す'}
+                    </button>
                   </li>
                 );
               })}
@@ -261,6 +302,7 @@ function Details({ item: x }: { item: ExtensionView }) {
           </div>
         );
       })}
+      {error && <p className="error">{error}</p>}
       {x.readme && (
         <>
           <h4>説明</h4>

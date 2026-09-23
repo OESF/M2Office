@@ -18,7 +18,7 @@ export { OpenAiCompatibleProvider, LlmRequestError } from './llm/gemini.js';
 export type { GeminiModelMap } from './llm/gemini.js';
 
 export type {
-  Repository, KnowledgeHit, KnowledgeItem, KnowledgeSearchResult, KnowledgeSectionView, RunStatRow, InstalledExtension, PrivateExtension, CompartmentAssignment,
+  Repository, DisabledConnectorTool, KnowledgeHit, KnowledgeItem, KnowledgeSearchResult, KnowledgeSectionView, RunStatRow, InstalledExtension, PrivateExtension, CompartmentAssignment,
   CredentialKind, TenantCredential, GoogleConnection,
 } from './repository/types.js';
 export { PostgresRepository } from './repository/postgres.js';
@@ -77,7 +77,7 @@ export { validateDefinition } from './engine/validate.js';
 export { enqueueJob } from './engine/enqueue.js';
 export { cancelRun, createdDriveLinks, CANCELLABLE } from './engine/cancel.js';
 export type { CancelActor, CancelOutcome } from './engine/cancel.js';
-export { Scheduler, SCHEDULE_SKIP_TITLE } from './scheduler/scheduler.js';
+export { Scheduler, SCHEDULE_SKIP_TITLE, SCHEDULE_TOOL_DISABLED_TITLE } from './scheduler/scheduler.js';
 export { nextRunAt, validateRule, describeRule } from './scheduler/rule.js';
 export { parseToolCalls } from './engine/tool-protocol.js';
 export {

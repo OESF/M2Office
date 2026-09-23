@@ -145,6 +145,7 @@ function fakeRepo() {
   const privates: PrivateExtension[] = [];
   const repo = {
     listInstalledExtensions: async (t: string) => installed.filter((i) => i.tenantId === t),
+    listDisabledConnectorTools: async () => [],
     listPrivateExtensions: async (t: string) => privates.filter((i) => i.tenantId === t),
   } as unknown as Repository;
   return { repo, installed, privates };

@@ -13,7 +13,7 @@ import type {
   StoredFile, Tenant, TenantSettings, User, UserGroup, UserSettings,
 } from '@m2office/shared';
 import { DEFAULT_TENANT_SETTINGS, DEFAULT_USER_SETTINGS, STANDARD_SYNONYMS } from '@m2office/shared';
-import type { CompartmentAssignment, Conversation, ConversationDigest, MemoryCandidate, Promotion, CredentialKind, GoogleConnection, TenantCredential, InstalledExtension, PrivateExtension, KnowledgeItem, KnowledgeSearchResult, KnowledgeSectionView, Memory, Repository, RunStatRow } from './types.js';
+import type { CompartmentAssignment, Conversation, ConversationDigest, MemoryCandidate, Promotion, CredentialKind, GoogleConnection, TenantCredential, DisabledConnectorTool, InstalledExtension, PrivateExtension, KnowledgeItem, KnowledgeSearchResult, KnowledgeSectionView, Memory, Repository, RunStatRow } from './types.js';
 import { SPLIT_VERSION, citationOf, splitKnowledge } from '../knowledge/sections.js';
 import { SEARCH_CANDIDATES, bigrams, expandTerms, extractTerms, normalizeForSearch, rankSections, rewritesOf } from '../knowledge/search.js';
 
@@ -1227,6 +1227,32 @@ export class PostgresRepository implements Repository {
               installed_at as "installedAt", enabled
          from tenant_extensions where tenant_id = $1 order by installed_at`,
       [tenantId]);
+  }
+
+  async listDisabledConnectorTools(tenantId: string): Promise<DisabledConnectorTool[]> {
+    return this.q<DisabledConnectorTool>(tenantId,
+      `select connector_id as "connectorId", tool_name as "toolName",
+              disabled_by as "disabledBy", disabled_at as "disabledAt"
+         from disabled_connector_tools where tenant_id = $1 order by connector_id, tool_name`,
+      [tenantId]);
+  }
+
+  async setConnectorToolEnabled(
+    tenantId: string, connectorId: string, toolName: string, enabled: boolean, by: string,
+  ): Promise<void> {
+    // 止めたものだけを残す。有効に戻すことは、行を消すことである
+    if (enabled) {
+      await this.q(tenantId,
+        `delete from disabled_connector_tools
+          where tenant_id = $1 and connector_id = $2 and tool_name = $3`,
+        [tenantId, connectorId, toolName]);
+      return;
+    }
+    await this.q(tenantId,
+      `insert into disabled_connector_tools (tenant_id, connector_id, tool_name, disabled_by)
+       values ($1,$2,$3,$4)
+       on conflict (tenant_id, connector_id, tool_name) do nothing`,
+      [tenantId, connectorId, toolName, by]);
   }
 
   async installExtension(r: InstalledExtension): Promise<void> {

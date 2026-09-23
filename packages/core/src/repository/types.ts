@@ -215,6 +215,20 @@ export interface Repository {
 
   /** 会社が導入した拡張機能（仕様書 第12.9.3節）。 */
   listInstalledExtensions(tenantId: string): Promise<InstalledExtension[]>;
+  /**
+   * 管理者が個別に止めたコネクタのツール（仕様書 第6.6.3.1節）。
+   *
+   * @remarks 止めたものだけが返る。載っていないツールは有効である。
+   */
+  listDisabledConnectorTools(tenantId: string): Promise<DisabledConnectorTool[]>;
+  /**
+   * コネクタのツールを 1 つ、有効または無効にする。
+   *
+   * @param by 決めた管理者。監査のために残す
+   */
+  setConnectorToolEnabled(
+    tenantId: string, connectorId: string, toolName: string, enabled: boolean, by: string,
+  ): Promise<void>;
   installExtension(record: InstalledExtension): Promise<void>;
   /** 導入をやめる。導入していなければ `false`。 */
   uninstallExtension(tenantId: string, extensionId: string): Promise<boolean>;
@@ -514,6 +528,14 @@ export interface CompartmentAssignment {
   groups: string[];
   /** 個別に割り当てた利用者の ID。 */
   users: string[];
+}
+
+/** 管理者が個別に止めたコネクタのツール（仕様書 第6.6.3.1節）。 */
+export interface DisabledConnectorTool {
+  connectorId: string;
+  toolName: string;
+  disabledBy: string;
+  disabledAt: string;
 }
 
 /** 会社が導入した拡張機能の記録。同意した権限を残す（不変則 I-8）。 */

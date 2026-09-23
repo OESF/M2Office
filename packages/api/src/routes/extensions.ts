@@ -59,6 +59,8 @@ export function extensionsRoute(deps: AppDeps) {
         auth: c.auth.type, authText: AUTH_WORDS[c.auth.type] ?? c.auth.type,
         tools: c.tools.map((t) => ({
           name: `${c.id}.${t.name}`, description: t.description, risk: t.risk, riskText: RISK_WORDS[t.risk],
+          // 管理者が個別に止めたか（第6.6.3.1節）。止めていなければ有効である
+          enabled: !view?.disabledTools.has(`${c.id}.${t.name}`),
         })),
       })),
       permissions: {
@@ -203,6 +205,57 @@ export function extensionsRoute(deps: AppDeps) {
     const connector = entry?.pkg.connectors.find((x) => x.id === c.req.param('connectorId'));
     if (!connector) return c.json({ error: 'コネクタが見つかりません' }, 404);
     return c.json(await deps.hub.checkConnector(connector));
+  });
+
+  /**
+   * ツールを止めると使えなくなる業務（仕様書 第6.6.3.1節）。
+   *
+   * @remarks 止める前に、数だけでなく名前を示して確かめてもらう。
+   */
+  app.get('/:id/connectors/:connectorId/tools/:tool/impact', async (c) => {
+    const { tenant } = c.get('ctx');
+    const view = await deps.tenantView(tenant.id);
+    const entry = find(view, c.req.param('id'));
+    const connector = entry?.pkg.connectors.find((x) => x.id === c.req.param('connectorId'));
+    const tool = connector?.tools.find((t) => t.name === c.req.param('tool'));
+    if (!connector || !tool) return c.json({ error: 'ツールが見つかりません' }, 404);
+
+    const name = `${connector.id}.${tool.name}`;
+    // いま使える業務のうち、このツールを使うもの。止めると消える
+    const blocked = view.agents.filter((a) => a.tools.includes(name));
+    const schedules = (await deps.repo.listSchedules(tenant.id, null))
+      .filter((s) => s.enabled && blocked.some((a) => a.id === s.agentId));
+    return c.json({
+      tool: name,
+      agents: blocked.map((a) => ({ id: a.id, name: a.name })),
+      schedules: schedules.length,
+    });
+  });
+
+  /**
+   * コネクタのツールを 1 つ、有効または無効にする（仕様書 第6.6.3.1節）。
+   *
+   * @remarks
+   * 止めたツールを使う業務は、メニュー・秘書・定時実行・API から消える。
+   * 動いている実行は止めない。同意のある範囲で始まっており、途中で止めると成果物が中途半端に残る。
+   */
+  app.put('/:id/connectors/:connectorId/tools/:tool/enabled', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const entry = find(await deps.tenantView(tenant.id), c.req.param('id'));
+    const connector = entry?.pkg.connectors.find((x) => x.id === c.req.param('connectorId'));
+    const tool = connector?.tools.find((t) => t.name === c.req.param('tool'));
+    if (!connector || !tool) return c.json({ error: 'ツールが見つかりません' }, 404);
+    const body = await c.req.json<{ enabled?: boolean }>();
+    if (typeof body.enabled !== 'boolean') return c.json({ error: 'enabled を指定してください' }, 400);
+
+    await deps.repo.setConnectorToolEnabled(tenant.id, connector.id, tool.name, body.enabled, user.id);
+    await deps.repo.appendAudit({
+      id: randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id,
+      action: 'extension.tool.toggle', targetType: 'extension', targetId: c.req.param('id'),
+      detail: { connectorId: connector.id, tool: tool.name, enabled: body.enabled },
+      occurredAt: new Date().toISOString(),
+    });
+    return c.json({ ok: true, enabled: body.enabled });
   });
 
   /**

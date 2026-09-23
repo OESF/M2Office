@@ -81,6 +81,11 @@ const scheduler = new Scheduler({
     if (!agentUsesGoogle(def, (await hub.forTenant(tenantId)).registry)) return false;
     return !(await repo.getGoogleConnection(tenantId, userId));
   },
+  // 管理者が止めたコネクタのツールを使う業務は動かせない（仕様書 第6.6.3.1節）
+  disabledToolOf: async (tenantId, def) => {
+    const { disabledTools } = await hub.forTenant(tenantId);
+    return def.tools.find((name) => disabledTools.has(name)) ?? null;
+  },
 });
 
 // 通知の控えを Chat へ届ける（仕様書 第6.5.5.2節）。送信口は B-2 のあとに差し替える

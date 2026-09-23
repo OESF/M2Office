@@ -29,10 +29,19 @@ export interface SchedulerDeps {
    * @remarks 見本の接続口で動かしている間は、接続が無くても動くため、常に `false` を返す。
    */
   missingGoogleConnection?(tenantId: string, userId: string, def: AgentDefinition): Promise<boolean>;
+  /**
+   * 管理者が止めたコネクタのツールのうち、その業務が使うもの（仕様書 第6.6.3.1節）。
+   *
+   * @returns 止まっているツールの名前。無ければ `null`
+   */
+  disabledToolOf?(tenantId: string, def: AgentDefinition): Promise<string | null>;
 }
 
 /** 接続が無いために定時実行を飛ばしたときの知らせの題名。未読の同じ知らせがあれば重ねて知らせない。 */
 export const SCHEDULE_SKIP_TITLE = 'Google と接続していないため、定時実行を飛ばしました';
+
+/** ツールが止められたために定時実行を飛ばしたときの知らせの題名（仕様書 第6.6.3.1節）。 */
+export const SCHEDULE_TOOL_DISABLED_TITLE = '管理者がツールを止めたため、定時実行を飛ばしました';
 
 /**
  * 定時実行の起動役。ワーカーの中で定期的に呼ぶ。
@@ -67,9 +76,13 @@ export class Scheduler {
       const def = await this.deps.resolveDefinition(due.agentId, due.agentVersion, due.tenantId);
       const user = await repo.findUserById(due.tenantId, due.userId);
       const settings = await repo.getTenantSettings(due.tenantId);
+      let disabledTool: string | null = null;
       const reason = !def ? '定義が見つかりません'
         : !user || user.status !== 'active' ? '対象者が利用できません'
         : settings.agents.disabled.includes(def.id) ? '管理者がこの業務を無効にしています'
+        // 管理者が止めたツールを使う業務は動かせない（仕様書 第6.6.3.1節）。拡張機能の未導入より先に見る
+        : (disabledTool = this.deps.disabledToolOf ? await this.deps.disabledToolOf(due.tenantId, def) : null)
+          ? TOOL_DISABLED
         : this.deps.isAvailable && !(await this.deps.isAvailable(due.tenantId, def.id)) ? 'この業務の拡張機能が導入されていません'
         // 利用範囲から外れた人の定時実行は起動しない（仕様書 第16.7.4節）
         : !canUseAgent(settings.access, def.id, due.userId, await repo.listUserGroupIds(due.tenantId, due.userId))
@@ -87,10 +100,15 @@ export class Scheduler {
         await repo.appendAudit({
           id: randomUUID(), tenantId: due.tenantId, actorType: 'system', actorId: 'scheduler',
           action: 'schedule.skip', targetType: 'schedule', targetId: due.id,
-          detail: { reason },
+          detail: { reason, ...(disabledTool ? { tool: disabledTool } : {}) },
           occurredAt: now.toISOString(),
         });
         if (reason === GOOGLE_MISSING) await this.notifySkipOnce(due.tenantId, due.userId, def?.name ?? due.agentId, now);
+        if (reason === TOOL_DISABLED) {
+          await this.notifyOnce(due.tenantId, due.userId, SCHEDULE_TOOL_DISABLED_TITLE,
+            `「${def?.name ?? due.agentId}」の定時実行は、管理者が止めたツール（${disabledTool}）を使うため動かせません。`
+            + '管理者がツールを戻すと、次の回から自動で動きます。', now);
+        }
         continue;
       }
 
@@ -105,15 +123,30 @@ export class Scheduler {
 
   /** 接続が無いために飛ばしたことを本人に知らせる。未読の同じ知らせがあれば重ねない（「一度だけ」）。 */
   private async notifySkipOnce(tenantId: string, userId: string, agentName: string, now: Date): Promise<void> {
+    await this.notifyOnce(tenantId, userId, SCHEDULE_SKIP_TITLE,
+      `「${agentName}」などの定時実行は、Google と接続し直すと、次の回から自動で動きます。個人設定の「Google 連携」から接続してください。`,
+      now);
+  }
+
+  /**
+   * 飛ばしたことを本人に一度だけ知らせる。
+   *
+   * @remarks 同じ題名の未読の知らせがあれば重ねない。毎回の見回りで知らせが積み上がるのを防ぐ。
+   */
+  private async notifyOnce(
+    tenantId: string, userId: string, title: string, body: string, now: Date,
+  ): Promise<void> {
     const { repo } = this.deps;
     const recent = await repo.listNotifications(tenantId, userId, 50);
-    if (recent.some((n) => n.title === SCHEDULE_SKIP_TITLE && !n.readAt)) return;
+    if (recent.some((n) => n.title === title && !n.readAt)) return;
     await repo.createNotification({
-      id: randomUUID(), tenantId, userId, kind: 'failure', title: SCHEDULE_SKIP_TITLE,
-      body: `「${agentName}」などの定時実行は、Google と接続し直すと、次の回から自動で動きます。個人設定の「Google 連携」から接続してください。`,
+      id: randomUUID(), tenantId, userId, kind: 'failure', title, body,
       runId: null, readAt: null, createdAt: now.toISOString(),
     });
   }
 }
+
+/** ツールが止められているために飛ばしたことを表す理由。 */
+const TOOL_DISABLED = '管理者がこの業務の使うツールを止めています';
 
 const GOOGLE_MISSING = '対象者が Google と接続していません';

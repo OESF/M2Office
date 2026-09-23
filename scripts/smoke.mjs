@@ -793,6 +793,48 @@ console.log('\n■ 21. 持ち運べる拡張機能（ファイルからの取り
   } else {
     console.log('  - DeepWiki への実際の問い合わせは省略（SMOKE_EXTERNAL=1 で実行）');
   }
+
+  // コネクタのツールを 1 つずつ止める（第6.6.3.1節）。ネットワークに依存しない
+  await call('a', `/v1/admin/extensions/${DW}/install`, { method: 'POST', body: JSON.stringify({ consent: true }) });
+  const AGENT = `${DW}:research`;
+  const toolPath = `/v1/admin/extensions/${DW}/connectors/deepwiki/tools/ask_wiki_question`;
+
+  const { body: agentsBefore } = await call('a', '/v1/agents', {}, 'member');
+  (agentsBefore.agents ?? []).some((a) => a.id === AGENT)
+    ? ok('止める前は、その業務が使える') : ng('業務が使えない');
+
+  // 止める前に、止まる業務を示す
+  const { body: impact } = await call('a', `${toolPath}/impact`);
+  (impact.agents ?? []).some((a) => a.id === AGENT)
+    ? ok('止める前に、止まる業務の名前を示す') : ng('影響を示さない', JSON.stringify(impact));
+
+  const toolOff = await call('a', `${toolPath}/enabled`, { method: 'PUT', body: JSON.stringify({ enabled: false }) });
+  toolOff.status === 200 ? ok('ツールを 1 つ止められる') : ng(`止められない（${toolOff.status}）`, JSON.stringify(toolOff.body));
+
+  const { body: listOff } = await call('a', '/v1/admin/extensions');
+  const conn = listOff.items?.find((x) => x.id === DW)?.connectors?.[0];
+  conn?.tools?.find((t) => t.name === 'deepwiki.ask_wiki_question')?.enabled === false
+    && conn?.tools?.find((t) => t.name === 'deepwiki.read_wiki_structure')?.enabled === true
+    ? ok('止めたツールだけが「止めている」になる') : ng('状態が違う', JSON.stringify(conn?.tools ?? []));
+
+  const { body: agentsOff } = await call('a', '/v1/agents', {}, 'member');
+  !(agentsOff.agents ?? []).some((a) => a.id === AGENT)
+    ? ok('止めたツールを使う業務は、メニューから消える') : ng('業務が残っている');
+
+  // 存在自体を示さない（依頼もできない）
+  const denied = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: AGENT }) }, 'member');
+  denied.status === 404 ? ok('止めた業務は依頼もできない（404）') : ng(`依頼できてしまう（${denied.status}）`);
+
+  const { body: auditsTool } = await call('a', '/v1/admin/audit-events');
+  (auditsTool.items ?? []).some((e) => e.action === 'extension.tool.toggle' && e.detail?.enabled === false)
+    ? ok('監査ログに extension.tool.toggle が残る') : ng('監査ログに残らない');
+
+  const toolOn = await call('a', `${toolPath}/enabled`, { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+  const { body: agentsOn } = await call('a', '/v1/agents', {}, 'member');
+  toolOn.status === 200 && (agentsOn.agents ?? []).some((a) => a.id === AGENT)
+    ? ok('戻せば、ツールも業務も戻る') : ng('戻らない');
+
+  await call('a', `/v1/admin/extensions/${DW}`, { method: 'DELETE' });
 }
 
 console.log('\n■ 22. グループと利用範囲');

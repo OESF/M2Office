@@ -16,6 +16,6 @@ export {
 } from './connectors.js';
 export { packExtension, unpackExtension, EXTENSION_FILE_MAX_BYTES } from './package-file.js';
 export {
-  ExtensionHub, consentSnapshot, decodeFiles, encodeFiles,
+  ExtensionHub, consentSnapshot, decodeFiles, encodeFiles, blockedByDisabledTool,
   type TenantExtensions, type ExtensionEntry, type ConsentSnapshot, type ExtensionHubDeps,
 } from './hub.js';

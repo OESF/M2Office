@@ -13,7 +13,7 @@ import type { InstalledExtension, Repository } from '../repository/types.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { McpClient } from '../connectors/mcp.js';
 import { silentLogger, type Logger } from '../log/logger.js';
-import { connectorTools, type ConnectorDeclaration } from './connectors.js';
+import { connectorToolName, connectorTools, type ConnectorDeclaration } from './connectors.js';
 import { loadExtensionFiles, type ExtensionFiles, type ExtensionPackage } from './loader.js';
 
 /** 会社から見た拡張機能 1 つ分。 */
@@ -43,6 +43,19 @@ export interface TenantExtensions {
   isAvailable(agentId: string): boolean;
   /** 業務エージェントがどの拡張機能のものか。公式なら `null`。 */
   entryOf(agentId: string): ExtensionEntry | null;
+  /** 管理者が個別に止めたコネクタのツール（`<コネクタの ID>.<ツールの名前>`。第6.6.3.1節）。 */
+  disabledTools: Set<string>;
+}
+
+/**
+ * その業務エージェントが、止められたツールを使うか（仕様書 第6.6.3.1節）。
+ *
+ * @remarks
+ * 業務の定義はツールを名前で指しており、1 つ欠けると最後まで進めない。
+ * そのため、1 つでも止まっていれば、その業務は使えないものとして扱う。
+ */
+export function blockedByDisabledTool(def: AgentDefinition, disabled: ReadonlySet<string>): boolean {
+  return def.tools.some((name) => disabled.has(name));
 }
 
 /** 導入の同意で記録する権限（仕様書 第12.10.5節、第12.11.2節）。 */
@@ -91,9 +104,11 @@ export class ExtensionHub {
    */
   async forTenant(tenantId: string): Promise<TenantExtensions> {
     const { repo, registry, official, mcp } = this.deps;
-    const [installed, privates] = await Promise.all([
+    const [installed, privates, disabledRows] = await Promise.all([
       repo.listInstalledExtensions(tenantId), repo.listPrivateExtensions(tenantId),
+      repo.listDisabledConnectorTools(tenantId),
     ]);
+    const disabledTools = new Set(disabledRows.map((d) => connectorToolName(d.connectorId, d.toolName)));
     const packages: { pkg: ExtensionPackage; origin: 'official' | 'private' }[] =
       this.deps.packages.map((pkg) => ({ pkg, origin: 'official' }));
     const takenAgents = new Set(this.officialAgents().map((a) => a.id));
@@ -116,16 +131,22 @@ export class ExtensionHub {
       return { pkg, origin, installed: rec, needsReconsent, active: rec !== null && rec.enabled && !needsReconsent };
     });
     const active = entries.filter((e) => e.active);
-    const agents = [...official, ...active.flatMap((e) => e.pkg.agents)];
+    // 止めたツールを使う業務は、メニュー・秘書・定時実行・API から消す（第6.6.3.1節）
+    const agents = [...official, ...active.flatMap((e) => e.pkg.agents)]
+      .filter((a) => !blockedByDisabledTool(a, disabledTools));
     const allAgents = [...official, ...entries.flatMap((e) => e.pkg.agents)];
-    const tenantRegistry = registry.extend(active.flatMap((e) => e.pkg.connectors.flatMap((c) => connectorTools(c, mcp))));
+    // 止めたツールは、その会社のツールの一覧から外す。業務からも接続の確認からも見えない
+    const tenantRegistry = registry.extend(
+      active.flatMap((e) => e.pkg.connectors.flatMap((c) => connectorTools(c, mcp)))
+        .filter((t) => !disabledTools.has(t.name)),
+    );
     const entryOf = (agentId: string) => {
       if (!agentId.includes(':')) return null;
       const extId = agentId.slice(0, agentId.indexOf(':'));
       return entries.find((e) => e.pkg.manifest.id === extId) ?? null;
     };
     return {
-      entries, agents, allAgents, registry: tenantRegistry,
+      entries, agents, allAgents, registry: tenantRegistry, disabledTools,
       resolve: (agentId, version) => allAgents.find((a) => a.id === agentId && a.version === version),
       isAvailable: (agentId) => agents.some((a) => a.id === agentId),
       entryOf,

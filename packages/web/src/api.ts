@@ -251,7 +251,7 @@ export interface ExtensionView {
   agents: { id: string; name: string; summary: string }[];
   connectors: {
     id: string; name: string; description: string; url: string; auth: string; authText: string;
-    tools: { name: string; description: string; risk: string; riskText: string }[];
+    tools: { name: string; description: string; risk: string; riskText: string; enabled: boolean }[];
   }[];
   permissions: {
     maxRisk: string; maxRiskText: string;
@@ -361,6 +361,11 @@ async function download(fileId: string, name: string): Promise<void> {
   a.click();
   URL.revokeObjectURL(url);
 }
+
+/** 1 つのコネクタのツールを指す道（`/impact` と `/enabled` の手前まで）。 */
+const toolPath = (id: string, connectorId: string, tool: string) =>
+  `/admin/extensions/${encodeURIComponent(id)}/connectors/${encodeURIComponent(connectorId)}`
+  + `/tools/${encodeURIComponent(tool)}`;
 
 export const api = {
   download,
@@ -603,6 +608,14 @@ export const api = {
         `/admin/extensions/${encodeURIComponent(id)}/connectors/${encodeURIComponent(connectorId)}/check`,
         { method: 'POST' },
       ),
+    /** ツールを止めると使えなくなる業務（仕様書 第6.6.3.1節）。止める前に示す。 */
+    connectorToolImpact: (id: string, connectorId: string, tool: string) =>
+      call<{ tool: string; agents: { id: string; name: string }[]; schedules: number }>(
+        `${toolPath(id, connectorId, tool)}/impact`,
+      ),
+    /** コネクタのツールを 1 つ、有効または無効にする（仕様書 第6.6.3.1節）。 */
+    setConnectorToolEnabled: (id: string, connectorId: string, tool: string, enabled: boolean) =>
+      call(`${toolPath(id, connectorId, tool)}/enabled`, { method: 'PUT', body: JSON.stringify({ enabled }) }),
   },
   agents: () => call<{ agents: AgentSummary[] }>('/agents'),
   createJob: (agentId: string, input: Record<string, unknown>, origin = 'menu') =>
