@@ -6,7 +6,7 @@
  * @see 仕様書 第6.1節 ワークスペースの画面構造
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Approval, Notification } from '@m2office/shared';
 import {
   api, describeError, type AgentSummary, type Lookup, type Me, type RunDetail, type ScheduleView, type SecretaryReply,
@@ -451,12 +451,20 @@ function SecretaryBar({ lookups, avatar, onSaid }: {
   const running = lookups.filter((x) => x.status !== 'completed' && x.status !== 'failed');
 
   // 入力に合わせて高さを伸ばす。上限を超えたら中で送る（仕様書 第6.1.3節）
-  useEffect(() => {
+  const fitBox = useCallback(() => {
     const el = box.current;
     if (!el) return;
     el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
-  }, [text]);
+    el.style.height = `${Math.min(el.scrollHeight, 180)}px`;
+  }, []);
+  // 書いている間は、描く前に合わせる。待たせると入力欄が一拍遅れて動く
+  useLayoutEffect(fitBox, [text, fitBox]);
+  // 最初の 1 回だけ、**配置が決まってから**測り直す。決まる前の値（親に引き伸ばされた
+  // 高さ）を拾うと、そのまま張り付いてしまう
+  useEffect(() => {
+    const id = requestAnimationFrame(fitBox);
+    return () => cancelAnimationFrame(id);
+  }, [fitBox]);
 
   async function send() {
     if (!text.trim() || busy) return;

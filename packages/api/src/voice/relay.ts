@@ -323,7 +323,8 @@ async function start(
       if (!prefs.memory.keepConversations) return;
       await deps.repo.appendConversation({
         id: randomUUID(), tenantId, userId,
-        message: message || '（聞き取れませんでした）',
+        // 第一声だけで終わることがある。そのとき「聞き取れませんでした」とは書かない
+        message: message || '（音声を始めました）',
         reply: reply || '（応答がありませんでした）',
         layer: 'full', agentId: null, runId: null, createdAt: new Date().toISOString(),
       });

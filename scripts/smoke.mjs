@@ -1951,12 +1951,19 @@ console.log('\n■ 42. 音声の対話（第10.5.5節）');
   ready?.provider === 'mock'
     ? ok('鍵が無い環境では見本の相手につなぐ（それらしい音声を作らない）') : ng('見本にならない', JSON.stringify(ready ?? null));
 
+  // つないだ時点で、秘書から第一声がある（第6.1.4節）
+  for (let i = 0; i < 60 && !messages.some((m) => m.type === 'reply'); i++) await sleep(50);
+  /内部の指示を受け取りました/.test(messages.find((m) => m.type === 'reply')?.text ?? '')
+    ? ok('つないだ時点で、秘書から先に声をかける') : ng('第一声が無い', JSON.stringify(messages));
+  const before = messages.length;
+
   // マイクの音を送ると、聞こえた内容と応答が文字で返る（併記）
   ws.send(Buffer.alloc(320), { binary: true });
-  for (let i = 0; i < 60 && !messages.some((m) => m.type === 'reply'); i++) await sleep(50);
-  const heard = messages.find((m) => m.type === 'heard');
-  const reply = messages.find((m) => m.type === 'reply');
-  heard && reply ? ok('聞こえた内容と応答が文字でも返る（併記）') : ng('文字が返らない', JSON.stringify(messages));
+  for (let i = 0; i < 60 && !messages.slice(before).some((m) => m.type === 'reply'); i++) await sleep(50);
+  const after = messages.slice(before);
+  const heard = after.find((m) => m.type === 'heard');
+  const reply = after.find((m) => m.type === 'reply');
+  heard && reply ? ok('聞こえた内容と応答が文字でも返る（併記）') : ng('文字が返らない', JSON.stringify(after));
   /声「Charon」と話し方の指示を受け取りました/.test(reply?.text ?? '')
     ? ok('選んだ声と話し方の指示が提供者へ渡る') : ng('渡らない', reply?.text ?? '');
   binary === 0 ? ok('見本では音声を返さない') : ng(`音声が返る（${binary}）`);
@@ -1970,6 +1977,9 @@ console.log('\n■ 42. 音声の対話（第10.5.5節）');
   const item = (logs.items ?? [])[0];
   (logs.items ?? []).length === 1 && item.reply.includes('見本の応答')
     ? ok('音声の対話が会話ログに 1 往復として残る') : ng('残らない', JSON.stringify(logs.items ?? []));
+  // 第一声だけで終わったときに「聞き取れませんでした」と書かない（第6.1.4節）
+  !/聞き取れませんでした/.test(item?.message ?? '')
+    ? ok('第一声を、聞き取れなかったこととして残さない') : ng('聞き取れなかったことにしている', item?.message ?? '');
 
   const { body: audits } = await call('a', '/v1/admin/audit-events');
   const voiceAudit = (audits.items ?? []).filter((e) => e.action === 'secretary.voice');

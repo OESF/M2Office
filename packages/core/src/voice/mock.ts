@@ -63,8 +63,12 @@ export class MockVoiceProvider implements VoiceProvider {
         session.onEvent({ type: 'turn-end' });
       },
       sendSystemNote(text) {
-        // 内部の指示は、利用者の発言として扱わない。聞こえた文字には出さない
-        session.onEvent({ type: 'reply', text: `［見本］お調べした結果をお伝えします。（材料: ${text.slice(0, 40)}…）` });
+        // 内部の指示は、利用者の発言として扱わない。聞こえた文字には出さない。
+        // 見本は推論を行わないため、受け取ったことだけを正直に返す
+        session.onEvent({
+          type: 'reply',
+          text: `［見本の応答］内部の指示を受け取りました（${text.slice(0, 30)}…）。鍵の設定後に、秘書が自分の言葉で伝えます。`,
+        });
         session.onEvent({ type: 'turn-end' });
       },
       close() {
