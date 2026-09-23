@@ -129,6 +129,14 @@ export interface AgentDefinition {
   locale: string;
   /** 権限区画。区画外は `null`（仕様書 第16.3.6節）。 */
   compartment: string | null;
+  /**
+   * 秘書が取次の候補にしてよいか（仕様書 第10.9.4.1節）。既定は `true`。
+   *
+   * @remarks
+   * `false` にすると、秘書はこの業務を提案しない。メニューからは使える。
+   * **秘書が自分で答えられることには使う。** ひと言の照会に本人の確認を求めると、会話にならない。
+   */
+  secretaryRoute?: boolean;
   /** 入力フォームを自動生成するための JSON Schema。 */
   inputs: Record<string, unknown>;
   /** 呼び出しを許可するツール。ここにないものは呼べない。 */

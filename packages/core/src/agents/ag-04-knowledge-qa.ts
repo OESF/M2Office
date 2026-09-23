@@ -24,6 +24,9 @@ export const AG04_KNOWLEDGE_QA: AgentDefinition = {
   description: '社内規程や議事録から、出典つきで回答します',
   locale: 'ja-JP',
   compartment: null,
+  // 秘書は層 3 で組織知識を根拠に答える（第10.9.4.1節）。同じことに本人の確認を求めない。
+  // メニューからは使える（記録の残る実行として、定時実行や API から呼びたいことがある）
+  secretaryRoute: false,
   inputs: {
     type: 'object',
     required: ['question'],

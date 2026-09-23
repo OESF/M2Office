@@ -29,6 +29,8 @@ export const AG16_LOOKUP: AgentDefinition = {
   description: '秘書が、時間のかかる調べものを引き受けます。読むだけで、送信も登録もしません',
   locale: 'ja-JP',
   compartment: null,
+  // 秘書が自分で起こす業務であり、提案するものではない（第10.11.4節）
+  secretaryRoute: false,
   inputs: {
     type: 'object',
     required: ['request'],
