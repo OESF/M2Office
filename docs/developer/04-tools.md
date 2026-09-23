@@ -41,7 +41,7 @@
 | `knowledge.search` | read | — | 社内の知識（規程・議事録など）を調べます。区画の外の人には区画内の文書を見せません |
 | `meet.transcript` | read | `meetings.space.readonly`（機密） | Meet の会議の文字起こしを読みます。あなたが参加した会議だけで、会議の終了から 30 日を過ぎたものは読めません |
 | `meeting.get_transcript` | read | — | 会議の記録（文字起こし）を読みます |
-| `pdf.extract` | read | — | PDF から文字を読み取ります。画像だけのページは読めません |
+| `pdf.extract` | read | — | PDF から文字を読み取ります。文字の無いページ（スキャンなど）は読み取りにかけますが、読み取り結果は確かめが要ります |
 | `sheet.read` | read | — | Excel・CSV を表として読みます |
 | `sheets.read` | read | `drive.file`（機密でない） | Google スプレッドシートの表を読みます |
 | `tasks.list` | read | `tasks`（機密） | ToDo の一覧を見ます |

@@ -16,7 +16,10 @@ import { loadFile, saveFile } from '../files/service.js';
 import { readSheet, renderSheet } from '../files/sheet.js';
 import { extractPdfText } from '../files/pdf.js';
 import { renderDocx, type DocBlock } from '../files/docx.js';
-import { missingCharacters, renderPdf, REPLACEMENT, type InvoiceDoc, type InvoiceRow } from '../files/pdf-render.js';
+import {
+  extractPages, missingCharacters, renderPdf, OCR_MAX_PAGES, REPLACEMENT,
+  type InvoiceDoc, type InvoiceRow,
+} from '../files/pdf-render.js';
 
 const str = (v: unknown, fallback = '') => (typeof v === 'string' ? v : fallback);
 
@@ -62,19 +65,41 @@ export const pdfExtract: Tool = {
   name: 'pdf.extract',
   risk: 'read',
   activityLabel: '書類を読んでいます',
-  helpText: 'PDF から文字を読み取ります。画像だけのページは読めません',
-  description: 'PDF から文字を取り出す（画像だけのページは OCR 未対応）',
+  helpText: 'PDF から文字を読み取ります。文字の無いページ（スキャンなど）は読み取りにかけますが、読み取り結果は確かめが要ります',
+  description: 'PDF から文字を取り出す。文字の無いページは読み取り（OCR）にかけ、readText として返す',
   args: { properties: { fileId: { type: 'string', description: 'ファイルの ID' } }, required: ['fileId'] },
   async invoke(args, ctx) {
     const f = await open(ctx, str(args['fileId']));
     if (!f) return { available: false, reason: 'ファイルが見つかりません' };
     if (f.meta.kind !== 'pdf') return { available: false, reason: `PDF ではありません: ${f.meta.kind}` };
     const text = await extractPdfText(f.bytes);
+    if (text.textlessPages.length === 0) {
+      return { available: true, untrusted: true, file: f.meta.name, ...text, note: null };
+    }
+
+    // 文字を取り出せないページは、そのページだけを抜き出して読み取りへ送る（仕様書 第9.4.1節、Q-56）
+    const pages = text.textlessPages;
+    if (!ctx.ocr) {
+      return {
+        available: true, untrusted: true, file: f.meta.name, ...text,
+        note: `文字を取り出せないページがあります（${pages.join('、')}）。画像の可能性がありますが、読み取りの準備ができていません（推論の接続が未設定です）`,
+      };
+    }
+    const part = await extractPages(f.bytes, pages);
+    if (!part) {
+      return { available: true, untrusted: true, file: f.meta.name, ...text, note: null };
+    }
+    const sent = pages.slice(0, OCR_MAX_PAGES);
+    const read = await ctx.ocr({ bytes: part, mimeType: 'application/pdf' });
     return {
       available: true, untrusted: true, file: f.meta.name, ...text,
-      note: text.textlessPages.length > 0
-        ? `文字を取り出せないページがあります（${text.textlessPages.join('、')}）。画像の可能性があります。画像のファイルなら image.read_text で読み取れます`
-        : null,
+      // 読み取った文は、取り出した文字とは別に返す。確かな値として扱わせない
+      readPages: sent,
+      readText: read,
+      note: [
+        `文字を取り出せないページ（${pages.join('、')}）を読み取りました。読み取り結果であり、原本で確かめてください`,
+        pages.length > OCR_MAX_PAGES ? `読み取ったのは先頭の ${OCR_MAX_PAGES} ページ（${sent.join('、')}）です。残りは分けて読んでください` : '',
+      ].filter(Boolean).join('。'),
     };
   },
 };

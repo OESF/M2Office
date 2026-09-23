@@ -9,7 +9,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  REPLACEMENT, extractPdfText, missingCharacters, renderPdf, rowAmount, yen,
+  OCR_MAX_PAGES, REPLACEMENT, extractPages, extractPdfText, missingCharacters, renderPdf, rowAmount, yen,
 } from '../src/index.js';
 
 const DOC = {
@@ -65,4 +65,29 @@ test('同梱した書体に無い字は、置き換えたうえで知らせる�
   const text = (await extractPdfText(await renderPdf({ title: '請求書', rows: [{ name: '鷗外商会', amount: 100 }] })))
     .pages[0]?.text ?? '';
   assert.ok(text.includes(`${REPLACEMENT}外商会`), `置き換わっていない: ${text}`);
+});
+
+test('読めないページだけを抜き出す（第9.4.1節）', async () => {
+  // 3 ページの PDF を作り、2 ページ目だけを抜き出す
+  const rows = Array.from({ length: 160 }, (_, i) => ({ name: `品目 ${i + 1}`, quantity: 1, unitPrice: 100 }));
+  const whole = await renderPdf({ title: '一覧', rows });
+  const pageCount = (await extractPdfText(whole)).pageCount;
+  assert.ok(pageCount >= 3, `ページが足りません: ${pageCount}`);
+
+  const part = await extractPages(whole, [2]);
+  assert.ok(part);
+  assert.equal((await extractPdfText(part)).pageCount, 1);
+  assert.equal(
+    (await extractPdfText(part)).pages[0]?.text,
+    (await extractPdfText(whole)).pages[1]?.text,
+    '抜き出したページの中身が一致する',
+  );
+
+  // 無いページは落とす。1 つも残らなければ null
+  assert.equal((await extractPdfText((await extractPages(whole, [99, 1]))!)).pageCount, 1);
+  assert.equal(await extractPages(whole, [99]), null);
+
+  // 上限を超える指定は、先頭から上限までにする
+  const many = await extractPages(whole, Array.from({ length: OCR_MAX_PAGES + 5 }, (_, i) => i + 1));
+  assert.equal((await extractPdfText(many!)).pageCount, Math.min(OCR_MAX_PAGES, pageCount));
 });

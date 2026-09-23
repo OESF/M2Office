@@ -23,6 +23,33 @@ const PAGE = { width: 595.28, height: 841.89 };
 const MARGIN = 56;
 const LINE = 16;
 
+/** 1 回の読み取りで送るページ数の上限（仕様書 第9.4.1節）。 */
+export const OCR_MAX_PAGES = 10;
+
+/**
+ * 指定したページだけを抜き出した PDF を作る（仕様書 第9.4.1節）。
+ *
+ * @param bytes 元の PDF
+ * @param pages 抜き出すページ（1 始まり）
+ * @returns 抜き出した PDF。ページが 1 つも無ければ `null`
+ *
+ * @remarks
+ * 文字を取り出せなかったページだけを読み取りへ送るために使う。
+ * ページを画像にはしない（描画の部品を増やさないため。ADR-0017 決定 8）。
+ */
+export async function extractPages(bytes: Uint8Array, pages: number[]): Promise<Uint8Array | null> {
+  const source = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  const wanted = [...new Set(pages)]
+    .filter((n) => n >= 1 && n <= source.getPageCount())
+    .sort((a, b) => a - b)
+    .slice(0, OCR_MAX_PAGES);
+  if (wanted.length === 0) return null;
+  const out = await PDFDocument.create();
+  const copied = await out.copyPages(source, wanted.map((n) => n - 1));
+  for (const page of copied) out.addPage(page);
+  return out.save();
+}
+
 /** 帳票の明細の 1 行。 */
 export interface InvoiceRow {
   /** 品目。 */

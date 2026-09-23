@@ -50,10 +50,14 @@ export interface LlmResponse {
  * @remarks
  * 実装は提供者ごとのアダプタに置く。呼び出し側は提供者を知らない。
  */
-/** 画像から文字を読み取る依頼（OCR。仕様書 第9.4.1節、Q-56）。 */
+/**
+ * 画像や PDF から文字を読み取る依頼（OCR。仕様書 第9.4.1節、Q-56）。
+ *
+ * @remarks PDF は、文字を取り出せなかったページだけを抜き出したものを渡す。
+ */
 export interface LlmImageRequest {
   bytes: Uint8Array;
-  /** `image/png` などの種類。 */
+  /** `image/png`・`application/pdf` などの種類。 */
   mimeType: string;
 }
 
@@ -61,7 +65,7 @@ export interface LlmProvider {
   readonly name: string;
   complete(req: LlmRequest): Promise<LlmResponse>;
   /**
-   * 画像から文字を読み取る（OCR。仕様書 第9.4.1節、Q-56、ADR-0017）。
+   * 画像や PDF から文字を読み取る（OCR。仕様書 第9.4.1節、Q-56、ADR-0017）。
    *
    * @remarks
    * 読み取りは推論であり、確かなものとして扱わない。持たない提供者（見本など）では未定義にし、

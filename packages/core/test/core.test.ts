@@ -16,7 +16,7 @@ import {
 } from '@m2office/shared';
 import {
   RunEngine, ToolRegistry, BUILTIN_TOOLS, MockWorkspaceConnector, MemoryFileStore, nextRunAt,
-  saveFile, readSheet, renderSheet, parseCsv,
+  saveFile, readSheet, renderSheet, parseCsv, extractPdfText,
   ApprovalForbiddenError, DefinitionInvalidError, validateDefinition, OFFICIAL_AGENTS,
   type LlmProvider, type LlmRequest, type Repository, type KnowledgeItem,
 } from '../src/index.js';
@@ -621,4 +621,47 @@ test('image.read_text は、推論が無ければ読み取れないと明示す�
   // ほかの人のファイルは読まない
   const other = await tool.invoke({ fileId: meta.id }, { ...base, userId: 'u-admin' }) as { available: boolean };
   assert.equal(other.available, false);
+});
+
+test('pdf.extract は、文字の無いページだけを読み取りへ送る（第9.4.1節、Q-56）', async () => {
+  // 1 ページ目に文字、2 ページ目は図形だけ（スキャンした紙に相当）の PDF を作る
+  const { PDFDocument, StandardFonts } = await import('pdf-lib');
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  doc.addPage([300, 200]).drawText('page one', { x: 20, y: 100, size: 12, font });
+  doc.addPage([300, 200]).drawRectangle({ x: 20, y: 20, width: 100, height: 60 });
+  const bytes = await doc.save();
+
+  const repo = new MemoryRepo();
+  const files = new MemoryFileStore();
+  const meta = await saveFile(repo as unknown as Repository, files, {
+    tenantId: 't', ownerUserId: 'u-member', name: 'scan.pdf', kind: 'pdf', bytes,
+    origin: 'upload', runId: 'r1',
+  });
+  const tool = BUILTIN_TOOLS.find((t) => t.name === 'pdf.extract')!;
+  const base = {
+    tenantId: 't', userId: 'u-member', runId: 'r1', compartment: null,
+    repo: repo as unknown as Repository, connector: new MockWorkspaceConnector(), files,
+  };
+
+  // 推論が無い環境では読み取らず、その旨を返す
+  const without = await tool.invoke({ fileId: meta.id }, base) as { textlessPages: number[]; note: string };
+  assert.deepEqual(without.textlessPages, [2]);
+  assert.match(without.note, /読み取りの準備ができていません/);
+
+  // 推論があれば、読めなかったページだけを PDF のまま送る
+  const sent: { mimeType: string; pages: number }[] = [];
+  const read = await tool.invoke({ fileId: meta.id }, {
+    ...base,
+    ocr: async (r) => {
+      sent.push({ mimeType: r.mimeType, pages: (await extractPdfText(r.bytes)).pageCount });
+      return '［読み取り］領収書 1,000 円';
+    },
+  }) as { readPages: number[]; readText: string; note: string; pages: { page: number; text: string }[] };
+
+  assert.deepEqual(sent, [{ mimeType: 'application/pdf', pages: 1 }], '送るのは読めなかった 1 ページだけ');
+  assert.deepEqual(read.readPages, [2]);
+  assert.equal(read.readText, '［読み取り］領収書 1,000 円');
+  assert.match(read.note, /原本で確かめて/);
+  assert.match(read.pages[0]?.text ?? '', /page one/, '取り出せた文字はそのまま返す');
 });

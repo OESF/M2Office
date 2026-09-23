@@ -91,7 +91,7 @@ decideApproval(...)  →  承認を記録し、待ち行列へ戻す
 |---|---|---|
 | `sheet.read` | read | Excel・CSV を表として読む。Shift_JIS の CSV も読む |
 | `sheet.render` | draft | 表を Excel・CSV（BOM 付き UTF-8）で出力する |
-| `pdf.extract` | read | PDF から文字を取り出す。画像だけのページは明示する（OCR 未対応） |
+| `pdf.extract` | read | PDF から文字を取り出す。文字の無いページは、そのページだけを抜き出した PDF を読み取りへ送る（10 ページまで。Q-56） |
 | `docx.render` | draft | Word 形式で文書を出力する |
 | `pdf.render` | draft | 帳票（請求書など）を PDF で出力する。日本語の一部に絞った Noto Sans JP を同梱し（`assets/fonts/README.md`）、使った文字だけを埋め込む。範囲の外の字は `〓` に置き換えて返す（Q-59、ADR-0017） |
 | `image.read_text` | read | 画像（PNG・JPEG）から文字を読み取る（OCR）。推論を使うため確かな値ではなく、鍵が無い環境では読み取らない（Q-56） |

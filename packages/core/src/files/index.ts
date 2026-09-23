@@ -11,6 +11,6 @@ export { readSheet, renderSheet, parseCsv, decodeText, type SheetData } from './
 export { extractPdfText, normalizeRadicals, type PdfText } from './pdf.js';
 export { renderDocx, type DocBlock } from './docx.js';
 export {
-  renderPdf, rowAmount, yen, missingCharacters, REPLACEMENT,
+  renderPdf, rowAmount, yen, missingCharacters, extractPages, REPLACEMENT, OCR_MAX_PAGES,
   type InvoiceDoc, type InvoiceRow,
 } from './pdf-render.js';
