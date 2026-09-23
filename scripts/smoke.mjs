@@ -1223,7 +1223,15 @@ console.log('\n■ 28. 接続の設定（Gemini・Google Workspace）');
   const ev = (audit.items ?? []).find((e) => e.action === 'connection.gemini.update');
   ev && !JSON.stringify(ev).includes(key) ? ok('鍵の登録を監査ログに残す（値は残さない）') : ng('監査ログの扱いが違う', JSON.stringify(ev));
   const bad = await call('a', '/v1/admin/connections/gemini', { method: 'PUT', body: JSON.stringify({ mode: 'byok', apiKey: 'short' }) });
-  bad.status === 400 ? ok('形式の違う鍵は登録できない') : ng(`登録できてしまう（${bad.status}）`);
+  bad.status === 400 ? ok('短すぎる鍵は登録できない') : ng(`登録できてしまう（${bad.status}）`);
+  const spaced = await call('a', '/v1/admin/connections/gemini', { method: 'PUT', body: JSON.stringify({ mode: 'byok', apiKey: 'AIza xxxxxxxxxxxxxxxxxxxxxxxx' }) });
+  spaced.status === 400 ? ok('空白の混じった鍵は登録できない（貼り間違い）') : ng(`登録できてしまう（${spaced.status}）`);
+  // 鍵の形は推測しない。Google は形式を変える（`AQ.` で始まりドットを含む鍵を弾いた事故がある）
+  const newStyle = await call('a', '/v1/admin/connections/gemini', {
+    method: 'PUT', body: JSON.stringify({ mode: 'byok', apiKey: 'AQ.Ab8RN6IsSMOKE_TEST_ONLY.0000000000000000000' }),
+  });
+  newStyle.status === 200 ? ok('新しい形式（AQ. で始まりドットを含む）の鍵も登録できる') : ng(`弾いてしまう（${newStyle.status}）`, JSON.stringify(newStyle.body));
+  await call('a', '/v1/admin/connections/gemini', { method: 'PUT', body: JSON.stringify({ mode: 'byok', apiKey: key }) });
   await call('a', '/v1/admin/connections/gemini/key', { method: 'DELETE' });
   const { body: after } = await call('a', '/v1/admin/connections');
   !after.gemini.keyRegistered && after.gemini.mode === 'platform' ? ok('鍵を削除すると運営一括に戻る') : ng('削除できない');

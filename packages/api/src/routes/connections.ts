@@ -104,7 +104,14 @@ export function connectionsRoute(deps: AppDeps) {
     const mode = body.mode === 'byok' ? 'byok' : 'platform';
     const current = await deps.repo.getTenantCredential(tenant.id, 'gemini');
     const apiKey = (body.apiKey ?? '').trim();
-    if (apiKey && !/^[A-Za-z0-9_\-]{20,}$/.test(apiKey)) return c.json({ error: 'API キーの形式が違います（Google AI Studio で発行した鍵を貼ってください）' }, 400);
+    // 鍵の形は**推測しない**。Google は形式を変えることがあり、実際に `AQ.` で始まりドットを
+    // 含む鍵を、英数字だけを許す検査で弾いてしまった。ここで見るのは「貼り間違い」だけとし、
+    // 鍵が使えるかどうかは「接続を確認する」（/gemini/test）で実際に呼んで確かめる
+    if (apiKey && !/^\S{20,200}$/.test(apiKey)) {
+      return c.json({
+        error: 'API キーの形が想定と違います。空白が混じっていないか確かめて、貼り直してください。保存したあと「接続を確認する」で実際に使えるかを確かめられます',
+      }, 400);
+    }
     const secretEnc = apiKey ? deps.box.encrypt(apiKey) : current?.secretEnc ?? null;
     if (mode === 'byok' && !secretEnc) return c.json({ error: '自社の鍵を使うには、API キーを登録してください' }, 400);
     const models: Partial<GeminiModels> = {};
