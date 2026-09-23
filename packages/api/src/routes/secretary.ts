@@ -8,7 +8,7 @@
 
 import { Hono } from 'hono';
 import type { RequestContext } from '@m2office/shared';
-import { listLookups } from '../secretary/lookups.js';
+import { claimUntold, listLookups } from '../secretary/lookups.js';
 import type { AppDeps } from '../context.js';
 
 /**
@@ -45,6 +45,20 @@ export function secretaryRoute(deps: AppDeps) {
   app.get('/lookups', async (c) => {
     const ctx = c.get('ctx');
     const items = await listLookups(deps.repo, ctx.tenant.id, ctx.user.id);
+    return c.json({ items });
+  });
+
+  /**
+   * まだ伝えていない調べものを受け取る（仕様書 第10.11.7節「持ち越し」）。
+   *
+   * @remarks
+   * **読むだけの口ではない。** 返したものは「伝えた」として記録される。
+   * 画面はこれを定期的に呼び、返ってきたものを秘書の応答として出す。
+   * 記録を先に取るため、音声の側と二重に伝えることはない。
+   */
+  app.post('/lookups/claim', async (c) => {
+    const ctx = c.get('ctx');
+    const items = await claimUntold(deps.repo, ctx.tenant.id, ctx.user.id);
     return c.json({ items });
   });
 

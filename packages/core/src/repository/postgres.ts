@@ -1229,6 +1229,25 @@ export class PostgresRepository implements Repository {
       [tenantId]);
   }
 
+  async claimLookupDelivery(tenantId: string, runId: string): Promise<boolean> {
+    // 記録できた側だけが伝える。二度伝えないための取り合いである
+    const rows = await this.q<{ run_id: string }>(tenantId,
+      `insert into lookup_deliveries (tenant_id, run_id) values ($1, $2)
+       on conflict (tenant_id, run_id) do nothing
+       returning run_id`,
+      [tenantId, runId]);
+    return rows.length > 0;
+  }
+
+  async listToldLookups(tenantId: string, runIds: string[]): Promise<string[]> {
+    if (runIds.length === 0) return [];
+    const rows = await this.q<{ runId: string }>(tenantId,
+      `select run_id as "runId" from lookup_deliveries
+        where tenant_id = $1 and run_id = any($2)`,
+      [tenantId, runIds]);
+    return rows.map((r) => r.runId);
+  }
+
   async findActiveJobByInput(
     tenantId: string, userId: string, agentId: string, key: string, value: string,
   ): Promise<string | null> {

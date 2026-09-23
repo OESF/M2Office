@@ -19,7 +19,7 @@ import type { VoiceEvent, VoiceSession } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { SESSION_COOKIE, sessionIdOf } from '../auth/session.js';
 import { extractSubdomain } from '../middleware/tenant.js';
-import { listLookups } from '../secretary/lookups.js';
+import { claimUntold } from '../secretary/lookups.js';
 import { TurnGate } from './turn-gate.js';
 
 /** 中継の経路。 */
@@ -140,8 +140,6 @@ async function start(
   const speak = prefs.secretary.speak !== false;
   const provider = await deps.ai.voiceFor(tenantId);
 
-  // すでに伝えた調べもの。同じものを二度伝えない
-  const told = new Set<string>();
   // 話している最中は伝えず、話し終わりを待つ（仕様書 第10.11.7節）
   const gate = new TurnGate((note) => session?.sendSystemNote(note));
 
@@ -194,22 +192,20 @@ async function start(
     return;
   }
 
-  // つないだ時点で終わっているものは伝えない。会話していない間の分は持ち越し（次の段階）で扱う
-  for (const x of await listLookups(deps.repo, tenantId, userId)) {
-    if (x.status === 'completed' || x.status === 'failed') told.add(x.runId);
-  }
-  // 別のプロセス（ワーカー）で進むため、見に行く（第10.11.7節）
+  // 別のプロセス（ワーカー）で進むため、見に行く（第10.11.7節）。
+  // つないだ直後にも見る。会話していない間に終わったものを、ここで持ち越して伝える
   const poll = setInterval(() => { void checkLookups(); }, LOOKUP_POLL_MS);
+  await checkLookups();
 
-  /** 終わった調べものを探して伝える。話している間は待たせる。 */
+  /**
+   * まだ伝えていない調べものを伝える。話している間は待たせる。
+   *
+   * @remarks
+   * 伝えたことは `claimUntold` が先に記録する。画面を同時に開いていても二度伝えない。
+   */
   async function checkLookups(): Promise<void> {
     try {
-      for (const x of await listLookups(deps.repo, tenantId, userId)) {
-        if (x.status !== 'completed' && x.status !== 'failed') continue;
-        if (told.has(x.runId)) continue;
-        told.add(x.runId);
-        gate.tell(lookupNote(x));
-      }
+      for (const x of await claimUntold(deps.repo, tenantId, userId)) gate.tell(lookupNote(x));
     } catch (err) {
       // 探せなくても会話は続ける。次の見回りで拾う
       log.warn('終わった調べものを探せませんでした', { err });

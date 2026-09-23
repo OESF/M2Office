@@ -1900,6 +1900,9 @@ console.log('\n■ 42. 音声の対話（第10.5.5節）');
 {
   const who = 'member';
   await call('a', '/v1/me/conversations', { method: 'DELETE' }, who);
+  // 前の節で終わった調べものは、つないだ時点で持ち越して伝わる（第10.11.7節）。
+  // ここで確かめたいのは声と話し方なので、先に受け取っておく
+  await call('a', '/v1/secretary/lookups/claim', { method: 'POST' }, who);
   // 声と話し方の指示を選ぶ（第10.5.6節）。知らない声は受け付けない
   const { body: settings } = await call('a', '/v1/me/settings', {}, who);
   await call('a', '/v1/me/settings/secretary', {
@@ -2164,7 +2167,6 @@ console.log('\n■ 45. 音声の最中に、調べものの結果を伝える（
   opened ? ok('音声の対話を開ける') : ng('開けない');
   await sleep(600);
 
-  // つないだ時点で終わっているものは伝えない（持ち越しは次の段階）
   const before = messages.filter((m) => m.type === 'reply').length;
 
   // 音声をつないだまま、ファイルを渡して調べものを起こす
@@ -2194,6 +2196,47 @@ console.log('\n■ 45. 音声の最中に、調べものの結果を伝える（
   ws.close();
   await sleep(400);
   await call('a', '/v1/me/conversations', { method: 'DELETE' }, who);
+}
+
+console.log('\n■ 46. 会話していない間に終わったものの持ち越し（第10.11.7節）');
+{
+  const who = 'member';
+  // 画面も音声も開いていない状態で、調べものを起こして終わらせる
+  const form = new FormData();
+  form.append('file', new Blob([new TextEncoder().encode('区分,件数\n新規,7\n')]), '持ち越し.csv');
+  const up = await fetch(`${API}/v1/files`, {
+    method: 'POST', body: form,
+    headers: { 'x-tenant': 'a', 'x-user': `${who}@alpha.example.jp` },
+  }).then((r) => r.json());
+  const asked = await call('a', '/v1/secretary', {
+    method: 'POST', body: JSON.stringify({ message: '持ち越しの確認', fileId: up.id }),
+  }, who);
+  const runId = asked.body.lookup?.runId;
+  runId ? ok('調べものを起こせる') : ng('起こせない', JSON.stringify(asked.body));
+  await waitFor('a', runId, ['completed', 'failed'], 30000, who);
+
+  // 伝える前は「まだ伝えていない」
+  const { body: pending } = await call('a', '/v1/secretary/lookups', {}, who);
+  (pending.items ?? []).find((x) => x.runId === runId)?.told === false
+    ? ok('伝える前は、まだ伝えていないと分かる') : ng('状態が違う', JSON.stringify((pending.items ?? [])[0] ?? null));
+
+  // 次に会話が始まったときに、一度だけ伝わる
+  const first = await call('a', '/v1/secretary/lookups/claim', { method: 'POST' }, who);
+  (first.body.items ?? []).some((x) => x.runId === runId)
+    ? ok('次に会話が始まったときに持ち越して伝える') : ng('持ち越されない', JSON.stringify(first.body.items ?? []));
+
+  const second = await call('a', '/v1/secretary/lookups/claim', { method: 'POST' }, who);
+  !(second.body.items ?? []).some((x) => x.runId === runId)
+    ? ok('二度目は伝えない（開き直しても繰り返さない）') : ng('二度伝える');
+
+  const { body: after } = await call('a', '/v1/secretary/lookups', {}, who);
+  (after.items ?? []).find((x) => x.runId === runId)?.told === true
+    ? ok('伝えたことが記録される') : ng('記録されない');
+
+  // 他人の調べものは受け取れない（不変則 I-9）
+  const theirs = await call('a', '/v1/secretary/lookups', {}, 'admin');
+  !(theirs.items ?? []).some((x) => x.runId === runId)
+    ? ok('他人の調べものは見えない') : ng('他人の調べものが見える');
 }
 
 console.log('');

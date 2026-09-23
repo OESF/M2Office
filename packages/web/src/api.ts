@@ -341,6 +341,10 @@ export interface Lookup {
   /** 答え。終わるまでは `null`。 */
   text: string | null;
   failureReason: string | null;
+  /** 終わった時刻。まだ終わっていなければ `null`。 */
+  endedAt: string | null;
+  /** 結果を伝えたか（仕様書 第10.11.7節）。 */
+  told: boolean;
 }
 
 export interface SecretaryReply {
@@ -656,6 +660,13 @@ export const api = {
     }),
   /** 後ろへ回した調べものの状態（仕様書 第10.11.6節）。画面が定期的に読む。 */
   lookups: () => call<{ items: Lookup[] }>('/secretary/lookups'),
+  /**
+   * まだ伝えていない調べものを受け取る（仕様書 第10.11.7節「持ち越し」）。
+   *
+   * **読むだけではない。** 返ってきたものは「伝えた」として記録される。
+   * 受け取ったら必ず画面に出すこと。
+   */
+  claimLookups: () => call<{ items: Lookup[] }>('/secretary/lookups/claim', { method: 'POST' }),
   /** 秘書に聞く。手元のファイルを 1 つ添えられる（仕様書 第10.10節）。 */
   ask: (message: string, fileId?: string) =>
     call<SecretaryReply>('/secretary', {

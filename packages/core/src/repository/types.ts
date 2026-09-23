@@ -222,6 +222,17 @@ export interface Repository {
    */
   listDisabledConnectorTools(tenantId: string): Promise<DisabledConnectorTool[]>;
   /**
+   * 調べものの結果を伝えたことを記録する（仕様書 第10.11.7節「持ち越し」）。
+   *
+   * @returns **この呼び出しで記録できたら `true`**。すでに誰かが記録していれば `false`
+   * @remarks
+   * 伝える前に呼び、`true` のときだけ伝える。
+   * 画面と音声の両方から伝えうるため、これで二度伝えることを防ぐ。
+   */
+  claimLookupDelivery(tenantId: string, runId: string): Promise<boolean>;
+  /** すでに伝えた調べものの実行の ID（仕様書 第10.11.7節）。 */
+  listToldLookups(tenantId: string, runIds: string[]): Promise<string[]>;
+  /**
    * 同じ依頼で動いている調べものを探す（仕様書 第10.11.4節）。
    *
    * @returns 動いていればその実行の ID。無ければ `null`

@@ -65,11 +65,6 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [replyFileId, setReplyFileId] = useState<string | null>(null);
   // 後ろへ回した調べもの（仕様書 第10.11節）。動いているものは処理中として見せる
   const [lookups, setLookups] = useState<Lookup[]>([]);
-  // すでに伝えた調べもの。同じ結果を二度伝えない
-  const announced = useRef<Set<string>>(new Set());
-  // 画面を開いた時点で終わっているものは伝えない。開くたびに古い答えが出てしまうため。
-  // 会話していない間に終わった分の持ち越しは、別に作る（仕様書 第10.11.9節）
-  const seeded = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [showTour, setShowTour] = useState(false);
@@ -96,25 +91,23 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
       setHistory(j.items as never);
       setNotifications(n.items);
       setLookups(l.items);
-      // 終わった調べものを、秘書の応答として伝える（仕様書 第10.11.7節）。一度だけ
-      for (const x of l.items) {
-        if (x.status !== 'completed' && x.status !== 'failed') continue;
-        if (announced.current.has(x.runId)) continue;
-        announced.current.add(x.runId);
-        // 開いた時点で終わっていたものは、印だけ付けて伝えない
-        if (!seeded.current) continue;
-        setReply({
-          layer: 'full',
-          // 秘書が自分で調べたものとして伝える。裏で別のものが動いていることは話さない（第10.11.7節）
-          text: x.status === 'completed'
-            ? (x.text || 'お調べしましたが、お伝えできる内容がありませんでした。')
-            : `お調べできませんでした。${x.failureReason ?? ''}`,
-          evidence: [{ label: 'ご依頼', value: x.request }],
-          tokensUsed: 0, elapsedMs: 0,
-        });
+      // まだ伝えていない調べものを受け取り、秘書の応答として出す（仕様書 第10.11.7節）。
+      // 伝えたことはサーバーが記録するため、画面を開き直しても二度は出ない。
+      // 会話していない間に終わったものも、ここで持ち越して伝わる
+      if (l.items.some((x) => !x.told && (x.status === 'completed' || x.status === 'failed'))) {
+        for (const x of (await api.claimLookups()).items) {
+          setReply({
+            layer: 'full',
+            // 秘書が自分で調べたものとして伝える。裏で別のものが動いていることは話さない
+            text: x.status === 'completed'
+              ? (x.text || 'お調べしましたが、お伝えできる内容がありませんでした。')
+              : `お調べできませんでした。${x.failureReason ?? ''}`,
+            evidence: [{ label: 'ご依頼', value: x.request }],
+            tokensUsed: 0, elapsedMs: 0,
+          });
+        }
       }
       setError(null);
-      seeded.current = true;
     } catch (err) {
       setError(describeError(err, '読み込みに失敗しました'));
     }
