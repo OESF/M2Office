@@ -60,9 +60,6 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [history, setHistory] = useState<{ run: { id: string; status: string }; job: { agentId: string } | null }[]>([]);
   const [view, setView] = useState<View>(() => (googleReturn ? { kind: 'settings' } : { kind: 'home' }));
   const [detail, setDetail] = useState<RunDetail | null>(null);
-  const [reply, setReply] = useState<SecretaryReply | null>(null);
-  // 秘書に渡したファイル。取り次いだ業務の入力へ引き継ぐ（仕様書 第10.10.3節）
-  const [replyFileId, setReplyFileId] = useState<string | null>(null);
   // 後ろへ回した調べもの（仕様書 第10.11節）。動いているものは処理中として見せる
   const [lookups, setLookups] = useState<Lookup[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -98,15 +95,12 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
       // 会話していない間に終わったものも、ここで持ち越して伝わる
       if (l.items.some((x) => !x.told && (x.status === 'completed' || x.status === 'failed'))) {
         for (const x of (await api.claimLookups()).items) {
-          setReply({
-            layer: 'full',
-            // 秘書が自分で調べたものとして伝える。裏で別のものが動いていることは話さない
-            text: x.status === 'completed'
+          // 秘書が自分で調べたものとして、流れの一番下に足す（第6.2.1・10.11.7節）
+          setTurns((t) => appendTurn(t, 'secretary',
+            x.status === 'completed'
               ? (x.text || 'お調べしましたが、お伝えできる内容がありませんでした。')
               : `お調べできませんでした。${x.failureReason ?? ''}`,
-            evidence: [{ label: 'ご依頼', value: x.request }],
-            tokensUsed: 0, elapsedMs: 0,
-          });
+            { evidence: [{ label: 'ご依頼', value: x.request }] }));
         }
       }
       setError(null);
@@ -131,10 +125,9 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
     return () => clearInterval(timer);
   }, [view]);
 
-  // 音声のやり取り。帯ではなくサッシパネルに出す（仕様書 第6.1.3節）
-  const [voice, setVoice] = useState<{ heard: string; reply: string }>({ heard: '', reply: '' });
-  const talking = voice.heard !== '' || voice.reply !== '';
-  const showSash = view.kind === 'run' || reply !== null || talking;
+  // 秘書とのやり取り。文字も音声も 1 本の流れにし、古いものが上・新しいものが下に並ぶ（第6.2.1節）
+  const [turns, setTurns] = useState<Turn[]>([]);
+  const showSash = view.kind === 'run' || turns.length > 0;
   const unread = notifications.filter((n) => !n.readAt).length;
   const isAdmin = me.user.roles.includes('admin');
 
@@ -191,10 +184,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
           <SecretaryBar
             lookups={lookups}
             avatar={avatar}
-            onReply={(r, fid) => { setReply(r); setReplyFileId(fid); setVoice({ heard: '', reply: '' }); }}
-            onVoice={(v) => setVoice((cur) => (v === null
-              ? { heard: '', reply: '' }
-              : { heard: cur.heard + v.heard, reply: cur.reply + v.reply }))}
+            onSaid={(role, text, meta) => setTurns((t) => appendTurn(t, role, text, meta))}
           />
         )}
       >
@@ -277,66 +267,20 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
 
         {showSash && (
           <aside className="sash">
-            {/* 音声のやり取り。帯を膨らませず、ここに出す（仕様書 第6.1.3節） */}
-            {talking && (
-              <div className="transcript">
-                <h3>音声のやり取り</h3>
-                {voice.heard && <p><span className="muted small">聞こえた内容</span><br />{voice.heard}</p>}
-                {voice.reply && <p className="reply"><span className="muted small">秘書</span><br />{voice.reply}</p>}
-              </div>
-            )}
-            {reply && (
-              <>
-                <h3>秘書の応答</h3>
-                <p className="reply">{reply.text}</p>
-                <p className="muted" style={{ fontSize: 12 }}>
-                  {layerLabel(reply.layer)} / {reply.elapsedMs}ms / {reply.tokensUsed} トークン
-                </p>
-                {reply.file && (
-                  <p className="muted" style={{ fontSize: 12 }}>
-                    読んだファイル: {reply.file.name}
-                    {reply.file.note && <>（{reply.file.note}）</>}
-                  </p>
-                )}
-                {reply.suggestedAgent && (
-                  <button
-                    className="btn"
-                    onClick={() => {
-                      const hit = agents.find((a) => a.id === reply.suggestedAgent?.id);
-                      // 秘書に渡したファイルを、そのまま業務の入力へ引き継ぐ（第10.10.3節）
-                      if (hit) setView({ kind: 'agent', agent: hit, ...(replyFileId ? { fileId: replyFileId } : {}) });
-                      setReply(null);
-                    }}
-                  >
-                    {reply.suggestedAgent.name} を開く
-                  </button>
-                )}
-                {reply.helpArticles && reply.helpArticles.length > 0 && (
-                  <>
-                    <h3 style={{ marginTop: 16 }}>ヘルプの記事</h3>
-                    {reply.helpArticles.map((a) => (
-                      <button key={a.id} className="help-item" onClick={() => openHelp(a.id)}>{a.title}</button>
-                    ))}
-                  </>
-                )}
-                {reply.evidence.length > 0 && (
-                  <>
-                    <h3 style={{ marginTop: 16 }}>根拠</h3>
-                    <dl className="kv">
-                      {reply.evidence.map((e, i) => (
-                        <div key={i} style={{ display: 'contents' }}>
-                          <dt>{e.label}</dt>
-                          <dd>{e.value}</dd>
-                        </div>
-                      ))}
-                    </dl>
-                  </>
-                )}
-              </>
+            {/* やり取りは 1 本の流れ。古いものが上、新しいものが下（仕様書 第6.2.1節） */}
+            {turns.length > 0 && (
+              <TurnLog
+                turns={turns}
+                onOpenAgent={(agentId, fileId) => {
+                  const hit = agents.find((a) => a.id === agentId);
+                  // 秘書に渡したファイルを、そのまま業務の入力へ引き継ぐ（第10.10.3節）
+                  if (hit) setView({ kind: 'agent', agent: hit, ...(fileId ? { fileId } : {}) });
+                }}
+              />
             )}
             {view.kind === 'run' && detail && (
               <>
-                <h3 style={{ marginTop: reply ? 16 : 0 }}>実行した処理</h3>
+                <h3 style={{ marginTop: turns.length > 0 ? 16 : 0 }}>実行した処理</h3>
                 <Evidence steps={detail.steps} />
               </>
             )}
@@ -366,18 +310,96 @@ function Home({ approvals, agents }: { approvals: number; agents: number }) {
   );
 }
 
+/** やり取りの 1 件（仕様書 第6.2.1節）。 */
+export interface Turn {
+  id: string;
+  role: 'user' | 'secretary';
+  text: string;
+  /** その応答に添えるもの。根拠・業務の提案・ヘルプの記事など。 */
+  meta?: {
+    note?: string;
+    suggestedAgent?: { id: string; name: string };
+    fileId?: string | null;
+    helpArticles?: { id: string; title: string }[];
+    evidence?: { label: string; value: string }[];
+  };
+}
+
+/**
+ * やり取りを 1 件足す（仕様書 第6.2.1節）。
+ *
+ * @remarks
+ * **同じ話し手が続く間は 1 件にまとめる。** 音声では文字が細かく届くため、
+ * そのまま並べると 1 文が何件にも割れる。話し手が変わったら次の 1 件にする。
+ * 添えるもの（根拠など）を持つ応答は、いつでも新しい 1 件にする。
+ */
+export function appendTurn(
+  turns: Turn[], role: Turn['role'], text: string, meta?: Turn['meta'],
+): Turn[] {
+  const last = turns[turns.length - 1];
+  if (!meta && last && last.role === role && !last.meta) {
+    return [...turns.slice(0, -1), { ...last, text: last.text + text }];
+  }
+  return [...turns, { id: `${Date.now()}-${turns.length}`, role, text, meta }];
+}
+
+/**
+ * やり取りの記録（仕様書 第6.2.1節）。
+ *
+ * @remarks
+ * 古いものが上、新しいものが下。新しく届いたら一番下まで送る。
+ */
+function TurnLog({ turns, onOpenAgent }: {
+  turns: Turn[];
+  onOpenAgent: (agentId: string, fileId: string | null) => void;
+}) {
+  const end = useRef<HTMLDivElement>(null);
+  useEffect(() => { end.current?.scrollIntoView({ block: 'end' }); }, [turns]);
+
+  return (
+    <div className="turns">
+      <h3>秘書とのやり取り</h3>
+      {turns.map((t) => (
+        <div key={t.id} className={`turn ${t.role}`}>
+          <span className="muted small">{t.role === 'user' ? 'あなた' : '秘書'}</span>
+          <p>{t.text}</p>
+          {t.meta?.note && <p className="muted small">{t.meta.note}</p>}
+          {t.meta?.suggestedAgent && (
+            <button className="btn small"
+              onClick={() => onOpenAgent(t.meta!.suggestedAgent!.id, t.meta!.fileId ?? null)}>
+              {t.meta.suggestedAgent.name} を開く
+            </button>
+          )}
+          {t.meta?.helpArticles?.map((a) => (
+            <button key={a.id} className="help-item" onClick={() => openHelp(a.id)}>{a.title}</button>
+          ))}
+          {t.meta?.evidence && t.meta.evidence.length > 0 && (
+            <dl className="kv">
+              {t.meta.evidence.map((e, i) => (
+                <div key={i} style={{ display: 'contents' }}>
+                  <dt>{e.label}</dt><dd>{e.value}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
+        </div>
+      ))}
+      <div ref={end} />
+    </div>
+  );
+}
+
 /**
  * 常駐の秘書バー。どの画面からでも呼び出せる（仕様書 第10.4節）。
  * 音声でも話しかけられ（第10.5節）、手元のファイルを 1 つ渡せる（第10.10節）。
  */
-function SecretaryBar({ lookups, avatar, onReply, onVoice }: {
+function SecretaryBar({ lookups, avatar, onSaid }: {
   /** 後ろで動いている調べもの。処理中であることを常に見せる（仕様書 第10.11.6節） */
   lookups: Lookup[];
   /** 秘書のアバター（個人設定。仕様書 第6.1.3節） */
   avatar: string;
-  onReply: (r: SecretaryReply, fileId: string | null) => void;
-  /** 音声のやり取り。帯ではなくサッシパネルに出す（第6.1.3節） */
-  onVoice: (v: { heard: string; reply: string } | null) => void;
+  /** やり取りを 1 件足す。帯ではなくサッシパネルに出す（第6.1.3・6.2.1節） */
+  onSaid: (role: Turn['role'], text: string, meta?: Turn['meta']) => void;
 }) {
   const box = useRef<HTMLTextAreaElement>(null);
   const [text, setText] = useState('');
@@ -404,8 +426,7 @@ function SecretaryBar({ lookups, avatar, onReply, onVoice }: {
   }
   // 音声の対話（第10.5.5節）。聞こえた文字と応答は、その場で画面にも出す（併記）
   const [call, setCall] = useState<VoiceCall | null>(null);
-  // やり取りの中身は帯に出さない。上へ渡し、サッシパネルに出す（仕様書 第6.1.3節）
-  const setVoice = onVoice;
+
 
   async function toggleVoice() {
     if (call) {
@@ -413,11 +434,11 @@ function SecretaryBar({ lookups, avatar, onReply, onVoice }: {
       setCall(null);
       return;
     }
-    setVoice({ heard: '', reply: '' });
     setHint('マイクの許可を確かめています…');
     const started = await startVoice({
-      onHeard: (t) => onVoice({ heard: t, reply: '' }),
-      onReply: (t) => onVoice({ heard: '', reply: t }),
+      // 音声では文字が細かく届く。同じ話し手が続く間は 1 件にまとまる（第6.2.1節）
+      onHeard: (t) => onSaid('user', t),
+      onReply: (t) => onSaid('secretary', t),
       onState: (state, note) => {
         setHint(note ?? { connecting: 'つないでいます…', listening: '聞いています（もう一度押すと終わります）', closed: '音声を終わりました' }[state]);
         if (state === 'closed') setCall(null);
@@ -440,16 +461,27 @@ function SecretaryBar({ lookups, avatar, onReply, onVoice }: {
   async function send() {
     if (!text.trim() || busy) return;
     setBusy(true);
+    const asked = text;
+    const withFile = file;
     try {
-      const reply = await api.ask(text, file?.id);
-      onReply(reply, file?.id ?? null);
-      setHint([
-        layerLabel(reply.layer), `${reply.elapsedMs}ms`,
-        reply.file ? `「${reply.file.name}」を受け取りました` : '',
-      ].filter(Boolean).join('・'));
+      // 自分の発言を先に足す。送った直後に流れへ出る（第6.2.1節）
+      onSaid('user', withFile ? `${asked}\n（渡した書類: ${withFile.name}）` : asked, { note: '' });
       setText('');
-      // 渡したファイルは 1 回の依頼ごとに外す。次の依頼に持ち越さない
       setFile(null);
+      const reply = await api.ask(asked, withFile?.id);
+      onSaid('secretary', reply.text, {
+        note: [
+          layerLabel(reply.layer), `${reply.elapsedMs}ms`,
+          reply.tokensUsed > 0 ? `${reply.tokensUsed} トークン` : '',
+          reply.file?.note ?? '',
+        ].filter(Boolean).join(' / '),
+        ...(reply.suggestedAgent
+          ? { suggestedAgent: { id: reply.suggestedAgent.id, name: reply.suggestedAgent.name }, fileId: withFile?.id ?? null }
+          : {}),
+        ...(reply.helpArticles ? { helpArticles: reply.helpArticles } : {}),
+        ...(reply.evidence.length > 0 ? { evidence: reply.evidence } : {}),
+      });
+      setHint(layerLabel(reply.layer));
     } catch (err) {
       setHint(describeError(err, '応答できませんでした'));
     } finally {
@@ -459,6 +491,7 @@ function SecretaryBar({ lookups, avatar, onReply, onVoice }: {
 
   return (
     <div className="secretary">
+      <div className="secretary-main">
       {/* アバターが音声の入口（仕様書 第6.1.3節）。ふだんは控えめ、話しているときははっきり */}
       <button
         className={`secretary-avatar${call ? ' on' : ''}`}
@@ -512,15 +545,22 @@ function SecretaryBar({ lookups, avatar, onReply, onVoice }: {
         <span className="sr-only">送る</span>
       </button>
 
-      {/* 帯に出すのは一言だけ。やり取りの中身はサッシパネルに出す（第6.1.3節） */}
-      {hint && <span className="layer">{hint}</span>}
-      {/* 秘書が黙り込んだように見せない。動いているものを必ず出す（第10.11.6節） */}
-      {running.map((x) => (
-        <span key={x.runId} className="lookup" title={x.request}>
-          <span className="spin" aria-hidden="true" />
-          {x.progress ?? 'お調べしています'}
-        </span>
-      ))}
+      </div>
+
+      {/*
+        状態の知らせ。**高さの決まった場所**に出す（第6.1.3節）。
+        長さで帯の高さを変えない。変わると、書いている最中に入力欄が動く
+      */}
+      <div className="secretary-status">
+        {/* 秘書が黙り込んだように見せない。動いているものを必ず出す（第10.11.6節） */}
+        {running.map((x) => (
+          <span key={x.runId} className="lookup" title={x.request}>
+            <span className="spin" aria-hidden="true" />
+            {x.progress ?? 'お調べしています'}
+          </span>
+        ))}
+        {hint && <span className="layer">{hint}</span>}
+      </div>
     </div>
   );
 }

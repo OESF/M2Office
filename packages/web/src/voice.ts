@@ -40,9 +40,10 @@ function toPcm16(input: Float32Array): Uint8Array {
 }
 
 /** 受け取った PCM を、鳴らせる形（Float32）に直す。 */
-function fromPcm16(bytes: ArrayBuffer): Float32Array {
+function fromPcm16(bytes: ArrayBuffer): Float32Array<ArrayBuffer> {
   const view = new DataView(bytes);
-  const out = new Float32Array(bytes.byteLength / 2);
+  // 音の置き場（AudioBuffer）は共有でない領域を要求するため、型でもそう示す
+  const out = new Float32Array(new ArrayBuffer(bytes.byteLength * 2));
   for (let i = 0; i < out.length; i++) out[i] = view.getInt16(i * 2, true) / 0x8000;
   return out;
 }
