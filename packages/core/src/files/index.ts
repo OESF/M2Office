@@ -10,4 +10,7 @@ export { saveFile, loadFile } from './service.js';
 export { readSheet, renderSheet, parseCsv, decodeText, type SheetData } from './sheet.js';
 export { extractPdfText, normalizeRadicals, type PdfText } from './pdf.js';
 export { renderDocx, type DocBlock } from './docx.js';
-export { renderPdf, rowAmount, yen, type InvoiceDoc, type InvoiceRow } from './pdf-render.js';
+export {
+  renderPdf, rowAmount, yen, missingCharacters, REPLACEMENT,
+  type InvoiceDoc, type InvoiceRow,
+} from './pdf-render.js';

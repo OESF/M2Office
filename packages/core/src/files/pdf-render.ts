@@ -1,6 +1,9 @@
 /**
  * @file 帳票の PDF を作る。日本語の書体（Noto Sans JP）を、使った文字だけ抜き出して埋め込む。
  *
+ * 書体は JIS X 0208 の範囲に絞って同梱している（`scripts/build-font-subset.mjs` で作る）。
+ * 範囲の外の字は `〓` に置き換え、どの字だったかを `missingCharacters()` で示す。
+ *
  * 体裁は最小限（表題・宛先などの項目・明細の表・合計・備考）にとどめる。
  * 会社ごとのひな形（ロゴ・色・並び）は Q-57 で決める。
  *
@@ -63,7 +66,17 @@ export function yen(n: number): string {
   return Math.round(n).toLocaleString('ja-JP');
 }
 
+/**
+ * 同梱した書体に無い字の代わりに置く記号。
+ *
+ * @remarks
+ * 書体は JIS X 0208 の範囲に絞って同梱している（Q-59）。範囲の外の字（人名の異体字など）は
+ * 黙って空白にせず、この記号に置き換えたうえで、どの字が置き換わったかを呼び出し側へ返す。
+ */
+export const REPLACEMENT = '〓';
+
 let cache: { regular: Uint8Array; bold: Uint8Array } | null = null;
+let coverage: { has(code: number): boolean } | null = null;
 
 /**
  * 同梱した書体を読む。
@@ -77,7 +90,41 @@ async function loadFonts(): Promise<{ regular: Uint8Array; bold: Uint8Array }> {
     readFile(fileURLToPath(new URL('NotoSansJP-Bold.ttf', FONT_DIR))),
   ]);
   cache = { regular: new Uint8Array(regular), bold: new Uint8Array(bold) };
+  // 字があるかの判定は通常の書体で行う（太字も同じ範囲で作っている）
+  const font = fontkit.create(cache.regular) as { hasGlyphForCodePoint(code: number): boolean };
+  coverage = { has: (code) => font.hasGlyphForCodePoint(code) };
   return cache;
+}
+
+/**
+ * 同梱した書体に無い字を挙げる。
+ *
+ * @param texts 帳票に載せる文字列
+ * @returns 書体に無い字（重複を除く）。すべて出せるなら空
+ *
+ * @remarks 呼び出し側は、これを「置き換えた字」として利用者に示す。黙って落とさないため。
+ */
+export async function missingCharacters(texts: string[]): Promise<string[]> {
+  await loadFonts();
+  const missing = new Set<string>();
+  for (const text of texts) {
+    for (const ch of text) {
+      const code = ch.codePointAt(0);
+      if (ch === '\n' || code === undefined) continue;
+      if (!coverage?.has(code)) missing.add(ch);
+    }
+  }
+  return [...missing];
+}
+
+/** 書体に無い字を置き換える。 */
+function fit(text: string): string {
+  let out = '';
+  for (const ch of text) {
+    const code = ch.codePointAt(0);
+    out += code !== undefined && coverage?.has(code) ? ch : REPLACEMENT;
+  }
+  return out;
 }
 
 /** 文字を描く小さな道具。 */
@@ -85,8 +132,10 @@ function writer(page: PDFPage, font: PDFFont, boldFont: PDFFont) {
   return (text: string, x: number, y: number, opts: { size?: number; bold?: boolean; right?: number } = {}) => {
     const size = opts.size ?? 10;
     const f = opts.bold ? boldFont : font;
-    const left = opts.right === undefined ? x : opts.right - f.widthOfTextAtSize(text, size);
-    page.drawText(text, { x: left, y, size, font: f, color: rgb(0.1, 0.1, 0.1) });
+    // 同梱した書体に無い字は置き換える。空白のまま出して、消えたことに気づかれないのを避ける
+    const shown = fit(text);
+    const left = opts.right === undefined ? x : opts.right - f.widthOfTextAtSize(shown, size);
+    page.drawText(shown, { x: left, y, size, font: f, color: rgb(0.1, 0.1, 0.1) });
   };
 }
 

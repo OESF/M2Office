@@ -8,7 +8,9 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { extractPdfText, renderPdf, rowAmount, yen } from '../src/index.js';
+import {
+  REPLACEMENT, extractPdfText, missingCharacters, renderPdf, rowAmount, yen,
+} from '../src/index.js';
 
 const DOC = {
   title: '請求書',
@@ -51,4 +53,16 @@ test('明細が多い帳票は次のページへ送る', async () => {
   const out = await extractPdfText(await renderPdf({ title: '請求書', rows }));
   assert.ok(out.pageCount >= 2, `ページが増えない: ${out.pageCount}`);
   assert.ok((out.pages.at(-1)?.text ?? '').includes('8,000'), '合計が最後のページにある');
+});
+
+test('同梱した書体に無い字は、置き換えたうえで知らせる（Q-59）', async () => {
+  // 鷗（かもめ）と 𠮷（つちよし）は同梱の範囲の外
+  assert.deepEqual(await missingCharacters(['鷗外商会', '請求書']), ['鷗']);
+  assert.deepEqual(await missingCharacters(['𠮷田さん']), ['𠮷'], '2 文字分の字も 1 字として数える');
+  // 人名でよく使う異体字（髙・﨑）は範囲に入っている
+  assert.deepEqual(await missingCharacters(['髙橋さん', '﨑山さん', '請求書 合計 1,000 円 ㈱ ①']), []);
+
+  const text = (await extractPdfText(await renderPdf({ title: '請求書', rows: [{ name: '鷗外商会', amount: 100 }] })))
+    .pages[0]?.text ?? '';
+  assert.ok(text.includes(`${REPLACEMENT}外商会`), `置き換わっていない: ${text}`);
 });

@@ -16,7 +16,7 @@ import { loadFile, saveFile } from '../files/service.js';
 import { readSheet, renderSheet } from '../files/sheet.js';
 import { extractPdfText } from '../files/pdf.js';
 import { renderDocx, type DocBlock } from '../files/docx.js';
-import { renderPdf, type InvoiceDoc, type InvoiceRow } from '../files/pdf-render.js';
+import { missingCharacters, renderPdf, REPLACEMENT, type InvoiceDoc, type InvoiceRow } from '../files/pdf-render.js';
 
 const str = (v: unknown, fallback = '') => (typeof v === 'string' ? v : fallback);
 
@@ -203,8 +203,26 @@ export const pdfRender: Tool = {
       ...(pairs(args['totals']).length > 0 ? { totals: pairs(args['totals']).slice(0, 6) } : {}),
       notes: list(args['notes']).map(String).slice(0, 10),
     };
+    // 同梱した書体に無い字は置き換わる。どの字が置き換わったかを返し、黙って落とさない（Q-59）
+    const texts = [
+      doc.title, doc.to ?? '', ...(doc.from ?? []),
+      ...(doc.fields ?? []).flatMap((f) => [f.label, f.value]),
+      ...rows.map((r) => r.name),
+      ...(doc.totals ?? []).flatMap((t) => [t.label, t.value]),
+      ...(doc.notes ?? []),
+    ];
+    const missing = await missingCharacters(texts);
     const bytes = await renderPdf(doc);
-    return { created: true, ...(await publish(ctx, `${title}.pdf`, 'pdf', bytes, title)) };
+    return {
+      created: true,
+      ...(await publish(ctx, `${title}.pdf`, 'pdf', bytes, title)),
+      ...(missing.length > 0
+        ? {
+            replacedCharacters: missing,
+            note: `同梱した書体に無い字を「${REPLACEMENT}」に置き換えました: ${missing.join('')}。別の書き方に直してください`,
+          }
+        : {}),
+    };
   },
 };
 
