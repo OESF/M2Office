@@ -137,8 +137,11 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
         <span className="brand">M2Office</span>
         <span className="tenant">{me.tenant.name}</span>
         {me.workspaceSource === 'mock' && (
-          <span className="badge warn" title="Google Workspace に未接続のため、予定・メール・タスクはダミーです">
-            ダミーデータで動作中
+          <span
+            className="badge warn"
+            title="Google Workspace につないでいないため、予定・メール・ToDo・ドライブ・Chat はダミーです。組織知識・書類の読み取り・承認・記録は本物です"
+          >
+            予定・メールはダミー
           </span>
         )}
         <span className="spacer" />
