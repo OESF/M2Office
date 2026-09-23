@@ -9,12 +9,21 @@
 
 import { Hono } from 'hono';
 import type { Approval, AuditEvent, Job, Run, User } from '@m2office/shared';
-import { stepLabel, type TenantExtensions } from '@m2office/core';
+import {
+  ACTIVE_WINDOW_MIN, buildPresence, summarizePresence, stepLabel,
+  type TenantExtensions,
+} from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { requireRole, type AppEnv } from '../middleware/tenant.js';
 
-/** 「ログイン中」とみなす、最後の操作からの時間（分）。 */
-const ACTIVE_WINDOW_MIN = 15;
+/** 秘書と会話中の判定に使う監査ログの種類（第6.7.4.1節）。 */
+const SECRETARY_ACTIONS = ['secretary.direct', 'secretary.route', 'secretary.chat', 'secretary.help'];
+
+/** SSE で状態を組み立て直す間隔（ミリ秒）。変わったときだけ送る（第6.7.9節）。 */
+const STREAM_TICK_MS = Number(process.env['DASHBOARD_STREAM_TICK_MS'] ?? 2000);
+
+/** SSE の心拍の間隔（ミリ秒）。経路の途中で切られることを防ぐ。 */
+const STREAM_HEARTBEAT_MS = 15_000;
 
 /** ダッシュボードの出来事として扱う監査ログの種類。ログインは含めない（第6.7.10節）。 */
 const EVENT_ACTIONS = [
@@ -37,31 +46,89 @@ export function dashboardRoute(deps: AppDeps) {
   /** いまの状態。上部の数値・業務の流れ・承認の滞留・出来事（第6.7.3節）。 */
   app.get('/live', async (c) => {
     const { tenant } = c.get('ctx');
-    const view = await deps.tenantView(tenant.id);
+    return c.json(await live(tenant.id));
+  });
+
+  /**
+   * いまの状態を送り続ける（SSE。仕様書 第6.7.9節、ADR-0013）。
+   *
+   * @remarks
+   * 変わったときだけ送る。状態は記憶上で比べるだけで保存しない（第6.7.10節）。
+   * テナント境界: 接続したテナントの状態だけを組み立てて送る（不変則 I-2）。
+   */
+  app.get('/stream', (c) => {
+    const { tenant } = c.get('ctx');
+    const log = c.get('log');
+    const stream = new ReadableStream({
+      async start(controller) {
+        const send = (text: string) => controller.enqueue(new TextEncoder().encode(text));
+        let previous = '';
+        let lastBeat = Date.now();
+        let closed = false;
+        c.req.raw.signal.addEventListener('abort', () => { closed = true; });
+        send(': 接続しました\n\n');
+        while (!closed) {
+          try {
+            const snapshot = JSON.stringify(await live(tenant.id));
+            if (snapshot !== previous) {
+              previous = snapshot;
+              send(`event: live\ndata: ${snapshot}\n\n`);
+              lastBeat = Date.now();
+            } else if (Date.now() - lastBeat >= STREAM_HEARTBEAT_MS) {
+              send(': 心拍\n\n');
+              lastBeat = Date.now();
+            }
+          } catch (err) {
+            log.warn('ダッシュボードの送信で例外が発生しました', { tenantId: tenant.id, err });
+            break;
+          }
+          await new Promise((r) => setTimeout(r, STREAM_TICK_MS));
+        }
+        try { controller.close(); } catch { /* すでに閉じている */ }
+      },
+    });
+    return new Response(stream, {
+      headers: {
+        'content-type': 'text/event-stream; charset=utf-8',
+        'cache-control': 'no-store',
+        connection: 'keep-alive',
+        // 串（リバースプロキシ）の緩衝を止める
+        'x-accel-buffering': 'no',
+      },
+    });
+  });
+
+  /** 「いま」の中身を組み立てる。`/live` と SSE の双方が使う。 */
+  async function live(tenantId: string) {
+    const view = await deps.tenantView(tenantId);
     const agentName = (id: string) => nameOfAgent(view, id);
     const now = new Date();
     const todayStart = jstDayStart(now, 0);
 
-    const [users, liveRuns, pending, todayRows, activeUsers, events] = await Promise.all([
-      deps.repo.listUsers(tenant.id),
-      deps.repo.listLiveRuns(tenant.id, todayStart),
-      deps.repo.listPendingApprovals(tenant.id),
-      deps.repo.runStats(tenant.id, todayStart),
-      deps.repo.countActiveUsers(tenant.id, new Date(now.getTime() - ACTIVE_WINDOW_MIN * 60_000)),
-      deps.repo.listAuditSince(tenant.id, EVENT_ACTIONS, 30),
-    ]);
+    const [users, liveRuns, pending, todayRows, activeUsers, events, sessions, secretaryEvents, settings] =
+      await Promise.all([
+        deps.repo.listUsers(tenantId),
+        deps.repo.listLiveRuns(tenantId, todayStart),
+        deps.repo.listPendingApprovals(tenantId),
+        deps.repo.runStats(tenantId, todayStart),
+        deps.repo.countActiveUsers(tenantId, new Date(now.getTime() - ACTIVE_WINDOW_MIN * 60_000)),
+        deps.repo.listAuditSince(tenantId, EVENT_ACTIONS, 30),
+        deps.repo.listActiveSessions(tenantId),
+        deps.repo.listAuditSince(tenantId, SECRETARY_ACTIONS, 30),
+        deps.repo.getTenantSettings(tenantId),
+      ]);
     const nameOf = names(users);
 
     // 承認待ちを実行に結び付ける（誰の判断を待っているかを示すため）
     const approvalByRun = new Map<string, Approval>();
     for (const a of pending) {
-      const step = await deps.repo.getRunStepById(tenant.id, a.runStepId);
+      const step = await deps.repo.getRunStepById(tenantId, a.runStepId);
       if (step) approvalByRun.set(step.runId, a);
     }
 
     const flows = [];
     for (const { run, job } of liveRuns) {
-      const steps = await deps.repo.listRunSteps(tenant.id, run.id);
+      const steps = await deps.repo.listRunSteps(tenantId, run.id);
       const confirming = steps.some((s) => s.status === 'awaiting' && s.stepId.endsWith(':confirm'));
       const approval = approvalByRun.get(run.id) ?? null;
       flows.push({
@@ -81,9 +148,9 @@ export function dashboardRoute(deps: AppDeps) {
 
     const backlog = [];
     for (const a of pending) {
-      const step = await deps.repo.getRunStepById(tenant.id, a.runStepId);
-      const run = step ? await deps.repo.getRun(tenant.id, step.runId) : null;
-      const job = run ? await deps.repo.getJob(tenant.id, run.jobId) : null;
+      const step = await deps.repo.getRunStepById(tenantId, a.runStepId);
+      const run = step ? await deps.repo.getRun(tenantId, step.runId) : null;
+      const job = run ? await deps.repo.getJob(tenantId, run.jobId) : null;
       backlog.push({
         approvalId: a.id,
         agentName: job ? agentName(job.agentId) : '不明な業務',
@@ -107,10 +174,20 @@ export function dashboardRoute(deps: AppDeps) {
     );
 
     const runAgent = new Map(liveRuns.map(({ run, job }) => [run.id, job.agentId]));
-    const recent = await deps.repo.listRunsWithJobs(tenant.id, { limit: 200 });
+    const recent = await deps.repo.listRunsWithJobs(tenantId, { limit: 200 });
     for (const { run, job } of recent) runAgent.set(run.id, job.agentId);
 
-    return c.json({
+    // 人の状態（第6.7.4.1節）。粒度は会社の設定に従う（Q-64）
+    const stepsByRun = new Map(await Promise.all(
+      liveRuns.map(async ({ run }) => [run.id, await deps.repo.listRunSteps(tenantId, run.id)] as const),
+    ));
+    const people = buildPresence({
+      now, users, sessions, liveRuns, stepsByRun, pending,
+      secretaryEvents: secretaryEvents.map((e) => ({ actorId: e.actorId, occurredAt: e.occurredAt })),
+      agentName,
+    });
+
+    return {
       generatedAt: now.toISOString(),
       counts: {
         activeUsers,
@@ -121,11 +198,14 @@ export function dashboardRoute(deps: AppDeps) {
         todayCostJpy: round2(today.costJpy),
         todaySavedMinutes: round1(today.savedMinutes),
       },
+      // 個人名を出さない設定の会社には、状態ごとの人数と業務の名前だけを返す
+      people: settings.dashboard.people === 'names' ? people : null,
+      peopleSummary: settings.dashboard.people === 'names' ? null : summarizePresence(people),
       flows,
       backlog,
       events: events.map((e) => eventView(e, nameOf, runAgent, agentName)).filter((e) => e !== null),
-    });
-  });
+    };
+  }
 
   /** 集計（第6.7.8節）。`days` は 1・7・30 のいずれか。 */
   app.get('/stats', async (c) => {

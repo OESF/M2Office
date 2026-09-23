@@ -7,6 +7,7 @@
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import type { UserSettings } from '@m2office/shared';
+import { buildPresence } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 
@@ -73,6 +74,56 @@ export function meRoute(deps: AppDeps) {
     const removed = await deps.repo.clearMemories(tenant.id, user.id);
     await audit(deps, tenant.id, user.id, 'memory.clear', String(removed));
     return c.json({ ok: true, removed });
+  });
+
+  /**
+   * 管理者のダッシュボードで、自分がどう表示されているか（仕様書 第6.7.10節 規定 4）。
+   *
+   * @remarks
+   * 「見られているかもしれない」に、実物で答えるための窓口である。
+   * 返すのは自分の状態だけで、ほかの人の状態は返さない。
+   */
+  app.get('/presence', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const now = new Date();
+    const since = new Date(now.getTime() - 24 * 3_600_000).toISOString();
+    const [liveRuns, pending, sessions, secretaryEvents, settings, view] = await Promise.all([
+      deps.repo.listLiveRuns(tenant.id, since),
+      deps.repo.listPendingApprovals(tenant.id),
+      deps.repo.listActiveSessions(tenant.id),
+      deps.repo.listAuditSince(
+        tenant.id, ['secretary.direct', 'secretary.route', 'secretary.chat', 'secretary.help'], 30,
+      ),
+      deps.repo.getTenantSettings(tenant.id),
+      deps.tenantView(tenant.id),
+    ]);
+    const mine = liveRuns.filter(({ job }) => job.requestedBy === user.id);
+    const stepsByRun = new Map(await Promise.all(
+      mine.map(async ({ run }) => [run.id, await deps.repo.listRunSteps(tenant.id, run.id)] as const),
+    ));
+    const [presence] = buildPresence({
+      now, users: [user], sessions, liveRuns: mine, stepsByRun, pending,
+      secretaryEvents: secretaryEvents.map((e) => ({ actorId: e.actorId, occurredAt: e.occurredAt })),
+      agentName: (id) => view.allAgents.find((a) => a.id === id)?.name ?? id,
+    });
+    return c.json({
+      presence,
+      // 会社が選んでいる粒度（第6.7.4.1節）
+      granularity: settings.dashboard.people,
+      shown: [
+        '状態（業務を実行中・承認の依頼ありなど）',
+        'いま使っている業務の名前',
+        '活動の表示名（「リサーチ中」など）',
+        '接続の経路と端末の種類',
+      ],
+      hidden: [
+        '秘書との会話の中身',
+        '業務の入力と成果物の中身',
+        '接続元の場所',
+        '個人ごとの勤務時間の集計',
+        '過去の状態の履歴',
+      ],
+    });
   });
 
   /** ログイン中の端末（第6.5.8節）。いま使っているものに印を付ける。 */

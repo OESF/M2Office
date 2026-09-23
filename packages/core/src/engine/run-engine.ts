@@ -443,7 +443,10 @@ export class RunEngine {
           toolResults.push({ name: call.name, risk: tool.risk, pending: '本人の確認を待っています' });
           continue;
         }
+        // いま何をしているかを、ダッシュボードの「活動中」に出すために書いておく（仕様書 第6.7.7節、ADR-0013）
+        await this.markActivity(run.tenantId, runStep, tool.activityLabel);
         toolResults.push(await this.invokeTool(run, def, run.cursor, call, requestedBy, registry, ai.research));
+        await this.markActivity(run.tenantId, runStep, null);
       }
 
       const output = { text: res.text, tools: toolResults };
@@ -470,6 +473,19 @@ export class RunEngine {
       if (step.onError === 'continue') return { kind: 'ok', tokensUsed: 0 };
       return { kind: 'failed', reason };
     }
+  }
+
+  /**
+   * 実行中のステップに、いま呼んでいるツールの活動の表示名を書く（消すときは `null`）。
+   *
+   * @remarks
+   * ダッシュボードの「活動中」（仕様書 第6.7.4.1節）はこれを読む。状態のための表は作らず、
+   * 実行のステップに一時的に持たせるだけである（第6.7.10節「履歴を保存しない」）。
+   */
+  private async markActivity(tenantId: string, runStep: RunStep, activity: string | null): Promise<void> {
+    const input = { ...(runStep.input as Record<string, unknown> | null), ...(activity ? { activity } : {}) };
+    if (!activity) delete input['activity'];
+    await this.deps.repo.updateRunStep(tenantId, { ...runStep, input });
   }
 
   /**

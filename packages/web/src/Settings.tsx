@@ -161,6 +161,8 @@ export function Settings({ me, agents, onChanged }: {
         </div>
       </div>
 
+      <PresenceNotice />
+
       <MemorySettings settings={s} onChange={(v) => set('memory', v)}
         onSave={() => void save(() => api.saveMySettings('memory', { ...s.memory }))} />
 
@@ -225,6 +227,36 @@ export function Settings({ me, agents, onChanged }: {
  * @param agents 使える業務（管理者が有効にしたもの）
  * @param order 本人が決めた並び順
  */
+/**
+ * 管理者のダッシュボードでの自分の見え方（仕様書 第6.7.10節 規定 4）。
+ *
+ * @remarks
+ * 「見られているかもしれない」に実物で答えるための区画である。
+ * いまの自分の状態と、示される項目・示されない項目を並べる。
+ */
+function PresenceNotice() {
+  const [data, setData] = useState<Awaited<ReturnType<typeof api.myPresence>> | null>(null);
+  useEffect(() => { api.myPresence().then(setData).catch(() => setData(null)); }, []);
+  if (!data) return null;
+  return (
+    <div className="card">
+      <h3>管理者のダッシュボードでの見え方</h3>
+      <p>
+        管理者の画面には、いまのあなたは
+        <strong>「{data.presence.detail}」</strong>
+        と表示されています
+        {data.granularity === 'counts' && <>（この会社は個人名を出さず、人数と業務だけを表示する設定です）</>}
+        。
+      </p>
+      <p className="muted small">表示されるもの: {data.shown.join('、')}</p>
+      <p className="muted small">表示されないもの: {data.hidden.join('、')}</p>
+      <p className="muted small">
+        個人の状態の履歴は残しません。後から見られるのは、監査ログ（誰が何を実行したか）と実行の記録だけです。
+      </p>
+    </div>
+  );
+}
+
 /**
  * 記憶とデータ（仕様書 第6.5.4節）。秘書が自分について覚えていることを見て、消せるようにする。
  *

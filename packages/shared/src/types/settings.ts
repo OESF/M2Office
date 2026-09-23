@@ -183,6 +183,14 @@ export interface PrivacySettings {
   googleDataRetentionDays: number;
 }
 
+/**
+ * ダッシュボードの見せ方（仕様書 第6.7.4.1節、Q-64）。
+ */
+export interface DashboardSettings {
+  /** 人の状態の粒度。`names`: 個人名で表示（既定）、`counts`: 人数と業務だけ。 */
+  people: 'names' | 'counts';
+}
+
 export interface TenantSettings {
   company: CompanyInfo;
   writingStyle: WritingStyle;
@@ -198,6 +206,8 @@ export interface TenantSettings {
   knowledge: KnowledgeSettings;
   /** Google から取得したデータの保持（第14.3.2節）。 */
   privacy: PrivacySettings;
+  /** ダッシュボードの見せ方（第6.7.4.1節）。 */
+  dashboard: DashboardSettings;
 }
 
 /** 設定が未保存の会社に使う既定値。 */
@@ -220,6 +230,8 @@ export const DEFAULT_TENANT_SETTINGS: TenantSettings = {
   knowledge: { standardSynonyms: true, synonyms: [] },
   // 上限の 7 日。会社は短くできるが、長くはできない（第14.3.2節）
   privacy: { googleDataRetentionDays: 7 },
+  // 承認の滞留が誰の判断待ちかを示すため、既定は個人名（Q-64）
+  dashboard: { people: 'names' },
 };
 
 /**

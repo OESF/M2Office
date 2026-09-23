@@ -1503,6 +1503,71 @@ console.log('\n■ 36. 記憶とデータ（第6.5.4・11.5.1節）');
     ? ok('監査ログに操作は残り、記憶の中身は残らない') : ng('監査ログの扱いが規定と違う', JSON.stringify(created ?? null));
 }
 
+console.log('\n■ 37. ダッシュボードの人の状態と SSE（第6.7.4.1・6.7.9節）');
+{
+  const { body: live } = await call('a', '/v1/admin/dashboard/live');
+  const me = (live.people ?? []).find((p) => p.userId.endsWith('admin'));
+  Array.isArray(live.people) && me?.name && me.state
+    ? ok(`人の状態を個人名で返す（既定。${live.people.length} 人、${me.name}さんは「${me.detail}」）`)
+    : ng('人の状態が返らない', JSON.stringify(live.people ?? null));
+  // 状態に持たせてよい項目だけであること（中身の項目が紛れていない）
+  const allowed = ['userId', 'name', 'state', 'detail', 'agentName', 'route', 'device'];
+  (live.people ?? []).every((p) => Object.keys(p).every((k) => allowed.includes(k)))
+    ? ok('状態・業務の名前までで、会話や入力の中身の項目を持たない')
+    : ng('余分な項目がある', JSON.stringify(Object.keys((live.people ?? [])[0] ?? {})));
+
+  // SSE。変化があると送られてくる（依頼を出して確かめる）
+  const controller = new AbortController();
+  const received = [];
+  const stream = (async () => {
+    const res = await fetch(`${API}/v1/admin/dashboard/stream`, {
+      headers: { 'x-tenant': 'a', 'x-user': 'admin@alpha.example.jp' },
+      signal: controller.signal,
+    });
+    if (!res.ok) throw new Error(`受け取れない (${res.status})`);
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const chunks = buffer.split('\n\n');
+      buffer = chunks.pop() ?? '';
+      for (const chunk of chunks) {
+        const data = chunk.split('\n').find((l) => l.startsWith('data: '));
+        if (data) received.push(JSON.parse(data.slice('data: '.length)));
+      }
+    }
+  })().catch((e) => { if (!controller.signal.aborted) ng('SSE が切れた', e.message); });
+
+  await sleep(500);
+  const { body: qa } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: 'knowledge-qa', input: { question: '有給休暇' } }) });
+  await waitFor('a', qa.runId, ['completed', 'failed']);
+  for (let i = 0; i < 20 && received.length === 0; i++) await sleep(500);
+  controller.abort();
+  await stream;
+
+  received.length > 0
+    ? ok(`変化があると SSE で届く（${received.length} 回）`) : ng('SSE で届かない');
+  received.some((r) => Array.isArray(r.people))
+    ? ok('SSE でも人の状態を送る') : ng('SSE に人の状態が無い');
+
+  // 粒度を「人数と業務だけ」に変えると、名前を出さない
+  await call('a', '/v1/admin/settings/dashboard', { method: 'PUT', body: JSON.stringify({ people: 'counts' }) });
+  const { body: counts } = await call('a', '/v1/admin/dashboard/live');
+  counts.people === null && counts.peopleSummary && !JSON.stringify(counts.peopleSummary).includes('管理者')
+    ? ok('「人数と業務だけ」にすると、誰かを示さない') : ng('名前が出ている', JSON.stringify(counts.peopleSummary ?? null));
+  await call('a', '/v1/admin/settings/dashboard', { method: 'PUT', body: JSON.stringify({ people: 'names' }) });
+
+  // 本人は自分の見え方を確かめられる（第6.7.10節 規定 4）
+  const { body: mine } = await call('a', '/v1/me/presence', {}, 'member');
+  mine.presence?.userId && mine.presence.detail
+    ? ok(`本人は自分の見え方を確かめられる（「${mine.presence.detail}」）`) : ng('自分の見え方が分からない', JSON.stringify(mine));
+  (mine.hidden ?? []).some((x) => x.includes('会話の中身'))
+    ? ok('表示されないものを本人に示す') : ng('示さない');
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

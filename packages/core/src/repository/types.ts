@@ -222,6 +222,12 @@ export interface Repository {
   /** 権限区画の一覧。 */
   listCompartments(tenantId: string): Promise<{ id: string; name: string; description: string | null }[]>;
 
+  /**
+   * 有効なログイン状態を、利用者ごとに 1 つ（最後に操作したもの）返す（仕様書 第6.7.4.1節）。
+   *
+   * @remarks 人の状態を組み立てるのに使う。接続元の場所は持たない（第6.7.10節 規定 2）。
+   */
+  listActiveSessions(tenantId: string): Promise<{ userId: string; lastSeenAt: string; userAgent: string | null }[]>;
   /** 最近操作した利用者の人数（ダッシュボードの「ログイン中」。仕様書 第6.7.4節）。 */
   countActiveUsers(tenantId: string, since: Date): Promise<number>;
   /**

@@ -35,6 +35,12 @@ curl -H 'x-tenant: a' -H 'x-user: member@alpha.example.jp' http://localhost:3101
 
 Cookie は `HttpOnly`・`SameSite=Lax` で、`Domain` 属性を付けません。
 
+### ダッシュボードの SSE
+
+`GET /v1/admin/dashboard/stream` は `text/event-stream` で「いま」の中身を送ります（仕様書 第6.7.9節、ADR-0013）。
+`DASHBOARD_STREAM_TICK_MS`（既定 2 秒）ごとに状態を組み立て、**前回と違うときだけ**送ります。15 秒ごとに心拍を送ります。
+画面は `EventSource` ではなく `fetch` の読み取りで受けます（認証のヘッダーを付けるため）。
+
 ### テナントの状態による制御
 
 テナントの状態（`tenants.status`）で、受け付ける要求を変えます（仕様書 第23.8.6節）。判定は `resolveTenant()` にあります。

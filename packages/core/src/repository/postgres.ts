@@ -737,7 +737,8 @@ export class PostgresRepository implements Repository {
       effect: TenantSettings['effect'] | null; onboarding: TenantSettings['onboarding'] | null;
       access: TenantSettings['access'] | null; slides: TenantSettings['slides'] | null;
       knowledge: TenantSettings['knowledge'] | null; privacy: TenantSettings['privacy'] | null;
-    }>(tenantId, `select company, writing_style, automation, agents, effect, onboarding, access, slides, knowledge, privacy
+      dashboard: TenantSettings['dashboard'] | null;
+    }>(tenantId, `select company, writing_style, automation, agents, effect, onboarding, access, slides, knowledge, privacy, dashboard
                     from tenant_settings where tenant_id = $1`,
       [tenantId]);
     const r = rows[0];
@@ -756,6 +757,7 @@ export class PostgresRepository implements Repository {
         synonyms: [...(r?.knowledge?.synonyms ?? [])],
       },
       privacy: { ...d.privacy, ...(r?.privacy ?? {}) },
+      dashboard: { ...d.dashboard, ...(r?.dashboard ?? {}) },
     };
   }
 
@@ -765,6 +767,7 @@ export class PostgresRepository implements Repository {
     const column = ({
       company: 'company', writingStyle: 'writing_style', automation: 'automation', agents: 'agents',
       effect: 'effect', onboarding: 'onboarding', access: 'access', slides: 'slides', knowledge: 'knowledge', privacy: 'privacy',
+      dashboard: 'dashboard',
     } as const)[section];
     // 列名は上の固定の対応表からのみ取る。利用者の入力を SQL に埋め込まない
     await this.q(tenantId,
@@ -953,6 +956,18 @@ export class PostgresRepository implements Repository {
          from files where tenant_id = $1 and id = $2`,
       [tenantId, id]);
     return rows[0] ?? null;
+  }
+
+  async listActiveSessions(
+    tenantId: string,
+  ): Promise<{ userId: string; lastSeenAt: string; userAgent: string | null }[]> {
+    return this.q<{ userId: string; lastSeenAt: string; userAgent: string | null }>(tenantId,
+      `select distinct on (user_id)
+              user_id as "userId", last_seen_at as "lastSeenAt", user_agent as "userAgent"
+         from sessions
+        where tenant_id = $1 and revoked_at is null and expires_at > now()
+        order by user_id, last_seen_at desc`,
+      [tenantId]);
   }
 
   async countActiveUsers(tenantId: string, since: Date): Promise<number> {

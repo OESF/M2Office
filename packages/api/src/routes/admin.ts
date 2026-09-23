@@ -395,6 +395,11 @@ function validateSection(
       }
       return { section: 'effect', value: { minutesPerRun } };
     }
+    case 'dashboard': {
+      // 人の状態の粒度（第6.7.4.1節、Q-64）。既定は個人名
+      const people = o['people'] === 'counts' ? 'counts' : 'names';
+      return { section: 'dashboard', value: { people } };
+    }
     case 'slides': {
       // スライドのテンプレート（仕様書 第9.4.2節）。URL から ID を取り出し、名前の重なりと既定を整える
       const input = Array.isArray(o['templates']) ? o['templates'] : [];

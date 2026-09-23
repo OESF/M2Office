@@ -135,6 +135,17 @@ export interface LoginProviders {
 export type ScheduleView = Schedule & { label: string };
 
 /** ダッシュボードの「いま」（仕様書 第6.7.3節）。 */
+/** 人の状態の 1 人分（仕様書 第6.7.4.1節）。 */
+export interface PresenceView {
+  userId: string;
+  name: string;
+  state: 'approval' | 'activity' | 'running' | 'talking' | 'idle' | 'offline';
+  detail: string;
+  agentName: string | null;
+  route: string | null;
+  device: string | null;
+}
+
 export interface DashboardLive {
   generatedAt: string;
   counts: {
@@ -147,6 +158,10 @@ export interface DashboardLive {
     waitingFor: { who: string; since: string; kind: 'approval' | 'confirm' } | null;
     failureReason: string | null;
   }[];
+  /** 人の状態。会社の設定が「人数と業務だけ」なら `null`（第6.7.4.1節）。 */
+  people: PresenceView[] | null;
+  /** 人数と業務だけの見せ方。個人名で表示する会社では `null`。 */
+  peopleSummary: { counts: { state: string; label: string; n: number }[]; agents: string[] } | null;
   backlog: { approvalId: string; agentName: string; what: string; requester: string; approver: string; since: string }[];
   events: { at: string; kind: 'start' | 'done' | 'fail' | 'wait'; text: string }[];
 }
@@ -366,6 +381,10 @@ export const api = {
   mySettings: () => call<UserSettings>('/me/settings'),
   saveMySettings: <K extends keyof UserSettings>(section: K, value: UserSettings[K]) =>
     call(`/me/settings/${section}`, { method: 'PUT', body: JSON.stringify(value) }),
+  /** 管理者のダッシュボードでの自分の見え方（仕様書 第6.7.10節 規定 4）。 */
+  myPresence: () => call<{
+    presence: PresenceView; granularity: 'names' | 'counts'; shown: string[]; hidden: string[];
+  }>('/me/presence'),
   /** 記憶とデータ（仕様書 第6.5.4節）。本人の記憶だけが返る。 */
   myMemories: () => call<{ items: MemoryView[] }>('/me/memories'),
   deleteMemory: (id: string) => call(`/me/memories/${id}`, { method: 'DELETE' }),
@@ -422,6 +441,49 @@ export const api = {
       }[];
     }>('/admin/settings'),
     dashboardLive: () => call<DashboardLive>('/admin/dashboard/live'),
+    /**
+     * ダッシュボードの状態を受け取り続ける（SSE。仕様書 第6.7.9節）。
+     *
+     * @param onData 変化が届くたびに呼ぶ
+     * @param onError 経路が切れたときに呼ぶ。呼び出し側が取り直しへ切り替える
+     * @returns 受け取りをやめる関数
+     *
+     * @remarks
+     * `EventSource` ではなく `fetch` の読み取りで受ける。`EventSource` は
+     * 認証のヘッダー（開発用のテナント指定）を付けられないため（ADR-0013）。
+     */
+    dashboardStream: (onData: (live: DashboardLive) => void, onError: (e: unknown) => void): (() => void) => {
+      const controller = new AbortController();
+      void (async () => {
+        try {
+          const res = await fetch('/v1/admin/dashboard/stream', {
+            credentials: 'same-origin',
+            headers: { ...(devTenant ? { 'x-tenant': devTenant } : {}) },
+            signal: controller.signal,
+          });
+          if (!res.ok || !res.body) throw new Error(`受け取れませんでした (${res.status})`);
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            // 1 件は空行で区切られる
+            const chunks = buffer.split('\n\n');
+            buffer = chunks.pop() ?? '';
+            for (const chunk of chunks) {
+              const data = chunk.split('\n').find((l) => l.startsWith('data: '));
+              if (data) onData(JSON.parse(data.slice('data: '.length)) as DashboardLive);
+            }
+          }
+          throw new Error('接続が終了しました');
+        } catch (e) {
+          if (!controller.signal.aborted) onError(e);
+        }
+      })();
+      return () => controller.abort();
+    },
     dashboardStats: (days: 1 | 7 | 30) => call<DashboardStats>(`/admin/dashboard/stats?days=${days}`),
     saveSettings: <K extends keyof TenantSettings>(section: K, value: TenantSettings[K]) =>
       call(`/admin/settings/${section}`, { method: 'PUT', body: JSON.stringify(value) }),

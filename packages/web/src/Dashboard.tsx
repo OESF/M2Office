@@ -71,22 +71,96 @@ function Checklist({ onGo }: { onGo?: (tab: string) => void }) {
   );
 }
 
+/**
+ * 人の状態（仕様書 第6.7.4節）。会社の設定により、個人名か、人数と業務だけを出す（第6.7.4.1節）。
+ *
+ * @remarks
+ * 出すのは状態・業務の名前・活動の表示名までである。会話や入力の中身、接続元の場所は出さない（第6.7.10節）。
+ */
+function People({ data, onGranularityChanged }: { data: DashboardLive; onGranularityChanged: () => void }) {
+  const granularity = data.peopleSummary ? 'counts' : 'names';
+  const switcher = (
+    <div className="row">
+      <label className="muted small">見せ方</label>
+      <select value={granularity}
+        onChange={(e) => void api.admin.saveSettings('dashboard', { people: e.target.value as 'names' | 'counts' })
+          .then(onGranularityChanged)}>
+        <option value="names">個人名で表示</option>
+        <option value="counts">人数と業務だけ</option>
+      </select>
+    </div>
+  );
+
+  if (data.peopleSummary) {
+    const { counts, agents } = data.peopleSummary;
+    return (
+      <section className="card">
+        <h3>人の状態 <HelpTip article="admin-dashboard">いま誰が何をしているかを、状態と業務の名前までで示します。会話や入力の中身、接続元の場所は出しません。</HelpTip></h3>
+        {switcher}
+        <p className="muted small">この会社は「人数と業務だけ」の表示にしています。</p>
+        <div className="presence-row">
+          {counts.filter((x) => x.n > 0).map((x) => (
+            <span key={x.state} className={`chip presence-${x.state}`}>{x.label} {x.n} 人</span>
+          ))}
+        </div>
+        {agents.length > 0 && <p className="muted small">動いている業務: {agents.join('、')}</p>}
+      </section>
+    );
+  }
+  const people = data.people ?? [];
+  return (
+    <section className="card">
+      <h3>人の状態 <HelpTip article="admin-dashboard">いま誰が何をしているかを、状態と業務の名前までで示します。会話や入力の中身、接続元の場所は出しません。</HelpTip></h3>
+      {switcher}
+      {people.length === 0 && <p className="muted">利用者がいません。</p>}
+      <div className="presence-row">
+        {people.map((p) => (
+          <span key={p.userId} className={`presence presence-${p.state}`} title={p.detail}>
+            <strong>{p.name}</strong>
+            <span className="small">{p.detail}</span>
+            {(p.route || p.device) && (
+              <span className="muted small">{[p.route, p.device].filter(Boolean).join('・')}</span>
+            )}
+          </span>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 /** 「いま」の画面（第6.7.3節）。 */
 function Live() {
   const [data, setData] = useState<DashboardLive | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [, setTick] = useState(0);
 
+  // SSE で受け取り、受け取れないときだけ一定間隔の取り直しに戻す（仕様書 第6.7.9節）
+  const [live, setLive] = useState(true);
   useEffect(() => {
     let alive = true;
     const load = () => api.admin.dashboardLive()
       .then((d) => { if (alive) { setData(d); setError(null); } })
       .catch((e) => { if (alive) setError(e.message); });
     void load();
-    const timer = setInterval(load, LIVE_INTERVAL_MS);
     // 経過時間の表示を毎秒進める
     const clock = setInterval(() => setTick((t) => t + 1), 1000);
-    return () => { alive = false; clearInterval(timer); clearInterval(clock); };
+
+    let stop: (() => void) | null = null;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    stop = api.admin.dashboardStream(
+      (d) => { if (alive) { setData(d); setError(null); setLive(true); } },
+      () => {
+        if (!alive || timer) return;
+        setLive(false);
+        timer = setInterval(load, LIVE_INTERVAL_MS);
+      },
+    );
+    return () => {
+      alive = false;
+      stop?.();
+      clearInterval(clock);
+      if (timer) clearInterval(timer);
+    };
   }, []);
 
   if (error && !data) return <p className="error">{error}</p>;
@@ -96,9 +170,12 @@ function Live() {
   return (
     <>
       <p className="lead">
-        自動で更新しています（最終更新 {time(data.generatedAt)}）
+        {live ? '変化があるとすぐに更新します' : '5 秒ごとに取り直しています'}
+        （最終更新 {time(data.generatedAt)}）
         {error && <span className="error-inline"> 更新に失敗しました: {error}</span>}
       </p>
+
+      <People data={data} onGranularityChanged={() => void api.admin.dashboardLive().then(setData).catch(() => undefined)} />
 
       <div className="tiles">
         <Tile label="ログイン中" value={c.activeUsers} unit="人" />
