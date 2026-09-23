@@ -133,9 +133,14 @@ export function Settings({ me, agents, onChanged }: {
               次に音声で話しかけたときから変わります。
             </span>
           </div>
-          <Text label="話し方の指示" value={s.secretary.voiceStyle}
-            onChange={(v) => set('secretary', { voiceStyle: v.slice(0, VOICE_STYLE_MAX) })}
-            hint={`音声のときの話し方を、言葉で指示できます（${VOICE_STYLE_MAX} 字まで）。例: 関西弁で話して / ゆっくり、短めに`} />
+          <div className="field"><label>話し方の指示</label>
+            <input value={s.secretary.voiceStyle} disabled={!s.secretary.speak}
+              placeholder="例: 関西弁で話して"
+              onChange={(e) => set('secretary', { voiceStyle: e.target.value.slice(0, VOICE_STYLE_MAX) })} />
+            <span className="muted small">
+              音声のときの話し方を、言葉で指示できます（{VOICE_STYLE_MAX} 字まで）。例: 関西弁で話して / ゆっくり、短めに
+            </span>
+          </div>
         </div>
         <button className="btn" onClick={() => void save(() => api.saveMySettings('secretary', s.secretary))}>保存する</button>
       </div>
