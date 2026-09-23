@@ -22,6 +22,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadAuthConfig, type AuthConfig } from './auth/config.js';
 import { OAuthStateStore } from './auth/oauth-state.js';
+import { HandoffStore } from './auth/handoff.js';
 
 /** API プロセス全体で共有する依存。 */
 export interface AppDeps {
@@ -65,6 +66,10 @@ export interface AppDeps {
   ai: TenantAiResolver;
   /** Google の OAuth。戻り先の URI と、使い捨ての state の置き場。 */
   oauth: { redirectUri: string; states: OAuthStateStore };
+  /** ログインの `state`（仕様書 第16.1.2節）。業務の連携のものとは別に持つ。 */
+  loginStates: OAuthStateStore;
+  /** ログインの引換券（仕様書 第16.1.2節）。運営のホストから会社のホストへ渡す。 */
+  handoffs: HandoffStore;
 }
 
 /**
@@ -172,6 +177,8 @@ export function buildDeps(): AppDeps {
       redirectUri: process.env['GOOGLE_OAUTH_REDIRECT_URI'] ?? 'http://localhost:3100/v1/oauth/google/callback',
       states: new OAuthStateStore(),
     },
+    loginStates: new OAuthStateStore(),
+    handoffs: new HandoffStore(),
   };
 }
 

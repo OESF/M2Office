@@ -164,3 +164,46 @@ export async function revokeGoogleToken(token: string, endpoints: GoogleOAuthEnd
 function shortScopes(scope: string): string[] {
   return scope.split(/\s+/).filter(Boolean).map((s) => s.replace('https://www.googleapis.com/auth/', '').replace(/^https:\/\/www\.googleapis\.com\/auth\/userinfo\.email$/, 'email'));
 }
+
+/**
+ * ログインの同意画面の URL を作る（仕様書 第16.1.1節）。
+ *
+ * @remarks
+ * 求めるのは `openid`・`email`・`profile` **だけ**である。
+ * メールも予定もドライブも読めない。会社のデータに触れるのは、
+ * 会社の OAuth クライアントで得た許可だけである。
+ *
+ * 業務の連携（{@link buildGoogleAuthUrl}）と違い、`access_type=offline` を付けない。
+ * ログインに、あとから使うトークンは要らないためである。
+ */
+export function buildGoogleLoginUrl(p: {
+  clientId: string; redirectUri: string; state: string; codeChallenge: string; hostedDomain?: string;
+}, endpoints: GoogleOAuthEndpoints = GOOGLE_OAUTH_ENDPOINTS): string {
+  const q = new URLSearchParams({
+    client_id: p.clientId, redirect_uri: p.redirectUri, response_type: 'code',
+    scope: 'openid email profile',
+    state: p.state, code_challenge: p.codeChallenge, code_challenge_method: 'S256',
+    // アカウントを選ばせる。前に選んだものを黙って使わない
+    prompt: 'select_account',
+    // 会社のドメインを Google 側でも絞る。こちらでも必ず確かめる（第16.1.2節）
+    ...(p.hostedDomain ? { hd: p.hostedDomain } : {}),
+  });
+  return `${endpoints.auth}?${q.toString()}`;
+}
+
+/**
+ * ログインの戻りのコードを、アクセス トークンに換える（仕様書 第16.1.2節）。
+ *
+ * @remarks
+ * リフレッシュ トークンは要らない。誰がログインしたかを 1 度知れば足りるためである。
+ */
+export async function exchangeGoogleLoginCode(p: {
+  clientId: string; clientSecret: string; code: string; redirectUri: string; codeVerifier: string;
+}, endpoints: GoogleOAuthEndpoints = GOOGLE_OAUTH_ENDPOINTS): Promise<{ accessToken: string }> {
+  const t = await postForm(endpoints.token, {
+    client_id: p.clientId, client_secret: p.clientSecret, code: p.code, redirect_uri: p.redirectUri,
+    code_verifier: p.codeVerifier, grant_type: 'authorization_code',
+  });
+  if (!t['access_token']) throw new GoogleOAuthError('Google からトークンが返りませんでした');
+  return { accessToken: String(t['access_token']) };
+}

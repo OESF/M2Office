@@ -413,6 +413,16 @@ export const api = {
     return me;
   },
   providers: () => call<LoginProviders>('/auth/providers'),
+  /** Google の同意画面の URL を得る（仕様書 第16.1.2節）。 */
+  googleLoginUrl: () => call<{ url: string }>('/auth/google/start'),
+  /**
+   * 引換券を、このホストでのログイン状態に換える（仕様書 第16.1.2節）。
+   *
+   * @remarks 券は 1 回しか使えない。失敗したらログインをやり直す。
+   */
+  exchangeTicket: async (ticket: string) => {
+    await call('/auth/exchange', { method: 'POST', body: JSON.stringify({ ticket }) });
+  },
   devLogin: async (email: string) => {
     const res = await call<{ csrfToken: string }>('/auth/dev-login', {
       method: 'POST', body: JSON.stringify({ email }),

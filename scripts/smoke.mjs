@@ -2239,6 +2239,38 @@ console.log('\n■ 46. 会話していない間に終わったものの持ち越
     ? ok('他人の調べものは見えない') : ng('他人の調べものが見える');
 }
 
+console.log('\n■ 47. Google ログインの経路（第16.1.2節）');
+{
+  // 引換券は、このホストでしか使えない。でたらめな券では入れない
+  const bad = await fetch(`${API}/v1/auth/exchange`, {
+    method: 'POST', headers: { 'content-type': 'application/json', 'x-tenant': 'a' },
+    body: JSON.stringify({ ticket: 'でたらめな券' }),
+  });
+  bad.status === 401 ? ok('知らない引換券では入れない（401）') : ng(`入れてしまう（${bad.status}）`);
+
+  const empty = await fetch(`${API}/v1/auth/exchange`, {
+    method: 'POST', headers: { 'content-type': 'application/json', 'x-tenant': 'a' },
+    body: JSON.stringify({}),
+  });
+  empty.status === 401 ? ok('券が無ければ入れない（401）') : ng(`入れてしまう（${empty.status}）`);
+
+  // 運営のクライアントが未設定なら、始められないことを正直に返す
+  const start = await fetch(`${API}/v1/auth/google/start`, { headers: { 'x-tenant': 'a' } });
+  const startBody = await start.json();
+  (start.status === 503 && /準備中/.test(startBody.error ?? ''))
+    || (start.status === 200 && /^https:\/\/accounts\.google\.com\//.test(startBody.url ?? ''))
+    ? ok(`ログインの開始が筋の通った応答を返す（${start.status}）`) : ng('応答が違う', JSON.stringify(startBody));
+
+  // 運営のホストでの戻りは、テナントの判定より前に受ける。知らない state は断る
+  const cb = await fetch(`${API}/v1/oauth/google/login-callback?state=unknown&code=x`);
+  cb.status === 400 ? ok('知らない state の戻りは断る（400）') : ng(`断らない（${cb.status}）`);
+
+  // 使える手段の一覧に、テナントの名前が入る
+  const { body: providers } = await call('a', '/v1/auth/providers');
+  providers.tenant?.subdomain === 'a' && typeof providers.google?.enabled === 'boolean'
+    ? ok('使えるログイン手段を返す') : ng('返らない', JSON.stringify(providers));
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

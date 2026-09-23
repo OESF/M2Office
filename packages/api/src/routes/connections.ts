@@ -12,7 +12,7 @@
 import { randomUUID } from 'node:crypto';
 import { Hono, type Context } from 'hono';
 import {
-  buildGoogleAuthUrl, checkGeminiLive, checkGeminiText, createPkce, exchangeGoogleCode, googleGrantedScopes,
+  buildGoogleAuthUrl, checkGeminiLive, checkGeminiText, createPkce, exchangeGoogleCode, exchangeGoogleLoginCode, googleGrantedScopes,
   googleScopeLabel, googleUserEmail, refreshGoogleAccessToken, revokeGoogleToken, GoogleOAuthError,
   type GeminiModels, type GeminiSettingsMeta,
 } from '@m2office/core';
@@ -332,6 +332,59 @@ export function oauthCallbackRoute(deps: AppDeps) {
       return back('connected');
     } catch (err) {
       deps.log.warn('Google との接続に失敗しました', { tenantId: pending.tenantId, err: err instanceof Error ? err.message : String(err) });
+      return back('failed');
+    }
+  });
+
+  /**
+   * ログインの戻りを受ける（仕様書 第16.1.2節）。
+   *
+   * @remarks
+   * **運営のホストで受ける。** Google は HTTPS を要求する（例外は `localhost`）ため、
+   * テナントごとのホストをリダイレクト先にできない。
+   *
+   * ここでは Cookie を張らない。`Domain` を付けない Cookie は、
+   * このホストでしか効かないためである。代わりに 1 回限りの引換券を渡す。
+   */
+  app.get('/google/login-callback', async (c) => {
+    const pending = deps.loginStates.take(c.req.query('state') ?? '');
+    if (!pending) return c.text('ログインの要求が無効か、期限が切れています。もう一度お試しください。', 400);
+    // 失敗しても、どこまで合っていたかは示さない（登録の有無を外から測らせない）
+    const back = (result: string) =>
+      c.redirect(`${pending.returnTo}${pending.returnTo.includes('?') ? '&' : '?'}login=${result}`);
+    if (c.req.query('error')) return back('cancelled');
+    const code = c.req.query('code');
+    const login = deps.auth.login;
+    if (!code || !login) return back('failed');
+
+    try {
+      const tenant = await deps.repo.findTenantById(pending.tenantId);
+      // 停止中・緊急停止・解約済みの会社にはログインさせない（第23.8.6節）
+      if (!tenant || !isOperational(tenant)) return back('failed');
+      const { accessToken } = await exchangeGoogleLoginCode({
+        clientId: login.clientId, clientSecret: login.clientSecret,
+        code, redirectUri: login.redirectUri, codeVerifier: pending.codeVerifier,
+      });
+      const email = await googleUserEmail(accessToken);
+      if (!email) return back('failed');
+
+      // ドメインが会社のものであり、かつその会社の利用者として登録されていること（第16.1.2節）
+      const domain = email.split('@')[1];
+      const user = tenant.workspaceDomain && domain === tenant.workspaceDomain
+        ? await deps.repo.findUserByEmail(tenant.id, email)
+        : null;
+      if (!user || user.status !== 'active') {
+        await audit(deps, tenant.id, 'system', 'auth.login.denied', email, {
+          reason: domain === tenant.workspaceDomain ? '登録されていない利用者' : 'ドメインが違う',
+        });
+        return back('denied');
+      }
+      const ticket = deps.handoffs.issue({ tenantId: tenant.id, userId: user.id });
+      return c.redirect(`${pending.returnTo}?ticket=${encodeURIComponent(ticket)}`);
+    } catch (err) {
+      deps.log.warn('ログインに失敗しました', {
+        tenantId: pending.tenantId, err: err instanceof Error ? err.message : String(err),
+      });
       return back('failed');
     }
   });

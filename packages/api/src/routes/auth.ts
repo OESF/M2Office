@@ -11,7 +11,21 @@ import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
+import { buildGoogleLoginUrl, createPkce } from '@m2office/core';
 import { clearSessionCookie, issueSession, readSession } from '../auth/session.js';
+
+/**
+ * 始めた会社のホストの起点。
+ *
+ * @remarks
+ * 画面から呼ばれるため `Origin` が付く。無ければ `Host` から組み立てる。
+ * 開発は HTTP、本番は HTTPS である。
+ */
+function tenantOrigin(origin: string | undefined, host: string | undefined): string {
+  if (origin) return origin;
+  const h = host ?? 'localhost';
+  return `${h.startsWith('localhost') || h.includes('.lvh.me') ? 'http' : 'https'}://${h}`;
+}
 
 /**
  * ログインとログアウト。
@@ -77,18 +91,72 @@ export function authRoute(deps: AppDeps) {
   });
 
   /**
-   * Google でのログインを始める。
+   * Google でのログインを始める（仕様書 第16.1.2節）。
    *
    * @remarks
-   * B-2 の完了後に、認可コードフロー（PKCE 付き）で実装する。
-   * それまでは準備中であることを返す。黙って開発用ログインへ切り替えない。
+   * 使うのは**運営の OAuth クライアント**であり、求める権限は
+   * `openid`・`email`・`profile` だけである（第16.1.1節）。
+   *
+   * 戻り先は運営のホスト 1 本である。どの会社から始めたかは `state` に入れて運ぶ。
    */
-  app.get('/google/start', (c) =>
-    c.json(
-      { error: 'Google ログインは準備中です。OAuth クライアントの設定（B-2）の完了後に有効になります。' },
-      503,
-    ),
-  );
+  app.get('/google/start', (c) => {
+    const tenant = c.get('tenant');
+    const login = deps.auth.login;
+    if (!login) {
+      return c.json(
+        { error: 'Google ログインは準備中です。OAuth クライアントの設定（B-2）の完了後に有効になります。' },
+        503,
+      );
+    }
+    const { verifier, challenge } = createPkce();
+    const state = deps.loginStates.issue({
+      tenantId: tenant.id,
+      // ログインの時点では、まだ誰かが分からない
+      userId: '',
+      codeVerifier: verifier,
+      // 戻す先は、始めた会社のホストである
+      returnTo: tenantOrigin(c.req.header('origin'), c.req.header('host')),
+    });
+    return c.json({
+      url: buildGoogleLoginUrl({
+        clientId: login.clientId, redirectUri: login.redirectUri, state, codeChallenge: challenge,
+        // Google 側でも会社のドメインに絞る。こちらでも必ず確かめる
+        ...(tenant.workspaceDomain ? { hostedDomain: tenant.workspaceDomain } : {}),
+      }),
+    });
+  });
+
+  /**
+   * 引換券を、この会社のホストでのログイン状態に換える（仕様書 第16.1.2節）。
+   *
+   * @remarks
+   * ログイン状態の Cookie は `Domain` を付けないため、運営のホストで張っても
+   * 会社のホストには届かない。**この口でだけ、そのホストの Cookie を張る。**
+   *
+   * 券は 1 回しか使えない。会社が食い違えば拒否する。
+   */
+  app.post('/exchange', async (c) => {
+    const tenant = c.get('tenant');
+    const { ticket } = await c.req.json<{ ticket?: string }>().catch(() => ({ ticket: undefined }));
+    const hit = ticket ? deps.handoffs.take(ticket) : null;
+    // 券が違う会社のものなら、使わせない（券は消費済みである）
+    if (!hit || hit.tenantId !== tenant.id) {
+      return c.json({ error: 'ログインをやり直してください' }, 401);
+    }
+    const user = await deps.repo.findUserById(tenant.id, hit.userId);
+    if (!user || user.status !== 'active') {
+      return c.json({ error: 'ログインをやり直してください' }, 401);
+    }
+    const session = await issueSession(c, deps.repo, deps.auth, {
+      tenantId: tenant.id, userId: user.id, provider: 'google',
+    });
+    await deps.repo.appendAudit({
+      id: randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id,
+      action: 'auth.login', targetType: 'session', targetId: session.id.slice(0, 16),
+      detail: { provider: 'google' }, occurredAt: new Date().toISOString(),
+    });
+    return c.json({ ok: true, csrfToken: session.csrfToken });
+  });
 
   /** ログアウト。ログイン状態を失効させ、Cookie を消す。 */
   app.post('/logout', async (c) => {

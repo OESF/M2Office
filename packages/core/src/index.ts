@@ -54,6 +54,7 @@ export {
 export { checkGeminiText, checkGeminiLive, type CheckResult } from './secrets/gemini-check.js';
 export {
   GOOGLE_OAUTH_ENDPOINTS, GOOGLE_LOGIN_SCOPES, googleScopeUrl, googleScopeLabel, createPkce, buildGoogleAuthUrl,
+  buildGoogleLoginUrl, exchangeGoogleLoginCode,
   exchangeGoogleCode, refreshGoogleAccessToken, googleGrantedScopes, googleUserEmail, revokeGoogleToken, GoogleOAuthError,
   type GoogleOAuthEndpoints,
 } from './google/oauth.js';

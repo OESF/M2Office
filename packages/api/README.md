@@ -79,7 +79,27 @@ A 社のサブドメインで発行した Cookie は B 社へ送られず、持�
 データベースには Cookie の値ではなくハッシュを保存します。
 
 正式なログインは Google アカウントのみです（仕様書 第16.1節）。
-OAuth クライアントが整うまでは、`GET /v1/auth/google/start` は 503 を返し、
+
+**ログインと、Google のデータへのアクセスとで OAuth クライアントを分けます**（第16.1.1節）。
+ログインは運営のもの 1 つ（`GOOGLE_LOGIN_CLIENT_ID` / `GOOGLE_LOGIN_CLIENT_SECRET`）で、
+求める権限は `openid`・`email`・`profile` だけです。会社のデータには触れません。
+会社のクライアントは管理者ページの接続で登録します。分ける理由は、会社のクライアントの登録に
+管理者ページが要る以上、ログインまでそれに頼ると最初の管理者が入れないためです。
+
+Google はリダイレクト URI に HTTPS を要求します（例外は `localhost`）。
+テナントごとのホストを戻り先にできないため、次の経路にしています（第16.1.2節）。
+
+| 順 | 口 | ホスト |
+|---|---|---|
+| 1 | `GET /v1/auth/google/start` | 会社のホスト。`state` に会社を入れて同意画面の URL を返す |
+| 2 | `GET /v1/oauth/google/login-callback` | **運営のホスト 1 本**（開発は `localhost:3101`）。ここでは Cookie を張らない |
+| 3 | `POST /v1/auth/exchange` | 会社のホスト。**1 回限りの引換券**を Cookie に換える |
+
+ログイン Cookie は `Domain` を付けないため、運営のホストで張っても会社のホストには届きません。
+引換券はそれを越えるためのもので、2 分で失効し、1 回しか使えません。
+券に入れるのは会社と利用者の ID だけで、名前もメールアドレスも入れません。
+
+未設定なら `GET /v1/auth/google/start` は 503 を返し、
 開発用ログイン（`POST /v1/auth/dev-login`）で動かします。
 開発用の手段は `NODE_ENV=production` で有効にすると起動を拒否します。
 
@@ -90,6 +110,9 @@ OAuth クライアントが整うまでは、`GET /v1/auth/google/start` は 503
 | `GET /health` | 生存確認。テナント不要 |
 | `GET /v1/auth/providers` | 使えるログイン手段。認証不要 |
 | `POST /v1/auth/dev-login` | 開発用ログイン。認証不要 |
+| `GET /v1/auth/google/start` | Google の同意画面の URL を返す（仕様書 第16.1.2節）。運営のクライアントが未設定なら 503 |
+| `POST /v1/auth/exchange` | 引換券を、このホストでのログイン状態に換える。券は 1 回限り・2 分 |
+| `GET /v1/oauth/google/login-callback` | Google からの戻り。**運営のホストで受ける**。テナントの判定とログインより前 |
 | `POST /v1/auth/logout` | ログアウト |
 | `GET /v1/me` | テナント・利用者・CSRF トークン・接続の状態 |
 | `GET /v1/agents` | 利用できるエージェントと入力スキーマ |
