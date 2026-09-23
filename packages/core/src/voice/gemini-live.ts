@@ -114,12 +114,14 @@ export class GeminiLiveProvider implements VoiceProvider {
     return {
       sendAudio(pcm) {
         if (ws.readyState !== WebSocket.OPEN) return;
+        // `realtimeInput.audio` で送る。以前の `mediaChunks` は Gemini 側で廃止され、
+        // 送ると「realtime_input.media_chunks is deprecated」で接続を切られる（2026-09-23 に実機で確認）
         ws.send(JSON.stringify({
           realtimeInput: {
-            mediaChunks: [{
+            audio: {
               mimeType: `audio/pcm;rate=${AUDIO.inputHz}`,
               data: Buffer.from(pcm).toString('base64'),
-            }],
+            },
           },
         }));
       },

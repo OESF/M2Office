@@ -57,9 +57,11 @@ test('音声を送り、聞こえた文字と応答と音を受け取る', async
   // 送りは Gemini Live の形（realtimeInput）に直される。中継と画面はこの形を知らない
   session.sendAudio(new Uint8Array([1, 2, 3, 4]));
   await waitFor(() => live.received.length >= 2);
-  const sent = live.received[1] as { realtimeInput?: { mediaChunks?: { mimeType?: string; data?: string }[] } };
-  assert.match(sent.realtimeInput?.mediaChunks?.[0]?.mimeType ?? '', /audio\/pcm;rate=16000/);
-  assert.equal(Buffer.from(sent.realtimeInput?.mediaChunks?.[0]?.data ?? '', 'base64').length, 4);
+  const sent = live.received[1] as { realtimeInput?: { audio?: { mimeType?: string; data?: string } } };
+  // `audio` で送る。以前の `mediaChunks` は廃止され、送ると接続を切られる（実機で確認）
+  assert.ok(sent.realtimeInput?.audio, 'realtimeInput.audio で送ること（mediaChunks は廃止）');
+  assert.match(sent.realtimeInput.audio.mimeType ?? '', /audio\/pcm;rate=16000/);
+  assert.equal(Buffer.from(sent.realtimeInput.audio.data ?? '', 'base64').length, 4);
 
   live.reply({ serverContent: { inputTranscription: { text: '今日の予定は' } } });
   live.reply({ serverContent: { outputTranscription: { text: '10 時から定例です' } } });
