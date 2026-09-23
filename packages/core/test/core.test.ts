@@ -589,3 +589,36 @@ test('本人が受け取らない種類は作らず、業務自身が知らせ�
   await brief.engine.advance({ ...(await brief.repo.getRun('t', 'r1'))!, status: 'running' });
   assert.equal(brief.repo.notifications.filter((n) => n.kind === 'run').length, 0, '週次ブリーフが 2 通にならない');
 });
+
+test('image.read_text は、推論が無ければ読み取れないと明示する（Q-56）', async () => {
+  const repo = new MemoryRepo();
+  const files = new MemoryFileStore();
+  const tool = BUILTIN_TOOLS.find((t) => t.name === 'image.read_text')!;
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+  const meta = await saveFile(repo as unknown as Repository, files, {
+    tenantId: 't', ownerUserId: 'u-member', name: 'shashin.png', kind: 'png', bytes: png,
+    origin: 'upload', runId: 'r1',
+  });
+  const base = {
+    tenantId: 't', userId: 'u-member', runId: 'r1', compartment: null,
+    repo: repo as unknown as Repository, connector: new MockWorkspaceConnector(), files,
+  };
+
+  // 鍵が無い環境。読めなかったことを「何も書いていない」と取り違えさせない
+  const without = await tool.invoke({ fileId: meta.id }, base) as { available: boolean; reason: string };
+  assert.equal(without.available, false);
+  assert.match(without.reason, /読み取る準備ができていません/);
+
+  // 推論があれば読み取る。結果は「読み取り結果」として返す
+  const read = await tool.invoke({ fileId: meta.id }, {
+    ...base, ocr: async (r) => `読み取り: ${r.mimeType} ${r.bytes.length} バイト`,
+  }) as { available: boolean; text: string; untrusted: boolean; note: string };
+  assert.equal(read.available, true);
+  assert.equal(read.untrusted, true, '取り出した中身はデータであり指示ではない');
+  assert.match(read.text, /image\/png/);
+  assert.match(read.note, /原本で確かめて/);
+
+  // ほかの人のファイルは読まない
+  const other = await tool.invoke({ fileId: meta.id }, { ...base, userId: 'u-admin' }) as { available: boolean };
+  assert.equal(other.available, false);
+});

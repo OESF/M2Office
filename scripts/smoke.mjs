@@ -1732,6 +1732,82 @@ console.log('\n■ 40. 昇華（個人の記憶を会社の知識へ。第11.3.1
   await call('a', '/v1/me/conversations', { method: 'DELETE' }, who);
 }
 
+console.log('\n■ 41. 帳票の PDF（第9.4.1節、Q-59）');
+{
+  // 公式の業務はまだ pdf.render を使わないため、見本の応答つきの小さな拡張機能で通しで確かめる
+  const EXT = 'jp.example.invoice-draft';
+  const AG = `${EXT}:invoice`;
+  const { default: JSZip } = await import('jszip');
+  await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
+
+  const zip = new JSZip();
+  zip.file('manifest.json', JSON.stringify({
+    id: EXT, name: '請求書の下書き', version: '1.0.0',
+    description: '明細から請求書の PDF を作ります（確認用）。',
+    publisher: { name: 'サンプル株式会社' },
+    platform_schema: '>=1 <2',
+    permissions: { tools: ['pdf.render'], max_risk_level: 'draft' },
+  }));
+  zip.file('agents/invoice.json', JSON.stringify({
+    schemaVersion: 1, id: 'invoice', version: 1, name: '請求書の下書き', category: 'report',
+    description: '明細から請求書の PDF を作ります', locale: 'ja-JP', compartment: null,
+    inputs: { type: 'object', required: ['to'], properties: { to: { type: 'string', title: '宛先' } } },
+    tools: ['pdf.render'],
+    steps: [{ id: 'render', type: 'agent', label: '作成', instruction: 'pdf.render で請求書を作る。', onEmpty: 'stop', onError: 'stop' }],
+    constraints: ['送信しない'],
+    limits: { maxSteps: 3, maxTokens: 10000, timeoutSec: 60 },
+    help: { summary: '明細から請求書の PDF を作ります。送信はしません。', examples: [], notes: [], faq: [] },
+  }));
+  zip.file('evals/invoice.json', JSON.stringify({
+    agent: 'invoice',
+    cases: [{
+      name: '基本', input: { to: '株式会社アルファ 御中' },
+      expect: '請求書の PDF を作る',
+      stub: {
+        render: [{
+          name: 'pdf.render',
+          args: {
+            title: '請求書', to: '株式会社アルファ 御中', from: ['M2ホールディングス株式会社'],
+            fields: [{ label: '発行日', value: '2026-09-23' }],
+            rows: [{ name: '月額利用料（9 月分）', quantity: 10, unitPrice: 3000 }],
+            notes: ['お支払い期限: 2026-10-31'],
+          },
+        }],
+      },
+    }],
+  }));
+  const bytes = await zip.generateAsync({ type: 'uint8array' });
+  const imported = await call('a', '/v1/admin/extensions/import', {
+    method: 'POST', body: bytes, headers: { 'content-type': 'application/octet-stream' },
+  });
+  await call('a', `/v1/admin/extensions/${EXT}/install`, { method: 'POST', body: JSON.stringify({ consent: true }) });
+
+  const { body: job } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: AG, input: { to: '株式会社アルファ 御中' } }) }, 'member');
+  const done = await waitFor('a', job.runId, ['completed', 'failed'], 20000, 'member');
+  const artifact = done.artifacts?.[0];
+  imported.status === 200 && done.run?.status === 'completed' && artifact?.kind === 'file:pdf'
+    ? ok(`帳票の PDF を作れた（${artifact.body}）`) : ng('PDF を作れない', JSON.stringify(done.run ?? imported.body));
+
+  // 取り出して、日本語が入っていることを確かめる
+  if (artifact?.fileId) {
+    const res = await fetch(`${API}/v1/files/${artifact.fileId}/content`, {
+      headers: { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' },
+    });
+    const pdf = new Uint8Array(await res.arrayBuffer());
+    const head = new TextDecoder().decode(pdf.slice(0, 5));
+    // 読み返しは pdf.js を直接使う（この確認は素の JavaScript で動かすため）
+    const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+    const doc = await pdfjs.getDocument({ data: new Uint8Array(pdf), useSystemFonts: false, disableFontFace: true }).promise;
+    const content = await (await doc.getPage(1)).getTextContent();
+    const text = content.items.map((i) => ('str' in i ? i.str : '')).join(' ');
+    head === '%PDF-' && text.includes('請求書') && text.includes('株式会社アルファ 御中') && pdf.length < 1_000_000
+      ? ok(`取り出した PDF から日本語を読み返せる（${Math.ceil(pdf.length / 1024)} KB）`)
+      : ng('読み返せない', `${head} ${text.slice(0, 60)}`);
+  }
+
+  await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

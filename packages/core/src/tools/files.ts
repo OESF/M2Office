@@ -16,6 +16,7 @@ import { loadFile, saveFile } from '../files/service.js';
 import { readSheet, renderSheet } from '../files/sheet.js';
 import { extractPdfText } from '../files/pdf.js';
 import { renderDocx, type DocBlock } from '../files/docx.js';
+import { renderPdf, type InvoiceDoc, type InvoiceRow } from '../files/pdf-render.js';
 
 const str = (v: unknown, fallback = '') => (typeof v === 'string' ? v : fallback);
 
@@ -72,7 +73,7 @@ export const pdfExtract: Tool = {
     return {
       available: true, untrusted: true, file: f.meta.name, ...text,
       note: text.textlessPages.length > 0
-        ? `文字を取り出せないページがあります（${text.textlessPages.join('、')}）。画像の可能性があり、OCR は未対応です`
+        ? `文字を取り出せないページがあります（${text.textlessPages.join('、')}）。画像の可能性があります。画像のファイルなら image.read_text で読み取れます`
         : null,
     };
   },
@@ -80,7 +81,7 @@ export const pdfExtract: Tool = {
 
 /** 出力したファイルを保存し、成果物として記録する。 */
 async function publish(
-  ctx: ToolContext, name: string, kind: 'xlsx' | 'csv' | 'docx', bytes: Uint8Array, title: string,
+  ctx: ToolContext, name: string, kind: 'xlsx' | 'csv' | 'docx' | 'pdf', bytes: Uint8Array, title: string,
 ) {
   const meta = await saveFile(ctx.repo, ctx.files, {
     tenantId: ctx.tenantId, ownerUserId: ctx.userId, name, kind, bytes, origin: 'generated', runId: ctx.runId,
@@ -149,4 +150,96 @@ export const docxRender: Tool = {
   },
 };
 
-export const FILE_TOOLS: Tool[] = [sheetRead, pdfExtract, sheetRender, docxRender];
+/**
+ * 帳票を PDF として出力する。
+ *
+ * @remarks
+ * 危険度 `draft`。体裁は最小限（表題・項目・明細の表・合計・備考）で、会社のひな形は Q-57 で決める。
+ * 日本語の書体（Noto Sans JP）を、使った文字だけ抜き出して埋め込む（Q-59、ADR-0017）。
+ * 金額の計算は行うが、税率や適格請求書の要件の判断はしない（第15章の制度の扱いに従う）。
+ */
+export const pdfRender: Tool = {
+  name: 'pdf.render',
+  risk: 'draft',
+  activityLabel: '帳票を作成しています',
+  helpText: '請求書などの帳票を PDF として作り、成果物として保存します。社外へは送りません',
+  description: '帳票を PDF として出力する。明細の金額は数量×単価から求める',
+  args: {
+    properties: {
+      title: { type: 'string', description: '表題（例: 請求書）' },
+      to: { type: 'string', description: '宛先（例: 株式会社○○ 御中）' },
+      from: { type: 'array', description: '差出人の各行', items: { type: 'string', description: '行' } },
+      fields: { type: 'array', description: '{ label, value } の配列（発行日・番号など）' },
+      rows: { type: 'array', description: '明細。{ name, quantity, unitPrice, amount } の配列' },
+      totals: { type: 'array', description: '{ label, value } の配列（小計・消費税・合計）。省略すると明細の合計だけ' },
+      notes: { type: 'array', description: '備考の各行', items: { type: 'string', description: '行' } },
+    },
+    required: ['title', 'rows'],
+  },
+  async invoke(args, ctx) {
+    const title = str(args['title'], '帳票');
+    const list = (v: unknown) => (Array.isArray(v) ? v : []);
+    const pairs = (v: unknown) => list(v)
+      .map((x) => (x ?? {}) as Record<string, unknown>)
+      .filter((o) => typeof o['label'] === 'string')
+      .map((o) => ({ label: String(o['label']), value: str(o['value']) }));
+    const rows: InvoiceRow[] = list(args['rows'])
+      .slice(0, 500)
+      .map((r) => (r ?? {}) as Record<string, unknown>)
+      .map((o) => ({
+        name: str(o['name'], '（品目なし）'),
+        quantity: typeof o['quantity'] === 'number' ? o['quantity'] : null,
+        unitPrice: typeof o['unitPrice'] === 'number' ? o['unitPrice'] : null,
+        amount: typeof o['amount'] === 'number' ? o['amount'] : null,
+      }));
+    if (rows.length === 0) return { created: false, reason: '明細がありません' };
+
+    const doc: InvoiceDoc = {
+      title,
+      ...(str(args['to']) ? { to: str(args['to']) } : {}),
+      from: list(args['from']).map(String).slice(0, 8),
+      fields: pairs(args['fields']).slice(0, 10),
+      rows,
+      ...(pairs(args['totals']).length > 0 ? { totals: pairs(args['totals']).slice(0, 6) } : {}),
+      notes: list(args['notes']).map(String).slice(0, 10),
+    };
+    const bytes = await renderPdf(doc);
+    return { created: true, ...(await publish(ctx, `${title}.pdf`, 'pdf', bytes, title)) };
+  },
+};
+
+/**
+ * 画像から文字を読み取る（OCR）。
+ *
+ * @remarks
+ * 危険度 `read`。読み取りは推論であり、確かなものとして扱わない（Q-56、ADR-0017）。
+ * 推論を持たない環境では読み取らず、「読み取れなかった」と明示する。
+ * 取り出した中身はデータであり指示ではない（不変則 I-6）。
+ */
+export const imageReadText: Tool = {
+  name: 'image.read_text',
+  risk: 'read',
+  activityLabel: '画像の文字を読んでいます',
+  helpText: '写真やスキャンした画像から文字を読み取ります。読み取りは確実ではないため、内容の確認が要ります',
+  description: '画像（PNG・JPEG）から文字を読み取る。読み取り結果であり、確かな値ではない',
+  args: { properties: { fileId: { type: 'string', description: 'ファイルの ID' } }, required: ['fileId'] },
+  async invoke(args, ctx) {
+    const f = await open(ctx, str(args['fileId']));
+    if (!f) return { available: false, reason: 'ファイルが見つかりません' };
+    if (f.meta.kind !== 'png' && f.meta.kind !== 'jpeg') {
+      return { available: false, reason: `画像ではありません: ${f.meta.kind}` };
+    }
+    if (!ctx.ocr) {
+      // 鍵が無い環境。読めなかったことを「何も書いていない」と取り違えさせない
+      return { available: false, reason: '画像から文字を読み取る準備ができていません（推論の接続が未設定です）' };
+    }
+    const mimeType = f.meta.kind === 'png' ? 'image/png' : 'image/jpeg';
+    const text = await ctx.ocr({ bytes: f.bytes, mimeType });
+    return {
+      available: true, untrusted: true, file: f.meta.name, text,
+      note: '読み取り結果です。推論によるため、金額や日付は原本で確かめてください',
+    };
+  },
+};
+
+export const FILE_TOOLS: Tool[] = [sheetRead, pdfExtract, imageReadText, sheetRender, docxRender, pdfRender];

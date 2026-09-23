@@ -35,6 +35,14 @@ export interface ToolContext {
   approvalsAhead?: number;
   /** ツール名から、Google の権限を持つツールか（`Tool.google` の宣言があるか）を返す。 */
   isGoogleTool?: (name: string) => boolean;
+  /**
+   * 画像から文字を読み取る（OCR。仕様書 第9.4.1節、Q-56）。
+   *
+   * @remarks
+   * 推論を持たない環境（鍵が無い・見本）では持たない。持たなければ OCR を行わず、
+   * 「読み取れなかった」と明示する。
+   */
+  ocr?: (req: { bytes: Uint8Array; mimeType: string }) => Promise<string>;
 }
 
 /** 引数 1 つの定義（JSON Schema の一部）。 */

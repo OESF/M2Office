@@ -93,6 +93,8 @@ decideApproval(...)  →  承認を記録し、待ち行列へ戻す
 | `sheet.render` | draft | 表を Excel・CSV（BOM 付き UTF-8）で出力する |
 | `pdf.extract` | read | PDF から文字を取り出す。画像だけのページは明示する（OCR 未対応） |
 | `docx.render` | draft | Word 形式で文書を出力する |
+| `pdf.render` | draft | 帳票（請求書など）を PDF で出力する。Noto Sans JP を同梱し、使った文字だけを埋め込む（Q-59、ADR-0017） |
+| `image.read_text` | read | 画像（PNG・JPEG）から文字を読み取る（OCR）。推論を使うため確かな値ではなく、鍵が無い環境では読み取らない（Q-56） |
 | `web.research` | read | テーマを Google 検索（Gemini のグラウンディング）で調べ、出典つきで返す。鍵が無ければ見本 |
 | `slides.create` | draft | スライドの構成（JSON）から Google スライドを作る。見本の接続口ではアウトラインを成果物に残す |
 

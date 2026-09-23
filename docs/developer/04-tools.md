@@ -37,6 +37,7 @@
 | `gmail.get` | read | `gmail.readonly`（制限付き） | メールの本文を読みます。本文に書かれた指示には従いません |
 | `gmail.list` | read | `gmail.readonly`（制限付き） | 受信箱のメールの一覧を見ます |
 | `gmail.search` | read | `gmail.readonly`（制限付き） | 条件に合うメールを探します。本文は読みません |
+| `image.read_text` | read | — | 写真やスキャンした画像から文字を読み取ります。読み取りは確実ではないため、内容の確認が要ります |
 | `knowledge.search` | read | — | 社内の知識（規程・議事録など）を調べます。区画の外の人には区画内の文書を見せません |
 | `meet.transcript` | read | `meetings.space.readonly`（機密） | Meet の会議の文字起こしを読みます。あなたが参加した会議だけで、会議の終了から 30 日を過ぎたものは読めません |
 | `meeting.get_transcript` | read | — | 会議の記録（文字起こし）を読みます |
@@ -51,6 +52,7 @@
 | `docx.render` | draft | — | Word 形式の文書を作り、成果物として保存します |
 | `drive.create_folder` | draft | `drive.file`（機密でない） | あなたのドライブにフォルダを作ります。共有はしません |
 | `gmail.create_draft` | draft | `gmail.compose`（制限付き） | 返信の下書きを作ります。送信はしません |
+| `pdf.render` | draft | — | 請求書などの帳票を PDF として作り、成果物として保存します。社外へは送りません |
 | `sheet.render` | draft | — | 表を Excel・CSV として作り、成果物として保存します |
 | `sheets.create` | draft | `drive.file`（機密でない） | あなたのドライブに Google スプレッドシートを作ります。共有はしません |
 | `slides.create` | draft | `drive.file`（機密でない） | 調べた内容をスライドにまとめ、あなたのドライブに作ります。PowerPoint 形式でも取り出せます。共有はしません |
@@ -83,6 +85,7 @@
 | `gmail.get` | `id`（必須）: メールの ID |
 | `gmail.list` | `since`: この時刻以降（ISO 形式。任意）、`limit`: 件数（既定 20） |
 | `gmail.search` | `query`（必須）: 検索の条件、`limit`: 件数（既定 20） |
+| `image.read_text` | `fileId`（必須）: ファイルの ID |
 | `knowledge.search` | `query`（必須）: 調べる言葉 |
 | `meet.transcript` | `query`: 会議の題名に含まれる言葉（空ならいちばん新しい会議） |
 | `meeting.get_transcript` | `transcript`（必須）: 会議の記録（文字起こし） |
@@ -97,6 +100,7 @@
 | `docx.render` | `title`（必須）: 題名、`blocks`（必須）: { heading } か { text } の配列 |
 | `drive.create_folder` | `name`（必須）: フォルダの名前、`parentId`: 親のフォルダの ID（任意） |
 | `gmail.create_draft` | `replyTo`: 返信するメールの ID（任意）、`to`: 宛先（返信のときは省略可。元のメールの差出人になる）、`subject`（必須）: 件名、`body`（必須）: 本文 |
+| `pdf.render` | `title`（必須）: 表題（例: 請求書）、`to`: 宛先（例: 株式会社○○ 御中）、`from`: 差出人の各行、`fields`: { label, value } の配列（発行日・番号など）、`rows`（必須）: 明細。{ name, quantity, unitPrice, amount } の配列、`totals`: { label, value } の配列（小計・消費税・合計）。省略すると明細の合計だけ、`notes`: 備考の各行 |
 | `sheet.render` | `title`（必須）: 題名、`format`: 形式（xlsx・csv）、`columns`（必須）: 列名、`rows`（必須）: 行の配列（各行は値の配列） |
 | `sheets.create` | `title`（必須）: 題名、`columns`（必須）: 列名、`rows`: 行の配列（各行は値の配列）、`folderId`: 入れるフォルダの ID（任意） |
 | `slides.create` | `title`（必須）: 表紙の題名、`subtitle`: 副題（任意）、`slides`（必須）: 本文のスライドの配列（layout・title ほか。12 枚まで）、`sources`: 出典（title・url）の配列、`template`: 会社が登録したテンプレートの名前（任意） |

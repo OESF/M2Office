@@ -445,7 +445,7 @@ export class RunEngine {
         }
         // いま何をしているかを、ダッシュボードの「活動中」に出すために書いておく（仕様書 第6.7.7節、ADR-0013）
         await this.markActivity(run.tenantId, runStep, tool.activityLabel);
-        toolResults.push(await this.invokeTool(run, def, run.cursor, call, requestedBy, registry, ai.research));
+        toolResults.push(await this.invokeTool(run, def, run.cursor, call, requestedBy, registry, ai.research, llm));
         await this.markActivity(run.tenantId, runStep, null);
       }
 
@@ -496,6 +496,7 @@ export class RunEngine {
   private async invokeTool(
     run: Run, def: AgentDefinition, stepIndex: number, call: ToolCall, requestedBy: string, registry: ToolRegistry,
     research: ResearchProvider | undefined = this.deps.research,
+    llm?: LlmProvider,
   ): Promise<unknown> {
     const { repo, connector, files } = this.deps;
     const tool = registry.get(call.name);
@@ -506,6 +507,8 @@ export class RunEngine {
       tenantId: run.tenantId, userId: requestedBy, runId: run.id,
       compartment: def.compartment, repo, connector, files, research,
       approvalsAhead, isGoogleTool: (name) => !!registry.get(name)?.google,
+      // 画像から文字を読む手段。推論が持っていなければ渡さない（第9.4.1節、Q-56）
+      ...(llm?.readImage ? { ocr: async (r) => (await llm.readImage!(r)).text } : {}),
     });
     await repo.appendAudit({
       id: randomUUID(), tenantId: run.tenantId, actorType: 'agent', actorId: def.id,
