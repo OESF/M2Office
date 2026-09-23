@@ -13,6 +13,7 @@ secretary2.png
 secretary3.png
 secretary4.png
 secretary5.png
+secretary6.png
 ```
 
 置いた画像は `/avatars/secretary1.png` として配信されます。

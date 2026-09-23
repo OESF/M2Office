@@ -392,11 +392,12 @@ export const VOICE_STYLE_MAX = 100;
  * 権利の確かめられない画像を同梱しない。
  */
 export const AVATAR_PRESETS: { id: string; label: string }[] = [
-  { id: 'secretary1', label: '秘書 1' },
-  { id: 'secretary2', label: '秘書 2' },
-  { id: 'secretary3', label: '秘書 3' },
-  { id: 'secretary4', label: '秘書 4' },
-  { id: 'secretary5', label: '秘書 5' },
+  { id: 'secretary1', label: '眼鏡・ボブ（女性）' },
+  { id: 'secretary2', label: 'スカーフ（女性）' },
+  { id: 'secretary3', label: 'ショートヘア（女性）' },
+  { id: 'secretary4', label: '紺のスーツ（男性）' },
+  { id: 'secretary5', label: '眼鏡・グレー（男性）' },
+  { id: 'secretary6', label: '黒のスーツ（男性）' },
 ];
 
 /**
