@@ -29,7 +29,8 @@
     "ext:pack": "node --import tsx scripts/pack-extension.mjs",
     "docs:manual-pdf": "python3 tools/pdf/build_manual.py",
     "docs:tools": "node --import tsx scripts/gen-tool-docs.mjs",
-    "tenant:create": "node --env-file-if-exists=.env scripts/create-tenant.mjs"
+    "tenant:create": "node --env-file-if-exists=.env scripts/create-tenant.mjs",
+    "dev:cert": "node scripts/dev-cert.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

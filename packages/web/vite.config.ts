@@ -6,8 +6,41 @@
  * @see 仕様書 第20.4.1節 ローカル開発環境
  */
 
+import { existsSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+
+/**
+ * 開発を HTTPS で動かすための証明書（`npm run dev:cert` で作る）。
+ *
+ * @remarks
+ * ブラウザは**安全な文脈（HTTPS か `localhost`）でしかマイクを使わせない**ため、
+ * 音声を `<サブドメイン>.lvh.me` で試すには HTTPS が要る（仕様書 第20.4.1節）。
+ * `WEB_HTTPS=true` のときだけ使う。証明書が無ければ HTTP のまま動かし、作り方を示す。
+ */
+function devHttps(): { key: Buffer; cert: Buffer } | undefined {
+  if (process.env['WEB_HTTPS'] !== 'true') return undefined;
+  const dir = fileURLToPath(new URL('../../.data/certs', import.meta.url));
+  const key = `${dir}/dev-key.pem`;
+  const cert = `${dir}/dev-cert.pem`;
+  if (!existsSync(key) || !existsSync(cert)) {
+    console.warn('[web] WEB_HTTPS=true ですが証明書がありません。npm run dev:cert で作ってください。HTTP で起動します。');
+    return undefined;
+  }
+  return { key: readFileSync(key), cert: readFileSync(cert) };
+}
+
+/** API への転送。**WebSocket も通す**（音声の中継。仕様書 第10.5.5節）。 */
+const apiProxy = {
+  '/v1': {
+    target: `http://127.0.0.1:${process.env['API_PORT'] ?? 3101}`,
+    // テナント解決のため、元のホスト名を保つ
+    changeOrigin: false,
+    // 音声の中継は WebSocket である。これが無いと接続が張れない
+    ws: true,
+  },
+};
 
 /**
  * 画面の開発サーバー設定。
@@ -22,26 +55,17 @@ export default defineConfig({
   server: {
     port: Number(process.env['WEB_PORT'] ?? 3100),
     host: true,
+    https: devHttps(),
     // 任意のサブドメインで開けるようにする。テナントはホスト名で解決する
     allowedHosts: ['.lvh.me', '.localhost', `.${process.env['BASE_DOMAIN'] ?? 'lvh.me'}`],
-    proxy: {
-      '/v1': {
-        target: `http://127.0.0.1:${process.env['API_PORT'] ?? 3101}`,
-        // テナント解決のため、元のホスト名を保つ
-        changeOrigin: false,
-      },
-    },
+    proxy: apiProxy,
   },
   // ビルド結果の確認用。開発サーバーと同じ転送設定を使う
   preview: {
     port: Number(process.env['WEB_PREVIEW_PORT'] ?? 3103),
     host: true,
+    https: devHttps(),
     allowedHosts: ['.lvh.me', '.localhost', `.${process.env['BASE_DOMAIN'] ?? 'lvh.me'}`],
-    proxy: {
-      '/v1': {
-        target: `http://127.0.0.1:${process.env['API_PORT'] ?? 3101}`,
-        changeOrigin: false,
-      },
-    },
+    proxy: apiProxy,
   },
 });

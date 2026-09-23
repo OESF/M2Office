@@ -48,6 +48,41 @@ function fromPcm16(bytes: ArrayBuffer): Float32Array {
 }
 
 /**
+ * マイクの口が無いときの理由。
+ *
+ * @remarks
+ * 多くは「安全な文脈でない」ことによる。設定では直せないため、そう伝える。
+ */
+function micUnavailableReason(): string {
+  if (!window.isSecureContext) {
+    return `この画面は ${location.protocol}//${location.host} で開かれているため、ブラウザがマイクを使わせません。`
+      + 'https で開くか、localhost で開いてください（ブラウザの設定では変えられません）';
+  }
+  return 'このブラウザはマイクに対応していません';
+}
+
+/**
+ * マイクを取れなかった理由を、直せる形で伝える。
+ *
+ * @remarks
+ * 「許可してください」と言ってよいのは、本人が断ったときだけである。
+ * 機器が無い・ほかのアプリが使っている場合に許可を求めても直らない。
+ */
+function micErrorReason(err: unknown): string {
+  const name = err instanceof Error ? err.name : '';
+  switch (name) {
+    case 'NotAllowedError':
+      return 'マイクの使用が許可されませんでした。ブラウザのアドレス欄のマイクの印から許可してください';
+    case 'NotFoundError':
+      return 'マイクが見つかりませんでした。端末にマイクがつながっているか確かめてください';
+    case 'NotReadableError':
+      return 'マイクを使えませんでした。ほかのアプリが使っていないか確かめてください';
+    default:
+      return `マイクを使えませんでした（${name || '理由不明'}）`;
+  }
+}
+
+/**
  * 音声の対話を始める。
  *
  * @param handlers 画面へ伝える口
@@ -59,11 +94,20 @@ function fromPcm16(bytes: ArrayBuffer): Float32Array {
  */
 export async function startVoice(handlers: VoiceHandlers): Promise<VoiceCall> {
   handlers.onState('connecting');
+
+  // ブラウザは、安全な文脈（HTTPS か localhost）でしかマイクを使わせない。
+  // それ以外では navigator.mediaDevices 自体が無く、**許可を尋ねる画面も出ない**。
+  // ここで「設定で許可してください」と言うと、できないことを指示することになる
+  if (!navigator.mediaDevices?.getUserMedia) {
+    handlers.onState('closed', micUnavailableReason());
+    return { stop: () => undefined };
+  }
+
   let stream: MediaStream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true } });
-  } catch {
-    handlers.onState('closed', 'マイクを使えませんでした。ブラウザの設定で許可してください');
+  } catch (err) {
+    handlers.onState('closed', micErrorReason(err));
     return { stop: () => undefined };
   }
 
