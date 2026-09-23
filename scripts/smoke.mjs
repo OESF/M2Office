@@ -1696,8 +1696,38 @@ console.log('\n■ 40. 昇華（個人の記憶を会社の知識へ。第11.3.1
   const { body: mine } = await call('a', '/v1/me/memories', {}, who);
   (mine.items ?? []).length === 1 ? ok('昇華しても、本人の記憶は残る') : ng('記憶が消えている');
 
+  // 秘書が夜間に作った候補（本人の確認待ち）は、本人が出すかやめるかを選ぶ。
+  // 候補を作るのは推論を使う夜間の見回りのため、ここでは候補がある状態から確かめる
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const { rows: [u] } = await owner.query(`select id, tenant_id from users where email = 'member@alpha.example.jp'`);
+  await owner.query(`delete from promotions where id in ('smoke-sug-1','smoke-sug-2')`);
+  for (const id of ['smoke-sug-1', 'smoke-sug-2']) {
+    await owner.query(
+      `insert into promotions (id, tenant_id, user_id, text, status) values ($1,$2,$3,$4,'proposed')`,
+      [id, u.tenant_id, u.id, `秘書が見つけた候補 ${id.slice(-1)}`]);
+  }
+
+  const { body: suggested } = await call('a', '/v1/me/promotions', {}, who);
+  (suggested.items ?? []).filter((p) => p.status === 'proposed').length === 2
+    ? ok('秘書が作った候補は、本人の確認待ちとして並ぶ') : ng('候補が並ばない');
+
+  const { body: beforeSubmit } = await call('a', '/v1/admin/promotions');
+  (beforeSubmit.items ?? []).every((p) => !p.text.startsWith('秘書が見つけた候補'))
+    ? ok('本人が出すまで、承認待ちには並ばない') : ng('先に承認待ちへ回っている');
+
+  await call('a', '/v1/me/promotions/smoke-sug-1/submit', { method: 'POST', body: '{}' }, who);
+  await call('a', '/v1/me/promotions/smoke-sug-2/withdraw', { method: 'POST', body: '{}' }, who);
+  const { body: afterSubmit } = await call('a', '/v1/admin/promotions');
+  const submitted = (afterSubmit.items ?? []).filter((p) => p.text.startsWith('秘書が見つけた候補'));
+  submitted.length === 1 && submitted[0].text.endsWith('1')
+    ? ok('「出す」を押したものだけが承認待ちへ回る') : ng('回り方が違う', JSON.stringify(submitted));
+
   // 後片付け
   if (registered) await call('a', `/v1/admin/knowledge/${registered.id}`, { method: 'DELETE' });
+  await owner.query(`delete from promotions where id in ('smoke-sug-1','smoke-sug-2')`);
+  await owner.end();
   await call('a', '/v1/me/memories', { method: 'DELETE' }, who);
   await call('a', '/v1/me/conversations', { method: 'DELETE' }, who);
 }

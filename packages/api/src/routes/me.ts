@@ -7,7 +7,7 @@
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import type { UserSettings } from '@m2office/shared';
-import { buildPresence, proposePromotion } from '@m2office/core';
+import { buildPresence, proposePromotion, submitPromotion, withdrawPromotion } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 
@@ -102,6 +102,28 @@ export function meRoute(deps: AppDeps) {
     );
     if (!promotion) return c.json({ error: '記憶が見つかりません' }, 404);
     return c.json({ id: promotion.id, status: promotion.status });
+  });
+
+  /** 秘書が作った候補を、組織の承認へ出す（第11.3.1節の本人の承認）。 */
+  app.post('/promotions/:id/submit', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const submitted = await submitPromotion(
+      { repo: deps.repo, notify: (t, u, title, body) => notify(deps, t, u, title, body) },
+      tenant.id, user, c.req.param('id'), new Date(),
+    );
+    if (!submitted) return c.json({ error: 'この提案は出せません' }, 404);
+    return c.json({ status: submitted.status });
+  });
+
+  /** 秘書が作った候補を、本人がやめる。記憶は残る。 */
+  app.post('/promotions/:id/withdraw', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const withdrawn = await withdrawPromotion(
+      { repo: deps.repo, notify: (t, u, title, body) => notify(deps, t, u, title, body) },
+      tenant.id, user, c.req.param('id'), new Date(),
+    );
+    if (!withdrawn) return c.json({ error: 'この提案はやめられません' }, 404);
+    return c.json({ status: withdrawn.status });
   });
 
   /** 自分の昇華の履歴（第6.5.4節「昇華の履歴」）。 */

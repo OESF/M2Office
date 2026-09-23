@@ -68,6 +68,51 @@ export async function proposePromotion(
 }
 
 /**
+ * 秘書が作った候補を、本人が組織の承認へ出す（第11.3節の本人の承認）。
+ *
+ * @returns 出した提案。本人のものでなければ `null`
+ */
+export async function submitPromotion(
+  deps: PromoteDeps, tenantId: string, user: User, id: string, now: Date,
+): Promise<Promotion | null> {
+  const promotion = await deps.repo.getPromotion(tenantId, id);
+  // 本人の判断待ちのものだけを出せる
+  if (!promotion || promotion.userId !== user.id || promotion.status !== 'proposed') return null;
+  const submitted: Promotion = { ...promotion, status: 'pending' };
+  await deps.repo.updatePromotion(submitted);
+  await deps.repo.appendAudit({
+    id: randomUUID(), tenantId, actorType: 'user', actorId: user.id,
+    action: 'memory.promote', targetType: 'promotion', targetId: promotion.id,
+    detail: { from: 'suggestion' }, occurredAt: now.toISOString(),
+  });
+  for (const u of await deps.repo.listUsers(tenantId)) {
+    if (u.status !== 'active' || !canDecidePromotion(submitted, u)) continue;
+    await deps.notify(
+      tenantId, u.id, '会社の知識にする提案があります',
+      `${user.displayName}さんから提案がありました。管理者ページの「知識」で判断してください。`,
+    );
+  }
+  return submitted;
+}
+
+/**
+ * 秘書が作った候補を、本人がやめる。記憶は消さない。
+ *
+ * @returns やめた提案。本人のものでなければ `null`
+ */
+export async function withdrawPromotion(
+  deps: PromoteDeps, tenantId: string, user: User, id: string, now: Date,
+): Promise<Promotion | null> {
+  const promotion = await deps.repo.getPromotion(tenantId, id);
+  if (!promotion || promotion.userId !== user.id || promotion.status !== 'proposed') return null;
+  const withdrawn: Promotion = {
+    ...promotion, status: 'withdrawn', decidedBy: user.id, decidedAt: now.toISOString(),
+  };
+  await deps.repo.updatePromotion(withdrawn);
+  return withdrawn;
+}
+
+/**
  * 組織の承認者が判断する。承認したときだけ組織知識に登録する。
  *
  * @param decision 承認または却下

@@ -10,7 +10,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { AuditEvent, User } from '@m2office/shared';
 import {
-  canDecidePromotion, decidePromotion, promotionTitle, proposePromotion, type Repository,
+  canDecidePromotion, decidePromotion, promotionTitle, proposePromotion, submitPromotion,
+  withdrawPromotion, type Repository,
 } from '../src/index.js';
 import type { KnowledgeItem, Memory, Promotion } from '../src/repository/types.js';
 
@@ -114,6 +115,44 @@ test('却下しても知識に入れず、記憶は残る。本人と権限の�
   const decided = await decidePromotion(deps, 't', promotion.id, 'rejected', approver, '全社には広げない', NOW);
   assert.equal(decided?.status, 'rejected');
   assert.equal(decided?.comment, '全社には広げない');
+  assert.equal(repo.knowledge.length, 0);
+  assert.equal(repo.memories.length, 1);
+});
+
+test('秘書が作った候補は、本人が出すか、やめるかを選ぶ（第11.3.1節）', async () => {
+  const { repo, deps, notices } = setup();
+  const suggested: Promotion = {
+    id: 'p1', tenantId: 't', userId: 'u-member', memoryId: 'm1', text: '経費の精算は佐藤さんに出す',
+    status: 'proposed', knowledgeId: null, decidedBy: null, comment: null,
+    createdAt: '2026-09-23T00:00:00.000Z', decidedAt: null,
+  };
+  repo.promotions.push(suggested);
+
+  // 本人の確認待ちの間は、承認者も判断できない
+  assert.equal(await decidePromotion(deps, 't', 'p1', 'approved', admin, null, NOW), null);
+
+  // ほかの人は出せない
+  assert.equal(await submitPromotion(deps, 't', admin, 'p1', NOW), null);
+
+  const submitted = await submitPromotion(deps, 't', owner, 'p1', NOW);
+  assert.equal(submitted?.status, 'pending');
+  assert.deepEqual(notices.map((n) => n.userId).sort(), ['u-admin', 'u-appr'], '判断できる人に知らせる');
+  assert.equal(await submitPromotion(deps, 't', owner, 'p1', NOW), null, '二度は出せない');
+
+  // 出したものは承認できる
+  assert.equal((await decidePromotion(deps, 't', 'p1', 'approved', admin, null, NOW))?.status, 'approved');
+});
+
+test('本人がやめた候補は、承認へ回らず、記憶も消えない', async () => {
+  const { repo, deps } = setup();
+  repo.promotions.push({
+    id: 'p2', tenantId: 't', userId: 'u-member', memoryId: 'm1', text: '経費の精算は佐藤さんに出す',
+    status: 'proposed', knowledgeId: null, decidedBy: null, comment: null,
+    createdAt: '2026-09-23T00:00:00.000Z', decidedAt: null,
+  });
+  const withdrawn = await withdrawPromotion(deps, 't', owner, 'p2', NOW);
+  assert.equal(withdrawn?.status, 'withdrawn');
+  assert.equal(await decidePromotion(deps, 't', 'p2', 'approved', admin, null, NOW), null);
   assert.equal(repo.knowledge.length, 0);
   assert.equal(repo.memories.length, 1);
 });

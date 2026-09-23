@@ -400,6 +400,9 @@ export const api = {
     call(`/me/settings/${section}`, { method: 'PUT', body: JSON.stringify(value) }),
   /** 記憶を会社の知識にする提案（昇華。仕様書 第11.3.1節）。 */
   promoteMemory: (id: string) => call<{ id: string; status: string }>(`/me/memories/${id}/promote`, { method: 'POST', body: '{}' }),
+  /** 秘書が作った候補を、組織の承認へ出す／やめる（仕様書 第11.3.1節）。 */
+  submitPromotion: (id: string) => call(`/me/promotions/${id}/submit`, { method: 'POST', body: '{}' }),
+  withdrawPromotion: (id: string) => call(`/me/promotions/${id}/withdraw`, { method: 'POST', body: '{}' }),
   /** 自分の昇華の履歴。 */
   myPromotions: () => call<{ items: PromotionView[] }>('/me/promotions'),
   /** 記憶の候補（仕様書 第11.5.2節）。対話から作られ、本人が採ると記憶になる。 */

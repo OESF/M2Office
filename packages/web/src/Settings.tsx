@@ -309,10 +309,15 @@ function ConversationSettings({ settings, onChange, onSave }: {
   );
 }
 
-/** 昇華の履歴（仕様書 第6.5.4節）。自分の提案がどうなったかを示す。 */
+/**
+ * 昇華の履歴（仕様書 第6.5.4節）。自分の提案がどうなったかを示す。
+ *
+ * @remarks 秘書が作った候補（本人の確認待ち）は、ここで「出す」か「やめる」を選ぶ（第11.3.1節）。
+ */
 function PromotionHistory() {
   const [items, setItems] = useState<PromotionView[]>([]);
-  useEffect(() => { api.myPromotions().then((r) => setItems(r.items)).catch(() => setItems([])); }, []);
+  const load = () => api.myPromotions().then((r) => setItems(r.items)).catch(() => setItems([]));
+  useEffect(() => { void load(); }, []);
   if (items.length === 0) return null;
   const label = (s: PromotionView['status']) => ({
     proposed: '本人の確認待ち', pending: '会社の確認待ち', approved: '会社の知識になりました',
@@ -321,12 +326,28 @@ function PromotionHistory() {
   return (
     <>
       <h4>会社の知識にする提案（{items.length} 件）</h4>
+      {items.some((p) => p.status === 'proposed') && (
+        <p className="muted small">
+          秘書が「ほかの人にも役立ちそう」と見つけたものです。「出す」を押すと、管理者か承認者の確認へ回ります。
+        </p>
+      )}
       <table className="table">
         <tbody>
           {items.map((p) => (
             <tr key={p.id}>
               <td>{p.text}</td>
-              <td className="num muted small">{label(p.status)}{p.comment ? `（${p.comment}）` : ''}</td>
+              <td className="num">
+                {p.status === 'proposed' ? (
+                  <>
+                    <button className="btn small" title="管理者・承認者の確認へ回します"
+                      onClick={() => void api.submitPromotion(p.id).then(load)}>出す</button>{' '}
+                    <button className="btn ghost small"
+                      onClick={() => void api.withdrawPromotion(p.id).then(load)}>やめる</button>
+                  </>
+                ) : (
+                  <span className="muted small">{label(p.status)}{p.comment ? `（${p.comment}）` : ''}</span>
+                )}
+              </td>
             </tr>
           ))}
         </tbody>

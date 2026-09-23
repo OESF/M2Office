@@ -163,7 +163,8 @@ AG-02 議事録作成・共有は、承認②のあとに `knowledge.register` �
 
 - `MemoryLearning.sweep()` は 1 日 1 回、前日の会話から**その日の要約**と**記憶の候補**を作ります（仕様書 第11.5.2節、ADR-0015）。候補は本人が採ったときだけ記憶になります。推論が見本（`stub`）の環境では候補を作りません
 - 同じ文は二度候補にしません。「不要」とされた候補は `dismissed` として残します
-- `proposePromotion()` と `decidePromotion()` が昇華です（第11.3.1節、ADR-0016）。本人が出し、**管理者または承認者の役割を持つ人**（`canDecidePromotion()`）が判断します。提案した本人は判断できません
+- 同じ見回りが `suggestPromotions()` で、覚えたことの中から**ほかの人にも役立つもの**を昇華の候補（`proposed`）にします。番号だけを選ばせ、記憶の文は書き換えません
+- `proposePromotion()`（本人から）と `submitPromotion()`（秘書の候補を本人が出す）→ `decidePromotion()` が昇華です（第11.3.1節、ADR-0016）。判断できるのは**管理者または承認者の役割を持つ人**（`canDecidePromotion()`）で、提案した本人は判断できません。本人が `withdrawPromotion()` でやめた候補は承認へ回りません
 - 承認すると、記憶の一文をそのまま組織知識（`kind: 'promoted'`）に登録します。却下しても記憶は消しません
 
 ### 人の状態（`dashboard/presence.ts`）
