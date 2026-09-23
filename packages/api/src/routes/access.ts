@@ -321,6 +321,71 @@ export function compartmentsRoute(deps: AppDeps) {
     return c.json({ ...target, groups, users });
   });
 
+  /**
+   * 区画を使う・使わないを切り替える（仕様書 第16.3.6.1節）。
+   *
+   * @remarks 無効の間は誰も区画に入れない。区画の知識・業務は誰にも見えない（外す側に倒さない）。
+   */
+  app.put('/:id/enabled', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const id = c.req.param('id');
+    const target = (await deps.repo.listCompartmentAssignments(tenant.id)).find((x) => x.id === id);
+    if (!target) return c.json({ error: '区画が見つかりません' }, 404);
+    const body = await c.req.json<{ enabled?: unknown }>().catch(() => ({} as { enabled?: unknown }));
+    const enabled = body.enabled !== false;
+    const before = await compartmentMembers(deps, tenant.id);
+    await deps.repo.setCompartmentEnabled(tenant.id, id, enabled);
+    await deps.repo.appendAudit({
+      id: randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id,
+      action: enabled ? 'compartment.enable' : 'compartment.disable',
+      targetType: 'compartment', targetId: id, detail: { name: target.name }, occurredAt: new Date().toISOString(),
+    });
+    await reportCompartmentChanges(
+      deps, tenant.id, user.id, before,
+      `区画「${target.description ?? target.name}」を${enabled ? '有効に' : '無効に'}した`,
+    );
+    return c.json({ ...target, enabled });
+  });
+
+  /**
+   * 区画を消す（仕様書 第16.3.6.1節）。
+   *
+   * @remarks その区画に属する知識・業務が残っていれば断り、何が残っているかを示す。
+   */
+  app.delete('/:id', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const id = c.req.param('id');
+    const target = (await deps.repo.listCompartmentAssignments(tenant.id)).find((x) => x.id === id);
+    if (!target) return c.json({ error: '区画が見つかりません' }, 404);
+
+    const [knowledge, view] = await Promise.all([
+      deps.repo.countKnowledgeInCompartment(tenant.id, target.name),
+      deps.tenantView(tenant.id),
+    ]);
+    const agents = view.allAgents.filter((a) => a.compartment === target.name).map((a) => a.name);
+    if (knowledge > 0 || agents.length > 0) {
+      const left = [
+        knowledge > 0 ? `知識 ${knowledge} 件` : '',
+        agents.length > 0 ? `業務 ${agents.length} 件（${agents.join('、')}）` : '',
+      ].filter(Boolean).join('、');
+      return c.json({
+        error: `この区画には ${left} が残っています。先に消すか、区画の外へ移してから削除してください`,
+        knowledge, agents,
+      }, 409);
+    }
+
+    const before = await compartmentMembers(deps, tenant.id);
+    await deps.repo.deleteCompartment(tenant.id, id);
+    await deps.repo.appendAudit({
+      id: randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id, action: 'compartment.delete',
+      targetType: 'compartment', targetId: id, detail: { name: target.name }, occurredAt: new Date().toISOString(),
+    });
+    await reportCompartmentChanges(
+      deps, tenant.id, user.id, before, `区画「${target.description ?? target.name}」の削除`,
+    );
+    return c.json({ ok: true });
+  });
+
   return app;
 }
 

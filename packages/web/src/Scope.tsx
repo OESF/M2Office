@@ -270,6 +270,7 @@ export function CompartmentSettings({ onChanged }: { onChanged?: () => void }) {
               <tr key={c.id}>
                 <td>
                   <strong>{c.description ?? c.name}</strong> <span className="muted small">{c.name}</span>
+                  {!c.enabled && <> <span className="badge warn">無効（誰も入れません）</span></>}
                   {editing?.id === c.id ? (
                     <>
                       <ScopeEditor
@@ -292,7 +293,23 @@ export function CompartmentSettings({ onChanged }: { onChanged?: () => void }) {
                 </td>
                 <td className="num">
                   {editing?.id !== c.id && (
-                    <button className="link small" onClick={() => setEditing({ id: c.id, value: { groups: c.groups, users: c.users } })}>割当の変更</button>
+                    <>
+                      {c.enabled && (
+                        <button className="link small"
+                          onClick={() => setEditing({ id: c.id, value: { groups: c.groups, users: c.users } })}>割当の変更</button>
+                      )}{' '}
+                      <button className="link small" title="無効にすると、その間は誰も区画に入れません（知識と業務は誰にも見えません）"
+                        onClick={() => void act(
+                          () => api.admin.setCompartmentEnabled(c.id, !c.enabled),
+                          c.enabled
+                            ? `「${c.description ?? c.name}」を無効にしました。その間は誰も入れません`
+                            : `「${c.description ?? c.name}」を有効に戻しました`,
+                        )}>{c.enabled ? '無効にする' : '有効に戻す'}</button>{' '}
+                      <button className="link small danger" onClick={() => {
+                        if (!confirm(`区画「${c.description ?? c.name}」を削除しますか。元に戻せません。`)) return;
+                        void act(() => api.admin.deleteCompartment(c.id), `「${c.description ?? c.name}」を削除しました`);
+                      }}>削除</button>
+                    </>
                   )}
                 </td>
               </tr>

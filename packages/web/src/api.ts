@@ -560,6 +560,11 @@ export const api = {
     compartments: () => call<{ items: CompartmentView[] }>('/admin/compartments'),
     createCompartment: (name: string, description: string) =>
       call<CompartmentView>('/admin/compartments', { method: 'POST', body: JSON.stringify({ name, description }) }),
+    /** 区画を使う・使わない（仕様書 第16.3.6.1節）。無効の間は誰も区画に入れない。 */
+    setCompartmentEnabled: (id: string, enabled: boolean) =>
+      call(`/admin/compartments/${id}/enabled`, { method: 'PUT', body: JSON.stringify({ enabled }) }),
+    /** 区画を消す。知識や業務が残っていれば断られる。 */
+    deleteCompartment: (id: string) => call(`/admin/compartments/${id}`, { method: 'DELETE' }),
     setCompartmentAssignment: (id: string, a: { groups: string[]; users: string[] }) =>
       call<CompartmentView>(`/admin/compartments/${encodeURIComponent(id)}/assignment`, { method: 'PUT', body: JSON.stringify(a) }),
     setScope: (target: string, scope: ScopeValue) =>

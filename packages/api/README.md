@@ -35,6 +35,12 @@ curl -H 'x-tenant: a' -H 'x-user: member@alpha.example.jp' http://localhost:3101
 
 Cookie は `HttpOnly`・`SameSite=Lax` で、`Domain` 属性を付けません。
 
+### 権限区画の無効化と削除
+
+`PUT /v1/admin/compartments/:id/enabled` と `DELETE /v1/admin/compartments/:id`（仕様書 第16.3.6.1節）。
+無効の間は誰も区画に入れません（`listUserCompartments()` が `enabled` で絞ります）。
+削除は、その区画の知識（`countKnowledgeInCompartment()`）と業務（会社から見える定義の `compartment`）が残っていれば 409 で断ります。
+
 ### 音声の中継（WebSocket）
 
 `/v1/secretary/voice` は WebSocket で、ブラウザと音声の提供者のあいだを中継します（仕様書 第10.5.5節、ADR-0018）。

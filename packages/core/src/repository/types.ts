@@ -222,6 +222,20 @@ export interface Repository {
   listCompartmentAssignments(tenantId: string): Promise<CompartmentAssignment[]>;
   /** 権限区画を作る。名前は会社の中で重ならない。 */
   createCompartment(c: { id: string; tenantId: string; name: string; description: string }): Promise<void>;
+  /**
+   * 区画を使うか（仕様書 第16.3.6.1節）。無効の間は誰も区画に入れない。
+   *
+   * @returns 変えられたら `true`。区画が無ければ `false`
+   */
+  setCompartmentEnabled(tenantId: string, compartmentId: string, enabled: boolean): Promise<boolean>;
+  /**
+   * 区画を消す（割当も消える）。
+   *
+   * @remarks 区画に属する知識・業務が残っていないことは、呼び出し側が先に確かめる（第16.3.6.1節）。
+   */
+  deleteCompartment(tenantId: string, compartmentId: string): Promise<boolean>;
+  /** その区画に属する組織知識の数（削除してよいかの判断に使う）。 */
+  countKnowledgeInCompartment(tenantId: string, compartment: string): Promise<number>;
   /** 権限区画の割当を丸ごと置き換える。その会社のグループと利用者だけを入れる。 */
   setCompartmentAssignment(
     tenantId: string, compartmentId: string, a: { groups: string[]; users: string[] }, assignedBy: string,

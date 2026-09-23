@@ -1312,6 +1312,27 @@ export class PostgresRepository implements Repository {
       [c.id, c.tenantId, c.name, c.description]);
   }
 
+  async setCompartmentEnabled(tenantId: string, compartmentId: string, enabled: boolean): Promise<boolean> {
+    const rows = await this.q<{ id: string }>(tenantId,
+      `update compartments set enabled = $3 where tenant_id = $1 and id = $2 returning id`,
+      [tenantId, compartmentId, enabled]);
+    return rows.length > 0;
+  }
+
+  async deleteCompartment(tenantId: string, compartmentId: string): Promise<boolean> {
+    const rows = await this.q<{ id: string }>(tenantId,
+      `delete from compartments where tenant_id = $1 and id = $2 returning id`,
+      [tenantId, compartmentId]);
+    return rows.length > 0;
+  }
+
+  async countKnowledgeInCompartment(tenantId: string, compartment: string): Promise<number> {
+    const rows = await this.q<{ n: number }>(tenantId,
+      `select count(*)::int as n from knowledge_items where tenant_id = $1 and compartment = $2`,
+      [tenantId, compartment]);
+    return rows[0]?.n ?? 0;
+  }
+
   async setCompartmentAssignment(
     tenantId: string, compartmentId: string, a: { groups: string[]; users: string[] }, assignedBy: string,
   ): Promise<void> {

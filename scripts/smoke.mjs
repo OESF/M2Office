@@ -924,7 +924,36 @@ console.log('\n■ 23. 権限区画をグループで割り当てる');
   const { body: bComp } = await call('b', '/v1/admin/compartments');
   !(bComp.items ?? []).some((x) => x.name === 'smoke-legal') ? ok('区画と割当はほかの会社から見えない') : ng('ほかの会社から見える');
 
-  await call('a', `/v1/admin/compartments/${comp.id}/assignment`, { method: 'PUT', body: JSON.stringify({ groups: [], users: [] }) });
+  // 無効にすると、その間は誰も区画に入れない（第16.3.6.1節）
+  await call('a', `/v1/admin/groups/${legal.id}/members`, { method: 'PUT', body: JSON.stringify({ userIds: [memberId] }) });
+  await call('a', `/v1/admin/compartments/${comp.id}/enabled`, { method: 'PUT', body: JSON.stringify({ enabled: false }) });
+  const disabled = (await call('a', '/v1/me/usage', {}, 'member')).body.compartments;
+  !disabled.includes('smoke-legal') ? ok('無効にすると、割当が残っていても誰も区画に入れない') : ng('入れてしまう');
+
+  await call('a', `/v1/admin/compartments/${comp.id}/enabled`, { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+  const reenabled = (await call('a', '/v1/me/usage', {}, 'member')).body.compartments;
+  reenabled.includes('smoke-legal') ? ok('有効に戻すと、元の割当が効く') : ng('戻らない', JSON.stringify(reenabled));
+
+  // 区画に知識が残っていれば削除を断る
+  await call('a', '/v1/admin/knowledge/smoke-comp-doc', {
+    method: 'PUT',
+    body: JSON.stringify({ title: '確認用の区画の文書', body: '区画内の文書です。', source: '確認用', compartment: 'smoke-legal' }),
+  });
+  const busy = await call('a', `/v1/admin/compartments/${comp.id}`, { method: 'DELETE' });
+  busy.status === 409 && busy.body.knowledge === 1
+    ? ok('区画に知識が残っていれば削除を断り、何が残っているかを示す') : ng(`断らない（${busy.status}）`, JSON.stringify(busy.body));
+
+  await call('a', '/v1/admin/knowledge/smoke-comp-doc', { method: 'DELETE' });
+  const removed = await call('a', `/v1/admin/compartments/${comp.id}`, { method: 'DELETE' });
+  const { body: left } = await call('a', '/v1/admin/compartments');
+  removed.status === 200 && !(left.items ?? []).some((x) => x.id === comp.id)
+    ? ok('残っていなければ区画を削除できる') : ng(`削除できない（${removed.status}）`, JSON.stringify(removed.body));
+
+  const { body: audit2 } = await call('a', '/v1/admin/audit-events');
+  const acts2 = (audit2.items ?? []).filter((e) => e.targetId === comp.id).map((e) => e.action);
+  ['compartment.disable', 'compartment.enable', 'compartment.delete'].every((a) => acts2.includes(a))
+    ? ok('無効化・有効化・削除を監査ログに残す') : ng('記録が足りない', acts2.join(', '));
+
   await call('a', `/v1/admin/groups/${legal.id}`, { method: 'DELETE' });
 }
 
