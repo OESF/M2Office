@@ -184,12 +184,65 @@ button { font: inherit; cursor: pointer; }
 .status.failed, .status.rejected { background: var(--danger-soft); color: var(--danger); }
 .status.running { background: var(--accent-soft); color: var(--accent); }
 
+/* 秘書バー（仕様書 第6.1.3節）。帯には呼びかけの口だけを置き、やり取りはサッシパネルに出す */
 .secretary {
   background: var(--panel); border-top: 1px solid var(--line);
-  padding: 10px 16px; display: flex; gap: 10px; align-items: center;
+  padding: 10px 16px; display: flex; gap: 8px; align-items: flex-end;
 }
-.secretary input { flex: 1; padding: 9px 12px; border: 1px solid var(--line); border-radius: 999px; font: inherit; }
-.secretary .layer { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.secretary .layer { font-size: 11px; color: var(--muted); white-space: nowrap; align-self: center; }
+
+/* 読み上げにだけ伝える文。目には見せない */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+
+/* アバターが音声の入口。ふだんは控えめ、話しているときははっきり */
+.secretary-avatar {
+  flex: none; width: 40px; height: 40px; padding: 0;
+  border: 1px solid var(--line); border-radius: 50%;
+  background: var(--bg); color: var(--muted);
+  display: grid; place-items: center; cursor: pointer; overflow: hidden;
+  opacity: 0.55; transition: opacity 0.15s, border-color 0.15s, color 0.15s;
+}
+.secretary-avatar:hover { opacity: 0.85; }
+.secretary-avatar .icon { width: 24px; height: 24px; }
+.secretary-avatar .avatar-img { width: 100%; height: 100%; object-fit: cover; }
+.secretary-avatar.on {
+  opacity: 1; color: var(--accent); border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* 入力欄。複数行を書ける。Enter で送り、Shift+Enter で改行する */
+.secretary-input {
+  flex: 1; min-width: 0;
+  border: 1px solid var(--line); border-radius: 18px;
+  padding: 6px 12px; background: var(--bg);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.secretary-input textarea {
+  width: 100%; border: 0; background: none; resize: none; font: inherit; color: inherit;
+  line-height: 1.5; max-height: 160px; overflow-y: auto; padding: 3px 0;
+}
+.secretary-input textarea:focus { outline: none; }
+
+/* 操作はアイコンにする。言葉は重ねたときに出す */
+.icon-btn {
+  flex: none; width: 36px; height: 36px; padding: 0;
+  border: 1px solid transparent; border-radius: 50%;
+  background: none; color: var(--muted); cursor: pointer;
+  display: grid; place-items: center;
+}
+.icon-btn:hover:not(:disabled) { background: var(--accent-soft); color: var(--accent); }
+.icon-btn:disabled { opacity: 0.4; cursor: default; }
+.icon-btn .icon { width: 20px; height: 20px; }
+.icon-btn.send { background: var(--accent); color: #fff; }
+.icon-btn.send:hover:not(:disabled) { background: var(--accent); color: #fff; opacity: 0.85; }
+.icon-btn.on { color: var(--accent); border-color: var(--accent); }
+
+/* サッシパネルに出す、音声のやり取り */
+.transcript { margin-bottom: 16px; }
+.transcript p { margin: 0 0 10px; white-space: pre-wrap; }
 
 .reply { margin: 0 0 8px; white-space: pre-wrap; }
 .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; font-size: 12px; }
@@ -584,12 +637,6 @@ code.uri { background: var(--subtle-bg); border: 1px solid var(--line); border-r
 .secretary .attached .link { padding: 0; line-height: 1; }
 
 /* 後ろで動いている調べもの（仕様書 第10.11.6節） */
-.secretary .lookups {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  flex-basis: 100%;
-}
 .secretary .lookup {
   display: inline-flex;
   align-items: center;
@@ -615,3 +662,15 @@ code.uri { background: var(--subtle-bg); border: 1px solid var(--line); border-r
 @media (prefers-reduced-motion: reduce) {
   .secretary .lookup .spin { animation: none; }
 }
+
+/* 個人設定のアバターの選択（仕様書 第6.1.3節） */
+.avatar-picker { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0; }
+.avatar-choice {
+  width: 44px; height: 44px; padding: 0;
+  border: 1px solid var(--line); border-radius: 50%;
+  background: var(--bg); color: var(--muted);
+  display: grid; place-items: center; cursor: pointer; overflow: hidden;
+}
+.avatar-choice .icon { width: 26px; height: 26px; }
+.avatar-choice .avatar-img { width: 100%; height: 100%; object-fit: cover; }
+.avatar-choice.on { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }

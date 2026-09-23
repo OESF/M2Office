@@ -6,8 +6,8 @@
 
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
-import { VOICE_CHOICES, VOICE_STYLE_MAX, type UserSettings } from '@m2office/shared';
-import { buildPresence, proposePromotion, submitPromotion, withdrawPromotion } from '@m2office/core';
+import { VOICE_CHOICES, VOICE_STYLE_MAX, isValidAvatar, type UserSettings } from '@m2office/shared';
+import { buildPresence, loadFile, proposePromotion, submitPromotion, withdrawPromotion } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 
@@ -20,6 +20,38 @@ import type { AppEnv } from '../middleware/tenant.js';
  */
 export function meRoute(deps: AppDeps) {
   const app = new Hono<AppEnv>();
+
+  /**
+   * 本人が登録した秘書のアバターを、画面に埋め込める形で返す（仕様書 第6.1.3節）。
+   *
+   * @remarks
+   * ファイルの取り出し（`/v1/files/:id/content`）は、中身を画面の権限で実行させないため
+   * **必ず保存させる**（`attachment`）。アバターは画面に出す必要があるため、ここだけ別に置く。
+   *
+   * 狭くするために、次を守る。
+   * - **本人が個人設定に登録したファイルだけ**を返す（ID を渡して任意のファイルを出させない）
+   * - **画像（PNG・JPEG）だけ**を返す
+   * - 種類を推測させず（`nosniff`）、何も読み込ませない（`Content-Security-Policy`）
+   */
+  app.get('/avatar', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const prefs = await deps.repo.getUserSettings(tenant.id, user.id);
+    const avatar = prefs.secretary.avatar ?? '';
+    if (!avatar.startsWith('file:')) return c.json({ error: 'アバターは登録されていません' }, 404);
+    const f = await loadFile(deps.repo, deps.files, tenant.id, avatar.slice('file:'.length), user);
+    if (!f || (f.meta.kind !== 'png' && f.meta.kind !== 'jpeg')) {
+      return c.json({ error: 'アバターは登録されていません' }, 404);
+    }
+    return new Response(Buffer.from(f.bytes), {
+      headers: {
+        'content-type': f.meta.mime,
+        'x-content-type-options': 'nosniff',
+        'content-security-policy': "default-src 'none'; sandbox",
+        // 本人だけのものであり、共有の置き場に残させない
+        'cache-control': 'private, max-age=60',
+      },
+    });
+  });
 
   app.get('/settings', async (c) => {
     const { tenant, user } = c.get('ctx');
@@ -324,6 +356,8 @@ function validate(
           // 声は一覧にあるものだけを受け付ける。話し方は本人の言葉（第10.5.6節）
           voice: VOICE_CHOICES.some((v) => v.name === o['voice']) ? String(o['voice']) : '',
           voiceStyle: str(o['voiceStyle'], VOICE_STYLE_MAX),
+          // 見本か、本人が上げた画像だけ。ほかの文字列は捨てる（任意の URL を出させない）
+          avatar: isValidAvatar(str(o['avatar'], 80)) ? str(o['avatar'], 80) : '',
         },
       };
     }

@@ -23,14 +23,29 @@ function files(dir) {
 }
 
 /**
+ * コメントを取り除く。
+ *
+ * @remarks
+ * 説明の中に `<ID>` のような書き方があると、JSX と取り違える。
+ * 行数を保つため、消した分は改行に置き換える。
+ */
+function withoutComments(source) {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
+    .replace(/(^|[^:])\/\/[^\n]*/g, (m, head) => head + m.slice(head.length).replace(/./g, ' '));
+}
+
+/**
  * JSX で使っている部品の名前（大文字で始まるもの）。
  *
  * @remarks
  * 直前が識別子の文字なら、型の指定（`useState<Loaded>`・`call<T>(`）であって JSX ではない。
  * 直後が `extends` なら、関数の型引数（`<K extends keyof T>`）である。
+ * コメントの中は見ない（説明に書いた `<ID>` を部品と取り違えるため）。
  */
 function usedComponents(source) {
-  const hits = [...source.matchAll(/(^|[\s(){}[\],:?=&|])<([A-Z][A-Za-z0-9_]*)(\s+extends\b|\s|\/|>)/g)];
+  const code = withoutComments(source);
+  const hits = [...code.matchAll(/(^|[\s(){}[\],:?=&|])<([A-Z][A-Za-z0-9_]*)(\s+extends\b|\s|\/|>)/g)];
   return new Set(hits.filter((m) => !/extends/.test(m[3])).map((m) => m[2]));
 }
 

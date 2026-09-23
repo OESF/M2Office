@@ -38,4 +38,19 @@
   <symbol id="sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M18.7 5.3l-1.4 1.4M6.7 17.3l-1.4 1.4"/></symbol>
   <symbol id="moon" viewBox="0 0 24 24"><path d="M19.5 14.5A7.5 7.5 0 0 1 9.5 4.5a7.5 7.5 0 1 0 10 10z"/></symbol>
   <symbol id="logout" viewBox="0 0 24 24"><path d="M14 4H6a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h8M10 12h10M17 8.5 20.5 12 17 15.5"/></symbol>
+
+  <!-- 秘書バー（仕様書 第6.1.3節） -->
+  <symbol id="mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3M9 21h6"/></symbol>
+  <symbol id="mic-off" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3M9 21h6M4 3l16 18"/></symbol>
+  <symbol id="clip" viewBox="0 0 24 24"><path d="M19 11.5 12 18.5a4.5 4.5 0 0 1-6.4-6.4l7.6-7.6a3 3 0 0 1 4.3 4.3l-7.6 7.6a1.5 1.5 0 0 1-2.1-2.1l7-7"/></symbol>
+  <symbol id="send" viewBox="0 0 24 24"><path d="M4 12 20.5 4 13 20.5l-2-7z"/><path d="m11 13.5 9.5-9.5"/></symbol>
+
+  <!--
+    秘書のアバターの見本（仕様書 第6.1.3節）。自分たちで描いた線画であり、
+    写真や、生成した人物の画像は同梱しない（権利の扱いを抱え込まないため）。
+  -->
+  <symbol id="avatar-a1" viewBox="0 0 24 24"><circle cx="12" cy="9.5" r="4"/><path d="M8.2 7.2c1.5-2.4 6.1-2.4 7.6 0M12 5.5V4M9 4.5a10 10 0 0 0 6 0"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0"/></symbol>
+  <symbol id="avatar-a2" viewBox="0 0 24 24"><circle cx="12" cy="9.5" r="4"/><path d="M7.8 8.6C8.4 5.6 10 4.5 12 4.5s3.6 1.1 4.2 4.1"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0"/></symbol>
+  <symbol id="avatar-a3" viewBox="0 0 24 24"><circle cx="12" cy="9.5" r="4"/><path d="M8 8.4c.6-2.8 2.2-3.9 4-3.9s3.4 1.1 4 3.9"/><circle cx="10.3" cy="9.8" r="1.2"/><circle cx="13.7" cy="9.8" r="1.2"/><path d="M11.5 9.8h1"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0"/></symbol>
+  <symbol id="avatar-a4" viewBox="0 0 24 24"><circle cx="12" cy="9.5" r="4"/><path d="M8 8.6C8 5.4 9.8 4.2 12 4.2s4 1.2 4 4.4"/><path d="M7.7 8v6.5M16.3 8v6.5"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0"/></symbol>
 </svg>

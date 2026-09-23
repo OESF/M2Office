@@ -4,8 +4,8 @@
  * @see 仕様書 第6.5節 個人設定
  */
 
-import { useEffect, useState } from 'react';
-import { VOICE_CHOICES, VOICE_STYLE_MAX, type UserSettings } from '@m2office/shared';
+import { useEffect, useRef, useState } from 'react';
+import { AVATAR_PRESETS, VOICE_CHOICES, VOICE_STYLE_MAX, type UserSettings } from '@m2office/shared';
 import {
   api, describeError,
   type AgentSummary, type ConversationView, type Me, type MemoryCandidateView, type MemoryView,
@@ -13,6 +13,7 @@ import {
 } from './api.js';
 import { useTheme, type ThemeChoice } from './theme.js';
 import { statusLabel } from './components.js';
+import { SecretaryAvatar } from './nav.js';
 
 /**
  * 個人設定（仕様書 第6.5節）。左ペインの最下部の利用者のカードの歯車のボタンから開く。
@@ -24,6 +25,7 @@ export function Settings({ me, agents, onChanged }: {
   me: Me; agents: AgentSummary[]; onChanged: () => void;
 }) {
   const [s, setS] = useState<UserSettings | null>(null);
+  const avatarInput = useRef<HTMLInputElement>(null);
   const [name, setName] = useState(me.user.displayName);
   const [usage, setUsage] = useState<Awaited<ReturnType<typeof api.myUsage>> | null>(null);
   const [sessions, setSessions] = useState<Awaited<ReturnType<typeof api.mySessions>>['items']>([]);
@@ -141,6 +143,44 @@ export function Settings({ me, agents, onChanged }: {
               音声のときの話し方を、言葉で指示できます（{VOICE_STYLE_MAX} 字まで）。例: 関西弁で話して / ゆっくり、短めに
             </span>
           </div>
+        </div>
+        <div className="field">
+          <label>アバター</label>
+          <span className="muted small">
+            秘書バーの左端に出ます。押すと音声で話せます（仕様書 第6.1.3節）。
+            同梱のものから選ぶか、自分の画像を上げてください。
+          </span>
+          <div className="avatar-picker">
+            <button type="button" title="出さない"
+              className={`avatar-choice${s.secretary.avatar === '' ? ' on' : ''}`}
+              onClick={() => set('secretary', { avatar: '' })}>
+              <SecretaryAvatar avatar="" />
+            </button>
+            {AVATAR_PRESETS.map((a) => (
+              <button key={a.id} type="button" title={a.label}
+                className={`avatar-choice${s.secretary.avatar === `preset:${a.id}` ? ' on' : ''}`}
+                onClick={() => set('secretary', { avatar: `preset:${a.id}` })}>
+                <SecretaryAvatar avatar={`preset:${a.id}`} />
+              </button>
+            ))}
+            {s.secretary.avatar.startsWith('file:') && (
+              <span className="avatar-choice on" title="上げた画像">
+                <SecretaryAvatar avatar={s.secretary.avatar} />
+              </span>
+            )}
+          </div>
+          <input ref={avatarInput} type="file" accept="image/png,image/jpeg" hidden
+            onChange={async (e) => {
+              const chosen = e.target.files?.[0];
+              if (!chosen) return;
+              // 会社のロゴと同じ仕組み。上げた本人のファイルとして保存される
+              const up = await api.uploadFile(chosen);
+              set('secretary', { avatar: `file:${up.id}` });
+              e.target.value = '';
+            }} />
+          <button className="btn ghost small" type="button" onClick={() => avatarInput.current?.click()}>
+            画像を上げる（PNG か JPEG）
+          </button>
         </div>
         <button className="btn" onClick={() => void save(() => api.saveMySettings('secretary', s.secretary))}>保存する</button>
       </div>

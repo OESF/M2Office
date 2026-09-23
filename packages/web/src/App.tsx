@@ -15,7 +15,7 @@ import { HelpCenter, HelpTip, Tour, openHelp, useOpenHelp } from './help.js';
 import { startVoice, type VoiceCall } from './voice.js';
 import { AgentForm, ApprovalTray, Evidence, RunView, statusLabel, SuspendedBanner } from './components.js';
 import { Settings, orderAgents } from './Settings.js';
-import { NavHeading, NavItem, NavUserCard, SideNavLayout, ThemeToggle, agentIcon } from './nav.js';
+import { Icon, NavHeading, NavItem, NavUserCard, SecretaryAvatar, SideNavLayout, ThemeToggle, agentIcon } from './nav.js';
 
 /**
  * Google との接続から戻ってきたときの結果（`?google=connected` など。仕様書 第14.3.3節）。
@@ -76,8 +76,10 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   // 画面のどこからでもヘルプの記事を開けるようにする
   useOpenHelp(useCallback((articleId: string | null) => setView({ kind: 'help', articleId }), []));
   const [menu, setMenu] = useState<{ hidden: string[]; order: string[] }>({ hidden: [], order: [] });
+  // 秘書のアバター（仕様書 第6.1.3節）。個人設定で変えたら読み直す
+  const [avatar, setAvatar] = useState('');
   const loadMenu = useCallback(() => {
-    api.mySettings().then((s) => setMenu(s.menu)).catch(() => undefined);
+    api.mySettings().then((s) => { setMenu(s.menu); setAvatar(s.secretary.avatar ?? ''); }).catch(() => undefined);
   }, []);
   useEffect(loadMenu, [loadMenu]);
 
@@ -129,7 +131,10 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
     return () => clearInterval(timer);
   }, [view]);
 
-  const showSash = view.kind === 'run' || reply !== null;
+  // 音声のやり取り。帯ではなくサッシパネルに出す（仕様書 第6.1.3節）
+  const [voice, setVoice] = useState<{ heard: string; reply: string }>({ heard: '', reply: '' });
+  const talking = voice.heard !== '' || voice.reply !== '';
+  const showSash = view.kind === 'run' || reply !== null || talking;
   const unread = notifications.filter((n) => !n.readAt).length;
   const isAdmin = me.user.roles.includes('admin');
 
@@ -182,7 +187,16 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
             active={view.kind === 'settings'} onOpenSettings={() => setView({ kind: 'settings' })}
           />
         )}
-        footer={<SecretaryBar lookups={lookups} onReply={(r, fid) => { setReply(r); setReplyFileId(fid); }} />}
+        footer={(
+          <SecretaryBar
+            lookups={lookups}
+            avatar={avatar}
+            onReply={(r, fid) => { setReply(r); setReplyFileId(fid); setVoice({ heard: '', reply: '' }); }}
+            onVoice={(v) => setVoice((cur) => (v === null
+              ? { heard: '', reply: '' }
+              : { heard: cur.heard + v.heard, reply: cur.reply + v.reply }))}
+          />
+        )}
       >
         <main className="canvas">
           {error && <p className="error">{error}</p>}
@@ -263,6 +277,14 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
 
         {showSash && (
           <aside className="sash">
+            {/* 音声のやり取り。帯を膨らませず、ここに出す（仕様書 第6.1.3節） */}
+            {talking && (
+              <div className="transcript">
+                <h3>音声のやり取り</h3>
+                {voice.heard && <p><span className="muted small">聞こえた内容</span><br />{voice.heard}</p>}
+                {voice.reply && <p className="reply"><span className="muted small">秘書</span><br />{voice.reply}</p>}
+              </div>
+            )}
             {reply && (
               <>
                 <h3>秘書の応答</h3>
@@ -348,11 +370,16 @@ function Home({ approvals, agents }: { approvals: number; agents: number }) {
  * 常駐の秘書バー。どの画面からでも呼び出せる（仕様書 第10.4節）。
  * 音声でも話しかけられ（第10.5節）、手元のファイルを 1 つ渡せる（第10.10節）。
  */
-function SecretaryBar({ lookups, onReply }: {
+function SecretaryBar({ lookups, avatar, onReply, onVoice }: {
   /** 後ろで動いている調べもの。処理中であることを常に見せる（仕様書 第10.11.6節） */
   lookups: Lookup[];
+  /** 秘書のアバター（個人設定。仕様書 第6.1.3節） */
+  avatar: string;
   onReply: (r: SecretaryReply, fileId: string | null) => void;
+  /** 音声のやり取り。帯ではなくサッシパネルに出す（第6.1.3節） */
+  onVoice: (v: { heard: string; reply: string } | null) => void;
 }) {
+  const box = useRef<HTMLTextAreaElement>(null);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
@@ -377,7 +404,8 @@ function SecretaryBar({ lookups, onReply }: {
   }
   // 音声の対話（第10.5.5節）。聞こえた文字と応答は、その場で画面にも出す（併記）
   const [call, setCall] = useState<VoiceCall | null>(null);
-  const [voice, setVoice] = useState<{ heard: string; reply: string } | null>(null);
+  // やり取りの中身は帯に出さない。上へ渡し、サッシパネルに出す（仕様書 第6.1.3節）
+  const setVoice = onVoice;
 
   async function toggleVoice() {
     if (call) {
@@ -388,8 +416,8 @@ function SecretaryBar({ lookups, onReply }: {
     setVoice({ heard: '', reply: '' });
     setHint('マイクの許可を確かめています…');
     const started = await startVoice({
-      onHeard: (t) => setVoice((v) => ({ heard: (v?.heard ?? '') + t, reply: v?.reply ?? '' })),
-      onReply: (t) => setVoice((v) => ({ heard: v?.heard ?? '', reply: (v?.reply ?? '') + t })),
+      onHeard: (t) => onVoice({ heard: t, reply: '' }),
+      onReply: (t) => onVoice({ heard: '', reply: t }),
       onState: (state, note) => {
         setHint(note ?? { connecting: 'つないでいます…', listening: '聞いています（もう一度押すと終わります）', closed: '音声を終わりました' }[state]);
         if (state === 'closed') setCall(null);
@@ -400,6 +428,14 @@ function SecretaryBar({ lookups, onReply }: {
 
   // 終わったものは出さない。終わったことは秘書が応答として伝える（第10.11.7節）
   const running = lookups.filter((x) => x.status !== 'completed' && x.status !== 'failed');
+
+  // 入力に合わせて高さを伸ばす。上限を超えたら中で送る（仕様書 第6.1.3節）
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  }, [text]);
 
   async function send() {
     if (!text.trim() || busy) return;
@@ -423,55 +459,68 @@ function SecretaryBar({ lookups, onReply }: {
 
   return (
     <div className="secretary">
-      <span className="muted">秘書</span>
-      <input
-        value={text}
-        placeholder="例: 今日の予定は？ / 会議の議事録をまとめて / 承認はどうやるの？"
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          // 日本語入力の変換確定の Enter では送らない
-          if (e.key === 'Enter' && !e.nativeEvent.isComposing) void send();
-        }}
-        disabled={busy}
-      />
-      <button className="btn" onClick={() => void send()} disabled={busy}>
-        {busy ? '…' : '聞く'}
+      {/* アバターが音声の入口（仕様書 第6.1.3節）。ふだんは控えめ、話しているときははっきり */}
+      <button
+        className={`secretary-avatar${call ? ' on' : ''}`}
+        onClick={() => void toggleVoice()}
+        aria-pressed={call !== null}
+        title={call ? '音声を終わります' : '押すと、秘書と音声で話せます'}
+      >
+        <SecretaryAvatar avatar={avatar} />
+        <span className="sr-only">{call ? '秘書との音声を終わる' : '秘書と音声で話す'}</span>
       </button>
-      <button className={`btn ghost${call ? ' danger' : ''}`} onClick={() => void toggleVoice()}
-        title="音声で話しかけます。話した内容と応答は画面にも出ます">
-        {call ? '音声を終わる' : '音声で話す'}
-      </button>
+
+      <div className="secretary-input">
+        <textarea
+          ref={box}
+          value={text}
+          rows={1}
+          placeholder="例: 今日の予定は？ / 会議の議事録をまとめて（Shift+Enter で改行）"
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            // Enter で送り、Shift+Enter で改行する。変換確定の Enter では送らない（第6.1.3節）
+            if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return;
+            e.preventDefault();
+            void send();
+          }}
+          disabled={busy}
+        />
+        {file && (
+          <span className="attached">
+            {file.name}
+            <button className="link" onClick={() => setFile(null)} title="渡すのをやめる">×</button>
+          </span>
+        )}
+      </div>
+
       <input ref={fileInput} type="file" hidden
         accept=".pdf,.xlsx,.csv,.docx,.png,.jpg,.jpeg"
         onChange={(e) => void attach(e.target.files?.[0])} />
-      <button className="btn ghost" disabled={busy} onClick={() => fileInput.current?.click()}
-        title="手元のファイルを渡して、それについて聞けます（PDF・Word・Excel・CSV・画像。10 MB まで）">
-        書類を渡す
+      <button className="icon-btn" disabled={busy} onClick={() => fileInput.current?.click()}
+        title="書類を渡して、それについて聞けます（PDF・Word・Excel・CSV・画像。10 MB まで）">
+        <Icon name="clip" />
+        <span className="sr-only">書類を渡す</span>
       </button>
-      {file && (
-        <span className="attached">
-          {file.name}
-          <button className="link" onClick={() => setFile(null)} title="渡すのをやめる">×</button>
-        </span>
-      )}
+      <button className={`icon-btn${call ? ' on' : ''}`} onClick={() => void toggleVoice()}
+        title={call ? '音声を終わります' : '音声で話しかけます。話した内容と応答は右側に出ます'}>
+        <Icon name={call ? 'mic-off' : 'mic'} />
+        <span className="sr-only">{call ? '音声を終わる' : '音声で話す'}</span>
+      </button>
+      <button className="icon-btn send" onClick={() => void send()} disabled={busy || !text.trim()}
+        title="送ります（Enter）">
+        <Icon name="send" />
+        <span className="sr-only">送る</span>
+      </button>
+
+      {/* 帯に出すのは一言だけ。やり取りの中身はサッシパネルに出す（第6.1.3節） */}
       {hint && <span className="layer">{hint}</span>}
       {/* 秘書が黙り込んだように見せない。動いているものを必ず出す（第10.11.6節） */}
-      {running.length > 0 && (
-        <div className="lookups">
-          {running.map((x) => (
-            <span key={x.runId} className="lookup" title={x.request}>
-              <span className="spin" aria-hidden="true" />
-              {x.progress ?? 'お調べしています'}: {x.request}
-            </span>
-          ))}
-        </div>
-      )}
-      {voice && (voice.heard || voice.reply) && (
-        <div className="voice-transcript">
-          {voice.heard && <p><span className="muted small">聞こえた内容</span> {voice.heard}</p>}
-          {voice.reply && <p><span className="muted small">秘書</span> {voice.reply}</p>}
-        </div>
-      )}
+      {running.map((x) => (
+        <span key={x.runId} className="lookup" title={x.request}>
+          <span className="spin" aria-hidden="true" />
+          {x.progress ?? 'お調べしています'}
+        </span>
+      ))}
     </div>
   );
 }

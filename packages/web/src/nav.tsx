@@ -10,6 +10,7 @@
  */
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { AVATAR_PRESETS } from '@m2office/shared';
 import { useTheme } from './theme.js';
 
 /** アイコンの名前（public/icons.svg の symbol の id）。 */
@@ -17,7 +18,9 @@ export type IconName =
   | 'mail' | 'calendar' | 'knowledge' | 'meeting' | 'briefing' | 'research' | 'report' | 'sample' | 'agent'
   | 'approvals' | 'history' | 'notifications' | 'schedules' | 'help' | 'user' | 'settings'
   | 'dashboard' | 'usage' | 'runs' | 'company' | 'sliders' | 'extensions' | 'users' | 'audit' | 'connectors'
-  | 'nav-collapse' | 'nav-expand' | 'sun' | 'moon' | 'logout';
+  | 'nav-collapse' | 'nav-expand' | 'sun' | 'moon' | 'logout'
+  | 'mic' | 'mic-off' | 'clip' | 'send'
+  | 'avatar-a1' | 'avatar-a2' | 'avatar-a3' | 'avatar-a4';
 
 /** モノクロのアイコン。文字の色を引き継ぐ。飾りなので読み上げない。 */
 export function Icon({ name, className }: { name: IconName; className?: string }) {
@@ -26,6 +29,21 @@ export function Icon({ name, className }: { name: IconName; className?: string }
       <use href={`/icons.svg#${name}`} />
     </svg>
   );
+}
+
+/**
+ * 秘書のアバター（仕様書 第6.1.3節）。
+ *
+ * @param avatar `preset:<id>` は同梱の線画、`file:<ID>` は本人が上げた画像。空なら人の形
+ */
+export function SecretaryAvatar({ avatar }: { avatar: string }) {
+  if (avatar.startsWith('file:')) {
+    // 本人が登録した画像だけを返す口を通す（任意のファイルは出せない）
+    return <img src="/v1/me/avatar" alt="" className="avatar-img" />;
+  }
+  const preset = avatar.startsWith('preset:') ? avatar.slice('preset:'.length) : '';
+  const name = AVATAR_PRESETS.some((a) => a.id === preset) ? `avatar-${preset}` : 'user';
+  return <Icon name={name as IconName} />;
 }
 
 /** 業務の分類（`category`）からアイコンを決める。対応が無ければ共通のアイコン。 */

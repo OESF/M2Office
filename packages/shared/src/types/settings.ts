@@ -304,6 +304,14 @@ export interface UserSettings {
     voice: string;
     /** 話し方の指示（例: 「関西弁で話して」）。100 字まで。音声のときだけ使う（第10.5.6節）。 */
     voiceStyle: string;
+    /**
+     * 秘書バーの左端に出すアバター（仕様書 第6.1.3節）。
+     *
+     * @remarks
+     * `preset:<id>` は同梱の線画、`file:<ファイルの ID>` は本人が上げた画像。
+     * 空なら人の形のアイコンを出す。
+     */
+    avatar: string;
   };
   notifications: {
     /** 受け取る種類（第6.5.5節）。`false` にしたものは届けない。 */
@@ -340,7 +348,7 @@ export interface UserSettings {
 
 export const DEFAULT_USER_SETTINGS: UserSettings = {
   profile: { furigana: '', title: '', timezone: 'Asia/Tokyo' },
-  secretary: { name: '', callMe: '', style: 'polite', proactivity: 'normal', speak: true, voice: '', voiceStyle: '' },
+  secretary: { name: '', callMe: '', style: 'polite', proactivity: 'normal', speak: true, voice: '', voiceStyle: '', avatar: '' },
   notifications: {
     kinds: { brief: true, run: true, approval: true, failure: true },
     quietHours: null,
@@ -372,3 +380,30 @@ export const VOICE_CHOICES: { name: string; note: string }[] = [
 
 /** 話し方の指示の長さの上限（字）。 */
 export const VOICE_STYLE_MAX = 100;
+
+/**
+ * 同梱する秘書のアバター（仕様書 第6.1.3節）。
+ *
+ * @remarks
+ * 線画の SVG を自分たちで描いて同梱する。**写真や、生成した人物の画像は同梱しない。**
+ * 権利の扱いを抱え込まないためである。特定の見た目にしたい人は、自分の画像を上げる。
+ */
+export const AVATAR_PRESETS: { id: string; label: string }[] = [
+  { id: 'a1', label: '髪を結った人' },
+  { id: 'a2', label: '短い髪の人' },
+  { id: 'a3', label: '眼鏡の人' },
+  { id: 'a4', label: '長い髪の人' },
+];
+
+/**
+ * アバターの指定として妥当か（仕様書 第6.1.3節）。
+ *
+ * @remarks
+ * 受け付けるのは、同梱の見本（`preset:<id>`）か、上げた画像（`file:<ファイルの ID>`）だけ。
+ * 空は「未設定」を表す。ほかの文字列は受け付けない（任意の URL を出させない）。
+ */
+export function isValidAvatar(v: string): boolean {
+  if (v === '') return true;
+  if (v.startsWith('preset:')) return AVATAR_PRESETS.some((a) => a.id === v.slice('preset:'.length));
+  return /^file:[A-Za-z0-9_-]{1,64}$/.test(v);
+}
