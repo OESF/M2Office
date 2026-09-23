@@ -186,6 +186,7 @@ AG-02 議事録作成・共有は、承認②のあとに `knowledge.register` �
 - `GeminiLiveProvider` が Gemini Live 固有の形（`setup`・`realtimeInput`・`serverContent`）を担います。鍵はサーバーだけが持ちます
 - 鍵が無い環境では `MockVoiceProvider` に切り替わり、音声を返さず文字だけを返します
 - 音は通すだけで、どこにも書き出しません（第10.5.3節）。会話ログに残すのは文字だけです
+- 声（`VOICE_CHOICES` から本人が選ぶ）は `speechConfig` で、話し方の指示（例: 関西弁で話して）は指示文の末尾で渡します（第10.5.6節）。知らない声の名前は中継が落とします
 
 ### 通知と、その控え（`notify/`）
 

@@ -1812,6 +1812,24 @@ console.log('\n■ 42. 音声の対話（第10.5.5節）');
 {
   const who = 'member';
   await call('a', '/v1/me/conversations', { method: 'DELETE' }, who);
+  // 声と話し方の指示を選ぶ（第10.5.6節）。知らない声は受け付けない
+  const { body: settings } = await call('a', '/v1/me/settings', {}, who);
+  await call('a', '/v1/me/settings/secretary', {
+    method: 'PUT',
+    body: JSON.stringify({ ...settings.secretary, speak: true, voice: 'Charon', voiceStyle: '関西弁で話して' }),
+  }, who);
+  await call('a', '/v1/me/settings/secretary', {
+    method: 'PUT',
+    body: JSON.stringify({ ...settings.secretary, speak: true, voice: 'にせものの声', voiceStyle: '関西弁で話して' }),
+  }, who);
+  const { body: saved } = await call('a', '/v1/me/settings', {}, who);
+  saved.secretary.voice === '' && saved.secretary.voiceStyle === '関西弁で話して'
+    ? ok('声は一覧にあるものだけを受け付け、話し方の指示は残る') : ng('設定の扱いが違う', JSON.stringify(saved.secretary));
+  await call('a', '/v1/me/settings/secretary', {
+    method: 'PUT',
+    body: JSON.stringify({ ...settings.secretary, speak: true, voice: 'Charon', voiceStyle: '関西弁で話して' }),
+  }, who);
+
   const { default: WebSocket } = await import('ws');
   const ws = new WebSocket(`${API.replace('http', 'ws')}/v1/secretary/voice`, {
     headers: { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' },
@@ -1840,6 +1858,8 @@ console.log('\n■ 42. 音声の対話（第10.5.5節）');
   const heard = messages.find((m) => m.type === 'heard');
   const reply = messages.find((m) => m.type === 'reply');
   heard && reply ? ok('聞こえた内容と応答が文字でも返る（併記）') : ng('文字が返らない', JSON.stringify(messages));
+  /声「Charon」と話し方の指示を受け取りました/.test(reply?.text ?? '')
+    ? ok('選んだ声と話し方の指示が提供者へ渡る') : ng('渡らない', reply?.text ?? '');
   binary === 0 ? ok('見本では音声を返さない') : ng(`音声が返る（${binary}）`);
 
   ws.close();
@@ -1858,6 +1878,8 @@ console.log('\n■ 42. 音声の対話（第10.5.5節）');
     ? ok('監査ログに開始と終了だけが残る（話した中身は残らない）') : ng('監査ログの扱いが規定と違う', JSON.stringify(voiceAudit));
 
   await call('a', '/v1/me/conversations', { method: 'DELETE' }, who);
+  // 後片付け: 声と話し方の指示を戻す
+  await call('a', '/v1/me/settings/secretary', { method: 'PUT', body: JSON.stringify(settings.secretary) }, who);
 
   // 停止中の会社では開けない（第23.8.6節）
   const { default: pg } = await import('pg');

@@ -120,3 +120,43 @@ test('鍵が無い環境の見本は、音声を返さず文字だけを返す',
   assert.match(reply && 'text' in reply ? reply.text : '', /見本の応答/);
   session.close();
 });
+
+test('選んだ声を提供者へ渡す。選ばなければ既定に任せる（第10.5.6節）', async () => {
+  const live = await fakeLive();
+  const provider = new GeminiLiveProvider({ apiKey: 'k', model: 'gemini-live', url: live.url });
+
+  const chosen = await provider.open({
+    instructions: '秘書です。話し方の指定: 関西弁で話して', speak: true, voice: 'Charon', onEvent: () => undefined,
+  });
+  const setup = live.received[0] as {
+    setup?: { speechConfig?: { voiceConfig?: { prebuiltVoiceConfig?: { voiceName?: string } } }; systemInstruction?: { parts?: { text?: string }[] } };
+  };
+  assert.equal(setup.setup?.speechConfig?.voiceConfig?.prebuiltVoiceConfig?.voiceName, 'Charon');
+  assert.match(setup.setup?.systemInstruction?.parts?.[0]?.text ?? '', /関西弁で話して/, '話し方の指示は指示文で渡す');
+  chosen.close();
+
+  live.received.length = 0;
+  const auto = await provider.open({ instructions: '秘書です。', speak: true, voice: '', onEvent: () => undefined });
+  const plain = live.received[0] as { setup?: { speechConfig?: unknown } };
+  assert.equal(plain.setup?.speechConfig, undefined, '選ばなければ声を指定しない');
+  auto.close();
+
+  live.received.length = 0;
+  const silent = await provider.open({ instructions: '秘書です。', speak: false, voice: 'Kore', onEvent: () => undefined });
+  const noSpeak = live.received[0] as { setup?: { speechConfig?: unknown } };
+  assert.equal(noSpeak.setup?.speechConfig, undefined, '読み上げを切っていれば声も指定しない');
+  silent.close();
+
+  await live.close();
+});
+
+test('見本は、受け取った声と話し方の指示を答えに書き添える', async () => {
+  const sink = collect();
+  const session = await new MockVoiceProvider().open({
+    instructions: '秘書です。話し方の指定: 関西弁で話して', speak: true, voice: 'Puck', onEvent: sink.onEvent,
+  });
+  session.sendText('今日の予定は');
+  const reply = sink.events.find((e) => e.type === 'reply');
+  assert.match(reply && 'text' in reply ? reply.text : '', /声「Puck」と話し方の指示を受け取りました/);
+  session.close();
+});

@@ -6,7 +6,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
-import type { UserSettings } from '@m2office/shared';
+import { VOICE_CHOICES, VOICE_STYLE_MAX, type UserSettings } from '@m2office/shared';
 import { buildPresence, proposePromotion, submitPromotion, withdrawPromotion } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
@@ -321,6 +321,9 @@ function validate(
           name: str(o['name'], 30), callMe: str(o['callMe'], 30), style, proactivity,
           // 読み上げの入り切り（第10.5.2節）
           speak: o['speak'] !== false,
+          // 声は一覧にあるものだけを受け付ける。話し方は本人の言葉（第10.5.6節）
+          voice: VOICE_CHOICES.some((v) => v.name === o['voice']) ? String(o['voice']) : '',
+          voiceStyle: str(o['voiceStyle'], VOICE_STYLE_MAX),
         },
       };
     }

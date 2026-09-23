@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import type { UserSettings } from '@m2office/shared';
+import { VOICE_CHOICES, VOICE_STYLE_MAX, type UserSettings } from '@m2office/shared';
 import {
   api, describeError,
   type AgentSummary, type ConversationView, type Me, type MemoryCandidateView, type MemoryView,
@@ -122,6 +122,20 @@ export function Settings({ me, agents, onChanged }: {
               onChange={(e) => set('secretary', { speak: e.target.checked })} />
             音声で読み上げる（切ると、音声で話しかけても文字だけで答えます）
           </label>
+          <div className="field"><label>声</label>
+            <select value={s.secretary.voice} disabled={!s.secretary.speak}
+              onChange={(e) => set('secretary', { voice: e.target.value })}>
+              <option value="">おまかせ</option>
+              {VOICE_CHOICES.map((v) => <option key={v.name} value={v.name}>{v.name}（{v.note}）</option>)}
+            </select>
+            <span className="muted small">
+              Gemini が用意している声です。添えた言葉は聞いた印象の目安で、性別を示すものではありません。
+              次に音声で話しかけたときから変わります。
+            </span>
+          </div>
+          <Text label="話し方の指示" value={s.secretary.voiceStyle}
+            onChange={(v) => set('secretary', { voiceStyle: v.slice(0, VOICE_STYLE_MAX) })}
+            hint={`音声のときの話し方を、言葉で指示できます（${VOICE_STYLE_MAX} 字まで）。例: 関西弁で話して / ゆっくり、短めに`} />
         </div>
         <button className="btn" onClick={() => void save(() => api.saveMySettings('secretary', s.secretary))}>保存する</button>
       </div>

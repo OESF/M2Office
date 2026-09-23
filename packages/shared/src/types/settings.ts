@@ -272,6 +272,14 @@ export interface UserSettings {
     proactivity: 'low' | 'normal' | 'high';
     /** 音声で読み上げるか（仕様書 第10.5.2節）。切ると、音声の対話でも文字だけを返す。 */
     speak: boolean;
+    /**
+     * 読み上げの声（仕様書 第10.5.6節）。提供者が用意する声の名前。空なら提供者の既定。
+     *
+     * @remarks 選べる声は {@link VOICE_CHOICES}。一覧は提供者の更新で変わる
+     */
+    voice: string;
+    /** 話し方の指示（例: 「関西弁で話して」）。100 字まで。音声のときだけ使う（第10.5.6節）。 */
+    voiceStyle: string;
   };
   notifications: {
     /** 受け取る種類（第6.5.5節）。`false` にしたものは届けない。 */
@@ -306,7 +314,7 @@ export interface UserSettings {
 
 export const DEFAULT_USER_SETTINGS: UserSettings = {
   profile: { furigana: '', title: '', timezone: 'Asia/Tokyo' },
-  secretary: { name: '', callMe: '', style: 'polite', proactivity: 'normal', speak: true },
+  secretary: { name: '', callMe: '', style: 'polite', proactivity: 'normal', speak: true, voice: '', voiceStyle: '' },
   notifications: {
     kinds: { brief: true, run: true, approval: true, failure: true },
     quietHours: null,
@@ -316,3 +324,25 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   menu: { hidden: [], order: [] },
   onboarding: { tourCompletedAt: null },
 };
+
+/**
+ * 読み上げに選べる声（仕様書 第10.5.6節）。
+ *
+ * @remarks
+ * Gemini が用意する声の名前をそのまま並べる。M2Office では声を作らない。
+ * 添えた言葉は**聞いた印象の目安**であり、性別として断定しない。
+ * 一覧は提供者の更新で変わるため、鍵の取得（B-3）の後に実機で確かめて増減させる。
+ */
+export const VOICE_CHOICES: { name: string; note: string }[] = [
+  { name: 'Puck', note: '明るく軽やか' },
+  { name: 'Charon', note: '落ち着いた低め' },
+  { name: 'Kore', note: 'はきはきした中音' },
+  { name: 'Fenrir', note: '力強い低め' },
+  { name: 'Aoede', note: 'やわらかい中音' },
+  { name: 'Leda', note: '軽やかな高め' },
+  { name: 'Orus', note: '落ち着いた中音' },
+  { name: 'Zephyr', note: '明るい高め' },
+];
+
+/** 話し方の指示の長さの上限（字）。 */
+export const VOICE_STYLE_MAX = 100;

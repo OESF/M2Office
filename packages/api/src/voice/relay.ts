@@ -11,6 +11,7 @@ import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket as NodeWebSocket } from 'ws';
+import { VOICE_CHOICES } from '@m2office/shared';
 import type { VoiceEvent, VoiceSession } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { SESSION_COOKIE, sessionIdOf } from '../auth/session.js';
@@ -113,12 +114,16 @@ async function start(
   try {
     session = await provider.open({
       speak,
+      // 本人が選んだ声。知らない名前は渡さない（第10.5.6節）
+      voice: VOICE_CHOICES.some((v) => v.name === prefs.secretary.voice) ? prefs.secretary.voice : '',
       instructions: [
         `あなたは中小企業の従業員に付く秘書${prefs.secretary.name ? `「${prefs.secretary.name}」` : ''}です。`,
         `相手を「${prefs.secretary.callMe || `${displayName}さん`}」と呼びます。`,
         prefs.secretary.style === 'concise' ? '要点だけを短く答えます。' : '丁寧な日本語で、要点を先に答えます。',
         '業務の実行や送信は行いません。必要なときは、画面で操作するよう案内します。',
-      ].join(''),
+        // 本人が書いた話し方の指示（例: 関西弁で話して）。音声のときだけ使う
+        prefs.secretary.voiceStyle ? `話し方の指定: ${prefs.secretary.voiceStyle}` : '',
+      ].filter(Boolean).join(''),
       onEvent: (event: VoiceEvent) => {
         switch (event.type) {
           case 'heard':

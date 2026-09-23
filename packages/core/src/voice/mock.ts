@@ -7,6 +7,22 @@
 
 import type { VoiceProvider, VoiceSession, VoiceSessionOptions } from './provider.js';
 
+/**
+ * 見本の応答の文。選んだ声と話し方の指示を書き添えて、設定が届いていることを確かめられるようにする。
+ *
+ * @remarks それらしい音声は作らない（ADR-0018 決定 7）。
+ */
+function sampleReply(session: VoiceSessionOptions): string {
+  const chosen = [
+    session.voice ? `声「${session.voice}」` : '',
+    session.instructions.includes('話し方の指定:') ? '話し方の指示' : '',
+  ].filter(Boolean).join('と');
+  return [
+    '［見本の応答］鍵が設定されていないため、音声の対話は行えません。文字でお尋ねください。',
+    chosen ? `（${chosen}を受け取りました。鍵の設定後に反映されます）` : '',
+  ].join('');
+}
+
 /** 見本の応答を返すまでの待ち（ミリ秒）。話し終わりの区切りに使う。 */
 const REPLY_DELAY_MS = 300;
 
@@ -30,10 +46,7 @@ export class MockVoiceProvider implements VoiceProvider {
         if (closed) return;
         // 何を話したかは分からない。分かるのは受け取った量だけであり、それを正直に返す
         session.onEvent({ type: 'heard', text: `［見本］音声を ${chunks} 区切り受け取りました（文字にはしていません）` });
-        session.onEvent({
-          type: 'reply',
-          text: '［見本の応答］鍵が設定されていないため、音声の対話は行えません。文字でお尋ねください。',
-        });
+        session.onEvent({ type: 'reply', text: sampleReply(session) });
         session.onEvent({ type: 'turn-end' });
         chunks = 0;
       }, REPLY_DELAY_MS);
@@ -46,10 +59,7 @@ export class MockVoiceProvider implements VoiceProvider {
       },
       sendText(text) {
         session.onEvent({ type: 'heard', text });
-        session.onEvent({
-          type: 'reply',
-          text: '［見本の応答］鍵が設定されていないため、音声の対話は行えません。文字でお尋ねください。',
-        });
+        session.onEvent({ type: 'reply', text: sampleReply(session) });
         session.onEvent({ type: 'turn-end' });
       },
       close() {

@@ -43,6 +43,12 @@ export interface VoiceSessionOptions {
   instructions: string;
   /** 音声で応答するか。切っている人には文字だけを返す（第10.5.5節）。 */
   speak: boolean;
+  /**
+   * 読み上げの声（仕様書 第10.5.6節）。提供者が用意する声の名前。
+   *
+   * @remarks 空なら提供者の既定に任せる。知らない名前を渡さないよう、呼び出し側が確かめる
+   */
+  voice?: string;
   /** 出来事を受け取る。 */
   onEvent(event: VoiceEvent): void;
 }
