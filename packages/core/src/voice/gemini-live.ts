@@ -63,11 +63,13 @@ export class GeminiLiveProvider implements VoiceProvider {
             generationConfig: {
               // 読み上げを切っている人には音声を作らせない（第10.5.5節）
               responseModalities: session.speak ? ['AUDIO'] : ['TEXT'],
+              // 声（第10.5.6節）。選ばれていなければ提供者の既定に任せる。
+              // `speechConfig` は `generationConfig` の中に置く。`setup` の直下に置くと
+              // 「Unknown name "speechConfig" at 'setup'」で接続を断られる（2026-09-23 に実機で確認）
+              ...(session.speak && session.voice
+                ? { speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: session.voice } } } }
+                : {}),
             },
-            // 声（第10.5.6節）。選ばれていなければ提供者の既定に任せる
-            ...(session.speak && session.voice
-              ? { speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: session.voice } } } }
-              : {}),
             systemInstruction: { parts: [{ text: session.instructions }] },
             // 聞こえた文字と応答の文字を必ず受け取る（画面への併記と会話ログに使う。第10.5.2節）
             inputAudioTranscription: {},

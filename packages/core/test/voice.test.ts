@@ -131,22 +131,29 @@ test('選んだ声を提供者へ渡す。選ばなければ既定に任せる�
     instructions: '秘書です。話し方の指定: 関西弁で話して', speak: true, voice: 'Charon', onEvent: () => undefined,
   });
   const setup = live.received[0] as {
-    setup?: { speechConfig?: { voiceConfig?: { prebuiltVoiceConfig?: { voiceName?: string } } }; systemInstruction?: { parts?: { text?: string }[] } };
+    setup?: {
+      generationConfig?: { speechConfig?: { voiceConfig?: { prebuiltVoiceConfig?: { voiceName?: string } } } };
+      systemInstruction?: { parts?: { text?: string }[] };
+    };
   };
-  assert.equal(setup.setup?.speechConfig?.voiceConfig?.prebuiltVoiceConfig?.voiceName, 'Charon');
+  // speechConfig は generationConfig の中。setup の直下に置くと接続を断られる（実機で確認）
+  assert.equal(
+    setup.setup?.generationConfig?.speechConfig?.voiceConfig?.prebuiltVoiceConfig?.voiceName,
+    'Charon',
+  );
   assert.match(setup.setup?.systemInstruction?.parts?.[0]?.text ?? '', /関西弁で話して/, '話し方の指示は指示文で渡す');
   chosen.close();
 
   live.received.length = 0;
   const auto = await provider.open({ instructions: '秘書です。', speak: true, voice: '', onEvent: () => undefined });
-  const plain = live.received[0] as { setup?: { speechConfig?: unknown } };
-  assert.equal(plain.setup?.speechConfig, undefined, '選ばなければ声を指定しない');
+  const plain = live.received[0] as { setup?: { generationConfig?: { speechConfig?: unknown } } };
+  assert.equal(plain.setup?.generationConfig?.speechConfig, undefined, '選ばなければ声を指定しない');
   auto.close();
 
   live.received.length = 0;
   const silent = await provider.open({ instructions: '秘書です。', speak: false, voice: 'Kore', onEvent: () => undefined });
-  const noSpeak = live.received[0] as { setup?: { speechConfig?: unknown } };
-  assert.equal(noSpeak.setup?.speechConfig, undefined, '読み上げを切っていれば声も指定しない');
+  const noSpeak = live.received[0] as { setup?: { generationConfig?: { speechConfig?: unknown } } };
+  assert.equal(noSpeak.setup?.generationConfig?.speechConfig, undefined, '読み上げを切っていれば声も指定しない');
   silent.close();
 
   await live.close();

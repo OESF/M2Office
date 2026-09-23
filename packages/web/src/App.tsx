@@ -491,8 +491,7 @@ function SecretaryBar({ lookups, avatar, onSaid }: {
 
   return (
     <div className="secretary">
-      <div className="secretary-main">
-      {/* アバターが音声の入口（仕様書 第6.1.3節）。ふだんは控えめ、話しているときははっきり */}
+      {/* アバターが音声の入口（仕様書 第6.1.3節）。帯の高さいっぱいに置く */}
       <button
         className={`secretary-avatar${call ? ' on' : ''}`}
         onClick={() => void toggleVoice()}
@@ -503,6 +502,8 @@ function SecretaryBar({ lookups, avatar, onSaid }: {
         <span className="sr-only">{call ? '秘書との音声を終わる' : '秘書と音声で話す'}</span>
       </button>
 
+      <div className="secretary-right">
+      <div className="secretary-main">
       <div className="secretary-input">
         <textarea
           ref={box}
@@ -560,6 +561,7 @@ function SecretaryBar({ lookups, avatar, onSaid }: {
           </span>
         ))}
         {hint && <span className="layer">{hint}</span>}
+      </div>
       </div>
     </div>
   );

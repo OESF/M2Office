@@ -385,14 +385,18 @@ export const VOICE_STYLE_MAX = 100;
  * 同梱する秘書のアバター（仕様書 第6.1.3節）。
  *
  * @remarks
- * 線画の SVG を自分たちで描いて同梱する。**写真や、生成した人物の画像は同梱しない。**
- * 権利の扱いを抱え込まないためである。特定の見た目にしたい人は、自分の画像を上げる。
+ * 画像は `packages/web/public/avatars/<id>.png` に置く（置き方はそこの README）。
+ * **置いていないものは画面に出さない。** 壊れた画像を並べないためである。
+ *
+ * 画像そのものはリポジトリの持ち主が用意する。
+ * 権利の確かめられない画像を同梱しない。
  */
 export const AVATAR_PRESETS: { id: string; label: string }[] = [
-  { id: 'a1', label: '髪を結った人' },
-  { id: 'a2', label: '短い髪の人' },
-  { id: 'a3', label: '眼鏡の人' },
-  { id: 'a4', label: '長い髪の人' },
+  { id: 'secretary1', label: '秘書 1' },
+  { id: 'secretary2', label: '秘書 2' },
+  { id: 'secretary3', label: '秘書 3' },
+  { id: 'secretary4', label: '秘書 4' },
+  { id: 'secretary5', label: '秘書 5' },
 ];
 
 /**

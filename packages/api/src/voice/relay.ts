@@ -14,8 +14,8 @@ import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket as NodeWebSocket } from 'ws';
-import { VOICE_CHOICES } from '@m2office/shared';
-import type { VoiceEvent, VoiceSession } from '@m2office/core';
+import { VOICE_CHOICES, canDecide } from '@m2office/shared';
+import type { Logger, VoiceEvent, VoiceSession } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { SESSION_COOKIE, sessionIdOf } from '../auth/session.js';
 import { extractSubdomain } from '../middleware/tenant.js';
@@ -30,6 +30,67 @@ const TRANSCRIPT_LIMIT = 4000;
 
 /** 終わった調べものを探す間隔（ミリ秒）。実行はワーカー（別のプロセス）で進むため、見に行く。 */
 const LOOKUP_POLL_MS = 3000;
+
+/**
+ * 音声を始めたときの第一声の材料を集める（仕様書 第6.1.4節）。
+ *
+ * @remarks
+ * **取れたものだけを渡す。** 取れなかったものは渡さず、第一声で詫びさせない。
+ * 渡すのは材料であり、読み上げる原稿ではない。
+ *
+ * 失敗しても会話は始める。挨拶のために対話そのものを止めない。
+ */
+async function greetingFacts(
+  deps: AppDeps, tenantId: string, userId: string, log: Logger,
+): Promise<string[]> {
+  const facts: string[] = [];
+  const day = new Date();
+  const from = new Date(day.getFullYear(), day.getMonth(), day.getDate()).toISOString();
+  const to = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1).toISOString();
+  try {
+    const events = await deps.connector.calendar.list({ tenantId, userId }, { from, to });
+    const ahead = events.filter((e) => Date.parse(e.start) > Date.now());
+    if (ahead.length > 0) {
+      const next = ahead[0]!;
+      const at = new Date(next.start).toLocaleTimeString('ja-JP', {
+        hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo',
+      });
+      facts.push(`このあとの予定は ${ahead.length} 件。次は ${at} から「${next.title}」`);
+    } else if (events.length > 0) {
+      facts.push('今日の予定はすべて終わっている');
+    }
+  } catch (err) {
+    // 取れなければ触れない。「取得できませんでした」と言わせない
+    log.warn('第一声の予定を取れませんでした', { err });
+  }
+  try {
+    const mine = (await deps.repo.listPendingApprovals(tenantId))
+      .filter((a) => canDecide(a, { id: userId, roles: [] }));
+    if (mine.length > 0) facts.push(`あなたが判断できる承認待ちが ${mine.length} 件`);
+  } catch (err) {
+    log.warn('第一声の承認待ちを取れませんでした', { err });
+  }
+  return facts;
+}
+
+/**
+ * 第一声の内部の指示を組み立てる（仕様書 第6.1.4節）。
+ *
+ * @remarks
+ * 押した人が「何を言えばよいか」を考えずに済むよう、秘書から先に声をかける。
+ */
+function greetingNote(callMe: string, secretaryName: string, facts: string[]): string {
+  return [
+    '（内部情報・この文をそのまま読み上げないこと）',
+    '音声での対話が始まりました。あなたから先に、ひと息で声をかけてください。',
+    `相手の呼び方: ${callMe}`,
+    secretaryName ? `あなたの名前: ${secretaryName}（名乗ってください）` : '名前は決まっていません。名乗らないでください。',
+    facts.length > 0
+      ? `いま分かっていること:\n${facts.map((f) => `- ${f}`).join('\n')}`
+      : 'いま伝えることはありません。予定や承認について、分からないことを語らないでください。',
+    'ここに書かれていないことは言わないでください。最後に、用件を尋ねて相手に返してください。',
+  ].join('\n');
+}
 
 /**
  * 終わった調べものを、秘書に伝えさせるための内部の指示を組み立てる（仕様書 第10.11.7節）。
@@ -213,6 +274,12 @@ async function start(
   }
 
   send({ type: 'ready', provider: provider.name, speak });
+  // 押したら、秘書から先に声をかける（仕様書 第6.1.4節）
+  gate.tell(greetingNote(
+    prefs.secretary.callMe || `${displayName}さん`,
+    prefs.secretary.name,
+    await greetingFacts(deps, tenantId, userId, log),
+  ));
   await deps.repo.appendAudit({
     id: randomUUID(), tenantId, actorType: 'user', actorId: userId,
     action: 'secretary.voice', targetType: 'session', targetId: 'start',

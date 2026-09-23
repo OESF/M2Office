@@ -19,8 +19,7 @@ export type IconName =
   | 'approvals' | 'history' | 'notifications' | 'schedules' | 'help' | 'user' | 'settings'
   | 'dashboard' | 'usage' | 'runs' | 'company' | 'sliders' | 'extensions' | 'users' | 'audit' | 'connectors'
   | 'nav-collapse' | 'nav-expand' | 'sun' | 'moon' | 'logout'
-  | 'mic' | 'mic-off' | 'clip' | 'send'
-  | 'avatar-a1' | 'avatar-a2' | 'avatar-a3' | 'avatar-a4';
+  | 'mic' | 'mic-off' | 'clip' | 'send';
 
 /** モノクロのアイコン。文字の色を引き継ぐ。飾りなので読み上げない。 */
 export function Icon({ name, className }: { name: IconName; className?: string }) {
@@ -37,13 +36,16 @@ export function Icon({ name, className }: { name: IconName; className?: string }
  * @param avatar `preset:<id>` は同梱の線画、`file:<ID>` は本人が上げた画像。空なら人の形
  */
 export function SecretaryAvatar({ avatar }: { avatar: string }) {
-  if (avatar.startsWith('file:')) {
-    // 本人が登録した画像だけを返す口を通す（任意のファイルは出せない）
-    return <img src="/v1/me/avatar" alt="" className="avatar-img" />;
-  }
+  // 画像が無いときは線画に落とす。同梱の画像をまだ置いていない場合にも壊れて見えない
+  const [broken, setBroken] = useState(false);
   const preset = avatar.startsWith('preset:') ? avatar.slice('preset:'.length) : '';
-  const name = AVATAR_PRESETS.some((a) => a.id === preset) ? `avatar-${preset}` : 'user';
-  return <Icon name={name as IconName} />;
+  const src = avatar.startsWith('file:')
+    // 本人が登録した画像だけを返す口を通す（任意のファイルは出せない）
+    ? '/v1/me/avatar'
+    : (AVATAR_PRESETS.some((a) => a.id === preset) ? `/avatars/${preset}.png` : '');
+
+  if (!src || broken) return <Icon name="user" />;
+  return <img src={src} alt="" className="avatar-img" onError={() => setBroken(true)} />;
 }
 
 /** 業務の分類（`category`）からアイコンを決める。対応が無ければ共通のアイコン。 */

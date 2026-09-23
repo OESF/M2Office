@@ -189,15 +189,23 @@ button { font: inherit; cursor: pointer; }
   音声での対話は製品の要である（第6.1.3節）。帯は狭く詰めず、落ち着いて話しかけられる高さを取る。
   知らせの長さで高さが変わらないよう、状態の行は高さを決めて置く。
 */
+/*
+  アバターは帯の高さいっぱい（第6.1.3節）。入力欄と知らせの場所の両方に並ぶ。
+  そのため、帯は「アバター」と「右側（入力欄と知らせ）」の 2 列に分ける。
+*/
 .secretary {
   background: var(--panel); border-top: 1px solid var(--line);
-  padding: 12px 16px 8px; display: flex; flex-direction: column; gap: 4px;
+  /*
+    下ぞろえにする。stretch にすると、右側がアバターの高さまで引き伸ばされ、
+    入力欄の高さを測る処理（scrollHeight）がその高さを拾って、際限なく伸びる
+  */
+  padding: 12px 16px 8px; display: flex; gap: 14px; align-items: flex-end;
 }
+.secretary-right { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .secretary-main { display: flex; gap: 10px; align-items: flex-end; }
 /* 高さの決まった知らせの場所。中身が無くても場所は残す */
 .secretary-status {
-  height: 18px; display: flex; gap: 12px; align-items: center;
-  padding-left: 66px; overflow: hidden;
+  height: 18px; display: flex; gap: 12px; align-items: center; overflow: hidden;
 }
 .secretary .layer {
   font-size: 11px; color: var(--muted); white-space: nowrap;
@@ -212,18 +220,18 @@ button { font: inherit; cursor: pointer; }
 
 /* アバターが音声の入口。ふだんは控えめ、話しているときははっきり */
 .secretary-avatar {
-  flex: none; width: 56px; height: 56px; padding: 0;
+  flex: none; width: 140px; height: 140px; padding: 0;
   border: 1px solid var(--line); border-radius: 50%;
   background: var(--bg); color: var(--muted);
   display: grid; place-items: center; cursor: pointer; overflow: hidden;
   opacity: 0.55; transition: opacity 0.15s, border-color 0.15s, color 0.15s;
 }
 .secretary-avatar:hover { opacity: 0.85; }
-.secretary-avatar .icon { width: 34px; height: 34px; }
+.secretary-avatar .icon { width: 72px; height: 72px; }
 .secretary-avatar .avatar-img { width: 100%; height: 100%; object-fit: cover; }
 .secretary-avatar.on {
   opacity: 1; color: var(--accent); border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: 0 0 0 4px var(--accent-soft);
 }
 
 /* 入力欄。複数行を書ける。Enter で送り、Shift+Enter で改行する */
