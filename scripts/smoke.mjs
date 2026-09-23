@@ -2145,6 +2145,57 @@ console.log('\n■ 44. 秘書にファイルを渡す（第10.10節）');
   await call('a', `/v1/runs/${job.runId}/cancel`, { method: 'POST' }, 'member');
 }
 
+console.log('\n■ 45. 音声の最中に、調べものの結果を伝える（第10.11.7節）');
+{
+  const who = 'member';
+  const { default: WebSocket } = await import('ws');
+  const ws = new WebSocket(`${API.replace('http', 'ws')}/v1/secretary/voice`, {
+    headers: { 'x-tenant': 'a', 'x-user': `${who}@alpha.example.jp` },
+  });
+  const messages = [];
+  ws.on('message', (data, isBinary) => {
+    if (isBinary) return;
+    try { messages.push(JSON.parse(data.toString('utf8'))); } catch { /* 読めない形は無視 */ }
+  });
+  const opened = await new Promise((resolve) => {
+    ws.on('open', () => resolve(true));
+    ws.on('error', () => resolve(false));
+  });
+  opened ? ok('音声の対話を開ける') : ng('開けない');
+  await sleep(600);
+
+  // つないだ時点で終わっているものは伝えない（持ち越しは次の段階）
+  const before = messages.filter((m) => m.type === 'reply').length;
+
+  // 音声をつないだまま、ファイルを渡して調べものを起こす
+  const form = new FormData();
+  form.append('file', new Blob([new TextEncoder().encode('部署,人数\n営業,3\n')]), '名簿.csv');
+  const up = await fetch(`${API}/v1/files`, {
+    method: 'POST', body: form,
+    headers: { 'x-tenant': 'a', 'x-user': `${who}@alpha.example.jp` },
+  }).then((r) => r.json());
+  const asked = await call('a', '/v1/secretary', {
+    method: 'POST', body: JSON.stringify({ message: '名簿の部署を教えて', fileId: up.id }),
+  }, who);
+  asked.body.lookup?.runId ? ok('音声をつないだまま、調べものを起こせる') : ng('起こせない', JSON.stringify(asked.body));
+
+  // 終わるのを待ち、そのあと中継が見に行く間隔（3 秒）を足して待つ
+  await waitFor('a', asked.body.lookup.runId, ['completed', 'failed'], 30000, who);
+  await sleep(4500);
+
+  const after = messages.filter((m) => m.type === 'reply');
+  after.length > before
+    ? ok('終わると、音声の側にも秘書の応答として届く') : ng('届かない', JSON.stringify(messages.slice(-3)));
+  // 内部の指示は、利用者が話したこととして扱わない
+  const heard = messages.filter((m) => m.type === 'heard').map((m) => m.text).join('');
+  !/内部情報/.test(heard)
+    ? ok('内部の指示を、聞こえた内容として出さない') : ng('内部の指示が聞こえた内容に出る', heard.slice(0, 120));
+
+  ws.close();
+  await sleep(400);
+  await call('a', '/v1/me/conversations', { method: 'DELETE' }, who);
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

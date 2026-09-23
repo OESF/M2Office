@@ -103,6 +103,14 @@ export class GeminiLiveProvider implements VoiceProvider {
       emit({ type: 'closed', reason: ev.reason || '接続が終わりました' });
     });
 
+    /** 1 往復分の文字を送る。 */
+    const sendTurn = (text: string) => {
+      if (ws.readyState !== WebSocket.OPEN) return;
+      ws.send(JSON.stringify({
+        clientContent: { turns: [{ role: 'user', parts: [{ text }] }], turnComplete: true },
+      }));
+    };
+
     return {
       sendAudio(pcm) {
         if (ws.readyState !== WebSocket.OPEN) return;
@@ -115,12 +123,9 @@ export class GeminiLiveProvider implements VoiceProvider {
           },
         }));
       },
-      sendText(text) {
-        if (ws.readyState !== WebSocket.OPEN) return;
-        ws.send(JSON.stringify({
-          clientContent: { turns: [{ role: 'user', parts: [{ text }] }], turnComplete: true },
-        }));
-      },
+      sendText: sendTurn,
+      // 送り方は文字と同じだが、意味が違う。利用者の発言ではなく、秘書への内部の指示である
+      sendSystemNote: sendTurn,
       close() {
         try { ws.close(); } catch { /* すでに閉じていることがある */ }
       },

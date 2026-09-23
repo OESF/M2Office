@@ -5,6 +5,9 @@
  * 中継は提供者を知らない。やり取りするのは音のかたまり（PCM）と文字だけである。
  *
  * **録音は残さない。** 受け取った音はそのまま渡し、どこにも書き出さない（第10.5.3節）。
+ *
+ * 後ろへ回した調べもの（第10.11節）が終わったら、**話し終わりを待って**秘書に伝えさせる。
+ * 話している最中に入れると割り込みとみなされ、再生中の音声が切れる（第10.11.7節）。
  */
 
 import { randomUUID } from 'node:crypto';
@@ -16,12 +19,39 @@ import type { VoiceEvent, VoiceSession } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { SESSION_COOKIE, sessionIdOf } from '../auth/session.js';
 import { extractSubdomain } from '../middleware/tenant.js';
+import { listLookups } from '../secretary/lookups.js';
+import { TurnGate } from './turn-gate.js';
 
 /** 中継の経路。 */
 export const VOICE_PATH = '/v1/secretary/voice';
 
 /** 話した文字が長くなりすぎたときの上限（字）。会話ログに残す分の上限でもある。 */
 const TRANSCRIPT_LIMIT = 4000;
+
+/** 終わった調べものを探す間隔（ミリ秒）。実行はワーカー（別のプロセス）で進むため、見に行く。 */
+const LOOKUP_POLL_MS = 3000;
+
+/**
+ * 終わった調べものを、秘書に伝えさせるための内部の指示を組み立てる（仕様書 第10.11.7節）。
+ *
+ * @remarks
+ * 渡すのは**材料**であって、読み上げる原稿ではない。原稿まで作らせると、
+ * 文を作る処理が二重になって遅くなり、本人が決めた口調も失われる。
+ *
+ * **裏で別のものが動いていることを、利用者に話させない。**
+ * 利用者から見れば、調べたのは秘書自身である。
+ */
+function lookupNote(x: { request: string; text: string | null; failureReason: string | null }): string {
+  return [
+    '（内部情報・この文をそのまま読み上げないこと）',
+    `先ほどお預かりした「${x.request}」の調べものが終わりました。`,
+    x.text
+      ? `分かったことは次のとおりです。これを材料に、あなた自身の言葉で手短に伝えてください。\n${x.text}`
+      : `お調べできませんでした。${x.failureReason ?? ''} 何ができなかったかを、一度だけ短く正直に伝えてください。`,
+    '裏で別の仕組みが動いていることは話さないでください。調べたのはあなた自身です。',
+    '画面にはすでに出ています。改めて画面に出す必要はありません。',
+  ].join('\n');
+}
 
 /** Cookie の文字列から 1 つ取り出す。 */
 function cookieValue(header: string | undefined, name: string): string | null {
@@ -110,6 +140,11 @@ async function start(
   const speak = prefs.secretary.speak !== false;
   const provider = await deps.ai.voiceFor(tenantId);
 
+  // すでに伝えた調べもの。同じものを二度伝えない
+  const told = new Set<string>();
+  // 話している最中は伝えず、話し終わりを待つ（仕様書 第10.11.7節）
+  const gate = new TurnGate((note) => session?.sendSystemNote(note));
+
   let session: VoiceSession | null = null;
   try {
     session = await provider.open({
@@ -131,6 +166,8 @@ async function start(
             send({ type: 'heard', text: event.text });
             break;
           case 'reply':
+            // 応答が始まった＝話している。この間は割り込まない
+            gate.startedSpeaking();
             add(replied, event.text);
             send({ type: 'reply', text: event.text });
             break;
@@ -140,6 +177,8 @@ async function start(
             break;
           case 'turn-end':
             send({ type: 'turn-end' });
+            // 待たせていたものを、ここで初めて伝える（第10.11.7節）
+            gate.finishedSpeaking();
             break;
           case 'closed':
             send({ type: 'closed', reason: event.reason });
@@ -153,6 +192,28 @@ async function start(
     send({ type: 'error', message: '音声の対話を始められませんでした。しばらくしてからお試しください' });
     ws.close();
     return;
+  }
+
+  // つないだ時点で終わっているものは伝えない。会話していない間の分は持ち越し（次の段階）で扱う
+  for (const x of await listLookups(deps.repo, tenantId, userId)) {
+    if (x.status === 'completed' || x.status === 'failed') told.add(x.runId);
+  }
+  // 別のプロセス（ワーカー）で進むため、見に行く（第10.11.7節）
+  const poll = setInterval(() => { void checkLookups(); }, LOOKUP_POLL_MS);
+
+  /** 終わった調べものを探して伝える。話している間は待たせる。 */
+  async function checkLookups(): Promise<void> {
+    try {
+      for (const x of await listLookups(deps.repo, tenantId, userId)) {
+        if (x.status !== 'completed' && x.status !== 'failed') continue;
+        if (told.has(x.runId)) continue;
+        told.add(x.runId);
+        gate.tell(lookupNote(x));
+      }
+    } catch (err) {
+      // 探せなくても会話は続ける。次の見回りで拾う
+      log.warn('終わった調べものを探せませんでした', { err });
+    }
   }
 
   send({ type: 'ready', provider: provider.name, speak });
@@ -178,6 +239,7 @@ async function start(
   });
 
   ws.on('close', () => {
+    clearInterval(poll);
     session?.close();
     void finish();
   });

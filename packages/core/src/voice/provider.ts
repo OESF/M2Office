@@ -34,6 +34,17 @@ export interface VoiceSession {
   sendAudio(pcm: Uint8Array): void;
   /** 文字で送る（聞き取りが難しいときの補い）。 */
   sendText(text: string): void;
+  /**
+   * 内部の指示を送る（仕様書 第10.11.7節）。
+   *
+   * @remarks
+   * 利用者の発言ではない。後ろで終わった調べものの**材料**を渡し、
+   * 秘書が自分の言葉で伝えられるようにする。読み上げる原稿は渡さない。
+   *
+   * **話している最中に送ってはならない。** 割り込みとみなされ、再生中の音声が切れる。
+   * 送るのは話し終わり（`turn-end`）のあとである。
+   */
+  sendSystemNote(text: string): void;
   /** 終わる。 */
   close(): void;
 }

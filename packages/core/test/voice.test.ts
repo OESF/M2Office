@@ -160,3 +160,31 @@ test('見本は、受け取った声と話し方の指示を答えに書き添�
   assert.match(reply && 'text' in reply ? reply.text : '', /声「Puck」と話し方の指示を受け取りました/);
   session.close();
 });
+
+test('内部の指示は、利用者の発言として扱わない（仕様書 第10.11.7節）', async () => {
+  const sink = collect();
+  const session = await new MockVoiceProvider().open({ instructions: '', speak: true, onEvent: sink.onEvent });
+
+  session.sendSystemNote('（内部情報）調べものが終わりました。売上は 300 円です。');
+  // 聞こえた文字には出さない。利用者はそう言っていない
+  assert.equal(sink.events.some((e) => e.type === 'heard'), false);
+  assert.deepEqual(sink.events.map((e) => e.type), ['reply', 'turn-end']);
+  session.close();
+});
+
+test('内部の指示も 1 往復として送る（Gemini Live）', async () => {
+  const live = await fakeLive();
+  const provider = new GeminiLiveProvider({ apiKey: 'k', model: 'models/gemini-live', url: live.url });
+  const session = await provider.open({ instructions: '', speak: true, onEvent: () => undefined });
+
+  session.sendSystemNote('（内部情報）調べものが終わりました。');
+  // 届くまで待つ
+  for (let i = 0; i < 50 && live.received.length < 2; i++) await new Promise((r) => setTimeout(r, 20));
+  const sent = live.received.at(-1) as {
+    clientContent?: { turns?: { parts?: { text?: string }[] }[]; turnComplete?: boolean };
+  };
+  assert.match(sent.clientContent?.turns?.[0]?.parts?.[0]?.text ?? '', /内部情報/);
+  assert.equal(sent.clientContent?.turnComplete, true, '1 往復として閉じる');
+  session.close();
+  await live.close();
+});

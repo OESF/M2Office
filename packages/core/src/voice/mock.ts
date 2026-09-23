@@ -62,6 +62,11 @@ export class MockVoiceProvider implements VoiceProvider {
         session.onEvent({ type: 'reply', text: sampleReply(session) });
         session.onEvent({ type: 'turn-end' });
       },
+      sendSystemNote(text) {
+        // 内部の指示は、利用者の発言として扱わない。聞こえた文字には出さない
+        session.onEvent({ type: 'reply', text: `［見本］お調べした結果をお伝えします。（材料: ${text.slice(0, 40)}…）` });
+        session.onEvent({ type: 'turn-end' });
+      },
       close() {
         closed = true;
         if (timer) clearTimeout(timer);

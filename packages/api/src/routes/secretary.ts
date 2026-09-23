@@ -8,7 +8,7 @@
 
 import { Hono } from 'hono';
 import type { RequestContext } from '@m2office/shared';
-import { LOOKUP_AGENT_ID } from '@m2office/core';
+import { listLookups } from '../secretary/lookups.js';
 import type { AppDeps } from '../context.js';
 
 /**
@@ -44,41 +44,9 @@ export function secretaryRoute(deps: AppDeps) {
    */
   app.get('/lookups', async (c) => {
     const ctx = c.get('ctx');
-    const rows = await deps.repo.listRunsWithJobs(ctx.tenant.id, {
-      limit: 20, requestedBy: ctx.user.id,
-    });
-    const items = [];
-    for (const { run, job } of rows) {
-      if (job.agentId !== LOOKUP_AGENT_ID) continue;
-      items.push({
-        runId: run.id,
-        request: String(job.input['request'] ?? ''),
-        status: run.status,
-        // 何をしているか。段の見出しをそのまま使う（見込みの時間は出さない。第10.11.5節）
-        progress: run.status === 'completed' || run.status === 'failed'
-          ? null
-          : await stepLabelOf(ctx.tenant.id, run.id),
-        // 終わったものだけ中身を返す。動いている間は結果が無い
-        text: run.status === 'completed' ? await answerOf(ctx.tenant.id, run.id) : null,
-        failureReason: run.failureReason,
-      });
-    }
+    const items = await listLookups(deps.repo, ctx.tenant.id, ctx.user.id);
     return c.json({ items });
   });
-
-  /** いま動いている段の見出し。分からなければ「お調べしています」。 */
-  async function stepLabelOf(tenantId: string, runId: string): Promise<string> {
-    const steps = await deps.repo.listRunSteps(tenantId, runId);
-    const current = [...steps].reverse().find((s) => s.status === 'running') ?? steps.at(-1);
-    return current?.stepId === 'answer' ? 'まとめています' : 'お調べしています';
-  }
-
-  /** 調べものの答え。最後の段の応答の文を使う。 */
-  async function answerOf(tenantId: string, runId: string): Promise<string> {
-    const steps = await deps.repo.listRunSteps(tenantId, runId);
-    const last = [...steps].reverse().find((s) => (s.output as { text?: string } | null)?.text);
-    return (last?.output as { text?: string } | null)?.text ?? '';
-  }
 
   return app;
 }

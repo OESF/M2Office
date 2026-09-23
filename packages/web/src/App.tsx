@@ -67,6 +67,9 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [lookups, setLookups] = useState<Lookup[]>([]);
   // すでに伝えた調べもの。同じ結果を二度伝えない
   const announced = useRef<Set<string>>(new Set());
+  // 画面を開いた時点で終わっているものは伝えない。開くたびに古い答えが出てしまうため。
+  // 会話していない間に終わった分の持ち越しは、別に作る（仕様書 第10.11.9節）
+  const seeded = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [showTour, setShowTour] = useState(false);
@@ -98,6 +101,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
         if (x.status !== 'completed' && x.status !== 'failed') continue;
         if (announced.current.has(x.runId)) continue;
         announced.current.add(x.runId);
+        // 開いた時点で終わっていたものは、印だけ付けて伝えない
+        if (!seeded.current) continue;
         setReply({
           layer: 'full',
           // 秘書が自分で調べたものとして伝える。裏で別のものが動いていることは話さない（第10.11.7節）
@@ -109,6 +114,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
         });
       }
       setError(null);
+      seeded.current = true;
     } catch (err) {
       setError(describeError(err, '読み込みに失敗しました'));
     }
