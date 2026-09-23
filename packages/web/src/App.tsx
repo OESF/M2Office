@@ -11,7 +11,7 @@ import type { Approval, Notification } from '@m2office/shared';
 import {
   api, describeError, type AgentSummary, type Lookup, type Me, type RunDetail, type ScheduleView, type SecretaryReply,
 } from './api.js';
-import { HelpCenter, HelpTip, Tour, openHelp, useOpenHelp } from './help.js';
+import { HelpCenter, HelpTip, Markdown, Tour, openHelp, useOpenHelp } from './help.js';
 import { startVoice, type VoiceCall } from './voice.js';
 import { AgentForm, ApprovalTray, Evidence, RunView, statusLabel, SuspendedBanner } from './components.js';
 import { Settings, orderAgents } from './Settings.js';
@@ -365,7 +365,8 @@ function TurnLog({ turns, onOpenAgent }: {
       {turns.map((t) => (
         <div key={t.id} className={`turn ${t.role}`}>
           <span className="muted small">{t.role === 'user' ? 'あなた' : '秘書'}</span>
-          <p>{t.text}</p>
+          {/* 秘書の答えは見出しや箇条書きを使う。本人が書いた文は、書いたとおりに出す */}
+          {t.role === 'user' ? <p>{t.text}</p> : <div className="md"><Markdown text={t.text} /></div>}
           {t.meta?.note && <p className="muted small">{t.meta.note}</p>}
           {t.meta?.suggestedAgent && (
             <button className="btn small"
@@ -593,7 +594,7 @@ function Notifications({ items, onRead }: { items: Notification[]; onRead: () =>
             </span>
           </h3>
           {open === n.id ? (
-            <p className="reply">{n.body}</p>
+            <div className="reply"><Markdown text={n.body} /></div>
           ) : (
             <button className="btn ghost small" onClick={() => {
               setOpen(n.id);

@@ -7,7 +7,7 @@
 import { useState } from 'react';
 import type { Approval, Artifact, RunStep } from '@m2office/shared';
 import { api, describeError, type AgentSummary, type JsonSchemaField, type RunDetail } from './api.js';
-import { AgentHelpPanel, openHelp } from './help.js';
+import { AgentHelpPanel, Markdown, openHelp } from './help.js';
 
 /**
  * 通常の停止の間、画面の上部に出す案内（仕様書 第23.8.6節）。停止していなければ何も出さない。
@@ -206,7 +206,7 @@ export function RunView({
         <div className="card">
           <h3>結果</h3>
           {answer
-            ? <p className="reply">{answer}</p>
+            ? <div className="reply"><Markdown text={answer} /></div>
             : <p className="muted">結果がありません。ステップと根拠をご確認ください。</p>}
         </div>
       )}

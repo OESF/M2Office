@@ -82,11 +82,12 @@ export function parseMarkdown(text: string): MdBlock[] {
       continue;
     }
     if (line.trim() === '') { flush(); continue; }
-    const h = /^(#{1,3})\s+(.*)$/.exec(line);
+    const h = /^(#{1,6})\s+(.*)$/.exec(line);
     if (h) {
       flush();
-      // 記事の題名は画面の見出し（h1）が持つため、本文の # と ## はどちらも h2 にする
-      blocks.push({ kind: h[1]!.length === 3 ? 'h3' : 'h2', text: h[2]!.trim() });
+      // 記事の題名は画面の見出し（h1）が持つため、本文の # と ## はどちらも h2 にする。
+      // 業務の答えは #### 以下も使うため、3 段より深いものは h3 にまとめる
+      blocks.push({ kind: h[1]!.length >= 3 ? 'h3' : 'h2', text: h[2]!.trim() });
       continue;
     }
     const ul = /^\s*[-*]\s+(.*)$/.exec(line);

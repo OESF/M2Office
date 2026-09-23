@@ -67,3 +67,34 @@ test('行の中のコード・リンク・太字を読み、相対のリンク�
   ]);
   assert.ok(!parseInline('[危ない](javascript:alert(1))').some((n) => n.kind === 'link'), 'http(s) 以外は押せるリンクにしない');
 });
+
+test('業務の答えの書き方を読む（仕様書 第6.2.2節）', () => {
+  // 実機で出た答えの形。見出し・太字つきの箇条書き・出典が混じる
+  const blocks = parseMarkdown([
+    '就業規則におけるリモートワークに関する規則は以下のとおりです。',
+    '',
+    '### リモートワークの実施について',
+    '* **趣旨・適用**: 開発業務の効率化のため、リモートワークを認めます。',
+    '* **遵守事項**: 第6条の情報セキュリティ基準を遵守しなければなりません。',
+    '',
+    '#### 費用の負担',
+    '通信費は別途定めます。',
+    '',
+    '**出典:**',
+    '* 就業規則 › 第5章 › 第9条（リモートワークの実施）',
+  ].join('\n'));
+
+  assert.deepEqual(blocks.map((b) => b.kind), ['p', 'h3', 'ul', 'h3', 'p', 'p', 'ul']);
+  // #### も見出しとして読む（文字のまま出さない）
+  assert.equal((blocks[3] as { text: string }).text, '費用の負担');
+  assert.equal((blocks[2] as { items: string[] }).items.length, 2);
+});
+
+test('答えに書かれたリンクは、http(s) と mailto だけを押せるようにする', () => {
+  // 外から取り込んだ文書に由来する行が答えに混じりうる（不変則 I-6）
+  const nodes = parseInline('[社内](javascript:alert(1)) と [規程](https://example.jp/a)');
+  assert.deepEqual(nodes.filter((n) => n.kind === 'link').map((n) => (n as { href: string }).href),
+    ['https://example.jp/a']);
+  // 押せないものは文字だけが残る
+  assert.equal(nodes.some((n) => n.kind === 'text' && n.text === '社内'), true);
+});
