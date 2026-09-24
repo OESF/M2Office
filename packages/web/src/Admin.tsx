@@ -11,7 +11,7 @@ import { statusLabel, SuspendedBanner } from './components.js';
 import {
   AgentSettings, CompanySettings, KnowledgeSettings, UserSettings,
 } from './AdminSettings.js';
-import { Dashboard } from './Dashboard.js';
+import { Checklist, Dashboard } from './Dashboard.js';
 import { ExtensionSettings } from './Extensions.js';
 import { Connections } from './Connections.js';
 import { HelpCenter, useOpenHelp } from './help.js';
@@ -19,7 +19,7 @@ import { NavHeading, NavItem, SideNavLayout, ThemeToggle, type IconName } from '
 
 type Tab =
   | 'dashboard' | 'usage' | 'runs' | 'company' | 'agents' | 'extensions' | 'users' | 'knowledge' | 'audit'
-  | 'connectors' | 'help';
+  | 'connectors' | 'setup' | 'help';
 
 /**
  * 管理者ページの左ペインの項目。説明はマウスを重ねたときに出す（仕様書 第6.1.1節）。
@@ -28,15 +28,18 @@ type Tab =
  * 並びは仕様書 第6.6節の順（会社情報 → 接続 → ユーザーと権限 → 業務と承認 → 知識 →
  * 費用と契約 → 記録と監視）にそろえる。設定を上から順に済ませれば使い始められるようにするため。
  * ダッシュボードは最初の画面として先頭に置く（第6.6.8節）。
+ * 「はじめに行う設定」は一度きりの作業なので、**設定のいちばん下**に置く（第6.10.3.1節）。
+ * すべて済むと項目ごと消す。
  */
 const TABS: { id: Tab; label: string; icon: IconName; description: string; group: string }[] = [
-  { id: 'dashboard', label: 'ダッシュボード', icon: 'dashboard', description: 'いまの状況と集計、はじめに行う設定', group: '' },
+  { id: 'dashboard', label: 'ダッシュボード', icon: 'dashboard', description: 'いまの状況と集計', group: '' },
   { id: 'company', label: '会社情報', icon: 'company', description: '会社の情報、自社の書き方、スライドのテンプレート', group: '設定' },
   { id: 'connectors', label: '接続', icon: 'connectors', description: 'LLM（Gemini）と Google Workspace への接続、業務が求める権限', group: '設定' },
   { id: 'users', label: 'ユーザーと権限', icon: 'users', description: '招待・ロール・グループ・権限区画', group: '設定' },
   { id: 'agents', label: '業務と承認', icon: 'sliders', description: '使う業務、承認の決まり、利用できる人', group: '設定' },
   { id: 'extensions', label: '拡張機能', icon: 'extensions', description: '業務と、外部とのつながり（コネクタ）を追加する', group: '設定' },
   { id: 'knowledge', label: '知識', icon: 'knowledge', description: '就業規則などの社内の規程、言い換え', group: '設定' },
+  { id: 'setup', label: 'はじめに行う設定', icon: 'help', description: '導入の流れと、残っている設定', group: '設定' },
   { id: 'usage', label: '利用状況', icon: 'usage', description: '業務ごとの実行の件数と費用', group: '記録' },
   { id: 'runs', label: '実行の一覧', icon: 'runs', description: '全員の実行の状態と費用（中身は見られません）', group: '記録' },
   { id: 'audit', label: '監査ログ', icon: 'audit', description: '誰が何をしたかの記録', group: '記録' },
@@ -56,6 +59,17 @@ const TABS: { id: Tab; label: string; icon: IconName; description: string; group
 export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [tab, setTab] = useState<Tab>('dashboard');
   const [helpArticle, setHelpArticle] = useState<string | null>(null);
+  /*
+    はじめに行う設定の進み具合（仕様書 第6.10.3.1節）。
+    **左ペインに出すのが要である。** 画面から追い出しただけでは、途中であることに気づけなくなる。
+    すべて済んだら null にし、項目ごと出さない。
+  */
+  const [setup, setSetup] = useState<{ done: number; total: number } | null>(null);
+  useEffect(() => {
+    api.onboarding.checklist()
+      .then((r) => setSetup(r.done ? null : { done: r.items.filter((i) => i.done).length, total: r.items.length }))
+      .catch(() => setSetup(null));
+  }, [tab]);
   useOpenHelp(useCallback((id: string | null) => { setHelpArticle(id); setTab('help'); }, []));
   const isAdmin = me.user.roles.includes('admin');
 
@@ -76,18 +90,27 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
       ) : (
         <SideNavLayout nav={(
           <>
-            {TABS.map((t, i) => (
+            {/* すべて済んだ会社では「はじめに行う設定」を出さない（仕様書 第6.10.3.1節） */}
+            {TABS.filter((t) => t.id !== 'setup' || setup).map((t, i, shown) => (
               <Fragment key={t.id}>
                 {/* まとまりの変わり目に見出しを出す（仕様書 第6.6節の並び） */}
-                {t.group && t.group !== TABS[i - 1]?.group && <NavHeading>{t.group}</NavHeading>}
+                {t.group && t.group !== shown[i - 1]?.group && <NavHeading>{t.group}</NavHeading>}
                 <NavItem icon={t.icon} label={t.label} description={t.description}
+                  hint={t.id === 'setup' && setup ? `${setup.done} / ${setup.total}` : ''}
                   active={tab === t.id} onClick={() => setTab(t.id)} />
               </Fragment>
             ))}
           </>
         )}>
           <main className="canvas">
-            {tab === 'dashboard' && <Dashboard onGo={(t) => setTab(t as Tab)} />}
+            {tab === 'dashboard' && <Dashboard />}
+            {tab === 'setup' && (
+              <>
+                <h1>はじめに行う設定</h1>
+                <p className="lead">上から順に済ませると、使い始められます。すべて済むと、この項目は消えます。</p>
+                <Checklist onGo={(t) => setTab(t as Tab)} />
+              </>
+            )}
             {tab === 'help' && <HelpCenter initial={helpArticle} />}
             {tab === 'usage' && <Usage />}
             {tab === 'runs' && <Runs />}

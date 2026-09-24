@@ -15,13 +15,16 @@ import { HelpTip, openHelp } from './help.js';
 const LIVE_INTERVAL_MS = 5000;
 
 /**
- * @param onGo 初期設定のチェックリストから、管理者ページの別のタブへ移る
+ * ダッシュボード（仕様書 第6.7節）。
+ *
+ * @remarks
+ * **初期設定のチェックリストはここに置かない**（第6.10.3.1節）。初期設定は一度きりの作業であり、
+ * 毎日見る画面の先頭を占めると、いまの状況が下へ押し下げられる。設定の 1 項目として出す。
  */
-export function Dashboard({ onGo }: { onGo?: (tab: string) => void }) {
+export function Dashboard() {
   const [tab, setTab] = useState<'live' | 'stats'>('live');
   return (
     <>
-      <Checklist onGo={onGo} />
       <div className="dash-head">
         <h1>ダッシュボード <HelpTip article="admin-dashboard">業務の流れと承認の滞留を見る画面です。会話や業務の中身、個人の勤務時間は出ません。</HelpTip></h1>
         <div className="seg">
@@ -35,16 +38,23 @@ export function Dashboard({ onGo }: { onGo?: (tab: string) => void }) {
 }
 
 /**
- * 管理者の初期設定チェックリスト（仕様書 第6.10.3節）。すべて済むと出さない。
+ * 管理者の初期設定チェックリスト（仕様書 第6.10.3節・第6.10.3.1節）。
+ *
+ * @remarks
+ * **設定の 1 項目として出す。** すべて済むと、左ペインからも消える。
+ *
+ * @param onGo 未了の項目から、管理者ページの別の画面へ移る
  */
-function Checklist({ onGo }: { onGo?: (tab: string) => void }) {
+export function Checklist({ onGo }: { onGo?: (tab: string) => void }) {
   const [items, setItems] = useState<ChecklistItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const load = () => api.onboarding.checklist()
     .then((r) => setItems(r.done ? null : r.items)).catch((e) => setError(describeError(e)));
   useEffect(() => { void load(); }, []);
   if (error) return <p className="error">{error}</p>;
-  if (!items) return null;
+  if (!items) {
+    return <p className="muted">はじめに行う設定は、すべて済んでいます。</p>;
+  }
   const done = items.filter((i) => i.done).length;
   return (
     <section className="card checklist">
