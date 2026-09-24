@@ -26,11 +26,6 @@ const EVENTS_FOLDED = 5;
  */
 export function Dashboard() {
   const [tab, setTab] = useState<'live' | 'stats'>('live');
-  // 壁に映すなら、個人名の設定を見直す機会になる（仕様書 第6.7.2.1節）
-  const [names, setNames] = useState(false);
-  useEffect(() => {
-    api.admin.dashboardLive().then((d) => setNames(d.people !== null)).catch(() => undefined);
-  }, []);
   return (
     <>
       <div className="dash-head">
@@ -45,14 +40,6 @@ export function Dashboard() {
           別の画面で開く
         </a>
       </div>
-      {names && (
-        <p className="muted small">
-          「別の画面で開く」は、壁のモニターに映しておくための画面です。
-          いまは人の状態を<strong>個人名で表示</strong>する設定のため、
-          <strong>通りかかった人にも誰が何をしているかが見えます</strong>。
-          気になるときは、下の「見せ方」を「人数と業務だけ」に変えてください。
-        </p>
-      )}
       {tab === 'live' ? <Live /> : <Stats />}
     </>
   );
@@ -141,22 +128,7 @@ export function Checklist({ onGo }: { onGo?: (tab: string) => void }) {
  * @remarks
  * 出すのは状態・業務の名前・活動の表示名までである。会話や入力の中身、接続元の場所は出さない（第6.7.10節）。
  */
-function People({ data, board = false, onGranularityChanged }: {
-  data: DashboardLive; board?: boolean; onGranularityChanged: () => void;
-}) {
-  const granularity = data.peopleSummary ? 'counts' : 'names';
-  // 掛け通しの画面には、押すところを置かない（仕様書 第6.7.2.1節）
-  const switcher = board ? null : (
-    <div className="row presence-switch">
-      <label className="muted small">見せ方</label>
-      <select value={granularity}
-        onChange={(e) => void api.admin.saveSettings('dashboard', { people: e.target.value as 'names' | 'counts' })
-          .then(onGranularityChanged)}>
-        <option value="names">個人名で表示</option>
-        <option value="counts">人数と業務だけ</option>
-      </select>
-    </div>
-  );
+function People({ data, board = false }: { data: DashboardLive; board?: boolean }) {
   const tip = board ? null : (
     <HelpTip article="admin-dashboard">
       いま誰が何をしているかを、状態と業務の名前までで示します。会話や入力の中身、接続元の場所は出しません。
@@ -168,7 +140,6 @@ function People({ data, board = false, onGranularityChanged }: {
     return (
       <section className="card">
         <h3>人の状態 {tip}</h3>
-        {switcher}
         <p className="muted small">この会社は「人数と業務だけ」の表示にしています。</p>
         <div className="presence-row">
           {counts.filter((x) => x.n > 0).map((x) => (
@@ -183,7 +154,6 @@ function People({ data, board = false, onGranularityChanged }: {
   return (
     <section className="card">
       <h3>人の状態 {tip}</h3>
-      {switcher}
       {people.length === 0 && <p className="muted">利用者がいません。</p>}
       <div className="presence-row">
         {people.map((p) => (
@@ -246,17 +216,15 @@ function Live({ board = false }: { board?: boolean }) {
 
   return (
     <>
-      {/* 更新が途切れたら黙って古い値を映し続けない（仕様書 第6.7.2.1節） */}
-      <p className={error ? 'error' : 'lead'}>
-        {error
-          ? `更新できていません（最終更新 ${time(data.generatedAt)}）: ${error}`
-          : `${live ? '変化があるとすぐに更新します' : '5 秒ごとに取り直しています'}（最終更新 ${time(data.generatedAt)}）`}
+      {/*
+        最終更新の時刻だけを片隅に出す（仕様書 第6.7.3.1節）。
+        **更新が途切れたときは目立たせる。** 古い値を黙って映し続けない（第6.7.2.1節）
+      */}
+      <p className={`updated-at${error ? ' stale' : ''}`} title={error ?? (live ? '変化があるとすぐに更新します' : '5 秒ごとに取り直しています')}>
+        {error ? '更新できていません ' : ''}{time(data.generatedAt)}
       </p>
 
-      <People
-        data={data} board={board}
-        onGranularityChanged={() => void api.admin.dashboardLive().then(setData).catch(() => undefined)}
-      />
+      <People data={data} board={board} />
 
       <div className="tiles">
         <Tile label="ログイン中" value={c.activeUsers} unit="人" />

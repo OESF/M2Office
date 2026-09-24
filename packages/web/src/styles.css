@@ -476,6 +476,14 @@ pre.body { white-space: pre-wrap; background: var(--subtle-bg); border: 1px soli
 .tile.wait { border-color: var(--warn-line); background: var(--consent-bg); }
 .tile.fail { border-color: var(--danger-line); background: var(--danger-soft); }
 
+/* 最終更新の時刻。片隅に小さく出す（仕様書 第6.7.3.1節） */
+.updated-at {
+  margin: -26px 0 10px; text-align: right; font-size: 12px; color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.updated-at.stale { color: var(--danger); font-weight: 600; }
+.board .updated-at { margin: 0 0 8px; font-size: calc(12px * var(--board-scale)); }
+
 /*
   掛け通しの画面（仕様書 第6.7.2.1節）。**眺める画面である。**
   押すところを置かず、離れて読める大きさにする。画面の幅に応じて文字を変える
@@ -524,8 +532,6 @@ pre.body { white-space: pre-wrap; background: var(--subtle-bg); border: 1px soli
   background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
 }
 .voice-transcript p { margin: 2px 0; }
-/* 見せ方の切り替えと、人の並びが詰まって見えないよう間を空ける（仕様書 第6.7.4節） */
-.presence-switch { margin: 8px 0 14px; }
 .presence-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .presence {
   display: flex; flex-direction: column; gap: 2px; min-width: 150px;

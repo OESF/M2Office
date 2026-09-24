@@ -122,6 +122,28 @@ export function CompanySettings() {
           onClick={() => void saver.run(() => api.admin.saveSettings('company', company))}>保存する</button>
       </div>
 
+      {/*
+        ダッシュボードの見せ方（仕様書 第6.7.4.1節、Q-64）。
+        **ダッシュボードの上には置かない。** 毎日眺める画面に、めったに触らない設定を置かない。
+        壁のモニターに映すときに見直すものなので、会社の設定として持つ。
+      */}
+      <div className="card">
+        <h3>ダッシュボードの人の見せ方</h3>
+        <p>
+          管理者ページのダッシュボードで、いま誰が何をしているかをどこまで出すかを決めます。
+          <strong>壁のモニターに映す（「別の画面で開く」）ときは、通りかかった人にも見えます。</strong>
+        </p>
+        <div className="field">
+          <label>見せ方</label>
+          <select value={data.dashboard.people}
+            onChange={(e) => void saver.run(() =>
+              api.admin.saveSettings('dashboard', { people: e.target.value as 'names' | 'counts' }).then(reload))}>
+            <option value="names">個人名で表示（既定）</option>
+            <option value="counts">人数と業務だけ（誰かは出さない）</option>
+          </select>
+        </div>
+      </div>
+
       <div className="card">
         <h3>自社の書き方</h3>
         <p>すべての業務が同じ書き方で文面を作ります。業務ごとの個別指定はできません。</p>
