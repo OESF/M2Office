@@ -233,7 +233,10 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
           {view.kind === 'run' && (
             <>
               <h1>実行の詳細</h1>
-              <p className="lead">進捗は自動で更新されます。</p>
+              {/* 終わったら、案内も消す（仕様書 第6.2.2.2節） */}
+              {detail && !['completed', 'failed', 'cancelled'].includes(detail.run.status) && (
+                <p className="lead">進み具合は自動で更新されます。</p>
+              )}
               {detail ? (
                 <RunView detail={detail} viewerId={me.user.id} onCancelled={() => void api.run(view.runId).then(setDetail)} />
               ) : <p className="muted">読み込み中…</p>}

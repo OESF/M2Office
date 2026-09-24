@@ -327,7 +327,8 @@ export interface JsonSchemaField {
 export interface RunDetail {
   run: Run;
   job: { agentId: string; input: Record<string, unknown>; requestedBy: string } | null;
-  steps: RunStep[];
+  /** 段。API が表示名（仕様書 第9.2.4節）を足して返す。 */
+  steps: (RunStep & { label: string })[];
   artifacts: Artifact[];
 }
 

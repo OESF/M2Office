@@ -197,6 +197,19 @@ button { font: inherit; cursor: pointer; }
 .btn.ghost { background: none; color: var(--accent); border: 1px solid var(--accent); }
 .btn.danger { background: none; color: var(--danger); border: 1px solid var(--danger-line); }
 
+/* 実行の途中の知らせ（仕様書 第6.2.2.2節）。動いていることと、いま何をしているかだけ */
+.card.running .doing {
+  display: flex; align-items: center; gap: 8px;
+  color: var(--ink); font-size: 15px; margin: 0 0 6px;
+}
+.card.running .spin { width: 14px; height: 14px; }
+/* 段・道具・実行 ID は、開いたときだけ出す */
+.record { margin: 4px 0 12px; }
+.record summary { color: var(--muted); font-size: 13px; cursor: pointer; }
+.record summary:hover { color: var(--accent); }
+.record h4 { font-size: 12px; color: var(--muted); margin: 12px 0 6px; letter-spacing: .06em; }
+.record .steps { margin-top: 8px; }
+
 .steps { list-style: none; padding: 0; margin: 0; }
 .steps li { display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px dashed var(--line); }
 .steps .seq { color: var(--muted); width: 22px; }
@@ -713,7 +726,7 @@ code.uri { background: var(--subtle-bg); border: 1px solid var(--line); border-r
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.secretary .lookup .spin {
+.spin {
   width: 10px;
   height: 10px;
   border: 2px solid var(--line);
@@ -725,7 +738,7 @@ code.uri { background: var(--subtle-bg); border: 1px solid var(--line); border-r
 @keyframes m2o-spin { to { transform: rotate(360deg); } }
 /* 動きを抑える設定の端末では回さない */
 @media (prefers-reduced-motion: reduce) {
-  .secretary .lookup .spin { animation: none; }
+  .spin { animation: none; }
 }
 
 /* 個人設定のアバターの選択（仕様書 第6.1.3節） */

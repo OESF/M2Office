@@ -135,7 +135,13 @@ function answerOf(steps: RunStep[]): string {
 const CANCELLABLE = ['queued', 'running', 'awaiting_approval'];
 
 /**
- * 実行の詳細。進捗とステップを表示する（仕様書 FR-305）。
+ * 実行の詳細（仕様書 第6.2.2節・第6.2.2.2節）。
+ *
+ * @remarks
+ * **本人が読むものと、本人が決めることだけを出す。**
+ * 動いている間は「動いていること」と「いま何をしているか」だけ。終わったら途中の表示を消し、
+ * 結果と成果物だけを残す。実行 ID・トークン数・費用・段の一覧・道具の一覧は、
+ * 利用者が変えられないため既定では出さない（閉じた「実行の記録」の中に置く）。
  *
  * @param viewerId 見ている人。依頼した本人にだけ「中止」を出す（第9.3.1節）
  * @param onCancelled 中止したあとに呼ぶ。呼び出し側が読み直す
@@ -152,8 +158,13 @@ export function RunView({
   const [error, setError] = useState<string | null>(null);
   const [leftover, setLeftover] = useState<string[] | null>(null);
   const canCancel = detail.job?.requestedBy === viewerId && CANCELLABLE.includes(run.status);
-  const done = run.status === 'completed' || run.status === 'failed';
+  const done = run.status === 'completed' || run.status === 'failed' || run.status === 'cancelled';
   const answer = answerOf(steps);
+  /*
+    いま何をしているか。段は始まった時点で作られるため、動いている段があればそれを使う。
+    待ち行列に入ったばかりで段がまだ無いこともある。**推測で名前を作らない。**
+  */
+  const doing = steps.find((x) => x.status === 'running');
 
   async function cancel() {
     // 中止は、すでに起きたことを取り消さない。押す前に伝える（第9.3.1節）
@@ -179,60 +190,45 @@ export function RunView({
 
   return (
     <>
-      <div className="card">
-        <h3>
-          実行の状況 <span className={`status ${run.status}`}>{statusLabel(run.status)}</span>
-        </h3>
-        <dl className="kv">
-          <dt>実行 ID</dt><dd>{run.id}</dd>
-          <dt>進捗</dt><dd>{run.cursor} / {steps.length} ステップ</dd>
-          <dt>消費</dt><dd>{run.tokensUsed} トークン（約 {run.costJpy} 円）</dd>
-          {run.failureReason && (<><dt>理由</dt><dd>{run.failureReason}</dd></>)}
-        </dl>
-        {canCancel && (
-          <button className="btn ghost small" onClick={() => void cancel()} disabled={cancelling}>
-            {cancelling ? '止めています…' : '中止'}
-          </button>
-        )}
-        {error && <p className="error">{error}</p>}
-        {leftover && leftover.length > 0 && (
-          <p className="muted">
-            作りかけの文書がドライブに残っています:{' '}
-            {leftover.map((url) => (
-              <a key={url} href={url} target="_blank" rel="noreferrer">{url}</a>
-            ))}
+      {/* 動いている間。だんまりにせず、動いていることだけを示す（仕様書 第6.2.2.2節） */}
+      {!done && (
+        <div className="card running">
+          <p className="doing">
+            {/* 承認待ちは人の番であり、こちらは動いていない。回さない */}
+            {run.status !== 'awaiting_approval' && <span className="spin" aria-hidden="true" />}
+            {run.status === 'awaiting_approval'
+              ? '承認をお待ちしています'
+              : `${doing?.label ?? '準備しています'}…`}
           </p>
-        )}
-      </div>
+          {run.status === 'awaiting_approval' && (
+            <p className="muted small">承認トレイで判断すると、続きから進みます。</p>
+          )}
+          {canCancel && (
+            <button className="btn ghost small" onClick={() => void cancel()} disabled={cancelling}>
+              {cancelling ? '止めています…' : '中止'}
+            </button>
+          )}
+        </div>
+      )}
       {/* 終わった実行の答えを必ず出す（仕様書 第6.2.2節）。成果物を作らない業務もある */}
       {done && (
         <div className="card">
           <h3>結果</h3>
+          {run.failureReason && <p className="error">{run.failureReason}</p>}
           {answer
             ? <div className="reply"><Markdown text={answer} /></div>
-            : <p className="muted">結果がありません。ステップと根拠をご確認ください。</p>}
+            : !run.failureReason && <p className="muted">結果がありません。</p>}
         </div>
       )}
-      <div className="card">
-        <h3>ステップ</h3>
-        <ul className="steps">
-          {steps.map((s) => (
-            <li key={s.id}>
-              <span className="seq">{s.seq + 1}</span>
-              <span className="name">
-                {s.stepId}
-                <span className="muted">（{s.kind === 'approval' ? '承認' : '処理'}）</span>
-              </span>
-              <span className={`status ${s.status}`}>{statusLabel(s.status)}</span>
-            </li>
+      {error && <p className="error">{error}</p>}
+      {leftover && leftover.length > 0 && (
+        <p className="muted">
+          作りかけの文書がドライブに残っています:{' '}
+          {leftover.map((url) => (
+            <a key={url} href={url} target="_blank" rel="noreferrer">{url}</a>
           ))}
-        </ul>
-      </div>
-      {/* 業務の実行の根拠。結果の隣で読む（仕様書 第6.2節、ADR-0020） */}
-      <div className="card">
-        <h3>実行した処理</h3>
-        <Evidence steps={steps} />
-      </div>
+        </p>
+      )}
       {artifacts.map((a: Artifact) => (
         <div className="card" key={a.id}>
           <h3>成果物: {a.title}</h3>
@@ -245,6 +241,30 @@ export function RunView({
           )}
         </div>
       ))}
+      {/*
+        承認する人は、判断の前に中身を確かめる必要がある（原則 u2）。
+        **既定は閉じる。** 開いたときだけ段・道具・ID を出す（仕様書 第6.2.2.2節）
+      */}
+      {done && (
+        <details className="record">
+          <summary>実行の記録（確認用）</summary>
+          <ul className="steps">
+            {steps.map((x) => (
+              <li key={x.id}>
+                <span className="seq">{x.seq + 1}</span>
+                <span className="name">
+                  {x.label}
+                  <span className="muted">（{x.kind === 'approval' ? '承認' : '処理'}）</span>
+                </span>
+                <span className={`status ${x.status}`}>{statusLabel(x.status)}</span>
+              </li>
+            ))}
+          </ul>
+          <h4>使った道具</h4>
+          <Evidence steps={steps} />
+          <p className="muted small">実行 ID: {run.id}</p>
+        </details>
+      )}
     </>
   );
 }

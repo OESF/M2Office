@@ -100,6 +100,11 @@ let qaRunId;
   (run.artifacts ?? []).length === 0
     ? ok('この業務は成果物を作らない（結果は段から読む）') : ng('成果物ができている');
 
+  // 動いている間に「いま何をしているか」を出せる（第6.2.2.2節）。段の表示名が要る
+  run.steps.every((s) => typeof s.label === 'string' && s.label.length > 0)
+    ? ok('段に表示名が付いて返る（画面が「いま何をしているか」を出せる）')
+    : ng('表示名が無い段がある', JSON.stringify(run.steps.map((s) => [s.stepId, s.label])));
+
   const searched = run.steps.find((s) => s.stepId === 'search');
   const hits = searched?.output?.tools?.[0]?.result?.hits ?? [];
   hits.length > 0

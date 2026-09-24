@@ -8,7 +8,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
-import { CANCELLABLE, canViewRun, cancelRun, createdDriveLinks } from '@m2office/core';
+import { CANCELLABLE, canViewRun, cancelRun, createdDriveLinks, stepLabel } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 
@@ -39,11 +39,20 @@ export function runsRoute(deps: AppDeps) {
     if (!job || !(await canViewRun(deps.repo, ctx.tenant.id, job, run.id, ctx.user))) {
       return c.json({ error: '実行が見つかりません' }, 404);
     }
-    const [steps, artifacts] = await Promise.all([
+    const [steps, artifacts, agents] = await Promise.all([
       deps.repo.listRunSteps(ctx.tenant.id, id),
       deps.repo.listArtifacts(ctx.tenant.id, id),
+      deps.agentsFor(ctx.tenant.id),
     ]);
-    return c.json({ run, job, steps, artifacts });
+    /*
+      段の表示名（仕様書 第9.2.4節）。画面は動いている間、これを 1 行で出す（第6.2.2.2節）。
+      定義が見つからないとき（拡張機能を外した後など）は、段の ID をそのまま返す。
+      **推測で名前を作らない。**
+    */
+    const def = agents.find((a) => a.id === job.agentId);
+    const labels = new Map((def?.steps ?? []).map((st) => [st.id, stepLabel(st)]));
+    const labelled = steps.map((st) => ({ ...st, label: labels.get(st.stepId) ?? st.stepId }));
+    return c.json({ run, job, steps: labelled, artifacts });
   });
 
   /**
