@@ -81,6 +81,7 @@ src/Scope.tsx          グループの管理、業務・拡張機能ごとの「
 src/Connections.tsx    管理者ページ「接続」（Gemini の鍵・モデル・接続の確認、Google の OAuth クライアント・従業員の接続状況）
 src/nav.tsx            左ペインの共通部品（アイコン・折りたたみ・項目）と明るさの切り替えボタン
 src/theme.ts           画面の明るさ（ライト・ダーク・端末に合わせる）の選択と反映
+src/greeting.ts        最初の画面の時候の一言（第6.1.5節）
 public/icons.svg       画面のアイコン（モノクロの線画。文字の色を引き継ぐ）
 src/Settings.tsx    個人設定
 src/help.tsx        ヘルプ（ヘルプセンター・記事・画面の「？」・初回の案内・業務の説明）

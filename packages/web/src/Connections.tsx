@@ -51,7 +51,6 @@ export function Connections() {
   return (
     <>
       <h1>接続 <HelpTip article="admin-connectors">Gemini と Google Workspace への接続を設定します。鍵やシークレットは登録後に表示しません。</HelpTip></h1>
-      <p className="lead">業務の推論に使う Gemini と、メール・予定などを扱う Google Workspace への接続を設定します。</p>
       <p className="muted small">
         ほかのサービスとのつながり（コネクタ。MCP サーバ）は、拡張機能として導入します。左の「拡張機能」をご覧ください。
       </p>

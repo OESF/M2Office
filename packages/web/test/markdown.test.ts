@@ -7,6 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseInline, parseMarkdown } from '../src/markdown.js';
+import { timeGreeting } from '../src/greeting.js';
 
 test('見出しのすぐ次の行に箇条書きが続いても、見出しと箇条書きに分ける（業務の説明の書き方）', () => {
   const md = [
@@ -97,4 +98,17 @@ test('答えに書かれたリンクは、http(s) と mailto だけを押せる�
     ['https://example.jp/a']);
   // 押せないものは文字だけが残る
   assert.equal(nodes.some((n) => n.kind === 'text' && n.text === '社内'), true);
+});
+
+test('時候の一言は、時刻と曜日から選ぶ（仕様書 第6.1.5節）', () => {
+  // 2026-09-24 は木曜日
+  assert.equal(timeGreeting(new Date('2026-09-24T07:00:00+09:00')), 'おはようございます');
+  assert.equal(timeGreeting(new Date('2026-09-24T13:00:00+09:00')), 'こんにちは');
+  assert.equal(timeGreeting(new Date('2026-09-24T20:00:00+09:00')), 'お疲れさまです');
+  assert.equal(timeGreeting(new Date('2026-09-24T23:30:00+09:00')), '遅くまでお疲れさまです');
+  assert.equal(timeGreeting(new Date('2026-09-25T03:00:00+09:00')), '遅くまでお疲れさまです');
+
+  // 土曜・日曜は、時刻より優先する
+  assert.equal(timeGreeting(new Date('2026-09-26T09:00:00+09:00')), '休日にお疲れさまです');
+  assert.equal(timeGreeting(new Date('2026-09-27T21:00:00+09:00')), '休日にお疲れさまです');
 });

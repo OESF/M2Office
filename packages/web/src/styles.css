@@ -156,6 +156,11 @@ button { font: inherit; cursor: pointer; }
 
 .canvas { overflow-y: auto; padding: 20px 24px; min-width: 0; }
 .canvas h1 { font-size: 18px; margin: 0 0 4px; }
+
+/* 最初の画面（仕様書 第6.1.5節）。呼びかけから始める */
+.home { padding-top: 8vh; max-width: 40em; }
+.home-greeting { font-size: 15px; color: var(--muted); margin: 0 0 4px; }
+.home h1 { font-size: 26px; margin: 0 0 8px; }
 .canvas .lead { color: var(--muted); margin: 0 0 20px; }
 
 /* 会話ペイン（仕様書 第6.2節、ADR-0020）。秘書とのやり取りだけを置く */

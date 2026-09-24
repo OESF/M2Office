@@ -110,7 +110,7 @@ export function Checklist({ onGo }: { onGo?: (tab: string) => void }) {
               {i.note && <span className="muted small">（{i.note}）</span>}
               {!i.done && i.important && <span className="small warn-text"> 空のままだと秘書が答えられません</span>}
             </span>
-            {!i.done && i.go && <button className="btn ghost small" onClick={() => onGo?.(i.go!)}>設定する</button>}
+            {!i.done && i.go && <button className="btn ghost small" onClick={() => onGo?.(i.go!)}>設定へ</button>}
             {!i.done && i.id === 'notify' && (
               <button className="btn ghost small" onClick={() => void api.onboarding.notified().then(load)}>知らせた</button>
             )}

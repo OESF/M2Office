@@ -354,7 +354,6 @@ export function AgentSettings() {
   return (
     <>
       <h1>業務と承認 <HelpTip article="admin-agents">社内への書き込みの確認の要否と、使う業務を決めます。社外や他の人に届く操作は、設定にかかわらず必ず承認が必要です。</HelpTip></h1>
-      <p className="lead">社内で使う業務と、承認を省略してよい範囲を決めます。</p>
       <div className="card">
         <h3>社内への書き込み（タスクの起票、予定の登録、本人宛の通知など）</h3>
         <p>承認が必要な場合、業務は書き込む直前で止まり、依頼した本人に確認を求めます。</p>
@@ -487,7 +486,7 @@ export function UserSettings({ meId }: { meId: string }) {
   return (
     <>
       <h1>ユーザーと権限 <HelpTip article="admin-users">招待・ロール・停止を管理します。管理者は 2 人以上にしておくことをおすすめします。</HelpTip></h1>
-      <p className="lead">ログインは各自の Google アカウントで行います。ここではロールと利用の可否を決めます。</p>
+      <p className="lead">ログインは各自の Google アカウントで行います。</p>
       <table className="table">
         <thead><tr><th>名前</th><th>メールアドレス</th><th>ロール</th><th>状態</th></tr></thead>
         <tbody>
@@ -555,7 +554,7 @@ export function KnowledgeSettings() {
   return (
     <>
       <h1>知識 <HelpTip article="admin-knowledge">ここに登録した規程から、秘書と「社内ナレッジ Q&A」が出典つきで答えます。空のままだと答えられません。</HelpTip></h1>
-      <p className="lead">就業規則・経費規程・価格表などを登録します。「社内ナレッジ Q&A」はここから出典つきで答えます。</p>
+      <p className="lead">就業規則・経費規程・価格表など。<strong>空のままだと秘書は答えられません。</strong></p>
       <div className="card">
         <h3>{draft.id === 'new' ? '新しく登録する' : '編集する'}</h3>
         <Text label="題名" value={draft.title} onChange={(v) => setDraft({ ...draft, title: v })} />

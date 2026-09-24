@@ -14,6 +14,7 @@ import {
 import { AgentHelpTip, HelpCenter, HelpTip, Markdown, Tour, openHelp, useOpenHelp } from './help.js';
 import { startVoice, type VoiceCall } from './voice.js';
 import { keyLabel, useHotkey, useNumberHotkeys } from './keys.js';
+import { timeGreeting } from './greeting.js';
 import { AgentForm, ApprovalTray, RunView, statusLabel, SuspendedBanner } from './components.js';
 import {
   SETTINGS_SECTIONS, SETTINGS_SECTION_KEY, Settings, orderAgents, rememberedSection,
@@ -84,8 +85,14 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [menu, setMenu] = useState<{ hidden: string[]; order: string[] }>({ hidden: [], order: [] });
   // 秘書のアバター（仕様書 第6.1.3節）。個人設定で変えたら読み直す
   const [avatar, setAvatar] = useState('');
+  // 本人の呼ばれ方（仕様書 第6.5.3節）。最初の画面の呼びかけに使う（第6.1.5節）
+  const [callMe, setCallMe] = useState('');
   const loadMenu = useCallback(() => {
-    api.mySettings().then((s) => { setMenu(s.menu); setAvatar(s.secretary.avatar ?? ''); }).catch(() => undefined);
+    api.mySettings().then((s) => {
+      setMenu(s.menu);
+      setAvatar(s.secretary.avatar ?? '');
+      setCallMe(s.secretary.callMe ?? '');
+    }).catch(() => undefined);
   }, []);
   useEffect(loadMenu, [loadMenu]);
 
@@ -236,7 +243,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
       >
         <main className="canvas">
           {error && <p className="error">{error}</p>}
-          {view.kind === 'home' && <Home approvals={approvals.length} agents={agents.length} />}
+          {view.kind === 'home' && <Home callMe={callMe || `${me.user.displayName}さん`} />}
           {view.kind === 'agent' && (
             <>
               {/* 説明は広げず、題名の「？」から出す（仕様書 第6.10.5.1節） */}
@@ -362,21 +369,28 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   );
 }
 
-function Home({ approvals, agents }: { approvals: number; agents: number }) {
+/**
+ * 最初の画面（仕様書 第6.1.5節）。
+ *
+ * @remarks
+ * **呼びかけから始める。** 件数の表は出さない。使える業務は左のメニューに、
+ * 承認待ちは承認トレイに出ている。同じことを二度出さない。
+ *
+ * @param callMe 本人の呼ばれ方（第6.5.3節）。設定が無ければ表示名に「さん」
+ */
+function Home({ callMe }: { callMe: string }) {
+  // 日をまたいでも、時刻が変わっても、開いたままで正しい挨拶になるようにする
+  const [greeting, setGreeting] = useState(() => timeGreeting());
+  useEffect(() => {
+    const t = setInterval(() => setGreeting(timeGreeting()), 60_000);
+    return () => clearInterval(t);
+  }, []);
   return (
-    <>
+    <div className="home">
+      <p className="home-greeting">{callMe}、{greeting}。</p>
       <h1>何かお手伝いしましょうか</h1>
-      <p className="lead">
-        メニューから業務を選ぶか、下の入力欄で秘書に話しかけてください。
-      </p>
-      <div className="card">
-        <h3>いまの状況</h3>
-        <dl className="kv">
-          <dt>使える業務</dt><dd>{agents} 件</dd>
-          <dt>承認待ち</dt><dd>{approvals} 件</dd>
-        </dl>
-      </div>
-    </>
+      <p className="lead">メニューから業務を選ぶか、下の入力欄で話しかけてください。</p>
+    </div>
   );
 }
 
