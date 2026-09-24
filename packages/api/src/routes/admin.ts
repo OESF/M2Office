@@ -14,7 +14,7 @@ import {
 } from '@m2office/shared';
 import {
   DEFAULT_STANDARD_MINUTES, GOOGLE_DATA_RETENTION_DAYS, KNOWLEDGE_MAX_CHARS,
-  canDecidePromotion, decidePromotion,
+  canDecidePromotion, decidePromotion, stepLabel,
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { requireRole, type AppEnv } from '../middleware/tenant.js';
@@ -53,6 +53,44 @@ export function adminRoute(deps: AppDeps) {
       origin: job.origin, requestedBy: job.requestedBy,
     }));
     return c.json({ items });
+  });
+
+  /**
+   * 実行 1 件の**状態だけ**（仕様書 第6.6.8節）。一覧でその場に開くために使う（第6.2.4節）。
+   *
+   * @remarks
+   * **中身は返さない。** 段の入力と出力、成果物、業務の入力は含めない。
+   * 返すのは段の表示名と状態、失敗の理由、時刻、費用、削減時間までである。
+   * 管理者が見られるのは状態・費用・起動経路だけであり、これは不変則 I-10 の帰結である。
+   */
+  app.get('/runs/:id', async (c) => {
+    const { tenant } = c.get('ctx');
+    const run = await deps.repo.getRun(tenant.id, c.req.param('id'));
+    if (!run) return c.json({ error: '実行が見つかりません' }, 404);
+    const job = await deps.repo.getJob(tenant.id, run.jobId);
+    const view = await deps.tenantView(tenant.id);
+    const def = job ? view.allAgents.find((a) => a.id === job.agentId) : undefined;
+    const labels = new Map((def?.steps ?? []).map((st) => [st.id, stepLabel(st)]));
+    const steps = (await deps.repo.listRunSteps(tenant.id, run.id)).map((st) => ({
+      seq: st.seq,
+      label: labels.get(st.stepId) ?? st.stepId,
+      kind: st.kind,
+      status: st.status,
+      startedAt: st.startedAt,
+      endedAt: st.endedAt,
+    }));
+    return c.json({
+      id: run.id,
+      status: run.status,
+      startedAt: run.startedAt,
+      endedAt: run.endedAt,
+      failureReason: run.failureReason,
+      tokensUsed: run.tokensUsed,
+      costJpy: run.costJpy,
+      savedMinutes: run.savedMinutes,
+      origin: job?.origin ?? null,
+      steps,
+    });
   });
 
   /** 利用量の集計。エージェント別の件数と費用（第6.6.7節）。 */

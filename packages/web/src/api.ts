@@ -238,6 +238,18 @@ export interface AdminRun {
   requestedBy: string;
 }
 
+/**
+ * 実行 1 件の**状態だけ**（仕様書 第6.6.8節）。管理者の一覧で、その場に開くために使う。
+ *
+ * @remarks **中身は入らない。** 段の入力と出力、成果物、業務の入力は返らない。
+ */
+export interface AdminRunStatus {
+  id: string; status: string; startedAt: string; endedAt: string | null;
+  failureReason: string | null;
+  tokensUsed: number; costJpy: number; savedMinutes: number; origin: string | null;
+  steps: { seq: number; label: string; kind: string; status: string; startedAt: string; endedAt: string | null }[];
+}
+
 export interface AgentSummary {
   id: string;
   version: number;
@@ -532,6 +544,8 @@ export const api = {
       total: { runs: number; costJpy: number }; note: string | null;
     }>('/admin/usage'),
     runs: () => call<{ items: AdminRun[] }>('/admin/runs'),
+    /** 実行 1 件の状態だけ（仕様書 第6.6.8節）。**中身は返らない。** */
+    runStatus: (id: string) => call<AdminRunStatus>(`/admin/runs/${id}`),
     users: () => call<{ items: User[] }>('/admin/users'),
     audit: () => call<{ items: AuditEvent[] }>('/admin/audit-events'),
     connections: () => call<ConnectionSettings>('/admin/connections'),

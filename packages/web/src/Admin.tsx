@@ -6,7 +6,7 @@
 
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import type { AuditEvent } from '@m2office/shared';
-import { api, type AdminRun, type Me } from './api.js';
+import { api, describeError, type AdminRun, type AdminRunStatus, type Me } from './api.js';
 import { statusLabel, SuspendedBanner } from './components.js';
 import {
   AgentSettings, CompanySettings, KnowledgeSettings, UserSettings,
@@ -15,7 +15,7 @@ import { Checklist, Dashboard } from './Dashboard.js';
 import { ExtensionSettings } from './Extensions.js';
 import { Connections } from './Connections.js';
 import { HelpCenter, useOpenHelp } from './help.js';
-import { NavHeading, NavItem, SideNavLayout, ThemeToggle, type IconName } from './nav.js';
+import { Icon, NavHeading, NavItem, SideNavLayout, ThemeToggle, type IconName } from './nav.js';
 
 type Tab =
   | 'dashboard' | 'usage' | 'runs' | 'company' | 'agents' | 'extensions' | 'users' | 'knowledge' | 'audit'
@@ -265,20 +265,70 @@ function Runs() {
       <h1>実行の一覧</h1>
       <p className="lead">入力や成果物の中身は表示しません。</p>
       {error && <p className="error">{error}</p>}
-      <table className="table">
-        <thead><tr><th>開始</th><th>業務</th><th>依頼者</th><th>起動</th><th>状態</th><th className="num">費用</th></tr></thead>
-        <tbody>
-          {data?.items.map((r: AdminRun) => (
-            <tr key={r.id}>
-              <td>{time(r.startedAt)}</td><td>{r.agentName}</td><td>{nameOf(r.requestedBy)}</td>
-              <td>{originLabel(r.origin)}</td>
-              <td><span className={`status ${r.status}`}>{statusLabel(r.status)}</span></td>
-              <td className="num">{r.costJpy} 円</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      {data?.items.map((r: AdminRun) => (
+        <RunRow key={r.id} run={r} requester={nameOf(r.requestedBy)} />
+      ))}
     </>
+  );
+}
+
+/**
+ * 実行の一覧の 1 行（仕様書 第6.2.4節）。**その場で開く。**
+ *
+ * @remarks
+ * 開いても出すのは**状態だけ**である（段の進み・失敗の理由・費用・削減時間）。
+ * 業務の入力・段の入出力・成果物は返らない。管理者が見られるのは状態・費用・
+ * 起動経路までである（第6.6.8節、不変則 I-10）。
+ */
+function RunRow({ run, requester }: { run: AdminRun; requester: string }) {
+  const [open, setOpen] = useState(false);
+  const [detail, setDetail] = useState<AdminRunStatus | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!open || detail) return;
+    api.admin.runStatus(run.id).then(setDetail).catch((e) => setError(describeError(e, '読み込めませんでした')));
+  }, [open, detail, run.id]);
+
+  return (
+    <div className={`card fold-row${open ? ' open' : ''}`}>
+      <button className="fold-head" onClick={() => setOpen(!open)} aria-expanded={open}>
+        <Icon name={open ? 'caret-down' : 'caret-right'} className="nav-caret" />
+        <strong>{run.agentName}</strong>
+        <span className={`status ${run.status}`}>{statusLabel(run.status)}</span>
+        <span className="muted small">{requester}さん・{originLabel(run.origin)}</span>
+        <span className="muted small tail">{time(run.startedAt)}</span>
+      </button>
+      {open && (
+        <div className="fold-body">
+          {error && <p className="error">{error}</p>}
+          {!error && !detail && <p className="muted">読み込み中…</p>}
+          {detail && (
+            <>
+              {detail.failureReason && <p className="error">{detail.failureReason}</p>}
+              <ul className="steps">
+                {detail.steps.map((st) => (
+                  <li key={st.seq}>
+                    <span className="seq">{st.seq + 1}</span>
+                    <span className="name">
+                      {st.label}
+                      <span className="muted">（{st.kind === 'approval' ? '承認' : '処理'}）</span>
+                    </span>
+                    <span className={`status ${st.status}`}>{statusLabel(st.status)}</span>
+                  </li>
+                ))}
+              </ul>
+              <dl className="kv">
+                <dt>終わり</dt><dd>{detail.endedAt ? time(detail.endedAt) : '—'}</dd>
+                <dt>消費</dt><dd>{detail.tokensUsed} トークン（{detail.costJpy} 円）</dd>
+                <dt>削減時間の推計</dt><dd>{detail.savedMinutes} 分</dd>
+                <dt>実行 ID</dt><dd className="small">{detail.id}</dd>
+              </dl>
+              <p className="muted small">入力・成果物・段の中身は、管理者には表示しません。</p>
+            </>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

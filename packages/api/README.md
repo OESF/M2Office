@@ -133,6 +133,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/schedules/:id/trigger` | 次の回を今にする（動作確認用） |
 | `GET /v1/admin/usage` | 管理者: エージェント別の利用量 |
 | `GET /v1/admin/runs` | 管理者: 全利用者の実行の状態（中身は返さない） |
+| `GET /v1/admin/runs/:id` | 管理者: 実行 1 件の**状態だけ**。段の表示名と状態・失敗の理由・費用・削減時間まで。**入力・段の入出力・成果物は返さない**（仕様書 第6.6.8節、不変則 I-10） |
 | `GET /v1/admin/users` | 管理者: 利用者の一覧 |
 | `GET /v1/admin/audit-events` | 管理者: 監査ログ |
 | `GET /v1/admin/connectors` | 管理者: 接続の状態 |

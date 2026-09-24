@@ -2343,6 +2343,38 @@ console.log('\n■ 47. Google ログインの経路（第16.1.2節）');
     ? ok('使えるログイン手段を返す') : ng('返らない', JSON.stringify(providers));
 }
 
+console.log('\n■ 48. 管理者の実行の一覧は、状態だけを返す（第6.6.8節、不変則 I-10）');
+{
+  const { status, body } = await call('a', '/v1/admin/runs');
+  status === 200 && Array.isArray(body.items) && body.items.length > 0
+    ? ok(`実行の一覧を返す（${body.items.length} 件）`) : ng(`取れない（${status}）`);
+
+  const listText = JSON.stringify(body);
+  !listText.includes('"input"') && !listText.includes('"artifacts"') && !listText.includes('"output"')
+    ? ok('一覧に、入力・出力・成果物を含まない') : ng('中身が含まれている');
+
+  // その場で開くための 1 件の状態（第6.2.4節）。**中身は返らない**
+  const one = body.items[0];
+  const { status: st, body: detail } = await call('a', `/v1/admin/runs/${one.id}`);
+  st === 200 && Array.isArray(detail.steps)
+    ? ok(`1 件の状態を返す（段 ${detail.steps.length} 件）`) : ng(`取れない（${st}）`);
+  (detail.steps ?? []).every((x) => x.label && x.status && !('input' in x) && !('output' in x))
+    ? ok('段は表示名と状態だけで、入力と出力を持たない') : ng('段に中身がある', JSON.stringify(detail.steps?.[0] ?? null));
+  typeof detail.costJpy === 'number' && 'savedMinutes' in detail && 'failureReason' in detail
+    ? ok('費用・削減時間・失敗の理由は返る') : ng('状態が足りない', JSON.stringify(detail).slice(0, 160));
+  const text = JSON.stringify(detail);
+  !text.includes('"artifacts"') && !text.includes('"body"') && !/"input"\s*:/.test(text)
+    ? ok('入力・成果物・本文は返らない') : ng('中身が漏れている', text.slice(0, 200));
+
+  // 一般の利用者は見られない
+  const member = await call('a', `/v1/admin/runs/${one.id}`, {}, 'member');
+  member.status === 403 ? ok('一般利用者は見られない（403）') : ng(`見えてしまう（${member.status}）`);
+
+  // 他の会社の実行は、存在も示さない（不変則 I-2）
+  const other = await call('b', `/v1/admin/runs/${one.id}`);
+  other.status === 404 ? ok('他の会社の実行は見つからない（404）') : ng(`テナントを跨げる（${other.status}）`);
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');
