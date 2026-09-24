@@ -184,6 +184,22 @@ button { font: inherit; cursor: pointer; }
 .talk.collapsed .talk-toggle { align-self: center; }
 
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 16px; margin-bottom: 12px; }
+
+/*
+  実行履歴の 1 行（仕様書 第6.2.4節）。**その場で開く。** 別の画面へ飛ばさない
+*/
+.history-row { padding: 0; margin-bottom: 8px; }
+.history-head {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  background: none; border: none; color: var(--ink); font: inherit;
+  padding: 12px 16px; cursor: pointer; border-radius: 6px;
+}
+.history-head:hover { background: var(--accent-soft); }
+.history-head .muted { margin-left: auto; }
+.history-body { padding: 0 16px 12px; border-top: 1px solid var(--line); }
+/* 開いた中の囲みは、枠を重ねない */
+.history-body .card { border: none; padding: 12px 0 0; margin-bottom: 0; background: none; }
+.history-body .card + .card { border-top: 1px dashed var(--line); margin-top: 12px; }
 .card h3 { margin: 0 0 8px; font-size: 14px; }
 .card p { margin: 0 0 10px; color: var(--muted); }
 

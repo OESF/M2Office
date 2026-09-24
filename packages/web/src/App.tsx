@@ -64,7 +64,9 @@ type View =
 export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
-  const [history, setHistory] = useState<{ run: { id: string; status: string }; job: { agentId: string } | null }[]>([]);
+  const [history, setHistory] = useState<
+    { run: { id: string; status: string; startedAt: string }; job: { agentId: string } | null }[]
+  >([]);
   const [view, setView] = useState<View>(() => (
     // Google から戻ったときは、その場で結果が見えるよう連携の区分を開く（第6.5.0節）
     googleReturn ? { kind: 'settings', section: 'google' } : { kind: 'home' }
@@ -328,15 +330,10 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
               <h1>実行履歴</h1>
               {history.length === 0 && <p className="muted">まだ履歴はありません。左のメニューから業務を選ぶか、秘書に頼んでみてください。</p>}
               {history.map(({ run, job }) => (
-                <div className="card" key={run.id}>
-                  <h3>
-                    {agents.find((a) => a.id === job?.agentId)?.name ?? '不明な業務'}{' '}
-                    <span className={`status ${run.status}`}>{statusLabel(run.status)}</span>
-                  </h3>
-                  <button className="btn ghost" onClick={() => setView({ kind: 'run', runId: run.id })}>
-                    詳細を見る
-                  </button>
-                </div>
+                <HistoryRow
+                  key={run.id} run={run} viewerId={me.user.id}
+                  agentName={agents.find((a) => a.id === job?.agentId)?.name ?? '不明な業務'}
+                />
               ))}
             </>
           )}
@@ -388,6 +385,48 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
  *
  * @param callMe 本人の呼ばれ方（第6.5.3節）。設定が無ければ表示名に「さん」
  */
+/**
+ * 実行履歴の 1 行（仕様書 第6.2.4節）。
+ *
+ * @remarks
+ * **画面を移らず、その場で開く。** 別の画面へ飛ばすと、戻る道が無く一覧を見失う
+ * （2026-09-25 に実機で確認）。開いたときにだけ中身を取りに行く。
+ */
+function HistoryRow({ run, agentName, viewerId }: {
+  run: { id: string; status: string; startedAt: string };
+  agentName: string;
+  viewerId: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [detail, setDetail] = useState<RunDetail | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(() => {
+    api.run(run.id).then((d) => { setDetail(d); setError(null); })
+      .catch((e) => setError(describeError(e, '読み込めませんでした')));
+  }, [run.id]);
+  useEffect(() => { if (open && !detail) load(); }, [open, detail, load]);
+
+  return (
+    <div className={`card history-row${open ? ' open' : ''}`}>
+      <button className="history-head" onClick={() => setOpen(!open)} aria-expanded={open}>
+        <Icon name={open ? 'caret-down' : 'caret-right'} className="nav-caret" />
+        <strong>{agentName}</strong>
+        <span className={`status ${run.status}`}>{statusLabel(run.status)}</span>
+        <span className="muted small">
+          {new Date(run.startedAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}
+        </span>
+      </button>
+      {open && (
+        <div className="history-body">
+          {error && <p className="error">{error}</p>}
+          {!error && !detail && <p className="muted">読み込み中…</p>}
+          {detail && <RunView detail={detail} viewerId={viewerId} onCancelled={load} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** ヘルプを開く前の画面へ戻す道（仕様書 第6.10.7.2節）。名前で示す。 */
 function backTo(view: View | null, go: (v: View) => void): { label: string; go: () => void } | undefined {
   if (!view) return undefined;
