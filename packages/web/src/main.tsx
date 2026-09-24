@@ -8,6 +8,7 @@ import { StrictMode, useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App.js';
 import { Admin } from './Admin.js';
+import { Board } from './Dashboard.js';
 import { Login } from './Login.js';
 import { api, ApiError, setUnauthorizedHandler, type Me } from './api.js';
 import './styles.css';
@@ -21,6 +22,7 @@ applyTheme();
  *
  * @remarks
  * 管理者ページはテナントのサブドメイン配下の `/admin` に置く（仕様書 第6.6節）。
+ * 掛け通しの画面（眺めるだけのダッシュボード）は `/board`（第6.7.2.1節）。
  * 画面の出し分けは利便のためであり、権限の判定は API 側で行う。
  */
 function Root() {
@@ -56,6 +58,13 @@ function Root() {
     setMe(null);
     setState('login');
   };
+  if (location.pathname.startsWith('/board')) {
+    // 権限の判定は API が行う。ここは案内だけ（仕様書 第6.7.2.1節）
+    if (!me.user.roles.includes('admin')) {
+      return <p className="error center">この画面は管理者だけが開けます。</p>;
+    }
+    return <Board tenantName={me.tenant.name} />;
+  }
   return location.pathname.startsWith('/admin')
     ? <Admin me={me} onLogout={logout} />
     : <App me={me} onLogout={logout} />;

@@ -26,6 +26,11 @@ const EVENTS_FOLDED = 5;
  */
 export function Dashboard() {
   const [tab, setTab] = useState<'live' | 'stats'>('live');
+  // 壁に映すなら、個人名の設定を見直す機会になる（仕様書 第6.7.2.1節）
+  const [names, setNames] = useState(false);
+  useEffect(() => {
+    api.admin.dashboardLive().then((d) => setNames(d.people !== null)).catch(() => undefined);
+  }, []);
   return (
     <>
       <div className="dash-head">
@@ -34,9 +39,55 @@ export function Dashboard() {
           <button className={tab === 'live' ? 'on' : ''} onClick={() => setTab('live')}>いま</button>
           <button className={tab === 'stats' ? 'on' : ''} onClick={() => setTab('stats')}>集計</button>
         </div>
+        {/* 眺めるための画面は別の道に置く（仕様書 第6.7.2.1節） */}
+        <a className="btn ghost small" href={`/board${location.search}`} target="_blank" rel="noreferrer"
+          title="左のメニューや操作を出さない、眺めるための画面を新しいタブで開きます">
+          別の画面で開く
+        </a>
       </div>
+      {names && (
+        <p className="muted small">
+          「別の画面で開く」は、壁のモニターに映しておくための画面です。
+          いまは人の状態を<strong>個人名で表示</strong>する設定のため、
+          <strong>通りかかった人にも誰が何をしているかが見えます</strong>。
+          気になるときは、下の「見せ方」を「人数と業務だけ」に変えてください。
+        </p>
+      )}
       {tab === 'live' ? <Live /> : <Stats />}
     </>
+  );
+}
+
+/**
+ * 掛け通しの画面（`/board`。仕様書 第6.7.2.1節）。
+ *
+ * @remarks
+ * **操作する画面ではない。眺める画面である。** 左のメニュー・上の帯・タブ・ヘルプの「？」を
+ * 出さず、押すところを置かない。壁に掛けたモニターに映しておく使い方を想定する。
+ *
+ * @param tenantName 会社の名前。誰の画面かが離れて分かるように出す
+ * @param namesShown 人の状態を個人名で出す設定か。**壁に映る以上、一度知らせる**
+ */
+export function Board({ tenantName }: { tenantName: string }) {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  return (
+    <div className="board">
+      <header className="board-head">
+        <span className="board-brand">M2Office</span>
+        <span className="board-tenant">{tenantName}</span>
+        <span className="spacer" />
+        <span className="board-clock">
+          {now.toLocaleTimeString('ja-JP', { timeZone: 'Asia/Tokyo', hour: '2-digit', minute: '2-digit' })}
+        </span>
+      </header>
+      <main className="board-body">
+        <Live board />
+      </main>
+    </div>
   );
 }
 
@@ -90,9 +141,12 @@ export function Checklist({ onGo }: { onGo?: (tab: string) => void }) {
  * @remarks
  * 出すのは状態・業務の名前・活動の表示名までである。会話や入力の中身、接続元の場所は出さない（第6.7.10節）。
  */
-function People({ data, onGranularityChanged }: { data: DashboardLive; onGranularityChanged: () => void }) {
+function People({ data, board = false, onGranularityChanged }: {
+  data: DashboardLive; board?: boolean; onGranularityChanged: () => void;
+}) {
   const granularity = data.peopleSummary ? 'counts' : 'names';
-  const switcher = (
+  // 掛け通しの画面には、押すところを置かない（仕様書 第6.7.2.1節）
+  const switcher = board ? null : (
     <div className="row presence-switch">
       <label className="muted small">見せ方</label>
       <select value={granularity}
@@ -103,12 +157,17 @@ function People({ data, onGranularityChanged }: { data: DashboardLive; onGranula
       </select>
     </div>
   );
+  const tip = board ? null : (
+    <HelpTip article="admin-dashboard">
+      いま誰が何をしているかを、状態と業務の名前までで示します。会話や入力の中身、接続元の場所は出しません。
+    </HelpTip>
+  );
 
   if (data.peopleSummary) {
     const { counts, agents } = data.peopleSummary;
     return (
       <section className="card">
-        <h3>人の状態 <HelpTip article="admin-dashboard">いま誰が何をしているかを、状態と業務の名前までで示します。会話や入力の中身、接続元の場所は出しません。</HelpTip></h3>
+        <h3>人の状態 {tip}</h3>
         {switcher}
         <p className="muted small">この会社は「人数と業務だけ」の表示にしています。</p>
         <div className="presence-row">
@@ -123,7 +182,7 @@ function People({ data, onGranularityChanged }: { data: DashboardLive; onGranula
   const people = data.people ?? [];
   return (
     <section className="card">
-      <h3>人の状態 <HelpTip article="admin-dashboard">いま誰が何をしているかを、状態と業務の名前までで示します。会話や入力の中身、接続元の場所は出しません。</HelpTip></h3>
+      <h3>人の状態 {tip}</h3>
       {switcher}
       {people.length === 0 && <p className="muted">利用者がいません。</p>}
       <div className="presence-row">
@@ -142,7 +201,12 @@ function People({ data, onGranularityChanged }: { data: DashboardLive; onGranula
 }
 
 /** 「いま」の画面（第6.7.3節）。 */
-function Live() {
+/**
+ * 「いま」の中身（仕様書 第6.7.3節）。
+ *
+ * @param board 掛け通しの画面（第6.7.2.1節）として出すか。押すところを減らし、文字を大きくする
+ */
+function Live({ board = false }: { board?: boolean }) {
   const [data, setData] = useState<DashboardLive | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [, setTick] = useState(0);
@@ -182,13 +246,17 @@ function Live() {
 
   return (
     <>
-      <p className="lead">
-        {live ? '変化があるとすぐに更新します' : '5 秒ごとに取り直しています'}
-        （最終更新 {time(data.generatedAt)}）
-        {error && <span className="error-inline"> 更新に失敗しました: {error}</span>}
+      {/* 更新が途切れたら黙って古い値を映し続けない（仕様書 第6.7.2.1節） */}
+      <p className={error ? 'error' : 'lead'}>
+        {error
+          ? `更新できていません（最終更新 ${time(data.generatedAt)}）: ${error}`
+          : `${live ? '変化があるとすぐに更新します' : '5 秒ごとに取り直しています'}（最終更新 ${time(data.generatedAt)}）`}
       </p>
 
-      <People data={data} onGranularityChanged={() => void api.admin.dashboardLive().then(setData).catch(() => undefined)} />
+      <People
+        data={data} board={board}
+        onGranularityChanged={() => void api.admin.dashboardLive().then(setData).catch(() => undefined)}
+      />
 
       <div className="tiles">
         <Tile label="ログイン中" value={c.activeUsers} unit="人" />
@@ -196,11 +264,12 @@ function Live() {
         <Tile label="承認待ち" value={c.awaitingApproval} unit="件" tone={c.awaitingApproval > 0 ? 'wait' : undefined} />
         <Tile label="今日の失敗" value={c.failedToday} unit="件" tone={c.failedToday > 0 ? 'fail' : undefined} />
         <Tile label="今日の実行" value={c.todayRuns} unit="件" />
-        <Tile label="今日の推計の削減時間" value={hours(c.todaySavedMinutes)} unit="時間" />
+        <Tile label="削減時間（推計）" value={hours(c.todaySavedMinutes)} unit="時間"
+          title="今日の、手作業と比べた削減時間の推計（仕様書 第6.7.12節）" />
         <Tile label="今日の費用" value={c.todayCostJpy} unit="円" />
       </div>
 
-      <Agents data={data} />
+      <Agents data={data} board={board} />
 
       <div className="dash-grid">
         <section className="card">
@@ -259,15 +328,17 @@ function Live() {
  * **動いていない業務も「待機」として出す。** 動いているものだけを並べると、
  * 導入したのに誰にも使われていない業務があることに気づけない。
  */
-function Agents({ data }: { data: DashboardLive }) {
+function Agents({ data, board = false }: { data: DashboardLive; board?: boolean }) {
   if (data.agents.length === 0) return null;
   return (
     <section className="card">
       <h3>
         業務の状態{' '}
-        <HelpTip article="admin-dashboard">
-          使える業務ごとに、いま何件を受け持っているかを出します。どれも 0 なら「待機」です。
-        </HelpTip>
+        {!board && (
+          <HelpTip article="admin-dashboard">
+            使える業務ごとに、いま何件を受け持っているかを出します。どれも 0 なら「待機」です。
+          </HelpTip>
+        )}
       </h3>
       <div className="agent-grid">
         {data.agents.map((a) => {
@@ -454,11 +525,13 @@ function Stats() {
   );
 }
 
-function Tile({ label, value, unit, tone }: {
+function Tile({ label, value, unit, tone, title }: {
   label: string; value: number | string; unit: string; tone?: 'active' | 'wait' | 'fail';
+  /** 見出しだけでは足りないときの補足。**折り返さないために短くした分を、ここで補う** */
+  title?: string;
 }) {
   return (
-    <div className={`tile ${tone ?? ''}`}>
+    <div className={`tile ${tone ?? ''}`} title={title}>
       <span>{label}</span>
       <strong>{typeof value === 'number' ? value.toLocaleString() : value}<small> {unit}</small></strong>
     </div>
