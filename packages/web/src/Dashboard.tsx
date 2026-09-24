@@ -233,7 +233,7 @@ function Live({ board = false }: { board?: boolean }) {
         <Tile label="今日の失敗" value={c.failedToday} unit="件" tone={c.failedToday > 0 ? 'fail' : undefined} />
         <Tile label="今日の実行" value={c.todayRuns} unit="件" />
         <Tile label="削減時間（推計）" value={hours(c.todaySavedMinutes)} unit="時間"
-          title="今日の、手作業と比べた削減時間の推計（仕様書 第6.7.12節）" />
+          title="今日の、手作業と比べた削減時間の推計です" />
         <Tile label="今日の費用" value={c.todayCostJpy} unit="円" />
       </div>
 

@@ -46,7 +46,30 @@ export class GeminiLiveProvider implements VoiceProvider {
 
   constructor(private readonly options: GeminiLiveOptions) {}
 
+  /**
+   * 音声の対話を開く。
+   *
+   * @remarks
+   * **選んだ声を相手が受け付けないことがある。** 声の一覧は提供者の更新で変わり、
+   * こちらの一覧が先に古くなる。そのときは**既定の声で開き直す**。
+   * 声が合わないだけで音声そのものが使えなくなるのは、割に合わない（仕様書 第10.5.6節）。
+   */
   async open(session: VoiceSessionOptions): Promise<VoiceSession> {
+    try {
+      return await this.connect(session);
+    } catch (err) {
+      if (!session.voice) throw err;
+      // 声を外してもう一度だけ試す。これで開けるなら、原因は声である
+      const retried = await this.connect({ ...session, voice: '' });
+      session.onEvent({
+        type: 'note',
+        text: `「${session.voice}」の声は使えなかったため、既定の声でお話しします。`,
+      });
+      return retried;
+    }
+  }
+
+  private async connect(session: VoiceSessionOptions): Promise<VoiceSession> {
     const url = `${this.options.url ?? LIVE_URL}?key=${encodeURIComponent(this.options.apiKey)}`;
     const ws = new WebSocket(url);
     const model = this.options.model.startsWith('models/') ? this.options.model : `models/${this.options.model}`;

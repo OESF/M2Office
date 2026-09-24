@@ -82,6 +82,7 @@ src/Connections.tsx    管理者ページ「接続」（Gemini の鍵・モデ�
 src/nav.tsx            左ペインの共通部品（アイコン・折りたたみ・項目）と明るさの切り替えボタン
 src/theme.ts           画面の明るさ（ライト・ダーク・端末に合わせる）の選択と反映
 src/greeting.ts        最初の画面の時候の一言（第6.1.5節）
+src/toast.tsx          操作の結果の知らせ（画面の右下。第6.10.4.2節）
 public/icons.svg       画面のアイコン（モノクロの線画。文字の色を引き継ぐ）
 src/Settings.tsx    個人設定
 src/help.tsx        ヘルプ（ヘルプセンター・記事・画面の「？」・初回の案内・業務の説明）

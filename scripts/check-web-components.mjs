@@ -1,8 +1,11 @@
 /**
- * @file 画面の部品が、定義も取り込みもされずに使われていないかを確かめる。
+ * @file 画面の作りを機械的に確かめる。2 つを見る。
  *
- * TypeScript の型検査は、ブラウザ標準の名前（`Text`・`Option` など）を部品として書いても通す。
- * 実行するまで気づけないため、ここで機械的に見つける。
+ * 1. 部品が、定義も取り込みもされずに使われていないか。
+ *    TypeScript の型検査は、ブラウザ標準の名前（`Text`・`Option` など）を部品として書いても通す。
+ * 2. **利用者に見える文に、社内の文書への参照が混じっていないか**（仕様書 第6.10.4.1節）。
+ *    「仕様書 第6.1.3節」のような書き方は、コードの説明には要るが、画面に出してはならない。
+ *    実際に個人設定へ出ていた（2026-09-24）。
  *
  * 使い方: node scripts/check-web-components.mjs
  */
@@ -63,6 +66,28 @@ function definedNames(source) {
   return names;
 }
 
+/**
+ * 利用者に見える文に、社内の文書への参照が混じっていないか（仕様書 第6.10.4.1節）。
+ *
+ * @remarks
+ * コメントは見ない（コードの説明には要る）。JSX の文字と、画面に出る属性
+ * （`title`・`placeholder`・`aria-label`・`alt`）を見る。
+ */
+function docLeaks(source) {
+  const code = withoutComments(source);
+  const bad = /(仕様書\s*第[0-9.]+節|開発規約\s*第[0-9.]+節|不変則\s*I-[0-9]+|ADR-[0-9]{4}|第[0-9]+\.[0-9.]+節)/;
+  const hits = [];
+  // 画面に出る属性
+  for (const m of code.matchAll(/\b(title|placeholder|aria-label|alt)\s*=\s*(["'])([^"']*)\2/g)) {
+    if (bad.test(m[3])) hits.push(`${m[1]}="${m[3]}"`);
+  }
+  // JSX の中の地の文（タグとタグのあいだ）
+  for (const m of code.matchAll(/>([^<>{}]*[^\s<>{}][^<>{}]*)</g)) {
+    if (bad.test(m[1])) hits.push(m[1].trim());
+  }
+  return hits;
+}
+
 const problems = [];
 for (const path of files(ROOT)) {
   const source = readFileSync(path, 'utf8');
@@ -70,12 +95,16 @@ for (const path of files(ROOT)) {
   for (const used of usedComponents(source)) {
     if (!defined.has(used)) problems.push(`${path.replace(ROOT, '')}: <${used}> が定義も取り込みもされていません`);
   }
+  for (const leak of docLeaks(source)) {
+    problems.push(`${path.replace(ROOT, '')}: 画面に社内の文書への参照が出ています: ${leak}`);
+  }
 }
 
 if (problems.length > 0) {
-  console.error('画面の部品:');
+  console.error('画面の確認:');
   for (const p of problems) console.error(`  ${p}`);
-  console.error('ブラウザ標準の名前（Text・Option など）と重なっていないか確かめてください。');
+  console.error('部品はブラウザ標準の名前（Text・Option など）と重なっていないか、');
+  console.error('文は「仕様書 第○節」のような社内の参照を含んでいないかを確かめてください。');
   process.exit(1);
 }
-console.log('画面の部品: すべて定義または取り込みがあります。');
+console.log('画面の確認: 部品の取り込みと、利用者に見える文の書き方はどちらも問題ありません。');

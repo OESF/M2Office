@@ -15,6 +15,7 @@ import { useTheme, type ThemeChoice } from './theme.js';
 import { statusLabel } from './components.js';
 import { SecretaryAvatar } from './nav.js';
 import { KEY_BINDINGS, isTouchOnly, keyLabel } from './keys.js';
+import { toast } from './toast.js';
 
 /**
  * 個人設定（仕様書 第6.5節）。左ペインの最下部の利用者のカードの歯車のボタンから開く。
@@ -79,9 +80,13 @@ export function Settings({ me, agents, onChanged, section }: {
     try {
       await fn();
       setMsg({ ok: '保存しました' });
+      // 押した場所と結果が離れていても分かるよう、決まった場所にも出す（第6.10.4.2節）
+      toast('保存しました');
       onChanged();
     } catch (e) {
-      setMsg({ error: e instanceof Error ? e.message : '保存できませんでした' });
+      const error = e instanceof Error ? e.message : '保存できませんでした';
+      setMsg({ error });
+      toast(error, 'error');
     }
   }
 
@@ -189,7 +194,7 @@ export function Settings({ me, agents, onChanged, section }: {
         <div className="field">
           <label>アバター</label>
           <span className="muted small">
-            秘書バーの左端に出ます。押すと音声で話せます（仕様書 第6.1.3節）。
+            画面の下の左端に出ます。押すと音声で話せます。
             同梱のものから選ぶか、自分の画像を上げてください。
           </span>
           <div className="avatar-picker">

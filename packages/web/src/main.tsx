@@ -10,6 +10,7 @@ import { App } from './App.js';
 import { Admin } from './Admin.js';
 import { Board } from './Dashboard.js';
 import { Login } from './Login.js';
+import { Toaster } from './toast.js';
 import { api, ApiError, setUnauthorizedHandler, type Me } from './api.js';
 import './styles.css';
 import { applyTheme } from './theme.js';
@@ -75,5 +76,7 @@ if (!root) throw new Error('#root が見つかりません');
 createRoot(root).render(
   <StrictMode>
     <Root />
+    {/* 操作の結果は、画面の決まった場所に出す（仕様書 第6.10.4.2節） */}
+    <Toaster />
   </StrictMode>,
 );

@@ -284,6 +284,10 @@ async function start(
             // 待たせていたものを、ここで初めて伝える（第10.11.7節）
             gate.finishedSpeaking();
             break;
+          case 'note':
+            // 断り書き。会話ログには残さない（本人も秘書も言っていない）
+            send({ type: 'note', text: event.text });
+            break;
           case 'closed':
             send({ type: 'closed', reason: event.reason });
             ws.close();

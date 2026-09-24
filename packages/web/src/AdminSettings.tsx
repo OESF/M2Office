@@ -14,6 +14,7 @@ import type {
 import { STANDARD_SYNONYMS, SYNONYM_LIMITS } from '@m2office/shared';
 import { api, describeError, type KnowledgeItemView, type KnowledgeSectionView } from './api.js';
 import { HelpTip } from './help.js';
+import { toast } from './toast.js';
 import { CompartmentSettings, GroupSettings, ScopeField, useAccessOptions } from './Scope.js';
 
 type Catalog = {
@@ -38,9 +39,14 @@ function useSaver() {
     setState({ busy: true, message: null, error: null });
     try {
       const r = await fn();
-      setState({ busy: false, message: typeof done === 'function' ? done(r) : done, error: null });
+      const message = typeof done === 'function' ? done(r) : done;
+      setState({ busy: false, message, error: null });
+      // 押した場所と結果が離れていても分かるよう、決まった場所にも出す（第6.10.4.2節）
+      toast(message);
     } catch (e) {
-      setState({ busy: false, message: null, error: describeError(e, '保存できませんでした') });
+      const error = describeError(e, '保存できませんでした');
+      setState({ busy: false, message: null, error });
+      toast(error, 'error');
     }
   };
   const view = (

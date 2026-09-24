@@ -166,6 +166,8 @@ export async function startVoice(handlers: VoiceHandlers): Promise<VoiceCall> {
       const message = JSON.parse(String(ev.data)) as { type: string; text?: string; reason?: string; message?: string };
       if (message.type === 'heard' && message.text) handlers.onHeard(message.text);
       if (message.type === 'reply' && message.text) handlers.onReply(message.text);
+      // 断り書き（選んだ声が使えなかった、など）。やり取りではないので帯の知らせに出す
+      if (message.type === 'note' && message.text) handlers.onState('listening', message.text);
       if (message.type === 'error') { handlers.onState('closed', message.message); stop(); }
       if (message.type === 'closed') stop();
     } catch {

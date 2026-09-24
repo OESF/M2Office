@@ -364,18 +364,44 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
  *
  * @remarks
  * Gemini が用意する声の名前をそのまま並べる。M2Office では声を作らない。
- * 添えた言葉は**聞いた印象の目安**であり、性別として断定しない。
- * 一覧は提供者の更新で変わるため、鍵の取得（B-3）の後に実機で確かめて増減させる。
+ * 添えた言葉は、Google の説明（Bright・Firm など）を日本語にしたもので、
+ * **聞いた印象の目安**である。性別として断定しない。
+ *
+ * 出どころ: https://ai.google.dev/gemini-api/docs/speech-generation （2026-09-24 に確認、30 種）。
+ * 一覧は提供者の更新で変わる。**選んだ声を相手が受け付けないことがある**ため、
+ * そのときは既定の声に落として対話を続ける（`packages/core/src/voice/gemini-live.ts`）。
  */
 export const VOICE_CHOICES: { name: string; note: string }[] = [
-  { name: 'Puck', note: '明るく軽やか' },
-  { name: 'Charon', note: '落ち着いた低め' },
-  { name: 'Kore', note: 'はきはきした中音' },
-  { name: 'Fenrir', note: '力強い低め' },
-  { name: 'Aoede', note: 'やわらかい中音' },
-  { name: 'Leda', note: '軽やかな高め' },
-  { name: 'Orus', note: '落ち着いた中音' },
-  { name: 'Zephyr', note: '明るい高め' },
+  { name: 'Zephyr', note: '明るい' },
+  { name: 'Puck', note: '陽気' },
+  { name: 'Charon', note: '説明に向く' },
+  { name: 'Kore', note: 'しっかりした' },
+  { name: 'Fenrir', note: '元気のよい' },
+  { name: 'Leda', note: '若々しい' },
+  { name: 'Orus', note: 'しっかりした' },
+  { name: 'Aoede', note: '軽やか' },
+  { name: 'Callirrhoe', note: 'おだやか' },
+  { name: 'Autonoe', note: '明るい' },
+  { name: 'Enceladus', note: '息づかいのある' },
+  { name: 'Iapetus', note: '澄んだ' },
+  { name: 'Umbriel', note: 'おだやか' },
+  { name: 'Algieba', note: 'なめらか' },
+  { name: 'Despina', note: 'なめらか' },
+  { name: 'Erinome', note: '澄んだ' },
+  { name: 'Algenib', note: 'かすれた低め' },
+  { name: 'Rasalgethi', note: '説明に向く' },
+  { name: 'Laomedeia', note: '陽気' },
+  { name: 'Achernar', note: 'やわらかい' },
+  { name: 'Alnilam', note: 'しっかりした' },
+  { name: 'Schedar', note: '平らな' },
+  { name: 'Gacrux', note: '落ち着いた' },
+  { name: 'Pulcherrima', note: '前へ出る' },
+  { name: 'Achird', note: '親しみやすい' },
+  { name: 'Zubenelgenubi', note: 'くだけた' },
+  { name: 'Vindemiatrix', note: 'やさしい' },
+  { name: 'Sadachbia', note: '生き生きした' },
+  { name: 'Sadaltager', note: '物知りな' },
+  { name: 'Sulafat', note: 'あたたかい' },
 ];
 
 /** 話し方の指示の長さの上限（字）。 */

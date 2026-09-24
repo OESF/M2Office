@@ -25,6 +25,12 @@ export type VoiceEvent =
   | { type: 'audio'; pcm: Uint8Array }
   /** 応答が一区切りついた。 */
   | { type: 'turn-end' }
+  /**
+   * 画面へ伝える断り書き。**本人の発言でも秘書の応答でもない。**
+   *
+   * @remarks 選んだ声が使えず既定の声にした、といった知らせに使う（仕様書 第10.5.6節）。
+   */
+  | { type: 'note'; text: string }
   /** 終わった。 */
   | { type: 'closed'; reason: string };
 

@@ -13,7 +13,7 @@ import { WebSocketServer, type WebSocket as WsSocket } from 'ws';
 import { GeminiLiveProvider, MockVoiceProvider, type VoiceEvent } from '../src/index.js';
 
 /** 偽の Gemini Live。受け取ったメッセージを覚え、決まった応答を返す。 */
-async function fakeLive(): Promise<{
+async function fakeLive(opts: { rejectVoice?: boolean } = {}): Promise<{
   url: string; received: unknown[]; reply(payload: unknown): void; close(): Promise<void>;
 }> {
   const received: unknown[] = [];
@@ -25,7 +25,14 @@ async function fakeLive(): Promise<{
     ws.on('message', (data: Buffer) => {
       const message = JSON.parse(data.toString('utf8')) as Record<string, unknown>;
       received.push(message);
-      if (message['setup']) ws.send(JSON.stringify({ setupComplete: {} }));
+      if (!message['setup']) return;
+      // 声が入っているときだけ断る相手（知らない声を渡した場合の見立て）
+      const setup = message['setup'] as { generationConfig?: { speechConfig?: unknown } };
+      if (opts.rejectVoice && setup.generationConfig?.speechConfig) {
+        ws.close(1007, 'Unsupported voice');
+        return;
+      }
+      ws.send(JSON.stringify({ setupComplete: {} }));
     });
   });
   const port = (server.address() as { port: number }).port;
@@ -194,6 +201,32 @@ test('内部の指示も 1 往復として送る（Gemini Live）', async () => 
   };
   assert.match(sent.clientContent?.turns?.[0]?.parts?.[0]?.text ?? '', /内部情報/);
   assert.equal(sent.clientContent?.turnComplete, true, '1 往復として閉じる');
+  session.close();
+  await live.close();
+});
+
+test('選んだ声が使えなければ、既定の声で開き直す（仕様書 第10.5.6節）', async () => {
+  // 声が入っている間だけ setup を断る相手
+  const live = await fakeLive({ rejectVoice: true });
+  const sink = collect();
+  const provider = new GeminiLiveProvider({ apiKey: 'k', model: 'gemini-live', url: live.url });
+
+  const session = await provider.open({
+    instructions: '', speak: true, voice: 'まだ知らない声', onEvent: sink.onEvent,
+  });
+
+  // 音声そのものは使える。声が合わないだけで使えなくしない
+  assert.ok(session);
+  const note = sink.events.find((e) => e.type === 'note');
+  assert.ok(note, `断り書きが出ない: ${JSON.stringify(sink.events.map((e) => e.type))}`);
+  assert.match((note as { text: string }).text, /まだ知らない声/);
+  assert.match((note as { text: string }).text, /既定の声/);
+
+  // 2 回目は声を付けずに開いている
+  const setups = live.received.filter((m) => (m as Record<string, unknown>)['setup']);
+  assert.equal(setups.length, 2, '2 回開こうとする');
+  const second = (setups[1] as { setup: { generationConfig?: { speechConfig?: unknown } } }).setup;
+  assert.equal(second.generationConfig?.speechConfig, undefined, '2 回目は声を渡さない');
   session.close();
   await live.close();
 });
