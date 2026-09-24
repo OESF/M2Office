@@ -24,7 +24,8 @@ src/extensions/  拡張機能の読み込みと検証、.m2ext の作成と展�
 src/scheduler/   定時実行の規則と起動役
 src/notify/      通知の控え（Chat）の送信口と、届ける見回り役
 src/retention/   Google から取得したデータの保持（期間を過ぎた実行の中身を消す、承認待ちの期限切れ）と、許可がなくなったときの業務の後始末
-src/llm/         LLM 抽象化層（スタブ／OpenAI 互換）
+src/llm/         LLM 抽象化層（スタブ／OpenAI 互換）。
+                 models.ts は役割ごとの既定のモデルと、モデルごとの値段の表（出どころと確認日つき。第20.2.2節）
 src/repository/  永続化。テナント境界の絞り込みを伴う
 src/agents/      公式エージェントの定義（AG-01〜05）
 src/secretary/   秘書。3 層の応答振り分け

@@ -1,6 +1,6 @@
 # M2Office
 
-> 現在の版: v0.2.0（2026-09-23）。変更の履歴は [CHANGELOG.md](CHANGELOG.md)
+> 現在の版: v0.3.0（2026-09-24）。変更の履歴は [CHANGELOG.md](CHANGELOG.md)
 
 中小企業向けの AI エージェントシステム。
 従業員ひとりひとりに秘書エージェントが付き、業務エージェントが承認を経て作業を代行します。
@@ -186,7 +186,10 @@ docs/            開発規約・リリース規定・設計判断記録
 | `MODEL_RESEARCH` | `MODEL_STANDARD` と同じ | Web の調査（`web.research`） |
 | `MODEL_LIVE` | `gemini-3.1-flash-live-preview` | 音声の対話（Gemini Live） |
 | `USD_JPY` | 155 | 費用を円で示すときの為替（概算） |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | — | Google 連携（未実装） |
+| `GOOGLE_LOGIN_CLIENT_ID` / `GOOGLE_LOGIN_CLIENT_SECRET` | — | Google ログインに使う**運営の** OAuth クライアント（仕様書 第16.1.1節）。求める権限は openid・email・profile だけ。未設定なら Google ログインは無効 |
+| `GOOGLE_LOGIN_REDIRECT_URI` | `http://localhost:<API_PORT>/v1/oauth/google/login-callback` | Google に登録する戻り先。**運営のホスト 1 本**（第16.1.2節） |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | — | Google 連携（会社ごとの OAuth クライアント。管理者ページで登録する。ここは開発の既定値としてのみ使う） |
+| `WEB_HTTPS` | false | 開発で音声を試すときに true。**ブラウザは安全な文脈でしかマイクを使わせない**（`npm run dev:cert` で証明書を作る） |
 | `CONNECTOR_MODE` | mock | `mock`（ダミーデータ）または `google`（未実装。指定すると起動を止める） |
 | `AUTH_DEV_LOGIN` | false | 開発用ログインを許す。`.env.example` では true |
 | `AUTH_DEV_HEADERS` | false | `X-Tenant`・`X-User` ヘッダーでの指定を許す。動作確認用 |
@@ -247,9 +250,14 @@ API とワーカーは起動時にリポジトリ直下の `.env` を読みま�
 | 監査ログ | 実装済み |
 | 実行ごとのコスト記録 | 実装済み |
 | Google ログイン | 実装済み・実地で確認済み（運営の OAuth クライアント 1 つでログインし、引換券で会社のホストへ渡す。仕様書 第16.1.1・16.1.2節） |
+| 会話ペイン | 実装済み（画面右は秘書とのやり取り専用。折りたためて、既定は折りたたみ。新しいやり取りで開く。開いたときは中央と同じ幅。仕様書 第6.2節、ADR-0020） |
+| キーボードの割り当て | 実装済み（`⌘J`・`⌘Enter`・`⌘⇧1`〜`9`・`⌘B`・`⌘I`・`⌘,`・`⌘/`・`Esc`。`Mod` は端末に合わせて出し分け、画面に併記する。表は `packages/web/src/keys.ts` の 1 か所。仕様書 第6.11節、ADR-0021） |
+| 個人設定の分割 | 実装済み（8 区分に分け、歯車から選んで直接入る。最後に開いた区分を覚える。仕様書 第6.5.0節） |
+| 実行の結果の表示 | 実装済み（動いている間は回る印と「いま何をしているか」、終わると結果と成果物だけ。実行 ID・トークン・費用・段の一覧は閉じた「実行の記録」の中。仕様書 第6.2.2節・第6.2.2.2節） |
+| モデルの選び方と費用の計算 | 実装済み（役割ごとの既定を安いほうから選ぶ。「…-latest」は既定にしない。費用は入力と出力を分け、モデルごとの単価で計算する。仕様書 第20.2.2節・第21.4.1節） |
 | テナントの作成 | 実装済み（`npm run tenant:create`。マスター管理画面までの暫定。仕様書 第16.1.3節） |
 | Google 連携（接続口の `google` 実装） | **未実装**（B-2 の準備後） |
-| Gemini | 接続を確認済み（文章・音声とも）。業務・秘書・OCR・調査での実際の出来ばえはこれから |
+| Gemini | 接続を確認済み（文章・音声とも）。**知識の照会は実地の確認（20 問）に合格**（`docs/acceptance-test-questions.md`、2026-09-24）。OCR・調査での出来ばえはこれから |
 | 権限区画のメンバーの割り当て画面 | 実装済み（グループと個人） |
 | マーケット・第三者の配布元 | 未実装（Q-71） |
 | 課金・運営バックヤード | 未実装 |

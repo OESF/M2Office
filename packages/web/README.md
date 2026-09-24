@@ -86,6 +86,7 @@ src/Settings.tsx    個人設定
 src/help.tsx        ヘルプ（ヘルプセンター・記事・画面の「？」・初回の案内・業務の説明）
 src/components.tsx  フォーム・実行詳細（中止）・承認トレイ
 src/voice.ts        音声の対話（マイクの取り込み・再生・中継との WebSocket）
+src/keys.ts         キーボードの割り当て（表・修飾キーの出し分け・登録。第6.11節）
 src/markdown.ts     ヘルプと説明の Markdown の描画
 src/styles.css      3 ペインの配置
 ```

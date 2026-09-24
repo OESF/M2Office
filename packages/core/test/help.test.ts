@@ -152,3 +152,17 @@ test('長い言葉に含まれる短い言葉は、長い言葉とまとめて 1
   assert.ok(helpConcepts('誰に見られますか').some((x) => x.term === '見られ'), '漢字 1 文字の動詞の語幹を拾う');
   assert.ok(!helpConcepts('承認はどうやるの？').some((x) => x.term.endsWith('は')), '助詞で始まる送り仮名は拾わない');
 });
+
+test('更新情報は、使い方の質問で案内の記事に勝たない（仕様書 第6.10.7.1節）', () => {
+  const catalog = officialCatalog();
+  const ctx = { roles: ['member'], disabledAgents: [], automation: DEFAULT_TENANT_SETTINGS.automation };
+
+  // 版を重ねるたび、題名に業務の言葉を含む更新情報が増える。
+  // 「秘書と会話できるようになりました」が「秘書に頼む」に勝ってはいけない
+  assert.equal(catalog.search('秘書の使い方を教えて', ctx)[0]?.article.id, 'start-secretary');
+  assert.equal(catalog.search('画面の見方を教えて', ctx)[0]?.article.id, 'start-screen');
+
+  // 下げるだけで、消しはしない。更新情報の中身を探せば出る
+  const hits = catalog.search('会話できるようになりました', ctx).map((h) => h.article.id);
+  assert.ok(hits.some((id) => id.startsWith('updates-')), `更新情報が出ない: ${hits.join('、')}`);
+});

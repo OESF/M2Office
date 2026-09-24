@@ -137,7 +137,8 @@ export class HelpCatalog {
       .map((article) => {
         const m = matchConcepts(concepts, { heading: article.title, path: [], body: article.body });
         const relevant = m.inHeading > 0 || (m.total >= 2 && m.matched === m.total);
-        return { article, score: relevant ? Math.round(m.score * 100) / 100 : 0 };
+        const score = relevant ? m.score * weightOf(article.category) : 0;
+        return { article, score: Math.round(score * 100) / 100 };
       })
       .filter((h) => h.score >= 1)
       .sort((a, b) => b.score - a.score);
@@ -160,6 +161,22 @@ export interface HelpContext {
   agents?: AgentDefinition[];
   /** その会社で使えるツール（コネクタのツールを含む）。省略時は内蔵のツール。 */
   registry?: ToolRegistry;
+}
+
+/**
+ * 更新情報の記事の重み。
+ *
+ * @remarks
+ * **更新情報は「いつ何が変わったか」の記録であり、使い方の案内ではない**（仕様書 第6.10.7.1節）。
+ * 題名に業務の言葉が入るため（例:「秘書と会話できるようになりました」）、そのままでは
+ * 「秘書の使い方を教えて」で使い方の記事に勝ってしまう。下げて、案内のほうを先に出す。
+ * 消しはしない。版を重ねるほど数が増えるため、**下げ方は版の数によらず一定**にする。
+ */
+const UPDATES_WEIGHT = 0.4;
+
+/** 記事の区分ごとの、検索の重み。 */
+function weightOf(category: HelpCategory): number {
+  return category === 'updates' ? UPDATES_WEIGHT : 1;
 }
 
 /** 使い方の質問に多く、検索の手がかりにならない語。 */
