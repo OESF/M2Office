@@ -225,6 +225,11 @@ export function RunView({
           ))}
         </ul>
       </div>
+      {/* 業務の実行の根拠。結果の隣で読む（仕様書 第6.2節、ADR-0020） */}
+      <div className="card">
+        <h3>実行した処理</h3>
+        <Evidence steps={steps} />
+      </div>
       {artifacts.map((a: Artifact) => (
         <div className="card" key={a.id}>
           <h3>成果物: {a.title}</h3>
@@ -307,7 +312,13 @@ export function statusLabel(status: string): string {
   return table[status] ?? status;
 }
 
-/** サッシパネルに出す根拠（仕様書 第6.2節）。 */
+/**
+ * 業務の実行の根拠（仕様書 第6.2節、ADR-0020）。
+ *
+ * @remarks
+ * **実行の詳細の画面に置く。** 会話ペインには置かない。秘書の答えの根拠と並ぶと、
+ * どちらの話かが読み取れなくなる。
+ */
 export function Evidence({ steps }: { steps: RunStep[] }) {
   const calls = steps.flatMap((s) => {
     const out = s.output as { tools?: { name: string; risk?: string }[] } | null;

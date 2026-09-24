@@ -61,14 +61,28 @@ const KEY = 'm2office.nav-collapsed';
 const Collapsed = createContext(false);
 
 /** 折りたたんだかどうか（端末ごとに覚える）。 */
-function useCollapsed(): [boolean, (v: boolean) => void] {
+/**
+ * 開いているか閉じているかを、端末ごとに覚えておく（仕様書 第6.1.1節・第6.2節）。
+ *
+ * @param key 覚えておく先の鍵
+ * @param initial まだ覚えていないときの値
+ * @remarks 覚えられない環境（保存を禁じた設定）でも動く。そのときは毎回 `initial` から始まる
+ */
+export function useRemembered(key: string, initial: boolean): [boolean, (v: boolean) => void] {
   const [v, setV] = useState(() => {
-    try { return localStorage.getItem(KEY) === '1'; } catch { return false; }
+    try {
+      const raw = localStorage.getItem(key);
+      return raw === null ? initial : raw === '1';
+    } catch { return initial; }
   });
   useEffect(() => {
-    try { localStorage.setItem(KEY, v ? '1' : '0'); } catch { /* 覚えられなくても動く */ }
-  }, [v]);
+    try { localStorage.setItem(key, v ? '1' : '0'); } catch { /* 覚えられなくても動く */ }
+  }, [key, v]);
   return [v, setV];
+}
+
+function useCollapsed(): [boolean, (v: boolean) => void] {
+  return useRemembered(KEY, false);
 }
 
 /**
@@ -77,7 +91,7 @@ function useCollapsed(): [boolean, (v: boolean) => void] {
  *
  * @param navFooter 左ペインの最下部に固定するもの（利用者のカード）
  * @param footer 右側の下端に置くもの（秘書バー）
- * @param extraClass `panes` に足すクラス（サッシパネルを開くときの `with-sash` など）
+ * @param extraClass `panes` に足すクラス（会話ペインを開くときの `talk-open` など）
  */
 export function SideNavLayout({ nav, navFooter, footer, children, extraClass = '' }: {
   nav: ReactNode; navFooter?: ReactNode; footer?: ReactNode; children: ReactNode; extraClass?: string;

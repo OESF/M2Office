@@ -65,7 +65,7 @@ export interface DirectAnswer {
    * @remarks 「この会話は残さないで」のように、残さないこと自体が答えである照会で `false` にする。
    */
   keep?: boolean;
-  /** 根拠。サッシパネルに表示する（仕様書 第6.2節）。 */
+  /** 根拠。その応答に添えて会話ペインに表示する（仕様書 第6.2節）。 */
   evidence: { label: string; value: string }[];
 }
 

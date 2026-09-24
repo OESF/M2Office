@@ -1,5 +1,5 @@
 /**
- * @file ワークスペースの画面。左にメニュー、中央にキャンバス、右にサッシパネル、下に秘書バーを置く。
+ * @file ワークスペースの画面。左にメニュー、中央にキャンバス、右に会話ペイン、下に秘書バーを置く。
  *
  * お知らせ・定時実行・個人設定もここから開く。
  *
@@ -13,9 +13,11 @@ import {
 } from './api.js';
 import { HelpCenter, HelpTip, Markdown, Tour, openHelp, useOpenHelp } from './help.js';
 import { startVoice, type VoiceCall } from './voice.js';
-import { AgentForm, ApprovalTray, Evidence, RunView, statusLabel, SuspendedBanner } from './components.js';
+import { AgentForm, ApprovalTray, RunView, statusLabel, SuspendedBanner } from './components.js';
 import { Settings, orderAgents } from './Settings.js';
-import { Icon, NavHeading, NavItem, NavUserCard, SecretaryAvatar, SideNavLayout, ThemeToggle, agentIcon } from './nav.js';
+import {
+  Icon, NavHeading, NavItem, NavUserCard, SecretaryAvatar, SideNavLayout, ThemeToggle, agentIcon, useRemembered,
+} from './nav.js';
 
 /**
  * Google との接続から戻ってきたときの結果（`?google=connected` など。仕様書 第14.3.3節）。
@@ -51,7 +53,7 @@ type View =
 /**
  * ワークスペースの画面。
  *
- * 左にコマンドメニュー、中央にキャンバス、右に必要時のサッシパネル、
+ * 左にコマンドメニュー、中央にキャンバス、右に折りたためる会話ペイン、
  * 下部に常駐の秘書バーを置く（仕様書 第6.1節）。
  */
 export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
@@ -127,7 +129,18 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
 
   // 秘書とのやり取り。文字も音声も 1 本の流れにし、古いものが上・新しいものが下に並ぶ（第6.2.1節）
   const [turns, setTurns] = useState<Turn[]>([]);
-  const showSash = view.kind === 'run' || turns.length > 0;
+  /*
+    会話ペインの開閉（仕様書 第6.2節、ADR-0020）。
+    既定は折りたたみ。**新しいやり取りが届いたら開く**。話しかけたのに答えが見えない、を起こさない。
+    閉じるのは本人だけで、画面を移っても閉じない
+  */
+  const [talkOpen, setTalkOpen] = useRemembered('m2office.talk-open', false);
+  useEffect(() => {
+    // 件数が増えたときだけ開く。本人が閉じても、次のやり取りまでは閉じたまま
+    if (turns.length > 0) setTalkOpen(true);
+    // setTalkOpen は状態の設定関数。依存に入れると毎回動いてしまう
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [turns.length]);
   const unread = notifications.filter((n) => !n.readAt).length;
   const isAdmin = me.user.roles.includes('admin');
 
@@ -153,7 +166,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
       <SuspendedBanner status={me.tenant.status} />
 
       <SideNavLayout
-        extraClass={showSash ? 'with-sash' : ''}
+        extraClass={talkOpen ? 'talk-open' : ''}
         nav={(
           <>
             <NavHeading>業務</NavHeading>
@@ -268,10 +281,21 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
           )}
         </main>
 
-        {showSash && (
-          <aside className="sash">
+        {/* 秘書とのやり取り専用。ほかのものを入れない（仕様書 第6.2節、ADR-0020） */}
+        <aside className={`talk${talkOpen ? '' : ' collapsed'}`} aria-label="秘書との会話">
+          <button
+            className="talk-toggle" onClick={() => setTalkOpen(!talkOpen)}
+            title={talkOpen ? '秘書との会話を閉じる' : '秘書との会話を開く'}
+            aria-label={talkOpen ? '秘書との会話を閉じる' : '秘書との会話を開く'} aria-expanded={talkOpen}
+          >
+            <Icon name={talkOpen ? 'nav-collapse' : 'nav-expand'} />
+            {!talkOpen && turns.length > 0 && (
+              <span className="nav-dot">{turns.length > 99 ? '99+' : turns.length}</span>
+            )}
+          </button>
+          <div className="talk-body">
             {/* やり取りは 1 本の流れ。古いものが上、新しいものが下（仕様書 第6.2.1節） */}
-            {turns.length > 0 && (
+            {turns.length > 0 ? (
               <TurnLog
                 turns={turns}
                 onOpenAgent={(agentId, fileId) => {
@@ -280,15 +304,14 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
                   if (hit) setView({ kind: 'agent', agent: hit, ...(fileId ? { fileId } : {}) });
                 }}
               />
-            )}
-            {view.kind === 'run' && detail && (
+            ) : (
               <>
-                <h3 style={{ marginTop: turns.length > 0 ? 16 : 0 }}>実行した処理</h3>
-                <Evidence steps={detail.steps} />
+                <h3>秘書とのやり取り</h3>
+                <p className="muted">下の欄から話しかけると、ここに並びます。</p>
               </>
             )}
-          </aside>
-        )}
+          </div>
+        </aside>
       </SideNavLayout>
       {showTour && <Tour onDone={finishTour} />}
     </div>
@@ -402,7 +425,7 @@ function SecretaryBar({ lookups, avatar, onSaid }: {
   lookups: Lookup[];
   /** 秘書のアバター（個人設定。仕様書 第6.1.3節） */
   avatar: string;
-  /** やり取りを 1 件足す。帯ではなくサッシパネルに出す（第6.1.3・6.2.1節） */
+  /** やり取りを 1 件足す。帯ではなく会話ペインに出す（第6.1.3・6.2.1節） */
   onSaid: (role: Turn['role'], text: string, meta?: Turn['meta']) => void;
 }) {
   const box = useRef<HTMLTextAreaElement>(null);

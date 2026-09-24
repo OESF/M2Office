@@ -125,14 +125,22 @@ button { font: inherit; cursor: pointer; }
   border-radius: 999px; padding: 2px 10px; font-size: 12px;
 }
 
-/* 左ペインは画面の下端まで伸ばし、秘書バー（.pane-footer）は左ペインの右側に置く（仕様書 第6.1節） */
-.panes { flex: 1; display: grid; grid-template-columns: 240px 1fr; grid-template-rows: minmax(0, 1fr) auto; min-height: 0; }
-.panes.with-sash { grid-template-columns: 240px 1fr 320px; }
+/* 左ペインは画面の下端まで伸ばし、秘書バー（.pane-footer）は左ペインの右側に置く（仕様書 第6.1節）。
+   両端のペインの幅は名前の付いた値で持ち、折りたたみで値だけを差し替える（ADR-0020） */
+.panes {
+  --nav-w: 240px;
+  --talk-w: 48px;
+  flex: 1; display: grid;
+  grid-template-columns: var(--nav-w) 1fr var(--talk-w);
+  grid-template-rows: minmax(0, 1fr) auto; min-height: 0;
+}
+/* 会話は読むもの。開いたら、答えの見出しと箇条書きが読める幅を取る（仕様書 第6.2節） */
+.panes.talk-open { --talk-w: 420px; }
 
 .left { grid-row: 1 / -1; grid-column: 1; background: var(--panel); border-right: 1px solid var(--line); padding: 12px 0 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 .left .nav-scroll { flex: 1; min-height: 0; overflow-y: auto; }
 .left .nav-footer { flex: none; border-top: 1px solid var(--line); padding: 8px; }
-.canvas, .sash { grid-row: 1; }
+.canvas, .talk { grid-row: 1; }
 .pane-footer { grid-row: 2; grid-column: 2 / -1; min-width: 0; }
 .left h2 { font-size: 11px; color: var(--muted); margin: 12px 16px 6px; letter-spacing: .08em; }
 .left .item {
@@ -148,11 +156,25 @@ button { font: inherit; cursor: pointer; }
 .canvas h1 { font-size: 18px; margin: 0 0 4px; }
 .canvas .lead { color: var(--muted); margin: 0 0 20px; }
 
-.sash {
+/* 会話ペイン（仕様書 第6.2節、ADR-0020）。秘書とのやり取りだけを置く */
+.talk {
   background: var(--panel); border-left: 1px solid var(--line);
-  overflow-y: auto; padding: 16px;
+  overflow-y: auto; padding: 16px; min-width: 0;
+  display: flex; flex-direction: column; gap: 8px;
 }
-.sash h3 { font-size: 12px; color: var(--muted); margin: 0 0 10px; letter-spacing: .06em; }
+.talk h3 { font-size: 12px; color: var(--muted); margin: 0 0 10px; letter-spacing: .06em; }
+.talk-body { flex: 1; min-height: 0; }
+/* 開け閉めのボタン。左ペインの印を左右に返して使う */
+.talk-toggle {
+  flex: none; align-self: flex-start; position: relative;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: none; border: none; color: var(--muted); padding: 2px 4px 6px; cursor: pointer;
+}
+.talk-toggle:hover { color: var(--accent); }
+.talk-toggle .icon { transform: scaleX(-1); }
+.talk.collapsed { padding: 16px 8px; align-items: center; }
+.talk.collapsed .talk-body { display: none; }
+.talk.collapsed .talk-toggle { align-self: center; }
 
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 16px; margin-bottom: 12px; }
 .card h3 { margin: 0 0 8px; font-size: 14px; }
@@ -184,7 +206,7 @@ button { font: inherit; cursor: pointer; }
 .status.failed, .status.rejected { background: var(--danger-soft); color: var(--danger); }
 .status.running { background: var(--accent-soft); color: var(--accent); }
 
-/* 秘書バー（仕様書 第6.1.3節）。帯には呼びかけの口だけを置き、やり取りはサッシパネルに出す */
+/* 秘書バー（仕様書 第6.1.3節）。帯には呼びかけの口だけを置き、やり取りは会話ペインに出す */
 /*
   音声での対話は製品の要である（第6.1.3節）。帯は狭く詰めず、落ち着いて話しかけられる高さを取る。
   知らせの長さで高さが変わらないよう、状態の行は高さを決めて置く。
@@ -262,7 +284,7 @@ button { font: inherit; cursor: pointer; }
 .icon-btn.send:hover:not(:disabled) { background: var(--accent); color: #fff; opacity: 0.85; }
 .icon-btn.on { color: var(--accent); border-color: var(--accent); }
 
-/* サッシパネルに出す、音声のやり取り */
+/* 会話ペインに出す、音声のやり取り */
 .transcript { margin-bottom: 16px; }
 .transcript p { margin: 0 0 10px; white-space: pre-wrap; }
 
@@ -277,26 +299,30 @@ pre.body { white-space: pre-wrap; background: var(--subtle-bg); border: 1px soli
 /* 画面幅に応じた調整。
    3 ペインは PC を前提とするが、狭い幅でも読めるようにする（仕様書 第6.9節）。 */
 @media (max-width: 1200px) {
-  .panes { grid-template-columns: 200px 1fr; }
-  .panes.with-sash { grid-template-columns: 200px 1fr 280px; }
+  .panes { --nav-w: 200px; }
+  .panes.talk-open { --talk-w: 380px; }
 }
 @media (max-width: 960px) {
-  .panes, .panes.with-sash { grid-template-columns: 180px 1fr; }
-  /* サッシパネルはキャンバスの下へ回す */
-  .panes.with-sash { grid-template-rows: minmax(0, 1fr) auto auto; }
-  .panes.with-sash .sash {
-    grid-row: 2; grid-column: 2 / -1; border-left: none; border-top: 1px solid var(--line);
-    max-height: 40vh;
+  /* 会話ペインはキャンバスの下へ回す。ここでは折りたたみを使わない（仕様書 第6.2節） */
+  .panes, .panes.talk-open {
+    --nav-w: 180px;
+    grid-template-columns: var(--nav-w) 1fr;
+    grid-template-rows: minmax(0, 1fr) auto auto;
   }
-  .panes.with-sash .pane-footer { grid-row: 3; }
+  .talk, .talk.collapsed {
+    grid-row: 2; grid-column: 2 / -1; border-left: none; border-top: 1px solid var(--line);
+    max-height: 40vh; padding: 16px; align-items: stretch;
+  }
+  .talk.collapsed .talk-body { display: block; }
+  .talk-toggle { display: none; }
+  .pane-footer { grid-row: 3; }
 }
 @media (max-width: 680px) {
   /* 左メニューを隠すと業務へ到達できなくなるため、上部の横並びに変える */
-  .panes, .panes.with-sash {
+  .panes, .panes.talk-open {
     grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(0, 1fr) auto;
+    grid-template-rows: auto minmax(0, 1fr) auto auto;
   }
-  .panes.with-sash { grid-template-rows: auto minmax(0, 1fr) auto auto; }
   .left {
     grid-row: 1; grid-column: 1; flex-direction: row; gap: 6px; padding: 8px;
     overflow-x: auto; overflow-y: hidden;
@@ -304,8 +330,7 @@ pre.body { white-space: pre-wrap; background: var(--subtle-bg); border: 1px soli
   }
   .left .nav-scroll { display: flex; gap: 6px; flex: none; overflow: visible; }
   .left .nav-footer { border-top: none; padding: 0; }
-  .pane-footer { grid-column: 1; grid-row: 3; }
-  .panes.with-sash .pane-footer { grid-row: 4; }
+  .pane-footer { grid-column: 1; grid-row: 4; }
   .left h2 { display: none; }
   .left .item {
     width: auto; white-space: nowrap; border: 1px solid var(--line);
@@ -321,7 +346,7 @@ pre.body { white-space: pre-wrap; background: var(--subtle-bg); border: 1px soli
   .left .me-summary .sub { display: none; }
   .topbar { flex-wrap: wrap; row-gap: 6px; }
   .canvas { grid-row: 2; padding: 16px; }
-  .panes.with-sash .sash { grid-row: 3; grid-column: 1; max-height: 45vh; }
+  .talk, .talk.collapsed { grid-row: 3; grid-column: 1; max-height: 45vh; }
 }
 
 /* ログイン画面（仕様書 第16.1節） */
@@ -557,8 +582,7 @@ button.link.danger { color: var(--danger); }
   background: none; border: none; color: var(--muted); padding: 2px 12px 6px;
 }
 .nav-toggle:hover { color: var(--accent); }
-.panes.nav-collapsed { grid-template-columns: 56px 1fr; }
-.panes.nav-collapsed.with-sash { grid-template-columns: 56px 1fr 320px; }
+.panes.nav-collapsed { --nav-w: 56px; }
 .left.collapsed .nav-toggle { justify-content: center; padding: 2px 0 6px; }
 .left.collapsed .item, .left.collapsed .me-summary { justify-content: center; padding: 10px 0; }
 .left.collapsed .nav-label, .left.collapsed .count { display: none; }
@@ -569,16 +593,16 @@ button.link.danger { color: var(--danger); }
   border-radius: 8px; background: var(--warn); color: var(--panel); font-size: 10px; line-height: 16px; text-align: center; font-weight: 700;
 }
 .left.collapsed .me-summary { border: none; }
+.talk-toggle .nav-dot {
+  position: absolute; top: -2px; right: -6px; min-width: 16px; height: 16px; padding: 0 4px;
+  border-radius: 8px; background: var(--accent); color: var(--panel); font-size: 10px; line-height: 16px; text-align: center; font-weight: 700;
+}
 .icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
 .icon-btn:hover { color: var(--accent); border-color: var(--accent); }
-@media (max-width: 1200px) {
-  .panes.nav-collapsed { grid-template-columns: 56px 1fr; }
-  .panes.nav-collapsed.with-sash { grid-template-columns: 56px 1fr 280px; }
-}
 @media (max-width: 680px) {
   /* 狭い画面では折りたたみを使わず、上部の横並びにする */
   .nav-toggle { display: none; }
-  .panes.nav-collapsed, .panes.nav-collapsed.with-sash { grid-template-columns: 1fr; }
+  .panes.nav-collapsed { grid-template-columns: 1fr; }
   .left.collapsed .item, .left.collapsed .me-summary { padding: 6px 12px; }
   .left.collapsed .nav-label, .left.collapsed .count { display: inline; }
   .left.collapsed .nav-dot { display: none; }
