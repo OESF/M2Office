@@ -30,21 +30,74 @@ type Tab =
  * ダッシュボードは最初の画面として先頭に置く（第6.6.8節）。
  * 「はじめに行う設定」は一度きりの作業なので、**設定のいちばん下**に置く（第6.10.3.1節）。
  * すべて済むと項目ごと消す。
+ *
+ * **保存を持つ区分は、小分けに割る**（第6.6.0節）。1 つの画面に保存を 1 つだけ置くため。
  */
-const TABS: { id: Tab; label: string; icon: IconName; description: string; group: string }[] = [
+const TABS: {
+  id: Tab; label: string; icon: IconName; description: string; group: string;
+  /** 小分け（第6.6.0.1節）。**1 つが 1 画面**で、保存は多くても 1 つ。 */
+  pages?: { id: string; label: string }[];
+}[] = [
   { id: 'dashboard', label: 'ダッシュボード', icon: 'dashboard', description: 'いまの状況と集計', group: '' },
-  { id: 'company', label: '会社情報', icon: 'company', description: '会社の情報、自社の書き方、スライドのテンプレート', group: '設定' },
-  { id: 'connectors', label: '接続', icon: 'connectors', description: 'LLM（Gemini）と Google Workspace への接続、業務が求める権限', group: '設定' },
-  { id: 'users', label: 'ユーザーと権限', icon: 'users', description: '招待・ロール・グループ・権限区画', group: '設定' },
-  { id: 'agents', label: '業務と承認', icon: 'sliders', description: '使う業務、承認の決まり、利用できる人', group: '設定' },
+  {
+    id: 'company', label: '会社情報', icon: 'company', description: '会社の情報、文面の書き方、帳票の体裁', group: '設定',
+    pages: [
+      { id: 'basic', label: '基本情報' },
+      { id: 'writing', label: '自社の書き方' },
+      { id: 'invoice', label: '帳票の体裁' },
+      { id: 'slides', label: 'スライドの見本' },
+      { id: 'dashboard', label: 'ダッシュボードの見せ方' },
+    ],
+  },
+  {
+    id: 'connectors', label: '接続', icon: 'connectors', description: 'Gemini と Google Workspace への接続', group: '設定',
+    pages: [
+      { id: 'gemini', label: 'Gemini' },
+      { id: 'google', label: 'Google Workspace' },
+      { id: 'retention', label: 'データを残す日数' },
+      { id: 'permissions', label: '求める許可' },
+      { id: 'people', label: '従業員の接続状況' },
+      { id: 'mcp', label: 'コネクタ（MCP）' },
+    ],
+  },
+  {
+    id: 'users', label: 'ユーザーと権限', icon: 'users', description: '招待・ロール・グループ・権限区画', group: '設定',
+    pages: [
+      { id: 'list', label: 'ユーザー' },
+      { id: 'invite', label: '招待する' },
+      { id: 'groups', label: 'グループ' },
+      { id: 'compartments', label: '権限区画' },
+    ],
+  },
+  {
+    id: 'agents', label: '業務と承認', icon: 'sliders', description: '使う業務、承認の決まり、利用できる人', group: '設定',
+    pages: [
+      { id: 'enabled', label: '使う業務' },
+      { id: 'automation', label: '社内への書き込み' },
+      { id: 'scope', label: '利用できる人' },
+      { id: 'effect', label: '効果の推計' },
+    ],
+  },
   { id: 'extensions', label: '拡張機能', icon: 'extensions', description: '業務と、外部とのつながり（コネクタ）を追加する', group: '設定' },
-  { id: 'knowledge', label: '知識', icon: 'knowledge', description: '就業規則などの社内の規程、言い換え', group: '設定' },
+  {
+    id: 'knowledge', label: '知識', icon: 'knowledge', description: '就業規則などの社内の規程、言い換え', group: '設定',
+    pages: [
+      { id: 'items', label: '登録と一覧' },
+      { id: 'synonyms', label: '言い換え' },
+      { id: 'promotions', label: '会社の知識にする提案' },
+    ],
+  },
   { id: 'setup', label: 'はじめに行う設定', icon: 'help', description: '導入の流れと、残っている設定', group: '設定' },
   { id: 'usage', label: '利用状況', icon: 'usage', description: '業務ごとの実行の件数と費用', group: '記録' },
   { id: 'runs', label: '実行の一覧', icon: 'runs', description: '全員の実行の状態と費用（中身は見られません）', group: '記録' },
   { id: 'audit', label: '監査ログ', icon: 'audit', description: '誰が何をしたかの記録', group: '記録' },
   { id: 'help', label: 'ヘルプ', icon: 'help', description: '管理者向けの記事と検索', group: '' },
 ];
+
+/** その区分の最初の小分け。小分けを持たない区分は空文字。 */
+function firstPage(tab: Tab): string {
+  return TABS.find((t) => t.id === tab)?.pages?.[0]?.id ?? '';
+}
 
 /**
  * 管理者ページ（`/admin`。仕様書 第6.6節）。
@@ -57,7 +110,11 @@ const TABS: { id: Tab; label: string; icon: IconName; description: string; group
  * 実行の一覧は状態と費用だけを表示する。
  */
 export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
-  const [tab, setTab] = useState<Tab>('dashboard');
+  const [tab, setTabState] = useState<Tab>('dashboard');
+  /** いま開いている小分け（第6.6.0節）。小分けを持たない区分では空文字。 */
+  const [page, setPage] = useState('');
+  /** 区分を開く。小分けがあれば最初のものへ入る。 */
+  const setTab = useCallback((id: Tab) => { setTabState(id); setPage(firstPage(id)); }, []);
   const [helpArticle, setHelpArticle] = useState<string | null>(null);
   /*
     はじめに行う設定の進み具合（仕様書 第6.10.3.1節）。
@@ -97,7 +154,15 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
                 {t.group && t.group !== shown[i - 1]?.group && <NavHeading>{t.group}</NavHeading>}
                 <NavItem icon={t.icon} label={t.label} description={t.description}
                   hint={t.id === 'setup' && setup ? `${setup.done} / ${setup.total}` : ''}
+                  expanded={t.pages ? tab === t.id : undefined}
                   active={tab === t.id} onClick={() => setTab(t.id)} />
+                {/* 開いている区分の小分けだけを出す。1 つが 1 画面（第6.6.0節） */}
+                {t.pages && tab === t.id && t.pages.map((x) => (
+                  <NavItem
+                    key={x.id} className="item nav-sub" icon={t.icon} label={x.label}
+                    active={page === x.id} onClick={() => setPage(x.id)}
+                  />
+                ))}
               </Fragment>
             ))}
           </>
@@ -114,13 +179,13 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
             {tab === 'help' && <HelpCenter initial={helpArticle} />}
             {tab === 'usage' && <Usage />}
             {tab === 'runs' && <Runs />}
-            {tab === 'company' && <CompanySettings />}
-            {tab === 'agents' && <AgentSettings />}
+            {tab === 'company' && <CompanySettings page={page} />}
+            {tab === 'agents' && <AgentSettings page={page} />}
             {tab === 'extensions' && <ExtensionSettings />}
-            {tab === 'users' && <UserSettings meId={me.user.id} />}
-            {tab === 'knowledge' && <KnowledgeSettings />}
+            {tab === 'users' && <UserSettings meId={me.user.id} page={page} />}
+            {tab === 'knowledge' && <KnowledgeSettings page={page} />}
             {tab === 'audit' && <Audit />}
-            {tab === 'connectors' && <><Connections /><Connectors /></>}
+            {tab === 'connectors' && (page === 'mcp' ? <Connectors /> : <Connections page={page} />)}
           </main>
         </SideNavLayout>
       )}

@@ -136,9 +136,13 @@ export function NavHeading({ children }: { children: string }) {
  * @param description 説明。項目には並べず、`title` と読み上げに使う
  * @param count 件数（承認待ち・未読）。折りたたんだときはアイコンの右上に小さく出す
  * @param hint 押すキー（仕様書 第6.11.1節 k4）。**隠れたショートカットにしない**ため併記する
+ * @param expanded 小分けを持つ区分のとき、開いているかどうか（第6.6.0節）。印を出す
  */
-export function NavItem({ icon, label, description, active, count, hint, onClick, className = 'item' }: {
+export function NavItem({
+  icon, label, description, active, count, hint, expanded, onClick, className = 'item',
+}: {
   icon: IconName; label: string; description?: string; active?: boolean; count?: number; hint?: string;
+  expanded?: boolean;
   onClick: () => void; className?: string;
 }) {
   const collapsed = useContext(Collapsed);
@@ -148,6 +152,7 @@ export function NavItem({ icon, label, description, active, count, hint, onClick
       className={`${className}${active ? ' active' : ''}`} onClick={onClick}
       title={tip} aria-label={collapsed ? label : undefined} aria-description={description}
       aria-current={active ? 'page' : undefined}
+      aria-expanded={expanded}
     >
       <span className="nav-icon">
         <Icon name={icon} />
@@ -156,6 +161,8 @@ export function NavItem({ icon, label, description, active, count, hint, onClick
       <span className="nav-label">{label}</span>
       {count ? <span className="count">{count}</span> : null}
       {!count && hint ? <kbd className="nav-key">{hint}</kbd> : null}
+      {/* 小分けを持つ区分の、開いているかどうかの印（第6.6.0節） */}
+      {expanded !== undefined && <span className="nav-caret" aria-hidden>{expanded ? '▾' : '▸'}</span>}
     </button>
   );
 }

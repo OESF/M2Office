@@ -40,8 +40,12 @@ function clientChangeText(impact: { users: number; runs: number } | null, what: 
   return lines.join('\n');
 }
 
-/** 管理者ページ「接続」。 */
-export function Connections() {
+/**
+ * 管理者ページ「接続」（仕様書 第6.6.2節）。
+ *
+ * @remarks **1 画面 1 保存**（第6.6.0節）。小分けを `page` で受け取り、1 つだけを出す。
+ */
+export function Connections({ page }: { page: string }) {
   const [data, setData] = useState<ConnectionSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
   const load = () => api.admin.connections().then(setData).catch((e) => setError(describeError(e, '読み込めませんでした')));
@@ -50,13 +54,15 @@ export function Connections() {
   if (!data) return <p className="muted">読み込み中…</p>;
   return (
     <>
-      <h1>接続 <HelpTip article="admin-connectors">Gemini と Google Workspace への接続を設定します。鍵やシークレットは登録後に表示しません。</HelpTip></h1>
-      <p className="muted small">
-        ほかのサービスとのつながり（コネクタ。MCP サーバ）は、拡張機能として導入します。左の「拡張機能」をご覧ください。
-      </p>
-      <GeminiCard data={data.gemini} onSaved={() => void load()} />
-      <GoogleCard data={data.google} onSaved={() => void load()} />
-      <RetentionCard />
+      <h1>
+        接続 › {TITLES[page] ?? ''}{' '}
+        <HelpTip article="admin-connectors">Gemini と Google Workspace への接続を設定します。鍵やシークレットは登録後に表示しません。</HelpTip>
+      </h1>
+      {page === 'gemini' && <GeminiCard data={data.gemini} onSaved={() => void load()} />}
+      {(page === 'google' || page === 'permissions' || page === 'people') && (
+        <GoogleCard data={data.google} page={page} onSaved={() => void load()} />
+      )}
+      {page === 'retention' && <RetentionCard />}
     </>
   );
 }
@@ -73,7 +79,9 @@ function RetentionCard() {
   if (days === null) return null;
   return (
     <div className="card">
-      <h3>取得したデータを残す日数 <HelpTip article="admin-connectors">業務が Google から読んだメールや文書の中身と、そこから作った文を、業務が終わってから何日残すかです。過ぎると中身を消し、使ったツールの名前と件数だけを残します。</HelpTip></h3>
+      <p className="small">
+        <HelpTip article="admin-connectors">業務が Google から読んだメールや文書の中身と、そこから作った文を、業務が終わってから何日残すかです。過ぎると中身を消し、使ったツールの名前と件数だけを残します。</HelpTip>
+      </p>
       <p className="muted small">業務が終わってから、この日数が過ぎると、読んだメール・文書の中身と、そこから作った要約などを消します。作った成果物（下書き・議事録など）は消しません。承認待ちの間は残します。</p>
       <div className="field">
         <label>残す日数</label>
@@ -121,7 +129,7 @@ function GeminiCard({ data, onSaved }: { data: ConnectionSettings['gemini']; onS
 
   return (
     <div className="card">
-      <h3>Gemini（業務の推論・秘書・Web の調査・音声）</h3>
+      <p className="muted small">業務の推論・秘書・Web の調査・音声に使います。</p>
       <p className="small">いまの状態: <strong>{effective}</strong></p>
       <div className="field">
         <label>契約の形態</label>
@@ -173,7 +181,9 @@ function GeminiCard({ data, onSaved }: { data: ConnectionSettings['gemini']; onS
 }
 
 /** Google Workspace（会社の OAuth クライアントの登録と、利用者ごとの接続）。 */
-function GoogleCard({ data, onSaved }: { data: ConnectionSettings['google']; onSaved: () => void }) {
+function GoogleCard({ data, page, onSaved }: {
+  data: ConnectionSettings['google']; page: string; onSaved: () => void;
+}) {
   const [clientId, setClientId] = useState(data.clientId);
   const [secret, setSecret] = useState('');
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -190,9 +200,10 @@ function GoogleCard({ data, onSaved }: { data: ConnectionSettings['google']; onS
 
   return (
     <>
+      {page === 'google' && (
       <div className="card">
-        <h3>Google Workspace（Gmail・カレンダー・ToDo・Chat・ドライブほか）</h3>
         <p className="small">
+          Gmail・カレンダー・ToDo・Chat・ドライブほかに使います。{' '}
           会社の Google Cloud で作った OAuth クライアント（同意画面を「内部」にしたもの）を登録します。
           社内だけで使うアプリになるため、Google の審査は要りません。登録したあと、従業員はそれぞれ個人設定の「Google 連携」で接続します。
         </p>
@@ -253,9 +264,10 @@ function GoogleCard({ data, onSaved }: { data: ConnectionSettings['google']; onS
           </p>
         )}
       </div>
+      )}
 
+      {page === 'permissions' && (
       <div className="card">
-        <h3>接続のときに求める許可</h3>
         <p className="small">この会社で使える業務のツールから決まります。使っていない業務の許可は求めません。業務を足して許可が増えたら、従業員に接続し直しを案内します。</p>
         <table className="table">
           <tbody>
@@ -269,9 +281,11 @@ function GoogleCard({ data, onSaved }: { data: ConnectionSettings['google']; onS
           </tbody>
         </table>
       </div>
+      )}
 
+      {page === 'people' && (
       <div className="card">
-        <h3>従業員の接続状況（{connectedCount} / {data.users.length} 人）</h3>
+        <p className="muted small">{connectedCount} / {data.users.length} 人が接続済み</p>
         <table className="table">
           <thead><tr><th>名前</th><th>Google アカウント</th><th>接続した日時</th><th>足りない許可</th></tr></thead>
           <tbody>
@@ -286,6 +300,17 @@ function GoogleCard({ data, onSaved }: { data: ConnectionSettings['google']; onS
           </tbody>
         </table>
       </div>
+      )}
     </>
   );
 }
+
+/** 小分けの題名（仕様書 第6.6.0.1節）。 */
+const TITLES: Record<string, string> = {
+  gemini: 'Gemini',
+  google: 'Google Workspace',
+  retention: 'データを残す日数',
+  permissions: '求める許可',
+  people: '従業員の接続状況',
+  mcp: 'コネクタ（MCP）',
+};

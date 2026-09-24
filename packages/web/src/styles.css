@@ -719,6 +719,12 @@ button.link.danger { color: var(--danger); }
 .left .nav-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .left .count { float: none; margin-left: auto; }
 .left .nav-dot { display: none; }
+/* 区分の小分け（仕様書 第6.6.0節）。1 つが 1 画面 */
+.left .nav-sub { padding-left: 34px; font-size: 13px; }
+.left .nav-sub .nav-icon { display: none; }
+.left.collapsed .nav-sub { display: none; }
+.nav-caret { flex: none; color: var(--muted); font-size: 10px; margin-left: 4px; }
+.left.collapsed .nav-caret { display: none; }
 .left .nav-heading { display: block; }
 .nav-toggle {
   display: flex; align-items: center; justify-content: flex-end; width: 100%;

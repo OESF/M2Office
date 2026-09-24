@@ -68,7 +68,13 @@ function Text({ label, value, onChange, hint, multiline }: {
 }
 
 /** 会社情報と自社の書き方（第6.6.1節、第15.2.1節）。 */
-export function CompanySettings() {
+/**
+ * 会社情報（仕様書 第6.6.1節）。
+ *
+ * @remarks
+ * **1 画面 1 保存**（第6.6.0節）。小分けを `page` で受け取り、1 つだけを出す。
+ */
+export function CompanySettings({ page }: { page: string }) {
   const { data, error, reload } = useSettings();
   const [company, setCompany] = useState<CompanyInfo | null>(null);
   const [style, setStyle] = useState<WritingStyle | null>(null);
@@ -79,11 +85,12 @@ export function CompanySettings() {
   const c = (k: keyof CompanyInfo) => (v: string) => setCompany({ ...company, [k]: v });
   const w = (k: keyof WritingStyle) => (v: string) => setStyle({ ...style, [k]: v });
 
+  const title = TITLES[page] ?? '会社情報';
   return (
     <>
-      <h1>会社情報 <HelpTip article="admin-setup">帳票・メールの署名と、すべての業務の文面に使います。</HelpTip></h1>
+      <h1>会社情報 › {title} <HelpTip article="admin-setup">帳票・メールの署名と、すべての業務の文面に使います。</HelpTip></h1>
+      {page === 'basic' && (
       <div className="card">
-        <h3>基本情報</h3>
         <Text label="正式な会社名" value={company.legalName} onChange={c('legalName')} hint="前株・後株を含めて正確に" />
         <Text label="住所" value={company.address} onChange={c('address')} />
         <Text label="電話番号" value={company.phone} onChange={c('phone')} />
@@ -120,14 +127,15 @@ export function CompanySettings() {
         </div>
         <SaveButton run={() => api.admin.saveSettings('company', company)} />
       </div>
+      )}
 
       {/*
         ダッシュボードの見せ方（仕様書 第6.7.4.1節、Q-64）。
         **ダッシュボードの上には置かない。** 毎日眺める画面に、めったに触らない設定を置かない。
         壁のモニターに映すときに見直すものなので、会社の設定として持つ。
       */}
+      {page === 'dashboard' && (
       <div className="card">
-        <h3>ダッシュボードの人の見せ方</h3>
         <p>
           管理者ページのダッシュボードで、いま誰が何をしているかをどこまで出すかを決めます。
           <strong>壁のモニターに映す（「別の画面で開く」）ときは、通りかかった人にも見えます。</strong>
@@ -141,10 +149,12 @@ export function CompanySettings() {
             <option value="counts">人数と業務だけ（誰かは出さない）</option>
           </select>
         </div>
+        {saver.view}
       </div>
+      )}
 
+      {page === 'writing' && (
       <div className="card">
-        <h3>自社の書き方</h3>
         <p>すべての業務が同じ書き方で文面を作ります。業務ごとの個別指定はできません。</p>
         <Text label="自社の呼び方" value={style.selfReference} onChange={w('selfReference')} hint="例: 弊社／当社" />
         <Text label="社外宛ての書き出し" value={style.greeting} onChange={w('greeting')} multiline />
@@ -170,12 +180,21 @@ export function CompanySettings() {
         <Text label="その他の注意" value={style.notes} onChange={w('notes')} multiline />
         <SaveButton run={() => api.admin.saveSettings('writingStyle', style)} />
       </div>
-      <InvoiceStyleSettings initial={data.invoice} onSaved={() => void reload()} />
-      <SlideTemplateSettings initial={data.slides.templates} onSaved={() => void reload()} />
-      {saver.view}
+      )}
+      {page === 'invoice' && <InvoiceStyleSettings initial={data.invoice} onSaved={() => void reload()} />}
+      {page === 'slides' && <SlideTemplateSettings initial={data.slides.templates} onSaved={() => void reload()} />}
     </>
   );
 }
+
+/** 小分けの題名（第6.6.0.1節）。左のメニューと題名で同じ言葉を使う。 */
+const TITLES: Record<string, string> = {
+  basic: '基本情報',
+  writing: '自社の書き方',
+  invoice: '帳票の体裁',
+  slides: 'スライドの見本',
+  dashboard: 'ダッシュボードの見せ方',
+};
 
 /**
  * 帳票の体裁（仕様書 第15.2.2節、Q-57）。請求書などの PDF に使う。
@@ -193,7 +212,6 @@ function InvoiceStyleSettings({ initial, onSaved }: {
 
   return (
     <div className="card">
-      <h3>帳票の体裁</h3>
       <p>
         請求書などの PDF に使います。差出人（会社名・住所・電話・登録番号）は、上の会社情報から出します。
         設定しない項目は、帳票に出しません。
@@ -261,7 +279,9 @@ function SlideTemplateSettings({ initial, onSaved }: { initial: SlideTemplate[];
 
   return (
     <div className="card">
-      <h3>スライドのテンプレート <HelpTip article="admin-slides">Google スライドで作った自社のファイルを、スライドを作るときの見本として使います。URL を貼るだけで登録できます。</HelpTip></h3>
+      <p className="muted small">
+        <HelpTip article="admin-slides">Google スライドで作った自社のファイルを、スライドを作るときの見本として使います。URL を貼るだけで登録できます。</HelpTip>
+      </p>
       <div className="note small">
         <p>Google スライドで作った<strong>自社のファイル</strong>を、スライド作成の見本として使います。URL を貼るだけで登録できます。</p>
         <p>
@@ -322,7 +342,7 @@ function SlideTemplateSettings({ initial, onSaved }: { initial: SlideTemplate[];
 }
 
 /** 業務の有効化と自動化ポリシー（第6.6.5節、第9.4節）。 */
-export function AgentSettings() {
+export function AgentSettings({ page }: { page: string }) {
   const { data, error, reload } = useSettings();
   const access = useAccessOptions();
   const [policy, setPolicy] = useState<AutomationPolicy | null>(null);
@@ -351,9 +371,13 @@ export function AgentSettings() {
 
   return (
     <>
-      <h1>業務と承認 <HelpTip article="admin-agents">社内への書き込みの確認の要否と、使う業務を決めます。社外や他の人に届く操作は、設定にかかわらず必ず承認が必要です。</HelpTip></h1>
+      <h1>
+        業務と承認 › {AGENT_TITLES[page] ?? ''}{' '}
+        <HelpTip article="admin-agents">社内への書き込みの確認の要否と、使う業務を決めます。社外や他の人に届く操作は、設定にかかわらず必ず承認が必要です。</HelpTip>
+      </h1>
+      {page === 'automation' && (
       <div className="card">
-        <h3>社内への書き込み（タスクの起票、予定の登録、本人宛の通知など）</h3>
+        <p className="muted small">タスクの起票、予定の登録、本人宛の通知など</p>
         <p>承認が必要な場合、業務は書き込む直前で止まり、依頼した本人に確認を求めます。</p>
         <div className="field">
           <label>全体の設定</label>
@@ -385,9 +409,10 @@ export function AgentSettings() {
         </p>
         <SaveButton run={() => api.admin.saveSettings('automation', policy)} />
       </div>
+      )}
 
+      {page === 'enabled' && (
       <div className="card">
-        <h3>使う業務</h3>
         <p>無効にした業務は、メニュー・秘書・定時実行のいずれからも起動できなくなります。</p>
         <table className="table">
           <tbody>
@@ -404,10 +429,16 @@ export function AgentSettings() {
             ))}
           </tbody>
         </table>
+        {saver.view}
       </div>
+      )}
+
+      {page === 'scope' && (
       <div className="card">
-        <h3>利用できる人 <HelpTip article="admin-groups">業務ごとに、使える人を全員か、指定したグループと人に絞ります。範囲の外の人のメニュー・秘書には、その業務が出ません。</HelpTip></h3>
-        <p>業務ごとに、使える人を決めます。指定したグループに所属する人と、個別に加えた人だけが使えます。</p>
+        <p>
+          業務ごとに、使える人を決めます。指定したグループに所属する人と、個別に加えた人だけが使えます。{' '}
+          <HelpTip article="admin-groups">範囲の外の人のメニュー・秘書には、その業務が出ません。</HelpTip>
+        </p>
         {access.error && <p className="error">{access.error}</p>}
         {access.options && (
           <table className="table">
@@ -424,8 +455,9 @@ export function AgentSettings() {
         )}
         <p className="muted small">拡張機能の業務は、「拡張機能」の画面で拡張機能ごとに設定します。</p>
       </div>
+      )}
+      {page === 'effect' && (
       <div className="card">
-        <h3>効果の推計（手作業での標準所要時間）</h3>
         <p>
           「手作業なら 1 件に何分かかるか」を業務ごとに決めます。ダッシュボードの推計の削減時間は、
           完了した件数にこの値を掛けて求めます。実態に合わせて控えめに設定してください。
@@ -451,17 +483,33 @@ export function AgentSettings() {
             minutesPerRun: Object.fromEntries(Object.entries(minutes).map(([k, v]) => [k, Number(v)])),
           })} />
       </div>
-      {saver.view}
+      )}
     </>
   );
 }
+
+/** 小分けの題名（第6.6.0.1節）。 */
+const AGENT_TITLES: Record<string, string> = {
+  enabled: '使う業務',
+  automation: '社内への書き込み',
+  scope: '利用できる人',
+  effect: '効果の推計',
+};
+
+/** 小分けの題名（第6.6.0.1節）。 */
+const USER_TITLES: Record<string, string> = {
+  list: 'ユーザー',
+  invite: '招待する',
+  groups: 'グループ',
+  compartments: '権限区画',
+};
 
 const ROLE_LABELS: Record<Role, string> = {
   admin: '管理者', approver: '承認者', member: '一般', external: '外部協力者', developer: '開発者',
 };
 
 /** ユーザーと権限（第6.6.4節）。 */
-export function UserSettings({ meId }: { meId: string }) {
+export function UserSettings({ meId, page }: { meId: string; page: string }) {
   const [users, setUsers] = useState<User[]>([]);
   const [invite, setInvite] = useState({ email: '', displayName: '' });
   // グループと区画は互いの表示（割り当て先・入れる人）に効くため、片方を変えたら両方を読み直す
@@ -482,7 +530,11 @@ export function UserSettings({ meId }: { meId: string }) {
 
   return (
     <>
-      <h1>ユーザーと権限 <HelpTip article="admin-users">招待・ロール・停止を管理します。管理者は 2 人以上にしておくことをおすすめします。</HelpTip></h1>
+      <h1>
+        ユーザーと権限 › {USER_TITLES[page] ?? ''}{' '}
+        <HelpTip article="admin-users">招待・ロール・停止を管理します。管理者は 2 人以上にしておくことをおすすめします。</HelpTip>
+      </h1>
+      {page === 'list' && <>
       <p className="lead">ログインは各自の Google アカウントで行います。</p>
       <table className="table">
         <thead><tr><th>名前</th><th>メールアドレス</th><th>ロール</th><th>状態</th></tr></thead>
@@ -509,8 +561,11 @@ export function UserSettings({ meId }: { meId: string }) {
           ))}
         </tbody>
       </table>
-      <div className="card" style={{ marginTop: 16 }}>
-        <h3>招待する</h3>
+      {saver.view}
+      </>}
+
+      {page === 'invite' && (
+      <div className="card">
         <div className="grid2">
           <Text label="メールアドレス" value={invite.email} onChange={(v) => setInvite({ ...invite, email: v })}
             hint="会社の Google Workspace のアドレス" />
@@ -524,16 +579,22 @@ export function UserSettings({ meId }: { meId: string }) {
           }, '招待しました。Google ログインが使えるようになると、この方がログインできます')}>
           一般ロールで招待する
         </button>
+        {saver.view}
       </div>
-      <GroupSettings users={users} key={`g-${version.c}`} onChanged={() => setVersion((v) => ({ ...v, g: v.g + 1 }))} />
-      <CompartmentSettings key={`c-${version.g}`} onChanged={() => setVersion((v) => ({ ...v, c: v.c + 1 }))} />
-      {saver.view}
+      )}
+
+      {page === 'groups' && (
+        <GroupSettings users={users} key={`g-${version.c}`} onChanged={() => setVersion((v) => ({ ...v, g: v.g + 1 }))} />
+      )}
+      {page === 'compartments' && (
+        <CompartmentSettings key={`c-${version.g}`} onChanged={() => setVersion((v) => ({ ...v, c: v.c + 1 }))} />
+      )}
     </>
   );
 }
 
 /** 知識管理（第6.6.6節）。規程の登録。 */
-export function KnowledgeSettings() {
+export function KnowledgeSettings({ page }: { page: string }) {
   const [items, setItems] = useState<KnowledgeItemView[]>([]);
   const [compartments, setCompartments] = useState<{ name: string; description: string | null }[]>([]);
   const empty = { id: 'new', kind: 'rule', title: '', body: '', source: '', compartment: null as string | null };
@@ -550,7 +611,11 @@ export function KnowledgeSettings() {
 
   return (
     <>
-      <h1>知識 <HelpTip article="admin-knowledge">ここに登録した規程から、秘書と「社内ナレッジ Q&A」が出典つきで答えます。空のままだと答えられません。</HelpTip></h1>
+      <h1>
+        知識 › {KNOWLEDGE_TITLES[page] ?? ''}{' '}
+        <HelpTip article="admin-knowledge">ここに登録した規程から、秘書と「社内ナレッジ Q&A」が出典つきで答えます。空のままだと答えられません。</HelpTip>
+      </h1>
+      {page === 'items' && <>
       <p className="lead">就業規則・経費規程・価格表など。<strong>空のままだと秘書は答えられません。</strong></p>
       <div className="card">
         <h3>{draft.id === 'new' ? '新しく登録する' : '編集する'}</h3>
@@ -631,11 +696,19 @@ export function KnowledgeSettings() {
           ))}
         </tbody>
       </table>
-      <PromotionApprovals />
-      <SynonymSettings />
+      </>}
+      {page === 'promotions' && <PromotionApprovals />}
+      {page === 'synonyms' && <SynonymSettings />}
     </>
   );
 }
+
+/** 小分けの題名（第6.6.0.1節）。 */
+const KNOWLEDGE_TITLES: Record<string, string> = {
+  items: '登録と一覧',
+  synonyms: '言い換え',
+  promotions: '会社の知識にする提案',
+};
 
 /**
  * 昇華の承認（仕様書 第11.3.1節）。個人の記憶を会社の知識にする提案を判断する。
@@ -647,7 +720,7 @@ function PromotionApprovals() {
   const saver = useSaver();
   const load = () => api.admin.promotions().then((r) => setItems(r.items)).catch(() => setItems([]));
   useEffect(() => { void load(); }, []);
-  if (items.length === 0) return null;
+  if (items.length === 0) return <p className="muted">いまは提案がありません。</p>;
 
   const decide = (id: string, decision: 'approved' | 'rejected') => void saver.run(async () => {
     const comment = decision === 'rejected' ? (prompt('見送る理由（任意）') ?? '') : '';
@@ -657,7 +730,7 @@ function PromotionApprovals() {
 
   return (
     <div className="card">
-      <h3>会社の知識にする提案（{items.length} 件）</h3>
+      <p className="muted small">{items.length} 件</p>
       <p>
         従業員が、秘書に覚えさせたことを会社の知識にしたいと提案しています。
         承認すると、そのままの文で知識に登録され、全員の秘書と業務が参照します。
@@ -709,7 +782,9 @@ function SynonymSettings() {
 
   return (
     <div className="card">
-      <h3>言い換え <HelpTip article="admin-knowledge">「育休」と聞かれたら「育児休業」でも探す、というように、同じ意味の言葉を結び付けます。</HelpTip></h3>
+      <p>
+        <HelpTip article="admin-knowledge">「育休」と聞かれたら「育児休業」でも探す、というように、同じ意味の言葉を結び付けます。</HelpTip>
+      </p>
       <p className="muted small">質問の言葉が規程の言葉と違っても見つかるようにします。言い換えで見つけたときは、答えに「読み替えて探しました」と示します。</p>
       <div className="field">
         <label className="check">
