@@ -32,7 +32,7 @@ export const AG01_INBOX: AgentDefinition = {
   inputs: {
     type: 'object',
     properties: {
-      since: { type: 'string', title: '対象期間の開始（省略時は前回以降）' },
+      since: { type: 'string', title: '対象期間の開始', examples: ['2026-09-01'] },
     },
   },
   tools: ['gmail.list', 'gmail.get', 'gmail.create_draft', 'knowledge.search', 'document.create'],

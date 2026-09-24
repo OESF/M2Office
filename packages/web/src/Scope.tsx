@@ -119,7 +119,7 @@ export function ScopeField({ target, options, onSaved }: {
     <div>
       <ScopeEditor value={editing} onChange={setEditing} options={options} />
       <div className="row">
-        <button className="btn small" disabled={busy} onClick={() => void save()}>保存する</button>
+        <button className="btn small" disabled={busy} onClick={() => void save()}>保存</button>
         <button className="btn small ghost" onClick={() => setEditing(null)}>やめる</button>
       </div>
       {error && <p className="error small">{error}</p>}
@@ -281,7 +281,7 @@ export function CompartmentSettings({ onChanged }: { onChanged?: () => void }) {
                         <button className="btn small" onClick={() => void act(async () => {
                           await api.admin.setCompartmentAssignment(c.id, editing.value);
                           setEditing(null);
-                        }, `「${c.description ?? c.name}」の割当を保存しました`)}>保存する</button>
+                        }, `「${c.description ?? c.name}」の割当を保存しました`)}>保存</button>
                         <button className="btn small ghost" onClick={() => setEditing(null)}>やめる</button>
                       </div>
                     </>

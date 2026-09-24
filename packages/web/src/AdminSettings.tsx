@@ -81,7 +81,6 @@ export function CompanySettings() {
   return (
     <>
       <h1>会社情報 <HelpTip article="admin-setup">帳票・メールの署名と、すべての業務の文面に使います。</HelpTip></h1>
-      <p className="lead">帳票・メールの署名、すべての業務の文面に使います。</p>
       <div className="card">
         <h3>基本情報</h3>
         <Text label="正式な会社名" value={company.legalName} onChange={c('legalName')} hint="前株・後株を含めて正確に" />
@@ -119,7 +118,7 @@ export function CompanySettings() {
           <Text label="支払サイト" value={company.paymentTerms} onChange={c('paymentTerms')} hint="例: 翌月末払い" />
         </div>
         <button className="btn" disabled={saver.busy}
-          onClick={() => void saver.run(() => api.admin.saveSettings('company', company))}>保存する</button>
+          onClick={() => void saver.run(() => api.admin.saveSettings('company', company))}>保存</button>
       </div>
 
       {/*
@@ -170,7 +169,7 @@ export function CompanySettings() {
         </div>
         <Text label="その他の注意" value={style.notes} onChange={w('notes')} multiline />
         <button className="btn" disabled={saver.busy}
-          onClick={() => void saver.run(() => api.admin.saveSettings('writingStyle', style))}>保存する</button>
+          onClick={() => void saver.run(() => api.admin.saveSettings('writingStyle', style))}>保存</button>
       </div>
       <InvoiceStyleSettings initial={data.invoice} onSaved={() => void reload()} />
       <SlideTemplateSettings initial={data.slides.templates} onSaved={() => void reload()} />
@@ -237,7 +236,7 @@ function InvoiceStyleSettings({ initial, onSaved }: {
           onClick={() => void saver.run(async () => {
             await api.admin.saveSettings('invoice', style);
             onSaved();
-          })}>保存する</button>
+          })}>保存</button>
       </div>
       {saver.view}
     </div>
@@ -388,7 +387,7 @@ export function AgentSettings() {
           メールの送信・チャットへの投稿・予定の招待など、社外や他の人に届く操作は、設定にかかわらず必ず承認が必要です。
         </p>
         <button className="btn" disabled={saver.busy}
-          onClick={() => void saver.run(() => api.admin.saveSettings('automation', policy))}>保存する</button>
+          onClick={() => void saver.run(() => api.admin.saveSettings('automation', policy))}>保存</button>
       </div>
 
       <div className="card">
@@ -454,7 +453,7 @@ export function AgentSettings() {
         <button className="btn" disabled={saver.busy}
           onClick={() => void saver.run(() => api.admin.saveSettings('effect', {
             minutesPerRun: Object.fromEntries(Object.entries(minutes).map(([k, v]) => [k, Number(v)])),
-          }))}>保存する</button>
+          }))}>保存</button>
       </div>
       {saver.view}
     </>
@@ -581,7 +580,7 @@ export function KnowledgeSettings() {
               await load();
               setOpen({ id: saved.id, sections: saved.sections });
               return saved.sections.length;
-            }, (n) => `保存しました。本文を ${n} の節に分けました。下の一覧で分け方を確かめられます`)}>保存する</button>
+            }, (n) => `保存しました。本文を ${n} の節に分けました。下の一覧で分け方を確かめられます`)}>保存</button>
           {draft.id !== 'new' && <button className="btn ghost" onClick={() => setDraft(empty)}>やめる</button>}
         </div>
       </div>
@@ -732,7 +731,7 @@ function SynonymSettings() {
           onClick={() => void saver.run(async () => {
             // 文のまま送る。サーバーが組に分けて検証し、誤りは画面の行番号で返す
             await api.admin.saveSettings('knowledge', { standardSynonyms: standard, synonyms: text as unknown as string[][] });
-          })}>保存する</button>
+          })}>保存</button>
       </div>
       {saver.view}
     </div>

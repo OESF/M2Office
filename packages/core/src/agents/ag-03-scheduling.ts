@@ -32,10 +32,13 @@ export const AG03_SCHEDULING: AgentDefinition = {
     type: 'object',
     required: ['title', 'attendees'],
     properties: {
-      title: { type: 'string', title: '目的・件名' },
-      attendees: { type: 'string', title: '参加者のメールアドレス（カンマ区切り、社内のみ）' },
-      durationMin: { type: 'string', title: '所要時間（分）' },
-      period: { type: 'string', title: '希望する期間（例: 来週）' },
+      title: { type: 'string', title: '目的・件名', examples: ['新製品の企画打ち合わせ'] },
+      attendees: {
+        type: 'string', title: '参加者（社内のみ）',
+        examples: ['yamada@example.co.jp, sato@example.co.jp'],
+      },
+      durationMin: { type: 'string', title: '所要時間（分）', examples: ['60'] },
+      period: { type: 'string', title: '希望する期間', examples: ['来週の午後'] },
     },
   },
   tools: ['calendar.freebusy', 'calendar.create'],

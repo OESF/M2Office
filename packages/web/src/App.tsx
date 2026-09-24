@@ -249,7 +249,6 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
                   )}
                 />
               </h1>
-              <p className="lead">必要な項目を入力して実行します。</p>
               <AgentForm
                 key={view.agent.id} agent={view.agent} fill={formFill}
                 initial={view.fileId ? { fileId: view.fileId } : undefined}
@@ -260,10 +259,6 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
           {view.kind === 'run' && (
             <>
               <h1>実行の詳細</h1>
-              {/* 終わったら、案内も消す（仕様書 第6.2.2.2節） */}
-              {detail && !['completed', 'failed', 'cancelled'].includes(detail.run.status) && (
-                <p className="lead">進み具合は自動で更新されます。</p>
-              )}
               {detail ? (
                 <RunView detail={detail} viewerId={me.user.id} onCancelled={() => void api.run(view.runId).then(setDetail)} />
               ) : <p className="muted">読み込み中…</p>}
@@ -272,14 +267,13 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
           {view.kind === 'approvals' && (
             <>
               <h1>承認トレイ <HelpTip article="start-approvals">承認すると業務が続きから進み、却下するとそこで終わります。送信や登録は承認のあとにだけ行います。</HelpTip></h1>
-              <p className="lead">内容を確認してから承認してください。</p>
               <ApprovalTray items={approvals} onDecided={() => void refresh()} />
             </>
           )}
           {view.kind === 'notifications' && (
             <>
               <h1>お知らせ</h1>
-              <p className="lead">あなた宛ての通知です。週次ブリーフもここに届きます。</p>
+              <p className="lead">週次ブリーフもここに届きます。</p>
               <Notifications items={notifications} onRead={() => void refresh()} />
             </>
           )}
@@ -315,7 +309,6 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
           {view.kind === 'history' && (
             <>
               <h1>実行履歴</h1>
-              <p className="lead">過去の依頼と結果を確認できます。</p>
               {history.length === 0 && <p className="muted">まだ履歴はありません。左のメニューから業務を選ぶか、秘書に頼んでみてください。</p>}
               {history.map(({ run, job }) => (
                 <div className="card" key={run.id}>

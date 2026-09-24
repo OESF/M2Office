@@ -92,7 +92,7 @@ export function AgentForm({
       ))}
       {error && <p className="error">{error}</p>}
       <button className="btn" onClick={submit} disabled={busy} title={hotkey ? `実行する（${hotkey}）` : '実行する'}>
-        {busy ? '開始しています…' : '実行する'}
+        {busy ? '開始しています…' : '実行'}
         {hotkey && <kbd className="btn-key">{hotkey}</kbd>}
       </button>
     </div>
@@ -110,13 +110,15 @@ function Field({
   onChange: (v: string) => void;
 }) {
   const label = `${field.title ?? name}${required ? '（必須）' : ''}`;
+  // 説明の文を足すより、例を薄く置く（仕様書 第6.10.4.1節）。例が無ければ何も出さない
+  const hint = field.examples?.[0] ? `例: ${field.examples[0]}` : undefined;
   return (
     <div className="field">
       <label htmlFor={name}>{label}</label>
       {field.format === 'textarea' ? (
-        <textarea id={name} value={value} onChange={(e) => onChange(e.target.value)} />
+        <textarea id={name} value={value} placeholder={hint} onChange={(e) => onChange(e.target.value)} />
       ) : (
-        <input id={name} value={value} onChange={(e) => onChange(e.target.value)} />
+        <input id={name} value={value} placeholder={hint} onChange={(e) => onChange(e.target.value)} />
       )}
     </div>
   );

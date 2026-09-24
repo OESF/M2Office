@@ -330,6 +330,11 @@ export interface JsonSchemaField {
   type: string;
   title?: string;
   format?: string;
+  /**
+   * 入力の例（JSON Schema の `examples`）。**1 つ目を入力欄に薄く置く**（仕様書 第6.10.4.1節）。
+   * 説明の文を足すより、例のほうが短く確実に伝わる。
+   */
+  examples?: string[];
 }
 
 export interface RunDetail {

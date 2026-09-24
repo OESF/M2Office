@@ -31,7 +31,7 @@ export const AG04_KNOWLEDGE_QA: AgentDefinition = {
     type: 'object',
     required: ['question'],
     properties: {
-      question: { type: 'string', title: '知りたいこと' },
+      question: { type: 'string', title: '知りたいこと', examples: ['夏季休暇は何日ありますか'] },
     },
   },
   tools: ['knowledge.search'],

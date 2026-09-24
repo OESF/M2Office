@@ -88,7 +88,7 @@ function RetentionCard() {
           api.admin.saveSettings('privacy', { googleDataRetentionDays: days })
             .then(() => setMsg({ ok: true, text: '保存しました' }))
             .catch((e) => setMsg({ ok: false, text: describeError(e, '保存できませんでした') }));
-        }}>保存する</button>
+        }}>保存</button>
       </div>
       {msg && <p className={msg.ok ? 'ok-msg' : 'error'}>{msg.text}</p>}
     </div>

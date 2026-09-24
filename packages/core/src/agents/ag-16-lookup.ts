@@ -35,7 +35,10 @@ export const AG16_LOOKUP: AgentDefinition = {
     type: 'object',
     required: ['request'],
     properties: {
-      request: { type: 'string', title: '調べてほしいこと', format: 'textarea' },
+      request: {
+        type: 'string', title: '調べてほしいこと', format: 'textarea',
+        examples: ['この書類の要点を 3 つにまとめて'],
+      },
       // 秘書に渡されたファイル（仕様書 第10.10節）
       fileId: { type: 'string', title: '渡された書類', format: 'file' },
     },

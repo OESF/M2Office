@@ -137,7 +137,7 @@ export function Settings({ me, agents, onChanged, section }: {
         <button className="btn" onClick={() => void save(async () => {
           if (name !== me.user.displayName) await api.saveDisplayName(name);
           await api.saveMySettings('profile', s.profile);
-        })}>保存する</button>
+        })}>保存</button>
       </div>
       </>}
 
@@ -224,7 +224,7 @@ export function Settings({ me, agents, onChanged, section }: {
             画像を上げる（PNG か JPEG）
           </button>
         </div>
-        <button className="btn" onClick={() => void save(() => api.saveMySettings('secretary', s.secretary))}>保存する</button>
+        <button className="btn" onClick={() => void save(() => api.saveMySettings('secretary', s.secretary))}>保存</button>
       </div>
       )}
 
@@ -267,7 +267,7 @@ export function Settings({ me, agents, onChanged, section }: {
           Chat（本人への個別メッセージ）
         </label>
         <div style={{ marginTop: 12 }}>
-          <button className="btn" onClick={() => void save(() => api.saveMySettings('notifications', s.notifications))}>保存する</button>
+          <button className="btn" onClick={() => void save(() => api.saveMySettings('notifications', s.notifications))}>保存</button>
         </div>
       </div>
       </>}
@@ -311,7 +311,7 @@ export function Settings({ me, agents, onChanged, section }: {
           </tbody>
         </table>
         <div style={{ marginTop: 12 }}>
-          <button className="btn" onClick={() => void save(() => api.saveMySettings('menu', { ...s.menu, order: ordered.map((a) => a.id) }))}>保存する</button>
+          <button className="btn" onClick={() => void save(() => api.saveMySettings('menu', { ...s.menu, order: ordered.map((a) => a.id) }))}>保存</button>
         </div>
       </div>
       </>}
@@ -413,7 +413,7 @@ function ConversationSettings({ settings, onChange, onSave }: {
         会話を残す（切ると、以後 1 件も残しません）
       </label>
       <div className="row">
-        <button className="btn" onClick={onSave}>保存する</button>
+        <button className="btn" onClick={onSave}>保存</button>
       </div>
 
       <div className="row">
@@ -609,7 +609,7 @@ function MemorySettings({ settings, onChange, onSave }: {
         <p className="muted small">ここに書いた言葉を含む指示は覚えません。秘書に「〜は覚えないで」と言っても増えます。</p>
       </div>
       <div className="row">
-        <button className="btn" onClick={onSave}>保存する</button>
+        <button className="btn" onClick={onSave}>保存</button>
       </div>
 
       <MemoryCandidates onAccepted={load} />

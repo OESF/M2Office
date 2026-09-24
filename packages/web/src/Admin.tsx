@@ -146,7 +146,6 @@ function Usage() {
   return (
     <>
       <h1>利用状況</h1>
-      <p className="lead">エージェントごとの実行件数と費用です。</p>
       {error && <p className="error">{error}</p>}
       {data && (
         <>
@@ -180,7 +179,7 @@ function Runs() {
   return (
     <>
       <h1>実行の一覧</h1>
-      <p className="lead">全利用者の実行の状態です。入力や成果物の中身は表示しません。</p>
+      <p className="lead">入力や成果物の中身は表示しません。</p>
       {error && <p className="error">{error}</p>}
       <table className="table">
         <thead><tr><th>開始</th><th>業務</th><th>依頼者</th><th>起動</th><th>状態</th><th className="num">費用</th></tr></thead>

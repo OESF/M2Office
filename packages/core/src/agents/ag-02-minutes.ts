@@ -32,11 +32,14 @@ export const AG02_MINUTES: AgentDefinition = {
     type: 'object',
     required: ['title'],
     properties: {
-      title: { type: 'string', title: '会議名' },
+      title: { type: 'string', title: '会議名', examples: ['9月度 営業定例'] },
       // 秘書に渡したファイル（仕様書 第10.10節）。画面では添付から入る
       fileId: { type: 'string', title: '文字起こしのファイル', format: 'file' },
-      transcript: { type: 'string', title: '会議の記録', format: 'textarea' },
-      space: { type: 'string', title: '共有先のスペース' },
+      transcript: {
+        type: 'string', title: '会議の記録', format: 'textarea',
+        examples: ['三浦: 次回は 10 月 1 日。資料は山田が作る。'],
+      },
+      space: { type: 'string', title: '共有先のスペース', examples: ['営業部'] },
     },
   },
   tools: ['file.read_text', 'meeting.get_transcript', 'document.create', 'tasks.create', 'chat.post', 'knowledge.register'],
