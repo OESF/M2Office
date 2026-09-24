@@ -84,7 +84,7 @@ export function HelpTip({ article, children }: { article: string; children: Reac
 }
 
 /** 業務の説明のポップアップの幅（仕様書 第6.10.5.1節）。画面が狭ければ縮める。 */
-const HELP_POP_WIDTH = 520;
+const HELP_POP_WIDTH = 560;
 
 /** ヘルプを開く前の画面へ戻す道（仕様書 第6.10.7.2節）。戻り先が無ければ何も出さない。 */
 function BackLink({ back }: { back?: { label: string; go: () => void } }) {

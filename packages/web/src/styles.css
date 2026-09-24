@@ -678,7 +678,11 @@ tr.muted td { color: var(--muted); }
 .agent-help ul { margin: 0 0 8px; padding-left: 1.2em; font-size: 13px; line-height: 1.7; }
 .agent-help-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .flow-mini { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 8px 0; }
+/* 実行例（仕様書 第6.10.5節）。**見出しは 1 行を使い、例は横に並べる** */
 .examples { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0; }
+.examples > .muted { flex-basis: 100%; margin-bottom: 2px; }
+/* 進み方も同じ。見出しが段の並びを押し出さないようにする */
+.flow-mini > .muted { flex-basis: 100%; margin-bottom: 2px; }
 .agent-help details { font-size: 13px; margin: 4px 0; }
 .agent-help details p { margin: 4px 0 8px 1em; }
 .notes { font-size: 13px; }
