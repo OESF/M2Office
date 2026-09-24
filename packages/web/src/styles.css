@@ -254,20 +254,27 @@ button { font: inherit; cursor: pointer; }
   overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
 }
 
-/* アバターが音声の入口。ふだんは控えめ、話しているときははっきり */
+/* アバターが音声の入口。**ふだんからはっきり出す**。押せることは、重ねたときの動きで示す */
 .secretary-avatar {
   flex: none; width: 72px; height: 72px; padding: 0;
   border: 1px solid var(--line); border-radius: 50%;
   background: var(--bg); color: var(--muted);
   display: grid; place-items: center; cursor: pointer; overflow: hidden;
-  opacity: 0.55; transition: opacity 0.15s, border-color 0.15s, color 0.15s;
+  transition: transform 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
 }
-.secretary-avatar:hover { opacity: 0.85; }
+/* 重ねたら少し大きくして、押せることを示す */
+.secretary-avatar:hover { transform: scale(1.06); border-color: var(--accent); color: var(--accent); }
+.secretary-avatar:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.secretary-avatar:active { transform: scale(0.98); }
 .secretary-avatar .icon { width: 40px; height: 40px; }
 .secretary-avatar .avatar-img { width: 100%; height: 100%; object-fit: cover; }
 .secretary-avatar.on {
-  opacity: 1; color: var(--accent); border-color: var(--accent);
+  color: var(--accent); border-color: var(--accent);
   box-shadow: 0 0 0 4px var(--accent-soft);
+}
+/* 動きを抑える設定の端末では拡大しない */
+@media (prefers-reduced-motion: reduce) {
+  .secretary-avatar:hover, .secretary-avatar:active { transform: none; }
 }
 
 /* 入力欄。複数行を書ける。Enter で送り、Shift+Enter で改行する */
@@ -293,6 +300,35 @@ button { font: inherit; cursor: pointer; }
 }
 .icon-btn:hover:not(:disabled) { background: var(--accent-soft); color: var(--accent); }
 .icon-btn:disabled { opacity: 0.4; cursor: default; }
+
+/* 押すキーの表示（仕様書 第6.11.1節 k4）。隠れたショートカットにしない */
+kbd {
+  font: inherit; font-size: 11px; line-height: 1.4; color: var(--muted);
+  border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px;
+  background: var(--subtle-bg); white-space: nowrap;
+}
+.nav-key { flex: none; margin-left: auto; font-size: 10px; padding: 0 4px; }
+.left.collapsed .nav-key { display: none; }
+.btn-key { margin-left: 8px; border-color: currentColor; background: none; color: inherit; opacity: 0.75; }
+
+/* 歯車から出す、個人設定の区分の一覧（仕様書 第6.5.0節） */
+.settings-menu {
+  position: absolute; z-index: 50; bottom: calc(100% + 8px); left: 8px;
+  width: 260px; max-height: 70vh; overflow-y: auto;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: 0 8px 24px var(--shadow-sm); padding: 6px;
+}
+.settings-menu-title {
+  margin: 4px 8px 6px; font-size: 11px; color: var(--muted); letter-spacing: .08em;
+}
+.settings-menu-item {
+  display: block; width: 100%; text-align: left; background: none; border: none;
+  border-radius: 6px; padding: 7px 10px; color: var(--ink); cursor: pointer;
+}
+.settings-menu-item:hover, .settings-menu-item:focus-visible { background: var(--accent-soft); }
+.settings-menu-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.settings-menu-label { display: block; font-size: 14px; }
+.settings-menu-hint { display: block; font-size: 11px; color: var(--muted); }
 .icon-btn .icon { width: 22px; height: 22px; }
 .icon-btn.send { background: var(--accent); color: #fff; }
 .icon-btn.send:hover:not(:disabled) { background: var(--accent); color: #fff; opacity: 0.85; }
@@ -629,7 +665,7 @@ button.link.danger { color: var(--danger); }
 }
 
 /* 左ペインの最下部の利用者のカード（仕様書 第6.1.1節） */
-.user-card { display: flex; align-items: center; gap: 6px; border-radius: 6px; }
+.user-card { position: relative; display: flex; align-items: center; gap: 6px; border-radius: 6px; }
 .user-card.active { background: var(--accent-soft); }
 .user-card-main {
   flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; text-align: left;

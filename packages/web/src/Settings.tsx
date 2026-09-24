@@ -14,6 +14,7 @@ import {
 import { useTheme, type ThemeChoice } from './theme.js';
 import { statusLabel } from './components.js';
 import { SecretaryAvatar } from './nav.js';
+import { KEY_BINDINGS, isTouchOnly, keyLabel } from './keys.js';
 
 /**
  * 個人設定（仕様書 第6.5節）。左ペインの最下部の利用者のカードの歯車のボタンから開く。
@@ -21,8 +22,43 @@ import { SecretaryAvatar } from './nav.js';
  * @remarks
  * 昇華の履歴と会話ログ（第6.5.4節）は、昇華と会話ログの実装とあわせて追加する（Phase 2）。
  */
-export function Settings({ me, agents, onChanged }: {
+/**
+ * 個人設定の区分（仕様書 第6.5.0節）。
+ *
+ * @remarks
+ * **1 度に 1 区分だけを出す。** すべてを縦に並べると、目的の項目まで画面を延々と送ることになる。
+ * 歯車を押したときの一覧も、この表から作る。
+ */
+export const SETTINGS_SECTIONS = [
+  { id: 'profile', label: 'プロフィール', hint: '名前・所属・利用状況' },
+  { id: 'google', label: 'Google 連携', hint: 'メール・予定への接続' },
+  { id: 'secretary', label: '秘書', hint: '名前・呼ばれ方・声・アバター' },
+  { id: 'notifications', label: '通知', hint: '種類・時間帯・受け取り方' },
+  { id: 'memory', label: '記憶とデータ', hint: '記憶・会話ログ・見え方' },
+  { id: 'display', label: '表示', hint: '明るさ・メニューの並び' },
+  { id: 'keys', label: 'キーボード', hint: 'ショートカットの一覧' },
+  { id: 'security', label: 'セキュリティ', hint: 'ログイン中の端末' },
+] as const;
+
+/** 個人設定の区分の ID。 */
+export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]['id'];
+
+/** 覚えておく先。最後に開いた区分から始める（仕様書 第6.5.0節）。 */
+export const SETTINGS_SECTION_KEY = 'm2office.settings-section';
+
+/** 覚えている区分。知らない値なら先頭に戻す。 */
+export function rememberedSection(): SettingsSection {
+  try {
+    const v = localStorage.getItem(SETTINGS_SECTION_KEY);
+    if (SETTINGS_SECTIONS.some((x) => x.id === v)) return v as SettingsSection;
+  } catch { /* 覚えられなくても動く */ }
+  return 'profile';
+}
+
+export function Settings({ me, agents, onChanged, section }: {
   me: Me; agents: AgentSummary[]; onChanged: () => void;
+  /** 出す区分（仕様書 第6.5.0節）。 */
+  section: SettingsSection;
 }) {
   const [s, setS] = useState<UserSettings | null>(null);
   const avatarInput = useRef<HTMLInputElement>(null);
@@ -63,11 +99,15 @@ export function Settings({ me, agents, onChanged }: {
     set('menu', { order: ids });
   };
 
+  // 1 度に 1 区分だけを出す（仕様書 第6.5.0節）
+  const on = (id: SettingsSection) => section === id;
+
   return (
     <>
       {msg.ok && <p className="ok-msg">{msg.ok}</p>}
       {msg.error && <p className="error">{msg.error}</p>}
 
+      {on('profile') && <>
       <div className="card">
         <h3>利用状況</h3>
         <dl className="kv">
@@ -99,9 +139,11 @@ export function Settings({ me, agents, onChanged }: {
           await api.saveMySettings('profile', s.profile);
         })}>保存する</button>
       </div>
+      </>}
 
-      <GoogleSettings />
+      {on('google') && <GoogleSettings />}
 
+      {on('secretary') && (
       <div className="card">
         <h3>秘書</h3>
         <div className="grid2">
@@ -184,7 +226,9 @@ export function Settings({ me, agents, onChanged }: {
         </div>
         <button className="btn" onClick={() => void save(() => api.saveMySettings('secretary', s.secretary))}>保存する</button>
       </div>
+      )}
 
+      {on('notifications') && <>
       <div className="card">
         <h3>通知</h3>
         <p>受け取る種類と、受け取り方を選びます。切った種類は画面内にも届きません。</p>
@@ -226,7 +270,9 @@ export function Settings({ me, agents, onChanged }: {
           <button className="btn" onClick={() => void save(() => api.saveMySettings('notifications', s.notifications))}>保存する</button>
         </div>
       </div>
+      </>}
 
+      {on('memory') && <>
       <PresenceNotice />
 
       <MemorySettings settings={s} onChange={(v) => set('memory', v)}
@@ -234,7 +280,11 @@ export function Settings({ me, agents, onChanged }: {
 
       <ConversationSettings settings={s} onChange={(v) => set('memory', v)}
         onSave={() => void save(() => api.saveMySettings('memory', { ...s.memory }))} />
+      </>}
 
+      {on('keys') && <KeyboardSettings />}
+
+      {on('display') && <>
       <DisplaySettings />
       <div className="card">
         <h3>メニューの並び</h3>
@@ -264,7 +314,9 @@ export function Settings({ me, agents, onChanged }: {
           <button className="btn" onClick={() => void save(() => api.saveMySettings('menu', { ...s.menu, order: ordered.map((a) => a.id) }))}>保存する</button>
         </div>
       </div>
+      </>}
 
+      {on('security') && (
       <div className="card">
         <h3>セキュリティ</h3>
         <p>2 段階認証は Google アカウント側で設定します。M2Office では設定しません。</p>
@@ -286,7 +338,42 @@ export function Settings({ me, agents, onChanged }: {
           </tbody>
         </table>
       </div>
+      )}
     </>
+  );
+}
+
+/**
+ * ショートカットの一覧（仕様書 第6.11節）。
+ *
+ * @remarks
+ * **割り当ての表（`keys.ts`）から作る。** ここに書き写すと、一覧と実際がずれる。
+ * 外付けのキーボードが無さそうな端末では、割り当ての代わりにその旨を出す。
+ */
+function KeyboardSettings() {
+  const groups = ['秘書', '画面', '業務'] as const;
+  return (
+    <div className="card">
+      <h3>キーボード</h3>
+      <p>よく使う操作は、キーボードだけで終えられます。文字を打っている最中でも効きます。</p>
+      {isTouchOnly() ? (
+        <p className="muted">この端末にはキーボードがつながっていないようです。つなぐと使えます。</p>
+      ) : groups.map((g) => (
+        <div key={g}>
+          <h4>{g}</h4>
+          <table className="table">
+            <tbody>
+              {KEY_BINDINGS.filter((b) => b.group === g).map((b) => (
+                <tr key={b.combo}>
+                  <td style={{ width: '9em' }}><kbd>{keyLabel(b.combo)}</kbd></td>
+                  <td>{b.what}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ))}
+    </div>
   );
 }
 

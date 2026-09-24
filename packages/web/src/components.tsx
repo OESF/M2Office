@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react';
 import type { Approval, Artifact, RunStep } from '@m2office/shared';
 import { api, describeError, type AgentSummary, type JsonSchemaField, type RunDetail } from './api.js';
 import { Markdown, openHelp } from './help.js';
+import { keyLabel, useHotkey } from './keys.js';
 
 /**
  * 通常の停止の間、画面の上部に出す案内（仕様書 第23.8.6節）。停止していなければ何も出さない。
@@ -46,10 +47,15 @@ export function AgentForm({
 }) {
   const [values, setValues] = useState<Record<string, string>>(initial ?? {});
   useEffect(() => { if (fill) setValues(fill); }, [fill]);
+  // 入力欄から手を離さずに実行できるようにする（仕様書 第6.11.1節 k2）
+  const hotkey = keyLabel('Mod+Enter');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const props = agent.inputs?.properties ?? {};
   const required = new Set(agent.inputs?.required ?? []);
+
+  // 入力欄の中からでも効く（Mod を伴うため。仕様書 第6.11.2節）
+  useHotkey('Mod+Enter', () => { if (!busy) void submit(); });
 
   async function submit() {
     setBusy(true);
@@ -85,8 +91,9 @@ export function AgentForm({
         />
       ))}
       {error && <p className="error">{error}</p>}
-      <button className="btn" onClick={submit} disabled={busy}>
+      <button className="btn" onClick={submit} disabled={busy} title={hotkey ? `実行する（${hotkey}）` : '実行する'}>
         {busy ? '開始しています…' : '実行する'}
+        {hotkey && <kbd className="btn-key">{hotkey}</kbd>}
       </button>
     </div>
     </>

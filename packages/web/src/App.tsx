@@ -13,8 +13,12 @@ import {
 } from './api.js';
 import { AgentHelpTip, HelpCenter, HelpTip, Markdown, Tour, openHelp, useOpenHelp } from './help.js';
 import { startVoice, type VoiceCall } from './voice.js';
+import { keyLabel, useHotkey, useNumberHotkeys } from './keys.js';
 import { AgentForm, ApprovalTray, RunView, statusLabel, SuspendedBanner } from './components.js';
-import { Settings, orderAgents } from './Settings.js';
+import {
+  SETTINGS_SECTIONS, SETTINGS_SECTION_KEY, Settings, orderAgents, rememberedSection,
+  type SettingsSection,
+} from './Settings.js';
 import {
   Icon, NavHeading, NavItem, NavUserCard, SecretaryAvatar, SideNavLayout, ThemeToggle, agentIcon, useRemembered,
 } from './nav.js';
@@ -47,7 +51,7 @@ type View =
   | { kind: 'history' }
   | { kind: 'notifications' }
   | { kind: 'schedules' }
-  | { kind: 'settings' }
+  | { kind: 'settings'; section: SettingsSection }
   | { kind: 'help'; articleId: string | null };
 
 /**
@@ -60,7 +64,10 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [history, setHistory] = useState<{ run: { id: string; status: string }; job: { agentId: string } | null }[]>([]);
-  const [view, setView] = useState<View>(() => (googleReturn ? { kind: 'settings' } : { kind: 'home' }));
+  const [view, setView] = useState<View>(() => (
+    // Google から戻ったときは、その場で結果が見えるよう連携の区分を開く（第6.5.0節）
+    googleReturn ? { kind: 'settings', section: 'google' } : { kind: 'home' }
+  ));
   const [detail, setDetail] = useState<RunDetail | null>(null);
   // 後ろへ回した調べもの（仕様書 第10.11節）。動いているものは処理中として見せる
   const [lookups, setLookups] = useState<Lookup[]>([]);
@@ -137,7 +144,23 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [talkOpen, setTalkOpen] = useRemembered('m2office.talk-open', false);
   // 実行例から入れ直す値（仕様書 第6.10.5.1節）。業務を変えたら持ち越さない
   const [formFill, setFormFill] = useState<Record<string, string> | null>(null);
+  /** 個人設定を開く。区分を省くと、最後に開いたものから始める（仕様書 第6.5.0節）。 */
+  const openSettings = useCallback((section?: string) => {
+    const id = (section ?? rememberedSection()) as SettingsSection;
+    try { localStorage.setItem(SETTINGS_SECTION_KEY, id); } catch { /* 覚えられなくても動く */ }
+    setView({ kind: 'settings', section: id });
+  }, []);
   useEffect(() => { setFormFill(null); }, [view.kind === 'agent' ? view.agent.id : null]);
+
+  // キーボードの割り当て（仕様書 第6.11.3節）。表は keys.ts に 1 つだけ置く
+  const menuAgents = orderAgents(agents, menu.order).filter((a) => !menu.hidden.includes(a.id));
+  useHotkey('Mod+,', useCallback(() => openSettings(), [openSettings]));
+  useHotkey('Mod+/', useCallback(() => openSettings('keys'), [openSettings]));
+  useHotkey('Mod+I', useCallback(() => setTalkOpen(!talkOpen), [talkOpen, setTalkOpen]));
+  useNumberHotkeys(useCallback((n: number) => {
+    const agent = menuAgents[n - 1];
+    if (agent) setView({ kind: 'agent', agent });
+  }, [menuAgents]));
   useEffect(() => {
     // 件数が増えたときだけ開く。本人が閉じても、次のやり取りまでは閉じたまま
     if (turns.length > 0) setTalkOpen(true);
@@ -173,10 +196,12 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
         nav={(
           <>
             <NavHeading>業務</NavHeading>
-            {orderAgents(agents, menu.order).filter((a) => !menu.hidden.includes(a.id)).map((a) => (
+            {menuAgents.map((a, i) => (
               <NavItem
                 key={a.id} icon={agentIcon(a.category)} label={a.name} description={a.description}
                 active={view.kind === 'agent' && view.agent.id === a.id}
+                // 1〜9 番目には、押すキーを併記する（仕様書 第6.11.1節 k4）
+                hint={i < 9 ? keyLabel(`Mod+Shift+${i + 1}`) : ''}
                 onClick={() => setView({ kind: 'agent', agent: a })}
               />
             ))}
@@ -196,7 +221,9 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
         navFooter={(
           <NavUserCard
             name={me.user.displayName} role={primaryRole(me.user.roles)}
-            active={view.kind === 'settings'} onOpenSettings={() => setView({ kind: 'settings' })}
+            active={view.kind === 'settings'} sections={SETTINGS_SECTIONS}
+            current={view.kind === 'settings' ? view.section : undefined}
+            onOpenSettings={openSettings}
           />
         )}
         footer={(
@@ -265,12 +292,18 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
           )}
           {view.kind === 'settings' && (
             <>
-              <h1>個人設定 <HelpTip article="start-settings">ここでの設定は、あなたにだけ効きます。管理者も変更できません。</HelpTip></h1>
-              <p className="lead">あなただけに関わる設定です。管理者も変更できません。</p>
+              {/* いまどの区分を見ているかを題名に出す（仕様書 第6.5.0節） */}
+              <h1>
+                個人設定 › {SETTINGS_SECTIONS.find((x) => x.id === view.section)?.label}{' '}
+                <HelpTip article="start-settings">ここでの設定は、あなたにだけ効きます。管理者も変更できません。</HelpTip>
+              </h1>
+              <p className="lead">
+                ほかの項目は、左下の歯車から選べます（{keyLabel('Mod+,') || '歯車'}）。
+              </p>
               {googleReturn && GOOGLE_RETURN_TEXT[googleReturn] && (
                 <p className={GOOGLE_RETURN_TEXT[googleReturn]!.ok ? 'ok-msg' : 'error'}>{GOOGLE_RETURN_TEXT[googleReturn]!.text}</p>
               )}
-              <Settings me={me} agents={agents} onChanged={loadMenu} />
+              <Settings me={me} agents={agents} onChanged={loadMenu} section={view.section} />
             </>
           )}
           {view.kind === 'help' && (
@@ -447,6 +480,8 @@ function SecretaryBar({ lookups, avatar, onSaid }: {
   onSaid: (role: Turn['role'], text: string, meta?: Turn['meta']) => void;
 }) {
   const box = useRef<HTMLTextAreaElement>(null);
+  // どの画面からでも、秘書の入力欄へ移る（仕様書 第6.11.3節）
+  useHotkey('Mod+J', useCallback(() => box.current?.focus(), []));
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
@@ -562,7 +597,8 @@ function SecretaryBar({ lookups, avatar, onSaid }: {
           ref={box}
           value={text}
           rows={1}
-          placeholder="例: 今日の予定は？ / 会議の議事録をまとめて（Shift+Enter で改行）"
+          placeholder={`例: 今日の予定は？ / 会議の議事録をまとめて（Shift+Enter で改行${
+            keyLabel('Mod+J') ? `、${keyLabel('Mod+J')} でここへ` : ''}）`}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
             // Enter で送り、Shift+Enter で改行する。変換確定の Enter では送らない（第6.1.3節）

@@ -9,9 +9,12 @@
  * @see 仕様書 第6.1.2節 画面の明るさ（ライト・ダーク）
  */
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import {
+  createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode,
+} from 'react';
 import { AVATAR_PRESETS } from '@m2office/shared';
 import { useTheme } from './theme.js';
+import { keyLabel, useHotkey } from './keys.js';
 
 /** アイコンの名前（public/icons.svg の symbol の id）。 */
 export type IconName =
@@ -97,12 +100,15 @@ export function SideNavLayout({ nav, navFooter, footer, children, extraClass = '
   nav: ReactNode; navFooter?: ReactNode; footer?: ReactNode; children: ReactNode; extraClass?: string;
 }) {
   const [collapsed, setCollapsed] = useCollapsed();
+  // メニューの開閉（仕様書 第6.11.3節）
+  useHotkey('Mod+B', useCallback(() => setCollapsed(!collapsed), [collapsed, setCollapsed]));
   return (
     <div className={`panes${collapsed ? ' nav-collapsed' : ''}${extraClass ? ` ${extraClass}` : ''}`}>
       <nav className={`left${collapsed ? ' collapsed' : ''}`} aria-label="メニュー">
         <button
           className="nav-toggle" onClick={() => setCollapsed(!collapsed)}
-          title={collapsed ? 'メニューを広げる' : 'メニューを狭くする（アイコンだけ）'}
+          title={`${collapsed ? 'メニューを広げる' : 'メニューを狭くする（アイコンだけ）'}${
+            keyLabel('Mod+B') ? `（${keyLabel('Mod+B')}）` : ''}`}
           aria-label={collapsed ? 'メニューを広げる' : 'メニューを狭くする'} aria-expanded={!collapsed}
         >
           <Icon name={collapsed ? 'nav-expand' : 'nav-collapse'} />
@@ -129,13 +135,14 @@ export function NavHeading({ children }: { children: string }) {
  *
  * @param description 説明。項目には並べず、`title` と読み上げに使う
  * @param count 件数（承認待ち・未読）。折りたたんだときはアイコンの右上に小さく出す
+ * @param hint 押すキー（仕様書 第6.11.1節 k4）。**隠れたショートカットにしない**ため併記する
  */
-export function NavItem({ icon, label, description, active, count, onClick, className = 'item' }: {
-  icon: IconName; label: string; description?: string; active?: boolean; count?: number;
+export function NavItem({ icon, label, description, active, count, hint, onClick, className = 'item' }: {
+  icon: IconName; label: string; description?: string; active?: boolean; count?: number; hint?: string;
   onClick: () => void; className?: string;
 }) {
   const collapsed = useContext(Collapsed);
-  const tip = description ? `${label}\n${description}` : label;
+  const tip = [label, description, hint].filter(Boolean).join('\n');
   return (
     <button
       className={`${className}${active ? ' active' : ''}`} onClick={onClick}
@@ -148,6 +155,7 @@ export function NavItem({ icon, label, description, active, count, onClick, clas
       </span>
       <span className="nav-label">{label}</span>
       {count ? <span className="count">{count}</span> : null}
+      {!count && hint ? <kbd className="nav-key">{hint}</kbd> : null}
     </button>
   );
 }
@@ -158,23 +166,63 @@ export function NavItem({ icon, label, description, active, count, onClick, clas
  *
  * @param role 属性（例: 管理者）
  */
-export function NavUserCard({ name, role, active, onOpenSettings }: {
-  name: string; role: string; active?: boolean; onOpenSettings: () => void;
+export function NavUserCard({ name, role, active, sections, current, onOpenSettings }: {
+  name: string; role: string; active?: boolean;
+  /** 歯車を押したときに出す区分の一覧（仕様書 第6.5.0節）。 */
+  sections: readonly { id: string; label: string; hint: string }[];
+  /** いま開いている区分。 */
+  current?: string;
+  onOpenSettings: (section: string) => void;
 }) {
   const tip = `${name}（${role}）\n個人設定を開く`;
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  // 外を押す・Esc で閉じる（仕様書 第6.5.0節・第6.11.1節 k3）
+  useEffect(() => {
+    if (!open) return undefined;
+    const away = (e: MouseEvent) => { if (!box.current?.contains(e.target as Node)) setOpen(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    const timer = setTimeout(() => document.addEventListener('mousedown', away), 0);
+    document.addEventListener('keydown', esc);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('mousedown', away);
+      document.removeEventListener('keydown', esc);
+    };
+  }, [open]);
+
+  const choose = (id: string) => { setOpen(false); onOpenSettings(id); };
+
   return (
-    <div className={`user-card${active ? ' active' : ''}`}>
-      <button className="user-card-main" onClick={onOpenSettings} title={tip} tabIndex={-1} aria-hidden="true">
+    <div className={`user-card${active ? ' active' : ''}`} ref={box}>
+      <button className="user-card-main" onClick={() => setOpen(!open)} title={tip} tabIndex={-1} aria-hidden="true">
         <span className="avatar"><Icon name="user" /></span>
         <span className="user-text">
           <strong>{name}</strong>
           <span className="role">{role}</span>
         </span>
       </button>
-      <button className="gear" onClick={onOpenSettings} title={tip} aria-label={`個人設定（${name}・${role}）`}
-        aria-current={active ? 'page' : undefined}>
+      <button
+        className="gear" onClick={() => setOpen(!open)} title={tip} aria-label={`個人設定（${name}・${role}）`}
+        aria-expanded={open} aria-current={active ? 'page' : undefined}
+      >
         <Icon name="settings" />
       </button>
+      {/* 設定の区分を選ぶ一覧。ここから直接その区分へ入る（仕様書 第6.5.0節） */}
+      {open && (
+        <div className="settings-menu" role="menu">
+          <p className="settings-menu-title">個人設定</p>
+          {sections.map((x) => (
+            <button
+              key={x.id} role="menuitem" className={`settings-menu-item${current === x.id ? ' active' : ''}`}
+              onClick={() => choose(x.id)}
+            >
+              <span className="settings-menu-label">{x.label}</span>
+              <span className="settings-menu-hint">{x.hint}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
