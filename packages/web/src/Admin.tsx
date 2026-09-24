@@ -4,7 +4,7 @@
  * @see 仕様書 第6.6節 管理者ページ
  */
 
-import { Fragment, useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import type { AuditEvent } from '@m2office/shared';
 import { api, type AdminRun, type Me } from './api.js';
 import { statusLabel, SuspendedBanner } from './components.js';
@@ -127,7 +127,18 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
       .then((r) => setSetup(r.done ? null : { done: r.items.filter((i) => i.done).length, total: r.items.length }))
       .catch(() => setSetup(null));
   }, [tab]);
-  useOpenHelp(useCallback((id: string | null) => { setHelpArticle(id); setTab('help'); }, []));
+  /* ヘルプを開く直前の画面（仕様書 第6.10.7.2節）。調べ終えたら、ここへ戻せる */
+  const before = useRef<{ tab: Tab; page: string } | null>(null);
+  useOpenHelp(useCallback((id: string | null) => {
+    setHelpArticle(id);
+    setTabState((t) => {
+      if (t !== 'help') before.current = { tab: t, page: pageRef.current };
+      return 'help';
+    });
+  }, []));
+  // 小分けは状態としても持つが、合図の中から読むために控えておく
+  const pageRef = useRef(page);
+  useEffect(() => { pageRef.current = page; }, [page]);
   const isAdmin = me.user.roles.includes('admin');
 
   return (
@@ -176,7 +187,15 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
                 <Checklist onGo={(t) => setTab(t as Tab)} />
               </>
             )}
-            {tab === 'help' && <HelpCenter initial={helpArticle} />}
+            {tab === 'help' && (
+              <HelpCenter
+                initial={helpArticle}
+                back={before.current ? {
+                  label: TABS.find((t) => t.id === before.current!.tab)?.label ?? '前の画面',
+                  go: () => { setTabState(before.current!.tab); setPage(before.current!.page); },
+                } : undefined}
+              />
+            )}
             {tab === 'usage' && <Usage />}
             {tab === 'runs' && <Runs />}
             {tab === 'company' && <CompanySettings page={page} />}

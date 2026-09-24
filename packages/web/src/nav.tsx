@@ -21,7 +21,7 @@ export type IconName =
   | 'mail' | 'calendar' | 'knowledge' | 'meeting' | 'briefing' | 'research' | 'report' | 'sample' | 'agent'
   | 'approvals' | 'history' | 'notifications' | 'schedules' | 'help' | 'user' | 'settings'
   | 'dashboard' | 'usage' | 'runs' | 'company' | 'sliders' | 'extensions' | 'users' | 'audit' | 'connectors'
-  | 'nav-collapse' | 'nav-expand' | 'sun' | 'moon' | 'logout'
+  | 'nav-collapse' | 'nav-expand' | 'caret-right' | 'caret-down' | 'back' | 'sun' | 'moon' | 'logout'
   | 'mic' | 'mic-off' | 'clip' | 'send';
 
 /** モノクロのアイコン。文字の色を引き継ぐ。飾りなので読み上げない。 */
@@ -162,7 +162,9 @@ export function NavItem({
       {count ? <span className="count">{count}</span> : null}
       {!count && hint ? <kbd className="nav-key">{hint}</kbd> : null}
       {/* 小分けを持つ区分の、開いているかどうかの印（第6.6.0節） */}
-      {expanded !== undefined && <span className="nav-caret" aria-hidden>{expanded ? '▾' : '▸'}</span>}
+      {expanded !== undefined && (
+        <Icon name={expanded ? 'caret-down' : 'caret-right'} className="nav-caret" />
+      )}
     </button>
   );
 }

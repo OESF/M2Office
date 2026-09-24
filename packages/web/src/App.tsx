@@ -81,7 +81,17 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   }, []);
   const finishTour = () => { setShowTour(false); void api.onboarding.finishTour().catch(() => undefined); };
   // 画面のどこからでもヘルプの記事を開けるようにする
-  useOpenHelp(useCallback((articleId: string | null) => setView({ kind: 'help', articleId }), []));
+  /*
+    ヘルプを開く直前の画面（仕様書 第6.10.7.2節）。調べ終えたら、ここへ戻せる。
+    ヘルプからヘルプを開いたときは上書きしない（戻り先が消える）
+  */
+  const before = useRef<View | null>(null);
+  useOpenHelp(useCallback((articleId: string | null) => {
+    setView((v) => {
+      if (v.kind !== 'help') before.current = v;
+      return { kind: 'help', articleId };
+    });
+  }, []));
   const [menu, setMenu] = useState<{ hidden: string[]; order: string[] }>({ hidden: [], order: [] });
   // 秘書のアバター（仕様書 第6.1.3節）。個人設定で変えたら読み直す
   const [avatar, setAvatar] = useState('');
@@ -308,7 +318,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
             </>
           )}
           {view.kind === 'help' && (
-            <HelpCenter initial={view.articleId} onReplayTour={() => {
+            <HelpCenter initial={view.articleId} back={backTo(before.current, (v) => setView(v))} onReplayTour={() => {
               void api.onboarding.resetTour().catch(() => undefined);
               setShowTour(true);
             }} />
@@ -378,6 +388,24 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
  *
  * @param callMe 本人の呼ばれ方（第6.5.3節）。設定が無ければ表示名に「さん」
  */
+/** ヘルプを開く前の画面へ戻す道（仕様書 第6.10.7.2節）。名前で示す。 */
+function backTo(view: View | null, go: (v: View) => void): { label: string; go: () => void } | undefined {
+  if (!view) return undefined;
+  const label = VIEW_LABELS[view.kind] ?? (view.kind === 'agent' ? view.agent.name : '前の画面');
+  return { label, go: () => go(view) };
+}
+
+/** 画面の名前。戻る先を名前で示すために使う。 */
+const VIEW_LABELS: Record<string, string> = {
+  home: 'ホーム',
+  run: '実行の詳細',
+  approvals: '承認トレイ',
+  history: '実行履歴',
+  notifications: 'お知らせ',
+  schedules: '定時実行',
+  settings: '個人設定',
+};
+
 function Home({ callMe }: { callMe: string }) {
   // 日をまたいでも、時刻が変わっても、開いたままで正しい挨拶になるようにする
   const [greeting, setGreeting] = useState(() => timeGreeting());

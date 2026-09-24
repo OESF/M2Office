@@ -625,6 +625,15 @@ tr.muted td { color: var(--muted); }
   font-size: 13px; line-height: 1.6; color: var(--ink); }
 .link-btn { background: none; border: none; color: var(--accent); padding: 4px 0; font-size: 13px; display: block; }
 .link-btn:hover { text-decoration: underline; }
+/* ヘルプを開く前の画面へ戻す道（仕様書 第6.10.7.2節） */
+.back-link {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: none; border: none; color: var(--accent); font: inherit; font-size: 13px;
+  padding: 0; margin: 0 0 12px; cursor: pointer;
+}
+.back-link:hover { text-decoration: underline; }
+.back-link .icon { width: 16px; height: 16px; }
+
 .help-search { display: flex; gap: 8px; margin-bottom: 14px; }
 .help-search input { flex: 1; padding: 8px 12px; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
 .help-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
@@ -723,7 +732,9 @@ button.link.danger { color: var(--danger); }
 .left .nav-sub { padding-left: 34px; font-size: 13px; }
 .left .nav-sub .nav-icon { display: none; }
 .left.collapsed .nav-sub { display: none; }
-.nav-caret { flex: none; color: var(--muted); font-size: 10px; margin-left: 4px; }
+/* 開いているかどうかの印。**小さすぎると点にしか見えない**ので、はっきり出す */
+.nav-caret { flex: none; width: 16px; height: 16px; color: var(--muted); margin-left: 4px; stroke-width: 2.4; }
+.item:hover .nav-caret, .item.active .nav-caret { color: var(--accent); }
 .left.collapsed .nav-caret { display: none; }
 .left .nav-heading { display: block; }
 .nav-toggle {

@@ -12,6 +12,7 @@ import {
 } from 'react';
 import { parseInline, parseMarkdown } from './markdown.js';
 import { api, describeError, type AgentHelpView, type HelpArticleMeta } from './api.js';
+import { Icon } from './nav.js';
 
 /** ヘルプセンターで記事を開く合図の名前。 */
 const OPEN_EVENT = 'm2o:open-help';
@@ -85,6 +86,17 @@ export function HelpTip({ article, children }: { article: string; children: Reac
 /** 業務の説明のポップアップの幅（仕様書 第6.10.5.1節）。画面が狭ければ縮める。 */
 const HELP_POP_WIDTH = 520;
 
+/** ヘルプを開く前の画面へ戻す道（仕様書 第6.10.7.2節）。戻り先が無ければ何も出さない。 */
+function BackLink({ back }: { back?: { label: string; go: () => void } }) {
+  if (!back) return null;
+  return (
+    <button className="back-link" onClick={back.go}>
+      <Icon name="back" />
+      {back.label}へ戻る
+    </button>
+  );
+}
+
 const CATEGORY_LABELS: Record<string, string> = {
   start: 'はじめに', agents: '業務', faq: 'よくある質問', admin: '管理者向け',
   glossary: '用語', updates: '更新情報', contact: '問い合わせ',
@@ -96,7 +108,15 @@ const CATEGORY_ORDER = ['start', 'agents', 'faq', 'admin', 'glossary', 'updates'
  *
  * @param initial 最初に開く記事
  */
-export function HelpCenter({ initial, onReplayTour }: { initial: string | null; onReplayTour?: () => void }) {
+export function HelpCenter({ initial, back, onReplayTour }: {
+  initial: string | null;
+  /**
+   * ヘルプを開く直前にいた画面へ戻す道（仕様書 第6.10.7.2節）。
+   * **どこへ戻るのかを名前で書く。** 左のメニューから入ったときは渡さない
+   */
+  back?: { label: string; go: () => void };
+  onReplayTour?: () => void;
+}) {
   const [items, setItems] = useState<HelpArticleMeta[]>([]);
   const [articleId, setArticleId] = useState<string | null>(initial);
   const [q, setQ] = useState('');
@@ -111,11 +131,18 @@ export function HelpCenter({ initial, onReplayTour }: { initial: string | null; 
     try { setResults((await api.help.search(q)).items); } catch (e) { setError(describeError(e)); }
   }
 
+  // 記事を見ているときは、まず記事の一覧へ戻す（二段階。第6.10.7.2節）
   if (articleId) {
-    return <ArticleView id={articleId} items={items} onOpen={setArticleId} onBack={() => setArticleId(null)} />;
+    return (
+      <>
+        <BackLink back={back} />
+        <ArticleView id={articleId} items={items} onOpen={setArticleId} onBack={() => setArticleId(null)} />
+      </>
+    );
   }
   return (
     <>
+      <BackLink back={back} />
       <h1>ヘルプ</h1>
       <p className="lead">分からないことは、下の秘書に「〜はどうやるの？」と聞くのがいちばん早い方法です。</p>
       {error && <p className="error">{error}</p>}
