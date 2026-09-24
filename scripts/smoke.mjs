@@ -602,6 +602,23 @@ console.log('\n■ 18. ダッシュボード');
   body.flows?.every((f) => Array.isArray(f.steps) && f.steps.every((x) => x.label))
     ? ok(`業務の流れを段階の表示名つきで返す（${body.flows.length} 件）`) : ng('流れの形が不正');
 
+  // 業務の流れに、終わったもの（失敗）を混ぜない（第6.7.5.1節）
+  (body.flows ?? []).every((f) => f.status !== 'failed')
+    ? ok('業務の流れは、いま動いているものだけ') : ng('失敗が流れに混ざっている');
+  Array.isArray(body.failures) && (body.failures ?? []).every((f) => f.reason && f.at && f.agentName)
+    ? ok(`今日の失敗を別に返す（${body.failures.length} 件）`) : ng('失敗の形が不正', JSON.stringify(body.failures ?? null));
+
+  // 業務エージェントごとの受け持ち（第6.7.4.2節）。使える業務はすべて出る
+  const { body: cat } = await call('a', '/v1/agents');
+  const states = body.agents ?? [];
+  states.length >= (cat.items ?? cat.agents ?? []).length && states.every((a) => a.name && typeof a.running === 'number')
+    ? ok(`業務の状態を、使える業務すべてについて返す（${states.length} 件）`)
+    : ng('業務の状態が足りない', JSON.stringify(states.map((a) => a.agentId)));
+  // 忙しい順に並ぶ
+  const busy = states.map((a) => a.running + a.awaiting + a.queued);
+  busy.every((n, i) => i === 0 || busy[i - 1] >= n)
+    ? ok('忙しい順に並ぶ') : ng('並び順が違う', JSON.stringify(busy));
+
   const member = await call('a', '/v1/admin/dashboard/live', {}, 'member');
   member.status === 403 ? ok('一般利用者は見られない（403）') : ng(`見えてしまう（${member.status}）`);
 

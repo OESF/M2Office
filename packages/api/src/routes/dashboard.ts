@@ -126,8 +126,24 @@ export function dashboardRoute(deps: AppDeps) {
       if (step) approvalByRun.set(step.runId, a);
     }
 
+    /*
+      業務の流れは**いま動いているものだけ**を並べる（仕様書 第6.7.5.1節）。
+      失敗は別の囲みへ回す。混ぜると、何時間も前のものが並び続けて、
+      いま動いているのかどうかが読み取れなくなる。
+    */
     const flows = [];
+    const failures = [];
     for (const { run, job } of liveRuns) {
+      if (run.status === 'failed') {
+        failures.push({
+          runId: run.id,
+          agentName: agentName(job.agentId),
+          requester: nameOf(job.requestedBy),
+          at: run.endedAt ?? run.startedAt,
+          reason: run.failureReason ?? '理由が記録されていません',
+        });
+        continue;
+      }
       const steps = await deps.repo.listRunSteps(tenantId, run.id);
       const confirming = steps.some((s) => s.status === 'awaiting' && s.stepId.endsWith(':confirm'));
       const approval = approvalByRun.get(run.id) ?? null;
@@ -142,9 +158,9 @@ export function dashboardRoute(deps: AppDeps) {
         waitingFor: approval
           ? { who: approverText(approval, nameOf), since: approval.createdAt, kind: confirming ? 'confirm' : 'approval' }
           : null,
-        failureReason: run.status === 'failed' ? run.failureReason : null,
       });
     }
+    failures.sort((x, y) => y.at.localeCompare(x.at));
 
     const backlog = [];
     for (const a of pending) {
@@ -187,6 +203,35 @@ export function dashboardRoute(deps: AppDeps) {
       agentName,
     });
 
+    /*
+      業務エージェントごとの受け持ち（仕様書 第6.7.4.2節）。
+      **使えるものはすべて出す。** 動いていない業務も「待機」として出さないと、
+      誰にも使われていない業務があることに気づけない。
+    */
+    const byAgent = new Map<string, { running: number; awaiting: number; queued: number }>();
+    for (const { run, job } of liveRuns) {
+      const a = byAgent.get(job.agentId) ?? { running: 0, awaiting: 0, queued: 0 };
+      if (run.status === 'running') a.running += 1;
+      else if (run.status === 'awaiting_approval') a.awaiting += 1;
+      else if (run.status === 'queued') a.queued += 1;
+      byAgent.set(job.agentId, a);
+    }
+    const todayByAgent = new Map<string, { runs: number; failed: number }>();
+    for (const r of todayRows) {
+      const t = todayByAgent.get(r.agentId) ?? { runs: 0, failed: 0 };
+      t.runs += r.runs;
+      if (r.status === 'failed') t.failed += r.runs;
+      todayByAgent.set(r.agentId, t);
+    }
+    const agents = view.agents.map((def) => {
+      const busy = byAgent.get(def.id) ?? { running: 0, awaiting: 0, queued: 0 };
+      const t = todayByAgent.get(def.id) ?? { runs: 0, failed: 0 };
+      return { agentId: def.id, name: def.name, ...busy, todayRuns: t.runs, todayFailed: t.failed };
+    });
+    // 忙しい順。同じなら今日の件数の多い順
+    agents.sort((x, y) =>
+      (y.running + y.awaiting + y.queued) - (x.running + x.awaiting + x.queued) || y.todayRuns - x.todayRuns);
+
     return {
       generatedAt: now.toISOString(),
       counts: {
@@ -201,7 +246,9 @@ export function dashboardRoute(deps: AppDeps) {
       // 個人名を出さない設定の会社には、状態ごとの人数と業務の名前だけを返す
       people: settings.dashboard.people === 'names' ? people : null,
       peopleSummary: settings.dashboard.people === 'names' ? null : summarizePresence(people),
+      agents,
       flows,
+      failures,
       backlog,
       events: events.map((e) => eventView(e, nameOf, runAgent, agentName)).filter((e) => e !== null),
     };

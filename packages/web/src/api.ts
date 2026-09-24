@@ -152,12 +152,20 @@ export interface DashboardLive {
     activeUsers: number; running: number; awaitingApproval: number; failedToday: number;
     todayRuns: number; todayCostJpy: number; todaySavedMinutes: number;
   };
+  /** 業務エージェントごとの受け持ち（仕様書 第6.7.4.2節）。使える業務はすべて入る。 */
+  agents: {
+    agentId: string; name: string;
+    running: number; awaiting: number; queued: number;
+    todayRuns: number; todayFailed: number;
+  }[];
+  /** いま動いている業務だけ。失敗は `failures` へ回す（第6.7.5.1節）。 */
   flows: {
     runId: string; agentName: string; status: string; requester: string; origin: string; startedAt: string;
     steps: { label: string; state: 'done' | 'current' | 'waiting' | 'failed' | 'todo' }[];
     waitingFor: { who: string; since: string; kind: 'approval' | 'confirm' } | null;
-    failureReason: string | null;
   }[];
+  /** 今日（日本時間の 0 時以降）に失敗した業務。日が変わると消える（第6.7.5.1節）。 */
+  failures: { runId: string; agentName: string; requester: string; at: string; reason: string }[];
   /** 人の状態。会社の設定が「人数と業務だけ」なら `null`（第6.7.4.1節）。 */
   people: PresenceView[] | null;
   /** 人数と業務だけの見せ方。個人名で表示する会社では `null`。 */

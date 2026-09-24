@@ -14,6 +14,9 @@ import { HelpTip, openHelp } from './help.js';
 /** 「いま」を取り直す間隔（ミリ秒）。 */
 const LIVE_INTERVAL_MS = 5000;
 
+/** 畳まずに出す出来事の数（仕様書 第6.7.3.1節）。残りは押すと伸びる。 */
+const EVENTS_FOLDED = 5;
+
 /**
  * ダッシュボード（仕様書 第6.7節）。
  *
@@ -90,7 +93,7 @@ export function Checklist({ onGo }: { onGo?: (tab: string) => void }) {
 function People({ data, onGranularityChanged }: { data: DashboardLive; onGranularityChanged: () => void }) {
   const granularity = data.peopleSummary ? 'counts' : 'names';
   const switcher = (
-    <div className="row">
+    <div className="row presence-switch">
       <label className="muted small">見せ方</label>
       <select value={granularity}
         onChange={(e) => void api.admin.saveSettings('dashboard', { people: e.target.value as 'names' | 'counts' })
@@ -197,6 +200,8 @@ function Live() {
         <Tile label="今日の費用" value={c.todayCostJpy} unit="円" />
       </div>
 
+      <Agents data={data} />
+
       <div className="dash-grid">
         <section className="card">
           <h3>業務の流れ</h3>
@@ -223,9 +228,9 @@ function Live() {
                   （{ago(f.waitingFor.since)}）
                 </p>
               )}
-              {f.failureReason && <p className="failed-note">失敗: {f.failureReason}</p>}
             </div>
           ))}
+          <Failures items={data.failures} />
         </section>
 
         <section className="card">
@@ -240,17 +245,109 @@ function Live() {
               <AgeBar since={b.since} />
             </div>
           ))}
-          <h3 style={{ marginTop: 20 }}>出来事</h3>
+          <Events items={data.events} />
+        </section>
+      </div>
+    </>
+  );
+}
+
+/**
+ * 業務エージェントごとの受け持ち（仕様書 第6.7.4.2節）。
+ *
+ * @remarks
+ * **動いていない業務も「待機」として出す。** 動いているものだけを並べると、
+ * 導入したのに誰にも使われていない業務があることに気づけない。
+ */
+function Agents({ data }: { data: DashboardLive }) {
+  if (data.agents.length === 0) return null;
+  return (
+    <section className="card">
+      <h3>
+        業務の状態{' '}
+        <HelpTip article="admin-dashboard">
+          使える業務ごとに、いま何件を受け持っているかを出します。どれも 0 なら「待機」です。
+        </HelpTip>
+      </h3>
+      <div className="agent-grid">
+        {data.agents.map((a) => {
+          const busy = a.running + a.awaiting + a.queued;
+          return (
+            <div className={`agent-state${busy > 0 ? ' busy' : ''}`} key={a.agentId}>
+              <div className="agent-name">{a.name}</div>
+              <div className="agent-now">
+                {busy === 0 ? <span className="muted">待機</span> : (
+                  <>
+                    {a.running > 0 && <span className="chip current">実行中 {a.running}</span>}
+                    {a.awaiting > 0 && <span className="chip waiting">承認待ち {a.awaiting}</span>}
+                    {a.queued > 0 && <span className="chip todo">待ち行列 {a.queued}</span>}
+                  </>
+                )}
+              </div>
+              <div className="muted small">
+                今日 {a.todayRuns} 件
+                {a.todayFailed > 0 && <span className="warn-text">（失敗 {a.todayFailed}）</span>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * 今日、失敗した業務（仕様書 第6.7.5.1節）。
+ *
+ * @remarks
+ * **業務の流れとは分ける。** 流れはいま動いているものを見る区画であり、
+ * 終わったものが混ざると、いま動いているのかどうかが読み取れない。既定は畳む。
+ */
+function Failures({ items }: { items: DashboardLive['failures'] }) {
+  if (items.length === 0) return null;
+  return (
+    <details className="fold">
+      <summary>今日、失敗した業務（{items.length} 件）</summary>
+      <p className="muted small">日本時間の 0 時以降に失敗したものです。日が変わると消えます。</p>
+      {items.map((f) => (
+        <div className="failed-note" key={f.runId}>
+          <strong>{f.agentName}</strong>{' '}
+          <span className="muted small">{f.requester}さん・{time(f.at)}</span>
+          <div>{f.reason}</div>
+        </div>
+      ))}
+    </details>
+  );
+}
+
+/** 直近の出来事（仕様書 第6.7.3.1節）。**既定では畳む。** 縦を使いすぎない。 */
+function Events({ items }: { items: DashboardLive['events'] }) {
+  const shown = items.slice(0, EVENTS_FOLDED);
+  return (
+    <>
+      <h3 style={{ marginTop: 20 }}>出来事</h3>
+      {items.length === 0 && <p className="muted">まだありません。</p>}
+      <ul className="events">
+        {shown.map((e, i) => (
+          <li key={i} className={e.kind}>
+            <span className="t">{time(e.at)}</span>
+            <span>{e.text}</span>
+          </li>
+        ))}
+      </ul>
+      {items.length > EVENTS_FOLDED && (
+        <details className="fold">
+          <summary>さらに {items.length - EVENTS_FOLDED} 件</summary>
           <ul className="events">
-            {data.events.map((e, i) => (
+            {items.slice(EVENTS_FOLDED).map((e, i) => (
               <li key={i} className={e.kind}>
                 <span className="t">{time(e.at)}</span>
                 <span>{e.text}</span>
               </li>
             ))}
           </ul>
-        </section>
-      </div>
+        </details>
+      )}
     </>
   );
 }
