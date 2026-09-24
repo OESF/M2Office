@@ -72,7 +72,12 @@ export { ToolRegistry, validateToolArgs } from './tools/registry.js';
 export type { Tool, ToolContext, ArgSpec, ToolArgsSchema, GoogleScope, GoogleScopeLevel } from './tools/registry.js';
 export { BUILTIN_TOOLS } from './tools/builtin.js';
 
-export { RunEngine, estimateCostJpy } from './engine/run-engine.js';
+export { RunEngine, costOf } from './engine/run-engine.js';
+export {
+  DEFAULT_MODELS, DEFAULT_LIVE_MODEL, MODEL_PRICES, UNKNOWN_MODEL_PRICE,
+  costJpy, defaultGeminiModels, isHotSwapAlias, usdJpy, warnHotSwapModels,
+  type ModelPrice,
+} from './llm/models.js';
 export type { AdvanceResult, RunEngineDeps } from './engine/run-engine.js';
 export { validateDefinition } from './engine/validate.js';
 export { enqueueJob } from './engine/enqueue.js';

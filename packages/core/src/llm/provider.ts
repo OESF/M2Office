@@ -40,8 +40,18 @@ export interface LlmRequest {
 
 export interface LlmResponse {
   text: string;
-  /** 消費トークン。原価の記録に使う（仕様書 第21.4節）。 */
+  /** 消費トークン（入力＋出力）。実行の合計として記録する。 */
   tokensUsed: number;
+  /**
+   * 入力のトークン数。分かるときだけ入れる。
+   *
+   * @remarks 入力と出力は単価が違う（出力は 5〜10 倍）。費用の計算に要る（仕様書 第21.4節）。
+   */
+  inputTokens?: number;
+  /** 出力のトークン数。分かるときだけ入れる。 */
+  outputTokens?: number;
+  /** 実際に使ったモデル名。費用の単価を引くのに使う。分からなければ入れない。 */
+  model?: string;
 }
 
 /**

@@ -13,6 +13,7 @@ import {
   RunEngine, Secretary, OFFICIAL_AGENTS, buildConnector, LocalFileStore,
   createLoggerFromEnv, HelpCatalog, parseArticle, ExtensionHub, HttpMcpClient, loadExtensions,
   GeminiResearchProvider, MockResearchProvider, TenantAiResolver, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID, type ResearchProvider,
+  defaultGeminiModels,
   type SecretBox, type GeminiModels,
   type FileStore, type TenantExtensions, type HelpArticle, type LlmProvider, type Logger, type Repository, type WorkspaceConnector,
 } from '@m2office/core';
@@ -253,21 +254,9 @@ export function fileStorageDir(): string {
 export function buildResearch(): ResearchProvider {
   const key = process.env['GEMINI_API_KEY'] ?? '';
   if ((process.env['LLM_PROVIDER'] ?? 'stub') === 'gemini' && key) {
-    return new GeminiResearchProvider(key, process.env['MODEL_RESEARCH'] ?? process.env['MODEL_STANDARD'] ?? 'gemini-flash-latest');
+    return new GeminiResearchProvider(key, defaultGeminiModels().research);
   }
   return new MockResearchProvider();
-}
-
-/** 既定のモデル（会社が指定しなければこれを使う）。ワーカーと同じ。 */
-export function defaultGeminiModels(): GeminiModels {
-  const standard = process.env['MODEL_STANDARD'] ?? 'gemini-flash-latest';
-  return {
-    fast: process.env['MODEL_FAST'] ?? 'gemini-flash-latest',
-    standard,
-    advanced: process.env['MODEL_ADVANCED'] ?? 'gemini-pro-latest',
-    research: process.env['MODEL_RESEARCH'] ?? standard,
-    live: process.env['MODEL_LIVE'] ?? 'gemini-3.1-flash-live-preview',
-  };
 }
 
 /**
@@ -281,11 +270,7 @@ export function buildLlm(hub?: ExtensionHub): LlmProvider {
   if (provider === 'gemini' && key) {
     return new OpenAiCompatibleProvider(
       key,
-      {
-        fast: process.env['MODEL_FAST'] ?? 'gemini-flash-latest',
-        standard: process.env['MODEL_STANDARD'] ?? 'gemini-flash-latest',
-        advanced: process.env['MODEL_ADVANCED'] ?? 'gemini-pro-latest',
-      },
+      defaultGeminiModels(),
       process.env['GEMINI_BASE_URL'] ??
         'https://generativelanguage.googleapis.com/v1beta/openai',
     );

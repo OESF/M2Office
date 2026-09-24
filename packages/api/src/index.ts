@@ -11,6 +11,7 @@ import { serve } from '@hono/node-server';
 import type { Server as HttpServer } from 'node:http';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { defaultGeminiModels, warnHotSwapModels } from '@m2office/core';
 import { buildDeps } from './context.js';
 import { authenticate, resolveTenant, type AppEnv } from './middleware/tenant.js';
 import { attachVoiceRelay } from './voice/relay.js';
@@ -105,13 +106,17 @@ app.route('/v1/onboarding', onboardingRoute(deps));
 
 const port = Number(process.env['API_PORT'] ?? 3101);
 const server = serve({ fetch: app.fetch, port }, (info) => {
+  const models = defaultGeminiModels();
   deps.log.info('待ち受けを開始しました', {
     port: info.port,
     connector: deps.connector.source,
     llm: deps.llm.name,
+    // どのモデルで動いているかを、起動のときに残す（費用の追跡に要る。仕様書 第20.2.2節）
+    models: `fast=${models.fast} standard=${models.standard} advanced=${models.advanced}`,
     devLogin: deps.auth.devLogin,
     devHeaders: deps.auth.devHeaders,
   });
+  warnHotSwapModels(models, deps.log);
   if (deps.auth.devLogin || deps.auth.devHeaders) {
     deps.log.warn('開発用ログインが有効です（本番では起動を拒否します）');
   }

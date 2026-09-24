@@ -75,12 +75,18 @@ export class OpenAiCompatibleProvider implements LlmProvider {
     }
 
     const json = (await res.json()) as {
+      model?: string;
       choices?: { message?: { content?: string } }[];
-      usage?: { total_tokens?: number };
+      usage?: { total_tokens?: number; prompt_tokens?: number; completion_tokens?: number };
     };
+    // 入力と出力は単価が違う。分けて返す（仕様書 第21.4節）
+    const used = json.usage ?? {};
     return {
       text: json.choices?.[0]?.message?.content ?? '',
-      tokensUsed: json.usage?.total_tokens ?? 0,
+      tokensUsed: used.total_tokens ?? (used.prompt_tokens ?? 0) + (used.completion_tokens ?? 0),
+      ...(used.prompt_tokens !== undefined ? { inputTokens: used.prompt_tokens } : {}),
+      ...(used.completion_tokens !== undefined ? { outputTokens: used.completion_tokens } : {}),
+      model: json.model ?? this.resolveModel(req.tier),
     };
   }
 

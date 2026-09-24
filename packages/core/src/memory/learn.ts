@@ -180,8 +180,9 @@ export class MemoryLearning {
     const memories = (await repo.listMemories(tenantId, userId)).filter((m) => !decided.has(m.id));
     if (memories.length === 0) return 0;
 
+    // 番号を選ぶだけの仕事。高速モデルで足りる（仕様書 第20.2.2節）
     const res = await llm.complete({
-      tier: 'standard',
+      tier: 'fast',
       maxOutputTokens: 200,
       messages: [
         { role: 'system', content: '日本語で答えます。指定された形式だけを出力します。' },
@@ -234,8 +235,9 @@ export class MemoryLearning {
     const conversations = all.filter((c) => !excludes.some((w) => `${c.message} ${c.reply}`.includes(w)));
     if (conversations.length === 0) return { digest: false, candidates: 0 };
 
+    // その日の会話の要約と記憶の候補。夜の一括処理で、利用者を待たせない（仕様書 第20.2.2節）
     const res = await llm.complete({
-      tier: 'standard',
+      tier: 'fast',
       maxOutputTokens: 800,
       messages: [
         { role: 'system', content: '日本語で答えます。指定された形式だけを出力します。' },

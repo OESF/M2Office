@@ -180,6 +180,12 @@ docs/            開発規約・リリース規定・設計判断記録
 | `BASE_DOMAIN` | lvh.me | 開発用のベースドメイン |
 | `LLM_PROVIDER` | stub | `stub` または `gemini` |
 | `GEMINI_API_KEY` | — | `gemini` のときに必要 |
+| `MODEL_FAST` | `gemini-3.5-flash-lite` | 振り分け・分類・夜の要約。安いものを既定にする（仕様書 第20.2.2節） |
+| `MODEL_STANDARD` | `gemini-3.5-flash-lite` | 業務のステップ・秘書の対話・文字の読み取り |
+| `MODEL_ADVANCED` | `gemini-3.8-flash` | 難しい計画・長文の分析（いまは使っていない） |
+| `MODEL_RESEARCH` | `MODEL_STANDARD` と同じ | Web の調査（`web.research`） |
+| `MODEL_LIVE` | `gemini-3.1-flash-live-preview` | 音声の対話（Gemini Live） |
+| `USD_JPY` | 155 | 費用を円で示すときの為替（概算） |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | — | Google 連携（未実装） |
 | `CONNECTOR_MODE` | mock | `mock`（ダミーデータ）または `google`（未実装。指定すると起動を止める） |
 | `AUTH_DEV_LOGIN` | false | 開発用ログインを許す。`.env.example` では true |

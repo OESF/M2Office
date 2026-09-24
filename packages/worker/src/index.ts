@@ -14,6 +14,7 @@ import {
   RunEngine, Scheduler, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, agentUsesGoogle,
   NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning,
   loadExtensions, OFFICIAL_AGENTS, GeminiResearchProvider, MockResearchProvider, TenantAiResolver, secretBoxFromEnv,
+  defaultGeminiModels, warnHotSwapModels,
   type LlmProvider,
 } from '@m2office/core';
 import { fileURLToPath } from 'node:url';
@@ -49,19 +50,17 @@ const isAvailable = async (tenantId: string, agentId: string) => (await hub.forT
 const llm = buildLlm();
 // Web の調査（第9.4.2節）。鍵があれば Gemini の Google 検索、無ければ見本。API と同じ判定
 const research = process.env['LLM_PROVIDER'] === 'gemini' && process.env['GEMINI_API_KEY']
-  ? new GeminiResearchProvider(process.env['GEMINI_API_KEY'], process.env['MODEL_RESEARCH'] ?? process.env['MODEL_STANDARD'] ?? 'gemini-flash-latest')
+  ? new GeminiResearchProvider(process.env['GEMINI_API_KEY'], defaultGeminiModels().research)
   : new MockResearchProvider();
 // 会社ごとの Gemini（会社が自社の鍵を登録していればその鍵。仕様書 第14.3.3節）
 const { box } = secretBoxFromEnv();
-const standardModel = process.env['MODEL_STANDARD'] ?? 'gemini-flash-latest';
+// 役割ごとのモデル。既定は安いほうから選ぶ（仕様書 第20.2.2節）。API と同じ
+const models = defaultGeminiModels();
+warnHotSwapModels(models, log);
 const ai = new TenantAiResolver({
   repo, box, fallbackLlm: llm, fallbackResearch: research,
   platformKey: process.env['LLM_PROVIDER'] === 'gemini' ? process.env['GEMINI_API_KEY'] || null : null,
-  defaults: {
-    fast: process.env['MODEL_FAST'] ?? 'gemini-flash-latest', standard: standardModel,
-    advanced: process.env['MODEL_ADVANCED'] ?? 'gemini-pro-latest', research: process.env['MODEL_RESEARCH'] ?? standardModel,
-    live: process.env['MODEL_LIVE'] ?? 'gemini-3.1-flash-live-preview',
-  },
+  defaults: models,
   baseUrl: process.env['GEMINI_BASE_URL'] ?? 'https://generativelanguage.googleapis.com/v1beta/openai',
 });
 // Google から取得したデータの保持（仕様書 第14.3.2節）。Google のツールは、内蔵のツールのうち権限を宣言しているもの
@@ -223,11 +222,7 @@ function buildLlm(): LlmProvider {
   if (provider === 'gemini' && key) {
     return new OpenAiCompatibleProvider(
       key,
-      {
-        fast: process.env['MODEL_FAST'] ?? 'gemini-flash-latest',
-        standard: process.env['MODEL_STANDARD'] ?? 'gemini-flash-latest',
-        advanced: process.env['MODEL_ADVANCED'] ?? 'gemini-pro-latest',
-      },
+      defaultGeminiModels(),
       process.env['GEMINI_BASE_URL'] ??
         'https://generativelanguage.googleapis.com/v1beta/openai',
     );

@@ -17,7 +17,8 @@ import {
   type RunStep, type Step,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
-import type { LlmMessage, LlmProvider } from '../llm/provider.js';
+import type { LlmMessage, LlmProvider, LlmResponse } from '../llm/provider.js';
+import { costJpy } from '../llm/models.js';
 import { validateToolArgs, type Tool, type ToolRegistry } from '../tools/registry.js';
 import type { WorkspaceConnector } from '../connectors/types.js';
 import type { FileStore } from '../files/store.js';
@@ -172,7 +173,11 @@ export class RunEngine {
       );
       stepLog.debug('ステップを終了', { outcome: result.kind, ms: Date.now() - startedAt });
       // 手順の途中で止められていれば、消費だけを記録し、止めた状態を上書きしない
-      const stoppedDuring = await this.cancelledNow(current, 'tokensUsed' in result ? result.tokensUsed : 0);
+      const stoppedDuring = await this.cancelledNow(
+        current,
+        'tokensUsed' in result ? result.tokensUsed : 0,
+        'costJpy' in result ? result.costJpy : 0,
+      );
       if (stoppedDuring) return stoppedDuring;
       if (result.kind === 'failed') return this.fail(current, result.reason);
 
@@ -182,7 +187,7 @@ export class RunEngine {
         const paused = {
           ...current,
           tokensUsed: current.tokensUsed + result.tokensUsed,
-          costJpy: current.costJpy + estimateCostJpy(result.tokensUsed),
+          costJpy: current.costJpy + result.costJpy,
         };
         await repo.updateRun(paused);
         const approvalId = await this.suspendForConfirmation(paused, step, result.calls, job.requestedBy);
@@ -193,7 +198,7 @@ export class RunEngine {
         ...current,
         cursor: current.cursor + 1,
         tokensUsed: current.tokensUsed + result.tokensUsed,
-        costJpy: current.costJpy + estimateCostJpy(result.tokensUsed),
+        costJpy: current.costJpy + result.costJpy,
       };
       await repo.updateRun(current);
 
@@ -368,8 +373,8 @@ export class RunEngine {
     registry: ToolRegistry,
     ai: { llm: LlmProvider; research?: ResearchProvider },
   ): Promise<
-    | { kind: 'ok' | 'stopped'; tokensUsed: number }
-    | { kind: 'confirm'; tokensUsed: number; calls: ToolCall[] }
+    | { kind: 'ok' | 'stopped'; tokensUsed: number; costJpy: number }
+    | { kind: 'confirm'; tokensUsed: number; costJpy: number; calls: ToolCall[] }
     | { kind: 'failed'; reason: string }
   > {
     const { repo } = this.deps;
@@ -404,6 +409,7 @@ export class RunEngine {
       const alreadyCalled = new Map<string, unknown>();
       let text = '';
       let tokensUsed = 0;
+      let spent = 0;
 
       for (let round = 1; round <= MAX_TOOL_ROUNDS; round++) {
         // 最後の往復では道具を使わせない。ここまでに分かったことで答えさせる
@@ -420,6 +426,7 @@ export class RunEngine {
           ],
         });
         tokensUsed += res.tokensUsed;
+        spent += costOf(res);
 
         // ツール呼び出しを取り出して実行する
         const calls = lastRound ? [] : parseToolCalls(res.text);
@@ -498,13 +505,13 @@ export class RunEngine {
         ...runStep, status: 'succeeded', output, endedAt: new Date().toISOString(),
       });
 
-      if (deferred.length > 0) return { kind: 'confirm', tokensUsed, calls: deferred };
+      if (deferred.length > 0) return { kind: 'confirm', tokensUsed, costJpy: spent, calls: deferred };
 
       const empty = text.trim().length === 0 && toolResults.length === 0;
       if (empty && step.onEmpty === 'stop') {
-        return { kind: 'stopped', tokensUsed };
+        return { kind: 'stopped', tokensUsed, costJpy: spent };
       }
-      return { kind: 'ok', tokensUsed };
+      return { kind: 'ok', tokensUsed, costJpy: spent };
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       this.log.warn('ステップで例外が発生しました', {
@@ -514,7 +521,7 @@ export class RunEngine {
         ...runStep, status: 'failed', output: { error: reason },
         endedAt: new Date().toISOString(),
       });
-      if (step.onError === 'continue') return { kind: 'ok', tokensUsed: 0 };
+      if (step.onError === 'continue') return { kind: 'ok', tokensUsed: 0, costJpy: 0 };
       return { kind: 'failed', reason };
     }
   }
@@ -630,15 +637,16 @@ export class RunEngine {
    * 保存されている実行の状態を読み直し、止められていれば、その結果を返す。
    *
    * @param extraTokens 止められる前に使い終えたトークン（消費の記録に足す）
+   * @param extraCost 同じく、使い終えた費用（円）
    * @returns 止められていなければ `null`
    */
-  private async cancelledNow(run: Run, extraTokens = 0): Promise<AdvanceResult | null> {
+  private async cancelledNow(run: Run, extraTokens = 0, extraCost = 0): Promise<AdvanceResult | null> {
     const latest = await this.deps.repo.getRun(run.tenantId, run.id);
     if (latest?.status !== 'cancelled') return null;
     const reason = latest.failureReason ?? '止められました';
     if (extraTokens > 0) {
       await this.deps.repo.updateRun({
-        ...latest, tokensUsed: latest.tokensUsed + extraTokens, costJpy: latest.costJpy + estimateCostJpy(extraTokens),
+        ...latest, tokensUsed: latest.tokensUsed + extraTokens, costJpy: latest.costJpy + extraCost,
       });
     }
     this.log.info('止められた実行の続きを行いません', { runId: run.id, tenantId: run.tenantId, reason });
@@ -679,15 +687,19 @@ export class RunEngine {
 }
 
 /**
- * 消費トークンから概算費用を求める。
+ * 1 回の呼び出しの費用（円）。
  *
  * @remarks
  * 実行ごとのコスト記録は Phase 1 の必須事項である（仕様書 第24.2節 第 8 項）。
- * 係数は設定値として持つべきもので、ここでは暫定値を用いる。
+ * **入力と出力は単価が違う**（出力は 5〜10 倍）。提供者が分けて返したときはそれを使い、
+ * 返さないときは、費用を少なく見せないよう**すべて出力とみなす**（仕様書 第21.4節）。
  */
-export function estimateCostJpy(tokens: number): number {
-  const JPY_PER_1K_TOKENS = 0.3;
-  return Math.round((tokens / 1000) * JPY_PER_1K_TOKENS * 100) / 100;
+export function costOf(res: LlmResponse): number {
+  const model = res.model ?? '';
+  if (res.inputTokens !== undefined || res.outputTokens !== undefined) {
+    return costJpy(model, res.inputTokens ?? 0, res.outputTokens ?? 0);
+  }
+  return costJpy(model, 0, res.tokensUsed);
 }
 
 type ToolCall = { name: string; args: Record<string, unknown> };
