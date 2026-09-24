@@ -134,8 +134,9 @@ button { font: inherit; cursor: pointer; }
   grid-template-columns: var(--nav-w) 1fr var(--talk-w);
   grid-template-rows: minmax(0, 1fr) auto; min-height: 0;
 }
-/* 会話は読むもの。開いたら、答えの見出しと箇条書きが読める幅を取る（仕様書 第6.2節） */
-.panes.talk-open { --talk-w: 420px; }
+/* 会話は読むもの。開いたら、**中央のキャンバスと同じ幅**を取る。
+   残りの幅を半分ずつに分けるので、画面が広いほど会話も広がる（仕様書 第6.2節） */
+.panes.talk-open { --talk-w: 1fr; }
 
 .left { grid-row: 1 / -1; grid-column: 1; background: var(--panel); border-right: 1px solid var(--line); padding: 12px 0 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 .left .nav-scroll { flex: 1; min-height: 0; overflow-y: auto; }
@@ -300,7 +301,6 @@ pre.body { white-space: pre-wrap; background: var(--subtle-bg); border: 1px soli
    3 ペインは PC を前提とするが、狭い幅でも読めるようにする（仕様書 第6.9節）。 */
 @media (max-width: 1200px) {
   .panes { --nav-w: 200px; }
-  .panes.talk-open { --talk-w: 380px; }
 }
 @media (max-width: 960px) {
   /* 会話ペインはキャンバスの下へ回す。ここでは折りたたみを使わない（仕様書 第6.2節） */
