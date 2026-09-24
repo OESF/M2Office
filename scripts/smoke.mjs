@@ -306,6 +306,11 @@ console.log('\n■ 10. AG-03 日程調整（招待の前に本人が承認）');
   approval?.approverUserId === 'u-a-member'
     ? ok('依頼した本人の承認トレイに出た') : ng('本人の承認トレイに出ない');
 
+  // 開く前に、何を判断するのかが分かる（第6.2.4節）
+  approval?.agentName
+    ? ok(`承認トレイに業務の名前が出る（${approval.agentName}）`)
+    : ng('業務の名前が無い', JSON.stringify(approval ?? null).slice(0, 120));
+
   const { body: adminTray } = await call('a', '/v1/approvals');
   adminTray.items.every((a) => a.id !== approval.id)
     ? ok('管理者の承認トレイには出ない') : ng('他人の承認トレイに出ている');

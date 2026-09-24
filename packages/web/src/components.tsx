@@ -5,9 +5,12 @@
  */
 
 import { useEffect, useState } from 'react';
-import type { Approval, Artifact, RunStep } from '@m2office/shared';
-import { api, describeError, type AgentSummary, type JsonSchemaField, type RunDetail } from './api.js';
+import type { Artifact, RunStep } from '@m2office/shared';
+import {
+  api, describeError, type AgentSummary, type ApprovalView, type JsonSchemaField, type RunDetail,
+} from './api.js';
 import { Markdown, openHelp } from './help.js';
+import { Icon } from './nav.js';
 import { keyLabel, useHotkey } from './keys.js';
 
 /**
@@ -282,7 +285,7 @@ export function RunView({
 export function ApprovalTray({
   items, onDecided,
 }: {
-  items: Approval[];
+  items: ApprovalView[];
   onDecided: () => void;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
@@ -308,23 +311,66 @@ export function ApprovalTray({
   return (
     <>
       {items.map((a) => (
-        <div className="card" key={a.id}>
-          <h3>承認の依頼</h3>
-          <p className="reply">{a.present}</p>
-          <p className="muted">
-            {a.approverUserId ? 'あなたが依頼した業務です。内容を確認してください。'
-              : `承認できる役割: ${a.approverRole.join(' / ')}`}
-          </p>
-          <button className="btn" disabled={busy === a.id} onClick={() => decide(a.id, 'approved')}>
-            承認する
-          </button>{' '}
-          <button className="btn danger" disabled={busy === a.id} onClick={() => decide(a.id, 'rejected')}>
-            却下する
-          </button>
-        </div>
+        <ApprovalRow key={a.id} approval={a} busy={busy === a.id} onDecide={decide} />
       ))}
     </>
   );
+}
+
+/**
+ * 承認の依頼 1 件（仕様書 第6.2.4節）。**その場で開く。**
+ *
+ * @remarks
+ * **判断のボタンは、開いたときにだけ出す。** 中身を見ずに押せてしまうと、
+ * 承認が形だけのものになる（不変則 I-11 と同じ考え方）。
+ * 1 件目は開いた状態で出す。ほとんどの場合、判断するのはその 1 件だからである。
+ */
+function ApprovalRow({ approval, busy, onDecide }: {
+  approval: ApprovalView;
+  busy: boolean;
+  onDecide: (id: string, decision: 'approved' | 'rejected') => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const first = firstLine(approval.present);
+  return (
+    <div className={`card fold-row${open ? ' open' : ''}`}>
+      <button className="fold-head" onClick={() => setOpen(!open)} aria-expanded={open}>
+        <Icon name={open ? 'caret-down' : 'caret-right'} className="nav-caret" />
+        <strong>{approval.agentName ?? '承認の依頼'}</strong>
+        <span className="muted small">{first}</span>
+        <span className="muted small tail">{ago(approval.createdAt)}</span>
+      </button>
+      {open && (
+        <div className="fold-body">
+          <div className="reply"><Markdown text={approval.present} /></div>
+          <p className="muted small">
+            {approval.approverUserId ? 'あなたが依頼した業務です。内容を確認してください。'
+              : `承認できる役割: ${approval.approverRole.join(' / ')}`}
+          </p>
+          <button className="btn" disabled={busy} onClick={() => onDecide(approval.id, 'approved')}>
+            承認する
+          </button>{' '}
+          <button className="btn danger" disabled={busy} onClick={() => onDecide(approval.id, 'rejected')}>
+            却下する
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 何の承認かを 1 行で示す。開く前に、どれを開くかが分かるようにする。 */
+function firstLine(text: string): string {
+  const line = text.split('\n').map((x) => x.trim()).find(Boolean) ?? '';
+  return line.length > 40 ? `${line.slice(0, 40)}…` : line;
+}
+
+/** 依頼からの経過。長く待たせているものが分かる。 */
+function ago(at: string): string {
+  const min = Math.max(0, Math.round((Date.now() - new Date(at).getTime()) / 60000));
+  if (min < 60) return `${min} 分前`;
+  const h = Math.round(min / 60);
+  return h < 24 ? `${h} 時間前` : `${Math.round(h / 24)} 日前`;
 }
 
 /** ステップと実行の状態を、利用者向けの言葉に直す（仕様書 原則 u1）。 */

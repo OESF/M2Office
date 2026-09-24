@@ -25,8 +25,24 @@ export function approvalsRoute(deps: AppDeps) {
   /** 本人が判断できる承認待ちだけを返す（ロール、または依頼者本人。仕様書 第9.2.3節）。 */
   app.get('/', async (c) => {
     const ctx = c.get('ctx');
-    const items = (await deps.repo.listPendingApprovals(ctx.tenant.id))
+    const pending = (await deps.repo.listPendingApprovals(ctx.tenant.id))
       .filter((a) => canDecide(a, ctx.user));
+    /*
+      どの業務の承認かを添える（仕様書 第6.2.4節）。
+      **開く前に、何を判断するのかが分かること。** 「承認の依頼」が並ぶだけでは選べない。
+      定義が見つからないときは業務の ID を返す。**推測で名前を作らない。**
+    */
+    const view = await deps.tenantView(ctx.tenant.id);
+    const items = [];
+    for (const a of pending) {
+      const step = await deps.repo.getRunStepById(ctx.tenant.id, a.runStepId);
+      const run = step ? await deps.repo.getRun(ctx.tenant.id, step.runId) : null;
+      const job = run ? await deps.repo.getJob(ctx.tenant.id, run.jobId) : null;
+      const agentName = job
+        ? (view.allAgents.find((x) => x.id === job.agentId)?.name ?? job.agentId)
+        : null;
+      items.push({ ...a, agentName });
+    }
     return c.json({ items });
   });
 

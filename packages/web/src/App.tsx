@@ -7,9 +7,10 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { Approval, Notification } from '@m2office/shared';
+import type { Notification } from '@m2office/shared';
 import {
-  api, describeError, type AgentSummary, type Lookup, type Me, type RunDetail, type ScheduleView, type SecretaryReply,
+  api, describeError,
+  type AgentSummary, type ApprovalView, type Lookup, type Me, type RunDetail, type ScheduleView, type SecretaryReply,
 } from './api.js';
 import { AgentHelpTip, HelpCenter, HelpTip, Markdown, Tour, openHelp, useOpenHelp } from './help.js';
 import { startVoice, type VoiceCall } from './voice.js';
@@ -63,7 +64,7 @@ type View =
  */
 export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [agents, setAgents] = useState<AgentSummary[]>([]);
-  const [approvals, setApprovals] = useState<Approval[]>([]);
+  const [approvals, setApprovals] = useState<ApprovalView[]>([]);
   const [history, setHistory] = useState<
     { run: { id: string; status: string; startedAt: string }; job: { agentId: string } | null }[]
   >([]);
@@ -407,17 +408,17 @@ function HistoryRow({ run, agentName, viewerId }: {
   useEffect(() => { if (open && !detail) load(); }, [open, detail, load]);
 
   return (
-    <div className={`card history-row${open ? ' open' : ''}`}>
-      <button className="history-head" onClick={() => setOpen(!open)} aria-expanded={open}>
+    <div className={`card fold-row${open ? ' open' : ''}`}>
+      <button className="fold-head" onClick={() => setOpen(!open)} aria-expanded={open}>
         <Icon name={open ? 'caret-down' : 'caret-right'} className="nav-caret" />
         <strong>{agentName}</strong>
         <span className={`status ${run.status}`}>{statusLabel(run.status)}</span>
-        <span className="muted small">
+        <span className="muted small tail">
           {new Date(run.startedAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}
         </span>
       </button>
       {open && (
-        <div className="history-body">
+        <div className="fold-body">
           {error && <p className="error">{error}</p>}
           {!error && !detail && <p className="muted">読み込み中…</p>}
           {detail && <RunView detail={detail} viewerId={viewerId} onCancelled={load} />}
@@ -732,31 +733,45 @@ function SecretaryBar({ lookups, avatar, onSaid }: {
 
 /** 本人宛の通知の一覧。開くと既読になる。 */
 function Notifications({ items, onRead }: { items: Notification[]; onRead: () => void }) {
-  const [open, setOpen] = useState<string | null>(null);
   if (items.length === 0) return <p className="muted">お知らせはありません。週次ブリーフや業務の結果が、ここに届きます。</p>;
   return (
     <>
-      {items.map((n) => (
-        <div key={n.id} className={`card notice${n.readAt ? '' : ' unread'}`}>
-          <h3>
-            {n.title}{' '}
-            <span className="muted small">
-              {new Date(n.createdAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}
-            </span>
-          </h3>
-          {open === n.id ? (
-            <div className="reply"><Markdown text={n.body} /></div>
-          ) : (
-            <button className="btn ghost small" onClick={() => {
-              setOpen(n.id);
-              if (!n.readAt) void api.readNotification(n.id).then(onRead);
-            }}>
-              開く
-            </button>
-          )}
-        </div>
-      ))}
+      {items.map((n) => <NoticeRow key={n.id} notice={n} onRead={onRead} />)}
     </>
+  );
+}
+
+/**
+ * お知らせ 1 件（仕様書 第6.2.4節）。**その場で開く。**
+ *
+ * @remarks
+ * 開いたときに読んだことにする。**閉じても読んだままにする**（開き直すたびに未読へ戻さない）。
+ */
+function NoticeRow({ notice, onRead }: { notice: Notification; onRead: () => void }) {
+  const [open, setOpen] = useState(false);
+  const unread = !notice.readAt;
+  return (
+    <div className={`card fold-row${open ? ' open' : ''}${unread ? ' unread' : ''}`}>
+      <button
+        className="fold-head" aria-expanded={open}
+        onClick={() => {
+          setOpen(!open);
+          if (!open && unread) void api.readNotification(notice.id).then(onRead);
+        }}
+      >
+        <Icon name={open ? 'caret-down' : 'caret-right'} className="nav-caret" />
+        <strong>{notice.title}</strong>
+        {unread && <span className="chip waiting">未読</span>}
+        <span className="muted small tail">
+          {new Date(notice.createdAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}
+        </span>
+      </button>
+      {open && (
+        <div className="fold-body">
+          <div className="reply"><Markdown text={notice.body} /></div>
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -146,6 +146,9 @@ export interface PresenceView {
   device: string | null;
 }
 
+/** 承認待ち 1 件。どの業務かを添える（仕様書 第6.2.4節）。定義が見つからなければ `null`。 */
+export type ApprovalView = Approval & { agentName: string | null };
+
 export interface DashboardLive {
   generatedAt: string;
   counts: {
@@ -676,7 +679,8 @@ export const api = {
   /** 実行を途中で止める（仕様書 第9.3.1節）。止められるのは依頼した本人だけ。 */
   cancelRun: (id: string) =>
     call<{ ok: true; leftoverLinks: string[] }>(`/runs/${id}/cancel`, { method: 'POST' }),
-  approvals: () => call<{ items: Approval[] }>('/approvals'),
+  /** 承認待ち。どの業務かを添える（仕様書 第6.2.4節）。 */
+  approvals: () => call<{ items: ApprovalView[] }>('/approvals'),
   decide: (id: string, decision: 'approved' | 'rejected', comment?: string) =>
     call<{ runId: string }>(`/approvals/${id}`, {
       method: 'POST',
