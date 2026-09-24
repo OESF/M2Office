@@ -15,7 +15,7 @@ import { useTheme, type ThemeChoice } from './theme.js';
 import { statusLabel } from './components.js';
 import { SecretaryAvatar } from './nav.js';
 import { KEY_BINDINGS, isTouchOnly, keyLabel } from './keys.js';
-import { toast } from './toast.js';
+import { SaveButton } from './save.js';
 
 /**
  * 個人設定（仕様書 第6.5節）。左ペインの最下部の利用者のカードの歯車のボタンから開く。
@@ -75,21 +75,6 @@ export function Settings({ me, agents, onChanged, section }: {
     void loadSessions();
   }, []);
 
-  async function save(fn: () => Promise<unknown>) {
-    setMsg({});
-    try {
-      await fn();
-      setMsg({ ok: '保存しました' });
-      // 押した場所と結果が離れていても分かるよう、決まった場所にも出す（第6.10.4.2節）
-      toast('保存しました');
-      onChanged();
-    } catch (e) {
-      const error = e instanceof Error ? e.message : '保存できませんでした';
-      setMsg({ error });
-      toast(error, 'error');
-    }
-  }
-
   if (!s) return <p className="muted">読み込み中…</p>;
   const set = <K extends keyof UserSettings>(k: K, v: Partial<UserSettings[K]>) =>
     setS({ ...s, [k]: { ...s[k], ...v } });
@@ -109,7 +94,6 @@ export function Settings({ me, agents, onChanged, section }: {
 
   return (
     <>
-      {msg.ok && <p className="ok-msg">{msg.ok}</p>}
       {msg.error && <p className="error">{msg.error}</p>}
 
       {on('profile') && <>
@@ -139,10 +123,11 @@ export function Settings({ me, agents, onChanged, section }: {
         </div>
         <div className="field"><label>メールアドレス</label>
           <input value={me.user.email} disabled /><span className="muted small">Google 側で管理しているため変更できません</span></div>
-        <button className="btn" onClick={() => void save(async () => {
+        <SaveButton run={async () => {
           if (name !== me.user.displayName) await api.saveDisplayName(name);
           await api.saveMySettings('profile', s.profile);
-        })}>保存</button>
+          onChanged();
+        }} />
       </div>
       </>}
 
@@ -229,7 +214,7 @@ export function Settings({ me, agents, onChanged, section }: {
             画像を上げる（PNG か JPEG）
           </button>
         </div>
-        <button className="btn" onClick={() => void save(() => api.saveMySettings('secretary', s.secretary))}>保存</button>
+        <SaveButton run={() => api.saveMySettings('secretary', s.secretary).then(onChanged)} />
       </div>
       )}
 
@@ -272,7 +257,7 @@ export function Settings({ me, agents, onChanged, section }: {
           Chat（本人への個別メッセージ）
         </label>
         <div style={{ marginTop: 12 }}>
-          <button className="btn" onClick={() => void save(() => api.saveMySettings('notifications', s.notifications))}>保存</button>
+          <SaveButton run={() => api.saveMySettings('notifications', s.notifications).then(onChanged)} />
         </div>
       </div>
       </>}
@@ -281,10 +266,10 @@ export function Settings({ me, agents, onChanged, section }: {
       <PresenceNotice />
 
       <MemorySettings settings={s} onChange={(v) => set('memory', v)}
-        onSave={() => void save(() => api.saveMySettings('memory', { ...s.memory }))} />
+        onSave={() => api.saveMySettings('memory', { ...s.memory }).then(onChanged)} />
 
       <ConversationSettings settings={s} onChange={(v) => set('memory', v)}
-        onSave={() => void save(() => api.saveMySettings('memory', { ...s.memory }))} />
+        onSave={() => api.saveMySettings('memory', { ...s.memory }).then(onChanged)} />
       </>}
 
       {on('keys') && <KeyboardSettings />}
@@ -316,7 +301,7 @@ export function Settings({ me, agents, onChanged, section }: {
           </tbody>
         </table>
         <div style={{ marginTop: 12 }}>
-          <button className="btn" onClick={() => void save(() => api.saveMySettings('menu', { ...s.menu, order: ordered.map((a) => a.id) }))}>保存</button>
+          <SaveButton run={() => api.saveMySettings('menu', { ...s.menu, order: ordered.map((a) => a.id) }).then(onChanged)} />
         </div>
       </div>
       </>}
@@ -396,7 +381,8 @@ function KeyboardSettings() {
 function ConversationSettings({ settings, onChange, onSave }: {
   settings: UserSettings;
   onChange: (v: UserSettings['memory']) => void;
-  onSave: () => void;
+  /** 保存の処理。終わるのを待って、結果をボタンの横に出す（第6.10.4.2節）。 */
+  onSave: () => Promise<unknown>;
 }) {
   const [items, setItems] = useState<ConversationView[]>([]);
   const [query, setQuery] = useState('');
@@ -418,7 +404,7 @@ function ConversationSettings({ settings, onChange, onSave }: {
         会話を残す（切ると、以後 1 件も残しません）
       </label>
       <div className="row">
-        <button className="btn" onClick={onSave}>保存</button>
+        <SaveButton run={onSave} />
       </div>
 
       <div className="row">
@@ -588,7 +574,8 @@ function MemoryCandidates({ onAccepted }: { onAccepted: () => void }) {
 function MemorySettings({ settings, onChange, onSave }: {
   settings: UserSettings;
   onChange: (v: UserSettings['memory']) => void;
-  onSave: () => void;
+  /** 保存の処理。終わるのを待って、結果をボタンの横に出す（第6.10.4.2節）。 */
+  onSave: () => Promise<unknown>;
 }) {
   const [items, setItems] = useState<MemoryView[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
@@ -614,7 +601,7 @@ function MemorySettings({ settings, onChange, onSave }: {
         <p className="muted small">ここに書いた言葉を含む指示は覚えません。秘書に「〜は覚えないで」と言っても増えます。</p>
       </div>
       <div className="row">
-        <button className="btn" onClick={onSave}>保存</button>
+        <SaveButton run={onSave} />
       </div>
 
       <MemoryCandidates onAccepted={load} />

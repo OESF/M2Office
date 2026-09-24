@@ -451,24 +451,18 @@ pre.body { white-space: pre-wrap; background: var(--subtle-bg); border: 1px soli
 .ok-msg { color: var(--ok); background: var(--ok-soft); border: 1px solid var(--ok-line); padding: 8px 12px; border-radius: 4px; }
 
 /*
-  操作の結果の知らせ（仕様書 第6.10.4.2節）。
-  押した場所と結果が離れていても分かるよう、**どの画面でも同じところ**に出す
+  保存の結果（仕様書 第6.10.4.2節）。
+  **押したボタンのすぐ横に出す。** 画面の隅に出すと、目線がボタンから離れて気づけない
 */
-.toaster {
-  position: fixed; z-index: 100; right: 16px; bottom: 16px;
-  display: flex; flex-direction: column; gap: 8px; align-items: flex-end;
-  pointer-events: none;
+.save-row { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.save-result:empty { display: none; }
+.saved {
+  color: var(--ok); font-size: 13px; font-weight: 600;
+  animation: m2o-saved-in 0.18s ease-out;
 }
-.toast {
-  pointer-events: auto; cursor: pointer; font: inherit; font-size: 14px; text-align: left;
-  padding: 10px 16px; border-radius: 8px; box-shadow: 0 6px 20px var(--shadow-sm);
-  max-width: min(420px, calc(100vw - 32px));
-  animation: m2o-toast-in 0.18s ease-out;
-}
-.toast.ok { background: var(--ok-soft); color: var(--ok); border: 1px solid var(--ok-line); }
-.toast.error { background: var(--danger-soft); color: var(--danger); border: 1px solid var(--danger-line); }
-@keyframes m2o-toast-in { from { opacity: 0; transform: translateY(8px); } }
-@media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
+.save-row .error-inline { color: var(--danger); font-size: 13px; }
+@keyframes m2o-saved-in { from { opacity: 0; transform: translateX(-4px); } }
+@media (prefers-reduced-motion: reduce) { .saved { animation: none; } }
 .table select { padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; font: inherit; }
 @media (max-width: 680px) { .grid2 { grid-template-columns: 1fr; } }
 

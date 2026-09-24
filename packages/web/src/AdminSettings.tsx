@@ -14,7 +14,7 @@ import type {
 import { STANDARD_SYNONYMS, SYNONYM_LIMITS } from '@m2office/shared';
 import { api, describeError, type KnowledgeItemView, type KnowledgeSectionView } from './api.js';
 import { HelpTip } from './help.js';
-import { toast } from './toast.js';
+import { SaveButton } from './save.js';
 import { CompartmentSettings, GroupSettings, ScopeField, useAccessOptions } from './Scope.js';
 
 type Catalog = {
@@ -39,14 +39,9 @@ function useSaver() {
     setState({ busy: true, message: null, error: null });
     try {
       const r = await fn();
-      const message = typeof done === 'function' ? done(r) : done;
-      setState({ busy: false, message, error: null });
-      // 押した場所と結果が離れていても分かるよう、決まった場所にも出す（第6.10.4.2節）
-      toast(message);
+      setState({ busy: false, message: typeof done === 'function' ? done(r) : done, error: null });
     } catch (e) {
-      const error = describeError(e, '保存できませんでした');
-      setState({ busy: false, message: null, error });
-      toast(error, 'error');
+      setState({ busy: false, message: null, error: describeError(e, '保存できませんでした') });
     }
   };
   const view = (
@@ -123,8 +118,7 @@ export function CompanySettings() {
           </div>
           <Text label="支払サイト" value={company.paymentTerms} onChange={c('paymentTerms')} hint="例: 翌月末払い" />
         </div>
-        <button className="btn" disabled={saver.busy}
-          onClick={() => void saver.run(() => api.admin.saveSettings('company', company))}>保存</button>
+        <SaveButton run={() => api.admin.saveSettings('company', company)} />
       </div>
 
       {/*
@@ -174,8 +168,7 @@ export function CompanySettings() {
           </button>
         </div>
         <Text label="その他の注意" value={style.notes} onChange={w('notes')} multiline />
-        <button className="btn" disabled={saver.busy}
-          onClick={() => void saver.run(() => api.admin.saveSettings('writingStyle', style))}>保存</button>
+        <SaveButton run={() => api.admin.saveSettings('writingStyle', style)} />
       </div>
       <InvoiceStyleSettings initial={data.invoice} onSaved={() => void reload()} />
       <SlideTemplateSettings initial={data.slides.templates} onSaved={() => void reload()} />
@@ -238,11 +231,10 @@ function InvoiceStyleSettings({ initial, onSaved }: {
         印の欄を出す（差出人の下に枠を置きます）
       </label>
       <div className="row">
-        <button className="btn" disabled={saver.busy}
-          onClick={() => void saver.run(async () => {
-            await api.admin.saveSettings('invoice', style);
-            onSaved();
-          })}>保存</button>
+        <SaveButton run={async () => {
+          await api.admin.saveSettings('invoice', style);
+          onSaved();
+        }} />
       </div>
       {saver.view}
     </div>
@@ -316,12 +308,12 @@ function SlideTemplateSettings({ initial, onSaved }: { initial: SlideTemplate[];
           onClick={() => setItems([...items, { id: '', name: '', url: '', description: '', isDefault: items.length === 0 }])}>
           ＋ テンプレートを追加
         </button>
-        <button className="btn" disabled={saver.busy} onClick={() => void saver.run(async () => {
+        <SaveButton run={async () => {
           await api.admin.saveSettings('slides', {
             templates: items.map((t) => ({ id: t.id, name: t.name, presentationId: t.url, description: t.description, isDefault: t.isDefault })),
           });
           onSaved();
-        })}>保存</button>
+        }} />
       </div>
       <p className="muted small">中身（レイアウトと差し込み口）の読み取りは、Google との接続ができてから行います。いまは登録と既定の選択だけが効きます。</p>
       {saver.view}
@@ -391,8 +383,7 @@ export function AgentSettings() {
         <p className="muted small">
           メールの送信・チャットへの投稿・予定の招待など、社外や他の人に届く操作は、設定にかかわらず必ず承認が必要です。
         </p>
-        <button className="btn" disabled={saver.busy}
-          onClick={() => void saver.run(() => api.admin.saveSettings('automation', policy))}>保存</button>
+        <SaveButton run={() => api.admin.saveSettings('automation', policy)} />
       </div>
 
       <div className="card">
@@ -455,10 +446,10 @@ export function AgentSettings() {
           </tbody>
         </table>
         <p className="muted small">変更は、これから完了する実行から反映されます。過去の実行の推計は変わりません。</p>
-        <button className="btn" disabled={saver.busy}
-          onClick={() => void saver.run(() => api.admin.saveSettings('effect', {
+        <SaveButton
+          run={() => api.admin.saveSettings('effect', {
             minutesPerRun: Object.fromEntries(Object.entries(minutes).map(([k, v]) => [k, Number(v)])),
-          }))}>保存</button>
+          })} />
       </div>
       {saver.view}
     </>
@@ -576,8 +567,8 @@ export function KnowledgeSettings() {
           </select>
         </div>
         <div className="row">
-          <button className="btn" disabled={saver.busy}
-            onClick={() => void saver.run(async () => {
+          <SaveButton
+            run={async () => {
               // 由来は保存し直しても変わらない（仕様書 第9.5.2節）。送らない
               const { id: _id, version: _v, sectionCount: _n, updatedAt: _u, originRunId: _r, googleDerived: _g, ...rest } = draft as KnowledgeItemView;
               const saved = await api.admin.saveKnowledge(draft.id, rest);
@@ -585,7 +576,9 @@ export function KnowledgeSettings() {
               await load();
               setOpen({ id: saved.id, sections: saved.sections });
               return saved.sections.length;
-            }, (n) => `保存しました。本文を ${n} の節に分けました。下の一覧で分け方を確かめられます`)}>保存</button>
+            }}
+            done={(n) => `保存しました。本文を ${n} の節に分けました`}
+          />
           {draft.id !== 'new' && <button className="btn ghost" onClick={() => setDraft(empty)}>やめる</button>}
         </div>
       </div>
@@ -732,11 +725,10 @@ function SynonymSettings() {
       <Text label="自社の言い換え" value={text} onChange={setText} multiline
         hint={`1 行に 1 組。語は「、」で区切ります（例: 営推、営業推進部）。1 組 ${SYNONYM_LIMITS.wordsPerGroup} 語まで、${SYNONYM_LIMITS.groups} 組まで`} />
       <div className="row">
-        <button className="btn" disabled={saver.busy || !loaded}
-          onClick={() => void saver.run(async () => {
-            // 文のまま送る。サーバーが組に分けて検証し、誤りは画面の行番号で返す
-            await api.admin.saveSettings('knowledge', { standardSynonyms: standard, synonyms: text as unknown as string[][] });
-          })}>保存</button>
+        <SaveButton disabled={!loaded} run={async () => {
+          // 文のまま送る。サーバーが組に分けて検証し、誤りは画面の行番号で返す
+          await api.admin.saveSettings('knowledge', { standardSynonyms: standard, synonyms: text as unknown as string[][] });
+        }} />
       </div>
       {saver.view}
     </div>
