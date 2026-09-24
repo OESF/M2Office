@@ -11,7 +11,7 @@ import type { Approval, Notification } from '@m2office/shared';
 import {
   api, describeError, type AgentSummary, type Lookup, type Me, type RunDetail, type ScheduleView, type SecretaryReply,
 } from './api.js';
-import { HelpCenter, HelpTip, Markdown, Tour, openHelp, useOpenHelp } from './help.js';
+import { AgentHelpTip, HelpCenter, HelpTip, Markdown, Tour, openHelp, useOpenHelp } from './help.js';
 import { startVoice, type VoiceCall } from './voice.js';
 import { AgentForm, ApprovalTray, RunView, statusLabel, SuspendedBanner } from './components.js';
 import { Settings, orderAgents } from './Settings.js';
@@ -135,6 +135,9 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
     閉じるのは本人だけで、画面を移っても閉じない
   */
   const [talkOpen, setTalkOpen] = useRemembered('m2office.talk-open', false);
+  // 実行例から入れ直す値（仕様書 第6.10.5.1節）。業務を変えたら持ち越さない
+  const [formFill, setFormFill] = useState<Record<string, string> | null>(null);
+  useEffect(() => { setFormFill(null); }, [view.kind === 'agent' ? view.agent.id : null]);
   useEffect(() => {
     // 件数が増えたときだけ開く。本人が閉じても、次のやり取りまでは閉じたまま
     if (turns.length > 0) setTalkOpen(true);
@@ -209,10 +212,22 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
           {view.kind === 'home' && <Home approvals={approvals.length} agents={agents.length} />}
           {view.kind === 'agent' && (
             <>
-              <h1>{view.agent.name}</h1>
+              {/* 説明は広げず、題名の「？」から出す（仕様書 第6.10.5.1節） */}
+              <h1>
+                {view.agent.name}{' '}
+                <AgentHelpTip
+                  agentId={view.agent.id}
+                  onExample={(input) => setFormFill(
+                    Object.fromEntries(Object.entries(input).map(([k, v]) => [k, String(v ?? '')])),
+                  )}
+                />
+              </h1>
               <p className="lead">必要な項目を入力して実行します。</p>
-              <AgentForm agent={view.agent} initial={view.fileId ? { fileId: view.fileId } : undefined}
-                onSubmitted={(runId) => setView({ kind: 'run', runId })} />
+              <AgentForm
+                key={view.agent.id} agent={view.agent} fill={formFill}
+                initial={view.fileId ? { fileId: view.fileId } : undefined}
+                onSubmitted={(runId) => setView({ kind: 'run', runId })}
+              />
             </>
           )}
           {view.kind === 'run' && (

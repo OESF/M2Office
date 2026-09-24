@@ -4,10 +4,10 @@
  * @see 仕様書 第6章 ユーザー体験
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Approval, Artifact, RunStep } from '@m2office/shared';
 import { api, describeError, type AgentSummary, type JsonSchemaField, type RunDetail } from './api.js';
-import { AgentHelpPanel, Markdown, openHelp } from './help.js';
+import { Markdown, openHelp } from './help.js';
 
 /**
  * 通常の停止の間、画面の上部に出す案内（仕様書 第23.8.6節）。停止していなければ何も出さない。
@@ -32,14 +32,20 @@ export function SuspendedBanner({ status }: { status: string }) {
  * 定義の `inputs` からフォームを組み立てる。
  */
 export function AgentForm({
-  agent, onSubmitted, initial,
+  agent, onSubmitted, initial, fill,
 }: {
   agent: AgentSummary;
   onSubmitted: (runId: string) => void;
   /** 初めから入れておく値。秘書に渡したファイルを引き継ぐのに使う（仕様書 第10.10.3節）。 */
   initial?: Record<string, string>;
+  /**
+   * あとから入れ直す値。題名の「？」の中の実行例から渡る（仕様書 第6.10.5.1節）。
+   * 押すたびに新しい入れ物で渡るため、同じ例を二度押しても入り直す。
+   */
+  fill?: Record<string, string> | null;
 }) {
   const [values, setValues] = useState<Record<string, string>>(initial ?? {});
+  useEffect(() => { if (fill) setValues(fill); }, [fill]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const props = agent.inputs?.properties ?? {};
@@ -60,10 +66,7 @@ export function AgentForm({
 
   return (
     <>
-    <AgentHelpPanel agentId={agent.id} onExample={(input) =>
-      setValues(Object.fromEntries(Object.entries(input).map(([k, v]) => [k, String(v ?? '')])))} />
     <div className="card">
-      <h3>{agent.name}</h3>
       {agent.extension && (
         <p className="muted small">拡張機能「{agent.extension.name}」・提供: {agent.extension.publisher}</p>
       )}

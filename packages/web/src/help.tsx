@@ -7,7 +7,9 @@
  * @see 仕様書 第6.10節 ヘルプと案内
  */
 
-import { Fragment, useEffect, useState, type ReactNode } from 'react';
+import {
+  Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode,
+} from 'react';
 import { parseInline, parseMarkdown } from './markdown.js';
 import { api, describeError, type AgentHelpView, type HelpArticleMeta } from './api.js';
 
@@ -33,14 +35,42 @@ export function useOpenHelp(handler: (articleId: string | null) => void): void {
 }
 
 /**
+ * 開いているポップアップを、外を押したときと Esc で閉じる（仕様書 第6.10.5.1節）。
+ *
+ * @param open 開いているか
+ * @param onClose 閉じるときに呼ぶ
+ * @returns 包む要素に付ける `ref`
+ */
+function useDismiss(open: boolean, onClose: () => void) {
+  const box = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const away = (e: MouseEvent) => {
+      if (!box.current?.contains(e.target as Node)) onClose();
+    };
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    // 開いた瞬間の押下で閉じないよう、次の周回から見る
+    const timer = setTimeout(() => document.addEventListener('mousedown', away), 0);
+    document.addEventListener('keydown', esc);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('mousedown', away);
+      document.removeEventListener('keydown', esc);
+    };
+  }, [open, onClose]);
+  return box;
+}
+
+/**
  * 画面の「？」。押すと短い説明を出し、「詳しく」で記事を開く（仕様書 第6.10.4節）。
  *
  * @param article 記事の ID。`npm test` が実在を確かめる
  */
 export function HelpTip({ article, children }: { article: string; children: ReactNode }) {
   const [open, setOpen] = useState(false);
+  const box = useDismiss(open, useCallback(() => setOpen(false), []));
   return (
-    <span className="helptip">
+    <span className="helptip" ref={box}>
       <button className="helptip-btn" aria-label="説明を見る" aria-expanded={open} onClick={() => setOpen(!open)}>？</button>
       {open && (
         <span className="helptip-pop" role="note">
@@ -51,6 +81,9 @@ export function HelpTip({ article, children }: { article: string; children: Reac
     </span>
   );
 }
+
+/** 業務の説明のポップアップの幅（仕様書 第6.10.5.1節）。画面が狭ければ縮める。 */
+const HELP_POP_WIDTH = 520;
 
 const CATEGORY_LABELS: Record<string, string> = {
   start: 'はじめに', agents: '業務', faq: 'よくある質問', admin: '管理者向け',
@@ -198,19 +231,54 @@ function inline(s: string): ReactNode {
 }
 
 /**
- * 業務の説明（仕様書 第6.10.5節）。業務の入力画面の上に出す。
+ * 業務の説明（仕様書 第6.10.5節・第6.10.5.1節）。
+ *
+ * @remarks
+ * **画面には広げない。業務の題名の右の「？」を押したときだけ出す。**
+ * 説明は一度読めば済む。毎回、入力欄の上に置くと、繰り返し使う人にとっては
+ * 入力欄を下へ押し下げるだけのものになる。
  *
  * @param onExample 実行例を押したときに、入力欄へ入れる値を受け取る
  */
-export function AgentHelpPanel({ agentId, onExample }: {
+export function AgentHelpTip({ agentId, onExample }: {
   agentId: string; onExample: (input: Record<string, unknown>) => void;
 }) {
   const [help, setHelp] = useState<AgentHelpView | null>(null);
   const [showMore, setShowMore] = useState(false);
-  useEffect(() => { setHelp(null); api.help.agent(agentId).then(setHelp).catch(() => setHelp(null)); }, [agentId]);
+  const [open, setOpen] = useState(false);
+  const close = useCallback(() => setOpen(false), []);
+  const box = useDismiss(open, close);
+  const btn = useRef<HTMLButtonElement>(null);
+  /*
+    出す位置は**画面に対して**決める（`position: fixed`）。
+    キャンバスは縦に送れる領域であり、その中に置くと縁で切られる（実機で確認）。
+  */
+  const [at, setAt] = useState<{ top: number; left: number; width: number } | null>(null);
+  const place = useCallback(() => {
+    const r = btn.current?.getBoundingClientRect();
+    if (!r) return;
+    const width = Math.min(HELP_POP_WIDTH, window.innerWidth - 32);
+    // 画面の外へはみ出さないところまで寄せる
+    const left = Math.max(16, Math.min(r.left - 10, window.innerWidth - width - 16));
+    setAt({ top: r.bottom + 8, left, width });
+  }, []);
+  useLayoutEffect(() => {
+    if (!open) return undefined;
+    place();
+    window.addEventListener('resize', place);
+    return () => window.removeEventListener('resize', place);
+  }, [open, place]);
+  // 業務を変えたら、開いたままにしない
+  useEffect(() => { setHelp(null); setOpen(false); api.help.agent(agentId).then(setHelp).catch(() => setHelp(null)); }, [agentId]);
   if (!help) return null;
   return (
-    <div className="card agent-help">
+    <span className="helptip" ref={box}>
+      <button
+        ref={btn} className="helptip-btn" aria-label="この業務の説明を見る" aria-expanded={open}
+        title="この業務の説明" onClick={() => setOpen(!open)}
+      >？</button>
+      {open && at && (
+    <div className="helptip-pop agent-help" role="note" style={{ top: at.top, left: at.left, width: at.width }}>
       <p className="summary">{help.summary}</p>
       <div className="agent-help-cols">
         <div>
@@ -238,7 +306,10 @@ export function AgentHelpPanel({ agentId, onExample }: {
         <div className="examples">
           <span className="muted small">実行例（押すと入力欄に入ります）</span>
           {help.examples.map((e) => (
-            <button key={e.title} className="btn ghost small" onClick={() => onExample(e.input)}>{e.title}</button>
+            // 入れたらすぐ実行に移れるよう、説明は閉じる（仕様書 第6.10.5.1節）
+            <button key={e.title} className="btn ghost small" onClick={() => { onExample(e.input); close(); }}>
+              {e.title}
+            </button>
           ))}
         </div>
       )}
@@ -251,10 +322,14 @@ export function AgentHelpPanel({ agentId, onExample }: {
         <>
           {help.notes.length > 0 && <ul className="notes">{help.notes.map((n) => <li key={n}>{n}</li>)}</ul>}
           {help.faq.map((f) => <details key={f.q}><summary>{f.q}</summary><p>{f.a}</p></details>)}
-          <button className="link-btn" onClick={() => openHelp(`agent-${help.agentId}`)}>ヘルプセンターで開く</button>
+          <button className="link-btn" onClick={() => { close(); openHelp(`agent-${help.agentId}`); }}>
+            ヘルプセンターで開く
+          </button>
         </>
       )}
     </div>
+      )}
+    </span>
   );
 }
 
