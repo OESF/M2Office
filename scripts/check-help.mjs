@@ -3,7 +3,8 @@
  *
  * 1. `docs/help/` の記事が必須の属性（id・title・audience・category）を持ち、ID が重複しない
  * 2. 記事の `related` が実在する記事を指す
- * 3. 画面の `<HelpTip article="…">` と `openHelp('…')` が実在する記事を指す
+ * 3. 画面の `<HelpTip article="…">` と `openHelp('…')`、題名の説明（`article: '…'`）が実在する記事を指す
+ * 4. 「？」を段落の中に置いていない（仕様書 第6.10.4.4節）。見出しの無い「？」と、文の途中の「？」を見つける
  *
  * 業務の記事（`agent-<ID>`）は定義から自動で作るため、公式エージェントの ID と照合する。
  *
@@ -55,6 +56,15 @@ for (const f of readdirSync(webDir).filter((f) => /\.tsx?$/.test(f))) {
   }
   for (const m of text.matchAll(/openHelp\('([^']+)'\)/g)) {
     if (!exists(m[1])) problems.push(`packages/web/src/${f}: openHelp の記事 ${m[1]} が見つかりません`);
+  }
+  // 題名の「？」の説明（PageTitle に渡す { article, text }）
+  for (const m of text.matchAll(/\barticle: '([^']+)'/g)) {
+    if (!exists(m[1])) problems.push(`packages/web/src/${f}: 題名の説明の記事 ${m[1]} が見つかりません`);
+  }
+  // 「？」は題名か見出しの横にだけ置く。段落（<p>）の中に置くと、囲みの中で離れた「？」や、文の途中の「？」になる
+  for (const m of text.matchAll(/<p\b[^>]*>[^<]*<HelpTip\b/g)) {
+    const line = text.slice(0, m.index).split('\n').length;
+    problems.push(`packages/web/src/${f}:${line}: 「？」を段落の中に置いています。題名の説明（PageTitle）へまとめてください（仕様書 第6.10.4.4節）`);
   }
 }
 // API のチェックリストが指す記事

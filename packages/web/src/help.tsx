@@ -83,6 +83,33 @@ export function HelpTip({ article, children }: { article: string; children: Reac
   );
 }
 
+/** 画面の題名に添える説明（仕様書 第6.10.4.4節）。開いている小分けのことを書く。 */
+export interface PageHelp {
+  /** 開く記事の ID。その小分けを扱う記事。無ければ区分の記事 */
+  article: string;
+  /** 「？」を押したときに出す短い説明 */
+  text: string;
+}
+
+/**
+ * 画面の題名（`区分 › 小分け`）と、その横の「？」（仕様書 第6.10.4.4節）。
+ *
+ * @param trail 題名の並び（例: `['知識', '言い換え']`）。空の要素は飛ばす
+ * @param help 開いている小分けの説明。記事の無い画面では渡さない（「？」を出さない）
+ *
+ * @remarks
+ * **「？」は 1 画面に 1 つ、ここにだけ置く。** 区分全体の説明をすべての小分けで使い回したり、
+ * 囲みの中に見出しの無い「？」を別に置いたりすると、どちらを押せばよいか分からなくなる。
+ */
+export function PageTitle({ trail, help }: { trail: readonly string[]; help?: PageHelp | null }) {
+  return (
+    <h1>
+      {trail.filter(Boolean).join(' › ')}
+      {help && <>{' '}<HelpTip article={help.article}>{help.text}</HelpTip></>}
+    </h1>
+  );
+}
+
 /** 業務の説明のポップアップの幅（仕様書 第6.10.5.1節）。画面が狭ければ縮める。 */
 const HELP_POP_WIDTH = 560;
 

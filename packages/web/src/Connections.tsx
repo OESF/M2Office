@@ -12,7 +12,7 @@
 
 import { useEffect, useState } from 'react';
 import { api, describeError, type ConnectionSettings, type GoogleClientVerdict } from './api.js';
-import { HelpTip } from './help.js';
+import { PageTitle, type PageHelp } from './help.js';
 import { SaveButton } from './save.js';
 
 const MODEL_LABELS: [string, string][] = [
@@ -55,10 +55,7 @@ export function Connections({ page }: { page: string }) {
   if (!data) return <p className="muted">読み込み中…</p>;
   return (
     <>
-      <h1>
-        接続 › {TITLES[page] ?? ''}{' '}
-        <HelpTip article="admin-connectors">Gemini と Google Workspace への接続を設定します。鍵やシークレットは登録後に表示しません。</HelpTip>
-      </h1>
+      <PageTitle trail={['接続', TITLES[page] ?? '']} help={CONNECTION_HELP[page]} />
       {page === 'gemini' && <GeminiCard data={data.gemini} onSaved={() => void load()} />}
       {(page === 'google' || page === 'permissions' || page === 'people') && (
         <GoogleCard data={data.google} page={page} onSaved={() => void load()} />
@@ -112,9 +109,6 @@ function RetentionCard() {
   if (days === null) return null;
   return (
     <div className="card">
-      <p className="small">
-        <HelpTip article="admin-connectors">業務が Google から読んだメールや文書の中身と、そこから作った文を、業務が終わってから何日残すかです。過ぎると中身を消し、使ったツールの名前と件数だけを残します。</HelpTip>
-      </p>
       <p className="muted small">業務が終わってから、この日数が過ぎると、読んだメール・文書の中身と、そこから作った要約などを消します。作った成果物（下書き・議事録など）は消しません。承認待ちの間は残します。</p>
       <div className="field">
         <label>残す日数</label>
@@ -357,4 +351,17 @@ const TITLES: Record<string, string> = {
   permissions: '求める許可',
   people: '従業員の接続状況',
   mcp: 'コネクタ（MCP）',
+};
+
+/**
+ * 小分けごとの「？」の説明（仕様書 第6.10.4.4節）。
+ *
+ * @remarks `mcp` の画面は管理者ページ側（`Admin.tsx`）が出す。題名と説明もそちらで持つ
+ */
+const CONNECTION_HELP: Record<string, PageHelp> = {
+  gemini: { article: 'admin-connectors', text: '業務の推論・秘書・Web の調査・音声に使う Gemini の鍵とモデルです。鍵は登録後に表示しません。' },
+  google: { article: 'admin-connectors', text: '従業員が Google Workspace につなぐための OAuth クライアントです。シークレットは登録後に表示しません。' },
+  retention: { article: 'admin-connectors', text: '業務が Google から読んだメールや文書の中身と、そこから作った文を、業務が終わってから何日残すかです。過ぎると中身を消し、使ったツールの名前と件数だけを残します。' },
+  permissions: { article: 'admin-connectors', text: '従業員が接続するときに Google に求める許可と、その権限の段階です。' },
+  people: { article: 'admin-connectors', text: '従業員ごとの、Google との接続の状況です。' },
 };

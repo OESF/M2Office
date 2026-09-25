@@ -13,7 +13,7 @@ import type {
 } from '@m2office/shared';
 import { STANDARD_SYNONYMS, SYNONYM_LIMITS } from '@m2office/shared';
 import { api, describeError, type KnowledgeItemView, type KnowledgeSectionView } from './api.js';
-import { HelpTip } from './help.js';
+import { PageTitle, type PageHelp } from './help.js';
 import { SaveButton } from './save.js';
 import { CompartmentSettings, GroupSettings, ScopeField, useAccessOptions } from './Scope.js';
 
@@ -88,7 +88,7 @@ export function CompanySettings({ page }: { page: string }) {
   const title = TITLES[page] ?? '会社情報';
   return (
     <>
-      <h1>会社情報 › {title} <HelpTip article="admin-setup">帳票・メールの署名と、すべての業務の文面に使います。</HelpTip></h1>
+      <PageTitle trail={['会社情報', title]} help={COMPANY_HELP[page]} />
       {page === 'basic' && (
       <div className="card">
         <Text label="正式な会社名" value={company.legalName} onChange={c('legalName')} hint="前株・後株を含めて正確に" />
@@ -196,6 +196,15 @@ const TITLES: Record<string, string> = {
   dashboard: 'ダッシュボードの見せ方',
 };
 
+/** 小分けごとの「？」の説明（仕様書 第6.10.4.4節）。開いている画面のことを書く。 */
+const COMPANY_HELP: Record<string, PageHelp> = {
+  basic: { article: 'admin-setup', text: '正式な会社名・住所・会計年度など、会社の基本の値です。帳票とメールの署名に使います。' },
+  writing: { article: 'admin-setup', text: '自社の呼び方・書き出し・結び・署名など、すべての業務が文面を作るときに従う書き方です。業務ごとには変えられません。' },
+  invoice: { article: 'admin-setup', text: '請求書などの PDF に出すロゴ・振込先・支払期限・備考です。文面の書き方は「自社の書き方」で決めます。' },
+  slides: { article: 'admin-slides', text: 'Google スライドで作った自社のファイルを、スライドを作るときの見本として使います。URL を貼るだけで登録できます。' },
+  dashboard: { article: 'admin-dashboard', text: 'ダッシュボードの人の状態を、個人名で出すか、人数と業務だけにするかを決めます。壁のモニターに映すときに見直してください。' },
+};
+
 /**
  * 帳票の体裁（仕様書 第15.2.2節、Q-57）。請求書などの PDF に使う。
  *
@@ -279,9 +288,6 @@ function SlideTemplateSettings({ initial, onSaved }: { initial: SlideTemplate[];
 
   return (
     <div className="card">
-      <p className="muted small">
-        <HelpTip article="admin-slides">Google スライドで作った自社のファイルを、スライドを作るときの見本として使います。URL を貼るだけで登録できます。</HelpTip>
-      </p>
       <div className="note small">
         <p>Google スライドで作った<strong>自社のファイル</strong>を、スライド作成の見本として使います。URL を貼るだけで登録できます。</p>
         <p>
@@ -371,10 +377,7 @@ export function AgentSettings({ page }: { page: string }) {
 
   return (
     <>
-      <h1>
-        業務と承認 › {AGENT_TITLES[page] ?? ''}{' '}
-        <HelpTip article="admin-agents">社内への書き込みの確認の要否と、使う業務を決めます。社外や他の人に届く操作は、設定にかかわらず必ず承認が必要です。</HelpTip>
-      </h1>
+      <PageTitle trail={['業務と承認', AGENT_TITLES[page] ?? '']} help={AGENT_HELP[page]} />
       {page === 'automation' && (
       <div className="card">
         <p className="muted small">タスクの起票、予定の登録、本人宛の通知など</p>
@@ -435,10 +438,7 @@ export function AgentSettings({ page }: { page: string }) {
 
       {page === 'scope' && (
       <div className="card">
-        <p>
-          業務ごとに、使える人を決めます。指定したグループに所属する人と、個別に加えた人だけが使えます。{' '}
-          <HelpTip article="admin-groups">範囲の外の人のメニュー・秘書には、その業務が出ません。</HelpTip>
-        </p>
+        <p>業務ごとに、使える人を決めます。指定したグループに所属する人と、個別に加えた人だけが使えます。</p>
         {access.error && <p className="error">{access.error}</p>}
         {access.options && (
           <table className="table">
@@ -496,12 +496,28 @@ const AGENT_TITLES: Record<string, string> = {
   effect: '効果の推計',
 };
 
+/** 小分けごとの「？」の説明（仕様書 第6.10.4.4節）。 */
+const AGENT_HELP: Record<string, PageHelp> = {
+  enabled: { article: 'admin-agents', text: '会社で使う業務を選びます。無効にした業務は、メニュー・秘書・定時実行のどれからも起動できなくなります。' },
+  automation: { article: 'admin-agents', text: 'タスクの起票や予定の登録など、社内への書き込みの前に確認を求めるかを決めます。社外や他の人に届く操作は、設定にかかわらず必ず承認が必要です。' },
+  scope: { article: 'admin-groups', text: '業務ごとに、使える人をグループと個人で決めます。範囲の外の人のメニュー・秘書には、その業務が出ません。' },
+  effect: { article: 'admin-agents', text: '「手作業なら 1 件に何分かかるか」を業務ごとに決めます。ダッシュボードの推計の削減時間に使います。' },
+};
+
 /** 小分けの題名（第6.6.0.1節）。 */
 const USER_TITLES: Record<string, string> = {
   list: 'ユーザー',
   invite: '招待する',
   groups: 'グループ',
   compartments: '権限区画',
+};
+
+/** 小分けごとの「？」の説明（仕様書 第6.10.4.4節）。 */
+const USER_HELP: Record<string, PageHelp> = {
+  list: { article: 'admin-users', text: '招待した人の一覧です。ロールの変更と停止をここで行います。管理者は 2 人以上にしておくことをおすすめします。' },
+  invite: { article: 'admin-users', text: 'メールアドレスとロールを指定して招待します。ログインは各自の Google アカウントで行います。' },
+  groups: { article: 'admin-groups', text: '業務を使える人と、権限区画を割り当てる人のまとまりです。Google Chat のスペースとは別のものです。' },
+  compartments: { article: 'admin-groups', text: '給与や評価のような機微なデータを隔てる区画です。区画ごとに、入れるグループと人を割り当てます。' },
 };
 
 const ROLE_LABELS: Record<Role, string> = {
@@ -530,10 +546,7 @@ export function UserSettings({ meId, page }: { meId: string; page: string }) {
 
   return (
     <>
-      <h1>
-        ユーザーと権限 › {USER_TITLES[page] ?? ''}{' '}
-        <HelpTip article="admin-users">招待・ロール・停止を管理します。管理者は 2 人以上にしておくことをおすすめします。</HelpTip>
-      </h1>
+      <PageTitle trail={['ユーザーと権限', USER_TITLES[page] ?? '']} help={USER_HELP[page]} />
       {page === 'list' && <>
       <p className="lead">ログインは各自の Google アカウントで行います。</p>
       <table className="table">
@@ -611,10 +624,7 @@ export function KnowledgeSettings({ page }: { page: string }) {
 
   return (
     <>
-      <h1>
-        知識 › {KNOWLEDGE_TITLES[page] ?? ''}{' '}
-        <HelpTip article="admin-knowledge">ここに登録した規程から、秘書と「社内ナレッジ Q&A」が出典つきで答えます。空のままだと答えられません。</HelpTip>
-      </h1>
+      <PageTitle trail={['知識', KNOWLEDGE_TITLES[page] ?? '']} help={KNOWLEDGE_HELP[page]} />
       {page === 'items' && <>
       <p className="lead">就業規則・経費規程・価格表など。<strong>空のままだと秘書は答えられません。</strong></p>
       <div className="card">
@@ -710,6 +720,13 @@ const KNOWLEDGE_TITLES: Record<string, string> = {
   promotions: '会社の知識にする提案',
 };
 
+/** 小分けごとの「？」の説明（仕様書 第6.10.4.4節）。 */
+const KNOWLEDGE_HELP: Record<string, PageHelp> = {
+  items: { article: 'admin-knowledge', text: 'ここに登録した規程から、秘書と「社内ナレッジ Q&A」が出典つきで答えます。空のままだと答えられません。' },
+  synonyms: { article: 'admin-knowledge', text: '「育休」と聞かれたら「育児休業」でも探す、というように、同じ意味の言葉を結び付けます。' },
+  promotions: { article: 'admin-knowledge', text: '従業員が秘書に覚えさせたことを、会社の知識にしたいという提案です。承認すると、そのままの文で登録され、全員の秘書と業務が参照します。' },
+};
+
 /**
  * 昇華の承認（仕様書 第11.3.1節）。個人の記憶を会社の知識にする提案を判断する。
  *
@@ -782,9 +799,6 @@ function SynonymSettings() {
 
   return (
     <div className="card">
-      <p>
-        <HelpTip article="admin-knowledge">「育休」と聞かれたら「育児休業」でも探す、というように、同じ意味の言葉を結び付けます。</HelpTip>
-      </p>
       <p className="muted small">質問の言葉が規程の言葉と違っても見つかるようにします。言い換えで見つけたときは、答えに「読み替えて探しました」と示します。</p>
       <div className="field">
         <label className="check">

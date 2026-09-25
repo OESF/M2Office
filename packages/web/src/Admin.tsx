@@ -14,7 +14,7 @@ import {
 import { Checklist, Dashboard } from './Dashboard.js';
 import { ExtensionSettings } from './Extensions.js';
 import { Connections } from './Connections.js';
-import { HelpCenter, useOpenHelp } from './help.js';
+import { HelpCenter, PageTitle, useOpenHelp } from './help.js';
 import { AppVersionBadge } from './launcher.js';
 import { Icon, NavHeading, NavItem, SideNavLayout, ThemeToggle, type IconName } from './nav.js';
 
@@ -184,7 +184,10 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
             {tab === 'dashboard' && <Dashboard />}
             {tab === 'setup' && (
               <>
-                <h1>はじめに行う設定</h1>
+                <PageTitle trail={['はじめに行う設定']} help={{
+                  article: 'admin-setup',
+                  text: 'M2Office を使い始めるまでに済ませる設定の一覧です。済んだものには印が付き、すべて済むとメニューから消えます。',
+                }} />
                 <p className="lead">上から順に済ませると、使い始められます。すべて済むと、この項目は消えます。</p>
                 <Checklist onGo={(t) => setTab(t as Tab)} />
               </>
@@ -368,6 +371,10 @@ function Connectors() {
   const perms = useLoad(api.admin.googlePermissions);
   return (
     <>
+      <PageTitle trail={['接続', 'コネクタ（MCP）']} help={{
+        article: 'admin-connectors',
+        text: '接続の状態と、この会社の業務が求める Google の権限の一覧です。外部のサービスとのつながり（コネクタ）の追加は「拡張機能」で行います。',
+      }} />
       {error && <p className="error">{error}</p>}
       {data && (
         <div className="card">

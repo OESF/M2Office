@@ -12,7 +12,7 @@ import {
   api, describeError,
   type AgentSummary, type ApprovalView, type Lookup, type Me, type RunDetail, type ScheduleView, type SecretaryReply,
 } from './api.js';
-import { AgentHelpTip, HelpCenter, HelpTip, Markdown, Tour, openHelp, useOpenHelp } from './help.js';
+import { AgentHelpTip, HelpCenter, HelpTip, Markdown, PageTitle, Tour, openHelp, useOpenHelp } from './help.js';
 import { AppVersionBadge, GoogleLauncher } from './launcher.js';
 import { startVoice, type VoiceCall } from './voice.js';
 import { keyLabel, useHotkey, useNumberHotkeys } from './keys.js';
@@ -314,10 +314,16 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
           {view.kind === 'settings' && (
             <>
               {/* いまどの区分を見ているかを題名に出す（仕様書 第6.5.0節） */}
-              <h1>
-                個人設定 › {SETTINGS_SECTIONS.find((x) => x.id === view.section)?.label}{' '}
-                <HelpTip article="start-settings">ここでの設定は、あなたにだけ効きます。管理者も変更できません。</HelpTip>
-              </h1>
+              {(() => {
+                const section = SETTINGS_SECTIONS.find((x) => x.id === view.section);
+                // 開いている区分のことを先に書く（仕様書 第6.10.4.4節）
+                return (
+                  <PageTitle trail={['個人設定', section?.label ?? '']} help={{
+                    article: 'start-settings',
+                    text: `${section ? `${section.hint}の設定です。` : ''}ここでの設定は、あなたにだけ効きます。管理者も変更できません。`,
+                  }} />
+                );
+              })()}
               <p className="lead">
                 ほかの項目は、左下の歯車から選べます（{keyLabel('Mod+,') || '歯車'}）。
               </p>
