@@ -17,6 +17,7 @@ import { startVoice, type VoiceCall } from './voice.js';
 import { keyLabel, useHotkey, useNumberHotkeys } from './keys.js';
 import { timeGreeting } from './greeting.js';
 import { AgentForm, ApprovalTray, RunView, statusLabel, SuspendedBanner } from './components.js';
+import { Sources } from './sources.js';
 import {
   SETTINGS_SECTIONS, SETTINGS_SECTION_KEY, Settings, orderAgents, rememberedSection,
   type SettingsSection,
@@ -475,7 +476,7 @@ export interface Turn {
     suggestedAgent?: { id: string; name: string };
     fileId?: string | null;
     helpArticles?: { id: string; title: string }[];
-    evidence?: { label: string; value: string }[];
+    evidence?: { label: string; value: string; kind?: 'source' }[];
   };
 }
 
@@ -528,14 +529,17 @@ function TurnLog({ turns, onOpenAgent }: {
           {t.meta?.helpArticles?.map((a) => (
             <button key={a.id} className="help-item" onClick={() => openHelp(a.id)}>{a.title}</button>
           ))}
-          {t.meta?.evidence && t.meta.evidence.length > 0 && (
+          {t.meta?.evidence && t.meta.evidence.some((e) => e.kind !== 'source') && (
             <dl className="kv">
-              {t.meta.evidence.map((e, i) => (
+              {t.meta.evidence.filter((e) => e.kind !== 'source').map((e, i) => (
                 <div key={i} style={{ display: 'contents' }}>
                   <dt>{e.label}</dt><dd>{e.value}</dd>
                 </div>
               ))}
             </dl>
+          )}
+          {t.meta?.evidence && t.meta.evidence.some((e) => e.kind === 'source') && (
+            <Sources items={t.meta.evidence.filter((e) => e.kind === 'source')} reply={t.text} />
           )}
         </div>
       ))}

@@ -8,6 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseInline, parseMarkdown } from '../src/markdown.js';
 import { timeGreeting } from '../src/greeting.js';
+import { citedSources, plainText } from '../src/sources.js';
 
 test('見出しのすぐ次の行に箇条書きが続いても、見出しと箇条書きに分ける（業務の説明の書き方）', () => {
   const md = [
@@ -135,4 +136,17 @@ test('字下げした箇条書きは、直前の項目の入れ子にする（�
 test('改行を保つ読み方では、段落の中の改行を残す（業務の答え・成果物・送る本文）', () => {
   assert.deepEqual(parseMarkdown('1 行目\n2 行目', { lineBreaks: true }), [{ kind: 'p', text: '1 行目\n2 行目' }]);
   assert.deepEqual(parseMarkdown('1 行目\n2 行目'), [{ kind: 'p', text: '1 行目2 行目' }], 'ヘルプの記事は原稿の折り返しを消す（既定）');
+});
+
+test('出典の抜き出しは、書式の記号を外して読める文にする（仕様書 第6.2節「出典の見せ方」）', () => {
+  // 2026-09-25 の受け入れテストで、この形のまま出ていた
+  assert.equal(plainText('1. **新製品の見積について**\n   - 山田より、見積書を提出予定。\n\n## 保留\n- 展示会'),
+    '1. 新製品の見積について\n・山田より、見積書を提出予定。\n保留\n・展示会');
+});
+
+test('出典の並び: 答えの【】で引用したものだけを先に出す（文書全体の出典が、節の出典と途中まで一致しても引用としない）', () => {
+  const base = '9月度 営業定例 › 議事録';
+  const reply = `次回は 10 月 2 日です。\n【${base} › 議事・報告事項】`;
+  assert.deepEqual(citedSources([{ label: base, value: '' }, { label: `${base} › 議事・報告事項`, value: '' }], reply).map((e) => e.label),
+    [`${base} › 議事・報告事項`]);
 });

@@ -66,7 +66,14 @@ export interface DirectAnswer {
    */
   keep?: boolean;
   /** 根拠。その応答に添えて会話ペインに表示する（仕様書 第6.2節）。 */
-  evidence: { label: string; value: string }[];
+  evidence: EvidenceItem[];
+}
+
+/** 根拠 1 件。`kind: 'source'` は社内の知識の出典（題名と抜き出しの 2 段で出す。仕様書 第6.2節「出典の見せ方」）。 */
+export interface EvidenceItem {
+  label: string;
+  value: string;
+  kind?: 'source';
 }
 
 /** 照会ではなく作業の依頼であることを示す言い回し。 */

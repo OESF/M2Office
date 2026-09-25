@@ -83,6 +83,7 @@ src/nav.tsx            左ペインの共通部品（アイコン・折りたた
 src/theme.ts           画面の明るさ（ライト・ダーク・端末に合わせる）の選択と反映
 src/greeting.ts        最初の画面の時候の一言（第6.1.5節）
 src/save.tsx           保存のボタンと、その横に出る結果（第6.10.4.2節）
+src/sources.tsx        秘書の答えの出典（題名と抜き出しの 2 段。引用したものを先に。第6.2節）
 public/icons.svg       画面のアイコン（モノクロの線画。文字の色を引き継ぐ）
 public/avatars/        秘書のアバターの見本（第6.1.3節）。README を参照
 public/agents/         業務エージェントの絵 25 枚（第6.7.4.3節）。README を参照

@@ -11,7 +11,7 @@ import type { Repository } from '../repository/types.js';
 import type { LlmProvider } from '../llm/provider.js';
 import type { WorkspaceConnector } from '../connectors/types.js';
 import type { HelpCatalog } from '../help/articles.js';
-import { DIRECT_QUERIES, type DirectAnswer } from './catalog.js';
+import { DIRECT_QUERIES, type DirectAnswer, type EvidenceItem } from './catalog.js';
 import { rewriteNote } from '../knowledge/search.js';
 import { LOOKUP_AGENT_ID } from '../agents/index.js';
 
@@ -21,7 +21,7 @@ export type ResponseLayer = 'direct' | 'light' | 'full';
 export interface SecretaryReply {
   layer: ResponseLayer;
   text: string;
-  evidence: { label: string; value: string }[];
+  evidence: EvidenceItem[];
   /** 業務エージェントの起動を提案する場合、その候補。 */
   suggestedAgent?: { id: string; version: number; name: string };
   /** 使い方の質問に答えた場合、材料にしたヘルプの記事（仕様書 第6.10.6節）。 */
@@ -220,7 +220,7 @@ export class Secretary {
    */
   private async searchKnowledge(
     tenantId: string, userId: string, message: string,
-  ): Promise<{ text: string; evidence: { label: string; value: string }[] }> {
+  ): Promise<{ text: string; evidence: EvidenceItem[] }> {
     try {
       const compartments = await this.deps.repo.listUserCompartments(tenantId, userId);
       const { hits } = await this.deps.repo.searchKnowledge(tenantId, message, compartments[0] ?? null);
@@ -233,7 +233,8 @@ export class Secretary {
           '',
           ...top.map((h) => `【${h.citation}】\n${h.body}`),
         ].join('\n'),
-        evidence: top.map((h) => ({ label: h.citation, value: h.body.slice(0, 120) })),
+        // 出典の印を付ける。画面は題名と抜き出しの 2 段で出し、答えで引用したものを先に並べる（仕様書 第6.2節）
+        evidence: top.map((h) => ({ label: h.citation, value: h.body.slice(0, 240), kind: 'source' as const })),
       };
     } catch (err) {
       // 探せなくても会話は続ける。ただし、根拠が無いことは指示で伝わる

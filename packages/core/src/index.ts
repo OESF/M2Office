@@ -104,7 +104,7 @@ export {
 } from './agents/index.js';
 export { Secretary, acceptsFile } from './secretary/secretary.js';
 export type { SecretaryReply, ResponseLayer } from './secretary/secretary.js';
-export { DIRECT_QUERIES } from './secretary/catalog.js';
+export { DIRECT_QUERIES, type EvidenceItem } from './secretary/catalog.js';
 export {
   MEMORY_MAX_CHARS, memoryTextOf, refuseToRemember, refusalMessage,
 } from './secretary/memory.js';

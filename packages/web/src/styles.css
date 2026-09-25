@@ -893,6 +893,15 @@ code.uri { background: var(--subtle-bg); border: 1px solid var(--line); border-r
 .md-quote h2, .md-quote h3 { font-size: 14px; margin: 8px 0 4px; }
 .md-quote > :first-child { margin-top: 0; }
 .md-quote > :last-child { margin-bottom: 0; }
+/* 秘書の答えの出典（仕様書 第6.2節「出典の見せ方」）。題名と抜き出しの 2 段。抜き出しは 3 行まで */
+.sources { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.source { border-left: 3px solid var(--line); padding: 2px 0 2px 10px; }
+.source-title { font-size: 12px; font-weight: 600; color: var(--muted); }
+.source-text {
+  font-size: 13px; white-space: pre-line; overflow: hidden;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3;
+}
+.sources .fold .source { margin-top: 6px; }
 /* 改行を保つ段落（業務の答え・成果物・送る本文） */
 .md-br { white-space: pre-line; }
 .md-table th, .md-table td { min-width: 6em; }
