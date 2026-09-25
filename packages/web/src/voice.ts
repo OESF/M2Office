@@ -23,8 +23,8 @@ export interface VoiceHandlers {
   /** 状態が変わった（つないだ・終わった・失敗した）。 */
   onState(state: 'connecting' | 'listening' | 'closed', note?: string): void;
   /**
-   * 秘書の取次の答え（仕様書 第10.5.7節）。画面の入力に答えたときと同じ形で会話ペインに出す。
-   * 音声では要点だけを話すため、詳しい答え・根拠・業務の提案のボタンはこちらで見せる
+   * 秘書のキャンバスに出す答え（仕様書 第6.2.0節）。画面の入力に答えたときと同じ形で出す。
+   * 届くのは、答えが大きいときと、本人が「画面に出して」と言ったときだけ（ほかは声だけで返す）
    */
   onAnswer?(answer: VoiceAnswer): void;
 }
@@ -35,7 +35,7 @@ export interface VoiceAnswer {
   reply: {
     text: string;
     layer: string;
-    evidence: { label: string; value: string }[];
+    evidence: { label: string; value: string; kind?: 'source' }[];
     suggestedAgent?: { id: string; version: number; name: string };
     helpArticles?: { id: string; title: string }[];
     lookup?: { runId: string; request: string };

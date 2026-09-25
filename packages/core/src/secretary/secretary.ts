@@ -14,6 +14,7 @@ import type { HelpCatalog } from '../help/articles.js';
 import { DIRECT_QUERIES, type DirectAnswer, type EvidenceItem } from './catalog.js';
 import { rewriteNote } from '../knowledge/search.js';
 import { LOOKUP_AGENT_ID } from '../agents/index.js';
+import { REFERS_TO_PAST, recall } from './recall.js';
 
 /** 秘書がどの層で応答したか。計測と表示に使う（仕様書 第10.9.1節）。 */
 export type ResponseLayer = 'direct' | 'light' | 'full';
@@ -140,7 +141,9 @@ export class Secretary {
     }
 
     // 層 1: パターン一致で定型の照会に該当するか（LLM を使わない）
-    const direct = this.matchDirect(message);
+    // 「あの件の進み具合は」のような過去を指す問いは、実行の件数ではなく、覚えていることから答える（第10.7.3節）
+    const direct0 = this.matchDirect(message);
+    const direct = direct0?.id === 'recent-runs' && REFERS_TO_PAST.test(message) ? undefined : direct0;
     if (direct) {
       const answer = await direct.answer({
         tenantId, userId, message, repo: this.deps.repo, connector: this.deps.connector,
@@ -157,7 +160,8 @@ export class Secretary {
     // 秘書が自分で答えられる業務は、取次の候補にしない（第10.9.4.1節）
     const enabled = available.filter((a) => !agents.disabled.includes(a.id) && a.secretaryRoute !== false);
     const llm = this.deps.llmFor ? await this.deps.llmFor(tenantId) : this.deps.llm;
-    const routed = await this.route(message, enabled, llm);
+    // 「あれ、どうなった」のような過去を指す問いは、業務へ取り次がず、記憶を使って答える（第10.7.3節）
+    const routed = REFERS_TO_PAST.test(message) ? { agent: null, reason: '', tokensUsed: 0 } : await this.route(message, enabled, llm);
     if (routed.agent) {
       await this.audit(tenantId, userId, 'secretary.route', routed.agent.id);
       return {
@@ -173,11 +177,12 @@ export class Secretary {
     }
 
     // 層 3: 完全な対話。本人が決めた名前・呼ばれ方・応対スタイルに合わせる（仕様書 第6.5.3節）
-    const [prefs, user, memories, knowledge] = await Promise.all([
+    const [prefs, user, remembered, knowledge] = await Promise.all([
       this.deps.repo.getUserSettings(tenantId, userId),
       this.deps.repo.findUserById(tenantId, userId),
-      // 個人記憶は本人との対話でだけ使う。ほかの利用者と業務エージェントには渡さない（仕様書 第11.1節）
-      this.deps.repo.listMemories(tenantId, userId),
+      // 本人についての記憶（今日のやり取り・会話の要約・覚えた事実・頼んだ業務）。答えるたびに使う（第10.7.3節）。
+      // 本人との対話でだけ使い、ほかの利用者と業務エージェントには渡さない（仕様書 第11.1節）
+      recall(this.deps.repo, tenantId, userId, message, available),
       // **必ず組織知識を検索する**（第10.9.4.1節）。これが無いと、会社の規程を見ずに
       // 法律や世間の相場を会社の決まりのように答えてしまう。区画の絞り込みは効く（不変則 I-12）
       this.searchKnowledge(tenantId, userId, message),
@@ -187,10 +192,7 @@ export class Secretary {
       `あなたは中小企業の従業員に付く秘書${s.name ? `「${s.name}」` : ''}です。`,
       `相手を「${s.callMe || `${user?.displayName ?? ''}さん`}」と呼びます。`,
       s.style === 'concise' ? '要点だけを短く答えます。' : '丁寧な日本語で、要点を先に答えます。',
-      ...(memories.length > 0
-        ? ['\n本人から覚えておくよう言われたこと（本人にだけ使う。ほかの人に伝えない）:',
-          ...memories.slice(0, 20).map((m) => `- ${m.text}`)]
-        : []),
+      'あなたは本人と一心同体の秘書で、本人とのやり取りをずっと覚えています。覚えていることを踏まえて答えます。',
       '\n',
       GROUNDING_RULE,
     ].join('');
@@ -198,7 +200,8 @@ export class Secretary {
       tier: 'standard',
       messages: [
         { role: 'system', content: persona },
-        // 会社の規程は、本人の依頼とは別のメッセージで渡す（不変則 I-6）
+        // 覚えていることと会社の規程は、本人の依頼とは別のメッセージで渡す（不変則 I-6）
+        ...(remembered.text ? [{ role: 'user' as const, content: remembered.text }] : []),
         ...(knowledge.text ? [{ role: 'user' as const, content: knowledge.text }] : []),
         { role: 'user', content: message },
       ],
@@ -206,7 +209,7 @@ export class Secretary {
     await this.audit(tenantId, userId, 'secretary.chat', 'full');
     return {
       reply: {
-        layer: 'full', text: res.text, evidence: knowledge.evidence, tokensUsed: res.tokensUsed,
+        layer: 'full', text: res.text, evidence: [...knowledge.evidence, ...remembered.evidence], tokensUsed: res.tokensUsed,
       },
       keep: true,
     };

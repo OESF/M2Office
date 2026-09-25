@@ -165,7 +165,7 @@ while (running) {
     try {
       await conversations.sweep(new Date());
       const learned = await learning.sweep(new Date());
-      if (learned.candidates > 0 || learned.digests > 0) log.info('対話からの学習を行いました', learned);
+      if (learned.learned > 0 || learned.digests > 0) log.info('対話からの学習を行いました', learned);
     } catch (err) {
       log.error('会話ログの入れ替えで例外が発生しました', { err });
     }

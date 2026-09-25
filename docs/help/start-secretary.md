@@ -3,9 +3,16 @@ id: start-secretary
 title: 秘書の使い方
 audience: all
 category: start
-related: [start-screen, start-agents, faq-mistakes]
+related: [start-screen, start-memory, start-voice, start-agents, faq-mistakes]
 ---
-画面の下の入力欄から、秘書に話しかけられます。
+画面の下の入力欄から、秘書に話しかけられます。答えは画面右の**秘書のキャンバス**に出ます
+（いちばん新しい答えだけが出て、次の答えで置き換わります）。
+
+## 前の話の続き
+
+秘書は、あなたと話したことや頼んだ業務を**ずっと覚えています**。画面に前のやり取りが残っていなくても、
+「それを詳しく」「**あれ、どうなった？**」「先週頼んだ議事録は？」と聞けば、覚えていることから答えます。
+覚えていないことは、推測せずに聞き返します（「秘書に覚えてもらう・忘れてもらう」を参照）。
 
 ## すぐに答えてくれること
 

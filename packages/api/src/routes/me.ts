@@ -7,7 +7,7 @@
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import { VOICE_CHOICES, VOICE_STYLE_MAX, isValidAvatar, type UserSettings } from '@m2office/shared';
-import { buildPresence, loadFile, proposePromotion, submitPromotion, withdrawPromotion } from '@m2office/core';
+import { LEARNED_SOURCE, buildPresence, loadFile, proposePromotion, refusalMessage, refuseToRemember, submitPromotion, withdrawPromotion } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 
@@ -230,10 +230,47 @@ export function meRoute(deps: AppDeps) {
   /** 記憶を 1 件消す。 */
   app.delete('/memories/:id', async (c) => {
     const { tenant, user } = c.get('ctx');
+    const memory = (await deps.repo.listMemories(tenant.id, user.id)).find((m) => m.id === c.req.param('id'));
     const ok = await deps.repo.deleteMemory(tenant.id, user.id, c.req.param('id'));
     if (!ok) return c.json({ error: '記憶が見つかりません' }, 404);
+    // 秘書が自分で覚えたものを本人が消したら、同じ文は再び覚えない（仕様書 第11.5.2節、ADR-0027）
+    if (memory?.source === LEARNED_SOURCE) {
+      await deps.repo.createMemoryCandidate({
+        id: randomUUID(), tenantId: tenant.id, userId: user.id, text: memory.text,
+        status: 'dismissed', sourceDay: memory.createdAt.slice(0, 10), createdAt: new Date().toISOString(),
+      });
+    }
     // 消した中身は監査ログに入れない（第11.5.1節）
     await audit(deps, tenant.id, user.id, 'memory.delete', c.req.param('id'));
+    return c.json({ ok: true });
+  });
+
+  /**
+   * 記憶を 1 件直す（仕様書 第11.5.2節）。秘書が自分で覚えたものも、本人が直せる。
+   *
+   * @remarks
+   * 認証情報・覚えない言葉・長すぎる文は、頼んで覚えるときと同じく断る（第11.5.1節）。
+   * 秘書が覚えた文を直したら、元の文は再び覚えない（消したときと同じ扱い）。
+   */
+  app.patch('/memories/:id', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const body = (await c.req.json().catch(() => ({}))) as { text?: unknown };
+    const text = typeof body.text === 'string' ? body.text.trim() : '';
+    const settings = await deps.repo.getUserSettings(tenant.id, user.id);
+    // 本人が直すときは、覚えることを止めていても直せる。止めているのは秘書が覚えることである
+    const refusal = refuseToRemember(text, { ...settings.memory, learning: true });
+    if (refusal) return c.json({ error: refusalMessage(refusal) }, 400);
+    const memory = (await deps.repo.listMemories(tenant.id, user.id)).find((m) => m.id === c.req.param('id'));
+    if (!memory) return c.json({ error: '記憶が見つかりません' }, 404);
+    await deps.repo.updateMemory(tenant.id, user.id, memory.id, text);
+    if (memory.source === LEARNED_SOURCE && memory.text !== text) {
+      await deps.repo.createMemoryCandidate({
+        id: randomUUID(), tenantId: tenant.id, userId: user.id, text: memory.text,
+        status: 'dismissed', sourceDay: memory.createdAt.slice(0, 10), createdAt: new Date().toISOString(),
+      });
+    }
+    // 直した中身は監査ログに入れない（第11.5.1節）
+    await audit(deps, tenant.id, user.id, 'memory.update', memory.id);
     return c.json({ ok: true });
   });
 

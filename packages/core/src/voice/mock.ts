@@ -61,16 +61,20 @@ export class MockVoiceProvider implements VoiceProvider {
         session.onEvent({ type: 'heard', text });
         // 道具があれば、書いた文字をそのまま最初の道具（秘書の取次）に渡す（仕様書 第10.5.7節）。
         // 推論は行わないため、取次の答えをそのまま返す。取次が動くことを確かめられるようにする
-        const tool = session.tools?.[0];
+        // 「画面に出して」だけは、画面に出す道具へ渡す（第6.2.0節）。見本でも確かめられるように
+        const show = /(画面|キャンバス)に(出|表示)/.test(text) ? session.tools?.find((t) => t.name === 'show_on_canvas') : undefined;
+        const tool = show ?? session.tools?.[0];
         if (!tool) {
           session.onEvent({ type: 'reply', text: sampleReply(session) });
           session.onEvent({ type: 'turn-end' });
           return;
         }
         const key = Object.keys(tool.parameters)[0] ?? 'request';
-        void tool.run({ [key]: text }).then((res) => {
+        void tool.run(show ? {} : { [key]: text }).then((res) => {
           if (closed) return;
-          const answer = typeof res['answer'] === 'string' ? res['answer'] : typeof res['error'] === 'string' ? res['error'] : '';
+          const answer = typeof res['error'] === 'string' ? res['error']
+            : res['shown_on_screen'] === true ? `${typeof res['answer'] === 'string' && !show ? res['answer'] : ''}（画面に出しました）`
+            : typeof res['answer'] === 'string' ? res['answer'] : '';
           session.onEvent({ type: 'reply', text: `［見本の応答］${answer}` });
           session.onEvent({ type: 'turn-end' });
         });

@@ -242,11 +242,6 @@ export interface PromotionView {
   comment: string | null; createdAt: string; decidedAt: string | null;
 }
 
-/** 記憶の候補（仕様書 第11.5.2節）。 */
-export interface MemoryCandidateView {
-  id: string; text: string; sourceDay: string; createdAt: string;
-}
-
 /** 会話ログの 1 往復（仕様書 第11.9.4.1節）。 */
 export interface ConversationView {
   id: string; message: string; reply: string; layer: 'direct' | 'light' | 'full';
@@ -521,12 +516,6 @@ export const api = {
     if (!res.ok) throw new ApiError(body.error ?? `エラー (${res.status})`, res.status, false);
     return body as { id: string; name: string };
   },
-  /** 記憶の候補（仕様書 第11.5.2節）。対話から作られ、本人が採ると記憶になる。 */
-  myMemoryCandidates: () => call<{ items: MemoryCandidateView[] }>('/me/memory-candidates'),
-  acceptMemoryCandidate: (id: string) =>
-    call(`/me/memory-candidates/${id}/accept`, { method: 'POST', body: '{}' }),
-  dismissMemoryCandidate: (id: string) =>
-    call(`/me/memory-candidates/${id}/dismiss`, { method: 'POST', body: '{}' }),
   /** 会話の要約（仕様書 第11.9.6節）。 */
   myConversationDigests: () => call<{ items: { day: string; summary: string }[] }>('/me/conversation-digests'),
   /** 会話ログ（仕様書 第11.9.4.1節）。本人のやり取りだけが返る。 */
@@ -541,6 +530,8 @@ export const api = {
   /** 記憶とデータ（仕様書 第6.5.4節）。本人の記憶だけが返る。 */
   myMemories: () => call<{ items: MemoryView[] }>('/me/memories'),
   deleteMemory: (id: string) => call(`/me/memories/${id}`, { method: 'DELETE' }),
+  updateMemory: (id: string, text: string) =>
+    call(`/me/memories/${id}`, { method: 'PATCH', body: JSON.stringify({ text }) }),
   clearMemories: () => call<{ removed: number }>('/me/memories', { method: 'DELETE' }),
   saveDisplayName: (displayName: string) =>
     call('/me/profile', { method: 'PATCH', body: JSON.stringify({ displayName }) }),

@@ -206,6 +206,11 @@ export interface Repository {
   createMemory(memory: Memory): Promise<void>;
   /** 1 件を消す。本人のものでなければ消さず `false` を返す。 */
   deleteMemory(tenantId: string, userId: string, id: string): Promise<boolean>;
+  /**
+   * 1 件の文を本人が直す（仕様書 第11.5.2節）。きっかけは本人の指示（`secretary`）に改める。
+   * 本人のものでなければ直さず `false` を返す。
+   */
+  updateMemory(tenantId: string, userId: string, id: string, text: string): Promise<boolean>;
   /** 本人の記憶をすべて消す。 */
   clearMemories(tenantId: string, userId: string): Promise<number>;
   saveUserSettings<K extends keyof UserSettings>(
@@ -494,7 +499,7 @@ export interface Memory {
   userId: string;
   /** 覚えた一文。本人が指示したそのまま。 */
   text: string;
-  /** きっかけ（`secretary`: 秘書への指示）。 */
+  /** きっかけ（`secretary`: 本人の指示や本人が直したもの、`learned`: 秘書が会話から自分で覚えたもの。第11.5.2節）。 */
   source: string;
   createdAt: string;
 }

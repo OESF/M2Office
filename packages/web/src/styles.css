@@ -203,7 +203,7 @@ button { font: inherit; cursor: pointer; }
 .home h1 { font-size: 26px; margin: 0 0 8px; }
 .canvas .lead { color: var(--muted); margin: 0 0 20px; }
 
-/* 会話ペイン（仕様書 第6.2節、ADR-0020）。秘書とのやり取りだけを置く */
+/* 秘書のキャンバス（仕様書 第6.2節、ADR-0026）。秘書が結果を見せる場所で、会話の履歴は並べない */
 .talk {
   background: var(--panel); border-left: 1px solid var(--line);
   overflow-y: auto; padding: 16px; min-width: 0;
@@ -286,7 +286,7 @@ button { font: inherit; cursor: pointer; }
 .status.failed, .status.rejected { background: var(--danger-soft); color: var(--danger); }
 .status.running { background: var(--accent-soft); color: var(--accent); }
 
-/* 秘書バー（仕様書 第6.1.3節）。帯には呼びかけの口だけを置き、やり取りは会話ペインに出す */
+/* 秘書バー（仕様書 第6.1.3節）。帯には呼びかけの口と音声の字幕だけを置き、結果は秘書のキャンバスに出す */
 /*
   音声での対話は製品の要である（第6.1.3節）。帯は狭く詰めず、落ち着いて話しかけられる高さを取る。
   知らせの長さで高さが変わらないよう、状態の行は高さを決めて置く。
@@ -400,9 +400,13 @@ kbd {
 .icon-btn.send:hover:not(:disabled) { background: var(--accent); color: #fff; opacity: 0.85; }
 .icon-btn.on { color: var(--accent); border-color: var(--accent); }
 
-/* 会話ペインに出す、音声のやり取り */
-.transcript { margin-bottom: 16px; }
-.transcript p { margin: 0 0 10px; white-space: pre-wrap; }
+/* 音声の字幕（第6.2.0節・10.5.2節）。直近の 1 往復だけ。高さを決め、1 行ずつに収める */
+.secretary-caption { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.secretary-caption p {
+  margin: 0; height: 18px; line-height: 18px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.secretary-caption .muted { display: inline-block; min-width: 3.5em; margin-right: 6px; font-size: 11px; }
 
 .reply { margin: 0 0 8px; white-space: pre-wrap; }
 .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; font-size: 12px; }
@@ -1046,13 +1050,11 @@ code.uri { background: var(--subtle-bg); border: 1px solid var(--line); border-r
 .avatar-choice .avatar-img { width: 100%; height: 100%; object-fit: cover; }
 .avatar-choice.on { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 
-/* やり取りの記録（仕様書 第6.2.1節）。古いものが上、新しいものが下 */
-.turns { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; }
-.turn { display: flex; flex-direction: column; gap: 2px; }
-.turn p { margin: 0; white-space: pre-wrap; }
-.turn.user > p {
-  background: var(--accent-soft); color: var(--fg);
-  padding: 8px 10px; border-radius: 10px 10px 10px 2px;
+/* 秘書のキャンバスの結果（仕様書 第6.2.0節）。いちばん新しいもの 1 つ。見出しに依頼の言葉を小さく出す */
+.canvas-result { display: flex; flex-direction: column; gap: 8px; }
+.canvas-request {
+  margin: 0; display: flex; flex-direction: column; gap: 2px;
+  padding-bottom: 8px; border-bottom: 1px solid var(--line);
+  font-size: 13px; color: var(--muted); white-space: pre-wrap;
 }
-.turn.secretary > p { padding: 2px 0; }
-.turn .btn.small, .turn .help-item { margin-top: 6px; align-self: flex-start; }
+.canvas-result .btn.small, .canvas-result .help-item { align-self: flex-start; }

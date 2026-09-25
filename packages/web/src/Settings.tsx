@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from 'react';
 import { AVATAR_PRESETS, VOICE_CHOICES, VOICE_STYLE_MAX, type UserSettings } from '@m2office/shared';
 import {
   api, describeError,
-  type AgentSummary, type ConversationView, type Me, type MemoryCandidateView, type MemoryView,
+  type AgentSummary, type ConversationView, type Me, type MemoryView,
   type MyGoogle, type PromotionView,
 } from './api.js';
 import { useTheme, type ThemeChoice } from './theme.js';
@@ -528,50 +528,15 @@ function PresenceNotice() {
   );
 }
 
-/**
- * 記憶の候補（仕様書 第11.5.2節）。対話から作られた候補を、本人が採るか捨てるか決める。
- *
- * @remarks 採ったものだけが記憶になる。黙って覚えることはしない（ADR-0015）。
- */
-function MemoryCandidates({ onAccepted }: { onAccepted: () => void }) {
-  const [items, setItems] = useState<MemoryCandidateView[]>([]);
-  const load = () => api.myMemoryCandidates().then((r) => setItems(r.items)).catch(() => setItems([]));
-  useEffect(() => { void load(); }, []);
-  if (items.length === 0) return null;
-  return (
-    <>
-      <h4>覚える候補（{items.length} 件）</h4>
-      <p className="muted small">
-        秘書が会話から見つけた、覚えておくとよさそうなことです。「覚える」を押したものだけを覚えます。
-      </p>
-      <table className="table">
-        <tbody>
-          {items.map((c) => (
-            <tr key={c.id}>
-              <td>
-                <div>{c.text}</div>
-                <div className="muted small">{c.sourceDay} の会話から</div>
-              </td>
-              <td className="num">
-                <button className="btn small"
-                  onClick={() => void api.acceptMemoryCandidate(c.id).then(load).then(onAccepted)}>覚える</button>{' '}
-                <button className="btn ghost small"
-                  onClick={() => void api.dismissMemoryCandidate(c.id).then(load)}>不要</button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </>
-  );
-}
+/** 「新しく覚えたこと」の印を付ける日数（仕様書 第11.5.2節）。 */
+const NEW_DAYS = 7;
 
 /**
- * 記憶とデータ（仕様書 第6.5.4節）。秘書が自分について覚えていることを見て、消せるようにする。
+ * 記憶とデータ（仕様書 第6.5.4節）。秘書が自分について覚えていることを見て、直して、消せるようにする。
  *
  * @remarks
  * 「何を覚えているか分からない AI」にしないための画面である（第11.5節）。
- * 覚えるのは、本人が秘書に「〜を覚えておいて」と頼んだときだけ（第11.5.1節）。
+ * 秘書は会話から自分で覚える（第11.5.2節、ADR-0027）。覚えたことには印を付けて並べ、本人はいつでも直せ、消せる。
  */
 function MemorySettings({ settings, onChange, onSave }: {
   settings: UserSettings;
@@ -581,56 +546,96 @@ function MemorySettings({ settings, onChange, onSave }: {
 }) {
   const [items, setItems] = useState<MemoryView[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
+  // 直している 1 件（ID と書きかけの文）
+  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const load = () => api.myMemories().then((r) => setItems(r.items)).catch((e) => setMsg(describeError(e)));
   useEffect(() => { void load(); }, []);
+  const since = Date.now() - NEW_DAYS * 86_400_000;
+  const learnedNew = items.filter((m) => m.source === 'learned' && Date.parse(m.createdAt) >= since).length;
+
+  const saveEdit = async () => {
+    if (!editing) return;
+    try {
+      await api.updateMemory(editing.id, editing.text);
+      setEditing(null);
+      setMsg('直しました');
+      await load();
+    } catch (e) {
+      setMsg(describeError(e));
+    }
+  };
 
   return (
     <div className="card">
       <h3>記憶とデータ</h3>
       <p>
-        秘書が自分について覚えていることです。覚えるのは、秘書に「〜を覚えておいて」と頼んだときだけです。
+        秘書が自分について覚えていることです。秘書は、会話から大事なこと（決めたこと・頼んだこと・期限・よく使う言葉など）を自分で覚えます。
+        「〜を覚えておいて」と頼んだことも覚えます。違っていれば直し、要らなければ消してください。消したことは、もう一度は覚えません。
         覚えていることを見られるのは本人だけで、管理者にも見えません。
       </p>
       <label className="check">
         <input type="checkbox" checked={settings.memory.learning}
           onChange={(e) => onChange({ ...settings.memory, learning: e.target.checked })} />
-        覚えることを許す（切ると、頼んでも覚えません）
+        覚えることを許す
       </label>
+      <p className="muted small">切ると、会話から覚えず、頼んでも覚えません。</p>
       <div className="field">
         <label>覚えない言葉（1 行に 1 つ）</label>
         <textarea rows={3} value={settings.memory.excludes.join('\n')}
           onChange={(e) => onChange({ ...settings.memory, excludes: e.target.value.split('\n') })} />
-        <p className="muted small">ここに書いた言葉を含む指示は覚えません。秘書に「〜は覚えないで」と言っても増えます。</p>
+        <p className="muted small">ここに書いた言葉を含む会話や指示からは覚えません。秘書に「〜は覚えないで」と言っても増えます。</p>
       </div>
       <div className="row">
         <SaveButton run={onSave} />
       </div>
 
-      <MemoryCandidates onAccepted={load} />
-
-      <h4>覚えていること（{items.length} 件）</h4>
+      <h4>覚えていること（{items.length} 件{learnedNew > 0 ? `。うち新しく覚えたこと ${learnedNew} 件` : ''}）</h4>
       {items.length === 0 ? (
-        <p className="muted small">まだ何も覚えていません。秘書に「〜を覚えておいて」とお伝えください。</p>
+        <p className="muted small">まだ何も覚えていません。秘書と話すうちに、大事なことを覚えていきます。</p>
       ) : (
         <table className="table">
           <tbody>
-            {items.map((m) => (
-              <tr key={m.id}>
-                <td>{m.text}</td>
-                <td className="num">
-                  <button className="btn ghost small" title="管理者・承認者の確認を経て、会社の知識になります"
-                    onClick={() => void api.promoteMemory(m.id)
-                      .then(() => setMsg('会社の知識にする提案を出しました。管理者か承認者の確認を待ちます'))
-                      .catch((e) => setMsg(describeError(e)))}>
-                    会社の知識にする
-                  </button>{' '}
-                  <button className="btn danger small"
-                    onClick={() => void api.deleteMemory(m.id).then(load).then(() => setMsg('消しました')).catch((e) => setMsg(describeError(e)))}>
-                    消す
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {items.map((m) => {
+              const isNew = m.source === 'learned' && Date.parse(m.createdAt) >= since;
+              return (
+                <tr key={m.id}>
+                  <td>
+                    {editing?.id === m.id ? (
+                      <textarea rows={2} value={editing.text} aria-label="覚えていることを直す"
+                        onChange={(e) => setEditing({ id: m.id, text: e.target.value })} />
+                    ) : (
+                      <div>{isNew && <span className="chip waiting">新しく覚えたこと</span>} {m.text}</div>
+                    )}
+                    <div className="muted small">
+                      {new Date(m.createdAt).toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' })}
+                      {m.source === 'learned' ? ' に会話から覚えました' : ' に覚えました'}
+                    </div>
+                  </td>
+                  <td className="num">
+                    {editing?.id === m.id ? (
+                      <>
+                        <button className="btn small" disabled={!editing.text.trim()} onClick={() => void saveEdit()}>保存</button>{' '}
+                        <button className="btn ghost small" onClick={() => setEditing(null)}>やめる</button>
+                      </>
+                    ) : (
+                      <>
+                        <button className="btn ghost small" onClick={() => setEditing({ id: m.id, text: m.text })}>直す</button>{' '}
+                        <button className="btn ghost small" title="管理者・承認者の確認を経て、会社の知識になります"
+                          onClick={() => void api.promoteMemory(m.id)
+                            .then(() => setMsg('会社の知識にする提案を出しました。管理者か承認者の確認を待ちます'))
+                            .catch((e) => setMsg(describeError(e)))}>
+                          会社の知識にする
+                        </button>{' '}
+                        <button className="btn danger small"
+                          onClick={() => void api.deleteMemory(m.id).then(load).then(() => setMsg('消しました')).catch((e) => setMsg(describeError(e)))}>
+                          消す
+                        </button>
+                      </>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       )}

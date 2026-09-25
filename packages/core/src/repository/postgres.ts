@@ -1043,6 +1043,14 @@ export class PostgresRepository implements Repository {
     return rows.length > 0;
   }
 
+  async updateMemory(tenantId: string, userId: string, id: string, text: string): Promise<boolean> {
+    const rows = await this.q<{ id: string }>(tenantId,
+      `update memories set text = $4, source = 'secretary'
+        where tenant_id = $1 and user_id = $2 and id = $3 returning id`,
+      [tenantId, userId, id, text]);
+    return rows.length > 0;
+  }
+
   async clearMemories(tenantId: string, userId: string): Promise<number> {
     const rows = await this.q<{ id: string }>(tenantId,
       `delete from memories where tenant_id = $1 and user_id = $2 returning id`,

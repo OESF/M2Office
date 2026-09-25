@@ -319,3 +319,19 @@ test('見本の音声でも、書いた文字は秘書の取次に渡す（取�
     ['［見本の応答］明日の予定は 2 件です（明日の予定を教えて）']);
   session.close();
 });
+
+test('見本の音声でも、「画面に出して」は画面に出す道具へ渡す（第6.2.0節）', async () => {
+  const shown: Record<string, string>[] = [];
+  const sink = collect();
+  const show = {
+    name: 'show_on_canvas', description: 'x', parameters: { request: { description: 'x' } }, required: [],
+    run: async (args: Record<string, string>) => { shown.push(args); return { shown_on_screen: true }; },
+  };
+  const session = await new MockVoiceProvider().open({ instructions: 'x', speak: false, tools: [askTool([]), show], onEvent: sink.onEvent });
+  session.sendText('それ、画面に出して');
+  await waitFor(() => sink.events.some((e) => e.type === 'turn-end'));
+  assert.deepEqual(shown, [{}], '直前の答えを出す（依頼の言葉は渡さない）');
+  assert.deepEqual(sink.events.filter((e) => e.type === 'reply').map((e) => (e as { text: string }).text),
+    ['［見本の応答］（画面に出しました）']);
+  session.close();
+});

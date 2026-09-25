@@ -312,7 +312,8 @@ const pendingApprovals: DirectQuery = {
 const recentRuns: DirectQuery = {
   id: 'recent-runs',
   label: '実行状況の確認',
-  patterns: [/実行/, /状況/, /進捗/, /どうなった/],
+  // 「あれ、どうなった」は件数ではなく、覚えていることから答える（第10.7.3節）。ここでは拾わない
+  patterns: [/実行/, /状況/, /進捗/],
   compartment: null,
   async answer(ctx) {
     const runs = await ctx.repo.listRuns(ctx.tenantId, 5);

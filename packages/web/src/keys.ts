@@ -32,7 +32,7 @@ export const KEY_BINDINGS: KeyBinding[] = [
   { combo: 'Mod+Enter', what: 'いまの画面の主な操作を行う（実行する・送る）', group: '秘書' },
   { combo: 'Mod+Shift+1', what: 'メニューの 1〜9 番目の業務を開く', group: '業務' },
   { combo: 'Mod+B', what: 'メニューを広げる・狭くする', group: '画面' },
-  { combo: 'Mod+I', what: '秘書との会話を開く・閉じる', group: '画面' },
+  { combo: 'Mod+I', what: '秘書のキャンバスを開く・閉じる', group: '画面' },
   { combo: 'Mod+,', what: '個人設定を開く', group: '画面' },
   { combo: 'Mod+/', what: 'このショートカットの一覧を出す', group: '画面' },
   { combo: 'Escape', what: '開いているものを閉じる', group: '画面' },

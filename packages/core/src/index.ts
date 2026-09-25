@@ -104,6 +104,8 @@ export {
 } from './agents/index.js';
 export { Secretary, acceptsFile } from './secretary/secretary.js';
 export type { SecretaryReply, ResponseLayer } from './secretary/secretary.js';
+export { REFERS_TO_PAST, closeness, recall, type Recall } from './secretary/recall.js';
+export { LIST_MIN, SPOKEN_MAX, needsCanvas } from './secretary/canvas.js';
 export { DIRECT_QUERIES, type EvidenceItem } from './secretary/catalog.js';
 export {
   MEMORY_MAX_CHARS, memoryTextOf, refuseToRemember, refusalMessage,
