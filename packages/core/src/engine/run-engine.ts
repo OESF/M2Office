@@ -440,7 +440,9 @@ export class RunEngine {
       const stepTools = step.tools ?? def.tools;
       const tools = registry.allowed(stepTools);
       const system = buildSystemPrompt(def, tools, settings.writingStyle);
-      const prompt = buildStepPrompt(step, input, previous);
+      // 承認の前の組み立てでは、記録された操作を「待つ」ものと取り違えさせない（2026-09-25 に本物の推論で、
+      // 社内への共有を記録したあと「承認待ち」として投稿と登録を出さずに終えた）
+      const prompt = buildStepPrompt(step, input, previous) + (mode === 'plan' ? PLAN_NOTE : '');
       /*
         ツールを呼んだら、その結果を渡してもう一度考えさせる（仕様書 第9.3.2節）。
         1 往復で終えると、推論がツールを呼んだ時点でステップが終わり、**文が 1 つも残らない**。
@@ -527,7 +529,7 @@ export class RunEngine {
             // 同じ操作は 1 度だけ記録する（二重に実行しない）。印には中身の鍵を持たせ、実行後に結果と突き合わせる
             const key = callKey(recorded);
             if (!deferred.some((d) => callKey(d) === key)) deferred.push(recorded);
-            roundResults.push({ name: call.name, risk: tool.risk, pending: '承認のあとに実行します（まだ実行していません）', key });
+            roundResults.push({ name: call.name, risk: tool.risk, pending: '記録しました。承認のあとに、このとおり実行します。この段のほかの操作も、続けて呼んでください', key });
             continue;
           }
           if (alwaysRequiresApproval(tool.risk) && !gatedByApproval) {
@@ -964,9 +966,23 @@ const PREVIOUS_RESULTS_LIMIT = 8000;
  *
  * @remarks
  * 最後の 1 回は**ツールを使わせない**。ここまでに分かったことで答えさせ、
- * ツールの呼び出しだけでステップが終わるのを防ぐ。
+ * ツールの呼び出しだけでステップが終わるのを防ぐ。ツールを使えるのは 3 往復（第 0.110.1 版で 2 から 3 に）。
+ * 前の結果を使う操作が続く段（文書を保存し、その ID で共有し、そのリンクで投稿する）が 2 往復では足りなかった。
  */
-const MAX_TOOL_ROUNDS = 3;
+const MAX_TOOL_ROUNDS = 4;
+
+/**
+ * 承認の前の組み立て（ADR-0023）で、段の指示に添える説明。
+ *
+ * @remarks 書き込み・送信は記録されるだけなので、推論は「承認待ち」と受け取って残りの操作を出さずに終えやすい
+ */
+const PLAN_NOTE = [
+  '',
+  '# いまの進め方（承認の前の組み立て）',
+  'この段は、承認の前に組み立てている。社内への書き込みと社外への送信（起票・共有・投稿・登録など）は、呼ぶと記録され、承認のあとにそのとおり実行される。',
+  '記録された操作は、行ったものとして扱ってよい。**「承認を待つ」として止めず、この段の指示にある操作を最後まですべて呼ぶこと。**',
+  '記録された操作の結果（ID など）はまだ無い。後の操作に要る値は、すでに結果の出ている操作（読み取り・下書き）から取る。',
+].join('\n');
 
 /** 最後の往復で添える指示。ここまでに分かったことで答えさせる（仕様書 第9.3.2節）。 */
 const NO_MORE_TOOLS = [

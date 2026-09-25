@@ -757,6 +757,43 @@ test('AG-02 は承認①で確かめた議事録を Google ドキュメントに
   assert.equal(ctx.repo.knowledge.length, 1);
 });
 
+test('承認の前の組み立てでは、記録された操作のあとも、段の残りの操作をすべて出させる（2026-09-25 の不具合）', async () => {
+  // 本物の推論は、社内への共有が「記録された」と見ると、承認待ちとして投稿と登録を出さずに終えた。
+  // それをまねる推論: 段の指示に組み立ての説明が無ければ、記録を見た時点で止まる
+  const ctx = setup(AG02_MINUTES, { name: 'noop', args: {} });
+  const base = minutesLlm(ctx.repo);
+  const rounds: Record<string, number> = {};
+  const P = { tenantId: 't', userId: 'u-member' };
+  (ctx.engine as unknown as { deps: { llm: LlmProvider } }).deps.llm = {
+    name: 'cautious',
+    async complete(req: LlmRequest) {
+      const id = String(req.context?.stepId ?? '');
+      if (id !== 'share') return base.complete(req);
+      const n = (rounds[id] = (rounds[id] ?? 0) + 1);
+      const tool = (c: unknown[]) => ({ text: c.map((x) => '```tool\n' + JSON.stringify(x) + '\n```').join('\n'), tokensUsed: 1 });
+      const artifactId = ctx.repo.artifacts[0]!.id;
+      if (n === 1) return tool([{ name: 'docs.create', args: { artifactId, folderName: 'M2Office 議事録' } }]);
+      const doc = (await ctx.connector.drive.search(P, { query: '営業定例の議事録' })).find((f) => f.kind === 'document')!;
+      if (n === 2) return tool([{ name: 'drive.share_company', args: { fileId: doc.id } }]);
+      const told = String(req.messages[1]?.content ?? '').includes('最後まですべて呼ぶこと');
+      if (n === 3 && told) {
+        return tool([{ name: 'chat.post', args: { space: 'general', text: '議事録を共有します' } }, { name: 'knowledge.register', args: { artifactId } }]);
+      }
+      return { text: '社内共有は承認待ちのため、投稿と登録はまだ行いません。', tokensUsed: 1 };
+    },
+  };
+  const admin = { id: 'u-admin', roles: ['admin', 'approver'] };
+  const first = await ctx.engine.advance(ctx.run);
+  if (first.outcome !== 'awaiting_approval') assert.fail(first.outcome);
+  await ctx.engine.decideApproval('t', first.approvalId, 'approved', admin, null);
+  const second = await ctx.engine.advance({ ...(await ctx.repo.getRun('t', 'r1'))!, status: 'running' });
+  if (second.outcome !== 'awaiting_approval') assert.fail(second.outcome);
+  const present = ctx.repo.approvals.find((a) => a.id === second.approvalId)!.present;
+  assert.match(present, /会社の全員が閲覧できるようにします/);
+  assert.match(present, /チャットのスペース「general」に投稿します/, '記録のあとも、投稿を出させる');
+  assert.match(present, /社内の知識に登録します/, '記録のあとも、知識への登録を出させる');
+});
+
 test('承認②を却下したら、保存した文書は本人のドライブに残り、共有も投稿もしない', async () => {
   const { ctx, decide } = await minutesWithDocs();
   await decide('rejected');

@@ -143,14 +143,15 @@ test('上限まで道具を呼び続けても、最後は文で終わらせる',
   const llm = new ScriptedLlm([
     CALL('knowledge.search', { query: 'あ' }),
     CALL('knowledge.search', { query: 'い' }),
+    CALL('knowledge.search', { query: 'う' }),
     'ここまでで分かったことをお伝えします。',
   ]);
   const { engine, run, repo } = engineFor(QA_DEF, llm);
 
   await engine.advance(run);
-  assert.equal(llm.seen.length, 3, '3 往復で打ち切る');
+  assert.equal(llm.seen.length, 4, '4 往復で打ち切る（道具を使えるのは 3 往復。第 0.110.1 版）');
   // 最後の往復では道具を使わせない
-  const last = llm.seen[2]!.messages.map((m) => m.content).join('\n');
+  const last = llm.seen[3]!.messages.map((m) => m.content).join('\n');
   assert.match(last, /これ以上ツールは使えません/);
   const out = repo.steps[0]!['output'] as { text: string };
   assert.equal(out.text, 'ここまでで分かったことをお伝えします。');
