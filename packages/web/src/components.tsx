@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import type { Artifact, RunStep } from '@m2office/shared';
+import { hideInternalIds, type Artifact, type RunStep } from '@m2office/shared';
 import {
   api, describeError, type AgentSummary, type ApprovalView, type JsonSchemaField, type RunDetail,
 } from './api.js';
@@ -137,7 +137,8 @@ function Field({
 function answerOf(steps: RunStep[]): string {
   for (let i = steps.length - 1; i >= 0; i--) {
     const raw = (steps[i]?.output as { text?: string } | null)?.text ?? '';
-    const text = raw.replace(/```tool[\s\S]*?```/g, '').trim();
+    // 推論の文に混じった内部の ID（成果物・ファイル・実行）は出さない。リンクは残す（仕様書 第6.2.2節）
+    const text = hideInternalIds(raw.replace(/```tool[\s\S]*?```/g, '')).trim();
     if (text) return text;
   }
   return '';
