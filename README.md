@@ -190,7 +190,8 @@ docs/            開発規約・リリース規定・設計判断記録
 | `GOOGLE_LOGIN_REDIRECT_URI` | `http://localhost:<API_PORT>/v1/oauth/google/login-callback` | Google に登録する戻り先。**運営のホスト 1 本**（第16.1.2節） |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | — | Google 連携（会社ごとの OAuth クライアント。管理者ページで登録する。ここは開発の既定値としてのみ使う） |
 | `WEB_HTTPS` | false | 開発で音声を試すときに true。**ブラウザは安全な文脈でしかマイクを使わせない**（`npm run dev:cert` で証明書を作る） |
-| `CONNECTOR_MODE` | mock | `mock`（ダミーデータ）または `google`（未実装。指定すると起動を止める） |
+| `CONNECTOR_MODE` | mock | `mock`（ダミーデータ）または `google`（Gmail とカレンダーを本物で動かす。ほかのサービスは「準備中」と断る。仕様書 第14.3.4節） |
+| `CONNECTOR_MOCK_TENANTS` | （なし） | **開発だけ。** `google` のとき、見本のまま動かす会社のテナント ID（カンマ区切り）。smoke の会社を見本に保つ（例: `t-alpha,t-beta`）。本番で設定すると起動を拒否する |
 | `AUTH_DEV_LOGIN` | false | 開発用ログインを許す。`.env.example` では true |
 | `AUTH_DEV_HEADERS` | false | `X-Tenant`・`X-User` ヘッダーでの指定を許す。動作確認用 |
 | `SESSION_TTL_HOURS` | 168 | ログイン状態の有効時間 |

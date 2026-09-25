@@ -75,7 +75,7 @@ export const slidesCreate: Tool = {
     const created = await ctx.connector.slides.createPresentation(
       { tenantId: ctx.tenantId, userId: ctx.userId }, { title: plan.title, plan, template },
     );
-    const mock = ctx.connector.source === 'mock';
+    const mock = ctx.connector.sourceFor(ctx.tenantId) === 'mock';
     const links = created.url
       ? [`開く: ${created.url}`, ...(created.pptxUrl ? [`PowerPoint 形式: ${created.pptxUrl}`] : [])]
       : ['（見本の接続口のため、Google スライドは作っていません。構成をアウトラインとして残しています）'];

@@ -26,7 +26,12 @@ const repo = new PostgresRepository(
 );
 const registry = new ToolRegistry();
 for (const tool of BUILTIN_TOOLS) registry.register(tool);
-const connector = buildConnector(process.env['CONNECTOR_MODE'] ?? 'mock');
+// 秘密の値の箱。接続口（google）がリフレッシュ トークンを戻すのにも使う
+const { box } = secretBoxFromEnv();
+const connector = buildConnector(process.env['CONNECTOR_MODE'] ?? 'mock', {
+  repo, box, mockTenants: (process.env['CONNECTOR_MOCK_TENANTS'] ?? '').split(','),
+  production: process.env['NODE_ENV'] === 'production',
+});
 
 // API と同じ置き場を使う。既定はリポジトリ直下の .data/files
 const files = new LocalFileStore(
@@ -53,7 +58,6 @@ const research = process.env['LLM_PROVIDER'] === 'gemini' && process.env['GEMINI
   ? new GeminiResearchProvider(process.env['GEMINI_API_KEY'], defaultGeminiModels().research)
   : new MockResearchProvider();
 // 会社ごとの Gemini（会社が自社の鍵を登録していればその鍵。仕様書 第14.3.3節）
-const { box } = secretBoxFromEnv();
 // 役割ごとのモデル。既定は安いほうから選ぶ（仕様書 第20.2.2節）。API と同じ
 const models = defaultGeminiModels();
 warnHotSwapModels(models, log);
@@ -76,7 +80,7 @@ const scheduler = new Scheduler({
   repo, resolveDefinition, isAvailable, logger: log,
   // 本物の Google の接続口で動かすときだけ、接続の無い人の Google を使う定時実行を飛ばす（仕様書 第6.5.2.1節）
   missingGoogleConnection: async (tenantId, userId, def) => {
-    if (connector.source !== 'google') return false;
+    if (connector.sourceFor(tenantId) !== 'google') return false;
     if (!agentUsesGoogle(def, (await hub.forTenant(tenantId)).registry)) return false;
     return !(await repo.getGoogleConnection(tenantId, userId));
   },
@@ -129,7 +133,8 @@ process.on('SIGINT', () => { running = false; });
 process.on('SIGTERM', () => { running = false; });
 
 log.info('待ち行列の監視を開始しました', {
-  connector: connector.source, scheduleIntervalMs: SCHEDULE_INTERVAL_MS,
+  connector: process.env['CONNECTOR_MODE'] ?? 'mock', mockTenants: process.env['CONNECTOR_MOCK_TENANTS'] || undefined,
+  scheduleIntervalMs: SCHEDULE_INTERVAL_MS,
 });
 
 while (running) {

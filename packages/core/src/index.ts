@@ -36,14 +36,17 @@ export * from './retention/google-data.js';
 export * from './retention/revocation.js';
 export * from './knowledge/index.js';
 
-export { buildConnector, MockWorkspaceConnector } from './connectors/index.js';
+export {
+  buildConnector, MockWorkspaceConnector, GoogleWorkspaceConnector, TenantRoutingConnector, ConnectorUnavailableError,
+  GOOGLE_API_ENDPOINTS, GoogleTokenSource, type GoogleApiEndpoints, type ConnectorDeps,
+} from './connectors/index.js';
 export {
   HttpMcpClient, MCP_TIMEOUT_MS, MCP_RESULT_LIMIT,
   type McpClient, type McpToolInfo, type McpCallResult,
 } from './connectors/mcp.js';
 export type {
   WorkspaceConnector, ConnectorPrincipal, DataSource, MailSummary, MailMessage,
-  CalendarEvent, TaskItem, BusySlot, DriveFile, DirectoryPerson, MeetTranscript, FormResponses,
+  CalendarEvent, TaskItem, BusySlot, DriveFile, DirectoryPerson, MeetTranscript, FormResponses, ConnectorUnavailableKind,
 } from './connectors/types.js';
 
 export * from './files/index.js';

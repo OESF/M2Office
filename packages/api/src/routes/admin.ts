@@ -353,8 +353,8 @@ export function adminRoute(deps: AppDeps) {
   app.get('/connectors', (c) =>
     c.json({
       workspace: {
-        source: deps.connector.source,
-        label: deps.connector.source === 'mock'
+        source: deps.connector.sourceFor(c.get('ctx').tenant.id),
+        label: deps.connector.sourceFor(c.get('ctx').tenant.id) === 'mock'
           ? 'ダミーデータで動作中（Google 未接続）'
           : 'Google Workspace に接続中',
       },

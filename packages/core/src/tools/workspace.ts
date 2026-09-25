@@ -35,7 +35,7 @@ export const gmailList: Tool = {
       since: str(args['since']) || undefined,
       limit: typeof args['limit'] === 'number' ? args['limit'] : 20,
     });
-    return { source: ctx.connector.source, count: items.length, items };
+    return { source: ctx.connector.sourceFor(ctx.tenantId), count: items.length, items };
   },
 };
 
@@ -56,8 +56,8 @@ export const gmailGet: Tool = {
   google: { scope: 'gmail.readonly', level: 'restricted' },
   async invoke(args, ctx) {
     const mail = await ctx.connector.mail.get(principal(ctx), str(args['id']));
-    if (!mail) return { source: ctx.connector.source, available: false, reason: 'メールが見つかりません' };
-    return { source: ctx.connector.source, available: true, untrusted: true, mail };
+    if (!mail) return { source: ctx.connector.sourceFor(ctx.tenantId), available: false, reason: 'メールが見つかりません' };
+    return { source: ctx.connector.sourceFor(ctx.tenantId), available: true, untrusted: true, mail };
   },
 };
 
@@ -83,7 +83,7 @@ export const gmailCreateDraft: Tool = {
       subject: str(args['subject']),
       body: str(args['body']),
     });
-    return { source: ctx.connector.source, ...res, sent: false };
+    return { source: ctx.connector.sourceFor(ctx.tenantId), ...res, sent: false };
   },
 };
 
@@ -105,7 +105,7 @@ export const calendarList: Tool = {
     const from = str(args['from']) || jst(today, 0);
     const to = str(args['to']) || jst(addDays(today, 7), 0);
     const items = await ctx.connector.calendar.list(principal(ctx), { from, to });
-    return { source: ctx.connector.source, from, to, count: items.length, items };
+    return { source: ctx.connector.sourceFor(ctx.tenantId), from, to, count: items.length, items };
   },
 };
 
@@ -125,13 +125,17 @@ export const calendarFreeBusy: Tool = {
   async invoke(args, ctx) {
     const emails = Array.isArray(args['emails']) ? args['emails'].map(String) : [];
     if (emails.length === 0) {
-      return { source: ctx.connector.source, available: false, reason: '参加者が指定されていません' };
+      return { source: ctx.connector.sourceFor(ctx.tenantId), available: false, reason: '参加者が指定されていません' };
     }
     const today = ymd(new Date());
     const from = str(args['from']) || jst(addDays(today, 1), 0);
     const to = str(args['to']) || jst(addDays(today, 8), 0);
-    const busy = await ctx.connector.calendar.freeBusy(principal(ctx), { emails, from, to });
-    return { source: ctx.connector.source, available: true, from, to, busy };
+    const { busy, unknown } = await ctx.connector.calendar.freeBusy(principal(ctx), { emails, from, to });
+    return {
+      source: ctx.connector.sourceFor(ctx.tenantId), available: true, from, to, busy,
+      // 予定を見られなかった人を「空き」とみなさない（仕様書 第14.3.4節）
+      ...(unknown.length > 0 ? { unknown, note: '次の人は予定を見られなかったため、空いているかどうか分かりません。候補を出すときは、そのことを書いてください' } : {}),
+    };
   },
 };
 
@@ -156,7 +160,7 @@ export const calendarCreate: Tool = {
       end: str(args['end']),
       attendees: Array.isArray(args['attendees']) ? args['attendees'].map(String) : [],
     });
-    return { source: ctx.connector.source, ...res };
+    return { source: ctx.connector.sourceFor(ctx.tenantId), ...res };
   },
 };
 
@@ -171,7 +175,7 @@ export const tasksList: Tool = {
   google: { scope: 'tasks', level: 'sensitive' },
   async invoke(_args, ctx) {
     const items = await ctx.connector.tasks.list(principal(ctx), {});
-    return { source: ctx.connector.source, count: items.length, items };
+    return { source: ctx.connector.sourceFor(ctx.tenantId), count: items.length, items };
   },
 };
 
@@ -189,7 +193,7 @@ export const tasksCreate: Tool = {
       title: str(args['title'], '無題のタスク'),
       due: str(args['due']) || null,
     });
-    return { source: ctx.connector.source, created: true, ...res, title: args['title'] ?? '' };
+    return { source: ctx.connector.sourceFor(ctx.tenantId), created: true, ...res, title: args['title'] ?? '' };
   },
 };
 
@@ -207,7 +211,7 @@ export const chatPost: Tool = {
       space: str(args['space'], 'general'),
       text: str(args['text']),
     });
-    return { source: ctx.connector.source, posted: true, ...res };
+    return { source: ctx.connector.sourceFor(ctx.tenantId), posted: true, ...res };
   },
 };
 

@@ -109,7 +109,7 @@ export function connectionsRoute(deps: AppDeps) {
         updatedAt: google?.updatedAt ?? null,
         redirectUri: deps.oauth.redirectUri,
         requiredScopes: required.map((r) => ({ ...r, label: googleScopeLabel(r.scope) })),
-        workspaceSource: deps.connector.source,
+        workspaceSource: deps.connector.sourceFor(tenant.id),
         users: users.filter((u) => u.status === 'active').map((u) => {
           const conn = conns.find((x) => x.userId === u.id);
           return {

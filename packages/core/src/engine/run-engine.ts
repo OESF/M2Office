@@ -20,7 +20,7 @@ import type { Repository } from '../repository/types.js';
 import type { LlmMessage, LlmProvider, LlmResponse } from '../llm/provider.js';
 import { costJpy } from '../llm/models.js';
 import { validateToolArgs, type Tool, type ToolRegistry } from '../tools/registry.js';
-import type { WorkspaceConnector } from '../connectors/types.js';
+import { ConnectorUnavailableError, type WorkspaceConnector } from '../connectors/types.js';
 import type { FileStore } from '../files/store.js';
 import type { ResearchProvider } from '../research/provider.js';
 import { silentLogger, type Logger } from '../log/logger.js';
@@ -554,13 +554,24 @@ export class RunEngine {
     if (!tool) return { name: call.name, error: '許可されていないツールです' };
     this.log.debug('ツールを呼び出し', { runId: run.id, tenantId: run.tenantId, tool: call.name, risk: tool.risk });
     const approvalsAhead = def.steps.slice(stepIndex + 1).filter((s) => s.type === 'approval').length;
-    const out = await tool.invoke(call.args, {
-      tenantId: run.tenantId, userId: requestedBy, runId: run.id,
-      compartment: def.compartment, repo, connector, files, research,
-      approvalsAhead, isGoogleTool: (name) => !!registry.get(name)?.google,
-      // 画像から文字を読む手段。推論が持っていなければ渡さない（第9.4.1節、Q-56）
-      ...(llm?.readImage ? { ocr: async (r) => (await llm.readImage!(r)).text } : {}),
-    });
+    let out: unknown;
+    try {
+      out = await tool.invoke(call.args, {
+        tenantId: run.tenantId, userId: requestedBy, runId: run.id,
+        compartment: def.compartment, repo, connector, files, research,
+        approvalsAhead, isGoogleTool: (name) => !!registry.get(name)?.google,
+        // 画像から文字を読む手段。推論が持っていなければ渡さない（第9.4.1節、Q-56）
+        ...(llm?.readImage ? { ocr: async (r) => (await llm.readImage!(r)).text } : {}),
+      });
+    } catch (err) {
+      // 接続口に断られたとき（ADR-0022）。読むだけのツールなら実行を止めず、取得できなかったことを理由つきで返す。
+      // 書くツールはそのまま失敗にする（書いたつもりで先へ進ませない）
+      if (!(err instanceof ConnectorUnavailableError) || tool.risk !== 'read') throw err;
+      this.log.info('接続口に断られました（読むツールのため、続けます）', {
+        runId: run.id, tenantId: run.tenantId, tool: call.name, kind: err.kind,
+      });
+      out = { source: connector.sourceFor(run.tenantId), available: false, reason: `取得できませんでした: ${err.message}` };
+    }
     await repo.appendAudit({
       id: randomUUID(), tenantId: run.tenantId, actorType: 'agent', actorId: def.id,
       action: 'tool.invoke', targetType: 'tool', targetId: call.name,

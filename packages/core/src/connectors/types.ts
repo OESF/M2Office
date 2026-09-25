@@ -2,7 +2,7 @@
  * @file 業務システムへの接続口（コネクタ）の型。メール・予定・タスク・チャット・ドライブ・ドキュメント・スプレッドシート・スライドの操作を定める。
  *
  * ツール層はこのインターフェースだけを見て、Google の API を直接呼ばない。
- * 実装は `mock`（ダミー）と `google`（B-2 の完了後）の 2 つ。
+ * 実装は `mock`（ダミー）と `google`（仕様書 第14.3.4節。Gmail とカレンダーから）の 2 つ。
  * どちらも返す値に出どころ（`DataSource`）を含め、ダミーを本物と取り違えないようにする。
  *
  * @see 仕様書 第14.5節 Google 以外のグループウェアへの対応
@@ -13,6 +13,36 @@ import type { SlidePlan } from '../slides/plan.js';
 
 /** 値の出どころ。画面と監査ログで区別して表示する。 */
 export type DataSource = 'mock' | 'google';
+
+/**
+ * 接続口が呼べないときの理由（仕様書 第14.3.4節「断るときの言葉」）。
+ *
+ * - `not-connected`: 本人が Google と接続していない
+ * - `revoked`: 許可が取り消されたか、期限が切れた
+ * - `insufficient-scope`: その操作に要る許可が無い
+ * - `api-disabled`: 会社の Google Cloud で、その API が有効になっていない
+ * - `no-client` / `client-error`: 会社の OAuth クライアントが無い・誤っている
+ * - `not-implemented`: その会社の接続口で、まだ本物につないでいないサービス（準備中）
+ * - `unreachable`: Google に届かない・混み合っている
+ */
+export type ConnectorUnavailableKind =
+  | 'not-connected' | 'revoked' | 'insufficient-scope' | 'api-disabled'
+  | 'no-client' | 'client-error' | 'not-implemented' | 'unreachable';
+
+/**
+ * 接続口が呼べないことを伝える例外（ADR-0022）。
+ *
+ * @remarks
+ * **文にはメールや予定の中身を入れない。** 実行の失敗の理由として、管理者の一覧にも出るためである。
+ * エンジンは、読むだけのツール（危険度 `read`）でこれを受けたら実行を止めず、
+ * 「取得できませんでした」と理由つきで推論に返す。書くツールならステップを失敗にする。
+ */
+export class ConnectorUnavailableError extends Error {
+  constructor(readonly kind: ConnectorUnavailableKind, message: string) {
+    super(message);
+    this.name = 'ConnectorUnavailableError';
+  }
+}
 
 /** 誰の権限で接続するか。利用者本人の認可で動く（仕様書 第14.3節）。 */
 export interface ConnectorPrincipal {
@@ -41,6 +71,8 @@ export interface CalendarEvent {
   end: string;
   attendees: string[];
   location: string | null;
+  /** 終日の予定。`start`・`end` はその日の 0 時と翌日の 0 時（日本時間。仕様書 第14.3.4節）。 */
+  allDay?: boolean;
 }
 
 /** 参加者ごとの予定が埋まっている時間帯。 */
@@ -89,11 +121,16 @@ export interface MailConnector {
 export interface CalendarConnector {
   /** 期間内の予定を開始時刻の順に返す。 */
   list(p: ConnectorPrincipal, range: { from: string; to: string }): Promise<CalendarEvent[]>;
-  /** 参加者の埋まっている時間帯を返す。 */
+  /**
+   * 参加者の埋まっている時間帯を返す。
+   *
+   * @returns `busy` は埋まっている時間帯。`unknown` は予定を見られなかった人（社外・非公開など）。
+   *   **見られなかった人を「空き」とみなさない**（仕様書 第14.3.4節）
+   */
   freeBusy(
     p: ConnectorPrincipal,
     q: { emails: string[]; from: string; to: string },
-  ): Promise<BusySlot[]>;
+  ): Promise<{ busy: BusySlot[]; unknown: string[] }>;
   /** 予定を作成し、参加者を招待する。 */
   create(
     p: ConnectorPrincipal,
@@ -221,7 +258,11 @@ export interface SlidesConnector {
  * そのテナントと利用者の範囲でのみ動く（不変則 I-2）。
  */
 export interface WorkspaceConnector {
-  readonly source: DataSource;
+  /**
+   * その会社の値の出どころ（ADR-0022）。開発では会社ごとに見本と本物を分けられるため、
+   * 接続口全体ではなく会社ごとに引く。
+   */
+  sourceFor(tenantId: string): DataSource;
   mail: MailConnector;
   calendar: CalendarConnector;
   tasks: TaskConnector;

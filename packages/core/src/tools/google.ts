@@ -39,7 +39,7 @@ export const gmailSearch: Tool = {
     const items = await ctx.connector.mail.search(principal(ctx), {
       query: str(args['query']), limit: Math.min(Number(args['limit'] ?? 20) || 20, 100),
     });
-    return { source: ctx.connector.source, count: items.length, items };
+    return { source: ctx.connector.sourceFor(ctx.tenantId), count: items.length, items };
   },
 };
 
@@ -63,11 +63,11 @@ export const gmailSend: Tool = {
   google: { scope: 'gmail.send', level: 'sensitive' },
   async invoke(args, ctx) {
     const to = list(args['to']);
-    if (to.length === 0) return { source: ctx.connector.source, sent: false, reason: '宛先がありません' };
+    if (to.length === 0) return { source: ctx.connector.sourceFor(ctx.tenantId), sent: false, reason: '宛先がありません' };
     const res = await ctx.connector.mail.send(principal(ctx), {
       to, cc: list(args['cc']), subject: str(args['subject']), body: str(args['body']), replyTo: str(args['replyTo']) || null,
     });
-    return { source: ctx.connector.source, sent: true, ...res };
+    return { source: ctx.connector.sourceFor(ctx.tenantId), sent: true, ...res };
   },
 };
 
@@ -93,7 +93,7 @@ export const calendarUpdate: Tool = {
       title: str(args['title']) || undefined, start: str(args['start']) || undefined, end: str(args['end']) || undefined,
       attendees: Array.isArray(args['attendees']) ? list(args['attendees']) : undefined,
     });
-    return res ? { source: ctx.connector.source, updated: true, ...res } : { source: ctx.connector.source, updated: false, reason: '予定が見つかりません' };
+    return res ? { source: ctx.connector.sourceFor(ctx.tenantId), updated: true, ...res } : { source: ctx.connector.sourceFor(ctx.tenantId), updated: false, reason: '予定が見つかりません' };
   },
 };
 
@@ -112,7 +112,7 @@ export const calendarCancel: Tool = {
   google: { scope: 'calendar.events', level: 'sensitive' },
   async invoke(args, ctx) {
     const res = await ctx.connector.calendar.cancel(principal(ctx), { eventId: str(args['eventId']) });
-    return res ? { source: ctx.connector.source, cancelled: true, ...res } : { source: ctx.connector.source, cancelled: false, reason: '予定が見つかりません' };
+    return res ? { source: ctx.connector.sourceFor(ctx.tenantId), cancelled: true, ...res } : { source: ctx.connector.sourceFor(ctx.tenantId), cancelled: false, reason: '予定が見つかりません' };
   },
 };
 
@@ -131,7 +131,7 @@ export const tasksComplete: Tool = {
   google: { scope: 'tasks', level: 'sensitive' },
   async invoke(args, ctx) {
     const res = await ctx.connector.tasks.complete(principal(ctx), { taskId: str(args['taskId']) });
-    return res ? { source: ctx.connector.source, completed: true, ...res } : { source: ctx.connector.source, completed: false, reason: 'ToDo が見つかりません' };
+    return res ? { source: ctx.connector.sourceFor(ctx.tenantId), completed: true, ...res } : { source: ctx.connector.sourceFor(ctx.tenantId), completed: false, reason: 'ToDo が見つかりません' };
   },
 };
 
@@ -150,7 +150,7 @@ export const driveSearch: Tool = {
   google: { scope: 'drive.file', level: 'non-sensitive' },
   async invoke(args, ctx) {
     const items = await ctx.connector.drive.search(principal(ctx), { query: str(args['query']), limit: Math.min(Number(args['limit'] ?? 20) || 20, 100) });
-    return { source: ctx.connector.source, count: items.length, items };
+    return { source: ctx.connector.sourceFor(ctx.tenantId), count: items.length, items };
   },
 };
 
@@ -172,10 +172,10 @@ export const driveRead: Tool = {
   google: { scope: 'drive.file', level: 'non-sensitive' },
   async invoke(args, ctx) {
     const res = await ctx.connector.drive.read(principal(ctx), str(args['fileId']));
-    if (!res) return { source: ctx.connector.source, available: false, reason: 'ファイルが見つからないか、読めません' };
+    if (!res) return { source: ctx.connector.sourceFor(ctx.tenantId), available: false, reason: 'ファイルが見つからないか、読めません' };
     const truncated = res.text.length > READ_LIMIT;
     return {
-      source: ctx.connector.source, available: true, untrusted: true, file: res.file,
+      source: ctx.connector.sourceFor(ctx.tenantId), available: true, untrusted: true, file: res.file,
       text: truncated ? `${res.text.slice(0, READ_LIMIT)}\n…（以降は省略）` : res.text, truncated,
     };
   },
@@ -192,7 +192,7 @@ export const driveCreateFolder: Tool = {
   google: { scope: 'drive.file', level: 'non-sensitive' },
   async invoke(args, ctx) {
     const folder = await ctx.connector.drive.createFolder(principal(ctx), { name: str(args['name']), parentId: str(args['parentId']) || null });
-    return { source: ctx.connector.source, created: true, folder };
+    return { source: ctx.connector.sourceFor(ctx.tenantId), created: true, folder };
   },
 };
 
@@ -207,7 +207,7 @@ export const docsCreate: Tool = {
   google: { scope: 'drive.file', level: 'non-sensitive' },
   async invoke(args, ctx) {
     const file = await ctx.connector.docs.create(principal(ctx), { title: str(args['title']), body: str(args['body']), folderId: str(args['folderId']) || null });
-    return { source: ctx.connector.source, created: true, file };
+    return { source: ctx.connector.sourceFor(ctx.tenantId), created: true, file };
   },
 };
 
@@ -222,7 +222,7 @@ export const docsAppend: Tool = {
   google: { scope: 'drive.file', level: 'non-sensitive' },
   async invoke(args, ctx) {
     const res = await ctx.connector.docs.append(principal(ctx), { documentId: str(args['documentId']), text: str(args['text']) });
-    return res ? { source: ctx.connector.source, appended: true, ...res } : { source: ctx.connector.source, appended: false, reason: 'M2Office で作った文書が見つかりません' };
+    return res ? { source: ctx.connector.sourceFor(ctx.tenantId), appended: true, ...res } : { source: ctx.connector.sourceFor(ctx.tenantId), appended: false, reason: 'M2Office で作った文書が見つかりません' };
   },
 };
 
@@ -242,7 +242,7 @@ export const sheetsCreate: Tool = {
     const file = await ctx.connector.sheets.create(principal(ctx), {
       title: str(args['title']), columns: list(args['columns']), rows: rows(args['rows']), folderId: str(args['folderId']) || null,
     });
-    return { source: ctx.connector.source, created: true, file };
+    return { source: ctx.connector.sourceFor(ctx.tenantId), created: true, file };
   },
 };
 
@@ -264,8 +264,8 @@ export const sheetsRead: Tool = {
       spreadsheetId: str(args['spreadsheetId']), maxRows: Math.min(Number(args['maxRows'] ?? 500) || 500, 5000),
     });
     return res
-      ? { source: ctx.connector.source, available: true, untrusted: true, file: res.file, columns: res.values[0] ?? [], rows: res.values.slice(1) }
-      : { source: ctx.connector.source, available: false, reason: 'スプレッドシートが見つからないか、読めません' };
+      ? { source: ctx.connector.sourceFor(ctx.tenantId), available: true, untrusted: true, file: res.file, columns: res.values[0] ?? [], rows: res.values.slice(1) }
+      : { source: ctx.connector.sourceFor(ctx.tenantId), available: false, reason: 'スプレッドシートが見つからないか、読めません' };
   },
 };
 
@@ -284,9 +284,9 @@ export const sheetsAppend: Tool = {
   google: { scope: 'drive.file', level: 'non-sensitive' },
   async invoke(args, ctx) {
     const r = rows(args['rows']);
-    if (r.length === 0) return { source: ctx.connector.source, appended: 0, reason: '足す行がありません' };
+    if (r.length === 0) return { source: ctx.connector.sourceFor(ctx.tenantId), appended: 0, reason: '足す行がありません' };
     const res = await ctx.connector.sheets.append(principal(ctx), { spreadsheetId: str(args['spreadsheetId']), rows: r });
-    return res ? { source: ctx.connector.source, ...res } : { source: ctx.connector.source, appended: 0, reason: 'M2Office で作ったスプレッドシートが見つかりません' };
+    return res ? { source: ctx.connector.sourceFor(ctx.tenantId), ...res } : { source: ctx.connector.sourceFor(ctx.tenantId), appended: 0, reason: 'M2Office で作ったスプレッドシートが見つかりません' };
   },
 };
 
@@ -312,12 +312,12 @@ export const driveShare: Tool = {
   google: { scope: 'drive.file', level: 'non-sensitive' },
   async invoke(args, ctx) {
     const emails = list(args['emails']);
-    if (emails.length === 0) return { source: ctx.connector.source, shared: false, reason: '共有する相手がいません' };
+    if (emails.length === 0) return { source: ctx.connector.sourceFor(ctx.tenantId), shared: false, reason: '共有する相手がいません' };
     const role = (['reader', 'commenter', 'writer'] as const).find((r) => r === args['role']) ?? 'reader';
     const res = await ctx.connector.drive.share(principal(ctx), { fileId: str(args['fileId']), emails, role });
     return res
-      ? { source: ctx.connector.source, shared: true, role, roleLabel: ROLE_LABEL[role], ...res }
-      : { source: ctx.connector.source, shared: false, reason: 'M2Office で作ったファイルが見つかりません（それ以外のファイルは共有しません）' };
+      ? { source: ctx.connector.sourceFor(ctx.tenantId), shared: true, role, roleLabel: ROLE_LABEL[role], ...res }
+      : { source: ctx.connector.sourceFor(ctx.tenantId), shared: false, reason: 'M2Office で作ったファイルが見つかりません（それ以外のファイルは共有しません）' };
   },
 };
 
@@ -336,7 +336,7 @@ export const directorySearch: Tool = {
   google: { scope: 'directory.readonly', level: 'sensitive' },
   async invoke(args, ctx) {
     const people = await ctx.connector.directory.search(principal(ctx), { query: str(args['query']), limit: Math.min(Number(args['limit'] ?? 20) || 20, 100) });
-    return { source: ctx.connector.source, count: people.length, people };
+    return { source: ctx.connector.sourceFor(ctx.tenantId), count: people.length, people };
   },
 };
 
@@ -361,12 +361,12 @@ export const meetTranscript: Tool = {
   async invoke(args, ctx) {
     const t = await ctx.connector.meet.transcript(principal(ctx), { query: str(args['query']) });
     if (!t) {
-      return { source: ctx.connector.source, available: false, reason: '会議の文字起こしが見つかりません（文字起こしは会議の終了から 30 日で消えます）' };
+      return { source: ctx.connector.sourceFor(ctx.tenantId), available: false, reason: '会議の文字起こしが見つかりません（文字起こしは会議の終了から 30 日で消えます）' };
     }
     const text = t.entries.map((e) => `${e.speaker}: ${e.text}`).join('\n');
     const truncated = text.length > TRANSCRIPT_LIMIT;
     return {
-      source: ctx.connector.source, available: true, untrusted: true, conference: t.conference,
+      source: ctx.connector.sourceFor(ctx.tenantId), available: true, untrusted: true, conference: t.conference,
       text: truncated ? `${text.slice(0, TRANSCRIPT_LIMIT)}\n…（以降は省略）` : text, truncated,
     };
   },
@@ -395,8 +395,8 @@ export const formsResponses: Tool = {
     const res = await ctx.connector.forms.responses(principal(ctx), {
       formId: str(args['formId']), since: str(args['since']) || null, limit: Math.min(Number(args['limit'] ?? 100) || 100, 1000),
     });
-    if (!res) return { source: ctx.connector.source, available: false, reason: 'フォームが見つからないか、読めません（選んだフォームだけを読めます）' };
-    return { source: ctx.connector.source, available: true, untrusted: true, form: res.form, count: res.responses.length, responses: res.responses };
+    if (!res) return { source: ctx.connector.sourceFor(ctx.tenantId), available: false, reason: 'フォームが見つからないか、読めません（選んだフォームだけを読めます）' };
+    return { source: ctx.connector.sourceFor(ctx.tenantId), available: true, untrusted: true, form: res.form, count: res.responses.length, responses: res.responses };
   },
 };
 

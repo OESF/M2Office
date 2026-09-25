@@ -86,7 +86,12 @@ export function buildDeps(): AppDeps {
   const repo = new PostgresRepository(
     process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office',
   );
-  const connector = buildConnector(process.env['CONNECTOR_MODE'] ?? 'mock');
+  // 秘密の値の箱。接続口（google）がリフレッシュ トークンを戻すのにも使う
+  const { box, devKey } = secretBoxFromEnv();
+  const connector = buildConnector(process.env['CONNECTOR_MODE'] ?? 'mock', {
+    repo, box, mockTenants: (process.env['CONNECTOR_MOCK_TENANTS'] ?? '').split(','),
+    production: process.env['NODE_ENV'] === 'production',
+  });
   const registry = new ToolRegistry();
   for (const tool of BUILTIN_TOOLS) registry.register(tool);
 
@@ -117,7 +122,6 @@ export function buildDeps(): AppDeps {
   // Google のデータを扱うツールは、内蔵のツールのうち権限（google）を宣言しているもの（第9.4.4節）
   const retentionRef = new GoogleDataRetention({ repo, isGoogleTool: (name) => !!registry.get(name)?.google, logger: log });
   const research = buildResearch();
-  const { box, devKey } = secretBoxFromEnv();
   if (devKey) log.warn('M2OFFICE_SECRET_KEY が未設定のため、開発用の固定の鍵で秘密の値を暗号化しています（本番では起動しません）');
   const ai = new TenantAiResolver({
     repo, box, fallbackLlm: llm, fallbackResearch: research,

@@ -73,8 +73,8 @@ export interface DirectAnswer {
 const ACTION_WORDS = /調整|入れて|作って|作成|下書き|返信|起票|まとめ|送って|共有/;
 
 /** 接続口の値の出どころを根拠の 1 行目に示す。ダミーを本物と取り違えないため。 */
-function sourceNote(connector: WorkspaceConnector): { label: string; value: string }[] {
-  return connector.source === 'mock'
+function sourceNote(connector: WorkspaceConnector, tenantId: string): { label: string; value: string }[] {
+  return connector.sourceFor(tenantId) === 'mock'
     ? [{ label: '出どころ', value: 'ダミーデータ（Google 未接続）' }]
     : [];
 }
@@ -112,16 +112,16 @@ const schedule: DirectQuery = {
       return {
         text: next ? `次の予定は ${md(next.start)} ${hm(next.start)} からの「${next.title}」です。`
           : `${range.label}、この後の予定はありません。`,
-        evidence: [...sourceNote(ctx.connector),
+        evidence: [...sourceNote(ctx.connector, ctx.tenantId),
           ...(next ? [{ label: hm(next.start), value: `${next.title}（${next.location ?? '場所未設定'}）` }] : [])],
       };
     }
     if (events.length === 0) {
-      return { text: `${range.label}の予定はありません。`, evidence: sourceNote(ctx.connector) };
+      return { text: `${range.label}の予定はありません。`, evidence: sourceNote(ctx.connector, ctx.tenantId) };
     }
     return {
       text: `${range.label}の予定は ${events.length} 件です。`,
-      evidence: [...sourceNote(ctx.connector), ...events.map((e) => ({
+      evidence: [...sourceNote(ctx.connector, ctx.tenantId), ...events.map((e) => ({
         label: range.label === '今日' ? hm(e.start) : `${md(e.start)} ${hm(e.start)}`,
         value: e.title,
       }))],
@@ -141,7 +141,7 @@ const unreadMail: DirectQuery = {
     const unread = items.filter((m) => m.unread);
     return {
       text: unread.length === 0 ? '未読のメールはありません。' : `未読のメールが ${unread.length} 件あります。`,
-      evidence: [...sourceNote(ctx.connector),
+      evidence: [...sourceNote(ctx.connector, ctx.tenantId),
         ...unread.slice(0, 5).map((m) => ({ label: m.from.replace(/\s*<.*>$/, ''), value: m.subject }))],
     };
   },
@@ -163,7 +163,7 @@ const todayTasks: DirectQuery = {
       text: due.length === 0
         ? '今日が期限のタスクはありません。'
         : `今日までのタスクが ${due.length} 件あります（うち期限切れ ${overdue.length} 件）。`,
-      evidence: [...sourceNote(ctx.connector),
+      evidence: [...sourceNote(ctx.connector, ctx.tenantId),
         ...due.map((t) => ({ label: overdue.includes(t) ? '期限切れ' : '今日', value: t.title }))],
     };
   },

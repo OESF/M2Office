@@ -42,8 +42,8 @@ export function onboardingRoute(deps: AppDeps) {
     const items = [
       { id: 'company', label: '会社情報を入力する', done: settings.company.legalName.trim() !== '', go: 'company', help: 'admin-setup' },
       {
-        id: 'google', label: 'Google Workspace を接続する', done: deps.connector.source === 'google', go: 'connectors',
-        help: 'faq-dummy', note: deps.connector.source === 'mock' ? 'いまは準備中のため、見本のデータで動いています' : null,
+        id: 'google', label: 'Google Workspace を接続する', done: deps.connector.sourceFor(tenant.id) === 'google', go: 'connectors',
+        help: 'faq-dummy', note: deps.connector.sourceFor(tenant.id) === 'mock' ? 'いまは準備中のため、見本のデータで動いています' : null,
       },
       { id: 'agents', label: '使う業務を選ぶ', done: !!settings.onboarding.agentsReviewedAt, go: 'agents', help: 'admin-agents' },
       { id: 'knowledge', label: '就業規則などの規程を登録する', done: knowledge > 0, go: 'knowledge', help: 'admin-knowledge', important: true },

@@ -14,7 +14,7 @@ Node.js 22 以上。PostgreSQL への接続が必要です（`DATABASE_URL`）�
 ```
 src/engine/      実行エンジン。承認による中断と再開、ジョブの投入
 src/tools/       ツールの登録簿と内蔵ツール
-src/connectors/  メール・予定・タスク・チャットへの接続口（ダミー実装を含む）と、MCP サーバのクライアント
+src/connectors/  メール・予定・タスク・チャットへの接続口（見本と Google の実装）と、MCP サーバのクライアント
 src/files/       ファイルの置き場と、PDF・Excel・CSV・Word の読み書き。
                  to-text.ts は形式によらず「読むための文字」にし、指示ではないものとして囲う（第10.10節）
 src/log/         アプリログのロガー（レベル・JSON・伏せ字）
@@ -73,7 +73,19 @@ decideApproval(...)  →  承認を記録し、待ち行列へ戻す
 
 ツールは Google の API を直接呼ばず、接続口だけを呼びます（仕様書 第24.2節 第 6 項）。
 `buildConnector('mock')` はダミーデータを返し、戻り値に `source: 'mock'` を含めます。
-`google` は B-2 の完了後に実装します（ADR-0003）。
+`buildConnector('google', { repo, box })` は **Gmail とカレンダーを本物の Google で**動かし、
+ほかのサービスは「準備中」と断ります（`src/connectors/google/`。仕様書 第14.3.4節、ADR-0022）。
+見本のデータで代わりに動かすことはしません。
+
+| ファイル | 内容 |
+|---|---|
+| `google/http.ts` | 本人のアクセス トークン（メモリにだけ持つ）と、Google の失敗を「断るときの言葉」に直す呼び出し |
+| `google/mime.ts` | 本文の取り出し（宣言された文字コードで戻す。添付は読まない）と、送るメールの組み立て |
+| `google/index.ts` | Gmail とカレンダーの本体。準備中のサービスの断り |
+
+呼べないときは `ConnectorUnavailableError`（理由の種類つき）を投げます。
+エンジンは、読むだけのツールならこれを受けて「取得できませんでした」と推論に返し、書くツールならステップを失敗にします。
+値の出どころは会社ごとに `sourceFor(tenantId)` で引きます（開発では `CONNECTOR_MOCK_TENANTS` で会社ごとに見本にできるため）。
 
 ### 社内への書き込みの操作確認
 

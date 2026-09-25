@@ -342,7 +342,7 @@ export function dashboardRoute(deps: AppDeps) {
           .reduce((t, x) => t + x.n, 0),
       },
       health: {
-        workspace: deps.connector.source === 'mock' ? 'ダミーデータで動作中（Google 未接続）' : 'Google Workspace に接続中',
+        workspace: deps.connector.sourceFor(tenant.id) === 'mock' ? 'ダミーデータで動作中（Google 未接続）' : 'Google Workspace に接続中',
         llm: deps.llm.name === 'stub' ? 'スタブ（推論を行わない開発用）' : deps.llm.name,
       },
     });

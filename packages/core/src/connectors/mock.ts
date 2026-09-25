@@ -26,7 +26,10 @@ import type {
  * - テナントと利用者ごとに記憶を分け、境界を越えて見えないようにする（不変則 I-2）
  */
 export class MockWorkspaceConnector implements WorkspaceConnector {
-  readonly source = 'mock' as const;
+  /** 見本の接続口は、どの会社でも見本である。 */
+  sourceFor(_tenantId: string): 'mock' {
+    return 'mock';
+  }
   private readonly createdTasks = new Map<string, TaskItem[]>();
   private readonly createdEvents = new Map<string, CalendarEvent[]>();
 
@@ -103,7 +106,7 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
     freeBusy: async (
       _p: ConnectorPrincipal,
       q: { emails: string[]; from: string; to: string },
-    ): Promise<BusySlot[]> => {
+    ): Promise<{ busy: BusySlot[]; unknown: string[] }> => {
       // 参加者ごとに、平日の午前 10 時台と午後 3 時台を埋まっているものとする
       const slots: BusySlot[] = [];
       for (const day of businessDays(q.from, q.to)) {
@@ -112,7 +115,8 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
           slots.push({ email, start: jst(day, 15), end: jst(day, 16) });
         }
       }
-      return slots;
+      // 見本では、全員の予定が見えるものとする
+      return { busy: slots, unknown: [] };
     },
     create: async (
       p: ConnectorPrincipal,

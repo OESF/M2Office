@@ -81,7 +81,8 @@ app.get('/v1/me', (c) => {
     user: ctx.user,
     auth: { method: auth.method },
     csrfToken: auth.method === 'session' ? auth.csrfToken : null,
-    workspaceSource: deps.connector.source,
+    // 値の出どころは会社ごと（ADR-0022）
+    workspaceSource: deps.connector.sourceFor(ctx.tenant.id),
   });
 });
 app.route('/v1/me/google', myGoogleRoute(deps));
@@ -109,7 +110,8 @@ const server = serve({ fetch: app.fetch, port }, (info) => {
   const models = defaultGeminiModels();
   deps.log.info('待ち受けを開始しました', {
     port: info.port,
-    connector: deps.connector.source,
+    connector: process.env['CONNECTOR_MODE'] ?? 'mock',
+    mockTenants: process.env['CONNECTOR_MOCK_TENANTS'] || undefined,
     llm: deps.llm.name,
     // どのモデルで動いているかを、起動のときに残す（費用の追跡に要る。仕様書 第20.2.2節）
     models: `fast=${models.fast} standard=${models.standard} advanced=${models.advanced}`,
