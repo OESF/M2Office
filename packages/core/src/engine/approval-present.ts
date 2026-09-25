@@ -34,6 +34,24 @@ export function describeContext(registry: ToolRegistry, artifacts: Artifact[]): 
  */
 const demote = (text: string) => text.replace(/^#{1,6}\s+/gm, '#### ');
 
+/** 比べるために、行の書式（見出し・箇条書きの印・太字・空白）を落とす。 */
+const plainLine = (l: string) => l.replace(/^\s*(#{1,6}\s+|[-*+]\s+|\d+[.)]\s+|>\s*)/, '').replace(/\*\*|`/g, '').replace(/\s+/g, '').trim();
+
+/**
+ * 段の文が、成果物の本文を繰り返しているか。
+ *
+ * @remarks
+ * 成果物の中身のある行（書式を落として 6 字以上）のうち、**6 割以上が段の文にもある**なら繰り返しとみなす。
+ * 推論は同じ内容を見出しの深さや箇条書きの印を変えて書くため、行の書式を落としてから比べる
+ */
+export function repeatsArtifact(text: string, body: string): boolean {
+  const lines = [...new Set(body.split('\n').map(plainLine).filter((l) => l.length >= 6))];
+  if (lines.length < 3) return false;
+  const inText = new Set(text.split('\n').map(plainLine));
+  const hit = lines.filter((l) => inText.has(l)).length;
+  return hit / lines.length >= 0.6;
+}
+
 /** 「〜します」の言い方を「〜しました」にする（行ったことを出すとき）。1 行目だけを使う。 */
 const done = (description: string) => description.split('\n')[0]!.replace(/ます\*\*/, 'ました**');
 
@@ -77,6 +95,8 @@ export function composeApprovalPresent(p: {
 
   const ctx = describeContext(registry, artifacts);
   const material: string[] = [];
+  // この承認で見せる成果物。段の文がこれを繰り返しているだけなら、段の文は省く（同じ議事録が 2 回並ばないように）
+  const shownArtifacts = artifacts.filter((x) => !shownBefore.has(x.id));
   for (const s of steps) {
     if (s.kind !== 'agent' || s.status !== 'succeeded' || s.seq <= since || s.seq >= gateSeq) continue;
     const output = (s.output ?? {}) as { text?: string; planned?: boolean; executed?: boolean };
@@ -94,10 +114,16 @@ export function composeApprovalPresent(p: {
       }
     }
     if (!text) continue;
+    const repeated = shownArtifacts.find((a) => repeatsArtifact(text, a.body));
+    if (repeated) {
+      // 2026-09-25 に、議事録作成の「取得」の段が議事録そのものを書き、承認①の画面に同じ議事録が 2 回並んだ
+      material.push(`### ${label}`, '', `（下の成果物「${repeated.title}」と同じ内容のため、省きました）`, '');
+      continue;
+    }
     // 推論の文には内部の ID が混じりうる。承認する人に見せる前に取り除く
     material.push(`### ${label}`, '', demote(cut(hideInternalIds(text), TEXT_MAX)), '');
   }
-  for (const a of artifacts.filter((x) => !shownBefore.has(x.id))) {
+  for (const a of shownArtifacts) {
     material.push(`### 成果物「${a.title}」`, '', demote(cut(a.body, ARTIFACT_MAX)), '');
   }
   out.push('## 判断するもの', '');

@@ -17,7 +17,7 @@ import {
 import {
   RunEngine, ToolRegistry, BUILTIN_TOOLS, MockWorkspaceConnector, MemoryFileStore, nextRunAt,
   saveFile, readSheet, renderSheet, parseCsv, extractPdfText,
-  ApprovalForbiddenError, ConnectorUnavailableError, hideInternalIds, DefinitionInvalidError, validateDefinition, OFFICIAL_AGENTS, todayJst, describeCall, jpDate,
+  ApprovalForbiddenError, ConnectorUnavailableError, hideInternalIds, repeatsArtifact, DefinitionInvalidError, validateDefinition, OFFICIAL_AGENTS, todayJst, describeCall, jpDate,
   type LlmProvider, type LlmRequest, type Repository, type KnowledgeItem,
 } from '../src/index.js';
 
@@ -607,6 +607,53 @@ test('承認の画面に出す推論の文から、内部の ID を取り除く�
   assert.ok(!present.includes(ctx.repo.artifacts[0]!.id), '成果物の ID を出さない');
   assert.match(present, /### 作成\n\n作りました。/);
   assert.match(system, /利用者に見せる文には、成果物・ファイル・文書・実行などの ID を書かない/);
+});
+
+const REAL_MINUTES = `#### 議事録: M2Office 接続確認の打ち合わせ（テスト）
+
+#### 会議情報
+- 開催日: 2026年9月25日（金）
+- 会議名: M2Office 接続確認の打ち合わせ（テスト）
+- スペース: M2Office
+
+#### 議事内容
+- 三浦より、Google ドキュメントにも保存する機能の動作確認を行うことが述べられた。
+
+#### 決定事項
+- 確認終了後、結果を仕様書に記録する。
+  - 期限: 2026-09-30
+  - 担当: 三浦
+
+#### 保留事項
+- スプレッドシートの対応時期については、次回決定する。`;
+
+test('段の文が成果物を繰り返すだけなら、承認の画面では省く（同じ議事録が 2 回並ばない。2026-09-25）', async () => {
+  // 本物の推論が「取得」の段に書いた文（成果物と見出しの深さが違うだけ）
+  const fetchText = `提供された入力に transcript が含まれているため、その内容を使用します。\n\n以下に議事録を作成いたします。\n\n---\n\n${REAL_MINUTES.replace(/^#### /gm, '### ')}\n\n---\n\n※タスクの起票は承認後に実施いたします。`;
+  assert.equal(repeatsArtifact(fetchText, REAL_MINUTES), true);
+  assert.equal(repeatsArtifact('記録は貼り付けられた文字起こしから取得しました（約 300 字）。', REAL_MINUTES), false, '短い報告は繰り返しではない');
+  assert.equal(repeatsArtifact('決定事項\n確認終了後、結果を仕様書に記録する。', REAL_MINUTES), false, '一部を引いただけなら繰り返しではない');
+
+  const ctx = setup(AG02_MINUTES, { name: 'noop', args: {} });
+  const base = minutesLlm(ctx.repo);
+  (ctx.engine as unknown as { deps: { llm: LlmProvider } }).deps.llm = {
+    name: 'repeat',
+    async complete(req: LlmRequest) {
+      const id = String(req.context?.stepId ?? '');
+      if (id === 'fetch') return { text: fetchText, tokensUsed: 1 };
+      if (id === 'draft' && ctx.repo.artifacts.length === 0) {
+        return { text: '```tool\n' + JSON.stringify({ name: 'document.create', args: { kind: 'minutes', title: '接続確認の議事録', body: REAL_MINUTES } }) + '\n```', tokensUsed: 1 };
+      }
+      if (id === 'draft') return { text: '作りました。', tokensUsed: 1 };
+      return base.complete(req);
+    },
+  };
+  const first = await ctx.engine.advance(ctx.run);
+  if (first.outcome !== 'awaiting_approval') assert.fail(first.outcome);
+  const present = ctx.repo.approvals.find((a) => a.id === first.approvalId)!.present;
+  assert.match(present, /### 取得\n\n（下の成果物「接続確認の議事録」と同じ内容のため、省きました）/);
+  assert.equal(present.split('スプレッドシートの対応時期については').length - 1, 1, '議事録の本文は成果物として 1 回だけ出る');
+  assert.match(present, /### 作成\n\n作りました。/, '繰り返しでない段の文は出す');
 });
 
 test('承認の前に組み立てた操作を、承認のあとそのまま実行する。推論をやり直さない（ADR-0023）', async () => {
