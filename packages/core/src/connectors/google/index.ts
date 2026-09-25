@@ -234,7 +234,7 @@ export class GoogleWorkspaceConnector implements WorkspaceConnector {
 
   // ─── ToDo（仕様書 第14.3.4節「ToDo」） ───────────────────────────────
 
-  private todo(p: ConnectorPrincipal, path: string, init?: { method?: string; body?: unknown }) {
+  private todo(p: ConnectorPrincipal, path: string, init?: { method?: string; body?: unknown; missingOn400?: boolean }) {
     // 本人の既定のリストだけを扱う
     return callGoogle(this.tokens, p, 'ToDo', `${this.endpoints.tasks}/lists/@default${path}`, init);
   }
@@ -256,7 +256,8 @@ export class GoogleWorkspaceConnector implements WorkspaceConnector {
       return { taskId: String(res?.['id'] ?? '') };
     },
     complete: async (p: ConnectorPrincipal, t: { taskId: string }) => {
-      const res = await this.todo(p, `/tasks/${encodeURIComponent(t.taskId)}`, { method: 'PATCH', body: { status: 'completed' } });
+      // 送る中身は決まっている。400 になるのは ID の形が違うときだけで、それは「見つからない」（2026-09-25 に本物で確認）
+      const res = await this.todo(p, `/tasks/${encodeURIComponent(t.taskId)}`, { method: 'PATCH', body: { status: 'completed' }, missingOn400: true });
       return res ? { taskId: t.taskId } : null;
     },
   };

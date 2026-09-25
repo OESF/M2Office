@@ -180,6 +180,8 @@ async function fakeGoogle(behave: (s: Seen) => { status: number; json?: unknown 
     }
     if (s.path === '/tasks/lists/@default/tasks' && s.method === 'POST') return send(200, { id: 'task-new' });
     if (s.path === '/tasks/lists/@default/tasks/gone') return send(404, { error: { code: 404 } });
+    // 本物の Google は、形の違う ID に 404 でなく 400 を返す（2026-09-25 に確認）
+    if (s.path === '/tasks/lists/@default/tasks/bad-shape') return send(400, { error: { code: 400, status: 'INVALID_ARGUMENT' } });
     if (s.path.startsWith('/tasks/lists/@default/tasks/') && s.method === 'PATCH') return send(200, { id: s.path.split('/').pop(), status: 'completed' });
     send(404, { error: { code: 404 } });
   });
@@ -383,7 +385,14 @@ test('ToDo: 本人の既定のリストを使う。期限は日付の終わり�
     assert.deepEqual(await c.tasks.complete(P, { taskId: 't1' }), { taskId: 't1' });
     assert.deepEqual(g.seen.find((s) => s.method === 'PATCH' && s.path.startsWith('/tasks/'))!.body, { status: 'completed' });
     assert.equal(await c.tasks.complete(P, { taskId: 'gone' }), null, '無い ToDo は「見つかりません」');
+    assert.equal(await c.tasks.complete(P, { taskId: 'bad-shape' }), null, '形の違う ID（400）も「見つかりません」');
   });
+});
+
+test('400 を「見つからない」に丸めるのは ToDo の完了だけ（ほかでは組み立ての誤りを隠さない）', async () => {
+  await withConnector(async (c) => {
+    await assert.rejects(c.calendar.update(P, { eventId: 'e1', title: 'x' }), /要求を受け付けませんでした（HTTP 400・INVALID_ARGUMENT）/);
+  }, {}, (s) => (s.method === 'PATCH' ? { status: 400, json: { error: { code: 400, status: 'INVALID_ARGUMENT' } } } : undefined));
 });
 
 test('準備中のサービスは、見本で代えずに断る（ADR-0022）', async () => {

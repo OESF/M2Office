@@ -102,6 +102,8 @@ export class GoogleTokenSource {
  * Google の API を 1 回呼ぶ。
  *
  * @param api 利用者に見せる API の名前（断りの文に使う）
+ * @param init.missingOn400 `400 INVALID_ARGUMENT` も「見つからない」とみなす。**送る中身が決まっていて、
+ *   不正になりうるのが ID だけの呼び出し**に限って使う（ToDo の完了。ID の形が違うと Google は 404 でなく 400 を返す）
  * @returns 応答の JSON。`404`・`410` なら `null`（呼び出し側が「見つからない」として扱う）
  * @throws {ConnectorUnavailableError} 許可が無い・API が無効・届かない
  *
@@ -112,7 +114,7 @@ export class GoogleTokenSource {
  */
 export async function callGoogle(
   tokens: GoogleTokenSource, p: ConnectorPrincipal, api: GoogleApiName,
-  url: string, init: { method?: string; body?: unknown } = {},
+  url: string, init: { method?: string; body?: unknown; missingOn400?: boolean } = {},
 ): Promise<Record<string, any> | null> {
   for (let attempt = 1; ; attempt++) {
     const token = await tokens.token(p);
@@ -140,6 +142,7 @@ export async function callGoogle(
       body.error?.status, ...(body.error?.errors ?? []).map((e) => e.reason), ...(body.error?.details ?? []).map((d) => d.reason),
     ].filter((x): x is string => typeof x === 'string');
 
+    if (res.status === 400 && init.missingOn400 && reasons.some((r) => /INVALID_ARGUMENT|invalid/i.test(r))) return null;
     if (res.status === 401 && attempt === 1) { tokens.forget(p); continue; }
     if (res.status === 401) {
       throw new ConnectorUnavailableError('revoked', 'Google の許可が取り消されたか、期限が切れています。個人設定の「Google 連携」で接続し直してください');
