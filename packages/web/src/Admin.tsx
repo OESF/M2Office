@@ -240,7 +240,10 @@ function Usage() {
   const { data, error } = useLoad(api.admin.usage);
   return (
     <>
-      <h1>利用状況</h1>
+      <PageTitle trail={['利用状況']} help={{
+        article: 'admin-usage',
+        text: '業務ごとの、これまでの実行件数と推論の費用です。費用は概算で、請求額ではありません。',
+      }} />
       {error && <p className="error">{error}</p>}
       {data && (
         <>
@@ -273,7 +276,10 @@ function Runs() {
   const nameOf = (id: string | null) => users?.items.find((u) => u.id === id)?.displayName ?? id ?? '—';
   return (
     <>
-      <h1>実行の一覧</h1>
+      <PageTitle trail={['実行の一覧']} help={{
+        article: 'admin-runs',
+        text: '直近 100 件の業務の状態です。行を押すと、段の進みと失敗の理由が出ます。入力や成果物の中身は出ません。',
+      }} />
       <p className="lead">入力や成果物の中身は表示しません。</p>
       {error && <p className="error">{error}</p>}
       {data?.items.map((r: AdminRun) => (
@@ -347,7 +353,10 @@ function Audit() {
   const { data, error } = useLoad(api.admin.audit);
   return (
     <>
-      <h1>監査ログ</h1>
+      <PageTitle trail={['監査ログ']} help={{
+        article: 'admin-audit',
+        text: '「いつ・誰が・何をしたか」の記録です。変えることも消すこともできません。会話や成果物の中身は残しません。',
+      }} />
       <p className="lead">直近 200 件です。記録は追記のみで、変更や削除はできません。</p>
       {error && <p className="error">{error}</p>}
       <table className="table">
