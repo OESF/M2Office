@@ -9,7 +9,7 @@ import type { Repository } from '../../repository/types.js';
 import type { SecretBox } from '../../secrets/box.js';
 import {
   ConnectorUnavailableError, type BusySlot, type CalendarEvent, type ConnectorPrincipal, type MailMessage,
-  type MailSummary, type WorkspaceConnector,
+  type MailSummary, type TaskItem, type WorkspaceConnector,
 } from '../types.js';
 import { GOOGLE_API_ENDPOINTS, GoogleTokenSource, callGoogle, type GoogleApiEndpoints } from './http.js';
 import { buildRawMessage, decodeEntities, decodeHeaderWords, extractBody, header, type GmailPart } from './mime.js';
@@ -23,6 +23,12 @@ const MAIL_FETCH_CONCURRENCY = 8;
 /** 日本時間の日付（`YYYY-MM-DD`）の 0 時を ISO にする。終日の予定に使う。 */
 const midnightJst = (date: string) => `${date}T00:00:00+09:00`;
 
+/** 日本時間の日付（`YYYY-MM-DD`）の終わりを ISO にする。ToDo の期限に使う（仕様書 第14.3.4節「ToDo」）。 */
+const endOfDayJst = (date: string) => `${date}T23:59:59+09:00`;
+
+/** ToDo の件数の上限（1 回の一覧）。 */
+const TASKS_LIMIT = 100;
+
 /** Gmail のメッセージ（必要なところだけ）。 */
 interface GmailMessage {
   id: string;
@@ -31,6 +37,14 @@ interface GmailMessage {
   snippet?: string;
   internalDate?: string;
   payload?: GmailPart;
+}
+
+/** Google の ToDo（必要なところだけ）。 */
+interface GTask {
+  id: string;
+  title?: string;
+  status?: 'needsAction' | 'completed';
+  due?: string;
 }
 
 /** カレンダーの予定（必要なところだけ）。 */
@@ -218,9 +232,37 @@ export class GoogleWorkspaceConnector implements WorkspaceConnector {
     },
   };
 
+  // ─── ToDo（仕様書 第14.3.4節「ToDo」） ───────────────────────────────
+
+  private todo(p: ConnectorPrincipal, path: string, init?: { method?: string; body?: unknown }) {
+    // 本人の既定のリストだけを扱う
+    return callGoogle(this.tokens, p, 'ToDo', `${this.endpoints.tasks}/lists/@default${path}`, init);
+  }
+
+  tasks = {
+    list: async (p: ConnectorPrincipal, opts: { includeCompleted?: boolean }): Promise<TaskItem[]> => {
+      const all = opts.includeCompleted ? 'true' : 'false';
+      const q = new URLSearchParams({ maxResults: String(TASKS_LIMIT), showCompleted: all, showHidden: all });
+      const res = await this.todo(p, `/tasks?${q}`);
+      return ((res?.['items'] ?? []) as GTask[]).map(toTask);
+    },
+    create: async (p: ConnectorPrincipal, t: { title: string; due: string | null }) => {
+      const date = t.due ? jstDate(t.due) : null;
+      const res = await this.todo(p, '/tasks', {
+        method: 'POST',
+        // 期限は日付だけが残る。時刻は Google が捨てるので、その日の 0 時（UTC）で渡す
+        body: { title: t.title, ...(date ? { due: `${date}T00:00:00.000Z` } : {}) },
+      });
+      return { taskId: String(res?.['id'] ?? '') };
+    },
+    complete: async (p: ConnectorPrincipal, t: { taskId: string }) => {
+      const res = await this.todo(p, `/tasks/${encodeURIComponent(t.taskId)}`, { method: 'PATCH', body: { status: 'completed' } });
+      return res ? { taskId: t.taskId } : null;
+    },
+  };
+
   // ─── 準備中（ADR-0022） ──────────────────────────────────────────────
 
-  tasks = pending<WorkspaceConnector['tasks']>('ToDo');
   chat = pending<WorkspaceConnector['chat']>('Chat');
   slides = pending<WorkspaceConnector['slides']>('スライド');
   drive = pending<WorkspaceConnector['drive']>('ドライブ');
@@ -250,6 +292,29 @@ function toSummary(m: GmailMessage): MailSummary {
     receivedAt: Number.isFinite(received.getTime()) ? received.toISOString() : '',
     unread: labels.includes('UNREAD'),
     labels,
+  };
+}
+
+/**
+ * 期限の値を、日本時間の日付（`YYYY-MM-DD`）にする。
+ *
+ * @returns 日付だけならそのまま。時刻つきなら日本時間の日付。読めなければ `null`（期限なしで登録する）
+ */
+function jstDate(v: string): string | null {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+  const t = Date.parse(v);
+  if (!Number.isFinite(t)) return null;
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo' }).format(new Date(t));
+}
+
+/** Google の ToDo を、接続口の ToDo の形にする。期限は日付の終わり（日本時間）で表す。 */
+function toTask(t: GTask): TaskItem {
+  const date = t.due ? t.due.slice(0, 10) : null;
+  return {
+    id: t.id,
+    title: t.title || '（無題）',
+    due: date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? endOfDayJst(date) : null,
+    completed: t.status === 'completed',
   };
 }
 

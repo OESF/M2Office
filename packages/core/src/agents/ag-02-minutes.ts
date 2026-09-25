@@ -82,7 +82,11 @@ export const AG02_MINUTES: AgentDefinition = {
       id: 'tasks',
       type: 'agent',
       label: '起票',
-      instruction: '承認された決定事項を ToDo として起票する。',
+      instruction: [
+        '承認された決定事項を ToDo として起票する。',
+        'ToDo は依頼した本人のリストに入る（他人には割り当てられない）。担当者がいれば、題名の末尾に「（担当: 山田）」のように書く。',
+        '期限があれば YYYY-MM-DD の形で渡す。期限が決まっていなければ渡さない（推測で決めない）。',
+      ].join('\n'),
     },
     {
       id: 'gate-share',

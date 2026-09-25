@@ -16,12 +16,14 @@ import { ConnectorUnavailableError, type ConnectorPrincipal } from '../types.js'
 export interface GoogleApiEndpoints {
   gmail: string;
   calendar: string;
+  tasks: string;
   oauth: GoogleOAuthEndpoints;
 }
 
 export const GOOGLE_API_ENDPOINTS: GoogleApiEndpoints = {
   gmail: 'https://gmail.googleapis.com/gmail/v1',
   calendar: 'https://www.googleapis.com/calendar/v3',
+  tasks: 'https://tasks.googleapis.com/tasks/v1',
   oauth: GOOGLE_OAUTH_ENDPOINTS,
 };
 
@@ -32,7 +34,7 @@ const REFRESH_MARGIN_MS = 60_000;
 const TIMEOUT_MS = 20_000;
 
 /** 呼び先の API の、利用者に見せる名前。 */
-export type GoogleApiName = 'Gmail' | 'カレンダー';
+export type GoogleApiName = 'Gmail' | 'カレンダー' | 'ToDo';
 
 /**
  * 利用者ごとのアクセス トークンを配る（仕様書 第14.3.4節「誰の権限で呼ぶか」）。

@@ -169,12 +169,24 @@ async function fakeGoogle(behave: (s: Seen) => { status: number; json?: unknown 
     if (s.path === '/cal/calendars/primary/events/gone') return send(410, { error: { code: 410 } });
     if (s.path.startsWith('/cal/calendars/primary/events/') && s.method === 'PATCH') return send(200, { id: s.path.split('/').pop() });
     if (s.path.startsWith('/cal/calendars/primary/events/') && s.method === 'DELETE') return send(204);
+    // ToDo（既定のリスト）
+    if (s.path === '/tasks/lists/@default/tasks' && s.method === 'GET') {
+      const items = [
+        { id: 't1', title: '見積書を送る', status: 'needsAction', due: '2026-09-26T00:00:00.000Z' },
+        { id: 't2', title: '', status: 'needsAction' },
+        { id: 't3', title: '済んだもの', status: 'completed', due: '2026-09-20T00:00:00.000Z' },
+      ];
+      return send(200, { items: s.query.get('showCompleted') === 'true' ? items : items.filter((t) => t.status !== 'completed') });
+    }
+    if (s.path === '/tasks/lists/@default/tasks' && s.method === 'POST') return send(200, { id: 'task-new' });
+    if (s.path === '/tasks/lists/@default/tasks/gone') return send(404, { error: { code: 404 } });
+    if (s.path.startsWith('/tasks/lists/@default/tasks/') && s.method === 'PATCH') return send(200, { id: s.path.split('/').pop(), status: 'completed' });
     send(404, { error: { code: 404 } });
   });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const endpoints: GoogleApiEndpoints = {
-    gmail: `${base}/gmail`, calendar: `${base}/cal`,
+    gmail: `${base}/gmail`, calendar: `${base}/cal`, tasks: `${base}/tasks`,
     oauth: { auth: `${base}/oauth/auth`, token: `${base}/oauth/token`, tokeninfo: `${base}/oauth/tokeninfo`, userinfo: `${base}/oauth/userinfo`, revoke: `${base}/oauth/revoke` },
   };
   return { endpoints, seen, refreshes: () => refreshes, close: () => new Promise<void>((r) => server.close(() => r())) };
@@ -347,9 +359,36 @@ test('カレンダー: 作成・変更・取り消しは参加者に知らせる
   });
 });
 
+test('ToDo: 本人の既定のリストを使う。期限は日付の終わり（日本時間）として扱う', async () => {
+  await withConnector(async (c, g) => {
+    const open = await c.tasks.list(P, {});
+    assert.deepEqual(open, [
+      { id: 't1', title: '見積書を送る', due: '2026-09-26T23:59:59+09:00', completed: false },
+      { id: 't2', title: '（無題）', due: null, completed: false },
+    ], 'Google の期限（日付だけ・UTC の 0 時）を、その日の終わり（日本時間）にする');
+    const q = g.seen.find((s) => s.path === '/tasks/lists/@default/tasks')!.query;
+    assert.equal(q.get('showCompleted'), 'false', '既定は未完了だけ');
+    assert.equal((await c.tasks.list(P, { includeCompleted: true })).length, 3);
+
+    assert.deepEqual(await c.tasks.create(P, { title: '資料を作る（担当: 山田）', due: '2026-10-01' }), { taskId: 'task-new' });
+    const post = () => g.seen.filter((s) => s.method === 'POST' && s.path === '/tasks/lists/@default/tasks').at(-1)!.body;
+    assert.deepEqual(post(), { title: '資料を作る（担当: 山田）', due: '2026-10-01T00:00:00.000Z' }, '期限は日付だけを渡す');
+    await c.tasks.create(P, { title: '夜に決めた', due: '2026-10-01T23:30:00+09:00' });
+    assert.equal(post().due, '2026-10-01T00:00:00.000Z', '時刻つきなら日本時間の日付にする');
+    await c.tasks.create(P, { title: '期限なし', due: null });
+    assert.equal('due' in post(), false);
+    await c.tasks.create(P, { title: '読めない期限', due: '来週のどこか' });
+    assert.equal('due' in post(), false, '読めない期限は推測せず、期限なしで登録する');
+
+    assert.deepEqual(await c.tasks.complete(P, { taskId: 't1' }), { taskId: 't1' });
+    assert.deepEqual(g.seen.find((s) => s.method === 'PATCH' && s.path.startsWith('/tasks/'))!.body, { status: 'completed' });
+    assert.equal(await c.tasks.complete(P, { taskId: 'gone' }), null, '無い ToDo は「見つかりません」');
+  });
+});
+
 test('準備中のサービスは、見本で代えずに断る（ADR-0022）', async () => {
   await withConnector(async (c) => {
-    assert.equal(await kindOf(c.tasks.list(P, {})), 'not-implemented');
+    assert.equal(await kindOf(c.drive.search(P, { query: '' })), 'not-implemented');
     const err = await c.chat.post(P, { space: 's', text: 't' }).catch((e: unknown) => e as Error);
     assert.match(err.message, /Chat はまだ Google につないでいません（準備中）/);
     assert.equal(c.sourceFor('t-real'), 'google');
