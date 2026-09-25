@@ -59,8 +59,21 @@ export class MockVoiceProvider implements VoiceProvider {
       },
       sendText(text) {
         session.onEvent({ type: 'heard', text });
-        session.onEvent({ type: 'reply', text: sampleReply(session) });
-        session.onEvent({ type: 'turn-end' });
+        // 道具があれば、書いた文字をそのまま最初の道具（秘書の取次）に渡す（仕様書 第10.5.7節）。
+        // 推論は行わないため、取次の答えをそのまま返す。取次が動くことを確かめられるようにする
+        const tool = session.tools?.[0];
+        if (!tool) {
+          session.onEvent({ type: 'reply', text: sampleReply(session) });
+          session.onEvent({ type: 'turn-end' });
+          return;
+        }
+        const key = Object.keys(tool.parameters)[0] ?? 'request';
+        void tool.run({ [key]: text }).then((res) => {
+          if (closed) return;
+          const answer = typeof res['answer'] === 'string' ? res['answer'] : typeof res['error'] === 'string' ? res['error'] : '';
+          session.onEvent({ type: 'reply', text: `［見本の応答］${answer}` });
+          session.onEvent({ type: 'turn-end' });
+        });
       },
       sendSystemNote(text) {
         // 内部の指示は、利用者の発言として扱わない。聞こえた文字には出さない。

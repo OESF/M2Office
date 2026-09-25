@@ -55,6 +55,21 @@ export interface VoiceSession {
   close(): void;
 }
 
+/**
+ * 音声の相手に渡す道具（仕様書 第10.5.7節）。音声の相手が呼び、その結果をもとに話す。
+ *
+ * @remarks 引数は文字の項目だけ。道具は例外を投げず、答えを返す（呼び出し側で断りの文にする）
+ */
+export interface VoiceTool {
+  name: string;
+  /** 音声の相手への説明。いつ呼ぶかを書く。 */
+  description: string;
+  /** 引数（すべて文字）。 */
+  parameters: Record<string, { description: string }>;
+  required: string[];
+  run(args: Record<string, string>): Promise<Record<string, unknown>>;
+}
+
 export interface VoiceSessionOptions {
   /** 秘書の名乗りと応対のしかた（仕様書 第6.5.3節）。 */
   instructions: string;
@@ -66,6 +81,8 @@ export interface VoiceSessionOptions {
    * @remarks 空なら提供者の既定に任せる。知らない名前を渡さないよう、呼び出し側が確かめる
    */
   voice?: string;
+  /** 音声の相手に渡す道具（仕様書 第10.5.7節）。無ければ話し相手だけになる。 */
+  tools?: VoiceTool[];
   /** 出来事を受け取る。 */
   onEvent(event: VoiceEvent): void;
 }

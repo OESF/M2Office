@@ -22,6 +22,24 @@ export interface VoiceHandlers {
   onReply(text: string): void;
   /** 状態が変わった（つないだ・終わった・失敗した）。 */
   onState(state: 'connecting' | 'listening' | 'closed', note?: string): void;
+  /**
+   * 秘書の取次の答え（仕様書 第10.5.7節）。画面の入力に答えたときと同じ形で会話ペインに出す。
+   * 音声では要点だけを話すため、詳しい答え・根拠・業務の提案のボタンはこちらで見せる
+   */
+  onAnswer?(answer: VoiceAnswer): void;
+}
+
+/** 音声の依頼に、秘書の取次が返した答え（画面の入力の応答と同じ形の一部）。 */
+export interface VoiceAnswer {
+  request: string;
+  reply: {
+    text: string;
+    layer: string;
+    evidence: { label: string; value: string }[];
+    suggestedAgent?: { id: string; version: number; name: string };
+    helpArticles?: { id: string; title: string }[];
+    lookup?: { runId: string; request: string };
+  };
 }
 
 /** 開いている対話。画面はこれを持ち、終わるときに `stop()` を呼ぶ。 */
@@ -163,7 +181,10 @@ export async function startVoice(handlers: VoiceHandlers): Promise<VoiceCall> {
       return;
     }
     try {
-      const message = JSON.parse(String(ev.data)) as { type: string; text?: string; reason?: string; message?: string };
+      const message = JSON.parse(String(ev.data)) as { type: string; text?: string; reason?: string; message?: string } & Partial<VoiceAnswer>;
+      if (message.type === 'secretary' && message.reply && typeof message.request === 'string') {
+        handlers.onAnswer?.({ request: message.request, reply: message.reply });
+      }
       if (message.type === 'heard' && message.text) handlers.onHeard(message.text);
       if (message.type === 'reply' && message.text) handlers.onReply(message.text);
       // 断り書き（選んだ声が使えなかった、など）。やり取りではないので帯の知らせに出す

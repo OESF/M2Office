@@ -82,12 +82,15 @@ export class Secretary {
    * @param tenantId テナント
    * @param userId 依頼した従業員
    * @param message 依頼の本文
+   * @param options.record 会話ログに残すか（既定は残す）。音声の対話は、終わったときに聞こえた文字と応答を
+   *   まとめて残すため、取次に渡した 1 件ずつは残さない（仕様書 第10.5.7節）
    * @returns 応答と、用いた層
    */
   async respond(
-    tenantId: string, userId: string, message: string, fileId?: string,
+    tenantId: string, userId: string, message: string, fileId?: string, options: { record?: boolean } = {},
   ): Promise<SecretaryReply> {
     const { reply, keep } = await this.reply(tenantId, userId, message, fileId);
+    if (options.record === false) return reply;
     // 会話ログに残すのはファイルの**名前だけ**。中身はファイルの側にある（仕様書 第10.10.5節）
     const logged = reply.file ? `${message}\n（渡したファイル: ${reply.file.name}）` : message;
     if (keep) await this.record(tenantId, userId, logged, reply);

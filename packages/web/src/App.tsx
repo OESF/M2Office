@@ -711,6 +711,13 @@ function SecretaryBar({ lookups, avatar, onSaid }: {
       // 音声では文字が細かく届く。同じ話し手が続く間は 1 件にまとまる（第6.2.1節）
       onHeard: (t) => onSaid('user', t),
       onReply: (t) => onSaid('secretary', t),
+      // 取次の答えは、画面の入力と同じ形で出す（根拠・ヘルプ・業務を開くボタン。仕様書 第10.5.7節）
+      onAnswer: ({ reply }) => onSaid('secretary', reply.text, {
+        note: '音声での依頼への答え',
+        ...(reply.suggestedAgent ? { suggestedAgent: { id: reply.suggestedAgent.id, name: reply.suggestedAgent.name }, fileId: null } : {}),
+        ...(reply.helpArticles ? { helpArticles: reply.helpArticles } : {}),
+        ...(reply.evidence.length > 0 ? { evidence: reply.evidence } : {}),
+      }),
       onState: (state, note) => {
         setHint(note ?? { connecting: 'つないでいます…', listening: '聞いています（もう一度押すと終わります）', closed: '音声を終わりました' }[state]);
         if (state === 'closed') setCall(null);

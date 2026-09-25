@@ -126,3 +126,17 @@ test('秘書が自分で答えられる業務は、取次の候補にしない',
   assert.equal(lookup.secretaryRoute, false, '調べものは秘書が自分で起こす');
   assert.notEqual(minutes.secretaryRoute, false, 'まとまった作業は取り次ぐ');
 });
+
+test('音声からの取次は、1 件ずつ会話ログに残さない（対話の終わりにまとめて残すため。第10.5.7節）', async () => {
+  const llm = fakeLlm();
+  const { repo } = fake();
+  const logged: string[] = [];
+  const r = repo as unknown as { getUserSettings: () => Promise<unknown>; appendConversation: (c: { message: string }) => Promise<void> };
+  r.getUserSettings = async () => ({ secretary: { name: '', callMe: '', style: 'polite' }, memory: { keepConversations: true } });
+  r.appendConversation = async (c) => { logged.push(c.message); };
+  const s = new Secretary({ repo, llm, connector: {} as never, agents: [] });
+
+  await s.respond('t', 'u1', '画面から聞いたこと');
+  await s.respond('t', 'u1', '音声から聞いたこと', undefined, { record: false });
+  assert.deepEqual(logged, ['画面から聞いたこと']);
+});

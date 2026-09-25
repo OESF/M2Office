@@ -230,3 +230,92 @@ test('選んだ声が使えなければ、既定の声で開き直す（仕様�
   session.close();
   await live.close();
 });
+
+// ─── 秘書の取次を呼ぶ道具（仕様書 第10.5.7節） ─────────────────────────
+
+const askTool = (calls: Record<string, string>[]) => ({
+  name: 'ask_secretary',
+  description: '本人の依頼を秘書の取次に渡す',
+  parameters: { request: { description: '本人の言葉' } },
+  required: ['request'],
+  run: async (args: Record<string, string>) => {
+    calls.push(args);
+    return { answer: `明日の予定は 2 件です（${args['request']}）` };
+  },
+});
+
+test('道具を渡すと、Gemini Live に関数として宣言する。渡さなければ宣言しない', async () => {
+  const live = await fakeLive();
+  const s1 = await new GeminiLiveProvider({ apiKey: 'k', model: 'm', url: live.url }).open({
+    instructions: 'x', speak: false, tools: [askTool([])], onEvent: () => undefined,
+  });
+  const setup = (live.received[0] as { setup: { tools?: unknown } }).setup;
+  assert.deepEqual(setup.tools, [{
+    functionDeclarations: [{
+      name: 'ask_secretary', description: '本人の依頼を秘書の取次に渡す',
+      parameters: { type: 'OBJECT', properties: { request: { type: 'STRING', description: '本人の言葉' } }, required: ['request'] },
+    }],
+  }]);
+  s1.close();
+  await live.close();
+
+  const live2 = await fakeLive();
+  const s2 = await new GeminiLiveProvider({ apiKey: 'k', model: 'm', url: live2.url }).open({ instructions: 'x', speak: false, onEvent: () => undefined });
+  assert.equal((live2.received[0] as { setup: { tools?: unknown } }).setup.tools, undefined);
+  s2.close();
+  await live2.close();
+});
+
+test('Gemini Live が道具を呼んだら、取次の答えを同じ ID で返す。知らない道具・取りやめた呼び出しを扱う', async () => {
+  const live = await fakeLive();
+  const calls: Record<string, string>[] = [];
+  const session = await new GeminiLiveProvider({ apiKey: 'k', model: 'm', url: live.url }).open({
+    instructions: 'x', speak: false, tools: [askTool(calls)], onEvent: () => undefined,
+  });
+  live.reply({ toolCall: { functionCalls: [{ id: 'c1', name: 'ask_secretary', args: { request: '明日の予定を教えて' } }, { id: 'c2', name: 'send_mail', args: {} }] } });
+  const response = () => live.received.find((m) => (m as { toolResponse?: unknown }).toolResponse) as
+    { toolResponse: { functionResponses: { id: string; name: string; response: Record<string, unknown> }[] } } | undefined;
+  await waitFor(() => !!response());
+  assert.deepEqual(calls, [{ request: '明日の予定を教えて' }]);
+  assert.deepEqual(response()!.toolResponse.functionResponses, [
+    { id: 'c1', name: 'ask_secretary', response: { answer: '明日の予定は 2 件です（明日の予定を教えて）' } },
+    { id: 'c2', name: 'send_mail', response: { error: 'その道具はありません' } },
+  ], '知らない道具は動かさず、断りの文を返す');
+
+  // 本人が話をさえぎって取りやめた呼び出しには、結果を返さない
+  const before = live.received.length;
+  live.reply({ toolCallCancellation: { ids: ['c3'] } });
+  live.reply({ toolCall: { functionCalls: [{ id: 'c3', name: 'ask_secretary', args: { request: 'やっぱりいい' } }] } });
+  await waitFor(() => calls.length === 2);
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(live.received.slice(before).filter((m) => (m as { toolResponse?: unknown }).toolResponse).length, 0);
+  session.close();
+  await live.close();
+});
+
+test('道具が失敗しても、音声の対話は続け、断りの文を返す', async () => {
+  const live = await fakeLive();
+  const session = await new GeminiLiveProvider({ apiKey: 'k', model: 'm', url: live.url }).open({
+    instructions: 'x', speak: false, onEvent: () => undefined,
+    tools: [{ ...askTool([]), run: async () => { throw new Error('内部の失敗'); } }],
+  });
+  live.reply({ toolCall: { functionCalls: [{ id: 'c1', name: 'ask_secretary', args: { request: 'x' } }] } });
+  await waitFor(() => live.received.some((m) => (m as { toolResponse?: unknown }).toolResponse));
+  const r = live.received.find((m) => (m as { toolResponse?: unknown }).toolResponse) as { toolResponse: { functionResponses: { response: { error: string } }[] } };
+  assert.match(r.toolResponse.functionResponses[0]!.response.error, /処理できませんでした/);
+  assert.ok(!JSON.stringify(r).includes('内部の失敗'), '内部の例外の文は相手に渡さない');
+  session.close();
+  await live.close();
+});
+
+test('見本の音声でも、書いた文字は秘書の取次に渡す（取次が動くことを確かめられる）', async () => {
+  const calls: Record<string, string>[] = [];
+  const sink = collect();
+  const session = await new MockVoiceProvider().open({ instructions: 'x', speak: false, tools: [askTool(calls)], onEvent: sink.onEvent });
+  session.sendText('明日の予定を教えて');
+  await waitFor(() => sink.events.some((e) => e.type === 'turn-end'));
+  assert.deepEqual(calls, [{ request: '明日の予定を教えて' }]);
+  assert.deepEqual(sink.events.filter((e) => e.type === 'reply').map((e) => (e as { text: string }).text),
+    ['［見本の応答］明日の予定は 2 件です（明日の予定を教えて）']);
+  session.close();
+});

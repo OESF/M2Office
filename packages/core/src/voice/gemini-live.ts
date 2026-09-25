@@ -7,7 +7,7 @@
  * 鍵はサーバーだけが持つ。ブラウザには渡さない（ADR-0007 決定 7）。
  */
 
-import { AUDIO, type VoiceEvent, type VoiceProvider, type VoiceSession, type VoiceSessionOptions } from './provider.js';
+import { AUDIO, type VoiceEvent, type VoiceProvider, type VoiceSession, type VoiceSessionOptions, type VoiceTool } from './provider.js';
 
 const LIVE_URL =
   'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
@@ -25,6 +25,25 @@ interface LiveMessage {
     turnComplete?: boolean;
     interrupted?: boolean;
   };
+  /** 道具の呼び出し（仕様書 第10.5.7節）。 */
+  toolCall?: { functionCalls?: { id?: string; name?: string; args?: Record<string, unknown> }[] };
+  /** 音声の相手が取りやめた呼び出し（本人が話をさえぎったときなど）。 */
+  toolCallCancellation?: { ids?: string[] };
+}
+
+/** 道具を Gemini の関数の宣言にする。型の名前は大文字で書く（Gemini の決まり）。 */
+function declarations(tools: VoiceTool[]) {
+  return [{
+    functionDeclarations: tools.map((t) => ({
+      name: t.name,
+      description: t.description,
+      parameters: {
+        type: 'OBJECT',
+        properties: Object.fromEntries(Object.entries(t.parameters).map(([k, v]) => [k, { type: 'STRING', description: v.description }])),
+        required: t.required,
+      },
+    })),
+  }];
 }
 
 export interface GeminiLiveOptions {
@@ -94,6 +113,8 @@ export class GeminiLiveProvider implements VoiceProvider {
                 : {}),
             },
             systemInstruction: { parts: [{ text: session.instructions }] },
+            // 秘書の取次を呼ぶ道（仕様書 第10.5.7節）。渡さなければ話し相手だけになる
+            ...(session.tools && session.tools.length > 0 ? { tools: declarations(session.tools) } : {}),
             // 聞こえた文字と応答の文字を必ず受け取る（画面への併記と会話ログに使う。第10.5.2節）
             inputAudioTranscription: {},
             outputAudioTranscription: {},
@@ -109,8 +130,15 @@ export class GeminiLiveProvider implements VoiceProvider {
     });
 
     const emit = (event: VoiceEvent) => session.onEvent(event);
+    // 取りやめられた呼び出し。結果が出ても返さない
+    const cancelled = new Set<string>();
     ws.addEventListener('message', async (ev) => {
       const message = await parseMessage(ev.data);
+      for (const id of message?.toolCallCancellation?.ids ?? []) cancelled.add(id);
+      if (message?.toolCall?.functionCalls?.length) {
+        await answerToolCalls(message.toolCall.functionCalls);
+        return;
+      }
       const content = message?.serverContent;
       if (!content) return;
       if (content.inputTranscription?.text) emit({ type: 'heard', text: content.inputTranscription.text });
@@ -127,6 +155,33 @@ export class GeminiLiveProvider implements VoiceProvider {
     ws.addEventListener('close', (ev) => {
       emit({ type: 'closed', reason: ev.reason || '接続が終わりました' });
     });
+
+    /**
+     * 道具の呼び出しに答える（仕様書 第10.5.7節）。知らない道具と、道具の失敗は、断りの文で返す。
+     *
+     * @remarks 返すまで音声の相手は待つ。結果は話し終わりを待たずに返してよい（相手が求めているため）
+     */
+    async function answerToolCalls(calls: { id?: string; name?: string; args?: Record<string, unknown> }[]) {
+      const responses = [];
+      for (const call of calls) {
+        const tool = session.tools?.find((t) => t.name === call.name);
+        let response: Record<string, unknown>;
+        if (!tool) {
+          response = { error: 'その道具はありません' };
+        } else {
+          try {
+            const args = Object.fromEntries(Object.entries(call.args ?? {}).map(([k, v]) => [k, typeof v === 'string' ? v : String(v ?? '')]));
+            response = await tool.run(args);
+          } catch {
+            response = { error: '処理できませんでした。画面の入力欄でもう一度お試しください' };
+          }
+        }
+        if (call.id && cancelled.has(call.id)) continue;
+        responses.push({ ...(call.id ? { id: call.id } : {}), name: call.name ?? '', response });
+      }
+      if (responses.length === 0 || ws.readyState !== WebSocket.OPEN) return;
+      ws.send(JSON.stringify({ toolResponse: { functionResponses: responses } }));
+    }
 
     /** 1 往復分の文字を送る。 */
     const sendTurn = (text: string) => {
