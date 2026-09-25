@@ -1681,8 +1681,11 @@ console.log('\n■ 37. ダッシュボードの人の状態と SSE（第6.7.4.1�
     ? ok(`人の状態を個人名で返す（既定。${live.people.length} 人、${me.name}さんは「${me.detail}」）`)
     : ng('人の状態が返らない', JSON.stringify(live.people ?? null));
   // 状態に持たせてよい項目だけであること（中身の項目が紛れていない）
-  const allowed = ['userId', 'name', 'state', 'detail', 'agentName', 'route', 'device'];
-  (live.people ?? []).every((p) => Object.keys(p).every((k) => allowed.includes(k)))
+  // 本人と秘書の 1 組（第6.7.4.4節）の項目を含む。秘書の側も状態・名前・アバターまで
+  const allowed = ['userId', 'name', 'state', 'detail', 'agentName', 'route', 'device', 'self', 'secretary', 'photo'];
+  const secretaryAllowed = ['state', 'detail', 'busy', 'name', 'avatar'];
+  (live.people ?? []).every((p) => Object.keys(p).every((k) => allowed.includes(k))
+    && Object.keys(p.secretary ?? {}).every((k) => secretaryAllowed.includes(k)))
     ? ok('状態・業務の名前までで、会話や入力の中身の項目を持たない')
     : ng('余分な項目がある', JSON.stringify(Object.keys((live.people ?? [])[0] ?? {})));
 
@@ -2515,6 +2518,84 @@ console.log('\n■ 50. 秘書のアバターに使っている画像は、4 週�
     await call('a', '/v1/me/settings/secretary', { method: 'PUT', body: JSON.stringify({ ...prefs.secretary, avatar: keep }) }, 'member');
     await owner.query(`delete from files where id = any($1)`, [[avatarId, looseId]]);
     for (const id of [avatarId, looseId]) await store.remove('t-alpha', id).catch(() => undefined);
+    await owner.end();
+    await repo.close?.();
+  }
+}
+
+console.log('\n■ 51. ダッシュボードの本人と秘書の 1 組（第6.7.4.4節）');
+{
+  const who = { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' };
+  const { body: meBody } = await call('a', '/v1/me', {}, 'member');
+  const memberId = meBody.user.id;
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+  const form = new FormData();
+  form.append('file', new Blob([png], { type: 'image/png' }), 'smoke-pair.png');
+  const avatarId = (await (await fetch(`${API}/v1/files`, { method: 'POST', headers: who, body: form })).json()).id;
+  const { body: prefs } = await call('a', '/v1/me/settings', {}, 'member');
+  const keep = prefs.secretary;
+  const setSecretary = (over) => call('a', '/v1/me/settings/secretary', { method: 'PUT', body: JSON.stringify({ ...keep, ...over }) }, 'member');
+
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const { tsImport } = await import('tsx/esm/api');
+  const { PostgresRepository } = await tsImport('../packages/core/src/repository/postgres.ts', import.meta.url);
+  const { LocalFileStore } = await tsImport('../packages/core/src/files/store.ts', import.meta.url);
+  const repo = new PostgresRepository(process.env.DATABASE_URL ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
+  const store = new LocalFileStore(process.env.FILE_STORAGE_DIR ?? new URL('../.data/files', import.meta.url).pathname);
+  const hadPhoto = (await owner.query(`select 1 from user_photos where tenant_id = 't-alpha' and user_id = $1`, [memberId])).rowCount > 0;
+  try {
+    await setSecretary({ name: 'スモーク秘書', avatar: `file:${avatarId}` });
+    if (!hadPhoto) {
+      await repo.saveUserPhoto({ tenantId: 't-alpha', userId: memberId, mime: 'image/png', bytes: png, fetchedAt: new Date().toISOString() });
+    }
+    const { body: live } = await call('a', '/v1/admin/dashboard/live');
+    const pair = (live.people ?? []).find((p) => p.userId === memberId);
+    pair?.self?.detail && pair.secretary?.detail && typeof pair.secretary.busy === 'boolean'
+      ? ok(`本人の状態と秘書の状態を分けて返す（本人「${pair.self.detail}」・秘書「${pair.secretary.detail}」）`)
+      : ng('本人と秘書の状態が返らない', JSON.stringify(pair ?? null));
+    pair?.secretary.name === 'スモーク秘書' ? ok('秘書の名前を返す') : ng('秘書の名前が違う', pair?.secretary.name);
+    const avatarUrl = `/v1/admin/dashboard/people/${encodeURIComponent(memberId)}/secretary-avatar`;
+    pair?.secretary.avatar === avatarUrl ? ok('上げた画像の秘書のアバターは、利用者ごとの口を示す') : ng('アバターの URL が違う', pair?.secretary.avatar);
+    pair?.photo?.startsWith(`/v1/admin/dashboard/people/${encodeURIComponent(memberId)}/photo?v=`)
+      ? ok('本人の写真の URL を返す') : ng('写真の URL が返らない', pair?.photo);
+
+    const get = (tenant, path, user) => fetch(`${API}${path}`, {
+      headers: { 'x-tenant': tenant, 'x-user': `${user}@${tenant === 'a' ? 'alpha' : 'beta'}.example.jp` },
+    });
+    const img = await get('a', avatarUrl, 'admin');
+    img.status === 200 && img.headers.get('content-type') === 'image/png'
+      && img.headers.get('x-content-type-options') === 'nosniff' && (img.headers.get('content-security-policy') ?? '').includes('sandbox')
+      ? ok('管理者は秘書のアバターを読める（nosniff と CSP 付き）') : ng(`アバターが読めない（${img.status}）`);
+    const photo = await get('a', pair?.photo ?? '/', 'admin');
+    photo.status === 200 ? ok('管理者は本人の写真を読める') : ng(`写真が読めない（${photo.status}）`);
+    (await get('a', avatarUrl, 'member')).status === 403
+      ? ok('管理者でなければ、ほかの人のアバターは読めない') : ng('管理者でない人が読めた');
+    (await get('b', avatarUrl, 'admin')).status === 404
+      ? ok('ほかの会社の管理者は、この会社の人のアバターを読めない（テナント境界）') : ng('ほかの会社から読めた');
+    (await get('b', pair?.photo ?? '/', 'admin')).status === 404
+      ? ok('ほかの会社の管理者は、この会社の人の写真を読めない（テナント境界）') : ng('ほかの会社から写真が読めた');
+
+    await call('a', '/v1/admin/settings/dashboard', { method: 'PUT', body: JSON.stringify({ people: 'counts' }) });
+    const hidden = [(await get('a', avatarUrl, 'admin')).status, (await get('a', pair?.photo ?? '/', 'admin')).status];
+    hidden.every((x) => x === 404)
+      ? ok('「人数と業務だけ」の会社では、写真もアバターも返さない') : ng('人数だけの会社で画像が返った', hidden.join(','));
+    await call('a', '/v1/admin/settings/dashboard', { method: 'PUT', body: JSON.stringify({ people: 'names' }) });
+
+    await setSecretary({ name: '', avatar: 'preset:secretary1' });
+    const { body: again } = await call('a', '/v1/admin/dashboard/live');
+    const p2 = (again.people ?? []).find((p) => p.userId === memberId);
+    p2?.secretary.avatar === '/avatars/secretary1.png' && p2.secretary.name === '秘書'
+      ? ok('同梱の絵は静的な置き場を示し、名前が無ければ「秘書」と出す') : ng('同梱の絵か名前の扱いが違う', JSON.stringify(p2?.secretary ?? null));
+    (await get('a', avatarUrl, 'admin')).status === 404
+      ? ok('上げた画像を登録していなければ、口は何も返さない（ファイルの ID は受け取らない）') : ng('登録していない画像が返った');
+  } finally {
+    await call('a', '/v1/admin/settings/dashboard', { method: 'PUT', body: JSON.stringify({ people: 'names' }) });
+    await call('a', '/v1/me/settings/secretary', { method: 'PUT', body: JSON.stringify(keep) }, 'member');
+    if (!hadPhoto) await owner.query(`delete from user_photos where tenant_id = 't-alpha' and user_id = $1`, [memberId]);
+    await owner.query(`delete from files where id = $1`, [avatarId]);
+    await store.remove('t-alpha', avatarId).catch(() => undefined);
     await owner.end();
     await repo.close?.();
   }

@@ -256,7 +256,7 @@ export function meRoute(deps: AppDeps) {
     const { tenant, user } = c.get('ctx');
     const now = new Date();
     const since = new Date(now.getTime() - 24 * 3_600_000).toISOString();
-    const [liveRuns, pending, sessions, secretaryEvents, settings, view] = await Promise.all([
+    const [liveRuns, pending, sessions, secretaryEvents, settings, view, voiceEvents] = await Promise.all([
       deps.repo.listLiveRuns(tenant.id, since),
       deps.repo.listPendingApprovals(tenant.id),
       deps.repo.listActiveSessions(tenant.id),
@@ -265,6 +265,7 @@ export function meRoute(deps: AppDeps) {
       ),
       deps.repo.getTenantSettings(tenant.id),
       deps.tenantView(tenant.id),
+      deps.repo.listAuditSince(tenant.id, ['secretary.voice'], 50),
     ]);
     const mine = liveRuns.filter(({ job }) => job.requestedBy === user.id);
     const stepsByRun = new Map(await Promise.all(
@@ -273,6 +274,7 @@ export function meRoute(deps: AppDeps) {
     const [presence] = buildPresence({
       now, users: [user], sessions, liveRuns: mine, stepsByRun, pending,
       secretaryEvents: secretaryEvents.map((e) => ({ actorId: e.actorId, occurredAt: e.occurredAt })),
+      voiceEvents: voiceEvents.map((e) => ({ actorId: e.actorId, occurredAt: e.occurredAt, targetId: e.targetId })),
       agentName: (id) => view.allAgents.find((a) => a.id === id)?.name ?? id,
     });
     return c.json({
@@ -284,6 +286,8 @@ export function meRoute(deps: AppDeps) {
         'いま使っている業務の名前',
         '活動の表示名（「リサーチ中」など）',
         '接続の経路と端末の種類',
+        'Google のプロフィール写真',
+        '秘書の名前・アバターと、秘書の状態（「議事録作成を実行中」「待機」など）',
       ],
       hidden: [
         '秘書との会話の中身',

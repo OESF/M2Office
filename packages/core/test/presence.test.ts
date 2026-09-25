@@ -3,14 +3,14 @@
  *
  * 状態の決め方（強い順）、中身を持たないこと、粒度の見せ方を確かめる。
  *
- * @see 仕様書 第6.7.4.1節、ADR-0013
+ * @see 仕様書 第6.7.4.1節・第6.7.4.4節、ADR-0013
  */
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Approval, Job, Run, RunStep, User } from '@m2office/shared';
 import {
-  ACTIVE_WINDOW_MIN, PRESENCE_LABELS, activityOf, buildPresence, deviceOf, summarizePresence,
+  ACTIVE_WINDOW_MIN, PRESENCE_LABELS, VOICE_WINDOW_MIN, activityOf, buildPresence, deviceOf, summarizePresence, voiceOpen,
 } from '../src/index.js';
 
 const NOW = new Date('2026-09-23T02:00:00.000Z');
@@ -130,5 +130,67 @@ test('粒度が「人数と業務だけ」なら、誰かを示さない', () =>
   assert.equal(JSON.stringify(summary).includes('一般'), false, '名前を含めない');
   assert.deepEqual(summary.agents, ['議事録作成・共有']);
   assert.equal(summary.counts.find((x) => x.state === 'running')?.n, 1);
-  assert.equal(summary.counts.length, 6, '人数 0 の状態も落とさない');
+  assert.equal(summary.counts.length, 7, '人数 0 の状態も落とさない');
+});
+
+test('本人がオフラインでも、秘書は定時実行の業務を進めていると示す（本人と秘書の 1 組）', () => {
+  const people = build({
+    liveRuns: [
+      { run: run('r1', 'running'), job: { ...job('r1', 'u-member'), origin: 'schedule' } },
+      { run: run('r2', 'queued'), job: job('r2', 'u-member') },
+    ],
+    stepsByRun: new Map([['r1', [step({})]]]),
+  });
+  const member = people.find((p) => p.userId === 'u-member')!;
+  assert.deepEqual(member.self, { state: 'offline', detail: 'オフライン' });
+  assert.deepEqual(member.secretary, { state: 'running', detail: '議事録作成・共有を実行中（ほか 1 件）', busy: true });
+  const admin = people.find((p) => p.userId === 'u-admin')!;
+  assert.deepEqual(admin.secretary, { state: 'idle', detail: '待機', busy: false }, '何も無ければ秘書は待機');
+});
+
+test('秘書の状態は強い順に決める: 活動中 → 実行中 → 承認待ち → 順番待ち → 音声 → 応対中', () => {
+  const sessions = [{ userId: 'u-member', lastSeenAt: ago(1), userAgent: null }];
+  const secretaryOfMember = (over: Partial<Parameters<typeof buildPresence>[0]>) =>
+    build({ sessions, ...over }).find((p) => p.userId === 'u-member')!.secretary;
+
+  assert.equal(secretaryOfMember({
+    liveRuns: [{ run: run('r1', 'running'), job: job('r1', 'u-member') }],
+    stepsByRun: new Map([['r1', [step({ activity: 'メールを確認中' })]]]),
+  }).detail, 'メールを確認中');
+  assert.deepEqual(secretaryOfMember({ liveRuns: [{ run: run('r1', 'awaiting_approval'), job: job('r1', 'u-member') }] }),
+    { state: 'awaiting', detail: '議事録作成・共有の承認を待っています', busy: true });
+  assert.deepEqual(secretaryOfMember({ liveRuns: [{ run: run('r1', 'queued'), job: job('r1', 'u-member') }] }),
+    { state: 'queued', detail: '議事録作成・共有の順番待ち', busy: true });
+  assert.deepEqual(secretaryOfMember({ secretaryEvents: [{ actorId: 'u-member', occurredAt: ago(1) }] }),
+    { state: 'talking', detail: '応対中', busy: true });
+});
+
+test('承認の依頼は本人の状態に、業務の進み具合は秘書の状態に出す', () => {
+  const people = build({
+    sessions: [{ userId: 'u-member', lastSeenAt: ago(1), userAgent: null }],
+    pending: [approval([], 'u-member')],
+    liveRuns: [{ run: run('r1', 'awaiting_approval'), job: job('r1', 'u-member') }],
+  });
+  const member = people.find((p) => p.userId === 'u-member')!;
+  assert.equal(member.state, 'approval', '1 組全体の状態は強い順のまま');
+  assert.equal(member.self.detail, '承認の依頼 1 件');
+  assert.equal(member.secretary.state, 'awaiting');
+});
+
+test('音声の対話は、始まりがあり終わりが無いあいだだけ「音声で会話中」とする', () => {
+  const since = NOW.getTime() - VOICE_WINDOW_MIN * 60_000;
+  const start = (min: number) => ({ actorId: 'u-member', occurredAt: ago(min), targetId: 'start' });
+  const end = (min: number) => ({ actorId: 'u-member', occurredAt: ago(min), targetId: 'end' });
+  assert.equal(voiceOpen([start(5)], 'u-member', since), true);
+  assert.equal(voiceOpen([start(5), end(1)], 'u-member', since), false, '終わっていれば会話中にしない');
+  assert.equal(voiceOpen([start(20), end(10), start(2)], 'u-member', since), true, '次の対話が開いている');
+  assert.equal(voiceOpen([start(VOICE_WINDOW_MIN + 1)], 'u-member', since), false, '古い始まりは数えない（異常終了に備える）');
+  assert.equal(voiceOpen([start(5)], 'u-admin', since), false, 'ほかの人の対話を数えない');
+
+  const people = build({ voiceEvents: [start(3)] });
+  const member = people.find((p) => p.userId === 'u-member')!;
+  assert.equal(member.state, 'voice');
+  assert.equal(member.route, '音声');
+  assert.deepEqual(member.self, { state: 'voice', detail: '音声で会話中' });
+  assert.deepEqual(member.secretary, { state: 'voice', detail: '音声で応対中', busy: true });
 });

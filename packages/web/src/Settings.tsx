@@ -516,6 +516,8 @@ function PresenceNotice() {
         と表示されています
         {data.granularity === 'counts' && <>（この会社は個人名を出さず、人数と業務だけを表示する設定です）</>}
         。
+        {/* 本人と秘書は 1 組で出る（仕様書 第6.7.4.4節）。個人名の会社だけ */}
+        {data.granularity === 'names' && <>あなたの秘書は<strong>「{data.presence.secretary.detail}」</strong>と表示されています。</>}
       </p>
       <p className="muted small">表示されるもの: {data.shown.join('、')}</p>
       <p className="muted small">表示されないもの: {data.hidden.join('、')}</p>

@@ -144,6 +144,12 @@ export interface Repository {
 
   /** 本人の設定を返す。未保存の区分は既定値で補う。 */
   getUserSettings(tenantId: string, userId: string): Promise<UserSettings>;
+  /**
+   * 会社の全員の、秘書の設定（名前・アバター）を返す（仕様書 第6.7.4.4節）。未保存の人は含めない。
+   *
+   * @remarks ダッシュボードで本人と秘書を 1 組にして並べるために使う。1 人ずつ引くと、更新のたびに人数ぶん問い合わせるため
+   */
+  listSecretarySettings(tenantId: string): Promise<Map<string, UserSettings['secretary']>>;
 
   /**
    * 会話ログを 1 往復ぶん残す（仕様書 第11.9.4.1節）。
@@ -236,6 +242,12 @@ export interface Repository {
   getUserPhoto(tenantId: string, userId: string): Promise<UserPhoto | null>;
   /** 本人のアバターを上書きする。1 人 1 枚で、古い写真は残さない。 */
   saveUserPhoto(photo: UserPhoto): Promise<void>;
+  /**
+   * 写真を持っている人と、取り込んだ時刻（仕様書 第6.7.4.4節）。画像そのものは読まない。
+   *
+   * @returns 利用者の ID → 取り込んだ時刻。画面の URL に添え、取り込み直したら読み直させる
+   */
+  listUserPhotoStamps(tenantId: string): Promise<Map<string, string>>;
   /**
    * 同じ依頼で動いている調べものを探す（仕様書 第10.11.4節）。
    *

@@ -143,11 +143,28 @@ export type ScheduleView = Schedule & { label: string };
 export interface PresenceView {
   userId: string;
   name: string;
-  state: 'approval' | 'activity' | 'running' | 'talking' | 'idle' | 'offline';
+  state: 'approval' | 'activity' | 'running' | 'voice' | 'talking' | 'idle' | 'offline';
   detail: string;
   agentName: string | null;
   route: string | null;
   device: string | null;
+  /** 本人だけの状態（仕様書 第6.7.4.4節）。 */
+  self: { state: 'approval' | 'voice' | 'talking' | 'idle' | 'offline'; detail: string };
+  /** その人に付く秘書の状態。`busy` なら秘書が動いている（アバターを輪で囲む）。 */
+  secretary: {
+    state: 'activity' | 'running' | 'awaiting' | 'queued' | 'voice' | 'talking' | 'idle';
+    detail: string; busy: boolean;
+  };
+}
+
+/**
+ * ダッシュボードの人の状態の 1 組（本人と秘書。仕様書 第6.7.4.4節）。個人名で表示する会社にだけ返る。
+ *
+ * @remarks `photo` と `secretary.avatar` は画面が読む URL。無ければ `null`（人の形のアイコンを出す）
+ */
+export interface PresencePairView extends PresenceView {
+  photo: string | null;
+  secretary: PresenceView['secretary'] & { name: string; avatar: string | null };
 }
 
 /** 承認待ち 1 件。どの業務かを添える（仕様書 第6.2.4節）。定義が見つからなければ `null`。 */
@@ -176,7 +193,7 @@ export interface DashboardLive {
   /** 今日（日本時間の 0 時以降）に失敗した業務。日が変わると消える（第6.7.5.1節）。 */
   failures: { runId: string; agentName: string; requester: string; at: string; reason: string }[];
   /** 人の状態。会社の設定が「人数と業務だけ」なら `null`（第6.7.4.1節）。 */
-  people: PresenceView[] | null;
+  people: PresencePairView[] | null;
   /** 人数と業務だけの見せ方。個人名で表示する会社では `null`。 */
   peopleSummary: { counts: { state: string; label: string; n: number }[]; agents: string[] } | null;
   backlog: { approvalId: string; agentName: string; what: string; requester: string; approver: string; since: string }[];

@@ -10,6 +10,7 @@
 import { useEffect, useState } from 'react';
 import { api, describeError, type ChecklistItem, type DashboardLive, type DashboardStats } from './api.js';
 import { HelpTip, openHelp } from './help.js';
+import { Icon } from './nav.js';
 
 /** 「いま」を取り直す間隔（ミリ秒）。 */
 const LIVE_INTERVAL_MS = 5000;
@@ -155,18 +156,57 @@ function People({ data, board = false }: { data: DashboardLive; board?: boolean 
     <section className="card">
       <h3>人の状態 {tip}</h3>
       {people.length === 0 && <p className="muted">利用者がいません。</p>}
-      <div className="presence-row">
+      {/* 本人と秘書を 1 組で並べる（仕様書 第6.7.4.4節）。本人がオフラインでも、秘書は業務を進めている */}
+      <div className="pair-grid">
         {people.map((p) => (
-          <span key={p.userId} className={`presence presence-${p.state}`} title={p.detail}>
-            <strong>{p.name}</strong>
-            <span className="small">{p.detail}</span>
-            {(p.route || p.device) && (
-              <span className="muted small">{[p.route, p.device].filter(Boolean).join('・')}</span>
-            )}
-          </span>
+          <div key={p.userId} className={`pair presence-${p.state}`}>
+            <div className="pair-side">
+              <PairAvatar src={p.photo} busy={false} />
+              <span className="pair-text">
+                <strong>{p.name}</strong>
+                <span className="small">{p.self.detail}</span>
+                {(p.route || p.device) && (
+                  <span className="muted small">{[p.route, p.device].filter(Boolean).join('・')}</span>
+                )}
+              </span>
+            </div>
+            <span className="pair-link" aria-hidden="true" />
+            <div className="pair-side">
+              <PairAvatar src={p.secretary.avatar} busy={p.secretary.busy} />
+              <span className="pair-text">
+                <strong>
+                  {p.secretary.name}
+                  {/* 名前を付けていなければ名前が「秘書」になる。同じ言葉を二度並べない */}
+                  {p.secretary.name !== '秘書' && <span className="muted small pair-role">秘書</span>}
+                </strong>
+                <span className={`small${p.secretary.busy ? ' pair-busy' : ''}`}>{p.secretary.detail}</span>
+              </span>
+            </div>
+          </div>
         ))}
       </div>
     </section>
+  );
+}
+
+/**
+ * 人の状態の 1 組に添える顔（本人のプロフィール写真、または秘書のアバター。仕様書 第6.7.4.4節）。
+ *
+ * @param src 画像の URL。無ければ人の形のアイコン
+ * @param busy 秘書が動いているか。動いているあいだは輪で囲む（業務の絵と同じ手がかり。第6.7.4.3節）
+ *
+ * @remarks 読み上げには渡さない。顔が伝えることは、すぐ横の名前と状態が書いている
+ */
+function PairAvatar({ src, busy }: { src: string | null; busy: boolean }) {
+  // 読めなければアイコンに戻す（壊れた画像の印を出さない）
+  const [broken, setBroken] = useState(false);
+  useEffect(() => setBroken(false), [src]);
+  return (
+    <span className={`pair-avatar${busy ? ' busy' : ''}`} aria-hidden="true">
+      {src && !broken
+        ? <img src={src} alt="" loading="lazy" onError={() => setBroken(true)} />
+        : <span className="pair-avatar-icon"><Icon name="user" /></span>}
+    </span>
   );
 }
 

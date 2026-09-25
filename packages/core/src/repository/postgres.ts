@@ -1071,6 +1071,12 @@ export class PostgresRepository implements Repository {
     };
   }
 
+  async listSecretarySettings(tenantId: string): Promise<Map<string, UserSettings['secretary']>> {
+    const rows = await this.q<{ userId: string; secretary: Partial<UserSettings['secretary']> | null }>(tenantId,
+      `select user_id as "userId", secretary from user_settings where tenant_id = $1`, [tenantId]);
+    return new Map(rows.map((r) => [r.userId, { ...DEFAULT_USER_SETTINGS.secretary, ...(r.secretary ?? {}) }]));
+  }
+
   async saveUserSettings<K extends keyof UserSettings>(
     tenantId: string, userId: string, section: K, value: UserSettings[K],
   ): Promise<void> {
@@ -1245,6 +1251,12 @@ export class PostgresRepository implements Repository {
       [tenantId, userId]);
     const r = rows[0];
     return r ? { tenantId, userId, mime: r.mime, bytes: new Uint8Array(r.bytes), fetchedAt: new Date(r.fetchedAt).toISOString() } : null;
+  }
+
+  async listUserPhotoStamps(tenantId: string): Promise<Map<string, string>> {
+    const rows = await this.q<{ userId: string; fetchedAt: Date }>(tenantId,
+      `select user_id as "userId", fetched_at as "fetchedAt" from user_photos where tenant_id = $1`, [tenantId]);
+    return new Map(rows.map((r) => [r.userId, new Date(r.fetchedAt).toISOString()]));
   }
 
   async saveUserPhoto(photo: UserPhoto): Promise<void> {

@@ -8,7 +8,7 @@
  */
 
 import { Hono } from 'hono';
-import type { Approval, AuditEvent, Job, Run, User } from '@m2office/shared';
+import { isValidAvatar, type Approval, type AuditEvent, type Job, type Run, type User } from '@m2office/shared';
 import {
   ACTIVE_WINDOW_MIN, agentFace, buildPresence, summarizePresence, stepLabel,
   type TenantExtensions,
@@ -18,6 +18,9 @@ import { requireRole, type AppEnv } from '../middleware/tenant.js';
 
 /** 秘書と会話中の判定に使う監査ログの種類（第6.7.4.1節）。 */
 const SECRETARY_ACTIONS = ['secretary.direct', 'secretary.route', 'secretary.chat', 'secretary.help'];
+
+/** 音声で会話中の判定に使う監査ログの種類（第6.7.4.1節）。始まりと終わりの 2 つを残す。 */
+const VOICE_ACTIONS = ['secretary.voice'];
 
 /** SSE で状態を組み立て直す間隔（ミリ秒）。変わったときだけ送る（第6.7.9節）。 */
 const STREAM_TICK_MS = Number(process.env['DASHBOARD_STREAM_TICK_MS'] ?? 2000);
@@ -48,6 +51,52 @@ export function dashboardRoute(deps: AppDeps) {
     const { tenant } = c.get('ctx');
     return c.json(await live(tenant.id));
   });
+
+  /**
+   * 人の状態に添える、本人のプロフィール写真（仕様書 第6.7.4.4節）。
+   *
+   * @remarks
+   * **個人名で表示する会社で、停止していない利用者のものだけ**を返す。
+   * 種類を推測させず（`nosniff`）、何も読み込ませない（`Content-Security-Policy`）。
+   */
+  app.get('/people/:userId/photo', async (c) => {
+    const { tenant } = c.get('ctx');
+    const target = await shownUser(tenant.id, c.req.param('userId'));
+    const photo = target ? await deps.repo.getUserPhoto(tenant.id, target.id) : null;
+    if (!photo) return c.json({ error: '写真はありません' }, 404);
+    return imageResponse(photo.bytes, photo.mime, 86400);
+  });
+
+  /**
+   * 人の状態に添える、その人の秘書のアバター（本人が上げた画像。仕様書 第6.7.4.4節）。
+   *
+   * @remarks
+   * **本人が個人設定に登録した画像だけ**を返す。ファイルの ID は受け取らない（任意のファイルを出させない）。
+   * 同梱の絵は画面の静的な置き場から出すため、ここを通らない。
+   */
+  app.get('/people/:userId/secretary-avatar', async (c) => {
+    const { tenant } = c.get('ctx');
+    const target = await shownUser(tenant.id, c.req.param('userId'));
+    const avatar = target ? (await deps.repo.getUserSettings(tenant.id, target.id)).secretary.avatar ?? '' : '';
+    if (!avatar.startsWith('file:')) return c.json({ error: 'アバターは登録されていません' }, 404);
+    const id = avatar.slice('file:'.length);
+    const meta = await deps.repo.getFile(tenant.id, id);
+    const bytes = meta && (meta.kind === 'png' || meta.kind === 'jpeg') ? await deps.files.get(tenant.id, id) : null;
+    if (!meta || !bytes) return c.json({ error: 'アバターは登録されていません' }, 404);
+    return imageResponse(bytes, meta.mime, 60);
+  });
+
+  /**
+   * 写真やアバターを出してよい利用者。個人名で表示する会社の、停止していない利用者だけ（第6.7.4.4節）。
+   *
+   * @returns 出してよければその利用者。そうでなければ `null`
+   */
+  async function shownUser(tenantId: string, userId: string): Promise<User | null> {
+    const settings = await deps.repo.getTenantSettings(tenantId);
+    if (settings.dashboard.people !== 'names') return null;
+    const user = await deps.repo.findUserById(tenantId, userId);
+    return user && user.status === 'active' ? user : null;
+  }
 
   /**
    * いまの状態を送り続ける（SSE。仕様書 第6.7.9節、ADR-0013）。
@@ -105,7 +154,10 @@ export function dashboardRoute(deps: AppDeps) {
     const now = new Date();
     const todayStart = jstDayStart(now, 0);
 
-    const [users, liveRuns, pending, todayRows, activeUsers, events, sessions, secretaryEvents, settings] =
+    const [
+      users, liveRuns, pending, todayRows, activeUsers, events, sessions, secretaryEvents, settings,
+      voiceEvents, secretaries, photos,
+    ] =
       await Promise.all([
         deps.repo.listUsers(tenantId),
         deps.repo.listLiveRuns(tenantId, todayStart),
@@ -116,6 +168,9 @@ export function dashboardRoute(deps: AppDeps) {
         deps.repo.listActiveSessions(tenantId),
         deps.repo.listAuditSince(tenantId, SECRETARY_ACTIONS, 30),
         deps.repo.getTenantSettings(tenantId),
+        deps.repo.listAuditSince(tenantId, VOICE_ACTIONS, 50),
+        deps.repo.listSecretarySettings(tenantId),
+        deps.repo.listUserPhotoStamps(tenantId),
       ]);
     const nameOf = names(users);
 
@@ -200,7 +255,22 @@ export function dashboardRoute(deps: AppDeps) {
     const people = buildPresence({
       now, users, sessions, liveRuns, stepsByRun, pending,
       secretaryEvents: secretaryEvents.map((e) => ({ actorId: e.actorId, occurredAt: e.occurredAt })),
+      voiceEvents: voiceEvents.map((e) => ({ actorId: e.actorId, occurredAt: e.occurredAt, targetId: e.targetId })),
       agentName,
+    });
+    // 本人と秘書を 1 組にして見せる（第6.7.4.4節）。写真と秘書の名前は、個人名で出す会社にだけ返す
+    const pairs = people.map((p) => {
+      const sec = secretaries.get(p.userId);
+      const stamp = photos.get(p.userId);
+      return {
+        ...p,
+        photo: stamp ? `/v1/admin/dashboard/people/${encodeURIComponent(p.userId)}/photo?v=${encodeURIComponent(stamp)}` : null,
+        secretary: {
+          ...p.secretary,
+          name: sec?.name?.trim() || '秘書',
+          avatar: secretaryAvatarUrl(p.userId, sec?.avatar ?? ''),
+        },
+      };
     });
 
     /*
@@ -247,7 +317,7 @@ export function dashboardRoute(deps: AppDeps) {
         todaySavedMinutes: round1(today.savedMinutes),
       },
       // 個人名を出さない設定の会社には、状態ごとの人数と業務の名前だけを返す
-      people: settings.dashboard.people === 'names' ? people : null,
+      people: settings.dashboard.people === 'names' ? pairs : null,
       peopleSummary: settings.dashboard.people === 'names' ? null : summarizePresence(people),
       agents,
       flows,
@@ -441,4 +511,29 @@ function jstDate(now: Date, back: number): string {
 /** 日本時間で `back` 日前の 0 時（ISO 形式）。 */
 function jstDayStart(now: Date, back: number): string {
   return new Date(`${jstDate(now, back)}T00:00:00+09:00`).toISOString();
+}
+
+/**
+ * 秘書のアバターを画面が読む URL（仕様書 第6.7.4.4節）。
+ *
+ * @param avatar 個人設定の値（`preset:<id>`・`file:<ID>`・空）
+ * @returns 同梱の絵は静的な置き場、上げた画像は利用者ごとの口。無ければ `null`（画面は人の形のアイコンを出す）
+ */
+export function secretaryAvatarUrl(userId: string, avatar: string): string | null {
+  if (avatar.startsWith('preset:') && isValidAvatar(avatar)) return `/avatars/${avatar.slice('preset:'.length)}.png`;
+  if (avatar.startsWith('file:')) return `/v1/admin/dashboard/people/${encodeURIComponent(userId)}/secretary-avatar`;
+  return null;
+}
+
+/** 画像を、画面に埋め込める形で返す。種類を推測させず、何も読み込ませない。 */
+function imageResponse(bytes: Uint8Array, mime: string, maxAge: number): Response {
+  return new Response(Buffer.from(bytes), {
+    headers: {
+      'content-type': mime,
+      'x-content-type-options': 'nosniff',
+      'content-security-policy': "default-src 'none'; sandbox",
+      // 個人の画像であり、共有の置き場に残させない
+      'cache-control': `private, max-age=${maxAge}`,
+    },
+  });
 }
