@@ -10,7 +10,7 @@
 import {
   Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode,
 } from 'react';
-import { parseInline, parseMarkdown } from './markdown.js';
+import { parseInline, parseMarkdown, type MdList } from './markdown.js';
 import { api, describeError, type AgentHelpView, type HelpArticleMeta } from './api.js';
 import { Icon } from './nav.js';
 
@@ -220,15 +220,19 @@ function ArticleView({ id, items, onOpen, onBack }: {
  * 行ごとに読むため、見出しのすぐ次の行に箇条書きが続いても崩れない（`parseMarkdown`）。
  * HTML としては解釈せず、React の要素として組み立てる。記事に書かれたタグは文字のまま出る。
  */
-export function Markdown({ text }: { text: string }) {
+export function Markdown({ text, lineBreaks = false }: {
+  text: string;
+  /** 段落の中の改行を保つ（業務の答え・成果物・送る本文）。ヘルプの記事は保たない。 */
+  lineBreaks?: boolean;
+}) {
   return (
     <>
-      {parseMarkdown(text).map((b, i) => {
+      {parseMarkdown(text, { lineBreaks }).map((b, i) => {
         switch (b.kind) {
           case 'h2': return <h2 key={i}>{inline(b.text)}</h2>;
           case 'h3': return <h3 key={i}>{inline(b.text)}</h3>;
-          case 'ul': return <ul key={i}>{b.items.map((t, j) => <li key={j}>{inline(t)}</li>)}</ul>;
-          case 'ol': return <ol key={i}>{b.items.map((t, j) => <li key={j}>{inline(t)}</li>)}</ol>;
+          case 'ul':
+          case 'ol': return <MdListView key={i} list={b} lineBreaks={lineBreaks} />;
           case 'table': return (
             <div key={i} className="md-table-wrap">
               <table className="table md-table">
@@ -238,16 +242,26 @@ export function Markdown({ text }: { text: string }) {
             </div>
           );
           case 'code': return <pre key={i} className="md-pre"><code>{b.text}</code></pre>;
+          // 引用の中も書式として読み、改行を保つ（送る本文を、読める形で見せる。仕様書 第9.3.3節）
           case 'quote': return (
-            <blockquote key={i} className="md-quote">
-              {b.lines.map((l, j) => <span key={j} className="md-quote-line">{inline(l)}</span>)}
-            </blockquote>
+            <blockquote key={i} className="md-quote"><Markdown text={b.lines.join('\n')} lineBreaks /></blockquote>
           );
-          default: return <p key={i}>{inline(b.text)}</p>;
+          default: return <p key={i} className={lineBreaks ? 'md-br' : undefined}>{inline(b.text)}</p>;
         }
       })}
     </>
   );
+}
+
+/** 箇条書き。入れ子（1 段）があれば、その項目の中に出す。 */
+function MdListView({ list, lineBreaks }: { list: MdList; lineBreaks: boolean }) {
+  const items = list.items.map((t, j) => (
+    <li key={j} className={lineBreaks ? 'md-br' : undefined}>
+      {inline(t)}
+      {list.sub?.[j] && <MdListView list={list.sub[j]!} lineBreaks={lineBreaks} />}
+    </li>
+  ));
+  return list.kind === 'ol' ? <ol>{items}</ol> : <ul>{items}</ul>;
 }
 
 /** 行の中の書式（コード・リンク・太字）を React の要素にする。HTML としては解釈しない。 */

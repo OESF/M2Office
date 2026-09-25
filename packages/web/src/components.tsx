@@ -228,7 +228,7 @@ export function RunView({
           <h3>結果</h3>
           {run.failureReason && <p className="error">{run.failureReason}</p>}
           {answer
-            ? <div className="reply"><Markdown text={answer} /></div>
+            ? <div className="reply"><Markdown text={answer} lineBreaks /></div>
             : !run.failureReason && <p className="muted">結果がありません。</p>}
         </div>
       )}
@@ -244,7 +244,8 @@ export function RunView({
       {artifacts.map((a: Artifact) => (
         <div className="card" key={a.id}>
           <h3>成果物: {a.title}</h3>
-          <pre className="body">{a.body}</pre>
+          {/* 書式として読み、改行を保つ。生の文字で出すと「## 決定事項」「**…**」がそのまま見える（2026-09-25 に確認） */}
+          <div className="reply"><Markdown text={a.body} lineBreaks /></div>
           {a.fileId && (
             <button className="btn ghost small"
               onClick={() => void api.download(a.fileId!, a.body.replace(/（.*）$/, ''))}>
@@ -342,7 +343,7 @@ function ApprovalRow({ approval, busy, onDecide }: {
       </button>
       {open && (
         <div className="fold-body">
-          <div className="reply"><Markdown text={approval.present} /></div>
+          <div className="reply"><Markdown text={approval.present} lineBreaks /></div>
           <p className="muted small">
             {approval.approverUserId ? 'あなたが依頼した業務です。内容を確認してください。'
               : `承認できる役割: ${approval.approverRole.join(' / ')}`}

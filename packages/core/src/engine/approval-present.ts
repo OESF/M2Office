@@ -30,6 +30,9 @@ export function describeContext(registry: ToolRegistry, artifacts: Artifact[]): 
  */
 const demote = (text: string) => text.replace(/^#{1,6}\s+/gm, '#### ');
 
+/** 「〜します」の言い方を「〜しました」にする（行ったことを出すとき）。1 行目だけを使う。 */
+const done = (description: string) => description.split('\n')[0]!.replace(/ます\*\*/, 'ました**');
+
 const cut = (text: string, max: number) =>
   (text.length > max ? `${text.slice(0, max)}\n\n…（長いため、ここで切りました。続きは実行の詳細で見られます）` : text);
 
@@ -59,13 +62,26 @@ export function composeApprovalPresent(p: {
   const since = prevGate?.seq ?? -1;
   const shownBefore = new Set(((prevGate?.input ?? {}) as { artifactIds?: string[] }).artifactIds ?? []);
 
+  const ctx = describeContext(registry, artifacts);
   const material: string[] = [];
   for (const s of steps) {
     if (s.kind !== 'agent' || s.status !== 'succeeded' || s.seq <= since || s.seq >= gateSeq) continue;
-    const text = ((s.output ?? {}) as { text?: string }).text?.trim();
-    if (!text) continue;
+    const output = (s.output ?? {}) as { text?: string; planned?: boolean; executed?: boolean };
+    const text = output.text?.trim();
     const def0 = def.steps.find((d) => d.id === s.stepId);
-    material.push(`### ${def0 ? stepLabel(def0) : s.stepId}`, '', demote(cut(text, TEXT_MAX)), '');
+    const label = def0 ? stepLabel(def0) : s.stepId;
+    if (output.planned && output.executed) {
+      // 前の承認のあとに実行した段。推論の文は承認の前に書いたもので古い（「承認待ちです」などと書いている）。
+      // 行ったことを出す（2026-09-25 に承認の画面で確認）
+      const gateRecord = steps.find((x) => x.kind === 'approval' && (x.input as { plannedStep?: number } | null)?.plannedStep === s.seq);
+      const calls = ((gateRecord?.input ?? {}) as { toolCalls?: { name: string; args: Record<string, unknown> }[] }).toolCalls ?? [];
+      if (calls.length > 0) {
+        material.push(`### ${label}（前の承認のあとに行ったこと）`, '', ...calls.map((c) => `- ${done(describeCall(c, ctx))}`), '');
+        continue;
+      }
+    }
+    if (!text) continue;
+    material.push(`### ${label}`, '', demote(cut(text, TEXT_MAX)), '');
   }
   for (const a of artifacts.filter((x) => !shownBefore.has(x.id))) {
     material.push(`### 成果物「${a.title}」`, '', demote(cut(a.body, ARTIFACT_MAX)), '');
@@ -79,7 +95,6 @@ export function composeApprovalPresent(p: {
   } else if (plan.calls.length === 0) {
     out.push(`「${stepLabel(plan.step)}」に進みます。社内への書き込みや、社外への送信は行いません。`, '');
   } else {
-    const ctx = describeContext(registry, artifacts);
     out.push(`「${stepLabel(plan.step)}」に進み、**次のことをこのとおりに行います**（承認のあとで内容を変えることはありません）。`, '');
     // 1 行で済むものは箇条書きに、本文を伴うもの（投稿・メール）は、本文の改行を保って独立したまとまりにする
     let listOpen = false;

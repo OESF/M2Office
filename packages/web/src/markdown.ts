@@ -9,11 +9,18 @@
  * @see docs/help/README.md 記事の書き方
  */
 
+/** 箇条書き。`sub` は項目ごとの入れ子の箇条書き（字下げした行。1 段まで）。入れ子が無ければ持たない。 */
+export interface MdList {
+  kind: 'ul' | 'ol';
+  items: string[];
+  sub?: (MdList | undefined)[];
+}
+
 /** 表示のまとまり。 */
 export type MdBlock =
   | { kind: 'h2' | 'h3'; text: string }
   | { kind: 'p'; text: string }
-  | { kind: 'ul' | 'ol'; items: string[] }
+  | MdList
   | { kind: 'table'; header: string[]; rows: string[][] }
   | { kind: 'code'; lang: string; text: string }
   /** 引用（`>` で始まる行の並び）。**改行を保つ**。承認の画面で、送る本文をそのまま見せるのに使う（仕様書 第9.3.3節）。 */
@@ -47,13 +54,20 @@ export function splitTableRow(line: string): string[] {
   return cells;
 }
 
-/** Markdown を、表示のまとまりに分ける。 */
-export function parseMarkdown(text: string): MdBlock[] {
+/**
+ * Markdown を、表示のまとまりに分ける。
+ *
+ * @param opts.lineBreaks 段落の中の改行を保つ。業務の答え・成果物・送る本文に使う。
+ *   ヘルプの記事は、原稿の折り返しを消すために行をつなげる（既定）
+ */
+export function parseMarkdown(text: string, opts: { lineBreaks?: boolean } = {}): MdBlock[] {
   const blocks: MdBlock[] = [];
   let para: string[] = [];
-  let list: { kind: 'ul' | 'ol'; items: string[] } | null = null;
+  let list: MdList | null = null;
+  /** いまの箇条書きの字下げ（先頭の空白の数）。これより深い箇条書きの行は、直前の項目の入れ子にする。 */
+  let listIndent = 0;
   const flush = () => {
-    if (para.length > 0) blocks.push({ kind: 'p', text: para.join('') });
+    if (para.length > 0) blocks.push({ kind: 'p', text: para.join(opts.lineBreaks ? '\n' : '') });
     if (list) blocks.push(list);
     para = [];
     list = null;
@@ -101,19 +115,30 @@ export function parseMarkdown(text: string): MdBlock[] {
       blocks.push({ kind: h[1]!.length >= 3 ? 'h3' : 'h2', text: h[2]!.trim() });
       continue;
     }
-    const ul = /^\s*[-*]\s+(.*)$/.exec(line);
-    const ol = /^\s*\d+[.)]\s+(.*)$/.exec(line);
+    const ul = /^(\s*)[-*]\s+(.*)$/.exec(line);
+    const ol = /^(\s*)\d+[.)]\s+(.*)$/.exec(line);
     if (ul || ol) {
       const kind = ul ? 'ul' : 'ol';
-      if (para.length > 0) { blocks.push({ kind: 'p', text: para.join('') }); para = []; }
+      const indent = (ul ?? ol)![1]!.length;
+      const item = (ul ?? ol)![2]!;
+      // 字下げした箇条書きは、直前の項目の入れ子にする（「1. 見積書 ／   - 期限: …」）。
+      // 入れ子を別の箇条書きにすると、番号がすべて「1.」になる（2026-09-25 に承認の画面で確認）
+      if (list && indent > listIndent && list.items.length > 0) {
+        list.sub ??= [];
+        const at = list.items.length - 1;
+        const nested = (list.sub[at] ??= { kind, items: [] });
+        nested.items.push(item);
+        continue;
+      }
+      if (para.length > 0) { blocks.push({ kind: 'p', text: para.join(opts.lineBreaks ? '\n' : '') }); para = []; }
       if (list && list.kind !== kind) { blocks.push(list); list = null; }
-      list ??= { kind, items: [] };
-      list.items.push((ul ?? ol)![1]!);
+      if (!list) { list = { kind, items: [] }; listIndent = indent; }
+      list.items.push(item);
       continue;
     }
     // 箇条書きの途中の、字下げした続きの行は、直前の項目につなげる
     if (list && /^\s+/.test(raw)) {
-      list.items[list.items.length - 1] += line.trim();
+      list.items[list.items.length - 1] += (opts.lineBreaks ? '\n' : '') + line.trim();
       continue;
     }
     if (list) { blocks.push(list); list = null; }

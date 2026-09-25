@@ -517,7 +517,7 @@ function TurnLog({ turns, onOpenAgent }: {
         <div key={t.id} className={`turn ${t.role}`}>
           <span className="muted small">{t.role === 'user' ? 'あなた' : '秘書'}</span>
           {/* 秘書の答えは見出しや箇条書きを使う。本人が書いた文は、書いたとおりに出す */}
-          {t.role === 'user' ? <p>{t.text}</p> : <div className="md"><Markdown text={t.text} /></div>}
+          {t.role === 'user' ? <p>{t.text}</p> : <div className="md"><Markdown text={t.text} lineBreaks /></div>}
           {t.meta?.note && <p className="muted small">{t.meta.note}</p>}
           {t.meta?.suggestedAgent && (
             <button className="btn small"
@@ -770,7 +770,7 @@ function NoticeRow({ notice, onRead }: { notice: Notification; onRead: () => voi
       </button>
       {open && (
         <div className="fold-body">
-          <div className="reply"><Markdown text={notice.body} /></div>
+          <div className="reply"><Markdown text={notice.body} lineBreaks /></div>
         </div>
       )}
     </div>

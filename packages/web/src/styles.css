@@ -889,7 +889,12 @@ code.uri { background: var(--subtle-bg); border: 1px solid var(--line); border-r
 .md-pre code { font-family: Menlo, Consolas, monospace; white-space: pre; }
 /* 引用。承認の画面で、送る本文をそのまま見せる（仕様書 第9.3.3節）。行の区切りを保つ */
 .md-quote { margin: 6px 0 12px; padding: 8px 12px; border-left: 3px solid var(--accent); background: var(--subtle-bg); border-radius: 0 4px 4px 0; }
-.md-quote-line { display: block; min-height: 1.4em; white-space: pre-wrap; }
+/* 引用の中の見出しは、Chat の太字の行くらいの大きさにする */
+.md-quote h2, .md-quote h3 { font-size: 14px; margin: 8px 0 4px; }
+.md-quote > :first-child { margin-top: 0; }
+.md-quote > :last-child { margin-bottom: 0; }
+/* 改行を保つ段落（業務の答え・成果物・送る本文） */
+.md-br { white-space: pre-line; }
 .md-table th, .md-table td { min-width: 6em; }
 .md-table .md-code { overflow-wrap: anywhere; }
 
