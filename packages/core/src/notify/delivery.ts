@@ -7,7 +7,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { Notification, Tenant, UserSettings } from '@m2office/shared';
+import { notificationPath, type Notification, type Tenant, type UserSettings } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import { silentLogger, type Logger } from '../log/logger.js';
 import type { NotificationChannel, NotificationSender } from './sender.js';
@@ -57,7 +57,7 @@ export function channelsOf(settings: UserSettings): NotificationChannel[] {
 export interface NotificationDeliveryDeps {
   repo: Repository;
   sender: NotificationSender;
-  /** 会社の画面へのリンクを作る（例: `https://a.m2office.online/`）。 */
+  /** 会社の画面の入口（例: `https://a.m2office.online`）。お知らせごとの画面の道を後ろに足す（仕様書 第6.1.6節）。 */
   linkFor(tenant: Tenant): string;
   logger?: Logger;
 }
@@ -129,7 +129,8 @@ export class NotificationDelivery {
       tenantId: tenant.id, userId: user.id, email: user.email,
       kindLabel: KIND_LABELS[n.kind] ?? 'お知らせ',
       title: n.title,
-      link: this.deps.linkFor(tenant),
+      // 承認の依頼は承認トレイ、実行に結び付くものは実行の詳細へ直接入れるようにする（仕様書 第6.1.6節）
+      link: `${this.deps.linkFor(tenant).replace(/\/+$/, '')}${notificationPath(n)}`,
     };
     try {
       for (const channel of channels) {

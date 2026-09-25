@@ -135,8 +135,12 @@ const CATEGORY_ORDER = ['start', 'agents', 'faq', 'admin', 'glossary', 'updates'
  *
  * @param initial 最初に開く記事
  */
-export function HelpCenter({ initial, back, onReplayTour }: {
+export function HelpCenter({ initial, back, onReplayTour, onArticle }: {
   initial: string | null;
+  /**
+   * 開いている記事が変わったとき（一覧へ戻ったときは `null`）。画面の URL を合わせるのに使う（仕様書 第6.1.6節）
+   */
+  onArticle?: (articleId: string | null) => void;
   /**
    * ヘルプを開く直前にいた画面へ戻す道（仕様書 第6.10.7.2節）。
    * **どこへ戻るのかを名前で書く。** 左のメニューから入ったときは渡さない
@@ -152,6 +156,7 @@ export function HelpCenter({ initial, back, onReplayTour }: {
 
   useEffect(() => { api.help.list().then((r) => setItems(r.items)).catch((e) => setError(describeError(e))); }, []);
   useEffect(() => { setArticleId(initial); }, [initial]);
+  useEffect(() => { onArticle?.(articleId); }, [articleId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function search() {
     if (!q.trim()) { setResults(null); return; }

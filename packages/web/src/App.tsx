@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Notification } from '@m2office/shared';
 import {
-  api, describeError,
+  api, ApiError, describeError,
   type AgentSummary, type ApprovalView, type Lookup, type Me, type RunDetail, type ScheduleView, type SecretaryReply,
 } from './api.js';
 import { AgentHelpTip, HelpCenter, HelpTip, Markdown, PageTitle, Tour, openHelp, useOpenHelp } from './help.js';
@@ -19,6 +19,7 @@ import { keyLabel, useHotkey, useNumberHotkeys } from './keys.js';
 import { timeGreeting } from './greeting.js';
 import { AgentForm, ApprovalTray, RunView, statusLabel, SuspendedBanner } from './components.js';
 import { Sources } from './sources.js';
+import { parseRoute, routePath, syncUrl, type Route } from './route.js';
 import {
   SETTINGS_SECTIONS, SETTINGS_SECTION_KEY, Settings, orderAgents, rememberedSection,
   type SettingsSection,
@@ -60,6 +61,34 @@ type View =
   | { kind: 'settings'; section: SettingsSection }
   | { kind: 'help'; articleId: string | null };
 
+/** 画面の URL（仕様書 第6.1.6節）。 */
+function viewPath(v: View): string {
+  switch (v.kind) {
+    case 'agent': return routePath({ kind: 'agent', agentId: v.agent.id });
+    case 'run': return routePath({ kind: 'run', runId: v.runId });
+    case 'settings': return routePath({ kind: 'settings', section: v.section });
+    case 'help': return routePath({ kind: 'help', articleId: v.articleId });
+    default: return routePath({ kind: v.kind });
+  }
+}
+
+/**
+ * URL から画面を決める。業務は一覧を読んでから引くため、ここでは決めない（`null`）。
+ * 知らない URL も `null`（呼ぶ側が最初の画面に戻す）。
+ */
+function viewOf(r: Route): View | null {
+  switch (r.kind) {
+    case 'agent': case 'unknown': return null;
+    case 'settings': {
+      const known = SETTINGS_SECTIONS.some((x) => x.id === r.section);
+      return { kind: 'settings', section: (known ? r.section : rememberedSection()) as SettingsSection };
+    }
+    case 'run': return { kind: 'run', runId: r.runId };
+    case 'help': return { kind: 'help', articleId: r.articleId };
+    default: return { kind: r.kind };
+  }
+}
+
 /**
  * ワークスペースの画面。
  *
@@ -72,10 +101,23 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [history, setHistory] = useState<
     { run: { id: string; status: string; startedAt: string }; job: { agentId: string } | null }[]
   >([]);
+  /*
+    画面の URL（仕様書 第6.1.6節）。開いたときの URL から画面を決める。
+    業務の画面は、業務の一覧を読むまで決められないため、読み終えてから開く（pendingAgent）
+  */
+  const initialRoute = useRef<Route>(parseRoute(location.pathname));
   const [view, setView] = useState<View>(() => (
     // Google から戻ったときは、その場で結果が見えるよう連携の区分を開く（第6.5.0節）
-    googleReturn ? { kind: 'settings', section: 'google' } : { kind: 'home' }
+    googleReturn ? { kind: 'settings', section: 'google' } : (viewOf(initialRoute.current) ?? { kind: 'home' })
   ));
+  const [pendingAgent, setPendingAgent] = useState<string | null>(
+    !googleReturn && initialRoute.current.kind === 'agent' ? initialRoute.current.agentId : null,
+  );
+  // 開こうとした画面が無い・見られないとき、最初の画面に知らせる（使えない業務があることは示さない）
+  const [notFound, setNotFound] = useState(initialRoute.current.kind === 'unknown');
+  // 次に URL を合わせるとき、履歴に積まずに置き換える（最初に開いたとき・戻る・進むのあと・見つからずに戻すとき）
+  const replaceNext = useRef(true);
+  const [agentsLoaded, setAgentsLoaded] = useState(false);
   const [detail, setDetail] = useState<RunDetail | null>(null);
   // 後ろへ回した調べもの（仕様書 第10.11節）。動いているものは処理中として見せる
   const [lookups, setLookups] = useState<Lookup[]>([]);
@@ -119,6 +161,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
         api.agents(), api.approvals(), api.jobs(), api.notifications(), api.lookups(),
       ]);
       setAgents(a.agents);
+      setAgentsLoaded(true);
       setApprovals(p.items);
       setHistory(j.items as never);
       setNotifications(n.items);
@@ -152,7 +195,14 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   // 実行を表示している間は詳細も追う
   useEffect(() => {
     if (view.kind !== 'run') { setDetail(null); return; }
-    const load = () => api.run(view.runId).then(setDetail).catch(() => undefined);
+    const load = () => api.run(view.runId).then(setDetail).catch((err: unknown) => {
+      // 無い・見られない実行（URL を直接開いた場合など）は、最初の画面に戻して知らせる（仕様書 第6.1.6節）
+      if (err instanceof ApiError && (err.status === 404 || err.status === 403)) {
+        replaceNext.current = true;
+        setNotFound(true);
+        setView({ kind: 'home' });
+      }
+    });
     void load();
     const timer = setInterval(load, 1500);
     return () => clearInterval(timer);
@@ -175,6 +225,46 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
     setView({ kind: 'settings', section: id });
   }, []);
   useEffect(() => { setFormFill(null); }, [view.kind === 'agent' ? view.agent.id : null]);
+
+  // 画面を切り替えたら URL を合わせる（仕様書 第6.1.6節）。業務の一覧を待っている間は触らない
+  useEffect(() => {
+    if (pendingAgent) return;
+    syncUrl(viewPath(view), replaceNext.current);
+    replaceNext.current = false;
+    if (view.kind !== 'home') setNotFound(false);
+  }, [view, pendingAgent]);
+
+  // 開いたときの URL が業務の画面なら、一覧を読み終えてから開く。使えない業務なら最初の画面に戻す
+  useEffect(() => {
+    if (!pendingAgent || !agentsLoaded) return;
+    const hit = agents.find((a) => a.id === pendingAgent);
+    replaceNext.current = true;
+    if (hit) setView({ kind: 'agent', agent: hit });
+    else { setNotFound(true); setView({ kind: 'home' }); }
+    setPendingAgent(null);
+  }, [pendingAgent, agentsLoaded, agents]);
+
+  // ブラウザの「戻る」「進む」（仕様書 第6.1.6節）
+  const agentsRef = useRef(agents);
+  agentsRef.current = agents;
+  useEffect(() => {
+    const onPop = () => {
+      const r = parseRoute(location.pathname);
+      replaceNext.current = true;
+      if (r.kind === 'agent') {
+        const hit = agentsRef.current.find((a) => a.id === r.agentId);
+        if (hit) { setView({ kind: 'agent', agent: hit }); return; }
+        setNotFound(true);
+        setView({ kind: 'home' });
+        return;
+      }
+      const v = viewOf(r);
+      if (!v) setNotFound(true);
+      setView(v ?? { kind: 'home' });
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
 
   // キーボードの割り当て（仕様書 第6.11.3節）。表は keys.ts に 1 つだけ置く
   const menuAgents = orderAgents(agents, menu.order).filter((a) => !menu.hidden.includes(a.id));
@@ -263,7 +353,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
       >
         <main className="canvas">
           {error && <p className="error">{error}</p>}
-          {view.kind === 'home' && <Home callMe={callMe || `${me.user.displayName}さん`} />}
+          {view.kind === 'home' && <Home callMe={callMe || `${me.user.displayName}さん`} notFound={notFound} />}
           {view.kind === 'agent' && (
             <>
               {/* 説明は広げず、題名の「？」から出す（仕様書 第6.10.5.1節） */}
@@ -334,7 +424,11 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
             </>
           )}
           {view.kind === 'help' && (
-            <HelpCenter initial={view.articleId} back={backTo(before.current, (v) => setView(v))} onReplayTour={() => {
+            <HelpCenter
+              initial={view.articleId} back={backTo(before.current, (v) => setView(v))}
+              // 記事を開いたら URL も合わせる（/help/{記事}。仕様書 第6.1.6節）
+              onArticle={(id) => setView((v) => (v.kind === 'help' && v.articleId === id ? v : { kind: 'help', articleId: id }))}
+              onReplayTour={() => {
               void api.onboarding.resetTour().catch(() => undefined);
               setShowTour(true);
             }} />
@@ -459,7 +553,11 @@ const VIEW_LABELS: Record<string, string> = {
   settings: '個人設定',
 };
 
-function Home({ callMe }: { callMe: string }) {
+function Home({ callMe, notFound = false }: {
+  callMe: string;
+  /** 開こうとした画面が無い・見られなかった（仕様書 第6.1.6節）。 */
+  notFound?: boolean;
+}) {
   // 日をまたいでも、時刻が変わっても、開いたままで正しい挨拶になるようにする
   const [greeting, setGreeting] = useState(() => timeGreeting());
   useEffect(() => {
@@ -468,6 +566,9 @@ function Home({ callMe }: { callMe: string }) {
   }, []);
   return (
     <div className="home">
+      {notFound && (
+        <p className="warn-msg small">お探しの画面は見つかりませんでした。無くなったか、あなたが使えないものの可能性があります。</p>
+      )}
       <p className="home-greeting">{callMe}、{greeting}。</p>
       <h1>何かお手伝いしましょうか</h1>
       <p className="lead">メニューから業務を選ぶか、下の入力欄で話しかけてください。</p>

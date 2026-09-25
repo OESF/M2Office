@@ -13,6 +13,7 @@ import {
 } from './AdminSettings.js';
 import { Checklist, Dashboard } from './Dashboard.js';
 import { ConnectorList } from './ConnectorList.js';
+import { adminPath, parseAdminRoute, syncUrl } from './route.js';
 import { ExtensionSettings } from './Extensions.js';
 import { Connections } from './Connections.js';
 import { HelpCenter, PageTitle, useOpenHelp } from './help.js';
@@ -102,6 +103,28 @@ function firstPage(tab: Tab): string {
 }
 
 /**
+ * 管理者ページの URL（`/admin/{区分}/{小分け}`。仕様書 第6.1.6節）から、開く画面を決める。
+ *
+ * @remarks
+ * 知らない区分は最初の画面（ダッシュボード）、知らない小分けはその区分の最初の小分けにする。
+ * ヘルプの区分では、小分けの位置に記事の ID を置く（`/admin/help/{記事}`）
+ */
+function adminFromUrl(): { tab: Tab; page: string; article: string | null } {
+  const r = parseAdminRoute(location.pathname) ?? { tab: null, page: null };
+  const t = TABS.find((x) => x.id === r.tab);
+  if (!t) return { tab: 'dashboard', page: '', article: null };
+  if (t.id === 'help') return { tab: 'help', page: '', article: r.page };
+  const ok = (t.pages ?? []).some((p) => p.id === r.page);
+  return { tab: t.id, page: ok ? r.page! : firstPage(t.id), article: null };
+}
+
+/** 管理者ページの画面の URL。ダッシュボードは `/admin`。 */
+function adminUrl(tab: Tab, page: string, article: string | null): string {
+  if (tab === 'dashboard') return '/admin';
+  return adminPath(tab, tab === 'help' ? (article ?? '') : page);
+}
+
+/**
  * 管理者ページ（`/admin`。仕様書 第6.6節）。
  *
  * 会社情報・業務と承認・ユーザー・知識は編集できる。
@@ -112,14 +135,34 @@ function firstPage(tab: Tab): string {
  * 実行の一覧は状態と費用だけを表示する。
  */
 export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
-  const [tab, setTabState] = useState<Tab>('dashboard');
+  // 開いたときの URL から区分と小分けを決める（仕様書 第6.1.6節）
+  const initial = useRef(adminFromUrl());
+  const [tab, setTabState] = useState<Tab>(initial.current.tab);
   /** いま開いている小分け（第6.6.0節）。小分けを持たない区分では空文字。 */
-  const [page, setPage] = useState('');
+  const [page, setPage] = useState(initial.current.page);
   /** 区分を開く。小分けがあれば最初のものへ入る。 */
   const setTab = useCallback((id: Tab) => { setTabState(id); setPage(firstPage(id)); setExtFocus(null); }, []);
   /** 拡張機能の画面で、詳細を開いておく拡張機能（「接続 › コネクタ」から移ったとき）。 */
   const [extFocus, setExtFocus] = useState<string | null>(null);
-  const [helpArticle, setHelpArticle] = useState<string | null>(null);
+  const [helpArticle, setHelpArticle] = useState<string | null>(initial.current.article);
+  // 次に URL を合わせるとき、履歴に積まずに置き換える（最初に開いたとき・戻る・進むのあと）
+  const replaceNext = useRef(true);
+  useEffect(() => {
+    syncUrl(adminUrl(tab, page, helpArticle), replaceNext.current);
+    replaceNext.current = false;
+  }, [tab, page, helpArticle]);
+  // ブラウザの「戻る」「進む」（仕様書 第6.1.6節）
+  useEffect(() => {
+    const onPop = () => {
+      const r = adminFromUrl();
+      replaceNext.current = true;
+      setTabState(r.tab);
+      setPage(r.page);
+      setHelpArticle(r.article);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
   /*
     はじめに行う設定の進み具合（仕様書 第6.10.3.1節）。
     **左ペインに出すのが要である。** 画面から追い出しただけでは、途中であることに気づけなくなる。
@@ -199,6 +242,8 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
             {tab === 'help' && (
               <HelpCenter
                 initial={helpArticle}
+                // 記事を開いたら URL も合わせる（/admin/help/{記事}。仕様書 第6.1.6節）
+                onArticle={setHelpArticle}
                 back={before.current ? {
                   label: TABS.find((t) => t.id === before.current!.tab)?.label ?? '前の画面',
                   go: () => { setTabState(before.current!.tab); setPage(before.current!.page); },

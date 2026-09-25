@@ -15,3 +15,4 @@ export * from './types/approval.js';
 export * from './types/settings.js';
 export * from './types/access.js';
 export * from './text/internal-ids.js';
+export * from './text/paths.js';

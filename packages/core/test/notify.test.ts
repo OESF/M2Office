@@ -78,7 +78,7 @@ test('Chat を選んだ人には、種類・題名・リンクだけを送り、
   const sent = sender.outbox[0]!;
   assert.equal(sent.kindLabel, '承認依頼');
   assert.equal(sent.title, '承認をお願いします: 議事録作成・共有');
-  assert.equal(sent.link, 'http://a.lvh.me:3100');
+  assert.equal(sent.link, 'http://a.lvh.me:3100/approvals', '承認の依頼は、承認トレイへ直接入るリンク（仕様書 第6.1.6節）');
   assert.equal(JSON.stringify(sent).includes('抽出した決定事項'), false, '本文は送らない');
   assert.ok(repo.audits.some((a) => a.action === 'notification.deliver'));
 
