@@ -161,7 +161,8 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
       {!isAdmin ? (
         <main className="canvas"><p className="error">管理者ページは管理者のみが開けます。</p></main>
       ) : (
-        <SideNavLayout nav={(
+        // 管理者ページには秘書との会話の列が無い。右端の列を取らない
+        <SideNavLayout extraClass="no-talk" nav={(
           <>
             {/* すべて済んだ会社では「はじめに行う設定」を出さない（仕様書 第6.10.3.1節） */}
             {TABS.filter((t) => t.id !== 'setup' || setup).map((t, i, shown) => (

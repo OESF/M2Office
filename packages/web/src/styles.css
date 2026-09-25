@@ -175,6 +175,9 @@ button { font: inherit; cursor: pointer; }
 /* 会話は読むもの。開いたら、**中央のキャンバスと同じ幅**を取る。
    残りの幅を半分ずつに分けるので、画面が広いほど会話も広がる（仕様書 第6.2節） */
 .panes.talk-open { --talk-w: 1fr; }
+/* 会話ペインを持たない画面（管理者ページ）。右端の列を取らず、キャンバスを画面の右端まで広げる。
+   列の並びは変えず幅だけを 0 にするので、狭い幅の並べ替え（下の @media）はそのまま効く */
+.panes.no-talk { --talk-w: 0px; }
 
 .left { grid-row: 1 / -1; grid-column: 1; background: var(--panel); border-right: 1px solid var(--line); padding: 12px 0 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 .left .nav-scroll { flex: 1; min-height: 0; overflow-y: auto; }
