@@ -157,7 +157,9 @@ export function parseMarkdown(text: string, opts: { lineBreaks?: boolean } = {})
  */
 export function parseInline(s: string): MdInline[] {
   const out: MdInline[] = [];
-  const re = /`([^`]+)`|\[([^\]]+)\]\(([^)\s]+)\)|\*\*([^*]+)\*\*/g;
+  // 最後の選択肢は、文の中にそのまま書かれた URL（仕様書 第6.2.2.1節）。http(s) だけを押せるようにする。
+  // 空白・括弧・引用符・日本語の句読点と閉じ括弧で終わりとみなす（「…/edit）。」の「）。」を含めない）
+  const re = /`([^`]+)`|\[([^\]]+)\]\(([^)\s]+)\)|\*\*([^*]+)\*\*|(https?:\/\/[^\s<>"'()（）「」『』【】、。，．\u3000]+)/g;
   let last = 0;
   for (const m of s.matchAll(re)) {
     if (m.index! > last) out.push({ kind: 'text', text: s.slice(last, m.index) });
@@ -165,7 +167,14 @@ export function parseInline(s: string): MdInline[] {
     else if (m[2] !== undefined) {
       const href = m[3]!;
       out.push(/^(https?:\/\/|mailto:)/i.test(href) ? { kind: 'link', text: m[2], href } : { kind: 'text', text: m[2] });
-    } else out.push({ kind: 'strong', text: m[4]! });
+    } else if (m[4] !== undefined) out.push({ kind: 'strong', text: m[4] });
+    else {
+      // 文の終わりの「.」「,」などは URL に含めない
+      const url = m[5]!.replace(/[.,;:!?]+$/, '');
+      out.push({ kind: 'link', text: url, href: url });
+      last = m.index! + url.length;
+      continue;
+    }
     last = m.index! + m[0].length;
   }
   if (last < s.length) out.push({ kind: 'text', text: s.slice(last) });

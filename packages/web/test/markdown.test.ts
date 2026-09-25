@@ -92,6 +92,25 @@ test('業務の答えの書き方を読む（仕様書 第6.2.2節）', () => {
   assert.equal((blocks[2] as { items: string[] }).items.length, 2);
 });
 
+test('文の中にそのまま書かれた URL も押せるようにする。句読点や閉じ括弧は含めない（第6.2.2.1節）', () => {
+  assert.deepEqual(parseInline('議事録（Google ドキュメント）: https://docs.google.com/document/d/1kt_Cg-Ef/edit?usp=drivesdk'), [
+    { kind: 'text', text: '議事録（Google ドキュメント）: ' },
+    { kind: 'link', text: 'https://docs.google.com/document/d/1kt_Cg-Ef/edit?usp=drivesdk', href: 'https://docs.google.com/document/d/1kt_Cg-Ef/edit?usp=drivesdk' },
+  ]);
+  assert.deepEqual(parseInline('資料（https://example.jp/a）を見てください。https://example.jp/b. と http://x.jp、'), [
+    { kind: 'text', text: '資料（' },
+    { kind: 'link', text: 'https://example.jp/a', href: 'https://example.jp/a' },
+    { kind: 'text', text: '）を見てください。' },
+    { kind: 'link', text: 'https://example.jp/b', href: 'https://example.jp/b' },
+    { kind: 'text', text: '. と ' },
+    { kind: 'link', text: 'http://x.jp', href: 'http://x.jp' },
+    { kind: 'text', text: '、' },
+  ]);
+  assert.ok(!parseInline('javascript:alert(1) と ftp://x.jp').some((n) => n.kind === 'link'), 'http(s) 以外は押せるようにしない');
+  assert.deepEqual(parseInline('`https://example.jp/code`'), [{ kind: 'code', text: 'https://example.jp/code' }], 'コードの中は押せるようにしない');
+  assert.deepEqual(parseInline('[規程](https://example.jp/a)').length, 1, 'Markdown のリンクは、これまでどおり 1 つのリンク');
+});
+
 test('答えに書かれたリンクは、http(s) と mailto だけを押せるようにする', () => {
   // 外から取り込んだ文書に由来する行が答えに混じりうる（不変則 I-6）
   const nodes = parseInline('[社内](javascript:alert(1)) と [規程](https://example.jp/a)');
