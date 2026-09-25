@@ -12,9 +12,10 @@
 import { randomUUID } from 'node:crypto';
 import { Hono, type Context } from 'hono';
 import {
-  buildGoogleAuthUrl, checkGeminiLive, checkGeminiText, createPkce, exchangeGoogleCode, exchangeGoogleLoginCode, googleGrantedScopes,
-  googleScopeLabel, googleUserEmail, refreshGoogleAccessToken, revokeGoogleToken, GoogleOAuthError,
-  type GeminiModels, type GeminiSettingsMeta,
+  buildGoogleAuthUrl, checkGeminiLive, checkGeminiText, checkGoogleClient, createPkce, exchangeGoogleCode, exchangeGoogleLoginCode,
+  googleGrantedScopes, googleScopeLabel, googleUserEmail, isGoogleClientError, refreshGoogleAccessToken, revokeGoogleToken,
+  GoogleOAuthError,
+  type GeminiModels, type GeminiSettingsMeta, type GoogleClientVerdict,
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { isOperational, requireRole, type AppEnv } from '../middleware/tenant.js';
@@ -46,6 +47,34 @@ async function googleClient(deps: AppDeps, tenantId: string): Promise<{ clientId
   const clientId = typeof cred?.meta['clientId'] === 'string' ? cred.meta['clientId'] : '';
   if (!cred?.secretEnc || !clientId) return null;
   return { clientId, clientSecret: deps.box.decrypt(cred.secretEnc) };
+}
+
+/**
+ * クライアントの確かめの結果を、管理者に見せる文にする（仕様書 第14.3.3節「登録の確認」）。
+ *
+ * @param saved 保存したあとの文か（確かめの画面では `false`）
+ */
+function clientVerdictText(verdict: GoogleClientVerdict, detail: string | null, saved: boolean): string {
+  switch (verdict) {
+    case 'ok':
+      return saved ? '保存しました。Google で確かめ、クライアント ID とシークレットの組が正しいことを確認しました'
+        : 'Google で確かめました。クライアント ID とシークレットの組は正しいです';
+    case 'bad-secret':
+      return 'クライアント シークレットが、このクライアント ID のものではありません。Google Cloud Console でこのクライアントを開き、'
+        + 'シークレットを確かめて貼り直してください（シークレットは作ったときにしか全体が表示されません。分からなければ「シークレットを追加」で作れます）';
+    case 'no-client':
+      return 'このクライアント ID は Google に見つかりません。別のプロジェクトの ID か、削除したクライアントでないかを確かめてください';
+    case 'unreachable':
+      return saved ? '保存しましたが、Google に届かなかったため、正しいかどうかは確かめられていません。あとで「Google で確かめる」を押してください'
+        : 'Google に届かなかったため、確かめられませんでした。しばらくしてからもう一度お試しください';
+    case 'unexpected':
+      return `${saved ? '保存しましたが、' : ''}Google から想定と違う返事がありました（${detail ?? '内容なし'}）。正しいかどうかは確かめられていません`;
+  }
+}
+
+/** 保存を断る判定か。**誤りと分かったものだけ**を断る。確かめられなかったものは断らない。 */
+function rejects(verdict: GoogleClientVerdict): boolean {
+  return verdict === 'bad-secret' || verdict === 'no-client';
 }
 
 /** 管理者向けの接続の設定。`/v1/admin/connections` に置く。 */
@@ -168,14 +197,40 @@ export function connectionsRoute(deps: AppDeps) {
     const secret = (body.clientSecret ?? '').trim();
     const secretEnc = secret ? deps.box.encrypt(secret) : current?.secretEnc ?? null;
     if (!secretEnc) return c.json({ error: 'クライアント シークレットを登録してください' }, 400);
+
+    // 保存する前に、組になっているかを Google に確かめる（仕様書 第14.3.3節「登録の確認」）。
+    // 誤りなら保存しない。正しいシークレットを誤った値で上書きすると、接続済みの全員がトークンを取り直せなくなる
+    const check = await checkGoogleClient({
+      clientId, clientSecret: secret || deps.box.decrypt(secretEnc), redirectUri: deps.oauth.redirectUri,
+    });
+    if (rejects(check.verdict)) {
+      await audit(deps, tenant.id, user.id, 'connection.google.update_rejected', 'google_oauth', { clientId, verdict: check.verdict });
+      return c.json({ error: clientVerdictText(check.verdict, check.detail, false), verdict: check.verdict }, 400);
+    }
+
     await deps.repo.saveTenantCredential({
       tenantId: tenant.id, kind: 'google_oauth', secretEnc, meta: { clientId }, updatedBy: user.id, updatedAt: new Date().toISOString(),
     });
     // クライアント ID を替えると、これまでの接続（トークン）は使えない。全員について後始末する。シークレットだけなら影響しない
     const previousId = (current?.meta as { clientId?: string } | undefined)?.clientId;
     const cleanup = previousId && previousId !== clientId ? await disconnectEveryone(deps, tenant.id, 'client-removed') : { users: 0, stoppedRuns: 0 };
-    await audit(deps, tenant.id, user.id, 'connection.google.update', 'google_oauth', { clientId, secretChanged: !!secret, ...cleanup });
-    return c.json({ ok: true, ...cleanup });
+    await audit(deps, tenant.id, user.id, 'connection.google.update', 'google_oauth', {
+      clientId, secretChanged: !!secret, verdict: check.verdict, ...cleanup,
+    });
+    return c.json({ ok: true, verdict: check.verdict, message: clientVerdictText(check.verdict, check.detail, true), ...cleanup });
+  });
+
+  /**
+   * 登録済みのクライアントを Google に確かめる（仕様書 第14.3.3節「登録の確認」）。保存し直さずに試せる。
+   *
+   * @remarks 変えるものは無い。判定と、管理者に見せる文だけを返す。
+   */
+  app.post('/google/test', async (c) => {
+    const { tenant } = c.get('ctx');
+    const client = await googleClient(deps, tenant.id);
+    if (!client) return c.json({ error: 'OAuth クライアントが登録されていません' }, 404);
+    const check = await checkGoogleClient({ ...client, redirectUri: deps.oauth.redirectUri });
+    return c.json({ verdict: check.verdict, ok: check.verdict === 'ok', message: clientVerdictText(check.verdict, check.detail, false) });
   });
 
   /**
@@ -339,7 +394,8 @@ export function oauthCallbackRoute(deps: AppDeps) {
       return back('connected');
     } catch (err) {
       deps.log.warn('Google との接続に失敗しました', { tenantId: pending.tenantId, err: err instanceof Error ? err.message : String(err) });
-      return back('failed');
+      // 会社のクライアントの誤りは、もう一度押しても直らない。管理者に伝えるよう知らせる（第14.3.3節）
+      return back(isGoogleClientError(err) ? 'client' : 'failed');
     }
   });
 

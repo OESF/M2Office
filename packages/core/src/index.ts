@@ -56,7 +56,8 @@ export {
   GOOGLE_OAUTH_ENDPOINTS, GOOGLE_LOGIN_SCOPES, googleScopeUrl, googleScopeLabel, createPkce, buildGoogleAuthUrl,
   buildGoogleLoginUrl, exchangeGoogleLoginCode,
   exchangeGoogleCode, refreshGoogleAccessToken, googleGrantedScopes, googleUserEmail, revokeGoogleToken, GoogleOAuthError,
-  type GoogleOAuthEndpoints,
+  checkGoogleClient, isGoogleClientError,
+  type GoogleOAuthEndpoints, type GoogleClientVerdict,
 } from './google/oauth.js';
 export {
   GeminiResearchProvider, MockResearchProvider, type ResearchProvider, type ResearchResult,

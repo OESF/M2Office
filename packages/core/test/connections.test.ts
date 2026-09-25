@@ -12,7 +12,8 @@ import type { AddressInfo } from 'node:net';
 import {
   SecretBox, StubLlmProvider, MockResearchProvider, TenantAiResolver, buildGoogleAuthUrl, createPkce,
   exchangeGoogleCode, googleGrantedScopes, googleScopeLabel, googleUserEmail, refreshGoogleAccessToken, revokeGoogleToken,
-  GoogleOAuthError, type GoogleOAuthEndpoints, type Repository, type TenantCredential,
+  GoogleOAuthError, checkGoogleClient, isGoogleClientError,
+  type GoogleOAuthEndpoints, type Repository, type TenantCredential,
 } from '../src/index.js';
 
 test('秘密の値: 暗号化して戻せる。毎回ちがう暗号文になり、別の鍵や改ざんでは戻せない', () => {
@@ -53,6 +54,11 @@ async function fakeGoogle() {
     seen.push({ path: url.pathname, body, auth: req.headers.authorization });
     const json = (code: number, v: unknown) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(v)); };
     if (url.pathname === '/token' && body.get('grant_type') === 'authorization_code') {
+      // 本物の Google と同じく、コードより先にクライアントを確かめる（2026-09-25 に本物で確かめた返し方）
+      if (body.get('client_id') === 'boom') return json(503, {});
+      if (body.get('client_id') === 'missing') return json(401, { error: 'invalid_client', error_description: 'The OAuth client was not found.' });
+      if (body.get('client_secret') !== 's') return json(401, { error: 'invalid_client', error_description: 'The provided client secret is invalid.' });
+      if (body.get('client_id') === 'odd') return json(400, { error: 'redirect_uri_mismatch', error_description: 'Bad Request' });
       if (body.get('code') !== 'good' || !body.get('code_verifier')) return json(400, { error: 'invalid_grant' });
       return json(200, { access_token: 'at-1', refresh_token: 'rt-1', scope: 'openid https://www.googleapis.com/auth/gmail.readonly' });
     }
@@ -86,6 +92,46 @@ test('OAuth: コードをトークンに換え、取り直し、実際に許可�
     assert.equal(await googleUserEmail('at-2', g.endpoints), 'sato@alpha.example.jp');
     assert.equal(g.seen.find((x) => x.path === '/userinfo')?.auth, 'Bearer at-2');
     assert.equal(await revokeGoogleToken('rt-1', g.endpoints), true);
+  } finally {
+    await g.close();
+  }
+});
+
+test('登録の確認: ID とシークレットの組を、使えないコードで Google に確かめる（仕様書 第14.3.3節）', async () => {
+  const g = await fakeGoogle();
+  const check = (clientId: string, clientSecret: string) =>
+    checkGoogleClient({ clientId, clientSecret, redirectUri: 'https://localhost:3100/cb' }, g.endpoints);
+  try {
+    assert.equal((await check('c', 's')).verdict, 'ok', '組が正しければ、コードが無効（invalid_grant）と返る');
+    const bad = await check('c', 'wrong');
+    assert.equal(bad.verdict, 'bad-secret');
+    assert.match(bad.detail ?? '', /client secret is invalid/);
+    assert.equal(bad.detail?.includes('wrong'), false, '返す文にシークレットを含めない');
+    assert.equal((await check('missing', 's')).verdict, 'no-client');
+    assert.equal((await check('boom', 's')).verdict, 'unreachable', '5xx は正否が分からない');
+    const odd = await check('odd', 's');
+    assert.equal(odd.verdict, 'unexpected', '想定と違う返事は、正しいとも誤りとも言わない');
+    assert.match(odd.detail ?? '', /redirect_uri_mismatch/);
+    const sent = g.seen.at(-1)!.body;
+    assert.equal(sent.get('grant_type'), 'authorization_code');
+    assert.equal(sent.get('redirect_uri'), 'https://localhost:3100/cb', '実際に使う戻り先で確かめる');
+  } finally {
+    await g.close();
+  }
+  // 届かないときも例外を投げず、確かめられなかったと返す
+  const closed = { ...g.endpoints, token: 'http://127.0.0.1:1/token' };
+  assert.equal((await checkGoogleClient({ clientId: 'c', clientSecret: 's', redirectUri: 'x' }, closed)).verdict, 'unreachable');
+});
+
+test('利用者の接続で、会社のクライアントの誤りを見分ける（もう一度試しても直らないため）', async () => {
+  const g = await fakeGoogle();
+  try {
+    const err = await exchangeGoogleCode({ clientId: 'c', clientSecret: 'wrong', code: 'good', redirectUri: 'x', codeVerifier: 'v' }, g.endpoints)
+      .then(() => null, (e: unknown) => e);
+    assert.equal(isGoogleClientError(err), true);
+    const other = await exchangeGoogleCode({ clientId: 'c', clientSecret: 's', code: 'bad', redirectUri: 'x', codeVerifier: 'v' }, g.endpoints)
+      .then(() => null, (e: unknown) => e);
+    assert.equal(isGoogleClientError(other), false, 'コードの誤りは、クライアントの誤りではない');
   } finally {
     await g.close();
   }

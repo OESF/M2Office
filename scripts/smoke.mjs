@@ -1281,7 +1281,51 @@ console.log('\n■ 28. 接続の設定（Gemini・Google Workspace）');
   const none = await call('a', '/v1/me/google/connect', { method: 'POST' }, 'member');
   none.status === 409 ? ok('会社の OAuth クライアントが無ければ、利用者は接続を始められない') : ng(`始められてしまう（${none.status}）`);
   void before;
-  await call('a', '/v1/admin/connections/google', { method: 'PUT', body: JSON.stringify({ clientId: '123456-smoke.apps.googleusercontent.com', clientSecret: 'GOCSPX-smoke-secret' }) });
+
+  // 登録の確認（第14.3.3節）。保存の前に Google で組を確かめ、誤りなら保存しない。
+  // 架空のクライアントは本物の Google に「見つからない」と断られる。届かない環境では確かめられないまま保存される
+  const fake = await call('a', '/v1/admin/connections/google', { method: 'PUT', body: JSON.stringify({ clientId: '123456-smoke.apps.googleusercontent.com', clientSecret: 'GOCSPX-smoke-secret' }) });
+  if (fake.status === 400) {
+    fake.body.verdict === 'no-client' && fake.body.error.includes('見つかりません')
+      ? ok('Google に無いクライアント ID は、確かめて保存しない') : ng('断り方が違う', JSON.stringify(fake.body));
+    const { body: afterFake } = await call('a', '/v1/admin/connections');
+    !afterFake.google.secretRegistered ? ok('断ったときは何も保存しない') : ng('断ったのに保存されている');
+  } else {
+    fake.status === 200 && fake.body.verdict === 'unreachable' && fake.body.message.includes('確かめられていません')
+      ? ok('Google に届かない環境では、確かめられなかったと明示して保存する') : ng('確かめの結果が違う', JSON.stringify(fake.body));
+  }
+
+  // 以降の確認のために、架空のクライアントを直接入れる（テストの準備。Google の確かめを通らない値のため）。
+  // 暗号化はサーバーと同じ箱で行う（.env を同じく読むため、同じ鍵になる）
+  const { tsImport } = await import('tsx/esm/api');
+  const { secretBoxFromEnv } = await tsImport('../packages/core/src/secrets/box.ts', import.meta.url);
+  const { default: pgSeed } = await import('pg');
+  const seedDb = new pgSeed.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await seedDb.connect();
+  const seedClient = (secret) => seedDb.query(
+    `insert into tenant_credentials (tenant_id, kind, secret_enc, meta, updated_by, updated_at)
+     values ((select id from tenants where subdomain = 'a'), 'google_oauth', $1, $2, 'smoke', now())
+     on conflict (tenant_id, kind) do update set secret_enc = excluded.secret_enc, meta = excluded.meta, updated_at = excluded.updated_at`,
+    [secretBoxFromEnv().box.encrypt(secret), { clientId: '123456-smoke.apps.googleusercontent.com' }],
+  );
+  await seedClient('GOCSPX-smoke-secret');
+  await seedDb.end();
+
+  // 誤ったシークレットで上書きしようとしても、いまの登録は残る（接続済みの全員を巻き込まないため）
+  const { body: seeded } = await call('a', '/v1/admin/connections');
+  const over = await call('a', '/v1/admin/connections/google', { method: 'PUT', body: JSON.stringify({ clientId: '123456-smoke.apps.googleusercontent.com', clientSecret: 'GOCSPX-other' }) });
+  const { body: afterOver } = await call('a', '/v1/admin/connections');
+  if (over.status === 400) {
+    afterOver.google.updatedAt === seeded.google.updatedAt && afterOver.google.secretRegistered
+      ? ok('確かめて誤りなら、いまの登録を上書きしない') : ng('上書きされた', JSON.stringify(afterOver.google));
+  }
+  // 「Google で確かめる」は何も変えず、判定と文だけを返す。シークレットは返さない
+  const tried = await call('a', '/v1/admin/connections/google/test', { method: 'POST' });
+  tried.status === 200 && ['no-client', 'unreachable'].includes(tried.body.verdict) && tried.body.message && !JSON.stringify(tried.body).includes('GOCSPX')
+    ? ok(`登録済みのクライアントを確かめられる（判定: ${tried.body.verdict}）`) : ng('確かめの応答が違う', JSON.stringify(tried.body));
+  const triedByMember = await call('a', '/v1/admin/connections/google/test', { method: 'POST' }, 'member');
+  triedByMember.status === 403 ? ok('一般利用者は確かめられない（403）') : ng(`確かめられてしまう（${triedByMember.status}）`);
+
   const { body: g } = await call('a', '/v1/admin/connections');
   g.google.secretRegistered && !JSON.stringify(g).includes('GOCSPX-smoke-secret') && g.google.redirectUri.endsWith('/v1/oauth/google/callback')
     ? ok('OAuth クライアントを登録でき、シークレットは返さず、登録するリダイレクト URI を示す') : ng('OAuth クライアントの扱いが違う', JSON.stringify(g.google));

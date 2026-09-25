@@ -179,6 +179,9 @@ export interface DashboardLive {
   events: { at: string; kind: 'start' | 'done' | 'fail' | 'wait'; text: string }[];
 }
 
+/** OAuth クライアントを Google で確かめた結果（仕様書 第14.3.3節「登録の確認」）。 */
+export type GoogleClientVerdict = 'ok' | 'bad-secret' | 'no-client' | 'unreachable' | 'unexpected';
+
 /** ダッシュボードの「集計」（仕様書 第6.7.8節）。 */
 export interface DashboardStats {
   days: number;
@@ -556,8 +559,18 @@ export const api = {
     deleteGeminiKey: () => call('/admin/connections/gemini/key', { method: 'DELETE' }),
     testGemini: (kind: 'text' | 'live') =>
       call<{ ok: boolean; ms: number; error?: string; source: string; model: string }>('/admin/connections/gemini/test', { method: 'POST', body: JSON.stringify({ kind }) }),
+    /**
+     * 会社の OAuth クライアントを保存する。保存の前に Google で組を確かめ、誤りなら保存せずに断る（仕様書 第14.3.3節）。
+     *
+     * @returns 判定と、保存のボタンの横に出す文
+     */
     saveGoogleClient: (v: { clientId: string; clientSecret?: string }) =>
-      call('/admin/connections/google', { method: 'PUT', body: JSON.stringify(v) }),
+      call<{ ok: true; verdict: GoogleClientVerdict; message: string; users: number; stoppedRuns: number }>(
+        '/admin/connections/google', { method: 'PUT', body: JSON.stringify(v) },
+      ),
+    /** 登録済みの OAuth クライアントを Google で確かめる。何も変えない（仕様書 第14.3.3節）。 */
+    testGoogleClient: () =>
+      call<{ ok: boolean; verdict: GoogleClientVerdict; message: string }>('/admin/connections/google/test', { method: 'POST' }),
     deleteGoogleClient: () => call<{ ok: true; users: number; stoppedRuns: number }>('/admin/connections/google', { method: 'DELETE' }),
     /** OAuth クライアントを削除する（クライアント ID を替える）と影響する人数と業務の数（仕様書 第6.5.2.1節）。 */
     googleClientImpact: () => call<{ users: number; runs: number }>('/admin/connections/google/impact'),

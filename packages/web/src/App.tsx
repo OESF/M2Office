@@ -42,6 +42,8 @@ const GOOGLE_RETURN_TEXT: Record<string, { ok: boolean; text: string }> = {
   connected: { ok: true, text: 'Google と接続しました。下の「Google 連携」で許可の状況を確かめられます。' },
   cancelled: { ok: false, text: 'Google との接続を取りやめました。' },
   failed: { ok: false, text: 'Google と接続できませんでした。もう一度試すか、管理者に設定を確かめてもらってください。' },
+  // 会社のクライアントの誤り。もう一度押しても直らないので、試し直しを勧めない（仕様書 第14.3.3節）
+  client: { ok: false, text: '会社の Google 接続の設定に誤りがあるため、接続できませんでした。管理者に伝えてください（管理者ページ「接続」の「Google で確かめる」で確かめられます）。' },
 };
 
 /** 中央キャンバスに何を表示しているか。 */

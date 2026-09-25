@@ -481,6 +481,8 @@ pre.body { white-space: pre-wrap; background: var(--subtle-bg); border: 1px soli
   animation: m2o-saved-in 0.18s ease-out;
 }
 .save-row .error-inline { color: var(--danger); font-size: 13px; }
+/* 保存はしたが、注意が要る（確かめられなかったなど）。成功の色で出さない */
+.saved.warn { color: var(--warn); }
 @keyframes m2o-saved-in { from { opacity: 0; transform: translateX(-4px); } }
 @media (prefers-reduced-motion: reduce) { .saved { animation: none; } }
 .table select { padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; font: inherit; }

@@ -141,7 +141,8 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `PUT /v1/admin/connections/gemini` | 管理者: Gemini の設定（`mode`・`apiKey`（渡したときだけ上書き）・`models`）。鍵は暗号化して保存 |
 | `DELETE /v1/admin/connections/gemini/key` | 管理者: 自社の鍵を削除（運営一括に戻る） |
 | `POST /v1/admin/connections/gemini/test` | 管理者: 接続の確認（`kind`: `text` か `live`） |
-| `PUT /v1/admin/connections/google` | 管理者: 会社の OAuth クライアント（`clientId`・`clientSecret`）。シークレットは暗号化して保存 |
+| `PUT /v1/admin/connections/google` | 管理者: 会社の OAuth クライアント（`clientId`・`clientSecret`）。**保存の前に Google で組を確かめ、誤り（`bad-secret`・`no-client`）なら 400 で断り、保存しない**。シークレットは暗号化して保存（仕様書 第14.3.3節） |
+| `POST /v1/admin/connections/google/test` | 管理者: 登録済みの OAuth クライアントを Google で確かめる。何も変えない。`verdict`（`ok`・`bad-secret`・`no-client`・`unreachable`・`unexpected`）と文を返す |
 | `GET /v1/admin/connections/google/impact` | 管理者: OAuth クライアントを消す（クライアント ID を替える）と影響する人数と業務の件数 |
 | `DELETE /v1/admin/connections/google` | 管理者: OAuth クライアントの登録を消す。接続している全員の接続を消し、Google を使う動いている途中の業務を止める（仕様書 第6.5.2.1節）。クライアント ID を替える `PUT` も同じ |
 | `GET /v1/me/google` | 本人: Google 連携の状況（業務の言葉の許可の一覧。トークンは返さない） |

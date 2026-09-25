@@ -11,8 +11,9 @@
  */
 
 import { useEffect, useState } from 'react';
-import { api, describeError, type ConnectionSettings } from './api.js';
+import { api, describeError, type ConnectionSettings, type GoogleClientVerdict } from './api.js';
 import { HelpTip } from './help.js';
+import { SaveButton } from './save.js';
 
 const MODEL_LABELS: [string, string][] = [
   ['fast', '高速（秘書の取り次ぎなど）'], ['standard', '標準（業務の推論）'], ['advanced', '高性能'],
@@ -64,6 +65,38 @@ export function Connections({ page }: { page: string }) {
       )}
       {page === 'retention' && <RetentionCard />}
     </>
+  );
+}
+
+/**
+ * 登録済みの OAuth クライアントを Google で確かめるボタン（仕様書 第14.3.3節「登録の確認」）。
+ *
+ * @remarks
+ * 保存し直さずに試せる。何も変えない。結果はボタンのすぐ横に出す（第6.10.4.2節）。
+ * 確かめられなかったときは注意の色で出し、正しいとは言わない。
+ */
+function CheckClientButton() {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ verdict: GoogleClientVerdict | 'error'; text: string } | null>(null);
+  const tone = (v: GoogleClientVerdict | 'error') =>
+    v === 'ok' ? 'saved' : v === 'unreachable' || v === 'unexpected' ? 'saved warn' : 'error-inline';
+  return (
+    <span className="save-row">
+      <button className="btn ghost" disabled={busy} onClick={() => void (async () => {
+        setBusy(true); setResult(null);
+        try {
+          const r = await api.admin.testGoogleClient();
+          setResult({ verdict: r.verdict, text: r.message });
+        } catch (e) {
+          setResult({ verdict: 'error', text: describeError(e, '確かめられませんでした') });
+        } finally {
+          setBusy(false);
+        }
+      })()}>{busy ? '確かめています…' : 'Google で確かめる'}</button>
+      <span className="save-result" role="status" aria-live="polite">
+        {result && <span className={tone(result.verdict)}>{result.text}</span>}
+      </span>
+    </span>
   );
 }
 
@@ -240,15 +273,26 @@ function GoogleCard({ data, page, onSaved }: {
               placeholder={data.secretRegistered ? `●●●●●●●●（登録済み・${fmt(data.updatedAt)}）` : 'GOCSPX-…'} />
           </div>
         </div>
+        <p className="muted small">保存するときに、クライアント ID とシークレットが組になっているかを Google で確かめます。誤っていれば保存しません。</p>
         <div className="row">
-          <button className="btn" disabled={busy} onClick={() => void (async () => {
-            // クライアント ID を替えると、全員の接続が使えなくなる。先に確かめる（仕様書 第6.5.2.1節）
-            if (registered && data.clientId && clientId.trim() !== data.clientId) {
-              const impact = await api.admin.googleClientImpact().catch(() => null);
-              if (impact && impact.users > 0 && !confirm(clientChangeText(impact, 'クライアント ID を替えます'))) return;
-            }
-            await run(() => api.admin.saveGoogleClient({ clientId, clientSecret: secret || undefined }), '保存しました');
-          })()}>保存</button>
+          {/* 保存の前に Google で組を確かめる。誤りなら API が断り、その理由をボタンの横に出す（仕様書 第14.3.3節） */}
+          <SaveButton
+            disabled={busy}
+            run={async () => {
+              // クライアント ID を替えると、全員の接続が使えなくなる。先に確かめる（仕様書 第6.5.2.1節）
+              if (registered && data.clientId && clientId.trim() !== data.clientId) {
+                const impact = await api.admin.googleClientImpact().catch(() => null);
+                if (impact && impact.users > 0 && !confirm(clientChangeText(impact, 'クライアント ID を替えます'))) return null;
+              }
+              setMsg(null);
+              const r = await api.admin.saveGoogleClient({ clientId, clientSecret: secret || undefined });
+              setSecret('');
+              onSaved();
+              return r;
+            }}
+            done={(r) => (r === null ? '' : { text: r.message, warn: r.verdict !== 'ok' })}
+          />
+          {registered && <CheckClientButton />}
           {registered && (
             <button className="btn danger" disabled={busy} onClick={() => void (async () => {
               const impact = await api.admin.googleClientImpact().catch(() => null);

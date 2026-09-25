@@ -118,6 +118,71 @@ export async function exchangeGoogleCode(p: {
   return { refreshToken: String(t['refresh_token']), accessToken: String(t['access_token']), scopes: shortScopes(String(t['scope'] ?? '')) };
 }
 
+/**
+ * クライアントの確かめの結果（仕様書 第14.3.3節「登録の確認」）。
+ *
+ * - `ok`: ID とシークレットは組になっている
+ * - `bad-secret`: シークレットが誤っている
+ * - `no-client`: その ID のクライアントが Google に無い
+ * - `unreachable`: Google に届かなかった（正否は分からない）
+ * - `unexpected`: 想定と違う返事（`detail` に返事をそのまま入れる）
+ */
+export type GoogleClientVerdict = 'ok' | 'bad-secret' | 'no-client' | 'unreachable' | 'unexpected';
+
+/** 確かめに使う、使えない認可コード。Google は先にクライアントを確かめるため、コードの正否より前に判定が出る。 */
+const CLIENT_CHECK_CODE = 'm2office-client-check';
+
+/**
+ * OAuth クライアントの ID とシークレットが組になっているかを、Google に確かめる（仕様書 第14.3.3節）。
+ *
+ * @param p 確かめるクライアント。`redirectUri` は実際に使う戻り先を渡す
+ * @returns 判定と、Google の返事（画面や記録に出すため。**シークレットは含まない**）
+ *
+ * @remarks
+ * 使えない認可コードで鍵の受け取りを求め、返し方で判定する。
+ * 組が正しければ `invalid_grant`（コードが無効）、シークレットが誤りなら `invalid_client` が返る
+ * （2026-09-25 に本物の Google で確かめた）。利用者の許可も、実際の鍵も要らない。
+ *
+ * **例外は投げない。** 届かないときも `unreachable` として返し、呼び出し側が「確かめられなかった」と示す。
+ * 確かめられるのはクライアントの正否だけで、リダイレクト URI の登録漏れなどは分からない。
+ */
+export async function checkGoogleClient(p: {
+  clientId: string; clientSecret: string; redirectUri: string;
+}, endpoints: GoogleOAuthEndpoints = GOOGLE_OAUTH_ENDPOINTS): Promise<{ verdict: GoogleClientVerdict; detail: string | null }> {
+  let res: Response;
+  try {
+    res = await fetch(endpoints.token, {
+      method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: p.clientId, client_secret: p.clientSecret, code: CLIENT_CHECK_CODE,
+        redirect_uri: p.redirectUri, grant_type: 'authorization_code',
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch (err) {
+    return { verdict: 'unreachable', detail: err instanceof Error ? err.message : String(err) };
+  }
+  if (res.status >= 500) return { verdict: 'unreachable', detail: `HTTP ${res.status}` };
+  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  const error = typeof json['error'] === 'string' ? json['error'] : '';
+  const description = typeof json['error_description'] === 'string' ? json['error_description'] : '';
+  const detail = [error, description].filter(Boolean).join(': ') || `HTTP ${res.status}`;
+  if (error === 'invalid_grant') return { verdict: 'ok', detail };
+  if (error === 'invalid_client') {
+    return { verdict: /not found/i.test(description) ? 'no-client' : 'bad-secret', detail };
+  }
+  return { verdict: 'unexpected', detail };
+}
+
+/**
+ * Google の失敗が「会社のクライアントの誤り」によるものか（仕様書 第14.3.3節）。
+ *
+ * @remarks 利用者の接続で分かったとき、もう一度試しても直らないことを知らせるために使う。
+ */
+export function isGoogleClientError(err: unknown): boolean {
+  return err instanceof GoogleOAuthError && err.detail === 'invalid_client';
+}
+
 /** リフレッシュ トークンからアクセス トークンを取り直す。 */
 export async function refreshGoogleAccessToken(p: {
   clientId: string; clientSecret: string; refreshToken: string;
