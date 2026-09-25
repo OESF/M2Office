@@ -88,6 +88,8 @@ export interface Repository {
     tenantId: string,
     query: string,
     compartment: string | null,
+    /** 秘書が考えた言い換え（第11.7.7.0節）。登録した言い換えと同じように効かせる。 */
+    extraSynonyms?: readonly (readonly string[])[],
   ): Promise<KnowledgeSearchResult>;
 
   /** 本人宛の通知を保存する。宛先の決定はツール側で行う。 */

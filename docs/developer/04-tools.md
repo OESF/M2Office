@@ -60,14 +60,14 @@
 | `drive.share_company` | write-internal | `drive.file`（機密でない） | M2Office で作ったファイルを、会社の全員が閲覧できるようにします。社外の人は見られません。リンクで誰にでも公開することはしません |
 | `knowledge.register` | write-internal | — | 承認された議事録などを、そのまま社内の知識に登録します。すべての承認のあとに行い、承認した人が見た内容だけを登録します |
 | `notification.send` | write-internal | — | 依頼した本人にだけお知らせを届けます。他の人には送りません |
-| `sheets.append` | write-internal | `drive.file`（機密でない） | M2Office で作った表に行を足します。会社の設定により、その前に確認を求めます |
-| `tasks.complete` | write-internal | `tasks`（機密） | ToDo を完了にします。会社の設定により、その前に確認を求めます |
-| `tasks.create` | write-internal | `tasks`（機密） | ToDo を登録します。会社の設定により、登録の前に確認を求めます |
+| `sheets.append` | write-internal | `drive.file`（機密でない） | M2Office で作った表に行を足します |
+| `tasks.complete` | write-internal | `tasks`（機密） | ToDo を完了にします |
+| `tasks.create` | write-internal | `tasks`（機密） | ToDo を登録します |
 | `calendar.cancel` | external-send | `calendar.events`（機密） | 予定を取り消します。参加者に通知が届くため、必ず承認のあとに行います |
-| `calendar.create` | external-send | `calendar.events`（機密） | 予定を登録し、参加者を招待します。必ず承認のあとに行います |
+| `calendar.create` | external-send | `calendar.events`（機密） | 予定を登録し、参加者を招待します。社外の人を招くときは、承認のあとに行います |
 | `calendar.update` | external-send | `calendar.events`（機密） | 予定の日時・題名・参加者を変えます。参加者に通知が届くため、必ず承認のあとに行います |
-| `chat.post` | external-send | `chat.messages.create`（機密）・`chat.spaces.readonly`（機密） | チャットへ投稿します。必ず承認のあとに行います |
-| `drive.share` | external-send | `drive.file`（機密でない） | M2Office で作ったファイルを、指定した人と共有します。必ず承認のあとに行います。リンクで誰にでも公開することはしません |
+| `chat.post` | external-send | `chat.messages.create`（機密）・`chat.spaces.readonly`（機密） | チャットへ投稿します。社外の人が入れるスペースへの投稿は、承認のあとに行います |
+| `drive.share` | external-send | `drive.file`（機密でない） | M2Office で作ったファイルを、指定した人と共有します。社外の人との共有は、承認のあとに行います。リンクで誰にでも公開することはしません |
 | `gmail.send` | external-send | `gmail.send`（機密） | メールを送ります。必ず承認のあとに行います |
 
 ## 4.3 引数

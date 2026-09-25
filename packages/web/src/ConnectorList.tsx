@@ -51,7 +51,7 @@ export function ConnectorList({ onOpenExtension }: { onOpenExtension: (extension
       {!items && !error && <p className="muted">読み込み中…</p>}
       {items && rows.length === 0 && (
         <div className="card">
-          <p>コネクタはまだありません。拡張機能を追加すると、ここに並びます。</p>
+          <p>コネクタはまだありません</p>
           <button className="btn ghost small" onClick={() => onOpenExtension('')}>拡張機能を開く</button>
         </div>
       )}

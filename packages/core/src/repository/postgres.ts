@@ -491,13 +491,16 @@ export class PostgresRepository implements Repository {
     tenantId: string,
     query: string,
     compartment: string | null,
+    extraSynonyms: readonly (readonly string[])[] = [],
   ): Promise<KnowledgeSearchResult> {
     const terms = extractTerms(query);
     if (terms.length === 0) return { hits: [], rewrites: [] };
     await this.resplitStaleKnowledge(tenantId);
-    // 言い換え（標準と自社）を足す（第11.7.7節）
+    // 言い換え（標準・以前に登録した組・秘書が考えたもの）を足す（第11.7.7節・第11.7.7.0節）
     const { knowledge } = await this.getTenantSettings(tenantId);
-    const concepts = expandTerms(terms, [...(knowledge.standardSynonyms ? STANDARD_SYNONYMS : []), ...knowledge.synonyms]);
+    const concepts = expandTerms(terms, [
+      ...(knowledge.standardSynonyms ? STANDARD_SYNONYMS : []), ...knowledge.synonyms, ...extraSynonyms,
+    ]);
     const patterns = [...new Set(concepts.flatMap((c) => c.alternatives.flatMap(bigrams)))].map((g) => `%${escapeLike(g)}%`);
     const rows = await this.q<{
       id: string; title: string; heading: string; path: string[]; body: string; source: string;

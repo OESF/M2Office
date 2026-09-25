@@ -13,7 +13,7 @@ import {
 } from '../types.js';
 import { GOOGLE_API_ENDPOINTS, GoogleTokenSource, callGoogle, type GoogleApiEndpoints } from './http.js';
 import { buildRawMessage, decodeEntities, decodeHeaderWords, extractBody, header, type GmailPart } from './mime.js';
-import { pickSpace, spaceIdOf, toChatText } from './chat.js';
+import { externalOf, pickSpace, spaceIdOf, toChatText } from './chat.js';
 import { googleDocs, googleDrive } from './drive.js';
 import { googleSheets } from './sheets.js';
 
@@ -289,13 +289,13 @@ export class GoogleWorkspaceConnector implements WorkspaceConnector {
   }
 
   /** 本人が入っている、名前のあるスペース。1 対 1 とグループの会話は名前で探さないため含めない。 */
-  private async namedSpaces(p: ConnectorPrincipal): Promise<{ name: string; displayName?: string }[]> {
-    const spaces: { name: string; displayName?: string }[] = [];
+  private async namedSpaces(p: ConnectorPrincipal): Promise<{ name: string; displayName?: string; externalUserAllowed?: boolean }[]> {
+    const spaces: { name: string; displayName?: string; externalUserAllowed?: boolean }[] = [];
     let pageToken = '';
     for (let page = 0; page < CHAT_SPACE_PAGES; page++) {
       const q = new URLSearchParams({ pageSize: '1000', filter: 'spaceType = "SPACE"', ...(pageToken ? { pageToken } : {}) });
       const res = await this.chatApi(p, `/spaces?${q}`);
-      spaces.push(...((res?.['spaces'] ?? []) as { name: string; displayName?: string }[]));
+      spaces.push(...((res?.['spaces'] ?? []) as { name: string; displayName?: string; externalUserAllowed?: boolean }[]));
       pageToken = String(res?.['nextPageToken'] ?? '');
       if (!pageToken) break;
     }
@@ -317,7 +317,7 @@ export class GoogleWorkspaceConnector implements WorkspaceConnector {
         const res = await this.chatApi(p, `/${direct}`);
         if (!res) return { reason: 'リンクのチャットのスペースが見つかりません。リンクを確かめてください' };
         const name = String(res['displayName'] ?? '').trim();
-        return { space: direct, displayName: name || null };
+        return { space: direct, displayName: name || null, external: externalOf(res as { externalUserAllowed?: boolean }) };
       } catch (err) {
         if (err instanceof ConnectorUnavailableError) throw err;
         // 入っていないスペースは 403 が返る。存在しない ID には、形が正しくても 400 が返る（2026-09-25 に本物で確認）。

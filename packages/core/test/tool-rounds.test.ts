@@ -24,6 +24,8 @@ class ScriptedLlm implements LlmProvider {
   private i = 0;
   constructor(private readonly replies: string[]) {}
   async complete(req: LlmRequest) {
+    // 言い換えを考えさせる呼び出し（第11.7.7.0節）は数えない
+    if (String(req.messages.at(-1)?.content ?? '').startsWith('社内の規程や文書を探します')) return { text: '', tokensUsed: 0 };
     this.seen.push(req);
     const text = this.replies[Math.min(this.i, this.replies.length - 1)] ?? '';
     this.i += 1;

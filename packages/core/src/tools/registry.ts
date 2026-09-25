@@ -43,6 +43,8 @@ export interface ToolContext {
    * 「読み取れなかった」と明示する。
    */
   ocr?: (req: { bytes: Uint8Array; mimeType: string }) => Promise<string>;
+  /** 組織知識を探す前に、言い換えを秘書に考えさせる（仕様書 第11.7.7.0節）。無ければ言い換えなしで探す。 */
+  expandQuery?: (query: string) => Promise<string[][]>;
 }
 
 /** 引数 1 つの定義（JSON Schema の一部）。 */
@@ -132,7 +134,14 @@ export interface Tool {
  * - `unchecked`: 確かめられなかった（Google に届かないなど）。元の引数で記録し、承認の画面に添える
  */
 export type PreparedCall =
-  | { kind: 'ready'; args: Record<string, unknown>; shown?: string }
+  | {
+    kind: 'ready'; args: Record<string, unknown>; shown?: string;
+    /**
+     * 送り先が社内だけと確かめられたか（仕様書 第9.4.0節、ADR-0028）。`internal` なら、送る道具でも承認の段を自動で通してよい。
+     * 返さなければ、送る道具（`external-send`）は社外とみなす
+     */
+    audience?: 'internal' | 'external';
+  }
   | { kind: 'problem'; reason: string }
   | { kind: 'unchecked'; reason: string };
 

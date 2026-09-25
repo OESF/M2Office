@@ -239,8 +239,8 @@ export const DEFAULT_TENANT_SETTINGS: TenantSettings = {
     invoiceRegistrationNumber: '', taxRounding: 'floor', closingDay: 'end', paymentTerms: '',
   },
   writingStyle: { selfReference: '弊社', greeting: '', closing: '', signature: '', terms: [], notes: '' },
-  // AG-05 の本人宛通知は既定で承認なし（Q-53）
-  automation: { writeInternal: 'require', perAgent: { 'weekly-brief': 'allow' } },
+  // 社内への書き込みは既定で承認なし。人に判断を求めるのは社外とお金だけ（第9.4.0節、ADR-0028）
+  automation: { writeInternal: 'allow', perAgent: {} },
   agents: { disabled: [] },
   effect: { minutesPerRun: {} },
   onboarding: { agentsReviewedAt: null, employeesNotifiedAt: null },

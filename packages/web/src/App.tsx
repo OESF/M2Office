@@ -42,7 +42,7 @@ const googleReturn: string | null = (() => {
 })();
 
 const GOOGLE_RETURN_TEXT: Record<string, { ok: boolean; text: string }> = {
-  connected: { ok: true, text: 'Google と接続しました。下の「Google 連携」で許可の状況を確かめられます。' },
+  connected: { ok: true, text: 'Google と接続しました' },
   cancelled: { ok: false, text: 'Google との接続を取りやめました。' },
   failed: { ok: false, text: 'Google と接続できませんでした。もう一度試すか、管理者に設定を確かめてもらってください。' },
   // 会社のクライアントの誤り。もう一度押しても直らないので、試し直しを勧めない（仕様書 第14.3.3節）
@@ -403,14 +403,12 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
           {view.kind === 'notifications' && (
             <>
               <h1>お知らせ</h1>
-              <p className="lead">週次ブリーフもここに届きます。</p>
               <Notifications items={notifications} onRead={() => void refresh()} />
             </>
           )}
           {view.kind === 'schedules' && (
             <>
               <h1>定時実行 <HelpTip article="start-schedules">決まった時刻に、あなたの権限で業務を自動で実行します。「今すぐ実行」で動きを確かめられます。</HelpTip></h1>
-              <p className="lead">決まった時刻に、あなたの権限で業務を実行します。</p>
               <Schedules agents={agents} />
             </>
           )}
@@ -427,9 +425,6 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
                   }} />
                 );
               })()}
-              <p className="lead">
-                ほかの項目は、左下の歯車から選べます（{keyLabel('Mod+,') || '歯車'}）。
-              </p>
               {googleReturn && GOOGLE_RETURN_TEXT[googleReturn] && (
                 <p className={GOOGLE_RETURN_TEXT[googleReturn]!.ok ? 'ok-msg' : 'error'}>{GOOGLE_RETURN_TEXT[googleReturn]!.text}</p>
               )}
@@ -449,7 +444,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
           {view.kind === 'history' && (
             <>
               <h1>実行履歴</h1>
-              {history.length === 0 && <p className="muted">まだ履歴はありません。左のメニューから業務を選ぶか、秘書に頼んでみてください。</p>}
+              {history.length === 0 && <p className="muted">まだ履歴はありません</p>}
               {history.map(({ run, job }) => (
                 <HistoryRow
                   key={run.id} run={run} viewerId={me.user.id}
@@ -481,10 +476,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
                 }}
               />
             ) : (
-              <>
-                <h3>秘書のキャンバス</h3>
-                <p className="muted">秘書が答えを見せる場所です。下の欄に書いて頼むと、答えがここに出ます。声で頼んだときは声で答え、一覧のような大きい答えや、「画面に出して」と頼んだものだけをここに出します。</p>
-              </>
+              <h3>秘書のキャンバス</h3>
             )}
           </div>
         </aside>
@@ -577,11 +569,10 @@ function Home({ callMe, notFound = false }: {
   return (
     <div className="home">
       {notFound && (
-        <p className="warn-msg small">お探しの画面は見つかりませんでした。無くなったか、あなたが使えないものの可能性があります。</p>
+        <p className="warn-msg small">お探しの画面は見つかりませんでした</p>
       )}
       <p className="home-greeting">{callMe}、{greeting}。</p>
       <h1>何かお手伝いしましょうか</h1>
-      <p className="lead">メニューから業務を選ぶか、下の入力欄で話しかけてください。</p>
     </div>
   );
 }
@@ -806,8 +797,7 @@ function SecretaryBar({ lookups, avatar, onResult, onVoice }: {
           ref={box}
           value={text}
           rows={1}
-          placeholder={`例: 今日の予定は？ / 会議の議事録をまとめて（Shift+Enter で改行${
-            keyLabel('Mod+J') ? `、${keyLabel('Mod+J')} でここへ` : ''}）`}
+          placeholder="例: 今日の予定は？"
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
             // Enter で送り、Shift+Enter で改行する。変換確定の Enter では送らない（第6.1.3節）
@@ -871,7 +861,7 @@ const tail = (text: string) => (text.length > CAPTION_MAX ? `…${text.slice(-CA
 
 /** 本人宛の通知の一覧。開くと既読になる。 */
 function Notifications({ items, onRead }: { items: Notification[]; onRead: () => void }) {
-  if (items.length === 0) return <p className="muted">お知らせはありません。週次ブリーフや業務の結果が、ここに届きます。</p>;
+  if (items.length === 0) return <p className="muted">お知らせはありません</p>;
   return (
     <>
       {items.map((n) => <NoticeRow key={n.id} notice={n} onRead={onRead} />)}

@@ -23,7 +23,6 @@ export function SuspendedBanner({ status }: { status: string }) {
   return (
     <div className="suspended-banner" role="status">
       <strong>ご利用を停止しています。閲覧のみできます。</strong>
-      {' '}業務の依頼・承認・設定の変更は、再開のあとに行えます。
       {' '}<button className="link-btn" onClick={() => openHelp('faq-suspended')}>解除の方法</button>
     </div>
   );
@@ -78,10 +77,6 @@ export function AgentForm({
     <div className="card">
       {agent.extension && (
         <p className="muted small">拡張機能「{agent.extension.name}」・提供: {agent.extension.publisher}</p>
-      )}
-      <p>{agent.description}</p>
-      {agent.hasApproval && (
-        <p className="muted">この業務には承認の確認が入ります（全 {agent.stepCount} 段階）。</p>
       )}
       {Object.entries(props).map(([key, field]) => (
         <Field
@@ -213,9 +208,6 @@ export function RunView({
               ? '承認をお待ちしています'
               : `${doing?.label ?? '準備しています'}…`}
           </p>
-          {run.status === 'awaiting_approval' && (
-            <p className="muted small">承認トレイで判断すると、続きから進みます。</p>
-          )}
           {canCancel && (
             <button className="btn ghost small" onClick={() => void cancel()} disabled={cancelling}>
               {cancelling ? '止めています…' : '中止'}
@@ -268,7 +260,9 @@ export function RunView({
                 <span className="seq">{x.seq + 1}</span>
                 <span className="name">
                   {x.label}
-                  <span className="muted">（{x.kind === 'approval' ? '承認' : '処理'}）</span>
+                  {/* 社外にもお金にも関わらない承認の段は、人を待たずに通る（仕様書 第9.3.3節、ADR-0028） */}
+                  <span className="muted">（{x.kind !== 'approval' ? '処理'
+                    : (x.output as { automatic?: boolean } | null)?.automatic ? '承認・自動で通過' : '承認'}）</span>
                 </span>
                 <span className={`status ${x.status}`}>{statusLabel(x.status)}</span>
               </li>
@@ -305,7 +299,7 @@ export function ApprovalTray({
   if (items.length === 0) {
     return (
       <div className="card">
-        <p className="muted">承認待ちはありません。承認が必要な業務を実行すると、判断できる人のここに届きます。</p>
+        <p className="muted">承認待ちはありません</p>
       </div>
     );
   }
@@ -346,7 +340,7 @@ function ApprovalRow({ approval, busy, onDecide }: {
         <div className="fold-body">
           <div className="reply"><Markdown text={approval.present} lineBreaks /></div>
           <p className="muted small">
-            {approval.approverUserId ? 'あなたが依頼した業務です。内容を確認してください。'
+            {approval.approverUserId ? 'あなたの依頼です'
               : `承認できる役割: ${approval.approverRole.join(' / ')}`}
           </p>
           <button className="btn" disabled={busy} onClick={() => onDecide(approval.id, 'approved')}>
@@ -409,8 +403,8 @@ export function Evidence({ steps }: { steps: RunStep[] }) {
   const note = redacted && (
     <p className="muted small">
       {(redacted.output as { reason?: string }).reason === 'disconnect'
-        ? 'Google との連携を解除したため、読んだメールや文書の中身を消しました。使ったツールの名前だけを残しています。'
-        : '保存期間を過ぎたため、読んだメールや文書の中身を消しました。使ったツールの名前だけを残しています。'}
+        ? '連携解除により中身を消去済み'
+        : '保存期間切れで中身を消去済み'}
     </p>
   );
   if (calls.length === 0) return <>{note}<p className="muted">まだ根拠はありません。</p></>;

@@ -39,15 +39,26 @@ export function normalizeSpaceName(name: string): string {
  * @returns 選んだスペース。無い・複数ある場合は、その理由の文（利用者に見せる）
  */
 export function pickSpace(
-  wanted: string, spaces: { name: string; displayName?: string }[],
-): { space: string; displayName: string | null } | { reason: string } {
+  wanted: string, spaces: { name: string; displayName?: string; externalUserAllowed?: boolean }[],
+): { space: string; displayName: string | null; external: boolean | null } | { reason: string } {
   const key = normalizeSpaceName(wanted);
   const hits = spaces.filter((s) => s.displayName && normalizeSpaceName(s.displayName) === key);
-  if (hits.length === 1) return { space: hits[0]!.name, displayName: hits[0]!.displayName ?? null };
+  if (hits.length === 1) return { space: hits[0]!.name, displayName: hits[0]!.displayName ?? null, external: externalOf(hits[0]!) };
   if (hits.length === 0) {
     return { reason: `「${wanted}」という名前のチャットのスペースが見つかりません（あなたが入っているスペースだけを探します）。名前を確かめるか、スペースのリンクを指定してください` };
   }
   return { reason: `「${wanted}」という名前のチャットのスペースが ${hits.length} つあります。どれに投稿するか決められないため、スペースのリンクを指定してください` };
+}
+
+/**
+ * スペースに社外の人が入れるか（仕様書 第9.4.0節）。
+ *
+ * @remarks
+ * Chat の API は、真偽の項目が偽のときは返さないことがある。返らなければ「入れない」と読む
+ * （`externalUserAllowed` は、社外の人を入れられるスペースでだけ `true` が返る）。
+ */
+export function externalOf(space: { externalUserAllowed?: boolean }): boolean {
+  return space.externalUserAllowed === true;
 }
 
 /**

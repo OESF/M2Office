@@ -126,7 +126,7 @@ export const tasksComplete: Tool = {
   name: 'tasks.complete',
   risk: 'write-internal',
   activityLabel: 'ToDo を完了にしています',
-  helpText: 'ToDo を完了にします。会社の設定により、その前に確認を求めます',
+  helpText: 'ToDo を完了にします',
   description: 'ToDo を完了にする',
   args: { properties: { taskId: S('ToDo の ID') }, required: ['taskId'] },
   google: { scope: 'tasks', level: 'sensitive' },
@@ -325,7 +325,7 @@ export const sheetsAppend: Tool = {
   name: 'sheets.append',
   risk: 'write-internal',
   activityLabel: '表に行を足しています',
-  helpText: 'M2Office で作った表に行を足します。会社の設定により、その前に確認を求めます',
+  helpText: 'M2Office で作った表に行を足します',
   description: 'M2Office が作った Google スプレッドシートの末尾に行を足す',
   args: { properties: { spreadsheetId: S('スプレッドシートの ID'), rows: { type: 'array', description: '足す行の配列（各行は値の配列）' } }, required: ['spreadsheetId', 'rows'] },
   google: { scope: 'drive.file', level: 'non-sensitive' },
@@ -344,19 +344,24 @@ const ROLE_LABEL = { reader: '閲覧', commenter: 'コメント', writer: '編�
  *
  * @remarks
  * 危険度 `external-send`。相手がファイルを見られるようになるため、承認ステップの直後でしか呼べない（仕様書 第9.4節）。
+ * 相手が社内の人だけなら、その承認の段は自動で通る（第9.4.0節）。
  * 共有できるのは M2Office が作ったファイルだけ。リンクによる一般公開はしない。権限 `drive.file`（機密でない）。
  */
 export const driveShare: Tool = {
   name: 'drive.share',
   risk: 'external-send',
   activityLabel: 'ファイルを共有しています',
-  helpText: 'M2Office で作ったファイルを、指定した人と共有します。必ず承認のあとに行います。リンクで誰にでも公開することはしません',
+  helpText: 'M2Office で作ったファイルを、指定した人と共有します。社外の人との共有は、承認のあとに行います。リンクで誰にでも公開することはしません',
   description: 'M2Office が作ったファイルを、指定した人と共有する（リンクによる一般公開はしない）',
   args: {
     properties: { fileId: S('ファイルの ID'), emails: SA('共有する相手のメールアドレス'), role: { type: 'string', description: '役割', enum: ['reader', 'commenter', 'writer'] } },
     required: ['fileId', 'emails'],
   },
   google: { scope: 'drive.file', level: 'non-sensitive' },
+  /** 共有する相手が社内の人だけかを確かめる（仕様書 第9.4.0節）。読むだけ。 */
+  async prepare(args, ctx): Promise<PreparedCall> {
+    return { kind: 'ready', args, audience: await audienceOf(ctx, list(args['emails'])) };
+  },
   async invoke(args, ctx) {
     const emails = list(args['emails']);
     if (emails.length === 0) return { source: ctx.connector.sourceFor(ctx.tenantId), shared: false, reason: '共有する相手がいません' };
@@ -384,6 +389,20 @@ async function companyDomain(ctx: ToolContext): Promise<{ domain: string } | { r
   if (!domain) return { reason: '会社のドメインが分かりません' };
   if (CONSUMER_DOMAINS.has(domain)) return { reason: '個人向けの Google アカウントでは、会社の全員への共有はできません' };
   return { domain };
+}
+
+/**
+ * 相手が全員、本人の会社の人か（仕様書 第9.4.0節、ADR-0028）。
+ *
+ * @param emails 送り先・共有先・招く人のメールアドレス（空なら社内とみなす。相手がいない）
+ * @returns 社内の人だけなら `internal`。**確かめられなければ `external`**（見本の接続口の会社・会社のドメインが分からない・個人向けのアカウント）
+ */
+export async function audienceOf(ctx: ToolContext, emails: string[]): Promise<'internal' | 'external'> {
+  if (ctx.connector.sourceFor(ctx.tenantId) !== 'google') return 'external';
+  const d = await companyDomain(ctx).catch(() => ({ reason: '' }));
+  if ('reason' in d) return 'external';
+  const inside = emails.every((e) => e.trim().toLowerCase().split('@')[1] === d.domain);
+  return inside ? 'internal' : 'external';
 }
 
 /**

@@ -60,8 +60,8 @@ export function ScopeEditor({ value, onChange, options, allowAll = true }: {
       {value !== 'all' && (
         <div className="scope-pick">
           <div>
-            <div className="small muted">グループ（所属する人が使えます）</div>
-            {options.groups.length === 0 && <p className="small muted">グループがありません。「ユーザーと権限」で作れます。</p>}
+            <div className="small muted">グループ</div>
+            {options.groups.length === 0 && <p className="small muted">グループがありません</p>}
             {options.groups.map((g) => (
               <label key={g.id} className="check">
                 <input type="checkbox" checked={picked.groups.includes(g.id)} onChange={() => toggle('groups', g.id)} />
@@ -158,10 +158,6 @@ export function GroupSettings({ users, onChanged }: {
   return (
     <div className="card" style={{ marginTop: 16 }}>
       <h3>グループ</h3>
-      <p className="small">
-        管理職・マーケティング・開発など、利用者をグループにまとめます。業務ごとに「利用できる人」をグループで指定できます
-        （「業務と承認」「拡張機能」の画面）。1 人が複数のグループに入れます。
-      </p>
       {groups.length === 0 && <p className="muted small">まだありません。</p>}
       <table className="table">
         <tbody>
@@ -178,10 +174,7 @@ export function GroupSettings({ users, onChanged }: {
                   </div>
                 )}
                 {open === g.id && g.usedBy && g.usedBy.compartments.length > 0 && (
-                  <p className="warn-msg small">
-                    このグループは権限区画（{g.usedBy.compartments.join('、')}）に割り当てられています。
-                    所属を変えると、その区画のデータを見られる人が変わります。変更は記録され、管理者全員に通知されます。
-                  </p>
+                  <p className="warn-msg small">区画（{g.usedBy.compartments.join('、')}）のデータを見られる人が変わります</p>
                 )}
                 {open === g.id && (
                   <div className="scope-pick">
@@ -258,10 +251,7 @@ export function CompartmentSettings({ onChanged }: { onChanged?: () => void }) {
   return (
     <div className="card" style={{ marginTop: 16 }}>
       <h3>権限区画</h3>
-      <p className="small">
-        人事の給与・評価のような機微なデータを隔てる単位です。区画に入れるのは、割り当てたグループに所属する人と、個別に割り当てた人だけです。
-        区画に入れる人が変わると記録され、管理者全員に通知されます。
-      </p>
+      <p className="muted small">変更は記録され、管理者全員に通知されます</p>
       {!options && <p className="muted small">読み込んでいます…</p>}
       {options && (
         <table className="table">

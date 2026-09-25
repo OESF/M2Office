@@ -16,6 +16,8 @@ function fakeLlm() {
     name: 'fake',
     seen,
     async complete(req: { messages: { role: string; content: string }[] }) {
+      // 言い換えを考えさせる呼び出し（第11.7.7.0節）は数えない
+      if (String(req.messages.at(-1)?.content ?? '').startsWith('社内の規程や文書を探します')) return { text: '', tokensUsed: 0 };
       seen.push(req.messages);
       return { text: 'わかりました', tokensUsed: 3 };
     },

@@ -46,6 +46,10 @@ class LearnRepo {
   async listUsers() { return this.users; }
   async listPromotions() { return this.promotions; }
   async createPromotion(p: Promotion) { this.promotions.push(p); }
+  async updatePromotion(p: Promotion) { this.promotions = this.promotions.map((x) => (x.id === p.id ? p : x)); }
+  knowledge: { id: string; kind: string; body: string; source: string; compartment: string | null }[] = [];
+  async listKnowledge() { return this.knowledge; }
+  async saveKnowledge(k: { id: string; kind: string; body: string; source: string; compartment: string | null }) { this.knowledge.push(k); }
   async createNotification(n: { userId: string; title: string }) { this.notifications.push(n); }
 }
 
@@ -86,7 +90,7 @@ test('応答から要約と事実を取り出す', () => {
 test('前日の会話から要約を作り、事実はそのまま覚える（ADR-0027）', async () => {
   const { repo, learning } = setup(ANSWER);
   const result = await learning.sweep(new Date('2026-09-23T02:00:00.000Z'));
-  assert.deepEqual(result, { digests: 1, learned: 2, suggestions: 0 });
+  assert.deepEqual(result, { digests: 1, learned: 2, promoted: 0 });
   assert.equal(repo.digests[0]!.day, previousDay(new Date('2026-09-23T02:00:00.000Z')).day);
   assert.deepEqual(repo.memories.map((m) => [m.text, m.source]), [['経費の精算は佐藤さんに出す', 'learned'], ['締めは毎月 25 日', 'learned']]);
   assert.equal(repo.candidates.length, 0, '候補を挟まない');
@@ -116,28 +120,28 @@ test('同じ文を二度は覚えず、本人が消した文も再び覚えな�
     id: 'm1', tenantId: 't', userId: 'u', text: '締めは毎月 25 日', source: 'secretary',
     createdAt: '2026-09-22T00:00:00.000Z',
   });
-  assert.deepEqual(await learning.sweep(now), { digests: 1, learned: 0, suggestions: 0 });
+  assert.deepEqual(await learning.sweep(now), { digests: 1, learned: 0, promoted: 0 });
   assert.equal(repo.memories.length, 1);
 });
 
 test('覚えないもの・止めている人・鍵が無い環境では覚えない', async () => {
   // 認証情報らしき事実は覚えない
   const cred = setup(['要約: 設定の話。', '- 社内システムのパスワードは abc123'].join('\n'));
-  assert.deepEqual(await cred.learning.sweep(new Date('2026-09-23T02:00:00.000Z')), { digests: 1, learned: 0, suggestions: 0 });
+  assert.deepEqual(await cred.learning.sweep(new Date('2026-09-23T02:00:00.000Z')), { digests: 1, learned: 0, promoted: 0 });
 
   // 覚えることを止めている人は、要約も作らず、覚えもしない
   const off = setup(ANSWER);
   off.repo.settings.memory.learning = false;
-  assert.deepEqual(await off.learning.sweep(new Date('2026-09-23T02:00:00.000Z')), { digests: 0, learned: 0, suggestions: 0 });
+  assert.deepEqual(await off.learning.sweep(new Date('2026-09-23T02:00:00.000Z')), { digests: 0, learned: 0, promoted: 0 });
 
   // 対象外の言葉を含む会話は使わない
   const excluded = setup(ANSWER);
   excluded.repo.settings.memory.excludes = ['経費'];
-  assert.deepEqual(await excluded.learning.sweep(new Date('2026-09-23T02:00:00.000Z')), { digests: 0, learned: 0, suggestions: 0 });
+  assert.deepEqual(await excluded.learning.sweep(new Date('2026-09-23T02:00:00.000Z')), { digests: 0, learned: 0, promoted: 0 });
 
   // 見本の応答（鍵が無い環境）では覚えない
   const stub = setup(ANSWER, 'stub');
-  assert.deepEqual(await stub.learning.sweep(new Date('2026-09-23T02:00:00.000Z')), { digests: 0, learned: 0, suggestions: 0 });
+  assert.deepEqual(await stub.learning.sweep(new Date('2026-09-23T02:00:00.000Z')), { digests: 0, learned: 0, promoted: 0 });
 });
 
 test('記憶の番号だけを取り出す', () => {
@@ -146,37 +150,47 @@ test('記憶の番号だけを取り出す', () => {
   assert.match(promotionPrompt([{ text: '経費は佐藤さん' }]), /1\. 経費は佐藤さん/);
 });
 
-test('覚えたことから、ほかの人にも役立つものを昇華の候補にする（第11.3.1節）', async () => {
+test('覚えたことから、ほかの人にも役立つものを秘書が選び、そのまま会社の知識にする（第11.3.1節、ADR-0028）', async () => {
   const { repo, learning } = setup('- 1');
   repo.conversations.length = 0;
   repo.memories.push(
-    { id: 'm1', tenantId: 't', userId: 'u', text: '経費の精算は佐藤さんに出す', source: 'secretary', createdAt: '2026-09-22T00:00:00.000Z' },
-    { id: 'm2', tenantId: 't', userId: 'u', text: '自分は朝に集中したい', source: 'secretary', createdAt: '2026-09-22T00:00:00.000Z' },
+    // 新しい順に並ぶ（postgres.ts と同じ）。判断は古いものから
+    { id: 'm2', tenantId: 't', userId: 'u', text: '自分は朝に集中したい', source: 'learned', createdAt: '2026-09-22T01:00:00.000Z' },
+    { id: 'm1', tenantId: 't', userId: 'u', text: '経費の精算は佐藤さんに出す', source: 'learned', createdAt: '2026-09-22T00:00:00.000Z' },
   );
   const result = await learning.sweep(new Date('2026-09-23T02:00:00.000Z'));
-  assert.equal(result.suggestions, 1);
-  assert.equal(repo.promotions.length, 1);
-  assert.equal(repo.promotions[0]!.memoryId, 'm1');
-  assert.equal(repo.promotions[0]!.status, 'proposed', 'まず本人が出すかどうかを決める');
-  assert.deepEqual(repo.notifications.map((n) => n.title), ['会社の知識にしませんか']);
-
-  const audit = repo.audits.find((a) => a.action === 'memory.promote.suggest');
-  assert.deepEqual(audit?.detail, { suggestions: 1 });
+  assert.equal(result.promoted, 1);
+  assert.deepEqual(repo.knowledge.map((k) => [k.kind, k.body, k.source, k.compartment]),
+    [['promoted', '経費の精算は佐藤さんに出す', '秘書が会話から学んだこと', null]], '記憶の一文そのまま。持ち主の名前は出さない');
+  assert.deepEqual(repo.promotions.map((p) => [p.memoryId, p.status]), [['m1', 'approved'], ['m2', 'rejected']], '選ばなかったものも判断済みにする');
+  assert.equal(repo.notifications.length, 0, '本人にも管理者にも承認を求めない');
+  const audit = repo.audits.find((a) => a.action === 'knowledge.promote.auto');
+  assert.deepEqual(audit?.detail, { promoted: 1 });
   assert.equal(JSON.stringify(audit).includes('佐藤'), false, '監査ログに記憶の中身を入れない');
 
-  // すでに提案した記憶は選び直さない（残りの記憶からは選ばれうる）
-  repo.notifications.length = 0;
-  await learning.sweep(new Date('2026-09-23T02:00:00.000Z'));
-  assert.deepEqual(repo.promotions.map((p) => p.memoryId), ['m1', 'm2'], '同じ記憶は二度提案しない');
-  repo.memories.length = 0;
-  repo.memories.push({ id: 'm1', tenantId: 't', userId: 'u', text: '経費の精算は佐藤さんに出す', source: 'secretary', createdAt: '2026-09-22T00:00:00.000Z' });
-  assert.equal((await learning.sweep(new Date('2026-09-23T02:00:00.000Z'))).suggestions, 0, '提案済みだけなら何も作らない');
+  // 判断した記憶は選び直さない
+  assert.equal((await learning.sweep(new Date('2026-09-24T02:00:00.000Z'))).promoted, 0);
+  assert.equal(repo.knowledge.length, 1);
 });
 
-test('学習を止めている人には、昇華の候補も作らない', async () => {
+test('以前の形で判断待ちの提案も、秘書が判断する。会社の知識にすでにある文は重ねない', async () => {
+  const { repo, learning } = setup('- 1\n- 2');
+  repo.conversations.length = 0;
+  repo.memories.push(
+    { id: 'm2', tenantId: 't', userId: 'u', text: '締めは毎月 25 日', source: 'learned', createdAt: '2026-09-22T01:00:00.000Z' },
+    { id: 'm1', tenantId: 't', userId: 'u', text: '経費の精算は佐藤さんに出す', source: 'secretary', createdAt: '2026-09-22T00:00:00.000Z' },
+  );
+  repo.promotions.push({ id: 'p1', tenantId: 't', userId: 'u', memoryId: 'm1', text: '経費の精算は佐藤さんに出す', status: 'pending', knowledgeId: null, decidedBy: null, comment: null, createdAt: '2026-09-22T00:00:00.000Z', decidedAt: null });
+  repo.knowledge.push({ id: 'k0', kind: 'promoted', body: '締めは毎月 25 日', source: '秘書が会話から学んだこと', compartment: null });
+  assert.equal((await learning.sweep(new Date('2026-09-23T02:00:00.000Z'))).promoted, 1);
+  assert.equal(repo.promotions.find((p) => p.id === 'p1')!.status, 'approved', '判断待ちの提案を書き換える');
+  assert.equal(repo.knowledge.filter((k) => k.body === '締めは毎月 25 日').length, 1, '同じ文は重ねない');
+});
+
+test('学習を止めている人の記憶は、会社の知識にしない', async () => {
   const { repo, learning } = setup('- 1');
   repo.conversations.length = 0;
   repo.settings.memory.learning = false;
   repo.memories.push({ id: 'm1', tenantId: 't', userId: 'u', text: '経費は佐藤さん', source: 'secretary', createdAt: '2026-09-22T00:00:00.000Z' });
-  assert.equal((await learning.sweep(new Date('2026-09-23T02:00:00.000Z'))).suggestions, 0);
+  assert.equal((await learning.sweep(new Date('2026-09-23T02:00:00.000Z'))).promoted, 0);
 });

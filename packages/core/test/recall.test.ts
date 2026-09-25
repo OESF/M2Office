@@ -87,6 +87,8 @@ test('「あれ、どうなった」は業務へ取り次がず、覚えてい�
   const llm = {
     name: 'fake',
     async complete(req: { tier?: string; messages: { role: string; content: string }[] }) {
+      // 言い換えを考えさせる呼び出し（第11.7.7.0節）は取次の判定ではない。数えない
+      if (req.messages.at(-1)!.content.startsWith('社内の規程や文書を探します')) return { text: '', tokensUsed: 0 };
       seen.push(req);
       // 取次の判定（高速）なら議事録作成を選ぶ、という推論を置く。呼ばれてはならない
       return req.tier === 'fast' ? { text: 'minutes', tokensUsed: 1 } : { text: '議事録作成は承認待ちです。', tokensUsed: 3 };

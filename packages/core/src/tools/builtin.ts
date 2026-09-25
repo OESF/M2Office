@@ -30,7 +30,9 @@ export const knowledgeSearch: Tool = {
   args: { properties: { query: { type: 'string', description: '調べる言葉' } }, required: ['query'] },
   async invoke(args, ctx) {
     const query = String(args['query'] ?? '');
-    const { hits, rewrites } = await ctx.repo.searchKnowledge(ctx.tenantId, query, ctx.compartment);
+    // 言い換えは秘書が考える（第11.7.7.0節）
+    const synonyms = ctx.expandQuery ? await ctx.expandQuery(query) : [];
+    const { hits, rewrites } = await ctx.repo.searchKnowledge(ctx.tenantId, query, ctx.compartment, synonyms);
     return {
       query,
       hits: hits.map((h) => ({ citation: h.citation, title: h.title, heading: h.heading, source: h.source, body: h.body })),

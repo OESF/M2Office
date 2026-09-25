@@ -414,7 +414,6 @@ function Failures({ items }: { items: DashboardLive['failures'] }) {
   return (
     <details className="fold">
       <summary>今日、失敗した業務（{items.length} 件）</summary>
-      <p className="muted small">日本時間の 0 時以降に失敗したものです。日が変わると消えます。</p>
       {items.map((f) => (
         <div className="failed-note" key={f.runId}>
           <strong>{f.agentName}</strong>{' '}
@@ -550,10 +549,7 @@ function Stats() {
               </dl>
             </section>
           </div>
-          <p className="muted small">
-            削減時間は「完了した実行の件数 × 手作業での標準所要時間」による推計です。
-            標準所要時間は「業務と承認」で会社ごとに変えられます。
-          </p>
+          <p className="muted small">削減時間は推計です</p>
         </>
       )}
     </>
@@ -662,7 +658,6 @@ function LayerBar({ s }: { s: DashboardStats['secretary'] }) {
           </div>
         ))}
       </dl>
-      <p className="muted small">直接応答は AI を使わずに答えたもの。多いほど速く、費用がかからない。</p>
     </>
   );
 }

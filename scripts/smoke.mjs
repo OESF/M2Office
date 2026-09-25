@@ -1198,13 +1198,11 @@ console.log('\n■ 26. Google Workspace のツール（第 2 弾）');
     ? ok('Meet の会議の文字起こしを取れる（中身はデータの印つき）') : ng('文字起こしを取れない', JSON.stringify(out('fetch')));
   out('who')?.people?.[0]?.department === '営業部' ? ok('社内の人を部署で探せる') : ng('社内の人を探せない', JSON.stringify(out('who')));
   const docId = out('write')?.file?.id;
-  w.run?.status === 'awaiting_approval' && docId ? ok('記録の文書を作り、共有の手前で承認を待つ') : ng('承認を待たない', w.run?.status);
-  // 共有する文書の ID は実行中に決まるため、承認の前に見本の応答を差し替えずに、共有のステップの引数に反映できない。
-  // ここでは承認のあとに「作っていないファイル」を共有しようとして断られることを確かめる
-  const ap = await approvalFor('a', job.runId, 'member');
-  await call('a', `/v1/approvals/${ap.id}`, { method: 'POST', body: JSON.stringify({ decision: 'approved' }) }, 'member');
-  const done = await waitFor('a', job.runId, ['completed', 'failed'], 20000, 'member');
-  done.run?.status === 'completed' ? ok('承認のあとに共有のステップへ進む') : ng('共有のステップへ進まない', JSON.stringify(done.run));
+  // 共有する文書の ID は実行中に決まるため、見本の応答では共有の段に操作を書けない。
+  // 送るものが無い承認の段は、人を待たずに通る（仕様書 第9.3.3節・第9.4.0節、ADR-0028）
+  const gateRow = w.steps?.find((x) => x.stepId === 'gate');
+  w.run?.status === 'completed' && docId && gateRow?.output?.automatic === true
+    ? ok('記録の文書を作り、送るものが無い承認の段は自動で通る') : ng('承認の段の扱いが違う', JSON.stringify({ status: w.run?.status, gate: gateRow?.output }));
   const { body: perms } = await call('a', '/v1/admin/google-permissions');
   ['meetings.space.readonly', 'directory.readonly'].every((sc) => perms.items?.some((p) => p.scope === sc && p.level === 'sensitive'))
     ? ok('第 2 弾の権限（Meet・ディレクトリ）が、段階つきで一覧に出る') : ng('権限の一覧に出ない', JSON.stringify(perms.items));

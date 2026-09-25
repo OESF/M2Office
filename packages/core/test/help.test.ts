@@ -42,7 +42,7 @@ test('受信箱整理の説明は「送信しない」ことを、危険度か�
 
 test('議事録の説明は、送る前に承認を求めることと承認者を書く', () => {
   const h = help('minutes');
-  assert.ok(h.safeguards.some((d) => d.startsWith('送る前に、必ず承認を求めます')));
+  assert.ok(h.safeguards.some((d) => d.startsWith('社外に出るもの（メール、社外の人がいる先への投稿や招待）は、送る前に承認を求めます')));
   assert.deepEqual(h.approvals.map((a) => a.step), ['内容の承認', '共有の承認']);
   assert.ok(h.approvals.every((a) => a.who.includes('管理者')));
   assert.deepEqual(h.flow, ['取得', '作成', '内容の承認', '起票', '共有の承認', '共有']);
@@ -50,7 +50,7 @@ test('議事録の説明は、送る前に承認を求めることと承認者�
 
 test('承認が 2 回あっても、同じ役割を繰り返して書かない', () => {
   const h = help('minutes');
-  assert.ok(h.safeguards.includes('送る前に、必ず承認を求めます（管理者・承認者）'), h.safeguards.join(' / '));
+  assert.ok(h.safeguards.includes('社外に出るもの（メール、社外の人がいる先への投稿や招待）は、送る前に承認を求めます（管理者・承認者）'), h.safeguards.join(' / '));
 });
 
 test('日程調整の承認者は「依頼したあなた」と書く（approver: requester）', () => {
@@ -59,7 +59,7 @@ test('日程調整の承認者は「依頼したあなた」と書く（approver
 
 test('社内への書き込みの確認は、会社の設定に合わせて書き分ける', () => {
   assert.ok(help('minutes', true).safeguards.some((d) => d.includes('確認を求めます')));
-  assert.ok(help('minutes', false).safeguards.some((d) => d.includes('確認なしで')));
+  assert.ok(help('minutes', false).safeguards.some((d) => d.includes('確認を待たずに')));
 });
 
 test('公式の記事はすべて読み込め、ID が重複しない', () => {

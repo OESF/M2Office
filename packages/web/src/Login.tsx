@@ -87,9 +87,6 @@ export function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
         {providers?.dev.enabled && (
           <div className="dev-login">
             <h3>開発用ログイン</h3>
-            <p className="muted small">
-              Google ログインが使えるようになるまでの仮の入口です。本番では表示されません。
-            </p>
             {providers.dev.users.map((u) => (
               <button key={u.email} className="btn ghost wide" disabled={busy}
                 onClick={() => void devLogin(u.email)}>

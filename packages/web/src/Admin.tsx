@@ -83,11 +83,9 @@ const TABS: {
   },
   { id: 'extensions', label: '拡張機能', icon: 'extensions', description: '業務と、外部とのつながり（コネクタ）を追加する', group: '設定' },
   {
-    id: 'knowledge', label: '知識', icon: 'knowledge', description: '就業規則などの社内の規程、言い換え', group: '設定',
+    id: 'knowledge', label: '知識', icon: 'knowledge', description: '就業規則などの社内の規程と、秘書が加えた知識', group: '設定',
     pages: [
       { id: 'items', label: '登録と一覧' },
-      { id: 'synonyms', label: '言い換え' },
-      { id: 'promotions', label: '会社の知識にする提案' },
     ],
   },
   { id: 'setup', label: 'はじめに行う設定', icon: 'help', description: '導入の流れと、残っている設定', group: '設定' },
@@ -235,7 +233,6 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
                   article: 'admin-setup',
                   text: 'M2Office を使い始めるまでに済ませる設定の一覧です。済んだものには印が付き、すべて済むとメニューから消えます。',
                 }} />
-                <p className="lead">上から順に済ませると、使い始められます。すべて済むと、この項目は消えます。</p>
                 <Checklist onGo={(t) => setTab(t as Tab)} />
               </>
             )}
@@ -309,7 +306,7 @@ function Usage() {
             </tbody>
           </table>
           {data.note && <p className="muted small">{data.note}</p>}
-          <p className="muted small">費用は暫定の係数による概算です。請求額ではありません。</p>
+          <p className="muted small">概算です（請求額ではありません）</p>
         </>
       )}
     </>
@@ -326,7 +323,6 @@ function Runs() {
         article: 'admin-runs',
         text: '直近 100 件の業務の状態です。行を押すと、段の進みと失敗の理由が出ます。入力や成果物の中身は出ません。',
       }} />
-      <p className="lead">入力や成果物の中身は表示しません。</p>
       {error && <p className="error">{error}</p>}
       {data?.items.map((r: AdminRun) => (
         <RunRow key={r.id} run={r} requester={nameOf(r.requestedBy)} />
@@ -386,7 +382,6 @@ function RunRow({ run, requester }: { run: AdminRun; requester: string }) {
                 <dt>削減時間の推計</dt><dd>{detail.savedMinutes} 分</dd>
                 <dt>実行 ID</dt><dd className="small">{detail.id}</dd>
               </dl>
-              <p className="muted small">入力・成果物・段の中身は、管理者には表示しません。</p>
             </>
           )}
         </div>
@@ -403,7 +398,7 @@ function Audit() {
         article: 'admin-audit',
         text: '「いつ・誰が・何をしたか」の記録です。変えることも消すこともできません。会話や成果物の中身は残しません。',
       }} />
-      <p className="lead">直近 200 件です。記録は追記のみで、変更や削除はできません。</p>
+      <p className="muted small">直近 200 件</p>
       {error && <p className="error">{error}</p>}
       <table className="table">
         <thead><tr><th>日時</th><th>主体</th><th>操作</th><th>対象</th></tr></thead>

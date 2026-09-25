@@ -38,6 +38,7 @@ related: [admin-runs, admin-users, faq-privacy]
 | `job.create` | 業務を依頼した |
 | `run.complete`・`run.fail`・`run.cancel`・`run.expire` | 業務が完了した・失敗した・中止された・期限切れになった |
 | `run.await_approval`・`run.await_confirmation` | 業務が承認・操作の確認を待ち始めた |
+| `approval.auto` | 社外にもお金にも関わらない承認の段を、自動で通した |
 | `approval.decide` | 承認または却下した |
 | `tool.invoke` | 業務がツールを使った。`tool.blocked` は使うのを止めたとき |
 | `schedule.create`・`schedule.update`・`schedule.trigger`・`schedule.skip` | 定時実行を作った・変えた・動かした・飛ばした |
@@ -47,8 +48,8 @@ related: [admin-runs, admin-users, faq-privacy]
 | `settings.update` | 会社の設定を変えた |
 | `connection.*` | Gemini の鍵や Google との接続を登録した・変えた・外した |
 | `extension.*` | 拡張機能を取り込んだ・導入した・削除した、ツールを止めた・戻した |
-| `knowledge.*` | 知識を登録した・直した・消した、言い換えを保存した |
-| `memory.*` | 秘書の記憶を足した・消した、会社の知識にする提案を出した・判断した。**記憶の中身は記録しません** |
+| `knowledge.*` | 知識を登録した・直した・消した。秘書が会社の知識に加えた（`knowledge.promote.auto`）・会話で直した（`knowledge.correct`） |
+| `memory.*` | 秘書が覚えた・直した・消した。**記憶の中身は記録しません** |
 
 ## 記録しないもの
 

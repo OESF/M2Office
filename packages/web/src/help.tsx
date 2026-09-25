@@ -176,7 +176,7 @@ export function HelpCenter({ initial, back, onReplayTour, onArticle }: {
     <>
       <BackLink back={back} />
       <h1>ヘルプ</h1>
-      <p className="lead">分からないことは、下の秘書に「〜はどうやるの？」と聞くのがいちばん早い方法です。</p>
+      <p className="lead">秘書に聞くのが早道です</p>
       {error && <p className="error">{error}</p>}
       <div className="help-search">
         <input value={q} placeholder="例: 承認のしかた、定時実行" onChange={(e) => setQ(e.target.value)}
@@ -186,7 +186,7 @@ export function HelpCenter({ initial, back, onReplayTour, onArticle }: {
       {results && (
         <div className="card">
           <h3>「{q}」の検索結果</h3>
-          {results.length === 0 && <p>見つかりませんでした。言い方を変えるか、秘書に聞いてみてください。</p>}
+          {results.length === 0 && <p>見つかりませんでした</p>}
           {results.map((r) => (
             <button key={r.id} className="help-item" onClick={() => setArticleId(r.id)}>
               <strong>{r.title}</strong><span className="sub">{r.excerpt}</span>
@@ -227,7 +227,6 @@ function ArticleView({ id, items, onOpen, onBack }: {
       {article && (
         <article className="card article">
           <h1>{article.title}</h1>
-          {article.source === 'agent' && <p className="muted small">この説明は、業務の設定から自動で作っています。</p>}
           <Markdown text={article.body} />
           {article.related.length > 0 && (
             <div className="related">
@@ -382,7 +381,7 @@ export function AgentHelpTip({ agentId, onExample }: {
       )}
       {help.examples.length > 0 && (
         <div className="examples">
-          <span className="muted small">実行例（押すと入力欄に入ります）</span>
+          <span className="muted small">実行例</span>
           {help.examples.map((e) => (
             // 入れたらすぐ実行に移れるよう、説明は閉じる（仕様書 第6.10.5.1節）
             <button key={e.title} className="btn ghost small" onClick={() => { onExample(e.input); close(); }}>
@@ -415,7 +414,7 @@ export function AgentHelpTip({ agentId, onExample }: {
 const TOUR_STEPS = [
   { title: '左に、使える業務が並んでいます', body: '議事録作成や受信箱整理など、代わりに進めてくれる業務です。押すと、何をしてくれるかと入力の画面が出ます。' },
   { title: '下の秘書に、何でも話しかけられます', body: '「今日の予定は？」「会議の議事録をまとめて」のように話しかけてください。困ったときは「〜はどうやるの？」と聞けば、使い方も答えます。' },
-  { title: '確認が必要なものは、承認トレイに届きます', body: 'メールの送信や投稿など、社外や他の人に届く操作は、必ず人の承認のあとに行います。勝手に送られることはありません。' },
+  { title: '社外に出るものだけ、承認トレイに届きます', body: 'メールの送信や社外の人への共有など、社外に出るものとお金の確定だけは、人の承認のあとに行います。それ以外は秘書と業務が進めます。' },
 ];
 
 /**

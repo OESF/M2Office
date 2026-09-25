@@ -15,13 +15,16 @@ import {
   type RunStep, type TenantSettings,
 } from '@m2office/shared';
 import {
-  RunEngine, ToolRegistry, BUILTIN_TOOLS, MockWorkspaceConnector, MemoryFileStore, nextRunAt,
+  RunEngine, ToolRegistry, BUILTIN_TOOLS, MockWorkspaceConnector, MemoryFileStore, nextRunAt, needsHuman, AUTO_PASS_REASON,
   saveFile, readSheet, renderSheet, parseCsv, extractPdfText,
   ApprovalForbiddenError, ConnectorUnavailableError, hideInternalIds, repeatsArtifact, DefinitionInvalidError, validateDefinition, OFFICIAL_AGENTS, todayJst, describeCall, jpDate,
   type LlmProvider, type LlmRequest, type Repository, type KnowledgeItem,
 } from '../src/index.js';
 
 /** 実行エンジンが使う操作だけを持つ、記憶上の永続化層。 */
+/** 社内への書き込みにも承認を求める会社の設定（第 0.114.0 版までの既定）。 */
+const STRICT_POLICY: TenantSettings['automation'] = { writeInternal: 'require', perAgent: { 'weekly-brief': 'allow' } };
+
 class MemoryRepo {
   jobs: Job[] = [];
   runs: Run[] = [];
@@ -70,7 +73,9 @@ class MemoryRepo {
   fileRows: Record<string, unknown>[] = [];
   async createFile(f: Record<string, unknown>) { this.fileRows.push(f); }
   async getFile(t: string, id: string) { return this.fileRows.find((f) => f['tenantId'] === t && f['id'] === id) ?? null; }
-  settings: TenantSettings = structuredClone(DEFAULT_TENANT_SETTINGS);
+  // 人の承認の流れを確かめるため、既定は「社内への書き込み: 承認が必要」にしている会社とする。
+  // 新しい既定（承認なし。仕様書 第9.4.0節）での自動の通過は、個別のテストで確かめる
+  settings: TenantSettings = structuredClone({ ...DEFAULT_TENANT_SETTINGS, automation: STRICT_POLICY });
   async getTenantSettings() { return this.settings; }
   groupsOf: Record<string, string[]> = {};
   compartmentsOf: Record<string, string[]> = {};
@@ -141,7 +146,7 @@ test('承認の直後のステップでは、対外送信のツールを呼べ�
 });
 
 test('依頼者が利用範囲の外なら、実行を進めずに止める（第16.7.4節）', async () => {
-  const { repo, connector, engine, run } = setup(SHARE_DEF, { name: 'chat.post', args: {} });
+  const { repo, connector, engine, run } = setup(SHARE_DEF, { name: 'chat.post', args: { text: '共有します' } });
   repo.settings.access = { scopes: { 'share-test': { groups: ['g-dev'], users: [] } } };
   const res = await engine.advance(run);
   assert.equal(res.outcome, 'failed');
@@ -150,7 +155,7 @@ test('依頼者が利用範囲の外なら、実行を進めずに止める（�
 });
 
 test('利用範囲のグループに所属していれば実行できる', async () => {
-  const { repo, engine, run } = setup(SHARE_DEF, { name: 'chat.post', args: {} });
+  const { repo, engine, run } = setup(SHARE_DEF, { name: 'chat.post', args: { text: '共有します' } });
   repo.settings.access = { scopes: { 'share-test': { groups: ['g-dev'], users: [] } } };
   repo.groupsOf['u-member'] = ['g-dev'];
   assert.equal((await engine.advance(run)).outcome, 'awaiting_approval');
@@ -158,7 +163,7 @@ test('利用範囲のグループに所属していれば実行できる', async
 
 test('権限区画に属する業務は、区画に入れない依頼者では実行しない（第16.3.6節）', async () => {
   const def = { ...SHARE_DEF, id: 'hr-test', compartment: 'hr' };
-  const { repo, engine, run } = setup(def, { name: 'chat.post', args: {} });
+  const { repo, engine, run } = setup(def, { name: 'chat.post', args: { text: '共有します' } });
   const res = await engine.advance(run);
   assert.equal(res.outcome, 'failed');
   assert.match(res.outcome === 'failed' ? res.reason : '', /権限区画/);
@@ -168,7 +173,7 @@ test('権限区画に属する業務は、区画に入れない依頼者では�
 });
 
 test('承認者のロールを持たない利用者は、承認も却下もできない', async () => {
-  const { engine, run } = setup(SHARE_DEF, { name: 'chat.post', args: {} });
+  const { engine, run } = setup(SHARE_DEF, { name: 'chat.post', args: { text: '共有します' } });
   const first = await engine.advance(run);
   if (first.outcome !== 'awaiting_approval') assert.fail('承認待ちにならない');
   for (const decision of ['approved', 'rejected'] as const) {
@@ -185,7 +190,7 @@ test('approver: requester の承認は、依頼した本人だけが判断でき
     steps: SHARE_DEF.steps.map((s) =>
       s.type === 'approval' ? { ...s, approver: 'requester' as const, approverRole: [] } : s),
   };
-  const { repo, engine, run } = setup(def, { name: 'chat.post', args: {} });
+  const { repo, engine, run } = setup(def, { name: 'chat.post', args: { text: '共有します' } });
   const first = await engine.advance(run);
   if (first.outcome !== 'awaiting_approval') assert.fail('承認待ちにならない');
   assert.equal(repo.approvals[0]!.approverUserId, 'u-member', '依頼者が承認者として記録される');
@@ -242,7 +247,7 @@ const TASK_DEF: AgentDefinition = {
   ],
 };
 
-test('社内への書き込みは、既定では実行前に本人の確認を求める', async () => {
+test('会社が「承認が必要」にしていれば、社内への書き込みの前に本人の確認を求める', async () => {
   const { repo, connector, engine, run } = setup(TASK_DEF, { name: 'tasks.create', args: { title: '確認後に起票' } });
   const first = await engine.advance(run);
   assert.equal(first.outcome, 'awaiting_approval');
@@ -272,7 +277,7 @@ test('AG-05 の例外: エージェントごとの設定が全体の設定より
   const { repo, engine, run } = setup(def, { name: 'tasks.create', args: { title: '例外' } });
   assert.equal(repo.settings.automation.writeInternal, 'require');
   const res = await engine.advance(run);
-  assert.equal(res.outcome, 'completed', '既定で weekly-brief は承認なし（Q-53）');
+  assert.equal(res.outcome, 'completed', '業務ごとの「承認なし」が全体の「承認が必要」より優先される');
 });
 
 test('無効にされた業務は実行しない', async () => {
@@ -1006,7 +1011,7 @@ test('ほかの実行の成果物と、Google から読んだ記録で作った�
 });
 
 test('承認待ちになったら、判断できる人に知らせる（仕様書 第6.5.5.1節）', async () => {
-  const { repo, engine, run } = setup(SHARE_DEF, { name: 'chat.post', args: {} });
+  const { repo, engine, run } = setup(SHARE_DEF, { name: 'chat.post', args: { text: '共有します' } });
   const res = await engine.advance(run);
   assert.equal(res.outcome, 'awaiting_approval');
   const notes = repo.notifications.filter((n) => n.kind === 'approval');
@@ -1026,19 +1031,19 @@ test('実行が終わったら依頼した本人に知らせ、失敗も知ら�
   assert.equal(finished[0]!.title, '業務が終わりました: テスト');
 
   // 失敗したときは種類 failure で知らせる
-  const failed = setup({ ...SHARE_DEF, id: 'fail-test' }, { name: 'chat.post', args: {} });
+  const failed = setup({ ...SHARE_DEF, id: 'fail-test' }, { name: 'chat.post', args: { text: '共有します' } });
   failed.repo.settings.agents = { disabled: ['fail-test'] };
   assert.equal((await failed.engine.advance(failed.run)).outcome, 'failed');
   assert.deepEqual(failed.repo.notifications.map((n) => n.kind), ['failure']);
 });
 
 test('本人が受け取らない種類は作らず、業務自身が知らせた実行には完了を重ねない', async () => {
-  const off = setup(SHARE_DEF, { name: 'chat.post', args: {} });
+  const off = setup(SHARE_DEF, { name: 'chat.post', args: { text: '共有します' } });
   off.repo.userSettings.notifications.kinds.approval = false;
   await off.engine.advance(off.run);
   assert.equal(off.repo.notifications.length, 0, '切った種類は画面内にも作らない');
 
-  const brief = setup(SHARE_DEF, { name: 'chat.post', args: {} });
+  const brief = setup(SHARE_DEF, { name: 'chat.post', args: { text: '共有します' } });
   brief.repo.notifications.push({
     id: 'n-brief', tenantId: 't', userId: 'u-member', kind: 'brief', title: '今週のブリーフ',
     body: '', runId: 'r1', readAt: null, createdAt: new Date().toISOString(),
@@ -1130,3 +1135,52 @@ test('pdf.extract は、文字の無いページだけを読み取りへ送る�
 function docsCreateTool() {
   return BUILTIN_TOOLS.find((t) => t.name === 'docs.create')!;
 }
+
+// ─── 人に判断を求めるのは社外とお金だけ（仕様書 第9.4.0節、ADR-0028） ─────────────
+
+test('人の判断が要るかは、社外に出るか・お金の確定か・会社の設定で決まる', () => {
+  const registry = new ToolRegistry();
+  for (const t of BUILTIN_TOOLS) registry.register(t);
+  registry.register({ name: 'invoice.finalize', risk: 'financial', activityLabel: '', description: '', invoke: async () => null });
+  const allow = { writeInternal: 'allow' as const, perAgent: {} };
+  const strict = { writeInternal: 'require' as const, perAgent: {} };
+  assert.equal(needsHuman([], registry, allow, 'x'), false, '行うことが無ければ通る');
+  assert.equal(needsHuman([{ name: 'tasks.create' }], registry, allow, 'x'), false, '社内への書き込みは既定で通る');
+  assert.equal(needsHuman([{ name: 'tasks.create' }], registry, strict, 'x'), true, '会社が「承認が必要」にしていれば人に回す');
+  assert.equal(needsHuman([{ name: 'chat.post', internal: true }], registry, allow, 'x'), false, '社内だけと確かめた投稿は通る');
+  assert.equal(needsHuman([{ name: 'chat.post' }], registry, allow, 'x'), true, '確かめられなかった投稿は社外とみなす');
+  assert.equal(needsHuman([{ name: 'gmail.send', internal: true }], registry, allow, 'x'), true, 'メールは確かめる手段を持たず、常に人');
+  assert.equal(needsHuman([{ name: 'invoice.finalize', internal: true }], registry, allow, 'x'), true, 'お金の確定は常に人');
+  assert.equal(needsHuman([{ name: 'unknown.tool' }], registry, allow, 'x'), true, '知らない道具は人に回す');
+});
+
+test('社外の人が入れないスペースへの投稿は、承認の段を自動で通って投稿する（第9.3.3節）', async () => {
+  const { repo, connector, engine, run } = setup(SHARE_DEF, { name: 'chat.post', args: { space: '営業部', text: '共有します' } });
+  repo.settings.automation = { writeInternal: 'allow', perAgent: {} };
+  connector.chat.findSpace = async () => ({ space: 'spaces/SALES', displayName: '営業部', external: false });
+  const res = await engine.advance(run);
+  assert.equal(res.outcome, 'completed');
+  assert.equal(repo.approvals.length, 0, '承認トレイには出さない');
+  assert.equal(connector.outbox.filter((m) => m.kind === 'chat').length, 1, '記録どおり 1 回だけ投稿する');
+  const gate = repo.steps.find((s) => s.kind === 'approval')!;
+  assert.equal(gate.status, 'succeeded');
+  assert.equal((gate.output as { reason?: string }).reason, AUTO_PASS_REASON, '実行の詳細に「自動で通過」と残す');
+  assert.ok(repo.audits.some((a) => a.action === 'approval.auto'));
+});
+
+test('社外の人が入れるスペースや、分からないスペースへの投稿は、人の承認を待つ', async () => {
+  for (const external of [true, null]) {
+    const { repo, connector, engine, run } = setup(SHARE_DEF, { name: 'chat.post', args: { space: '取引先', text: '共有します' } });
+    repo.settings.automation = { writeInternal: 'allow', perAgent: {} };
+    connector.chat.findSpace = async () => ({ space: 'spaces/EXT', displayName: '取引先', external });
+    assert.equal((await engine.advance(run)).outcome, 'awaiting_approval', `external: ${external}`);
+    assert.equal(connector.outbox.length, 0);
+  }
+});
+
+test('行えない操作があれば、社内だけでも自動で通さず人に回す（欠けたまま終わらせない）', async () => {
+  const { repo, connector, engine, run } = setup(SHARE_DEF, { name: 'chat.post', args: { space: '無い部', text: '共有します' } });
+  repo.settings.automation = { writeInternal: 'allow', perAgent: {} };
+  connector.chat.findSpace = async () => ({ reason: '「無い部」という名前のチャットのスペースが見つかりません' });
+  assert.equal((await engine.advance(run)).outcome, 'awaiting_approval');
+});

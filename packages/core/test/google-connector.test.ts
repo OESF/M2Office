@@ -189,7 +189,7 @@ async function fakeGoogle(behave: (s: Seen) => { status: number; json?: unknown 
       if (!s.query.get('pageToken')) {
         return send(200, { spaces: [{ name: 'spaces/SALES', displayName: '営業部' }, { name: 'spaces/DUP1', displayName: '総務' }], nextPageToken: 'p2' });
       }
-      return send(200, { spaces: [{ name: 'spaces/DUP2', displayName: '総務 ' }, { name: 'spaces/DEV', displayName: 'Dev Team' }] });
+      return send(200, { spaces: [{ name: 'spaces/DUP2', displayName: '総務 ' }, { name: 'spaces/DEV', displayName: 'Dev Team', externalUserAllowed: true }] });
     }
     if (s.path === '/chat/spaces/GONE/messages') return send(404, { error: { code: 404, status: 'NOT_FOUND', message: 'Space not found' } });
     // 1 つのスペースを見る（承認の前の確かめ。ADR-0024）
@@ -414,16 +414,17 @@ test('Chat: 投稿先のリンク・ID を読み、名前はちょうど 1 つ�
   assert.equal(spaceIdOf('https://mail.google.com/chat/u/0/#chat/space/AAAAdef'), 'spaces/AAAAdef');
   assert.equal(spaceIdOf('営業部'), null, '名前は ID ではない');
   const list = [{ name: 'spaces/A', displayName: '営業部' }, { name: 'spaces/B', displayName: 'Ｄｅｖ　Team' }, { name: 'spaces/C', displayName: '総務' }, { name: 'spaces/D', displayName: '総務' }];
-  assert.deepEqual(pickSpace(' 営業部 ', list), { space: 'spaces/A', displayName: '営業部' });
-  assert.deepEqual(pickSpace('dev team', list), { space: 'spaces/B', displayName: 'Ｄｅｖ　Team' }, '全角と半角・大小・空白は区別しない');
+  assert.deepEqual(pickSpace(' 営業部 ', list), { space: 'spaces/A', displayName: '営業部', external: false });
+  assert.deepEqual(pickSpace('dev team', list), { space: 'spaces/B', displayName: 'Ｄｅｖ　Team', external: false }, '全角と半角・大小・空白は区別しない');
   assert.match((pickSpace('営業', list) as { reason: string }).reason, /見つかりません/, '似た名前に推測で投稿しない');
   assert.match((pickSpace('総務', list) as { reason: string }).reason, /2 つあります.*リンク/);
 });
 
 test('Chat: 承認の前に投稿先を探す。投稿はしない（ADR-0024）', async () => {
   await withConnector(async (c, g) => {
-    assert.deepEqual(await c.chat.findSpace(P, '営業部'), { space: 'spaces/SALES', displayName: '営業部' });
-    assert.deepEqual(await c.chat.findSpace(P, 'https://chat.google.com/room/SALES'), { space: 'spaces/SALES', displayName: '営業部' }, 'リンクなら、そのスペースを見て名前を得る');
+    assert.deepEqual(await c.chat.findSpace(P, '営業部'), { space: 'spaces/SALES', displayName: '営業部', external: false }, '社外の人を入れる印が無ければ社内');
+    assert.deepEqual(await c.chat.findSpace(P, 'Dev Team'), { space: 'spaces/DEV', displayName: 'Dev Team', external: true }, '社外の人を入れるスペース（仕様書 第9.4.0節）');
+    assert.deepEqual(await c.chat.findSpace(P, 'https://chat.google.com/room/SALES'), { space: 'spaces/SALES', displayName: '営業部', external: false }, 'リンクなら、そのスペースを見て名前を得る');
     assert.match((await c.chat.findSpace(P, '総務') as { reason: string }).reason, /2 つあります/);
     assert.match((await c.chat.findSpace(P, '人事') as { reason: string }).reason, /見つかりません/);
     assert.match((await c.chat.findSpace(P, 'spaces/GONE') as { reason: string }).reason, /リンクのチャットのスペースが見つかりません/);

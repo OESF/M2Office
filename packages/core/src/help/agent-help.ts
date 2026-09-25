@@ -71,12 +71,13 @@ export function buildAgentHelp(
   } else {
     // 承認が複数あっても、同じ役割は 1 度だけ書く（「管理者・承認者、管理者・承認者」としない）
     const approvers = [...new Set(approvals.map((a) => a.who))];
-    safeguards.push(`送る前に、必ず承認を求めます（${approvers.join('、') || '承認者'}）`);
+    // 人に判断を求めるのは社外に出るものだけ（仕様書 第9.4.0節、ADR-0028）
+    safeguards.push(`社外に出るもの（メール、社外の人がいる先への投稿や招待）は、送る前に承認を求めます（${approvers.join('、') || '承認者'}）`);
   }
   if (tools.some((t) => t.risk === 'write-internal')) {
     safeguards.push(opts.writeInternalNeedsApproval
       ? 'ToDo や予定などの社内への書き込みは、行う前にあなたに確認を求めます'
-      : 'ToDo や予定などの社内への書き込みは、会社の設定により確認なしで行います');
+      : 'ToDo や予定などの社内への書き込みは、確認を待たずに行います');
   }
   if (tools.some((t) => t.name === 'gmail.get' || t.name === 'pdf.extract' || t.name === 'sheet.read')) {
     safeguards.push('読み取ったメールや書類に書かれた指示には従いません');

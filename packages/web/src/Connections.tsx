@@ -109,7 +109,7 @@ function RetentionCard() {
   if (days === null) return null;
   return (
     <div className="card">
-      <p className="muted small">業務が終わってから、この日数が過ぎると、読んだメール・文書の中身と、そこから作った要約などを消します。作った成果物（下書き・議事録など）は消しません。承認待ちの間は残します。</p>
+      <p className="muted small">成果物（下書き等）は消しません</p>
       <div className="field">
         <label>残す日数</label>
         <select value={days} onChange={(e) => setDays(Number(e.target.value))}>
@@ -156,7 +156,6 @@ function GeminiCard({ data, onSaved }: { data: ConnectionSettings['gemini']; onS
 
   return (
     <div className="card">
-      <p className="muted small">業務の推論・秘書・Web の調査・音声に使います。</p>
       <p className="small">いまの状態: <strong>{effective}</strong></p>
       <div className="field">
         <label>契約の形態</label>
@@ -168,7 +167,7 @@ function GeminiCard({ data, onSaved }: { data: ConnectionSettings['gemini']; onS
           <label>Gemini API キー</label>
           <input type="password" autoComplete="off" value={apiKey} onChange={(e) => setApiKey(e.target.value)}
             placeholder={data.keyRegistered ? `●●●●●●●●（登録済み・${fmt(data.updatedAt)}）` : 'AIzaSy…'} />
-          <span className="small muted">Google AI Studio（aistudio.google.com）で発行した鍵を貼ります。登録した鍵は二度と表示しません。変えるときは上書きしてください。</span>
+          <span className="small muted">登録後は表示しません</span>
         </div>
       )}
       <details className="field">
@@ -200,9 +199,6 @@ function GeminiCard({ data, onSaved }: { data: ConnectionSettings['gemini']; onS
         <button className="btn ghost small" onClick={() => void test('live')}>音声（Gemini Live）を試す</button>
         <span className="small">{tests['live']}</span>
       </div>
-      <p className="muted small">
-        音声では、鍵をブラウザに渡しません。ブラウザは M2Office のサーバーにつなぎ、サーバーが Gemini Live へ中継します。
-      </p>
     </div>
   );
 }
@@ -223,12 +219,7 @@ function RequiredScopes({ scopes }: { scopes: ConnectionSettings['google']['requ
   }, []);
   return (
     <div className="card">
-      <p className="small">
-        この会社で使える業務のツールから決まります。使っていない業務の許可は求めません。業務を足して許可が増えたら、従業員に接続し直しを案内します。
-      </p>
-      <p className="muted small">
-        「制限付き」の権限は、一般公開の前に第三者のセキュリティ評価（CASA）が必要です。段階は見込みで、申請の前に Google の一覧で確かめます。
-      </p>
+      <p className="muted small">制限付き＝公開時に CASA 評価が必要</p>
       {error && <p className="error">{error}</p>}
       <table className="table">
         <thead><tr><th>許可</th><th>段階</th><th>使う業務</th></tr></thead>
@@ -267,33 +258,21 @@ function GoogleCard({ data, page, onSaved }: {
     <>
       {page === 'google' && (
       <div className="card">
-        <p className="small">
-          Gmail・カレンダー・ToDo・Chat・ドライブほかに使います。{' '}
-          会社の Google Cloud で作った OAuth クライアント（同意画面を「内部」にしたもの）を登録します。
-          社内だけで使うアプリになるため、Google の審査は要りません。登録したあと、従業員はそれぞれ個人設定の「Google 連携」で接続します。
-        </p>
-        <ol className="small steps-guide">
-          <li>
-            Google Cloud でプロジェクトを作り、使う API（Gmail・Calendar・Tasks・Chat・Drive・Docs・Sheets・Slides・People・Meet・Forms）を有効にする
-            （<a className="link" href="https://console.cloud.google.com/apis/library" target="_blank" rel="noreferrer">API ライブラリ</a>）
-          </li>
-          <li>
-            OAuth の同意画面を<strong>「内部」</strong>で作る
-            （<a className="link" href="https://console.cloud.google.com/auth/branding" target="_blank" rel="noreferrer">同意画面</a>）
-          </li>
-          <li>
-            OAuth クライアントを種類「ウェブ アプリケーション」で作り、次の<strong>リダイレクト URI</strong>を登録する
-            （<a className="link" href="https://console.cloud.google.com/auth/clients" target="_blank" rel="noreferrer">クライアント</a>）
-            <div className="row">
-              <code className="uri">{data.redirectUri}</code>
-              <button className="btn ghost small" onClick={() => {
-                void navigator.clipboard?.writeText(data.redirectUri).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); });
-              }}>{copied ? 'コピーしました' : 'コピー'}</button>
-            </div>
-          </li>
-          <li>クライアント ID とクライアント シークレットを、下に登録する</li>
-          <li>管理者が自分で、個人設定の「Google 連携」から接続を試す</li>
-        </ol>
+        {/* 手順の説明は「？」とヘルプの記事に任せ、ここには Google Cloud の各画面へのリンクとリダイレクト URI だけを置く */}
+        <div className="row small">
+          <a className="link" href="https://console.cloud.google.com/apis/library" target="_blank" rel="noreferrer">API ライブラリ</a>
+          <a className="link" href="https://console.cloud.google.com/auth/branding" target="_blank" rel="noreferrer">同意画面（内部）</a>
+          <a className="link" href="https://console.cloud.google.com/auth/clients" target="_blank" rel="noreferrer">クライアント</a>
+        </div>
+        <div className="field">
+          <label>リダイレクト URI</label>
+          <div className="row">
+            <code className="uri">{data.redirectUri}</code>
+            <button className="btn ghost small" onClick={() => {
+              void navigator.clipboard?.writeText(data.redirectUri).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); });
+            }}>{copied ? 'コピーしました' : 'コピー'}</button>
+          </div>
+        </div>
         <div className="grid2">
           <div className="field">
             <label>クライアント ID</label>
@@ -305,7 +284,6 @@ function GoogleCard({ data, page, onSaved }: {
               placeholder={data.secretRegistered ? `●●●●●●●●（登録済み・${fmt(data.updatedAt)}）` : 'GOCSPX-…'} />
           </div>
         </div>
-        <p className="muted small">保存するときに、クライアント ID とシークレットが組になっているかを Google で確かめます。誤っていれば保存しません。</p>
         <div className="row">
           {/* 保存の前に Google で組を確かめる。誤りなら API が断り、その理由をボタンの横に出す（仕様書 第14.3.3節） */}
           <SaveButton
@@ -335,9 +313,7 @@ function GoogleCard({ data, page, onSaved }: {
         </div>
         {msg && <p className={msg.ok ? 'ok-msg' : 'error'}>{msg.text}</p>}
         {data.workspaceSource === 'mock' && (
-          <p className="warn-msg small">
-            Google の API を実際に呼ぶ部分は準備中です。接続して許可の状況を確かめることはできますが、業務はまだ見本のデータで動きます。
-          </p>
+          <p className="warn-msg small">この会社の業務は見本データで動きます</p>
         )}
       </div>
       )}

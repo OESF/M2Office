@@ -12,7 +12,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   alwaysRequiresApproval, canDecide, canUseAgent, writeInternalNeedsApproval,
-  type TenantSettings, type WritingStyle,
+  type AutomationPolicy, type TenantSettings, type WritingStyle,
   type AgentDefinition, type AgentStep, type ApprovalStep, type Approval, type Run,
   type RunStep, type Step,
 } from '@m2office/shared';
@@ -29,6 +29,7 @@ import { standardMinutes, stepLabel } from '../agents/index.js';
 import { describeCall } from './describe-call.js';
 import { composeApprovalPresent, describeContext } from './approval-present.js';
 import { validateDefinition } from './validate.js';
+import { expandQuery } from '../knowledge/expand.js';
 import { parseToolCalls } from './tool-protocol.js';
 
 /** 実行を 1 歩進めた結果。ワーカーが次の行動を決めるのに使う。 */
@@ -185,6 +186,12 @@ export class RunEngine {
             done: planned.kind === 'planned' ? planned.done : [],
           };
         }
+        // 社外に出るものもお金の確定も無ければ、人を待たずに通る（仕様書 第9.3.3節・第9.4.0節、ADR-0028）。
+        // 行えない操作があるときは、進めるかを人が決める（黙って欠けたまま終わらせない）
+        if (!needsHuman(plan?.calls ?? [], registry, settings.automation, def.id) && (plan?.unable.length ?? 0) === 0) {
+          current = await this.passAutomatically(current, def, step, plan, job.requestedBy, registry, ai.research);
+          continue;
+        }
         const approvalId = await this.suspendForApproval(current, def, step, job.requestedBy, plan, registry);
         return { outcome: 'awaiting_approval', approvalId };
       }
@@ -303,6 +310,49 @@ export class RunEngine {
     // 承認された。次のステップから再開できるよう待ち行列へ戻す
     await repo.updateRun({ ...run, status: 'queued', cursor: run.cursor + 1 });
     return { runId: run.id };
+  }
+
+  /**
+   * 承認の段を、人を待たずに通す（仕様書 第9.3.3節、ADR-0028）。
+   *
+   * @remarks
+   * 承認の段の記録を「自動で通過」として残し、組み立てた操作を人が承認したときと同じくそのまま実行する（推論をやり直さない）。
+   * 承認トレイには出さず、誰にも知らせない。行えない操作があるときは呼ばれない（人に回す）。
+   *
+   * @returns 組み立てた段を済ませて進めたあとの実行
+   */
+  private async passAutomatically(
+    run: Run,
+    def: AgentDefinition,
+    step: ApprovalStep,
+    plan: { stepIndex: number; step: AgentStep; calls: ToolCall[]; unable: UnableCall[]; done: DoneCall[] } | null,
+    requestedBy: string,
+    registry: ToolRegistry,
+    research?: ResearchProvider,
+  ): Promise<Run> {
+    const { repo } = this.deps;
+    const now = new Date().toISOString();
+    const artifacts = await repo.listArtifacts(run.tenantId, run.id);
+    await repo.appendRunStep(run.tenantId, {
+      id: randomUUID(), runId: run.id, seq: run.cursor, stepId: step.id,
+      kind: 'approval', status: 'succeeded',
+      input: {
+        present: step.present, artifactIds: artifacts.map((a) => a.id), automatic: true,
+        ...(plan ? { toolCalls: plan.calls, plannedStep: plan.stepIndex } : {}),
+        ...(plan && plan.unable.length > 0 ? { unableCalls: plan.unable } : {}),
+      },
+      output: { decision: 'approved', automatic: true, reason: AUTO_PASS_REASON },
+      startedAt: now, endedAt: now,
+    });
+    await repo.appendAudit({
+      id: randomUUID(), tenantId: run.tenantId, actorType: 'system', actorId: 'engine',
+      action: 'approval.auto', targetType: 'run', targetId: run.id,
+      detail: { stepId: step.id, tools: (plan?.calls ?? []).map((c) => c.name) }, occurredAt: now,
+    });
+    const advanced = { ...run, cursor: run.cursor + 1 };
+    await repo.updateRun(advanced);
+    // 組み立てた段があれば、記録どおりに実行して、その段を済ませる
+    return this.executeConfirmedCalls(advanced, def, requestedBy, registry, research);
   }
 
   private async suspendForApproval(
@@ -524,7 +574,10 @@ export class RunEngine {
               continue;
             }
             const recorded: ToolCall = check?.kind === 'ready'
-              ? { name: call.name, args: check.args, ...(check.shown ? { shown: check.shown } : {}) }
+              ? {
+                name: call.name, args: check.args, ...(check.shown ? { shown: check.shown } : {}),
+                ...(check.audience === 'internal' ? { internal: true } : {}),
+              }
               : check?.kind === 'unchecked' ? { ...call, caution: check.reason } : call;
             // 同じ操作は 1 度だけ記録する（二重に実行しない）。印には中身の鍵を持たせ、実行後に結果と突き合わせる
             const key = callKey(recorded);
@@ -649,6 +702,7 @@ export class RunEngine {
       approvalsAhead, isGoogleTool: (name) => !!registry.get(name)?.google,
       // 画像から文字を読む手段。推論が持っていなければ渡さない（第9.4.1節、Q-56）
       ...(llm?.readImage ? { ocr: async (r) => (await llm.readImage!(r)).text } : {}),
+      ...(llm ? { expandQuery: (q: string) => expandQuery(llm, q) } : {}),
     };
   }
 
@@ -864,7 +918,37 @@ type ToolCall = {
   shown?: string;
   /** 承認の前に確かめられなかった理由。 */
   caution?: string;
+  /** 送り先が社内だけと確かめられた（仕様書 第9.4.0節）。送る道具でも、人の判断を要しない。 */
+  internal?: boolean;
 };
+
+/** 承認の段を自動で通したときに、記録に残す理由（実行の詳細に出す）。 */
+export const AUTO_PASS_REASON = '社外への送信とお金の確定が無いため、自動で通過しました';
+
+/**
+ * 承認の後に行う操作に、人の判断が要るものがあるか（仕様書 第9.4.0節、ADR-0028）。
+ *
+ * @remarks
+ * 人の判断が要るのは、社外に出るもの（送る道具で、送り先が社内だけと確かめられなかったもの）とお金の確定。
+ * 会社が「社内への書き込み: 承認が必要」にしていれば、社内への書き込みも人に回す。知らない道具は人に回す。
+ */
+export function needsHuman(
+  calls: { name: string; internal?: boolean }[],
+  registry: Pick<ToolRegistry, 'get'>,
+  policy: AutomationPolicy,
+  agentId: string,
+): boolean {
+  return calls.some((c) => {
+    const risk = registry.get(c.name)?.risk;
+    if (risk === 'read' || risk === 'draft') return false;
+    if (risk === 'write-internal') return writeInternalNeedsApproval(policy, agentId);
+    if (risk === 'external-send') return c.internal !== true || ALWAYS_ASK.has(c.name);
+    return true;
+  });
+}
+
+/** 送り先に関わらず、いつも人に判断を求める道具。メールは宛先に関わらず人が見る（仕様書 第9.4.0節）。 */
+const ALWAYS_ASK = new Set(['gmail.send']);
 
 /** 承認の前の確かめで、行えないと分かった操作（記録しない。ADR-0024）。 */
 type UnableCall = { name: string; args: Record<string, unknown>; reason: string };

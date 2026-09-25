@@ -244,10 +244,11 @@ export interface ChatConnector {
    * 投稿先を探す。**読むだけで、投稿はしない**（承認の前の確かめに使う。仕様書 第9.3.3節、ADR-0024）。
    *
    * @param input スペースの名前か、リンク・ID
-   * @returns 見つかったスペース（`spaces/…` と、表示名。無ければ `null`）か、投稿できない理由（利用者に見せる文）
+   * @returns 見つかったスペース（`spaces/…` と、表示名。無ければ `null`）と、社外の人が入れるか
+   *   （`external`。分からなければ `null`。仕様書 第9.4.0節）か、投稿できない理由（利用者に見せる文）
    * @throws {ConnectorUnavailableError} 接続・許可・会社の準備の問題、Google に届かないとき
    */
-  findSpace(p: ConnectorPrincipal, input: string): Promise<{ space: string; displayName: string | null } | { reason: string }>;
+  findSpace(p: ConnectorPrincipal, input: string): Promise<{ space: string; displayName: string | null; external: boolean | null } | { reason: string }>;
 }
 
 /** Google スライドへの接続口（仕様書 第9.4.2節）。 */

@@ -77,7 +77,7 @@ export { ToolRegistry, validateToolArgs, toolGoogleScopes } from './tools/regist
 export type { Tool, ToolContext, ArgSpec, ToolArgsSchema, GoogleScope, GoogleScopeLevel } from './tools/registry.js';
 export { BUILTIN_TOOLS } from './tools/builtin.js';
 
-export { RunEngine, costOf } from './engine/run-engine.js';
+export { AUTO_PASS_REASON, RunEngine, costOf, needsHuman } from './engine/run-engine.js';
 export {
   DEFAULT_MODELS, DEFAULT_LIVE_MODEL, MODEL_PRICES, UNKNOWN_MODEL_PRICE,
   costJpy, defaultGeminiModels, isHotSwapAlias, usdJpy, warnHotSwapModels,
@@ -106,6 +106,7 @@ export { Secretary, acceptsFile } from './secretary/secretary.js';
 export type { SecretaryReply, ResponseLayer } from './secretary/secretary.js';
 export { REFERS_TO_PAST, closeness, recall, type Recall } from './secretary/recall.js';
 export { LIST_MIN, SPOKEN_MAX, needsCanvas } from './secretary/canvas.js';
+export { CORRECTION, correctMemory, correctionPrompt, parseCorrection, type CorrectionOp, type CorrectionResult } from './secretary/correct.js';
 export { DIRECT_QUERIES, type EvidenceItem } from './secretary/catalog.js';
 export {
   MEMORY_MAX_CHARS, memoryTextOf, refuseToRemember, refusalMessage,

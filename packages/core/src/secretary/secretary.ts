@@ -15,6 +15,8 @@ import { DIRECT_QUERIES, type DirectAnswer, type EvidenceItem } from './catalog.
 import { rewriteNote } from '../knowledge/search.js';
 import { LOOKUP_AGENT_ID } from '../agents/index.js';
 import { REFERS_TO_PAST, recall } from './recall.js';
+import { CORRECTION, correctMemory } from './correct.js';
+import { expandQuery } from '../knowledge/expand.js';
 
 /** 秘書がどの層で応答したか。計測と表示に使う（仕様書 第10.9.1節）。 */
 export type ResponseLayer = 'direct' | 'light' | 'full';
@@ -140,6 +142,19 @@ export class Secretary {
       return { reply: await this.answerHowTo(tenantId, userId, message, this.deps.help), keep: true };
     }
 
+    // 「それは違う」「〇〇は忘れて」は、秘書が自分で記憶を直す（仕様書 第11.5.3節、ADR-0028）。
+    // 記憶の話でなければ推論が「無し」と返し、ふつうの答えに進む
+    if (CORRECTION.test(message)) {
+      const llm = this.deps.llmFor ? await this.deps.llmFor(tenantId) : this.deps.llm;
+      if (llm.name !== 'stub') {
+        const fixed = await correctMemory({ repo: this.deps.repo, llm }, tenantId, userId, message).catch(() => null);
+        if (fixed?.text) {
+          await this.audit(tenantId, userId, 'secretary.correct', 'memory');
+          return { reply: { layer: 'full', text: fixed.text, evidence: fixed.changes, tokensUsed: 0 }, keep: true };
+        }
+      }
+    }
+
     // 層 1: パターン一致で定型の照会に該当するか（LLM を使わない）
     // 「あの件の進み具合は」のような過去を指す問いは、実行の件数ではなく、覚えていることから答える（第10.7.3節）
     const direct0 = this.matchDirect(message);
@@ -228,8 +243,12 @@ export class Secretary {
     tenantId: string, userId: string, message: string,
   ): Promise<{ text: string; evidence: EvidenceItem[] }> {
     try {
-      const compartments = await this.deps.repo.listUserCompartments(tenantId, userId);
-      const { hits } = await this.deps.repo.searchKnowledge(tenantId, message, compartments[0] ?? null);
+      const llm = this.deps.llmFor ? await this.deps.llmFor(tenantId) : this.deps.llm;
+      // 言い換えは秘書が考える（第11.7.7.0節）。区画の取得と同時に行う
+      const [compartments, synonyms] = await Promise.all([
+        this.deps.repo.listUserCompartments(tenantId, userId), expandQuery(llm, message),
+      ]);
+      const { hits } = await this.deps.repo.searchKnowledge(tenantId, message, compartments[0] ?? null, synonyms);
       if (hits.length === 0) return { text: '', evidence: [] };
       const top = hits.slice(0, KNOWLEDGE_HITS);
       return {
@@ -349,7 +368,8 @@ export class Secretary {
     };
     const hits = help.search(message, ctx, 3);
     // 区画の外として検索する。区画内の文書を使い方の答えに混ぜない
-    const found = await this.deps.repo.searchKnowledge(tenantId, message, null);
+    const llm = this.deps.llmFor ? await this.deps.llmFor(tenantId) : this.deps.llm;
+    const found = await this.deps.repo.searchKnowledge(tenantId, message, null, await expandQuery(llm, message));
     const rules = found.hits.slice(0, 2);
 
     const parts: string[] = [];

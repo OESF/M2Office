@@ -11,7 +11,6 @@ import { Fragment, useEffect, useState } from 'react';
 import type {
   AutomationPolicy, CompanyInfo, Role, SlideTemplate, TenantSettings, User, WritingStyle,
 } from '@m2office/shared';
-import { STANDARD_SYNONYMS, SYNONYM_LIMITS } from '@m2office/shared';
 import { api, describeError, type KnowledgeItemView, type KnowledgeSectionView } from './api.js';
 import { PageTitle, type PageHelp } from './help.js';
 import { SaveButton } from './save.js';
@@ -136,10 +135,7 @@ export function CompanySettings({ page }: { page: string }) {
       */}
       {page === 'dashboard' && (
       <div className="card">
-        <p>
-          管理者ページのダッシュボードで、いま誰が何をしているかをどこまで出すかを決めます。
-          <strong>壁のモニターに映す（「別の画面で開く」）ときは、通りかかった人にも見えます。</strong>
-        </p>
+        <p className="muted small">壁に映すと通行人にも見えます</p>
         <div className="field">
           <label>見せ方</label>
           <select value={data.dashboard.people}
@@ -155,7 +151,6 @@ export function CompanySettings({ page }: { page: string }) {
 
       {page === 'writing' && (
       <div className="card">
-        <p>すべての業務が同じ書き方で文面を作ります。業務ごとの個別指定はできません。</p>
         <Text label="自社の呼び方" value={style.selfReference} onChange={w('selfReference')} hint="例: 弊社／当社" />
         <Text label="社外宛ての書き出し" value={style.greeting} onChange={w('greeting')} multiline />
         <Text label="社外宛ての結び" value={style.closing} onChange={w('closing')} multiline />
@@ -221,10 +216,6 @@ function InvoiceStyleSettings({ initial, onSaved }: {
 
   return (
     <div className="card">
-      <p>
-        請求書などの PDF に使います。差出人（会社名・住所・電話・登録番号）は、上の会社情報から出します。
-        設定しない項目は、帳票に出しません。
-      </p>
       <div className="field">
         <label>ロゴ</label>
         <input type="file" accept="image/png,image/jpeg"
@@ -238,9 +229,7 @@ function InvoiceStyleSettings({ initial, onSaved }: {
               onSaved();
             }, 'ロゴを登録しました');
           }} />
-        <span className="muted small">
-          PNG か JPEG。帳票の右上に出します。{style.logoFileId ? '（登録済み）' : '（未登録）'}
-        </span>
+        <span className="muted small">PNG / JPEG{style.logoFileId ? '（登録済み）' : ''}</span>
         {style.logoFileId && (
           <div className="row">
             <button className="btn ghost small" onClick={() => set({ logoFileId: null })}>ロゴを外す</button>
@@ -250,12 +239,12 @@ function InvoiceStyleSettings({ initial, onSaved }: {
       <Text label="振込先" value={style.bankAccount} onChange={(v) => set({ bankAccount: v })}
         hint="例: ○○銀行 △△支店 普通 1234567 カ）エムツーホールディングス" />
       <Text label="支払期限の既定" value={style.paymentDue} onChange={(v) => set({ paymentDue: v })}
-        hint="例: 翌月末。帳票の項目に出します" />
+        hint="例: 翌月末" />
       <Text label="備考の定型文" value={style.notes} onChange={(v) => set({ notes: v })} multiline
-        hint="毎回入れる断り書き。例: 振込手数料は貴社にてご負担ください" />
+        hint="例: 振込手数料は貴社にてご負担ください" />
       <label className="check">
         <input type="checkbox" checked={style.sealBox} onChange={(e) => set({ sealBox: e.target.checked })} />
-        印の欄を出す（差出人の下に枠を置きます）
+        印の欄を出す
       </label>
       <div className="row">
         <SaveButton run={async () => {
@@ -288,16 +277,7 @@ function SlideTemplateSettings({ initial, onSaved }: { initial: SlideTemplate[];
 
   return (
     <div className="card">
-      <div className="note small">
-        <p>Google スライドで作った<strong>自社のファイル</strong>を、スライド作成の見本として使います。URL を貼るだけで登録できます。</p>
-        <p>
-          中身は Google スライドの画面で自由に作り直せます。見本のスライドを 1 枚足せばレイアウトが 1 つ増え、M2Office の変更は要りません。
-          ロゴ・フッター・背景は<strong>マスター</strong>に置くと全スライドに入ります。
-          差し込みたい場所は <code>{'{{見出し}}'}</code>、図の場所は <code>{'{{CHART}}'}</code>・<code>{'{{IMAGE}}'}</code>、
-          レイアウトの名前は画面の外に <code>{'{{LAYOUT_NAME:3カード比較}}'}</code> と書きます。
-        </p>
-        <p>1 つも登録していない間は、M2Office の標準のテンプレートで作ります。使う人が見られるように、ファイルは会社の中で共有してください。</p>
-      </div>
+      <p className="muted small">ファイルは社内で共有してください</p>
       {items.map((t, i) => {
         const id = idOf(t.url);
         return (
@@ -341,7 +321,7 @@ function SlideTemplateSettings({ initial, onSaved }: { initial: SlideTemplate[];
           onSaved();
         }} />
       </div>
-      <p className="muted small">中身（レイアウトと差し込み口）の読み取りは、Google との接続ができてから行います。いまは登録と既定の選択だけが効きます。</p>
+      <p className="muted small">現在は登録と既定の選択のみ有効</p>
       {saver.view}
     </div>
   );
@@ -380,14 +360,12 @@ export function AgentSettings({ page }: { page: string }) {
       <PageTitle trail={['業務と承認', AGENT_TITLES[page] ?? '']} help={AGENT_HELP[page]} />
       {page === 'automation' && (
       <div className="card">
-        <p className="muted small">タスクの起票、予定の登録、本人宛の通知など</p>
-        <p>承認が必要な場合、業務は書き込む直前で止まり、依頼した本人に確認を求めます。</p>
         <div className="field">
           <label>全体の設定</label>
           <select value={policy.writeInternal}
             onChange={(e) => setPolicy({ ...policy, writeInternal: e.target.value as 'require' | 'allow' })}>
-            <option value="require">承認が必要（推奨）</option>
-            <option value="allow">承認なしで実行する</option>
+            <option value="allow">承認なし（既定）</option>
+            <option value="require">承認が必要</option>
           </select>
         </div>
         <table className="table">
@@ -407,16 +385,14 @@ export function AgentSettings({ page }: { page: string }) {
             ))}
           </tbody>
         </table>
-        <p className="muted small">
-          メールの送信・チャットへの投稿・予定の招待など、社外や他の人に届く操作は、設定にかかわらず必ず承認が必要です。
-        </p>
+        <p className="muted small">社外に出るものとお金の確定は、いつも人が判断します</p>
         <SaveButton run={() => api.admin.saveSettings('automation', policy)} />
       </div>
       )}
 
       {page === 'enabled' && (
       <div className="card">
-        <p>無効にした業務は、メニュー・秘書・定時実行のいずれからも起動できなくなります。</p>
+        <p className="muted small">無効にすると誰も起動できません</p>
         <table className="table">
           <tbody>
             {data.catalog.map((a) => (
@@ -438,7 +414,6 @@ export function AgentSettings({ page }: { page: string }) {
 
       {page === 'scope' && (
       <div className="card">
-        <p>業務ごとに、使える人を決めます。指定したグループに所属する人と、個別に加えた人だけが使えます。</p>
         {access.error && <p className="error">{access.error}</p>}
         {access.options && (
           <table className="table">
@@ -453,15 +428,11 @@ export function AgentSettings({ page }: { page: string }) {
             </tbody>
           </table>
         )}
-        <p className="muted small">拡張機能の業務は、「拡張機能」の画面で拡張機能ごとに設定します。</p>
+        <p className="muted small">拡張機能の業務は「拡張機能」で設定</p>
       </div>
       )}
       {page === 'effect' && (
       <div className="card">
-        <p>
-          「手作業なら 1 件に何分かかるか」を業務ごとに決めます。ダッシュボードの推計の削減時間は、
-          完了した件数にこの値を掛けて求めます。実態に合わせて控えめに設定してください。
-        </p>
         <table className="table">
           <thead><tr><th>業務</th><th className="num">標準所要時間（分）</th><th className="num">公式の既定値</th></tr></thead>
           <tbody>
@@ -477,7 +448,7 @@ export function AgentSettings({ page }: { page: string }) {
             ))}
           </tbody>
         </table>
-        <p className="muted small">変更は、これから完了する実行から反映されます。過去の実行の推計は変わりません。</p>
+        <p className="muted small">過去の推計は変わりません</p>
         <SaveButton
           run={() => api.admin.saveSettings('effect', {
             minutesPerRun: Object.fromEntries(Object.entries(minutes).map(([k, v]) => [k, Number(v)])),
@@ -499,7 +470,7 @@ const AGENT_TITLES: Record<string, string> = {
 /** 小分けごとの「？」の説明（仕様書 第6.10.4.4節）。 */
 const AGENT_HELP: Record<string, PageHelp> = {
   enabled: { article: 'admin-agents', text: '会社で使う業務を選びます。無効にした業務は、メニュー・秘書・定時実行のどれからも起動できなくなります。' },
-  automation: { article: 'admin-agents', text: 'タスクの起票や予定の登録など、社内への書き込みの前に確認を求めるかを決めます。社外や他の人に届く操作は、設定にかかわらず必ず承認が必要です。' },
+  automation: { article: 'admin-agents', text: '社内への書き込みは、既定では確認なしで行います。社外に出るものとお金の確定は、設定にかかわらず、いつも人が判断します。' },
   scope: { article: 'admin-groups', text: '業務ごとに、使える人をグループと個人で決めます。範囲の外の人のメニュー・秘書には、その業務が出ません。' },
   effect: { article: 'admin-agents', text: '「手作業なら 1 件に何分かかるか」を業務ごとに決めます。ダッシュボードの推計の削減時間に使います。' },
 };
@@ -548,7 +519,6 @@ export function UserSettings({ meId, page }: { meId: string; page: string }) {
     <>
       <PageTitle trail={['ユーザーと権限', USER_TITLES[page] ?? '']} help={USER_HELP[page]} />
       {page === 'list' && <>
-      <p className="lead">ログインは各自の Google アカウントで行います。</p>
       <table className="table">
         <thead><tr><th>名前</th><th>メールアドレス</th><th>ロール</th><th>状態</th></tr></thead>
         <tbody>
@@ -589,7 +559,7 @@ export function UserSettings({ meId, page }: { meId: string; page: string }) {
             await api.admin.inviteUser(invite.email, invite.displayName, ['member']);
             setInvite({ email: '', displayName: '' });
             await load();
-          }, '招待しました。Google ログインが使えるようになると、この方がログインできます')}>
+          }, '招待しました')}>
           一般ロールで招待する
         </button>
         {saver.view}
@@ -626,14 +596,14 @@ export function KnowledgeSettings({ page }: { page: string }) {
     <>
       <PageTitle trail={['知識', KNOWLEDGE_TITLES[page] ?? '']} help={KNOWLEDGE_HELP[page]} />
       {page === 'items' && <>
-      <p className="lead">就業規則・経費規程・価格表など。<strong>空のままだと秘書は答えられません。</strong></p>
+      {items.length === 0 && <p className="lead"><strong>空のままだと秘書は答えられません。</strong></p>}
       <div className="card">
         <h3>{draft.id === 'new' ? '新しく登録する' : '編集する'}</h3>
         <Text label="題名" value={draft.title} onChange={(v) => setDraft({ ...draft, title: v })} />
         <Text label="出典（条番号など）" value={draft.source} onChange={(v) => setDraft({ ...draft, source: v })}
-          hint="文書の出どころ。例: 就業規則（2024 年 4 月改定）、ファイル名やリンク。条は本文の見出しから自動で示します" />
+          hint="例: 就業規則（2024 年 4 月改定）" />
         <Text label="本文" value={draft.body} onChange={(v) => setDraft({ ...draft, body: v })} multiline
-          hint="長い規程も 1 件で登録できます（50 万字まで）。「第○章」「第○条」や「## 見出し」で、検索と出典の単位（節）に自動で分けます" />
+          hint="50 万字まで。見出しで節に分けます" />
         <div className="field">
           <label>権限区画</label>
           <select value={draft.compartment ?? ''} onChange={(e) => setDraft({ ...draft, compartment: e.target.value || null })}>
@@ -670,6 +640,8 @@ export function KnowledgeSettings({ page }: { page: string }) {
                 {/* 業務から登録した知識の由来。Google 由来のものを探して消せるようにする（第9.5.2節） */}
                 {k.originRunId && <>{' '}<span className="badge muted-badge" title="2 回の承認のあとに、業務が登録しました">業務から登録</span></>}
                 {k.googleDerived && <>{' '}<span className="badge muted-badge" title="Google から読んだ記録（会議の文字起こしなど）から作りました">Google 由来</span></>}
+                {/* 秘書が会話から学び、自分で会社の知識にしたもの（仕様書 第11.3節、ADR-0028）。違っていれば消す */}
+                {k.kind === 'promoted' && <>{' '}<span className="badge muted-badge" title="秘書が会話から学んで加えました">秘書が追加</span></>}
               </td>
               <td>{k.compartment ?? '—'}</td>
               <td>
@@ -707,8 +679,6 @@ export function KnowledgeSettings({ page }: { page: string }) {
         </tbody>
       </table>
       </>}
-      {page === 'promotions' && <PromotionApprovals />}
-      {page === 'synonyms' && <SynonymSettings />}
     </>
   );
 }
@@ -716,111 +686,10 @@ export function KnowledgeSettings({ page }: { page: string }) {
 /** 小分けの題名（第6.6.0.1節）。 */
 const KNOWLEDGE_TITLES: Record<string, string> = {
   items: '登録と一覧',
-  synonyms: '言い換え',
-  promotions: '会社の知識にする提案',
 };
 
 /** 小分けごとの「？」の説明（仕様書 第6.10.4.4節）。 */
 const KNOWLEDGE_HELP: Record<string, PageHelp> = {
   items: { article: 'admin-knowledge', text: 'ここに登録した規程から、秘書と「社内ナレッジ Q&A」が出典つきで答えます。空のままだと答えられません。' },
-  synonyms: { article: 'admin-knowledge', text: '「育休」と聞かれたら「育児休業」でも探す、というように、同じ意味の言葉を結び付けます。' },
-  promotions: { article: 'admin-knowledge', text: '従業員が秘書に覚えさせたことを、会社の知識にしたいという提案です。承認すると、そのままの文で登録され、全員の秘書と業務が参照します。' },
 };
-
-/**
- * 昇華の承認（仕様書 第11.3.1節）。個人の記憶を会社の知識にする提案を判断する。
- *
- * @remarks 判断できるのは管理者と承認者の役割を持つ人で、提案した本人は判断できない（二重の承認）。
- */
-function PromotionApprovals() {
-  const [items, setItems] = useState<Awaited<ReturnType<typeof api.admin.promotions>>['items']>([]);
-  const saver = useSaver();
-  const load = () => api.admin.promotions().then((r) => setItems(r.items)).catch(() => setItems([]));
-  useEffect(() => { void load(); }, []);
-  if (items.length === 0) return <p className="muted">いまは提案がありません。</p>;
-
-  const decide = (id: string, decision: 'approved' | 'rejected') => void saver.run(async () => {
-    const comment = decision === 'rejected' ? (prompt('見送る理由（任意）') ?? '') : '';
-    await api.admin.decidePromotion(id, decision, comment || null);
-    await load();
-  }, decision === 'approved' ? '会社の知識に登録しました' : '見送りにしました');
-
-  return (
-    <div className="card">
-      <p className="muted small">{items.length} 件</p>
-      <p>
-        従業員が、秘書に覚えさせたことを会社の知識にしたいと提案しています。
-        承認すると、そのままの文で知識に登録され、全員の秘書と業務が参照します。
-      </p>
-      {saver.view}
-      <table className="table">
-        <tbody>
-          {items.map((p) => (
-            <tr key={p.id}>
-              <td>
-                <div>{p.text}</div>
-                <div className="muted small">{p.proposedBy}さんの提案</div>
-              </td>
-              <td className="num">
-                {p.canDecide ? (
-                  <>
-                    <button className="btn small" disabled={saver.busy}
-                      onClick={() => decide(p.id, 'approved')}>会社の知識にする</button>{' '}
-                    <button className="btn ghost small" disabled={saver.busy}
-                      onClick={() => decide(p.id, 'rejected')}>見送る</button>
-                  </>
-                ) : <span className="muted small">自分の提案は判断できません</span>}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-/**
- * 言い換えの登録（仕様書 第11.7.7節）。同じ意味の言葉の組で、知識の検索を補う。
- *
- * @remarks 自社の組は 1 行に 1 組の文で編集し、保存のときにサーバーが組に分けて検証する。
- */
-function SynonymSettings() {
-  const [standard, setStandard] = useState(true);
-  const [text, setText] = useState('');
-  const [loaded, setLoaded] = useState(false);
-  const saver = useSaver();
-  useEffect(() => {
-    api.admin.settings().then((s) => {
-      setStandard(s.knowledge.standardSynonyms);
-      setText(s.knowledge.synonyms.map((g) => g.join('、')).join('\n'));
-      setLoaded(true);
-    }).catch(() => setLoaded(true));
-  }, []);
-
-  return (
-    <div className="card">
-      <p className="muted small">質問の言葉が規程の言葉と違っても見つかるようにします。言い換えで見つけたときは、答えに「読み替えて探しました」と示します。</p>
-      <div className="field">
-        <label className="check">
-          <input type="checkbox" checked={standard} onChange={(e) => setStandard(e.target.checked)} />
-          標準の言い換えを使う（労務・経費でよく使う {STANDARD_SYNONYMS.length} 組）
-        </label>
-        <details>
-          <summary className="small">標準の言い換えを見る</summary>
-          <ul className="small">{STANDARD_SYNONYMS.map((g) => <li key={g[0]}>{g.join('、')}</li>)}</ul>
-          <p className="muted small">一部だけ直したいときは、標準を使わない設定にして、下の自社の言い換えに書き直してください。</p>
-        </details>
-      </div>
-      <Text label="自社の言い換え" value={text} onChange={setText} multiline
-        hint={`1 行に 1 組。語は「、」で区切ります（例: 営推、営業推進部）。1 組 ${SYNONYM_LIMITS.wordsPerGroup} 語まで、${SYNONYM_LIMITS.groups} 組まで`} />
-      <div className="row">
-        <SaveButton disabled={!loaded} run={async () => {
-          // 文のまま送る。サーバーが組に分けて検証し、誤りは画面の行番号で返す
-          await api.admin.saveSettings('knowledge', { standardSynonyms: standard, synonyms: text as unknown as string[][] });
-        }} />
-      </div>
-      {saver.view}
-    </div>
-  );
-}
 

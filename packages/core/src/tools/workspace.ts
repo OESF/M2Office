@@ -14,6 +14,7 @@ import type { PreparedCall, Tool, ToolContext } from './registry.js';
 import { canDecide } from '@m2office/shared';
 import { addDays, jst, ymd } from '../connectors/mock.js';
 import { ConnectorUnavailableError } from '../connectors/types.js';
+import { audienceOf } from './google.js';
 
 const principal = (ctx: ToolContext) => ({ tenantId: ctx.tenantId, userId: ctx.userId });
 const str = (v: unknown, fallback = '') => (typeof v === 'string' ? v : fallback);
@@ -144,16 +145,22 @@ export const calendarFreeBusy: Tool = {
  * 予定を作成し、参加者を招待する。
  *
  * @remarks
- * 危険度 `external-send`。招待は相手に届くため、承認を省略できない（仕様書 第9.5.3節）。
+ * 危険度 `external-send`。招待は相手に届くため、承認の段の直後でしか呼べない。
+ * 招く人が社内の人だけなら、その承認の段は自動で通る（仕様書 第9.4.0節・第9.5.3節）。
  */
 export const calendarCreate: Tool = {
   name: 'calendar.create',
   risk: 'external-send',
   activityLabel: '予定を登録しています',
-  helpText: '予定を登録し、参加者を招待します。必ず承認のあとに行います',
+  helpText: '予定を登録し、参加者を招待します。社外の人を招くときは、承認のあとに行います',
   description: '予定を作成し、参加者を招待する',
   args: { properties: { title: { type: 'string', description: '予定の題名' }, start: { type: 'string', description: '開始（ISO 形式）' }, end: { type: 'string', description: '終了（ISO 形式）' }, attendees: { type: 'array', description: '参加者のメールアドレス', items: { type: 'string', description: '要素' } } }, required: ['title', 'start', 'end'] },
   google: { scope: 'calendar.events', level: 'sensitive' },
+  /** 招く人が社内の人だけかを確かめる（仕様書 第9.4.0節）。読むだけ。 */
+  async prepare(args, ctx): Promise<PreparedCall> {
+    const attendees = Array.isArray(args['attendees']) ? args['attendees'].map(String) : [];
+    return { kind: 'ready', args, audience: await audienceOf(ctx, attendees) };
+  },
   async invoke(args, ctx) {
     const res = await ctx.connector.calendar.create(principal(ctx), {
       title: str(args['title'], '打ち合わせ'),
@@ -185,7 +192,7 @@ export const tasksCreate: Tool = {
   name: 'tasks.create',
   risk: 'write-internal',
   activityLabel: 'ToDo を登録しています',
-  helpText: 'ToDo を登録します。会社の設定により、登録の前に確認を求めます',
+  helpText: 'ToDo を登録します',
   description: 'ToDo を起票する',
   args: { properties: { title: { type: 'string', description: 'ToDo の題名' }, due: { type: 'string', description: '期限（YYYY-MM-DD。任意）' } }, required: ['title'] },
   google: { scope: 'tasks', level: 'sensitive' },
@@ -198,12 +205,16 @@ export const tasksCreate: Tool = {
   },
 };
 
-/** チャットのスペースへ投稿する。 @remarks 危険度 `external-send`。承認が必須。 */
+/**
+ * チャットのスペースへ投稿する。
+ *
+ * @remarks 危険度 `external-send`。承認の段の直後でしか呼べない。社外の人が入れないスペースなら、その承認の段は自動で通る（仕様書 第9.4.0節）。
+ */
 export const chatPost: Tool = {
   name: 'chat.post',
   risk: 'external-send',
   activityLabel: 'チャットへ投稿しています',
-  helpText: 'チャットへ投稿します。必ず承認のあとに行います',
+  helpText: 'チャットへ投稿します。社外の人が入れるスペースへの投稿は、承認のあとに行います',
   description: 'チャットのスペースへ投稿する',
   args: { properties: { space: { type: 'string', description: 'スペースの名前（例: 営業部）か、スペースのリンク' }, text: { type: 'string', description: '本文' } }, required: ['text'] },
   google: { scope: 'chat.messages.create', level: 'sensitive' },
@@ -218,7 +229,11 @@ export const chatPost: Tool = {
     try {
       const found = await ctx.connector.chat.findSpace(principal(ctx), wanted);
       if ('reason' in found) return { kind: 'problem', reason: found.reason };
-      return { kind: 'ready', args: { ...args, space: found.space }, shown: found.displayName ?? wanted };
+      return {
+        kind: 'ready', args: { ...args, space: found.space }, shown: found.displayName ?? wanted,
+        // 社外の人が入れないと分かったスペースだけを社内とする。分からなければ社外（仕様書 第9.4.0節）
+        audience: found.external === false ? 'internal' : 'external',
+      };
     } catch (err) {
       // 届かないだけなら、承認のあとで改めて探す。接続・許可・会社の準備の問題は、承認しても投稿できない
       if (err instanceof ConnectorUnavailableError && err.kind !== 'unreachable') return { kind: 'problem', reason: err.message };

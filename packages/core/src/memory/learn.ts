@@ -7,6 +7,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { promotionTitle } from './promotion.js';
 import type { LlmProvider } from '../llm/provider.js';
 import type { Conversation, Repository } from '../repository/types.js';
 import { silentLogger, type Logger } from '../log/logger.js';
@@ -82,23 +83,31 @@ export function learningPrompt(conversations: Conversation[]): string {
 }
 
 /** 1 回の見回りで 1 人あたり作る昇華の候補の上限。 */
-const MAX_SUGGESTIONS = 3;
+/** 1 人の記憶を 1 晩に見る数の上限。多ければ古い順に次の晩へ回す。 */
+const PROMOTION_BATCH = 40;
+
+/** 秘書が会社の知識にしたものの出典（仕様書 第11.3.1節。持ち主の名前は出さない）。 */
+export const AUTO_PROMOTED_SOURCE = '秘書が会話から学んだこと';
 
 /**
- * 昇華の候補を選ばせる指示（仕様書 第11.3.1節）。
+ * 会社の知識にするものを選ばせる指示（仕様書 第11.3.1節、ADR-0028）。
  *
- * @remarks 記憶に番号を振り、役立つものの番号だけを返させる。文を書き換えさせない
+ * @param memories ある従業員の記憶（まだ判断していないもの）
+ * @param known 会社の知識にすでにある文（重なるものは選ばせない）
+ *
+ * @remarks 記憶に番号を振り、会社の知識にするものの番号だけを返させる。文を書き換えさせない
  */
-export function promotionPrompt(memories: { text: string }[]): string {
+export function promotionPrompt(memories: { text: string }[], known: string[] = []): string {
   return [
-    '次は、ある従業員が秘書に覚えさせたことの一覧です。',
+    '次は、ある従業員の秘書が、その人との会話から覚えたことの一覧です。',
     '',
-    'この中で、**同じ会社のほかの人にも役立つ**ものの番号だけを、「- 1」のように 1 行に 1 つ挙げてください。',
-    '挙げてよいもの: 社内の手順や決まり、担当や窓口、社内の用語や通称、取引先とのやり方。',
-    '挙げてはならないもの: その人だけの好み、一時的な予定、ほかの人の個人情報、機微なこと。',
+    'この中で、**会社のほかの人にも役立つ**ものの番号だけを、「- 1」のように 1 行に 1 つ挙げてください。挙げたものは、そのまま会社の知識になります。',
+    '挙げてよいもの: 社内の手順や決まり、担当や窓口、社内の用語や通称、取引先とのやり方、仕事で分かった事実。',
+    '挙げてはならないもの: その人だけの好みや癖、その人の予定、ほかの人の個人情報（健康・家族・評価など）、機微なこと、下の「会社の知識にすでにあること」と同じ内容。',
     '当てはまるものが無ければ、何も書かないでください。番号以外は書かないでください。',
     '',
     ...memories.map((m, i) => `${i + 1}. ${m.text}`),
+    ...(known.length > 0 ? ['', '会社の知識にすでにあること（参考。番号は付けない）:', ...known.map((k) => `・${k}`)] : []),
   ].join('\n');
 }
 
@@ -140,11 +149,11 @@ export class MemoryLearning {
    * @param now 現在時刻
    * @returns 作った要約と、覚えた事実の数
    */
-  async sweep(now: Date = new Date()): Promise<{ digests: number; learned: number; suggestions: number }> {
+  async sweep(now: Date = new Date()): Promise<{ digests: number; learned: number; promoted: number }> {
     const day = previousDay(now);
     let digests = 0;
     let learned = 0;
-    let suggestions = 0;
+    let promoted = 0;
     for (const tenantId of await this.deps.repo.listTenantIds()) {
       try {
         const llm = await this.deps.llmFor(tenantId);
@@ -159,76 +168,89 @@ export class MemoryLearning {
           digests += made.digest ? 1 : 0;
           learned += made.learned;
         }
-        // 覚えたことの中から、ほかの人にも役立つものを昇華の候補にする（第11.3.1節）
+        // 覚えたことの中から、ほかの人にも役立つものを秘書が選び、会社の知識にする（第11.3.1節、ADR-0028）
         for (const user of await this.deps.repo.listUsers(tenantId)) {
           if (user.status !== 'active') continue;
-          suggestions += await this.suggestPromotions(tenantId, user.id, llm, now);
+          promoted += await this.promote(tenantId, user.id, llm, now);
         }
       } catch (err) {
         // 1 社の失敗で、ほかの会社を止めない
         this.log.error('対話からの学習で例外が発生しました', { tenantId, err });
       }
     }
-    return { digests, learned, suggestions };
+    return { digests, learned, promoted };
   }
 
   /**
-   * 本人の記憶から、ほかの人にも役立つものを昇華の候補にする（仕様書 第11.3.1節）。
+   * 本人の記憶から、ほかの人にも役立つものを選び、会社の知識にする（仕様書 第11.3.1節、ADR-0028）。
    *
-   * @returns 作った候補の数
+   * @returns 会社の知識にした数
    *
    * @remarks
-   * 作るのは本人の判断待ち（`proposed`）までである。組織の承認へ出すかどうかは本人が決める。
-   * すでに提案した記憶と、本人がやめた記憶は選び直さない。
+   * 本人にも管理者にも承認を求めない。選ばなかった記憶も「判断した」として残し、毎晩選び直さない。
+   * 以前の形で判断待ちになっている提案（本人の判断待ち・組織の承認待ち）も、同じ判断にかける。
+   * 知識の本文は記憶の一文そのもので、出典に持ち主の名前は出さない。権限区画は付けない（区画のデータは記憶に入らない）。
    */
-  private async suggestPromotions(
-    tenantId: string, userId: string, llm: LlmProvider, now: Date,
-  ): Promise<number> {
+  private async promote(tenantId: string, userId: string, llm: LlmProvider, now: Date): Promise<number> {
     const { repo } = this.deps;
     const settings = await repo.getUserSettings(tenantId, userId);
-    // 覚えることを止めている人には、候補も作らない
+    // 覚えることを止めている人の記憶は見ない
     if (!settings.memory.learning) return 0;
 
-    const decided = new Set(
-      (await repo.listPromotions(tenantId, { userId })).map((p) => p.memoryId).filter((id): id is string => !!id),
-    );
-    const memories = (await repo.listMemories(tenantId, userId)).filter((m) => !decided.has(m.id));
+    const history = await repo.listPromotions(tenantId, { userId });
+    const decided = new Set(history.filter((p) => p.status === 'approved' || p.status === 'rejected' || p.status === 'withdrawn')
+      .map((p) => p.memoryId).filter((id): id is string => !!id));
+    const waiting = new Map(history.filter((p) => p.status === 'proposed' || p.status === 'pending')
+      .map((p) => [p.memoryId, p] as const));
+    const memories = (await repo.listMemories(tenantId, userId))
+      .filter((m) => !decided.has(m.id))
+      // 古いものから判断する（新しいものは翌晩でもよい）
+      .reverse().slice(0, PROMOTION_BATCH);
     if (memories.length === 0) return 0;
 
+    const known = (await repo.listKnowledge(tenantId)).filter((k) => k.kind === 'promoted').map((k) => k.body).slice(0, 80);
     // 番号を選ぶだけの仕事。高速モデルで足りる（仕様書 第20.2.2節）
     const res = await llm.complete({
       tier: 'fast',
       maxOutputTokens: 200,
       messages: [
         { role: 'system', content: '日本語で答えます。指定された形式だけを出力します。' },
-        { role: 'user', content: promotionPrompt(memories) },
+        { role: 'user', content: promotionPrompt(memories, known) },
       ],
     });
+    const chosen = new Set(parseSuggestedNumbers(res.text, memories.length));
+    const knownBodies = new Set(known);
     const at = now.toISOString();
     let made = 0;
-    for (const n of parseSuggestedNumbers(res.text, memories.length).slice(0, MAX_SUGGESTIONS)) {
-      const memory = memories[n - 1];
-      if (!memory) continue;
-      await repo.createPromotion({
-        id: randomUUID(), tenantId, userId, memoryId: memory.id, text: memory.text,
-        // まず本人が「出す」か「やめる」を選ぶ（第11.3節の二重の承認）
-        status: 'proposed', knowledgeId: null, decidedBy: null, comment: null,
-        createdAt: at, decidedAt: null,
-      });
-      made++;
+    for (const [i, memory] of memories.entries()) {
+      const promote = chosen.has(i + 1) && !knownBodies.has(memory.text);
+      let knowledgeId: string | null = null;
+      if (promote) {
+        knowledgeId = `promoted-${randomUUID()}`;
+        await repo.saveKnowledge({
+          id: knowledgeId, tenantId, kind: 'promoted', title: promotionTitle(memory.text), body: memory.text,
+          source: AUTO_PROMOTED_SOURCE, compartment: null, updatedAt: at,
+        });
+        knownBodies.add(memory.text);
+        made++;
+      }
+      const record = {
+        tenantId, userId, memoryId: memory.id, text: memory.text,
+        status: promote ? 'approved' as const : 'rejected' as const, knowledgeId,
+        // 判断したのは秘書（人ではない）
+        decidedBy: null, comment: promote ? '秘書が会社の知識にしました' : '秘書の判断: 本人だけに関わる、または重なる',
+        decidedAt: at,
+      };
+      const old = waiting.get(memory.id);
+      if (old) await repo.updatePromotion({ ...old, ...record });
+      else await repo.createPromotion({ id: randomUUID(), ...record, createdAt: at });
     }
     if (made > 0) {
-      await repo.createNotification({
-        id: randomUUID(), tenantId, userId, kind: 'approval',
-        title: '会社の知識にしませんか',
-        body: `覚えていることのうち ${made} 件が、ほかの人にも役立ちそうです。個人設定の「記憶とデータ」で、出すかどうかを選べます。`,
-        runId: null, readAt: null, createdAt: at,
-      });
-      // 件数だけを残す。記憶の中身は監査ログに入れない
+      // 件数と知識の数だけを残す。記憶の中身は監査ログに入れない
       await repo.appendAudit({
         id: randomUUID(), tenantId, actorType: 'system', actorId: 'learning',
-        action: 'memory.promote.suggest', targetType: 'user', targetId: userId,
-        detail: { suggestions: made }, occurredAt: at,
+        action: 'knowledge.promote.auto', targetType: 'user', targetId: userId,
+        detail: { promoted: made }, occurredAt: at,
       });
     }
     return made;

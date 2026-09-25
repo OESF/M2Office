@@ -154,7 +154,7 @@ export function Settings({ me, agents, onChanged, section }: {
           <label className="check">
             <input type="checkbox" checked={s.secretary.speak}
               onChange={(e) => set('secretary', { speak: e.target.checked })} />
-            音声で読み上げる（切ると、音声で話しかけても文字だけで答えます）
+            音声で読み上げる
           </label>
           <div className="field"><label>声</label>
             <select value={s.secretary.voice} disabled={!s.secretary.speak}
@@ -162,26 +162,17 @@ export function Settings({ me, agents, onChanged, section }: {
               <option value="">おまかせ</option>
               {VOICE_CHOICES.map((v) => <option key={v.name} value={v.name}>{v.name}（{v.note}）</option>)}
             </select>
-            <span className="muted small">
-              Gemini が用意している声です。添えた言葉は聞いた印象の目安で、性別を示すものではありません。
-              次に音声で話しかけたときから変わります。
-            </span>
+            <span className="muted small">（）内は声の印象の目安です</span>
           </div>
           <div className="field"><label>話し方の指示</label>
             <input value={s.secretary.voiceStyle} disabled={!s.secretary.speak}
               placeholder="例: 関西弁で話して"
               onChange={(e) => set('secretary', { voiceStyle: e.target.value.slice(0, VOICE_STYLE_MAX) })} />
-            <span className="muted small">
-              音声のときの話し方を、言葉で指示できます（{VOICE_STYLE_MAX} 字まで）。例: 関西弁で話して / ゆっくり、短めに
-            </span>
+            <span className="muted small">{VOICE_STYLE_MAX} 字まで</span>
           </div>
         </div>
         <div className="field">
           <label>アバター</label>
-          <span className="muted small">
-            画面の下の左端に出ます。押すと音声で話せます。
-            同梱のものから選ぶか、自分の画像を上げてください。
-          </span>
           <div className="avatar-picker">
             <button type="button" title="出さない"
               className={`avatar-choice${s.secretary.avatar === '' ? ' on' : ''}`}
@@ -221,7 +212,7 @@ export function Settings({ me, agents, onChanged, section }: {
       {on('notifications') && <>
       <div className="card">
         <h3>通知</h3>
-        <p>受け取る種類と、受け取り方を選びます。切った種類は画面内にも届きません。</p>
+        <p className="muted small">切った種類は画面内にも届きません</p>
         {([['brief', '週次ブリーフ'], ['run', '実行の完了'], ['approval', '承認の依頼'], ['failure', '失敗']] as const).map(([k, label]) => (
           <label key={k} className="check">
             <input type="checkbox" checked={s.notifications.kinds[k]}
@@ -230,9 +221,7 @@ export function Settings({ me, agents, onChanged, section }: {
           </label>
         ))}
         <h4>通知しない時間帯</h4>
-        <p className="muted small">
-          この時間帯は Chat へ送りません。時間帯が明けてから送ります。画面内のお知らせはその場で届きます。
-        </p>
+        <p className="muted small">Chat だけ、明けてから送ります</p>
         <div className="row">
           <input type="time" value={s.notifications.quietHours?.from ?? ''}
             onChange={(e) => set('notifications', {
@@ -247,10 +236,7 @@ export function Settings({ me, agents, onChanged, section }: {
         </div>
 
         <h4>受け取り方</h4>
-        <p className="muted small">
-          画面内のお知らせは必ず残ります。Chat には控えとして、種類・題名と画面へのリンクだけを送ります（本文は送りません）。
-          メールは送りません。いまは送信口が見本のため、Chat にも実際には届きません。
-        </p>
+        <p className="muted small">Chat には題名とリンクのみ（本文なし）。Chat への送信は準備中で、まだ届きません</p>
         <label className="check">
           <input type="checkbox" checked={s.notifications.channels.chat}
             onChange={(e) => set('notifications', { channels: { chat: e.target.checked } })} />
@@ -278,7 +264,6 @@ export function Settings({ me, agents, onChanged, section }: {
       <DisplaySettings />
       <div className="card">
         <h3>メニューの並び</h3>
-        <p>使える業務のうち、メニューに並べるものと順番を決めます。使える業務を増やすことはできません。</p>
         <table className="table">
           <tbody>
             {ordered.map((a, i) => (
@@ -309,7 +294,7 @@ export function Settings({ me, agents, onChanged, section }: {
       {on('security') && (
       <div className="card">
         <h3>セキュリティ</h3>
-        <p>2 段階認証は Google アカウント側で設定します。M2Office では設定しません。</p>
+        <p className="muted small">2 段階認証は Google 側で設定</p>
         <table className="table">
           <thead><tr><th>ログインした日時</th><th>最後の利用</th><th>端末</th><th /></tr></thead>
           <tbody>
@@ -324,7 +309,7 @@ export function Settings({ me, agents, onChanged, section }: {
                 </td>
               </tr>
             ))}
-            {sessions.length === 0 && <tr><td colSpan={4} className="muted">開発用ヘッダーでの接続のため、表示できる端末はありません</td></tr>}
+            {sessions.length === 0 && <tr><td colSpan={4} className="muted">表示できる端末はありません</td></tr>}
           </tbody>
         </table>
       </div>
@@ -345,9 +330,8 @@ function KeyboardSettings() {
   return (
     <div className="card">
       <h3>キーボード</h3>
-      <p>よく使う操作は、キーボードだけで終えられます。文字を打っている最中でも効きます。</p>
       {isTouchOnly() ? (
-        <p className="muted">この端末にはキーボードがつながっていないようです。つなぐと使えます。</p>
+        <p className="muted">キーボードが見つかりません</p>
       ) : groups.map((g) => (
         <div key={g}>
           <h4>{g}</h4>
@@ -394,14 +378,11 @@ function ConversationSettings({ settings, onChange, onSave }: {
   return (
     <div className="card">
       <h3>会話ログ</h3>
-      <p>
-        秘書とのやり取りです。読めるのは自分だけで、管理者にも運営にも見えません。
-        逐語は 4 週で消えます。秘書に「この会話は残さないで」と言うと、直近 1 時間の会話を消します。
-      </p>
+      <p className="muted small">本人のみ閲覧可・4 週で自動削除</p>
       <label className="check">
         <input type="checkbox" checked={settings.memory.keepConversations}
           onChange={(e) => onChange({ ...settings.memory, keepConversations: e.target.checked })} />
-        会話を残す（切ると、以後 1 件も残しません）
+        会話を残す
       </label>
       <div className="row">
         <SaveButton run={onSave} />
@@ -444,54 +425,25 @@ function ConversationSettings({ settings, onChange, onSave }: {
         </table>
       )}
       {msg && <p className="muted small">{msg}</p>}
-      <PromotionHistory />
     </div>
   );
 }
 
 /**
- * 昇華の履歴（仕様書 第6.5.4節）。自分の提案がどうなったかを示す。
+ * 自分の記憶から、秘書が会社の知識にしたもの（仕様書 第6.5.4節・第11.3節、ADR-0028）。
  *
- * @remarks 秘書が作った候補（本人の確認待ち）は、ここで「出す」か「やめる」を選ぶ（第11.3.1節）。
+ * @remarks 判断は秘書が行う。ここは見るだけの場所で、選ばせる操作は置かない。違っていれば秘書に話せば直る（第11.5.3節）。
  */
 function PromotionHistory() {
   const [items, setItems] = useState<PromotionView[]>([]);
-  const load = () => api.myPromotions().then((r) => setItems(r.items)).catch(() => setItems([]));
-  useEffect(() => { void load(); }, []);
+  useEffect(() => { api.myPromotions().then((r) => setItems(r.items.filter((p) => p.status === 'approved'))).catch(() => setItems([])); }, []);
   if (items.length === 0) return null;
-  const label = (s: PromotionView['status']) => ({
-    proposed: '本人の確認待ち', pending: '会社の確認待ち', approved: '会社の知識になりました',
-    rejected: '見送りになりました', withdrawn: '取り下げました',
-  }[s]);
   return (
     <>
-      <h4>会社の知識にする提案（{items.length} 件）</h4>
-      {items.some((p) => p.status === 'proposed') && (
-        <p className="muted small">
-          秘書が「ほかの人にも役立ちそう」と見つけたものです。「出す」を押すと、管理者か承認者の確認へ回ります。
-        </p>
-      )}
-      <table className="table">
-        <tbody>
-          {items.map((p) => (
-            <tr key={p.id}>
-              <td>{p.text}</td>
-              <td className="num">
-                {p.status === 'proposed' ? (
-                  <>
-                    <button className="btn small" title="管理者・承認者の確認へ回します"
-                      onClick={() => void api.submitPromotion(p.id).then(load)}>出す</button>{' '}
-                    <button className="btn ghost small"
-                      onClick={() => void api.withdrawPromotion(p.id).then(load)}>やめる</button>
-                  </>
-                ) : (
-                  <span className="muted small">{label(p.status)}{p.comment ? `（${p.comment}）` : ''}</span>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <h4>会社の知識になったこと（{items.length} 件）</h4>
+      <ul className="plain-list">
+        {items.map((p) => <li key={p.id}>{p.text}</li>)}
+      </ul>
     </>
   );
 }
@@ -519,24 +471,22 @@ function PresenceNotice() {
         {/* 本人と秘書は 1 組で出る（仕様書 第6.7.4.4節）。個人名の会社だけ */}
         {data.granularity === 'names' && <>あなたの秘書は<strong>「{data.presence.secretary.detail}」</strong>と表示されています。</>}
       </p>
-      <p className="muted small">表示されるもの: {data.shown.join('、')}</p>
-      <p className="muted small">表示されないもの: {data.hidden.join('、')}</p>
-      <p className="muted small">
-        個人の状態の履歴は残しません。後から見られるのは、監査ログ（誰が何を実行したか）と実行の記録だけです。
-      </p>
+      {/* 何が見えて何が見えないかは、知りたい人が開く（原則 u11） */}
+      <details className="small">
+        <summary className="muted">表示されるもの・されないもの</summary>
+        <p className="muted small">表示されるもの: {data.shown.join('、')}</p>
+        <p className="muted small">表示されないもの: {data.hidden.join('、')}。状態の履歴は残しません</p>
+      </details>
     </div>
   );
 }
 
-/** 「新しく覚えたこと」の印を付ける日数（仕様書 第11.5.2節）。 */
-const NEW_DAYS = 7;
-
 /**
- * 記憶とデータ（仕様書 第6.5.4節）。秘書が自分について覚えていることを見て、直して、消せるようにする。
+ * 記憶とデータ（仕様書 第6.5.4節）。秘書が自分について覚えていることを、見たいときに見る場所。
  *
  * @remarks
- * 「何を覚えているか分からない AI」にしないための画面である（第11.5節）。
- * 秘書は会話から自分で覚える（第11.5.2節、ADR-0027）。覚えたことには印を付けて並べ、本人はいつでも直せ、消せる。
+ * 秘書は会話から自分で覚え、違っていれば本人が会話で指摘すると自分で直す（第11.5.2節・第11.5.3節、ADR-0028）。
+ * ここで 1 件ずつ確かめる必要はない。確認を求める印は出さない。直す・消すは、画面でしたい人のために残す。
  */
 function MemorySettings({ settings, onChange, onSave }: {
   settings: UserSettings;
@@ -550,8 +500,6 @@ function MemorySettings({ settings, onChange, onSave }: {
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const load = () => api.myMemories().then((r) => setItems(r.items)).catch((e) => setMsg(describeError(e)));
   useEffect(() => { void load(); }, []);
-  const since = Date.now() - NEW_DAYS * 86_400_000;
-  const learnedNew = items.filter((m) => m.source === 'learned' && Date.parse(m.createdAt) >= since).length;
 
   const saveEdit = async () => {
     if (!editing) return;
@@ -568,80 +516,59 @@ function MemorySettings({ settings, onChange, onSave }: {
   return (
     <div className="card">
       <h3>記憶とデータ</h3>
-      <p>
-        秘書が自分について覚えていることです。秘書は、会話から大事なこと（決めたこと・頼んだこと・期限・よく使う言葉など）を自分で覚えます。
-        「〜を覚えておいて」と頼んだことも覚えます。違っていれば直し、要らなければ消してください。消したことは、もう一度は覚えません。
-        覚えていることを見られるのは本人だけで、管理者にも見えません。
-      </p>
+      <p className="muted small">違っていれば、秘書に「それは違う、〇〇だよ」と話すだけで直ります。</p>
       <label className="check">
         <input type="checkbox" checked={settings.memory.learning}
           onChange={(e) => onChange({ ...settings.memory, learning: e.target.checked })} />
         覚えることを許す
       </label>
-      <p className="muted small">切ると、会話から覚えず、頼んでも覚えません。</p>
       <div className="field">
         <label>覚えない言葉（1 行に 1 つ）</label>
-        <textarea rows={3} value={settings.memory.excludes.join('\n')}
+        <textarea rows={2} value={settings.memory.excludes.join('\n')}
           onChange={(e) => onChange({ ...settings.memory, excludes: e.target.value.split('\n') })} />
-        <p className="muted small">ここに書いた言葉を含む会話や指示からは覚えません。秘書に「〜は覚えないで」と言っても増えます。</p>
       </div>
       <div className="row">
         <SaveButton run={onSave} />
       </div>
 
-      <h4>覚えていること（{items.length} 件{learnedNew > 0 ? `。うち新しく覚えたこと ${learnedNew} 件` : ''}）</h4>
+      <h4>覚えていること（{items.length} 件）</h4>
       {items.length === 0 ? (
-        <p className="muted small">まだ何も覚えていません。秘書と話すうちに、大事なことを覚えていきます。</p>
+        <p className="muted small">まだ何も覚えていません。</p>
       ) : (
         <table className="table">
           <tbody>
-            {items.map((m) => {
-              const isNew = m.source === 'learned' && Date.parse(m.createdAt) >= since;
-              return (
-                <tr key={m.id}>
-                  <td>
-                    {editing?.id === m.id ? (
-                      <textarea rows={2} value={editing.text} aria-label="覚えていることを直す"
-                        onChange={(e) => setEditing({ id: m.id, text: e.target.value })} />
-                    ) : (
-                      <div>{isNew && <span className="chip waiting">新しく覚えたこと</span>} {m.text}</div>
-                    )}
-                    <div className="muted small">
-                      {new Date(m.createdAt).toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' })}
-                      {m.source === 'learned' ? ' に会話から覚えました' : ' に覚えました'}
-                    </div>
-                  </td>
-                  <td className="num">
-                    {editing?.id === m.id ? (
-                      <>
-                        <button className="btn small" disabled={!editing.text.trim()} onClick={() => void saveEdit()}>保存</button>{' '}
-                        <button className="btn ghost small" onClick={() => setEditing(null)}>やめる</button>
-                      </>
-                    ) : (
-                      <>
-                        <button className="btn ghost small" onClick={() => setEditing({ id: m.id, text: m.text })}>直す</button>{' '}
-                        <button className="btn ghost small" title="管理者・承認者の確認を経て、会社の知識になります"
-                          onClick={() => void api.promoteMemory(m.id)
-                            .then(() => setMsg('会社の知識にする提案を出しました。管理者か承認者の確認を待ちます'))
-                            .catch((e) => setMsg(describeError(e)))}>
-                          会社の知識にする
-                        </button>{' '}
-                        <button className="btn danger small"
-                          onClick={() => void api.deleteMemory(m.id).then(load).then(() => setMsg('消しました')).catch((e) => setMsg(describeError(e)))}>
-                          消す
-                        </button>
-                      </>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
+            {items.map((m) => (
+              <tr key={m.id}>
+                <td>
+                  {editing?.id === m.id ? (
+                    <textarea rows={2} value={editing.text} aria-label="覚えていることを直す"
+                      onChange={(e) => setEditing({ id: m.id, text: e.target.value })} />
+                  ) : m.text}
+                </td>
+                <td className="num">
+                  {editing?.id === m.id ? (
+                    <>
+                      <button className="btn small" disabled={!editing.text.trim()} onClick={() => void saveEdit()}>保存</button>{' '}
+                      <button className="btn ghost small" onClick={() => setEditing(null)}>やめる</button>
+                    </>
+                  ) : (
+                    <>
+                      <button className="btn ghost small" onClick={() => setEditing({ id: m.id, text: m.text })}>直す</button>{' '}
+                      <button className="btn danger small"
+                        onClick={() => void api.deleteMemory(m.id).then(load).then(() => setMsg('消しました')).catch((e) => setMsg(describeError(e)))}>
+                        消す
+                      </button>
+                    </>
+                  )}
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
       )}
       {items.length > 0 && (
         <div className="row">
-          <button className="btn danger"
+          <button className="btn danger ghost small"
             onClick={() => {
               if (!confirm('覚えていることをすべて消しますか。元に戻せません。')) return;
               void api.clearMemories().then((r) => setMsg(`${r.removed} 件を消しました`)).then(load).catch((e) => setMsg(describeError(e)));
@@ -649,6 +576,7 @@ function MemorySettings({ settings, onChange, onSave }: {
         </div>
       )}
       {msg && <p className="muted small">{msg}</p>}
+      <PromotionHistory />
     </div>
   );
 }
@@ -668,7 +596,7 @@ function DisplaySettings() {
   return (
     <div className="card">
       <h3>表示</h3>
-      <p>画面の明るさを選びます。この端末（ブラウザ）にだけ効き、すぐに変わります。上部のボタンでも切り替えられます。</p>
+      <p className="muted small">この端末にだけ効きます</p>
       <div className="row">
         {options.map(([v, label]) => (
           <label key={v} className="check">
@@ -676,7 +604,6 @@ function DisplaySettings() {
           </label>
         ))}
       </div>
-      <p className="muted small">左のメニューは、上の端のボタンで狭く（アイコンだけに）できます。これもこの端末に覚えます。</p>
     </div>
   );
 }
@@ -713,14 +640,13 @@ function GoogleSettings() {
     <div className="card">
       <h3>Google 連携</h3>
       {!g.available ? (
-        <p>会社の管理者が Google との接続を設定すると、ここから接続できます。</p>
+        <p className="muted">管理者の設定待ちです</p>
       ) : (
         <>
           <p>
             {g.connected
               ? <>接続しています（{g.googleEmail ?? 'アカウントを確かめられませんでした'}・{g.connectedAt ? new Date(g.connectedAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }) : ''}）。</>
-              : 'まだ接続していません。接続すると、業務があなたのメール・予定・ToDo などを扱えるようになります。'}
-            あなたの Google アカウントで許可し、あなたのデータだけを扱います。
+              : '未接続です'}
           </p>
           <ul className="grant-list">
             {g.scopes.map((s) => (

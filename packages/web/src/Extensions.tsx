@@ -98,10 +98,7 @@ export function ExtensionSettings({ focus = null }: { focus?: string | null } = 
           />
         </div>
       </div>
-      <p className="lead">
-        有効な拡張機能の業務は、この会社のメニュー・秘書・定時実行に加わります。
-        拡張機能のファイル（.m2ext）は、この画面へドラッグしても取り込めます。
-      </p>
+      <p className="muted small">.m2ext はドラッグでも追加できます</p>
 
       {notice && (
         <div className={notice.kind === 'ok' ? 'ok-msg' : 'error'}>
@@ -141,7 +138,7 @@ export function ExtensionSettings({ focus = null }: { focus?: string | null } = 
 
       <h2>導入済み</h2>
       {installed.length === 0 && (
-        <p className="muted">まだありません。「配布元から追加」か「ファイルから追加」で追加してください。</p>
+        <p className="muted">まだありません</p>
       )}
       {installed.map((x) => (
         <InstalledCard

@@ -314,7 +314,8 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
     findSpace: async (_p: ConnectorPrincipal, input: string) => {
       const name = input.trim();
       if (!name) return { reason: '投稿先のチャットのスペースが指定されていません' };
-      return { space: name, displayName: /^spaces\//.test(name) ? null : name };
+      // 見本のスペースは、社外の人が入れるか分からない。分からないものは社外とみなす（仕様書 第9.4.0節）
+      return { space: name, displayName: /^spaces\//.test(name) ? null : name, external: null };
     },
     post: async (p: ConnectorPrincipal, msg: { space: string; text: string }) => {
       this.outbox.push({ kind: 'chat', principal: p, body: msg });
