@@ -112,6 +112,15 @@ export interface EvalCase {
 }
 
 /**
+ * 同梱している業務エージェントの絵の数（仕様書 第6.7.4.3節）。
+ *
+ * @remarks
+ * `packages/web/public/agents/agent01.png`〜`agent25.png` に対応する。
+ * **ここを増やすときは、画像を先に置くこと。** 番号だけ増やすと、絵の出ない業務ができる。
+ */
+export const AGENT_FACE_COUNT = 25;
+
+/**
  * エージェント定義の本体。
  *
  * @remarks
@@ -150,4 +159,13 @@ export interface AgentDefinition {
   evals?: EvalCase[];
   /** 利用者向けのヘルプの補足。拡張機能では必須（仕様書 第9.2.5節）。 */
   help?: AgentHelp;
+  /**
+   * ダッシュボードに出す絵の番号（1〜{@link AGENT_FACE_COUNT}。仕様書 第6.7.4.3節）。
+   *
+   * @remarks
+   * **業務を 1 つ足すたびに、まだ使っていない番号を 1 つ割り当てる。**
+   * 省いたときは ID から機械的に決めるため、絵は必ず出るが、
+   * 他の業務と重なることがある。公式のカタログでは必ず書く。
+   */
+  face?: number;
 }

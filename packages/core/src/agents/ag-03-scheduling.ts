@@ -105,4 +105,5 @@ export const AG03_SCHEDULING: AgentDefinition = {
       { q: '確認せずに招待が送られることはありますか', a: 'ありません。招待は相手に届くため、必ずあなたの承認のあとに送ります' },
     ],
   },
+  face: 4,
 };

@@ -134,4 +134,5 @@ export const AG02_MINUTES: AgentDefinition = {
       { q: '登録した議事録を消したいときは', a: '管理者が、管理者ページの「知識」から消せます' },
     ],
   },
+  face: 2,
 };

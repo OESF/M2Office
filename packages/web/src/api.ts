@@ -158,6 +158,8 @@ export interface DashboardLive {
   /** 業務エージェントごとの受け持ち（仕様書 第6.7.4.2節）。使える業務はすべて入る。 */
   agents: {
     agentId: string; name: string;
+    /** 同梱の絵の番号（1〜25。仕様書 第6.7.4.3節）。 */
+    face: number;
     running: number; awaiting: number; queued: number;
     todayRuns: number; todayFailed: number;
   }[];

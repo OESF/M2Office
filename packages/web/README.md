@@ -84,6 +84,8 @@ src/theme.ts           画面の明るさ（ライト・ダーク・端末に合
 src/greeting.ts        最初の画面の時候の一言（第6.1.5節）
 src/save.tsx           保存のボタンと、その横に出る結果（第6.10.4.2節）
 public/icons.svg       画面のアイコン（モノクロの線画。文字の色を引き継ぐ）
+public/avatars/        秘書のアバターの見本（第6.1.3節）。README を参照
+public/agents/         業務エージェントの絵 25 枚（第6.7.4.3節）。README を参照
 src/Settings.tsx    個人設定
 src/help.tsx        ヘルプ（ヘルプセンター・記事・画面の「？」・初回の案内・業務の説明）
 src/components.tsx  フォーム・実行詳細（中止）・承認トレイ

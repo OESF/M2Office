@@ -619,6 +619,11 @@ console.log('\n■ 18. ダッシュボード');
   states.length >= (cat.items ?? cat.agents ?? []).length && states.every((a) => a.name && typeof a.running === 'number')
     ? ok(`業務の状態を、使える業務すべてについて返す（${states.length} 件）`)
     : ng('業務の状態が足りない', JSON.stringify(states.map((a) => a.agentId)));
+  // 絵の番号を業務ごとに返し、重ならない（第6.7.4.3節）
+  const faces = states.map((a) => a.face);
+  faces.every((n) => Number.isInteger(n) && n >= 1 && n <= 25) && new Set(faces).size === faces.length
+    ? ok(`業務ごとに絵の番号を返す（${faces.join('・')}）`)
+    : ng('絵の番号が不正か重なっている', JSON.stringify(faces));
   // 忙しい順に並ぶ
   const busy = states.map((a) => a.running + a.awaiting + a.queued);
   busy.every((n, i) => i === 0 || busy[i - 1] >= n)

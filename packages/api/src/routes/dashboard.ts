@@ -10,7 +10,7 @@
 import { Hono } from 'hono';
 import type { Approval, AuditEvent, Job, Run, User } from '@m2office/shared';
 import {
-  ACTIVE_WINDOW_MIN, buildPresence, summarizePresence, stepLabel,
+  ACTIVE_WINDOW_MIN, agentFace, buildPresence, summarizePresence, stepLabel,
   type TenantExtensions,
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
@@ -226,7 +226,10 @@ export function dashboardRoute(deps: AppDeps) {
     const agents = view.agents.map((def) => {
       const busy = byAgent.get(def.id) ?? { running: 0, awaiting: 0, queued: 0 };
       const t = todayByAgent.get(def.id) ?? { runs: 0, failed: 0 };
-      return { agentId: def.id, name: def.name, ...busy, todayRuns: t.runs, todayFailed: t.failed };
+      return {
+        agentId: def.id, name: def.name, face: agentFace(def),
+        ...busy, todayRuns: t.runs, todayFailed: t.failed,
+      };
     });
     // 忙しい順。同じなら今日の件数の多い順
     agents.sort((x, y) =>

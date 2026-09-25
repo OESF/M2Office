@@ -108,4 +108,5 @@ export const AG16_LOOKUP: AgentDefinition = {
       },
     ],
   },
+  face: 6,
 };

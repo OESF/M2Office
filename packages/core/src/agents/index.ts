@@ -4,7 +4,7 @@
  * @see 仕様書 第9.5節 初期エージェントカタログ
  */
 
-import type { AgentDefinition } from '@m2office/shared';
+import { AGENT_FACE_COUNT, type AgentDefinition } from '@m2office/shared';
 import { AG01_INBOX } from './ag-01-inbox.js';
 import { AG02_MINUTES } from './ag-02-minutes.js';
 import { AG03_SCHEDULING } from './ag-03-scheduling.js';
@@ -30,6 +30,25 @@ export const OFFICIAL_AGENTS: AgentDefinition[] = [
  * @remarks 読むだけの業務であり、承認を経ずに秘書が自分で起こしてよい。
  */
 export const LOOKUP_AGENT_ID = AG16_LOOKUP.id;
+
+/**
+ * ダッシュボードに出す絵の番号を返す（1〜{@link AGENT_FACE_COUNT}。仕様書 第6.7.4.3節）。
+ *
+ * @param def エージェント定義
+ * @returns 画像 `agent<NN>.png` の番号
+ *
+ * @remarks
+ * **定義に `face` があれば、それをそのまま使う。**
+ * 無いのは拡張機能で入った業務であり、ID から機械的に決める。
+ * 決め方は場所と時によらない（同じ業務は、いつどの画面で見ても同じ絵になる）。
+ * 他の業務と重なることはあるが、絵が出ないよりはよい。
+ */
+export function agentFace(def: Pick<AgentDefinition, 'id' | 'face'>): number {
+  if (def.face !== undefined) return def.face;
+  let h = 0;
+  for (const ch of def.id) h = (h * 31 + ch.codePointAt(0)!) % 1_000_003;
+  return (h % AGENT_FACE_COUNT) + 1;
+}
 
 /**
  * エージェント定義を ID と版で解決する。

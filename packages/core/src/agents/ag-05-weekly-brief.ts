@@ -70,4 +70,5 @@ export const AG05_WEEKLY_BRIEF: AgentDefinition = {
       '届く曜日と時刻は「定時実行」で変えられます',
     ],
   },
+  face: 5,
 };

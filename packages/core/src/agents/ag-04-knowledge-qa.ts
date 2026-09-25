@@ -84,4 +84,5 @@ export const AG04_KNOWLEDGE_QA: AgentDefinition = {
       { q: '答えが間違っていたらどうすればよいですか', a: '出典の文書を確認し、内容が古ければ管理者に更新を依頼してください' },
     ],
   },
+  face: 1,
 };

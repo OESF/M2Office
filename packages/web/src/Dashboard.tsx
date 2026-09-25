@@ -313,25 +313,51 @@ function Agents({ data, board = false }: { data: DashboardLive; board?: boolean 
           const busy = a.running + a.awaiting + a.queued;
           return (
             <div className={`agent-state${busy > 0 ? ' busy' : ''}`} key={a.agentId}>
-              <div className="agent-name">{a.name}</div>
-              <div className="agent-now">
-                {busy === 0 ? <span className="muted">待機</span> : (
-                  <>
-                    {a.running > 0 && <span className="chip current">実行中 {a.running}</span>}
-                    {a.awaiting > 0 && <span className="chip waiting">承認待ち {a.awaiting}</span>}
-                    {a.queued > 0 && <span className="chip todo">待ち行列 {a.queued}</span>}
-                  </>
-                )}
-              </div>
-              <div className="muted small">
-                今日 {a.todayRuns} 件
-                {a.todayFailed > 0 && <span className="warn-text">（失敗 {a.todayFailed}）</span>}
+              <AgentFace face={a.face} busy={busy > 0} />
+              <div className="agent-body">
+                <div className="agent-name">{a.name}</div>
+                <div className="agent-now">
+                  {busy === 0 ? <span className="muted">待機</span> : (
+                    <>
+                      {a.running > 0 && <span className="chip current">実行中 {a.running}</span>}
+                      {a.awaiting > 0 && <span className="chip waiting">承認待ち {a.awaiting}</span>}
+                      {a.queued > 0 && <span className="chip todo">待ち行列 {a.queued}</span>}
+                    </>
+                  )}
+                </div>
+                <div className="muted small">
+                  今日 {a.todayRuns} 件
+                  {a.todayFailed > 0 && <span className="warn-text">（失敗 {a.todayFailed}）</span>}
+                </div>
               </div>
             </div>
           );
         })}
       </div>
     </section>
+  );
+}
+
+/**
+ * 業務エージェントの絵（仕様書 第6.7.4.3節）。
+ *
+ * @param face 同梱の画像の番号。API が業務ごとに返す
+ * @param busy いま受け持ちがあるか
+ *
+ * @remarks
+ * **動かすのは、受け持ちがあるあいだだけ。** 何も起きていないのに動き続けると、
+ * 画面のどこを見ればよいか分からなくなる。待機は色を落とし、動かさない。
+ *
+ * 読み上げには渡さない（`aria-hidden`）。絵が伝えることは、すぐ横の文字がすべて書いている。
+ */
+function AgentFace({ face, busy }: { face: number; busy: boolean }) {
+  const [broken, setBroken] = useState(false);
+  if (broken) return null;
+  const n = String(face).padStart(2, '0');
+  return (
+    <span className={`agent-face${busy ? ' busy' : ''}`} aria-hidden="true">
+      <img src={`/agents/agent${n}.png`} alt="" loading="lazy" onError={() => setBroken(true)} />
+    </span>
   );
 }
 
