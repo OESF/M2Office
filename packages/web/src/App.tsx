@@ -242,7 +242,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
         )}
         navFooter={(
           <NavUserCard
-            name={me.user.displayName} role={primaryRole(me.user.roles)}
+            name={me.user.displayName} role={primaryRole(me.user.roles)} photo={me.photo}
             active={view.kind === 'settings'} sections={SETTINGS_SECTIONS}
             current={view.kind === 'settings' ? view.section : undefined}
             onOpenSettings={openSettings}

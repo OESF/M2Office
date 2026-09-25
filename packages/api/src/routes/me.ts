@@ -53,6 +53,28 @@ export function meRoute(deps: AppDeps) {
     });
   });
 
+  /**
+   * 本人のアバター（Google のプロフィール写真）を、画面に埋め込める形で返す（仕様書 第6.5.1.1節）。
+   *
+   * @remarks
+   * **本人の写真だけを返す。** 利用者の ID を受け取らない（他人の写真を出させない）。
+   * 秘書のアバターと同じく、種類を推測させず（`nosniff`）、何も読み込ませない（`Content-Security-Policy`）。
+   */
+  app.get('/photo', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const photo = await deps.repo.getUserPhoto(tenant.id, user.id);
+    if (!photo) return c.json({ error: '写真はありません' }, 404);
+    return new Response(Buffer.from(photo.bytes), {
+      headers: {
+        'content-type': photo.mime,
+        'x-content-type-options': 'nosniff',
+        'content-security-policy': "default-src 'none'; sandbox",
+        // 本人だけのものであり、共有の置き場に残させない。取り込み直したら URL の v= が変わる
+        'cache-control': 'private, max-age=86400',
+      },
+    });
+  });
+
   app.get('/settings', async (c) => {
     const { tenant, user } = c.get('ctx');
     return c.json(await deps.repo.getUserSettings(tenant.id, user.id));

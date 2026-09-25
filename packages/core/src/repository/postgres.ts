@@ -13,7 +13,7 @@ import type {
   StoredFile, Tenant, TenantSettings, User, UserGroup, UserSettings,
 } from '@m2office/shared';
 import { DEFAULT_TENANT_SETTINGS, DEFAULT_USER_SETTINGS, STANDARD_SYNONYMS } from '@m2office/shared';
-import type { CompartmentAssignment, Conversation, ConversationDigest, MemoryCandidate, Promotion, CredentialKind, GoogleConnection, TenantCredential, DisabledConnectorTool, InstalledExtension, PrivateExtension, KnowledgeItem, KnowledgeSearchResult, KnowledgeSectionView, Memory, Repository, RunStatRow } from './types.js';
+import type { CompartmentAssignment, Conversation, ConversationDigest, MemoryCandidate, Promotion, CredentialKind, GoogleConnection, UserPhoto, TenantCredential, DisabledConnectorTool, InstalledExtension, PrivateExtension, KnowledgeItem, KnowledgeSearchResult, KnowledgeSectionView, Memory, Repository, RunStatRow } from './types.js';
 import { SPLIT_VERSION, citationOf, splitKnowledge } from '../knowledge/sections.js';
 import { SEARCH_CANDIDATES, bigrams, expandTerms, extractTerms, normalizeForSearch, rankSections, rewritesOf } from '../knowledge/search.js';
 
@@ -1237,6 +1237,23 @@ export class PostgresRepository implements Repository {
        returning run_id`,
       [tenantId, runId]);
     return rows.length > 0;
+  }
+
+  async getUserPhoto(tenantId: string, userId: string): Promise<UserPhoto | null> {
+    const rows = await this.q<{ mime: UserPhoto['mime']; bytes: Buffer; fetchedAt: Date }>(tenantId,
+      `select mime, bytes, fetched_at as "fetchedAt" from user_photos where tenant_id = $1 and user_id = $2`,
+      [tenantId, userId]);
+    const r = rows[0];
+    return r ? { tenantId, userId, mime: r.mime, bytes: new Uint8Array(r.bytes), fetchedAt: new Date(r.fetchedAt).toISOString() } : null;
+  }
+
+  async saveUserPhoto(photo: UserPhoto): Promise<void> {
+    // 1 人 1 枚。上書きして、古い写真を残さない
+    await this.q(photo.tenantId,
+      `insert into user_photos (tenant_id, user_id, mime, bytes, fetched_at) values ($1, $2, $3, $4, $5)
+       on conflict (tenant_id, user_id) do update
+         set mime = excluded.mime, bytes = excluded.bytes, fetched_at = excluded.fetched_at`,
+      [photo.tenantId, photo.userId, photo.mime, Buffer.from(photo.bytes), photo.fetchedAt]);
   }
 
   async listToldLookups(tenantId: string, runIds: string[]): Promise<string[]> {

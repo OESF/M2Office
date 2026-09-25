@@ -114,7 +114,8 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/auth/exchange` | 引換券を、このホストでのログイン状態に換える。券は 1 回限り・2 分 |
 | `GET /v1/oauth/google/login-callback` | Google からの戻り。**運営のホストで受ける**。テナントの判定とログインより前 |
 | `POST /v1/auth/logout` | ログアウト |
-| `GET /v1/me` | テナント・利用者・CSRF トークン・接続の状態 |
+| `GET /v1/me` | テナント・利用者・CSRF トークン・接続の状態・本人のアバターの URL（`photo`。無ければ `null`） |
+| `GET /v1/me/photo` | 本人のアバター（Google のプロフィール写真）。**本人の写真だけ**を返し、利用者の ID は受け取らない。`nosniff` と読み込みを禁じる CSP を付ける（仕様書 第6.5.1.1節） |
 | `GET /v1/agents` | 利用できるエージェントと入力スキーマ |
 | `POST /v1/jobs` | ジョブを作成し待ち行列へ入れる。実行はワーカーが担う |
 | `GET /v1/jobs` | **本人が依頼した**実行の一覧 |
@@ -147,7 +148,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `DELETE /v1/admin/connections/google` | 管理者: OAuth クライアントの登録を消す。接続している全員の接続を消し、Google を使う動いている途中の業務を止める（仕様書 第6.5.2.1節）。クライアント ID を替える `PUT` も同じ |
 | `GET /v1/me/google` | 本人: Google 連携の状況（業務の言葉の許可の一覧。トークンは返さない） |
 | `POST /v1/me/google/connect` | 本人: 接続を始める（Google の同意の画面の URL を返す。state と PKCE つき） |
-| `POST /v1/me/google/check` | 本人: 許可の状況を Google に問い合わせ直す |
+| `POST /v1/me/google/check` | 本人: 許可の状況を Google に問い合わせ直す。その許可で受け取れれば、プロフィール写真も取り込み直す |
 | `GET /v1/me/google/impact` | 本人: 取り消すと止まる業務と、飛ばす定時実行の数 |
 | `DELETE /v1/me/google` | 本人: 接続を取り消す（Google 側の許可も取り消し、トークンを消す）。Google を使う動いている途中の業務を止め、終わった実行の中身を消す（仕様書 第6.5.2.1節・第14.3.2節） |
 | `GET /v1/oauth/google/callback` | Google からの戻り（ログイン不要。state で照合する） |

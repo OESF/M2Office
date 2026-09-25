@@ -13,7 +13,8 @@ import { randomUUID } from 'node:crypto';
 import { Hono, type Context } from 'hono';
 import {
   buildGoogleAuthUrl, checkGeminiLive, checkGeminiText, checkGoogleClient, createPkce, exchangeGoogleCode, exchangeGoogleLoginCode,
-  googleGrantedScopes, googleScopeLabel, googleUserEmail, isGoogleClientError, refreshGoogleAccessToken, revokeGoogleToken,
+  fetchGooglePhoto, googleGrantedScopes, googleScopeLabel, googleUserInfo, isGoogleClientError, refreshGoogleAccessToken,
+  revokeGoogleToken,
   GoogleOAuthError,
   type GeminiModels, type GeminiSettingsMeta, type GoogleClientVerdict,
 } from '@m2office/core';
@@ -47,6 +48,34 @@ async function googleClient(deps: AppDeps, tenantId: string): Promise<{ clientId
   const clientId = typeof cred?.meta['clientId'] === 'string' ? cred.meta['clientId'] : '';
   if (!cred?.secretEnc || !clientId) return null;
   return { clientId, clientSecret: deps.box.decrypt(cred.secretEnc) };
+}
+
+/**
+ * 本人の Google のプロフィール写真を取り込む（仕様書 第6.5.1.1節）。
+ *
+ * @param googleEmail 写真の持ち主の Google アカウント。**M2Office の利用者と同じときだけ取り込む**
+ *   （Google 連携で別のアカウントを選んだ場合に、別人の顔を出さないため）
+ * @param picture Google の利用者情報の `picture`。無ければ何もしない
+ *
+ * @remarks
+ * **待たずに呼ぶ。** 取り込みはログインや接続の応答のあとで進む。写真のためにログインを遅らせない。
+ * 取れなければ何もしない（前の写真のまま）。写真の URL はログに残さない。
+ */
+export function importGooglePhoto(
+  deps: AppDeps, tenantId: string, user: { id: string; email: string },
+  googleEmail: string | null, picture: string | null,
+): void {
+  if (!picture || !googleEmail || googleEmail.toLowerCase() !== user.email.toLowerCase()) return;
+  void (async () => {
+    const photo = await fetchGooglePhoto(picture);
+    if (!photo) {
+      deps.log.info('Google のプロフィール写真を取り込めませんでした（前の写真のまま）', { tenantId, userId: user.id });
+      return;
+    }
+    await deps.repo.saveUserPhoto({ tenantId, userId: user.id, ...photo, fetchedAt: new Date().toISOString() });
+  })().catch((err: unknown) => {
+    deps.log.warn('Google のプロフィール写真を保存できませんでした', { tenantId, userId: user.id, err: err instanceof Error ? err.message : String(err) });
+  });
 }
 
 /**
@@ -333,8 +362,10 @@ export function myGoogleRoute(deps: AppDeps) {
     if (!client || !conn) return c.json({ error: 'Google と接続していません' }, 404);
     try {
       const { accessToken } = await refreshGoogleAccessToken({ ...client, refreshToken: deps.box.decrypt(conn.refreshTokenEnc) });
-      const scopes = await googleGrantedScopes(accessToken);
+      const [scopes, info] = await Promise.all([googleGrantedScopes(accessToken), googleUserInfo(accessToken)]);
       await deps.repo.saveGoogleConnection({ ...conn, scopes, checkedAt: new Date().toISOString() });
+      // その許可で写真を受け取れれば、取り込み直す（第6.5.1.1節）
+      importGooglePhoto(deps, tenant.id, user, info.email, info.picture);
       return c.json({ ok: true, scopes });
     } catch (err) {
       // 取り消された・失効した場合もここに来る。再接続を促す
@@ -382,15 +413,18 @@ export function oauthCallbackRoute(deps: AppDeps) {
       const client = await googleClient(deps, pending.tenantId);
       if (!client) return back('failed');
       const tokens = await exchangeGoogleCode({ ...client, code, redirectUri: deps.oauth.redirectUri, codeVerifier: pending.codeVerifier });
-      const [scopes, email] = await Promise.all([
-        googleGrantedScopes(tokens.accessToken).catch(() => tokens.scopes), googleUserEmail(tokens.accessToken),
+      const [scopes, info] = await Promise.all([
+        googleGrantedScopes(tokens.accessToken).catch(() => tokens.scopes), googleUserInfo(tokens.accessToken),
       ]);
+      const email = info.email;
       const now = new Date().toISOString();
       await deps.repo.saveGoogleConnection({
         tenantId: pending.tenantId, userId: pending.userId, refreshTokenEnc: deps.box.encrypt(tokens.refreshToken),
         googleEmail: email, scopes, connectedAt: now, checkedAt: now,
       });
       await audit(deps, pending.tenantId, pending.userId, 'connection.google.connect', pending.userId, { googleEmail: email, scopes });
+      const who = await deps.repo.findUserById(pending.tenantId, pending.userId);
+      if (who) importGooglePhoto(deps, pending.tenantId, who, email, info.picture);
       return back('connected');
     } catch (err) {
       deps.log.warn('Google との接続に失敗しました', { tenantId: pending.tenantId, err: err instanceof Error ? err.message : String(err) });
@@ -428,7 +462,7 @@ export function oauthCallbackRoute(deps: AppDeps) {
         clientId: login.clientId, clientSecret: login.clientSecret,
         code, redirectUri: login.redirectUri, codeVerifier: pending.codeVerifier,
       });
-      const email = await googleUserEmail(accessToken);
+      const { email, picture } = await googleUserInfo(accessToken);
       if (!email) return back('failed');
 
       // ドメインが会社のものであり、かつその会社の利用者として登録されていること（第16.1.2節）
@@ -443,6 +477,8 @@ export function oauthCallbackRoute(deps: AppDeps) {
         return back('denied');
       }
       const ticket = deps.handoffs.issue({ tenantId: tenant.id, userId: user.id });
+      // ログインのたびに、Google のプロフィール写真を取り込み直す（第6.5.1.1節。待たない）
+      importGooglePhoto(deps, tenant.id, user, email, picture);
       return c.redirect(`${pending.returnTo}?ticket=${encodeURIComponent(ticket)}`);
     } catch (err) {
       deps.log.warn('ログインに失敗しました', {

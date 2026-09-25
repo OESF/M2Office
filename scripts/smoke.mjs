@@ -2424,6 +2424,43 @@ console.log('\n■ 48. 管理者の実行の一覧は、状態だけを返す（
   other.status === 404 ? ok('他の会社の実行は見つからない（404）') : ng(`テナントを跨げる（${other.status}）`);
 }
 
+console.log('\n■ 49. 本人のアバター（Google のプロフィール写真。第6.5.1.1節）');
+{
+  // 写真は Google から取り込むもので、ここでは作れない。所有者のロールで見本の写真を 1 枚入れる
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+  const { rows: [m] } = await owner.query(`select id, tenant_id from users where email = 'member@alpha.example.jp'`);
+  await owner.query(`delete from user_photos where tenant_id = $1 and user_id = $2`, [m.tenant_id, m.id]);
+  try {
+    const { body: before } = await call('a', '/v1/me', {}, 'member');
+    const none = await fetch(`${API}/v1/me/photo`, { headers: { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' } });
+    before.photo === null && none.status === 404
+      ? ok('写真が無ければ null を返し、写真の口は 404') : ng('写真の無い人の扱いが違う', JSON.stringify(before.photo));
+
+    await owner.query(`insert into user_photos (tenant_id, user_id, mime, bytes) values ($1, $2, 'image/png', $3)`, [m.tenant_id, m.id, png]);
+    const { body: after } = await call('a', '/v1/me', {}, 'member');
+    const res = await fetch(`${API}${after.photo ?? '/v1/me/photo'}`, { headers: { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' } });
+    const bytes = Buffer.from(await res.arrayBuffer());
+    /^\/v1\/me\/photo\?v=/.test(after.photo ?? '') && res.status === 200 && bytes.equals(png)
+      && res.headers.get('x-content-type-options') === 'nosniff' && /sandbox/.test(res.headers.get('content-security-policy') ?? '')
+      ? ok('本人の写真を、種類の推測と読み込みを禁じて返す') : ng(`写真の返し方が違う（${res.status}）`);
+
+    // 本人の写真だけを返す。管理者が開いても、その人自身の写真（無ければ 404）
+    const adminRes = await fetch(`${API}/v1/me/photo`, { headers: { 'x-tenant': 'a', 'x-user': 'admin@alpha.example.jp' } });
+    const adminBytes = Buffer.from(await adminRes.arrayBuffer());
+    !adminBytes.equals(png) ? ok('ほかの人の写真は見えない（本人のものだけ）') : ng('他人の写真が見える');
+    const { rows: leaked } = await owner.query(`select 1 from user_photos where tenant_id <> $1 and user_id = $2`, [m.tenant_id, m.id]);
+    const bRes = await fetch(`${API}/v1/me/photo`, { headers: { 'x-tenant': 'b', 'x-user': 'admin@beta.example.jp' } });
+    leaked.length === 0 && !Buffer.from(await bRes.arrayBuffer()).equals(png)
+      ? ok('ほかの会社から写真は見えない') : ng('会社を跨いで見える');
+  } finally {
+    await owner.query(`delete from user_photos where tenant_id = $1 and user_id = $2`, [m.tenant_id, m.id]);
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

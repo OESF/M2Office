@@ -204,12 +204,26 @@ export async function googleGrantedScopes(accessToken: string, endpoints: Google
   return shortScopes(json['scope']);
 }
 
+/**
+ * 接続した Google アカウントの利用者情報（メールアドレスとプロフィール写真の URL）。
+ *
+ * @returns 取れなかった項目は `null`。写真は `profile` の許可があるときだけ返る（仕様書 第6.5.1.1節）
+ */
+export async function googleUserInfo(
+  accessToken: string, endpoints: GoogleOAuthEndpoints = GOOGLE_OAUTH_ENDPOINTS,
+): Promise<{ email: string | null; picture: string | null }> {
+  const res = await fetch(endpoints.userinfo, { headers: { authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(20_000) });
+  if (!res.ok) return { email: null, picture: null };
+  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  return {
+    email: typeof json['email'] === 'string' ? json['email'] : null,
+    picture: typeof json['picture'] === 'string' ? json['picture'] : null,
+  };
+}
+
 /** 接続した Google アカウントのメールアドレス。 */
 export async function googleUserEmail(accessToken: string, endpoints: GoogleOAuthEndpoints = GOOGLE_OAUTH_ENDPOINTS): Promise<string | null> {
-  const res = await fetch(endpoints.userinfo, { headers: { authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(20_000) });
-  if (!res.ok) return null;
-  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-  return typeof json['email'] === 'string' ? json['email'] : null;
+  return (await googleUserInfo(accessToken, endpoints)).email;
 }
 
 /** 許可を取り消す。失敗しても例外にしない（トークンはこちらで消すため）。 */

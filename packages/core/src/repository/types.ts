@@ -232,6 +232,10 @@ export interface Repository {
   claimLookupDelivery(tenantId: string, runId: string): Promise<boolean>;
   /** すでに伝えた調べものの実行の ID（仕様書 第10.11.7節）。 */
   listToldLookups(tenantId: string, runIds: string[]): Promise<string[]>;
+  /** 本人のアバター（Google のプロフィール写真。仕様書 第6.5.1.1節）。無ければ `null`。 */
+  getUserPhoto(tenantId: string, userId: string): Promise<UserPhoto | null>;
+  /** 本人のアバターを上書きする。1 人 1 枚で、古い写真は残さない。 */
+  saveUserPhoto(photo: UserPhoto): Promise<void>;
   /**
    * 同じ依頼で動いている調べものを探す（仕様書 第10.11.4節）。
    *
@@ -540,6 +544,15 @@ export interface TenantCredential {
 }
 
 /** 利用者の Google の接続。`refreshTokenEnc` は暗号化したリフレッシュ トークン。 */
+/** 本人のアバターの画像（仕様書 第6.5.1.1節）。 */
+export interface UserPhoto {
+  tenantId: string;
+  userId: string;
+  mime: 'image/png' | 'image/jpeg';
+  bytes: Uint8Array;
+  fetchedAt: string;
+}
+
 export interface GoogleConnection {
   tenantId: string;
   userId: string;

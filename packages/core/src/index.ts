@@ -19,7 +19,7 @@ export type { GeminiModelMap } from './llm/gemini.js';
 
 export type {
   Repository, DisabledConnectorTool, KnowledgeHit, KnowledgeItem, KnowledgeSearchResult, KnowledgeSectionView, RunStatRow, InstalledExtension, PrivateExtension, CompartmentAssignment,
-  CredentialKind, TenantCredential, GoogleConnection,
+  CredentialKind, TenantCredential, GoogleConnection, UserPhoto,
 } from './repository/types.js';
 export { PostgresRepository } from './repository/postgres.js';
 export { canViewRun, type RunViewer } from './engine/run-access.js';
@@ -51,6 +51,7 @@ export type {
 
 export * from './files/index.js';
 export { SecretBox, secretBoxFromEnv } from './secrets/box.js';
+export { fetchGooglePhoto, isGooglePhotoUrl, MAX_PHOTO_BYTES } from './google/photo.js';
 export {
   TenantAiResolver, type GeminiModels, type GeminiSettingsMeta, type ResolvedGemini, type TenantAiResolverDeps,
 } from './secrets/tenant-ai.js';
@@ -59,7 +60,7 @@ export {
   GOOGLE_OAUTH_ENDPOINTS, GOOGLE_LOGIN_SCOPES, googleScopeUrl, googleScopeLabel, createPkce, buildGoogleAuthUrl,
   buildGoogleLoginUrl, exchangeGoogleLoginCode,
   exchangeGoogleCode, refreshGoogleAccessToken, googleGrantedScopes, googleUserEmail, revokeGoogleToken, GoogleOAuthError,
-  checkGoogleClient, isGoogleClientError,
+  checkGoogleClient, isGoogleClientError, googleUserInfo,
   type GoogleOAuthEndpoints, type GoogleClientVerdict,
 } from './google/oauth.js';
 export {

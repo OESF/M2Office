@@ -124,6 +124,8 @@ export interface Me {
   csrfToken: string | null;
   /** 予定やメールの出どころ。`mock` の間は画面にダミーであることを示す。 */
   workspaceSource: 'mock' | 'google';
+  /** 本人のアバター（Google のプロフィール写真。仕様書 第6.5.1.1節）の URL。まだ無ければ `null`。 */
+  photo: string | null;
 }
 
 export interface LoginProviders {

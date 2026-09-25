@@ -175,8 +175,11 @@ export function NavItem({
  *
  * @param role 属性（例: 管理者）
  */
-export function NavUserCard({ name, role, active, sections, current, onOpenSettings }: {
-  name: string; role: string; active?: boolean;
+export function NavUserCard({ name, role, photo = null, active, sections, current, onOpenSettings }: {
+  name: string; role: string;
+  /** 本人のアバター（Google のプロフィール写真。仕様書 第6.5.1.1節）。無ければ人の形のアイコン。 */
+  photo?: string | null;
+  active?: boolean;
   /** 歯車を押したときに出す区分の一覧（仕様書 第6.5.0節）。 */
   sections: readonly { id: string; label: string; hint: string }[];
   /** いま開いている区分。 */
@@ -185,6 +188,9 @@ export function NavUserCard({ name, role, active, sections, current, onOpenSetti
 }) {
   const tip = `${name}（${role}）\n個人設定を開く`;
   const [open, setOpen] = useState(false);
+  // 写真が読めなければ、アイコンに戻す（壊れた画像の印を出さない）
+  const [broken, setBroken] = useState(false);
+  useEffect(() => setBroken(false), [photo]);
   const box = useRef<HTMLDivElement>(null);
   // 外を押す・Esc で閉じる（仕様書 第6.5.0節・第6.11.1節 k3）
   useEffect(() => {
@@ -205,7 +211,9 @@ export function NavUserCard({ name, role, active, sections, current, onOpenSetti
   return (
     <div className={`user-card${active ? ' active' : ''}`} ref={box}>
       <button className="user-card-main" onClick={() => setOpen(!open)} title={tip} tabIndex={-1} aria-hidden="true">
-        <span className="avatar"><Icon name="user" /></span>
+        <span className="avatar">
+          {photo && !broken ? <img src={photo} alt="" onError={() => setBroken(true)} /> : <Icon name="user" />}
+        </span>
         <span className="user-text">
           <strong>{name}</strong>
           <span className="role">{role}</span>

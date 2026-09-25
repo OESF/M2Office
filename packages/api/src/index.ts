@@ -73,12 +73,15 @@ app.route('/v1/auth', authRoute(deps));
 app.use('/v1/*', async (c, next) =>
   c.req.path.startsWith('/v1/auth/') ? next() : authenticate(deps)(c, next));
 
-app.get('/v1/me', (c) => {
+app.get('/v1/me', async (c) => {
   const ctx = c.get('ctx');
   const auth = c.get('auth');
+  // 本人のアバター（第6.5.1.1節）。取り込み直すと URL が変わり、画面が新しい写真を読む
+  const photo = await deps.repo.getUserPhoto(ctx.tenant.id, ctx.user.id);
   return c.json({
     tenant: ctx.tenant,
     user: ctx.user,
+    photo: photo ? `/v1/me/photo?v=${encodeURIComponent(photo.fetchedAt)}` : null,
     auth: { method: auth.method },
     csrfToken: auth.method === 'session' ? auth.csrfToken : null,
     // 値の出どころは会社ごと（ADR-0022）
