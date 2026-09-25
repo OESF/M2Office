@@ -207,6 +207,7 @@ async function fakeGoogle(behave: (s: Seen) => { status: number; json?: unknown 
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const endpoints: GoogleApiEndpoints = {
     gmail: `${base}/gmail`, calendar: `${base}/cal`, tasks: `${base}/tasks`, chat: `${base}/chat`,
+    drive: `${base}/drive`, driveUpload: `${base}/upload`, docs: `${base}/docs`,
     oauth: { auth: `${base}/oauth/auth`, token: `${base}/oauth/token`, tokeninfo: `${base}/oauth/tokeninfo`, userinfo: `${base}/oauth/userinfo`, revoke: `${base}/oauth/revoke` },
   };
   return { endpoints, seen, refreshes: () => refreshes, close: () => new Promise<void>((r) => server.close(() => r())) };
@@ -489,7 +490,7 @@ test('400 を「見つからない」に丸めるのは ToDo の完了だけ（�
 
 test('準備中のサービスは、見本で代えずに断る（ADR-0022）', async () => {
   await withConnector(async (c) => {
-    assert.equal(await kindOf(c.drive.search(P, { query: '' })), 'not-implemented');
+    assert.equal(await kindOf(c.sheets.read(P, { spreadsheetId: 's1', maxRows: 10 })), 'not-implemented');
     const err = await c.meet.transcript(P, { query: '定例' }).catch((e: unknown) => e as Error);
     assert.match(err.message, /Meet はまだ Google につないでいません（準備中）/, '英字で終わる名前の後ろに空白を入れる');
     assert.equal(c.sourceFor('t-real'), 'google');

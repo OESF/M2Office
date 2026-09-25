@@ -18,6 +18,12 @@ export interface GoogleApiEndpoints {
   calendar: string;
   tasks: string;
   chat: string;
+  /** Drive API（ファイルの一覧・取り出し・共有）。 */
+  drive: string;
+  /** Drive API の取り込み口（ファイルの中身を送る）。 */
+  driveUpload: string;
+  /** Docs API（文書への追記）。 */
+  docs: string;
   oauth: GoogleOAuthEndpoints;
 }
 
@@ -26,6 +32,9 @@ export const GOOGLE_API_ENDPOINTS: GoogleApiEndpoints = {
   calendar: 'https://www.googleapis.com/calendar/v3',
   tasks: 'https://tasks.googleapis.com/tasks/v1',
   chat: 'https://chat.googleapis.com/v1',
+  drive: 'https://www.googleapis.com/drive/v3',
+  driveUpload: 'https://www.googleapis.com/upload/drive/v3',
+  docs: 'https://docs.googleapis.com/v1',
   oauth: GOOGLE_OAUTH_ENDPOINTS,
 };
 
@@ -36,7 +45,7 @@ const REFRESH_MARGIN_MS = 60_000;
 const TIMEOUT_MS = 20_000;
 
 /** 呼び先の API の、利用者に見せる名前。 */
-export type GoogleApiName = 'Gmail' | 'カレンダー' | 'ToDo' | 'Chat';
+export type GoogleApiName = 'Gmail' | 'カレンダー' | 'ToDo' | 'Chat' | 'ドライブ' | 'ドキュメント';
 
 /**
  * 利用者ごとのアクセス トークンを配る（仕様書 第14.3.4節「誰の権限で呼ぶか」）。
@@ -116,8 +125,53 @@ export class GoogleTokenSource {
  */
 export async function callGoogle(
   tokens: GoogleTokenSource, p: ConnectorPrincipal, api: GoogleApiName,
-  url: string, init: { method?: string; body?: unknown; missingOn400?: boolean } = {},
+  url: string, init: GoogleRequestInit = {},
 ): Promise<Record<string, any> | null> {
+  const res = await requestGoogle(tokens, p, api, url, init);
+  if (!res) return null;
+  if (res.status === 204) return {};
+  return (await res.json().catch(() => ({}))) as Record<string, any>;
+}
+
+/** Google への要求の中身。 */
+export interface GoogleRequestInit {
+  method?: string;
+  /** JSON で送る中身。 */
+  body?: unknown;
+  /** JSON でない中身（ファイルの取り込みの multipart など）。`body` と一緒には使わない。 */
+  raw?: { contentType: string; data: string | Uint8Array };
+  missingOn400?: boolean;
+}
+
+/**
+ * Google からファイルの中身を受け取る（ドライブの取り出し・書き出し）。
+ *
+ * @param maxBytes これを超える中身は受け取らない
+ * @returns 中身。`404`・`410` なら `null`。大きすぎれば `{ tooLarge: true }`
+ * @throws {ConnectorUnavailableError} 許可が無い・API が無効・届かない（{@link callGoogle} と同じ）
+ */
+export async function downloadGoogle(
+  tokens: GoogleTokenSource, p: ConnectorPrincipal, api: GoogleApiName, url: string, maxBytes: number,
+): Promise<{ bytes: Uint8Array } | { tooLarge: true } | null> {
+  const res = await requestGoogle(tokens, p, api, url, {});
+  if (!res) return null;
+  const declared = Number(res.headers.get('content-length') ?? '');
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    await res.body?.cancel().catch(() => undefined);
+    return { tooLarge: true };
+  }
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  return bytes.byteLength > maxBytes ? { tooLarge: true } : { bytes };
+}
+
+/**
+ * Google へ 1 回要求し、成功した応答をそのまま返す（中身はまだ読まない）。
+ *
+ * @returns 成功した応答。`404`・`410`（と `missingOn400` の `400`）なら `null`
+ */
+async function requestGoogle(
+  tokens: GoogleTokenSource, p: ConnectorPrincipal, api: GoogleApiName, url: string, init: GoogleRequestInit,
+): Promise<Response | null> {
   for (let attempt = 1; ; attempt++) {
     const token = await tokens.token(p);
     let res: Response;
@@ -127,16 +181,17 @@ export async function callGoogle(
         headers: {
           authorization: `Bearer ${token}`,
           ...(init.body !== undefined ? { 'content-type': 'application/json' } : {}),
+          ...(init.raw ? { 'content-type': init.raw.contentType } : {}),
         },
         ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
+        ...(init.raw ? { body: typeof init.raw.data === 'string' ? init.raw.data : Buffer.from(init.raw.data) } : {}),
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
     } catch {
       if (attempt === 1) continue;
       throw new ConnectorUnavailableError('unreachable', `${api}（Google）に届きませんでした。しばらくしてからもう一度お試しください`);
     }
-    if (res.status === 204) return {};
-    if (res.ok) return (await res.json().catch(() => ({}))) as Record<string, any>;
+    if (res.ok) return res;
 
     const body = (await res.json().catch(() => ({}))) as { error?: { status?: string; message?: string; errors?: { reason?: string }[]; details?: { reason?: string }[] } };
     // Chat は、会社の Google Cloud で Chat アプリを設定していないと 404 を返す（2026-09-25 に確認）。

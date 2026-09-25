@@ -73,7 +73,7 @@ decideApproval(...)  →  承認を記録し、待ち行列へ戻す
 
 ツールは Google の API を直接呼ばず、接続口だけを呼びます（仕様書 第24.2節 第 6 項）。
 `buildConnector('mock')` はダミーデータを返し、戻り値に `source: 'mock'` を含めます。
-`buildConnector('google', { repo, box })` は **Gmail・カレンダー・ToDo・Chat を本物の Google で**動かし、
+`buildConnector('google', { repo, box })` は **Gmail・カレンダー・ToDo・Chat・ドライブ・ドキュメントを本物の Google で**動かし、
 ほかのサービスは「準備中」と断ります（`src/connectors/google/`。仕様書 第14.3.4節、ADR-0022）。
 見本のデータで代わりに動かすことはしません。
 
@@ -82,6 +82,8 @@ decideApproval(...)  →  承認を記録し、待ち行列へ戻す
 | `google/http.ts` | 本人のアクセス トークン（メモリにだけ持つ）と、Google の失敗を「断るときの言葉」に直す呼び出し |
 | `google/mime.ts` | 本文の取り出し（宣言された文字コードで戻す。添付は読まない）と、送るメールの組み立て |
 | `google/index.ts` | Gmail・カレンダー・ToDo・Chat の本体。準備中のサービスの断り |
+| `google/drive.ts` | ドライブ（探す・読む・フォルダ・共有）とドキュメント（作る・追記）。`drive.file` の範囲だけで、リンクによる公開は作らない |
+| `google/doc-html.ts` | 文書の本文（Markdown）を、ドキュメントに取り込ませる HTML に直す（中身はエスケープする） |
 | `google/chat.ts` | Chat の投稿先の見つけ方（リンク・ID か、名前でちょうど 1 つ一致）と、本文の書式 |
 
 呼べないときは `ConnectorUnavailableError`（理由の種類つき）を投げます。
