@@ -603,18 +603,17 @@ pre.body { white-space: pre-wrap; background: var(--subtle-bg); border: 1px soli
 .agent-now .chip { font-size: 11px; padding: 1px 8px; }
 
 /* 業務エージェントの絵（仕様書 第6.7.4.3節）。動かすのは受け持ちがあるあいだだけ */
-.agent-face { position: relative; flex-shrink: 0; width: 52px; height: 52px; display: grid; place-items: center; }
-.agent-face img { width: 48px; height: 48px; object-fit: contain; display: block; }
-/* 待機は色を落とす。並べたとき、動いているものが浮き上がる */
-.agent-face:not(.busy) img { filter: grayscale(.9); opacity: .4; }
-/* 暗い画面では、落としすぎると形まで消える。明るさを足して輪郭を残す。
-   端末の設定で暗くしている場合（data-theme が無い）も同じにする */
-:root[data-theme="dark"] .agent-face:not(.busy) img { filter: grayscale(.9) brightness(1.7); opacity: .5; }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .agent-face:not(.busy) img { filter: grayscale(.9) brightness(1.7); opacity: .5; }
-}
+.agent-face { position: relative; flex-shrink: 0; width: 56px; height: 56px; display: grid; place-items: center; }
+.agent-face img { width: 48px; height: 48px; object-fit: contain; display: block; position: relative; z-index: 1; }
+/* **待機でも色は落とさない。** 絵は色が身上であり、灰色にすると誰の絵かも分からなくなる。
+   動いているかどうかは、輪（下）と囲みの左端の帯で示す */
 .agent-face.busy img { animation: agent-work 2.6s ease-in-out infinite; }
-/* 手を動かしている感じを出す。輪は後ろで静かに広がる */
+/* 動いているあいだ、絵を輪で囲む。輪は消えず、その外側をもう 1 本が広がっていく */
+.agent-face.busy::before {
+  content: ''; position: absolute; inset: 0; border-radius: 50%;
+  border: 2px solid var(--accent); background: var(--accent-soft);
+  animation: agent-breathe 2.6s ease-in-out infinite;
+}
 .agent-face.busy::after {
   content: ''; position: absolute; inset: 0; border-radius: 50%;
   border: 2px solid var(--accent); animation: agent-ping 2.6s ease-out infinite;
@@ -625,12 +624,17 @@ pre.body { white-space: pre-wrap; background: var(--subtle-bg); border: 1px soli
   65% { transform: translateY(-1px) rotate(1.5deg); }
 }
 @keyframes agent-ping {
-  0% { transform: scale(.78); opacity: .45; }
-  70%, 100% { transform: scale(1.12); opacity: 0; }
+  0% { transform: scale(1); opacity: .55; }
+  70%, 100% { transform: scale(1.35); opacity: 0; }
+}
+@keyframes agent-breathe {
+  0%, 100% { opacity: .75; }
+  50% { opacity: 1; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .agent-face.busy img { animation: none; }
-  .agent-face.busy::after { animation: none; opacity: .3; }
+  /* 動かさない。輪は残す（動いていることを示すのは輪の役目） */
+  .agent-face.busy img, .agent-face.busy::before { animation: none; }
+  .agent-face.busy::after { display: none; }
 }
 
 /* 畳んでおくもの（仕様書 第6.7.3.1節）。縦を使いすぎない */
