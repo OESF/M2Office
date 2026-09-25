@@ -256,6 +256,7 @@ export interface Repository {
    * @remarks
    * **どの依頼の入力にも使われていないもの**だけを消す。
    * 1 つのファイルは複数の実行で使われうるため、実行との 1 対 1 の紐づけは持たない。
+   * **秘書のアバターに使っている画像も消さない**（仕様書 第10.10.5節）。
    */
   deleteLooseUploadsBefore(tenantId: string, before: string): Promise<string[]>;
   /**

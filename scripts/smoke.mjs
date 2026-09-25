@@ -2461,6 +2461,56 @@ console.log('\n■ 49. 本人のアバター（Google のプロフィール写�
   }
 }
 
+console.log('\n■ 50. 秘書のアバターに使っている画像は、4 週の見回りで消さない（第10.10.5節・第6.1.3節）');
+{
+  // 本人が上げたアバターは、どの依頼の入力にも現れない。以前は「秘書に渡しただけのファイル」と
+  // 同じ扱いで 4 週後に消え、アバターが人の形のアイコンに戻っていた
+  const who = { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' };
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+  const upload = async (name) => {
+    const form = new FormData();
+    form.append('file', new Blob([png], { type: 'image/png' }), name);
+    const res = await fetch(`${API}/v1/files`, { method: 'POST', headers: who, body: form });
+    return (await res.json()).id;
+  };
+  const avatarId = await upload('smoke-avatar.png');
+  const looseId = await upload('smoke-loose.png');
+  const { body: prefs } = await call('a', '/v1/me/settings', {}, 'member');
+  const keep = prefs.secretary.avatar;
+  await call('a', '/v1/me/settings/secretary', { method: 'PUT', body: JSON.stringify({ ...prefs.secretary, avatar: `file:${avatarId}` }) }, 'member');
+
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const { tsImport } = await import('tsx/esm/api');
+  const { PostgresRepository } = await tsImport('../packages/core/src/repository/postgres.ts', import.meta.url);
+  const { LocalFileStore } = await tsImport('../packages/core/src/files/store.ts', import.meta.url);
+  const repo = new PostgresRepository(process.env.DATABASE_URL ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
+  const store = new LocalFileStore(process.env.FILE_STORAGE_DIR ?? new URL('../.data/files', import.meta.url).pathname);
+  try {
+    // 2 つとも 30 日前に上げたことにして、4 週の見回りと同じ条件で消させる
+    await owner.query(`update files set created_at = now() - interval '30 days' where id = any($1)`, [[avatarId, looseId]]);
+    const swept = await repo.deleteLooseUploadsBefore('t-alpha', new Date(Date.now() - 28 * 86_400_000).toISOString());
+    for (const id of swept) await store.remove('t-alpha', id).catch(() => undefined);
+    !swept.includes(avatarId) ? ok('アバターに使っている画像は消さない') : ng('アバターの画像が消えた');
+    swept.includes(looseId) ? ok('どこにも使っていない画像は、これまでどおり 4 週で消す') : ng('使っていない画像が残った');
+    const avatar = await fetch(`${API}/v1/me/avatar`, { headers: who });
+    avatar.status === 200 ? ok('見回りのあとも、アバターを表示できる') : ng(`アバターが表示できない（${avatar.status}）`);
+
+    // アバターを替えると、前の画像はどこにも使われなくなり、4 週の見回りで消える
+    await call('a', '/v1/me/settings/secretary', { method: 'PUT', body: JSON.stringify({ ...prefs.secretary, avatar: '' }) }, 'member');
+    const later = await repo.deleteLooseUploadsBefore('t-alpha', new Date(Date.now() - 28 * 86_400_000).toISOString());
+    for (const id of later) await store.remove('t-alpha', id).catch(() => undefined);
+    later.includes(avatarId) ? ok('アバターを替えたあとの古い画像は、4 週の見回りで消える') : ng('替えたあとの古い画像が残った');
+  } finally {
+    await call('a', '/v1/me/settings/secretary', { method: 'PUT', body: JSON.stringify({ ...prefs.secretary, avatar: keep }) }, 'member');
+    await owner.query(`delete from files where id = any($1)`, [[avatarId, looseId]]);
+    for (const id of [avatarId, looseId]) await store.remove('t-alpha', id).catch(() => undefined);
+    await owner.end();
+    await repo.close?.();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

@@ -1280,13 +1280,18 @@ export class PostgresRepository implements Repository {
   }
 
   async deleteLooseUploadsBefore(tenantId: string, before: string): Promise<string[]> {
-    // どの依頼の入力にも現れないものだけを消す。1 つのファイルは複数の実行で使われうる
+    // どの依頼の入力にも現れないものだけを消す。1 つのファイルは複数の実行で使われうる。
+    // **秘書のアバターに使っている画像も消さない**（仕様書 第10.10.5節）。依頼の入力には現れないが、
+    // 秘書に渡しただけのファイルではない。替えて使わなくなれば、次の見回りで消える
     const rows = await this.q<{ id: string }>(tenantId,
       `delete from files f
         where f.tenant_id = $1 and f.origin = 'upload' and f.run_id is null and f.created_at < $2
           and not exists (
             select 1 from jobs j, jsonb_each_text(j.input) e
              where j.tenant_id = f.tenant_id and e.value = f.id)
+          and not exists (
+            select 1 from user_settings s
+             where s.tenant_id = f.tenant_id and s.secretary->>'avatar' = 'file:' || f.id)
         returning f.id`,
       [tenantId, before]);
     return rows.map((r) => r.id);
