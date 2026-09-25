@@ -31,6 +31,13 @@ function devHttps(): { key: Buffer; cert: Buffer } | undefined {
   return { key: readFileSync(key), cert: readFileSync(cert) };
 }
 
+/**
+ * 画面に埋め込む版（ルートの `package.json`。仕様書 第6.1.1.1節）。
+ *
+ * @remarks **ビルドのときに決まる。** リリースで版を上げたら、画面を作り直さないと古い版が出たままになる（リリース規定）。
+ */
+const appVersion = (JSON.parse(readFileSync(fileURLToPath(new URL('../../package.json', import.meta.url)), 'utf-8')) as { version: string }).version;
+
 /** API への転送。**WebSocket も通す**（音声の中継。仕様書 第10.5.5節）。 */
 const apiProxy = {
   '/v1': {
@@ -52,6 +59,8 @@ const apiProxy = {
  */
 export default defineConfig({
   plugins: [react()],
+  // 画面の版を埋め込む（仕様書 第6.1.1.1節）
+  define: { __APP_VERSION__: JSON.stringify(appVersion) },
   server: {
     port: Number(process.env['WEB_PORT'] ?? 3100),
     host: true,

@@ -8,6 +8,7 @@
  */
 
 import { serve } from '@hono/node-server';
+import { readFileSync } from 'node:fs';
 import type { Server as HttpServer } from 'node:http';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
@@ -42,6 +43,19 @@ import { connectionsRoute, myGoogleRoute, oauthCallbackRoute } from './routes/co
  * 画面専用の抜け道を作らない。SPA 構成により、これは構造として保たれる。
  */
 const deps = buildDeps();
+
+/**
+ * サーバーの版（ルートの `package.json`。仕様書 第6.1.1.1節）。起動のときに 1 度だけ読む。
+ *
+ * @remarks 画面は自分の版と比べ、違えば再読み込みを促す（開いたままのタブが古い版のまま残るため）。
+ */
+const SERVER_VERSION: string | null = (() => {
+  try {
+    return (JSON.parse(readFileSync(new URL('../../../package.json', import.meta.url), 'utf-8')) as { version: string }).version;
+  } catch {
+    return null;
+  }
+})();
 const app = new Hono<AppEnv>();
 
 /**
@@ -82,6 +96,8 @@ app.get('/v1/me', async (c) => {
     tenant: ctx.tenant,
     user: ctx.user,
     photo: photo ? `/v1/me/photo?v=${encodeURIComponent(photo.fetchedAt)}` : null,
+    // サーバーの版。画面の版と違えば、画面が再読み込みを促す（第6.1.1.1節）
+    serverVersion: SERVER_VERSION,
     auth: { method: auth.method },
     csrfToken: auth.method === 'session' ? auth.csrfToken : null,
     // 値の出どころは会社ごと（ADR-0022）

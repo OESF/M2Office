@@ -84,6 +84,9 @@ src/theme.ts           画面の明るさ（ライト・ダーク・端末に合
 src/greeting.ts        最初の画面の時候の一言（第6.1.5節）
 src/save.tsx           保存のボタンと、その横に出る結果（第6.10.4.2節）
 src/sources.tsx        秘書の答えの出典（題名と抜き出しの 2 段。引用したものを先に。第6.2節）
+src/launcher.tsx       上の帯の版の表示（「このアプリについて」）と Google のアプリの一覧（第6.1.1.1節・第6.1.1.2節）
+src/version.ts         画面の版。ビルドのときに vite.config.ts の define で埋め込む（ルートの package.json の版）
+src/google-links.ts    Google のアプリの一覧に並べるリンク（本人のアカウントの指定だけを載せる）
 public/icons.svg       画面のアイコン（モノクロの線画。文字の色を引き継ぐ）
 public/avatars/        秘書のアバターの見本（第6.1.3節）。README を参照
 public/agents/         業務エージェントの絵 25 枚（第6.7.4.3節）。README を参照

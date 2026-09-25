@@ -126,6 +126,8 @@ export interface Me {
   workspaceSource: 'mock' | 'google';
   /** 本人のアバター（Google のプロフィール写真。仕様書 第6.5.1.1節）の URL。まだ無ければ `null`。 */
   photo: string | null;
+  /** サーバーの版（仕様書 第6.1.1.1節）。読めなければ `null`。 */
+  serverVersion: string | null;
 }
 
 export interface LoginProviders {

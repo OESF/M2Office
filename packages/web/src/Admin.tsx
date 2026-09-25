@@ -15,6 +15,7 @@ import { Checklist, Dashboard } from './Dashboard.js';
 import { ExtensionSettings } from './Extensions.js';
 import { Connections } from './Connections.js';
 import { HelpCenter, useOpenHelp } from './help.js';
+import { AppVersionBadge } from './launcher.js';
 import { Icon, NavHeading, NavItem, SideNavLayout, ThemeToggle, type IconName } from './nav.js';
 
 type Tab =
@@ -145,6 +146,7 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
     <div className="app">
       <header className="topbar">
         <span className="brand">M2Office 管理</span>
+        <AppVersionBadge serverVersion={me.serverVersion} />
         <span className="tenant">{me.tenant.name}</span>
         <span className="spacer" />
         <a className="link" href={`/${location.search}`}>ワークスペースへ戻る</a>

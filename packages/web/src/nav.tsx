@@ -22,7 +22,8 @@ export type IconName =
   | 'approvals' | 'history' | 'notifications' | 'schedules' | 'help' | 'user' | 'settings'
   | 'dashboard' | 'usage' | 'runs' | 'company' | 'sliders' | 'extensions' | 'users' | 'audit' | 'connectors'
   | 'nav-collapse' | 'nav-expand' | 'caret-right' | 'caret-down' | 'back' | 'sun' | 'moon' | 'logout'
-  | 'mic' | 'mic-off' | 'clip' | 'send';
+  | 'mic' | 'mic-off' | 'clip' | 'send' | 'tasks' | 'chat' | 'drive' | 'external'
+  | 'doc' | 'sheet' | 'slides' | 'form' | 'video' | 'console' | 'apps';
 
 /** モノクロのアイコン。文字の色を引き継ぐ。飾りなので読み上げない。 */
 export function Icon({ name, className }: { name: IconName; className?: string }) {

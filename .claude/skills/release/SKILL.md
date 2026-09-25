@@ -228,9 +228,17 @@ python3 tools/pdf/build.py specification.md <scratchpad>/specification.html
 pdftotext -f 1 -l 1 specification.pdf - | grep draft    # 表紙の版が仕様書の版と合うか
 ```
 
-画面は、いまのところ版の番号をビルドに埋め込んでいない。**埋め込むようにした後は、リリースのコミットの後に必ず
-`npm run build -w packages/web` で作り直し、埋め込まれた値を確かめること**
+画面は、ビルドのときにルートの `package.json` の版を埋め込み、上の帯の「M2Office」の右に出す（仕様書 第6.1.1.1節）。
+**リリースのコミットの後に必ず作り直し、埋め込まれた値が新しい版か確かめること**
 （AI Radio で、作り直しを省いて画面の版が古いまま残った事故がある）。
+
+```bash
+npm run build -w packages/web
+grep -o '"X.Y.Z"' packages/web/dist/assets/*.js | head -1    # 新しい版が埋め込まれているか
+```
+
+開発サーバー（`npm run dev`）は、版を上げても起動し直すまで古い版を出し続ける。
+開いたままのタブには「新しい版があります」と出るので、再起動するかは三浦さんに確かめてから行う。
 
 ### 10. 結果を確かめて報告する
 
