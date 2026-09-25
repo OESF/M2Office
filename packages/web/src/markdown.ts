@@ -1,7 +1,7 @@
 /**
  * @file ヘルプの記事の Markdown を、表示のためのまとまり（見出し・段落・箇条書き）に分ける。
  *
- * 見出し・段落・箇条書き・表・コードの囲みと、行の中のコード・リンク・太字を扱う。
+ * 見出し・段落・箇条書き・表・コードの囲み・引用と、行の中のコード・リンク・太字を扱う。
  * 行ごとに読む。見出しの行はそれだけで 1 つのまとまりにするため、見出しのすぐ次の行に箇条書きや段落が
  * 空行なしで続いても崩れない（業務の説明は定義から自動で作り、この書き方になる。仕様書 第6.10.5節）。
  * HTML としては解釈しない。記事に書かれたタグは文字のまま出る。
@@ -15,7 +15,9 @@ export type MdBlock =
   | { kind: 'p'; text: string }
   | { kind: 'ul' | 'ol'; items: string[] }
   | { kind: 'table'; header: string[]; rows: string[][] }
-  | { kind: 'code'; lang: string; text: string };
+  | { kind: 'code'; lang: string; text: string }
+  /** 引用（`>` で始まる行の並び）。**改行を保つ**。承認の画面で、送る本文をそのまま見せるのに使う（仕様書 第9.3.3節）。 */
+  | { kind: 'quote'; lines: string[] };
 
 /** 行の中の書式。 */
 export type MdInline =
@@ -82,6 +84,15 @@ export function parseMarkdown(text: string): MdBlock[] {
       continue;
     }
     if (line.trim() === '') { flush(); continue; }
+    // 引用。続く行も `>` で始まるかぎり 1 つのまとまりにし、行の区切りを保つ
+    if (/^\s*>/.test(line)) {
+      flush();
+      const quoted: string[] = [];
+      while (i < lines.length && /^\s*>/.test(lines[i]!)) quoted.push(lines[i++]!.replace(/^\s*> ?/, '').trimEnd());
+      i--;
+      blocks.push({ kind: 'quote', lines: quoted });
+      continue;
+    }
     const h = /^(#{1,6})\s+(.*)$/.exec(line);
     if (h) {
       flush();

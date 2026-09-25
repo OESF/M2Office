@@ -54,6 +54,15 @@ export function validateDefinition(def: AgentDefinition, registry: ToolRegistry)
     throw new DefinitionInvalidError('権限区画に属する業務では web.research を使えません（区画のデータを社外の検索に送らないため）');
   }
 
+  // 2c. 段ごとの道具は、定義の道具の一部でなければならない（第9.2.7節）
+  for (const step of def.steps) {
+    if (step.type !== 'agent' || !step.tools) continue;
+    const outside = step.tools.filter((t) => !def.tools.includes(t));
+    if (outside.length > 0) {
+      throw new DefinitionInvalidError(`段「${step.id}」が、定義の道具に無いものを使おうとしています: ${outside.join(', ')}`);
+    }
+  }
+
   // 3. ステップ ID の重複と、restartFrom の参照先
   const ids = new Set<string>();
   for (const step of def.steps) {

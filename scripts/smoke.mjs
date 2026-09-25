@@ -297,7 +297,8 @@ console.log('\n■ 10. AG-03 日程調整（招待の前に本人が承認）');
     body: JSON.stringify({ agentId: 'scheduling', input: { title: '企画会議', attendees: 'admin@alpha.example.jp' } }),
   }, 'member');
   const run = await waitFor('a', body.runId, ['awaiting_approval', 'completed', 'failed'], 20000, 'member');
-  const invitedEarly = run.steps.flatMap((s) => s.output?.tools ?? []).some((t) => t.name === 'calendar.create' && !t.error);
+  // 承認の前に組み立てた段には「承認のあとに実行します」の印だけが残る（第9.3.3節）。実行した結果があるかで見る
+  const invitedEarly = run.steps.flatMap((s) => s.output?.tools ?? []).some((t) => t.name === 'calendar.create' && t.result);
   run.run.status === 'awaiting_approval' && !invitedEarly
     ? ok('空きを取得し、招待の前で止まった')
     : ng(`承認待ちにならない（${run.run.status}）`);
@@ -305,6 +306,13 @@ console.log('\n■ 10. AG-03 日程調整（招待の前に本人が承認）');
   const approval = await approvalFor('a', body.runId, 'member');
   approval?.approverUserId === 'u-a-member'
     ? ok('依頼した本人の承認トレイに出た') : ng('本人の承認トレイに出ない');
+
+  // 承認の画面に、判断するものと、承認すると行うことが出る（第9.3.3節）。見出しの 1 行だけではない
+  const shown = approval?.present ?? '';
+  shown.split('\n')[0] === '予定の候補と招待の文面' && /## 判断するもの/.test(shown)
+    && /## 承認すると[\s\S]*予定を登録し、招待を送ります/.test(shown) && !/calendar\.create|\{"/.test(shown)
+    ? ok('承認の画面に、判断するものと、承認すると行うこと（予定の作成）を業務の言葉で出す')
+    : ng('承認の画面に中身が出ない', shown.slice(0, 200));
 
   // 開く前に、何を判断するのかが分かる（第6.2.4節）
   approval?.agentName
@@ -1127,13 +1135,14 @@ console.log('\n■ 25. Google Workspace のツール（第 1 弾）');
     ? ok('読んだ内容からスプレッドシートを作れる') : ng('スプレッドシートを作れない', JSON.stringify(created));
   /引数が正しくありません: rows がありません/.test(badAppend?.error ?? '')
     ? ok('必須の引数が無い呼び出しは、ツールを呼ばずに理由を返す') : ng('引数の検証が効かない', JSON.stringify(badAppend));
-  waiting.run?.status === 'awaiting_approval' && out('send').length === 0
-    ? ok('メールの送信の手前で、承認を待つ') : ng('承認を待たない', waiting.run?.status);
+  // 送る段は承認の前に組み立てられ、「承認のあとに実行します」の印だけが残る（第9.3.3節）
+  waiting.run?.status === 'awaiting_approval' && out('send').every((t) => !t.result) && out('send').some((t) => t.pending)
+    ? ok('メールの送信の手前で、承認を待つ（送る中身は組み立て済みで、まだ送っていない）') : ng('承認を待たない', waiting.run?.status);
 
   const ap = await approvalFor('a', job.runId, 'member');
   await call('a', `/v1/approvals/${ap.id}`, { method: 'POST', body: JSON.stringify({ decision: 'approved' }) }, 'member');
   const done = await waitFor('a', job.runId, ['completed', 'failed'], 20000, 'member');
-  const sent = done.steps?.find((x) => x.stepId === 'send')?.output?.tools?.[0]?.result;
+  const sent = done.steps?.find((x) => x.stepId === 'send')?.output?.tools?.find((t) => t.name === 'gmail.send' && t.result)?.result;
   done.run?.status === 'completed' && sent?.sent === true && sent.source === 'mock'
     ? ok('承認のあとにメールを送る（見本の接続口）') : ng('承認のあとに送れない', JSON.stringify(done.run));
 

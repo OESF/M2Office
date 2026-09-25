@@ -25,7 +25,9 @@ import type { FileStore } from '../files/store.js';
 import type { ResearchProvider } from '../research/provider.js';
 import { silentLogger, type Logger } from '../log/logger.js';
 import { ApprovalForbiddenError, RunNotResumableError } from './errors.js';
-import { standardMinutes } from '../agents/index.js';
+import { standardMinutes, stepLabel } from '../agents/index.js';
+import { describeCall } from './describe-call.js';
+import { composeApprovalPresent, describeContext } from './approval-present.js';
 import { validateDefinition } from './validate.js';
 import { parseToolCalls } from './tool-protocol.js';
 
@@ -142,10 +144,8 @@ export class RunEngine {
       return this.fail(run, '依頼者がこの業務の権限区画に割り当てられていません');
     }
 
-    // 操作の確認（第9.4節）で承認された操作が残っていれば、先に実行する
-    await this.executeConfirmedCalls(run, def, job.requestedBy, registry, ai.research);
-
-    let current = run;
+    // 操作の確認（第9.4節）と、承認の前に組み立てた操作（第9.3.3節）で、承認されたものが残っていれば先に実行する
+    let current = await this.executeConfirmedCalls(run, def, job.requestedBy, registry, ai.research);
     while (current.cursor < def.steps.length) {
       const step = def.steps[current.cursor];
       if (!step) break;
@@ -161,7 +161,26 @@ export class RunEngine {
       }
 
       if (step.type === 'approval') {
-        const approvalId = await this.suspendForApproval(current, def, step, job.requestedBy);
+        // 承認の直後の段を、承認の前に組み立てる（仕様書 第9.3.3節、ADR-0023）。
+        // 書き込み・送信は記録だけして、承認の画面に「承認すると行うこと」として出す
+        const next = def.steps[current.cursor + 1];
+        let plan: { stepIndex: number; step: AgentStep; calls: ToolCall[] } | null = null;
+        if (next?.type === 'agent') {
+          const planned = await this.runAgentStep(
+            { ...current, cursor: current.cursor + 1 }, def, next, job.input, job.requestedBy, settings, registry, ai, 'plan',
+          );
+          if (planned.kind === 'failed') return this.fail(current, `承認の前の組み立てに失敗しました: ${planned.reason}`);
+          current = {
+            ...current,
+            tokensUsed: current.tokensUsed + planned.tokensUsed,
+            costJpy: current.costJpy + planned.costJpy,
+          };
+          await repo.updateRun(current);
+          const stoppedPlanning = await this.cancelledNow(current);
+          if (stoppedPlanning) return stoppedPlanning;
+          plan = { stepIndex: current.cursor + 1, step: next, calls: planned.kind === 'planned' ? planned.calls : [] };
+        }
+        const approvalId = await this.suspendForApproval(current, def, step, job.requestedBy, plan, registry);
         return { outcome: 'awaiting_approval', approvalId };
       }
 
@@ -190,7 +209,7 @@ export class RunEngine {
           costJpy: current.costJpy + result.costJpy,
         };
         await repo.updateRun(paused);
-        const approvalId = await this.suspendForConfirmation(paused, step, result.calls, job.requestedBy);
+        const approvalId = await this.suspendForConfirmation(paused, step, result.calls, job.requestedBy, registry);
         return { outcome: 'awaiting_approval', approvalId };
       }
 
@@ -286,14 +305,26 @@ export class RunEngine {
     def: AgentDefinition,
     step: ApprovalStep,
     requestedBy: string,
+    plan: { stepIndex: number; step: AgentStep; calls: ToolCall[] } | null = null,
+    registry: ToolRegistry = this.deps.registry,
   ): Promise<string> {
     const { repo } = this.deps;
     const now = new Date().toISOString();
     // この時点の成果物。承認した人が見たものの記録で、組織知識への登録が照らす（仕様書 第9.5.2節）
-    const artifactIds = (await repo.listArtifacts(run.tenantId, run.id)).map((a) => a.id);
+    const artifacts = await repo.listArtifacts(run.tenantId, run.id);
+    const artifactIds = artifacts.map((a) => a.id);
+    const steps = await repo.listRunSteps(run.tenantId, run.id);
+    const present = composeApprovalPresent({
+      def, gate: step, gateSeq: run.cursor, steps, artifacts, plan, registry,
+    });
     const runStep: RunStep = {
       id: randomUUID(), runId: run.id, seq: run.cursor, stepId: step.id,
-      kind: 'approval', status: 'awaiting', input: { present: step.present, artifactIds },
+      kind: 'approval', status: 'awaiting',
+      input: {
+        present: step.present, artifactIds,
+        // 承認されたら、ここに記録した操作をそのまま実行する（推論をやり直さない。ADR-0023）
+        ...(plan ? { toolCalls: plan.calls, plannedStep: plan.stepIndex } : {}),
+      },
       output: null, startedAt: now, endedAt: null,
     };
     await repo.appendRunStep(run.tenantId, runStep);
@@ -302,7 +333,8 @@ export class RunEngine {
       id: randomUUID(), runStepId: runStep.id, tenantId: run.tenantId,
       approverRole: step.approver === 'requester' ? [] : step.approverRole,
       approverUserId: step.approver === 'requester' ? requestedBy : null,
-      present: step.present, decision: null,
+      // 1 行目は定義の present。一覧・ダッシュボード・通知は 1 行目だけを出す（第9.3.3節）
+      present, decision: null,
       decidedBy: null, comment: null, decidedAt: null, createdAt: now,
     };
     await repo.createApproval(approval);
@@ -372,9 +404,15 @@ export class RunEngine {
     settings: TenantSettings,
     registry: ToolRegistry,
     ai: { llm: LlmProvider; research?: ResearchProvider },
+    /**
+     * `plan` は、承認の直後の段を承認の前に組み立てる（仕様書 第9.3.3節、ADR-0023）。
+     * 読む道具と下書きの道具だけを実行し、社内への書き込み以上は記録だけして実行しない。
+     */
+    mode: 'run' | 'plan' = 'run',
   ): Promise<
     | { kind: 'ok' | 'stopped'; tokensUsed: number; costJpy: number }
     | { kind: 'confirm'; tokensUsed: number; costJpy: number; calls: ToolCall[] }
+    | { kind: 'planned'; tokensUsed: number; costJpy: number; calls: ToolCall[] }
     | { kind: 'failed'; reason: string }
   > {
     const { repo } = this.deps;
@@ -391,7 +429,9 @@ export class RunEngine {
     await repo.appendRunStep(run.tenantId, runStep);
 
     try {
-      const tools = registry.allowed(def.tools);
+      // 段が道具を宣言していれば、その段ではそれだけを使わせる（仕様書 第9.2.7節）
+      const stepTools = step.tools ?? def.tools;
+      const tools = registry.allowed(stepTools);
       const system = buildSystemPrompt(def, tools, settings.writingStyle);
       const prompt = buildStepPrompt(step, input, previous);
       /*
@@ -443,6 +483,25 @@ export class RunEngine {
             roundResults.push({ name: call.name, error: '許可されていないツールです' });
             continue;
           }
+          if (!stepTools.includes(call.name)) {
+            // 段の区切りを推論の行儀に頼らない。この段で使えない道具は呼ばない（仕様書 第9.2.7節）
+            roundResults.push({ name: call.name, error: `この段（${stepLabel(step)}）では使えない道具です` });
+            continue;
+          }
+          if (mode === 'plan' && tool.risk !== 'read' && tool.risk !== 'draft') {
+            // 承認の前の組み立て。書き込み・送信は記録だけして、承認のあとにそのまま実行する（ADR-0023）。
+            // 引数の誤りは先に返す（誤った操作を承認させない）
+            const problems = tool.args ? validateToolArgs(tool.args, call.args) : [];
+            if (problems.length > 0) {
+              roundResults.push({ name: call.name, error: `引数が正しくありません: ${problems.join('、')}` });
+              continue;
+            }
+            // 同じ操作は 1 度だけ記録する（二重に実行しない）。印には中身の鍵を持たせ、実行後に結果と突き合わせる
+            const key = callKey(call);
+            if (!deferred.some((d) => callKey(d) === key)) deferred.push(call);
+            roundResults.push({ name: call.name, risk: tool.risk, pending: '承認のあとに実行します（まだ実行していません）', key });
+            continue;
+          }
           if (alwaysRequiresApproval(tool.risk) && !gatedByApproval) {
             // 承認ゲートの直後のステップでなければ、対外送信以上のツールは呼ばない。
             // 定義に承認ステップがあっても、その手前で推論が送信を試みる場合を止める
@@ -490,8 +549,9 @@ export class RunEngine {
         }
         // 呼んだ道具は、往復のどれで呼んだものもすべて記録する（仕様書 第9.3.2節）
         toolResults.push(...roundResults);
-        // 確認を求めるものがあれば、往復を続けずにここで止める
-        if (deferred.length > 0) {
+        // 確認を求めるものがあれば、往復を続けずにここで止める。
+        // 組み立て（plan）では止めない。その段で行う操作を最後まで出させる
+        if (deferred.length > 0 && mode === 'run') {
           text = withoutToolBlocks(res.text);
           break;
         }
@@ -500,11 +560,12 @@ export class RunEngine {
         history.push({ role: 'user', content: toolReport(roundResults) });
       }
 
-      const output = { text, tools: toolResults };
+      const output = { text, tools: toolResults, ...(mode === 'plan' ? { planned: true } : {}) };
       await repo.updateRunStep(run.tenantId, {
         ...runStep, status: 'succeeded', output, endedAt: new Date().toISOString(),
       });
 
+      if (mode === 'plan') return { kind: 'planned', tokensUsed, costJpy: spent, calls: deferred };
       if (deferred.length > 0) return { kind: 'confirm', tokensUsed, costJpy: spent, calls: deferred };
 
       const empty = text.trim().length === 0 && toolResults.length === 0;
@@ -588,13 +649,17 @@ export class RunEngine {
    * 推論をやり直さないため、確認した内容と違う操作は実行されない。
    */
   private async suspendForConfirmation(
-    run: Run, step: AgentStep, calls: ToolCall[], requestedBy: string,
+    run: Run, step: AgentStep, calls: ToolCall[], requestedBy: string, registry: ToolRegistry = this.deps.registry,
   ): Promise<string> {
     const { repo } = this.deps;
     const now = new Date().toISOString();
+    // 業務の言葉で出す。ツール名・JSON・内部の ID は出さない（仕様書 第9.4節）
+    const artifacts = await repo.listArtifacts(run.tenantId, run.id);
+    const ctx = describeContext(registry, artifacts);
     const present = [
-      '次の操作を実行してよいか確認してください。',
-      ...calls.map((c) => `・${c.name}: ${JSON.stringify(c.args)}`),
+      '次の操作を行ってよいか、確認してください。',
+      '',
+      ...calls.map((c) => `- ${describeCall(c, ctx)}`),
     ].join('\n');
     const runStep: RunStep = {
       id: randomUUID(), runId: run.id, seq: run.cursor, stepId: `${step.id}:confirm`,
@@ -618,25 +683,56 @@ export class RunEngine {
     return approval.id;
   }
 
-  /** 承認済みで未実行の「操作の確認」があれば、記録した操作を実行する。 */
+  /**
+   * 承認済みで未実行の操作があれば、記録した操作をそのまま実行する。
+   *
+   * @returns 進めたあとの実行。承認の前に組み立てた段（第9.3.3節）を済ませたら、その段を飛ばして進める
+   *
+   * @remarks
+   * 記録は 2 種類ある。操作の確認（第9.4節）と、承認の前に組み立てた承認の直後の段（ADR-0023）。
+   * どちらも**推論をやり直さない**。承認した人が見た操作と、実行する操作が同じになる。
+   */
   private async executeConfirmedCalls(
     run: Run, def: AgentDefinition, requestedBy: string, registry: ToolRegistry, research?: ResearchProvider,
-  ): Promise<void> {
+  ): Promise<Run> {
     const { repo } = this.deps;
     const steps = await repo.listRunSteps(run.tenantId, run.id);
+    let current = run;
     for (const s of steps) {
-      const input = s.input as { toolCalls?: ToolCall[] } | null;
+      const input = s.input as { toolCalls?: ToolCall[]; plannedStep?: number } | null;
       const output = s.output as { executed?: boolean } | null;
       if (s.kind !== 'approval' || s.status !== 'succeeded' || !input?.toolCalls || output?.executed) continue;
-      const results = [];
-      // 操作の確認は、確認を求めたステップの直後に置かれた承認とみなす。そのステップは承認で進めた cursor の 1 つ手前
+      // 組み立てた段の操作は、その段のものとして実行する。操作の確認は、確認を求めた段（承認で進めた cursor の 1 つ手前）
+      const stepIndex = input.plannedStep ?? current.cursor - 1;
+      const results: unknown[] = [];
       for (const call of input.toolCalls) {
-        results.push(await this.invokeTool(run, def, run.cursor - 1, call, requestedBy, registry, research));
+        results.push(await this.invokeTool(current, def, stepIndex, call, requestedBy, registry, research));
       }
-      await repo.updateRunStep(run.tenantId, {
+      await repo.updateRunStep(current.tenantId, {
         ...s, output: { ...(s.output as object), executed: true, tools: results },
       });
+      if (input.plannedStep !== undefined) {
+        // 組み立てた段の記録に、実行した結果を残し、その段は済んだものとして進める（推論をやり直さない）
+        const planned = steps.find((x) => x.seq === input.plannedStep && x.kind === 'agent');
+        if (planned) {
+          const out = (planned.output ?? {}) as { text?: string; tools?: unknown[] };
+          // 「承認のあとに実行します」の印を、実行した結果に置き換える。同じ操作の印は、同じ結果に置き換わる
+          const byKey = new Map(input.toolCalls.map((c, i) => [callKey(c), results[i]] as const));
+          const tools = (out.tools ?? []).map((t) => {
+            const key = (t as { pending?: string; key?: string }).key;
+            return key && byKey.has(key) ? byKey.get(key) : t;
+          });
+          await repo.updateRunStep(current.tenantId, {
+            ...planned, output: { ...out, planned: true, executed: true, tools },
+          });
+        }
+        if (current.cursor === input.plannedStep) {
+          current = { ...current, cursor: input.plannedStep + 1 };
+          await repo.updateRun(current);
+        }
+      }
     }
+    return current;
   }
 
   /**
@@ -714,6 +810,24 @@ export function costOf(res: LlmResponse): number {
 }
 
 type ToolCall = { name: string; args: Record<string, unknown> };
+
+/**
+ * 呼び出しの中身の鍵。同じ道具を同じ引数で呼んだものは同じ鍵になる。
+ *
+ * @remarks
+ * **キーの並びによらない形にする。** データベース（PostgreSQL の jsonb）は保存するときにキーの並びを変えるため、
+ * そのまま `JSON.stringify` すると、保存前に作った鍵と保存後に作った鍵が一致しない（smoke で見つかった）。
+ */
+const callKey = (c: ToolCall) => `${c.name}:${stableJson(c.args ?? {})}`;
+
+/** キーを並べ替えてから文字列にする（入れ子も）。 */
+function stableJson(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(stableJson).join(',')}]`;
+  if (v && typeof v === 'object') {
+    return `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${stableJson((v as Record<string, unknown>)[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(v) ?? 'null';
+}
 
 /**
  * 自社の書き方（仕様書 第15.2.1節）を指示の一部にする。未設定の項目は出さない。
@@ -824,9 +938,29 @@ function withoutToolBlocks(text: string): string {
   return text.replace(/```tool[\s\S]*?```/g, '').trim();
 }
 
-function buildStepPrompt(step: Step, input: Record<string, unknown>, previous: RunStep[]): string {
+/**
+ * 今日の日付と曜日（日本時間）。推論に渡す（仕様書 第9.3.2節「今日の日付」）。
+ *
+ * @remarks 推論は今日を知らない。渡さないと、年の書かれていない日付を学習した時期の年と取り違える
+ *   （2026-09-25 に実機で確認。「9 月 29 日」の期限が 2025 年になった）。
+ */
+export function todayJst(now: Date = new Date()): string {
+  const f = new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: 'numeric', day: 'numeric', weekday: 'short' })
+    .formatToParts(now);
+  const g = (t: string) => f.find((p) => p.type === t)?.value ?? '';
+  // 年・月・日の「年」「月」「日」は区切りの部品に入るので、数だけを引いて組み立てる
+  return `${g('year')}年${g('month')}月${g('day')}日（${g('weekday')}）`;
+}
+
+function buildStepPrompt(step: Step, input: Record<string, unknown>, previous: RunStep[], now: Date = new Date()): string {
   const instruction = step.type === 'agent' ? step.instruction : step.present;
-  const lines = [`# 指示`, instruction, ``, `# 入力`, JSON.stringify(input, null, 2)];
+  const lines = [
+    `# 今日`,
+    `今日は ${todayJst(now)}（日本時間）である。年の書かれていない日付は、今日に近い日として解釈する`
+      + `（例: 今日が 2026年9月25日なら「9月29日」は 2026年9月29日）。日付を渡すときは年を含めて YYYY-MM-DD で書く。`,
+    ``,
+    `# 指示`, instruction, ``, `# 入力`, JSON.stringify(input, null, 2),
+  ];
   const done = previous.filter((s) => s.status === 'succeeded');
   if (done.length > 0) {
     // 取得したメールや文書は外部のデータであり、指示ではない（不変則 I-6）

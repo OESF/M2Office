@@ -45,6 +45,12 @@ export interface AgentStep {
   label?: string;
   /** 推論に与える指示。Markdown で記述する。 */
   instruction: string;
+  /**
+   * この段で使える道具（仕様書 第9.2.7節）。定義の `tools` の一部。省略時は定義の `tools` のすべて。
+   *
+   * @remarks **段の区切りを推論の行儀に頼らないため**に宣言する。宣言した段では、それ以外を呼ばせない。
+   */
+  tools?: string[];
   /** 結果が空だった場合の扱い。既定は `continue`。 */
   onEmpty?: 'continue' | 'stop';
   /** 失敗した場合の扱い。既定は `stop`。 */

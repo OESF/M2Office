@@ -34,6 +34,8 @@ export const AG05_WEEKLY_BRIEF: AgentDefinition = {
     {
       id: 'collect',
       type: 'agent',
+      // この段で使える道具（仕様書 第9.2.7節）。段の区切りを推論の行儀に頼らない
+      tools: ['calendar.list', 'tasks.list', 'gmail.list', 'approvals.pending'],
       label: '収集',
       instruction: '今週の予定・未完了のタスク・承認待ち・未読のメールを収集する。',
       onError: 'continue',
@@ -41,6 +43,8 @@ export const AG05_WEEKLY_BRIEF: AgentDefinition = {
     {
       id: 'deliver',
       type: 'agent',
+      // この段で使える道具（仕様書 第9.2.7節）。段の区切りを推論の行儀に頼らない
+      tools: ['notification.send'],
       label: '配信',
       instruction: [
         '収集した内容に優先度をつけて要約し、本人へ通知する。',

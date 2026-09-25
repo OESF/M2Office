@@ -40,6 +40,8 @@ export const AG01_INBOX: AgentDefinition = {
     {
       id: 'fetch',
       type: 'agent',
+      // この段で使える道具（仕様書 第9.2.7節）。段の区切りを推論の行儀に頼らない
+      tools: ['gmail.list', 'gmail.get'],
       label: '取得',
       instruction: '受信箱から未処理のメールを取得する。',
       onEmpty: 'stop',
@@ -48,6 +50,8 @@ export const AG01_INBOX: AgentDefinition = {
     {
       id: 'classify',
       type: 'agent',
+      // この段で使える道具（仕様書 第9.2.7節）。段の区切りを推論の行儀に頼らない
+      tools: ['gmail.get', 'knowledge.search', 'document.create'],
       label: '分類',
       instruction: [
         '取得したメールを「要返信」「要対応」「情報共有のみ」「不要」に分類する。',
@@ -58,6 +62,8 @@ export const AG01_INBOX: AgentDefinition = {
     {
       id: 'draft',
       type: 'agent',
+      // この段で使える道具（仕様書 第9.2.7節）。段の区切りを推論の行儀に頼らない
+      tools: ['gmail.get', 'knowledge.search', 'gmail.create_draft'],
       label: '下書き',
       instruction: [
         '「要返信」のメールに返信の下書きを作る。送信はしない。',

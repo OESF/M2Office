@@ -17,7 +17,7 @@ import {
 import {
   RunEngine, ToolRegistry, BUILTIN_TOOLS, MockWorkspaceConnector, MemoryFileStore, nextRunAt,
   saveFile, readSheet, renderSheet, parseCsv, extractPdfText,
-  ApprovalForbiddenError, DefinitionInvalidError, validateDefinition, OFFICIAL_AGENTS,
+  ApprovalForbiddenError, DefinitionInvalidError, validateDefinition, OFFICIAL_AGENTS, todayJst, describeCall, jpDate,
   type LlmProvider, type LlmRequest, type Repository, type KnowledgeItem,
 } from '../src/index.js';
 
@@ -445,8 +445,8 @@ function minutesLlm(repo: MemoryRepo, extra: Record<string, { name: string; args
 }
 
 /** AG-02 を、承認を 2 回通して最後まで進める。`rejectShare` なら承認②を却下する。 */
-async function runMinutes(opts: { rejectShare?: boolean; extra?: Parameters<typeof minutesLlm>[1] } = {}) {
-  const ctx = setup(AG02_MINUTES, { name: 'noop', args: {} });
+async function runMinutes(opts: { rejectShare?: boolean; extra?: Parameters<typeof minutesLlm>[1]; def?: AgentDefinition } = {}) {
+  const ctx = setup(opts.def ?? AG02_MINUTES, { name: 'noop', args: {} });
   (ctx.engine as unknown as { deps: { llm: LlmProvider } }).deps.llm = minutesLlm(ctx.repo, opts.extra);
   const admin = { id: 'u-admin', roles: ['admin', 'approver'] };
   const first = await ctx.engine.advance(ctx.run);
@@ -485,7 +485,16 @@ test('AG-02 は承認②のあと、承認①で見た議事録をそのまま�
 });
 
 test('承認②の手前（承認①の直後）では、知識に登録しない', async () => {
-  const { repo } = await runMinutes({ rejectShare: true, extra: { tasks: [{ name: 'knowledge.register', args: { artifactId: 'x' } }] } });
+  const extra = { tasks: [{ name: 'knowledge.register', args: { artifactId: 'x' } }] };
+  // 1. AG-02 の定義のまま: 「起票」の段では知識の登録を使えない（段ごとの道具。第9.2.7節）
+  const scoped = await runMinutes({ rejectShare: true, extra });
+  const blocked = scoped.repo.steps.filter((x) => x.stepId === 'tasks')
+    .flatMap((x) => ((x.output as { tools?: { name: string; error?: string }[] }).tools ?? []).filter((t) => t.name === 'knowledge.register'));
+  assert.match(String(blocked[0]?.error), /この段（起票）では使えない道具です/);
+  assert.equal(scoped.repo.knowledge.length, 0);
+  // 2. 段ごとの道具が無くても、道具そのものが「すべての承認のあと」でなければ登録しない（二重の守り）
+  const unscoped = { ...AG02_MINUTES, steps: AG02_MINUTES.steps.map((st) => (st.type === 'agent' ? { ...st, tools: undefined } : st)) };
+  const { repo } = await runMinutes({ rejectShare: true, extra, def: unscoped });
   const early = resultsOf(repo, 'tasks', 'knowledge.register');
   assert.equal(early[0]?.['registered'], false);
   assert.match(String(early[0]?.['reason']), /すべての承認/);
@@ -493,30 +502,185 @@ test('承認②の手前（承認①の直後）では、知識に登録しな�
 });
 
 test('承認のあとに作り直した成果物は、知識に登録しない', async () => {
-  // 承認①の直後の手順で、推論が別の議事録を作り、それを登録させようとする
-  const ctx = setup(AG02_MINUTES, { name: 'noop', args: {} });
-  const llm = minutesLlm(ctx.repo, {
-    tasks: [{ name: 'document.create', args: { kind: 'minutes', title: '差し替え', body: '承認していない内容' } }],
-  });
+  // 承認の直後の段は承認の前に組み立てられ、そこで作った下書きは承認の画面に出る（第9.3.3節）。
+  // そこで、承認の直後の段の**さらに次**（組み立ての対象でない段）で別の議事録を作り、登録させようとする
+  const SWAP_DEF: AgentDefinition = {
+    schemaVersion: 1, id: 'swap-test', version: 1, name: 'テスト', category: 'test', description: 'テスト',
+    locale: 'ja-JP', compartment: null, inputs: {},
+    tools: ['document.create', 'knowledge.register', 'chat.post'],
+    steps: [
+      { id: 'draft', type: 'agent', instruction: '作る' },
+      { id: 'gate', type: 'approval', approverRole: ['approver'], present: '議事録の内容' },
+      { id: 'share', type: 'agent', instruction: '共有する' },
+      { id: 'late', type: 'agent', instruction: '登録する' },
+    ],
+    constraints: [], limits: { maxSteps: 10, maxTokens: 10_000, timeoutSec: 60 },
+  };
+  const ctx = setup(SWAP_DEF, { name: 'noop', args: {} });
+  ctx.repo.settings.automation.writeInternal = 'allow';
+  const rounds: Record<string, number> = {};
   (ctx.engine as unknown as { deps: { llm: LlmProvider } }).deps.llm = {
     name: 'swap',
     async complete(req: LlmRequest) {
-      if (req.context?.stepId !== 'share') return llm.complete(req);
-      const swapped = ctx.repo.artifacts.find((a) => a.title === '差し替え')!.id;
-      return { text: '```tool\n' + JSON.stringify({ name: 'knowledge.register', args: { artifactId: swapped } }) + '\n```', tokensUsed: 1 };
+      const id = req.context?.stepId ?? '';
+      const n = (rounds[id] = (rounds[id] ?? 0) + 1);
+      const call = (c: unknown) => ({ text: '```tool\n' + JSON.stringify(c) + '\n```', tokensUsed: 1 });
+      if (id === 'draft' && n === 1) return call({ name: 'document.create', args: { kind: 'minutes', title: '承認する議事録', body: '決定事項' } });
+      if (id === 'share' && n === 1) return call({ name: 'chat.post', args: { space: 'general', text: '共有します' } });
+      if (id === 'late' && n === 1) return call({ name: 'document.create', args: { kind: 'minutes', title: '差し替え', body: '承認していない内容' } });
+      if (id === 'late' && n === 2) {
+        const swapped = ctx.repo.artifacts.find((a) => a.title === '差し替え')!.id;
+        return call({ name: 'knowledge.register', args: { artifactId: swapped } });
+      }
+      return { text: '終わりました。', tokensUsed: 1 };
     },
   };
-  const admin = { id: 'u-admin', roles: ['admin', 'approver'] };
-  for (let i = 0; i < 2; i++) {
-    const r = await ctx.engine.advance({ ...(await ctx.repo.getRun('t', 'r1'))!, status: 'running' });
-    if (r.outcome !== 'awaiting_approval') assert.fail(r.outcome);
-    await ctx.engine.decideApproval('t', r.approvalId, 'approved', admin, null);
-  }
-  await ctx.engine.advance({ ...(await ctx.repo.getRun('t', 'r1'))!, status: 'running' });
-  // 承認②の前に作られていても、承認①で見ていないため登録しない。承認②の後に承認は無い
-  const res = resultsOf(ctx.repo, 'share', 'knowledge.register')[0];
-  assert.equal(ctx.repo.knowledge.length, 0);
+  const r = await ctx.engine.advance(ctx.run);
+  if (r.outcome !== 'awaiting_approval') assert.fail(r.outcome);
+  await ctx.engine.decideApproval('t', r.approvalId, 'approved', { id: 'u-admin', roles: ['admin', 'approver'] }, null);
+  assert.equal((await ctx.engine.advance({ ...(await ctx.repo.getRun('t', 'r1'))!, status: 'running' })).outcome, 'completed');
+  const res = resultsOf(ctx.repo, 'late', 'knowledge.register')[0];
+  assert.equal(ctx.repo.knowledge.length, 0, '承認で見ていない成果物は登録しない');
   assert.match(String(res?.['reason']), /承認で確かめた成果物ではない/);
+});
+
+test('承認の画面に、確認すること・判断するもの・承認すると行うことを出す（第9.3.3節）', async () => {
+  const ctx = setup(AG02_MINUTES, { name: 'noop', args: {} });
+  (ctx.engine as unknown as { deps: { llm: LlmProvider } }).deps.llm = minutesLlm(ctx.repo, {
+    tasks: [{ name: 'tasks.create', args: { title: '資料を作る（担当: 山田）', due: '2026-09-29' } }],
+  });
+  const first = await ctx.engine.advance(ctx.run);
+  if (first.outcome !== 'awaiting_approval') assert.fail(first.outcome);
+  const a1 = ctx.repo.approvals.find((a) => a.id === first.approvalId)!;
+  const lines = a1.present.split('\n');
+  assert.equal(lines[0], '議事録の内容と、抽出した決定事項', '1 行目は定義の present（一覧・通知は 1 行目だけを出す）');
+  assert.match(a1.present, /## 判断するもの[\s\S]*成果物「営業定例の議事録」[\s\S]*販促は A 案で進める/, '議事録の本文が出る');
+  assert.match(a1.present, /## 承認すると[\s\S]*「起票」に進み/);
+  assert.match(a1.present, /\*\*ToDo を登録します\*\*: A 案の準備（期限なし）/);
+  assert.match(a1.present, /\*\*ToDo を登録します\*\*: 資料を作る（担当: 山田）（期限 2026年9月29日）/);
+  assert.doesNotMatch(a1.present, /tasks\.create|\{"/, 'ツール名や JSON を出さない');
+  assert.equal(ctx.repo.notifications.find((n) => n.kind === 'approval')?.body, '議事録の内容と、抽出した決定事項', '通知には中身を載せない');
+
+  await ctx.engine.decideApproval('t', first.approvalId, 'approved', { id: 'u-admin', roles: ['admin', 'approver'] }, null);
+  const second = await ctx.engine.advance({ ...(await ctx.repo.getRun('t', 'r1'))!, status: 'running' });
+  if (second.outcome !== 'awaiting_approval') assert.fail(second.outcome);
+  const a2 = ctx.repo.approvals.find((a) => a.id === second.approvalId)!;
+  assert.match(a2.present, /チャットのスペース「general」に投稿します\*\*:\n\s*> 議事録を共有します/, '投稿する本文そのものが出る');
+  assert.match(a2.present, /社内の知識に登録します\*\*: 「営業定例の議事録」/, 'ID ではなく題名で出す');
+  assert.doesNotMatch(a2.present, /成果物「営業定例の議事録」/, '前の承認で見せた成果物は繰り返さない');
+});
+
+test('承認の前に組み立てた操作を、承認のあとそのまま実行する。推論をやり直さない（ADR-0023）', async () => {
+  const ctx = setup(AG02_MINUTES, { name: 'noop', args: {} });
+  const base = minutesLlm(ctx.repo);
+  const calls: string[] = [];
+  (ctx.engine as unknown as { deps: { llm: LlmProvider } }).deps.llm = {
+    name: 'count', async complete(req: LlmRequest) { calls.push(String(req.context?.stepId)); return base.complete(req); },
+  };
+  const admin = { id: 'u-admin', roles: ['admin', 'approver'] };
+  const first = await ctx.engine.advance(ctx.run);
+  if (first.outcome !== 'awaiting_approval') assert.fail(first.outcome);
+  assert.ok(calls.includes('tasks'), '承認①の前に「起票」を組み立てる');
+  assert.equal(ctx.connector.outbox.filter((o) => o.kind === 'chat').length, 0);
+  assert.equal(ctx.repo.steps.find((s) => s.stepId === 'tasks')?.output && (ctx.repo.steps.find((s) => s.stepId === 'tasks')!.output as { planned?: boolean }).planned, true);
+  const before = calls.length;
+  await ctx.engine.decideApproval('t', first.approvalId, 'approved', admin, null);
+  const second = await ctx.engine.advance({ ...(await ctx.repo.getRun('t', 'r1'))!, status: 'running' });
+  if (second.outcome !== 'awaiting_approval') assert.fail(second.outcome);
+  assert.equal(calls.slice(before).filter((x) => x === 'tasks').length, 0, '承認のあとに「起票」を推論し直さない');
+  assert.ok(resultsOf(ctx.repo, 'tasks', 'tasks.create').every((r) => r['created'] === true), '組み立てた ToDo を実行した（記録の印は結果に置き換わる）');
+  const made = (await ctx.connector.tasks.list({ tenantId: 't', userId: 'u-member' }, {})).filter((t) => t.title === 'A 案の準備');
+  assert.equal(made.length, 1, '推論が同じ ToDo を 2 度出しても、1 度だけ作る');
+  await ctx.engine.decideApproval('t', second.approvalId, 'approved', admin, null);
+  const n = calls.length;
+  assert.equal((await ctx.engine.advance({ ...(await ctx.repo.getRun('t', 'r1'))!, status: 'running' })).outcome, 'completed');
+  assert.equal(calls.length, n, '承認②のあとも推論し直さない');
+  const posted = ctx.connector.outbox.filter((o) => o.kind === 'chat');
+  assert.deepEqual(posted.map((o) => (o.body as { text: string }).text), ['議事録を共有します'], '承認の画面に出した本文をそのまま投稿した');
+  assert.equal(ctx.repo.knowledge.length, 1);
+});
+
+test('組み立てた操作は、保存でキーの並びが変わっても結果と突き合わせられる', async () => {
+  // PostgreSQL の jsonb はキーを「短い順、同じ長さなら文字の順」に並べ直す。記憶上の保存では起きないため、同じ並べ方をまねる。
+  // 引数は space, text の順で渡す。jsonb は text（4 文字）を先にするので、保存の前後で並びが変わる
+  const ctx = setup(SHARE_DEF, { name: 'chat.post', args: { space: 'general', text: '共有' } });
+  const jsonbOrder = (v: unknown): unknown => (Array.isArray(v) ? v.map(jsonbOrder)
+    : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v)
+      .sort(([a], [b]) => a.length - b.length || (a < b ? -1 : a > b ? 1 : 0)).map(([k, x]) => [k, jsonbOrder(x)])) : v);
+  const repo = ctx.repo as unknown as { appendRunStep: (t: string, st: RunStepLike) => Promise<void>; updateRunStep: (t: string, st: RunStepLike) => Promise<void> };
+  type RunStepLike = { input: unknown; output: unknown };
+  const append = repo.appendRunStep.bind(ctx.repo);
+  const update = repo.updateRunStep.bind(ctx.repo);
+  repo.appendRunStep = (t, st) => append(t, { ...st, input: jsonbOrder(st.input), output: jsonbOrder(st.output) });
+  repo.updateRunStep = (t, st) => update(t, { ...st, input: jsonbOrder(st.input), output: jsonbOrder(st.output) });
+  const r = await ctx.engine.advance(ctx.run);
+  if (r.outcome !== 'awaiting_approval') assert.fail(r.outcome);
+  await ctx.engine.decideApproval('t', r.approvalId, 'approved', { id: 'u-admin', roles: ['admin', 'approver'] }, null);
+  assert.equal((await ctx.engine.advance({ ...(await ctx.repo.getRun('t', 'r1'))!, status: 'running' })).outcome, 'completed');
+  const tools = (ctx.repo.steps.find((st) => st.stepId === 'share')!.output as { tools: { pending?: string; result?: { posted?: boolean } }[] }).tools;
+  assert.ok(tools.length > 0 && tools.every((t) => !t.pending && t.result?.posted === true), '印がすべて実行の結果に置き換わる');
+  assert.equal(ctx.connector.outbox.filter((o) => o.kind === 'chat').length, 1, '投稿は 1 回');
+});
+
+test('承認を却下したら、組み立てた送信は実行しない', async () => {
+  const { connector, repo } = await runMinutes({ rejectShare: true });
+  assert.equal(connector.outbox.filter((o) => o.kind === 'chat').length, 0);
+  assert.equal(repo.knowledge.length, 0);
+});
+
+test('段が道具を宣言していれば、その段ではそれ以外を呼ばせない（第9.2.7節）', async () => {
+  const DEF: AgentDefinition = {
+    schemaVersion: 1, id: 'scoped', version: 1, name: 'テスト', category: 'test', description: 'テスト',
+    locale: 'ja-JP', compartment: null, inputs: {}, tools: ['tasks.create', 'knowledge.search'],
+    steps: [{ id: 'read', type: 'agent', instruction: '調べる', tools: ['knowledge.search'] }],
+    constraints: [], limits: { maxSteps: 10, maxTokens: 10_000, timeoutSec: 60 },
+  };
+  const { repo, engine, run } = setup(DEF, { name: 'tasks.create', args: { title: '先走り' } });
+  repo.settings.automation.writeInternal = 'allow';
+  await engine.advance(run);
+  const r = (repo.steps[0]!.output as { tools: { error?: string }[] }).tools[0]!;
+  assert.match(String(r.error), /この段（read）では使えない道具です/);
+  assert.equal(repo.audits.filter((a) => a.action === 'tool.invoke' && a.targetId === 'tasks.create').length, 0, '実行していない');
+  const registry = new ToolRegistry();
+  for (const t of BUILTIN_TOOLS) registry.register(t);
+  assert.throws(() => validateDefinition({ ...DEF, steps: [{ id: 'x', type: 'agent', instruction: 'x', tools: ['chat.post'] }] }, registry),
+    /定義の道具に無いもの/);
+});
+
+test('推論に今日の日付（日本時間）を渡す（第9.3.2節）', async () => {
+  const seen: string[] = [];
+  const { engine, run } = setup(SHARE_DEF, { name: 'noop', args: {} });
+  (engine as unknown as { deps: { llm: LlmProvider } }).deps.llm = {
+    name: 'see', async complete(req: LlmRequest) { seen.push(req.messages.map((m) => m.content).join('\n')); return { text: 'ok', tokensUsed: 1 }; },
+  };
+  await engine.advance(run);
+  assert.ok(seen[0]!.includes(`今日は ${todayJst()}`));
+  assert.match(todayJst(new Date('2026-09-25T20:00:00Z')), /^2026年9月26日（土）$/, '日本時間の日付と曜日');
+});
+
+test('操作の確認を、業務の言葉で出す（ツール名・JSON・ID を出さない）', async () => {
+  const DEF: AgentDefinition = {
+    schemaVersion: 1, id: 'confirm', version: 1, name: 'テスト', category: 'test', description: 'テスト',
+    locale: 'ja-JP', compartment: null, inputs: {}, tools: ['tasks.create'],
+    steps: [{ id: 'do', type: 'agent', instruction: '登録する' }],
+    constraints: [], limits: { maxSteps: 10, maxTokens: 10_000, timeoutSec: 60 },
+  };
+  const { repo, engine, run } = setup(DEF, { name: 'tasks.create', args: { title: '見積書を送る', due: '2026-09-29' } });
+  const r = await engine.advance(run);
+  if (r.outcome !== 'awaiting_approval') assert.fail(r.outcome);
+  const present = repo.approvals.find((a) => a.id === r.approvalId)!.present;
+  assert.match(present, /\*\*ToDo を登録します\*\*: 見積書を送る（期限 2026年9月29日）/);
+  assert.doesNotMatch(present, /tasks\.create|\{"/);
+});
+
+test('道具の呼び出しを業務の言葉にする（知らない道具は ID を出さない）', () => {
+  assert.equal(jpDate('2026-09-29'), '2026年9月29日');
+  assert.equal(jpDate('2026-09-30T10:00:00+09:00'), '2026年9月30日 10:00');
+  assert.equal(describeCall({ name: 'tasks.complete', args: { taskId: 'abc' } }), '**ToDo を完了にします**');
+  assert.equal(describeCall({ name: 'gmail.send', args: { to: ['a@x.jp'], cc: [], subject: '件', body: '本文' } }),
+    '**メールを送ります**: 宛先 a@x.jp／件名「件」\n> 本文');
+  const unknown = describeCall({ name: 'x.do', args: { fileId: 'secret-id', title: '報告' } }, { helpText: () => '報告を作ります。社外へは出しません' });
+  assert.equal(unknown, '**報告を作ります**: 報告');
 });
 
 test('ほかの実行の成果物と、Google から読んだ記録で作った議事録の扱い', async () => {

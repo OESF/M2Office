@@ -85,6 +85,9 @@ export {
 } from './llm/models.js';
 export type { AdvanceResult, RunEngineDeps } from './engine/run-engine.js';
 export { validateDefinition } from './engine/validate.js';
+export { todayJst } from './engine/run-engine.js';
+export { describeCall, jpDate, type DescribedCall, type DescribeContext } from './engine/describe-call.js';
+export { composeApprovalPresent } from './engine/approval-present.js';
 export { enqueueJob } from './engine/enqueue.js';
 export { cancelRun, createdDriveLinks, CANCELLABLE } from './engine/cancel.js';
 export type { CancelActor, CancelOutcome } from './engine/cancel.js';

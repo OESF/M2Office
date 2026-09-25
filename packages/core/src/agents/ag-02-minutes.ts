@@ -48,6 +48,8 @@ export const AG02_MINUTES: AgentDefinition = {
     {
       id: 'fetch',
       type: 'agent',
+      // この段で使える道具（仕様書 第9.2.7節）。段の区切りを推論の行儀に頼らない
+      tools: ['file.read_text', 'meeting.get_transcript'],
       label: '取得',
       instruction: [
         '会議の記録を取得する。次の順に見て、最初に見つかったものを使う（仕様書 第9.5.2節）。',
@@ -63,6 +65,8 @@ export const AG02_MINUTES: AgentDefinition = {
     {
       id: 'draft',
       type: 'agent',
+      // この段で使える道具（仕様書 第9.2.7節）。段の区切りを推論の行儀に頼らない
+      tools: ['document.create'],
       label: '作成',
       instruction: [
         '記録から議題・決定事項・保留事項・担当と期限を構造化し、議事録を作成する。',
@@ -81,6 +85,8 @@ export const AG02_MINUTES: AgentDefinition = {
     {
       id: 'tasks',
       type: 'agent',
+      // この段で使える道具（仕様書 第9.2.7節）。段の区切りを推論の行儀に頼らない
+      tools: ['tasks.create'],
       label: '起票',
       instruction: [
         '承認された決定事項を ToDo として起票する。',
@@ -99,6 +105,8 @@ export const AG02_MINUTES: AgentDefinition = {
     {
       id: 'share',
       type: 'agent',
+      // この段で使える道具（仕様書 第9.2.7節）。段の区切りを推論の行儀に頼らない
+      tools: ['chat.post', 'knowledge.register'],
       label: '共有',
       instruction: [
         '承認された内容をチャットへ投稿する。',

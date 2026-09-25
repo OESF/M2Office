@@ -216,7 +216,7 @@ function ArticleView({ id, items, onOpen, onBack }: {
  * ヘルプの記事の本文を表示する。
  *
  * @remarks
- * 見出し（#・##・###）・段落・箇条書き・番号付きの箇条書き・表・コードの囲み・行の中のコード・リンク・太字を扱う（docs/help/README.md）。
+ * 見出し（#・##・###）・段落・箇条書き・番号付きの箇条書き・表・コードの囲み・引用・行の中のコード・リンク・太字を扱う（docs/help/README.md）。
  * 行ごとに読むため、見出しのすぐ次の行に箇条書きが続いても崩れない（`parseMarkdown`）。
  * HTML としては解釈せず、React の要素として組み立てる。記事に書かれたタグは文字のまま出る。
  */
@@ -238,6 +238,11 @@ export function Markdown({ text }: { text: string }) {
             </div>
           );
           case 'code': return <pre key={i} className="md-pre"><code>{b.text}</code></pre>;
+          case 'quote': return (
+            <blockquote key={i} className="md-quote">
+              {b.lines.map((l, j) => <span key={j} className="md-quote-line">{inline(l)}</span>)}
+            </blockquote>
+          );
           default: return <p key={i}>{inline(b.text)}</p>;
         }
       })}

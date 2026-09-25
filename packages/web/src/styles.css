@@ -887,6 +887,9 @@ code.uri { background: var(--subtle-bg); border: 1px solid var(--line); border-r
 .md-code { font-family: Menlo, Consolas, monospace; font-size: 0.9em; background: var(--neutral-soft); border-radius: 3px; padding: 1px 4px; }
 .md-pre { background: var(--subtle-bg); border: 1px solid var(--line); border-radius: 4px; padding: 10px 12px; overflow-x: auto; font-size: 13px; line-height: 1.5; }
 .md-pre code { font-family: Menlo, Consolas, monospace; white-space: pre; }
+/* 引用。承認の画面で、送る本文をそのまま見せる（仕様書 第9.3.3節）。行の区切りを保つ */
+.md-quote { margin: 6px 0 12px; padding: 8px 12px; border-left: 3px solid var(--accent); background: var(--subtle-bg); border-radius: 0 4px 4px 0; }
+.md-quote-line { display: block; min-height: 1.4em; white-space: pre-wrap; }
 .md-table th, .md-table td { min-width: 6em; }
 .md-table .md-code { overflow-wrap: anywhere; }
 

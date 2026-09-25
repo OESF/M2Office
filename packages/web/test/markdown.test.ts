@@ -112,3 +112,12 @@ test('時候の一言は、時刻と曜日から選ぶ（仕様書 第6.1.5節�
   assert.equal(timeGreeting(new Date('2026-09-26T09:00:00+09:00')), '休日にお疲れさまです');
   assert.equal(timeGreeting(new Date('2026-09-27T21:00:00+09:00')), '休日にお疲れさまです');
 });
+
+test('引用は、行の区切りを保って 1 つのまとまりにする（承認の画面で送る本文を見せる。仕様書 第9.3.3節）', () => {
+  const blocks = parseMarkdown('**チャットに投稿します**:\n> *議事録*\n> 1 行目\n>\n> 3 行目\n\n- 次の項目');
+  assert.deepEqual(blocks, [
+    { kind: 'p', text: '**チャットに投稿します**:' },
+    { kind: 'quote', lines: ['*議事録*', '1 行目', '', '3 行目'] },
+    { kind: 'ul', items: ['次の項目'] },
+  ]);
+});

@@ -46,6 +46,8 @@ export const AG03_SCHEDULING: AgentDefinition = {
     {
       id: 'freebusy',
       type: 'agent',
+      // この段で使える道具（仕様書 第9.2.7節）。段の区切りを推論の行儀に頼らない
+      tools: ['calendar.freebusy'],
       label: '空き確認',
       instruction: '参加者全員の空きを取得する。',
       onEmpty: 'stop',
@@ -54,6 +56,8 @@ export const AG03_SCHEDULING: AgentDefinition = {
     {
       id: 'propose',
       type: 'agent',
+      // この段で使える道具（仕様書 第9.2.7節）。段の区切りを推論の行儀に頼らない
+      tools: [],
       label: '候補作成',
       instruction: [
         '全員が空いている時間帯から候補を 3 つ挙げ、招待の文面を用意する。',
@@ -73,6 +77,8 @@ export const AG03_SCHEDULING: AgentDefinition = {
     {
       id: 'create',
       type: 'agent',
+      // この段で使える道具（仕様書 第9.2.7節）。段の区切りを推論の行儀に頼らない
+      tools: ['calendar.create'],
       label: '招待',
       instruction: '承認された候補の第一案で予定を作成し、参加者を招待する。',
     },
