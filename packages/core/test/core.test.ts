@@ -17,7 +17,7 @@ import {
 import {
   RunEngine, ToolRegistry, BUILTIN_TOOLS, MockWorkspaceConnector, MemoryFileStore, nextRunAt,
   saveFile, readSheet, renderSheet, parseCsv, extractPdfText,
-  ApprovalForbiddenError, ConnectorUnavailableError, DefinitionInvalidError, validateDefinition, OFFICIAL_AGENTS, todayJst, describeCall, jpDate,
+  ApprovalForbiddenError, ConnectorUnavailableError, hideInternalIds, DefinitionInvalidError, validateDefinition, OFFICIAL_AGENTS, todayJst, describeCall, jpDate,
   type LlmProvider, type LlmRequest, type Repository, type KnowledgeItem,
 } from '../src/index.js';
 
@@ -570,6 +570,43 @@ test('承認の画面に、確認すること・判断するもの・承認す�
   assert.doesNotMatch(a2.present, /成果物「営業定例の議事録」/, '前の承認で見せた成果物は繰り返さない');
   assert.match(a2.present, /### 起票（前の承認のあとに行ったこと）\n\n- \*\*ToDo を登録しました\*\*: A 案の準備/, '承認のあとに実行した段は、行ったことを出す');
   assert.doesNotMatch(a2.present, /### 起票\n/, '承認の前に書いた古い文は出さない');
+});
+
+test('承認の画面に出す推論の文から、内部の ID を取り除く。リンクは残す（2026-09-25 の表示の問題）', async () => {
+  const text = [
+    '作成された文書の成果物IDは以下の通りです。',
+    '- `ce89528a-39bb-43ed-9016-5477965234ba`（営業定例の議事録）',
+    '保存しました（ファイルID: `1fj5sWy8MjTdmlfBlz4F3ZFB50Wr7md_3Z7ReppMYPbY`）。',
+    'リンク: https://docs.google.com/document/d/1fj5sWy8MjTdmlfBlz4F3ZFB50Wr7md_3Z7ReppMYPbY/edit',
+    '実行 3c982953-a432-4011-bc8b-469c0f991e15 は終わりました。extraordinarily_long_identifier_name は語なので残す。',
+  ].join('\n');
+  assert.equal(hideInternalIds(text), [
+    '- 営業定例の議事録',
+    '保存しました。',
+    'リンク: https://docs.google.com/document/d/1fj5sWy8MjTdmlfBlz4F3ZFB50Wr7md_3Z7ReppMYPbY/edit',
+    '実行 は終わりました。extraordinarily_long_identifier_name は語なので残す。',
+  ].join('\n'));
+
+  // 推論が ID を書いても、承認の画面には出ない。推論への指示にも「ID を書かない」を入れる
+  const ctx = setup(AG02_MINUTES, { name: 'noop', args: {} });
+  const base = minutesLlm(ctx.repo);
+  let system = '';
+  (ctx.engine as unknown as { deps: { llm: LlmProvider } }).deps.llm = {
+    name: 'id-writer',
+    async complete(req: LlmRequest) {
+      system = String(req.messages[0]?.content ?? '');
+      if (req.context?.stepId === 'draft' && ctx.repo.artifacts.length > 0) {
+        return { text: `作りました。成果物 ID: \`${ctx.repo.artifacts[0]!.id}\``, tokensUsed: 1 };
+      }
+      return base.complete(req);
+    },
+  };
+  const first = await ctx.engine.advance(ctx.run);
+  if (first.outcome !== 'awaiting_approval') assert.fail(first.outcome);
+  const present = ctx.repo.approvals.find((a) => a.id === first.approvalId)!.present;
+  assert.ok(!present.includes(ctx.repo.artifacts[0]!.id), '成果物の ID を出さない');
+  assert.match(present, /### 作成\n\n作りました。/);
+  assert.match(system, /利用者に見せる文には、成果物・ファイル・文書・実行などの ID を書かない/);
 });
 
 test('承認の前に組み立てた操作を、承認のあとそのまま実行する。推論をやり直さない（ADR-0023）', async () => {

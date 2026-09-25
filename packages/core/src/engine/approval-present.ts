@@ -30,6 +30,45 @@ export function describeContext(registry: ToolRegistry, artifacts: Artifact[]): 
  */
 const demote = (text: string) => text.replace(/^#{1,6}\s+/gm, '#### ');
 
+/** 実行・成果物などの ID（UUID）。`g` を付けたもの（置き換え用）と付けないもの（判定用）を分ける。 */
+const UUID_SOURCE = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+const UUID = new RegExp(UUID_SOURCE, 'gi');
+const IS_UUID = new RegExp(`^\\s*${UUID_SOURCE}\\s*$`, 'i');
+/** Google のファイルなどの ID。英数字と `-`・`_` が 25 字以上続き、数字を含むもの。 */
+const LONG_ID = /(?<![A-Za-z0-9_\-/=])[A-Za-z0-9_-]{25,}(?![A-Za-z0-9_\-])/g;
+
+/**
+ * 推論の文から、内部の ID を取り除く（承認の画面に出す前の安全網）。
+ *
+ * @remarks
+ * 推論には ID を書かないよう指示しているが、それでも書くことがある（2026-09-25 に承認の画面で成果物の ID が出た）。
+ * **URL の中は触らない**（文書のリンクは押せるように残す）。ID を取り除いて空になった箇条書きと、
+ * 「ID:」だけが残った括弧も消す。
+ */
+export function hideInternalIds(text: string): string {
+  const cleaned = text.split(/(https?:\/\/[^\s)）]+)/).map((part, i) => {
+    if (i % 2 === 1) return part; // URL
+    return part
+      .replace(/`([^`]*)`/g, (m, inner: string) => (IS_UUID.test(inner) || isLongId(inner) ? '' : m))
+      .replace(UUID, '')
+      .replace(LONG_ID, (m) => (/\d/.test(m) ? '' : m))
+      .replace(/[（(]\s*[^（）()\n]{0,12}ID\s*[:：]?\s*[）)]/g, '')
+      .replace(/ {2,}/g, ' ');
+  }).join('');
+  return cleaned.split('\n')
+    // 「ID は以下の通りです」のように、ID を紹介するだけの行は、ID を消すと意味を失う
+    .filter((l) => !/ID\s*(は|を)?[^。\n]{0,12}(以下|次)の(通り|とおり)/.test(l))
+    // ID を消して「- （題名）」だけが残った箇条書きは、括弧を外す
+    .map((l) => l.replace(/^(\s*[-*]\s*)[（(](.+)[）)]\s*$/, '$1$2'))
+    .filter((l) => !/^\s*[-*]\s*$/.test(l))
+    .join('\n');
+}
+
+/** 1 つの語が、長い ID か。 */
+function isLongId(v: string): boolean {
+  return /^[A-Za-z0-9_-]{25,}$/.test(v.trim()) && /\d/.test(v);
+}
+
 /** 「〜します」の言い方を「〜しました」にする（行ったことを出すとき）。1 行目だけを使う。 */
 const done = (description: string) => description.split('\n')[0]!.replace(/ます\*\*/, 'ました**');
 
@@ -90,7 +129,8 @@ export function composeApprovalPresent(p: {
       }
     }
     if (!text) continue;
-    material.push(`### ${label}`, '', demote(cut(text, TEXT_MAX)), '');
+    // 推論の文には内部の ID が混じりうる。承認する人に見せる前に取り除く
+    material.push(`### ${label}`, '', demote(cut(hideInternalIds(text), TEXT_MAX)), '');
   }
   for (const a of artifacts.filter((x) => !shownBefore.has(x.id))) {
     material.push(`### 成果物「${a.title}」`, '', demote(cut(a.body, ARTIFACT_MAX)), '');
