@@ -597,9 +597,6 @@ export const api = {
     /** OAuth クライアントを削除する（クライアント ID を替える）と影響する人数と業務の数（仕様書 第6.5.2.1節）。 */
     googleClientImpact: () => call<{ users: number; runs: number }>('/admin/connections/google/impact'),
     googlePermissions: () => call<{ items: { scope: string; level: string; tools: string[]; agents: string[] }[] }>('/admin/google-permissions'),
-    connectors: () => call<{ workspace: { source: string; label: string }; llm: { provider: string } }>(
-      '/admin/connectors',
-    ),
     settings: () => call<TenantSettings & {
       catalog: {
         id: string; name: string; description: string; usesWriteInternal: boolean; defaultMinutes: number;

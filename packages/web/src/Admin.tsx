@@ -12,6 +12,7 @@ import {
   AgentSettings, CompanySettings, KnowledgeSettings, UserSettings,
 } from './AdminSettings.js';
 import { Checklist, Dashboard } from './Dashboard.js';
+import { ConnectorList } from './ConnectorList.js';
 import { ExtensionSettings } from './Extensions.js';
 import { Connections } from './Connections.js';
 import { HelpCenter, PageTitle, useOpenHelp } from './help.js';
@@ -115,7 +116,9 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
   /** いま開いている小分け（第6.6.0節）。小分けを持たない区分では空文字。 */
   const [page, setPage] = useState('');
   /** 区分を開く。小分けがあれば最初のものへ入る。 */
-  const setTab = useCallback((id: Tab) => { setTabState(id); setPage(firstPage(id)); }, []);
+  const setTab = useCallback((id: Tab) => { setTabState(id); setPage(firstPage(id)); setExtFocus(null); }, []);
+  /** 拡張機能の画面で、詳細を開いておく拡張機能（「接続 › コネクタ」から移ったとき）。 */
+  const [extFocus, setExtFocus] = useState<string | null>(null);
   const [helpArticle, setHelpArticle] = useState<string | null>(null);
   /*
     はじめに行う設定の進み具合（仕様書 第6.10.3.1節）。
@@ -205,11 +208,14 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
             {tab === 'runs' && <Runs />}
             {tab === 'company' && <CompanySettings page={page} />}
             {tab === 'agents' && <AgentSettings page={page} />}
-            {tab === 'extensions' && <ExtensionSettings />}
+            {tab === 'extensions' && <ExtensionSettings focus={extFocus} />}
             {tab === 'users' && <UserSettings meId={me.user.id} page={page} />}
             {tab === 'knowledge' && <KnowledgeSettings page={page} />}
             {tab === 'audit' && <Audit />}
-            {tab === 'connectors' && (page === 'mcp' ? <Connectors /> : <Connections page={page} />)}
+            {tab === 'connectors' && (page === 'mcp'
+              // 設定は拡張機能で行う。その拡張機能の詳細を開いた状態で移る（仕様書 第6.6.3.0節）
+              ? <ConnectorList onOpenExtension={(id) => { setTab('extensions'); setExtFocus(id || null); }} />
+              : <Connections page={page} />)}
           </main>
         </SideNavLayout>
       )}
@@ -360,58 +366,6 @@ function Audit() {
 }
 
 /** Google の権限の段階の表示（仕様書 第14.3.1節）。 */
-const LEVEL_LABEL: Record<string, { text: string; className: string }> = {
-  restricted: { text: '制限付き（公開の前に CASA が必要）', className: 'badge warn' },
-  sensitive: { text: '機密（公開の前に Google の審査）', className: 'badge' },
-  'non-sensitive': { text: '機密でない', className: 'badge muted-badge' },
-};
-
-function Connectors() {
-  const { data, error } = useLoad(api.admin.connectors);
-  const perms = useLoad(api.admin.googlePermissions);
-  return (
-    <>
-      <PageTitle trail={['接続', 'コネクタ（MCP）']} help={{
-        article: 'admin-connectors',
-        text: '接続の状態と、この会社の業務が求める Google の権限の一覧です。外部のサービスとのつながり（コネクタ）の追加は「拡張機能」で行います。',
-      }} />
-      {error && <p className="error">{error}</p>}
-      {data && (
-        <div className="card">
-          <h3>接続の状態</h3>
-          <dl className="kv">
-            <dt>Google Workspace</dt><dd>{data.workspace.label}</dd>
-            <dt>LLM（既定）</dt><dd>{data.llm.provider === 'stub' ? 'スタブ（推論を行わない開発用）' : data.llm.provider}</dd>
-          </dl>
-        </div>
-      )}
-      <div className="card">
-        <h3>この会社の業務が求める Google の権限</h3>
-        <p className="small">
-          使える業務のツールから集めた一覧です。Google との接続では、使う業務の分だけ許可を求めます。
-          「制限付き」の権限は、一般公開の前に第三者のセキュリティ評価（CASA）が必要です。段階は見込みで、申請の前に Google の一覧で確かめます。
-        </p>
-        {perms.error && <p className="error">{perms.error}</p>}
-        {perms.data && (
-          <table className="table">
-            <thead><tr><th>権限</th><th>段階</th><th>ツール</th><th>業務</th></tr></thead>
-            <tbody>
-              {perms.data.items.map((p) => (
-                <tr key={p.scope}>
-                  <td><code>{p.scope}</code></td>
-                  <td><span className={LEVEL_LABEL[p.level]?.className ?? 'badge'}>{LEVEL_LABEL[p.level]?.text ?? p.level}</span></td>
-                  <td className="small">{p.tools.join('、')}</td>
-                  <td className="small">{p.agents.join('、')}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-    </>
-  );
-}
-
 function originLabel(origin: string | null): string {
   return ({ menu: 'メニュー', secretary: '秘書', schedule: '定時実行', api: 'API' } as Record<string, string>)[origin ?? ''] ?? '—';
 }

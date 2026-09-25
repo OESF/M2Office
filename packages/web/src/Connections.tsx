@@ -208,6 +208,44 @@ function GeminiCard({ data, onSaved }: { data: ConnectionSettings['gemini']; onS
 }
 
 /** Google Workspace（会社の OAuth クライアントの登録と、利用者ごとの接続）。 */
+/**
+ * 求める許可（確認の画面。仕様書 第14.3.2節 規定 2）。許可ごとに、その許可を使う業務を並べる（第6.6.3.0節）。
+ *
+ * @param scopes 接続の設定が返す、求める許可の一覧（業務の言葉の名前つき）
+ */
+function RequiredScopes({ scopes }: { scopes: ConnectionSettings['google']['requiredScopes'] }) {
+  const [usedBy, setUsedBy] = useState<Map<string, string[]> | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    api.admin.googlePermissions()
+      .then((r) => setUsedBy(new Map(r.items.map((x) => [x.scope, x.agents]))))
+      .catch((e) => setError(describeError(e, '使う業務を読み込めませんでした')));
+  }, []);
+  return (
+    <div className="card">
+      <p className="small">
+        この会社で使える業務のツールから決まります。使っていない業務の許可は求めません。業務を足して許可が増えたら、従業員に接続し直しを案内します。
+      </p>
+      <p className="muted small">
+        「制限付き」の権限は、一般公開の前に第三者のセキュリティ評価（CASA）が必要です。段階は見込みで、申請の前に Google の一覧で確かめます。
+      </p>
+      {error && <p className="error">{error}</p>}
+      <table className="table">
+        <thead><tr><th>許可</th><th>段階</th><th>使う業務</th></tr></thead>
+        <tbody>
+          {scopes.map((s) => (
+            <tr key={s.scope}>
+              <td>{s.label}<div><code className="small">{s.scope}</code></div></td>
+              <td><span className={LEVEL[s.level]?.cls ?? 'badge'}>{LEVEL[s.level]?.text ?? s.level}</span></td>
+              <td className="small">{usedBy ? (usedBy.get(s.scope)?.join('、') || '—') : ''}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function GoogleCard({ data, page, onSaved }: {
   data: ConnectionSettings['google']; page: string; onSaved: () => void;
 }) {
@@ -304,22 +342,7 @@ function GoogleCard({ data, page, onSaved }: {
       </div>
       )}
 
-      {page === 'permissions' && (
-      <div className="card">
-        <p className="small">この会社で使える業務のツールから決まります。使っていない業務の許可は求めません。業務を足して許可が増えたら、従業員に接続し直しを案内します。</p>
-        <table className="table">
-          <tbody>
-            {data.requiredScopes.map((s) => (
-              <tr key={s.scope}>
-                <td>{s.label}</td>
-                <td><code className="small">{s.scope}</code></td>
-                <td><span className={LEVEL[s.level]?.cls ?? 'badge'}>{LEVEL[s.level]?.text ?? s.level}</span></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      )}
+      {page === 'permissions' && <RequiredScopes scopes={data.requiredScopes} />}
 
       {page === 'people' && (
       <div className="card">

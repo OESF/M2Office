@@ -16,7 +16,12 @@ import { ScopeEditor, ScopeField, useAccessOptions } from './Scope.js';
 /** 画面の下に出す知らせ。 */
 type Notice = { kind: 'ok' | 'error'; text: string; problems?: string[] } | null;
 
-export function ExtensionSettings() {
+/**
+ * 拡張機能の画面。
+ *
+ * @param focus 詳細を開いて見せる拡張機能の ID（「接続 › コネクタ」から移ったとき。仕様書 第6.6.3.0節）
+ */
+export function ExtensionSettings({ focus = null }: { focus?: string | null } = {}) {
   const [items, setItems] = useState<ExtensionView[] | null>(null);
   const [adding, setAdding] = useState(false);
   const [consenting, setConsenting] = useState<string | null>(null);
@@ -140,7 +145,8 @@ export function ExtensionSettings() {
       )}
       {installed.map((x) => (
         <InstalledCard
-          key={x.id} item={x} busy={busy} options={access.options} onChanged={() => void Promise.all([load(), access.reload()])}
+          key={x.id} item={x} busy={busy} focused={x.id === focus}
+          options={access.options} onChanged={() => void Promise.all([load(), access.reload()])}
           onToggle={(on) => void act(
             () => api.admin.setExtensionEnabled(x.id, on),
             on ? `「${x.name}」を有効にしました` : `「${x.name}」を無効にしました。業務はメニューから消えます`,
@@ -180,16 +186,25 @@ function Title({ item: x }: { item: ExtensionView }) {
 }
 
 /** 導入済みの拡張機能のカード。スイッチ・詳細・削除。 */
-function InstalledCard({ item: x, busy, options, onChanged, onToggle, onReconsent, onDelete }: {
-  item: ExtensionView; busy: boolean; options: AccessOptions | null;
+function InstalledCard({ item: x, busy, focused = false, options, onChanged, onToggle, onReconsent, onDelete }: {
+  item: ExtensionView; busy: boolean;
+  /** 詳細を開いた状態で出し、画面の中へ送る（「接続 › コネクタ」から移ったとき） */
+  focused?: boolean;
+  options: AccessOptions | null;
   /** 利用範囲の保存と、ツールの入り切りのあとに呼ぶ。一覧を読み直す */
   onChanged: () => void;
   onToggle: (on: boolean) => void; onReconsent: () => void; onDelete: () => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(focused);
+  const card = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!focused) return;
+    setOpen(true);
+    card.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }, [focused]);
   const on = x.enabled && !x.needsReconsent;
   return (
-    <div className={on ? 'card ext-card' : 'card ext-card off'}>
+    <div ref={card} className={on ? 'card ext-card' : 'card ext-card off'}>
       <div className="ext-row">
         <Title item={x} />
         <label className="switch-label">

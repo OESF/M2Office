@@ -78,7 +78,8 @@ src/Dashboard.tsx   ダッシュボード（いま・集計）と、眺めるた
 src/AdminSettings.tsx  管理者ページ（会社情報・業務と承認・ユーザー・知識の編集と、知識の分け方の確認）
 src/Extensions.tsx     管理者ページ「拡張機能」（取り込み・同意・スイッチ・接続の確認・削除）
 src/Scope.tsx          グループの管理、業務・拡張機能ごとの「利用できる人」、権限区画の割当
-src/Connections.tsx    管理者ページ「接続」（Gemini の鍵・モデル・接続の確認、Google の OAuth クライアント・従業員の接続状況）
+src/Connections.tsx    管理者ページ「接続」（Gemini の鍵・モデル・接続の確認、Google の OAuth クライアント・求める許可と使う業務・従業員の接続状況）
+src/ConnectorList.tsx  管理者ページ「接続 › コネクタ（MCP）」。導入済みのコネクタの一覧（確認の画面。設定は拡張機能で。第6.6.3.0節）
 src/nav.tsx            左ペインの共通部品（アイコン・折りたたみ・項目）と明るさの切り替えボタン
 src/theme.ts           画面の明るさ（ライト・ダーク・端末に合わせる）の選択と反映
 src/greeting.ts        最初の画面の時候の一言（第6.1.5節）

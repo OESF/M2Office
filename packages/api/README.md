@@ -137,7 +137,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/admin/runs/:id` | 管理者: 実行 1 件の**状態だけ**。段の表示名と状態・失敗の理由・費用・削減時間まで。**入力・段の入出力・成果物は返さない**（仕様書 第6.6.8節、不変則 I-10） |
 | `GET /v1/admin/users` | 管理者: 利用者の一覧 |
 | `GET /v1/admin/audit-events` | 管理者: 監査ログ |
-| `GET /v1/admin/connectors` | 管理者: 接続の状態 |
+| `GET /v1/admin/connectors` | 管理者: 接続の状態（Google Workspace が本物か見本か、LLM の提供者）。画面からは使っていない（仕様書 第6.6.3.0節）。後方互換のために残す |
 | `GET /v1/admin/connections` | 管理者: 接続の設定（Gemini の契約の形態・鍵の登録の有無・モデル、Google の OAuth クライアント・リダイレクト URI・求める許可・従業員の接続状況）。秘密の値は返さない |
 | `PUT /v1/admin/connections/gemini` | 管理者: Gemini の設定（`mode`・`apiKey`（渡したときだけ上書き）・`models`）。鍵は暗号化して保存 |
 | `DELETE /v1/admin/connections/gemini/key` | 管理者: 自社の鍵を削除（運営一括に戻る） |
