@@ -95,6 +95,9 @@ export function describeCall(call: DescribedCall, ctx: DescribeContext = {}): st
       return `**文書を作ります**: ${str(a['title']) || '（題名なし）'}`;
     case 'drive.share':
       return `**ファイルを共有します**: 相手 ${list(a['emails']).join('、') || '（なし）'}（${({ reader: '閲覧', commenter: 'コメント', writer: '編集' } as Record<string, string>)[str(a['role'])] ?? str(a['role'])}）`;
+    case 'drive.share_company':
+      // 承認の前に確かめたファイルの名前を出す（ADR-0024・ADR-0025）
+      return `**会社の全員が閲覧できるようにします**: 「${call.shown || '保存した文書'}」（社外の人は見られません。リンクを知っている社内の人だけが開けます）`;
     case 'sheets.append':
       return `**表に行を足します**: ${Array.isArray(a['rows']) ? a['rows'].length : 0} 行`;
     default: {
@@ -107,3 +110,25 @@ export function describeCall(call: DescribedCall, ctx: DescribeContext = {}): st
     }
   }
 }
+
+/**
+ * 承認の前の組み立てで**済ませたこと**（下書きの道具の結果）を、承認の画面に出す言葉にする（ADR-0025）。
+ *
+ * @returns 出す言葉。承認する人に知らせる必要の無いもの（M2Office の中の成果物など）は `null`
+ */
+export function describeDone(call: DescribedCall, result: unknown): string | null {
+  const r = (result ?? {}) as { created?: boolean; file?: { name?: string; url?: string | null }; reason?: string; title?: string };
+  switch (call.name) {
+    case 'docs.create': {
+      if (r.created && r.file) {
+        const name = r.file.name || str(call.args['title']) || '文書';
+        const link = r.file.url ? `[${name}](${r.file.url})` : `「${name}」`;
+        return `**Google ドキュメントに保存しました**: ${link}（あなたのドライブ。まだ誰にも共有していません）`;
+      }
+      return `**Google ドキュメントに保存できませんでした**: ${r.reason ?? '理由が分かりません'}`;
+    }
+    default:
+      return null;
+  }
+}
+

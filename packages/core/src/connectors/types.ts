@@ -166,6 +166,15 @@ export interface DriveConnector {
   share(
     p: ConnectorPrincipal, s: { fileId: string; emails: string[]; role: 'reader' | 'commenter' | 'writer' },
   ): Promise<{ fileId: string; sharedWith: string[] } | null>;
+  /** 1 つのファイルの情報。見えない・ごみ箱なら `null`（承認の画面に名前を出すのに使う）。 */
+  get(p: ConnectorPrincipal, fileId: string): Promise<DriveFile | null>;
+  /**
+   * M2Office が作ったファイルを、会社のドメインの全員が**閲覧だけ**できるようにする（仕様書 第14.3.4節、ADR-0025）。
+   * 検索には出さず、リンクを知っている社内の人だけが開ける。見えないファイルなら `null`。
+   *
+   * @param s.domain 会社のドメイン（例: `oesf.jp`）。個人向けのドメインを渡さないことは呼ぶ側が守る
+   */
+  shareWithDomain(p: ConnectorPrincipal, s: { fileId: string; domain: string }): Promise<{ fileId: string; domain: string } | null>;
 }
 
 /** 会社の中の人（Google Workspace のディレクトリ）。 */

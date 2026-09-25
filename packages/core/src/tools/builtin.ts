@@ -14,6 +14,7 @@ import { FILE_TOOLS } from './files.js';
 import { RESEARCH_TOOLS } from './research.js';
 import { GOOGLE_TOOLS } from './google.js';
 import { rewriteNote } from '../knowledge/search.js';
+import { approvedArtifact, jstDate } from './approved-artifact.js';
 
 /**
  * 組織知識を検索する。関係の深い節（条など）を、出典を伴って返す（仕様書 第11.7.4節）。
@@ -86,15 +87,6 @@ export const documentCreate: Tool = {
 const REGISTER_SOURCE = '業務「議事録作成・共有」で作成';
 
 /**
- * 日本時間の日付（YYYY-MM-DD）。
- *
- * @remarks 知識の題名に添える。同じ会議名の議事録（毎週の定例など）を見分けるため
- */
-function jstDate(iso: string): string {
-  return new Date(Date.parse(iso) + 9 * 3_600_000).toISOString().slice(0, 10);
-}
-
-/**
  * 実行で作った成果物を、そのまま組織知識として登録する（仕様書 第9.5.2節の手順 7、ADR-0010）。
  *
  * @remarks
@@ -116,23 +108,11 @@ export const knowledgeRegister: Tool = {
     if (ctx.approvalsAhead === undefined || ctx.approvalsAhead > 0) {
       return { registered: false, reason: 'すべての承認を通ったあとでなければ、知識に登録できません' };
     }
-    const artifact = (await ctx.repo.listArtifacts(ctx.tenantId, ctx.runId)).find((a) => a.id === artifactId);
-    if (!artifact) {
-      return { registered: false, reason: 'この実行で作った成果物が見つかりません' };
-    }
-    if (!artifact.body.trim()) {
-      return { registered: false, reason: '本文のない成果物は、知識に登録できません' };
-    }
-    // すべての承認で承認した人が見た成果物か。最初の承認で止めた時点にあったものでなければならない。
-    // 承認①の後に推論が作り直したものを登録させないため。操作の確認（`:confirm`）は内容の承認とみなさない
+    // すべての承認で承認した人が見た成果物か。最初の承認で止めた時点にあったものでなければならない
+    const picked = await approvedArtifact(ctx, artifactId);
+    if ('reason' in picked) return { registered: false, reason: `${picked.reason}。知識に登録できません` };
+    const { artifact } = picked;
     const steps = await ctx.repo.listRunSteps(ctx.tenantId, ctx.runId);
-    const firstGate = steps
-      .filter((s) => s.kind === 'approval' && s.status === 'succeeded' && !s.stepId.endsWith(':confirm'))
-      .sort((a, b) => a.seq - b.seq)[0];
-    const shown = (firstGate?.input as { artifactIds?: unknown } | null)?.artifactIds;
-    if (!Array.isArray(shown) || !shown.includes(artifact.id)) {
-      return { registered: false, reason: '承認で確かめた成果物ではないため、知識に登録できません' };
-    }
     // Google から読んだデータで作ったか。書き込み（ToDo の起票・投稿）は中身の出どころではないため数えない
     const isGoogleTool = ctx.isGoogleTool ?? (() => false);
     const googleDerived = steps.some((s) => {

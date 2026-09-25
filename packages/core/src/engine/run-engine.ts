@@ -164,7 +164,7 @@ export class RunEngine {
         // 承認の直後の段を、承認の前に組み立てる（仕様書 第9.3.3節、ADR-0023）。
         // 書き込み・送信は記録だけして、承認の画面に「承認すると行うこと」として出す
         const next = def.steps[current.cursor + 1];
-        let plan: { stepIndex: number; step: AgentStep; calls: ToolCall[]; unable: UnableCall[] } | null = null;
+        let plan: { stepIndex: number; step: AgentStep; calls: ToolCall[]; unable: UnableCall[]; done: DoneCall[] } | null = null;
         if (next?.type === 'agent') {
           const planned = await this.runAgentStep(
             { ...current, cursor: current.cursor + 1 }, def, next, job.input, job.requestedBy, settings, registry, ai, 'plan',
@@ -182,6 +182,7 @@ export class RunEngine {
             stepIndex: current.cursor + 1, step: next,
             calls: planned.kind === 'planned' ? planned.calls : [],
             unable: planned.kind === 'planned' ? planned.unable : [],
+            done: planned.kind === 'planned' ? planned.done : [],
           };
         }
         const approvalId = await this.suspendForApproval(current, def, step, job.requestedBy, plan, registry);
@@ -309,7 +310,7 @@ export class RunEngine {
     def: AgentDefinition,
     step: ApprovalStep,
     requestedBy: string,
-    plan: { stepIndex: number; step: AgentStep; calls: ToolCall[]; unable: UnableCall[] } | null = null,
+    plan: { stepIndex: number; step: AgentStep; calls: ToolCall[]; unable: UnableCall[]; done: DoneCall[] } | null = null,
     registry: ToolRegistry = this.deps.registry,
   ): Promise<string> {
     const { repo } = this.deps;
@@ -418,7 +419,7 @@ export class RunEngine {
   ): Promise<
     | { kind: 'ok' | 'stopped'; tokensUsed: number; costJpy: number }
     | { kind: 'confirm'; tokensUsed: number; costJpy: number; calls: ToolCall[] }
-    | { kind: 'planned'; tokensUsed: number; costJpy: number; calls: ToolCall[]; unable: UnableCall[] }
+    | { kind: 'planned'; tokensUsed: number; costJpy: number; calls: ToolCall[]; unable: UnableCall[]; done: DoneCall[] }
     | { kind: 'failed'; reason: string }
   > {
     const { repo } = this.deps;
@@ -449,6 +450,8 @@ export class RunEngine {
       const deferred: ToolCall[] = [];
       // 承認の前の確かめで行えないと分かった操作と、確かめた結果（同じ呼び出しを二度確かめない。ADR-0024）
       const unable: UnableCall[] = [];
+      // 組み立ての中で実行した下書き（Google ドキュメントへの保存など）。承認の画面に出す（ADR-0025）
+      const done: DoneCall[] = [];
       const prepared = new Map<string, PreparedCall>();
       /*
         1 ステップの中で、**同じツールを同じ引数で二度呼ばない**（仕様書 第9.3.2節）。
@@ -569,6 +572,8 @@ export class RunEngine {
           await this.markActivity(run.tenantId, runStep, tool.activityLabel);
           const result = await this.invokeTool(run, def, run.cursor, call, requestedBy, registry, ai.research, llm);
           await this.markActivity(run.tenantId, runStep, null);
+          // 記録は `{ name, risk, result }` で包まれている。道具が返したもの（result）を出す
+          if (mode === 'plan' && tool.risk === 'draft') done.push({ name: call.name, args: call.args, result: (result as { result?: unknown } | null)?.result });
           alreadyCalled.set(key, result);
           roundResults.push(result);
         }
@@ -590,7 +595,7 @@ export class RunEngine {
         ...runStep, status: 'succeeded', output, endedAt: new Date().toISOString(),
       });
 
-      if (mode === 'plan') return { kind: 'planned', tokensUsed, costJpy: spent, calls: deferred, unable };
+      if (mode === 'plan') return { kind: 'planned', tokensUsed, costJpy: spent, calls: deferred, unable, done };
       if (deferred.length > 0) return { kind: 'confirm', tokensUsed, costJpy: spent, calls: deferred };
 
       const empty = text.trim().length === 0 && toolResults.length === 0;
@@ -861,6 +866,9 @@ type ToolCall = {
 
 /** 承認の前の確かめで、行えないと分かった操作（記録しない。ADR-0024）。 */
 type UnableCall = { name: string; args: Record<string, unknown>; reason: string };
+
+/** 承認の前の組み立てで実行した下書きの操作と、その結果（承認の画面に「済ませたこと」として出す。ADR-0025）。 */
+type DoneCall = { name: string; args: Record<string, unknown>; result: unknown };
 
 /**
  * 呼び出しの中身の鍵。同じ道具を同じ引数で呼んだものは同じ鍵になる。

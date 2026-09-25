@@ -66,8 +66,8 @@ async function fakeDrive(pdf: Uint8Array) {
     }
     const perm = /^\/drive\/files\/([^/]+)\/permissions$/.exec(s.path);
     if (perm && s.method === 'POST') {
-      const b = JSON.parse(s.body) as { emailAddress: string };
-      if (b.emailAddress.endsWith('@outside.example')) {
+      const b = JSON.parse(s.body) as { emailAddress?: string };
+      if (b.emailAddress?.endsWith('@outside.example')) {
         return json(403, { error: { code: 403, errors: [{ reason: 'publishOutNotPermitted' }], message: 'Sharing outside not permitted' } });
       }
       return json(200, { id: 'perm1' });
@@ -159,6 +159,19 @@ test('ドライブ: フォルダを作る。共有は指定した人にだけで
     assert.ok(perms.every((s) => !s.body.includes('anyone')), 'リンクを知っている全員への公開は作らない');
     assert.equal(await c.drive.share(P, { fileId: 'NOPE', emails: ['a@x.jp'], role: 'reader' }), null, '見えないファイルは共有しない');
     await assert.rejects(c.drive.share(P, { fileId: 'DOC1', emails: ['z@outside.example'], role: 'reader' }), /要求を受け付けませんでした（HTTP 403・publishOutNotPermitted）/, '社外への共有を会社が禁じていれば、Google が断る');
+  });
+});
+
+test('ドライブ: 会社の全員に閲覧だけで共有する。検索には出さず、知らせのメールは送らない（ADR-0025）', async () => {
+  await withDrive(async (c, seen) => {
+    assert.deepEqual(await c.drive.shareWithDomain(P, { fileId: 'DOC1', domain: 'oesf.jp' }), { fileId: 'DOC1', domain: 'oesf.jp' });
+    const perm = seen.find((s) => s.path === '/drive/files/DOC1/permissions')!;
+    assert.deepEqual(JSON.parse(perm.body), { type: 'domain', role: 'reader', domain: 'oesf.jp', allowFileDiscovery: false });
+    assert.equal(perm.query.get('sendNotificationEmail'), 'false');
+    assert.equal(await c.drive.shareWithDomain(P, { fileId: 'NOPE', domain: 'oesf.jp' }), null, '見えないファイルは共有しない');
+    assert.equal(await c.drive.shareWithDomain(P, { fileId: 'OLD1', domain: 'oesf.jp' }), null, 'ごみ箱のものは共有しない');
+    assert.deepEqual(await c.drive.get(P, 'SHEET1'), { id: 'SHEET1', name: '顧客一覧', kind: 'spreadsheet', modifiedAt: '2026-09-25T01:00:00.000Z', url: 'https://docs.example/SHEET1' });
+    assert.equal(await c.drive.get(P, 'NOPE'), null);
   });
 });
 

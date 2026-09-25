@@ -541,7 +541,7 @@ test('承認のあとに作り直した成果物は、知識に登録しない',
   assert.equal((await ctx.engine.advance({ ...(await ctx.repo.getRun('t', 'r1'))!, status: 'running' })).outcome, 'completed');
   const res = resultsOf(ctx.repo, 'late', 'knowledge.register')[0];
   assert.equal(ctx.repo.knowledge.length, 0, '承認で見ていない成果物は登録しない');
-  assert.match(String(res?.['reason']), /承認で確かめた成果物ではない/);
+  assert.match(String(res?.['reason']), /承認で確かめた成果物ではありません/);
 });
 
 test('承認の画面に、確認すること・判断するもの・承認すると行うことを出す（第9.3.3節）', async () => {
@@ -682,6 +682,119 @@ test('許可が足りないときは行えないと出し、Google に届かな�
   assert.match(busy.present, /承認の前に確かめられませんでした（Chat（Google）が混み合っています）。承認のあとで改めて試します/);
   assert.equal(await busy.approveAndFinish(), 'completed');
   assert.deepEqual(busy.ctx.connector.outbox.filter((o) => o.kind === 'chat').map((o) => (o.body as { space: string }).space), ['技術部'], '元の指定のまま投稿を試した');
+});
+
+/**
+ * 議事録を Google ドキュメントにも保存する LLM（ADR-0025）。共有の段は、保存 → 結果の ID で社内に共有 → リンクを添えて投稿 → 知識に登録。
+ *
+ * @param connector 保存した文書の ID とリンクを引く（推論が結果を読んだものとして使う）
+ */
+function minutesDocsLlm(repo: MemoryRepo, connector: MockWorkspaceConnector): LlmProvider {
+  const rounds: Record<string, number> = {};
+  const base = minutesLlm(repo);
+  return {
+    name: 'minutes-docs',
+    async complete(req: LlmRequest) {
+      const id = String(req.context?.stepId ?? '');
+      if (id !== 'share') return base.complete(req);
+      const n = (rounds[id] = (rounds[id] ?? 0) + 1);
+      const tool = (c: unknown[]) => ({ text: c.map((x) => '```tool\n' + JSON.stringify(x) + '\n```').join('\n'), tokensUsed: 1 });
+      const artifactId = repo.artifacts[0]!.id;
+      if (n === 1) return tool([{ name: 'docs.create', args: { artifactId, folderName: 'M2Office 議事録' } }]);
+      if (n === 2) {
+        const doc = (await connector.drive.search({ tenantId: 't', userId: 'u-member' }, { query: '営業定例の議事録' })).find((f) => f.kind === 'document');
+        return tool([
+          ...(doc ? [{ name: 'drive.share_company', args: { fileId: doc.id } }] : []),
+          { name: 'chat.post', args: { space: 'general', text: `議事録を共有します${doc ? `\n議事録（Google ドキュメント）: ${doc.url ?? '（見本のためリンクなし）'}` : ''}` } },
+          { name: 'knowledge.register', args: { artifactId } },
+        ]);
+      }
+      return { text: '共有の準備ができました。', tokensUsed: 1 };
+    },
+  };
+}
+
+/** 議事録作成を、Google ドキュメントに保存する形で承認②まで進める。 */
+async function minutesWithDocs(user: { email?: string } = {}) {
+  const ctx = setup(AG02_MINUTES, { name: 'noop', args: {} });
+  if (user.email) ctx.repo.users = ctx.repo.users.map((u) => (u.id === 'u-member' ? { ...u, email: user.email! } : u));
+  (ctx.engine as unknown as { deps: { llm: LlmProvider } }).deps.llm = minutesDocsLlm(ctx.repo, ctx.connector);
+  const admin = { id: 'u-admin', roles: ['admin', 'approver'] };
+  const first = await ctx.engine.advance(ctx.run);
+  if (first.outcome !== 'awaiting_approval') assert.fail(first.outcome);
+  const docsBeforeFirst = (await ctx.connector.drive.search({ tenantId: 't', userId: 'u-member' }, { query: '議事録' })).length;
+  await ctx.engine.decideApproval('t', first.approvalId, 'approved', admin, null);
+  const second = await ctx.engine.advance({ ...(await ctx.repo.getRun('t', 'r1'))!, status: 'running' });
+  if (second.outcome !== 'awaiting_approval') assert.fail(second.outcome);
+  const present = ctx.repo.approvals.find((a) => a.id === second.approvalId)!.present;
+  const decide = async (d: 'approved' | 'rejected') => {
+    await ctx.engine.decideApproval('t', second.approvalId, d, admin, null);
+    if (d === 'approved') assert.equal((await ctx.engine.advance({ ...(await ctx.repo.getRun('t', 'r1'))!, status: 'running' })).outcome, 'completed');
+  };
+  return { ctx, present, decide, docsBeforeFirst };
+}
+
+test('AG-02 は承認①で確かめた議事録を Google ドキュメントに保存し、承認②のあとに社内に共有する（ADR-0025）', async () => {
+  const { ctx, present, decide, docsBeforeFirst } = await minutesWithDocs();
+  const P = { tenantId: 't', userId: 'u-member' };
+  assert.equal(docsBeforeFirst, 0, '承認①の前には保存しない');
+  const files = await ctx.connector.drive.search(P, { query: '' });
+  const folder = files.find((f) => f.kind === 'folder' && f.name === 'M2Office 議事録');
+  const doc = files.find((f) => f.kind === 'document' && /^営業定例の議事録（\d{4}-\d{2}-\d{2}）$/.test(f.name));
+  assert.ok(folder, '「M2Office 議事録」フォルダを作る');
+  assert.ok(doc, '題名は成果物の題名に日付を添える');
+  assert.equal((await ctx.connector.drive.read(P, doc.id))!.text, ctx.repo.artifacts[0]!.body, '成果物の本文をそのまま保存する');
+
+  assert.match(present, /## 承認の前に済ませたこと\n\n- \*\*Google ドキュメントに保存しました\*\*: 「営業定例の議事録（\d{4}-\d{2}-\d{2}）」（あなたのドライブ。まだ誰にも共有していません）/);
+  assert.match(present, /\*\*会社の全員が閲覧できるようにします\*\*: 「営業定例の議事録（\d{4}-\d{2}-\d{2}）」（社外の人は見られません/, '共有するファイルの名前を出す');
+  assert.match(present, /議事録（Google ドキュメント）:/, '投稿の本文にリンクの行が入る');
+  assert.equal(ctx.connector.outbox.filter((o) => o.kind === 'drive.share_company').length, 0, '承認②の前には共有しない');
+
+  await decide('approved');
+  const shared = ctx.connector.outbox.filter((o) => o.kind === 'drive.share_company');
+  assert.deepEqual(shared.map((o) => o.body), [{ fileId: doc.id, domain: 'x' }], '承認②のあとに、会社のドメインへ閲覧で共有する');
+  assert.equal(ctx.connector.outbox.filter((o) => o.kind === 'chat').length, 1);
+  assert.equal(ctx.repo.knowledge.length, 1);
+});
+
+test('承認②を却下したら、保存した文書は本人のドライブに残り、共有も投稿もしない', async () => {
+  const { ctx, decide } = await minutesWithDocs();
+  await decide('rejected');
+  assert.equal((await ctx.connector.drive.search({ tenantId: 't', userId: 'u-member' }, { query: '営業定例の議事録' })).length, 1, '文書は残る');
+  assert.equal(ctx.connector.outbox.filter((o) => o.kind === 'drive.share_company' || o.kind === 'chat').length, 0);
+});
+
+test('個人向けの Google アカウントでは、会社の全員への共有を行えないと出す', async () => {
+  const { ctx, present, decide } = await minutesWithDocs({ email: 'someone@gmail.com' });
+  assert.match(present, /次のことは行えません[\s\S]*会社の全員が閲覧できるようにします[\s\S]*理由: 個人向けの Google アカウントでは、会社の全員への共有はできません/);
+  await decide('approved');
+  assert.equal(ctx.connector.outbox.filter((o) => o.kind === 'drive.share_company').length, 0);
+  assert.equal(ctx.connector.outbox.filter((o) => o.kind === 'chat').length, 1, '行える分（投稿）は進める');
+});
+
+test('Google ドキュメントに保存できなくても業務は止めず、承認の画面に理由を出す', async () => {
+  const ctx = setup(AG02_MINUTES, { name: 'noop', args: {} });
+  ctx.connector.docs.create = async () => { throw new ConnectorUnavailableError('insufficient-scope', 'この操作に要る Google の許可（ドキュメント）がありません'); };
+  (ctx.engine as unknown as { deps: { llm: LlmProvider } }).deps.llm = minutesDocsLlm(ctx.repo, ctx.connector);
+  const admin = { id: 'u-admin', roles: ['admin', 'approver'] };
+  const first = await ctx.engine.advance(ctx.run);
+  if (first.outcome !== 'awaiting_approval') assert.fail(first.outcome);
+  await ctx.engine.decideApproval('t', first.approvalId, 'approved', admin, null);
+  const second = await ctx.engine.advance({ ...(await ctx.repo.getRun('t', 'r1'))!, status: 'running' });
+  if (second.outcome !== 'awaiting_approval') assert.fail(`保存に失敗しても承認②で止まる: ${second.outcome}`);
+  const present = ctx.repo.approvals.find((a) => a.id === second.approvalId)!.present;
+  assert.match(present, /\*\*Google ドキュメントに保存できませんでした\*\*: この操作に要る Google の許可（ドキュメント）がありません/);
+  assert.doesNotMatch(present, /議事録（Google ドキュメント）:/, 'リンクを添えない');
+});
+
+test('docs.create の artifactId は、承認で確かめた成果物だけを保存する', async () => {
+  const ctx = setup(AG02_MINUTES, { name: 'noop', args: {} });
+  const res = await docsCreateTool().invoke({ artifactId: 'none' }, {
+    tenantId: 't', userId: 'u-member', runId: 'r1', compartment: null,
+    repo: ctx.repo as unknown as Repository, connector: ctx.connector, files: new MemoryFileStore(),
+  }) as { created: boolean; reason: string };
+  assert.equal(res.created, false);
+  assert.match(res.reason, /この実行で作った成果物が見つかりません。Google ドキュメントに保存しませんでした/);
 });
 
 test('承認を却下したら、組み立てた送信は実行しない', async () => {
@@ -891,3 +1004,8 @@ test('pdf.extract は、文字の無いページだけを読み取りへ送る�
   assert.match(read.note, /原本で確かめて/);
   assert.match(read.pages[0]?.text ?? '', /page one/, '取り出せた文字はそのまま返す');
 });
+
+/** 登録簿から `docs.create` を引く。 */
+function docsCreateTool() {
+  return BUILTIN_TOOLS.find((t) => t.name === 'docs.create')!;
+}

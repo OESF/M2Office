@@ -120,6 +120,21 @@ export function googleDrive(ctx: Ctx): DriveConnector {
       return toFile(res);
     },
 
+    get: async (p, fileId) => {
+      const f = await meta(p, fileId);
+      return f ? toFile(f) : null;
+    },
+
+    shareWithDomain: async (p, s) => {
+      const f = await meta(p, s.fileId);
+      if (!f) return null;
+      // 会社のドメインの全員に閲覧だけ。検索には出さない（allowFileDiscovery: false）。リンクによる一般公開ではない
+      await api(p, `/files/${encodeURIComponent(f.id)}/permissions?sendNotificationEmail=false&fields=id`, {
+        method: 'POST', body: { type: 'domain', role: 'reader', domain: s.domain, allowFileDiscovery: false },
+      });
+      return { fileId: f.id, domain: s.domain };
+    },
+
     share: async (p, s) => {
       // 見えないファイル（M2Office が作っていないもの）は共有しない。drive.file の範囲なので、Google からも見えない
       const f = await meta(p, s.fileId);

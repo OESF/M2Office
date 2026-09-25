@@ -8,7 +8,7 @@
 import type { AgentDefinition, AgentStep, ApprovalStep, Artifact, RunStep } from '@m2office/shared';
 import type { ToolRegistry } from '../tools/registry.js';
 import { stepLabel } from '../agents/index.js';
-import { describeCall, type DescribeContext } from './describe-call.js';
+import { describeCall, describeDone, type DescribeContext } from './describe-call.js';
 
 /** 段の文を、この字数で切る。 */
 const TEXT_MAX = 4000;
@@ -58,6 +58,8 @@ export function composeApprovalPresent(p: {
     step: AgentStep;
     calls: { name: string; args: Record<string, unknown>; shown?: string; caution?: string }[];
     unable?: { name: string; args: Record<string, unknown>; reason: string }[];
+    /** 組み立ての中で実行した下書き（Google ドキュメントへの保存など）と、その結果（ADR-0025）。 */
+    done?: { name: string; args: Record<string, unknown>; result: unknown }[];
   } | null;
   registry: ToolRegistry;
 }): string {
@@ -95,6 +97,12 @@ export function composeApprovalPresent(p: {
   }
   out.push('## 判断するもの', '');
   out.push(...(material.length > 0 ? material : ['（この承認までに作られた文や成果物はありません）', '']));
+
+  // 承認の前の組み立てで済ませたこと。承認する人が、作られた文書を開いて確かめられるようにする（ADR-0025）
+  const doneLines = (plan?.done ?? []).map((d) => describeDone(d, d.result)).filter((x): x is string => !!x);
+  if (doneLines.length > 0) {
+    out.push('## 承認の前に済ませたこと', '', ...doneLines.map((l) => `- ${l}`), '');
+  }
 
   out.push('## 承認すると', '');
   const unable = plan?.unable ?? [];

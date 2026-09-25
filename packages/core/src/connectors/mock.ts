@@ -35,7 +35,7 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
 
   /** 下書き・投稿の記録。動作確認で参照する。 */
   readonly outbox: {
-    kind: 'draft' | 'chat' | 'slides' | 'mail' | 'event.update' | 'event.cancel' | 'drive.share';
+    kind: 'draft' | 'chat' | 'slides' | 'mail' | 'event.update' | 'event.cancel' | 'drive.share' | 'drive.share_company';
     principal: ConnectorPrincipal; body: unknown;
   }[] = [];
   /** 完了にした ToDo（見本の ToDo にも効かせる）。 */
@@ -189,6 +189,14 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
     },
     createFolder: async (p: ConnectorPrincipal, input: { name: string; parentId: string | null }) =>
       this.addFile(p, input.name, 'folder', {}),
+    get: async (p: ConnectorPrincipal, fileId: string) => this.visibleFiles(p).find((x) => x.file.id === fileId)?.file ?? null,
+    shareWithDomain: async (p: ConnectorPrincipal, s: { fileId: string; domain: string }) => {
+      const f = this.driveFiles.get(s.fileId);
+      // 共有できるのは本人が M2Office で作ったファイルだけ（drive.file の範囲を模す）
+      if (!f || f.owner !== key(p)) return null;
+      this.outbox.push({ kind: 'drive.share_company', principal: p, body: s });
+      return { fileId: s.fileId, domain: s.domain };
+    },
     share: async (p: ConnectorPrincipal, s: { fileId: string; emails: string[]; role: 'reader' | 'commenter' | 'writer' }) => {
       const f = this.driveFiles.get(s.fileId);
       // 共有できるのは本人が M2Office で作ったファイルだけ（drive.file の範囲を模す）

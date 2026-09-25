@@ -12,7 +12,8 @@
  * @see 仕様書 第14.3.2節 CASA に備えた作り
  */
 
-import type { Tool, ToolContext } from './registry.js';
+import type { PreparedCall, Tool, ToolContext } from './registry.js';
+import { approvedArtifact, jstDate } from './approved-artifact.js';
 
 const principal = (ctx: ToolContext) => ({ tenantId: ctx.tenantId, userId: ctx.userId });
 const str = (v: unknown, fallback = '') => (typeof v === 'string' ? v.trim() : fallback);
@@ -196,20 +197,66 @@ export const driveCreateFolder: Tool = {
   },
 };
 
-/** Google ドキュメントを作る。 @remarks 危険度 `draft`（本人のドライブに作り、共有しない）。権限 `drive.file`。 */
+/**
+ * Google ドキュメントを作る。
+ *
+ * @remarks
+ * 危険度 `draft`（本人のドライブに作り、共有しない）。権限 `drive.file`。
+ * `artifactId` を渡すと、**承認で確かめた成果物の本文をそのまま**入れる（推論に書き直させない。ADR-0025）。
+ * このときは保存に失敗しても例外にせず、`created: false` と理由を返す（業務を止めない。仕様書 第9.5.2節）。
+ * `folderName` を渡すと、M2Office が作ったその名前のフォルダに入れる（無ければ作る）。
+ */
 export const docsCreate: Tool = {
   name: 'docs.create',
   risk: 'draft',
   activityLabel: '文書を作っています',
   helpText: 'あなたのドライブに Google ドキュメントを作ります。共有はしません',
-  description: '本人のドライブに Google ドキュメントを作る（共有しない）',
-  args: { properties: { title: S('題名'), body: S('本文'), folderId: S('入れるフォルダの ID（任意）') }, required: ['title', 'body'] },
+  description: '本人のドライブに Google ドキュメントを作る（共有しない）。承認で確かめた成果物を保存するときは、body の代わりに artifactId を渡す（本文を変えずに入れる）',
+  args: {
+    properties: {
+      title: S('題名（artifactId のときは省略できる。成果物の題名に日付を添える）'),
+      body: S('本文（Markdown。artifactId のときは渡さない）'),
+      artifactId: S('保存する成果物の ID（document.create の結果）。本文はそこから取る'),
+      folderId: S('入れるフォルダの ID（任意）'),
+      folderName: S('入れるフォルダの名前（任意。M2Office が作ったその名前のフォルダに入れ、無ければ作る）'),
+    },
+  },
   google: { scope: 'drive.file', level: 'non-sensitive' },
   async invoke(args, ctx) {
-    const file = await ctx.connector.docs.create(principal(ctx), { title: str(args['title']), body: str(args['body']), folderId: str(args['folderId']) || null });
-    return { source: ctx.connector.sourceFor(ctx.tenantId), created: true, file };
+    const source = ctx.connector.sourceFor(ctx.tenantId);
+    const artifactId = str(args['artifactId']);
+    if (!artifactId) {
+      if (!str(args['body'])) return { source, created: false, reason: '本文（body）か、成果物の ID（artifactId）を渡してください' };
+      const folderId = str(args['folderId']) || (str(args['folderName']) ? await folderByName(ctx, str(args['folderName'])) : null);
+      const file = await ctx.connector.docs.create(principal(ctx), { title: str(args['title']) || '無題の文書', body: str(args['body']), folderId });
+      return { source, created: true, file };
+    }
+    const picked = await approvedArtifact(ctx, artifactId);
+    if ('reason' in picked) return { source, created: false, reason: `${picked.reason}。Google ドキュメントに保存しませんでした` };
+    const { artifact } = picked;
+    const title = str(args['title']) || `${artifact.title}（${jstDate(artifact.createdAt)}）`;
+    try {
+      const folderId = str(args['folderId']) || (str(args['folderName']) ? await folderByName(ctx, str(args['folderName'])) : null);
+      const file = await ctx.connector.docs.create(principal(ctx), { title, body: artifact.body, folderId });
+      return { source, created: true, file, fromArtifact: artifact.id };
+    } catch (err) {
+      // 議事録は成果物と組織知識に残る。保存できなかったことを理由つきで返し、業務は止めない（仕様書 第9.5.2節）
+      return { source, created: false, title, reason: err instanceof Error ? err.message : '保存できませんでした' };
+    }
   },
 };
+
+/**
+ * M2Office が作った、その名前のフォルダの ID。無ければ本人のドライブに作る。
+ *
+ * @remarks `drive.file` の範囲なので、利用者が自分で作った同じ名前のフォルダは見えず、使わない
+ */
+async function folderByName(ctx: ToolContext, name: string): Promise<string> {
+  const found = (await ctx.connector.drive.search(principal(ctx), { query: name, limit: 50 }))
+    .find((f) => f.kind === 'folder' && f.name === name);
+  if (found) return found.id;
+  return (await ctx.connector.drive.createFolder(principal(ctx), { name, parentId: null })).id;
+}
 
 /** M2Office が作った Google ドキュメントに追記する。 @remarks 危険度 `draft`。権限 `drive.file`。 */
 export const docsAppend: Tool = {
@@ -321,6 +368,62 @@ export const driveShare: Tool = {
   },
 };
 
+/** 会社の全員に共有してはいけない、個人向けの Google アカウントのドメイン（ドメインが会社でなく、一般公開と同じになる）。 */
+const CONSUMER_DOMAINS = new Set(['gmail.com', 'googlemail.com']);
+
+/**
+ * 会社の全員への共有に使う、本人の会社のドメイン。本人の Google アカウント（無ければ M2Office の利用者）のメールから取る。
+ *
+ * @returns ドメインか、共有できない理由
+ */
+async function companyDomain(ctx: ToolContext): Promise<{ domain: string } | { reason: string }> {
+  // 接続が読めなければ（見本の会社など）、M2Office の利用者のメールで決める
+  const conn = await Promise.resolve().then(() => ctx.repo.getGoogleConnection(ctx.tenantId, ctx.userId)).catch(() => null);
+  const email = conn?.googleEmail || (await ctx.repo.findUserById(ctx.tenantId, ctx.userId))?.email || '';
+  const domain = email.split('@')[1]?.trim().toLowerCase() ?? '';
+  if (!domain) return { reason: '会社のドメインが分かりません' };
+  if (CONSUMER_DOMAINS.has(domain)) return { reason: '個人向けの Google アカウントでは、会社の全員への共有はできません' };
+  return { domain };
+}
+
+/**
+ * M2Office が作ったファイルを、会社の全員が**閲覧だけ**できるようにする（仕様書 第14.3.4節、ADR-0025）。
+ *
+ * @remarks
+ * 危険度 `write-internal`（会社の中に閉じる）。承認②のあとに行う（AG-02）。権限 `drive.file`。
+ * 検索には出さず、リンクを知っている社内の人だけが開ける。リンクによる一般公開はしない。
+ * 承認の前に、ファイルが見えるかとドメインを確かめ、承認の画面にファイルの名前を出す（ADR-0024）。
+ */
+export const driveShareCompany: Tool = {
+  name: 'drive.share_company',
+  risk: 'write-internal',
+  activityLabel: 'ファイルを社内に共有しています',
+  helpText: 'M2Office で作ったファイルを、会社の全員が閲覧できるようにします。社外の人は見られません。リンクで誰にでも公開することはしません',
+  description: 'M2Office が作ったファイルを、会社の全員が閲覧できるようにする（会社のドメインの人だけ。検索には出さない）',
+  args: { properties: { fileId: S('ファイルの ID（docs.create の結果の file.id）') }, required: ['fileId'] },
+  google: { scope: 'drive.file', level: 'non-sensitive' },
+  async prepare(args, ctx): Promise<PreparedCall> {
+    try {
+      const d = await companyDomain(ctx);
+      if ('reason' in d) return { kind: 'problem', reason: d.reason };
+      const file = await ctx.connector.drive.get(principal(ctx), str(args['fileId']));
+      if (!file) return { kind: 'problem', reason: 'M2Office で作ったファイルが見つかりません' };
+      return { kind: 'ready', args, shown: file.name };
+    } catch (err) {
+      return { kind: 'unchecked', reason: err instanceof Error ? err.message : '確かめられませんでした' };
+    }
+  },
+  async invoke(args, ctx) {
+    const source = ctx.connector.sourceFor(ctx.tenantId);
+    const d = await companyDomain(ctx);
+    if ('reason' in d) return { source, shared: false, reason: d.reason };
+    const res = await ctx.connector.drive.shareWithDomain(principal(ctx), { fileId: str(args['fileId']), domain: d.domain });
+    return res
+      ? { source, shared: true, ...res }
+      : { source, shared: false, reason: 'M2Office で作ったファイルが見つかりません（それ以外のファイルは共有しません）' };
+  },
+};
+
 /**
  * 社内の人を、名前・メール・部署で探す。
  *
@@ -406,6 +509,8 @@ export const GOOGLE_TOOLS: Tool[] = [
   driveSearch, driveRead, driveCreateFolder, docsCreate, docsAppend, sheetsCreate, sheetsRead, sheetsAppend,
   // 第 2 弾
   driveShare, directorySearch, meetTranscript,
+  // 議事録を Google ドキュメントに保存して社内に共有する（第 0.110.0 版）
+  driveShareCompany,
   // 第 3 弾
   formsResponses,
 ];
