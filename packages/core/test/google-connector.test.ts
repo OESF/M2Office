@@ -20,6 +20,7 @@ import {
 import {
   buildRawMessage, decodeHeaderWords, decodeText, extractBody, htmlToText, MAX_BODY_CHARS,
 } from '../src/connectors/google/mime.js';
+import { MAX_CHAT_CHARS, pickSpace, spaceIdOf, toChatText } from '../src/connectors/google/chat.js';
 
 const P = { tenantId: 't-real', userId: 'u1' };
 const b64url = (s: string | Uint8Array) => Buffer.from(s).toString('base64url');
@@ -183,12 +184,23 @@ async function fakeGoogle(behave: (s: Seen) => { status: number; json?: unknown 
     // 本物の Google は、形の違う ID に 404 でなく 400 を返す（2026-09-25 に確認）
     if (s.path === '/tasks/lists/@default/tasks/bad-shape') return send(400, { error: { code: 400, status: 'INVALID_ARGUMENT' } });
     if (s.path.startsWith('/tasks/lists/@default/tasks/') && s.method === 'PATCH') return send(200, { id: s.path.split('/').pop(), status: 'completed' });
+    // Chat
+    if (s.path === '/chat/spaces' && s.method === 'GET') {
+      if (!s.query.get('pageToken')) {
+        return send(200, { spaces: [{ name: 'spaces/SALES', displayName: '営業部' }, { name: 'spaces/DUP1', displayName: '総務' }], nextPageToken: 'p2' });
+      }
+      return send(200, { spaces: [{ name: 'spaces/DUP2', displayName: '総務 ' }, { name: 'spaces/DEV', displayName: 'Dev Team' }] });
+    }
+    if (s.path === '/chat/spaces/GONE/messages') return send(404, { error: { code: 404, status: 'NOT_FOUND', message: 'Space not found' } });
+    if (s.path.startsWith('/chat/spaces/') && s.path.endsWith('/messages') && s.method === 'POST') {
+      return send(200, { name: `${s.path.slice('/chat/'.length, -'/messages'.length)}/messages/m1` });
+    }
     send(404, { error: { code: 404 } });
   });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const endpoints: GoogleApiEndpoints = {
-    gmail: `${base}/gmail`, calendar: `${base}/cal`, tasks: `${base}/tasks`,
+    gmail: `${base}/gmail`, calendar: `${base}/cal`, tasks: `${base}/tasks`, chat: `${base}/chat`,
     oauth: { auth: `${base}/oauth/auth`, token: `${base}/oauth/token`, tokeninfo: `${base}/oauth/tokeninfo`, userinfo: `${base}/oauth/userinfo`, revoke: `${base}/oauth/revoke` },
   };
   return { endpoints, seen, refreshes: () => refreshes, close: () => new Promise<void>((r) => server.close(() => r())) };
@@ -389,6 +401,60 @@ test('ToDo: 本人の既定のリストを使う。期限は日付の終わり�
   });
 });
 
+test('Chat: 投稿先のリンク・ID を読み、名前はちょうど 1 つ一致したときだけ選ぶ', () => {
+  assert.equal(spaceIdOf('spaces/AAAAxyz_1'), 'spaces/AAAAxyz_1');
+  assert.equal(spaceIdOf('https://chat.google.com/room/AAAAabc?cls=7'), 'spaces/AAAAabc');
+  assert.equal(spaceIdOf('https://mail.google.com/chat/u/0/#chat/space/AAAAdef'), 'spaces/AAAAdef');
+  assert.equal(spaceIdOf('営業部'), null, '名前は ID ではない');
+  const list = [{ name: 'spaces/A', displayName: '営業部' }, { name: 'spaces/B', displayName: 'Ｄｅｖ　Team' }, { name: 'spaces/C', displayName: '総務' }, { name: 'spaces/D', displayName: '総務' }];
+  assert.deepEqual(pickSpace(' 営業部 ', list), { space: 'spaces/A' });
+  assert.deepEqual(pickSpace('dev team', list), { space: 'spaces/B' }, '全角と半角・大小・空白は区別しない');
+  assert.match((pickSpace('営業', list) as { reason: string }).reason, /見つかりません/, '似た名前に推測で投稿しない');
+  assert.match((pickSpace('総務', list) as { reason: string }).reason, /2 つあります.*リンク/);
+});
+
+test('Chat: 本文を Chat の書式に直し、長ければ切る', () => {
+  assert.equal(toChatText('## 決定事項\n- **資料**を作る\n### 保留 ###'), '*決定事項*\n- *資料*を作る\n*保留*');
+  const long = toChatText('あ'.repeat(MAX_CHAT_CHARS + 5));
+  assert.ok(long.startsWith('あ'.repeat(MAX_CHAT_CHARS)));
+  assert.match(long, /続きは M2Office で見られます/);
+});
+
+test('Chat: 名前で探して本人として投稿する。見つからない・複数・アプリ未設定を見分ける', async () => {
+  await withConnector(async (c, g) => {
+    assert.deepEqual(await c.chat.post(P, { space: '営業部', text: '## 議事録\n決まったこと' }), { messageId: 'spaces/SALES/messages/m1' });
+    const list = g.seen.find((s) => s.path === '/chat/spaces')!;
+    assert.equal(list.query.get('filter'), 'spaceType = "SPACE"', '名前のあるスペースだけを探す');
+    const post = g.seen.find((s) => s.method === 'POST' && s.path === '/chat/spaces/SALES/messages')!;
+    assert.deepEqual(post.body, { text: '*議事録*\n決まったこと' });
+
+    await c.chat.post(P, { space: 'dev team', text: 'x' });
+    assert.ok(g.seen.some((s) => s.path === '/chat/spaces/DEV/messages'), '2 ページ目まで探す');
+    const before = g.seen.filter((s) => s.path === '/chat/spaces').length;
+    await c.chat.post(P, { space: 'https://chat.google.com/room/LINKED', text: 'x' });
+    assert.equal(g.seen.filter((s) => s.path === '/chat/spaces').length, before, 'リンクなら一覧を読まない');
+
+    await assert.rejects(c.chat.post(P, { space: '総務', text: 'x' }), /2 つあります/);
+    await assert.rejects(c.chat.post(P, { space: '人事', text: 'x' }), /見つかりません/);
+    await assert.rejects(c.chat.post(P, { space: 'spaces/GONE', text: 'x' }), /スペースが見つかりません/);
+    await assert.rejects(c.chat.post(P, { space: '', text: 'x' }), /指定されていません/);
+    assert.equal(g.seen.filter((s) => s.method === 'POST' && s.path.includes('総務')).length, 0);
+  });
+  await withConnector(async (c) => {
+    const err = await c.chat.post(P, { space: 'spaces/AAAA', text: 'x' }).catch((e: unknown) => e as ConnectorUnavailableError);
+    assert.equal(err.kind, 'api-disabled');
+    assert.match(err.message, /Chat アプリが設定されていません/);
+  }, {}, (s) => (s.path.startsWith('/chat/') ? {
+    status: 404,
+    json: { error: { code: 404, status: 'NOT_FOUND', message: 'Google Chat app not found. To create a Chat app, you must turn on the Chat API and configure the app in the Google Cloud console.' } },
+  } : undefined));
+  await withConnector(async (c) => {
+    assert.equal(await kindOf(c.chat.post(P, { space: '営業部', text: 'x' })), 'insufficient-scope', '一覧の許可が無い（接続し直す前）');
+  }, {}, (s) => (s.path === '/chat/spaces' ? {
+    status: 403, json: { error: { code: 403, status: 'PERMISSION_DENIED', details: [{ reason: 'ACCESS_TOKEN_SCOPE_INSUFFICIENT' }] } },
+  } : undefined));
+});
+
 test('400 を「見つからない」に丸めるのは ToDo の完了だけ（ほかでは組み立ての誤りを隠さない）', async () => {
   await withConnector(async (c) => {
     await assert.rejects(c.calendar.update(P, { eventId: 'e1', title: 'x' }), /要求を受け付けませんでした（HTTP 400・INVALID_ARGUMENT）/);
@@ -398,8 +464,8 @@ test('400 を「見つからない」に丸めるのは ToDo の完了だけ（�
 test('準備中のサービスは、見本で代えずに断る（ADR-0022）', async () => {
   await withConnector(async (c) => {
     assert.equal(await kindOf(c.drive.search(P, { query: '' })), 'not-implemented');
-    const err = await c.chat.post(P, { space: 's', text: 't' }).catch((e: unknown) => e as Error);
-    assert.match(err.message, /Chat はまだ Google につないでいません（準備中）/);
+    const err = await c.meet.transcript(P, { query: '定例' }).catch((e: unknown) => e as Error);
+    assert.match(err.message, /Meet はまだ Google につないでいません（準備中）/, '英字で終わる名前の後ろに空白を入れる');
     assert.equal(c.sourceFor('t-real'), 'google');
   });
 });

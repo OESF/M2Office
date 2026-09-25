@@ -204,8 +204,10 @@ export const chatPost: Tool = {
   activityLabel: 'チャットへ投稿しています',
   helpText: 'チャットへ投稿します。必ず承認のあとに行います',
   description: 'チャットのスペースへ投稿する',
-  args: { properties: { space: { type: 'string', description: 'スペース（既定 general）' }, text: { type: 'string', description: '本文' } }, required: ['text'] },
+  args: { properties: { space: { type: 'string', description: 'スペースの名前（例: 営業部）か、スペースのリンク' }, text: { type: 'string', description: '本文' } }, required: ['text'] },
   google: { scope: 'chat.messages.create', level: 'sensitive' },
+  // 投稿先を名前で探すため、本人が入っているスペースの一覧を見る（仕様書 第14.3.4節「Chat」）
+  googleAlso: [{ scope: 'chat.spaces.readonly', level: 'sensitive' }],
   async invoke(args, ctx) {
     const res = await ctx.connector.chat.post(principal(ctx), {
       space: str(args['space'], 'general'),

@@ -17,6 +17,7 @@ export interface GoogleApiEndpoints {
   gmail: string;
   calendar: string;
   tasks: string;
+  chat: string;
   oauth: GoogleOAuthEndpoints;
 }
 
@@ -24,6 +25,7 @@ export const GOOGLE_API_ENDPOINTS: GoogleApiEndpoints = {
   gmail: 'https://gmail.googleapis.com/gmail/v1',
   calendar: 'https://www.googleapis.com/calendar/v3',
   tasks: 'https://tasks.googleapis.com/tasks/v1',
+  chat: 'https://chat.googleapis.com/v1',
   oauth: GOOGLE_OAUTH_ENDPOINTS,
 };
 
@@ -34,7 +36,7 @@ const REFRESH_MARGIN_MS = 60_000;
 const TIMEOUT_MS = 20_000;
 
 /** 呼び先の API の、利用者に見せる名前。 */
-export type GoogleApiName = 'Gmail' | 'カレンダー' | 'ToDo';
+export type GoogleApiName = 'Gmail' | 'カレンダー' | 'ToDo' | 'Chat';
 
 /**
  * 利用者ごとのアクセス トークンを配る（仕様書 第14.3.4節「誰の権限で呼ぶか」）。
@@ -135,9 +137,15 @@ export async function callGoogle(
     }
     if (res.status === 204) return {};
     if (res.ok) return (await res.json().catch(() => ({}))) as Record<string, any>;
+
+    const body = (await res.json().catch(() => ({}))) as { error?: { status?: string; message?: string; errors?: { reason?: string }[]; details?: { reason?: string }[] } };
+    // Chat は、会社の Google Cloud で Chat アプリを設定していないと 404 を返す（2026-09-25 に確認）。
+    // 「見つからない」と取り違えず、会社の準備が要ることとして断る。文を見るのはここだけで、利用者には出さない
+    if (res.status === 404 && /Chat app not found/i.test(body.error?.message ?? '')) {
+      throw new ConnectorUnavailableError('api-disabled', '会社の Google Cloud で Chat アプリが設定されていません。管理者に伝えてください');
+    }
     if (res.status === 404 || res.status === 410) return null;
 
-    const body = (await res.json().catch(() => ({}))) as { error?: { status?: string; errors?: { reason?: string }[]; details?: { reason?: string }[] } };
     const reasons = [
       body.error?.status, ...(body.error?.errors ?? []).map((e) => e.reason), ...(body.error?.details ?? []).map((d) => d.reason),
     ].filter((x): x is string => typeof x === 'string');

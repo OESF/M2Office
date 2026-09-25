@@ -14,7 +14,7 @@ import { Hono, type Context } from 'hono';
 import {
   buildGoogleAuthUrl, checkGeminiLive, checkGeminiText, checkGoogleClient, createPkce, exchangeGoogleCode, exchangeGoogleLoginCode,
   fetchGooglePhoto, googleGrantedScopes, googleScopeLabel, googleUserInfo, isGoogleClientError, refreshGoogleAccessToken,
-  revokeGoogleToken,
+  revokeGoogleToken, toolGoogleScopes,
   GoogleOAuthError,
   type GeminiModels, type GeminiSettingsMeta, type GoogleClientVerdict,
 } from '@m2office/core';
@@ -37,7 +37,7 @@ export async function requiredGoogleScopes(deps: AppDeps, tenantId: string): Pro
   const [view, settings] = await Promise.all([deps.tenantView(tenantId), deps.repo.getTenantSettings(tenantId)]);
   const out = new Map<string, string>();
   for (const agent of view.agents.filter((a) => !settings.agents.disabled.includes(a.id))) {
-    for (const tool of view.registry.allowed(agent.tools)) if (tool.google) out.set(tool.google.scope, tool.google.level);
+    for (const tool of view.registry.allowed(agent.tools)) for (const g of toolGoogleScopes(tool)) out.set(g.scope, g.level);
   }
   return [...out.entries()].map(([scope, level]) => ({ scope, level })).sort((a, b) => a.scope.localeCompare(b.scope));
 }

@@ -74,6 +74,15 @@ export interface GoogleScope {
 }
 
 /**
+ * ツールが求める Google の権限をすべて返す（主な権限と、ほかに要る権限）。
+ *
+ * @remarks 求める権限の一覧・管理者ページの権限の表・開発者マニュアルは、これを通して数える。
+ */
+export function toolGoogleScopes(tool: { google?: GoogleScope; googleAlso?: GoogleScope[] }): GoogleScope[] {
+  return tool.google ? [tool.google, ...(tool.googleAlso ?? [])] : [];
+}
+
+/**
  * ツールの定義。
  *
  * @remarks
@@ -99,6 +108,11 @@ export interface Tool {
   args?: ToolArgsSchema;
   /** 必要な Google の権限。Google を使わないツールは持たない（仕様書 第14.3.2節）。 */
   google?: GoogleScope;
+  /**
+   * 主な権限（`google`）のほかに要る Google の権限（例: `chat.post` がスペースを名前で探すための一覧の権限）。
+   * 求める権限の一覧には、主な権限と同じく入る。{@link toolGoogleScopes} で両方を引く。
+   */
+  googleAlso?: GoogleScope[];
   invoke(args: Record<string, unknown>, ctx: ToolContext): Promise<unknown>;
 }
 

@@ -73,7 +73,7 @@ export {
 export * from './help/index.js';
 export * from './extensions/index.js';
 
-export { ToolRegistry, validateToolArgs } from './tools/registry.js';
+export { ToolRegistry, validateToolArgs, toolGoogleScopes } from './tools/registry.js';
 export type { Tool, ToolContext, ArgSpec, ToolArgsSchema, GoogleScope, GoogleScopeLevel } from './tools/registry.js';
 export { BUILTIN_TOOLS } from './tools/builtin.js';
 

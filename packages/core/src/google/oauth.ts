@@ -50,6 +50,7 @@ export function googleScopeLabel(name: string): string {
     'calendar.events': '予定を登録・変更する（承認のあとだけ）',
     tasks: 'ToDo を見る・登録する',
     'chat.messages.create': 'チャットに投稿する（承認のあとだけ）',
+    'chat.spaces.readonly': '入っているチャットのスペースを見る（投稿先を名前で探すため）',
     'drive.file': 'M2Office で作った・あなたが選んだファイルを扱う',
     'directory.readonly': '社内の人を探す',
     'meetings.space.readonly': '参加した会議の文字起こしを読む',

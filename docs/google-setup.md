@@ -188,6 +188,10 @@ GOOGLE_CLIENT_SECRET=<クライアントシークレット>
    Google は `http` の戻り先を `localhost` にしか認めないが、`https` の `localhost` は認める。
    開発用の証明書は `localhost` も含めて作ってある（`npm run dev:cert`）
 2. 使う API（Gmail・Calendar・Tasks・Chat・Drive・Docs・Sheets・Slides・People・Meet・Forms）を有効にする
+   - **Chat は、API を有効にするだけでは使えない。** Google Chat API の構成（Configuration）の画面で、
+     アプリの名前・アバターの画像の URL・説明を入れて保存する（対話の機能は使わないので、切ったままでよい）。
+     本人の権限で投稿する場合も Google が求める。設定が無いと、投稿のときに
+     「Google Chat app not found」と返る（2026-09-25 に確認。仕様書 第14.3.4節「Chat」）
 3. 管理者ページ「接続」の「Google Workspace」に、クライアント ID とシークレットを登録する
 4. 個人設定の「Google 連携」で「Google と接続する」を押し、許可の状況を確かめる
 

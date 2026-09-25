@@ -14,7 +14,7 @@ import {
 } from '@m2office/shared';
 import {
   DEFAULT_STANDARD_MINUTES, GOOGLE_DATA_RETENTION_DAYS, KNOWLEDGE_MAX_CHARS,
-  canDecidePromotion, decidePromotion, stepLabel,
+  canDecidePromotion, decidePromotion, stepLabel, toolGoogleScopes,
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { requireRole, type AppEnv } from '../middleware/tenant.js';
@@ -375,11 +375,12 @@ export function adminRoute(deps: AppDeps) {
     const byScope = new Map<string, { scope: string; level: string; tools: Set<string>; agents: Set<string> }>();
     for (const agent of view.agents.filter((a) => !settings.agents.disabled.includes(a.id))) {
       for (const tool of view.registry.allowed(agent.tools)) {
-        if (!tool.google) continue;
-        const e = byScope.get(tool.google.scope) ?? { scope: tool.google.scope, level: tool.google.level, tools: new Set(), agents: new Set() };
-        e.tools.add(tool.name);
-        e.agents.add(agent.name);
-        byScope.set(tool.google.scope, e);
+        for (const g of toolGoogleScopes(tool)) {
+          const e = byScope.get(g.scope) ?? { scope: g.scope, level: g.level, tools: new Set(), agents: new Set() };
+          e.tools.add(tool.name);
+          e.agents.add(agent.name);
+          byScope.set(g.scope, e);
+        }
       }
     }
     const order = { restricted: 0, sensitive: 1, 'non-sensitive': 2 } as Record<string, number>;

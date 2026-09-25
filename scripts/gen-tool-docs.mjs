@@ -36,7 +36,7 @@ const lines = [
   '',
   '| ツール | 危険度 | Google の権限 | すること |',
   '|---|---|---|---|',
-  ...tools.map((t) => `| \`${t.name}\` | ${t.risk} | ${t.google ? `\`${t.google.scope}\`（${LEVEL[t.google.level]}）` : '—'} | ${esc(t.helpText)} |`),
+  ...tools.map((t) => `| \`${t.name}\` | ${t.risk} | ${t.google ? [t.google, ...(t.googleAlso ?? [])].map((g) => `\`${g.scope}\`（${LEVEL[g.level]}）`).join('・') : '—'} | ${esc(t.helpText)} |`),
   '',
   '## 4.3 引数',
   '',

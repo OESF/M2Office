@@ -13,6 +13,10 @@ import {
 } from '../types.js';
 import { GOOGLE_API_ENDPOINTS, GoogleTokenSource, callGoogle, type GoogleApiEndpoints } from './http.js';
 import { buildRawMessage, decodeEntities, decodeHeaderWords, extractBody, header, type GmailPart } from './mime.js';
+import { pickSpace, spaceIdOf, toChatText } from './chat.js';
+
+/** スペースの一覧を読む上限（ページの数）。1 ページ 1,000 件。 */
+const CHAT_SPACE_PAGES = 5;
 
 /** 一覧で一度に返すメールの上限（仕様書 第14.3.4節）。 */
 const MAIL_LIMIT_MAX = 50;
@@ -262,9 +266,47 @@ export class GoogleWorkspaceConnector implements WorkspaceConnector {
     },
   };
 
+  // ─── Chat（仕様書 第14.3.4節「Chat」） ──────────────────────────────
+
+  private chatApi(p: ConnectorPrincipal, path: string, init?: { method?: string; body?: unknown }) {
+    return callGoogle(this.tokens, p, 'Chat', `${this.endpoints.chat}${path}`, init);
+  }
+
+  /**
+   * 投稿先を `spaces/…` にする。リンク・ID ならそのまま、名前なら本人が入っているスペースから探す。
+   *
+   * @throws {Error} 見つからない・複数ある（利用者に見せる理由の文）
+   */
+  private async resolveSpace(p: ConnectorPrincipal, input: string): Promise<string> {
+    const direct = spaceIdOf(input);
+    if (direct) return direct;
+    if (!input.trim()) throw new Error('投稿先のチャットのスペースが指定されていません');
+    const spaces: { name: string; displayName?: string }[] = [];
+    let pageToken = '';
+    for (let page = 0; page < CHAT_SPACE_PAGES; page++) {
+      // 名前のあるスペースだけ。1 対 1 とグループの会話は名前で探さない
+      const q = new URLSearchParams({ pageSize: '1000', filter: 'spaceType = "SPACE"', ...(pageToken ? { pageToken } : {}) });
+      const res = await this.chatApi(p, `/spaces?${q}`);
+      spaces.push(...((res?.['spaces'] ?? []) as { name: string; displayName?: string }[]));
+      pageToken = String(res?.['nextPageToken'] ?? '');
+      if (!pageToken) break;
+    }
+    const picked = pickSpace(input, spaces);
+    if ('reason' in picked) throw new Error(picked.reason);
+    return picked.space;
+  }
+
+  chat = {
+    post: async (p: ConnectorPrincipal, msg: { space: string; text: string }) => {
+      const space = await this.resolveSpace(p, msg.space);
+      const res = await this.chatApi(p, `/${space}/messages`, { method: 'POST', body: { text: toChatText(msg.text) } });
+      if (!res) throw new Error('投稿先のチャットのスペースが見つかりません。リンクを確かめるか、そのスペースに入っているかを確かめてください');
+      return { messageId: String(res['name'] ?? '') };
+    },
+  };
+
   // ─── 準備中（ADR-0022） ──────────────────────────────────────────────
 
-  chat = pending<WorkspaceConnector['chat']>('Chat');
   slides = pending<WorkspaceConnector['slides']>('スライド');
   drive = pending<WorkspaceConnector['drive']>('ドライブ');
   docs = pending<WorkspaceConnector['docs']>('ドキュメント');
