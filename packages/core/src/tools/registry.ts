@@ -113,8 +113,28 @@ export interface Tool {
    * 求める権限の一覧には、主な権限と同じく入る。{@link toolGoogleScopes} で両方を引く。
    */
   googleAlso?: GoogleScope[];
+  /**
+   * 承認の前の確かめ（仕様書 第9.3.3節、ADR-0024）。承認の前の組み立てで、操作を記録する前に呼ぶ。
+   *
+   * @remarks
+   * **読む操作だけを行う。** 書き込みも送信もしない。持たないツールは、確かめずに記録する。
+   * 例外は投げない（確かめられなかったときは `unchecked` を返す）。
+   */
+  prepare?(args: Record<string, unknown>, ctx: ToolContext): Promise<PreparedCall>;
   invoke(args: Record<string, unknown>, ctx: ToolContext): Promise<unknown>;
 }
+
+/**
+ * 承認の前の確かめの結果（ADR-0024）。
+ *
+ * - `ready`: 行える。`args` で記録し、承認のあとはそのまま行う。`shown` は承認の画面に出す、確かめた名前
+ * - `problem`: 行えない。記録せず、承認の画面に理由を出す
+ * - `unchecked`: 確かめられなかった（Google に届かないなど）。元の引数で記録し、承認の画面に添える
+ */
+export type PreparedCall =
+  | { kind: 'ready'; args: Record<string, unknown>; shown?: string }
+  | { kind: 'problem'; reason: string }
+  | { kind: 'unchecked'; reason: string };
 
 /**
  * 利用できるツールの登録簿。

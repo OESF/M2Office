@@ -192,6 +192,12 @@ async function fakeGoogle(behave: (s: Seen) => { status: number; json?: unknown 
       return send(200, { spaces: [{ name: 'spaces/DUP2', displayName: '総務 ' }, { name: 'spaces/DEV', displayName: 'Dev Team' }] });
     }
     if (s.path === '/chat/spaces/GONE/messages') return send(404, { error: { code: 404, status: 'NOT_FOUND', message: 'Space not found' } });
+    // 1 つのスペースを見る（承認の前の確かめ。ADR-0024）
+    if (s.path === '/chat/spaces/SALES' && s.method === 'GET') return send(200, { name: 'spaces/SALES', displayName: '営業部' });
+    if (s.path === '/chat/spaces/GONE' && s.method === 'GET') return send(404, { error: { code: 404, status: 'NOT_FOUND' } });
+    // 存在しない ID には、形が正しくても 400 が返る（2026-09-25 に本物で確認）
+    if (s.path === '/chat/spaces/NOSUCH' && s.method === 'GET') return send(400, { error: { code: 400, status: 'INVALID_ARGUMENT' } });
+    if (s.path === '/chat/spaces/OUTSIDER' && s.method === 'GET') return send(403, { error: { code: 403, status: 'PERMISSION_DENIED', message: 'The caller does not have permission' } });
     if (s.path.startsWith('/chat/spaces/') && s.path.endsWith('/messages') && s.method === 'POST') {
       return send(200, { name: `${s.path.slice('/chat/'.length, -'/messages'.length)}/messages/m1` });
     }
@@ -407,10 +413,30 @@ test('Chat: 投稿先のリンク・ID を読み、名前はちょうど 1 つ�
   assert.equal(spaceIdOf('https://mail.google.com/chat/u/0/#chat/space/AAAAdef'), 'spaces/AAAAdef');
   assert.equal(spaceIdOf('営業部'), null, '名前は ID ではない');
   const list = [{ name: 'spaces/A', displayName: '営業部' }, { name: 'spaces/B', displayName: 'Ｄｅｖ　Team' }, { name: 'spaces/C', displayName: '総務' }, { name: 'spaces/D', displayName: '総務' }];
-  assert.deepEqual(pickSpace(' 営業部 ', list), { space: 'spaces/A' });
-  assert.deepEqual(pickSpace('dev team', list), { space: 'spaces/B' }, '全角と半角・大小・空白は区別しない');
+  assert.deepEqual(pickSpace(' 営業部 ', list), { space: 'spaces/A', displayName: '営業部' });
+  assert.deepEqual(pickSpace('dev team', list), { space: 'spaces/B', displayName: 'Ｄｅｖ　Team' }, '全角と半角・大小・空白は区別しない');
   assert.match((pickSpace('営業', list) as { reason: string }).reason, /見つかりません/, '似た名前に推測で投稿しない');
   assert.match((pickSpace('総務', list) as { reason: string }).reason, /2 つあります.*リンク/);
+});
+
+test('Chat: 承認の前に投稿先を探す。投稿はしない（ADR-0024）', async () => {
+  await withConnector(async (c, g) => {
+    assert.deepEqual(await c.chat.findSpace(P, '営業部'), { space: 'spaces/SALES', displayName: '営業部' });
+    assert.deepEqual(await c.chat.findSpace(P, 'https://chat.google.com/room/SALES'), { space: 'spaces/SALES', displayName: '営業部' }, 'リンクなら、そのスペースを見て名前を得る');
+    assert.match((await c.chat.findSpace(P, '総務') as { reason: string }).reason, /2 つあります/);
+    assert.match((await c.chat.findSpace(P, '人事') as { reason: string }).reason, /見つかりません/);
+    assert.match((await c.chat.findSpace(P, 'spaces/GONE') as { reason: string }).reason, /リンクのチャットのスペースが見つかりません/);
+    assert.match((await c.chat.findSpace(P, 'spaces/OUTSIDER') as { reason: string }).reason, /見られません.*入っているか/, '入っていないスペース（403）');
+    assert.match((await c.chat.findSpace(P, 'spaces/NOSUCH') as { reason: string }).reason, /リンクのチャットのスペースが見つかりません/, '存在しない ID（400）');
+    assert.match((await c.chat.findSpace(P, '  ') as { reason: string }).reason, /指定されていません/);
+    assert.equal(g.seen.filter((s) => s.method === 'POST' && s.path.startsWith('/chat/')).length, 0, '確かめるだけで、投稿しない');
+  });
+  await withConnector(async (c) => {
+    const err = await c.chat.findSpace(P, '営業部').catch((e: unknown) => e as ConnectorUnavailableError);
+    assert.equal(err.kind, 'api-disabled', 'Chat アプリの設定が無いことは、理由の文でなく例外で知らせる');
+  }, {}, (s) => (s.path.startsWith('/chat/') ? {
+    status: 404, json: { error: { code: 404, status: 'NOT_FOUND', message: 'Google Chat app not found.' } },
+  } : undefined));
 });
 
 test('Chat: 本文を Chat の書式に直し、長ければ切る', () => {

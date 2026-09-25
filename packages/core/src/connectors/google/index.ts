@@ -281,22 +281,51 @@ export class GoogleWorkspaceConnector implements WorkspaceConnector {
     const direct = spaceIdOf(input);
     if (direct) return direct;
     if (!input.trim()) throw new Error('投稿先のチャットのスペースが指定されていません');
+    const picked = pickSpace(input, await this.namedSpaces(p));
+    if ('reason' in picked) throw new Error(picked.reason);
+    return picked.space;
+  }
+
+  /** 本人が入っている、名前のあるスペース。1 対 1 とグループの会話は名前で探さないため含めない。 */
+  private async namedSpaces(p: ConnectorPrincipal): Promise<{ name: string; displayName?: string }[]> {
     const spaces: { name: string; displayName?: string }[] = [];
     let pageToken = '';
     for (let page = 0; page < CHAT_SPACE_PAGES; page++) {
-      // 名前のあるスペースだけ。1 対 1 とグループの会話は名前で探さない
       const q = new URLSearchParams({ pageSize: '1000', filter: 'spaceType = "SPACE"', ...(pageToken ? { pageToken } : {}) });
       const res = await this.chatApi(p, `/spaces?${q}`);
       spaces.push(...((res?.['spaces'] ?? []) as { name: string; displayName?: string }[]));
       pageToken = String(res?.['nextPageToken'] ?? '');
       if (!pageToken) break;
     }
-    const picked = pickSpace(input, spaces);
-    if ('reason' in picked) throw new Error(picked.reason);
-    return picked.space;
+    return spaces;
   }
 
   chat = {
+    /**
+     * 投稿先を探す（承認の前の確かめ。ADR-0024）。名前なら本人が入っているスペースから探し、
+     * リンク・ID なら本人がそのスペースを見られるかを確かめる。
+     */
+    findSpace: async (p: ConnectorPrincipal, input: string) => {
+      const direct = spaceIdOf(input);
+      if (!direct) {
+        if (!input.trim()) return { reason: '投稿先のチャットのスペースが指定されていません' };
+        return pickSpace(input, await this.namedSpaces(p));
+      }
+      try {
+        const res = await this.chatApi(p, `/${direct}`);
+        if (!res) return { reason: 'リンクのチャットのスペースが見つかりません。リンクを確かめてください' };
+        const name = String(res['displayName'] ?? '').trim();
+        return { space: direct, displayName: name || null };
+      } catch (err) {
+        if (err instanceof ConnectorUnavailableError) throw err;
+        // 入っていないスペースは 403 が返る。存在しない ID には、形が正しくても 400 が返る（2026-09-25 に本物で確認）。
+        // どちらも投稿できない
+        const msg = err instanceof Error ? err.message : '';
+        if (/HTTP 403/.test(msg)) return { reason: 'リンクのチャットのスペースを見られません。あなたがそのスペースに入っているかを確かめてください' };
+        if (/HTTP 400/.test(msg)) return { reason: 'リンクのチャットのスペースが見つかりません。リンクを確かめてください' };
+        throw err;
+      }
+    },
     post: async (p: ConnectorPrincipal, msg: { space: string; text: string }) => {
       const space = await this.resolveSpace(p, msg.space);
       const res = await this.chatApi(p, `/${space}/messages`, { method: 'POST', body: { text: toChatText(msg.text) } });

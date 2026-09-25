@@ -10,9 +10,10 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { Tool, ToolContext } from './registry.js';
+import type { PreparedCall, Tool, ToolContext } from './registry.js';
 import { canDecide } from '@m2office/shared';
 import { addDays, jst, ymd } from '../connectors/mock.js';
+import { ConnectorUnavailableError } from '../connectors/types.js';
 
 const principal = (ctx: ToolContext) => ({ tenantId: ctx.tenantId, userId: ctx.userId });
 const str = (v: unknown, fallback = '') => (typeof v === 'string' ? v : fallback);
@@ -208,6 +209,22 @@ export const chatPost: Tool = {
   google: { scope: 'chat.messages.create', level: 'sensitive' },
   // 投稿先を名前で探すため、本人が入っているスペースの一覧を見る（仕様書 第14.3.4節「Chat」）
   googleAlso: [{ scope: 'chat.spaces.readonly', level: 'sensitive' }],
+  /**
+   * 投稿先を承認の前に探す（仕様書 第14.3.4節「Chat」、ADR-0024）。見つかれば `spaces/…` で記録し、
+   * 承認のあとは探し直さない。見つからない・複数ある・許可が無いときは、投稿を記録させない。
+   */
+  async prepare(args, ctx): Promise<PreparedCall> {
+    const wanted = str(args['space'], 'general');
+    try {
+      const found = await ctx.connector.chat.findSpace(principal(ctx), wanted);
+      if ('reason' in found) return { kind: 'problem', reason: found.reason };
+      return { kind: 'ready', args: { ...args, space: found.space }, shown: found.displayName ?? wanted };
+    } catch (err) {
+      // 届かないだけなら、承認のあとで改めて探す。接続・許可・会社の準備の問題は、承認しても投稿できない
+      if (err instanceof ConnectorUnavailableError && err.kind !== 'unreachable') return { kind: 'problem', reason: err.message };
+      return { kind: 'unchecked', reason: err instanceof Error ? err.message : '確かめられませんでした' };
+    }
+  },
   async invoke(args, ctx) {
     const res = await ctx.connector.chat.post(principal(ctx), {
       space: str(args['space'], 'general'),

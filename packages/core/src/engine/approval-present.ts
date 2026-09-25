@@ -50,8 +50,15 @@ export function composeApprovalPresent(p: {
   steps: RunStep[];
   /** この実行の成果物。 */
   artifacts: Artifact[];
-  /** 承認の前に組み立てた、承認の直後の段と、記録した操作。 */
-  plan: { step: AgentStep; calls: { name: string; args: Record<string, unknown> }[] } | null;
+  /**
+   * 承認の前に組み立てた、承認の直後の段と、記録した操作。
+   * `unable` は承認の前の確かめで行えないと分かった操作（記録していない。ADR-0024）。
+   */
+  plan: {
+    step: AgentStep;
+    calls: { name: string; args: Record<string, unknown>; shown?: string; caution?: string }[];
+    unable?: { name: string; args: Record<string, unknown>; reason: string }[];
+  } | null;
   registry: ToolRegistry;
 }): string {
   const { def, gate, gateSeq, steps, artifacts, plan, registry } = p;
@@ -90,6 +97,7 @@ export function composeApprovalPresent(p: {
   out.push(...(material.length > 0 ? material : ['（この承認までに作られた文や成果物はありません）', '']));
 
   out.push('## 承認すると', '');
+  const unable = plan?.unable ?? [];
   if (!plan) {
     out.push('この業務の次の段へ進みます。', '');
   } else if (plan.calls.length === 0) {
@@ -100,11 +108,26 @@ export function composeApprovalPresent(p: {
     let listOpen = false;
     for (const c of plan.calls) {
       const d = describeCall(c, ctx);
-      if (!d.includes('\n')) { out.push(`- ${d}`); listOpen = true; continue; }
+      // 承認の前に確かめられなかったもの（Google に届かないなど）は、そのことを添える（ADR-0024）
+      const caution = c.caution ? `承認の前に確かめられませんでした（${c.caution}）。承認のあとで改めて試します` : '';
+      if (!d.includes('\n')) {
+        out.push(`- ${d}`, ...(caution ? [`  - ${caution}`] : []));
+        listOpen = true;
+        continue;
+      }
       if (listOpen) { out.push(''); listOpen = false; }
-      out.push(d, '');
+      out.push(d, ...(caution ? ['', caution] : []), '');
     }
     if (listOpen) out.push('');
+  }
+  if (unable.length > 0) {
+    // 行えないことを黙って消さない。何が・なぜを出し、承認するか却下するかは承認する人が決める（ADR-0024）
+    out.push('**次のことは行えません（承認しても行いません）**:', '');
+    for (const u of unable) {
+      const what = describeCall(u, ctx).split('\n')[0]!.replace(/:\s*$/, '');
+      out.push(`- ${what}`, `  - 理由: ${u.reason}`);
+    }
+    out.push('', '行えないことを直すには、却下して、依頼し直してください。', '');
   }
   out.push('却下すると、ここで止まり、上のことは行いません。');
   return out.join('\n').trim();

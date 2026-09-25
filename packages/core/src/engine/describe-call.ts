@@ -10,6 +10,8 @@
 export interface DescribedCall {
   name: string;
   args: Record<string, unknown>;
+  /** 承認の前に確かめた名前（例: スペースの名前。ADR-0024）。あれば引数の値の代わりに出す。 */
+  shown?: string;
 }
 
 /** 言葉にするときに引くもの。 */
@@ -57,7 +59,8 @@ export function describeCall(call: DescribedCall, ctx: DescribeContext = {}): st
     case 'tasks.complete':
       return '**ToDo を完了にします**';
     case 'chat.post':
-      return `**チャットのスペース「${str(a['space']) || '（指定なし）'}」に投稿します**:\n${quote(str(a['text']))}`;
+      // 確かめたスペースの名前があれば、それを出す（記録の引数は `spaces/…` になっている）
+      return `**チャットのスペース「${call.shown || str(a['space']) || '（指定なし）'}」に投稿します**:\n${quote(str(a['text']))}`;
     case 'gmail.send': {
       const cc = list(a['cc']);
       return [

@@ -299,6 +299,15 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
   }
 
   chat = {
+    /**
+     * 見本では、指定があればどのスペースも見つかる。指定をそのまま投稿先とする
+     * （見本の投稿はスペースを区別しないため。通しの確認が見る投稿先を変えない）。
+     */
+    findSpace: async (_p: ConnectorPrincipal, input: string) => {
+      const name = input.trim();
+      if (!name) return { reason: '投稿先のチャットのスペースが指定されていません' };
+      return { space: name, displayName: /^spaces\//.test(name) ? null : name };
+    },
     post: async (p: ConnectorPrincipal, msg: { space: string; text: string }) => {
       this.outbox.push({ kind: 'chat', principal: p, body: msg });
       return { messageId: `mock-msg-${randomUUID().slice(0, 8)}` };

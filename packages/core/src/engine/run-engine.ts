@@ -19,7 +19,7 @@ import {
 import type { Repository } from '../repository/types.js';
 import type { LlmMessage, LlmProvider, LlmResponse } from '../llm/provider.js';
 import { costJpy } from '../llm/models.js';
-import { validateToolArgs, type Tool, type ToolRegistry } from '../tools/registry.js';
+import { validateToolArgs, type PreparedCall, type Tool, type ToolContext, type ToolRegistry } from '../tools/registry.js';
 import { ConnectorUnavailableError, type WorkspaceConnector } from '../connectors/types.js';
 import type { FileStore } from '../files/store.js';
 import type { ResearchProvider } from '../research/provider.js';
@@ -164,7 +164,7 @@ export class RunEngine {
         // 承認の直後の段を、承認の前に組み立てる（仕様書 第9.3.3節、ADR-0023）。
         // 書き込み・送信は記録だけして、承認の画面に「承認すると行うこと」として出す
         const next = def.steps[current.cursor + 1];
-        let plan: { stepIndex: number; step: AgentStep; calls: ToolCall[] } | null = null;
+        let plan: { stepIndex: number; step: AgentStep; calls: ToolCall[]; unable: UnableCall[] } | null = null;
         if (next?.type === 'agent') {
           const planned = await this.runAgentStep(
             { ...current, cursor: current.cursor + 1 }, def, next, job.input, job.requestedBy, settings, registry, ai, 'plan',
@@ -178,7 +178,11 @@ export class RunEngine {
           await repo.updateRun(current);
           const stoppedPlanning = await this.cancelledNow(current);
           if (stoppedPlanning) return stoppedPlanning;
-          plan = { stepIndex: current.cursor + 1, step: next, calls: planned.kind === 'planned' ? planned.calls : [] };
+          plan = {
+            stepIndex: current.cursor + 1, step: next,
+            calls: planned.kind === 'planned' ? planned.calls : [],
+            unable: planned.kind === 'planned' ? planned.unable : [],
+          };
         }
         const approvalId = await this.suspendForApproval(current, def, step, job.requestedBy, plan, registry);
         return { outcome: 'awaiting_approval', approvalId };
@@ -305,7 +309,7 @@ export class RunEngine {
     def: AgentDefinition,
     step: ApprovalStep,
     requestedBy: string,
-    plan: { stepIndex: number; step: AgentStep; calls: ToolCall[] } | null = null,
+    plan: { stepIndex: number; step: AgentStep; calls: ToolCall[]; unable: UnableCall[] } | null = null,
     registry: ToolRegistry = this.deps.registry,
   ): Promise<string> {
     const { repo } = this.deps;
@@ -324,6 +328,8 @@ export class RunEngine {
         present: step.present, artifactIds,
         // 承認されたら、ここに記録した操作をそのまま実行する（推論をやり直さない。ADR-0023）
         ...(plan ? { toolCalls: plan.calls, plannedStep: plan.stepIndex } : {}),
+        // 行えないと分かった操作。承認しても行わない（ADR-0024）
+        ...(plan && plan.unable.length > 0 ? { unableCalls: plan.unable } : {}),
       },
       output: null, startedAt: now, endedAt: null,
     };
@@ -412,7 +418,7 @@ export class RunEngine {
   ): Promise<
     | { kind: 'ok' | 'stopped'; tokensUsed: number; costJpy: number }
     | { kind: 'confirm'; tokensUsed: number; costJpy: number; calls: ToolCall[] }
-    | { kind: 'planned'; tokensUsed: number; costJpy: number; calls: ToolCall[] }
+    | { kind: 'planned'; tokensUsed: number; costJpy: number; calls: ToolCall[]; unable: UnableCall[] }
     | { kind: 'failed'; reason: string }
   > {
     const { repo } = this.deps;
@@ -441,6 +447,9 @@ export class RunEngine {
       const history: LlmMessage[] = [];
       const toolResults: unknown[] = [];
       const deferred: ToolCall[] = [];
+      // 承認の前の確かめで行えないと分かった操作と、確かめた結果（同じ呼び出しを二度確かめない。ADR-0024）
+      const unable: UnableCall[] = [];
+      const prepared = new Map<string, PreparedCall>();
       /*
         1 ステップの中で、**同じツールを同じ引数で二度呼ばない**（仕様書 第9.3.2節）。
         往復させると、推論は同じ問い合わせを繰り返すことがある。読むだけなら無駄で済むが、
@@ -496,9 +505,25 @@ export class RunEngine {
               roundResults.push({ name: call.name, error: `引数が正しくありません: ${problems.join('、')}` });
               continue;
             }
+            // 承認の前に、行えるかを確かめる（読むだけ。仕様書 第9.3.3節、ADR-0024）
+            let check: PreparedCall | null = null;
+            if (tool.prepare) {
+              const original = callKey(call);
+              check = prepared.get(original) ?? await tool.prepare(call.args, this.toolContext(run, def, run.cursor, requestedBy, registry, ai.research));
+              prepared.set(original, check);
+            }
+            if (check?.kind === 'problem') {
+              // 記録しない。承認の画面から黙って消さず、行えないこととして理由を出す
+              if (!unable.some((u) => callKey(u) === callKey(call))) unable.push({ name: call.name, args: call.args, reason: check.reason });
+              roundResults.push({ name: call.name, risk: tool.risk, error: `この操作は行えません: ${check.reason}` });
+              continue;
+            }
+            const recorded: ToolCall = check?.kind === 'ready'
+              ? { name: call.name, args: check.args, ...(check.shown ? { shown: check.shown } : {}) }
+              : check?.kind === 'unchecked' ? { ...call, caution: check.reason } : call;
             // 同じ操作は 1 度だけ記録する（二重に実行しない）。印には中身の鍵を持たせ、実行後に結果と突き合わせる
-            const key = callKey(call);
-            if (!deferred.some((d) => callKey(d) === key)) deferred.push(call);
+            const key = callKey(recorded);
+            if (!deferred.some((d) => callKey(d) === key)) deferred.push(recorded);
             roundResults.push({ name: call.name, risk: tool.risk, pending: '承認のあとに実行します（まだ実行していません）', key });
             continue;
           }
@@ -565,7 +590,7 @@ export class RunEngine {
         ...runStep, status: 'succeeded', output, endedAt: new Date().toISOString(),
       });
 
-      if (mode === 'plan') return { kind: 'planned', tokensUsed, costJpy: spent, calls: deferred };
+      if (mode === 'plan') return { kind: 'planned', tokensUsed, costJpy: spent, calls: deferred, unable };
       if (deferred.length > 0) return { kind: 'confirm', tokensUsed, costJpy: spent, calls: deferred };
 
       const empty = text.trim().length === 0 && toolResults.length === 0;
@@ -601,6 +626,26 @@ export class RunEngine {
   }
 
   /**
+   * ツールに渡す文脈。実行と承認の前の確かめ（`prepare`）で同じものを使う。
+   *
+   * @param stepIndex 呼び出したステップの、定義の中の位置。後に残る承認ステップの数を数えるのに使う
+   */
+  private toolContext(
+    run: Run, def: AgentDefinition, stepIndex: number, requestedBy: string, registry: ToolRegistry,
+    research: ResearchProvider | undefined, llm?: LlmProvider,
+  ): ToolContext {
+    const { repo, connector, files } = this.deps;
+    const approvalsAhead = def.steps.slice(stepIndex + 1).filter((s) => s.type === 'approval').length;
+    return {
+      tenantId: run.tenantId, userId: requestedBy, runId: run.id,
+      compartment: def.compartment, repo, connector, files, research,
+      approvalsAhead, isGoogleTool: (name) => !!registry.get(name)?.google,
+      // 画像から文字を読む手段。推論が持っていなければ渡さない（第9.4.1節、Q-56）
+      ...(llm?.readImage ? { ocr: async (r) => (await llm.readImage!(r)).text } : {}),
+    };
+  }
+
+  /**
    * ツールを 1 つ呼び、監査ログに残す。
    *
    * @param stepIndex 呼び出したステップの、定義の中の位置。後に残る承認ステップの数を数えるのに使う
@@ -614,16 +659,9 @@ export class RunEngine {
     const tool = registry.get(call.name);
     if (!tool) return { name: call.name, error: '許可されていないツールです' };
     this.log.debug('ツールを呼び出し', { runId: run.id, tenantId: run.tenantId, tool: call.name, risk: tool.risk });
-    const approvalsAhead = def.steps.slice(stepIndex + 1).filter((s) => s.type === 'approval').length;
     let out: unknown;
     try {
-      out = await tool.invoke(call.args, {
-        tenantId: run.tenantId, userId: requestedBy, runId: run.id,
-        compartment: def.compartment, repo, connector, files, research,
-        approvalsAhead, isGoogleTool: (name) => !!registry.get(name)?.google,
-        // 画像から文字を読む手段。推論が持っていなければ渡さない（第9.4.1節、Q-56）
-        ...(llm?.readImage ? { ocr: async (r) => (await llm.readImage!(r)).text } : {}),
-      });
+      out = await tool.invoke(call.args, this.toolContext(run, def, stepIndex, requestedBy, registry, research, llm));
     } catch (err) {
       // 接続口に断られたとき（ADR-0022）。読むだけのツールなら実行を止めず、取得できなかったことを理由つきで返す。
       // 書くツールはそのまま失敗にする（書いたつもりで先へ進ませない）
@@ -809,7 +847,20 @@ export function costOf(res: LlmResponse): number {
   return costJpy(model, 0, res.tokensUsed);
 }
 
-type ToolCall = { name: string; args: Record<string, unknown> };
+/**
+ * 記録する呼び出し。`shown` と `caution` は承認の画面に出すためのもので、実行には使わない（ADR-0024）。
+ */
+type ToolCall = {
+  name: string;
+  args: Record<string, unknown>;
+  /** 承認の前に確かめた名前（例: スペースの名前）。 */
+  shown?: string;
+  /** 承認の前に確かめられなかった理由。 */
+  caution?: string;
+};
+
+/** 承認の前の確かめで、行えないと分かった操作（記録しない。ADR-0024）。 */
+type UnableCall = { name: string; args: Record<string, unknown>; reason: string };
 
 /**
  * 呼び出しの中身の鍵。同じ道具を同じ引数で呼んだものは同じ鍵になる。

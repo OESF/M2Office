@@ -40,10 +40,10 @@ export function normalizeSpaceName(name: string): string {
  */
 export function pickSpace(
   wanted: string, spaces: { name: string; displayName?: string }[],
-): { space: string } | { reason: string } {
+): { space: string; displayName: string | null } | { reason: string } {
   const key = normalizeSpaceName(wanted);
   const hits = spaces.filter((s) => s.displayName && normalizeSpaceName(s.displayName) === key);
-  if (hits.length === 1) return { space: hits[0]!.name };
+  if (hits.length === 1) return { space: hits[0]!.name, displayName: hits[0]!.displayName ?? null };
   if (hits.length === 0) {
     return { reason: `「${wanted}」という名前のチャットのスペースが見つかりません（あなたが入っているスペースだけを探します）。名前を確かめるか、スペースのリンクを指定してください` };
   }

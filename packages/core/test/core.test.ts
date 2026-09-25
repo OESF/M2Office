@@ -17,7 +17,7 @@ import {
 import {
   RunEngine, ToolRegistry, BUILTIN_TOOLS, MockWorkspaceConnector, MemoryFileStore, nextRunAt,
   saveFile, readSheet, renderSheet, parseCsv, extractPdfText,
-  ApprovalForbiddenError, DefinitionInvalidError, validateDefinition, OFFICIAL_AGENTS, todayJst, describeCall, jpDate,
+  ApprovalForbiddenError, ConnectorUnavailableError, DefinitionInvalidError, validateDefinition, OFFICIAL_AGENTS, todayJst, describeCall, jpDate,
   type LlmProvider, type LlmRequest, type Repository, type KnowledgeItem,
 } from '../src/index.js';
 
@@ -622,6 +622,66 @@ test('組み立てた操作は、保存でキーの並びが変わっても結�
   const tools = (ctx.repo.steps.find((st) => st.stepId === 'share')!.output as { tools: { pending?: string; result?: { posted?: boolean } }[] }).tools;
   assert.ok(tools.length > 0 && tools.every((t) => !t.pending && t.result?.posted === true), '印がすべて実行の結果に置き換わる');
   assert.equal(ctx.connector.outbox.filter((o) => o.kind === 'chat').length, 1, '投稿は 1 回');
+});
+
+/** 投稿先の確かめを差し替えて、共有の業務を承認の段まで進める（ADR-0024）。 */
+async function shareUntilGate(space: string, findSpace: (input: string) => Promise<{ space: string; displayName: string | null } | { reason: string }>) {
+  const ctx = setup(SHARE_DEF, { name: 'chat.post', args: { space, text: '議事録を共有します' } });
+  ctx.connector.chat.findSpace = async (_p, input) => findSpace(input);
+  const r = await ctx.engine.advance(ctx.run);
+  if (r.outcome !== 'awaiting_approval') assert.fail(r.outcome);
+  const present = ctx.repo.approvals.find((a) => a.id === r.approvalId)!.present;
+  const approveAndFinish = async () => {
+    await ctx.engine.decideApproval('t', r.approvalId, 'approved', { id: 'u-admin', roles: ['admin', 'approver'] }, null);
+    return (await ctx.engine.advance({ ...(await ctx.repo.getRun('t', 'r1'))!, status: 'running' })).outcome;
+  };
+  return { ctx, present, approveAndFinish };
+}
+
+test('承認の前に投稿先を探し、見つかったスペースへ承認のあとで投稿する（探し直さない。ADR-0024）', async () => {
+  let lookups = 0;
+  const { ctx, present, approveAndFinish } = await shareUntilGate('技術部', async (input) => {
+    lookups += 1;
+    return input === '技術部' ? { space: 'spaces/TECH', displayName: '技術部' } : { reason: '見つかりません' };
+  });
+  assert.match(present, /チャットのスペース「技術部」に投稿します\*\*:\n\s*> 議事録を共有します/, '確かめた名前で出す');
+  assert.doesNotMatch(present, /spaces\/TECH/, '内部の ID は出さない');
+  assert.doesNotMatch(present, /行えません/);
+  assert.equal(ctx.connector.outbox.filter((o) => o.kind === 'chat').length, 0, '確かめるだけで投稿しない');
+  const before = lookups;
+  assert.equal(await approveAndFinish(), 'completed');
+  const posted = ctx.connector.outbox.filter((o) => o.kind === 'chat').map((o) => (o.body as { space: string }).space);
+  assert.deepEqual(posted, ['spaces/TECH'], '確かめたスペースの ID へ投稿した');
+  assert.equal(lookups, before, '承認のあとに探し直さない');
+  const tools = (ctx.repo.steps.find((st) => st.stepId === 'share')!.output as { tools: { pending?: string; result?: { posted?: boolean } }[] }).tools;
+  assert.ok(tools.length > 0 && tools.every((t) => !t.pending && t.result?.posted === true), '引数を確かめた値に替えても、印は実行の結果に置き換わる');
+});
+
+test('投稿先が見つからなければ記録せず、承認の画面に「行えません」と理由を出す（ADR-0024）', async () => {
+  const { ctx, present, approveAndFinish } = await shareUntilGate('技術部', async () => ({ reason: '「技術部」という名前のチャットのスペースが見つかりません' }));
+  assert.match(present, /\*\*次のことは行えません（承認しても行いません）\*\*/);
+  assert.match(present, /- \*\*チャットのスペース「技術部」に投稿します\*\*\n {2}- 理由: 「技術部」という名前のチャットのスペースが見つかりません/);
+  assert.match(present, /却下して、依頼し直してください/);
+  assert.doesNotMatch(present, /このとおりに行います/, '行えない投稿を「行うこと」に並べない');
+  const share = ctx.repo.steps.find((st) => st.stepId === 'share')!.output as { tools: { error?: string }[] };
+  assert.match(String(share.tools[0]?.error), /この操作は行えません/, '推論にも行えないと返す');
+  assert.equal(await approveAndFinish(), 'completed', '承認すれば、行える分だけで進む');
+  assert.equal(ctx.connector.outbox.filter((o) => o.kind === 'chat').length, 0, '投稿しない');
+});
+
+test('許可が足りないときは行えないと出し、Google に届かないときは記録して承認のあとで試す（ADR-0024）', async () => {
+  const scope = await shareUntilGate('技術部', async () => {
+    throw new ConnectorUnavailableError('insufficient-scope', 'この操作に要る Google の許可（Chat）がありません');
+  });
+  assert.match(scope.present, /行えません[\s\S]*理由: この操作に要る Google の許可（Chat）がありません/);
+
+  const busy = await shareUntilGate('技術部', async () => {
+    throw new ConnectorUnavailableError('unreachable', 'Chat（Google）が混み合っています');
+  });
+  assert.match(busy.present, /このとおりに行います[\s\S]*チャットのスペース「技術部」に投稿します/, '投稿は記録する');
+  assert.match(busy.present, /承認の前に確かめられませんでした（Chat（Google）が混み合っています）。承認のあとで改めて試します/);
+  assert.equal(await busy.approveAndFinish(), 'completed');
+  assert.deepEqual(busy.ctx.connector.outbox.filter((o) => o.kind === 'chat').map((o) => (o.body as { space: string }).space), ['技術部'], '元の指定のまま投稿を試した');
 });
 
 test('承認を却下したら、組み立てた送信は実行しない', async () => {
