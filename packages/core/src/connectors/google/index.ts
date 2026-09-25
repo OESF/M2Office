@@ -15,6 +15,7 @@ import { GOOGLE_API_ENDPOINTS, GoogleTokenSource, callGoogle, type GoogleApiEndp
 import { buildRawMessage, decodeEntities, decodeHeaderWords, extractBody, header, type GmailPart } from './mime.js';
 import { pickSpace, spaceIdOf, toChatText } from './chat.js';
 import { googleDocs, googleDrive } from './drive.js';
+import { googleSheets } from './sheets.js';
 
 /** スペースの一覧を読む上限（ページの数）。1 ページ 1,000 件。 */
 const CHAT_SPACE_PAGES = 5;
@@ -342,8 +343,9 @@ export class GoogleWorkspaceConnector implements WorkspaceConnector {
   // トークンは組み立てのあとに決まるため、呼ぶたびに引く
   drive = googleDrive(() => ({ tokens: this.tokens, endpoints: this.endpoints }));
   docs = googleDocs(() => ({ tokens: this.tokens, endpoints: this.endpoints }));
+  // スプレッドシート（仕様書 第14.3.4節「スプレッドシート」）。値は式として読ませない
+  sheets = googleSheets(() => ({ tokens: this.tokens, endpoints: this.endpoints }));
 
-  sheets = pending<WorkspaceConnector['sheets']>('スプレッドシート');
   directory = pending<WorkspaceConnector['directory']>('社内の名簿（ディレクトリ）');
   meet = pending<WorkspaceConnector['meet']>('Meet');
   forms = pending<WorkspaceConnector['forms']>('フォーム');

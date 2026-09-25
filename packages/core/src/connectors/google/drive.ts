@@ -17,9 +17,9 @@ export const DRIVE_READ_MAX_BYTES = 5 * 1024 * 1024;
 const SEARCH_LIMIT_MAX = 50;
 
 /** ファイルの情報のうち、使うもの。 */
-const FIELDS = 'id,name,mimeType,modifiedTime,webViewLink,trashed';
+export const FIELDS = 'id,name,mimeType,modifiedTime,webViewLink,trashed';
 
-const MIME = {
+export const MIME = {
   document: 'application/vnd.google-apps.document',
   spreadsheet: 'application/vnd.google-apps.spreadsheet',
   presentation: 'application/vnd.google-apps.presentation',
@@ -29,7 +29,7 @@ const MIME = {
 } as const;
 
 /** Drive API が返すファイルの情報。 */
-interface DriveMeta {
+export interface DriveMeta {
   id: string; name?: string; mimeType?: string; modifiedTime?: string; webViewLink?: string; trashed?: boolean;
 }
 
@@ -39,7 +39,7 @@ export function kindOf(mimeType: string | undefined): DriveFile['kind'] {
   return hit ? hit[0] : 'other';
 }
 
-const toFile = (f: DriveMeta): DriveFile => ({
+export const toFile = (f: DriveMeta): DriveFile => ({
   id: f.id, name: f.name ?? '', kind: kindOf(f.mimeType), modifiedAt: f.modifiedTime ?? '', url: f.webViewLink ?? null,
 });
 

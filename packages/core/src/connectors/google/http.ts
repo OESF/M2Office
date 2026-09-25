@@ -24,6 +24,8 @@ export interface GoogleApiEndpoints {
   driveUpload: string;
   /** Docs API（文書への追記）。 */
   docs: string;
+  /** Sheets API（表の作成・読み取り・行の追加）。 */
+  sheets: string;
   oauth: GoogleOAuthEndpoints;
 }
 
@@ -35,6 +37,7 @@ export const GOOGLE_API_ENDPOINTS: GoogleApiEndpoints = {
   drive: 'https://www.googleapis.com/drive/v3',
   driveUpload: 'https://www.googleapis.com/upload/drive/v3',
   docs: 'https://docs.googleapis.com/v1',
+  sheets: 'https://sheets.googleapis.com/v4',
   oauth: GOOGLE_OAUTH_ENDPOINTS,
 };
 
@@ -45,7 +48,7 @@ const REFRESH_MARGIN_MS = 60_000;
 const TIMEOUT_MS = 20_000;
 
 /** 呼び先の API の、利用者に見せる名前。 */
-export type GoogleApiName = 'Gmail' | 'カレンダー' | 'ToDo' | 'Chat' | 'ドライブ' | 'ドキュメント';
+export type GoogleApiName = 'Gmail' | 'カレンダー' | 'ToDo' | 'Chat' | 'ドライブ' | 'ドキュメント' | 'スプレッドシート';
 
 /**
  * 利用者ごとのアクセス トークンを配る（仕様書 第14.3.4節「誰の権限で呼ぶか」）。
