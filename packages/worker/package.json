@@ -1,6 +1,6 @@
 {
   "name": "@m2office/worker",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "private": true,
   "type": "module",
   "description": "ジョブ実行。承認による中断と再開を担う常駐プロセス",
