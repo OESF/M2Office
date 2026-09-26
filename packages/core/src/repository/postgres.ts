@@ -13,7 +13,7 @@ import type {
   StoredFile, Tenant, TenantSettings, User, UserGroup, UserSettings,
 } from '@m2office/shared';
 import { DEFAULT_TENANT_SETTINGS, DEFAULT_USER_SETTINGS, STANDARD_SYNONYMS } from '@m2office/shared';
-import type { CompartmentAssignment, Conversation, ConversationDigest, MemoryCandidate, Promotion, CredentialKind, GoogleConnection, UserPhoto, TenantCredential, DisabledConnectorTool, InstalledExtension, PrivateExtension, KnowledgeItem, KnowledgeSearchResult, KnowledgeSectionView, Memory, Repository, RunStatRow } from './types.js';
+import type { CompartmentAssignment, Conversation, ConversationDigest, MemoryCandidate, Promotion, CredentialKind, GoogleConnection, UserPhoto, TenantCredential, TenantConnection, DisabledConnectorTool, InstalledExtension, PrivateExtension, KnowledgeItem, KnowledgeSearchResult, KnowledgeSectionView, Memory, Repository, RunStatRow } from './types.js';
 import { SPLIT_VERSION, citationOf, splitKnowledge } from '../knowledge/sections.js';
 import { SEARCH_CANDIDATES, bigrams, expandTerms, extractTerms, normalizeForSearch, rankSections, rewritesOf } from '../knowledge/search.js';
 
@@ -1331,6 +1331,31 @@ export class PostgresRepository implements Repository {
               disabled_by as "disabledBy", disabled_at as "disabledAt"
          from disabled_connector_tools where tenant_id = $1 order by connector_id, tool_name`,
       [tenantId]);
+  }
+
+  async listConnections(tenantId: string): Promise<TenantConnection[]> {
+    return this.q<TenantConnection>(tenantId,
+      `select tenant_id as "tenantId", id, name, description, transport, url, auth, tools, origin,
+              created_by as "createdBy", created_at as "createdAt", updated_at as "updatedAt"
+         from tenant_connections where tenant_id = $1 order by id`,
+      [tenantId]);
+  }
+
+  async saveConnection(c: TenantConnection): Promise<void> {
+    await this.q(c.tenantId,
+      `insert into tenant_connections (tenant_id, id, name, description, transport, url, auth, tools, origin, created_by, created_at, updated_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+       on conflict (tenant_id, id) do update set
+         name = excluded.name, description = excluded.description, transport = excluded.transport, url = excluded.url,
+         auth = excluded.auth, tools = excluded.tools, origin = excluded.origin, updated_at = excluded.updated_at`,
+      [c.tenantId, c.id, c.name, c.description, c.transport, c.url, JSON.stringify(c.auth), JSON.stringify(c.tools),
+        c.origin, c.createdBy, c.createdAt, c.updatedAt]);
+  }
+
+  async deleteConnection(tenantId: string, id: string): Promise<boolean> {
+    const rows = await this.q<{ id: string }>(tenantId,
+      'delete from tenant_connections where tenant_id = $1 and id = $2 returning id', [tenantId, id]);
+    return rows.length > 0;
   }
 
   async setConnectorToolEnabled(

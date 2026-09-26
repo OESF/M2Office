@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import {
   BUILTIN_TOOLS, ExtensionHub, JSON_FORMAT_RETIRED, OFFICIAL_AGENTS, StubLlmProvider, ToolRegistry, blockedByDisabledTool,
   loadCompiledExtension, loadExtension, loadExtensionFiles, loadExtensions, readExtensionDir,
-  type DisabledConnectorTool, type InstalledExtension, type Repository,
+  type DisabledConnectorTool, type InstalledExtension, type Repository, type TenantConnection,
 } from '../src/index.js';
 
 const registry = new ToolRegistry();
@@ -24,6 +24,15 @@ const HELLO_SKILL = new URL('../../../extensions/hello-world', import.meta.url).
 /** 組み立てた後の形として検証する。 */
 const compiled = (dir: string) => loadCompiledExtension(readExtensionDir(dir), registry);
 const DEEPWIKI = new URL('../../../extensions/deepwiki-research', import.meta.url).pathname;
+
+/** 会社の接続（仕様書 第12.11.0節）だけを持つ、テスト用の永続化層の一部。 */
+function connectionStore() {
+  const rows: TenantConnection[] = [];
+  return {
+    listConnections: async (t: string) => rows.filter((r) => r.tenantId === t),
+    saveConnection: async (c: TenantConnection) => { rows.splice(0, rows.length, ...rows.filter((r) => !(r.tenantId === c.tenantId && r.id === c.id)), c); },
+  };
+}
 
 /** サンプルを一時ディレクトリへ写し、一部を書き換えて検証する。 */
 function variant(edit: (dir: string) => void): string[] {
@@ -118,6 +127,7 @@ test('会社が導入した拡張機能の業務エージェントだけが、�
     listInstalledExtensions: async () => installed,
     listDisabledConnectorTools: async () => disabledTools,
     listPrivateExtensions: async () => [],
+    ...connectionStore(),
   } as unknown as Repository;
   const hub = new ExtensionHub({ repo, registry, official: OFFICIAL_AGENTS, packages: [pkg!] });
   const id = 'jp.m2office.samples.hello-world:hello';
@@ -170,6 +180,7 @@ test('管理者が止めたコネクタのツールは、その会社のツー�
     listInstalledExtensions: async () => installed,
     listDisabledConnectorTools: async () => disabledTools,
     listPrivateExtensions: async () => [],
+    ...connectionStore(),
   } as unknown as Repository;
   const hub = new ExtensionHub({ repo, registry, official: OFFICIAL_AGENTS, packages: [pkg!] });
   const agentId = 'jp.m2office.samples.deepwiki-research:research';

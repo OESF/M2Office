@@ -1,15 +1,16 @@
 /**
  * @file 会社ごとの拡張機能の見え方をまとめる。公式の配布元と、その会社が取り込んだファイルを合わせる。
  *
- * 会社で使えるのは、公式の業務エージェントと、**導入済み・有効・再同意が不要**な拡張機能の
- * 業務エージェントとコネクタのツールだけである（仕様書 第12.10.4節）。
+ * 会社で使えるのは、公式の業務エージェントと、**導入済み・有効・再同意が不要**な拡張機能の業務エージェント（仕様書 第12.10.4節）。
+ * 道具は、内蔵の道具と**会社の接続**（コネクタ。MCP）の道具である（第12.11.0節、ADR-0037）。
+ * 拡張機能に同梱した接続は、導入したときに会社の接続として登録する。
  * ファイルから取り込んだ拡張機能（自社専用）は、取り込んだ会社にだけ見える（第12.10.3節）。
  *
  * @see 仕様書 第12.10節 持ち運べる拡張機能
  */
 
 import { RISK_ORDER, type AgentDefinition, type RiskLevel } from '@m2office/shared';
-import type { InstalledExtension, Repository } from '../repository/types.js';
+import type { InstalledExtension, Repository, TenantConnection } from '../repository/types.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { McpClient } from '../connectors/mcp.js';
 import { silentLogger, type Logger } from '../log/logger.js';
@@ -45,7 +46,20 @@ export interface TenantExtensions {
   entryOf(agentId: string): ExtensionEntry | null;
   /** 管理者が個別に止めたコネクタのツール（`<コネクタの ID>.<ツールの名前>`。第6.6.3.1節）。 */
   disabledTools: Set<string>;
+  /** 会社の接続（第12.11.0節）。 */
+  connections: TenantConnection[];
+  /**
+   * その業務が使う道具のうち、この会社に無いもの（会社の接続が登録されていない道具。第12.11.0節）。
+   *
+   * @remarks 1 つでもあれば、その業務は使えない（「接続が要ります」）
+   */
+  missingToolsOf(def: AgentDefinition): string[];
 }
+
+/**
+ * 秘書の調べもの（第10.11.4節）の ID。会社の接続の**読むだけの道具**を足して使わせる（第12.11.0節）。
+ */
+const CONNECTION_READER_IDS = new Set(['secretary-lookup']);
 
 /**
  * その業務エージェントが、止められたツールを使うか（仕様書 第6.6.3.1節）。
@@ -112,16 +126,15 @@ export class ExtensionHub {
     const packages: { pkg: ExtensionPackage; origin: 'official' | 'private' }[] =
       this.deps.packages.map((pkg) => ({ pkg, origin: 'official' }));
     const takenAgents = new Set(this.officialAgents().map((a) => a.id));
-    const takenConnectors = new Set(this.deps.packages.flatMap((p) => p.connectors.map((c) => c.id)));
     for (const rec of privates) {
       if (this.deps.packages.some((p) => p.manifest.id === rec.extensionId)) continue;
-      const { pkg, problems } = loadExtensionFiles(decodeFiles(rec.files), registry, { takenAgents, takenConnectors });
+      // 接続の ID は拡張機能どうしで重なってよい（同じ会社の接続を使う。第12.11.0節）
+      const { pkg, problems } = loadExtensionFiles(decodeFiles(rec.files), registry, { takenAgents });
       if (!pkg || problems.length > 0) {
         this.log.warn('取り込んだ拡張機能が検証を通りません', { tenantId, extensionId: rec.extensionId, problems });
         continue;
       }
       for (const a of pkg.agents) takenAgents.add(a.id);
-      for (const c of pkg.connectors) takenConnectors.add(c.id);
       packages.push({ pkg, origin: 'private' });
     }
 
@@ -131,22 +144,33 @@ export class ExtensionHub {
       return { pkg, origin, installed: rec, needsReconsent, active: rec !== null && rec.enabled && !needsReconsent };
     });
     const active = entries.filter((e) => e.active);
-    // 止めたツールを使う業務は、メニュー・秘書・定時実行・API から消す（第6.6.3.1節）
-    const agents = [...official, ...active.flatMap((e) => e.pkg.agents)]
-      .filter((a) => !blockedByDisabledTool(a, disabledTools));
-    const allAgents = [...official, ...entries.flatMap((e) => e.pkg.agents)];
+    // 導入済みの拡張機能が同梱する接続で、まだ会社に無いものを登録する（第 0.132.0 版より前に導入した会社のため）
+    let connections = await repo.listConnections(tenantId);
+    const missing = active.flatMap((e) => e.pkg.connectors.map((c) => ({ c, e }))).filter(({ c }) => !connections.some((x) => x.id === c.id));
+    if (missing.length > 0) {
+      for (const { c, e } of missing) await repo.saveConnection(bundledConnection(tenantId, c, e.pkg.manifest.id, e.installed?.installedBy ?? 'system'));
+      connections = await repo.listConnections(tenantId);
+    }
     // 止めたツールは、その会社のツールの一覧から外す。業務からも接続の確認からも見えない
     const tenantRegistry = registry.extend(
-      active.flatMap((e) => e.pkg.connectors.flatMap((c) => connectorTools(c, mcp)))
-        .filter((t) => !disabledTools.has(t.name)),
+      connections.flatMap((c) => connectorTools(c, mcp)).filter((t) => !disabledTools.has(t.name)),
     );
+    const missingToolsOf = (def: AgentDefinition) => def.tools.filter((name) => !tenantRegistry.get(name));
+    // 秘書の調べものは、会社の接続の読むだけの道具を使える（第12.11.0節）
+    const readTools = connections.flatMap((c) => connectorTools(c)).filter((t) => t.risk === 'read' && tenantRegistry.get(t.name)).map((t) => t.name);
+    const withReaders = (a: AgentDefinition) => (CONNECTION_READER_IDS.has(a.id) && readTools.length > 0
+      ? { ...a, tools: [...new Set([...a.tools, ...readTools])] } : a);
+    const allAgents = [...official, ...entries.flatMap((e) => e.pkg.agents)].map(withReaders);
+    // 止めたツール・会社に無い接続の道具を使う業務は、メニュー・秘書・定時実行・API から消す（第6.6.3.1節・第12.11.0節）
+    const activeIds = new Set([...official.map((a) => a.id), ...active.flatMap((e) => e.pkg.agents.map((a) => a.id))]);
+    const agents = allAgents.filter((a) => activeIds.has(a.id) && !blockedByDisabledTool(a, disabledTools) && missingToolsOf(a).length === 0);
     const entryOf = (agentId: string) => {
       if (!agentId.includes(':')) return null;
       const extId = agentId.slice(0, agentId.indexOf(':'));
       return entries.find((e) => e.pkg.manifest.id === extId) ?? null;
     };
     return {
-      entries, agents, allAgents, registry: tenantRegistry, disabledTools,
+      entries, agents, allAgents, registry: tenantRegistry, disabledTools, connections, missingToolsOf,
       resolve: (agentId, version) => allAgents.find((a) => a.id === agentId && a.version === version),
       isAvailable: (agentId) => agents.some((a) => a.id === agentId),
       entryOf,
@@ -168,6 +192,21 @@ export class ExtensionHub {
   }
 
   /**
+   * MCP サーバに道具の一覧を問い合わせる（会社の接続を登録するとき。仕様書 第12.11.0節）。
+   *
+   * @returns 道具の一覧（名前・説明・読むだけの目印）。接続できなければ理由
+   */
+  async listMcpTools(url: string): ReturnType<McpClient['listTools']> {
+    if (!this.deps.mcp) return { ok: false, error: 'コネクタへの接続口が用意されていません' };
+    return this.deps.mcp.listTools(url);
+  }
+
+  /** 内蔵の道具の名前の頭の部分（`gmail` など）。会社の接続の ID に使えない。 */
+  builtinPrefixes(): Set<string> {
+    return new Set(this.deps.registry.names().map((n) => n.split('.')[0]!));
+  }
+
+  /**
    * 取り込もうとするファイルを検証する（仕様書 第12.10.2節）。
    *
    * @remarks
@@ -183,14 +222,25 @@ export class ExtensionHub {
     }
     const others = (await repo.listPrivateExtensions(tenantId)).filter((r) => r.extensionId !== extId);
     const takenAgents = new Set(this.officialAgents().map((a) => a.id));
-    const takenConnectors = new Set(this.deps.packages.flatMap((p) => p.connectors.map((c) => c.id)));
     for (const rec of others) {
       const { pkg } = loadExtensionFiles(decodeFiles(rec.files), registry, {});
       for (const a of pkg?.agents ?? []) takenAgents.add(a.id);
-      for (const c of pkg?.connectors ?? []) takenConnectors.add(c.id);
     }
-    return loadExtensionFiles(files, registry, { takenAgents, takenConnectors });
+    return loadExtensionFiles(files, registry, { takenAgents });
   }
+}
+
+/**
+ * 拡張機能に同梱した接続を、会社の接続の形にする（第12.11.0節）。危険度は同梱の宣言の推奨のまま。
+ *
+ * @param extensionId 同梱していた拡張機能（登録の由来に残す）
+ */
+export function bundledConnection(tenantId: string, c: ConnectorDeclaration, extensionId: string, by: string): TenantConnection {
+  const now = new Date().toISOString();
+  return {
+    tenantId, id: c.id, name: c.name, description: c.description ?? '', transport: c.transport, url: c.url, auth: c.auth,
+    tools: c.tools.map((t) => ({ ...t })), origin: `extension:${extensionId}`, createdBy: by, createdAt: now, updatedAt: now,
+  };
 }
 
 /** 拡張機能が求める権限を、同意の記録の形にする。 */

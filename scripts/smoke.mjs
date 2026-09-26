@@ -862,10 +862,10 @@ console.log('\n■ 21. 持ち運べる拡張機能（ファイルからの取り
   dw?.connectors?.[0]?.url === 'https://mcp.deepwiki.com/mcp' && dw.counts.tools === 2
     ? ok('コネクタを持つ拡張機能（DeepWiki）が読み込まれている') : ng('DeepWiki の拡張機能が無い');
   if (process.env.SMOKE_EXTERNAL === '1') {
-    const check = await call('a', `/v1/admin/extensions/${DW}/connectors/deepwiki/check`, { method: 'POST' });
+    await call('a', `/v1/admin/extensions/${DW}/install`, { method: 'POST', body: JSON.stringify({ consent: true }) });
+    const check = await call('a', '/v1/admin/connections/mcp/deepwiki/check', { method: 'POST' });
     check.body.ok && check.body.tools.every((t) => t.provided)
       ? ok('コネクタの接続を確かめられる（宣言したツールが提供されている）') : ng('接続を確かめられない', JSON.stringify(check.body));
-    await call('a', `/v1/admin/extensions/${DW}/install`, { method: 'POST', body: JSON.stringify({ consent: true }) });
     const input = { リポジトリ: 'modelcontextprotocol/typescript-sdk', 知りたいこと: 'このリポジトリは何をするものですか？' };
     const { body: j } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: `${DW}:research`, input }) }, 'member');
     const r = await waitFor('a', j.runId, ['completed', 'failed'], 90000, 'member');
@@ -879,10 +879,14 @@ console.log('\n■ 21. 持ち運べる拡張機能（ファイルからの取り
     console.log('  - DeepWiki への実際の問い合わせは省略（SMOKE_EXTERNAL=1 で実行）');
   }
 
-  // コネクタのツールを 1 つずつ止める（第6.6.3.1節）。ネットワークに依存しない
+  // 同梱の接続は、導入のときに会社の接続として登録する（第12.11.0節、ADR-0037）。道具は接続の画面で 1 つずつ止める（第6.6.3.1節）
   await call('a', `/v1/admin/extensions/${DW}/install`, { method: 'POST', body: JSON.stringify({ consent: true }) });
+  const { body: mcpList } = await call('a', '/v1/admin/connections/mcp');
+  const reg = mcpList.items?.find((x) => x.id === 'deepwiki');
+  reg?.origin === `extension:${DW}` && reg.tools.length === 2 && reg.usedBy.some((a) => a.id === `${DW}:research`)
+    ? ok('同梱の接続は、導入のときに会社の接続として登録される（使う業務つき）') : ng('会社の接続に登録されない', JSON.stringify(mcpList));
   const AGENT = `${DW}:research`;
-  const toolPath = `/v1/admin/extensions/${DW}/connectors/deepwiki/tools/ask_wiki_question`;
+  const toolPath = '/v1/admin/connections/mcp/deepwiki/tools/ask_wiki_question';
 
   const { body: agentsBefore } = await call('a', '/v1/agents', {}, 'member');
   (agentsBefore.agents ?? []).some((a) => a.id === AGENT)
@@ -896,10 +900,10 @@ console.log('\n■ 21. 持ち運べる拡張機能（ファイルからの取り
   const toolOff = await call('a', `${toolPath}/enabled`, { method: 'PUT', body: JSON.stringify({ enabled: false }) });
   toolOff.status === 200 ? ok('ツールを 1 つ止められる') : ng(`止められない（${toolOff.status}）`, JSON.stringify(toolOff.body));
 
-  const { body: listOff } = await call('a', '/v1/admin/extensions');
-  const conn = listOff.items?.find((x) => x.id === DW)?.connectors?.[0];
-  conn?.tools?.find((t) => t.name === 'deepwiki.ask_wiki_question')?.enabled === false
-    && conn?.tools?.find((t) => t.name === 'deepwiki.read_wiki_structure')?.enabled === true
+  const { body: listOff } = await call('a', '/v1/admin/connections/mcp');
+  const conn = listOff.items?.find((x) => x.id === 'deepwiki');
+  conn?.tools?.find((t) => t.name === 'ask_wiki_question')?.enabled === false
+    && conn?.tools?.find((t) => t.name === 'read_wiki_structure')?.enabled === true
     ? ok('止めたツールだけが「止めている」になる') : ng('状態が違う', JSON.stringify(conn?.tools ?? []));
 
   const { body: agentsOff } = await call('a', '/v1/agents', {}, 'member');
@@ -911,8 +915,8 @@ console.log('\n■ 21. 持ち運べる拡張機能（ファイルからの取り
   denied.status === 404 ? ok('止めた業務は依頼もできない（404）') : ng(`依頼できてしまう（${denied.status}）`);
 
   const { body: auditsTool } = await call('a', '/v1/admin/audit-events');
-  (auditsTool.items ?? []).some((e) => e.action === 'extension.tool.toggle' && e.detail?.enabled === false)
-    ? ok('監査ログに extension.tool.toggle が残る') : ng('監査ログに残らない');
+  (auditsTool.items ?? []).some((e) => e.action === 'connection.mcp.tool.toggle' && e.detail?.enabled === false)
+    ? ok('監査ログに connection.mcp.tool.toggle が残る') : ng('監査ログに残らない');
 
   const toolOn = await call('a', `${toolPath}/enabled`, { method: 'PUT', body: JSON.stringify({ enabled: true }) });
   const { body: agentsOn } = await call('a', '/v1/agents', {}, 'member');
@@ -920,6 +924,75 @@ console.log('\n■ 21. 持ち運べる拡張機能（ファイルからの取り
     ? ok('戻せば、ツールも業務も戻る') : ng('戻らない');
 
   await call('a', `/v1/admin/extensions/${DW}`, { method: 'DELETE' });
+}
+
+console.log('\n■ 21b. 会社の接続（MCP を拡張機能から切り離して管理する。第12.11.0節、ADR-0037）');
+{
+  // 手元に小さな MCP サーバを立てる（開発用の localhost は http で登録できる）
+  const { createServer } = await import('node:http');
+  const server = createServer(async (req, res) => {
+    let raw = '';
+    for await (const ch of req) raw += ch;
+    const msg = JSON.parse(raw || '{}');
+    if (msg.id === undefined) { res.writeHead(202).end(); return; }
+    const result = msg.method === 'initialize' ? { protocolVersion: '2025-06-18', capabilities: {} }
+      : msg.method === 'tools/list' ? { tools: [
+        { name: 'list_deals', description: '商談を探す', annotations: { readOnlyHint: true } },
+        { name: 'create_invoice', description: '請求書を作る' },
+      ] }
+      : msg.method === 'tools/call' ? { content: [{ type: 'text', text: `商談: 見本商事（${JSON.stringify(msg.params.arguments)}）` }] } : {};
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result }));
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const url = `http://localhost:${server.address().port}/mcp`;
+  await call('a', '/v1/admin/connections/mcp/crm', { method: 'DELETE' });
+
+  const memberAdd = await call('a', '/v1/admin/connections/mcp', { method: 'POST', body: JSON.stringify({ id: 'crm', url }) }, 'member');
+  memberAdd.status === 403 ? ok('一般の利用者は接続を登録できない（403）') : ng(`登録できてしまう（${memberAdd.status}）`);
+  const added = await call('a', '/v1/admin/connections/mcp', { method: 'POST', body: JSON.stringify({ id: 'crm', name: '顧客管理', url }) });
+  const { body: l1 } = await call('a', '/v1/admin/connections/mcp');
+  const crm = l1.items?.find((x) => x.id === 'crm');
+  added.status === 201 && crm?.tools?.find((t) => t.name === 'list_deals')?.risk === 'read' && crm.tools.find((t) => t.name === 'create_invoice')?.risk === 'external-send'
+    ? ok('URL から登録すると道具の一覧を問い合わせ、読むだけの目印が無い道具は「社外に送る」にする') : ng('登録の結果が違う', JSON.stringify({ added: added.body, crm }));
+  const dup = await call('a', '/v1/admin/connections/mcp', { method: 'POST', body: JSON.stringify({ id: 'gmail', url }) });
+  dup.status === 400 ? ok('内蔵の道具と重なる ID は登録できない') : ng(`登録できてしまう（${dup.status}）`);
+
+  // 同梱していない会社の接続の道具を使う SKILL.md の業務
+  const EXT = 'jp.example.crm-deals';
+  const AG = `${EXT}:deals`;
+  await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
+  const data = await skillZip({
+    id: EXT, name: 'deals', title: '確認用: 商談を探す', tools: ['crm.list_deals'], inputs: ['会社: 短文'], input: { 会社: '見本商事' },
+    stub: { work: [{ name: 'crm.list_deals', args: { company: '見本商事' } }] },
+  });
+  await call('a', '/v1/admin/extensions/import', { method: 'POST', body: data, headers: { 'content-type': 'application/octet-stream' } });
+  await call('a', `/v1/admin/extensions/${EXT}/install`, { method: 'POST', body: JSON.stringify({ consent: true }) });
+  const { body: job } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: AG, input: { 会社: '見本商事' } }) }, 'member');
+  const done = await waitFor('a', job.runId, ['completed', 'failed', 'awaiting_approval'], 20000, 'member');
+  const called = done.steps?.find((x) => x.stepId === 'work')?.output?.tools?.find((t) => t.name === 'crm.list_deals')?.result;
+  done.run?.status === 'completed' && /見本商事/.test(called?.text ?? '') && called?.source === 'external'
+    ? ok('業務が会社の接続の道具を使える（応答は外部のデータの印つき）') : ng('会社の接続の道具を使えない', JSON.stringify({ status: done.run?.status, called }));
+
+  const risk = await call('a', '/v1/admin/connections/mcp/crm', { method: 'PUT', body: JSON.stringify({ tools: [{ name: 'create_invoice', risk: 'financial' }] }) });
+  const { body: l2 } = await call('a', '/v1/admin/connections/mcp');
+  risk.status === 200 && l2.items?.find((x) => x.id === 'crm')?.tools?.find((t) => t.name === 'create_invoice')?.risk === 'financial'
+    ? ok('道具ごとの危険度を管理者が決められる') : ng('危険度を変えられない');
+
+  const check = await call('a', '/v1/admin/connections/mcp/crm/check', { method: 'POST' });
+  check.body.ok && check.body.tools.every((t) => t.provided) ? ok('接続を確かめられる') : ng('確かめられない', JSON.stringify(check.body));
+
+  const { body: impact } = await call('a', '/v1/admin/connections/mcp/crm/impact');
+  (impact.agents ?? []).some((a) => a.id === AG) ? ok('消す前に、使えなくなる業務の名前を示す') : ng('影響を示さない', JSON.stringify(impact));
+  await call('a', '/v1/admin/connections/mcp/crm', { method: 'DELETE' });
+  const { body: menu } = await call('a', '/v1/agents', {}, 'member');
+  const gone = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: AG, input: { 会社: 'x' } }) }, 'member');
+  !(menu.agents ?? []).some((a) => a.id === AG) && gone.status === 404
+    ? ok('接続を消すと、その道具を使う業務は使えなくなる（接続が要る）') : ng('接続が無くても使えてしまう');
+  const { body: bList } = await call('b', '/v1/admin/connections/mcp');
+  !(bList.items ?? []).some((x) => x.id === 'crm') ? ok('会社の接続は、ほかの会社には見えない') : ng('ほかの会社に見える');
+  await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
+  await new Promise((r) => server.close(r));
 }
 
 console.log('\n■ 22. グループと利用範囲');

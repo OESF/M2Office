@@ -19,7 +19,7 @@ export { OpenAiCompatibleProvider, LlmRequestError } from './llm/gemini.js';
 export type { GeminiModelMap } from './llm/gemini.js';
 
 export type {
-  Repository, DisabledConnectorTool, KnowledgeHit, KnowledgeItem, KnowledgeSearchResult, KnowledgeSectionView, RunStatRow, InstalledExtension, PrivateExtension, CompartmentAssignment,
+  Repository, DisabledConnectorTool, TenantConnection, KnowledgeHit, KnowledgeItem, KnowledgeSearchResult, KnowledgeSectionView, RunStatRow, InstalledExtension, PrivateExtension, CompartmentAssignment,
   CredentialKind, TenantCredential, GoogleConnection, UserPhoto,
 } from './repository/types.js';
 export { PostgresRepository } from './repository/postgres.js';

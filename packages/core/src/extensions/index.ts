@@ -11,7 +11,7 @@ export {
   type ExtensionManifest, type ExtensionPackage, type ExtensionFiles, type LoadResult, type LoadOptions,
 } from './loader.js';
 export {
-  checkConnector, connectorTools, connectorToolName, CONNECTOR_AUTH_TYPES,
+  checkConnector, connectorTools, connectorToolName, connectionPlaceholder, isConnectionToolName, CONNECTOR_AUTH_TYPES,
   type ConnectorDeclaration, type ConnectorToolDeclaration, type ConnectorAuthType,
 } from './connectors.js';
 export { packExtension, unpackExtension, EXTENSION_FILE_MAX_BYTES } from './package-file.js';
@@ -21,6 +21,6 @@ export {
   type Frontmatter, type SkillPackage,
 } from './skill.js';
 export {
-  ExtensionHub, consentSnapshot, decodeFiles, encodeFiles, blockedByDisabledTool,
+  ExtensionHub, bundledConnection, consentSnapshot, decodeFiles, encodeFiles, blockedByDisabledTool,
   type TenantExtensions, type ExtensionEntry, type ConsentSnapshot, type ExtensionHubDeps,
 } from './hub.js';

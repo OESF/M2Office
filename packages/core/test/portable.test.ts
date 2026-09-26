@@ -18,7 +18,7 @@ import {
   buildSkillPackage, connectorTools, consentSnapshot, encodeFiles, loadCompiledExtension, loadExtension, loadExtensionFiles, packExtension,
   readExtensionDir, unpackExtension,
   type ConnectorDeclaration, type ExtensionFiles, type InstalledExtension, type McpClient,
-  type PrivateExtension, type Repository,
+  type PrivateExtension, type Repository, type TenantConnection,
 } from '../src/index.js';
 
 const registry = new ToolRegistry();
@@ -153,12 +153,16 @@ test('宣言していないコネクタのツールを allowed-tools に書い�
 function fakeRepo() {
   const installed: InstalledExtension[] = [];
   const privates: PrivateExtension[] = [];
+  const connections: TenantConnection[] = [];
   const repo = {
     listInstalledExtensions: async (t: string) => installed.filter((i) => i.tenantId === t),
     listDisabledConnectorTools: async () => [],
     listPrivateExtensions: async (t: string) => privates.filter((i) => i.tenantId === t),
+    // 会社の接続（仕様書 第12.11.0節）
+    listConnections: async (t: string) => connections.filter((c) => c.tenantId === t),
+    saveConnection: async (c: TenantConnection) => { connections.push(c); },
   } as unknown as Repository;
-  return { repo, installed, privates };
+  return { repo, installed, privates, connections };
 }
 
 test('導入して有効なときだけ、業務エージェントとコネクタのツールが使える。スイッチを切れば使えない', async () => {
@@ -183,7 +187,8 @@ test('導入して有効なときだけ、業務エージェントとコネク�
   rec.enabled = false;
   view = await hub.forTenant('a');
   assert.equal(view.isAvailable(id), false);
-  assert.equal(view.registry.get('deepwiki.ask_wiki_question'), undefined);
+  assert.ok(view.registry.get('deepwiki.ask_wiki_question'), '拡張機能を止めても、会社の接続は残る（第12.11.0節）');
+  assert.equal(view.connections[0]?.origin, 'extension:jp.m2office.samples.deepwiki-research', '同梱の接続として登録された');
   assert.equal(view.entryOf(id)?.installed?.enabled, false, '無効でも導入の記録は残る');
   assert.equal((await hub.forTenant('b')).isAvailable(id), false, 'ほかの会社には影響しない');
 });

@@ -260,8 +260,8 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
             {tab === 'knowledge' && <KnowledgeSettings page={page} />}
             {tab === 'audit' && <Audit />}
             {tab === 'connectors' && (page === 'mcp'
-              // 設定は拡張機能で行う。その拡張機能の詳細を開いた状態で移る（仕様書 第6.6.3.0節）
-              ? <ConnectorList onOpenExtension={(id) => { setTab('extensions'); setExtFocus(id || null); }} />
+              // 会社の接続の管理（仕様書 第6.6.3.0節、ADR-0037）
+              ? <ConnectorList />
               : <Connections page={page} />)}
           </main>
         </SideNavLayout>

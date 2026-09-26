@@ -1,160 +1,89 @@
 /**
- * @file 接続の設定の単体テスト。秘密の値の暗号化、Google の OAuth の各呼び出し（手元の偽の Google で確かめる）、
- * 会社ごとの Gemini の選択。
+ * @file 会社の接続（コネクタ。MCP）の単体テスト（仕様書 第12.11.0節、ADR-0037）。
  *
- * @see 仕様書 第14.3.3節 接続の設定
+ * コネクタは拡張機能の一部ではなく、会社の資源として管理する。秘書・公式の業務・拡張機能のどれからでも使い、
+ * 会社に接続が無い道具を使う業務は使えないこと、SKILL.md の組み立てで同梱していない接続の道具を扱えることを確かめる。
  */
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createServer } from 'node:http';
-import type { AddressInfo } from 'node:net';
 import {
-  SecretBox, StubLlmProvider, MockResearchProvider, TenantAiResolver, buildGoogleAuthUrl, createPkce,
-  exchangeGoogleCode, googleGrantedScopes, googleScopeLabel, googleUserEmail, refreshGoogleAccessToken, revokeGoogleToken,
-  GoogleOAuthError, checkGoogleClient, isGoogleClientError,
-  type GoogleOAuthEndpoints, type Repository, type TenantCredential,
+  BUILTIN_TOOLS, ExtensionHub, OFFICIAL_AGENTS, ToolRegistry, consentSnapshot, isConnectionToolName, loadExtensionFiles,
+  type InstalledExtension, type Repository, type TenantConnection,
 } from '../src/index.js';
 
-test('秘密の値: 暗号化して戻せる。毎回ちがう暗号文になり、別の鍵や改ざんでは戻せない', () => {
-  const box = new SecretBox('テスト用の鍵');
-  const a = box.encrypt('AIzaSy-secret');
-  const b = box.encrypt('AIzaSy-secret');
-  assert.notEqual(a, b);
-  assert.ok(!a.includes('AIzaSy'));
-  assert.equal(box.decrypt(a), 'AIzaSy-secret');
-  assert.throws(() => new SecretBox('別の鍵').decrypt(a));
-  const parts = a.split(':');
-  parts[3] = Buffer.from('tampered').toString('base64');
-  assert.throws(() => box.decrypt(parts.join(':')));
+const registry = new ToolRegistry();
+for (const t of BUILTIN_TOOLS) registry.register(t);
+const enc = (v: string) => new TextEncoder().encode(v);
+
+/** freee の見積もりを探す業務（同梱していない会社の接続「freee」の道具を使う）。 */
+const SKILL = [
+  '---', 'name: deals', 'description: freee の商談を探して要点をまとめる',
+  'allowed-tools: freee.list_deals freee.create_invoice knowledge.search',
+  'metadata:', '  m2office-id: jp.example.freee-deals', '---', '', '# 商談の要点', '', '$ARGUMENTS の商談を探して要点をまとめる。', '',
+].join('\n');
+
+const freee = (tenantId: string, risk: 'read' | 'external-send' = 'read'): TenantConnection => ({
+  tenantId, id: 'freee', name: 'freee', description: '', transport: 'http', url: 'https://mcp.freee.example/mcp', auth: { type: 'none' },
+  tools: [
+    { name: 'list_deals', description: '商談を探す', risk: 'read' },
+    { name: 'create_invoice', description: '請求書を作る', risk },
+  ],
+  origin: 'manual', createdBy: 'u', createdAt: '', updatedAt: '',
 });
 
-test('認可の URL: ログインの権限と業務の権限、オフラインの利用、PKCE、state を付ける', () => {
-  const { verifier, challenge } = createPkce();
-  assert.ok(verifier.length >= 43);
-  const url = new URL(buildGoogleAuthUrl({ clientId: 'c', redirectUri: 'http://localhost/cb', scopes: ['gmail.readonly', 'drive.file'], state: 's1', codeChallenge: challenge }));
-  const q = url.searchParams;
-  assert.equal(q.get('scope'), 'openid email https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/drive.file');
-  assert.equal(q.get('access_type'), 'offline');
-  assert.equal(q.get('prompt'), 'consent');
-  assert.equal(q.get('code_challenge_method'), 'S256');
-  assert.equal(q.get('code_challenge'), challenge);
-  assert.equal(q.get('state'), 's1');
-  assert.equal(googleScopeLabel('gmail.readonly'), 'メールを読む', '権限は業務の言葉で見せる');
+test('SKILL.md の同梱していない接続の道具は、会社の接続の道具として組み立てる（作業の段と送る段の両方に置く）', () => {
+  const { pkg, problems, notices } = loadExtensionFiles(new Map([['SKILL.md', enc(SKILL)]]), registry);
+  assert.deepEqual(problems, []);
+  const def = pkg!.agents[0]!;
+  assert.deepEqual(pkg!.manifest.permissions.connections, ['freee.list_deals', 'freee.create_invoice']);
+  const [work, gate, send] = def.steps;
+  assert.ok(work?.type === 'agent' && work.tools?.includes('freee.list_deals') && work.tools.includes('knowledge.search'), '読むだけなら作業の段で使える');
+  assert.equal(gate?.type, 'approval', '危険度が分からないため、承認の段を入れる（社外に出なければ自動で通る）');
+  assert.ok(send?.type === 'agent' && send.tools?.includes('freee.create_invoice') && !send.required, '送る・書き込む道具は承認の後の段でも使える');
+  assert.ok((notices ?? []).some((n) => n.includes('会社の接続（freee）')), (notices ?? []).join('\n'));
+  assert.equal(isConnectionToolName('gmail.send', new Set(['gmail'])), false, '内蔵の道具は接続の道具ではない');
 });
 
-/** 手元の偽の Google（トークン・tokeninfo・userinfo・取り消し）。 */
-async function fakeGoogle() {
-  const seen: { path: string; body: URLSearchParams; auth?: string }[] = [];
-  const server = createServer(async (req, res) => {
-    let raw = '';
-    for await (const ch of req) raw += ch;
-    const url = new URL(req.url!, 'http://x');
-    const body = new URLSearchParams(raw);
-    seen.push({ path: url.pathname, body, auth: req.headers.authorization });
-    const json = (code: number, v: unknown) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(v)); };
-    if (url.pathname === '/token' && body.get('grant_type') === 'authorization_code') {
-      // 本物の Google と同じく、コードより先にクライアントを確かめる（2026-09-25 に本物で確かめた返し方）
-      if (body.get('client_id') === 'boom') return json(503, {});
-      if (body.get('client_id') === 'missing') return json(401, { error: 'invalid_client', error_description: 'The OAuth client was not found.' });
-      if (body.get('client_secret') !== 's') return json(401, { error: 'invalid_client', error_description: 'The provided client secret is invalid.' });
-      if (body.get('client_id') === 'odd') return json(400, { error: 'redirect_uri_mismatch', error_description: 'Bad Request' });
-      if (body.get('code') !== 'good' || !body.get('code_verifier')) return json(400, { error: 'invalid_grant' });
-      return json(200, { access_token: 'at-1', refresh_token: 'rt-1', scope: 'openid https://www.googleapis.com/auth/gmail.readonly' });
-    }
-    if (url.pathname === '/token' && body.get('grant_type') === 'refresh_token') {
-      return body.get('refresh_token') === 'rt-1' ? json(200, { access_token: 'at-2', expires_in: 3599 }) : json(400, { error: 'invalid_grant', error_description: 'Token has been expired or revoked.' });
-    }
-    if (url.pathname === '/tokeninfo') return json(200, { scope: 'openid https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/drive.file' });
-    if (url.pathname === '/userinfo') return json(200, { email: 'sato@alpha.example.jp' });
-    if (url.pathname === '/revoke') return json(200, {});
-    json(404, {});
+function world() {
+  const installed: InstalledExtension[] = [];
+  const connections: TenantConnection[] = [];
+  const repo = {
+    listInstalledExtensions: async (t: string) => installed.filter((i) => i.tenantId === t),
+    listDisabledConnectorTools: async () => [],
+    listPrivateExtensions: async () => [],
+    listConnections: async (t: string) => connections.filter((c) => c.tenantId === t),
+    saveConnection: async (c: TenantConnection) => { connections.push(c); },
+  } as unknown as Repository;
+  const { pkg } = loadExtensionFiles(new Map([['SKILL.md', enc(SKILL)]]), registry);
+  const hub = new ExtensionHub({ repo, registry, official: OFFICIAL_AGENTS, packages: [pkg!] });
+  installed.push({
+    tenantId: 'a', extensionId: 'jp.example.freee-deals', version: '1.0.0', consentedPermissions: consentSnapshot(pkg!),
+    installedBy: 'u', installedAt: '', enabled: true,
   });
-  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
-  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  const endpoints: GoogleOAuthEndpoints = {
-    auth: `${base}/auth`, token: `${base}/token`, tokeninfo: `${base}/tokeninfo`, userinfo: `${base}/userinfo`, revoke: `${base}/revoke`,
-  };
-  return { endpoints, seen, close: () => new Promise<void>((r) => server.close(() => r())) };
+  return { hub, connections };
 }
 
-test('OAuth: コードをトークンに換え、取り直し、実際に許可された範囲とメールアドレスを確かめ、取り消せる', async () => {
-  const g = await fakeGoogle();
-  try {
-    const t = await exchangeGoogleCode({ clientId: 'c', clientSecret: 's', code: 'good', redirectUri: 'http://localhost/cb', codeVerifier: 'v' }, g.endpoints);
-    assert.equal(t.refreshToken, 'rt-1');
-    assert.equal(g.seen[0]!.body.get('code_verifier'), 'v', 'PKCE の検証用の値を送る');
-    await assert.rejects(exchangeGoogleCode({ clientId: 'c', clientSecret: 's', code: 'bad', redirectUri: 'x', codeVerifier: 'v' }, g.endpoints), GoogleOAuthError);
-    const r = await refreshGoogleAccessToken({ clientId: 'c', clientSecret: 's', refreshToken: 'rt-1' }, g.endpoints);
-    assert.equal(r.accessToken, 'at-2');
-    await assert.rejects(refreshGoogleAccessToken({ clientId: 'c', clientSecret: 's', refreshToken: 'old' }, g.endpoints), /expired or revoked/);
-    assert.deepEqual(await googleGrantedScopes('at-2', g.endpoints), ['openid', 'gmail.readonly', 'drive.file']);
-    assert.equal(await googleUserEmail('at-2', g.endpoints), 'sato@alpha.example.jp');
-    assert.equal(g.seen.find((x) => x.path === '/userinfo')?.auth, 'Bearer at-2');
-    assert.equal(await revokeGoogleToken('rt-1', g.endpoints), true);
-  } finally {
-    await g.close();
-  }
+test('会社に接続が無い道具を使う業務は使えず、接続を登録すると使える。危険度は会社の接続のもの', async () => {
+  const { hub, connections } = world();
+  const id = 'jp.example.freee-deals:deals';
+  let view = await hub.forTenant('a');
+  assert.equal(view.isAvailable(id), false, '接続が無ければ使えない（接続が要ります）');
+  assert.deepEqual(view.missingToolsOf(view.resolve(id, 1)!), ['freee.list_deals', 'freee.create_invoice']);
+  connections.push(freee('a', 'external-send'));
+  view = await hub.forTenant('a');
+  assert.equal(view.isAvailable(id), true);
+  assert.equal(view.registry.get('freee.create_invoice')?.risk, 'external-send', '実行のときは会社が決めた危険度');
+  assert.equal((await hub.forTenant('b')).registry.get('freee.list_deals'), undefined, 'ほかの会社には無い');
 });
 
-test('登録の確認: ID とシークレットの組を、使えないコードで Google に確かめる（仕様書 第14.3.3節）', async () => {
-  const g = await fakeGoogle();
-  const check = (clientId: string, clientSecret: string) =>
-    checkGoogleClient({ clientId, clientSecret, redirectUri: 'https://localhost:3100/cb' }, g.endpoints);
-  try {
-    assert.equal((await check('c', 's')).verdict, 'ok', '組が正しければ、コードが無効（invalid_grant）と返る');
-    const bad = await check('c', 'wrong');
-    assert.equal(bad.verdict, 'bad-secret');
-    assert.match(bad.detail ?? '', /client secret is invalid/);
-    assert.equal(bad.detail?.includes('wrong'), false, '返す文にシークレットを含めない');
-    assert.equal((await check('missing', 's')).verdict, 'no-client');
-    assert.equal((await check('boom', 's')).verdict, 'unreachable', '5xx は正否が分からない');
-    const odd = await check('odd', 's');
-    assert.equal(odd.verdict, 'unexpected', '想定と違う返事は、正しいとも誤りとも言わない');
-    assert.match(odd.detail ?? '', /redirect_uri_mismatch/);
-    const sent = g.seen.at(-1)!.body;
-    assert.equal(sent.get('grant_type'), 'authorization_code');
-    assert.equal(sent.get('redirect_uri'), 'https://localhost:3100/cb', '実際に使う戻り先で確かめる');
-  } finally {
-    await g.close();
-  }
-  // 届かないときも例外を投げず、確かめられなかったと返す
-  const closed = { ...g.endpoints, token: 'http://127.0.0.1:1/token' };
-  assert.equal((await checkGoogleClient({ clientId: 'c', clientSecret: 's', redirectUri: 'x' }, closed)).verdict, 'unreachable');
-});
-
-test('利用者の接続で、会社のクライアントの誤りを見分ける（もう一度試しても直らないため）', async () => {
-  const g = await fakeGoogle();
-  try {
-    const err = await exchangeGoogleCode({ clientId: 'c', clientSecret: 'wrong', code: 'good', redirectUri: 'x', codeVerifier: 'v' }, g.endpoints)
-      .then(() => null, (e: unknown) => e);
-    assert.equal(isGoogleClientError(err), true);
-    const other = await exchangeGoogleCode({ clientId: 'c', clientSecret: 's', code: 'bad', redirectUri: 'x', codeVerifier: 'v' }, g.endpoints)
-      .then(() => null, (e: unknown) => e);
-    assert.equal(isGoogleClientError(other), false, 'コードの誤りは、クライアントの誤りではない');
-  } finally {
-    await g.close();
-  }
-});
-
-test('会社ごとの Gemini: 自社の鍵を登録した会社はその鍵、ほかの会社は運営の設定を使う', async () => {
-  const box = new SecretBox('k');
-  const creds: TenantCredential[] = [{
-    tenantId: 'a', kind: 'gemini', secretEnc: box.encrypt('AIzaSy-tenant-a'), meta: { mode: 'byok', models: { standard: 'gemini-2.5-flash' } },
-    updatedBy: 'u', updatedAt: '2026-09-22T00:00:00Z',
-  }];
-  const repo = { getTenantCredential: async (t: string, k: string) => creds.find((c) => c.tenantId === t && c.kind === k) ?? null } as unknown as Repository;
-  const fallback = new StubLlmProvider();
-  const ai = new TenantAiResolver({
-    repo, box, fallbackLlm: fallback, fallbackResearch: new MockResearchProvider(), platformKey: null,
-    defaults: { fast: 'f', standard: 's', advanced: 'a', research: 'r', live: 'l' }, baseUrl: 'http://x',
-  });
-  const a = await ai.geminiFor('a');
-  assert.deepEqual([a.source, a.apiKey, a.models.standard, a.models.fast], ['tenant', 'AIzaSy-tenant-a', 'gemini-2.5-flash', 'f']);
-  assert.notEqual(await ai.llmFor('a'), fallback);
-  assert.equal((await ai.llmFor('a')).name, 'gemini');
-  assert.equal(await ai.llmFor('a'), await ai.llmFor('a'), '設定が変わるまで使い回す');
-  const b = await ai.geminiFor('b');
-  assert.deepEqual([b.source, b.apiKey], ['none', null]);
-  assert.equal(await ai.llmFor('b'), fallback, '鍵の無い会社は既定（ここではスタブ）');
+test('秘書の調べものは、会社の接続の読むだけの道具を使える（書き込みの道具は使わない）', async () => {
+  const { hub, connections } = world();
+  connections.push(freee('a', 'external-send'));
+  const view = await hub.forTenant('a');
+  const lookup = view.agents.find((a) => a.id === 'secretary-lookup')!;
+  assert.ok(lookup.tools.includes('freee.list_deals'));
+  assert.ok(!lookup.tools.includes('freee.create_invoice'));
+  assert.ok(view.resolve('secretary-lookup', 1)!.tools.includes('freee.list_deals'), '実行のときの定義にも入る');
+  assert.ok(!OFFICIAL_AGENTS.find((a) => a.id === 'secretary-lookup')!.tools.includes('freee.list_deals'), '公式の定義そのものは変えない');
 });

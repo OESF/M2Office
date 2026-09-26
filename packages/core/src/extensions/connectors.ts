@@ -100,6 +100,38 @@ function isAllowedUrl(url: unknown): boolean {
  * 内蔵のツールと同じくエンジンが扱う（仕様書 第12.11.3節）。
  * 応答は外部のデータとして返し、失敗は「取得できませんでした」として返す。推測で埋めない。
  */
+/** 会社の接続の道具の名前の形（`<接続の ID>.<道具>`）。 */
+const CONNECTION_TOOL = /^[a-z0-9][a-z0-9-]*\.[A-Za-z0-9_-]+$/;
+
+/**
+ * 会社の接続の道具を指す名前か（仕様書 第12.11.0節）。内蔵の道具の頭の部分（`gmail` など）で始まるものは違う。
+ *
+ * @param builtinPrefixes 内蔵の道具の名前の頭の部分
+ */
+export function isConnectionToolName(name: string, builtinPrefixes: ReadonlySet<string>): boolean {
+  return CONNECTION_TOOL.test(name) && !builtinPrefixes.has(name.split('.')[0]!);
+}
+
+/**
+ * 同梱していない会社の接続の道具を、業務を組み立てるときだけの仮の道具にする（仕様書 第12.11.2節、ADR-0037）。
+ *
+ * @remarks
+ * 危険度は組み立てのときには分からない。業務の組み立て（`compileSkill`）が作業の段と送る段の両方に置き、
+ * 実行のときは会社の接続（管理者が決めた危険度）の道具に置き換わる。会社に接続が無ければ、その業務は使えない
+ */
+export function connectionPlaceholder(name: string): Tool {
+  const [id, tool] = [name.slice(0, name.indexOf('.')), name.slice(name.indexOf('.') + 1)];
+  return {
+    name, risk: 'read',
+    description: `会社の接続「${id}」の道具 ${tool}`,
+    activityLabel: `${id}に問い合わせています`,
+    helpText: `会社の接続「${id}」の道具 ${tool} を使います（接続は管理者ページの「接続」で登録します）`,
+    async invoke() {
+      return { error: `取得できませんでした: 会社の接続「${id}」が登録されていません` };
+    },
+  };
+}
+
 export function connectorTools(c: ConnectorDeclaration, client?: McpClient): Tool[] {
   return c.tools.map((t) => ({
     name: connectorToolName(c.id, t.name),

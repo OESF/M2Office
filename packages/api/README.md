@@ -161,11 +161,17 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/admin/google-permissions` | 管理者: この会社の業務が求める Google の権限と段階（制限付きかどうか）、使うツールと業務 |
 | `GET /v1/admin/extensions` | 管理者: 拡張機能の一覧（公式・自社専用）、構成要素、必要な権限の説明、導入と有効・無効の状態 |
 | `POST /v1/admin/extensions/import` | 管理者: `.m2ext` を取り込む（本文はファイルのバイト列。5 MB まで）。検証を通らなければ `problems` を返す |
-| `POST /v1/admin/extensions/:id/install` | 管理者: 同意して導入（本文に `consent: true`）。導入すると有効になる |
+| `POST /v1/admin/extensions/:id/install` | 管理者: 同意して導入（本文に `consent: true`）。導入すると有効になる。同梱の接続は会社の接続として登録する（同じ ID が別の接続先で登録済みなら `notices` で知らせる） |
 | `PUT /v1/admin/extensions/:id/enabled` | 管理者: 有効・無効の切り替え（本文に `enabled`）。権限が増えた版は 409 |
-| `POST /v1/admin/extensions/:id/connectors/:connectorId/check` | 管理者: コネクタの接続の確認（宣言したツールが提供されているか） |
-| `GET /v1/admin/extensions/:id/connectors/:connectorId/tools/:tool/impact` | 管理者: そのツールを止めると使えなくなる業務の名前と、飛ばす定時実行の数（仕様書 第6.6.3.1節） |
-| `PUT /v1/admin/extensions/:id/connectors/:connectorId/tools/:tool/enabled` | 管理者: コネクタのツールを 1 つ、有効または無効にする。止めたツールを使う業務はメニュー・秘書・定時実行・API から消える。動いている実行は止めない |
+| `GET /v1/admin/connections/mcp` | 管理者: 会社の接続（MCP）の一覧。道具ごとの危険度・有効かどうか・使っている業務（仕様書 第12.11節、ADR-0037） |
+| `POST /v1/admin/connections/mcp` | 管理者: URL を受け取り、道具の一覧を取って会社の接続として登録する（読むだけの印が付いた道具は「読むだけ」、ほかは「社外へ送る」扱い） |
+| `PUT /v1/admin/connections/mcp/:id` | 管理者: 接続の名前と、道具ごとの危険度を変える |
+| `POST /v1/admin/connections/mcp/:id/refresh` | 管理者: 道具の一覧を取り直す（決めた危険度は保つ） |
+| `POST /v1/admin/connections/mcp/:id/check` | 管理者: 接続の確認（宣言した道具が提供されているか） |
+| `GET /v1/admin/connections/mcp/:id/impact` | 管理者: 接続を消すと使えなくなる業務 |
+| `GET /v1/admin/connections/mcp/:id/tools/:tool/impact` | 管理者: その道具を止めると使えなくなる業務の名前と、飛ばす定時実行の数（仕様書 第6.6.3.1節） |
+| `PUT /v1/admin/connections/mcp/:id/tools/:tool/enabled` | 管理者: 道具を 1 つ、有効または無効にする。止めた道具を使う業務はメニュー・秘書・定時実行・API から消える。動いている実行は止めない |
+| `DELETE /v1/admin/connections/mcp/:id` | 管理者: 会社の接続を消す。その道具を使う業務は使えなくなる |
 | `DELETE /v1/admin/extensions/:id` | 管理者: 削除する。自社専用のものは取り込んだファイルも消す |
 | `GET /v1/admin/groups` | 管理者: グループの一覧（所属する人と、割り当て先の区画・業務を含む。第16.7節） |
 | `POST /v1/admin/groups` | 管理者: グループを作る（名前は会社の中で重ならない） |

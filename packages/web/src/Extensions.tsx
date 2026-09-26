@@ -9,7 +9,7 @@
  */
 
 import { useEffect, useRef, useState, type DragEvent } from 'react';
-import { api, ApiError, describeError, type AccessOptions, type ConnectorCheck, type ExtensionView, type ScopeValue } from './api.js';
+import { api, ApiError, describeError, type AccessOptions, type ExtensionView, type ScopeValue } from './api.js';
 import { HelpTip, Markdown } from './help.js';
 import { ScopeEditor, ScopeField, useAccessOptions } from './Scope.js';
 
@@ -239,46 +239,11 @@ function InstalledCard({ item: x, busy, focused = false, options, onChanged, onT
 }
 
 /**
- * 詳細。業務エージェント、コネクタ（接続の確認）、ツールの危険度と入り切り、説明。
+ * 詳細。業務エージェント、同梱の接続、説明。
  *
- * @param onChanged ツールの入り切りを変えたら呼ぶ。一覧を読み直す
+ * @remarks 接続の道具の危険度と入り切りは「接続 › コネクタ（MCP）」で決める（会社の接続。仕様書 第12.11.0節）
  */
-function Details({ item: x, onChanged }: { item: ExtensionView; onChanged: () => void }) {
-  const [checks, setChecks] = useState<Record<string, ConnectorCheck | 'busy'>>({});
-  const [busyTool, setBusyTool] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const check = async (id: string) => {
-    setChecks((c) => ({ ...c, [id]: 'busy' }));
-    const res = await api.admin.checkConnector(x.id, id)
-      .catch((e): ConnectorCheck => ({ ok: false, error: describeError(e) }));
-    setChecks((c) => ({ ...c, [id]: res }));
-  };
-
-  /** ツールを 1 つ入り切りする。止めるときは、使えなくなる業務を先に示す（第6.6.3.1節）。 */
-  async function toggleTool(connectorId: string, toolName: string, enabled: boolean) {
-    setBusyTool(toolName);
-    setError(null);
-    try {
-      if (!enabled) {
-        const impact = await api.admin.connectorToolImpact(x.id, connectorId, toolName);
-        const names = impact.agents.map((a) => `・${a.name}`).join('\n');
-        const ok = window.confirm(
-          impact.agents.length === 0
-            ? `ツール「${toolName}」を止めます。\n\nいま止まる業務はありません。\n\n止めてよろしいですか。`
-            : `ツール「${toolName}」を止めます。\n\n次の業務が使えなくなります。\n${names}\n`
-              + (impact.schedules > 0 ? `\nこれらの定時実行 ${impact.schedules} 件も、次の回から飛ばします。\n` : '')
-              + '\n動いている業務は最後まで進みます。いつでも戻せます。\n\n止めてよろしいですか。',
-        );
-        if (!ok) return;
-      }
-      await api.admin.setConnectorToolEnabled(x.id, connectorId, toolName, enabled);
-      onChanged();
-    } catch (err) {
-      setError(describeError(err, enabled ? '戻せませんでした' : '止められませんでした'));
-    } finally {
-      setBusyTool(null);
-    }
-  }
+function Details({ item: x }: { item: ExtensionView; onChanged: () => void }) {
   return (
     <div className="ext-details">
       {x.agents.length > 0 && (
@@ -287,41 +252,15 @@ function Details({ item: x, onChanged }: { item: ExtensionView; onChanged: () =>
           <ul className="small">{x.agents.map((a) => <li key={a.id}><strong>{a.name}</strong>: {a.summary}</li>)}</ul>
         </>
       )}
-      {x.connectors.map((c) => {
-        const st = checks[c.id];
-        return (
-          <div key={c.id}>
-            <h4>コネクタ: {c.name}</h4>
-            <p className="small">接続先 <code>{c.url}</code>・{c.authText}</p>
-            <ul className="small">
-              {c.tools.map((t) => {
-                const provided = st && st !== 'busy' && st.ok ? st.tools.find((x) => `${c.id}.${x.name}` === t.name)?.provided : undefined;
-                // ツールの名前は `<コネクタの ID>.<ツールの名前>`。API には後ろだけを渡す
-                const bare = t.name.slice(t.name.indexOf('.') + 1);
-                return (
-                  <li key={t.name}>
-                    {t.description}（<code>{t.name}</code>・{t.riskText}）
-                    {provided === true && <span className="status succeeded">提供あり</span>}
-                    {provided === false && <span className="status failed">提供なし</span>}
-                    {!t.enabled && <span className="status cancelled">止めています</span>}{' '}
-                    <button className="link" disabled={busyTool === bare}
-                      onClick={() => void toggleTool(c.id, bare, !t.enabled)}>
-                      {busyTool === bare ? '…' : t.enabled ? '止める' : '戻す'}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-            <button className="btn small ghost" disabled={st === 'busy'} onClick={() => void check(c.id)}>
-              {st === 'busy' ? '確認しています…' : '接続を確認する'}
-            </button>{' '}
-            {st && st !== 'busy' && (st.ok
-              ? <span className="small ok-inline">接続できました</span>
-              : <span className="small error-inline">接続できませんでした: {st.error}</span>)}
-          </div>
-        );
-      })}
-      {error && <p className="error">{error}</p>}
+      {x.connectors.length > 0 && (
+        <>
+          <h4>同梱の接続</h4>
+          <ul className="small">
+            {x.connectors.map((c) => <li key={c.id}>{c.name}（<code>{c.id}</code>）: <code>{c.url}</code></li>)}
+          </ul>
+          <p className="muted small">導入すると会社の接続として登録されます。道具の危険度と入り切りは「接続 › コネクタ（MCP）」で決めます。</p>
+        </>
+      )}
       {x.readme && (
         <>
           <h4>説明</h4>

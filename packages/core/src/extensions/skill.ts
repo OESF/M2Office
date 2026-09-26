@@ -13,7 +13,7 @@
 import { RISK_ORDER, type AgentDefinition, type AgentStep, type ApprovalStep, type RiskLevel } from '@m2office/shared';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { ExtensionFiles, ExtensionManifest } from './loader.js';
-import { connectorTools, type ConnectorDeclaration } from './connectors.js';
+import { connectionPlaceholder, connectorTools, isConnectionToolName, type ConnectorDeclaration } from './connectors.js';
 
 /** 補助のファイルの合計の上限（字。第12.12.2節）。 */
 export const SKILL_FILES_MAX_CHARS = 500_000;
@@ -299,10 +299,21 @@ export function buildSkillPackage(files: ExtensionFiles, registry: ToolRegistry)
       // 読めない宣言は、組み立てた後の検証で理由を返す
     }
   }
-  const local = connectors.length > 0 ? registry.extend(connectors.flatMap((c) => connectorTools(c))) : registry;
-
   // 道具は allowed-tools に M2Office の道具を書く。スキルの環境の道具は無視して知らせる（第12.12.1節 1）
   const declared = list(fm['allowed-tools']).map((t) => t.replace(/\(.*\)$/, ''));
+  // 同梱していない会社の接続の道具（<接続の ID>.<道具>）は、会社の接続の画面で登録したものを使う（第12.11.0節、ADR-0037）。
+  // 同梱したコネクタの ID と、内蔵の道具の頭の部分は除く
+  const builtinPrefixes = new Set(registry.names().map((n) => n.split('.')[0]!));
+  const bundledIds = new Set(connectors.map((c) => c.id));
+  const connections = [...new Set(declared.filter((t) => isConnectionToolName(t, builtinPrefixes) && !bundledIds.has(t.split('.')[0]!)))];
+  const local = registry.extend([
+    ...connectors.flatMap((c) => connectorTools(c)),
+    ...connections.map((n) => connectionPlaceholder(n)),
+  ]);
+  if (connections.length > 0) {
+    const ids = [...new Set(connections.map((n) => n.split('.')[0]!))];
+    notices.push(`会社の接続（${ids.join('・')}）の道具を使います。管理者ページの「接続」で登録されていない会社では、この業務は使えません`);
+  }
   const known = declared.filter((t) => local.get(t));
   const unknown = declared.filter((t) => !local.get(t));
   if (unknown.length > 0) notices.push(`allowed-tools の ${[...new Set(unknown)].join('・')} は M2Office の道具ではないため使いません（M2Office の道具は開発者マニュアル 第4章）`);
@@ -321,6 +332,7 @@ export function buildSkillPackage(files: ExtensionFiles, registry: ToolRegistry)
     title: firstHeading(body) || name, approver: meta['m2office-approver']?.trim() ?? '',
     examples: (meta['m2office-examples'] ?? '').split('\n').map((l) => l.replace(/^[-*・\s]+/, '').trim()).filter(Boolean),
     help, arguments: meta['m2office-inputs'] ? Object.keys(schema.properties) : args,
+    connections,
     route: !truthy(fm['disable-model-invocation']),
     menu: !('user-invocable' in fm) || truthy(fm['user-invocable']),
     tier: EFFORT_TIER[effort],
@@ -336,6 +348,7 @@ export function buildSkillPackage(files: ExtensionFiles, registry: ToolRegistry)
     permissions: {
       tools,
       max_risk_level: risks.reduce<RiskLevel>((top, r) => (RISK_ORDER[r] > RISK_ORDER[top] ? r : top), 'read'),
+      ...(connections.length > 0 ? { connections } : {}),
     },
   };
   const out: ExtensionFiles = new Map();
@@ -363,8 +376,12 @@ export function compileSkill(s: {
   supporting: { path: string; text: string }[];
   tools: string[]; inputs: InputSchema; approver: string; examples: string[]; help: string;
   arguments: string[]; route: boolean; menu: boolean; tier?: AgentDefinition['tier'];
+  /** 同梱していない会社の接続の道具。危険度が分からないため、作業の段と送る段の両方に置く（第12.11.2節）。 */
+  connections?: string[];
 }, registry: ToolRegistry): AgentDefinition {
+  const connections = s.connections ?? [];
   const sends = s.tools.filter((t) => {
+    if (connections.includes(t)) return false;
     const risk = registry.get(t)?.risk;
     return risk ? RISK_ORDER[risk] >= RISK_ORDER['external-send'] : false;
   });
@@ -379,7 +396,9 @@ export function compileSkill(s: {
       : `${s.body}${files}`,
   };
   const steps: AgentDefinition['steps'] = [work];
-  if (sends.length > 0) {
+  // 会社の接続の道具は、送る・書き込む道具かもしれない。承認の後の段にも置く（読むだけなら、作業の段で使える）
+  const afterGate = [...sends, ...connections];
+  if (afterGate.length > 0) {
     const byRequester = !s.approver || /依頼|本人/.test(s.approver);
     const roles = /管理者/.test(s.approver) ? ['admin'] : ['admin', 'approver'];
     const gate: ApprovalStep = {
@@ -388,8 +407,11 @@ export function compileSkill(s: {
       present: '送る内容', onReject: 'stop',
     };
     steps.push(gate, {
-      id: 'send', type: 'agent', label: '送る', tools: sends, required: [sends[0]!],
-      instruction: `${s.body}\n\n---\nこの段では、作業の段の答えに書いた中身を、そのとおりに送る。中身を書き換えない。作業の段で送らないと決めたものは送らない。`,
+      id: 'send', type: 'agent', label: '送る', tools: afterGate, ...(sends.length > 0 ? { required: [sends[0]!] } : {}),
+      instruction: sends.length > 0
+        ? `${s.body}\n\n---\nこの段では、作業の段の答えに書いた中身を、そのとおりに送る。中身を書き換えない。作業の段で送らないと決めたものは送らない。`
+        : `${s.body}\n\n---\nこの段では、作業の段で「承認の直後の段でのみ実行できます」と断られた接続の道具があれば、作業の段の答えのとおりに行う。`
+          + '無ければ道具を呼ばない。最後に、作業の段の答えをそのまま示して終える。',
     });
   }
   const firstField = Object.keys(s.inputs.properties)[0] ?? 'request';

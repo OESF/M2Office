@@ -8,6 +8,7 @@ import type {
   Approval, Artifact, AuditEvent, Job, Notification, Run, RunStep, Schedule, Session,
   StoredFile, Tenant, TenantSettings, User, UserGroup, UserSettings,
 } from '@m2office/shared';
+import type { ConnectorDeclaration } from '../extensions/connectors.js';
 
 /**
  * 永続化層のインターフェース。
@@ -234,6 +235,12 @@ export interface Repository {
    * @remarks 止めたものだけが返る。載っていないツールは有効である。
    */
   listDisabledConnectorTools(tenantId: string): Promise<DisabledConnectorTool[]>;
+  /** 会社の接続（コネクタ。MCP サーバ。仕様書 第12.11節、ADR-0037）。ID の順。 */
+  listConnections(tenantId: string): Promise<TenantConnection[]>;
+  /** 会社の接続を登録する・書き換える（ID が同じなら置き換える）。 */
+  saveConnection(c: TenantConnection): Promise<void>;
+  /** 会社の接続を消す。無ければ `false`。 */
+  deleteConnection(tenantId: string, id: string): Promise<boolean>;
   /**
    * 調べものの結果を伝えたことを記録する（仕様書 第10.11.7節「持ち越し」）。
    *
@@ -597,6 +604,20 @@ export interface CompartmentAssignment {
 }
 
 /** 管理者が個別に止めたコネクタのツール（仕様書 第6.6.3.1節）。 */
+/**
+ * 会社の接続（コネクタ。仕様書 第12.11節、ADR-0037）。拡張機能の一部ではなく、道具を供給する会社の資源。
+ *
+ * @remarks `tools` の危険度は管理者が決めたもの（初期値は同梱の宣言の推奨か、MCP の読むだけの目印）
+ */
+export interface TenantConnection extends ConnectorDeclaration {
+  tenantId: string;
+  /** 登録の由来。`manual`（管理者が登録）か `extension:<拡張機能の ID>`（同梱）。 */
+  origin: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface DisabledConnectorTool {
   connectorId: string;
   toolName: string;

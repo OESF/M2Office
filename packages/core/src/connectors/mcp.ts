@@ -18,6 +18,11 @@ export const MCP_RESULT_LIMIT = 6000;
 export interface McpToolInfo {
   name: string;
   description: string;
+  /**
+   * 読むだけの道具だという MCP の目印（`annotations.readOnlyHint`）。
+   * 会社の接続の危険度の初期値に使う（仕様書 第12.11.2節）。目印が無ければ `undefined`
+   */
+  readOnly?: boolean;
 }
 
 /** ツールを呼んだ結果。失敗しても例外にせず、理由を返す。 */
@@ -52,8 +57,14 @@ export class HttpMcpClient implements McpClient {
     try {
       const session = await this.initialize(url);
       const res = await this.rpc(url, 'tools/list', {}, session);
-      const tools = (res.tools as { name: string; description?: string }[] | undefined) ?? [];
-      return { ok: true as const, tools: tools.map((t) => ({ name: t.name, description: t.description ?? '' })) };
+      const tools = (res.tools as { name: string; description?: string; annotations?: { readOnlyHint?: boolean } }[] | undefined) ?? [];
+      return {
+        ok: true as const,
+        tools: tools.map((t) => ({
+          name: t.name, description: t.description ?? '',
+          ...(typeof t.annotations?.readOnlyHint === 'boolean' ? { readOnly: t.annotations.readOnlyHint } : {}),
+        })),
+      };
     } catch (err) {
       return { ok: false as const, error: describe(err) };
     }

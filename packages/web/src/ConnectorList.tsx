@@ -1,98 +1,151 @@
 /**
- * @file 管理者ページ「接続 › コネクタ（MCP）」。導入済みの拡張機能が宣言するコネクタを見渡す確認の画面（仕様書 第6.6.3.0節）。
+ * @file 管理者ページ「接続 › コネクタ（MCP）」。会社の接続を登録し、道具の危険度と入り切りを決める（仕様書 第6.6.3.0節、ADR-0037）。
  *
- * 設定（導入・有効と無効・ツールの入り切り）は「拡張機能」の画面で行う。ここは状態を変えない。
+ * コネクタは拡張機能の一部ではなく、道具を供給する会社の資源である。秘書・公式の業務・拡張機能のどれからでも使う。
  */
 
-import { useEffect, useState } from 'react';
-import { RISK_ORDER, type RiskLevel } from '@m2office/shared';
-import { api, describeError, type ConnectorCheck, type ExtensionView } from './api.js';
+import { useCallback, useEffect, useState } from 'react';
+import { api, describeError, type ConnectorCheck, type McpConnectionView } from './api.js';
 import { PageTitle } from './help.js';
 
-/** 一覧の 1 行。コネクタと、それを宣言した拡張機能。 */
-interface Row {
-  extension: ExtensionView;
-  connector: ExtensionView['connectors'][number];
-}
-
-/**
- * 導入済みのコネクタの一覧。
- *
- * @param onOpenExtension 「拡張機能で設定」を押したとき。拡張機能の画面で、その拡張機能の詳細を開く
- */
-export function ConnectorList({ onOpenExtension }: { onOpenExtension: (extensionId: string) => void }) {
-  const [items, setItems] = useState<ExtensionView[] | null>(null);
+/** 会社の接続の一覧と追加。 */
+export function ConnectorList() {
+  const [items, setItems] = useState<McpConnectionView[] | null>(null);
+  const [risks, setRisks] = useState<{ value: string; text: string }[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [checks, setChecks] = useState<Record<string, ConnectorCheck | 'busy'>>({});
-  useEffect(() => {
-    api.admin.extensions().then((r) => setItems(r.items)).catch((e) => setError(describeError(e, '読み込めませんでした')));
+  const [busy, setBusy] = useState<string | null>(null);
+  const [url, setUrl] = useState('');
+  const [name, setName] = useState('');
+  const load = useCallback(() => {
+    api.admin.mcpConnections()
+      .then((r) => { setItems(r.items); setRisks(r.risks); })
+      .catch((e) => setError(describeError(e, '読み込めませんでした')));
   }, []);
+  useEffect(load, [load]);
 
-  const rows: Row[] = (items ?? [])
-    .filter((x) => x.installed)
-    .flatMap((x) => x.connectors.map((c) => ({ extension: x, connector: c })));
+  /** 失敗を画面に出して、一覧を読み直す。 */
+  const run = async (key: string, fn: () => Promise<unknown>, failed: string) => {
+    setBusy(key);
+    setError(null);
+    try {
+      await fn();
+      load();
+    } catch (e) {
+      setError(describeError(e, failed));
+    } finally {
+      setBusy(null);
+    }
+  };
 
-  /** その場で接続を試す。状態は変えない（拡張機能の詳細の確認と同じ口）。 */
-  const check = async ({ extension, connector }: Row) => {
-    const key = `${extension.id}/${connector.id}`;
-    setChecks((c) => ({ ...c, [key]: 'busy' }));
-    const res = await api.admin.checkConnector(extension.id, connector.id)
-      .catch((e): ConnectorCheck => ({ ok: false, error: describeError(e) }));
-    setChecks((c) => ({ ...c, [key]: res }));
+  const add = () => run('add', async () => {
+    await api.admin.addMcpConnection({ url: url.trim(), ...(name.trim() ? { name: name.trim() } : {}) });
+    setUrl('');
+    setName('');
+  }, '登録できませんでした');
+
+  /** 道具を止めるときは、使えなくなる業務を先に示す（第6.6.3.1節）。 */
+  const toggle = (c: McpConnectionView, tool: string, enabled: boolean) => run(`${c.id}/${tool}`, async () => {
+    if (!enabled) {
+      const impact = await api.admin.mcpToolImpact(c.id, tool);
+      const names = impact.agents.map((a) => `・${a.name}`).join('\n');
+      const ok = window.confirm(impact.agents.length === 0
+        ? `道具「${tool}」を止めます。いま止まる業務はありません。止めてよろしいですか。`
+        : `道具「${tool}」を止めます。次の業務が使えなくなります。\n${names}\n`
+          + (impact.schedules > 0 ? `\nこれらの定時実行 ${impact.schedules} 件も、次の回から飛ばします。\n` : '')
+          + '\n止めてよろしいですか。');
+      if (!ok) return;
+    }
+    await api.admin.setMcpToolEnabled(c.id, tool, enabled);
+  }, enabled ? '戻せませんでした' : '止められませんでした');
+
+  /** 消すときは、使えなくなる業務を先に示す（第12.11.0節）。 */
+  const remove = (c: McpConnectionView) => run(`${c.id}/delete`, async () => {
+    const impact = await api.admin.mcpConnectionImpact(c.id);
+    const names = impact.agents.map((a) => `・${a.name}`).join('\n');
+    const ok = window.confirm(impact.agents.length === 0
+      ? `接続「${c.name}」を消します。よろしいですか。`
+      : `接続「${c.name}」を消します。次の業務が使えなくなります。\n${names}\n\nよろしいですか。`);
+    if (!ok) return;
+    await api.admin.deleteMcpConnection(c.id);
+  }, '消せませんでした');
+
+  const check = async (c: McpConnectionView) => {
+    setChecks((x) => ({ ...x, [c.id]: 'busy' }));
+    const res = await api.admin.checkMcpConnection(c.id).catch((e): ConnectorCheck => ({ ok: false, error: describeError(e) }));
+    setChecks((x) => ({ ...x, [c.id]: res }));
   };
 
   return (
     <>
       <PageTitle trail={['接続', 'コネクタ（MCP）']} help={{
         article: 'admin-connectors',
-        text: '導入した拡張機能がつなぐ外部のサービス（コネクタ）の一覧です。追加や入り切りは「拡張機能」の画面で行います。',
+        text: '外部のサービス（MCP サーバ）への接続です。秘書・業務・拡張機能のどれからでも使えます。',
       }} />
       {error && <p className="error">{error}</p>}
-      {!items && !error && <p className="muted">読み込み中…</p>}
-      {items && rows.length === 0 && (
-        <div className="card">
-          <p>コネクタはまだありません</p>
-          <button className="btn ghost small" onClick={() => onOpenExtension('')}>拡張機能を開く</button>
+      <div className="card">
+        <div className="form-grid">
+          <div className="field span-3"><label>接続先の URL</label>
+            <input value={url} placeholder="https://mcp.example.com/mcp" onChange={(e) => setUrl(e.target.value)} /></div>
+          <div className="field span-2"><label>名前</label>
+            <input value={name} placeholder="空なら URL から" onChange={(e) => setName(e.target.value)} /></div>
         </div>
-      )}
-      {rows.map((row) => {
-        const { extension: x, connector: c } = row;
-        const key = `${x.id}/${c.id}`;
-        const st = checks[key];
-        const enabledTools = c.tools.filter((t) => t.enabled).length;
-        const stopped = c.tools.length - enabledTools;
-        const top = strongest(c.tools);
-        const unusable = x.needsReconsent ? '新しい版の権限への同意を待っています' : !x.enabled ? '拡張機能が無効です' : null;
+        <button className="btn small" disabled={!url.trim() || busy === 'add'} onClick={() => void add()}>
+          {busy === 'add' ? '問い合わせています…' : '追加'}
+        </button>
+      </div>
+      {!items && !error && <p className="muted">読み込み中…</p>}
+      {items && items.length === 0 && <p className="muted">コネクタはまだありません</p>}
+      {items?.map((c) => {
+        const st = checks[c.id];
         return (
-          <div key={key} className={unusable ? 'card ext-card off' : 'card ext-card'}>
+          <div key={c.id} className="card ext-card">
             <div className="ext-row">
               <div>
-                <strong>{c.name}</strong>{' '}
-                {unusable
-                  ? <span className="status cancelled">使えません</span>
-                  : <span className="status succeeded">使えます</span>}
-                <div className="muted small">拡張機能「{x.name}」（{x.publisher.name}）</div>
+                <strong>{c.name}</strong> <span className="muted small">{c.id}</span>
+                <div className="muted small">{c.originText}・<code>{c.url}</code></div>
               </div>
             </div>
             {c.description && <p className="small">{c.description}</p>}
-            <dl className="kv small">
-              <dt>接続先</dt><dd><code>{c.url}</code></dd>
-              <dt>認証</dt><dd>{c.authText}</dd>
-              <dt>ツール</dt>
-              <dd>
-                有効 {enabledTools} ／ {c.tools.length}
-                {stopped > 0 && <span className="warn-inline">（{stopped} 個を止めています）</span>}
-              </dd>
-              {top && <><dt>最も強い危険度</dt><dd>{top.riskText}</dd></>}
-            </dl>
-            {unusable && <p className="warn-msg small">{unusable}。拡張機能の画面で確かめてください。</p>}
+            <table className="table small">
+              <thead><tr><th>道具</th><th>危険度</th><th>使う</th></tr></thead>
+              <tbody>
+                {c.tools.map((t) => {
+                  const provided = st && st !== 'busy' && st.ok ? st.tools.find((x) => x.name === t.name)?.provided : undefined;
+                  return (
+                    <tr key={t.name}>
+                      <td title={t.description}>
+                        <code>{t.name}</code>
+                        {provided === false && <span className="status failed">提供なし</span>}
+                        <div className="muted small">{t.description}</div>
+                      </td>
+                      <td>
+                        <select value={t.risk} disabled={busy === `${c.id}/risk`}
+                          onChange={(e) => void run(`${c.id}/risk`, () => api.admin.updateMcpConnection(c.id, { tools: [{ name: t.name, risk: e.target.value }] }), '変えられませんでした')}>
+                          {risks.map((r) => <option key={r.value} value={r.value}>{r.text}</option>)}
+                        </select>
+                      </td>
+                      <td>
+                        <input type="checkbox" checked={t.enabled} disabled={busy === `${c.id}/${t.name}`}
+                          aria-label={`${t.name}を使う`} onChange={(e) => void toggle(c, t.name, e.target.checked)} />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {c.usedBy.length > 0 && <p className="muted small">使う業務: {c.usedBy.map((a) => a.name).join('、')}</p>}
             <div className="row small">
-              <button className="btn small ghost" disabled={st === 'busy'} onClick={() => void check(row)}>
+              <button className="btn small ghost" disabled={st === 'busy'} onClick={() => void check(c)}>
                 {st === 'busy' ? '確認しています…' : '接続を確認'}
               </button>
-              <button className="btn small ghost" onClick={() => onOpenExtension(x.id)}>拡張機能で設定</button>
+              <button className="btn small ghost" disabled={busy === `${c.id}/refresh`}
+                onClick={() => void run(`${c.id}/refresh`, () => api.admin.refreshMcpConnection(c.id), '取り直せませんでした')}>
+                道具を取り直す
+              </button>
+              <button className="btn small ghost danger" disabled={busy === `${c.id}/delete`} onClick={() => void remove(c)}>消す</button>
               {st && st !== 'busy' && (st.ok
-                ? <span className="ok-inline">接続できました（提供のあるツール {st.tools.filter((t) => t.provided).length} ／ {st.tools.length}）</span>
+                ? <span className="ok-inline">接続できました（提供のある道具 {st.tools.filter((t) => t.provided).length} ／ {st.tools.length}）</span>
                 : <span className="error">接続できませんでした: {st.error}</span>)}
             </div>
           </div>
@@ -100,14 +153,4 @@ export function ConnectorList({ onOpenExtension }: { onOpenExtension: (extension
       })}
     </>
   );
-}
-
-/**
- * ツールのうち、最も危険度の強いもの。
- *
- * @returns 危険度の分からないツールしか無ければ `null`
- */
-function strongest<T extends { risk: string; riskText: string }>(tools: T[]): T | null {
-  const rank = (r: string) => RISK_ORDER[r as RiskLevel] ?? -1;
-  return tools.reduce<T | null>((top, t) => (rank(t.risk) > (top ? rank(top.risk) : -1) ? t : top), null);
 }

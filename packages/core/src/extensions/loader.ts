@@ -17,7 +17,7 @@ import type { ToolRegistry } from '../tools/registry.js';
 import { validateDefinition } from '../engine/validate.js';
 import { buildSkillPackage, SKILL_FOLDER_ENTRY, type SkillPackage } from './skill.js';
 import {
-  checkConnector, connectorToolName, connectorTools, type ConnectorDeclaration,
+  checkConnector, connectionPlaceholder, connectorToolName, connectorTools, type ConnectorDeclaration,
 } from './connectors.js';
 
 /** 拡張機能のマニフェスト（仕様書 第12.3節）。 */
@@ -36,6 +36,12 @@ export interface ExtensionManifest {
     tools: string[];
     /** 扱う最大の危険度。定義のツールもコネクタのツールもこれを超えられない。 */
     max_risk_level: RiskLevel;
+    /**
+     * 同梱していない会社の接続の道具（`<接続の ID>.<道具>`。仕様書 第12.11.0節）。`tools` にも入る。
+     *
+     * @remarks 危険度は会社の接続で決まる。その会社に接続が無ければ、その道具を使う業務は使えない
+     */
+    connections?: string[];
   };
 }
 
@@ -244,8 +250,11 @@ function loadPackageFiles(
       }
     }
   }
-  // この拡張機能の中で使えるツール = 内蔵のツール + この拡張機能のコネクタのツール
-  const local = registry.extend(connectors.flatMap((c) => connectorTools(c)));
+  // この拡張機能の中で使えるツール = 内蔵のツール + この拡張機能のコネクタのツール + 会社の接続の道具（仮）
+  const local = registry.extend([
+    ...connectors.flatMap((c) => connectorTools(c)),
+    ...(manifest.permissions.connections ?? []).map((n) => connectionPlaceholder(n)),
+  ]);
   const unknown = manifest.permissions.tools.filter((t) => !local.get(t));
   if (unknown.length > 0) {
     problems.push(`manifest.json: permissions.tools に、内蔵のツールにもこの拡張機能のコネクタにも無いツールがあります: ${unknown.join(', ')}`);

@@ -449,10 +449,22 @@ async function download(fileId: string, name: string): Promise<void> {
   URL.revokeObjectURL(url);
 }
 
-/** 1 つのコネクタのツールを指す道（`/impact` と `/enabled` の手前まで）。 */
-const toolPath = (id: string, connectorId: string, tool: string) =>
-  `/admin/extensions/${encodeURIComponent(id)}/connectors/${encodeURIComponent(connectorId)}`
-  + `/tools/${encodeURIComponent(tool)}`;
+/** 会社の接続（仕様書 第12.11.0節）を指す道。 */
+const mcpPath = (id: string) => `/admin/connections/mcp/${encodeURIComponent(id)}`;
+
+/** 会社の接続 1 つ（仕様書 第12.11.0節、ADR-0037）。 */
+export interface McpConnectionView {
+  id: string;
+  name: string;
+  description: string;
+  url: string;
+  auth: string;
+  origin: string;
+  originText: string;
+  tools: { name: string; description: string; risk: string; riskText: string; enabled: boolean }[];
+  /** その接続の道具を使う業務。 */
+  usedBy: { id: string; name: string }[];
+}
 
 export const api = {
   download,
@@ -705,19 +717,26 @@ export const api = {
       }),
     setExtensionEnabled: (id: string, enabled: boolean) =>
       call(`/admin/extensions/${encodeURIComponent(id)}/enabled`, { method: 'PUT', body: JSON.stringify({ enabled }) }),
-    checkConnector: (id: string, connectorId: string) =>
-      call<ConnectorCheck>(
-        `/admin/extensions/${encodeURIComponent(id)}/connectors/${encodeURIComponent(connectorId)}/check`,
-        { method: 'POST' },
-      ),
+    /** 会社の接続（コネクタ。仕様書 第12.11.0節）。 */
+    mcpConnections: () => call<{ items: McpConnectionView[]; risks: { value: string; text: string }[] }>('/admin/connections/mcp'),
+    /** 接続を登録する。MCP サーバに道具の一覧を問い合わせる。 */
+    addMcpConnection: (v: { url: string; name?: string; id?: string }) =>
+      call<{ ok: true; id: string; tools: number }>('/admin/connections/mcp', { method: 'POST', body: JSON.stringify(v) }),
+    /** 道具ごとの危険度などを変える。 */
+    updateMcpConnection: (id: string, v: { tools?: { name: string; risk: string }[]; name?: string }) =>
+      call(mcpPath(id), { method: 'PUT', body: JSON.stringify(v) }),
+    refreshMcpConnection: (id: string) =>
+      call<{ ok: true; added: string[]; removed: string[] }>(`${mcpPath(id)}/refresh`, { method: 'POST' }),
+    checkMcpConnection: (id: string) => call<ConnectorCheck>(`${mcpPath(id)}/check`, { method: 'POST' }),
+    /** 接続を消すと使えなくなる業務。 */
+    mcpConnectionImpact: (id: string) => call<{ agents: { id: string; name: string }[] }>(`${mcpPath(id)}/impact`),
+    deleteMcpConnection: (id: string) => call(mcpPath(id), { method: 'DELETE' }),
     /** ツールを止めると使えなくなる業務（仕様書 第6.6.3.1節）。止める前に示す。 */
-    connectorToolImpact: (id: string, connectorId: string, tool: string) =>
-      call<{ tool: string; agents: { id: string; name: string }[]; schedules: number }>(
-        `${toolPath(id, connectorId, tool)}/impact`,
-      ),
-    /** コネクタのツールを 1 つ、有効または無効にする（仕様書 第6.6.3.1節）。 */
-    setConnectorToolEnabled: (id: string, connectorId: string, tool: string, enabled: boolean) =>
-      call(`${toolPath(id, connectorId, tool)}/enabled`, { method: 'PUT', body: JSON.stringify({ enabled }) }),
+    mcpToolImpact: (id: string, tool: string) =>
+      call<{ tool: string; agents: { id: string; name: string }[]; schedules: number }>(`${mcpPath(id)}/tools/${encodeURIComponent(tool)}/impact`),
+    /** 接続のツールを 1 つ、有効または無効にする（仕様書 第6.6.3.1節）。 */
+    setMcpToolEnabled: (id: string, tool: string, enabled: boolean) =>
+      call(`${mcpPath(id)}/tools/${encodeURIComponent(tool)}/enabled`, { method: 'PUT', body: JSON.stringify({ enabled }) }),
   },
   agents: () => call<{ agents: AgentSummary[] }>('/agents'),
   createJob: (agentId: string, input: Record<string, unknown>, origin = 'menu') =>
