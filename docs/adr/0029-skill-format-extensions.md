@@ -58,3 +58,15 @@ Markdown の本文）である。**本文がそのまま業務の指示になる
 
 - **JSON の定義を画面の入力で作らせる**: 段・スキーマ・承認を画面で組ませても、難しさは変わらない
 - **独自の Markdown の書き方（段の見出しなど）を決める**: スキルとの互換が崩れ、持ち込み・持ち出しができなくなる
+
+## 追記（2026-09-26。第 0.120.0 版）
+
+三浦さんから「まずスキルの基本をしっかり理解し、そのうえで M2Office の拡張を行う。エンジニアはスキルの知識がそれなりにある。
+M2Office で動かすための必要事項だけを学べばよい形に」と指示を受け、次のとおり改めた（仕様書 第12.12節）。
+
+- スキル（Claude Code の Skills・Agent Skills）の項目を、同じ意味で効かせる: `name`（省けばフォルダ名）・`description`・`when_to_use`・
+  `argument-hint`・`arguments` と本文の `$ARGUMENTS`・`$N`・`$名前` の置き換え・`disable-model-invocation`・`user-invocable`・`effort`。
+  補助のファイルは、スキルと同じく本文から参照したものを推論が必要なときに読む（読むだけの道具 `skill.read`）
+- M2Office で覚えることを 4 つに絞った: 道具は `allowed-tools` に M2Office の道具を書く・利用者向けの説明は `HELP.md`・プログラムは動かない・承認は書かない
+- `metadata` の `m2office-title`・`m2office-tools` をやめた（本文の最初の見出しと `allowed-tools` を使う）。`m2office-*` は、スキルで言い表せないこと（配布の ID・欄の種類・実行例・承認者）だけに残す
+
