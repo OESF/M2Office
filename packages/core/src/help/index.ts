@@ -4,7 +4,7 @@
  * @see 仕様書 第6.10節 ヘルプと案内
  */
 
-export { buildAgentHelp, agentHelpMarkdown, type AgentHelpView, type AgentHelpOptions } from './agent-help.js';
+export { buildAgentHelp, agentHelpMarkdown, type AgentHelpView } from './agent-help.js';
 export {
   HelpCatalog, parseArticle, audiencesFor, helpTerms, helpConcepts, HELP_CATEGORIES,
   type HelpArticle, type HelpAudience, type HelpCategory, type HelpHit, type HelpContext,

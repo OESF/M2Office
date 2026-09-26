@@ -106,7 +106,6 @@ export interface AgentHelpView {
   flow: string[];
   approvals: { step: string; who: string }[];
   does: string[];
-  safeguards: string[];
   examples: { title: string; input: Record<string, unknown> }[];
   notes: string[];
   faq: { q: string; a: string }[];

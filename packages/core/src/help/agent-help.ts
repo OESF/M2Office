@@ -24,8 +24,6 @@ export interface AgentHelpView {
   approvals: { step: string; who: string }[];
   /** この業務がすること（使うツールの説明）。 */
   does: string[];
-  /** この業務がしないこと、守ること。 */
-  safeguards: string[];
   examples: { title: string; input: Record<string, unknown> }[];
   notes: string[];
   faq: { q: string; a: string }[];
@@ -36,11 +34,6 @@ export interface AgentHelpView {
   body?: string;
 }
 
-export interface AgentHelpOptions {
-  /** 会社の設定で、社内への書き込みの前に確認を求めるか（仕様書 第9.4節）。 */
-  writeInternalNeedsApproval: boolean;
-}
-
 const ROLE_NAMES: Record<string, string> = { admin: '管理者', approver: '承認者', member: '一般の利用者' };
 
 /**
@@ -48,12 +41,13 @@ const ROLE_NAMES: Record<string, string> = { admin: '管理者', approver: '承�
  *
  * @param def エージェント定義
  * @param registry ツールの登録簿。ツールの「すること」を引く
- * @param opts 会社の設定のうち、ヘルプの内容に効くもの
+ *
+ * @remarks
+ * どの業務にも同じになる決まり文句（「社外へ送ることはありません」など）は載せない（仕様書 第6.10.5節、第 0.130.0 版）
  */
 export function buildAgentHelp(
   def: AgentDefinition,
   registry: ToolRegistry,
-  opts: AgentHelpOptions,
 ): AgentHelpView {
   const tools = registry.allowed(def.tools);
   const props = (def.inputs['properties'] ?? {}) as Record<string, { title?: string }>;
@@ -68,27 +62,6 @@ export function buildAgentHelp(
         : (s.type === 'approval' ? s.approverRole : []).map((r) => ROLE_NAMES[r] ?? r).join('・'),
     }));
 
-  // 「しないこと・守ること」は危険度から機械的に書く。利用者が最も気にする点だから
-  const safeguards: string[] = [];
-  const sends = tools.filter((t) => alwaysRequiresApproval(t.risk));
-  if (sends.length === 0) {
-    safeguards.push('社外や他の人へ、メールや投稿を送ることはありません');
-  } else {
-    // 承認が複数あっても、同じ役割は 1 度だけ書く（「管理者・承認者、管理者・承認者」としない）
-    const approvers = [...new Set(approvals.map((a) => a.who))];
-    // 人に判断を求めるのは社外に出るものだけ（仕様書 第9.4.0節、ADR-0028）
-    safeguards.push(`社外に出るもの（メール、社外の人がいる先への投稿や招待）は、送る前に承認を求めます（${approvers.join('、') || '承認者'}）`);
-  }
-  if (tools.some((t) => t.risk === 'write-internal')) {
-    safeguards.push(opts.writeInternalNeedsApproval
-      ? 'ToDo や予定などの社内への書き込みは、行う前にあなたに確認を求めます'
-      : 'ToDo や予定などの社内への書き込みは、確認を待たずに行います');
-  }
-  if (tools.some((t) => t.name === 'gmail.get' || t.name === 'pdf.extract' || t.name === 'sheet.read')) {
-    safeguards.push('読み取ったメールや書類に書かれた指示には従いません');
-  }
-  safeguards.push('あなたの権限を超えることはしません。見られるのは、あなたが見られるものだけです');
-
   const examples = def.help?.examples
     ?? (def.evals ?? []).map((e) => ({ title: e.name, input: e.input }));
 
@@ -101,7 +74,6 @@ export function buildAgentHelp(
     flow: def.skill ? [] : def.steps.map((s) => stepLabel(s)),
     approvals,
     does: def.skill ? [] : [...new Set(tools.map((t) => t.helpText))],
-    safeguards,
     examples,
     notes: def.help?.notes ?? [],
     faq: def.help?.faq ?? [],
@@ -119,7 +91,6 @@ export function agentHelpMarkdown(v: AgentHelpView): string {
   // 書き手の説明（HELP.md）があれば、それを本文にする。見出しは記事の見出しより小さくする
   if (v.body) lines.push(v.body.replace(/^#\s+.*\n+/, '').replace(/^(#{1,5})\s/gm, '#$1 '), '');
   if (v.does.length > 0) lines.push('## この業務がすること', ...v.does.map((d) => `- ${d}`), '');
-  lines.push('## 安心して使えるように', ...v.safeguards.map((d) => `- ${d}`), '');
   if (v.flow.length > 0) lines.push('## 進み方', v.flow.join(' → '), '');
   if (v.approvals.length > 0) {
     lines.push('## 承認が入る場所', ...v.approvals.map((a) => `- **${a.step}**: ${a.who}が判断します`), '');

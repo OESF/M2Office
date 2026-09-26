@@ -746,8 +746,8 @@ console.log('\n■ 20. 拡張機能（サンプル「あいさつ」）');
     ? ok('他の会社には現れず、実行もできない') : ng('他の会社から使えてしまう');
 
   const { body: helpText } = await call('a', `/v1/help/agents/${encodeURIComponent(AG)}`, {}, 'member');
-  helpText.safeguards?.some((x) => x.includes('送ることはありません'))
-    ? ok('拡張機能の業務にも、説明が定義から自動で付く') : ng('説明が付かない');
+  helpText.summary && Array.isArray(helpText.inputs) && helpText.safeguards === undefined
+    ? ok('拡張機能の業務にも、説明が定義から自動で付く（決まり文句は並べない）') : ng('説明が付かない', JSON.stringify(helpText).slice(0, 200));
 
   await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
   const after = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: AG, input: { message: 'こんにちは' } }) }, 'member');

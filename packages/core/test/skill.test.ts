@@ -112,11 +112,10 @@ test('HELP.md を業務の説明の本文にし、道具の説明と組み立て
   const { pkg } = load({ 'SKILL.md': SKILL, 'HELP.md': '# 経費精算チェック\n\n申請を貼ると、規程に合わない点を指摘します。' });
   const def = pkg!.agents[0]!;
   assert.match(def.help?.body ?? '', /規程に合わない点/);
-  const view = buildAgentHelp(def, registry, { writeInternalNeedsApproval: false });
+  const view = buildAgentHelp(def, registry);
   assert.match(view.body ?? '', /規程に合わない点/);
   assert.deepEqual(view.does, []);
   assert.deepEqual(view.flow, []);
-  assert.ok(view.safeguards.length > 0, '「安心して使えるように」は M2Office が作る');
 });
 
 test('プログラムと画像は取り込まず、本文のコマンドは消して知らせる。補助のファイルは持ち込む', () => {

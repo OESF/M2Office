@@ -9,7 +9,7 @@
  * @see 仕様書 第6.10.9節 ヘルプの内容の管理
  */
 
-import { writeInternalNeedsApproval, type AgentDefinition, type AutomationPolicy } from '@m2office/shared';
+import type { AgentDefinition, AutomationPolicy } from '@m2office/shared';
 import type { ToolRegistry } from '../tools/registry.js';
 import { agentHelpMarkdown, buildAgentHelp, type AgentHelpView } from './agent-help.js';
 import { extractTerms, matchConcepts, normalizeForSearch, type SearchConcept } from '../knowledge/search.js';
@@ -104,13 +104,9 @@ export class HelpCatalog {
     return [...this.official, ...agentArticles].filter((a) => allowed.has(a.audience));
   }
 
-  /**
-   * 業務の説明を組み立てる。会社の自動化ポリシーに合わせて「安心して使えるように」を書く。
-   */
+  /** 業務の説明を組み立てる（仕様書 第6.10.5節）。 */
   agentHelp(def: AgentDefinition, ctx: HelpContext): AgentHelpView {
-    return buildAgentHelp(def, ctx.registry ?? this.registry, {
-      writeInternalNeedsApproval: writeInternalNeedsApproval(ctx.automation, def.id),
-    });
+    return buildAgentHelp(def, ctx.registry ?? this.registry);
   }
 
   /** 記事を 1 件返す。見られない記事は `null`（存在を示さない）。 */

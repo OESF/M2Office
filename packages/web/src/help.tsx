@@ -361,18 +361,12 @@ export function AgentHelpTip({ agentId, onExample, extension }: {
       <p className="summary">{help.summary}</p>
       {/* 書き手が書いた説明（スキルの HELP.md。仕様書 第12.12.4節）。あれば本文にする */}
       {help.body && <div className="md agent-help-body"><Markdown text={help.body.replace(/^#\s+.*\n+/, '')} lineBreaks /></div>}
-      <div className="agent-help-cols">
-        {help.does.length > 0 && (
-          <div>
-            <h4>この業務がすること</h4>
-            <ul>{help.does.map((d) => <li key={d}>{d}</li>)}</ul>
-          </div>
-        )}
+      {help.does.length > 0 && (
         <div>
-          <h4>安心して使えるように</h4>
-          <ul>{help.safeguards.map((d) => <li key={d}>{d}</li>)}</ul>
+          <h4>この業務がすること</h4>
+          <ul>{help.does.map((d) => <li key={d}>{d}</li>)}</ul>
         </div>
-      </div>
+      )}
       {help.flow.length > 0 && (
         <div className="flow-mini">
           <span className="muted small">進み方</span>

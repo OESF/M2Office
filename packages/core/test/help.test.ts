@@ -15,8 +15,7 @@ import { DEFAULT_TENANT_SETTINGS } from '@m2office/shared';
 
 const registry = new ToolRegistry();
 for (const t of BUILTIN_TOOLS) registry.register(t);
-const help = (id: string, writeInternalNeedsApproval = true) =>
-  buildAgentHelp(resolveOfficialAgent(id, 1)!, registry, { writeInternalNeedsApproval });
+const help = (id: string) => buildAgentHelp(resolveOfficialAgent(id, 1)!, registry);
 
 test('すべての公式エージェントがヘルプの概要と実行例を持つ（仕様書 第9.2.5節）', () => {
   for (const a of OFFICIAL_AGENTS) {
@@ -35,31 +34,19 @@ test('すべてのツールが「すること」と活動の表示名を持つ',
 test('受信箱整理の説明は「送信しない」ことを、危険度から正しく書く', () => {
   const h = help('inbox-triage');
   assert.ok(h.does.some((d) => d.includes('送信はしません')));
-  assert.ok(h.safeguards.some((d) => d.includes('送ることはありません')));
-  assert.ok(h.safeguards.some((d) => d.includes('指示には従いません')), 'メール本文の指示に従わない');
+  assert.equal((h as { safeguards?: unknown }).safeguards, undefined, 'どの業務にも同じになる決まり文句は並べない（第 0.130.0 版）');
   assert.deepEqual(h.approvals, []);
 });
 
-test('議事録の説明は、送る前に承認を求めることと承認者を書く', () => {
+test('議事録の説明は、承認が入る場所と承認者を書く', () => {
   const h = help('minutes');
-  assert.ok(h.safeguards.some((d) => d.startsWith('社外に出るもの（メール、社外の人がいる先への投稿や招待）は、送る前に承認を求めます')));
   assert.deepEqual(h.approvals.map((a) => a.step), ['内容の承認', '共有の承認']);
   assert.ok(h.approvals.every((a) => a.who.includes('管理者')));
   assert.deepEqual(h.flow, ['取得', '作成', '内容の承認', '起票', '共有の承認', '共有']);
 });
 
-test('承認が 2 回あっても、同じ役割を繰り返して書かない', () => {
-  const h = help('minutes');
-  assert.ok(h.safeguards.includes('社外に出るもの（メール、社外の人がいる先への投稿や招待）は、送る前に承認を求めます（管理者・承認者）'), h.safeguards.join(' / '));
-});
-
 test('日程調整の承認者は「依頼したあなた」と書く（approver: requester）', () => {
   assert.deepEqual(help('scheduling').approvals, [{ step: '承認', who: '依頼したあなた' }]);
-});
-
-test('社内への書き込みの確認は、会社の設定に合わせて書き分ける', () => {
-  assert.ok(help('minutes', true).safeguards.some((d) => d.includes('確認を求めます')));
-  assert.ok(help('minutes', false).safeguards.some((d) => d.includes('確認を待たずに')));
 });
 
 test('公式の記事はすべて読み込め、ID が重複しない', () => {
