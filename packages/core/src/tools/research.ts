@@ -1,5 +1,5 @@
 /**
- * @file 調べてスライドにまとめる共通ツール（`web.research`・`slides.create`）。
+ * @file 調べてスライドにまとめる共通ツール（`web.research`・`slides.template`・`slides.create`）。
  *
  * 1. 調べる（`web.research`）→ 2. 構成を決める（推論のステップ）→ 3. 組み立てる（`slides.create`）の 3 段の、
  * 1 と 3 を担う。AI Radio の秘書の `create_presentation` を移植した（ADR-0006）。
@@ -9,7 +9,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { Tool } from './registry.js';
-import { normalizeSlidePlan, planOutline } from '../slides/plan.js';
+import { SlidePlanError, normalizeSlidePlan, planOutline } from '../slides/plan.js';
 
 /**
  * テーマを Google 検索で調べ、出典つきの文章を返す。
@@ -41,6 +41,80 @@ export const webResearch: Tool = {
 };
 
 /**
+ * 使うテンプレートを決める。名前の指定があればそれ、無ければ既定。登録が無ければ `null`（標準）。
+ *
+ * @returns 選んだテンプレートと、名前が見つからなかったときの注意
+ */
+async function chooseTemplate(ctx: Parameters<Tool['invoke']>[1], wanted: string) {
+  const { templates } = (await ctx.repo.getTenantSettings(ctx.tenantId)).slides;
+  const named = wanted ? templates.find((t) => t.name === wanted) : undefined;
+  const chosen = named ?? templates.find((t) => t.isDefault) ?? null;
+  return {
+    template: chosen ? { presentationId: chosen.presentationId, name: chosen.name } : null,
+    warning: wanted && !named ? `テンプレート「${wanted}」が登録されていないため、既定のテンプレートを使いました` : null,
+  };
+}
+
+/**
+ * 会社のテンプレートを使えない理由。本人がドライブ全体の許可（`drive`）をまだ与えていなければ、接続し直すよう書く。
+ *
+ * @remarks
+ * 許可が無いまま読むと、Google は「見つからない」と返し、管理者の登録の誤りと見分けられない。先に許可を確かめる。
+ * 見本の接続口では確かめない（`null`）
+ */
+async function missingDriveGrant(ctx: Parameters<Tool['invoke']>[1], name: string): Promise<string | null> {
+  if (ctx.connector.sourceFor(ctx.tenantId) !== 'google') return null;
+  const conn = await ctx.repo.getGoogleConnection(ctx.tenantId, ctx.userId);
+  if (!conn || conn.scopes.includes('drive')) return null;
+  return `会社のテンプレート「${name}」を使う Google の許可がありません。個人設定の「Google 連携」で接続し直すと、次から会社のテンプレートで作ります`;
+}
+
+/** 標準のレイアウトで構成するときに推論へ返す言葉。 */
+const USE_STANDARD = '標準のレイアウト（BULLET・COMPARISON・KPI・CHART・IMAGE）で構成してください';
+
+/**
+ * 会社が登録したスライドのテンプレートの、使える見本のスライドと差し込み口を読む。
+ *
+ * @remarks
+ * 危険度: `read`。テンプレートを読むだけで、どこにも書き込まない。
+ * 会社のテンプレートは M2Office が作ったファイルではないため、ドライブ全体の権限（`drive`）が要る（仕様書 第9.4.2節、Q-88）。
+ * 開けないときも止めず、標準のレイアウトで構成するよう返す。
+ */
+export const slidesTemplate: Tool = {
+  name: 'slides.template',
+  risk: 'read',
+  activityLabel: 'スライドのテンプレートを確かめています',
+  helpText: '会社が登録したスライドのテンプレートの、使えるレイアウトを確かめます。どこにも書き込みません',
+  description: '会社が登録したスライドのテンプレートの、使えるレイアウト（見本のスライド）の名前と差し込み口（入る行数と 1 行の字数の目安）、'
+    + 'マスターの変数を返す。slides.create の前に呼ぶ。テンプレートがあれば、slides[] の layout に見本の名前、values に差し込み口ごとの値、'
+    + 'deck にマスターの変数の値を書き、表紙も見本の 1 枚として構成に入れる。引数: template（テンプレートの名前。任意。無ければ既定）',
+  args: { properties: { template: { type: 'string', description: 'テンプレートの名前（任意）' } } },
+  google: { scope: 'drive', level: 'restricted' },
+  async invoke(args, ctx) {
+    const { template, warning } = await chooseTemplate(ctx, typeof args['template'] === 'string' ? args['template'].trim() : '');
+    if (!template) return { template: null, message: `会社のテンプレートは登録されていません。${USE_STANDARD}` };
+    const blocked = await missingDriveGrant(ctx, template.name);
+    if (blocked) return { template: template.name, message: `${blocked}。${USE_STANDARD}` };
+    const got = await ctx.connector.slides.readTemplate({ tenantId: ctx.tenantId, userId: ctx.userId }, template);
+    if (!got) return { template: template.name, source: 'mock', message: `見本の接続口のため、テンプレートを読めません。${USE_STANDARD}` };
+    if ('unavailable' in got) return { template: template.name, message: `${got.unavailable}。${USE_STANDARD}` };
+    if (got.layouts.length === 0) return { template: template.name, message: `テンプレートに見本のスライドがありません。${USE_STANDARD}` };
+    return {
+      template: template.name,
+      layouts: got.layouts.map((l) => ({
+        name: l.name,
+        slots: l.slots.map((x) => ({ key: x.key, lines: x.lines, charsPerLine: x.charsPerLine })),
+        ...(l.chart ? { chart: '表を置ける（chartCategories と chartSeries を書く）' } : {}),
+        ...(l.image ? { image: '画像の置き場所（いまは空になる）' } : {}),
+      })),
+      deckVariables: got.deckVariables,
+      warnings: [...(warning ? [warning] : []), ...got.warnings],
+      message: 'この見本の名前だけで構成してください（標準のレイアウトと混ぜない）。値は入る量の目安を超えないようにしてください',
+    };
+  },
+};
+
+/**
  * スライドの構成から Google スライドを作り、成果物として記録する。
  *
  * @remarks
@@ -59,23 +133,35 @@ export const slidesCreate: Tool = {
     + 'BULLET は body（改行区切りで 6 行まで）、COMPARISON は compareLeftTitle・compareLeftBody・compareRightTitle・compareRightBody、'
     + 'KPI は stats（value と label、3 件まで）、CHART は chartType・chartCategories・chartSeries（name と values、2 系列まで）、'
     + 'IMAGE は imagePrompt と caption。takeaway は伝えたいこと 1 文。本文のスライドは 12 枚まで。'
+    + '会社のテンプレートがあるときは slides.template で見本を確かめ、layout に見本の名前、values に差し込み口ごとの値、deck にマスターの変数の値を書く。'
     + 'template に会社が登録したテンプレートの名前を渡せばそれを、無ければ既定のテンプレートを使う',
   args: { properties: { title: { type: 'string', description: '表紙の題名' }, subtitle: { type: 'string', description: '副題（任意）' }, slides: { type: 'array', description: '本文のスライドの配列（layout・title ほか。12 枚まで）' }, sources: { type: 'array', description: '出典（title・url）の配列' }, template: { type: 'string', description: '会社が登録したテンプレートの名前（任意）' } }, required: ['title', 'slides'] },
   google: { scope: 'drive.file', level: 'non-sensitive' },
+  // 会社のテンプレートを本人のドライブへ複製するため（仕様書 第9.4.2節、Q-88）
+  googleAlso: [{ scope: 'drive', level: 'restricted' }],
   async invoke(args, ctx) {
     const checked = normalizeSlidePlan(args);
     if ('error' in checked) return { error: `スライドを作れませんでした: ${checked.error}` };
     const { plan, warnings } = checked;
     // 会社が登録したテンプレート（第9.4.2節）。名前の指定が無い・見つからなければ既定、登録が無ければ標準
-    const { templates } = (await ctx.repo.getTenantSettings(ctx.tenantId)).slides;
-    const wanted = typeof args['template'] === 'string' ? args['template'].trim() : '';
-    const named = wanted ? templates.find((t) => t.name === wanted) : undefined;
-    if (wanted && !named) warnings.push(`テンプレート「${wanted}」が登録されていないため、既定のテンプレートを使いました`);
-    const chosen = named ?? templates.find((t) => t.isDefault) ?? null;
-    const template = chosen ? { presentationId: chosen.presentationId, name: chosen.name } : null;
-    const created = await ctx.connector.slides.createPresentation(
-      { tenantId: ctx.tenantId, userId: ctx.userId }, { title: plan.title, plan, template },
-    );
+    const chosen = await chooseTemplate(ctx, typeof args['template'] === 'string' ? args['template'].trim() : '');
+    if (chosen.warning) warnings.push(chosen.warning);
+    const blocked = chosen.template ? await missingDriveGrant(ctx, chosen.template.name) : null;
+    if (blocked) warnings.push(blocked);
+    const template = blocked ? null : chosen.template;
+    // マスターの {{会社名}} などは、構成に値が無ければ会社情報で埋める（第9.4.2節）
+    const { company } = await ctx.repo.getTenantSettings(ctx.tenantId);
+    const deckDefaults = { 会社名: company.legalName, 会社の略称: company.shortName || company.legalName };
+    let created;
+    try {
+      created = await ctx.connector.slides.createPresentation(
+        { tenantId: ctx.tenantId, userId: ctx.userId }, { title: plan.title, plan, template, deckDefaults },
+      );
+    } catch (err) {
+      // 見本に無い名前などは推論が直せる。段を失敗にせず、理由を返す
+      if (err instanceof SlidePlanError) return { error: `スライドを作れませんでした: ${err.message}` };
+      throw err;
+    }
     const mock = ctx.connector.sourceFor(ctx.tenantId) === 'mock';
     // 接続口が会社のテンプレートを使えなかったときは、標準の見た目で作ったと書く（第9.4.2節）
     const used = created.templateApplied === false ? null : template;
@@ -96,4 +182,4 @@ export const slidesCreate: Tool = {
   },
 };
 
-export const RESEARCH_TOOLS: Tool[] = [webResearch, slidesCreate];
+export const RESEARCH_TOOLS: Tool[] = [webResearch, slidesTemplate, slidesCreate];

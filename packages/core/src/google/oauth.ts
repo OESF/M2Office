@@ -52,6 +52,7 @@ export function googleScopeLabel(name: string): string {
     'chat.messages.create': 'チャットに投稿する（承認のあとだけ）',
     'chat.spaces.readonly': '入っているチャットのスペースを見る（投稿先を名前で探すため）',
     'drive.file': 'M2Office で作った・あなたが選んだファイルを扱う',
+    drive: 'ドライブのファイルを扱う（会社のスライドのテンプレートを複製するため）',
     'directory.readonly': '社内の人を探す',
     'meetings.space.readonly': '参加した会議の文字起こしを読む',
     openid: 'ログイン', email: 'メールアドレスを知る',

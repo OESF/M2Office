@@ -16,10 +16,19 @@ export type SlideLayout = (typeof SLIDE_LAYOUTS)[number];
 export const CHART_TYPES = ['COLUMN', 'BAR', 'LINE', 'AREA', 'SCATTER', 'PIE'] as const;
 export type ChartType = (typeof CHART_TYPES)[number];
 
-/** 本文のスライド 1 枚。 */
+/**
+ * 本文のスライド 1 枚。
+ *
+ * @remarks
+ * `layout` は標準の 5 つ（{@link SLIDE_LAYOUTS}）か、会社のテンプレートの見本の名前。
+ * 見本の名前のときは、差し込み口ごとの値を `values` に持つ（仕様書 第9.4.2節「スライドのテンプレート」）
+ */
 export interface SlideSpec {
-  layout: SlideLayout;
+  layout: SlideLayout | string;
+  /** 題名。見本のスライドでは省けて、そのときは最初の値か見本の名前（アウトラインにだけ使う）。 */
   title: string;
+  /** 見本のスライドの差し込み口ごとの値（キーは `{{…}}` の中の名前）。 */
+  values?: Record<string, string>;
   /** 箇条書き。1 行ずつ改行で区切る。 */
   body?: string;
   compareLeftTitle?: string;
@@ -44,9 +53,24 @@ export interface SlidePlan {
   title: string;
   subtitle?: string;
   slides: SlideSpec[];
-  /** 出典。最後のスライドに一覧として載せる。 */
+  /** 出典。標準の見た目では最後に出典のページを足し、テンプレートでは最後のスライドの発表者のメモに書く。 */
   sources?: { title: string; url?: string }[];
+  /** テンプレートのマスターの変数の値（会社名など）。 */
+  deck?: Record<string, string>;
 }
+
+/**
+ * 構成の誤り（テンプレートの見本に無い名前など）。接続口が投げ、道具は作らずに理由を推論へ返す。
+ *
+ * @remarks 推論が直せる誤りなので、段を失敗にしない
+ */
+export class SlidePlanError extends Error {}
+
+/** 標準の 5 つのレイアウトか。 */
+export const isStandardLayout = (layout: string): layout is SlideLayout => (SLIDE_LAYOUTS as readonly string[]).includes(layout);
+
+/** 見本のスライドの差し込み口 1 つに入れてよい字数（テンプレートの枠の大きさは会社ごとに違うため、明らかに多すぎるものだけを切る）。 */
+const VALUE_MAX = 600;
 
 /** 本文のスライドの枚数の上限（表紙を除く）。 */
 export const MAX_SLIDES = 12;
@@ -93,10 +117,24 @@ export function normalizeSlidePlan(input: unknown): { plan: SlidePlan; warnings:
   for (const [i, raw] of (o['slides'] as unknown[]).entries()) {
     const r = (raw ?? {}) as Record<string, unknown>;
     const at = `${i + 1} 枚目`;
-    const layout = r['layout'] as SlideLayout;
-    if (!SLIDE_LAYOUTS.includes(layout)) return { error: `${at}: layout は ${SLIDE_LAYOUTS.join('・')} のいずれかです` };
-    const s: SlideSpec = { layout, title: str(r['title'], LIMITS.short, `${at}の題名`) };
-    if (!s.title) return { error: `${at}: 題名（title）がありません` };
+    const layout = typeof r['layout'] === 'string' ? r['layout'].trim() : '';
+    // 会社のテンプレートの見本のスライド。名前が見本にあるかは組み立てで確かめる（テンプレートを読むのは接続口）
+    const hasValues = !!r['values'] && typeof r['values'] === 'object' && !Array.isArray(r['values']);
+    if (!isStandardLayout(layout) && !(layout && hasValues)) {
+      return { error: `${at}: layout は ${SLIDE_LAYOUTS.join('・')} のいずれか、または会社のテンプレートの見本の名前（values と一緒に）です` };
+    }
+    let s: SlideSpec;
+    if (!isStandardLayout(layout)) {
+      const values: Record<string, string> = {};
+      for (const [k, v] of Object.entries(r['values'] as Record<string, unknown>)) {
+        values[k.replace(/^\{\{\s*|\s*\}\}$/g, '').trim()] = str(v, VALUE_MAX, `${at}の「${k}」`);
+      }
+      const first = Object.values(values).find(Boolean) ?? '';
+      s = { layout, title: str(r['title'], 40, `${at}の題名`) || first.split('\n')[0]!.slice(0, 40) || layout, values };
+    } else {
+      s = { layout, title: str(r['title'], LIMITS.short, `${at}の題名`) };
+      if (!s.title) return { error: `${at}: 題名（title）がありません` };
+    }
     if (r['body'] !== undefined) {
       // 行頭の印（・や -）は外す。箇条書きの印は組み立てで付くため、残すと二重になる（2026-09-26 に oesf で確認）
       const lines = linesOf(r['body']).split('\n').map((l) => l.trim().replace(BULLET_MARK, '').trim()).filter(Boolean);
@@ -116,8 +154,9 @@ export function normalizeSlidePlan(input: unknown): { plan: SlidePlan; warnings:
         value: str(x?.['value'], LIMITS.short, `${at}の数値`), label: str(x?.['label'], LIMITS.short, `${at}の数値の説明`),
       }));
     }
-    if (layout === 'CHART') {
-      const chartType = r['chartType'] as ChartType;
+    // 見本のスライドでは、{{CHART}} に置く表のために、系列があるときだけ読む（種類は問わない）
+    if (layout === 'CHART' || (!isStandardLayout(layout) && Array.isArray(r['chartSeries']))) {
+      const chartType = (r['chartType'] ?? (layout === 'CHART' ? undefined : 'COLUMN')) as ChartType;
       if (!CHART_TYPES.includes(chartType)) return { error: `${at}: chartType は ${CHART_TYPES.join('・')} のいずれかです` };
       const cats = Array.isArray(r['chartCategories']) ? r['chartCategories'].map(String) : [];
       const series = Array.isArray(r['chartSeries']) ? r['chartSeries'] : [];
@@ -140,7 +179,14 @@ export function normalizeSlidePlan(input: unknown): { plan: SlidePlan; warnings:
       ...(typeof x?.['url'] === 'string' ? { url: x['url'] } : {}),
     })).filter((x) => x.title)
     : undefined;
-  return { plan: { title, subtitle: str(o['subtitle'], 60, '副題') || undefined, slides, sources }, warnings };
+  const deck: Record<string, string> = {};
+  if (o['deck'] && typeof o['deck'] === 'object' && !Array.isArray(o['deck'])) {
+    for (const [k, v] of Object.entries(o['deck'] as Record<string, unknown>)) deck[k.replace(/^\{\{\s*|\s*\}\}$/g, '').trim()] = str(v, 200, `「${k}」`);
+  }
+  return {
+    plan: { title, subtitle: str(o['subtitle'], 60, '副題') || undefined, slides, sources, ...(Object.keys(deck).length ? { deck } : {}) },
+    warnings,
+  };
 }
 
 /** 構成を、人が読めるアウトライン（Markdown）にする。成果物に残す。 */
@@ -149,6 +195,7 @@ export function planOutline(plan: SlidePlan): string {
   if (plan.subtitle) out.push(plan.subtitle);
   plan.slides.forEach((s, i) => {
     out.push('', `## ${i + 1}. ${s.title}（${s.layout}）`);
+    for (const [k, v] of Object.entries(s.values ?? {})) if (v) out.push(`- ${k}: ${v.replace(/\n/g, ' / ')}`);
     if (s.body) out.push(...s.body.split('\n').map((l) => `- ${l}`));
     if (s.compareLeftTitle || s.compareRightTitle) {
       out.push(`- ${s.compareLeftTitle ?? '左'}: ${s.compareLeftBody ?? ''}`, `- ${s.compareRightTitle ?? '右'}: ${s.compareRightBody ?? ''}`);

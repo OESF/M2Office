@@ -91,6 +91,8 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
 
   /** Google スライドは作らない。構成を記録し、リンクの無い ID を返す（仕様書 第9.4.2節「鍵・接続が無い環境」）。 */
   slides = {
+    // 見本の接続口にはテンプレートのファイルが無い。読めないことを返し、標準のレイアウトで構成させる
+    readTemplate: async () => null,
     createPresentation: async (
       p: ConnectorPrincipal,
       input: { title: string; plan: SlidePlan; template: { presentationId: string; name: string } | null },

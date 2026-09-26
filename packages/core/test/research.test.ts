@@ -72,7 +72,7 @@ function ctx(): ToolContext & { artifacts: { title: string; body: string; kind: 
     tenantId: 't', userId: 'u', runId: 'r', compartment: null, artifacts,
     repo: {
       createArtifact: async (a: { title: string; body: string; kind: string }) => { artifacts.push(a); },
-      getTenantSettings: async () => ({ slides: { templates: settingsTemplates } }),
+      getTenantSettings: async () => ({ slides: { templates: settingsTemplates }, company: { legalName: '株式会社見本', shortName: '' } }),
     } as never,
     connector: new MockWorkspaceConnector(), files: {} as never, research: new MockResearchProvider(),
   };
@@ -107,6 +107,36 @@ test('slides.create: 会社が登録したテンプレートを使う。名前�
   } finally {
     settingsTemplates = [];
   }
+});
+
+test('slides.template: 登録が無ければ標準で構成するよう返す。見本の接続口では読めないことを返す', async () => {
+  const tool = registry.get('slides.template')!;
+  assert.equal(tool.risk, 'read');
+  assert.equal(tool.google?.scope, 'drive');
+  const none = await tool.invoke({}, ctx()) as Record<string, unknown>;
+  assert.equal(none['template'], null);
+  assert.match(String(none['message']), /標準のレイアウト/);
+  settingsTemplates = [{ id: 'a', name: '社内向け', presentationId: 'p-inner-0000000000000000', description: '', isDefault: true }];
+  try {
+    const mock = await tool.invoke({}, ctx()) as Record<string, unknown>;
+    assert.equal(mock['template'], '社内向け');
+    assert.match(String(mock['message']), /見本の接続口.*標準のレイアウト/);
+  } finally {
+    settingsTemplates = [];
+  }
+});
+
+test('構成: 会社のテンプレートの見本の名前は values と一緒なら受け付ける。題名は最初の値から。deck も読む', () => {
+  const r = normalizeSlidePlan({
+    title: 't', deck: { '{{部署}}': '営業部' },
+    slides: [{ layout: '3カード比較', values: { '{{見出し}}': '比べる', 本文: ['a', 'b'] } }],
+  });
+  if ('error' in r) assert.fail(r.error);
+  assert.deepEqual(r.plan.slides[0]!.values, { 見出し: '比べる', 本文: 'a\nb' }, '目印の括弧は外し、配列は行にする');
+  assert.equal(r.plan.slides[0]!.title, '比べる');
+  assert.deepEqual(r.plan.deck, { 部署: '営業部' });
+  const bad = normalizeSlidePlan({ title: 't', slides: [{ layout: '3カード比較' }] });
+  assert.ok('error' in bad && /values/.test(bad.error), '見本の名前だけで値が無いものは誤り');
 });
 
 test('Google スライドの URL からファイルの ID を取り出す', async () => {

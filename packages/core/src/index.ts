@@ -68,9 +68,12 @@ export {
   GeminiResearchProvider, MockResearchProvider, type ResearchProvider, type ResearchResult,
 } from './research/provider.js';
 export {
-  normalizeSlidePlan, planOutline, SLIDE_LAYOUTS, CHART_TYPES, MAX_SLIDES,
+  normalizeSlidePlan, planOutline, isStandardLayout, SlidePlanError, SLIDE_LAYOUTS, CHART_TYPES, MAX_SLIDES,
   type SlidePlan, type SlideSpec, type SlideLayout, type ChartType,
 } from './slides/plan.js';
+export {
+  describeTemplate, TEMPLATE_FIELDS, type TemplateManifest, type TemplateLayout, type TemplateSlot, type SlidesPresentation,
+} from './slides/template.js';
 export * from './help/index.js';
 export * from './extensions/index.js';
 

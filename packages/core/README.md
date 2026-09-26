@@ -92,7 +92,7 @@ decideApproval(...)  →  承認を記録し、待ち行列へ戻す
 | `google/index.ts` | Gmail・カレンダー・ToDo・Chat の本体。準備中のサービスの断り |
 | `google/drive.ts` | ドライブ（探す・読む・フォルダ・共有）とドキュメント（作る・追記）。`drive.file` の範囲だけで、リンクによる公開は作らない |
 | `google/sheets.ts` | スプレッドシート（作る・最初のシートを読む・行を足す）。値は `RAW` で送り、式として読ませない |
-| `google/slides.ts` | スライド（構成から標準の見た目で組み立てる）。テンプレートのファイルを使わず `drive.file` の範囲で作り、失敗したら作りかけをごみ箱に移す（ADR-0031） |
+| `google/slides.ts` | スライド。会社のテンプレートがあれば本人のドライブに複製し、見本のスライドを複製して差し込む（ADR-0032）。無ければ標準の見た目で組み立てる（ADR-0031）。失敗したら作りかけをごみ箱に移す |
 | `google/doc-html.ts` | 文書の本文（Markdown）を、ドキュメントに取り込ませる HTML に直す（中身はエスケープする） |
 | `google/chat.ts` | Chat の投稿先の見つけ方（リンク・ID か、名前でちょうど 1 つ一致）と、本文の書式 |
 
@@ -140,7 +140,8 @@ decideApproval(...)  →  承認を記録し、待ち行列へ戻す
 | `pdf.render` | draft | 帳票（請求書など）を PDF で出力する。日本語の一部に絞った Noto Sans JP を同梱し（`assets/fonts/README.md`）、使った文字だけを埋め込む。範囲の外の字は `〓` に置き換えて返す（Q-59、ADR-0017）。会社の帳票の体裁（第15.2.2節）は `loadInvoiceStyle()` で読み、ロゴ・差出人・振込先・備考の定型文・印の欄を出す |
 | `image.read_text` | read | 画像（PNG・JPEG）から文字を読み取る（OCR）。推論を使うため確かな値ではない（Q-56） |
 | `web.research` | read | テーマを Google 検索（Gemini のグラウンディング）で調べ、出典つきで返す |
-| `slides.create` | draft | スライドの構成（JSON）から Google スライドを作る。見本の接続口ではアウトラインを成果物に残す |
+| `slides.template` | read | 会社が登録したスライドのテンプレートの、見本のスライドと差し込み口を読む（`describeTemplate()`） |
+| `slides.create` | draft | スライドの構成（JSON）から Google スライドを作る。会社のテンプレートがあれば見本に差し込む。見本の接続口ではアウトラインを成果物に残す |
 
 エージェントが読めるのは依頼した本人のファイルだけです。ライブラリの選定は ADR-0004 を参照してください。
 `web.research` と `slides.create` は AI Radio の秘書の実装を移植したものです（ADR-0006）。構成の検証は `normalizeSlidePlan()` です。

@@ -47,6 +47,7 @@
 | `sheet.read` | read | — | Excel・CSV を表として読みます |
 | `sheets.read` | read | `drive.file`（機密でない） | Google スプレッドシートの表を読みます |
 | `skill.read` | read | — | このスキルに入っている資料を読みます |
+| `slides.template` | read | `drive`（制限付き） | 会社が登録したスライドのテンプレートの、使えるレイアウトを確かめます。どこにも書き込みません |
 | `tasks.list` | read | `tasks`（機密） | ToDo の一覧を見ます |
 | `web.research` | read | — | テーマを Google 検索で調べ、出典つきでまとめます。調べる言葉は Google に送られますが、どこにも書き込みません |
 | `docs.append` | draft | `drive.file`（機密でない） | M2Office で作った文書の末尾に書き足します |
@@ -58,7 +59,7 @@
 | `pdf.render` | draft | — | 請求書などの帳票を PDF として作り、成果物として保存します。社外へは送りません |
 | `sheet.render` | draft | — | 表を Excel・CSV として作り、成果物として保存します |
 | `sheets.create` | draft | `drive.file`（機密でない） | あなたのドライブに Google スプレッドシートを作ります。共有はしません |
-| `slides.create` | draft | `drive.file`（機密でない） | 調べた内容をスライドにまとめ、あなたのドライブに作ります。PowerPoint 形式でも取り出せます。共有はしません |
+| `slides.create` | draft | `drive.file`（機密でない）・`drive`（制限付き） | 調べた内容をスライドにまとめ、あなたのドライブに作ります。PowerPoint 形式でも取り出せます。共有はしません |
 | `drive.share_company` | write-internal | `drive.file`（機密でない） | M2Office で作ったファイルを、会社の全員が閲覧できるようにします。社外の人は見られません。リンクで誰にでも公開することはしません |
 | `knowledge.register` | write-internal | — | 承認された議事録などを、そのまま社内の知識に登録します。すべての承認のあとに行い、承認した人が見た内容だけを登録します |
 | `notification.send` | write-internal | — | 依頼した本人にだけお知らせを届けます。他の人には送りません |
@@ -99,6 +100,7 @@
 | `sheet.read` | `fileId`（必須）: ファイルの ID、`sheet`: シート名（任意）、`maxRows`: 読む行数の上限（既定 500） |
 | `sheets.read` | `spreadsheetId`（必須）: スプレッドシートの ID、`maxRows`: 読む行数の上限（既定 500） |
 | `skill.read` | `path`（必須）: ファイルの相対パス |
+| `slides.template` | `template`: テンプレートの名前（任意） |
 | `tasks.list` | なし |
 | `web.research` | `topic`（必須）: 調べるテーマ、`focus`: 特に知りたいこと（任意） |
 | `docs.append` | `documentId`（必須）: 文書の ID、`text`（必須）: 追記する文 |
@@ -183,7 +185,7 @@ Google と接続した会社では、本人のドライブに Google スライ�
 | `IMAGE` | 説明（`caption`）だけを出す（画像の生成は今後の版） |
 | `takeaway` | 各スライドの下に強調して出す |
 | `sources` | 最後に「出典」のページを足す（ページ数に含まれる） |
-| 会社が登録したテンプレート | まだ使わない（仕様書 Q-88）。登録があっても標準の見た目で作り、結果にそのことが残る |
+| 会社が登録したテンプレート | 登録があれば、`slides.template` が返す見本の名前と差し込み口で構成する（`layout` に見本の名前、`values` に差し込み口ごとの値、`deck` にマスターの変数）。表紙も見本の 1 枚。テンプレートを開けないとき・許可が無いときは標準の見た目で作る（仕様書 第9.4.2節） |
 
 ## 4.6 ツールを増やしたいとき
 

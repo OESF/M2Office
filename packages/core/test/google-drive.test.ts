@@ -20,6 +20,8 @@ import { markdownToDocHtml } from '../src/connectors/google/doc-html.js';
 import { DRIVE_READ_MAX_BYTES, kindOf, quoteDriveQuery } from '../src/connectors/google/drive.js';
 import { sheetRange, toCell } from '../src/connectors/google/sheets.js';
 import { SOURCES_MAX, TABLE_ROWS_MAX, slideRequests } from '../src/connectors/google/slides.js';
+import { describeTemplate } from '../src/slides/template.js';
+import { SlidePlanError } from '../src/slides/plan.js';
 
 const P = { tenantId: 't1', userId: 'u1' };
 const G = 'application/vnd.google-apps.';
@@ -109,6 +111,16 @@ async function fakeDrive(pdf: Uint8Array) {
       return json(200, { presentationId: bad ? 'BADDECK' : 'NEWDECK', pageSize: { width: { magnitude: 9144000 }, height: { magnitude: 5143500 } }, slides: [{ objectId: 'p' }] });
     }
     if (s.path === '/slides/presentations/NEWDECK:batchUpdate' && s.method === 'POST') return json(200, { replies: [] });
+    // 会社のテンプレート。TPL は読める。NOSHARE は共有されていない
+    if ((s.path === '/slides/presentations/TPL' || s.path === '/slides/presentations/COPYDECK') && s.method === 'GET') {
+      if ((s.query.get('fields') ?? '').includes('notesPage')) {
+        return json(200, { slides: [1, 2, 3].map((n) => ({ objectId: `m2tpl${n}`, slideProperties: { notesPage: { notesProperties: { speakerNotesObjectId: `notes${n}` } } } })) });
+      }
+      return json(200, TEMPLATE);
+    }
+    if (s.path === '/slides/presentations/NOSHARE' && s.method === 'GET') return json(403, { error: { code: 403, status: 'PERMISSION_DENIED' } });
+    if (s.path === '/drive/files/TPL/copy' && s.method === 'POST') return json(200, { id: 'COPYDECK' });
+    if (s.path === '/slides/presentations/COPYDECK:batchUpdate' && s.method === 'POST') return json(200, { replies: [] });
     if (s.path === '/slides/presentations/BADDECK:batchUpdate' && s.method === 'POST') return json(400, { error: { code: 400, message: 'Invalid requests[3]' } });
     json(404, { error: { code: 404 } });
   });
@@ -287,6 +299,22 @@ test('スプレッドシート: 末尾に行を足す。式として読ませな
 });
 
 
+const IN = 914400;
+const box = (id: string, text: string, x: number, y: number, w: number, h: number, pt?: number) => ({
+  objectId: id, size: { width: { magnitude: w * IN }, height: { magnitude: h * IN } }, transform: { scaleX: 1, scaleY: 1, translateX: x * IN, translateY: y * IN },
+  ...(text ? { shape: { text: { textElements: [{ textRun: { content: text, ...(pt ? { style: { fontSize: { magnitude: pt } } } : {}) } }] } } } : { shape: {} }),
+});
+const TEMPLATE = {
+  title: '会社の標準',
+  slides: [
+    { objectId: 'sCover', pageElements: [box('nCover', '{{LAYOUT_NAME:表紙}}', -3, 0, 2, 0.5), box('tCover', '{{ 題名 }}', 1, 2, 8, 1, 36), box('uCover', '{{副題}}', 1, 3, 8, 0.5)] },
+    { objectId: 'sList', pageElements: [box('nList', '{{LAYOUT_NAME:箇条書き}}', -3, 0, 2, 0.5), box('hList', '{{見出し}}', 0.5, 0.3, 9, 0.8, 28), box('bList', '{{本文}}', 0.5, 1.3, 9, 3.6, 18)] },
+    { objectId: 'sTable', pageElements: [box('nTable', '{{LAYOUT_NAME:表}}', -3, 0, 2, 0.5), box('hTable', '{{見出し}}', 0.5, 0.3, 9, 0.8), box('fTable', '', 0.5, 1.3, 9, 3.6), box('lTable', '{{CHART}}', 0.6, 1.4, 2, 0.3)] },
+    { objectId: 'sThanks', pageElements: [box('xThanks', 'ご清聴ありがとうございました', 1, 2, 8, 1)] },
+  ],
+  masters: [{ pageElements: [box('mCo', '{{会社名}}', 0, 5, 3, 0.3), box('mDept', '{{部署}}', 7, 5, 3, 0.3)] }],
+};
+
 const DECK = {
   title: 'ローカル LLM の動向', subtitle: '2026 年 9 月',
   slides: [
@@ -349,4 +377,79 @@ test('スライド: 表と出典は上限で切り、そのことを注意に残
   assert.ok(r.requests.some((x) => x['deleteObject']?.objectId === 'm2cover_s'));
   const r2 = slideRequests({ title: 't', slides: [{ layout: 'BULLET', title: 'b', body: 'x' }] }, { width: 9144000, height: 5143500 }, null);
   assert.equal(r2.pages, 2, '出典が無ければ出典のページを足さない');
+});
+
+test('テンプレート: 見本のスライドと差し込み口を読む。名前・入る量・図の置き場所（囲む枠）・マスターの変数', () => {
+  const m = describeTemplate(TEMPLATE);
+  assert.deepEqual(m.layouts.map((l) => l.name), ['表紙', '箇条書き', '表'], '差し込み口の無いスライドは見本にしない');
+  assert.deepEqual(m.layouts[0]!.slots.map((x) => [x.key, x.tokens]), [['題名', ['{{ 題名 }}']], ['副題', ['{{副題}}']]], '書かれたとおりの目印で置き換える');
+  const body = m.layouts[1]!.slots.find((x) => x.key === '本文')!;
+  assert.deepEqual([body.lines, body.charsPerLine], [9, 36], '3.6 インチの高さに 18pt で 9 行、9 インチの幅に 36 字');
+  assert.deepEqual(m.layouts[2]!.chartArea, { x: 0.5 * IN, y: 1.3 * IN, w: 9 * IN, h: 3.6 * IN, deleteIds: ['lTable', 'fTable'] }, '目印を囲む枠の大きさで置く');
+  assert.deepEqual(m.deckVariables, ['会社名', '部署']);
+  assert.deepEqual(m.slideIds, ['sCover', 'sList', 'sTable', 'sThanks'], '見本でないスライドも最後に消す');
+  assert.deepEqual(m.warnings, []);
+  const unnamed = describeTemplate({ slides: [{ objectId: 'a1', pageElements: [box('x1', '{{見出し}}', 0, 0, 1, 1)] }] });
+  assert.equal(unnamed.layouts[0]!.name, '見本1');
+  assert.match(unnamed.warnings.join(), /名前の無い見本/);
+});
+
+const TPL_PLAN = {
+  title: '中小企業の生成 AI',
+  slides: [
+    { layout: '表紙', title: '', values: { 題名: '中小企業の生成 AI', 副題: '2026 年の動向' } },
+    { layout: '箇条書き', title: '', values: { 見出し: '導入の状況', 本文: '3 割が活用\n効果の実感は 8 割' } },
+    { layout: '表', title: '', values: { 見出し: 'ツールの利用' }, chartType: 'BAR' as const, chartCategories: ['ChatGPT', 'Gemini'], chartSeries: [{ name: '利用率', values: [75, 74] }] },
+  ],
+  sources: [{ title: '見本の調査', url: 'https://example.com/r' }],
+};
+
+test('テンプレート: 本人のドライブに複製し、見本を複製して差し込み、順に並べ、見本を消す（第9.4.2節）', async () => {
+  await withDrive(async (c, seen) => {
+    const made = await c.slides.createPresentation(P, { title: TPL_PLAN.title, plan: TPL_PLAN, template: { presentationId: 'TPL', name: '会社の標準' }, deckDefaults: { 会社名: '株式会社見本' } });
+    assert.equal(made.presentationId, 'COPYDECK');
+    assert.equal(made.templateApplied, true);
+    assert.equal(made.pages, 3, '表紙も見本の 1 枚。出典のページは足さない');
+    assert.deepEqual(JSON.parse(seen.find((s) => s.path === '/drive/files/TPL/copy')!.body), { name: TPL_PLAN.title });
+    assert.ok(!seen.some((s) => s.path === '/slides/presentations' && s.method === 'POST'), '空のプレゼンテーションは作らない');
+    const reqs = JSON.parse(seen.find((s) => s.path === '/slides/presentations/COPYDECK:batchUpdate')!.body).requests as Record<string, any>[];
+    const dups = reqs.filter((r) => r['duplicateObject']).map((r) => r['duplicateObject']);
+    assert.deepEqual(dups.map((d) => [d.objectId, d.objectIds[d.objectId]]), [['sCover', 'm2tpl1'], ['sList', 'm2tpl2'], ['sTable', 'm2tpl3']]);
+    const rep = (text: string, page?: string) => reqs.find((r) => r['replaceAllText']?.containsText.text === text && (page ? r['replaceAllText'].pageObjectIds?.[0] === page : !r['replaceAllText'].pageObjectIds))?.['replaceAllText'].replaceText;
+    assert.equal(rep('{{ 題名 }}', 'm2tpl1'), '中小企業の生成 AI', '空白を含む目印も置き換える');
+    assert.equal(rep('{{本文}}', 'm2tpl2'), '3 割が活用\n効果の実感は 8 割');
+    assert.equal(rep('{{会社名}}'), '株式会社見本', 'マスターの会社名は会社情報で埋める');
+    assert.equal(rep('{{部署}}'), '', '値の無い変数は空にし、{{…}} を残さない');
+    const deleted = reqs.filter((r) => r['deleteObject']).map((r) => r['deleteObject'].objectId);
+    for (const id of ['sCover', 'sList', 'sTable', 'sThanks']) assert.ok(deleted.includes(id), `元のスライド ${id} を消す`);
+    const nameMarker = dups[0].objectIds['nCover'];
+    assert.ok(nameMarker && deleted.includes(nameMarker), '名前の目印を消す');
+    assert.ok(deleted.includes(dups[2].objectIds['lTable']) && deleted.includes(dups[2].objectIds['fTable']), '表の置き場所の目印と枠を消す');
+    const table = reqs.find((r) => r['createTable'])!['createTable'];
+    assert.equal(table.elementProperties.pageObjectId, 'm2tpl3');
+    assert.equal(table.elementProperties.size.width.magnitude, 9 * IN, '枠の大きさで置く');
+    assert.deepEqual(reqs.filter((r) => r['updateSlidesPosition']).map((r) => [r['updateSlidesPosition'].slideObjectIds[0], r['updateSlidesPosition'].insertionIndex]), [['m2tpl1', 0], ['m2tpl2', 1], ['m2tpl3', 2]]);
+    const notes = seen.filter((s) => s.path === '/slides/presentations/COPYDECK:batchUpdate').map((s) => JSON.parse(s.body).requests).flat().find((r: any) => r.insertText?.objectId === 'notes3');
+    assert.match(notes.insertText.text, /出典\n1\. 見本の調査 https:\/\/example\.com\/r/, '出典は最後のスライドの発表者のメモ');
+  });
+});
+
+test('テンプレート: 見本に無い名前は作らずに理由を返す。標準だけの構成・開けないテンプレートは標準の見た目で作る', async () => {
+  await withDrive(async (c, seen) => {
+    const t = { presentationId: 'TPL', name: '会社の標準' };
+    await assert.rejects(
+      c.slides.createPresentation(P, { title: 'x', plan: { title: 'x', slides: [{ layout: '三段', title: '', values: { a: 'b' } }] }, template: t }),
+      (e: unknown) => e instanceof SlidePlanError && /三段.*使える名前: 表紙・箇条書き・表/.test((e as Error).message),
+    );
+    assert.ok(!seen.some((s) => s.path.endsWith('/copy')), '誤りがあれば複製しない');
+    const std = await c.slides.createPresentation(P, { title: 'x', plan: { title: 'x', slides: [{ layout: 'BULLET', title: 'b', body: 'y' }] }, template: t });
+    assert.equal(std.templateApplied, false);
+    assert.match(std.warnings![0]!, /見本で構成されていなかった/);
+    const noshare = await c.slides.createPresentation(P, { title: 'x', plan: TPL_PLAN, template: { presentationId: 'NOSHARE', name: '営業用' } });
+    assert.equal(noshare.templateApplied, false);
+    assert.match(noshare.warnings![0]!, /営業用.*共有されているか/);
+    const read = await c.slides.readTemplate(P, t);
+    assert.ok(read && 'layouts' in read && read.layouts.length === 3);
+    assert.deepEqual(await c.slides.readTemplate(P, { presentationId: 'NOSHARE', name: '営業用' }), { unavailable: '会社のテンプレート「営業用」を開けませんでした。ファイルが会社の中で共有されているかを、管理者に確かめてもらってください' });
+  });
 });

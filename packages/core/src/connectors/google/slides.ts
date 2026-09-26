@@ -6,7 +6,9 @@
  * LLM は内容と構成だけを決め、位置や色はここで決める（ADR-0006）。共有はしない。
  */
 
-import type { SlidePlan, SlideSpec } from '../../slides/plan.js';
+import { SlidePlanError, isStandardLayout, type SlidePlan, type SlideSpec } from '../../slides/plan.js';
+import { TEMPLATE_FIELDS, describeTemplate, type SlidesPresentation, type TemplateManifest } from '../../slides/template.js';
+import { ConnectorUnavailableError } from '../types.js';
 import type { ConnectorPrincipal, SlidesConnector } from '../types.js';
 import { callGoogle, type GoogleApiEndpoints, type GoogleTokenSource } from './http.js';
 
@@ -145,37 +147,14 @@ export function slideRequests(
       });
     } else if (s.layout === 'CHART') {
       const cats = s.chartCategories ?? [];
-      const series = s.chartSeries ?? [];
-      if (cats.length > TABLE_ROWS_MAX) warnings.push(`${i + 1} 枚目の表は ${TABLE_ROWS_MAX} 行までにしました（${cats.length} 項目）`);
       const rows = Math.min(cats.length, TABLE_ROWS_MAX);
-      const tid = `${id}_tbl`;
-      requests.push({ createTable: { objectId: tid, elementProperties: at(id, { ...area, h: Math.min(area.h, 0.4 * (rows + 1)) }), rows: rows + 1, columns: series.length + 1 } });
-      const cell = (r: number, c: number, v: string, head: boolean) => {
-        if (!v) return;
-        requests.push({ insertText: { objectId: tid, cellLocation: { rowIndex: r, columnIndex: c }, text: v, insertionIndex: 0 } });
-        requests.push({
-          updateTextStyle: {
-            objectId: tid, cellLocation: { rowIndex: r, columnIndex: c }, textRange: { type: 'ALL' },
-            style: { fontSize: { magnitude: 12, unit: 'PT' }, bold: head, foregroundColor: { opaqueColor: { rgbColor: head ? COLOR.accent : COLOR.text } } },
-            fields: 'fontSize,bold,foregroundColor',
-          },
-        });
-      };
-      series.forEach((se, c) => cell(0, c + 1, se.name, true));
-      cats.slice(0, rows).forEach((cat, r) => {
-        cell(r + 1, 0, cat, true);
-        series.forEach((se, c) => cell(r + 1, c + 1, (se.values[r] ?? 0).toLocaleString('ja-JP'), false));
-      });
-      requests.push({
-        updateTableCellProperties: {
-          objectId: tid, tableRange: { location: { rowIndex: 0, columnIndex: 0 }, rowSpan: 1, columnSpan: series.length + 1 },
-          tableCellProperties: { tableCellBackgroundFill: { solidFill: { color: { rgbColor: COLOR.accentLight } } } },
-          fields: 'tableCellBackgroundFill.solidFill.color',
-        },
-      });
+      requests.push(...tableRequests(`${id}_tbl`, at(id, { ...area, h: Math.min(area.h, 0.4 * (rows + 1)) }), s, `${i + 1} 枚目`, warnings));
     } else if (s.layout === 'IMAGE') {
       // 画像の生成は後の段階（第9.4.2節）。説明だけを出す
       box(`${id}_c`, id, area, s.caption ?? s.body ?? '', { size: 18, center: true, color: COLOR.muted });
+    } else {
+      // 会社のテンプレートの見本の名前で構成されたが、テンプレートを使えなかった。値を箇条書きにして失わない
+      box(`${id}_b`, id, area, Object.values(s.values ?? {}).filter(Boolean).join('\n'), { size: 16, bullets: true });
     }
     if (s.takeaway) {
       box(`${id}_w`, id, { x: 0.5, y: 4.75, w: 9, h: 0.55 }, s.takeaway, { size: 14, bold: true, color: COLOR.accent, fill: COLOR.accentLight });
@@ -207,6 +186,122 @@ export function slideRequests(
 }
 
 /**
+ * 表（`CHART` の代わり）を置く要求。項目は {@link TABLE_ROWS_MAX} 行まで。
+ *
+ * @param elementProperties 置く場所（Slides API の形）
+ * @param where 注意に書く場所（例: 3 枚目）
+ */
+function tableRequests(
+  tid: string, elementProperties: Record<string, unknown>, s: SlideSpec, where: string, warnings: string[],
+): Request[] {
+  const cats = s.chartCategories ?? [];
+  const series = s.chartSeries ?? [];
+  if (cats.length === 0 || series.length === 0) return [];
+  if (cats.length > TABLE_ROWS_MAX) warnings.push(`${where}の表は ${TABLE_ROWS_MAX} 行までにしました（${cats.length} 項目）`);
+  const rows = Math.min(cats.length, TABLE_ROWS_MAX);
+  const out: Request[] = [{ createTable: { objectId: tid, elementProperties, rows: rows + 1, columns: series.length + 1 } }];
+  const cell = (r: number, c: number, v: string, head: boolean) => {
+    if (!v) return;
+    out.push({ insertText: { objectId: tid, cellLocation: { rowIndex: r, columnIndex: c }, text: v, insertionIndex: 0 } });
+    out.push({
+      updateTextStyle: {
+        objectId: tid, cellLocation: { rowIndex: r, columnIndex: c }, textRange: { type: 'ALL' },
+        style: { fontSize: { magnitude: 12, unit: 'PT' }, bold: head, foregroundColor: { opaqueColor: { rgbColor: head ? COLOR.accent : COLOR.text } } },
+        fields: 'fontSize,bold,foregroundColor',
+      },
+    });
+  };
+  series.forEach((se, c) => cell(0, c + 1, se.name, true));
+  cats.slice(0, rows).forEach((cat, r) => {
+    cell(r + 1, 0, cat, true);
+    series.forEach((se, c) => cell(r + 1, c + 1, (se.values[r] ?? 0).toLocaleString('ja-JP'), false));
+  });
+  out.push({
+    updateTableCellProperties: {
+      objectId: tid, tableRange: { location: { rowIndex: 0, columnIndex: 0 }, rowSpan: 1, columnSpan: series.length + 1 },
+      tableCellProperties: { tableCellBackgroundFill: { solidFill: { color: { rgbColor: COLOR.accentLight } } } },
+      fields: 'tableCellBackgroundFill.solidFill.color',
+    },
+  });
+  return out;
+}
+
+/**
+ * 会社のテンプレートで組み立てる要求（仕様書 第9.4.2節「スライドのテンプレート」）。
+ *
+ * @param plan 検証済みの構成。すべてのスライドが見本の名前で書かれていること（{@link checkTemplatePlan}）
+ * @param manifest 複製したデッキから読み取ったもの（ID は複製したデッキのもの）
+ * @param deckValues マスターの変数の値（構成の `deck` と、会社名などの既定の値を合わせたもの）
+ * @returns 要求の並びと注意
+ *
+ * @remarks
+ * 見本のスライドを複製するとき、名前の目印・図の置き場所の要素に ID を決めて渡す（あとで消す・置き換えるため）。
+ * 複製したスライドは複製元のすぐ後ろに入るため、構成の順に 1 枚ずつ先頭から並べ直し、最後に元のスライドをすべて消す。
+ */
+export function templateRequests(
+  plan: SlidePlan, manifest: TemplateManifest, deckValues: Record<string, string>,
+): { requests: Request[]; warnings: string[] } {
+  const requests: Request[] = [];
+  const warnings: string[] = [];
+  const ids: string[] = [];
+  plan.slides.forEach((s, i) => {
+    const layout = manifest.layouts.find((l) => l.name === s.layout)!;
+    const sid = `m2tpl${i + 1}`;
+    ids.push(sid);
+    const mapped = (orig: string) => `${sid}_e${layout.elementIds.indexOf(orig) + 1}`;
+    requests.push({
+      duplicateObject: { objectId: layout.id, objectIds: { [layout.id]: sid, ...Object.fromEntries(layout.elementIds.map((e) => [e, mapped(e)])) } },
+    });
+    const values = s.values ?? {};
+    for (const slot of layout.slots) {
+      for (const token of slot.tokens) {
+        requests.push({ replaceAllText: { containsText: { text: token, matchCase: true }, replaceText: values[slot.key] ?? '', pageObjectIds: [sid] } });
+      }
+    }
+    const unused = Object.keys(values).filter((k) => values[k] && !layout.slots.some((sl) => sl.key === k));
+    if (unused.length > 0) warnings.push(`${i + 1} 枚目（${layout.name}）に差し込み口の無い値がありました: ${unused.join('・')}`);
+    if (layout.nameMarkerId) requests.push({ deleteObject: { objectId: mapped(layout.nameMarkerId) } });
+    if (layout.chartArea) {
+      const a = layout.chartArea;
+      if (s.chartSeries?.length) {
+        for (const d of a.deleteIds) requests.push({ deleteObject: { objectId: mapped(d) } });
+        requests.push(...tableRequests(`${sid}_tbl`, {
+          pageObjectId: sid,
+          size: { width: { magnitude: Math.round(a.w), unit: 'EMU' }, height: { magnitude: Math.round(a.h), unit: 'EMU' } },
+          transform: { scaleX: 1, scaleY: 1, translateX: Math.round(a.x), translateY: Math.round(a.y), unit: 'EMU' },
+        }, s, `${i + 1} 枚目`, warnings));
+      } else {
+        requests.push({ deleteObject: { objectId: mapped(a.deleteIds[0]!) } });
+      }
+    }
+    // 画像の生成は後の段階。目印だけを消し、枠は飾りとして残す
+    if (layout.imageArea) requests.push({ deleteObject: { objectId: mapped(layout.imageArea.deleteIds[0]!) } });
+  });
+  ids.forEach((sid, i) => requests.push({ updateSlidesPosition: { slideObjectIds: [sid], insertionIndex: i } }));
+  for (const orig of manifest.slideIds) requests.push({ deleteObject: { objectId: orig } });
+  for (const [key, tokens] of Object.entries(manifest.deckTokens)) {
+    for (const token of tokens) requests.push({ replaceAllText: { containsText: { text: token, matchCase: true }, replaceText: deckValues[key] ?? '' } });
+  }
+  return { requests, warnings };
+}
+
+/**
+ * 構成が会社のテンプレートで作れるかを確かめる。
+ *
+ * @returns `template` なら見本で作れる。`standard` なら標準のレイアウトだけで書かれている（標準の見た目で作る）
+ * @throws {SlidePlanError} 見本に無い名前がある・標準のレイアウトと混ざっている
+ */
+export function checkTemplatePlan(plan: SlidePlan, manifest: TemplateManifest): 'template' | 'standard' {
+  if (plan.slides.every((s) => isStandardLayout(s.layout))) return 'standard';
+  const names = manifest.layouts.map((l) => l.name);
+  const wrong = plan.slides.filter((s) => !names.includes(s.layout)).map((s) => s.layout);
+  if (wrong.length > 0) {
+    throw new SlidePlanError(`会社のテンプレートの見本に無いレイアウトです: ${[...new Set(wrong)].join('・')}。使える名前: ${names.join('・')}（標準のレイアウトと混ぜずに、見本の名前だけで構成してください）`);
+  }
+  return 'template';
+}
+
+/**
  * スライドの接続口を作る。
  *
  * @param ctx トークンと呼び先を返す
@@ -216,33 +311,99 @@ export function googleSlides(ctx: Ctx): SlidesConnector {
     callGoogle(ctx().tokens, p, 'スライド', `${ctx().endpoints.slides}${path}`, init);
   const drive = (p: ConnectorPrincipal, path: string, init?: Parameters<typeof callGoogle>[4]) =>
     callGoogle(ctx().tokens, p, 'ドライブ', `${ctx().endpoints.drive}${path}`, init);
+  const links = (id: string) => ({
+    url: `https://docs.google.com/presentation/d/${id}/edit`, pptxUrl: `https://docs.google.com/presentation/d/${id}/export/pptx`,
+  });
+  /** 作りかけを残さない。ごみ箱に移すだけで、消しはしない（本人が戻せる）。 */
+  const discard = (p: ConnectorPrincipal, id: string) =>
+    drive(p, `/files/${encodeURIComponent(id)}`, { method: 'PATCH', body: { trashed: true } }).catch(() => null);
+
+  /**
+   * テンプレートを読む。開けなければ、標準の見た目に切り替える理由を返す。
+   *
+   * @throws {ConnectorUnavailableError} 接続が無い・取り消されたなど（許可が足りないときを除く）
+   */
+  const read = async (p: ConnectorPrincipal, presentationId: string, name: string): Promise<TemplateManifest | { reason: string }> => {
+    try {
+      const pres = await slides(p, `/presentations/${encodeURIComponent(presentationId)}?fields=${encodeURIComponent(TEMPLATE_FIELDS)}`);
+      if (!pres) return { reason: `会社のテンプレート「${name}」が見つかりませんでした。管理者に、登録した URL を確かめてもらってください` };
+      return describeTemplate(pres as SlidesPresentation);
+    } catch (err) {
+      if (err instanceof ConnectorUnavailableError) {
+        if (err.kind !== 'insufficient-scope') throw err;
+        return { reason: `会社のテンプレート「${name}」を使う Google の許可がありません。個人設定の「Google 連携」で接続し直すと、次から会社のテンプレートで作ります` };
+      }
+      if (/HTTP 403/.test(err instanceof Error ? err.message : '')) {
+        return { reason: `会社のテンプレート「${name}」を開けませんでした。ファイルが会社の中で共有されているかを、管理者に確かめてもらってください` };
+      }
+      throw err;
+    }
+  };
+
+  /** 標準の見た目で作る（第9.4.2節「標準の見た目」）。 */
+  const standard = async (p: ConnectorPrincipal, input: { title: string; plan: SlidePlan }) => {
+    const made = await slides(p, '/presentations', { method: 'POST', body: { title: input.title } });
+    const id = String(made?.['presentationId'] ?? '');
+    if (!id) throw new Error('スライドを作れませんでした');
+    const size = made?.['pageSize'] as { width?: { magnitude?: number }; height?: { magnitude?: number } } | undefined;
+    const page = { width: size?.width?.magnitude || BASE.width, height: size?.height?.magnitude || BASE.height };
+    const first = (made?.['slides'] as { objectId?: string }[] | undefined)?.[0]?.objectId ?? null;
+    const { requests, pages, warnings } = slideRequests(input.plan, page, first);
+    try {
+      await slides(p, `/presentations/${encodeURIComponent(id)}:batchUpdate`, { method: 'POST', body: { requests } });
+    } catch (err) {
+      await discard(p, id);
+      throw new Error(`スライドを組み立てられませんでした: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    return { presentationId: id, ...links(id), templateApplied: false, pages, warnings };
+  };
 
   return {
+    readTemplate: async (p, t) => {
+      const got = await read(p, t.presentationId, t.name);
+      return 'reason' in got ? { unavailable: got.reason } : got;
+    },
+
     createPresentation: async (p, input) => {
-      const made = await slides(p, '/presentations', { method: 'POST', body: { title: input.title } });
-      const id = String(made?.['presentationId'] ?? '');
-      if (!id) throw new Error('スライドを作れませんでした');
-      const size = made?.['pageSize'] as { width?: { magnitude?: number }; height?: { magnitude?: number } } | undefined;
-      const page = {
-        width: size?.width?.magnitude || BASE.width,
-        height: size?.height?.magnitude || BASE.height,
+      if (!input.template) return standard(p, input);
+      const t = input.template;
+      const got = await read(p, t.presentationId, t.name);
+      const fallback = async (reason: string) => {
+        const r = await standard(p, input);
+        return { ...r, warnings: [reason, ...r.warnings] };
       };
-      const first = (made?.['slides'] as { objectId?: string }[] | undefined)?.[0]?.objectId ?? null;
-      const { requests, pages, warnings } = slideRequests(input.plan, page, first);
+      if ('reason' in got) return fallback(got.reason);
+      if (got.layouts.length === 0) return fallback(`会社のテンプレート「${t.name}」に見本のスライドが無いため、標準の見た目で作りました`);
+      if (checkTemplatePlan(input.plan, got) === 'standard') {
+        return fallback(`会社のテンプレート「${t.name}」の見本で構成されていなかったため、標準の見た目で作りました`);
+      }
+
+      // 本人のドライブにテンプレートを複製し、複製したものを読み直す（ID は複製先のものを使う）
+      const copied = await drive(p, `/files/${encodeURIComponent(t.presentationId)}/copy?fields=id`, { method: 'POST', body: { name: input.title } });
+      const id = String(copied?.['id'] ?? '');
+      if (!id) return fallback(`会社のテンプレート「${t.name}」を複製できなかったため、標準の見た目で作りました`);
       try {
+        const deck = describeTemplate((await slides(p, `/presentations/${encodeURIComponent(id)}?fields=${encodeURIComponent(TEMPLATE_FIELDS)}`)) as SlidesPresentation);
+        checkTemplatePlan(input.plan, deck);
+        const { requests, warnings } = templateRequests(input.plan, deck, { ...input.deckDefaults, ...input.plan.deck });
         await slides(p, `/presentations/${encodeURIComponent(id)}:batchUpdate`, { method: 'POST', body: { requests } });
+        // 出典は、見た目を崩さないよう最後のスライドの発表者のメモに書く
+        const sources = input.plan.sources ?? [];
+        if (sources.length > 0) {
+          const notes = await slides(p, `/presentations/${encodeURIComponent(id)}?fields=${encodeURIComponent('slides(objectId,slideProperties(notesPage(notesProperties(speakerNotesObjectId))))')}`);
+          const last = (notes?.['slides'] as { slideProperties?: { notesPage?: { notesProperties?: { speakerNotesObjectId?: string } } } }[] | undefined)?.at(-1);
+          const notesId = last?.slideProperties?.notesPage?.notesProperties?.speakerNotesObjectId;
+          if (notesId) {
+            const text = ['出典', ...sources.map((x, k) => `${k + 1}. ${x.title}${x.url ? ` ${x.url}` : ''}`)].join('\n');
+            await slides(p, `/presentations/${encodeURIComponent(id)}:batchUpdate`, { method: 'POST', body: { requests: [{ insertText: { objectId: notesId, text, insertionIndex: 0 } }] } });
+          }
+        }
+        return { presentationId: id, ...links(id), templateApplied: true, pages: input.plan.slides.length, warnings: [...got.warnings, ...warnings] };
       } catch (err) {
-        // 空のスライドを残さない。ごみ箱に移すだけで、消しはしない（本人が戻せる）
-        await drive(p, `/files/${encodeURIComponent(id)}`, { method: 'PATCH', body: { trashed: true } }).catch(() => null);
+        await discard(p, id);
+        if (err instanceof SlidePlanError) throw err;
         throw new Error(`スライドを組み立てられませんでした: ${err instanceof Error ? err.message : String(err)}`);
       }
-      // 会社のテンプレートは、読む権限を決めるまで使わない（第9.4.2節、Q-88）
-      if (input.template) warnings.unshift(`会社のテンプレート「${input.template.name}」での組み立ては準備中のため、標準の見た目で作りました`);
-      const url = `https://docs.google.com/presentation/d/${id}/edit`;
-      return {
-        presentationId: id, url, pptxUrl: `https://docs.google.com/presentation/d/${id}/export/pptx`,
-        templateApplied: false, pages, warnings,
-      };
     },
   };
 }

@@ -16,6 +16,10 @@
             }
           },
           {
+            "name": "slides.template",
+            "args": {}
+          },
+          {
             "name": "slides.create",
             "args": {
               "title": "ローカル LLM の最近の製品動向",

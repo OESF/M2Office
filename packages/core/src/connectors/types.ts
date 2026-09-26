@@ -10,6 +10,7 @@
  */
 
 import type { SlidePlan } from '../slides/plan.js';
+import type { TemplateManifest } from '../slides/template.js';
 
 /** 値の出どころ。画面と監査ログで区別して表示する。 */
 export type DataSource = 'mock' | 'google';
@@ -265,6 +266,13 @@ export interface ChatConnector {
 /** Google スライドへの接続口（仕様書 第9.4.2節）。 */
 export interface SlidesConnector {
   /**
+   * 会社が登録したテンプレートの、使える見本のスライドと差し込み口を読む（第9.4.2節「スライドのテンプレート」）。
+   *
+   * @returns 読み取ったもの。開けない・許可が足りないときは理由（`unavailable`）。見本の接続口では `null`（読めない）
+   */
+  readTemplate(p: ConnectorPrincipal, template: { presentationId: string; name: string }): Promise<TemplateManifest | { unavailable: string } | null>;
+
+  /**
    * スライドの構成から、本人のドライブにプレゼンテーションを作る。**共有はしない。**
    *
    * @returns 作ったものの ID と、開くリンク・PowerPoint 形式の取り出しリンク（見本の接続口では `null`）。
@@ -277,6 +285,8 @@ export interface SlidesConnector {
       title: string; plan: SlidePlan;
       /** 会社が登録したテンプレート（第9.4.2節）。`null` なら標準のテンプレート。 */
       template: { presentationId: string; name: string } | null;
+      /** マスターの変数の既定の値（`会社名` など）。構成の `deck` が優先する。 */
+      deckDefaults?: Record<string, string>;
     },
   ): Promise<{
     presentationId: string; url: string | null; pptxUrl: string | null;

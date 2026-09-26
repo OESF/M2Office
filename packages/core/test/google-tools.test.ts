@@ -7,7 +7,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { BUILTIN_TOOLS, MockWorkspaceConnector, ToolRegistry, validateToolArgs, type ToolContext } from '../src/index.js';
+import { BUILTIN_TOOLS, MockWorkspaceConnector, ToolRegistry, toolGoogleScopes, validateToolArgs, type ToolContext } from '../src/index.js';
 
 const registry = new ToolRegistry();
 for (const t of BUILTIN_TOOLS) registry.register(t);
@@ -28,9 +28,9 @@ test('すべての内蔵ツールが引数の定義を持ち、Google を使う�
   }
 });
 
-test('制限付きの権限を使うツールは Gmail の読み取り・下書きだけ（第14.3.2節 規定 3）', () => {
-  const restricted = BUILTIN_TOOLS.filter((t) => t.google?.level === 'restricted').map((t) => t.name).sort();
-  assert.deepEqual(restricted, ['gmail.create_draft', 'gmail.get', 'gmail.list', 'gmail.search', 'gmail.unread']);
+test('制限付きの権限を使うツールは Gmail の読み取り・下書きと、スライドの会社のテンプレートだけ（第14.3.2節 規定 3）', () => {
+  const restricted = BUILTIN_TOOLS.filter((t) => toolGoogleScopes(t).some((g) => g.level === 'restricted')).map((t) => t.name).sort();
+  assert.deepEqual(restricted, ['gmail.create_draft', 'gmail.get', 'gmail.list', 'gmail.search', 'gmail.unread', 'slides.create', 'slides.template']);
   assert.ok(BUILTIN_TOOLS.filter((t) => t.name.startsWith('drive.')).every((t) => t.google?.scope === 'drive.file'), 'ドライブは drive.file だけ');
 });
 
