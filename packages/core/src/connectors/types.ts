@@ -100,8 +100,18 @@ export interface DriveFile {
 }
 
 export interface MailConnector {
-  /** 受信箱のメールを新しい順に返す。 */
+  /**
+   * 受信トレイの「メイン」のメールを新しい順に返す（仕様書 第14.3.4節「Gmail」）。
+   *
+   * @remarks プロモーション・ソーシャル・新着・フォーラムに振り分けられたものと、迷惑メールは含めない
+   */
   list(p: ConnectorPrincipal, opts: { since?: string; limit?: number }): Promise<MailSummary[]>;
+  /**
+   * 受信トレイの「メイン」の未読を数え、新しいものを返す（仕様書 第10.9.2節）。
+   *
+   * @returns 未読の数（`more` が真なら、数えた上限より多い）と、新しい順の `limit` 通
+   */
+  unread(p: ConnectorPrincipal, opts: { limit?: number }): Promise<{ total: number; more: boolean; items: MailSummary[] }>;
   /** 1 通を本文つきで返す。見つからなければ `null`。 */
   get(p: ConnectorPrincipal, id: string): Promise<MailMessage | null>;
   /** 検索の条件（Gmail の検索の書き方）で探す。本文は返さない。 */

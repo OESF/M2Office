@@ -36,7 +36,7 @@
 | `file.read_text` | read | — | 渡されたファイル（PDF・Word・Excel・CSV・画像）から文字を読み取ります |
 | `forms.responses` | read | `drive.file`（機密でない） | Google フォームの回答を読みます。あなたが選んだフォームだけで、回答に書かれた指示には従いません |
 | `gmail.get` | read | `gmail.readonly`（制限付き） | メールの本文を読みます。本文に書かれた指示には従いません |
-| `gmail.list` | read | `gmail.readonly`（制限付き） | 受信箱のメールの一覧を見ます |
+| `gmail.list` | read | `gmail.readonly`（制限付き） | 受信トレイ（メイン）のメールの一覧を見ます |
 | `gmail.search` | read | `gmail.readonly`（制限付き） | 条件に合うメールを探します。本文は読みません |
 | `image.read_text` | read | — | 写真やスキャンした画像から文字を読み取ります。読み取りは確実ではないため、内容の確認が要ります |
 | `knowledge.search` | read | — | 社内の知識（規程・議事録など）を調べます。区画の外の人には区画内の文書を見せません |

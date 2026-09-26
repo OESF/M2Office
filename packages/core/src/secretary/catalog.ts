@@ -144,12 +144,12 @@ const unreadMail: DirectQuery = {
   excludes: [ACTION_WORDS],
   compartment: null,
   async answer(ctx) {
-    const items = await ctx.connector.mail.list({ tenantId: ctx.tenantId, userId: ctx.userId }, { limit: 50 });
-    const unread = items.filter((m) => m.unread);
+    // 受信トレイの「メイン」だけを数える。振り分けられたものと迷惑メールは数えない（仕様書 第10.9.2節）
+    const { total, more, items } = await ctx.connector.mail.unread({ tenantId: ctx.tenantId, userId: ctx.userId }, { limit: 5 });
     return {
-      text: unread.length === 0 ? '未読のメールはありません。' : `未読のメールが ${unread.length} 件あります。`,
+      text: total === 0 ? '受信トレイに未読のメールはありません。' : `受信トレイに未読のメールが ${total} 件${more ? '以上' : ''}あります。`,
       evidence: [...sourceNote(ctx.connector, ctx.tenantId),
-        ...unread.slice(0, 5).map((m) => ({ label: m.from.replace(/\s*<.*>$/, ''), value: m.subject }))],
+        ...items.map((m) => ({ label: m.from.replace(/\s*<.*>$/, '').replace(/^"|"$/g, ''), value: m.subject }))],
     };
   },
 };

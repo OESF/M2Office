@@ -291,13 +291,13 @@ test('許可: 権限が足りない・API が無効・混み合っている、�
 
 // ─── Gmail ──────────────────────────────────────────────────────────
 
-test('Gmail: 受信箱を新しい順に。件数は 50 まで、以降は after: で絞る。消えたメールは飛ばす', async () => {
+test('Gmail: 受信トレイの「メイン」を新しい順に。件数は 50 まで、以降は after: で絞る。消えたメールは飛ばす', async () => {
   await withConnector(async (c, g) => {
     const items = await c.mail.list(P, { since: '2026-09-20T00:00:00+09:00', limit: 500 });
     const q = g.seen.find((s) => s.path === '/gmail/users/me/messages')!.query;
-    assert.equal(q.get('labelIds'), 'INBOX');
     assert.equal(q.get('maxResults'), '50', '上限は 50');
-    assert.equal(q.get('q'), `after:${Math.floor(Date.parse('2026-09-20T00:00:00+09:00') / 1000)}`);
+    assert.equal(q.get('q'), `in:inbox category:primary after:${Math.floor(Date.parse('2026-09-20T00:00:00+09:00') / 1000)}`,
+      'プロモーションなどに振り分けられたものは含めない（2026-09-26 に oesf で確認）');
     assert.deepEqual(items.map((m) => m.id), ['m1', 'm2'], '消えたメール（404）は飛ばし、順は保つ');
     assert.equal(items[0]!.subject, 'こんにちは', '符号化された件名を戻す');
     assert.equal(items[0]!.unread, true);
@@ -305,6 +305,16 @@ test('Gmail: 受信箱を新しい順に。件数は 50 まで、以降は after
     assert.equal(items[0]!.snippet, "ご確認ください '至急' & よろしく", '抜粋の文字の参照を戻す');
     assert.equal(items[0]!.receivedAt, new Date(1790000000000).toISOString());
     assert.equal('body' in items[0]!, false, '一覧に本文は入れない');
+  });
+});
+
+test('Gmail: 未読は受信トレイの「メイン」だけを数え、新しいものを返す', async () => {
+  await withConnector(async (c, g) => {
+    const r = await c.mail.unread(P, { limit: 5 });
+    const q = g.seen.filter((s) => s.path === '/gmail/users/me/messages').at(-1)!.query;
+    assert.equal(q.get('q'), 'in:inbox category:primary is:unread');
+    assert.equal(r.more, false);
+    assert.ok(r.total >= r.items.length);
   });
 });
 

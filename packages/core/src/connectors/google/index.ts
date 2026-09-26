@@ -23,6 +23,18 @@ const CHAT_SPACE_PAGES = 5;
 /** 一覧で一度に返すメールの上限（仕様書 第14.3.4節）。 */
 const MAIL_LIMIT_MAX = 50;
 
+/**
+ * 秘書と業務が見るメールの範囲。受信トレイの「メイン」だけ（仕様書 第14.3.4節「Gmail」）。
+ *
+ * @remarks
+ * 受信トレイ全体（`INBOX`）には、プロモーション・ソーシャル・新着・フォーラムに振り分けられたものまで入る。
+ * 2026-09-26 に oesf で、受信トレイ全体の未読が 5000 通を超え、「メイン」の未読は 13 通だった（三浦さんが画面で見ている数と合う）
+ */
+const INBOX_MAIN = 'in:inbox category:primary';
+
+/** 未読を数えるときに読む頁の上限（1 頁 500 通）。 */
+const UNREAD_COUNT_PAGES = 2;
+
 /** メールの見出しを同時に取りに行く数。多すぎると Google に断られる。 */
 const MAIL_FETCH_CONCURRENCY = 8;
 
@@ -136,10 +148,28 @@ export class GoogleWorkspaceConnector implements WorkspaceConnector {
 
   mail = {
     list: async (p: ConnectorPrincipal, opts: { since?: string; limit?: number }) => {
-      const q = new URLSearchParams({ labelIds: 'INBOX', maxResults: String(clampLimit(opts.limit)) });
       const since = opts.since ? Date.parse(opts.since) : NaN;
-      if (Number.isFinite(since)) q.set('q', `after:${Math.floor(since / 1000)}`);
+      const q = new URLSearchParams({
+        q: [INBOX_MAIN, ...(Number.isFinite(since) ? [`after:${Math.floor(since / 1000)}`] : [])].join(' '),
+        maxResults: String(clampLimit(opts.limit)),
+      });
       return this.summaries(p, await this.listIds(p, q));
+    },
+    unread: async (p: ConnectorPrincipal, opts: { limit?: number }) => {
+      // ID だけを数える（中身は読まない）。多すぎるときは上限で打ち切り、「以上」と伝える
+      let total = 0;
+      let token = '';
+      const first: string[] = [];
+      for (let page = 0; page < UNREAD_COUNT_PAGES; page++) {
+        const q = new URLSearchParams({ q: `${INBOX_MAIN} is:unread`, maxResults: '500', ...(token ? { pageToken: token } : {}) });
+        const res = await this.gmail(p, `/messages?${q}`);
+        const ids = ((res?.['messages'] ?? []) as { id: string }[]).map((m) => m.id);
+        if (page === 0) first.push(...ids.slice(0, clampLimit(opts.limit ?? 5)));
+        total += ids.length;
+        token = String(res?.['nextPageToken'] ?? '');
+        if (!token) break;
+      }
+      return { total, more: !!token, items: await this.summaries(p, first) };
     },
     get: async (p: ConnectorPrincipal, id: string): Promise<MailMessage | null> => {
       const m = await this.gmail(p, `/messages/${encodeURIComponent(id)}?format=full`) as GmailMessage | null;

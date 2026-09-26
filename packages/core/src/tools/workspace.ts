@@ -28,8 +28,8 @@ export const gmailList: Tool = {
   name: 'gmail.list',
   risk: 'read',
   activityLabel: 'メールを確認しています',
-  helpText: '受信箱のメールの一覧を見ます',
-  description: '受信箱のメールを新しい順に一覧する（本文なし）',
+  helpText: '受信トレイ（メイン）のメールの一覧を見ます',
+  description: '受信トレイの「メイン」のメールを新しい順に一覧する（本文なし。プロモーションなどに振り分けられたものは含まない）',
   args: { properties: { since: { type: 'string', description: 'この時刻以降（ISO 形式。任意）' }, limit: { type: 'number', description: '件数（既定 20）' } } },
   google: { scope: 'gmail.readonly', level: 'restricted' },
   async invoke(args, ctx) {
