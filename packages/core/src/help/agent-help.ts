@@ -29,6 +29,11 @@ export interface AgentHelpView {
   examples: { title: string; input: Record<string, unknown> }[];
   notes: string[];
   faq: { q: string; a: string }[];
+  /**
+   * 書き手が書いた利用者向けの説明（スキルの `HELP.md`。仕様書 第12.12.4節）。
+   * あれば説明の本文にする。スキルの業務では `does`（道具の説明）と `flow`（組み立てた段）を空にする
+   */
+  body?: string;
 }
 
 export interface AgentHelpOptions {
@@ -92,13 +97,15 @@ export function buildAgentHelp(
     name: def.name,
     summary: def.help?.summary ?? def.description,
     inputs: Object.entries(props).map(([key, p]) => ({ key, title: p.title ?? key, required: required.has(key) })),
-    flow: def.steps.map((s) => stepLabel(s)),
+    // スキルの業務では、組み立てた段の名前と道具の説明を出さない（仕組みを見せるだけ。第12.12.4節）
+    flow: def.skill ? [] : def.steps.map((s) => stepLabel(s)),
     approvals,
-    does: [...new Set(tools.map((t) => t.helpText))],
+    does: def.skill ? [] : [...new Set(tools.map((t) => t.helpText))],
     safeguards,
     examples,
     notes: def.help?.notes ?? [],
     faq: def.help?.faq ?? [],
+    ...(def.help?.body ? { body: def.help.body } : {}),
   };
 }
 
@@ -108,9 +115,12 @@ export function buildAgentHelp(
  * @remarks 記事の ID は `agent-<エージェント ID>` とする。
  */
 export function agentHelpMarkdown(v: AgentHelpView): string {
-  const lines = [v.summary, '', '## この業務がすること', ...v.does.map((d) => `- ${d}`), ''];
+  const lines = [v.summary, ''];
+  // 書き手の説明（HELP.md）があれば、それを本文にする。見出しは記事の見出しより小さくする
+  if (v.body) lines.push(v.body.replace(/^#\s+.*\n+/, '').replace(/^(#{1,5})\s/gm, '#$1 '), '');
+  if (v.does.length > 0) lines.push('## この業務がすること', ...v.does.map((d) => `- ${d}`), '');
   lines.push('## 安心して使えるように', ...v.safeguards.map((d) => `- ${d}`), '');
-  lines.push('## 進み方', v.flow.join(' → '), '');
+  if (v.flow.length > 0) lines.push('## 進み方', v.flow.join(' → '), '');
   if (v.approvals.length > 0) {
     lines.push('## 承認が入る場所', ...v.approvals.map((a) => `- **${a.step}**: ${a.who}が判断します`), '');
   }

@@ -106,6 +106,12 @@ export interface AgentHelp {
   /** 注意点。止まる条件や、できないこと。 */
   notes?: string[];
   faq?: { q: string; a: string }[];
+  /**
+   * 書き手が書いた利用者向けの説明（Markdown。スキルの `HELP.md`。仕様書 第12.12.4節）。
+   *
+   * @remarks あれば業務の説明の本文にし、道具の説明から作る「この業務がすること」と「進み方」は出さない
+   */
+  body?: string;
 }
 
 /** 品質検証用のテストケース（仕様書 第18.2節）。 */
@@ -158,6 +164,22 @@ export interface AgentDefinition {
    * **秘書が自分で答えられることには使う。** ひと言の照会に本人の確認を求めると、会話にならない。
    */
   secretaryRoute?: boolean;
+  /**
+   * メニューに出すか（仕様書 第12.12.2節）。既定は `true`。スキルの `user-invocable: false` で `false` になる。
+   *
+   * @remarks `false` の業務は、秘書が取り次いだときだけ使う
+   */
+  menu?: boolean;
+  /** 段の推論の強さ（仕様書 第20.2.2節）。既定は `standard`。スキルの `effort` から決まる。 */
+  tier?: 'fast' | 'standard' | 'advanced';
+  /**
+   * スキルの形式（SKILL.md）から組み立てた業務の、実行のときに使うもの（仕様書 第12.12節）。
+   *
+   * @remarks
+   * `arguments` は指示の `$名前`・`$N` を入力で置き換えるための欄の名前の並び。
+   * `files` は本文から参照する補助のファイル（読むだけの道具 `skill.read` で開く）
+   */
+  skill?: { arguments: string[]; files: { path: string; text: string }[] };
   /** 入力フォームを自動生成するための JSON Schema。 */
   inputs: Record<string, unknown>;
   /** 呼び出しを許可するツール。ここにないものは呼べない。 */

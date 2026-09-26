@@ -110,6 +110,8 @@ export interface AgentHelpView {
   examples: { title: string; input: Record<string, unknown> }[];
   notes: string[];
   faq: { q: string; a: string }[];
+  /** 書き手が書いた利用者向けの説明（スキルの HELP.md。仕様書 第12.12.4節）。 */
+  body?: string;
 }
 
 /** 管理者の初期設定チェックリストの 1 項目。 */
@@ -282,6 +284,8 @@ export interface AgentSummary {
   stepCount: number;
   /** 拡張機能の業務エージェントなら、その拡張機能と提供者。公式なら `null`。 */
   extension: { id: string; name: string; publisher: string } | null;
+  /** メニューに出すか（スキルの user-invocable。仕様書 第12.12.2節）。`false` なら秘書が取り次いだときだけ使う。 */
+  menu?: boolean;
 }
 
 /** 導入できる拡張機能（仕様書 第12.9.3節）。 */

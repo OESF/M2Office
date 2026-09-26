@@ -43,6 +43,8 @@ export interface ToolContext {
    * 「読み取れなかった」と明示する。
    */
   ocr?: (req: { bytes: Uint8Array; mimeType: string }) => Promise<string>;
+  /** スキルの補助のファイル（仕様書 第12.12.2節）。実行中の業務がスキルのときだけある。 */
+  skillFiles?: { path: string; text: string }[];
   /** 組織知識を探す前に、言い換えを秘書に考えさせる（仕様書 第11.7.7.0節）。無ければ言い換えなしで探す。 */
   expandQuery?: (query: string) => Promise<string[][]>;
 }

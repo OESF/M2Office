@@ -30,6 +30,7 @@ import { describeCall } from './describe-call.js';
 import { composeApprovalPresent, describeContext } from './approval-present.js';
 import { validateDefinition } from './validate.js';
 import { expandQuery } from '../knowledge/expand.js';
+import { substituteArguments } from '../extensions/skill.js';
 import { AI_NOT_CONFIGURED_MESSAGE, aiAvailable } from '../llm/unconfigured.js';
 import { parseToolCalls } from './tool-protocol.js';
 
@@ -495,7 +496,9 @@ export class RunEngine {
       const system = buildSystemPrompt(def, tools, settings.writingStyle);
       // 承認の前の組み立てでは、記録された操作を「待つ」ものと取り違えさせない（2026-09-25 に本物の推論で、
       // 社内への共有を記録したあと「承認待ち」として投稿と登録を出さずに終えた）
-      const prompt = buildStepPrompt(step, input, previous) + (mode === 'plan' ? PLAN_NOTE : '');
+      // スキルの業務は、指示の $ARGUMENTS・$名前 を入力で置き換える（スキルと同じ。仕様書 第12.12.2節）
+      const shown = def.skill ? { ...step, instruction: substituteArguments(step.instruction, input, def.skill.arguments) } : step;
+      const prompt = buildStepPrompt(shown, input, previous) + (mode === 'plan' ? PLAN_NOTE : '');
       /*
         ツールを呼んだら、その結果を渡してもう一度考えさせる（仕様書 第9.3.2節）。
         1 往復で終えると、推論がツールを呼んだ時点でステップが終わり、**文が 1 つも残らない**。
@@ -524,7 +527,8 @@ export class RunEngine {
         // 最後の往復では道具を使わせない。ここまでに分かったことで答えさせる
         const lastRound = round === MAX_TOOL_ROUNDS;
         const res = await llm.complete({
-          tier: 'standard',
+          // スキルの effort から決まる推論の強さ（仕様書 第12.12.2節）。無ければ標準
+          tier: def.tier ?? 'standard',
           maxOutputTokens: 2000,
           context: { agentId: def.id, stepId: step.id, input, evals: def.evals, stepResults: stepResults(previous) },
           messages: [
@@ -738,6 +742,8 @@ export class RunEngine {
       // 画像から文字を読む手段。推論が持っていなければ渡さない（第9.4.1節、Q-56）
       ...(llm?.readImage ? { ocr: async (r) => (await llm.readImage!(r)).text } : {}),
       ...(llm ? { expandQuery: (q: string) => expandQuery(llm, q) } : {}),
+      // スキルの補助のファイル。skill.read で開く（仕様書 第12.12.2節）
+      ...(def.skill?.files.length ? { skillFiles: def.skill.files } : {}),
     };
   }
 

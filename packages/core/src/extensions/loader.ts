@@ -11,11 +11,11 @@
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, relative, sep } from 'node:path';
+import { basename, join, relative, sep } from 'node:path';
 import { RISK_LEVELS, RISK_ORDER, type AgentDefinition, type EvalCase, type RiskLevel } from '@m2office/shared';
 import type { ToolRegistry } from '../tools/registry.js';
 import { validateDefinition } from '../engine/validate.js';
-import { buildSkillPackage, type SkillPackage } from './skill.js';
+import { buildSkillPackage, SKILL_FOLDER_ENTRY, type SkillPackage } from './skill.js';
 import {
   checkConnector, connectorToolName, connectorTools, type ConnectorDeclaration,
 } from './connectors.js';
@@ -149,7 +149,10 @@ export function loadExtension(
     return { pkg: null, problems: ['SKILL.md（または manifest.json）がありません'] };
   }
   const opts = options instanceof Set ? { takenAgents: options } : options;
-  const res = loadExtensionFiles(readExtensionDir(dir), registry, opts);
+  const files = readExtensionDir(dir);
+  // スキルの name を省いたときは、フォルダの名前を使う（スキルと同じ。仕様書 第12.12.2節）
+  if (files.has('SKILL.md')) files.set(SKILL_FOLDER_ENTRY, new TextEncoder().encode(basename(dir)));
+  const res = loadExtensionFiles(files, registry, opts);
   return { pkg: res.pkg ? { ...res.pkg, dir } : null, problems: res.problems, ...(res.notices ? { notices: res.notices } : {}) };
 }
 

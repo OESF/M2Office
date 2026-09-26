@@ -44,6 +44,28 @@ export const knowledgeSearch: Tool = {
   },
 };
 
+/**
+ * スキルの補助のファイルを読む（仕様書 第12.12.2節）。スキルと同じく、本文から参照したファイルを必要なときに開く。
+ *
+ * @remarks 危険度 read。読めるのは、実行中のスキルに入っていた Markdown・テキストだけ。書き手が用意した業務の資料として扱う
+ */
+export const skillRead: Tool = {
+  name: 'skill.read',
+  risk: 'read',
+  activityLabel: 'スキルの資料を読んでいます',
+  helpText: 'このスキルに入っている資料を読みます',
+  description: 'このスキルの補助のファイル（本文で参照しているもの）を読む。path は本文に書かれた相対パス（例: reference.md）',
+  args: { properties: { path: { type: 'string', description: 'ファイルの相対パス' } }, required: ['path'] },
+  async invoke(args, ctx) {
+    const want = String(args['path'] ?? '').replace(/^\.\//, '').trim();
+    const files = ctx.skillFiles ?? [];
+    const hit = files.find((f) => f.path === want) ?? files.find((f) => f.path.endsWith(`/${want}`) || f.path.split('/').pop() === want);
+    return hit
+      ? { path: hit.path, text: hit.text }
+      : { found: false, reason: `このスキルに ${want} はありません`, files: files.map((f) => f.path) };
+  },
+};
+
 /** 会議の記録を取得する。プロトタイプでは入力に貼り付けた本文を用いる。 */
 export const meetingGetTranscript: Tool = {
   name: 'meeting.get_transcript',
@@ -141,6 +163,7 @@ export const knowledgeRegister: Tool = {
 /** 基盤が提供するツールの全体。エージェント定義はここから選ぶ。 */
 export const BUILTIN_TOOLS: Tool[] = [
   knowledgeSearch,
+  skillRead,
   knowledgeRegister,
   meetingGetTranscript,
   documentCreate,

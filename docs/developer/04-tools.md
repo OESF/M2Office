@@ -46,6 +46,7 @@
 | `pdf.extract` | read | — | PDF から文字を読み取ります。文字の無いページ（スキャンなど）は読み取りにかけますが、読み取り結果は確かめが要ります |
 | `sheet.read` | read | — | Excel・CSV を表として読みます |
 | `sheets.read` | read | `drive.file`（機密でない） | Google スプレッドシートの表を読みます |
+| `skill.read` | read | — | このスキルに入っている資料を読みます |
 | `tasks.list` | read | `tasks`（機密） | ToDo の一覧を見ます |
 | `web.research` | read | — | テーマを Google 検索で調べ、出典つきでまとめます。調べる言葉は Google に送られますが、どこにも書き込みません |
 | `docs.append` | draft | `drive.file`（機密でない） | M2Office で作った文書の末尾に書き足します |
@@ -97,6 +98,7 @@
 | `pdf.extract` | `fileId`（必須）: ファイルの ID |
 | `sheet.read` | `fileId`（必須）: ファイルの ID、`sheet`: シート名（任意）、`maxRows`: 読む行数の上限（既定 500） |
 | `sheets.read` | `spreadsheetId`（必須）: スプレッドシートの ID、`maxRows`: 読む行数の上限（既定 500） |
+| `skill.read` | `path`（必須）: ファイルの相対パス |
 | `tasks.list` | なし |
 | `web.research` | `topic`（必須）: 調べるテーマ、`focus`: 特に知りたいこと（任意） |
 | `docs.append` | `documentId`（必須）: 文書の ID、`text`（必須）: 追記する文 |

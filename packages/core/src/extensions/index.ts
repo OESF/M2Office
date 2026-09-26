@@ -16,7 +16,8 @@ export {
 } from './connectors.js';
 export { packExtension, unpackExtension, EXTENSION_FILE_MAX_BYTES } from './package-file.js';
 export {
-  buildSkillPackage, compileSkill, parseInputs, parseSkill, SKILL_DEFAULT_TOOLS, SKILL_REFERENCE_MAX_CHARS,
+  buildSkillPackage, compileSkill, parseInputs, parseSkill, substituteArguments,
+  SKILL_DEFAULT_TOOLS, SKILL_FILES_MAX_CHARS, SKILL_FOLDER_ENTRY, SKILL_READ_TOOL,
   type Frontmatter, type SkillPackage,
 } from './skill.js';
 export {

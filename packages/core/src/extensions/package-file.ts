@@ -8,6 +8,7 @@
  */
 
 import JSZip from 'jszip';
+import { SKILL_FOLDER_ENTRY } from './skill.js';
 import { isAllowedExtensionFile, type ExtensionFiles } from './loader.js';
 
 /** `.m2ext` の大きさの上限（仕様書 第12.10.2節）。 */
@@ -79,6 +80,8 @@ export async function unpackExtension(data: Uint8Array): Promise<{ files: Extens
     if (total > EXPANDED_MAX_BYTES) return { files: new Map(), problems: ['展開したあとの大きさが大きすぎます'] };
     files.set(e.name.slice(prefix.length), bytes);
   }
+  // スキルの name を省いたときは、フォルダの名前を使う（スキルと同じ。仕様書 第12.12.2節）
+  if (prefix && files.has('SKILL.md')) files.set(SKILL_FOLDER_ENTRY, new TextEncoder().encode(prefix.replace(/\/$/, '')));
   return { files, problems: [] };
 }
 

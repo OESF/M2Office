@@ -6,48 +6,44 @@
 
 ## 3.0 SKILL.md（標準）
 
-### フロントマター
+スキル（Claude Code の Skills・Agent Skills）の書き方のまま書きます。**M2Office で覚えることは第2章の冒頭の 4 つだけ**です。
 
-Agent Skills の決まりに準拠します。
+### スキルの項目の扱い
 
-| 項目 | 必須 | M2Office での使い方 |
-|---|---|---|
-| `name` | 必須 | 業務の ID の一部（英小文字・数字・ハイフン、64 字まで） |
-| `description` | 必須 | 何をするか・いつ使うか。メニューの説明、秘書が取り次ぐ手がかり、業務の説明の要約 |
-| `license`・`compatibility` | 任意 | 保つが、動きには使わない |
-| `allowed-tools` | 任意 | 使わない（ほかの環境の道具の名前）。M2Office の道具は `m2office-tools` に書く |
-| `metadata.version` | 任意 | 拡張機能の版（例: `"1.2.0"`）。無ければ `1.0.0` |
-| `metadata.author` | 任意 | 提供者の名前。無ければ「自社」 |
+| スキルの項目 | M2Office での扱い |
+|---|---|
+| `name` | 業務の ID の一部（`<拡張機能の ID>:<name>`）。省けばフォルダの名前 |
+| `description` | メニューの説明と、秘書が業務へ取り次ぐ手がかり。省けば本文の最初の行 |
+| `when_to_use` | `description` に添えて、秘書の取り次ぎの手がかりにする |
+| 本文の最初の見出し（`# 〇〇`） | 画面に出す業務の名前。無ければ `name` |
+| 本文 | 業務の指示（推論が読む） |
+| `argument-hint` | 入力の欄に薄く出る例 |
+| `arguments` | 入力の欄（1 つの名前が 1 つの欄）。無ければ自由記入の「依頼」の欄 1 つ |
+| `$ARGUMENTS`・`$ARGUMENTS[N]`・`$N`・`$名前` | 実行のときに入力で置き換える（`\$` は `$` のまま） |
+| `disable-model-invocation: true` | 秘書は取り次がない。メニューからだけ使う |
+| `user-invocable: false` | メニューに出さない。秘書が取り次いだときだけ使う |
+| `allowed-tools` | **M2Office の道具の一覧**（第4章）。書いた道具しか使えない。書かなければ読むだけの道具（`knowledge.search`・`file.read_text`）、`""` なら道具なし。M2Office に無い道具（`Bash`・`Read` など）は無視して知らせる |
+| `effort` | `low` は高速のモデル、`medium`・`high` は標準、`xhigh`・`max` は高性能のモデル |
+| `model`・`context`・`agent`・`background`・`disallowed-tools`・`hooks`・`paths`・`shell` | 使わない（知らせる） |
+| `license`・`compatibility`・`metadata` | 保つ。`metadata.version`・`metadata.author` は拡張機能の版と提供者 |
+| 補助のファイル（`reference.md`・`examples.md` など） | スキルと同じく、本文から参照したものを推論が必要なときに読む（道具 `skill.read` が自動で付く）。Markdown・テキストのみ |
+| `scripts/`・`` !`コマンド` ``・`${CLAUDE_SKILL_DIR}` | 動かさない。ファイルは除き、コマンドは消して知らせる |
 
-### `metadata` の `m2office-*`（すべて任意。値はすべて文字）
+### M2Office で足すもの
 
-| 名前 | 書き方 | 書かないとき |
-|---|---|---|
-| `m2office-id` | 拡張機能の ID（逆ドメイン名。例: `jp.example.expense`） | `skill.<name>` |
-| `m2office-title` | 画面に出す業務の名前 | `name` |
-| `m2office-tools` | 使う道具の名前を空白か「、」で区切る（第4章） | 読むだけの道具: `knowledge.search`・`file.read_text` |
-| `m2office-inputs` | 1 行に 1 つ「欄の名前: 種類」。種類は `短文`・`長文`・`日付`・`ファイル`。後ろに「（任意）」 | 自由記入の「依頼」の欄 1 つ |
-| `m2office-examples` | 1 行に 1 つ、実行例（最初の欄に入る） | 出さない |
-| `m2office-approver` | 社外に出すものの承認者: `依頼した本人`・`承認者`・`管理者` | 依頼した本人 |
-
-### 本文
-
-**業務の指示そのものです。** 見出し・箇条書きで、何を読み、何を確かめ、何を答えるかを書きます（第8章）。
-結果は最後に返した文がそのまま出るので、「成果物に保存する」といった指示は要りません。
+| もの | 使うとき |
+|---|---|
+| `HELP.md` | 利用者向けの説明。業務の題名の「？」とヘルプセンターに出る |
+| `metadata.m2office-id` | 他の会社に配るときの ID（逆ドメイン名）。無ければ `skill.<name>`（自社専用） |
+| `metadata.m2office-inputs` | 欄に種類を付けたいとき。1 行に 1 つ「欄の名前: 種類」（`短文`・`長文`・`日付`・`ファイル`、後ろに「（任意）」） |
+| `metadata.m2office-examples` | 業務の説明に実行例のボタンを出したいとき（1 行に 1 つ） |
+| `metadata.m2office-approver` | 社外に出すものを依頼した本人以外が承認するとき（`承認者`・`管理者`） |
 
 ### M2Office が組み立てるもの
 
-| もの | 組み立て方 |
-|---|---|
-| 段 | 本文を指示にした段が 1 つ（「作業」） |
-| 承認の段 | 送る道具（`gmail.send`・`chat.post` など `external-send` 以上）を書いたときだけ「作業 → 承認 → 送る」。社外にもお金にも関わらなければ、承認は自動で通る |
-| 入力のフォーム | `m2office-inputs` から。`日付（任意）` はチェックボックスとカレンダーになる |
-| 権限の同意 | `m2office-tools` から。扱う最大の危険度は道具から決まる |
-| 資料 | `references/` などの Markdown・テキストを、本文の後ろに添える（合計 5 万字まで） |
-
-### 持ち込めないもの
-
-`scripts/` などのプログラムは**実行しません**（取り込むときに除き、除いたことを示します）。画像・PDF などの資料も今は持ち込めません。
+段・承認の段・入力のフォーム・権限の同意は、取り込むときに M2Office が作ります。
+送る道具（`gmail.send`・`chat.post` など）を `allowed-tools` に書けば「作業 → 承認 → 送る」になり、
+社外にもお金にも関わらなければ、承認は自動で通ります。結果は、最後に返した文がそのまま出ます。
 
 ---
 

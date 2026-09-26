@@ -36,6 +36,8 @@ export function agentsRoute(deps: AppDeps) {
       /** 承認ゲートを持つかどうか。画面での説明に使う。 */
       hasApproval: a.steps.some((s) => s.type === 'approval'),
       stepCount: a.steps.length,
+      /** メニューに出すか（スキルの user-invocable: false で出さない。仕様書 第12.12.2節）。 */
+      menu: a.menu !== false,
       /** 拡張機能の業務エージェントなら、その提供者。公式なら `null`。 */
       extension: (() => {
         const ext = view.entryOf(a.id)?.pkg;

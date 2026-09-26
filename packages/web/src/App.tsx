@@ -282,7 +282,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   }, []);
 
   // キーボードの割り当て（仕様書 第6.11.3節）。表は keys.ts に 1 つだけ置く
-  const menuAgents = orderAgents(agents, menu.order).filter((a) => !menu.hidden.includes(a.id));
+  // スキルの user-invocable: false の業務はメニューに出さない。秘書が取り次いだときだけ使う（仕様書 第12.12.2節）
+  const menuAgents = orderAgents(agents, menu.order).filter((a) => !menu.hidden.includes(a.id) && a.menu !== false);
   useHotkey('Mod+,', useCallback(() => openSettings(), [openSettings]));
   useHotkey('Mod+/', useCallback(() => openSettings('keys'), [openSettings]));
   useHotkey('Mod+I', useCallback(() => setTalkOpen(!talkOpen), [talkOpen, setTalkOpen]));
