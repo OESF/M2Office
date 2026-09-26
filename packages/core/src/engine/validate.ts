@@ -63,6 +63,16 @@ export function validateDefinition(def: AgentDefinition, registry: ToolRegistry)
     }
   }
 
+  // 2d. 段が必ず呼ぶ道具は、その段で使える道具の一部でなければならない（第9.2.7節）
+  for (const step of def.steps) {
+    if (step.type !== 'agent' || !step.required) continue;
+    const usable = step.tools ?? def.tools;
+    const outside = step.required.filter((t) => !usable.includes(t));
+    if (outside.length > 0) {
+      throw new DefinitionInvalidError(`段「${step.id}」が必ず呼ぶ道具が、その段で使えません: ${outside.join(', ')}`);
+    }
+  }
+
   // 3. ステップ ID の重複と、restartFrom の参照先
   const ids = new Set<string>();
   for (const step of def.steps) {

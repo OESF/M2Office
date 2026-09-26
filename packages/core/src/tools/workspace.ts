@@ -224,6 +224,8 @@ export const chatPost: Tool = {
    * 投稿先を承認の前に探す（仕様書 第14.3.4節「Chat」、ADR-0024）。見つかれば `spaces/…` で記録し、
    * 承認のあとは探し直さない。見つからない・複数ある・許可が無いときは、投稿を記録させない。
    */
+  // 同じスペースへの投稿は、1 つの段で 1 度だけ。言い直したら後のものにする
+  planKey: (args) => `space:${str(args['space'], 'general')}`,
   async prepare(args, ctx): Promise<PreparedCall> {
     const wanted = str(args['space'], 'general');
     try {

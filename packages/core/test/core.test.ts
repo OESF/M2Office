@@ -1184,3 +1184,74 @@ test('行えない操作があれば、社内だけでも自動で通さず人�
   connector.chat.findSpace = async () => ({ reason: '「無い部」という名前のチャットのスペースが見つかりません' });
   assert.equal((await engine.advance(run)).outcome, 'awaiting_approval');
 });
+
+/** 呼ばれた順に、決めた応答を返す推論（往復ごとに言い直す推論を再現する）。 */
+function scriptedLlm(replies: { name: string; args: Record<string, unknown> }[][]): LlmProvider & { prompts: string[] } {
+  let i = 0;
+  const prompts: string[] = [];
+  return {
+    name: 'scripted',
+    prompts,
+    async complete(req: LlmRequest) {
+      prompts.push(String(req.messages.at(-1)?.content ?? ''));
+      const calls = replies[Math.min(i++, replies.length - 1)] ?? [];
+      return { text: calls.length > 0 ? calls.map((c) => '```tool\n' + JSON.stringify(c) + '\n```').join('\n') : '終わりました。', tokensUsed: 5 };
+    },
+  };
+}
+
+/** 決めた応答の推論で、共有の業務を動かす。 */
+function scriptedShare(def: AgentDefinition, replies: Parameters<typeof scriptedLlm>[0]) {
+  const { repo, connector, run } = setup(def, { name: 'chat.post', args: {} });
+  repo.settings.automation = { writeInternal: 'allow', perAgent: {} };
+  connector.chat.findSpace = async (_p, input) => (input === '無い部'
+    ? { reason: '「無い部」という名前のチャットのスペースが見つかりません' }
+    : { space: 'spaces/SALES', displayName: '営業部', external: false });
+  const registry = new ToolRegistry();
+  for (const t of BUILTIN_TOOLS) registry.register(t);
+  const llm = scriptedLlm(replies);
+  const engine = new RunEngine({
+    repo: repo as unknown as Repository, registry, connector, files: new MemoryFileStore(), resolveDefinition: () => def, llm,
+  });
+  return { repo, connector, run, engine, llm };
+}
+
+test('組み立てで同じスペースへの投稿を言い直したら、後のものだけを記録する（投稿を 2 重にしない。2026-09-26）', async () => {
+  const { connector, run, engine } = scriptedShare(SHARE_DEF, [
+    [], // 準備の段（道具を使わない）
+    // 組み立て 1 往復目: 見つからない先への投稿と、リンク無しの投稿
+    [{ name: 'chat.post', args: { space: '無い部', text: 'x' } }, { name: 'chat.post', args: { space: '営業部', text: 'リンク無し' } }],
+    // 2 往復目: リンク付きで言い直す
+    [{ name: 'chat.post', args: { space: '営業部', text: 'リンク付き' } }],
+    [],
+  ]);
+  assert.equal((await engine.advance(run)).outcome, 'completed', '言い直して行えるようになったので、自動で通る');
+  const posts = connector.outbox.filter((m) => m.kind === 'chat');
+  assert.equal(posts.length, 1, '1 回だけ投稿する');
+  assert.equal((posts[0]!.body as { text: string }).text, 'リンク付き', '後の言い直しを使う');
+});
+
+test('段が必ず呼ぶ道具を呼ばずに終えようとしたら、一度だけ促す（第9.2.7節。2026-09-26 の呼び忘れ）', async () => {
+  const def: AgentDefinition = {
+    ...SHARE_DEF, id: 'share-required', tools: ['chat.post', 'knowledge.register'],
+    steps: SHARE_DEF.steps.map((s) => (s.id === 'share' ? { ...s, required: ['chat.post', 'knowledge.register'] } : s)),
+  };
+  const { repo, run, engine, llm } = scriptedShare(def, [
+    [],
+    [{ name: 'chat.post', args: { space: '営業部', text: '共有します' } }],
+    [], // 登録を呼ばずに終えようとする
+    [{ name: 'knowledge.register', args: { artifactId: 'none' } }],
+    [],
+  ]);
+  await engine.advance(run);
+  assert.ok(llm.prompts.some((p) => p.includes('必ず呼ぶ道具を、まだ呼んでいません: knowledge.register')), '呼ぶよう促す');
+  const gate = repo.steps.find((s) => s.stepId === 'gate')!;
+  assert.deepEqual(((gate.input as { toolCalls: { name: string }[] }).toolCalls).map((c) => c.name), ['chat.post', 'knowledge.register']);
+});
+
+test('段が必ず呼ぶ道具は、その段で使える道具でなければ定義を拒む', () => {
+  const registry = new ToolRegistry();
+  for (const t of BUILTIN_TOOLS) registry.register(t);
+  const bad: AgentDefinition = { ...SHARE_DEF, steps: SHARE_DEF.steps.map((s) => (s.id === 'share' ? { ...s, required: ['gmail.send'] } : s)) };
+  assert.throws(() => validateDefinition(bad, registry), /必ず呼ぶ道具/);
+});

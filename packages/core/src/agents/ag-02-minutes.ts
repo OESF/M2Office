@@ -114,6 +114,8 @@ export const AG02_MINUTES: AgentDefinition = {
       type: 'agent',
       // この段で使える道具（仕様書 第9.2.7節）。段の区切りを推論の行儀に頼らない
       tools: ['docs.create', 'drive.share_company', 'chat.post', 'knowledge.register'],
+      // 知識への登録を呼び忘れると、会議の決定が会社の知識に残らない（2026-09-26 に oesf で呼び忘れを確認）
+      required: ['chat.post', 'knowledge.register'],
       label: '共有',
       instruction: [
         'まず、作成した議事録を Google ドキュメントに保存する。docs.create に artifactId（作成の手順で得た成果物の ID）と folderName「M2Office 議事録」を渡す。本文は渡さない（成果物をそのまま保存する）。',

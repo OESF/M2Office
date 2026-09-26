@@ -514,6 +514,8 @@ export class RunEngine {
       let text = '';
       let tokensUsed = 0;
       let spent = 0;
+      // 必ず呼ぶ道具を促したか（一度だけ）
+      let nudged = false;
 
       for (let round = 1; round <= MAX_TOOL_ROUNDS; round++) {
         // 最後の往復では道具を使わせない。ここまでに分かったことで答えさせる
@@ -534,6 +536,16 @@ export class RunEngine {
 
         // ツール呼び出しを取り出して実行する
         const calls = lastRound ? [] : parseToolCalls(res.text);
+        // 段が必ず呼ぶと決めた道具を呼ばずに終えようとしたら、一度だけ呼ぶよう促す（仕様書 第9.2.7節）。
+        // 2026-09-26 に oesf で、議事録の共有の段が知識への登録を呼び忘れた
+        const called = new Set([...toolResults.map((t) => (t as { name?: string }).name), ...deferred.map((d) => d.name)]);
+        const missing = (step.required ?? []).filter((n) => !called.has(n) && stepTools.includes(n));
+        if (calls.length === 0 && missing.length > 0 && !nudged && round < MAX_TOOL_ROUNDS - 1) {
+          nudged = true;
+          history.push({ role: 'assistant', content: res.text });
+          history.push({ role: 'user', content: `この段で必ず呼ぶ道具を、まだ呼んでいません: ${missing.join('、')}。指示に従って呼んでください。` });
+          continue;
+        }
         if (calls.length === 0) {
           // 文で終わった。道具の囲みが混じっていても、答えとしては残さない
           text = withoutToolBlocks(res.text);
@@ -569,7 +581,7 @@ export class RunEngine {
             }
             if (check?.kind === 'problem') {
               // 記録しない。承認の画面から黙って消さず、行えないこととして理由を出す
-              if (!unable.some((u) => callKey(u) === callKey(call))) unable.push({ name: call.name, args: call.args, reason: check.reason });
+              if (!unable.some((u) => callKey(u) === callKey(call))) unable.push({ name: call.name, args: call.args, reason: check.reason, round });
               roundResults.push({ name: call.name, risk: tool.risk, error: `この操作は行えません: ${check.reason}` });
               continue;
             }
@@ -581,7 +593,27 @@ export class RunEngine {
               : check?.kind === 'unchecked' ? { ...call, caution: check.reason } : call;
             // 同じ操作は 1 度だけ記録する（二重に実行しない）。印には中身の鍵を持たせ、実行後に結果と突き合わせる
             const key = callKey(recorded);
-            if (!deferred.some((d) => callKey(d) === key)) deferred.push(recorded);
+            // 推論が言い直したもの（同じ投稿先への投稿など、道具の `planKey` が同じもの）は、後のもので置き換える。
+            // 2026-09-26 に、下書きの結果を待たずにリンク無しの投稿を記録し、次の往復でリンク付きの投稿を記録して、投稿が 2 重になった
+            const slot = tool.planKey?.(recorded.args);
+            // 同じ中身の呼び直しは置き換えず、1 度だけ記録する（下の突き合わせで同じ結果になる）
+            const replaced = slot === undefined || deferred.some((d) => callKey(d) === key) ? -1
+              : deferred.findIndex((d) => d.name === recorded.name && registry.get(d.name)?.planKey?.(d.args) === slot);
+            if (replaced >= 0) {
+              const oldKey = callKey(deferred[replaced]!);
+              deferred.splice(replaced, 1, recorded);
+              // 前の往復の「記録しました」は、置き換えたことに書き換える（記録を見た人が 2 回行うと誤らないように）
+              for (const list of [toolResults, roundResults]) {
+                for (const [i, t] of list.entries()) {
+                  if ((t as { key?: string }).key === oldKey) list[i] = { name: call.name, risk: tool.risk, replaced: 'あとの操作で置き換えました' };
+                }
+              }
+            }
+            else if (!deferred.some((d) => callKey(d) === key)) deferred.push(recorded);
+            // 前の往復で行えなかった同じ道具の操作は、推論が正しく呼び直したので、行えないことから外す
+            for (let i = unable.length - 1; i >= 0; i--) {
+              if (unable[i]!.name === recorded.name && (unable[i]!.round ?? round) < round) unable.splice(i, 1);
+            }
             roundResults.push({ name: call.name, risk: tool.risk, pending: '記録しました。承認のあとに、このとおり実行します。この段のほかの操作も、続けて呼んでください', key });
             continue;
           }
@@ -951,7 +983,11 @@ export function needsHuman(
 const ALWAYS_ASK = new Set(['gmail.send']);
 
 /** 承認の前の確かめで、行えないと分かった操作（記録しない。ADR-0024）。 */
-type UnableCall = { name: string; args: Record<string, unknown>; reason: string };
+type UnableCall = {
+  name: string; args: Record<string, unknown>; reason: string;
+  /** 行えないと分かった往復。後の往復で同じ道具を正しく呼び直したら外す。 */
+  round?: number;
+};
 
 /** 承認の前の組み立てで実行した下書きの操作と、その結果（承認の画面に「済ませたこと」として出す。ADR-0025）。 */
 type DoneCall = { name: string; args: Record<string, unknown>; result: unknown };

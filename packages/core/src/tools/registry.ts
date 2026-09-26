@@ -123,6 +123,12 @@ export interface Tool {
    * 例外は投げない（確かめられなかったときは `unchecked` を返す）。
    */
   prepare?(args: Record<string, unknown>, ctx: ToolContext): Promise<PreparedCall>;
+  /**
+   * 承認の前の組み立てで、同じ鍵の操作が後から記録されたら、前のものを置き換える（推論が言い直した）。
+   *
+   * @remarks 1 つの段で 1 度しか行わない操作に付ける（同じスペースへの投稿など）。持たない道具は、引数が違えば別の操作として記録する
+   */
+  planKey?(args: Record<string, unknown>): string;
   invoke(args: Record<string, unknown>, ctx: ToolContext): Promise<unknown>;
 }
 
