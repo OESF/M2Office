@@ -47,7 +47,7 @@ deepwiki-research/
   manifest.json
   connectors/deepwiki.json   コネクタの宣言
   agents/research.json       業務エージェント（調査 → 資料作成）
-  evals/research.json        評価のケースと見本の応答
+  evals/research.json        評価のケース（入力と期待する結果）
   README.md
   icon.png
 ```
@@ -99,19 +99,16 @@ deepwiki-research/
 ]
 ```
 
-### 見本の応答で、鍵なしで通す
+### 評価のケース（evals/research.json）
 
 ```json
-"stub": {
-  "ask":  [{ "name": "deepwiki.ask_wiki_question",
-             "args": { "repoName": "modelcontextprotocol/typescript-sdk", "question": "このリポジトリは何をするものですか？" } }],
-  "save": [{ "name": "document.create",
-             "args": { "kind": "research", "title": "リポジトリ調査: modelcontextprotocol/typescript-sdk", "body": "{{ask}}" } }]
-}
+{ "name": "MCP の TypeScript SDK",
+  "input": { "repo": "modelcontextprotocol/typescript-sdk", "question": "このリポジトリは何をするものですか？" },
+  "expect": "DeepWiki の答えをもとに、SDK の目的と主な機能を資料に保存する" }
 ```
 
-`{{ask}}` は、ステップ `ask` のツールの結果（DeepWiki の答え）に置き換わります（第5.4節）。
-LLM の鍵が無くても、**DeepWiki には実際に問い合わせ**、その答えが資料に残ります。
+コネクタを使う業務も、本物の推論で動かして確かめます。推論が選んだツールで **DeepWiki に実際に問い合わせ**、その答えが資料に残ることを、`expect` と見比べます（第6.4節）。
+このファイルにある `stub` は M2Office の自動テスト用です。拡張機能を作るときは書きません（第5.4節）。
 
 ### 動かす
 

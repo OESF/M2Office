@@ -8,7 +8,7 @@
 | ファイル | 内容 |
 |---|---|
 | `SKILL.md` | 業務の指示。フロントマターの `name`・`description` と、`metadata` の中の M2Office 向けの追記（`m2office-`） |
-| `evals/hello.json` | 評価のケースと、LLM の鍵が無いときの見本の答え（`answer`） |
+| `evals/hello.json` | 評価のケース（入力と期待する結果） |
 | `icon.png` | アイコン |
 
 ## 必要な権限

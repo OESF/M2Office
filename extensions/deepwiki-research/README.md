@@ -9,7 +9,7 @@ GitHub で公開されているリポジトリについて質問すると、[Dee
 |---|---|---|
 | コネクタ | `connectors/deepwiki.json` | DeepWiki の MCP サーバ（`https://mcp.deepwiki.com/mcp`、認証なし）。使うツールは 2 つ |
 | 業務エージェント | `agents/research.json` | 調査（DeepWiki に質問）→ 資料作成（`document.create`） |
-| 評価のケース | `evals/research.json` | 鍵が無い環境で通すための見本の応答。資料の本文に `{{ask}}`（調査の結果）を差し込む |
+| 評価のケース | `evals/research.json` | 評価のケース（入力と期待する結果）。中の `stub` は M2Office の自動テスト用で、拡張機能を作るときは書かない |
 
 | ツール | すること | 危険度 |
 |---|---|---|
@@ -31,6 +31,3 @@ GitHub で公開されているリポジトリについて質問すると、[Dee
 npm run ext:validate extensions/deepwiki-research
 npm run ext:pack extensions/deepwiki-research
 ```
-
-LLM の鍵が無い開発環境では、例の入力（`modelcontextprotocol/typescript-sdk` について「このリポジトリは何をするものですか？」）
-だけを受け付けます。そのときも DeepWiki には実際に問い合わせ、その答えが資料に残ります。
