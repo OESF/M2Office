@@ -79,6 +79,18 @@ export interface EvidenceItem {
 /** 照会ではなく作業の依頼であることを示す言い回し。 */
 const ACTION_WORDS = /調整|入れて|作って|作成|下書き|返信|起票|まとめ|送って|共有/;
 
+/**
+ * 定型の照会にしては長い依頼（仕様書 第10.9.2節）。
+ *
+ * @remarks
+ * 層 1 は「今日の予定は？」のような短い照会のためのもの。長い依頼に「予定」「スケジュール」が入っていても、定型の答えを返さない。
+ * 2026-09-26 に、出張の行程を頼んだ長い依頼に「今日の予定はありません」と答えた
+ */
+const LONG_REQUEST = /^[\s\S]{40,}$/;
+
+/** 今日・明日・今週のほかの日を指す言い方。定型の予定の照会は、この 3 つしか答えられない。 */
+const OTHER_DAY = /\d{1,2}\s*月\s*\d{1,2}\s*日|\d{1,2}\/\d{1,2}|来週|来月|再来|昨日|先週/;
+
 /** 接続口の値の出どころを根拠の 1 行目に示す。ダミーを本物と取り違えないため。 */
 function sourceNote(connector: WorkspaceConnector, tenantId: string): { label: string; value: string }[] {
   return connector.sourceFor(tenantId) === 'mock'
@@ -106,7 +118,7 @@ const schedule: DirectQuery = {
   id: 'calendar-range',
   label: '予定の確認',
   patterns: [/予定|スケジュール/],
-  excludes: [ACTION_WORDS],
+  excludes: [ACTION_WORDS, LONG_REQUEST, OTHER_DAY],
   compartment: null,
   async answer(ctx) {
     const range = rangeOf(ctx.message);
@@ -141,7 +153,7 @@ const unreadMail: DirectQuery = {
   id: 'mail-unread',
   label: '未読メールの確認',
   patterns: [/メール|受信/],
-  excludes: [ACTION_WORDS],
+  excludes: [ACTION_WORDS, LONG_REQUEST],
   compartment: null,
   async answer(ctx) {
     // 受信トレイの「メイン」だけを数える。振り分けられたものと迷惑メールは数えない（仕様書 第10.9.2節）
@@ -159,7 +171,7 @@ const todayTasks: DirectQuery = {
   id: 'tasks-today',
   label: '今日のタスク',
   patterns: [/タスク|ToDo|やること/i],
-  excludes: [ACTION_WORDS],
+  excludes: [ACTION_WORDS, LONG_REQUEST],
   compartment: null,
   async answer(ctx) {
     const items = await ctx.connector.tasks.list({ tenantId: ctx.tenantId, userId: ctx.userId }, {});

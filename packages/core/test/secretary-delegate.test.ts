@@ -119,3 +119,12 @@ test('fillInputs: 推論が JSON を返さなければ、依頼の文を request
   const m = await fillInputs(agent('scheduling'), '調整して', '', llm);
   assert.deepEqual(m.missing, ['目的・件名', '参加者（社内のみ）']);
 });
+
+test('日付を指定した長い依頼は、「スケジュール」の語があっても定型の予定の照会（層 1）にしない', async () => {
+  const d = deps();
+  const llm = llmWith({ route: 'secretary-lookup' });
+  const s = new Secretary({ repo: d.repo, llm, connector: {} as never, agents: [agent('secretary-lookup')], startAgent: d.startAgent, startLookup: d.startLookup });
+  const reply = await s.respond('t', 'u1', '10月1日の朝10時から夕方3時まで大阪でミーティングがあります。東京から日帰りで、新幹線の時間も含めて全体のスケジュールを教えてください');
+  assert.notEqual(reply.layer, 'direct');
+  assert.equal(d.lookups.length, 1);
+});
