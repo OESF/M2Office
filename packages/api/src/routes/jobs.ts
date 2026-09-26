@@ -8,7 +8,7 @@
 
 import { Hono } from 'hono';
 import type { Job } from '@m2office/shared';
-import { enqueueJob } from '@m2office/core';
+import { AI_NOT_CONFIGURED_MESSAGE, aiAvailable, enqueueJob } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 
@@ -44,6 +44,10 @@ export function jobsRoute(deps: AppDeps) {
     const { agents } = await deps.repo.getTenantSettings(ctx.tenant.id);
     if (agents.disabled.includes(def.id)) {
       return c.json({ error: 'この業務は管理者によって無効にされています' }, 403);
+    }
+    // 推論が使えない会社では、業務を始めない（仕様書 第20.2.4節、ADR-0030）
+    if (!aiAvailable(await deps.ai.llmFor(ctx.tenant.id))) {
+      return c.json({ error: AI_NOT_CONFIGURED_MESSAGE }, 409);
     }
     const origin = body.origin && USER_ORIGINS.includes(body.origin) ? body.origin : 'menu';
 

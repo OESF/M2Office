@@ -158,7 +158,7 @@ export class MemoryLearning {
       try {
         const llm = await this.deps.llmFor(tenantId);
         // 推論が使えない環境では、それらしい誤った事実を作らない（第11.5.2節）
-        if (llm.name === 'stub') continue;
+        if (llm.name === 'stub' || llm.name === 'unconfigured') continue;
         // 以前の形（候補を本人が採る。ADR-0015）で残っている候補は、覚えたことに移す（ADR-0027）
         for (const user of await this.deps.repo.listUsers(tenantId)) {
           if (user.status === 'active') learned += await this.adoptPendingCandidates(tenantId, user.id, now);

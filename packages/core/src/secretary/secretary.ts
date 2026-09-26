@@ -16,6 +16,7 @@ import { rewriteNote } from '../knowledge/search.js';
 import { LOOKUP_AGENT_ID } from '../agents/index.js';
 import { REFERS_TO_PAST, recall } from './recall.js';
 import { CORRECTION, correctMemory } from './correct.js';
+import { AI_NOT_CONFIGURED_MESSAGE, aiAvailable } from '../llm/unconfigured.js';
 import { expandQuery } from '../knowledge/expand.js';
 
 /** 秘書がどの層で応答したか。計測と表示に使う（仕様書 第10.9.1節）。 */
@@ -92,6 +93,9 @@ export class Secretary {
   async respond(
     tenantId: string, userId: string, message: string, fileId?: string, options: { record?: boolean } = {},
   ): Promise<SecretaryReply> {
+    // 推論が使えない会社では、何を聞かれても設定されていないことだけを伝える（仕様書 第20.2.4節、ADR-0030）
+    const llm = this.deps.llmFor ? await this.deps.llmFor(tenantId) : this.deps.llm;
+    if (!aiAvailable(llm)) return { layer: 'direct', text: AI_NOT_CONFIGURED_MESSAGE, evidence: [], tokensUsed: 0 };
     const { reply, keep } = await this.reply(tenantId, userId, message, fileId);
     if (options.record === false) return reply;
     // 会話ログに残すのはファイルの**名前だけ**。中身はファイルの側にある（仕様書 第10.10.5節）

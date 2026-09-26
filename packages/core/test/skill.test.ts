@@ -129,5 +129,5 @@ test('見本の拡張機能「あいさつ」は SKILL.md で書かれ、業務�
   const { pkg, problems } = loadExtension(new URL('../../../extensions/hello-world', import.meta.url).pathname, registry);
   assert.deepEqual(problems, []);
   assert.equal(pkg!.agents[0]!.id, 'jp.m2office.samples.hello-world:hello');
-  assert.equal(pkg!.agents[0]!.evals?.[0]?.answer, 'Hello World');
+  assert.equal(pkg!.agents[0]!.evals?.[0]?.input['あいさつ'], 'こんにちは', '評価のケースを持ち込む');
 });

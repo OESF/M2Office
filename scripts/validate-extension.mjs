@@ -57,10 +57,9 @@ for (const target of targets) {
   const risk = (name) => registry.get(name)?.risk
     ?? pkg.connectors.flatMap((c) => c.tools.map((t) => [`${c.id}.${t.name}`, t.risk])).find(([n]) => n === name)?.[1];
   for (const a of pkg.agents) {
-    const withStub = (a.evals ?? []).filter((e) => e.stub || e.answer).length;
+    const withStub = (a.evals ?? []).filter((e) => e.stub).length;
     console.log(`    業務エージェント ${a.id}: ${a.steps.length} ステップ、ツール ${a.tools.map((t) => `${t}=${risk(t)}`).join(', ')}`);
-    console.log(`    評価のケース ${(a.evals ?? []).length} 件（うち見本の応答つき ${withStub} 件）`);
-    if (withStub === 0) console.log('    \x1b[33m注意\x1b[0m: 見本の応答が無いため、LLM の鍵が無い環境では動作を確かめられません');
+    console.log(`    評価のケース ${(a.evals ?? []).length} 件${withStub > 0 ? `（うち自動テスト用の見本の応答つき ${withStub} 件）` : ''}`);
   }
   for (const a of pkg.agents) takenAgents.add(a.id);
   for (const c of pkg.connectors) takenConnectors.add(c.id);

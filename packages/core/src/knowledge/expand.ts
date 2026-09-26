@@ -49,7 +49,7 @@ export function parseExpansion(text: string): string[][] {
  * @returns 言葉の組（登録した言い換えと同じ形）。推論が使えない・間に合わない・失敗したときは空
  */
 export async function expandQuery(llm: LlmProvider, query: string): Promise<string[][]> {
-  if (llm.name === 'stub') return [];
+  if (llm.name === 'stub' || llm.name === 'unconfigured') return [];
   const terms = extractTerms(query);
   if (terms.length === 0) return [];
   let timer: ReturnType<typeof setTimeout> | undefined;

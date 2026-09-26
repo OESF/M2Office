@@ -9,10 +9,10 @@
  */
 
 import {
-  PostgresRepository, StubLlmProvider, OpenAiCompatibleProvider, ToolRegistry, BUILTIN_TOOLS, GoogleDataRetention, GoogleRevocation, agentUsesGoogle,
+  PostgresRepository, ToolRegistry, BUILTIN_TOOLS, GoogleDataRetention, GoogleRevocation, agentUsesGoogle,
   RunEngine, Secretary, OFFICIAL_AGENTS, buildConnector, LocalFileStore,
   createLoggerFromEnv, HelpCatalog, parseArticle, ExtensionHub, HttpMcpClient, loadExtensions,
-  GeminiResearchProvider, MockResearchProvider, TenantAiResolver, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID, type ResearchProvider,
+  TenantAiResolver, platformAi, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID,
   defaultGeminiModels,
   type SecretBox, type GeminiModels,
   type FileStore, type TenantExtensions, type HelpArticle, type LlmProvider, type Logger, type Repository, type WorkspaceConnector,
@@ -96,7 +96,8 @@ export function buildDeps(): AppDeps {
   for (const tool of BUILTIN_TOOLS) registry.register(tool);
 
   const hub = buildHub(repo, registry, log);
-  const llm = buildLlm(hub);
+  const platform = buildAi(hub);
+  const llm = platform.llm;
   const tenantView = (tenantId: string) => hub.forTenant(tenantId);
   /** その人の利用範囲の判定を作る。会社の設定と、その人の所属するグループを読む。 */
   // 利用範囲（第16.7節）と権限区画（第16.3.6節）の両方を見る
@@ -121,13 +122,13 @@ export function buildDeps(): AppDeps {
   const files = new LocalFileStore(fileStorageDir());
   // Google のデータを扱うツールは、内蔵のツールのうち権限（google）を宣言しているもの（第9.4.4節）
   const retentionRef = new GoogleDataRetention({ repo, isGoogleTool: (name) => !!registry.get(name)?.google, logger: log });
-  const research = buildResearch();
+  const research = platform.research;
   if (devKey) log.warn('M2OFFICE_SECRET_KEY が未設定のため、開発用の固定の鍵で秘密の値を暗号化しています（本番では起動しません）');
   const ai = new TenantAiResolver({
     repo, box, fallbackLlm: llm, fallbackResearch: research,
-    platformKey: (process.env['LLM_PROVIDER'] ?? 'stub') === 'gemini' ? process.env['GEMINI_API_KEY'] || null : null,
+    platformKey: platform.platformKey, testMode: platform.testMode,
     defaults: defaultGeminiModels(),
-    baseUrl: process.env['GEMINI_BASE_URL'] ?? 'https://generativelanguage.googleapis.com/v1beta/openai',
+    baseUrl: platform.baseUrl,
   });
   const engine = new RunEngine({
     repo, llm, registry, connector, files, logger: log, research,
@@ -251,35 +252,12 @@ export function fileStorageDir(): string {
 }
 
 /**
- * 設定に応じて Web の調査の提供者を選ぶ（仕様書 第9.4.2節）。
+ * 運営の設定から、会社の鍵が無いときの推論と調べものを決める（仕様書 第20.2節・第20.2.4節）。
  *
- * @remarks LLM と同じく、Gemini の鍵があれば Google 検索グラウンディングで調べ、無ければ見本を返す。ワーカーと同じ判定。
+ * @remarks
+ * 運営の鍵があれば Gemini。`LLM_PROVIDER=stub` は自動テスト専用のスタブ（見本の応答を再生する）。
+ * どちらでもなければ「設定されていない」になり、秘書も業務も動かさない（ADR-0030）。ワーカーと同じ判定。
  */
-export function buildResearch(): ResearchProvider {
-  const key = process.env['GEMINI_API_KEY'] ?? '';
-  if ((process.env['LLM_PROVIDER'] ?? 'stub') === 'gemini' && key) {
-    return new GeminiResearchProvider(key, defaultGeminiModels().research);
-  }
-  return new MockResearchProvider();
-}
-
-/**
- * 設定に応じて LLM 提供者を選ぶ（仕様書 第20.2節）。
- *
- * @remarks ワーカーと同じ判定を用いる。
- */
-export function buildLlm(hub?: ExtensionHub): LlmProvider {
-  const provider = process.env['LLM_PROVIDER'] ?? 'stub';
-  const key = process.env['GEMINI_API_KEY'] ?? '';
-  if (provider === 'gemini' && key) {
-    return new OpenAiCompatibleProvider(
-      key,
-      defaultGeminiModels(),
-      process.env['GEMINI_BASE_URL'] ??
-        'https://generativelanguage.googleapis.com/v1beta/openai',
-    );
-  }
-  // 鍵が無い開発環境では、拡張機能の評価のケースにある見本の応答を再生する（仕様書 第12.9.4節）。
-  // 実行エンジンは実行中の定義の評価のケースを渡す。ここでは公式の配布元の分を予備として引く
-  return new StubLlmProvider((agentId) => hub?.officialAgents().find((a) => a.id === agentId)?.evals);
+export function buildAi(hub?: ExtensionHub) {
+  return platformAi(process.env, (agentId) => hub?.officialAgents().find((a) => a.id === agentId)?.evals);
 }

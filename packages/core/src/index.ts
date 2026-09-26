@@ -14,6 +14,7 @@ export {
 
 export * from './llm/provider.js';
 export { StubLlmProvider } from './llm/stub.js';
+export { AI_NOT_CONFIGURED_MESSAGE, AiNotConfiguredError, UnconfiguredLlmProvider, UnconfiguredResearchProvider, aiAvailable } from './llm/unconfigured.js';
 export { OpenAiCompatibleProvider, LlmRequestError } from './llm/gemini.js';
 export type { GeminiModelMap } from './llm/gemini.js';
 
@@ -53,7 +54,7 @@ export * from './files/index.js';
 export { SecretBox, secretBoxFromEnv } from './secrets/box.js';
 export { fetchGooglePhoto, isGooglePhotoUrl, MAX_PHOTO_BYTES } from './google/photo.js';
 export {
-  TenantAiResolver, type GeminiModels, type GeminiSettingsMeta, type ResolvedGemini, type TenantAiResolverDeps,
+  TenantAiResolver, platformAi, type GeminiModels, type GeminiSettingsMeta, type ResolvedGemini, type TenantAiResolverDeps,
 } from './secrets/tenant-ai.js';
 export { checkGeminiText, checkGeminiLive, type CheckResult } from './secrets/gemini-check.js';
 export {

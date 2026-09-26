@@ -3,15 +3,17 @@
   "cases": [
     {
       "name": "こんにちは",
-      "input": { "あいさつ": "こんにちは" },
-      "expect": "「Hello World」と返す",
-      "answer": "Hello World"
+      "input": {
+        "あいさつ": "こんにちは"
+      },
+      "expect": "「Hello World」と返す"
     },
     {
       "name": "おはようございます",
-      "input": { "あいさつ": "おはようございます" },
-      "expect": "「Good morning」のような短い英語で返す",
-      "answer": "Good morning"
+      "input": {
+        "あいさつ": "おはようございます"
+      },
+      "expect": "「Good morning」のような短い英語で返す"
     }
   ]
 }

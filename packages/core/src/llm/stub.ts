@@ -1,28 +1,27 @@
 /**
- * @file 推論を行わないスタブの LLM。鍵が無くても全体の流れを確かめるためのもの。
+ * @file 推論を行わないスタブの LLM。**M2Office 自身の自動テスト（単体テストと通しの確認）の中だけで使う**（仕様書 第20.2.4節、ADR-0030）。
  *
- * 指示文の語句からツール呼び出しを組み立てて返す。本番では使わない。
+ * 指示文の語句からツール呼び出しを組み立てて返す。利用者の画面では使わない。
  */
 
 import type { EvalCase } from '@m2office/shared';
 import type { LlmProvider, LlmRequest, LlmResponse } from './provider.js';
 
 /**
- * 鍵を設定せずに全体の流れを確認するためのスタブ実装。
+ * 自動テストのためのスタブ実装。
  *
  * 実際の推論は行わない。システムプロンプトに書かれたツール一覧を読み取り、
  * 指示文の語句に応じて妥当なツール呼び出しを組み立てて返す。
- * これにより、鍵が無くても実行エンジンとツール層の経路を通して検証できる。
+ * これにより、自動テストで実行エンジンとツール層の経路を通して検証できる。
  *
  * @remarks
- * 本番では使わない。`LLM_PROVIDER=stub` のときだけ選ばれる。
+ * 利用者の画面では使わない。`LLM_PROVIDER=stub`（自動テスト専用）のときだけ選ばれる。
  */
 export class StubLlmProvider implements LlmProvider {
   readonly name = 'stub';
 
   /**
-   * @param evalsFor 業務エージェントの評価のケース（見本の応答を含む）を引く。
-   *   拡張機能の業務エージェントを鍵なしで動かすために使う（仕様書 第12.9.4節）
+   * @param evalsFor 業務エージェントの評価のケース（自動テストの見本の応答を含む）を引く（仕様書 第12.9.4節）
    */
   constructor(private readonly evalsFor?: (agentId: string) => EvalCase[] | undefined) {}
 
@@ -57,7 +56,7 @@ export class StubLlmProvider implements LlmProvider {
    */
   private replay(req: LlmRequest): LlmResponse | null {
     const ctx = req.context;
-    const cases = ctx ? (ctx.evals ?? this.evalsFor?.(ctx.agentId) ?? []).filter((c) => c.stub || c.answer) : [];
+    const cases = ctx ? (ctx.evals ?? this.evalsFor?.(ctx.agentId) ?? []).filter((c) => c.stub) : [];
     if (!ctx || cases.length === 0) return null;
     const hit = cases.find((c) => stableJson(c.input) === stableJson(ctx.input));
     const tokensUsed = Math.ceil(JSON.stringify(ctx.input).length / 4) + 32;
@@ -70,8 +69,6 @@ export class StubLlmProvider implements LlmProvider {
     const calls = (hit.stub?.[ctx.stepId] ?? []).map((c) => ({
       ...c, args: fillPlaceholders(c.args, ctx.stepResults ?? {}) as Record<string, unknown>,
     }));
-    // 道具を呼ばない段で見本の答えがあれば、それを答えにする（スキルの形式。第12.12節）
-    if (calls.length === 0 && hit.answer) return { text: hit.answer, tokensUsed };
     const lines = [`［スタブ応答］見本の応答を再生しています（評価のケース「${hit.name}」）。`];
     for (const call of calls) lines.push('', '```tool', JSON.stringify(call), '```');
     return { text: lines.join('\n'), tokensUsed };

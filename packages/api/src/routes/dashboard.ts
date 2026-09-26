@@ -413,7 +413,7 @@ export function dashboardRoute(deps: AppDeps) {
       },
       health: {
         workspace: deps.connector.sourceFor(tenant.id) === 'mock' ? 'ダミーデータで動作中（Google 未接続）' : 'Google Workspace に接続中',
-        llm: deps.llm.name === 'stub' ? 'スタブ（推論を行わない開発用）' : deps.llm.name,
+        llm: deps.llm.name === 'stub' ? 'スタブ（自動テスト専用）' : deps.llm.name === 'unconfigured' ? '未設定（会社の鍵だけで動く）' : deps.llm.name,
       },
     });
   });

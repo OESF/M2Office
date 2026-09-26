@@ -30,6 +30,7 @@ import { describeCall } from './describe-call.js';
 import { composeApprovalPresent, describeContext } from './approval-present.js';
 import { validateDefinition } from './validate.js';
 import { expandQuery } from '../knowledge/expand.js';
+import { AI_NOT_CONFIGURED_MESSAGE, aiAvailable } from '../llm/unconfigured.js';
 import { parseToolCalls } from './tool-protocol.js';
 
 /** 実行を 1 歩進めた結果。ワーカーが次の行動を決めるのに使う。 */
@@ -120,6 +121,8 @@ export class RunEngine {
       llm: this.deps.llmFor ? await this.deps.llmFor(run.tenantId) : this.deps.llm,
       research: this.deps.researchFor ? await this.deps.researchFor(run.tenantId) : this.deps.research,
     };
+    // 推論が使えない会社では進めない。定時実行もここで失敗にする（仕様書 第20.2.4節、ADR-0030）
+    if (!aiAvailable(ai.llm)) return this.fail(run, AI_NOT_CONFIGURED_MESSAGE);
 
     try {
       validateDefinition(def, registry);

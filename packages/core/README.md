@@ -24,7 +24,7 @@ src/extensions/  拡張機能の読み込みと検証、.m2ext の作成と展�
 src/scheduler/   定時実行の規則と起動役
 src/notify/      通知の控え（Chat）の送信口と、届ける見回り役
 src/retention/   Google から取得したデータの保持（期間を過ぎた実行の中身を消す、承認待ちの期限切れ）と、許可がなくなったときの業務の後始末
-src/llm/         LLM 抽象化層（スタブ／OpenAI 互換）。
+src/llm/         LLM 抽象化層（OpenAI 互換、設定されていない会社の推論、自動テスト用のスタブ）。
                  models.ts は役割ごとの既定のモデルと、モデルごとの値段の表（出どころと確認日つき。第20.2.2節）
 src/repository/  永続化。テナント境界の絞り込みを伴う
 src/agents/      公式エージェントの定義（AG-01〜05）
@@ -33,6 +33,14 @@ test/            単体テスト（DB を使わない）
 ```
 
 ## 中心にあるもの
+
+### 推論が使えない会社（`llm/unconfigured.ts`）
+
+**推論（Gemini）が使えない会社では、秘書も業務も動かしません**（仕様書 第20.2.4節、ADR-0030）。
+`platformAi()`（`secrets/tenant-ai.ts`）が運営の設定から、会社の鍵が無いときの推論を決めます。運営の鍵があれば Gemini、
+`LLM_PROVIDER=stub` なら自動テスト用のスタブ、どちらでもなければ `UnconfiguredLlmProvider`（`name: 'unconfigured'`）です。
+秘書（`Secretary.respond`）・実行エンジン（`RunEngine.advance`）・業務の受け付け（API）・音声（`TenantAiResolver.voiceFor`）は、
+`aiAvailable()` で見分けて推論を呼ばずに断り、`AI_NOT_CONFIGURED_MESSAGE` を返します。見本の応答で動いたように見せません。
 
 ### 実行エンジン（`RunEngine`）
 
@@ -129,8 +137,8 @@ decideApproval(...)  →  承認を記録し、待ち行列へ戻す
 | `pdf.extract` | read | PDF から文字を取り出す。文字の無いページは、そのページだけを抜き出した PDF を読み取りへ送る（10 ページまで。Q-56） |
 | `docx.render` | draft | Word 形式で文書を出力する |
 | `pdf.render` | draft | 帳票（請求書など）を PDF で出力する。日本語の一部に絞った Noto Sans JP を同梱し（`assets/fonts/README.md`）、使った文字だけを埋め込む。範囲の外の字は `〓` に置き換えて返す（Q-59、ADR-0017）。会社の帳票の体裁（第15.2.2節）は `loadInvoiceStyle()` で読み、ロゴ・差出人・振込先・備考の定型文・印の欄を出す |
-| `image.read_text` | read | 画像（PNG・JPEG）から文字を読み取る（OCR）。推論を使うため確かな値ではなく、鍵が無い環境では読み取らない（Q-56） |
-| `web.research` | read | テーマを Google 検索（Gemini のグラウンディング）で調べ、出典つきで返す。鍵が無ければ見本 |
+| `image.read_text` | read | 画像（PNG・JPEG）から文字を読み取る（OCR）。推論を使うため確かな値ではない（Q-56） |
+| `web.research` | read | テーマを Google 検索（Gemini のグラウンディング）で調べ、出典つきで返す |
 | `slides.create` | draft | スライドの構成（JSON）から Google スライドを作る。見本の接続口ではアウトラインを成果物に残す |
 
 エージェントが読めるのは依頼した本人のファイルだけです。ライブラリの選定は ADR-0004 を参照してください。
@@ -243,7 +251,7 @@ AG-02 議事録作成・共有は、承認②のあとに `knowledge.register` �
 
 - `VoiceProvider.open()` が返すのは、音を送る・文字と音を受け取る・終わる、だけの口です。画面と中継は提供者を知りません
 - `GeminiLiveProvider` が Gemini Live 固有の形（`setup`・`realtimeInput`・`serverContent`）を担います。鍵はサーバーだけが持ちます
-- 鍵が無い環境では `MockVoiceProvider` に切り替わり、音声を返さず文字だけを返します
+- 鍵が無い会社では音声を始めず、「Gemini の接続が設定されていません」と伝えます（`AiNotConfiguredError`。仕様書 第20.2.4節）。`MockVoiceProvider` は自動テスト（`LLM_PROVIDER=stub`）の中だけで使います
 - 音は通すだけで、どこにも書き出しません（第10.5.3節）。会話ログに残すのは文字だけです
 - 声（`VOICE_CHOICES` から本人が選ぶ）は `speechConfig` で、話し方の指示（例: 関西弁で話して）は指示文の末尾で渡します（第10.5.6節）。知らない声の名前は中継が落とします
 

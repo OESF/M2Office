@@ -16,6 +16,11 @@ import type { SecretBox } from './box.js';
 import type { VoiceProvider } from '../voice/provider.js';
 import { GeminiLiveProvider } from '../voice/gemini-live.js';
 import { MockVoiceProvider } from '../voice/mock.js';
+import { MockResearchProvider } from '../research/provider.js';
+import { StubLlmProvider } from '../llm/stub.js';
+import { AiNotConfiguredError, UnconfiguredLlmProvider, UnconfiguredResearchProvider } from '../llm/unconfigured.js';
+import { defaultGeminiModels } from '../llm/models.js';
+import type { EvalCase } from '@m2office/shared';
 
 /** 役割ごとのモデル名。 */
 export interface GeminiModels {
@@ -42,7 +47,7 @@ export interface ResolvedGemini {
 export interface TenantAiResolverDeps {
   repo: Repository;
   box: SecretBox;
-  /** 会社の鍵が無いときの推論（運営の鍵か、鍵の無い開発環境のスタブ）。 */
+  /** 会社の鍵が無いときの推論（運営の鍵か、設定されていないことを伝えるもの。自動テストではスタブ）。 */
   fallbackLlm: LlmProvider;
   fallbackResearch: ResearchProvider;
   /** 運営の鍵。無ければ `null`。 */
@@ -51,6 +56,33 @@ export interface TenantAiResolverDeps {
   defaults: GeminiModels;
   /** OpenAI 互換の窓口。 */
   baseUrl: string;
+  /** 自動テストか（`LLM_PROVIDER=stub`）。見本の音声を使ってよいのはこのときだけ（仕様書 第20.2.4節）。 */
+  testMode?: boolean;
+}
+
+/**
+ * 運営の設定（環境変数）から、会社の鍵が無いときに使う推論と調べものを決める（仕様書 第20.2.4節、ADR-0030）。
+ *
+ * @param evalsFor 自動テストの見本の応答（評価のケース）を引く。スタブのときだけ使う
+ * @returns 運営の鍵があれば Gemini、`LLM_PROVIDER=stub` なら自動テスト用のスタブ、どちらでもなければ「設定されていない」
+ */
+export function platformAi(
+  env: Record<string, string | undefined>,
+  evalsFor?: (agentId: string) => EvalCase[] | undefined,
+): { llm: LlmProvider; research: ResearchProvider; platformKey: string | null; testMode: boolean; baseUrl: string } {
+  const baseUrl = env['GEMINI_BASE_URL'] ?? 'https://generativelanguage.googleapis.com/v1beta/openai';
+  if ((env['LLM_PROVIDER'] ?? 'gemini') === 'stub') {
+    return { llm: new StubLlmProvider(evalsFor), research: new MockResearchProvider(), platformKey: null, testMode: true, baseUrl };
+  }
+  const key = env['GEMINI_API_KEY'] ?? '';
+  if (key) {
+    const models = defaultGeminiModels();
+    return {
+      llm: new OpenAiCompatibleProvider(key, models, baseUrl), research: new GeminiResearchProvider(key, models.research),
+      platformKey: key, testMode: false, baseUrl,
+    };
+  }
+  return { llm: new UnconfiguredLlmProvider(), research: new UnconfiguredResearchProvider(), platformKey: null, testMode: false, baseUrl };
 }
 
 export class TenantAiResolver {
@@ -87,11 +119,15 @@ export class TenantAiResolver {
   /**
    * 会社の音声の対話（仕様書 第10.5節、ADR-0018）。
    *
-   * @remarks 鍵があれば Gemini Live、無ければ見本の実装を返す。呼び出し側は違いを知らない。
+   * @remarks 鍵があれば Gemini Live。無ければ始めない（仕様書 第20.2.4節）。見本の実装は自動テストのときだけ
+   * @throws {AiNotConfiguredError} 鍵が無いとき（自動テストを除く）
    */
   async voiceFor(tenantId: string): Promise<VoiceProvider> {
     const g = await this.geminiFor(tenantId);
-    if (!g.apiKey) return new MockVoiceProvider();
+    if (!g.apiKey) {
+      if (this.deps.testMode) return new MockVoiceProvider();
+      throw new AiNotConfiguredError();
+    }
     return new GeminiLiveProvider({ apiKey: g.apiKey, model: g.models.live });
   }
 

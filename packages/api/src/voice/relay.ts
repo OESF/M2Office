@@ -15,7 +15,7 @@ import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket as NodeWebSocket } from 'ws';
 import { VOICE_CHOICES, canDecide } from '@m2office/shared';
-import { needsCanvas, type Logger, type SecretaryReply, type VoiceEvent, type VoiceSession, type VoiceTool } from '@m2office/core';
+import { AiNotConfiguredError, needsCanvas, type Logger, type SecretaryReply, type VoiceEvent, type VoiceSession, type VoiceTool } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { SESSION_COOKIE, sessionIdOf } from '../auth/session.js';
 import { extractSubdomain } from '../middleware/tenant.js';
@@ -263,7 +263,15 @@ async function start(
 
   const prefs = await deps.repo.getUserSettings(tenantId, userId);
   const speak = prefs.secretary.speak !== false;
-  const provider = await deps.ai.voiceFor(tenantId);
+  // 推論が使えない会社では、音声を始めない（仕様書 第20.2.4節、ADR-0030）
+  let provider: Awaited<ReturnType<typeof deps.ai.voiceFor>>;
+  try {
+    provider = await deps.ai.voiceFor(tenantId);
+  } catch (err) {
+    send({ type: 'error', message: err instanceof AiNotConfiguredError ? err.message : '音声の対話を始められませんでした。しばらくしてからお試しください' });
+    ws.close();
+    return;
+  }
 
   try {
     session = await provider.open({
