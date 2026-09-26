@@ -97,6 +97,9 @@ function viewOf(r: Route): View | null {
  */
 export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [agents, setAgents] = useState<AgentSummary[]>([]);
+  // よく使う業務の ID（仕様書 第6.1.1節）。ほかはたたむ
+  const [frequent, setFrequent] = useState<string[]>([]);
+  const [moreOpen, setMoreOpen] = useRemembered('m2office.nav-more-agents', false);
   const [approvals, setApprovals] = useState<ApprovalView[]>([]);
   const [history, setHistory] = useState<
     { run: { id: string; status: string; startedAt: string }; job: { agentId: string } | null }[]
@@ -181,6 +184,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
         api.agents(), api.approvals(), api.jobs(), api.notifications(), api.lookups(),
       ]);
       setAgents(a.agents);
+      setFrequent(a.frequent ?? []);
       setAgentsLoaded(true);
       setApprovals(p.items);
       setHistory(j.items as never);
@@ -283,7 +287,15 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
 
   // キーボードの割り当て（仕様書 第6.11.3節）。表は keys.ts に 1 つだけ置く
   // スキルの user-invocable: false の業務はメニューに出さない。秘書が取り次いだときだけ使う（仕様書 第12.12.2節）
-  const menuAgents = orderAgents(agents, menu.order).filter((a) => !menu.hidden.includes(a.id) && a.menu !== false);
+  const allMenuAgents = orderAgents(agents, menu.order).filter((a) => !menu.hidden.includes(a.id) && a.menu !== false);
+  // よく使う業務だけを上に出し、ほかは「ほかの業務」にたたむ（仕様書 第6.1.1節「業務の並び」）。並びはメニューの順のまま
+  const topAgents = frequent.length > 0 ? allMenuAgents.filter((a) => frequent.includes(a.id)) : allMenuAgents.slice(0, 6);
+  const otherAgents = allMenuAgents.filter((a) => !topAgents.includes(a));
+  // いま開いている業務がたたんだ中にあれば、開いておく
+  const openingOther = view.kind === 'agent' && otherAgents.some((a) => a.id === view.agent.id);
+  const showOthers = moreOpen || openingOther;
+  // 押すキー（1〜9）は見えている順に割り当てる
+  const menuAgents = showOthers ? [...topAgents, ...otherAgents] : topAgents;
   useHotkey('Mod+,', useCallback(() => openSettings(), [openSettings]));
   useHotkey('Mod+/', useCallback(() => openSettings('keys'), [openSettings]));
   useHotkey('Mod+I', useCallback(() => setTalkOpen(!talkOpen), [talkOpen, setTalkOpen]));
@@ -333,13 +345,28 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
         nav={(
           <>
             <NavHeading>業務</NavHeading>
-            {menuAgents.map((a, i) => (
+            {topAgents.map((a, i) => (
               <NavItem
                 key={a.id} icon={agentIcon(a.category)} label={a.name} description={a.description}
                 active={view.kind === 'agent' && view.agent.id === a.id}
                 // 1〜9 番目には、押すキーを併記する（仕様書 第6.11.1節 k4）
                 hint={i < 9 ? keyLabel(`Mod+Shift+${i + 1}`) : ''}
                 onClick={() => setView({ kind: 'agent', agent: a })}
+              />
+            ))}
+            {otherAgents.length > 0 && (
+              <NavItem
+                icon="apps" label={`ほかの業務（${otherAgents.length}）`} expanded={showOthers}
+                onClick={() => setMoreOpen(!showOthers)}
+              />
+            )}
+            {showOthers && otherAgents.map((a, i) => (
+              <NavItem
+                key={a.id} icon={agentIcon(a.category)} label={a.name} description={a.description}
+                active={view.kind === 'agent' && view.agent.id === a.id}
+                hint={topAgents.length + i < 9 ? keyLabel(`Mod+Shift+${topAgents.length + i + 1}`) : ''}
+                onClick={() => setView({ kind: 'agent', agent: a })}
+                className="item nav-other"
               />
             ))}
             <NavHeading>自分の状況</NavHeading>

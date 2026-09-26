@@ -56,7 +56,7 @@ export function SecretaryAvatar({ avatar }: { avatar: string }) {
 export function agentIcon(category: string): IconName {
   const map: Record<string, IconName> = {
     mail: 'mail', calendar: 'calendar', knowledge: 'knowledge', meeting: 'meeting', briefing: 'briefing',
-    research: 'research', report: 'report', sample: 'sample',
+    research: 'research', report: 'report', sample: 'sample', document: 'doc',
   };
   return map[category] ?? 'agent';
 }
