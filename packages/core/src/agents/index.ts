@@ -13,6 +13,7 @@ import { AG05_WEEKLY_BRIEF } from './ag-05-weekly-brief.js';
 import { AG16_LOOKUP } from './ag-16-lookup.js';
 import { SECRETARY_CALENDAR } from './secretary-calendar.js';
 import { MORNING_BRIEF } from './morning-brief.js';
+import { BASIC_AGENTS } from './basic.js';
 
 /**
  * 公式エージェントのカタログ。
@@ -23,7 +24,7 @@ import { MORNING_BRIEF } from './morning-brief.js';
  * 並びは画面のメニューの既定順であり、実装の順序（第9.5.7節）ではない。
  */
 export const OFFICIAL_AGENTS: AgentDefinition[] = [
-  AG04_KNOWLEDGE_QA, AG02_MINUTES, AG01_INBOX, AG03_SCHEDULING, AG05_WEEKLY_BRIEF, MORNING_BRIEF, AG16_LOOKUP, SECRETARY_CALENDAR,
+  AG04_KNOWLEDGE_QA, AG02_MINUTES, AG01_INBOX, AG03_SCHEDULING, AG05_WEEKLY_BRIEF, MORNING_BRIEF, ...BASIC_AGENTS, AG16_LOOKUP, SECRETARY_CALENDAR,
 ];
 
 /**
@@ -82,6 +83,11 @@ export const DEFAULT_STANDARD_MINUTES: Record<string, number> = {
   'knowledge-qa': 10,
   'calendar-register': 5,
   'morning-brief': 10,
+  'meeting-prep': 15,
+  'reply-followup': 10,
+  'document-draft': 20,
+  'sheet-builder': 15,
+  slides: 60,
   'weekly-brief': 20,
 };
 
