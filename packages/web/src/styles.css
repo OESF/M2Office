@@ -1069,3 +1069,24 @@ code.uri { background: var(--subtle-bg); border: 1px solid var(--line); border-r
 /* 会社のロゴ（仕様書 第6.6.1節）。上の帯の高さに収める */
 .brand-logo { height: 26px; max-width: 160px; object-fit: contain; display: block; }
 .company-logo-preview { height: 40px; max-width: 200px; object-fit: contain; border: 1px solid var(--line); border-radius: 4px; padding: 4px; background: #fff; }
+
+/*
+  詰めた並べ方（会社情報の基本情報など）。12 列に分け、欄の幅を中身の長さに合わせる。
+  広い画面でも欄が伸びすぎないよう、全体の幅に上限を置く。狭い画面では 1 列に積む
+*/
+.form-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 0 14px; max-width: 1040px; }
+.form-grid > .field { grid-column: span 12; }
+.form-grid > .span-2 { grid-column: span 2; }
+.form-grid > .span-3 { grid-column: span 3; }
+.form-grid > .span-4 { grid-column: span 4; }
+.form-grid > .span-6 { grid-column: span 6; }
+.form-grid > .span-7 { grid-column: span 7; }
+.form-grid > .span-8 { grid-column: span 8; }
+.form-grid label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 900px) {
+  .form-grid > .field { grid-column: span 6; }
+}
+@media (max-width: 600px) {
+  .form-grid > .field { grid-column: span 12; }
+}
+.field input[type="file"] { width: auto; max-width: 100%; }

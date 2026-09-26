@@ -52,15 +52,19 @@ function useSaver() {
   return { busy: state.busy, run, view };
 }
 
-function Text({ label, value, onChange, hint, multiline }: {
+function Text({ label, value, onChange, hint, multiline, span, placeholder }: {
   label: string; value: string; onChange: (v: string) => void; hint?: string; multiline?: boolean;
+  /** 詰めた並べ方（`form-grid`）の中で使う列の数（12 のうち）。 */
+  span?: number;
+  /** 入力欄の中に薄く置く例（仕様書 第6.10.4.1節）。下に説明を足すより場所を取らない。 */
+  placeholder?: string;
 }) {
   return (
-    <div className="field">
+    <div className={`field${span ? ` span-${span}` : ''}`}>
       <label>{label}</label>
       {multiline
-        ? <textarea value={value} onChange={(e) => onChange(e.target.value)} />
-        : <input value={value} onChange={(e) => onChange(e.target.value)} />}
+        ? <textarea value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} />
+        : <input value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} />}
       {hint && <span className="muted small">{hint}</span>}
     </div>
   );
@@ -119,30 +123,27 @@ export function CompanySettings({ page }: { page: string }) {
       <PageTitle trail={['会社情報', title]} help={COMPANY_HELP[page]} />
       {page === 'basic' && (
       <div className="card">
-        <Text label="正式な会社名" value={company.legalName} onChange={c('legalName')} hint="前株・後株を含めて正確に" />
-        {/* 略称は、秘書が名乗るときの会社の呼び方と画面の見出しに使う（仕様書 第6.6.1節） */}
-        <Text label="略称" value={company.shortName ?? ''} onChange={c('shortName')} hint="例: OESF" />
-        <div className="grid2">
-          <Text label="郵便番号" value={company.postalCode ?? ''} onChange={c('postalCode')} hint="例: 123-4567" />
-          <span />
-        </div>
-        <Text label="住所" value={company.address} onChange={c('address')} />
-        <CompanyLogo fileId={company.logoFileId ?? null}
-          onChange={async (logoFileId) => {
-            const next = { ...company, logoFileId };
-            setCompany(next);
-            await api.admin.saveSettings('company', next);
-          }} />
-        <Text label="電話番号" value={company.phone} onChange={c('phone')} />
-        <div className="grid2">
-          <div className="field">
+        {/*
+          詰めて並べる（2026-09-26 に三浦さんが指摘。欄がすべて横いっぱいで広すぎた）。
+          欄の幅は中身の長さに合わせ、例は欄の中に薄く置く（第6.10.4.1節）
+        */}
+        <div className="form-grid">
+          <Text span={8} label="正式な会社名" value={company.legalName} onChange={c('legalName')} placeholder="前株・後株を含めて正確に" />
+          {/* 略称は、秘書が名乗るときの会社の呼び方と画面の見出しに使う（仕様書 第6.6.1節） */}
+          <Text span={4} label="略称" value={company.shortName ?? ''} onChange={c('shortName')} placeholder="例: OESF" />
+          <Text span={2} label="郵便番号" value={company.postalCode ?? ''} onChange={c('postalCode')} placeholder="123-4567" />
+          <Text span={7} label="住所" value={company.address} onChange={c('address')} />
+          <Text span={3} label="電話番号" value={company.phone} onChange={c('phone')} placeholder="03-0000-0000" />
+          <Text span={4} label="適格請求書発行事業者の登録番号" value={company.invoiceRegistrationNumber}
+            onChange={c('invoiceRegistrationNumber')} placeholder="T1234567890123（未登録なら空欄）" />
+          <div className="field span-2">
             <label>会計年度の開始月</label>
             <select value={company.fiscalYearStartMonth}
               onChange={(e) => setCompany({ ...company, fiscalYearStartMonth: Number(e.target.value) })}>
               {Array.from({ length: 12 }, (_, i) => <option key={i + 1} value={i + 1}>{i + 1} 月</option>)}
             </select>
           </div>
-          <div className="field">
+          <div className="field span-2">
             <label>締め日</label>
             <select value={String(company.closingDay)}
               onChange={(e) => setCompany({ ...company, closingDay: e.target.value === 'end' ? 'end' : Number(e.target.value) })}>
@@ -150,12 +151,8 @@ export function CompanySettings({ page }: { page: string }) {
               {Array.from({ length: 28 }, (_, i) => <option key={i + 1} value={i + 1}>{i + 1} 日</option>)}
             </select>
           </div>
-        </div>
-        <Text label="適格請求書発行事業者の登録番号" value={company.invoiceRegistrationNumber}
-          onChange={c('invoiceRegistrationNumber')} hint="T に続く 13 桁（例: T1234567890123）。未登録なら空欄" />
-        <div className="grid2">
-          <div className="field">
-            <label>消費税の端数処理（税率ごとに 1 回）</label>
+          <div className="field span-2">
+            <label title="税率ごとに 1 回">消費税の端数処理</label>
             <select value={company.taxRounding}
               onChange={(e) => setCompany({ ...company, taxRounding: e.target.value as CompanyInfo['taxRounding'] })}>
               <option value="floor">切り捨て</option>
@@ -163,8 +160,14 @@ export function CompanySettings({ page }: { page: string }) {
               <option value="ceil">切り上げ</option>
             </select>
           </div>
-          <Text label="支払サイト" value={company.paymentTerms} onChange={c('paymentTerms')} hint="例: 翌月末払い" />
+          <Text span={2} label="支払サイト" value={company.paymentTerms} onChange={c('paymentTerms')} placeholder="例: 翌月末払い" />
         </div>
+        <CompanyLogo fileId={company.logoFileId ?? null}
+          onChange={async (logoFileId) => {
+            const next = { ...company, logoFileId };
+            setCompany(next);
+            await api.admin.saveSettings('company', next);
+          }} />
         <SaveButton run={() => api.admin.saveSettings('company', company)} />
       </div>
       )}
