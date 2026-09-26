@@ -2,8 +2,9 @@
 :root {
   /* 色はすべてここで名前を付けて持つ。画面ごとに直書きしない（仕様書 第6.1.2節） */
   color-scheme: light;
-  /* 文字の大きさの倍率。画面の文字はすべてこれを掛ける（仕様書 第6.1節。第 0.136.1 版で 0.9） */
-  --font-scale: 0.9;
+  /* 文字の大きさと行間の倍率。画面の文字と行間はすべてこれを掛ける（仕様書 第6.1節。第 0.136.2 版で 0.875 と 0.9） */
+  --font-scale: 0.875;
+  --line-scale: 0.9;
   --bg: #f6f7f8;
   --panel: #ffffff;
   --line: #d8dee2;
@@ -111,8 +112,8 @@
 }
 
 * { box-sizing: border-box; }
-/* 大きさを指定していない文字（ブラウザの既定の 16px）にも倍率を掛ける */
-body { margin: 0; background: var(--bg); font-size: calc(16px * var(--font-scale)); }
+/* 大きさと行間を指定していない文字（ブラウザの既定の 16px、行間はこの書体の既定の 1.5）にも倍率を掛ける */
+body { margin: 0; background: var(--bg); font-size: calc(16px * var(--font-scale)); line-height: calc(1.5 * var(--line-scale)); }
 button { font: inherit; cursor: pointer; }
 
 .app { display: flex; flex-direction: column; height: 100vh; }
@@ -156,7 +157,7 @@ button { font: inherit; cursor: pointer; }
 .launcher-item {
   display: flex; flex-direction: column; align-items: center; gap: 6px;
   padding: 12px 4px 10px; border-radius: 8px; color: var(--ink); text-decoration: none;
-  font-size: calc(12px * var(--font-scale)); text-align: center; line-height: 1.3; white-space: nowrap;
+  font-size: calc(12px * var(--font-scale)); text-align: center; line-height: calc(1.3 * var(--line-scale)); white-space: nowrap;
 }
 .launcher-item:hover, .launcher-item:focus-visible { background: var(--accent-soft); color: var(--accent); }
 .launcher-item .icon { width: 28px; height: 28px; }
@@ -356,7 +357,7 @@ button { font: inherit; cursor: pointer; }
 /* 最初から 2 行ぶん見える。書くほど伸び、上限を超えたら中で送る（第6.1.3節） */
 .secretary-input textarea {
   width: 100%; border: 0; background: none; resize: none; font: inherit; color: inherit;
-  line-height: 1.6; min-height: 3.2em; max-height: 180px; overflow-y: auto; padding: 2px 0;
+  line-height: calc(1.6 * var(--line-scale)); min-height: 3.2em; max-height: 180px; overflow-y: auto; padding: 2px 0;
 }
 .secretary-input textarea:focus { outline: none; }
 
@@ -372,7 +373,7 @@ button { font: inherit; cursor: pointer; }
 
 /* 押すキーの表示（仕様書 第6.11.1節 k4）。隠れたショートカットにしない */
 kbd {
-  font: inherit; font-size: calc(11px * var(--font-scale)); line-height: 1.4; color: var(--muted);
+  font: inherit; font-size: calc(11px * var(--font-scale)); line-height: calc(1.4 * var(--line-scale)); color: var(--muted);
   border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px;
   background: var(--subtle-bg); white-space: nowrap;
 }
@@ -557,7 +558,7 @@ pre.body { white-space: pre-wrap; background: var(--subtle-bg); border: 1px soli
   /* 入りきらないときは縮める。折り返さない */
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
 }
-.tile strong { font-size: calc(24px * var(--font-scale)); font-variant-numeric: tabular-nums; line-height: 1.2; white-space: nowrap; }
+.tile strong { font-size: calc(24px * var(--font-scale)); font-variant-numeric: tabular-nums; line-height: calc(1.2 * var(--line-scale)); white-space: nowrap; }
 .tile strong small { font-size: calc(12px * var(--font-scale)); font-weight: 400; color: var(--muted); }
 .tile.active { border-color: var(--accent); background: var(--accent-soft); }
 .tile.wait { border-color: var(--warn-line); background: var(--consent-bg); }
@@ -634,7 +635,7 @@ pre.body { white-space: pre-wrap; background: var(--subtle-bg); border: 1px soli
 }
 .pair.presence-offline { color: inherit; }
 .pair-side { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
-.pair-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; line-height: 1.35; }
+.pair-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; line-height: calc(1.35 * var(--line-scale)); }
 .pair-text > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pair-text strong { font-size: calc(13px * var(--font-scale)); }
 .pair.presence-offline .pair-side:first-child .pair-text { color: var(--muted); }
@@ -757,7 +758,7 @@ tr.muted td { color: var(--muted); }
 .helptip-btn:hover { color: var(--accent); border-color: var(--accent); }
 .helptip-pop { position: absolute; z-index: 20; top: 26px; left: -10px; width: 280px; background: var(--panel);
   border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; box-shadow: 0 4px 16px var(--shadow-sm);
-  font-size: calc(13px * var(--font-scale)); line-height: 1.6; color: var(--ink); }
+  font-size: calc(13px * var(--font-scale)); line-height: calc(1.6 * var(--line-scale)); color: var(--ink); }
 .link-btn { background: none; border: none; color: var(--accent); padding: 4px 0; font-size: calc(13px * var(--font-scale)); display: block; }
 .link-btn:hover { text-decoration: underline; }
 /* ヘルプを開く前の画面へ戻す道（仕様書 第6.10.7.2節） */
@@ -776,7 +777,7 @@ tr.muted td { color: var(--muted); }
   color: var(--accent); font-size: calc(14px * var(--font-scale)); border-bottom: 1px dashed var(--line); }
 .help-item:hover { text-decoration: underline; }
 .help-item .sub { display: block; color: var(--muted); font-size: calc(12px * var(--font-scale)); }
-.article { line-height: 1.8; }
+.article { line-height: calc(1.8 * var(--line-scale)); }
 .article h1 { margin-bottom: 12px; }
 .article h2 { font-size: calc(16px * var(--font-scale)); margin: 20px 0 6px; }
 .article p { color: var(--ink); }
@@ -790,7 +791,7 @@ tr.muted td { color: var(--muted); }
 }
 .agent-help .summary { color: var(--ink); font-size: calc(15px * var(--font-scale)); margin-bottom: 10px; }
 .agent-help h4 { font-size: calc(12px * var(--font-scale)); color: var(--muted); margin: 6px 0; }
-.agent-help ul { margin: 0 0 8px; padding-left: 1.2em; font-size: calc(13px * var(--font-scale)); line-height: 1.7; }
+.agent-help ul { margin: 0 0 8px; padding-left: 1.2em; font-size: calc(13px * var(--font-scale)); line-height: calc(1.7 * var(--line-scale)); }
 .flow-mini { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 8px 0; }
 /* 実行例（仕様書 第6.10.5節）。**見出しは 1 行を使い、例は横に並べる** */
 .examples { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0; }
@@ -803,7 +804,7 @@ tr.muted td { color: var(--muted); }
 .tour-backdrop { position: fixed; inset: 0; background: var(--backdrop); display: grid; place-items: center; z-index: 50; padding: 16px; }
 .tour { background: var(--panel); border-radius: 10px; padding: 22px 24px; width: min(460px, 100%); box-shadow: 0 10px 40px var(--shadow-lg); }
 .tour h2 { font-size: calc(18px * var(--font-scale)); margin: 6px 0 8px; }
-.tour p { line-height: 1.7; }
+.tour p { line-height: calc(1.7 * var(--line-scale)); }
 .tour .spacer { flex: 1; }
 .checklist ul { list-style: none; padding: 0; margin: 8px 0 0; }
 .checklist li { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px dashed var(--line); font-size: calc(14px * var(--font-scale)); }
@@ -938,7 +939,7 @@ button.link.danger { color: var(--danger); }
 }
 /* 本人のアバター（Google のプロフィール写真。仕様書 第6.5.1.1節）。円に収める */
 .user-card .avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.user-card .user-text { min-width: 0; display: flex; flex-direction: column; line-height: 1.3; }
+.user-card .user-text { min-width: 0; display: flex; flex-direction: column; line-height: calc(1.3 * var(--line-scale)); }
 .user-card .user-text strong { font-size: calc(13px * var(--font-scale)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .user-card .user-text .role { font-size: calc(11px * var(--font-scale)); color: var(--muted); }
 .user-card .gear {
@@ -972,13 +973,13 @@ code.uri { background: var(--subtle-bg); border: 1px solid var(--line); border-r
 
 /* 知識の分け方の確認（仕様書 第11.7.2節） */
 .table tr.sub-row td { background: var(--subtle-bg); }
-.section-list { margin: 4px 0; padding-left: 1.6em; max-height: 320px; overflow-y: auto; font-size: calc(13px * var(--font-scale)); line-height: 1.7; }
+.section-list { margin: 4px 0; padding-left: 1.6em; max-height: 320px; overflow-y: auto; font-size: calc(13px * var(--font-scale)); line-height: calc(1.7 * var(--line-scale)); }
 
 /* ヘルプの記事・拡張機能の説明の Markdown（表・コード） */
 .md-table-wrap { overflow-x: auto; margin: 8px 0 12px; }
 .md-table td, .md-table th { vertical-align: top; }
 .md-code { font-family: Menlo, Consolas, monospace; font-size: 0.9em; background: var(--neutral-soft); border-radius: 3px; padding: 1px 4px; }
-.md-pre { background: var(--subtle-bg); border: 1px solid var(--line); border-radius: 4px; padding: 10px 12px; overflow-x: auto; font-size: calc(13px * var(--font-scale)); line-height: 1.5; }
+.md-pre { background: var(--subtle-bg); border: 1px solid var(--line); border-radius: 4px; padding: 10px 12px; overflow-x: auto; font-size: calc(13px * var(--font-scale)); line-height: calc(1.5 * var(--line-scale)); }
 .md-pre code { font-family: Menlo, Consolas, monospace; white-space: pre; }
 /* 引用。承認の画面で、送る本文をそのまま見せる（仕様書 第9.3.3節）。行の区切りを保つ */
 .md-quote { margin: 6px 0 12px; padding: 8px 12px; border-left: 3px solid var(--accent); background: var(--subtle-bg); border-radius: 0 4px 4px 0; }
