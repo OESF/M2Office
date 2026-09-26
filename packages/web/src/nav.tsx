@@ -233,10 +233,10 @@ export function NavUserCard({ name, role, photo = null, active, sections, curren
           {sections.map((x) => (
             <button
               key={x.id} role="menuitem" className={`settings-menu-item${current === x.id ? ' active' : ''}`}
-              onClick={() => choose(x.id)}
+              // 何を設定するかは、マウスを重ねたときだけ出す（原則 u11）
+              onClick={() => choose(x.id)} title={x.hint}
             >
               <span className="settings-menu-label">{x.label}</span>
-              <span className="settings-menu-hint">{x.hint}</span>
             </button>
           ))}
         </div>
