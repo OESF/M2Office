@@ -146,7 +146,7 @@
 ## 4.5 スライドを作る（調べてスライドにまとめる）
 
 `web.research` と `slides.create` を組み合わせると、「〇〇について調べて、8 ページほどのスライドにまとめて」という業務を作れます。
-サンプルは [extensions/research-slides](../../extensions/research-slides/)（「スライド作成」。SKILL.md）です（仕様書 第9.4.2節）。
+サンプルは [extensions/research-slides](../../extensions/research-slides/)（「スライド作成（見本）」。SKILL.md。公式の「スライド作成」と同じ動き）です（仕様書 第9.4.2節）。
 
 ```markdown
 ---
