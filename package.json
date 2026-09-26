@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "中小企業向け AI エージェントシステム",
+  "license": "Apache-2.0",
   "workspaces": [
     "packages/*"
   ],

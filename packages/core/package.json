@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "ドメインロジック。実行エンジン、承認、ツール、知識、LLM 抽象化層",
+  "license": "Apache-2.0",
   "main": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts"

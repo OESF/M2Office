@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "従業員のワークスペースと管理者ページ（Vite + React の SPA）",
+  "license": "Apache-2.0",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

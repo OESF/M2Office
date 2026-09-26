@@ -286,3 +286,8 @@ API とワーカーは起動時にリポジトリ直下の `.env` を読みま�
 | [docs/adr/](docs/adr/) | 設計判断の記録 |
 | [docs/help/](docs/help/) | ヘルプセンターに出す公式の記事（書き方は docs/help/README.md） |
 | [docs/developer/](docs/developer/README.md) | 開発者マニュアル（拡張機能・業務エージェント・コネクタの作り方） |
+| [LICENSE](LICENSE) | ライセンス（Apache License 2.0） |
+
+## ライセンス
+
+[Apache License 2.0](LICENSE) で公開しています。
