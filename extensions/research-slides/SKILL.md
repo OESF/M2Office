@@ -6,7 +6,7 @@ argument-hint: ローカルで動く LLM の最近の製品動向を 8 ページ
 allowed-tools: web.research slides.create
 metadata:
   author: 株式会社M2ホールディングス
-  version: "2.0.0"
+  version: "2.0.1"
   m2office-id: jp.m2office.samples.research-slides
   m2office-examples: |
     ローカルで動く LLM の最近の製品動向を 8 ページで
@@ -27,9 +27,9 @@ metadata:
 
 ## 構成の決め方
 
-- ページ数は依頼にあればそれに合わせる（表紙を含む）。無ければ 8 ページ
+- ページ数は依頼にあればそれに合わせる。無ければ 8 ページ。ページ数は表紙を含むので、`slides` の枚数はページ数から 1 を引いた数にする（出典のページは別に最後に付く）
 - 数値の比較や時系列の変化は `CHART`、重要な数値は `KPI`（3 件まで）、2 つの対比は `COMPARISON`、それ以外の説明は `BULLET`（6 行まで）
-- 題名は 20 文字以内、本文は 150 文字以内
+- 題名は 20 文字以内、本文は 150 文字以内。箇条書きの行頭に「・」や「-」を付けない（印は自動で付く）
 - 各スライドの `takeaway` に、そのスライドで伝えたいことを 1 文で書く
 - 調べた結果の出典を `sources` に入れる
 

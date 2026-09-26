@@ -48,6 +48,22 @@ test('上限を超えた文字は切り詰め、そのことを注意として�
   assert.ok(r.warnings.some((w) => w.includes('題名')) && r.warnings.some((w) => w.includes('6 行')));
 });
 
+test('箇条書きの行頭の印は外す（組み立てで付く印と二重にしない）。数の - は残す', () => {
+  const r = normalizeSlidePlan({ title: 't', slides: [{ layout: 'BULLET', title: 'b', body: '・MoE の主流化\n- 量子化\n• 小型化\n-3% の低下' }] });
+  if ('error' in r) assert.fail(r.error);
+  assert.equal(r.plan.slides[0]!.body, 'MoE の主流化\n量子化\n小型化\n-3% の低下');
+});
+
+test('本文を配列で渡されても 1 行ずつの箇条書きとして読む（比較の本文も）', () => {
+  const r = normalizeSlidePlan({ title: 't', slides: [
+    { layout: 'BULLET', title: 'b', body: ['導入率は 20.4%', '・利用率は 82.6%'] },
+    { layout: 'COMPARISON', title: 'c', compareLeftTitle: '事務', compareLeftBody: ['請求書', '議事録'], compareRightTitle: '営業', compareRightBody: '提案書' },
+  ] });
+  if ('error' in r) assert.fail(r.error);
+  assert.equal(r.plan.slides[0]!.body, '導入率は 20.4%\n利用率は 82.6%');
+  assert.equal(r.plan.slides[1]!.compareLeftBody, '請求書\n議事録');
+});
+
 let settingsTemplates: { id: string; name: string; presentationId: string; description: string; isDefault: boolean }[] = [];
 
 function ctx(): ToolContext & { artifacts: { title: string; body: string; kind: string }[]; connector: MockWorkspaceConnector } {

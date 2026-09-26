@@ -51,6 +51,20 @@ export interface SlidePlan {
 /** 本文のスライドの枚数の上限（表紙を除く）。 */
 export const MAX_SLIDES = 12;
 
+/** 箇条書きの行頭の印。`-3%` のような数は印とみなさない（後ろに空白がある `-`・`*` だけ）。 */
+const BULLET_MARK = /^(?:[・•●◦▪■□◆◇]|[-*](?=\s))\s*/;
+
+/**
+ * 文字の値を読む。推論は箇条書きを配列で渡すことがあるため、配列なら 1 行ずつにつなぐ。
+ *
+ * @remarks 2026-09-26 に oesf で、本文を配列で渡され、比較の本文が空になり、箇条書きがカンマでつながった
+ */
+function linesOf(v: unknown): string {
+  if (typeof v === 'string') return v;
+  if (Array.isArray(v)) return v.filter((x) => typeof x === 'string' || typeof x === 'number').map(String).join('\n');
+  return '';
+}
+
 /** 文字数の上限。AI Radio の構成の指示文の上限を引き継ぐ。 */
 const LIMITS = { short: 20, body: 150, lines: 6, prompt: 100 };
 
@@ -65,7 +79,7 @@ export function normalizeSlidePlan(input: unknown): { plan: SlidePlan; warnings:
   const o = (input ?? {}) as Record<string, unknown>;
   const warnings: string[] = [];
   const str = (v: unknown, max: number, where: string): string => {
-    const s = typeof v === 'string' ? v.trim() : '';
+    const s = linesOf(v).trim();
     if (s.length <= max) return s;
     warnings.push(`${where} を ${max} 文字に切り詰めました`);
     return `${s.slice(0, max - 1)}…`;
@@ -84,7 +98,8 @@ export function normalizeSlidePlan(input: unknown): { plan: SlidePlan; warnings:
     const s: SlideSpec = { layout, title: str(r['title'], LIMITS.short, `${at}の題名`) };
     if (!s.title) return { error: `${at}: 題名（title）がありません` };
     if (r['body'] !== undefined) {
-      const lines = String(r['body']).split('\n').map((l) => l.trim()).filter(Boolean);
+      // 行頭の印（・や -）は外す。箇条書きの印は組み立てで付くため、残すと二重になる（2026-09-26 に oesf で確認）
+      const lines = linesOf(r['body']).split('\n').map((l) => l.trim().replace(BULLET_MARK, '').trim()).filter(Boolean);
       if (lines.length > LIMITS.lines) warnings.push(`${at}の箇条書きを ${LIMITS.lines} 行に切り詰めました`);
       s.body = str(lines.slice(0, LIMITS.lines).join('\n'), LIMITS.body, `${at}の本文`);
     }
