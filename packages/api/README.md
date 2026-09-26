@@ -189,7 +189,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/admin/dashboard/people/:userId/secretary-avatar` | 管理者: その人の秘書のアバター（本人が上げた画像）。**本人が個人設定に登録した画像だけ**を返し、ファイルの ID は受け取らない。同じく個人名で表示する会社だけ |
 | `GET /v1/admin/dashboard/stats?days=1\|7\|30` | 管理者: ダッシュボードの集計（日ごと・時間帯・業務ごと・秘書の層・削減時間） |
 | `GET /v1/admin/settings` | 管理者: 会社の設定（会社情報・自社の書き方・自動化ポリシー・業務の有効化） |
-| `PUT /v1/admin/settings/:section` | 管理者: 設定の 1 区分を保存（`company`・`writingStyle`・`automation`・`agents`・`effect`・`slides`・`knowledge`・`privacy`。`knowledge` は以前に登録した言い換え（画面からは登録しない）、`privacy` は Google から取得したデータを残す日数） |
+| `PUT /v1/admin/settings/:section` | 管理者: 設定の 1 区分を保存（`company`・`writingStyle`・`automation`・`agents`・`effect`・`slides`・`privacy`。`knowledge`（言い換えの登録）は 400 で断る（第 0.115.0 版から秘書が考える。第11.7.7.0節）。`privacy` は Google から取得したデータを残す日数） |
 | `POST /v1/admin/users` | 管理者: 利用者の招待（Workspace のドメインのみ） |
 | `PATCH /v1/admin/users/:id` | 管理者: 表示名・ロール・状態（管理者が 0 人になる変更は 409） |
 | `GET /v1/admin/knowledge` | 管理者: 組織知識の一覧 |
@@ -207,6 +207,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `PATCH /v1/me/memories/:id` | 覚えていることを本人が直す（`{ text }`）。認証情報・覚えない言葉・200 字超は 400。秘書が覚えた文を直すと、元の文は再び覚えない |
 | `DELETE /v1/me/memories/:id` | 1 件を消す。秘書が覚えた文を消すと、同じ文は再び覚えない |
 | `DELETE /v1/me/memories` | すべて消す |
+| `GET /v1/me/promotions` | 本人の記憶から、秘書が会社の知識にしたものの履歴（本人のものだけ。第6.5.4節）。本人が出す・管理者が承認する API は第 0.115.0 版でなくした |
 | `GET /v1/help/articles` | ヘルプの記事の一覧（役割と有効な業務で出し分け） |
 | `GET /v1/help/articles/:id` | 記事の本文。見られない記事は 404 |
 | `GET /v1/help/search?q=` | 記事の検索 |

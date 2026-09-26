@@ -49,4 +49,4 @@ npm run docs:manual-pdf    # → docs/developer/developer-manual.pdf
 
 ## この文書の版
 
-M2Office の仕様書 第 0.133.1 版（サービス 0.8.0）に対応します。業務エージェントはスキルの形式（SKILL.md。第12.12節）だけで書きます（JSON の定義は廃止）。M2Office の中では `schema_version: 1` の定義に組み立てて動かします。
+M2Office の仕様書 第 0.133.2 版（サービス 0.8.0）に対応します。業務エージェントはスキルの形式（SKILL.md。第12.12節）だけで書きます（JSON の定義は廃止）。M2Office の中では `schema_version: 1` の定義に組み立てて動かします。

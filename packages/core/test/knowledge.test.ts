@@ -8,7 +8,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { STANDARD_SYNONYMS, parseSynonymLines } from '@m2office/shared';
+import { STANDARD_SYNONYMS } from '@m2office/shared';
 import {
   SECTION_MAX_CHARS, citationOf, expandTerms, extractTerms, rankSections, rewriteNote, rewritesOf, scoreSection,
   splitKnowledge, toConcepts,
@@ -134,14 +134,4 @@ test('言い換えの組はまとめて 1 つの言葉として数え、点が�
   assert.equal(expanded, plain, '言い換えを足しても、元の言葉で当たる節の点は変わらない');
   const r = rankSections(expandTerms(['育児休業'], STANDARD_SYNONYMS), [IKUJI]);
   assert.deepEqual(rewritesOf(expandTerms(['育児休業'], STANDARD_SYNONYMS), r), [], '元の言葉で見つかったときは読み替えを示さない');
-});
-
-test('言い換えの文を組に分け、規則に合わない行は行番号とともに断る', () => {
-  assert.deepEqual(parseSynonymLines('育休、育児休業\n\n残業 = 時間外労働, 時間外勤務'), {
-    groups: [['育休', '育児休業'], ['残業', '時間外労働', '時間外勤務']],
-  });
-  assert.match((parseSynonymLines('育休') as { error: string }).error, /1 行目: 2 語以上/);
-  assert.match((parseSynonymLines('育休、育児休業\n育休、育児') as { error: string }).error, /2 行目: 「育休」は 1 行目/);
-  assert.match((parseSynonymLines('あ、育児休業') as { error: string }).error, /「あ」は 2〜30 字/);
-  assert.match((parseSynonymLines(Array.from({ length: 301 }, (_, i) => `語${i}a、語${i}b`).join('\n')) as { error: string }).error, /300 組まで/);
 });

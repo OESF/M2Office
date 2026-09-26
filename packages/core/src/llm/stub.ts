@@ -200,7 +200,7 @@ function chooseTools(tools: string[], prompt: string): Call[] {
             body: minutesStub(previous) },
     }];
   }
-  // 渡された書類を読む（AG-16 秘書の調べもの。仕様書 第10.11.4節）。
+  // 渡された書類を読む（秘書の調べもの。仕様書 第10.11.4節）。
   // 語句ではなく、指示が道具の名前を挙げているかで見る。「利用者が読む文」のような
   // 別の意味の「読む」に反応して、まとめの段でもう一度読んでしまうため
   if (has('file.read_text') && instruction.includes('file.read_text')) {

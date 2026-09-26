@@ -9,12 +9,12 @@
 import { randomUUID } from 'node:crypto';
 import { Hono, type Context } from 'hono';
 import {
-  isValidInvoiceNumber, parsePresentationId, parseSynonymLines, type AutomationPolicy, type CompanyInfo, type Role, type SlideTemplate, type TenantSettings,
+  isValidInvoiceNumber, parsePresentationId, type AutomationPolicy, type CompanyInfo, type Role, type SlideTemplate, type TenantSettings,
   type User, type WritingStyle,
 } from '@m2office/shared';
 import {
   DEFAULT_STANDARD_MINUTES, GOOGLE_DATA_RETENTION_DAYS, KNOWLEDGE_MAX_CHARS,
-  canDecidePromotion, decidePromotion, stepLabel, toolGoogleScopes,
+  stepLabel, toolGoogleScopes,
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { requireRole, type AppEnv } from '../middleware/tenant.js';
@@ -158,15 +158,8 @@ export function adminRoute(deps: AppDeps) {
           { ...current.onboarding, agentsReviewedAt: new Date().toISOString() }, user.id);
       }
     }
-    if (checked.section === 'knowledge') {
-      // 言い換えの登録と変更は、専用の操作として残す（第11.7.7節）
-      const v = checked.value as TenantSettings['knowledge'];
-      await audit(deps, tenant.id, user.id, 'knowledge.synonyms.save', 'tenant_settings', 'knowledge',
-        { standardSynonyms: v.standardSynonyms, groups: v.synonyms.length });
-    } else {
-      await audit(deps, tenant.id, user.id, 'settings.update', 'tenant_settings', checked.section,
-        { section: checked.section });
-    }
+    await audit(deps, tenant.id, user.id, 'settings.update', 'tenant_settings', checked.section,
+      { section: checked.section });
     return c.json({ ok: true });
   });
 
@@ -298,40 +291,6 @@ export function adminRoute(deps: AppDeps) {
   // 新規は ID を発行する。更新は呼ぶ側が ID を指す（仕様書 第13.3節、ADR-0019）
   app.post('/knowledge', saveKnowledge(true));
   app.put('/knowledge/:id', saveKnowledge(false));
-
-  /**
-   * 昇華の提案の一覧（仕様書 第11.3.1節）。組織の承認待ちだけを返す。
-   *
-   * @remarks 判断できるのは管理者と承認者の役割を持つ人であり、提案した本人は判断できない。
-   */
-  app.get('/promotions', async (c) => {
-    const { tenant, user } = c.get('ctx');
-    const [items, users] = await Promise.all([
-      deps.repo.listPromotions(tenant.id, { status: 'pending' }),
-      deps.repo.listUsers(tenant.id),
-    ]);
-    const nameOf = (id: string) => users.find((u) => u.id === id)?.displayName ?? '不明';
-    return c.json({
-      items: items.map((p) => ({
-        id: p.id, text: p.text, proposedBy: nameOf(p.userId), createdAt: p.createdAt,
-        // 自分が提案したものは判断できない（二重の承認）
-        canDecide: canDecidePromotion(p, user),
-      })),
-    });
-  });
-
-  /** 昇華を判断する。承認すると組織知識に登録する。 */
-  app.post('/promotions/:id', async (c) => {
-    const { tenant, user } = c.get('ctx');
-    const body = await c.req.json<{ decision?: string; comment?: string }>();
-    const decision = body.decision === 'approved' ? 'approved' : 'rejected';
-    const decided = await decidePromotion(
-      { repo: deps.repo, notify: (t, u, title, text) => notifyUser(deps, t, u, title, text) },
-      tenant.id, c.req.param('id'), decision, user, (body.comment ?? '').trim() || null, new Date(),
-    );
-    if (!decided) return c.json({ error: 'この提案は判断できません' }, 403);
-    return c.json({ status: decided.status, knowledgeId: decided.knowledgeId });
-  });
 
   /** 1 件の知識を、どう節に分けたか（第6.6.6節「分け方の確認」）。 */
   app.get('/knowledge/:id/sections', async (c) => {
@@ -532,35 +491,12 @@ function validateSection(
         },
       };
     }
-    case 'knowledge': {
-      // 言い換え（仕様書 第11.7.7節）。1 行に 1 組の文でも、組の配列でも受け付ける
-      const raw = o['synonyms'];
-      const text = typeof raw === 'string'
-        ? raw
-        : Array.isArray(raw) ? raw.map((g) => (Array.isArray(g) ? g.map(String).join('、') : String(g))).join('\n') : '';
-      const parsed = parseSynonymLines(text);
-      if ('error' in parsed) return { error: parsed.error };
-      return { section: 'knowledge', value: { standardSynonyms: o['standardSynonyms'] !== false, synonyms: parsed.groups } };
-    }
+    case 'knowledge':
+      // 言い換えは秘書が探すたびに考える。新しく登録することはしない（仕様書 第11.7.7.0節、ADR-0028）。登録済みの組はそのまま効く
+      return { error: '言い換えは秘書が探すたびに考えるため、登録できません' };
     default:
       return { error: `不明な設定の区分です: ${section}` };
   }
-}
-
-/**
- * 本人宛ての通知を作る（仕様書 第6.5.5.1節）。昇華の判断を提案した人へ知らせる。
- *
- * @remarks 本人が受け取らないと決めた種類は作らない。
- */
-async function notifyUser(
-  deps: AppDeps, tenantId: string, userId: string, title: string, body: string,
-): Promise<void> {
-  const prefs = await deps.repo.getUserSettings(tenantId, userId);
-  if (!prefs.notifications.kinds.approval) return;
-  await deps.repo.createNotification({
-    id: randomUUID(), tenantId, userId, kind: 'approval', title, body,
-    runId: null, readAt: null, createdAt: new Date().toISOString(),
-  });
 }
 
 async function audit(

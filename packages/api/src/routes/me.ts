@@ -7,7 +7,7 @@
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import { VOICE_CHOICES, VOICE_STYLE_MAX, isValidAvatar, type UserSettings } from '@m2office/shared';
-import { LEARNED_SOURCE, buildPresence, loadFile, proposePromotion, refusalMessage, refuseToRemember, submitPromotion, withdrawPromotion } from '@m2office/core';
+import { LEARNED_SOURCE, buildPresence, loadFile, refusalMessage, refuseToRemember } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 
@@ -166,81 +166,11 @@ export function meRoute(deps: AppDeps) {
     return c.json({ items });
   });
 
-  /**
-   * 記憶を会社の知識にする提案（昇華。仕様書 第11.3.1節）。
-   *
-   * @remarks 本人が出し、管理者または承認者の役割を持つ人が判断する（二重の承認）。
-   */
-  app.post('/memories/:id/promote', async (c) => {
-    const { tenant, user } = c.get('ctx');
-    const promotion = await proposePromotion(
-      { repo: deps.repo, notify: (t, u, title, body) => notify(deps, t, u, title, body) },
-      tenant.id, user, c.req.param('id'), new Date(),
-    );
-    if (!promotion) return c.json({ error: '記憶が見つかりません' }, 404);
-    return c.json({ id: promotion.id, status: promotion.status });
-  });
-
-  /** 秘書が作った候補を、組織の承認へ出す（第11.3.1節の本人の承認）。 */
-  app.post('/promotions/:id/submit', async (c) => {
-    const { tenant, user } = c.get('ctx');
-    const submitted = await submitPromotion(
-      { repo: deps.repo, notify: (t, u, title, body) => notify(deps, t, u, title, body) },
-      tenant.id, user, c.req.param('id'), new Date(),
-    );
-    if (!submitted) return c.json({ error: 'この提案は出せません' }, 404);
-    return c.json({ status: submitted.status });
-  });
-
-  /** 秘書が作った候補を、本人がやめる。記憶は残る。 */
-  app.post('/promotions/:id/withdraw', async (c) => {
-    const { tenant, user } = c.get('ctx');
-    const withdrawn = await withdrawPromotion(
-      { repo: deps.repo, notify: (t, u, title, body) => notify(deps, t, u, title, body) },
-      tenant.id, user, c.req.param('id'), new Date(),
-    );
-    if (!withdrawn) return c.json({ error: 'この提案はやめられません' }, 404);
-    return c.json({ status: withdrawn.status });
-  });
-
-  /** 自分の昇華の履歴（第6.5.4節「昇華の履歴」）。 */
+  /** 自分の記憶から、秘書が会社の知識にしたものの履歴（第6.5.4節「昇華の履歴」。判断は秘書が行う。第11.3節）。 */
   app.get('/promotions', async (c) => {
     const { tenant, user } = c.get('ctx');
     const items = await deps.repo.listPromotions(tenant.id, { userId: user.id });
     return c.json({ items });
-  });
-
-  /**
-   * 記憶の候補（仕様書 第11.5.2節）。対話から作った候補を、本人が採るか捨てるか決める。
-   */
-  app.get('/memory-candidates', async (c) => {
-    const { tenant, user } = c.get('ctx');
-    const items = await deps.repo.listMemoryCandidates(tenant.id, user.id, 'pending');
-    return c.json({ items });
-  });
-
-  /** 候補を採る。個人記憶になる。 */
-  app.post('/memory-candidates/:id/accept', async (c) => {
-    const { tenant, user } = c.get('ctx');
-    const candidate = await deps.repo.deleteMemoryCandidate(tenant.id, user.id, c.req.param('id'));
-    if (!candidate) return c.json({ error: '候補が見つかりません' }, 404);
-    const id = randomUUID();
-    await deps.repo.createMemory({
-      id, tenantId: tenant.id, userId: user.id, text: candidate.text, source: 'conversation',
-      createdAt: new Date().toISOString(),
-    });
-    // 覚えた中身は監査ログに入れない（第11.5.1節）
-    await audit(deps, tenant.id, user.id, 'memory.create', id);
-    return c.json({ ok: true, memoryId: id });
-  });
-
-  /** 候補を捨てる。同じ文は再び候補にしない（第11.5.2節）。 */
-  app.post('/memory-candidates/:id/dismiss', async (c) => {
-    const { tenant, user } = c.get('ctx');
-    const ok = await deps.repo.updateMemoryCandidate(tenant.id, user.id, c.req.param('id'), 'dismissed');
-    if (!ok) return c.json({ error: '候補が見つかりません' }, 404);
-    await audit(deps, tenant.id, user.id, 'memory.candidate.dismiss', c.req.param('id'));
-    return c.json({ ok: true });
   });
 
   /** 会話の要約（第11.9.6節）。逐語が消えた後も残る。 */
@@ -492,22 +422,6 @@ function validate(
     default:
       return { error: `不明な設定の区分です: ${section}` };
   }
-}
-
-/**
- * 本人宛ての通知を作る（仕様書 第6.5.5.1節）。昇華の提案と判断を知らせるのに使う。
- *
- * @remarks 本人が受け取らないと決めた種類は作らない。
- */
-async function notify(
-  deps: AppDeps, tenantId: string, userId: string, title: string, body: string,
-): Promise<void> {
-  const prefs = await deps.repo.getUserSettings(tenantId, userId);
-  if (!prefs.notifications.kinds.approval) return;
-  await deps.repo.createNotification({
-    id: randomUUID(), tenantId, userId, kind: 'approval', title, body,
-    runId: null, readAt: null, createdAt: new Date().toISOString(),
-  });
 }
 
 async function audit(deps: AppDeps, tenantId: string, userId: string, action: string, target: string) {

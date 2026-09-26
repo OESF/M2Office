@@ -514,12 +514,7 @@ export const api = {
   mySettings: () => call<UserSettings>('/me/settings'),
   saveMySettings: <K extends keyof UserSettings>(section: K, value: UserSettings[K]) =>
     call(`/me/settings/${section}`, { method: 'PUT', body: JSON.stringify(value) }),
-  /** 記憶を会社の知識にする提案（昇華。仕様書 第11.3.1節）。 */
-  promoteMemory: (id: string) => call<{ id: string; status: string }>(`/me/memories/${id}/promote`, { method: 'POST', body: '{}' }),
-  /** 秘書が作った候補を、組織の承認へ出す／やめる（仕様書 第11.3.1節）。 */
-  submitPromotion: (id: string) => call(`/me/promotions/${id}/submit`, { method: 'POST', body: '{}' }),
-  withdrawPromotion: (id: string) => call(`/me/promotions/${id}/withdraw`, { method: 'POST', body: '{}' }),
-  /** 自分の昇華の履歴。 */
+  /** 自分の記憶から、秘書が会社の知識にしたものの履歴（仕様書 第6.5.4節）。 */
   myPromotions: () => call<{ items: PromotionView[] }>('/me/promotions'),
   /**
    * ファイルを上げる（帳票のロゴなど）。
@@ -620,14 +615,6 @@ export const api = {
         id: string; name: string; description: string; usesWriteInternal: boolean; defaultMinutes: number;
       }[];
     }>('/admin/settings'),
-    /** 昇華の承認待ち（仕様書 第11.3.1節）。 */
-    promotions: () => call<{
-      items: { id: string; text: string; proposedBy: string; createdAt: string; canDecide: boolean }[];
-    }>('/admin/promotions'),
-    decidePromotion: (id: string, decision: 'approved' | 'rejected', comment: string | null) =>
-      call<{ status: string }>(`/admin/promotions/${id}`, {
-        method: 'POST', body: JSON.stringify({ decision, comment }),
-      }),
     dashboardLive: () => call<DashboardLive>('/admin/dashboard/live'),
     /**
      * ダッシュボードの状態を受け取り続ける（SSE。仕様書 第6.7.9節）。

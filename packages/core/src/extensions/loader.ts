@@ -77,13 +77,15 @@ export interface LoadOptions {
   takenConnectors?: Iterable<string>;
 }
 
-/** パッケージに入れてよいファイル（仕様書 第12.10.2節）。これ以外は拒否する。 */
+/**
+ * 書く人がパッケージに入れてよいファイル（仕様書 第12.10.2節）。これ以外は拒否する。
+ *
+ * @remarks JSON の定義（`manifest.json`・`agents/*.json`）は第 0.131.0 版で廃止し、ここには入れない（第12.12.7節）。
+ */
 const ALLOWED_FILES = [
   // スキルの形式（第12.12節）。資料は Markdown・テキストだけ（プログラムの置き場所の scripts/ は除く）
   /^SKILL\.md$/,
   /^(?!scripts\/)[^.][^]*\.(md|markdown|txt)$/i,
-  /^manifest\.json$/,
-  /^agents\/[^/]+\.json$/,
   /^connectors\/[^/]+\.json$/,
   /^evals\/[^/]+\.json$/,
   /^help\/[^/]+\.md$/,
@@ -94,9 +96,17 @@ const ALLOWED_FILES = [
 /** アイコンの大きさの上限。 */
 const ICON_MAX_BYTES = 256 * 1024;
 
-/** パッケージに入れてよいファイルか。 */
+/** SKILL.md から M2Office が組み立てた中の形にだけ現れるファイル。書く人は入れない。 */
+const COMPILED_FILES = [/^manifest\.json$/, /^agents\/[^/]+\.json$/];
+
+/** 書く人がパッケージに入れてよいファイルか。 */
 export function isAllowedExtensionFile(path: string): boolean {
   return ALLOWED_FILES.some((re) => re.test(path));
+}
+
+/** 組み立てた中の形として持ってよいファイルか（書く人が入れてよいものと、組み立てで作るもの）。 */
+function isCompiledFile(path: string): boolean {
+  return isAllowedExtensionFile(path) || COMPILED_FILES.some((re) => re.test(path));
 }
 
 /**
@@ -222,7 +232,7 @@ function loadPackageFiles(
   const under = (folder: string, ext: string) =>
     [...files.keys()].filter((k) => k.startsWith(`${folder}/`) && k.endsWith(ext)).sort();
 
-  const disallowed = [...files.keys()].filter((k) => !isAllowedExtensionFile(k));
+  const disallowed = [...files.keys()].filter((k) => !isCompiledFile(k));
   if (disallowed.length > 0) {
     problems.push(`入れてはならないファイルがあります（プログラムなどは入れられません）: ${disallowed.join(', ')}`);
   }

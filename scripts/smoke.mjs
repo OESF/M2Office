@@ -1447,36 +1447,37 @@ console.log('\n■ 29. 組織知識の節（章・条で分けて、条の単位
   gone.status === 404 ? ok('知識を削除すると節も消える') : ng('節が残っている');
 }
 
-console.log('\n■ 30. 言い換えの登録（第11.7.7節）');
+console.log('\n■ 30. 言い換え（第11.7.7節。第 0.115.0 版から秘書が考え、新しくは登録しない）');
 {
   const qa = async (question, tenant = 'a') => {
     const { body: job } = await call(tenant, '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: 'knowledge-qa', input: { question } }) });
     const run = await waitFor(tenant, job.runId, ['completed', 'failed']);
     return run.steps.find((x) => x.stepId === 'search')?.output?.tools?.[0]?.result ?? {};
   };
-  const put = (value, tenant = 'a', who = 'admin') =>
-    call(tenant, '/v1/admin/settings/knowledge', { method: 'PUT', body: JSON.stringify(value) }, who);
 
   const std = await qa('育休はいつまで？');
   std.hits?.[0]?.heading === '第34条（育児休業）' && std.note === '「育休」を「育児休業」と読み替えて探しました'
     ? ok('標準の言い換えで「育休」から「育児休業」の条を見つけ、読み替えを示す') : ng('標準の言い換えが効かない', JSON.stringify(std).slice(0, 200));
 
-  const bad = await put({ standardSynonyms: true, synonyms: '育休、育児休業\n育休、育児' });
-  bad.status === 400 && /2 行目/.test(bad.body.error ?? '') ? ok('同じ語を 2 つの組に入れると、行番号とともに断る') : ng(`断らない（${bad.status}）`);
-  const member = await put({ standardSynonyms: true, synonyms: '' }, 'a', 'member');
-  member.status === 403 ? ok('言い換えは管理者だけが変えられる') : ng(`管理者以外が変えられる（${member.status}）`);
+  const put = await call('a', '/v1/admin/settings/knowledge', { method: 'PUT', body: JSON.stringify({ standardSynonyms: true, synonyms: '始業、出社の時刻' }) });
+  put.status === 400 ? ok('言い換えを新しく登録する操作は受け付けない（400）') : ng(`登録できてしまう（${put.status}）`);
 
-  const saved = await put({ standardSynonyms: false, synonyms: '始業、出社の時刻' });
-  const off = await qa('育休はいつまで？');
-  const own = await qa('出社の時刻は何時？');
-  saved.status === 200 && (off.hits ?? []).length === 0 && own.hits?.[0]?.heading === '第15条（始業・終業の時刻）'
-    ? ok('標準を無効にすると使わず、自社の組は使う') : ng('設定が効いていない', JSON.stringify({ off: off.hits?.length, own: own.hits?.[0] }));
-  const bOwn = await qa('出社の時刻は何時？', 'b');
-  !(bOwn.hits ?? []).some((h) => h.heading?.includes('始業')) ? ok('言い換えはほかの会社に効かない') : ng('ほかの会社に効いている');
-
-  const { body: audits } = await call('a', '/v1/admin/audit-events');
-  (audits.items ?? []).some((e) => e.action === 'knowledge.synonyms.save') ? ok('言い換えの変更を監査ログに残す') : ng('監査ログに残らない');
-  await put({ standardSynonyms: true, synonyms: '' });
+  // 第 0.115.0 版より前に会社が登録した組は、そのまま効く
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const { rows: [before] } = await owner.query(`select knowledge from tenant_settings where tenant_id = 't-alpha'`);
+  try {
+    await owner.query(`update tenant_settings set knowledge = $1 where tenant_id = 't-alpha'`,
+      [JSON.stringify({ standardSynonyms: true, synonyms: [['始業', '出社の時刻']] })]);
+    const own = await qa('出社の時刻は何時？');
+    own.hits?.[0]?.heading === '第15条（始業・終業の時刻）' ? ok('以前に登録した自社の組は、そのまま効く') : ng('登録済みの組が効かない', JSON.stringify(own.hits?.[0] ?? null));
+    const bOwn = await qa('出社の時刻は何時？', 'b');
+    !(bOwn.hits ?? []).some((h) => h.heading?.includes('始業')) ? ok('言い換えはほかの会社に効かない') : ng('ほかの会社に効いている');
+  } finally {
+    await owner.query(`update tenant_settings set knowledge = $1 where tenant_id = 't-alpha'`, [before?.knowledge ?? null]);
+    await owner.end();
+  }
 }
 
 console.log('\n■ 31. 実行の中身を見られる人（第6.2.1節）');
@@ -1842,120 +1843,44 @@ console.log('\n■ 38. 会話ログ（第11.9.4.1節）');
   await call('a', '/v1/me/conversations', { method: 'DELETE' }, who);
 }
 
-console.log('\n■ 39. 対話からの学習（記憶の候補。第11.5.2節）');
+console.log('\n■ 39. 対話からの学習（第11.5.2節。本人が候補を採る形は第 0.114.0 版でやめた）');
 {
-  const who = 'member';
-  // 候補を作るのは夜間のワーカーで、鍵の無い環境では作らない。ここでは候補の採否を確かめる
-  const { default: pg } = await import('pg');
-  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
-  await owner.connect();
-  const { rows: [user] } = await owner.query(`select id from users where email = 'member@alpha.example.jp'`);
-  const { rows: [tenant] } = await owner.query(`select id from tenants where subdomain = 'a'`);
-  const ids = ['smoke-cand-1', 'smoke-cand-2'];
-  await owner.query(`delete from memory_candidates where id = any($1)`, [ids]);
-  for (const [i, id] of ids.entries()) {
-    await owner.query(
-      `insert into memory_candidates (id, tenant_id, user_id, text, status, source_day)
-       values ($1,$2,$3,$4,'pending','2026-09-22')`,
-      [id, tenant.id, user.id, `確認用の候補 ${i + 1}`]);
-  }
-
-  const { body: pending } = await call('a', '/v1/me/memory-candidates', {}, who);
-  (pending.items ?? []).length === 2 ? ok('記憶の候補を本人に示す') : ng('候補が出ない', String((pending.items ?? []).length));
-
-  const { body: other } = await call('a', '/v1/me/memory-candidates', {}, 'admin');
-  (other.items ?? []).every((c) => !c.text.startsWith('確認用の候補'))
-    ? ok('ほかの人の候補は見えない') : ng('他人の候補が見えている');
-
-  await call('a', `/v1/me/memory-candidates/${ids[0]}/accept`, { method: 'POST', body: '{}' }, who);
-  await call('a', `/v1/me/memory-candidates/${ids[1]}/dismiss`, { method: 'POST', body: '{}' }, who);
-  const [{ body: memories }, { body: left }] = await Promise.all([
-    call('a', '/v1/me/memories', {}, who),
-    call('a', '/v1/me/memory-candidates', {}, who),
-  ]);
-  (memories.items ?? []).some((m) => m.text === '確認用の候補 1' && m.source === 'conversation')
-    ? ok('「覚える」を押した候補だけが記憶になる') : ng('記憶にならない', JSON.stringify(memories.items ?? []).slice(0, 120));
-  (left.items ?? []).length === 0 ? ok('判断した候補は一覧から消える') : ng('候補が残る');
-
-  const { rows: [dismissed] } = await owner.query(`select status from memory_candidates where id = $1`, [ids[1]]);
-  dismissed?.status === 'dismissed'
-    ? ok('「不要」とした文は、同じ文を再び候補にしないために残す') : ng('残らない', JSON.stringify(dismissed ?? null));
-
-  // 後片付け
-  await call('a', '/v1/me/memories', { method: 'DELETE' }, who);
-  await owner.query(`delete from memory_candidates where id = any($1)`, [ids]);
-  await owner.end();
+  // 覚えるのはワーカーが 1 日 1 回自分で行う（ADR-0027）。本人に候補を採らせる口は無い
+  const list = await call('a', '/v1/me/memory-candidates', {}, 'member');
+  const accept = await call('a', '/v1/me/memory-candidates/x/accept', { method: 'POST', body: '{}' }, 'member');
+  list.status === 404 && accept.status === 404 ? ok('記憶の候補を本人に採らせる API は無い（404）') : ng(`候補の API が残っている（${list.status}・${accept.status}）`);
 }
 
-console.log('\n■ 40. 昇華（個人の記憶を会社の知識へ。第11.3.1節）');
+console.log('\n■ 40. 昇華（秘書が判断して会社の知識にする。第11.3節、ADR-0028）');
 {
   const who = 'member';
-  await call('a', '/v1/me/memories', { method: 'DELETE' }, who);
-  await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message: '経費の精算は佐藤さんに出すと覚えておいて' }) }, who);
-  const { body: memories } = await call('a', '/v1/me/memories', {}, who);
-  const memory = (memories.items ?? [])[0];
+  // 二重の承認の API は無い
+  const promote = await call('a', '/v1/me/memories/x/promote', { method: 'POST', body: '{}' }, who);
+  const pendingList = await call('a', '/v1/admin/promotions');
+  const decide = await call('a', '/v1/admin/promotions/x', { method: 'POST', body: JSON.stringify({ decision: 'approved' }) });
+  [promote.status, pendingList.status, decide.status].every((x) => x === 404)
+    ? ok('本人が出す・管理者が承認する API は無い（404）') : ng('昇華の承認の API が残っている', [promote.status, pendingList.status, decide.status].join(','));
 
-  const { status: promoted } = await call('a', `/v1/me/memories/${memory.id}/promote`, { method: 'POST', body: '{}' }, who);
-  const { body: pending } = await call('a', '/v1/admin/promotions');
-  const proposal = (pending.items ?? []).find((p) => p.text === memory.text);
-  promoted === 200 && proposal?.canDecide
-    ? ok(`提案が管理者の承認待ちに並ぶ（${proposal.proposedBy}さんの提案）`) : ng('承認待ちに並ばない', JSON.stringify(pending.items ?? []));
-
-  // 提案した本人は判断できない（二重の承認）
-  const { status: bySelf } = await call('a', `/v1/admin/promotions/${proposal.id}`, { method: 'POST', body: JSON.stringify({ decision: 'approved' }) }, who);
-  bySelf === 403 ? ok('提案した本人は判断できない') : ng(`判断できてしまう（${bySelf}）`);
-
-  await call('a', `/v1/admin/promotions/${proposal.id}`, { method: 'POST', body: JSON.stringify({ decision: 'approved', comment: null }) });
-  const { body: knowledge } = await call('a', '/v1/admin/knowledge');
-  const registered = (knowledge.items ?? []).find((k) => k.body === memory.text);
-  registered && /昇華/.test(registered.source)
-    ? ok(`承認すると、その文のまま会社の知識になる（${registered.source}）`) : ng('知識にならない', JSON.stringify(registered ?? null));
-
-  const { body: history } = await call('a', '/v1/me/promotions', {}, who);
-  (history.items ?? []).some((p) => p.status === 'approved')
-    ? ok('本人は昇華の履歴を見られる') : ng('履歴が見えない');
-
-  const { body: notes } = await call('a', '/v1/notifications', {}, who);
-  (notes.items ?? []).some((n) => n.title === '提案が会社の知識になりました')
-    ? ok('判断を本人に知らせる') : ng('知らせない');
-
-  const { body: mine } = await call('a', '/v1/me/memories', {}, who);
-  (mine.items ?? []).length === 1 ? ok('昇華しても、本人の記憶は残る') : ng('記憶が消えている');
-
-  // 秘書が夜間に作った候補（本人の確認待ち）は、本人が出すかやめるかを選ぶ。
-  // 候補を作るのは推論を使う夜間の見回りのため、ここでは候補がある状態から確かめる
+  // 秘書が会社の知識にしたものは、本人が履歴で見られる（ほかの人には見えない）
   const { default: pg } = await import('pg');
   const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
   await owner.connect();
-  const { rows: [u] } = await owner.query(`select id, tenant_id from users where email = 'member@alpha.example.jp'`);
-  await owner.query(`delete from promotions where id in ('smoke-sug-1','smoke-sug-2')`);
-  for (const id of ['smoke-sug-1', 'smoke-sug-2']) {
+  try {
+    const { rows: [u] } = await owner.query(`select id, tenant_id from users where email = 'member@alpha.example.jp'`);
+    await owner.query(`delete from promotions where id = 'smoke-promo-1'`);
     await owner.query(
-      `insert into promotions (id, tenant_id, user_id, text, status) values ($1,$2,$3,$4,'proposed')`,
-      [id, u.tenant_id, u.id, `秘書が見つけた候補 ${id.slice(-1)}`]);
+      `insert into promotions (id, tenant_id, user_id, text, status, decided_at) values ('smoke-promo-1', $1, $2, $3, 'approved', now())`,
+      [u.tenant_id, u.id, '経費の精算は佐藤さんに出す（確認用）']);
+    const { body: mine } = await call('a', '/v1/me/promotions', {}, who);
+    const { body: others } = await call('a', '/v1/me/promotions', {}, 'admin');
+    (mine.items ?? []).some((p) => p.id === 'smoke-promo-1' && p.status === 'approved')
+      ? ok('本人は、自分の記憶から会社の知識になったものを見られる') : ng('履歴が見えない');
+    (others.items ?? []).every((p) => p.id !== 'smoke-promo-1')
+      ? ok('ほかの人の履歴は見えない') : ng('他人の履歴が見える');
+  } finally {
+    await owner.query(`delete from promotions where id = 'smoke-promo-1'`);
+    await owner.end();
   }
-
-  const { body: suggested } = await call('a', '/v1/me/promotions', {}, who);
-  (suggested.items ?? []).filter((p) => p.status === 'proposed').length === 2
-    ? ok('秘書が作った候補は、本人の確認待ちとして並ぶ') : ng('候補が並ばない');
-
-  const { body: beforeSubmit } = await call('a', '/v1/admin/promotions');
-  (beforeSubmit.items ?? []).every((p) => !p.text.startsWith('秘書が見つけた候補'))
-    ? ok('本人が出すまで、承認待ちには並ばない') : ng('先に承認待ちへ回っている');
-
-  await call('a', '/v1/me/promotions/smoke-sug-1/submit', { method: 'POST', body: '{}' }, who);
-  await call('a', '/v1/me/promotions/smoke-sug-2/withdraw', { method: 'POST', body: '{}' }, who);
-  const { body: afterSubmit } = await call('a', '/v1/admin/promotions');
-  const submitted = (afterSubmit.items ?? []).filter((p) => p.text.startsWith('秘書が見つけた候補'));
-  submitted.length === 1 && submitted[0].text.endsWith('1')
-    ? ok('「出す」を押したものだけが承認待ちへ回る') : ng('回り方が違う', JSON.stringify(submitted));
-
-  // 後片付け
-  if (registered) await call('a', `/v1/admin/knowledge/${registered.id}`, { method: 'DELETE' });
-  await owner.query(`delete from promotions where id in ('smoke-sug-1','smoke-sug-2')`);
-  await owner.end();
-  await call('a', '/v1/me/memories', { method: 'DELETE' }, who);
-  await call('a', '/v1/me/conversations', { method: 'DELETE' }, who);
 }
 
 console.log('\n■ 41. 帳票の PDF（第9.4.1節、Q-59・Q-57）');

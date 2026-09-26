@@ -1,5 +1,5 @@
 /**
- * @file AG-16 秘書の調べもの のエージェント定義。
+ * @file 秘書の調べもの のエージェント定義。
  *
  * 秘書が、時間のかかる依頼を後ろへ回すための受け皿である（仕様書 第10.11.4節）。
  * 利用者がメニューから選ぶことは想定していないが、隠しはしない（自分で依頼してもよい）。
@@ -13,14 +13,14 @@
 import type { AgentDefinition } from '@m2office/shared';
 
 /**
- * AG-16 秘書の調べもの。
+ * 秘書の調べもの（業務の番号は持たない。AG-16 は採用支援。仕様書 第9.6節）。
  *
  * @remarks
  * 危険度は全体として `read`。承認ゲートを持たないのは、読むだけであるためである。
  * 手順を 1 つにしているのは、依頼の中身が決まっていないためで、
  * 何をどの順で調べるかは、そのつどの判断に委ねる。
  */
-export const AG16_LOOKUP: AgentDefinition = {
+export const SECRETARY_LOOKUP: AgentDefinition = {
   schemaVersion: 1,
   id: 'secretary-lookup',
   version: 1,
