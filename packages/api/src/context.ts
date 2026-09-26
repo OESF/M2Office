@@ -261,3 +261,13 @@ export function fileStorageDir(): string {
 export function buildAi(hub?: ExtensionHub) {
   return platformAi(process.env, (agentId) => hub?.officialAgents().find((a) => a.id === agentId)?.evals);
 }
+
+/**
+ * 画面に出す会社名（仕様書 第6.6.1節）。会社情報の正式な会社名、入っていなければ申し込みのときの名前。
+ *
+ * @remarks 上の帯・ログイン画面・眺める画面で同じ名前を出すため、ここで 1 つに決める
+ */
+export async function companyName(deps: Pick<AppDeps, 'repo'>, tenant: { id: string; name: string }): Promise<string> {
+  const legal = (await deps.repo.getTenantSettings(tenant.id).catch(() => null))?.company.legalName?.trim();
+  return legal || tenant.name;
+}

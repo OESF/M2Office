@@ -13,7 +13,7 @@ import type { Server as HttpServer } from 'node:http';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { defaultGeminiModels, warnHotSwapModels } from '@m2office/core';
-import { buildDeps } from './context.js';
+import { buildDeps, companyName } from './context.js';
 import { authenticate, resolveTenant, type AppEnv } from './middleware/tenant.js';
 import { attachVoiceRelay } from './voice/relay.js';
 import { onUnexpectedError, requestLogger } from './middleware/logging.js';
@@ -93,7 +93,8 @@ app.get('/v1/me', async (c) => {
   // 本人のアバター（第6.5.1.1節）。取り込み直すと URL が変わり、画面が新しい写真を読む
   const photo = await deps.repo.getUserPhoto(ctx.tenant.id, ctx.user.id);
   return c.json({
-    tenant: ctx.tenant,
+    // 画面に出す会社名は、会社情報の正式な会社名（仕様書 第6.6.1節）。入っていなければ申し込みのときの名前
+    tenant: { ...ctx.tenant, name: await companyName(deps, ctx.tenant) },
     user: ctx.user,
     photo: photo ? `/v1/me/photo?v=${encodeURIComponent(photo.fetchedAt)}` : null,
     // サーバーの版。画面の版と違えば、画面が再読み込みを促す（第6.1.1.1節）

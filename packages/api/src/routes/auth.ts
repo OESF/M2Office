@@ -9,7 +9,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
-import type { AppDeps } from '../context.js';
+import { companyName, type AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 import { buildGoogleLoginUrl, createPkce } from '@m2office/core';
 import { clearSessionCookie, issueSession, readSession } from '../auth/session.js';
@@ -49,7 +49,8 @@ export function authRoute(deps: AppDeps) {
           .map((u) => ({ email: u.email, displayName: u.displayName, roles: u.roles }))
       : [];
     return c.json({
-      tenant: { name: tenant.name, subdomain: tenant.subdomain },
+      // ログイン画面に出す会社名も、会社情報の正式な会社名（仕様書 第6.6.1節）
+      tenant: { name: await companyName(deps, tenant), subdomain: tenant.subdomain },
       google: deps.auth.googleConfigured
         ? { enabled: true }
         : { enabled: false, reason: 'Google ログインは準備中です（OAuth クライアントの設定待ち）' },
