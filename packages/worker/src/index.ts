@@ -12,7 +12,7 @@
 import {
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
   RunEngine, Scheduler, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, agentUsesGoogle,
-  NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor,
+  NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv,
   defaultGeminiModels, warnHotSwapModels, ProactiveWatcher,
 } from '@m2office/core';
@@ -124,8 +124,29 @@ const conversations = new ConversationRotation({ repo, files, logger: log });
 // 対話からの学習。前日の会話から、その日の要約と記憶の候補を作る（仕様書 第11.5.2節）
 const learning = new MemoryLearning({ repo, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log });
 // 秘書の受け手（指揮者）。業務と秘書のイベントを受け、その場で学ぶ（仕様書 第10.13節、ADR-0039）
+// 秘書の分身（段取り役）。段取りを立て、本人として業務を起こし、返事を集めて報告する（仕様書 第10.14節、ADR-0040）
+const planAgentsFor = async (tenantId: string, userId: string) => {
+  const view = await hub.forTenant(tenantId);
+  const [settings, groups, compartments] = await Promise.all([
+    repo.getTenantSettings(tenantId), repo.listUserGroupIds(tenantId, userId), repo.listUserCompartments(tenantId, userId),
+  ]);
+  // 本人が使える業務だけ（利用範囲・無効にした業務・権限区画。不変則 I-9）
+  return view.agents.filter((def) => !settings.agents.disabled.includes(def.id) && canRunAgent(settings.access, def, userId, groups, compartments));
+};
+const plans = new PlanRunner({
+  repo, logger: log, llmFor: (tenantId) => ai.llmFor(tenantId), agentsFor: planAgentsFor,
+  enqueue: async (tenantId, userId, def, input, planStepId) => {
+    const view = await hub.forTenant(tenantId);
+    if (!view.isAvailable(def.id)) return null;
+    const { runId } = await enqueueJob(repo, {
+      tenantId, requestedBy: userId, def, input, origin: 'secretary',
+      actor: { type: 'system', id: 'secretary-plan' }, ...(planStepId ? { planStepId } : {}),
+    });
+    return runId;
+  },
+});
 const conductor = new SecretaryConductor({
-  repo, learning, logger: log,
+  repo, learning, plans, logger: log,
   // 業務の名前と権限区画を引く（本人が直接使った業務からも学ぶ。ADR-0038）
   agentsFor: async (tenantId) => (await hub.forTenant(tenantId)).allAgents,
 });

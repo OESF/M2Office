@@ -8,7 +8,7 @@
  * @see 仕様書 第10.11.7節 終わったことを伝える
  */
 
-import { LOOKUP_AGENT_ID, MORNING_BRIEF, OFFICIAL_AGENTS, PROACTIVE_TRIGGER } from '@m2office/core';
+import { LOOKUP_AGENT_ID, MORNING_BRIEF, OFFICIAL_AGENTS, PLAN_REPORT_AGENT_ID, PROACTIVE_TRIGGER, planProgress } from '@m2office/core';
 import type { Repository } from '@m2office/core';
 import { randomUUID } from 'node:crypto';
 
@@ -60,12 +60,15 @@ export async function listLookups(
   // 秘書が起こしたもの（調べもの・頼んだ業務）と、本人がメニューから起こした調べもの
   const rows = (await repo.listRunsWithJobs(tenantId, { limit: LIMIT, requestedBy: userId }))
     // 朝のブリーフは定時実行で起きるが、秘書の答えとして届ける（第9.5.5.1節）
-    .filter(({ job }) => job.origin === 'secretary' || job.agentId === LOOKUP_AGENT_ID || job.agentId === MORNING_BRIEF.id);
+    .filter(({ job }) => job.origin === 'secretary' || job.agentId === LOOKUP_AGENT_ID || job.agentId === MORNING_BRIEF.id)
+    // 段取りの段の業務は個別に届けない。段取りの報告でまとめて届ける（第10.14節）
+    .filter(({ job }) => !job.planStepId);
   const told = new Set(await repo.listToldLookups(tenantId, rows.map(({ run }) => run.id)));
   const out: LookupView[] = [];
   for (const { run, job } of rows) {
     const done = DONE.has(run.status);
-    const isLookup = job.agentId === LOOKUP_AGENT_ID;
+    // 段取りの報告も、秘書が自分でまとめたものとして伝える（第10.14節）
+    const isLookup = job.agentId === LOOKUP_AGENT_ID || job.agentId === PLAN_REPORT_AGENT_ID;
     const name = isLookup ? null : (nameOf(job.agentId) ?? '業務');
     const steps = await repo.listRunSteps(tenantId, run.id);
     const firstText = Object.values(job.input).find((v): v is string => typeof v === 'string' && v.trim() !== '');
@@ -77,11 +80,21 @@ export async function listLookups(
       proactive: job.input['trigger'] === PROACTIVE_TRIGGER,
       status: run.status,
       done,
-      progress: done ? null : run.status === 'awaiting_approval' ? '承認を待っています' : isLookup ? progressOf(steps) : `「${name}」を進めています`,
+      progress: done ? null : run.status === 'awaiting_approval' ? '承認を待っています' : job.agentId === PLAN_REPORT_AGENT_ID ? 'まとめています' : isLookup ? progressOf(steps) : `「${name}」を進めています`,
       text: run.status === 'completed' ? await resultOf(repo, tenantId, run.id, steps) : null,
       failureReason: done && run.status !== 'completed' ? (run.failureReason ?? (run.status === 'cancelled' ? '中止されました' : '期限が切れました')) : run.failureReason,
       endedAt: run.endedAt,
       told: told.has(run.id),
+    });
+  }
+  // 動いている段取り（第10.14節）。秘書バーに進み具合を出す。報告は、終わったあとに報告の業務として届く
+  const plans = await Promise.resolve().then(() => repo.listActivePlans(tenantId, userId)).catch(() => []);
+  for (const plan of plans) {
+    const steps = await repo.listPlanSteps(tenantId, plan.id);
+    out.unshift({
+      runId: `plan:${plan.id}`, request: plan.request, agentName: null, agentId: 'plan', proactive: false,
+      status: plan.status, done: false, progress: planProgress(plan, steps), text: null, failureReason: null,
+      endedAt: null, told: false,
     });
   }
   return out;

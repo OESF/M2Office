@@ -11,6 +11,7 @@ import { AG03_SCHEDULING } from './ag-03-scheduling.js';
 import { AG04_KNOWLEDGE_QA } from './ag-04-knowledge-qa.js';
 import { AG05_WEEKLY_BRIEF } from './ag-05-weekly-brief.js';
 import { SECRETARY_LOOKUP } from './secretary-lookup.js';
+import { SECRETARY_PLAN_REPORT } from './secretary-plan-report.js';
 import { SECRETARY_CALENDAR } from './secretary-calendar.js';
 import { MORNING_BRIEF } from './morning-brief.js';
 import { BASIC_AGENTS } from './basic.js';
@@ -24,8 +25,11 @@ import { BASIC_AGENTS } from './basic.js';
  * 並びは画面のメニューの既定順であり、実装の順序（第9.5.7節）ではない。
  */
 export const OFFICIAL_AGENTS: AgentDefinition[] = [
-  AG04_KNOWLEDGE_QA, AG02_MINUTES, AG01_INBOX, AG03_SCHEDULING, AG05_WEEKLY_BRIEF, MORNING_BRIEF, ...BASIC_AGENTS, SECRETARY_LOOKUP, SECRETARY_CALENDAR,
+  AG04_KNOWLEDGE_QA, AG02_MINUTES, AG01_INBOX, AG03_SCHEDULING, AG05_WEEKLY_BRIEF, MORNING_BRIEF, ...BASIC_AGENTS, SECRETARY_LOOKUP, SECRETARY_CALENDAR, SECRETARY_PLAN_REPORT,
 ];
+
+/** 秘書の段取りの報告に使う業務の ID（仕様書 第10.14節）。 */
+export const PLAN_REPORT_AGENT_ID = SECRETARY_PLAN_REPORT.id;
 
 /**
  * 秘書が、時間のかかる依頼を後ろへ回すときに使う業務の ID（仕様書 第10.11.4節）。
@@ -67,7 +71,7 @@ export function resolveOfficialAgent(
   return OFFICIAL_AGENTS.find((a) => a.id === agentId && a.version === version);
 }
 
-export { AG01_INBOX, AG02_MINUTES, AG03_SCHEDULING, AG04_KNOWLEDGE_QA, AG05_WEEKLY_BRIEF, SECRETARY_LOOKUP, SECRETARY_CALENDAR, MORNING_BRIEF };
+export { AG01_INBOX, AG02_MINUTES, AG03_SCHEDULING, AG04_KNOWLEDGE_QA, AG05_WEEKLY_BRIEF, SECRETARY_LOOKUP, SECRETARY_CALENDAR, SECRETARY_PLAN_REPORT, MORNING_BRIEF };
 
 /**
  * 公式エージェントの標準所要時間（分）の既定値。手作業なら 1 件に何分かかるか。

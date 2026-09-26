@@ -13,7 +13,7 @@ import type {
   StoredFile, Tenant, TenantSettings, User, UserGroup, UserSettings,
 } from '@m2office/shared';
 import { DEFAULT_TENANT_SETTINGS, DEFAULT_USER_SETTINGS, STANDARD_SYNONYMS } from '@m2office/shared';
-import type { AgentEvent, CompartmentAssignment, Conversation, ConversationDigest, MemoryCandidate, Promotion, CredentialKind, GoogleConnection, UserPhoto, TenantCredential, TenantConnection, DisabledConnectorTool, InstalledExtension, PrivateExtension, KnowledgeItem, KnowledgeSearchResult, KnowledgeSectionView, Memory, Repository, RunStatRow } from './types.js';
+import type { AgentEvent, Plan, PlanStep, CompartmentAssignment, Conversation, ConversationDigest, MemoryCandidate, Promotion, CredentialKind, GoogleConnection, UserPhoto, TenantCredential, TenantConnection, DisabledConnectorTool, InstalledExtension, PrivateExtension, KnowledgeItem, KnowledgeSearchResult, KnowledgeSectionView, Memory, Repository, RunStatRow } from './types.js';
 import { SPLIT_VERSION, citationOf, splitKnowledge } from '../knowledge/sections.js';
 import { SEARCH_CANDIDATES, bigrams, expandTerms, extractTerms, normalizeForSearch, rankSections, rewritesOf } from '../knowledge/search.js';
 
@@ -164,10 +164,10 @@ export class PostgresRepository implements Repository {
   async createJob(job: Job): Promise<void> {
     await this.q(job.tenantId, 
       `insert into jobs (id, tenant_id, agent_id, agent_version, requested_by,
-                         origin, input, created_at)
-       values ($1,$2,$3,$4,$5,$6,$7,$8)`,
+                         origin, input, created_at, plan_step_id)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
       [job.id, job.tenantId, job.agentId, job.agentVersion, job.requestedBy,
-       job.origin, JSON.stringify(job.input), job.createdAt],
+       job.origin, JSON.stringify(job.input), job.createdAt, job.planStepId ?? null],
     );
   }
 
@@ -175,7 +175,7 @@ export class PostgresRepository implements Repository {
     const rows = await this.q<Job>(tenantId, 
       `select id, tenant_id as "tenantId", agent_id as "agentId",
               agent_version as "agentVersion", requested_by as "requestedBy",
-              origin, input, created_at as "createdAt"
+              origin, input, created_at as "createdAt", plan_step_id as "planStepId"
          from jobs where tenant_id = $1 and id = $2`,
       [tenantId, jobId],
     );
@@ -241,7 +241,8 @@ export class PostgresRepository implements Repository {
               json_build_object(
                 'id', j.id, 'tenantId', j.tenant_id, 'agentId', j.agent_id,
                 'agentVersion', j.agent_version, 'requestedBy', j.requested_by,
-                'origin', j.origin, 'input', j.input, 'createdAt', j.created_at) as job
+                'origin', j.origin, 'input', j.input, 'createdAt', j.created_at,
+                'planStepId', j.plan_step_id) as job
          from runs r join jobs j on j.id = r.job_id and j.tenant_id = r.tenant_id
         where r.tenant_id = $1 and ($2::text is null or j.requested_by = $2)
         order by r.started_at desc limit $3`,
@@ -943,7 +944,7 @@ export class PostgresRepository implements Repository {
   async getAgentEvent(tenantId: string, id: string): Promise<AgentEvent | null> {
     const rows = await this.q<AgentEvent>(tenantId,
       `select id, tenant_id as "tenantId", user_id as "userId", kind, run_id as "runId",
-              conversation_id as "conversationId", status, created_at as "createdAt", attempts,
+              conversation_id as "conversationId", plan_id as "planId", status, created_at as "createdAt", attempts,
               processed_at as "processedAt", last_error as "lastError"
          from agent_events where tenant_id = $1 and id = $2`,
       [tenantId, id]);
@@ -956,6 +957,65 @@ export class PostgresRepository implements Repository {
         ? `update agent_events set processed_at = now(), last_error = null where tenant_id = $1 and id = $2`
         : `update agent_events set last_error = $3 where tenant_id = $1 and id = $2`,
       error === null ? [tenantId, id] : [tenantId, id, error.slice(0, 500)]);
+  }
+
+  async createPlan(p: Plan): Promise<void> {
+    await this.q(p.tenantId,
+      `insert into plans (id, tenant_id, user_id, request, context, status, question, report_run_id, note,
+                          created_at, updated_at, finished_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+      [p.id, p.tenantId, p.userId, p.request, p.context, p.status, p.question, p.reportRunId, p.note,
+       p.createdAt, p.updatedAt, p.finishedAt]);
+  }
+
+  async getPlan(tenantId: string, id: string): Promise<Plan | null> {
+    const rows = await this.q<Plan>(tenantId, `select ${PLAN_COLUMNS} from plans where tenant_id = $1 and id = $2`, [tenantId, id]);
+    return rows[0] ?? null;
+  }
+
+  async listActivePlans(tenantId: string, userId: string): Promise<Plan[]> {
+    return this.q<Plan>(tenantId,
+      `select ${PLAN_COLUMNS} from plans
+        where tenant_id = $1 and user_id = $2 and status in ('planning', 'running', 'waiting_input')
+        order by created_at desc limit 20`,
+      [tenantId, userId]);
+  }
+
+  async updatePlan(p: Plan): Promise<void> {
+    await this.q(p.tenantId,
+      `update plans set context = $3, status = $4, question = $5, report_run_id = $6, note = $7,
+                        updated_at = $8, finished_at = $9
+        where tenant_id = $1 and id = $2`,
+      [p.tenantId, p.id, p.context, p.status, p.question, p.reportRunId, p.note, p.updatedAt, p.finishedAt]);
+  }
+
+  async createPlanSteps(steps: PlanStep[]): Promise<void> {
+    for (const s of steps) {
+      await this.q(s.tenantId,
+        `insert into plan_steps (id, tenant_id, plan_id, seq, agent_id, purpose, depends_on, status, run_id,
+                                 attempts, asked, answer, note, updated_at)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+        [s.id, s.tenantId, s.planId, s.seq, s.agentId, s.purpose, s.dependsOn, s.status, s.runId,
+         s.attempts, s.asked, s.answer, s.note, s.updatedAt]);
+    }
+  }
+
+  async listPlanSteps(tenantId: string, planId: string): Promise<PlanStep[]> {
+    return this.q<PlanStep>(tenantId,
+      `select ${PLAN_STEP_COLUMNS} from plan_steps where tenant_id = $1 and plan_id = $2 order by seq`, [tenantId, planId]);
+  }
+
+  async getPlanStep(tenantId: string, id: string): Promise<PlanStep | null> {
+    const rows = await this.q<PlanStep>(tenantId,
+      `select ${PLAN_STEP_COLUMNS} from plan_steps where tenant_id = $1 and id = $2`, [tenantId, id]);
+    return rows[0] ?? null;
+  }
+
+  async updatePlanStep(s: PlanStep): Promise<void> {
+    await this.q(s.tenantId,
+      `update plan_steps set status = $3, run_id = $4, attempts = $5, asked = $6, answer = $7, note = $8, updated_at = $9
+        where tenant_id = $1 and id = $2`,
+      [s.tenantId, s.id, s.status, s.runId, s.attempts, s.asked, s.answer, s.note, s.updatedAt]);
   }
 
   async purgeAgentEvents(tenantId: string, before: string): Promise<number> {
@@ -1633,6 +1693,14 @@ function iso(v: string | null): string | null {
 
 const GOOGLE_CONNECTION_COLUMNS = `tenant_id as "tenantId", user_id as "userId", refresh_token_enc as "refreshTokenEnc",
   google_email as "googleEmail", scopes, connected_at as "connectedAt", checked_at as "checkedAt"`;
+
+/** 段取りの列（仕様書 第10.14節）。 */
+const PLAN_COLUMNS = `id, tenant_id as "tenantId", user_id as "userId", request, context, status, question,
+  report_run_id as "reportRunId", note, created_at as "createdAt", updated_at as "updatedAt", finished_at as "finishedAt"`;
+
+/** 段取りの段の列。 */
+const PLAN_STEP_COLUMNS = `id, tenant_id as "tenantId", plan_id as "planId", seq, agent_id as "agentId", purpose,
+  depends_on as "dependsOn", status, run_id as "runId", attempts, asked, answer, note, updated_at as "updatedAt"`;
 
 const SCHEDULE_COLUMNS = `id, tenant_id as "tenantId", user_id as "userId", agent_id as "agentId",
   agent_version as "agentVersion", input, rule, timezone, enabled, next_run_at as "nextRunAt",

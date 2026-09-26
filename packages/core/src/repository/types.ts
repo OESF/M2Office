@@ -201,6 +201,18 @@ export interface Repository {
   finishAgentEvent(tenantId: string, id: string, error: string | null): Promise<void>;
   /** 処理済みで、指定の時刻より古いイベントを消す。消した数を返す。 */
   purgeAgentEvents(tenantId: string, before: string): Promise<number>;
+
+  /** 段取りを作る（仕様書 第10.14節）。作るとデータベースがイベント `plan.requested` を書く。 */
+  createPlan(p: Plan): Promise<void>;
+  getPlan(tenantId: string, id: string): Promise<Plan | null>;
+  /** 本人の、まだ終わっていない段取り（新しい順）。 */
+  listActivePlans(tenantId: string, userId: string): Promise<Plan[]>;
+  /** 段取りを書き換える。`waiting_input` から `running` にするとイベント `plan.resumed` が書かれる。 */
+  updatePlan(p: Plan): Promise<void>;
+  createPlanSteps(steps: PlanStep[]): Promise<void>;
+  listPlanSteps(tenantId: string, planId: string): Promise<PlanStep[]>;
+  getPlanStep(tenantId: string, id: string): Promise<PlanStep | null>;
+  updatePlanStep(step: PlanStep): Promise<void>;
   /** その日の会話の要約を保存する（長期に持つ。第11.9.6節）。 */
   saveConversationDigest(d: ConversationDigest): Promise<void>;
   /** 本人の会話の要約（新しい順）。 */
@@ -460,15 +472,59 @@ export interface AgentEvent {
   tenantId: string;
   /** 持ち主（業務を依頼した人・会話した人）。この人の秘書だけが受け取る。 */
   userId: string;
-  kind: 'run.finished' | 'run.awaiting_approval' | 'conversation.turn';
+  kind: 'run.finished' | 'run.awaiting_approval' | 'conversation.turn' | 'plan.requested' | 'plan.resumed';
   runId: string | null;
   conversationId: string | null;
+  /** 段取り（`plan.*` のとき。第10.14節）。 */
+  planId: string | null;
   /** 実行の状態（`run.*` のとき）。 */
   status: string | null;
   createdAt: string;
   attempts: number;
   processedAt: string | null;
   lastError: string | null;
+}
+
+/** 秘書の段取り（仕様書 第10.14節、ADR-0040）。 */
+export interface Plan {
+  id: string;
+  tenantId: string;
+  /** 依頼した本人。分身はこの人として業務を起こす。 */
+  userId: string;
+  request: string;
+  /** 段取りを立てる材料（今日の会話・本人の返事）。 */
+  context: string;
+  status: 'planning' | 'running' | 'waiting_input' | 'reported' | 'cancelled';
+  /** 本人に聞いていること（`waiting_input` のとき）。 */
+  question: string | null;
+  reportRunId: string | null;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+  finishedAt: string | null;
+}
+
+/** 段取りの段。1 つの業務への依頼。 */
+export interface PlanStep {
+  id: string;
+  tenantId: string;
+  planId: string;
+  /** 1 から始まる順番。 */
+  seq: number;
+  agentId: string;
+  /** この段で頼むこと。 */
+  purpose: string;
+  /** 先に終わっている必要がある段（`seq`）。 */
+  dependsOn: number[];
+  status: 'pending' | 'needs_input' | 'running' | 'awaiting_approval' | 'completed' | 'failed' | 'skipped' | 'cancelled';
+  runId: string | null;
+  attempts: number;
+  /** 本人に聞いたか（1 回だけ聞く）。 */
+  asked: boolean;
+  /** 業務の答え（完了したとき）。 */
+  answer: string | null;
+  note: string | null;
+  updatedAt: string;
 }
 
 export interface Conversation {

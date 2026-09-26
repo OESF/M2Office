@@ -19,7 +19,7 @@ export { OpenAiCompatibleProvider, LlmRequestError } from './llm/gemini.js';
 export type { GeminiModelMap } from './llm/gemini.js';
 
 export type {
-  Repository, AgentEvent, DisabledConnectorTool, TenantConnection, KnowledgeHit, KnowledgeItem, KnowledgeSearchResult, KnowledgeSectionView, RunStatRow, InstalledExtension, PrivateExtension, CompartmentAssignment,
+  Repository, AgentEvent, Plan, PlanStep, DisabledConnectorTool, TenantConnection, KnowledgeHit, KnowledgeItem, KnowledgeSearchResult, KnowledgeSectionView, RunStatRow, InstalledExtension, PrivateExtension, CompartmentAssignment,
   CredentialKind, TenantCredential, GoogleConnection, UserPhoto,
 } from './repository/types.js';
 export { PostgresRepository } from './repository/postgres.js';
@@ -101,13 +101,17 @@ export { nextRunAt, validateRule, describeRule } from './scheduler/rule.js';
 export { isSchedulable, missingInputs, withEnabled, triggeredNow } from './scheduler/control.js';
 export { answerSchedule, type ScheduleAnswer } from './secretary/schedules.js';
 export { SecretaryConductor, type ConductorDeps, type ConductorOutcome } from './secretary/conductor.js';
+export {
+  PlanRunner, createPlan, cancelPlan, planProgress, planStatusText, planningPrompt, parsePlan,
+  PLAN_MAX_STEPS, PLAN_MAX_PARALLEL, type PlanRunnerDeps, type PlanDraft,
+} from './secretary/plan.js';
 export { parseToolCalls } from './engine/tool-protocol.js';
 export {
   RunNotResumableError, DefinitionInvalidError, TenantBoundaryError, ApprovalForbiddenError,
 } from './engine/errors.js';
 
 export {
-  OFFICIAL_AGENTS, LOOKUP_AGENT_ID, resolveOfficialAgent, DEFAULT_STANDARD_MINUTES, standardMinutes, stepLabel,
+  OFFICIAL_AGENTS, LOOKUP_AGENT_ID, PLAN_REPORT_AGENT_ID, resolveOfficialAgent, DEFAULT_STANDARD_MINUTES, standardMinutes, stepLabel,
   agentFace, MORNING_BRIEF,
 } from './agents/index.js';
 export { Secretary, acceptsFile, fillInputs } from './secretary/secretary.js';

@@ -94,8 +94,9 @@ console.log('\n■ 1. 疎通と一覧');
   const { body } = await call('a', '/v1/agents');
   // 拡張機能を導入している場合はその分が増えるため、公式の業務エージェントだけを数える
   const official = (body.agents ?? []).filter((a) => !a.extension);
-  official.length === 13
-    ? ok(`公式の業務エージェントが 13 件（${official.map((a) => a.name).join(' / ')}）`)
+  // 段取りの報告（第10.14節）はメニューに出ない中の業務
+  official.length === 14 && official.filter((a) => a.menu === false).map((a) => a.id).join() === 'secretary-plan-report'
+    ? ok(`公式の業務エージェントが 14 件（うち中の業務 1。${official.map((a) => a.name).join(' / ')}）`)
     : ng('エージェントの一覧が取得できない', JSON.stringify(body));
 }
 
@@ -2672,6 +2673,85 @@ console.log('\n■ 53. 秘書が指揮する: 業務と秘書のイベント（�
     ng('イベントの確認が途中で止まった', String(err));
   } finally {
     await owner.end();
+  }
+}
+
+console.log('\n■ 54. 秘書が段取りをする: 分身と業務の連携（第10.14節、ADR-0040）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const say = async (message) => (await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message }) }, 'member')).body;
+  const lookups = async () => (await call('a', '/v1/secretary/lookups', {}, 'member')).body.items ?? [];
+  const planOf = async (id) => (await owner.query(`select status, question, report_run_id from plans where id = $1`, [id])).rows[0];
+  const until = async (fn, ms = 20000) => { const end = Date.now() + ms; let v; while (Date.now() < end) { v = await fn(); if (v) return v; await sleep(300); } return v; };
+  const planIds = [];
+  try {
+    // 依頼を受けたら、段取りを作ってすぐ返す（黙り込まない）
+    const started = Date.now();
+    const reply = await say('大阪出張の準備の段取りをして');
+    const ms = Date.now() - started;
+    const planId = reply.lookup?.runId?.startsWith('plan:') ? reply.lookup.runId.slice(5) : null;
+    if (planId) planIds.push(planId);
+    planId && /段取りを組みます/.test(reply.text ?? '') && ms < 3000
+      ? ok(`段取りを作ってすぐ返す（${ms} ms）`) : ng('段取りにならない', JSON.stringify(reply).slice(0, 200));
+
+    // 分身が段取りを立て、業務に依頼し、足りない情報を本人に聞く
+    const asked = await until(async () => (await planOf(planId))?.status === 'waiting_input' && await planOf(planId));
+    asked?.question && /社内ナレッジ Q&A/.test(asked.question)
+      ? ok(`分身が段取りを立てて業務に頼み、足りない情報を 1 回だけ聞く（「${asked.question}」）`) : ng('問いが出ない', JSON.stringify(asked ?? null));
+    const bar = (await lookups()).find((x) => x.runId === `plan:${planId}`);
+    bar && !bar.done && bar.progress === asked?.question ? ok('秘書バーに段取りの問いを出す') : ng('秘書バーに出ない', JSON.stringify(bar ?? null));
+    const { rows: stepRuns } = await owner.query(
+      `select s.seq, s.status, s.run_id, j.plan_step_id from plan_steps s left join jobs j on j.plan_step_id = s.id where s.plan_id = $1 order by s.seq`, [planId]);
+    stepRuns[0]?.status === 'completed' && stepRuns[0]?.plan_step_id ? ok('1 段目の業務は、段取りの段として起こして完了した') : ng('段の業務が無い', JSON.stringify(stepRuns));
+    (await lookups()).every((x) => x.runId !== stepRuns[0]?.run_id) ? ok('段の業務の結果は個別には届けない') : ng('段の結果が個別に届く');
+
+    // 本人が答えると、秘書が段取りに渡して続きを進め、そろったら報告が届く
+    const answered = await say('来週の月曜の会議です');
+    /段取りを続けます/.test(answered.text ?? '') ? ok('本人の返事を秘書が見分けて段取りに渡す') : ng('返事が段取りに渡らない', answered.text);
+    const reported = await until(async () => { const p = await planOf(planId); return p?.status === 'reported' && p.report_run_id ? p : null; });
+    reported ? ok('すべての段が終わると、段取りの報告を起こす') : ng('報告にならない', JSON.stringify(await planOf(planId)));
+    const report = await until(async () => (await lookups()).find((x) => x.runId === reported?.report_run_id && x.done));
+    report && report.agentName === null && report.request === '大阪出張の準備の段取りをして'
+      ? ok('報告は秘書の答えとして届く（依頼の文のまま）') : ng('報告が届かない', JSON.stringify(report ?? null));
+    const { body: claimed } = await call('a', '/v1/secretary/lookups/claim', { method: 'POST' }, 'member');
+    (claimed.items ?? []).some((x) => x.runId === reported?.report_run_id) ? ok('報告を本人に伝える（持ち越しと同じ経路）') : ng('報告を伝えない');
+
+    // 進み具合と取りやめ
+    const second = await say('東京の取引先訪問の段取りをして');
+    const secondId = second.lookup?.runId?.slice(5);
+    if (secondId) planIds.push(secondId);
+    const status = await say('段取りはどこまで進んだ？');
+    /段取り/.test(status.text ?? '') && status.layer === 'direct' ? ok('進み具合を推論なしで答える') : ng('進み具合を答えない', status.text);
+    const cancelled = await say('段取りはやめて');
+    const after = secondId ? await planOf(secondId) : null;
+    /取りやめました/.test(cancelled.text ?? '') && after?.status === 'cancelled' ? ok('「やめて」で段取りを取りやめる') : ng('取りやめられない', `${cancelled.text} / ${after?.status}`);
+
+    const { rows: audits } = await owner.query(
+      `select distinct action from audit_events where target_id = any($1) and action like 'secretary.plan.%'`, [planIds]);
+    const actions = audits.map((r) => r.action);
+    ['secretary.plan.create', 'secretary.plan.report', 'secretary.plan.cancel'].every((a) => actions.includes(a))
+      ? ok('段取りの操作を監査ログに残す') : ng('監査ログが足りない', actions.join(','));
+
+    // テナント境界: ほかの会社から段取りは見えない
+    const app = new pg.Client({ connectionString: process.env.DATABASE_URL });
+    await app.connect();
+    try {
+      await app.query(`select set_config('app.tenant_id', 't-beta', false)`);
+      const { rows: seen } = await app.query(`select count(*)::int as n from plans where id = any($1)`, [planIds]);
+      seen[0].n === 0 ? ok('ほかの会社から段取りは見えない（テナント境界）') : ng('ほかの会社から見える');
+    } finally {
+      await app.end();
+    }
+  } catch (err) {
+    ng('段取りの確認が途中で止まった', String(err));
+  } finally {
+    for (const id of planIds) {
+      await owner.query(`update plans set status = 'cancelled' where id = $1 and status in ('planning','running','waiting_input')`, [id]);
+    }
+    await owner.end();
+    await call('a', '/v1/me/conversations', { method: 'DELETE' }, 'member');
   }
 }
 

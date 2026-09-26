@@ -30,12 +30,15 @@ export async function enqueueJob(
     origin: Job['origin'];
     /** 監査ログに残す起動者。定時実行では `scheduler`。 */
     actor: { type: 'user' | 'system'; id: string };
+    /** 秘書の段取りの段として起こすなら、その段の ID（仕様書 第10.14節）。 */
+    planStepId?: string;
   },
 ): Promise<{ jobId: string; runId: string }> {
   const now = new Date().toISOString();
   const job: Job = {
     id: randomUUID(), tenantId: p.tenantId, agentId: p.def.id, agentVersion: p.def.version,
     requestedBy: p.requestedBy, origin: p.origin, input: p.input, createdAt: now,
+    ...(p.planStepId ? { planStepId: p.planStepId } : {}),
   };
   const run: Run = {
     id: randomUUID(), jobId: job.id, tenantId: p.tenantId, status: 'queued', cursor: 0,
@@ -46,7 +49,7 @@ export async function enqueueJob(
   await repo.appendAudit({
     id: randomUUID(), tenantId: p.tenantId, actorType: p.actor.type, actorId: p.actor.id,
     action: 'job.create', targetType: 'job', targetId: job.id,
-    detail: { agentId: p.def.id, runId: run.id, origin: job.origin, requestedBy: p.requestedBy },
+    detail: { agentId: p.def.id, runId: run.id, origin: job.origin, requestedBy: p.requestedBy, ...(p.planStepId ? { planStepId: p.planStepId } : {}) },
     occurredAt: now,
   });
   return { jobId: job.id, runId: run.id };

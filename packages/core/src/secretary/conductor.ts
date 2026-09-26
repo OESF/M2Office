@@ -3,10 +3,11 @@
  *
  * 業務の実行の終了・承認待ちと秘書との会話の保存は、データベースがイベント（`agent_events`）として必ず書く。
  * ワーカーがこの受け手の {@link SecretaryConductor.tick} を繰り返し呼び、イベントを 1 件ずつ確保して処理する。
- * いまは、その場で学ぶ（第11.5.2節）。結果を見て次の業務を起こす連携は、このイベントを土台に作る。
+ * その場で学び（第11.5.2節）、段取りのイベントと段の業務の終了は分身（{@link PlanRunner}）に渡す（第10.14節）。
  *
  * @see 仕様書 第10.13節 秘書が指揮する
- * @see ADR-0039
+ * @see 仕様書 第10.14節 秘書が段取りをする
+ * @see ADR-0039・ADR-0040
  */
 
 import type { AgentDefinition } from '@m2office/shared';
@@ -15,6 +16,7 @@ import { OFFICIAL_AGENTS } from '../agents/index.js';
 import { silentLogger, type Logger } from '../log/logger.js';
 import type { MemoryLearning } from '../memory/learn.js';
 import { learnableWork, readWorkAnswers } from '../memory/work.js';
+import type { PlanRunner } from './plan.js';
 
 /** 業務の答え 1 件の長さの上限（字）。 */
 const WORK_ANSWER_MAX = 1500;
@@ -27,12 +29,15 @@ export interface ConductorDeps {
    * 省略時は公式の業務だけ（拡張機能の業務は、区画が分からないため学ばない）。
    */
   agentsFor?(tenantId: string): Promise<AgentDefinition[]>;
+  /** 秘書の分身（段取り役。第10.14節）。無ければ段取りのイベントは記録だけにする。 */
+  plans?: Pick<PlanRunner, 'onRequested' | 'onResumed' | 'onStepRun'>;
   logger?: Logger;
 }
 
 /** 1 件を処理した結果。 */
 export type ConductorOutcome =
   | { event: AgentEvent; action: 'learned'; learned: number; promoted: number }
+  | { event: AgentEvent; action: 'planned' }
   | { event: AgentEvent; action: 'skipped'; reason: string }
   | { event: null; action: 'failed'; eventId: string; error: string };
 
@@ -76,6 +81,20 @@ export class SecretaryConductor {
     const event = await this.deps.repo.getAgentEvent(tenantId, id);
     if (!event) throw new Error('イベントが見つかりません');
     if (event.kind === 'conversation.turn') return this.onConversation(event, now);
+    const { plans } = this.deps;
+    // 段取り（第10.14節）: 分身が段取りを立てる・続きを進める
+    if ((event.kind === 'plan.requested' || event.kind === 'plan.resumed') && event.planId) {
+      if (!plans) return { event, action: 'skipped', reason: '分身がいません' };
+      if (event.kind === 'plan.requested') await plans.onRequested(event.tenantId, event.planId, now);
+      else await plans.onResumed(event.tenantId, event.planId, now);
+      return { event, action: 'planned' };
+    }
+    // 段取りの段の業務なら、分身に渡す（結果は段取りの報告でまとめて届ける）
+    if (plans && event.runId && (event.kind === 'run.finished' || event.kind === 'run.awaiting_approval')) {
+      const run = await this.deps.repo.getRun(event.tenantId, event.runId);
+      const job = run ? await this.deps.repo.getJob(event.tenantId, run.jobId) : null;
+      if (run && job?.planStepId && await plans.onStepRun(event.tenantId, job, run, now)) return { event, action: 'planned' };
+    }
     if (event.kind === 'run.finished' && event.status === 'completed') return this.onRunCompleted(event, now);
     // 失敗・中止・承認待ちは記録するだけ（第10.13節）。秘書が次の業務を起こす連携の材料にする
     return { event, action: 'skipped', reason: `記録のみ（${event.kind}・${event.status ?? ''}）` };

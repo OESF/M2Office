@@ -17,6 +17,7 @@ import { LOOKUP_AGENT_ID } from '../agents/index.js';
 import { REFERS_TO_PAST, recall } from './recall.js';
 import { CORRECTION, correctMemory } from './correct.js';
 import { answerSchedule } from './schedules.js';
+import { cancelPlan, createPlan, planStatusText } from './plan.js';
 import { AI_NOT_CONFIGURED_MESSAGE, aiAvailable } from '../llm/unconfigured.js';
 import { expandQuery } from '../knowledge/expand.js';
 import { jstDay } from '../memory/learn.js';
@@ -235,6 +236,10 @@ export class Secretary {
       return { reply: { layer: 'direct', text: scheduled.text, evidence: scheduled.evidence, tokensUsed: 0 }, keep: true };
     }
 
+    // 動いている段取り（第10.14節）: 問いへの答え・取りやめ・進み具合。業務への取次より先に見る
+    const planned = await this.answerPlans(tenantId, userId, message, scheduleAgents);
+    if (planned) return { reply: planned, keep: true };
+
     // 層 1: パターン一致で定型の照会に該当するか（LLM を使わない）
     // 「あの件の進み具合は」のような過去を指す問いは、実行の件数ではなく、覚えていることから答える（第10.7.3節）
     const direct0 = this.matchDirect(message);
@@ -260,7 +265,18 @@ export class Secretary {
     // 「あれ、どうなった」のような過去を指す問いは、業務へ取り次がず、記憶を使って答える（第10.7.3節）。
     // ただし「さっきの行程をカレンダーに入れて」のような作業の依頼は取り次ぐ（第10.9.6節）
     const pastOnly = REFERS_TO_PAST.test(message) && !DOING.test(message);
-    const routed = pastOnly ? { agent: null, reason: '', tokensUsed: 0 } : await this.route(message, enabled, llm, lookup);
+    const routed = pastOnly ? { agent: undefined, plan: false, reason: '', tokensUsed: 0 } : await this.route(message, enabled, llm, lookup, true);
+    if (routed.plan) {
+      // 2 つ以上の業務を組み合わせる依頼は、段取りを作って分身に任せ、すぐ返す（第10.14節、ADR-0040）。黙り込まない
+      const plan = await createPlan(this.deps.repo, tenantId, userId, message, await this.todayContext(tenantId, userId));
+      return {
+        reply: {
+          layer: 'light', text: '段取りを組みます。業務に頼んで進め、そろったらまとめてお伝えします。',
+          evidence: [{ label: '判定', value: routed.reason }], lookup: { runId: `plan:${plan.id}`, request: message }, tokensUsed: routed.tokensUsed,
+        },
+        keep: true,
+      };
+    }
     if (routed.agent) {
       await this.audit(tenantId, userId, 'secretary.route', routed.agent.id);
       // 専門の業務は頼んで実行し、結果をあとで伝える。本人に実行の可否を聞かない（第10.9.6節、ADR-0033）
@@ -551,6 +567,56 @@ export class Secretary {
     };
   }
 
+  /**
+   * 動いている段取りについての発言に答える（仕様書 第10.14節）。当たらなければ `null`。
+   *
+   * @remarks
+   * 問いを出している段取りがあれば、高速の推論で「問いへの答えか」を見分け、答えなら段取りに渡す（イベント `plan.resumed`）。
+   * 取りやめと進み具合は推論を使わない。
+   */
+  private async answerPlans(
+    tenantId: string, userId: string, message: string, agents: AgentDefinition[],
+  ): Promise<SecretaryReply | null> {
+    const { repo } = this.deps;
+    const active = await Promise.resolve().then(() => repo.listActivePlans(tenantId, userId)).catch(() => []);
+    if (active.length === 0) return null;
+    const latest = active[0]!;
+    const direct = (text: string): SecretaryReply => ({ layer: 'direct', text, evidence: [], tokensUsed: 0 });
+
+    if (PLAN_CANCEL.test(message) && (PLAN_WORD.test(message) || (active.length === 1 && message.length <= 20))) {
+      const steps = await repo.listPlanSteps(tenantId, latest.id);
+      const done = steps.filter((s) => s.status === 'completed').map((s) => agents.find((a) => a.id === s.agentId)?.name ?? '業務');
+      await cancelPlan(repo, latest);
+      return direct(`「${latest.request.slice(0, 40)}」の段取りを取りやめました。${done.length ? `終わった分（${[...new Set(done)].join('、')}）の成果は残しています。` : ''}`);
+    }
+    if (PLAN_STATUS.test(message) && (PLAN_WORD.test(message) || message.length <= 20)) {
+      const texts = await Promise.all(active.map(async (p) => planStatusText(p, await repo.listPlanSteps(tenantId, p.id), agents)));
+      return direct(texts.join('\n\n'));
+    }
+    const waiting = active.find((p) => p.status === 'waiting_input' && p.question);
+    if (waiting) {
+      const llm = this.deps.llmFor ? await this.deps.llmFor(tenantId) : this.deps.llm;
+      const res = await llm.complete({
+        tier: 'fast',
+        maxOutputTokens: 10,
+        messages: [
+          { role: 'system', content: '秘書が本人に出した問いと、本人の発言を見て、発言が問いへの答えなら「はい」、別の話なら「いいえ」とだけ返してください。' },
+          { role: 'user', content: `問い: ${waiting.question}\n本人の発言: ${message}` },
+        ],
+      }).catch(() => ({ text: '', tokensUsed: 0 }));
+      if (/はい/.test(res.text)) {
+        await repo.updatePlan({
+          ...waiting, status: 'running', question: null,
+          context: [waiting.context, `本人の返事（${waiting.question}）: ${message}`].filter(Boolean).join('\n'),
+          updatedAt: new Date().toISOString(),
+        });
+        await this.audit(tenantId, userId, 'secretary.plan.answer', waiting.id);
+        return { ...direct('ありがとうございます。段取りを続けます。'), layer: 'light', tokensUsed: res.tokensUsed };
+      }
+    }
+    return null;
+  }
+
   private matchDirect(message: string) {
     return DIRECT_QUERIES.find(
       (q) => q.patterns.some((p) => p.test(message)) && !q.excludes?.some((p) => p.test(message)),
@@ -569,7 +635,8 @@ export class Secretary {
     agents: AgentDefinition[],
     llm: LlmProvider = this.deps.llm,
     lookup?: AgentDefinition,
-  ): Promise<{ agent?: AgentDefinition; reason: string; tokensUsed: number }> {
+    allowPlan = false,
+  ): Promise<{ agent?: AgentDefinition; plan?: boolean; reason: string; tokensUsed: number }> {
     // **照会は業務に取り次がない**（仕様書 第10.9.4.1節）。層 3 が組織知識を根拠に答える。
     // ただし外の最新の情報や本人の予定が要る照会（出張の行程など）は、秘書の調べものに回す（第10.9.6節）
     const asking = ASKING.test(message) && !DOING.test(message);
@@ -585,9 +652,11 @@ export class Secretary {
         a.category === 'briefing' && /ブリーフ|週報/.test(message),
     );
     if (byKeyword) return { agent: byKeyword, reason: '語句の一致', tokensUsed: 0 };
-    const list = candidates
-      .map((a) => (a.id === LOOKUP_AGENT_ID ? `${a.id}: ${LOOKUP_ROUTE_NOTE}` : `${a.id}: ${a.name} — ${a.description}`))
-      .join('\n');
+    const list = [
+      ...candidates.map((a) => (a.id === LOOKUP_AGENT_ID ? `${a.id}: ${LOOKUP_ROUTE_NOTE}` : `${a.id}: ${a.name} — ${a.description}`)),
+      // 段取り（第10.14節）。照会には選ばせない
+      ...(allowPlan && !asking && agents.length > 1 ? [`${PLAN_ROUTE_ID}: ${PLAN_ROUTE_NOTE}`] : []),
+    ].join('\n');
     const res = await llm.complete({
       tier: 'fast',
       maxOutputTokens: 50,
@@ -605,6 +674,9 @@ export class Secretary {
         { role: 'user', content: message },
       ],
     });
+    if (allowPlan && !asking && agents.length > 1 && new RegExp(`(^|\\s)${PLAN_ROUTE_ID}(\\s|$)`).test(res.text.trim())) {
+      return { plan: true, reason: '複数の業務を組み合わせる依頼（段取り）', tokensUsed: res.tokensUsed };
+    }
     const picked = candidates.find((a) => res.text.includes(a.id));
     return picked
       ? { agent: picked, reason: picked.id === LOOKUP_AGENT_ID ? '外の情報や予定を調べる依頼' : '推論による判定', tokensUsed: res.tokensUsed }
@@ -671,6 +743,18 @@ const CONTEXT_CHARS = 2000;
 const MEMORY_FOR_LOOKUP = 20;
 
 /** 取次の判定で、秘書の調べものを表す説明（第10.9.6節）。 */
+/** 取次の候補に並べる「段取り」の ID（仕様書 第10.14節）。業務の ID と重ならない。 */
+const PLAN_ROUTE_ID = 'plan';
+const PLAN_ROUTE_NOTE = '段取り — 2 つ以上の業務を組み合わせる依頼や、ある業務の結果を別の業務に使う依頼'
+  + '（例: 出張の準備をして、〇〇を調べて資料にまとめて、会議の準備と予定の登録をして）。1 つの業務で済む依頼には選ばない';
+
+/** 段取りの取りやめ。 */
+const PLAN_CANCEL = /やめて|中止|取りやめ|キャンセル/;
+/** 段取りの進み具合を尋ねる言い回し。 */
+const PLAN_STATUS = /どこまで|進み具合|進捗|状況|どうなって|終わった[？?]?$/;
+/** 段取りを指す言葉。 */
+const PLAN_WORD = /段取り|手配|さっきの依頼|頼んだ件|その件/;
+
 const LOOKUP_ROUTE_NOTE = '調べもの — 時刻表・乗り換え・道順・出張や外出の行程・天気・ニュース・価格・営業時間など外の最新の情報が要る依頼、'
   + '本人の予定・空き・ToDo を見て考える依頼、長い調査。社内の決まりの質問には選ばない';
 

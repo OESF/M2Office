@@ -29,6 +29,8 @@ export interface Job {
   origin: JobOrigin;
   input: Record<string, unknown>;
   createdAt: string;
+  /** 秘書の段取りの段として起こしたなら、その段の ID（仕様書 第10.14節）。 */
+  planStepId?: string | null;
 }
 
 export interface Run {

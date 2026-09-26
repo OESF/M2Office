@@ -31,6 +31,9 @@ export class StubLlmProvider implements LlmProvider {
 
     const system = req.messages.find((m) => m.role === 'system')?.content ?? '';
     const user = req.messages.at(-1)?.content ?? '';
+    // 秘書の段取り（仕様書 第10.14節）を自動テストで通しで確かめるための、決まった応答
+    const planned = stubPlanning(system, user);
+    if (planned !== null) return { text: planned, tokensUsed: 16 };
     const tools = extractToolNames(system);
     const calls = chooseTools(tools, user);
 
@@ -285,4 +288,27 @@ function readText(previous: string): string {
 function extractField(text: string, key: string): string {
   const m = new RegExp(`"${key}"\\s*:\\s*"([^"]*)"`).exec(text);
   return m?.[1] ?? '';
+}
+
+/**
+ * 秘書の段取りの推論に、決まった応答を返す（自動テスト専用。仕様書 第10.14節）。当たらなければ `null`。
+ *
+ * @remarks
+ * - 取次で「段取り」を含む依頼には `plan` を返す
+ * - 段取りを立てる指示には、使える業務のうち秘書の調べもの（1 段目）と社内ナレッジ Q&A（1 段目の答えを使う 2 段目）を返す
+ * - 問いへの答えかの見分けには「はい」を返す
+ */
+function stubPlanning(system: string, user: string): string | null {
+  if (system.includes('依頼に最も合う業務を 1 つ選び') && system.includes('plan: 段取り') && user.includes('段取り')) return 'plan';
+  if (system.includes('問いへの答えなら「はい」')) return 'はい';
+  if (user.startsWith('# 段取り')) {
+    const listed = (id: string) => user.includes(`\n- ${id}: `);
+    const request = user.split('## 本人の依頼\n')[1]?.trim() ?? '';
+    const steps = [
+      ...(listed('secretary-lookup') ? [{ agent: 'secretary-lookup', purpose: request, after: [] as number[] }] : []),
+      ...(listed('knowledge-qa') ? [{ agent: 'knowledge-qa', purpose: '社内の規程で確かめる', after: listed('secretary-lookup') ? [1] : [] }] : []),
+    ];
+    return JSON.stringify({ steps, cannot: '' });
+  }
+  return null;
 }

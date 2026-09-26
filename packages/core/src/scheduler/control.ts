@@ -6,18 +6,19 @@
  */
 
 import type { AgentDefinition, Schedule } from '@m2office/shared';
-import { LOOKUP_AGENT_ID } from '../agents/index.js';
+import { LOOKUP_AGENT_ID, PLAN_REPORT_AGENT_ID } from '../agents/index.js';
 import { nextRunAt } from './rule.js';
 
 /**
  * 定時実行に登録できる業務か。
  *
  * @remarks
- * ファイルを受け取る業務（入力に `fileId` を持つ。仕様書 第10.10.3節）と秘書の調べものは、
+ * ファイルを受け取る業務（入力に `fileId` を持つ。仕様書 第10.10.3節）と秘書の調べもの・段取りの報告は、
  * 毎回違うものを渡すため登録できない（第6.1.7節）。利用範囲と無効にした業務は、呼ぶ側で確かめる。
  */
 export function isSchedulable(def: AgentDefinition): boolean {
-  if (def.id === LOOKUP_AGENT_ID) return false;
+  // 秘書の調べものと段取りの報告は、秘書が自分で起こす中の業務（第10.11節・第10.14節）
+  if (def.id === LOOKUP_AGENT_ID || def.id === PLAN_REPORT_AGENT_ID) return false;
   return !Object.keys((def.inputs as { properties?: object }).properties ?? {}).includes('fileId');
 }
 
