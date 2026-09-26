@@ -19,7 +19,7 @@ const registry = new ToolRegistry();
 for (const t of BUILTIN_TOOLS) registry.register(t);
 const SAMPLE_PLAN = JSON.parse(readFileSync(
   new URL('../../../extensions/research-slides/evals/research-slides.json', import.meta.url), 'utf8',
-)).cases[0].stub.build[0].args;
+)).cases[0].stub.work.find((c: { name: string }) => c.name === 'slides.create').args;
 
 test('サンプルの構成（表紙を含む 8 ページ）は検証を通る', () => {
   const r = normalizeSlidePlan(SAMPLE_PLAN);

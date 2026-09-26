@@ -47,6 +47,7 @@ export const webResearch: Tool = {
  * 危険度: `draft`。依頼した本人のドライブに作り、共有はしない。
  * 構成の形が違えば作らずに理由を返す。上限を超えた文字は切り詰め、そのことを結果に書く。
  * 接続口が見本のときは Google スライドを作らず、構成をアウトラインとして成果物に残す。
+ * Google では標準の見た目で組み立てる（会社のテンプレートは Q-88 の後）。
  */
 export const slidesCreate: Tool = {
   name: 'slides.create',
@@ -76,18 +77,21 @@ export const slidesCreate: Tool = {
       { tenantId: ctx.tenantId, userId: ctx.userId }, { title: plan.title, plan, template },
     );
     const mock = ctx.connector.sourceFor(ctx.tenantId) === 'mock';
+    // 接続口が会社のテンプレートを使えなかったときは、標準の見た目で作ったと書く（第9.4.2節）
+    const used = created.templateApplied === false ? null : template;
+    warnings.push(...(created.warnings ?? []));
     const links = created.url
       ? [`開く: ${created.url}`, ...(created.pptxUrl ? [`PowerPoint 形式: ${created.pptxUrl}`] : [])]
       : ['（見本の接続口のため、Google スライドは作っていません。構成をアウトラインとして残しています）'];
     const id = randomUUID();
     await ctx.repo.createArtifact({
       id, runId: ctx.runId, tenantId: ctx.tenantId, kind: 'slides', title: plan.title,
-      body: [...links, `テンプレート: ${template ? template.name : '標準のテンプレート'}`, '', planOutline(plan), ...(warnings.length ? ['', '---', ...warnings.map((w) => `注意: ${w}`)] : [])].join('\n'),
+      body: [...links, `テンプレート: ${used ? used.name : '標準のテンプレート'}`, '', planOutline(plan), ...(warnings.length ? ['', '---', ...warnings.map((w) => `注意: ${w}`)] : [])].join('\n'),
       createdAt: new Date().toISOString(),
     });
     return {
       artifactId: id, presentationId: created.presentationId, url: created.url, pptxUrl: created.pptxUrl,
-      slideCount: plan.slides.length + 1, template: template?.name ?? '標準', warnings, ...(mock ? { source: 'mock' } : {}),
+      slideCount: created.pages ?? plan.slides.length + 1, template: used?.name ?? '標準', warnings, ...(mock ? { source: 'mock' } : {}),
     };
   },
 };

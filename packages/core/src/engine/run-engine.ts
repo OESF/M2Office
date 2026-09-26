@@ -529,7 +529,7 @@ export class RunEngine {
         const res = await llm.complete({
           // スキルの effort から決まる推論の強さ（仕様書 第12.12.2節）。無ければ標準
           tier: def.tier ?? 'standard',
-          maxOutputTokens: 2000,
+          maxOutputTokens: STEP_OUTPUT_TOKENS,
           context: { agentId: def.id, stepId: step.id, input, evals: def.evals, stepResults: stepResults(previous) },
           messages: [
             { role: 'system', content: system },
@@ -1101,6 +1101,15 @@ const PREVIOUS_RESULTS_LIMIT = 8000;
  * 前の結果を使う操作が続く段（文書を保存し、その ID で共有し、そのリンクで投稿する）が 2 往復では足りなかった。
  */
 const MAX_TOOL_ROUNDS = 4;
+
+/**
+ * 段の 1 回の推論で出してよい量（トークン）。
+ *
+ * @remarks
+ * 2,000 では、道具の引数が大きい段で途中で切れる。スライドの構成（本文 12 枚と出典）は日本語で 3,000 字を超え、
+ * Gemini の考える分もこの量に数えられる（第 0.122.0 版で 2,000 から 8,000 に）。実行全体の量は `limits.maxTokens` で抑える
+ */
+const STEP_OUTPUT_TOKENS = 8000;
 
 /**
  * 承認の前の組み立て（ADR-0023）で、段の指示に添える説明。

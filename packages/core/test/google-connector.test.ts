@@ -207,7 +207,7 @@ async function fakeGoogle(behave: (s: Seen) => { status: number; json?: unknown 
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const endpoints: GoogleApiEndpoints = {
     gmail: `${base}/gmail`, calendar: `${base}/cal`, tasks: `${base}/tasks`, chat: `${base}/chat`,
-    drive: `${base}/drive`, driveUpload: `${base}/upload`, docs: `${base}/docs`, sheets: `${base}/sheets`,
+    drive: `${base}/drive`, driveUpload: `${base}/upload`, docs: `${base}/docs`, sheets: `${base}/sheets`, slides: `${base}/slides`,
     oauth: { auth: `${base}/oauth/auth`, token: `${base}/oauth/token`, tokeninfo: `${base}/oauth/tokeninfo`, userinfo: `${base}/oauth/userinfo`, revoke: `${base}/oauth/revoke` },
   };
   return { endpoints, seen, refreshes: () => refreshes, close: () => new Promise<void>((r) => server.close(() => r())) };

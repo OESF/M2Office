@@ -1,7 +1,8 @@
 /**
  * @file 接続口の `google` 実装（仕様書 第14.3.4節、ADR-0022）。
  *
- * **Gmail とカレンダーを本物にする。** 残りのサービスは「準備中」と断る。見本のデータで代わりに動かさない。
+ * Gmail・カレンダー・ToDo・Chat・ドライブ・ドキュメント・スプレッドシート・スライドを本物にする。
+ * 残りのサービスは「準備中」と断る。見本のデータで代わりに動かさない。
  * どの呼び出しも、依頼した本人の Google の許可で行う（不変則 I-9）。
  */
 
@@ -16,6 +17,7 @@ import { buildRawMessage, decodeEntities, decodeHeaderWords, extractBody, header
 import { externalOf, pickSpace, spaceIdOf, toChatText } from './chat.js';
 import { googleDocs, googleDrive } from './drive.js';
 import { googleSheets } from './sheets.js';
+import { googleSlides } from './slides.js';
 
 /** スペースの一覧を読む上限（ページの数）。1 ページ 1,000 件。 */
 const CHAT_SPACE_PAGES = 5;
@@ -109,7 +111,7 @@ function pending<T extends object>(service: string): T {
  * 接続口の `google` 実装。
  *
  * @remarks
- * 作るのは Gmail とカレンダー。そのほかは `pending` が「準備中」と断る（ADR-0022）。
+ * 社内の名簿・Meet・フォームは、まだ `pending` が「準備中」と断る（ADR-0022）。
  * アクセス トークンは {@link GoogleTokenSource} がプロセスのメモリにだけ持つ。
  */
 export class GoogleWorkspaceConnector implements WorkspaceConnector {
@@ -368,15 +370,17 @@ export class GoogleWorkspaceConnector implements WorkspaceConnector {
     },
   };
 
-  // ─── 準備中（ADR-0022） ──────────────────────────────────────────────
-
-  slides = pending<WorkspaceConnector['slides']>('スライド');
   // ─── ドライブ・ドキュメント（仕様書 第14.3.4節「ドライブ」「ドキュメント」） ─────
   // トークンは組み立てのあとに決まるため、呼ぶたびに引く
   drive = googleDrive(() => ({ tokens: this.tokens, endpoints: this.endpoints }));
   docs = googleDocs(() => ({ tokens: this.tokens, endpoints: this.endpoints }));
   // スプレッドシート（仕様書 第14.3.4節「スプレッドシート」）。値は式として読ませない
   sheets = googleSheets(() => ({ tokens: this.tokens, endpoints: this.endpoints }));
+  // スライド（仕様書 第9.4.2節「標準の見た目」）。テンプレートのファイルを使わずに組み立てる
+  slides = googleSlides(() => ({ tokens: this.tokens, endpoints: this.endpoints }));
+
+  // ─── 準備中（ADR-0022） ──────────────────────────────────────────────
+
 
   directory = pending<WorkspaceConnector['directory']>('社内の名簿（ディレクトリ）');
   meet = pending<WorkspaceConnector['meet']>('Meet');

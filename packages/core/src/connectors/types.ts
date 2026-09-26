@@ -267,7 +267,9 @@ export interface SlidesConnector {
   /**
    * スライドの構成から、本人のドライブにプレゼンテーションを作る。**共有はしない。**
    *
-   * @returns 作ったものの ID と、開くリンク・PowerPoint 形式の取り出しリンク。見本の接続口では `null`
+   * @returns 作ったものの ID と、開くリンク・PowerPoint 形式の取り出しリンク（見本の接続口では `null`）。
+   *   `templateApplied` が `false` なら、会社のテンプレートを使わず標準の見た目で作った。`pages` は出典のページを含むページ数。
+   *   `warnings` は組み立てで切り詰めたことなど
    */
   createPresentation(
     p: ConnectorPrincipal,
@@ -276,7 +278,10 @@ export interface SlidesConnector {
       /** 会社が登録したテンプレート（第9.4.2節）。`null` なら標準のテンプレート。 */
       template: { presentationId: string; name: string } | null;
     },
-  ): Promise<{ presentationId: string; url: string | null; pptxUrl: string | null }>;
+  ): Promise<{
+    presentationId: string; url: string | null; pptxUrl: string | null;
+    templateApplied?: boolean; pages?: number; warnings?: string[];
+  }>;
 }
 
 /**

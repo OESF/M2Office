@@ -1,11 +1,12 @@
 /**
- * @file Google ドライブ・ドキュメント・スプレッドシートの接続口の単体テスト。手元の偽の Google に向けて呼ぶ。
+ * @file Google ドライブ・ドキュメント・スプレッドシート・スライドの接続口の単体テスト。手元の偽の Google に向けて呼ぶ。
  *
  * `drive.file` の範囲で探す・読む・フォルダ・共有、文書の作成（Markdown を書式にして取り込む）と追記、
  * 表の作成・読み取り・行の追加（値を式として読ませない）を確かめる。
+ * スライドは標準の見た目で組み立てる（テンプレートのファイルを使わない）。
  * リンクによる公開を作らないこと、見えないファイルに触れないことも確かめる。
  *
- * @see 仕様書 第14.3.4節「ドライブ」「ドキュメント」「スプレッドシート」
+ * @see 仕様書 第14.3.4節「ドライブ」「ドキュメント」「スプレッドシート」、第9.4.2節「標準の見た目」
  */
 
 import { test } from 'node:test';
@@ -18,6 +19,7 @@ import {
 import { markdownToDocHtml } from '../src/connectors/google/doc-html.js';
 import { DRIVE_READ_MAX_BYTES, kindOf, quoteDriveQuery } from '../src/connectors/google/drive.js';
 import { sheetRange, toCell } from '../src/connectors/google/sheets.js';
+import { SOURCES_MAX, TABLE_ROWS_MAX, slideRequests } from '../src/connectors/google/slides.js';
 
 const P = { tenantId: 't1', userId: 'u1' };
 const G = 'application/vnd.google-apps.';
@@ -101,13 +103,20 @@ async function fakeDrive(pdf: Uint8Array) {
       return json(200, { id: 'NEWDOC', name: '作った文書', mimeType: `${G}document`, modifiedTime: '2026-09-25T03:00:00.000Z', webViewLink: 'https://docs.example/NEWDOC' });
     }
     if (s.path === '/docs/documents/DOC1:batchUpdate' && s.method === 'POST') return json(200, { documentId: 'DOC1' });
+    // スライド。題名が「失敗」なら組み立てで断る
+    if (s.path === '/slides/presentations' && s.method === 'POST') {
+      const bad = JSON.parse(raw).title === '失敗';
+      return json(200, { presentationId: bad ? 'BADDECK' : 'NEWDECK', pageSize: { width: { magnitude: 9144000 }, height: { magnitude: 5143500 } }, slides: [{ objectId: 'p' }] });
+    }
+    if (s.path === '/slides/presentations/NEWDECK:batchUpdate' && s.method === 'POST') return json(200, { replies: [] });
+    if (s.path === '/slides/presentations/BADDECK:batchUpdate' && s.method === 'POST') return json(400, { error: { code: 400, message: 'Invalid requests[3]' } });
     json(404, { error: { code: 404 } });
   });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const endpoints: GoogleApiEndpoints = {
     gmail: `${base}/gmail`, calendar: `${base}/cal`, tasks: `${base}/tasks`, chat: `${base}/chat`,
-    drive: `${base}/drive`, driveUpload: `${base}/upload`, docs: `${base}/docs`, sheets: `${base}/sheets`,
+    drive: `${base}/drive`, driveUpload: `${base}/upload`, docs: `${base}/docs`, sheets: `${base}/sheets`, slides: `${base}/slides`,
     oauth: { auth: `${base}/oauth/auth`, token: `${base}/oauth/token`, tokeninfo: `${base}/oauth/tokeninfo`, userinfo: `${base}/oauth/userinfo`, revoke: `${base}/oauth/revoke` },
   };
   return { endpoints, seen, close: () => new Promise<void>((r) => server.close(() => r())) };
@@ -277,3 +286,67 @@ test('スプレッドシート: 末尾に行を足す。式として読ませな
   });
 });
 
+
+const DECK = {
+  title: 'ローカル LLM の動向', subtitle: '2026 年 9 月',
+  slides: [
+    { layout: 'BULLET' as const, title: '要点', body: '製品が増えた\n価格が下がった', takeaway: '手元で動かせる時代になった' },
+    { layout: 'COMPARISON' as const, title: '比べる', compareLeftTitle: '手元', compareLeftBody: '社外に出さない', compareRightTitle: 'クラウド', compareRightBody: '手軽' },
+    { layout: 'KPI' as const, title: '数値', stats: [{ value: '12', label: '製品の数' }, { value: '8GB', label: 'メモリ' }] },
+    { layout: 'CHART' as const, title: '推移', chartType: 'COLUMN' as const, chartCategories: ['2024', '2025'], chartSeries: [{ name: '製品の数', values: [3, 12000] }] },
+    { layout: 'IMAGE' as const, title: '画像', caption: '手元で動く様子' },
+  ],
+  sources: [{ title: '見本の記事', url: 'https://example.com/a' }, { title: '怪しいリンク', url: 'javascript:alert(1)' }],
+};
+
+test('スライド: 標準の見た目で組み立てる。表紙・各レイアウト・出典のページ。共有はしない（第9.4.2節）', async () => {
+  await withDrive(async (c, seen) => {
+    const made = await c.slides.createPresentation(P, { title: DECK.title, plan: DECK, template: { presentationId: 'TPL', name: '社外提案用' } });
+    assert.equal(made.presentationId, 'NEWDECK');
+    assert.equal(made.url, 'https://docs.google.com/presentation/d/NEWDECK/edit');
+    assert.equal(made.pptxUrl, 'https://docs.google.com/presentation/d/NEWDECK/export/pptx');
+    assert.equal(made.pages, 7, '表紙 + 5 枚 + 出典');
+    assert.equal(made.templateApplied, false);
+    assert.match(made.warnings![0]!, /社外提案用.*標準の見た目/);
+    assert.deepEqual(JSON.parse(seen.find((s) => s.path === '/slides/presentations')!.body), { title: DECK.title });
+    const reqs = JSON.parse(seen.find((s) => s.path === '/slides/presentations/NEWDECK:batchUpdate')!.body).requests as Record<string, any>[];
+    const slides = reqs.filter((r) => r['createSlide']).map((r) => r['createSlide'].objectId);
+    assert.deepEqual(slides, ['m2cover', 'm2slide1', 'm2slide2', 'm2slide3', 'm2slide4', 'm2slide5', 'm2src']);
+    assert.deepEqual(reqs.at(-1), { deleteObject: { objectId: 'p' } }, '最初から入っていた 1 枚は最後に消す');
+    const texts = reqs.filter((r) => r['insertText']).map((r) => r['insertText'].text);
+    for (const t of ['ローカル LLM の動向', '2026 年 9 月', '製品が増えた\n価格が下がった', '手元で動かせる時代になった', '手元\n社外に出さない', '12\n製品の数', '12,000', '手元で動く様子', '出典']) {
+      assert.ok(texts.includes(t), `「${t}」を置く`);
+    }
+    assert.equal(reqs.filter((r) => r['createTable']).length, 1, 'グラフは表で示す');
+    assert.equal(reqs.filter((r) => r['createParagraphBullets']).length, 1);
+    const links = reqs.filter((r) => r['updateTextStyle']?.style?.link).map((r) => r['updateTextStyle'].style.link.url);
+    assert.deepEqual(links, ['https://example.com/a'], 'http・https だけをリンクにする');
+    assert.ok(!seen.some((s) => s.path.includes('/permissions')), '共有しない');
+    const ids = [...JSON.stringify(reqs).matchAll(/"(?:objectId|pageObjectId)":"([^"]+)"/g)].map((m) => m[1]!).filter((id) => id !== 'p');
+    assert.deepEqual(ids.filter((id) => id.length < 5), [], 'オブジェクトの ID は 5 文字以上（Slides API の決まり）');
+  });
+});
+
+test('スライド: 組み立てに失敗したら、作りかけをごみ箱に移して理由を返す（空のスライドを残さない）', async () => {
+  await withDrive(async (c, seen) => {
+    await assert.rejects(
+      c.slides.createPresentation(P, { title: '失敗', plan: { title: '失敗', slides: [{ layout: 'BULLET', title: 'x', body: 'y' }] }, template: null }),
+      /スライドを組み立てられませんでした/,
+    );
+    const trash = seen.find((s) => s.method === 'PATCH' && s.path === '/drive/files/BADDECK')!;
+    assert.deepEqual(JSON.parse(trash.body), { trashed: true }, '消さずにごみ箱へ');
+  });
+});
+
+test('スライド: 表と出典は上限で切り、そのことを注意に残す。副題が無ければ枠を消す', () => {
+  const r = slideRequests({
+    title: 't',
+    slides: [{ layout: 'CHART', title: 'g', chartType: 'BAR', chartCategories: Array.from({ length: 11 }, (_, i) => `項目${i}`), chartSeries: [{ name: 's', values: Array.from({ length: 11 }, (_, i) => i) }] }],
+    sources: Array.from({ length: 12 }, (_, i) => ({ title: `出典${i}` })),
+  }, { width: 9144000, height: 5143500 }, null);
+  assert.equal(r.requests.find((x) => x['createTable'])!['createTable'].rows, TABLE_ROWS_MAX + 1);
+  assert.ok(r.warnings.some((w) => w.includes(`${TABLE_ROWS_MAX} 行`)) && r.warnings.some((w) => w.includes(`${SOURCES_MAX} 件`)));
+  assert.ok(r.requests.some((x) => x['deleteObject']?.objectId === 'm2cover_s'));
+  const r2 = slideRequests({ title: 't', slides: [{ layout: 'BULLET', title: 'b', body: 'x' }] }, { width: 9144000, height: 5143500 }, null);
+  assert.equal(r2.pages, 2, '出典が無ければ出典のページを足さない');
+});

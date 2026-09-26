@@ -1047,11 +1047,11 @@ console.log('\n■ 23. 権限区画をグループで割り当てる');
   await call('a', `/v1/admin/groups/${legal.id}`, { method: 'DELETE' });
 }
 
-console.log('\n■ 24. 調べてスライドにまとめる（web.research・slides.create）');
+console.log('\n■ 24. スライド作成（web.research・slides.create）');
 {
   const EXT = 'jp.m2office.samples.research-slides';
   const AG = `${EXT}:research-slides`;
-  const input = { topic: 'ローカルで動く LLM の最近の製品動向', pages: '8' };
+  const input = { request: 'ローカルで動く LLM の最近の製品動向を 8 ページで' };
   await call('a', `/v1/admin/extensions/${EXT}/install`, { method: 'POST', body: JSON.stringify({ consent: true }) });
   const badTpl = await call('a', '/v1/admin/settings/slides', { method: 'PUT', body: JSON.stringify({ templates: [{ name: 'x', presentationId: 'https://example.com/' }] }) });
   badTpl.status === 400 ? ok('Google スライドの URL でないものは、テンプレートとして登録できない') : ng(`登録できてしまう（${badTpl.status}）`);
@@ -1063,9 +1063,9 @@ console.log('\n■ 24. 調べてスライドにまとめる（web.research・sli
     ? ok('URL からファイルの ID を取り出して登録し、1 件目を既定にする') : ng('テンプレートの登録が違う', JSON.stringify(tpl));
   const { body: job } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: AG, input }) }, 'member');
   const done = await waitFor('a', job.runId, ['completed', 'failed'], 20000, 'member');
-  const research = done.steps?.find((x) => x.stepId === 'research')?.output?.tools?.[0]?.result;
+  const research = done.steps?.find((x) => x.stepId === 'work')?.output?.tools?.find((t) => t.name === 'web.research')?.result;
   research?.source === 'mock' && /実際には調べていません/.test(research.text)
-    ? ok('鍵が無い環境の調査は、見本であることを明示する') : ng('見本の調査の扱いが違う', JSON.stringify(research));
+    ? ok('自動テストの見本の調査は、見本であることを明示する') : ng('見本の調査の扱いが違う', JSON.stringify(research));
   const art = done.artifacts?.find((x) => x.kind === 'slides');
   done.run?.status === 'completed' && art && (art.body.match(/^## \d+\./gm) ?? []).length === 7
     ? ok('構成を検証し、表紙を含む 8 ページのアウトラインを成果物に残す') : ng('スライドの成果物が無い', JSON.stringify(done.run));

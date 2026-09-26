@@ -81,7 +81,7 @@ decideApproval(...)  →  承認を記録し、待ち行列へ戻す
 
 ツールは Google の API を直接呼ばず、接続口だけを呼びます（仕様書 第24.2節 第 6 項）。
 `buildConnector('mock')` はダミーデータを返し、戻り値に `source: 'mock'` を含めます。
-`buildConnector('google', { repo, box })` は **Gmail・カレンダー・ToDo・Chat・ドライブ・ドキュメント・スプレッドシートを本物の Google で**動かし、
+`buildConnector('google', { repo, box })` は **Gmail・カレンダー・ToDo・Chat・ドライブ・ドキュメント・スプレッドシート・スライドを本物の Google で**動かし、
 ほかのサービスは「準備中」と断ります（`src/connectors/google/`。仕様書 第14.3.4節、ADR-0022）。
 見本のデータで代わりに動かすことはしません。
 
@@ -92,6 +92,7 @@ decideApproval(...)  →  承認を記録し、待ち行列へ戻す
 | `google/index.ts` | Gmail・カレンダー・ToDo・Chat の本体。準備中のサービスの断り |
 | `google/drive.ts` | ドライブ（探す・読む・フォルダ・共有）とドキュメント（作る・追記）。`drive.file` の範囲だけで、リンクによる公開は作らない |
 | `google/sheets.ts` | スプレッドシート（作る・最初のシートを読む・行を足す）。値は `RAW` で送り、式として読ませない |
+| `google/slides.ts` | スライド（構成から標準の見た目で組み立てる）。テンプレートのファイルを使わず `drive.file` の範囲で作り、失敗したら作りかけをごみ箱に移す（ADR-0031） |
 | `google/doc-html.ts` | 文書の本文（Markdown）を、ドキュメントに取り込ませる HTML に直す（中身はエスケープする） |
 | `google/chat.ts` | Chat の投稿先の見つけ方（リンク・ID か、名前でちょうど 1 つ一致）と、本文の書式 |
 
