@@ -868,6 +868,21 @@ button.link.danger { color: var(--danger); }
 .left .nav-sub { padding-left: 34px; font-size: 13px; }
 .left .nav-sub .nav-icon { display: none; }
 .left.collapsed .nav-sub { display: none; }
+/* ピン止め（仕様書 第6.1.1節）。ピンのボタンは項目の右端に重ね、ピン止めした項目では常に、ほかはマウスを重ねたときだけ出す */
+.left .nav-pin-row { position: relative; }
+.left .nav-pin-row .item { padding-right: 40px; }
+.left .nav-pin {
+  /* 右端はスクロールバーが重なる（重ねて出す環境では、押しても棒に取られる）ため、少し内側に置く */
+  position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
+  width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
+  border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; opacity: 0;
+}
+.left .nav-pin .icon { width: 14px; height: 14px; }
+.left .nav-pin-row:hover .nav-pin, .left .nav-pin:focus-visible { opacity: 1; }
+.left .nav-pin-row.pinned .nav-pin { opacity: 0.55; }
+.left .nav-pin-row.pinned .nav-pin .icon { fill: currentColor; }
+.left .nav-pin:hover { background: var(--accent-soft); color: var(--accent); opacity: 1; }
+.left.collapsed .nav-pin-row .item { padding-right: 0; }
 /* たたんだ「ほかの業務」を開いたときの項目。少し下げて、よく使う業務と見分ける（仕様書 第6.1.1節） */
 .left .item.nav-other { padding-left: 22px; }
 .left.collapsed .item.nav-other { padding-left: 0; }

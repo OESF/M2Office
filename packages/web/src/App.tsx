@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Notification } from '@m2office/shared';
+import { splitMenu, togglePinned } from './menu.js';
 import {
   api, ApiError, describeError,
   type AgentSummary, type ApprovalView, type Lookup, type Me, type RunDetail, type ScheduleView, type SecretaryReply,
@@ -25,7 +26,7 @@ import {
   type SettingsSection,
 } from './Settings.js';
 import {
-  Icon, NavHeading, NavItem, NavUserCard, SecretaryAvatar, SideNavLayout, ThemeToggle, agentIcon, useRemembered,
+  Icon, NavHeading, NavItem, NavUserCard, PinnableNavItem, SecretaryAvatar, SideNavLayout, ThemeToggle, agentIcon, useRemembered,
 } from './nav.js';
 
 /**
@@ -97,8 +98,6 @@ function viewOf(r: Route): View | null {
  */
 export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [agents, setAgents] = useState<AgentSummary[]>([]);
-  // よく使う業務の ID（仕様書 第6.1.1節）。ほかはたたむ
-  const [frequent, setFrequent] = useState<string[]>([]);
   const [moreOpen, setMoreOpen] = useRemembered('m2office.nav-more-agents', false);
   const [approvals, setApprovals] = useState<ApprovalView[]>([]);
   const [history, setHistory] = useState<
@@ -144,7 +143,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
       return { kind: 'help', articleId };
     });
   }, []));
-  const [menu, setMenu] = useState<{ hidden: string[]; order: string[] }>({ hidden: [], order: [] });
+  const [menu, setMenu] = useState<{ hidden: string[]; order: string[]; pinned?: string[] | null }>({ hidden: [], order: [], pinned: null });
   // 秘書のアバター（仕様書 第6.1.3節）。個人設定で変えたら読み直す
   const [avatar, setAvatar] = useState('');
   // 本人の呼ばれ方（仕様書 第6.5.3節）。最初の画面の呼びかけに使う（第6.1.5節）
@@ -184,7 +183,6 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
         api.agents(), api.approvals(), api.jobs(), api.notifications(), api.lookups(),
       ]);
       setAgents(a.agents);
-      setFrequent(a.frequent ?? []);
       setAgentsLoaded(true);
       setApprovals(p.items);
       setHistory(j.items as never);
@@ -288,9 +286,14 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   // キーボードの割り当て（仕様書 第6.11.3節）。表は keys.ts に 1 つだけ置く
   // スキルの user-invocable: false の業務はメニューに出さない。秘書が取り次いだときだけ使う（仕様書 第12.12.2節）
   const allMenuAgents = orderAgents(agents, menu.order).filter((a) => !menu.hidden.includes(a.id) && a.menu !== false);
-  // よく使う業務だけを上に出し、ほかは「ほかの業務」にたたむ（仕様書 第6.1.1節「業務の並び」）。並びはメニューの順のまま
-  const topAgents = frequent.length > 0 ? allMenuAgents.filter((a) => frequent.includes(a.id)) : allMenuAgents.slice(0, 6);
-  const otherAgents = allMenuAgents.filter((a) => !topAgents.includes(a));
+  // ピン止めした業務だけを上に出し、ほかは「ほかの業務」にたたむ（仕様書 第6.1.1節「業務の並び」）。並びはメニューの順のまま。
+  // 使った回数では変えない。まだ一度も変えていなければ標準の組
+  const { top: topAgents, others: otherAgents } = splitMenu(allMenuAgents, menu.pinned);
+  const togglePin = (id: string) => {
+    const saved = { ...menu, pinned: togglePinned(menu.pinned, id) };
+    setMenu(saved);
+    void api.saveMySettings('menu', saved).catch(() => loadMenu());
+  };
   // いま開いている業務がたたんだ中にあれば、開いておく
   const openingOther = view.kind === 'agent' && otherAgents.some((a) => a.id === view.agent.id);
   const showOthers = moreOpen || openingOther;
@@ -346,8 +349,9 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
           <>
             <NavHeading>業務</NavHeading>
             {topAgents.map((a, i) => (
-              <NavItem
-                key={a.id} icon={agentIcon(a.category)} label={a.name} description={a.description}
+              <PinnableNavItem
+                key={a.id} pinned onPin={() => togglePin(a.id)}
+                icon={agentIcon(a.category)} label={a.name} description={a.description}
                 active={view.kind === 'agent' && view.agent.id === a.id}
                 // 1〜9 番目には、押すキーを併記する（仕様書 第6.11.1節 k4）
                 hint={i < 9 ? keyLabel(`Mod+Shift+${i + 1}`) : ''}
@@ -361,8 +365,9 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
               />
             )}
             {showOthers && otherAgents.map((a, i) => (
-              <NavItem
-                key={a.id} icon={agentIcon(a.category)} label={a.name} description={a.description}
+              <PinnableNavItem
+                key={a.id} pinned={false} onPin={() => togglePin(a.id)}
+                icon={agentIcon(a.category)} label={a.name} description={a.description}
                 active={view.kind === 'agent' && view.agent.id === a.id}
                 hint={topAgents.length + i < 9 ? keyLabel(`Mod+Shift+${topAgents.length + i + 1}`) : ''}
                 onClick={() => setView({ kind: 'agent', agent: a })}

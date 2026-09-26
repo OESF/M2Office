@@ -355,6 +355,12 @@ export interface UserSettings {
     hidden: string[];
     /** 並び順。載っていない業務は後ろに既定の順で並ぶ。 */
     order: string[];
+    /**
+     * ピン止めした業務（仕様書 第6.1.1節「業務の並び」）。左のメニューの上に常に出し、ほかは「ほかの業務」にたたむ。
+     *
+     * @remarks `null` はまだ一度も変えていないことを表し、{@link DEFAULT_PINNED} を使う。使った回数では変えない
+     */
+    pinned?: string[] | null;
   };
   /** 初回の案内を見終えた（または飛ばした）日時。`null` なら次のログインで案内する（第6.10.3節）。 */
   onboarding: {
@@ -363,6 +369,9 @@ export interface UserSettings {
     morningBriefAt?: string | null;
   };
 }
+
+/** まだピン止めを変えていない人に、はじめからピン止めしておく業務（仕様書 第6.1.1節）。 */
+export const DEFAULT_PINNED = ['minutes', 'inbox-triage', 'knowledge-qa', 'scheduling', 'slides', 'document-draft'];
 
 export const DEFAULT_USER_SETTINGS: UserSettings = {
   profile: { furigana: '', title: '', timezone: 'Asia/Tokyo', home: '', workplace: '' },
@@ -373,7 +382,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
     channels: { chat: false },
   },
   memory: { learning: true, excludes: [], keepConversations: true },
-  menu: { hidden: [], order: [] },
+  menu: { hidden: [], order: [], pinned: null },
   onboarding: { tourCompletedAt: null, morningBriefAt: null },
 };
 

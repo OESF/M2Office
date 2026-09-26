@@ -485,7 +485,9 @@ function validate(
     case 'menu': {
       const ids = agentIds;
       const list = (v: unknown) => (Array.isArray(v) ? v.map(String).filter((x) => ids.includes(x)) : []);
-      return { section, value: { hidden: [...new Set(list(o['hidden']))], order: [...new Set(list(o['order']))] } };
+      // ピン止め（仕様書 第6.1.1節）。配列でなければ、まだ変えていない（null）として残す
+      const pinned = Array.isArray(o['pinned']) ? [...new Set(list(o['pinned']))] : null;
+      return { section, value: { hidden: [...new Set(list(o['hidden']))], order: [...new Set(list(o['order']))], pinned } };
     }
     default:
       return { error: `不明な設定の区分です: ${section}` };

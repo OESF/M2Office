@@ -106,7 +106,6 @@ export {
   OFFICIAL_AGENTS, LOOKUP_AGENT_ID, resolveOfficialAgent, DEFAULT_STANDARD_MINUTES, standardMinutes, stepLabel,
   agentFace, MORNING_BRIEF,
 } from './agents/index.js';
-export { pickFrequent, FREQUENT_MAX, FREQUENT_DAYS, DEFAULT_FREQUENT } from './agents/frequent.js';
 export { Secretary, acceptsFile, fillInputs } from './secretary/secretary.js';
 export { ProactiveWatcher, PROACTIVE_TRIGGER, TRAVEL_PREFIX, PREP_WINDOW_MIN, TRAVEL_NOTICE_HOUR, isMeetingSoon, hasPlace, meetingKey } from './secretary/proactive.js';
 export type { SecretaryReply, ResponseLayer } from './secretary/secretary.js';

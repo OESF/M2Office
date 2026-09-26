@@ -720,8 +720,7 @@ export const api = {
     setConnectorToolEnabled: (id: string, connectorId: string, tool: string, enabled: boolean) =>
       call(`${toolPath(id, connectorId, tool)}/enabled`, { method: 'PUT', body: JSON.stringify({ enabled }) }),
   },
-  // frequent はよく使う業務の ID（仕様書 第6.1.1節「業務の並び」）
-  agents: () => call<{ agents: AgentSummary[]; frequent?: string[] }>('/agents'),
+  agents: () => call<{ agents: AgentSummary[] }>('/agents'),
   createJob: (agentId: string, input: Record<string, unknown>, origin = 'menu') =>
     call<{ jobId: string; runId: string }>('/jobs', {
       method: 'POST',

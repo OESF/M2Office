@@ -23,7 +23,7 @@ export type IconName =
   | 'dashboard' | 'usage' | 'runs' | 'company' | 'sliders' | 'extensions' | 'users' | 'audit' | 'connectors'
   | 'nav-collapse' | 'nav-expand' | 'caret-right' | 'caret-down' | 'back' | 'sun' | 'moon' | 'logout'
   | 'mic' | 'mic-off' | 'clip' | 'send' | 'tasks' | 'chat' | 'drive' | 'external'
-  | 'doc' | 'sheet' | 'slides' | 'form' | 'video' | 'console' | 'apps';
+  | 'doc' | 'sheet' | 'slides' | 'form' | 'video' | 'console' | 'apps' | 'pin';
 
 /** モノクロのアイコン。文字の色を引き継ぐ。飾りなので読み上げない。 */
 export function Icon({ name, className }: { name: IconName; className?: string }) {
@@ -167,6 +167,32 @@ export function NavItem({
         <Icon name={expanded ? 'caret-down' : 'caret-right'} className="nav-caret" />
       )}
     </button>
+  );
+}
+
+/**
+ * ピン止めできる左ペインの項目（仕様書 第6.1.1節「業務の並び」）。項目の右端にピンのボタンを重ねる。
+ *
+ * @param pinned ピン止めしているか。しているときはピンの印を常に出し、していなければマウスを重ねたときだけ出す
+ * @param onPin ピンのボタンを押したとき（止める・外す）
+ * @remarks ボタンの中にボタンを入れられないため、項目とピンのボタンを並べて包む。折りたたんだ左ペインではピンを出さない
+ */
+export function PinnableNavItem({ pinned, onPin, ...item }: Parameters<typeof NavItem>[0] & { pinned: boolean; onPin: () => void }) {
+  const collapsed = useContext(Collapsed);
+  return (
+    <div className={`nav-pin-row${pinned ? ' pinned' : ''}`}>
+      <NavItem {...item} />
+      {!collapsed && (
+        <button
+          className="nav-pin" onClick={onPin}
+          title={pinned ? 'ピン止めを外す（「ほかの業務」に入ります）' : 'ピン止めする（いつも上に出します）'}
+          aria-label={pinned ? `${item.label}のピン止めを外す` : `${item.label}をピン止めする`}
+          aria-pressed={pinned}
+        >
+          <Icon name="pin" />
+        </button>
+      )}
+    </div>
   );
 }
 
