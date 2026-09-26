@@ -15,7 +15,7 @@ import type { AddressInfo } from 'node:net';
 import JSZip from 'jszip';
 import {
   BUILTIN_TOOLS, ExtensionHub, HttpMcpClient, OFFICIAL_AGENTS, StubLlmProvider, ToolRegistry,
-  connectorTools, consentSnapshot, encodeFiles, loadExtension, loadExtensionFiles, packExtension,
+  buildSkillPackage, connectorTools, consentSnapshot, encodeFiles, loadCompiledExtension, loadExtension, loadExtensionFiles, packExtension,
   readExtensionDir, unpackExtension,
   type ConnectorDeclaration, type ExtensionFiles, type InstalledExtension, type McpClient,
   type PrivateExtension, type Repository,
@@ -23,8 +23,8 @@ import {
 
 const registry = new ToolRegistry();
 for (const t of BUILTIN_TOOLS) registry.register(t);
-// JSON の形（廃止の方向）の見本。見本の拡張機能「あいさつ」は SKILL.md になった（第12.12節）
-const HELLO = new URL('./fixtures/extension-json', import.meta.url).pathname;
+// 見本の拡張機能「あいさつ」（SKILL.md。第12.12節）
+const HELLO = new URL('../../../extensions/hello-world', import.meta.url).pathname;
 const DEEPWIKI = new URL('../../../extensions/deepwiki-research', import.meta.url).pathname;
 const WEEKLY = new URL('../../../examples/extensions/weekly-report', import.meta.url).pathname;
 const enc = (v: unknown) => new TextEncoder().encode(typeof v === 'string' ? v : JSON.stringify(v));
@@ -59,9 +59,11 @@ test('.m2ext に作って展開すると、元のディレクトリと同じ拡�
   assert.match(pkg!.icon ?? '', /^data:image\/png;base64,/);
 });
 
-test('プログラムなど、入れてよいファイル以外を含む拡張機能は拒否する（不変則 I-7）', () => {
-  const p = problemsOf(edited(HELLO, { 'tools/run.js': enc('console.log(1)') }));
-  assert.ok(p.some((x) => x.includes('入れてはならないファイル') && x.includes('tools/run.js')), p.join('\n'));
+test('プログラムなど、入れてよいファイル以外は持ち込まず、そのことを知らせる（不変則 I-7、第12.12.6節）', () => {
+  const res = loadExtensionFiles(edited(HELLO, { 'tools/run.js': enc('console.log(1)') }), registry);
+  assert.deepEqual(res.problems, []);
+  assert.ok(!res.keep?.has('tools/run.js'), 'プログラムは取り込まない');
+  assert.ok((res.notices ?? []).some((x) => x.includes('tools/run.js')), (res.notices ?? []).join('\n'));
 });
 
 test('ファイルを作るときは、入れてよいファイル以外を入れない', async () => {
@@ -75,11 +77,11 @@ test('ファイルを作るときは、入れてよいファイル以外を入�
 test('フォルダごと圧縮した ZIP も取り込める。OS が作るファイルは無視する', async () => {
   const zip = new JSZip();
   for (const [k, v] of readExtensionDir(HELLO)) zip.file(`hello-world/${k}`, v);
-  zip.file('__MACOSX/hello-world/._manifest.json', 'x');
+  zip.file('__MACOSX/hello-world/._SKILL.md', 'x');
   zip.file('hello-world/.DS_Store', 'x');
   const { files, problems } = await unpackExtension(await zip.generateAsync({ type: 'uint8array' }));
   assert.deepEqual(problems, []);
-  assert.ok(files.has('manifest.json'));
+  assert.ok(files.has('SKILL.md'));
   assert.deepEqual(problemsOf(files), []);
 });
 
@@ -125,17 +127,24 @@ test('内蔵のツールと重なるコネクタの ID は拒否する', () => {
   assert.ok(p.some((x) => x.includes('すでに使われています')), p.join('\n'));
 });
 
-test('コネクタのツールの危険度は、マニフェストの最大の危険度を超えられない', () => {
-  const p = problemsOf(connector((c) => { c.tools[0].risk = 'external-send'; }));
+test('組み立てた後の形でも、コネクタのツールの危険度は最大の危険度を超えられない', () => {
+  // SKILL.md では最大の危険度を道具から決めるため、組み立てた後の形を直接書き換えて確かめる
+  const built = buildSkillPackage(readExtensionDir(DEEPWIKI), registry).files;
+  const c = JSON.parse(new TextDecoder().decode(built.get('connectors/deepwiki.json')));
+  c.tools[0].risk = 'external-send';
+  built.set('connectors/deepwiki.json', enc(c));
+  const p = loadCompiledExtension(built, registry).problems;
   assert.ok(p.some((x) => x.includes('max_risk_level')), p.join('\n'));
 });
 
-test('宣言していないコネクタのツールを使う業務エージェントは拒否する', () => {
-  const p = problemsOf(edited(DEEPWIKI, {
-    'manifest.json': (m) => { m.permissions.tools.push('deepwiki.read_wiki_contents'); },
-    'agents/research.json': (a) => { a.tools.push('deepwiki.read_wiki_contents'); },
-  }));
-  assert.ok(p.some((x) => x.includes('deepwiki.read_wiki_contents')), p.join('\n'));
+test('宣言していないコネクタのツールを allowed-tools に書いても使わず、そのことを知らせる', () => {
+  const files = readExtensionDir(DEEPWIKI);
+  const skill = new TextDecoder().decode(files.get('SKILL.md')).replace('allowed-tools: deepwiki.ask_wiki_question', 'allowed-tools: deepwiki.read_wiki_contents deepwiki.ask_wiki_question');
+  files.set('SKILL.md', enc(skill));
+  const { pkg, problems, notices } = loadExtensionFiles(files, registry);
+  assert.deepEqual(problems, []);
+  assert.ok(!pkg!.agents[0]!.tools.includes('deepwiki.read_wiki_contents'));
+  assert.ok((notices ?? []).some((x) => x.includes('deepwiki.read_wiki_contents')), (notices ?? []).join('\n'));
 });
 
 // ---- 会社ごとの見え方（第12.10.3節・第12.10.4節） ----
@@ -278,13 +287,10 @@ test('コネクタのツールの応答は、外部のデータとして印を�
 // ---- 見本の応答（第12.11.4節） ----
 
 test('見本の応答の {{ステップ ID}} に、前のステップのツールの結果を差し込む', async () => {
-  const def = loadExtension(DEEPWIKI, registry).pkg!.agents[0]!;
+  const evals = [{ name: '確認', input: { q: 'x' }, expect: '', stub: { save: [{ name: 'document.create', args: { body: '{{ask}}' } }] } }];
   const res = await new StubLlmProvider().complete({
     tier: 'standard', messages: [{ role: 'user', content: '' }],
-    context: {
-      agentId: def.id, stepId: 'save', input: def.evals![0]!.input as Record<string, unknown>,
-      evals: def.evals, stepResults: { ask: 'SDK の答え' },
-    },
+    context: { agentId: 'a', stepId: 'save', input: { q: 'x' }, evals, stepResults: { ask: 'SDK の答え' } },
   });
   assert.match(res.text, /"body":"SDK の答え"/);
 });

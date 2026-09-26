@@ -1,14 +1,15 @@
 # リポジトリ調査（DeepWiki）
 
 GitHub で公開されているリポジトリについて質問すると、[DeepWiki](https://deepwiki.com/) で調べて、答えを資料にまとめます。
-**コネクタ（MCP）を使う拡張機能のサンプル**です。
+**コネクタ（MCP）を使う拡張機能のサンプル**です。SKILL.md と同じフォルダにコネクタの宣言を置いています（第 2.0.0 版で JSON の定義から書き直しました）。
 
 ## 構成
 
 | 構成要素 | ファイル | 内容 |
 |---|---|---|
 | コネクタ | `connectors/deepwiki.json` | DeepWiki の MCP サーバ（`https://mcp.deepwiki.com/mcp`、認証なし）。使うツールは 2 つ |
-| 業務エージェント | `agents/research.json` | 調査（DeepWiki に質問）→ 資料作成（`document.create`） |
+| 業務 | `SKILL.md` | DeepWiki に質問し、答えを資料にまとめる（`document.create`）。`allowed-tools` にコネクタの道具を書く |
+| 利用者向けの説明 | `HELP.md` | 業務の「？」とヘルプセンターに出る |
 | 評価のケース | `evals/research.json` | 評価のケース（入力と期待する結果）。中の `stub` は M2Office の自動テスト用で、拡張機能を作るときは書かない |
 
 | ツール | すること | 危険度 |

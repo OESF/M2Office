@@ -44,9 +44,9 @@
 
 ```
 deepwiki-research/
-  manifest.json
+  SKILL.md                   業務（スキルの書き方のまま）。allowed-tools にコネクタの道具を書く
+  HELP.md                    利用者向けの説明
   connectors/deepwiki.json   コネクタの宣言
-  agents/research.json       業務エージェント（調査 → 資料作成）
   evals/research.json        評価のケース（入力と期待する結果）
   README.md
   icon.png
@@ -77,33 +77,37 @@ deepwiki-research/
 | `auth.type` | いまは `none` だけ |
 | `tools[].name` | MCP サーバでのツールの名前（`tools/list` で確かめる） |
 | `tools[].description` | すること。**導入の同意の画面とヘルプにそのまま出る**ので、業務の言葉で書く |
-| `tools[].risk` | 推奨の危険度。マニフェストの `max_risk_level` を超えられない |
+| `tools[].risk` | 危険度。拡張機能が扱う最大の危険度は、SKILL.md の `allowed-tools` の道具の危険度から決まる。`external-send` 以上なら「作業 → 承認 → 送る」になる |
 
-### マニフェストと業務エージェント
+### SKILL.md から使う
 
-業務エージェントからは `<コネクタの ID>.<ツールの名前>` で使います。マニフェストの `permissions.tools` にも同じ名前で書きます。
+同じフォルダの SKILL.md の `allowed-tools` に、`<コネクタの ID>.<ツールの名前>` で書きます。書いた道具しか使えません。
 
-```json
-"permissions": {
-  "tools": ["deepwiki.ask_wiki_question", "deepwiki.read_wiki_structure", "document.create"],
-  "max_risk_level": "draft"
-}
+```markdown
+---
+name: research
+description: GitHub で公開されているリポジトリについて DeepWiki に質問し、答えを資料にまとめる
+allowed-tools: deepwiki.ask_wiki_question deepwiki.read_wiki_structure document.create
+metadata:
+  m2office-id: jp.m2office.samples.deepwiki-research
+  m2office-inputs: |
+    リポジトリ: 短文
+    知りたいこと: 長文
+---
+
+# リポジトリ調査（DeepWiki）
+
+1. `deepwiki.ask_wiki_question` で質問する。`repoName` に $リポジトリ を、`question` に $知りたいこと を渡す
+2. 答えを日本語で要点にまとめ、`document.create` で保存する。取得できなかったときは、そのことと理由だけを書く
 ```
 
-```json
-"steps": [
-  { "id": "ask", "type": "agent", "label": "調査",
-    "instruction": "deepwiki.ask_wiki_question を使い、repoName に入力の repo を、question に入力の question を渡して質問する。" },
-  { "id": "save", "type": "agent", "label": "資料作成",
-    "instruction": "前のステップで得た答えを日本語で要点にまとめ、document.create で保存する。答えが取得できなかった場合は、取得できなかったことと理由だけを書く。" }
-]
-```
+宣言していないコネクタの道具を `allowed-tools` に書いても使われず、取り込みの画面で知らされます。
 
 ### 評価のケース（evals/research.json）
 
 ```json
 { "name": "MCP の TypeScript SDK",
-  "input": { "repo": "modelcontextprotocol/typescript-sdk", "question": "このリポジトリは何をするものですか？" },
+  "input": { "リポジトリ": "modelcontextprotocol/typescript-sdk", "知りたいこと": "このリポジトリは何をするものですか？" },
   "expect": "DeepWiki の答えをもとに、SDK の目的と主な機能を資料に保存する" }
 ```
 

@@ -3,19 +3,27 @@
   "cases": [
     {
       "name": "MCP の TypeScript SDK",
-      "input": { "repo": "modelcontextprotocol/typescript-sdk", "question": "このリポジトリは何をするものですか？" },
+      "input": {
+        "リポジトリ": "modelcontextprotocol/typescript-sdk",
+        "知りたいこと": "このリポジトリは何をするものですか？"
+      },
       "expect": "DeepWiki の答えをもとに、SDK の目的と主な機能を資料に保存する",
       "stub": {
-        "ask": [
+        "work": [
           {
             "name": "deepwiki.ask_wiki_question",
-            "args": { "repoName": "modelcontextprotocol/typescript-sdk", "question": "このリポジトリは何をするものですか？" }
-          }
-        ],
-        "save": [
+            "args": {
+              "repoName": "modelcontextprotocol/typescript-sdk",
+              "question": "このリポジトリは何をするものですか？"
+            }
+          },
           {
             "name": "document.create",
-            "args": { "kind": "research", "title": "リポジトリ調査: modelcontextprotocol/typescript-sdk", "body": "{{ask}}" }
+            "args": {
+              "kind": "research",
+              "title": "リポジトリ調査: modelcontextprotocol/typescript-sdk",
+              "body": "DeepWiki の答えの要点（自動テストの見本の本文）"
+            }
           }
         ]
       }

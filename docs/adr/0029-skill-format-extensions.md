@@ -70,3 +70,9 @@ M2Office で動かすための必要事項だけを学べばよい形に」と�
 - M2Office で覚えることを 4 つに絞った: 道具は `allowed-tools` に M2Office の道具を書く・利用者向けの説明は `HELP.md`・プログラムは動かない・承認は書かない
 - `metadata` の `m2office-title`・`m2office-tools` をやめた（本文の最初の見出しと `allowed-tools` を使う）。`m2office-*` は、スキルで言い表せないこと（配布の ID・欄の種類・実行例・承認者）だけに残す
 
+## 追記（2026-09-26。第 0.131.0 版）
+
+- **JSON の定義（`manifest.json`＋`agents/*.json`）の拡張機能を廃止した**（三浦さんの依頼）。取り込もうとすると「SKILL.md で書いてください」と断る。
+  見本の拡張機能（リポジトリ調査（DeepWiki）・週報の下書き）もすべて SKILL.md に書き直した。M2Office の中では、SKILL.md から組み立てた後の形として使い続ける
+- コネクタの宣言（`connectors/*.json`）は SKILL.md と同じフォルダに置き、その道具を `allowed-tools` に `<コネクタの ID>.<道具>` で書く
+

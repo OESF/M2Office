@@ -7,7 +7,7 @@
  */
 
 export {
-  loadExtensions, loadExtension, loadExtensionFiles, readExtensionDir, isAllowedExtensionFile,
+  loadExtensions, loadExtension, loadExtensionFiles, loadCompiledExtension, readExtensionDir, isAllowedExtensionFile, JSON_FORMAT_RETIRED,
   type ExtensionManifest, type ExtensionPackage, type ExtensionFiles, type LoadResult, type LoadOptions,
 } from './loader.js';
 export {

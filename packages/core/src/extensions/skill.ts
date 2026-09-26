@@ -13,6 +13,7 @@
 import { RISK_ORDER, type AgentDefinition, type AgentStep, type ApprovalStep, type RiskLevel } from '@m2office/shared';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { ExtensionFiles, ExtensionManifest } from './loader.js';
+import { connectorTools, type ConnectorDeclaration } from './connectors.js';
 
 /** 補助のファイルの合計の上限（字。第12.12.2節）。 */
 export const SKILL_FILES_MAX_CHARS = 500_000;
@@ -265,7 +266,9 @@ export function buildSkillPackage(files: ExtensionFiles, registry: ToolRegistry)
   const supporting: { path: string; text: string }[] = [];
   let help = '';
   for (const [path, bytes] of files) {
-    if (path === 'SKILL.md' || path === 'icon.png' || path === 'README.md' || path === SKILL_FOLDER_ENTRY || /^evals\/[^/]+\.json$/.test(path)) {
+    // コネクタの宣言（第12.11節）は SKILL.md と同じフォルダに置ける（第12.12.7節、第 0.131.0 版）
+    if (path === 'SKILL.md' || path === 'icon.png' || path === 'README.md' || path === SKILL_FOLDER_ENTRY
+      || /^evals\/[^/]+\.json$/.test(path) || /^connectors\/[^/]+\.json$/.test(path)) {
       keep.set(path, bytes);
       continue;
     }
@@ -285,10 +288,23 @@ export function buildSkillPackage(files: ExtensionFiles, registry: ToolRegistry)
     problems.push(`補助のファイルが長すぎます（合計 ${chars.toLocaleString('ja-JP')} 字。${SKILL_FILES_MAX_CHARS.toLocaleString('ja-JP')} 字まで）`);
   }
 
+  // 同じフォルダのコネクタの道具も allowed-tools に書ける（<コネクタの ID>.<道具>）。宣言の検証は組み立てた後に行う
+  const connectors: ConnectorDeclaration[] = [];
+  for (const [path, bytes] of keep) {
+    if (!/^connectors\/[^/]+\.json$/.test(path)) continue;
+    try {
+      const c = JSON.parse(decode(bytes)) as ConnectorDeclaration;
+      if (c && typeof c.id === 'string' && Array.isArray(c.tools)) connectors.push(c);
+    } catch {
+      // 読めない宣言は、組み立てた後の検証で理由を返す
+    }
+  }
+  const local = connectors.length > 0 ? registry.extend(connectors.flatMap((c) => connectorTools(c))) : registry;
+
   // 道具は allowed-tools に M2Office の道具を書く。スキルの環境の道具は無視して知らせる（第12.12.1節 1）
   const declared = list(fm['allowed-tools']).map((t) => t.replace(/\(.*\)$/, ''));
-  const known = declared.filter((t) => registry.get(t));
-  const unknown = declared.filter((t) => !registry.get(t));
+  const known = declared.filter((t) => local.get(t));
+  const unknown = declared.filter((t) => !local.get(t));
   if (unknown.length > 0) notices.push(`allowed-tools の ${[...new Set(unknown)].join('・')} は M2Office の道具ではないため使いません（M2Office の道具は開発者マニュアル 第4章）`);
   // allowed-tools を空で書けば道具を使わない。書かない・M2Office の道具が 1 つも無いときは、読むだけの道具
   const none = 'allowed-tools' in fm && declared.length === 0;
@@ -308,8 +324,8 @@ export function buildSkillPackage(files: ExtensionFiles, registry: ToolRegistry)
     route: !truthy(fm['disable-model-invocation']),
     menu: !('user-invocable' in fm) || truthy(fm['user-invocable']),
     tier: EFFORT_TIER[effort],
-  }, registry);
-  const risks = tools.map((t) => registry.get(t)?.risk).filter((r): r is RiskLevel => !!r);
+  }, local);
+  const risks = tools.map((t) => local.get(t)?.risk).filter((r): r is RiskLevel => !!r);
   const manifest: ExtensionManifest = {
     id: meta['m2office-id']?.trim() || `skill.${name}`,
     name: def.name,
@@ -326,7 +342,7 @@ export function buildSkillPackage(files: ExtensionFiles, registry: ToolRegistry)
   const encode = (v: unknown) => new TextEncoder().encode(JSON.stringify(v));
   out.set('manifest.json', encode(manifest));
   out.set(`agents/${name}.json`, encode(def));
-  for (const [k, v] of keep) if (k === 'icon.png' || k === 'README.md' || k.startsWith('evals/')) out.set(k, v);
+  for (const [k, v] of keep) if (k === 'icon.png' || k === 'README.md' || k.startsWith('evals/') || k.startsWith('connectors/')) out.set(k, v);
   return { files: out, keep, notices, problems };
 }
 

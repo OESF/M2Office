@@ -3,20 +3,26 @@
   "cases": [
     {
       "name": "今週",
-      "input": { "week": "今週" },
+      "input": {
+        "対象の週": "今週"
+      },
       "expect": "予定と ToDo をもとに、4 つの見出しの週報の下書きを保存する",
       "stub": {
-        "collect": [
-          { "name": "calendar.list", "args": {} },
-          { "name": "tasks.list", "args": {} }
-        ],
-        "write": [
+        "work": [
+          {
+            "name": "calendar.list",
+            "args": {}
+          },
+          {
+            "name": "tasks.list",
+            "args": {}
+          },
           {
             "name": "document.create",
             "args": {
               "kind": "weekly-report",
               "title": "週報の下書き（今週）",
-              "body": "（見本の応答: 鍵が無い環境では、集めた予定と ToDo をそのまま載せています）\n\n## 集めた予定と ToDo\n{{collect}}\n\n## 相談したいこと\n（ここに書き足してください）"
+              "body": "（自動テストの見本の本文）\n\n## 今週やったこと\n\n## 来週の予定\n\n## 持ち越しの ToDo\n\n## 相談したいこと\n（ここに書き足してください）"
             }
           }
         ]

@@ -55,6 +55,24 @@ async function waitFor(tenant, runId, statuses, timeoutMs = 20000, who = 'admin'
 }
 
 /**
+ * SKILL.md の拡張機能を ZIP にする（仕様書 第12.12節。JSON の定義は第 0.131.0 版で廃止した）。
+ *
+ * @param o.inputs 入力の欄（`m2office-inputs` の行。例: `memo: 短文`）
+ * @param o.stub 自動テスト用の見本の応答（段の ID ごと。スキルの段は work・approve・send）
+ */
+async function skillZip(o) {
+  const { default: JSZip } = await import('jszip');
+  const zip = new JSZip();
+  zip.file('SKILL.md', [
+    '---', `name: ${o.name}`, `description: ${o.description ?? '確認用'}`, `allowed-tools: ${o.tools.join(' ')}`,
+    'metadata:', `  author: ${o.author ?? '確認用'}`, '  version: "1.0.0"', `  m2office-id: ${o.id}`,
+    '  m2office-inputs: |', ...o.inputs.map((l) => `    ${l}`), '---', '', `# ${o.title}`, '', o.body ?? '確認用の業務。', '',
+  ].join('\n'));
+  zip.file(`evals/${o.name}.json`, JSON.stringify({ agent: o.name, cases: [{ name: '確認', input: o.input, expect: '確認', stub: o.stub }] }));
+  return zip.generateAsync({ type: 'uint8array' });
+}
+
+/**
  * その実行が止まっている承認を探す。
  *
  * 承認トレイには他の実行の承認も並ぶため、「先頭の承認」を選ぶと別の実行を承認してしまう。
@@ -781,9 +799,19 @@ console.log('\n■ 21. 持ち運べる拡張機能（ファイルからの取り
     method: 'POST', body: data, headers: { 'content-type': 'application/octet-stream' },
   });
 
+  // JSON の定義（manifest.json＋agents/*.json）は廃止した（第 0.131.0 版）
+  const { default: JSZipOld } = await import('jszip');
+  const old = new JSZipOld();
+  old.file('manifest.json', JSON.stringify({ id: 'jp.example.old-json', name: '古い形', version: '1.0.0', publisher: { name: '確認用' }, platform_schema: '>=1 <2', permissions: { tools: [], max_risk_level: 'read' } }));
+  old.file('agents/old.json', '{}');
+  const retired = await upload('a', await old.generateAsync({ type: 'uint8array' }));
+  retired.status === 400 && retired.body.problems?.some((x) => x.includes('廃止しました') && x.includes('SKILL.md'))
+    ? ok('JSON の定義の拡張機能は取り込めず、SKILL.md で書くよう伝える（400）') : ng(`取り込めてしまう（${retired.status}）`, JSON.stringify(retired.body));
+
   const bad = await upload('a', await zipDir(DIR, { 'tools/run.js': 'console.log(1)' }));
-  bad.status === 400 && bad.body.problems?.some((x) => x.includes('入れてはならないファイル'))
-    ? ok('プログラムを含むファイルは取り込めない（400）') : ng(`取り込めてしまう（${bad.status}）`, JSON.stringify(bad.body));
+  bad.status === 200 && JSON.stringify(bad.body).includes('tools/run.js')
+    ? ok('プログラムは持ち込まず、そのことを知らせる（第12.12.6節）') : ng(`扱いが違う（${bad.status}）`, JSON.stringify(bad.body));
+  await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
 
   const official = await upload('a', await zipDir(new URL('../extensions/hello-world/', import.meta.url).pathname));
   official.status === 400 && official.body.problems?.some((x) => x.includes('公式の拡張機能と同じ ID'))
@@ -793,21 +821,21 @@ console.log('\n■ 21. 持ち運べる拡張機能（ファイルからの取り
   imp.status === 200 && imp.body.item?.origin === 'private' && !imp.body.item.installed
     ? ok('ファイルから取り込むと、自社専用として一覧に出る（まだ導入はされない）') : ng('取り込めない', JSON.stringify(imp.body));
 
-  const notYet = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: AG, input: { week: '今週' } }) });
+  const notYet = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: AG, input: { 対象の週: '今週' } }) });
   notYet.status === 404 ? ok('取り込んだだけでは使えない（同意して導入が必要）') : ng(`使えてしまう（${notYet.status}）`);
 
   const { body: bList } = await call('b', '/v1/admin/extensions');
   !bList.items?.some((x) => x.id === EXT) ? ok('取り込んだファイルは、ほかの会社には見えない') : ng('ほかの会社に見える');
 
   await call('a', `/v1/admin/extensions/${EXT}/install`, { method: 'POST', body: JSON.stringify({ consent: true }) });
-  const { body: job } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: AG, input: { week: '今週' } }) }, 'member');
+  const { body: job } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: AG, input: { 対象の週: '今週' } }) }, 'member');
   const done = await waitFor('a', job.runId, ['completed', 'failed'], 20000, 'member');
   done.run?.status === 'completed' && done.artifacts?.[0]?.title === '週報の下書き（今週）'
     ? ok('同意して導入すると、取り込んだ業務が動く（週報の下書き）') : ng('動かない', JSON.stringify(done.run));
 
   const off = await call('a', `/v1/admin/extensions/${EXT}/enabled`, { method: 'PUT', body: JSON.stringify({ enabled: false }) });
   const { body: menuOff } = await call('a', '/v1/agents', {}, 'member');
-  const runOff = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: AG, input: { week: '今週' } }) }, 'member');
+  const runOff = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: AG, input: { 対象の週: '今週' } }) }, 'member');
   off.status === 200 && !menuOff.agents.some((x) => x.id === AG) && runOff.status === 404
     ? ok('スイッチを切ると、メニューから消えて実行できない') : ng('無効にしても使える');
 
@@ -838,11 +866,13 @@ console.log('\n■ 21. 持ち運べる拡張機能（ファイルからの取り
     check.body.ok && check.body.tools.every((t) => t.provided)
       ? ok('コネクタの接続を確かめられる（宣言したツールが提供されている）') : ng('接続を確かめられない', JSON.stringify(check.body));
     await call('a', `/v1/admin/extensions/${DW}/install`, { method: 'POST', body: JSON.stringify({ consent: true }) });
-    const input = { repo: 'modelcontextprotocol/typescript-sdk', question: 'このリポジトリは何をするものですか？' };
+    const input = { リポジトリ: 'modelcontextprotocol/typescript-sdk', 知りたいこと: 'このリポジトリは何をするものですか？' };
     const { body: j } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: `${DW}:research`, input }) }, 'member');
     const r = await waitFor('a', j.runId, ['completed', 'failed'], 90000, 'member');
-    const body = r.artifacts?.[0]?.body ?? '';
-    r.run?.status === 'completed' && body.length > 50 && !body.startsWith('取得できませんでした')
+    // スキルの段は 1 つ。DeepWiki の答えは道具の結果に残る
+    const answer = r.steps?.find((x) => x.stepId === 'work')?.output?.tools?.find((t) => t.name === 'deepwiki.ask_wiki_question')?.result;
+    const body = String(answer?.text ?? '');
+    r.run?.status === 'completed' && body.length > 50 && r.artifacts?.length > 0
       ? ok('コネクタで外部に問い合わせ、その結果を資料に残す（鍵なし）') : ng('問い合わせの結果が残らない', body.slice(0, 200));
     await call('a', `/v1/admin/extensions/${DW}`, { method: 'DELETE' });
   } else {
@@ -1086,60 +1116,37 @@ console.log('\n■ 24. スライド作成（web.research・slides.create）');
 
 console.log('\n■ 25. Google Workspace のツール（第 1 弾）');
 {
-  const { default: JSZip } = await import('jszip');
   const EXT = 'jp.example.smoke-google-tools';
   const AG = `${EXT}:memo-to-sheet`;
   await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
   const tools = ['drive.search', 'drive.read', 'sheets.create', 'sheets.append', 'gmail.send'];
-  const agent = (steps) => ({
-    schemaVersion: 1, id: 'memo-to-sheet', version: 1, name: '確認用: 会議メモを表にして送る', category: 'test',
-    description: '確認用', locale: 'ja-JP', compartment: null,
-    inputs: { type: 'object', required: ['memo'], properties: { memo: { type: 'string', title: 'メモの名前' } } },
-    tools, steps, constraints: [], limits: { maxSteps: 8, maxTokens: 20000, timeoutSec: 120 },
-    help: { summary: '確認用の拡張機能です' },
-  });
-  const steps = [
-    { id: 'find', type: 'agent', instruction: 'メモを探す' },
-    { id: 'read', type: 'agent', instruction: 'メモを読む' },
-    { id: 'table', type: 'agent', instruction: '表にする' },
-    { id: 'gate', type: 'approval', approver: 'requester', approverRole: [], present: '送る内容' },
-    { id: 'send', type: 'agent', instruction: '送る' },
-  ];
   const input = { memo: '営業会議メモ' };
+  // スキルの段は「作業 → 承認 → 送る」（送る道具があるため M2Office が組み立てる。第12.12.1節）
   const stub = {
-    find: [{ name: 'drive.search', args: { query: '営業会議メモ' } }],
-    read: [{ name: 'drive.read', args: { fileId: 'mock-file-t-alpha-1' } }],
-    table: [
-      { name: 'sheets.create', args: { title: '決定事項（確認用）', columns: ['内容'], rows: [['{{read}}']] } },
+    work: [
+      { name: 'drive.search', args: { query: '営業会議メモ' } },
+      { name: 'drive.read', args: { fileId: 'mock-file-t-alpha-1' } },
+      { name: 'sheets.create', args: { title: '決定事項（確認用）', columns: ['内容'], rows: [['決定事項の見本']] } },
       { name: 'sheets.append', args: { spreadsheetId: 'x' } },
     ],
     send: [{ name: 'gmail.send', args: { to: ['sato@customer.example.jp'], subject: '決定事項（確認用）', body: '確認用の本文' } }],
   };
-  const pack = async (agentDef) => {
-    const zip = new JSZip();
-    zip.file('manifest.json', JSON.stringify({
-      id: EXT, name: '確認用: Google のツール', version: '1.0.0', publisher: { name: '確認用' }, platform_schema: '>=1 <2',
-      permissions: { tools, max_risk_level: 'external-send' },
-    }));
-    zip.file('agents/memo-to-sheet.json', JSON.stringify(agentDef));
-    zip.file('evals/memo-to-sheet.json', JSON.stringify({ agent: 'memo-to-sheet', cases: [{ name: '確認', input, stub }] }));
-    return zip.generateAsync({ type: 'uint8array' });
-  };
+  const pack = () => skillZip({ id: EXT, name: 'memo-to-sheet', title: '確認用: 会議メモを表にして送る', tools, inputs: ['memo: 短文'], input, stub });
   const upload = async (data) => call('a', '/v1/admin/extensions/import', { method: 'POST', body: data, headers: { 'content-type': 'application/octet-stream' } });
 
-  const noGate = await upload(await pack(agent(steps.filter((x) => x.id !== 'gate'))));
-  noGate.status === 400 && noGate.body.problems?.some((p) => p.includes('承認ゲートが必要'))
-    ? ok('メールを送る業務は、承認ステップが無ければ取り込めない') : ng('承認なしで取り込めてしまう', JSON.stringify(noGate.body));
-
-  const imp = await upload(await pack(agent(steps)));
+  const imp = await upload(await pack());
   await call('a', `/v1/admin/extensions/${EXT}/install`, { method: 'POST', body: JSON.stringify({ consent: true }) });
   const { body: job } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: AG, input }) }, 'member');
   const waiting = await waitFor('a', job.runId, ['awaiting_approval', 'completed', 'failed'], 20000, 'member');
   const out = (id) => waiting.steps?.find((x) => x.stepId === id)?.output?.tools ?? [];
-  const read = out('read')[0]?.result;
-  const [created, badAppend] = out('table');
-  imp.status === 200 && read?.untrusted === true && /佐藤様への提案/.test(read.text) && out('find')[0]?.result?.count >= 1
-    ? ok('ドライブのファイルを探して読める（中身はデータの印つき）') : ng('探す・読むができない', JSON.stringify(out('read')));
+  const tool = (name) => out('work').find((t) => t.name === name);
+  const read = tool('drive.read')?.result;
+  const [created, badAppend] = [tool('sheets.create'), tool('sheets.append')];
+  const { body: menu } = await call('a', '/v1/agents', {}, 'member');
+  menu.agents?.find((x) => x.id === AG)?.hasApproval === true
+    ? ok('メールを送る業務には、M2Office が承認の段を入れる（SKILL.md に書かなくてよい）') : ng('承認の段が無い', JSON.stringify(menu.agents?.find((x) => x.id === AG)));
+  imp.status === 200 && read?.untrusted === true && /佐藤様への提案/.test(read.text) && tool('drive.search')?.result?.count >= 1
+    ? ok('ドライブのファイルを探して読める（中身はデータの印つき）') : ng('探す・読むができない', JSON.stringify(out('work')));
   created?.result?.created === true && created.result.file.kind === 'spreadsheet'
     ? ok('読んだ内容からスプレッドシートを作れる') : ng('スプレッドシートを作れない', JSON.stringify(created));
   /引数が正しくありません: rows がありません/.test(badAppend?.error ?? '')
@@ -1167,49 +1174,31 @@ console.log('\n■ 25. Google Workspace のツール（第 1 弾）');
 
 console.log('\n■ 26. Google Workspace のツール（第 2 弾）');
 {
-  const { default: JSZip } = await import('jszip');
   const EXT = 'jp.example.smoke-google-tools-2';
   const AG = `${EXT}:meeting-share`;
   await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
   const tools = ['meet.transcript', 'directory.search', 'docs.create', 'drive.share'];
-  const def = {
-    schemaVersion: 1, id: 'meeting-share', version: 1, name: '確認用: 会議の記録を共有する', category: 'test',
-    description: '確認用', locale: 'ja-JP', compartment: null,
-    inputs: { type: 'object', required: ['meeting'], properties: { meeting: { type: 'string', title: '会議の題名' } } },
-    tools, constraints: [], limits: { maxSteps: 8, maxTokens: 20000, timeoutSec: 120 }, help: { summary: '確認用の拡張機能です' },
-    steps: [
-      { id: 'fetch', type: 'agent', instruction: '文字起こしを取る' },
-      { id: 'who', type: 'agent', instruction: '共有する相手を探す' },
-      { id: 'write', type: 'agent', instruction: '記録を作る' },
-      { id: 'gate', type: 'approval', approver: 'requester', approverRole: [], present: '共有する相手と文書' },
-      { id: 'share', type: 'agent', instruction: '共有する' },
-    ],
-  };
   const input = { meeting: '営業定例' };
   const stub = {
-    fetch: [{ name: 'meet.transcript', args: { query: '営業定例' } }],
-    who: [{ name: 'directory.search', args: { query: '営業部' } }],
-    write: [{ name: 'docs.create', args: { title: '営業定例の記録（確認用）', body: '{{fetch}}' } }],
+    work: [
+      { name: 'meet.transcript', args: { query: '営業定例' } },
+      { name: 'directory.search', args: { query: '営業部' } },
+      { name: 'docs.create', args: { title: '営業定例の記録（確認用）', body: '営業定例の記録の見本' } },
+    ],
   };
-  const zip = new JSZip();
-  zip.file('manifest.json', JSON.stringify({
-    id: EXT, name: '確認用: 第 2 弾', version: '1.0.0', publisher: { name: '確認用' }, platform_schema: '>=1 <2',
-    permissions: { tools, max_risk_level: 'external-send' },
-  }));
-  zip.file('agents/meeting-share.json', JSON.stringify(def));
-  zip.file('evals/meeting-share.json', JSON.stringify({ agent: 'meeting-share', cases: [{ name: '確認', input, stub }] }));
-  await call('a', '/v1/admin/extensions/import', { method: 'POST', body: await zip.generateAsync({ type: 'uint8array' }), headers: { 'content-type': 'application/octet-stream' } });
+  const data = await skillZip({ id: EXT, name: 'meeting-share', title: '確認用: 会議の記録を共有する', tools, inputs: ['meeting: 短文'], input, stub });
+  await call('a', '/v1/admin/extensions/import', { method: 'POST', body: data, headers: { 'content-type': 'application/octet-stream' } });
   await call('a', `/v1/admin/extensions/${EXT}/install`, { method: 'POST', body: JSON.stringify({ consent: true }) });
   const { body: job } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: AG, input }) }, 'member');
   const w = await waitFor('a', job.runId, ['awaiting_approval', 'completed', 'failed'], 20000, 'member');
-  const out = (id) => w.steps?.find((x) => x.stepId === id)?.output?.tools?.[0]?.result;
-  out('fetch')?.untrusted === true && /佐藤様への提案/.test(out('fetch')?.text ?? '')
-    ? ok('Meet の会議の文字起こしを取れる（中身はデータの印つき）') : ng('文字起こしを取れない', JSON.stringify(out('fetch')));
-  out('who')?.people?.[0]?.department === '営業部' ? ok('社内の人を部署で探せる') : ng('社内の人を探せない', JSON.stringify(out('who')));
-  const docId = out('write')?.file?.id;
+  const out = (name) => w.steps?.find((x) => x.stepId === 'work')?.output?.tools?.find((t) => t.name === name)?.result;
+  out('meet.transcript')?.untrusted === true && /佐藤様への提案/.test(out('meet.transcript')?.text ?? '')
+    ? ok('Meet の会議の文字起こしを取れる（中身はデータの印つき）') : ng('文字起こしを取れない', JSON.stringify(out('meet.transcript')));
+  out('directory.search')?.people?.[0]?.department === '営業部' ? ok('社内の人を部署で探せる') : ng('社内の人を探せない', JSON.stringify(out('directory.search')));
+  const docId = out('docs.create')?.file?.id;
   // 共有する文書の ID は実行中に決まるため、見本の応答では共有の段に操作を書けない。
   // 送るものが無い承認の段は、人を待たずに通る（仕様書 第9.3.3節・第9.4.0節、ADR-0028）
-  const gateRow = w.steps?.find((x) => x.stepId === 'gate');
+  const gateRow = w.steps?.find((x) => x.stepId === 'approve');
   w.run?.status === 'completed' && docId && gateRow?.output?.automatic === true
     ? ok('記録の文書を作り、送るものが無い承認の段は自動で通る') : ng('承認の段の扱いが違う', JSON.stringify({ status: w.run?.status, gate: gateRow?.output }));
   const { body: perms } = await call('a', '/v1/admin/google-permissions');
@@ -1220,45 +1209,29 @@ console.log('\n■ 26. Google Workspace のツール（第 2 弾）');
 
 console.log('\n■ 27. Google Workspace のツール（第 3 弾: フォームの回答）');
 {
-  const { default: JSZip } = await import('jszip');
   const EXT = 'jp.example.smoke-google-tools-3';
   const AG = `${EXT}:survey-summary`;
   await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
   const tools = ['drive.search', 'forms.responses', 'sheets.create'];
-  const def = {
-    schemaVersion: 1, id: 'survey-summary', version: 1, name: '確認用: アンケートを表にまとめる', category: 'test',
-    description: '確認用', locale: 'ja-JP', compartment: null,
-    inputs: { type: 'object', required: ['form'], properties: { form: { type: 'string', title: 'フォームの名前' } } },
-    tools, constraints: [], limits: { maxSteps: 6, maxTokens: 20000, timeoutSec: 120 }, help: { summary: '確認用の拡張機能です' },
-    steps: [
-      { id: 'find', type: 'agent', instruction: 'フォームを探す' },
-      { id: 'collect', type: 'agent', instruction: '回答を集める' },
-      { id: 'table', type: 'agent', instruction: '表にまとめる' },
-    ],
-  };
   const input = { form: '研修のアンケート' };
   const stub = {
-    find: [{ name: 'drive.search', args: { query: 'アンケート' } }],
-    collect: [{ name: 'forms.responses', args: { formId: 'mock-file-t-alpha-3' } }],
-    table: [{ name: 'sheets.create', args: { title: 'アンケートの集計（確認用）', columns: ['回答'], rows: [['{{collect}}']] } }],
+    work: [
+      { name: 'drive.search', args: { query: 'アンケート' } },
+      { name: 'forms.responses', args: { formId: 'mock-file-t-alpha-3' } },
+      { name: 'sheets.create', args: { title: 'アンケートの集計（確認用）', columns: ['回答'], rows: [['回答の見本']] } },
+    ],
   };
-  const zip = new JSZip();
-  zip.file('manifest.json', JSON.stringify({
-    id: EXT, name: '確認用: 第 3 弾', version: '1.0.0', publisher: { name: '確認用' }, platform_schema: '>=1 <2',
-    permissions: { tools, max_risk_level: 'draft' },
-  }));
-  zip.file('agents/survey-summary.json', JSON.stringify(def));
-  zip.file('evals/survey-summary.json', JSON.stringify({ agent: 'survey-summary', cases: [{ name: '確認', input, stub }] }));
-  await call('a', '/v1/admin/extensions/import', { method: 'POST', body: await zip.generateAsync({ type: 'uint8array' }), headers: { 'content-type': 'application/octet-stream' } });
+  const data = await skillZip({ id: EXT, name: 'survey-summary', title: '確認用: アンケートを表にまとめる', tools, inputs: ['form: 短文'], input, stub });
+  await call('a', '/v1/admin/extensions/import', { method: 'POST', body: data, headers: { 'content-type': 'application/octet-stream' } });
   await call('a', `/v1/admin/extensions/${EXT}/install`, { method: 'POST', body: JSON.stringify({ consent: true }) });
   const { body: job } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: AG, input }) }, 'member');
   const done = await waitFor('a', job.runId, ['completed', 'failed'], 20000, 'member');
-  const out = (id) => done.steps?.find((x) => x.stepId === id)?.output?.tools?.[0]?.result;
-  out('find')?.items?.[0]?.kind === 'form' ? ok('ドライブの検索でフォームが見つかる') : ng('フォームが見つからない', JSON.stringify(out('find')));
-  const r = out('collect');
+  const out = (name) => done.steps?.find((x) => x.stepId === 'work')?.output?.tools?.find((t) => t.name === name)?.result;
+  out('drive.search')?.items?.[0]?.kind === 'form' ? ok('ドライブの検索でフォームが見つかる') : ng('フォームが見つからない', JSON.stringify(out('drive.search')));
+  const r = out('forms.responses');
   r?.untrusted === true && r.count === 3 && r.form?.questions?.includes('満足度')
     ? ok('フォームの回答を、質問の文つきで取れる（データの印つき）') : ng('回答を取れない', JSON.stringify(r));
-  done.run?.status === 'completed' && out('table')?.created === true
+  done.run?.status === 'completed' && out('sheets.create')?.created === true
     ? ok('回答を表（スプレッドシート）にまとめる') : ng('表にまとめられない', JSON.stringify(done.run));
   await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
 }
@@ -1926,46 +1899,25 @@ console.log('\n■ 41. 帳票の PDF（第9.4.1節、Q-59・Q-57）');
   // 公式の業務はまだ pdf.render を使わないため、見本の応答つきの小さな拡張機能で通しで確かめる
   const EXT = 'jp.example.invoice-draft';
   const AG = `${EXT}:invoice`;
-  const { default: JSZip } = await import('jszip');
   await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
 
-  const zip = new JSZip();
-  zip.file('manifest.json', JSON.stringify({
-    id: EXT, name: '請求書の下書き', version: '1.0.0',
-    description: '明細から請求書の PDF を作ります（確認用）。',
-    publisher: { name: 'サンプル株式会社' },
-    platform_schema: '>=1 <2',
-    permissions: { tools: ['pdf.render'], max_risk_level: 'draft' },
-  }));
-  zip.file('agents/invoice.json', JSON.stringify({
-    schemaVersion: 1, id: 'invoice', version: 1, name: '請求書の下書き', category: 'report',
-    description: '明細から請求書の PDF を作ります', locale: 'ja-JP', compartment: null,
-    inputs: { type: 'object', required: ['to'], properties: { to: { type: 'string', title: '宛先' } } },
-    tools: ['pdf.render'],
-    steps: [{ id: 'render', type: 'agent', label: '作成', instruction: 'pdf.render で請求書を作る。', onEmpty: 'stop', onError: 'stop' }],
-    constraints: ['送信しない'],
-    limits: { maxSteps: 3, maxTokens: 10000, timeoutSec: 60 },
-    help: { summary: '明細から請求書の PDF を作ります。送信はしません。', examples: [], notes: [], faq: [] },
-  }));
-  zip.file('evals/invoice.json', JSON.stringify({
-    agent: 'invoice',
-    cases: [{
-      name: '基本', input: { to: '株式会社アルファ 御中' },
-      expect: '請求書の PDF を作る',
-      stub: {
-        render: [{
-          name: 'pdf.render',
-          args: {
-            title: '請求書', to: '株式会社アルファ 御中', from: ['M2ホールディングス株式会社'],
-            fields: [{ label: '発行日', value: '2026-09-23' }],
-            rows: [{ name: '月額利用料（9 月分）', quantity: 10, unitPrice: 3000 }],
-            notes: ['お支払い期限: 2026-10-31'],
-          },
-        }],
-      },
-    }],
-  }));
-  const bytes = await zip.generateAsync({ type: 'uint8array' });
+  const bytes = await skillZip({
+    id: EXT, name: 'invoice', title: '請求書の下書き', author: 'サンプル株式会社', description: '明細から請求書の PDF を作る（送信しない）',
+    tools: ['pdf.render'], inputs: ['to: 短文'], input: { to: '株式会社アルファ 御中' },
+    body: 'pdf.render で請求書を作る。送信しない。',
+    stub: {
+      work: [{
+        name: 'pdf.render',
+        args: {
+          title: '請求書', to: '株式会社アルファ 御中', from: ['M2ホールディングス株式会社'],
+          fields: [{ label: '発行日', value: '2026-09-23' }],
+          rows: [{ name: '月額利用料（9 月分）', quantity: 10, unitPrice: 3000 }],
+          notes: ['お支払い期限: 2026-10-31'],
+        },
+      }],
+    },
+  });
+
   const imported = await call('a', '/v1/admin/extensions/import', {
     method: 'POST', body: bytes, headers: { 'content-type': 'application/octet-stream' },
   });

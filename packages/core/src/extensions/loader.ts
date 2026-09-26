@@ -145,8 +145,8 @@ export function loadExtension(
   registry: ToolRegistry,
   options: LoadOptions | Set<string> = {},
 ): { pkg: ExtensionPackage | null; problems: string[]; notices?: string[] } {
-  if (!existsSync(join(dir, 'manifest.json')) && !existsSync(join(dir, 'SKILL.md'))) {
-    return { pkg: null, problems: ['SKILL.md（または manifest.json）がありません'] };
+  if (!existsSync(join(dir, 'SKILL.md'))) {
+    return { pkg: null, problems: [existsSync(join(dir, 'manifest.json')) ? JSON_FORMAT_RETIRED : 'SKILL.md がありません'] };
   }
   const opts = options instanceof Set ? { takenAgents: options } : options;
   const files = readExtensionDir(dir);
@@ -166,16 +166,35 @@ export function loadExtensionFiles(
   registry: ToolRegistry,
   options: LoadOptions = {},
 ): { pkg: ExtensionPackage | null; problems: string[]; notices?: string[]; keep?: ExtensionFiles } {
-  // スキルの形式（SKILL.md）なら、拡張機能のファイルに組み立ててから同じ検証を通す（第12.12節）
-  let files = source;
-  let skill: SkillPackage | null = null;
-  if (source.has('SKILL.md') && !source.has('manifest.json')) {
-    skill = buildSkillPackage(source, registry);
-    if (skill.problems.length > 0) return { pkg: null, problems: skill.problems, notices: skill.notices };
-    files = skill.files;
+  // 拡張機能は SKILL.md で書く。JSON の定義（manifest.json＋agents/*.json）は第 0.131.0 版で廃止した（第12.12.7節）
+  const jsonDefinition = [...source.keys()].filter((k) => k === 'manifest.json' || /^agents\/[^/]+\.json$/.test(k));
+  if (!source.has('SKILL.md')) {
+    return { pkg: null, problems: [jsonDefinition.length > 0 ? JSON_FORMAT_RETIRED : 'SKILL.md がありません'] };
   }
-  const res = loadPackageFiles(files, registry, options);
-  return skill ? { ...res, notices: skill.notices, keep: skill.keep } : res;
+  if (jsonDefinition.length > 0) {
+    return { pkg: null, problems: [`${jsonDefinition.join('・')} は入れられません。SKILL.md から M2Office が組み立てます（第12.12.7節）`] };
+  }
+  // SKILL.md を拡張機能の中の形に組み立ててから、同じ検証を通す（第12.12節）
+  const skill: SkillPackage = buildSkillPackage(source, registry);
+  if (skill.problems.length > 0) return { pkg: null, problems: skill.problems, notices: skill.notices };
+  const res = loadPackageFiles(skill.files, registry, options);
+  return { ...res, notices: skill.notices, keep: skill.keep };
+}
+
+/** JSON の定義の拡張機能を断るときの言葉。 */
+export const JSON_FORMAT_RETIRED = 'JSON の定義（manifest.json と agents/*.json）の拡張機能は廃止しました（第 0.131.0 版）。SKILL.md で書いてください（開発者マニュアル 第2章・第3章）';
+
+/**
+ * 組み立てた後の形（manifest.json＋agents/*.json）を検証する（仕様書 第12.9.2節）。
+ *
+ * @remarks
+ * **利用者の拡張機能の取り込みには使わない**（JSON の定義は廃止した。{@link loadExtensionFiles} を使う）。
+ * SKILL.md から組み立てた定義の検証の規則（道具の許可・危険度・承認ゲートなど）を、単体テストで直接確かめるために書き出す
+ */
+export function loadCompiledExtension(
+  files: ExtensionFiles, registry: ToolRegistry, options: LoadOptions = {},
+): { pkg: ExtensionPackage | null; problems: string[] } {
+  return loadPackageFiles(files, registry, options);
 }
 
 /** 拡張機能のファイル（manifest.json の形）を読み込み、検証する。 */

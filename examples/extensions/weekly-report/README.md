@@ -9,7 +9,8 @@
 
 | 構成要素 | ファイル | 内容 |
 |---|---|---|
-| 業務エージェント | `agents/weekly.json` | 収集（`calendar.list`・`tasks.list`）→ 下書き（`document.create`） |
+| 業務 | `SKILL.md` | 予定と ToDo を集めて（`calendar.list`・`tasks.list`）、下書きを保存する（`document.create`）。スキルの書き方のまま |
+| 利用者向けの説明 | `HELP.md` | 業務の「？」とヘルプセンターに出る |
 | 評価のケース | `evals/weekly.json` | 評価のケース（入力と期待する結果）。中の `stub` は M2Office の自動テスト用で、拡張機能を作るときは書かない |
 
 使うツールはすべて内蔵のもので、危険度は最大でも「下書き」です。
@@ -18,7 +19,7 @@
 
 ```bash
 npm run ext:pack examples/extensions/weekly-report
-# → dist/extensions/jp.example.weekly-report-1.0.0.m2ext
+# → dist/extensions/jp.example.weekly-report-2.0.0.m2ext
 ```
 
 1. 管理者ページの「拡張機能」で「ファイルから追加」を押し、作ったファイルを選ぶ（画面へドラッグしてもよい）

@@ -10,15 +10,19 @@ import { cpSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  BUILTIN_TOOLS, ExtensionHub, OFFICIAL_AGENTS, StubLlmProvider, ToolRegistry, blockedByDisabledTool,
-  loadExtension, loadExtensions,
+  BUILTIN_TOOLS, ExtensionHub, JSON_FORMAT_RETIRED, OFFICIAL_AGENTS, StubLlmProvider, ToolRegistry, blockedByDisabledTool,
+  loadCompiledExtension, loadExtension, loadExtensionFiles, loadExtensions, readExtensionDir,
   type DisabledConnectorTool, type InstalledExtension, type Repository,
 } from '../src/index.js';
 
 const registry = new ToolRegistry();
 for (const t of BUILTIN_TOOLS) registry.register(t);
-// JSON の形（廃止の方向。中の定義の検証を確かめる）の見本。見本の拡張機能は SKILL.md になった（第12.12節）
+// 組み立てた後の形（manifest.json＋agents/*.json）の見本。中の定義の検証の規則を確かめる。
+// この形の取り込みは第 0.131.0 版で廃止した（第12.12.7節）。拡張機能は SKILL.md で書く
 const SAMPLE = new URL('./fixtures/extension-json', import.meta.url).pathname;
+const HELLO_SKILL = new URL('../../../extensions/hello-world', import.meta.url).pathname;
+/** 組み立てた後の形として検証する。 */
+const compiled = (dir: string) => loadCompiledExtension(readExtensionDir(dir), registry);
 const DEEPWIKI = new URL('../../../extensions/deepwiki-research', import.meta.url).pathname;
 
 /** サンプルを一時ディレクトリへ写し、一部を書き換えて検証する。 */
@@ -26,7 +30,7 @@ function variant(edit: (dir: string) => void): string[] {
   const dir = join(mkdtempSync(join(tmpdir(), 'm2o-ext-')), 'pkg');
   cpSync(SAMPLE, dir, { recursive: true });
   edit(dir);
-  return loadExtension(dir, registry).problems;
+  return compiled(dir).problems;
 }
 const rewrite = (file: string, fn: (j: Record<string, any>) => void) => {
   const j = JSON.parse(readFileSync(file, 'utf8'));
@@ -34,8 +38,16 @@ const rewrite = (file: string, fn: (j: Record<string, any>) => void) => {
   writeFileSync(file, JSON.stringify(j));
 };
 
-test('サンプルの拡張機能は検証を通り、ID に拡張機能の ID が付く', () => {
-  const { pkg, problems } = loadExtension(SAMPLE, registry);
+test('JSON の定義（manifest.json＋agents/*.json）の拡張機能は取り込めない（第 0.131.0 版で廃止）', () => {
+  assert.deepEqual(loadExtension(SAMPLE, registry).problems, [JSON_FORMAT_RETIRED]);
+  assert.deepEqual(loadExtensionFiles(readExtensionDir(SAMPLE), registry).problems, [JSON_FORMAT_RETIRED]);
+  const mixed = readExtensionDir(HELLO_SKILL);
+  mixed.set('agents/extra.json', new TextEncoder().encode('{}'));
+  assert.match(loadExtensionFiles(mixed, registry).problems[0]!, /agents\/extra\.json は入れられません/, 'SKILL.md と混ぜても入れられない');
+});
+
+test('組み立てた後の形は検証を通り、ID に拡張機能の ID が付く', () => {
+  const { pkg, problems } = compiled(SAMPLE);
   assert.deepEqual(problems, []);
   assert.equal(pkg!.agents[0]!.id, 'jp.m2office.samples.hello-world:hello');
   assert.equal(pkg!.agents[0]!.evals!.filter((e) => e.stub).length, 2, '評価のケースを定義に結び付ける');
@@ -80,9 +92,10 @@ test('マニフェストの形式の誤りは拒否する', () => {
 
 test('検証を通らない拡張機能は、読み込みの結果から除く', () => {
   const root = mkdtempSync(join(tmpdir(), 'm2o-exts-'));
-  cpSync(SAMPLE, join(root, 'good'), { recursive: true });
-  cpSync(SAMPLE, join(root, 'bad'), { recursive: true });
-  rewrite(join(root, 'bad/manifest.json'), (j) => { j.id = 'jp.example.bad'; j.permissions.tools = []; });
+  cpSync(HELLO_SKILL, join(root, 'good'), { recursive: true });
+  cpSync(HELLO_SKILL, join(root, 'bad'), { recursive: true });
+  const skill = join(root, 'bad/SKILL.md');
+  writeFileSync(skill, readFileSync(skill, 'utf8').replace('m2office-id: jp.m2office.samples.hello-world', 'm2office-id: jp.example.bad').replace('name: hello', 'name: Bad Name'));
   const { packages, errors } = loadExtensions(root, registry, OFFICIAL_AGENTS.map((a) => a.id));
   assert.deepEqual(packages.map((p) => p.manifest.id), ['jp.m2office.samples.hello-world']);
   assert.equal(errors.length, 1);
@@ -90,15 +103,15 @@ test('検証を通らない拡張機能は、読み込みの結果から除く',
 
 test('同じ ID の拡張機能は 2 つ目を拒否する', () => {
   const root = mkdtempSync(join(tmpdir(), 'm2o-exts-'));
-  cpSync(SAMPLE, join(root, 'a'), { recursive: true });
-  cpSync(SAMPLE, join(root, 'b'), { recursive: true });
+  cpSync(HELLO_SKILL, join(root, 'a'), { recursive: true });
+  cpSync(HELLO_SKILL, join(root, 'b'), { recursive: true });
   const { packages, errors } = loadExtensions(root, registry, []);
   assert.equal(packages.length, 1);
   assert.ok(errors[0]!.problems.some((x) => x.includes('すでに使われています')));
 });
 
 test('会社が導入した拡張機能の業務エージェントだけが、その会社で使える', async () => {
-  const { pkg } = loadExtension(SAMPLE, registry);
+  const { pkg } = compiled(SAMPLE);
   const installed: InstalledExtension[] = [];
   const disabledTools: DisabledConnectorTool[] = [];
   const repo = {
@@ -124,7 +137,7 @@ test('会社が導入した拡張機能の業務エージェントだけが、�
 });
 
 test('スタブは入力の一致する評価のケースの見本を再生し、一致しなければツールを呼ばない', async () => {
-  const { pkg } = loadExtension(SAMPLE, registry);
+  const { pkg } = compiled(SAMPLE);
   const def = pkg!.agents[0]!;
   const stub = new StubLlmProvider((id) => (id === def.id ? def.evals : undefined));
   const ask = (message: string) => stub.complete({
