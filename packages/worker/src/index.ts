@@ -122,7 +122,11 @@ const notifier = new NotificationDelivery({
 // ファイルの実体も消す（仕様書 第10.10.5節）
 const conversations = new ConversationRotation({ repo, files, logger: log });
 // 対話からの学習。前日の会話から、その日の要約と記憶の候補を作る（仕様書 第11.5.2節）
-const learning = new MemoryLearning({ repo, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log });
+const learning = new MemoryLearning({
+  repo, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
+  // 業務の名前と権限区画を引く（本人が直接使った業務からも学ぶ。ADR-0038）
+  agentsFor: async (tenantId) => (await hub.forTenant(tenantId)).allAgents,
+});
 
 const POLL_INTERVAL_MS = 1000;
 /** 定時実行の見回り間隔。分単位の指定に対して十分に短くする。 */

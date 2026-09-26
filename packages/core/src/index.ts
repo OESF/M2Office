@@ -30,6 +30,7 @@ export { GeminiLiveProvider } from './voice/gemini-live.js';
 export { MockVoiceProvider } from './voice/mock.js';
 export * from './memory/learn.js';
 export * from './memory/promotion.js';
+export * from './memory/work.js';
 export * from './dashboard/presence.js';
 export * from './notify/sender.js';
 export * from './notify/delivery.js';

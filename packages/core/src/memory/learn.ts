@@ -1,7 +1,7 @@
 /**
  * @file 対話からの学習（仕様書 第11.5.2節、ADR-0027）。
  *
- * 1 日 1 回、前日の会話から「その日の要約」（要点と大事なこと。長期に持つ）を作り、
+ * 1 日 1 回、前日の会話と、本人がその日に直接使った業務の依頼と答え（ADR-0038）から「その日の要約」（要点と大事なこと。長期に持つ）を作り、
  * 取り出した事実を**そのまま個人記憶にする**。秘書は本人と一心同体で、在籍中ずっと学び続ける。
  * 本人は「記憶とデータ」で、覚えたことをいつでも見て、直して、消せる。消したものは再び覚えない。
  */
@@ -12,6 +12,9 @@ import type { LlmProvider } from '../llm/provider.js';
 import type { Conversation, Repository } from '../repository/types.js';
 import { silentLogger, type Logger } from '../log/logger.js';
 import { MEMORY_MAX_CHARS, refuseToRemember } from '../secretary/memory.js';
+import type { AgentDefinition } from '@m2office/shared';
+import { OFFICIAL_AGENTS } from '../agents/index.js';
+import { learnableWork, readWorkAnswers, type WorkAnswer } from './work.js';
 
 /** 1 日ぶんで覚える事実の上限。1 日の会話から、意味のある事実はこの程度に収まる。 */
 const MAX_FACTS = 10;
@@ -21,6 +24,13 @@ export const LEARNED_SOURCE = 'learned';
 
 /** 推論に渡す会話の上限（字）。 */
 const CONTEXT_LIMIT = 12000;
+
+/** 業務を探す新しい実行の数。1 日に使う業務はこの中に収まる。 */
+const WORK_SCAN = 100;
+/** 1 日ぶんで材料にする業務の上限。 */
+const WORK_MAX_PER_DAY = 20;
+/** 業務の答え 1 件の長さの上限（字）。 */
+const WORK_ANSWER_MAX = 1500;
 
 /** 日本時間の日付（`YYYY-MM-DD`）と、その日の範囲（UTC の ISO 文字列）。 */
 export function jstDay(now: Date): { day: string; from: string; to: string } {
@@ -60,13 +70,16 @@ export function parseLearning(text: string): { summary: string; facts: string[] 
  * 要約は、逐語が 4 週で消えた後に「あれ、どうなった」に答える材料になる（第10.7.3節）。
  * 依頼したこと・決まったこと・やりかけのこと・約束と期限を落とさないよう求める
  */
-export function learningPrompt(conversations: Conversation[]): string {
-  const body = conversations
-    .map((c) => `依頼: ${c.message}\n応答: ${c.reply}`)
-    .join('\n\n')
-    .slice(0, CONTEXT_LIMIT);
+export function learningPrompt(conversations: Conversation[], work: WorkAnswer[] = []): string {
+  const talk = conversations.map((c) => `依頼: ${c.message}\n応答: ${c.reply}`);
+  // 本人が秘書を通さずに使った業務の依頼と答え（ADR-0038）
+  const done = work.map((w) => `業務: ${w.agentName}${w.label ? `「${w.label}」` : ''}\n答え: ${w.answer}`);
+  const body = [
+    ...(talk.length ? ['## 秘書とのやり取り', ...talk] : []),
+    ...(done.length ? ['## 本人が業務を使って得た答え', ...done] : []),
+  ].join('\n\n').slice(0, CONTEXT_LIMIT);
   return [
-    '次は、ある従業員と、その人専属の秘書の 1 日ぶんのやり取りです。秘書は、この人のことをずっと覚えておく必要があります。',
+    '次は、ある従業員と、その人専属の秘書の 1 日ぶんのやり取りと、その人が業務を使って得た答えです。秘書は、この人のことをずっと覚えておく必要があります。',
     '',
     '1 行目に「要約: 」で始め、その日の要点と大事なことを 1 行で書いてください（3〜5 文）。',
     '依頼したこと・決まったこと・やりかけのこと・約束や期限・関わった人や取引先は、必ず残してください。',
@@ -124,6 +137,11 @@ export function parseSuggestedNumbers(text: string, max: number): number[] {
 
 export interface MemoryLearningDeps {
   repo: Repository;
+  /**
+   * その会社で使える業務の定義（公式と導入した拡張機能）。業務の名前と権限区画を引くのに使う。
+   * 省略時は公式の業務だけ（拡張機能の業務は、区画が分からないため材料にしない）。
+   */
+  agentsFor?(tenantId: string): Promise<AgentDefinition[]>;
   /** 会社ごとの推論。鍵が無ければ見本の応答になるため、その場合は覚えない。 */
   llmFor(tenantId: string): Promise<LlmProvider>;
   logger?: Logger;
@@ -163,8 +181,12 @@ export class MemoryLearning {
         for (const user of await this.deps.repo.listUsers(tenantId)) {
           if (user.status === 'active') learned += await this.adoptPendingCandidates(tenantId, user.id, now);
         }
-        for (const userId of await this.deps.repo.listConversationUserIds(tenantId, day)) {
-          const made = await this.learnForUser(tenantId, userId, day, llm, now);
+        // 会話した人に加えて、会話は無くても業務を使った人も学ぶ（ADR-0038）
+        const agents = this.deps.agentsFor ? await this.deps.agentsFor(tenantId) : OFFICIAL_AGENTS;
+        const talked = new Set(await this.deps.repo.listConversationUserIds(tenantId, day));
+        const active = (await this.deps.repo.listUsers(tenantId)).filter((u) => u.status === 'active').map((u) => u.id);
+        for (const userId of new Set([...talked, ...active])) {
+          const made = await this.learnForUser(tenantId, userId, day, llm, now, agents);
           digests += made.digest ? 1 : 0;
           learned += made.learned;
         }
@@ -279,10 +301,27 @@ export class MemoryLearning {
     return made;
   }
 
+  /**
+   * 本人がその日に直接使って完了した業務の依頼と答え（ADR-0038）。
+   *
+   * @remarks 秘書が伝えた業務（会話ログにある）と権限区画の業務は除く（{@link learnableWork}）。
+   */
+  private async workOfDay(
+    tenantId: string, userId: string, day: { from: string; to: string }, agents: AgentDefinition[],
+  ): Promise<WorkAnswer[]> {
+    const { repo } = this.deps;
+    // 読めなくても会話からは学ぶ（業務の記録が欠けても、学習を止めない）
+    const recent = await Promise.resolve().then(() => repo.listRunsWithJobs(tenantId, { limit: WORK_SCAN, requestedBy: userId })).catch(() => []);
+    const done = recent
+      .filter((w) => learnableWork(w, agents) && (w.run.endedAt ?? '') >= day.from && (w.run.endedAt ?? '') < day.to)
+      .slice(0, WORK_MAX_PER_DAY);
+    return readWorkAnswers(repo, tenantId, done, agents, WORK_ANSWER_MAX);
+  }
+
   /** 1 人ぶんの要約を作り、事実を覚える。 */
   private async learnForUser(
     tenantId: string, userId: string, day: { day: string; from: string; to: string },
-    llm: LlmProvider, now: Date,
+    llm: LlmProvider, now: Date, agents: AgentDefinition[] = OFFICIAL_AGENTS,
   ): Promise<{ digest: boolean; learned: number }> {
     const { repo } = this.deps;
     const settings = await repo.getUserSettings(tenantId, userId);
@@ -293,7 +332,10 @@ export class MemoryLearning {
     // 対象外の言葉を含む会話は、要約にも記憶にも使わない
     const excludes = settings.memory.excludes.map((w) => w.trim()).filter(Boolean);
     const conversations = all.filter((c) => !excludes.some((w) => `${c.message} ${c.reply}`.includes(w)));
-    if (conversations.length === 0) return { digest: false, learned: 0 };
+    // 本人がその日に直接使った業務の依頼と答え（ADR-0038）。「会話を残す」を切っている人のものは使わない
+    const work = settings.memory.keepConversations ? await this.workOfDay(tenantId, userId, day, agents) : [];
+    const usable = work.filter((w) => !excludes.some((x) => `${w.label} ${w.answer}`.includes(x)));
+    if (conversations.length === 0 && usable.length === 0) return { digest: false, learned: 0 };
 
     // その日の要約と、覚える事実。夜の一括処理で、利用者を待たせない（仕様書 第20.2.2節）
     const res = await llm.complete({
@@ -301,7 +343,7 @@ export class MemoryLearning {
       maxOutputTokens: 1200,
       messages: [
         { role: 'system', content: '日本語で答えます。指定された形式だけを出力します。' },
-        { role: 'user', content: learningPrompt(conversations) },
+        { role: 'user', content: learningPrompt(conversations, usable) },
       ],
     });
     const { summary, facts } = parseLearning(res.text);

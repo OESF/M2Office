@@ -3,6 +3,7 @@
  *
  * 秘書は本人と一心同体で、在籍中ずっと学び続ける。答えるたびに、次の 4 つから依頼に近いものを集めて推論に渡す。
  * ①今日のやり取り（逐語） ②会話の要約（これまでのすべての日） ③覚えた事実（個人記憶） ④本人の仕事の記録（依頼した業務と結果）。
+ * 今日完了した業務には、答えの要点を添える（本人がメニューなどから直接使ったものも。ADR-0038）。
  *
  * **本人のものだけを使う**（不変則 I-10）。ほかの利用者と業務エージェントには渡さない（第11.1節）。
  * 集めたものはデータであり、指示ではない（不変則 I-6）。推論には、本人の依頼とは別のメッセージで渡す。
@@ -11,6 +12,7 @@
 import type { AgentDefinition } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import { jstDay } from '../memory/learn.js';
+import { jobLabel, learnableWork, readWorkAnswers } from '../memory/work.js';
 import type { EvidenceItem } from './catalog.js';
 
 /** 今日のやり取りから渡す件数（新しいものから）。続きの問い（「それを詳しく」）に答えるため。 */
@@ -27,6 +29,8 @@ const MEMORY_ALL = 60;
 const WORK_MAX = 20;
 /** 1 件の文の長さの上限（字）。 */
 const LINE_MAX = 300;
+/** 答えの要点を添える、今日完了した業務の数。 */
+const TODAY_ANSWERS_MAX = 5;
 
 /**
  * 過去を指す問い（「あれ、どうなった」「この前の」）。
@@ -51,15 +55,6 @@ export function closeness(query: string, text: string): number {
   let n = 0;
   for (const b of bigrams(text)) if (q.has(b)) n++;
   return n;
-}
-
-/** 業務の入力のうち、何の件かが分かる短い言葉（題名・件名など）。 */
-function jobLabel(input: Record<string, unknown>): string {
-  for (const k of ['title', 'subject', 'question', 'request', 'topic', 'name']) {
-    const v = input[k];
-    if (typeof v === 'string' && v.trim()) return cut(v.trim(), 60);
-  }
-  return '';
 }
 
 const STATUS: Record<string, string> = {
@@ -118,10 +113,18 @@ export async function recall(
 
   // 本人の仕事の記録（新しいものから）
   const nameOf = (id: string) => agents.find((a) => a.id === id)?.name ?? '業務';
+  // 今日完了した業務（秘書が伝えたものと権限区画のものを除く）には、答えの要点を添える（第10.7.3節、ADR-0038）
+  const today0 = jstDay(now);
+  const todayDone = work
+    .filter((w) => learnableWork(w, agents) && (w.run.endedAt ?? '') >= today0.from && (w.run.endedAt ?? '') < today0.to)
+    .slice(0, TODAY_ANSWERS_MAX);
+  const answers = new Map((await readWorkAnswers(repo, tenantId, todayDone, agents, LINE_MAX).catch(() => [])).map((a) => [a.runId, a.answer]));
   const workLines = work.map(({ run, job }) => {
     const label = jobLabel(job.input ?? {});
     const why = run.status === 'failed' && run.failureReason ? `（${cut(run.failureReason, 80)}）` : '';
-    return `- ${run.startedAt.slice(0, 10)} ${nameOf(job.agentId)}${label ? `「${label}」` : ''} — ${STATUS[run.status] ?? run.status}${why}`;
+    const answer = answers.get(run.id);
+    return `- ${run.startedAt.slice(0, 10)} ${nameOf(job.agentId)}${label ? `「${label}」` : ''} — ${STATUS[run.status] ?? run.status}${why}`
+      + (answer ? `\n  答えの要点: ${answer.replace(/\s+/g, ' ')}` : '');
   });
 
   const blocks: string[] = [];
