@@ -32,18 +32,25 @@ export const AG01_INBOX: AgentDefinition = {
   inputs: {
     type: 'object',
     properties: {
-      since: { type: 'string', title: '対象期間の開始', examples: ['2026-09-01'] },
+      // 任意。指定したときだけ、その日以降の未読に絞る（仕様書 第9.5.1節）
+      since: { type: 'string', title: '対象期間の開始（任意）', examples: ['2026-09-01'] },
     },
   },
-  tools: ['gmail.list', 'gmail.get', 'gmail.create_draft', 'knowledge.search', 'document.create'],
+  tools: ['gmail.unread', 'gmail.get', 'gmail.create_draft', 'knowledge.search', 'document.create'],
   steps: [
     {
       id: 'fetch',
       type: 'agent',
       // この段で使える道具（仕様書 第9.2.7節）。段の区切りを推論の行儀に頼らない
-      tools: ['gmail.list', 'gmail.get'],
+      tools: ['gmail.unread', 'gmail.get'],
+      // 対象は受信トレイの「メイン」の未読（仕様書 第9.5.1節）。推論に既読・未読を選ばせない
+      required: ['gmail.unread'],
       label: '取得',
-      instruction: '受信箱から未処理のメールを取得する。',
+      instruction: [
+        '受信トレイの未読のメールを gmail.unread で取得する（未読であることを「未処理」とみなす）。',
+        '入力に since があれば、そのまま渡す。無ければ渡さない（期間で絞らない）。limit は渡さない（既定の 50 通）。',
+        '結果に remaining があれば、その文をそのまま書き残す。',
+      ].join('\n'),
       onEmpty: 'stop',
       onError: 'stop',
     },
@@ -56,6 +63,7 @@ export const AG01_INBOX: AgentDefinition = {
       instruction: [
         '取得したメールを「要返信」「要対応」「情報共有のみ」「不要」に分類する。',
         '分類の結果を一覧として作成し、成果物に保存する。',
+        '取得の段で、ほかにも未読がある（remaining）と分かったときは、その件数を一覧の最後に書く。',
         '判断できないものは「要確認」とし、推測で振り分けない。',
       ].join('\n'),
     },
@@ -91,6 +99,8 @@ export const AG01_INBOX: AgentDefinition = {
       '下書きは Gmail の下書きフォルダに入ります。確認して、ご自身で送信してください',
       '判断に迷うメールは「要確認」に分け、推測で振り分けません',
       'Gmail がプロモーション・ソーシャルなどに振り分けたメールと、迷惑メールは見ません',
+      '対象期間を入れると、その日以降の未読だけを見ます。入れなければ、未読をすべて対象にします',
+      '一度に整理するのは新しい 50 通までです。それより多いときは、残りの件数を一覧の最後に書きます',
       '毎朝の定時実行にしておくと、出社時には整理が済んでいます',
     ],
     faq: [

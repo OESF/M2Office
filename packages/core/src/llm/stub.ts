@@ -171,6 +171,10 @@ function chooseTools(tools: string[], prompt: string): Call[] {
       },
     }];
   }
+  // 受信箱整理は、受信トレイの「メイン」の未読を取る（仕様書 第9.5.1節）
+  if (has('gmail.unread') && /取得/.test(instruction)) {
+    return [{ name: 'gmail.unread', args: {} }];
+  }
   if (has('gmail.list') && /を取得/.test(instruction)) {
     return [{ name: 'gmail.list', args: { limit: 20 } }];
   }

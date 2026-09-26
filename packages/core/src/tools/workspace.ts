@@ -42,6 +42,34 @@ export const gmailList: Tool = {
 };
 
 /**
+ * 受信トレイの「メイン」の未読を、数と新しい順の一覧で返す（仕様書 第9.5.1節・第14.3.4節）。
+ *
+ * @remarks
+ * 危険度 `read`。本文は返さない。振り分けられたメールと迷惑メールは含めない。
+ * 一覧は 50 通まで。`total` が一覧より多ければ、残りがあることを利用者に伝える（黙って漏らさない）。
+ */
+export const gmailUnread: Tool = {
+  name: 'gmail.unread',
+  risk: 'read',
+  activityLabel: '未読のメールを確認しています',
+  helpText: '受信トレイ（メイン）の未読のメールを見ます',
+  description: '受信トレイの「メイン」の未読を、数（total）と新しい順の一覧（最大 50 通。本文なし）で返す。since を渡すとその日以降の未読だけ',
+  args: { properties: { since: { type: 'string', description: 'この日時以降の未読だけ（ISO 形式。任意）' }, limit: { type: 'number', description: '一覧の件数（既定 50、上限 50）' } } },
+  google: { scope: 'gmail.readonly', level: 'restricted' },
+  async invoke(args, ctx) {
+    const res = await ctx.connector.mail.unread(principal(ctx), {
+      since: str(args['since']) || undefined,
+      limit: typeof args['limit'] === 'number' ? args['limit'] : 50,
+    });
+    const rest = res.total - res.items.length;
+    return {
+      source: ctx.connector.sourceFor(ctx.tenantId), total: res.total, more: res.more, count: res.items.length, items: res.items,
+      ...(rest > 0 || res.more ? { remaining: `ほかに ${rest} 通${res.more ? '以上' : ''}の未読があります（新しい ${res.items.length} 通だけを返しました）` } : {}),
+    };
+  },
+};
+
+/**
  * メールを 1 通、本文つきで取得する。
  *
  * @remarks
@@ -316,7 +344,7 @@ export const approvalsPending: Tool = {
 };
 
 export const WORKSPACE_TOOLS: Tool[] = [
-  gmailList, gmailGet, gmailCreateDraft,
+  gmailList, gmailUnread, gmailGet, gmailCreateDraft,
   calendarList, calendarFreeBusy, calendarCreate,
   tasksList, tasksCreate, chatPost,
   notificationSend, approvalsPending,

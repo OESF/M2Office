@@ -107,11 +107,12 @@ export interface MailConnector {
    */
   list(p: ConnectorPrincipal, opts: { since?: string; limit?: number }): Promise<MailSummary[]>;
   /**
-   * 受信トレイの「メイン」の未読を数え、新しいものを返す（仕様書 第10.9.2節）。
+   * 受信トレイの「メイン」の未読を数え、新しいものを返す（仕様書 第10.9.2節・第14.3.4節）。
    *
-   * @returns 未読の数（`more` が真なら、数えた上限より多い）と、新しい順の `limit` 通
+   * @param opts.since この時刻以降の未読だけにする（任意）
+   * @returns 未読の数（`more` が真なら、数えた上限より多い）と、新しい順の `limit` 通（上限 50）
    */
-  unread(p: ConnectorPrincipal, opts: { limit?: number }): Promise<{ total: number; more: boolean; items: MailSummary[] }>;
+  unread(p: ConnectorPrincipal, opts: { limit?: number; since?: string }): Promise<{ total: number; more: boolean; items: MailSummary[] }>;
   /** 1 通を本文つきで返す。見つからなければ `null`。 */
   get(p: ConnectorPrincipal, id: string): Promise<MailMessage | null>;
   /** 検索の条件（Gmail の検索の書き方）で探す。本文は返さない。 */

@@ -57,8 +57,10 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
         .slice(0, opts.limit ?? 20)
         .map(({ body: _body, ...summary }) => summary);
     },
-    unread: async (p: ConnectorPrincipal, opts: { limit?: number }) => {
-      const unread = this.mails(p).filter((m) => m.unread).map(({ body: _body, ...summary }) => summary);
+    unread: async (p: ConnectorPrincipal, opts: { limit?: number; since?: string }) => {
+      const since = opts.since ? Date.parse(opts.since) : 0;
+      const unread = this.mails(p).filter((m) => m.unread && Date.parse(m.receivedAt) >= since)
+        .map(({ body: _body, ...summary }) => summary);
       return { total: unread.length, more: false, items: unread.slice(0, opts.limit ?? 5) };
     },
     get: async (p: ConnectorPrincipal, id: string) =>

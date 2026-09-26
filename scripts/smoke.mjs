@@ -1487,7 +1487,7 @@ console.log('\n■ 32. Google から取得したデータの保持（第14.3.2�
     await new Promise((res) => setTimeout(res, 1000));
   }
   const toolNames = (after?.steps ?? []).flatMap((st) => (st.output?.tools ?? []).map((t) => t.name));
-  saved.status === 200 && after && toolNames.includes('gmail.list') && after.steps.every((st) => st.input === null)
+  saved.status === 200 && after && toolNames.includes('gmail.unread') && after.steps.every((st) => st.input === null)
     && before.length > JSON.stringify(after.steps).length
     ? ok(`日数を 0 にすると、終わった実行の中身を消し、ツール名だけを残す（${[...new Set(toolNames)].join('・')}）`)
     : ng('中身が消えない', JSON.stringify(after?.steps ?? done.steps).slice(0, 200));

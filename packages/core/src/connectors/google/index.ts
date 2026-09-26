@@ -155,13 +155,15 @@ export class GoogleWorkspaceConnector implements WorkspaceConnector {
       });
       return this.summaries(p, await this.listIds(p, q));
     },
-    unread: async (p: ConnectorPrincipal, opts: { limit?: number }) => {
+    unread: async (p: ConnectorPrincipal, opts: { limit?: number; since?: string }) => {
+      const since = opts.since ? Date.parse(opts.since) : NaN;
+      const query = [INBOX_MAIN, 'is:unread', ...(Number.isFinite(since) ? [`after:${Math.floor(since / 1000)}`] : [])].join(' ');
       // ID だけを数える（中身は読まない）。多すぎるときは上限で打ち切り、「以上」と伝える
       let total = 0;
       let token = '';
       const first: string[] = [];
       for (let page = 0; page < UNREAD_COUNT_PAGES; page++) {
-        const q = new URLSearchParams({ q: `${INBOX_MAIN} is:unread`, maxResults: '500', ...(token ? { pageToken: token } : {}) });
+        const q = new URLSearchParams({ q: query, maxResults: '500', ...(token ? { pageToken: token } : {}) });
         const res = await this.gmail(p, `/messages?${q}`);
         const ids = ((res?.['messages'] ?? []) as { id: string }[]).map((m) => m.id);
         if (page === 0) first.push(...ids.slice(0, clampLimit(opts.limit ?? 5)));

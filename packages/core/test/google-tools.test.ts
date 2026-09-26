@@ -30,7 +30,7 @@ test('すべての内蔵ツールが引数の定義を持ち、Google を使う�
 
 test('制限付きの権限を使うツールは Gmail の読み取り・下書きだけ（第14.3.2節 規定 3）', () => {
   const restricted = BUILTIN_TOOLS.filter((t) => t.google?.level === 'restricted').map((t) => t.name).sort();
-  assert.deepEqual(restricted, ['gmail.create_draft', 'gmail.get', 'gmail.list', 'gmail.search']);
+  assert.deepEqual(restricted, ['gmail.create_draft', 'gmail.get', 'gmail.list', 'gmail.search', 'gmail.unread']);
   assert.ok(BUILTIN_TOOLS.filter((t) => t.name.startsWith('drive.')).every((t) => t.google?.scope === 'drive.file'), 'ドライブは drive.file だけ');
 });
 
@@ -158,3 +158,16 @@ test('第 3 弾: フォームの回答を、質問の文つきで取れる（デ
   assert.equal((await run('forms.responses', { formId: 'someone-elses-form' }, ctx))['available'], false);
 });
 
+
+test('未読の一覧は数と新しい順の一覧を返し、多ければ残りの件数を伝える（第9.5.1節）', async () => {
+  const tool = registry.get('gmail.unread')!;
+  const connector = new MockWorkspaceConnector();
+  connector.mail.unread = async (_p, opts) => ({
+    total: 120, more: false,
+    items: Array.from({ length: Math.min(opts.limit ?? 50, 50) }, (_, i) => ({ id: `m${i}`, from: 'a', subject: 's', snippet: '', receivedAt: '', unread: true, labels: [] })),
+  });
+  const res = await tool.invoke({ since: '2026-09-01' }, { tenantId: 't', userId: 'u', runId: 'r', compartment: null, connector } as never) as { total: number; count: number; remaining?: string };
+  assert.equal(res.total, 120);
+  assert.equal(res.count, 50, '既定は 50 通');
+  assert.match(res.remaining ?? '', /ほかに 70 通の未読があります/);
+});
