@@ -2,7 +2,7 @@
  * @file 管理者ページ「拡張機能」。ブラウザの拡張機能と同じ感覚で、取り込み・導入・スイッチ・削除を行う。
  *
  * 導入済みの拡張機能はカードで並べ、スイッチで有効と無効を切り替える。
- * 追加は「配布元から追加」（公式の配布元と、取り込み済みのファイル）と「ファイルから追加」（`.m2ext`）の 2 つ。
+ * 追加は「配布元から追加」（公式の配布元と、取り込み済みのファイル）と「ファイルから追加」（SKILL.md・`.zip`・`.m2ext`）の 2 つ。
  * 導入の前に、業務エージェント・コネクタ・ツールごとに、何をするかと危険度を示して同意を得る。
  *
  * @see 仕様書 第12.10.5節 画面（管理者ページ「拡張機能」）
@@ -54,13 +54,20 @@ export function ExtensionSettings({ focus = null }: { focus?: string | null } = 
   };
 
   /** ファイルを取り込み、通れば同意の画面を開く。 */
-  const importFile = (file: File) => act(async () => {
-    const res = await api.admin.importExtension(file);
-    if (res.item) {
-      setAdding(false);
-      setConsenting(res.item.installed && !res.item.needsReconsent ? null : res.item.id);
-    }
-  }, `「${file.name}」を取り込みました。内容を確認して導入してください`);
+  const importFile = async (file: File) => {
+    // スキルの形式で除いたファイル（プログラムなど）があれば、取り込めたことと一緒に知らせる（仕様書 第12.12.4節）
+    let notes: string[] = [];
+    const done = `「${file.name}」を取り込みました。内容を確認して導入してください`;
+    await act(async () => {
+      const res = await api.admin.importExtension(file);
+      notes = res.notices ?? [];
+      if (res.item) {
+        setAdding(false);
+        setConsenting(res.item.installed && !res.item.needsReconsent ? null : res.item.id);
+      }
+    }, done);
+    if (notes.length > 0) setNotice({ kind: 'ok', text: done, problems: notes });
+  };
 
   const onDrop = (e: DragEvent) => {
     e.preventDefault();
@@ -93,12 +100,12 @@ export function ExtensionSettings({ focus = null }: { focus?: string | null } = 
           <button className="btn ghost" onClick={() => { setAdding(!adding); setConsenting(null); }}>配布元から追加</button>
           <button className="btn" onClick={() => fileInput.current?.click()}>ファイルから追加</button>
           <input
-            ref={fileInput} type="file" accept=".m2ext,.zip" hidden
+            ref={fileInput} type="file" accept=".m2ext,.zip,.skill,.md" hidden
             onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void importFile(f); }}
           />
         </div>
       </div>
-      <p className="muted small">.m2ext はドラッグでも追加できます</p>
+      <p className="muted small">SKILL.md・.zip・.m2ext はドラッグでも追加できます</p>
 
       {notice && (
         <div className={notice.kind === 'ok' ? 'ok-msg' : 'error'}>

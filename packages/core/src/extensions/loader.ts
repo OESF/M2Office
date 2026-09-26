@@ -15,6 +15,7 @@ import { join, relative, sep } from 'node:path';
 import { RISK_LEVELS, RISK_ORDER, type AgentDefinition, type EvalCase, type RiskLevel } from '@m2office/shared';
 import type { ToolRegistry } from '../tools/registry.js';
 import { validateDefinition } from '../engine/validate.js';
+import { buildSkillPackage, type SkillPackage } from './skill.js';
 import {
   checkConnector, connectorToolName, connectorTools, type ConnectorDeclaration,
 } from './connectors.js';
@@ -72,6 +73,9 @@ export interface LoadOptions {
 
 /** パッケージに入れてよいファイル（仕様書 第12.10.2節）。これ以外は拒否する。 */
 const ALLOWED_FILES = [
+  // スキルの形式（第12.12節）。資料は Markdown・テキストだけ（プログラムの置き場所の scripts/ は除く）
+  /^SKILL\.md$/,
+  /^(?!scripts\/)[^.][^]*\.(md|markdown|txt)$/i,
   /^manifest\.json$/,
   /^agents\/[^/]+\.json$/,
   /^connectors\/[^/]+\.json$/,
@@ -140,11 +144,13 @@ export function loadExtension(
   dir: string,
   registry: ToolRegistry,
   options: LoadOptions | Set<string> = {},
-): { pkg: ExtensionPackage | null; problems: string[] } {
-  if (!existsSync(join(dir, 'manifest.json'))) return { pkg: null, problems: ['manifest.json がありません'] };
+): { pkg: ExtensionPackage | null; problems: string[]; notices?: string[] } {
+  if (!existsSync(join(dir, 'manifest.json')) && !existsSync(join(dir, 'SKILL.md'))) {
+    return { pkg: null, problems: ['SKILL.md（または manifest.json）がありません'] };
+  }
   const opts = options instanceof Set ? { takenAgents: options } : options;
   const res = loadExtensionFiles(readExtensionDir(dir), registry, opts);
-  return { pkg: res.pkg ? { ...res.pkg, dir } : null, problems: res.problems };
+  return { pkg: res.pkg ? { ...res.pkg, dir } : null, problems: res.problems, ...(res.notices ? { notices: res.notices } : {}) };
 }
 
 /**
@@ -153,9 +159,27 @@ export function loadExtension(
  * @remarks ディレクトリからも `.m2ext` からも、この関数で同じ検証を行う。
  */
 export function loadExtensionFiles(
-  files: ExtensionFiles,
+  source: ExtensionFiles,
   registry: ToolRegistry,
   options: LoadOptions = {},
+): { pkg: ExtensionPackage | null; problems: string[]; notices?: string[]; keep?: ExtensionFiles } {
+  // スキルの形式（SKILL.md）なら、拡張機能のファイルに組み立ててから同じ検証を通す（第12.12節）
+  let files = source;
+  let skill: SkillPackage | null = null;
+  if (source.has('SKILL.md') && !source.has('manifest.json')) {
+    skill = buildSkillPackage(source, registry);
+    if (skill.problems.length > 0) return { pkg: null, problems: skill.problems, notices: skill.notices };
+    files = skill.files;
+  }
+  const res = loadPackageFiles(files, registry, options);
+  return skill ? { ...res, notices: skill.notices, keep: skill.keep } : res;
+}
+
+/** 拡張機能のファイル（manifest.json の形）を読み込み、検証する。 */
+function loadPackageFiles(
+  files: ExtensionFiles,
+  registry: ToolRegistry,
+  options: LoadOptions,
 ): { pkg: ExtensionPackage | null; problems: string[] } {
   const problems: string[] = [];
   const text = (path: string) => new TextDecoder().decode(files.get(path));

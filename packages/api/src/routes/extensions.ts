@@ -123,14 +123,15 @@ export function extensionsRoute(deps: AppDeps) {
     if (unpacked.problems.length > 0) {
       return c.json({ error: '取り込めませんでした', problems: unpacked.problems }, 400);
     }
-    const { pkg, problems } = await deps.hub.validateImport(tenant.id, unpacked.files);
+    const { pkg, problems, notices = [], keep } = await deps.hub.validateImport(tenant.id, unpacked.files);
     if (!pkg || problems.length > 0) {
-      return c.json({ error: '検証を通りませんでした', problems }, 400);
+      return c.json({ error: '検証を通りませんでした', problems: [...problems, ...notices] }, 400);
     }
     const now = new Date().toISOString();
+    // スキルの形式なら、除いたファイル（プログラムなど）を保存しない（第12.12.4節）
     await deps.repo.savePrivateExtension({
       tenantId: tenant.id, extensionId: pkg.manifest.id, version: pkg.manifest.version,
-      files: encodeFiles(unpacked.files), sizeBytes: data.length, importedBy: user.id, importedAt: now,
+      files: encodeFiles(keep ?? unpacked.files), sizeBytes: data.length, importedBy: user.id, importedAt: now,
     });
     await deps.repo.appendAudit({
       id: randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id, action: 'extension.import',
@@ -139,7 +140,7 @@ export function extensionsRoute(deps: AppDeps) {
     });
     const view = await deps.tenantView(tenant.id);
     const entry = find(view, pkg.manifest.id);
-    return c.json({ ok: true, item: entry ? { ...describe(entry.pkg, view), ...stateOf(entry) } : null });
+    return c.json({ ok: true, notices, item: entry ? { ...describe(entry.pkg, view), ...stateOf(entry) } : null });
   });
 
   /**

@@ -262,6 +262,13 @@ AG-02 議事録作成・共有は、承認②のあとに `knowledge.register` �
 `.m2ext` を展開しても（`unpackExtension()`）、同じ検証を通ります（仕様書 第12.9.2節、第12.10.2節）。
 入れてよいファイル以外（とくにプログラム）が入っていれば拒否します。
 
+**スキルの形式（SKILL.md）が標準の書き方です**（仕様書 第12.12節、ADR-0029。`extensions/skill.ts`）。
+`SKILL.md` があって `manifest.json` が無ければ、`buildSkillPackage()` が Agent Skills のフロントマター（`name`・`description`・`metadata` の `m2office-*`）と本文から
+マニフェストとエージェント定義を組み立て、同じ検証に回します。段は本文を指示にした 1 つで、送る道具があれば「作業 → 承認 → 送る」を組みます。
+`scripts/` などのプログラムと画像は除き（`notices` で知らせ、保存もしない）、`references/` などの Markdown・テキストは指示に添えます。
+フロントマターは依存を足さず、YAML の基本の形だけを読みます（`parseSkill()`）。SKILL.md 1 つのファイルも取り込めます。
+JSON の定義（`manifest.json`＋`agents/*.json`）は廃止の方向で、取り込みはしばらく受け付けます。
+
 `ExtensionHub.forTenant()` は、公式の配布元の拡張機能と、その会社がファイルから取り込んだもの（自社専用）を合わせ、
 **導入済み・有効・再同意が不要**なものだけを使える業務エージェントとツールにします。
 返す `registry` には、使えるコネクタのツール（`<コネクタの ID>.<ツールの名前>`）が加わります。

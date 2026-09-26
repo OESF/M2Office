@@ -14,8 +14,8 @@ M2Office に**業務を追加する人**のための手引きです。拡張機�
 | # | 章 | 内容 |
 |---|---|---|
 | 1 | [用語と全体像](01-concepts.md) | 拡張機能・業務エージェント・コネクタ・ツールとは。何が作れて、何が作れないか |
-| 2 | [はじめての拡張機能](02-quickstart.md) | **「こんにちは」に「Hello World」と返す**サンプルを作り、動かすまで |
-| 3 | [業務エージェントの定義](03-agent-definition.md) | 定義の全項目のリファレンス |
+| 2 | [はじめての拡張機能](02-quickstart.md) | **「こんにちは」に「Hello World」と返す**サンプルを SKILL.md で作り、動かすまで |
+| 3 | [業務エージェントの書き方](03-agent-definition.md) | SKILL.md（スキルの形式）のリファレンス。JSON の定義（廃止の方向）も載せる |
 | 4 | [ツールと危険度](04-tools.md) | 使えるツール（Google Workspace を操作するツールを含む 40 個）の一覧・引数・必要な Google の権限と、承認の決まり |
 | 5 | [拡張機能パッケージ](05-package.md) | マニフェスト・評価のケース・見本の応答の書式、持ち運べるファイル（.m2ext） |
 | 6 | [検証・導入・動作確認](06-validate-and-install.md) | 手元での検証、ファイルからの取り込み、スイッチ、利用できる人、よくあるエラーと直し方 |
@@ -27,7 +27,7 @@ M2Office に**業務を追加する人**のための手引きです。拡張機�
 
 | サンプル | 置き場所 | 見どころ |
 |---|---|---|
-| あいさつ | [extensions/hello-world](../../extensions/hello-world/) | いちばん小さい拡張機能（第2章） |
+| あいさつ | [extensions/hello-world](../../extensions/hello-world/) | いちばん小さい拡張機能。SKILL.md で書いた見本（第2章） |
 | リポジトリ調査（DeepWiki） | [extensions/deepwiki-research](../../extensions/deepwiki-research/) | コネクタ（MCP）を使う拡張機能（第7章） |
 | 調べてスライドにまとめる | [extensions/research-slides](../../extensions/research-slides/) | Web で調べてスライドにまとめる（第4.5節） |
 | 週報の下書き | [examples/extensions/weekly-report](../../examples/extensions/weekly-report/) | 内蔵ツールを組み合わせた実務の例。ファイルにして取り込む自社専用の拡張機能（第6章） |
@@ -43,7 +43,7 @@ npm run docs:manual-pdf    # → docs/developer/developer-manual.pdf
 ## 前提
 
 - M2Office の開発環境が動いていること（リポジトリ直下の README の「セットアップ」と「起動」）
-- 業務エージェントを作るのに、プログラミングは要りません。JSON が読み書きできれば十分です
+- 業務エージェントを作るのに、プログラミングも JSON も要りません。業務の指示を文で書ければ十分です（SKILL.md。公開されているスキルを土台にもできます）
 - コネクタ（第7章）を作るには、API を扱うプログラミングの知識が要ります
 
 ## この文書の版

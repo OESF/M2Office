@@ -57,7 +57,7 @@ export class StubLlmProvider implements LlmProvider {
    */
   private replay(req: LlmRequest): LlmResponse | null {
     const ctx = req.context;
-    const cases = ctx ? (ctx.evals ?? this.evalsFor?.(ctx.agentId) ?? []).filter((c) => c.stub) : [];
+    const cases = ctx ? (ctx.evals ?? this.evalsFor?.(ctx.agentId) ?? []).filter((c) => c.stub || c.answer) : [];
     if (!ctx || cases.length === 0) return null;
     const hit = cases.find((c) => stableJson(c.input) === stableJson(ctx.input));
     const tokensUsed = Math.ceil(JSON.stringify(ctx.input).length / 4) + 32;
@@ -70,6 +70,8 @@ export class StubLlmProvider implements LlmProvider {
     const calls = (hit.stub?.[ctx.stepId] ?? []).map((c) => ({
       ...c, args: fillPlaceholders(c.args, ctx.stepResults ?? {}) as Record<string, unknown>,
     }));
+    // 道具を呼ばない段で見本の答えがあれば、それを答えにする（スキルの形式。第12.12節）
+    if (calls.length === 0 && hit.answer) return { text: hit.answer, tokensUsed };
     const lines = [`［スタブ応答］見本の応答を再生しています（評価のケース「${hit.name}」）。`];
     for (const call of calls) lines.push('', '```tool', JSON.stringify(call), '```');
     return { text: lines.join('\n'), tokensUsed };

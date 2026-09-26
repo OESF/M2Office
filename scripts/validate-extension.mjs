@@ -48,6 +48,8 @@ for (const target of targets) {
     continue;
   }
   console.log(`\x1b[32m✓\x1b[0m ${pkg.manifest.name}（${pkg.manifest.id} ${pkg.manifest.version}）`);
+  // スキルの形式で除いたファイル（プログラムなど。仕様書 第12.12.4節）
+  for (const n of result.notices ?? []) console.log(`    \x1b[33m注意\x1b[0m: ${n}`);
   for (const c of pkg.connectors) {
     console.log(`    コネクタ ${c.id}: ${c.url}（認証 ${c.auth.type}）`);
     for (const t of c.tools) console.log(`      ツール ${c.id}.${t.name}=${t.risk}`);
@@ -55,7 +57,7 @@ for (const target of targets) {
   const risk = (name) => registry.get(name)?.risk
     ?? pkg.connectors.flatMap((c) => c.tools.map((t) => [`${c.id}.${t.name}`, t.risk])).find(([n]) => n === name)?.[1];
   for (const a of pkg.agents) {
-    const withStub = (a.evals ?? []).filter((e) => e.stub).length;
+    const withStub = (a.evals ?? []).filter((e) => e.stub || e.answer).length;
     console.log(`    業務エージェント ${a.id}: ${a.steps.length} ステップ、ツール ${a.tools.map((t) => `${t}=${risk(t)}`).join(', ')}`);
     console.log(`    評価のケース ${(a.evals ?? []).length} 件（うち見本の応答つき ${withStub} 件）`);
     if (withStub === 0) console.log('    \x1b[33m注意\x1b[0m: 見本の応答が無いため、LLM の鍵が無い環境では動作を確かめられません');

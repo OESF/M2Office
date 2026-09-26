@@ -121,6 +121,12 @@ export interface EvalCase {
    * 本物の LLM は使わない。定義の一部ではなく、開発と試験のためのもの。
    */
   stub?: Record<string, { name: string; args: Record<string, unknown> }[]>;
+  /**
+   * 見本の答えの文（仕様書 第12.9.4節・第12.12節）。道具を呼ばない段で、スタブがこの文を答えとして返す。
+   *
+   * @remarks スキルの形式の業務は、答えの文がそのまま結果になるため、鍵の無い環境でも結果を確かめられるようにする
+   */
+  answer?: string;
 }
 
 /**

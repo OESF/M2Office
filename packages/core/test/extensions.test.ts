@@ -17,7 +17,8 @@ import {
 
 const registry = new ToolRegistry();
 for (const t of BUILTIN_TOOLS) registry.register(t);
-const SAMPLE = new URL('../../../extensions/hello-world', import.meta.url).pathname;
+// JSON の形（廃止の方向。中の定義の検証を確かめる）の見本。見本の拡張機能は SKILL.md になった（第12.12節）
+const SAMPLE = new URL('./fixtures/extension-json', import.meta.url).pathname;
 const DEEPWIKI = new URL('../../../extensions/deepwiki-research', import.meta.url).pathname;
 
 /** サンプルを一時ディレクトリへ写し、一部を書き換えて検証する。 */

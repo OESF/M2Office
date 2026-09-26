@@ -688,7 +688,7 @@ export const api = {
     uninstallExtension: (id: string) => call(`/admin/extensions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     /** `.m2ext` を取り込む。本文はファイルのバイト列そのもの。 */
     importExtension: (file: Blob) =>
-      call<{ ok: true; item: ExtensionView | null }>('/admin/extensions/import', {
+      call<{ ok: true; item: ExtensionView | null; notices?: string[] }>('/admin/extensions/import', {
         method: 'POST', body: file, headers: { 'content-type': 'application/octet-stream' },
       }),
     setExtensionEnabled: (id: string, enabled: boolean) =>

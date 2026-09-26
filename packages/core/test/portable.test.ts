@@ -23,7 +23,8 @@ import {
 
 const registry = new ToolRegistry();
 for (const t of BUILTIN_TOOLS) registry.register(t);
-const HELLO = new URL('../../../extensions/hello-world', import.meta.url).pathname;
+// JSON の形（廃止の方向）の見本。見本の拡張機能「あいさつ」は SKILL.md になった（第12.12節）
+const HELLO = new URL('./fixtures/extension-json', import.meta.url).pathname;
 const DEEPWIKI = new URL('../../../extensions/deepwiki-research', import.meta.url).pathname;
 const WEEKLY = new URL('../../../examples/extensions/weekly-report', import.meta.url).pathname;
 const enc = (v: unknown) => new TextEncoder().encode(typeof v === 'string' ? v : JSON.stringify(v));
@@ -83,7 +84,7 @@ test('フォルダごと圧縮した ZIP も取り込める。OS が作るファ
 });
 
 test('ZIP でないもの・不正なパスを含むものは取り込まない', async () => {
-  assert.match((await unpackExtension(enc('not a zip'))).problems[0]!, /ZIP として読めません/);
+  assert.match((await unpackExtension(enc('not a zip'))).problems[0]!, /ZIP としても SKILL\.md としても読めません/);
   const zip = new JSZip();
   zip.file('../manifest.json', '{}');
   assert.match((await unpackExtension(await zip.generateAsync({ type: 'uint8array' }))).problems[0]!, /不正なパス/);

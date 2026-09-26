@@ -173,7 +173,7 @@ export class ExtensionHub {
    * @remarks
    * 公式の拡張機能と同じ ID は取り込めない。同じ ID の自社専用の拡張機能があれば、それを置き換える前提で検証する。
    */
-  async validateImport(tenantId: string, files: ExtensionFiles) {
+  async validateImport(tenantId: string, files: ExtensionFiles): Promise<ReturnType<typeof loadExtensionFiles>> {
     const { repo, registry } = this.deps;
     const first = loadExtensionFiles(files, registry, {});
     const extId = first.pkg?.manifest.id;

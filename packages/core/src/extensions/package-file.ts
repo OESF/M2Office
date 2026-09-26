@@ -51,10 +51,15 @@ export async function unpackExtension(data: Uint8Array): Promise<{ files: Extens
     return { files, problems: ['ファイルが大きすぎます（5 MB まで）'] };
   }
   let zip: JSZip;
+  // SKILL.md を 1 つだけ渡されたとき（ZIP でない。第12.10.2節）
+  if (looksLikeSkill(data)) {
+    files.set('SKILL.md', data);
+    return { files, problems: [] };
+  }
   try {
     zip = await JSZip.loadAsync(data);
   } catch {
-    return { files, problems: ['ZIP として読めません。.m2ext は ZIP の形式です'] };
+    return { files, problems: ['ZIP としても SKILL.md としても読めません。拡張機能のファイル（.m2ext・.zip・.skill）か、SKILL.md を選んでください'] };
   }
   const entries = Object.values(zip.files).filter((e) => !e.dir && !isJunk(e.name));
   if (entries.length > MAX_ENTRIES) return { files, problems: [`ファイルの数が多すぎます（${MAX_ENTRIES} まで）`] };
@@ -77,6 +82,13 @@ export async function unpackExtension(data: Uint8Array): Promise<{ files: Extens
   return { files, problems: [] };
 }
 
+/** 文字のファイルで、先頭がフロントマター（---）なら SKILL.md とみなす。ZIP は先頭が PK で始まる。 */
+function looksLikeSkill(data: Uint8Array): boolean {
+  if (data[0] === 0x50 && data[1] === 0x4b) return false;
+  const head = new TextDecoder().decode(data.slice(0, 64)).replace(/^\uFEFF/, '');
+  return head.startsWith('---');
+}
+
 /** OS が自動で作るファイル。取り込みの対象にしない。 */
 function isJunk(name: string): boolean {
   return name.startsWith('__MACOSX/') || name.split('/').some((p) => p === '.DS_Store' || p === 'Thumbs.db');
@@ -84,7 +96,7 @@ function isJunk(name: string): boolean {
 
 /** すべてのパスが同じ 1 つのフォルダの下にあり、直下に manifest.json が無ければ、そのフォルダ名（末尾に `/`）。 */
 function commonFolder(names: string[]): string {
-  if (names.includes('manifest.json')) return '';
+  if (names.includes('manifest.json') || names.includes('SKILL.md')) return '';
   const first = names[0]?.split('/')[0];
   if (!first || !names.every((n) => n.startsWith(`${first}/`))) return '';
   return `${first}/`;
