@@ -374,6 +374,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
                 {view.agent.name}{' '}
                 <AgentHelpTip
                   agentId={view.agent.id}
+                  extension={view.agent.extension}
                   onExample={(input) => setFormFill(
                     Object.fromEntries(Object.entries(input).map(([k, v]) => [k, String(v ?? '')])),
                   )}

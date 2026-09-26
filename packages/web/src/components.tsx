@@ -75,9 +75,6 @@ export function AgentForm({
   return (
     <>
     <div className="card">
-      {agent.extension && (
-        <p className="muted small">拡張機能「{agent.extension.name}」・提供: {agent.extension.publisher}</p>
-      )}
       {Object.entries(props).map(([key, field]) => (
         <Field
           key={key}

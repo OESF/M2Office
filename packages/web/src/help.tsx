@@ -316,9 +316,11 @@ function inline(s: string): ReactNode {
  * 入力欄を下へ押し下げるだけのものになる。
  *
  * @param onExample 実行例を押したときに、入力欄へ入れる値を受け取る
+ * @param extension 拡張機能の業務なら、その名前と提供者。説明の最後に出す（入力の画面には出さない）
  */
-export function AgentHelpTip({ agentId, onExample }: {
+export function AgentHelpTip({ agentId, onExample, extension }: {
   agentId: string; onExample: (input: Record<string, unknown>) => void;
+  extension?: { name: string; publisher: string } | null;
 }) {
   const [help, setHelp] = useState<AgentHelpView | null>(null);
   const [showMore, setShowMore] = useState(false);
@@ -404,6 +406,7 @@ export function AgentHelpTip({ agentId, onExample }: {
           </button>
         </>
       )}
+      {extension && <p className="muted small">拡張機能「{extension.name}」・提供: {extension.publisher}</p>}
     </div>
       )}
     </span>
