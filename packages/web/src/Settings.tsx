@@ -249,7 +249,7 @@ export function Settings({ me, agents, onChanged, section }: {
             onChange={(e) => set('notifications', { channels: { chat: e.target.checked } })} />
           Chat（本人への個別メッセージ）
         </label>
-        <div style={{ marginTop: 12 }}>
+        <div style={{ marginTop: 'calc(12px * var(--space-scale))' }}>
           <SaveButton run={() => api.saveMySettings('notifications', s.notifications).then(onChanged)} />
         </div>
       </div>
@@ -292,7 +292,7 @@ export function Settings({ me, agents, onChanged, section }: {
             ))}
           </tbody>
         </table>
-        <div style={{ marginTop: 12 }}>
+        <div style={{ marginTop: 'calc(12px * var(--space-scale))' }}>
           <SaveButton run={() => api.saveMySettings('menu', { ...s.menu, order: ordered.map((a) => a.id) }).then(onChanged)} />
         </div>
       </div>

@@ -430,7 +430,7 @@ function Events({ items }: { items: DashboardLive['events'] }) {
   const shown = items.slice(0, EVENTS_FOLDED);
   return (
     <>
-      <h3 style={{ marginTop: 20 }}>出来事</h3>
+      <h3 style={{ marginTop: 'calc(20px * var(--space-scale))' }}>出来事</h3>
       {items.length === 0 && <p className="muted">まだありません。</p>}
       <ul className="events">
         {shown.map((e, i) => (
@@ -651,7 +651,7 @@ function LayerBar({ s }: { s: DashboardStats['secretary'] }) {
       <div className="stack">
         {parts.map((p) => p.n > 0 && <span key={p.key} className={p.key} style={{ width: `${(p.n / total) * 100}%` }} />)}
       </div>
-      <dl className="kv" style={{ marginTop: 8 }}>
+      <dl className="kv" style={{ marginTop: 'calc(8px * var(--space-scale))' }}>
         {parts.map((p) => (
           <div key={p.key} style={{ display: 'contents' }}>
             <dt><i className={`dot ${p.key}`} />{p.label}</dt><dd>{p.n} 回（{Math.round((p.n / total) * 100)}%）</dd>

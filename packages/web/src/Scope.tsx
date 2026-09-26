@@ -156,7 +156,7 @@ export function GroupSettings({ users, onChanged }: {
   const nameOf = (id: string) => users.find((u) => u.id === id)?.displayName ?? '（利用者）';
 
   return (
-    <div className="card" style={{ marginTop: 16 }}>
+    <div className="card" style={{ marginTop: 'calc(16px * var(--space-scale))' }}>
       <h3>グループ</h3>
       {groups.length === 0 && <p className="muted small">まだありません。</p>}
       <table className="table">
@@ -249,7 +249,7 @@ export function CompartmentSettings({ onChanged }: { onChanged?: () => void }) {
   const options = access.options;
 
   return (
-    <div className="card" style={{ marginTop: 16 }}>
+    <div className="card" style={{ marginTop: 'calc(16px * var(--space-scale))' }}>
       <h3>権限区画</h3>
       <p className="muted small">変更は記録され、管理者全員に通知されます</p>
       {!options && <p className="muted small">読み込んでいます…</p>}
