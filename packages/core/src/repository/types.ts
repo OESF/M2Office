@@ -120,6 +120,8 @@ export interface Repository {
   listSchedules(tenantId: string, userId: string | null): Promise<Schedule[]>;
   getSchedule(tenantId: string, id: string): Promise<Schedule | null>;
   updateSchedule(s: Schedule): Promise<void>;
+  /** 定時実行を消す。消したら `true`（仕様書 第6.1.7節）。動いている実行は止めない。 */
+  deleteSchedule(tenantId: string, id: string): Promise<boolean>;
   /**
    * 実行時刻を過ぎた定時実行を 1 件確保し、次回の時刻を進める（ワーカー用）。
    *

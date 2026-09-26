@@ -11,7 +11,7 @@ import type { Notification } from '@m2office/shared';
 import { splitMenu, togglePinned } from './menu.js';
 import {
   api, ApiError, describeError,
-  type AgentSummary, type ApprovalView, type Lookup, type Me, type RunDetail, type ScheduleView, type SecretaryReply,
+  type AgentSummary, type ApprovalView, type Lookup, type Me, type RunDetail, type SecretaryReply,
 } from './api.js';
 import { AgentHelpTip, HelpCenter, HelpTip, Markdown, PageTitle, Tour, openHelp, useOpenHelp } from './help.js';
 import { AppVersionBadge, GoogleLauncher } from './launcher.js';
@@ -20,6 +20,7 @@ import { keyLabel, useHotkey, useNumberHotkeys } from './keys.js';
 import { timeGreeting } from './greeting.js';
 import { AgentForm, ApprovalTray, RunView, statusLabel, SuspendedBanner } from './components.js';
 import { Sources } from './sources.js';
+import { Schedules } from './Schedules.js';
 import { parseRoute, routePath, syncUrl, type Route } from './route.js';
 import {
   SETTINGS_SECTIONS, SETTINGS_SECTION_KEY, Settings, orderAgents, rememberedSection,
@@ -450,7 +451,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
           {view.kind === 'schedules' && (
             <>
               <h1>定時実行 <HelpTip article="start-schedules">決まった時刻に、あなたの権限で業務を自動で実行します。「今すぐ実行」で動きを確かめられます。</HelpTip></h1>
-              <Schedules agents={agents} />
+              {/* 秘書が止めた・再開したことを一覧に映すため、秘書の答えが出るたびに読み直す（仕様書 第10.9.8節） */}
+              <Schedules agents={agents} reloadKey={result?.id} />
             </>
           )}
           {view.kind === 'settings' && (
@@ -941,51 +943,6 @@ function NoticeRow({ notice, onRead }: { notice: Notification; onRead: () => voi
         </div>
       )}
     </div>
-  );
-}
-
-/** 定時実行の一覧。停止・再開と、動作確認のための「今すぐ実行」。 */
-function Schedules({ agents }: { agents: AgentSummary[] }) {
-  const [items, setItems] = useState<ScheduleView[]>([]);
-  const [message, setMessage] = useState<string | null>(null);
-  const load = useCallback(() => {
-    api.schedules().then((r) => setItems(r.items)).catch((err) => setMessage(String(err.message ?? err)));
-  }, []);
-  useEffect(load, [load]);
-
-  if (items.length === 0) return <p className="muted">定時実行はありません。</p>;
-  return (
-    <>
-      {message && <p className="muted">{message}</p>}
-      {items.map((s) => (
-        <div key={s.id} className="card">
-          <h3>
-            {agents.find((a) => a.id === s.agentId)?.name ?? s.agentId}{' '}
-            <span className={`status ${s.enabled ? 'succeeded' : ''}`}>{s.enabled ? '有効' : '停止中'}</span>
-          </h3>
-          <dl className="kv">
-            <dt>繰り返し</dt><dd>{s.label}</dd>
-            <dt>次回</dt>
-            <dd>{s.enabled ? new Date(s.nextRunAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }) : '—'}</dd>
-            <dt>前回</dt>
-            <dd>{s.lastRunAt ? new Date(s.lastRunAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }) : 'まだ実行していません'}</dd>
-          </dl>
-          <div className="row">
-            <button className="btn ghost small" onClick={() =>
-              void api.updateSchedule(s.id, { enabled: !s.enabled }).then(load)}>
-              {s.enabled ? '停止する' : '再開する'}
-            </button>
-            <button className="btn ghost small" onClick={() =>
-              void api.triggerSchedule(s.id).then(() => {
-                setMessage('次の見回りで実行します。結果は「お知らせ」と「実行履歴」に出ます。');
-                load();
-              })}>
-              今すぐ実行
-            </button>
-          </div>
-        </div>
-      ))}
-    </>
   );
 }
 

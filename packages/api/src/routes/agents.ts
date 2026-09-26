@@ -5,6 +5,7 @@
  */
 
 import { Hono } from 'hono';
+import { isSchedulable } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 
@@ -38,6 +39,8 @@ export function agentsRoute(deps: AppDeps) {
       stepCount: a.steps.length,
       /** メニューに出すか（スキルの user-invocable: false で出さない。仕様書 第12.12.2節）。 */
       menu: a.menu !== false,
+      /** 定時実行に登録できるか（ファイルを受け取る業務と秘書の調べものは登録できない。仕様書 第6.1.7節）。 */
+      schedulable: isSchedulable(a),
       /** 拡張機能の業務エージェントなら、その提供者。公式なら `null`。 */
       extension: (() => {
         const ext = view.entryOf(a.id)?.pkg;

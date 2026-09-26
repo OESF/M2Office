@@ -41,7 +41,7 @@ related: [admin-runs, admin-users, faq-privacy]
 | `approval.auto` | 社外にもお金にも関わらない承認の段を、自動で通した |
 | `approval.decide` | 承認または却下した |
 | `tool.invoke` | 業務がツールを使った。`tool.blocked` は使うのを止めたとき |
-| `schedule.create`・`schedule.update`・`schedule.trigger`・`schedule.skip` | 定時実行を作った・変えた・動かした・飛ばした |
+| `schedule.create`・`schedule.update`・`schedule.trigger`・`schedule.delete`・`schedule.skip` | 定時実行を作った・変えた・動かした・消した・飛ばした（秘書に頼んで止めた・動かしたものは、行った者が秘書になる） |
 | `secretary.*` | 秘書が応対した（`secretary.chat` は会話、`secretary.route` は業務へのつなぎ、`secretary.voice` は音声の始まりと終わり）。**話した中身は記録しません** |
 | `user.invite`・`user.update` | 人を招待した・ロールや状態を変えた |
 | `group.*`・`compartment.*` | グループ・権限区画を作った・変えた・消した |

@@ -286,6 +286,8 @@ export interface AgentSummary {
   extension: { id: string; name: string; publisher: string } | null;
   /** メニューに出すか（スキルの user-invocable。仕様書 第12.12.2節）。`false` なら秘書が取り次いだときだけ使う。 */
   menu?: boolean;
+  /** 定時実行に登録できるか（仕様書 第6.1.7節）。 */
+  schedulable?: boolean;
 }
 
 /** 導入できる拡張機能（仕様書 第12.9.3節）。 */
@@ -575,10 +577,11 @@ export const api = {
   }>('/me/usage'),
   readNotification: (id: string) => call(`/notifications/${id}/read`, { method: 'POST' }),
   schedules: () => call<{ items: ScheduleView[] }>('/schedules'),
-  createSchedule: (agentId: string, rule: ScheduleRule) =>
-    call<ScheduleView>('/schedules', { method: 'POST', body: JSON.stringify({ agentId, rule }) }),
-  updateSchedule: (id: string, patch: { enabled?: boolean; rule?: ScheduleRule }) =>
+  createSchedule: (agentId: string, rule: ScheduleRule, input: Record<string, unknown> = {}) =>
+    call<ScheduleView>('/schedules', { method: 'POST', body: JSON.stringify({ agentId, rule, input }) }),
+  updateSchedule: (id: string, patch: { enabled?: boolean; rule?: ScheduleRule; input?: Record<string, unknown> }) =>
     call<ScheduleView>(`/schedules/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  deleteSchedule: (id: string) => call(`/schedules/${id}`, { method: 'DELETE' }),
   triggerSchedule: (id: string) => call(`/schedules/${id}/trigger`, { method: 'POST' }),
   admin: {
     usage: () => call<{

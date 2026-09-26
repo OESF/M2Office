@@ -1,13 +1,16 @@
 /**
- * @file 定時実行の設定の API。作成・停止と再開・規則の変更・今すぐ実行。
+ * @file 定時実行の設定の API。登録・編集（繰り返し・時刻・入力）・停止と再開・今すぐ実行・削除。
  *
+ * @see 仕様書 第6.1.7節 定時実行の画面
  * @see 仕様書 第9.5.5節 AG-05 週次ブリーフ
  */
 
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import type { Schedule, ScheduleRule } from '@m2office/shared';
-import { describeRule, nextRunAt, validateRule } from '@m2office/core';
+import {
+  describeRule, isSchedulable, missingInputs, nextRunAt, triggeredNow, validateRule, withEnabled,
+} from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 
@@ -40,6 +43,13 @@ export function schedulesRoute(deps: AppDeps) {
     if (!def || !(await deps.canUse(tenant.id, user.id, def.id))) {
       return c.json({ error: `エージェントが見つかりません: ${body.agentId}` }, 404);
     }
+    if ((await deps.repo.getTenantSettings(tenant.id)).agents.disabled.includes(def.id)) {
+      return c.json({ error: 'この業務は管理者によって無効にされています' }, 403);
+    }
+    // ファイルを受け取る業務と秘書の調べものは登録できない（仕様書 第6.1.7節）
+    if (!isSchedulable(def)) return c.json({ error: 'この業務は定時実行に登録できません（毎回ファイルや依頼を渡す業務のため）' }, 400);
+    const missing = missingInputs(def, body.input ?? {});
+    if (missing.length > 0) return c.json({ error: `必須の欄が空です: ${missing.join('、')}` }, 400);
     try {
       validateRule(body.rule);
     } catch (err) {
@@ -59,26 +69,53 @@ export function schedulesRoute(deps: AppDeps) {
     return c.json({ ...schedule, label: describeRule(schedule.rule) }, 201);
   });
 
+  /**
+   * 繰り返し・時刻・入力・有効かどうかを変える（仕様書 第6.1.7節）。業務は変えない。
+   *
+   * @remarks
+   * 繰り返しか時刻を変えたら、次回の時刻を求め直す。再開したときも今から求め直し、止めていた間の回は起動しない。
+   */
   app.patch('/:id', async (c) => {
     const { tenant, user } = c.get('ctx');
     const current = await deps.repo.getSchedule(tenant.id, c.req.param('id'));
     if (!current || current.userId !== user.id) return c.json({ error: '定時実行が見つかりません' }, 404);
-    const body = await c.req.json<{ enabled?: boolean; rule?: ScheduleRule }>();
+    const body = await c.req.json<{ enabled?: boolean; rule?: ScheduleRule; input?: Record<string, unknown> }>();
     const rule = body.rule ?? current.rule;
     try {
       validateRule(rule);
     } catch (err) {
       return c.json({ error: (err as Error).message }, 400);
     }
-    const next: Schedule = {
+    if (body.input !== undefined) {
+      const def = (await deps.tenantView(tenant.id)).resolve(current.agentId, current.agentVersion);
+      const missing = def ? missingInputs(def, body.input) : [];
+      if (missing.length > 0) return c.json({ error: `必須の欄が空です: ${missing.join('、')}` }, 400);
+    }
+    const now = new Date();
+    const edited: Schedule = {
       ...current,
       rule,
-      enabled: body.enabled ?? current.enabled,
-      nextRunAt: body.rule ? nextRunAt(rule, current.timezone, new Date()) : current.nextRunAt,
+      input: body.input ?? current.input,
+      nextRunAt: body.rule ? nextRunAt(rule, current.timezone, now) : current.nextRunAt,
     };
+    const next = body.enabled === undefined ? edited : withEnabled(edited, body.enabled, now);
     await deps.repo.updateSchedule(next);
-    await audit(deps, tenant.id, user.id, 'schedule.update', next.id, { enabled: next.enabled, rule });
+    await audit(deps, tenant.id, user.id, 'schedule.update', next.id, { enabled: next.enabled, rule, inputChanged: body.input !== undefined });
     return c.json({ ...next, label: describeRule(next.rule) });
+  });
+
+  /**
+   * 消す（仕様書 第6.1.7節）。確かめの画面は出さない（社外にもお金にも関わらない。ADR-0028）。
+   *
+   * @remarks 動いている実行は止めない。
+   */
+  app.delete('/:id', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const current = await deps.repo.getSchedule(tenant.id, c.req.param('id'));
+    if (!current || current.userId !== user.id) return c.json({ error: '定時実行が見つかりません' }, 404);
+    await deps.repo.deleteSchedule(tenant.id, current.id);
+    await audit(deps, tenant.id, user.id, 'schedule.delete', current.id, { agentId: current.agentId });
+    return c.json({ ok: true });
   });
 
   /**
@@ -90,7 +127,7 @@ export function schedulesRoute(deps: AppDeps) {
     const { tenant, user } = c.get('ctx');
     const current = await deps.repo.getSchedule(tenant.id, c.req.param('id'));
     if (!current || current.userId !== user.id) return c.json({ error: '定時実行が見つかりません' }, 404);
-    await deps.repo.updateSchedule({ ...current, enabled: true, nextRunAt: new Date().toISOString() });
+    await deps.repo.updateSchedule(triggeredNow(current));
     await audit(deps, tenant.id, user.id, 'schedule.trigger', current.id, {});
     return c.json({ ok: true });
   });

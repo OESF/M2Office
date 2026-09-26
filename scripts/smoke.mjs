@@ -2633,6 +2633,67 @@ console.log('\n■ 51. ダッシュボードの本人と秘書の 1 組（第6.7
   }
 }
 
+console.log('\n■ 52. 定時実行の画面と秘書からの制御（第6.1.7節・第10.9.8節）');
+{
+  const { body: ag } = await call('a', '/v1/agents', {}, 'member');
+  const { body: before } = await call('a', '/v1/schedules', {}, 'member');
+  const taken = new Set((before.items ?? []).map((s) => s.agentId));
+  const target = ag.agents.find((a) => a.schedulable && !(a.inputs?.required ?? []).length && !taken.has(a.id));
+  const fileAgent = ag.agents.find((a) => Object.keys(a.inputs?.properties ?? {}).includes('fileId'));
+  const needsInput = ag.agents.find((a) => a.schedulable && (a.inputs?.required ?? []).length > 0);
+  fileAgent && fileAgent.schedulable === false ? ok(`ファイルを受け取る業務は登録できない印が付く（${fileAgent.name}）`) : ng('ファイルを受け取る業務に印が無い');
+  let id = null;
+  try {
+    if (!target) throw new Error('登録できる業務が見つからない');
+    const created = await call('a', '/v1/schedules', { method: 'POST', body: JSON.stringify({ agentId: target.id, rule: { kind: 'weekly', weekday: 3, hour: 6, minute: 15 } }) }, 'member');
+    id = created.body?.id;
+    created.status === 201 && created.body.label === '毎週水曜 6:15' ? ok(`画面から登録できる（${target.name}・${created.body.label}）`) : ng('登録できない', JSON.stringify(created.body));
+    if (fileAgent) {
+      const bad = await call('a', '/v1/schedules', { method: 'POST', body: JSON.stringify({ agentId: fileAgent.id, rule: { kind: 'daily', hour: 9, minute: 0 } }) }, 'member');
+      bad.status === 400 ? ok('ファイルを受け取る業務の登録は断る（400）') : ng(`登録できてしまう（${bad.status}）`);
+    }
+    if (needsInput) {
+      const bad = await call('a', '/v1/schedules', { method: 'POST', body: JSON.stringify({ agentId: needsInput.id, rule: { kind: 'daily', hour: 9, minute: 0 }, input: {} }) }, 'member');
+      bad.status === 400 && /必須/.test(bad.body?.error ?? '') ? ok(`必須の欄が空なら断る（${needsInput.name}）`) : ng(`必須の欄が空でも登録できる（${bad.status}）`);
+    }
+    const edited = await call('a', `/v1/schedules/${id}`, { method: 'PATCH', body: JSON.stringify({ rule: { kind: 'weekdays', hour: 7, minute: 5 }, input: { note: 'テスト' } }) }, 'member');
+    edited.body?.label === '毎平日（月〜金） 7:05' && edited.body?.input?.note === 'テスト' && Date.parse(edited.body.nextRunAt) > Date.now()
+      ? ok('繰り返し・時刻・入力を編集でき、次回を求め直す') : ng('編集できない', JSON.stringify(edited.body));
+
+    const say = async (message) => (await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message }) }, 'member')).body;
+    const mine = async () => (await call('a', '/v1/schedules', {}, 'member')).body.items.find((s) => s.id === id);
+    const paused = await say(`${target.name}を止めて`);
+    /止めました/.test(paused.text ?? '') && (await mine())?.enabled === false
+      ? ok(`秘書に「${target.name}を止めて」と頼むと止まる（業務には取り次がない）`) : ng('秘書で止まらない', paused.text);
+    const resumed = await say(`${target.name}を再開して`);
+    const after = await mine();
+    /再開しました/.test(resumed.text ?? '') && after?.enabled === true && Date.parse(after.nextRunAt) > Date.now()
+      ? ok('秘書に頼んで再開でき、止めていた間の回は起動しない') : ng('秘書で再開できない', resumed.text);
+    const status = await say('定時実行はどうなってる？');
+    status.layer === 'direct' && new RegExp(`${target.name}: 毎平日`).test(status.text ?? '')
+      ? ok('秘書が定時実行の状態を推論なしで並べる') : ng('状態を答えない', status.text);
+    const edit = await say('定時実行を追加して');
+    /「定時実行」の画面/.test(edit.text ?? '') ? ok('登録は画面を案内し、秘書は行わない') : ng('登録の案内が無い', edit.text);
+    const { body: audits } = await call('a', '/v1/admin/audit-events');
+    (audits.items ?? []).some((e) => e.action === 'schedule.update' && e.targetId === id && e.actorType === 'secretary')
+      ? ok('秘書の操作を監査ログに秘書として残す') : ng('監査ログに秘書の操作が無い');
+
+    const other = await call('b', `/v1/schedules/${id}`, { method: 'DELETE' }, 'member');
+    const admin = await call('a', `/v1/schedules/${id}`, { method: 'DELETE' });
+    other.status === 404 && admin.status === 404 ? ok('ほかの会社の人も、同じ会社の管理者も、本人の定時実行を消せない') : ng(`消せてしまう（${other.status}・${admin.status}）`);
+    const run = await say(`${target.name}を今すぐ実行して`);
+    /今すぐ実行します/.test(run.text ?? '') ? ok('秘書に頼んで今すぐ実行できる') : ng('今すぐ実行できない', run.text);
+    const del = await call('a', `/v1/schedules/${id}`, { method: 'DELETE' }, 'member');
+    const gone = !(await mine());
+    del.status === 200 && gone ? ok('本人は画面から削除できる') : ng(`削除できない（${del.status}）`);
+    if (gone) id = null;
+  } catch (err) {
+    ng('定時実行の確認が途中で止まった', String(err));
+  } finally {
+    if (id) await call('a', `/v1/schedules/${id}`, { method: 'DELETE' }, 'member');
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

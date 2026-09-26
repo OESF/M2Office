@@ -53,9 +53,6 @@ export function AgentForm({
   const hotkey = keyLabel('Mod+Enter');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const props = agent.inputs?.properties ?? {};
-  const required = new Set(agent.inputs?.required ?? []);
-
   // 入力欄の中からでも効く（Mod を伴うため。仕様書 第6.11.2節）
   useHotkey('Mod+Enter', () => { if (!busy) void submit(); });
 
@@ -75,6 +72,31 @@ export function AgentForm({
   return (
     <>
     <div className="card">
+      <InputFields agent={agent} values={values} onChange={(key, v) => setValues((s) => ({ ...s, [key]: v }))} />
+      {error && <p className="error">{error}</p>}
+      <button className="btn" onClick={submit} disabled={busy} title={hotkey ? `実行する（${hotkey}）` : '実行する'}>
+        {busy ? '開始しています…' : '実行'}
+        {hotkey && <kbd className="btn-key">{hotkey}</kbd>}
+      </button>
+    </div>
+    </>
+  );
+}
+
+/**
+ * 業務の入力の欄を、定義（`inputs`）から並べる。
+ *
+ * @remarks 実行の画面と定時実行の登録（仕様書 第6.1.7節）で同じ欄を出すために共通にしている。
+ */
+export function InputFields({ agent, values, onChange }: {
+  agent: AgentSummary;
+  values: Record<string, string>;
+  onChange: (key: string, value: string) => void;
+}) {
+  const props = agent.inputs?.properties ?? {};
+  const required = new Set(agent.inputs?.required ?? []);
+  return (
+    <>
       {Object.entries(props).map(([key, field]) => (
         <Field
           key={key}
@@ -82,15 +104,9 @@ export function AgentForm({
           field={field}
           required={required.has(key)}
           value={values[key] ?? ''}
-          onChange={(v) => setValues((s) => ({ ...s, [key]: v }))}
+          onChange={(v) => onChange(key, v)}
         />
       ))}
-      {error && <p className="error">{error}</p>}
-      <button className="btn" onClick={submit} disabled={busy} title={hotkey ? `実行する（${hotkey}）` : '実行する'}>
-        {busy ? '開始しています…' : '実行'}
-        {hotkey && <kbd className="btn-key">{hotkey}</kbd>}
-      </button>
-    </div>
     </>
   );
 }

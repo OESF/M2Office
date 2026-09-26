@@ -1106,3 +1106,9 @@ code.uri { background: var(--subtle-bg); border: 1px solid var(--line); border-r
   .form-grid > .field { grid-column: span 12; }
 }
 .field input[type="file"] { width: auto; max-width: 100%; }
+
+/* 定時実行の画面の「追加」（仕様書 第6.1.7節） */
+.schedule-add { margin: 0 0 12px; }
+/* 繰り返し・曜日・時刻を 1 行に。狭い欄でも中身の幅で並べ、入らなければ折り返す */
+.schedule-when { display: flex; flex-wrap: wrap; gap: 0 14px; }
+.schedule-when .field select, .schedule-when .field input { width: auto; }

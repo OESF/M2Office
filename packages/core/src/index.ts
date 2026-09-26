@@ -97,6 +97,8 @@ export { cancelRun, createdDriveLinks, CANCELLABLE } from './engine/cancel.js';
 export type { CancelActor, CancelOutcome } from './engine/cancel.js';
 export { Scheduler, SCHEDULE_SKIP_TITLE, SCHEDULE_TOOL_DISABLED_TITLE } from './scheduler/scheduler.js';
 export { nextRunAt, validateRule, describeRule } from './scheduler/rule.js';
+export { isSchedulable, missingInputs, withEnabled, triggeredNow } from './scheduler/control.js';
+export { answerSchedule, type ScheduleAnswer } from './secretary/schedules.js';
 export { parseToolCalls } from './engine/tool-protocol.js';
 export {
   RunNotResumableError, DefinitionInvalidError, TenantBoundaryError, ApprovalForbiddenError,

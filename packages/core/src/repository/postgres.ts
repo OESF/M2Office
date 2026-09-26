@@ -670,6 +670,14 @@ export class PostgresRepository implements Repository {
     );
   }
 
+  async deleteSchedule(tenantId: string, id: string): Promise<boolean> {
+    const rows = await this.q<{ id: string }>(tenantId,
+      `delete from schedules where tenant_id = $1 and id = $2 returning id`,
+      [tenantId, id],
+    );
+    return rows.length > 0;
+  }
+
   async claimDueSchedule(
     now: Date,
     computeNext: (s: Schedule) => string,

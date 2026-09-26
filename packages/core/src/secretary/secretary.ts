@@ -16,6 +16,7 @@ import { rewriteNote } from '../knowledge/search.js';
 import { LOOKUP_AGENT_ID } from '../agents/index.js';
 import { REFERS_TO_PAST, recall } from './recall.js';
 import { CORRECTION, correctMemory } from './correct.js';
+import { answerSchedule } from './schedules.js';
 import { AI_NOT_CONFIGURED_MESSAGE, aiAvailable } from '../llm/unconfigured.js';
 import { expandQuery } from '../knowledge/expand.js';
 import { jstDay } from '../memory/learn.js';
@@ -225,6 +226,15 @@ export class Secretary {
       }
     }
 
+    // 定時実行の確認・停止・再開・今すぐ実行（仕様書 第10.9.8節）。推論を使わない。
+    // 業務への取次より先に見る。「朝のブリーフを止めて」を朝のブリーフの実行に取り次がないため
+    const scheduleAgents = this.deps.agentsFor ? await this.deps.agentsFor(tenantId, userId) : this.deps.agents;
+    const scheduled = await answerSchedule(this.deps.repo, tenantId, userId, message, scheduleAgents);
+    if (scheduled) {
+      await this.audit(tenantId, userId, 'secretary.schedule', scheduled.action);
+      return { reply: { layer: 'direct', text: scheduled.text, evidence: scheduled.evidence, tokensUsed: 0 }, keep: true };
+    }
+
     // 層 1: パターン一致で定型の照会に該当するか（LLM を使わない）
     // 「あの件の進み具合は」のような過去を指す問いは、実行の件数ではなく、覚えていることから答える（第10.7.3節）
     const direct0 = this.matchDirect(message);
@@ -241,7 +251,7 @@ export class Secretary {
     // 層 2: 高速モデルで業務エージェントへの取次を判定する。無効にされた業務には取り次がない
     const { agents } = await this.deps.repo.getTenantSettings(tenantId);
     // 本人の利用範囲（第16.7節）の外の業務には取り次がない
-    const available = this.deps.agentsFor ? await this.deps.agentsFor(tenantId, userId) : this.deps.agents;
+    const available = scheduleAgents;
     // 秘書が自分で答えられる業務は、取次の候補にしない（第10.9.4.1節）
     const enabled = available.filter((a) => !agents.disabled.includes(a.id) && a.secretaryRoute !== false);
     // 外の最新の情報や本人の予定が要る依頼の受け皿（第10.9.6節）。提案の候補ではなく、秘書が自分で回す先

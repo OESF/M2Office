@@ -120,7 +120,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/auth/exchange` | 引換券を、このホストでのログイン状態に換える。券は 1 回限り・2 分 |
 | `GET /v1/oauth/google/login-callback` | Google からの戻り。**運営のホストで受ける**。テナントの判定とログインより前 |
 | `POST /v1/auth/logout` | ログアウト |
-| `GET /v1/agents` | 本人が使える業務の一覧（`agents`。入力スキーマを含む）。メニューのピン止めは個人設定（`menu.pinned`。仕様書 第6.1.1節） |
+| `GET /v1/agents` | 本人が使える業務の一覧（`agents`。入力スキーマと、定時実行に登録できるかの `schedulable` を含む）。メニューのピン止めは個人設定（`menu.pinned`。仕様書 第6.1.1節） |
 | `GET /v1/me` | テナント・利用者・CSRF トークン・接続の状態・本人のアバターの URL（`photo`。無ければ `null`）・サーバーの版（`serverVersion`。画面の版との食い違いの判定に使う。仕様書 第6.1.1.1節）。呼ばれたとき、まだなら朝のブリーフの定時実行（平日 7:30）を秘書が用意する（`secretary/morning.ts`。第9.5.5.1節） |
 | `GET /v1/me/photo` | 本人のアバター（Google のプロフィール写真）。**本人の写真だけ**を返し、利用者の ID は受け取らない。`nosniff` と読み込みを禁じる CSP を付ける（仕様書 第6.5.1.1節） |
 | `POST /v1/jobs` | ジョブを作成し待ち行列へ入れる。実行はワーカーが担う |
@@ -135,9 +135,10 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/notifications` | 本人宛の通知 |
 | `POST /v1/notifications/:id/read` | 既読にする |
 | `GET /v1/schedules` | 本人の定時実行 |
-| `POST /v1/schedules` | 定時実行を作る（毎日／毎週） |
-| `PATCH /v1/schedules/:id` | 停止・再開、規則の変更 |
+| `POST /v1/schedules` | 定時実行を作る（毎日／毎平日／毎週、業務の入力）。ファイルを受け取る業務と秘書の調べものは 400、必須の入力が空なら 400（仕様書 第6.1.7節） |
+| `PATCH /v1/schedules/:id` | 停止・再開、繰り返し・時刻・入力の変更。再開すると次回を今から求め直す（止めていた間の回は起動しない） |
 | `POST /v1/schedules/:id/trigger` | 次の回を今にする（動作確認用） |
+| `DELETE /v1/schedules/:id` | 本人の定時実行を消す。動いている実行は止めない |
 | `GET /v1/admin/usage` | 管理者: エージェント別の利用量 |
 | `GET /v1/admin/runs` | 管理者: 全利用者の実行の状態（中身は返さない） |
 | `GET /v1/admin/runs/:id` | 管理者: 実行 1 件の**状態だけ**。段の表示名と状態・失敗の理由・費用・削減時間まで。**入力・段の入出力・成果物は返さない**（仕様書 第6.6.8節、不変則 I-10） |
