@@ -48,4 +48,4 @@ npm run docs:manual-pdf    # → docs/developer/developer-manual.pdf
 
 ## この文書の版
 
-M2Office の仕様書 第 0.39.0 版に対応します。定義の形式は `schema_version: 1` です。
+M2Office の仕様書 第 0.118.0 版に対応します。業務エージェントはスキルの形式（SKILL.md。第12.12節）で書きます。中の定義の形式は `schema_version: 1` です。
