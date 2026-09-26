@@ -139,6 +139,21 @@ function answerOf(steps: RunStep[]): string {
   return '';
 }
 
+/** 比べるために、書式の記号と空白を落とす。 */
+const plain = (t: string) => t.replace(/[#*`>\-_|]/g, '').replace(/\s+/g, '');
+
+/**
+ * 2 つの文が同じことを言っているか。片方がもう片方をそのまま含むときも同じとみなす（答えが成果物の本文を写しただけ、など）。
+ *
+ * @remarks 短い要約（「議事録を作りました」）は成果物に含まれないので、別のものとして両方出す
+ */
+export function sameText(a: string, b: string): boolean {
+  const x = plain(a);
+  const y = plain(b);
+  if (!x || !y) return false;
+  return x === y || (x.length >= 20 && y.includes(x)) || (y.length >= 20 && x.includes(y));
+}
+
 /** 途中で止められる状態（仕様書 第9.3.1節）。終わった実行は止められない。 */
 const CANCELLABLE = ['queued', 'running', 'awaiting_approval'];
 
@@ -168,6 +183,8 @@ export function RunView({
   const canCancel = detail.job?.requestedBy === viewerId && CANCELLABLE.includes(run.status);
   const done = run.status === 'completed' || run.status === 'failed' || run.status === 'cancelled';
   const answer = answerOf(steps);
+  // 答えの文が、成果物のどれかと同じことを言っているだけか（同じものを 2 度並べない。仕様書 第6.2.2節）
+  const repeated = !!answer && artifacts.some((a: Artifact) => sameText(answer, a.body));
   /*
     いま何をしているか。段は始まった時点で作られるため、動いている段があればそれを使う。
     待ち行列に入ったばかりで段がまだ無いこともある。**推測で名前を作らない。**
@@ -215,14 +232,16 @@ export function RunView({
           )}
         </div>
       )}
-      {/* 終わった実行の答えを必ず出す（仕様書 第6.2.2節）。成果物を作らない業務もある */}
-      {done && (
+      {/*
+        終わった実行の答えを必ず出す（仕様書 第6.2.2節）。成果物を作らない業務もある。
+        **同じことを 2 度出さない。** 答えの文が成果物と同じなら、成果物だけを出す。「結果」「成果物」の見出しは付けない
+      */}
+      {done && (run.failureReason || (answer && !repeated) || artifacts.length === 0) && (
         <div className="card">
-          <h3>結果</h3>
           {run.failureReason && <p className="error">{run.failureReason}</p>}
-          {answer
+          {answer && !repeated
             ? <div className="reply"><Markdown text={answer} lineBreaks /></div>
-            : !run.failureReason && <p className="muted">結果がありません。</p>}
+            : !run.failureReason && artifacts.length === 0 && <p className="muted">結果がありません。</p>}
         </div>
       )}
       {error && <p className="error">{error}</p>}
@@ -236,7 +255,8 @@ export function RunView({
       )}
       {artifacts.map((a: Artifact) => (
         <div className="card" key={a.id}>
-          <h3>成果物: {a.title}</h3>
+          {/* 題名は、成果物が 2 つ以上あって見分けが要るときだけ出す */}
+          {artifacts.length > 1 && <h3>{a.title}</h3>}
           {/* 書式として読み、改行を保つ。生の文字で出すと「## 決定事項」「**…**」がそのまま見える（2026-09-25 に確認） */}
           <div className="reply"><Markdown text={a.body} lineBreaks /></div>
           {a.fileId && (
