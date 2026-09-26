@@ -128,3 +128,16 @@ test('日付を指定した長い依頼は、「スケジュール」の語が�
   assert.notEqual(reply.layer, 'direct');
   assert.equal(d.lookups.length, 1);
 });
+
+test('段取りを頼む言い回しなら、業務の名前が入っていても 1 つの業務に決めず、段取りを作ってすぐ返す（第10.14節）', async () => {
+  const d = deps();
+  const plans: { request: string }[] = [];
+  const repo = Object.assign(d.repo, { createPlan: async (p: { request: string }) => { plans.push(p); }, listSchedules: async () => [] });
+  const llm = llmWith({ route: 'plan' });
+  const s = new Secretary({ repo, llm, connector: {} as never, agents: [agent('meeting-prep'), agent('knowledge-qa')], startAgent: d.startAgent, startLookup: d.startLookup });
+  const reply = await s.respond('t', 'u1', '次の会議の準備と、出張規程の確認を、それぞれの業務に頼んでまとめて報告して');
+  assert.equal(d.started.length, 0, '語句の一致で「会議の準備」だけに取り次がない');
+  assert.equal(plans.length, 1);
+  assert.match(reply.text, /段取りを組みます/);
+  assert.match(reply.lookup?.runId ?? '', /^plan:/);
+});

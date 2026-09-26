@@ -643,7 +643,9 @@ export class Secretary {
     const candidates = asking ? (lookup ? [lookup] : []) : [...agents, ...(lookup ? [lookup] : [])];
     if (candidates.length === 0) return { reason: asking ? '照会のため、秘書が答えます' : '使える業務がありません', tokensUsed: 0 };
 
-    const byKeyword = asking ? undefined : agents.find(
+    // 段取りを頼む言い回しなら、語句の一致で 1 つの業務に決めずに推論に選ばせる（第10.14節）。
+    // 「次の会議の準備、規程の確認、天気の確認をそれぞれ頼んで」を「会議の準備」だけに取り次がないため
+    const byKeyword = asking || (allowPlan && PLAN_HINT.test(message)) ? undefined : agents.find(
       (a) =>
         message.includes(a.name) ||
         a.category === 'meeting' && /議事録/.test(message) ||
@@ -655,7 +657,8 @@ export class Secretary {
     const list = [
       ...candidates.map((a) => (a.id === LOOKUP_AGENT_ID ? `${a.id}: ${LOOKUP_ROUTE_NOTE}` : `${a.id}: ${a.name} — ${a.description}`)),
       // 段取り（第10.14節）。照会には選ばせない
-      ...(allowPlan && !asking && agents.length > 1 ? [`${PLAN_ROUTE_ID}: ${PLAN_ROUTE_NOTE}`] : []),
+      // 段取りは、取次の候補に無い業務（秘書が自分で答える業務など）も組み合わせるため、候補の数によらず出す
+      ...(allowPlan && !asking ? [`${PLAN_ROUTE_ID}: ${PLAN_ROUTE_NOTE}`] : []),
     ].join('\n');
     const res = await llm.complete({
       tier: 'fast',
@@ -674,7 +677,7 @@ export class Secretary {
         { role: 'user', content: message },
       ],
     });
-    if (allowPlan && !asking && agents.length > 1 && new RegExp(`(^|\\s)${PLAN_ROUTE_ID}(\\s|$)`).test(res.text.trim())) {
+    if (allowPlan && !asking && new RegExp(`(^|\\s)${PLAN_ROUTE_ID}(\\s|$)`).test(res.text.trim())) {
       return { plan: true, reason: '複数の業務を組み合わせる依頼（段取り）', tokensUsed: res.tokensUsed };
     }
     const picked = candidates.find((a) => res.text.includes(a.id));
@@ -747,6 +750,9 @@ const MEMORY_FOR_LOOKUP = 20;
 const PLAN_ROUTE_ID = 'plan';
 const PLAN_ROUTE_NOTE = '段取り — 2 つ以上の業務を組み合わせる依頼や、ある業務の結果を別の業務に使う依頼'
   + '（例: 出張の準備をして、〇〇を調べて資料にまとめて、会議の準備と予定の登録をして）。1 つの業務で済む依頼には選ばない';
+
+/** 段取りを頼む言い回し。これがあれば、語句の一致で 1 つの業務に決めない。 */
+const PLAN_HINT = /段取り|手配|それぞれ|まとめて(報告|伝え|知らせ)/;
 
 /** 段取りの取りやめ。 */
 const PLAN_CANCEL = /やめて|中止|取りやめ|キャンセル/;
