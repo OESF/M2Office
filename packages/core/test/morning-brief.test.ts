@@ -52,8 +52,9 @@ test('朝のブリーフ: 公式の業務で、読むだけの道具だけを使
   assert.doesNotThrow(() => validateDefinition(MORNING_BRIEF, registry));
   for (const name of MORNING_BRIEF.tools) assert.equal(registry.get(name)?.risk, 'read', `${name} は読むだけ`);
   assert.ok(MORNING_BRIEF.tools.includes('web.research') && MORNING_BRIEF.tools.includes('profile.read'));
-  const collect = MORNING_BRIEF.steps[0]!;
-  assert.ok(collect.type === 'agent' && /天気/.test(collect.instruction) && /ニュース/.test(collect.instruction));
+  const [collect, outside] = MORNING_BRIEF.steps;
+  assert.ok(collect?.type === 'agent' && collect.tools?.includes('profile.read') && !collect.tools.includes('web.research'), '本人の情報を読んでから調べる');
+  assert.ok(outside?.type === 'agent' && /天気/.test(outside.instruction) && /ニュース/.test(outside.instruction) && /市区町村の名前だけ/.test(outside.instruction));
   assert.ok(!MORNING_BRIEF.steps.some((s) => s.type === 'approval'), '承認は無い');
   assert.ok(OFFICIAL_AGENTS.find((a) => a.id === 'secretary-lookup')!.tools.includes('profile.read'), '調べものも出発地を読める');
 });
