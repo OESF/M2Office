@@ -13,6 +13,10 @@ import type { AccessSettings } from './access.js';
 export interface CompanyInfo {
   /** 正式な会社名（前株・後株を含む）。 */
   legalName: string;
+  /** 略称（例: OESF。仕様書 第6.6.1節）。秘書が名乗るときの会社の呼び方と、画面の見出しに使う。 */
+  shortName: string;
+  /** 郵便番号（例: 123-4567）。帳票の差出人に「〒」を付けて出す。 */
+  postalCode: string;
   address: string;
   phone: string;
   /** 会計年度の開始月（1〜12）。 */
@@ -25,6 +29,8 @@ export interface CompanyInfo {
   closingDay: number | 'end';
   /** 支払サイト（例: 翌月末払い）。 */
   paymentTerms: string;
+  /** 会社のロゴ（PNG・JPEG のファイル ID。仕様書 第6.6.1節）。画面の左上に出す。無ければ `null`。 */
+  logoFileId: string | null;
 }
 
 /** 自社の書き方（仕様書 第15.2.1節）。すべてのエージェントに同じものを差し込む。 */
@@ -235,8 +241,8 @@ export interface TenantSettings {
 /** 設定が未保存の会社に使う既定値。 */
 export const DEFAULT_TENANT_SETTINGS: TenantSettings = {
   company: {
-    legalName: '', address: '', phone: '', fiscalYearStartMonth: 4,
-    invoiceRegistrationNumber: '', taxRounding: 'floor', closingDay: 'end', paymentTerms: '',
+    legalName: '', shortName: '', postalCode: '', address: '', phone: '', fiscalYearStartMonth: 4,
+    invoiceRegistrationNumber: '', taxRounding: 'floor', closingDay: 'end', paymentTerms: '', logoFileId: null,
   },
   writingStyle: { selfReference: '弊社', greeting: '', closing: '', signature: '', terms: [], notes: '' },
   // 社内への書き込みは既定で承認なし。人に判断を求めるのは社外とお金だけ（第9.4.0節、ADR-0028）

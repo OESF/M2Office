@@ -75,6 +75,29 @@ export function meRoute(deps: AppDeps) {
     });
   });
 
+  /**
+   * 会社のロゴ（仕様書 第6.6.1節）。画面の左上に出す。会社の全員が見られる。
+   *
+   * @remarks PNG・JPEG だけを返す。画面に埋め込むため inline で返すが、スクリプトは動かさない（CSP と nosniff）
+   */
+  app.get('/company-logo', async (c) => {
+    const { tenant } = c.get('ctx');
+    const id = (await deps.repo.getTenantSettings(tenant.id)).company.logoFileId;
+    const meta = id ? await deps.repo.getFile(tenant.id, id) : null;
+    if (!id || !meta || (meta.kind !== 'png' && meta.kind !== 'jpeg')) return c.json({ error: 'ロゴはありません' }, 404);
+    const bytes = await deps.files.get(tenant.id, id);
+    if (!bytes) return c.json({ error: 'ロゴはありません' }, 404);
+    return new Response(Buffer.from(bytes), {
+      headers: {
+        'content-type': meta.kind === 'png' ? 'image/png' : 'image/jpeg',
+        'x-content-type-options': 'nosniff',
+        'content-security-policy': "default-src 'none'; sandbox",
+        // ロゴを替えると URL の v= が変わる
+        'cache-control': 'private, max-age=86400',
+      },
+    });
+  });
+
   app.get('/settings', async (c) => {
     const { tenant, user } = c.get('ctx');
     return c.json(await deps.repo.getUserSettings(tenant.id, user.id));

@@ -268,6 +268,22 @@ export function buildAi(hub?: ExtensionHub) {
  * @remarks 上の帯・ログイン画面・眺める画面で同じ名前を出すため、ここで 1 つに決める
  */
 export async function companyName(deps: Pick<AppDeps, 'repo'>, tenant: { id: string; name: string }): Promise<string> {
-  const legal = (await deps.repo.getTenantSettings(tenant.id).catch(() => null))?.company.legalName?.trim();
-  return legal || tenant.name;
+  return (await companyView(deps, tenant)).name;
+}
+
+/**
+ * 画面に渡す会社の見え方（仕様書 第6.6.1節）: 会社名・略称・ロゴの URL。
+ *
+ * @returns 略称が無ければ会社名、ロゴが無ければ `null`
+ */
+export async function companyView(
+  deps: Pick<AppDeps, 'repo'>, tenant: { id: string; name: string },
+): Promise<{ name: string; shortName: string; logo: string | null }> {
+  const company = (await deps.repo.getTenantSettings(tenant.id).catch(() => null))?.company;
+  const name = company?.legalName?.trim() || tenant.name;
+  return {
+    name,
+    shortName: company?.shortName?.trim() || name,
+    logo: company?.logoFileId ? `/v1/me/company-logo?v=${encodeURIComponent(company.logoFileId)}` : null,
+  };
 }

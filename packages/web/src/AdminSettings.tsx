@@ -73,6 +73,35 @@ function Text({ label, value, onChange, hint, multiline }: {
  * @remarks
  * **1 画面 1 保存**（第6.6.0節）。小分けを `page` で受け取り、1 つだけを出す。
  */
+/**
+ * 会社のロゴ（仕様書 第6.6.1節）。上げるとすぐに保存し、画面の左上に出す（読み込み直すと替わる）。
+ */
+function CompanyLogo({ fileId, onChange }: { fileId: string | null; onChange: (id: string | null) => Promise<void> }) {
+  const saver = useSaver();
+  return (
+    <div className="field">
+      <label>会社のロゴ</label>
+      <input type="file" accept="image/png,image/jpeg"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (!file) return;
+          void saver.run(async () => {
+            const up = await api.uploadFile(file);
+            await onChange(up.id);
+          }, 'ロゴを登録しました。読み込み直すと画面の左上に出ます');
+        }} />
+      <span className="muted small">PNG / JPEG。画面の左上に出ます{fileId ? '（登録済み）' : ''}</span>
+      {fileId && (
+        <div className="row">
+          <img className="company-logo-preview" src={`/v1/me/company-logo?v=${encodeURIComponent(fileId)}`} alt="登録したロゴ" />
+          <button className="btn ghost small" onClick={() => void saver.run(() => onChange(null), 'ロゴを外しました')}>ロゴを外す</button>
+        </div>
+      )}
+      {saver.view}
+    </div>
+  );
+}
+
 export function CompanySettings({ page }: { page: string }) {
   const { data, error, reload } = useSettings();
   const [company, setCompany] = useState<CompanyInfo | null>(null);
@@ -91,7 +120,19 @@ export function CompanySettings({ page }: { page: string }) {
       {page === 'basic' && (
       <div className="card">
         <Text label="正式な会社名" value={company.legalName} onChange={c('legalName')} hint="前株・後株を含めて正確に" />
+        {/* 略称は、秘書が名乗るときの会社の呼び方と画面の見出しに使う（仕様書 第6.6.1節） */}
+        <Text label="略称" value={company.shortName ?? ''} onChange={c('shortName')} hint="例: OESF" />
+        <div className="grid2">
+          <Text label="郵便番号" value={company.postalCode ?? ''} onChange={c('postalCode')} hint="例: 123-4567" />
+          <span />
+        </div>
         <Text label="住所" value={company.address} onChange={c('address')} />
+        <CompanyLogo fileId={company.logoFileId ?? null}
+          onChange={async (logoFileId) => {
+            const next = { ...company, logoFileId };
+            setCompany(next);
+            await api.admin.saveSettings('company', next);
+          }} />
         <Text label="電話番号" value={company.phone} onChange={c('phone')} />
         <div className="grid2">
           <div className="field">

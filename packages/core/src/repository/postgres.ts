@@ -1315,6 +1315,11 @@ export class PostgresRepository implements Repository {
           and not exists (
             select 1 from user_settings s
              where s.tenant_id = f.tenant_id and s.secretary->>'avatar' = 'file:' || f.id)
+          -- 会社のロゴと帳票のロゴに使っている画像も消さない（仕様書 第6.6.1節・第15.2.2節）
+          and not exists (
+            select 1 from tenant_settings t
+             where t.tenant_id = f.tenant_id
+               and (t.company->>'logoFileId' = f.id or t.invoice->>'logoFileId' = f.id))
         returning f.id`,
       [tenantId, before]);
     return rows.map((r) => r.id);

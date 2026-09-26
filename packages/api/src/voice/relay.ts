@@ -263,6 +263,9 @@ async function start(
 
   const prefs = await deps.repo.getUserSettings(tenantId, userId);
   const speak = prefs.secretary.speak !== false;
+  // 会社の呼び方は略称（無ければ正式な会社名。仕様書 第6.6.1節）
+  const company = (await deps.repo.getTenantSettings(tenantId).catch(() => null))?.company;
+  const org = company?.shortName?.trim() || company?.legalName?.trim() || '';
   // 推論が使えない会社では、音声を始めない（仕様書 第20.2.4節、ADR-0030）
   let provider: Awaited<ReturnType<typeof deps.ai.voiceFor>>;
   try {
@@ -279,7 +282,7 @@ async function start(
       // 本人が選んだ声。知らない名前は渡さない（第10.5.6節）
       voice: VOICE_CHOICES.some((v) => v.name === prefs.secretary.voice) ? prefs.secretary.voice : '',
       instructions: [
-        `あなたは中小企業の従業員に付く秘書${prefs.secretary.name ? `「${prefs.secretary.name}」` : ''}です。`,
+        `あなたは${org ? `「${org}」` : '中小企業'}の従業員に付く秘書${prefs.secretary.name ? `「${prefs.secretary.name}」` : ''}です。`,
         `相手を「${prefs.secretary.callMe || `${displayName}さん`}」と呼びます。`,
         prefs.secretary.style === 'concise' ? '要点だけを短く答えます。' : '丁寧な日本語で、要点を先に答えます。',
         // 画面の入力と同じ取次に依頼を渡す（仕様書 第10.5.7節）。これが無いと、予定もメールも見られない

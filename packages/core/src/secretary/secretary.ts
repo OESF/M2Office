@@ -126,6 +126,12 @@ export class Secretary {
     }
   }
 
+  /** 秘書が名乗るときの会社の呼び方（略称、無ければ正式な会社名。仕様書 第6.6.1節）。読めなければ空。 */
+  private async companyCall(tenantId: string): Promise<string> {
+    const company = (await Promise.resolve().then(() => this.deps.repo.getTenantSettings(tenantId)).catch(() => null))?.company;
+    return company?.shortName?.trim() || company?.legalName?.trim() || '';
+  }
+
   /**
    * 依頼に応答する（会話ログに残す前の本体）。
    *
@@ -207,8 +213,10 @@ export class Secretary {
       this.searchKnowledge(tenantId, userId, message),
     ]);
     const s = prefs.secretary;
+    // 会社の呼び方は略称（無ければ正式な会社名）。M2Office はプロダクトの名前で、会社の名前ではない（仕様書 第6.6.1節）
+    const org = await this.companyCall(tenantId);
     const persona = [
-      `あなたは中小企業の従業員に付く秘書${s.name ? `「${s.name}」` : ''}です。`,
+      `あなたは${org ? `「${org}」` : '中小企業'}の従業員に付く秘書${s.name ? `「${s.name}」` : ''}です。`,
       `相手を「${s.callMe || `${user?.displayName ?? ''}さん`}」と呼びます。`,
       s.style === 'concise' ? '要点だけを短く答えます。' : '丁寧な日本語で、要点を先に答えます。',
       'あなたは本人と一心同体の秘書で、本人とのやり取りをずっと覚えています。覚えていることを踏まえて答えます。',

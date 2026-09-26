@@ -184,12 +184,16 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
   // 小分けは状態としても持つが、合図の中から読むために控えておく
   const pageRef = useRef(page);
   useEffect(() => { pageRef.current = page; }, [page]);
+  // ブラウザのタブの名前は、会社の略称とプロダクトの名前（仕様書 第6.6.1節）
+  useEffect(() => { document.title = `${me.tenant.shortName || me.tenant.name} | M2Office 管理`; }, [me.tenant.shortName, me.tenant.name]);
   const isAdmin = me.user.roles.includes('admin');
 
   return (
     <div className="app">
       <header className="topbar">
-        <span className="brand">M2Office 管理</span>
+        {me.tenant.logo
+          ? <><img className="brand-logo" src={me.tenant.logo} alt={me.tenant.shortName ?? me.tenant.name} /><span className="brand">管理</span></>
+          : <span className="brand">M2Office 管理</span>}
         <AppVersionBadge serverVersion={me.serverVersion} />
         <span className="tenant">{me.tenant.name}</span>
         <span className="spacer" />

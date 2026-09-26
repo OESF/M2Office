@@ -22,7 +22,8 @@ export async function loadInvoiceStyle(ctx: ToolContext): Promise<InvoiceStyleIn
   const { company, invoice } = settings;
   const from = [
     company.legalName,
-    company.address,
+    // 郵便番号は住所の前に「〒」を付けて出す（仕様書 第6.6.1節）
+    [company.postalCode ? `〒${company.postalCode}` : '', company.address].filter(Boolean).join(' '),
     company.phone ? `電話 ${company.phone}` : '',
     company.invoiceRegistrationNumber ? `登録番号 ${company.invoiceRegistrationNumber}` : '',
   ].filter(Boolean);

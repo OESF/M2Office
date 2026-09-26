@@ -294,13 +294,20 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   // たたんでいる間に出た結果には、まだ見ていない印を出す（第6.2節）
   const [seen, setSeen] = useState<string | null>(null);
   useEffect(() => { if (talkOpen && result) setSeen(result.id); }, [talkOpen, result]);
+  // ブラウザのタブの名前は、会社の略称とプロダクトの名前（仕様書 第6.6.1節）
+  useEffect(() => {
+    document.title = `${me.tenant.shortName || me.tenant.name} | M2Office`;
+  }, [me.tenant.shortName, me.tenant.name]);
   const unread = notifications.filter((n) => !n.readAt).length;
   const isAdmin = me.user.roles.includes('admin');
 
   return (
     <div className="app">
       <header className="topbar">
-        <span className="brand">M2Office</span>
+        {/* 会社のロゴがあれば、プロダクトの名前の代わりに出す（仕様書 第6.6.1節） */}
+        {me.tenant.logo
+          ? <img className="brand-logo" src={me.tenant.logo} alt={me.tenant.shortName ?? me.tenant.name} />
+          : <span className="brand">M2Office</span>}
         <AppVersionBadge serverVersion={me.serverVersion} />
         <span className="tenant">{me.tenant.name}</span>
         {me.workspaceSource === 'mock' && (

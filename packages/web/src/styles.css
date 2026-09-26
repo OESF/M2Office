@@ -1065,3 +1065,7 @@ code.uri { background: var(--subtle-bg); border: 1px solid var(--line); border-r
 /* 任意の日付（第6.10.4.1節）。チェックボックスの下にカレンダーの欄を出す */
 .field-date { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
 .field-date input[type="date"] { width: auto; }
+
+/* 会社のロゴ（仕様書 第6.6.1節）。上の帯の高さに収める */
+.brand-logo { height: 26px; max-width: 160px; object-fit: contain; display: block; }
+.company-logo-preview { height: 40px; max-width: 200px; object-fit: contain; border: 1px solid var(--line); border-radius: 4px; padding: 4px; background: #fff; }
