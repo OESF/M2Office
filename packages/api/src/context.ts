@@ -149,7 +149,7 @@ export function buildDeps(): AppDeps {
       return f && f.ownerUserId === userId ? f.name : null;
     },
     // 時間のかかる依頼を、読むだけの業務として後ろへ回す（仕様書 第10.11.4節）
-    startLookup: async (tenantId, userId, request, fileId) => {
+    startLookup: async (tenantId, userId, request, fileId, context) => {
       const view = await tenantView(tenantId);
       const def = view.resolve(LOOKUP_AGENT_ID, 1);
       if (!def || !view.isAvailable(LOOKUP_AGENT_ID)) return null;
@@ -158,8 +158,21 @@ export function buildDeps(): AppDeps {
       if (same) return { runId: same, already: true };
       const { runId } = await enqueueJob(repo, {
         tenantId, requestedBy: userId, def,
-        input: { request, ...(fileId ? { fileId } : {}) },
+        input: { request, ...(fileId ? { fileId } : {}), ...(context ? { context } : {}) },
         origin: 'secretary', actor: { type: 'user', id: userId },
+      });
+      return { runId, already: false };
+    },
+    // 業務に頼んで実行する（仕様書 第10.9.6節、ADR-0033）。本人として起こし、承認ゲートはそのまま効く
+    startAgent: async (tenantId, userId, agent, input) => {
+      const view = await tenantView(tenantId);
+      const def = view.resolve(agent.id, agent.version);
+      if (!def || !view.isAvailable(agent.id)) return null;
+      const request = typeof input['request'] === 'string' ? input['request'] : null;
+      const same = request ? await repo.findActiveJobByInput(tenantId, userId, agent.id, 'request', request) : null;
+      if (same) return { runId: same, already: true };
+      const { runId } = await enqueueJob(repo, {
+        tenantId, requestedBy: userId, def, input, origin: 'secretary', actor: { type: 'user', id: userId },
       });
       return { runId, already: false };
     },

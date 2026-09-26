@@ -11,6 +11,7 @@ import { AG03_SCHEDULING } from './ag-03-scheduling.js';
 import { AG04_KNOWLEDGE_QA } from './ag-04-knowledge-qa.js';
 import { AG05_WEEKLY_BRIEF } from './ag-05-weekly-brief.js';
 import { AG16_LOOKUP } from './ag-16-lookup.js';
+import { SECRETARY_CALENDAR } from './secretary-calendar.js';
 
 /**
  * 公式エージェントのカタログ。
@@ -21,7 +22,7 @@ import { AG16_LOOKUP } from './ag-16-lookup.js';
  * 並びは画面のメニューの既定順であり、実装の順序（第9.5.7節）ではない。
  */
 export const OFFICIAL_AGENTS: AgentDefinition[] = [
-  AG04_KNOWLEDGE_QA, AG02_MINUTES, AG01_INBOX, AG03_SCHEDULING, AG05_WEEKLY_BRIEF, AG16_LOOKUP,
+  AG04_KNOWLEDGE_QA, AG02_MINUTES, AG01_INBOX, AG03_SCHEDULING, AG05_WEEKLY_BRIEF, AG16_LOOKUP, SECRETARY_CALENDAR,
 ];
 
 /**
@@ -64,7 +65,7 @@ export function resolveOfficialAgent(
   return OFFICIAL_AGENTS.find((a) => a.id === agentId && a.version === version);
 }
 
-export { AG01_INBOX, AG02_MINUTES, AG03_SCHEDULING, AG04_KNOWLEDGE_QA, AG05_WEEKLY_BRIEF, AG16_LOOKUP };
+export { AG01_INBOX, AG02_MINUTES, AG03_SCHEDULING, AG04_KNOWLEDGE_QA, AG05_WEEKLY_BRIEF, AG16_LOOKUP, SECRETARY_CALENDAR };
 
 /**
  * 公式エージェントの標準所要時間（分）の既定値。手作業なら 1 件に何分かかるか。
@@ -78,6 +79,7 @@ export const DEFAULT_STANDARD_MINUTES: Record<string, number> = {
   minutes: 30,
   scheduling: 15,
   'knowledge-qa': 10,
+  'calendar-register': 5,
   'weekly-brief': 20,
 };
 

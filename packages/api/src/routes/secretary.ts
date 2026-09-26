@@ -44,7 +44,7 @@ export function secretaryRoute(deps: AppDeps) {
    */
   app.get('/lookups', async (c) => {
     const ctx = c.get('ctx');
-    const items = await listLookups(deps.repo, ctx.tenant.id, ctx.user.id);
+    const items = await listLookups(deps.repo, ctx.tenant.id, ctx.user.id, await agentNames(deps, ctx.tenant.id));
     return c.json({ items });
   });
 
@@ -58,9 +58,15 @@ export function secretaryRoute(deps: AppDeps) {
    */
   app.post('/lookups/claim', async (c) => {
     const ctx = c.get('ctx');
-    const items = await claimUntold(deps.repo, ctx.tenant.id, ctx.user.id);
+    const items = await claimUntold(deps.repo, ctx.tenant.id, ctx.user.id, new Date(), await agentNames(deps, ctx.tenant.id));
     return c.json({ items });
   });
 
   return app;
+}
+
+/** その会社の業務の名前を引く（拡張機能の業務を含む）。秘書が頼んだ業務の結果を伝えるときに名前を添える。 */
+async function agentNames(deps: AppDeps, tenantId: string): Promise<(agentId: string) => string | undefined> {
+  const view = await deps.tenantView(tenantId);
+  return (agentId) => view.agents.find((a) => a.id === agentId)?.name;
 }

@@ -76,8 +76,8 @@ console.log('\n■ 1. 疎通と一覧');
   const { body } = await call('a', '/v1/agents');
   // 拡張機能を導入している場合はその分が増えるため、公式の業務エージェントだけを数える
   const official = (body.agents ?? []).filter((a) => !a.extension);
-  official.length === 6
-    ? ok(`公式の業務エージェントが 6 件（${official.map((a) => a.name).join(' / ')}）`)
+  official.length === 7
+    ? ok(`公式の業務エージェントが 7 件（${official.map((a) => a.name).join(' / ')}）`)
     : ng('エージェントの一覧が取得できない', JSON.stringify(body));
 }
 
@@ -272,9 +272,16 @@ console.log('\n■ 8. ダミー接続による照会（Google 未接続）');
   const { body: routed } = await call('a', '/v1/secretary', {
     method: 'POST', body: JSON.stringify({ message: 'メールの返信を下書きして' }),
   });
-  routed.suggestedAgent?.id === 'inbox-triage'
-    ? ok('作業の依頼は照会と取り違えず、受信箱整理へ取り次いだ')
-    : ng('依頼を照会として処理してしまう', JSON.stringify(routed).slice(0, 160));
+  // 専門の業務は、本人に実行の可否を聞かずに頼んで実行し、結果をあとで伝える（第10.9.6節、ADR-0033）
+  routed.lookup?.runId && /「受信箱整理・返信起案」に頼みました/.test(routed.text) && !routed.suggestedAgent
+    ? ok('作業の依頼は照会と取り違えず、受信箱整理に頼んで実行した（実行してよいかを聞かない）')
+    : ng('依頼を照会として処理してしまう、または実行してよいかを聞く', JSON.stringify(routed).slice(0, 160));
+  const delegated = routed.lookup?.runId ? await waitFor('a', routed.lookup.runId, ['completed', 'failed', 'awaiting_approval'], 20000) : null;
+  const { body: bar } = await call('a', '/v1/secretary/lookups');
+  const item = (bar.items ?? []).find((x) => x.runId === routed.lookup?.runId);
+  item?.agentName === '受信箱整理・返信起案' && delegated?.run?.status === 'completed' && item.done
+    ? ok('頼んだ業務は秘書バーの一覧に名前つきで並び、終わると伝える対象になる')
+    : ng('頼んだ業務が秘書バーに並ばない', JSON.stringify(item));
 }
 
 console.log('\n■ 9. AG-01 受信箱整理（承認なし・送信しない）');
@@ -2254,8 +2261,8 @@ console.log('\n■ 44. 秘書にファイルを渡す（第10.10節）');
   const routed = await call('a', '/v1/secretary', {
     method: 'POST', body: JSON.stringify({ message: 'この記録から議事録を作って', fileId }),
   }, 'member');
-  routed.body.suggestedAgent?.id === 'minutes' && !routed.body.lookup
-    ? ok('承認が要る業務は、取次を提案して本人が決める') : ng('勝手に始める、または取り次がない', JSON.stringify(routed.body));
+  routed.body.suggestedAgent?.id === 'minutes' && !routed.body.lookup && /会議名が要ります/.test(routed.body.text)
+    ? ok('必須の入力（会議名）が埋められなければ、それを聞いて業務を開くボタンを添える（始めない）') : ng('足りない入力を聞かない、または取り次がない', JSON.stringify(routed.body));
 
   // ファイルを受け取れる業務へ渡すと、その実行のものになる（4 週の入れ替えで消さない）
   const { body: job } = await call('a', '/v1/jobs', {

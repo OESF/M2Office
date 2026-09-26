@@ -106,7 +106,7 @@ export {
   OFFICIAL_AGENTS, LOOKUP_AGENT_ID, resolveOfficialAgent, DEFAULT_STANDARD_MINUTES, standardMinutes, stepLabel,
   agentFace,
 } from './agents/index.js';
-export { Secretary, acceptsFile } from './secretary/secretary.js';
+export { Secretary, acceptsFile, fillInputs } from './secretary/secretary.js';
 export type { SecretaryReply, ResponseLayer } from './secretary/secretary.js';
 export { REFERS_TO_PAST, closeness, recall, type Recall } from './secretary/recall.js';
 export { LIST_MIN, SPOKEN_MAX, needsCanvas } from './secretary/canvas.js';

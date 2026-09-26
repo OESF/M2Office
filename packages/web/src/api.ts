@@ -390,7 +390,11 @@ export interface RunDetail {
 export interface Lookup {
   runId: string;
   request: string;
+  /** 秘書が頼んだ業務の名前。調べものなら `null`（仕様書 第10.9.6節）。 */
+  agentName: string | null;
   status: string;
+  /** 終わったか（完了・失敗・中止・期限切れ）。 */
+  done: boolean;
   /** 何をしているか。終わっていれば `null`。見込みの時間は出さない（第10.11.5節）。 */
   progress: string | null;
   /** 答え。終わるまでは `null`。 */

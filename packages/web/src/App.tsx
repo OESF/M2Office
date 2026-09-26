@@ -190,14 +190,14 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
       // 伝えたことはサーバーが記録するため、画面を開き直しても二度は出ない。
       // 会話していない間に終わったものも、ここで持ち越して伝わる
       // 音声で話している間は受け取らない。中継が声で伝え、大きければ秘書のキャンバスに出す（第6.2.0節）
-      if (!voiceOn.current && l.items.some((x) => !x.told && (x.status === 'completed' || x.status === 'failed'))) {
+      if (!voiceOn.current && l.items.some((x) => !x.told && x.done)) {
         for (const x of (await api.claimLookups()).items) {
           // 秘書が自分で調べたものとして、秘書のキャンバスに出す（第6.2.0・10.11.7節）
           show({
             request: x.request,
             text: x.status === 'completed'
-              ? (x.text || 'お調べしましたが、お伝えできる内容がありませんでした。')
-              : `お調べできませんでした。${x.failureReason ?? ''}`,
+              ? (x.text || (x.agentName ? `「${x.agentName}」が終わりました。` : 'お調べしましたが、お伝えできる内容がありませんでした。'))
+              : `${x.agentName ? `「${x.agentName}」で` : 'お調べ'}できませんでした。${x.failureReason ?? ''}`,
           });
         }
       }
@@ -725,7 +725,7 @@ function SecretaryBar({ lookups, avatar, onResult, onVoice }: {
   }
 
   // 終わったものは出さない。終わったことは秘書が応答として伝える（第10.11.7節）
-  const running = lookups.filter((x) => x.status !== 'completed' && x.status !== 'failed');
+  const running = lookups.filter((x) => !x.done);
 
   // 入力に合わせて高さを伸ばす。上限を超えたら中で送る（仕様書 第6.1.3節）
   const fitBox = useCallback(() => {
