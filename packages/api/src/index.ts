@@ -22,6 +22,7 @@ import { jobsRoute } from './routes/jobs.js';
 import { runsRoute } from './routes/runs.js';
 import { approvalsRoute } from './routes/approvals.js';
 import { secretaryRoute } from './routes/secretary.js';
+import { ensureMorningBrief } from './secretary/morning.js';
 import { authRoute } from './routes/auth.js';
 import { notificationsRoute } from './routes/notifications.js';
 import { schedulesRoute } from './routes/schedules.js';
@@ -92,6 +93,8 @@ app.get('/v1/me', async (c) => {
   const auth = c.get('auth');
   // 本人のアバター（第6.5.1.1節）。取り込み直すと URL が変わり、画面が新しい写真を読む
   const photo = await deps.repo.getUserPhoto(ctx.tenant.id, ctx.user.id);
+  // 朝のブリーフの定時実行を、まだなら秘書が用意する（仕様書 第9.5.5.1節）。応答は待たせない
+  void ensureMorningBrief(deps, ctx.tenant.id, ctx.user.id).catch((err) => deps.log.warn('朝のブリーフを用意できませんでした', { err }));
   return c.json({
     // 画面に出す会社名は、会社情報の正式な会社名（仕様書 第6.6.1節）。入っていなければ申し込みのときの名前
     tenant: { ...ctx.tenant, ...(await companyView(deps, ctx.tenant)) },

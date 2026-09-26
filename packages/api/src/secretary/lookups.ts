@@ -8,7 +8,7 @@
  * @see 仕様書 第10.11.7節 終わったことを伝える
  */
 
-import { LOOKUP_AGENT_ID, OFFICIAL_AGENTS } from '@m2office/core';
+import { LOOKUP_AGENT_ID, MORNING_BRIEF, OFFICIAL_AGENTS } from '@m2office/core';
 import type { Repository } from '@m2office/core';
 import { randomUUID } from 'node:crypto';
 
@@ -18,6 +18,8 @@ export interface LookupView {
   request: string;
   /** 秘書が頼んだ業務の名前。調べものなら `null`（利用者から見れば秘書が自分で調べたもの。第10.11.7節）。 */
   agentName: string | null;
+  /** 業務の ID。 */
+  agentId: string;
   status: string;
   /** 終わったか（完了・失敗・中止・期限切れ）。 */
   done: boolean;
@@ -55,7 +57,8 @@ export async function listLookups(
 ): Promise<LookupView[]> {
   // 秘書が起こしたもの（調べもの・頼んだ業務）と、本人がメニューから起こした調べもの
   const rows = (await repo.listRunsWithJobs(tenantId, { limit: LIMIT, requestedBy: userId }))
-    .filter(({ job }) => job.origin === 'secretary' || job.agentId === LOOKUP_AGENT_ID);
+    // 朝のブリーフは定時実行で起きるが、秘書の答えとして届ける（第9.5.5.1節）
+    .filter(({ job }) => job.origin === 'secretary' || job.agentId === LOOKUP_AGENT_ID || job.agentId === MORNING_BRIEF.id);
   const told = new Set(await repo.listToldLookups(tenantId, rows.map(({ run }) => run.id)));
   const out: LookupView[] = [];
   for (const { run, job } of rows) {
@@ -66,8 +69,9 @@ export async function listLookups(
     const firstText = Object.values(job.input).find((v): v is string => typeof v === 'string' && v.trim() !== '');
     out.push({
       runId: run.id,
-      request: String(job.input['request'] ?? firstText ?? name ?? ''),
+      request: job.agentId === MORNING_BRIEF.id ? '今朝のブリーフ' : String(job.input['request'] ?? firstText ?? name ?? ''),
       agentName: name,
+      agentId: job.agentId,
       status: run.status,
       done,
       progress: done ? null : run.status === 'awaiting_approval' ? '承認を待っています' : isLookup ? progressOf(steps) : `「${name}」を進めています`,
@@ -79,6 +83,9 @@ export async function listLookups(
   }
   return out;
 }
+
+/** 日本時間の日付（`YYYY-MM-DD`）。 */
+const jstDay = (iso: string) => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo' }).format(new Date(iso));
 
 /** 終わった状態。 */
 const DONE = new Set(['completed', 'failed', 'cancelled', 'expired']);
@@ -124,7 +131,9 @@ export async function claimUntold(
     if (!x.done) continue;
     if (x.told) continue;
     // 日が経ちすぎたものは伝えない。ただし記録は取り、以降も蒸し返さない
-    const fresh = x.endedAt !== null && Date.parse(x.endedAt) >= limit;
+    // 朝のブリーフは、その日のうちだけ伝える（前の日の予定や天気を言い出さない。第9.5.5.1節）
+    const fresh = x.endedAt !== null && Date.parse(x.endedAt) >= limit
+      && (x.agentId !== MORNING_BRIEF.id || jstDay(x.endedAt) === jstDay(now.toISOString()));
     const claimed = await repo.claimLookupDelivery(tenantId, x.runId);
     if (claimed && fresh) {
       out.push(x);

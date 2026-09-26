@@ -104,7 +104,7 @@ export {
 
 export {
   OFFICIAL_AGENTS, LOOKUP_AGENT_ID, resolveOfficialAgent, DEFAULT_STANDARD_MINUTES, standardMinutes, stepLabel,
-  agentFace,
+  agentFace, MORNING_BRIEF,
 } from './agents/index.js';
 export { Secretary, acceptsFile, fillInputs } from './secretary/secretary.js';
 export type { SecretaryReply, ResponseLayer } from './secretary/secretary.js';

@@ -427,7 +427,10 @@ function validate(
       } catch {
         return { error: `タイムゾーンが正しくありません: ${timezone}` };
       }
-      return { section, value: { furigana: str(o['furigana'], 100), title: str(o['title'], 100), timezone } };
+      return {
+        section,
+        value: { furigana: str(o['furigana'], 100), title: str(o['title'], 100), timezone, home: str(o['home'], 200), workplace: str(o['workplace'], 200) },
+      };
     }
     case 'secretary': {
       const style = o['style'] === 'concise' ? 'concise' : 'polite';

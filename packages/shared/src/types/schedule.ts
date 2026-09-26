@@ -10,11 +10,13 @@
  * 定時実行の規則。
  *
  * @remarks
- * 利用者が画面で選べる粒度にとどめる（毎日／毎週）。
+ * 利用者が画面で選べる粒度にとどめる（毎日／毎平日／毎週）。
  * cron 式は利用者に見せない（原則 u1）。月次は Phase 2 で追加する。
+ * 毎平日（月〜金）は朝のブリーフのために足した（仕様書 第9.5.5.1節）。祝日は考えない。
  */
 export type ScheduleRule =
   | { kind: 'daily'; hour: number; minute: number }
+  | { kind: 'weekdays'; hour: number; minute: number }
   | { kind: 'weekly'; weekday: number; hour: number; minute: number };
 
 export interface Schedule {

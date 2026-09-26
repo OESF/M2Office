@@ -372,7 +372,9 @@ export class Secretary {
     const context = await this.todayContext(tenantId, userId);
     const suggested = { id: agent.id, version: agent.version, name: agent.name };
     if (agent.id === LOOKUP_AGENT_ID) {
-      const started = await this.deps.startLookup!(tenantId, userId, message, fileId, context);
+      // 覚えている本人の好み（「新幹線は窓側」など）も渡す（第10.9.6節）
+      const liked = await this.memoryContext(tenantId, userId);
+      const started = await this.deps.startLookup!(tenantId, userId, message, fileId, [context, liked].filter(Boolean).join('\n\n'));
       if (!started) return { reply: { layer: 'direct', text: 'いまお調べできません。しばらくしてからお試しください。', evidence: [], tokensUsed: 0 }, keep: true };
       await this.audit(tenantId, userId, 'secretary.lookup', started.runId);
       return {
@@ -413,6 +415,13 @@ export class Secretary {
       },
       keep: true,
     };
+  }
+
+  /** 覚えている本人の事実（新しいものから）。調べものに渡し、好みに合わせて組ませる。何も無ければ空。 */
+  private async memoryContext(tenantId: string, userId: string): Promise<string> {
+    const rows = await Promise.resolve().then(() => this.deps.repo.listMemories(tenantId, userId)).catch(() => []);
+    const recent = [...rows].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, MEMORY_FOR_LOOKUP);
+    return recent.length ? ['覚えている本人のこと:', ...recent.map((m) => `- ${m.text.slice(0, 200)}`)].join('\n') : '';
   }
 
   /**
@@ -587,6 +596,9 @@ const KNOWLEDGE_HITS = 5;
 /** 業務に渡す今日の会話の件数と、1 件の字数。直前の答え（行程の表など）が切れない長さにする。 */
 const CONTEXT_TURNS = 4;
 const CONTEXT_CHARS = 2000;
+
+/** 調べものに渡す、覚えている本人の事実の件数。 */
+const MEMORY_FOR_LOOKUP = 20;
 
 /** 取次の判定で、秘書の調べものを表す説明（第10.9.6節）。 */
 const LOOKUP_ROUTE_NOTE = '調べもの — 時刻表・乗り換え・道順・出張や外出の行程・天気・ニュース・価格・営業時間など外の最新の情報が要る依頼、'

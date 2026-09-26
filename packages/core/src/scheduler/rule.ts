@@ -9,7 +9,7 @@ import type { ScheduleRule } from '@m2office/shared';
 /**
  * 定時実行の次回時刻を求める。
  *
- * @param rule 毎日／毎週の規則
+ * @param rule 毎日／毎平日／毎週の規則
  * @param timezone 規則を解釈する基準（例: `Asia/Tokyo`）
  * @param after この時刻より後で最も近い回を探す
  * @returns 次回の実行時刻（ISO 形式、UTC）
@@ -25,6 +25,7 @@ export function nextRunAt(rule: ScheduleRule, timezone: string, after: Date): st
   for (let d = 0; d <= 8; d++) {
     const day = localDate(new Date(after.getTime() + d * 86_400_000), timezone);
     if (rule.kind === 'weekly' && day.weekday !== rule.weekday) continue;
+    if (rule.kind === 'weekdays' && (day.weekday === 0 || day.weekday === 6)) continue;
     const at = wallTimeToUtc(day.y, day.m, day.d, rule.hour, rule.minute, timezone);
     if (at.getTime() > after.getTime()) return at.toISOString();
   }
@@ -47,8 +48,8 @@ export function validateRule(rule: ScheduleRule): void {
   if (rule.kind === 'weekly' && (!Number.isInteger(rule.weekday) || rule.weekday < 0 || rule.weekday > 6)) {
     throw new RangeError('曜日は 0（日）〜6（土）で指定してください');
   }
-  if (rule.kind !== 'daily' && rule.kind !== 'weekly') {
-    throw new RangeError('規則は daily か weekly で指定してください');
+  if (rule.kind !== 'daily' && rule.kind !== 'weekdays' && rule.kind !== 'weekly') {
+    throw new RangeError('規則は daily・weekdays・weekly のどれかで指定してください');
   }
 }
 
@@ -56,6 +57,7 @@ export function validateRule(rule: ScheduleRule): void {
 export function describeRule(rule: ScheduleRule): string {
   const time = `${rule.hour}:${String(rule.minute).padStart(2, '0')}`;
   if (rule.kind === 'daily') return `毎日 ${time}`;
+  if (rule.kind === 'weekdays') return `毎平日（月〜金） ${time}`;
   return `毎週${'日月火水木金土'[rule.weekday]}曜 ${time}`;
 }
 

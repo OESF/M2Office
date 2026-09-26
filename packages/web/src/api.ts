@@ -392,6 +392,8 @@ export interface Lookup {
   request: string;
   /** 秘書が頼んだ業務の名前。調べものなら `null`（仕様書 第10.9.6節）。 */
   agentName: string | null;
+  /** 業務の ID（朝のブリーフは `morning-brief`）。 */
+  agentId: string;
   status: string;
   /** 終わったか（完了・失敗・中止・期限切れ）。 */
   done: boolean;

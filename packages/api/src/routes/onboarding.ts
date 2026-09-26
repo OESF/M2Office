@@ -27,7 +27,9 @@ export function onboardingRoute(deps: AppDeps) {
     const { tenant, user } = c.get('ctx');
     const body = await c.req.json<{ reset?: boolean }>().catch(() => ({ reset: false }));
     const tourCompletedAt = body.reset ? null : new Date().toISOString();
-    await deps.repo.saveUserSettings(tenant.id, user.id, 'onboarding', { tourCompletedAt });
+    // ほかの記録（朝のブリーフを用意したことなど）を消さない
+    const current = (await deps.repo.getUserSettings(tenant.id, user.id)).onboarding;
+    await deps.repo.saveUserSettings(tenant.id, user.id, 'onboarding', { ...current, tourCompletedAt });
     return c.json({ completedAt: tourCompletedAt });
   });
 

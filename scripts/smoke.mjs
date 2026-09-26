@@ -76,8 +76,8 @@ console.log('\n■ 1. 疎通と一覧');
   const { body } = await call('a', '/v1/agents');
   // 拡張機能を導入している場合はその分が増えるため、公式の業務エージェントだけを数える
   const official = (body.agents ?? []).filter((a) => !a.extension);
-  official.length === 7
-    ? ok(`公式の業務エージェントが 7 件（${official.map((a) => a.name).join(' / ')}）`)
+  official.length === 8
+    ? ok(`公式の業務エージェントが 8 件（${official.map((a) => a.name).join(' / ')}）`)
     : ng('エージェントの一覧が取得できない', JSON.stringify(body));
 }
 

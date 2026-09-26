@@ -121,6 +121,13 @@ export function Settings({ me, agents, onChanged, section }: {
           <div className="field"><label>タイムゾーン</label>
             <input value={s.profile.timezone} onChange={(e) => set('profile', { timezone: e.target.value })} /></div>
         </div>
+        {/* 行程の出発地と朝のブリーフの天気に使う。本人の秘書だけが使い、管理者には見せない（仕様書 第6.5.1節） */}
+        <div className="grid2">
+          <div className="field"><label>自宅</label>
+            <input value={s.profile.home} placeholder="例: 横浜市港北区・日吉駅" onChange={(e) => set('profile', { home: e.target.value })} /></div>
+          <div className="field"><label>いつもの勤務地</label>
+            <input value={s.profile.workplace} placeholder="空なら会社の住所" onChange={(e) => set('profile', { workplace: e.target.value })} /></div>
+        </div>
         <div className="field"><label>メールアドレス</label>
           <input value={me.user.email} disabled /><span className="muted small">Google 側で管理しているため変更できません</span></div>
         <SaveButton run={async () => {

@@ -262,6 +262,7 @@ AG-02 議事録作成・共有は、承認②のあとに `knowledge.register` �
 
 画面内のお知らせが正で、Chat はその控えです（仕様書 第6.5.5.2節、ADR-0011）。メールは送りません（Q-86）。
 
+- 朝のブリーフ（`agents/morning-brief.ts`）は通知を作らず、秘書の答えとして届けます（仕様書 第9.5.5.1節）。本人の自宅・勤務地は道具 `profile.read`（`tools/profile.ts`）で読みます
 - 通知を作るのは実行エンジン（承認依頼・完了・失敗）と `notification.send`（週次ブリーフ）です。本人が受け取らないと決めた種類は作りません
 - 控えを届けるのは `NotificationDelivery.sweep()` で、ワーカーが一定の間隔で呼びます。送るのは種類・題名・画面へのリンクだけです
 - 送信口は `NotificationSender`。いまは `MockNotificationSender`（送ったことにして控える）で、会社の Chat アプリ（B-2）の後に差し替えます

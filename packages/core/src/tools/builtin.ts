@@ -13,6 +13,7 @@ import { WORKSPACE_TOOLS } from './workspace.js';
 import { FILE_TOOLS } from './files.js';
 import { RESEARCH_TOOLS } from './research.js';
 import { GOOGLE_TOOLS } from './google.js';
+import { PROFILE_TOOLS } from './profile.js';
 import { rewriteNote } from '../knowledge/search.js';
 import { approvedArtifact, jstDate } from './approved-artifact.js';
 
@@ -171,4 +172,5 @@ export const BUILTIN_TOOLS: Tool[] = [
   ...FILE_TOOLS,
   ...RESEARCH_TOOLS,
   ...GOOGLE_TOOLS,
+  ...PROFILE_TOOLS,
 ];

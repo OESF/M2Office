@@ -292,6 +292,14 @@ export interface UserSettings {
     title: string;
     /** 予定と定時実行の基準（第6.5.1節）。 */
     timezone: string;
+    /**
+     * 自宅（地域か最寄り駅。第6.5.1節）。行程の出発地と、朝のブリーフの天気の地域に使う。
+     *
+     * @remarks 本人の秘書と、本人の依頼で動く業務（`profile.read` を宣言したもの）だけが使う。管理者には見せない
+     */
+    home: string;
+    /** いつもの勤務地（第6.5.1節）。空なら会社情報の住所。 */
+    workplace: string;
   };
   secretary: {
     /** 秘書の名前。呼びかけに使う。 */
@@ -349,11 +357,15 @@ export interface UserSettings {
     order: string[];
   };
   /** 初回の案内を見終えた（または飛ばした）日時。`null` なら次のログインで案内する（第6.10.3節）。 */
-  onboarding: { tourCompletedAt: string | null };
+  onboarding: {
+    tourCompletedAt: string | null;
+    /** 朝のブリーフの定時実行を秘書が用意した時刻（第9.5.5.1節）。一度用意したら、止めたり消したりしても作り直さない。 */
+    morningBriefAt?: string | null;
+  };
 }
 
 export const DEFAULT_USER_SETTINGS: UserSettings = {
-  profile: { furigana: '', title: '', timezone: 'Asia/Tokyo' },
+  profile: { furigana: '', title: '', timezone: 'Asia/Tokyo', home: '', workplace: '' },
   secretary: { name: '', callMe: '', style: 'polite', proactivity: 'normal', speak: true, voice: '', voiceStyle: '', avatar: '' },
   notifications: {
     kinds: { brief: true, run: true, approval: true, failure: true },
@@ -362,7 +374,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   },
   memory: { learning: true, excludes: [], keepConversations: true },
   menu: { hidden: [], order: [] },
-  onboarding: { tourCompletedAt: null },
+  onboarding: { tourCompletedAt: null, morningBriefAt: null },
 };
 
 /**

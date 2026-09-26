@@ -120,7 +120,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/auth/exchange` | 引換券を、このホストでのログイン状態に換える。券は 1 回限り・2 分 |
 | `GET /v1/oauth/google/login-callback` | Google からの戻り。**運営のホストで受ける**。テナントの判定とログインより前 |
 | `POST /v1/auth/logout` | ログアウト |
-| `GET /v1/me` | テナント・利用者・CSRF トークン・接続の状態・本人のアバターの URL（`photo`。無ければ `null`）・サーバーの版（`serverVersion`。画面の版との食い違いの判定に使う。仕様書 第6.1.1.1節） |
+| `GET /v1/me` | テナント・利用者・CSRF トークン・接続の状態・本人のアバターの URL（`photo`。無ければ `null`）・サーバーの版（`serverVersion`。画面の版との食い違いの判定に使う。仕様書 第6.1.1.1節）。呼ばれたとき、まだなら朝のブリーフの定時実行（平日 7:30）を秘書が用意する（`secretary/morning.ts`。第9.5.5.1節） |
 | `GET /v1/me/photo` | 本人のアバター（Google のプロフィール写真）。**本人の写真だけ**を返し、利用者の ID は受け取らない。`nosniff` と読み込みを禁じる CSP を付ける（仕様書 第6.5.1.1節） |
 | `GET /v1/agents` | 利用できるエージェントと入力スキーマ |
 | `POST /v1/jobs` | ジョブを作成し待ち行列へ入れる。実行はワーカーが担う |

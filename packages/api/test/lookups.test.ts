@@ -132,3 +132,26 @@ test('秘書が頼んだ業務も並べ、名前・承認待ち・成果物の�
   assert.match(logged[0]!.message, /「スライド作成」に頼んだ結果/);
   assert.equal(logged[0]!.runId, 's1');
 });
+
+test('朝のブリーフは、その日のうちだけ伝える（前の日のものは言い出さない）', async () => {
+  const rows = [
+    { run: { id: 'b1', status: 'completed', endedAt: '2026-09-22T22:40:00.000Z', failureReason: null }, job: { agentId: 'morning-brief', origin: 'schedule', input: {} } },
+    { run: { id: 'b2', status: 'completed', endedAt: '2026-09-23T00:10:00.000Z', failureReason: null }, job: { agentId: 'morning-brief', origin: 'schedule', input: {} } },
+  ];
+  const told = new Set<string>();
+  const repo = {
+    listRunsWithJobs: async () => rows,
+    listRunSteps: async () => [{ stepId: 'write', status: 'succeeded', output: { text: 'おはようございます' } }],
+    listArtifacts: async () => [],
+    listToldLookups: async () => [...told],
+    claimLookupDelivery: async (_t: string, runId: string) => { told.add(runId); return true; },
+  } as unknown as Repository;
+  // NOW は 2026-09-23 21:00（日本時間）。b1 は 09-23 7:40、b2 は 09-23 9:10（どちらも日本時間）
+  const claimed = await claimUntold(repo, 't', 'u', new Date('2026-09-23T12:00:00.000Z'));
+  assert.deepEqual(claimed.map((x) => [x.runId, x.request]), [['b1', '今朝のブリーフ'], ['b2', '今朝のブリーフ']]);
+  const next = await claimUntold(repo, 't', 'u', new Date('2026-09-24T01:00:00.000Z'));
+  assert.deepEqual(next, []);
+  told.clear();
+  const late = await claimUntold(repo, 't', 'u', new Date('2026-09-24T01:00:00.000Z'));
+  assert.deepEqual(late, [], '翌日には伝えない');
+});
