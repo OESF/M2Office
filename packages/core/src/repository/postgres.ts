@@ -13,7 +13,7 @@ import type {
   StoredFile, Tenant, TenantSettings, User, UserGroup, UserSettings,
 } from '@m2office/shared';
 import { DEFAULT_TENANT_SETTINGS, DEFAULT_USER_SETTINGS, STANDARD_SYNONYMS } from '@m2office/shared';
-import type { CompartmentAssignment, Conversation, ConversationDigest, MemoryCandidate, Promotion, CredentialKind, GoogleConnection, UserPhoto, TenantCredential, TenantConnection, DisabledConnectorTool, InstalledExtension, PrivateExtension, KnowledgeItem, KnowledgeSearchResult, KnowledgeSectionView, Memory, Repository, RunStatRow } from './types.js';
+import type { AgentEvent, CompartmentAssignment, Conversation, ConversationDigest, MemoryCandidate, Promotion, CredentialKind, GoogleConnection, UserPhoto, TenantCredential, TenantConnection, DisabledConnectorTool, InstalledExtension, PrivateExtension, KnowledgeItem, KnowledgeSearchResult, KnowledgeSectionView, Memory, Repository, RunStatRow } from './types.js';
 import { SPLIT_VERSION, citationOf, splitKnowledge } from '../knowledge/sections.js';
 import { SEARCH_CANDIDATES, bigrams, expandTerms, extractTerms, normalizeForSearch, rankSections, rewritesOf } from '../knowledge/search.js';
 
@@ -922,6 +922,47 @@ export class PostgresRepository implements Repository {
         where tenant_id = $1 and user_id = $2 and created_at >= $3 and created_at < $4
         order by created_at`,
       [tenantId, userId, day.from, day.to]);
+  }
+
+  async getConversation(tenantId: string, id: string): Promise<Conversation | null> {
+    const rows = await this.q<Conversation>(tenantId,
+      `select id, tenant_id as "tenantId", user_id as "userId", message, reply, layer,
+              agent_id as "agentId", run_id as "runId", created_at as "createdAt"
+         from conversations where tenant_id = $1 and id = $2`,
+      [tenantId, id]);
+    return rows[0] ?? null;
+  }
+
+  async claimAgentEvent(): Promise<{ id: string; tenantId: string } | null> {
+    // テナントを横断してイベントを見るのはこの関数だけであり、データベース側の関数（security definer）に閉じ込めている
+    const rows = await this.q<{ id: string; tenantId: string }>(null,
+      `select id, tenant_id as "tenantId" from m2o_claim_agent_event()`);
+    return rows[0] ?? null;
+  }
+
+  async getAgentEvent(tenantId: string, id: string): Promise<AgentEvent | null> {
+    const rows = await this.q<AgentEvent>(tenantId,
+      `select id, tenant_id as "tenantId", user_id as "userId", kind, run_id as "runId",
+              conversation_id as "conversationId", status, created_at as "createdAt", attempts,
+              processed_at as "processedAt", last_error as "lastError"
+         from agent_events where tenant_id = $1 and id = $2`,
+      [tenantId, id]);
+    return rows[0] ?? null;
+  }
+
+  async finishAgentEvent(tenantId: string, id: string, error: string | null): Promise<void> {
+    await this.q(tenantId,
+      error === null
+        ? `update agent_events set processed_at = now(), last_error = null where tenant_id = $1 and id = $2`
+        : `update agent_events set last_error = $3 where tenant_id = $1 and id = $2`,
+      error === null ? [tenantId, id] : [tenantId, id, error.slice(0, 500)]);
+  }
+
+  async purgeAgentEvents(tenantId: string, before: string): Promise<number> {
+    const rows = await this.q<{ id: string }>(tenantId,
+      `delete from agent_events where tenant_id = $1 and processed_at is not null and processed_at < $2 returning id`,
+      [tenantId, before]);
+    return rows.length;
   }
 
   async listConversationUserIds(tenantId: string, day: { from: string; to: string }): Promise<string[]> {

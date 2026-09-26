@@ -2619,6 +2619,62 @@ console.log('\n■ 52. 定時実行の画面と秘書からの制御（第6.1.7�
   }
 }
 
+console.log('\n■ 53. 秘書が指揮する: 業務と秘書のイベント（第10.13節、ADR-0039）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  try {
+    const eventsOf = async (col, id) => (await owner.query(
+      `select kind, status, user_id, tenant_id, processed_at, attempts, last_error from agent_events where ${col} = $1 order by created_at`, [id])).rows;
+    const waitProcessed = async (col, id, ms = 10000) => {
+      const until = Date.now() + ms;
+      let rows = [];
+      while (Date.now() < until) {
+        rows = await eventsOf(col, id);
+        if (rows.length > 0 && rows.every((r) => r.processed_at)) break;
+        await sleep(300);
+      }
+      return rows;
+    };
+
+    // メニューから業務を使う
+    const { body: job } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: 'knowledge-qa', input: { question: '有給休暇は何日？' } }) }, 'member');
+    const done = await waitFor('a', job.runId, ['completed', 'failed'], 20000, 'member');
+    const runEvents = await waitProcessed('run_id', job.runId);
+    const { rows: [member] } = await owner.query(`select id, tenant_id from users where email = 'member@alpha.example.jp'`);
+    const finished = runEvents.find((e) => e.kind === 'run.finished');
+    finished && finished.status === done.run.status && finished.user_id === member.id && finished.tenant_id === member.tenant_id
+      ? ok(`業務が終わると、データベースがイベントを書く（${finished.kind}・${finished.status}・依頼した本人）`) : ng('実行のイベントが無い', JSON.stringify(runEvents));
+    runEvents.length > 0 && runEvents.every((e) => e.processed_at && !e.last_error)
+      ? ok('秘書の受け手がすぐに取り出して処理する（数秒以内）') : ng('処理されない', JSON.stringify(runEvents));
+
+    // 秘書と話す
+    await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message: '今日の予定は？' }) }, 'member');
+    const { rows: [conv] } = await owner.query(`select id from conversations where user_id = $1 order by created_at desc limit 1`, [member.id]);
+    const convEvents = conv ? await waitProcessed('conversation_id', conv.id) : [];
+    convEvents.length === 1 && convEvents[0].kind === 'conversation.turn' && convEvents[0].processed_at
+      ? ok('会話を 1 往復残すと、イベントが書かれ、すぐに処理される') : ng('会話のイベントが無い', JSON.stringify(convEvents));
+
+    // 会社をまたいで取り出せるのはデータベースの関数だけ（アプリの権限では、ほかの会社のイベントは見えない）
+    const app = new pg.Client({ connectionString: process.env.DATABASE_URL ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office' });
+    await app.connect();
+    try {
+      await app.query(`select set_config('app.tenant_id', $1, false)`, ['t-beta']);
+      const { rows: seen } = await app.query(`select count(*)::int as n from agent_events where tenant_id = $1`, [member.tenant_id]);
+      seen[0].n === 0 ? ok('ほかの会社のイベントは見えない（テナント境界）') : ng('ほかの会社のイベントが見える', String(seen[0].n));
+      const ins = await app.query(`insert into agent_events (tenant_id, user_id, kind) values ('t-beta', 'x', 'conversation.turn')`).then(() => 'ok', (e) => e.code);
+      ins !== 'ok' ? ok('アプリはイベントを直接書けない（書くのはデータベースだけ）') : ng('アプリがイベントを書けてしまう');
+    } finally {
+      await app.end();
+    }
+  } catch (err) {
+    ng('イベントの確認が途中で止まった', String(err));
+  } finally {
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

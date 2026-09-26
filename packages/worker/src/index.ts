@@ -12,7 +12,7 @@
 import {
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
   RunEngine, Scheduler, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, agentUsesGoogle,
-  NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning,
+  NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv,
   defaultGeminiModels, warnHotSwapModels, ProactiveWatcher,
 } from '@m2office/core';
@@ -122,11 +122,15 @@ const notifier = new NotificationDelivery({
 // ファイルの実体も消す（仕様書 第10.10.5節）
 const conversations = new ConversationRotation({ repo, files, logger: log });
 // 対話からの学習。前日の会話から、その日の要約と記憶の候補を作る（仕様書 第11.5.2節）
-const learning = new MemoryLearning({
-  repo, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
+const learning = new MemoryLearning({ repo, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log });
+// 秘書の受け手（指揮者）。業務と秘書のイベントを受け、その場で学ぶ（仕様書 第10.13節、ADR-0039）
+const conductor = new SecretaryConductor({
+  repo, learning, logger: log,
   // 業務の名前と権限区画を引く（本人が直接使った業務からも学ぶ。ADR-0038）
   agentsFor: async (tenantId) => (await hub.forTenant(tenantId)).allAgents,
 });
+/** 処理済みのイベントを残す日数。 */
+const AGENT_EVENT_KEEP_DAYS = 7;
 
 const POLL_INTERVAL_MS = 1000;
 /** 定時実行の見回り間隔。分単位の指定に対して十分に短くする。 */
@@ -193,8 +197,11 @@ while (running) {
     lastConversationCheck = Date.now();
     try {
       await conversations.sweep(new Date());
-      const learned = await learning.sweep(new Date());
-      if (learned.learned > 0 || learned.digests > 0 || learned.promoted > 0) log.info('対話からの学習を行いました', learned);
+      // 学習はイベントのたびに行う（第10.13節）。ここでは以前の形の候補の移し替えと、処理済みのイベントの片付けだけ
+      const adopted = await learning.adoptLegacyCandidates(new Date());
+      if (adopted > 0) log.info('以前の記憶の候補を覚えたことに移しました', { adopted });
+      const before = new Date(Date.now() - AGENT_EVENT_KEEP_DAYS * 86_400_000).toISOString();
+      for (const tenantId of await repo.listTenantIds()) await repo.purgeAgentEvents(tenantId, before);
     } catch (err) {
       log.error('会話ログの入れ替えで例外が発生しました', { err });
     }
@@ -239,6 +246,19 @@ while (running) {
     // 個別の実行の失敗でワーカー全体を落とさない
     log.error('実行中に例外が発生しました', { err });
   }
+  // 業務と秘書のイベントを 1 件処理する（第10.13節）。業務の実行と同じ間隔で見る
+  try {
+    const outcome = await conductor.tick(new Date());
+    if (outcome) {
+      handled = true;
+      if (outcome.action === 'learned' && (outcome.learned > 0 || outcome.promoted > 0)) {
+        log.info('秘書がその場で学びました', { tenantId: outcome.event.tenantId, kind: outcome.event.kind, learned: outcome.learned, promoted: outcome.promoted });
+      }
+    }
+  } catch (err) {
+    log.error('秘書の受け手で例外が発生しました', { err });
+  }
+
   if (!handled) await sleep(POLL_INTERVAL_MS);
 }
 

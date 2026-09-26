@@ -187,6 +187,20 @@ export interface Repository {
   listConversationsOfDay(tenantId: string, userId: string, day: { from: string; to: string }): Promise<Conversation[]>;
   /** 会話ログを持つ利用者の ID（その日ぶん）。 */
   listConversationUserIds(tenantId: string, day: { from: string; to: string }): Promise<string[]>;
+  /** 会話を 1 往復読む。本人が消していれば `null`。 */
+  getConversation(tenantId: string, id: string): Promise<Conversation | null>;
+
+  /**
+   * 次に処理する業務と秘書のイベントを 1 件確保する（仕様書 第10.13節、ADR-0039）。
+   *
+   * @remarks 会社をまたいで見るのはデータベースの関数だけ。確保すると 2 分間はほかのワーカーに渡らない
+   */
+  claimAgentEvent(): Promise<{ id: string; tenantId: string } | null>;
+  getAgentEvent(tenantId: string, id: string): Promise<AgentEvent | null>;
+  /** 処理を終える。`error` があれば処理済みにせず、理由を残す（確保の期限のあとにやり直す）。 */
+  finishAgentEvent(tenantId: string, id: string, error: string | null): Promise<void>;
+  /** 処理済みで、指定の時刻より古いイベントを消す。消した数を返す。 */
+  purgeAgentEvents(tenantId: string, before: string): Promise<number>;
   /** その日の会話の要約を保存する（長期に持つ。第11.9.6節）。 */
   saveConversationDigest(d: ConversationDigest): Promise<void>;
   /** 本人の会話の要約（新しい順）。 */
@@ -436,6 +450,27 @@ export interface KnowledgeSectionView {
  *
  * @remarks 読めるのは本人だけである。管理者にも運営にも渡さない（不変則 I-10）。
  */
+/**
+ * 業務と秘書をつなぐイベント（仕様書 第10.13節、ADR-0039）。
+ *
+ * @remarks 実行の状態の変更と会話の保存と同じトランザクションの中で、データベースのトリガーが書く。
+ */
+export interface AgentEvent {
+  id: string;
+  tenantId: string;
+  /** 持ち主（業務を依頼した人・会話した人）。この人の秘書だけが受け取る。 */
+  userId: string;
+  kind: 'run.finished' | 'run.awaiting_approval' | 'conversation.turn';
+  runId: string | null;
+  conversationId: string | null;
+  /** 実行の状態（`run.*` のとき）。 */
+  status: string | null;
+  createdAt: string;
+  attempts: number;
+  processedAt: string | null;
+  lastError: string | null;
+}
+
 export interface Conversation {
   id: string;
   tenantId: string;

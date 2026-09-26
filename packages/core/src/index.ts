@@ -19,7 +19,7 @@ export { OpenAiCompatibleProvider, LlmRequestError } from './llm/gemini.js';
 export type { GeminiModelMap } from './llm/gemini.js';
 
 export type {
-  Repository, DisabledConnectorTool, TenantConnection, KnowledgeHit, KnowledgeItem, KnowledgeSearchResult, KnowledgeSectionView, RunStatRow, InstalledExtension, PrivateExtension, CompartmentAssignment,
+  Repository, AgentEvent, DisabledConnectorTool, TenantConnection, KnowledgeHit, KnowledgeItem, KnowledgeSearchResult, KnowledgeSectionView, RunStatRow, InstalledExtension, PrivateExtension, CompartmentAssignment,
   CredentialKind, TenantCredential, GoogleConnection, UserPhoto,
 } from './repository/types.js';
 export { PostgresRepository } from './repository/postgres.js';
@@ -100,6 +100,7 @@ export { Scheduler, SCHEDULE_SKIP_TITLE, SCHEDULE_TOOL_DISABLED_TITLE } from './
 export { nextRunAt, validateRule, describeRule } from './scheduler/rule.js';
 export { isSchedulable, missingInputs, withEnabled, triggeredNow } from './scheduler/control.js';
 export { answerSchedule, type ScheduleAnswer } from './secretary/schedules.js';
+export { SecretaryConductor, type ConductorDeps, type ConductorOutcome } from './secretary/conductor.js';
 export { parseToolCalls } from './engine/tool-protocol.js';
 export {
   RunNotResumableError, DefinitionInvalidError, TenantBoundaryError, ApprovalForbiddenError,
