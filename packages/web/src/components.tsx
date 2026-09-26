@@ -4,7 +4,7 @@
  * @see 仕様書 第6章 ユーザー体験
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { hideInternalIds, type Artifact, type RunStep } from '@m2office/shared';
 import {
   api, describeError, type AgentSummary, type ApprovalView, type JsonSchemaField, type RunDetail,
@@ -110,6 +110,7 @@ function Field({
   const label = `${field.title ?? name}${required ? '（必須）' : ''}`;
   // 説明の文を足すより、例を薄く置く（仕様書 第6.10.4.1節）。例が無ければ何も出さない
   const hint = field.examples?.[0] ? `例: ${field.examples[0]}` : undefined;
+  if (field.format === 'date') return <DateField name={name} label={label} optional={!required} value={value} onChange={onChange} />;
   return (
     <div className="field">
       <label htmlFor={name}>{label}</label>
@@ -118,6 +119,47 @@ function Field({
       ) : (
         <input id={name} value={value} placeholder={hint} onChange={(e) => onChange(e.target.value)} />
       )}
+    </div>
+  );
+}
+
+/**
+ * 日付の入力（仕様書 第6.10.4.1節）。任意の項目は、チェックボックスを入れたときだけ日付を選ぶ。
+ *
+ * @remarks
+ * 既定ではチェックせず、日付を渡さない。チェックするとカレンダーを開く（ブラウザの日付の選び方を使う）。
+ * チェックを外すと日付を消す。必須の項目はチェックボックスを付けない。
+ */
+function DateField({ name, label, optional, value, onChange }: {
+  name: string; label: string; optional: boolean; value: string; onChange: (v: string) => void;
+}) {
+  const [on, setOn] = useState(!optional || value !== '');
+  const input = useRef<HTMLInputElement>(null);
+  const opened = useRef(false);
+  useEffect(() => {
+    // チェックを入れた直後に、カレンダーを開く。開けないブラウザでは、日付の欄を押せば開く
+    if (!optional || !on || opened.current) return;
+    opened.current = true;
+    try { input.current?.showPicker?.(); } catch { /* 開けなくても、欄は使える */ }
+    input.current?.focus();
+  }, [on, optional]);
+  const picker = (
+    <input ref={input} id={name} type="date" value={value} aria-label={label} onChange={(e) => onChange(e.target.value)} />
+  );
+  if (!optional) {
+    return <div className="field"><label htmlFor={name}>{label}</label>{picker}</div>;
+  }
+  return (
+    <div className="field field-date">
+      <label className="check">
+        <input type="checkbox" checked={on} onChange={(e) => {
+          setOn(e.target.checked);
+          opened.current = false;
+          if (!e.target.checked) onChange('');
+        }} />
+        {label}
+      </label>
+      {on && picker}
     </div>
   );
 }

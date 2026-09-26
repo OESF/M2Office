@@ -57,8 +57,10 @@ export const gmailUnread: Tool = {
   args: { properties: { since: { type: 'string', description: 'この日時以降の未読だけ（ISO 形式。任意）' }, limit: { type: 'number', description: '一覧の件数（既定 50、上限 50）' } } },
   google: { scope: 'gmail.readonly', level: 'restricted' },
   async invoke(args, ctx) {
+    // 日付だけ（YYYY-MM-DD）なら、日本時間のその日の 0 時からにする
+    const since = str(args['since']);
     const res = await ctx.connector.mail.unread(principal(ctx), {
-      since: str(args['since']) || undefined,
+      since: /^\d{4}-\d{2}-\d{2}$/.test(since) ? `${since}T00:00:00+09:00` : since || undefined,
       limit: typeof args['limit'] === 'number' ? args['limit'] : 50,
     });
     const rest = res.total - res.items.length;

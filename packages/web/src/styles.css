@@ -1061,3 +1061,7 @@ code.uri { background: var(--subtle-bg); border: 1px solid var(--line); border-r
 /* 見るだけの短い一覧（記憶から会社の知識になったことなど） */
 .plain-list { margin: 4px 0 0; padding-left: 1.2em; }
 .plain-list li { margin: 2px 0; }
+
+/* 任意の日付（第6.10.4.1節）。チェックボックスの下にカレンダーの欄を出す */
+.field-date { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.field-date input[type="date"] { width: auto; }
