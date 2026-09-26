@@ -14,8 +14,9 @@ import {
   RunEngine, Scheduler, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, agentUsesGoogle,
   NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv,
-  defaultGeminiModels, warnHotSwapModels,
+  defaultGeminiModels, warnHotSwapModels, ProactiveWatcher,
 } from '@m2office/core';
+import { canRunAgent } from '@m2office/shared';
 import { fileURLToPath } from 'node:url';
 
 const log = createLoggerFromEnv('worker');
@@ -90,6 +91,18 @@ const scheduler = new Scheduler({
   },
 });
 
+// 秘書の先回り（会議の直前の準備・前日の移動の知らせ。仕様書 第10.12節）。本人が使える業務だけを使う（利用範囲。第16.7節）
+const proactive = new ProactiveWatcher({
+  repo, connector, logger: log,
+  agentsFor: async (tenantId, userId) => {
+    const view = await hub.forTenant(tenantId);
+    const [settings, groups, compartments] = await Promise.all([
+      repo.getTenantSettings(tenantId), repo.listUserGroupIds(tenantId, userId), repo.listUserCompartments(tenantId, userId),
+    ]);
+    return view.agents.filter((def) => canRunAgent(settings.access, def, userId, groups, compartments));
+  },
+});
+
 // 通知の控えを Chat へ届ける（仕様書 第6.5.5.2節）。送信口は B-2 のあとに差し替える
 /**
  * 会社の画面のアドレス。通知の控えに載せるリンクに使う（仕様書 第6.5.5.2節）。
@@ -116,6 +129,8 @@ const POLL_INTERVAL_MS = 1000;
 const SCHEDULE_INTERVAL_MS = Number(process.env['SCHEDULE_INTERVAL_MS'] ?? 15_000);
 /** 通知の控えの見回り間隔。通知しない時間帯が明けたときの遅れを、この間隔に収める。 */
 const NOTIFY_INTERVAL_MS = Number(process.env['NOTIFY_INTERVAL_MS'] ?? 10_000);
+/** 秘書の先回りの見回り間隔（仕様書 第10.12節）。会議の準備を起こす窓（40 分）より短くする。 */
+const PROACTIVE_INTERVAL_MS = Number(process.env['PROACTIVE_INTERVAL_MS'] ?? 600_000);
 /** 会話ログの入れ替えの間隔。1 日 1 回で足りる（開発では確かめやすいよう短くできる）。 */
 const CONVERSATION_INTERVAL_MS = Number(process.env['CONVERSATION_INTERVAL_MS'] ?? 24 * 3_600_000);
 /** 保持期間の見回り間隔。本番は 10 分、開発は確かめやすいよう 15 秒。 */
@@ -127,6 +142,7 @@ let lastScheduleCheck = 0;
 let lastRetentionCheck = 0;
 let lastNotifyCheck = 0;
 let lastConversationCheck = 0;
+let lastProactiveCheck = 0;
 
 process.on('SIGINT', () => { running = false; });
 process.on('SIGTERM', () => { running = false; });
@@ -156,6 +172,16 @@ while (running) {
       if (r.sent > 0) log.info('通知の控えを届けました', r);
     } catch (err) {
       log.error('通知の控えの見回りで例外が発生しました', { err });
+    }
+  }
+
+  if (Date.now() - lastProactiveCheck >= PROACTIVE_INTERVAL_MS) {
+    lastProactiveCheck = Date.now();
+    try {
+      const started = await proactive.tick(new Date());
+      if (started.length > 0) log.info('秘書が先回りして業務を起こしました', { count: started.length });
+    } catch (err) {
+      log.error('先回りの見回りで例外が発生しました', { err });
     }
   }
 

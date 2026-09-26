@@ -107,6 +107,7 @@ export {
   agentFace, MORNING_BRIEF,
 } from './agents/index.js';
 export { Secretary, acceptsFile, fillInputs } from './secretary/secretary.js';
+export { ProactiveWatcher, PROACTIVE_TRIGGER, TRAVEL_PREFIX, PREP_WINDOW_MIN, TRAVEL_NOTICE_HOUR, isMeetingSoon, hasPlace, meetingKey } from './secretary/proactive.js';
 export type { SecretaryReply, ResponseLayer } from './secretary/secretary.js';
 export { REFERS_TO_PAST, closeness, recall, type Recall } from './secretary/recall.js';
 export { LIST_MIN, SPOKEN_MAX, needsCanvas } from './secretary/canvas.js';

@@ -109,11 +109,13 @@ function greetingNote(callMe: string, secretaryName: string, facts: string[]): s
  * **裏で別のものが動いていることを、利用者に話させない。**
  * 利用者から見れば、調べたのは秘書自身である。
  */
-function lookupNote(x: { request: string; text: string | null; failureReason: string | null; agentName?: string | null; agentId?: string }, shown: boolean): string {
+function lookupNote(x: { request: string; text: string | null; failureReason: string | null; agentName?: string | null; agentId?: string; proactive?: boolean }, shown: boolean): string {
   return [
     '（内部情報・この文をそのまま読み上げないこと）',
     x.agentId === 'morning-brief'
       ? '今朝のブリーフができました。朝の挨拶を添えて、最初に今日いちばん気をつけることを伝えてください。'
+      : x.proactive
+      ? `頼まれる前に、あなたが先回りして用意したもの（${x.agentName ?? '移動の調べもの'}）ができました。「〇〇の準備をしておきました」のように伝えてください。`
       : x.agentName
       ? `先ほど「${x.agentName}」に頼んだ「${x.request}」が終わりました。`
       : `先ほどお預かりした「${x.request}」の調べものが終わりました。`,

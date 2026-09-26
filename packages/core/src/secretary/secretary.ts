@@ -106,12 +106,62 @@ export class Secretary {
     // 推論が使えない会社では、何を聞かれても設定されていないことだけを伝える（仕様書 第20.2.4節、ADR-0030）
     const llm = this.deps.llmFor ? await this.deps.llmFor(tenantId) : this.deps.llm;
     if (!aiAvailable(llm)) return { layer: 'direct', text: AI_NOT_CONFIGURED_MESSAGE, evidence: [], tokensUsed: 0 };
+    // 「あとで〇〇する」は本人の ToDo に入れる（第10.12節）。答えと同時に行い、待たせない
+    const todo = this.captureTodo(tenantId, userId, message, llm).catch(() => null);
     const { reply, keep } = await this.reply(tenantId, userId, message, fileId);
+    const added = await todo;
+    if (added) {
+      reply.text = `${reply.text}\n\n（ToDo に「${added.title}」を入れました${added.due ? `。期限は ${Number(added.due.slice(5, 7))}/${Number(added.due.slice(8, 10))}` : ''}）`;
+      reply.evidence = [...reply.evidence, { label: 'ToDo に入れた', value: added.title }];
+    }
     if (options.record === false) return reply;
     // 会話ログに残すのはファイルの**名前だけ**。中身はファイルの側にある（仕様書 第10.10.5節）
     const logged = reply.file ? `${message}\n（渡したファイル: ${reply.file.name}）` : message;
     if (keep) await this.record(tenantId, userId, logged, reply);
     return reply;
+  }
+
+  /**
+   * 本人自身のこれからの用事（「あとで見積もりを送る」など）を、本人の ToDo に入れる（仕様書 第10.12節、ADR-0036）。
+   *
+   * @returns 入れた ToDo。入れなかったときは `null`
+   *
+   * @remarks
+   * 言い回しで当たりを付け（{@link TODO_HINT}）、当たったときだけ推論に本人自身の用事かを判断させる。
+   * 秘書への依頼・ほかの人の用事・過去のこと・迷いは入れない。本人だけの ToDo なので確認しない（ADR-0028）。
+   * 秘書の積極性が「控えめ」の人には行わない。
+   */
+  private async captureTodo(
+    tenantId: string, userId: string, message: string, llm: LlmProvider,
+  ): Promise<{ title: string; due: string | null } | null> {
+    if (!TODO_HINT.test(message) || ASKS_SECRETARY.test(message)) return null;
+    const prefs = await this.deps.repo.getUserSettings(tenantId, userId);
+    if (prefs.secretary.proactivity === 'low') return null;
+    const today = new Intl.DateTimeFormat('sv-SE', { timeZone: prefs.profile.timezone || 'Asia/Tokyo' }).format(new Date());
+    const res = await llm.complete({
+      tier: 'fast',
+      maxOutputTokens: 300,
+      messages: [
+        {
+          role: 'system',
+          content: [
+            '本人の発言から、本人自身がこれからする用事を 1 つだけ取り出し、JSON だけを返してください。',
+            '形: {"todo": "ToDo の名前（30 字まで。〇〇する、の形）", "due": "YYYY-MM-DD か null"}。無ければ {"todo": null}。',
+            '秘書への依頼（〇〇して）・ほかの人の用事・過去のこと・「〇〇しようかな」程度の迷いは null にしてください。',
+            `今日は ${today} です。「明日」「来週の月曜」などは日付にしてください。期限が読み取れなければ null。`,
+          ].join('\n'),
+        },
+        { role: 'user', content: message },
+      ],
+    });
+    const json = /\{[\s\S]*\}/.exec(res.text)?.[0];
+    const parsed = json ? (JSON.parse(json) as { todo?: unknown; due?: unknown }) : {};
+    const title = typeof parsed.todo === 'string' ? parsed.todo.trim().slice(0, 60) : '';
+    if (!title) return null;
+    const due = typeof parsed.due === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(parsed.due) ? parsed.due : null;
+    await this.deps.connector.tasks.create({ tenantId, userId }, { title, due });
+    await this.audit(tenantId, userId, 'secretary.todo', title);
+    return { title, due };
   }
 
   /**
@@ -589,6 +639,16 @@ const ASKING = /[？?]|ですか|でしょうか|ますか|は何|はいくら|�
 
 /** 作業を頼む言い回し。照会の言い回しを含んでいても、こちらがあれば取り次ぐ。 */
 const DOING = /して(ください|くれ|ほしい)|作って|作成して|まとめて|起票|下書き|送って|共有して|調整して|入れて|登録して/;
+
+/**
+ * 本人自身のこれからの用事らしい言い回し（第10.12節）。当たったときだけ推論に判断させる。
+ *
+ * @remarks 広めに当てる。本人の用事かどうかの最後の判断は推論が行う
+ */
+const TODO_HINT = /あとで|後で|までに|しないと|しなきゃ|しなくちゃ|忘れずに|やっておく|しておく|予定です|つもり|(明日|あした|来週|今度|今週中|月曜|火曜|水曜|木曜|金曜).*(する|やる|送る|電話|連絡|確認|作る|出す|書く|返す|払う|行く|提出)/;
+
+/** 秘書への依頼の言い回し。これは本人の ToDo ではなく、秘書が今こたえる依頼。 */
+const ASKS_SECRETARY = /[てで](ください|おいて|ほしい|くれ|もらえ|ちょうだい)|[てで][。！!]?$|[？?]/;
 
 /** 根拠として渡す節の数。多すぎると応答が遅くなり、少なすぎると当たらない。 */
 const KNOWLEDGE_HITS = 5;

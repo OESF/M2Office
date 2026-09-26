@@ -8,7 +8,7 @@
  * @see 仕様書 第10.11.7節 終わったことを伝える
  */
 
-import { LOOKUP_AGENT_ID, MORNING_BRIEF, OFFICIAL_AGENTS } from '@m2office/core';
+import { LOOKUP_AGENT_ID, MORNING_BRIEF, OFFICIAL_AGENTS, PROACTIVE_TRIGGER } from '@m2office/core';
 import type { Repository } from '@m2office/core';
 import { randomUUID } from 'node:crypto';
 
@@ -20,6 +20,8 @@ export interface LookupView {
   agentName: string | null;
   /** 業務の ID。 */
   agentId: string;
+  /** 本人に頼まれずに、秘書が先回りして起こしたもの（会議の直前の準備・前日の移動の知らせ。第10.12節）。 */
+  proactive: boolean;
   status: string;
   /** 終わったか（完了・失敗・中止・期限切れ）。 */
   done: boolean;
@@ -72,6 +74,7 @@ export async function listLookups(
       request: job.agentId === MORNING_BRIEF.id ? '今朝のブリーフ' : String(job.input['request'] ?? firstText ?? name ?? ''),
       agentName: name,
       agentId: job.agentId,
+      proactive: job.input['trigger'] === PROACTIVE_TRIGGER,
       status: run.status,
       done,
       progress: done ? null : run.status === 'awaiting_approval' ? '承認を待っています' : isLookup ? progressOf(steps) : `「${name}」を進めています`,

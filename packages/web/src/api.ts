@@ -394,6 +394,8 @@ export interface Lookup {
   agentName: string | null;
   /** 業務の ID（朝のブリーフは `morning-brief`）。 */
   agentId: string;
+  /** 秘書が先回りして起こしたもの（仕様書 第10.12節）。 */
+  proactive: boolean;
   status: string;
   /** 終わったか（完了・失敗・中止・期限切れ）。 */
   done: boolean;
