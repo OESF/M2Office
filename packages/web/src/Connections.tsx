@@ -152,7 +152,7 @@ function GeminiCard({ data, onSaved }: { data: ConnectionSettings['gemini']; onS
       setTests((t) => ({ ...t, [kind]: `つながりませんでした: ${describeError(e)}` }));
     }
   };
-  const effective = { tenant: '自社の鍵を使っています', platform: '運営の鍵を使っています', none: '使える鍵がありません（開発用のスタブで動いています）' }[data.effective];
+  const effective = { tenant: '自社の鍵を使っています', platform: '運営の鍵を使っています', none: '使える鍵がありません。秘書も業務も動きません' }[data.effective];
 
   return (
     <div className="card">

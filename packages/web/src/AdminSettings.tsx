@@ -365,7 +365,6 @@ function SlideTemplateSettings({ initial, onSaved }: { initial: SlideTemplate[];
           onSaved();
         }} />
       </div>
-      <p className="muted small">現在は登録と既定の選択のみ有効</p>
       {saver.view}
     </div>
   );

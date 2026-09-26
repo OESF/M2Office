@@ -97,6 +97,8 @@ npm run ext:validate extensions/hello-world
     評価のケース 2 件
 ```
 
+（`extensions/hello-world` の完成品には `metadata.version` と評価のケースを 2 件足してあります。上の手順のとおりに作ると、版は `1.0.0`、ケースは 1 件と出ます。）
+
 スキルの項目のうち M2Office で使わないもの（`model`・`context`・`hooks` など）や、M2Office に無い道具は、ここと取り込みの画面で知らせます。
 
 ## 2.6 取り込んで動かす

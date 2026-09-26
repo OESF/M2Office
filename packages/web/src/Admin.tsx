@@ -53,7 +53,7 @@ const TABS: {
     ],
   },
   {
-    id: 'connectors', label: '接続', icon: 'connectors', description: 'Gemini と Google Workspace への接続', group: '設定',
+    id: 'connectors', label: '接続', icon: 'connectors', description: 'Gemini・Google Workspace・コネクタ（MCP）への接続', group: '設定',
     pages: [
       { id: 'gemini', label: 'Gemini' },
       { id: 'google', label: 'Google Workspace' },

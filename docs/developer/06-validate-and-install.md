@@ -5,7 +5,7 @@
 ```bash
 npm run ext:validate                                          # extensions/ の下をすべて
 npm run ext:validate extensions/hello-world                   # 1 つだけ
-npm run ext:validate dist/extensions/jp.example.weekly-report-1.0.0.m2ext   # 作ったファイル
+npm run ext:validate dist/extensions/jp.example.weekly-report-2.0.0.m2ext   # 作ったファイル
 ```
 
 API が読み込み・取り込みの時点で行う検証と同じものです（仕様書 第12.9.2節、第12.10.2節）。
@@ -13,13 +13,15 @@ API が読み込み・取り込みの時点で行う検証と同じものです�
 | # | 確かめること |
 |---|---|
 | 1 | 入れてよいファイルだけでできている（プログラムが入っていない） |
-| 2 | マニフェストの必須項目と形式 |
-| 3 | コネクタの宣言（ID の重なり、`http` の方式、`https` の接続先、認証の方式、ツールの危険度。第7章） |
-| 4 | 定義が基盤の規則を満たす（承認ゲート、登録されたツール、ステップ ID の重複など） |
-| 5 | 定義のツールが `permissions.tools` の中にあり、`permissions.tools` のツールがすべて存在する |
-| 6 | 定義とコネクタのツールの危険度が `max_risk_level` を超えない |
-| 7 | `help.summary` がある |
-| 8 | 業務エージェントの ID が他と重ならない |
+| 2 | SKILL.md の `name`・`description`・本文・`metadata.m2office-inputs` の形 |
+| 3 | 補助のファイルが合計 50 万字まで |
+| 4 | コネクタの宣言（ID、`http` の方式、`https` の接続先、認証の方式、ツールの危険度。第7章） |
+| 5 | 同梱したコネクタの道具の危険度が、`allowed-tools` から決まる最大の危険度を超えない |
+| 6 | 評価のケース（`evals/*.json`）の `agent` が `name` と一致する |
+| 7 | `icon.png` が PNG で 256 KB まで |
+| 8 | 業務やコネクタの ID が他と重ならない |
+
+マニフェスト・段・承認の段・ヘルプの概要は SKILL.md から M2Office が組み立てるため、書く人が直すものではありません。
 
 ## 6.2 導入して動かす
 
@@ -43,8 +45,8 @@ API が読み込み・取り込みの時点で行う検証と同じものです�
 
 | 状態 | 業務エージェント | コネクタ |
 |---|---|---|
-| 有効 | メニュー・秘書・定時実行に出る | 接続する |
-| 無効 | 出ない。実行できない | 接続しない |
+| 有効 | メニュー・秘書・定時実行に出る | 会社の接続として残る（スイッチや削除に関係なく。止めるのは管理者ページ「接続 › コネクタ（MCP）」） |
+| 無効 | 出ない。実行できない | 同上 |
 
 切り替えに同意のやり直しは要りません。ただし、新しい版で必要な権限が増えた場合は、
 「内容を確認して同意する」を押すまでスイッチを入れられません（仕様書 第12.10.4節）。
@@ -63,7 +65,7 @@ API が読み込み・取り込みの時点で行う検証と同じものです�
 | 実行の途中 | 依頼のあとに範囲から外れたら、実行を止める |
 
 **開発者として気を付けること**: 拡張機能の側で「誰が使えるか」を書く項目はありません。使う人は会社が決めます。
-特定の部署向けの業務なら、README や `help.notes` に「人事部向けの業務です」のように書き、管理者が範囲を決める手がかりにしてください。
+特定の部署向けの業務なら、README や `HELP.md`（注意の節）に「人事部向けの業務です」のように書き、管理者が範囲を決める手がかりにしてください。
 管理者も、業務を使うときは範囲に従います。試すときは、自分を範囲に加えてください。
 
 ### API で確かめる（開発用のヘッダーを使う例）
@@ -71,7 +73,7 @@ API が読み込み・取り込みの時点で行う検証と同じものです�
 ```bash
 # ファイルを取り込む（管理者）
 curl -X POST -H 'x-tenant: a' -H 'x-user: admin@alpha.example.jp' -H 'content-type: application/octet-stream' \
-  --data-binary @dist/extensions/jp.example.weekly-report-1.0.0.m2ext http://localhost:3101/v1/admin/extensions/import
+  --data-binary @dist/extensions/jp.example.weekly-report-2.0.0.m2ext http://localhost:3101/v1/admin/extensions/import
 
 # 同意して導入する（管理者）
 curl -X POST -H 'x-tenant: a' -H 'x-user: admin@alpha.example.jp' -H 'content-type: application/json' \
@@ -83,13 +85,13 @@ curl -X PUT -H 'x-tenant: a' -H 'x-user: admin@alpha.example.jp' -H 'content-typ
 
 # 実行
 curl -X POST -H 'x-tenant: a' -H 'x-user: member@alpha.example.jp' -H 'content-type: application/json' \
-  -d '{"agentId":"jp.example.weekly-report:weekly","input":{"week":"今週"}}' http://localhost:3101/v1/jobs
+  -d '{"agentId":"jp.example.weekly-report:weekly","input":{"対象の週":"今週"}}' http://localhost:3101/v1/jobs
 
 # 結果（runId は上の応答のもの）
 curl -H 'x-tenant: a' -H 'x-user: member@alpha.example.jp' http://localhost:3101/v1/runs/<runId>
 ```
 
-`npm run smoke` の「■ 20」と「■ 21」は、この流れ（導入していない会社で使えない、同意なしで導入できない、
+`npm run smoke` の「■ 20」「■ 21」「■ 21b」は、この流れ（導入していない会社で使えない、同意なしで導入できない、
 プログラムを含むファイルを取り込めない、取り込んだものは他の会社に見えない、スイッチを切ると使えない、削除すると使えない）を
 毎回確かめています。`SMOKE_EXTERNAL=1 npm run smoke` とすると、DeepWiki への実際の問い合わせも確かめます。
 
@@ -103,11 +105,13 @@ curl -H 'x-tenant: a' -H 'x-user: member@alpha.example.jp' http://localhost:3101
 | `name（…）は英小文字・数字・ハイフンで書いてください` | `name` に大文字や日本語が入っている | `expense-check` のように書く（画面に出る名前は本文の最初の見出し） |
 | `description がありません` | `description` も本文も無い | 何をするか・いつ使うかを書く |
 | `m2office-inputs の「…」が読めません` | 「欄の名前: 種類」の形になっていない | 種類は `短文`・`長文`・`日付`・`ファイル`（後ろに「（任意）」を付けられる） |
-| `allowed-tools の … は M2Office の道具ではないため使いません`（知らせ） | スキルの環境の道具（`Bash` など）や、名前の誤り、宣言していないコネクタの道具 | 第4章の名前にするか、コネクタの宣言に足す |
+| `allowed-tools の … は M2Office の道具ではないため使いません`（知らせ） | スキルの環境の道具（`Bash` など）や名前の誤り | 第4章の名前にする |
+| `会社の接続（…）の道具を使います`（知らせ） | 同梱していない接続の道具（`<接続の ID>.<道具>`）を書いた | 意図どおりならそのまま。内蔵の道具の書き間違い（例: `gmial.send`）もこの扱いになり、業務が使えなくなるので名前を確かめる |
+| `… の危険度（…）が max_risk_level（…）を超えています` | 同梱したコネクタに、`allowed-tools` に書いていない強い道具がある | `allowed-tools` に書くか、宣言から外す |
 | `次のファイルは取り込みませんでした`（知らせ） | プログラム（`scripts/` など）や画像が入っている | 処理はコネクタとして外に作る（第7章） |
 | `ZIP として読めません` | `.m2ext` が壊れているか、ZIP でない | `npm run ext:pack` で作り直す |
 | `公式の拡張機能と同じ ID です` | `metadata.m2office-id` が、公式の配布元のものと同じ | 自社用の ID（例: `jp.example.…`）にするか、書かずに自社専用にする |
-| `ID … はすでに使われています` | 他の拡張機能と ID が重なる | 拡張機能やコネクタの `id` を変える |
+| `ID … はすでに使われています` | 他の拡張機能と ID が重なる | 拡張機能の ID を変える（コネクタの `id` の重なりで止まるのは公式の配布元の検証だけ） |
 | スイッチを入れられず「権限が増えています」と出る | 新しい版で権限が増えた | 「内容を確認して同意する」を押す |
 | 実行が「この業務は、この会社に導入されていません」で失敗 | 実行の途中で無効にしたか、導入をやめた | スイッチを入れるか、導入し直す |
 | ツールの結果が「引数が正しくありません: 〜がありません」 | 必須の引数が無いか、型が違う | 第4.3節の表どおりに引数を書く |
@@ -115,9 +119,10 @@ curl -H 'x-tenant: a' -H 'x-user: member@alpha.example.jp' http://localhost:3101
 | 実行が「依頼者がこの業務の権限区画に割り当てられていません」で失敗 | 区画に属する業務（`compartment`）を、区画に入れない人が実行した | 管理者に区画へ割り当ててもらう（グループか個人） |
 | `権限区画に属する業務では web.research を使えません` | 区画に属する業務で Web の調査を使おうとした | 調べる業務と区画の業務を分ける |
 | メニューに業務が出ない（導入済み・有効なのに） | 利用できる人の範囲の外 | 管理者に範囲を確かめてもらう |
+| 同上 | 会社の接続が登録されていない、または管理者が接続の道具を止めた | 管理者ページ「接続 › コネクタ（MCP）」で登録するか、道具を入れる |
 
 ## 6.4 本物の LLM で確かめる
 
 業務は Gemini の推論で動きます。`.env` の `GEMINI_API_KEY`（開発者の鍵）か、管理者ページの「接続」で登録した会社の鍵を設定してください。
 どちらも無い会社では、業務は動かず「Gemini の接続が設定されていません。管理者ページの「接続」で設定してください」と出ます。
-評価のケースの `expect` と結果を見比べ、指示（`instruction`）を直してください。
+評価のケースの `expect` と結果を見比べ、SKILL.md の本文（指示）を直してください。

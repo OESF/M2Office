@@ -27,6 +27,7 @@ JSON で書く定義（`manifest.json`＋`agents/*.json`）は**第 0.131.0 版�
 | `model`・`context`・`agent`・`background`・`disallowed-tools`・`hooks`・`paths`・`shell` | 使わない（知らせる） |
 | `license`・`compatibility`・`metadata` | 保つ。`metadata.version`・`metadata.author` は拡張機能の版と提供者 |
 | `connectors/*.json` | 外部のサービス（MCP サーバ）をつなぐコネクタの宣言。SKILL.md と同じフォルダに置き、その道具を `allowed-tools` に `<コネクタの ID>.<道具>` で書く（第7章） |
+| `allowed-tools` の `<接続の ID>.<道具>`（同梱しない） | 会社がすでに登録した接続（MCP）の道具を使う。その会社に接続が無ければ、業務は使えない（第7.2節） |
 | 補助のファイル（`reference.md`・`examples.md` など） | スキルと同じく、本文から参照したものを推論が必要なときに読む（道具 `skill.read` が自動で付く）。Markdown・テキストのみ |
 | `scripts/`・`` !`コマンド` ``・`${CLAUDE_SKILL_DIR}` | 動かさない。ファイルは除き、コマンドは消して知らせる |
 

@@ -438,7 +438,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
           )}
           {view.kind === 'approvals' && (
             <>
-              <h1>承認トレイ <HelpTip article="start-approvals">承認すると業務が続きから進み、却下するとそこで終わります。送信や登録は承認のあとにだけ行います。</HelpTip></h1>
+              <h1>承認トレイ <HelpTip article="start-approvals">承認すると業務が続きから進み、却下するとそこで終わります。社外に出るものとお金の確定は、承認のあとにだけ行います。</HelpTip></h1>
               <ApprovalTray items={approvals} onDecided={() => void refresh()} />
             </>
           )}

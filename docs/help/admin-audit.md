@@ -46,8 +46,8 @@ related: [admin-runs, admin-users, faq-privacy]
 | `user.invite`・`user.update` | 人を招待した・ロールや状態を変えた |
 | `group.*`・`compartment.*` | グループ・権限区画を作った・変えた・消した |
 | `settings.update` | 会社の設定を変えた |
-| `connection.*` | Gemini の鍵や Google との接続を登録した・変えた・外した |
-| `extension.*` | 拡張機能を取り込んだ・導入した・削除した、ツールを止めた・戻した |
+| `connection.*` | Gemini の鍵、Google との接続、コネクタ（MCP）を登録した・変えた・外した。コネクタの道具を止めた・戻した |
+| `extension.*` | 拡張機能を取り込んだ・導入した・有効にした・無効にした・削除した |
 | `knowledge.*` | 知識を登録した・直した・消した。秘書が会社の知識に加えた（`knowledge.promote.auto`）・会話で直した（`knowledge.correct`） |
 | `memory.*` | 秘書が覚えた・直した・消した。**記憶の中身は記録しません** |
 

@@ -14,6 +14,8 @@ related: [admin-setup, admin-extensions]
 - **自社の鍵を使う**: Google AI Studio で発行した API キーを登録します。費用は自社の Google Cloud に直接かかります
 - 「文章を試す」「音声（Gemini Live）を試す」で、つながるかをその場で確かめられます
 - 音声では、鍵をブラウザに渡しません。M2Office のサーバーが Gemini Live へ中継します
+- 役割ごとに使うモデルを指定できます（空なら既定のモデル）
+- 使える鍵が無いと、秘書も業務も動きません
 
 ## Google Workspace
 
