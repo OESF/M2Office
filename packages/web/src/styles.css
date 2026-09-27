@@ -173,13 +173,16 @@ button { font: inherit; cursor: pointer; }
   /* 業務の名前と、押すキー（⌘⇧1）が並ぶ。名前を切らない幅を取る（仕様書 第6.11.1節 k4） */
   --nav-w: 280px;
   --talk-w: 48px;
+  /* 秘書のキャンバスで本人が決めた幅。決めていなければ十分に大きい値にし、下の上限（残りの半分）で止める */
+  --talk-px: 100vw;
   flex: 1; display: grid;
   grid-template-columns: var(--nav-w) 1fr var(--talk-w);
   grid-template-rows: minmax(0, 1fr) auto; min-height: 0;
 }
 /* 会話は読むもの。開いたら、**中央のキャンバスと同じ幅**を取る。
    残りの幅を半分ずつに分けるので、画面が広いほど会話も広がる（仕様書 第6.2節） */
-.panes.talk-open { --talk-w: 1fr; }
+/* 境目で狭くできる（第6.2節）。広げられるのは左ペインを除いた残りの半分まで */
+.panes.talk-open { --talk-w: min(var(--talk-px), calc((100% - var(--nav-w)) / 2)); }
 /* 会話ペインを持たない画面（管理者ページ）。右端の列を取らず、キャンバスを画面の右端まで広げる。
    列の並びは変えず幅だけを 0 にするので、狭い幅の並べ替え（下の @media）はそのまま効く */
 .panes.no-talk { --talk-w: 0px; }
@@ -210,23 +213,33 @@ button { font: inherit; cursor: pointer; }
 
 /* 秘書のキャンバス（仕様書 第6.2節、ADR-0026）。秘書が結果を見せる場所で、会話の履歴は並べない */
 .talk {
-  background: var(--panel); border-left: 1px solid var(--line);
-  overflow-y: auto; padding: calc(16px * var(--space-scale)); min-width: 0;
+  position: relative; background: var(--panel); border-left: 1px solid var(--line);
+  overflow: hidden; padding: calc(16px * var(--space-scale)); min-width: 0;
   display: flex; flex-direction: column; gap: calc(8px * var(--space-scale));
 }
-.talk h3 { font-size: calc(12px * var(--font-scale)); color: var(--muted); margin: 0 0 calc(10px * var(--space-scale)); letter-spacing: .06em; }
-.talk-body { flex: 1; min-height: 0; }
+/* 開け閉めのボタンと題の行。題は行の中央に置く（左右を同じ幅にして真ん中を取る） */
+.talk-head { flex: none; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; }
+.talk-head .talk-toggle { grid-column: 1; justify-self: start; }
+.talk-head h3 { grid-column: 2; font-size: calc(12px * var(--font-scale)); color: var(--muted); margin: 0; letter-spacing: .06em; white-space: nowrap; }
+.talk-body { flex: 1; min-height: 0; overflow-y: auto; }
+/* 左端の境目。つかんで幅を変える。線に重ねて、つかみやすい幅を取る */
+.talk-sash { position: absolute; top: 0; bottom: 0; left: 0; width: 6px; cursor: col-resize; z-index: 1; touch-action: none; }
+.talk-sash:hover, .talk-sash:focus-visible { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); outline: none; }
+/* つかんでいる間は、文字を選ばず、どこでも境目のカーソルにする */
+body.resizing { cursor: col-resize; user-select: none; }
 /* 開け閉めのボタン。左ペインの印を左右に返して使う */
 .talk-toggle {
-  flex: none; align-self: flex-start; position: relative;
+  flex: none; position: relative;
   display: inline-flex; align-items: center; justify-content: center;
-  background: none; border: none; color: var(--muted); padding: calc(2px * var(--space-scale)) calc(4px * var(--space-scale)) calc(6px * var(--space-scale)); cursor: pointer;
+  background: none; border: none; color: var(--muted); padding: calc(2px * var(--space-scale)) calc(4px * var(--space-scale)); cursor: pointer;
 }
 .talk-toggle:hover { color: var(--accent); }
 .talk-toggle .icon { transform: scaleX(-1); }
 .talk.collapsed { padding: calc(16px * var(--space-scale)) calc(8px * var(--space-scale)); align-items: center; }
 .talk.collapsed .talk-body { display: none; }
-.talk.collapsed .talk-toggle { align-self: center; }
+.talk.collapsed .talk-head { grid-template-columns: 1fr; justify-items: center; }
+.talk.collapsed .talk-head .talk-toggle { justify-self: center; }
+.talk.collapsed .talk-head h3 { display: none; }
 
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: calc(16px * var(--space-scale)); margin-bottom: calc(12px * var(--space-scale)); }
 
@@ -437,7 +450,9 @@ pre.body { white-space: pre-wrap; background: var(--subtle-bg); border: 1px soli
     max-height: 40vh; padding: calc(16px * var(--space-scale)); align-items: stretch;
   }
   .talk.collapsed .talk-body { display: block; }
-  .talk-toggle { display: none; }
+  .talk-toggle, .talk-sash { display: none; }
+  .talk.collapsed .talk-head h3 { display: block; }
+  .talk { overflow-y: auto; }
   .pane-footer { grid-row: 3; }
 }
 @media (max-width: 680px) {

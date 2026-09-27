@@ -10,7 +10,7 @@
  */
 
 import {
-  createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode,
+  createContext, useCallback, useContext, useEffect, useRef, useState, type CSSProperties, type ReactNode,
 } from 'react';
 import { AVATAR_PRESETS } from '@m2office/shared';
 import { useTheme } from './theme.js';
@@ -85,6 +85,26 @@ export function useRemembered(key: string, initial: boolean): [boolean, (v: bool
   return [v, setV];
 }
 
+/**
+ * 数（幅など）を、端末ごとに覚えておく（仕様書 第6.2節の秘書のキャンバスの幅）。
+ *
+ * @param key 覚えておく先の鍵
+ * @param initial まだ覚えていないときの値
+ * @remarks 覚えられない環境でも動く。そのときは毎回 `initial` から始まる。読めない値は `initial` とみなす
+ */
+export function useRememberedNumber(key: string, initial: number): [number, (v: number) => void] {
+  const [v, setV] = useState(() => {
+    try {
+      const n = Number(localStorage.getItem(key));
+      return localStorage.getItem(key) !== null && Number.isFinite(n) ? n : initial;
+    } catch { return initial; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(key, String(v)); } catch { /* 覚えられなくても動く */ }
+  }, [key, v]);
+  return [v, setV];
+}
+
 function useCollapsed(): [boolean, (v: boolean) => void] {
   return useRemembered(KEY, false);
 }
@@ -96,15 +116,16 @@ function useCollapsed(): [boolean, (v: boolean) => void] {
  * @param navFooter 左ペインの最下部に固定するもの（利用者のカード）
  * @param footer 右側の下端に置くもの（秘書バー）
  * @param extraClass `panes` に足すクラス（会話ペインを開くときの `talk-open` など）
+ * @param style `panes` に渡す値（秘書のキャンバスの幅 `--talk-px` など）
  */
-export function SideNavLayout({ nav, navFooter, footer, children, extraClass = '' }: {
-  nav: ReactNode; navFooter?: ReactNode; footer?: ReactNode; children: ReactNode; extraClass?: string;
+export function SideNavLayout({ nav, navFooter, footer, children, extraClass = '', style }: {
+  nav: ReactNode; navFooter?: ReactNode; footer?: ReactNode; children: ReactNode; extraClass?: string; style?: CSSProperties;
 }) {
   const [collapsed, setCollapsed] = useCollapsed();
   // メニューの開閉（仕様書 第6.11.3節）
   useHotkey('Mod+B', useCallback(() => setCollapsed(!collapsed), [collapsed, setCollapsed]));
   return (
-    <div className={`panes${collapsed ? ' nav-collapsed' : ''}${extraClass ? ` ${extraClass}` : ''}`}>
+    <div className={`panes${collapsed ? ' nav-collapsed' : ''}${extraClass ? ` ${extraClass}` : ''}`} style={style}>
       <nav className={`left${collapsed ? ' collapsed' : ''}`} aria-label="メニュー">
         <button
           className="nav-toggle" onClick={() => setCollapsed(!collapsed)}

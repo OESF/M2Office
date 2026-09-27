@@ -6,7 +6,7 @@
  * @see 仕様書 第6.1節 ワークスペースの画面構造
  */
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { showsCaptions, type Notification } from '@m2office/shared';
 import { splitMenu, togglePinned } from './menu.js';
 import {
@@ -28,6 +28,7 @@ import {
 } from './Settings.js';
 import {
   Icon, NavHeading, NavItem, NavUserCard, PinnableNavItem, SecretaryAvatar, SideNavLayout, ThemeToggle, agentIcon, useRemembered,
+  useRememberedNumber,
 } from './nav.js';
 
 /**
@@ -171,6 +172,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
     閉じるのは本人だけで、画面を移っても閉じない
   */
   const [talkOpen, setTalkOpen] = useRemembered('m2office.talk-open', false);
+  // 秘書のキャンバスの幅（px。仕様書 第6.2節）。0 は既定の幅（左ペインを除いた残りの半分。これが最大）
+  const [talkWidth, setTalkWidth] = useRememberedNumber('m2office.talk-width', 0);
   /** 音声で話している間か。その間に終わった調べものは、中継が声で伝える（第6.2.0節）。 */
   const voiceOn = useRef(false);
   /** 秘書のキャンバスに結果を出す。前の結果は置き換える（第6.2.0節）。 */
@@ -349,6 +352,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
 
       <SideNavLayout
         extraClass={talkOpen ? 'talk-open' : ''}
+        style={talkWidth > 0 ? ({ '--talk-px': `${talkWidth}px` } as CSSProperties) : undefined}
         nav={(
           <>
             <NavHeading>業務</NavHeading>
@@ -504,14 +508,19 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
 
         {/* 秘書のキャンバス。秘書が結果を見せる場所で、会話の履歴は並べない（仕様書 第6.2節、ADR-0026） */}
         <aside className={`talk${talkOpen ? '' : ' collapsed'}`} aria-label="秘書のキャンバス">
-          <button
-            className="talk-toggle" onClick={() => setTalkOpen(!talkOpen)}
-            title={talkOpen ? '秘書のキャンバスを閉じる' : '秘書のキャンバスを開く'}
-            aria-label={talkOpen ? '秘書のキャンバスを閉じる' : '秘書のキャンバスを開く'} aria-expanded={talkOpen}
-          >
-            <Icon name={talkOpen ? 'nav-collapse' : 'nav-expand'} />
-            {!talkOpen && result && result.id !== seen && <span className="nav-dot" title="まだ見ていない結果があります">1</span>}
-          </button>
+          {talkOpen && <CanvasSash onChange={setTalkWidth} />}
+          {/* 開け閉めのボタンと題を 1 行に置く。題のために 1 行を使わない（第6.2節） */}
+          <div className="talk-head">
+            <button
+              className="talk-toggle" onClick={() => setTalkOpen(!talkOpen)}
+              title={talkOpen ? '秘書のキャンバスを閉じる' : '秘書のキャンバスを開く'}
+              aria-label={talkOpen ? '秘書のキャンバスを閉じる' : '秘書のキャンバスを開く'} aria-expanded={talkOpen}
+            >
+              <Icon name={talkOpen ? 'nav-collapse' : 'nav-expand'} />
+              {!talkOpen && result && result.id !== seen && <span className="nav-dot" title="まだ見ていない結果があります">1</span>}
+            </button>
+            <h3>秘書のキャンバス</h3>
+          </div>
           <div className="talk-body">
             {result ? (
               <CanvasView
@@ -522,9 +531,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
                   if (hit) setView({ kind: 'agent', agent: hit, ...(fileId ? { fileId } : {}) });
                 }}
               />
-            ) : (
-              <h3>秘書のキャンバス</h3>
-            )}
+            ) : null}
           </div>
         </aside>
       </SideNavLayout>
@@ -639,6 +646,73 @@ export interface CanvasResult {
   fileId?: string | null;
   helpArticles?: { id: string; title: string }[];
   evidence?: { label: string; value: string; kind?: 'source' }[];
+}
+
+/** 秘書のキャンバスの幅の下限（px。仕様書 第6.2節）。これより狭いと答えが読めない。 */
+const TALK_MIN_WIDTH = 280;
+/** キーボードで幅を変えるときの 1 回の量（px）。 */
+const TALK_WIDTH_STEP = 24;
+
+/**
+ * 秘書のキャンバスの左端の境目（仕様書 第6.2節）。つかんで左右に動かすと幅が変わる。
+ *
+ * @param onChange 新しい幅（px）。**0 は既定の幅**（左ペインを除いた残りの半分）を表す
+ *
+ * @remarks
+ * 広げられるのは既定の幅まで。いちばん広くしたら 0（既定）として覚え、画面の広さが変わっても半分に追従させる。
+ * ダブルクリックで既定の幅に戻す。キーボードでは、境目に移って左右の矢印で変える。
+ * 狭い画面（キャンバスの下に積むとき）では CSS で隠す。
+ */
+function CanvasSash({ onChange }: { onChange: (px: number) => void }) {
+  const sash = useRef<HTMLDivElement>(null);
+  const dragging = useRef(false);
+
+  /** いまの幅と、広げられる上限（左ペインを除いた残りの半分）。 */
+  const measure = () => {
+    const aside = sash.current?.parentElement;
+    const nav = aside?.parentElement?.querySelector('.left');
+    if (!aside || !nav) return null;
+    const box = aside.getBoundingClientRect();
+    return { right: box.right, width: box.width, max: (box.right - nav.getBoundingClientRect().right) / 2 };
+  };
+  /** 幅を下限と上限の間に収めて渡す。上限に届いたら既定（0）にする。 */
+  const apply = (px: number, max: number) => {
+    const w = Math.round(Math.max(TALK_MIN_WIDTH, Math.min(px, max)));
+    onChange(w >= Math.floor(max) - 1 ? 0 : w);
+  };
+
+  return (
+    <div
+      ref={sash} className="talk-sash" role="separator" aria-orientation="vertical" tabIndex={0}
+      aria-label="秘書のキャンバスの幅" title="ドラッグで幅を変える（ダブルクリックで元の幅）"
+      onPointerDown={(e) => {
+        e.preventDefault();
+        e.currentTarget.setPointerCapture(e.pointerId);
+        dragging.current = true;
+        document.body.classList.add('resizing');
+      }}
+      onPointerMove={(e) => {
+        if (!dragging.current) return;
+        const m = measure();
+        if (m) apply(m.right - e.clientX, m.max);
+      }}
+      onPointerUp={(e) => {
+        dragging.current = false;
+        e.currentTarget.releasePointerCapture(e.pointerId);
+        document.body.classList.remove('resizing');
+      }}
+      onDoubleClick={() => onChange(0)}
+      onKeyDown={(e) => {
+        const m = measure();
+        if (!m) return;
+        // 境目は左端にある。左へ動かすと広がり、右へ動かすと狭まる
+        if (e.key === 'ArrowLeft') apply(m.width + TALK_WIDTH_STEP, m.max);
+        else if (e.key === 'ArrowRight') apply(m.width - TALK_WIDTH_STEP, m.max);
+        else return;
+        e.preventDefault();
+      }}
+    />
+  );
 }
 
 /**
