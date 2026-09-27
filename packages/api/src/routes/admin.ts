@@ -10,14 +10,15 @@ import { randomUUID } from 'node:crypto';
 import { Hono, type Context } from 'hono';
 import {
   isValidInvoiceNumber, parsePresentationId, type AutomationPolicy, type CompanyInfo, type Role, type SlideTemplate, type TenantSettings,
-  type User, type WritingStyle,
+  type AuditEvent, type User, type WritingStyle,
 } from '@m2office/shared';
 import {
   DEFAULT_STANDARD_MINUTES, GOOGLE_DATA_RETENTION_DAYS, KNOWLEDGE_MAX_CHARS,
-  stepLabel, toolGoogleScopes,
+  stepLabel, toolGoogleScopes, type AuditQuery,
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { requireRole, type AppEnv } from '../middleware/tenant.js';
+import { AUDIT_CATEGORIES, auditCsv, presentAudit, type AuditNames } from '../audit/present.js';
 
 /**
  * 管理者ページ（`/admin`）が使う API（仕様書 第6.6節）。
@@ -114,10 +115,39 @@ export function adminRoute(deps: AppDeps) {
   });
 
   /** 監査ログ（第16.6節）。 */
+  /**
+   * 監査ログ（仕様書 第6.6.8.1節）。期間・人・操作の種類で絞り、誰が（人の名前）・何をしたか（業務の言葉）・何に対して（名前）で返す。
+   *
+   * @remarks 記録の名前と値も並べて返す。`people` と `categories` は絞り込みの選択肢
+   */
   app.get('/audit-events', async (c) => {
     const { tenant } = c.get('ctx');
-    const items = await deps.repo.listAudit(tenant.id, 200);
-    return c.json({ items });
+    const q = auditQuery(c.req.query());
+    const events = await deps.repo.searchAudit(tenant.id, q);
+    const names = await auditNames(deps, tenant.id, events);
+    const users = await deps.repo.listUsers(tenant.id);
+    return c.json({
+      items: events.map((e) => presentAudit(e, names)),
+      hasMore: events.length === q.limit,
+      people: users.map((u) => ({ id: u.id, name: u.displayName })),
+      categories: AUDIT_CATEGORIES.map((x) => ({ id: x.id, label: x.label })),
+    });
+  });
+
+  /** 監査ログを CSV で出力する（絞った結果をそのまま）。出力したことも記録する（第6.6.8.1節）。 */
+  app.get('/audit-events/export', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const q = { ...auditQuery(c.req.query()), limit: AUDIT_EXPORT_MAX, offset: 0 };
+    const events = await deps.repo.searchAudit(tenant.id, q);
+    const names = await auditNames(deps, tenant.id, events);
+    await deps.repo.appendAudit({
+      id: randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id, action: 'audit.export', targetType: 'audit', targetId: 'csv',
+      detail: { from: q.from ?? null, to: q.to ?? null, userId: q.userId ?? null, actions: q.actions ?? null, rows: events.length },
+      occurredAt: new Date().toISOString(),
+    });
+    c.header('Content-Type', 'text/csv; charset=utf-8');
+    c.header('Content-Disposition', `attachment; filename="audit-${new Date().toISOString().slice(0, 10)}.csv"`);
+    return c.body(auditCsv(events.map((e) => presentAudit(e, names))));
   });
 
   /** 会社の設定をまとめて返す（第6.6.1節、第6.6.5節、第15.2.1節）。 */
@@ -508,3 +538,66 @@ async function audit(
     detail, occurredAt: new Date().toISOString(),
   });
 }
+
+/** 画面の 1 回で返す監査ログの件数（第6.6.8.1節）。 */
+const AUDIT_PAGE = 200;
+/** CSV に出す上限の件数。 */
+const AUDIT_EXPORT_MAX = 10_000;
+/** 期間を指定しないときの既定（直近 7 日）。 */
+const AUDIT_DEFAULT_DAYS = 7;
+
+/**
+ * 画面の絞り込みを、監査ログの問い合わせにする。
+ *
+ * @param p `from`・`to`（日付 `YYYY-MM-DD`。日本時間の一日として扱い、`to` はその日の終わりまで）、`user`、`category`、`offset`
+ */
+function auditQuery(p: Record<string, string>): AuditQuery {
+  const day = (v: string | undefined, end: boolean) => {
+    if (!v || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return undefined;
+    const t = new Date(`${v}T00:00:00+09:00`);
+    if (end) t.setUTCDate(t.getUTCDate() + 1);
+    return t.toISOString();
+  };
+  const from = day(p['from'], false) ?? new Date(Date.now() - AUDIT_DEFAULT_DAYS * 86_400_000).toISOString();
+  const category = AUDIT_CATEGORIES.find((x) => x.id === p['category']);
+  const offset = Math.max(0, Number(p['offset']) || 0);
+  return {
+    from, ...(day(p['to'], true) ? { to: day(p['to'], true)! } : {}),
+    ...(p['user'] ? { userId: p['user'] } : {}),
+    ...(category ? { actions: category.prefixes } : {}),
+    limit: AUDIT_PAGE, offset,
+  };
+}
+
+/**
+ * 監査ログに出てくる ID の名前をまとめて引く（人・業務・接続・グループ・区画・実行）。
+ *
+ * @remarks 実行は、対象か根拠の `runId` に出てくるものだけを引く。引けないものは `undefined`（記録の値のまま出す）
+ */
+async function auditNames(deps: AppDeps, tenantId: string, events: AuditEvent[]): Promise<AuditNames> {
+  const [users, view, groups, compartments] = await Promise.all([
+    deps.repo.listUsers(tenantId), deps.tenantView(tenantId),
+    deps.repo.listGroups(tenantId).catch(() => []), deps.repo.listCompartmentAssignments(tenantId).catch(() => []),
+  ]);
+  const runIds = new Set<string>();
+  for (const e of events) {
+    // 秘書の記録の対象は、起こした実行の ID のことがある（調べもの・取次）
+    if (e.targetType === 'run' || (e.targetType === 'secretary' && /^[0-9a-f-]{36}$/.test(e.targetId))) runIds.add(e.targetId);
+    if (typeof e.detail?.['runId'] === 'string') runIds.add(e.detail['runId'] as string);
+  }
+  const runs = new Map<string, { agentName: string; requestedBy: string }>();
+  for (const id of runIds) {
+    const run = await deps.repo.getRun(tenantId, id).catch(() => null);
+    const job = run ? await deps.repo.getJob(tenantId, run.jobId).catch(() => null) : null;
+    if (job) runs.set(id, { agentName: view.allAgents.find((a) => a.id === job.agentId)?.name ?? job.agentId, requestedBy: job.requestedBy });
+  }
+  return {
+    user: (id) => users.find((u) => u.id === id)?.displayName,
+    agent: (id) => view.allAgents.find((a) => a.id === id)?.name,
+    connection: (id) => view.connections.find((x) => x.id === id)?.name,
+    group: (id) => groups.find((g) => g.id === id)?.name,
+    compartment: (id) => compartments.find((x) => x.id === id)?.name,
+    run: (id) => runs.get(id),
+  };
+}
+

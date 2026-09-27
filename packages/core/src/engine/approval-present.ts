@@ -175,3 +175,63 @@ export function composeApprovalPresent(p: {
   out.push('却下すると、ここで止まり、上のことは行いません。');
   return out.join('\n').trim();
 }
+
+/** 承認のあとに実際に行った操作 1 件（仕様書 第6.2.5節）。 */
+export interface ExecutedCall {
+  /** 業務の言葉で、何をしたか（承認の画面の 1 行目と同じ言い方）。 */
+  text: string;
+  /** 相手のリンク（投稿・文書・予定など）。無ければ `null`。 */
+  link: string | null;
+  /** 失敗したときの理由。 */
+  error: string | null;
+}
+
+/**
+ * 承認の段の記録から、承認のあとに実際に行った操作と結果を取り出す（仕様書 第6.2.5節「実際に行ったこと」）。
+ *
+ * @param step 承認の段（`input.toolCalls` に記録した操作、`output.tools` に行った結果がある）
+ * @returns 行った操作。承認の前の組み立てが無い・まだ行っていない・却下したときは空
+ */
+export function executedCalls(step: RunStep | null, ctx: DescribeContext = {}): ExecutedCall[] {
+  const input = (step?.input ?? {}) as { toolCalls?: { name: string; args: Record<string, unknown>; shown?: string }[] };
+  const output = (step?.output ?? {}) as { executed?: boolean; tools?: { name: string; result?: unknown }[] };
+  if (!output.executed || !Array.isArray(output.tools)) return [];
+  const calls = input.toolCalls ?? [];
+  return output.tools.map((t, i) => {
+    const call = calls[i]?.name === t.name ? calls[i]! : calls.find((c) => c.name === t.name) ?? { name: t.name, args: {} };
+    const r = (t.result ?? {}) as Record<string, unknown>;
+    return {
+      // 1 行目だけ（本文は承認の画面に出ている）
+      text: describeCall(call, ctx).split('\n')[0]!,
+      link: firstLink(t.result),
+      error: typeof r['error'] === 'string' ? r['error'] : null,
+    };
+  });
+}
+
+/**
+ * 結果の中の最初の相手のリンク（http・https）。深く探しすぎない。
+ *
+ * @remarks 会社の接続（MCP）の結果は JSON の文字で返ることがある（Slack の `message_link`）ため、文字の中も探す
+ */
+function firstLink(v: unknown, depth = 0): string | null {
+  if (depth > 4 || v === null || v === undefined) return null;
+  if (typeof v === 'string') {
+    const m = /https?:\\?\/\\?\/[^\s"'<>)\]]+/.exec(v);
+    return m ? m[0].replace(/\\\//g, '/') : null;
+  }
+  if (Array.isArray(v)) {
+    for (const x of v) { const l = firstLink(x, depth + 1); if (l) return l; }
+    return null;
+  }
+  if (typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    // よく使う名前を先に見る
+    for (const k of ['url', 'link', 'message_link', 'webViewLink', 'htmlLink', 'permalink']) {
+      if (typeof o[k] === 'string' && /^https?:/.test(o[k] as string)) return o[k] as string;
+    }
+    for (const x of Object.values(o)) { const l = firstLink(x, depth + 1); if (l) return l; }
+  }
+  return null;
+}
+

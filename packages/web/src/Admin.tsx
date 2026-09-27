@@ -5,8 +5,7 @@
  */
 
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
-import type { AuditEvent } from '@m2office/shared';
-import { api, describeError, type AdminRun, type AdminRunStatus, type Me } from './api.js';
+import { api, describeError, type AdminRun, type AdminRunStatus, type AuditFilter, type AuditRowView, type Me } from './api.js';
 import { statusLabel, SuspendedBanner } from './components.js';
 import {
   AgentSettings, CompanySettings, KnowledgeSettings, UserSettings,
@@ -394,27 +393,109 @@ function RunRow({ run, requester }: { run: AdminRun; requester: string }) {
   );
 }
 
+/**
+ * 監査ログ（仕様書 第6.6.8.1節）。誰が（人の名前）・何をしたか（業務の言葉）・何に対して（名前）を並べる。
+ * 期間・人・操作の種類で絞り、行を押すとその場で詳細を開く。絞った結果を CSV で保存できる。
+ */
 function Audit() {
-  const { data, error } = useLoad(api.admin.audit);
+  const today = new Date(Date.now() + 9 * 3_600_000).toISOString().slice(0, 10);
+  const weekAgo = new Date(Date.now() + 9 * 3_600_000 - 6 * 86_400_000).toISOString().slice(0, 10);
+  const [filter, setFilter] = useState<AuditFilter>({ from: weekAgo, to: today });
+  const [rows, setRows] = useState<AuditRowView[]>([]);
+  const [choices, setChoices] = useState<{ people: { id: string; name: string }[]; categories: { id: string; label: string }[] }>({ people: [], categories: [] });
+  const [hasMore, setHasMore] = useState(false);
+  const [open, setOpen] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  /** 絞り込みで読み直す。`more` なら続きを足す。 */
+  const load = useCallback(async (f: AuditFilter, more = false) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await api.admin.audit({ ...f, offset: more ? rows.length : 0 });
+      setRows((x) => (more ? [...x, ...r.items] : r.items));
+      setHasMore(r.hasMore);
+      setChoices({ people: r.people, categories: r.categories });
+    } catch (e) {
+      setError(describeError(e, '読み込めませんでした'));
+    } finally {
+      setBusy(false);
+    }
+  }, [rows.length]);
+  // 絞り込みを変えたら読み直す（続きの件数には依らない）
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { void load(filter); }, [filter]);
+
+  const set = (k: keyof AuditFilter, v: string) => setFilter((f) => ({ ...f, [k]: v || undefined }));
+
   return (
     <>
       <PageTitle trail={['監査ログ']} help={{
         article: 'admin-audit',
         text: '「いつ・誰が・何をしたか」の記録です。変えることも消すこともできません。会話や成果物の中身は残しません。',
       }} />
-      <p className="muted small">直近 200 件</p>
+      <div className="card audit-filter">
+        <div className="field"><label>期間</label>
+          <div className="row small">
+            <input type="date" value={filter.from ?? ''} onChange={(e) => set('from', e.target.value)} />
+            <span>〜</span>
+            <input type="date" value={filter.to ?? ''} onChange={(e) => set('to', e.target.value)} />
+          </div>
+        </div>
+        <div className="field"><label>人</label>
+          <select value={filter.user ?? ''} onChange={(e) => set('user', e.target.value)}>
+            <option value="">全員</option>
+            {choices.people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </div>
+        <div className="field"><label>操作の種類</label>
+          <select value={filter.category ?? ''} onChange={(e) => set('category', e.target.value)}>
+            <option value="">すべて</option>
+            {choices.categories.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
+          </select>
+        </div>
+        <button className="btn ghost small" disabled={rows.length === 0}
+          onClick={() => void api.admin.downloadAudit(filter).catch((e) => setError(describeError(e, '出力できませんでした')))}>
+          CSV で保存
+        </button>
+      </div>
       {error && <p className="error">{error}</p>}
-      <table className="table">
-        <thead><tr><th>日時</th><th>主体</th><th>操作</th><th>対象</th></tr></thead>
-        <tbody>
-          {data?.items.map((e: AuditEvent) => (
-            <tr key={e.id}>
-              <td>{time(e.occurredAt)}</td><td>{e.actorType}: {e.actorId}</td>
-              <td><code>{e.action}</code></td><td>{e.targetType}: {e.targetId.slice(0, 16)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      {!busy && rows.length === 0 && !error && <p className="muted">この条件の記録はありません</p>}
+      {rows.length > 0 && (
+        <table className="table audit-table">
+          <thead><tr><th>日時</th><th>誰が</th><th>何をしたか</th><th>何に対して</th></tr></thead>
+          <tbody>
+            {rows.map((r) => (
+              <Fragment key={r.id}>
+                <tr className="clickable" onClick={() => setOpen(open === r.id ? null : r.id)} aria-expanded={open === r.id}>
+                  <td>{time(r.occurredAt)}</td><td>{r.who}</td><td>{r.what}</td><td>{r.target}</td>
+                </tr>
+                {open === r.id && (
+                  <tr className="audit-detail">
+                    <td colSpan={4}>
+                      <dl className="kv">
+                        <dt>種類</dt><dd>{r.category}</dd>
+                        {Object.entries(r.detail).map(([k, v]) => (
+                          <Fragment key={k}><dt>{k}</dt><dd>{typeof v === 'string' ? v : JSON.stringify(v)}</dd></Fragment>
+                        ))}
+                        <dt>記録の名前</dt><dd><code>{r.action}</code></dd>
+                        <dt>記録の主体</dt><dd><code>{r.actor}</code></dd>
+                        <dt>記録の対象</dt><dd><code>{r.targetRaw}</code></dd>
+                      </dl>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {hasMore && (
+        <button className="btn ghost small" disabled={busy} onClick={() => void load(filter, true)}>
+          {busy ? '読み込んでいます…' : 'さらに読む'}
+        </button>
+      )}
     </>
   );
 }

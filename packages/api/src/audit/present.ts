@@ -1,0 +1,262 @@
+/**
+ * @file 監査ログを、管理者が読める言葉にする（仕様書 第6.6.8.1節）。誰が（人の名前・指示した人）、何をしたか（業務の言葉）、何に対して（名前）。
+ *
+ * 記録そのものは書き換えない。見せるときに言葉を足すだけで、記録の名前と値も並べて返す。
+ * 引けない名前は推測で作らず、記録の値のまま出す。
+ */
+
+import type { AuditEvent } from '@m2office/shared';
+
+/** 操作の名前を業務の言葉にする。無い名前は記録の名前のまま出す。 */
+const ACTION_LABELS: Record<string, string> = {
+  'auth.login': 'ログインした',
+  'auth.login.denied': 'ログインを断られた',
+  'auth.logout': 'ログアウトした',
+  'auth.revoke': 'ログイン中の端末を切った',
+  'approval.decide': '承認・却下した',
+  'approval.auto': '承認が自動で通過した',
+  'job.create': '業務を依頼した',
+  'run.complete': '業務が完了した',
+  'run.fail': '業務が失敗した',
+  'run.cancel': '業務を止めた',
+  'run.expire': '承認待ちの業務を期限切れにした',
+  'run.await_approval': '業務が承認待ちになった',
+  'run.awaiting_approval': '業務が承認待ちになった',
+  'run.await_confirmation': '業務が操作の確認待ちになった',
+  'run.finished': '業務が終わった',
+  'tool.invoke': '業務が道具を使った',
+  'tool.blocked': '承認の前の送信を止めた',
+  'secretary.chat': '秘書と話した',
+  'secretary.direct': '秘書が定型の照会に答えた',
+  'secretary.route': '秘書が業務に取り次いだ',
+  'secretary.delegate': '秘書が業務に頼んだ',
+  'secretary.lookup': '秘書が調べものを起こした',
+  'secretary.promise': '秘書が約束した調べものを起こした',
+  'secretary.file': '秘書にファイルを渡した',
+  'secretary.help': '秘書がヘルプで答えた',
+  'secretary.todo': '秘書が ToDo を受けた',
+  'secretary.correct': '秘書の覚えたことを直した',
+  'secretary.schedule': '秘書が定時実行を操作した',
+  'secretary.voice': '秘書と音声で話した',
+  'secretary.plan.create': '秘書が段取りを組んだ',
+  'secretary.plan.step': '段取りの業務を起こした',
+  'secretary.plan.report': '段取りをまとめて報告した',
+  'secretary.plan.cancel': '段取りを取りやめた',
+  'secretary.plan.answer': '段取りの問いに答えた',
+  'connection.google.connect': 'Google と接続した',
+  'connection.google.disconnect': 'Google との接続を取り消した',
+  'connection.google.update': 'Google の接続の設定を変えた',
+  'connection.google.update_rejected': 'Google の接続の設定が確かめで断られた',
+  'connection.google.delete': 'Google の接続の設定を消した',
+  'connection.gemini.update': 'Gemini の設定を変えた',
+  'connection.gemini.delete_key': 'Gemini の鍵を消した',
+  'connection.mcp.create': 'コネクタを登録した',
+  'connection.mcp.update': 'コネクタの危険度などを変えた',
+  'connection.mcp.refresh': 'コネクタの道具を取り直した',
+  'connection.mcp.delete': 'コネクタを消した',
+  'connection.mcp.tool.toggle': 'コネクタの道具を入り切りした',
+  'connection.secret.update': '接続の鍵・シークレットを登録した',
+  'connection.oauth.connect': 'サービスと接続した',
+  'connection.oauth.disconnect': 'サービスとの接続を取り消した',
+  'connection.oauth.lost': 'サービスとの接続が切れた',
+  'extension.import': '拡張機能を取り込んだ',
+  'extension.install': '拡張機能を導入した',
+  'extension.uninstall': '拡張機能を削除した',
+  'extension.enable': '拡張機能を有効にした',
+  'extension.disable': '拡張機能を無効にした',
+  'extension.tool.toggle': '道具を入り切りした',
+  'user.invite': '利用者を招待した',
+  'user.update': '利用者の役割・状態を変えた',
+  'group.create': 'グループを作った',
+  'group.update': 'グループを変えた',
+  'group.delete': 'グループを消した',
+  'group.members': 'グループの所属を変えた',
+  'compartment.create': '権限区画を作った',
+  'compartment.delete': '権限区画を消した',
+  'compartment.assign': '権限区画に割り当てた',
+  'compartment.enable': '権限区画を有効にした',
+  'compartment.disable': '権限区画を無効にした',
+  'compartment.enter': '権限区画のデータを見た',
+  'compartment.leave': '権限区画から外れた',
+  'settings.update': '会社の設定を変えた',
+  'me.settings.update': '個人設定を変えた',
+  'me.profile.update': '表示名を変えた',
+  'onboarding.notified': 'はじめの設定を知らせた',
+  'knowledge.save': '知識を登録した',
+  'knowledge.delete': '知識を消した',
+  'knowledge.correct': '知識を直した',
+  'knowledge.register': '業務が知識に登録した',
+  'knowledge.promote.auto': '秘書が覚えたことを会社の知識にした',
+  'memory.create': '覚えることを登録した',
+  'memory.update': '覚えたことを直した',
+  'memory.delete': '覚えたことを消した',
+  'memory.clear': '覚えたことをすべて消した',
+  'memory.learn': '秘書が会話から学んだ',
+  'conversation.clear': '会話ログをすべて消した',
+  'conversation.delete': '会話ログを消した',
+  'schedule.create': '定時実行を登録した',
+  'schedule.update': '定時実行を変えた',
+  'schedule.delete': '定時実行を消した',
+  'schedule.trigger': '定時実行を今すぐ動かした',
+  'schedule.skip': '定時実行を飛ばした',
+  'file.upload': 'ファイルを上げた',
+  'notification.deliver': '通知を届けた',
+  'audit.export': '監査ログを出力した',
+};
+
+/** 操作の種類（絞り込みの単位）。`prefixes` のどれかで始まる操作が当たる。 */
+export const AUDIT_CATEGORIES: { id: string; label: string; prefixes: string[] }[] = [
+  { id: 'login', label: 'ログイン', prefixes: ['auth.'] },
+  { id: 'approval', label: '承認', prefixes: ['approval.'] },
+  { id: 'run', label: '業務の実行', prefixes: ['job.', 'run.', 'tool.'] },
+  { id: 'secretary', label: '秘書', prefixes: ['secretary.'] },
+  { id: 'connection', label: '接続', prefixes: ['connection.'] },
+  { id: 'extension', label: '拡張機能', prefixes: ['extension.'] },
+  { id: 'users', label: 'ユーザーと権限', prefixes: ['user.', 'group.', 'compartment.'] },
+  { id: 'settings', label: '設定', prefixes: ['settings.', 'me.', 'onboarding.'] },
+  { id: 'knowledge', label: '知識と記憶', prefixes: ['knowledge.', 'memory.', 'conversation.'] },
+  { id: 'schedule', label: '定時実行', prefixes: ['schedule.'] },
+];
+
+/** 仕組みの名前（主体が `system` のとき）。 */
+const SYSTEM_LABELS: Record<string, string> = {
+  scheduler: '定時実行',
+  engine: '業務の実行',
+  learning: '秘書の学習',
+  notifier: '通知',
+  retention: 'データの保持期間の処理',
+  revocation: '許可の取り消しの後始末',
+  connection: '接続の見張り',
+  conductor: '秘書の指揮',
+  proactive: '秘書の先回り',
+  worker: '業務の実行',
+  onboarding: 'はじめの設定の案内',
+  notify: '通知',
+};
+
+/** 秘書の応答の層などの記録の値（`secretary.chat` の `full` など）。 */
+const SECRETARY_TARGETS: Record<string, string> = { full: '会話', direct: '定型の照会', light: '取次', start: '音声の始まり', end: '音声の終わり' };
+
+/** 見せるための名前を引く口。引けなければ `undefined`（記録の値のまま出す）。 */
+export interface AuditNames {
+  user(id: string): string | undefined;
+  agent(id: string): string | undefined;
+  connection(id: string): string | undefined;
+  group(id: string): string | undefined;
+  compartment(id: string): string | undefined;
+  /** 実行の業務の名前と依頼した人の ID。 */
+  run(id: string): { agentName: string; requestedBy: string } | undefined;
+}
+
+/** 画面と CSV に出す 1 行。記録の名前と値も並べる。 */
+export interface AuditRow {
+  id: string;
+  occurredAt: string;
+  who: string;
+  what: string;
+  target: string;
+  category: string;
+  action: string;
+  actor: string;
+  targetRaw: string;
+  detail: Record<string, unknown>;
+  /** 記録の値そのもの（API を読む側が突き合わせに使う）。 */
+  actorType: AuditEvent['actorType'];
+  actorId: string;
+  targetType: string;
+  targetId: string;
+}
+
+/** 操作が属する種類。どれにも当たらなければ「その他」。 */
+export function categoryOf(action: string): string {
+  return AUDIT_CATEGORIES.find((c) => c.prefixes.some((p) => action.startsWith(p)))?.label ?? 'その他';
+}
+
+/**
+ * 監査ログ 1 件を、誰が・何をしたか・何に対してに直す（仕様書 第6.6.8.1節）。
+ *
+ * @remarks 秘書と業務が行ったものは、指示した人を添える（第16.6節「本人を主体として記録する」）
+ */
+export function presentAudit(e: AuditEvent, names: AuditNames): AuditRow {
+  const person = (id: string) => names.user(id) ?? id;
+  const runId = typeof e.detail?.['runId'] === 'string' ? e.detail['runId'] : null;
+  const run = runId ? names.run(runId) : undefined;
+  const who = e.actorType === 'user' ? person(e.actorId)
+    : e.actorType === 'secretary' ? `秘書（${person(e.actorId)}さんの依頼）`
+    : e.actorType === 'agent' ? `業務「${names.agent(e.actorId) ?? run?.agentName ?? e.actorId}」${run ? `（${person(run.requestedBy)}さんの依頼）` : ''}`
+    : e.actorType === 'api_client' ? `外部アプリ（${e.actorId}）`
+    : `システム（${SYSTEM_LABELS[e.actorId] ?? e.actorId}）`;
+  return {
+    id: e.id, occurredAt: e.occurredAt, who, what: whatOf(e), target: targetOf(e, names), category: categoryOf(e.action),
+    action: e.action, actor: `${e.actorType}: ${e.actorId}`, targetRaw: `${e.targetType}: ${e.targetId}`, detail: e.detail ?? {},
+    actorType: e.actorType, actorId: e.actorId, targetType: e.targetType, targetId: e.targetId,
+  };
+}
+
+/** 何をしたか。承認は承認か却下かまで言う。 */
+function whatOf(e: AuditEvent): string {
+  if (e.action === 'approval.decide') {
+    const d = e.detail?.['decision'];
+    if (d === 'approved') return '承認した';
+    if (d === 'rejected') return '却下した';
+  }
+  return ACTION_LABELS[e.action] ?? e.action;
+}
+
+/** 何に対してか。分かるものは名前にする。 */
+function targetOf(e: AuditEvent, names: AuditNames): string {
+  const id = e.targetId;
+  switch (e.targetType) {
+    case 'user': return names.user(id) ?? id;
+    case 'run': {
+      const r = names.run(id);
+      return r ? `業務「${r.agentName}」の実行` : `実行 ${id.slice(0, 8)}`;
+    }
+    case 'agent': return names.agent(id) ? `業務「${names.agent(id)}」` : id;
+    case 'approval': {
+      // 承認の記録は、どの業務の承認かを添える
+      const runId = typeof e.detail?.['runId'] === 'string' ? e.detail['runId'] : '';
+      const r = runId ? names.run(runId) : undefined;
+      return r ? `業務「${r.agentName}」の承認` : `承認 ${id.slice(0, 8)}`;
+    }
+    case 'connection': return names.connection(id) ? `接続「${names.connection(id)}」` : id;
+    case 'group': return names.group(id) ? `グループ「${names.group(id)}」` : id;
+    case 'compartment': return names.compartment(id) ? `区画「${names.compartment(id)}」` : id;
+    case 'tool': {
+      // 会社の接続の道具（`slack.slack_send_message`）は接続の名前を添える
+      const [head, ...rest] = id.split('.');
+      const conn = head ? names.connection(head) : undefined;
+      return conn && rest.length > 0 ? `${conn} の道具 ${rest.join('.')}` : `道具 ${id}`;
+    }
+    case 'job': {
+      // 依頼の記録は、根拠に業務の ID を持つ
+      const agentId = typeof e.detail?.['agentId'] === 'string' ? e.detail['agentId'] : '';
+      return agentId ? `業務「${names.agent(agentId) ?? agentId}」` : `依頼 ${id.slice(0, 8)}`;
+    }
+    // 秘書の記録の対象は、取り次いだ業務か、起こした実行か、応答の層
+    case 'secretary': return names.agent(id) ? `業務「${names.agent(id)}」` : names.run(id) ? `業務「${names.run(id)!.agentName}」の実行` : (SECRETARY_TARGETS[id] ?? id);
+    case 'session': return 'ログイン中の端末';
+    case 'tenant': case 'tenant_settings': return '会社の設定';
+    case 'user_settings': return '個人設定';
+    case 'audit': return '監査ログ';
+    case 'conversation': return '会話ログ';
+    default: return id ? `${id}` : '—';
+  }
+}
+
+/** CSV の 1 項目。区切り・引用・改行を含む値を囲む。 */
+function cell(v: string): string {
+  return /[",\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+}
+
+/**
+ * 監査ログを CSV にする（Excel で開けるよう BOM 付き）。列は日時・誰が・何をしたか・何に対して・種類・記録の名前・記録の値・詳細。
+ */
+export function auditCsv(rows: AuditRow[], timeZone = 'Asia/Tokyo'): string {
+  const head = ['日時', '誰が', '何をしたか', '何に対して', '種類', '記録の名前', '記録の主体', '記録の対象', '詳細'];
+  const fmt = new Intl.DateTimeFormat('ja-JP', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  const lines = rows.map((r) => [
+    fmt.format(new Date(r.occurredAt)), r.who, r.what, r.target, r.category, r.action, r.actor, r.targetRaw, JSON.stringify(r.detail),
+  ].map(cell).join(','));
+  return `﻿${[head.join(','), ...lines].join('\r\n')}\r\n`;
+}

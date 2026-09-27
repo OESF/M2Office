@@ -52,7 +52,14 @@ export function runsRoute(deps: AppDeps) {
     const def = agents.find((a) => a.id === job.agentId);
     const labels = new Map((def?.steps ?? []).map((st) => [st.id, stepLabel(st)]));
     const labelled = steps.map((st) => ({ ...st, label: labels.get(st.stepId) ?? st.stepId }));
-    return c.json({ run, job, steps: labelled, artifacts });
+    // 誰がいつ判断したか（仕様書 第6.2.5節）。依頼した人が、自分の業務を誰が承認したかを確かめられるように
+    const decisions = [];
+    for (const a of await deps.repo.listRunApprovals(ctx.tenant.id, id)) {
+      if (!a.decision) continue;
+      const who = a.decidedBy ? (await deps.repo.findUserById(ctx.tenant.id, a.decidedBy))?.displayName ?? null : null;
+      decisions.push({ runStepId: a.runStepId, decision: a.decision, decidedBy: who, decidedAt: a.decidedAt, comment: a.comment });
+    }
+    return c.json({ run, job, steps: labelled, artifacts, decisions });
   });
 
   /**

@@ -59,6 +59,12 @@ export interface Repository {
   listPendingApprovals(tenantId: string): Promise<Approval[]>;
   /** 1 つの実行の承認（判断済みを含む）。実行の中身を見られる人の判定に使う（仕様書 第6.2.1節）。 */
   listRunApprovals(tenantId: string, runId: string): Promise<Approval[]>;
+  /**
+   * その人が判断した承認と却下（仕様書 第6.2.5節）。新しい順。自動で通過したもの・期限切れ・取り消しは含まない。
+   *
+   * @returns 承認と、その実行と依頼の要点（業務・依頼した人）
+   */
+  listDecidedApprovals(tenantId: string, userId: string, limit: number): Promise<DecidedApproval[]>;
   /** 入力にそのファイルの ID を含む依頼の実行の承認（判断済みを含む）。利用者が上げたファイルを開ける人の判定に使う。 */
   listApprovalsForFileInput(tenantId: string, fileId: string): Promise<Approval[]>;
   /** 指定した時刻より前から承認待ちの承認（期限切れの見回り。仕様書 第14.3.2節）。 */
@@ -431,6 +437,14 @@ export interface Repository {
   /** 監査ログを追記する。更新と削除は用意しない（仕様書 第16.6節）。 */
   appendAudit(event: AuditEvent): Promise<void>;
   listAudit(tenantId: string, limit: number): Promise<AuditEvent[]>;
+  /**
+   * 監査ログを絞って探す（仕様書 第6.6.8.1節）。新しい順。
+   *
+   * @remarks
+   * `userId` は、その人が行ったものと、その人の依頼で秘書や業務が行ったもの（記録の根拠の `runId` の実行を依頼した人）を返す。
+   * `actions` は操作の名前の頭（`approval.` など）。どれかに当たれば返す
+   */
+  searchAudit(tenantId: string, q: AuditQuery): Promise<AuditEvent[]>;
 }
 
 /** 知識検索の結果の 1 節。出典を必ず伴う（仕様書 第11.7.4節）。 */
@@ -683,6 +697,27 @@ export interface UserPhoto {
   mime: 'image/png' | 'image/jpeg';
   bytes: Uint8Array;
   fetchedAt: string;
+}
+
+/** 判断した承認 1 件と、その実行の要点（仕様書 第6.2.5節）。 */
+export interface DecidedApproval extends Approval {
+  runId: string;
+  agentId: string;
+  agentVersion: number;
+  requestedBy: string;
+}
+
+/** 監査ログの絞り込み（仕様書 第6.6.8.1節）。 */
+export interface AuditQuery {
+  /** この時刻以降（含む）。 */
+  from?: string;
+  /** この時刻より前。 */
+  to?: string;
+  userId?: string;
+  /** 操作の名前の頭。 */
+  actions?: string[];
+  limit: number;
+  offset?: number;
 }
 
 export interface GoogleConnection {

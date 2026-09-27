@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { hideInternalIds, type Artifact, type RunStep } from '@m2office/shared';
 import {
-  api, describeError, type AgentSummary, type ApprovalView, type JsonSchemaField, type RunDetail,
+  api, describeError, type AgentSummary, type ApprovalView, type DecidedApprovalView, type JsonSchemaField, type RunDetail,
 } from './api.js';
 import { Markdown, openHelp } from './help.js';
 import { Icon } from './nav.js';
@@ -326,6 +326,8 @@ export function RunView({
             : !run.failureReason && artifacts.length === 0 && <p className="muted">結果がありません。</p>}
         </div>
       )}
+      {/* 誰がいつ判断したか（仕様書 第6.2.5節）。閉じた実行の記録の中ではなく、結果の近くに出す */}
+      <Decisions detail={detail} />
       {error && <p className="error">{error}</p>}
       {leftover && leftover.length > 0 && (
         <p className="muted">
@@ -379,6 +381,28 @@ export function RunView({
   );
 }
 
+/**
+ * 実行の承認の段ごとに、誰がいつ判断したか（仕様書 第6.2.5節）。自動で通過したものは「自動で通過」。
+ */
+function Decisions({ detail }: { detail: RunDetail }) {
+  const gates = detail.steps.filter((x) => x.kind === 'approval' && (x.status === 'succeeded' || x.status === 'failed'));
+  if (gates.length === 0) return null;
+  return (
+    <div className="decisions small">
+      {gates.map((g) => {
+        const d = detail.decisions?.find((x) => x.runStepId === g.id);
+        const automatic = (g.output as { automatic?: boolean } | null)?.automatic;
+        const text = d?.decidedBy
+          ? `${d.decidedBy}さんが ${when(d.decidedAt)} に${d.decision === 'approved' ? '承認' : '却下'}${d.comment ? `（${d.comment}）` : ''}`
+          : automatic ? '自動で通過（社外にもお金にも関わらないため）'
+          : d ? (d.decision === 'approved' ? '承認' : '却下') : '判断の記録がありません';
+        // 承認の段が 1 つなら段の名前は要らない（定義を外した業務では段の ID になり、読めない）
+        return <p key={g.id} className="muted">{gates.length > 1 ? `${g.label}: ` : '承認: '}{text}</p>;
+      })}
+    </div>
+  );
+}
+
 /** 承認トレイ。差分を見て承認・却下する（仕様書 FR-306）。 */
 export function ApprovalTray({
   items, onDecided,
@@ -398,21 +422,83 @@ export function ApprovalTray({
     }
   }
 
-  if (items.length === 0) {
-    return (
-      <div className="card">
-        <p className="muted">承認待ちはありません</p>
-      </div>
-    );
-  }
-
   return (
     <>
-      {items.map((a) => (
-        <ApprovalRow key={a.id} approval={a} busy={busy === a.id} onDecide={decide} />
-      ))}
+      {items.length === 0
+        ? <div className="card"><p className="muted">承認待ちはありません</p></div>
+        : items.map((a) => <ApprovalRow key={a.id} approval={a} busy={busy === a.id} onDecide={decide} />)}
+      {/* 判断したもの（仕様書 第6.2.5節）。判断を待つものの下に並べる。判断するたびに読み直す */}
+      <DecidedApprovals reloadKey={items.map((a) => a.id).join(',')} />
     </>
   );
+}
+
+/**
+ * 判断したもの（承認の履歴。仕様書 第6.2.5節）。自分が判断した承認と却下を新しい順に並べ、その場で開く。
+ *
+ * @param reloadKey 承認待ちが変わったら読み直す（判断した直後に、ここへ移る）
+ */
+function DecidedApprovals({ reloadKey }: { reloadKey: string }) {
+  const [items, setItems] = useState<DecidedApprovalView[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    api.decidedApprovals().then((r) => setItems(r.items)).catch((e) => setError(describeError(e, '読み込めませんでした')));
+  }, [reloadKey]);
+  if (error) return <p className="error">{error}</p>;
+  if (!items || items.length === 0) return null;
+  return (
+    <>
+      <h2 className="section-title">判断したもの</h2>
+      {items.map((a) => <DecidedRow key={a.id} item={a} />)}
+    </>
+  );
+}
+
+/** 判断したもの 1 件。開くと、何を承認したか・どのように承認したか・実際に行ったことを出す。 */
+function DecidedRow({ item }: { item: DecidedApprovalView }) {
+  const [open, setOpen] = useState(false);
+  const approved = item.decision === 'approved';
+  return (
+    <div className={`card fold-row${open ? ' open' : ''}`}>
+      <button className="fold-head" onClick={() => setOpen(!open)} aria-expanded={open}>
+        <Icon name={open ? 'caret-down' : 'caret-right'} className="nav-caret" />
+        <strong>{item.agentName}</strong>
+        <span className={`status ${approved ? 'completed' : 'failed'}`}>{approved ? '承認' : '却下'}</span>
+        {item.requestedBy && <span className="muted small">{item.requestedBy}さんの依頼</span>}
+        <span className="muted small tail">{when(item.decidedAt)}</span>
+      </button>
+      {open && (
+        <div className="fold-body decided">
+          <p className="small">
+            <strong>{approved ? '承認しました' : '却下しました'}</strong>（{when(item.decidedAt)}）
+            {item.comment && <>　コメント: {item.comment}</>}
+          </p>
+          <h4>実際に行ったこと</h4>
+          {!approved ? <p className="muted small">行っていません（却下したため）</p>
+            : item.done.length === 0 ? <p className="muted small">社外への送信や書き込みはありません</p>
+            : (
+              <ul className="done-list small">
+                {item.done.map((d, i) => (
+                  <li key={i}>
+                    <Markdown text={d.text} />
+                    {d.link && <a href={d.link} target="_blank" rel="noreferrer">開く</a>}
+                    {d.error && <span className="error small">失敗: {d.error}</span>}
+                  </li>
+                ))}
+              </ul>
+            )}
+          <h4>承認したときの画面</h4>
+          <div className="reply"><Markdown text={item.present} lineBreaks /></div>
+          <a className="btn ghost small" href={`/runs/${encodeURIComponent(item.runId)}${location.search}`}>実行の詳細を開く</a>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 判断した日時（日本の書き方）。 */
+function when(at: string | null): string {
+  return at ? new Date(at).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
 }
 
 /**

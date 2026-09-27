@@ -20,7 +20,7 @@ export type { GeminiModelMap } from './llm/gemini.js';
 
 export type {
   Repository, AgentEvent, Plan, PlanStep, DisabledConnectorTool, TenantConnection, KnowledgeHit, KnowledgeItem, KnowledgeSearchResult, KnowledgeSectionView, RunStatRow, InstalledExtension, PrivateExtension, CompartmentAssignment,
-  CredentialKind, TenantCredential, GoogleConnection, UserPhoto,
+  CredentialKind, TenantCredential, GoogleConnection, UserPhoto, AuditQuery, DecidedApproval, ConnectionSecret, UserConnection,
 } from './repository/types.js';
 export { PostgresRepository } from './repository/postgres.js';
 export { canViewRun, type RunViewer } from './engine/run-access.js';
@@ -100,7 +100,7 @@ export type { AdvanceResult, RunEngineDeps } from './engine/run-engine.js';
 export { validateDefinition } from './engine/validate.js';
 export { todayJst } from './engine/run-engine.js';
 export { describeCall, jpDate, type DescribedCall, type DescribeContext } from './engine/describe-call.js';
-export { composeApprovalPresent, hideInternalIds, repeatsArtifact } from './engine/approval-present.js';
+export { composeApprovalPresent, describeContext, executedCalls, hideInternalIds, repeatsArtifact, type ExecutedCall } from './engine/approval-present.js';
 export { enqueueJob } from './engine/enqueue.js';
 export { cancelRun, createdDriveLinks, CANCELLABLE } from './engine/cancel.js';
 export type { CancelActor, CancelOutcome } from './engine/cancel.js';

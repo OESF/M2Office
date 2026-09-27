@@ -1074,6 +1074,23 @@ code.uri { background: var(--subtle-bg); border: 1px solid var(--line); border-r
 }
 
 /* 個人設定のアバターの選択（仕様書 第6.1.3節） */
+/* 監査ログ（仕様書 第6.6.8.1節） */
+.audit-filter { display: flex; flex-wrap: wrap; align-items: flex-end; gap: calc(12px * var(--space-scale)); }
+.audit-filter .field { margin-bottom: 0; }
+.audit-filter .row { margin-top: 0; flex-wrap: nowrap; }
+.audit-filter input[type="date"] { width: auto; }
+.audit-table tr.clickable { cursor: pointer; }
+.audit-table tr.clickable:hover td { background: var(--accent-soft); }
+.audit-detail td { background: var(--bg); }
+.audit-detail dd { word-break: break-all; }
+/* 判断したもの（承認の履歴。仕様書 第6.2.5節） */
+.section-title { font-size: calc(14px * var(--font-scale)); color: var(--muted); margin: calc(20px * var(--space-scale)) 0 calc(8px * var(--space-scale)); }
+.fold-body.decided h4 { margin: calc(12px * var(--space-scale)) 0 calc(4px * var(--space-scale)); font-size: calc(13px * var(--font-scale)); }
+.done-list { margin: 0; padding-left: calc(18px * var(--space-scale)); }
+.done-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: calc(8px * var(--space-scale)); }
+.done-list li p { margin: 0; }
+.decisions { margin: 0 0 calc(12px * var(--space-scale)); }
+.decisions p { margin: calc(2px * var(--space-scale)) 0; }
 /* 認証の要る会社の接続の設定（仕様書 第12.11.6.2節） */
 .auth-settings { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: calc(10px * var(--space-scale)) 0; margin: calc(8px * var(--space-scale)) 0; }
 .auth-settings .copy-row { display: flex; align-items: center; gap: calc(8px * var(--space-scale)); }

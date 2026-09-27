@@ -13,7 +13,7 @@ import type {
   StoredFile, Tenant, TenantSettings, User, UserGroup, UserSettings,
 } from '@m2office/shared';
 import { DEFAULT_TENANT_SETTINGS, DEFAULT_USER_SETTINGS, STANDARD_SYNONYMS } from '@m2office/shared';
-import type { AgentEvent, Plan, PlanStep, CompartmentAssignment, Conversation, ConversationDigest, MemoryCandidate, Promotion, CredentialKind, GoogleConnection, UserPhoto, TenantCredential, TenantConnection, ConnectionSecret, UserConnection, DisabledConnectorTool, InstalledExtension, PrivateExtension, KnowledgeItem, KnowledgeSearchResult, KnowledgeSectionView, Memory, Repository, RunStatRow } from './types.js';
+import type { AgentEvent, Plan, PlanStep, DecidedApproval, AuditQuery, CompartmentAssignment, Conversation, ConversationDigest, MemoryCandidate, Promotion, CredentialKind, GoogleConnection, UserPhoto, TenantCredential, TenantConnection, ConnectionSecret, UserConnection, DisabledConnectorTool, InstalledExtension, PrivateExtension, KnowledgeItem, KnowledgeSearchResult, KnowledgeSectionView, Memory, Repository, RunStatRow } from './types.js';
 import { SPLIT_VERSION, citationOf, splitKnowledge } from '../knowledge/sections.js';
 import { SEARCH_CANDIDATES, bigrams, expandTerms, extractTerms, normalizeForSearch, rankSections, rewritesOf } from '../knowledge/search.js';
 
@@ -368,6 +368,23 @@ export class PostgresRepository implements Repository {
     );
   }
 
+  async listDecidedApprovals(tenantId: string, userId: string, limit: number): Promise<DecidedApproval[]> {
+    return this.q<DecidedApproval>(tenantId,
+      `select a.id, a.run_step_id as "runStepId", a.tenant_id as "tenantId",
+              a.approver_role as "approverRole", a.approver_user_id as "approverUserId", a.present,
+              a.decision, a.decided_by as "decidedBy", a.comment, a.decided_at as "decidedAt",
+              a.created_at as "createdAt",
+              s.run_id as "runId", j.agent_id as "agentId", j.agent_version as "agentVersion", j.requested_by as "requestedBy"
+         from approvals a
+         join run_steps s on s.id = a.run_step_id
+         join runs r on r.id = s.run_id and r.tenant_id = a.tenant_id
+         join jobs j on j.id = r.job_id and j.tenant_id = r.tenant_id
+        where a.tenant_id = $1 and a.decided_by = $2 and a.decision in ('approved', 'rejected')
+        order by a.decided_at desc
+        limit $3`,
+      [tenantId, userId, limit]);
+  }
+
   async listRunApprovals(tenantId: string, runId: string): Promise<Approval[]> {
     return this.q<Approval>(tenantId,
       `select a.id, a.run_step_id as "runStepId", a.tenant_id as "tenantId",
@@ -570,6 +587,26 @@ export class PostgresRepository implements Repository {
       [e.id, e.tenantId, e.actorType, e.actorId, e.action, e.targetType,
        e.targetId, JSON.stringify(e.detail), e.occurredAt],
     );
+  }
+
+  async searchAudit(tenantId: string, q: AuditQuery): Promise<AuditEvent[]> {
+    return this.q<AuditEvent>(tenantId,
+      `select a.id, a.tenant_id as "tenantId", a.actor_type as "actorType",
+              a.actor_id as "actorId", a.action, a.target_type as "targetType",
+              a.target_id as "targetId", a.detail, a.occurred_at as "occurredAt"
+         from audit_events a
+        where a.tenant_id = $1
+          and ($2::timestamptz is null or a.occurred_at >= $2)
+          and ($3::timestamptz is null or a.occurred_at < $3)
+          and ($4::text is null or a.actor_id = $4 or (a.detail->>'runId') in (
+                select r.id from runs r join jobs j on j.id = r.job_id and j.tenant_id = r.tenant_id
+                 where r.tenant_id = $1 and j.requested_by = $4))
+          and ($5::text[] is null or a.action like any($5))
+        order by a.occurred_at desc, a.id desc
+        limit $6 offset $7`,
+      [tenantId, q.from ?? null, q.to ?? null, q.userId ?? null,
+        q.actions && q.actions.length > 0 ? q.actions.map((x) => `${x.replace(/[%_]/g, '\\$&')}%`) : null,
+        q.limit, q.offset ?? 0]);
   }
 
   async listAudit(tenantId: string, limit: number): Promise<AuditEvent[]> {

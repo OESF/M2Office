@@ -1,13 +1,14 @@
 /**
- * @file 承認トレイの API。本人が判断できる承認待ちの一覧と、承認・却下の受付。
+ * @file 承認トレイの API。本人が判断できる承認待ちの一覧、承認・却下の受付、本人が判断したものの履歴。
  *
  * @see 仕様書 第9.2.3節 承認者の指定
  * @see 仕様書 第9.3節 実行ライフサイクル
+ * @see 仕様書 第6.2.5節 判断したもの（承認の履歴）
  */
 
 import { Hono } from 'hono';
 import { canDecide } from '@m2office/shared';
-import { ApprovalForbiddenError, RunNotResumableError } from '@m2office/core';
+import { ApprovalForbiddenError, RunNotResumableError, describeContext, executedCalls } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 
@@ -19,6 +20,9 @@ import type { AppEnv } from '../middleware/tenant.js';
  * 外部アプリからの承認は既定で禁止とし、ここでは画面からの操作だけを受ける。
  * `external-send` と `financial` は恒久的に API 承認を禁止する。
  */
+/** 「判断したもの」に出す件数（仕様書 第6.2.5節）。 */
+const DECIDED_LIMIT = 100;
+
 export function approvalsRoute(deps: AppDeps) {
   const app = new Hono<AppEnv>();
 
@@ -42,6 +46,40 @@ export function approvalsRoute(deps: AppDeps) {
         ? (view.allAgents.find((x) => x.id === job.agentId)?.name ?? job.agentId)
         : null;
       items.push({ ...a, agentName });
+    }
+    return c.json({ items });
+  });
+
+  /**
+   * 本人が判断したもの（仕様書 第6.2.5節）。何を承認したか（判断したときの承認の画面）と、どのように承認したか、
+   * 承認のあとに実際に行ったことと結果を返す。新しい順に 100 件まで。
+   *
+   * @remarks 自動で通過した承認・期限切れ・取り消しは含まない（人が判断していない）。本人の判断だけを返す
+   */
+  app.get('/decided', async (c) => {
+    const ctx = c.get('ctx');
+    const view = await deps.tenantView(ctx.tenant.id);
+    const rows = await deps.repo.listDecidedApprovals(ctx.tenant.id, ctx.user.id, DECIDED_LIMIT);
+    const names = new Map<string, string>();
+    const nameOf = async (userId: string) => {
+      if (!names.has(userId)) names.set(userId, (await deps.repo.findUserById(ctx.tenant.id, userId))?.displayName ?? '');
+      return names.get(userId)!;
+    };
+    const items = [];
+    for (const a of rows) {
+      const [step, artifacts] = await Promise.all([
+        deps.repo.getRunStepById(ctx.tenant.id, a.runStepId),
+        deps.repo.listArtifacts(ctx.tenant.id, a.runId),
+      ]);
+      items.push({
+        id: a.id, runId: a.runId,
+        // 定義が見つからなければ業務の ID を出す。推測で名前を作らない
+        agentName: view.resolve(a.agentId, a.agentVersion)?.name ?? view.allAgents.find((x) => x.id === a.agentId)?.name ?? a.agentId,
+        decision: a.decision, decidedAt: a.decidedAt, comment: a.comment, present: a.present,
+        // 自分が依頼したものでなければ、依頼した人を出す
+        requestedBy: a.requestedBy === ctx.user.id ? null : await nameOf(a.requestedBy),
+        done: a.decision === 'approved' ? executedCalls(step, describeContext(view.registry, artifacts)) : [],
+      });
     }
     return c.json({ items });
   });

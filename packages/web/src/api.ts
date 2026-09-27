@@ -8,7 +8,7 @@
  */
 
 import type {
-  Approval, Artifact, AuditEvent, Notification, Run, RunStep, Schedule, ScheduleRule, Tenant,
+  Approval, Artifact, Notification, Run, RunStep, Schedule, ScheduleRule, Tenant,
   TenantSettings, User, UserSettings,
 } from '@m2office/shared';
 
@@ -387,6 +387,24 @@ export interface RunDetail {
   /** 段。API が表示名（仕様書 第9.2.4節）を足して返す。 */
   steps: (RunStep & { label: string })[];
   artifacts: Artifact[];
+  /** 誰がいつ判断したか（仕様書 第6.2.5節）。自動で通過した承認は判断した人が無い。 */
+  decisions?: { runStepId: string; decision: string; decidedBy: string | null; decidedAt: string | null; comment: string | null }[];
+}
+
+/** 自分が判断した承認 1 件（仕様書 第6.2.5節）。 */
+export interface DecidedApprovalView {
+  id: string;
+  runId: string;
+  agentName: string;
+  decision: 'approved' | 'rejected';
+  decidedAt: string;
+  comment: string | null;
+  /** 判断したときの承認の画面（何を承認したか）。 */
+  present: string;
+  /** 依頼した人。自分の依頼なら `null`。 */
+  requestedBy: string | null;
+  /** 承認のあとに実際に行ったことと結果。 */
+  done: { text: string; link: string | null; error: string | null }[];
 }
 
 /** 後ろへ回した調べもの 1 件（仕様書 第10.11節）。 */
@@ -451,6 +469,46 @@ async function download(fileId: string, name: string): Promise<void> {
   a.download = name;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+/**
+ * 監査ログを CSV で保存する（仕様書 第6.6.8.1節）。画面の絞り込みをそのまま渡す。
+ */
+async function downloadAuditCsv(q: AuditFilter): Promise<void> {
+  const res = await fetch(`/v1/admin/audit-events/export?${auditParams(q)}`, {
+    credentials: 'same-origin',
+    headers: devTenant ? { 'x-tenant': devTenant } : {},
+  });
+  if (!res.ok) throw new ApiError('監査ログを出力できませんでした', res.status);
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `監査ログ-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/** 監査ログの絞り込み（仕様書 第6.6.8.1節）。日付は `YYYY-MM-DD`（日本時間の一日）。 */
+export interface AuditFilter { from?: string; to?: string; user?: string; category?: string; offset?: number }
+
+function auditParams(q: AuditFilter): string {
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries(q)) if (v !== undefined && v !== '') p.set(k, String(v));
+  return p.toString();
+}
+
+/** 監査ログの 1 行（誰が・何をしたか・何に対して。記録の名前と値も並べる）。 */
+export interface AuditRowView {
+  id: string;
+  occurredAt: string;
+  who: string;
+  what: string;
+  target: string;
+  category: string;
+  action: string;
+  actor: string;
+  targetRaw: string;
+  detail: Record<string, unknown>;
 }
 
 /** 会社の接続（仕様書 第12.11.0節）を指す道。 */
@@ -632,7 +690,11 @@ export const api = {
     /** 実行 1 件の状態だけ（仕様書 第6.6.8節）。**中身は返らない。** */
     runStatus: (id: string) => call<AdminRunStatus>(`/admin/runs/${id}`),
     users: () => call<{ items: User[] }>('/admin/users'),
-    audit: () => call<{ items: AuditEvent[] }>('/admin/audit-events'),
+    /** 監査ログ（仕様書 第6.6.8.1節）。期間・人・操作の種類で絞る。 */
+    audit: (q: AuditFilter = {}) => call<{
+      items: AuditRowView[]; hasMore: boolean; people: { id: string; name: string }[]; categories: { id: string; label: string }[];
+    }>(`/admin/audit-events?${auditParams(q)}`),
+    downloadAudit: downloadAuditCsv,
     connections: () => call<ConnectionSettings>('/admin/connections'),
     saveGemini: (v: { mode: 'platform' | 'byok'; apiKey?: string; models?: Record<string, string> }) =>
       call('/admin/connections/gemini', { method: 'PUT', body: JSON.stringify(v) }),
@@ -801,6 +863,8 @@ export const api = {
     call<{ ok: true; leftoverLinks: string[] }>(`/runs/${id}/cancel`, { method: 'POST' }),
   /** 承認待ち。どの業務かを添える（仕様書 第6.2.4節）。 */
   approvals: () => call<{ items: ApprovalView[] }>('/approvals'),
+  /** 自分が判断した承認と却下（仕様書 第6.2.5節）。新しい順に 100 件まで。 */
+  decidedApprovals: () => call<{ items: DecidedApprovalView[] }>('/approvals/decided'),
   decide: (id: string, decision: 'approved' | 'rejected', comment?: string) =>
     call<{ runId: string }>(`/approvals/${id}`, {
       method: 'POST',

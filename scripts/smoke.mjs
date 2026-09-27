@@ -192,6 +192,22 @@ console.log('\n■ 4. 承認による再開（最重要）');
     ? ok(`最後まで完了した（${final.steps.length} ステップ、${final.run.costJpy} 円）`)
     : ng(`完了しない（状態: ${final.run.status}）`, final.run.failureReason);
 
+  // 判断したもの（承認の履歴。仕様書 第6.2.5節）: 何を・どのように承認したかを見返せる
+  const { body: decided } = await call('a', '/v1/approvals/decided');
+  const mine = (decided.items ?? []).filter((x) => x.runId === runId);
+  const firstDecided = mine.find((x) => x.id === first.id);
+  firstDecided?.decision === 'approved' && firstDecided.comment === '内容を確認しました' && firstDecided.present === first.present
+    && firstDecided.agentName && firstDecided.decidedAt
+    ? ok('判断したものに、承認したときの画面・承認か却下か・日時・コメントが残る') : ng('判断したものが違う', JSON.stringify(firstDecided ?? decided).slice(0, 300));
+  const secondDecided = second ? mine.find((x) => x.id === second.id) : null;
+  !second || (secondDecided && Array.isArray(secondDecided.done) && secondDecided.done.length > 0 && secondDecided.done.every((d) => typeof d.text === 'string' && !/[a-z]+\.[a-z_]+:/.test(d.text)))
+    ? ok(`承認のあとに実際に行ったことを業務の言葉で見返せる（${secondDecided?.done?.length ?? 0} 件）`) : ng('行ったことが出ない', JSON.stringify(secondDecided ?? null).slice(0, 300));
+  const { body: other } = await call('a', '/v1/approvals/decided', {}, 'member');
+  !(other.items ?? []).some((x) => x.runId === runId) ? ok('ほかの人の判断は見えない') : ng('ほかの人の判断が見える');
+  const { body: detailed } = await call('a', `/v1/runs/${runId}`);
+  (detailed.decisions ?? []).some((d) => d.decision === 'approved' && d.decidedBy && d.decidedAt)
+    ? ok('実行の詳細に、誰がいつ判断したかが出る') : ng('実行の詳細に判断した人が出ない', JSON.stringify(detailed.decisions ?? null));
+
   // 手順 7: 承認②のあと、承認①で見た議事録をそのまま組織知識に登録する（仕様書 第9.5.2節）
   const { body: kb } = await call('a', '/v1/admin/knowledge');
   const registered = (kb.items ?? []).find((k) => k.originRunId === runId);
@@ -256,6 +272,38 @@ console.log('\n■ 6. 監査ログ');
   missing.length === 0
     ? ok(`主要な操作が記録されている（${actions.size} 種類）`)
     : ng(`記録が足りない: ${missing.join(', ')}`);
+
+  // 誰が・何をしたか・何に対してを、人の名前と業務の言葉で出す（第6.6.8.1節）
+  const decided = (body.items ?? []).find((e) => e.action === 'approval.decide');
+  decided && /^(承認した|却下した)$/.test(decided.what) && !/^user:|^u-/.test(decided.who) && /業務「.+」の承認/.test(decided.target)
+    ? ok(`承認を人の名前と業務の言葉で出す（${decided.who}・${decided.what}・${decided.target}）`) : ng('言葉で出ていない', JSON.stringify(decided ?? null).slice(0, 300));
+  const tool = (body.items ?? []).find((e) => e.action === 'tool.invoke');
+  tool && /^業務「.+」（.+さんの依頼）$/.test(tool.who) ? ok(`業務が行ったものは指示した人を添える（${tool.who}）`) : ng('指示した人が出ない', JSON.stringify(tool ?? null).slice(0, 200));
+
+  // 絞り込み: 人・操作の種類
+  const me = (body.people ?? []).find((p) => p.name) ?? null;
+  const { body: byCat } = await call('a', '/v1/admin/audit-events?category=approval');
+  (byCat.items ?? []).length > 0 && (byCat.items ?? []).every((e) => e.action.startsWith('approval.'))
+    ? ok('操作の種類で絞れる') : ng('種類で絞れない');
+  const { body: member } = await call('a', '/v1/admin/audit-events', {}, 'member');
+  member.items === undefined ? ok('一般の利用者は監査ログを見られない') : ng('一般の利用者が見られる');
+  const users = (body.people ?? []).map((p) => p.id);
+  const { body: byUser } = users[0] ? await call('a', `/v1/admin/audit-events?user=${encodeURIComponent(users[0])}`) : { body: {} };
+  Array.isArray(byUser.items) ? ok('人で絞れる') : ng('人で絞れない');
+
+  // CSV の出力と、出力したことの記録
+  const res = await fetch(`${API}/v1/admin/audit-events/export?category=approval`, { headers: { 'x-tenant': 'a', 'x-user': 'admin@alpha.example.jp' } });
+  // fetch の text() は先頭の BOM を外すため、バイトで確かめる
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  const csv = new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes);
+  res.ok && (res.headers.get('content-type') ?? '').includes('text/csv') && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf
+    && csv.startsWith('\uFEFF日時,誰が,何をしたか,何に対して')
+    ? ok('絞った結果を CSV で出力できる（Excel で開ける形）') : ng('CSV で出力できない', `${res.status} ${csv.slice(0, 80)}`);
+  const { body: after } = await call('a', '/v1/admin/audit-events?category=settings');
+  const { body: all } = await call('a', '/v1/admin/audit-events');
+  (all.items ?? []).some((e) => e.action === 'audit.export' && e.what === '監査ログを出力した')
+    ? ok('出力したことも監査ログに残す') : ng('出力が記録されない');
+  void me; void after;
 }
 
 console.log('\n■ 7. 秘書の応答（3 層）');
