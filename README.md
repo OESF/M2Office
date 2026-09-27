@@ -5,7 +5,7 @@
 中小企業向けの AI エージェントシステム。
 従業員ひとりひとりに秘書エージェントが付き、業務エージェントが承認を経て作業を代行します。
 
-設計の正は [specification.md](specification.md) です。実装はそれに従います。
+設計の正は [specification.md](specification.md)（入口）と [spec/](spec/) の各章です。実装はそれに従います。
 
 ## 前提
 
@@ -279,7 +279,7 @@ API とワーカーは起動時にリポジトリ直下の `.env` を読みま�
 
 | 文書 | 内容 |
 |---|---|
-| [specification.md](specification.md) | システム仕様の全体 |
+| [specification.md](specification.md)・[spec/](spec/) | システム仕様の全体。入口と、1 章 1 ファイルの各章 |
 | [CLAUDE.md](CLAUDE.md) | 開発時に守ること（要点） |
 | [docs/google-setup.md](docs/google-setup.md) | Google Workspace と Google Cloud の設定手順 |
 | [docs/coding-standards.md](docs/coding-standards.md) | コードの書き方、JSDoc、README |

@@ -2,6 +2,8 @@
 """Markdown（仕様書・開発者マニュアル）を印刷用 HTML に変換する。
 
 使い方: python build.py <入力の Markdown> <出力の HTML>
+
+仕様書は章ごとのファイルに分けてある。入口（specification.md）の include の行の順につないでから変換する。
 """
 import io, os, re, sys, html, datetime
 import markdown
@@ -10,6 +12,19 @@ SRC = sys.argv[1]
 OUT = sys.argv[2]
 
 raw = io.open(SRC, encoding='utf-8').read()
+
+# 章ごとのファイルをつなぐ（仕様書 第0.3節 約束 6、ADR-0041）。
+# 入口の Markdown に `<!-- include: spec/01-background.md -->` の行があれば、その位置にそのファイルを入れる。
+# パスは入口のファイルからの相対。書いてあるファイルが無ければ止める（章の抜けた PDF を作らない）
+def expand_includes(text, base):
+    def load(m):
+        path = os.path.join(base, m.group(1).strip())
+        if not os.path.exists(path):
+            sys.exit(f'読む順番にあるファイルがありません: {m.group(1).strip()}')
+        return io.open(path, encoding='utf-8').read()
+    return re.sub(r'^<!--\s*include:\s*(.+?)\s*-->\n?', load, text, flags=re.M)
+
+raw = expand_includes(raw, os.path.dirname(os.path.abspath(SRC)))
 
 # YAML frontmatter を取り出す
 meta = {}

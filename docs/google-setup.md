@@ -14,7 +14,7 @@ tags: [M2Office, google-workspace, oauth, gemini, setup]
 
 > **注記**: 管理コンソールの項目名は変わることがあります。
 > 本書は「どこを探すか」の見当をつけるためのものです。実際の画面でご確認ください。
-> 判断の根拠は [specification.md](../specification.md) 第14章・第16章にあります。
+> 判断の根拠は仕様書の [第14章](../spec/14-google.md)・[第16章](../spec/16-security.md) にあります。
 
 ## 1. 全体像
 
@@ -267,7 +267,7 @@ npm run smoke
 
 | 文書 | 内容 |
 |---|---|
-| [specification.md](../specification.md) 第14章 | Google プラットフォーム連携 |
-| [specification.md](../specification.md) 第16.1節 | 認証。Google アカウントへの一本化 |
-| [specification.md](../specification.md) 第22.2節 | Google 連携ウィザード |
+| [仕様書 第14章](../spec/14-google.md) | Google プラットフォーム連携 |
+| [仕様書 第16.1節](../spec/16-security.md) | 認証。Google アカウントへの一本化 |
+| [仕様書 第22.2節](../spec/22-operations.md) | Google 連携ウィザード |
 | [README.md](../README.md) | 開発環境の立ち上げ |

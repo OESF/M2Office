@@ -7,7 +7,7 @@
 
 | 文書 | 内容 | 位置付け |
 |---|---|---|
-| [specification.md](specification.md) | システム仕様の全体 | **設計の正** |
+| [specification.md](specification.md) と [spec/](spec/) | システム仕様の全体。入口（版・文書管理・読む順番）と、1 章 1 ファイルの各章（ADR-0041） | **設計の正** |
 | [docs/coding-standards.md](docs/coding-standards.md) | コードの書き方、JSDoc、README | **実装の正** |
 | [docs/release-process.md](docs/release-process.md) | バージョンとリリース | リリース時に参照。作業は `/release` スキル |
 | [CHANGELOG.md](CHANGELOG.md) | 版ごとの変更（開発者向け） | `/release` で追記 |

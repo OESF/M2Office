@@ -2,6 +2,9 @@
 
 `specification.md` と開発者マニュアル（`docs/developer/*.md`）から印刷用の PDF を作ります。
 
+仕様書は章ごとのファイル（`spec/`）に分けてあります（ADR-0041）。`build.py` は入口の `specification.md` にある
+`<!-- include: spec/… -->` の行の順に各章をつないでから変換するため、使い方は分ける前と同じです。
+
 ## 前提
 
 | 項目 | 内容 |
