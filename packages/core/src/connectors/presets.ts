@@ -24,6 +24,16 @@ export interface ConnectionPreset {
   readOnly: RegExp;
   /** 相手の側で要ること（管理者に示す）。 */
   setup: string[];
+  /**
+   * 引数の名前を、承認の画面に出す言葉にする（例: `channel_id` → 「送り先」）。無い名前はそのまま出す。
+   */
+  argLabels?: Record<string, string>;
+  /**
+   * 承認の前に、ID を人の読める名前に直す問い合わせ（読むだけ。依頼した本人の認可で呼ぶ。仕様書 第12.11.3節）。
+   *
+   * @remarks 値が `match` に合うときだけ `url?{param}={値}` を呼び、応答の `field` をたどった値に `prefix`・`suffix` を付けて出す
+   */
+  resolvers?: { arg: string; match: RegExp; url: string; param: string; field: string[]; prefix?: string; suffix?: string }[];
   /** 出典と確認日。 */
   source: string;
   checkedAt: string;
@@ -79,6 +89,15 @@ const SLACK: ConnectionPreset = {
     'アプリの設定の「Agents & AI Apps」（app-assistant）で、Slack の MCP サーバの利用をオンにする（オフのままだと「App is not enabled for Slack MCP server access」で断られます）',
     'ワークスペースの管理者がアプリを承認する運用なら、承認を受ける',
   ],
+  argLabels: {
+    channel_id: '送り先', message: '本文', text: '本文', thread_ts: '返信先のスレッド', post_at: '送る日時',
+    reply_broadcast: 'チャンネルにも出す', title: '題名', content: '本文', canvas_id: 'キャンバス',
+  },
+  // 送り先の ID（C… はチャンネル、U… は人）を名前にする。Slack の Web API を本人の認可で読む（channels:read・users:read）
+  resolvers: [
+    { arg: 'channel_id', match: /^[CG][A-Z0-9]+$/, url: 'https://slack.com/api/conversations.info', param: 'channel', field: ['channel', 'name'], prefix: '#' },
+    { arg: 'channel_id', match: /^U[A-Z0-9]+$/, url: 'https://slack.com/api/users.info', param: 'user', field: ['user', 'real_name'], suffix: ' さん（ダイレクトメッセージ）' },
+  ],
   source: 'Slack Developer Docs「Slack MCP server overview」https://docs.slack.dev/ai/slack-mcp-server/',
   checkedAt: '2026-09-27',
 };
@@ -111,3 +130,31 @@ export function scopesForTools(preset: ConnectionPreset, toolNames: string[]): s
 export function presetRisk(preset: ConnectionPreset, toolName: string): RiskLevel {
   return preset.readOnly.test(toolName) ? 'read' : 'external-send';
 }
+
+/**
+ * 承認の前に、引数の ID を名前に直す（型の `resolvers`。読むだけ）。
+ *
+ * @param headers 依頼した本人の認可（会社の鍵）の見出し
+ * @returns 直せた引数の名前と表示。直せなければ空（**推測で埋めない**。ID のまま出す）
+ */
+export async function resolveArgNames(
+  preset: ConnectionPreset, args: Record<string, unknown>, headers: Record<string, string>, fetchImpl: typeof fetch = fetch,
+): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  for (const r of preset.resolvers ?? []) {
+    const v = args[r.arg];
+    if (typeof v !== 'string' || out[r.arg] || !r.match.test(v)) continue;
+    try {
+      const u = new URL(r.url);
+      u.searchParams.set(r.param, v);
+      const res = await fetchImpl(u, { headers, signal: AbortSignal.timeout(10_000) });
+      let node: unknown = await res.json();
+      for (const key of r.field) node = (node as Record<string, unknown> | null)?.[key];
+      if (typeof node === 'string' && node !== '') out[r.arg] = `${r.prefix ?? ''}${node}${r.suffix ?? ''}`;
+    } catch {
+      // 直せなければ ID のまま出す
+    }
+  }
+  return out;
+}
+

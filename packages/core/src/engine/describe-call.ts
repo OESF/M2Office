@@ -20,6 +20,8 @@ export interface DescribeContext {
   helpText?(name: string): string | undefined;
   /** 成果物の ID から題名を引く（知識への登録などで、ID の代わりに題名を出す）。 */
   artifactTitle?(id: string): string | undefined;
+  /** 会社の接続の道具なら、接続の名前・相手の道具の名前・危険度（仕様書 第12.11節）。 */
+  connectionOf?(name: string): { service: string; tool: string; risk: string; labels?: Record<string, string> } | undefined;
 }
 
 const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
@@ -101,6 +103,10 @@ export function describeCall(call: DescribedCall, ctx: DescribeContext = {}): st
     case 'sheets.append':
       return `**表に行を足します**: ${Array.isArray(a['rows']) ? a['rows'].length : 0} 行`;
     default: {
+      // 会社の接続の道具は、相手の説明が英語で長く、引数の意味も分からない。サービスと道具の名前と、
+      // **送り先を含むすべての引数**を出す（承認する人が、どこへ何が行くかを見て判断できるように。2026-09-27 に Slack で確認）
+      const conn = ctx.connectionOf?.(call.name);
+      if (conn) return describeConnectionCall(conn, a, call.shown);
       // 知らない道具は、道具の説明と、ID でない文字の引数だけを出す
       const help = ctx.helpText?.(call.name) ?? 'この業務の操作を行います';
       const shown = Object.entries(a)
@@ -109,6 +115,40 @@ export function describeCall(call: DescribedCall, ctx: DescribeContext = {}): st
       return `**${help.replace(/。.*$/, '')}**${shown.length ? `: ${shown.join('／')}` : ''}`;
     }
   }
+}
+
+/** 会社の接続の道具の危険度ごとの言い方。 */
+const CONNECTION_VERBS: Record<string, string> = {
+  read: 'から読みます',
+  draft: 'に下書きを作ります',
+  'write-internal': 'に書き込みます',
+  'external-send': 'へ送ります',
+  financial: 'でお金に関わる操作をします',
+};
+
+/**
+ * 会社の接続の道具の呼び出しを、承認の画面に出す言葉にする。
+ *
+ * @param shown 承認の前に確かめた名前（`{"channel_id":"#研究開発"}` の形。型の `resolvers`）
+ * @remarks
+ * 1 行目に「Slack へ送ります（slack_send_message）」、続けて引数を 1 つずつ。引数の名前は型の言葉にし（送り先・本文）、
+ * 確かめた名前があれば ID の前に出す。長い文字の引数は引用で出す
+ */
+function describeConnectionCall(
+  conn: { service: string; tool: string; risk: string; labels?: Record<string, string> }, a: Record<string, unknown>, shown?: string,
+): string {
+  const head = `**${conn.service}${CONNECTION_VERBS[conn.risk] ?? 'の操作を行います'}**（${conn.tool}）`;
+  let names: Record<string, string> = {};
+  try { names = shown ? JSON.parse(shown) as Record<string, string> : {}; } catch { names = {}; }
+  const lines: string[] = [];
+  for (const [k, v] of Object.entries(a)) {
+    if (v === undefined || v === null || v === '') continue;
+    const label = conn.labels?.[k] ?? k;
+    const raw = typeof v === 'string' ? v : JSON.stringify(v);
+    const text = names[k] ? `${names[k]}（${raw}）` : raw;
+    lines.push(text.includes('\n') || text.length > 80 ? `- ${label}:\n${quote(text)}` : `- ${label}: ${text}`);
+  }
+  return lines.length > 0 ? [head, ...lines].join('\n') : head;
 }
 
 /**

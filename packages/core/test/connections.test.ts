@@ -37,6 +37,8 @@ test('SKILL.md の同梱していない接続の道具は、会社の接続の�
   assert.deepEqual(problems, []);
   const def = pkg!.agents[0]!;
   assert.deepEqual(pkg!.manifest.permissions.connections, ['freee.list_deals', 'freee.create_invoice']);
+  // 危険度が分からない会社の接続の道具は送る道具として数え、同意の画面に「読むだけ」と出さない（第12.11.2節）
+  assert.equal(pkg!.manifest.permissions.max_risk_level, 'external-send');
   const [work, gate, send] = def.steps;
   assert.ok(work?.type === 'agent' && work.tools?.includes('freee.list_deals') && work.tools.includes('knowledge.search'), '読むだけなら作業の段で使える');
   assert.equal(gate?.type, 'approval', '危険度が分からないため、承認の段を入れる（社外に出なければ自動で通る）');

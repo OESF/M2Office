@@ -12,8 +12,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  CONNECTION_PRESETS, ConnectionCredentials, SecretBox, argsFromInputSchema, buildConnectionAuthUrl, checkConnector, connectorTools,
-  discoverOAuthEndpoints, exchangeConnectionCode, presetById, presetRisk, scopesForTools,
+  CONNECTION_PRESETS, ConnectionCredentials, SecretBox, argsFromInputSchema, buildConnectionAuthUrl, describeCall, checkConnector, connectorTools,
+  discoverOAuthEndpoints, exchangeConnectionCode, presetById, presetRisk, resolveArgNames, scopesForTools,
   type ConnectionAuthProvider, type ConnectionSecret, type ConnectorDeclaration, type McpClient, type Repository, type UserConnection,
 } from '../src/index.js';
 
@@ -222,4 +222,35 @@ test('MCP の道具の引数の定義（inputSchema）を推論に渡す形に�
   assert.equal(argsFromInputSchema({ type: 'object', properties: {} }), undefined);
   const [tool] = connectorTools({ ...slack, auth: { type: 'none' }, tools: [{ ...slack.tools[0]!, args }] });
   assert.deepEqual(tool!.args, args);
+});
+
+test('承認の画面: 会社の接続の道具は、サービスと道具の名前と、送り先を含むすべての引数を出す（相手の長い説明は出さない）', () => {
+  const [tool] = connectorTools({ ...slack, auth: { type: 'none' }, tools: [{ name: 'slack_send_message', description: 'Sends a message to a Slack channel or user. '.repeat(20), risk: 'external-send' }] });
+  assert.equal(tool!.helpText, '外部のサービス「Slack」の道具「slack_send_message」を使います');
+  assert.deepEqual(tool!.connection, { id: 'slack', name: 'Slack', tool: 'slack_send_message' });
+  const text = describeCall(
+    { name: 'slack.slack_send_message', args: { channel_id: 'C0C4WEH1TNY', message: 'M2Office からの投稿テストです' } },
+    { helpText: () => tool!.helpText, connectionOf: () => ({ service: 'Slack', tool: 'slack_send_message', risk: 'external-send' }) },
+  );
+  assert.equal(text, '**Slackへ送ります**（slack_send_message）\n- channel_id: C0C4WEH1TNY\n- message: M2Office からの投稿テストです');
+  assert.ok(!text.includes('Sends a message'));
+});
+
+test('承認の前に、Slack の送り先の ID をチャンネル名に直し、引数の名前を「送り先」「本文」にする（読むだけ・本人の認可）', async () => {
+  const preset = presetById('slack')!;
+  const seen: string[] = [];
+  const fetchImpl = (async (url: URL, init: RequestInit) => {
+    seen.push(`${url.toString()} ${(init.headers as Record<string, string>)['Authorization']}`);
+    return new Response(JSON.stringify(url.pathname.endsWith('conversations.info') ? { ok: true, channel: { name: '研究開発' } } : { ok: false }));
+  }) as unknown as typeof fetch;
+  const names = await resolveArgNames(preset, { channel_id: 'C0C4WEH1TNY', message: 'x' }, { Authorization: 'Bearer tok-u' }, fetchImpl);
+  assert.deepEqual(names, { channel_id: '#研究開発' });
+  assert.deepEqual(seen, ['https://slack.com/api/conversations.info?channel=C0C4WEH1TNY Bearer tok-u']);
+  assert.deepEqual(await resolveArgNames(preset, { channel_id: 'U123' }, {}, fetchImpl), {}, '直せなければ ID のまま（推測で埋めない）');
+
+  const text = describeCall(
+    { name: 'slack.slack_send_message', args: { channel_id: 'C0C4WEH1TNY', message: '投稿テスト' }, shown: JSON.stringify(names) },
+    { connectionOf: () => ({ service: 'Slack', tool: 'slack_send_message', risk: 'external-send', labels: preset.argLabels }) },
+  );
+  assert.equal(text, '**Slackへ送ります**（slack_send_message）\n- 送り先: #研究開発（C0C4WEH1TNY）\n- 本文: 投稿テスト');
 });

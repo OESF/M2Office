@@ -492,13 +492,19 @@ export class RunEngine {
     try {
       // 段が道具を宣言していれば、その段ではそれだけを使わせる（仕様書 第9.2.7節）
       const stepTools = step.tools ?? def.tools;
-      const tools = registry.allowed(stepTools);
+      // 承認の直後でない段（組み立てを除く）では、社外への送信とお金の道具を推論に見せない。呼んでも止めるだけで、
+      // 推論が「エラーが発生しました」と書き、その文が承認の画面に出てしまう（2026-09-27 に Slack への投稿で確認）
+      const allowed = registry.allowed(stepTools);
+      const tools = allowed.filter((t) => gatedByApproval || mode === 'plan' || !alwaysRequiresApproval(t.risk));
+      // 見せなかった道具があれば、それは承認のあとの段で行うことを伝える。伝えないと推論が「道具が使えないため行えない」と
+      // 書き、承認の前の組み立てがその文をなぞって送る操作を記録せず、承認が自動で通ってしまった（2026-09-27 に Slack で確認）
+      const held = allowed.length - tools.length;
       const system = buildSystemPrompt(def, tools, settings.writingStyle);
       // 承認の前の組み立てでは、記録された操作を「待つ」ものと取り違えさせない（2026-09-25 に本物の推論で、
       // 社内への共有を記録したあと「承認待ち」として投稿と登録を出さずに終えた）
       // スキルの業務は、指示の $ARGUMENTS・$名前 を入力で置き換える（スキルと同じ。仕様書 第12.12.2節）
       const shown = def.skill ? { ...step, instruction: substituteArguments(step.instruction, input, def.skill.arguments) } : step;
-      const prompt = buildStepPrompt(shown, input, previous) + (mode === 'plan' ? PLAN_NOTE : '');
+      const prompt = buildStepPrompt(shown, input, previous) + (mode === 'plan' ? PLAN_NOTE : '') + (held > 0 ? AFTER_APPROVAL_NOTE : '');
       /*
         ツールを呼んだら、その結果を渡してもう一度考えさせる（仕様書 第9.3.2節）。
         1 往復で終えると、推論がツールを呼んだ時点でステップが終わり、**文が 1 つも残らない**。
@@ -1034,6 +1040,18 @@ function writingStyleLines(w: WritingStyle): string[] {
   if (w.notes) lines.push(`- ${w.notes}`);
   return lines.length > 0 ? ['', '自社の書き方（必ず従う）:', ...lines] : [];
 }
+
+/**
+ * 承認の前の段に添える注意（仕様書 第9.4.0節）。社外への送信とお金の操作は、この段では見せず、承認のあとの段で行う。
+ *
+ * @remarks 「行えない」と書かせない。前の文を承認の前の組み立てがなぞり、送る操作を記録しなくなるため
+ */
+const AFTER_APPROVAL_NOTE = [
+  '',
+  '',
+  '（注意）社外への送信やお金に関わる操作は、この段では行いません。承認のあとの段で行います。',
+  'この段では、送る内容（送り先と本文など）を確かめて整え、そのまま示してください。「行えない」「ツールが使えない」とは書かないでください。',
+].join('\n');
 
 /** ツールの説明と引数を、推論に渡す文にする（仕様書 第9.4.4節）。 */
 function describeTools(tools: Tool[]): string[] {

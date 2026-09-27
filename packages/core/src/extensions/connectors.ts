@@ -10,6 +10,7 @@
 import { RISK_LEVELS, type RiskLevel } from '@m2office/shared';
 import type { Tool, ToolArgsSchema } from '../tools/registry.js';
 import type { McpClient } from '../connectors/mcp.js';
+import { presetById, resolveArgNames } from '../connectors/presets.js';
 
 /**
  * コネクタの認証の方式（仕様書 第12.11.6.1節）。
@@ -202,13 +203,24 @@ function isAuthRejected(error: string): boolean {
 }
 
 export function connectorTools(c: ConnectorDeclaration, client?: McpClient, auth?: ConnectionAuthProvider): Tool[] {
+  const preset = presetById(c.auth.preset);
   return c.tools.map((t) => ({
     name: connectorToolName(c.id, t.name),
     risk: t.risk,
     description: `${t.description}（${c.name}）`,
     activityLabel: `${c.name}に問い合わせています`,
-    helpText: `${t.description}（外部のサービス「${c.name}」を使います）`,
+    // 相手の説明は英語で長いことがある（Slack）。推論には `description` で渡し、人に見せる文は短くする
+    helpText: `外部のサービス「${c.name}」の道具「${t.name}」を使います`,
+    connection: { id: c.id, name: c.name, tool: t.name, ...(preset?.argLabels ? { labels: preset.argLabels } : {}) },
     ...(t.args ? { args: t.args } : {}),
+    // 型が ID を名前に直す問い合わせを持てば、承認の前に送り先の名前を確かめる（読むだけ。第12.11.3節）
+    ...(preset?.resolvers?.length && t.risk !== 'read' ? {
+      async prepare(args: Record<string, unknown>, ctx) {
+        const h = c.auth.type === 'none' ? { ok: true as const, headers: {} } : auth ? await auth.headersFor(ctx.tenantId, ctx.userId, c) : null;
+        const names = h?.ok ? await resolveArgNames(preset, args, h.headers) : {};
+        return { kind: 'ready' as const, args, ...(Object.keys(names).length > 0 ? { shown: JSON.stringify(names) } : {}) };
+      },
+    } : {}),
     async invoke(args: Record<string, unknown>, ctx) {
       if (!client) return { error: '取得できませんでした: コネクタが接続されていません' };
       let headers: Record<string, string> | undefined;

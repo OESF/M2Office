@@ -50,7 +50,7 @@ export {
   discoverOAuthEndpoints, buildConnectionAuthUrl, exchangeConnectionCode, refreshConnectionToken, fetchAccountLabel,
   revokeConnectionToken, ConnectionOAuthError, type OAuthEndpoints, type OAuthTokens,
 } from './connectors/oauth.js';
-export { CONNECTION_PRESETS, presetById, scopesForTools, presetRisk, type ConnectionPreset } from './connectors/presets.js';
+export { CONNECTION_PRESETS, presetById, scopesForTools, presetRisk, resolveArgNames, type ConnectionPreset } from './connectors/presets.js';
 export {
   ConnectionCredentials, needsConnectionMessage, lostConnectionMessage, type ConnectionCredentialsDeps,
 } from './connectors/credentials.js';

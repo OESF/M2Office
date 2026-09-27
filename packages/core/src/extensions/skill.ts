@@ -337,7 +337,10 @@ export function buildSkillPackage(files: ExtensionFiles, registry: ToolRegistry)
     menu: !('user-invocable' in fm) || truthy(fm['user-invocable']),
     tier: EFFORT_TIER[effort],
   }, local);
-  const risks = tools.map((t) => local.get(t)?.risk).filter((r): r is RiskLevel => !!r);
+  // 会社の接続の道具は、組み立てのときには危険度が分からない。送る道具として数える（承認の段が入るのと同じ扱い。
+  // 仮の道具の危険度（read）のまま数えると、投稿する業務でも同意の画面に「読むだけ」と出ていた。仕様書 第12.11.2節）
+  const risks = tools.map((t): RiskLevel | undefined => (connections.includes(t) ? 'external-send' : local.get(t)?.risk))
+    .filter((r): r is RiskLevel => !!r);
   const manifest: ExtensionManifest = {
     id: meta['m2office-id']?.trim() || `skill.${name}`,
     name: def.name,

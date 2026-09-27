@@ -110,6 +110,12 @@ export interface Tool {
   helpText: string;
   /** 引数の定義。推論への説明・呼び出しの検証・開発者マニュアルの一覧に使う（仕様書 第9.4.4節）。 */
   args?: ToolArgsSchema;
+  /**
+   * 会社の接続（MCP）の道具なら、その接続の名前と相手の道具の名前（仕様書 第12.11節）。
+   *
+   * @remarks 承認の画面で「Slack へ送ります（slack_send_message）」のように出すのに使う。内蔵の道具は持たない
+   */
+  connection?: { id: string; name: string; tool: string; labels?: Record<string, string> };
   /** 必要な Google の権限。Google を使わないツールは持たない（仕様書 第14.3.2節）。 */
   google?: GoogleScope;
   /**

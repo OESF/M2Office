@@ -24,6 +24,10 @@ export function describeContext(registry: ToolRegistry, artifacts: Artifact[]): 
   return {
     helpText: (name) => registry.get(name)?.helpText,
     artifactTitle: (id) => artifacts.find((a) => a.id === id)?.title,
+    connectionOf: (name) => {
+      const t = registry.get(name);
+      return t?.connection ? { service: t.connection.name, tool: t.connection.tool, risk: t.risk, ...(t.connection.labels ? { labels: t.connection.labels } : {}) } : undefined;
+    },
   };
 }
 
