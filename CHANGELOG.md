@@ -8,6 +8,57 @@ M2Office のサービス本体の版ごとの変更を、開発者と拡張機�
 
 仕様書・エージェント定義スキーマ・公開 API・拡張機能の版は、サービス本体の版とは独立しています（リリース規定 第2章）。
 
+## v0.9.0 段取り・Slack の接続・承認の履歴（2026-09-27）
+
+### 配備で行うこと
+- `npm run db:migrate`（移行 `033_agent_events.sql`〜`035_connection_auth.sql`）。いずれも表・関数・トリガーを足すだけ
+  - 033: 業務と秘書のイベントの表 `agent_events`、トリガー `runs_emit_event`・`conversations_emit_event`、会社をまたいで取り出す関数 `m2o_claim_agent_event()`
+  - 034: 段取りの表 `plans`・`plan_steps`、`jobs.plan_step_id`・`agent_events.plan_id`、トリガー `plans_emit_event`
+  - 035: 認証の要る接続の表 `connection_secrets`・`user_connections`
+- **ワーカーを必ず再起動する。** 秘書の受け手（`SecretaryConductor`）と分身（`PlanRunner`）はワーカーの中で動く。ワーカーが古いままだと、イベントが溜まり、段取りが進まず、秘書がその場で学ばない
+- 環境変数 `CONNECTION_OAUTH_REDIRECT_URI` を追加（任意。既定は `GOOGLE_OAUTH_REDIRECT_URI` と同じホストの `/v1/oauth/connection/callback`）。**Slack は https の戻り先だけを認める**ので、本番は https で配信する
+- Slack をつなぐ会社は、Slack のアプリを作り、**Agents の「Slack Model Context Protocol (MCP) Server」を有効に**して、クライアント ID とシークレットを管理者ページで登録する（手順は管理者ページの「Slack を追加」とヘルプ `admin-connectors`）
+- Google の権限の変化は無い。エージェント定義の `schema_version` は 1 のまま
+- 画面は作り直して、埋め込まれた版が `0.9.0` か確かめる
+- 巻き戻し: v0.8.0 に戻せば動くが、033・034 のトリガーが消費する者のいない `agent_events` に書き続ける。戻すときは次を流す（表は残してよい）
+  ```sql
+  DROP TRIGGER IF EXISTS runs_emit_event ON runs;
+  DROP TRIGGER IF EXISTS conversations_emit_event ON conversations;
+  DROP TRIGGER IF EXISTS plans_emit_event ON plans;
+  ```
+  表まで消すなら `DROP TABLE plan_steps, plans, agent_events, user_connections, connection_secrets CASCADE` と `ALTER TABLE jobs DROP COLUMN plan_step_id`。巻き戻せない移行は無い
+
+### 追加
+- **秘書が指揮者になる（業務と秘書のイベント連携）** — 実行の終了・失敗・中止・承認待ちと会話の保存を、データベースのトリガーが同じトランザクションで `agent_events` に書く（アウトボックス）。ワーカーの `SecretaryConductor`（`secretary/conductor.ts`）が 1 件ずつ確保し、依頼した本人の秘書として処理する。失敗は 2 分後に 5 回までやり直す。夜の一括の学習をやめ、会話の 1 往復と本人が直接使った業務の答えから、その場で学ぶ（`MemoryLearning.learnNow`、`memory/work.ts`）（仕様書 第10.13節・第10.7.3節、ADR-0038・ADR-0039）
+- **秘書が段取りをする** — 2 つ以上の業務を組み合わせる依頼を見分け、段取り（`plans`・`plan_steps`）を作ってすぐ返す。分身 `PlanRunner`（`secretary/plan.ts`）が本人として業務を起こし、前の段の答えを次の段に渡し、足りない入力は 1 回だけ聞き、失敗は 1 回頼み直す（段 8・同時 3 まで）。権限区画の答えは区画の外に渡さない。中の業務「段取りの報告」で出典つきでまとめて届ける。秘書バーに進み具合と問い、取りやめ（仕様書 第10.14節、ADR-0040。smoke 第 54 節）
+- **認証の要る会社の接続（`oauth`・`api_key`）** — `ConnectorAuth` を足し、`oauth` は会社がアプリのクライアント ID とシークレットを登録して利用者ごとに許可する。業務・定時実行・段取り・秘書の調べものは**依頼した本人の認可で呼び、他人の認可で代わりに呼ばない**（`ConnectionCredentials`）。RFC 9728・RFC 8414 での口の発見、state と PKCE、認可の暗号化、期限の更新と断られたときの 1 回の呼び直し、更新できなければ認可を消して本人に知らせる。`api_key` は会社の鍵で動く。登録の型は Slack（`connectors/presets.ts`。道具ごとの権限・読む道具の見分け・引数の名前・送り先の ID を名前に直す）。MCP の `inputSchema` を道具の引数の定義として推論に渡す。本物の Slack の公式の MCP サーバで、許可・読む・承認を経た投稿を確かめた（仕様書 第12.11.6節、ADR-0044。smoke 第 56 節）
+  - API: `GET /v1/me/connections`・`POST /v1/me/connections/:id/connect`・`GET /v1/me/connections/:id/impact`・`DELETE /v1/me/connections/:id`・`GET /v1/oauth/connection/callback`・`PUT /v1/admin/connections/mcp/:id/credentials`
+  - 接続していない人の業務は `needsConnection` を返して画面に接続のボタンを出し、定時実行は接続するまで飛ばす
+- **承認の履歴（判断したもの）** — 承認トレイの下に、本人が判断した承認と却下を新しい順に 100 件。判断したときの承認の画面・コメント・承認のあとに実際に行ったことと結果のリンク。実行の詳細に誰がいつ判断したか（`decisions`）。`GET /v1/approvals/decided`（仕様書 第6.2.5節）
+- **定時実行の画面と秘書からの操作** — 登録・編集・削除・停止・再開・今すぐ実行（`Schedules.tsx`、`DELETE /v1/schedules/:id`）。ファイルを受け取る業務と秘書の調べものは登録できない（`schedulable`）。秘書は「朝のブリーフを止めて」などを推論なしで行う（`secretary/schedules.ts`）（仕様書 第6.1.7節・第10.9.8節）
+- **声を試す** — 個人設定の「秘書」で、保存の前の設定のまま、本番と同じ Gemini Live と名乗りの指示で秘書に名乗らせる。`POST /v1/me/voice-test`（`voice/persona.ts`・`voice/sample.ts`）（仕様書 第10.5.8節）
+- **「会話を文字で出す」** — 音声の字幕を消せる（声で答えないときは消せない）（仕様書 第10.5.2節）
+- **秘書のキャンバスの幅を変えられる** — 左端の境目で、既定の幅（左ペインを除いた残りの半分）から 280px まで。端末ごとに覚え、ダブルクリックで戻す（仕様書 第6.2節）
+- 秘書のアバターの見本を 12 種、業務の絵を 50 枚にした（`AGENT_FACE_COUNT`）。`face` を書かない拡張機能の業務の絵は一度だけ入れ替わる
+
+### 変更
+- **監査ログの画面と API** — `GET /v1/admin/audit-events` を、誰が（人の名前。秘書・業務が行ったものは指示した人、仕組みは仕組みの名前）・何をしたか（業務の言葉）・何に対して（名前）の行で返すようにした。記録の値（`actorType`・`actorId`・`action`・`targetType`・`targetId`・`detail`）も同じ行に残すので、値を読んでいた呼び出し側はそのまま動く。`from`・`to`・`user`・`category`・`offset` で絞り、既定は直近 7 日・200 件ずつ。`GET /v1/admin/audit-events/export` で CSV（BOM 付き。出力を `audit.export` で記録）。`repo.searchAudit`（`user` はその人の依頼で秘書や業務が行ったものも返す）、`api/src/audit/present.ts`（仕様書 第6.6.8.1節）
+- **承認の画面** — 承認の直後でない段には社外への送信とお金の道具を見せず、送る操作は承認のあとで行うと伝える（推論が「道具が使えない」と書き、その文が承認の画面に出ていた）。会社の接続の道具は「Slack へ送ります（slack_send_message）」と名前の付いた引数で出し、送り先の ID を名前に直す。会社の接続の道具を送る道具として数え、同意の画面の危険度を直した（仕様書 第9.4.0節・第12.11.2節・第12.11.3節）
+- 「音声の読み上げ」を「声で答える」に改めた
+- 画面の文字の大きさ（`--font-scale` 0.875）・行間（`--line-scale` 0.9）・余白（`--space-scale` 0.9）を 1 か所の倍率で持つようにした（仕様書 第6.1節）
+- 仕様書を `spec/` の下に 1 章 1 ファイルで持つようにした。入口は `specification.md`（版・第0章・読む順番）。章と節の番号は変えていない。`tools/pdf/build.py` は読む順番に従ってつなぐ（ADR-0041）
+- 名刺管理（第27章、ADR-0042）と契約書チェック（第28章、ADR-0043）の仕様を定めた。**実装はまだ**
+
+### 削除
+- 昇華の承認と記憶の候補の API を消した: `/v1/admin/promotions`・`/v1/me/memories/:id/promote`・`/v1/me/promotions/:id/submit`・`/v1/me/promotions/:id/withdraw`・`/v1/me/memory-candidates*`。v0.8.0 で秘書が自分で判断するようにしたため（ADR-0028）。本人の履歴 `GET /v1/me/promotions` は残す
+- 言い換えの登録（`PUT /v1/admin/settings/knowledge` の言い換え）は 400 で断る。登録済みの組はそのまま効く
+
+### 修正
+- 「声で答える」を切ると音声の対話が始まらなかった（現行のモデルが文字だけの応答を断るため。常に音声で受けて中継で捨てる）
+- 秘書が「調べてお伝えします」と約束して何も起こさず、本人が待ち続けた。会社の接続の名前が出る「探す・読む」依頼は秘書の調べものへ回し、あとで伝える約束の答えなら調べものを起こす（仕様書 第10.11.5.1節）
+- 段取りを頼む言い回しが、業務の名前の語句の一致で 1 つの業務だけに取り次がれていた。段取りの報告で出典が落ちていた
+- MCP サーバが断った理由（応答の本文）がエラーに出ていなかった
+
 ## v0.8.0 秘書の代行とスキルの形式（2026-09-26）
 
 ### 配備で行うこと

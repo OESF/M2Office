@@ -246,6 +246,9 @@ src/context.ts        依存の構築（永続化・LLM・接続口・ツール�
 src/auth/             認証の設定とログイン状態（Cookie）
 src/middleware/       テナント解決、利用者の確認、ロールの確認、要求のログと想定外のエラーの処理
 src/routes/           エンドポイント
+src/secretary/        秘書の調べものと秘書が頼んだ業務の状態、朝のブリーフの自動の用意
+src/voice/            音声の中継（Gemini Live）、秘書の名乗りの指示、声を試す
+src/audit/            監査ログの見せ方（人の名前・業務の言葉・CSV。仕様書 第6.6.8.1節）
 ```
 
 ## 関連文書
