@@ -416,6 +416,12 @@ export const AVATAR_PRESETS: { id: string; label: string }[] = [
   { id: 'secretary4', label: '紺のスーツ（男性）' },
   { id: 'secretary5', label: '眼鏡・グレー（男性）' },
   { id: 'secretary6', label: '黒のスーツ（男性）' },
+  { id: 'secretary7', label: 'ショートヘア・カーディガン（女性）' },
+  { id: 'secretary8', label: 'ミリタリージャケット（女性）' },
+  { id: 'secretary9', label: 'ダンガリーシャツ（女性）' },
+  { id: 'secretary10', label: '眼鏡・グレーのニット（女性）' },
+  { id: 'secretary11', label: 'ベージュのジャケット（女性）' },
+  { id: 'secretary12', label: '三つ編み・メモ帳（女性）' },
 ];
 
 /**
