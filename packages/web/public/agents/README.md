@@ -9,7 +9,7 @@
 このディレクトリに、次の名前で置いてください。
 
 ```
-agent01.png ～ agent25.png
+agent01.png ～ agent50.png
 ```
 
 置いた画像は `/agents/agent01.png` として配信されます。
@@ -27,17 +27,26 @@ agent01.png ～ agent25.png
 | 4 | 日程調整（`scheduling`） |
 | 5 | 週次ブリーフ（`weekly-brief`） |
 | 6 | 秘書の調べもの（`secretary-lookup`） |
-| 7 以降 | 未使用 |
+| 7 | 予定の登録（`calendar-register`） |
+| 8 | 朝のブリーフ（`morning-brief`） |
+| 9 | 会議の準備（`meeting-prep`） |
+| 10 | 返信待ちの追跡（`reply-followup`） |
+| 11 | 文書の作成（`document-draft`） |
+| 12 | 表の作成（`sheet-builder`） |
+| 13 | スライド作成（`slides`） |
+| 14 | 段取りの報告（`secretary-plan-report`） |
+| 15 以降 | 未使用 |
 
 **業務を 1 つ足すたびに、まだ使っていない番号を 1 つ割り当ててください。**
-いまは 25 番まで用意してあります。この表と実際の値が食い違わないよう、
-`packages/core/test/agents.test.ts` が重複と範囲を確かめます。
+いまは 50 番まで用意してあります。この表と実際の値が食い違わないよう、
+`packages/core/test/agent-faces.test.ts` が重複と範囲を確かめます。
 
 `face` を書かない定義（拡張機能で入った業務）は、ID から機械的に決めます
 （`agentFace()`）。絵は必ず出ますが、他の業務と重なることがあります。
 
-26 個目が要るようになったら、画像を足したうえで
+51 個目が要るようになったら、画像を足したうえで
 `packages/shared/src/types/agent.ts` の `AGENT_FACE_COUNT` を増やしてください。
+枚数を増やすと、`face` を書かない業務の絵（ID から決まる番号）が一度だけ入れ替わります。
 
 ## 画像の決まり
 

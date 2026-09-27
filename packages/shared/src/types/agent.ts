@@ -133,10 +133,10 @@ export interface EvalCase {
  * 同梱している業務エージェントの絵の数（仕様書 第6.7.4.3節）。
  *
  * @remarks
- * `packages/web/public/agents/agent01.png`〜`agent25.png` に対応する。
+ * `packages/web/public/agents/agent01.png`〜`agent50.png` に対応する（第 0.140.1 版で 25 から 50 に増やした）。
  * **ここを増やすときは、画像を先に置くこと。** 番号だけ増やすと、絵の出ない業務ができる。
  */
-export const AGENT_FACE_COUNT = 25;
+export const AGENT_FACE_COUNT = 50;
 
 /**
  * エージェント定義の本体。

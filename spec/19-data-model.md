@@ -34,6 +34,8 @@
 | conversation | 秘書との対話 | user_id、文脈、開始・終了、入力経路（音声／テキスト） |
 | conversation_turn | 発話単位 | conversation_id、入力、出力、参照した記憶、評価（承認／修正／却下）、学習除外フラグ、**区画の印** |
 | connector | 外部接続 | tenant_id、種別、認証情報（暗号化）、有効ツール、状態 |
+| connection_secret | 会社の接続の認証情報（第12.11.6節） | tenant_id、接続の ID、クライアント ID、シークレット（暗号化）または会社の鍵（暗号化）と見出しの名前、認可の口、求める権限 |
+| user_connection | 利用者ごとの接続の認可（第12.11.6.3節） | tenant_id、user_id、接続の ID、認可（暗号化）、更新用の認可（暗号化）、期限、許可された権限、許可したアカウントの表示名、接続した日時 |
 | llm_config | LLM 設定 | tenant_id、プロバイダ、モデル階層、認証情報（暗号化）、上限 |
 | api_client | 外部アプリ | tenant_id、名称、スコープ、最大危険度、状態 |
 | artifact | 成果物 | run_id、種別、保存先、確定状態、ファイルの参照 |
