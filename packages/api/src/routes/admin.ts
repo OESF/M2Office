@@ -1,5 +1,5 @@
 /**
- * @file 管理者ページ（`/admin`）が使う API。利用状況・実行の一覧・設定・ユーザー・知識を扱う。
+ * @file 管理者ページ（`/admin`）が使う API。利用状況・実行の一覧・定時実行の一覧・設定・ユーザー・知識を扱う。
  *
  * 管理者ロールを持つ者だけが呼べる。管理者でも、他人の会話や実行の中身は見られない（不変則 I-10）。
  *
@@ -14,7 +14,7 @@ import {
 } from '@m2office/shared';
 import {
   DEFAULT_STANDARD_MINUTES, GOOGLE_DATA_RETENTION_DAYS, KNOWLEDGE_MAX_CHARS,
-  stepLabel, toolGoogleScopes, type AuditQuery,
+  describeRule, scheduleBlocker, scheduleChecks, stepLabel, toolGoogleScopes, type AuditQuery,
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { requireRole, type AppEnv } from '../middleware/tenant.js';
@@ -53,6 +53,40 @@ export function adminRoute(deps: AppDeps) {
       agentId: job.agentId, agentName: allAgents.find((a) => a.id === job.agentId)?.name ?? job.agentId,
       origin: job.origin, requestedBy: job.requestedBy,
     }));
+    return c.json({ items });
+  });
+
+  /**
+   * 会社の全員の定時実行（仕様書 第6.6.8.2節）。人・業務・繰り返し・次回・前回・状態を返す。
+   *
+   * @remarks
+   * **業務の入力は返さない**（本人が業務に渡す中身。不変則 I-10）。操作の口も持たない（本人の画面だけで行う。第6.1.7節）。
+   * 次の回に動かない理由は、起動役と同じ判定（`scheduleBlocker`）で、いま見たときのものを返す。
+   * 並びは動かないものを先に、次に人・次回の順
+   */
+  app.get('/schedules', async (c) => {
+    const { tenant } = c.get('ctx');
+    const [schedules, users] = await Promise.all([deps.repo.listSchedules(tenant.id, null), deps.repo.listUsers(tenant.id)]);
+    const view = await deps.tenantView(tenant.id);
+    const checks = scheduleChecks({ repo: deps.repo, hub: deps.hub, connector: deps.connector });
+    const items = await Promise.all(schedules.map(async (s) => {
+      const { def, block } = await scheduleBlocker(checks, s);
+      return {
+        id: s.id, userId: s.userId,
+        // 名前を引けなければ記録の値のまま出す（推測で名前を作らない）
+        userName: users.find((u) => u.id === s.userId)?.displayName ?? s.userId,
+        agentId: s.agentId,
+        agentName: def?.name ?? view.allAgents.find((a) => a.id === s.agentId)?.name ?? s.agentId,
+        label: describeRule(s.rule), timezone: s.timezone,
+        nextRunAt: s.nextRunAt, lastRunAt: s.lastRunAt,
+        state: !s.enabled ? 'paused' as const : block ? 'blocked' as const : 'active' as const,
+        blockedReason: block?.label ?? null,
+      };
+    }));
+    const rank = { blocked: 0, active: 1, paused: 2 };
+    items.sort((a, b) => rank[a.state] - rank[b.state]
+      || a.userName.localeCompare(b.userName, 'ja')
+      || (a.nextRunAt ?? '').localeCompare(b.nextRunAt ?? ''));
     return c.json({ items });
   });
 

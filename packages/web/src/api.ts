@@ -262,6 +262,17 @@ export interface AdminRun {
 }
 
 /**
+ * 管理者の定時実行の一覧の 1 行（仕様書 第6.6.8.2節）。
+ *
+ * @remarks **業務の入力は入らない。** `blockedReason` は次の回に動かない理由（起動役と同じ判定）
+ */
+export interface AdminSchedule {
+  id: string; userId: string; userName: string; agentId: string; agentName: string;
+  label: string; timezone: string; nextRunAt: string | null; lastRunAt: string | null;
+  state: 'active' | 'paused' | 'blocked'; blockedReason: string | null;
+}
+
+/**
  * 実行 1 件の**状態だけ**（仕様書 第6.6.8節）。管理者の一覧で、その場に開くために使う。
  *
  * @remarks **中身は入らない。** 段の入力と出力、成果物、業務の入力は返らない。
@@ -687,6 +698,8 @@ export const api = {
       total: { runs: number; costJpy: number }; note: string | null;
     }>('/admin/usage'),
     runs: () => call<{ items: AdminRun[] }>('/admin/runs'),
+    /** 会社の全員の定時実行（仕様書 第6.6.8.2節）。見るだけ。 */
+    schedules: () => call<{ items: AdminSchedule[] }>('/admin/schedules'),
     /** 実行 1 件の状態だけ（仕様書 第6.6.8節）。**中身は返らない。** */
     runStatus: (id: string) => call<AdminRunStatus>(`/admin/runs/${id}`),
     users: () => call<{ items: User[] }>('/admin/users'),

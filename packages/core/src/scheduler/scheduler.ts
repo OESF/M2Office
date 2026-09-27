@@ -7,40 +7,16 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { canUseAgent, type AgentDefinition } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import { enqueueJob } from '../engine/enqueue.js';
 import { nextRunAt } from './rule.js';
+import { scheduleBlocker, type ScheduleChecks } from './blocker.js';
 import { silentLogger, type Logger } from '../log/logger.js';
 
-export interface SchedulerDeps {
-  repo: Repository;
-  /** エージェント定義を解決する。自社専用の拡張機能はその会社でしか解決できない（仕様書 第12.10.3節）。 */
-  resolveDefinition(
-    agentId: string, version: number, tenantId: string,
-  ): AgentDefinition | undefined | Promise<AgentDefinition | undefined>;
+/** 起動役の依存。動かない理由の判定に要るもの（{@link ScheduleChecks}）と、アプリログ。 */
+export interface SchedulerDeps extends ScheduleChecks {
   /** アプリログ。省略時は何も書かない。 */
   logger?: Logger;
-  /** その会社で業務エージェントを使えるか（拡張機能を導入しているか）。 */
-  isAvailable?(tenantId: string, agentId: string): Promise<boolean>;
-  /**
-   * 業務が Google のツールを使うのに、対象者が Google と接続していないか（仕様書 第6.5.2.1節）。
-   *
-   * @remarks 見本の接続口で動かしている間は、接続が無くても動くため、常に `false` を返す。
-   */
-  missingGoogleConnection?(tenantId: string, userId: string, def: AgentDefinition): Promise<boolean>;
-  /**
-   * 管理者が止めたコネクタのツールのうち、その業務が使うもの（仕様書 第6.6.3.1節）。
-   *
-   * @returns 止まっているツールの名前。無ければ `null`
-   */
-  disabledToolOf?(tenantId: string, def: AgentDefinition): Promise<string | null>;
-  /**
-   * 業務が使う、利用者ごとに許可する会社の接続のうち、対象者がまだ接続していないもの（仕様書 第12.11.6.3節）。
-   *
-   * @returns 接続の名前。無ければ `null`
-   */
-  missingConnection?(tenantId: string, userId: string, def: AgentDefinition): Promise<string | null>;
 }
 
 /** 接続が無いために定時実行を飛ばしたときの知らせの題名。未読の同じ知らせがあれば重ねて知らせない。 */
@@ -82,49 +58,27 @@ export class Scheduler {
       const due = await repo.claimDueSchedule(now, (s) => nextRunAt(s.rule, s.timezone, now));
       if (!due) break;
 
-      const def = await this.deps.resolveDefinition(due.agentId, due.agentVersion, due.tenantId);
-      const user = await repo.findUserById(due.tenantId, due.userId);
-      const settings = await repo.getTenantSettings(due.tenantId);
-      let disabledTool: string | null = null;
-      let missing: string | null = null;
-      const reason = !def ? '定義が見つかりません'
-        : !user || user.status !== 'active' ? '対象者が利用できません'
-        : settings.agents.disabled.includes(def.id) ? '管理者がこの業務を無効にしています'
-        // 管理者が止めたツールを使う業務は動かせない（仕様書 第6.6.3.1節）。拡張機能の未導入より先に見る
-        : (disabledTool = this.deps.disabledToolOf ? await this.deps.disabledToolOf(due.tenantId, def) : null)
-          ? TOOL_DISABLED
-        : this.deps.isAvailable && !(await this.deps.isAvailable(due.tenantId, def.id)) ? 'この業務の拡張機能が導入されていません'
-        // 利用範囲から外れた人の定時実行は起動しない（仕様書 第16.7.4節）
-        : !canUseAgent(settings.access, def.id, due.userId, await repo.listUserGroupIds(due.tenantId, due.userId))
-          ? '対象者がこの業務の利用範囲の外です'
-        : def.compartment && !(await repo.listUserCompartments(due.tenantId, due.userId)).includes(def.compartment)
-          ? '対象者がこの業務の権限区画に割り当てられていません'
-        // 許可がない間は飛ばす。設定は残し、接続し直せば次から起動する（仕様書 第6.5.2.1節）
-        : this.deps.missingGoogleConnection && (await this.deps.missingGoogleConnection(due.tenantId, due.userId, def))
-          ? GOOGLE_MISSING
-        // 会社の接続も同じ。接続するまで飛ばす（第12.11.6.3節）
-        : (missing = this.deps.missingConnection ? await this.deps.missingConnection(due.tenantId, due.userId, def) : null)
-          ? CONNECTION_MISSING
-        : null;
-      if (!def || reason) {
+      const { def, block } = await scheduleBlocker(this.deps, due);
+      const reason = block?.reason ?? null;
+      if (!def || block) {
         (this.deps.logger ?? silentLogger).warn('定時実行を見送りました', {
           scheduleId: due.id, tenantId: due.tenantId, reason,
         });
         await repo.appendAudit({
           id: randomUUID(), tenantId: due.tenantId, actorType: 'system', actorId: 'scheduler',
           action: 'schedule.skip', targetType: 'schedule', targetId: due.id,
-          detail: { reason, ...(disabledTool ? { tool: disabledTool } : {}) },
+          detail: { reason, ...(block?.tool ? { tool: block.tool } : {}) },
           occurredAt: now.toISOString(),
         });
-        if (reason === GOOGLE_MISSING) await this.notifySkipOnce(due.tenantId, due.userId, def?.name ?? due.agentId, now);
-        if (reason === CONNECTION_MISSING) {
+        if (block?.kind === 'google') await this.notifySkipOnce(due.tenantId, due.userId, def?.name ?? due.agentId, now);
+        if (block?.kind === 'connection') {
           await this.notifyOnce(due.tenantId, due.userId, SCHEDULE_CONNECTION_TITLE,
-            `「${def?.name ?? due.agentId}」の定時実行は、「${missing}」との接続が要るため動かせません。`
+            `「${def?.name ?? due.agentId}」の定時実行は、「${block.connection}」との接続が要るため動かせません。`
             + '個人設定の「サービスとの接続」から接続すると、次の回から自動で動きます。', now);
         }
-        if (reason === TOOL_DISABLED) {
+        if (block?.kind === 'tool-disabled') {
           await this.notifyOnce(due.tenantId, due.userId, SCHEDULE_TOOL_DISABLED_TITLE,
-            `「${def?.name ?? due.agentId}」の定時実行は、管理者が止めたツール（${disabledTool}）を使うため動かせません。`
+            `「${def?.name ?? due.agentId}」の定時実行は、管理者が止めたツール（${block.tool}）を使うため動かせません。`
             + '管理者がツールを戻すと、次の回から自動で動きます。', now);
         }
         continue;
@@ -163,9 +117,3 @@ export class Scheduler {
     });
   }
 }
-
-/** ツールが止められているために飛ばしたことを表す理由。 */
-const TOOL_DISABLED = '管理者がこの業務の使うツールを止めています';
-
-const GOOGLE_MISSING = '対象者が Google と接続していません';
-const CONNECTION_MISSING = '対象者が業務の使うサービスと接続していません';

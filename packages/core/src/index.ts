@@ -105,6 +105,8 @@ export { enqueueJob } from './engine/enqueue.js';
 export { cancelRun, createdDriveLinks, CANCELLABLE } from './engine/cancel.js';
 export type { CancelActor, CancelOutcome } from './engine/cancel.js';
 export { Scheduler, SCHEDULE_SKIP_TITLE, SCHEDULE_TOOL_DISABLED_TITLE } from './scheduler/scheduler.js';
+export { scheduleBlocker, scheduleChecks } from './scheduler/blocker.js';
+export type { ScheduleChecks, ScheduleBlock, ScheduleBlockKind } from './scheduler/blocker.js';
 export { nextRunAt, validateRule, describeRule } from './scheduler/rule.js';
 export { isSchedulable, missingInputs, withEnabled, triggeredNow } from './scheduler/control.js';
 export { answerSchedule, type ScheduleAnswer } from './secretary/schedules.js';

@@ -11,7 +11,7 @@
 
 import {
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
-  RunEngine, Scheduler, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, agentUsesGoogle,
+  RunEngine, Scheduler, scheduleChecks, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention,
   NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv,
   defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials,
@@ -78,28 +78,9 @@ const engine = new RunEngine({
   // 止めた実行に後から書き込まれた中身も消す（仕様書 第6.5.2.1節）
   onCancelled: async (run) => { await retention.purgeRun(run, 'disconnect', new Date()); },
 });
-const scheduler = new Scheduler({
-  repo, resolveDefinition, isAvailable, logger: log,
-  // 本物の Google の接続口で動かすときだけ、接続の無い人の Google を使う定時実行を飛ばす（仕様書 第6.5.2.1節）
-  missingGoogleConnection: async (tenantId, userId, def) => {
-    if (connector.sourceFor(tenantId) !== 'google') return false;
-    if (!agentUsesGoogle(def, (await hub.forTenant(tenantId)).registry)) return false;
-    return !(await repo.getGoogleConnection(tenantId, userId));
-  },
-  // 管理者が止めたコネクタのツールを使う業務は動かせない（仕様書 第6.6.3.1節）
-  disabledToolOf: async (tenantId, def) => {
-    const { disabledTools } = await hub.forTenant(tenantId);
-    return def.tools.find((name) => disabledTools.has(name)) ?? null;
-  },
-  // 利用者ごとに許可する会社の接続（Slack など）に、持ち主が接続していなければ飛ばす（第12.11.6.3節）
-  missingConnection: async (tenantId, userId, def) => {
-    const { connections } = await hub.forTenant(tenantId);
-    for (const x of connections.filter((c) => c.auth.type === 'oauth' && def.tools.some((n) => n.startsWith(`${c.id}.`)))) {
-      if (!(await repo.getUserConnection(tenantId, userId, x.id))) return x.name;
-    }
-    return null;
-  },
-});
+// 動かない理由の判定は、管理者の「定時実行の一覧」と同じもの（仕様書 第6.6.8.2節）。
+// 本物の Google の接続口の会社で接続の無い人・止めたツール・未接続のサービス（Slack など）の定時実行は飛ばす
+const scheduler = new Scheduler({ ...scheduleChecks({ repo, hub, connector }), logger: log });
 
 // 秘書の先回り（会議の直前の準備・前日の移動の知らせ。仕様書 第10.12節）。本人が使える業務だけを使う（利用範囲。第16.7節）
 const proactive = new ProactiveWatcher({

@@ -1081,6 +1081,8 @@ code.uri { background: var(--subtle-bg); border: 1px solid var(--line); border-r
 .audit-filter input[type="date"] { width: auto; }
 .audit-table tr.clickable { cursor: pointer; }
 .audit-table tr.clickable:hover td { background: var(--accent-soft); }
+/* 定時実行の一覧（仕様書 第6.6.8.2節）。人・日時は折り返さず、理由の列だけを折り返す */
+.schedule-table td:not(:last-child) { white-space: nowrap; }
 .audit-detail td { background: var(--bg); }
 .audit-detail dd { word-break: break-all; }
 /* 判断したもの（承認の履歴。仕様書 第6.2.5節） */

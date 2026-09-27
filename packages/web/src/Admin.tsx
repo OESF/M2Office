@@ -5,7 +5,7 @@
  */
 
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
-import { api, describeError, type AdminRun, type AdminRunStatus, type AuditFilter, type AuditRowView, type Me } from './api.js';
+import { api, describeError, type AdminRun, type AdminRunStatus, type AdminSchedule, type AuditFilter, type AuditRowView, type Me } from './api.js';
 import { statusLabel, SuspendedBanner } from './components.js';
 import {
   AgentSettings, CompanySettings, KnowledgeSettings, UserSettings,
@@ -20,7 +20,7 @@ import { AppVersionBadge } from './launcher.js';
 import { Icon, NavHeading, NavItem, SideNavLayout, ThemeToggle, type IconName } from './nav.js';
 
 type Tab =
-  | 'dashboard' | 'usage' | 'runs' | 'company' | 'agents' | 'extensions' | 'users' | 'knowledge' | 'audit'
+  | 'dashboard' | 'usage' | 'runs' | 'schedules' | 'company' | 'agents' | 'extensions' | 'users' | 'knowledge' | 'audit'
   | 'connectors' | 'setup' | 'help';
 
 /**
@@ -90,6 +90,7 @@ const TABS: {
   { id: 'setup', label: 'はじめに行う設定', icon: 'help', description: '導入の流れと、残っている設定', group: '設定' },
   { id: 'usage', label: '利用状況', icon: 'usage', description: '業務ごとの実行の件数と費用', group: '記録' },
   { id: 'runs', label: '実行の一覧', icon: 'runs', description: '全員の実行の状態と費用（中身は見られません）', group: '記録' },
+  { id: 'schedules', label: '定時実行の一覧', icon: 'schedules', description: '全員の定時実行と、動かないものの理由（見るだけ）', group: '記録' },
   { id: 'audit', label: '監査ログ', icon: 'audit', description: '誰が何をしたかの記録', group: '記録' },
   { id: 'help', label: 'ヘルプ', icon: 'help', description: '管理者向けの記事と検索', group: '' },
 ];
@@ -252,6 +253,7 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
             )}
             {tab === 'usage' && <Usage />}
             {tab === 'runs' && <Runs />}
+            {tab === 'schedules' && <TenantSchedules />}
             {tab === 'company' && <CompanySettings page={page} />}
             {tab === 'agents' && <AgentSettings page={page} />}
             {tab === 'extensions' && <ExtensionSettings focus={extFocus} />}
@@ -330,6 +332,51 @@ function Runs() {
       {data?.items.map((r: AdminRun) => (
         <RunRow key={r.id} run={r} requester={nameOf(r.requestedBy)} />
       ))}
+    </>
+  );
+}
+
+/** 定時実行の状態の出し方。 */
+const SCHEDULE_STATE: Record<AdminSchedule['state'], { label: string; className: string }> = {
+  active: { label: '動く', className: 'succeeded' },
+  paused: { label: '止めている', className: '' },
+  blocked: { label: '動かない', className: 'failed' },
+};
+
+/**
+ * 定時実行の一覧（仕様書 第6.6.8.2節）。会社の全員の定時実行を、人・業務・繰り返し・次回・前回・状態で並べる。
+ *
+ * @remarks
+ * **見るだけで操作しない**（本人の権限で動くものを他人が変えない。第6.1.7節）。業務の入力は API も返さない（不変則 I-10）。
+ * 次の回に動かないものは、起動役と同じ判定の理由を状態の下に出す
+ */
+function TenantSchedules() {
+  const { data, error } = useLoad(api.admin.schedules);
+  return (
+    <>
+      <PageTitle trail={['定時実行の一覧']} help={{
+        article: 'admin-schedules',
+        text: '会社の全員の定時実行です。見るだけで、変えるのは本人の画面です。動かないものは理由が出ます。',
+      }} />
+      {error && <p className="error">{error}</p>}
+      {data && data.items.length === 0 && <p className="muted">定時実行はありません</p>}
+      {data && data.items.length > 0 && (
+        <table className="table schedule-table">
+          <thead><tr><th>人</th><th>業務</th><th>繰り返し</th><th>次回</th><th>前回</th><th>状態</th></tr></thead>
+          <tbody>
+            {data.items.map((s) => (
+              <tr key={s.id}>
+                <td>{s.userName}</td><td>{s.agentName}</td><td>{s.label}</td>
+                <td>{s.state === 'paused' ? '—' : time(s.nextRunAt)}</td><td>{time(s.lastRunAt)}</td>
+                <td>
+                  <span className={`status ${SCHEDULE_STATE[s.state].className}`}>{SCHEDULE_STATE[s.state].label}</span>
+                  {s.blockedReason && <div className="small muted">{s.blockedReason}</div>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </>
   );
 }

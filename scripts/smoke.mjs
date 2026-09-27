@@ -2607,7 +2607,7 @@ console.log('\n■ 51. ダッシュボードの本人と秘書の 1 組（第6.7
   }
 }
 
-console.log('\n■ 52. 定時実行の画面と秘書からの制御（第6.1.7節・第10.9.8節）');
+console.log('\n■ 52. 定時実行の画面と秘書からの制御、管理者の一覧（第6.1.7節・第10.9.8節・第6.6.8.2節）');
 {
   const { body: ag } = await call('a', '/v1/agents', {}, 'member');
   const { body: before } = await call('a', '/v1/schedules', {}, 'member');
@@ -2651,6 +2651,28 @@ console.log('\n■ 52. 定時実行の画面と秘書からの制御（第6.1.7�
     const { body: audits } = await call('a', '/v1/admin/audit-events');
     (audits.items ?? []).some((e) => e.action === 'schedule.update' && e.targetId === id && e.actorType === 'secretary')
       ? ok('秘書の操作を監査ログに秘書として残す') : ng('監査ログに秘書の操作が無い');
+
+    // 管理者の「定時実行の一覧」（第6.6.8.2節）。見るだけ・入力を返さない・動かない理由は起動役と同じ判定
+    const adminList = async (tenant = 'a', who) => (await call(tenant, '/v1/admin/schedules', {}, who));
+    const { body: al } = await adminList();
+    const row = (al.items ?? []).find((s) => s.id === id);
+    row && row.userName && row.userName !== row.userId && row.agentName === target.name && row.label === '毎平日（月〜金） 7:05' && row.state === 'active'
+      ? ok(`管理者は全員の定時実行を人の名前で一覧できる（${row.userName}・${row.agentName}・${row.label}）`) : ng('管理者の一覧に出ない', JSON.stringify(row));
+    row && !('input' in row) ? ok('管理者の一覧は業務の入力を返さない（不変則 I-10）') : ng('管理者の一覧が入力を返す');
+    const byMember = await adminList('a', 'member');
+    const { body: otherTenant } = await adminList('b');
+    byMember.status === 403 && !(otherTenant.items ?? []).some((s) => s.id === id)
+      ? ok('管理者でない人は見られず（403）、ほかの会社の管理者には出ない') : ng(`一覧の境界が効かない（${byMember.status}）`);
+    const { body: agentSettings } = await call('a', '/v1/admin/settings');
+    const wasDisabled = agentSettings?.agents?.disabled ?? [];
+    await call('a', '/v1/admin/settings/agents', { method: 'PUT', body: JSON.stringify({ disabled: [...wasDisabled, target.id] }) });
+    try {
+      const blocked = (await adminList()).body.items?.find((s) => s.id === id);
+      blocked?.state === 'blocked' && /無効/.test(blocked.blockedReason ?? '') && al.items[0] && (await adminList()).body.items[0].state === 'blocked'
+        ? ok(`業務を無効にすると「動かない」と理由が出て、先頭に並ぶ（${blocked.blockedReason}）`) : ng('動かない理由が出ない', JSON.stringify(blocked));
+    } finally {
+      await call('a', '/v1/admin/settings/agents', { method: 'PUT', body: JSON.stringify({ disabled: wasDisabled }) });
+    }
 
     const other = await call('b', `/v1/schedules/${id}`, { method: 'DELETE' }, 'member');
     const admin = await call('a', `/v1/schedules/${id}`, { method: 'DELETE' });
