@@ -273,8 +273,20 @@ export interface UserSettings {
     callMe: string;
     style: 'polite' | 'concise';
     proactivity: 'low' | 'normal' | 'high';
-    /** 音声で読み上げるか（仕様書 第10.5.2節）。切ると、音声の対話でも文字だけを返す。 */
+    /**
+     * 声で答えるか（個人設定「声で答える」。仕様書 第6.5.3節・第10.5.5節）。切ると、音声の対話でも文字だけを返す。
+     *
+     * @remarks 入力欄に書いた依頼には、この設定によらず声を使わない（第6.2.0節）
+     */
     speak: boolean;
+    /**
+     * 音声で話している間、秘書バーに字幕（聞こえた言葉と秘書の言葉）を出すか（個人設定「会話を文字で出す」。第10.5.2節）。
+     *
+     * @remarks
+     * `speak` が切りのときは、この値によらず出す（声も文字も無いと答えが伝わらない）。{@link showsCaptions} で判定する。
+     * 消しても、会話ログへの保存と秘書のキャンバスに出す答えは変わらない
+     */
+    captions: boolean;
     /**
      * 読み上げの声（仕様書 第10.5.6節）。提供者が用意する声の名前。空なら提供者の既定。
      *
@@ -340,7 +352,7 @@ export const DEFAULT_PINNED = ['minutes', 'inbox-triage', 'knowledge-qa', 'sched
 
 export const DEFAULT_USER_SETTINGS: UserSettings = {
   profile: { furigana: '', title: '', timezone: 'Asia/Tokyo', home: '', workplace: '' },
-  secretary: { name: '', callMe: '', style: 'polite', proactivity: 'normal', speak: true, voice: '', voiceStyle: '', avatar: '' },
+  secretary: { name: '', callMe: '', style: 'polite', proactivity: 'normal', speak: true, captions: true, voice: '', voiceStyle: '', avatar: '' },
   notifications: {
     kinds: { brief: true, run: true, approval: true, failure: true },
     quietHours: null,
@@ -395,6 +407,15 @@ export const VOICE_CHOICES: { name: string; note: string }[] = [
   { name: 'Sadaltager', note: '物知りな' },
   { name: 'Sulafat', note: 'あたたかい' },
 ];
+
+/**
+ * 音声で話している間に字幕を出すか（仕様書 第6.5.3節「会話を文字で出す」）。
+ *
+ * @remarks 「声で答える」を切っているときは、設定によらず出す。声も文字も無いと、秘書の答えが伝わらないため
+ */
+export function showsCaptions(s: Pick<UserSettings['secretary'], 'speak' | 'captions'>): boolean {
+  return s.captions !== false || !s.speak;
+}
 
 /** 話し方の指示の長さの上限（字）。 */
 export const VOICE_STYLE_MAX = 100;

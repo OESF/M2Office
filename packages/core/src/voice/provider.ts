@@ -21,7 +21,7 @@ export type VoiceEvent =
   | { type: 'heard'; text: string }
   /** 秘書の応答の文字。 */
   | { type: 'reply'; text: string }
-  /** 秘書の応答の音（PCM）。読み上げを切っている人には送らない。 */
+  /** 秘書の応答の音（PCM）。「声で答える」を切っている人には送らない。 */
   | { type: 'audio'; pcm: Uint8Array }
   /** 応答が一区切りついた。 */
   | { type: 'turn-end' }
@@ -73,7 +73,13 @@ export interface VoiceTool {
 export interface VoiceSessionOptions {
   /** 秘書の名乗りと応対のしかた（仕様書 第6.5.3節）。 */
   instructions: string;
-  /** 音声で応答するか。切っている人には文字だけを返す（第10.5.5節）。 */
+  /**
+   * 声で答えるか（個人設定「声で答える」）。切っている人には、応答の文字だけを返す（第10.5.5節）。
+   *
+   * @remarks
+   * 提供者が文字だけの応答を受け付けないことがある（Gemini Live の現行のモデル）。
+   * そのときも音声で受け、音の出来事（`audio`）を出さずに捨てる。応答の文字は書き起こしを使う
+   */
   speak: boolean;
   /**
    * 読み上げの声（仕様書 第10.5.6節）。提供者が用意する声の名前。

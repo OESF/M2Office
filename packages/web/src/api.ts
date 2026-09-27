@@ -514,6 +514,12 @@ export const api = {
   mySettings: () => call<UserSettings>('/me/settings'),
   saveMySettings: <K extends keyof UserSettings>(section: K, value: UserSettings[K]) =>
     call(`/me/settings/${section}`, { method: 'PUT', body: JSON.stringify(value) }),
+  /**
+   * 声を試す（仕様書 第10.5.8節）。画面に入っている秘書の設定（保存の前でもよい）で、秘書に名乗らせる。
+   * 声は PCM を base64 にしたもの。鳴らしたら捨てる。
+   */
+  voiceTest: (secretary: UserSettings['secretary']) =>
+    call<{ text: string; audio: string; sampleRate: number; notes: string[] }>('/me/voice-test', { method: 'POST', body: JSON.stringify(secretary) }),
   /** 自分の記憶から、秘書が会社の知識にしたものの履歴（仕様書 第6.5.4節）。 */
   myPromotions: () => call<{ items: PromotionView[] }>('/me/promotions'),
   /**

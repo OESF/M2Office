@@ -5,6 +5,7 @@
  * 音のかたまり（PCM）と文字だけである（仕様書 第10.5.4節、ADR-0018）。
  *
  * **録音は残さない。** マイクの音は送ったら捨て、応答の音も鳴らしたら捨てる（第10.5.3節）。
+ * 個人設定の「声を試す」（第10.5.8節）の音を鳴らすのもここで行う（`playSample`）。
  */
 
 /** 送りの標本化周波数（サーバーと合わせる）。 */
@@ -233,3 +234,31 @@ class M2oMic extends AudioWorkletProcessor {
 }
 registerProcessor('m2o-mic', M2oMic);
 `;
+
+/**
+ * 声を試した結果の音（仕様書 第10.5.8節）を 1 回だけ鳴らす。鳴り終わったら解決する。
+ *
+ * @param base64 受けの PCM（16 ビット・リトルエンディアン）を base64 にしたもの
+ * @param sampleRate 標本化周波数（サーバーが返した値）
+ *
+ * @remarks **保存しない。** 鳴らし終えたら音の置き場ごと閉じて捨てる（第10.5.3節）
+ */
+export async function playSample(base64: string, sampleRate = OUTPUT_HZ): Promise<void> {
+  const raw = Uint8Array.from(atob(base64), (ch) => ch.charCodeAt(0));
+  if (raw.byteLength < 2) return;
+  const samples = fromPcm16(raw.buffer.slice(0, raw.byteLength - (raw.byteLength % 2)));
+  const output = new AudioContext({ sampleRate });
+  try {
+    const buffer = output.createBuffer(1, samples.length, sampleRate);
+    buffer.copyToChannel(samples, 0);
+    const source = output.createBufferSource();
+    source.buffer = buffer;
+    source.connect(output.destination);
+    await new Promise<void>((resolve) => {
+      source.onended = () => resolve();
+      source.start();
+    });
+  } finally {
+    void output.close();
+  }
+}

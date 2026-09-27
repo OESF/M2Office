@@ -2755,6 +2755,31 @@ console.log('\n■ 54. 秘書が段取りをする: 分身と業務の連携（�
   }
 }
 
+console.log('\n■ 55. 声を試す・会話を文字で出す（第10.5.8節・第6.5.3節）');
+{
+  const before = await call('a', '/v1/me/settings', {}, 'member');
+  const secretary = { name: '試しの秘書', callMe: '', style: 'polite', proactivity: 'normal', speak: true, voice: 'Kore', voiceStyle: 'ゆっくり話して', avatar: '' };
+  const r = await call('a', '/v1/me/voice-test', { method: 'POST', body: JSON.stringify(secretary) }, 'member');
+  // 自動テストでは見本の音声が返る。声は無く、内部の指示を受け取ったことだけを文字で返す
+  r.status === 200 && typeof r.body.text === 'string' && r.body.text.includes('声の確認') && r.body.sampleRate === 24000 && typeof r.body.audio === 'string'
+    ? ok('画面に入っている設定で秘書に名乗らせ、文字と声を返す') : ng(`声を試せない（${r.status}）`, JSON.stringify(r.body).slice(0, 200));
+  const after = await call('a', '/v1/me/settings', {}, 'member');
+  after.body?.secretary?.name === before.body?.secretary?.name
+    ? ok('試しても設定は保存しない') : ng('試しただけで設定が変わった');
+  const off = await call('a', '/v1/me/voice-test', { method: 'POST', body: JSON.stringify({ ...secretary, speak: false }) }, 'member');
+  off.status === 400 ? ok('「声で答える」を切っているときは試せない') : ng(`切っていても試せる（${off.status}）`);
+  const convs = await call('a', '/v1/me/conversations', {}, 'member');
+  !(convs.body?.items ?? []).some((c) => String(c.reply ?? '').includes('声の確認'))
+    ? ok('会話ログには残さない') : ng('会話ログに残った');
+
+  // 会話を文字で出す（第6.5.3節）。既定は出す。切ったら保存され、戻せる
+  (before.body?.secretary?.captions === true) ? ok('「会話を文字で出す」の既定は入') : ng('既定が入でない', JSON.stringify(before.body?.secretary));
+  await call('a', '/v1/me/settings/secretary', { method: 'PUT', body: JSON.stringify({ ...before.body.secretary, captions: false }) }, 'member');
+  const noCap = await call('a', '/v1/me/settings', {}, 'member');
+  noCap.body?.secretary?.captions === false ? ok('「会話を文字で出す」を切って保存できる') : ng('切った値が保存されない');
+  await call('a', '/v1/me/settings/secretary', { method: 'PUT', body: JSON.stringify(before.body.secretary) }, 'member');
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

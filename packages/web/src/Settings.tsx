@@ -4,8 +4,8 @@
  * @see 仕様書 第6.5節 個人設定
  */
 
-import { useEffect, useRef, useState } from 'react';
-import { AVATAR_PRESETS, VOICE_CHOICES, VOICE_STYLE_MAX, type UserSettings } from '@m2office/shared';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { AVATAR_PRESETS, VOICE_CHOICES, VOICE_STYLE_MAX, showsCaptions, type UserSettings } from '@m2office/shared';
 import {
   api, describeError,
   type AgentSummary, type ConversationView, type Me, type MemoryView,
@@ -16,6 +16,7 @@ import { statusLabel } from './components.js';
 import { SecretaryAvatar } from './nav.js';
 import { KEY_BINDINGS, isTouchOnly, keyLabel } from './keys.js';
 import { SaveButton } from './save.js';
+import { playSample } from './voice.js';
 
 /**
  * 個人設定（仕様書 第6.5節）。左ペインの最下部の利用者のカードの歯車のボタンから開く。
@@ -158,11 +159,20 @@ export function Settings({ me, agents, onChanged, section }: {
             <select value={s.secretary.proactivity} onChange={(e) => set('secretary', { proactivity: e.target.value as 'low' | 'normal' | 'high' })}>
               <option value="low">控えめ</option><option value="normal">標準</option><option value="high">積極的</option>
             </select></div>
-          <label className="check">
-            <input type="checkbox" checked={s.secretary.speak}
-              onChange={(e) => set('secretary', { speak: e.target.checked })} />
-            音声で読み上げる
-          </label>
+          {/* 音声で話しかけたときの答え方（仕様書 第6.5.3節）。書いた依頼には、もともと声を使わない */}
+          <div className="field"><label>音声で話したとき</label>
+            <label className="check">
+              <input type="checkbox" checked={s.secretary.speak}
+                onChange={(e) => set('secretary', { speak: e.target.checked })} />
+              声で答える
+            </label>
+            {/* 声で答えないときは字幕を消せない。声も文字も無いと答えが伝わらない */}
+            <label className="check">
+              <input type="checkbox" checked={showsCaptions(s.secretary)} disabled={!s.secretary.speak}
+                onChange={(e) => set('secretary', { captions: e.target.checked })} />
+              会話を文字で出す
+            </label>
+          </div>
           <div className="field"><label>声</label>
             <select value={s.secretary.voice} disabled={!s.secretary.speak}
               onChange={(e) => set('secretary', { voice: e.target.value })}>
@@ -171,12 +181,14 @@ export function Settings({ me, agents, onChanged, section }: {
             </select>
             <span className="muted small">（）内は声の印象の目安です</span>
           </div>
-          <div className="field"><label>話し方の指示</label>
+        </div>
+        {/* 話し方の指示は幅いっぱいに取り、書いたらすぐ横の「声を試す」で確かめられるようにする（第10.5.8節） */}
+        <div className="field"><label>話し方の指示</label>
+          <VoiceTest secretary={s.secretary}>
             <input value={s.secretary.voiceStyle} disabled={!s.secretary.speak}
-              placeholder="例: 関西弁で話して"
+              placeholder="例: 関西弁で話して" maxLength={VOICE_STYLE_MAX}
               onChange={(e) => set('secretary', { voiceStyle: e.target.value.slice(0, VOICE_STYLE_MAX) })} />
-            <span className="muted small">{VOICE_STYLE_MAX} 字まで</span>
-          </div>
+          </VoiceTest>
         </div>
         <div className="field">
           <label>アバター</label>
@@ -693,5 +705,59 @@ function GoogleSettings() {
       )}
       {msg && <p className={msg.ok ? 'ok-msg' : 'error'}>{msg.text}</p>}
     </div>
+  );
+}
+
+/**
+ * 声を試す（仕様書 第10.5.8節）。いま画面に入っている秘書の設定で、秘書に名乗りの挨拶を話させる。
+ *
+ * @remarks
+ * 保存の前に試せる。試しても保存はしない。「声で答える」を切っている間は押せない（声を選ぶ欄と同じ）。
+ * 話した文字も横に出す。音が聞こえない環境でも、設定が届いたかを確かめられるように。
+ */
+function VoiceTest({ secretary, children }: {
+  secretary: UserSettings['secretary'];
+  /** ボタンの左に並べる入力欄（話し方の指示）。 */
+  children: ReactNode;
+}) {
+  const [state, setState] = useState<'idle' | 'preparing' | 'speaking'>('idle');
+  const [said, setSaid] = useState('');
+  const [notes, setNotes] = useState<string[]>([]);
+  const [error, setError] = useState('');
+
+  const run = async () => {
+    setState('preparing');
+    setSaid('');
+    setNotes([]);
+    setError('');
+    try {
+      const r = await api.voiceTest(secretary);
+      setSaid(r.text);
+      setNotes(r.notes);
+      setState('speaking');
+      if (r.audio) await playSample(r.audio, r.sampleRate);
+    } catch (err) {
+      setError(describeError(err, '声を試せませんでした'));
+    } finally {
+      setState('idle');
+    }
+  };
+
+  return (
+    <>
+      <div className="voice-test">
+        {children}
+        <button type="button" className="btn ghost" disabled={!secretary.speak || state !== 'idle'} onClick={() => void run()}>
+          {state === 'preparing' ? '準備しています…' : state === 'speaking' ? '話しています…' : '声を試す'}
+        </button>
+      </div>
+      {(said || notes.length > 0 || error) && (
+        <div className="voice-test-result">
+          {said && <span className="muted small">「{said}」</span>}
+          {notes.map((n) => <span key={n} className="muted small">{n}</span>)}
+          {error && <span className="error small">{error}</span>}
+        </div>
+      )}
+    </>
   );
 }

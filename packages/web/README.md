@@ -119,10 +119,10 @@ src/google-links.ts    Google のアプリの一覧に並べるリンク（本�
 public/icons.svg       画面のアイコン（モノクロの線画。文字の色を引き継ぐ）
 public/avatars/        秘書のアバターの見本（第6.1.3節）。README を参照
 public/agents/         業務エージェントの絵 25 枚（第6.7.4.3節）。README を参照
-src/Settings.tsx    個人設定
+src/Settings.tsx    個人設定（秘書の「声を試す」を含む）
 src/help.tsx        ヘルプ（ヘルプセンター・記事・画面の「？」・初回の案内・業務の説明）
 src/components.tsx  フォーム・実行詳細（中止）・承認トレイ
-src/voice.ts        音声の対話（マイクの取り込み・再生・中継との WebSocket。秘書のキャンバスに出す答えの受け取り）
+src/voice.ts        音声の対話（マイクの取り込み・再生・中継との WebSocket。秘書のキャンバスに出す答えの受け取り）と、声を試した音の再生
 src/keys.ts         キーボードの割り当て（表・修飾キーの出し分け・登録。第6.11節）
 src/markdown.ts     ヘルプと説明の Markdown の描画
 src/styles.css      3 ペインの配置

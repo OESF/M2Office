@@ -7,7 +7,7 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { Notification } from '@m2office/shared';
+import { showsCaptions, type Notification } from '@m2office/shared';
 import { splitMenu, togglePinned } from './menu.js';
 import {
   api, ApiError, describeError,
@@ -149,11 +149,14 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [avatar, setAvatar] = useState('');
   // 本人の呼ばれ方（仕様書 第6.5.3節）。最初の画面の呼びかけに使う（第6.1.5節）
   const [callMe, setCallMe] = useState('');
+  // 音声の字幕を出すか（仕様書 第6.5.3節「会話を文字で出す」）。個人設定で変えたら読み直す
+  const [captions, setCaptions] = useState(true);
   const loadMenu = useCallback(() => {
     api.mySettings().then((s) => {
       setMenu(s.menu);
       setAvatar(s.secretary.avatar ?? '');
       setCallMe(s.secretary.callMe ?? '');
+      setCaptions(showsCaptions(s.secretary));
     }).catch(() => undefined);
   }, []);
   useEffect(loadMenu, [loadMenu]);
@@ -400,6 +403,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
           <SecretaryBar
             lookups={lookups}
             avatar={avatar}
+            captions={captions}
             onResult={show}
             onVoice={(on) => { voiceOn.current = on; }}
           />
@@ -687,11 +691,13 @@ function CanvasView({ result, onOpenAgent }: {
  * 常駐の秘書バー。どの画面からでも呼び出せる（仕様書 第10.4節）。
  * 音声でも話しかけられ（第10.5節）、手元のファイルを 1 つ渡せる（第10.10節）。
  */
-function SecretaryBar({ lookups, avatar, onResult, onVoice }: {
+function SecretaryBar({ lookups, avatar, captions, onResult, onVoice }: {
   /** 後ろで動いている調べもの。処理中であることを常に見せる（仕様書 第10.11.6節） */
   lookups: Lookup[];
   /** 秘書のアバター（個人設定。仕様書 第6.1.3節） */
   avatar: string;
+  /** 音声の字幕を出すか（仕様書 第6.5.3節「会話を文字で出す」）。 */
+  captions: boolean;
   /** 秘書のキャンバスに結果を出す（第6.2.0節）。帯には出さない */
   onResult: (result: Omit<CanvasResult, 'id'>) => void;
   /** 音声を始めた・終えた。その間の調べものは声で伝わる（第6.2.0節） */
@@ -826,9 +832,9 @@ function SecretaryBar({ lookups, avatar, onResult, onVoice }: {
       <div className="secretary-right">
       {/*
         音声の字幕（第6.2.0節・10.5.2節）。話している間だけ、直近の 1 往復を出す。
-        高さは決めてあり、長い文は新しい側を見せる
+        高さは決めてあり、長い文は新しい側を見せる。本人が「会話を文字で出す」を切っていれば出さない
       */}
-      {call && (
+      {call && captions && (
         <div className="secretary-caption" aria-live="polite">
           <p><span className="muted">あなた</span>{tail(caption.heard) || '…'}</p>
           <p><span className="muted">秘書</span>{tail(caption.reply) || '…'}</p>

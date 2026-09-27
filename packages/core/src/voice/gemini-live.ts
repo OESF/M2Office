@@ -103,8 +103,10 @@ export class GeminiLiveProvider implements VoiceProvider {
           setup: {
             model,
             generationConfig: {
-              // 読み上げを切っている人には音声を作らせない（第10.5.5節）
-              responseModalities: session.speak ? ['AUDIO'] : ['TEXT'],
+              // 常に音声で求める。現行のモデル（gemini-3.1-flash-live-preview）は文字だけ（TEXT）を断り、
+              // 「The requested combination of response modalities (TEXT) is not supported」で接続を切る
+              // （2026-09-27 に実機で確認）。声で答えない人には、受け取った音を渡さずに捨てる（第10.5.5節）
+              responseModalities: ['AUDIO'],
               // 声（第10.5.6節）。選ばれていなければ提供者の既定に任せる。
               // `speechConfig` は `generationConfig` の中に置く。`setup` の直下に置くと
               // 「Unknown name "speechConfig" at 'setup'」で接続を断られる（2026-09-23 に実機で確認）
@@ -145,7 +147,7 @@ export class GeminiLiveProvider implements VoiceProvider {
       if (content.outputTranscription?.text) emit({ type: 'reply', text: content.outputTranscription.text });
       for (const part of content.modelTurn?.parts ?? []) {
         if (part.text) emit({ type: 'reply', text: part.text });
-        // 音は渡すだけ。ここでは書き出さない（第10.5.3節）
+        // 音は渡すだけ。ここでは書き出さない（第10.5.3節）。声で答えない人には渡さず、ここで捨てる
         if (part.inlineData?.data && session.speak) {
           emit({ type: 'audio', pcm: new Uint8Array(Buffer.from(part.inlineData.data, 'base64')) });
         }

@@ -86,17 +86,18 @@ test('音声を送り、聞こえた文字と応答と音を受け取る', async
   await live.close();
 });
 
-test('読み上げを切ると、音声を求めず、音も渡さない（第10.5.5節）', async () => {
+test('声で答えないときも音声で求め（文字だけは断られる）、音は渡さずに書き起こしを返す（第10.5.5節）', async () => {
   const live = await fakeLive();
   const sink = collect();
   const provider = new GeminiLiveProvider({ apiKey: 'test-key', model: 'gemini-live', url: live.url });
   const session = await provider.open({ instructions: '秘書です。', speak: false, onEvent: sink.onEvent });
 
   const setup = live.received[0] as { setup?: { generationConfig?: { responseModalities?: string[] } } };
-  assert.deepEqual(setup.setup?.generationConfig?.responseModalities, ['TEXT']);
+  assert.deepEqual(setup.setup?.generationConfig?.responseModalities, ['AUDIO'], '文字だけ（TEXT）は求めない');
 
-  live.reply({ serverContent: { modelTurn: { parts: [{ text: '承知しました' }, { inlineData: { data: Buffer.from([1]).toString('base64') } }] } } });
+  live.reply({ serverContent: { outputTranscription: { text: '承知しました' }, modelTurn: { parts: [{ inlineData: { data: Buffer.from([1]).toString('base64') } }] } } });
   await waitFor(() => sink.events.some((e) => e.type === 'reply'));
+  assert.deepEqual(sink.events.filter((e) => e.type === 'reply'), [{ type: 'reply', text: '承知しました' }], '応答の文字は書き起こし');
   assert.equal(sink.events.some((e) => e.type === 'audio'), false, '切っている人に音を渡さない');
 
   session.close();
@@ -160,7 +161,7 @@ test('選んだ声を提供者へ渡す。選ばなければ既定に任せる�
   live.received.length = 0;
   const silent = await provider.open({ instructions: '秘書です。', speak: false, voice: 'Kore', onEvent: () => undefined });
   const noSpeak = live.received[0] as { setup?: { generationConfig?: { speechConfig?: unknown } } };
-  assert.equal(noSpeak.setup?.generationConfig?.speechConfig, undefined, '読み上げを切っていれば声も指定しない');
+  assert.equal(noSpeak.setup?.generationConfig?.speechConfig, undefined, '声で答えなければ声も指定しない');
   silent.close();
 
   await live.close();

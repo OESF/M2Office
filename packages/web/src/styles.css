@@ -1059,6 +1059,12 @@ code.uri { background: var(--subtle-bg); border: 1px solid var(--line); border-r
 }
 
 /* 個人設定のアバターの選択（仕様書 第6.1.3節） */
+/* 声を試す（仕様書 第10.5.8節）。ボタンの横に、話した文字と断り書きを出す */
+.voice-test { display: flex; align-items: stretch; gap: calc(8px * var(--space-scale)); }
+.voice-test input { flex: 1; min-width: 0; }
+.voice-test .btn { flex: none; white-space: nowrap; min-width: 7.5em; }
+.voice-test-result { display: flex; flex-direction: column; gap: calc(2px * var(--space-scale)); margin-top: calc(4px * var(--space-scale)); }
+.voice-test-result .error { margin: 0; }
 .avatar-picker { display: flex; flex-wrap: wrap; gap: calc(8px * var(--space-scale)); margin: calc(6px * var(--space-scale)) 0; }
 .avatar-choice {
   width: 44px; height: 44px; padding: 0;

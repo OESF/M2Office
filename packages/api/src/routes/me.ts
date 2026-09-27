@@ -1,5 +1,5 @@
 /**
- * @file 個人設定の API。本人の設定・表示名・ログイン中の端末・利用状況を扱う。
+ * @file 個人設定の API。本人の設定・表示名・ログイン中の端末・利用状況と、声を試すことを扱う。
  *
  * @see 仕様書 第6.5節 個人設定
  */
@@ -7,9 +7,11 @@
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import { VOICE_CHOICES, VOICE_STYLE_MAX, isValidAvatar, type UserSettings } from '@m2office/shared';
-import { LEARNED_SOURCE, buildPresence, loadFile, refusalMessage, refuseToRemember } from '@m2office/core';
+import { AUDIO, AiNotConfiguredError, LEARNED_SOURCE, buildPresence, loadFile, refusalMessage, refuseToRemember } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
+import { speakSample } from '../voice/sample.js';
+import { voiceNameOf } from '../voice/persona.js';
 
 /**
  * 個人設定（仕様書 第6.5節）。本人の分だけを読み書きする。
@@ -111,6 +113,53 @@ export function meRoute(deps: AppDeps) {
     await deps.repo.saveUserSettings(tenant.id, user.id, checked.section, checked.value as never);
     await audit(deps, tenant.id, user.id, 'me.settings.update', checked.section);
     return c.json({ ok: true });
+  });
+
+  /** 声を試している最中の人（`会社:利用者`）。押し直しで何本も開かない。 */
+  const sampling = new Set<string>();
+
+  /**
+   * 声を試す（仕様書 第10.5.8節）。画面に入っている秘書の設定（保存の前でもよい）で、秘書に名乗りの挨拶を話させる。
+   *
+   * @remarks
+   * 設定は保存しない。実際の音声の対話と同じ提供者と名乗りの指示を使う。
+   * 声は 24 kHz・16 ビットの PCM を base64 で返す。**どこにも保存しない**（第10.5.3節）。
+   * 会話ログ・記憶・監査ログの `secretary.voice` には残さない。
+   */
+  app.post('/voice-test', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const checked = validate('secretary', await c.req.json<unknown>().catch(() => ({})), []);
+    if ('error' in checked) return c.json({ error: checked.error }, 400);
+    const prefs = checked.value as UserSettings['secretary'];
+    if (!prefs.speak) return c.json({ error: '「声で答える」を切っているため、声を試せません' }, 400);
+    const key = `${tenant.id}:${user.id}`;
+    if (sampling.has(key)) return c.json({ error: 'いま話しています。終わってからお試しください' }, 429);
+    // 推論が使えない会社では試さない。音声の対話と同じ断りを返す（第10.5.4節）
+    let provider: Awaited<ReturnType<typeof deps.ai.voiceFor>>;
+    try {
+      provider = await deps.ai.voiceFor(tenant.id);
+    } catch (err) {
+      if (err instanceof AiNotConfiguredError) return c.json({ error: err.message }, 409);
+      throw err;
+    }
+    // 会社の呼び方は略称（無ければ正式な会社名。仕様書 第6.6.1節）
+    const company = (await deps.repo.getTenantSettings(tenant.id).catch(() => null))?.company;
+    const org = company?.shortName?.trim() || company?.legalName?.trim() || '';
+    sampling.add(key);
+    try {
+      const sample = await speakSample(provider, { org, displayName: user.displayName, secretary: prefs }, voiceNameOf(prefs.voice));
+      return c.json({
+        text: sample.text,
+        audio: Buffer.from(sample.pcm).toString('base64'),
+        sampleRate: AUDIO.outputHz,
+        notes: sample.notes,
+      });
+    } catch (err) {
+      deps.log.warn('声を試せませんでした', { tenantId: tenant.id, userId: user.id, err });
+      return c.json({ error: '声を試せませんでした。しばらくしてからお試しください' }, 502);
+    } finally {
+      sampling.delete(key);
+    }
   });
 
   /** 表示名の変更。画面と成果物に出る名前（第6.5.1節）。 */
@@ -370,8 +419,9 @@ function validate(
         section,
         value: {
           name: str(o['name'], 30), callMe: str(o['callMe'], 30), style, proactivity,
-          // 読み上げの入り切り（第10.5.2節）
+          // 声で答えるかと、音声の字幕を出すか（第6.5.3節・第10.5.2節）
           speak: o['speak'] !== false,
+          captions: o['captions'] !== false,
           // 声は一覧にあるものだけを受け付ける。話し方は本人の言葉（第10.5.6節）
           voice: VOICE_CHOICES.some((v) => v.name === o['voice']) ? String(o['voice']) : '',
           voiceStyle: str(o['voiceStyle'], VOICE_STYLE_MAX),
