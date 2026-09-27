@@ -265,7 +265,15 @@ export class Secretary {
     // 「あれ、どうなった」のような過去を指す問いは、業務へ取り次がず、記憶を使って答える（第10.7.3節）。
     // ただし「さっきの行程をカレンダーに入れて」のような作業の依頼は取り次ぐ（第10.9.6節）
     const pastOnly = REFERS_TO_PAST.test(message) && !DOING.test(message);
-    const routed = pastOnly ? { agent: undefined, plan: false, reason: '', tokensUsed: 0 } : await this.route(message, enabled, llm, lookup, true);
+    // 会社の接続（Slack など）の名前（第10.11.5.1節）。調べものの説明に入れ、名前が出る「探す・読む」依頼は推論に選ばせずに回す
+    const connections = lookup ? await this.connectionNames(tenantId) : [];
+    if (lookup && !pastOnly && asksConnectionData(message, connections)) {
+      await this.audit(tenantId, userId, 'secretary.route', LOOKUP_AGENT_ID);
+      return this.delegate(tenantId, userId, message, lookup, '会社の接続のデータを探す依頼', llm);
+    }
+    const routed = pastOnly
+      ? { agent: undefined, plan: false, reason: '', tokensUsed: 0 }
+      : await this.route(message, enabled, llm, lookup, true, connections.map((c) => c.name));
     if (routed.plan) {
       // 2 つ以上の業務を組み合わせる依頼は、段取りを作って分身に任せ、すぐ返す（第10.14節、ADR-0040）。黙り込まない
       const plan = await createPlan(this.deps.repo, tenantId, userId, message, await this.todayContext(tenantId, userId));
@@ -316,12 +324,34 @@ export class Secretary {
       ],
     });
     await this.audit(tenantId, userId, 'secretary.chat', 'full');
+    // 「お調べします」「少々お待ちください」と約束したのに、何も起こさないまま返さない（第10.11.5.1節）。
+    // 約束したら実際に調べものを起こす。起こせない会社では、約束の文を返さない
+    if (PROMISES_LATER.test(res.text)) {
+      if (lookup) {
+        await this.audit(tenantId, userId, 'secretary.promise', LOOKUP_AGENT_ID);
+        return this.delegate(tenantId, userId, message, lookup, '秘書があとで伝えると約束した調べもの', llm);
+      }
+      return {
+        reply: { layer: 'full', text: 'この場ではお調べできません。分かる範囲のことを聞いていただくか、しばらくしてからお試しください。', evidence: [], tokensUsed: res.tokensUsed },
+        keep: true,
+      };
+    }
     return {
       reply: {
         layer: 'full', text: res.text, evidence: [...knowledge.evidence, ...remembered.evidence], tokensUsed: res.tokensUsed,
       },
       keep: true,
     };
+  }
+
+  /**
+   * 会社の接続のうち、秘書の調べものが読める（読むだけの道具を持つ）ものの名前と ID（第10.11.5.1節）。
+   *
+   * @remarks 取れなければ空（取次は推論に任せる）。永続化層がこの操作を持たない環境（テスト）でも止めない
+   */
+  private async connectionNames(tenantId: string): Promise<{ id: string; name: string }[]> {
+    const rows = await Promise.resolve().then(() => this.deps.repo.listConnections(tenantId)).catch(() => []);
+    return (rows ?? []).filter((c) => c.tools.some((t) => t.risk === 'read')).map((c) => ({ id: c.id, name: c.name }));
   }
 
   /**
@@ -636,6 +666,7 @@ export class Secretary {
     llm: LlmProvider = this.deps.llm,
     lookup?: AgentDefinition,
     allowPlan = false,
+    connectionNames: string[] = [],
   ): Promise<{ agent?: AgentDefinition; plan?: boolean; reason: string; tokensUsed: number }> {
     // **照会は業務に取り次がない**（仕様書 第10.9.4.1節）。層 3 が組織知識を根拠に答える。
     // ただし外の最新の情報や本人の予定が要る照会（出張の行程など）は、秘書の調べものに回す（第10.9.6節）
@@ -655,7 +686,10 @@ export class Secretary {
     );
     if (byKeyword) return { agent: byKeyword, reason: '語句の一致', tokensUsed: 0 };
     const list = [
-      ...candidates.map((a) => (a.id === LOOKUP_AGENT_ID ? `${a.id}: ${LOOKUP_ROUTE_NOTE}` : `${a.id}: ${a.name} — ${a.description}`)),
+      ...candidates.map((a) => (a.id === LOOKUP_AGENT_ID
+        // 会社の接続（Slack など）のデータを探す・読む依頼も調べものだと分かるように、名前を入れる（第10.11.5.1節）
+        ? `${a.id}: ${LOOKUP_ROUTE_NOTE}${connectionNames.length > 0 ? `。会社の接続（${connectionNames.join('・')}）のメッセージ・チャンネル・人などを探す・読む依頼` : ''}`
+        : `${a.id}: ${a.name} — ${a.description}`)),
       // 段取り（第10.14節）。照会には選ばせない
       // 段取りは、取次の候補に無い業務（秘書が自分で答える業務など）も組み合わせるため、候補の数によらず出す
       ...(allowPlan && !asking ? [`${PLAN_ROUTE_ID}: ${PLAN_ROUTE_NOTE}`] : []),
@@ -744,6 +778,34 @@ const CONTEXT_CHARS = 2000;
 
 /** 調べものに渡す、覚えている本人の事実の件数。 */
 const MEMORY_FOR_LOOKUP = 20;
+
+/**
+ * あとで伝えると約束する言い回し（第10.11.5.1節）。層 3 の答えがこれに当たれば、実際に調べものを起こす。
+ *
+ * @remarks 「お調べします」は層 3 の指示で決めた言い方。そのほかは推論がよく使う約束の形
+ */
+const PROMISES_LATER = /お調べします|調べて(から)?お(伝え|知らせ)|(少々|しばらく)お待ち(ください|いただけ)|(分かり|わかり|取得でき|確認でき|調べ終わり)(まし)?たら.{0,12}(お伝え|お知らせ|ご連絡|ご報告)/;
+
+/** 探す・読む・教えての言い回し（会社の接続のデータを求める依頼。第10.11.5.1節）。 */
+const READS_DATA = /探して|検索|調べて|読んで|教えて|見せて|見て|確認して|一覧|知りたい|ある[？?]|あります[か？?]/;
+
+/** 送る・書き込む言い回し。会社の接続の名前が出ても、これがあれば送る業務の取次に任せる。 */
+const SENDS_DATA = /送って|送信|投稿|書き込|返信して|リアクション|作成して|作って|登録して|予約して/;
+
+/** 「投稿はしないで」のような打ち消し。送る言い回しの判定から外す。 */
+const NOT_SENDING = /(投稿|送信|送る|送り|書き込み?|返信)(は|を|も)?(しない|せず|不要|なし|禁止)/g;
+
+/**
+ * 会社の接続のデータを探す・読む依頼か（第10.11.5.1節）。接続の名前か ID が出て、探す・読むの言い回しがあり、送る言い回しが無い。
+ *
+ * @param connections 会社の接続（読むだけの道具を持つもの）の名前と ID
+ */
+export function asksConnectionData(message: string, connections: { id: string; name: string }[]): boolean {
+  const lower = message.toLowerCase();
+  const named = connections.some((c) => lower.includes(c.name.toLowerCase()) || new RegExp(`(^|[^a-z0-9-])${c.id}([^a-z0-9-]|$)`).test(lower));
+  if (!named || !READS_DATA.test(message)) return false;
+  return !SENDS_DATA.test(message.replace(NOT_SENDING, ''));
+}
 
 /** 取次の判定で、秘書の調べものを表す説明（第10.9.6節）。 */
 /** 取次の候補に並べる「段取り」の ID（仕様書 第10.14節）。業務の ID と重ならない。 */
@@ -837,7 +899,8 @@ const GROUNDING_RULE = [
   '・渡された規程に書かれていないことは、**「社内の規程には書かれていません」と正直に答えてください。**',
   '・そのうえで一般的な話をするなら、**「一般的には」と断り、会社の決まりではないことを明示**してください。',
   '・日数・金額・期限を、出典なしに会社の決まりとして断定してはいけません。',
-  '・列車の時刻・天気・ニュース・価格など、外の最新の情報を記憶で作ってはいけません。分からなければ、調べると伝えてください。',
+  '・列車の時刻・天気・ニュース・価格など、外の最新の情報や、Slack などの会社の接続の中身を記憶で作ってはいけません。',
+  '  分からなければ、答えを作らずに「お調べします」とだけ答えてください（秘書が調べものを起こし、終わったらお伝えします）。',
 ].join('\n');
 
 export type { DirectAnswer };

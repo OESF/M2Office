@@ -7,7 +7,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { OFFICIAL_AGENTS, Secretary, fillInputs, type LlmProvider, type Repository } from '../src/index.js';
+import { OFFICIAL_AGENTS, Secretary, asksConnectionData, fillInputs, type LlmProvider, type Repository } from '../src/index.js';
 
 const agent = (id: string) => OFFICIAL_AGENTS.find((a) => a.id === id)!;
 
@@ -140,4 +140,83 @@ test('段取りを頼む言い回しなら、業務の名前が入っていて�
   assert.equal(plans.length, 1);
   assert.match(reply.text, /段取りを組みます/);
   assert.match(reply.lookup?.runId ?? '', /^plan:/);
+});
+
+/** 会社の接続（Slack）を持つ会社の永続化層（第10.11.5.1節）。 */
+function withSlack(d: ReturnType<typeof deps>) {
+  return Object.assign(d.repo, {
+    listConnections: async () => [{
+      id: 'slack', name: 'Slack', tools: [
+        { name: 'slack_search_channels', description: '', risk: 'read' },
+        { name: 'slack_send_message', description: '', risk: 'external-send' },
+      ],
+    }],
+  });
+}
+
+/** 取次の判定の指示文をそのまま控え、層 3 には決めた答えを返す推論。 */
+function llmFull(route: string, full: string) {
+  const systems: string[] = [];
+  return {
+    systems,
+    name: 'fake',
+    async complete(req: { messages: { role: string; content: string }[] }) {
+      const system = req.messages[0]?.content ?? '';
+      const last = String(req.messages.at(-1)?.content ?? '');
+      if (last.startsWith('社内の規程や文書を探します')) return { text: '', tokensUsed: 0 };
+      systems.push(system);
+      if (system.startsWith('依頼に最も合う業務')) return { text: route, tokensUsed: 1 };
+      return { text: full, tokensUsed: 1 };
+    },
+  } as unknown as LlmProvider & { systems: string[] };
+}
+
+// 2026-09-27 に oesf で起きた言い回しそのもの。層 3 が「少々お待ちください」と約束し、何も起こさなかった
+const SLACK_ASK = 'Slack で「general」を含むチャンネルを検索して、チャンネル名を教えて。調べるだけで、投稿はしないでください。';
+
+test('会社の接続（Slack）の名前が出る「探す・読む」依頼は、推論に選ばせずに秘書の調べものへ回す（第10.11.5.1節）', async () => {
+  const d = deps();
+  const repo = withSlack(d);
+  const llm = llmFull('none', '取得できましたら結果をお伝えしますね。少々お待ちください！');
+  const s = new Secretary({ repo, llm, connector: {} as never, agents: [agent('secretary-lookup')], startAgent: d.startAgent, startLookup: d.startLookup });
+  const reply = await s.respond('t', 'u1', SLACK_ASK);
+  assert.equal(d.lookups.length, 1, '調べものを実際に起こす');
+  assert.deepEqual(reply.lookup, { runId: 'run-lookup', request: SLACK_ASK });
+  assert.match(reply.text, /お調べします。終わりましたらお伝えします/);
+  assert.ok(!llm.systems.some((x) => x.startsWith('依頼に最も合う業務')), '推論に選ばせない');
+});
+
+test('送る依頼（「Slack に投稿して」）は調べものに回さない。取次の説明には会社の接続の名前を入れる', async () => {
+  const d = deps();
+  const repo = withSlack(d);
+  const llm = llmFull('none', 'わかりました');
+  const s = new Secretary({ repo, llm, connector: {} as never, agents: [agent('secretary-lookup')], startAgent: d.startAgent, startLookup: d.startLookup });
+  await s.respond('t', 'u1', 'Slack の #研究開発 にお知らせを投稿してください');
+  assert.equal(d.lookups.length, 0);
+  const routing = llm.systems.find((x) => x.startsWith('依頼に最も合う業務')) ?? '';
+  assert.match(routing, /会社の接続（Slack）のメッセージ・チャンネル・人などを探す・読む依頼/);
+  assert.equal(asksConnectionData('投稿はしないで、Slack で探して', [{ id: 'slack', name: 'Slack' }]), true, '打ち消しの「投稿はしない」は送る依頼ではない');
+  assert.equal(asksConnectionData('Slack の使い方を教えて', []), false, '会社に接続が無ければ当てない');
+});
+
+test('層 3 が「あとで伝える」と約束したら、実際に調べものを起こす。起こせなければ約束の文を返さない（第10.11.5.1節）', async () => {
+  const d = deps();
+  const llm = llmFull('none', '承知いたしました！取得できましたら結果をお伝えしますね。少々お待ちください！');
+  const s = new Secretary({ repo: d.repo, llm, connector: {} as never, agents: [agent('secretary-lookup')], startAgent: d.startAgent, startLookup: d.startLookup });
+  const reply = await s.respond('t', 'u1', '来週の大阪の天気はどうですか');
+  assert.equal(d.lookups.length, 1);
+  assert.ok(reply.lookup, '約束したら、あとで届く印を付ける');
+  assert.doesNotMatch(reply.text, /少々お待ちください/);
+
+  const none = deps();
+  const s2 = new Secretary({ repo: none.repo, llm, connector: {} as never, agents: [] });
+  const r2 = await s2.respond('t', 'u1', '来週の大阪の天気はどうですか');
+  assert.equal(r2.lookup, undefined);
+  assert.doesNotMatch(r2.text, /お待ちください|お伝えします/, '起こせないのに約束しない');
+
+  const plain = deps();
+  const s3 = new Secretary({ repo: plain.repo, llm: llmFull('none', '経費の締めは毎月 25 日です。'), connector: {} as never, agents: [agent('secretary-lookup')], startAgent: plain.startAgent, startLookup: plain.startLookup });
+  const r3 = await s3.respond('t', 'u1', '経費の締めはいつですか');
+  assert.equal(plain.lookups.length, 0, '約束の無い答えはそのまま返す');
+  assert.equal(r3.text, '経費の締めは毎月 25 日です。');
 });
