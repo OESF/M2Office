@@ -161,16 +161,22 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/me/google/check` | 本人: 許可の状況を Google に問い合わせ直す。その許可で受け取れれば、プロフィール写真も取り込み直す |
 | `GET /v1/me/google/impact` | 本人: 取り消すと止まる業務と、飛ばす定時実行の数 |
 | `DELETE /v1/me/google` | 本人: 接続を取り消す（Google 側の許可も取り消し、トークンを消す）。Google を使う動いている途中の業務を止め、終わった実行の中身を消す（仕様書 第6.5.2.1節・第14.3.2節） |
+| `GET /v1/me/connections` | 本人: 利用者ごとに許可する会社の接続（Slack など）と、接続しているか・許可したアカウント・接続し直しが要るか・使う業務（仕様書 第6.5.9節） |
+| `POST /v1/me/connections/:id/connect` | 本人: 接続を始める（相手の許可の画面の URL を返す。state と PKCE つき。会社の設定が済んでいなければ 409） |
+| `GET /v1/me/connections/:id/impact` | 本人: 取り消すと止まる業務・使えなくなる業務・飛ばす定時実行 |
+| `DELETE /v1/me/connections/:id` | 本人: 接続を取り消す（相手の取り消しの口があればそこでも取り消し、認可を消す）。その接続を使う本人の動いている業務を止める（仕様書 第12.11.6.5節） |
 | `GET /v1/oauth/google/callback` | Google からの戻り（ログイン不要。state で照合する） |
+| `GET /v1/oauth/connection/callback` | 認証の要る会社の接続（Slack など）の相手からの戻り（ログイン不要。state で照合し、認可を暗号化して保存して個人設定へ戻す。仕様書 第12.11.6.3節） |
 | `GET /v1/admin/google-permissions` | 管理者: この会社の業務が求める Google の権限と段階（制限付きかどうか）、使うツールと業務 |
 | `GET /v1/admin/extensions` | 管理者: 拡張機能の一覧（公式・自社専用）、構成要素、必要な権限の説明、導入と有効・無効の状態 |
 | `POST /v1/admin/extensions/import` | 管理者: `.m2ext` を取り込む（本文はファイルのバイト列。5 MB まで）。検証を通らなければ `problems` を返す |
 | `POST /v1/admin/extensions/:id/install` | 管理者: 同意して導入（本文に `consent: true`）。導入すると有効になる。同梱の接続は会社の接続として登録する（同じ ID が別の接続先で登録済みなら `notices` で知らせる） |
 | `PUT /v1/admin/extensions/:id/enabled` | 管理者: 有効・無効の切り替え（本文に `enabled`）。権限が増えた版は 409 |
-| `GET /v1/admin/connections/mcp` | 管理者: 会社の接続（MCP）の一覧。道具ごとの危険度・有効かどうか・使っている業務（仕様書 第12.11節、ADR-0037） |
-| `POST /v1/admin/connections/mcp` | 管理者: URL を受け取り、道具の一覧を取って会社の接続として登録する（読むだけの印が付いた道具は「読むだけ」、ほかは「社外へ送る」扱い） |
+| `GET /v1/admin/connections/mcp` | 管理者: 会社の接続（MCP）の一覧。道具ごとの危険度・有効かどうか・使っている業務、認証の状態（`authState`。秘密の値は返さない）、よく使うサービスの型（`presets`）（仕様書 第12.11節、ADR-0037・ADR-0044） |
+| `POST /v1/admin/connections/mcp` | 管理者: URL を受け取り、道具の一覧を取って会社の接続として登録する（読むだけの印が付いた道具は「読むだけ」、ほかは「社外へ送る」扱い）。`preset`（`slack`）で型から、`auth`（`oauth`・`api_key`）で認証の要る接続を登録する。認証の要る接続の道具は、認証情報のあとで取る |
+| `PUT /v1/admin/connections/mcp/:id/credentials` | 管理者: 認証情報を登録する。`oauth` はクライアント ID とシークレット（ID を替えると全員の認可を消す）、`api_key` は会社の鍵（その鍵で道具を問い合わせる）。値は暗号化し、返さない（仕様書 第12.11.6節） |
 | `PUT /v1/admin/connections/mcp/:id` | 管理者: 接続の名前と、道具ごとの危険度を変える |
-| `POST /v1/admin/connections/mcp/:id/refresh` | 管理者: 道具の一覧を取り直す（決めた危険度は保つ） |
+| `POST /v1/admin/connections/mcp/:id/refresh` | 管理者: 道具の一覧を取り直す（決めた危険度は保つ）。認証の要る接続は管理者自身の認可（会社の鍵）で問い合わせる |
 | `POST /v1/admin/connections/mcp/:id/check` | 管理者: 接続の確認（宣言した道具が提供されているか） |
 | `GET /v1/admin/connections/mcp/:id/impact` | 管理者: 接続を消すと使えなくなる業務 |
 | `GET /v1/admin/connections/mcp/:id/tools/:tool/impact` | 管理者: その道具を止めると使えなくなる業務の名前と、飛ばす定時実行の数（仕様書 第6.6.3.1節） |

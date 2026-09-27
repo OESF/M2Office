@@ -14,7 +14,7 @@ Node.js 22 以上。PostgreSQL への接続が必要です（`DATABASE_URL`）�
 ```
 src/engine/      実行エンジン。承認による中断と再開、ジョブの投入
 src/tools/       ツールの登録簿と内蔵ツール
-src/connectors/  メール・予定・タスク・チャットへの接続口（見本と Google の実装）と、MCP サーバのクライアント
+src/connectors/  メール・予定・タスク・チャットへの接続口（見本と Google の実装）と、MCP サーバのクライアント。認証の要る会社の接続の許可の流れ（oauth.ts）・登録の型（presets.ts。Slack）・呼ぶときの認可（credentials.ts。仕様書 第12.11.6節）
 src/files/       ファイルの置き場と、PDF・Excel・CSV・Word の読み書き。
                  to-text.ts は形式によらず「読むための文字」にし、指示ではないものとして囲う（第10.10節）
 src/log/         アプリログのロガー（レベル・JSON・伏せ字）

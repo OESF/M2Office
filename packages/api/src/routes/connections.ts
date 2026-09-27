@@ -20,6 +20,7 @@ import {
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { isOperational, requireRole, type AppEnv } from '../middleware/tenant.js';
+import { registerConnectionCallback } from './connection-auth.js';
 
 const MODEL_KEYS: (keyof GeminiModels)[] = ['fast', 'standard', 'advanced', 'research', 'live'];
 
@@ -398,10 +399,13 @@ export function myGoogleRoute(deps: AppDeps) {
  */
 export function oauthCallbackRoute(deps: AppDeps) {
   const app = new Hono();
+  // 認証の要る会社の接続からの戻り（仕様書 第12.11.6.3節）
+  registerConnectionCallback(app, deps);
   app.get('/google/callback', async (c) => {
     const state = c.req.query('state') ?? '';
     const pending = deps.oauth.states.take(state);
-    if (!pending) return c.text('この接続の要求は無効か、期限が切れています。M2Office の画面からもう一度「Google と接続する」を押してください。', 400);
+    // 会社の接続（第12.11.6節）の要求の state では受けない（取り違えを防ぐ）
+    if (!pending || pending.connectionId) return c.text('この接続の要求は無効か、期限が切れています。M2Office の画面からもう一度「Google と接続する」を押してください。', 400);
     const back = (result: string) => c.redirect(`${pending.returnTo}${pending.returnTo.includes('?') ? '&' : '?'}google=${result}`);
     if (c.req.query('error')) return back('cancelled');
     const code = c.req.query('code');
@@ -491,7 +495,7 @@ export function oauthCallbackRoute(deps: AppDeps) {
 }
 
 /** 接続のあとに戻す画面。要求を送った画面のオリジン（テナントのサブドメイン）と、個人設定を開く印。 */
-function returnTo(c: Context<AppEnv>): string {
+export function returnTo(c: Context<AppEnv>): string {
   const origin = c.req.header('origin') ?? (() => {
     const ref = c.req.header('referer');
     try { return ref ? new URL(ref).origin : ''; } catch { return ''; }

@@ -14,7 +14,7 @@ import {
   RunEngine, Scheduler, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, agentUsesGoogle,
   NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv,
-  defaultGeminiModels, warnHotSwapModels, ProactiveWatcher,
+  defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials,
 } from '@m2office/core';
 import { canRunAgent } from '@m2office/shared';
 import { fileURLToPath } from 'node:url';
@@ -45,8 +45,10 @@ const extensions = loadExtensions(
 for (const e of extensions.errors) log.warn('拡張機能を読み込めませんでした', { dir: e.dir, problems: e.problems });
 // 会社ごとの見え方（公式の配布元と、会社がファイルから取り込んだもの。仕様書 第12.10節）。
 // コネクタのツールは、このワーカーから MCP サーバを呼ぶ（第12.11.3節）
+// 認証の要る接続は、依頼した本人の認可（会社の鍵なら会社の鍵）を付けて呼ぶ（第12.11.6.4節）
 const hub = new ExtensionHub({
   repo, registry, official: OFFICIAL_AGENTS, packages: extensions.packages, mcp: new HttpMcpClient(), logger: log,
+  connectionAuth: new ConnectionCredentials({ repo, box }),
 });
 const resolveDefinition = async (id: string, version: number, tenantId: string) =>
   (await hub.forTenant(tenantId)).resolve(id, version);
@@ -88,6 +90,14 @@ const scheduler = new Scheduler({
   disabledToolOf: async (tenantId, def) => {
     const { disabledTools } = await hub.forTenant(tenantId);
     return def.tools.find((name) => disabledTools.has(name)) ?? null;
+  },
+  // 利用者ごとに許可する会社の接続（Slack など）に、持ち主が接続していなければ飛ばす（第12.11.6.3節）
+  missingConnection: async (tenantId, userId, def) => {
+    const { connections } = await hub.forTenant(tenantId);
+    for (const x of connections.filter((c) => c.auth.type === 'oauth' && def.tools.some((n) => n.startsWith(`${c.id}.`)))) {
+      if (!(await repo.getUserConnection(tenantId, userId, x.id))) return x.name;
+    }
+    return null;
   },
 });
 

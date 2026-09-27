@@ -13,7 +13,7 @@ import {
   RunEngine, Secretary, OFFICIAL_AGENTS, buildConnector, LocalFileStore,
   createLoggerFromEnv, HelpCatalog, parseArticle, ExtensionHub, HttpMcpClient, loadExtensions,
   TenantAiResolver, platformAi, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID,
-  defaultGeminiModels,
+  defaultGeminiModels, ConnectionCredentials, type ConnectionAuthProvider,
   type SecretBox, type GeminiModels,
   type FileStore, type TenantExtensions, type HelpArticle, type LlmProvider, type Logger, type Repository, type WorkspaceConnector,
 } from '@m2office/core';
@@ -65,8 +65,13 @@ export interface AppDeps {
   box: SecretBox;
   /** 会社ごとの Gemini（自社の鍵か運営の設定）。 */
   ai: TenantAiResolver;
-  /** Google の OAuth。戻り先の URI と、使い捨ての state の置き場。 */
-  oauth: { redirectUri: string; states: OAuthStateStore };
+  /**
+   * OAuth の戻り先の URI と、使い捨ての state の置き場。
+   * `redirectUri` は Google、`connectionRedirectUri` は認証の要る会社の接続（仕様書 第12.11.6.2節）の戻り先
+   */
+  oauth: { redirectUri: string; connectionRedirectUri: string; states: OAuthStateStore };
+  /** 認証の要る会社の接続の認可（仕様書 第12.11.6.4節）。接続の確認と道具の取り直しで使う。 */
+  connections: ConnectionCredentials;
   /** ログインの `state`（仕様書 第16.1.2節）。業務の連携のものとは別に持つ。 */
   loginStates: OAuthStateStore;
   /** ログインの引換券（仕様書 第16.1.2節）。運営のホストから会社のホストへ渡す。 */
@@ -95,7 +100,9 @@ export function buildDeps(): AppDeps {
   const registry = new ToolRegistry();
   for (const tool of BUILTIN_TOOLS) registry.register(tool);
 
-  const hub = buildHub(repo, registry, log);
+  // 認証の要る会社の接続の認可（仕様書 第12.11.6.4節）。道具を呼ぶときに依頼した本人の認可を付ける
+  const connections = new ConnectionCredentials({ repo, box });
+  const hub = buildHub(repo, registry, log, connections);
   const platform = buildAi(hub);
   const llm = platform.llm;
   const tenantView = (tenantId: string) => hub.forTenant(tenantId);
@@ -188,12 +195,16 @@ export function buildDeps(): AppDeps {
       return !!def && agentUsesGoogle(def, view.registry);
     },
   });
+  const googleRedirect = process.env['GOOGLE_OAUTH_REDIRECT_URI'] ?? 'http://localhost:3100/v1/oauth/google/callback';
   return {
     repo, llm, connector, files, registry, engine, secretary, auth: loadAuthConfig(), log, help, retention, revocation,
-    hub, tenantView, agentsFor, canUse, isAvailable, box, ai,
+    hub, tenantView, agentsFor, canUse, isAvailable, box, ai, connections,
     oauth: {
       // Google は http の戻り先を localhost にしか認めないため、開発では localhost の画面の転送を通す（ADR-0007）
-      redirectUri: process.env['GOOGLE_OAUTH_REDIRECT_URI'] ?? 'http://localhost:3100/v1/oauth/google/callback',
+      redirectUri: googleRedirect,
+      // 会社の接続の戻り先。無ければ Google の戻り先と同じホストに置く（Slack は https の戻り先だけを認める）
+      connectionRedirectUri: process.env['CONNECTION_OAUTH_REDIRECT_URI']
+        ?? new URL('/v1/oauth/connection/callback', googleRedirect).toString(),
       states: new OAuthStateStore(),
     },
     loginStates: new OAuthStateStore(),
@@ -208,7 +219,7 @@ export function buildDeps(): AppDeps {
  * 検証を通らない拡張機能は使わず、理由を記録する。起動は止めない。
  * 会社がファイルから取り込んだ拡張機能は、要求のたびにデータベースから読む（再起動は要らない）。
  */
-export function buildHub(repo: Repository, registry: ToolRegistry, log: Logger): ExtensionHub {
+export function buildHub(repo: Repository, registry: ToolRegistry, log: Logger, connectionAuth?: ConnectionAuthProvider): ExtensionHub {
   const dir = process.env['EXTENSIONS_DIR'] ?? fileURLToPath(new URL('../../../extensions', import.meta.url));
   const { packages, errors } = loadExtensions(dir, registry, OFFICIAL_AGENTS.map((a) => a.id));
   for (const e of errors) log.warn('拡張機能を読み込めませんでした', { dir: e.dir, problems: e.problems });
@@ -220,6 +231,7 @@ export function buildHub(repo: Repository, registry: ToolRegistry, log: Logger):
   }
   return new ExtensionHub({
     repo, registry, official: OFFICIAL_AGENTS, packages, mcp: new HttpMcpClient(), logger: log,
+    ...(connectionAuth ? { connectionAuth } : {}),
   });
 }
 

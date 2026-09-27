@@ -267,8 +267,20 @@ export interface Repository {
   listConnections(tenantId: string): Promise<TenantConnection[]>;
   /** 会社の接続を登録する・書き換える（ID が同じなら置き換える）。 */
   saveConnection(c: TenantConnection): Promise<void>;
-  /** 会社の接続を消す。無ければ `false`。 */
+  /** 会社の接続を消す。無ければ `false`。認証情報と利用者ごとの認可も一緒に消える。 */
   deleteConnection(tenantId: string, id: string): Promise<boolean>;
+  /** 会社の接続の認証情報（仕様書 第12.11.6節）。無ければ `null`。 */
+  getConnectionSecret(tenantId: string, connectionId: string): Promise<ConnectionSecret | null>;
+  saveConnectionSecret(s: ConnectionSecret): Promise<void>;
+  /** 利用者の接続の認可。無ければ `null`。 */
+  getUserConnection(tenantId: string, userId: string, connectionId: string): Promise<UserConnection | null>;
+  /** 接続の認可の一覧。`userId` を渡せばその人のもの、`connectionId` を渡せばその接続のものだけ。 */
+  listUserConnections(tenantId: string, filter?: { userId?: string; connectionId?: string }): Promise<UserConnection[]>;
+  saveUserConnection(c: UserConnection): Promise<void>;
+  /** 利用者の接続の認可を消す。無ければ `false`。 */
+  deleteUserConnection(tenantId: string, userId: string, connectionId: string): Promise<boolean>;
+  /** その接続の全員の認可を消す（クライアント ID を替えたとき。第12.11.6.2節）。消した数を返す。 */
+  deleteUserConnectionsFor(tenantId: string, connectionId: string): Promise<number>;
   /**
    * 調べものの結果を伝えたことを記録する（仕様書 第10.11.7節「持ち越し」）。
    *
@@ -708,6 +720,43 @@ export interface TenantConnection extends ConnectorDeclaration {
   origin: string;
   createdBy: string;
   createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * 会社の接続の認証情報（仕様書 第12.11.6節）。**秘密の値は暗号化したまま**持ち、画面にも API にも出さない。
+ */
+export interface ConnectionSecret {
+  tenantId: string;
+  connectionId: string;
+  /** `oauth`: クライアント ID（秘密ではない）。 */
+  clientId: string | null;
+  /** `oauth`: クライアント シークレット（暗号化）。 */
+  clientSecretEnc: string | null;
+  /** `api_key`: 会社の鍵（暗号化）。 */
+  apiKeyEnc: string | null;
+  updatedBy: string;
+  updatedAt: string;
+}
+
+/**
+ * 利用者ごとの接続の認可（`oauth`。仕様書 第12.11.6.3節）。認可は暗号化したまま持つ。
+ */
+export interface UserConnection {
+  tenantId: string;
+  userId: string;
+  connectionId: string;
+  accessTokenEnc: string;
+  refreshTokenEnc: string | null;
+  /** 認可の期限。相手が期限を返さなければ `null`（期限なし）。 */
+  expiresAt: string | null;
+  /** 許可された権限。 */
+  scopes: string[];
+  /** 許可したアカウントの表示名（例: 「OESF / 三浦」）。 */
+  accountLabel: string;
+  /** 認可を受けたときのクライアント ID。会社がクライアント ID を替えたら使えない。 */
+  clientId: string;
+  connectedAt: string;
   updatedAt: string;
 }
 

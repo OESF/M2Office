@@ -1074,6 +1074,17 @@ code.uri { background: var(--subtle-bg); border: 1px solid var(--line); border-r
 }
 
 /* 個人設定のアバターの選択（仕様書 第6.1.3節） */
+/* 認証の要る会社の接続の設定（仕様書 第12.11.6.2節） */
+.auth-settings { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: calc(10px * var(--space-scale)) 0; margin: calc(8px * var(--space-scale)) 0; }
+.auth-settings .copy-row { display: flex; align-items: center; gap: calc(8px * var(--space-scale)); }
+.auth-settings .copy-row input { flex: 1; min-width: 0; }
+.auth-settings .copy-row .btn { flex: none; }
+.auth-settings details { margin: calc(4px * var(--space-scale)) 0 calc(8px * var(--space-scale)); }
+.auth-settings details code { word-break: break-all; }
+.preset-row { margin-bottom: calc(10px * var(--space-scale)); }
+/* 会社の接続に本人が接続していないとき（仕様書 第12.11.6.3節） */
+.connect-prompt { display: flex; flex-wrap: wrap; align-items: center; gap: calc(8px * var(--space-scale)); padding: calc(8px * var(--space-scale)) calc(10px * var(--space-scale)); margin-bottom: calc(12px * var(--space-scale)); border: 1px solid var(--warn); border-radius: 6px; background: var(--bg); }
+.connect-prompt .error { margin: 0; }
 /* 声を試す（仕様書 第10.5.8節）。ボタンの横に、話した文字と断り書きを出す */
 .voice-test { display: flex; align-items: stretch; gap: calc(8px * var(--space-scale)); }
 .voice-test input { flex: 1; min-width: 0; }

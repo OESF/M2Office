@@ -29,6 +29,29 @@ export function SuspendedBanner({ status }: { status: string }) {
 }
 
 /**
+ * 「〇〇との接続が要ります」と接続のボタン（仕様書 第12.11.6.3節「求められたときに接続する」）。
+ *
+ * @remarks 押すと相手のサービスの許可の画面へ移り、終わると個人設定に戻る
+ */
+export function ConnectPrompt({ id, name }: { id: string; name: string }) {
+  const [error, setError] = useState<string | null>(null);
+  const connect = async () => {
+    try {
+      location.href = (await api.connectConnection(id)).url;
+    } catch (err) {
+      setError(describeError(err, '接続を始められませんでした'));
+    }
+  };
+  return (
+    <div className="connect-prompt">
+      <span>「{name}」との接続が要ります</span>
+      <button type="button" className="btn small" onClick={() => void connect()}>{name}と接続する</button>
+      {error && <span className="error small">{error}</span>}
+    </div>
+  );
+}
+
+/**
  * 入力スキーマからフォームを自動生成する（仕様書 FR-202）。
  *
  * エージェントが増えても画面側の実装を変えないため、
@@ -69,12 +92,16 @@ export function AgentForm({
     }
   }
 
+  // 本人がまだ接続していない会社の接続（仕様書 第12.11.6.3節）。接続するまで実行できない
+  const missing = agent.needsConnection ?? [];
+
   return (
     <>
     <div className="card">
+      {missing.map((m) => <ConnectPrompt key={m.id} id={m.id} name={m.name} />)}
       <InputFields agent={agent} values={values} onChange={(key, v) => setValues((s) => ({ ...s, [key]: v }))} />
       {error && <p className="error">{error}</p>}
-      <button className="btn" onClick={submit} disabled={busy} title={hotkey ? `実行する（${hotkey}）` : '実行する'}>
+      <button className="btn" onClick={submit} disabled={busy || missing.length > 0} title={hotkey ? `実行する（${hotkey}）` : '実行する'}>
         {busy ? '開始しています…' : '実行'}
         {hotkey && <kbd className="btn-key">{hotkey}</kbd>}
       </button>

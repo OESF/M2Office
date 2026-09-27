@@ -288,6 +288,8 @@ export interface AgentSummary {
   menu?: boolean;
   /** 定時実行に登録できるか（仕様書 第6.1.7節）。 */
   schedulable?: boolean;
+  /** 使う前に本人が接続しておく会社の接続（仕様書 第12.11.6.3節）。無ければ空。 */
+  needsConnection?: { id: string; name: string }[];
 }
 
 /** 導入できる拡張機能（仕様書 第12.9.3節）。 */
@@ -465,6 +467,43 @@ export interface McpConnectionView {
   originText: string;
   tools: { name: string; description: string; risk: string; riskText: string; enabled: boolean }[];
   /** その接続の道具を使う業務。 */
+  usedBy: { id: string; name: string }[];
+  /** 認証の状態（仕様書 第12.11.6節）。秘密の値は返らない。 */
+  authState: McpAuthState;
+}
+
+/** 会社の接続の認証の状態。 */
+export type McpAuthState =
+  | { type: 'none'; text: string; ready: true }
+  | { type: 'api_key'; text: string; ready: boolean; keySet: boolean; header: string }
+  | {
+    type: 'oauth'; text: string; ready: boolean;
+    /** クライアント ID（秘密ではない）。シークレットは登録したかだけ。 */
+    clientId: string; secretSet: boolean;
+    /** 相手のサービスのアプリに登録する戻り先の URL。 */
+    redirectUri: string;
+    /** 求める権限（相手のアプリに足す）。 */
+    scopes: string[];
+    connectedUsers: number;
+    preset: { id: string; name: string; setup: string[]; source: string; checkedAt: string } | null;
+  };
+
+/** よく使うサービスの登録の型（仕様書 第12.11.6.7節）。 */
+export interface ConnectionPresetView { id: string; name: string; description: string; url: string }
+
+/** 個人設定「サービスとの接続」の 1 つ（仕様書 第6.5.9節）。 */
+export interface MyConnectionView {
+  id: string;
+  name: string;
+  description: string;
+  /** 会社の設定が済んでいて、接続できるか。 */
+  available: boolean;
+  connected: boolean;
+  /** 許可したアカウントの表示名。 */
+  account: string;
+  connectedAt: string | null;
+  /** 会社が道具を足して権限が増えた。接続し直しを促す。 */
+  needsReconnect: boolean;
   usedBy: { id: string; name: string }[];
 }
 
@@ -714,10 +753,16 @@ export const api = {
     setExtensionEnabled: (id: string, enabled: boolean) =>
       call(`/admin/extensions/${encodeURIComponent(id)}/enabled`, { method: 'PUT', body: JSON.stringify({ enabled }) }),
     /** 会社の接続（コネクタ。仕様書 第12.11.0節）。 */
-    mcpConnections: () => call<{ items: McpConnectionView[]; risks: { value: string; text: string }[] }>('/admin/connections/mcp'),
-    /** 接続を登録する。MCP サーバに道具の一覧を問い合わせる。 */
-    addMcpConnection: (v: { url: string; name?: string; id?: string }) =>
-      call<{ ok: true; id: string; tools: number }>('/admin/connections/mcp', { method: 'POST', body: JSON.stringify(v) }),
+    mcpConnections: () => call<{ items: McpConnectionView[]; risks: { value: string; text: string }[]; presets: ConnectionPresetView[] }>('/admin/connections/mcp'),
+    /**
+     * 接続を登録する。認証の要らない接続は、MCP サーバに道具の一覧を問い合わせる。
+     * `preset` を渡すと型（Slack など）から登録する（仕様書 第12.11.6.7節）。
+     */
+    addMcpConnection: (v: { url?: string; name?: string; id?: string; preset?: string; auth?: 'none' | 'oauth' | 'api_key'; header?: string }) =>
+      call<{ ok: true; id: string; tools: number; auth: string }>('/admin/connections/mcp', { method: 'POST', body: JSON.stringify(v) }),
+    /** 認証情報を登録する（仕様書 第12.11.6.2節）。値は暗号化され、返らない。 */
+    setMcpCredentials: (id: string, v: { clientId?: string; clientSecret?: string; apiKey?: string }) =>
+      call<{ ok: true; reset?: number; tools?: number; warning?: string }>(`${mcpPath(id)}/credentials`, { method: 'PUT', body: JSON.stringify(v) }),
     /** 道具ごとの危険度などを変える。 */
     updateMcpConnection: (id: string, v: { tools?: { name: string; risk: string }[]; name?: string }) =>
       call(mcpPath(id), { method: 'PUT', body: JSON.stringify(v) }),
@@ -725,7 +770,7 @@ export const api = {
       call<{ ok: true; added: string[]; removed: string[] }>(`${mcpPath(id)}/refresh`, { method: 'POST' }),
     checkMcpConnection: (id: string) => call<ConnectorCheck>(`${mcpPath(id)}/check`, { method: 'POST' }),
     /** 接続を消すと使えなくなる業務。 */
-    mcpConnectionImpact: (id: string) => call<{ agents: { id: string; name: string }[] }>(`${mcpPath(id)}/impact`),
+    mcpConnectionImpact: (id: string) => call<{ agents: { id: string; name: string }[]; connectedUsers: number }>(`${mcpPath(id)}/impact`),
     deleteMcpConnection: (id: string) => call(mcpPath(id), { method: 'DELETE' }),
     /** ツールを止めると使えなくなる業務（仕様書 第6.6.3.1節）。止める前に示す。 */
     mcpToolImpact: (id: string, tool: string) =>
@@ -735,6 +780,15 @@ export const api = {
       call(`${mcpPath(id)}/tools/${encodeURIComponent(tool)}/enabled`, { method: 'PUT', body: JSON.stringify({ enabled }) }),
   },
   agents: () => call<{ agents: AgentSummary[] }>('/agents'),
+  /** 個人設定「サービスとの接続」（仕様書 第6.5.9節）。 */
+  myConnections: () => call<{ items: MyConnectionView[] }>('/me/connections'),
+  /** 相手のサービスの許可の画面の URL を受け取る（画面を移す）。 */
+  connectConnection: (id: string) => call<{ url: string }>(`/me/connections/${encodeURIComponent(id)}/connect`, { method: 'POST' }),
+  /** 取り消すと止まるもの。 */
+  connectionImpact: (id: string) =>
+    call<{ runs: number; agents: { id: string; name: string }[]; schedules: number }>(`/me/connections/${encodeURIComponent(id)}/impact`),
+  disconnectConnection: (id: string) =>
+    call<{ ok: true; stopped: number }>(`/me/connections/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   createJob: (agentId: string, input: Record<string, unknown>, origin = 'menu') =>
     call<{ jobId: string; runId: string }>('/jobs', {
       method: 'POST',

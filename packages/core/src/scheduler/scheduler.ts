@@ -35,10 +35,19 @@ export interface SchedulerDeps {
    * @returns 止まっているツールの名前。無ければ `null`
    */
   disabledToolOf?(tenantId: string, def: AgentDefinition): Promise<string | null>;
+  /**
+   * 業務が使う、利用者ごとに許可する会社の接続のうち、対象者がまだ接続していないもの（仕様書 第12.11.6.3節）。
+   *
+   * @returns 接続の名前。無ければ `null`
+   */
+  missingConnection?(tenantId: string, userId: string, def: AgentDefinition): Promise<string | null>;
 }
 
 /** 接続が無いために定時実行を飛ばしたときの知らせの題名。未読の同じ知らせがあれば重ねて知らせない。 */
 export const SCHEDULE_SKIP_TITLE = 'Google と接続していないため、定時実行を飛ばしました';
+
+/** 会社の接続に本人が接続していないために定時実行を飛ばしたときの知らせの題名（仕様書 第12.11.6.3節）。 */
+export const SCHEDULE_CONNECTION_TITLE = 'サービスと接続していないため、定時実行を飛ばしました';
 
 /** ツールが止められたために定時実行を飛ばしたときの知らせの題名（仕様書 第6.6.3.1節）。 */
 export const SCHEDULE_TOOL_DISABLED_TITLE = '管理者がツールを止めたため、定時実行を飛ばしました';
@@ -77,6 +86,7 @@ export class Scheduler {
       const user = await repo.findUserById(due.tenantId, due.userId);
       const settings = await repo.getTenantSettings(due.tenantId);
       let disabledTool: string | null = null;
+      let missing: string | null = null;
       const reason = !def ? '定義が見つかりません'
         : !user || user.status !== 'active' ? '対象者が利用できません'
         : settings.agents.disabled.includes(def.id) ? '管理者がこの業務を無効にしています'
@@ -92,6 +102,9 @@ export class Scheduler {
         // 許可がない間は飛ばす。設定は残し、接続し直せば次から起動する（仕様書 第6.5.2.1節）
         : this.deps.missingGoogleConnection && (await this.deps.missingGoogleConnection(due.tenantId, due.userId, def))
           ? GOOGLE_MISSING
+        // 会社の接続も同じ。接続するまで飛ばす（第12.11.6.3節）
+        : (missing = this.deps.missingConnection ? await this.deps.missingConnection(due.tenantId, due.userId, def) : null)
+          ? CONNECTION_MISSING
         : null;
       if (!def || reason) {
         (this.deps.logger ?? silentLogger).warn('定時実行を見送りました', {
@@ -104,6 +117,11 @@ export class Scheduler {
           occurredAt: now.toISOString(),
         });
         if (reason === GOOGLE_MISSING) await this.notifySkipOnce(due.tenantId, due.userId, def?.name ?? due.agentId, now);
+        if (reason === CONNECTION_MISSING) {
+          await this.notifyOnce(due.tenantId, due.userId, SCHEDULE_CONNECTION_TITLE,
+            `「${def?.name ?? due.agentId}」の定時実行は、「${missing}」との接続が要るため動かせません。`
+            + '個人設定の「サービスとの接続」から接続すると、次の回から自動で動きます。', now);
+        }
         if (reason === TOOL_DISABLED) {
           await this.notifyOnce(due.tenantId, due.userId, SCHEDULE_TOOL_DISABLED_TITLE,
             `「${def?.name ?? due.agentId}」の定時実行は、管理者が止めたツール（${disabledTool}）を使うため動かせません。`
@@ -150,3 +168,4 @@ export class Scheduler {
 const TOOL_DISABLED = '管理者がこの業務の使うツールを止めています';
 
 const GOOGLE_MISSING = '対象者が Google と接続していません';
+const CONNECTION_MISSING = '対象者が業務の使うサービスと接続していません';

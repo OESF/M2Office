@@ -2780,6 +2780,142 @@ console.log('\n■ 55. 声を試す・会話を文字で出す（第10.5.8節・
   await call('a', '/v1/me/settings/secretary', { method: 'PUT', body: JSON.stringify(before.body.secretary) }, 'member');
 }
 
+console.log('\n■ 56. 認証の要る会社の接続（oauth・api_key。第12.11.6節、ADR-0044）');
+{
+  // 手元に「許可の画面と認可の受け取り」と「認可が要る MCP サーバ」を兼ねるサーバを立てる。
+  // コード good-<名前> を受け取ると、認可 tok-<名前> を渡す。MCP は認可を見て、誰の認可で呼ばれたかを返す
+  const { createServer } = await import('node:http');
+  const server = createServer(async (req, res) => {
+    let raw = '';
+    for await (const ch of req) raw += ch;
+    const origin = `http://localhost:${server.address().port}`;
+    const json = (status, body) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
+    if (req.url === '/.well-known/oauth-protected-resource') return json(200, { authorization_servers: [origin] });
+    if (req.url === '/.well-known/oauth-authorization-server') {
+      return json(200, { authorization_endpoint: `${origin}/authorize`, token_endpoint: `${origin}/token`, code_challenge_methods_supported: ['S256'] });
+    }
+    if (req.url === '/token') {
+      const f = new URLSearchParams(raw);
+      if (f.get('client_secret') !== 'csecret') return json(200, { ok: false, error: 'bad_client_secret' });
+      if (!f.get('code_verifier')) return json(200, { ok: false, error: 'pkce_required' });
+      const who = (f.get('code') ?? '').replace(/^good-/, '');
+      return json(200, { ok: true, access_token: `tok-${who}`, token_type: 'user', scope: 'deals:read' });
+    }
+    // MCP。/mcp は oauth の認可、/mcp-key は会社の鍵を求める
+    const auth = req.url === '/mcp-key' ? (req.headers['x-api-key'] === 'KEY-1' ? 'key' : null)
+      : /^Bearer tok-/.test(req.headers.authorization ?? '') ? req.headers.authorization.slice('Bearer '.length) : null;
+    if (!auth) return json(401, { error: 'unauthorized' });
+    const msg = JSON.parse(raw || '{}');
+    if (msg.id === undefined) { res.writeHead(202).end(); return; }
+    const result = msg.method === 'initialize' ? { protocolVersion: '2025-06-18', capabilities: {} }
+      : msg.method === 'tools/list' ? { tools: [{ name: 'list_deals', description: '商談を探す', annotations: { readOnlyHint: true } }] }
+      : msg.method === 'tools/call' ? { content: [{ type: 'text', text: `商談: 見本商事（認可: ${auth}）` }] } : {};
+    return json(200, { jsonrpc: '2.0', id: msg.id, result });
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const base = `http://localhost:${server.address().port}`;
+  const EXT = 'jp.example.oauth-deals';
+  const AG = `${EXT}:deals`;
+  for (const id of ['oauthcrm', 'keycrm']) await call('a', `/v1/admin/connections/mcp/${id}`, { method: 'DELETE' });
+  await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
+
+  /** 本人として許可の画面へ進んだことにし、相手からの戻りを API に届ける（画面の転送は通さない）。 */
+  const connectAs = async (who, code) => {
+    const start = await call('a', '/v1/me/connections/oauthcrm/connect', { method: 'POST' }, who);
+    const u = new URL(start.body.url ?? 'http://x/');
+    const back = await fetch(`${API}/v1/oauth/connection/callback?state=${encodeURIComponent(u.searchParams.get('state') ?? '')}&code=${code}`, { redirect: 'manual' });
+    return { start, u, back };
+  };
+
+  try {
+    const added = await call('a', '/v1/admin/connections/mcp', { method: 'POST', body: JSON.stringify({ id: 'oauthcrm', name: '顧客管理', url: `${base}/mcp`, auth: 'oauth' }) });
+    const { body: l1 } = await call('a', '/v1/admin/connections/mcp');
+    const c1 = l1.items?.find((x) => x.id === 'oauthcrm');
+    added.status === 201 && c1?.authState?.type === 'oauth' && c1.authState.ready === false && /\/v1\/oauth\/connection\/callback$/.test(c1.authState.redirectUri ?? '')
+      ? ok('利用者ごとに許可する接続を登録でき、戻り先の URL を示す（道具は許可のあとで問い合わせる）') : ng('登録の結果が違う', JSON.stringify({ added: added.body, c1 }));
+
+    const memberCred = await call('a', '/v1/admin/connections/mcp/oauthcrm/credentials', { method: 'PUT', body: JSON.stringify({ clientId: 'cid', clientSecret: 'csecret' }) }, 'member');
+    memberCred.status === 403 ? ok('一般の利用者は認証情報を登録できない（403）') : ng(`登録できてしまう（${memberCred.status}）`);
+    const cred = await call('a', '/v1/admin/connections/mcp/oauthcrm/credentials', { method: 'PUT', body: JSON.stringify({ clientId: 'cid', clientSecret: 'csecret' }) });
+    const { body: l2 } = await call('a', '/v1/admin/connections/mcp');
+    const c2 = l2.items?.find((x) => x.id === 'oauthcrm');
+    cred.status === 200 && c2?.authState?.ready === true && c2.authState.secretSet === true && !JSON.stringify(l2).includes('csecret')
+      ? ok('クライアント ID とシークレットを登録できる。シークレットは返さない') : ng('認証情報の登録が違う', JSON.stringify(c2?.authState));
+
+    const { body: before } = await call('a', '/v1/me/connections', {}, 'member');
+    const m0 = before.items?.find((x) => x.id === 'oauthcrm');
+    m0?.available === true && m0.connected === false ? ok('個人設定に、未接続のサービスとして出る') : ng('個人設定の一覧が違う', JSON.stringify(before));
+
+    const bad = await fetch(`${API}/v1/oauth/connection/callback?state=nope&code=good-member`, { redirect: 'manual' });
+    bad.status === 400 ? ok('照合できない戻りは受け付けない') : ng(`受け付けてしまう（${bad.status}）`);
+
+    const { start, u, back } = await connectAs('member', 'good-member');
+    start.status === 200 && u.searchParams.get('code_challenge') && u.searchParams.get('code_challenge_method') === 'S256' && u.pathname === '/authorize'
+      ? ok('許可の画面の URL は、相手の案内から見つけた口に state と PKCE を付ける') : ng('許可の画面の URL が違う', start.body.url);
+    const loc = back.headers.get('location') ?? '';
+    back.status === 302 && /connection=connected/.test(loc) ? ok('相手からの戻りで認可を受け取り、個人設定へ戻す') : ng('戻りの扱いが違う', `${back.status} ${loc}`);
+    const { body: after } = await call('a', '/v1/me/connections', {}, 'member');
+    after.items?.find((x) => x.id === 'oauthcrm')?.connected === true ? ok('接続したことが個人設定に出る') : ng('接続が出ない', JSON.stringify(after));
+
+    // 管理者も自分で接続して確かめ、自分の認可で道具を取り直す（第12.11.6.2節 手順 4）
+    const noAdmin = await call('a', '/v1/admin/connections/mcp/oauthcrm/refresh', { method: 'POST' });
+    noAdmin.status === 400 && /接続が要ります/.test(noAdmin.body.error ?? '') ? ok('管理者が接続する前は、道具を取り直せない（接続が要ると示す）') : ng('接続なしで取り直せてしまう', JSON.stringify(noAdmin.body));
+    await connectAs('admin', 'good-admin');
+    const refreshed = await call('a', '/v1/admin/connections/mcp/oauthcrm/refresh', { method: 'POST' });
+    const { body: l3 } = await call('a', '/v1/admin/connections/mcp');
+    refreshed.status === 200 && l3.items?.find((x) => x.id === 'oauthcrm')?.tools?.find((t) => t.name === 'list_deals')?.risk === 'read'
+      ? ok('管理者の認可で道具を問い合わせて並べる') : ng('道具を取り直せない', JSON.stringify(refreshed.body));
+
+    // 業務は依頼した本人の認可で呼ぶ（不変則 I-9）
+    const data = await skillZip({
+      id: EXT, name: 'deals', title: '確認用: 許可の要る商談', tools: ['oauthcrm.list_deals'], inputs: ['会社: 短文'], input: { 会社: '見本商事' },
+      stub: { work: [{ name: 'oauthcrm.list_deals', args: { company: '見本商事' } }] },
+    });
+    await call('a', '/v1/admin/extensions/import', { method: 'POST', body: data, headers: { 'content-type': 'application/octet-stream' } });
+    await call('a', `/v1/admin/extensions/${EXT}/install`, { method: 'POST', body: JSON.stringify({ consent: true }) });
+    const { body: job } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: AG, input: { 会社: '見本商事' } }) }, 'member');
+    const done = await waitFor('a', job.runId, ['completed', 'failed', 'awaiting_approval'], 20000, 'member');
+    const called = done.steps?.find((x) => x.stepId === 'work')?.output?.tools?.find((t) => t.name === 'oauthcrm.list_deals')?.result;
+    done.run?.status === 'completed' && /認可: tok-member/.test(called?.text ?? '')
+      ? ok('業務は依頼した本人の認可で呼ぶ（管理者の認可で代わりに呼ばない）') : ng('本人の認可で呼べていない', JSON.stringify({ status: done.run?.status, called }));
+
+    const off = await call('a', '/v1/me/connections/oauthcrm', { method: 'DELETE' }, 'member');
+    const { body: menu } = await call('a', '/v1/agents', {}, 'member');
+    const need = menu.agents?.find((a) => a.id === AG)?.needsConnection ?? [];
+    off.status === 200 && need.some((x) => x.id === 'oauthcrm') ? ok('取り消すと、その業務に「接続が要ります」が出る') : ng('取り消しの結果が違う', JSON.stringify({ off: off.body, need }));
+    const { body: job2 } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: AG, input: { 会社: '見本商事' } }) }, 'member');
+    const done2 = await waitFor('a', job2.runId, ['completed', 'failed', 'awaiting_approval'], 20000, 'member');
+    const called2 = done2.steps?.find((x) => x.stepId === 'work')?.output?.tools?.find((t) => t.name === 'oauthcrm.list_deals')?.result;
+    /接続が要ります/.test(called2?.error ?? '') && !/tok-admin/.test(JSON.stringify(done2))
+      ? ok('接続していない人の業務は、ほかの人の認可で動かさず「接続が要ります」で止まる') : ng('接続なしで動いてしまう', JSON.stringify({ status: done2.run?.status, called2 }));
+
+    // 会社の鍵で動く接続
+    const key = await call('a', '/v1/admin/connections/mcp', { method: 'POST', body: JSON.stringify({ id: 'keycrm', name: '販売管理', url: `${base}/mcp-key`, auth: 'api_key', header: 'X-API-Key' }) });
+    const keyCred = await call('a', '/v1/admin/connections/mcp/keycrm/credentials', { method: 'PUT', body: JSON.stringify({ apiKey: 'KEY-1' }) });
+    const { body: l4 } = await call('a', '/v1/admin/connections/mcp');
+    const k = l4.items?.find((x) => x.id === 'keycrm');
+    key.status === 201 && keyCred.body.tools === 1 && k?.authState?.keySet === true && !JSON.stringify(l4).includes('KEY-1')
+      ? ok('会社の鍵を登録すると、その鍵で道具を問い合わせる。鍵は返さない') : ng('会社の鍵の登録が違う', JSON.stringify({ key: key.body, keyCred: keyCred.body, k: k?.authState }));
+    const check = await call('a', '/v1/admin/connections/mcp/keycrm/check', { method: 'POST' });
+    check.body.ok ? ok('会社の鍵で接続を確かめられる') : ng('確かめられない', JSON.stringify(check.body));
+
+    const { body: bList } = await call('b', '/v1/admin/connections/mcp');
+    const { body: bMine } = await call('b', '/v1/me/connections', {}, 'member');
+    !(bList.items ?? []).some((x) => x.id === 'oauthcrm') && !(bMine.items ?? []).some((x) => x.id === 'oauthcrm')
+      ? ok('認証の要る接続と利用者の接続は、ほかの会社には見えない') : ng('ほかの会社に見える');
+    const { body: audits } = await call('a', '/v1/admin/audit-events');
+    const actions = (audits.items ?? audits.events ?? []).map((e) => e.action);
+    ['connection.secret.update', 'connection.oauth.connect', 'connection.oauth.disconnect'].every((a) => actions.includes(a))
+      ? ok('認証情報の登録・接続・取り消しを監査ログに残す（値は残さない）') : ng('監査ログが足りない', actions.slice(0, 20).join(','));
+  } catch (err) {
+    ng('認証の要る接続の確認が途中で止まった', String(err));
+  } finally {
+    await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
+    for (const id of ['oauthcrm', 'keycrm']) await call('a', `/v1/admin/connections/mcp/${id}`, { method: 'DELETE' });
+    await new Promise((r) => server.close(r));
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

@@ -1,5 +1,5 @@
 /**
- * @file Google の認可の要求に付ける、使い捨ての `state` の置き場。戻ってきた要求を照合し、テナントと利用者を引く。
+ * @file Google と会社の接続の認可の要求に付ける、使い捨ての `state` の置き場。戻ってきた要求を照合し、テナントと利用者を引く。
  *
  * `state` は推測できない値にし、10 分で失効させ、1 回使ったら消す。PKCE の検証用の値もここに持つ。
  * いまは API のプロセスの記憶に置く。API を複数台にするときはデータベースに移す（ADR-0007）。
@@ -16,6 +16,8 @@ export interface OAuthPending {
   codeVerifier: string;
   /** 終わったあとに戻す画面（テナントのオリジン + パス）。 */
   returnTo: string;
+  /** 会社の接続の認可のとき、その接続の ID（仕様書 第12.11.6.3節）。Google のときは無い。 */
+  connectionId?: string;
   expiresAt: number;
 }
 

@@ -14,10 +14,18 @@ export const MCP_TIMEOUT_MS = 60_000;
 /** ツールの応答として推論に渡す量の上限（文字数）。超えた分は切り詰める。 */
 export const MCP_RESULT_LIMIT = 6000;
 
+import type { ArgSpec, ToolArgsSchema } from '../tools/registry.js';
+
 /** MCP サーバが提供するツールの概要。 */
 export interface McpToolInfo {
   name: string;
   description: string;
+  /**
+   * 引数の定義（MCP の `inputSchema` から、推論に渡せる形に直したもの）。無ければ `undefined`。
+   *
+   * @remarks これが無いと、推論が引数を知らずに呼び、検索の言葉などが空のまま渡る（2026-09-27 に Slack で確認）
+   */
+  args?: ToolArgsSchema;
   /**
    * 読むだけの道具だという MCP の目印（`annotations.readOnlyHint`）。
    * 会社の接続の危険度の初期値に使う（仕様書 第12.11.2節）。目印が無ければ `undefined`
@@ -32,8 +40,11 @@ export type McpCallResult =
 
 /** MCP サーバへの接続口。テストでは差し替える。 */
 export interface McpClient {
-  listTools(url: string): Promise<{ ok: true; tools: McpToolInfo[] } | { ok: false; error: string }>;
-  callTool(url: string, name: string, args: Record<string, unknown>): Promise<McpCallResult>;
+  /**
+   * @param headers 認証の要る接続で付ける見出し（`Authorization` など。仕様書 第12.11.6.4節）
+   */
+  listTools(url: string, headers?: Record<string, string>): Promise<{ ok: true; tools: McpToolInfo[] } | { ok: false; error: string }>;
+  callTool(url: string, name: string, args: Record<string, unknown>, headers?: Record<string, string>): Promise<McpCallResult>;
 }
 
 /** JSON-RPC の応答。 */
@@ -53,27 +64,31 @@ interface RpcResponse {
 export class HttpMcpClient implements McpClient {
   constructor(private readonly timeoutMs = MCP_TIMEOUT_MS) {}
 
-  async listTools(url: string) {
+  async listTools(url: string, auth?: Record<string, string>) {
     try {
-      const session = await this.initialize(url);
-      const res = await this.rpc(url, 'tools/list', {}, session);
-      const tools = (res.tools as { name: string; description?: string; annotations?: { readOnlyHint?: boolean } }[] | undefined) ?? [];
+      const session = await this.initialize(url, auth);
+      const res = await this.rpc(url, 'tools/list', {}, session, auth);
+      const tools = (res.tools as { name: string; description?: string; annotations?: { readOnlyHint?: boolean }; inputSchema?: unknown }[] | undefined) ?? [];
       return {
         ok: true as const,
-        tools: tools.map((t) => ({
-          name: t.name, description: t.description ?? '',
-          ...(typeof t.annotations?.readOnlyHint === 'boolean' ? { readOnly: t.annotations.readOnlyHint } : {}),
-        })),
+        tools: tools.map((t) => {
+          const args = argsFromInputSchema(t.inputSchema);
+          return {
+            name: t.name, description: t.description ?? '',
+            ...(typeof t.annotations?.readOnlyHint === 'boolean' ? { readOnly: t.annotations.readOnlyHint } : {}),
+            ...(args ? { args } : {}),
+          };
+        }),
       };
     } catch (err) {
       return { ok: false as const, error: describe(err) };
     }
   }
 
-  async callTool(url: string, name: string, args: Record<string, unknown>): Promise<McpCallResult> {
+  async callTool(url: string, name: string, args: Record<string, unknown>, auth?: Record<string, string>): Promise<McpCallResult> {
     try {
-      const session = await this.initialize(url);
-      const res = await this.rpc(url, 'tools/call', { name, arguments: args }, session);
+      const session = await this.initialize(url, auth);
+      const res = await this.rpc(url, 'tools/call', { name, arguments: args }, session, auth);
       const text = textOf(res);
       if (res.isError === true) return { ok: false, error: text || 'MCP サーバがエラーを返しました' };
       return text.length > MCP_RESULT_LIMIT
@@ -85,26 +100,30 @@ export class HttpMcpClient implements McpClient {
   }
 
   /** 接続を始め、セッション ID があれば返す。 */
-  private async initialize(url: string): Promise<string | null> {
+  private async initialize(url: string, auth?: Record<string, string>): Promise<string | null> {
     const { headers } = await this.post(url, {
       jsonrpc: '2.0', id: 0, method: 'initialize',
       params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'M2Office', version: '1' } },
-    }, null);
+    }, null, true, auth);
     const session = headers.get('mcp-session-id');
-    await this.post(url, { jsonrpc: '2.0', method: 'notifications/initialized' }, session, false);
+    await this.post(url, { jsonrpc: '2.0', method: 'notifications/initialized' }, session, false, auth);
     return session;
   }
 
-  private async rpc(url: string, method: string, params: unknown, session: string | null) {
-    const { body } = await this.post(url, { jsonrpc: '2.0', id: 1, method, params }, session);
+  private async rpc(url: string, method: string, params: unknown, session: string | null, auth?: Record<string, string>) {
+    const { body } = await this.post(url, { jsonrpc: '2.0', id: 1, method, params }, session, true, auth);
     if (!body) throw new Error('MCP サーバから応答がありません');
     if (body.error) throw new Error(`MCP のエラー: ${body.error.message}`);
     return body.result ?? {};
   }
 
-  /** JSON-RPC の要求を 1 つ送り、応答（JSON または SSE）を読む。 */
+  /**
+   * JSON-RPC の要求を 1 つ送り、応答（JSON または SSE）を読む。
+   *
+   * @param auth 認証の見出し（仕様書 第12.11.6.4節）。**記録に出さない**
+   */
   private async post(
-    url: string, payload: Record<string, unknown>, session: string | null, expectBody = true,
+    url: string, payload: Record<string, unknown>, session: string | null, expectBody = true, auth?: Record<string, string>,
   ): Promise<{ headers: Headers; body: RpcResponse | null }> {
     const res = await fetch(url, {
       method: 'POST',
@@ -112,12 +131,16 @@ export class HttpMcpClient implements McpClient {
         'Content-Type': 'application/json',
         Accept: 'application/json, text/event-stream',
         ...(session ? { 'Mcp-Session-Id': session } : {}),
+        ...(auth ?? {}),
       },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(this.timeoutMs),
     });
     if (!res.ok && res.status !== 202) {
-      throw new Error(res.status === 401 ? '認証が必要です（401）' : `HTTP ${res.status}`);
+      if (res.status === 401) throw new Error('認証が必要です（401）');
+      // 相手が理由を返していれば添える（長ければ切る。認可の値は応答に含まれない）
+      const why = (await res.text().catch(() => '')).replace(/\s+/g, ' ').trim().slice(0, 300);
+      throw new Error(`HTTP ${res.status}${why ? `: ${why}` : ''}`);
     }
     if (!expectBody) {
       await res.body?.cancel();
@@ -154,3 +177,42 @@ function describe(err: unknown): string {
   if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) return '時間内に応答がありませんでした';
   return err instanceof Error ? err.message : String(err);
 }
+
+/** 引数の説明の長さの上限（字）。長い説明は推論への指示を膨らませるため切る。 */
+const ARG_DESCRIPTION_LIMIT = 300;
+
+/**
+ * MCP の `inputSchema`（JSON Schema）を、推論に渡す引数の定義に直す（仕様書 第9.4.4節）。
+ *
+ * @returns 引数が 1 つも無ければ `undefined`。知らない型は文字として扱う
+ */
+export function argsFromInputSchema(schema: unknown): ToolArgsSchema | undefined {
+  const s = schema as { properties?: Record<string, unknown>; required?: unknown } | undefined;
+  if (!s || typeof s.properties !== 'object' || s.properties === null) return undefined;
+  const properties: Record<string, ArgSpec> = {};
+  for (const [key, raw] of Object.entries(s.properties)) {
+    const spec = toArgSpec(raw);
+    if (spec) properties[key] = spec;
+  }
+  if (Object.keys(properties).length === 0) return undefined;
+  const required = Array.isArray(s.required) ? s.required.filter((k): k is string => typeof k === 'string' && k in properties) : [];
+  return { properties, ...(required.length > 0 ? { required } : {}) };
+}
+
+function toArgSpec(raw: unknown): ArgSpec | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as { type?: unknown; description?: unknown; enum?: unknown; items?: unknown };
+  // 型が並び（["string","null"]）のときは null 以外の最初のもの
+  const t = Array.isArray(r.type) ? r.type.find((x) => x !== 'null') : r.type;
+  const type: ArgSpec['type'] = t === 'integer' || t === 'number' ? 'number'
+    : t === 'boolean' || t === 'array' || t === 'object' ? t : 'string';
+  const description = typeof r.description === 'string' ? r.description.trim().slice(0, ARG_DESCRIPTION_LIMIT) : '';
+  const spec: ArgSpec = { type, description };
+  if (type === 'string' && Array.isArray(r.enum) && r.enum.every((v) => typeof v === 'string')) spec.enum = r.enum as string[];
+  if (type === 'array') {
+    const items = toArgSpec(r.items);
+    if (items) spec.items = items;
+  }
+  return spec;
+}
+

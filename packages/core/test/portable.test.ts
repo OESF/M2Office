@@ -117,9 +117,13 @@ test('https でない接続先は拒否する。開発用の localhost だけは
   assert.deepEqual(problemsOf(connector((c) => { c.url = 'http://localhost:9000/mcp'; })), []);
 });
 
-test('まだ実装していない認証の方式は、使えないと示す', () => {
-  const p = problemsOf(connector((c) => { c.auth = { type: 'oauth' }; }));
-  assert.ok(p.some((x) => x.includes('まだ使えません')), p.join('\n'));
+test('認証の要る接続（oauth・api_key）を受け付け、認可の口は https に限る（仕様書 第12.11.6節）', () => {
+  assert.deepEqual(problemsOf(connector((c) => { c.auth = { type: 'oauth', authorizeUrl: 'https://a.example/authorize', tokenUrl: 'https://a.example/token' }; })), []);
+  assert.deepEqual(problemsOf(connector((c) => { c.auth = { type: 'api_key', header: 'X-API-Key' }; })), []);
+  const p = problemsOf(connector((c) => { c.auth = { type: 'oauth', tokenUrl: 'http://a.example/token' }; }));
+  assert.ok(p.some((x) => x.includes('auth.tokenUrl')), p.join('\n'));
+  assert.ok(problemsOf(connector((c) => { c.auth = { type: 'api_key', header: 'X API Key' }; })).some((x) => x.includes('auth.header')));
+  assert.ok(problemsOf(connector((c) => { c.auth = { type: 'basic' as never }; })).some((x) => x.includes('auth.type')));
 });
 
 test('内蔵のツールと重なるコネクタの ID は拒否する', () => {

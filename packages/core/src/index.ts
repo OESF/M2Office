@@ -43,9 +43,17 @@ export {
   GOOGLE_API_ENDPOINTS, GoogleTokenSource, type GoogleApiEndpoints, type ConnectorDeps,
 } from './connectors/index.js';
 export {
-  HttpMcpClient, MCP_TIMEOUT_MS, MCP_RESULT_LIMIT,
+  HttpMcpClient, MCP_TIMEOUT_MS, MCP_RESULT_LIMIT, argsFromInputSchema,
   type McpClient, type McpToolInfo, type McpCallResult,
 } from './connectors/mcp.js';
+export {
+  discoverOAuthEndpoints, buildConnectionAuthUrl, exchangeConnectionCode, refreshConnectionToken, fetchAccountLabel,
+  revokeConnectionToken, ConnectionOAuthError, type OAuthEndpoints, type OAuthTokens,
+} from './connectors/oauth.js';
+export { CONNECTION_PRESETS, presetById, scopesForTools, presetRisk, type ConnectionPreset } from './connectors/presets.js';
+export {
+  ConnectionCredentials, needsConnectionMessage, lostConnectionMessage, type ConnectionCredentialsDeps,
+} from './connectors/credentials.js';
 export type {
   WorkspaceConnector, ConnectorPrincipal, DataSource, MailSummary, MailMessage,
   CalendarEvent, TaskItem, BusySlot, DriveFile, DirectoryPerson, MeetTranscript, FormResponses, ConnectorUnavailableKind,

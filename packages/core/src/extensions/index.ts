@@ -12,7 +12,7 @@ export {
 } from './loader.js';
 export {
   checkConnector, connectorTools, connectorToolName, connectionPlaceholder, isConnectionToolName, CONNECTOR_AUTH_TYPES,
-  type ConnectorDeclaration, type ConnectorToolDeclaration, type ConnectorAuthType,
+  type ConnectorDeclaration, type ConnectorToolDeclaration, type ConnectorAuthType, type ConnectorAuth, type ConnectionAuthProvider,
 } from './connectors.js';
 export { packExtension, unpackExtension, EXTENSION_FILE_MAX_BYTES } from './package-file.js';
 export {

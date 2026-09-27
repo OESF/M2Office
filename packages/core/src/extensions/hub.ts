@@ -14,7 +14,7 @@ import type { InstalledExtension, Repository, TenantConnection } from '../reposi
 import type { ToolRegistry } from '../tools/registry.js';
 import type { McpClient } from '../connectors/mcp.js';
 import { silentLogger, type Logger } from '../log/logger.js';
-import { connectorToolName, connectorTools, type ConnectorDeclaration } from './connectors.js';
+import { connectorToolName, connectorTools, type ConnectionAuthProvider, type ConnectorDeclaration } from './connectors.js';
 import { loadExtensionFiles, type ExtensionFiles, type ExtensionPackage } from './loader.js';
 
 /** 会社から見た拡張機能 1 つ分。 */
@@ -89,6 +89,10 @@ export interface ExtensionHubDeps {
   packages: ExtensionPackage[];
   /** コネクタの MCP サーバへの接続口。省略するとコネクタのツールは「接続されていません」を返す。 */
   mcp?: McpClient;
+  /**
+   * 認証の要る接続の認可を用意する口（仕様書 第12.11.6.4節）。無ければ、認証の要る接続の道具は「準備がありません」を返す
+   */
+  connectionAuth?: ConnectionAuthProvider;
   logger?: Logger;
 }
 
@@ -117,7 +121,7 @@ export class ExtensionHub {
    * 取り込んだファイルは読み込むたびに検証し直す。通らなくなったものは使わない。
    */
   async forTenant(tenantId: string): Promise<TenantExtensions> {
-    const { repo, registry, official, mcp } = this.deps;
+    const { repo, registry, official, mcp, connectionAuth } = this.deps;
     const [installed, privates, disabledRows] = await Promise.all([
       repo.listInstalledExtensions(tenantId), repo.listPrivateExtensions(tenantId),
       repo.listDisabledConnectorTools(tenantId),
@@ -153,7 +157,7 @@ export class ExtensionHub {
     }
     // 止めたツールは、その会社のツールの一覧から外す。業務からも接続の確認からも見えない
     const tenantRegistry = registry.extend(
-      connections.flatMap((c) => connectorTools(c, mcp)).filter((t) => !disabledTools.has(t.name)),
+      connections.flatMap((c) => connectorTools(c, mcp, connectionAuth)).filter((t) => !disabledTools.has(t.name)),
     );
     const missingToolsOf = (def: AgentDefinition) => def.tools.filter((name) => !tenantRegistry.get(name));
     // 秘書の調べものは、会社の接続の読むだけの道具を使える（第12.11.0節）
@@ -182,11 +186,11 @@ export class ExtensionHub {
    *
    * @returns 宣言したツールごとに、MCP サーバが提供しているか。接続できなければ理由
    */
-  async checkConnector(c: ConnectorDeclaration): Promise<
+  async checkConnector(c: ConnectorDeclaration, headers?: Record<string, string>): Promise<
     { ok: true; tools: { name: string; provided: boolean }[] } | { ok: false; error: string }
   > {
     if (!this.deps.mcp) return { ok: false, error: 'コネクタへの接続口が用意されていません' };
-    const res = await this.deps.mcp.listTools(c.url);
+    const res = await this.deps.mcp.listTools(c.url, headers);
     if (!res.ok) return res;
     return { ok: true, tools: c.tools.map((t) => ({ name: t.name, provided: res.tools.some((x) => x.name === t.name) })) };
   }
@@ -196,9 +200,9 @@ export class ExtensionHub {
    *
    * @returns 道具の一覧（名前・説明・読むだけの目印）。接続できなければ理由
    */
-  async listMcpTools(url: string): ReturnType<McpClient['listTools']> {
+  async listMcpTools(url: string, headers?: Record<string, string>): ReturnType<McpClient['listTools']> {
     if (!this.deps.mcp) return { ok: false, error: 'コネクタへの接続口が用意されていません' };
-    return this.deps.mcp.listTools(url);
+    return this.deps.mcp.listTools(url, headers);
   }
 
   /** 内蔵の道具の名前の頭の部分（`gmail` など）。会社の接続の ID に使えない。 */

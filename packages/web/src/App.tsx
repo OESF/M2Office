@@ -44,6 +44,27 @@ const googleReturn: string | null = (() => {
   return v;
 })();
 
+/**
+ * 会社の接続（Slack など）の許可から戻ってきたときの結果（`?connection=connected&id=slack`。仕様書 第12.11.6.3節）。
+ * 一度だけ読み、アドレスから取り除く。
+ */
+const connectionReturn: { result: string; id: string } | null = (() => {
+  const q = new URLSearchParams(location.search);
+  const result = q.get('connection');
+  if (!result) return null;
+  const id = q.get('id') ?? '';
+  q.delete('connection');
+  q.delete('id');
+  history.replaceState(null, '', `${location.pathname}${q.toString() ? `?${q}` : ''}`);
+  return { result, id };
+})();
+
+const CONNECTION_RETURN_TEXT: Record<string, { ok: boolean; text: string }> = {
+  connected: { ok: true, text: '接続しました' },
+  cancelled: { ok: false, text: '接続を取りやめました。' },
+  failed: { ok: false, text: '接続できませんでした。もう一度試すか、管理者に設定を確かめてもらってください。' },
+};
+
 const GOOGLE_RETURN_TEXT: Record<string, { ok: boolean; text: string }> = {
   connected: { ok: true, text: 'Google と接続しました' },
   cancelled: { ok: false, text: 'Google との接続を取りやめました。' },
@@ -112,10 +133,12 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const initialRoute = useRef<Route>(parseRoute(location.pathname));
   const [view, setView] = useState<View>(() => (
     // Google から戻ったときは、その場で結果が見えるよう連携の区分を開く（第6.5.0節）
-    googleReturn ? { kind: 'settings', section: 'google' } : (viewOf(initialRoute.current) ?? { kind: 'home' })
+    googleReturn ? { kind: 'settings', section: 'google' }
+      : connectionReturn ? { kind: 'settings', section: 'services' }
+      : (viewOf(initialRoute.current) ?? { kind: 'home' })
   ));
   const [pendingAgent, setPendingAgent] = useState<string | null>(
-    !googleReturn && initialRoute.current.kind === 'agent' ? initialRoute.current.agentId : null,
+    !googleReturn && !connectionReturn && initialRoute.current.kind === 'agent' ? initialRoute.current.agentId : null,
   );
   // 開こうとした画面が無い・見られないとき、最初の画面に知らせる（使えない業務があることは示さない）
   const [notFound, setNotFound] = useState(initialRoute.current.kind === 'unknown');
@@ -150,6 +173,13 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [avatar, setAvatar] = useState('');
   // 本人の呼ばれ方（仕様書 第6.5.3節）。最初の画面の呼びかけに使う（第6.1.5節）
   const [callMe, setCallMe] = useState('');
+  // 個人設定「サービスとの接続」は、会社に利用者ごとに許可する接続があるときだけ出す（仕様書 第6.5.9節）
+  const [hasServices, setHasServices] = useState(false);
+  useEffect(() => {
+    api.myConnections().then((r) => setHasServices(r.items.length > 0)).catch(() => setHasServices(false));
+  }, []);
+  const settingsSections = hasServices || view.kind === 'settings' && view.section === 'services'
+    ? SETTINGS_SECTIONS : SETTINGS_SECTIONS.filter((x) => x.id !== 'services');
   // 音声の字幕を出すか（仕様書 第6.5.3節「会話を文字で出す」）。個人設定で変えたら読み直す
   const [captions, setCaptions] = useState(true);
   const loadMenu = useCallback(() => {
@@ -398,7 +428,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
         navFooter={(
           <NavUserCard
             name={me.user.displayName} role={primaryRole(me.user.roles)} photo={me.photo}
-            active={view.kind === 'settings'} sections={SETTINGS_SECTIONS}
+            active={view.kind === 'settings'} sections={settingsSections}
             current={view.kind === 'settings' ? view.section : undefined}
             onOpenSettings={openSettings}
           />
@@ -476,6 +506,9 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
                   }} />
                 );
               })()}
+              {connectionReturn && CONNECTION_RETURN_TEXT[connectionReturn.result] && (
+                <p className={CONNECTION_RETURN_TEXT[connectionReturn.result]!.ok ? 'ok-msg' : 'error'}>{CONNECTION_RETURN_TEXT[connectionReturn.result]!.text}</p>
+              )}
               {googleReturn && GOOGLE_RETURN_TEXT[googleReturn] && (
                 <p className={GOOGLE_RETURN_TEXT[googleReturn]!.ok ? 'ok-msg' : 'error'}>{GOOGLE_RETURN_TEXT[googleReturn]!.text}</p>
               )}

@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { AVATAR_PRESETS, VOICE_CHOICES, VOICE_STYLE_MAX, showsCaptions, type UserSettings } from '@m2office/shared';
 import {
-  api, describeError,
+  api, describeError, type MyConnectionView,
   type AgentSummary, type ConversationView, type Me, type MemoryView,
   type MyGoogle, type PromotionView,
 } from './api.js';
@@ -34,6 +34,8 @@ import { playSample } from './voice.js';
 export const SETTINGS_SECTIONS = [
   { id: 'profile', label: 'プロフィール', hint: '名前・所属・利用状況' },
   { id: 'google', label: 'Google 連携', hint: 'メール・予定への接続' },
+  // 会社に利用者ごとに許可する接続があるときだけ出す（仕様書 第6.5.9節。出し分けは画面の上側で行う）
+  { id: 'services', label: 'サービスとの接続', hint: 'Slack などへの接続' },
   { id: 'secretary', label: '秘書', hint: '名前・呼ばれ方・声・アバター' },
   { id: 'notifications', label: '通知', hint: '種類・時間帯・受け取り方' },
   { id: 'memory', label: '記憶とデータ', hint: '記憶・会話ログ・見え方' },
@@ -140,6 +142,8 @@ export function Settings({ me, agents, onChanged, section }: {
       </>}
 
       {on('google') && <GoogleSettings />}
+
+      {on('services') && <ServicesSettings />}
 
       {on('secretary') && (
       <div className="card">
@@ -624,6 +628,83 @@ function DisplaySettings() {
         ))}
       </div>
     </div>
+  );
+}
+
+/**
+ * 個人設定「サービスとの接続」（仕様書 第6.5.9節・第12.11.6.3節）。本人が許可し、本人が取り消す。
+ *
+ * @remarks
+ * 「鍵」「トークン」と言わない（原則 u1）。取り消す前に、使えなくなる業務と止まる定時実行を示す（第12.11.6.5節）。
+ */
+function ServicesSettings() {
+  const [items, setItems] = useState<MyConnectionView[] | null>(null);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const load = () => api.myConnections().then((r) => setItems(r.items)).catch((e) => setMsg({ ok: false, text: describeError(e, '読み込めませんでした') }));
+  useEffect(() => { void load(); }, []);
+
+  const connect = async (c: MyConnectionView) => {
+    setBusy(c.id);
+    try {
+      location.href = (await api.connectConnection(c.id)).url;
+    } catch (e) {
+      setMsg({ ok: false, text: describeError(e, '接続を始められませんでした') });
+      setBusy(null);
+    }
+  };
+
+  const disconnect = async (c: MyConnectionView) => {
+    const impact = await api.connectionImpact(c.id).catch(() => null);
+    const lines = [`${c.name}との接続を取り消しますか。`];
+    if (impact === null) lines.push('', '止まる業務を確かめられませんでした。');
+    else {
+      if (impact.agents.length > 0) lines.push('', '次の業務が使えなくなります:', ...impact.agents.map((a) => `・${a.name}`));
+      if (impact.runs > 0) lines.push('', `動いている業務 ${impact.runs} 件を止めます。`);
+      if (impact.schedules > 0) lines.push('', `定時実行 ${impact.schedules} 件は、接続し直すまで飛ばします（設定は残ります）。`);
+    }
+    if (!confirm(lines.join('\n'))) return;
+    setBusy(c.id);
+    setMsg(null);
+    try {
+      const r = await api.disconnectConnection(c.id);
+      setMsg({ ok: true, text: r.stopped > 0 ? `接続を取り消し、業務 ${r.stopped} 件を止めました` : '接続を取り消しました' });
+      await load();
+    } catch (e) {
+      setMsg({ ok: false, text: describeError(e) });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (!items) return msg ? <p className={msg.ok ? 'ok-msg' : 'error'}>{msg.text}</p> : null;
+  return (
+    <>
+      {msg && <p className={msg.ok ? 'ok-msg' : 'error'}>{msg.text}</p>}
+      {items.length === 0 && <p className="muted">接続できるサービスはありません</p>}
+      {items.map((c) => (
+        <div key={c.id} className="card">
+          <h3>{c.name}</h3>
+          {!c.available ? <p className="muted">管理者の設定待ちです</p> : (
+            <>
+              <p>
+                {c.connected
+                  ? <>接続しています（{c.account || 'アカウントを確かめられませんでした'}{c.connectedAt ? `・${new Date(c.connectedAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}` : ''}）</>
+                  : '未接続です'}
+              </p>
+              {c.usedBy.length > 0 && <p className="muted small">使う業務: {c.usedBy.map((a) => a.name).join('、')}</p>}
+              {c.needsReconnect && <p className="warn-msg small">使える業務が増えて、新しい許可が要ります。「接続し直す」を押してください。</p>}
+              <div className="row">
+                <button className="btn" disabled={busy === c.id} onClick={() => void connect(c)}>
+                  {c.connected ? '接続し直す' : `${c.name}と接続する`}
+                </button>
+                {c.connected && <button className="btn danger" disabled={busy === c.id} onClick={() => void disconnect(c)}>接続を取り消す</button>}
+              </div>
+            </>
+          )}
+        </div>
+      ))}
+    </>
   );
 }
 

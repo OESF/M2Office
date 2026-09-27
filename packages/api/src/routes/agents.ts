@@ -27,6 +27,9 @@ export function agentsRoute(deps: AppDeps) {
     const view = await deps.tenantView(tenant.id);
     // 本人の利用範囲（第16.7節）の中の業務だけを出す
     const available = await deps.agentsFor(tenant.id, c.get('ctx').user.id);
+    // 本人がまだ接続していない、利用者ごとに許可する接続（仕様書 第12.11.6.3節「求められたときに接続する」）
+    const mine = new Set((await deps.repo.listUserConnections(tenant.id, { userId: c.get('ctx').user.id })).map((u) => u.connectionId));
+    const unconnected = view.connections.filter((x) => x.auth.type === 'oauth' && !mine.has(x.id));
     const agents = available.filter((a) => !setting.disabled.includes(a.id)).map((a) => ({
       id: a.id,
       version: a.version,
@@ -41,6 +44,8 @@ export function agentsRoute(deps: AppDeps) {
       menu: a.menu !== false,
       /** 定時実行に登録できるか（ファイルを受け取る業務と秘書の調べものは登録できない。仕様書 第6.1.7節）。 */
       schedulable: isSchedulable(a),
+      /** 使う前に本人が接続しておく接続（業務の画面に「接続が要ります」を出す）。無ければ空。 */
+      needsConnection: unconnected.filter((x) => a.tools.some((n) => n.startsWith(`${x.id}.`))).map((x) => ({ id: x.id, name: x.name })),
       /** 拡張機能の業務エージェントなら、その提供者。公式なら `null`。 */
       extension: (() => {
         const ext = view.entryOf(a.id)?.pkg;

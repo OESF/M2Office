@@ -13,7 +13,7 @@ import type {
   StoredFile, Tenant, TenantSettings, User, UserGroup, UserSettings,
 } from '@m2office/shared';
 import { DEFAULT_TENANT_SETTINGS, DEFAULT_USER_SETTINGS, STANDARD_SYNONYMS } from '@m2office/shared';
-import type { AgentEvent, Plan, PlanStep, CompartmentAssignment, Conversation, ConversationDigest, MemoryCandidate, Promotion, CredentialKind, GoogleConnection, UserPhoto, TenantCredential, TenantConnection, DisabledConnectorTool, InstalledExtension, PrivateExtension, KnowledgeItem, KnowledgeSearchResult, KnowledgeSectionView, Memory, Repository, RunStatRow } from './types.js';
+import type { AgentEvent, Plan, PlanStep, CompartmentAssignment, Conversation, ConversationDigest, MemoryCandidate, Promotion, CredentialKind, GoogleConnection, UserPhoto, TenantCredential, TenantConnection, ConnectionSecret, UserConnection, DisabledConnectorTool, InstalledExtension, PrivateExtension, KnowledgeItem, KnowledgeSearchResult, KnowledgeSectionView, Memory, Repository, RunStatRow } from './types.js';
 import { SPLIT_VERSION, citationOf, splitKnowledge } from '../knowledge/sections.js';
 import { SEARCH_CANDIDATES, bigrams, expandTerms, extractTerms, normalizeForSearch, rankSections, rewritesOf } from '../knowledge/search.js';
 
@@ -1467,6 +1467,66 @@ export class PostgresRepository implements Repository {
     return rows.length > 0;
   }
 
+  async getConnectionSecret(tenantId: string, connectionId: string): Promise<ConnectionSecret | null> {
+    const rows = await this.q<ConnectionSecret>(tenantId,
+      `select tenant_id as "tenantId", connection_id as "connectionId", client_id as "clientId",
+              client_secret_enc as "clientSecretEnc", api_key_enc as "apiKeyEnc",
+              updated_by as "updatedBy", updated_at as "updatedAt"
+         from connection_secrets where tenant_id = $1 and connection_id = $2`, [tenantId, connectionId]);
+    return rows[0] ?? null;
+  }
+
+  async saveConnectionSecret(s: ConnectionSecret): Promise<void> {
+    await this.q(s.tenantId,
+      `insert into connection_secrets (tenant_id, connection_id, client_id, client_secret_enc, api_key_enc, updated_by, updated_at)
+       values ($1,$2,$3,$4,$5,$6,$7)
+       on conflict (tenant_id, connection_id) do update set
+         client_id = excluded.client_id, client_secret_enc = excluded.client_secret_enc, api_key_enc = excluded.api_key_enc,
+         updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
+      [s.tenantId, s.connectionId, s.clientId, s.clientSecretEnc, s.apiKeyEnc, s.updatedBy, s.updatedAt]);
+  }
+
+  async getUserConnection(tenantId: string, userId: string, connectionId: string): Promise<UserConnection | null> {
+    const rows = await this.q<UserConnection>(tenantId,
+      `select ${USER_CONNECTION_COLUMNS} from user_connections where tenant_id = $1 and user_id = $2 and connection_id = $3`,
+      [tenantId, userId, connectionId]);
+    return rows[0] ?? null;
+  }
+
+  async listUserConnections(tenantId: string, filter: { userId?: string; connectionId?: string } = {}): Promise<UserConnection[]> {
+    return this.q<UserConnection>(tenantId,
+      `select ${USER_CONNECTION_COLUMNS} from user_connections
+        where tenant_id = $1 and ($2::text is null or user_id = $2) and ($3::text is null or connection_id = $3)
+        order by connected_at`,
+      [tenantId, filter.userId ?? null, filter.connectionId ?? null]);
+  }
+
+  async saveUserConnection(c: UserConnection): Promise<void> {
+    await this.q(c.tenantId,
+      `insert into user_connections (tenant_id, user_id, connection_id, access_token_enc, refresh_token_enc, expires_at,
+                                     scopes, account_label, client_id, connected_at, updated_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+       on conflict (tenant_id, user_id, connection_id) do update set
+         access_token_enc = excluded.access_token_enc, refresh_token_enc = excluded.refresh_token_enc,
+         expires_at = excluded.expires_at, scopes = excluded.scopes, account_label = excluded.account_label,
+         client_id = excluded.client_id, connected_at = excluded.connected_at, updated_at = excluded.updated_at`,
+      [c.tenantId, c.userId, c.connectionId, c.accessTokenEnc, c.refreshTokenEnc, c.expiresAt, c.scopes,
+        c.accountLabel, c.clientId, c.connectedAt, c.updatedAt]);
+  }
+
+  async deleteUserConnection(tenantId: string, userId: string, connectionId: string): Promise<boolean> {
+    const rows = await this.q<{ user_id: string }>(tenantId,
+      `delete from user_connections where tenant_id = $1 and user_id = $2 and connection_id = $3 returning user_id`,
+      [tenantId, userId, connectionId]);
+    return rows.length > 0;
+  }
+
+  async deleteUserConnectionsFor(tenantId: string, connectionId: string): Promise<number> {
+    const rows = await this.q<{ user_id: string }>(tenantId,
+      `delete from user_connections where tenant_id = $1 and connection_id = $2 returning user_id`, [tenantId, connectionId]);
+    return rows.length;
+  }
+
   async setConnectorToolEnabled(
     tenantId: string, connectorId: string, toolName: string, enabled: boolean, by: string,
   ): Promise<void> {
@@ -1690,6 +1750,11 @@ export class PostgresRepository implements Repository {
 function iso(v: string | null): string | null {
   return v ? new Date(v).toISOString() : null;
 }
+
+/** 利用者ごとの接続の認可の列（仕様書 第12.11.6.3節）。 */
+const USER_CONNECTION_COLUMNS = `tenant_id as "tenantId", user_id as "userId", connection_id as "connectionId",
+  access_token_enc as "accessTokenEnc", refresh_token_enc as "refreshTokenEnc", expires_at as "expiresAt",
+  scopes, account_label as "accountLabel", client_id as "clientId", connected_at as "connectedAt", updated_at as "updatedAt"`;
 
 const GOOGLE_CONNECTION_COLUMNS = `tenant_id as "tenantId", user_id as "userId", refresh_token_enc as "refreshTokenEnc",
   google_email as "googleEmail", scopes, connected_at as "connectedAt", checked_at as "checkedAt"`;
