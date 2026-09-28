@@ -23,7 +23,7 @@ JSON で書く定義（`manifest.json`＋`agents/*.json`）は**第 0.131.0 版�
 | `disable-model-invocation: true` | 秘書は取り次がない。メニューからだけ使う |
 | `user-invocable: false` | メニューに出さない。秘書が取り次いだときだけ使う |
 | `allowed-tools` | **M2Office の道具の一覧**（第4章）。書いた道具しか使えない。書かなければ読むだけの道具（`knowledge.search`・`file.read_text`）、`""` なら道具なし。M2Office に無い道具（`Bash`・`Read` など）は無視して知らせる |
-| `effort` | `low` は高速のモデル、`medium`・`high` は標準、`xhigh`・`max` は高性能のモデル |
+| `effort` | `low` は高速のモデル、`medium`・`high` は標準、`xhigh`・`max` は高性能のモデル（上限もトークン 30 万・時間 10 分に広がる。長い文書を読む業務向け） |
 | `model`・`context`・`agent`・`background`・`disallowed-tools`・`hooks`・`paths`・`shell` | 使わない（知らせる） |
 | `license`・`compatibility`・`metadata` | 保つ。`metadata.version`・`metadata.author` は拡張機能の版と提供者 |
 | `connectors/*.json` | 外部のサービス（MCP サーバ）をつなぐコネクタの宣言。SKILL.md と同じフォルダに置き、その道具を `allowed-tools` に `<コネクタの ID>.<道具>` で書く（第7章） |
@@ -40,6 +40,7 @@ JSON で書く定義（`manifest.json`＋`agents/*.json`）は**第 0.131.0 版�
 | `metadata.m2office-inputs` | 欄に種類を付けたいとき。1 行に 1 つ「欄の名前: 種類」（`短文`・`長文`・`日付`・`ファイル`、後ろに「（任意）」） |
 | `metadata.m2office-examples` | 業務の説明に実行例のボタンを出したいとき（1 行に 1 つ） |
 | `metadata.m2office-approver` | 社外に出すものを依頼した本人以外が承認するとき（`承認者`・`管理者`） |
+| `metadata.m2office-private` | 結果を秘書の記憶に入れたくないとき（契約書など機密の業務）。`"true"` と書くと、秘書はその結果から学ばない |
 
 ### M2Office が組み立てるもの
 

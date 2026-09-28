@@ -511,7 +511,7 @@ export class RunEngine {
       // 見せなかった道具があれば、それは承認のあとの段で行うことを伝える。伝えないと推論が「道具が使えないため行えない」と
       // 書き、承認の前の組み立てがその文をなぞって送る操作を記録せず、承認が自動で通ってしまった（2026-09-27 に Slack で確認）
       const held = allowed.length - tools.length;
-      const system = buildSystemPrompt(def, tools, settings.writingStyle);
+      const system = buildSystemPrompt(def, tools, settings.writingStyle, await this.companyNames(run.tenantId, settings));
       // 承認の前の組み立てでは、記録された操作を「待つ」ものと取り違えさせない（2026-09-25 に本物の推論で、
       // 社内への共有を記録したあと「承認待ち」として投稿と登録を出さずに終えた）
       // スキルの業務は、指示の $ARGUMENTS・$名前 を入力で置き換える（スキルと同じ。仕様書 第12.12.2節）
@@ -740,6 +740,16 @@ export class RunEngine {
     const input = { ...(runStep.input as Record<string, unknown> | null), ...(activity ? { activity } : {}) };
     if (!activity) delete input['activity'];
     await this.deps.repo.updateRunStep(tenantId, { ...runStep, input });
+  }
+
+  /**
+   * 会社の名前（正式名称と略称。仕様書 第12.12.5節）。会社情報に無ければ、申し込みのときの会社名を正式名称にする。
+   */
+  private async companyNames(tenantId: string, settings: TenantSettings): Promise<{ legalName: string; shortName: string }> {
+    const legal = settings.company.legalName.trim();
+    // 引けなくても業務は止めない（会社の名前が無いだけにする）
+    const tenant = legal ? null : await Promise.resolve().then(() => this.deps.repo.findTenantById(tenantId)).catch(() => null);
+    return { legalName: legal || tenant?.name || '', shortName: settings.company.shortName.trim() };
   }
 
   /**
@@ -1083,7 +1093,20 @@ function describeTools(tools: Tool[]): string[] {
   });
 }
 
-function buildSystemPrompt(def: AgentDefinition, tools: Tool[], style: WritingStyle): string {
+/**
+ * 会社の名前を指示の一部にする（仕様書 第12.12.5節）。契約書の当事者のどちらが自社かを見分けるなどに使う。
+ *
+ * @remarks 自社の書き方（第15.2.1節）と同じく、すべての業務に同じ内容を添える
+ */
+function companyLines(c: { legalName: string; shortName: string }): string[] {
+  if (!c.legalName && !c.shortName) return [];
+  const parts = [c.legalName && `正式名称「${c.legalName}」`, c.shortName && c.shortName !== c.legalName && `略称「${c.shortName}」`].filter(Boolean);
+  return ['', `自社（この業務を使っている会社）: ${parts.join('、')}。文書の当事者のどちらが自社かは、この名前で見分ける。`];
+}
+
+function buildSystemPrompt(
+  def: AgentDefinition, tools: Tool[], style: WritingStyle, company: { legalName: string; shortName: string } = { legalName: '', shortName: '' },
+): string {
   const toolNames = tools.map((t) => t.name);
   return [
     `あなたは「${def.name}」として業務を遂行します。`,
@@ -1096,6 +1119,7 @@ function buildSystemPrompt(def: AgentDefinition, tools: Tool[], style: WritingSt
     // 承認の画面や実行の詳細に、成果物の ID がそのまま出ていた（2026-09-25）
     `- 利用者に見せる文には、成果物・ファイル・文書・実行などの ID を書かない。ID はツールの引数にだけ使う。作ったものは題名で書く。`,
     ...writingStyleLines(style),
+    ...companyLines(company),
     ``,
     `使えるツール: ${toolNames.join(', ') || 'なし'}`,
     ...(tools.length > 0 ? ['', 'ツールの説明:', ...describeTools(tools)] : []),

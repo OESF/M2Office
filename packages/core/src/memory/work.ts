@@ -48,14 +48,14 @@ export function jobLabel(input: Record<string, unknown>, max = 60): string {
  * 秘書の記憶の材料にしてよい業務か。
  *
  * @remarks
- * 完了したもの、秘書が伝えるものでないもの、権限区画に属さない業務だけを通す（第16.3節）。
+ * 完了したもの、秘書が伝えるものでないもの、権限区画に属さない業務、学ばない業務でないもの（第12.12.3節）だけを通す（第16.3節）。
  * 定義が見つからない業務（外した拡張機能など）は、区画が分からないため通さない。
  */
 export function learnableWork(item: { run: Run; job: Job }, agents: AgentDefinition[]): boolean {
   if (item.run.status !== 'completed' || !item.run.endedAt) return false;
   if (deliveredBySecretary(item.job)) return false;
   const def = agents.find((a) => a.id === item.job.agentId);
-  return !!def && def.compartment === null;
+  return !!def && def.compartment === null && def.private !== true;
 }
 
 /**

@@ -29,6 +29,12 @@ export const SKILL_FOLDER_ENTRY = '.skill-folder';
 
 /** 既定の上限（第12.12.5節）。 */
 const LIMITS = { maxSteps: 10, maxTokens: 100_000, timeoutSec: 300 };
+/**
+ * 推論の強さが `xhigh`・`max`（高性能のモデル）のスキルの上限（第12.12.5節、第 0.146.0 版）。
+ *
+ * @remarks 契約書チェックのように、長い文書を道具を呼ぶたびに読み直す業務のため。強さを上げた業務だけが使う
+ */
+const LIMITS_ADVANCED = { maxSteps: 10, maxTokens: 300_000, timeoutSec: 600 };
 
 /** 補助のファイルとして持ち込めるもの（Markdown・テキスト）。 */
 const TEXT_FILE = /\.(md|markdown|txt)$/i;
@@ -334,6 +340,8 @@ export function buildSkillPackage(files: ExtensionFiles, registry: ToolRegistry)
     help, arguments: meta['m2office-inputs'] ? Object.keys(schema.properties) : args,
     connections,
     route: !truthy(fm['disable-model-invocation']),
+    // 学ばない業務の印（第12.12.3節。契約書チェックなど）
+    private: truthy(meta['m2office-private']),
     menu: !('user-invocable' in fm) || truthy(fm['user-invocable']),
     tier: EFFORT_TIER[effort],
   }, local);
@@ -379,6 +387,8 @@ export function compileSkill(s: {
   supporting: { path: string; text: string }[];
   tools: string[]; inputs: InputSchema; approver: string; examples: string[]; help: string;
   arguments: string[]; route: boolean; menu: boolean; tier?: AgentDefinition['tier'];
+  /** 学ばない業務（`metadata.m2office-private`。第12.12.3節）。 */
+  private?: boolean;
   /** 同梱していない会社の接続の道具。危険度が分からないため、作業の段と送る段の両方に置く（第12.11.2節）。 */
   connections?: string[];
 }, registry: ToolRegistry): AgentDefinition {
@@ -426,8 +436,9 @@ export function compileSkill(s: {
     ...(s.route ? {} : { secretaryRoute: false }),
     ...(s.menu ? {} : { menu: false }),
     ...(s.tier ? { tier: s.tier } : {}),
+    ...(s.private ? { private: true } : {}),
     skill: { arguments: s.arguments, files: s.supporting },
-    inputs: s.inputs, tools: s.tools, steps, constraints: [], limits: LIMITS,
+    inputs: s.inputs, tools: s.tools, steps, constraints: [], limits: s.tier === 'advanced' ? LIMITS_ADVANCED : LIMITS,
     help: {
       summary: s.description,
       ...(s.help ? { body: s.help } : {}),

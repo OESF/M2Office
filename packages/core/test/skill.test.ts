@@ -200,3 +200,26 @@ test('実行のとき、推論に渡す指示の $名前 を入力で置き換�
   const read = (steps[0]!['output'] as { tools: { name: string; result?: { text?: string } }[] }).tools.find((t) => t.name === 'skill.read');
   assert.equal(read?.result?.text, '宿題は担当つきで書く');
 });
+
+test('学ばない業務の印・推論の強さの上限・ファイルの欄（契約書チェック。第12.12.3節・第12.12.5節）', async () => {
+  const { pkg, problems } = load({
+    'SKILL.md': [
+      '---', 'name: contract-review', 'description: 契約書を読んで注意したい点をまとめる', 'effort: xhigh',
+      'allowed-tools: file.read_text docx.render', 'metadata:', '  m2office-private: "true"', '  m2office-inputs: |',
+      '    契約書: ファイル', '    気になる点・背景: 長文（任意）', '---', '# 契約書チェック', '契約書: $契約書',
+    ].join('\n'),
+  });
+  assert.deepEqual(problems, []);
+  const def = pkg!.agents[0]!;
+  assert.equal(def.private, true, 'm2office-private で学ばない業務になる');
+  assert.equal(def.tier, 'advanced');
+  assert.equal(def.limits.maxTokens, 300_000, '強さを上げたスキルは上限も大きい');
+  const { fileInputKey } = await import('@m2office/shared');
+  assert.equal(fileInputKey(def), '契約書', '「ファイル」と書いた欄が、渡されたファイルの入る欄');
+  const { acceptsFile } = await import('../src/index.js');
+  assert.equal(acceptsFile(def), true, '秘書が契約書を渡せる');
+  const plain = load({ 'SKILL.md': SKILL, 'reference.md': '区分' }).pkg!.agents[0]!;
+  assert.equal(plain.private, undefined);
+  assert.equal(plain.limits.maxTokens, 100_000);
+  assert.equal(fileInputKey(plain), null);
+});

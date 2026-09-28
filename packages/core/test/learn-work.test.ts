@@ -167,3 +167,30 @@ test('秘書が伝える業務を見分け、業務の答えを学習の指示�
   const p = learningPrompt([], [{ runId: 'r', agentName: '社内ナレッジ Q&A', label: '夏季休暇', answer: '3 日', endedAt: DONE_AT }]);
   assert.match(p, /## 本人が業務を使って得た答え\n\n業務: 社内ナレッジ Q&A「夏季休暇」\n答え: 3 日/);
 });
+
+test('学ばない業務（m2office-private。契約書チェックなど）の結果からは学ばない（第12.12.3節）', async () => {
+  const { learnableWork } = await import('../src/memory/work.js');
+  const secret = { ...OFFICIAL_AGENTS[0]!, id: 'x:contract-review', private: true } as AgentDefinition;
+  const normal = { ...OFFICIAL_AGENTS[0]!, id: 'x:normal' } as AgentDefinition;
+  const item = (agentId: string) => ({
+    run: { id: 'r', jobId: 'j', status: 'completed', startedAt: DONE_AT, endedAt: DONE_AT } as never,
+    job: { id: 'j', agentId, origin: 'menu', input: {}, requestedBy: 'u' } as never,
+  });
+  assert.equal(learnableWork(item('x:contract-review'), [secret, normal]), false);
+  assert.equal(learnableWork(item('x:normal'), [secret, normal]), true);
+});
+
+test('学ばない業務の結果を秘書が伝えた会話からは学ばない（会話ログには残る。第12.12.3節）', async () => {
+  const secret = { ...OFFICIAL_AGENTS[0]!, id: 'x:contract-review', private: true } as AgentDefinition;
+  const { repo } = repoOf([row('r9', 'x:contract-review', {}, '第6条に上限がありません', { origin: 'secretary' })], [{ kind: 'conversation.turn', conversationId: 'c9' }]);
+  // 伝えた結果の会話（実行につながる）
+  (repo as unknown as { getConversation: unknown }).getConversation = async () => ({
+    id: 'c9', tenantId: 't', userId: 'u', message: '（「契約書チェック」に頼んだ結果）この NDA 大丈夫？', reply: '第6条に上限がありません',
+    layer: 'full', agentId: null, runId: 'r9', createdAt: DONE_AT,
+  });
+  const { calls, learning } = spyLearning();
+  const conductor = new SecretaryConductor({ repo, learning, agentsFor: async () => [...OFFICIAL_AGENTS, secret] });
+  const outcome = await conductor.tick(NOW);
+  assert.equal(outcome?.action, 'skipped');
+  assert.equal(calls.length, 0, '契約書の中身を記憶に入れない');
+});

@@ -170,6 +170,12 @@ export interface AgentDefinition {
    * @remarks `false` の業務は、秘書が取り次いだときだけ使う
    */
   menu?: boolean;
+  /**
+   * 学ばない業務（仕様書 第12.12.3節 `m2office-private`）。契約書など機密の中身を扱う業務に付ける。
+   *
+   * @remarks `true` の業務の結果からは、秘書が学ばず（第10.13節）、秘書の答えに結果の要点を添えない（第10.7.3節）
+   */
+  private?: boolean;
   /** 段の推論の強さ（仕様書 第20.2.2節）。既定は `standard`。スキルの `effort` から決まる。 */
   tier?: 'fast' | 'standard' | 'advanced';
   /**
@@ -203,3 +209,17 @@ export interface AgentDefinition {
    */
   face?: number;
 }
+
+/**
+ * 業務の入力のうち、ファイルを受け取る欄の名前（仕様書 第10.10.3節）。無ければ `null`。
+ *
+ * @remarks
+ * 公式の業務は `fileId`、スキルの業務は `m2office-inputs` で「ファイル」と書いた欄（名前は「契約書」など）。
+ * 秘書に渡したファイルは、この欄に入れる
+ */
+export function fileInputKey(def: Pick<AgentDefinition, 'inputs'>): string | null {
+  const props = ((def.inputs as { properties?: Record<string, { format?: string }> }).properties) ?? {};
+  if ('fileId' in props) return 'fileId';
+  return Object.entries(props).find(([, p]) => p?.format === 'file')?.[0] ?? null;
+}
+

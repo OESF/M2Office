@@ -6,7 +6,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { AgentDefinition } from '@m2office/shared';
+import { fileInputKey, type AgentDefinition } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { LlmProvider } from '../llm/provider.js';
 import type { WorkspaceConnector } from '../connectors/types.js';
@@ -438,7 +438,7 @@ export class Secretary {
     const takers = available.filter((a) => acceptsFile(a) && a.id !== LOOKUP_AGENT_ID && !agents.disabled.includes(a.id));
     if (takers.length > 0) {
       const llm = this.deps.llmFor ? await this.deps.llmFor(tenantId) : this.deps.llm;
-      const routed = await this.route(message, takers, llm);
+      const routed = await this.route(message, takers, llm, undefined, false, [], true);
       if (routed.agent) {
         await this.audit(tenantId, userId, 'secretary.route', routed.agent.id);
         // 渡されたファイルを入力に入れて頼む（第10.10.3節）
@@ -681,10 +681,12 @@ export class Secretary {
     lookup?: AgentDefinition,
     allowPlan = false,
     connectionNames: string[] = [],
+    fileGiven = false,
   ): Promise<{ agent?: AgentDefinition; plan?: boolean; reason: string; tokensUsed: number }> {
     // **照会は業務に取り次がない**（仕様書 第10.9.4.1節）。層 3 が組織知識を根拠に答える。
-    // ただし外の最新の情報や本人の予定が要る照会（出張の行程など）は、秘書の調べものに回す（第10.9.6節）
-    const asking = ASKING.test(message) && !DOING.test(message);
+    // ただし外の最新の情報や本人の予定が要る照会（出張の行程など）は、秘書の調べものに回す（第10.9.6節）。
+    // ファイルを渡されたときの問い（「この NDA 大丈夫？」）は、そのファイルを扱う業務の仕事であり、照会として扱わない（第28.8節）
+    const asking = !fileGiven && ASKING.test(message) && !DOING.test(message);
     const candidates = asking ? (lookup ? [lookup] : []) : [...agents, ...(lookup ? [lookup] : [])];
     if (candidates.length === 0) return { reason: asking ? '照会のため、秘書が答えます' : '使える業務がありません', tokensUsed: 0 };
 
@@ -696,7 +698,9 @@ export class Secretary {
         a.category === 'meeting' && /議事録/.test(message) ||
         a.category === 'mail' && /返信|下書き|受信箱/.test(message) ||
         a.category === 'calendar' && /日程|空いて/.test(message) ||
-        a.category === 'briefing' && /ブリーフ|週報/.test(message),
+        a.category === 'briefing' && /ブリーフ|週報/.test(message) ||
+        // 契約書の業務（契約書チェック。第28.8節）。「この NDA 大丈夫？」のように業務の名前が出ない依頼も取り次ぐ
+        fileGiven && /契約書/.test(a.name) && /契約|NDA|秘密保持|覚書|約款/.test(message),
     );
     if (byKeyword) return { agent: byKeyword, reason: '語句の一致', tokensUsed: 0 };
     const list = [
@@ -754,11 +758,11 @@ export class Secretary {
  * その業務がファイルを受け取れるか（仕様書 第10.10.3節）。
  *
  * @remarks
- * 入力に `fileId` を持つ業務だけが、渡されたファイルを使える。
+ * 入力にファイルの欄（公式の業務は `fileId`、スキルの業務は「ファイル」と書いた欄）を持つ業務だけが、渡されたファイルを使える。
  * 秘書は、ファイルが付いているときにこれらだけを取次の候補にする。
  */
 export function acceptsFile(def: AgentDefinition): boolean {
-  return Object.keys(def.inputs?.properties ?? {}).includes('fileId');
+  return fileInputKey(def) !== null;
 }
 
 /**
@@ -855,7 +859,8 @@ export async function fillInputs(
 ): Promise<{ input: Record<string, unknown>; missing: string[]; tokensUsed: number }> {
   const schema = agent.inputs as { required?: string[]; properties?: Record<string, { title?: string; format?: string; examples?: string[] }> };
   const props = schema.properties ?? {};
-  const keys = Object.keys(props).filter((k) => k !== 'fileId');
+  const fileKey = fileInputKey(agent);
+  const keys = Object.keys(props).filter((k) => k !== fileKey);
   const input: Record<string, unknown> = {};
   let tokensUsed = 0;
   if (keys.length > 0) {
@@ -891,7 +896,7 @@ export async function fillInputs(
     }
     if (input['request'] === undefined && keys.includes('request')) input['request'] = message;
   }
-  if (fileId && Object.keys(props).includes('fileId')) input['fileId'] = fileId;
+  if (fileId && fileKey) input[fileKey] = fileId;
   const missing = (schema.required ?? [])
     .filter((k) => input[k] === undefined || input[k] === '')
     .map((k) => props[k]?.title ?? k);
@@ -915,6 +920,8 @@ const GROUNDING_RULE = [
   '・日数・金額・期限を、出典なしに会社の決まりとして断定してはいけません。',
   '・列車の時刻・天気・ニュース・価格など、外の最新の情報や、Slack などの会社の接続の中身を記憶で作ってはいけません。',
   '  分からなければ、答えを作らずに「お調べします」とだけ答えてください（秘書が調べものを起こし、終わったらお伝えします）。',
+  '・契約書について「サインしていい？」「大丈夫？」「違法？」と聞かれても、結んでよいか・法律上どうかは判断しないでください（仕様書 第28.2節）。',
+  '  契約書を渡してもらえれば、契約書チェックで注意したい点を整理できると伝えてください。重要な契約は弁護士への確認を勧めてください。',
 ].join('\n');
 
 export type { DirectAnswer };

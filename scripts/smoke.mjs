@@ -3125,6 +3125,40 @@ console.log('\n■ 57. 名刺管理（内蔵の拡張。第27章、ADR-0042）')
   }
 }
 
+console.log('\n■ 58. 契約書チェック（公式の拡張機能。第28章、ADR-0043）');
+{
+  const EXT = 'jp.m2office.legal.contract-review';
+  const AGENT = `${EXT}:contract-review`;
+  try {
+    const { body: before } = await call('a', '/v1/admin/extensions');
+    const item = (before.items ?? []).find((x) => x.id === EXT);
+    item && !item.installed && item.permissions?.maxRisk === 'draft'
+      ? ok('公式の拡張機能として配布元に並び、既定では入っていない。最上位の危険度は下書き') : ng('配布元に無いか、入っている', JSON.stringify(item?.installed));
+    const install = await call('a', `/v1/admin/extensions/${EXT}/install`, { method: 'POST', body: JSON.stringify({ consent: true }) });
+    const { body: agents } = await call('a', '/v1/agents', {}, 'member');
+    const def = (agents.agents ?? []).find((a) => a.id === AGENT);
+    install.status === 200 && def && def.inputs?.properties?.['契約書']?.format === 'file'
+      ? ok('導入すると、契約書のファイルの欄を持つ業務として使える') : ng('業務が使えない', JSON.stringify(install.body));
+
+    // 秘書に契約書を渡して「この NDA 大丈夫？」と聞くと、照会として答えずに契約書チェックへ回す（第28.8節）
+    const form = new FormData();
+    form.append('file', new Blob([Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da6364f8ff0f0000050101005b1c4a1a0000000049454e44ae426082', 'hex')]), 'nda.png');
+    const up = await fetch(`${API}/v1/files`, { method: 'POST', body: form, headers: { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' } });
+    const file = await up.json();
+    const { body: reply } = await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message: 'このNDA大丈夫？サインしていい？', fileId: file.id }) }, 'member');
+    /契約書チェック/.test(reply.text ?? '') && reply.lookup?.runId
+      ? ok('契約書を渡した問いは、秘書が大丈夫かを答えずに契約書チェックへ回す') : ng('契約書チェックに回らない', reply.text);
+    if (reply.lookup?.runId) {
+      const { body: run } = await call('a', `/v1/runs/${reply.lookup.runId}`, {}, 'member');
+      run.job?.input?.['契約書'] === file.id ? ok('渡した契約書が、業務の「契約書」の欄に入る') : ng('ファイルが欄に入らない', JSON.stringify(run.job?.input));
+    }
+  } catch (err) {
+    ng('契約書チェックの確認が途中で止まった', String(err));
+  } finally {
+    await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

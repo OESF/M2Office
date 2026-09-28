@@ -107,6 +107,10 @@ export class SecretaryConductor {
     const conversation = await repo.getConversation(event.tenantId, event.conversationId);
     // 本人がすでに消していれば学ばない
     if (!conversation || conversation.userId !== event.userId) return { event, action: 'skipped', reason: '会話がありません' };
+    // 学ばない業務（契約書チェックなど。第12.12.3節）の結果を伝えた会話からは学ばない。会話ログには残る（本人が続きを聞けるように）
+    if (conversation.runId && await this.fromPrivateWork(event.tenantId, conversation.runId)) {
+      return { event, action: 'skipped', reason: '学ばない業務の結果' };
+    }
     const r = await learning.learnNow(event.tenantId, event.userId, { conversations: [conversation] }, now);
     return { event, action: 'learned', learned: r.learned, promoted: r.promoted };
   }
@@ -128,5 +132,16 @@ export class SecretaryConductor {
     if (work.length === 0) return { event, action: 'skipped', reason: '答えがありません' };
     const r = await learning.learnNow(event.tenantId, event.userId, { work }, now);
     return { event, action: 'learned', learned: r.learned, promoted: r.promoted };
+  }
+
+  /** その実行が、学ばない業務（第12.12.3節）のものか。業務が分からなければ学ぶ側に倒さない（学ばない）。 */
+  private async fromPrivateWork(tenantId: string, runId: string): Promise<boolean> {
+    const { repo } = this.deps;
+    const run = await repo.getRun(tenantId, runId).catch(() => null);
+    const job = run ? await repo.getJob(tenantId, run.jobId).catch(() => null) : null;
+    if (!job) return false;
+    const agents = this.deps.agentsFor ? await this.deps.agentsFor(tenantId) : OFFICIAL_AGENTS;
+    const def = agents.find((a) => a.id === job.agentId);
+    return def ? def.private === true : true;
   }
 }
