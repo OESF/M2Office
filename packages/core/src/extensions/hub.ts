@@ -16,12 +16,13 @@ import type { McpClient } from '../connectors/mcp.js';
 import { silentLogger, type Logger } from '../log/logger.js';
 import { connectorToolName, connectorTools, type ConnectionAuthProvider, type ConnectorDeclaration } from './connectors.js';
 import { loadExtensionFiles, type ExtensionFiles, type ExtensionPackage } from './loader.js';
+import { CARDS_PACKAGE } from '../cards/agents.js';
 
 /** 会社から見た拡張機能 1 つ分。 */
 export interface ExtensionEntry {
   pkg: ExtensionPackage;
-  /** 公式の配布元か、その会社がファイルから取り込んだもの（自社専用）か。 */
-  origin: 'official' | 'private';
+  /** 公式の配布元か、その会社がファイルから取り込んだもの（自社専用）か、中核に組み込んだ内蔵の拡張（第12.13節）か。 */
+  origin: 'official' | 'private' | 'builtin';
   /** 導入の記録。未導入なら `null`。 */
   installed: InstalledExtension | null;
   /** 導入したときより権限が増えている。スイッチを入れる前に再同意が要る（第12.6節）。 */
@@ -122,9 +123,9 @@ export class ExtensionHub {
    */
   async forTenant(tenantId: string): Promise<TenantExtensions> {
     const { repo, registry, official, mcp, connectionAuth } = this.deps;
-    const [installed, privates, disabledRows] = await Promise.all([
+    const [installed, privates, disabledRows, settings] = await Promise.all([
       repo.listInstalledExtensions(tenantId), repo.listPrivateExtensions(tenantId),
-      repo.listDisabledConnectorTools(tenantId),
+      repo.listDisabledConnectorTools(tenantId), repo.getTenantSettings(tenantId),
     ]);
     const disabledTools = new Set(disabledRows.map((d) => connectorToolName(d.connectorId, d.toolName)));
     const packages: { pkg: ExtensionPackage; origin: 'official' | 'private' }[] =
@@ -147,6 +148,15 @@ export class ExtensionHub {
       const needsReconsent = rec !== null && !covers(rec.consentedPermissions, consentSnapshot(pkg));
       return { pkg, origin, installed: rec, needsReconsent, active: rec !== null && rec.enabled && !needsReconsent };
     });
+    // 内蔵の拡張（名刺管理。第12.13節）。導入の手順は無く、会社の設定の入り切りだけで決まる（既定は入）
+    entries.push({
+      pkg: CARDS_PACKAGE, origin: 'builtin', needsReconsent: false, active: settings.cards.enabled,
+      installed: {
+        tenantId, extensionId: CARDS_PACKAGE.manifest.id, version: CARDS_PACKAGE.manifest.version,
+        consentedPermissions: { tools: CARDS_PACKAGE.manifest.permissions.tools, max_risk_level: CARDS_PACKAGE.manifest.permissions.max_risk_level },
+        installedBy: 'system', installedAt: '', enabled: settings.cards.enabled,
+      },
+    });
     const active = entries.filter((e) => e.active);
     // 導入済みの拡張機能が同梱する接続で、まだ会社に無いものを登録する（第 0.132.0 版より前に導入した会社のため）
     let connections = await repo.listConnections(tenantId);
@@ -162,6 +172,8 @@ export class ExtensionHub {
     const missingToolsOf = (def: AgentDefinition) => def.tools.filter((name) => !tenantRegistry.get(name));
     // 秘書の調べものは、会社の接続の読むだけの道具を使える（第12.11.0節）
     const readTools = connections.flatMap((c) => connectorTools(c)).filter((t) => t.risk === 'read' && tenantRegistry.get(t.name)).map((t) => t.name);
+    // 名刺管理を使う会社では、秘書の調べものが名刺を探せる（第27.9節）。利用範囲は道具を呼ぶときに確かめる
+    if (settings.cards.enabled) readTools.push('contacts.search', 'contacts.get');
     const withReaders = (a: AgentDefinition) => (CONNECTION_READER_IDS.has(a.id) && readTools.length > 0
       ? { ...a, tools: [...new Set([...a.tools, ...readTools])] } : a);
     const allAgents = [...official, ...entries.flatMap((e) => e.pkg.agents)].map(withReaders);

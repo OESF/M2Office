@@ -21,6 +21,8 @@ import { cancelPlan, createPlan, planStatusText } from './plan.js';
 import { AI_NOT_CONFIGURED_MESSAGE, aiAvailable } from '../llm/unconfigured.js';
 import { expandQuery } from '../knowledge/expand.js';
 import { jstDay } from '../memory/learn.js';
+import { contactRequest } from './contacts.js';
+import { CARD_UPDATE } from '../cards/agents.js';
 
 /** 秘書がどの層で応答したか。計測と表示に使う（仕様書 第10.9.1節）。 */
 export type ResponseLayer = 'direct' | 'light' | 'full';
@@ -270,6 +272,18 @@ export class Secretary {
     if (lookup && !pastOnly && asksConnectionData(message, connections)) {
       await this.audit(tenantId, userId, 'secretary.route', LOOKUP_AGENT_ID);
       return this.delegate(tenantId, userId, message, lookup, '会社の接続のデータを探す依頼', llm);
+    }
+    // 名刺（第27.9節）。名刺管理を使える人（付属の業務が候補にある人）の「〇〇さんの電話番号は？」は名刺を探す調べものへ、
+    // 「直して・メモして」は名刺の修正へ回す。推論に選ばせない（名刺の問いに「分かりません」と答えないように）
+    const cardUpdate = enabled.find((a) => a.id === CARD_UPDATE.id);
+    const contact = cardUpdate && !pastOnly ? contactRequest(message) : null;
+    if (contact === 'fix' && cardUpdate) {
+      await this.audit(tenantId, userId, 'secretary.route', cardUpdate.id);
+      return this.delegate(tenantId, userId, message, cardUpdate, '名刺を直す依頼', llm);
+    }
+    if (contact === 'ask' && lookup) {
+      await this.audit(tenantId, userId, 'secretary.route', LOOKUP_AGENT_ID);
+      return this.delegate(tenantId, userId, message, lookup, '名刺を探す依頼', llm);
     }
     const routed = pastOnly
       ? { agent: undefined, plan: false, reason: '', tokensUsed: 0 }

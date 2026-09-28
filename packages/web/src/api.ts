@@ -9,7 +9,7 @@
 
 import type {
   Approval, Artifact, Notification, Run, RunStep, Schedule, ScheduleRule, Tenant,
-  TenantSettings, User, UserSettings,
+  TenantSettings, User, UserSettings, CardFields, Contact, ContactScope,
 } from '@m2office/shared';
 
 /**
@@ -64,6 +64,28 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
     );
   }
   return res.json() as Promise<T>;
+}
+
+/**
+ * ファイルの中身を読む（画像・vCard など）。ログインと、開発で選んだ会社をそのまま使う。
+ *
+ * @returns 中身。読めなければ `null`
+ */
+async function fetchBlob(path: string): Promise<Blob | null> {
+  const res = await fetch(`/v1${path}`, {
+    credentials: 'same-origin', headers: devTenant ? { 'x-tenant': devTenant } : {},
+  });
+  return res.ok ? res.blob() : null;
+}
+
+/** 読んだ中身を、名前を付けて保存させる。 */
+function saveBlob(blob: Blob, name: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 /** API が返した業務上のエラー。画面では平易な文言として表示する。 */
@@ -130,7 +152,49 @@ export interface Me {
   photo: string | null;
   /** サーバーの版（仕様書 第6.1.1.1節）。読めなければ `null`。 */
   serverVersion: string | null;
+  /** 名刺管理を使えるか（会社の入り切りと利用範囲。仕様書 第27.2節）。 */
+  cards?: boolean;
 }
+
+/** 名刺の一覧の 1 行（仕様書 第27.8節）。 */
+export interface CardSummary {
+  id: string; scope: ContactScope; ownerUserId: string; name: string; nameKana: string; company: string;
+  department: string; title: string; emails: string[]; status: 'active' | 'trash'; trashedAt: string | null;
+  cardId: string | null; frontFileId: string | null; frontRotation: number; frontKind: string | null;
+  lastReceivedOn: string | null; cardCount: number;
+}
+
+/** 名刺の一覧。 */
+export interface CardList {
+  items: CardSummary[];
+  /** 読み取り中のまとまりの進み具合（何枚中何枚）。無ければ `null`。 */
+  progress: { total: number; finished: number } | null;
+  /** 本人が取り込んで、読み取り中か読み取れなかった名刺。 */
+  unresolved: { id: string; status: 'pending' | 'reading' | 'failed'; failureReason: string | null; frontFileId: string | null; createdAt: string }[];
+  defaultScope: ContactScope;
+  hasMore: boolean;
+}
+
+/** 名刺の受け付けの結果。 */
+export interface CardAccept { batchId: string; queued: number; rejected: { name: string; reason: string }[] }
+
+/** 名刺の詳細（仕様書 第27.8節）。 */
+export interface CardDetail {
+  contact: Contact;
+  ownerName: string | null;
+  updatedByName: string | null;
+  cards: {
+    id: string; receivedOn: string; receivedBy: string | null; mine: boolean; hasFront: boolean; hasBack: boolean;
+    frontRotation: number; backRotation: number; note: string | null;
+  }[];
+  history: { receivedOn: string; company: string; department: string; title: string }[];
+  canManage: boolean;
+}
+
+/** 会った日の本人の予定。 */
+export type CardMeetings =
+  | { available: true; days: { date: string; events: { title: string; start: string; end: string; allDay: boolean }[] }[] }
+  | { available: false; reason: string };
 
 export interface LoginProviders {
   tenant: { name: string; subdomain: string };
@@ -320,8 +384,8 @@ export interface ExtensionView {
     maxRisk: string; maxRiskText: string;
     tools: { name: string; does: string; risk: string | null }[];
   };
-  /** 公式の配布元か、ファイルから取り込んだもの（自社専用）か。 */
-  origin: 'official' | 'private';
+  /** 公式の配布元か、ファイルから取り込んだもの（自社専用）か、中核に組み込んだ内蔵の拡張（仕様書 第12.13節）か。 */
+  origin: 'official' | 'private' | 'builtin';
   originText: string;
   installed: { version: string; installedAt: string } | null;
   enabled: boolean;
@@ -330,6 +394,8 @@ export interface ExtensionView {
   active: boolean;
   /** 利用できる人（第16.7節）。 */
   scope: ScopeValue;
+  /** 名刺管理の会社の設定（取り込んだ名刺の既定の範囲。仕様書 第27.7節）。名刺管理のときだけある。 */
+  cards?: { defaultScope: ContactScope };
 }
 
 /** 管理者ページ「接続」の設定（仕様書 第14.3.3節）。秘密の値は含まない。 */
@@ -651,6 +717,64 @@ export const api = {
     if (!res.ok) throw new ApiError(body.error ?? `エラー (${res.status})`, res.status, false);
     return body as { id: string; name: string };
   },
+  /** 名刺管理（内蔵の拡張。仕様書 第27章）。 */
+  cards: {
+    /** 一覧と検索。本人の読み取り中・読み取れなかった名刺と、進み具合も返る（第27.8節）。 */
+    list: (q: { q?: string; scope?: 'all' | ContactScope; trash?: boolean } = {}) => {
+      const p = new URLSearchParams();
+      if (q.q) p.set('q', q.q);
+      if (q.scope && q.scope !== 'all') p.set('scope', q.scope);
+      if (q.trash) p.set('trash', '1');
+      return call<CardList>(`/cards?${p.toString()}`);
+    },
+    /**
+     * 名刺のファイルを渡す（第27.4節）。読み取りは後ろで進むため、受け付けだけを待つ。
+     *
+     * @param backOf ファイルごとに、組にする表のファイルの番号（撮るときの「裏も撮る」）。表なら `null`
+     */
+    upload: async (files: File[], opts: { scope?: ContactScope; backOf?: (number | null)[] } = {}): Promise<CardAccept> => {
+      const form = new FormData();
+      for (const f of files) form.append('file', f);
+      if (opts.backOf) form.append('backOf', JSON.stringify(opts.backOf));
+      if (opts.scope) form.append('scope', opts.scope);
+      const res = await fetch('/v1/cards', {
+        method: 'POST', credentials: 'same-origin', body: form,
+        headers: { ...(devTenant ? { 'x-tenant': devTenant } : {}), ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}) },
+      });
+      const body = await res.json().catch(() => ({ error: '通信に失敗しました' }));
+      if (!res.ok && !(body as CardAccept).rejected) throw new ApiError(body.error ?? `エラー (${res.status})`, res.status, false);
+      return body as CardAccept;
+    },
+    get: (id: string) => call<CardDetail>(`/cards/${encodeURIComponent(id)}`),
+    /** 項目とメモをその場で直す。 */
+    update: (id: string, patch: Partial<CardFields> & { note?: string }) =>
+      call<{ ok: true }>(`/cards/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    setScope: (id: string, scope: ContactScope) =>
+      call<{ ok: true }>(`/cards/${encodeURIComponent(id)}/scope`, { method: 'PUT', body: JSON.stringify({ scope }) }),
+    split: (id: string, cardId: string) =>
+      call<{ contactId: string }>(`/cards/${encodeURIComponent(id)}/split`, { method: 'POST', body: JSON.stringify({ cardId }) }),
+    trash: (id: string) => call<{ ok: true }>(`/cards/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    restore: (id: string) => call<{ ok: true }>(`/cards/${encodeURIComponent(id)}/restore`, { method: 'POST' }),
+    purge: (id: string) => call<{ ok: true }>(`/cards/${encodeURIComponent(id)}/purge`, { method: 'DELETE' }),
+    /** 受け取った日を直す（受け取った本人だけ。第27.3節）。 */
+    setReceivedOn: (cardId: string, receivedOn: string) =>
+      call<{ ok: true }>(`/cards/card/${encodeURIComponent(cardId)}/received`, { method: 'PUT', body: JSON.stringify({ receivedOn }) }),
+    dismiss: (cardId: string) => call<{ ok: true }>(`/cards/card/${encodeURIComponent(cardId)}`, { method: 'DELETE' }),
+    /** 会った日の本人の予定（保存しない。第27.8節）。 */
+    meetings: (id: string) => call<CardMeetings>(`/cards/${encodeURIComponent(id)}/meetings`),
+    /**
+     * 名刺の画像を読む。画面では `URL.createObjectURL` で出す（ログインと会社の指定をそのまま使うため）。
+     *
+     * @returns 画像。見られなければ `null`
+     */
+    image: (cardId: string, side: 'front' | 'back') => fetchBlob(`/cards/card/${encodeURIComponent(cardId)}/${side}`),
+    /** vCard を保存する（1 件）。 */
+    downloadVCard: async (id: string, name: string) => {
+      const blob = await fetchBlob(`/cards/${encodeURIComponent(id)}/vcard`);
+      if (!blob) throw new ApiError('書き出せませんでした', 404);
+      saveBlob(blob, `${name || 'contact'}.vcf`);
+    },
+  },
   /** 会話の要約（仕様書 第11.9.6節）。 */
   myConversationDigests: () => call<{ items: { day: string; summary: string }[] }>('/me/conversation-digests'),
   /** 会話ログ（仕様書 第11.9.4.1節）。本人のやり取りだけが返る。 */
@@ -825,6 +949,9 @@ export const api = {
       call<{ ok: true; item: ExtensionView | null; notices?: string[] }>('/admin/extensions/import', {
         method: 'POST', body: file, headers: { 'content-type': 'application/octet-stream' },
       }),
+    /** 名刺管理の、取り込んだ名刺の既定の範囲（仕様書 第27.7節）。 */
+    setCardsDefaultScope: (defaultScope: ContactScope) =>
+      call<{ ok: true }>('/admin/extensions/business-cards/settings', { method: 'PUT', body: JSON.stringify({ defaultScope }) }),
     setExtensionEnabled: (id: string, enabled: boolean) =>
       call(`/admin/extensions/${encodeURIComponent(id)}/enabled`, { method: 'PUT', body: JSON.stringify({ enabled }) }),
     /** 会社の接続（コネクタ。仕様書 第12.11.0節）。 */

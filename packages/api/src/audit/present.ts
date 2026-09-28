@@ -102,6 +102,14 @@ const ACTION_LABELS: Record<string, string> = {
   'file.upload': 'ファイルを上げた',
   'notification.deliver': '通知を届けた',
   'audit.export': '監査ログを出力した',
+  // 名刺管理（仕様書 第27.10節。見ただけでは残さない）
+  'card.import': '名刺を取り込んだ',
+  'contact.merge': '同じ人の名刺をまとめた',
+  'contact.split': 'まとめた名刺を分けた',
+  'contact.scope': '名刺の範囲を変えた',
+  'contact.trash': '名刺をごみ箱へ移した',
+  'contact.restore': '名刺をごみ箱から戻した',
+  'contact.purge': '名刺を消去した',
 };
 
 /** 操作の種類（絞り込みの単位）。`prefixes` のどれかで始まる操作が当たる。 */
@@ -116,6 +124,7 @@ export const AUDIT_CATEGORIES: { id: string; label: string; prefixes: string[] }
   { id: 'settings', label: '設定', prefixes: ['settings.', 'me.', 'onboarding.'] },
   { id: 'knowledge', label: '知識と記憶', prefixes: ['knowledge.', 'memory.', 'conversation.'] },
   { id: 'schedule', label: '定時実行', prefixes: ['schedule.'] },
+  { id: 'cards', label: '名刺', prefixes: ['card.', 'contact.'] },
 ];
 
 /** 仕組みの名前（主体が `system` のとき）。 */
@@ -132,6 +141,7 @@ const SYSTEM_LABELS: Record<string, string> = {
   worker: '業務の実行',
   onboarding: 'はじめの設定の案内',
   notify: '通知',
+  cards: '名刺の読み取り',
 };
 
 /** 秘書の応答の層などの記録の値（`secretary.chat` の `full` など）。 */
@@ -240,6 +250,8 @@ function targetOf(e: AuditEvent, names: AuditNames): string {
     case 'user_settings': return '個人設定';
     case 'audit': return '監査ログ';
     case 'conversation': return '会話ログ';
+    // 名刺の相手の名前は出さない。自分だけの名刺の相手を、管理者に知らせないため（第27.7節）
+    case 'contact': case 'card': case 'card_batch': return '名刺';
     default: return id ? `${id}` : '—';
   }
 }

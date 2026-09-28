@@ -4,7 +4,7 @@
  * @see 仕様書 第20.2節 LLM 抽象化層
  */
 
-import type { LlmProvider, LlmRequest, LlmResponse, ModelTier } from './provider.js';
+import type { LlmExtractRequest, LlmProvider, LlmRequest, LlmResponse, ModelTier } from './provider.js';
 
 /** 役割ごとのモデル名。設定で差し替えられる（仕様書 第20.2節）。 */
 export interface GeminiModelMap {
@@ -164,6 +164,49 @@ export class OpenAiCompatibleProvider implements LlmProvider {
     };
     const text = (json.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('');
     return { text, tokensUsed: json.usageMetadata?.totalTokenCount ?? 0 };
+  }
+
+  /**
+   * 画像から、指示の形の JSON で項目を取り出す（名刺の読み取り。仕様書 第27.5節）。
+   *
+   * @remarks
+   * Gemini の `generateContent` に画像をそのまま添え、JSON だけを返させる（`responseMimeType`）。
+   * OpenAI 互換の窓口を使わないのは、iPhone の写真（HEIC・HEIF）と WebP、PDF をそのまま渡すため
+   */
+  async extractFromImage(req: LlmExtractRequest): Promise<LlmResponse> {
+    const base = this.baseUrl.replace(/\/openai\/?$/, '');
+    const model = this.resolveModel('standard');
+    const res = await fetch(`${base}/models/${encodeURIComponent(model)}:generateContent`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-goog-api-key': this.apiKey },
+      body: JSON.stringify({
+        contents: [{
+          role: 'user',
+          parts: [
+            { text: req.prompt },
+            { inlineData: { mimeType: req.mimeType, data: Buffer.from(req.bytes).toString('base64') } },
+          ],
+        }],
+        generationConfig: { maxOutputTokens: req.maxOutputTokens ?? 2000, responseMimeType: 'application/json' },
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      throw new LlmRequestError(`画像の読み取りに失敗しました (${res.status})`, body);
+    }
+    const json = (await res.json()) as {
+      modelVersion?: string;
+      candidates?: { content?: { parts?: { text?: string }[] } }[];
+      usageMetadata?: { totalTokenCount?: number; promptTokenCount?: number; candidatesTokenCount?: number };
+    };
+    const used = json.usageMetadata ?? {};
+    return {
+      text: (json.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join(''),
+      tokensUsed: used.totalTokenCount ?? 0,
+      ...(used.promptTokenCount !== undefined ? { inputTokens: used.promptTokenCount } : {}),
+      ...(used.candidatesTokenCount !== undefined ? { outputTokens: used.candidatesTokenCount } : {}),
+      model: json.modelVersion ?? model,
+    };
   }
 
   private resolveModel(tier: ModelTier): string {

@@ -9,6 +9,7 @@ import type { Repository } from '../repository/types.js';
 import type { WorkspaceConnector } from '../connectors/types.js';
 import type { FileStore } from '../files/store.js';
 import type { ResearchProvider } from '../research/provider.js';
+import type { CardToolContext } from '../cards/tools.js';
 
 /** ツール呼び出しの文脈。テナント境界と実行の同一性を持ち回る。 */
 export interface ToolContext {
@@ -47,6 +48,12 @@ export interface ToolContext {
   skillFiles?: { path: string; text: string }[];
   /** 組織知識を探す前に、言い換えを秘書に考えさせる（仕様書 第11.7.7.0節）。無ければ言い換えなしで探す。 */
   expandQuery?: (query: string) => Promise<string[][]>;
+  /**
+   * 名刺管理（内蔵の拡張。仕様書 第27章）。使えるかどうか（会社の入り切り・利用範囲）は、道具が呼ぶたびに確かめる。
+   *
+   * @remarks 無ければ名刺の道具は「使えない」と返す
+   */
+  cards?: CardToolContext;
 }
 
 /** 引数 1 つの定義（JSON Schema の一部）。 */

@@ -26,6 +26,7 @@ import { ensureMorningBrief } from './secretary/morning.js';
 import { authRoute } from './routes/auth.js';
 import { notificationsRoute } from './routes/notifications.js';
 import { schedulesRoute } from './routes/schedules.js';
+import { cardsRoute } from './routes/cards.js';
 import { adminRoute } from './routes/admin.js';
 import { mcpConnectionsRoute } from './routes/mcp-connections.js';
 import { meRoute } from './routes/me.js';
@@ -108,6 +109,8 @@ app.get('/v1/me', async (c) => {
     csrfToken: auth.method === 'session' ? auth.csrfToken : null,
     // 値の出どころは会社ごと（ADR-0022）
     workspaceSource: deps.connector.sourceFor(ctx.tenant.id),
+    // 名刺管理を使えるか（会社の入り切りと利用範囲。仕様書 第27.2節）。使えなければ左ペインに「名刺」を出さない
+    cards: !!(await deps.cards.access(ctx.tenant.id, ctx.user.id)),
   });
 });
 app.route('/v1/me/google', myGoogleRoute(deps));
@@ -121,6 +124,7 @@ app.route('/v1/approvals', approvalsRoute(deps));
 app.route('/v1/secretary', secretaryRoute(deps));
 app.route('/v1/notifications', notificationsRoute(deps));
 app.route('/v1/schedules', schedulesRoute(deps));
+app.route('/v1/cards', cardsRoute(deps));
 app.route('/v1/admin/dashboard', dashboardRoute(deps));
 app.route('/v1/admin/extensions', extensionsRoute(deps));
 app.route('/v1/admin/groups', groupsRoute(deps));

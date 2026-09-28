@@ -182,6 +182,18 @@ export interface InvoiceStyle {
   sealBox: boolean;
 }
 
+/**
+ * 名刺管理（内蔵の拡張。仕様書 第27章・第12.13節）の会社の設定。
+ *
+ * @remarks 切ってもデータは消さない。入れ直せば戻る（第12.13節）
+ */
+export interface CardsSettings {
+  /** 名刺管理を使うか。既定は入（第27.2節）。 */
+  enabled: boolean;
+  /** 取り込んだ名刺の既定の範囲。既定は会社で共有（第27.7節）。 */
+  defaultScope: 'company' | 'personal';
+}
+
 export interface TenantSettings {
   company: CompanyInfo;
   writingStyle: WritingStyle;
@@ -201,6 +213,8 @@ export interface TenantSettings {
   dashboard: DashboardSettings;
   /** 帳票の体裁（第15.2.2節）。 */
   invoice: InvoiceStyle;
+  /** 名刺管理（第27章）。 */
+  cards: CardsSettings;
 }
 
 /** 設定が未保存の会社に使う既定値。 */
@@ -227,6 +241,8 @@ export const DEFAULT_TENANT_SETTINGS: TenantSettings = {
   dashboard: { people: 'names' },
   // 帳票の体裁。未設定でも帳票は出せる（無い欄は出さない）
   invoice: { logoFileId: null, bankAccount: '', paymentDue: '', notes: '', sealBox: false },
+  // 名刺は会社の資産として共有するのを既定にする（第27.7節）
+  cards: { enabled: true, defaultScope: 'company' },
 };
 
 /**

@@ -21,6 +21,7 @@ import { timeGreeting } from './greeting.js';
 import { AgentForm, ApprovalTray, RunView, statusLabel, SuspendedBanner } from './components.js';
 import { Sources } from './sources.js';
 import { Schedules } from './Schedules.js';
+import { Cards } from './Cards.js';
 import { parseRoute, routePath, syncUrl, type Route } from './route.js';
 import {
   SETTINGS_SECTIONS, SETTINGS_SECTION_KEY, Settings, orderAgents, rememberedSection,
@@ -82,6 +83,7 @@ type View =
   | { kind: 'history' }
   | { kind: 'notifications' }
   | { kind: 'schedules' }
+  | { kind: 'cards'; contactId: string | null }
   | { kind: 'settings'; section: SettingsSection }
   | { kind: 'help'; articleId: string | null };
 
@@ -91,6 +93,7 @@ function viewPath(v: View): string {
     case 'agent': return routePath({ kind: 'agent', agentId: v.agent.id });
     case 'run': return routePath({ kind: 'run', runId: v.runId });
     case 'settings': return routePath({ kind: 'settings', section: v.section });
+    case 'cards': return routePath({ kind: 'cards', contactId: v.contactId });
     case 'help': return routePath({ kind: 'help', articleId: v.articleId });
     default: return routePath({ kind: v.kind });
   }
@@ -108,6 +111,7 @@ function viewOf(r: Route): View | null {
       return { kind: 'settings', section: (known ? r.section : rememberedSection()) as SettingsSection };
     }
     case 'run': return { kind: 'run', runId: r.runId };
+    case 'cards': return { kind: 'cards', contactId: r.contactId };
     case 'help': return { kind: 'help', articleId: r.articleId };
     default: return { kind: r.kind };
   }
@@ -213,6 +217,21 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
     // setTalkOpen は状態の設定関数。依存に入れると毎回作り直してしまう
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /**
+   * 画面から秘書に頼む（名刺の「メールを書く」など。仕様書 第27.9節）。答えは秘書のキャンバスに出る。
+   */
+  const askSecretary = useCallback(async (message: string) => {
+    try {
+      const reply = await api.ask(message);
+      show({
+        request: message, text: reply.text, note: layerLabel(reply.layer),
+        ...(reply.evidence.length > 0 ? { evidence: reply.evidence } : {}),
+      });
+    } catch (err) {
+      setError(describeError(err, '秘書に頼めませんでした'));
+    }
+  }, [show]);
 
   const refresh = useCallback(async () => {
     try {
@@ -421,6 +440,11 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
               active={view.kind === 'notifications'} onClick={() => setView({ kind: 'notifications' })} />
             <NavItem icon="schedules" label="定時実行" description="決まった時刻に、あなたの権限で業務を実行します"
               active={view.kind === 'schedules'} onClick={() => setView({ kind: 'schedules' })} />
+            {/* 名刺管理を切っている会社と、利用範囲の外の人には出さない（仕様書 第27.2節） */}
+            {me.cards && (
+              <NavItem icon="cards" label="名刺" description="撮るだけで連絡先になる名刺管理"
+                active={view.kind === 'cards'} onClick={() => setView({ kind: 'cards', contactId: null })} />
+            )}
             <NavItem icon="help" label="ヘルプ" description="使い方の記事と検索"
               active={view.kind === 'help'} onClick={() => setView({ kind: 'help', articleId: null })} />
           </>
@@ -484,6 +508,12 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
             <>
               <h1>お知らせ</h1>
               <Notifications items={notifications} onRead={() => void refresh()} />
+            </>
+          )}
+          {view.kind === 'cards' && (
+            <>
+              <h1>名刺 <HelpTip article="start-cards">撮るかファイルを選ぶと、AI が読み取って登録します。秘書に「〇〇さんの電話番号は？」と聞けます。</HelpTip></h1>
+              <Cards contactId={view.contactId} onOpen={(contactId) => setView({ kind: 'cards', contactId })} onAsk={(m) => void askSecretary(m)} />
             </>
           )}
           {view.kind === 'schedules' && (
@@ -639,6 +669,7 @@ const VIEW_LABELS: Record<string, string> = {
   history: '実行履歴',
   notifications: 'お知らせ',
   schedules: '定時実行',
+  cards: '名刺',
   settings: '個人設定',
 };
 

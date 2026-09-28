@@ -4,6 +4,7 @@
  * @see 仕様書 第12.9節 拡張機能の読み込みと導入
  */
 
+import { DEFAULT_TENANT_SETTINGS } from '@m2office/shared';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { cpSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -126,6 +127,8 @@ test('会社が導入した拡張機能の業務エージェントだけが、�
   const repo = {
     listInstalledExtensions: async () => installed,
     listDisabledConnectorTools: async () => disabledTools,
+    // 名刺管理（内蔵の拡張）の入り切りを読む（第12.13節）
+    getTenantSettings: async () => DEFAULT_TENANT_SETTINGS,
     listPrivateExtensions: async () => [],
     ...connectionStore(),
   } as unknown as Repository;
@@ -179,6 +182,8 @@ test('管理者が止めたコネクタのツールは、その会社のツー�
   const repo = {
     listInstalledExtensions: async () => installed,
     listDisabledConnectorTools: async () => disabledTools,
+    // 名刺管理（内蔵の拡張）の入り切りを読む（第12.13節）
+    getTenantSettings: async () => DEFAULT_TENANT_SETTINGS,
     listPrivateExtensions: async () => [],
     ...connectionStore(),
   } as unknown as Repository;

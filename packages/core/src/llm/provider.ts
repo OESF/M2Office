@@ -71,6 +71,21 @@ export interface LlmImageRequest {
   mimeType: string;
 }
 
+/**
+ * 画像から、決まった形（JSON）で項目を取り出す依頼（名刺の読み取り。仕様書 第27.5節）。
+ *
+ * @remarks OCR（{@link LlmImageRequest}）と違い、文字をまとめて書き出させずに項目ごとに分けて返させる
+ */
+export interface LlmExtractRequest {
+  bytes: Uint8Array;
+  /** `image/png`・`image/jpeg`・`image/heic`・`image/webp`・`application/pdf` など。 */
+  mimeType: string;
+  /** 何をどの形で取り出すかの指示。返す JSON の形もここに書く。 */
+  prompt: string;
+  /** 出力の上限。 */
+  maxOutputTokens?: number;
+}
+
 export interface LlmProvider {
   readonly name: string;
   complete(req: LlmRequest): Promise<LlmResponse>;
@@ -82,4 +97,10 @@ export interface LlmProvider {
    * 呼び出し側は「読み取れなかった」として扱う。
    */
   readImage?(req: LlmImageRequest): Promise<LlmResponse>;
+  /**
+   * 画像から、指示の形の JSON で項目を取り出す（名刺の読み取り。仕様書 第27.5節）。
+   *
+   * @remarks 持たない提供者では未定義にし、呼び出し側は「読み取る準備ができていない」として扱う。返す文は JSON（解釈は呼び出し側）
+   */
+  extractFromImage?(req: LlmExtractRequest): Promise<LlmResponse>;
 }

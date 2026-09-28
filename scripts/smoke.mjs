@@ -703,7 +703,8 @@ console.log('\n■ 18. ダッシュボード');
     : ng('業務の状態が足りない', JSON.stringify(states.map((a) => a.agentId)));
   // 絵の番号を業務ごとに返し、重ならない（第6.7.4.3節）
   const faces = states.map((a) => a.face);
-  faces.every((n) => Number.isInteger(n) && n >= 1 && n <= 25) && new Set(faces).size === faces.length
+  // 絵は 50 枚（AGENT_FACE_COUNT。第 0.140.1 版）
+  faces.every((n) => Number.isInteger(n) && n >= 1 && n <= 50) && new Set(faces).size === faces.length
     ? ok(`業務ごとに絵の番号を返す（${faces.join('・')}）`)
     : ng('絵の番号が不正か重なっている', JSON.stringify(faces));
   // 忙しい順に並ぶ
@@ -2983,6 +2984,144 @@ console.log('\n■ 56. 認証の要る会社の接続（oauth・api_key。第12.
     await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
     for (const id of ['oauthcrm', 'keycrm']) await call('a', `/v1/admin/connections/mcp/${id}`, { method: 'DELETE' });
     await new Promise((r) => server.close(r));
+  }
+}
+
+console.log('\n■ 57. 名刺管理（内蔵の拡張。第27章、ADR-0042）');
+{
+  // 自動テストの推論（スタブ）は、画像に埋め込んだ見本の読み取り結果を返す（llm/stub.ts の extractFromImage）
+  const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da6364f8ff0f0000050101005b1c4a1a0000000049454e44ae426082', 'hex');
+  const tag = Date.now().toString(36);
+  const cardImage = (fields) => Buffer.concat([PNG, Buffer.from(`\nM2O-CARD:${JSON.stringify({ isCard: true, cardCount: 1, textTop: 'up', ...fields })}\n`, 'utf8')]);
+  const upload = async (tenant, who, files, extra = {}) => {
+    const form = new FormData();
+    for (const [name, bytes] of files) form.append('file', new Blob([bytes]), name);
+    for (const [k, v] of Object.entries(extra)) form.append(k, v);
+    const res = await fetch(`${API}/v1/cards`, {
+      method: 'POST', body: form,
+      headers: { 'x-tenant': tenant, 'x-user': `${who}@${tenant === 'a' ? 'alpha' : 'beta'}.example.jp` },
+    });
+    return { status: res.status, body: await res.json() };
+  };
+  const list = async (who, q = '', tenant = 'a') => (await call(tenant, `/v1/cards?q=${encodeURIComponent(q)}`, {}, who)).body;
+  const settle = async (who) => {
+    for (let i = 0; i < 40; i++) {
+      const l = await list(who);
+      if (!l.progress && !(l.unresolved ?? []).some((u) => u.status !== 'failed')) return l;
+      await sleep(500);
+    }
+    return list(who);
+  };
+  const created = [];
+  try {
+    const email = `tanaka-${tag}@sample.example`;
+    const first = await upload('a', 'member', [
+      ['c1.png', cardImage({ name: `田中 ${tag}`, company: '株式会社サンプル', title: '課長', emails: [email], phones: [{ kind: 'main', number: '03-1111-2222' }] })],
+      ['not-card.png', PNG],
+    ]);
+    first.status === 202 && first.body.queued === 2 ? ok('名刺のファイルを受け付け、読み取りを待たずに返す（202）') : ng('受け付けない', JSON.stringify(first.body));
+    const after = await settle('member');
+    const tanaka = (after.items ?? []).find((c) => c.emails.includes(email));
+    if (tanaka) created.push(tanaka.id);
+    tanaka && tanaka.scope === 'company' ? ok('読み取ったら確認なしに登録し、既定は会社で共有') : ng('登録されない', JSON.stringify(after));
+    (after.unresolved ?? []).some((u) => u.status === 'failed')
+      ? ok('名刺と見分けられないものは登録せず、「読み取れませんでした」と画像と一緒に残す') : ng('読み取れなかったものが残らない');
+
+    // 別の人が同じ人の新しい名刺を取り込むと、1 つの連絡先にまとまり、中身は新しい名刺になる（第27.6節）
+    await upload('a', 'admin', [['c2.png', cardImage({ name: `田中 ${tag}`, company: '株式会社サンプル', title: '部長', emails: [email], phones: [{ kind: 'mobile', number: '090-3333-4444' }] })]]);
+    await settle('admin');
+    const { body: merged } = await call('a', `/v1/cards/${tanaka?.id}`, {}, 'member');
+    merged.cards?.length === 2 && merged.contact?.title === '部長' && merged.history?.some((h) => h.title === '課長')
+      && merged.contact?.phones.length === 2
+      ? ok('同じメールアドレスの名刺は 1 つにまとまり、新しい名刺の役職になり、以前の役職は履歴に残る') : ng('まとまらない', JSON.stringify(merged).slice(0, 300));
+
+    // 自分だけの名刺は、管理者も・ほかの会社も見られない（第27.7節）
+    const mine = await upload('a', 'member', [['c3.png', cardImage({ name: `佐藤 ${tag}`, company: '個人の知り合い', emails: [`sato-${tag}@private.example`] })]], { scope: 'personal' });
+    await settle('member');
+    const personal = (await list('member', `佐藤 ${tag}`)).items?.[0];
+    if (personal) created.push(personal.id);
+    const byAdmin = await list('admin', `佐藤 ${tag}`);
+    const detailByAdmin = await call('a', `/v1/cards/${personal?.id}`, {}, 'admin');
+    const imgByAdmin = await fetch(`${API}/v1/cards/card/${personal?.cardId}/front`, { headers: { 'x-tenant': 'a', 'x-user': 'admin@alpha.example.jp' } });
+    const imgByMe = await fetch(`${API}/v1/cards/card/${personal?.cardId}/front`, { headers: { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' } });
+    mine.status === 202 && personal?.scope === 'personal' && (byAdmin.items ?? []).length === 0 && detailByAdmin.status === 404
+      && imgByAdmin.status === 404 && imgByMe.status === 200
+      ? ok('自分だけの名刺は、本人だけが一覧・詳細・画像を見られる（管理者も見られない）') : ng('自分だけの名刺が見える', `${byAdmin.items?.length} ${detailByAdmin.status} ${imgByAdmin.status} ${imgByMe.status}`);
+    const other = await list('admin', tag, 'b');
+    const otherDetail = await call('b', `/v1/cards/${tanaka?.id}`);
+    (other.items ?? []).length === 0 && otherDetail.status === 404 ? ok('ほかの会社の名刺は、一覧にも詳細にも出ない') : ng('ほかの会社の名刺が見える');
+
+    // その場の修正・範囲・vCard・分ける（第27.8節）
+    const fix = await call('a', `/v1/cards/${tanaka?.id}`, { method: 'PATCH', body: JSON.stringify({ department: '営業部', note: '展示会で会った' }) }, 'admin');
+    const { body: fixed } = await call('a', `/v1/cards/${tanaka?.id}`, {}, 'member');
+    fix.status === 200 && fixed.contact?.department === '営業部' && fixed.updatedByName ? ok('会社で共有の名刺は、見られる人が直せ、直した人が残る') : ng('直せない', JSON.stringify(fix.body));
+    // 受け取った日（第27.3節）。初めは取り込んだ日（日本時間）で、受け取った本人だけが直せる
+    const todayJst = new Date(Date.now() + 9 * 3_600_000).toISOString().slice(0, 10);
+    const myCard = merged.cards?.find((c) => c.mine);
+    const theirCard = merged.cards?.find((c) => !c.mine);
+    const setMine = await call('a', `/v1/cards/card/${myCard?.id}/received`, { method: 'PUT', body: JSON.stringify({ receivedOn: '2026-09-01' }) }, 'member');
+    const setTheirs = await call('a', `/v1/cards/card/${theirCard?.id}/received`, { method: 'PUT', body: JSON.stringify({ receivedOn: '2026-09-01' }) }, 'member');
+    const future = await call('a', `/v1/cards/card/${myCard?.id}/received`, { method: 'PUT', body: JSON.stringify({ receivedOn: '2999-01-01' }) }, 'member');
+    const { body: dated } = await call('a', `/v1/cards/${tanaka?.id}`, {}, 'member');
+    myCard?.receivedOn === todayJst && setMine.status === 200 && setTheirs.status === 400 && future.status === 400
+      && dated.cards?.some((c) => c.mine && c.receivedOn === '2026-09-01')
+      ? ok('受け取った日は初め日本時間の取り込んだ日で、受け取った本人だけが直せる（今日より後は断る）')
+      : ng('受け取った日が違う', JSON.stringify({ first: myCard?.receivedOn, todayJst, setMine: setMine.status, setTheirs: setTheirs.status, future: future.status }));
+    const toPersonal = await call('a', `/v1/cards/${tanaka?.id}/scope`, { method: 'PUT', body: JSON.stringify({ scope: 'personal' }) }, 'admin');
+    toPersonal.status === 403 ? ok('取り込んだ本人でない人は、自分だけにできない') : ng(`自分だけにできてしまう（${toPersonal.status}）`);
+    const vcard = await fetch(`${API}/v1/cards/${tanaka?.id}/vcard`, { headers: { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' } });
+    const vtext = await vcard.text();
+    vcard.status === 200 && vtext.includes(`FN:田中 ${tag}`) && vtext.includes('TITLE:部長') ? ok('1 件を vCard で書き出せる') : ng('vCard が違う', vtext.slice(0, 120));
+    // 管理者が取り込んだほうの名刺を分ける（分けた連絡先は、その名刺を取り込んだ人のものになる）
+    const split = await call('a', `/v1/cards/${tanaka?.id}/split`, { method: 'POST', body: JSON.stringify({ cardId: merged.cards?.find((c) => !c.mine)?.id }) }, 'member');
+    if (split.body?.contactId) created.push(split.body.contactId);
+    const { body: afterSplit } = await call('a', `/v1/cards/${tanaka?.id}`, {}, 'member');
+    split.status === 200 && afterSplit.cards?.length === 1 ? ok('まとめた名刺を別の連絡先に分けられる') : ng('分けられない', JSON.stringify(split.body));
+
+    // 入り切りと利用範囲（第12.13節・第16.7.3節）
+    await call('a', '/v1/admin/extensions/business-cards/enabled', { method: 'PUT', body: JSON.stringify({ enabled: false }) });
+    const offList = await call('a', '/v1/cards', {}, 'member');
+    const { body: offMe } = await call('a', '/v1/me', {}, 'member');
+    await call('a', '/v1/admin/extensions/business-cards/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const onList = await list('member', tag);
+    offList.status === 403 && offMe.cards === false && (onList.items ?? []).length > 0
+      ? ok('名刺管理を切ると画面も API も使えず、入れ直すとデータが戻る') : ng('入り切りが効かない', `${offList.status} ${offMe.cards}`);
+    const { body: users } = await call('a', '/v1/admin/users');
+    const adminId = users.items?.find((u) => u.email === 'admin@alpha.example.jp')?.id;
+    await call('a', '/v1/admin/access/business-cards', { method: 'PUT', body: JSON.stringify({ scope: { groups: [], users: [adminId] } }) });
+    const outOfScope = await call('a', '/v1/cards', {}, 'member');
+    await call('a', '/v1/admin/access/business-cards', { method: 'PUT', body: JSON.stringify({ scope: 'all' }) });
+    outOfScope.status === 403 ? ok('利用範囲の外の人は名刺管理を使えない') : ng(`利用範囲の外でも使える（${outOfScope.status}）`);
+
+    // ごみ箱と消去（第27.7節）
+    const trash = await call('a', `/v1/cards/${personal?.id}`, { method: 'DELETE' }, 'member');
+    const inTrash = (await call('a', '/v1/cards?trash=1', {}, 'member')).body.items?.some((c) => c.id === personal?.id);
+    const purge = await call('a', `/v1/cards/${personal?.id}/purge`, { method: 'DELETE' }, 'member');
+    const gone = await call('a', `/v1/cards/${personal?.id}`, {}, 'member');
+    const imgGone = await fetch(`${API}/v1/cards/card/${personal?.cardId}/front`, { headers: { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' } });
+    trash.status === 200 && inTrash && purge.status === 200 && gone.status === 404 && imgGone.status === 404
+      ? ok('消すとごみ箱へ移り、「いま消す」で画像ごと本当に消える') : ng('消去が違う', `${trash.status} ${inTrash} ${purge.status} ${gone.status} ${imgGone.status}`);
+    // 分けた連絡先は、その名刺を取り込んだ管理者のもの。一般の利用者は直せるが消せない
+    const trashByOther = await call('a', `/v1/cards/${split.body?.contactId}`, { method: 'DELETE' }, 'member');
+    trashByOther.status === 403 ? ok('取り込んだ本人でも管理者でもない人は消せない') : ng(`消せてしまう（${trashByOther.status}）`);
+
+    const { body: audits } = await call('a', '/v1/admin/audit-events?category=cards');
+    const acts = (audits.items ?? []).map((e) => e.action);
+    const names = (audits.items ?? []).map((e) => e.target);
+    ['card.import', 'contact.merge', 'contact.split', 'contact.trash', 'contact.purge'].every((a) => acts.includes(a)) && !names.some((n) => n.includes(tag))
+      ? ok('取り込み・まとめる・分ける・消すを監査ログに残し、相手の名前は出さない') : ng('監査ログが違う', acts.slice(0, 12).join(','));
+  } catch (err) {
+    ng('名刺管理の確認が途中で止まった', String(err));
+  } finally {
+    await call('a', '/v1/admin/extensions/business-cards/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    await call('a', '/v1/admin/access/business-cards', { method: 'PUT', body: JSON.stringify({ scope: 'all' }) });
+    for (const id of created) {
+      for (const who of ['member', 'admin']) {
+        await call('a', `/v1/cards/${id}`, { method: 'DELETE' }, who);
+        await call('a', `/v1/cards/${id}/purge`, { method: 'DELETE' }, who);
+      }
+    }
+    for (const u of (await list('member')).unresolved ?? []) await call('a', `/v1/cards/card/${u.id}`, { method: 'DELETE' }, 'member');
   }
 }
 

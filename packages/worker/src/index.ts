@@ -11,7 +11,7 @@
 
 import {
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
-  RunEngine, Scheduler, scheduleChecks, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention,
+  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention,
   NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv,
   defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials,
@@ -71,8 +71,14 @@ const ai = new TenantAiResolver({
 });
 // Google から取得したデータの保持（仕様書 第14.3.2節）。Google のツールは、内蔵のツールのうち権限を宣言しているもの
 const retention = new GoogleDataRetention({ repo, isGoogleTool: (name) => !!registry.get(name)?.google, logger: log });
+// 名刺管理（内蔵の拡張。仕様書 第27章）。名刺の道具（第27.9節）と、後ろでの読み取り（第27.4節）が同じ置き場を使う
+const contactStore = new PostgresContactStore(
+  process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office',
+);
+const cards = new CardService({ store: contactStore, repo, files, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log });
 const engine = new RunEngine({
   repo, llm, registry, connector, files, resolveDefinition, isAvailable, logger: log, research,
+  cards: { store: contactStore, service: cards, access: cardsAccess(repo) },
   llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId),
   registryFor: async (tenantId) => (await hub.forTenant(tenantId)).registry,
   // 止めた実行に後から書き込まれた中身も消す（仕様書 第6.5.2.1節）
@@ -143,6 +149,10 @@ const conductor = new SecretaryConductor({
 });
 /** 処理済みのイベントを残す日数。 */
 const AGENT_EVENT_KEEP_DAYS = 7;
+
+/** 期限を過ぎた名刺（ごみ箱に 30 日・読み取れなかったもの 4 週）を消す見回りの間隔。 */
+const CARD_PURGE_INTERVAL_MS = Number(process.env['CARD_PURGE_INTERVAL_MS'] ?? 3_600_000);
+let lastCardPurge = 0;
 
 const POLL_INTERVAL_MS = 1000;
 /** 定時実行の見回り間隔。分単位の指定に対して十分に短くする。 */
@@ -258,6 +268,22 @@ while (running) {
     // 個別の実行の失敗でワーカー全体を落とさない
     log.error('実行中に例外が発生しました', { err });
   }
+  // 名刺を 1 枚読み取る（第27.4節）。業務の実行と同じ間隔で見る
+  try {
+    if (await cards.processNext()) handled = true;
+  } catch (err) {
+    log.error('名刺の読み取りで例外が発生しました', { err });
+  }
+  if (Date.now() - lastCardPurge >= CARD_PURGE_INTERVAL_MS) {
+    lastCardPurge = Date.now();
+    try {
+      const n = await cards.purgeExpired();
+      if (n > 0) log.info('期限を過ぎた名刺を消しました', { cards: n });
+    } catch (err) {
+      log.error('名刺の消去の見回りで例外が発生しました', { err });
+    }
+  }
+
   // 業務と秘書のイベントを 1 件処理する（第10.13節）。業務の実行と同じ間隔で見る
   try {
     const outcome = await conductor.tick(new Date());
@@ -276,6 +302,7 @@ while (running) {
 
 log.info('停止しました');
 await repo.close();
+await contactStore.close();
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));

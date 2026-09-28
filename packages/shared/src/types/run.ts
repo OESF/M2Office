@@ -107,12 +107,13 @@ export interface StoredFile {
   tenantId: string;
   ownerUserId: string;
   name: string;
-  kind: 'pdf' | 'xlsx' | 'csv' | 'docx' | 'png' | 'jpeg';
+  /** `heic`・`webp` は名刺の画像に限る（仕様書 第27.4節）。 */
+  kind: 'pdf' | 'xlsx' | 'csv' | 'docx' | 'png' | 'jpeg' | 'heic' | 'webp';
   mime: string;
   size: number;
   sha256: string;
-  /** `upload` は利用者が上げたもの、`generated` は業務が作ったもの。 */
-  origin: 'upload' | 'generated';
+  /** `upload` は利用者が上げたもの、`generated` は業務が作ったもの、`card` は名刺の画像（仕様書 第27.11節）。 */
+  origin: 'upload' | 'generated' | 'card';
   runId: string | null;
   createdAt: string;
 }

@@ -14,7 +14,7 @@ import {
   alwaysRequiresApproval, canDecide, canUseAgent, writeInternalNeedsApproval,
   type AutomationPolicy, type TenantSettings, type WritingStyle,
   type AgentDefinition, type AgentStep, type ApprovalStep, type Approval, type Run,
-  type RunStep, type Step,
+  type RunStep, type Step, type ContactScope,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { LlmMessage, LlmProvider, LlmResponse } from '../llm/provider.js';
@@ -30,6 +30,8 @@ import { describeCall } from './describe-call.js';
 import { composeApprovalPresent, describeContext } from './approval-present.js';
 import { validateDefinition } from './validate.js';
 import { expandQuery } from '../knowledge/expand.js';
+import type { CardService } from '../cards/service.js';
+import type { ContactStore } from '../cards/store.js';
 import { substituteArguments } from '../extensions/skill.js';
 import { AI_NOT_CONFIGURED_MESSAGE, aiAvailable } from '../llm/unconfigured.js';
 import { parseToolCalls } from './tool-protocol.js';
@@ -82,6 +84,16 @@ export interface RunEngineDeps {
    * @remarks 止めた後に書き込んだステップの中身を消すために使う。止めた側はその時点の中身しか消せないため
    */
   onCancelled?(run: Run): Promise<void>;
+  /**
+   * 名刺管理（内蔵の拡張。仕様書 第27章）。道具に渡す。無ければ名刺の道具は「使えない」と返す。
+   *
+   * @remarks `access` は、会社が名刺管理を使っていて依頼者が利用範囲の中なら、取り込んだ名刺の既定の範囲を返す
+   */
+  cards?: {
+    service: CardService;
+    store: ContactStore;
+    access(tenantId: string, userId: string): Promise<{ defaultScope: ContactScope } | null>;
+  };
 }
 
 /**
@@ -750,6 +762,13 @@ export class RunEngine {
       ...(llm ? { expandQuery: (q: string) => expandQuery(llm, q) } : {}),
       // スキルの補助のファイル。skill.read で開く（仕様書 第12.12.2節）
       ...(def.skill?.files.length ? { skillFiles: def.skill.files } : {}),
+      // 名刺管理（第27.9節）。使えるかどうかは道具が呼ぶたびに確かめる
+      ...(this.deps.cards && llm ? {
+        cards: {
+          service: this.deps.cards.service, store: this.deps.cards.store, llm,
+          access: () => this.deps.cards!.access(run.tenantId, requestedBy),
+        },
+      } : {}),
     };
   }
 

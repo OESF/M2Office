@@ -134,3 +134,4 @@ export { DIRECT_QUERIES, type EvidenceItem } from './secretary/catalog.js';
 export {
   MEMORY_MAX_CHARS, memoryTextOf, refuseToRemember, refusalMessage,
 } from './secretary/memory.js';
+export * from './cards/index.js';

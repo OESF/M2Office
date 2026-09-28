@@ -5,6 +5,7 @@
  * 会社に接続が無い道具を使う業務は使えないこと、SKILL.md の組み立てで同梱していない接続の道具を扱えることを確かめる。
  */
 
+import { DEFAULT_TENANT_SETTINGS } from '@m2office/shared';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -53,6 +54,8 @@ function world() {
   const repo = {
     listInstalledExtensions: async (t: string) => installed.filter((i) => i.tenantId === t),
     listDisabledConnectorTools: async () => [],
+    // 名刺管理（内蔵の拡張）の入り切りを読む（第12.13節）
+    getTenantSettings: async () => DEFAULT_TENANT_SETTINGS,
     listPrivateExtensions: async () => [],
     listConnections: async (t: string) => connections.filter((c) => c.tenantId === t),
     saveConnection: async (c: TenantConnection) => { connections.push(c); },

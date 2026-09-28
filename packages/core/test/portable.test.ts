@@ -8,6 +8,7 @@
  * @see 仕様書 第12.11節 コネクタ（L2）の実装
  */
 
+import { DEFAULT_TENANT_SETTINGS } from '@m2office/shared';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
@@ -161,6 +162,8 @@ function fakeRepo() {
   const repo = {
     listInstalledExtensions: async (t: string) => installed.filter((i) => i.tenantId === t),
     listDisabledConnectorTools: async () => [],
+    // 名刺管理（内蔵の拡張）の入り切りを読む（第12.13節）
+    getTenantSettings: async () => DEFAULT_TENANT_SETTINGS,
     listPrivateExtensions: async (t: string) => privates.filter((i) => i.tenantId === t),
     // 会社の接続（仕様書 第12.11.0節）
     listConnections: async (t: string) => connections.filter((c) => c.tenantId === t),
@@ -222,7 +225,8 @@ test('ファイルから取り込んだ拡張機能は、取り込んだ会社�
   const a = await hub.forTenant('a');
   assert.equal(a.entries[0]?.origin, 'private');
   assert.equal(a.entries[0]?.active, false, '取り込んだだけでは使えない。導入（同意）が要る');
-  assert.equal((await hub.forTenant('b')).entries.length, 0);
+  // 内蔵の拡張（名刺管理。第12.13節）はどの会社にもある。取り込んだものだけを数える
+  assert.equal((await hub.forTenant('b')).entries.filter((e) => e.origin !== 'builtin').length, 0);
 });
 
 test('公式の拡張機能と同じ ID のファイルは取り込めない', async () => {

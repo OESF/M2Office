@@ -91,6 +91,10 @@ export async function fileToText(
       const text = await ocr({ bytes: f.bytes, mimeType: f.meta.mime });
       return cut(name, { text, note: '画像を読み取った結果です。原本で確かめてください' });
     }
+    // 名刺の画像にだけある形式（仕様書 第27.4節）。名刺の中身は名刺の道具で読む
+    case 'heic':
+    case 'webp':
+      return { ok: false, name, text: '', note: 'この形式の画像は、名刺の取り込みでだけ扱います' };
   }
 }
 

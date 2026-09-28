@@ -14,10 +14,11 @@ import {
   createLoggerFromEnv, HelpCatalog, parseArticle, ExtensionHub, HttpMcpClient, loadExtensions,
   TenantAiResolver, platformAi, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID,
   defaultGeminiModels, ConnectionCredentials, type ConnectionAuthProvider,
+  CardService, PostgresContactStore, cardsAccess, type ContactStore,
   type SecretBox, type GeminiModels,
   type FileStore, type TenantExtensions, type HelpArticle, type LlmProvider, type Logger, type Repository, type WorkspaceConnector,
 } from '@m2office/core';
-import { canRunAgent, type AgentDefinition } from '@m2office/shared';
+import { canRunAgent, type AgentDefinition, type ContactScope } from '@m2office/shared';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -76,6 +77,12 @@ export interface AppDeps {
   loginStates: OAuthStateStore;
   /** ログインの引換券（仕様書 第16.1.2節）。運営のホストから会社のホストへ渡す。 */
   handoffs: HandoffStore;
+  /**
+   * 名刺管理（内蔵の拡張。仕様書 第27章）。
+   *
+   * @remarks `access` は、会社が名刺管理を使っていて利用者が利用範囲の中なら、取り込んだ名刺の既定の範囲を返す（使えなければ `null`）
+   */
+  cards: { service: CardService; store: ContactStore; access(tenantId: string, userId: string): Promise<{ defaultScope: ContactScope } | null> };
 }
 
 /**
@@ -137,8 +144,17 @@ export function buildDeps(): AppDeps {
     defaults: defaultGeminiModels(),
     baseUrl: platform.baseUrl,
   });
+  // 名刺管理（内蔵の拡張。仕様書 第27章）。自分だけの名刺は持ち主でも絞るため、置き場は利用者を設定して問い合わせる
+  const contactStore = new PostgresContactStore(
+    process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office',
+  );
+  const cards = {
+    store: contactStore,
+    service: new CardService({ store: contactStore, repo, files, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log }),
+    access: cardsAccess(repo),
+  };
   const engine = new RunEngine({
-    repo, llm, registry, connector, files, logger: log, research,
+    repo, llm, registry, connector, files, logger: log, research, cards,
     llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId),
     resolveDefinition: async (id, version, tenantId) => (await tenantView(tenantId)).resolve(id, version),
     registryFor: async (tenantId) => (await tenantView(tenantId)).registry,
@@ -209,6 +225,7 @@ export function buildDeps(): AppDeps {
     },
     loginStates: new OAuthStateStore(),
     handoffs: new HandoffStore(),
+    cards,
   };
 }
 

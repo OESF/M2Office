@@ -181,7 +181,7 @@ function Title({ item: x }: { item: ExtensionView }) {
       <div>
         <div>
           <strong>{x.name}</strong> <span className="muted small">{x.version}</span>{' '}
-          <span className={x.origin === 'official' ? 'badge' : 'badge warn'}>{x.originText}</span>
+          <span className={x.origin === 'private' ? 'badge warn' : 'badge'}>{x.originText}</span>
         </div>
         <div className="muted small">提供: {x.publisher.name}{parts.length > 0 && `・${parts.join('・')}`}</div>
       </div>
@@ -229,9 +229,18 @@ function InstalledCard({ item: x, busy, focused = false, options, onChanged, onT
       {options && (
         <div className="small">利用できる人: <ScopeField target={x.id} options={options} onSaved={onChanged} /></div>
       )}
+      {x.cards && (
+        // 名刺管理の会社の設定（仕様書 第27.7節）。すぐに反映する
+        <label className="small check">
+          <input type="checkbox" checked={x.cards.defaultScope === 'personal'} disabled={busy}
+            onChange={(e) => void api.admin.setCardsDefaultScope(e.target.checked ? 'personal' : 'company').then(onChanged)} />
+          取り込んだ名刺を、既定で自分だけにする
+        </label>
+      )}
       <div className="row small">
         <button className="link" onClick={() => setOpen(!open)}>{open ? '詳細を閉じる' : '詳細'}</button>
-        <button className="link danger" disabled={busy} onClick={onDelete}>削除</button>
+        {/* 内蔵の拡張は削除しない。スイッチで切る（データは消えない。第12.13節） */}
+        {x.origin !== 'builtin' && <button className="link danger" disabled={busy} onClick={onDelete}>削除</button>}
       </div>
       {open && <Details item={x} onChanged={onChanged} />}
     </div>

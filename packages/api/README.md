@@ -139,6 +139,18 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/notifications` | 本人宛の通知 |
 | `POST /v1/notifications/:id/read` | 既読にする |
 | `GET /v1/schedules` | 本人の定時実行 |
+| `GET /v1/cards` | 名刺の一覧と検索（`q`・`scope`・`trash=1`）。本人の読み取り中・読み取れなかった名刺（`unresolved`）と進み具合（`progress`）、会社の既定の範囲も返す。名刺管理を切っている会社と利用範囲の外の人には、`/v1/cards` のどの口も 403（仕様書 第27.8節） |
+| `POST /v1/cards` | 名刺のファイルを受け付ける（multipart。`file` を 50 まで・`backOf`（裏を組にする表の番号の JSON）・`scope`）。読み取りを待たずに 202。受け付けなかったものは `rejected`（第27.4節） |
+| `GET /v1/cards/:id` | 名刺の詳細（連絡先・名刺ごとの受け取った人と日・向き・名刺の履歴・範囲を変えられるか） |
+| `PATCH /v1/cards/:id` | 項目とメモをその場で直す（見られる人の全員。直した値は名刺の「人が直した項目」にも残す） |
+| `PUT /v1/cards/:id/scope` | 範囲を変える（`company`・`personal`。自分だけにできるのは本人で、ほかの人の名刺がまとまっていないとき） |
+| `POST /v1/cards/:id/split` | まとめた名刺を別の連絡先に分ける（`cardId`） |
+| `DELETE /v1/cards/:id` ／ `POST /v1/cards/:id/restore` ／ `DELETE /v1/cards/:id/purge` | ごみ箱へ移す／戻す／ごみ箱からいま本当に消す（画像ごと。取り込んだ本人と、会社で共有のものは管理者） |
+| `GET /v1/cards/:id/vcard` | 1 件を vCard（3.0）で書き出す |
+| `GET /v1/cards/:id/meetings` | 本人が名刺を受け取った日の本人の予定（開くたびにカレンダーから引く。保存しない。第27.8節） |
+| `GET /v1/cards/card/:cardId/front` ／ `back` | 名刺の画像（見られる名刺のものだけ。ページだけの PDF は囲いの中で開かせる） |
+| `PUT /v1/cards/card/:cardId/received` | 受け取った日を直す（`receivedOn`。受け取った本人だけ。今日より後は 400。初めの値は取り込んだ人のタイムゾーンでの取り込んだ日。第27.3節） |
+| `DELETE /v1/cards/card/:cardId` | 読み取れなかった名刺を、待たずに消す（取り込んだ本人だけ） |
 | `POST /v1/schedules` | 定時実行を作る（毎日／毎平日／毎週、業務の入力）。ファイルを受け取る業務と秘書の調べものは 400、必須の入力が空なら 400（仕様書 第6.1.7節） |
 | `PATCH /v1/schedules/:id` | 停止・再開、繰り返し・時刻・入力の変更。再開すると次回を今から求め直す（止めていた間の回は起動しない） |
 | `POST /v1/schedules/:id/trigger` | 次の回を今にする（動作確認用） |
@@ -174,7 +186,8 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/admin/extensions` | 管理者: 拡張機能の一覧（公式・自社専用）、構成要素、必要な権限の説明、導入と有効・無効の状態 |
 | `POST /v1/admin/extensions/import` | 管理者: `.m2ext` を取り込む（本文はファイルのバイト列。5 MB まで）。検証を通らなければ `problems` を返す |
 | `POST /v1/admin/extensions/:id/install` | 管理者: 同意して導入（本文に `consent: true`）。導入すると有効になる。同梱の接続は会社の接続として登録する（同じ ID が別の接続先で登録済みなら `notices` で知らせる） |
-| `PUT /v1/admin/extensions/:id/enabled` | 管理者: 有効・無効の切り替え（本文に `enabled`）。権限が増えた版は 409 |
+| `PUT /v1/admin/extensions/:id/enabled` | 管理者: 有効・無効の切り替え（本文に `enabled`）。権限が増えた版は 409。内蔵の拡張（名刺管理）は会社の設定で入り切りし、データは消さない（導入と削除は 409。仕様書 第12.13節） |
+| `PUT /v1/admin/extensions/business-cards/settings` | 管理者: 名刺管理の、取り込んだ名刺の既定の範囲（`defaultScope`。第27.7節） |
 | `GET /v1/admin/connections/mcp` | 管理者: 会社の接続（MCP）の一覧。道具ごとの危険度・有効かどうか・使っている業務、認証の状態（`authState`。秘密の値は返さない）、よく使うサービスの型（`presets`）（仕様書 第12.11節、ADR-0037・ADR-0044） |
 | `POST /v1/admin/connections/mcp` | 管理者: URL を受け取り、道具の一覧を取って会社の接続として登録する（読むだけの印が付いた道具は「読むだけ」、ほかは「社外へ送る」扱い）。`preset`（`slack`）で型から、`auth`（`oauth`・`api_key`）で認証の要る接続を登録する。認証の要る接続の道具は、認証情報のあとで取る |
 | `PUT /v1/admin/connections/mcp/:id/credentials` | 管理者: 認証情報を登録する。`oauth` はクライアント ID とシークレット（ID を替えると全員の認可を消す）、`api_key` は会社の鍵（その鍵で道具を問い合わせる）。値は暗号化し、返さない（仕様書 第12.11.6節） |

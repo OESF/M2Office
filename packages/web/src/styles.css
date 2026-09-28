@@ -1168,3 +1168,48 @@ code.uri { background: var(--subtle-bg); border: 1px solid var(--line); border-r
 /* 繰り返し・曜日・時刻を 1 行に。狭い欄でも中身の幅で並べ、入らなければ折り返す */
 .schedule-when { display: flex; flex-wrap: wrap; gap: 0 calc(14px * var(--space-scale)); }
 .schedule-when .field select, .schedule-when .field input { width: auto; }
+
+/* 名刺の画面（仕様書 第27.8節）。撮る・探す・電話をかけるを片手で行えるよう、ボタンは大きめに並べて折り返す */
+.cards button.link { background: none; border: none; padding: 0; cursor: pointer; }
+.cards-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: calc(8px * var(--space-scale)); margin-bottom: calc(10px * var(--space-scale)); }
+.cards-search { flex: 1 1 220px; min-width: 0; }
+.segmented { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.segmented button { background: none; border: none; padding: calc(5px * var(--space-scale)) calc(10px * var(--space-scale)); color: var(--muted); cursor: pointer; }
+.segmented button + button { border-left: 1px solid var(--line); }
+.segmented button.on { background: var(--accent-soft); color: var(--accent); }
+.card-progress { display: flex; align-items: center; gap: calc(10px * var(--space-scale)); margin-bottom: calc(10px * var(--space-scale)); font-size: calc(13px * var(--font-scale)); }
+.card-progress progress { flex: 1; max-width: 240px; }
+.card-row { display: flex; align-items: center; gap: calc(12px * var(--space-scale)); width: 100%; text-align: left; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: calc(8px * var(--space-scale)) calc(12px * var(--space-scale)); margin-bottom: calc(6px * var(--space-scale)); color: inherit; }
+button.card-row { cursor: pointer; }
+button.card-row:hover { border-color: var(--accent); }
+.card-row.unresolved { border-style: dashed; }
+.card-row.failed { border-color: var(--danger-line); }
+.card-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.card-row-main > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-row-tail { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; white-space: nowrap; }
+/* 名刺の画像。縦横が違う名刺も枠の中に収める（向きは画素を回して正す） */
+.card-img { width: 84px; height: 50px; flex: none; border-radius: 6px; overflow: hidden; background: var(--neutral-soft); display: flex; align-items: center; justify-content: center; }
+.card-img img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.card-img.large { width: 360px; max-width: 100%; height: 216px; }
+.card-img.placeholder.pdf { font-size: calc(11px * var(--font-scale)); color: var(--muted); }
+iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
+.card-detail-head { display: flex; flex-wrap: wrap; gap: calc(16px * var(--space-scale)); margin: calc(8px * var(--space-scale)) 0 calc(16px * var(--space-scale)); }
+.card-images { display: flex; flex-wrap: wrap; gap: calc(8px * var(--space-scale)); flex: 1 1 360px; min-width: 0; }
+.card-actions { display: flex; flex-wrap: wrap; align-content: flex-start; gap: calc(6px * var(--space-scale)); max-width: 420px; }
+.card-fields { display: grid; grid-template-columns: max-content 1fr; gap: calc(6px * var(--space-scale)) calc(14px * var(--space-scale)); margin: 0 0 calc(16px * var(--space-scale)); }
+.card-fields dt { color: var(--muted); font-size: calc(13px * var(--font-scale)); padding-top: calc(4px * var(--space-scale)); }
+.card-fields dd { margin: 0; min-width: 0; }
+.card-fields input, .card-fields textarea { width: 100%; }
+.editable { background: none; border: 1px solid transparent; border-radius: 6px; padding: calc(3px * var(--space-scale)) calc(6px * var(--space-scale)); margin-left: calc(-6px * var(--space-scale)); text-align: left; color: inherit; cursor: text; white-space: pre-wrap; max-width: 100%; }
+.editable:hover { border-color: var(--line); }
+.editable.empty { color: var(--muted); }
+.card-phones .row { gap: calc(6px * var(--space-scale)); margin-bottom: calc(4px * var(--space-scale)); }
+.card-phones select { width: auto; }
+.card-exchanges { list-style: none; padding: 0; margin: 0 0 calc(14px * var(--space-scale)); }
+.card-exchanges li { padding: calc(4px * var(--space-scale)) 0; border-bottom: 1px dashed var(--line); display: flex; flex-wrap: wrap; align-items: baseline; gap: calc(6px * var(--space-scale)); }
+.card-exchanges li .link { margin-left: auto; }
+@media (max-width: 640px) {
+  .card-fields { grid-template-columns: 1fr; }
+  .card-fields dt { padding-top: calc(8px * var(--space-scale)); }
+  .cards-toolbar .btn { flex: 1 1 auto; }
+}

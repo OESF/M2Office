@@ -11,7 +11,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
-import type { RiskLevel } from '@m2office/shared';
+import { CARDS_EXTENSION_ID, type RiskLevel } from '@m2office/shared';
 import {
   bundledConnection, consentSnapshot, encodeFiles, unpackExtension, EXTENSION_FILE_MAX_BYTES,
   type ExtensionEntry, type ExtensionPackage, type TenantExtensions,
@@ -83,7 +83,7 @@ export function extensionsRoute(deps: AppDeps) {
   function stateOf(e: ExtensionEntry) {
     return {
       origin: e.origin,
-      originText: e.origin === 'official' ? '公式' : '自社専用',
+      originText: e.origin === 'official' ? '公式' : e.origin === 'builtin' ? '公式・内蔵' : '自社専用',
       installed: e.installed ? { version: e.installed.version, installedAt: e.installed.installedAt } : null,
       enabled: e.installed?.enabled ?? false,
       needsReconsent: e.needsReconsent,
@@ -101,8 +101,26 @@ export function extensionsRoute(deps: AppDeps) {
         ...describe(e.pkg, view), ...stateOf(e),
         // 利用できる人（第16.7節）。設定が無ければ全員
         scope: settings.access.scopes[e.pkg.manifest.id] ?? 'all',
+        // 内蔵の拡張の会社の設定（名刺管理: 取り込んだ名刺の既定の範囲。第27.7節）
+        ...(e.pkg.manifest.id === CARDS_EXTENSION_ID ? { cards: { defaultScope: settings.cards.defaultScope } } : {}),
       })),
     });
+  });
+
+  /**
+   * 名刺管理の、取り込んだ名刺の既定の範囲を変える（第27.7節「会社は自分だけを既定にできる」）。すぐに反映する。
+   */
+  app.put(`/${CARDS_EXTENSION_ID}/settings`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const body = await c.req.json<{ defaultScope?: unknown }>().catch(() => ({ defaultScope: undefined }));
+    if (body.defaultScope !== 'company' && body.defaultScope !== 'personal') return c.json({ error: 'defaultScope は company か personal です' }, 400);
+    const current = (await deps.repo.getTenantSettings(tenant.id)).cards;
+    await deps.repo.saveTenantSettings(tenant.id, 'cards', { ...current, defaultScope: body.defaultScope }, user.id);
+    await deps.repo.appendAudit({
+      id: randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id, action: 'settings.update',
+      targetType: 'settings', targetId: 'cards', detail: { defaultScope: body.defaultScope }, occurredAt: new Date().toISOString(),
+    });
+    return c.json({ ok: true, defaultScope: body.defaultScope });
   });
 
   /**
@@ -152,6 +170,8 @@ export function extensionsRoute(deps: AppDeps) {
     const { tenant, user } = c.get('ctx');
     const entry = find(await deps.tenantView(tenant.id), c.req.param('id'));
     if (!entry) return c.json({ error: '拡張機能が見つかりません' }, 404);
+    // 内蔵の拡張は導入の手順を持たない。入り切りだけで使う（第12.13節）
+    if (entry.origin === 'builtin') return c.json({ error: '内蔵の拡張は導入済みです。スイッチで入り切りしてください' }, 409);
     const body = await c.req.json<{ consent?: boolean; scope?: unknown }>().catch(() => ({ consent: false, scope: undefined }));
     if (body.consent !== true) {
       return c.json({ error: '必要な権限を確認し、同意してから導入してください' }, 400);
@@ -195,6 +215,17 @@ export function extensionsRoute(deps: AppDeps) {
     if (typeof body.enabled !== 'boolean') return c.json({ error: 'enabled に true か false を指定してください' }, 400);
     const entry = find(await deps.tenantView(tenant.id), id);
     if (!entry?.installed) return c.json({ error: '導入されていません' }, 404);
+    // 内蔵の拡張は会社の設定で入り切りする。切ってもデータは消さない（第12.13節）
+    if (entry.origin === 'builtin') {
+      const current = (await deps.repo.getTenantSettings(tenant.id)).cards;
+      await deps.repo.saveTenantSettings(tenant.id, 'cards', { ...current, enabled: body.enabled }, user.id);
+      await deps.repo.appendAudit({
+        id: randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id,
+        action: body.enabled ? 'extension.enable' : 'extension.disable',
+        targetType: 'extension', targetId: id, detail: { builtin: true }, occurredAt: new Date().toISOString(),
+      });
+      return c.json({ ok: true, enabled: body.enabled });
+    }
     if (body.enabled && entry.needsReconsent) {
       return c.json({ error: '新しい版で必要な権限が増えています。内容を確認して、もう一度同意してください' }, 409);
     }
@@ -215,6 +246,7 @@ export function extensionsRoute(deps: AppDeps) {
   app.delete('/:id', async (c) => {
     const { tenant, user } = c.get('ctx');
     const id = c.req.param('id');
+    if (id === CARDS_EXTENSION_ID) return c.json({ error: '内蔵の拡張は削除できません。スイッチで切ってください（データは消えません）' }, 409);
     const uninstalled = await deps.repo.uninstallExtension(tenant.id, id);
     const removed = await deps.repo.deletePrivateExtension(tenant.id, id);
     if (!uninstalled && !removed) return c.json({ error: '導入されていません' }, 404);

@@ -5,7 +5,7 @@
  */
 
 import type { EvalCase } from '@m2office/shared';
-import type { LlmProvider, LlmRequest, LlmResponse } from './provider.js';
+import type { LlmExtractRequest, LlmProvider, LlmRequest, LlmResponse } from './provider.js';
 
 /**
  * 自動テストのためのスタブ実装。
@@ -24,6 +24,22 @@ export class StubLlmProvider implements LlmProvider {
    * @param evalsFor 業務エージェントの評価のケース（自動テストの見本の応答を含む）を引く（仕様書 第12.9.4節）
    */
   constructor(private readonly evalsFor?: (agentId: string) => EvalCase[] | undefined) {}
+
+  /**
+   * 画像からの取り出し（名刺の読み取り。仕様書 第27.5節）の自動テスト用の応答。
+   *
+   * @remarks
+   * 推論は行わない。画像のバイト列に `M2O-CARD:` に続く 1 行の JSON が埋め込まれていれば、それを読み取り結果として返す
+   * （自動テストが名刺の見本の画像に書き込む）。無ければ「名刺ではない」と返す
+   */
+  async extractFromImage(req: LlmExtractRequest): Promise<LlmResponse> {
+    const text = Buffer.from(req.bytes).toString('latin1');
+    const at = text.indexOf('M2O-CARD:');
+    if (at === -1) return { text: JSON.stringify({ isCard: false }), tokensUsed: 8 };
+    const line = text.slice(at + 'M2O-CARD:'.length).split('\n')[0] ?? '';
+    // 見本の JSON は UTF-8 で書かれている
+    return { text: Buffer.from(line, 'latin1').toString('utf8'), tokensUsed: 32 };
+  }
 
   async complete(req: LlmRequest): Promise<LlmResponse> {
     const replay = this.replay(req);

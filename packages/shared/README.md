@@ -15,6 +15,7 @@ src/types/agent.ts    エージェント定義のスキーマ（schema_version: 
 src/types/run.ts      ジョブ・実行・ステップ・承認・成果物
 src/types/tenant.ts   テナント・利用者・要求ごとの文脈
 src/types/audit.ts    監査ログ
+src/types/cards.ts    名刺管理（連絡先・名刺・読み取った項目・範囲。仕様書 第27章）
 ```
 
 ## 主なもの

@@ -8,8 +8,9 @@
  * 受け付けるファイルの形式。
  *
  * 拡張子と先頭のバイト列の両方で確かめる。拡張子だけを信じない。
+ * `heic`・`webp` は名刺の画像に限って受け付ける（仕様書 第27.4節。{@link detectKind} は受け付けない）。
  */
-export type FileKind = 'pdf' | 'xlsx' | 'csv' | 'docx' | 'png' | 'jpeg';
+export type FileKind = 'pdf' | 'xlsx' | 'csv' | 'docx' | 'png' | 'jpeg' | 'heic' | 'webp';
 
 export const MIME: Record<FileKind, string> = {
   pdf: 'application/pdf',
@@ -18,6 +19,8 @@ export const MIME: Record<FileKind, string> = {
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   png: 'image/png',
   jpeg: 'image/jpeg',
+  heic: 'image/heic',
+  webp: 'image/webp',
 };
 
 /** 1 ファイルの上限（バイト）。 */
