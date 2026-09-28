@@ -46,7 +46,7 @@
 | inventory_location・inventory_lot・inventory_stock | 在庫の場所・ロット・いまの数（第29.19節。案） | 倉庫と棚、棚のラベル。ロットと使用期限。場所・ロットごとの品目の数（入出庫の記録から求める） |
 | inventory_move | 入出庫の記録（第29.19節。案） | 種類（入庫・出庫・移動・調整）、品目、場所、数、理由、元になったもの、記録した人と日時。**追記のみ** |
 | inventory_count・inventory_count_line | 棚卸しと、その行（第29.19節。案） | 対象・状態・始めた人と確定した人。行は品目・場所・数えた数・数えた時点の帳簿の数・数えた人 |
-| inventory_reservation・inventory_publication | 引き当てと公開（第29.19節。案） | 予約の番号と日時・品目・数・状態（**患者の情報を持たない**）。公開は承認した品目と項目・承認した人・公開の URL の鍵・状態 |
+| inventory_reservation・inventory_publication | 引き当てと公開（第29.19節。案） | 予約の番号と日時・品目・数・状態（**予約した人の情報を持たない**）。公開は承認した品目と項目・承認した人・公開の URL の鍵・状態 |
 | schedule | 定時実行 | tenant_id、対象者、agent 参照、入力、規則（毎日／毎平日／毎週。毎平日は第 0.125.0 版）、タイムゾーン、次回・前回の時刻、有効／無効 |
 | notification | 本人宛の通知 | tenant_id、宛先の利用者（1 人）、種類、題名、本文、run_id、既読の日時 |
 | session | ログイン状態 | tenant_id、user_id、Cookie の値のハッシュ、CSRF トークン、手段、端末、期限、失効の日時 |
