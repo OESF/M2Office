@@ -8,7 +8,7 @@
  */
 
 import { Hono, type Context } from 'hono';
-import { CARD_BATCH_MAX, canManage, toVCard, type CardUpload, type CardViewer } from '@m2office/core';
+import { CARD_BATCH_MAX, canManage, draftThanksMail, toVCard, type CardUpload, type CardViewer } from '@m2office/core';
 import type { CardFields, ContactScope } from '@m2office/shared';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
@@ -192,6 +192,26 @@ export function cardsRoute(deps: AppDeps) {
     const { user } = c.get('ctx');
     const err = await service.purgeNow(who(c), user, c.req.param('id'));
     return err ? c.json({ error: err }, 403) : c.json({ ok: true });
+  });
+
+  /**
+   * 名刺交換のお礼のメールの件名と本文を作る（第27.8節「メールを書く」）。画面が Gmail の新しいメールの画面に入れて開く。
+   *
+   * @remarks **送らない。** 送るのは本人が Gmail で行う。推論が使えなければ定型の文を返す
+   */
+  app.post('/:id/mail-draft', async (c) => {
+    const v = who(c);
+    const { tenant, user } = c.get('ctx');
+    const contact = await store.getContact(v, c.req.param('id'));
+    if (!contact) return c.json({ error: '名刺が見つかりません' }, 404);
+    const mine = (await store.listCardsOfContact(v, contact.id)).find((x) => x.ownerUserId === user.id && x.status === 'done');
+    const settings = await deps.repo.getTenantSettings(tenant.id);
+    const llm = await deps.ai.llmFor(tenant.id).catch(() => null);
+    const draft = await draftThanksMail(llm, {
+      contact, receivedOn: mine?.receivedOn ?? null, today: await service.today(v), senderName: user.displayName,
+      companyName: settings.company.shortName || settings.company.legalName || tenant.name, style: settings.writingStyle,
+    });
+    return c.json({ to: contact.emails[0] ?? '', ...draft });
   });
 
   /** vCard で書き出す（1 件。見られる人が書き出せる。第27.10節）。 */

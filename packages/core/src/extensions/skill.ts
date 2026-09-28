@@ -185,7 +185,9 @@ export function parseInputs(
         continue;
       }
       const name = m[1]!.trim();
-      properties[name] = { type: 'string', title: name, ...INPUT_KINDS[kind], ...(Object.keys(properties).length === 0 ? examples : {}) };
+      // 例は、ファイルでない最初の欄に置く（ファイルの欄には例を出す場所が無い。第6.10.4.1節）
+      const first = kind !== 'ファイル' && !Object.values(properties).some((p) => p.format !== 'file');
+      properties[name] = { type: 'string', title: name, ...INPUT_KINDS[kind], ...(first ? examples : {}) };
       if (!optional) required.push(name);
     }
     return { schema: { type: 'object', required, properties }, problems };

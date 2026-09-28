@@ -204,7 +204,7 @@ test('実行のとき、推論に渡す指示の $名前 を入力で置き換�
 test('学ばない業務の印・推論の強さの上限・ファイルの欄（契約書チェック。第12.12.3節・第12.12.5節）', async () => {
   const { pkg, problems } = load({
     'SKILL.md': [
-      '---', 'name: contract-review', 'description: 契約書を読んで注意したい点をまとめる', 'effort: xhigh',
+      '---', 'name: contract-review', 'description: 契約書を読んで注意したい点をまとめる', 'effort: xhigh', 'argument-hint: 損害賠償が心配',
       'allowed-tools: file.read_text docx.render', 'metadata:', '  m2office-private: "true"', '  m2office-inputs: |',
       '    契約書: ファイル', '    気になる点・背景: 長文（任意）', '---', '# 契約書チェック', '契約書: $契約書',
     ].join('\n'),
@@ -216,6 +216,9 @@ test('学ばない業務の印・推論の強さの上限・ファイルの欄�
   assert.equal(def.limits.maxTokens, 300_000, '強さを上げたスキルは上限も大きい');
   const { fileInputKey } = await import('@m2office/shared');
   assert.equal(fileInputKey(def), '契約書', '「ファイル」と書いた欄が、渡されたファイルの入る欄');
+  const props = (def.inputs as { properties: Record<string, { examples?: string[] }> }).properties;
+  assert.equal(props['契約書']?.examples, undefined, 'ファイルの欄には例を置かない');
+  assert.deepEqual(props['気になる点・背景']?.examples, ['損害賠償が心配'], '例はファイルでない最初の欄に置く');
   const { acceptsFile } = await import('../src/index.js');
   assert.equal(acceptsFile(def), true, '秘書が契約書を渡せる');
   const plain = load({ 'SKILL.md': SKILL, 'reference.md': '区分' }).pkg!.agents[0]!;

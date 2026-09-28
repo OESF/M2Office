@@ -701,6 +701,8 @@ export const api = {
    *
    * @remarks 受け付ける形式と大きさはサーバーが確かめる（仕様書 第9.4.1節）。
    */
+  /** ファイルの名前などを引く（本人が上げたもの・判断のために見られるものだけ）。 */
+  fileMeta: (id: string) => call<{ id: string; name: string; kind: string; size: number }>(`/files/${encodeURIComponent(id)}`),
   uploadFile: async (file: File): Promise<{ id: string; name: string }> => {
     const form = new FormData();
     form.append('file', file);
@@ -760,6 +762,8 @@ export const api = {
     setReceivedOn: (cardId: string, receivedOn: string) =>
       call<{ ok: true }>(`/cards/card/${encodeURIComponent(cardId)}/received`, { method: 'PUT', body: JSON.stringify({ receivedOn }) }),
     dismiss: (cardId: string) => call<{ ok: true }>(`/cards/card/${encodeURIComponent(cardId)}`, { method: 'DELETE' }),
+    /** 名刺交換のお礼のメールの件名と本文（第27.8節）。送らない。 */
+    mailDraft: (id: string) => call<{ to: string; subject: string; body: string }>(`/cards/${encodeURIComponent(id)}/mail-draft`, { method: 'POST' }),
     /** 会った日の本人の予定（保存しない。第27.8節）。 */
     meetings: (id: string) => call<CardMeetings>(`/cards/${encodeURIComponent(id)}/meetings`),
     /**

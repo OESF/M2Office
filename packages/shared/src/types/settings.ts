@@ -364,7 +364,8 @@ export interface UserSettings {
 }
 
 /** まだピン止めを変えていない人に、はじめからピン止めしておく業務（仕様書 第6.1.1節）。 */
-export const DEFAULT_PINNED = ['minutes', 'inbox-triage', 'knowledge-qa', 'scheduling', 'slides', 'document-draft'];
+// 'business-cards' は名刺（内蔵の拡張。業務の 1 つとして並べる。仕様書 第6.1.1節）
+export const DEFAULT_PINNED = ['minutes', 'inbox-triage', 'knowledge-qa', 'scheduling', 'slides', 'document-draft', 'business-cards'];
 
 export const DEFAULT_USER_SETTINGS: UserSettings = {
   profile: { furigana: '', title: '', timezone: 'Asia/Tokyo', home: '', workplace: '' },

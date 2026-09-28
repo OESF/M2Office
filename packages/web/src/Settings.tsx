@@ -60,7 +60,8 @@ export function rememberedSection(): SettingsSection {
 }
 
 export function Settings({ me, agents, onChanged, section }: {
-  me: Me; agents: AgentSummary[]; onChanged: () => void;
+  /** メニューの並びと表示に使う業務（名刺も業務の 1 つとして入る。第6.1.1節）。 */
+  me: Me; agents: { id: string; name: string }[]; onChanged: () => void;
   /** 出す区分（仕様書 第6.5.0節）。 */
   section: SettingsSection;
 }) {

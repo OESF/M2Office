@@ -3069,6 +3069,9 @@ console.log('\n■ 57. 名刺管理（内蔵の拡張。第27章、ADR-0042）')
       : ng('受け取った日が違う', JSON.stringify({ first: myCard?.receivedOn, todayJst, setMine: setMine.status, setTheirs: setTheirs.status, future: future.status }));
     const toPersonal = await call('a', `/v1/cards/${tanaka?.id}/scope`, { method: 'PUT', body: JSON.stringify({ scope: 'personal' }) }, 'admin');
     toPersonal.status === 403 ? ok('取り込んだ本人でない人は、自分だけにできない') : ng(`自分だけにできてしまう（${toPersonal.status}）`);
+    const { body: mail } = await call('a', `/v1/cards/${tanaka?.id}/mail-draft`, { method: 'POST' }, 'member');
+    mail.to === email && /名刺交換のお礼/.test(mail.subject ?? '') && new RegExp(`田中 ${tag} 様`).test(mail.body ?? '')
+      ? ok('お礼のメールの件名と本文を作る（送らない。画面が Gmail の新しいメールの画面に入れて開く）') : ng('お礼のメールが違う', JSON.stringify(mail).slice(0, 200));
     const vcard = await fetch(`${API}/v1/cards/${tanaka?.id}/vcard`, { headers: { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' } });
     const vtext = await vcard.text();
     vcard.status === 200 && vtext.includes(`FN:田中 ${tag}`) && vtext.includes('TITLE:部長') ? ok('1 件を vCard で書き出せる') : ng('vCard が違う', vtext.slice(0, 120));
@@ -3092,6 +3095,14 @@ console.log('\n■ 57. 名刺管理（内蔵の拡張。第27章、ADR-0042）')
     const outOfScope = await call('a', '/v1/cards', {}, 'member');
     await call('a', '/v1/admin/access/business-cards', { method: 'PUT', body: JSON.stringify({ scope: 'all' }) });
     outOfScope.status === 403 ? ok('利用範囲の外の人は名刺管理を使えない') : ng(`利用範囲の外でも使える（${outOfScope.status}）`);
+
+    // 名刺も業務の 1 つとしてピン止めできる（第6.1.1節）。本人の設定に残る
+    const { body: mySettings } = await call('a', '/v1/me/settings', {}, 'member');
+    const pinSave = await call('a', '/v1/me/settings/menu', { method: 'PUT', body: JSON.stringify({ ...mySettings.menu, pinned: ['business-cards'] }) }, 'member');
+    const { body: afterPin } = await call('a', '/v1/me/settings', {}, 'member');
+    await call('a', '/v1/me/settings/menu', { method: 'PUT', body: JSON.stringify(mySettings.menu) }, 'member');
+    pinSave.status === 200 && afterPin.menu?.pinned?.includes('business-cards')
+      ? ok('名刺を業務の 1 つとしてピン止めでき、本人の設定に残る') : ng('名刺のピン止めが残らない', JSON.stringify(afterPin.menu));
 
     // ごみ箱と消去（第27.7節）
     const trash = await call('a', `/v1/cards/${personal?.id}`, { method: 'DELETE' }, 'member');
@@ -3155,6 +3166,12 @@ console.log('\n■ 58. 契約書チェック（公式の拡張機能。第28章�
   } catch (err) {
     ng('契約書チェックの確認が途中で止まった', String(err));
   } finally {
+    // 起こした実行を止め、伝えたことにしておく（残すと、次の回の音声の確認（第 42 節）で伝える結果として会話ログに入る）
+    for (const r of (await call('a', '/v1/secretary/lookups', {}, 'member')).body.items ?? []) {
+      if (!r.done) await call('a', `/v1/runs/${r.runId}/cancel`, { method: 'POST' }, 'member');
+    }
+    await sleep(1500);
+    await call('a', '/v1/secretary/lookups/claim', { method: 'POST' }, 'member');
     await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
   }
 }

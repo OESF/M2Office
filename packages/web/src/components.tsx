@@ -71,13 +71,15 @@ export function AgentForm({
   fill?: Record<string, string> | null;
 }) {
   const [values, setValues] = useState<Record<string, string>>(initial ?? {});
+  // 押すキーから実行するときも、必須のファイルの欄が空なら実行しない
+  const fileMissingRef = useRef(false);
   useEffect(() => { if (fill) setValues(fill); }, [fill]);
   // 入力欄から手を離さずに実行できるようにする（仕様書 第6.11.1節 k2）
   const hotkey = keyLabel('Mod+Enter');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // 入力欄の中からでも効く（Mod を伴うため。仕様書 第6.11.2節）
-  useHotkey('Mod+Enter', () => { if (!busy) void submit(); });
+  useHotkey('Mod+Enter', () => { if (!busy && !fileMissingRef.current) void submit(); });
 
   async function submit() {
     setBusy(true);
@@ -94,6 +96,11 @@ export function AgentForm({
 
   // 本人がまだ接続していない会社の接続（仕様書 第12.11.6.3節）。接続するまで実行できない
   const missing = agent.needsConnection ?? [];
+  // 必須のファイルの欄が空なら実行できない（第6.10.4.1節）
+  const required = new Set(agent.inputs?.required ?? []);
+  const fileMissing = Object.entries(agent.inputs?.properties ?? {})
+    .some(([k, f]) => f.format === 'file' && required.has(k) && !values[k]);
+  fileMissingRef.current = fileMissing;
 
   return (
     <>
@@ -101,7 +108,7 @@ export function AgentForm({
       {missing.map((m) => <ConnectPrompt key={m.id} id={m.id} name={m.name} />)}
       <InputFields agent={agent} values={values} onChange={(key, v) => setValues((s) => ({ ...s, [key]: v }))} />
       {error && <p className="error">{error}</p>}
-      <button className="btn" onClick={submit} disabled={busy || missing.length > 0} title={hotkey ? `実行する（${hotkey}）` : '実行する'}>
+      <button className="btn" onClick={submit} disabled={busy || missing.length > 0 || fileMissing} title={hotkey ? `実行する（${hotkey}）` : '実行する'}>
         {busy ? '開始しています…' : '実行'}
         {hotkey && <kbd className="btn-key">{hotkey}</kbd>}
       </button>
@@ -151,6 +158,7 @@ function Field({
   // 説明の文を足すより、例を薄く置く（仕様書 第6.10.4.1節）。例が無ければ何も出さない
   const hint = field.examples?.[0] ? `例: ${field.examples[0]}` : undefined;
   if (field.format === 'date') return <DateField name={name} label={label} optional={!required} value={value} onChange={onChange} />;
+  if (field.format === 'file') return <FileField name={name} label={label} value={value} onChange={onChange} />;
   return (
     <div className="field">
       <label htmlFor={name}>{label}</label>
@@ -159,6 +167,72 @@ function Field({
       ) : (
         <input id={name} value={value} placeholder={hint} onChange={(e) => onChange(e.target.value)} />
       )}
+    </div>
+  );
+}
+
+/** 業務に渡せるファイル（第9.4.1節。秘書に渡すときと同じ）。 */
+const FILE_ACCEPT = '.pdf,.xlsx,.csv,.docx,.png,.jpg,.jpeg';
+const FILE_MAX_BYTES = 10 * 1024 * 1024;
+
+/**
+ * ファイルの入力（仕様書 第6.10.4.1節）。選ぶかドラッグすると、すぐに上げて、業務にはファイルの ID を渡す。
+ *
+ * @remarks 形式と大きさはサーバーが確かめる。大きすぎるものは上げる前に断る。秘書から渡したファイルは ID から名前を引いて出す
+ */
+function FileField({ name, label, value, onChange }: {
+  name: string; label: string; value: string; onChange: (v: string) => void;
+}) {
+  const [fileName, setFileName] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [over, setOver] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+  // はじめから入っているファイル（秘書から開いたとき）の名前を引く
+  useEffect(() => {
+    if (!value || fileName) return;
+    api.fileMeta(value).then((m) => setFileName(m.name)).catch(() => setFileName('渡したファイル'));
+  }, [value, fileName]);
+
+  const take = async (f: File | undefined) => {
+    if (!f) return;
+    setError(null);
+    if (f.size > FILE_MAX_BYTES) { setError('10 MB を超えるファイルは渡せません'); return; }
+    setBusy(true);
+    try {
+      const up = await api.uploadFile(f);
+      setFileName(up.name);
+      onChange(up.id);
+    } catch (e) {
+      setError(describeError(e, 'ファイルを渡せませんでした'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="field">
+      <label htmlFor={name}>{label}</label>
+      <div
+        className={`file-drop${over ? ' over' : ''}`}
+        onDragOver={(e) => { e.preventDefault(); setOver(true); }}
+        onDragLeave={() => setOver(false)}
+        onDrop={(e) => { e.preventDefault(); setOver(false); void take(e.dataTransfer.files[0]); }}
+      >
+        {value && fileName ? (
+          <>
+            <span className="file-name">{fileName}</span>
+            <button type="button" className="btn ghost small" onClick={() => { onChange(''); setFileName(null); }}>外す</button>
+          </>
+        ) : (
+          <button type="button" id={name} className="btn ghost small" disabled={busy} onClick={() => input.current?.click()}>
+            {busy ? '渡しています…' : 'ファイルを選ぶ'}
+          </button>
+        )}
+        <input ref={input} type="file" accept={FILE_ACCEPT} hidden
+          onChange={(e) => { void take(e.target.files?.[0]); e.target.value = ''; }} />
+      </div>
+      {error && <p className="error small">{error}</p>}
     </div>
   );
 }

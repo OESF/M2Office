@@ -14,5 +14,6 @@ export { CARD_PROMPT, readCard, parseCardReading, type CardReading } from './rea
 export { resolveContact, judgeSamePerson, mergeFields, type IdentityMatch } from './identity.js';
 export { detectCardKind, splitCardPdf, CARD_BATCH_MAX, CARD_MIME, type CardFileKind, type CardPage } from './formats.js';
 export { toVCard } from './vcard.js';
+export { draftThanksMail, templateThanks, type ThanksMail, type ThanksMailInput } from './mail.js';
 export { CARD_TOOLS, type CardToolContext } from './tools.js';
 export { CARD_AGENTS, CARD_IMPORT, CARD_UPDATE, CARDS_PACKAGE, CARDS_EXTENSION_VERSION } from './agents.js';

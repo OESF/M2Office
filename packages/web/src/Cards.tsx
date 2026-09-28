@@ -35,14 +35,14 @@ const PHONE_LABELS: Record<PhoneKind, string> = { main: '代表', direct: '直�
  *
  * @param contactId 開いている詳細。一覧なら `null`
  * @param onOpen 詳細を開く・一覧に戻る（URL を合わせる）
- * @param onAsk 秘書に頼む（メールの下書きなど）。答えは秘書のキャンバスに出る
+ * @param mailer メールの開き方（本人のアカウントの Gmail か `mailto:`）
  */
-export function Cards({ contactId, onOpen, onAsk }: {
+export function Cards({ contactId, onOpen, mailer }: {
   contactId: string | null;
   onOpen: (contactId: string | null) => void;
-  onAsk: (message: string) => void;
+  mailer: Mailer;
 }) {
-  if (contactId) return <CardDetailView id={contactId} onBack={() => onOpen(null)} onOpen={onOpen} onAsk={onAsk} />;
+  if (contactId) return <CardDetailView id={contactId} onBack={() => onOpen(null)} onOpen={onOpen} mailer={mailer} />;
   return <CardListView onOpen={onOpen} />;
 }
 
@@ -262,13 +262,14 @@ function CardThumb({ cardId, rotation, kind }: { cardId: string | null; rotation
   return <CardImage cardId={cardId} side="front" rotation={rotation} kind={kind} />;
 }
 
-/** 詳細。項目はその場で直せる（第27.8節）。 */
-function CardDetailView({ id, onBack, onOpen, onAsk }: {
-  id: string; onBack: () => void; onOpen: (id: string | null) => void; onAsk: (message: string) => void;
+/** 詳細。画像の横に氏名と操作、その下に項目を狭い幅で並べる。項目はその場で直せる（第27.8節）。 */
+function CardDetailView({ id, onBack, onOpen, mailer }: {
+  id: string; onBack: () => void; onOpen: (id: string | null) => void; mailer: Mailer;
 }) {
   const [d, setD] = useState<CardDetail | null>(null);
   const [meetings, setMeetings] = useState<CardMeetings | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [writing, setWriting] = useState(false);
   const load = useCallback(() => {
     api.cards.get(id).then(setD).catch((e) => setMessage(describeError(e, '名刺が見つかりません')));
   }, [id]);
@@ -288,50 +289,71 @@ function CardDetailView({ id, onBack, onOpen, onAsk }: {
   const act = (run: () => Promise<unknown>, after?: () => void) =>
     void run().then(() => (after ? after() : load())).catch((e) => setMessage(describeError(e)));
 
+  /**
+   * お礼のメールを書く（第27.8節）。件名と本文を作ってもらい、Gmail の新しいメールの画面に入れて開く。送るのは本人。
+   *
+   * @remarks 作るのを待ってから新しいタブを開くとブラウザに止められるため、押したときに先にタブを開いておく
+   */
+  const writeMail = async () => {
+    if (!d) return;
+    setMessage(null);
+    const tab = mailer.google ? window.open('about:blank', '_blank') : null;
+    setWriting(true);
+    try {
+      const draft = await api.cards.mailDraft(d.contact.id);
+      const url = composeUrl(mailer, draft.to, draft.subject, draft.body);
+      if (tab) tab.location.href = url;
+      else if (mailer.google) window.open(url, '_blank', 'noopener');
+      else location.href = url;
+    } catch (e) {
+      tab?.close();
+      setMessage(describeError(e, 'メールを用意できませんでした'));
+    } finally {
+      setWriting(false);
+    }
+  };
+
   if (!d) return (
     <div className="cards">
-      <button className="link" onClick={onBack}>← 名刺</button>
+      <button className="link" onClick={onBack}>← 名刺管理</button>
       {message ? <p className="error">{message}</p> : <p className="muted">読み込み中…</p>}
     </div>
   );
   const c = d.contact;
   const latest = d.cards[0];
-  const mapUrl = c.address ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(c.address)}` : null;
-  const email = c.emails[0];
   const eventsOn = (date: string) => (meetings?.available ? meetings.days.find((x) => x.date === date)?.events ?? [] : []);
 
   return (
     <div className="cards card-detail">
-      <button className="link" onClick={onBack}>← 名刺</button>
+      <button className="link" onClick={onBack}>← 名刺管理</button>
       {message && <p className="error">{message}</p>}
-      <div className="card-detail-head">
+      <div className="card-head">
         <div className="card-images">
           {latest?.hasFront && <CardImage cardId={latest.id} side="front" rotation={latest.frontRotation} kind={null} large />}
           {latest?.hasBack && <CardImage cardId={latest.id} side="back" rotation={latest.backRotation} kind={null} large />}
         </div>
-        <div className="card-actions">
-          {email && (
-            <button className="btn small" onClick={() => onAsk(`${c.company ? `${c.company}の` : ''}${c.name}さん（${email}）に、名刺交換のお礼のメールの下書きを作ってください`)}>
-              メールを書く
-            </button>
-          )}
-          {c.phones.filter((p) => p.kind !== 'fax').map((p) => (
-            <a key={p.number} className="btn ghost small" href={`tel:${p.number.replace(/[^0-9+]/g, '')}`}>電話（{PHONE_LABELS[p.kind]}）</a>
-          ))}
-          {mapUrl && <a className="btn ghost small" href={mapUrl} target="_blank" rel="noreferrer">地図</a>}
-          <button className="btn ghost small" onClick={() => act(() => api.cards.downloadVCard(c.id, c.name))}>vCard</button>
-          {d.canManage && (
-            <button className="btn ghost small" onClick={() => act(() => api.cards.setScope(c.id, c.scope === 'company' ? 'personal' : 'company'))}>
-              {c.scope === 'company' ? '自分だけにする' : '会社で共有する'}
-            </button>
-          )}
-          {d.canManage && (
-            <button className="btn ghost small danger" onClick={() => act(() => api.cards.trash(c.id), () => onOpen(null))}>消す</button>
-          )}
+        <div className="card-summary">
+          <h2>{c.name || '（氏名なし）'}</h2>
+          {c.nameKana && <div className="small muted">{c.nameKana}{c.kanaEstimated ? '（推定）' : ''}</div>}
+          <div>{c.company}</div>
+          <div className="small muted">{[c.department, c.title].filter(Boolean).join('　')}</div>
+          <div className="small"><span className="badge">{c.scope === 'company' ? '会社で共有' : '自分だけ'}</span></div>
+          <div className="card-actions">
+            {c.emails[0] && <button className="btn small" disabled={writing} onClick={() => void writeMail()}>{writing ? '用意しています…' : 'メールを書く'}</button>}
+            <button className="btn ghost small" onClick={() => act(() => api.cards.downloadVCard(c.id, c.name))}>vCard</button>
+            {d.canManage && (
+              <button className="btn ghost small" onClick={() => act(() => api.cards.setScope(c.id, c.scope === 'company' ? 'personal' : 'company'))}>
+                {c.scope === 'company' ? '自分だけにする' : '会社で共有する'}
+              </button>
+            )}
+            {d.canManage && (
+              <button className="btn ghost small danger" onClick={() => act(() => api.cards.trash(c.id), () => onOpen(null))}>消す</button>
+            )}
+          </div>
         </div>
       </div>
 
-      <div className="card-fields">
+      <dl className="card-fields">
         <Field label="氏名"><Editable value={c.name} onSave={(v) => save({ name: v })} /></Field>
         <Field label="ふりがな">
           <Editable value={c.nameKana} onSave={(v) => save({ nameKana: v })} />
@@ -341,14 +363,25 @@ function CardDetailView({ id, onBack, onOpen, onAsk }: {
         <Field label="部署"><Editable value={c.department} onSave={(v) => save({ department: v })} /></Field>
         <Field label="役職"><Editable value={c.title} onSave={(v) => save({ title: v })} /></Field>
         <Field label="電話"><Phones phones={c.phones} onSave={(phones) => save({ phones })} /></Field>
-        <Field label="メール"><Editable value={c.emails.join(', ')} onSave={(v) => save({ emails: v.split(/[,、\s]+/).filter(Boolean) })} /></Field>
+        <Field label="メール">
+          <LinkField value={c.emails.join(', ')} onSave={(v) => save({ emails: v.split(/[,、\s]+/).filter(Boolean) })}>
+            {c.emails.map((e) => <a key={e} href={composeUrl(mailer, e)} target={mailer.google ? '_blank' : undefined} rel="noreferrer">{e}</a>)}
+          </LinkField>
+        </Field>
         <Field label="郵便番号"><Editable value={c.postalCode} onSave={(v) => save({ postalCode: v })} /></Field>
-        <Field label="住所"><Editable value={c.address} onSave={(v) => save({ address: v })} /></Field>
-        <Field label="Web"><Editable value={c.website} onSave={(v) => save({ website: v })} /></Field>
+        <Field label="住所">
+          <LinkField value={c.address} onSave={(v) => save({ address: v })}>
+            {c.address && <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(c.address)}`} target="_blank" rel="noreferrer">{c.address}</a>}
+          </LinkField>
+        </Field>
+        <Field label="Web">
+          <LinkField value={c.website} onSave={(v) => save({ website: v })}>
+            {c.website && <a href={webUrl(c.website)} target="_blank" rel="noreferrer">{c.website}</a>}
+          </LinkField>
+        </Field>
         <Field label="そのほか"><Editable value={c.extra} onSave={(v) => save({ extra: v })} /></Field>
         <Field label="メモ"><Editable value={c.note} multiline onSave={(v) => save({ note: v })} /></Field>
-        <Field label="範囲"><span>{c.scope === 'company' ? '会社で共有' : '自分だけ'}</span></Field>
-      </div>
+      </dl>
 
       <h3>交換の記録</h3>
       <ul className="card-exchanges">
@@ -360,9 +393,9 @@ function CardDetailView({ id, onBack, onOpen, onAsk }: {
               : <span>{x.receivedOn}</span>}
             <span>{x.receivedBy ?? ''}</span>
             {x.mine && eventsOn(x.receivedOn).map((e) => (
-              <span key={`${e.start}-${e.title}`} className="small muted">　この日の予定: {e.title}</span>
+              <span key={`${e.start}-${e.title}`} className="small muted">この日の予定: {e.title}</span>
             ))}
-            {x.note && <span className="small muted">　{x.note}</span>}
+            {x.note && <span className="small muted">{x.note}</span>}
             {d.cards.length > 1 && (
               <button className="link small" onClick={() => act(() => api.cards.split(c.id, x.id), load)}>分ける</button>
             )}
@@ -386,16 +419,58 @@ function CardDetailView({ id, onBack, onOpen, onAsk }: {
   );
 }
 
+/** メールの開き方。会社が Google とつないでいれば、本人のアカウントの Gmail で開く（第27.8節）。 */
+export interface Mailer {
+  /** 本人のメールアドレス（Gmail のアカウントを選ぶのに使う）。 */
+  email: string;
+  google: boolean;
+}
+
+/** 新しいメールの画面の URL。Google とつないでいれば Gmail、つないでいなければ `mailto:`。 */
+function composeUrl(m: Mailer, to: string, subject = '', body = ''): string {
+  if (!m.google) {
+    const q = new URLSearchParams({ ...(subject ? { subject } : {}), ...(body ? { body } : {}) }).toString().replace(/\+/g, '%20');
+    return `mailto:${encodeURIComponent(to)}${q ? `?${q}` : ''}`;
+  }
+  const p = new URLSearchParams({ authuser: m.email, view: 'cm', fs: '1', to, ...(subject ? { su: subject } : {}), ...(body ? { body } : {}) });
+  return `https://mail.google.com/mail/?${p.toString()}`;
+}
+
+/** Web の項目を開ける URL にする（`http` の無いものは `https://` を付ける）。 */
+function webUrl(v: string): string {
+  return /^https?:\/\//i.test(v) ? v : `https://${v.replace(/^\/+/, '')}`;
+}
+
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return <><dt>{label}</dt><dd>{children}</dd></>;
 }
 
-/** その場で直せる値。押すと入力になり、離れるか Enter で保存する。 */
-function Editable({ value, onSave, multiline = false }: { value: string; onSave: (v: string) => void; multiline?: boolean }) {
+/**
+ * リンクになっている項目。ふだんはリンク（押すと開く）を出し、横の「直す」で入力に切り替える。
+ *
+ * @param value 直すときの文字
+ * @param children ふだん出すリンク。空なら「—」と直すボタンだけ
+ */
+function LinkField({ value, onSave, children }: { value: string; onSave: (v: string) => void; children: ReactNode }) {
   const [editing, setEditing] = useState(false);
+  if (editing) return <Editable value={value} startEditing onSave={(v) => { setEditing(false); onSave(v); }} onCancel={() => setEditing(false)} />;
+  const empty = !value.trim();
+  return (
+    <span className="link-field">
+      {empty ? <span className="muted">—</span> : <span className="link-values">{children}</span>}
+      <button className="edit-btn" title="直す" aria-label="直す" onClick={() => setEditing(true)}>✎</button>
+    </span>
+  );
+}
+
+/** その場で直せる値。押すと入力になり、離れるか Enter で保存する。 */
+function Editable({ value, onSave, multiline = false, startEditing = false, onCancel }: {
+  value: string; onSave: (v: string) => void; multiline?: boolean; startEditing?: boolean; onCancel?: () => void;
+}) {
+  const [editing, setEditing] = useState(startEditing);
   const [v, setV] = useState(value);
   useEffect(() => setV(value), [value]);
-  const done = () => { setEditing(false); if (v !== value) onSave(v); };
+  const done = () => { setEditing(false); if (v !== value) onSave(v); else onCancel?.(); };
   if (!editing) {
     return (
       <button className={`editable${value ? '' : ' empty'}`} onClick={() => setEditing(true)}>
@@ -406,7 +481,7 @@ function Editable({ value, onSave, multiline = false }: { value: string; onSave:
   return multiline
     ? <textarea autoFocus value={v} onChange={(e) => setV(e.target.value)} onBlur={done} rows={3} />
     : <input autoFocus value={v} onChange={(e) => setV(e.target.value)} onBlur={done}
-        onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) done(); if (e.key === 'Escape') { setV(value); setEditing(false); } }} />;
+        onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) done(); if (e.key === 'Escape') { setV(value); setEditing(false); onCancel?.(); } }} />;
 }
 
 /** 受け取った日。押すと日付の入力になり、選ぶと保存する。今日より後は選べない。 */
@@ -421,25 +496,49 @@ function ReceivedOn({ value, onSave }: { value: string; onSave: (v: string) => v
   );
 }
 
-/** 電話番号（種類つき）。行ごとに直し、空にすると消える。 */
+/**
+ * 電話番号（種類つき）。ふだんは種類と番号のリンク（`tel:`。スマホではそのまま発信）を出し、「直す」で行ごとの入力にする。空にした行は消える。
+ */
 function Phones({ phones, onSave }: { phones: ContactPhone[]; onSave: (p: ContactPhone[]) => void }) {
+  const [editing, setEditing] = useState(false);
   const [rows, setRows] = useState(phones);
   useEffect(() => setRows(phones), [phones]);
-  const commit = (next: ContactPhone[]) => {
-    const clean = next.filter((p) => p.number.trim());
+  if (!editing) {
+    return (
+      <span className="link-field">
+        {phones.length === 0 ? <span className="muted">—</span> : (
+          <span className="link-values">
+            {phones.map((p) => (
+              <span key={p.number} className="phone">
+                <span className="small muted">{PHONE_LABELS[p.kind]}</span>{' '}
+                {p.kind === 'fax' ? <span>{p.number}</span> : <a href={`tel:${p.number.replace(/[^0-9+]/g, '')}`}>{p.number}</a>}
+              </span>
+            ))}
+          </span>
+        )}
+        <button className="edit-btn" title="直す" aria-label="直す" onClick={() => setEditing(true)}>✎</button>
+      </span>
+    );
+  }
+  const finish = () => {
+    setEditing(false);
+    const clean = rows.filter((p) => p.number.trim());
     if (JSON.stringify(clean) !== JSON.stringify(phones)) onSave(clean);
   };
   return (
     <div className="card-phones">
       {rows.map((p, i) => (
         <div key={i} className="row small">
-          <select value={p.kind} onChange={(e) => { const next = rows.map((x, j) => (j === i ? { ...x, kind: e.target.value as PhoneKind } : x)); setRows(next); commit(next); }}>
+          <select value={p.kind} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, kind: e.target.value as PhoneKind } : x)))}>
             {(Object.keys(PHONE_LABELS) as PhoneKind[]).map((k) => <option key={k} value={k}>{PHONE_LABELS[k]}</option>)}
           </select>
-          <input value={p.number} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, number: e.target.value } : x)))} onBlur={() => commit(rows)} />
+          <input value={p.number} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, number: e.target.value } : x)))} />
         </div>
       ))}
-      <button className="link small" onClick={() => setRows([...rows, { kind: 'main', number: '' }])}>＋ 番号</button>
+      <div className="row small">
+        <button className="link small" onClick={() => setRows([...rows, { kind: 'main', number: '' }])}>＋ 番号</button>
+        <button className="btn small" onClick={finish}>保存</button>
+      </div>
     </div>
   );
 }

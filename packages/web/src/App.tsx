@@ -7,7 +7,7 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
-import { showsCaptions, type Notification } from '@m2office/shared';
+import { CARDS_EXTENSION_ID, showsCaptions, type Notification } from '@m2office/shared';
 import { splitMenu, togglePinned } from './menu.js';
 import {
   api, ApiError, describeError,
@@ -29,7 +29,7 @@ import {
 } from './Settings.js';
 import {
   Icon, NavHeading, NavItem, NavUserCard, PinnableNavItem, SecretaryAvatar, SideNavLayout, ThemeToggle, agentIcon, useRemembered,
-  useRememberedNumber,
+  useRememberedNumber, type IconName,
 } from './nav.js';
 
 /**
@@ -73,6 +73,13 @@ const GOOGLE_RETURN_TEXT: Record<string, { ok: boolean; text: string }> = {
   // 会社のクライアントの誤り。もう一度押しても直らないので、試し直しを勧めない（仕様書 第14.3.3節）
   client: { ok: false, text: '会社の Google 接続の設定に誤りがあるため、接続できませんでした。管理者に伝えてください（管理者ページ「接続」の「Google で確かめる」で確かめられます）。' },
 };
+
+/**
+ * 左のメニューの業務の 1 項目（仕様書 第6.1.1節）。業務と、画面を持つ内蔵の拡張（名刺。第27.2節）を同じ並びで扱う。
+ *
+ * @remarks `agent` が `null` の項目は名刺。押すと名刺の画面を開く。名刺管理を使えない人には項目を作らない
+ */
+type MenuItem = { id: string; name: string; description: string; icon: IconName; agent: AgentSummary | null };
 
 /** 中央キャンバスに何を表示しているか。 */
 type View =
@@ -218,21 +225,6 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /**
-   * 画面から秘書に頼む（名刺の「メールを書く」など。仕様書 第27.9節）。答えは秘書のキャンバスに出る。
-   */
-  const askSecretary = useCallback(async (message: string) => {
-    try {
-      const reply = await api.ask(message);
-      show({
-        request: message, text: reply.text, note: layerLabel(reply.layer),
-        ...(reply.evidence.length > 0 ? { evidence: reply.evidence } : {}),
-      });
-    } catch (err) {
-      setError(describeError(err, '秘書に頼めませんでした'));
-    }
-  }, [show]);
-
   const refresh = useCallback(async () => {
     try {
       const [a, p, j, n, l] = await Promise.all([
@@ -341,17 +333,25 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
 
   // キーボードの割り当て（仕様書 第6.11.3節）。表は keys.ts に 1 つだけ置く
   // スキルの user-invocable: false の業務はメニューに出さない。秘書が取り次いだときだけ使う（仕様書 第12.12.2節）
-  const allMenuAgents = orderAgents(agents, menu.order).filter((a) => !menu.hidden.includes(a.id) && a.menu !== false);
+  // 名刺（内蔵の拡張）も業務の 1 つとして並べる。ピン止め・たたみ・並び・押すキーはほかの業務と同じ（仕様書 第6.1.1節）
+  const menuItems: MenuItem[] = [
+    ...agents.filter((a) => a.menu !== false)
+      .map((a) => ({ id: a.id, name: a.name, description: a.description, icon: agentIcon(a.category), agent: a })),
+    ...(me.cards ? [{ id: CARDS_EXTENSION_ID, name: '名刺管理', description: '撮るだけで連絡先になる。会社で共有する名刺の置き場', icon: 'cards' as IconName, agent: null }] : []),
+  ];
+  const allMenuAgents = orderAgents(menuItems, menu.order).filter((a) => !menu.hidden.includes(a.id));
   // ピン止めした業務だけを上に出し、ほかは「ほかの業務」にたたむ（仕様書 第6.1.1節「業務の並び」）。並びはメニューの順のまま。
   // 使った回数では変えない。まだ一度も変えていなければ標準の組
   const { top: topAgents, others: otherAgents } = splitMenu(allMenuAgents, menu.pinned);
+  const openItem = (m: MenuItem) => (m.agent ? setView({ kind: 'agent', agent: m.agent }) : setView({ kind: 'cards', contactId: null }));
+  const isOpen = (m: MenuItem) => (m.agent ? view.kind === 'agent' && view.agent.id === m.id : view.kind === 'cards');
   const togglePin = (id: string) => {
     const saved = { ...menu, pinned: togglePinned(menu.pinned, id) };
     setMenu(saved);
     void api.saveMySettings('menu', saved).catch(() => loadMenu());
   };
   // いま開いている業務がたたんだ中にあれば、開いておく
-  const openingOther = view.kind === 'agent' && otherAgents.some((a) => a.id === view.agent.id);
+  const openingOther = otherAgents.some(isOpen);
   const showOthers = moreOpen || openingOther;
   // 押すキー（1〜9）は見えている順に割り当てる
   const menuAgents = showOthers ? [...topAgents, ...otherAgents] : topAgents;
@@ -359,8 +359,10 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   useHotkey('Mod+/', useCallback(() => openSettings('keys'), [openSettings]));
   useHotkey('Mod+I', useCallback(() => setTalkOpen(!talkOpen), [talkOpen, setTalkOpen]));
   useNumberHotkeys(useCallback((n: number) => {
-    const agent = menuAgents[n - 1];
-    if (agent) setView({ kind: 'agent', agent });
+    const item = menuAgents[n - 1];
+    if (item) openItem(item);
+    // openItem は描くたびに作り直すが、中で使うのは状態の設定関数だけ
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [menuAgents]));
   // たたんでいる間に出た結果には、まだ見ていない印を出す（第6.2節）
   const [seen, setSeen] = useState<string | null>(null);
@@ -408,11 +410,11 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
             {topAgents.map((a, i) => (
               <PinnableNavItem
                 key={a.id} pinned onPin={() => togglePin(a.id)}
-                icon={agentIcon(a.category)} label={a.name} description={a.description}
-                active={view.kind === 'agent' && view.agent.id === a.id}
+                icon={a.icon} label={a.name} description={a.description}
+                active={isOpen(a)}
                 // 1〜9 番目には、押すキーを併記する（仕様書 第6.11.1節 k4）
                 hint={i < 9 ? keyLabel(`Mod+Shift+${i + 1}`) : ''}
-                onClick={() => setView({ kind: 'agent', agent: a })}
+                onClick={() => openItem(a)}
               />
             ))}
             {otherAgents.length > 0 && (
@@ -424,10 +426,10 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
             {showOthers && otherAgents.map((a, i) => (
               <PinnableNavItem
                 key={a.id} pinned={false} onPin={() => togglePin(a.id)}
-                icon={agentIcon(a.category)} label={a.name} description={a.description}
-                active={view.kind === 'agent' && view.agent.id === a.id}
+                icon={a.icon} label={a.name} description={a.description}
+                active={isOpen(a)}
                 hint={topAgents.length + i < 9 ? keyLabel(`Mod+Shift+${topAgents.length + i + 1}`) : ''}
-                onClick={() => setView({ kind: 'agent', agent: a })}
+                onClick={() => openItem(a)}
                 className="item nav-other"
               />
             ))}
@@ -440,11 +442,6 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
               active={view.kind === 'notifications'} onClick={() => setView({ kind: 'notifications' })} />
             <NavItem icon="schedules" label="定時実行" description="決まった時刻に、あなたの権限で業務を実行します"
               active={view.kind === 'schedules'} onClick={() => setView({ kind: 'schedules' })} />
-            {/* 名刺管理を切っている会社と、利用範囲の外の人には出さない（仕様書 第27.2節） */}
-            {me.cards && (
-              <NavItem icon="cards" label="名刺" description="撮るだけで連絡先になる名刺管理"
-                active={view.kind === 'cards'} onClick={() => setView({ kind: 'cards', contactId: null })} />
-            )}
             <NavItem icon="help" label="ヘルプ" description="使い方の記事と検索"
               active={view.kind === 'help'} onClick={() => setView({ kind: 'help', articleId: null })} />
           </>
@@ -512,8 +509,9 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
           )}
           {view.kind === 'cards' && (
             <>
-              <h1>名刺 <HelpTip article="start-cards">撮るかファイルを選ぶと、AI が読み取って登録します。秘書に「〇〇さんの電話番号は？」と聞けます。</HelpTip></h1>
-              <Cards contactId={view.contactId} onOpen={(contactId) => setView({ kind: 'cards', contactId })} onAsk={(m) => void askSecretary(m)} />
+              <h1>名刺管理 <HelpTip article="start-cards">撮るかファイルを選ぶと、AI が読み取って登録します。秘書に「〇〇さんの電話番号は？」と聞けます。</HelpTip></h1>
+              <Cards contactId={view.contactId} onOpen={(contactId) => setView({ kind: 'cards', contactId })}
+                mailer={{ email: me.user.email, google: me.workspaceSource === 'google' }} />
             </>
           )}
           {view.kind === 'schedules' && (
@@ -542,7 +540,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
               {googleReturn && GOOGLE_RETURN_TEXT[googleReturn] && (
                 <p className={GOOGLE_RETURN_TEXT[googleReturn]!.ok ? 'ok-msg' : 'error'}>{GOOGLE_RETURN_TEXT[googleReturn]!.text}</p>
               )}
-              <Settings me={me} agents={agents} onChanged={loadMenu} section={view.section} />
+              <Settings me={me} agents={menuItems} onChanged={loadMenu} section={view.section} />
             </>
           )}
           {view.kind === 'help' && (
@@ -669,7 +667,7 @@ const VIEW_LABELS: Record<string, string> = {
   history: '実行履歴',
   notifications: 'お知らせ',
   schedules: '定時実行',
-  cards: '名刺',
+  cards: '名刺管理',
   settings: '個人設定',
 };
 

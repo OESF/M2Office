@@ -137,3 +137,21 @@ test('今日の日付は本人のタイムゾーンで決める（世界標準�
   assert.equal(dateIn('UTC', at), '2026-09-27');
   assert.equal(dateIn('Not/AZone', at), '2026-09-28', '知らないタイムゾーンは日本時間');
 });
+
+test('お礼のメール: 推論が使えなければ定型の文。本日・先日を受け取った日で決め、署名を付ける', async () => {
+  const { draftThanksMail } = await import('../src/index.js');
+  const input = {
+    contact: { name: '佐々木 美穂', company: '株式会社さくら', department: '', title: '', note: '' },
+    receivedOn: '2026-09-28', today: '2026-09-28', senderName: '三浦', companyName: 'OESF',
+    style: { selfReference: '当法人', greeting: '', closing: '', signature: '---\nOESF 三浦', terms: [], notes: '' },
+  };
+  const t = await draftThanksMail(null, input);
+  assert.match(t.subject, /名刺交換のお礼/);
+  assert.match(t.body, /^株式会社さくら\n佐々木 美穂 様/);
+  assert.match(t.body, /本日は名刺を交換/);
+  assert.match(t.body, /当法人をどうぞ/);
+  assert.match(t.body, /OESF 三浦$/);
+  assert.match((await draftThanksMail(null, { ...input, receivedOn: '2026-09-01' })).body, /先日は/);
+  const broken = { name: 'x', complete: async () => ({ text: '書けませんでした', tokensUsed: 1 }) };
+  assert.deepEqual(await draftThanksMail(broken, input), t, '推論の答えが読めなければ定型の文');
+});
