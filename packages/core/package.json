@@ -1,6 +1,6 @@
 {
   "name": "@m2office/core",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "private": true,
   "type": "module",
   "description": "ドメインロジック。実行エンジン、承認、ツール、知識、LLM 抽象化層",
