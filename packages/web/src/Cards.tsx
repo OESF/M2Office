@@ -12,8 +12,21 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { CardFields, ContactPhone, ContactScope, PhoneKind } from '@m2office/shared';
 import { api, describeError, type CardDetail, type CardList, type CardMeetings, type CardSummary } from './api.js';
 
-/** ファイルを選ぶときに受け付ける形式（第27.4節）。 */
-const ACCEPT = 'image/png,image/jpeg,image/heic,image/heif,image/webp,application/pdf,.heic,.heif,.webp,.pdf';
+/**
+ * ファイルを選ぶときに受け付ける形式（第27.4節）。
+ *
+ * @remarks
+ * スマホでは HEIC を挙げない。iPhone の Safari は、受け付ける形式に HEIC が無ければ写真を JPEG にしてから渡すため
+ * （サーバーで HEIC を JPEG に直さずに済む。Q-103）。パソコンでは HEIC も挙げる（挙げないと、選ぶ画面で HEIC が隠れる）
+ */
+const ACCEPT_MOBILE = 'image/png,image/jpeg,image/webp,application/pdf,.webp,.pdf';
+const ACCEPT_DESKTOP = 'image/png,image/jpeg,image/heic,image/heif,image/webp,application/pdf,.heic,.heif,.webp,.pdf';
+
+/** スマホ（iPhone・iPad・Android）か。iPad は Mac と名乗るため、触れる点の数でも見る。 */
+function isMobile(): boolean {
+  const ua = navigator.userAgent;
+  return /iPhone|iPad|iPod|Android/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+}
 
 const PHONE_LABELS: Record<PhoneKind, string> = { main: '代表', direct: '直通', mobile: '携帯', fax: 'FAX' };
 
@@ -108,7 +121,7 @@ function CardListView({ onOpen }: { onOpen: (id: string) => void }) {
         <label className="small check"><input type="checkbox" checked={!!personal} onChange={(e) => setPersonal(e.target.checked)} /> 自分だけ</label>
         <input ref={camera} type="file" accept="image/*" capture="environment" hidden
           onChange={(e) => { shot(e.target.files?.[0]); e.target.value = ''; }} />
-        <input ref={picker} type="file" accept={ACCEPT} multiple hidden
+        <input ref={picker} type="file" accept={isMobile() ? ACCEPT_MOBILE : ACCEPT_DESKTOP} multiple hidden
           onChange={(e) => { void send(Array.from(e.target.files ?? []).slice(0, 50)); e.target.value = ''; }} />
       </div>
       <div className="cards-toolbar">
