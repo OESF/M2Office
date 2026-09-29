@@ -11,6 +11,7 @@ import type {
   Approval, Artifact, Notification, Run, RunStep, Schedule, ScheduleRule, Tenant,
   TenantSettings, User, UserSettings, CardFields, Contact, ContactScope,
   InventoryItem, InventoryItemView, InventoryLocation, InventoryMove, InventoryMoveKind, InventorySettings, InventoryStockRow,
+  InventoryCount, InventoryCountRow, InventoryCountScope, InventoryCountView,
 } from '@m2office/shared';
 
 /**
@@ -874,6 +875,42 @@ export const api = {
       const body = await res.json().catch(() => ({ error: '通信に失敗しました' }));
       if (!res.ok) throw new ApiError(body.error ?? `エラー (${res.status})`, res.status, false);
       return body as InventoryImportResult;
+    },
+    /**
+     * スマホ用のページを開く QR（仕様書 第29.11.1節）。画面では `<img>` に出す。
+     *
+     * @returns 画像の URL（`URL.createObjectURL`）。作れなければ `null`
+     */
+    mobileQrUrl: async (): Promise<string | null> => {
+      const blob = await fetchBlob('/inventory/mobile-qr.svg');
+      return blob ? URL.createObjectURL(blob) : null;
+    },
+    /** 棚のラベル（QR）の PDF を保存する（仕様書 第29.7節）。`ids` を省けばすべての場所。 */
+    downloadLabels: async (ids?: string[]) => {
+      const blob = await fetchBlob(`/inventory/locations/labels.pdf${ids?.length ? `?ids=${ids.map(encodeURIComponent).join(',')}` : ''}`);
+      if (!blob) throw new ApiError('ラベルを作れませんでした', 404);
+      saveBlob(blob, '棚のラベル.pdf');
+    },
+    /** 棚卸し（仕様書 第29.10節）。 */
+    counts: {
+      /** 開いている棚卸し（無ければ `open: null`）と、最近の棚卸し。 */
+      current: () => call<{ open: InventoryCountView | null; recent: InventoryCount[] }>('/inventory/counts'),
+      /** 始める。開いていれば、それを続ける。 */
+      start: (scope: InventoryCountScope, value?: string) =>
+        call<{ view: InventoryCountView; created: boolean }>('/inventory/counts', { method: 'POST', body: JSON.stringify({ scope, value }) }),
+      get: (id: string) => call<InventoryCountView>(`/inventory/counts/${encodeURIComponent(id)}`),
+      /** 数える。読むたびに 1 つ足す（`add`）か、数え直して置き換える（`set`）。 */
+      count: (id: string, line: { itemId: string; qty?: number; mode?: 'add' | 'set'; unit?: 'unit' | 'pack'; locationId?: string; lot?: string; expiresOn?: string }) =>
+        call<{ row: InventoryCountRow }>(`/inventory/counts/${encodeURIComponent(id)}/lines`, { method: 'POST', body: JSON.stringify(line) }),
+      /** 差の大きい品目の、考えられる理由（秘書の推測）。 */
+      explain: (id: string) => call<{ text: string | null }>(`/inventory/counts/${encodeURIComponent(id)}/explain`, { method: 'POST' }),
+      close: (id: string) => call<{ adjusted: number; uncounted: number }>(`/inventory/counts/${encodeURIComponent(id)}/close`, { method: 'POST' }),
+      cancel: (id: string) => call<{ ok: true }>(`/inventory/counts/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
+      exportFile: async (id: string) => {
+        const blob = await fetchBlob(`/inventory/counts/${encodeURIComponent(id)}/export`);
+        if (!blob) throw new ApiError('書き出せませんでした', 404);
+        saveBlob(blob, `棚卸し-${new Date().toISOString().slice(0, 10)}.csv`);
+      },
     },
     /** 品目と数を書き出す。 */
     exportFile: async (format: 'csv' | 'xlsx') => {

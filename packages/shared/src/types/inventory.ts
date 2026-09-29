@@ -147,3 +147,51 @@ export interface InventoryItemView extends InventoryItem {
   /** 残っているロットのうち、いちばん近い使用期限。 */
   nearestExpiry: string | null;
 }
+
+/** 棚卸しの対象（第29.10節）。 */
+export type InventoryCountScope = 'all' | 'location' | 'category';
+
+/** 棚卸し。会社で同時に開くのは 1 つ。 */
+export interface InventoryCount {
+  id: string;
+  scope: InventoryCountScope;
+  /** 対象の場所の ID か分類の名前（全体なら空）。 */
+  scopeValue: string;
+  status: 'open' | 'closed' | 'cancelled';
+  startedBy: string;
+  startedByName?: string;
+  startedAt: string;
+  closedBy: string | null;
+  closedAt: string | null;
+}
+
+/** 棚卸しの 1 行（品目・場所・ロットごと）。数えていない行は `counted` が `null`。 */
+export interface InventoryCountRow {
+  itemId: string;
+  itemName: string;
+  unit: string;
+  packUnit: string;
+  packSize: number | null;
+  locationId: string;
+  lotId: string | null;
+  lot: string | null;
+  expiresOn: string | null;
+  /** 数えた数（使う単位）。数えていなければ `null`。 */
+  counted: number | null;
+  /** 数えた時点の帳簿の数（数えていなければ、いまの帳簿の数）。 */
+  book: number;
+  /** 差（数えた数 − 帳簿の数）。数えていなければ `null`。 */
+  diff: number | null;
+}
+
+/** 棚卸しの姿（差の大きい順の行と件数）。 */
+export interface InventoryCountView {
+  count: InventoryCount;
+  rows: InventoryCountRow[];
+  /** 数えた行の数。 */
+  counted: number;
+  /** 帳簿にあって、まだ数えていない行の数。確定しても 0 にしない。 */
+  uncounted: number;
+  /** 差のある行の数。 */
+  differing: number;
+}

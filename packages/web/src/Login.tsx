@@ -50,6 +50,7 @@ export function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
     setBusy(true);
     setError(null);
     try {
+      rememberReturnPath();
       location.href = (await api.googleLoginUrl()).url;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'ログインを始められませんでした');
@@ -100,4 +101,29 @@ export function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
       </div>
     </div>
   );
+}
+
+/** ログインのあとに戻すページを覚えておく鍵（仕様書 第29.11.1節）。 */
+const RETURN_KEY = 'm2o.after-login';
+
+/**
+ * 開こうとしたページを覚える。Google のログインは会社のトップに戻るため、戻ったあとで {@link takeReturnPath} で戻す。
+ *
+ * @remarks 覚えるのは同じ会社の中の道と問い合わせだけ（`/` で始まる）。保存できない端末では何もしない
+ */
+export function rememberReturnPath(): void {
+  const path = `${location.pathname}${location.search}`;
+  if (path === '/' || !path.startsWith('/')) return;
+  try { sessionStorage.setItem(RETURN_KEY, path); } catch { /* 覚えられなくてもログインは続ける */ }
+}
+
+/** 覚えておいたページを取り出して消す。無ければ `null`。 */
+export function takeReturnPath(): string | null {
+  try {
+    const path = sessionStorage.getItem(RETURN_KEY);
+    sessionStorage.removeItem(RETURN_KEY);
+    return path && path.startsWith('/') && !path.startsWith('//') ? path : null;
+  } catch {
+    return null;
+  }
 }

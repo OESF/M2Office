@@ -1,6 +1,6 @@
 ---
 title: M2Office 仕様書
-version: 0.160.0
+version: 0.162.0
 status: draft
 created: 2026-09-20
 updated: 2026-09-28
@@ -145,6 +145,12 @@ tags: [M2Office, specification, ai-agent, sme, saas, platform, google-workspace,
 | ADR-0042 | 名刺管理を、データの置き場と画面を持つ「内蔵の拡張」として中核に組み込む | `docs/adr/0042-business-cards-built-in.md` |
 | ADR-0043 | 契約書チェックを公式の拡張機能（スキル）として作り、論点の提示にとどめる | `docs/adr/0043-contract-review-extension.md` |
 | ADR-0044 | 認証の要る接続は、会社がアプリを登録し利用者ごとに認可する形を基本にし、最初に Slack で確かめる | `docs/adr/0044-authenticated-connections.md` |
+| ADR-0045 | 在庫管理を、既定で切りの汎用の「内蔵の拡張」として作る | `docs/adr/0045-inventory-built-in.md` |
+| ADR-0046 | 医療機関の診療データの分析は M2Office に組み込まず、別のシステムにして集計だけをつなぐ | `docs/adr/0046-clinic-data-analysis-separate-system.md` |
+| ADR-0047 | 朝のブリーフの中身を人ごとにし、社内のお知らせを流す | `docs/adr/0047-brief-per-person-and-notices.md` |
+| ADR-0048 | 週次ブリーフを「今週の見通しと先週からの変化」にし、全員に自動で用意する | `docs/adr/0048-weekly-brief-outlook.md` |
+| ADR-0049 | 人事・給与を M2Office の中で完結させる（給与計算を内製する） | `docs/adr/0049-hr-payroll-built-in.md` |
+| ADR-0050 | 在庫管理のバーコードの読み取りと棚のラベルに使う部品 | `docs/adr/0050-inventory-barcode-and-label-libraries.md` |
 | 実地の確認の手順 | 自社で使いながら確かめる順番と、用意するもの | `docs/acceptance-test.md` |
 | プラットフォーム API リファレンス | 公開 API の仕様 | TBD: 実装から自動生成 |
 

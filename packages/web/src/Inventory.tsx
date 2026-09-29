@@ -1,8 +1,10 @@
 /**
- * @file 在庫管理の画面。品目の一覧と検索・バーコードで引く・品目を足す・取り込みと書き出し・場所・品目の詳細と入出庫の記録と取り消し。
+ * @file 在庫管理のパソコンの画面。品目の一覧と検索・バーコードで引く（USB のリーダー）・スマホで開く・品目を足す・知らないバーコードの結び付け・
+ * 取り込みと書き出し・場所と棚のラベル・棚卸しへの入口・品目の詳細と入出庫の記録と取り消し。
  *
  * 数は使える数（在庫 − 引き当て − 期限切れ）を先に出す。説明文を常に出さない（原則 u11）。分からなければ秘書に聞けばよい。
- * バーコードのスキャナーは文字を打って Enter を押すため、探す欄でそのまま読める（カメラで読むのは第29.11.1節の画面）。
+ * USB のバーコードリーダーは文字を打って Enter を押すため、探す欄でそのまま読める。
+ * カメラで読むのはスマホ用のページ（`/m/inventory`。MobileInventory.tsx）で行う（仕様書 第29.11.1節）。
  *
  * @see 仕様書 第29章 在庫管理
  */
@@ -10,6 +12,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { InventoryItem, InventoryItemView, InventoryLocation, InventoryMove, InventoryMoveKind } from '@m2office/shared';
 import { api, describeError, type InventoryDetail, type InventoryList } from './api.js';
+import { Stocktake } from './Stocktake.js';
 
 const KIND_LABELS: Record<InventoryMoveKind, string> = { in: '入庫', out: '使用', transfer: '移動', adjust: '調整' };
 
@@ -36,8 +39,11 @@ const todayJst = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo'
 export function Inventory({ itemId, onOpen, userId }: { itemId: string | null; onOpen: (itemId: string | null) => void; userId: string }) {
   // 品目を作ったときの知らせ（単位の欄の数を数として読んだなど）を、開いた品目の上に一度だけ出す
   const [flash, setFlash] = useState<string | null>(null);
+  // 棚卸しは一覧の中で開く（数えている間に品目の詳細へ移らないため）
+  const [counting, setCounting] = useState(false);
+  if (counting && !itemId) return <Stocktake userId={userId} onBack={() => setCounting(false)} />;
   if (itemId) return <ItemView id={itemId} onBack={() => { setFlash(null); onOpen(null); }} userId={userId} initialMessage={flash} />;
-  return <ListView onOpen={(id, note) => { setFlash(note ?? null); onOpen(id); }} />;
+  return <ListView onOpen={(id, note) => { setFlash(note ?? null); onOpen(id); }} onStocktake={() => setCounting(true)} />;
 }
 
 /** 印（残りわずか・期限切れ・マイナス）。 */
@@ -53,7 +59,7 @@ function Marks({ item }: { item: InventoryItemView }) {
 }
 
 /** 一覧・探す（バーコードも）・品目を足す・取り込みと書き出し・場所。 */
-function ListView({ onOpen }: { onOpen: (id: string, note?: string | null) => void }) {
+function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string | null) => void; onStocktake: () => void }) {
   const [list, setList] = useState<InventoryList | null>(null);
   const [q, setQ] = useState('');
   const [stopped, setStopped] = useState(false);
@@ -61,6 +67,9 @@ function ListView({ onOpen }: { onOpen: (id: string, note?: string | null) => vo
   const [adding, setAdding] = useState<{ name: string; code: string } | null>(null);
   const [places, setPlaces] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [mobileQr, setMobileQr] = useState<string | null>(null);
+  // 知らないバーコード。新しい品目にするか、既にある品目に結び付ける（第29.11節）
+  const [unknown, setUnknown] = useState<string | null>(null);
   const picker = useRef<HTMLInputElement>(null);
 
   const load = useCallback(() => {
@@ -71,19 +80,20 @@ function ListView({ onOpen }: { onOpen: (id: string, note?: string | null) => vo
     return () => clearTimeout(t);
   }, [load, q]);
 
-  /** Enter で、バーコードとして引く。当たれば開き、無ければ品目を足す欄にコードを入れる。 */
-  const scan = async () => {
-    const code = q.trim();
+  /** 読んだ値（カメラ・リーダー・Enter）を引く。品目なら開き、知らないバーコードなら、どうするかを出す。 */
+  const lookup = async (raw: string) => {
+    const code = raw.trim();
     if (!code) return;
     try {
       const r = await api.inventory.lookup(code);
       if (r.item) { onOpen(r.item.id); return; }
       if (r.location) { setQ(''); setMessage(`棚「${placeName(r.location)}」のラベルです`); return; }
-      if (r.parsed.kind !== 'other') setAdding({ name: '', code: r.parsed.code });
+      if (r.parsed.kind !== 'other') setUnknown(r.parsed.code);
     } catch (e) {
       setMessage(describeError(e, '読めませんでした'));
     }
   };
+  const scan = () => lookup(q);
 
   const importFile = async (f: File | undefined) => {
     if (!f) return;
@@ -110,12 +120,27 @@ function ListView({ onOpen }: { onOpen: (id: string, note?: string | null) => vo
         <input className="cards-search" type="search" placeholder="品名・コード・バーコード" value={q} aria-label="品目を探す"
           onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void scan(); }} />
         <button className="btn" onClick={() => setAdding({ name: q.trim(), code: '' })}>品目を足す</button>
+        <button className="btn ghost" onClick={onStocktake}>棚卸し</button>
         <button className="btn ghost" disabled={busy} onClick={() => picker.current?.click()}>取り込む</button>
         <button className="btn ghost" onClick={() => void api.inventory.exportFile('csv').catch((e) => setMessage(describeError(e, '書き出せませんでした')))}>書き出す</button>
+        <button className="btn ghost" onClick={() => {
+          if (mobileQr) { URL.revokeObjectURL(mobileQr); setMobileQr(null); return; }
+          void api.inventory.mobileQrUrl().then(setMobileQr).catch((e) => setMessage(describeError(e, 'QR を作れませんでした')));
+        }}>スマホで開く</button>
         <input ref={picker} type="file" hidden accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           onChange={(e) => void importFile(e.target.files?.[0])} />
       </div>
       {message && <p className="small muted" role="status">{message}</p>}
+      {mobileQr && (
+        <div className="card inventory-new mobile-qr">
+          <img src={mobileQr} alt="スマホ用の在庫のページを開く QR" width={180} height={180} />
+          <span className="small muted">{`${location.origin}/m/inventory`}</span>
+        </div>
+      )}
+      {unknown && list && (
+        <UnknownCode code={unknown} items={list.items} onNew={() => { setAdding({ name: '', code: unknown }); setUnknown(null); }}
+          onLinked={(id) => { setUnknown(null); onOpen(id, `バーコード ${unknown} を結び付けました`); }} onCancel={() => setUnknown(null)} />
+      )}
       {adding && (
         <NewItem initial={adding} onCancel={() => setAdding(null)}
           onSaved={(id, note) => { setAdding(null); onOpen(id, note); }} />
@@ -147,6 +172,37 @@ function ListView({ onOpen }: { onOpen: (id: string, note?: string | null) => vo
         <button className="link" onClick={() => setPlaces(!places)}>{places ? '場所を閉じる' : `場所（${list?.locations.length ?? 0}）`}</button>
       </div>
       {places && list && <Places locations={list.locations} admin={list.admin} onChanged={load} />}
+    </div>
+  );
+}
+
+/** 知らないバーコードを読んだとき: 新しい品目にするか、既にある品目に結び付ける（第29.11節）。 */
+function UnknownCode({ code, items, onNew, onLinked, onCancel }: {
+  code: string; items: InventoryItemView[]; onNew: () => void; onLinked: (itemId: string) => void; onCancel: () => void;
+}) {
+  const [q, setQ] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const hits = q.trim() ? items.filter((i) => `${i.name}${i.sku}`.toLowerCase().includes(q.trim().toLowerCase())).slice(0, 8) : [];
+  const link = async (id: string) => {
+    try {
+      await api.inventory.update(id, { codes: [code] });
+      onLinked(id);
+    } catch (e) {
+      setError(describeError(e, '結び付けられませんでした'));
+    }
+  };
+  return (
+    <div className="card inventory-new">
+      <div className="row wrap">
+        <span className="small">{code}</span>
+        <button className="btn small" onClick={onNew}>新しい品目にする</button>
+        <input className="grow" placeholder="既にある品目に結び付ける（名前で探す）" value={q} onChange={(e) => setQ(e.target.value)} aria-label="結び付ける品目を探す" />
+        <button className="btn ghost small" onClick={onCancel}>やめる</button>
+      </div>
+      {hits.length > 0 && (
+        <ul className="plain">{hits.map((i) => <li key={i.id}><button className="link" onClick={() => void link(i.id)}>{i.name}</button></li>)}</ul>
+      )}
+      {error && <p className="error small">{error}</p>}
     </div>
   );
 }
@@ -229,6 +285,11 @@ function Places({ locations, admin, onChanged }: { locations: InventoryLocation[
           </li>
         ))}
       </ul>
+      {locations.length > 0 && (
+        <div className="row wrap">
+          <button className="btn ghost small" onClick={() => void api.inventory.downloadLabels().catch((e) => setError(describeError(e, 'ラベルを作れませんでした')))}>ラベルを印刷</button>
+        </div>
+      )}
       <div className="row wrap">
         <input className="short" placeholder="倉庫" value={warehouse} onChange={(e) => setWarehouse(e.target.value)} aria-label="倉庫" />
         <input className="short" placeholder="棚" value={shelf} onChange={(e) => setShelf(e.target.value)} aria-label="棚" />

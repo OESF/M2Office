@@ -1,5 +1,6 @@
 /**
- * @file 在庫管理（内蔵の拡張）の API。品目の一覧と詳細・作成と修正・止め・バーコードで引く・場所・入出庫の記録と取り消し・取り込みと書き出し。
+ * @file 在庫管理（内蔵の拡張）の API。品目の一覧と詳細・作成と修正・止め・バーコードで引く・場所と棚のラベル・入出庫の記録と取り消し・
+ * 棚卸し・取り込みと書き出し。
  *
  * 会社が在庫管理を切っているときと、利用範囲の外の人には、どの口も使わせない。
  * 在庫は会社で共有する。品目の止めと場所の削除は管理者だけ（第29.16節）。
@@ -8,10 +9,12 @@
  */
 
 import { Hono } from 'hono';
-import { readSheet, renderSheet, IMPORT_MAX_ROWS, type ItemInput, type MoveInput } from '@m2office/core';
+import QRCode from 'qrcode';
+import { readSheet, renderSheet, renderShelfLabels, IMPORT_MAX_ROWS, MOBILE_INVENTORY_PATH, type ItemInput, type MoveInput } from '@m2office/core';
 import type { InventoryMoveKind } from '@m2office/shared';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
+import { tenantOrigin } from '../tenant-origin.js';
 
 /** 取り込むファイルの大きさの上限（品目は数十〜数千。第29.1.1節）。 */
 const IMPORT_MAX_BYTES = 5 * 1024 * 1024;
@@ -185,6 +188,102 @@ export function inventoryRoute(deps: AppDeps) {
       limit: Math.min(500, Math.max(1, Number(c.req.query('limit')) || 200)),
     });
     return c.json({ moves });
+  });
+
+  /** スマホ用のページを開く QR（SVG。パソコンの画面の「スマホで開く」。第29.11.1節）。 */
+  app.get('/mobile-qr.svg', async (c) => {
+    const url = `${tenantOrigin(c.req.header('origin'), c.req.header('host'))}${MOBILE_INVENTORY_PATH}`;
+    const svg = await QRCode.toString(url, { type: 'svg', errorCorrectionLevel: 'M', margin: 2 });
+    c.header('Content-Type', 'image/svg+xml');
+    c.header('Cache-Control', 'no-store');
+    return c.body(svg);
+  });
+
+  /** 棚のラベル（QR）を A4 に並べた PDF（第29.7節）。`ids` を省けば、すべての場所。 */
+  app.get('/locations/labels.pdf', async (c) => {
+    const { tenant } = c.get('ctx');
+    const ids = (c.req.query('ids') ?? '').split(',').filter(Boolean);
+    const all = await service.locations(tenant.id);
+    const chosen = ids.length ? all.filter((l) => ids.includes(l.id)) : all;
+    if (chosen.length === 0) return c.json({ error: '場所がありません' }, 404);
+    const bytes = await renderShelfLabels(chosen, tenantOrigin(c.req.header('origin'), c.req.header('host')));
+    c.header('Content-Type', 'application/pdf');
+    c.header('Content-Disposition', `attachment; filename="shelf-labels.pdf"`);
+    return c.body(bytes as unknown as ArrayBuffer);
+  });
+
+  // ---- 棚卸し（第29.10節） ----
+
+  /** 開いている棚卸し（無ければ `count: null`）と、最近の棚卸し。 */
+  app.get('/counts', async (c) => {
+    const { tenant } = c.get('ctx');
+    const open = await service.openCount(tenant.id);
+    return c.json({ open: open ? await service.countView(tenant.id, open.id) : null, recent: await service.store.listCounts(tenant.id, 10) });
+  });
+
+  /** 棚卸しを始める（開いていれば、それを続ける）。 */
+  app.post('/counts', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const b = await c.req.json().catch(() => ({})) as { scope?: unknown; value?: unknown };
+    const kind = b.scope === 'location' || b.scope === 'category' ? b.scope : 'all';
+    const res = await service.startCount(tenant.id, user.id, { kind, value: str(b.value) });
+    if ('error' in res) return c.json({ error: res.error }, 400);
+    return c.json({ view: await service.countView(tenant.id, res.count.id), created: res.created }, res.created ? 201 : 200);
+  });
+
+  app.get('/counts/:id', async (c) => {
+    const { tenant } = c.get('ctx');
+    const view = await service.countView(tenant.id, c.req.param('id'));
+    if (!view) return c.json({ error: '棚卸しが見つかりません' }, 404);
+    return c.json(view);
+  });
+
+  /** 数える（読むたびに 1 つ足す・数を足す・数え直して置き換える）。 */
+  app.post('/counts/:id/lines', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const b = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+    const res = await service.recordCount(tenant.id, user.id, c.req.param('id'), {
+      itemId: str(b['itemId']) ?? '', qty: typeof b['qty'] === 'number' ? b['qty'] : Number(b['qty'] ?? 1),
+      mode: b['mode'] === 'set' ? 'set' : 'add', unit: b['unit'] === 'pack' ? 'pack' : 'unit',
+      ...(str(b['locationId']) ? { locationId: str(b['locationId'])! } : {}),
+      ...(str(b['lot']) ? { lot: str(b['lot'])! } : {}),
+      ...(str(b['expiresOn']) ? { expiresOn: str(b['expiresOn'])! } : {}),
+    });
+    if ('error' in res) return c.json({ error: res.error }, 400);
+    return c.json(res, 201);
+  });
+
+  /** 差の大きい品目の、考えられる理由（秘書の推測）。 */
+  app.post('/counts/:id/explain', async (c) => {
+    const { tenant } = c.get('ctx');
+    return c.json({ text: await service.explainCount(tenant.id, c.req.param('id')) });
+  });
+
+  /** 確定する（始めた人と管理者）。差の分を調整にし、数えていない行は 0 にしない。 */
+  app.post('/counts/:id/close', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const res = await service.closeCount(tenant.id, user.id, c.req.param('id'), isAdmin(c));
+    if ('error' in res) return c.json({ error: res.error }, res.error.includes('できるのは') ? 403 : 400);
+    return c.json(res);
+  });
+
+  /** やめる（始めた人と管理者）。帳簿は変えない。 */
+  app.post('/counts/:id/cancel', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const res = await service.cancelCount(tenant.id, user.id, c.req.param('id'), isAdmin(c));
+    if ('error' in res) return c.json({ error: res.error }, res.error.includes('できるのは') ? 403 : 400);
+    return c.json(res);
+  });
+
+  /** 棚卸しの結果を CSV で書き出す（監査ログに残す）。 */
+  app.get('/counts/:id/export', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const table = await service.countRows(tenant.id, user.id, c.req.param('id'));
+    if (!table) return c.json({ error: '棚卸しが見つかりません' }, 404);
+    const bytes = await renderSheet('棚卸し', table.columns, table.rows, 'csv');
+    c.header('Content-Type', 'text/csv; charset=utf-8');
+    c.header('Content-Disposition', `attachment; filename="stocktake-${new Date().toISOString().slice(0, 10)}.csv"`);
+    return c.body(bytes as unknown as ArrayBuffer);
   });
 
   /** CSV・Excel から品目を取り込む（第29.6節）。列の見出しは AI が読む。 */

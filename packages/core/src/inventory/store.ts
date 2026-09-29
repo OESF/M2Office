@@ -7,7 +7,7 @@
 
 import pg from 'pg';
 import type {
-  InventoryItem, InventoryLocation, InventoryMove, InventoryMoveKind, InventorySupplier,
+  InventoryCount, InventoryItem, InventoryLocation, InventoryMove, InventoryMoveKind, InventorySupplier,
 } from '@m2office/shared';
 
 /** 置き場に渡す品目（バーコードは別に持つ）。 */
@@ -48,6 +48,36 @@ export interface LotRecord {
   itemId: string;
   lot: string;
   expiresOn: string | null;
+}
+
+/** 棚卸しの行（品目・場所・ロットごと）。 */
+export interface CountLineRecord {
+  itemId: string;
+  locationId: string;
+  lotId: string | null;
+  lot: string | null;
+  expiresOn: string | null;
+  counted: number;
+  /** 数えた時点（最初に数えたとき）の帳簿の数。 */
+  bookAtCount: number;
+  countedBy: string;
+  updatedAt: string;
+}
+
+/** 棚卸しの行に数を足す（置き換える）ときの値。 */
+export interface CountEntry {
+  id: string;
+  countId: string;
+  itemId: string;
+  locationId: string;
+  lotId: string | null;
+  qty: number;
+  /** `add` は足す、`set` は置き換える（数え直し）。 */
+  mode: 'add' | 'set';
+  /** 行を初めて作るときの帳簿の数。すでに行があれば使わない。 */
+  bookAtCount: number;
+  countedBy: string;
+  at: string;
 }
 
 /** 入出庫の記録の探し方。 */
@@ -102,6 +132,16 @@ export interface InventoryStore {
    * @remarks 取り消しは操作の単位で行う（第29.9節）
    */
   siblings(tenantId: string, moveId: string): Promise<InventoryMove[]>;
+
+  createCount(tenantId: string, count: InventoryCount): Promise<void>;
+  getCount(tenantId: string, id: string): Promise<InventoryCount | null>;
+  /** 開いている棚卸し（会社で 1 つ）。 */
+  openCount(tenantId: string): Promise<InventoryCount | null>;
+  listCounts(tenantId: string, limit?: number): Promise<InventoryCount[]>;
+  /** 棚卸しの行に数を足す（置き換える）。何人が同時に数えても足し合わせる。 */
+  addCountLine(tenantId: string, entry: CountEntry): Promise<CountLineRecord>;
+  listCountLines(tenantId: string, countId: string): Promise<CountLineRecord[]>;
+  setCountStatus(tenantId: string, id: string, status: 'closed' | 'cancelled', userId: string, at: string): Promise<void>;
 }
 
 // ---- PostgreSQL ----------------------------------------------------------
@@ -147,6 +187,34 @@ function toMove(r: MoveRow): InventoryMove {
     fromLocationId: r.from_location_id, toLocationId: r.to_location_id, delta: num(r.delta), reason: r.reason,
     source: r.source, reversalOf: r.reversal_of, createdBy: r.created_by, createdByName: r.created_by_name ?? undefined,
     createdAt: iso(r.created_at),
+  };
+}
+
+interface CountRow {
+  id: string; scope: InventoryCount['scope']; scope_value: string; status: InventoryCount['status']; started_by: string;
+  started_by_name: string | null; started_at: unknown; closed_by: string | null; closed_at: unknown;
+}
+
+function toCount(r: CountRow): InventoryCount {
+  return {
+    id: r.id, scope: r.scope, scopeValue: r.scope_value, status: r.status, startedBy: r.started_by,
+    startedByName: r.started_by_name ?? undefined, startedAt: iso(r.started_at), closedBy: r.closed_by,
+    closedAt: r.closed_at ? iso(r.closed_at) : null,
+  };
+}
+
+interface CountLineRow {
+  item_id: string; location_id: string; lot_id: string | null; lot: string | null; expires_on: unknown;
+  counted: unknown; book_at_count: unknown; counted_by: string; updated_at: unknown;
+}
+
+const COUNT_LINE_SELECT = `select l.item_id, l.location_id, l.lot_id, lt.lot, lt.expires_on, l.counted, l.book_at_count, l.counted_by, l.updated_at
+  from inventory_count_lines l left join inventory_lots lt on lt.id = l.lot_id`;
+
+function toCountLine(r: CountLineRow): CountLineRecord {
+  return {
+    itemId: r.item_id, locationId: r.location_id, lotId: r.lot_id, lot: r.lot, expiresOn: day(r.expires_on),
+    counted: num(r.counted), bookAtCount: num(r.book_at_count), countedBy: r.counted_by, updatedAt: iso(r.updated_at),
   };
 }
 
@@ -358,6 +426,58 @@ export class PostgresInventoryStore implements InventoryStore {
         where m.tenant_id = $1 and (m.id = o.id or (o.batch_id is not null and m.batch_id = o.batch_id)) order by m.id`, [tenantId, moveId]);
     return rows.map(toMove);
   }
+
+  private readonly COUNT_SELECT = `select c.*, u.display_name as started_by_name from inventory_counts c left join users u on u.id = c.started_by`;
+
+  async createCount(tenantId: string, c: InventoryCount): Promise<void> {
+    await this.q(tenantId,
+      `insert into inventory_counts (id, tenant_id, scope, scope_value, status, started_by, started_at) values ($1,$2,$3,$4,'open',$5,$6)`,
+      [c.id, tenantId, c.scope, c.scopeValue, c.startedBy, c.startedAt]);
+  }
+
+  async getCount(tenantId: string, id: string): Promise<InventoryCount | null> {
+    const rows = await this.q<CountRow>(tenantId, `${this.COUNT_SELECT} where c.tenant_id = $1 and c.id = $2`, [tenantId, id]);
+    return rows[0] ? toCount(rows[0]) : null;
+  }
+
+  async openCount(tenantId: string): Promise<InventoryCount | null> {
+    const rows = await this.q<CountRow>(tenantId,
+      `${this.COUNT_SELECT} where c.tenant_id = $1 and c.status = 'open' order by c.started_at desc limit 1`, [tenantId]);
+    return rows[0] ? toCount(rows[0]) : null;
+  }
+
+  async listCounts(tenantId: string, limit = 20): Promise<InventoryCount[]> {
+    const rows = await this.q<CountRow>(tenantId,
+      `${this.COUNT_SELECT} where c.tenant_id = $1 order by c.started_at desc limit $2`, [tenantId, limit]);
+    return rows.map(toCount);
+  }
+
+  async addCountLine(tenantId: string, e: CountEntry): Promise<CountLineRecord> {
+    return this.tx(tenantId, async (c) => {
+      await c.query(
+        `insert into inventory_count_lines (id, tenant_id, count_id, item_id, location_id, lot_key, lot_id, counted, book_at_count, counted_by, updated_at)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+         on conflict (count_id, item_id, location_id, lot_key) do update set
+           counted = case when $12 = 'set' then excluded.counted else inventory_count_lines.counted + excluded.counted end,
+           counted_by = excluded.counted_by, updated_at = excluded.updated_at`,
+        [e.id, tenantId, e.countId, e.itemId, e.locationId, e.lotId ?? '', e.lotId, e.qty, e.bookAtCount, e.countedBy, e.at, e.mode]);
+      const { rows } = await c.query<CountLineRow>(
+        `${COUNT_LINE_SELECT} where l.tenant_id = $1 and l.count_id = $2 and l.item_id = $3 and l.location_id = $4 and l.lot_key = $5`,
+        [tenantId, e.countId, e.itemId, e.locationId, e.lotId ?? '']);
+      return toCountLine(rows[0]!);
+    });
+  }
+
+  async listCountLines(tenantId: string, countId: string): Promise<CountLineRecord[]> {
+    const rows = await this.q<CountLineRow>(tenantId, `${COUNT_LINE_SELECT} where l.tenant_id = $1 and l.count_id = $2`, [tenantId, countId]);
+    return rows.map(toCountLine);
+  }
+
+  async setCountStatus(tenantId: string, id: string, status: 'closed' | 'cancelled', userId: string, at: string): Promise<void> {
+    await this.q(tenantId,
+      `update inventory_counts set status = $3, closed_by = $4, closed_at = $5 where tenant_id = $1 and id = $2 and status = 'open'`,
+      [tenantId, id, status, userId, at]);
+  }
 }
 
 // ---- メモリ（自動テスト用） ----------------------------------------------
@@ -515,5 +635,53 @@ export class MemoryInventoryStore implements InventoryStore {
     const o = this.moves.find((m) => m.tenantId === tenantId && m.id === moveId);
     if (!o) return [];
     return this.moves.filter((m) => m.tenantId === tenantId && m.batchId === o.batchId).map((m) => this.toView(m));
+  }
+
+  readonly counts = new Map<string, InventoryCount & { tenantId: string }>();
+  readonly countLines = new Map<string, CountLineRecord & { tenantId: string; countId: string }>();
+
+  async createCount(tenantId: string, c: InventoryCount): Promise<void> {
+    this.counts.set(c.id, { ...c, status: 'open', tenantId });
+  }
+
+  async getCount(tenantId: string, id: string): Promise<InventoryCount | null> {
+    const c = this.counts.get(id);
+    if (!c || c.tenantId !== tenantId) return null;
+    const { tenantId: _t, ...rest } = c;
+    return rest;
+  }
+
+  async openCount(tenantId: string): Promise<InventoryCount | null> {
+    const c = [...this.counts.values()].filter((x) => x.tenantId === tenantId && x.status === 'open').sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
+    return c ? this.getCount(tenantId, c.id) : null;
+  }
+
+  async listCounts(tenantId: string, limit = 20): Promise<InventoryCount[]> {
+    const all = [...this.counts.values()].filter((x) => x.tenantId === tenantId).sort((a, b) => b.startedAt.localeCompare(a.startedAt)).slice(0, limit);
+    return Promise.all(all.map((c) => this.getCount(tenantId, c.id) as Promise<InventoryCount>));
+  }
+
+  async addCountLine(tenantId: string, e: CountEntry): Promise<CountLineRecord> {
+    const k = `${e.countId}\u0000${e.itemId}\u0000${e.locationId}\u0000${e.lotId ?? ''}`;
+    const cur = this.countLines.get(k);
+    const lot = e.lotId ? this.lots.get(e.lotId) : undefined;
+    const next = {
+      tenantId, countId: e.countId, itemId: e.itemId, locationId: e.locationId, lotId: e.lotId, lot: lot?.lot ?? null,
+      expiresOn: lot?.expiresOn ?? null, counted: e.mode === 'set' || !cur ? e.qty : cur.counted + e.qty,
+      bookAtCount: cur ? cur.bookAtCount : e.bookAtCount, countedBy: e.countedBy, updatedAt: e.at,
+    };
+    this.countLines.set(k, next);
+    const { tenantId: _t, countId: _c, ...rest } = next;
+    return rest;
+  }
+
+  async listCountLines(tenantId: string, countId: string): Promise<CountLineRecord[]> {
+    return [...this.countLines.values()].filter((l) => l.tenantId === tenantId && l.countId === countId)
+      .map(({ tenantId: _t, countId: _c, ...rest }) => rest);
+  }
+
+  async setCountStatus(tenantId: string, id: string, status: 'closed' | 'cancelled', userId: string, at: string): Promise<void> {
+    const c = this.counts.get(id);
+    if (c && c.tenantId === tenantId && c.status === 'open') Object.assign(c, { status, closedBy: userId, closedAt: at });
   }
 }

@@ -9,7 +9,8 @@ import { createRoot } from 'react-dom/client';
 import { App } from './App.js';
 import { Admin } from './Admin.js';
 import { Board } from './Dashboard.js';
-import { Login } from './Login.js';
+import { Login, takeReturnPath } from './Login.js';
+import { MobileInventory } from './MobileInventory.js';
 import { api, ApiError, setUnauthorizedHandler, type Me } from './api.js';
 import './styles.css';
 import { applyTheme } from './theme.js';
@@ -22,7 +23,7 @@ applyTheme();
  *
  * @remarks
  * 管理者ページはテナントのサブドメイン配下の `/admin` に置く（仕様書 第6.6節）。
- * 掛け通しの画面（眺めるだけのダッシュボード）は `/board`（第6.7.2.1節）。
+ * 掛け通しの画面（眺めるだけのダッシュボード）は `/board`（第6.7.2.1節）。スマホ用の在庫のページは `/m/inventory`（第29.11.1節）。
  * 画面の出し分けは利便のためであり、権限の判定は API 側で行う。
  */
 function Root() {
@@ -33,6 +34,9 @@ function Root() {
   const load = useCallback(async () => {
     try {
       setMe(await api.me());
+      // ログインの前に開こうとしていたページ（スマホ用の在庫のページなど）へ戻す（仕様書 第29.11.1節）
+      const back = takeReturnPath();
+      if (back && location.pathname === '/') history.replaceState(null, '', back);
       setState('ready');
     } catch (err) {
       if (err instanceof ApiError && err.needsLogin) {
@@ -58,6 +62,8 @@ function Root() {
     setMe(null);
     setState('login');
   };
+  // スマホ用の在庫のページ（仕様書 第29.11.1節）。ワークスペースの枠（左のメニュー・秘書の欄）を出さない
+  if (location.pathname.startsWith('/m/inventory')) return <MobileInventory me={me} />;
   if (location.pathname.startsWith('/board')) {
     // 権限の判定は API が行う。ここは案内だけ（仕様書 第6.7.2.1節）
     if (!me.user.roles.includes('admin')) {

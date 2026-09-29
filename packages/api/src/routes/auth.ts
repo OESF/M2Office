@@ -13,19 +13,7 @@ import { companyName, type AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 import { buildGoogleLoginUrl, createPkce } from '@m2office/core';
 import { clearSessionCookie, issueSession, readSession } from '../auth/session.js';
-
-/**
- * 始めた会社のホストの起点。
- *
- * @remarks
- * 画面から呼ばれるため `Origin` が付く。無ければ `Host` から組み立てる。
- * 開発は HTTP、本番は HTTPS である。
- */
-function tenantOrigin(origin: string | undefined, host: string | undefined): string {
-  if (origin) return origin;
-  const h = host ?? 'localhost';
-  return `${h.startsWith('localhost') || h.includes('.lvh.me') ? 'http' : 'https'}://${h}`;
-}
+import { tenantOrigin } from '../tenant-origin.js';
 
 /**
  * ログインとログアウト。

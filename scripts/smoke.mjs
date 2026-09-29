@@ -1995,7 +1995,8 @@ console.log('\n■ 41. 帳票の PDF（第9.4.1節、Q-59・Q-57）');
     const doc = await pdfjs.getDocument({ data: new Uint8Array(pdf), useSystemFonts: false, disableFontFace: true }).promise;
     const content = await (await doc.getPage(1)).getTextContent();
     const text = content.items.map((i) => ('str' in i ? i.str : '')).join(' ');
-    head === '%PDF-' && text.includes('請求書') && text.includes('株式会社アルファ 御中') && pdf.length < 1_000_000
+    // 書体はそのまま埋め込む（使った字だけを抜き出すと字の形が落ちた。文字の取り出しでは気づけない。ADR-0017 の改め）
+    head === '%PDF-' && text.includes('請求書') && text.includes('株式会社アルファ 御中') && pdf.length < 5_000_000
       ? ok(`取り出した PDF から日本語を読み返せる（${Math.ceil(pdf.length / 1024)} KB）`)
       : ng('読み返せない', `${head} ${text.slice(0, 60)}`);
     text.includes('お振込先: ○○銀行') && text.includes('振込手数料は貴社にてご負担ください') && text.includes('印')
@@ -3376,6 +3377,33 @@ console.log('\n■ 60. 在庫管理（内蔵の拡張。第29章、ADR-0045）')
     acts.has('inventory.import') && acts.has('inventory.export') && !acts.has('inventory.move')
       ? ok('取り込み・書き出しは監査ログの「在庫」に残し、入出庫の 1 件ずつは入れない') : ng('監査ログが合わない', [...acts].join(','));
 
+    // 棚卸し（第29.10節）。会社で 1 つ・数えた時点の帳簿と比べる・確定で差を調整にする・確定できる人
+    const cStart = await call('a', '/v1/inventory/counts', { method: 'POST', body: JSON.stringify({ scope: 'all' }) });
+    const countId = cStart.body?.view?.count?.id;
+    const cAgain = await call('a', '/v1/inventory/counts', { method: 'POST', body: JSON.stringify({ scope: 'all' }) }, 'member');
+    cStart.status === 201 && cAgain.status === 200 && cAgain.body?.view?.count?.id === countId
+      ? ok('棚卸しは会社で 1 つ。ほかの人が始めると、開いている棚卸しを続ける') : ng('棚卸しが 2 つ開く', `${cStart.status} ${cAgain.status}`);
+    const tonerId = withQty.body?.item?.id;
+    await call('a', `/v1/inventory/counts/${countId}/lines`, { method: 'POST', body: JSON.stringify({ itemId: tonerId, qty: 1 }) }, 'member');
+    const cLine = await call('a', `/v1/inventory/counts/${countId}/lines`, { method: 'POST', body: JSON.stringify({ itemId: tonerId, qty: 1 }) });
+    cLine.status === 201 && cLine.body?.row?.counted === 2 && cLine.body?.row?.book === 3 && cLine.body?.row?.diff === -1
+      ? ok('棚卸し: 読むたびに足し、ほかの人が数えた分も足し合わせ、帳簿との差を出す') : ng('数えられない', JSON.stringify(cLine.body));
+    const cByMember = await call('a', `/v1/inventory/counts/${countId}/close`, { method: 'POST' }, 'member');
+    const cClose = await call('a', `/v1/inventory/counts/${countId}/close`, { method: 'POST' });
+    const { body: tonerAfter } = await call('a', `/v1/inventory/items/${tonerId}`);
+    cByMember.status === 403 && cClose.status === 200 && cClose.body?.adjusted >= 1 && tonerAfter.item?.onHand === 2 && tonerAfter.moves?.[0]?.reason === '棚卸し'
+      ? ok('棚卸しの確定は始めた人と管理者だけ。差の分を理由「棚卸し」の調整にする') : ng('確定が合わない', `${cByMember.status} ${cClose.status} ${tonerAfter.item?.onHand}`);
+    const labels = await fetch(`${API}/v1/inventory/locations/labels.pdf`, { headers: { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' } });
+    const labelHead = new TextDecoder().decode(new Uint8Array(await labels.arrayBuffer()).slice(0, 5));
+    labels.status === 200 && labels.headers.get('content-type') === 'application/pdf' && labelHead === '%PDF-'
+      ? ok('棚のラベル（QR）を A4 に並べた PDF を出せる') : ng(`ラベルの PDF を出せない（${labels.status}）`);
+    // スマホ用のページ（第29.11.1節）。ラベルの QR の URL から棚を引ける・「スマホで開く」の QR を出せる
+    const byUrl = await call('a', `/v1/inventory/lookup?code=${encodeURIComponent(`http://a.lvh.me:3100/m/inventory?shelf=${encodeURIComponent(shelfA?.labelKey ?? '')}`)}`, {}, 'member');
+    const qr = await fetch(`${API}/v1/inventory/mobile-qr.svg`, { headers: { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' } });
+    const qrText = await qr.text();
+    byUrl.body?.location?.id === shelfA?.id && qr.status === 200 && qrText.includes('<svg')
+      ? ok('棚のラベルの QR（スマホ用のページの URL）から棚を引け、「スマホで開く」の QR を出せる') : ng('スマホ用のページの入口が働かない', `${JSON.stringify(byUrl.body?.location ?? null)} ${qr.status}`);
+
     // 秘書の在庫の問い（第29.15節）。推論に選ばせず、在庫の表を引いてその場で答える
     const { body: askStock } = await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message: `${tag} ハンドクリームの在庫は？` }) }, 'member');
     askStock.layer === 'direct' && /使える数 8 個/.test(askStock.text ?? '')
@@ -3404,6 +3432,8 @@ console.log('\n■ 60. 在庫管理（内蔵の拡張。第29章、ADR-0045）')
   } finally {
     // 確認用の品目と記録を消す（アプリからは消せないため、持ち主のつなぎで消す）
     const items = `select id from inventory_items where name like '${tag}%'`;
+    await owner.query(`delete from inventory_count_lines where item_id in (${items})`);
+    await owner.query(`delete from inventory_counts where tenant_id in ('t-alpha', 't-beta') and started_at >= $1`, [startedAt]);
     await owner.query(`delete from inventory_stock where item_id in (${items})`);
     await owner.query(`delete from inventory_moves where item_id in (${items})`);
     await owner.query(`delete from inventory_lots where item_id in (${items})`);

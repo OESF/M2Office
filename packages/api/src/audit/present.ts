@@ -123,6 +123,9 @@ const ACTION_LABELS: Record<string, string> = {
   'inventory.item.stop': '在庫の品目を止めた',
   'inventory.item.resume': '在庫の品目を使うに戻した',
   'inventory.location.remove': '在庫の場所を外した',
+  'inventory.count.start': '棚卸しを始めた',
+  'inventory.count.close': '棚卸しを確定した',
+  'inventory.count.cancel': '棚卸しをやめた',
 };
 
 /** 操作の種類（絞り込みの単位）。`prefixes` のどれかで始まる操作が当たる。 */

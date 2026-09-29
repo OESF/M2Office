@@ -162,6 +162,14 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/inventory/moves/:id/undo` | 自分の記録をその日のうちに取り消す（逆の記録を操作の組で足す） |
 | `GET /v1/inventory/moves` | 入出庫の記録（`itemId`・`from`・`to`） |
 | `POST /v1/inventory/import` | CSV・Excel から品目を取り込む（`file`。見出しを推論で読む。監査ログに残す） |
+| `GET /v1/inventory/locations/labels.pdf` | 棚のラベル（QR）を A4 に 3 列 × 7 段で並べた PDF（`ids` で場所を絞る）。QR にはその棚を開くスマホ用のページの URL（会社のホスト＋`/m/inventory?shelf=…`）を入れる（第29.7節） |
+| `GET /v1/inventory/mobile-qr.svg` | スマホ用のページ（`/m/inventory`）を開く QR（SVG。第29.11.1節） |
+| `GET /v1/inventory/counts` ／ `POST /v1/inventory/counts` | 開いている棚卸し（差の一覧つき）と最近の棚卸し ／ 始める（`scope`: all・location・category と `value`。開いていれば続ける。会社で 1 つ。第29.10節） |
+| `GET /v1/inventory/counts/:id` | 棚卸しの姿（数えた行と数えていない行を差の大きい順に） |
+| `POST /v1/inventory/counts/:id/lines` | 数える（`itemId`・`qty`・`mode`: add か set・`unit`・`locationId`・`lot`・`expiresOn`）。何人でも足し合わせる |
+| `POST /v1/inventory/counts/:id/explain` | 差の大きい品目の考えられる理由（秘書の推測。帳簿は直さない） |
+| `POST /v1/inventory/counts/:id/close` ／ `cancel` | 確定する（差を理由「棚卸し」の調整にし、数えていない行は 0 にしない）／ やめる。どちらも始めた人と管理者だけ（それ以外は 403） |
+| `GET /v1/inventory/counts/:id/export` | 棚卸しの結果を CSV で書き出す（監査ログに残す） |
 | `GET /v1/inventory/export` | 品目と数を書き出す（`format=csv` か `xlsx`。監査ログに残す） |
 | `GET /v1/notices` | 本人宛ての有効な社内のお知らせ（取り下げ・期間切れ・本人が済んだものを除く。`isNew`・`daysLeft` つき。仕様書 第10.15節） |
 | `POST /v1/notices` | 社内のお知らせを出す（`title`・`body`・`link`（https だけ）・`all` か `groupIds`・`dueOn`・`until`）。会社の全員が出せる。承認は挟まない。201 |
