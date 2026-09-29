@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { AVATAR_PRESETS, VOICE_CHOICES, VOICE_STYLE_MAX, showsCaptions, type UserSettings } from '@m2office/shared';
+import { AVATAR_PRESETS, BRIEF_SECTIONS, WEEKLY_SECTIONS, VOICE_CHOICES, VOICE_STYLE_MAX, showsCaptions, type BriefSettings, type UserSettings } from '@m2office/shared';
 import {
   api, describeError, type MyConnectionView,
   type AgentSummary, type ConversationView, type Me, type MemoryView,
@@ -36,7 +36,7 @@ export const SETTINGS_SECTIONS = [
   { id: 'google', label: 'Google 連携', hint: 'メール・予定への接続' },
   // 会社に利用者ごとに許可する接続があるときだけ出す（仕様書 第6.5.9節。出し分けは画面の上側で行う）
   { id: 'services', label: 'サービスとの接続', hint: 'Slack などへの接続' },
-  { id: 'secretary', label: '秘書', hint: '名前・呼ばれ方・声・アバター' },
+  { id: 'secretary', label: '秘書', hint: '名前・呼ばれ方・声・アバター・朝のブリーフ' },
   { id: 'notifications', label: '通知', hint: '種類・時間帯・受け取り方' },
   { id: 'memory', label: '記憶とデータ', hint: '記憶・会話ログ・見え方' },
   { id: 'display', label: '表示', hint: '明るさ・メニューの並び' },
@@ -147,6 +147,7 @@ export function Settings({ me, agents, onChanged, section }: {
       {on('services') && <ServicesSettings />}
 
       {on('secretary') && (
+      <>
       <div className="card">
         <h3>秘書</h3>
         <div className="grid2">
@@ -231,13 +232,15 @@ export function Settings({ me, agents, onChanged, section }: {
         </div>
         <SaveButton run={() => api.saveMySettings('secretary', s.secretary).then(onChanged)} />
       </div>
+      <BriefCard brief={s.brief} onSaved={(brief) => setS({ ...s, brief })} />
+      </>
       )}
 
       {on('notifications') && <>
       <div className="card">
         <h3>通知</h3>
         <p className="muted small">切った種類は画面内にも届きません</p>
-        {([['brief', '週次ブリーフ'], ['run', '実行の完了'], ['approval', '承認の依頼'], ['failure', '失敗']] as const).map(([k, label]) => (
+        {([['brief', 'ブリーフ（朝・週次）'], ['run', '実行の完了'], ['approval', '承認の依頼'], ['failure', '失敗']] as const).map(([k, label]) => (
           <label key={k} className="check">
             <input type="checkbox" checked={s.notifications.kinds[k]}
               onChange={(e) => set('notifications', { kinds: { ...s.notifications.kinds, [k]: e.target.checked } })} />
@@ -841,5 +844,73 @@ function VoiceTest({ secretary, children }: {
         </div>
       )}
     </>
+  );
+}
+
+/**
+ * ブリーフ（朝・週）の中身（仕様書 第6.5.3.1節・第9.5.5.1.1節）。秘書が覚えた関心の分野と、朝と週それぞれで外した項目を見せる。
+ *
+ * @remarks
+ * **足すのは秘書への会話で行う。** ここでは消す・戻すだけにする（人に一覧を作らせない。ADR-0028）。
+ * 押したらすぐ保存する。説明の文は常に出さない（原則 u11）。
+ */
+function BriefCard({ brief, onSaved }: { brief: BriefSettings; onSaved: (b: BriefSettings) => void }) {
+  const [error, setError] = useState<string | null>(null);
+  const save = async (next: BriefSettings) => {
+    setError(null);
+    try {
+      await api.saveMySettings('brief', next);
+      onSaved(next);
+    } catch (e) {
+      setError(describeError(e, '保存できませんでした'));
+    }
+  };
+  const label = (id: string) => BRIEF_SECTIONS.find((x) => x.id === id)?.label ?? id;
+  const weeklyLabel = (id: string) => WEEKLY_SECTIONS.find((x) => x.id === id)?.label ?? id;
+  const weeklyOmit = brief.weeklyOmit ?? [];
+  return (
+    <div className="card">
+      <h3>ブリーフ（朝・週）</h3>
+      {error && <p className="error">{error}</p>}
+      <h4>関心の分野</h4>
+      {brief.topics.length === 0
+        ? <p className="muted small">一般のニュースだけをお伝えしています</p>
+        : (
+          <ul className="brief-list">
+            {brief.topics.map((t) => (
+              <li key={t.label} className="row">
+                <strong>{t.label}</strong>
+                <span className="muted small">{t.query}</span>
+                <button className="btn ghost small" type="button" title={`「${t.label}」を外す`}
+                  onClick={() => void save({ ...brief, topics: brief.topics.filter((x) => x.label !== t.label) })}>外す</button>
+              </li>
+            ))}
+          </ul>
+        )}
+      {brief.omit.length > 0 && <>
+        <h4>朝のブリーフで外した項目</h4>
+        <ul className="brief-list">
+          {brief.omit.map((id) => (
+            <li key={id} className="row">
+              <span className="grow">{label(id)}</span>
+              <button className="btn ghost small" type="button"
+                onClick={() => void save({ ...brief, omit: brief.omit.filter((x) => x !== id) })}>戻す</button>
+            </li>
+          ))}
+        </ul>
+      </>}
+      {weeklyOmit.length > 0 && <>
+        <h4>週のブリーフで外した項目</h4>
+        <ul className="brief-list">
+          {weeklyOmit.map((id) => (
+            <li key={id} className="row">
+              <span className="grow">{weeklyLabel(id)}</span>
+              <button className="btn ghost small" type="button"
+                onClick={() => void save({ ...brief, weeklyOmit: weeklyOmit.filter((x) => x !== id) })}>戻す</button>
+            </li>
+          ))}
+        </ul>
+      </>}
+    </div>
   );
 }

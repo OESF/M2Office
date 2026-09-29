@@ -78,7 +78,7 @@ export interface Repository {
   listUserRunsForPurge(tenantId: string, userId: string): Promise<Run[]>;
   /**
    * 保持期間の処理を済ませたことを記録する。`steps` を渡せば、1 つのトランザクションでステップの中身を置き換え、
-   * 承認の表示（`present`）も消す。`null` なら、消すものが無かったとして記録だけする。
+   * 承認の表示（`present`）と、その実行の通知の本文も消す。`null` なら、消すものが無かったとして記録だけする。
    */
   markRunRetention(tenantId: string, runId: string, steps: RunStep[] | null, redactedPresent: string, at: string): Promise<void>;
   updateApproval(approval: Approval): Promise<void>;

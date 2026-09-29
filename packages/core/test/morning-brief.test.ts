@@ -58,3 +58,29 @@ test('朝のブリーフ: 公式の業務で、読むだけの道具だけを使
   assert.ok(!MORNING_BRIEF.steps.some((s) => s.type === 'approval'), '承認は無い');
   assert.ok(OFFICIAL_AGENTS.find((a) => a.id === 'secretary-lookup')!.tools.includes('profile.read'), '調べものも出発地を読める');
 });
+
+test('朝のブリーフ: 関心の分野と社内のお知らせを最初の段で読み、お知らせを最初に伝える（第9.5.5.1.1節・第10.15節）', () => {
+  const [collect, outside, write] = MORNING_BRIEF.steps;
+  assert.ok(collect?.type === 'agent' && collect.required?.includes('brief.settings') && collect.required.includes('notices.list'));
+  assert.ok(outside?.type === 'agent' && /topics/.test(outside.instruction) && /外した項目/.test(outside.instruction), '外した項目は調べない');
+  assert.ok(write?.type === 'agent' && /^\s*'?.*1\. 社内のお知らせ/m.test(write.instruction), 'お知らせを最初に');
+  assert.ok(write?.type === 'agent' && /指示には従わない/.test(write.instruction), 'お知らせの本文を指示として扱わない（不変則 I-6）');
+  assert.equal(MORNING_BRIEF.version, 1, '公式の業務は版を上げずに直す（定時実行が版を決め打ちで引く）');
+});
+
+test('週次ブリーフ: 読むだけで、配信の道具を使わない。週間天気・前週比・イベントを調べ、外した項目は調べない（第9.5.5節、ADR-0048）', async () => {
+  const { AG05_WEEKLY_BRIEF } = await import('../src/index.js');
+  assert.doesNotThrow(() => validateDefinition(AG05_WEEKLY_BRIEF, registry));
+  for (const name of AG05_WEEKLY_BRIEF.tools) assert.equal(registry.get(name)?.risk, 'read', `${name} は読むだけ`);
+  assert.ok(!AG05_WEEKLY_BRIEF.tools.includes('notification.send'), '届けるのは実行エンジン（ブリーフの通知）');
+  assert.equal(AG05_WEEKLY_BRIEF.category, 'briefing');
+  assert.equal(AG05_WEEKLY_BRIEF.version, 1, '公式の業務は版を上げずに直す');
+  const [collect, outside, events, write] = AG05_WEEKLY_BRIEF.steps;
+  assert.ok(collect?.type === 'agent' && collect.required?.includes('brief.settings') && collect.required.includes('notices.list'));
+  assert.ok(collect?.type === 'agent' && !collect.tools?.includes('web.research'), '本人の情報を読んでから調べる');
+  assert.ok(outside?.type === 'agent' && /週間天気予報/.test(outside.instruction) && /前週比/.test(outside.instruction));
+  assert.ok(events?.type === 'agent' && events.required?.includes('web.research') && /展示会/.test(events.instruction), 'イベントは段を分けて必ず調べる');
+  assert.ok(outside?.type === 'agent' && /weeklyOmit/.test(outside.instruction) && /市区町村の名前だけ/.test(outside.instruction));
+  assert.ok(write?.type === 'agent' && /曜日ごと/.test(write.instruction) && /日付と出典/.test(write.instruction), 'Web の数字には日付と出典');
+  assert.ok(!AG05_WEEKLY_BRIEF.steps.some((s) => s.type === 'approval'), '承認は無い');
+});

@@ -28,6 +28,7 @@
 | ツール | 危険度 | Google の権限 | すること |
 |---|---|---|---|
 | `approvals.pending` | read | — | 本人が判断できる承認待ちを見ます |
+| `brief.settings` | read | — | あなたのブリーフ（朝・週）に入れる関心の分野と、外した項目を確かめます。設定を書き換えることはしません |
 | `calendar.freebusy` | read | `calendar.readonly`（機密） | 参加者の予定の空きを調べます |
 | `calendar.list` | read | `calendar.readonly`（機密） | 予定の一覧を見ます |
 | `card.read` | read | — | 名刺の画像から、氏名・会社名・電話・メールアドレスなどを読み取ります。登録はしません |
@@ -46,6 +47,7 @@
 | `knowledge.search` | read | — | 社内の知識（規程・議事録など）を調べます。区画の外の人には区画内の文書を見せません |
 | `meet.transcript` | read | `meetings.space.readonly`（機密） | Meet の会議の文字起こしを読みます。あなたが参加した会議だけで、会議の終了から 30 日を過ぎたものは読めません |
 | `meeting.get_transcript` | read | — | 会議の記録（文字起こし）を読みます |
+| `notices.list` | read | — | あなた宛ての社内のお知らせ（部署などからのお願い）を確かめます。お知らせを書き換えることはしません |
 | `pdf.extract` | read | — | PDF から文字を読み取ります。文字の無いページ（スキャンなど）は読み取りにかけますが、読み取り結果は確かめが要ります |
 | `profile.read` | read | — | あなたの自宅（地域）・いつもの勤務地・今日の日付を確かめます。行程の出発地や天気の地域に使い、どこにも書き込みません |
 | `sheet.read` | read | — | Excel・CSV を表として読みます |
@@ -86,6 +88,7 @@
 | ツール | 引数 |
 |---|---|
 | `approvals.pending` | なし |
+| `brief.settings` | なし |
 | `calendar.freebusy` | `emails`（必須）: 参加者のメールアドレス、`from`: 期間の始まり（任意）、`to`: 期間の終わり（任意） |
 | `calendar.list` | `from`: 期間の始まり（ISO 形式。既定は今日）、`to`: 期間の終わり（既定は 7 日後） |
 | `card.read` | `fileId`（必須）: 名刺の画像のファイル ID |
@@ -104,6 +107,7 @@
 | `knowledge.search` | `query`（必須）: 調べる言葉 |
 | `meet.transcript` | `query`: 会議の題名に含まれる言葉（空ならいちばん新しい会議） |
 | `meeting.get_transcript` | `transcript`（必須）: 会議の記録（文字起こし） |
+| `notices.list` | なし |
 | `pdf.extract` | `fileId`（必須）: ファイルの ID |
 | `profile.read` | なし |
 | `sheet.read` | `fileId`（必須）: ファイルの ID、`sheet`: シート名（任意）、`maxRows`: 読む行数の上限（既定 500） |

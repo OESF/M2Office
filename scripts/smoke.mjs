@@ -437,6 +437,8 @@ console.log('\n■ 11. AG-05 週次ブリーフ（定時実行 → 本人へ通�
 
   const { body: adminInbox } = await call('a', '/v1/notifications');
   adminInbox.items.every((n) => n.id !== latest?.id) ? ok('他の利用者の受信箱には入らない') : ng('他人に届いている');
+  // 週次ブリーフは秘書の答えとしても届ける（第9.5.5節）。伝えたことにしておく（残すと、あとの音声の確認（第 42 節）で伝える結果として会話ログに入る）
+  await call('a', '/v1/secretary/lookups/claim', { method: 'POST' }, 'member');
 
   const { body: again } = await call('a', '/v1/schedules', {}, 'member');
   const next = again.items.find((s) => s.id === brief.id);
@@ -630,19 +632,23 @@ console.log('\n■ 16. 個人設定');
   const { body: sched } = await call('a', '/v1/schedules', {}, 'member');
   const brief = sched.items.find((x) => x.agentId === 'weekly-brief');
   const { body: before } = await call('a', '/v1/notifications', {}, 'member');
+  // 呼び出した後に始まった実行だけを待つ（直前の第 11 節の実行を、終わったものと取り違えないため）
+  const triggeredAt = Date.now() - 1000;
   await call('a', `/v1/schedules/${brief.id}/trigger`, { method: 'POST' }, 'member');
   const deadline = Date.now() + 40000;
   let done = false;
   while (Date.now() < deadline && !done) {
     const { body: j } = await call('a', '/v1/jobs', {}, 'member');
     const latest = j.items.find((i) => i.job.agentId === 'weekly-brief');
-    done = latest && Date.parse(latest.run.startedAt) > Date.now() - 45000 && latest.run.status === 'completed';
+    done = latest && Date.parse(latest.run.startedAt) >= triggeredAt && latest.run.status === 'completed';
     if (!done) await sleep(1000);
   }
   const { body: after } = await call('a', '/v1/notifications', {}, 'member');
   done && after.items.length === before.items.length
     ? ok('受け取らないと決めた種類の通知は届かない') : ng('設定に反して届いた、または実行が終わらない');
   await put('notifications', { kinds: { brief: true, run: true, approval: true, failure: true }, quietHours: null });
+  // 動かした週次ブリーフを伝えたことにしておく（第 11 節と同じ理由）
+  await call('a', '/v1/secretary/lookups/claim', { method: 'POST' }, 'member');
 
   const { body: usage } = await call('a', '/v1/me/usage', {}, 'member');
   typeof usage.thisMonth?.runs === 'number' ? ok(`今月の実行件数を返す（${usage.thisMonth.runs} 件）`) : ng('利用状況が取れない');
@@ -3173,6 +3179,80 @@ console.log('\n■ 58. 契約書チェック（公式の拡張機能。第28章�
     await sleep(1500);
     await call('a', '/v1/secretary/lookups/claim', { method: 'POST' }, 'member');
     await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
+  }
+}
+
+console.log('\n■ 59. 社内のお知らせと朝のブリーフの中身（第10.15節・第9.5.5.1.1節、ADR-0047）');
+{
+  const made = [];
+  let groupId = null;
+  try {
+    // 全員宛て: A 社の一般の人に載り、B 社には載らない（不変則 I-2）
+    const all = await call('a', '/v1/notices', {
+      method: 'POST',
+      body: JSON.stringify({ title: '確認用: 年末調整の書類', body: '12/5 までに総務へ', all: true, dueOn: '2099-12-05' }),
+    }, 'member');
+    if (all.body?.notice?.id) made.push(all.body.notice.id);
+    all.status === 201 && all.body.notice.until === '2099-12-05' ? ok('一般の人もお知らせを出せる。締切の日まで載せる') : ng('お知らせを出せない', JSON.stringify(all.body));
+    const { body: forAdmin } = await call('a', '/v1/notices');
+    const mineA = (forAdmin.items ?? []).find((n) => n.id === all.body?.notice?.id);
+    mineA?.isNew && typeof mineA.daysLeft === 'number' ? ok('全員宛てのお知らせが、ほかの人の一覧に載る（初めて載せるもの・締切までの日数つき）') : ng('全員宛てが載らない', JSON.stringify(forAdmin));
+    const { body: forB } = await call('b', '/v1/notices');
+    !(forB.items ?? []).some((n) => n.title?.startsWith('確認用:')) ? ok('ほかの会社には載らない') : ng('ほかの会社に載った');
+    const crossWithdraw = await call('b', `/v1/notices/${all.body?.notice?.id}/withdraw`, { method: 'POST' });
+    crossWithdraw.status === 404 ? ok('ほかの会社の管理者は取り下げられない（404）') : ng(`取り下げられた（${crossWithdraw.status}）`);
+
+    // 入力の確かめ
+    const bad = await call('a', '/v1/notices', { method: 'POST', body: JSON.stringify({ title: '確認用: x', link: 'http://example.jp', all: true }) }, 'member');
+    bad.status === 400 ? ok('https でないリンクは受け付けない') : ng(`受け付けた（${bad.status}）`);
+    const foreign = await call('b', '/v1/admin/groups', { method: 'POST', body: JSON.stringify({ name: '確認用-お知らせ' }) });
+    const toForeign = await call('a', '/v1/notices', { method: 'POST', body: JSON.stringify({ title: '確認用: x', all: false, groupIds: [foreign.body?.id] }) });
+    toForeign.status === 400 ? ok('ほかの会社のグループを宛先にできない') : ng(`宛先にできた（${toForeign.status}）`);
+    if (foreign.body?.id) await call('b', `/v1/admin/groups/${foreign.body.id}`, { method: 'DELETE' });
+
+    // グループ宛て: 所属していない人には載らない
+    const g = await call('a', '/v1/admin/groups', { method: 'POST', body: JSON.stringify({ name: '確認用-お知らせ' }) });
+    groupId = g.body?.id ?? null;
+    const grp = await call('a', '/v1/notices', { method: 'POST', body: JSON.stringify({ title: '確認用: 健康診断の申し込み', link: 'https://example.jp/kenshin', all: false, groupIds: [groupId] }) });
+    if (grp.body?.notice?.id) made.push(grp.body.notice.id);
+    const { body: memberList } = await call('a', '/v1/notices', {}, 'member');
+    grp.status === 201 && !(memberList.items ?? []).some((n) => n.id === grp.body.notice.id)
+      ? ok('グループ宛てのお知らせは、所属していない人に載らない') : ng('グループの外の人に載った', JSON.stringify(memberList));
+
+    // 済んだ・取り下げ
+    const done = await call('a', `/v1/notices/${all.body?.notice?.id}/done`, { method: 'POST' });
+    const { body: afterDone } = await call('a', '/v1/notices');
+    done.status === 200 && !(afterDone.items ?? []).some((n) => n.id === all.body?.notice?.id)
+      ? ok('済んだとしたら、その人には載せない') : ng('済んだ後も載る');
+    const byOther = await call('a', `/v1/notices/${grp.body?.notice?.id}/withdraw`, { method: 'POST' }, 'member');
+    byOther.status === 403 ? ok('出していない一般の人は取り下げられない（403）') : ng(`取り下げられた（${byOther.status}）`);
+    const byAuthor = await call('a', `/v1/notices/${all.body?.notice?.id}/withdraw`, { method: 'POST' }, 'member');
+    byAuthor.status === 200 ? ok('出した人は取り下げられる') : ng(`取り下げられない（${byAuthor.status}）`);
+    const { body: audit } = await call('a', '/v1/admin/audit-events?limit=100');
+    const acts = new Set((audit.items ?? []).map((e) => e.action));
+    acts.has('notice.create') && acts.has('notice.withdraw') ? ok('出す・取り下げるを監査ログに残す') : ng('監査ログに無い');
+
+    // 朝のブリーフの中身（個人設定の brief）
+    const before = (await call('a', '/v1/me/settings', {}, 'member')).body.brief;
+    const save = await call('a', '/v1/me/settings/brief', {
+      method: 'PUT',
+      body: JSON.stringify({
+        topics: [{ label: '技術の動き', query: '生成AI 最新ニュース' }, { label: '', query: '空の名前' }],
+        omit: ['weather', 'notices'], seededAt: null, seedNote: true,
+      }),
+    }, 'member');
+    const after = (await call('a', '/v1/me/settings', {}, 'member')).body.brief;
+    save.status === 200 && after.topics.length === 1 && after.omit.join() === 'weather'
+      ? ok('朝のブリーフの中身を保存できる。名前の無い分野と、外せないお知らせは受け付けない') : ng('中身を保存できない', JSON.stringify(after));
+    after.seededAt && after.seedNote === (before?.seedNote ?? false)
+      ? ok('秘書が選んだ印は画面から変えられない（分野を消しても選び直さない）') : ng('印が画面から変わった', JSON.stringify(after));
+    await call('a', '/v1/me/settings/brief', { method: 'PUT', body: JSON.stringify({ topics: before?.topics ?? [], omit: before?.omit ?? [] }) }, 'member');
+
+  } catch (err) {
+    ng('お知らせの確認が途中で止まった', String(err));
+  } finally {
+    for (const id of made) await call('a', `/v1/notices/${id}/withdraw`, { method: 'POST' });
+    if (groupId) await call('a', `/v1/admin/groups/${groupId}`, { method: 'DELETE' });
   }
 }
 

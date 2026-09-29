@@ -12,7 +12,7 @@ import { readFileSync } from 'node:fs';
 import type { Server as HttpServer } from 'node:http';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { defaultGeminiModels, warnHotSwapModels } from '@m2office/core';
+import { defaultGeminiModels, seedBriefTopics, warnHotSwapModels } from '@m2office/core';
 import { buildDeps, companyView } from './context.js';
 import { authenticate, resolveTenant, type AppEnv } from './middleware/tenant.js';
 import { attachVoiceRelay } from './voice/relay.js';
@@ -22,11 +22,12 @@ import { jobsRoute } from './routes/jobs.js';
 import { runsRoute } from './routes/runs.js';
 import { approvalsRoute } from './routes/approvals.js';
 import { secretaryRoute } from './routes/secretary.js';
-import { ensureMorningBrief } from './secretary/morning.js';
+import { ensureMorningBrief, ensureWeeklyBrief } from './secretary/morning.js';
 import { authRoute } from './routes/auth.js';
 import { notificationsRoute } from './routes/notifications.js';
 import { schedulesRoute } from './routes/schedules.js';
 import { cardsRoute } from './routes/cards.js';
+import { noticesRoute } from './routes/notices.js';
 import { adminRoute } from './routes/admin.js';
 import { mcpConnectionsRoute } from './routes/mcp-connections.js';
 import { meRoute } from './routes/me.js';
@@ -97,7 +98,15 @@ app.get('/v1/me', async (c) => {
   // 本人のアバター（第6.5.1.1節）。取り込み直すと URL が変わり、画面が新しい写真を読む
   const photo = await deps.repo.getUserPhoto(ctx.tenant.id, ctx.user.id);
   // 朝のブリーフの定時実行を、まだなら秘書が用意する（仕様書 第9.5.5.1節）。応答は待たせない
-  void ensureMorningBrief(deps, ctx.tenant.id, ctx.user.id).catch((err) => deps.log.warn('朝のブリーフを用意できませんでした', { err }));
+  // 週次ブリーフの定時実行も、まだなら秘書が用意する（仕様書 第9.5.5節、ADR-0048）。朝のブリーフの後に（同じ設定を書き換えるため）
+  void ensureMorningBrief(deps, ctx.tenant.id, ctx.user.id)
+    .catch((err) => deps.log.warn('朝のブリーフを用意できませんでした', { err }))
+    .then(() => ensureWeeklyBrief(deps, ctx.tenant.id, ctx.user.id))
+    .catch((err) => deps.log.warn('週次ブリーフを用意できませんでした', { err }));
+  // 朝のブリーフの関心の分野を、まだなら秘書が役職などから選ぶ（第9.5.5.1.1節、ADR-0047）。応答は待たせない
+  void deps.ai.llmFor(ctx.tenant.id)
+    .then((llm) => seedBriefTopics(deps.repo, llm, ctx.tenant.id, ctx.user.id))
+    .catch((err) => deps.log.warn('朝のブリーフの関心の分野を選べませんでした', { err }));
   return c.json({
     // 画面に出す会社名は、会社情報の正式な会社名（仕様書 第6.6.1節）。入っていなければ申し込みのときの名前
     tenant: { ...ctx.tenant, ...(await companyView(deps, ctx.tenant)) },
@@ -125,6 +134,7 @@ app.route('/v1/secretary', secretaryRoute(deps));
 app.route('/v1/notifications', notificationsRoute(deps));
 app.route('/v1/schedules', schedulesRoute(deps));
 app.route('/v1/cards', cardsRoute(deps));
+app.route('/v1/notices', noticesRoute(deps));
 app.route('/v1/admin/dashboard', dashboardRoute(deps));
 app.route('/v1/admin/extensions', extensionsRoute(deps));
 app.route('/v1/admin/groups', groupsRoute(deps));

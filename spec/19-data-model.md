@@ -49,9 +49,10 @@
 | inventory_reservation・inventory_publication | 引き当てと公開（第29.19節。案） | 予約の番号と日時・品目・数・状態（**予約した人の情報を持たない**）。公開は承認した品目と項目・承認した人・公開の URL の鍵・状態 |
 | schedule | 定時実行 | tenant_id、対象者、agent 参照、入力、規則（毎日／毎平日／毎週。毎平日は第 0.125.0 版）、タイムゾーン、次回・前回の時刻、有効／無効 |
 | notification | 本人宛の通知 | tenant_id、宛先の利用者（1 人）、種類、題名、本文、run_id、既読の日時 |
+| notice・notice_receipt | 社内のお知らせと、受け取った人ごとの状態（第10.15節。第 0.152.0 版） | tenant_id、出した人、題名、本文、リンク、宛先（全員かグループ）、締切、載せる最後の日、取り下げた人と日時。受け取った人ごとに、初めてブリーフに載せた日時と済んだ日時 |
 | session | ログイン状態 | tenant_id、user_id、Cookie の値のハッシュ、CSRF トークン、手段、端末、期限、失効の日時 |
 | tenant_settings | 会社の設定 | tenant_id、会社情報、自社の書き方、自動化ポリシー、業務の有効化、効果の推計、知識の言い換え（第11.7.7節） |
-| user_settings | 個人設定 | tenant_id、user_id、プロフィール、秘書、通知、メニューの並び |
+| user_settings | 個人設定 | tenant_id、user_id、プロフィール、秘書、通知、メニューの並び、朝のブリーフの中身（関心の分野・外した項目。第9.5.5.1.1節） |
 | audit_event | 監査イベント | tenant_id、主体、操作、対象、根拠、日時 |
 | usage_record | 利用実績 | tenant_id、期間、シート数、トークン、実行件数 |
 

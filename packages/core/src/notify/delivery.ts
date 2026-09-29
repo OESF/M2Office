@@ -23,7 +23,7 @@ const KIND_LABELS: Record<string, string> = {
   approval: '承認依頼',
   run: '業務の完了',
   failure: '業務の失敗',
-  brief: '週次ブリーフ',
+  brief: 'ブリーフ',
   security: 'セキュリティ',
 };
 

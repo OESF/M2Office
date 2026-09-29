@@ -14,7 +14,7 @@ import {
   createLoggerFromEnv, HelpCatalog, parseArticle, ExtensionHub, HttpMcpClient, loadExtensions,
   TenantAiResolver, platformAi, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID,
   defaultGeminiModels, ConnectionCredentials, type ConnectionAuthProvider,
-  CardService, PostgresContactStore, cardsAccess, type ContactStore,
+  CardService, PostgresContactStore, cardsAccess, type ContactStore, NoticeService, PostgresNoticeStore,
   type SecretBox, type GeminiModels,
   type FileStore, type TenantExtensions, type HelpArticle, type LlmProvider, type Logger, type Repository, type WorkspaceConnector,
 } from '@m2office/core';
@@ -83,6 +83,8 @@ export interface AppDeps {
    * @remarks `access` は、会社が名刺管理を使っていて利用者が利用範囲の中なら、取り込んだ名刺の既定の範囲を返す（使えなければ `null`）
    */
   cards: { service: CardService; store: ContactStore; access(tenantId: string, userId: string): Promise<{ defaultScope: ContactScope } | null> };
+  /** 社内のお知らせ（仕様書 第10.15節）。画面の API・秘書・朝のブリーフが同じものを使う。 */
+  notices: NoticeService;
 }
 
 /**
@@ -153,8 +155,13 @@ export function buildDeps(): AppDeps {
     service: new CardService({ store: contactStore, repo, files, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log }),
     access: cardsAccess(repo),
   };
+  // 社内のお知らせ（仕様書 第10.15節）
+  const notices = new NoticeService({
+    store: new PostgresNoticeStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+    repo,
+  });
   const engine = new RunEngine({
-    repo, llm, registry, connector, files, logger: log, research, cards,
+    repo, llm, registry, connector, files, logger: log, research, cards, notices,
     llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId),
     resolveDefinition: async (id, version, tenantId) => (await tenantView(tenantId)).resolve(id, version),
     registryFor: async (tenantId) => (await tenantView(tenantId)).registry,
@@ -164,7 +171,7 @@ export function buildDeps(): AppDeps {
   });
   const help = new HelpCatalog(loadHelpArticles(helpDir(), log), OFFICIAL_AGENTS, registry);
   const secretary = new Secretary({
-    repo, llm, connector, agents: OFFICIAL_AGENTS, help, agentsFor, llmFor: (t) => ai.llmFor(t),
+    repo, llm, connector, agents: OFFICIAL_AGENTS, help, agentsFor, llmFor: (t) => ai.llmFor(t), notices,
     // 渡されたファイルの名前だけを引く。中身は読まない（後ろへ回すため。仕様書 第10.11.3節）
     fileName: async (tenantId, userId, fileId) => {
       const f = await repo.getFile(tenantId, fileId);
@@ -226,6 +233,7 @@ export function buildDeps(): AppDeps {
     loginStates: new OAuthStateStore(),
     handoffs: new HandoffStore(),
     cards,
+    notices,
   };
 }
 

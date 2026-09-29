@@ -122,7 +122,7 @@ export {
 
 export {
   OFFICIAL_AGENTS, LOOKUP_AGENT_ID, PLAN_REPORT_AGENT_ID, resolveOfficialAgent, DEFAULT_STANDARD_MINUTES, standardMinutes, stepLabel,
-  agentFace, MORNING_BRIEF,
+  agentFace, MORNING_BRIEF, AG05_WEEKLY_BRIEF,
 } from './agents/index.js';
 export { Secretary, acceptsFile, asksConnectionData, fillInputs } from './secretary/secretary.js';
 export { ProactiveWatcher, PROACTIVE_TRIGGER, TRAVEL_PREFIX, PREP_WINDOW_MIN, TRAVEL_NOTICE_HOUR, isMeetingSoon, hasPlace, meetingKey } from './secretary/proactive.js';
@@ -135,3 +135,6 @@ export {
   MEMORY_MAX_CHARS, memoryTextOf, refuseToRemember, refusalMessage,
 } from './secretary/memory.js';
 export * from './cards/index.js';
+export * from './notices/index.js';
+export * from './brief/index.js';
+export { answerNotice, type NoticeAnswer } from './secretary/notices.js';

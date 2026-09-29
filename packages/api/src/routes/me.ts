@@ -6,8 +6,8 @@
 
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
-import { VOICE_CHOICES, VOICE_STYLE_MAX, isValidAvatar, type UserSettings, CARDS_EXTENSION_ID } from '@m2office/shared';
-import { AUDIO, AiNotConfiguredError, LEARNED_SOURCE, buildPresence, loadFile, refusalMessage, refuseToRemember } from '@m2office/core';
+import { BRIEF_SECTIONS, WEEKLY_SECTIONS, VOICE_CHOICES, VOICE_STYLE_MAX, isValidAvatar, type UserSettings, CARDS_EXTENSION_ID } from '@m2office/shared';
+import { AUDIO, AiNotConfiguredError, LEARNED_SOURCE, cleanTopics, buildPresence, loadFile, refusalMessage, refuseToRemember } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 import { speakSample } from '../voice/sample.js';
@@ -110,7 +110,13 @@ export function meRoute(deps: AppDeps) {
     const { allAgents } = await deps.tenantView(tenant.id);
     const checked = validate(c.req.param('section'), await c.req.json<unknown>(), allAgents.map((a) => a.id));
     if ('error' in checked) return c.json({ error: checked.error }, 400);
-    await deps.repo.saveUserSettings(tenant.id, user.id, checked.section, checked.value as never);
+    let value = checked.value;
+    if (checked.section === 'brief') {
+      // 秘書が選んだ印は画面から変えさせない。画面で分野を消しても、秘書が選び直さないよう印は付けたままにする（第9.5.5.1.1節）
+      const current = (await deps.repo.getUserSettings(tenant.id, user.id)).brief;
+      value = { ...(value as object), seededAt: current.seededAt ?? new Date().toISOString(), seedNote: current.seedNote };
+    }
+    await deps.repo.saveUserSettings(tenant.id, user.id, checked.section, value as never);
     await audit(deps, tenant.id, user.id, 'me.settings.update', checked.section);
     return c.json({ ok: true });
   });
@@ -469,6 +475,16 @@ function validate(
       // ピン止め（仕様書 第6.1.1節）。配列でなければ、まだ変えていない（null）として残す
       const pinned = Array.isArray(o['pinned']) ? [...new Set(list(o['pinned']))] : null;
       return { section, value: { hidden: [...new Set(list(o['hidden']))], order: [...new Set(list(o['order']))], pinned } };
+    }
+    case 'brief': {
+      // 朝のブリーフの中身（第6.5.3.1節）。画面では消す・戻すだけだが、形はここで整える
+      const topics = cleanTopics(o['topics']);
+      const omitIn = Array.isArray(o['omit']) ? o['omit'].map(String) : [];
+      const omit = BRIEF_SECTIONS.map((x) => x.id).filter((id) => omitIn.includes(id));
+      // 週次ブリーフの外した項目（ADR-0048）
+      const weeklyIn = Array.isArray(o['weeklyOmit']) ? o['weeklyOmit'].map(String) : [];
+      const weeklyOmit = WEEKLY_SECTIONS.map((x) => x.id).filter((id) => weeklyIn.includes(id));
+      return { section, value: { topics, omit, weeklyOmit } };
     }
     default:
       return { error: `不明な設定の区分です: ${section}` };

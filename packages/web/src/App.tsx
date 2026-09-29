@@ -22,6 +22,7 @@ import { AgentForm, ApprovalTray, RunView, statusLabel, SuspendedBanner } from '
 import { Sources } from './sources.js';
 import { Schedules } from './Schedules.js';
 import { Cards } from './Cards.js';
+import { isAttended, useAttention } from './attention.js';
 import { parseRoute, routePath, syncUrl, type Route } from './route.js';
 import {
   SETTINGS_SECTIONS, SETTINGS_SECTION_KEY, Settings, orderAgents, rememberedSection,
@@ -240,7 +241,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
       // 伝えたことはサーバーが記録するため、画面を開き直しても二度は出ない。
       // 会話していない間に終わったものも、ここで持ち越して伝わる
       // 音声で話している間は受け取らない。中継が声で伝え、大きければ秘書のキャンバスに出す（第6.2.0節）
-      if (!voiceOn.current && l.items.some((x) => !x.told && x.done)) {
+      // 本人が見て操作している画面だけが受け取る。離れた画面・裏のタブが受け取ると、誰も見ないまま伝えたことになる（第10.11.7節、ADR-0047）
+      if (!voiceOn.current && isAttended() && l.items.some((x) => !x.told && x.done)) {
         for (const x of (await api.claimLookups()).items) {
           // 秘書が自分で調べたものとして、秘書のキャンバスに出す（第6.2.0・10.11.7節）
           show({
@@ -263,6 +265,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
     const timer = setInterval(() => void refresh(), 2000);
     return () => clearInterval(timer);
   }, [refresh]);
+  // 離れていた画面に本人が戻ったら、待っていたもの（朝のブリーフなど）をすぐ受け取る
+  useAttention(() => void refresh());
 
   // 実行を表示している間は詳細も追う
   useEffect(() => {
@@ -438,7 +442,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
               active={view.kind === 'approvals'} onClick={() => setView({ kind: 'approvals' })} />
             <NavItem icon="history" label="実行履歴" description="過去の依頼と結果"
               active={view.kind === 'history'} onClick={() => setView({ kind: 'history' })} />
-            <NavItem icon="notifications" label="お知らせ" description="あなた宛ての通知。週次ブリーフもここに届きます" count={unread}
+            <NavItem icon="notifications" label="お知らせ" description="あなた宛ての通知。朝のブリーフ・週次ブリーフもここに届きます" count={unread}
               active={view.kind === 'notifications'} onClick={() => setView({ kind: 'notifications' })} />
             <NavItem icon="schedules" label="定時実行" description="決まった時刻に、あなたの権限で業務を実行します"
               active={view.kind === 'schedules'} onClick={() => setView({ kind: 'schedules' })} />

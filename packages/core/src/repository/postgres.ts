@@ -461,6 +461,10 @@ export class PostgresRepository implements Repository {
           `update approvals set present = $3
             where tenant_id = $1 and run_step_id in (select id from run_steps where run_id = $2)`,
           [tenantId, runId, redactedPresent]);
+        // その実行の通知の本文も消す（ブリーフの通知は、予定やメールから作った文を本文に持つ。仕様書 第14.3.2節）
+        await client.query(
+          `update notifications set body = $3 where tenant_id = $1 and run_id = $2`,
+          [tenantId, runId, redactedPresent]);
       }
       await client.query(
         `update runs set google_data_checked_at = $3,
@@ -1211,7 +1215,7 @@ export class PostgresRepository implements Repository {
 
   async getUserSettings(tenantId: string, userId: string): Promise<UserSettings> {
     const rows = await this.q<Partial<Record<keyof UserSettings, unknown>>>(tenantId,
-      `select profile, secretary, notifications, memory, menu, onboarding from user_settings
+      `select profile, secretary, notifications, memory, menu, brief, onboarding from user_settings
         where tenant_id = $1 and user_id = $2`, [tenantId, userId]);
     const r = rows[0] ?? {};
     const d = DEFAULT_USER_SETTINGS;
@@ -1226,6 +1230,8 @@ export class PostgresRepository implements Repository {
       },
       memory: { ...d.memory, ...(r.memory ?? {}) },
       menu: { ...d.menu, ...(r.menu ?? {}) },
+      // 朝のブリーフの中身（移行 037。仕様書 第9.5.5.1.1節）
+      brief: { ...d.brief, ...(r.brief ?? {}) },
       onboarding: { ...d.onboarding, ...(r.onboarding ?? {}) },
     };
   }
@@ -1241,7 +1247,7 @@ export class PostgresRepository implements Repository {
   ): Promise<void> {
     const column = ({
       profile: 'profile', secretary: 'secretary', notifications: 'notifications', memory: 'memory',
-      menu: 'menu', onboarding: 'onboarding',
+      menu: 'menu', brief: 'brief', onboarding: 'onboarding',
     } as const)[section];
     await this.q(tenantId,
       `insert into user_settings (tenant_id, user_id, ${column}, updated_at)

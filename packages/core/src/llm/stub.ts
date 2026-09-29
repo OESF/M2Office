@@ -62,6 +62,8 @@ export class StubLlmProvider implements LlmProvider {
     if (calls.length === 0) {
       const read = readText(section(user, 'これまでの結果'));
       if (read) lines.push('', '［スタブ］読み取った内容をそのまま示します。', '', read);
+      // 週次ブリーフのまとめの段は、集めた件数だけを本文にする（仕様書 第9.5.5節。届けるのは実行エンジン）
+      if (/今週のブリーフを書く/.test(section(user, '指示'))) lines.push('', summarizeForBrief(section(user, 'これまでの結果')));
     }
     return { text: lines.join('\n'), tokensUsed: Math.ceil(user.length / 4) + 64 };
   }
@@ -147,12 +149,14 @@ function chooseTools(tools: string[], prompt: string): Call[] {
   // 語句は「〜を収集」「〜を取得」のように目的語つきで見る。
   // 「収集した内容を要約する」のような後段の指示で、同じツールを呼び直さないため
 
-  // 収集: 読み取り系をまとめて呼ぶ（AG-05）
+  // 収集: 読み取り系をまとめて呼ぶ（AG-05。仕様書 第9.5.5節）
   if (/を収集/.test(instruction)) {
     const collectors: Call[] = [];
+    for (const name of ['profile.read', 'brief.settings', 'notices.list']) if (has(name)) collectors.push({ name, args: {} });
     if (has('calendar.list')) collectors.push({ name: 'calendar.list', args: {} });
     if (has('tasks.list')) collectors.push({ name: 'tasks.list', args: {} });
     if (has('gmail.list')) collectors.push({ name: 'gmail.list', args: { limit: 20 } });
+    if (has('gmail.unread')) collectors.push({ name: 'gmail.unread', args: {} });
     if (has('approvals.pending')) collectors.push({ name: 'approvals.pending', args: {} });
     if (collectors.length > 0) return collectors;
   }
@@ -264,7 +268,7 @@ function summarizeForBrief(previous: string): string {
     '［スタブ］今週のまとめです。',
     `- 予定: ${count('calendar.list')}`,
     `- 未完了のタスク: ${count('tasks.list')}`,
-    `- 受信箱: ${count('gmail.list')}`,
+    `- 受信箱: ${/"name":\s*"gmail\.unread"/.test(previous) ? count('gmail.unread') : count('gmail.list')}`,
     `- 承認待ち: ${count('approvals.pending')}`,
   ].join('\n');
 }

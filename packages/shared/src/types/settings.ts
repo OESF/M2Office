@@ -355,12 +355,72 @@ export interface UserSettings {
      */
     pinned?: string[] | null;
   };
+  /**
+   * 朝のブリーフの中身（仕様書 第9.5.5.1.1節、ADR-0047）。
+   *
+   * @remarks 秘書が選び、本人が会話で直す。個人設定では見て消す・戻すだけ（第6.5.3.1節）
+   */
+  brief: BriefSettings;
   /** 初回の案内を見終えた（または飛ばした）日時。`null` なら次のログインで案内する（第6.10.3節）。 */
   onboarding: {
     tourCompletedAt: string | null;
     /** 朝のブリーフの定時実行を秘書が用意した時刻（第9.5.5.1節）。一度用意したら、止めたり消したりしても作り直さない。 */
     morningBriefAt?: string | null;
+    /** 週次ブリーフの定時実行を秘書が用意した時刻（第9.5.5節、ADR-0048）。朝のブリーフと同じく、作り直さない。 */
+    weeklyBriefAt?: string | null;
   };
+}
+
+/** 朝のブリーフで外せる項目（仕様書 第9.5.5.1.1節）。社内のお知らせは外せない。 */
+export type BriefSection = 'weather' | 'news' | 'topics' | 'schedule' | 'tasks' | 'mail' | 'approvals';
+
+/** 外せる項目と、その呼び方。秘書の答えと個人設定に使う。 */
+export const BRIEF_SECTIONS: { id: BriefSection; label: string }[] = [
+  { id: 'weather', label: '天気' },
+  { id: 'news', label: '一般のニュース' },
+  { id: 'topics', label: '関心の分野' },
+  { id: 'schedule', label: '予定' },
+  { id: 'tasks', label: 'ToDo' },
+  { id: 'mail', label: '返事の要りそうなメール' },
+  { id: 'approvals', label: '承認待ち' },
+];
+
+/** 週次ブリーフで外せる項目（仕様書 第9.5.5.1.1節・第9.5.5節、ADR-0048）。社内のお知らせは外せない。 */
+export type WeeklySection = 'weather' | 'topics' | 'events' | 'schedule' | 'tasks' | 'mail' | 'approvals';
+
+/** 週次ブリーフで外せる項目と、その呼び方。 */
+export const WEEKLY_SECTIONS: { id: WeeklySection; label: string }[] = [
+  { id: 'weather', label: '天気予報' },
+  { id: 'topics', label: '関心の分野' },
+  { id: 'events', label: 'イベント' },
+  { id: 'schedule', label: '予定' },
+  { id: 'tasks', label: 'ToDo' },
+  { id: 'mail', label: '返事の要りそうなメール' },
+  { id: 'approvals', label: '承認待ち' },
+];
+
+/** 関心の分野 1 つ（仕様書 第9.5.5.1.1節）。 */
+export interface BriefTopic {
+  /** 名前（例: 経済・金融）。 */
+  label: string;
+  /** Web で調べる言葉（例: 日経平均 為替 今日）。社内の情報を入れない。 */
+  query: string;
+}
+
+/** 関心の分野の上限（1 回のブリーフで調べる回数を抑えるため。仕様書 第9.5.5.1節）。 */
+export const BRIEF_TOPICS_MAX = 4;
+
+/** 朝のブリーフの中身（仕様書 第9.5.5.1.1節）。 */
+export interface BriefSettings {
+  topics: BriefTopic[];
+  /** 本人が朝のブリーフから外した項目。 */
+  omit: BriefSection[];
+  /** 本人が週次ブリーフから外した項目（ADR-0048）。関心の分野は朝と同じものを使う。 */
+  weeklyOmit: WeeklySection[];
+  /** 秘書が最初の分野を選んだ日時。`null` ならまだ選んでいない（選べなかったときも日時を入れる）。 */
+  seededAt: string | null;
+  /** 秘書が選んだことを、次のブリーフで一度だけ伝えるか。 */
+  seedNote: boolean;
 }
 
 /** まだピン止めを変えていない人に、はじめからピン止めしておく業務（仕様書 第6.1.1節）。 */
@@ -377,7 +437,8 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   },
   memory: { learning: true, excludes: [], keepConversations: true },
   menu: { hidden: [], order: [], pinned: null },
-  onboarding: { tourCompletedAt: null, morningBriefAt: null },
+  brief: { topics: [], omit: [], weeklyOmit: [], seededAt: null, seedNote: false },
+  onboarding: { tourCompletedAt: null, morningBriefAt: null, weeklyBriefAt: null },
 };
 
 /**

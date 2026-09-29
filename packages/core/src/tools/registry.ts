@@ -10,6 +10,7 @@ import type { WorkspaceConnector } from '../connectors/types.js';
 import type { FileStore } from '../files/store.js';
 import type { ResearchProvider } from '../research/provider.js';
 import type { CardToolContext } from '../cards/tools.js';
+import type { NoticeService } from '../notices/service.js';
 
 /** ツール呼び出しの文脈。テナント境界と実行の同一性を持ち回る。 */
 export interface ToolContext {
@@ -54,6 +55,10 @@ export interface ToolContext {
    * @remarks 無ければ名刺の道具は「使えない」と返す
    */
   cards?: CardToolContext;
+  /**
+   * 社内のお知らせ（仕様書 第10.15節）。無ければ `notices.list` は「読めなかった」と返す。
+   */
+  notices?: NoticeService;
 }
 
 /** 引数 1 つの定義（JSON Schema の一部）。 */

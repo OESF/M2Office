@@ -37,6 +37,8 @@ const ACTION_LABELS: Record<string, string> = {
   'secretary.todo': '秘書が ToDo を受けた',
   'secretary.correct': '秘書の覚えたことを直した',
   'secretary.schedule': '秘書が定時実行を操作した',
+  'secretary.brief': '秘書が朝のブリーフの中身を直した',
+  'secretary.notice': '秘書が社内のお知らせを扱った',
   'secretary.voice': '秘書と音声で話した',
   'secretary.plan.create': '秘書が段取りを組んだ',
   'secretary.plan.step': '段取りの業務を起こした',
@@ -110,6 +112,9 @@ const ACTION_LABELS: Record<string, string> = {
   'contact.trash': '名刺をごみ箱へ移した',
   'contact.restore': '名刺をごみ箱から戻した',
   'contact.purge': '名刺を消去した',
+  // 社内のお知らせ（仕様書 第10.15節）
+  'notice.create': '社内のお知らせを出した',
+  'notice.withdraw': '社内のお知らせを取り下げた',
 };
 
 /** 操作の種類（絞り込みの単位）。`prefixes` のどれかで始まる操作が当たる。 */
@@ -125,6 +130,7 @@ export const AUDIT_CATEGORIES: { id: string; label: string; prefixes: string[] }
   { id: 'knowledge', label: '知識と記憶', prefixes: ['knowledge.', 'memory.', 'conversation.'] },
   { id: 'schedule', label: '定時実行', prefixes: ['schedule.'] },
   { id: 'cards', label: '名刺', prefixes: ['card.', 'contact.'] },
+  { id: 'notices', label: '社内のお知らせ', prefixes: ['notice.'] },
 ];
 
 /** 仕組みの名前（主体が `system` のとき）。 */
@@ -145,7 +151,7 @@ const SYSTEM_LABELS: Record<string, string> = {
 };
 
 /** 秘書の応答の層などの記録の値（`secretary.chat` の `full` など）。 */
-const SECRETARY_TARGETS: Record<string, string> = { full: '会話', direct: '定型の照会', light: '取次', start: '音声の始まり', end: '音声の終わり' };
+const SECRETARY_TARGETS: Record<string, string> = { settings: '朝のブリーフの中身', create: 'お知らせを出す', withdraw: 'お知らせの取り下げ', list: 'お知らせの一覧', done: 'お知らせを済んだにする', ask: '聞き返し', full: '会話', direct: '定型の照会', light: '取次', start: '音声の始まり', end: '音声の終わり' };
 
 /** 見せるための名前を引く口。引けなければ `undefined`（記録の値のまま出す）。 */
 export interface AuditNames {
@@ -252,6 +258,8 @@ function targetOf(e: AuditEvent, names: AuditNames): string {
     case 'conversation': return '会話ログ';
     // 名刺の相手の名前は出さない。自分だけの名刺の相手を、管理者に知らせないため（第27.7節）
     case 'contact': case 'card': case 'card_batch': return '名刺';
+    // お知らせは題名を添える（社内に出したものなので、管理者に見せてよい）
+    case 'notice': return typeof e.detail?.['title'] === 'string' ? `お知らせ「${e.detail['title']}」` : 'お知らせ';
     default: return id ? `${id}` : '—';
   }
 }

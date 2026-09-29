@@ -23,6 +23,9 @@ import { expandQuery } from '../knowledge/expand.js';
 import { jstDay } from '../memory/learn.js';
 import { contactRequest } from './contacts.js';
 import { CARD_UPDATE } from '../cards/agents.js';
+import { answerBriefSettings } from '../brief/settings.js';
+import type { NoticeService } from '../notices/service.js';
+import { answerNotice } from './notices.js';
 
 /** 秘書がどの層で応答したか。計測と表示に使う（仕様書 第10.9.1節）。 */
 export type ResponseLayer = 'direct' | 'light' | 'full';
@@ -79,6 +82,8 @@ export interface SecretaryDeps {
   ): Promise<{ runId: string; already: boolean } | null>;
   /** 渡されたファイルの名前だけを引く。中身は読まない（後ろへ回すため）。 */
   fileName?(tenantId: string, userId: string, fileId: string): Promise<string | null>;
+  /** 社内のお知らせ（仕様書 第10.15節）。無ければお知らせの依頼を扱わない。 */
+  notices?: NoticeService;
 }
 
 /**
@@ -229,6 +234,24 @@ export class Secretary {
       }
     }
 
+    // 朝のブリーフの中身（関心の分野・外す項目。仕様書 第9.5.5.1.1節）と社内のお知らせ（第10.15節）。
+    // 定時実行の答えより先に見る。「朝のブリーフに為替を入れて」を定時実行の変更と取り違えないため
+    {
+      const llm = this.deps.llmFor ? await this.deps.llmFor(tenantId) : this.deps.llm;
+      const brief = await answerBriefSettings(this.deps.repo, llm, tenantId, userId, message).catch(() => null);
+      if (brief) {
+        await this.audit(tenantId, userId, 'secretary.brief', 'settings');
+        return { reply: { layer: 'light', text: brief.text, evidence: brief.evidence, tokensUsed: 0 }, keep: true };
+      }
+      if (this.deps.notices) {
+        const notice = await answerNotice({ notices: this.deps.notices, repo: this.deps.repo, llm }, tenantId, userId, message).catch(() => null);
+        if (notice) {
+          await this.audit(tenantId, userId, 'secretary.notice', notice.action);
+          return { reply: { layer: 'light', text: notice.text, evidence: notice.evidence, tokensUsed: 0 }, keep: true };
+        }
+      }
+    }
+
     // 定時実行の確認・停止・再開・今すぐ実行（仕様書 第10.9.8節）。推論を使わない。
     // 業務への取次より先に見る。「朝のブリーフを止めて」を朝のブリーフの実行に取り次がないため
     const scheduleAgents = this.deps.agentsFor ? await this.deps.agentsFor(tenantId, userId) : this.deps.agents;
@@ -324,6 +347,8 @@ export class Secretary {
       `相手を「${s.callMe || `${user?.displayName ?? ''}さん`}」と呼びます。`,
       s.style === 'concise' ? '要点だけを短く答えます。' : '丁寧な日本語で、要点を先に答えます。',
       'あなたは本人と一心同体の秘書で、本人とのやり取りをずっと覚えています。覚えていることを踏まえて答えます。',
+      // この層では設定を変えたり業務を動かしたりしない。行っていないことを「行いました」と答えさせない（2026-09-28 に、朝のブリーフの中身を「変更しました」と答えた）
+      'この会話では設定の変更や業務の実行は行いません。行っていない変更・実行を「行いました」「更新しました」と言わないでください。頼まれたら、どう頼めばよいか（言い方の例）か、どの画面で行えるかを伝えてください。',
       '\n',
       GROUNDING_RULE,
     ].join('');

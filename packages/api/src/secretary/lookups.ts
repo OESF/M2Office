@@ -8,7 +8,7 @@
  * @see 仕様書 第10.11.7節 終わったことを伝える
  */
 
-import { LOOKUP_AGENT_ID, MORNING_BRIEF, OFFICIAL_AGENTS, PLAN_REPORT_AGENT_ID, PROACTIVE_TRIGGER, planProgress } from '@m2office/core';
+import { AG05_WEEKLY_BRIEF, LOOKUP_AGENT_ID, MORNING_BRIEF, OFFICIAL_AGENTS, PLAN_REPORT_AGENT_ID, PROACTIVE_TRIGGER, planProgress } from '@m2office/core';
 import type { Repository } from '@m2office/core';
 import { randomUUID } from 'node:crypto';
 
@@ -59,8 +59,8 @@ export async function listLookups(
 ): Promise<LookupView[]> {
   // 秘書が起こしたもの（調べもの・頼んだ業務）と、本人がメニューから起こした調べもの
   const rows = (await repo.listRunsWithJobs(tenantId, { limit: LIMIT, requestedBy: userId }))
-    // 朝のブリーフは定時実行で起きるが、秘書の答えとして届ける（第9.5.5.1節）
-    .filter(({ job }) => job.origin === 'secretary' || job.agentId === LOOKUP_AGENT_ID || job.agentId === MORNING_BRIEF.id)
+    // 朝のブリーフ・週次ブリーフは定時実行で起きるが、秘書の答えとしても届ける（第9.5.5.1節・第9.5.5節）
+    .filter(({ job }) => job.origin === 'secretary' || job.agentId === LOOKUP_AGENT_ID || isBrief(job.agentId))
     // 段取りの段の業務は個別に届けない。段取りの報告でまとめて届ける（第10.14節）
     .filter(({ job }) => !job.planStepId);
   const told = new Set(await repo.listToldLookups(tenantId, rows.map(({ run }) => run.id)));
@@ -74,7 +74,7 @@ export async function listLookups(
     const firstText = Object.values(job.input).find((v): v is string => typeof v === 'string' && v.trim() !== '');
     out.push({
       runId: run.id,
-      request: job.agentId === MORNING_BRIEF.id ? '今朝のブリーフ' : String(job.input['request'] ?? firstText ?? name ?? ''),
+      request: job.agentId === MORNING_BRIEF.id ? '今朝のブリーフ' : job.agentId === AG05_WEEKLY_BRIEF.id ? '今週のブリーフ' : String(job.input['request'] ?? firstText ?? name ?? ''),
       agentName: name,
       agentId: job.agentId,
       proactive: job.input['trigger'] === PROACTIVE_TRIGGER,
@@ -147,16 +147,33 @@ export async function claimUntold(
     if (!x.done) continue;
     if (x.told) continue;
     // 日が経ちすぎたものは伝えない。ただし記録は取り、以降も蒸し返さない
-    // 朝のブリーフは、その日のうちだけ伝える（前の日の予定や天気を言い出さない。第9.5.5.1節）
+    // ブリーフ（朝・週）は、その日のうちだけ伝える（前の日の予定や天気を言い出さない。第9.5.5.1節）
     const fresh = x.endedAt !== null && Date.parse(x.endedAt) >= limit
-      && (x.agentId !== MORNING_BRIEF.id || jstDay(x.endedAt) === jstDay(now.toISOString()));
+      && (!isBrief(x.agentId) || jstDay(x.endedAt) === jstDay(now.toISOString()));
     const claimed = await repo.claimLookupDelivery(tenantId, x.runId);
     if (claimed && fresh) {
       out.push(x);
       await remember(repo, tenantId, userId, x);
+      // 秘書が伝えたブリーフは、同じ中身の通知を既読にする（第9.5.5.1節、ADR-0047）。二度読ませない
+      if (isBrief(x.agentId)) await readBriefNotice(repo, tenantId, userId, x.runId);
     }
   }
   return out;
+}
+
+/** 秘書の答えとしても届けるブリーフ（朝・週）か。 */
+const isBrief = (agentId: string) => agentId === MORNING_BRIEF.id || agentId === AG05_WEEKLY_BRIEF.id;
+
+/** その実行のブリーフの通知を既読にする。できなくても伝えることは止めない。 */
+async function readBriefNotice(repo: Repository, tenantId: string, userId: string, runId: string): Promise<void> {
+  try {
+    const recent = await repo.listNotifications(tenantId, userId, 50);
+    for (const n of recent.filter((x) => x.runId === runId && x.kind === 'brief' && !x.readAt)) {
+      await repo.markNotificationRead(tenantId, userId, n.id);
+    }
+  } catch {
+    // 既読にできなくても、秘書は伝える
+  }
 }
 
 /**

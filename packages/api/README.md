@@ -151,6 +151,10 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/cards/card/:cardId/front` ／ `back` | 名刺の画像（見られる名刺のものだけ。ページだけの PDF は囲いの中で開かせる） |
 | `PUT /v1/cards/card/:cardId/received` | 受け取った日を直す（`receivedOn`。受け取った本人だけ。今日より後は 400。初めの値は取り込んだ人のタイムゾーンでの取り込んだ日。第27.3節） |
 | `DELETE /v1/cards/card/:cardId` | 読み取れなかった名刺を、待たずに消す（取り込んだ本人だけ） |
+| `GET /v1/notices` | 本人宛ての有効な社内のお知らせ（取り下げ・期間切れ・本人が済んだものを除く。`isNew`・`daysLeft` つき。仕様書 第10.15節） |
+| `POST /v1/notices` | 社内のお知らせを出す（`title`・`body`・`link`（https だけ）・`all` か `groupIds`・`dueOn`・`until`）。会社の全員が出せる。承認は挟まない。201 |
+| `POST /v1/notices/:id/withdraw` | 取り下げる（出した人と管理者だけ。ほかの人は 403、ほかの会社のものは 404） |
+| `POST /v1/notices/:id/done` | 本人が済んだとする（本人の朝のブリーフに載せなくなる） |
 | `POST /v1/schedules` | 定時実行を作る（毎日／毎平日／毎週、業務の入力）。ファイルを受け取る業務と秘書の調べものは 400、必須の入力が空なら 400（仕様書 第6.1.7節） |
 | `PATCH /v1/schedules/:id` | 停止・再開、繰り返し・時刻・入力の変更。再開すると次回を今から求め直す（止めていた間の回は起動しない） |
 | `POST /v1/schedules/:id/trigger` | 次の回を今にする（動作確認用） |
@@ -223,7 +227,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/admin/knowledge/:id/sections` | 管理者: 1 件の知識の節（見出しの経路と字数） |
 | `DELETE /v1/admin/knowledge/:id` | 管理者: 削除 |
 | `GET /v1/me/settings` | 本人の個人設定 |
-| `PUT /v1/me/settings/:section` | 個人設定の 1 区分を保存（`profile`・`secretary`・`notifications`・`menu`） |
+| `PUT /v1/me/settings/:section` | 個人設定の 1 区分を保存（`profile`・`secretary`・`notifications`・`memory`・`menu`・`brief`）。`brief`（朝のブリーフの関心の分野と外した項目。第6.5.3.1節）は、秘書が最初の分野を選んだ印を画面から変えさせない |
 | `POST /v1/me/voice-test` | 声を試す。本文の秘書の設定（保存の前でもよい）で秘書に名乗らせ、話した文字と声（24 kHz・16 ビットの PCM を base64）を返す。保存しない（仕様書 第10.5.8節） |
 | `PATCH /v1/me/profile` | 表示名の変更 |
 | `GET /v1/me/sessions` | ログイン中の端末 |
