@@ -21,6 +21,8 @@ export type Route =
   | { kind: 'inventory'; itemId: string | null }
   /** 人事・給与の担当者（仕様書 第30.25節）。`employeeId` があれば 1 人の台帳。 */
   | { kind: 'hr'; employeeId: string | null }
+  /** 本人の「給与・勤怠」（仕様書 第30.25節）。 */
+  | { kind: 'attendance' }
   | { kind: 'settings'; section: string | null }
   | { kind: 'help'; articleId: string | null }
   | { kind: 'unknown' };
@@ -55,6 +57,7 @@ export function parseRoute(pathname: string): Route {
     case 'schedules': return second === undefined ? { kind: 'schedules' } : { kind: 'unknown' };
     case 'cards': return second === undefined ? { kind: 'cards', contactId: null } : id(second) ? { kind: 'cards', contactId: id(second) } : { kind: 'unknown' };
     case 'inventory': return second === undefined ? { kind: 'inventory', itemId: null } : id(second) ? { kind: 'inventory', itemId: id(second) } : { kind: 'unknown' };
+    case 'attendance': return second === undefined ? { kind: 'attendance' } : { kind: 'unknown' };
     case 'hr': return second === undefined ? { kind: 'hr', employeeId: null } : id(second) ? { kind: 'hr', employeeId: id(second) } : { kind: 'unknown' };
     case 'settings': return { kind: 'settings', section: id(second) };
     case 'help': return { kind: 'help', articleId: id(second) };
@@ -69,7 +72,7 @@ export function routePath(route: Route): string {
     case 'home': case 'unknown': return '/';
     case 'agent': return `/agents/${enc(route.agentId)}`;
     case 'run': return `/runs/${enc(route.runId)}`;
-    case 'approvals': case 'history': case 'notifications': case 'schedules': return `/${route.kind}`;
+    case 'approvals': case 'history': case 'notifications': case 'schedules': case 'attendance': return `/${route.kind}`;
     case 'cards': return route.contactId ? `/cards/${enc(route.contactId)}` : '/cards';
     case 'inventory': return route.itemId ? `/inventory/${enc(route.itemId)}` : '/inventory';
     case 'hr': return route.employeeId ? `/hr/${enc(route.employeeId)}` : '/hr';

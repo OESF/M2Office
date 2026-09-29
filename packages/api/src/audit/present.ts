@@ -141,7 +141,15 @@ const ACTION_LABELS: Record<string, string> = {
   'hr.task.done': '入退社の手続きを済んだにした',
   'hr.task.reopen': '入退社の手続きを戻した',
   'hr.import': '従業員を取り込んだ',
-  'hr.export': '労働者名簿を書き出した',
+  'hr.export': '人事・給与の帳簿を書き出した',
+  'hr.employee.link': '従業員と利用者を結び付けた',
+  'hr.attendance.view': '勤怠の一覧を見た',
+  'hr.attendance.fix': '打刻を直した',
+  'hr.attendance.close': '勤怠を締めた',
+  'hr.attendance.reopen': '勤怠の締めを戻した',
+  'hr.leave.take': '有給を記録した',
+  'hr.leave.cancel': '有給を取り消した',
+  'hr.leave.grant': '有給を付与した（手作業）',
 };
 
 /** 操作の種類（絞り込みの単位）。`prefixes` のどれかで始まる操作が当たる。 */

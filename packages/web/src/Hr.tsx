@@ -5,7 +5,7 @@
  * 説明文は常に出さない（原則 u11）。分からなければ秘書に聞く。
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import {
   HR_CATEGORIES, HR_EMPLOYMENTS, HR_WAGE_TYPES,
   type HrEmployee, type HrEmployeeView, type HrSettings, type HrTask, type HrTerms,
@@ -25,7 +25,183 @@ const wage = (t: Pick<HrTerms, 'wageType' | 'wageAmount'> | null) => (t && t.wag
  * @param onOpen 従業員を開く・一覧へ戻る
  */
 export function Hr({ employeeId, onOpen }: { employeeId: string | null; onOpen: (id: string | null) => void }) {
-  return employeeId ? <EmployeeDetail id={employeeId} onBack={() => onOpen(null)} /> : <EmployeeList onOpen={onOpen} />;
+  const [tab, setTab] = useState<'ledger' | 'attendance' | 'leave'>('ledger');
+  if (employeeId) return <EmployeeDetail id={employeeId} onBack={() => onOpen(null)} />;
+  return (
+    <>
+      <div className="hr-tabs" role="tablist">
+        {([['ledger', '台帳'], ['attendance', '勤怠'], ['leave', '有給']] as const).map(([k, l]) => (
+          <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>
+        ))}
+      </div>
+      {tab === 'ledger' && <EmployeeList onOpen={onOpen} />}
+      {tab === 'attendance' && <AttendanceTab />}
+      {tab === 'leave' && <LeaveTab />}
+    </>
+  );
+}
+
+const hm = (m: number) => (m ? `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}` : '');
+/** 日本時間の時刻（HH:MM）。 */
+const time = (iso: string | null) => (iso ? new Date(new Date(iso).getTime() + 9 * 3_600_000).toISOString().slice(11, 16) : '');
+const WEEK = '日月火水木金土';
+const mdw = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}（${WEEK[new Date(`${d}T00:00:00Z`).getUTCDay()]}）`;
+const shiftMonth = (ym: string, n: number) => {
+  const [y, m] = ym.split('-').map(Number) as [number, number];
+  const t = y * 12 + (m - 1) + n;
+  return `${Math.floor(t / 12)}-${String((t % 12) + 1).padStart(2, '0')}`;
+};
+
+/** 勤怠（期間の集計・点検・36 協定・締め・出勤簿。仕様書 第30.6.1節）。 */
+function AttendanceTab() {
+  const [month, setMonth] = useState<string | undefined>(undefined);
+  const [data, setData] = useState<Awaited<ReturnType<typeof api.hr.attendance>> | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(() => {
+    api.hr.attendance(month).then((r) => { setData(r); setError(null); }).catch((e) => setError(describeError(e, '読み込めませんでした')));
+  }, [month]);
+  useEffect(load, [load]);
+  if (!data) return <p className="muted">{error ?? '読み込んでいます…'}</p>;
+  const ym = data.period.end.slice(0, 7);
+  const act = (fn: () => Promise<unknown>, fail: string) => void fn().then(load).catch((e) => setError(describeError(e, fail)));
+  return (
+    <div className="hr">
+      <div className="row wrap hr-toolbar">
+        <button className="btn ghost small" onClick={() => setMonth(shiftMonth(ym, -1))}>← 前</button>
+        <strong>{data.period.label}（{mdw(data.period.start)}〜{mdw(data.period.end)}）</strong>
+        <button className="btn ghost small" onClick={() => setMonth(shiftMonth(ym, 1))}>次 →</button>
+        <span className="grow" />
+        {data.close
+          ? <button className="btn ghost small" onClick={() => act(() => api.hr.reopenAttendance(data.close!.id), '締めを戻せませんでした')}>締めを戻す</button>
+          : <button className="btn small" onClick={() => act(() => api.hr.closeAttendance(ym), '締められませんでした')}>締める</button>}
+        <button className="btn ghost small" onClick={() => void api.hr.attendanceBook(ym).catch((e) => setError(describeError(e, '書き出せませんでした')))}>出勤簿</button>
+      </div>
+      {data.close && <p className="small muted">締めました（{data.close.closedAt.slice(0, 10)}）</p>}
+      {error && <p className="error">{error}</p>}
+      <table className="table hr-table">
+        <thead><tr><th>氏名</th><th>出勤</th><th>労働</th><th>法定外</th><th>60 時間超</th><th>深夜</th><th>休日</th><th>有給</th><th>点検</th></tr></thead>
+        <tbody>
+          {data.rows.map((r) => (
+            <Fragment key={r.employeeId}>
+              <tr>
+                <td><button className="link" onClick={() => setOpen(open === r.employeeId ? null : r.employeeId)}>{r.name}</button></td>
+                <td>{r.totals.workDays} 日</td><td>{hm(r.totals.workMinutes)}</td><td>{hm(r.totals.overtimeMinutes)}</td>
+                <td>{hm(r.totals.over60Minutes)}</td><td>{hm(r.totals.nightMinutes)}</td><td>{hm(r.totals.holidayMinutes)}</td>
+                <td>{r.totals.leaveDays || ''}</td>
+                <td className="small">
+                  {r.issues > 0 && <span className="badge warn">点検 {r.issues}</span>}
+                  {r.alerts.map((a) => <div key={a} className="error">{a}</div>)}
+                </td>
+              </tr>
+              {open === r.employeeId && <tr><td colSpan={9}><EmployeeAttendance employeeId={r.employeeId} month={ym} closed={!!data.close} onChanged={load} /></td></tr>}
+            </Fragment>
+          ))}
+          {data.rows.length === 0 && <tr><td colSpan={9} className="muted">この期間に在籍した人はいません</td></tr>}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** 1 人の期間の日ごとの勤怠（担当者が直せる）。 */
+function EmployeeAttendance({ employeeId, month, closed, onChanged }: { employeeId: string; month: string; closed: boolean; onChanged: () => void }) {
+  const [data, setData] = useState<Awaited<ReturnType<typeof api.hr.attendanceOf>> | null>(null);
+  const [fixing, setFixing] = useState<{ date: string; in: string; out: string; bs: string; be: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(() => {
+    api.hr.attendanceOf(employeeId, month).then(setData).catch((e) => setError(describeError(e, '読み込めませんでした')));
+  }, [employeeId, month]);
+  useEffect(load, [load]);
+  if (!data) return <p className="muted small">{error ?? '読み込んでいます…'}</p>;
+  const save = () => void api.hr.fixDay(employeeId, fixing!.date, {
+    in: fixing!.in, out: fixing!.out || null, breaks: fixing!.bs && fixing!.be ? [{ start: fixing!.bs, end: fixing!.be }] : [],
+  }).then(() => { setFixing(null); load(); onChanged(); }).catch((e) => setError(describeError(e, '直せませんでした')));
+  return (
+    <div className="hr-days">
+      {error && <p className="error small">{error}</p>}
+      <table className="table small">
+        <thead><tr><th>日付</th><th>出勤</th><th>退勤</th><th>休憩</th><th>労働</th><th>法定外</th><th>深夜</th><th>点検</th><th /></tr></thead>
+        <tbody>
+          {data.days.map((d) => (
+            fixing?.date === d.date ? (
+              <tr key={d.date}>
+                <td>{mdw(d.date)}</td>
+                <td><input type="time" value={fixing.in} onChange={(e) => setFixing({ ...fixing, in: e.target.value })} aria-label="出勤" /></td>
+                <td><input type="time" value={fixing.out} onChange={(e) => setFixing({ ...fixing, out: e.target.value })} aria-label="退勤" /></td>
+                <td colSpan={3}>
+                  <input type="time" value={fixing.bs} onChange={(e) => setFixing({ ...fixing, bs: e.target.value })} aria-label="休憩の始め" />〜
+                  <input type="time" value={fixing.be} onChange={(e) => setFixing({ ...fixing, be: e.target.value })} aria-label="休憩の終わり" />
+                </td>
+                <td colSpan={3}><button className="btn small" onClick={save}>保存</button><button className="btn ghost small" onClick={() => setFixing(null)}>やめる</button></td>
+              </tr>
+            ) : (
+              <tr key={d.date} className={d.type !== 'workday' ? 'muted' : ''}>
+                <td>{mdw(d.date)}{d.leaveDays ? ' 有給' : ''}</td><td>{time(d.in)}</td><td>{time(d.out)}</td><td>{hm(d.breakMinutes)}</td>
+                <td>{hm(d.workMinutes)}</td><td>{hm(d.overtimeMinutes)}</td><td>{hm(d.nightMinutes)}</td>
+                <td className={d.issues.length ? 'error' : ''}>{d.issues.join('・')}</td>
+                <td>{!closed && <button className="btn ghost small" onClick={() => setFixing({ date: d.date, in: time(d.in) || '09:00', out: time(d.out) || '18:00', bs: '', be: '' })}>直す</button>}</td>
+              </tr>
+            )
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** 有給（残り・取得義務・出勤率・手作業の付与・管理簿。仕様書 第30.7.1節）。 */
+function LeaveTab() {
+  const [rows, setRows] = useState<Awaited<ReturnType<typeof api.hr.leaveOverview>>['rows'] | null>(null);
+  const [grant, setGrant] = useState<{ employeeId: string; grantedOn: string; days: string; note: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(() => {
+    api.hr.leaveOverview().then((r) => setRows(r.rows)).catch((e) => setError(describeError(e, '読み込めませんでした')));
+  }, []);
+  useEffect(load, [load]);
+  if (!rows) return <p className="muted">{error ?? '読み込んでいます…'}</p>;
+  return (
+    <div className="hr">
+      <div className="row wrap hr-toolbar">
+        <span className="grow" />
+        <button className="btn ghost small" onClick={() => void api.hr.leaveRegister().catch((e) => setError(describeError(e, '書き出せませんでした')))}>管理簿</button>
+      </div>
+      {error && <p className="error">{error}</p>}
+      <table className="table hr-table">
+        <thead><tr><th>氏名</th><th>残り</th><th>付与</th><th>取得義務</th><th /></tr></thead>
+        <tbody>
+          {rows.map((r) => (
+            <Fragment key={r.employeeId}>
+              <tr>
+                <td>{r.name}</td>
+                <td>{r.balance.remaining} 日</td>
+                <td className="small">{r.balance.grants.filter((g) => g.left > 0).map((g) => `${g.grantedOn} ${g.days} 日（残り ${g.left}）`).join('・')}</td>
+                <td className="small">
+                  {r.balance.obligation && (r.balance.obligation.taken >= r.balance.obligation.required
+                    ? '済み'
+                    : <span className="badge warn">{r.balance.obligation.deadline} までにあと {r.balance.obligation.required - r.balance.obligation.taken} 日</span>)}
+                  {r.lowAttendance !== null && <div className="error">出勤率 {Math.round(r.lowAttendance * 100)}%（付与を確かめる）</div>}
+                </td>
+                <td><button className="btn ghost small" onClick={() => setGrant(grant?.employeeId === r.employeeId ? null : { employeeId: r.employeeId, grantedOn: '', days: '', note: '導入のときの残日数' })}>付与を足す</button></td>
+              </tr>
+              {grant?.employeeId === r.employeeId && (
+                <tr><td colSpan={5}>
+                  <div className="row wrap">
+                    <label className="small">付与の日 <input type="date" value={grant.grantedOn} onChange={(e) => setGrant({ ...grant, grantedOn: e.target.value })} /></label>
+                    <input className="num-input" type="number" min={0} step="0.5" placeholder="日数" value={grant.days} onChange={(e) => setGrant({ ...grant, days: e.target.value })} aria-label="日数" />
+                    <input className="grow" placeholder="理由" value={grant.note} onChange={(e) => setGrant({ ...grant, note: e.target.value })} aria-label="理由" />
+                    <button className="btn small" disabled={!grant.grantedOn || grant.days === ''} onClick={() => void api.hr.addGrant(grant.employeeId, grant.grantedOn, Number(grant.days), grant.note)
+                      .then(() => { setGrant(null); load(); }).catch((e) => setError(describeError(e, '付与を足せませんでした')))}>足す</button>
+                  </div>
+                </td></tr>
+              )}
+            </Fragment>
+          ))}
+          {rows.length === 0 && <tr><td colSpan={5} className="muted">在籍している人はいません</td></tr>}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 /** 期限の近い手続き（済んだにできる）。 */
@@ -183,6 +359,8 @@ function EmployeeDetail({ id, onBack }: { id: string; onBack: () => void }) {
   const [leave, setLeave] = useState<{ leftOn: string; reason: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [users, setUsers] = useState<{ id: string; name: string; email: string }[]>([]);
+  useEffect(() => { api.hr.users().then((r) => setUsers(r.users)).catch(() => setUsers([])); }, []);
   const load = useCallback(() => {
     api.hr.get(id).then((r) => { setD(r); setDraft(r.employee); }).catch((e) => setError(describeError(e, '読み込めませんでした')));
   }, [id]);
@@ -218,12 +396,18 @@ function EmployeeDetail({ id, onBack }: { id: string; onBack: () => void }) {
           {text('department', '所属')}{text('title', '役職')}
         </div>
         <div className="row wrap">{text('address', '住所', 'grow')}{text('phone', '電話')}{text('email', 'メールアドレス')}</div>
-        <div className="row wrap">{text('note', 'メモ', 'grow')}</div>
+        <div className="row wrap">
+          {text('note', 'メモ', 'grow')}
+          <select value={draft.userId ?? ''} onChange={(e) => set({ userId: e.target.value || null })} aria-label="結び付ける利用者">
+            <option value="">利用者に結び付けない</option>
+            {users.map((u) => <option key={u.id} value={u.id}>{u.name}（{u.email}）</option>)}
+          </select>
+        </div>
         <div className="row">
           <button className="btn small" onClick={() => act(() => api.hr.update(id, {
             name: draft.name, kana: draft.kana, code: draft.code, birthDate: draft.birthDate, gender: draft.gender, hiredOn: draft.hiredOn,
             employment: draft.employment, category: draft.category, department: draft.department, title: draft.title,
-            address: draft.address, phone: draft.phone, email: draft.email, note: draft.note,
+            address: draft.address, phone: draft.phone, email: draft.email, note: draft.note, userId: draft.userId ?? null,
           }), '保存できませんでした', () => setSaved(true))}>保存する</button>
           {saved && <span className="small muted">保存しました</span>}
         </div>

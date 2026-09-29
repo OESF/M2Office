@@ -57,6 +57,12 @@ export interface HrSettings {
   pay: { closingDay: number; payDay: number; payMonth: 'same' | 'next' };
   /** 社会保険と労働保険の手続きを、自社で行うか顧問の社会保険労務士に頼むか。 */
   procedures: 'self' | 'sharoushi';
+  /** 労働日と休日（第30.6.1節）。曜日は 0=日曜〜6=土曜。`nationalHolidays` は祝日を休み（所定休日）にするか。 */
+  work: { weekdays: number[]; legalHoliday: number; weekStart: number; nationalHolidays: boolean };
+  /** 36 協定（第30.6.1節）。上限は時間。`startMonth` は対象期間の始まりの月（1〜12）。 */
+  agreement: { enabled: boolean; monthly: number; yearly: number; special: boolean; startMonth: number };
+  /** 休暇（第30.7.1節）。 */
+  leave: { halfDay: boolean };
 }
 
 /** まだ設定していない会社の既定（締めは末日・支払は翌月 25 日。導入のときに会社が直す）。 */
@@ -67,6 +73,9 @@ export const DEFAULT_HR_SETTINGS: HrSettings = {
   socialApply: 'mandatory',
   pay: { closingDay: 31, payDay: 25, payMonth: 'next' },
   procedures: 'self',
+  work: { weekdays: [1, 2, 3, 4, 5], legalHoliday: 0, weekStart: 0, nationalHolidays: true },
+  agreement: { enabled: true, monthly: 45, yearly: 360, special: false, startMonth: 4 },
+  leave: { halfDay: true },
 };
 
 /** 従業員（人事の台帳。第30.5節）。 */
@@ -145,4 +154,111 @@ export interface HrTask {
 export interface HrEmployeeView extends HrEmployee {
   current: Pick<HrTerms, 'wageType' | 'wageAmount' | 'weeklyHours' | 'socialInsurance' | 'employmentInsurance'> | null;
   openTasks: number;
+}
+
+/** 打刻の種類（第30.6.1節）。 */
+export type AttPunchKind = 'in' | 'out' | 'break_start' | 'break_end';
+export const ATT_PUNCH_LABELS: Record<AttPunchKind, string> = { in: '出勤', out: '退勤', break_start: '休憩', break_end: '休憩終わり' };
+
+/** 打刻 1 つ。 */
+export interface AttPunch {
+  id: string;
+  employeeId: string;
+  kind: AttPunchKind;
+  at: string;
+  source: 'screen' | 'mobile' | 'secretary' | 'fix' | 'import';
+}
+
+/** 日の区分。 */
+export type AttDayType = 'workday' | 'dayoff' | 'legal-holiday';
+
+/** 日の集計（分）。 */
+export interface AttDay {
+  date: string;
+  type: AttDayType;
+  in: string | null;
+  out: string | null;
+  breakMinutes: number;
+  workMinutes: number;
+  nightMinutes: number;
+  /** 1 日 8 時間を超えた分。 */
+  overtimeMinutes: number;
+  /** 所定の時間を超え 8 時間までの分。 */
+  extraMinutes: number;
+  /** 法定休日の労働。 */
+  holidayMinutes: number;
+  lateMinutes: number;
+  earlyMinutes: number;
+  /** 有給を取った日数（0・0.5・1）。 */
+  leaveDays: number;
+  /** 点検の指摘（打刻漏れ・休憩の不足など）。 */
+  issues: string[];
+}
+
+/** 期間（締めの期間）の集計（分）。 */
+export interface AttTotals {
+  workDays: number;
+  workMinutes: number;
+  overtimeMinutes: number;
+  /** 週 40 時間を超えた分（overtimeMinutes に含む）。 */
+  weeklyOvertimeMinutes: number;
+  extraMinutes: number;
+  nightMinutes: number;
+  holidayMinutes: number;
+  /** 月 60 時間を超えた法定外。 */
+  over60Minutes: number;
+  lateMinutes: number;
+  earlyMinutes: number;
+  leaveDays: number;
+  /** 打刻の無い所定の労働日。 */
+  missingDays: number;
+}
+
+/** 締めの期間。 */
+export interface AttPeriod {
+  start: string;
+  end: string;
+  /** 「2026 年 9 月分」のような呼び名（締め日の月）。 */
+  label: string;
+}
+
+/** 締めの記録。 */
+export interface AttClose {
+  id: string;
+  periodStart: string;
+  periodEnd: string;
+  status: 'closed' | 'reopened';
+  closedBy: string | null;
+  closedAt: string;
+}
+
+/** 有給の付与。 */
+export interface LeaveGrant {
+  id: string;
+  employeeId: string;
+  grantedOn: string;
+  days: number;
+  expiresOn: string;
+  basis: 'auto' | 'manual';
+  note: string;
+}
+
+/** 有給の取得。 */
+export interface LeaveTake {
+  id: string;
+  employeeId: string;
+  date: string;
+  days: number;
+  status: 'taken' | 'cancelled';
+  source: 'screen' | 'secretary' | 'staff';
+}
+
+/** 有給の残りと取得義務。 */
+export interface LeaveBalance {
+  /** 使える日数（時効の来ていない付与から、取った分を古い順に引いたもの）。 */
+  remaining: number;
+  /** 付与ごとの残り（古い順）。 */
+  grants: (LeaveGrant & { used: number; left: number })[];
+  /** 取得義務（10 日以上の付与の、付与の日から 1 年）。無ければ `null`。 */
+  obligation: { grantedOn: string; deadline: string; taken: number; required: number } | null;
 }

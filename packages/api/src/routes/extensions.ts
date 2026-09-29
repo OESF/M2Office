@@ -171,7 +171,7 @@ export function extensionsRoute(deps: AppDeps) {
     const { tenant, user } = c.get('ctx');
     const b = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
     const cur = (await deps.repo.getTenantSettings(tenant.id)).hr;
-    const next: HrSettings = { ...cur, office: { ...cur.office }, health: { ...cur.health }, pay: { ...cur.pay } };
+    const next: HrSettings = { ...cur, office: { ...cur.office }, health: { ...cur.health }, pay: { ...cur.pay }, work: { ...cur.work }, agreement: { ...cur.agreement }, leave: { ...cur.leave } };
     const obj = (v: unknown) => (v && typeof v === 'object' ? v as Record<string, unknown> : null);
     const text = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : undefined);
     const day = (v: unknown) => (typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 31 ? v : undefined);
@@ -194,6 +194,30 @@ export function extensionsRoute(deps: AppDeps) {
       if (pay['payMonth'] === 'same' || pay['payMonth'] === 'next') next.pay.payMonth = pay['payMonth'];
     }
     if (b['procedures'] === 'self' || b['procedures'] === 'sharoushi') next.procedures = b['procedures'];
+    // 労働日と休日（第30.6.1節）。曜日は 0=日曜〜6=土曜
+    const work = obj(b['work']);
+    const wd = (v: unknown) => (typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 6 ? v : undefined);
+    if (work) {
+      if (Array.isArray(work['weekdays'])) next.work = { ...next.work, weekdays: [...new Set(work['weekdays'].map(wd).filter((x): x is number => x !== undefined))].sort() };
+      if (wd(work['legalHoliday']) !== undefined) next.work = { ...next.work, legalHoliday: wd(work['legalHoliday'])! };
+      if (wd(work['weekStart']) !== undefined) next.work = { ...next.work, weekStart: wd(work['weekStart'])! };
+      if (typeof work['nationalHolidays'] === 'boolean') next.work = { ...next.work, nationalHolidays: work['nationalHolidays'] };
+    }
+    // 36 協定（第30.6.1節）
+    const ag = obj(b['agreement']);
+    const hours = (v: unknown, max: number) => (typeof v === 'number' && Number.isFinite(v) && v > 0 && v <= max ? Math.round(v) : undefined);
+    if (ag) {
+      next.agreement = {
+        enabled: typeof ag['enabled'] === 'boolean' ? ag['enabled'] : next.agreement.enabled,
+        monthly: hours(ag['monthly'], 100) ?? next.agreement.monthly,
+        yearly: hours(ag['yearly'], 720) ?? next.agreement.yearly,
+        special: typeof ag['special'] === 'boolean' ? ag['special'] : next.agreement.special,
+        startMonth: hours(ag['startMonth'], 12) ?? next.agreement.startMonth,
+      };
+    }
+    // 休暇（第30.7.1節）
+    const lv = obj(b['leave']);
+    if (lv && typeof lv['halfDay'] === 'boolean') next.leave = { ...next.leave, halfDay: lv['halfDay'] };
     await deps.repo.saveTenantSettings(tenant.id, 'hr', next, user.id);
     await deps.repo.appendAudit({
       id: randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id, action: 'settings.update',

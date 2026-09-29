@@ -12,6 +12,7 @@ import type {
   TenantSettings, User, UserSettings, CardFields, Contact, ContactScope,
   InventoryItem, InventoryItemView, InventoryLocation, InventoryMove, InventoryMoveKind, InventorySettings, InventoryStockRow,
   HrEmployee, HrEmployeeView, HrSettings, HrTask, HrTerms,
+  AttClose, AttDay, AttPeriod, AttPunchKind, AttTotals, LeaveBalance, LeaveGrant, LeaveTake,
   InventoryCount, InventoryCountRow, InventoryCountScope, InventoryCountView, InventorySupplier,
   InventoryBooking, InventoryBookingMapping, InventoryBookingSource,
 } from '@m2office/shared';
@@ -186,8 +187,39 @@ export interface Me {
   inventory?: boolean;
   /** 人事・給与の担当者の画面を使えるか（会社の入り切りと人事区画。仕様書 第30.2節）。 */
   hr?: boolean;
+  /** 本人の「給与・勤怠」を使えるか（台帳に結び付いているか。仕様書 第30.25節）。 */
+  hrSelf?: boolean;
   /** デバッグモードか（`M2O_DEBUG=true`。仕様書 第20.4.1節「デバッグモード」）。 */
   debug?: boolean;
+}
+
+/** 1 日の打刻を直すときの入力（日本時間の HH:MM）。 */
+export interface DayFixInput {
+  in: string;
+  out: string | null;
+  breaks: { start: string; end: string }[];
+}
+
+/** 期間の従業員ごとの勤怠の行（担当者の画面）。 */
+export interface AttSummaryRow {
+  employeeId: string;
+  name: string;
+  totals: AttTotals;
+  issues: number;
+  alerts: string[];
+}
+
+/** 本人の「給与・勤怠」。 */
+export interface MyHrView {
+  employee: { id: string; name: string; hiredOn: string | null };
+  state: { state: 'off' | 'working' | 'break'; since: string | null };
+  period: AttPeriod;
+  days: AttDay[];
+  totals: AttTotals;
+  today: string;
+  leave: Omit<LeaveBalance, 'grants'> & { grants: LeaveBalance['grants']; takes: LeaveTake[] };
+  halfDay: boolean;
+  closed: boolean;
 }
 
 /** 従業員の取り込みの結果（仕様書 第30.5節）。 */
@@ -1072,12 +1104,42 @@ export const api = {
       if (!res.ok) throw new ApiError(body.error ?? `エラー (${res.status})`, res.status, false);
       return body as HrImportResult;
     },
+    /** 期間の勤怠の一覧（`month`: 締め日の月）。 */
+    attendance: (month?: string) => call<{ period: AttPeriod; rows: AttSummaryRow[]; close: AttClose | null }>(`/hr/attendance${month ? `?month=${month}` : ''}`),
+    attendanceOf: (employeeId: string, month?: string) =>
+      call<{ employee: { id: string; name: string }; period: AttPeriod; days: AttDay[]; totals: AttTotals }>(`/hr/attendance/${encodeURIComponent(employeeId)}${month ? `?month=${month}` : ''}`),
+    fixDay: (employeeId: string, date: string, fix: DayFixInput) =>
+      call<{ day: AttDay }>(`/hr/attendance/${encodeURIComponent(employeeId)}/days/${date}`, { method: 'PUT', body: JSON.stringify(fix) }),
+    closeAttendance: (month: string) => call<{ close: AttClose }>('/hr/attendance/close', { method: 'POST', body: JSON.stringify({ month }) }),
+    reopenAttendance: (closeId: string) => call<{ ok: true }>(`/hr/attendance/closes/${encodeURIComponent(closeId)}/reopen`, { method: 'POST' }),
+    attendanceBook: async (month: string) => {
+      const blob = await fetchBlob(`/hr/attendance/book?month=${month}&format=xlsx`);
+      if (!blob) throw new ApiError('書き出せませんでした', 403);
+      saveBlob(blob, `出勤簿-${month}.xlsx`);
+    },
+    leaveOverview: () => call<{ rows: { employeeId: string; name: string; balance: LeaveBalance; lowAttendance: number | null }[] }>('/hr/leave'),
+    addGrant: (employeeId: string, grantedOn: string, days: number, note: string) =>
+      call<{ grant: LeaveGrant }>(`/hr/leave/${encodeURIComponent(employeeId)}/grants`, { method: 'POST', body: JSON.stringify({ grantedOn, days, note }) }),
+    leaveRegister: async () => {
+      const blob = await fetchBlob('/hr/leave/register?format=xlsx');
+      if (!blob) throw new ApiError('書き出せませんでした', 403);
+      saveBlob(blob, `年次有給休暇管理簿-${new Date().toISOString().slice(0, 10)}.xlsx`);
+    },
+    users: () => call<{ users: { id: string; name: string; email: string }[] }>('/hr/users'),
     /** 労働者名簿を書き出す。 */
     roster: async (format: 'csv' | 'xlsx') => {
       const blob = await fetchBlob(`/hr/roster?format=${format}`);
       if (!blob) throw new ApiError('書き出せませんでした', 403);
       saveBlob(blob, `労働者名簿-${new Date().toISOString().slice(0, 10)}.${format}`);
     },
+  },
+  /** 本人の「給与・勤怠」（人事・給与の段 2。仕様書 第30.25節）。 */
+  myHr: {
+    get: (month?: string) => call<MyHrView>(`/me/hr${month ? `?month=${month}` : ''}`),
+    punch: (kind: AttPunchKind, source: 'screen' | 'mobile' = 'screen') => call<{ punch: { at: string } }>('/me/hr/punch', { method: 'POST', body: JSON.stringify({ kind, source }) }),
+    fixDay: (date: string, fix: DayFixInput) => call<{ day: AttDay }>(`/me/hr/days/${date}`, { method: 'PUT', body: JSON.stringify(fix) }),
+    leave: (date: string, days: number) => call<{ remaining: number }>('/me/hr/leave', { method: 'POST', body: JSON.stringify({ date, days }) }),
+    cancelLeave: (id: string) => call<{ ok: true }>(`/me/hr/leave/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   },
   /** 会話の要約（仕様書 第11.9.6節）。 */
   myConversationDigests: () => call<{ items: { day: string; summary: string }[] }>('/me/conversation-digests'),

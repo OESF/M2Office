@@ -12,3 +12,13 @@ export {
   hireProcedures, leaveProcedures, payDateFor, addOneMonth, tenthOfNextMonth, dayOfMonth,
   type ProcedureDraft, type ProcedureSubject,
 } from './procedures.js';
+export { PostgresAttendanceStore, type AttendanceStore } from './attendance-store.js';
+export {
+  AttendanceService, termsOn, groupShifts, type AttState, type DayFix, type AttSummaryRow, type AttendanceServiceDeps,
+} from './attendance-service.js';
+export {
+  summarizeDay, weeklyOvertime, periodTotals, periodOf, periodContaining, agreementAlerts, dayType, scheduledMinutes, jstDate, jstTime, shiftDate,
+  DAILY_LIMIT, WEEKLY_LIMIT, OVER60, type AgreementAlert, type DaySchedule,
+} from './attendance.js';
+export { leaveBalance, dueGrantDates, grantDays, addMonths, LEAVE_NORMAL, LEAVE_PROPORTIONAL, LEAVE_OBLIGATION_DAYS } from './leave.js';
+export { japaneseHolidays, isJapaneseHoliday, equinoxDays } from './holidays.js';

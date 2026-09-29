@@ -182,6 +182,16 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/hr/employees/:id/leave` | 退職を記録する（`leftOn`・`reason`）。退職の手続きを期限つきで作る（第30.5.2節） |
 | `PUT /v1/hr/tasks/:id` | 手続きを済んだにする・戻す（`done`） |
 | `POST /v1/hr/import` | CSV・Excel から従業員を取り込む（`file`。見出しを推論で読む。入社・退職から 60 日を過ぎた人の手続きは作らない） |
+| `GET /v1/hr/attendance` ／ `GET /v1/hr/attendance/:employeeId` | 勤怠（段 2。第30.6.1節）: 期間（`month`: 締め日の月 YYYY-MM）の従業員ごとの集計・点検の数・36 協定の知らせと締め ／ 1 人の日ごとの勤怠（見たことを監査ログに残す） |
+| `PUT /v1/hr/attendance/:employeeId/days/:date` | 担当者が 1 日の打刻を直す（`in`・`out`・`breaks`。締めた期間は 400） |
+| `POST /v1/hr/attendance/close` ／ `POST /v1/hr/attendance/closes/:id/reopen` | 期間を締める（`month`。期間の終わりの日を過ぎてから）／ 締めを戻す |
+| `GET /v1/hr/attendance/book` | 出勤簿を書き出す（`month`・`format`） |
+| `GET /v1/hr/leave` ／ `GET /v1/hr/leave/register` | 有給（第30.7.1節）: 全員の残り・付与・取得義務・出勤率の低い人 ／ 年次有給休暇の管理簿を書き出す |
+| `POST /v1/hr/leave/:employeeId/grants` ／ `POST /v1/hr/leave/:employeeId/takes` ／ `DELETE /v1/hr/leave/takes/:id` | 手作業の付与（導入のときの残日数）／ 担当者が取得を記録 ／ 取り消す |
+| `GET /v1/hr/users` | 台帳に結び付けられる利用者（名前とメールアドレス） |
+| `GET /v1/me/hr` | 本人の「給与・勤怠」（第30.25節）: 打刻の状態・期間の勤怠・有給の残りと取得義務。台帳に結び付いていなければ 404（同じメールアドレスなら自動で結び付く） |
+| `POST /v1/me/hr/punch` ／ `PUT /v1/me/hr/days/:date` | 本人が打刻する（`kind`: in・out・break_start・break_end。できない打刻は 409）／ 1 日を直す（人事区画の人に知らせる。締めた期間は 400） |
+| `POST /v1/me/hr/leave` ／ `DELETE /v1/me/hr/leave/:id` | 本人が有給を取る（`date`・`days`: 1 か 0.5。承認の段は挟まず、人事区画の人に知らせる）／ 取り消す |
 | `GET /v1/hr/roster` | 労働者名簿を書き出す（`format=csv` か `xlsx`。事業主本人は載せない。監査ログに残す） |
 | `GET /v1/inventory/bookings` | 今日（日本時間）から先の予約と取り置き・予約の日を過ぎた取り置き（`overdue`）・使う品目の分からない予約（`unmapped`）。予約との引き当てを切っている会社は 403（第29.13節） |
 | `POST /v1/inventory/bookings` | 取り置く（`itemId`・`qty`・`startsAt`・任意の `externalId`・`menu`）。使える数から引く |

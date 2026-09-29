@@ -21,6 +21,7 @@ const ACTIONS: Record<string, string> = {
   'secretary.plan.answer': '段取りへの答え',
   'secretary.todo': 'ToDo',
   'secretary.mail': 'メールを確認して振り分けた',
+  'secretary.attendance': '勤怠と有給',
 };
 
 /**

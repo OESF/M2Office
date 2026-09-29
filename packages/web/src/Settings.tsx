@@ -241,7 +241,8 @@ export function Settings({ me, agents, onChanged, section }: {
         <h3>通知</h3>
         <p className="muted small">切った種類は画面内にも届きません</p>
         {([['brief', 'ブリーフ（朝・週次）'], ['run', '実行の完了'], ['approval', '承認の依頼'], ['failure', '失敗'],
-          ...(me.inventory ? [['inventory', '在庫（残りわずか・無くなる見込み・使用期限）']] as const : [])] as const).map(([k, label]) => (
+          ...(me.inventory ? [['inventory', '在庫（残りわずか・無くなる見込み・使用期限）']] as const : []),
+          ...(me.hr || me.hrSelf ? [['attendance', '勤怠（打刻の直し・有給・時間外の上限・有給の取得義務）']] as const : [])] as const).map(([k, label]) => (
           <label key={k} className="check">
             <input type="checkbox" checked={s.notifications.kinds[k]}
               onChange={(e) => set('notifications', { kinds: { ...s.notifications.kinds, [k]: e.target.checked } })} />

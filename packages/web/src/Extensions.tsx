@@ -375,6 +375,9 @@ const PREFECTURES = ['北海道', '青森県', '岩手県', '宮城県', '秋田
   '新潟県', '富山県', '石川県', '福井県', '山梨県', '長野県', '岐阜県', '静岡県', '愛知県', '三重県', '滋賀県', '京都府', '大阪府', '兵庫県', '奈良県', '和歌山県',
   '鳥取県', '島根県', '岡山県', '広島県', '山口県', '徳島県', '香川県', '愛媛県', '高知県', '福岡県', '佐賀県', '長崎県', '熊本県', '大分県', '宮崎県', '鹿児島県', '沖縄県'];
 
+/** 曜日（0=日曜）。 */
+const WEEK = ['日', '月', '火', '水', '木', '金', '土'];
+
 /** 締め日・支払日の選び（31 は末日）。 */
 const DAYS = Array.from({ length: 31 }, (_, i) => i + 1);
 const dayLabel = (d: number) => (d === 31 ? '末日' : `${d} 日`);
@@ -421,6 +424,36 @@ function HrFields({ settings, busy, onChanged }: { settings: HrSettings; busy: b
         <select value={settings.procedures} disabled={busy} onChange={(e) => save({ procedures: e.target.value as HrSettings['procedures'] })} aria-label="保険の手続き">
           <option value="self">保険の手続き: 自社</option><option value="sharoushi">保険の手続き: 社会保険労務士に依頼</option>
         </select>
+      </div>
+      <div className="row wrap">
+        <span>所定の労働日</span>
+        {WEEK.map((w, i) => (
+          <label key={w} className="check">
+            <input type="checkbox" checked={settings.work.weekdays.includes(i)} disabled={busy}
+              onChange={(e) => save({ work: { ...settings.work, weekdays: e.target.checked ? [...settings.work.weekdays, i] : settings.work.weekdays.filter((x) => x !== i) } })} />{w}
+          </label>
+        ))}
+        <label className="check"><input type="checkbox" checked={settings.work.nationalHolidays} disabled={busy}
+          onChange={(e) => save({ work: { ...settings.work, nationalHolidays: e.target.checked } })} /> 祝日を休みにする</label>
+        <label>法定休日 <select value={settings.work.legalHoliday} disabled={busy} onChange={(e) => save({ work: { ...settings.work, legalHoliday: Number(e.target.value) } })}>
+          {WEEK.map((w, i) => <option key={w} value={i}>{w}曜</option>)}
+        </select></label>
+      </div>
+      <div className="row wrap">
+        <label className="check"><input type="checkbox" checked={settings.agreement.enabled} disabled={busy} onChange={(e) => save({ agreement: { ...settings.agreement, enabled: e.target.checked } })} /> 36 協定</label>
+        {settings.agreement.enabled && (
+          <>
+            <label>月 <input type="number" min={1} max={100} className="num" defaultValue={settings.agreement.monthly}
+              onBlur={(e) => Number(e.target.value) !== settings.agreement.monthly && save({ agreement: { ...settings.agreement, monthly: Number(e.target.value) } })} /> 時間</label>
+            <label>年 <input type="number" min={1} max={720} className="num" defaultValue={settings.agreement.yearly}
+              onBlur={(e) => Number(e.target.value) !== settings.agreement.yearly && save({ agreement: { ...settings.agreement, yearly: Number(e.target.value) } })} /> 時間</label>
+            <label className="check"><input type="checkbox" checked={settings.agreement.special} disabled={busy} onChange={(e) => save({ agreement: { ...settings.agreement, special: e.target.checked } })} /> 特別条項</label>
+            <label>起算の月 <select value={settings.agreement.startMonth} disabled={busy} onChange={(e) => save({ agreement: { ...settings.agreement, startMonth: Number(e.target.value) } })}>
+              {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => <option key={m} value={m}>{m} 月</option>)}
+            </select></label>
+          </>
+        )}
+        <label className="check"><input type="checkbox" checked={settings.leave.halfDay} disabled={busy} onChange={(e) => save({ leave: { halfDay: e.target.checked } })} /> 半日の有給</label>
       </div>
     </div>
   );

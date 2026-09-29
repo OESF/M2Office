@@ -11,7 +11,7 @@
 
 import {
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
-  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, InventoryService, InventoryWatch, InventoryBookings, PostgresInventoryStore, inventoryAccess, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention,
+  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, InventoryService, InventoryWatch, InventoryBookings, PostgresInventoryStore, inventoryAccess, AttendanceService, PostgresAttendanceStore, PostgresHrStore, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention,
   NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv,
   defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials,
@@ -92,6 +92,12 @@ const inventory = new InventoryService({
 // 予約との引き当て（第29.13節）。秘書から頼まれた取り置きと、毎朝の見直しが使う
 const inventoryBookings = new InventoryBookings({ store: inventory.store, service: inventory, repo, llm: (tenantId) => ai.llmFor(tenantId) });
 inventoryWatch = new InventoryWatch({ repo, service: inventory, bookings: inventoryBookings, logger: log });
+// 人事・給与の勤怠と有給（第30.7.1節）。毎朝、付与の日が来た分を作り、有給の取得義務を知らせる
+const attendance = new AttendanceService({
+  store: new PostgresAttendanceStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+  hrStore: new PostgresHrStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+  repo,
+});
 const engine = new RunEngine({
   repo, llm, registry, connector, files, resolveDefinition, isAvailable, logger: log, research, notices,
   cards: { store: contactStore, service: cards, access: cardsAccess(repo) },
@@ -174,6 +180,8 @@ let lastCardPurge = 0;
 const INVENTORY_WATCH_HOUR = Number(process.env['INVENTORY_WATCH_HOUR'] ?? 7);
 /** 在庫の毎朝の見直しを済ませた日（日本時間）。1 日 1 回にする。 */
 let inventoryWatchedOn = '';
+/** 有給の毎朝の見回りをした日（在庫と同じ時刻を過ぎたら 1 日 1 回）。 */
+let leaveWatchedOn = '';
 
 const POLL_INTERVAL_MS = 1000;
 /** 定時実行の見回り間隔。分単位の指定に対して十分に短くする。 */
@@ -317,6 +325,24 @@ while (running) {
       } catch (err) {
         log.error('在庫の見張りで例外が発生しました', { err });
       }
+    }
+  }
+
+  // 有給の付与と取得義務の見回り（第30.7.1節）。会社ごとの失敗はほかの会社を止めない
+  {
+    const jst = new Date(Date.now() + 9 * 3_600_000);
+    const today = jst.toISOString().slice(0, 10);
+    if (leaveWatchedOn !== today && jst.getUTCHours() >= INVENTORY_WATCH_HOUR) {
+      leaveWatchedOn = today;
+      let n = 0;
+      for (const tenantId of await repo.listTenantIds()) {
+        try {
+          n += await attendance.daily(tenantId);
+        } catch (err) {
+          log.warn('有給の見回りに失敗しました', { tenantId, err });
+        }
+      }
+      if (n > 0) log.info('有給の取得義務を知らせました', { notifications: n });
     }
   }
 

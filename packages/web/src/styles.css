@@ -1420,3 +1420,18 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .hr-tasks li.overdue span { color: var(--danger); }
 .hr-tasks li.done span { color: var(--muted); text-decoration: line-through; }
 .hr-table .badge { margin-left: 6px; }
+.hr-tabs { display: flex; gap: 4px; margin-bottom: calc(10px * var(--space-scale)); }
+.hr-tabs button { border: 1px solid var(--line); background: none; color: var(--ink); border-radius: 999px; padding: 4px 14px; cursor: pointer; }
+.hr-tabs button.on { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.hr-days { padding: 6px 0; }
+.hr-days input[type=time] { width: 7em; }
+
+/* 本人の「給与・勤怠」（仕様書 第30.25節）。打刻のボタンはスマホでも押しやすく大きく */
+.myhr .card { padding: calc(12px * var(--space-scale)); margin-bottom: calc(12px * var(--space-scale)); }
+.myhr .row.wrap { flex-wrap: wrap; gap: calc(8px * var(--space-scale)); align-items: center; }
+.myhr-state { font-size: calc(18px * var(--font-scale)); font-weight: 600; margin-bottom: 8px; }
+.myhr .btn.big { min-width: 8em; min-height: 52px; font-size: calc(17px * var(--font-scale)); }
+.myhr-nav { margin: 8px 0; }
+.myhr-totals { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-bottom: 8px; }
+.myhr-days tr.warn td:last-child { color: var(--danger); }
+.myhr-days input[type=time] { width: 7em; }

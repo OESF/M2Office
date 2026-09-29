@@ -43,6 +43,7 @@ import { connectionsRoute, myGoogleRoute, oauthCallbackRoute, returnTo } from '.
 import { myConnectionsRoute } from './routes/connection-auth.js';
 import { debugRoute } from './routes/debug.js';
 import { hrRoute } from './routes/hr.js';
+import { hrSelfRoute } from './routes/hr-self.js';
 
 /**
  * API サーバー。
@@ -140,11 +141,15 @@ app.get('/v1/me', async (c) => {
     inventory: !!(await deps.inventory.access(ctx.tenant.id, ctx.user.id)),
     // 人事・給与の担当者の画面を使えるか（会社の入り切りと人事区画。仕様書 第30.2節）
     hr: !!(await deps.hr.access(ctx.tenant.id, ctx.user.id)),
+    // 本人の「給与・勤怠」を使えるか（台帳に結び付いているか。同じメールアドレスなら自動で結び付く。第30.25節）
+    hrSelf: !!(await deps.hr.attendance.selfEmployee(ctx.tenant.id, ctx.user.id)),
     // デバッグモードか（仕様書 第20.4.1節「デバッグモード」）。画面の上の帯に「Debug mode」を出し、記録を見る入口を出す
     debug: !!deps.debug,
   });
 });
 app.route('/v1/me/google', myGoogleRoute(deps));
+// 本人の「給与・勤怠」（人事・給与の段 2。仕様書 第30.25節）。/v1/me より先に置く
+app.route('/v1/me/hr', hrSelfRoute(deps));
 // 認証の要る会社の接続（Slack など）の、本人の接続と取り消し（仕様書 第6.5.9節・第12.11.6.3節）
 app.route('/v1/me/connections', myConnectionsRoute(deps, returnTo));
 app.route('/v1/me', meRoute(deps));

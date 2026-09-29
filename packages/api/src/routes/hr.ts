@@ -5,8 +5,8 @@
  * 他人の台帳を見ただけでも監査ログに残す（第30.21節。処理側で残す）。
  */
 
-import { Hono } from 'hono';
-import { readSheet, renderSheet, HR_IMPORT_MAX_ROWS, type EmployeeInput, type TermsInput } from '@m2office/core';
+import { Hono, type Context } from 'hono';
+import { readSheet, renderSheet, HR_IMPORT_MAX_ROWS, type DayFix, type EmployeeInput, type TermsInput } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 
@@ -104,6 +104,125 @@ export function hrRoute(deps: AppDeps) {
     }
     if (rows.length < 2) return c.json({ error: '見出しの行と、従業員の行が要ります' }, 400);
     return c.json(await service.importRows(tenant.id, user.id, rows));
+  });
+
+  // ---- 勤怠（段 2。第30.6.1節） ----
+
+  const att = deps.hr.attendance;
+  const employeeOf = async (tenantId: string, id: string) => deps.hr.service.deps.store.getEmployee(tenantId, id);
+  const sheet = async (c: Context<AppEnv>, name: string, file: string, table: { columns: string[]; rows: (string | number | null)[][] }) => {
+    const format = c.req.query('format') === 'csv' ? 'csv' : 'xlsx';
+    const bytes = await renderSheet(name, table.columns, table.rows, format);
+    c.header('Content-Type', format === 'csv' ? 'text/csv; charset=utf-8' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    c.header('Content-Disposition', `attachment; filename="${file}.${format}"`);
+    return c.body(bytes as unknown as ArrayBuffer);
+  };
+
+  /** 期間の従業員ごとの勤怠の集計・点検の数・36 協定の知らせと、締めの記録（`month`: 締め日の月 YYYY-MM）。 */
+  app.get('/attendance', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const period = await att.period(tenant.id, c.req.query('month'));
+    const [rows, closes] = await Promise.all([att.summary(tenant.id, period), att.closes(tenant.id)]);
+    await deps.repo.appendAudit({
+      id: crypto.randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id, action: 'hr.attendance.view',
+      targetType: 'hr', targetId: `${period.start}..${period.end}`, detail: { rows: rows.length }, occurredAt: new Date().toISOString(),
+    });
+    return c.json({ period, rows, close: closes.find((x) => x.periodEnd === period.end && x.status === 'closed') ?? null });
+  });
+
+  /** 出勤簿を書き出す（期間の日ごと）。 */
+  app.get('/attendance/book', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const period = await att.period(tenant.id, c.req.query('month'));
+    return sheet(c, '出勤簿', `attendance-${period.end.slice(0, 7)}`, await att.attendanceBook(tenant.id, user.id, period));
+  });
+
+  /** 1 人の期間の日ごとの勤怠。 */
+  app.get('/attendance/:employeeId', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const employee = await employeeOf(tenant.id, c.req.param('employeeId'));
+    if (!employee) return c.json({ error: '従業員が見つかりません' }, 404);
+    const period = await att.period(tenant.id, c.req.query('month'));
+    const r = await att.days(tenant.id, employee, period);
+    await deps.repo.appendAudit({
+      id: crypto.randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id, action: 'hr.view',
+      targetType: 'hr_employee', targetId: employee.id, detail: { attendance: `${period.start}..${period.end}` }, occurredAt: new Date().toISOString(),
+    });
+    return c.json({ employee: { id: employee.id, name: employee.name }, period, ...r });
+  });
+
+  /** 担当者が 1 日の打刻を直す（締めた期間は、締めを戻してから）。 */
+  app.put('/attendance/:employeeId/days/:date', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const employee = await employeeOf(tenant.id, c.req.param('employeeId'));
+    if (!employee) return c.json({ error: '従業員が見つかりません' }, 404);
+    const b = await c.req.json<Partial<DayFix>>().catch(() => ({} as Partial<DayFix>));
+    const r = await att.fixDay(tenant.id, user.id, employee, c.req.param('date'), {
+      in: String(b.in ?? ''), out: b.out ? String(b.out) : null, breaks: Array.isArray(b.breaks) ? b.breaks : [],
+    }, true);
+    return 'error' in r ? c.json(r, 400) : c.json(r);
+  });
+
+  /** 期間を締める。 */
+  app.post('/attendance/close', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const b = await c.req.json<{ month?: string }>().catch(() => ({} as { month?: string }));
+    const r = await att.close(tenant.id, user.id, await att.period(tenant.id, b.month));
+    return 'error' in r ? c.json(r, 409) : c.json(r, 201);
+  });
+
+  /** 締めを戻す。 */
+  app.post('/attendance/closes/:id/reopen', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    return (await att.reopen(tenant.id, user.id, c.req.param('id'))) ? c.json({ ok: true }) : c.json({ error: '締めが見つかりません' }, 404);
+  });
+
+  // ---- 有給（段 2。第30.7.1節） ----
+
+  /** 有給の一覧（残り・取得義務・出勤率の低い人）。 */
+  app.get('/leave', async (c) => {
+    const { tenant } = c.get('ctx');
+    return c.json({ rows: await att.leaveOverview(tenant.id) });
+  });
+
+  /** 年次有給休暇の管理簿を書き出す。 */
+  app.get('/leave/register', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    return sheet(c, '年次有給休暇管理簿', 'leave-register', await att.leaveRegister(tenant.id, user.id));
+  });
+
+  /** 手作業の付与（導入のときの今の残日数・付与の直し）。 */
+  app.post('/leave/:employeeId/grants', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const employee = await employeeOf(tenant.id, c.req.param('employeeId'));
+    if (!employee) return c.json({ error: '従業員が見つかりません' }, 404);
+    const b = await c.req.json<{ grantedOn?: string; days?: number; note?: string }>().catch(() => ({} as { grantedOn?: string; days?: number; note?: string }));
+    const r = await att.addGrant(tenant.id, user.id, employee, String(b.grantedOn ?? ''), Number(b.days), String(b.note ?? ''));
+    return 'error' in r ? c.json(r, 400) : c.json(r, 201);
+  });
+
+  /** 担当者が有給の取得を記録する（締めた期間も記録できる）。 */
+  app.post('/leave/:employeeId/takes', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const employee = await employeeOf(tenant.id, c.req.param('employeeId'));
+    if (!employee) return c.json({ error: '従業員が見つかりません' }, 404);
+    const b = await c.req.json<{ date?: string; days?: number }>().catch(() => ({} as { date?: string; days?: number }));
+    const r = await att.requestLeave(tenant.id, user.id, employee, String(b.date ?? ''), Number(b.days ?? 1), 'staff');
+    return 'error' in r ? c.json(r, 400) : c.json(r, 201);
+  });
+
+  /** 担当者が有給の取得を取り消す。 */
+  app.delete('/leave/takes/:id', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const r = await att.cancelLeave(tenant.id, user.id, null, c.req.param('id'), true);
+    return 'error' in r ? c.json(r, 400) : c.json(r);
+  });
+
+  /** 台帳に結び付けられる利用者（名前とメールアドレスだけ）。 */
+  app.get('/users', async (c) => {
+    const { tenant } = c.get('ctx');
+    const users = (await deps.repo.listUsers(tenant.id)).filter((u) => u.status === 'active');
+    return c.json({ users: users.map((u) => ({ id: u.id, name: u.displayName, email: u.email })) });
   });
 
   /** 労働者名簿を CSV・Excel で書き出す（監査ログに残す）。 */

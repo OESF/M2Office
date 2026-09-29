@@ -3533,6 +3533,7 @@ console.log('\n■ 61. 人事・給与（内蔵の拡張。第30章、段 1: 台
   const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
   await owner.connect();
   const tag = `確認用人事${Date.now().toString(36)}`;
+  const hrStartedAt = new Date().toISOString();
   const { rows: saved } = await owner.query(`select tenant_id, hr from tenant_settings where tenant_id in ('t-alpha', 't-beta')`);
   const { body: compsBefore } = await call('a', '/v1/admin/compartments');
   const hrComp = (compsBefore.items ?? []).find((c) => c.name === 'hr');
@@ -3602,10 +3603,48 @@ console.log('\n■ 61. 人事・給与（内蔵の拡張。第30章、段 1: 台
     offComp.status === 403 ? ok('人事区画を止めると、人事・給与の担当者の画面も使えない') : ng(`区画を止めても使える（${offComp.status}）`);
     const cross = await call('b', `/v1/hr/employees/${empId}`);
     cross.status === 403 || cross.status === 404 ? ok('ほかの会社の従業員は見えない') : ng(`ほかの会社から見えた（${cross.status}）`);
+
+    // 段 2: 勤怠と有給（第30.6.1節・第30.7.1節）。台帳のメールアドレスが同じ利用者は自動で結び付く
+    const staff = await call('a', '/v1/hr/employees', { method: 'POST', body: JSON.stringify({
+      name: `${tag} 勤怠`, email: 'member@alpha.example.jp', hiredOn: '2024-04-01',
+      terms: { wageType: 'monthly', wageAmount: 250000, weeklyHours: 40, weeklyDays: 5, startTime: '09:00', endTime: '18:00', breakMinutes: 60 },
+    }) });
+    const staffId = staff.body?.employee?.id;
+    const { body: meM } = await call('a', '/v1/me', {}, 'member');
+    const noLink = await call('a', '/v1/me/hr');
+    meM.hrSelf === true && noLink.status === 404 ? ok('台帳のメールアドレスが同じ利用者は自動で結び付き、載っていない人には給与・勤怠を出さない') : ng('結び付きが合わない', `${meM.hrSelf} ${noLink.status}`);
+    const in1 = await call('a', '/v1/me/hr/punch', { method: 'POST', body: JSON.stringify({ kind: 'in' }) }, 'member');
+    const in2 = await call('a', '/v1/me/hr/punch', { method: 'POST', body: JSON.stringify({ kind: 'in' }) }, 'member');
+    const { body: sayIn } = await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message: '出勤' }) }, 'member');
+    in1.status === 201 && in2.status === 409 && /もう出勤しています/.test(sayIn.text ?? '') ? ok('打刻は状態を見て受け付け、秘書に「出勤」と言っても同じ決まりで扱う') : ng('打刻が合わない', `${in1.status} ${in2.status} ${sayIn.text}`);
+    const fix = await call('a', '/v1/me/hr/days/2026-08-03', { method: 'PUT', body: JSON.stringify({ in: '09:00', out: '20:30', breaks: [{ start: '12:00', end: '13:00' }] }) }, 'member');
+    const { body: aug } = await call('a', '/v1/hr/attendance?month=2026-08');
+    const augRow = (aug.rows ?? []).find((r) => r.employeeId === staffId);
+    fix.body?.day?.workMinutes === 630 && fix.body.day.overtimeMinutes === 150 && augRow?.totals?.overtimeMinutes === 150
+      ? ok('打刻を直すと、日と期間の法定外（8 時間を超えた分）を決まったプログラムで出す') : ng('勤怠の集計が合わない', JSON.stringify({ day: fix.body?.day, totals: augRow?.totals }));
+    const closed = await call('a', '/v1/hr/attendance/close', { method: 'POST', body: JSON.stringify({ month: '2026-08' }) });
+    const fixClosed = await call('a', '/v1/me/hr/days/2026-08-03', { method: 'PUT', body: JSON.stringify({ in: '09:00', out: '18:00', breaks: [] }) }, 'member');
+    const reopen = await call('a', `/v1/hr/attendance/closes/${closed.body?.close?.id}/reopen`, { method: 'POST' });
+    closed.status === 201 && fixClosed.status === 400 && reopen.status === 200 ? ok('締めた期間は本人が直せず、担当者が締めを戻せる') : ng('締めが合わない', `${closed.status} ${fixClosed.status} ${reopen.status}`);
+    const { body: myhr } = await call('a', '/v1/me/hr', {}, 'member');
+    const leaveDay = new Date(Date.now() + 9 * 3_600_000 + 7 * 86_400_000).toISOString().slice(0, 10);
+    const take = await call('a', '/v1/me/hr/leave', { method: 'POST', body: JSON.stringify({ date: leaveDay, days: 1 }) }, 'member');
+    const takeDup = await call('a', '/v1/me/hr/leave', { method: 'POST', body: JSON.stringify({ date: leaveDay, days: 1 }) }, 'member');
+    const { body: askLeave } = await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message: '有給あと何日？' }) }, 'member');
+    (myhr.leave?.grants ?? []).length >= 2 && take.status === 201 && takeDup.status === 400 && /有給の残りは/.test(askLeave.text ?? '')
+      ? ok('有給は入社日から自動で付与し、本人が画面と秘書から取れる（同じ日は二度取れない）') : ng('有給が合わない', JSON.stringify({ grants: myhr.leave?.grants?.length, take: take.status, dup: takeDup.status, ask: askLeave.text }));
+    const { body: staffNotes } = await call('a', '/v1/notifications');
+    (staffNotes.items ?? []).some((n) => n.kind === 'attendance' && n.title.includes(`${tag} 勤怠`))
+      ? ok('打刻の直しと有給の申請を、人事区画の人に知らせる（種類「勤怠」）') : ng('勤怠の知らせが届かない', JSON.stringify((staffNotes.items ?? []).slice(0, 3)));
+    const book = await fetch(`${API}/v1/hr/attendance/book?month=2026-08&format=csv`, { headers: { 'x-tenant': 'a', 'x-user': 'admin@alpha.example.jp' } });
+    const register = await fetch(`${API}/v1/hr/leave/register?format=csv`, { headers: { 'x-tenant': 'a', 'x-user': 'admin@alpha.example.jp' } });
+    book.status === 200 && register.status === 200 ? ok('出勤簿と年次有給休暇の管理簿を書き出せる') : ng(`帳簿を書き出せない（${book.status} ${register.status}）`);
   } catch (err) {
     ng('人事・給与の確認が途中で止まった', String(err));
   } finally {
-    // 確認用の従業員を消す（アプリからは消せないため、持ち主のつなぎで消す）
+    // 確認用の従業員を消す（アプリからは消せないため、持ち主のつなぎで消す）。打刻・有給は従業員と一緒に消える
+    await owner.query(`delete from notifications where kind = 'attendance' and title like '%${tag}%'`);
+    await owner.query(`delete from att_closes where tenant_id = 't-alpha' and closed_at >= $1`, [hrStartedAt]);
     await owner.query(`delete from hr_employees where name like '${tag}%'`);
     for (const r of saved) await owner.query(`update tenant_settings set hr = $2 where tenant_id = $1`, [r.tenant_id, r.hr ? JSON.stringify(r.hr) : null]);
     if (hrComp) {

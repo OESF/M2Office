@@ -23,6 +23,8 @@ import { expandQuery } from '../knowledge/expand.js';
 import { jstDay } from '../memory/learn.js';
 import { contactRequest } from './contacts.js';
 import { MAIL_TRIAGE_RULE, mailCheckRequest, mailCheckText, parseMailVerdicts } from './mail.js';
+import { answerAttendance, attendanceRequest } from './attendance.js';
+import type { AttendanceService } from '../hr/attendance-service.js';
 import { CARD_UPDATE } from '../cards/agents.js';
 import { answerBriefSettings } from '../brief/settings.js';
 import type { NoticeService } from '../notices/service.js';
@@ -94,6 +96,8 @@ export interface SecretaryDeps {
    * @remarks `access` は、会社が在庫管理を使っていて本人が利用範囲の中なら真を返す
    */
   inventory?: { service: InventoryService; access(tenantId: string, userId: string): Promise<unknown> };
+  /** 人事・給与の勤怠と有給（第30.20節）。本人の打刻・有給の残り・申請にその場で答える。 */
+  attendance?: AttendanceService;
   /**
    * 振り分けの経過を知らせる先（デバッグモード。仕様書 第20.4.1節「デバッグモード」）。どの定型の答え・どの業務に回したかと、その理由を受け取る。
    *
@@ -280,6 +284,15 @@ export class Secretary {
     // 動いている段取り（第10.14節）: 問いへの答え・取りやめ・進み具合。業務への取次より先に見る
     const planned = await this.answerPlans(tenantId, userId, message, scheduleAgents);
     if (planned) return { reply: planned, keep: true };
+
+    // 勤怠と有給（第30.20節）。「出勤」「有給あと何日？」「来週の金曜、有給で休みます」は推論に選ばせずに、本人の分だけ扱う
+    const att = this.deps.attendance ? attendanceRequest(message) : null;
+    if (att && this.deps.attendance && (await this.deps.attendance.settings(tenantId)).enabled) {
+      const employee = await this.deps.attendance.selfEmployee(tenantId, userId);
+      const text = await answerAttendance(this.deps.attendance, tenantId, userId, employee, att, message);
+      await this.audit(tenantId, userId, 'secretary.attendance', att.kind);
+      return { reply: { layer: 'direct', text, evidence: [], tokensUsed: 0 }, keep: true };
+    }
 
     // 層 1: パターン一致で定型の照会に該当するか（LLM を使わない）
     // 「あの件の進み具合は」のような過去を指す問いは、実行の件数ではなく、覚えていることから答える（第10.7.3節）

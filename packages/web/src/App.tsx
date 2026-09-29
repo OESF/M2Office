@@ -28,6 +28,7 @@ import { Schedules } from './Schedules.js';
 import { Cards } from './Cards.js';
 import { Inventory } from './Inventory.js';
 import { Hr } from './Hr.js';
+import { MyAttendance } from './MyAttendance.js';
 import { isAttended, useAttention } from './attention.js';
 import { parseRoute, routePath, syncUrl, type Route } from './route.js';
 import {
@@ -100,6 +101,7 @@ type View =
   | { kind: 'cards'; contactId: string | null }
   | { kind: 'inventory'; itemId: string | null }
   | { kind: 'hr'; employeeId: string | null }
+  | { kind: 'attendance' }
   | { kind: 'settings'; section: SettingsSection }
   | { kind: 'help'; articleId: string | null };
 
@@ -522,6 +524,11 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
               active={view.kind === 'notifications'} onClick={() => setView({ kind: 'notifications' })} />
             <NavItem icon="schedules" label="定時実行" description="決まった時刻に、あなたの権限で業務を実行します"
               active={view.kind === 'schedules'} onClick={() => setView({ kind: 'schedules' })} />
+            {/* 人事の台帳に結び付いた人だけ（仕様書 第30.25節） */}
+            {me.hrSelf && (
+              <NavItem icon="calendar" label="給与・勤怠" description="打刻・今月の勤怠・有給の残りと申請"
+                active={view.kind === 'attendance'} onClick={() => setView({ kind: 'attendance' })} />
+            )}
             <NavItem icon="help" label="ヘルプ" description="使い方の記事と検索"
               active={view.kind === 'help'} onClick={() => setView({ kind: 'help', articleId: null })} />
             {/* デバッグモードのときだけ（仕様書 第20.4.1節「デバッグモード」） */}
@@ -603,6 +610,12 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
             <>
               <h1>在庫管理 <HelpTip article="start-inventory">品目と数を記録します。秘書に「〇〇の在庫は？」「〇〇を 2 箱入庫して」と頼めます。</HelpTip></h1>
               <Inventory itemId={view.itemId} onOpen={(itemId) => setView({ kind: 'inventory', itemId })} userId={me.user.id} />
+            </>
+          )}
+          {view.kind === 'attendance' && (
+            <>
+              <h1>給与・勤怠 <HelpTip article="start-attendance">打刻と今月の勤怠、有給の残りと申請。秘書に「出勤」「有給あと何日？」と言っても扱えます。</HelpTip></h1>
+              <MyAttendance />
             </>
           )}
           {view.kind === 'hr' && (
@@ -767,6 +780,7 @@ const VIEW_LABELS: Record<string, string> = {
   cards: '名刺管理',
   inventory: '在庫管理',
   hr: '人事・給与',
+  attendance: '給与・勤怠',
   settings: '個人設定',
 };
 
