@@ -3262,6 +3262,8 @@ console.log('\n■ 60. 在庫管理（内蔵の拡張。第29章、ADR-0045）')
   const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
   await owner.connect();
   const tag = `確認用在庫${Date.now().toString(36)}`;
+  // 場所は品目と別の名前にする（品目の名前を場所と取り違えないことも確かめる）
+  const place = `確認用場所${Date.now().toString(36)}`;
   const startedAt = new Date().toISOString();
   const { rows: saved } = await owner.query(`select tenant_id, inventory from tenant_settings where tenant_id in ('t-alpha', 't-beta')`);
   try {
@@ -3288,8 +3290,8 @@ console.log('\n■ 60. 在庫管理（内蔵の拡張。第29章、ADR-0045）')
     unitFix.status === 400 ? ok('品目を直すときに単位の欄へ数を入れると断る') : ng(`単位に数を入れられた（${unitFix.status}）`);
     const dup = await call('a', '/v1/inventory/items', { method: 'POST', body: JSON.stringify({ name: `${tag} 別の品`, codes: ['4912345678904'] }) });
     dup.status === 400 ? ok('同じバーコードは、会社の中で別の品目に付けられない') : ng(`重なった（${dup.status}）`);
-    const shelfA = (await call('a', '/v1/inventory/locations', { method: 'POST', body: JSON.stringify({ warehouse: tag, shelf: '棚A' }) })).body?.location;
-    const shelfB = (await call('a', '/v1/inventory/locations', { method: 'POST', body: JSON.stringify({ warehouse: tag, shelf: '店頭' }) })).body?.location;
+    const shelfA = (await call('a', '/v1/inventory/locations', { method: 'POST', body: JSON.stringify({ warehouse: place, shelf: '棚A' }) })).body?.location;
+    const shelfB = (await call('a', '/v1/inventory/locations', { method: 'POST', body: JSON.stringify({ warehouse: place, shelf: '店頭' }) })).body?.location;
 
     // 入出庫（第29.8節・第29.9節）
     const in1 = await call('a', '/v1/inventory/moves', { method: 'POST', body: JSON.stringify({ kind: 'in', itemId, qty: 1, unit: 'pack', locationId: shelfA?.id, lot: 'LATE', expiresOn: '2099-06-30' }) }, 'member');
@@ -3359,7 +3361,7 @@ console.log('\n■ 60. 在庫管理（内蔵の拡張。第29章、ADR-0045）')
 
     // 取り込みと書き出し（第29.6節）
     const form = new FormData();
-    form.append('file', new Blob([`品番,商品名,入数,在庫数量,保管場所\n${tag}-1,${tag} コピー用紙,5,12,${tag}\n${tag}-2,,,1,\n`], { type: 'text/csv' }), 'items.csv');
+    form.append('file', new Blob([`品番,商品名,入数,在庫数量,保管場所\n${tag}-1,${tag} コピー用紙,5,12,${place}\n${tag}-2,,,1,\n`], { type: 'text/csv' }), 'items.csv');
     const imp = await fetch(`${API}/v1/inventory/import`, { method: 'POST', body: form, headers: { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' } }).then((r) => r.json());
     imp.created === 1 && imp.stocked === 1 && imp.skipped?.[0]?.row === 3 && imp.mapping?.find((m) => m.header === '商品名')?.field === 'name'
       ? ok('CSV の見出しを読んで品目を取り込み、取り込めない行は行の番号と理由を返す') : ng('取り込みが合わない', JSON.stringify(imp));
@@ -3373,6 +3375,16 @@ console.log('\n■ 60. 在庫管理（内蔵の拡張。第29章、ADR-0045）')
     const acts = new Set((audit.items ?? []).map((e) => e.action));
     acts.has('inventory.import') && acts.has('inventory.export') && !acts.has('inventory.move')
       ? ok('取り込み・書き出しは監査ログの「在庫」に残し、入出庫の 1 件ずつは入れない') : ng('監査ログが合わない', [...acts].join(','));
+
+    // 秘書の在庫の問い（第29.15節）。推論に選ばせず、在庫の表を引いてその場で答える
+    const { body: askStock } = await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message: `${tag} ハンドクリームの在庫は？` }) }, 'member');
+    askStock.layer === 'direct' && /使える数 8 個/.test(askStock.text ?? '')
+      ? ok('秘書に在庫を尋ねると、在庫の表を引いてその場で答える') : ng('秘書が在庫を答えない', JSON.stringify(askStock));
+    const { body: askPlace } = await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message: `${place}店頭の在庫はいくつ？` }) }, 'member');
+    askPlace.layer === 'direct' && /店頭にある品目は 1 件です/.test(askPlace.text ?? '') && /使える数 3 個/.test(askPlace.text ?? '')
+      ? ok('場所を言われたら、その場所の数で答える') : ng('場所の数で答えない', JSON.stringify(askPlace));
+    const { body: askNone } = await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message: `${tag}ボールペンの在庫は？` }) }, 'member');
+    /在庫管理にありません/.test(askNone.text ?? '') ? ok('無い品目は「ありません」と答え、推測しない') : ng('無い品目の答えが違う', askNone.text);
 
     // 左のメニュー（第6.1.1節）と入り切り（第12.13節）
     const { body: mySettings } = await call('a', '/v1/me/settings', {}, 'member');
@@ -3398,8 +3410,8 @@ console.log('\n■ 60. 在庫管理（内蔵の拡張。第29章、ADR-0045）')
     await owner.query(`delete from inventory_codes where item_id in (${items})`);
     await owner.query(`delete from inventory_items where name like '${tag}%'`);
     // 確認の間にできた場所（既定の「倉庫」を含む）も消す。在庫の残る場所は残す
-    await owner.query(`delete from inventory_locations l where tenant_id in ('t-alpha', 't-beta') and (warehouse = $1 or created_at >= $2)
-      and not exists (select 1 from inventory_moves m where m.from_location_id = l.id or m.to_location_id = l.id)`, [tag, startedAt]);
+    await owner.query(`delete from inventory_locations l where tenant_id in ('t-alpha', 't-beta') and (warehouse = $1 or warehouse = $3 or created_at >= $2)
+      and not exists (select 1 from inventory_moves m where m.from_location_id = l.id or m.to_location_id = l.id)`, [tag, startedAt, place]);
     for (const r of saved) await owner.query(`update tenant_settings set inventory = $2 where tenant_id = $1`, [r.tenant_id, r.inventory ? JSON.stringify(r.inventory) : null]);
     await owner.end();
   }

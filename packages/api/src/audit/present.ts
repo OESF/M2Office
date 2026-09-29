@@ -39,6 +39,7 @@ const ACTION_LABELS: Record<string, string> = {
   'secretary.schedule': '秘書が定時実行を操作した',
   'secretary.brief': '秘書が朝のブリーフの中身を直した',
   'secretary.notice': '秘書が社内のお知らせを扱った',
+  'secretary.inventory': '秘書が在庫の問いに答えた',
   'secretary.voice': '秘書と音声で話した',
   'secretary.plan.create': '秘書が段取りを組んだ',
   'secretary.plan.step': '段取りの業務を起こした',
@@ -159,7 +160,7 @@ const SYSTEM_LABELS: Record<string, string> = {
 };
 
 /** 秘書の応答の層などの記録の値（`secretary.chat` の `full` など）。 */
-const SECRETARY_TARGETS: Record<string, string> = { settings: '朝のブリーフの中身', create: 'お知らせを出す', withdraw: 'お知らせの取り下げ', list: 'お知らせの一覧', done: 'お知らせを済んだにする', ask: '聞き返し', full: '会話', direct: '定型の照会', light: '取次', start: '音声の始まり', end: '音声の終わり' };
+const SECRETARY_TARGETS: Record<string, string> = { stock: '在庫の数', low: '残りわずかの品目', settings: '朝のブリーフの中身', create: 'お知らせを出す', withdraw: 'お知らせの取り下げ', list: 'お知らせの一覧', done: 'お知らせを済んだにする', ask: '聞き返し', full: '会話', direct: '定型の照会', light: '取次', start: '音声の始まり', end: '音声の終わり' };
 
 /** 見せるための名前を引く口。引けなければ `undefined`（記録の値のまま出す）。 */
 export interface AuditNames {

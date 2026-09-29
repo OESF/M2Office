@@ -562,8 +562,8 @@ export interface Lookup {
 export interface SecretaryReply {
   layer: 'direct' | 'light' | 'full';
   text: string;
-  /** 根拠。`kind: 'source'` は社内の知識の出典（仕様書 第6.2節「出典の見せ方」）。 */
-  evidence: { label: string; value: string; kind?: 'source' }[];
+  /** 根拠。`kind: 'source'` は社内の知識の出典、`cited` は答えで根拠にした出典（仕様書 第6.2節「出典の見せ方」）。 */
+  evidence: { label: string; value: string; kind?: 'source'; cited?: boolean }[];
   suggestedAgent?: { id: string; version: number; name: string };
   /** 使い方の質問に答えたとき、材料にしたヘルプの記事。 */
   helpArticles?: { id: string; title: string }[];

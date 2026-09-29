@@ -725,7 +725,7 @@ export interface CanvasResult {
   suggestedAgent?: { id: string; name: string };
   fileId?: string | null;
   helpArticles?: { id: string; title: string }[];
-  evidence?: { label: string; value: string; kind?: 'source' }[];
+  evidence?: { label: string; value: string; kind?: 'source'; cited?: boolean }[];
 }
 
 /** 秘書のキャンバスの幅の下限（px。仕様書 第6.2節）。これより狭いと答えが読めない。 */
@@ -826,16 +826,22 @@ function CanvasView({ result, onOpenAgent }: {
       {result.helpArticles?.map((a) => (
         <button key={a.id} className="help-item" onClick={() => openHelp(a.id)}>{a.title}</button>
       ))}
-      {facts.length > 0 && (
-        <dl className="kv">
-          {facts.map((e, i) => (
-            <div key={i} style={{ display: 'contents' }}>
-              <dt>{e.label}</dt><dd>{e.value}</dd>
-            </div>
-          ))}
-        </dl>
+      {/* 会話の画面には答えだけを出し、根拠は畳む（仕様書 第6.2節「会話の画面には答えだけを出す」）。結果が変わったら閉じ直す */}
+      {(facts.length > 0 || sources.length > 0) && (
+        <details className="fold evidence-fold" key={result.id}>
+          <summary>根拠</summary>
+          {sources.length > 0 && <Sources items={sources} reply={result.text} />}
+          {facts.length > 0 && (
+            <dl className="kv">
+              {facts.map((e, i) => (
+                <div key={i} style={{ display: 'contents' }}>
+                  <dt>{e.label}</dt><dd>{e.value}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
+        </details>
       )}
-      {sources.length > 0 && <Sources items={sources} reply={result.text} />}
       {result.note && <p className="muted small">{result.note}</p>}
     </div>
   );
@@ -951,18 +957,16 @@ function SecretaryBar({ lookups, avatar, captions, onResult, onVoice }: {
       onResult({
         request: withFile ? `${asked}（渡した書類: ${withFile.name}）` : asked,
         text: reply.text,
-        note: [
-          layerLabel(reply.layer), `${reply.elapsedMs}ms`,
-          reply.tokensUsed > 0 ? `${reply.tokensUsed} トークン` : '',
-          reply.file?.note ?? '',
-        ].filter(Boolean).join(' / '),
+        // 応答の層・時間・トークンは会話の画面に出さない（仕様書 第6.2節）。ファイルの扱いの知らせだけを添える
+        ...(reply.file?.note ? { note: reply.file.note } : {}),
         ...(reply.suggestedAgent
           ? { suggestedAgent: { id: reply.suggestedAgent.id, name: reply.suggestedAgent.name }, fileId: withFile?.id ?? null }
           : {}),
         ...(reply.helpArticles ? { helpArticles: reply.helpArticles } : {}),
         ...(reply.evidence.length > 0 ? { evidence: reply.evidence } : {}),
       });
-      setHint(layerLabel(reply.layer));
+      // どの層で答えたかは出さない（仕様書 第6.2節）。「考えています…」を消すだけ
+      setHint(null);
     } catch (err) {
       setHint(describeError(err, '応答できませんでした'));
     } finally {
@@ -1108,11 +1112,6 @@ function NoticeRow({ notice, onRead }: { notice: Notification; onRead: () => voi
 
 function roleLabel(role: string): string {
   return ({ admin: '管理者', approver: '承認者', member: '一般', external: '外部協力者', developer: '開発者' } as Record<string, string>)[role] ?? role;
-}
-
-/** どの層で応答したかを表示用の言葉にする（仕様書 第10.9.1節）。 */
-function layerLabel(layer: SecretaryReply['layer']): string {
-  return { direct: '直接応答', light: '取次', full: '対話' }[layer];
 }
 
 /** 利用者のカードに出す属性。ロールのうち最も強いもの（仕様書 第6.1.1節）。 */

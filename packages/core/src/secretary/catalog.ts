@@ -74,6 +74,8 @@ export interface EvidenceItem {
   label: string;
   value: string;
   kind?: 'source';
+  /** 答えで根拠にした出典か（画面の「根拠」の先頭に出す。仕様書 第6.2節・第10.9.4.1節）。 */
+  cited?: boolean;
 }
 
 /** 照会ではなく作業の依頼であることを示す言い回し。 */

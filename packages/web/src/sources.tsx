@@ -12,8 +12,10 @@
  * **答えの中で引用した出典を先に出し**、ほかに調べた箇所は畳む。
  * 同じ文書の節が、書式のまま細い欄に 5 つ並んで読めなかった（2026-09-25 の受け入れテスト）。
  */
-export function Sources({ items, reply }: { items: { label: string; value: string }[]; reply: string }) {
-  const cited = citedSources(items, reply);
+export function Sources({ items, reply }: { items: { label: string; value: string; cited?: boolean }[]; reply: string }) {
+  // 秘書が根拠にした印を付けたものを先に。印が無い（古い答え）ときは本文の括弧から選ぶ（仕様書 第10.9.4.1節）
+  const marked = items.filter((e) => e.cited);
+  const cited = marked.length > 0 ? marked : citedSources(items, reply);
   // 引用が見つからなければ、いちばん関係の深いもの（先頭）を出す
   const shown = cited.length > 0 ? cited : items.slice(0, 1);
   const others = items.filter((e) => !shown.includes(e));
@@ -25,7 +27,6 @@ export function Sources({ items, reply }: { items: { label: string; value: strin
   );
   return (
     <div className="sources">
-      <div className="muted small">出典</div>
       {shown.map(one)}
       {others.length > 0 && (
         <details className="fold">

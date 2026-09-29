@@ -26,6 +26,9 @@ import { CARD_UPDATE } from '../cards/agents.js';
 import { answerBriefSettings } from '../brief/settings.js';
 import type { NoticeService } from '../notices/service.js';
 import { answerNotice } from './notices.js';
+import { answerStock, bareStockQuestion, inventoryRequest } from './inventory.js';
+import type { InventoryService } from '../inventory/service.js';
+import { INVENTORY_RECORD } from '../inventory/agents.js';
 
 /** 秘書がどの層で応答したか。計測と表示に使う（仕様書 第10.9.1節）。 */
 export type ResponseLayer = 'direct' | 'light' | 'full';
@@ -84,6 +87,12 @@ export interface SecretaryDeps {
   fileName?(tenantId: string, userId: string, fileId: string): Promise<string | null>;
   /** 社内のお知らせ（仕様書 第10.15節）。無ければお知らせの依頼を扱わない。 */
   notices?: NoticeService;
+  /**
+   * 在庫管理（仕様書 第29.15節）。無ければ在庫の依頼を見分けない。
+   *
+   * @remarks `access` は、会社が在庫管理を使っていて本人が利用範囲の中なら真を返す
+   */
+  inventory?: { service: InventoryService; access(tenantId: string, userId: string): Promise<unknown> };
 }
 
 /**
@@ -296,6 +305,31 @@ export class Secretary {
       await this.audit(tenantId, userId, 'secretary.route', LOOKUP_AGENT_ID);
       return this.delegate(tenantId, userId, message, lookup, '会社の接続のデータを探す依頼', llm);
     }
+    // 在庫（第29.15節）。在庫管理を使える人の在庫の依頼は推論に選ばせない（組織知識の問いと取り違えないため）。
+    // 数の問い・残りわずかはその場で答え、期間の記録は調べものへ、入庫・使用・移動は「在庫の記録」へ回す。
+    // 「先週の使用」も過去の話ではなく在庫の記録の問いなので、pastOnly より先に見る
+    let invKind = this.deps.inventory ? inventoryRequest(message) : null;
+    // 「店頭のコピー用紙は？」のように、品目と場所の名前だけでできた短い問いも在庫の問い
+    if (!invKind && this.deps.inventory && message.length <= 40 && await this.deps.inventory.access(tenantId, userId)) {
+      const [items, locations] = await Promise.all([this.deps.inventory.service.list(tenantId), this.deps.inventory.service.locations(tenantId)]);
+      if (bareStockQuestion(message, items, locations)) invKind = 'stock';
+    }
+    if (invKind && this.deps.inventory && await this.deps.inventory.access(tenantId, userId)) {
+      if (invKind === 'stock' || invKind === 'low') {
+        const answer = await answerStock(this.deps.inventory.service, tenantId, message, invKind);
+        await this.audit(tenantId, userId, 'secretary.inventory', invKind);
+        return { reply: { layer: 'direct', text: answer.text, evidence: answer.evidence, tokensUsed: 0 }, keep: true };
+      }
+      const record = enabled.find((a) => a.id === INVENTORY_RECORD.id);
+      if (invKind === 'record' && record) {
+        await this.audit(tenantId, userId, 'secretary.route', record.id);
+        return this.delegate(tenantId, userId, message, record, '在庫を記録する依頼', llm);
+      }
+      if (invKind === 'history' && lookup) {
+        await this.audit(tenantId, userId, 'secretary.route', LOOKUP_AGENT_ID);
+        return this.delegate(tenantId, userId, message, lookup, '在庫の記録を調べる依頼', llm);
+      }
+    }
     // 名刺（第27.9節）。名刺管理を使える人（付属の業務が候補にある人）の「〇〇さんの電話番号は？」は名刺を探す調べものへ、
     // 「直して・メモして」は名刺の修正へ回す。推論に選ばせない（名刺の問いに「分かりません」と答えないように）
     const cardUpdate = enabled.find((a) => a.id === CARD_UPDATE.id);
@@ -350,6 +384,8 @@ export class Secretary {
       // この層では設定を変えたり業務を動かしたりしない。行っていないことを「行いました」と答えさせない（2026-09-28 に、朝のブリーフの中身を「変更しました」と答えた）
       'この会話では設定の変更や業務の実行は行いません。行っていない変更・実行を「行いました」「更新しました」と言わないでください。頼まれたら、どう頼めばよいか（言い方の例）か、どの画面で行えるかを伝えてください。',
       '\n',
+      ANSWER_RULE,
+      '\n',
       GROUNDING_RULE,
     ].join('');
     const res = await llm.complete({
@@ -375,9 +411,11 @@ export class Secretary {
         keep: true,
       };
     }
+    // 本文から出典の申告の行と括弧を外し、根拠にした出典を「根拠」の先頭に並べる（第6.2節・第10.9.4.1節）
+    const answer = splitCitations(res.text, knowledge.evidence);
     return {
       reply: {
-        layer: 'full', text: res.text, evidence: [...knowledge.evidence, ...remembered.evidence], tokensUsed: res.tokensUsed,
+        layer: 'full', text: answer.text, evidence: [...answer.evidence, ...remembered.evidence], tokensUsed: res.tokensUsed,
       },
       keep: true,
     };
@@ -935,11 +973,26 @@ export async function fillInputs(
  * 利用者は「秘書に聞けば会社のことが分かる」と思っている。
  * 法律や世間の相場を会社の決まりのように答えるなら、秘書に聞く意味がない。
  */
+/**
+ * 答えの形（仕様書 第10.9.4.1節「答えの形」）。聞かれたことだけに短く答え、次にしそうなことは一文で申し出る。
+ *
+ * @remarks 2026-09-29 に「トナーまだ足りてる？」へ、聞いていない経費精算規程の条文まで並べて答えたため
+ */
+const ANSWER_RULE = [
+  '【答え方】',
+  '・聞かれたことだけに、短く答えてください。聞かれていない規程や、覚えていることを持ち出さないでください。',
+  '・質問を繰り返したり「〜についてですね」と前置きしたりせず、答えから書いてください。',
+  '・次に本人がしそうなことがあり、それに役立つ社内の決まりや業務が実際にあるときだけ、最後に一文で案内を申し出てください。',
+  '  質問と関係の無い決まりは挙げないでください。無ければ書かないでください。規程の中身は、頼まれたときに出してください。',
+  '  例（トナーの在庫を聞かれ、経費精算規程に消耗品の決まりがあるとき）:「購入されるなら、発注のしかたと経費精算の決まりをご案内します」',
+].join('\n');
+
 const GROUNDING_RULE = [
   '【会社のことを答えるときの決まり】',
   '・休暇、給与、手当、勤務時間、経費、規程、手続きなど、この会社の決まりを聞かれたときは、',
   '  渡された社内の規程に書かれていることだけを根拠にしてください。',
-  '・根拠にしたときは、出典（【…】の部分）を必ず添えてください。',
+  '・根拠にしたときは、本文に出典（【…】）を書かず、答えの最後の 1 行に「根拠: 【出典】」の形で書いてください（画面の「根拠」に回ります）。',
+  '  根拠にしなかったときは、この行を書かないでください。',
   '・渡された規程に書かれていないことは、**「社内の規程には書かれていません」と正直に答えてください。**',
   '・そのうえで一般的な話をするなら、**「一般的には」と断り、会社の決まりではないことを明示**してください。',
   '・日数・金額・期限を、出典なしに会社の決まりとして断定してはいけません。',
@@ -957,3 +1010,28 @@ export type { DirectAnswer };
  * @remarks 「今日の予定は？」のような照会や、「議事録をまとめて」のような依頼には当たらないようにする。
  */
 const HOW_TO = /どうやって|どうすれば|どうやる|どうなる[？?]?$|どうなりますか|やり方|使い方|方法は|って何|とは[？?]?$|何ができ|できますか|どこで|どこから|ヘルプ|わからない|分からない|勝手に|見られ/;
+
+/**
+ * 答えの本文から、出典の申告の行（`根拠: 【…】`）と本文の出典の括弧を外し、根拠にした出典に印を付けて先頭に並べる（仕様書 第10.9.4.1節）。
+ *
+ * @param sources 調べた出典（組織知識の検索の結果）
+ * @remarks 本文の括弧は、出典の題名と一致するもの、見出しの経路（`›`）を含むもの、覚えていることを文のまま引いたもの（「。」で終わる）だけを外す（ほかの括弧は残す）
+ */
+export function splitCitations(text: string, sources: EvidenceItem[]): { text: string; evidence: EvidenceItem[] } {
+  const cited = new Set<string>();
+  const lines = text.split('\n').filter((line) => {
+    const m = line.trim().match(/^根拠[:：]\s*(.*)$/);
+    if (!m) return true;
+    for (const q of m[1]!.matchAll(/【([^】]+)】/g)) cited.add(q[1]!.trim());
+    return false;
+  });
+  const labels = new Set(sources.map((e) => e.label.trim()));
+  const body = lines.join('\n').replace(/【([^】]{1,300})】/g, (all, inner: string) => {
+    const t = inner.trim();
+    if (labels.has(t) || t.includes('›')) { cited.add(t); return ''; }
+    if (/[。．]$/.test(t)) return '';
+    return all;
+  }).replace(/[ \t]+([。、])/g, '$1').replace(/\n{3,}/g, '\n\n').trim();
+  const marked = sources.map((e) => (cited.has(e.label.trim()) ? { ...e, cited: true } : e));
+  return { text: body, evidence: [...marked.filter((e) => e.cited), ...marked.filter((e) => !e.cited)] };
+}

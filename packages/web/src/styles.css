@@ -1225,6 +1225,14 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
   .cards-toolbar .btn { flex: 1 1 auto; }
 }
 
+/* 秘書の答えの「根拠」（仕様書 第6.2節）。答えの下に小さく畳んで置き、押したときだけ開く */
+.evidence-fold { margin-top: calc(10px * var(--space-scale)); }
+.evidence-fold > summary { cursor: pointer; color: var(--muted); font-size: calc(12px * var(--font-scale)); list-style: none; display: inline-block; }
+.evidence-fold > summary::-webkit-details-marker { display: none; }
+.evidence-fold > summary::before { content: '▸ '; }
+.evidence-fold[open] > summary::before { content: '▾ '; }
+.evidence-fold[open] > summary { margin-bottom: calc(6px * var(--space-scale)); }
+
 /* 在庫の画面（仕様書 第29章）。使える数を先に出し、記録の欄は狭い幅でも折り返す */
 .inventory button.link { background: none; border: none; padding: 0; cursor: pointer; color: inherit; text-align: left; }
 .inventory-table tr.clickable { cursor: pointer; }

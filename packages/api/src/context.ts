@@ -187,6 +187,8 @@ export function buildDeps(): AppDeps {
   const help = new HelpCatalog(loadHelpArticles(helpDir(), log), OFFICIAL_AGENTS, registry);
   const secretary = new Secretary({
     repo, llm, connector, agents: OFFICIAL_AGENTS, help, agentsFor, llmFor: (t) => ai.llmFor(t), notices,
+    // 在庫の問いは推論に選ばせず、その場で答える（仕様書 第29.15節）
+    inventory,
     // 渡されたファイルの名前だけを引く。中身は読まない（後ろへ回すため。仕様書 第10.11.3節）
     fileName: async (tenantId, userId, fileId) => {
       const f = await repo.getFile(tenantId, fileId);
