@@ -1305,6 +1305,12 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .m-primary { width: 100%; min-height: 60px; font-size: 20px; font-weight: 700; border-radius: 14px; border: none; background: var(--accent); color: var(--on-accent, #fff); margin-top: 8px; cursor: pointer; }
 .m-primary:disabled { opacity: 0.5; }
 .m-secondary { width: 100%; min-height: 52px; font-size: 17px; border-radius: 14px; border: 1px solid var(--accent); background: none; color: var(--accent); margin-top: 10px; cursor: pointer; }
+.m-file { display: flex; align-items: center; justify-content: center; box-sizing: border-box; }
+.order-panel .order-group + .order-group { margin-top: 14px; }
+.order-head { margin-bottom: 6px; }
+.order-qty { white-space: nowrap; }
+.order-contact pre { white-space: pre-wrap; font: inherit; background: var(--subtle-bg); padding: 8px; border-radius: 8px; }
+.slip-result .row.wrap { margin-top: 6px; }
 .m-link { display: block; margin: 16px auto 0; background: none; border: none; color: var(--muted); font-size: 14px; }
 .m-link.danger { color: var(--danger); }
 .m-note { font-size: 14px; color: var(--muted); margin: 8px 0; }

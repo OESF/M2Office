@@ -40,8 +40,9 @@ export interface Schedule {
 /** 通知の種類（仕様書 第6.5.5節「受け取る種類」）。 */
 /**
  * 通知の種類。`security`（権限区画への出入りなど）は、本人の設定にかかわらず届ける（仕様書 第16.7.5節）。
+ * `inventory` は在庫の見張り（残りわずか・無くなる見込み・使用期限と発注の案。仕様書 第29.14節）。
  */
-export type NotificationKind = 'brief' | 'run' | 'approval' | 'failure' | 'security';
+export type NotificationKind = 'brief' | 'run' | 'approval' | 'failure' | 'security' | 'inventory';
 
 /**
  * 本人宛の通知。

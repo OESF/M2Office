@@ -7,11 +7,18 @@
 
 import type { InventoryItemView, InventoryLocation, InventoryMoveKind, InventorySettings } from '@m2office/shared';
 import type { Tool, ToolContext } from '../tools/registry.js';
+import type { LlmProvider } from '../llm/provider.js';
+import { loadFile } from '../files/service.js';
+import { MIME, type FileKind } from '../files/formats.js';
 import { formatQty, MOVE_KIND_LABELS, toDate, type InventoryService } from './service.js';
+import { readSlip } from './slip.js';
+import { proposalLine } from './watch.js';
 
 /** 道具に渡す在庫管理の文脈。 */
 export interface InventoryToolContext {
   service: InventoryService;
+  /** 納品書を読み取る推論（その会社のもの）。無ければ `inventory.read_slip` は「使えない」と返す。 */
+  llm?: () => Promise<LlmProvider>;
   /**
    * 依頼者がいま在庫管理を使えるか。使えるなら会社の在庫管理の設定を返す。
    *
@@ -236,5 +243,113 @@ export const inventoryMove: Tool = {
   },
 };
 
+/**
+ * 見張りの結果（第29.14節）。無くなる見込みの早い順・残りわずか・使用期限の近いものと、発注の案（仕入先と発注の方法・連絡先）。
+ *
+ * @remarks 危険度 `read`。推論を使わない決まった計算。発注はしない（発注のメールは付属の業務「発注の下書き」が承認のあとに送る）
+ */
+export const inventoryForecast: Tool = {
+  name: 'inventory.forecast',
+  risk: 'read',
+  activityLabel: '足りなくなりそうなものを調べています',
+  helpText: '在庫の使う速さから、あと何日で無くなるか・残りわずか・使用期限の近いものと、発注の案を出します。見るだけです',
+  description: '在庫の見張りの結果を急ぐ順に返す。各品目に、使える数・1 日に使う数・あと何日で無くなるか・仕入れにかかる日数・使用期限の近いロット・発注の案（数・仕入先・発注の方法 mail/web/phone・連絡先・理由）。query で品目を絞れる。all を true にすると足りている品目も返す',
+  args: {
+    properties: {
+      query: { type: 'string', description: '品目の名前の一部（省けば全品目）' },
+      all: { type: 'boolean', description: '足りている品目も返すか' },
+    },
+  },
+  async invoke(args, ctx) {
+    const inv = await inventoryOf(ctx);
+    if (!inv) return UNAVAILABLE;
+    const q = str(args['query']).normalize('NFKC').toLowerCase();
+    const rows = (await inv.service.forecast(ctx.tenantId))
+      .filter((r) => (args['all'] === true || r.runningOut || r.low || r.expiring.length > 0) && (!q || r.name.normalize('NFKC').toLowerCase().includes(q)))
+      .slice(0, 30);
+    return {
+      available: true, untrusted: true, count: rows.length,
+      items: rows.map((r) => ({
+        itemId: r.itemId, name: r.name, available: formatQty(r, r.available), dailyUse: `${r.dailyUse} ${r.unit}`,
+        daysLeft: r.daysLeft, leadDays: r.leadDays, low: r.low, runningOut: r.runningOut,
+        expiring: r.expiring.map((e) => ({ lot: e.lot, expiresOn: e.expiresOn, qty: formatQty(r, e.qty), days: e.days })),
+        proposal: r.proposal ? {
+          text: proposalLine(r), qty: r.proposal.qty, packs: r.proposal.packs, unit: r.unit, packUnit: r.packUnit,
+          supplier: r.proposal.supplierName, method: r.proposal.method, contact: r.proposal.contact, reason: r.proposal.reason,
+        } : null,
+      })),
+      ...(rows.length === 0 ? { note: '足りなくなりそうなもの・期限の近いものはありません' } : {}),
+    };
+  },
+};
+
+/** 道具が受け取ったファイルを、納品書として読める形にする。 */
+async function slipFile(ctx: ToolContext, fileId: string): Promise<{ bytes: Uint8Array; mimeType: string; id: string } | { error: string }> {
+  const f = await loadFile(ctx.repo, ctx.files, ctx.tenantId, fileId, { id: ctx.userId, roles: [] });
+  if (!f) return { error: 'ファイルが見つかりません' };
+  const kind = f.meta.kind as FileKind;
+  if (!['png', 'jpeg', 'webp', 'heic', 'pdf'].includes(kind)) return { error: `納品書の画像か PDF ではありません: ${kind}` };
+  return { bytes: f.bytes, mimeType: MIME[kind], id: f.meta.id };
+}
+
+/**
+ * 納品書の画像・PDF から、行ごとの品名・品番・数・ロット・使用期限を取り出す（第29.15節）。
+ *
+ * @remarks 危険度 `read`。入庫はしない（入庫は `inventory.receive_slip`）。金額は読まない。読み取りは推論であり確かな値ではない
+ */
+export const inventoryReadSlip: Tool = {
+  name: 'inventory.read_slip',
+  risk: 'read',
+  activityLabel: '納品書を読み取っています',
+  helpText: '納品書の写真や PDF から、品名・品番・数・ロット・使用期限を読み取ります。入庫はしません',
+  description: '納品書の画像・PDF（fileId）から、行ごとの品名・品番・バーコード・数・単位・ロット・使用期限を取り出す。金額は読まない',
+  args: { properties: { fileId: { type: 'string', description: '納品書の画像か PDF のファイル ID' } }, required: ['fileId'] },
+  async invoke(args, ctx) {
+    const inv = await inventoryOf(ctx);
+    if (!inv || !ctx.inventory?.llm) return UNAVAILABLE;
+    const f = await slipFile(ctx, str(args['fileId']));
+    if ('error' in f) return { available: false, reason: f.error };
+    const r = await readSlip(await ctx.inventory.llm(), f.bytes, f.mimeType);
+    if (r.kind === 'unavailable') return { available: false, reason: r.reason };
+    if (r.kind === 'not-slip') return { available: true, isSlip: false, note: '納品書として読めませんでした' };
+    return { available: true, isSlip: true, untrusted: true, supplier: r.supplier, date: r.date, lines: r.lines };
+  },
+};
+
+/**
+ * 納品書から入庫する（第29.9節）。読み取った行を品目に照らし、照らせた行を入庫にする。照らせない行は残す。
+ *
+ * @remarks 危険度 `write-internal`。社内の在庫の記録に足すだけで、社外には何も送らない。確認を挟まない（ADR-0028）。
+ * 数が読めない行と品目が 1 つに決まらない行は入庫にしない。納品書の文はデータとして扱う（不変則 I-6）
+ */
+export const inventoryReceiveSlip: Tool = {
+  name: 'inventory.receive_slip',
+  risk: 'write-internal',
+  activityLabel: '納品書から入庫しています',
+  helpText: '納品書の写真や PDF を読み取り、在庫の品目に当てはまる行を入庫にします。当てはまらない行は残します。誰にも送りません',
+  description: '納品書の画像・PDF（fileId）を読み取り、品目に照らせた行を入庫にする。結果は入庫にした行（recorded）と、照らせなかった行（unmatched。理由と候補）',
+  args: {
+    properties: {
+      fileId: { type: 'string', description: '納品書の画像か PDF のファイル ID' },
+      place: { type: 'string', description: '入れる場所（倉庫や棚の名前。省けば品目ごとに今ある場所）' },
+    },
+    required: ['fileId'],
+  },
+  async invoke(args, ctx) {
+    const inv = await inventoryOf(ctx);
+    if (!inv) return UNAVAILABLE;
+    const f = await slipFile(ctx, str(args['fileId']));
+    if ('error' in f) return { recorded: false, reason: f.error };
+    const place = resolvePlace(await inv.service.locations(ctx.tenantId), str(args['place']));
+    const res = await inv.service.receiveSlip(ctx.tenantId, ctx.userId, { bytes: f.bytes, mimeType: f.mimeType, sourceId: f.id }, place?.id);
+    if (!res.read.ok) return { recorded: false, reason: res.read.reason };
+    return {
+      recorded: true, untrusted: true, supplier: res.read.supplier, date: res.read.date,
+      received: res.recorded.map((r) => r.text),
+      unmatched: res.unmatched.map((u) => ({ name: u.line.name || u.line.sku || u.line.code, qty: u.line.qty, unit: u.line.unit, reason: u.reason, candidates: u.candidates.map((c) => c.name) })),
+    };
+  },
+};
+
 /** 在庫管理の道具。 */
-export const INVENTORY_TOOLS: Tool[] = [inventorySearch, inventoryHistory, inventoryMove];
+export const INVENTORY_TOOLS: Tool[] = [inventorySearch, inventoryHistory, inventoryMove, inventoryForecast, inventoryReadSlip, inventoryReceiveSlip];

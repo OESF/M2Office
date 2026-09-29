@@ -28,7 +28,7 @@ import type { NoticeService } from '../notices/service.js';
 import { answerNotice } from './notices.js';
 import { answerStock, bareStockQuestion, inventoryRequest } from './inventory.js';
 import type { InventoryService } from '../inventory/service.js';
-import { INVENTORY_RECORD } from '../inventory/agents.js';
+import { INVENTORY_ORDER, INVENTORY_RECORD } from '../inventory/agents.js';
 
 /** 秘書がどの層で応答したか。計測と表示に使う（仕様書 第10.9.1節）。 */
 export type ResponseLayer = 'direct' | 'light' | 'full';
@@ -319,6 +319,11 @@ export class Secretary {
         const answer = await answerStock(this.deps.inventory.service, tenantId, message, invKind);
         await this.audit(tenantId, userId, 'secretary.inventory', invKind);
         return { reply: { layer: 'direct', text: answer.text, evidence: answer.evidence, tokensUsed: 0 }, keep: true };
+      }
+      const order = enabled.find((a) => a.id === INVENTORY_ORDER.id);
+      if (invKind === 'order' && order) {
+        await this.audit(tenantId, userId, 'secretary.route', order.id);
+        return this.delegate(tenantId, userId, message, order, '在庫を発注する依頼（送るのは承認のあと）', llm);
       }
       const record = enabled.find((a) => a.id === INVENTORY_RECORD.id);
       if (invKind === 'record' && record) {

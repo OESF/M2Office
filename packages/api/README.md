@@ -163,6 +163,10 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/inventory/moves` | 入出庫の記録（`itemId`・`from`・`to`） |
 | `POST /v1/inventory/import` | CSV・Excel から品目を取り込む（`file`。見出しを推論で読む。監査ログに残す） |
 | `GET /v1/inventory/locations/labels.pdf` | 棚のラベル（QR）を A4 に 3 列 × 7 段で並べた PDF（`ids` で場所を絞る）。QR にはその棚を開くスマホ用のページの URL（会社のホスト＋`/m/inventory?shelf=…`）を入れる（第29.7節） |
+| `GET /v1/inventory/suppliers` ／ `POST /v1/inventory/suppliers` | 仕入先の一覧 ／ 足す・直す（`id`・`name`・`method`: mail・web・phone・`contact`・`leadDays`。第29.4.1節） |
+| `GET /v1/inventory/forecast` | 見張りの結果（使える数・1 日に使う数・あと何日・仕入れの日数・期限の近いロット・発注の案。急ぐ順。第29.14節） |
+| `POST /v1/inventory/orders` | 発注を始める（`supplierId`・`lines`: itemId と qty）。メールの仕入先は付属の業務「発注の下書き」を起こす（送るのは本人の承認のあと。201 と `runId`）。Web・電話の仕入先は連絡先と伝える内容を返す |
+| `POST /v1/inventory/slips` | 納品書の写真か PDF（`file`・`locationId`）を読み取り、照らせた行を入庫にする。結果は入庫にした行と照らせなかった行（理由と候補）。読めなければ 422。ファイルは会社のファイルとして残す（第29.9節） |
 | `GET /v1/inventory/mobile-qr.svg` | スマホ用のページ（`/m/inventory`）を開く QR（SVG。第29.11.1節） |
 | `GET /v1/inventory/counts` ／ `POST /v1/inventory/counts` | 開いている棚卸し（差の一覧つき）と最近の棚卸し ／ 始める（`scope`: all・location・category と `value`。開いていれば続ける。会社で 1 つ。第29.10節） |
 | `GET /v1/inventory/counts/:id` | 棚卸しの姿（数えた行と数えていない行を差の大きい順に） |

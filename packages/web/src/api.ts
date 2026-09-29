@@ -11,7 +11,7 @@ import type {
   Approval, Artifact, Notification, Run, RunStep, Schedule, ScheduleRule, Tenant,
   TenantSettings, User, UserSettings, CardFields, Contact, ContactScope,
   InventoryItem, InventoryItemView, InventoryLocation, InventoryMove, InventoryMoveKind, InventorySettings, InventoryStockRow,
-  InventoryCount, InventoryCountRow, InventoryCountScope, InventoryCountView,
+  InventoryCount, InventoryCountRow, InventoryCountScope, InventoryCountView, InventorySupplier,
 } from '@m2office/shared';
 
 /**
@@ -196,6 +196,44 @@ export interface InventoryMoveResult {
   item: InventoryItemView;
   warnings: string[];
 }
+
+/** 見張りの結果の 1 行（仕様書 第29.14節）。 */
+export interface InventoryForecastRow {
+  itemId: string;
+  name: string;
+  unit: string;
+  packUnit: string;
+  packSize: number | null;
+  available: number;
+  dailyUse: number;
+  daysLeft: number | null;
+  leadDays: number;
+  low: boolean;
+  runningOut: boolean;
+  expiring: { lot: string | null; expiresOn: string; qty: number; days: number }[];
+  proposal: {
+    qty: number; packs: number | null; supplierId: string | null; supplierName: string | null;
+    method: InventorySupplier['method'] | null; contact: string | null; reason: string;
+  } | null;
+}
+
+/** 納品書から入庫した結果（仕様書 第29.9節）。 */
+export interface InventorySlipResult {
+  read: { ok: true; supplier: string; date: string } | { ok: false; reason: string };
+  recorded: { line: InventorySlipLine; itemId: string; itemName: string; text: string }[];
+  unmatched: { line: InventorySlipLine; reason: string; candidates: { id: string; name: string }[] }[];
+  fileId?: string;
+}
+
+/** 納品書の 1 行。 */
+export interface InventorySlipLine {
+  name: string; sku: string; code: string; qty: number | null; unit: string; lot: string; expiresOn: string;
+}
+
+/** 発注を始めた結果。メールの仕入先なら業務の実行、それ以外は連絡先と伝える内容。 */
+export type InventoryOrderResult =
+  | { method: 'mail'; runId: string; supplier: string }
+  | { method: 'web' | 'phone'; contact: string; supplier: string; text: string };
 
 /** 品目の取り込みの結果。 */
 export interface InventoryImportResult {
@@ -890,6 +928,29 @@ export const api = {
       const blob = await fetchBlob(`/inventory/locations/labels.pdf${ids?.length ? `?ids=${ids.map(encodeURIComponent).join(',')}` : ''}`);
       if (!blob) throw new ApiError('ラベルを作れませんでした', 404);
       saveBlob(blob, '棚のラベル.pdf');
+    },
+    /** 仕入先（仕様書 第29.4.1節）。 */
+    suppliers: () => call<{ suppliers: InventorySupplier[] }>('/inventory/suppliers'),
+    /** 仕入先を足す（`id` があれば直す）。 */
+    saveSupplier: (s: Partial<InventorySupplier>) =>
+      call<{ supplier: InventorySupplier }>('/inventory/suppliers', { method: 'POST', body: JSON.stringify(s) }),
+    /** 見張りの結果（無くなる見込み・残りわずか・使用期限・発注の案。急ぐ順。第29.14節）。 */
+    forecast: () => call<{ rows: InventoryForecastRow[] }>('/inventory/forecast'),
+    /** 発注を始める。メールの仕入先なら「発注の下書き」を起こす（送るのは承認のあと）。 */
+    order: (supplierId: string, lines: { itemId: string; qty: number }[]) =>
+      call<InventoryOrderResult>('/inventory/orders', { method: 'POST', body: JSON.stringify({ supplierId, lines }) }),
+    /** 納品書の写真か PDF を渡して入庫する（仕様書 第29.9節）。読めなかったときも結果を返す。 */
+    slip: async (file: File, locationId?: string): Promise<InventorySlipResult> => {
+      const form = new FormData();
+      form.append('file', file);
+      if (locationId) form.append('locationId', locationId);
+      const res = await fetch('/v1/inventory/slips', {
+        method: 'POST', credentials: 'same-origin', body: form,
+        headers: { ...(devTenant ? { 'x-tenant': devTenant } : {}), ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}) },
+      });
+      const body = await res.json().catch(() => ({ error: '通信に失敗しました' }));
+      if (!res.ok && !(body as InventorySlipResult).read) throw new ApiError(body.error ?? `エラー (${res.status})`, res.status, false);
+      return body as InventorySlipResult;
     },
     /** 棚卸し（仕様書 第29.10節）。 */
     counts: {

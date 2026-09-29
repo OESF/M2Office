@@ -440,7 +440,7 @@ function validate(
       const k = (o['kinds'] ?? {}) as Record<string, unknown>;
       const kinds = {
         brief: k['brief'] !== false, run: k['run'] !== false,
-        approval: k['approval'] !== false, failure: k['failure'] !== false,
+        approval: k['approval'] !== false, failure: k['failure'] !== false, inventory: k['inventory'] !== false,
       };
       const q = o['quietHours'] as { from?: string; to?: string } | null | undefined;
       const hhmm = /^([01]\d|2[0-3]):[0-5]\d$/;

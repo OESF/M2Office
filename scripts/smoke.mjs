@@ -3393,6 +3393,42 @@ console.log('\n■ 60. 在庫管理（内蔵の拡張。第29章、ADR-0045）')
     const { body: tonerAfter } = await call('a', `/v1/inventory/items/${tonerId}`);
     cByMember.status === 403 && cClose.status === 200 && cClose.body?.adjusted >= 1 && tonerAfter.item?.onHand === 2 && tonerAfter.moves?.[0]?.reason === '棚卸し'
       ? ok('棚卸しの確定は始めた人と管理者だけ。差の分を理由「棚卸し」の調整にする') : ng('確定が合わない', `${cByMember.status} ${cClose.status} ${tonerAfter.item?.onHand}`);
+    // 見張り（第29.14節）。棚卸しで 2 個になったトナーは残りわずか（目安 3）。記録した人に「在庫」のお知らせがその場で届く
+    await sleep(800);
+    const { body: memberNotes } = await call('a', '/v1/notifications', {}, 'member');
+    const invNote = (memberNotes.items ?? []).find((n) => n.kind === 'inventory' && n.title.includes(`${tag} トナー`));
+    invNote && /発注の案/.test(invNote.body) ? ok('残りわずかになった品目を、記録した人にその場で知らせる（発注の案つき）') : ng('在庫の知らせが届かない', JSON.stringify((memberNotes.items ?? []).slice(0, 3)));
+    // 仕入先と発注の案（第29.4.1節・第29.14節）
+    const badSupplier = await call('a', '/v1/inventory/suppliers', { method: 'POST', body: JSON.stringify({ name: `${tag} 文具`, method: 'web', contact: 'http://insecure.example' }) });
+    const webSupplier = (await call('a', '/v1/inventory/suppliers', { method: 'POST', body: JSON.stringify({ name: `${tag} 文具`, method: 'web', contact: 'https://order.example.jp', leadDays: 3 }) })).body?.supplier;
+    badSupplier.status === 400 && webSupplier?.id ? ok('仕入先を登録できる（Web の発注の画面は https だけ）') : ng('仕入先を登録できない', JSON.stringify(badSupplier.body));
+    await call('a', `/v1/inventory/items/${tonerId}`, { method: 'PUT', body: JSON.stringify({ supplierId: webSupplier?.id }) });
+    const { body: fc } = await call('a', '/v1/inventory/forecast', {}, 'member');
+    const tonerRow = (fc.rows ?? []).find((r) => r.itemId === tonerId);
+    tonerRow?.low && tonerRow.proposal?.supplierName === `${tag} 文具` && tonerRow.leadDays === 3 && tonerRow.proposal.qty > 0
+      ? ok('見張りの結果に、仕入先と仕入れの日数を使った発注の案が出る') : ng('発注の案が合わない', JSON.stringify(tonerRow));
+    const webOrder = await call('a', '/v1/inventory/orders', { method: 'POST', body: JSON.stringify({ supplierId: webSupplier?.id, lines: [{ itemId: tonerId, qty: 5 }] }) }, 'member');
+    webOrder.status === 200 && webOrder.body?.method === 'web' && webOrder.body?.contact === 'https://order.example.jp' && /トナー: 5 個/.test(webOrder.body?.text ?? '')
+      ? ok('Web の仕入先は、発注の画面と伝える内容を返す（何も送らない）') : ng('Web の発注の内容が合わない', JSON.stringify(webOrder.body));
+    const mailSupplier = (await call('a', '/v1/inventory/suppliers', { method: 'POST', body: JSON.stringify({ name: `${tag} 問屋`, method: 'mail', contact: 'order@example.jp' }) })).body?.supplier;
+    const mailOrder = await call('a', '/v1/inventory/orders', { method: 'POST', body: JSON.stringify({ supplierId: mailSupplier?.id, lines: [{ itemId: tonerId, qty: 5 }] }) }, 'member');
+    if (mailOrder.status === 201) {
+      const run = await waitFor('a', mailOrder.body.runId, ['awaiting_approval', 'completed', 'failed'], 20000, 'member');
+      const sent = (run?.steps ?? []).some((st) => (st.output?.tools ?? []).some((t) => t.name === 'gmail.send'));
+      run?.run?.status === 'awaiting_approval' || !sent
+        ? ok('メールの仕入先は「発注の下書き」を起こし、承認の前には送らない') : ng('承認の前に発注のメールを送った', run?.run?.status);
+      if (run?.run?.status === 'awaiting_approval') await call('a', `/v1/runs/${mailOrder.body.runId}/cancel`, { method: 'POST' }, 'member');
+    } else {
+      mailOrder.status === 409 ? ok('発注の下書きを使えない会社では、使えないと答える（409）') : ng(`発注を始められない（${mailOrder.status}）`, JSON.stringify(mailOrder.body));
+    }
+    // 納品書（第29.9節）。見本の推論では読み取れないため、読めなかったと答えて何も入庫しない
+    const slipForm = new FormData();
+    slipForm.append('file', new Blob([Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='), (c) => c.charCodeAt(0))], { type: 'image/png' }), 'slip.png');
+    const slipRes = await fetch(`${API}/v1/inventory/slips`, { method: 'POST', body: slipForm, headers: { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' } });
+    const slipBody = await slipRes.json();
+    slipRes.status === 422 && slipBody.read?.ok === false && (slipBody.recorded ?? []).length === 0
+      ? ok('納品書として読めなければ、何も入庫せずに理由を返す') : ng('納品書の扱いが違う', `${slipRes.status} ${JSON.stringify(slipBody).slice(0, 200)}`);
+
     const labels = await fetch(`${API}/v1/inventory/locations/labels.pdf`, { headers: { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' } });
     const labelHead = new TextDecoder().decode(new Uint8Array(await labels.arrayBuffer()).slice(0, 5));
     labels.status === 200 && labels.headers.get('content-type') === 'application/pdf' && labelHead === '%PDF-'
@@ -3433,6 +3469,9 @@ console.log('\n■ 60. 在庫管理（内蔵の拡張。第29章、ADR-0045）')
     // 確認用の品目と記録を消す（アプリからは消せないため、持ち主のつなぎで消す）
     const items = `select id from inventory_items where name like '${tag}%'`;
     await owner.query(`delete from inventory_count_lines where item_id in (${items})`);
+    await owner.query(`update inventory_items set supplier_id = null where name like '${tag}%'`);
+    await owner.query(`delete from inventory_suppliers where name like '${tag}%'`);
+    await owner.query(`delete from notifications where kind = 'inventory' and title like '%${tag}%'`);
     await owner.query(`delete from inventory_counts where tenant_id in ('t-alpha', 't-beta') and started_at >= $1`, [startedAt]);
     await owner.query(`delete from inventory_stock where item_id in (${items})`);
     await owner.query(`delete from inventory_moves where item_id in (${items})`);

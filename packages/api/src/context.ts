@@ -15,7 +15,7 @@ import {
   TenantAiResolver, platformAi, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID,
   defaultGeminiModels, ConnectionCredentials, type ConnectionAuthProvider,
   CardService, PostgresContactStore, cardsAccess, type ContactStore, NoticeService, PostgresNoticeStore,
-  InventoryService, PostgresInventoryStore, inventoryAccess,
+  InventoryService, InventoryWatch, PostgresInventoryStore, inventoryAccess,
   type SecretBox, type GeminiModels,
   type FileStore, type TenantExtensions, type HelpArticle, type LlmProvider, type Logger, type Repository, type WorkspaceConnector,
 } from '@m2office/core';
@@ -168,13 +168,15 @@ export function buildDeps(): AppDeps {
     repo,
   });
   // 在庫管理（内蔵の拡張。仕様書 第29章）。在庫は会社で共有する
-  const inventory = {
-    service: new InventoryService({
-      store: new PostgresInventoryStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
-      repo, llm: (tenantId) => ai.llmFor(tenantId),
-    }),
-    access: inventoryAccess(repo),
-  };
+  // 数が変わったら見張りが見直す（第29.14節）。見張りは処理を使うため、後から結び付ける
+  let inventoryWatch: InventoryWatch | null = null;
+  const inventoryService = new InventoryService({
+    store: new PostgresInventoryStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+    repo, llm: (tenantId) => ai.llmFor(tenantId),
+    onChanged: async (tenantId, itemIds) => inventoryWatch?.afterMoves(tenantId, itemIds),
+  });
+  inventoryWatch = new InventoryWatch({ repo, service: inventoryService, logger: log });
+  const inventory = { service: inventoryService, access: inventoryAccess(repo) };
   const engine = new RunEngine({
     repo, llm, registry, connector, files, logger: log, research, cards, notices, inventory,
     llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId),

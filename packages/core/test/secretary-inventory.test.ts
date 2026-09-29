@@ -23,6 +23,8 @@ test('在庫の依頼の見分け: 数の問い・残りわずか・期間の記
     ['先週のコピー用紙の使用を教えて', 'history'],
     ['今月の入庫の記録は？', 'history'],
     ['A4 用紙を 2 箱入庫して', 'record'],
+    ['トナーを発注して', 'order'],
+    ['コピー用紙を注文しておいて', 'order'],
     ['トナーを１本使った', 'record'],
     ['体験セットを 2 セット店頭に移した', 'record'],
     ['このテンプレートを使った', null],
@@ -59,7 +61,7 @@ test('在庫の数の問いに、表の数どおりにその場で答える。�
   const b = await answerStock(service, 't1', 'ハンドクリームの在庫は？', 'stock');
   assert.equal(b.text, 'ハンドクリーム 50g: 使える数 8 個（在庫 13 個・期限切れ 5 個）。');
   const c = await answerStock(service, 't1', '足りなくなりそうなものは？', 'low');
-  assert.match(c.text, /トナー（黒）: 使える数 1 本。残りわずかです/);
+  assert.match(c.text, /トナー（黒）: 使える数 1 本・残りわずか\n  発注の案: 2 本（使える数が目安（2 本）以下）/, '見張りの結果と発注の案を添える');
   const d = await answerStock(service, 't1', 'ボールペンの在庫は？', 'stock');
   assert.match(d.text, /「ボールペン」という品目は、在庫管理にありません/);
   const e = await answerStock(service, 't1', 'A4のコピー用紙の在庫は？', 'stock');

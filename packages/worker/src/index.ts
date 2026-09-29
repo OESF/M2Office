@@ -11,7 +11,7 @@
 
 import {
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
-  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, InventoryService, PostgresInventoryStore, inventoryAccess, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention,
+  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, InventoryService, InventoryWatch, PostgresInventoryStore, inventoryAccess, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention,
   NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv,
   defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials,
@@ -82,10 +82,14 @@ const notices = new NoticeService({
   repo,
 });
 // 在庫管理（内蔵の拡張。仕様書 第29章）。秘書から頼まれた入出庫の記録（第29.15節）が使う
+let inventoryWatch: InventoryWatch | null = null;
 const inventory = new InventoryService({
   store: new PostgresInventoryStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
   repo, llm: (tenantId) => ai.llmFor(tenantId),
+  // 秘書から頼まれた記録のあとも、見張りが見直す（第29.14節）
+  onChanged: async (tenantId, itemIds) => inventoryWatch?.afterMoves(tenantId, itemIds),
 });
+inventoryWatch = new InventoryWatch({ repo, service: inventory, logger: log });
 const engine = new RunEngine({
   repo, llm, registry, connector, files, resolveDefinition, isAvailable, logger: log, research, notices,
   cards: { store: contactStore, service: cards, access: cardsAccess(repo) },
@@ -164,6 +168,10 @@ const AGENT_EVENT_KEEP_DAYS = 7;
 /** 期限を過ぎた名刺（ごみ箱に 30 日・読み取れなかったもの 4 週）を消す見回りの間隔。 */
 const CARD_PURGE_INTERVAL_MS = Number(process.env['CARD_PURGE_INTERVAL_MS'] ?? 3_600_000);
 let lastCardPurge = 0;
+/** 在庫の毎朝の見直しを始める時刻（日本時間の時。仕様書 第29.14節）。朝のブリーフ（7:30）より前に知らせる。 */
+const INVENTORY_WATCH_HOUR = Number(process.env['INVENTORY_WATCH_HOUR'] ?? 7);
+/** 在庫の毎朝の見直しを済ませた日（日本時間）。1 日 1 回にする。 */
+let inventoryWatchedOn = '';
 
 const POLL_INTERVAL_MS = 1000;
 /** 定時実行の見回り間隔。分単位の指定に対して十分に短くする。 */
@@ -292,6 +300,21 @@ while (running) {
       if (n > 0) log.info('期限を過ぎた名刺を消しました', { cards: n });
     } catch (err) {
       log.error('名刺の消去の見回りで例外が発生しました', { err });
+    }
+  }
+
+  // 在庫の毎朝の見直し（第29.14節）。日本時間の決まった時刻を過ぎたら、その日 1 回だけ
+  {
+    const jst = new Date(Date.now() + 9 * 3_600_000);
+    const today = jst.toISOString().slice(0, 10);
+    if (inventoryWatchedOn !== today && jst.getUTCHours() >= INVENTORY_WATCH_HOUR) {
+      inventoryWatchedOn = today;
+      try {
+        const n = await inventoryWatch.dailyAll(new Date());
+        if (n > 0) log.info('在庫の見張りの知らせを送りました', { notifications: n });
+      } catch (err) {
+        log.error('在庫の見張りで例外が発生しました', { err });
+      }
     }
   }
 

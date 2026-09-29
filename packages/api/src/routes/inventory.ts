@@ -10,7 +10,10 @@
 
 import { Hono } from 'hono';
 import QRCode from 'qrcode';
-import { readSheet, renderSheet, renderShelfLabels, IMPORT_MAX_ROWS, MOBILE_INVENTORY_PATH, type ItemInput, type MoveInput } from '@m2office/core';
+import {
+  readSheet, renderSheet, renderShelfLabels, saveFile, detectKind, enqueueJob, IMPORT_MAX_ROWS, INVENTORY_ORDER, MAX_FILE_BYTES, MIME,
+  MOBILE_INVENTORY_PATH, type ItemInput, type MoveInput,
+} from '@m2office/core';
 import type { InventoryMoveKind } from '@m2office/shared';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
@@ -188,6 +191,93 @@ export function inventoryRoute(deps: AppDeps) {
       limit: Math.min(500, Math.max(1, Number(c.req.query('limit')) || 200)),
     });
     return c.json({ moves });
+  });
+
+  // ---- 仕入先と見張り（第29.4.1節・第29.14節） ----
+
+  /** 仕入先の一覧。 */
+  app.get('/suppliers', async (c) => {
+    const { tenant } = c.get('ctx');
+    return c.json({ suppliers: await service.suppliers(tenant.id) });
+  });
+
+  /** 仕入先を足す（`id` があれば直す）。 */
+  app.post('/suppliers', async (c) => {
+    const { tenant } = c.get('ctx');
+    const b = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+    const res = await service.saveSupplier(tenant.id, {
+      ...(str(b['id']) ? { id: str(b['id'])! } : {}),
+      ...(str(b['name']) !== undefined ? { name: str(b['name'])! } : {}),
+      ...(b['method'] === 'mail' || b['method'] === 'web' || b['method'] === 'phone' ? { method: b['method'] } : {}),
+      ...(str(b['contact']) !== undefined ? { contact: str(b['contact'])! } : {}),
+      ...(numOrNull(b['leadDays']) !== undefined ? { leadDays: numOrNull(b['leadDays'])! } : {}),
+      ...(str(b['note']) !== undefined ? { note: str(b['note'])! } : {}),
+      ...(b['status'] === 'active' || b['status'] === 'stopped' ? { status: b['status'] } : {}),
+    });
+    if ('error' in res) return c.json({ error: res.error }, 400);
+    return c.json({ supplier: res });
+  });
+
+  /**
+   * 納品書から入庫する（第29.9節）。写真か PDF を受け取り、読み取って品目に照らせた行を入庫にし、照らせない行を返す。
+   *
+   * @remarks 納品書のファイルは会社のファイルとして残し、入出庫の記録の元（source_id）にする。金額は読まない
+   */
+  app.post('/slips', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const form = await c.req.parseBody();
+    const f = form['file'];
+    if (!(f instanceof File)) return c.json({ error: '納品書の写真か PDF を選んでください' }, 400);
+    if (f.size > MAX_FILE_BYTES) return c.json({ error: 'ファイルが大きすぎます（10 MB まで）' }, 413);
+    const bytes = new Uint8Array(await f.arrayBuffer());
+    const kind = detectKind(f.name || 'slip.jpg', bytes);
+    if (!kind || !['png', 'jpeg', 'webp', 'pdf'].includes(kind)) return c.json({ error: '納品書の写真（PNG・JPEG・WebP）か PDF を選んでください' }, 400);
+    const saved = await saveFile(deps.repo, deps.files, {
+      tenantId: tenant.id, ownerUserId: user.id, name: f.name || '納品書', kind, bytes, origin: 'upload', runId: null,
+    });
+    const locationId = str(form['locationId']);
+    const res = await service.receiveSlip(tenant.id, user.id, { bytes, mimeType: MIME[kind], sourceId: saved.id }, locationId || undefined);
+    return c.json({ ...res, fileId: saved.id }, res.read.ok ? 201 : 422);
+  });
+
+  /**
+   * 発注を始める（第29.14節）。メールで受ける仕入先なら、付属の業務「発注の下書き」を起こす（送るのは本人の承認のあと）。
+   * Web・電話の仕入先は、発注の画面の URL か電話番号と、伝える内容を返す。
+   */
+  app.post('/orders', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const b = await c.req.json().catch(() => ({})) as { supplierId?: unknown; lines?: unknown };
+    const suppliers = await service.suppliers(tenant.id);
+    const supplier = suppliers.find((s) => s.id === str(b.supplierId));
+    if (!supplier) return c.json({ error: '仕入先を選んでください' }, 400);
+    const items = new Map((await service.list(tenant.id)).map((i) => [i.id, i]));
+    const lines = (Array.isArray(b.lines) ? b.lines : []).flatMap((l) => {
+      const o = l as { itemId?: unknown; qty?: unknown };
+      const item = items.get(str(o.itemId) ?? '');
+      const qty = typeof o.qty === 'number' ? o.qty : Number(o.qty);
+      if (!item || !Number.isFinite(qty) || qty <= 0) return [];
+      const amount = item.packUnit && item.packSize ? `${Math.ceil(qty / item.packSize)} ${item.packUnit}（${qty} ${item.unit}）` : `${qty} ${item.unit}`;
+      return [`${item.name}${item.sku ? `（品番 ${item.sku}）` : ''}: ${amount}`];
+    });
+    if (lines.length === 0) return c.json({ error: '発注する品目と数を選んでください' }, 400);
+    if (supplier.method !== 'mail') {
+      return c.json({ method: supplier.method, contact: supplier.contact, supplier: supplier.name, text: lines.join('\n') });
+    }
+    if (!supplier.contact) return c.json({ error: `仕入先「${supplier.name}」のメールアドレスがありません。仕入先に登録してください` }, 400);
+    const view = await deps.tenantView(tenant.id);
+    const def = view.resolve(INVENTORY_ORDER.id, INVENTORY_ORDER.version);
+    if (!def || !view.isAvailable(INVENTORY_ORDER.id)) return c.json({ error: '発注の下書きの業務を使えません（Google と接続していないか、業務を止めています）' }, 409);
+    const { runId } = await enqueueJob(deps.repo, {
+      tenantId: tenant.id, requestedBy: user.id, def, origin: 'menu', actor: { type: 'user', id: user.id },
+      input: { request: `${supplier.name}へ発注する`, supplier: supplier.name, to: supplier.contact, lines: lines.join('\n') },
+    });
+    return c.json({ method: 'mail', runId, supplier: supplier.name }, 201);
+  });
+
+  /** 見張りの結果（無くなる見込み・残りわずか・使用期限・発注の案。急ぐ順）。 */
+  app.get('/forecast', async (c) => {
+    const { tenant } = c.get('ctx');
+    return c.json({ rows: await service.forecast(tenant.id) });
   });
 
   /** スマホ用のページを開く QR（SVG。パソコンの画面の「スマホで開く」。第29.11.1節）。 */

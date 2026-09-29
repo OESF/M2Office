@@ -10,9 +10,11 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { InventoryItem, InventoryItemView, InventoryLocation, InventoryMove, InventoryMoveKind } from '@m2office/shared';
+import type { InventoryItem, InventoryItemView, InventoryLocation, InventoryMove, InventoryMoveKind, InventorySupplier } from '@m2office/shared';
 import { api, describeError, type InventoryDetail, type InventoryList } from './api.js';
 import { Stocktake } from './Stocktake.js';
+import { OrderPanel, SlipResultPanel, SuppliersPanel } from './InventoryOrders.js';
+import type { InventorySlipResult } from './api.js';
 
 const KIND_LABELS: Record<InventoryMoveKind, string> = { in: '入庫', out: '使用', transfer: '移動', adjust: '調整' };
 
@@ -65,7 +67,11 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
   const [stopped, setStopped] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [adding, setAdding] = useState<{ name: string; code: string } | null>(null);
-  const [places, setPlaces] = useState(false);
+  // 一覧の上に開く欄（1 つずつ）
+  const [panel, setPanel] = useState<'places' | 'orders' | 'suppliers' | null>(null);
+  const toggle = (p: 'places' | 'orders' | 'suppliers') => setPanel((cur) => (cur === p ? null : p));
+  const [slip, setSlip] = useState<InventorySlipResult | null>(null);
+  const slipPicker = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [mobileQr, setMobileQr] = useState<string | null>(null);
   // 知らないバーコード。新しい品目にするか、既にある品目に結び付ける（第29.11節）
@@ -94,6 +100,23 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
     }
   };
   const scan = () => lookup(q);
+
+  /** 納品書の写真・PDF を渡して入庫する。読めた行はすぐ入庫になり、照らせない行が残る。 */
+  const readSlipFile = async (f: File | undefined) => {
+    if (!f) return;
+    setBusy(true);
+    setMessage('納品書を読み取っています…');
+    try {
+      setSlip(await api.inventory.slip(f));
+      setMessage(null);
+      load();
+    } catch (e) {
+      setMessage(describeError(e, '納品書を読み取れませんでした'));
+    } finally {
+      setBusy(false);
+      if (slipPicker.current) slipPicker.current.value = '';
+    }
+  };
 
   const importFile = async (f: File | undefined) => {
     if (!f) return;
@@ -130,12 +153,22 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
         {/* 棚のラベルと場所は、ほかの操作と同じ並びに置く（一覧の下の小さな文字では見つけにくかった） */}
         <button className="btn ghost" disabled={!list || list.locations.length === 0}
           onClick={() => void api.inventory.downloadLabels().catch((e) => setMessage(describeError(e, 'ラベルを作れませんでした')))}>棚のラベルを印刷</button>
-        <button className={places ? 'btn' : 'btn ghost'} onClick={() => setPlaces(!places)}>場所（{list?.locations.length ?? 0}）</button>
+        <button className={panel === 'places' ? 'btn' : 'btn ghost'} onClick={() => toggle('places')}>場所（{list?.locations.length ?? 0}）</button>
+        <button className={panel === 'orders' ? 'btn' : 'btn ghost'} onClick={() => toggle('orders')}>
+          発注の案
+        </button>
+        <button className={panel === 'suppliers' ? 'btn' : 'btn ghost'} onClick={() => toggle('suppliers')}>仕入先</button>
+        <button className="btn ghost" disabled={busy} onClick={() => slipPicker.current?.click()}>納品書から入庫</button>
+        <input ref={slipPicker} type="file" hidden accept="image/png,image/jpeg,image/webp,application/pdf"
+          onChange={(e) => void readSlipFile(e.target.files?.[0])} />
         <input ref={picker} type="file" hidden accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           onChange={(e) => void importFile(e.target.files?.[0])} />
       </div>
       {message && <p className="small muted" role="status">{message}</p>}
-      {places && list && <Places locations={list.locations} admin={list.admin} onChanged={load} />}
+      {panel === 'places' && list && <Places locations={list.locations} admin={list.admin} onChanged={load} />}
+      {panel === 'orders' && <OrderPanel onOpenItem={(id) => onOpen(id)} />}
+      {panel === 'suppliers' && <SuppliersPanel />}
+      {slip && list && <SlipResultPanel result={slip} items={list.items} onRecorded={load} onClose={() => setSlip(null)} />}
       {mobileQr && (
         <div className="card inventory-new mobile-qr">
           <img src={mobileQr} alt="スマホ用の在庫のページを開く QR" width={180} height={180} />
@@ -302,11 +335,12 @@ function Places({ locations, admin, onChanged }: { locations: InventoryLocation[
 function ItemView({ id, onBack, userId, initialMessage = null }: { id: string; onBack: () => void; userId: string; initialMessage?: string | null }) {
   const [detail, setDetail] = useState<InventoryDetail | null>(null);
   const [list, setList] = useState<InventoryList | null>(null);
+  const [suppliers, setSuppliers] = useState<InventorySupplier[]>([]);
   const [message, setMessage] = useState<string | null>(initialMessage);
 
   const load = useCallback(() => {
-    Promise.all([api.inventory.get(id), api.inventory.list()])
-      .then(([d, l]) => { setDetail(d); setList(l); })
+    Promise.all([api.inventory.get(id), api.inventory.list(), api.inventory.suppliers()])
+      .then(([d, l, s]) => { setDetail(d); setList(l); setSuppliers(s.suppliers.filter((x) => x.status === 'active')); })
       .catch((e) => setMessage(describeError(e, '読み込めませんでした')));
   }, [id]);
   useEffect(load, [load]);
@@ -368,7 +402,7 @@ function ItemView({ id, onBack, userId, initialMessage = null }: { id: string; o
           </tbody>
         </table>
       )}
-      <ItemFields item={item} unitsOn={list.settings.features.units} onSaved={load} />
+      <ItemFields item={item} unitsOn={list.settings.features.units} suppliers={suppliers} onSaved={load} />
       {detail.moves.length > 0 && (
         <>
           <h3>記録</h3>
@@ -486,7 +520,9 @@ function MoveForm({ item, locations, features, onDone }: {
 }
 
 /** 品目の項目（その場で直す）。 */
-function ItemFields({ item, unitsOn, onSaved }: { item: InventoryItemView; unitsOn: boolean; onSaved: () => void }) {
+function ItemFields({ item, unitsOn, suppliers, onSaved }: {
+  item: InventoryItemView; unitsOn: boolean; suppliers: InventorySupplier[]; onSaved: () => void;
+}) {
   const [draft, setDraft] = useState(() => toDraft(item));
   const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -499,6 +535,7 @@ function ItemFields({ item, unitsOn, onSaved }: { item: InventoryItemView; units
       await api.inventory.update(item.id, {
         name: draft.name, publicName: draft.publicName, sku: draft.sku, category: draft.category, unit: draft.unit, note: draft.note,
         packUnit: draft.packUnit, packSize: numOrNull(draft.packSize), price: numOrNull(draft.price), lowThreshold: numOrNull(draft.lowThreshold),
+        supplierId: draft.supplierId || null, leadDays: numOrNull(draft.leadDays),
         ...(extraCode ? { codes: [extraCode] } : {}),
       });
       setError(null);
@@ -531,6 +568,14 @@ function ItemFields({ item, unitsOn, onSaved }: { item: InventoryItemView; units
         {unitsOn && field('packSize', '入り数', 'number')}
         {field('price', '販売価格', 'number')}
         {field('lowThreshold', '残りわずかの目安', 'number')}
+        <dt>仕入先</dt>
+        <dd>
+          <select value={draft.supplierId} onChange={(e) => setDraft({ ...draft, supplierId: e.target.value })} aria-label="仕入先">
+            <option value="">決めていない</option>
+            {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </dd>
+        {field('leadDays', '仕入れにかかる日数', 'number')}
         <dt>バーコード</dt>
         <dd>
           {item.codes.map((c) => (
@@ -558,5 +603,6 @@ function toDraft(i: InventoryItem) {
   return {
     name: i.name, publicName: i.publicName, sku: i.sku, category: i.category, unit: i.unit, packUnit: i.packUnit,
     packSize: s(i.packSize), price: s(i.price), lowThreshold: s(i.lowThreshold), note: i.note,
+    supplierId: i.supplierId ?? '', leadDays: s(i.leadDays),
   };
 }

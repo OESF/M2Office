@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { InventoryCountRow, InventoryCountView, InventoryItemView, InventoryLocation } from '@m2office/shared';
-import { api, describeError, type InventoryDetail, type InventoryList, type Me } from './api.js';
+import { api, describeError, type InventoryDetail, type InventoryList, type InventorySlipResult, type Me } from './api.js';
 import { Scanner } from './Scanner.js';
 
 type Mode = 'home' | 'in' | 'out' | 'count' | 'find';
@@ -128,6 +128,25 @@ function MoveFlow({ kind, list, shelf, onShelf, onRecorded }: {
   const [done, setDone] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const canPack = list.settings.features.units && !!item?.packUnit && !!item?.packSize;
+  const [slip, setSlip] = useState<InventorySlipResult | null>(null);
+
+  /** 納品書を撮って入庫する（第29.9節）。照らせた行はすぐ入庫になる。照らせない行はパソコンの画面で入れる。 */
+  const takeSlip = async (f: File | undefined) => {
+    if (!f) return;
+    setBusy(true);
+    setError(null);
+    setDone('納品書を読み取っています…');
+    try {
+      setSlip(await api.inventory.slip(f, shelf?.id));
+      setDone(null);
+      onRecorded();
+    } catch (e) {
+      setError(describeError(e, '納品書を読み取れませんでした'));
+      setDone(null);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const pick = (i: InventoryItemView, r: Looked | null) => {
     // 同じ品目を続けて読んだら 1 つ足す
@@ -162,6 +181,25 @@ function MoveFlow({ kind, list, shelf, onShelf, onRecorded }: {
     <div className="m-flow">
       <h2 className="m-flow-title">{kind === 'in' ? '入庫' : '使用'}{shelf ? <span className="m-sub">{placeName(shelf)}</span> : null}</h2>
       <Picker items={list.items} onItem={pick} onShelf={onShelf} busy={busy} />
+      {kind === 'in' && (
+        <label className="m-secondary m-file">
+          納品書を撮る
+          <input type="file" accept="image/*" capture="environment" hidden onChange={(e) => { void takeSlip(e.target.files?.[0]); e.target.value = ''; }} />
+        </label>
+      )}
+      {slip && (
+        <div className="m-card">
+          {!slip.read.ok ? <p className="m-note error">{slip.read.reason}</p> : (
+            <>
+              {slip.recorded.map((r, i) => <p key={i} className="m-row-nums">入庫: {r.text}</p>)}
+              {slip.unmatched.map((u, i) => (
+                <p key={`u${i}`} className="m-sub">入れていない: {u.line.name || u.line.sku || u.line.code}（{u.reason}）</p>
+              ))}
+              {slip.unmatched.length > 0 && <p className="m-sub">入れていない行は、パソコンの在庫管理の画面で品目を選んで入れられます</p>}
+            </>
+          )}
+        </div>
+      )}
       {item && (
         <div className="m-card">
           <div className="m-name">{item.name}</div>

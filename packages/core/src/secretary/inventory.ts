@@ -9,6 +9,7 @@
 
 import type { InventoryItemView, InventoryLocation } from '@m2office/shared';
 import { formatQty, type InventoryService } from '../inventory/service.js';
+import { proposalLine, statusLine } from '../inventory/watch.js';
 import { dateIn } from '../cards/service.js';
 import type { EvidenceItem } from './catalog.js';
 
@@ -25,19 +26,24 @@ const RECORD_VERB = /入庫|入荷|仕入れた|届いた|納品され|補充し
 /** 数と数え方（「2 箱」「1 本」「３個」）。 */
 const QTY = /[0-9０-９]+(\.[0-9]+)?\s*(個|本|箱|冊|枚|セット|袋|缶|回|台|ケース|パック|ダース|kg|ｋｇ|g|ml|L|包|錠|瓶|巻|組|足|着|点)/;
 
+/** 発注を頼む言い回し。 */
+const ORDER = /(発注|注文)(して|しておいて|しといて|お願い|を頼|したい|をかけて)/;
+
 /** 在庫の依頼の種類。 */
-export type InventoryRequest = 'stock' | 'low' | 'history' | 'record';
+export type InventoryRequest = 'stock' | 'low' | 'history' | 'record' | 'order';
 
 /**
  * 在庫についての依頼かを見分ける。
  *
- * @returns `stock`（数を尋ねる）・`low`（足りなくなりそうなもの）・`history`（期間の記録）・`record`（入庫・使用・移動を頼む）。
+ * @returns `stock`（数を尋ねる）・`low`（足りなくなりそうなもの）・`history`（期間の記録）・`record`（入庫・使用・移動を頼む）・
+ *   `order`（発注を頼む。発注のメールは承認のあとに送る）。
  *   在庫の依頼でなければ `null`
  * @remarks 在庫管理を使えるかは呼ぶ側が確かめる。「使った」だけ（数も在庫の言葉も無い）では記録の依頼にしない
  */
 export function inventoryRequest(message: string): InventoryRequest | null {
   const m = message.normalize('NFKC').trim();
   const stockWord = STOCK.test(m) || /在庫/.test(m);
+  if (ORDER.test(m)) return 'order';
   if (RECORD_VERB.test(m) && (QTY.test(m) || /在庫/.test(m)) && !/[?？]$/.test(m) && !/何個|いくつ/.test(m)) return 'record';
   if (LOW.test(m) && (stockWord || /もの|品/.test(m))) return 'low';
   // 「先週のコピー用紙の使用を教えて」: 期間と入出庫の言葉がそろった問い
@@ -173,11 +179,15 @@ export async function answerStock(
   service: InventoryService, tenantId: string, message: string, kind: 'stock' | 'low',
 ): Promise<{ text: string; evidence: EvidenceItem[] }> {
   if (kind === 'low') {
-    const low = (await service.list(tenantId)).filter((i) => i.low).sort((a, b) => a.available - b.available);
-    if (low.length === 0) return { text: 'いま、残りわずかの品目はありません。', evidence: [] };
+    // 見張りの結果（無くなる見込みの早い順・残りわずか。第29.14節）。発注の案があれば添える
+    const rows = (await service.forecast(tenantId)).filter((r) => r.runningOut || r.low);
+    if (rows.length === 0) return { text: 'いま、足りなくなりそうなものはありません。', evidence: [] };
+    const lines = rows.slice(0, LIST_MAX).flatMap((r) => [`- ${statusLine(r)}`, ...(proposalLine(r) ? [`  ${proposalLine(r)}`] : [])]);
     return {
-      text: [`残りわずかの品目は ${low.length} 件です。`, ...low.slice(0, LIST_MAX).map((i) => `- ${line(i)}`),
-        ...(low.length > LIST_MAX ? [`ほかに ${low.length - LIST_MAX} 件あります。在庫管理の画面で見られます。`] : [])].join('\n'),
+      text: [`足りなくなりそうなものは ${rows.length} 件です。`, ...lines,
+        ...(rows.length > LIST_MAX ? [`ほかに ${rows.length - LIST_MAX} 件あります。在庫管理の画面で見られます。`] : []),
+        ...(rows.some((r) => r.proposal?.method === 'mail') ? ['「〇〇を発注して」と言っていただければ、発注のメールを作ります（送るのは確認のあとです）。'] : []),
+      ].join('\n'),
       evidence: [{ label: '出どころ', value: '在庫管理' }],
     };
   }

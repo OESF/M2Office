@@ -808,7 +808,11 @@ export class RunEngine {
       } : {}),
       // 在庫管理（第29.15節）。使えるかどうかは道具が呼ぶたびに確かめる
       ...(this.deps.inventory ? {
-        inventory: { service: this.deps.inventory.service, access: () => this.deps.inventory!.access(run.tenantId, requestedBy) },
+        inventory: {
+          service: this.deps.inventory.service, access: () => this.deps.inventory!.access(run.tenantId, requestedBy),
+          // 納品書の読み取り（第29.15節）。その会社の推論を使う
+          ...(llm ? { llm: async () => llm } : {}),
+        },
       } : {}),
       // 社内のお知らせ（第10.15節）。朝のブリーフが読む
       ...(this.deps.notices ? { notices: this.deps.notices } : {}),

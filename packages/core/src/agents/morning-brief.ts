@@ -31,18 +31,20 @@ export const MORNING_BRIEF: AgentDefinition = {
   compartment: null,
   // 秘書が毎朝自分で起こす。会話の中で「今日の段取りを教えて」と頼まれたら秘書が取り次いでもよい
   inputs: { type: 'object', properties: {} },
-  tools: ['profile.read', 'brief.settings', 'notices.list', 'calendar.list', 'tasks.list', 'gmail.unread', 'approvals.pending', 'web.research'],
+  tools: ['profile.read', 'brief.settings', 'notices.list', 'calendar.list', 'tasks.list', 'gmail.unread', 'approvals.pending', 'inventory.forecast', 'web.research'],
   steps: [
     {
       id: 'collect',
       type: 'agent',
       label: '集める',
       // 天気の地域は本人の情報を読んでから決める。同じ段で調べさせると、推論が地域を推測して検索した（2026-09-26 に oesf で確認）
-      tools: ['profile.read', 'brief.settings', 'notices.list', 'calendar.list', 'tasks.list', 'gmail.unread', 'approvals.pending'],
+      // 在庫（第29.14節）は在庫管理を使う会社だけ。使わない会社では道具が「使えない」と返す
+      tools: ['profile.read', 'brief.settings', 'notices.list', 'calendar.list', 'tasks.list', 'gmail.unread', 'approvals.pending', 'inventory.forecast'],
       required: ['profile.read', 'brief.settings', 'notices.list'],
       instruction: [
         'profile.read（本人の自宅・勤務地・今日の日付）・brief.settings（関心の分野と外した項目）・notices.list（社内のお知らせ）を呼ぶ。',
         '続けて、外した項目に入っていないものだけ呼ぶ: calendar.list（今日の予定。外した項目「予定」なら呼ばない）・tasks.list（「ToDo」）・gmail.unread（「返事の要りそうなメール」）・approvals.pending（「承認待ち」）。',
+        'あわせて inventory.forecast を 1 回呼ぶ（在庫の足りなくなりそうなものと使用期限。available が false なら在庫管理を使っていない会社なので、何も書かない）。',
         '取れなかったものは、推測で埋めずに「取得できなかった」と書く。',
         '**この段ではブリーフの文章を書かない。** 道具を呼び終えたら、取れたものの要点だけを短い箇条書きで書く（予定は今日の分だけ、メールは差出人と件名、お知らせは題名・締切・isNew）。これから調べる天気やニュースについては何も書かない。',
       ].join('\n'),
@@ -78,8 +80,9 @@ export const MORNING_BRIEF: AgentDefinition = {
         '4. 今日が期限の ToDo と期限切れ（明日以降が期限のものは「近いもの」として 3 件まで）',
         '5. 返事の要りそうなメール（差出人と件名。多ければ主なもの 5 件まで）。広告・メールマガジン・請求や利用のお知らせ・自動送信の通知は入れない。人から届いた、返事や対応の要りそうなものだけにする。無ければ「返事の要りそうなメールはありません」と書く',
         '6. 承認待ち',
-        '7. 関心の分野（brief.settings の topics の順に、分野の名前を小見出しにして 2〜3 件ずつ。一行ずつ）',
-        '8. 主なニュース（3〜5 件。一行ずつ。最後に出典のリンクを、関心の分野と合わせて 5 件まで）',
+        '7. 在庫（inventory.forecast が品目を返したときだけ。足りなくなりそうなもの（あと何日・残りわずか）と発注の案を 1 行ずつ、使用期限の近いロットを期限の近い順に。数は道具の書き方のまま。無い・使っていない会社なら見出しごと書かない）',
+        '8. 関心の分野（brief.settings の topics の順に、分野の名前を小見出しにして 2〜3 件ずつ。一行ずつ）',
+        '9. 主なニュース（3〜5 件。一行ずつ。最後に出典のリンクを、関心の分野と合わせて 5 件まで）',
         '予定の無い日は、その旨を一言で書く。取得できなかった項目は「取得できませんでした」と書き、「なし」と書かない。',
         '前置きや締めの挨拶は長くしない。最初の一文で、今日いちばん気をつけること（締切の近いお知らせ・雨・朝早い予定など）を伝える。',
         'brief.settings の seededTopics が true なら、最後に一度だけ「関心の分野を「〇〇」にしました。変えたいときはお申し付けください」と添える（〇〇は topics の名前）。',

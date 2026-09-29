@@ -11,7 +11,7 @@ import {
   canUseAgent, INVENTORY_EXTENSION_ID,
   type AuditEvent, type InventoryCount, type InventoryCountRow, type InventoryCountScope, type InventoryCountView,
   type InventoryItem, type InventoryItemView, type InventoryLocation, type InventoryMove,
-  type InventoryMoveKind, type InventorySettings, type InventoryStockRow,
+  type InventoryMoveKind, type InventorySettings, type InventoryStockRow, type InventorySupplier,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { LlmProvider } from '../llm/provider.js';
@@ -20,6 +20,8 @@ import { dateIn } from '../cards/service.js';
 import type { InventoryStore, ItemRecord, NewMove, StockRecord } from './store.js';
 import { parseCode, type ParsedCode } from './gs1.js';
 import { shelfKeyOf } from './labels.js';
+import { forecastItem, sortForecast, USAGE_DAYS, type ForecastRow } from './forecast.js';
+import { matchLine, readSlip, type SlipLine } from './slip.js';
 
 /** 場所が 1 つも無い会社に作る既定の場所の名前（第29.7節）。 */
 export const DEFAULT_WAREHOUSE = '倉庫';
@@ -83,6 +85,16 @@ export interface ItemDetail {
   item: InventoryItemView;
   stock: InventoryStockRow[];
   moves: InventoryMove[];
+}
+
+/** 納品書からの入庫の結果（第29.9節）。 */
+export interface SlipResult {
+  /** 読み取れたか。読めなければ理由。 */
+  read: { ok: true; supplier: string; date: string } | { ok: false; reason: string };
+  /** 入庫にした行。 */
+  recorded: { line: SlipLine; itemId: string; itemName: string; text: string }[];
+  /** 照らせなかった行（候補があれば添える）。入庫にしていない。 */
+  unmatched: { line: SlipLine; reason: string; candidates: { id: string; name: string }[] }[];
 }
 
 /** 取り込みの結果。 */
@@ -187,6 +199,12 @@ export interface InventoryServiceDeps {
   repo: Repository;
   /** 取り込みの列の見出しを読む推論（無ければよくある言い方だけで読む）。 */
   llm?: (tenantId: string) => Promise<LlmProvider>;
+  /**
+   * 数が変わったあとに呼ぶ（在庫の見張り。第29.14節）。記録と同じ流れで待たずに呼び、失敗しても記録は止めない。
+   *
+   * @param itemIds 数が変わった品目
+   */
+  onChanged?: (tenantId: string, itemIds: string[]) => Promise<unknown>;
 }
 
 /**
@@ -200,6 +218,12 @@ export class InventoryService {
 
   get store(): InventoryStore {
     return this.deps.store;
+  }
+
+  /** 見張りに知らせる（待たない・失敗を記録に持ち込まない）。 */
+  private changed(tenantId: string, itemIds: string[]): void {
+    if (!this.deps.onChanged || itemIds.length === 0) return;
+    void Promise.resolve().then(() => this.deps.onChanged!(tenantId, [...new Set(itemIds)])).catch(() => undefined);
   }
 
   /** 会社の在庫管理の設定。 */
@@ -513,6 +537,7 @@ export class InventoryService {
       await this.audit(tenantId, userId, 'inventory.adjust', 'inventory_item', item.id, { name: item.name, delta: qty, reason });
     }
     const recorded = await Promise.all(moves.map((m) => this.deps.store.getMove(tenantId, m.id)));
+    this.changed(tenantId, [item.id]);
     return { ok: true, moves: recorded.filter((m): m is InventoryMove => !!m), item: view!, warnings };
   }
 
@@ -591,12 +616,114 @@ export class InventoryService {
     const item = (await this.deps.store.getItem(tenantId, move.itemId))!;
     const [view] = await this.views(tenantId, [item], await this.settings(tenantId));
     const recorded = await Promise.all(moves.map((m) => this.deps.store.getMove(tenantId, m.id)));
+    this.changed(tenantId, [move.itemId]);
     return { ok: true, moves: recorded.filter((m): m is InventoryMove => !!m), item: view!, warnings: [] };
   }
 
   /** 入出庫の記録を探す（新しい順）。 */
   async history(tenantId: string, q: { itemId?: string; since?: string; until?: string; limit?: number }): Promise<InventoryMove[]> {
     return this.deps.store.listMoves(tenantId, q);
+  }
+
+  // ---- 仕入先と見張り（第29.4.1節・第29.14節） --------------------------------
+
+  /** 仕入先の一覧。 */
+  async suppliers(tenantId: string): Promise<InventorySupplier[]> {
+    return this.deps.store.listSuppliers(tenantId);
+  }
+
+  /**
+   * 仕入先を足すか直す。
+   *
+   * @returns 保存した仕入先か、直せない理由
+   */
+  async saveSupplier(tenantId: string, input: Partial<InventorySupplier> & { id?: string }): Promise<InventorySupplier | { error: string }> {
+    const prev = input.id ? (await this.deps.store.listSuppliers(tenantId)).find((s) => s.id === input.id) : undefined;
+    if (input.id && !prev) return { error: '仕入先が見つかりません' };
+    const name = input.name !== undefined ? trimTo(input.name, 200) : prev?.name ?? '';
+    if (!name) return { error: '仕入先の名前を入れてください' };
+    const method = input.method ?? prev?.method ?? 'mail';
+    if (!['mail', 'web', 'phone'].includes(method)) return { error: '発注の方法は mail・web・phone のどれかです' };
+    const contact = input.contact !== undefined ? trimTo(input.contact, 300) : prev?.contact ?? '';
+    if (method === 'mail' && contact && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact)) return { error: 'メールアドレスの形ではありません' };
+    if (method === 'web' && contact && !/^https:\/\//.test(contact)) return { error: '発注の画面の URL は https:// で始めてください' };
+    const leadDays = input.leadDays === undefined ? prev?.leadDays ?? null
+      : input.leadDays === null ? null : Math.max(0, Math.min(365, Math.round(Number(input.leadDays)) || 0));
+    const rec: InventorySupplier = {
+      id: prev?.id ?? randomUUID(), name, method, contact, leadDays,
+      note: input.note !== undefined ? trimTo(input.note, 2000) : prev?.note ?? '',
+      status: input.status ?? prev?.status ?? 'active',
+    };
+    await this.deps.store.saveSupplier(tenantId, rec, now());
+    return rec;
+  }
+
+  /**
+   * 見張りの結果（第29.14節）。品目ごとに、あと何日で無くなるか・残りわずか・使用期限の近いロット・発注の案を出し、急ぐ順に並べる。
+   *
+   * @param today 今日（YYYY-MM-DD）。省けば日本時間の今日
+   * @remarks 使う速さは過去 4 週の「使用」から出す（取り消しは差し引く。調整は入れない）。推論を使わない
+   */
+  async forecast(tenantId: string, today?: string): Promise<ForecastRow[]> {
+    const day = today ?? dateIn('Asia/Tokyo');
+    const [items, settings, suppliers, stock] = await Promise.all([
+      this.list(tenantId, { today: day }), this.settings(tenantId), this.deps.store.listSuppliers(tenantId), this.deps.store.listStock(tenantId),
+    ]);
+    const since = new Date(Date.parse(`${day}T00:00:00+09:00`) - USAGE_DAYS * 86_400_000).toISOString();
+    // 想定する会社（品目 数十〜数千。第29.1.1節）では、4 週の記録は上限の数に収まる
+    const moves = await this.deps.store.listMoves(tenantId, { since, limit: 2000 });
+    const used = new Map<string, number>();
+    for (const m of moves) if (m.kind === 'out') used.set(m.itemId, (used.get(m.itemId) ?? 0) - m.delta);
+    const bySupplier = new Map(suppliers.map((s) => [s.id, s]));
+    const rows = items.map((i) => forecastItem(
+      i, used.get(i.id) ?? 0,
+      settings.features.lots ? stock.filter((s) => s.itemId === i.id && s.qty > 0) : [],
+      i.supplierId ? bySupplier.get(i.supplierId) ?? null : null, settings, day,
+    ));
+    return sortForecast(rows);
+  }
+
+  // ---- 納品書からの入庫（第29.9節） -------------------------------------------
+
+  /**
+   * 納品書の画像・PDF を読み取り、品目に照らせた行を入庫にする。**確認を挟まず、照らせない行だけを残す**（ADR-0028）。
+   *
+   * @param sourceId 納品書のファイルの ID（入出庫の記録の元として残す）
+   * @param locationId 入れる場所。省けば品目ごとに今ある場所
+   * @remarks 金額は使わない。数が読めない行・品目が 1 つに決まらない行は入庫にしない。納品書の文はデータとして扱う（不変則 I-6）
+   */
+  async receiveSlip(tenantId: string, userId: string, file: { bytes: Uint8Array; mimeType: string; sourceId?: string }, locationId?: string): Promise<SlipResult> {
+    if (!this.deps.llm) return { read: { ok: false, reason: '納品書を読み取れる推論が使えません' }, recorded: [], unmatched: [] };
+    const reading = await readSlip(await this.deps.llm(tenantId), file.bytes, file.mimeType);
+    if (reading.kind === 'unavailable') return { read: { ok: false, reason: reading.reason }, recorded: [], unmatched: [] };
+    if (reading.kind === 'not-slip') return { read: { ok: false, reason: '納品書として読めませんでした。納品書全体が写るように撮り直してください' }, recorded: [], unmatched: [] };
+    return { read: { ok: true, supplier: reading.supplier, date: reading.date }, ...(await this.receiveLines(tenantId, userId, reading.lines, file.sourceId, locationId)) };
+  }
+
+  /** 読み取った行を品目に照らし、照らせた行を入庫にする。 */
+  async receiveLines(tenantId: string, userId: string, lines: SlipLine[], sourceId?: string, locationId?: string): Promise<Omit<SlipResult, 'read'>> {
+    const [items, settings] = await Promise.all([this.deps.store.listItems(tenantId), this.settings(tenantId)]);
+    const recorded: SlipResult['recorded'] = [];
+    const unmatched: SlipResult['unmatched'] = [];
+    for (const line of lines) {
+      const hit = matchLine(line, items);
+      if (!('item' in hit)) {
+        unmatched.push({ line, reason: hit.candidates.length ? '品目が 1 つに決まりません' : '当てはまる品目がありません', candidates: hit.candidates.map((c) => ({ id: c.id, name: c.name })) });
+        continue;
+      }
+      if (line.qty === null) { unmatched.push({ line, reason: '数が読めません', candidates: [{ id: hit.item.id, name: hit.item.name }] }); continue; }
+      const u = line.unit.normalize('NFKC');
+      const pack = settings.features.units && !!hit.item.packSize && !!hit.item.packUnit && u === hit.item.packUnit.normalize('NFKC') && u !== hit.item.unit.normalize('NFKC');
+      const res = await this.recordMove(tenantId, userId, {
+        kind: 'in', itemId: hit.item.id, qty: line.qty, unit: pack ? 'pack' : 'unit', reason: '納品書', source: 'slip',
+        ...(sourceId ? { sourceId } : {}), ...(locationId ? { locationId } : {}),
+        ...(line.lot ? { lot: line.lot } : {}), ...(line.expiresOn ? { expiresOn: line.expiresOn } : {}),
+      });
+      if (!res.ok) { unmatched.push({ line, reason: res.error, candidates: [{ id: hit.item.id, name: hit.item.name }] }); continue; }
+      const units = res.moves.reduce((a, m) => a + m.delta, 0);
+      recorded.push({ line, itemId: hit.item.id, itemName: hit.item.name, text: `${hit.item.name}: ${formatQty(hit.item, units)}` });
+    }
+    return { recorded, unmatched };
   }
 
   // ---- 棚卸し（第29.10節） ---------------------------------------------------
@@ -739,6 +866,7 @@ export class InventoryService {
     }));
     if (moves.length) await this.deps.store.applyMoves(tenantId, moves);
     await this.deps.store.setCountStatus(tenantId, countId, 'closed', userId, at);
+    this.changed(tenantId, moves.map((m) => m.itemId));
     await this.audit(tenantId, userId, 'inventory.count.close', 'inventory_count', countId, {
       counted: view.counted, adjusted: moves.length, uncounted: view.uncounted,
     });
