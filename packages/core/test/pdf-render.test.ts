@@ -42,10 +42,10 @@ test('日本語の帳票を作り、同じ文字を読み返せる', async () =>
   assert.ok(text.includes('80,000'), text);
 });
 
-test('書体は使った文字だけを埋め込む（丸ごと入れない）', async () => {
+test('書体はそのまま埋め込む（使った字だけを抜き出すと字の形が落ちた。ADR-0017 の改め）', async () => {
   const bytes = await renderPdf(DOC);
-  // 書体のファイルは 1 つ 5 MB ある。サブセットが効いていれば帳票は 1 MB に満たない
-  assert.ok(bytes.byteLength < 1_000_000, `大きすぎます: ${bytes.byteLength}`);
+  // 同梱の書体（通常と太字）は 1 つ約 1.5 MB。そのまま入れれば帳票は数 MB になり、抜き出しに戻れば数十 KB になる
+  assert.ok(bytes.byteLength > 2_000_000 && bytes.byteLength < 5_000_000, `大きさが想定と違います: ${bytes.byteLength}`);
 });
 
 test('明細が多い帳票は次のページへ送る', async () => {

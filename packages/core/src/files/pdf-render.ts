@@ -164,6 +164,25 @@ export async function missingCharacters(texts: string[]): Promise<string[]> {
   return [...missing];
 }
 
+/**
+ * pdf-lib の「使った字だけを埋め込む」（`subset: true`）は、同梱の書体では**ほとんどの字の形を落とす**（2026-09-29 に確認。
+ * 文字の情報は残るため、文字の取り出しでは気づけない）。書体をそのまま埋め込む。1 つの書体で約 1.5 MB 増える（ADR-0017 の改め）
+ */
+const EMBED = { subset: false } as const;
+
+/**
+ * PDF に同梱の日本語の書体を埋め込む。帳票以外の PDF（棚のラベルなど）が使う。
+ *
+ * @param which 埋め込む書体。使わない書体は埋め込まない（1 つで約 1.5 MB あるため）
+ * @returns 書体と、書体に無い字を置き換える関数
+ */
+export async function embedJapaneseFonts(pdf: PDFDocument, which: 'regular' | 'bold' = 'regular'): Promise<{ font: PDFFont; fit(text: string): string }> {
+  const fonts = await loadFonts();
+  pdf.registerFontkit(fontkit);
+  const font = await pdf.embedFont(which === 'bold' ? fonts.bold : fonts.regular, EMBED);
+  return { font, fit };
+}
+
 /** 書体に無い字を置き換える。 */
 function fit(text: string): string {
   let out = '';
@@ -193,16 +212,15 @@ function writer(page: PDFPage, font: PDFFont, boldFont: PDFFont) {
  * @returns PDF の中身
  *
  * @remarks
- * 書体は**使った文字だけ**を抜き出して埋め込む（`subset: true`）。
- * 日本語の書体をそのまま入れると 1 通が数 MB になるため。
+ * 書体は、そのまま埋め込む（使った字だけを抜き出すと字の形が落ちるため。{@link EMBED}）。1 通が約 3 MB になる。
  */
 export async function renderPdf(doc: InvoiceDoc): Promise<Uint8Array> {
   const fonts = await loadFonts();
   const pdf = await PDFDocument.create();
   pdf.registerFontkit(fontkit);
   const [font, bold] = await Promise.all([
-    pdf.embedFont(fonts.regular, { subset: true }),
-    pdf.embedFont(fonts.bold, { subset: true }),
+    pdf.embedFont(fonts.regular, EMBED),
+    pdf.embedFont(fonts.bold, EMBED),
   ]);
   pdf.setTitle(doc.title);
 
