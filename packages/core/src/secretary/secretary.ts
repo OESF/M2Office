@@ -11,7 +11,7 @@ import type { Repository } from '../repository/types.js';
 import type { LlmProvider } from '../llm/provider.js';
 import type { WorkspaceConnector } from '../connectors/types.js';
 import type { HelpCatalog } from '../help/articles.js';
-import { DIRECT_QUERIES, type DirectAnswer, type EvidenceItem } from './catalog.js';
+import { DIRECT_QUERIES, sourceNote, type DirectAnswer, type EvidenceItem } from './catalog.js';
 import { rewriteNote } from '../knowledge/search.js';
 import { LOOKUP_AGENT_ID } from '../agents/index.js';
 import { REFERS_TO_PAST, recall } from './recall.js';
@@ -22,6 +22,7 @@ import { AI_NOT_CONFIGURED_MESSAGE, aiAvailable } from '../llm/unconfigured.js';
 import { expandQuery } from '../knowledge/expand.js';
 import { jstDay } from '../memory/learn.js';
 import { contactRequest } from './contacts.js';
+import { MAIL_TRIAGE_RULE, mailCheckRequest, mailCheckText, parseMailVerdicts } from './mail.js';
 import { CARD_UPDATE } from '../cards/agents.js';
 import { answerBriefSettings } from '../brief/settings.js';
 import type { NoticeService } from '../notices/service.js';
@@ -93,6 +94,12 @@ export interface SecretaryDeps {
    * @remarks `access` は、会社が在庫管理を使っていて本人が利用範囲の中なら真を返す
    */
   inventory?: { service: InventoryService; access(tenantId: string, userId: string): Promise<unknown> };
+  /**
+   * 振り分けの経過を知らせる先（デバッグモード。仕様書 第20.4.1節「デバッグモード」）。どの定型の答え・どの業務に回したかと、その理由を受け取る。
+   *
+   * @remarks 開発のときだけ渡す。失敗しても秘書の処理を止めない
+   */
+  onTrace?(tenantId: string, userId: string, action: string, target: string, detail?: Record<string, unknown>): void;
 }
 
 /**
@@ -347,6 +354,12 @@ export class Secretary {
       await this.audit(tenantId, userId, 'secretary.route', LOOKUP_AGENT_ID);
       return this.delegate(tenantId, userId, message, lookup, '名刺を探す依頼', llm);
     }
+    // メールの確認（第10.9.6節）。件数だけでなく、未読を読んで振り分けて案内する。推論に選ばせずに見分け、その場で答える
+    if (!pastOnly && mailCheckRequest(message)) {
+      const answer = await this.answerMailCheck(tenantId, userId, llm);
+      await this.audit(tenantId, userId, 'secretary.mail', 'check');
+      return { reply: { layer: 'light', ...answer }, keep: true };
+    }
     const routed = pastOnly
       ? { agent: undefined, plan: false, reason: '', tokensUsed: 0 }
       : await this.route(message, enabled, llm, lookup, true, connections.map((c) => c.name));
@@ -557,6 +570,7 @@ export class Secretary {
     tenantId: string, userId: string, message: string, agent: AgentDefinition, reason: string,
     llm: LlmProvider, fileId?: string,
   ): Promise<{ reply: SecretaryReply; keep: boolean }> {
+    this.trace(tenantId, userId, 'secretary.handoff', agent.id, { agent: agent.name, reason, message });
     const context = await this.todayContext(tenantId, userId);
     const suggested = { id: agent.id, version: agent.version, name: agent.name };
     if (agent.id === LOOKUP_AGENT_ID) {
@@ -807,7 +821,57 @@ export class Secretary {
   }
 
   /** 層 1 の応答も含め、すべての応答を監査ログに残す（不変則 I-4）。 */
+  /**
+   * メールの確認（第10.9.6節）。受信トレイ（メイン）の未読を新しい順に 50 通まで読み、推論に 1 通ずつ振り分けさせ、
+   * 返信・対応が要るものを先に並べて案内する。並べ方と文は決まった形で作る（推論に文を書かせない）。
+   *
+   * @remarks 推論に渡すのは差出人・件名・冒頭だけ。推論が使えない・失敗したときは、振り分けずに一覧で答える
+   */
+  private async answerMailCheck(tenantId: string, userId: string, llm: LlmProvider): Promise<{ text: string; evidence: EvidenceItem[]; tokensUsed: number }> {
+    const source = sourceNote(this.deps.connector, tenantId);
+    let unread: Awaited<ReturnType<WorkspaceConnector['mail']['unread']>>;
+    try {
+      unread = await this.deps.connector.mail.unread({ tenantId, userId }, { limit: 50 });
+    } catch (err) {
+      return { text: `メールを読めませんでした（${err instanceof Error ? err.message : String(err)}）。`, evidence: source, tokensUsed: 0 };
+    }
+    const { total, more, items } = unread;
+    if (items.length === 0) return { text: '受信トレイに未読のメールはありません。', evidence: source, tokensUsed: 0 };
+    let verdicts = parseMailVerdicts('', items.length);
+    let tokensUsed = 0;
+    let note: EvidenceItem[] = [];
+    if (aiAvailable(llm)) {
+      try {
+        const res = await llm.complete({
+          tier: 'standard',
+          maxOutputTokens: 4000,
+          messages: [
+            { role: 'system', content: MAIL_TRIAGE_RULE },
+            { role: 'user', content: JSON.stringify(items.map((m, i) => ({ i, from: m.from, subject: m.subject, head: m.snippet.slice(0, 160) }))) },
+          ],
+        });
+        tokensUsed = res.tokensUsed;
+        verdicts = parseMailVerdicts(res.text, items.length);
+      } catch {
+        note = [{ label: '振り分け', value: '推論が使えなかったため、振り分けずに並べました' }];
+      }
+    } else {
+      note = [{ label: '振り分け', value: '推論が使えないため、振り分けずに並べました' }];
+    }
+    return { text: mailCheckText(items, verdicts, total, more), evidence: [...source, ...note], tokensUsed };
+  }
+
+  /** 振り分けの経過をデバッグモードへ知らせる（渡されていなければ何もしない）。 */
+  private trace(tenantId: string, userId: string, action: string, target: string, detail?: Record<string, unknown>) {
+    try {
+      this.deps.onTrace?.(tenantId, userId, action, target, detail);
+    } catch {
+      // デバッグの記録の失敗で、秘書の答えを止めない
+    }
+  }
+
   private async audit(tenantId: string, userId: string, action: string, target: string) {
+    this.trace(tenantId, userId, action, target);
     await this.deps.repo.appendAudit({
       id: randomUUID(),
       tenantId,

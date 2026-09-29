@@ -41,6 +41,7 @@ import { extensionsRoute } from './routes/extensions.js';
 import { accessRoute, compartmentsRoute, groupsRoute } from './routes/access.js';
 import { connectionsRoute, myGoogleRoute, oauthCallbackRoute, returnTo } from './routes/connections.js';
 import { myConnectionsRoute } from './routes/connection-auth.js';
+import { debugRoute } from './routes/debug.js';
 
 /**
  * API サーバー。
@@ -95,6 +96,16 @@ app.use('/v1/*', resolveTenant(deps));
 app.route('/v1/auth', authRoute(deps));
 app.use('/v1/*', async (c, next) =>
   c.req.path.startsWith('/v1/auth/') ? next() : authenticate(deps)(c, next));
+// デバッグモード（仕様書 第20.4.1節「デバッグモード」）: 本人の呼び出しが失敗したら、パス・番号・理由を記録に残す
+if (deps.debug) {
+  app.use('/v1/*', async (c, next) => {
+    await next();
+    const ctx = c.get('ctx');
+    if (c.res.status < 400 || !ctx?.user || c.req.path.startsWith('/v1/debug')) return;
+    const body = await c.res.clone().text().catch(() => '');
+    deps.debug?.add(ctx.tenant.id, ctx.user.id, 'error', `${c.req.method} ${c.req.path} → ${c.res.status}`, { status: c.res.status, body: body.slice(0, 2000) });
+  });
+}
 
 app.get('/v1/me', async (c) => {
   const ctx = c.get('ctx');
@@ -126,6 +137,8 @@ app.get('/v1/me', async (c) => {
     cards: !!(await deps.cards.access(ctx.tenant.id, ctx.user.id)),
     // 在庫管理を使えるか（会社の入り切りと利用範囲。仕様書 第29.2節）。使えなければ左ペインに「在庫管理」を出さない
     inventory: !!(await deps.inventory.access(ctx.tenant.id, ctx.user.id)),
+    // デバッグモードか（仕様書 第20.4.1節「デバッグモード」）。画面の上の帯に「Debug mode」を出し、記録を見る入口を出す
+    debug: !!deps.debug,
   });
 });
 app.route('/v1/me/google', myGoogleRoute(deps));
@@ -152,6 +165,7 @@ app.route('/v1/admin/connections', connectionsRoute(deps));
 app.route('/v1/admin', adminRoute(deps));
 app.route('/v1/files', filesRoute(deps));
 app.route('/v1/help', helpRoute(deps));
+app.route('/v1/debug', debugRoute(deps));
 app.route('/v1/onboarding', onboardingRoute(deps));
 
 const port = Number(process.env['API_PORT'] ?? 3101);

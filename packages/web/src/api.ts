@@ -14,6 +14,7 @@ import type {
   InventoryCount, InventoryCountRow, InventoryCountScope, InventoryCountView, InventorySupplier,
   InventoryBooking, InventoryBookingMapping, InventoryBookingSource,
 } from '@m2office/shared';
+import { debugMode, recordCall } from './debug.js';
 
 /**
  * API の呼び出し口。
@@ -46,17 +47,40 @@ export function setUnauthorizedHandler(fn: () => void): void {
   onUnauthorized = fn;
 }
 
+/**
+ * 数秒ごとに読み直す口。デバッグモードの記録では、うまくいった読み出しを残さない（直近 100 件が埋まって、見たいものが流れるため）。
+ */
+const POLLED = /^\/(notifications|approvals|jobs|agents|secretary\/lookups)(\?|$)|^\/secretary\/lookups\/claim$/;
+
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`/v1${path}`, {
-    ...init,
-    credentials: 'same-origin',
-    headers: {
-      'content-type': 'application/json',
-      ...(devTenant ? { 'x-tenant': devTenant } : {}),
-      ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}),
-      ...(init?.headers ?? {}),
-    },
+  const started = performance.now();
+  // デバッグモードでは、呼び出しと応答を画面の記録に残す（仕様書 第20.4.1節「デバッグモード」）。記録の読み出しそのものは残さない
+  const traced = debugMode() && !path.startsWith('/debug/');
+  const note = (status: number, response?: string) => recordCall({
+    method: init?.method ?? 'GET', path, status, ms: Math.round(performance.now() - started),
+    request: typeof init?.body === 'string' ? init.body : init?.body ? '（ファイルなど）' : undefined, response,
   });
+  let res: Response;
+  try {
+    res = await fetch(`/v1${path}`, {
+      ...init,
+      credentials: 'same-origin',
+      headers: {
+        'content-type': 'application/json',
+        ...(devTenant ? { 'x-tenant': devTenant } : {}),
+        ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}),
+        ...(init?.headers ?? {}),
+      },
+    });
+  } catch (err) {
+    if (traced) note(0, String(err));
+    throw err;
+  }
+  if (traced) {
+    const text = await res.clone().text().catch(() => undefined);
+    const quiet = res.ok && POLLED.test(path) && (!init?.method || init.method === 'GET' || text === '{"items":[]}');
+    if (!quiet) note(res.status, text);
+  }
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: '通信に失敗しました' }));
     if (res.status === 401 && body.login) onUnauthorized?.();
@@ -159,6 +183,17 @@ export interface Me {
   cards?: boolean;
   /** 在庫管理を使えるか（会社の入り切りと利用範囲。仕様書 第29.2節）。 */
   inventory?: boolean;
+  /** デバッグモードか（`M2O_DEBUG=true`。仕様書 第20.4.1節「デバッグモード」）。 */
+  debug?: boolean;
+}
+
+/** デバッグモードのサーバーの記録の 1 件（仕様書 第20.4.1節「デバッグモード」）。 */
+export interface DebugEvent {
+  id: string;
+  at: string;
+  kind: 'voice' | 'secretary' | 'error';
+  title: string;
+  detail?: unknown;
 }
 
 /** 在庫の一覧（仕様書 第29.6節）。 */
@@ -735,6 +770,11 @@ export interface MyConnectionView {
 
 export const api = {
   download,
+  /** デバッグモードのサーバーの記録（仕様書 第20.4.1節「デバッグモード」）。 */
+  debug: {
+    events: (after?: string) => call<{ events: DebugEvent[] }>(`/debug/events${after ? `?after=${encodeURIComponent(after)}` : ''}`),
+    clear: () => call<{ ok: true }>('/debug/events', { method: 'DELETE' }),
+  },
   help: {
     list: () => call<{ items: HelpArticleMeta[] }>('/help/articles'),
     get: (id: string) => call<HelpArticleMeta & { body: string }>(`/help/articles/${encodeURIComponent(id)}`),

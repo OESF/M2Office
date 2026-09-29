@@ -26,6 +26,8 @@ import { fileURLToPath } from 'node:url';
 import { loadAuthConfig, type AuthConfig } from './auth/config.js';
 import { OAuthStateStore } from './auth/oauth-state.js';
 import { HandoffStore } from './auth/handoff.js';
+import { DebugLog, debugEnabled } from './debug/log.js';
+import { QUIET_TRACES, traceTitle } from './debug/trace.js';
 
 /** API プロセス全体で共有する依存。 */
 export interface AppDeps {
@@ -39,6 +41,8 @@ export interface AppDeps {
   auth: AuthConfig;
   /** アプリログ（開発規約 第7章）。 */
   log: Logger;
+  /** デバッグモードの記録（仕様書 第20.4.1節「デバッグモード」）。`M2O_DEBUG=true` のときだけある。 */
+  debug: DebugLog | null;
   /** ヘルプの記事（仕様書 第6.10節）。 */
   help: HelpCatalog;
   /** Google から取得したデータの保持（仕様書 第14.3.2節）。連携の解除のときに中身を消す。 */
@@ -195,9 +199,15 @@ export function buildDeps(): AppDeps {
     // 止めた実行に後から書き込まれた中身も消す（仕様書 第6.5.2.1節）
     onCancelled: async (run) => { await retentionRef.purgeRun(run, 'disconnect', new Date()); },
   });
+  // デバッグモード（仕様書 第20.4.1節「デバッグモード」）。本番で有効にすると起動を断る
+  const debug = debugEnabled() ? new DebugLog() : null;
   const help = new HelpCatalog(loadHelpArticles(helpDir(), log), OFFICIAL_AGENTS, registry);
   const secretary = new Secretary({
     repo, llm, connector, agents: OFFICIAL_AGENTS, help, agentsFor, llmFor: (t) => ai.llmFor(t), notices,
+    // デバッグモードでは、振り分けの経過を記録に残す（仕様書 第20.4.1節「デバッグモード」）
+    ...(debug ? { onTrace: (tenantId: string, userId: string, action: string, target: string, detail?: Record<string, unknown>) => {
+      if (!QUIET_TRACES.has(action)) debug.add(tenantId, userId, 'secretary', traceTitle(action, target, detail), { action, target, ...detail });
+    } } : {}),
     // 在庫の問いは推論に選ばせず、その場で答える（仕様書 第29.15節）
     inventory,
     // 渡されたファイルの名前だけを引く。中身は読まない（後ろへ回すため。仕様書 第10.11.3節）
@@ -248,7 +258,7 @@ export function buildDeps(): AppDeps {
   });
   const googleRedirect = process.env['GOOGLE_OAUTH_REDIRECT_URI'] ?? 'http://localhost:3100/v1/oauth/google/callback';
   return {
-    repo, llm, connector, files, registry, engine, secretary, auth: loadAuthConfig(), log, help, retention, revocation,
+    repo, llm, connector, files, registry, engine, secretary, auth: loadAuthConfig(), log, debug, help, retention, revocation,
     hub, tenantView, agentsFor, canUse, isAvailable, box, ai, connections,
     oauth: {
       // Google は http の戻り先を localhost にしか認めないため、開発では localhost の画面の転送を通す（ADR-0007）

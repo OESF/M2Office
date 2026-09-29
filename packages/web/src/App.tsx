@@ -12,6 +12,7 @@ import {
   addCategory, assignCategory, checkCategoryName, groupMenu, removeCategory, togglePinned, type MenuSection,
 } from './menu.js';
 import { CategoryMenuActions, ItemMenuActions } from './MenuActions.js';
+import { openDebugPanel } from './debug.js';
 import {
   api, ApiError, describeError,
   type AgentSummary, type ApprovalView, type Lookup, type Me, type RunDetail, type SecretaryReply,
@@ -516,6 +517,11 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
               active={view.kind === 'schedules'} onClick={() => setView({ kind: 'schedules' })} />
             <NavItem icon="help" label="ヘルプ" description="使い方の記事と検索"
               active={view.kind === 'help'} onClick={() => setView({ kind: 'help', articleId: null })} />
+            {/* デバッグモードのときだけ（仕様書 第20.4.1節「デバッグモード」） */}
+            {me.debug && (
+              <NavItem icon="console" label="デバッグ" description="音声・秘書の振り分け・失敗した呼び出しの記録"
+                onClick={openDebugPanel} />
+            )}
           </>
         )}
         navFooter={(

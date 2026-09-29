@@ -1373,3 +1373,35 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .brief-list li { margin-top: calc(4px * var(--space-scale)); }
 .brief-list li .muted, .brief-list li .grow { flex: 1; }
 
+/* デバッグモード（仕様書 第20.4.1節「デバッグモード」）。どの画面でも上の帯の真ん中に赤い印を重ね、押すと右から記録を開く */
+.debug-badge {
+  position: fixed; top: 6px; left: 50%; transform: translateX(-50%); z-index: 100;
+  padding: 2px 10px; border: 0; border-radius: 999px; background: var(--danger); color: #fff;
+  font: 700 11px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .04em; cursor: pointer;
+  box-shadow: 0 1px 4px var(--shadow-sm);
+}
+.debug-drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 95; width: min(620px, 100vw);
+  display: flex; flex-direction: column; background: var(--panel); border-left: 1px solid var(--line);
+  box-shadow: -8px 0 24px var(--shadow-sm); font-size: 13px;
+}
+.debug-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 34px 12px 10px; border-bottom: 1px solid var(--line); }
+.debug-head .spacer { flex: 1; }
+.debug-tabs, .debug-filter { display: flex; gap: 4px; flex-wrap: wrap; }
+.debug-filter { padding: 6px 12px; border-bottom: 1px solid var(--line); }
+.debug-tabs button, .debug-filter button {
+  border: 1px solid var(--line); background: none; color: var(--ink); border-radius: 999px; padding: 2px 10px; cursor: pointer; font-size: 12px;
+}
+.debug-tabs button.on, .debug-filter button.on { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.debug-list { list-style: none; margin: 0; padding: 4px 8px 24px; overflow-y: auto; flex: 1; }
+.debug-row { border-bottom: 1px solid var(--line); }
+.debug-row summary { cursor: pointer; padding: 5px 2px; line-height: 1.5; word-break: break-word; }
+.debug-row time { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin-right: 6px; }
+.debug-kind { display: inline-block; min-width: 3em; margin-right: 6px; padding: 0 6px; border-radius: 4px; background: var(--subtle-bg); font-size: 11px; text-align: center; }
+.debug-row.voice .debug-kind { background: var(--accent-soft); color: var(--accent); }
+.debug-row.error .debug-kind { background: var(--danger-soft); color: var(--danger); }
+.debug-row pre {
+  margin: 0 0 8px; padding: 8px; max-height: 360px; overflow: auto; background: var(--subtle-bg); border-radius: 6px;
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-all;
+}
+.debug-label { margin: 4px 0 2px; font-size: 11px; color: var(--muted); }

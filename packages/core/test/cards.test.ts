@@ -14,6 +14,7 @@ import {
 } from '../src/index.js';
 import { contactRequest } from '../src/secretary/contacts.js';
 import { DIRECT_QUERIES } from '../src/secretary/catalog.js';
+import { mailCheckRequest, mailCheckText, parseMailVerdicts, senderName } from '../src/secretary/mail.js';
 
 const fields = (over: Partial<CardFields>): CardFields => ({ ...EMPTY_CARD_FIELDS, ...over });
 
@@ -133,6 +134,40 @@ test('秘書の見分け: 名刺を探す依頼・直す依頼・名刺と関係
   assert.equal(contactRequest('佐々木美穂さんの連絡先情報（メールアドレス・住所など）'), 'ask');
   assert.equal(contactRequest('佐々木さんの電話番号'), 'ask');
   assert.equal(contactRequest('佐々木さんのメールアドレスに資料を送って'), null, '送る依頼は名刺の依頼にしない');
+});
+
+test('メールの確認は件数の答えに当てず、振り分けて案内する調べものに回す', () => {
+  const match = (m: string) => DIRECT_QUERIES.find((q) => q.patterns.some((p) => p.test(m)) && !q.excludes?.some((p) => p.test(m)))?.id;
+  for (const m of ['もう一度メールチェックしてください', 'メールを確認して', '大事なメールある？', '何かメール来てる？', '受信箱を見て']) {
+    assert.equal(mailCheckRequest(m), true, m);
+    assert.equal(match(m), undefined, `${m} は件数の答えにしない`);
+  }
+  for (const m of ['未読のメールは何件？', '未読メールは？']) {
+    assert.equal(mailCheckRequest(m), false, m);
+    assert.equal(match(m), 'mail-unread', `${m} は件数で答える`);
+  }
+  assert.equal(mailCheckRequest('確認したメールに返信の下書きを作って'), false, '書く依頼は受信箱整理へ');
+  assert.equal(mailCheckRequest('佐々木さんのメールアドレスを確認して'), false, '連絡先の問いは名刺へ');
+  assert.equal(mailCheckRequest('返信待ちのメールを確認して'), false, '返信待ちは「返信待ちの追跡」へ');
+});
+
+test('メールの確認: 推論の振り分けを読み、返信・対応が要るものを先に、宣伝は差出人だけで案内する', () => {
+  const mails = [
+    { from: 'Bvlgari <news@bvlgari.example>', subject: '新作のご案内' },
+    { from: '"佐藤 一郎" <sato@example.jp>', subject: '見積もりのご確認' },
+    { from: '楽天証券 <info@rakuten.example>', subject: 'ログインがありました' },
+    { from: 'Dan <dan@example.com>', subject: 'Re: PR #1' },
+  ];
+  const verdicts = parseMailVerdicts('```json\n{"items": [{"i": 0, "group": "promo"}, {"i": 1, "group": "reply", "reason": "見積もりの返事", "due": "10/3"}, {"i": 2, "group": "action", "reason": "心当たりを確認"}, {"i": 9, "group": "reply"}]}\n```', mails.length);
+  assert.deepEqual(verdicts.map((v) => v.group), ['promo', 'reply', 'action', 'read'], '返ってこなかった 1 通は「目を通すだけ」');
+  const text = mailCheckText(mails, verdicts, 30, false);
+  assert.match(text, /^未読は 30 件です。返信・対応が要るものは 2 件です。/);
+  assert.ok(text.indexOf('**返信が要る') < text.indexOf('**対応が要る') && text.indexOf('**対応が要る') < text.indexOf('**目を通すだけ'), '返信・対応が先');
+  assert.match(text, /佐藤 一郎 — 見積もりのご確認（見積もりの返事・期限 10\/3）/);
+  assert.match(text, /宣伝・お知らせ（1）\*\*\nBvlgari$/m, '宣伝は差出人だけ');
+  assert.match(text, /ほかに 26 件の未読は見ていません/);
+  assert.deepEqual(parseMailVerdicts('読めない答え', 2).map((v) => v.group), ['read', 'read'], '読めなければ推測で返信にしない');
+  assert.equal(senderName('"山田 太郎" <a@b.jp>'), '山田 太郎');
 });
 
 test('未読メールの定型の答えは、人の連絡先を尋ねる依頼に当てない', () => {

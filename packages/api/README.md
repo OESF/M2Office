@@ -273,6 +273,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/help/articles` | ヘルプの記事の一覧（役割と有効な業務で出し分け） |
 | `GET /v1/help/articles/:id` | 記事の本文。見られない記事は 404 |
 | `GET /v1/help/search?q=` | 記事の検索 |
+| `GET /v1/debug/events` ／ `DELETE` | デバッグモード（`M2O_DEBUG=true`）の本人の記録（新しい順。`after` でそれより後だけ）／ 消す。デバッグモードでなければ 404（仕様書 第20.4.1節） |
 | `GET /v1/help/agents/:agentId` | 業務の説明（定義から自動で作る） |
 | `GET /v1/onboarding/tour` | 本人の初回の案内の状態 |
 | `POST /v1/onboarding/tour` | 案内を見終えた記録。`{ "reset": true }` で見直し |
@@ -299,6 +300,7 @@ src/routes/           エンドポイント
 src/secretary/        秘書の調べものと秘書が頼んだ業務の状態、朝のブリーフの自動の用意
 src/voice/            音声の中継（Gemini Live）、秘書の名乗りの指示、声を試す
 src/audit/            監査ログの見せ方（人の名前・業務の言葉・CSV。仕様書 第6.6.8.1節）
+src/debug/            デバッグモードの記録（メモリーだけ・本人の分だけ）と、秘書の振り分けの 1 行（仕様書 第20.4.1節）
 ```
 
 ## 関連文書

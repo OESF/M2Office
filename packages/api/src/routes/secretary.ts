@@ -27,8 +27,11 @@ export function secretaryRoute(deps: AppDeps) {
       return c.json({ error: '依頼の内容を入力してください' }, 400);
     }
     const started = Date.now();
+    // デバッグモードでは、依頼と答えを記録に残す（仕様書 第20.4.1節「デバッグモード」）。振り分けの経過はその間に秘書が足す
+    deps.debug?.add(ctx.tenant.id, ctx.user.id, 'secretary', `文字の依頼: ${message}`, { message, fileId: fileId ?? null });
     // ファイルは本人が上げたものだけを読む。他人の ID を書いても読まない（仕様書 第10.10.2節）
     const reply = await deps.secretary.respond(ctx.tenant.id, ctx.user.id, message, fileId?.trim() || undefined);
+    deps.debug?.add(ctx.tenant.id, ctx.user.id, 'secretary', `秘書の答え（${reply.layer}・${Date.now() - started} ms）: ${reply.text}`, reply);
     return c.json({ ...reply, elapsedMs: Date.now() - started });
   });
 
@@ -59,6 +62,8 @@ export function secretaryRoute(deps: AppDeps) {
   app.post('/lookups/claim', async (c) => {
     const ctx = c.get('ctx');
     const items = await claimUntold(deps.repo, ctx.tenant.id, ctx.user.id, new Date(), await agentNames(deps, ctx.tenant.id));
+    // 後ろへ回した調べものの結果を画面が受け取った（デバッグモード。第20.4.1節「デバッグモード」）
+    for (const it of items) deps.debug?.add(ctx.tenant.id, ctx.user.id, 'secretary', `調べものの結果を画面へ: ${JSON.stringify(it).slice(0, 120)}`, it);
     return c.json({ items });
   });
 

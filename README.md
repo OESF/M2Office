@@ -199,6 +199,7 @@ docs/            開発規約・リリース規定・設計判断記録
 | `CONNECTOR_MOCK_TENANTS` | （なし） | **開発だけ。** `google` のとき、見本のまま動かす会社のテナント ID（カンマ区切り）。smoke の会社を見本に保つ（例: `t-alpha,t-beta`）。本番で設定すると起動を拒否する |
 | `AUTH_DEV_LOGIN` | false | 開発用ログインを許す。`.env.example` では true |
 | `AUTH_DEV_HEADERS` | false | `X-Tenant`・`X-User` ヘッダーでの指定を許す。動作確認用 |
+| `M2O_DEBUG` | false | デバッグモード。画面の上に「Debug mode」を出し、音声・秘書の振り分け・失敗した呼び出しと画面から呼んだ API を記録して見せる（メモリーだけに持つ。仕様書 第20.4.1節） |
 | `SESSION_TTL_HOURS` | 168 | ログイン状態の有効時間 |
 | `COOKIE_SECURE` | false | HTTPS で配信する環境では true |
 | `SCHEDULE_INTERVAL_MS` | 15000 | 定時実行の見回り間隔 |
@@ -209,7 +210,7 @@ docs/            開発規約・リリース規定・設計判断記録
 | `LOG_LEVEL` | 開発 debug / 本番 info | アプリログのレベル（`error`・`warn`・`info`・`debug`） |
 | `LOG_FORMAT` | 開発 pretty / 本番 json | アプリログの形式 |
 
-`AUTH_DEV_LOGIN` と `AUTH_DEV_HEADERS` は、`NODE_ENV=production` で有効にすると起動を拒否します。
+`AUTH_DEV_LOGIN`・`AUTH_DEV_HEADERS`・`M2O_DEBUG` は、`NODE_ENV=production` で有効にすると起動を拒否します。
 
 API とワーカーは起動時にリポジトリ直下の `.env` を読みます（Node.js の `--env-file-if-exists`）。
 

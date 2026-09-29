@@ -215,6 +215,18 @@ async function start(
   const send = (payload: unknown) => {
     if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(payload));
   };
+  // デバッグモード（仕様書 第20.4.1節「デバッグモード」）: 聞き取った文・秘書の発話・道具に渡した文と答えを、1 回の発話ごとに記録に残す
+  const dbg = (title: string, detail?: unknown) => deps.debug?.add(tenantId, userId, 'voice', title, detail);
+  let heardTurn = '';
+  let replyTurn = '';
+  const flushHeard = () => {
+    if (heardTurn.trim()) dbg(`あなた（聞き取り）: ${heardTurn.trim()}`);
+    heardTurn = '';
+  };
+  const flushReply = () => {
+    if (replyTurn.trim()) dbg(`秘書（発話）: ${replyTurn.trim()}`);
+    replyTurn = '';
+  };
 
   /**
    * 対話が開くまでに届いた音。
@@ -248,7 +260,10 @@ async function start(
   };
 
   // 話している最中は伝えず、話し終わりを待つ（仕様書 第10.11.7節）
-  const gate = new TurnGate((note) => session?.sendSystemNote(note));
+  const gate = new TurnGate((note) => {
+    dbg(`音声の秘書へ伝えた指示: ${note.slice(0, 120)}`, { note });
+    session?.sendSystemNote(note);
+  });
 
   ws.on('message', (data: Buffer, isBinary: boolean) => {
     if (isBinary) {
@@ -311,12 +326,14 @@ async function start(
         switch (event.type) {
           case 'heard':
             add(heard, event.text);
+            if (deps.debug) heardTurn += event.text;
             send({ type: 'heard', text: event.text });
             break;
           case 'reply':
             // 応答が始まった＝話している。この間は割り込まない
             gate.startedSpeaking();
             add(replied, event.text);
+            if (deps.debug) { flushHeard(); replyTurn += event.text; }
             send({ type: 'reply', text: event.text });
             break;
           case 'audio':
@@ -324,15 +341,19 @@ async function start(
             if (ws.readyState === ws.OPEN) ws.send(event.pcm, { binary: true });
             break;
           case 'turn-end':
+            flushHeard();
+            flushReply();
             send({ type: 'turn-end' });
             // 待たせていたものを、ここで初めて伝える（第10.11.7節）
             gate.finishedSpeaking();
             break;
           case 'note':
             // 断り書き。会話ログには残さない（本人も秘書も言っていない）
+            dbg(`断り書き: ${event.text}`);
             send({ type: 'note', text: event.text });
             break;
           case 'closed':
+            dbg(`音声の対話が閉じました（${event.reason}）`);
             send({ type: 'closed', reason: event.reason });
             ws.close();
             break;
@@ -341,6 +362,7 @@ async function start(
     });
   } catch (err) {
     log.warn('音声の対話を開けませんでした', { err });
+    dbg('音声の対話を開けませんでした', { error: String(err) });
     send({ type: 'error', message: '音声の対話を始められませんでした。しばらくしてからお試しください' });
     ws.close();
     return;
@@ -367,6 +389,7 @@ async function start(
         last = { request: x.request, reply };
         const shown = !!x.text && needsCanvas({ text: x.text, evidence: [] }) !== null;
         if (shown) showOnCanvas(x.request, reply);
+        dbg(`調べものの結果を音声へ${shown ? '（画面にも出した）' : ''}: ${x.request}`, x);
         gate.tell(lookupNote(x, shown));
       }
     } catch (err) {
@@ -380,6 +403,7 @@ async function start(
   early = null;
 
   send({ type: 'ready', provider: provider.name, speak });
+  dbg(`音声の対話を始めました（${provider.name}・声で答える: ${speak ? 'はい' : 'いいえ'}）`);
   // 押したら、秘書から先に声をかける（仕様書 第6.1.4節）
   gate.tell(greetingNote(
     callMeOf(persona),
@@ -413,13 +437,16 @@ async function start(
       parameters: { request: { description: '本人の言葉（聞こえたとおり。言い換えない）' } },
       required: ['request'],
       run: async (args) => {
+        flushHeard();
         const request = (args['request'] ?? '').trim();
+        dbg(`道具 ask_secretary に渡した文: ${request || '（空）'}`, args);
         if (!request) return { error: '依頼の言葉がありません' };
         try {
           const reply = canvasReply(await deps.secretary.respond(tenantId, userId, request, undefined, { record: false }));
           last = { request, reply };
           const why = needsCanvas(reply);
           if (why) showOnCanvas(request, reply);
+          dbg(`道具 ask_secretary の答え（${reply.layer ?? ''}${why ? '・画面に出した' : ''}）: ${reply.text}`, reply);
           return {
             answer: reply.text,
             shown_on_screen: why !== null,
@@ -430,6 +457,7 @@ async function start(
           };
         } catch (err) {
           log.warn('音声からの取次に失敗しました', { err });
+          dbg('道具 ask_secretary が失敗しました', { error: String(err) });
           return { error: '処理できませんでした。画面の入力欄でもう一度お試しください' };
         }
       },
@@ -449,19 +477,24 @@ async function start(
       parameters: { request: { description: '画面に出してほしいもの（本人の言葉）。直前の答えなら空' } },
       required: [],
       run: async (args) => {
+        flushHeard();
         const request = (args['request'] ?? '').trim();
+        dbg(`道具 show_on_canvas に渡した文: ${request || '（空。直前の答えを出す）'}`, args);
         if (!request) {
           if (!last) return { error: '画面に出せる答えがまだありません。何を出すか尋ねてください' };
           showOnCanvas(last.request, last.reply);
+          dbg(`直前の答えを画面に出しました: ${last.reply.text}`, last);
           return { shown_on_screen: true };
         }
         try {
           const reply = canvasReply(await deps.secretary.respond(tenantId, userId, request, undefined, { record: false }));
           last = { request, reply };
           showOnCanvas(request, reply);
+          dbg(`道具 show_on_canvas の答え（${reply.layer ?? ''}・画面に出した）: ${reply.text}`, reply);
           return { answer: reply.text, shown_on_screen: true };
         } catch (err) {
           log.warn('音声から画面に出す取次に失敗しました', { err });
+          dbg('道具 show_on_canvas が失敗しました', { error: String(err) });
           return { error: '処理できませんでした。画面の入力欄でもう一度お試しください' };
         }
       },
@@ -471,6 +504,9 @@ async function start(
   /** 終わったときに、聞こえた文字と応答を会話ログへ残す（第11.9.4.1節）。 */
   async function finish(): Promise<void> {
     const seconds = Math.round((Date.now() - startedAt) / 1000);
+    flushHeard();
+    flushReply();
+    dbg(`音声の対話を終えました（${seconds} 秒）`);
     try {
       await deps.repo.appendAudit({
         id: randomUUID(), tenantId, actorType: 'user', actorId: userId,

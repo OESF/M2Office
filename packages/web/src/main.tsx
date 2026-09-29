@@ -14,6 +14,8 @@ import { MobileInventory } from './MobileInventory.js';
 import { api, ApiError, setUnauthorizedHandler, type Me } from './api.js';
 import './styles.css';
 import { applyTheme } from './theme.js';
+import { DebugOverlay } from './DebugPanel.js';
+import { setDebugMode } from './debug.js';
 
 // 読み込みの途中で明るさが変わらないよう、描画の前に反映する（仕様書 第6.1.2節）
 applyTheme();
@@ -33,7 +35,10 @@ function Root() {
 
   const load = useCallback(async () => {
     try {
-      setMe(await api.me());
+      const got = await api.me();
+      // デバッグモード（仕様書 第20.4.1節「デバッグモード」）。画面から呼んだ API を記録し始める
+      setDebugMode(!!got.debug);
+      setMe(got);
       // ログインの前に開こうとしていたページ（スマホ用の在庫のページなど）へ戻す（仕様書 第29.11.1節）
       const back = takeReturnPath();
       if (back && location.pathname === '/') history.replaceState(null, '', back);
@@ -62,18 +67,20 @@ function Root() {
     setMe(null);
     setState('login');
   };
+  // デバッグモードでは、どの画面にも上に「Debug mode」を出し、押すと記録を開く（仕様書 第20.4.1節「デバッグモード」）
+  const withDebug = (page: JSX.Element) => (me.debug ? <>{page}<DebugOverlay /></> : page);
   // スマホ用の在庫のページ（仕様書 第29.11.1節）。ワークスペースの枠（左のメニュー・秘書の欄）を出さない
-  if (location.pathname.startsWith('/m/inventory')) return <MobileInventory me={me} />;
+  if (location.pathname.startsWith('/m/inventory')) return withDebug(<MobileInventory me={me} />);
   if (location.pathname.startsWith('/board')) {
     // 権限の判定は API が行う。ここは案内だけ（仕様書 第6.7.2.1節）
     if (!me.user.roles.includes('admin')) {
       return <p className="error center">この画面は管理者だけが開けます。</p>;
     }
-    return <Board tenantName={me.tenant.name} />;
+    return withDebug(<Board tenantName={me.tenant.name} />);
   }
-  return location.pathname.startsWith('/admin')
+  return withDebug(location.pathname.startsWith('/admin')
     ? <Admin me={me} onLogout={logout} />
-    : <App me={me} onLogout={logout} />;
+    : <App me={me} onLogout={logout} />);
 }
 
 const root = document.getElementById('root');
