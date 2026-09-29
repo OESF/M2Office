@@ -127,10 +127,15 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
           if (mobileQr) { URL.revokeObjectURL(mobileQr); setMobileQr(null); return; }
           void api.inventory.mobileQrUrl().then(setMobileQr).catch((e) => setMessage(describeError(e, 'QR を作れませんでした')));
         }}>スマホで開く</button>
+        {/* 棚のラベルと場所は、ほかの操作と同じ並びに置く（一覧の下の小さな文字では見つけにくかった） */}
+        <button className="btn ghost" disabled={!list || list.locations.length === 0}
+          onClick={() => void api.inventory.downloadLabels().catch((e) => setMessage(describeError(e, 'ラベルを作れませんでした')))}>棚のラベルを印刷</button>
+        <button className={places ? 'btn' : 'btn ghost'} onClick={() => setPlaces(!places)}>場所（{list?.locations.length ?? 0}）</button>
         <input ref={picker} type="file" hidden accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           onChange={(e) => void importFile(e.target.files?.[0])} />
       </div>
       {message && <p className="small muted" role="status">{message}</p>}
+      {places && list && <Places locations={list.locations} admin={list.admin} onChanged={load} />}
       {mobileQr && (
         <div className="card inventory-new mobile-qr">
           <img src={mobileQr} alt="スマホ用の在庫のページを開く QR" width={180} height={180} />
@@ -169,9 +174,7 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
       )}
       <div className="row small inventory-foot">
         <label className="check"><input type="checkbox" checked={stopped} onChange={(e) => setStopped(e.target.checked)} /> 止めた品目も出す</label>
-        <button className="link" onClick={() => setPlaces(!places)}>{places ? '場所を閉じる' : `場所（${list?.locations.length ?? 0}）`}</button>
       </div>
-      {places && list && <Places locations={list.locations} admin={list.admin} onChanged={load} />}
     </div>
   );
 }
@@ -285,11 +288,6 @@ function Places({ locations, admin, onChanged }: { locations: InventoryLocation[
           </li>
         ))}
       </ul>
-      {locations.length > 0 && (
-        <div className="row wrap">
-          <button className="btn ghost small" onClick={() => void api.inventory.downloadLabels().catch((e) => setError(describeError(e, 'ラベルを作れませんでした')))}>ラベルを印刷</button>
-        </div>
-      )}
       <div className="row wrap">
         <input className="short" placeholder="倉庫" value={warehouse} onChange={(e) => setWarehouse(e.target.value)} aria-label="倉庫" />
         <input className="short" placeholder="棚" value={shelf} onChange={(e) => setShelf(e.target.value)} aria-label="棚" />
