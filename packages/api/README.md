@@ -175,6 +175,11 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/inventory/counts/:id/close` ／ `cancel` | 確定する（差を理由「棚卸し」の調整にし、数えていない行は 0 にしない）／ やめる。どちらも始めた人と管理者だけ（それ以外は 403） |
 | `GET /v1/inventory/counts/:id/export` | 棚卸しの結果を CSV で書き出す（監査ログに残す） |
 | `GET /v1/inventory/export` | 品目と数を書き出す（`format=csv` か `xlsx`。監査ログに残す） |
+| `GET /v1/inventory/bookings` | 今日（日本時間）から先の予約と取り置き・予約の日を過ぎた取り置き（`overdue`）・使う品目の分からない予約（`unmapped`）。予約との引き当てを切っている会社は 403（第29.13節） |
+| `POST /v1/inventory/bookings` | 取り置く（`itemId`・`qty`・`startsAt`・任意の `externalId`・`menu`）。使える数から引く |
+| `POST /v1/inventory/bookings/:id/use` ／ `cancel` | 予約の人が来た（取り置きを使用の記録にする）／ 取り消す（使える数に戻す） |
+| `POST /v1/inventory/menus` | メニューで使う品目を覚える（`menu`・`items`: itemId と qty。空なら在庫を使わない）。品目の分からない予約を取り置き直す |
+| `POST /v1/hooks/inventory/:key` | **認証なしの受け口**。予約のシステムの Webhook を受ける（第29.13.1節）。会社は鍵（32 文字）のハッシュから引き、ホスト名は見ない。64 KB を超えれば 413。知らない鍵・止めた受け口・引き当てを切った会社はどれも 404、予約として読めなければ 422。項目の対応は最初の予約から推論して受け口に覚える。予約した人の名前・連絡先は残さない |
 | `GET /v1/notices` | 本人宛ての有効な社内のお知らせ（取り下げ・期間切れ・本人が済んだものを除く。`isNew`・`daysLeft` つき。仕様書 第10.15節） |
 | `POST /v1/notices` | 社内のお知らせを出す（`title`・`body`・`link`（https だけ）・`all` か `groupIds`・`dueOn`・`until`）。会社の全員が出せる。承認は挟まない。201 |
 | `POST /v1/notices/:id/withdraw` | 取り下げる（出した人と管理者だけ。ほかの人は 403、ほかの会社のものは 404） |
@@ -216,6 +221,8 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/admin/extensions/:id/install` | 管理者: 同意して導入（本文に `consent: true`）。導入すると有効になる。同梱の接続は会社の接続として登録する（同じ ID が別の接続先で登録済みなら `notices` で知らせる） |
 | `PUT /v1/admin/extensions/:id/enabled` | 管理者: 有効・無効の切り替え（本文に `enabled`）。権限が増えた版は 409。内蔵の拡張（名刺管理・在庫管理）は会社の設定で入り切りし、データは消さない（導入と削除は 409。仕様書 第12.13節） |
 | `PUT /v1/admin/extensions/business-cards/settings` | 管理者: 名刺管理の、取り込んだ名刺の既定の範囲（`defaultScope`。第27.7節） |
+| `GET /v1/admin/extensions/inventory/booking-sources` ／ `POST` | 管理者: 予約の受け口の一覧 ／ 作る（`name`）。作ったときだけ送り先の URL（鍵を含む）を返す。鍵はハッシュだけを持つ |
+| `PUT /v1/admin/extensions/inventory/booking-sources/:id/status` ／ `mapping` | 管理者: 受け口を止める・再開する（`status`）／ 項目の対応を直す・やり直す（`mapping`。`null` で次の予約から推論し直す） |
 | `PUT /v1/admin/extensions/inventory/settings` | 管理者: 在庫管理の機能の入り切り（`features`）・残りわずかの既定の目安（`lowDefault`）・仕入れの日数（`leadDaysDefault`）・棚卸しの頻度（`countEveryDays`）。送った項目だけを変える（第29.4.1節） |
 | `GET /v1/admin/connections/mcp` | 管理者: 会社の接続（MCP）の一覧。道具ごとの危険度・有効かどうか・使っている業務、認証の状態（`authState`。秘密の値は返さない）、よく使うサービスの型（`presets`）（仕様書 第12.11節、ADR-0037・ADR-0044） |
 | `POST /v1/admin/connections/mcp` | 管理者: URL を受け取り、道具の一覧を取って会社の接続として登録する（読むだけの印が付いた道具は「読むだけ」、ほかは「社外へ送る」扱い）。`preset`（`slack`）で型から、`auth`（`oauth`・`api_key`）で認証の要る接続を登録する。認証の要る接続の道具は、認証情報のあとで取る |

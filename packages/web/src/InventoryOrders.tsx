@@ -1,5 +1,5 @@
 /**
- * @file 在庫管理のパソコンの画面の、発注の案・仕入先・納品書から入庫の欄（仕様書 第29.14節・第29.4.1節・第29.9節）。
+ * @file 在庫管理のパソコンの画面の、発注の案・仕入先・納品書から入庫・取り置きの欄（仕様書 第29.14節・第29.4.1節・第29.9節・第29.13節）。
  *
  * 発注の案は見張りの結果（無くなる見込みの早い順）を仕入先ごとにまとめ、数を直して発注を始められるようにする。
  * メールの仕入先は「発注の下書き」の業務がメールを作り、**本人が承認トレイで確かめたあとに送る**。
@@ -7,7 +7,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import type { InventoryItemView, InventorySupplier } from '@m2office/shared';
+import type { InventoryBooking, InventoryItemView, InventorySupplier } from '@m2office/shared';
 import { api, describeError, type InventoryForecastRow, type InventoryOrderResult, type InventorySlipResult } from './api.js';
 
 const METHOD_LABELS: Record<InventorySupplier['method'], string> = { mail: 'メール', web: 'Web', phone: '電話' };
@@ -216,6 +216,106 @@ export function SlipResultPanel({ result, items, onRecorded, onClose }: {
         </div>
       ))}
       <button className="btn ghost small" onClick={onClose}>閉じる</button>
+    </div>
+  );
+}
+
+/** 予約の日時の出し方（日本時間）。今年でなければ年も出す。 */
+function when(iso: string | null): string {
+  if (!iso) return '日時なし';
+  const d = new Date(iso);
+  const year = (x: Date) => x.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric' });
+  return d.toLocaleString('ja-JP', {
+    timeZone: 'Asia/Tokyo', ...(year(d) === year(new Date()) ? {} : { year: 'numeric' }), month: 'numeric', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit',
+  });
+}
+
+/**
+ * 取り置き（予約との引き当て。仕様書 第29.13節）。今日から先の予約と、日を過ぎた取り置き・品目の分からないメニュー。
+ * 画面で取り置き、予約の人が来たら「使った」、来なかったら「取り消し」を押す。
+ *
+ * @param onChanged 取り置き・使用のあと（一覧の使える数を読み直す）
+ */
+export function BookingsPanel({ items, onChanged }: { items: InventoryItemView[]; onChanged: () => void }) {
+  const [data, setData] = useState<{ bookings: InventoryBooking[]; overdue: InventoryBooking[]; unmapped: InventoryBooking[] } | null>(null);
+  const [draft, setDraft] = useState({ itemId: '', qty: '1', startsAt: '', externalId: '' });
+  const [teach, setTeach] = useState<Record<string, { itemId: string; qty: string }>>({});
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(() => {
+    api.inventory.bookings().then(setData).catch((e) => setError(describeError(e, '読み込めませんでした')));
+  }, []);
+  useEffect(load, [load]);
+  const act = async (fn: () => Promise<unknown>, fail: string) => {
+    try {
+      await fn();
+      setError(null);
+      load();
+      onChanged();
+    } catch (e) {
+      setError(describeError(e, fail));
+    }
+  };
+  if (!data) return <div className="card inventory-new">{error ?? '読み込んでいます…'}</div>;
+  const menus = [...new Set(data.unmapped.map((b) => b.menu))];
+  // 済んだ予約（使った・取り消し）は出さない
+  const upcoming = data.bookings.filter((b) => b.status === 'booked');
+  const row = (b: InventoryBooking, past = false) => {
+    const held = b.lines.filter((l) => l.status === 'held');
+    return (
+      <li key={b.id} className={`row booking ${past ? 'danger' : ''}`}>
+        <span className="grow small">
+          <strong>{when(b.startsAt)}</strong> 予約 {b.externalId}{b.menu ? `・${b.menu}` : ''}{b.sourceName ? <span className="muted">（{b.sourceName}）</span> : null}
+          <span className="muted"> {held.length ? held.map((l) => `${l.itemName ?? ''} ${l.qty} ${l.unit ?? ''}`).join('・') : b.mapped ? '在庫を使わない' : '品目が分かりません'}</span>
+        </span>
+        {held.length > 0 && <button className="btn small" onClick={() => void act(() => api.inventory.useBooking(b.id), '記録できませんでした')}>使った</button>}
+        {held.length > 0 && <button className="btn ghost small" onClick={() => void act(() => api.inventory.cancelBooking(b.id), '取り消せませんでした')}>取り消し</button>}
+      </li>
+    );
+  };
+  return (
+    <div className="card inventory-new bookings-panel">
+      {data.overdue.length > 0 && (
+        <>
+          <div className="order-head"><strong>予約の日を過ぎた取り置き</strong></div>
+          <ul className="plain">{data.overdue.map((b) => row(b, true))}</ul>
+        </>
+      )}
+      {menus.length > 0 && (
+        <>
+          <div className="order-head"><strong>使う品目の分からないメニュー</strong></div>
+          {menus.map((m) => {
+            const t = teach[m] ?? { itemId: '', qty: '1' };
+            return (
+              <div key={m} className="row wrap">
+                <span className="grow small">{m}</span>
+                <select value={t.itemId} onChange={(e) => setTeach((x) => ({ ...x, [m]: { ...t, itemId: e.target.value } }))} aria-label={`${m}で使う品目`}>
+                  <option value="">在庫を使わない</option>
+                  {items.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+                </select>
+                {t.itemId && <input className="num-input" type="number" min={1} value={t.qty} onChange={(e) => setTeach((x) => ({ ...x, [m]: { ...t, qty: e.target.value } }))} aria-label="数" />}
+                <button className="btn small" onClick={() => void act(() => api.inventory.teachMenu(m, t.itemId ? [{ itemId: t.itemId, qty: Number(t.qty) || 1 }] : []), '覚えられませんでした')}>覚える</button>
+              </div>
+            );
+          })}
+        </>
+      )}
+      <div className="order-head"><strong>これからの予約</strong></div>
+      {upcoming.length === 0 ? <p className="muted small">取り置きはありません</p> : <ul className="plain">{upcoming.map((b) => row(b))}</ul>}
+      <div className="row wrap">
+        <input type="datetime-local" value={draft.startsAt} onChange={(e) => setDraft({ ...draft, startsAt: e.target.value })} aria-label="予約の日時" />
+        <select value={draft.itemId} onChange={(e) => setDraft({ ...draft, itemId: e.target.value })} aria-label="取り置く品目">
+          <option value="">品目を選ぶ</option>
+          {items.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+        </select>
+        <input className="num-input" type="number" min={1} value={draft.qty} onChange={(e) => setDraft({ ...draft, qty: e.target.value })} aria-label="数" />
+        <input className="short" placeholder="予約番号" value={draft.externalId} onChange={(e) => setDraft({ ...draft, externalId: e.target.value })} aria-label="予約番号" />
+        <button className="btn small" disabled={!draft.itemId || !draft.startsAt}
+          onClick={() => void act(async () => {
+            await api.inventory.hold({ itemId: draft.itemId, qty: Number(draft.qty) || 1, startsAt: draft.startsAt, ...(draft.externalId ? { externalId: draft.externalId } : {}) });
+            setDraft({ itemId: '', qty: '1', startsAt: '', externalId: '' });
+          }, '取り置けませんでした')}>取り置く</button>
+      </div>
+      {error && <p className="error small">{error}</p>}
     </div>
   );
 }

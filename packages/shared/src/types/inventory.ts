@@ -195,3 +195,62 @@ export interface InventoryCountView {
   /** 差のある行の数。 */
   differing: number;
 }
+
+/** 予約の状態（第29.13節）。 */
+export type InventoryBookingStatus = 'booked' | 'cancelled' | 'visited';
+
+/**
+ * 予約の受け口の「型」（通知の項目の対応。第29.13.1節）。値はドットでつないだ項目の道（例: `data.reservation.id`）。
+ *
+ * @remarks 標準の形は `id`・`startsAt`・`menu`・`status`。違う形は、初めて届いた通知から AI が推測する
+ */
+export interface InventoryBookingMapping {
+  id: string;
+  startsAt: string;
+  /** 日付と時刻が別の項目のときの、時刻の項目（`startsAt` は日付の項目になる）。 */
+  startTime?: string;
+  menu: string;
+  /** 状態の項目。無ければ空（いつも「予約」として扱う）。 */
+  status: string;
+  /** 取り消しを表す値（小文字でくらべる）。 */
+  cancelledValues: string[];
+  /** 来店済みを表す値。 */
+  visitedValues: string[];
+}
+
+/** 予約の受け口。URL の鍵は持たない（作ったときに一度だけ見せる）。 */
+export interface InventoryBookingSource {
+  id: string;
+  name: string;
+  mapping: InventoryBookingMapping | null;
+  status: 'active' | 'stopped';
+  createdAt: string;
+  lastReceivedAt: string | null;
+}
+
+/** 引き当ての 1 行（品目と数）。 */
+export interface InventoryReservationLine {
+  id: string;
+  itemId: string;
+  itemName?: string;
+  unit?: string;
+  qty: number;
+  status: 'held' | 'used' | 'cancelled';
+}
+
+/** 予約と、その引き当て（第29.13節）。予約した人の情報は持たない。 */
+export interface InventoryBooking {
+  id: string;
+  /** 受け口の ID か `manual`（画面・秘書）。 */
+  sourceKey: string;
+  sourceName?: string;
+  /** 予約番号（予約のシステムの番号。手で入れたものは自動の番号）。 */
+  externalId: string;
+  startsAt: string | null;
+  menu: string;
+  status: InventoryBookingStatus;
+  /** 品目に結び付いたか（メニューから品目が決まらなければ false）。 */
+  mapped: boolean;
+  lines: InventoryReservationLine[];
+  updatedAt: string;
+}

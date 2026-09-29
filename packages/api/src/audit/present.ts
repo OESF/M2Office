@@ -126,6 +126,11 @@ const ACTION_LABELS: Record<string, string> = {
   'inventory.count.start': '棚卸しを始めた',
   'inventory.count.close': '棚卸しを確定した',
   'inventory.count.cancel': '棚卸しをやめた',
+  'inventory.booking_source.create': '予約の受け口を作った',
+  'inventory.booking_source.stop': '予約の受け口を止めた',
+  'inventory.booking_source.resume': '予約の受け口を動かした',
+  'inventory.booking_source.mapping': '予約の受け口の型を直した',
+  'inventory.menu.teach': '予約のメニューで使う品目を覚えさせた',
 };
 
 /** 操作の種類（絞り込みの単位）。`prefixes` のどれかで始まる操作が当たる。 */

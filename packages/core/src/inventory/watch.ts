@@ -12,6 +12,7 @@ import type { Repository } from '../repository/types.js';
 import { silentLogger, type Logger } from '../log/logger.js';
 import { dateIn } from '../cards/service.js';
 import type { InventoryService } from './service.js';
+import type { InventoryBookings } from './bookings.js';
 import { EXPIRY_NOTICE_DAYS, type ForecastRow } from './forecast.js';
 
 /** 知らせる相手を探す期間（日）。 */
@@ -21,6 +22,8 @@ const RECENT_DAYS = 30;
 export interface InventoryWatchDeps {
   repo: Repository;
   service: InventoryService;
+  /** 予約との引き当て（第29.13節）。あれば、日を過ぎた取り置きと品目の分からないメニューも毎朝知らせる。 */
+  bookings?: InventoryBookings;
   logger?: Logger;
 }
 
@@ -121,15 +124,28 @@ export class InventoryWatch {
     if (!settings.inventory.enabled) return 0;
     const rows = await this.deps.service.forecast(tenantId);
     const short = rows.filter((r) => r.runningOut || r.low);
+    // 予約との引き当て（第29.13節）: 日を過ぎても取り置いたままの予約と、使う品目の分からないメニュー
+    let overdue: string[] = [];
+    let unknownMenus: string[] = [];
+    if (this.deps.bookings && settings.inventory.features.reserve) {
+      const todayStart = new Date(Date.parse(`${dateIn('Asia/Tokyo', now)}T00:00:00+09:00`)).toISOString();
+      // 推論が一時的に使えず品目の分からないままのメニューを、知らせる前に推測し直す
+      await this.deps.bookings.retryUnmapped(tenantId, todayStart).catch((err) => this.log.warn('予約のメニューを推測し直せませんでした', { tenantId, error: String(err) }));
+      const att = await this.deps.bookings.attention(tenantId, todayStart);
+      overdue = att.overdue.slice(0, 20).map((b) => `予約 ${b.externalId}（${b.startsAt ? new Date(b.startsAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '日時なし'}）: ${b.lines.filter((l) => l.status === 'held').map((l) => `${l.itemName ?? ''} ${l.qty}`).join('・')}`);
+      unknownMenus = [...new Set(att.unmapped.map((b) => b.menu))].slice(0, 10);
+    }
     const expiring = rows.flatMap((r) => r.expiring
       .filter((e) => (EXPIRY_NOTICE_DAYS as readonly number[]).includes(e.days) || e.days === 0)
       .map((e) => `${r.name}${e.lot ? `（ロット ${e.lot}）` : ''}: ${qty(r, e.qty)}が${e.days === 0 ? '今日' : ` ${e.days} 日後`}に期限`));
-    if (short.length === 0 && expiring.length === 0) return 0;
+    if (short.length === 0 && expiring.length === 0 && overdue.length === 0 && unknownMenus.length === 0) return 0;
     const day = dateIn('Asia/Tokyo', now);
     const title = `在庫の見張り（${day.slice(5).replace('-', '/')}）`;
     const body = [
       ...(short.length ? ['■ 足りなくなりそうなもの', ...short.slice(0, 20).flatMap((r) => [statusLine(r), ...(proposalLine(r) ? [`  ${proposalLine(r)}`] : [])])] : []),
       ...(expiring.length ? ['■ 使用期限', ...expiring.slice(0, 20)] : []),
+      ...(overdue.length ? ['■ 予約の日を過ぎた取り置き（使った・取り消しを在庫管理の「取り置き」で）', ...overdue] : []),
+      ...(unknownMenus.length ? ['■ 使う品目の分からない予約のメニュー（秘書に「〇〇では△△を 1 つ使う」と伝えてください）', ...unknownMenus] : []),
     ].join('\n');
     let sent = 0;
     for (const u of await this.recipients(tenantId)) if (await this.notify(tenantId, u, title, body, now)) sent++;

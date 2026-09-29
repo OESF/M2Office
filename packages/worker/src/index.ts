@@ -11,7 +11,7 @@
 
 import {
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
-  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, InventoryService, InventoryWatch, PostgresInventoryStore, inventoryAccess, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention,
+  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, InventoryService, InventoryWatch, InventoryBookings, PostgresInventoryStore, inventoryAccess, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention,
   NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv,
   defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials,
@@ -89,11 +89,13 @@ const inventory = new InventoryService({
   // 秘書から頼まれた記録のあとも、見張りが見直す（第29.14節）
   onChanged: async (tenantId, itemIds) => inventoryWatch?.afterMoves(tenantId, itemIds),
 });
-inventoryWatch = new InventoryWatch({ repo, service: inventory, logger: log });
+// 予約との引き当て（第29.13節）。秘書から頼まれた取り置きと、毎朝の見直しが使う
+const inventoryBookings = new InventoryBookings({ store: inventory.store, service: inventory, repo, llm: (tenantId) => ai.llmFor(tenantId) });
+inventoryWatch = new InventoryWatch({ repo, service: inventory, bookings: inventoryBookings, logger: log });
 const engine = new RunEngine({
   repo, llm, registry, connector, files, resolveDefinition, isAvailable, logger: log, research, notices,
   cards: { store: contactStore, service: cards, access: cardsAccess(repo) },
-  inventory: { service: inventory, access: inventoryAccess(repo) },
+  inventory: { service: inventory, bookings: inventoryBookings, access: inventoryAccess(repo) },
   llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId),
   registryFor: async (tenantId) => (await hub.forTenant(tenantId)).registry,
   // 止めた実行に後から書き込まれた中身も消す（仕様書 第6.5.2.1節）

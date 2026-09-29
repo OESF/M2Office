@@ -12,11 +12,14 @@ import { loadFile } from '../files/service.js';
 import { MIME, type FileKind } from '../files/formats.js';
 import { formatQty, MOVE_KIND_LABELS, toDate, type InventoryService } from './service.js';
 import { readSlip } from './slip.js';
+import { toInstant, type InventoryBookings } from './bookings.js';
 import { proposalLine } from './watch.js';
 
 /** 道具に渡す在庫管理の文脈。 */
 export interface InventoryToolContext {
   service: InventoryService;
+  /** 予約との引き当て（第29.13節）。無ければ `inventory.reserve` は「使えない」と返す。 */
+  bookings?: InventoryBookings;
   /** 納品書を読み取る推論（その会社のもの）。無ければ `inventory.read_slip` は「使えない」と返す。 */
   llm?: () => Promise<LlmProvider>;
   /**
@@ -351,5 +354,79 @@ export const inventoryReceiveSlip: Tool = {
   },
 };
 
+/**
+ * 予約で品目を取り置く・取り消す・使ったにする。メニューで使う品目を覚える（第29.13節）。
+ *
+ * @remarks 危険度 `write-internal`。社内の引き当ての台帳に書くだけで、予約のシステムにも誰にも送らない。予約した人の情報は受け取らない
+ */
+export const inventoryReserve: Tool = {
+  name: 'inventory.reserve',
+  risk: 'write-internal',
+  activityLabel: '予約の取り置きをしています',
+  helpText: '予約に合わせて品目を取り置き（使える数だけを減らす）、取り消し・使ったにし、メニューで使う品目を覚えます。誰にも送りません',
+  description: [
+    'action=hold: 品目（item）を数（qty）だけ、予約の日時（when。ISO 8601 か「2026-09-30 10:00」の形。今日の日付から計算）に取り置く。予約番号（booking）があれば入れる。',
+    'action=cancel / use: 予約番号（booking）の取り置きを取り消す・使ったにする（使用の記録を足す）。',
+    'action=teach: 予約のメニュー（menu）で使う品目（item）と数（qty）を覚える。在庫を使わないメニューなら item を空にする。',
+    '予約した人の名前は入れない。',
+  ].join(''),
+  args: {
+    properties: {
+      action: { type: 'string', description: 'hold・cancel・use・teach', enum: ['hold', 'cancel', 'use', 'teach'] },
+      item: { type: 'string', description: '品目（品名・自社のコード・バーコード）' },
+      qty: { type: 'number', description: '数（使う単位）' },
+      when: { type: 'string', description: '予約の日時' },
+      booking: { type: 'string', description: '予約番号' },
+      menu: { type: 'string', description: '予約のメニュー（コース・施術・プラン）の名前' },
+    },
+    required: ['action'],
+  },
+  async invoke(args, ctx) {
+    const inv = await inventoryOf(ctx);
+    if (!inv || !ctx.inventory?.bookings) return UNAVAILABLE;
+    if (!inv.settings.features.reserve) return { done: false, reason: '予約との引き当てを使っていません（管理者ページの拡張機能の在庫管理で入れられます）' };
+    const bookings = ctx.inventory.bookings;
+    const action = str(args['action']);
+    const findItem = async (): Promise<{ item: InventoryItemView } | { candidates: string[] }> => {
+      const hit = await resolveItem(inv.service, ctx.tenantId, str(args['item']));
+      return 'item' in hit ? { item: hit.item } : { candidates: hit.candidates.map((c) => c.name) };
+    };
+    if (action === 'hold') {
+      const found = await findItem();
+      if (!('item' in found)) return { done: false, needsChoice: found.candidates.length > 0, candidates: found.candidates, note: '品目が 1 つに決まりません。どれか本人に尋ねてください' };
+      const qty = typeof args['qty'] === 'number' ? args['qty'] : Number(args['qty'] ?? 1);
+      const res = await bookings.hold(ctx.tenantId, ctx.userId, {
+        itemId: found.item.id, qty, startsAt: toInstant(str(args['when'])), externalId: str(args['booking']) || undefined,
+        menu: str(args['menu']) || undefined, source: 'secretary',
+      });
+      if ('error' in res) return { done: false, reason: res.error };
+      const [view] = (await inv.service.list(ctx.tenantId)).filter((i) => i.id === found.item.id);
+      return { done: true, booking: res.externalId, when: res.startsAt, item: found.item.name, qty: formatQty(found.item, qty), availableNow: view ? formatQty(view, view.available) : null };
+    }
+    if (action === 'cancel' || action === 'use') {
+      const ref = str(args['booking']);
+      const b = (await bookings.list(ctx.tenantId, { limit: 1000 })).find((x) => x.externalId === ref && x.status === 'booked');
+      if (!b) return { done: false, reason: `予約番号「${ref}」の取り置きが見つかりません` };
+      const res = action === 'use' ? await bookings.consume(ctx.tenantId, ctx.userId, b.id) : await bookings.cancel(ctx.tenantId, b.id);
+      if ('error' in res) return { done: false, reason: res.error };
+      return { done: true, booking: ref, action: action === 'use' ? '使った' : '取り消した' };
+    }
+    if (action === 'teach') {
+      const menu = str(args['menu']);
+      if (!menu) return { done: false, reason: 'メニューの名前を入れてください' };
+      if (!str(args['item'])) {
+        const n = await bookings.teachMenu(ctx.tenantId, ctx.userId, menu, []);
+        return { done: true, menu, note: '在庫を使わないメニューとして覚えました', applied: n };
+      }
+      const found = await findItem();
+      if (!('item' in found)) return { done: false, needsChoice: found.candidates.length > 0, candidates: found.candidates };
+      const qty = typeof args['qty'] === 'number' ? args['qty'] : Number(args['qty'] ?? 1);
+      const n = await bookings.teachMenu(ctx.tenantId, ctx.userId, menu, [{ itemId: found.item.id, qty: qty > 0 ? qty : 1 }]);
+      return { done: true, menu, item: found.item.name, qty, applied: n };
+    }
+    return { done: false, reason: 'action は hold・cancel・use・teach のどれかです' };
+  },
+};
+
 /** 在庫管理の道具。 */
-export const INVENTORY_TOOLS: Tool[] = [inventorySearch, inventoryHistory, inventoryMove, inventoryForecast, inventoryReadSlip, inventoryReceiveSlip];
+export const INVENTORY_TOOLS: Tool[] = [inventorySearch, inventoryHistory, inventoryMove, inventoryForecast, inventoryReadSlip, inventoryReceiveSlip, inventoryReserve];

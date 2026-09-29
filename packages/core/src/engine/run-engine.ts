@@ -34,6 +34,7 @@ import type { CardService } from '../cards/service.js';
 import type { ContactStore } from '../cards/store.js';
 import type { NoticeService } from '../notices/service.js';
 import type { InventoryService } from '../inventory/service.js';
+import type { InventoryBookings } from '../inventory/bookings.js';
 import { answerOfSteps } from '../memory/work.js';
 import { substituteArguments } from '../extensions/skill.js';
 import { AI_NOT_CONFIGURED_MESSAGE, aiAvailable } from '../llm/unconfigured.js';
@@ -106,6 +107,8 @@ export interface RunEngineDeps {
    */
   inventory?: {
     service: InventoryService;
+    /** 予約との引き当て（第29.13節）。道具 `inventory.reserve` に渡す。 */
+    bookings?: InventoryBookings;
     access(tenantId: string, userId: string): Promise<InventorySettings | null>;
   };
 }
@@ -810,6 +813,7 @@ export class RunEngine {
       ...(this.deps.inventory ? {
         inventory: {
           service: this.deps.inventory.service, access: () => this.deps.inventory!.access(run.tenantId, requestedBy),
+          ...(this.deps.inventory.bookings ? { bookings: this.deps.inventory.bookings } : {}),
           // 納品書の読み取り（第29.15節）。その会社の推論を使う
           ...(llm ? { llm: async () => llm } : {}),
         },

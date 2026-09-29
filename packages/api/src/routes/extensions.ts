@@ -17,6 +17,7 @@ import {
   type ExtensionEntry, type ExtensionPackage, type TenantExtensions,
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
+import { tenantOrigin } from '../tenant-origin.js';
 import { requireRole, type AppEnv } from '../middleware/tenant.js';
 import { parseScope, saveScope } from './access.js';
 
@@ -155,6 +156,48 @@ export function extensionsRoute(deps: AppDeps) {
       occurredAt: new Date().toISOString(),
     });
     return c.json({ ok: true, inventory: next });
+  });
+
+  /** 在庫管理の予約の受け口（第29.13.1節）。URL の鍵は返さない（作ったときに一度だけ返す）。 */
+  app.get(`/${INVENTORY_EXTENSION_ID}/booking-sources`, async (c) => {
+    const { tenant } = c.get('ctx');
+    return c.json({ sources: await deps.inventory.bookings.sources(tenant.id) });
+  });
+
+  /** 予約の受け口を作る。URL（鍵を含む）は、この応答で一度だけ返す。 */
+  app.post(`/${INVENTORY_EXTENSION_ID}/booking-sources`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const body = await c.req.json<{ name?: unknown }>().catch(() => ({ name: undefined }));
+    const res = await deps.inventory.bookings.createSource(tenant.id, user.id, typeof body.name === 'string' ? body.name : '');
+    if ('error' in res) return c.json({ error: res.error }, 400);
+    const url = `${tenantOrigin(c.req.header('origin'), c.req.header('host'))}/v1/hooks/inventory/${res.key}`;
+    return c.json({ source: res.source, url }, 201);
+  });
+
+  /** 予約の受け口を止める・動かす。 */
+  app.put(`/${INVENTORY_EXTENSION_ID}/booking-sources/:id/status`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const body = await c.req.json<{ status?: unknown }>().catch(() => ({ status: undefined }));
+    if (body.status !== 'active' && body.status !== 'stopped') return c.json({ error: 'status は active か stopped です' }, 400);
+    await deps.inventory.bookings.setSourceStatus(tenant.id, user.id, c.req.param('id'), body.status);
+    return c.json({ ok: true });
+  });
+
+  /** 予約の受け口の型（項目の対応）を直す。`null` なら、次の通知から AI が推測し直す。 */
+  app.put(`/${INVENTORY_EXTENSION_ID}/booking-sources/:id/mapping`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const body = await c.req.json<{ mapping?: unknown }>().catch(() => ({ mapping: undefined }));
+    const m = body.mapping as Record<string, unknown> | null | undefined;
+    if (m === undefined) return c.json({ error: 'mapping を入れてください（推測し直すなら null）' }, 400);
+    const s = (v: unknown) => (typeof v === 'string' ? v.trim().slice(0, 200) : '');
+    const list = (v: unknown) => (Array.isArray(v) ? v.map((x) => String(x).trim().toLowerCase()).filter(Boolean).slice(0, 10) : []);
+    const mapping = m === null ? null : {
+      id: s(m['id']), startsAt: s(m['startsAt']), ...(s(m['startTime']) ? { startTime: s(m['startTime']) } : {}), menu: s(m['menu']), status: s(m['status']),
+      cancelledValues: list(m['cancelledValues']), visitedValues: list(m['visitedValues']),
+    };
+    if (mapping && (!mapping.id || !mapping.startsAt)) return c.json({ error: '予約番号と日時の項目は必ず入れてください' }, 400);
+    await deps.inventory.bookings.setSourceMapping(tenant.id, user.id, c.req.param('id'), mapping);
+    return c.json({ ok: true });
   });
 
   /**

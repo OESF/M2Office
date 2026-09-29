@@ -326,7 +326,7 @@ export class Secretary {
         return this.delegate(tenantId, userId, message, order, '在庫を発注する依頼（送るのは承認のあと）', llm);
       }
       const record = enabled.find((a) => a.id === INVENTORY_RECORD.id);
-      if (invKind === 'record' && record) {
+      if ((invKind === 'record' || invKind === 'reserve') && record) {
         await this.audit(tenantId, userId, 'secretary.route', record.id);
         return this.delegate(tenantId, userId, message, record, '在庫を記録する依頼', llm);
       }

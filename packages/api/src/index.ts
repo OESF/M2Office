@@ -28,6 +28,7 @@ import { notificationsRoute } from './routes/notifications.js';
 import { schedulesRoute } from './routes/schedules.js';
 import { cardsRoute } from './routes/cards.js';
 import { inventoryRoute } from './routes/inventory.js';
+import { inventoryHooksRoute } from './routes/inventory-hooks.js';
 import { noticesRoute } from './routes/notices.js';
 import { adminRoute } from './routes/admin.js';
 import { mcpConnectionsRoute } from './routes/mcp-connections.js';
@@ -88,6 +89,8 @@ app.get('/health', (c) => c.json({ ok: true, service: 'api' }));
 // テナントの解決はすべてに、利用者の確認はログイン以外のすべてに掛ける
 // Google からの戻りは、テナントの判定とログインより前に受ける（state で照合する。仕様書 第14.3.3節）
 app.route('/v1/oauth', oauthCallbackRoute(deps));
+// 予約の受け口（第29.13.1節）。予約のシステムがログインの無いまま呼ぶ。URL の鍵から会社を引くため、会社の判定より前に置く
+app.route('/v1/hooks/inventory', inventoryHooksRoute(deps));
 app.use('/v1/*', resolveTenant(deps));
 app.route('/v1/auth', authRoute(deps));
 app.use('/v1/*', async (c, next) =>

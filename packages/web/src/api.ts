@@ -12,6 +12,7 @@ import type {
   TenantSettings, User, UserSettings, CardFields, Contact, ContactScope,
   InventoryItem, InventoryItemView, InventoryLocation, InventoryMove, InventoryMoveKind, InventorySettings, InventoryStockRow,
   InventoryCount, InventoryCountRow, InventoryCountScope, InventoryCountView, InventorySupplier,
+  InventoryBooking, InventoryBookingMapping, InventoryBookingSource,
 } from '@m2office/shared';
 
 /**
@@ -929,6 +930,18 @@ export const api = {
       if (!blob) throw new ApiError('ラベルを作れませんでした', 404);
       saveBlob(blob, '棚のラベル.pdf');
     },
+    /** 予約との引き当て（仕様書 第29.13節）。今日から先の予約と、日を過ぎた取り置き・品目の分からない予約。 */
+    bookings: () => call<{ bookings: InventoryBooking[]; overdue: InventoryBooking[]; unmapped: InventoryBooking[] }>('/inventory/bookings'),
+    /** 画面で取り置く。 */
+    hold: (b: { itemId: string; qty: number; startsAt: string; externalId?: string; menu?: string }) =>
+      call<{ booking: InventoryBooking }>('/inventory/bookings', { method: 'POST', body: JSON.stringify(b) }),
+    /** 予約で使った（取り置きを使用の記録にする）。 */
+    useBooking: (id: string) => call<{ booking: InventoryBooking }>(`/inventory/bookings/${encodeURIComponent(id)}/use`, { method: 'POST' }),
+    /** 予約の取り置きを取り消す。 */
+    cancelBooking: (id: string) => call<{ booking: InventoryBooking }>(`/inventory/bookings/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
+    /** メニューで使う品目を覚えさせる（`items` が空なら在庫を使わない）。 */
+    teachMenu: (menu: string, items: { itemId: string; qty: number }[]) =>
+      call<{ ok: true; applied: number }>('/inventory/menus', { method: 'POST', body: JSON.stringify({ menu, items }) }),
     /** 仕入先（仕様書 第29.4.1節）。 */
     suppliers: () => call<{ suppliers: InventorySupplier[] }>('/inventory/suppliers'),
     /** 仕入先を足す（`id` があれば直す）。 */
@@ -1157,6 +1170,16 @@ export const api = {
     /** 名刺管理の、取り込んだ名刺の既定の範囲（仕様書 第27.7節）。 */
     setCardsDefaultScope: (defaultScope: ContactScope) =>
       call<{ ok: true }>('/admin/extensions/business-cards/settings', { method: 'PUT', body: JSON.stringify({ defaultScope }) }),
+    /** 在庫管理の予約の受け口（仕様書 第29.13.1節）。 */
+    bookingSources: () => call<{ sources: InventoryBookingSource[] }>('/admin/extensions/inventory/booking-sources'),
+    /** 予約の受け口を作る。URL（鍵を含む）はこの応答で一度だけ返る。 */
+    createBookingSource: (name: string) =>
+      call<{ source: InventoryBookingSource; url: string }>('/admin/extensions/inventory/booking-sources', { method: 'POST', body: JSON.stringify({ name }) }),
+    setBookingSourceStatus: (id: string, status: 'active' | 'stopped') =>
+      call<{ ok: true }>(`/admin/extensions/inventory/booking-sources/${encodeURIComponent(id)}/status`, { method: 'PUT', body: JSON.stringify({ status }) }),
+    /** 受け口の型を直す（`null` なら次の通知から AI が推測し直す）。 */
+    setBookingSourceMapping: (id: string, mapping: InventoryBookingMapping | null) =>
+      call<{ ok: true }>(`/admin/extensions/inventory/booking-sources/${encodeURIComponent(id)}/mapping`, { method: 'PUT', body: JSON.stringify({ mapping }) }),
     /** 在庫管理の、機能の入り切りと既定の目安（仕様書 第29.4.1節）。送った項目だけを変える。 */
     setInventorySettings: (patch: Partial<InventorySettings>) =>
       call<{ ok: true; inventory: InventorySettings }>('/admin/extensions/inventory/settings', { method: 'PUT', body: JSON.stringify(patch) }),

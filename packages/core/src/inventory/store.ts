@@ -5,9 +5,11 @@
  * 会社の境界はデータベースの行単位の制限でも効く（移行 038）。在庫は会社で共有する。
  */
 
+import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import type {
-  InventoryCount, InventoryItem, InventoryLocation, InventoryMove, InventoryMoveKind, InventorySupplier,
+  InventoryBooking, InventoryBookingMapping, InventoryBookingSource, InventoryBookingStatus, InventoryCount, InventoryItem,
+  InventoryLocation, InventoryMove, InventoryMoveKind, InventoryReservationLine, InventorySupplier,
 } from '@m2office/shared';
 
 /** 置き場に渡す品目（バーコードは別に持つ）。 */
@@ -80,6 +82,51 @@ export interface CountEntry {
   at: string;
 }
 
+/** 予約を足す・直すときの値（出どころ＋予約番号で 1 件）。 */
+export interface BookingRecord {
+  id: string;
+  sourceKey: string;
+  externalId: string;
+  startsAt: string | null;
+  menu: string;
+  status: InventoryBookingStatus;
+  mapped: boolean;
+  at: string;
+}
+
+/** 引き当てを足すときの値。 */
+export interface ReservationRecord {
+  id: string;
+  bookingId: string;
+  itemId: string;
+  qty: number;
+  bookingRef: string;
+  bookedAt: string | null;
+  source: 'screen' | 'secretary' | 'service';
+  createdBy: string;
+  at: string;
+}
+
+/** メニューと品目の対応の 1 行。`itemId` が `null` なら「在庫を使わないメニュー」。 */
+export interface MenuItemRecord {
+  itemId: string | null;
+  qty: number;
+  learnedBy: 'ai' | 'user';
+}
+
+/** 予約の探し方。 */
+export interface BookingQuery {
+  /** この時刻以降に始まる（ISO 8601）。 */
+  from?: string;
+  /** この時刻より前に始まる。 */
+  to?: string;
+  status?: InventoryBookingStatus;
+  /** 品目に結び付いていないものだけ。 */
+  unmappedOnly?: boolean;
+  menuKey?: string;
+  limit?: number;
+}
+
 /** 入出庫の記録の探し方。 */
 export interface MoveQuery {
   itemId?: string;
@@ -142,6 +189,25 @@ export interface InventoryStore {
   addCountLine(tenantId: string, entry: CountEntry): Promise<CountLineRecord>;
   listCountLines(tenantId: string, countId: string): Promise<CountLineRecord[]>;
   setCountStatus(tenantId: string, id: string, status: 'closed' | 'cancelled', userId: string, at: string): Promise<void>;
+
+  // ---- 予約との引き当て（第29.13節） ----
+  listBookingSources(tenantId: string): Promise<InventoryBookingSource[]>;
+  createBookingSource(tenantId: string, s: { id: string; name: string; hookHash: string; createdBy: string; at: string }): Promise<void>;
+  updateBookingSource(tenantId: string, id: string, patch: { mapping?: InventoryBookingMapping | null; status?: 'active' | 'stopped'; lastReceivedAt?: string }): Promise<void>;
+  /** 鍵のハッシュから受け口を引く（会社の判定より前。会社をまたいで 1 行だけ）。 */
+  findBookingSourceByHash(hookHash: string): Promise<{ id: string; tenantId: string; status: 'active' | 'stopped' } | null>;
+  /** 予約を足すか直す（出どころ＋予約番号で 1 件）。直したときは元の ID を返す。 */
+  upsertBooking(tenantId: string, b: BookingRecord): Promise<string>;
+  getBooking(tenantId: string, id: string): Promise<InventoryBooking | null>;
+  listBookings(tenantId: string, q: BookingQuery): Promise<InventoryBooking[]>;
+  updateBooking(tenantId: string, id: string, patch: { status?: InventoryBookingStatus; mapped?: boolean; startsAt?: string | null; at: string }): Promise<void>;
+  addReservation(tenantId: string, r: ReservationRecord): Promise<void>;
+  setReservationStatus(tenantId: string, id: string, status: 'used' | 'cancelled', at: string): Promise<void>;
+  /** 予約の引き当ての日時をそろえる（予約の日時が変わったとき）。 */
+  setReservationTime(tenantId: string, bookingId: string, bookedAt: string | null): Promise<void>;
+  listMenuItems(tenantId: string, menuKey: string): Promise<MenuItemRecord[]>;
+  /** メニューの対応を置き換える。 */
+  setMenuItems(tenantId: string, menuKey: string, rows: MenuItemRecord[], at: string): Promise<void>;
 }
 
 // ---- PostgreSQL ----------------------------------------------------------
@@ -478,6 +544,122 @@ export class PostgresInventoryStore implements InventoryStore {
       `update inventory_counts set status = $3, closed_by = $4, closed_at = $5 where tenant_id = $1 and id = $2 and status = 'open'`,
       [tenantId, id, status, userId, at]);
   }
+  async listBookingSources(tenantId: string): Promise<InventoryBookingSource[]> {
+    const rows = await this.q<{ id: string; name: string; mapping: InventoryBookingMapping | null; status: 'active' | 'stopped'; created_at: unknown; last_received_at: unknown }>(
+      tenantId, `select id, name, mapping, status, created_at, last_received_at from inventory_booking_sources where tenant_id = $1 order by created_at`, [tenantId]);
+    return rows.map((r) => ({ id: r.id, name: r.name, mapping: r.mapping, status: r.status, createdAt: iso(r.created_at), lastReceivedAt: r.last_received_at ? iso(r.last_received_at) : null }));
+  }
+
+  async createBookingSource(tenantId: string, s: { id: string; name: string; hookHash: string; createdBy: string; at: string }): Promise<void> {
+    await this.q(tenantId,
+      `insert into inventory_booking_sources (id, tenant_id, name, hook_hash, created_by, created_at) values ($1,$2,$3,$4,$5,$6)`,
+      [s.id, tenantId, s.name, s.hookHash, s.createdBy, s.at]);
+  }
+
+  async updateBookingSource(tenantId: string, id: string, patch: { mapping?: InventoryBookingMapping | null; status?: 'active' | 'stopped'; lastReceivedAt?: string }): Promise<void> {
+    const sets: string[] = [];
+    const params: unknown[] = [tenantId, id];
+    if (patch.mapping !== undefined) { params.push(patch.mapping === null ? null : JSON.stringify(patch.mapping)); sets.push(`mapping = $${params.length}`); }
+    if (patch.status) { params.push(patch.status); sets.push(`status = $${params.length}`); }
+    if (patch.lastReceivedAt) { params.push(patch.lastReceivedAt); sets.push(`last_received_at = $${params.length}`); }
+    if (sets.length === 0) return;
+    await this.q(tenantId, `update inventory_booking_sources set ${sets.join(', ')} where tenant_id = $1 and id = $2`, params);
+  }
+
+  async findBookingSourceByHash(hookHash: string): Promise<{ id: string; tenantId: string; status: 'active' | 'stopped' } | null> {
+    // 会社の判定より前に呼ぶ。鍵のハッシュで 1 行だけ返す関数を使う（移行 040）
+    const client = await this.pool.connect();
+    try {
+      const { rows } = await client.query<{ id: string; tenant_id: string; status: 'active' | 'stopped' }>(
+        'select id, tenant_id, status from m2o_inventory_booking_source($1)', [hookHash]);
+      const r = rows[0];
+      return r ? { id: r.id, tenantId: r.tenant_id, status: r.status } : null;
+    } finally {
+      client.release();
+    }
+  }
+
+  async upsertBooking(tenantId: string, b: BookingRecord): Promise<string> {
+    const rows = await this.q<{ id: string }>(tenantId,
+      `insert into inventory_bookings (id, tenant_id, source_key, external_id, starts_at, menu, status, mapped, created_at, updated_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9)
+       on conflict (tenant_id, source_key, external_id) do update set starts_at = excluded.starts_at, menu = excluded.menu,
+         status = excluded.status, updated_at = excluded.updated_at
+       returning id`, [b.id, tenantId, b.sourceKey, b.externalId, b.startsAt, b.menu, b.status, b.mapped, b.at]);
+    return rows[0]!.id;
+  }
+
+  private async bookingsWhere(tenantId: string, where: string, params: unknown[], limit: number): Promise<InventoryBooking[]> {
+    const rows = await this.q<{ id: string; source_key: string; source_name: string | null; external_id: string; starts_at: unknown; menu: string; status: InventoryBookingStatus; mapped: boolean; updated_at: unknown }>(tenantId,
+      `select b.*, s.name as source_name from inventory_bookings b left join inventory_booking_sources s on s.id = b.source_key
+        where b.tenant_id = $1 ${where} order by b.starts_at nulls last, b.created_at limit ${Math.min(limit, 1000)}`, [tenantId, ...params]);
+    if (rows.length === 0) return [];
+    const lines = await this.q<{ id: string; booking_id: string; item_id: string; item_name: string; unit: string; qty: unknown; status: InventoryReservationLine['status'] }>(tenantId,
+      `select r.id, r.booking_id, r.item_id, i.name as item_name, i.unit, r.qty, r.status from inventory_reservations r
+         join inventory_items i on i.id = r.item_id where r.tenant_id = $1 and r.booking_id = any($2::text[]) order by r.created_at`,
+      [tenantId, rows.map((r) => r.id)]);
+    return rows.map((r) => ({
+      id: r.id, sourceKey: r.source_key, sourceName: r.source_name ?? undefined, externalId: r.external_id,
+      startsAt: r.starts_at ? iso(r.starts_at) : null, menu: r.menu, status: r.status, mapped: r.mapped, updatedAt: iso(r.updated_at),
+      lines: lines.filter((l) => l.booking_id === r.id).map((l) => ({ id: l.id, itemId: l.item_id, itemName: l.item_name, unit: l.unit, qty: num(l.qty), status: l.status })),
+    }));
+  }
+
+  async getBooking(tenantId: string, id: string): Promise<InventoryBooking | null> {
+    return (await this.bookingsWhere(tenantId, 'and b.id = $2', [id], 1))[0] ?? null;
+  }
+
+  async listBookings(tenantId: string, q: BookingQuery): Promise<InventoryBooking[]> {
+    const params: unknown[] = [];
+    const where: string[] = [];
+    const add = (sql: string, v: unknown) => { params.push(v); where.push(sql.replace('?', `$${params.length + 1}`)); };
+    if (q.from) add('and b.starts_at >= ?', q.from);
+    if (q.to) add('and b.starts_at < ?', q.to);
+    if (q.status) add('and b.status = ?', q.status);
+    if (q.menuKey !== undefined) add('and lower(b.menu) = ?', q.menuKey);
+    if (q.unmappedOnly) where.push('and b.mapped = false');
+    return this.bookingsWhere(tenantId, where.join(' '), params, q.limit ?? 200);
+  }
+
+  async updateBooking(tenantId: string, id: string, patch: { status?: InventoryBookingStatus; mapped?: boolean; startsAt?: string | null; at: string }): Promise<void> {
+    const sets = ['updated_at = $3'];
+    const params: unknown[] = [tenantId, id, patch.at];
+    if (patch.status) { params.push(patch.status); sets.push(`status = $${params.length}`); }
+    if (patch.mapped !== undefined) { params.push(patch.mapped); sets.push(`mapped = $${params.length}`); }
+    if (patch.startsAt !== undefined) { params.push(patch.startsAt); sets.push(`starts_at = $${params.length}`); }
+    await this.q(tenantId, `update inventory_bookings set ${sets.join(', ')} where tenant_id = $1 and id = $2`, params);
+  }
+
+  async addReservation(tenantId: string, r: ReservationRecord): Promise<void> {
+    await this.q(tenantId,
+      `insert into inventory_reservations (id, tenant_id, item_id, qty, booking_ref, booked_at, status, source, created_by, created_at, booking_id)
+       values ($1,$2,$3,$4,$5,$6,'held',$7,$8,$9,$10)`,
+      [r.id, tenantId, r.itemId, r.qty, r.bookingRef, r.bookedAt, r.source, r.createdBy, r.at, r.bookingId]);
+  }
+
+  async setReservationStatus(tenantId: string, id: string, status: 'used' | 'cancelled', at: string): Promise<void> {
+    await this.q(tenantId, `update inventory_reservations set status = $3, closed_at = $4 where tenant_id = $1 and id = $2 and status = 'held'`, [tenantId, id, status, at]);
+  }
+
+  async setReservationTime(tenantId: string, bookingId: string, bookedAt: string | null): Promise<void> {
+    await this.q(tenantId, `update inventory_reservations set booked_at = $3 where tenant_id = $1 and booking_id = $2 and status = 'held'`, [tenantId, bookingId, bookedAt]);
+  }
+
+  async listMenuItems(tenantId: string, menuKey: string): Promise<MenuItemRecord[]> {
+    const rows = await this.q<{ item_id: string | null; qty: unknown; learned_by: 'ai' | 'user' }>(tenantId,
+      `select item_id, qty, learned_by from inventory_menu_items where tenant_id = $1 and menu_key = $2`, [tenantId, menuKey]);
+    return rows.map((r) => ({ itemId: r.item_id, qty: num(r.qty), learnedBy: r.learned_by }));
+  }
+
+  async setMenuItems(tenantId: string, menuKey: string, rows: MenuItemRecord[], at: string): Promise<void> {
+    await this.tx(tenantId, async (c) => {
+      await c.query(`delete from inventory_menu_items where tenant_id = $1 and menu_key = $2`, [tenantId, menuKey]);
+      for (const r of rows) {
+        await c.query(`insert into inventory_menu_items (id, tenant_id, menu_key, item_id, qty, learned_by, updated_at) values ($1,$2,$3,$4,$5,$6,$7)`,
+          [randomUUID(), tenantId, menuKey, r.itemId, r.qty, r.learnedBy, at]);
+      }
+    });
+  }
 }
 
 // ---- メモリ（自動テスト用） ----------------------------------------------
@@ -585,7 +767,9 @@ export class MemoryInventoryStore implements InventoryStore {
   }
 
   async heldByItem(tenantId: string): Promise<Map<string, number>> {
-    return new Map([...this.held].filter(([k]) => k.startsWith(`${tenantId}\u0000`)).map(([k, v]) => [k.split('\u0000')[1]!, v]));
+    const out = new Map([...this.held].filter(([k]) => k.startsWith(`${tenantId}\u0000`)).map(([k, v]) => [k.split('\u0000')[1]!, v]));
+    for (const r of this.reservations.values()) if (r.tenantId === tenantId && r.status === 'held') out.set(r.itemId, (out.get(r.itemId) ?? 0) + r.qty);
+    return out;
   }
 
   async applyMoves(tenantId: string, moves: NewMove[]): Promise<void> {
@@ -683,5 +867,94 @@ export class MemoryInventoryStore implements InventoryStore {
   async setCountStatus(tenantId: string, id: string, status: 'closed' | 'cancelled', userId: string, at: string): Promise<void> {
     const c = this.counts.get(id);
     if (c && c.tenantId === tenantId && c.status === 'open') Object.assign(c, { status, closedBy: userId, closedAt: at });
+  }
+  readonly bookingSources = new Map<string, InventoryBookingSource & { tenantId: string; hookHash: string }>();
+  readonly bookings = new Map<string, Omit<BookingRecord, 'at'> & { tenantId: string; updatedAt: string }>();
+  readonly reservations = new Map<string, ReservationRecord & { tenantId: string; status: InventoryReservationLine['status'] }>();
+  readonly menuItems = new Map<string, MenuItemRecord[]>();
+
+  async listBookingSources(tenantId: string): Promise<InventoryBookingSource[]> {
+    return [...this.bookingSources.values()].filter((s) => s.tenantId === tenantId).map(({ tenantId: _t, hookHash: _h, ...s }) => s);
+  }
+
+  async createBookingSource(tenantId: string, s: { id: string; name: string; hookHash: string; createdBy: string; at: string }): Promise<void> {
+    this.bookingSources.set(s.id, { id: s.id, name: s.name, mapping: null, status: 'active', createdAt: s.at, lastReceivedAt: null, tenantId, hookHash: s.hookHash });
+  }
+
+  async updateBookingSource(tenantId: string, id: string, patch: { mapping?: InventoryBookingMapping | null; status?: 'active' | 'stopped'; lastReceivedAt?: string }): Promise<void> {
+    const s = this.bookingSources.get(id);
+    if (!s || s.tenantId !== tenantId) return;
+    if (patch.mapping !== undefined) s.mapping = patch.mapping;
+    if (patch.status) s.status = patch.status;
+    if (patch.lastReceivedAt) s.lastReceivedAt = patch.lastReceivedAt;
+  }
+
+  async findBookingSourceByHash(hookHash: string): Promise<{ id: string; tenantId: string; status: 'active' | 'stopped' } | null> {
+    const s = [...this.bookingSources.values()].find((x) => x.hookHash === hookHash);
+    return s ? { id: s.id, tenantId: s.tenantId, status: s.status } : null;
+  }
+
+  async upsertBooking(tenantId: string, b: BookingRecord): Promise<string> {
+    const cur = [...this.bookings.values()].find((x) => x.tenantId === tenantId && x.sourceKey === b.sourceKey && x.externalId === b.externalId);
+    if (cur) {
+      Object.assign(cur, { startsAt: b.startsAt, menu: b.menu, status: b.status, updatedAt: b.at });
+      return cur.id;
+    }
+    const { at, ...rest } = b;
+    this.bookings.set(b.id, { ...rest, tenantId, updatedAt: at });
+    return b.id;
+  }
+
+  private viewBooking(b: Omit<BookingRecord, 'at'> & { tenantId: string; updatedAt: string }): InventoryBooking {
+    const src = this.bookingSources.get(b.sourceKey);
+    return {
+      id: b.id, sourceKey: b.sourceKey, sourceName: src?.name, externalId: b.externalId, startsAt: b.startsAt, menu: b.menu,
+      status: b.status, mapped: b.mapped, updatedAt: b.updatedAt,
+      lines: [...this.reservations.values()].filter((r) => r.tenantId === b.tenantId && r.bookingId === b.id)
+        .map((r) => ({ id: r.id, itemId: r.itemId, itemName: this.items.get(r.itemId)?.name, unit: this.items.get(r.itemId)?.unit, qty: r.qty, status: r.status })),
+    };
+  }
+
+  async getBooking(tenantId: string, id: string): Promise<InventoryBooking | null> {
+    const b = this.bookings.get(id);
+    return b && b.tenantId === tenantId ? this.viewBooking(b) : null;
+  }
+
+  async listBookings(tenantId: string, q: BookingQuery): Promise<InventoryBooking[]> {
+    return [...this.bookings.values()]
+      .filter((b) => b.tenantId === tenantId && (!q.from || (b.startsAt ?? '') >= q.from) && (!q.to || (b.startsAt !== null && b.startsAt < q.to))
+        && (!q.status || b.status === q.status) && (!q.unmappedOnly || !b.mapped) && (q.menuKey === undefined || b.menu.toLowerCase() === q.menuKey))
+      .sort((a, b) => (a.startsAt ?? '9999').localeCompare(b.startsAt ?? '9999'))
+      .slice(0, q.limit ?? 200).map((b) => this.viewBooking(b));
+  }
+
+  async updateBooking(tenantId: string, id: string, patch: { status?: InventoryBookingStatus; mapped?: boolean; startsAt?: string | null; at: string }): Promise<void> {
+    const b = this.bookings.get(id);
+    if (!b || b.tenantId !== tenantId) return;
+    if (patch.status) b.status = patch.status;
+    if (patch.mapped !== undefined) b.mapped = patch.mapped;
+    if (patch.startsAt !== undefined) b.startsAt = patch.startsAt;
+    b.updatedAt = patch.at;
+  }
+
+  async addReservation(tenantId: string, r: ReservationRecord): Promise<void> {
+    this.reservations.set(r.id, { ...r, tenantId, status: 'held' });
+  }
+
+  async setReservationStatus(tenantId: string, id: string, status: 'used' | 'cancelled'): Promise<void> {
+    const r = this.reservations.get(id);
+    if (r && r.tenantId === tenantId && r.status === 'held') r.status = status;
+  }
+
+  async setReservationTime(tenantId: string, bookingId: string, bookedAt: string | null): Promise<void> {
+    for (const r of this.reservations.values()) if (r.tenantId === tenantId && r.bookingId === bookingId && r.status === 'held') r.bookedAt = bookedAt;
+  }
+
+  async listMenuItems(tenantId: string, menuKey: string): Promise<MenuItemRecord[]> {
+    return [...(this.menuItems.get(`${tenantId}\u0000${menuKey}`) ?? [])];
+  }
+
+  async setMenuItems(tenantId: string, menuKey: string, rows: MenuItemRecord[]): Promise<void> {
+    this.menuItems.set(`${tenantId}\u0000${menuKey}`, [...rows]);
   }
 }

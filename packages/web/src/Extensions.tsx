@@ -10,7 +10,7 @@
 
 import { useEffect, useRef, useState, type DragEvent } from 'react';
 import { api, ApiError, describeError, type AccessOptions, type ExtensionView, type ScopeValue } from './api.js';
-import { INVENTORY_FEATURES, type InventoryFeature, type InventorySettings } from '@m2office/shared';
+import { INVENTORY_FEATURES, type InventoryBookingSource, type InventoryFeature, type InventorySettings } from '@m2office/shared';
 import { HelpTip, Markdown } from './help.js';
 import { ScopeEditor, ScopeField, useAccessOptions } from './Scope.js';
 
@@ -326,11 +326,11 @@ function Consent({ item: x, busy, options, onAgree, onCancel }: {
 }
 
 /**
- * 画面で入り切りできる在庫管理の機能。公開・引き当て・発注の案は、その段を作ったときに足す（仕様書 第24.4節）。
+ * 画面で入り切りできる在庫管理の機能。Web への公開は、その段を作ったときに足す（仕様書 第24.4節）。
  *
  * @remarks 働かない機能のスイッチを出さない（入れても何も起きないと、管理者を惑わせるため）
  */
-const INVENTORY_READY: InventoryFeature[] = ['lots', 'units'];
+const INVENTORY_READY: InventoryFeature[] = ['lots', 'units', 'order', 'reserve'];
 
 /**
  * 在庫管理の会社の設定（仕様書 第29.4節・第29.4.1節）。機能の入り切りと、残りわずか・仕入れの日数の既定。すぐに反映する。
@@ -362,6 +362,53 @@ function InventoryFields({ settings, busy, onChanged }: { settings: InventorySet
         <label>仕入れにかかる日数 <input type="number" min={0} className="num" value={lead} onChange={(e) => setLead(e.target.value)}
           onBlur={() => saveNumber(lead, 'leadDaysDefault', settings.leadDaysDefault)} /> 日</label>
       </div>
+      {settings.features.reserve && <BookingSources />}
+    </div>
+  );
+}
+
+/** 受け取った日時の出し方。 */
+const receivedAt = (iso: string | null) =>
+  iso ? `${new Date(iso).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}に受信` : 'まだ受信していません';
+
+/**
+ * 予約の受け口（仕様書 第29.13.1節）。予約のシステムの Webhook の送り先を作る。URL は作ったときに一度だけ出す。
+ * 項目の対応（型）は最初の予約から AI が推論するので、人は設定しない。推論が違っていたら「型をやり直す」で次の予約から推論し直す。
+ */
+function BookingSources() {
+  const [sources, setSources] = useState<InventoryBookingSource[] | null>(null);
+  const [name, setName] = useState('');
+  const [created, setCreated] = useState<{ name: string; url: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const load = () => void api.admin.bookingSources().then((r) => setSources(r.sources)).catch((e) => setError(describeError(e, '読み込めませんでした')));
+  useEffect(load, []);
+  const act = (fn: () => Promise<unknown>) => void fn().then(() => { setError(null); load(); }).catch((e) => setError(describeError(e, '変更できませんでした')));
+  return (
+    <div className="booking-sources">
+      <strong>予約の受け口</strong>
+      {sources?.map((s) => (
+        <div key={s.id} className="row wrap">
+          <span className="grow">{s.name}<span className="muted">（{s.status === 'stopped' ? '止めています' : receivedAt(s.lastReceivedAt)}{s.mapping ? '' : '・型はまだ'}）</span></span>
+          {s.mapping && <button className="btn ghost small" onClick={() => act(() => api.admin.setBookingSourceMapping(s.id, null))}>型をやり直す</button>}
+          <button className="btn ghost small" onClick={() => act(() => api.admin.setBookingSourceStatus(s.id, s.status === 'stopped' ? 'active' : 'stopped'))}>
+            {s.status === 'stopped' ? '再開' : '止める'}
+          </button>
+        </div>
+      ))}
+      {created && (
+        <div className="booking-created">
+          <div>{created.name}の送り先（この画面を閉じると二度と出ません）</div>
+          <code className="copyable">{created.url}</code>
+          <button className="btn ghost small" onClick={() => void navigator.clipboard?.writeText(created.url)}>写す</button>
+        </div>
+      )}
+      <div className="row">
+        <input placeholder="予約のシステムの名前" value={name} onChange={(e) => setName(e.target.value)} aria-label="予約のシステムの名前" />
+        <button className="btn small" disabled={!name.trim()} onClick={() => void api.admin.createBookingSource(name.trim())
+          .then((r) => { setCreated({ name: r.source.name, url: r.url }); setName(''); load(); })
+          .catch((e) => setError(describeError(e, '作れませんでした')))}>受け口を作る</button>
+      </div>
+      {error && <p className="error">{error}</p>}
     </div>
   );
 }

@@ -1,9 +1,9 @@
 ---
 title: M2Office 仕様書
-version: 0.163.0
+version: 0.164.0
 status: draft
 created: 2026-09-20
-updated: 2026-09-28
+updated: 2026-09-29
 owner: 三浦
 tags: [M2Office, specification, ai-agent, sme, saas, platform, google-workspace, gemini, secretary-agent]
 ---

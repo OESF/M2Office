@@ -74,6 +74,7 @@
 | `drive.share_company` | write-internal | `drive.file`（機密でない） | M2Office で作ったファイルを、会社の全員が閲覧できるようにします。社外の人は見られません。リンクで誰にでも公開することはしません |
 | `inventory.move` | write-internal | — | 入庫・使用・移動を在庫に記録します。社内の記録に足すだけで、誰にも送りません |
 | `inventory.receive_slip` | write-internal | — | 納品書の写真や PDF を読み取り、在庫の品目に当てはまる行を入庫にします。当てはまらない行は残します。誰にも送りません |
+| `inventory.reserve` | write-internal | — | 予約に合わせて品目を取り置き（使える数だけを減らす）、取り消し・使ったにし、メニューで使う品目を覚えます。誰にも送りません |
 | `knowledge.register` | write-internal | — | 承認された議事録などを、そのまま社内の知識に登録します。すべての承認のあとに行い、承認した人が見た内容だけを登録します |
 | `notification.send` | write-internal | — | 依頼した本人にだけお知らせを届けます。他の人には送りません |
 | `sheets.append` | write-internal | `drive.file`（機密でない） | M2Office で作った表に行を足します |
@@ -140,6 +141,7 @@
 | `drive.share_company` | `fileId`（必須）: ファイルの ID（docs.create の結果の file.id） |
 | `inventory.move` | `kind`（必須）: 記録の種類（in・out・transfer）、`item`（必須）: 品目（品名・自社のコード・バーコード）、`qty`（必須）: 数（正の数）、`unit`: 数の単位（unit は使う単位、pack は仕入れの単位）（unit・pack）、`place`: 場所（省けば今ある場所）、`to`: 移動の先の場所、`lot`: ロット、`expiresOn`: 使用期限（YYYY-MM-DD）、`reason`: 理由（例: 販売・使用・廃棄・仕入） |
 | `inventory.receive_slip` | `fileId`（必須）: 納品書の画像か PDF のファイル ID、`place`: 入れる場所（倉庫や棚の名前。省けば品目ごとに今ある場所） |
+| `inventory.reserve` | `action`（必須）: hold・cancel・use・teach（hold・cancel・use・teach）、`item`: 品目（品名・自社のコード・バーコード）、`qty`: 数（使う単位）、`when`: 予約の日時、`booking`: 予約番号、`menu`: 予約のメニュー（コース・施術・プラン）の名前 |
 | `knowledge.register` | `artifactId`（必須）: 登録する成果物の ID（document.create の結果） |
 | `notification.send` | `kind`: 種類（brief・run）、`title`（必須）: 題名、`body`（必須）: 本文 |
 | `sheets.append` | `spreadsheetId`（必須）: スプレッドシートの ID、`rows`（必須）: 足す行の配列（各行は値の配列） |

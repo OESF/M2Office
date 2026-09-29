@@ -29,14 +29,17 @@ const QTY = /[0-9０-９]+(\.[0-9]+)?\s*(個|本|箱|冊|枚|セット|袋|缶|�
 /** 発注を頼む言い回し。 */
 const ORDER = /(発注|注文)(して|しておいて|しといて|お願い|を頼|したい|をかけて)/;
 
+/** 予約の取り置き・メニューで使う品目を頼む言い回し（第29.13節）。 */
+const RESERVE = /取り置(いて|き|いといて)|引き当て|(コース|メニュー|プラン|施術)では.*(使う|使います|使わない|使いません)/;
+
 /** 在庫の依頼の種類。 */
-export type InventoryRequest = 'stock' | 'low' | 'history' | 'record' | 'order';
+export type InventoryRequest = 'stock' | 'low' | 'history' | 'record' | 'order' | 'reserve';
 
 /**
  * 在庫についての依頼かを見分ける。
  *
  * @returns `stock`（数を尋ねる）・`low`（足りなくなりそうなもの）・`history`（期間の記録）・`record`（入庫・使用・移動を頼む）・
- *   `order`（発注を頼む。発注のメールは承認のあとに送る）。
+ *   `order`（発注を頼む。発注のメールは承認のあとに送る）・`reserve`（予約の取り置き・メニューで使う品目）。
  *   在庫の依頼でなければ `null`
  * @remarks 在庫管理を使えるかは呼ぶ側が確かめる。「使った」だけ（数も在庫の言葉も無い）では記録の依頼にしない
  */
@@ -44,6 +47,7 @@ export function inventoryRequest(message: string): InventoryRequest | null {
   const m = message.normalize('NFKC').trim();
   const stockWord = STOCK.test(m) || /在庫/.test(m);
   if (ORDER.test(m)) return 'order';
+  if (RESERVE.test(m) && !/[?？]$/.test(m)) return 'reserve';
   if (RECORD_VERB.test(m) && (QTY.test(m) || /在庫/.test(m)) && !/[?？]$/.test(m) && !/何個|いくつ/.test(m)) return 'record';
   if (LOW.test(m) && (stockWord || /もの|品/.test(m))) return 'low';
   // 「先週のコピー用紙の使用を教えて」: 期間と入出庫の言葉がそろった問い

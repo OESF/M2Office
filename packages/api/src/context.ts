@@ -15,7 +15,7 @@ import {
   TenantAiResolver, platformAi, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID,
   defaultGeminiModels, ConnectionCredentials, type ConnectionAuthProvider,
   CardService, PostgresContactStore, cardsAccess, type ContactStore, NoticeService, PostgresNoticeStore,
-  InventoryService, InventoryWatch, PostgresInventoryStore, inventoryAccess,
+  InventoryService, InventoryWatch, InventoryBookings, PostgresInventoryStore, inventoryAccess,
   type SecretBox, type GeminiModels,
   type FileStore, type TenantExtensions, type HelpArticle, type LlmProvider, type Logger, type Repository, type WorkspaceConnector,
 } from '@m2office/core';
@@ -91,7 +91,12 @@ export interface AppDeps {
    *
    * @remarks `access` は、会社が在庫管理を使っていて利用者が利用範囲の中なら、会社の在庫管理の設定を返す（使えなければ `null`）
    */
-  inventory: { service: InventoryService; access(tenantId: string, userId: string): Promise<InventorySettings | null> };
+  inventory: {
+    service: InventoryService;
+    /** 予約との引き当て（第29.13節）。 */
+    bookings: InventoryBookings;
+    access(tenantId: string, userId: string): Promise<InventorySettings | null>;
+  };
 }
 
 /**
@@ -175,8 +180,12 @@ export function buildDeps(): AppDeps {
     repo, llm: (tenantId) => ai.llmFor(tenantId),
     onChanged: async (tenantId, itemIds) => inventoryWatch?.afterMoves(tenantId, itemIds),
   });
-  inventoryWatch = new InventoryWatch({ repo, service: inventoryService, logger: log });
-  const inventory = { service: inventoryService, access: inventoryAccess(repo) };
+  // 予約との引き当て（第29.13節）
+  const inventoryBookings = new InventoryBookings({
+    store: inventoryService.store, service: inventoryService, repo, llm: (tenantId) => ai.llmFor(tenantId),
+  });
+  inventoryWatch = new InventoryWatch({ repo, service: inventoryService, bookings: inventoryBookings, logger: log });
+  const inventory = { service: inventoryService, bookings: inventoryBookings, access: inventoryAccess(repo) };
   const engine = new RunEngine({
     repo, llm, registry, connector, files, logger: log, research, cards, notices, inventory,
     llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId),

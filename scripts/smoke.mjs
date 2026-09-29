@@ -3450,6 +3450,43 @@ console.log('\n■ 60. 在庫管理（内蔵の拡張。第29章、ADR-0045）')
     const { body: askNone } = await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message: `${tag}ボールペンの在庫は？` }) }, 'member');
     /在庫管理にありません/.test(askNone.text ?? '') ? ok('無い品目は「ありません」と答え、推測しない') : ng('無い品目の答えが違う', askNone.text);
 
+    // 予約との引き当て（第29.13節）。取り置くと使える数から引き、来たら使用・来なければ戻す
+    await call('a', '/v1/admin/extensions/inventory/settings', { method: 'PUT', body: JSON.stringify({ features: { lots: true, units: true, reserve: true } }) });
+    const setId = (await call('a', '/v1/inventory/items', { method: 'POST', body: JSON.stringify({ name: `${tag} 体験セット`, unit: '個', initialQty: 5 }) })).body?.item?.id;
+    const held = await call('a', '/v1/inventory/bookings', { method: 'POST', body: JSON.stringify({ itemId: setId, qty: 2, startsAt: '2099-01-10 14:00', externalId: `${tag}-R1` }) }, 'member');
+    const afterHold = (await call('a', `/v1/inventory/items/${setId}`, {}, 'member')).body?.item;
+    held.status === 201 && afterHold?.onHand === 5 && afterHold?.available === 3
+      ? ok('予約で取り置くと、ある数はそのままで使える数から引く') : ng('取り置きが使える数に効かない', `${held.status} ${JSON.stringify(afterHold)}`);
+    const cancelled = await call('a', `/v1/inventory/bookings/${held.body?.booking?.id}/cancel`, { method: 'POST' }, 'member');
+    const afterCancel = (await call('a', `/v1/inventory/items/${setId}`, {}, 'member')).body?.item;
+    cancelled.status === 200 && afterCancel?.available === 5 ? ok('取り置きを取り消すと、使える数に戻る') : ng('取り消しで戻らない', JSON.stringify(afterCancel));
+    // 予約の受け口（第29.13.1節）。作れるのは管理者だけで、URL は作ったときだけ返す
+    const srcByMember = await call('a', '/v1/admin/extensions/inventory/booking-sources', { method: 'POST', body: JSON.stringify({ name: `${tag} 予約` }) }, 'member');
+    const src = await call('a', '/v1/admin/extensions/inventory/booking-sources', { method: 'POST', body: JSON.stringify({ name: `${tag} 予約` }) });
+    const hookKey = String(src.body?.url ?? '').split('/').pop();
+    const { body: srcList } = await call('a', '/v1/admin/extensions/inventory/booking-sources');
+    srcByMember.status === 403 && src.status === 201 && /\/v1\/hooks\/inventory\/[A-Za-z0-9_-]{32}$/.test(src.body?.url ?? '') && !JSON.stringify(srcList).includes(hookKey)
+      ? ok('予約の受け口を作れるのは管理者だけで、送り先の URL は作ったときだけ返す') : ng('受け口の作り方が違う', `${srcByMember.status} ${src.status} ${src.body?.url}`);
+    await call('a', '/v1/inventory/menus', { method: 'POST', body: JSON.stringify({ menu: `${tag} 体験コース`, items: [{ itemId: setId, qty: 1 }] }) }, 'member');
+    const hook = (body) => fetch(`${API}/v1/hooks/inventory/${hookKey}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const pii = { id: `${tag}-EXT`, startsAt: '2099-01-11T10:00:00+09:00', menu: `${tag} 体験コース`, status: 'booked', customer: { name: '確認 花子', phone: '090-0000-0000' } };
+    const h1 = await hook(pii);
+    const h2 = await hook({ ...pii, startsAt: '2099-01-11T11:00:00+09:00' });
+    const { rows: extRows } = await owner.query(`select row_to_json(b)::text as j, starts_at from inventory_bookings b where external_id = $1`, [`${tag}-EXT`]);
+    const afterHook = (await call('a', `/v1/inventory/items/${setId}`, {}, 'member')).body?.item;
+    h1.status === 200 && h2.status === 200 && extRows.length === 1 && new Date(extRows[0].starts_at).toISOString() === '2099-01-11T02:00:00.000Z' && afterHook?.available === 4
+      ? ok('受け口に届いた予約を、覚えたメニューから取り置き、同じ予約は日時を直す') : ng('受け口の予約が合わない', `${h1.status} ${h2.status} ${extRows.length} ${afterHook?.available}`);
+    extRows.length === 1 && !/確認 花子|090-0000-0000/.test(extRows[0].j) ? ok('予約した人の名前・電話番号は残さない') : ng('予約した人の情報が残った');
+    const badKey = await fetch(`${API}/v1/hooks/inventory/${'x'.repeat(32)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(pii) });
+    badKey.status === 404 ? ok('知らない鍵の受け口は 404') : ng(`知らない鍵が通った（${badKey.status}）`);
+    const extId = (await call('a', '/v1/inventory/bookings', {}, 'member')).body?.bookings?.find((b) => b.externalId === `${tag}-EXT`)?.id;
+    const usedBooking = await call('a', `/v1/inventory/bookings/${extId}/use`, { method: 'POST' }, 'member');
+    const afterUse = (await call('a', `/v1/inventory/items/${setId}`, {}, 'member')).body?.item;
+    usedBooking.status === 200 && afterUse?.onHand === 4 && afterUse?.available === 4 ? ok('予約の人が来たら、取り置きを使用の記録にする') : ng('使ったが記録されない', JSON.stringify(afterUse));
+    await call('a', `/v1/admin/extensions/inventory/booking-sources/${src.body?.source?.id}/status`, { method: 'PUT', body: JSON.stringify({ status: 'stopped' }) });
+    const stopped = await hook({ ...pii, id: `${tag}-EXT2` });
+    stopped.status === 404 ? ok('止めた受け口は受け取らない') : ng(`止めた受け口が受け取った（${stopped.status}）`);
+
     // 左のメニュー（第6.1.1節）と入り切り（第12.13節）
     const { body: mySettings } = await call('a', '/v1/me/settings', {}, 'member');
     const pin = await call('a', '/v1/me/settings/menu', { method: 'PUT', body: JSON.stringify({ ...mySettings.menu, pinned: ['inventory'] }) }, 'member');
@@ -3468,6 +3505,10 @@ console.log('\n■ 60. 在庫管理（内蔵の拡張。第29章、ADR-0045）')
   } finally {
     // 確認用の品目と記録を消す（アプリからは消せないため、持ち主のつなぎで消す）
     const items = `select id from inventory_items where name like '${tag}%'`;
+    await owner.query(`delete from inventory_reservations where item_id in (${items})`);
+    await owner.query(`delete from inventory_bookings where external_id like '${tag}%'`);
+    await owner.query(`delete from inventory_booking_sources where name like '${tag}%'`);
+    await owner.query(`delete from inventory_menu_items where menu_key like '${tag}%'`);
     await owner.query(`delete from inventory_count_lines where item_id in (${items})`);
     await owner.query(`update inventory_items set supplier_id = null where name like '${tag}%'`);
     await owner.query(`delete from inventory_suppliers where name like '${tag}%'`);

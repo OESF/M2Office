@@ -11,7 +11,7 @@
 import { Hono } from 'hono';
 import QRCode from 'qrcode';
 import {
-  readSheet, renderSheet, renderShelfLabels, saveFile, detectKind, enqueueJob, IMPORT_MAX_ROWS, INVENTORY_ORDER, MAX_FILE_BYTES, MIME,
+  readSheet, renderSheet, renderShelfLabels, saveFile, detectKind, enqueueJob, toInstant, IMPORT_MAX_ROWS, INVENTORY_ORDER, MAX_FILE_BYTES, MIME,
   MOBILE_INVENTORY_PATH, type ItemInput, type MoveInput,
 } from '@m2office/core';
 import type { InventoryMoveKind } from '@m2office/shared';
@@ -272,6 +272,63 @@ export function inventoryRoute(deps: AppDeps) {
       input: { request: `${supplier.name}へ発注する`, supplier: supplier.name, to: supplier.contact, lines: lines.join('\n') },
     });
     return c.json({ method: 'mail', runId, supplier: supplier.name }, 201);
+  });
+
+  // ---- 予約との引き当て（第29.13節） ----
+
+  /** 予約と取り置きの一覧（昨日から先。始まる順）。 */
+  app.get('/bookings', async (c) => {
+    const { tenant } = c.get('ctx');
+    // 日本時間の今日の 0 時。これより前に始まって取り置いたままの予約は「日を過ぎた取り置き」
+    const todayStart = new Date(Date.parse(`${new Date(Date.now() + 9 * 3_600_000).toISOString().slice(0, 10)}T00:00:00+09:00`)).toISOString();
+    const [bookings, attention] = await Promise.all([
+      deps.inventory.bookings.list(tenant.id, { from: todayStart, limit: 300 }),
+      deps.inventory.bookings.attention(tenant.id, todayStart),
+    ]);
+    return c.json({ bookings, overdue: attention.overdue, unmapped: attention.unmapped });
+  });
+
+  /** 画面で取り置く（品目・数・日時・予約番号）。 */
+  app.post('/bookings', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const b = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+    const res = await deps.inventory.bookings.hold(tenant.id, user.id, {
+      itemId: str(b['itemId']) ?? '', qty: typeof b['qty'] === 'number' ? b['qty'] : Number(b['qty'] ?? 1),
+      startsAt: toInstant(str(b['startsAt']) ?? ''), externalId: str(b['externalId']), menu: str(b['menu']), source: 'screen',
+    });
+    if ('error' in res) return c.json({ error: res.error }, 400);
+    return c.json({ booking: res }, 201);
+  });
+
+  /** 予約で使った（取り置きを使用の記録にする）。 */
+  app.post('/bookings/:id/use', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const res = await deps.inventory.bookings.consume(tenant.id, user.id, c.req.param('id'));
+    if ('error' in res) return c.json({ error: res.error }, 400);
+    return c.json({ booking: res });
+  });
+
+  /** 予約の取り置きを取り消す（来なかった・取り消し）。 */
+  app.post('/bookings/:id/cancel', async (c) => {
+    const { tenant } = c.get('ctx');
+    const res = await deps.inventory.bookings.cancel(tenant.id, c.req.param('id'));
+    if ('error' in res) return c.json({ error: res.error }, 400);
+    return c.json({ booking: res });
+  });
+
+  /** メニューで使う品目を覚える（`items` が空なら「在庫を使わない」）。まだ取り置いていない同じメニューの予約にも引き当てる。 */
+  app.post('/menus', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const b = await c.req.json().catch(() => ({})) as { menu?: unknown; items?: unknown };
+    const menu = str(b.menu) ?? '';
+    if (!menu.trim()) return c.json({ error: 'メニューの名前を入れてください' }, 400);
+    const items = (Array.isArray(b.items) ? b.items : []).flatMap((x) => {
+      const o = x as { itemId?: unknown; qty?: unknown };
+      const qty = Number(o.qty ?? 1);
+      return typeof o.itemId === 'string' && Number.isFinite(qty) && qty > 0 ? [{ itemId: o.itemId, qty }] : [];
+    });
+    const applied = await deps.inventory.bookings.teachMenu(tenant.id, user.id, menu, items);
+    return c.json({ ok: true, applied });
   });
 
   /** 見張りの結果（無くなる見込み・残りわずか・使用期限・発注の案。急ぐ順）。 */

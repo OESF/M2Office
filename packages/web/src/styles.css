@@ -1311,6 +1311,11 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .order-qty { white-space: nowrap; }
 .order-contact pre { white-space: pre-wrap; font: inherit; background: var(--subtle-bg); padding: 8px; border-radius: 8px; }
 .slip-result .row.wrap { margin-top: 6px; }
+/* 取り置き（第29.13節）。日を過ぎた取り置きは赤く */
+.bookings-panel ul.plain { margin: 0 0 12px; }
+.bookings-panel li.booking { padding: 4px 0; border-bottom: 1px solid var(--line); }
+.bookings-panel li.booking.danger strong { color: var(--danger); }
+.bookings-panel .row.wrap { flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
 .m-link { display: block; margin: 16px auto 0; background: none; border: none; color: var(--muted); font-size: 14px; }
 .m-link.danger { color: var(--danger); }
 .m-note { font-size: 14px; color: var(--muted); margin: 8px 0; }
@@ -1331,6 +1336,9 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .ext-inventory { display: flex; flex-direction: column; gap: calc(6px * var(--space-scale)); margin-top: calc(6px * var(--space-scale)); }
 .ext-inventory .row.wrap { flex-wrap: wrap; gap: calc(4px * var(--space-scale)) calc(14px * var(--space-scale)); }
 .ext-inventory input.num { width: 5em; }
+.booking-sources { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.booking-sources .booking-created { padding: 8px; border: 1px solid var(--accent); border-radius: 8px; background: var(--accent-soft); }
+.booking-sources code.copyable { display: block; word-break: break-all; user-select: all; margin: 4px 0; }
 
 /* 業務の画面のファイルの欄（仕様書 第6.10.4.1節）。ドラッグしている間は枠を強める */
 .file-drop { display: flex; align-items: center; gap: calc(8px * var(--space-scale)); padding: calc(8px * var(--space-scale)); border: 1px dashed var(--line); border-radius: 8px; background: var(--input-bg); }
