@@ -3607,7 +3607,7 @@ console.log('\n■ 61. 人事・給与（内蔵の拡張。第30章、段 1: 台
     // 段 2: 勤怠と有給（第30.6.1節・第30.7.1節）。台帳のメールアドレスが同じ利用者は自動で結び付く
     const staff = await call('a', '/v1/hr/employees', { method: 'POST', body: JSON.stringify({
       name: `${tag} 勤怠`, email: 'member@alpha.example.jp', hiredOn: '2024-04-01',
-      terms: { wageType: 'monthly', wageAmount: 250000, weeklyHours: 40, weeklyDays: 5, startTime: '09:00', endTime: '18:00', breakMinutes: 60 },
+      terms: { wageType: 'monthly', wageAmount: 250000, weeklyHours: 40, weeklyDays: 5, startTime: '09:00', endTime: '18:00', breakMinutes: 60, socialInsurance: true, employmentInsurance: true },
     }) });
     const staffId = staff.body?.employee?.id;
     const { body: meM } = await call('a', '/v1/me', {}, 'member');
@@ -3639,12 +3639,38 @@ console.log('\n■ 61. 人事・給与（内蔵の拡張。第30章、段 1: 台
     const book = await fetch(`${API}/v1/hr/attendance/book?month=2026-08&format=csv`, { headers: { 'x-tenant': 'a', 'x-user': 'admin@alpha.example.jp' } });
     const register = await fetch(`${API}/v1/hr/leave/register?format=csv`, { headers: { 'x-tenant': 'a', 'x-user': 'admin@alpha.example.jp' } });
     book.status === 200 && register.status === 200 ? ok('出勤簿と年次有給休暇の管理簿を書き出せる') : ng(`帳簿を書き出せない（${book.status} ${register.status}）`);
+
+    // 段 3: 給与の計算（第30.10.1節）。保険料は公式の表の額と一致させる
+    await call('a', '/v1/admin/extensions/hr/settings', { method: 'PUT', body: JSON.stringify({ health: { kind: 'kyokai', prefecture: '東京都' }, payroll: { deductAbsence: false } }) });
+    const low = await call('a', '/v1/admin/extensions/hr/settings', { method: 'PUT', body: JSON.stringify({ payroll: { premiums: { overtime: 20 } } }) });
+    low.status === 400 ? ok('割増率は法定の下限より下げられない') : ng(`法定より低い割増率を受け付けた（${low.status}）`);
+    const sp = await call('a', `/v1/hr/payroll/employees/${staffId}/standard-pay`, { method: 'POST', body: JSON.stringify({ fromMonth: '2026-04', pay: 250000 }) });
+    const prof = await call('a', `/v1/hr/payroll/employees/${staffId}/profile`, { method: 'PUT', body: JSON.stringify({ taxColumn: 'ko', dependents: 0 }) });
+    const { body: payInfo } = await call('a', `/v1/hr/payroll/employees/${staffId}`);
+    sp.status === 201 && payInfo.standardPays?.[0]?.amount === 260000 && prof.status === 200 ? ok('報酬の額を等級表で標準報酬月額に直して登録する') : ng('標準報酬月額が合わない', JSON.stringify({ sp: sp.body, info: payInfo, prof: prof.status }));
+    // 人事区画を管理者だけにして、区画の外の人が給与を計算できないことを確かめる（割当は finally で元に戻す）
+    await call('a', `/v1/admin/compartments/${hr.id}/assignment`, { method: 'PUT', body: JSON.stringify({ groups: [], users: ['u-a-admin'] }) });
+    const runByMember = await call('a', '/v1/hr/payroll/runs', { method: 'POST', body: JSON.stringify({ month: '2026-08' }) }, 'member');
+    const calc = await call('a', '/v1/hr/payroll/runs', { method: 'POST', body: JSON.stringify({ month: '2026-08' }) });
+    const runId = calc.body?.run?.id;
+    const { body: runBody } = await call('a', `/v1/hr/payroll/runs/${runId}`);
+    const slip = (runBody.slips ?? []).find((s) => s.employeeId === staffId);
+    const amt = Object.fromEntries((slip?.lines ?? []).map((l) => [l.code, l.amount]));
+    runByMember.status === 403 && calc.status === 201 && amt.base === 250000 && amt.health === 12805 && amt.pension === 23790 && amt.child === 299 && amt['income-tax'] !== undefined
+      ? ok('月の給与を計算し、健康保険・厚生年金・子ども・子育て支援金を公式の表の額で引く（担当者だけ）') : ng('給与の計算が合わない', JSON.stringify({ member: runByMember.status, calc: calc.status, amt }));
+    (runBody.run?.warnings ?? []).some((w) => /監修前/.test(w)) ? ok('監修前の法令の表で計算した回は、確定に使えないと示す') : ng('監修前の知らせが無い', JSON.stringify(runBody.run?.warnings));
+    const again = await call('a', '/v1/hr/payroll/runs', { method: 'POST', body: JSON.stringify({ month: '2026-08' }) });
+    const { body: runs } = await call('a', '/v1/hr/payroll/runs');
+    const crossRun = await call('b', `/v1/hr/payroll/runs/${again.body?.run?.id}`);
+    (runs.runs ?? []).filter((r) => r.payMonth === '2026-08' && r.status === 'draft').length === 1 && (crossRun.status === 403 || crossRun.status === 404)
+      ? ok('計算し直すと同じ月の下書きを置き換え、ほかの会社からは見えない') : ng('給与の回が合わない', JSON.stringify({ runs: runs.runs?.length, cross: crossRun.status }));
   } catch (err) {
     ng('人事・給与の確認が途中で止まった', String(err));
   } finally {
     // 確認用の従業員を消す（アプリからは消せないため、持ち主のつなぎで消す）。打刻・有給は従業員と一緒に消える
     await owner.query(`delete from notifications where kind = 'attendance' and title like '%${tag}%'`);
     await owner.query(`delete from att_closes where tenant_id = 't-alpha' and closed_at >= $1`, [hrStartedAt]);
+    await owner.query(`delete from pay_runs where tenant_id = 't-alpha' and calculated_at >= $1`, [hrStartedAt]);
     await owner.query(`delete from hr_employees where name like '${tag}%'`);
     for (const r of saved) await owner.query(`update tenant_settings set hr = $2 where tenant_id = $1`, [r.tenant_id, r.hr ? JSON.stringify(r.hr) : null]);
     if (hrComp) {

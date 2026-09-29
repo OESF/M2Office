@@ -824,6 +824,11 @@ export class PostgresRepository implements Repository {
         work: { ...d.hr.work, ...(r?.hr?.work ?? {}) },
         agreement: { ...d.hr.agreement, ...(r?.hr?.agreement ?? {}) },
         leave: { ...d.hr.leave, ...(r?.hr?.leave ?? {}) },
+        payroll: {
+          ...d.hr.payroll, ...(r?.hr?.payroll ?? {}),
+          premiums: { ...d.hr.payroll.premiums, ...(r?.hr?.payroll?.premiums ?? {}) },
+          kumiai: { ...d.hr.payroll.kumiai, ...(r?.hr?.payroll?.kumiai ?? {}) },
+        },
       },
     };
   }

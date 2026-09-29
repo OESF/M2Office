@@ -13,6 +13,7 @@ import type {
   InventoryItem, InventoryItemView, InventoryLocation, InventoryMove, InventoryMoveKind, InventorySettings, InventoryStockRow,
   HrEmployee, HrEmployeeView, HrSettings, HrTask, HrTerms,
   AttClose, AttDay, AttPeriod, AttPunchKind, AttTotals, LeaveBalance, LeaveGrant, LeaveTake,
+  HrFamilyMember, HrPayrollProfile, HrStandardPay, PayRun, PaySlip,
   InventoryCount, InventoryCountRow, InventoryCountScope, InventoryCountView, InventorySupplier,
   InventoryBooking, InventoryBookingMapping, InventoryBookingSource,
 } from '@m2office/shared';
@@ -1126,6 +1127,21 @@ export const api = {
       saveBlob(blob, `年次有給休暇管理簿-${new Date().toISOString().slice(0, 10)}.xlsx`);
     },
     users: () => call<{ users: { id: string; name: string; email: string }[] }>('/hr/users'),
+    /** 給与（段 3。仕様書 第30.10.1節）。 */
+    payroll: {
+      employee: (id: string) => call<{ profile: HrPayrollProfile; standardPays: HrStandardPay[]; family: HrFamilyMember[] }>(`/hr/payroll/employees/${encodeURIComponent(id)}`),
+      saveProfile: (id: string, patch: Partial<HrPayrollProfile>) =>
+        call<{ profile: HrPayrollProfile }>(`/hr/payroll/employees/${encodeURIComponent(id)}/profile`, { method: 'PUT', body: JSON.stringify(patch) }),
+      addStandardPay: (id: string, fromMonth: string, pay: number) =>
+        call<{ standardPay: HrStandardPay; grade: number }>(`/hr/payroll/employees/${encodeURIComponent(id)}/standard-pay`, { method: 'POST', body: JSON.stringify({ fromMonth, pay }) }),
+      addFamily: (id: string, m: Partial<HrFamilyMember>) =>
+        call<{ member: HrFamilyMember }>(`/hr/payroll/employees/${encodeURIComponent(id)}/family`, { method: 'POST', body: JSON.stringify(m) }),
+      removeFamily: (id: string, memberId: string) =>
+        call<{ ok: true }>(`/hr/payroll/employees/${encodeURIComponent(id)}/family/${encodeURIComponent(memberId)}`, { method: 'DELETE' }),
+      runs: (month?: string) => call<{ runs: PayRun[]; schedule: { payDate: string; period: { start: string; end: string; label: string } } | null }>(`/hr/payroll/runs${month ? `?month=${month}` : ''}`),
+      calculate: (month: string) => call<{ run: PayRun; slips: PaySlip[] }>('/hr/payroll/runs', { method: 'POST', body: JSON.stringify({ month }) }),
+      run: (id: string) => call<{ run: PayRun; slips: PaySlip[] }>(`/hr/payroll/runs/${encodeURIComponent(id)}`),
+    },
     /** 労働者名簿を書き出す。 */
     roster: async (format: 'csv' | 'xlsx') => {
       const blob = await fetchBlob(`/hr/roster?format=${format}`);

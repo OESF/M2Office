@@ -15,7 +15,7 @@ import {
   TenantAiResolver, platformAi, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID,
   defaultGeminiModels, ConnectionCredentials, type ConnectionAuthProvider,
   CardService, PostgresContactStore, cardsAccess, type ContactStore, NoticeService, PostgresNoticeStore,
-  InventoryService, InventoryWatch, InventoryBookings, PostgresInventoryStore, inventoryAccess, HrService, PostgresHrStore, hrAccess, AttendanceService, PostgresAttendanceStore,
+  InventoryService, InventoryWatch, InventoryBookings, PostgresInventoryStore, inventoryAccess, HrService, PostgresHrStore, hrAccess, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK,
   type SecretBox, type GeminiModels,
   type FileStore, type TenantExtensions, type HelpArticle, type LlmProvider, type Logger, type Repository, type WorkspaceConnector,
 } from '@m2office/core';
@@ -106,6 +106,8 @@ export interface AppDeps {
     service: HrService;
     /** 勤怠と有給（段 2。第30.6.1節・第30.7.1節）。 */
     attendance: AttendanceService;
+    /** 給与の計算（段 3。第30.10.1節）。 */
+    payroll: PayrollService;
     access(tenantId: string, userId: string): Promise<HrSettings | null>;
   };
 }
@@ -292,7 +294,13 @@ export function buildDeps(): AppDeps {
     notices,
     inventory,
     // 人事・給与（第30章）。台帳は人事区画の人だけが扱い、勤怠と有給は本人も扱う
-    hr: { service: hrService, attendance, access: hrAccess(repo) },
+    hr: {
+      service: hrService, attendance, access: hrAccess(repo),
+      payroll: new PayrollService({
+        store: new PostgresPayrollStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+        hrStore: hrService.deps.store, attendance, repo, law: LAW_BOOK,
+      }),
+    },
   };
 }
 

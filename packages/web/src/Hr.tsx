@@ -8,7 +8,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import {
   HR_CATEGORIES, HR_EMPLOYMENTS, HR_WAGE_TYPES,
-  type HrEmployee, type HrEmployeeView, type HrSettings, type HrTask, type HrTerms,
+  type HrEmployee, type HrEmployeeView, type HrPayrollProfile, type HrSettings, type HrTask, type HrTerms, type PaySlip,
 } from '@m2office/shared';
 import { api, describeError, type HrImportResult } from './api.js';
 
@@ -25,18 +25,19 @@ const wage = (t: Pick<HrTerms, 'wageType' | 'wageAmount'> | null) => (t && t.wag
  * @param onOpen 従業員を開く・一覧へ戻る
  */
 export function Hr({ employeeId, onOpen }: { employeeId: string | null; onOpen: (id: string | null) => void }) {
-  const [tab, setTab] = useState<'ledger' | 'attendance' | 'leave'>('ledger');
+  const [tab, setTab] = useState<'ledger' | 'attendance' | 'leave' | 'payroll'>('ledger');
   if (employeeId) return <EmployeeDetail id={employeeId} onBack={() => onOpen(null)} />;
   return (
     <>
       <div className="hr-tabs" role="tablist">
-        {([['ledger', '台帳'], ['attendance', '勤怠'], ['leave', '有給']] as const).map(([k, l]) => (
+        {([['ledger', '台帳'], ['attendance', '勤怠'], ['leave', '有給'], ['payroll', '給与']] as const).map(([k, l]) => (
           <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>
         ))}
       </div>
       {tab === 'ledger' && <EmployeeList onOpen={onOpen} />}
       {tab === 'attendance' && <AttendanceTab />}
       {tab === 'leave' && <LeaveTab />}
+      {tab === 'payroll' && <PayrollTab onOpen={onOpen} />}
     </>
   );
 }
@@ -146,6 +147,171 @@ function EmployeeAttendance({ employeeId, month, closed, onChanged }: { employee
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+/** 給与（支給月の下書きの計算と明細。仕様書 第30.10.1節）。 */
+function PayrollTab({ onOpen }: { onOpen: (id: string) => void }) {
+  const thisMonth = new Date(Date.now() + 9 * 3_600_000).toISOString().slice(0, 7);
+  const [month, setMonth] = useState(thisMonth);
+  const [info, setInfo] = useState<Awaited<ReturnType<typeof api.hr.payroll.runs>> | null>(null);
+  const [run, setRun] = useState<Awaited<ReturnType<typeof api.hr.payroll.run>> | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(() => {
+    setRun(null);
+    api.hr.payroll.runs(month).then((r) => {
+      setInfo(r);
+      const draft = r.runs.find((x) => x.payMonth === month && x.kind === 'monthly');
+      if (draft) api.hr.payroll.run(draft.id).then(setRun).catch((e) => setError(describeError(e, '読み込めませんでした')));
+    }).catch((e) => setError(describeError(e, '読み込めませんでした')));
+  }, [month]);
+  useEffect(load, [load]);
+  const calc = () => {
+    setBusy(true);
+    void api.hr.payroll.calculate(month).then(setRun).catch((e) => setError(describeError(e, '計算できませんでした'))).finally(() => setBusy(false));
+  };
+  const yenOf = (n: number) => n.toLocaleString('ja-JP');
+  const sum = (s: PaySlip, codes: string[]) => s.lines.filter((l) => codes.includes(l.code)).reduce((a, l) => a + l.amount, 0);
+  return (
+    <div className="hr">
+      <div className="row wrap hr-toolbar">
+        <button className="btn ghost small" onClick={() => setMonth(shiftMonth(month, -1))}>← 前</button>
+        <strong>{Number(month.slice(0, 4))} 年 {Number(month.slice(5))} 月支給</strong>
+        <button className="btn ghost small" onClick={() => setMonth(shiftMonth(month, 1))}>次 →</button>
+        {info?.schedule && <span className="small muted">支払日 {info.schedule.payDate}・勤怠 {info.schedule.period.label}</span>}
+        <span className="grow" />
+        <button className="btn small" disabled={busy} onClick={calc}>{run ? '計算し直す' : '計算する'}</button>
+      </div>
+      {error && <p className="error">{error}</p>}
+      {run && (
+        <>
+          {run.run.warnings.map((w) => <p key={w} className="error small">{w}</p>)}
+          <p className="small muted">下書き（{new Date(run.run.calculatedAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })} に計算）</p>
+          <div className="pay-table">
+          <table className="table hr-table">
+            <thead><tr><th>氏名</th><th>総支給</th><th>社会保険</th><th>雇用保険</th><th>所得税</th><th>住民税</th><th>差引支給</th><th /></tr></thead>
+            <tbody>
+              {run.slips.map((s) => (
+                <Fragment key={s.id}>
+                  <tr>
+                    <td><button className="link" onClick={() => setOpen(open === s.id ? null : s.id)}>{s.employeeName}</button></td>
+                    <td>{yenOf(s.gross)}</td><td>{yenOf(sum(s, ['health', 'child', 'pension']))}</td><td>{yenOf(sum(s, ['employment']))}</td>
+                    <td>{yenOf(sum(s, ['income-tax']))}</td><td>{yenOf(sum(s, ['resident-tax']))}</td><td><strong>{yenOf(s.net)}</strong></td>
+                    <td className="small">{s.warnings.filter((w) => !w.startsWith('法令の表が監修前')).length > 0 && <span className="badge warn">注意 {s.warnings.filter((w) => !w.startsWith('法令の表が監修前')).length}</span>}</td>
+                  </tr>
+                  {open === s.id && (
+                    <tr><td colSpan={8}>
+                      <div className="pay-slip">
+                        {s.warnings.filter((w) => !w.startsWith('法令の表が監修前')).map((w) => <p key={w} className="error small">{w}</p>)}
+                        <table className="table small">
+                          <tbody>
+                            {s.lines.map((l) => (
+                              <tr key={l.code}>
+                                <td>{l.kind === 'deduct' ? '控除' : '支給'}</td>
+                                <td className="pay-line">{l.label}<div className="muted">{Object.entries(l.basis).map(([k, v]) => `${k}: ${v}`).join('・')}</div></td>
+                                <td className="num">{yenOf(l.amount)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        <button className="btn ghost small" onClick={() => onOpen(s.employeeId)}>台帳と給与の情報を開く</button>
+                      </div>
+                    </td></tr>
+                  )}
+                </Fragment>
+              ))}
+              {run.slips.length === 0 && <tr><td colSpan={8} className="muted">この月に計算する人はいません</td></tr>}
+            </tbody>
+          </table>
+          </div>
+        </>
+      )}
+      {!run && info && <p className="muted small">まだ計算していません</p>}
+    </div>
+  );
+}
+
+/** 1 人の給与の情報（税の区分・扶養・住民税・通勤・口座・標準報酬月額・家族。仕様書 第30.10.1節）。 */
+function PayrollProfile({ employeeId }: { employeeId: string }) {
+  const [d, setD] = useState<Awaited<ReturnType<typeof api.hr.payroll.employee>> | null>(null);
+  const [p, setP] = useState<HrPayrollProfile | null>(null);
+  const [std, setStd] = useState({ fromMonth: new Date(Date.now() + 9 * 3_600_000).toISOString().slice(0, 7), pay: '' });
+  const [fam, setFam] = useState({ name: '', relation: '', birthDate: '', dependent: true });
+  const [note, setNote] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(() => {
+    api.hr.payroll.employee(employeeId).then((r) => { setD(r); setP(r.profile); }).catch((e) => setError(describeError(e, '読み込めませんでした')));
+  }, [employeeId]);
+  useEffect(load, [load]);
+  if (!d || !p) return <p className="muted small">{error ?? '読み込んでいます…'}</p>;
+  const act = (fn: () => Promise<unknown>, fail: string, ok?: string) => void fn().then(() => { setError(null); setNote(ok ?? null); load(); }).catch((e) => setError(describeError(e, fail)));
+  const rt = p.residentTax[0] ?? { fiscalYear: new Date().getFullYear(), municipality: '', june: 0, monthly: 0 };
+  const setRt = (patch: Partial<typeof rt>) => setP({ ...p, residentTax: [{ ...rt, ...patch }, ...p.residentTax.slice(1)] });
+  const num = (v: string) => (v === '' ? 0 : Number(v));
+  return (
+    <div className="card hr-panel">
+      <strong>給与の情報</strong>
+      <div className="row wrap">
+        <select value={p.taxColumn} onChange={(e) => setP({ ...p, taxColumn: e.target.value as 'ko' | 'otsu' })} aria-label="税の区分">
+          <option value="ko">甲欄（扶養控除等申告書あり）</option><option value="otsu">乙欄</option>
+        </select>
+        <label className="small">扶養親族等 <input className="num-input" type="number" min={0} max={20} value={p.dependents} onChange={(e) => setP({ ...p, dependents: num(e.target.value) })} /> 人</label>
+      </div>
+      <div className="row wrap">
+        <span className="small">住民税</span>
+        <input className="num-input" type="number" value={rt.fiscalYear} onChange={(e) => setRt({ fiscalYear: num(e.target.value) })} aria-label="年度" />
+        <input className="short" placeholder="市区町村" value={rt.municipality} onChange={(e) => setRt({ municipality: e.target.value })} aria-label="市区町村" />
+        <label className="small">6 月分 <input className="num-input" type="number" min={0} value={rt.june} onChange={(e) => setRt({ june: num(e.target.value) })} /></label>
+        <label className="small">7 月以降 <input className="num-input" type="number" min={0} value={rt.monthly} onChange={(e) => setRt({ monthly: num(e.target.value) })} /></label>
+      </div>
+      <div className="row wrap">
+        <span className="small">通勤</span>
+        <input className="short" placeholder="手段" value={p.commute.means ?? ''} onChange={(e) => setP({ ...p, commute: { ...p.commute, means: e.target.value } })} aria-label="通勤の手段" />
+        <label className="small">月額 <input className="num-input" type="number" min={0} value={p.commute.monthly ?? 0} onChange={(e) => setP({ ...p, commute: { ...p.commute, monthly: num(e.target.value) } })} /></label>
+        <label className="small">うち非課税 <input className="num-input" type="number" min={0} value={p.commute.taxFree ?? 0} onChange={(e) => setP({ ...p, commute: { ...p.commute, taxFree: num(e.target.value) } })} /></label>
+      </div>
+      <div className="row wrap">
+        <span className="small">振込先</span>
+        <input className="short" placeholder="銀行" value={p.bank.bank ?? ''} onChange={(e) => setP({ ...p, bank: { ...p.bank, bank: e.target.value } })} aria-label="銀行" />
+        <input className="short" placeholder="支店" value={p.bank.branch ?? ''} onChange={(e) => setP({ ...p, bank: { ...p.bank, branch: e.target.value } })} aria-label="支店" />
+        <select value={p.bank.type ?? '普通'} onChange={(e) => setP({ ...p, bank: { ...p.bank, type: e.target.value as '普通' | '当座' } })} aria-label="種類"><option>普通</option><option>当座</option></select>
+        <input className="short" placeholder="口座番号" value={p.bank.number ?? ''} onChange={(e) => setP({ ...p, bank: { ...p.bank, number: e.target.value } })} aria-label="口座番号" />
+        <input className="short" placeholder="名義（カナ）" value={p.bank.holder ?? ''} onChange={(e) => setP({ ...p, bank: { ...p.bank, holder: e.target.value } })} aria-label="名義" />
+      </div>
+      <div className="row">
+        <button className="btn small" onClick={() => act(() => api.hr.payroll.saveProfile(employeeId, {
+          taxColumn: p.taxColumn, dependents: p.dependents, residentTax: rt.municipality || rt.june || rt.monthly ? [rt, ...p.residentTax.slice(1)] : p.residentTax.slice(1), commute: p.commute, bank: p.bank,
+        }), '保存できませんでした', '保存しました')}>保存する</button>
+        {note && <span className="small muted">{note}</span>}
+      </div>
+      {error && <p className="error small">{error}</p>}
+      <div className="row wrap">
+        <span className="small">標準報酬月額 {d.standardPays[0] ? `${d.standardPays[0].amount.toLocaleString('ja-JP')} 円（${d.standardPays[0].fromMonth} から）` : '未登録'}</span>
+        <input type="month" value={std.fromMonth} onChange={(e) => setStd({ ...std, fromMonth: e.target.value })} aria-label="適用の月" />
+        <input className="num-input" type="number" min={0} placeholder="報酬の額" value={std.pay} onChange={(e) => setStd({ ...std, pay: e.target.value })} aria-label="報酬の額" />
+        <button className="btn ghost small" disabled={!std.pay} onClick={() => act(() => api.hr.payroll.addStandardPay(employeeId, std.fromMonth, Number(std.pay)), '足せませんでした', '等級表で標準報酬月額に直して足しました')}>足す</button>
+      </div>
+      <div className="small">
+        家族
+        <ul className="plain">
+          {d.family.map((f) => (
+            <li key={f.id} className="row">
+              <span className="grow">{f.name}（{f.relation}）{f.birthDate ?? ''}{f.dependent ? '・扶養' : ''}</span>
+              <button className="btn ghost small" onClick={() => act(() => api.hr.payroll.removeFamily(employeeId, f.id), '外せませんでした')}>外す</button>
+            </li>
+          ))}
+        </ul>
+        <div className="row wrap">
+          <input className="short" placeholder="氏名" value={fam.name} onChange={(e) => setFam({ ...fam, name: e.target.value })} aria-label="家族の氏名" />
+          <input className="short" placeholder="続柄" value={fam.relation} onChange={(e) => setFam({ ...fam, relation: e.target.value })} aria-label="続柄" />
+          <input type="date" value={fam.birthDate} onChange={(e) => setFam({ ...fam, birthDate: e.target.value })} aria-label="生年月日" />
+          <label className="check"><input type="checkbox" checked={fam.dependent} onChange={(e) => setFam({ ...fam, dependent: e.target.checked })} /> 扶養</label>
+          <button className="btn ghost small" disabled={!fam.name} onClick={() => act(() => api.hr.payroll.addFamily(employeeId, { ...fam, birthDate: fam.birthDate || null }), '足せませんでした')}>足す</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -445,6 +611,8 @@ function EmployeeDetail({ id, onBack }: { id: string; onBack: () => void }) {
           </tbody>
         </table>
       </div>
+
+      <PayrollProfile employeeId={id} />
 
       <div className="card hr-panel">
         <strong>手続き</strong>

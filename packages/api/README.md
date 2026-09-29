@@ -188,6 +188,10 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/hr/attendance/book` | 出勤簿を書き出す（`month`・`format`） |
 | `GET /v1/hr/leave` ／ `GET /v1/hr/leave/register` | 有給（第30.7.1節）: 全員の残り・付与・取得義務・出勤率の低い人 ／ 年次有給休暇の管理簿を書き出す |
 | `POST /v1/hr/leave/:employeeId/grants` ／ `POST /v1/hr/leave/:employeeId/takes` ／ `DELETE /v1/hr/leave/takes/:id` | 手作業の付与（導入のときの残日数）／ 担当者が取得を記録 ／ 取り消す |
+| `GET /v1/hr/payroll/employees/:id` ／ `PUT .../profile` | 給与（段 3。第30.10.1節）: 1 人の給与の情報・標準報酬月額・家族 ／ 給与の情報を直す（`taxColumn`・`dependents`・`residentTax`・`commute`・`bank`） |
+| `POST /v1/hr/payroll/employees/:id/standard-pay` | 標準報酬月額を足す（`fromMonth`・`pay`。報酬の額を等級表で標準報酬月額に直す） |
+| `POST /v1/hr/payroll/employees/:id/family` ／ `DELETE .../family/:memberId` | 家族を足す・外す |
+| `GET /v1/hr/payroll/runs` ／ `POST /v1/hr/payroll/runs` ／ `GET /v1/hr/payroll/runs/:id` | 給与の回の一覧（`month` で支払日と勤怠の期間も）／ 支給月（`month`）の月の給与を計算して下書きにする（同じ月の下書きは置き換える）／ 回と明細（行ごとの根拠つき。見たことを監査ログに残す） |
 | `GET /v1/hr/users` | 台帳に結び付けられる利用者（名前とメールアドレス） |
 | `GET /v1/me/hr` | 本人の「給与・勤怠」（第30.25節）: 打刻の状態・期間の勤怠・有給の残りと取得義務。台帳に結び付いていなければ 404（同じメールアドレスなら自動で結び付く） |
 | `POST /v1/me/hr/punch` ／ `PUT /v1/me/hr/days/:date` | 本人が打刻する（`kind`: in・out・break_start・break_end。できない打刻は 409）／ 1 日を直す（人事区画の人に知らせる。締めた期間は 400） |

@@ -171,7 +171,7 @@ export function extensionsRoute(deps: AppDeps) {
     const { tenant, user } = c.get('ctx');
     const b = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
     const cur = (await deps.repo.getTenantSettings(tenant.id)).hr;
-    const next: HrSettings = { ...cur, office: { ...cur.office }, health: { ...cur.health }, pay: { ...cur.pay }, work: { ...cur.work }, agreement: { ...cur.agreement }, leave: { ...cur.leave } };
+    const next: HrSettings = { ...cur, office: { ...cur.office }, health: { ...cur.health }, pay: { ...cur.pay }, work: { ...cur.work }, agreement: { ...cur.agreement }, leave: { ...cur.leave }, payroll: { ...cur.payroll } };
     const obj = (v: unknown) => (v && typeof v === 'object' ? v as Record<string, unknown> : null);
     const text = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : undefined);
     const day = (v: unknown) => (typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 31 ? v : undefined);
@@ -218,6 +218,37 @@ export function extensionsRoute(deps: AppDeps) {
     // 休暇（第30.7.1節）
     const lv = obj(b['leave']);
     if (lv && typeof lv['halfDay'] === 'boolean') next.leave = { ...next.leave, halfDay: lv['halfDay'] };
+    // 給与の計算（第30.10.1節）。割増率は法定の下限を下回らせない
+    const py = obj(b['payroll']);
+    if (py) {
+      const p = { ...next.payroll, premiums: { ...next.payroll.premiums }, kumiai: { ...next.payroll.kumiai } };
+      if (py['collect'] === 'next' || py['collect'] === 'current') p.collect = py['collect'];
+      const pm = obj(py['premiums']);
+      const floor = { overtime: 25, over60: 50, night: 25, holiday: 35 } as const;
+      if (pm) {
+        for (const k of Object.keys(floor) as (keyof typeof floor)[]) {
+          const v = pm[k];
+          if (v === undefined) continue;
+          if (typeof v !== 'number' || !Number.isFinite(v) || v < floor[k] || v > 200) return c.json({ error: `割増率は法定の下限（${floor[k]}%）以上で入れてください` }, 400);
+          p.premiums[k] = v;
+        }
+      }
+      if (py['avgMonthlyHours'] === null) p.avgMonthlyHours = null;
+      else if (typeof py['avgMonthlyHours'] === 'number' && py['avgMonthlyHours'] > 0 && py['avgMonthlyHours'] <= 250) p.avgMonthlyHours = py['avgMonthlyHours'];
+      if (typeof py['deductAbsence'] === 'boolean') p.deductAbsence = py['deductAbsence'];
+      const km = obj(py['kumiai']);
+      const pct = (v: unknown) => (v === null ? null : typeof v === 'number' && v >= 0 && v < 30 ? v : undefined);
+      if (km) {
+        if (pct(km['health']) !== undefined) p.kumiai.health = pct(km['health'])!;
+        if (pct(km['care']) !== undefined) p.kumiai.care = pct(km['care'])!;
+      }
+      if (Array.isArray(py['items'])) {
+        p.items = py['items'].slice(0, 50).map((x) => x as Record<string, unknown>)
+          .filter((x) => typeof x['name'] === 'string' && x['name'].trim())
+          .map((x) => ({ name: String(x['name']).trim().slice(0, 50), premiumBase: x['premiumBase'] !== false, taxable: x['taxable'] !== false }));
+      }
+      next.payroll = p;
+    }
     await deps.repo.saveTenantSettings(tenant.id, 'hr', next, user.id);
     await deps.repo.appendAudit({
       id: randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id, action: 'settings.update',

@@ -455,6 +455,22 @@ function HrFields({ settings, busy, onChanged }: { settings: HrSettings; busy: b
         )}
         <label className="check"><input type="checkbox" checked={settings.leave.halfDay} disabled={busy} onChange={(e) => save({ leave: { halfDay: e.target.checked } })} /> 半日の有給</label>
       </div>
+      <div className="row wrap">
+        <label>社会保険料 <select value={settings.payroll.collect} disabled={busy} onChange={(e) => save({ payroll: { ...settings.payroll, collect: e.target.value as 'next' | 'current' } })}>
+          <option value="next">翌月徴収</option><option value="current">当月徴収</option>
+        </select></label>
+        <label>月の平均所定労働時間 <input type="number" min={1} max={250} step="0.01" className="num" defaultValue={settings.payroll.avgMonthlyHours ?? ''} placeholder="自動"
+          onBlur={(e) => { const v = e.target.value === '' ? null : Number(e.target.value); if (v !== settings.payroll.avgMonthlyHours) save({ payroll: { ...settings.payroll, avgMonthlyHours: v } }); }} /> 時間</label>
+        <label className="check"><input type="checkbox" checked={settings.payroll.deductAbsence} disabled={busy} onChange={(e) => save({ payroll: { ...settings.payroll, deductAbsence: e.target.checked } })} /> 欠勤・遅刻早退を引く</label>
+        {settings.health.kind === 'kumiai' && (
+          <>
+            <label>組合の健康保険料率 <input type="number" min={0} max={30} step="0.001" className="num" defaultValue={settings.payroll.kumiai.health ?? ''}
+              onBlur={(e) => save({ payroll: { ...settings.payroll, kumiai: { ...settings.payroll.kumiai, health: e.target.value === '' ? null : Number(e.target.value) } } })} /> %</label>
+            <label>介護 <input type="number" min={0} max={30} step="0.001" className="num" defaultValue={settings.payroll.kumiai.care ?? ''}
+              onBlur={(e) => save({ payroll: { ...settings.payroll, kumiai: { ...settings.payroll.kumiai, care: e.target.value === '' ? null : Number(e.target.value) } } })} /> %</label>
+          </>
+        )}
+      </div>
     </div>
   );
 }

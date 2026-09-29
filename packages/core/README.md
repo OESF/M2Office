@@ -40,7 +40,10 @@ src/hr/          人事・給与（内蔵の拡張。第30章）。段 1: 置き
                  手続きの一覧と期限（procedures.ts。決まったプログラムで作る）、台帳・取り込み（見出しを推論で読む）・労働者名簿（service.ts）、
                  人事区画の確かめと用意（hrAccess・ensureHrCompartment）。段 2: 勤怠の集計（attendance.ts。日 8 時間・週 40 時間・
                  深夜・法定休日・60 時間超・点検・締めの期間・36 協定）、有給（leave.ts。付与の表・時効・古い順・取得義務）、
-                 打刻・直し・締め・出勤簿・申請・管理簿・知らせ（attendance-service.ts）、置き場（attendance-store.ts）
+                 打刻・直し・締め・出勤簿・申請・管理簿・知らせ（attendance-service.ts）、置き場（attendance-store.ts）。
+                 段 3: 月の給与の計算（payroll.ts。割増・欠勤控除・社会保険料・支援金・雇用保険料・所得税・住民税と行ごとの根拠）、
+                 給与の情報・標準報酬月額・家族・下書きの回（payroll-service.ts・payroll-store.ts）、
+                 法令の表（law/。公式の発表から取り込んだデータのファイルと出典・監修の状態、使う日で引く Law）
 src/secretary/   秘書。3 層の応答振り分け、定時実行の確認・停止・再開・今すぐ実行（推論なし。第10.9.8節）、
                  社内のお知らせを出す・取り下げる・並べる・済んだにする（notices.ts。第10.15節）
                  在庫の依頼の見分けと、在庫の数の問いへのその場の答え（inventory.ts。第29.15節）

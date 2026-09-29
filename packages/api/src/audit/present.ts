@@ -150,6 +150,11 @@ const ACTION_LABELS: Record<string, string> = {
   'hr.leave.take': '有給を記録した',
   'hr.leave.cancel': '有給を取り消した',
   'hr.leave.grant': '有給を付与した（手作業）',
+  'hr.payroll.profile': '給与の情報を直した',
+  'hr.payroll.standard': '標準報酬月額を足した',
+  'hr.payroll.family': '家族を直した',
+  'hr.payroll.calculate': '給与を計算した（下書き）',
+  'hr.payroll.view': '給与の明細を見た',
 };
 
 /** 操作の種類（絞り込みの単位）。`prefixes` のどれかで始まる操作が当たる。 */

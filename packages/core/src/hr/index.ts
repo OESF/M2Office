@@ -22,3 +22,8 @@ export {
 } from './attendance.js';
 export { leaveBalance, dueGrantDates, grantDays, addMonths, LEAVE_NORMAL, LEAVE_PROPORTIONAL, LEAVE_OBLIGATION_DAYS } from './leave.js';
 export { japaneseHolidays, isJapaneseHoliday, equinoxDays } from './holidays.js';
+export { PostgresPayrollStore, type PayrollStore } from './payroll-store.js';
+export { PayrollService, type PayrollServiceDeps } from './payroll-service.js';
+export { calcSlip, round50, itemRule, reachMonth, insuredIn, shiftMonth as shiftPayMonth, type SlipInput, type SlipResult as PaySlipResult } from './payroll.js';
+export { LAW_BOOK, Law, type LawHit } from './law/index.js';
+export type { LawBook, LawMeta, LawReview, GradeRow, GradeTable, HealthRates, RateTable, EmploymentRates, WithholdingMonthly, WithholdingRow, WithholdingAbove, MinimumWage } from './law/types.js';

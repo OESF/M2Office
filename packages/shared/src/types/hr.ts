@@ -63,6 +63,33 @@ export interface HrSettings {
   agreement: { enabled: boolean; monthly: number; yearly: number; special: boolean; startMonth: number };
   /** 休暇（第30.7.1節）。 */
   leave: { halfDay: boolean };
+  /** 給与の計算（第30.10.1節）。 */
+  payroll: HrPayrollSettings;
+}
+
+/** 給与の計算の会社の設定（第30.10.1節）。 */
+export interface HrPayrollSettings {
+  /** 社会保険料の徴収（翌月徴収: 前の月の分を当月の給与から引く）。 */
+  collect: 'next' | 'current';
+  /** 割増率（%）。法定の下限以上。 */
+  premiums: { overtime: number; over60: number; night: number; holiday: number };
+  /** 月の平均所定労働時間（月給の割増の単価に使う）。`null` なら週の所定時間 × 52 ÷ 12。 */
+  avgMonthlyHours: number | null;
+  /** 月給の人の欠勤・遅刻早退を引くか。 */
+  deductAbsence: boolean;
+  /** 健康保険組合の料率（%。組合のとき会社が入れる）。 */
+  kumiai: { health: number | null; care: number | null };
+  /** 手当ごとの扱い（名前で当てる。無ければ名前から決まったプログラムで見分ける）。 */
+  items: HrPayItemRule[];
+}
+
+/** 手当の扱い。 */
+export interface HrPayItemRule {
+  name: string;
+  /** 割増の単価の基礎に入れるか。 */
+  premiumBase: boolean;
+  /** 所得税の対象か（通勤手当の非課税の分は別に扱う）。 */
+  taxable: boolean;
 }
 
 /** まだ設定していない会社の既定（締めは末日・支払は翌月 25 日。導入のときに会社が直す）。 */
@@ -76,6 +103,14 @@ export const DEFAULT_HR_SETTINGS: HrSettings = {
   work: { weekdays: [1, 2, 3, 4, 5], legalHoliday: 0, weekStart: 0, nationalHolidays: true },
   agreement: { enabled: true, monthly: 45, yearly: 360, special: false, startMonth: 4 },
   leave: { halfDay: true },
+  payroll: {
+    collect: 'next',
+    premiums: { overtime: 25, over60: 50, night: 25, holiday: 35 },
+    avgMonthlyHours: null,
+    deductAbsence: true,
+    kumiai: { health: null, care: null },
+    items: [],
+  },
 };
 
 /** 従業員（人事の台帳。第30.5節）。 */
@@ -261,4 +296,88 @@ export interface LeaveBalance {
   grants: (LeaveGrant & { used: number; left: number })[];
   /** 取得義務（10 日以上の付与の、付与の日から 1 年）。無ければ `null`。 */
   obligation: { grantedOn: string; deadline: string; taken: number; required: number } | null;
+}
+
+/** 住民税の年度の額（6 月から翌年 5 月。第30.14節）。 */
+export interface HrResidentTax {
+  /** 年度（6 月の年。2026 なら 2026 年 6 月〜2027 年 5 月）。 */
+  fiscalYear: number;
+  municipality: string;
+  /** 6 月分。 */
+  june: number;
+  /** 7 月以降の月額。 */
+  monthly: number;
+}
+
+/** 従業員ごとの給与の情報（第30.5節・第30.10.1節）。 */
+export interface HrPayrollProfile {
+  employeeId: string;
+  /** 甲欄（扶養控除等申告書を出している）か乙欄か。 */
+  taxColumn: 'ko' | 'otsu';
+  /** 源泉控除の扶養親族等の数。 */
+  dependents: number;
+  residentTax: HrResidentTax[];
+  /** 通勤手当の月額と、そのうち非課税の額。 */
+  commute: { means?: string; monthly?: number; taxFree?: number };
+  /** 給与の振込先（段 4 の振込データに使う）。 */
+  bank: { bank?: string; branch?: string; type?: '普通' | '当座'; number?: string; holder?: string };
+}
+
+/** 標準報酬月額の履歴。 */
+export interface HrStandardPay {
+  id: string;
+  employeeId: string;
+  /** 適用の月（YYYY-MM）。 */
+  fromMonth: string;
+  amount: number;
+  kind: 'acquire' | 'regular' | 'change' | 'manual';
+}
+
+/** 家族。 */
+export interface HrFamilyMember {
+  id: string;
+  employeeId: string;
+  name: string;
+  relation: string;
+  birthDate: string | null;
+  cohabiting: boolean;
+  incomeEstimate: number | null;
+  dependent: boolean;
+}
+
+/** 明細の 1 行。根拠は表の版・等級・料率・集計・端数処理（H-4）。 */
+export interface PayLine {
+  code: string;
+  label: string;
+  amount: number;
+  kind: 'pay' | 'deduct';
+  basis: Record<string, string | number>;
+}
+
+/** 明細（1 人・1 回）。 */
+export interface PaySlip {
+  id: string;
+  runId: string;
+  employeeId: string;
+  employeeName?: string;
+  gross: number;
+  deductions: number;
+  net: number;
+  lines: PayLine[];
+  warnings: string[];
+}
+
+/** 給与の回。 */
+export interface PayRun {
+  id: string;
+  kind: 'monthly' | 'bonus' | 'yea' | 'correction';
+  payMonth: string;
+  payDate: string;
+  periodStart: string;
+  periodEnd: string;
+  status: 'draft' | 'checked' | 'confirmed' | 'paid';
+  /** 使った法令の表の版と監修の状態。 */
+  law: Record<string, { version: string; source: string; reviewed: boolean }>;
+  warnings: string[];
+  calculatedAt: string;
 }

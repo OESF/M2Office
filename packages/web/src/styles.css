@@ -1435,3 +1435,9 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .myhr-totals { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-bottom: 8px; }
 .myhr-days tr.warn td:last-child { color: var(--danger); }
 .myhr-days input[type=time] { width: 7em; }
+.pay-table { overflow-x: auto; }
+.pay-table th, .pay-table td:not([colspan]) { white-space: nowrap; }
+.pay-table td.pay-line { white-space: normal; min-width: 14em; }
+.pay-table td.pay-line .muted { font-size: 0.9em; }
+.pay-slip { padding: 6px 0; }
+.pay-slip td.num { text-align: right; white-space: nowrap; }

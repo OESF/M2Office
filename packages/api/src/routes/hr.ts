@@ -218,6 +218,74 @@ export function hrRoute(deps: AppDeps) {
     return 'error' in r ? c.json(r, 400) : c.json(r);
   });
 
+  // ---- 給与（段 3。第30.10.1節） ----
+
+  const payroll = deps.hr.payroll;
+
+  /** 給与の情報・標準報酬月額・家族（1 人）。 */
+  app.get('/payroll/employees/:id', async (c) => {
+    const { tenant } = c.get('ctx');
+    const id = c.req.param('id');
+    if (!(await employeeOf(tenant.id, id))) return c.json({ error: '従業員が見つかりません' }, 404);
+    const [profile, standardPays, family] = await Promise.all([payroll.profile(tenant.id, id), payroll.standardPays(tenant.id, id), payroll.family(tenant.id, id)]);
+    return c.json({ profile, standardPays, family });
+  });
+
+  /** 給与の情報を直す（税の区分・扶養の数・住民税・通勤・口座）。 */
+  app.put('/payroll/employees/:id/profile', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const id = c.req.param('id');
+    if (!(await employeeOf(tenant.id, id))) return c.json({ error: '従業員が見つかりません' }, 404);
+    const r = await payroll.saveProfile(tenant.id, user.id, id, await c.req.json().catch(() => ({})));
+    return 'error' in r ? c.json(r, 400) : c.json(r);
+  });
+
+  /** 標準報酬月額を足す（報酬の額を入れれば等級表で直す）。 */
+  app.post('/payroll/employees/:id/standard-pay', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const id = c.req.param('id');
+    if (!(await employeeOf(tenant.id, id))) return c.json({ error: '従業員が見つかりません' }, 404);
+    const b = await c.req.json<{ fromMonth?: string; pay?: number }>().catch(() => ({} as { fromMonth?: string; pay?: number }));
+    const r = await payroll.addStandardPay(tenant.id, user.id, id, String(b.fromMonth ?? ''), Number(b.pay));
+    return 'error' in r ? c.json(r, 400) : c.json(r, 201);
+  });
+
+  /** 家族を足す・外す。 */
+  app.post('/payroll/employees/:id/family', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const id = c.req.param('id');
+    if (!(await employeeOf(tenant.id, id))) return c.json({ error: '従業員が見つかりません' }, 404);
+    const r = await payroll.addFamily(tenant.id, user.id, id, await c.req.json().catch(() => ({})));
+    return 'error' in r ? c.json(r, 400) : c.json(r, 201);
+  });
+  app.delete('/payroll/employees/:id/family/:memberId', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    return (await payroll.removeFamily(tenant.id, user.id, c.req.param('id'), c.req.param('memberId'))) ? c.json({ ok: true }) : c.json({ error: '見つかりません' }, 404);
+  });
+
+  /** 給与の回の一覧と、支給月の支払日・勤怠の期間（`month` を渡したとき）。 */
+  app.get('/payroll/runs', async (c) => {
+    const { tenant } = c.get('ctx');
+    const month = c.req.query('month');
+    const [runs, schedule] = await Promise.all([payroll.runs(tenant.id), month && /^\d{4}-\d{2}$/.test(month) ? payroll.schedule(tenant.id, month) : null]);
+    return c.json({ runs, schedule });
+  });
+
+  /** 支給月の月の給与を計算する（下書き。同じ月の下書きは置き換える）。 */
+  app.post('/payroll/runs', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const b = await c.req.json<{ month?: string }>().catch(() => ({} as { month?: string }));
+    const r = await payroll.calculate(tenant.id, user.id, String(b.month ?? ''));
+    return 'error' in r ? c.json(r, 400) : c.json(r, 201);
+  });
+
+  /** 回と明細（見たことを監査ログに残す）。 */
+  app.get('/payroll/runs/:id', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const r = await payroll.run(tenant.id, user.id, c.req.param('id'));
+    return r ? c.json(r) : c.json({ error: '回が見つかりません' }, 404);
+  });
+
   /** 台帳に結び付けられる利用者（名前とメールアドレスだけ）。 */
   app.get('/users', async (c) => {
     const { tenant } = c.get('ctx');
