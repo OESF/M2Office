@@ -1,6 +1,6 @@
 ---
 title: M2Office 仕様書
-version: 0.164.0
+version: 0.165.0
 status: draft
 created: 2026-09-20
 updated: 2026-09-29
@@ -34,7 +34,7 @@ tags: [M2Office, specification, ai-agent, sme, saas, platform, google-workspace,
 | VII 実装 | 19〜20 | 何をどう作るか | [19](spec/19-data-model.md)・[20](spec/20-tech-stack.md) |
 | VIII 事業と運用 | 21〜23 | どう売り、どう運ぶか | [21](spec/21-business-model.md)・[22](spec/22-operations.md)・[23](spec/23-backyard.md) |
 | IX 計画 | 24〜26 | これからどう進めるか | [24](spec/24-roadmap.md)・[25](spec/25-risks.md)・[26](spec/26-open-questions.md) |
-| X 業務の拡張 | 27〜 | 中小企業が共通して使う業務を、拡張として 1 つずつ定める（第 0.139.0 版） | [27 名刺管理](spec/27-business-cards.md)・[28 契約書チェック](spec/28-contract-review.md)・[29 在庫管理](spec/29-inventory.md)（案）・[30 人事・給与](spec/30-hr-payroll.md)（案） |
+| X 業務の拡張 | 27〜 | 中小企業が共通して使う業務を、拡張として 1 つずつ定める（第 0.139.0 版） | [27 名刺管理](spec/27-business-cards.md)・[28 契約書チェック](spec/28-contract-review.md)・[29 在庫管理](spec/29-inventory.md)（案）・[30 人事・給与](spec/30-hr-payroll.md)（案）・[31 店頭サイネージ](spec/31-signage.md)（案） |
 | 付録 | A〜D | 更新方針・参考資料・出典・改訂履歴 | [A](spec/appendix-a-update-policy.md)・[B](spec/appendix-b-references.md)・[C](spec/appendix-c-data-sources.md)・[D](spec/appendix-d-history.md) |
 
 ### 0.2 どこから読むか
@@ -151,6 +151,7 @@ tags: [M2Office, specification, ai-agent, sme, saas, platform, google-workspace,
 | ADR-0048 | 週次ブリーフを「今週の見通しと先週からの変化」にし、全員に自動で用意する | `docs/adr/0048-weekly-brief-outlook.md` |
 | ADR-0049 | 人事・給与を M2Office の中で完結させる（給与計算を内製する） | `docs/adr/0049-hr-payroll-built-in.md` |
 | ADR-0050 | 在庫管理のバーコードの読み取りと棚のラベルに使う部品 | `docs/adr/0050-inventory-barcode-and-label-libraries.md` |
+| ADR-0051 | 店頭サイネージを内蔵の拡張にし、会社の画面に出すことを社外への送信としない | `docs/adr/0051-signage-own-screens-not-external.md` |
 | 実地の確認の手順 | 自社で使いながら確かめる順番と、用意するもの | `docs/acceptance-test.md` |
 | プラットフォーム API リファレンス | 公開 API の仕様 | TBD: 実装から自動生成 |
 
@@ -189,6 +190,8 @@ tags: [M2Office, specification, ai-agent, sme, saas, platform, google-workspace,
 <!-- include: spec/27-business-cards.md -->
 <!-- include: spec/28-contract-review.md -->
 <!-- include: spec/29-inventory.md -->
+<!-- include: spec/30-hr-payroll.md -->
+<!-- include: spec/31-signage.md -->
 <!-- include: spec/appendix-a-update-policy.md -->
 <!-- include: spec/appendix-b-references.md -->
 <!-- include: spec/appendix-c-data-sources.md -->
