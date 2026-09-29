@@ -7,7 +7,7 @@
  */
 
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
-import { CARDS_EXTENSION_ID, INVENTORY_EXTENSION_ID, showsCaptions, type Notification, type UserSettings } from '@m2office/shared';
+import { CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, showsCaptions, type Notification, type UserSettings } from '@m2office/shared';
 import {
   addCategory, assignCategory, checkCategoryName, groupMenu, removeCategory, togglePinned, type MenuSection,
 } from './menu.js';
@@ -27,6 +27,7 @@ import { Sources } from './sources.js';
 import { Schedules } from './Schedules.js';
 import { Cards } from './Cards.js';
 import { Inventory } from './Inventory.js';
+import { Hr } from './Hr.js';
 import { isAttended, useAttention } from './attention.js';
 import { parseRoute, routePath, syncUrl, type Route } from './route.js';
 import {
@@ -98,6 +99,7 @@ type View =
   | { kind: 'schedules' }
   | { kind: 'cards'; contactId: string | null }
   | { kind: 'inventory'; itemId: string | null }
+  | { kind: 'hr'; employeeId: string | null }
   | { kind: 'settings'; section: SettingsSection }
   | { kind: 'help'; articleId: string | null };
 
@@ -109,6 +111,7 @@ function viewPath(v: View): string {
     case 'settings': return routePath({ kind: 'settings', section: v.section });
     case 'cards': return routePath({ kind: 'cards', contactId: v.contactId });
     case 'inventory': return routePath({ kind: 'inventory', itemId: v.itemId });
+    case 'hr': return routePath({ kind: 'hr', employeeId: v.employeeId });
     case 'help': return routePath({ kind: 'help', articleId: v.articleId });
     default: return routePath({ kind: v.kind });
   }
@@ -128,6 +131,7 @@ function viewOf(r: Route): View | null {
     case 'run': return { kind: 'run', runId: r.runId };
     case 'cards': return { kind: 'cards', contactId: r.contactId };
     case 'inventory': return { kind: 'inventory', itemId: r.itemId };
+    case 'hr': return { kind: 'hr', employeeId: r.employeeId };
     case 'help': return { kind: 'help', articleId: r.articleId };
     default: return { kind: r.kind };
   }
@@ -353,15 +357,18 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
       .map((a) => ({ id: a.id, name: a.name, description: a.description, icon: agentIcon(a.category), agent: a })),
     ...(me.cards ? [{ id: CARDS_EXTENSION_ID, name: '名刺管理', description: '撮るだけで連絡先になる。会社で共有する名刺の置き場', icon: 'cards' as IconName, agent: null }] : []),
     ...(me.inventory ? [{ id: INVENTORY_EXTENSION_ID, name: '在庫管理', description: '品目・場所・入出庫を記録し、使える数を出す', icon: 'inventory' as IconName, agent: null }] : []),
+    // 人事・給与は人事区画の人にだけ出す（仕様書 第30.2節）
+    ...(me.hr ? [{ id: HR_EXTENSION_ID, name: '人事・給与', description: '従業員の台帳・雇用条件・入社と退職の手続き', icon: 'users' as IconName, agent: null }] : []),
   ];
   const allMenuAgents = orderAgents(menuItems, menu.order).filter((a) => !menu.hidden.includes(a.id));
   // ピン止めした業務だけを上に出し、ほかはカテゴリーごと・「ほかの業務」にたたむ（仕様書 第6.1.1節「業務の並び」）。
   // 並びはメニューの順のまま。使った回数では変えない。まだ一度も変えていなければ標準の組
   const { top: topAgents, sections } = groupMenu(allMenuAgents, menu);
   const openItem = (m: MenuItem) => (m.agent ? setView({ kind: 'agent', agent: m.agent })
-    : m.id === INVENTORY_EXTENSION_ID ? setView({ kind: 'inventory', itemId: null }) : setView({ kind: 'cards', contactId: null }));
+    : m.id === INVENTORY_EXTENSION_ID ? setView({ kind: 'inventory', itemId: null })
+      : m.id === HR_EXTENSION_ID ? setView({ kind: 'hr', employeeId: null }) : setView({ kind: 'cards', contactId: null }));
   const isOpen = (m: MenuItem) => (m.agent ? view.kind === 'agent' && view.agent.id === m.id
-    : m.id === INVENTORY_EXTENSION_ID ? view.kind === 'inventory' : view.kind === 'cards');
+    : m.id === INVENTORY_EXTENSION_ID ? view.kind === 'inventory' : m.id === HR_EXTENSION_ID ? view.kind === 'hr' : view.kind === 'cards');
   // ピン止めとカテゴリーは個人設定（メニュー）に保存し、端末をまたいで同じにする。保存に失敗したら読み直す
   const saveMenu = (saved: UserSettings['menu']) => {
     setMenu(saved);
@@ -598,6 +605,12 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
               <Inventory itemId={view.itemId} onOpen={(itemId) => setView({ kind: 'inventory', itemId })} userId={me.user.id} />
             </>
           )}
+          {view.kind === 'hr' && (
+            <>
+              <h1>人事・給与 <HelpTip article="start-hr">従業員の台帳と雇用条件を持ち、入社・退職の手続きを期限つきで並べます。</HelpTip></h1>
+              <Hr employeeId={view.employeeId} onOpen={(employeeId) => setView({ kind: 'hr', employeeId })} />
+            </>
+          )}
           {view.kind === 'schedules' && (
             <>
               <h1>定時実行 <HelpTip article="start-schedules">決まった時刻に、あなたの権限で業務を自動で実行します。「今すぐ実行」で動きを確かめられます。</HelpTip></h1>
@@ -753,6 +766,7 @@ const VIEW_LABELS: Record<string, string> = {
   schedules: '定時実行',
   cards: '名刺管理',
   inventory: '在庫管理',
+  hr: '人事・給与',
   settings: '個人設定',
 };
 

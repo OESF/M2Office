@@ -131,6 +131,17 @@ const ACTION_LABELS: Record<string, string> = {
   'inventory.booking_source.resume': '予約の受け口を動かした',
   'inventory.booking_source.mapping': '予約の受け口の型を直した',
   'inventory.menu.teach': '予約のメニューで使う品目を覚えさせた',
+  // 人事・給与（仕様書 第30.21節。他人の台帳を見ただけでも残す）
+  'hr.list': '従業員の一覧を見た',
+  'hr.view': '従業員の台帳を見た',
+  'hr.employee.create': '従業員を登録した',
+  'hr.employee.update': '従業員の台帳を直した',
+  'hr.employee.leave': '従業員の退職を記録した',
+  'hr.terms.add': '雇用条件を足した',
+  'hr.task.done': '入退社の手続きを済んだにした',
+  'hr.task.reopen': '入退社の手続きを戻した',
+  'hr.import': '従業員を取り込んだ',
+  'hr.export': '労働者名簿を書き出した',
 };
 
 /** 操作の種類（絞り込みの単位）。`prefixes` のどれかで始まる操作が当たる。 */
@@ -148,6 +159,7 @@ export const AUDIT_CATEGORIES: { id: string; label: string; prefixes: string[] }
   { id: 'cards', label: '名刺', prefixes: ['card.', 'contact.'] },
   { id: 'notices', label: '社内のお知らせ', prefixes: ['notice.'] },
   { id: 'inventory', label: '在庫', prefixes: ['inventory.'] },
+  { id: 'hr', label: '人事・給与', prefixes: ['hr.'] },
 ];
 
 /** 仕組みの名前（主体が `system` のとき）。 */
@@ -255,6 +267,8 @@ function targetOf(e: AuditEvent, names: AuditNames): string {
     case 'connection': return names.connection(id) ? `接続「${names.connection(id)}」` : id;
     case 'group': return names.group(id) ? `グループ「${names.group(id)}」` : id;
     case 'compartment': return names.compartment(id) ? `区画「${names.compartment(id)}」` : id;
+    // 従業員の名前は監査ログの画面に出さない（人事区画の外の管理者も見るため）。台帳の ID の頭だけ
+    case 'hr_employee': return `従業員 ${id.slice(0, 8)}`;
     case 'tool': {
       // 会社の接続の道具（`slack.slack_send_message`）は接続の名前を添える
       const [head, ...rest] = id.split('.');

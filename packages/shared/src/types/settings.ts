@@ -9,6 +9,7 @@
 
 import type { AccessSettings } from './access.js';
 import { DEFAULT_INVENTORY_SETTINGS, type InventorySettings } from './inventory.js';
+import { DEFAULT_HR_SETTINGS, type HrSettings } from './hr.js';
 
 /** 会社情報（仕様書 第6.6.1節）。帳票とメールの署名に使う。 */
 export interface CompanyInfo {
@@ -218,6 +219,8 @@ export interface TenantSettings {
   cards: CardsSettings;
   /** 在庫管理（第29章）。 */
   inventory: InventorySettings;
+  /** 人事・給与（第30章）。 */
+  hr: HrSettings;
 }
 
 /** 設定が未保存の会社に使う既定値。 */
@@ -248,6 +251,8 @@ export const DEFAULT_TENANT_SETTINGS: TenantSettings = {
   cards: { enabled: true, defaultScope: 'company' },
   // 在庫管理は既定で切り。使う会社が導入のときに入れる（第29.2節）
   inventory: DEFAULT_INVENTORY_SETTINGS,
+  // 人事・給与は既定で切り。給与 SaaS を使っている会社は入れなくてよい（第30.2節）
+  hr: DEFAULT_HR_SETTINGS,
 };
 
 /**

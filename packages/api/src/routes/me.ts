@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import {
   BRIEF_SECTIONS, WEEKLY_SECTIONS, VOICE_CHOICES, VOICE_STYLE_MAX, isValidAvatar, type UserSettings, type MenuCategory,
-  CARDS_EXTENSION_ID, INVENTORY_EXTENSION_ID, MENU_CATEGORY_MAX, MENU_CATEGORY_NAME_MAX,
+  CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, MENU_CATEGORY_MAX, MENU_CATEGORY_NAME_MAX,
 } from '@m2office/shared';
 import { AUDIO, AiNotConfiguredError, LEARNED_SOURCE, cleanTopics, buildPresence, loadFile, refusalMessage, refuseToRemember } from '@m2office/core';
 import type { AppDeps } from '../context.js';
@@ -481,7 +481,7 @@ function validate(
     }
     case 'menu': {
       // 名刺・在庫（内蔵の拡張）も業務の 1 つとして並べ・ピン止めできる（仕様書 第6.1.1節）
-      const ids = [...agentIds, CARDS_EXTENSION_ID, INVENTORY_EXTENSION_ID];
+      const ids = [...agentIds, CARDS_EXTENSION_ID, INVENTORY_EXTENSION_ID, HR_EXTENSION_ID];
       const list = (v: unknown) => (Array.isArray(v) ? v.map(String).filter((x) => ids.includes(x)) : []);
       // ピン止め（仕様書 第6.1.1節）。配列でなければ、まだ変えていない（null）として残す
       const pinned = Array.isArray(o['pinned']) ? [...new Set(list(o['pinned']))] : null;

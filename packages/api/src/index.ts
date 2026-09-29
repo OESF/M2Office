@@ -42,6 +42,7 @@ import { accessRoute, compartmentsRoute, groupsRoute } from './routes/access.js'
 import { connectionsRoute, myGoogleRoute, oauthCallbackRoute, returnTo } from './routes/connections.js';
 import { myConnectionsRoute } from './routes/connection-auth.js';
 import { debugRoute } from './routes/debug.js';
+import { hrRoute } from './routes/hr.js';
 
 /**
  * API サーバー。
@@ -137,6 +138,8 @@ app.get('/v1/me', async (c) => {
     cards: !!(await deps.cards.access(ctx.tenant.id, ctx.user.id)),
     // 在庫管理を使えるか（会社の入り切りと利用範囲。仕様書 第29.2節）。使えなければ左ペインに「在庫管理」を出さない
     inventory: !!(await deps.inventory.access(ctx.tenant.id, ctx.user.id)),
+    // 人事・給与の担当者の画面を使えるか（会社の入り切りと人事区画。仕様書 第30.2節）
+    hr: !!(await deps.hr.access(ctx.tenant.id, ctx.user.id)),
     // デバッグモードか（仕様書 第20.4.1節「デバッグモード」）。画面の上の帯に「Debug mode」を出し、記録を見る入口を出す
     debug: !!deps.debug,
   });
@@ -154,6 +157,7 @@ app.route('/v1/notifications', notificationsRoute(deps));
 app.route('/v1/schedules', schedulesRoute(deps));
 app.route('/v1/cards', cardsRoute(deps));
 app.route('/v1/inventory', inventoryRoute(deps));
+app.route('/v1/hr', hrRoute(deps));
 app.route('/v1/notices', noticesRoute(deps));
 app.route('/v1/admin/dashboard', dashboardRoute(deps));
 app.route('/v1/admin/extensions', extensionsRoute(deps));

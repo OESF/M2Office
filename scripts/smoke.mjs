@@ -3527,6 +3527,95 @@ console.log('\n■ 60. 在庫管理（内蔵の拡張。第29章、ADR-0045）')
   }
 }
 
+console.log('\n■ 61. 人事・給与（内蔵の拡張。第30章、段 1: 台帳と手続き）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const tag = `確認用人事${Date.now().toString(36)}`;
+  const { rows: saved } = await owner.query(`select tenant_id, hr from tenant_settings where tenant_id in ('t-alpha', 't-beta')`);
+  const { body: compsBefore } = await call('a', '/v1/admin/compartments');
+  const hrComp = (compsBefore.items ?? []).find((c) => c.name === 'hr');
+  try {
+    // 既定は切り（第30.2節）。切っている会社では担当者の API も使えない
+    await call('b', '/v1/admin/extensions/hr/enabled', { method: 'PUT', body: JSON.stringify({ enabled: false }) });
+    const offB = await call('b', '/v1/hr/employees');
+    offB.status === 403 ? ok('人事・給与を切っている会社では、担当者の API を使えない') : ng(`切っていても使える（${offB.status}）`);
+    const on = await call('a', '/v1/admin/extensions/hr/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const { body: meA } = await call('a', '/v1/me');
+    const { body: comps } = await call('a', '/v1/admin/compartments');
+    const hr = (comps.items ?? []).find((c) => c.name === 'hr');
+    on.status === 200 && meA.hr === true && hr?.enabled
+      ? ok('管理者が入れると、人事区画 hr を用意し、入れた管理者が担当者の画面を使える') : ng('入れても使えない', JSON.stringify({ status: on.status, hr: meA.hr, comp: hr }));
+    const set = await call('a', '/v1/admin/extensions/hr/settings', { method: 'PUT', body: JSON.stringify({ pay: { closingDay: 20, payDay: 25, payMonth: 'same' }, procedures: 'sharoushi' }) });
+    const setByMember = await call('a', '/v1/admin/extensions/hr/settings', { method: 'PUT', body: JSON.stringify({ procedures: 'self' }) }, 'member');
+    set.body?.hr?.pay?.closingDay === 20 && setByMember.status === 403 ? ok('人事・給与の会社の設定を変えられるのは管理者だけ') : ng('設定が合わない', `${set.status} ${setByMember.status}`);
+
+    // 台帳と入社の手続き（第30.5節・第30.5.2節）
+    const made = await call('a', '/v1/hr/employees', { method: 'POST', body: JSON.stringify({
+      name: `${tag} 花子`, code: `${tag}-1`, hiredOn: '2099-04-01', employment: 'part',
+      terms: { wageType: 'hourly', wageAmount: 1200, weeklyHours: 25, weeklyDays: 4, socialInsurance: true, employmentInsurance: true, work: '受付' },
+    }) });
+    const empId = made.body?.employee?.id;
+    const { body: detail } = await call('a', `/v1/hr/employees/${empId}`);
+    const hireDue = Object.fromEntries((detail.tasks ?? []).map((t) => [t.code, [t.dueOn, t.title]]));
+    made.status === 201 && hireDue['social-acquire']?.[0] === '2099-04-05' && hireDue['employment-acquire']?.[0] === '2099-05-10' && /^社会保険労務士へ依頼/.test(hireDue['social-acquire']?.[1] ?? '')
+      ? ok('従業員を登録すると、入社の手続きを期限つきで作る（保険の手続きは社会保険労務士への依頼として）') : ng('入社の手続きが合わない', JSON.stringify(detail.tasks));
+    const dup = await call('a', '/v1/hr/employees', { method: 'POST', body: JSON.stringify({ name: `${tag} 別`, code: `${tag}-1` }) });
+    dup.status === 400 ? ok('社員番号は会社の中で重ならない') : ng(`重なった（${dup.status}）`);
+    const terms = await call('a', `/v1/hr/employees/${empId}/terms`, { method: 'POST', body: JSON.stringify({ effectiveOn: '2099-10-01', wageAmount: 1300 }) });
+    const { body: detail2 } = await call('a', `/v1/hr/employees/${empId}`);
+    terms.status === 201 && detail2.terms?.length === 2 && detail2.terms[0].wageAmount === 1300 && detail2.terms[0].weeklyHours === 25
+      ? ok('雇用条件は履歴として足し、前の条件を引き継ぐ') : ng('雇用条件の履歴が合わない', JSON.stringify(detail2.terms));
+    const leave = await call('a', `/v1/hr/employees/${empId}/leave`, { method: 'POST', body: JSON.stringify({ leftOn: '2099-12-15', reason: '自己都合' }) });
+    const { body: detail3 } = await call('a', `/v1/hr/employees/${empId}`);
+    const leaveDue = Object.fromEntries((detail3.tasks ?? []).filter((t) => t.kind === 'leave').map((t) => [t.code, t.dueOn]));
+    leave.status === 200 && leaveDue['social-lose'] === '2099-12-20' && leaveDue['employment-lose'] === '2099-12-25' && leaveDue['final-pay'] === '2099-12-25'
+      ? ok('退職を記録すると、資格喪失届・最後の給与などの手続きを期限つきで作る') : ng('退職の手続きが合わない', JSON.stringify(leaveDue));
+    const done = await call('a', `/v1/hr/tasks/${detail3.tasks[0].id}`, { method: 'PUT', body: JSON.stringify({ done: true }) });
+    done.body?.task?.doneAt ? ok('手続きを済んだにできる') : ng('済んだにできない', JSON.stringify(done.body));
+
+    // 取り込み（見出しの言い方が違っても読む。昔の入社の手続きは作らない）
+    const form = new FormData();
+    form.append('file', new Blob([`従業員氏名,社員番号,入社年月日,時給,雇用形態\n${tag} 太郎,${tag}-2,2015/4/1,1100,アルバイト\n${tag} 次郎,${tag}-3,2015/13/1,1000,パート\n`], { type: 'text/csv' }), 'staff.csv');
+    const imp = await fetch(`${API}/v1/hr/import`, { method: 'POST', body: form, headers: { 'x-tenant': 'a', 'x-user': 'admin@alpha.example.jp' } });
+    const impBody = await imp.json();
+    const { body: list } = await call('a', '/v1/hr/employees');
+    const taro = (list.employees ?? []).find((e) => e.code === `${tag}-2`);
+    imp.status === 200 && impBody.created === 1 && impBody.skipped?.length === 1 && taro?.employment === 'arbeit' && taro?.openTasks === 0
+      ? ok('表計算から取り込み、読めない日付の行は理由を返し、昔の入社の手続きは作らない') : ng('取り込みが合わない', JSON.stringify({ impBody, taro }));
+    const roster = await fetch(`${API}/v1/hr/roster?format=csv`, { headers: { 'x-tenant': 'a', 'x-user': 'admin@alpha.example.jp' } });
+    const rosterText = new TextDecoder().decode(new Uint8Array(await roster.arrayBuffer()));
+    roster.status === 200 && rosterText.includes('雇入れの年月日') && rosterText.includes(`${tag} 花子`) ? ok('労働者名簿を書き出せる') : ng(`労働者名簿を書き出せない（${roster.status}）`);
+
+    // 見ただけでも監査ログに残す（第30.21節）。値は入れない
+    const { body: audit } = await call('a', '/v1/admin/audit-events?category=hr');
+    const actions = new Set((audit.items ?? []).map((x) => x.action));
+    const leaks = JSON.stringify(audit.items ?? []).includes(`${tag} 花子`);
+    ['hr.view', 'hr.list', 'hr.employee.create', 'hr.employee.leave', 'hr.import', 'hr.export'].every((a) => actions.has(a)) && !leaks
+      ? ok('台帳を見ただけでも監査ログに残し、氏名は監査ログに出さない') : ng('監査ログが合わない', `${[...actions].join(',')} leaks=${leaks}`);
+
+    // 人事区画を止めると、担当者の画面も使えない
+    await call('a', `/v1/admin/compartments/${hr.id}/enabled`, { method: 'PUT', body: JSON.stringify({ enabled: false }) });
+    const offComp = await call('a', '/v1/hr/employees');
+    await call('a', `/v1/admin/compartments/${hr.id}/enabled`, { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    offComp.status === 403 ? ok('人事区画を止めると、人事・給与の担当者の画面も使えない') : ng(`区画を止めても使える（${offComp.status}）`);
+    const cross = await call('b', `/v1/hr/employees/${empId}`);
+    cross.status === 403 || cross.status === 404 ? ok('ほかの会社の従業員は見えない') : ng(`ほかの会社から見えた（${cross.status}）`);
+  } catch (err) {
+    ng('人事・給与の確認が途中で止まった', String(err));
+  } finally {
+    // 確認用の従業員を消す（アプリからは消せないため、持ち主のつなぎで消す）
+    await owner.query(`delete from hr_employees where name like '${tag}%'`);
+    for (const r of saved) await owner.query(`update tenant_settings set hr = $2 where tenant_id = $1`, [r.tenant_id, r.hr ? JSON.stringify(r.hr) : null]);
+    if (hrComp) {
+      await call('a', `/v1/admin/compartments/${hrComp.id}/assignment`, { method: 'PUT', body: JSON.stringify({ groups: hrComp.groups, users: hrComp.users }) });
+      await call('a', `/v1/admin/compartments/${hrComp.id}/enabled`, { method: 'PUT', body: JSON.stringify({ enabled: hrComp.enabled }) });
+    }
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

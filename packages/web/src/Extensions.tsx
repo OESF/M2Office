@@ -10,7 +10,7 @@
 
 import { useEffect, useRef, useState, type DragEvent } from 'react';
 import { api, ApiError, describeError, type AccessOptions, type ExtensionView, type ScopeValue } from './api.js';
-import { INVENTORY_FEATURES, type InventoryBookingSource, type InventoryFeature, type InventorySettings } from '@m2office/shared';
+import { INVENTORY_FEATURES, type HrSettings, type InventoryBookingSource, type InventoryFeature, type InventorySettings } from '@m2office/shared';
 import { HelpTip, Markdown } from './help.js';
 import { ScopeEditor, ScopeField, useAccessOptions } from './Scope.js';
 
@@ -227,9 +227,11 @@ function InstalledCard({ item: x, busy, focused = false, options, onChanged, onT
           <button className="btn small" onClick={onReconsent}>内容を確認して同意する</button>
         </p>
       )}
-      {options && (
+      {/* 人事・給与は利用範囲ではなく人事区画で決まる（仕様書 第30.2節）。区画の画面で人を足す */}
+      {options && !x.hr && (
         <div className="small">利用できる人: <ScopeField target={x.id} options={options} onSaved={onChanged} /></div>
       )}
+      {x.hr && <div className="small">利用できる人: 権限区画「hr」の人</div>}
       {x.cards && (
         // 名刺管理の会社の設定（仕様書 第27.7節）。すぐに反映する
         <label className="small check">
@@ -239,6 +241,7 @@ function InstalledCard({ item: x, busy, focused = false, options, onChanged, onT
         </label>
       )}
       {x.inventory && on && <InventoryFields settings={x.inventory} busy={busy} onChanged={onChanged} />}
+      {x.hr && on && <HrFields settings={x.hr} busy={busy} onChanged={onChanged} />}
       <div className="row small">
         <button className="link" onClick={() => setOpen(!open)}>{open ? '詳細を閉じる' : '詳細'}</button>
         {/* 内蔵の拡張は削除しない。スイッチで切る（データは消えない。第12.13節） */}
@@ -363,6 +366,62 @@ function InventoryFields({ settings, busy, onChanged }: { settings: InventorySet
           onBlur={() => saveNumber(lead, 'leadDaysDefault', settings.leadDaysDefault)} /> 日</label>
       </div>
       {settings.features.reserve && <BookingSources />}
+    </div>
+  );
+}
+
+/** 都道府県（健康保険の料率の区分。協会けんぽは都道府県ごと）。 */
+const PREFECTURES = ['北海道', '青森県', '岩手県', '宮城県', '秋田県', '山形県', '福島県', '茨城県', '栃木県', '群馬県', '埼玉県', '千葉県', '東京都', '神奈川県',
+  '新潟県', '富山県', '石川県', '福井県', '山梨県', '長野県', '岐阜県', '静岡県', '愛知県', '三重県', '滋賀県', '京都府', '大阪府', '兵庫県', '奈良県', '和歌山県',
+  '鳥取県', '島根県', '岡山県', '広島県', '山口県', '徳島県', '香川県', '愛媛県', '高知県', '福岡県', '佐賀県', '長崎県', '熊本県', '大分県', '宮崎県', '鹿児島県', '沖縄県'];
+
+/** 締め日・支払日の選び（31 は末日）。 */
+const DAYS = Array.from({ length: 31 }, (_, i) => i + 1);
+const dayLabel = (d: number) => (d === 31 ? '末日' : `${d} 日`);
+
+/**
+ * 人事・給与の会社の設定（仕様書 第30.8.1節のうち段 1 の項目）。事業所・事業の形態・健康保険・適用・締めと支払・手続きを行う人。すぐに反映する。
+ *
+ * @remarks 説明文は出さない（原則 u11）。何の設定かは秘書に聞けばよい
+ */
+function HrFields({ settings, busy, onChanged }: { settings: HrSettings; busy: boolean; onChanged: () => void }) {
+  const [name, setName] = useState(settings.office.name);
+  const [address, setAddress] = useState(settings.office.address);
+  const save = (patch: Partial<HrSettings>) => void api.admin.setHrSettings(patch).then(onChanged);
+  return (
+    <div className="small ext-inventory">
+      <div className="row wrap">
+        <label>事業所 <input value={name} onChange={(e) => setName(e.target.value)} onBlur={() => name !== settings.office.name && save({ office: { ...settings.office, name } })} /></label>
+        <label>所在地 <input value={address} onChange={(e) => setAddress(e.target.value)} onBlur={() => address !== settings.office.address && save({ office: { ...settings.office, address } })} /></label>
+        <select value={settings.office.form} disabled={busy} onChange={(e) => save({ office: { ...settings.office, form: e.target.value as HrSettings['office']['form'] } })} aria-label="事業の形態">
+          <option value="corporation">法人</option><option value="sole">個人事業</option>
+        </select>
+      </div>
+      <div className="row wrap">
+        <select value={settings.health.kind} disabled={busy} onChange={(e) => save({ health: { ...settings.health, kind: e.target.value as HrSettings['health']['kind'] } })} aria-label="健康保険">
+          <option value="kyokai">協会けんぽ</option><option value="kumiai">健康保険組合</option><option value="kokuho-kumiai">国民健康保険組合</option><option value="none">加入なし</option>
+        </select>
+        <select value={settings.health.prefecture} disabled={busy} onChange={(e) => save({ health: { ...settings.health, prefecture: e.target.value } })} aria-label="都道府県">
+          <option value="">都道府県</option>
+          {PREFECTURES.map((p) => <option key={p} value={p}>{p}</option>)}
+        </select>
+        <select value={settings.socialApply} disabled={busy} onChange={(e) => save({ socialApply: e.target.value as HrSettings['socialApply'] })} aria-label="社会保険の適用">
+          <option value="mandatory">社会保険: 強制適用</option><option value="voluntary">社会保険: 任意適用</option><option value="none">社会保険: 適用なし</option>
+        </select>
+      </div>
+      <div className="row wrap">
+        <label>締め日 <select value={settings.pay.closingDay} disabled={busy} onChange={(e) => save({ pay: { ...settings.pay, closingDay: Number(e.target.value) } })}>
+          {DAYS.map((d) => <option key={d} value={d}>{dayLabel(d)}</option>)}
+        </select></label>
+        <label>支払日 <select value={settings.pay.payMonth} disabled={busy} onChange={(e) => save({ pay: { ...settings.pay, payMonth: e.target.value as 'same' | 'next' } })}>
+          <option value="same">当月</option><option value="next">翌月</option>
+        </select> <select value={settings.pay.payDay} disabled={busy} onChange={(e) => save({ pay: { ...settings.pay, payDay: Number(e.target.value) } })}>
+          {DAYS.map((d) => <option key={d} value={d}>{dayLabel(d)}</option>)}
+        </select></label>
+        <select value={settings.procedures} disabled={busy} onChange={(e) => save({ procedures: e.target.value as HrSettings['procedures'] })} aria-label="保険の手続き">
+          <option value="self">保険の手続き: 自社</option><option value="sharoushi">保険の手続き: 社会保険労務士に依頼</option>
+        </select>
+      </div>
     </div>
   );
 }

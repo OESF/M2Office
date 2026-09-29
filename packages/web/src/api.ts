@@ -11,6 +11,7 @@ import type {
   Approval, Artifact, Notification, Run, RunStep, Schedule, ScheduleRule, Tenant,
   TenantSettings, User, UserSettings, CardFields, Contact, ContactScope,
   InventoryItem, InventoryItemView, InventoryLocation, InventoryMove, InventoryMoveKind, InventorySettings, InventoryStockRow,
+  HrEmployee, HrEmployeeView, HrSettings, HrTask, HrTerms,
   InventoryCount, InventoryCountRow, InventoryCountScope, InventoryCountView, InventorySupplier,
   InventoryBooking, InventoryBookingMapping, InventoryBookingSource,
 } from '@m2office/shared';
@@ -183,8 +184,18 @@ export interface Me {
   cards?: boolean;
   /** 在庫管理を使えるか（会社の入り切りと利用範囲。仕様書 第29.2節）。 */
   inventory?: boolean;
+  /** 人事・給与の担当者の画面を使えるか（会社の入り切りと人事区画。仕様書 第30.2節）。 */
+  hr?: boolean;
   /** デバッグモードか（`M2O_DEBUG=true`。仕様書 第20.4.1節「デバッグモード」）。 */
   debug?: boolean;
+}
+
+/** 従業員の取り込みの結果（仕様書 第30.5節）。 */
+export interface HrImportResult {
+  created: number;
+  updated: number;
+  skipped: { row: number; reason: string }[];
+  mapping: { header: string; field: string | null }[];
 }
 
 /** デバッグモードのサーバーの記録の 1 件（仕様書 第20.4.1節「デバッグモード」）。 */
@@ -522,6 +533,8 @@ export interface ExtensionView {
   cards?: { defaultScope: ContactScope };
   /** 在庫管理の会社の設定（機能の入り切りと既定の目安。仕様書 第29.4.1節）。在庫管理のときだけある。 */
   inventory?: InventorySettings;
+  /** 人事・給与の会社の設定（仕様書 第30.8.1節）。人事・給与のときだけある。 */
+  hr?: HrSettings;
 }
 
 /** 管理者ページ「接続」の設定（仕様書 第14.3.3節）。秘密の値は含まない。 */
@@ -1033,6 +1046,39 @@ export const api = {
       saveBlob(blob, `在庫-${new Date().toISOString().slice(0, 10)}.${format}`);
     },
   },
+  /** 人事・給与の担当者（人事区画。仕様書 第30章）。 */
+  hr: {
+    list: () => call<{ employees: HrEmployeeView[]; tasks: HrTask[]; settings: HrSettings }>('/hr/employees'),
+    get: (id: string) => call<{ employee: HrEmployee; terms: HrTerms[]; tasks: HrTask[] }>(`/hr/employees/${encodeURIComponent(id)}`),
+    create: (input: Partial<HrEmployee> & { terms?: Partial<HrTerms> }) =>
+      call<{ employee: HrEmployee; tasks: number }>('/hr/employees', { method: 'POST', body: JSON.stringify(input) }),
+    update: (id: string, input: Partial<HrEmployee>) =>
+      call<{ employee: HrEmployee }>(`/hr/employees/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(input) }),
+    addTerms: (id: string, input: Partial<HrTerms>) =>
+      call<{ terms: HrTerms }>(`/hr/employees/${encodeURIComponent(id)}/terms`, { method: 'POST', body: JSON.stringify(input) }),
+    leave: (id: string, leftOn: string, reason: string) =>
+      call<{ employee: HrEmployee; tasks: number }>(`/hr/employees/${encodeURIComponent(id)}/leave`, { method: 'POST', body: JSON.stringify({ leftOn, reason }) }),
+    setTaskDone: (id: string, done: boolean) =>
+      call<{ task: HrTask }>(`/hr/tasks/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify({ done }) }),
+    /** CSV・Excel から従業員を取り込む。列の見出しは AI が読む（仕様書 第30.5節）。 */
+    importFile: async (file: File): Promise<HrImportResult> => {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await fetch('/v1/hr/import', {
+        method: 'POST', credentials: 'same-origin', body: form,
+        headers: { ...(devTenant ? { 'x-tenant': devTenant } : {}), ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}) },
+      });
+      const body = await res.json().catch(() => ({ error: '通信に失敗しました' }));
+      if (!res.ok) throw new ApiError(body.error ?? `エラー (${res.status})`, res.status, false);
+      return body as HrImportResult;
+    },
+    /** 労働者名簿を書き出す。 */
+    roster: async (format: 'csv' | 'xlsx') => {
+      const blob = await fetchBlob(`/hr/roster?format=${format}`);
+      if (!blob) throw new ApiError('書き出せませんでした', 403);
+      saveBlob(blob, `労働者名簿-${new Date().toISOString().slice(0, 10)}.${format}`);
+    },
+  },
   /** 会話の要約（仕様書 第11.9.6節）。 */
   myConversationDigests: () => call<{ items: { day: string; summary: string }[] }>('/me/conversation-digests'),
   /** 会話ログ（仕様書 第11.9.4.1節）。本人のやり取りだけが返る。 */
@@ -1223,6 +1269,9 @@ export const api = {
     /** 在庫管理の、機能の入り切りと既定の目安（仕様書 第29.4.1節）。送った項目だけを変える。 */
     setInventorySettings: (patch: Partial<InventorySettings>) =>
       call<{ ok: true; inventory: InventorySettings }>('/admin/extensions/inventory/settings', { method: 'PUT', body: JSON.stringify(patch) }),
+    /** 人事・給与の会社の設定（仕様書 第30.8.1節）。送った項目だけを変える。 */
+    setHrSettings: (patch: Partial<HrSettings>) =>
+      call<{ ok: true; hr: HrSettings }>('/admin/extensions/hr/settings', { method: 'PUT', body: JSON.stringify(patch) }),
     setExtensionEnabled: (id: string, enabled: boolean) =>
       call(`/admin/extensions/${encodeURIComponent(id)}/enabled`, { method: 'PUT', body: JSON.stringify({ enabled }) }),
     /** 会社の接続（コネクタ。仕様書 第12.11.0節）。 */

@@ -11,10 +11,12 @@
 
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
-import { CARDS_EXTENSION_ID, INVENTORY_EXTENSION_ID, INVENTORY_FEATURES, type InventorySettings, type RiskLevel } from '@m2office/shared';
+import {
+  CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, INVENTORY_FEATURES, type HrSettings, type InventorySettings, type RiskLevel,
+} from '@m2office/shared';
 import {
   bundledConnection, builtinSection, consentSnapshot, encodeFiles, unpackExtension, EXTENSION_FILE_MAX_BYTES,
-  type ExtensionEntry, type ExtensionPackage, type TenantExtensions,
+  ensureHrCompartment, type ExtensionEntry, type ExtensionPackage, type TenantExtensions,
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { tenantOrigin } from '../tenant-origin.js';
@@ -106,6 +108,8 @@ export function extensionsRoute(deps: AppDeps) {
         ...(e.pkg.manifest.id === CARDS_EXTENSION_ID ? { cards: { defaultScope: settings.cards.defaultScope } } : {}),
         // 在庫管理: 機能の入り切りと既定の目安（第29.4.1節）
         ...(e.pkg.manifest.id === INVENTORY_EXTENSION_ID ? { inventory: settings.inventory } : {}),
+        // 人事・給与: 事業所・保険・締めと支払・手続きを行う人（第30.8.1節）
+        ...(e.pkg.manifest.id === HR_EXTENSION_ID ? { hr: settings.hr } : {}),
       })),
     });
   });
@@ -156,6 +160,46 @@ export function extensionsRoute(deps: AppDeps) {
       occurredAt: new Date().toISOString(),
     });
     return c.json({ ok: true, inventory: next });
+  });
+
+  /**
+   * 人事・給与の会社の設定を変える（第30.8.1節のうち段 1 の項目）。すぐに反映し、監査ログに残す。
+   *
+   * @remarks 送られた項目だけを変える。変えた日から効き、作った手続きの期限は変えない
+   */
+  app.put(`/${HR_EXTENSION_ID}/settings`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const b = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
+    const cur = (await deps.repo.getTenantSettings(tenant.id)).hr;
+    const next: HrSettings = { ...cur, office: { ...cur.office }, health: { ...cur.health }, pay: { ...cur.pay } };
+    const obj = (v: unknown) => (v && typeof v === 'object' ? v as Record<string, unknown> : null);
+    const text = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : undefined);
+    const day = (v: unknown) => (typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 31 ? v : undefined);
+    const office = obj(b['office']);
+    if (office) {
+      if (text(office['name'], 200) !== undefined) next.office.name = text(office['name'], 200)!;
+      if (text(office['address'], 300) !== undefined) next.office.address = text(office['address'], 300)!;
+      if (office['form'] === 'corporation' || office['form'] === 'sole') next.office.form = office['form'];
+    }
+    const health = obj(b['health']);
+    if (health) {
+      if (['kyokai', 'kumiai', 'kokuho-kumiai', 'none'].includes(String(health['kind']))) next.health.kind = health['kind'] as HrSettings['health']['kind'];
+      if (text(health['prefecture'], 10) !== undefined) next.health.prefecture = text(health['prefecture'], 10)!;
+    }
+    if (['mandatory', 'voluntary', 'none'].includes(String(b['socialApply']))) next.socialApply = b['socialApply'] as HrSettings['socialApply'];
+    const pay = obj(b['pay']);
+    if (pay) {
+      if (day(pay['closingDay'])) next.pay.closingDay = day(pay['closingDay'])!;
+      if (day(pay['payDay'])) next.pay.payDay = day(pay['payDay'])!;
+      if (pay['payMonth'] === 'same' || pay['payMonth'] === 'next') next.pay.payMonth = pay['payMonth'];
+    }
+    if (b['procedures'] === 'self' || b['procedures'] === 'sharoushi') next.procedures = b['procedures'];
+    await deps.repo.saveTenantSettings(tenant.id, 'hr', next, user.id);
+    await deps.repo.appendAudit({
+      id: randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id, action: 'settings.update',
+      targetType: 'settings', targetId: 'hr', detail: { fields: Object.keys(b) }, occurredAt: new Date().toISOString(),
+    });
+    return c.json({ ok: true, hr: next });
   });
 
   /** 在庫管理の予約の受け口（第29.13.1節）。URL の鍵は返さない（作ったときに一度だけ返す）。 */
@@ -297,7 +341,19 @@ export function extensionsRoute(deps: AppDeps) {
     if (section) {
       const settings = await deps.repo.getTenantSettings(tenant.id);
       if (section === 'cards') await deps.repo.saveTenantSettings(tenant.id, 'cards', { ...settings.cards, enabled: body.enabled }, user.id);
-      else await deps.repo.saveTenantSettings(tenant.id, 'inventory', { ...settings.inventory, enabled: body.enabled }, user.id);
+      else if (section === 'inventory') await deps.repo.saveTenantSettings(tenant.id, 'inventory', { ...settings.inventory, enabled: body.enabled }, user.id);
+      else await deps.repo.saveTenantSettings(tenant.id, 'hr', { ...settings.hr, enabled: body.enabled }, user.id);
+      // 人事・給与を入れたら、人事区画を用意し、入れた管理者を区画に入れる（仕様書 第30.2節）
+      if (section === 'hr' && body.enabled) {
+        const prepared = await ensureHrCompartment(deps.repo, tenant.id, user.id);
+        if (prepared.created || prepared.added) {
+          await deps.repo.appendAudit({
+            id: randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id,
+            action: prepared.created ? 'compartment.create' : 'compartment.enter',
+            targetType: 'compartment', targetId: 'hr', detail: { by: 'hr.enable', member: user.id }, occurredAt: new Date().toISOString(),
+          });
+        }
+      }
       await deps.repo.appendAudit({
         id: randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id,
         action: body.enabled ? 'extension.enable' : 'extension.disable',

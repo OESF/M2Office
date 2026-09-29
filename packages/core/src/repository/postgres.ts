@@ -792,7 +792,8 @@ export class PostgresRepository implements Repository {
       knowledge: TenantSettings['knowledge'] | null; privacy: TenantSettings['privacy'] | null;
       dashboard: TenantSettings['dashboard'] | null; invoice: TenantSettings['invoice'] | null;
       cards: TenantSettings['cards'] | null; inventory: Partial<TenantSettings['inventory']> | null;
-    }>(tenantId, `select company, writing_style, automation, agents, effect, onboarding, access, slides, knowledge, privacy, dashboard, invoice, cards, inventory
+      hr: Partial<TenantSettings['hr']> | null;
+    }>(tenantId, `select company, writing_style, automation, agents, effect, onboarding, access, slides, knowledge, privacy, dashboard, invoice, cards, inventory, hr
                     from tenant_settings where tenant_id = $1`,
       [tenantId]);
     const r = rows[0];
@@ -815,6 +816,12 @@ export class PostgresRepository implements Repository {
       invoice: { ...d.invoice, ...(r?.invoice ?? {}) },
       cards: { ...d.cards, ...(r?.cards ?? {}) },
       inventory: { ...d.inventory, ...(r?.inventory ?? {}), features: { ...d.inventory.features, ...(r?.inventory?.features ?? {}) } },
+      hr: {
+        ...d.hr, ...(r?.hr ?? {}),
+        office: { ...d.hr.office, ...(r?.hr?.office ?? {}) },
+        health: { ...d.hr.health, ...(r?.hr?.health ?? {}) },
+        pay: { ...d.hr.pay, ...(r?.hr?.pay ?? {}) },
+      },
     };
   }
 
@@ -824,7 +831,7 @@ export class PostgresRepository implements Repository {
     const column = ({
       company: 'company', writingStyle: 'writing_style', automation: 'automation', agents: 'agents',
       effect: 'effect', onboarding: 'onboarding', access: 'access', slides: 'slides', knowledge: 'knowledge', privacy: 'privacy',
-      dashboard: 'dashboard', invoice: 'invoice', cards: 'cards', inventory: 'inventory',
+      dashboard: 'dashboard', invoice: 'invoice', cards: 'cards', inventory: 'inventory', hr: 'hr',
     } as const)[section];
     // 列名は上の固定の対応表からのみ取る。利用者の入力を SQL に埋め込まない
     await this.q(tenantId,

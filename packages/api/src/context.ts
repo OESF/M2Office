@@ -15,11 +15,11 @@ import {
   TenantAiResolver, platformAi, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID,
   defaultGeminiModels, ConnectionCredentials, type ConnectionAuthProvider,
   CardService, PostgresContactStore, cardsAccess, type ContactStore, NoticeService, PostgresNoticeStore,
-  InventoryService, InventoryWatch, InventoryBookings, PostgresInventoryStore, inventoryAccess,
+  InventoryService, InventoryWatch, InventoryBookings, PostgresInventoryStore, inventoryAccess, HrService, PostgresHrStore, hrAccess,
   type SecretBox, type GeminiModels,
   type FileStore, type TenantExtensions, type HelpArticle, type LlmProvider, type Logger, type Repository, type WorkspaceConnector,
 } from '@m2office/core';
-import { canRunAgent, type AgentDefinition, type ContactScope, type InventorySettings } from '@m2office/shared';
+import { canRunAgent, type AgentDefinition, type ContactScope, type HrSettings, type InventorySettings } from '@m2office/shared';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -100,6 +100,11 @@ export interface AppDeps {
     /** 予約との引き当て（第29.13節）。 */
     bookings: InventoryBookings;
     access(tenantId: string, userId: string): Promise<InventorySettings | null>;
+  };
+  /** 人事・給与（内蔵の拡張。仕様書 第30章）。使えるのは会社で入れていて人事区画に入っている人だけ。 */
+  hr: {
+    service: HrService;
+    access(tenantId: string, userId: string): Promise<HrSettings | null>;
   };
 }
 
@@ -273,6 +278,14 @@ export function buildDeps(): AppDeps {
     cards,
     notices,
     inventory,
+    // 人事・給与（第30章）。台帳は人事区画の人だけが扱う
+    hr: {
+      service: new HrService({
+        store: new PostgresHrStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+        repo, llm: (tenantId) => ai.llmFor(tenantId),
+      }),
+      access: hrAccess(repo),
+    },
   };
 }
 

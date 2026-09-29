@@ -1405,3 +1405,18 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
   font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-all;
 }
 .debug-label { margin: 4px 0 2px; font-size: 11px; color: var(--muted); }
+
+/* 人事・給与の担当者の画面（仕様書 第30.25節） */
+.hr-toolbar { margin-bottom: calc(10px * var(--space-scale)); }
+.hr .row.wrap { flex-wrap: wrap; gap: calc(6px * var(--space-scale)); align-items: center; }
+.hr .row.wrap + .row.wrap { margin-top: calc(6px * var(--space-scale)); }
+.hr input.short { width: 10em; flex: 0 1 10em; }
+.hr input.num-input { width: 7em; flex: 0 0 7em; }
+.hr input.grow { flex: 1 1 14em; min-width: 0; }
+.hr button.link { background: none; border: none; padding: 0; cursor: pointer; color: inherit; font-weight: 600; text-align: left; }
+.hr-panel { padding: calc(10px * var(--space-scale)); margin-bottom: calc(12px * var(--space-scale)); }
+.hr-tasks { list-style: none; margin: calc(6px * var(--space-scale)) 0 0; padding: 0; }
+.hr-tasks li { padding: 3px 0; gap: 8px; }
+.hr-tasks li.overdue span { color: var(--danger); }
+.hr-tasks li.done span { color: var(--muted); text-decoration: line-through; }
+.hr-table .badge { margin-left: 6px; }

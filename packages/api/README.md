@@ -175,6 +175,14 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/inventory/counts/:id/close` ／ `cancel` | 確定する（差を理由「棚卸し」の調整にし、数えていない行は 0 にしない）／ やめる。どちらも始めた人と管理者だけ（それ以外は 403） |
 | `GET /v1/inventory/counts/:id/export` | 棚卸しの結果を CSV で書き出す（監査ログに残す） |
 | `GET /v1/inventory/export` | 品目と数を書き出す（`format=csv` か `xlsx`。監査ログに残す） |
+| `GET /v1/hr/employees` | 人事・給与（第30章）: 従業員の一覧（いまの雇用条件の要点・済んでいない手続きの数）と、済んでいない手続き・会社の設定。**会社で入れていて人事区画 `hr` に入っている人だけ**。それ以外は `/v1/hr` のどの口も 403。一覧を開いたことも監査ログに残す |
+| `GET /v1/hr/employees/:id` | 1 人の台帳（雇用条件の履歴・手続き）。見たことを監査ログに残す（第30.21節） |
+| `POST /v1/hr/employees` ／ `PUT /v1/hr/employees/:id` | 従業員を作る（最初の雇用条件 `terms` と入社の手続きを作る）／ 台帳の基本の項目を直す（入社日を変えたら入社の手続きの期限を直す）。社員番号は会社の中で重ならない |
+| `POST /v1/hr/employees/:id/terms` | 雇用条件を足す（`effectiveOn` 必須。前の条件を引き継ぎ、送った項目だけを変える履歴） |
+| `POST /v1/hr/employees/:id/leave` | 退職を記録する（`leftOn`・`reason`）。退職の手続きを期限つきで作る（第30.5.2節） |
+| `PUT /v1/hr/tasks/:id` | 手続きを済んだにする・戻す（`done`） |
+| `POST /v1/hr/import` | CSV・Excel から従業員を取り込む（`file`。見出しを推論で読む。入社・退職から 60 日を過ぎた人の手続きは作らない） |
+| `GET /v1/hr/roster` | 労働者名簿を書き出す（`format=csv` か `xlsx`。事業主本人は載せない。監査ログに残す） |
 | `GET /v1/inventory/bookings` | 今日（日本時間）から先の予約と取り置き・予約の日を過ぎた取り置き（`overdue`）・使う品目の分からない予約（`unmapped`）。予約との引き当てを切っている会社は 403（第29.13節） |
 | `POST /v1/inventory/bookings` | 取り置く（`itemId`・`qty`・`startsAt`・任意の `externalId`・`menu`）。使える数から引く |
 | `POST /v1/inventory/bookings/:id/use` ／ `cancel` | 予約の人が来た（取り置きを使用の記録にする）／ 取り消す（使える数に戻す） |
@@ -223,6 +231,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `PUT /v1/admin/extensions/business-cards/settings` | 管理者: 名刺管理の、取り込んだ名刺の既定の範囲（`defaultScope`。第27.7節） |
 | `GET /v1/admin/extensions/inventory/booking-sources` ／ `POST` | 管理者: 予約の受け口の一覧 ／ 作る（`name`）。作ったときだけ送り先の URL（鍵を含む）を返す。鍵はハッシュだけを持つ |
 | `PUT /v1/admin/extensions/inventory/booking-sources/:id/status` ／ `mapping` | 管理者: 受け口を止める・再開する（`status`）／ 項目の対応を直す・やり直す（`mapping`。`null` で次の予約から推論し直す） |
+| `PUT /v1/admin/extensions/hr/settings` | 管理者: 人事・給与の会社の設定（`office`・`health`・`socialApply`・`pay`・`procedures`。第30.8.1節）。送った項目だけを変える。人事・給与を `PUT /v1/admin/extensions/hr/enabled` で入れると、区画 `hr` が無ければ作り、入れた管理者を入れる |
 | `PUT /v1/admin/extensions/inventory/settings` | 管理者: 在庫管理の機能の入り切り（`features`）・残りわずかの既定の目安（`lowDefault`）・仕入れの日数（`leadDaysDefault`）・棚卸しの頻度（`countEveryDays`）。送った項目だけを変える（第29.4.1節） |
 | `GET /v1/admin/connections/mcp` | 管理者: 会社の接続（MCP）の一覧。道具ごとの危険度・有効かどうか・使っている業務、認証の状態（`authState`。秘密の値は返さない）、よく使うサービスの型（`presets`）（仕様書 第12.11節、ADR-0037・ADR-0044） |
 | `POST /v1/admin/connections/mcp` | 管理者: URL を受け取り、道具の一覧を取って会社の接続として登録する（読むだけの印が付いた道具は「読むだけ」、ほかは「社外へ送る」扱い）。`preset`（`slack`）で型から、`auth`（`oauth`・`api_key`）で認証の要る接続を登録する。認証の要る接続の道具は、認証情報のあとで取る |
