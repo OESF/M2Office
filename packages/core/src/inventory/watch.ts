@@ -122,7 +122,8 @@ export class InventoryWatch {
   async daily(tenantId: string, now: Date = new Date()): Promise<number> {
     const settings = await this.deps.repo.getTenantSettings(tenantId);
     if (!settings.inventory.enabled) return 0;
-    const rows = await this.deps.service.forecast(tenantId);
+    // 見直す日（`now` の日本時間の日付）で数える。実の今日で数えると、期限までの日数が見直す日とずれる
+    const rows = await this.deps.service.forecast(tenantId, dateIn('Asia/Tokyo', now));
     const short = rows.filter((r) => r.runningOut || r.low);
     // 予約との引き当て（第29.13節）: 日を過ぎても取り置いたままの予約と、使う品目の分からないメニュー
     let overdue: string[] = [];
