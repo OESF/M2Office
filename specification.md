@@ -1,6 +1,6 @@
 ---
 title: M2Office 仕様書
-version: 0.153.0
+version: 0.154.0
 status: draft
 created: 2026-09-20
 updated: 2026-09-28
@@ -34,7 +34,7 @@ tags: [M2Office, specification, ai-agent, sme, saas, platform, google-workspace,
 | VII 実装 | 19〜20 | 何をどう作るか | [19](spec/19-data-model.md)・[20](spec/20-tech-stack.md) |
 | VIII 事業と運用 | 21〜23 | どう売り、どう運ぶか | [21](spec/21-business-model.md)・[22](spec/22-operations.md)・[23](spec/23-backyard.md) |
 | IX 計画 | 24〜26 | これからどう進めるか | [24](spec/24-roadmap.md)・[25](spec/25-risks.md)・[26](spec/26-open-questions.md) |
-| X 業務の拡張 | 27〜 | 中小企業が共通して使う業務を、拡張として 1 つずつ定める（第 0.139.0 版） | [27 名刺管理](spec/27-business-cards.md)・[28 契約書チェック](spec/28-contract-review.md)・[29 在庫管理](spec/29-inventory.md)（案） |
+| X 業務の拡張 | 27〜 | 中小企業が共通して使う業務を、拡張として 1 つずつ定める（第 0.139.0 版） | [27 名刺管理](spec/27-business-cards.md)・[28 契約書チェック](spec/28-contract-review.md)・[29 在庫管理](spec/29-inventory.md)（案）・[30 人事・給与](spec/30-hr-payroll.md)（案） |
 | 付録 | A〜D | 更新方針・参考資料・出典・改訂履歴 | [A](spec/appendix-a-update-policy.md)・[B](spec/appendix-b-references.md)・[C](spec/appendix-c-data-sources.md)・[D](spec/appendix-d-history.md) |
 
 ### 0.2 どこから読むか
