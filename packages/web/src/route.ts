@@ -17,6 +17,8 @@ export type Route =
   | { kind: 'schedules' }
   /** 名刺（仕様書 第27.8節）。`contactId` があれば詳細。 */
   | { kind: 'cards'; contactId: string | null }
+  /** 在庫（仕様書 第29章）。`itemId` があれば品目の詳細。 */
+  | { kind: 'inventory'; itemId: string | null }
   | { kind: 'settings'; section: string | null }
   | { kind: 'help'; articleId: string | null }
   | { kind: 'unknown' };
@@ -50,6 +52,7 @@ export function parseRoute(pathname: string): Route {
     case 'notifications': return second === undefined ? { kind: 'notifications' } : { kind: 'unknown' };
     case 'schedules': return second === undefined ? { kind: 'schedules' } : { kind: 'unknown' };
     case 'cards': return second === undefined ? { kind: 'cards', contactId: null } : id(second) ? { kind: 'cards', contactId: id(second) } : { kind: 'unknown' };
+    case 'inventory': return second === undefined ? { kind: 'inventory', itemId: null } : id(second) ? { kind: 'inventory', itemId: id(second) } : { kind: 'unknown' };
     case 'settings': return { kind: 'settings', section: id(second) };
     case 'help': return { kind: 'help', articleId: id(second) };
     default: return { kind: 'unknown' };
@@ -65,6 +68,7 @@ export function routePath(route: Route): string {
     case 'run': return `/runs/${enc(route.runId)}`;
     case 'approvals': case 'history': case 'notifications': case 'schedules': return `/${route.kind}`;
     case 'cards': return route.contactId ? `/cards/${enc(route.contactId)}` : '/cards';
+    case 'inventory': return route.itemId ? `/inventory/${enc(route.itemId)}` : '/inventory';
     case 'settings': return route.section ? `/settings/${enc(route.section)}` : '/settings';
     case 'help': return route.articleId ? `/help/${enc(route.articleId)}` : '/help';
   }

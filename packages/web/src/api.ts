@@ -10,6 +10,7 @@
 import type {
   Approval, Artifact, Notification, Run, RunStep, Schedule, ScheduleRule, Tenant,
   TenantSettings, User, UserSettings, CardFields, Contact, ContactScope,
+  InventoryItem, InventoryItemView, InventoryLocation, InventoryMove, InventoryMoveKind, InventorySettings, InventoryStockRow,
 } from '@m2office/shared';
 
 /**
@@ -154,6 +155,54 @@ export interface Me {
   serverVersion: string | null;
   /** 名刺管理を使えるか（会社の入り切りと利用範囲。仕様書 第27.2節）。 */
   cards?: boolean;
+  /** 在庫管理を使えるか（会社の入り切りと利用範囲。仕様書 第29.2節）。 */
+  inventory?: boolean;
+}
+
+/** 在庫の一覧（仕様書 第29.6節）。 */
+export interface InventoryList {
+  items: InventoryItemView[];
+  locations: InventoryLocation[];
+  settings: Pick<InventorySettings, 'features' | 'lowDefault'>;
+  /** 見ている人が管理者か（品目の止め・場所の削除）。 */
+  admin: boolean;
+}
+
+/** 品目 1 件の詳しい姿。 */
+export interface InventoryDetail {
+  item: InventoryItemView;
+  stock: InventoryStockRow[];
+  moves: InventoryMove[];
+}
+
+/** 入出庫を記録するときに送る値。 */
+export interface InventoryMoveRequest {
+  kind: InventoryMoveKind;
+  itemId: string;
+  qty: number;
+  unit?: 'unit' | 'pack';
+  locationId?: string;
+  toLocationId?: string;
+  lot?: string;
+  expiresOn?: string;
+  reason?: string;
+}
+
+/** 入出庫の記録の結果。 */
+export interface InventoryMoveResult {
+  ok: true;
+  moves: InventoryMove[];
+  item: InventoryItemView;
+  warnings: string[];
+}
+
+/** 品目の取り込みの結果。 */
+export interface InventoryImportResult {
+  created: number;
+  updated: number;
+  stocked: number;
+  skipped: { row: number; reason: string }[];
+  mapping: { header: string; field: string | null }[];
 }
 
 /** 名刺の一覧の 1 行（仕様書 第27.8節）。 */
@@ -396,6 +445,8 @@ export interface ExtensionView {
   scope: ScopeValue;
   /** 名刺管理の会社の設定（取り込んだ名刺の既定の範囲。仕様書 第27.7節）。名刺管理のときだけある。 */
   cards?: { defaultScope: ContactScope };
+  /** 在庫管理の会社の設定（機能の入り切りと既定の目安。仕様書 第29.4.1節）。在庫管理のときだけある。 */
+  inventory?: InventorySettings;
 }
 
 /** 管理者ページ「接続」の設定（仕様書 第14.3.3節）。秘密の値は含まない。 */
@@ -779,6 +830,58 @@ export const api = {
       saveBlob(blob, `${name || 'contact'}.vcf`);
     },
   },
+  /** 在庫管理（内蔵の拡張。仕様書 第29章）。 */
+  inventory: {
+    list: (q: { q?: string; stopped?: boolean } = {}) => {
+      const p = new URLSearchParams();
+      if (q.q) p.set('q', q.q);
+      if (q.stopped) p.set('stopped', '1');
+      return call<InventoryList>(`/inventory?${p.toString()}`);
+    },
+    get: (id: string) => call<InventoryDetail>(`/inventory/items/${encodeURIComponent(id)}`),
+    /**
+     * 品目を作る。はじめの数があれば入庫として記録する。
+     *
+     * @returns 単位の欄の数をはじめの数として読んだときは、そのことを `note` で返す
+     */
+    create: (item: Partial<InventoryItem> & { initialQty?: number | null }) =>
+      call<{ item: InventoryItemView; note: string | null }>('/inventory/items', { method: 'POST', body: JSON.stringify(item) }),
+    update: (id: string, item: Partial<InventoryItem>) =>
+      call<{ item: InventoryItem }>(`/inventory/items/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(item) }),
+    /** 品目を止める・使うに戻す（管理者）。 */
+    setStatus: (id: string, status: 'active' | 'stopped') =>
+      call<{ ok: true }>(`/inventory/items/${encodeURIComponent(id)}/status`, { method: 'PUT', body: JSON.stringify({ status }) }),
+    removeCode: (id: string, code: string) =>
+      call<{ ok: true }>(`/inventory/items/${encodeURIComponent(id)}/codes/${encodeURIComponent(code)}`, { method: 'DELETE' }),
+    /** 読んだバーコード・QR から品目か棚を引く（仕様書 第29.11節）。 */
+    lookup: (code: string) => call<{
+      parsed: { code: string; gtin: string | null; expiresOn: string | null; lot: string | null; kind: 'gs1' | 'ean' | 'other' };
+      item: InventoryItem | null; location: InventoryLocation | null;
+    }>(`/inventory/lookup?code=${encodeURIComponent(code)}`),
+    addLocation: (warehouse: string, shelf: string) =>
+      call<{ location: InventoryLocation }>('/inventory/locations', { method: 'POST', body: JSON.stringify({ warehouse, shelf }) }),
+    removeLocation: (id: string) => call<{ ok: true }>(`/inventory/locations/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    move: (m: InventoryMoveRequest) => call<InventoryMoveResult>('/inventory/moves', { method: 'POST', body: JSON.stringify(m) }),
+    undo: (moveId: string) => call<InventoryMoveResult>(`/inventory/moves/${encodeURIComponent(moveId)}/undo`, { method: 'POST' }),
+    /** CSV・Excel から品目を取り込む。列の見出しは AI が読む（仕様書 第29.6節）。 */
+    importFile: async (file: File): Promise<InventoryImportResult> => {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await fetch('/v1/inventory/import', {
+        method: 'POST', credentials: 'same-origin', body: form,
+        headers: { ...(devTenant ? { 'x-tenant': devTenant } : {}), ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}) },
+      });
+      const body = await res.json().catch(() => ({ error: '通信に失敗しました' }));
+      if (!res.ok) throw new ApiError(body.error ?? `エラー (${res.status})`, res.status, false);
+      return body as InventoryImportResult;
+    },
+    /** 品目と数を書き出す。 */
+    exportFile: async (format: 'csv' | 'xlsx') => {
+      const blob = await fetchBlob(`/inventory/export?format=${format}`);
+      if (!blob) throw new ApiError('書き出せませんでした', 403);
+      saveBlob(blob, `在庫-${new Date().toISOString().slice(0, 10)}.${format}`);
+    },
+  },
   /** 会話の要約（仕様書 第11.9.6節）。 */
   myConversationDigests: () => call<{ items: { day: string; summary: string }[] }>('/me/conversation-digests'),
   /** 会話ログ（仕様書 第11.9.4.1節）。本人のやり取りだけが返る。 */
@@ -956,6 +1059,9 @@ export const api = {
     /** 名刺管理の、取り込んだ名刺の既定の範囲（仕様書 第27.7節）。 */
     setCardsDefaultScope: (defaultScope: ContactScope) =>
       call<{ ok: true }>('/admin/extensions/business-cards/settings', { method: 'PUT', body: JSON.stringify({ defaultScope }) }),
+    /** 在庫管理の、機能の入り切りと既定の目安（仕様書 第29.4.1節）。送った項目だけを変える。 */
+    setInventorySettings: (patch: Partial<InventorySettings>) =>
+      call<{ ok: true; inventory: InventorySettings }>('/admin/extensions/inventory/settings', { method: 'PUT', body: JSON.stringify(patch) }),
     setExtensionEnabled: (id: string, enabled: boolean) =>
       call(`/admin/extensions/${encodeURIComponent(id)}/enabled`, { method: 'PUT', body: JSON.stringify({ enabled }) }),
     /** 会社の接続（コネクタ。仕様書 第12.11.0節）。 */

@@ -11,6 +11,7 @@ import type { FileStore } from '../files/store.js';
 import type { ResearchProvider } from '../research/provider.js';
 import type { CardToolContext } from '../cards/tools.js';
 import type { NoticeService } from '../notices/service.js';
+import type { InventoryToolContext } from '../inventory/tools.js';
 
 /** ツール呼び出しの文脈。テナント境界と実行の同一性を持ち回る。 */
 export interface ToolContext {
@@ -59,6 +60,12 @@ export interface ToolContext {
    * 社内のお知らせ（仕様書 第10.15節）。無ければ `notices.list` は「読めなかった」と返す。
    */
   notices?: NoticeService;
+  /**
+   * 在庫管理（内蔵の拡張。仕様書 第29章）。使えるかどうか（会社の入り切り・利用範囲）は、道具が呼ぶたびに確かめる。
+   *
+   * @remarks 無ければ在庫の道具は「使えない」と返す
+   */
+  inventory?: InventoryToolContext;
 }
 
 /** 引数 1 つの定義（JSON Schema の一部）。 */

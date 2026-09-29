@@ -15,10 +15,11 @@ import {
   TenantAiResolver, platformAi, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID,
   defaultGeminiModels, ConnectionCredentials, type ConnectionAuthProvider,
   CardService, PostgresContactStore, cardsAccess, type ContactStore, NoticeService, PostgresNoticeStore,
+  InventoryService, PostgresInventoryStore, inventoryAccess,
   type SecretBox, type GeminiModels,
   type FileStore, type TenantExtensions, type HelpArticle, type LlmProvider, type Logger, type Repository, type WorkspaceConnector,
 } from '@m2office/core';
-import { canRunAgent, type AgentDefinition, type ContactScope } from '@m2office/shared';
+import { canRunAgent, type AgentDefinition, type ContactScope, type InventorySettings } from '@m2office/shared';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -85,6 +86,12 @@ export interface AppDeps {
   cards: { service: CardService; store: ContactStore; access(tenantId: string, userId: string): Promise<{ defaultScope: ContactScope } | null> };
   /** 社内のお知らせ（仕様書 第10.15節）。画面の API・秘書・朝のブリーフが同じものを使う。 */
   notices: NoticeService;
+  /**
+   * 在庫管理（内蔵の拡張。仕様書 第29章）。
+   *
+   * @remarks `access` は、会社が在庫管理を使っていて利用者が利用範囲の中なら、会社の在庫管理の設定を返す（使えなければ `null`）
+   */
+  inventory: { service: InventoryService; access(tenantId: string, userId: string): Promise<InventorySettings | null> };
 }
 
 /**
@@ -160,8 +167,16 @@ export function buildDeps(): AppDeps {
     store: new PostgresNoticeStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
     repo,
   });
+  // 在庫管理（内蔵の拡張。仕様書 第29章）。在庫は会社で共有する
+  const inventory = {
+    service: new InventoryService({
+      store: new PostgresInventoryStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+      repo, llm: (tenantId) => ai.llmFor(tenantId),
+    }),
+    access: inventoryAccess(repo),
+  };
   const engine = new RunEngine({
-    repo, llm, registry, connector, files, logger: log, research, cards, notices,
+    repo, llm, registry, connector, files, logger: log, research, cards, notices, inventory,
     llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId),
     resolveDefinition: async (id, version, tenantId) => (await tenantView(tenantId)).resolve(id, version),
     registryFor: async (tenantId) => (await tenantView(tenantId)).registry,
@@ -234,6 +249,7 @@ export function buildDeps(): AppDeps {
     handoffs: new HandoffStore(),
     cards,
     notices,
+    inventory,
   };
 }
 

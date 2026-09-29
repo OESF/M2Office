@@ -10,6 +10,7 @@
 
 import { useEffect, useRef, useState, type DragEvent } from 'react';
 import { api, ApiError, describeError, type AccessOptions, type ExtensionView, type ScopeValue } from './api.js';
+import { INVENTORY_FEATURES, type InventoryFeature, type InventorySettings } from '@m2office/shared';
 import { HelpTip, Markdown } from './help.js';
 import { ScopeEditor, ScopeField, useAccessOptions } from './Scope.js';
 
@@ -237,6 +238,7 @@ function InstalledCard({ item: x, busy, focused = false, options, onChanged, onT
           取り込んだ名刺を、既定で自分だけにする
         </label>
       )}
+      {x.inventory && on && <InventoryFields settings={x.inventory} busy={busy} onChanged={onChanged} />}
       <div className="row small">
         <button className="link" onClick={() => setOpen(!open)}>{open ? '詳細を閉じる' : '詳細'}</button>
         {/* 内蔵の拡張は削除しない。スイッチで切る（データは消えない。第12.13節） */}
@@ -318,6 +320,47 @@ function Consent({ item: x, busy, options, onAgree, onCancel }: {
       <div className="row">
         <button className="btn" disabled={busy || empty} onClick={() => onAgree(scope)}>同意して導入する</button>
         <button className="btn ghost" onClick={onCancel}>やめる</button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 画面で入り切りできる在庫管理の機能。公開・引き当て・発注の案は、その段を作ったときに足す（仕様書 第24.4節）。
+ *
+ * @remarks 働かない機能のスイッチを出さない（入れても何も起きないと、管理者を惑わせるため）
+ */
+const INVENTORY_READY: InventoryFeature[] = ['lots', 'units'];
+
+/**
+ * 在庫管理の会社の設定（仕様書 第29.4節・第29.4.1節）。機能の入り切りと、残りわずか・仕入れの日数の既定。すぐに反映する。
+ *
+ * @remarks 説明文は出さない（原則 u11）。何の機能かは秘書に聞けばよい
+ */
+function InventoryFields({ settings, busy, onChanged }: { settings: InventorySettings; busy: boolean; onChanged: () => void }) {
+  const [low, setLow] = useState(String(settings.lowDefault));
+  const [lead, setLead] = useState(String(settings.leadDaysDefault));
+  const save = (patch: Partial<InventorySettings>) => void api.admin.setInventorySettings(patch).then(onChanged);
+  const saveNumber = (v: string, key: 'lowDefault' | 'leadDaysDefault', current: number) => {
+    const n = Number(v);
+    if (Number.isFinite(n) && n >= 0 && n !== current) save({ [key]: n });
+  };
+  return (
+    <div className="small ext-inventory">
+      <div className="row wrap">
+        {INVENTORY_FEATURES.filter((f) => INVENTORY_READY.includes(f.id)).map((f) => (
+          <label key={f.id} className="check">
+            <input type="checkbox" checked={settings.features[f.id]} disabled={busy}
+              onChange={(e) => save({ features: { ...settings.features, [f.id]: e.target.checked } })} />
+            {f.label}
+          </label>
+        ))}
+      </div>
+      <div className="row wrap">
+        <label>残りわずかの目安 <input type="number" min={0} className="num" value={low} onChange={(e) => setLow(e.target.value)}
+          onBlur={() => saveNumber(low, 'lowDefault', settings.lowDefault)} /></label>
+        <label>仕入れにかかる日数 <input type="number" min={0} className="num" value={lead} onChange={(e) => setLead(e.target.value)}
+          onBlur={() => saveNumber(lead, 'leadDaysDefault', settings.leadDaysDefault)} /> 日</label>
       </div>
     </div>
   );

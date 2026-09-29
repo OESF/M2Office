@@ -151,6 +151,18 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/cards/card/:cardId/front` ／ `back` | 名刺の画像（見られる名刺のものだけ。ページだけの PDF は囲いの中で開かせる） |
 | `PUT /v1/cards/card/:cardId/received` | 受け取った日を直す（`receivedOn`。受け取った本人だけ。今日より後は 400。初めの値は取り込んだ人のタイムゾーンでの取り込んだ日。第27.3節） |
 | `DELETE /v1/cards/card/:cardId` | 読み取れなかった名刺を、待たずに消す（取り込んだ本人だけ） |
+| `GET /v1/inventory` | 在庫の品目の一覧（`q`・`stopped=1`）と使える数・場所・会社の機能の入り切り。在庫管理を切っている会社と利用範囲の外の人には、`/v1/inventory` のどの口も 403（仕様書 第29章） |
+| `GET /v1/inventory/items/:id` | 品目の詳細（場所とロットごとの数・最近の記録） |
+| `POST /v1/inventory/items` ／ `PUT /v1/inventory/items/:id` | 品目を作る・直す（バーコードは `codes` で足す。会社の中で重ならない）。作るときは `initialQty`（いまの数）を入庫として記録し、単位の欄の数ははじめの数として読んで `note` で返す。直すときに単位へ数を入れると 400 |
+| `PUT /v1/inventory/items/:id/status` | 管理者: 品目を止める・使うに戻す（在庫が残れば止められない） |
+| `DELETE /v1/inventory/items/:id/codes/:code` | 品目からバーコードを外す |
+| `GET /v1/inventory/lookup` | 読んだ値（`code`。GS1・JAN・棚のラベル）から品目か棚を引く。GS1 なら使用期限とロットも返す |
+| `POST /v1/inventory/locations` ／ `DELETE /v1/inventory/locations/:id` | 場所を足す・外す（外すのは管理者。在庫が残れば外せない） |
+| `POST /v1/inventory/moves` | 入庫・使用・移動・調整を記録する（`kind`・`itemId`・`qty`・`unit`・場所・ロット・理由）。在庫がマイナスになれば `warnings` で知らせる |
+| `POST /v1/inventory/moves/:id/undo` | 自分の記録をその日のうちに取り消す（逆の記録を操作の組で足す） |
+| `GET /v1/inventory/moves` | 入出庫の記録（`itemId`・`from`・`to`） |
+| `POST /v1/inventory/import` | CSV・Excel から品目を取り込む（`file`。見出しを推論で読む。監査ログに残す） |
+| `GET /v1/inventory/export` | 品目と数を書き出す（`format=csv` か `xlsx`。監査ログに残す） |
 | `GET /v1/notices` | 本人宛ての有効な社内のお知らせ（取り下げ・期間切れ・本人が済んだものを除く。`isNew`・`daysLeft` つき。仕様書 第10.15節） |
 | `POST /v1/notices` | 社内のお知らせを出す（`title`・`body`・`link`（https だけ）・`all` か `groupIds`・`dueOn`・`until`）。会社の全員が出せる。承認は挟まない。201 |
 | `POST /v1/notices/:id/withdraw` | 取り下げる（出した人と管理者だけ。ほかの人は 403、ほかの会社のものは 404） |
@@ -190,8 +202,9 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/admin/extensions` | 管理者: 拡張機能の一覧（公式・自社専用）、構成要素、必要な権限の説明、導入と有効・無効の状態 |
 | `POST /v1/admin/extensions/import` | 管理者: `.m2ext` を取り込む（本文はファイルのバイト列。5 MB まで）。検証を通らなければ `problems` を返す |
 | `POST /v1/admin/extensions/:id/install` | 管理者: 同意して導入（本文に `consent: true`）。導入すると有効になる。同梱の接続は会社の接続として登録する（同じ ID が別の接続先で登録済みなら `notices` で知らせる） |
-| `PUT /v1/admin/extensions/:id/enabled` | 管理者: 有効・無効の切り替え（本文に `enabled`）。権限が増えた版は 409。内蔵の拡張（名刺管理）は会社の設定で入り切りし、データは消さない（導入と削除は 409。仕様書 第12.13節） |
+| `PUT /v1/admin/extensions/:id/enabled` | 管理者: 有効・無効の切り替え（本文に `enabled`）。権限が増えた版は 409。内蔵の拡張（名刺管理・在庫管理）は会社の設定で入り切りし、データは消さない（導入と削除は 409。仕様書 第12.13節） |
 | `PUT /v1/admin/extensions/business-cards/settings` | 管理者: 名刺管理の、取り込んだ名刺の既定の範囲（`defaultScope`。第27.7節） |
+| `PUT /v1/admin/extensions/inventory/settings` | 管理者: 在庫管理の機能の入り切り（`features`）・残りわずかの既定の目安（`lowDefault`）・仕入れの日数（`leadDaysDefault`）・棚卸しの頻度（`countEveryDays`）。送った項目だけを変える（第29.4.1節） |
 | `GET /v1/admin/connections/mcp` | 管理者: 会社の接続（MCP）の一覧。道具ごとの危険度・有効かどうか・使っている業務、認証の状態（`authState`。秘密の値は返さない）、よく使うサービスの型（`presets`）（仕様書 第12.11節、ADR-0037・ADR-0044） |
 | `POST /v1/admin/connections/mcp` | 管理者: URL を受け取り、道具の一覧を取って会社の接続として登録する（読むだけの印が付いた道具は「読むだけ」、ほかは「社外へ送る」扱い）。`preset`（`slack`）で型から、`auth`（`oauth`・`api_key`）で認証の要る接続を登録する。認証の要る接続の道具は、認証情報のあとで取る |
 | `PUT /v1/admin/connections/mcp/:id/credentials` | 管理者: 認証情報を登録する。`oauth` はクライアント ID とシークレット（ID を替えると全員の認可を消す）、`api_key` は会社の鍵（その鍵で道具を問い合わせる）。値は暗号化し、返さない（仕様書 第12.11.6節） |

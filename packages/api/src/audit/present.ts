@@ -115,6 +115,13 @@ const ACTION_LABELS: Record<string, string> = {
   // 社内のお知らせ（仕様書 第10.15節）
   'notice.create': '社内のお知らせを出した',
   'notice.withdraw': '社内のお知らせを取り下げた',
+  // 在庫管理（仕様書 第29.16節。入出庫の 1 件ずつは記録そのものに残るため入れない）
+  'inventory.import': '在庫の品目を取り込んだ',
+  'inventory.export': '在庫を書き出した',
+  'inventory.adjust': '在庫を調整した',
+  'inventory.item.stop': '在庫の品目を止めた',
+  'inventory.item.resume': '在庫の品目を使うに戻した',
+  'inventory.location.remove': '在庫の場所を外した',
 };
 
 /** 操作の種類（絞り込みの単位）。`prefixes` のどれかで始まる操作が当たる。 */
@@ -131,6 +138,7 @@ export const AUDIT_CATEGORIES: { id: string; label: string; prefixes: string[] }
   { id: 'schedule', label: '定時実行', prefixes: ['schedule.'] },
   { id: 'cards', label: '名刺', prefixes: ['card.', 'contact.'] },
   { id: 'notices', label: '社内のお知らせ', prefixes: ['notice.'] },
+  { id: 'inventory', label: '在庫', prefixes: ['inventory.'] },
 ];
 
 /** 仕組みの名前（主体が `system` のとき）。 */

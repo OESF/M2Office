@@ -21,6 +21,6 @@ export {
   type Frontmatter, type SkillPackage,
 } from './skill.js';
 export {
-  ExtensionHub, bundledConnection, consentSnapshot, decodeFiles, encodeFiles, blockedByDisabledTool,
+  ExtensionHub, bundledConnection, consentSnapshot, decodeFiles, encodeFiles, blockedByDisabledTool, BUILTIN_EXTENSIONS, builtinSection,
   type TenantExtensions, type ExtensionEntry, type ConsentSnapshot, type ExtensionHubDeps,
 } from './hub.js';

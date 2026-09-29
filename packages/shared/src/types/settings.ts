@@ -8,6 +8,7 @@
  */
 
 import type { AccessSettings } from './access.js';
+import { DEFAULT_INVENTORY_SETTINGS, type InventorySettings } from './inventory.js';
 
 /** 会社情報（仕様書 第6.6.1節）。帳票とメールの署名に使う。 */
 export interface CompanyInfo {
@@ -215,6 +216,8 @@ export interface TenantSettings {
   invoice: InvoiceStyle;
   /** 名刺管理（第27章）。 */
   cards: CardsSettings;
+  /** 在庫管理（第29章）。 */
+  inventory: InventorySettings;
 }
 
 /** 設定が未保存の会社に使う既定値。 */
@@ -243,6 +246,8 @@ export const DEFAULT_TENANT_SETTINGS: TenantSettings = {
   invoice: { logoFileId: null, bankAccount: '', paymentDue: '', notes: '', sealBox: false },
   // 名刺は会社の資産として共有するのを既定にする（第27.7節）
   cards: { enabled: true, defaultScope: 'company' },
+  // 在庫管理は既定で切り。使う会社が導入のときに入れる（第29.2節）
+  inventory: DEFAULT_INVENTORY_SETTINGS,
 };
 
 /**
@@ -424,8 +429,8 @@ export interface BriefSettings {
 }
 
 /** まだピン止めを変えていない人に、はじめからピン止めしておく業務（仕様書 第6.1.1節）。 */
-// 'business-cards' は名刺（内蔵の拡張。業務の 1 つとして並べる。仕様書 第6.1.1節）
-export const DEFAULT_PINNED = ['minutes', 'inbox-triage', 'knowledge-qa', 'scheduling', 'slides', 'document-draft', 'business-cards'];
+// 'business-cards' は名刺、'inventory' は在庫（内蔵の拡張。業務の 1 つとして並べる。使える人にだけ出る。仕様書 第6.1.1節）
+export const DEFAULT_PINNED = ['minutes', 'inbox-triage', 'knowledge-qa', 'scheduling', 'slides', 'document-draft', 'business-cards', 'inventory'];
 
 export const DEFAULT_USER_SETTINGS: UserSettings = {
   profile: { furigana: '', title: '', timezone: 'Asia/Tokyo', home: '', workplace: '' },

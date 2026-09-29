@@ -3256,6 +3256,155 @@ console.log('\n■ 59. 社内のお知らせと朝のブリーフの中身（第
   }
 }
 
+console.log('\n■ 60. 在庫管理（内蔵の拡張。第29章、ADR-0045）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const tag = `確認用在庫${Date.now().toString(36)}`;
+  const startedAt = new Date().toISOString();
+  const { rows: saved } = await owner.query(`select tenant_id, inventory from tenant_settings where tenant_id in ('t-alpha', 't-beta')`);
+  try {
+    // 既定は切り（第29.2節）。切っている会社には画面も API も出さない
+    await call('b', '/v1/admin/extensions/inventory/enabled', { method: 'PUT', body: JSON.stringify({ enabled: false }) });
+    const offB = await call('b', '/v1/inventory');
+    const { body: meB } = await call('b', '/v1/me');
+    offB.status === 403 && meB.inventory === false ? ok('在庫管理を切っている会社では、API も左のメニューも使えない') : ng('切っていても使える', `${offB.status} ${meB.inventory}`);
+    await call('a', '/v1/admin/extensions/inventory/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const feat = await call('a', '/v1/admin/extensions/inventory/settings', { method: 'PUT', body: JSON.stringify({ features: { lots: true, units: true }, lowDefault: 3 }) });
+    const { body: meA } = await call('a', '/v1/me', {}, 'member');
+    feat.body?.inventory?.features?.lots === true && meA.inventory === true ? ok('管理者が入れると使え、機能を会社ごとに入り切りできる') : ng('入れられない', JSON.stringify(feat.body));
+    const memberSettings = await call('a', '/v1/admin/extensions/inventory/settings', { method: 'PUT', body: JSON.stringify({ lowDefault: 99 }) }, 'member');
+    memberSettings.status === 403 ? ok('在庫管理の設定を変えられるのは管理者だけ') : ng(`一般の人が変えられる（${memberSettings.status}）`);
+
+    // 品目と場所
+    const made = await call('a', '/v1/inventory/items', { method: 'POST', body: JSON.stringify({ name: `${tag} ハンドクリーム`, unit: '個', packUnit: '箱', packSize: 10, codes: ['4912345678904'] }) }, 'member');
+    const itemId = made.body?.item?.id;
+    made.status === 201 && made.body.item.codes?.includes('4912345678904') ? ok('一般の人も品目を作れる（バーコードつき）') : ng('品目を作れない', JSON.stringify(made.body));
+    const withQty = await call('a', '/v1/inventory/items', { method: 'POST', body: JSON.stringify({ name: `${tag} トナー`, unit: '3' }) }, 'member');
+    withQty.status === 201 && withQty.body.item?.unit === '個' && withQty.body.item?.onHand === 3 && /はじめの数/.test(withQty.body.note ?? '')
+      ? ok('品目を作るとき、単位の欄の数ははじめの数として読み、単位は呼び名にする') : ng('単位の欄の数の読み方が違う', JSON.stringify(withQty.body));
+    const unitFix = await call('a', `/v1/inventory/items/${withQty.body?.item?.id}`, { method: 'PUT', body: JSON.stringify({ unit: '5' }) }, 'member');
+    unitFix.status === 400 ? ok('品目を直すときに単位の欄へ数を入れると断る') : ng(`単位に数を入れられた（${unitFix.status}）`);
+    const dup = await call('a', '/v1/inventory/items', { method: 'POST', body: JSON.stringify({ name: `${tag} 別の品`, codes: ['4912345678904'] }) });
+    dup.status === 400 ? ok('同じバーコードは、会社の中で別の品目に付けられない') : ng(`重なった（${dup.status}）`);
+    const shelfA = (await call('a', '/v1/inventory/locations', { method: 'POST', body: JSON.stringify({ warehouse: tag, shelf: '棚A' }) })).body?.location;
+    const shelfB = (await call('a', '/v1/inventory/locations', { method: 'POST', body: JSON.stringify({ warehouse: tag, shelf: '店頭' }) })).body?.location;
+
+    // 入出庫（第29.8節・第29.9節）
+    const in1 = await call('a', '/v1/inventory/moves', { method: 'POST', body: JSON.stringify({ kind: 'in', itemId, qty: 1, unit: 'pack', locationId: shelfA?.id, lot: 'LATE', expiresOn: '2099-06-30' }) }, 'member');
+    const in2 = await call('a', '/v1/inventory/moves', { method: 'POST', body: JSON.stringify({ kind: 'in', itemId, qty: 5, locationId: shelfA?.id, lot: 'EARLY', expiresOn: '2099-01-31' }) }, 'member');
+    in1.status === 201 && in1.body.moves?.[0]?.delta === 10 && in2.body?.item?.available === 15
+      ? ok('入庫を仕入れの単位で入れると、入り数で使う単位に直す（1 箱 → 10 個）') : ng('入庫が合わない', JSON.stringify(in2.body?.item ?? in1.body));
+    const used = await call('a', '/v1/inventory/moves', { method: 'POST', body: JSON.stringify({ kind: 'out', itemId, qty: 7, reason: '販売' }) }, 'member');
+    const lots = (used.body?.moves ?? []).map((m) => `${m.lot}:${m.delta}`).join(',');
+    used.status === 201 && lots === 'EARLY:-5,LATE:-2' ? ok('使用は、使用期限の近いロットから減らす') : ng('減らす順が違う', lots);
+    const moved = await call('a', '/v1/inventory/moves', { method: 'POST', body: JSON.stringify({ kind: 'transfer', itemId, qty: 3, locationId: shelfA?.id, toLocationId: shelfB?.id }) }, 'member');
+    const { body: detail } = await call('a', `/v1/inventory/items/${itemId}`, {}, 'member');
+    const at = (loc) => (detail.stock ?? []).filter((s) => s.locationId === loc).reduce((a, s) => a + s.qty, 0);
+    moved.status === 201 && at(shelfA?.id) === 5 && at(shelfB?.id) === 3 && detail.item?.onHand === 8
+      ? ok('移動は元から減らして先に足し、合計は変わらない') : ng('移動が合わない', JSON.stringify(detail.stock));
+    const over = await call('a', '/v1/inventory/moves', { method: 'POST', body: JSON.stringify({ kind: 'out', itemId, qty: 20 }) });
+    over.status === 201 && over.body.item?.onHand < 0 && (over.body.warnings ?? []).some((w) => w.includes('マイナス'))
+      ? ok('在庫より多い使用も記録は受け付け、マイナスになったことを知らせる') : ng('マイナスの扱いが違う', JSON.stringify(over.body));
+
+    // 取り消し（逆の記録を足す。自分の記録・その日のうち・二度は取り消さない）
+    const byOther = await call('a', `/v1/inventory/moves/${over.body?.moves?.[0]?.id}/undo`, { method: 'POST' }, 'member');
+    byOther.status === 400 ? ok('ほかの人の記録は取り消せない') : ng(`取り消せた（${byOther.status}）`);
+    const undo = await call('a', `/v1/inventory/moves/${over.body?.moves?.[0]?.id}/undo`, { method: 'POST' });
+    const again = await call('a', `/v1/inventory/moves/${over.body?.moves?.[0]?.id}/undo`, { method: 'POST' });
+    undo.status === 201 && undo.body.item?.onHand === 8 && again.status === 400 ? ok('自分の記録はその日のうちなら取り消せ、二度は取り消せない') : ng('取り消しが合わない', `${undo.status} ${undo.body?.item?.onHand} ${again.status}`);
+    const adjNoReason = await call('a', '/v1/inventory/moves', { method: 'POST', body: JSON.stringify({ kind: 'adjust', itemId, qty: -1 }) });
+    adjNoReason.status === 400 ? ok('調整には理由が要る') : ng(`理由なしで調整できた（${adjNoReason.status}）`);
+
+    // 入出庫の記録は追記のみ（アプリのロールに更新と削除を許さない。第29.9節）
+    const app = new pg.Client({ connectionString: process.env.DATABASE_URL ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office' });
+    await app.connect();
+    const tryWrite = async (sql) => {
+      await app.query('begin');
+      await app.query(`select set_config('app.tenant_id', 't-alpha', true)`);
+      const r = await app.query(sql, [itemId]).then(() => 'done', (e) => e.message);
+      await app.query('rollback');
+      return r;
+    };
+    const upd = await tryWrite(`update inventory_moves set delta = 999 where item_id = $1`);
+    const del = await tryWrite(`delete from inventory_moves where item_id = $1`);
+    /permission denied/.test(upd) && /permission denied/.test(del) ? ok('入出庫の記録は、アプリから書き換えも削除もできない') : ng('記録を書き換えられる', `${upd} / ${del}`);
+    await app.query('begin');
+    await app.query(`select set_config('app.tenant_id', 't-beta', true)`);
+    const { rows: [seen] } = await app.query(`select count(*)::int as n from inventory_moves where item_id = $1`, [itemId]);
+    await app.query('commit');
+    await app.end();
+    seen.n === 0 ? ok('B 社を設定したつなぎからは、A 社の入出庫の記録が見えない（RLS）') : ng(`見えてしまう（${seen.n} 行）`);
+
+    // 会社の境界（不変則 I-2）。B 社も入れて、A 社の品目を引けないことを確かめる
+    await call('b', '/v1/admin/extensions/inventory/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const crossGet = await call('b', `/v1/inventory/items/${itemId}`);
+    const crossMove = await call('b', '/v1/inventory/moves', { method: 'POST', body: JSON.stringify({ kind: 'out', itemId, qty: 1 }) });
+    const crossCode = await call('b', '/v1/inventory/lookup?code=4912345678904');
+    crossGet.status === 404 && crossMove.status === 404 && crossCode.body?.item === null
+      ? ok('B 社からは、A 社の品目を見ることも記録することもバーコードで引くこともできない') : ng('他社の品目に届く', `${crossGet.status} ${crossMove.status}`);
+
+    // バーコード（GS1 は使用期限とロットも取り出す。第29.11節）
+    const gs1 = await call('a', `/v1/inventory/lookup?code=${encodeURIComponent('(01)04912345678904(17)270200(10)LOT-9')}`, {}, 'member');
+    gs1.body?.item?.id === itemId && gs1.body.parsed?.expiresOn === '2027-02-28' && gs1.body.parsed?.lot === 'LOT-9'
+      ? ok('GS1 のバーコードから品目・使用期限・ロットを取り出す') : ng('GS1 を読めない', JSON.stringify(gs1.body));
+
+    // 止める・外す（管理者。在庫が残れば止められない）
+    const stopByMember = await call('a', `/v1/inventory/items/${itemId}/status`, { method: 'PUT', body: JSON.stringify({ status: 'stopped' }) }, 'member');
+    const stopWithStock = await call('a', `/v1/inventory/items/${itemId}/status`, { method: 'PUT', body: JSON.stringify({ status: 'stopped' }) });
+    const removeWithStock = await call('a', `/v1/inventory/locations/${shelfA?.id}`, { method: 'DELETE' });
+    stopByMember.status === 403 && stopWithStock.status === 400 && removeWithStock.status === 400
+      ? ok('品目を止め・場所を外せるのは管理者で、在庫が残っていれば断る') : ng('止め・外しが合わない', `${stopByMember.status} ${stopWithStock.status} ${removeWithStock.status}`);
+
+    // 取り込みと書き出し（第29.6節）
+    const form = new FormData();
+    form.append('file', new Blob([`品番,商品名,入数,在庫数量,保管場所\n${tag}-1,${tag} コピー用紙,5,12,${tag}\n${tag}-2,,,1,\n`], { type: 'text/csv' }), 'items.csv');
+    const imp = await fetch(`${API}/v1/inventory/import`, { method: 'POST', body: form, headers: { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' } }).then((r) => r.json());
+    imp.created === 1 && imp.stocked === 1 && imp.skipped?.[0]?.row === 3 && imp.mapping?.find((m) => m.header === '商品名')?.field === 'name'
+      ? ok('CSV の見出しを読んで品目を取り込み、取り込めない行は行の番号と理由を返す') : ng('取り込みが合わない', JSON.stringify(imp));
+    const exp = await fetch(`${API}/v1/inventory/export?format=csv`, { headers: { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' } });
+    // text() は BOM を落とすため、バイト列で確かめる
+    const bytes = new Uint8Array(await exp.arrayBuffer());
+    const bom = bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf;
+    exp.status === 200 && bom && new TextDecoder().decode(bytes).includes(`${tag} コピー用紙`)
+      ? ok('品目と数を CSV（BOM 付き）で書き出せる') : ng(`書き出せない（${exp.status}・BOM ${bom}）`);
+    const { body: audit } = await call('a', '/v1/admin/audit-events?category=inventory&limit=50');
+    const acts = new Set((audit.items ?? []).map((e) => e.action));
+    acts.has('inventory.import') && acts.has('inventory.export') && !acts.has('inventory.move')
+      ? ok('取り込み・書き出しは監査ログの「在庫」に残し、入出庫の 1 件ずつは入れない') : ng('監査ログが合わない', [...acts].join(','));
+
+    // 左のメニュー（第6.1.1節）と入り切り（第12.13節）
+    const { body: mySettings } = await call('a', '/v1/me/settings', {}, 'member');
+    const pin = await call('a', '/v1/me/settings/menu', { method: 'PUT', body: JSON.stringify({ ...mySettings.menu, pinned: ['inventory'] }) }, 'member');
+    const { body: afterPin } = await call('a', '/v1/me/settings', {}, 'member');
+    await call('a', '/v1/me/settings/menu', { method: 'PUT', body: JSON.stringify(mySettings.menu) }, 'member');
+    pin.status === 200 && afterPin.menu?.pinned?.includes('inventory') ? ok('在庫管理も業務の 1 つとしてピン止めできる') : ng('ピン止めできない', JSON.stringify(afterPin.menu));
+    await call('a', '/v1/admin/extensions/inventory/enabled', { method: 'PUT', body: JSON.stringify({ enabled: false }) });
+    const offA = await call('a', `/v1/inventory/items/${itemId}`, {}, 'member');
+    await call('a', '/v1/admin/extensions/inventory/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const backA = await call('a', `/v1/inventory/items/${itemId}`, {}, 'member');
+    offA.status === 403 && backA.status === 200 && backA.body.item?.onHand === 8 ? ok('切ると使えず、入れ直すと記録が戻る') : ng('入り切りが効かない', `${offA.status} ${backA.status}`);
+    const del2 = await call('a', '/v1/admin/extensions/inventory', { method: 'DELETE' });
+    del2.status === 409 ? ok('内蔵の拡張は削除できない（スイッチで切る）') : ng(`削除できた（${del2.status}）`);
+  } catch (err) {
+    ng('在庫管理の確認が途中で止まった', String(err));
+  } finally {
+    // 確認用の品目と記録を消す（アプリからは消せないため、持ち主のつなぎで消す）
+    const items = `select id from inventory_items where name like '${tag}%'`;
+    await owner.query(`delete from inventory_stock where item_id in (${items})`);
+    await owner.query(`delete from inventory_moves where item_id in (${items})`);
+    await owner.query(`delete from inventory_lots where item_id in (${items})`);
+    await owner.query(`delete from inventory_codes where item_id in (${items})`);
+    await owner.query(`delete from inventory_items where name like '${tag}%'`);
+    // 確認の間にできた場所（既定の「倉庫」を含む）も消す。在庫の残る場所は残す
+    await owner.query(`delete from inventory_locations l where tenant_id in ('t-alpha', 't-beta') and (warehouse = $1 or created_at >= $2)
+      and not exists (select 1 from inventory_moves m where m.from_location_id = l.id or m.to_location_id = l.id)`, [tag, startedAt]);
+    for (const r of saved) await owner.query(`update tenant_settings set inventory = $2 where tenant_id = $1`, [r.tenant_id, r.inventory ? JSON.stringify(r.inventory) : null]);
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

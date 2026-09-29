@@ -17,6 +17,7 @@ import { PROFILE_TOOLS } from './profile.js';
 import { CARD_TOOLS } from '../cards/tools.js';
 import { BRIEF_TOOLS } from '../brief/tools.js';
 import { NOTICE_TOOLS } from '../notices/tools.js';
+import { INVENTORY_TOOLS } from '../inventory/tools.js';
 import { rewriteNote } from '../knowledge/search.js';
 import { approvedArtifact, jstDate } from './approved-artifact.js';
 
@@ -181,4 +182,6 @@ export const BUILTIN_TOOLS: Tool[] = [
   // 朝のブリーフの中身と社内のお知らせ（第9.5.5.1.1節・第10.15節）
   ...BRIEF_TOOLS,
   ...NOTICE_TOOLS,
+  // 在庫管理（内蔵の拡張。第29.15節）。会社が使っていて、依頼者が利用範囲の中のときだけ働く
+  ...INVENTORY_TOOLS,
 ];

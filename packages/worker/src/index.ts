@@ -11,7 +11,7 @@
 
 import {
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
-  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention,
+  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, InventoryService, PostgresInventoryStore, inventoryAccess, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention,
   NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv,
   defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials,
@@ -81,9 +81,15 @@ const notices = new NoticeService({
   store: new PostgresNoticeStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
   repo,
 });
+// 在庫管理（内蔵の拡張。仕様書 第29章）。秘書から頼まれた入出庫の記録（第29.15節）が使う
+const inventory = new InventoryService({
+  store: new PostgresInventoryStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+  repo, llm: (tenantId) => ai.llmFor(tenantId),
+});
 const engine = new RunEngine({
   repo, llm, registry, connector, files, resolveDefinition, isAvailable, logger: log, research, notices,
   cards: { store: contactStore, service: cards, access: cardsAccess(repo) },
+  inventory: { service: inventory, access: inventoryAccess(repo) },
   llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId),
   registryFor: async (tenantId) => (await hub.forTenant(tenantId)).registry,
   // 止めた実行に後から書き込まれた中身も消す（仕様書 第6.5.2.1節）

@@ -7,7 +7,7 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
-import { CARDS_EXTENSION_ID, showsCaptions, type Notification } from '@m2office/shared';
+import { CARDS_EXTENSION_ID, INVENTORY_EXTENSION_ID, showsCaptions, type Notification } from '@m2office/shared';
 import { splitMenu, togglePinned } from './menu.js';
 import {
   api, ApiError, describeError,
@@ -22,6 +22,7 @@ import { AgentForm, ApprovalTray, RunView, statusLabel, SuspendedBanner } from '
 import { Sources } from './sources.js';
 import { Schedules } from './Schedules.js';
 import { Cards } from './Cards.js';
+import { Inventory } from './Inventory.js';
 import { isAttended, useAttention } from './attention.js';
 import { parseRoute, routePath, syncUrl, type Route } from './route.js';
 import {
@@ -76,9 +77,9 @@ const GOOGLE_RETURN_TEXT: Record<string, { ok: boolean; text: string }> = {
 };
 
 /**
- * 左のメニューの業務の 1 項目（仕様書 第6.1.1節）。業務と、画面を持つ内蔵の拡張（名刺。第27.2節）を同じ並びで扱う。
+ * 左のメニューの業務の 1 項目（仕様書 第6.1.1節）。業務と、画面を持つ内蔵の拡張（名刺・在庫。第27.2節・第29.2節）を同じ並びで扱う。
  *
- * @remarks `agent` が `null` の項目は名刺。押すと名刺の画面を開く。名刺管理を使えない人には項目を作らない
+ * @remarks `agent` が `null` の項目は内蔵の拡張の画面（ID で名刺か在庫かを決める）。使えない人には項目を作らない
  */
 type MenuItem = { id: string; name: string; description: string; icon: IconName; agent: AgentSummary | null };
 
@@ -92,6 +93,7 @@ type View =
   | { kind: 'notifications' }
   | { kind: 'schedules' }
   | { kind: 'cards'; contactId: string | null }
+  | { kind: 'inventory'; itemId: string | null }
   | { kind: 'settings'; section: SettingsSection }
   | { kind: 'help'; articleId: string | null };
 
@@ -102,6 +104,7 @@ function viewPath(v: View): string {
     case 'run': return routePath({ kind: 'run', runId: v.runId });
     case 'settings': return routePath({ kind: 'settings', section: v.section });
     case 'cards': return routePath({ kind: 'cards', contactId: v.contactId });
+    case 'inventory': return routePath({ kind: 'inventory', itemId: v.itemId });
     case 'help': return routePath({ kind: 'help', articleId: v.articleId });
     default: return routePath({ kind: v.kind });
   }
@@ -120,6 +123,7 @@ function viewOf(r: Route): View | null {
     }
     case 'run': return { kind: 'run', runId: r.runId };
     case 'cards': return { kind: 'cards', contactId: r.contactId };
+    case 'inventory': return { kind: 'inventory', itemId: r.itemId };
     case 'help': return { kind: 'help', articleId: r.articleId };
     default: return { kind: r.kind };
   }
@@ -342,13 +346,16 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ...agents.filter((a) => a.menu !== false)
       .map((a) => ({ id: a.id, name: a.name, description: a.description, icon: agentIcon(a.category), agent: a })),
     ...(me.cards ? [{ id: CARDS_EXTENSION_ID, name: '名刺管理', description: '撮るだけで連絡先になる。会社で共有する名刺の置き場', icon: 'cards' as IconName, agent: null }] : []),
+    ...(me.inventory ? [{ id: INVENTORY_EXTENSION_ID, name: '在庫管理', description: '品目・場所・入出庫を記録し、使える数を出す', icon: 'inventory' as IconName, agent: null }] : []),
   ];
   const allMenuAgents = orderAgents(menuItems, menu.order).filter((a) => !menu.hidden.includes(a.id));
   // ピン止めした業務だけを上に出し、ほかは「ほかの業務」にたたむ（仕様書 第6.1.1節「業務の並び」）。並びはメニューの順のまま。
   // 使った回数では変えない。まだ一度も変えていなければ標準の組
   const { top: topAgents, others: otherAgents } = splitMenu(allMenuAgents, menu.pinned);
-  const openItem = (m: MenuItem) => (m.agent ? setView({ kind: 'agent', agent: m.agent }) : setView({ kind: 'cards', contactId: null }));
-  const isOpen = (m: MenuItem) => (m.agent ? view.kind === 'agent' && view.agent.id === m.id : view.kind === 'cards');
+  const openItem = (m: MenuItem) => (m.agent ? setView({ kind: 'agent', agent: m.agent })
+    : m.id === INVENTORY_EXTENSION_ID ? setView({ kind: 'inventory', itemId: null }) : setView({ kind: 'cards', contactId: null }));
+  const isOpen = (m: MenuItem) => (m.agent ? view.kind === 'agent' && view.agent.id === m.id
+    : m.id === INVENTORY_EXTENSION_ID ? view.kind === 'inventory' : view.kind === 'cards');
   const togglePin = (id: string) => {
     const saved = { ...menu, pinned: togglePinned(menu.pinned, id) };
     setMenu(saved);
@@ -518,6 +525,12 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
                 mailer={{ email: me.user.email, google: me.workspaceSource === 'google' }} />
             </>
           )}
+          {view.kind === 'inventory' && (
+            <>
+              <h1>在庫管理 <HelpTip article="start-inventory">品目と数を記録します。秘書に「〇〇の在庫は？」「〇〇を 2 箱入庫して」と頼めます。</HelpTip></h1>
+              <Inventory itemId={view.itemId} onOpen={(itemId) => setView({ kind: 'inventory', itemId })} userId={me.user.id} />
+            </>
+          )}
           {view.kind === 'schedules' && (
             <>
               <h1>定時実行 <HelpTip article="start-schedules">決まった時刻に、あなたの権限で業務を自動で実行します。「今すぐ実行」で動きを確かめられます。</HelpTip></h1>
@@ -672,6 +685,7 @@ const VIEW_LABELS: Record<string, string> = {
   notifications: 'お知らせ',
   schedules: '定時実行',
   cards: '名刺管理',
+  inventory: '在庫管理',
   settings: '個人設定',
 };
 

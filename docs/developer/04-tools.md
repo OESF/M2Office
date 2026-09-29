@@ -44,6 +44,8 @@
 | `gmail.search` | read | `gmail.readonly`（制限付き） | 条件に合うメールを探します。本文は読みません |
 | `gmail.unread` | read | `gmail.readonly`（制限付き） | 受信トレイ（メイン）の未読のメールを見ます |
 | `image.read_text` | read | — | 写真やスキャンした画像から文字を読み取ります。読み取りは確実ではないため、内容の確認が要ります |
+| `inventory.history` | read | — | 入庫・使用・移動・調整の記録を、品目と期間で調べます。見るだけです |
+| `inventory.search` | read | — | 品目の名前・コード・バーコードで、使える数・在庫・期限の近いロットを調べます。見るだけです |
 | `knowledge.search` | read | — | 社内の知識（規程・議事録など）を調べます。区画の外の人には区画内の文書を見せません |
 | `meet.transcript` | read | `meetings.space.readonly`（機密） | Meet の会議の文字起こしを読みます。あなたが参加した会議だけで、会議の終了から 30 日を過ぎたものは読めません |
 | `meeting.get_transcript` | read | — | 会議の記録（文字起こし）を読みます |
@@ -68,6 +70,7 @@
 | `slides.create` | draft | `drive.file`（機密でない）・`drive`（制限付き） | 調べた内容をスライドにまとめ、あなたのドライブに作ります。PowerPoint 形式でも取り出せます。共有はしません |
 | `contacts.save` | write-internal | — | 名刺を連絡先として登録するか、電話番号やメモなどを直します。社内の名刺の置き場に書くだけで、誰にも送りません |
 | `drive.share_company` | write-internal | `drive.file`（機密でない） | M2Office で作ったファイルを、会社の全員が閲覧できるようにします。社外の人は見られません。リンクで誰にでも公開することはしません |
+| `inventory.move` | write-internal | — | 入庫・使用・移動を在庫に記録します。社内の記録に足すだけで、誰にも送りません |
 | `knowledge.register` | write-internal | — | 承認された議事録などを、そのまま社内の知識に登録します。すべての承認のあとに行い、承認した人が見た内容だけを登録します |
 | `notification.send` | write-internal | — | 依頼した本人にだけお知らせを届けます。他の人には送りません |
 | `sheets.append` | write-internal | `drive.file`（機密でない） | M2Office で作った表に行を足します |
@@ -104,6 +107,8 @@
 | `gmail.search` | `query`（必須）: 検索の条件、`limit`: 件数（既定 20） |
 | `gmail.unread` | `since`: この日時以降の未読だけ（ISO 形式。任意）、`limit`: 一覧の件数（既定 50、上限 50） |
 | `image.read_text` | `fileId`（必須）: ファイルの ID |
+| `inventory.history` | `query`: 品目の名前・コード（省けば全品目）、`from`: 期間の始め（YYYY-MM-DD）、`to`: 期間の終わり（YYYY-MM-DD。この日を含む）、`kind`: 記録の種類（in・out・transfer・adjust） |
+| `inventory.search` | `query`: 探す言葉（空なら全品目）、`lowOnly`: 残りわずかの品目だけにするか |
 | `knowledge.search` | `query`（必須）: 調べる言葉 |
 | `meet.transcript` | `query`: 会議の題名に含まれる言葉（空ならいちばん新しい会議） |
 | `meeting.get_transcript` | `transcript`（必須）: 会議の記録（文字起こし） |
@@ -128,6 +133,7 @@
 | `slides.create` | `title`（必須）: 表紙の題名、`subtitle`: 副題（任意）、`slides`（必須）: 本文のスライドの配列（layout・title ほか。12 枚まで）、`sources`: 出典（title・url）の配列、`template`: 会社が登録したテンプレートの名前（任意） |
 | `contacts.save` | `contactId`: 直す連絡先の ID。新しく登録するときは書かない、`fields`: 直す項目（name・nameKana・company・department・title・postalCode・address・phones・emails・website・extra）、`note`: メモ（「展示会で会った」など）。書くと置き換える、`card`: 登録する名刺。card.read の結果の fileId・fields・rotation、`receivedOn`: 名刺を受け取った日（YYYY-MM-DD）。直すときだけ書く、`cardId`: 受け取った日を直す名刺（contacts.get の exchanges の cardId）。省くと呼んだ人のいちばん新しい名刺 |
 | `drive.share_company` | `fileId`（必須）: ファイルの ID（docs.create の結果の file.id） |
+| `inventory.move` | `kind`（必須）: 記録の種類（in・out・transfer）、`item`（必須）: 品目（品名・自社のコード・バーコード）、`qty`（必須）: 数（正の数）、`unit`: 数の単位（unit は使う単位、pack は仕入れの単位）（unit・pack）、`place`: 場所（省けば今ある場所）、`to`: 移動の先の場所、`lot`: ロット、`expiresOn`: 使用期限（YYYY-MM-DD）、`reason`: 理由（例: 販売・使用・廃棄・仕入） |
 | `knowledge.register` | `artifactId`（必須）: 登録する成果物の ID（document.create の結果） |
 | `notification.send` | `kind`: 種類（brief・run）、`title`（必須）: 題名、`body`（必須）: 本文 |
 | `sheets.append` | `spreadsheetId`（必須）: スプレッドシートの ID、`rows`（必須）: 足す行の配列（各行は値の配列） |

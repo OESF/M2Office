@@ -16,5 +16,6 @@ export * from './types/settings.js';
 export * from './types/access.js';
 export * from './types/cards.js';
 export * from './types/notice.js';
+export * from './types/inventory.js';
 export * from './text/internal-ids.js';
 export * from './text/paths.js';

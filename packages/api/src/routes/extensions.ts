@@ -11,9 +11,9 @@
 
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
-import { CARDS_EXTENSION_ID, type RiskLevel } from '@m2office/shared';
+import { CARDS_EXTENSION_ID, INVENTORY_EXTENSION_ID, INVENTORY_FEATURES, type InventorySettings, type RiskLevel } from '@m2office/shared';
 import {
-  bundledConnection, consentSnapshot, encodeFiles, unpackExtension, EXTENSION_FILE_MAX_BYTES,
+  bundledConnection, builtinSection, consentSnapshot, encodeFiles, unpackExtension, EXTENSION_FILE_MAX_BYTES,
   type ExtensionEntry, type ExtensionPackage, type TenantExtensions,
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
@@ -103,6 +103,8 @@ export function extensionsRoute(deps: AppDeps) {
         scope: settings.access.scopes[e.pkg.manifest.id] ?? 'all',
         // 内蔵の拡張の会社の設定（名刺管理: 取り込んだ名刺の既定の範囲。第27.7節）
         ...(e.pkg.manifest.id === CARDS_EXTENSION_ID ? { cards: { defaultScope: settings.cards.defaultScope } } : {}),
+        // 在庫管理: 機能の入り切りと既定の目安（第29.4.1節）
+        ...(e.pkg.manifest.id === INVENTORY_EXTENSION_ID ? { inventory: settings.inventory } : {}),
       })),
     });
   });
@@ -121,6 +123,38 @@ export function extensionsRoute(deps: AppDeps) {
       targetType: 'settings', targetId: 'cards', detail: { defaultScope: body.defaultScope }, occurredAt: new Date().toISOString(),
     });
     return c.json({ ok: true, defaultScope: body.defaultScope });
+  });
+
+  /**
+   * 在庫管理の、機能の入り切りと既定の目安を変える（第29.4節・第29.4.1節）。すぐに反映し、監査ログに残す。
+   *
+   * @remarks 送られた項目だけを変える。切った機能の記録は消さない
+   */
+  app.put(`/${INVENTORY_EXTENSION_ID}/settings`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
+    const current = (await deps.repo.getTenantSettings(tenant.id)).inventory;
+    const next: InventorySettings = { ...current, features: { ...current.features } };
+    const f = body['features'];
+    if (f && typeof f === 'object') {
+      for (const { id } of INVENTORY_FEATURES) {
+        const v = (f as Record<string, unknown>)[id];
+        if (typeof v === 'boolean') next.features[id] = v;
+      }
+    }
+    const count = (v: unknown, max: number) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= max ? v : undefined);
+    if (count(body['lowDefault'], 1_000_000) !== undefined) next.lowDefault = count(body['lowDefault'], 1_000_000)!;
+    if (count(body['leadDaysDefault'], 365) !== undefined) next.leadDaysDefault = Math.round(count(body['leadDaysDefault'], 365)!);
+    if (body['countEveryDays'] === null) next.countEveryDays = null;
+    else if (count(body['countEveryDays'], 366)) next.countEveryDays = Math.round(count(body['countEveryDays'], 366)!);
+    await deps.repo.saveTenantSettings(tenant.id, 'inventory', next, user.id);
+    await deps.repo.appendAudit({
+      id: randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id, action: 'settings.update',
+      targetType: 'settings', targetId: 'inventory',
+      detail: { features: next.features, lowDefault: next.lowDefault, leadDaysDefault: next.leadDaysDefault, countEveryDays: next.countEveryDays },
+      occurredAt: new Date().toISOString(),
+    });
+    return c.json({ ok: true, inventory: next });
   });
 
   /**
@@ -216,9 +250,11 @@ export function extensionsRoute(deps: AppDeps) {
     const entry = find(await deps.tenantView(tenant.id), id);
     if (!entry?.installed) return c.json({ error: '導入されていません' }, 404);
     // 内蔵の拡張は会社の設定で入り切りする。切ってもデータは消さない（第12.13節）
-    if (entry.origin === 'builtin') {
-      const current = (await deps.repo.getTenantSettings(tenant.id)).cards;
-      await deps.repo.saveTenantSettings(tenant.id, 'cards', { ...current, enabled: body.enabled }, user.id);
+    const section = entry.origin === 'builtin' ? builtinSection(id) : null;
+    if (section) {
+      const settings = await deps.repo.getTenantSettings(tenant.id);
+      if (section === 'cards') await deps.repo.saveTenantSettings(tenant.id, 'cards', { ...settings.cards, enabled: body.enabled }, user.id);
+      else await deps.repo.saveTenantSettings(tenant.id, 'inventory', { ...settings.inventory, enabled: body.enabled }, user.id);
       await deps.repo.appendAudit({
         id: randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id,
         action: body.enabled ? 'extension.enable' : 'extension.disable',
@@ -246,7 +282,7 @@ export function extensionsRoute(deps: AppDeps) {
   app.delete('/:id', async (c) => {
     const { tenant, user } = c.get('ctx');
     const id = c.req.param('id');
-    if (id === CARDS_EXTENSION_ID) return c.json({ error: '内蔵の拡張は削除できません。スイッチで切ってください（データは消えません）' }, 409);
+    if (builtinSection(id)) return c.json({ error: '内蔵の拡張は削除できません。スイッチで切ってください（データは消えません）' }, 409);
     const uninstalled = await deps.repo.uninstallExtension(tenant.id, id);
     const removed = await deps.repo.deletePrivateExtension(tenant.id, id);
     if (!uninstalled && !removed) return c.json({ error: '導入されていません' }, 404);

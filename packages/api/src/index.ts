@@ -27,6 +27,7 @@ import { authRoute } from './routes/auth.js';
 import { notificationsRoute } from './routes/notifications.js';
 import { schedulesRoute } from './routes/schedules.js';
 import { cardsRoute } from './routes/cards.js';
+import { inventoryRoute } from './routes/inventory.js';
 import { noticesRoute } from './routes/notices.js';
 import { adminRoute } from './routes/admin.js';
 import { mcpConnectionsRoute } from './routes/mcp-connections.js';
@@ -120,6 +121,8 @@ app.get('/v1/me', async (c) => {
     workspaceSource: deps.connector.sourceFor(ctx.tenant.id),
     // 名刺管理を使えるか（会社の入り切りと利用範囲。仕様書 第27.2節）。使えなければ左ペインに「名刺」を出さない
     cards: !!(await deps.cards.access(ctx.tenant.id, ctx.user.id)),
+    // 在庫管理を使えるか（会社の入り切りと利用範囲。仕様書 第29.2節）。使えなければ左ペインに「在庫管理」を出さない
+    inventory: !!(await deps.inventory.access(ctx.tenant.id, ctx.user.id)),
   });
 });
 app.route('/v1/me/google', myGoogleRoute(deps));
@@ -134,6 +137,7 @@ app.route('/v1/secretary', secretaryRoute(deps));
 app.route('/v1/notifications', notificationsRoute(deps));
 app.route('/v1/schedules', schedulesRoute(deps));
 app.route('/v1/cards', cardsRoute(deps));
+app.route('/v1/inventory', inventoryRoute(deps));
 app.route('/v1/notices', noticesRoute(deps));
 app.route('/v1/admin/dashboard', dashboardRoute(deps));
 app.route('/v1/admin/extensions', extensionsRoute(deps));

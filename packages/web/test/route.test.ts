@@ -18,6 +18,8 @@ test('ワークスペースの画面と URL は行き来できる', () => {
     ['/history', { kind: 'history' }],
     ['/notifications', { kind: 'notifications' }],
     ['/schedules', { kind: 'schedules' }],
+    ['/inventory', { kind: 'inventory', itemId: null }],
+    ['/inventory/3c982953-a432-4011-bc8b-469c0f991e15', { kind: 'inventory', itemId: '3c982953-a432-4011-bc8b-469c0f991e15' }],
     ['/settings/google', { kind: 'settings', section: 'google' }],
     ['/help', { kind: 'help', articleId: null }],
     ['/help/start-approvals', { kind: 'help', articleId: 'start-approvals' }],

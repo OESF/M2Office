@@ -1225,6 +1225,43 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
   .cards-toolbar .btn { flex: 1 1 auto; }
 }
 
+/* 在庫の画面（仕様書 第29章）。使える数を先に出し、記録の欄は狭い幅でも折り返す */
+.inventory button.link { background: none; border: none; padding: 0; cursor: pointer; color: inherit; text-align: left; }
+.inventory-table tr.clickable { cursor: pointer; }
+.inventory-table tr.clickable:hover td { background: var(--accent-soft); }
+.inventory-table .marks { white-space: nowrap; text-align: right; }
+.inventory-table th, .inventory-table td.date { white-space: nowrap; }
+.inventory-table td:first-child { min-width: 8em; }
+/* 狭い幅では帳簿の数（在庫）の列を外す。使える数と印は残す */
+@media (max-width: 640px) { .inventory-table .onhand { display: none; } }
+.inventory-table .marks .badge + .badge, .inventory-figures .badge + .badge { margin-left: 4px; }
+.inventory-foot { margin-top: calc(10px * var(--space-scale)); gap: calc(14px * var(--space-scale)); align-items: center; }
+.inventory-new, .inventory-places, .inventory-move { padding: calc(10px * var(--space-scale)); margin-bottom: calc(12px * var(--space-scale)); }
+.inventory .row.wrap { flex-wrap: wrap; gap: calc(6px * var(--space-scale)); align-items: center; }
+.inventory .row.wrap + .row.wrap { margin-top: calc(6px * var(--space-scale)); }
+.inventory input.short { width: 9em; flex: 0 1 9em; }
+.inventory input.num-input { width: 7em; flex: 0 0 7em; }
+.inventory input.unit-input { width: 6em; flex: 0 0 6em; }
+.inventory input.grow { flex: 1 1 12em; min-width: 0; }
+.inventory select { width: auto; }
+.inventory ul.plain { list-style: none; margin: 0 0 calc(8px * var(--space-scale)); padding: 0; }
+.inventory-places li { padding: calc(3px * var(--space-scale)) 0; border-bottom: 1px dashed var(--line); }
+.inventory-places li .grow, .inventory-moves li .grow { flex: 1; min-width: 0; }
+.inventory-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: calc(6px * var(--space-scale)) calc(18px * var(--space-scale)); margin: calc(8px * var(--space-scale)) 0 calc(12px * var(--space-scale)); }
+.inventory-head h2 { margin: 0; font-size: calc(22px * var(--font-scale)); }
+.inventory-figures { display: flex; flex-wrap: wrap; align-items: baseline; gap: calc(10px * var(--space-scale)); }
+.inventory-figures strong { font-size: calc(20px * var(--font-scale)); font-variant-numeric: tabular-nums; }
+.inventory-stock { max-width: 640px; margin-bottom: calc(14px * var(--space-scale)); }
+.inventory-stock td.danger { color: var(--danger); }
+.inventory-moves li { gap: calc(8px * var(--space-scale)); padding: calc(4px * var(--space-scale)) 0; border-bottom: 1px dashed var(--line); align-items: baseline; flex-wrap: wrap; }
+.inventory-moves .num { font-variant-numeric: tabular-nums; }
+.inventory .badge.danger { background: var(--danger-soft, var(--warn-soft)); color: var(--danger); }
+.code-chip { display: inline-flex; align-items: center; gap: 2px; margin: 0 6px 4px 0; padding: 1px 6px; border: 1px solid var(--line); border-radius: 6px; font-size: calc(12px * var(--font-scale)); font-variant-numeric: tabular-nums; }
+/* 管理者ページの拡張機能の、在庫管理の設定（第29.4.1節） */
+.ext-inventory { display: flex; flex-direction: column; gap: calc(6px * var(--space-scale)); margin-top: calc(6px * var(--space-scale)); }
+.ext-inventory .row.wrap { flex-wrap: wrap; gap: calc(4px * var(--space-scale)) calc(14px * var(--space-scale)); }
+.ext-inventory input.num { width: 5em; }
+
 /* 業務の画面のファイルの欄（仕様書 第6.10.4.1節）。ドラッグしている間は枠を強める */
 .file-drop { display: flex; align-items: center; gap: calc(8px * var(--space-scale)); padding: calc(8px * var(--space-scale)); border: 1px dashed var(--line); border-radius: 8px; background: var(--input-bg); }
 .file-drop.over { border-color: var(--accent); background: var(--accent-soft); }

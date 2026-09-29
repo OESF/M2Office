@@ -14,7 +14,7 @@ import {
   alwaysRequiresApproval, canDecide, canUseAgent, writeInternalNeedsApproval,
   type AutomationPolicy, type TenantSettings, type WritingStyle,
   type AgentDefinition, type AgentStep, type ApprovalStep, type Approval, type Run,
-  type RunStep, type Step, type ContactScope,
+  type RunStep, type Step, type ContactScope, type InventorySettings,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { LlmMessage, LlmProvider, LlmResponse } from '../llm/provider.js';
@@ -33,6 +33,7 @@ import { expandQuery } from '../knowledge/expand.js';
 import type { CardService } from '../cards/service.js';
 import type { ContactStore } from '../cards/store.js';
 import type { NoticeService } from '../notices/service.js';
+import type { InventoryService } from '../inventory/service.js';
 import { answerOfSteps } from '../memory/work.js';
 import { substituteArguments } from '../extensions/skill.js';
 import { AI_NOT_CONFIGURED_MESSAGE, aiAvailable } from '../llm/unconfigured.js';
@@ -98,6 +99,15 @@ export interface RunEngineDeps {
   };
   /** 社内のお知らせ（仕様書 第10.15節）。道具 `notices.list` に渡す。無ければ「読めなかった」と返す。 */
   notices?: NoticeService;
+  /**
+   * 在庫管理（内蔵の拡張。仕様書 第29章）。道具に渡す。無ければ在庫の道具は「使えない」と返す。
+   *
+   * @remarks `access` は、会社が在庫管理を使っていて依頼者が利用範囲の中なら、会社の在庫管理の設定を返す
+   */
+  inventory?: {
+    service: InventoryService;
+    access(tenantId: string, userId: string): Promise<InventorySettings | null>;
+  };
 }
 
 /** ブリーフの通知の本文の上限（字）。長すぎる答えで通知の一覧が重くならないように。 */
@@ -795,6 +805,10 @@ export class RunEngine {
           service: this.deps.cards.service, store: this.deps.cards.store, llm,
           access: () => this.deps.cards!.access(run.tenantId, requestedBy),
         },
+      } : {}),
+      // 在庫管理（第29.15節）。使えるかどうかは道具が呼ぶたびに確かめる
+      ...(this.deps.inventory ? {
+        inventory: { service: this.deps.inventory.service, access: () => this.deps.inventory!.access(run.tenantId, requestedBy) },
       } : {}),
       // 社内のお知らせ（第10.15節）。朝のブリーフが読む
       ...(this.deps.notices ? { notices: this.deps.notices } : {}),
