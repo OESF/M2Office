@@ -886,20 +886,43 @@ button.link.danger { color: var(--danger); }
 .left .nav-sub { padding-left: calc(34px * var(--space-scale)); font-size: calc(13px * var(--font-scale)); }
 .left .nav-sub .nav-icon { display: none; }
 .left.collapsed .nav-sub { display: none; }
-/* ピン止め（仕様書 第6.1.1節）。ピンのボタンは項目の右端に重ね、ピン止めした項目では常に、ほかはマウスを重ねたときだけ出す */
+/* 項目の操作（仕様書 第6.1.1節）。縦の三点のボタンは項目の右端に重ね、マウスを重ねたときと開いているときだけ出す */
 .left .nav-pin-row { position: relative; }
 .left .nav-pin-row .item { padding-right: calc(40px * var(--space-scale)); }
-.left .nav-pin {
+.left .nav-more {
   /* 右端はスクロールバーが重なる（重ねて出す環境では、押しても棒に取られる）ため、少し内側に置く */
   position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
   width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
   border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; opacity: 0;
 }
-.left .nav-pin .icon { width: 14px; height: 14px; }
-.left .nav-pin-row:hover .nav-pin, .left .nav-pin:focus-visible { opacity: 1; }
-.left .nav-pin-row.pinned .nav-pin { opacity: 0.55; }
-.left .nav-pin-row.pinned .nav-pin .icon { fill: currentColor; }
-.left .nav-pin:hover { background: var(--accent-soft); color: var(--accent); opacity: 1; }
+.left .nav-more .icon { width: 16px; height: 16px; }
+.left .nav-pin-row:hover .nav-more, .left .nav-more:focus-visible, .left .nav-more.open { opacity: 1; }
+.left .nav-more:hover, .left .nav-more.open { background: var(--accent-soft); color: var(--accent); }
+/* マウスを重ねられない端末（タッチ）では、三点のボタンを常に出す */
+@media (hover: none) {
+  .left .nav-more { opacity: 1; }
+}
+/* 三点のボタンで出す一覧。左ペインのスクロールに切られないよう、画面に対して置く */
+.row-menu {
+  position: fixed; z-index: 60; width: 248px; max-height: 70vh; overflow-y: auto;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: 0 8px 24px var(--shadow-sm); padding: calc(6px * var(--space-scale));
+}
+.row-menu-item {
+  display: flex; align-items: center; gap: calc(8px * var(--space-scale)); width: 100%; text-align: left;
+  background: none; border: none; border-radius: 6px; padding: calc(7px * var(--space-scale)) calc(8px * var(--space-scale));
+  color: var(--ink); cursor: pointer; font-size: calc(14px * var(--font-scale));
+}
+.row-menu-item:hover, .row-menu-item:focus-visible { background: var(--accent-soft); outline: none; }
+.row-menu-item.checked { color: var(--accent); font-weight: 600; }
+.row-menu-mark { flex: none; width: 16px; height: 16px; display: inline-flex; color: var(--muted); }
+.row-menu-item.checked .row-menu-mark { color: var(--accent); }
+.row-menu-mark .icon { width: 16px; height: 16px; }
+.row-menu-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-menu-sep { height: 1px; background: var(--line); margin: calc(4px * var(--space-scale)) 0; }
+.row-menu-input { padding: calc(4px * var(--space-scale)); }
+.row-menu-input input { width: 100%; box-sizing: border-box; }
+.row-menu-error { margin: 4px 2px 0; font-size: calc(12px * var(--font-scale)); color: var(--danger); }
 .left.collapsed .nav-pin-row .item { padding-right: 0; }
 /* たたんだ「ほかの業務」を開いたときの項目。少し下げて、よく使う業務と見分ける（仕様書 第6.1.1節） */
 .left .item.nav-other { padding-left: calc(22px * var(--space-scale)); }
@@ -1349,3 +1372,4 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .brief-list { list-style: none; margin: 0; padding: 0; }
 .brief-list li { margin-top: calc(4px * var(--space-scale)); }
 .brief-list li .muted, .brief-list li .grow { flex: 1; }
+

@@ -6,7 +6,10 @@
 
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
-import { BRIEF_SECTIONS, WEEKLY_SECTIONS, VOICE_CHOICES, VOICE_STYLE_MAX, isValidAvatar, type UserSettings, CARDS_EXTENSION_ID, INVENTORY_EXTENSION_ID } from '@m2office/shared';
+import {
+  BRIEF_SECTIONS, WEEKLY_SECTIONS, VOICE_CHOICES, VOICE_STYLE_MAX, isValidAvatar, type UserSettings, type MenuCategory,
+  CARDS_EXTENSION_ID, INVENTORY_EXTENSION_ID, MENU_CATEGORY_MAX, MENU_CATEGORY_NAME_MAX,
+} from '@m2office/shared';
 import { AUDIO, AiNotConfiguredError, LEARNED_SOURCE, cleanTopics, buildPresence, loadFile, refusalMessage, refuseToRemember } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
@@ -111,6 +114,14 @@ export function meRoute(deps: AppDeps) {
     const checked = validate(c.req.param('section'), await c.req.json<unknown>(), allAgents.map((a) => a.id));
     if ('error' in checked) return c.json({ error: checked.error }, 400);
     let value = checked.value;
+    if (checked.section === 'menu') {
+      // カテゴリーを送らなかった保存（並びだけの保存）では、今のカテゴリーを残す
+      const v = value as UserSettings['menu'];
+      if (v.categories === undefined) {
+        const current = (await deps.repo.getUserSettings(tenant.id, user.id)).menu;
+        value = { ...v, categories: current.categories ?? [], categoryOf: current.categoryOf ?? {} };
+      }
+    }
     if (checked.section === 'brief') {
       // 秘書が選んだ印は画面から変えさせない。画面で分野を消しても、秘書が選び直さないよう印は付けたままにする（第9.5.5.1.1節）
       const current = (await deps.repo.getUserSettings(tenant.id, user.id)).brief;
@@ -474,7 +485,20 @@ function validate(
       const list = (v: unknown) => (Array.isArray(v) ? v.map(String).filter((x) => ids.includes(x)) : []);
       // ピン止め（仕様書 第6.1.1節）。配列でなければ、まだ変えていない（null）として残す
       const pinned = Array.isArray(o['pinned']) ? [...new Set(list(o['pinned']))] : null;
-      return { section, value: { hidden: [...new Set(list(o['hidden']))], order: [...new Set(list(o['order']))], pinned } };
+      const value: UserSettings['menu'] = { hidden: [...new Set(list(o['hidden']))], order: [...new Set(list(o['order']))], pinned };
+      // カテゴリー（第6.1.1節）。送られなければ今の値を残す（古い画面から並びだけを保存しても消さない）
+      if (o['categories'] !== undefined || o['categoryOf'] !== undefined) {
+        const cats = cleanCategories(o['categories']);
+        if ('error' in cats) return cats;
+        const catIds = new Set(cats.map((x) => x.id));
+        const of = o['categoryOf'] && typeof o['categoryOf'] === 'object' && !Array.isArray(o['categoryOf'])
+          ? Object.fromEntries(Object.entries(o['categoryOf'] as Record<string, unknown>)
+            .filter(([k, v]) => ids.includes(k) && typeof v === 'string' && catIds.has(v)) as [string, string][])
+          : {};
+        value.categories = cats;
+        value.categoryOf = of;
+      }
+      return { section, value };
     }
     case 'brief': {
       // 朝のブリーフの中身（第6.5.3.1節）。画面では消す・戻すだけだが、形はここで整える
@@ -489,6 +513,28 @@ function validate(
     default:
       return { error: `不明な設定の区分です: ${section}` };
   }
+}
+
+/**
+ * 左のメニューのカテゴリーを整える（仕様書 第6.1.1節）。名前の前後の空白を落とし、同じ名前と空の名前を断る。
+ *
+ * @returns 整えたカテゴリー。数や名前の長さが決まりを超えれば `error`
+ */
+function cleanCategories(v: unknown): MenuCategory[] | { error: string } {
+  if (v === undefined || v === null) return [];
+  if (!Array.isArray(v)) return { error: 'カテゴリーの形が違います' };
+  if (v.length > MENU_CATEGORY_MAX) return { error: `カテゴリーは ${MENU_CATEGORY_MAX} 個までです` };
+  const out: MenuCategory[] = [];
+  for (const x of v) {
+    const c = x as { id?: unknown; name?: unknown };
+    const id = typeof c.id === 'string' ? c.id.trim() : '';
+    const name = typeof c.name === 'string' ? c.name.trim() : '';
+    if (!/^[A-Za-z0-9_-]{1,40}$/.test(id) || !name) return { error: 'カテゴリーの名前を入れてください' };
+    if ([...name].length > MENU_CATEGORY_NAME_MAX) return { error: `カテゴリーの名前は ${MENU_CATEGORY_NAME_MAX} 字までにしてください` };
+    if (out.some((y) => y.id === id || y.name === name)) return { error: `同じ名前のカテゴリー（${name}）があります` };
+    out.push({ id, name });
+  }
+  return out;
 }
 
 async function audit(deps: AppDeps, tenantId: string, userId: string, action: string, target: string) {

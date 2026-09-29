@@ -12,6 +12,10 @@ const PERSON = /さん|様|氏|社長|部長|課長|担当/;
 const CONTACT_ITEM = /電話番号|電話|携帯|メールアドレス|メアド|連絡先|住所|FAX|ファックス|役職|部署/;
 /** 尋ねる言い回し。 */
 const ASKS = /[?？]|教えて|知りたい|何番|探して|調べて|分かる|わかる|ある[?？]?$|は$/;
+/** 送る・誘う言い回し（「佐々木さんのメールアドレスに資料を送って」は名刺の問いではない）。 */
+const SENDS = /送って|送信|送る|転送|返信|招待|共有して|予定を|入れて|作って|下書き/;
+/** 名詞の形の依頼（音声の秘書が渡す「佐々木さんの連絡先情報（メールアドレス・住所など）」）。末尾が項目の名前か括弧で終わる。 */
+const NOUN_ASK = /(電話番号|電話|携帯|メールアドレス|メアド|連絡先|住所|FAX|ファックス|役職|部署|情報)\s*([（(][^）)]*[）)])?\s*[。．]?$/;
 /** 直す・書き足す言い回し。 */
 const FIXES = /直して|修正して|訂正して|に変えて|に変更して|メモして|メモを(残|書|足)|書き足して|追記して/;
 /** 名刺を受け取った日を告げる言い回し（「9 月 25 日の展示会でもらった」）。 */
@@ -28,7 +32,8 @@ const EXCHANGED = /名刺(を)?交換した(人|方)|名刺をもらった(人|�
  * 名刺についての依頼かを見分ける。
  *
  * @returns `ask`（名刺を探す）・`fix`（名刺を直す・メモする）。名刺の依頼でなければ `null`
- * @remarks 送る依頼（「〇〇さんにメールを送って」）は名刺の依頼にしない（尋ねる言い回しが無いため）
+ * @remarks 送る依頼（「〇〇さんにメールを送って」）は名刺の依頼にしない。尋ねる言い回しの無い名詞の形
+ *   （音声の秘書が画面に出すよう渡す「佐々木さんの連絡先（メールアドレス・住所など）」）は、名刺を探す問いとする
  */
 export function contactRequest(message: string): 'ask' | 'fix' | null {
   const m = message.trim();
@@ -39,5 +44,6 @@ export function contactRequest(message: string): 'ask' | 'fix' | null {
   if (EXCHANGED.test(m)) return 'ask';
   if (aboutCard && ASKS.test(m)) return 'ask';
   if (PERSON.test(m) && CONTACT_ITEM.test(m) && ASKS.test(m)) return 'ask';
+  if (PERSON.test(m) && CONTACT_ITEM.test(m) && NOUN_ASK.test(m) && !SENDS.test(m)) return 'ask';
   return null;
 }

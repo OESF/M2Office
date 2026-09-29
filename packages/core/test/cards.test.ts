@@ -13,6 +13,7 @@ import {
   type LlmProvider,
 } from '../src/index.js';
 import { contactRequest } from '../src/secretary/contacts.js';
+import { DIRECT_QUERIES } from '../src/secretary/catalog.js';
 
 const fields = (over: Partial<CardFields>): CardFields => ({ ...EMPTY_CARD_FIELDS, ...over });
 
@@ -128,6 +129,17 @@ test('秘書の見分け: 名刺を探す依頼・直す依頼・名刺と関係
   assert.equal(contactRequest('先週名刺をもらった人は？'), 'ask', '誰かを尋ねる文は探す依頼');
   assert.equal(contactRequest('明日の予定は？'), null);
   assert.equal(contactRequest('会議の議事録を作って'), null);
+  // 音声の秘書が画面に出すよう渡す、尋ねる言い回しの無い名詞の形（2026-09-29 に未読メールの件数を答えていた）
+  assert.equal(contactRequest('佐々木美穂さんの連絡先情報（メールアドレス・住所など）'), 'ask');
+  assert.equal(contactRequest('佐々木さんの電話番号'), 'ask');
+  assert.equal(contactRequest('佐々木さんのメールアドレスに資料を送って'), null, '送る依頼は名刺の依頼にしない');
+});
+
+test('未読メールの定型の答えは、人の連絡先を尋ねる依頼に当てない', () => {
+  const match = (m: string) => DIRECT_QUERIES.find((q) => q.patterns.some((p) => p.test(m)) && !q.excludes?.some((p) => p.test(m)))?.id;
+  assert.equal(match('佐々木美穂さんの連絡先情報（メールアドレス・住所など）'), undefined);
+  assert.equal(match('山田さんのメアドは？'), undefined);
+  assert.equal(match('未読のメールは？'), 'mail-unread', '未読メールの問いには答える');
 });
 
 test('今日の日付は本人のタイムゾーンで決める（世界標準時では日本の朝が前の日になる）', () => {

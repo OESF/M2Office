@@ -10,8 +10,9 @@
  */
 
 import {
-  createContext, useCallback, useContext, useEffect, useRef, useState, type CSSProperties, type ReactNode,
+  createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode,
 } from 'react';
+import { createPortal } from 'react-dom';
 import { AVATAR_PRESETS } from '@m2office/shared';
 import { useTheme } from './theme.js';
 import { keyLabel, useHotkey } from './keys.js';
@@ -23,7 +24,8 @@ export type IconName =
   | 'dashboard' | 'usage' | 'runs' | 'company' | 'sliders' | 'extensions' | 'users' | 'audit' | 'connectors'
   | 'nav-collapse' | 'nav-expand' | 'caret-right' | 'caret-down' | 'back' | 'sun' | 'moon' | 'logout'
   | 'mic' | 'mic-off' | 'clip' | 'send' | 'tasks' | 'chat' | 'drive' | 'external'
-  | 'doc' | 'sheet' | 'slides' | 'form' | 'video' | 'console' | 'apps' | 'pin' | 'cards' | 'inventory';
+  | 'doc' | 'sheet' | 'slides' | 'form' | 'video' | 'console' | 'apps' | 'pin' | 'cards' | 'inventory'
+  | 'more' | 'check' | 'folder';
 
 /** モノクロのアイコン。文字の色を引き継ぐ。飾りなので読み上げない。 */
 export function Icon({ name, className }: { name: IconName; className?: string }) {
@@ -103,6 +105,29 @@ export function useRememberedNumber(key: string, initial: number): [number, (v: 
     try { localStorage.setItem(key, String(v)); } catch { /* 覚えられなくても動く */ }
   }, [key, v]);
   return [v, setV];
+}
+
+/**
+ * 開いている見出しの集まりを、端末ごとに覚えておく（仕様書 第6.1.1節「たたみ方」。カテゴリーごとの開閉）。
+ *
+ * @param key 覚えておく先の鍵
+ * @returns 開いている ID の集まりと、1 つを開く・たたむ関数
+ * @remarks 覚えられない環境でも動く。そのときは毎回すべてたたんだ状態から始まる
+ */
+export function useRememberedSet(key: string): [Set<string>, (id: string, open: boolean) => void] {
+  const [ids, setIds] = useState<string[]>(() => {
+    try {
+      const v = JSON.parse(localStorage.getItem(key) ?? '[]') as unknown;
+      return Array.isArray(v) ? v.map(String) : [];
+    } catch { return []; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(key, JSON.stringify(ids)); } catch { /* 覚えられなくても動く */ }
+  }, [key, ids]);
+  const set = useCallback((id: string, open: boolean) => {
+    setIds((cur) => (open ? (cur.includes(id) ? cur : [...cur, id]) : cur.filter((x) => x !== id)));
+  }, []);
+  return [new Set(ids), set];
 }
 
 function useCollapsed(): [boolean, (v: boolean) => void] {
@@ -192,27 +217,142 @@ export function NavItem({
 }
 
 /**
- * ピン止めできる左ペインの項目（仕様書 第6.1.1節「業務の並び」）。項目の右端にピンのボタンを重ねる。
+ * 項目の右端の縦の三点（︙）のボタンと、押すと出る操作の一覧（仕様書 第6.1.1節「項目の操作」）。
  *
- * @param pinned ピン止めしているか。しているときはピンの印を常に出し、していなければマウスを重ねたときだけ出す
- * @param onPin ピンのボタンを押したとき（止める・外す）
- * @remarks ボタンの中にボタンを入れられないため、項目とピンのボタンを並べて包む。折りたたんだ左ペインではピンを出さない
+ * @param label ボタンの読み上げの名前
+ * @param children 一覧の中身。`close` で閉じる
+ * @remarks 一覧は左ペインのスクロールに切られないよう、body に出して画面に対して置く。外を押す・Esc・スクロールで閉じる。
+ *   折りたたんだ左ペインではボタンを出さない
  */
-export function PinnableNavItem({ pinned, onPin, ...item }: Parameters<typeof NavItem>[0] & { pinned: boolean; onPin: () => void }) {
+export function RowMenu({ label, children }: { label: string; children: (close: () => void) => ReactNode }) {
   const collapsed = useContext(Collapsed);
+  const [at, setAt] = useState<{ top: number; left: number; anchorTop: number } | null>(null);
+  const btn = useRef<HTMLButtonElement>(null);
+  const box = useRef<HTMLDivElement>(null);
+  const close = useCallback(() => setAt(null), []);
+  useEffect(() => {
+    if (!at) return undefined;
+    const away = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (!box.current?.contains(t) && !btn.current?.contains(t)) setAt(null);
+    };
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') { setAt(null); btn.current?.focus(); } };
+    const moved = (e: Event) => { if (!box.current?.contains(e.target as Node)) setAt(null); };
+    document.addEventListener('mousedown', away);
+    document.addEventListener('keydown', esc);
+    window.addEventListener('scroll', moved, true);
+    window.addEventListener('resize', close);
+    return () => {
+      document.removeEventListener('mousedown', away);
+      document.removeEventListener('keydown', esc);
+      window.removeEventListener('scroll', moved, true);
+      window.removeEventListener('resize', close);
+    };
+  }, [at, close]);
+  // 下に入り切らなければ、ボタンの上に出す。開いたら最初の操作に合わせる（キーボードで選べるように）
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!at || !el) return;
+    const h = el.offsetHeight;
+    if (at.top + h > window.innerHeight - 8) {
+      const top = Math.max(8, at.anchorTop - h - 4);
+      if (top !== at.top) setAt({ ...at, top });
+    }
+    el.querySelector<HTMLElement>('[role^="menuitem"], input')?.focus();
+    // 開いたときに 1 回だけ合わせる
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [at?.anchorTop]);
+  if (collapsed) return null;
+  const toggle = () => {
+    if (at) { setAt(null); return; }
+    const r = btn.current!.getBoundingClientRect();
+    const width = 248;
+    setAt({ top: r.bottom + 4, left: Math.min(Math.max(8, r.right - width), window.innerWidth - width - 8), anchorTop: r.top });
+  };
   return (
-    <div className={`nav-pin-row${pinned ? ' pinned' : ''}`}>
-      <NavItem {...item} />
-      {!collapsed && (
-        <button
-          className="nav-pin" onClick={onPin}
-          title={pinned ? 'ピン止めを外す（「ほかの業務」に入ります）' : 'ピン止めする（いつも上に出します）'}
-          aria-label={pinned ? `${item.label}のピン止めを外す` : `${item.label}をピン止めする`}
-          aria-pressed={pinned}
-        >
-          <Icon name="pin" />
-        </button>
+    <>
+      <button
+        ref={btn} className={`nav-more${at ? ' open' : ''}`} onClick={toggle}
+        title={label} aria-label={label} aria-haspopup="menu" aria-expanded={!!at}
+      >
+        <Icon name="more" />
+      </button>
+      {at && createPortal(
+        <div ref={box} className="row-menu" role="menu" aria-label={label} style={{ top: at.top, left: at.left }}>
+          {children(close)}
+        </div>,
+        document.body,
       )}
+    </>
+  );
+}
+
+/**
+ * 操作の一覧の 1 行。
+ *
+ * @param checked 選べるものの 1 つのとき、選んでいるかどうか（カテゴリーの一覧）。印を出す
+ */
+export function RowMenuItem({ icon, checked, onSelect, children }: {
+  icon?: IconName; checked?: boolean; onSelect: () => void; children: ReactNode;
+}) {
+  return (
+    <button
+      className={`row-menu-item${checked ? ' checked' : ''}`} onClick={onSelect}
+      role={checked === undefined ? 'menuitem' : 'menuitemradio'} aria-checked={checked}
+    >
+      <span className="row-menu-mark">
+        {checked ? <Icon name="check" /> : icon ? <Icon name={icon} /> : null}
+      </span>
+      <span className="row-menu-text">{children}</span>
+    </button>
+  );
+}
+
+/** 操作の一覧の区切り。 */
+export function RowMenuSeparator() {
+  return <div className="row-menu-sep" role="separator" />;
+}
+
+/**
+ * 操作の一覧の中で名前を入れる欄（カテゴリーを作る・名前を変える）。Enter で決め、Esc でやめる。
+ *
+ * @param onSubmit 決めたとき。だめなら理由を返す（欄の下に出す）
+ */
+export function RowMenuInput({ initial = '', placeholder, onSubmit, onCancel }: {
+  initial?: string; placeholder: string; onSubmit: (value: string) => string | null; onCancel: () => void;
+}) {
+  const [value, setValue] = useState(initial);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <div className="row-menu-input">
+      <input
+        // 開いたらすぐ打てるようにする（名前を変えるときは今の名前を選んでおく）
+        autoFocus onFocus={(e) => e.currentTarget.select()}
+        value={value} placeholder={placeholder} aria-label={placeholder} maxLength={40}
+        onChange={(e) => { setValue(e.target.value); setError(null); }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); setError(onSubmit(value)); }
+          if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onCancel(); }
+        }}
+      />
+      {error && <p className="row-menu-error">{error}</p>}
+    </div>
+  );
+}
+
+/**
+ * 操作の一覧を持つ左ペインの項目（仕様書 第6.1.1節「業務の並び」）。項目の右端に縦の三点のボタンを重ねる。
+ *
+ * @param menu 三点のボタンで出す操作の一覧の中身
+ * @remarks ボタンの中にボタンを入れられないため、項目と三点のボタンを並べて包む
+ */
+export function MenuNavItem({ menu, ...item }: Parameters<typeof NavItem>[0] & {
+  menu: (close: () => void) => ReactNode;
+}) {
+  return (
+    <div className="nav-pin-row">
+      <NavItem {...item} />
+      <RowMenu label={`${item.label}の操作`}>{menu}</RowMenu>
     </div>
   );
 }

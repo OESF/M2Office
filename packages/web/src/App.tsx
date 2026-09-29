@@ -6,9 +6,12 @@
  * @see 仕様書 第6.1節 ワークスペースの画面構造
  */
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
-import { CARDS_EXTENSION_ID, INVENTORY_EXTENSION_ID, showsCaptions, type Notification } from '@m2office/shared';
-import { splitMenu, togglePinned } from './menu.js';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { CARDS_EXTENSION_ID, INVENTORY_EXTENSION_ID, showsCaptions, type Notification, type UserSettings } from '@m2office/shared';
+import {
+  addCategory, assignCategory, checkCategoryName, groupMenu, removeCategory, togglePinned, type MenuSection,
+} from './menu.js';
+import { CategoryMenuActions, ItemMenuActions } from './MenuActions.js';
 import {
   api, ApiError, describeError,
   type AgentSummary, type ApprovalView, type Lookup, type Me, type RunDetail, type SecretaryReply,
@@ -30,8 +33,8 @@ import {
   type SettingsSection,
 } from './Settings.js';
 import {
-  Icon, NavHeading, NavItem, NavUserCard, PinnableNavItem, SecretaryAvatar, SideNavLayout, ThemeToggle, agentIcon, useRemembered,
-  useRememberedNumber, type IconName,
+  Icon, MenuNavItem, NavHeading, NavItem, NavUserCard, SecretaryAvatar, SideNavLayout, ThemeToggle, agentIcon, useRemembered,
+  useRememberedNumber, useRememberedSet, type IconName,
 } from './nav.js';
 
 /**
@@ -138,6 +141,8 @@ function viewOf(r: Route): View | null {
 export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [moreOpen, setMoreOpen] = useRemembered('m2office.nav-more-agents', false);
+  // 開いているカテゴリー（端末ごとに覚える。仕様書 第6.1.1節「たたみ方」）
+  const [openCategories, setCategoryOpen] = useRememberedSet('m2office.nav-open-categories');
   const [approvals, setApprovals] = useState<ApprovalView[]>([]);
   const [history, setHistory] = useState<
     { run: { id: string; status: string; startedAt: string }; job: { agentId: string } | null }[]
@@ -184,7 +189,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
       return { kind: 'help', articleId };
     });
   }, []));
-  const [menu, setMenu] = useState<{ hidden: string[]; order: string[]; pinned?: string[] | null }>({ hidden: [], order: [], pinned: null });
+  const [menu, setMenu] = useState<UserSettings['menu']>({ hidden: [], order: [], pinned: null, categories: [], categoryOf: {} });
   // 秘書のアバター（仕様書 第6.1.3節）。個人設定で変えたら読み直す
   const [avatar, setAvatar] = useState('');
   // 本人の呼ばれ方（仕様書 第6.5.3節）。最初の画面の呼びかけに使う（第6.1.5節）
@@ -349,23 +354,53 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ...(me.inventory ? [{ id: INVENTORY_EXTENSION_ID, name: '在庫管理', description: '品目・場所・入出庫を記録し、使える数を出す', icon: 'inventory' as IconName, agent: null }] : []),
   ];
   const allMenuAgents = orderAgents(menuItems, menu.order).filter((a) => !menu.hidden.includes(a.id));
-  // ピン止めした業務だけを上に出し、ほかは「ほかの業務」にたたむ（仕様書 第6.1.1節「業務の並び」）。並びはメニューの順のまま。
-  // 使った回数では変えない。まだ一度も変えていなければ標準の組
-  const { top: topAgents, others: otherAgents } = splitMenu(allMenuAgents, menu.pinned);
+  // ピン止めした業務だけを上に出し、ほかはカテゴリーごと・「ほかの業務」にたたむ（仕様書 第6.1.1節「業務の並び」）。
+  // 並びはメニューの順のまま。使った回数では変えない。まだ一度も変えていなければ標準の組
+  const { top: topAgents, sections } = groupMenu(allMenuAgents, menu);
   const openItem = (m: MenuItem) => (m.agent ? setView({ kind: 'agent', agent: m.agent })
     : m.id === INVENTORY_EXTENSION_ID ? setView({ kind: 'inventory', itemId: null }) : setView({ kind: 'cards', contactId: null }));
   const isOpen = (m: MenuItem) => (m.agent ? view.kind === 'agent' && view.agent.id === m.id
     : m.id === INVENTORY_EXTENSION_ID ? view.kind === 'inventory' : view.kind === 'cards');
-  const togglePin = (id: string) => {
-    const saved = { ...menu, pinned: togglePinned(menu.pinned, id) };
+  // ピン止めとカテゴリーは個人設定（メニュー）に保存し、端末をまたいで同じにする。保存に失敗したら読み直す
+  const saveMenu = (saved: UserSettings['menu']) => {
     setMenu(saved);
     void api.saveMySettings('menu', saved).catch(() => loadMenu());
   };
-  // いま開いている業務がたたんだ中にあれば、開いておく
-  const openingOther = otherAgents.some(isOpen);
-  const showOthers = moreOpen || openingOther;
-  // 押すキー（1〜9）は見えている順に割り当てる
-  const menuAgents = showOthers ? [...topAgents, ...otherAgents] : topAgents;
+  const togglePin = (id: string) => saveMenu({ ...menu, pinned: togglePinned(menu.pinned, id) });
+  const setItemCategory = (id: string, categoryId: string | null) => saveMenu({ ...menu, categoryOf: assignCategory(menu.categoryOf, id, categoryId) });
+  // カテゴリーを作ってその業務を入れ、中身が見えるよう開いておく
+  const createCategoryFor = (id: string, name: string): string | null => {
+    const made = addCategory(menu.categories, name);
+    if ('error' in made) return made.error;
+    saveMenu({ ...menu, categories: made.categories, categoryOf: assignCategory(menu.categoryOf, id, made.category.id) });
+    setCategoryOpen(made.category.id, true);
+    return null;
+  };
+  const renameCategory = (categoryId: string, name: string): string | null => {
+    const checked = checkCategoryName(menu.categories, name, categoryId);
+    if ('error' in checked) return checked.error;
+    saveMenu({ ...menu, categories: (menu.categories ?? []).map((c) => (c.id === categoryId ? { ...c, name: checked.name } : c)) });
+    return null;
+  };
+  const deleteCategory = (categoryId: string) => {
+    saveMenu({ ...menu, ...removeCategory(menu, categoryId) });
+    setCategoryOpen(categoryId, false);
+  };
+  // 業務の縦の三点のボタンで出す一覧（ピン止め・カテゴリーに入れる・入れない・作る）
+  const itemMenu = (id: string, pinned: boolean) => (close: () => void) => (
+    <ItemMenuActions
+      pinned={pinned} categories={menu.categories ?? []} categoryId={menu.categoryOf?.[id] ?? null} close={close}
+      onPin={() => togglePin(id)} onAssign={(c) => setItemCategory(id, c)} onCreate={(name) => createCategoryFor(id, name)}
+    />
+  );
+  // たたんだ見出しは、押すと開く。いま開いている業務がたたんだ中にあれば開いておく
+  const sectionOpen = (sec: MenuSection<MenuItem>) =>
+    (sec.category ? openCategories.has(sec.category.id) : moreOpen) || sec.items.some(isOpen);
+  const toggleSection = (sec: MenuSection<MenuItem>, open: boolean) =>
+    (sec.category ? setCategoryOpen(sec.category.id, open) : setMoreOpen(open));
+  // 押すキー（1〜9）は見えている順に割り当てる（たたんだ中の業務には割り当てない）
+  const menuAgents = [...topAgents, ...sections.filter(sectionOpen).flatMap((sec) => sec.items)];
+  const hotkeyIndex = new Map(menuAgents.map((a, i) => [a.id, i]));
   useHotkey('Mod+,', useCallback(() => openSettings(), [openSettings]));
   useHotkey('Mod+/', useCallback(() => openSettings('keys'), [openSettings]));
   useHotkey('Mod+I', useCallback(() => setTalkOpen(!talkOpen), [talkOpen, setTalkOpen]));
@@ -419,8 +454,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
           <>
             <NavHeading>業務</NavHeading>
             {topAgents.map((a, i) => (
-              <PinnableNavItem
-                key={a.id} pinned onPin={() => togglePin(a.id)}
+              <MenuNavItem
+                key={a.id} menu={itemMenu(a.id, true)}
                 icon={a.icon} label={a.name} description={a.description}
                 active={isOpen(a)}
                 // 1〜9 番目には、押すキーを併記する（仕様書 第6.11.1節 k4）
@@ -428,22 +463,48 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
                 onClick={() => openItem(a)}
               />
             ))}
-            {otherAgents.length > 0 && (
-              <NavItem
-                icon="apps" label={`ほかの業務（${otherAgents.length}）`} expanded={showOthers}
-                onClick={() => setMoreOpen(!showOthers)}
-              />
-            )}
-            {showOthers && otherAgents.map((a, i) => (
-              <PinnableNavItem
-                key={a.id} pinned={false} onPin={() => togglePin(a.id)}
-                icon={a.icon} label={a.name} description={a.description}
-                active={isOpen(a)}
-                hint={topAgents.length + i < 9 ? keyLabel(`Mod+Shift+${topAgents.length + i + 1}`) : ''}
-                onClick={() => openItem(a)}
-                className="item nav-other"
-              />
-            ))}
+            {/* カテゴリーごと（作った順）と、最後に「ほかの業務」。1 つずつたためる（仕様書 第6.1.1節） */}
+            {sections.map((sec) => {
+              const open = sectionOpen(sec);
+              const key = sec.category?.id ?? 'others';
+              const header = {
+                icon: (sec.category ? 'folder' : 'apps') as IconName,
+                label: `${sec.category?.name ?? 'ほかの業務'}（${sec.items.length}）`,
+                expanded: open,
+                onClick: () => toggleSection(sec, !open),
+              };
+              return (
+                <Fragment key={key}>
+                  {sec.category
+                    ? (
+                      <MenuNavItem
+                        {...header}
+                        menu={(close) => (
+                          <CategoryMenuActions
+                            category={sec.category!} close={close}
+                            onRename={(name) => renameCategory(sec.category!.id, name)}
+                            onRemove={() => deleteCategory(sec.category!.id)}
+                          />
+                        )}
+                      />
+                    )
+                    : <NavItem {...header} />}
+                  {open && sec.items.map((a) => {
+                    const n = hotkeyIndex.get(a.id);
+                    return (
+                      <MenuNavItem
+                        key={a.id} menu={itemMenu(a.id, false)}
+                        icon={a.icon} label={a.name} description={a.description}
+                        active={isOpen(a)}
+                        hint={n !== undefined && n < 9 ? keyLabel(`Mod+Shift+${n + 1}`) : ''}
+                        onClick={() => openItem(a)}
+                        className="item nav-other"
+                      />
+                    );
+                  })}
+                </Fragment>
+              );
+            })}
             <NavHeading>自分の状況</NavHeading>
             <NavItem icon="approvals" label="承認トレイ" description="あなたが判断する承認と、操作の確認" count={approvals.length}
               active={view.kind === 'approvals'} onClick={() => setView({ kind: 'approvals' })} />

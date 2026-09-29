@@ -150,12 +150,15 @@ const schedule: DirectQuery = {
   },
 };
 
+/** 人の連絡先を尋ねる言葉。「メールアドレス」は未読メールの問いではない（名刺を探す問い。第27.9節）。 */
+const CONTACT_WORDS = /メールアドレス|メアド|アドレス|連絡先/;
+
 /** 未読メールの件数を返す。 */
 const unreadMail: DirectQuery = {
   id: 'mail-unread',
   label: '未読メールの確認',
   patterns: [/メール|受信/],
-  excludes: [ACTION_WORDS, LONG_REQUEST],
+  excludes: [ACTION_WORDS, LONG_REQUEST, CONTACT_WORDS],
   compartment: null,
   async answer(ctx) {
     // 受信トレイの「メイン」だけを数える。振り分けられたものと迷惑メールは数えない（仕様書 第10.9.2節）

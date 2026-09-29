@@ -359,6 +359,14 @@ export interface UserSettings {
      * @remarks `null` はまだ一度も変えていないことを表し、{@link DEFAULT_PINNED} を使う。使った回数では変えない
      */
     pinned?: string[] | null;
+    /**
+     * 本人が作ったカテゴリー（仕様書 第6.1.1節）。作った順に左のメニューに並べ、1 つずつたためる。
+     *
+     * @remarks 本人だけのもの。利用者のグループ（第16.7.3節）とは別で、使える業務は変わらない
+     */
+    categories?: MenuCategory[];
+    /** 業務の ID から、入れたカテゴリーの ID へ。載っていない業務はどのカテゴリーにも入れていない（「ほかの業務」に出す）。 */
+    categoryOf?: Record<string, string>;
   };
   /**
    * 朝のブリーフの中身（仕様書 第9.5.5.1.1節、ADR-0047）。
@@ -428,6 +436,17 @@ export interface BriefSettings {
   seedNote: boolean;
 }
 
+/** 左のメニューのカテゴリー（仕様書 第6.1.1節）。 */
+export interface MenuCategory {
+  id: string;
+  name: string;
+}
+
+/** 1 人が作れるカテゴリーの数。 */
+export const MENU_CATEGORY_MAX = 20;
+/** カテゴリーの名前の長さ（字）。 */
+export const MENU_CATEGORY_NAME_MAX = 20;
+
 /** まだピン止めを変えていない人に、はじめからピン止めしておく業務（仕様書 第6.1.1節）。 */
 // 'business-cards' は名刺、'inventory' は在庫（内蔵の拡張。業務の 1 つとして並べる。使える人にだけ出る。仕様書 第6.1.1節）
 export const DEFAULT_PINNED = ['minutes', 'inbox-triage', 'knowledge-qa', 'scheduling', 'slides', 'document-draft', 'business-cards', 'inventory'];
@@ -441,7 +460,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
     channels: { chat: false },
   },
   memory: { learning: true, excludes: [], keepConversations: true },
-  menu: { hidden: [], order: [], pinned: null },
+  menu: { hidden: [], order: [], pinned: null, categories: [], categoryOf: {} },
   brief: { topics: [], omit: [], weeklyOmit: [], seededAt: null, seedNote: false },
   onboarding: { tourCompletedAt: null, morningBriefAt: null, weeklyBriefAt: null },
 };
