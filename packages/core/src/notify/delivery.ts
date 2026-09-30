@@ -26,6 +26,7 @@ const KIND_LABELS: Record<string, string> = {
   brief: 'ブリーフ',
   security: 'セキュリティ',
   inventory: '在庫',
+  signage: 'サイネージ',
 };
 
 /** 会社が業務を受け付ける状態か（仕様書 第23.8.6節）。停止中の会社へは控えを送らない。 */

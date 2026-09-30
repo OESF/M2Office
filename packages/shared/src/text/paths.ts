@@ -16,6 +16,7 @@ const RUN_ID = /^[A-Za-z0-9_.:-]{1,128}$/;
 export function notificationPath(n: { kind: string; runId: string | null }): string {
   if (n.kind === 'approval') return '/approvals';
   if (n.kind === 'inventory') return '/inventory';
+  if (n.kind === 'signage') return '/signage';
   if (n.runId && RUN_ID.test(n.runId)) return `/runs/${encodeURIComponent(n.runId)}`;
   return '/';
 }

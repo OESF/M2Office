@@ -17,6 +17,7 @@ import type {
   YeaDeclaration, YeaDeclarationView, YeaResult, SocialDetermination, SocialEvent, InsuranceEligibility, LaborInsuranceData, LaborInsuranceView, ShiftView, HrShiftSettings, HrShift,
   InventoryCount, InventoryCountRow, InventoryCountScope, InventoryCountView, InventorySupplier,
   InventoryBooking, InventoryBookingMapping, InventoryBookingSource,
+  SignageAsset, SignageEntry, SignageScreen, SignageSettings,
 } from '@m2office/shared';
 import { debugMode, recordCall } from './debug.js';
 
@@ -162,6 +163,17 @@ async function postForm<T>(path: string, form: FormData, method: 'POST' | 'PUT' 
   return body as T;
 }
 
+/** ファイルの中身そのものを本文にして送る（店頭サイネージの素材。仕様書 第31.6.1節）。失敗なら ApiError。 */
+async function sendRaw<T>(method: 'POST' | 'PUT', path: string, body: Blob, headers: Record<string, string> = {}): Promise<T> {
+  const res = await fetch(`/v1${path}`, {
+    method, credentials: 'same-origin', body,
+    headers: { 'content-type': body.type || 'application/octet-stream', ...headers, ...(devTenant ? { 'x-tenant': devTenant } : {}), ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}) },
+  });
+  const b = await res.json().catch(() => ({ error: '通信に失敗しました' }));
+  if (!res.ok) throw new ApiError(b.error ?? `エラー (${res.status})`, res.status);
+  return b as T;
+}
+
 /** POST で作ったファイルを受け取る（振込データ）。失敗なら ApiError（`problems` つき）。 */
 async function postBlob(path: string): Promise<{ blob: Blob; headers: Headers }> {
   const res = await fetch(`/v1${path}`, {
@@ -265,6 +277,8 @@ export interface Me {
   inventory?: boolean;
   /** 人事・給与の担当者の画面を使えるか（会社の入り切りと人事区画。仕様書 第30.2節）。 */
   hr?: boolean;
+  /** 店頭サイネージを使えるか（会社の入り切りと利用範囲。仕様書 第31.2節）。 */
+  signage?: boolean;
   /** 本人の「給与・勤怠」を使えるか（台帳に結び付いているか。仕様書 第30.25節）。 */
   hrSelf?: boolean;
   /** デバッグモードか（`M2O_DEBUG=true`。仕様書 第20.4.1節「デバッグモード」）。 */
@@ -645,7 +659,21 @@ export interface ExtensionView {
   inventory?: InventorySettings;
   /** 人事・給与の会社の設定（仕様書 第30.8.1節）。人事・給与のときだけある。 */
   hr?: HrSettings;
+  /** 店頭サイネージの会社の設定（仕様書 第31.4節）。店頭サイネージのときだけある。 */
+  signage?: SignageSettings;
 }
+
+/** 店頭サイネージの管理の画面の中身（仕様書 第31.9.4節）。 */
+export interface SignageOverview {
+  screens: SignageScreen[];
+  usage: { bytes: number; limit: number };
+  maxScreens: number;
+  settings: SignageSettings;
+  admin: boolean;
+}
+
+/** 店頭サイネージの素材（どの画面の流れに入っているかつき）。 */
+export type SignageAssetView = SignageAsset & { screens: string[] };
 
 /** 管理者ページ「接続」の設定（仕様書 第14.3.3節）。秘密の値は含まない。 */
 export interface ConnectionSettings {
@@ -1034,6 +1062,28 @@ export const api = {
     },
   },
   /** 在庫管理（内蔵の拡張。仕様書 第29章）。 */
+  /** 店頭サイネージ（仕様書 第31章）。 */
+  signage: {
+    overview: () => call<SignageOverview>('/signage'),
+    updateScreen: (id: string, patch: { name?: string; orientation?: 'landscape' | 'portrait'; rotation?: number }) =>
+      call<{ screen: SignageScreen }>(`/signage/screens/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    flow: (id: string) => call<{ version: number; entries: SignageEntry[] }>(`/signage/screens/${encodeURIComponent(id)}/entries`),
+    /** 流れを並びごと置き換える（読んだ版を送る。ほかの人が先に直していれば 409）。 */
+    saveFlow: (id: string, version: number, entries: SignageEntry[]) =>
+      call<{ version: number }>(`/signage/screens/${encodeURIComponent(id)}/entries`, { method: 'PUT', body: JSON.stringify({ version, entries }) }),
+    assets: () => call<{ assets: SignageAssetView[] }>('/signage/assets'),
+    /** 素材を足す（画面で縮めた画像か MP4 そのもの）。同じ中身なら前の素材が返る。 */
+    upload: (file: Blob, name: string, size?: { width: number; height: number }) =>
+      sendRaw<{ asset: SignageAsset; existing: boolean }>('POST', '/signage/assets', file, {
+        'x-file-name': encodeURIComponent(name), ...(size ? { 'x-width': String(size.width), 'x-height': String(size.height) } : {}),
+      }),
+    setThumbnail: (id: string, jpeg: Blob) => sendRaw<{ ok: true }>('PUT', `/signage/assets/${encodeURIComponent(id)}/thumbnail`, jpeg),
+    renameAsset: (id: string, name: string) => call<{ asset: SignageAsset }>(`/signage/assets/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+    /** 素材を消す（流れに入っていても外す）。外した画面の名前が返る。 */
+    deleteAsset: (id: string) => call<{ screens: string[] }>(`/signage/assets/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    /** 縮小画像（無ければ `null`）。 */
+    thumbnail: (id: string) => fetchBlob(`/signage/assets/${encodeURIComponent(id)}/thumbnail`),
+  },
   inventory: {
     list: (q: { q?: string; stopped?: boolean } = {}) => {
       const p = new URLSearchParams();
@@ -1592,6 +1642,14 @@ export const api = {
     hrLaborIndustries: () => call<{ industries: { code: string; category: string; name: string; rate: number }[] }>('/admin/extensions/hr/labor-industries'),
     setHrSettings: (patch: Partial<HrSettings>) =>
       call<{ ok: true; hr: HrSettings }>('/admin/extensions/hr/settings', { method: 'PUT', body: JSON.stringify(patch) }),
+    /** 店頭サイネージの会社の設定（画像の秒数・店の色。仕様書 第31.4節）。送った項目だけを変える。 */
+    setSignageSettings: (patch: Partial<Pick<SignageSettings, 'imageSeconds' | 'color'>>) =>
+      call<{ ok: true; signage: SignageSettings }>('/admin/extensions/signage/settings', { method: 'PUT', body: JSON.stringify(patch) }),
+    /** 番号で店頭サイネージの画面を登録する（管理者だけ。仕様書 第31.5.1節）。 */
+    claimSignageScreen: (code: string) =>
+      call<{ screen: SignageScreen; restored: boolean }>('/admin/extensions/signage/pairings/claim', { method: 'POST', body: JSON.stringify({ code }) }),
+    /** 店頭サイネージの画面を外す（管理者だけ。確認を挟まない）。 */
+    removeSignageScreen: (id: string) => call<{ ok: true }>(`/admin/extensions/signage/screens/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     setExtensionEnabled: (id: string, enabled: boolean) =>
       call(`/admin/extensions/${encodeURIComponent(id)}/enabled`, { method: 'PUT', body: JSON.stringify({ enabled }) }),
     /** 会社の接続（コネクタ。仕様書 第12.11.0節）。 */

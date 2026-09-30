@@ -10,6 +10,7 @@
 import type { AccessSettings } from './access.js';
 import { DEFAULT_INVENTORY_SETTINGS, type InventorySettings } from './inventory.js';
 import { DEFAULT_HR_SETTINGS, type HrSettings } from './hr.js';
+import { DEFAULT_SIGNAGE_SETTINGS, type SignageSettings } from './signage.js';
 
 /** 会社情報（仕様書 第6.6.1節）。帳票とメールの署名に使う。 */
 export interface CompanyInfo {
@@ -221,6 +222,8 @@ export interface TenantSettings {
   inventory: InventorySettings;
   /** 人事・給与（第30章）。 */
   hr: HrSettings;
+  /** 店頭サイネージ（第31章）。 */
+  signage: SignageSettings;
 }
 
 /** 設定が未保存の会社に使う既定値。 */
@@ -253,6 +256,8 @@ export const DEFAULT_TENANT_SETTINGS: TenantSettings = {
   inventory: DEFAULT_INVENTORY_SETTINGS,
   // 人事・給与は既定で切り。給与 SaaS を使っている会社は入れなくてよい（第30.2節）
   hr: DEFAULT_HR_SETTINGS,
+  // 店頭サイネージは既定で切り。料金は取らない標準の機能で、使う会社が入れる（第31.2節）
+  signage: DEFAULT_SIGNAGE_SETTINGS,
 };
 
 /**
@@ -332,7 +337,7 @@ export interface UserSettings {
   };
   notifications: {
     /** 受け取る種類（第6.5.5節）。`false` にしたものは届けない。 */
-    kinds: Record<'brief' | 'run' | 'approval' | 'failure' | 'inventory' | 'attendance', boolean>;
+    kinds: Record<'brief' | 'run' | 'approval' | 'failure' | 'inventory' | 'attendance' | 'signage', boolean>;
     /** 通知しない時間帯（例: 22:00〜7:00）。`null` は指定なし。 */
     quietHours: { from: string; to: string } | null;
     /**
@@ -460,7 +465,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   profile: { furigana: '', title: '', timezone: 'Asia/Tokyo', home: '', workplace: '' },
   secretary: { name: '', callMe: '', style: 'polite', proactivity: 'normal', speak: true, captions: true, voice: '', voiceStyle: '', avatar: '' },
   notifications: {
-    kinds: { brief: true, run: true, approval: true, failure: true, inventory: true, attendance: true },
+    kinds: { brief: true, run: true, approval: true, failure: true, inventory: true, attendance: true, signage: true },
     quietHours: null,
     channels: { chat: false },
   },

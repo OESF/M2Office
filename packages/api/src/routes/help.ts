@@ -8,7 +8,7 @@
 
 import { Hono } from 'hono';
 import type { HelpContext, HelpScope } from '@m2office/core';
-import { CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID } from '@m2office/shared';
+import { CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID } from '@m2office/shared';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 
@@ -17,16 +17,17 @@ export function helpRoute(deps: AppDeps) {
 
   /** 要求ごとの出し分けの文脈（役割・無効にした業務・自動化ポリシー・使える内蔵の拡張）。 */
   async function contextOf(tenantId: string, userId: string, roles: readonly string[]): Promise<HelpContext> {
-    const [settings, view, agents, cards, inventory, hr] = await Promise.all([
+    const [settings, view, agents, cards, inventory, hr, signage, hrSelf] = await Promise.all([
       deps.repo.getTenantSettings(tenantId), deps.tenantView(tenantId), deps.agentsFor(tenantId, userId),
-      deps.cards.access(tenantId, userId), deps.inventory.access(tenantId, userId), deps.hr.access(tenantId, userId),
+      deps.cards.access(tenantId, userId), deps.inventory.access(tenantId, userId), deps.hr.access(tenantId, userId), deps.signage.access(tenantId, userId),
+      deps.hr.attendance.selfEmployee(tenantId, userId),
     ]);
     return {
       roles, disabledAgents: settings.agents.disabled, automation: settings.automation,
       // 本人の利用範囲の外の業務の説明は出さない（第16.7.4節）
       agents, registry: view.registry,
-      // 業務のマニュアルは、その業務を使える人だけに出す（第6.10.7.3節）
-      extensions: [cards ? CARDS_EXTENSION_ID : '', inventory ? INVENTORY_EXTENSION_ID : '', hr ? HR_EXTENSION_ID : ''].filter(Boolean),
+      // 業務の要点の記事とマニュアルは、その業務を使える人だけに出す（第6.10.7節・第6.10.7.3節）
+      extensions: [cards ? CARDS_EXTENSION_ID : '', inventory ? INVENTORY_EXTENSION_ID : '', hr ? HR_EXTENSION_ID : '', signage ? SIGNAGE_EXTENSION_ID : '', hrSelf ? 'hr-self' : ''].filter(Boolean),
     };
   }
 

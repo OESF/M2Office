@@ -760,9 +760,11 @@ console.log('\n■ 19. ヘルプと案内');
   const hrChapters = adminWork.items.filter((a) => a.category === 'manual' && a.business === 'hr-payroll');
   const invChapters = adminWork.items.filter((a) => a.category === 'manual' && a.business === 'inventory');
   const { body: chapter } = hrChapters[0] ? await call('a', `/v1/help/articles/${hrChapters[0].id}`) : { body: null };
+  const has = (id) => adminWork.items.some((x) => x.id === id);
   (hrChapters.length > 0) === !!meHelp.hr && (invChapters.length > 0) === !!meHelp.inventory
+    && has('start-signage') === !!meHelp.signage && has('start-inventory') === !!meHelp.inventory && has('start-hr') === !!meHelp.hr
     && (!hrChapters.length || (adminWork.manuals ?? []).some((m) => m.id === 'hr-payroll' && m.title === '人事・給与') && typeof chapter?.body === 'string')
-    ? ok(`業務のマニュアルは、その業務を使える人にだけ章ごとに出す（人事・給与 ${hrChapters.length} 章・在庫管理 ${invChapters.length} 章）`)
+    ? ok(`業務の要点の記事とマニュアルは、その業務を使える人にだけ出す（人事・給与 ${hrChapters.length} 章・在庫管理 ${invChapters.length} 章）`)
     : ng('マニュアルの出し分けが合わない', JSON.stringify({ hr: meHelp.hr, inv: meHelp.inventory, hrChapters: hrChapters.length, invChapters: invChapters.length }));
 
   const hidden = await call('a', '/v1/help/articles/admin-setup', {}, 'member');
@@ -4009,6 +4011,137 @@ console.log('\n■ 62. お知らせを消す（第6.5.5節）');
     ng('お知らせを消す確認が途中で止まった', String(err));
   } finally {
     await owner.query(`delete from notifications where id like $1`, [`${tag}%`]);
+    await owner.end();
+  }
+}
+
+console.log('\n■ 63. 店頭サイネージ（内蔵の拡張。第31章の段 1、ADR-0051）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const clean = async () => {
+    await owner.query(`delete from signage_screens where tenant_id in ('t-alpha', 't-beta')`);
+    await owner.query(`delete from signage_assets where tenant_id in ('t-alpha', 't-beta')`);
+    await owner.query(`delete from signage_pairings where tenant_id in ('t-alpha', 't-beta')`);
+  };
+  const play = async (path, init = {}, key = null, t = 'a') => {
+    const res = await fetch(`${API}/v1/signage-play${path}`, { ...init, headers: { 'content-type': 'application/json', 'x-tenant': t, ...(key ? { authorization: `Bearer ${key}` } : {}), ...(init.headers ?? {}) } });
+    const text = await res.text();
+    let body; try { body = JSON.parse(text); } catch { body = text; }
+    return { status: res.status, body, headers: res.headers };
+  };
+  const box = (type, ...parts) => { const body = Buffer.concat(parts.map((x) => Buffer.from(x))); const b = Buffer.alloc(8); b.writeUInt32BE(8 + body.length); b.write(type, 4, 'latin1'); return Buffer.concat([b, body]); };
+  const mp4 = (codec) => {
+    const mvhd = Buffer.alloc(100); mvhd.writeUInt32BE(1000, 12); mvhd.writeUInt32BE(5000, 16);
+    const hdlr = Buffer.alloc(24); hdlr.write('vide', 8, 'latin1');
+    const entry = Buffer.alloc(78); entry.writeUInt16BE(1280, 24); entry.writeUInt16BE(720, 26);
+    const stsd = Buffer.concat([Buffer.alloc(4), Buffer.from([0, 0, 0, 1]), box(codec, entry)]);
+    return Buffer.concat([box('ftyp', Buffer.from('isom\0\0\0\0isomavc1', 'latin1')), box('moov', box('mvhd', mvhd), box('trak', box('mdia', box('hdlr', hdlr), box('minf', box('stbl', box('stsd', stsd)))))), box('mdat', Buffer.alloc(64))]);
+  };
+  const png = (w, h, salt) => { const b = Buffer.alloc(40); Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(b); b.writeUInt32BE(13, 8); b.write('IHDR', 12, 'latin1'); b.writeUInt32BE(w, 16); b.writeUInt32BE(h, 20); b[39] = salt; return b; };
+  const upload = async (bytes, name) => {
+    const res = await fetch(`${API}/v1/signage/assets`, { method: 'POST', body: bytes, headers: { 'x-tenant': 'a', 'x-user': 'admin@alpha.example.jp', 'content-type': 'application/octet-stream', 'x-file-name': encodeURIComponent(name) } });
+    return { status: res.status, body: await res.json() };
+  };
+  const pairScreen = async () => {
+    const secret = `smoke${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`.padEnd(40, 'x');
+    const p = await play('/pairings', { method: 'POST', body: JSON.stringify({ secret, viewport: { width: 1920, height: 1080 } }) });
+    return { secret, code: p.body?.code, status: p.status };
+  };
+  const setEnabled = (t, enabled) => call(t, '/v1/admin/extensions/signage/enabled', { method: 'PUT', body: JSON.stringify({ enabled }) });
+  try {
+    await clean();
+    await setEnabled('a', true);
+    // 登録: 端末が番号を作り、管理者だけが番号で登録する。鍵は登録の後に 1 度だけ渡る（第31.5.1節）
+    const p1 = await pairScreen();
+    const before = await play('/pairings/poll', { method: 'POST', body: JSON.stringify({ secret: p1.secret }) });
+    const byMember = await call('a', '/v1/admin/extensions/signage/pairings/claim', { method: 'POST', body: JSON.stringify({ code: p1.code }) }, 'member');
+    const claim = await call('a', '/v1/admin/extensions/signage/pairings/claim', { method: 'POST', body: JSON.stringify({ code: p1.code }) });
+    const got = await play('/pairings/poll', { method: 'POST', body: JSON.stringify({ secret: p1.secret }) });
+    const again = await play('/pairings/poll', { method: 'POST', body: JSON.stringify({ secret: p1.secret }) });
+    const key = got.body?.key;
+    const sid = claim.body?.screen?.id;
+    p1.status === 201 && /^\d{6}$/.test(p1.code ?? '') && before.body?.status === 'waiting' && byMember.status === 403 && claim.status === 201
+      && claim.body.screen.name === '画面 1' && claim.body.screen.orientation === 'landscape' && got.body?.status === 'registered' && typeof key === 'string' && again.body?.status === 'expired'
+      ? ok('サイネージの画面は、端末の番号を管理者が登録すると鍵が 1 度だけ渡り、名前と向きは尋ねずに決まる')
+      : ng('サイネージの画面の登録が合わない', JSON.stringify({ p1, before: before.body, member: byMember.status, claim: claim.body, got: got.body, again: again.body }).slice(0, 600));
+
+    // 素材: 形式・縦横・長さをサーバーでも確かめ直し、H.264 でない動画と長い辺が 1,920 を超える画像は断る。同じ中身は 1 つ（第31.6.1節）
+    const img = await upload(png(1920, 1080, 1), '入口.png');
+    const tooBig = await upload(png(4000, 3000, 2), 'big.png');
+    const video = await upload(mp4('avc1'), '動画.mp4');
+    const hevc = await upload(mp4('hvc1'), 'hevc.mp4');
+    const dup = await upload(png(1920, 1080, 1), '入口の写し.png');
+    img.status === 201 && img.body.asset.kind === 'image' && img.body.asset.name === '入口' && tooBig.status === 422 && video.status === 201 && video.body.asset.durationMs === 5000
+      && hevc.status === 422 && /H\.264/.test(hevc.body.error ?? '') && dup.status === 200 && dup.body.existing === true && dup.body.asset.id === img.body.asset.id
+      ? ok('サイネージの素材は形式・縦横・長さをサーバーでも確かめ、H.264 でない動画と大きすぎる画像を断り、同じ中身は 1 つにする')
+      : ng('サイネージの素材が合わない', JSON.stringify({ img: img.body, tooBig: tooBig.body, video: video.body, hevc: hevc.body, dup: dup.body }).slice(0, 600));
+
+    // 流れ: 並びごと置き換え、読んだ版と違えば 409。画面の鍵では、その画面の流れと素材だけを読める（第31.6.2節）
+    const flow0 = await call('a', `/v1/signage/screens/${sid}/entries`);
+    const put = await call('a', `/v1/signage/screens/${sid}/entries`, { method: 'PUT', body: JSON.stringify({ version: flow0.body.version, entries: [{ assetId: img.body.asset.id, seconds: 7 }, { assetId: video.body.asset.id, seconds: 30 }] }) });
+    const stale = await call('a', `/v1/signage/screens/${sid}/entries`, { method: 'PUT', body: JSON.stringify({ version: flow0.body.version, entries: [] }) });
+    const st = await play('/state', {}, key);
+    const range = await fetch(`${API}/v1/signage-play/assets/${video.body.asset.id}`, { headers: { 'x-tenant': 'a', authorization: `Bearer ${key}`, range: 'bytes=0-9' } });
+    const rangeLen = (await range.arrayBuffer()).byteLength;
+    put.status === 200 && stale.status === 409 && st.status === 200 && st.body.entries.length === 2 && st.body.entries[1].seconds === null && st.body.assets.length === 2
+      && range.status === 206 && rangeLen === 10 && range.headers.get('x-content-type-options') === 'nosniff'
+      ? ok('サイネージの流れは版で守って置き換え、画面は鍵で流れと素材（部分の読み出し）を読める。動画に秒数は付かない')
+      : ng('サイネージの流れが合わない', JSON.stringify({ put: put.status, stale: stale.status, st: st.body, range: range.status, rangeLen }).slice(0, 600));
+
+    // 鍵の境界: 鍵が無い・違う会社では読めない。生きている知らせで状態が管理の画面に出る（第31.5.1節・第31.12.1節）
+    await setEnabled('b', true);
+    const noKey = await play('/state');
+    const otherTenant = await play('/state', {}, key, 'b');
+    await setEnabled('b', false);
+    const beat = await play('/heartbeat', { method: 'POST', body: JSON.stringify({ current: img.body.asset.id, flowVersion: 1, cached: 2, uncached: [], failed: [], pageVersion: 'x', viewport: { width: 1920, height: 1080 }, storageFree: null, text: '12番の方' }) }, key);
+    const { body: ov } = await call('a', '/v1/signage');
+    const memberUse = await call('a', '/v1/signage', {}, 'member');
+    const scr = (ov.screens ?? []).find((s) => s.id === sid);
+    noKey.status === 401 && otherTenant.status === 401 && beat.status === 200 && scr?.online === true && scr.lastReport?.current === img.body.asset.id && !('text' in (scr.lastReport ?? {}))
+      && memberUse.status === 200 && ov.usage?.limit === 2 * 1024 ** 3
+      ? ok('サイネージの画面の鍵はその会社でだけ効き、生きている知らせで状態が出る（割り込みの文は受けない）')
+      : ng('サイネージの鍵と状態が合わない', JSON.stringify({ noKey: noKey.status, other: otherTenant.status, beat: beat.body, scr, member: memberUse.status }).slice(0, 600));
+
+    // 素材を消すと流れからも外れる。画面を外すと鍵はその場で効かない。切った会社では画面は 404（第31.5.1節・第31.9.1節）
+    const del = await call('a', `/v1/signage/assets/${img.body.asset.id}`, { method: 'DELETE' });
+    const { body: after } = await call('a', `/v1/signage/screens/${sid}/entries`);
+    const auditRows = (await owner.query(`select action from audit_events where tenant_id = 't-alpha' and action like 'signage.%' and occurred_at > now() - interval '5 minutes'`)).rows.map((r) => r.action);
+    await setEnabled('a', false);
+    const off = await play('/state', {}, key);
+    await setEnabled('a', true);
+    const removed = await call('a', `/v1/admin/extensions/signage/screens/${sid}`, { method: 'DELETE' });
+    const gone = await play('/state', {}, key);
+    del.status === 200 && (del.body.screens ?? []).includes('画面 1') && after.entries.length === 1 && off.status === 404 && removed.status === 200 && gone.status === 401
+      && ['signage.screen.register', 'signage.asset.add', 'signage.flow.update', 'signage.asset.remove'].every((a) => auditRows.includes(a))
+      ? ok('サイネージの素材を消すと流れからも外れ、切ると画面は無地、外すと鍵は効かない。登録・素材・流れの直しを監査ログに残す')
+      : ng('サイネージの取り外しが合わない', JSON.stringify({ del: del.body, after, off: off.status, removed: removed.status, gone: gone.status, auditRows }).slice(0, 600));
+
+    // 画面は 1 社 3 台まで（第31.4節）。外して 30 日以内の画面は、登録し直すと名前と流れを引き継ぐ
+    await owner.query(`delete from signage_screens where tenant_id = 't-alpha'`);
+    const made = [];
+    for (let i = 0; i < 4; i++) {
+      const p = await pairScreen();
+      made.push(await call('a', '/v1/admin/extensions/signage/pairings/claim', { method: 'POST', body: JSON.stringify({ code: p.code }) }));
+    }
+    const third = made[2]?.body?.screen;
+    await call('a', `/v1/admin/extensions/signage/screens/${third?.id}`, { method: 'DELETE' });
+    const p5 = await pairScreen();
+    const back = await call('a', '/v1/admin/extensions/signage/pairings/claim', { method: 'POST', body: JSON.stringify({ code: p5.code }) });
+    made.slice(0, 3).every((m) => m.status === 201) && made[3].status === 409 && (made[3].body.screens ?? []).length === 3
+      && back.status === 201 && back.body.restored === true && back.body.screen.id === third?.id && back.body.screen.name === third?.name
+      ? ok('サイネージの画面は 1 社 3 台までで、外して 30 日以内の画面は登録し直すと名前と流れを引き継ぐ')
+      : ng('サイネージの画面の上限が合わない', JSON.stringify({ made: made.map((m) => m.status), back: back.body }).slice(0, 400));
+  } catch (err) {
+    ng('サイネージの確認が途中で止まった', String(err));
+  } finally {
+    // 素材は API で消す（置き場の中身も消すため）
+    await setEnabled('a', true).catch(() => undefined);
+    for (const x of (await call('a', '/v1/signage/assets')).body?.assets ?? []) await call('a', `/v1/signage/assets/${x.id}`, { method: 'DELETE' });
+    await setEnabled('a', false).catch(() => undefined);
+    await setEnabled('b', false).catch(() => undefined);
+    await clean().catch(() => undefined);
     await owner.end();
   }
 }

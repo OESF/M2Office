@@ -1535,3 +1535,46 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .hr-photo-actions { display: flex; flex-direction: column; gap: 2px; }
 .hr-allowances { width: auto; margin: 6px 0; }
 .hr-allowances th, .hr-allowances td { padding: 3px 10px; }
+
+/* 店頭サイネージの再生のページ（仕様書 第31.9.1節）。全画面・マウスの矢印を隠す・選択させない。説明の文は出さない */
+.signage-root { position: fixed; inset: 0; overflow: hidden; background: #000; color: #fff; cursor: none; user-select: none; -webkit-user-select: none; }
+.signage-frame { position: absolute; inset: 0; overflow: hidden; }
+.signage-layer { position: absolute; inset: 0; opacity: 0; transition: opacity .5s ease; overflow: hidden; }
+.signage-layer.front { opacity: 1; z-index: 1; }
+/* 向きの合わない素材は切らずに収め、余白にはぼかして暗くしたものを敷く（第31.6.2節） */
+.signage-bg { position: absolute; inset: -6%; background-size: cover; background-position: center; filter: blur(40px) brightness(.55); }
+.signage-media { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.signage-empty { position: absolute; inset: 0; display: grid; place-items: center; font-size: 6vmin; font-weight: 700; letter-spacing: .08em; text-align: center; padding: 5vmin; }
+.signage-blank { background: #000; }
+.signage-pairing { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5vmin; background: #111; }
+.signage-qr { width: 38vmin; height: 38vmin; background: #fff; border-radius: 2vmin; padding: 1.5vmin; }
+.signage-code { font-size: 13vmin; font-weight: 700; letter-spacing: .12em; font-variant-numeric: tabular-nums; }
+
+/* 店頭サイネージの管理の画面（仕様書 第31.9.4節） */
+.signage { display: flex; flex-direction: column; gap: calc(12px * var(--space-scale)); }
+.signage-screens { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: calc(10px * var(--space-scale)); }
+.signage-screen { cursor: pointer; padding: calc(10px * var(--space-scale)); display: flex; flex-direction: column; gap: 6px; }
+.signage-screen.active { outline: 2px solid var(--accent); }
+.signage-screen-body { display: flex; flex-direction: column; gap: 4px; }
+.signage-screen .row { gap: 6px; align-items: center; flex-wrap: wrap; }
+.signage-preview { width: 100%; aspect-ratio: 16 / 9; background: #000; border-radius: 6px; overflow: hidden; }
+.signage-preview.portrait { width: auto; height: 150px; aspect-ratio: 9 / 16; margin: 0 auto; }
+.signage-preview img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.signage-name { font-weight: 600; width: 100%; }
+.signage-add { display: flex; gap: 6px; align-items: center; padding: calc(10px * var(--space-scale)); }
+.signage-code-input { width: 8em; }
+.signage-flow, .signage-assets { padding: calc(12px * var(--space-scale)); display: flex; flex-direction: column; gap: 8px; }
+.signage-flow .row, .signage-assets .row { gap: 8px; align-items: center; }
+.signage-entries { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.signage-entries li { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; cursor: grab; }
+.signage-thumb { width: 64px; height: 36px; flex: none; background: #000; border-radius: 4px; overflow: hidden; }
+.signage-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.signage-thumb.large { width: 100%; height: auto; aspect-ratio: 16 / 9; }
+.signage-thumb.large img { object-fit: contain; }
+.signage-asset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.signage-asset { display: flex; flex-direction: column; gap: 4px; }
+.signage-asset-name { width: 100%; }
+.signage-asset .btn { align-self: flex-start; }
+.signage-notes { padding: calc(10px * var(--space-scale)); }
+.signage-pair-body { display: flex; flex-direction: column; gap: 12px; padding: 16px; }
+.signage-pair-code { font-size: 32px; font-weight: 700; letter-spacing: .1em; text-align: center; }

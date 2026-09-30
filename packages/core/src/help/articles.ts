@@ -35,7 +35,7 @@ export interface HelpArticle {
   business?: string;
   /** 木の中の小分け（管理者向けの記事の「はじめに」「設定」「記録」など）。 */
   group?: string;
-  /** この内蔵の拡張を使える人だけに出す（マニュアルの章）。 */
+  /** この内蔵の拡張を使える人だけに出す（マニュアルの章と、業務の要点の記事）。`hr-self` は本人の「給与・勤怠」を使える人。 */
   extension?: string;
   /** 木の中の並びの順（記事の `order`。マニュアルの章は 0 がはじめに）。 */
   order?: number;
@@ -73,6 +73,7 @@ export function parseArticle(text: string): HelpArticle {
     category: attrs['category'] as HelpCategory, related, body: m[2]!.trim(), source: 'official',
     ...(attrs['business'] ? { business: attrs['business'] } : {}),
     ...(attrs['group'] ? { group: attrs['group'] } : {}),
+    ...(attrs['extension'] ? { extension: attrs['extension'] } : {}),
     ...(/^\d+$/.test(attrs['order'] ?? '') ? { order: Number(attrs['order']) } : {}),
   };
 }
@@ -161,10 +162,11 @@ export class HelpCatalog {
         id: `agent-${a.id}`, title: a.name, audience: 'all', category: 'agents', related: ['start-agents'],
         body: agentHelpMarkdown(this.agentHelp(a, ctx)), source: 'agent',
       }));
-    // マニュアルの章は、その業務を使える人だけに出す（第6.10.7.3節）。使える業務を渡されなければ出さない
-    const usable = new Set(ctx.extensions ?? []);
-    return [...this.official, ...agentArticles]
-      .filter((a) => allowed.has(a.audience) && (!a.extension || usable.has(a.extension)) && inScope(a, scope));
+    // 業務のマニュアルの章と要点の記事は、その業務を使える人だけに出す（第6.10.7節・第6.10.7.3節）。
+    // 使える業務を渡されないとき（秘書の答えの材料）は、マニュアルの章だけを出さない
+    const usable = ctx.extensions ? new Set(ctx.extensions) : null;
+    const shown = (a: HelpArticle) => (usable ? !a.extension || usable.has(a.extension) : a.category !== 'manual');
+    return [...this.official, ...agentArticles].filter((a) => allowed.has(a.audience) && shown(a) && inScope(a, scope));
   }
 
   /** 業務の説明を組み立てる（仕様書 第6.10.5節）。 */
@@ -220,7 +222,10 @@ export interface HelpContext {
   agents?: AgentDefinition[];
   /** その会社で使えるツール（コネクタのツールを含む）。省略時は内蔵のツール。 */
   registry?: ToolRegistry;
-  /** 本人が使える内蔵の拡張の ID。マニュアルの章を出す。省略時は出さない（秘書の答えの材料には入れない。第6.10.7.3節）。 */
+  /**
+   * 本人が使える内蔵の拡張の ID（本人の「給与・勤怠」を使えるなら `hr-self` も）。使えない業務の要点の記事とマニュアルの章を出さない。
+   * 省略時は、マニュアルの章だけを出さない（秘書の答えの材料。第6.10.7.3節）。
+   */
   extensions?: readonly string[];
 }
 

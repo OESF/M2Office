@@ -89,6 +89,8 @@ const WRITES_WHILE_SUSPENDED: { method: string; path: RegExp }[] = [
   { method: 'POST', path: /^\/v1\/notifications\/[^/]+\/read$/ },
   // ログイン中の端末のログアウト。乗っ取りへの備え（R-13）
   { method: 'DELETE', path: /^\/v1\/me\/sessions\/[^/]+$/ },
+  // 店頭サイネージの画面の生きている知らせ。停止中も画面は流れを流し続ける（第31.9.1節）
+  { method: 'POST', path: /^\/v1\/signage-play\/heartbeat$/ },
 ];
 
 /**

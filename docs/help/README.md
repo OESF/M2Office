@@ -28,6 +28,7 @@ related: [start-secretary, start-agents]
 | `business` | （任意）業務の要点の記事なら、その業務の名前（`docs/manual/` のマニュアルの名前と同じ。例: `inventory`・`hr-payroll`）。ヘルプの木の「業務」の、その業務の下に入る |
 | `group` | （任意）管理者向けの記事の木の中の小分け（`はじめに`・`設定`・`記録`） |
 | `order` | （任意）木の中の並びの順（数） |
+| `extension` | （任意）その内蔵の拡張を使える人にだけ出す（`business-cards`・`inventory`・`hr`・`signage`。本人の「給与・勤怠」は `hr-self`）。会社で入れていない業務の記事は出さない |
 
 ワークスペースのヘルプは管理者向け（`audience: admin`）の記事を出さず、管理者ページのヘルプは管理者向けの記事（`category: admin` と管理者向けの更新情報）だけを出します。用語と問い合わせは両方に出します（仕様書 第6.10.7節）。
 

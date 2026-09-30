@@ -29,6 +29,8 @@ import { schedulesRoute } from './routes/schedules.js';
 import { cardsRoute } from './routes/cards.js';
 import { inventoryRoute } from './routes/inventory.js';
 import { inventoryHooksRoute } from './routes/inventory-hooks.js';
+import { signageRoute } from './routes/signage.js';
+import { signagePlayRoute } from './routes/signage-play.js';
 import { noticesRoute } from './routes/notices.js';
 import { adminRoute } from './routes/admin.js';
 import { mcpConnectionsRoute } from './routes/mcp-connections.js';
@@ -97,8 +99,10 @@ app.route('/v1/oauth', oauthCallbackRoute(deps));
 app.route('/v1/hooks/inventory', inventoryHooksRoute(deps));
 app.use('/v1/*', resolveTenant(deps));
 app.route('/v1/auth', authRoute(deps));
+// 店頭サイネージの再生のページ（第31.9.1節）。ログインを使わず、画面の鍵で名乗る。会社はアドレスで決まるため、会社の判定の後・ログインの確かめより前に置く
+app.route('/v1/signage-play', signagePlayRoute(deps, SERVER_VERSION));
 app.use('/v1/*', async (c, next) =>
-  c.req.path.startsWith('/v1/auth/') ? next() : authenticate(deps)(c, next));
+  c.req.path.startsWith('/v1/auth/') || c.req.path.startsWith('/v1/signage-play/') ? next() : authenticate(deps)(c, next));
 // デバッグモード（仕様書 第20.4.1節「デバッグモード」）: 本人の呼び出しが失敗したら、パス・番号・理由を記録に残す
 if (deps.debug) {
   app.use('/v1/*', async (c, next) => {
@@ -143,6 +147,8 @@ app.get('/v1/me', async (c) => {
     cards: !!(await deps.cards.access(ctx.tenant.id, ctx.user.id)),
     // 在庫管理を使えるか（会社の入り切りと利用範囲。仕様書 第29.2節）。使えなければ左ペインに「在庫管理」を出さない
     inventory: !!(await deps.inventory.access(ctx.tenant.id, ctx.user.id)),
+    // 店頭サイネージを使えるか（会社の入り切りと利用範囲。仕様書 第31.2節）。使えなければ左ペインに「サイネージ」を出さない
+    signage: !!(await deps.signage.access(ctx.tenant.id, ctx.user.id)),
     // 人事・給与の担当者の画面を使えるか（会社の入り切りと人事区画。仕様書 第30.2節）
     hr: !!(await deps.hr.access(ctx.tenant.id, ctx.user.id)),
     // 本人の「給与・勤怠」を使えるか（台帳に結び付いているか。同じメールアドレスなら自動で結び付く。第30.25節）
@@ -166,6 +172,7 @@ app.route('/v1/notifications', notificationsRoute(deps));
 app.route('/v1/schedules', schedulesRoute(deps));
 app.route('/v1/cards', cardsRoute(deps));
 app.route('/v1/inventory', inventoryRoute(deps));
+app.route('/v1/signage', signageRoute(deps));
 app.route('/v1/hr', hrRoute(deps));
 // 従業員の顔写真（社内の全員が見られる。第30.5.4節）
 app.route('/v1/hr-photos', hrPhotosRoute(deps));

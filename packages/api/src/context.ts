@@ -15,11 +15,11 @@ import {
   TenantAiResolver, platformAi, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID,
   defaultGeminiModels, ConnectionCredentials, type ConnectionAuthProvider,
   CardService, PostgresContactStore, cardsAccess, type ContactStore, NoticeService, PostgresNoticeStore,
-  InventoryService, InventoryWatch, InventoryBookings, PostgresInventoryStore, inventoryAccess, HrService, PostgresHrStore, hrAccess, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
+  InventoryService, InventoryWatch, InventoryBookings, PostgresInventoryStore, inventoryAccess, HrService, PostgresHrStore, hrAccess, SignageService, PostgresSignageStore, signageAccess, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
   type SecretBox, type GeminiModels,
   type FileStore, type TenantExtensions, type HelpArticle, type ManualMeta, type LlmProvider, type Logger, type Repository, type WorkspaceConnector,
 } from '@m2office/core';
-import { canRunAgent, type AgentDefinition, type ContactScope, type HrSettings, type InventorySettings } from '@m2office/shared';
+import { canRunAgent, type AgentDefinition, type ContactScope, type HrSettings, type InventorySettings, type SignageSettings } from '@m2office/shared';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -103,6 +103,12 @@ export interface AppDeps {
     bookings: InventoryBookings;
     access(tenantId: string, userId: string): Promise<InventorySettings | null>;
   };
+  /**
+   * 店頭サイネージ（内蔵の拡張。仕様書 第31章）。
+   *
+   * @remarks `access` は、会社がサイネージを使っていて利用者が利用範囲の中なら、会社のサイネージの設定を返す（使えなければ `null`）
+   */
+  signage: { service: SignageService; access(tenantId: string, userId: string): Promise<SignageSettings | null> };
   /** 人事・給与（内蔵の拡張。仕様書 第30章）。使えるのは会社で入れていて人事区画に入っている人だけ。 */
   hr: {
     service: HrService;
@@ -332,6 +338,11 @@ export function buildDeps(): AppDeps {
     cards,
     notices,
     inventory,
+    // 店頭サイネージ（第31章）。画面と素材は会社で共有する
+    signage: {
+      service: new SignageService({ store: new PostgresSignageStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), repo, files }),
+      access: signageAccess(repo),
+    },
     // 人事・給与（第30章）。台帳は人事区画の人だけが扱い、勤怠と有給は本人も扱う
     hr: {
       service: hrService, attendance, access: hrAccess(repo),

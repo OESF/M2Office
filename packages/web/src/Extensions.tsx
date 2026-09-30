@@ -10,7 +10,7 @@
 
 import { useEffect, useRef, useState, type DragEvent } from 'react';
 import { api, ApiError, describeError, type AccessOptions, type ExtensionView, type HrProposalField, type ScopeValue } from './api.js';
-import { INVENTORY_FEATURES, type HrSettings, type InventoryBookingSource, type InventoryFeature, type InventorySettings } from '@m2office/shared';
+import { INVENTORY_FEATURES, SIGNAGE_DEFAULT_COLOR, type HrSettings, type InventoryBookingSource, type InventoryFeature, type InventorySettings, type SignageSettings } from '@m2office/shared';
 import { HelpTip, Markdown } from './help.js';
 import { ScopeEditor, ScopeField, useAccessOptions } from './Scope.js';
 
@@ -242,6 +242,7 @@ function InstalledCard({ item: x, busy, focused = false, options, onChanged, onT
       )}
       {x.inventory && on && <InventoryFields settings={x.inventory} busy={busy} onChanged={onChanged} />}
       {x.hr && on && <HrFields settings={x.hr} busy={busy} onChanged={onChanged} />}
+      {x.signage && on && <SignageFields settings={x.signage} busy={busy} onChanged={onChanged} />}
       <div className="row small">
         <button className="link" onClick={() => setOpen(!open)}>{open ? '詳細を閉じる' : '詳細'}</button>
         {/* 内蔵の拡張は削除しない。スイッチで切る（データは消えない。第12.13節） */}
@@ -340,6 +341,24 @@ const INVENTORY_READY: InventoryFeature[] = ['lots', 'units', 'order', 'reserve'
  *
  * @remarks 説明文は出さない（原則 u11）。何の機能かは秘書に聞けばよい
  */
+/** 店頭サイネージの会社の設定（画像を出す秒数・店の色。仕様書 第31.4節）。画面の数と容量の上限は全社共通の決まり。 */
+function SignageFields({ settings, busy, onChanged }: { settings: SignageSettings; busy: boolean; onChanged: () => void }) {
+  const [error, setError] = useState<string | null>(null);
+  const save = (patch: Partial<Pick<SignageSettings, 'imageSeconds' | 'color'>>) =>
+    void api.admin.setSignageSettings(patch).then(() => { setError(null); onChanged(); }).catch((e) => setError(describeError(e, '保存できませんでした')));
+  return (
+    <div className="small ext-inventory">
+      <div className="row wrap">
+        <label>画像を出す秒数 <input key={settings.imageSeconds} type="number" min={3} max={120} className="num" defaultValue={settings.imageSeconds} disabled={busy}
+          onBlur={(e) => { const n = Number(e.target.value); if (Number.isInteger(n) && n !== settings.imageSeconds) save({ imageSeconds: n }); }} /> 秒</label>
+        <label>店の色 <input type="color" value={settings.color ?? SIGNAGE_DEFAULT_COLOR} disabled={busy} onChange={(e) => save({ color: e.target.value })} aria-label="店の色" /></label>
+        {settings.color && <button className="link" disabled={busy} onClick={() => save({ color: null })}>元の色に戻す</button>}
+      </div>
+      {error && <p className="error">{error}</p>}
+    </div>
+  );
+}
+
 function InventoryFields({ settings, busy, onChanged }: { settings: InventorySettings; busy: boolean; onChanged: () => void }) {
   const [low, setLow] = useState(String(settings.lowDefault));
   const [lead, setLead] = useState(String(settings.leadDaysDefault));

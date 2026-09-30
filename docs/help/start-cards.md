@@ -5,6 +5,7 @@ audience: all
 category: start
 related: [start-secretary, faq-privacy, start-settings]
 business: cards
+extension: business-cards
 ---
 もらった名刺を撮るか、スキャナーで読み込んだファイルを渡すと、AI が読み取って連絡先として登録します。左のメニューの「名刺管理」で見られます。
 

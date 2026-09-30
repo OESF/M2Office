@@ -137,6 +137,7 @@ export {
 export * from './cards/index.js';
 export * from './inventory/index.js';
 export * from './hr/index.js';
+export * from './signage/index.js';
 export * from './notices/index.js';
 export * from './brief/index.js';
 export { answerNotice, type NoticeAnswer } from './secretary/notices.js';

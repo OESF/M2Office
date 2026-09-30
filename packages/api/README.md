@@ -152,6 +152,13 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/cards/card/:cardId/front` ／ `back` | 名刺の画像（見られる名刺のものだけ。ページだけの PDF は囲いの中で開かせる） |
 | `PUT /v1/cards/card/:cardId/received` | 受け取った日を直す（`receivedOn`。受け取った本人だけ。今日より後は 400。初めの値は取り込んだ人のタイムゾーンでの取り込んだ日。第27.3節） |
 | `DELETE /v1/cards/card/:cardId` | 読み取れなかった名刺を、待たずに消す（取り込んだ本人だけ） |
+| `GET /v1/signage` ／ `PATCH /v1/signage/screens/:id` | 店頭サイネージ（仕様書 第31章）: 画面の一覧と状態・使っている容量と上限・管理者か ／ 画面の名前・向き・回し方を直す。サイネージを切っている会社と利用範囲の外の人には、`/v1/signage` のどの口も 403 |
+| `GET` ／ `PUT /v1/signage/screens/:id/entries` | 画面の流れと版 ／ 並びごと置き換える（`version` が違えば 409） |
+| `GET` ／ `POST /v1/signage/assets` | 素材の一覧（どの画面の流れに入っているかつき）／ 足す（本文はファイルの中身そのもの。`x-file-name`・`x-width`・`x-height`。形式・縦横・長さをサーバーでも確かめ、H.264 でない動画は 422。同じ中身は 200 と前の素材） |
+| `PUT /v1/signage/assets/:id/thumbnail` ／ `PATCH` ／ `DELETE /v1/signage/assets/:id` | 縮小画像（JPEG・100 KB まで）／ 名前を直す ／ 消す（流れからも外し、外した画面の名前を返す） |
+| `GET /v1/signage/assets/:id/content` ／ `/thumbnail` | 素材の中身（`Range` に応じる）／ 縮小画像 |
+| `POST /v1/admin/extensions/signage/pairings/claim` ／ `DELETE /v1/admin/extensions/signage/screens/:id` ／ `PUT /v1/admin/extensions/signage/settings` | 管理者: 番号で画面を登録（1 社 3 台まで。外して 30 日以内の画面は引き継ぐ）／ 画面を外す（鍵はその場で効かない）／ 画像の秒数・店の色 |
+| `/v1/signage-play/...` | 再生のページ（端末）。**ログインを使わず、画面の鍵（`Authorization: Bearer`）で名乗る**。`POST /pairings`（登録の番号。1 時間に 20 回まで）・`GET /pairings/qr.svg`・`POST /pairings/poll`（登録されたら鍵を 1 度だけ返す）・`GET /state`・`GET /assets/:id`（`Range`）・`GET /assets/:id/thumbnail`・`GET /events`（SSE）・`POST /heartbeat`（停止中も受ける）。鍵が無い・違う会社は 401、切った会社は 404 |
 | `GET /v1/inventory` | 在庫の品目の一覧（`q`・`stopped=1`）と使える数・場所・会社の機能の入り切り。在庫管理を切っている会社と利用範囲の外の人には、`/v1/inventory` のどの口も 403（仕様書 第29章） |
 | `GET /v1/inventory/items/:id` | 品目の詳細（場所とロットごとの数・最近の記録） |
 | `POST /v1/inventory/items` ／ `PUT /v1/inventory/items/:id` | 品目を作る・直す（バーコードは `codes` で足す。会社の中で重ならない）。作るときは `initialQty`（いまの数）を入庫として記録し、単位の欄の数ははじめの数として読んで `note` で返す。直すときに単位へ数を入れると 400 |

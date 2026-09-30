@@ -4,7 +4,7 @@
  * @see 仕様書 第9.4.1節 文書を扱う共通ツール
  */
 
-export { LocalFileStore, MemoryFileStore, type FileStore } from './store.js';
+export { LocalFileStore, MemoryFileStore, fileReader, type FileStore } from './store.js';
 export { detectKind, MIME, MAX_FILE_BYTES, type FileKind } from './formats.js';
 export { saveFile, loadFile } from './service.js';
 export { readSheet, renderSheet, parseCsv, decodeText, type SheetData } from './sheet.js';

@@ -11,7 +11,7 @@
 
 import {
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
-  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, InventoryService, InventoryWatch, InventoryBookings, PostgresInventoryStore, inventoryAccess, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention,
+  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, InventoryService, InventoryWatch, InventoryBookings, PostgresInventoryStore, inventoryAccess, SignageService, PostgresSignageStore, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention,
   NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv,
   defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials,
@@ -105,6 +105,10 @@ const laborCalendar = new LaborCalendar({
   hrStore, attendance, repo, law: LAW_BOOK,
   payrollStore: new PostgresPayrollStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
   laborStore: new PostgresLaborStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+});
+// 店頭サイネージ（第31章）。つながらない画面を知らせ、切れた登録の番号などを消す
+const signage = new SignageService({
+  store: new PostgresSignageStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), repo, files,
 });
 const engine = new RunEngine({
   repo, llm, registry, connector, files, resolveDefinition, isAvailable, logger: log, research, notices,
@@ -211,6 +215,9 @@ let lastRetentionCheck = 0;
 let lastNotifyCheck = 0;
 let lastConversationCheck = 0;
 let lastProactiveCheck = 0;
+/** 店頭サイネージの見回りの間隔（つながらない画面の知らせ。第31.5.1節）。 */
+const SIGNAGE_INTERVAL_MS = Number(process.env['SIGNAGE_INTERVAL_MS'] ?? 60_000);
+let lastSignageCheck = 0;
 
 process.on('SIGINT', () => { running = false; });
 process.on('SIGTERM', () => { running = false; });
@@ -353,6 +360,19 @@ while (running) {
         }
       }
       if (n > 0) log.info('有給の取得義務と労務の期限を知らせました', { notifications: n });
+    }
+  }
+
+  // 店頭サイネージの見回り（第31.5.1節）。ふだん動いている時間帯に 5 分つながらない画面を知らせる。会社ごとの失敗はほかの会社を止めない
+  if (Date.now() - lastSignageCheck >= SIGNAGE_INTERVAL_MS) {
+    lastSignageCheck = Date.now();
+    for (const tenantId of await repo.listTenantIds()) {
+      try {
+        const r = await signage.sweep(tenantId);
+        if (r.notified > 0) log.info('つながらないサイネージの画面を知らせました', { tenantId, screens: r.notified });
+      } catch (err) {
+        log.warn('サイネージの見回りに失敗しました', { tenantId, err });
+      }
     }
   }
 

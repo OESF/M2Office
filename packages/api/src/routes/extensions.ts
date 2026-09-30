@@ -12,7 +12,7 @@
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import {
-  CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, INVENTORY_FEATURES, type HrSettings, type InventorySettings, type RiskLevel,
+  CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, INVENTORY_FEATURES, SIGNAGE_EXTENSION_ID, type HrSettings, type InventorySettings, type RiskLevel, type SignageSettings,
 } from '@m2office/shared';
 import {
   bundledConnection, builtinSection, consentSnapshot, encodeFiles, unpackExtension, EXTENSION_FILE_MAX_BYTES,
@@ -110,6 +110,8 @@ export function extensionsRoute(deps: AppDeps) {
         ...(e.pkg.manifest.id === INVENTORY_EXTENSION_ID ? { inventory: settings.inventory } : {}),
         // 人事・給与: 事業所・保険・締めと支払・手続きを行う人（第30.8.1節）
         ...(e.pkg.manifest.id === HR_EXTENSION_ID ? { hr: settings.hr } : {}),
+        // 店頭サイネージ: 画像の秒数・店の色（第31.4節）
+        ...(e.pkg.manifest.id === SIGNAGE_EXTENSION_ID ? { signage: settings.signage } : {}),
       })),
     });
   });
@@ -135,6 +137,49 @@ export function extensionsRoute(deps: AppDeps) {
    *
    * @remarks 送られた項目だけを変える。切った機能の記録は消さない
    */
+  /** 店頭サイネージの会社の設定を変える（送った項目だけ。画像の秒数 3〜120・店の色 `#RRGGBB` か `null`。第31.4節）。すぐ画面に届く。 */
+  app.put(`/${SIGNAGE_EXTENSION_ID}/settings`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
+    const current = (await deps.repo.getTenantSettings(tenant.id)).signage;
+    const next: SignageSettings = { ...current };
+    const changed: string[] = [];
+    if (body['imageSeconds'] !== undefined) {
+      const n = body['imageSeconds'];
+      if (typeof n !== 'number' || !Number.isInteger(n) || n < 3 || n > 120) return c.json({ error: '画像を出す秒数は 3〜120 秒にしてください' }, 400);
+      next.imageSeconds = n;
+      changed.push('imageSeconds');
+    }
+    if (body['color'] !== undefined) {
+      const v = body['color'];
+      if (v !== null && (typeof v !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(v))) return c.json({ error: '店の色は #RRGGBB の形にしてください' }, 400);
+      next.color = v === null ? null : (v as string).toLowerCase();
+      changed.push('color');
+    }
+    await deps.repo.saveTenantSettings(tenant.id, 'signage', next, user.id);
+    await deps.repo.appendAudit({
+      id: randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id, action: 'settings.update',
+      targetType: 'settings', targetId: 'signage', detail: { fields: changed }, occurredAt: new Date().toISOString(),
+    });
+    deps.signage.service.settingsChanged(tenant.id);
+    return c.json({ ok: true, signage: next });
+  });
+
+  /** 番号で店頭サイネージの画面を登録する（管理者だけ。第31.5.1節）。名前と向きは尋ねずに決める。 */
+  app.post(`/${SIGNAGE_EXTENSION_ID}/pairings/claim`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    if (!(await deps.repo.getTenantSettings(tenant.id)).signage.enabled) return c.json({ error: '店頭サイネージを入れていません' }, 404);
+    const b = await c.req.json<{ code?: unknown }>().catch(() => ({} as { code?: unknown }));
+    const r = await deps.signage.service.claim(tenant.id, user.id, b.code);
+    return 'error' in r ? c.json({ error: r.error, ...(r.screens ? { screens: r.screens } : {}) }, r.status as 404) : c.json(r, 201);
+  });
+
+  /** 店頭サイネージの画面を外す（管理者だけ。確認を挟まない。第31.5.1節）。鍵はその場で効かなくなる。 */
+  app.delete(`/${SIGNAGE_EXTENSION_ID}/screens/:id`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    return (await deps.signage.service.removeScreen(tenant.id, user.id, c.req.param('id'))) ? c.json({ ok: true }) : c.json({ error: '画面が見つかりません' }, 404);
+  });
+
   app.put(`/${INVENTORY_EXTENSION_ID}/settings`, async (c) => {
     const { tenant, user } = c.get('ctx');
     const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
@@ -496,7 +541,11 @@ export function extensionsRoute(deps: AppDeps) {
       const settings = await deps.repo.getTenantSettings(tenant.id);
       if (section === 'cards') await deps.repo.saveTenantSettings(tenant.id, 'cards', { ...settings.cards, enabled: body.enabled }, user.id);
       else if (section === 'inventory') await deps.repo.saveTenantSettings(tenant.id, 'inventory', { ...settings.inventory, enabled: body.enabled }, user.id);
-      else await deps.repo.saveTenantSettings(tenant.id, 'hr', { ...settings.hr, enabled: body.enabled }, user.id);
+      else if (section === 'signage') {
+        await deps.repo.saveTenantSettings(tenant.id, 'signage', { ...settings.signage, enabled: body.enabled }, user.id);
+        // 切ったら、画面は無地にする（登録・素材・流れは消さない。第31.2節）
+        deps.signage.service.settingsChanged(tenant.id);
+      } else await deps.repo.saveTenantSettings(tenant.id, 'hr', { ...settings.hr, enabled: body.enabled }, user.id);
       // 人事・給与を入れたら、人事区画を用意し、入れた管理者を区画に入れる（仕様書 第30.2節）
       if (section === 'hr' && body.enabled) {
         const prepared = await ensureHrCompartment(deps.repo, tenant.id, user.id);

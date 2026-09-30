@@ -5,6 +5,7 @@ audience: all
 category: start
 related: [admin-extensions, start-secretary]
 business: hr-payroll
+extension: hr
 ---
 人事・給与は、従業員の台帳と雇用条件を持ち、入社・退職の手続きを期限つきで並べます。会社が「人事・給与」を入れていて、あなたが**人事区画**に入っているときだけ、左の「業務」に出ます。
 

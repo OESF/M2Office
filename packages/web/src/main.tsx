@@ -4,13 +4,14 @@
  * @see 仕様書 第6章 ユーザー体験
  */
 
-import { StrictMode, useCallback, useEffect, useState } from 'react';
+import { lazy, StrictMode, Suspense, useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App.js';
 import { Admin } from './Admin.js';
 import { Board } from './Dashboard.js';
 import { Login, takeReturnPath } from './Login.js';
 import { MobileInventory } from './MobileInventory.js';
+import { SignagePair } from './SignagePair.js';
 import { api, ApiError, setUnauthorizedHandler, type Me } from './api.js';
 import './styles.css';
 import { applyTheme } from './theme.js';
@@ -19,6 +20,9 @@ import { setDebugMode } from './debug.js';
 
 // 読み込みの途中で明るさが変わらないよう、描画の前に反映する（仕様書 第6.1.2節）
 applyTheme();
+
+/** 店頭サイネージの再生のページ（仕様書 第31.9.1節）。ログインを使わないため、ワークスペースとは別に、必要なときだけ読み込む。 */
+const SignagePlayer = lazy(() => import('./SignagePlayer.js').then((m) => ({ default: m.SignagePlayer })));
 
 /**
  * 画面の入口。ログインの状態を確かめ、ワークスペースか管理者ページを出す。
@@ -71,6 +75,8 @@ function Root() {
   const withDebug = (page: JSX.Element) => (me.debug ? <>{page}<DebugOverlay /></> : page);
   // スマホ用の在庫のページ（仕様書 第29.11.1節）。ワークスペースの枠（左のメニュー・秘書の欄）を出さない
   if (location.pathname.startsWith('/m/inventory')) return withDebug(<MobileInventory me={me} />);
+  // 店頭サイネージの画面の登録（端末の QR を管理者がスマホで読む。仕様書 第31.5.1節）
+  if (location.pathname.startsWith('/m/signage/pair')) return withDebug(<SignagePair me={me} />);
   if (location.pathname.startsWith('/board')) {
     // 権限の判定は API が行う。ここは案内だけ（仕様書 第6.7.2.1節）
     if (!me.user.roles.includes('admin')) {
@@ -85,8 +91,11 @@ function Root() {
 
 const root = document.getElementById('root');
 if (!root) throw new Error('#root が見つかりません');
-createRoot(root).render(
-  <StrictMode>
-    <Root />
-  </StrictMode>,
-);
+// 再生のページはログインの確かめ（/v1/me）を通さない。端末で何か月も開いたままにするため、開発の二重の実行もしない
+createRoot(root).render(location.pathname.startsWith('/signage/play')
+  ? <Suspense fallback={null}><SignagePlayer /></Suspense>
+  : (
+    <StrictMode>
+      <Root />
+    </StrictMode>
+  ));

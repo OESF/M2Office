@@ -131,6 +131,13 @@ const ACTION_LABELS: Record<string, string> = {
   'inventory.booking_source.resume': '予約の受け口を動かした',
   'inventory.booking_source.mapping': '予約の受け口の型を直した',
   'inventory.menu.teach': '予約のメニューで使う品目を覚えさせた',
+  // 店頭サイネージ（仕様書 第31.12.1節。割り込みの 1 件ずつは入れない）
+  'signage.screen.register': 'サイネージの画面を登録した',
+  'signage.screen.remove': 'サイネージの画面を外した',
+  'signage.screen.update': 'サイネージの画面を直した',
+  'signage.flow.update': 'サイネージの流れを直した',
+  'signage.asset.add': 'サイネージの素材を足した',
+  'signage.asset.remove': 'サイネージの素材を消した',
   // 人事・給与（仕様書 第30.21節。他人の台帳を見ただけでも残す）
   'hr.list': '従業員の一覧を見た',
   'hr.view': '従業員の台帳を見た',
@@ -206,6 +213,7 @@ export const AUDIT_CATEGORIES: { id: string; label: string; prefixes: string[] }
   { id: 'notices', label: '社内のお知らせ', prefixes: ['notice.'] },
   { id: 'inventory', label: '在庫', prefixes: ['inventory.'] },
   { id: 'hr', label: '人事・給与', prefixes: ['hr.'] },
+  { id: 'signage', label: 'サイネージ', prefixes: ['signage.'] },
 ];
 
 /** 仕組みの名前（主体が `system` のとき）。 */

@@ -7,7 +7,7 @@
  */
 
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
-import { CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, showsCaptions, type Notification, type UserSettings } from '@m2office/shared';
+import { CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID, showsCaptions, type Notification, type UserSettings } from '@m2office/shared';
 import {
   addCategory, assignCategory, checkCategoryName, groupMenu, removeCategory, togglePinned, type MenuSection,
 } from './menu.js';
@@ -27,6 +27,7 @@ import { Sources } from './sources.js';
 import { Schedules } from './Schedules.js';
 import { Cards } from './Cards.js';
 import { Inventory } from './Inventory.js';
+import { Signage } from './Signage.js';
 import { Hr } from './Hr.js';
 import { MyAttendance } from './MyAttendance.js';
 import { isAttended, useAttention } from './attention.js';
@@ -102,6 +103,7 @@ type View =
   | { kind: 'inventory'; itemId: string | null }
   | { kind: 'hr'; employeeId: string | null }
   | { kind: 'attendance' }
+  | { kind: 'signage' }
   | { kind: 'settings'; section: SettingsSection }
   | { kind: 'help'; articleId: string | null };
 
@@ -361,6 +363,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ...(me.inventory ? [{ id: INVENTORY_EXTENSION_ID, name: '在庫管理', description: '品目・場所・入出庫を記録し、使える数を出す', icon: 'inventory' as IconName, agent: null }] : []),
     // 人事・給与は人事区画の人にだけ出す（仕様書 第30.2節）
     ...(me.hr ? [{ id: HR_EXTENSION_ID, name: '人事・給与', description: '従業員の台帳・雇用条件・入社と退職の手続き', icon: 'users' as IconName, agent: null }] : []),
+    // 店頭サイネージ（仕様書 第31.2節）。会社で入れていて利用範囲の人にだけ出す
+    ...(me.signage ? [{ id: SIGNAGE_EXTENSION_ID, name: 'サイネージ', description: '店頭や待合の画面に、画像と動画を流す', icon: 'signage' as IconName, agent: null }] : []),
   ];
   const allMenuAgents = orderAgents(menuItems, menu.order).filter((a) => !menu.hidden.includes(a.id));
   // ピン止めした業務だけを上に出し、ほかはカテゴリーごと・「ほかの業務」にたたむ（仕様書 第6.1.1節「業務の並び」）。
@@ -368,9 +372,11 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const { top: topAgents, sections } = groupMenu(allMenuAgents, menu);
   const openItem = (m: MenuItem) => (m.agent ? setView({ kind: 'agent', agent: m.agent })
     : m.id === INVENTORY_EXTENSION_ID ? setView({ kind: 'inventory', itemId: null })
-      : m.id === HR_EXTENSION_ID ? setView({ kind: 'hr', employeeId: null }) : setView({ kind: 'cards', contactId: null }));
+      : m.id === HR_EXTENSION_ID ? setView({ kind: 'hr', employeeId: null })
+        : m.id === SIGNAGE_EXTENSION_ID ? setView({ kind: 'signage' }) : setView({ kind: 'cards', contactId: null }));
   const isOpen = (m: MenuItem) => (m.agent ? view.kind === 'agent' && view.agent.id === m.id
-    : m.id === INVENTORY_EXTENSION_ID ? view.kind === 'inventory' : m.id === HR_EXTENSION_ID ? view.kind === 'hr' : view.kind === 'cards');
+    : m.id === INVENTORY_EXTENSION_ID ? view.kind === 'inventory' : m.id === HR_EXTENSION_ID ? view.kind === 'hr'
+      : m.id === SIGNAGE_EXTENSION_ID ? view.kind === 'signage' : view.kind === 'cards');
   // ピン止めとカテゴリーは個人設定（メニュー）に保存し、端末をまたいで同じにする。保存に失敗したら読み直す
   const saveMenu = (saved: UserSettings['menu']) => {
     setMenu(saved);
@@ -612,6 +618,12 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
               <Inventory itemId={view.itemId} onOpen={(itemId) => setView({ kind: 'inventory', itemId })} userId={me.user.id} />
             </>
           )}
+          {view.kind === 'signage' && (
+            <>
+              <h1>サイネージ <HelpTip article="start-signage">店頭や待合の画面に、画像と動画を繰り返し流します。</HelpTip></h1>
+              <Signage />
+            </>
+          )}
           {view.kind === 'attendance' && (
             <>
               <h1>給与・勤怠 <HelpTip article="start-attendance">打刻と今月の勤怠、有給の残りと申請。秘書に「出勤」「有給あと何日？」と言っても扱えます。</HelpTip></h1>
@@ -781,6 +793,7 @@ const VIEW_LABELS: Record<string, string> = {
   inventory: '在庫管理',
   hr: '人事・給与',
   attendance: '給与・勤怠',
+  signage: 'サイネージ',
   settings: '個人設定',
 };
 

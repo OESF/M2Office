@@ -184,4 +184,9 @@ test('ヘルプの出す所: ワークスペースは管理者向けを出さず
   assert.ok(catalog.list({ ...admin, extensions: ['hr'] }, 'workspace').some((a) => a.id === 'manual-hr-payroll-01'), '使える人には出す');
   assert.equal(catalog.search('給与の設定', admin, 3).length, 0, '使える業務を渡さない検索（秘書の答え）にはマニュアルを入れない');
   assert.ok(catalog.get('admin-users', admin), '画面の「？」は出す所に関わらず、役割で見られる記事を開ける');
+  const guide = parseArticle('---\nid: start-hr\ntitle: 人事・給与\naudience: all\ncategory: start\nbusiness: hr-payroll\nextension: hr\n---\n本文');
+  const withGuide = new HelpCatalog([guide], [], registry);
+  assert.equal(withGuide.list({ ...admin, extensions: [] }).length, 0, '使えない業務の要点の記事は出さない');
+  assert.equal(withGuide.list({ ...admin, extensions: ['hr'] }).length, 1);
+  assert.equal(withGuide.list(admin).length, 1, '使える業務を渡さない秘書の答えの材料には、要点の記事を残す');
 });
