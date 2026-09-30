@@ -47,7 +47,7 @@ export {
   type McpClient, type McpToolInfo, type McpCallResult,
 } from './connectors/mcp.js';
 export {
-  discoverOAuthEndpoints, buildConnectionAuthUrl, exchangeConnectionCode, refreshConnectionToken, fetchAccountLabel,
+  discoverOAuthEndpoints, registerOAuthClient, buildConnectionAuthUrl, exchangeConnectionCode, refreshConnectionToken, fetchAccountLabel,
   revokeConnectionToken, ConnectionOAuthError, type OAuthEndpoints, type OAuthTokens,
 } from './connectors/oauth.js';
 export { CONNECTION_PRESETS, presetById, scopesForTools, presetRisk, resolveArgNames, type ConnectionPreset } from './connectors/presets.js';

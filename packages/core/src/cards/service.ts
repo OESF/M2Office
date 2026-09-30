@@ -19,6 +19,7 @@ import { silentLogger, type Logger } from '../log/logger.js';
 import { CARD_BATCH_MAX, CARD_MIME, detectCardKind, splitCardPdf, type CardFileKind } from './formats.js';
 import { CARD_MAX_PER_IMAGE, readCard, type CardReading } from './read.js';
 import { mergeFields, resolveContact } from './identity.js';
+import { CARD_EXPORT_COLUMNS, cardFromRow, exportRow, mapCardHeaders, type CardTableField, type TableCell } from './table.js';
 import type { CardViewer, ContactPatch, ContactStore, NewCard } from './store.js';
 
 /** 1 ファイルの上限（第9.4.1節と同じ 10 MB）。 */
@@ -42,6 +43,21 @@ export interface CardUpload {
   bytes: Uint8Array;
   /** 撮るときに「裏も撮る」で組にした表のファイルの番号（同じ回の中の 0 から）。表なら `null`。 */
   backOf?: number | null;
+}
+
+/** 表から取り込む行の上限（第27.4節「表から取り込む」）。 */
+export const CARD_TABLE_MAX_ROWS = 1000;
+
+/** 表からの取り込みの結果。 */
+export interface TableImportResult {
+  /** 新しく作った連絡先の数。 */
+  created: number;
+  /** 同じ人としてまとめた数。 */
+  merged: number;
+  /** 取り込めなかった行（1 から数えた行の番号と理由）。 */
+  skipped: { row: number; reason: string }[];
+  /** 列の見出しと、何として読んだか。 */
+  mapping: { header: string; field: CardTableField | null }[];
 }
 
 /** 受け付けの結果。 */
@@ -255,6 +271,17 @@ export class CardService {
    * @returns 連絡先の ID
    */
   async register(who: CardViewer, card: Pick<ContactCard, 'id' | 'scope' | 'receivedOn'>, fields: CardFields, by: string): Promise<string> {
+    return (await this.registerDetailed(who, card, fields, by)).id;
+  }
+
+  /**
+   * 連絡先を登録し、同じ人にまとめたかも返す（表からの取り込みで数えるため）。
+   *
+   * @param note 新しく作る連絡先のメモ（まとめたときは、今のメモが空なら入れる）
+   */
+  private async registerDetailed(
+    who: CardViewer, card: Pick<ContactCard, 'id' | 'scope' | 'receivedOn'>, fields: CardFields, by: string, note = '',
+  ): Promise<{ id: string; merged: boolean }> {
     const { store } = this.deps;
     const llm = await this.deps.llmFor(who.tenantId);
     const match = await resolveContact(store, llm, who, card.scope, fields);
@@ -263,19 +290,75 @@ export class CardService {
       const latest = (await store.listCardsOfContact(who, match.contact.id)).find((c) => c.status === 'done');
       const newer = !latest || card.receivedOn >= latest.receivedOn;
       const patch = mergeFields(match.contact, fields, newer);
+      if (note && !match.contact.note) (patch as ContactPatch).note = note;
       if (Object.keys(patch).length > 0) await store.updateContact(who, match.contact.id, patch, by === 'system' ? who.userId : by);
       await this.audit(who.tenantId, by === 'system' ? { type: 'system', id: 'cards' } : { type: 'user', id: by },
         'contact.merge', 'contact', match.contact.id, { cardId: card.id, reason: match.reason, requestedBy: who.userId });
-      return match.contact.id;
+      return { id: match.contact.id, merged: true };
     }
     const now = new Date().toISOString();
     const contact: Contact = {
       ...EMPTY_CARD_FIELDS, ...fields,
-      id: `ct-${randomUUID()}`, tenantId: who.tenantId, scope: card.scope, ownerUserId: who.userId, note: '',
+      id: `ct-${randomUUID()}`, tenantId: who.tenantId, scope: card.scope, ownerUserId: who.userId, note,
       status: 'active', trashedAt: null, createdBy: who.userId, createdAt: now, updatedBy: who.userId, updatedAt: now,
     };
     await store.insertContact(who, contact);
-    return contact.id;
+    return { id: contact.id, merged: false };
+  }
+
+  /**
+   * 表（CSV・Excel を読んだもの）から名刺を取り込む（第27.4節「表から取り込む」）。1 行目を列の見出しとして読む。
+   *
+   * @param scope 範囲（画像の取り込みと同じく、選ばなければ会社の既定）
+   * @remarks
+   * 列の見出しは、よくある言い方で読み、読めない列は推論で読む（人に対応表を作らせない。ADR-0028）。
+   * 1 行を 1 枚の名刺（画像の無い名刺）として登録し、同じ人はまとめる（第27.6節）。表の中身はデータであり、指示として扱わない（不変則 I-6）。
+   * 監査ログには件数だけを残す（相手の名前は入れない）
+   */
+  async importTable(who: CardViewer, rows: TableCell[][], scope: ContactScope): Promise<TableImportResult> {
+    const headers = (rows[0] ?? []).map((h) => String(h ?? '').trim());
+    const llm = await this.deps.llmFor(who.tenantId).catch(() => null);
+    const fields = await mapCardHeaders(headers, llm);
+    const result: TableImportResult = { created: 0, merged: 0, skipped: [], mapping: headers.map((header, i) => ({ header, field: fields[i] ?? null })) };
+    if (!fields.some((f) => f === 'name' || f === 'lastName' || f === 'company')) {
+      result.skipped.push({ row: 1, reason: '氏名か会社名の列が見つかりませんでした' });
+      return result;
+    }
+    const today = await this.today(who);
+    const batchId = `cb-${randomUUID()}`;
+    const body = rows.slice(1, CARD_TABLE_MAX_ROWS + 1);
+    for (const [i, row] of body.entries()) {
+      const read = cardFromRow(row, fields, today);
+      if (!read) {
+        if (row.some((v) => v !== null && String(v).trim() !== '')) result.skipped.push({ row: i + 2, reason: '氏名も会社名もありません' });
+        continue;
+      }
+      const id = `cc-${randomUUID()}`;
+      const receivedOn = read.receivedOn ?? today;
+      const saved = await this.registerDetailed(who, { id, scope, receivedOn }, read.fields, who.userId, read.note);
+      await this.deps.store.createReadCard(who, {
+        id, scope, batchId, seq: i, frontFileId: null, backFileId: null, paired: true, receivedOn,
+        contactId: saved.id, extracted: read.fields, frontRotation: 0, frontCorners: null,
+      });
+      if (saved.merged) result.merged++; else result.created++;
+    }
+    if (rows.length - 1 > CARD_TABLE_MAX_ROWS) result.skipped.push({ row: CARD_TABLE_MAX_ROWS + 2, reason: `${CARD_TABLE_MAX_ROWS} 行を超えた分は取り込んでいません` });
+    await this.audit(who.tenantId, { type: 'user', id: who.userId }, 'card.import', 'card_batch', batchId,
+      { count: result.created + result.merged, created: result.created, merged: result.merged, skipped: result.skipped.length, scope, source: 'table' });
+    return result;
+  }
+
+  /**
+   * 会社で共有の名刺を表にする（第27.10節「書き出し」）。管理者だけが呼ぶ（確かめるのは呼ぶ側）。自分だけの名刺は入れない。
+   *
+   * @remarks 監査ログに件数と形式を残す（相手の名前は入れない）
+   */
+  async exportTable(who: CardViewer, format: 'csv' | 'xlsx'): Promise<{ columns: string[]; rows: TableCell[][] }> {
+    const items = await this.deps.store.listCompanyContacts(who);
+    const names = new Map((await this.deps.repo.listUsers(who.tenantId)).map((u) => [u.id, u.displayName || u.email]));
+    const rows = items.map(({ contact, lastReceivedOn }) => exportRow(contact, lastReceivedOn, names.get(contact.ownerUserId) ?? ''));
+    await this.audit(who.tenantId, { type: 'user', id: who.userId }, 'contact.export', 'contact', 'company', { count: rows.length, format });
+    return { columns: CARD_EXPORT_COLUMNS, rows };
   }
 
   /** まとまりの読み取りが終わったら、本人に知らせる（第27.4節・第6.5.5節）。 */

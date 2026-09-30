@@ -4,7 +4,7 @@
  * 道具を呼ぶときに依頼した本人の認可を付けること、接続していなければ「接続が要ります」で止めること、
  * 断られたら更新して 1 回だけ呼び直すこと、更新できなければ認可を消して本人に知らせること、
  * 会社の鍵を見出しに載せること、許可の流れ（相手の案内の発見・許可の画面の URL・認可の受け取り）、
- * Slack の型が道具から権限と危険度を決めることを確かめる。
+ * Slack の型が道具から権限と危険度を決めること、アプリの自動登録（動的クライアント登録。Q-99）を確かめる。
  *
  * @see 仕様書 第12.11.6節 認証の要る接続
  */
@@ -13,7 +13,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   CONNECTION_PRESETS, ConnectionCredentials, SecretBox, argsFromInputSchema, buildConnectionAuthUrl, describeCall, checkConnector, connectorTools,
-  discoverOAuthEndpoints, exchangeConnectionCode, presetById, presetRisk, resolveArgNames, scopesForTools,
+  discoverOAuthEndpoints, exchangeConnectionCode, presetById, registerOAuthClient, presetRisk, resolveArgNames, scopesForTools,
   type ConnectionAuthProvider, type ConnectionSecret, type ConnectorDeclaration, type McpClient, type Repository, type UserConnection,
 } from '../src/index.js';
 
@@ -161,7 +161,7 @@ test('許可の流れ: 相手の案内から口を見つけ、許可の画面の
   const found = await discoverOAuthEndpoints('https://mcp.slack.com/mcp', fetchDocs);
   assert.deepEqual(found, {
     authorizeUrl: 'https://slack.com/oauth/v2_user/authorize', tokenUrl: 'https://slack.com/api/oauth.v2.user.access',
-    scopesSupported: ['chat:write'], pkce: true,
+    scopesSupported: ['chat:write'], pkce: true, registrationUrl: null, tokenAuthMethods: ['client_secret_basic'],
   });
   assert.equal(await discoverOAuthEndpoints('https://none.example/mcp', fetchDocs), null, '見つからなければ null');
 
@@ -180,6 +180,38 @@ test('許可の流れ: 相手の案内から口を見つけ、許可の画面の
   assert.deepEqual(tokens, { accessToken: 'xoxp-1', refreshToken: null, expiresAt: null, scopes: ['search:read.public', 'chat:write'] });
   const refused = (async () => new Response(JSON.stringify({ ok: false, error: 'invalid_code' }))) as unknown as typeof fetch;
   await assert.rejects(exchangeConnectionCode({ tokenUrl: 'https://t', clientId: 'c', clientSecret: 's', code: 'x', redirectUri: 'r' }, refused), /invalid_code/);
+});
+
+test('アプリの自動登録: 案内に口があれば見つけ、アプリの名前・戻り先・権限だけを送って登録し、シークレットの無いアプリは送らずに認可を受け取る（第12.11.6.2節、Q-99）', async () => {
+  const sent: { url: string; body: string }[] = [];
+  const fake = (async (url: string | URL, init?: RequestInit) => {
+    const u = String(url);
+    sent.push({ url: u, body: String(init?.body ?? '') });
+    const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { 'content-type': 'application/json' } });
+    if (u.endsWith('/.well-known/oauth-protected-resource')) return json({ authorization_servers: ['https://auth.example'] });
+    if (u.endsWith('/.well-known/oauth-authorization-server')) {
+      return json({ authorization_endpoint: 'https://auth.example/authorize', token_endpoint: 'https://auth.example/token', registration_endpoint: 'https://auth.example/register', token_endpoint_auth_methods_supported: ['none'] });
+    }
+    if (u === 'https://auth.example/register') return json({ client_id: 'dyn-1' }, 201);
+    if (u === 'https://auth.example/token') return json({ access_token: 'at', expires_in: 3600 });
+    return json({}, 404);
+  }) as typeof fetch;
+  const found = await discoverOAuthEndpoints('https://mcp.example/mcp', fake);
+  assert.equal(found?.registrationUrl, 'https://auth.example/register');
+  assert.deepEqual(found?.tokenAuthMethods, ['none']);
+  const client = await registerOAuthClient({ registrationUrl: found!.registrationUrl!, redirectUri: 'https://a.example/v1/oauth/connection/callback', scopes: ['read'], authMethods: found!.tokenAuthMethods }, fake);
+  assert.deepEqual(client, { clientId: 'dyn-1', clientSecret: null });
+  const reg = JSON.parse(sent.find((x) => x.url.endsWith('/register'))!.body) as Record<string, unknown>;
+  assert.deepEqual(reg, { client_name: 'M2Office', redirect_uris: ['https://a.example/v1/oauth/connection/callback'], grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'], token_endpoint_auth_method: 'none', scope: 'read' });
+  await exchangeConnectionCode({ tokenUrl: 'https://auth.example/token', clientId: 'dyn-1', clientSecret: null, code: 'c', redirectUri: 'r', codeVerifier: 'v' }, fake);
+  assert.ok(!sent.at(-1)!.body.includes('client_secret'), 'シークレットの無いアプリは送らない');
+  // 案内に口が無ければ null。http の口は手元の開発のサーバだけ認める
+  const noReg = (async (url: string | URL) => new Response(JSON.stringify(String(url).endsWith('authorization-server')
+    ? { authorization_endpoint: 'https://x/a', token_endpoint: 'https://x/t', registration_endpoint: 'http://evil.example/register' } : {}), { status: 200 })) as typeof fetch;
+  assert.equal((await discoverOAuthEndpoints('https://mcp.example/mcp', noReg))?.registrationUrl, null);
+  // 断られたら理由つきで止める
+  const refuse = (async () => new Response(JSON.stringify({ error: 'invalid_redirect_uri' }), { status: 400 })) as typeof fetch;
+  await assert.rejects(registerOAuthClient({ registrationUrl: 'https://auth.example/register', redirectUri: 'r', scopes: [], authMethods: [] }, refuse), /invalid_redirect_uri/);
 });
 
 test('Slack の型: 有効な道具から権限を決め、目印の無い書く道具は external-send にする', () => {

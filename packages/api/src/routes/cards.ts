@@ -8,7 +8,7 @@
  */
 
 import { Hono, type Context } from 'hono';
-import { CARD_BATCH_MAX, canManage, draftThanksMail, toVCard, type CardUpload, type CardViewer } from '@m2office/core';
+import { CARD_BATCH_MAX, CARD_TABLE_MAX_ROWS, canManage, draftThanksMail, readSheet, renderSheet, toVCard, type CardUpload, type CardViewer } from '@m2office/core';
 import type { CardFields, ContactScope } from '@m2office/shared';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
@@ -24,6 +24,8 @@ const who = (c: Context<CardsEnv>): CardViewer => {
 
 /** 会った日の予定を引く日数の上限（交換した日が多い人でも、呼ぶたびの Google への問い合わせを抑える）。 */
 const MEETING_DAYS_MAX = 5;
+/** 表から取り込むファイルの大きさの上限（第27.4節）。 */
+const TABLE_MAX_BYTES = 5 * 1024 * 1024;
 
 /**
  * 名刺管理の API（仕様書 第27章）。
@@ -68,6 +70,48 @@ export function cardsRoute(deps: AppDeps) {
       defaultScope: c.get('cardsDefaultScope'),
       hasMore: items.length === 100,
     });
+  });
+
+  /**
+   * 表（CSV・Excel）から名刺を取り込む（第27.4節「表から取り込む」）。本文は multipart の `file`（1 つ）と `scope`。
+   *
+   * @remarks 列の見出しはよくある言い方と推論で読む。1 行を 1 枚の名刺として、その場で登録する（読み取りを待たない。画像が無いため）
+   */
+  app.post('/import', async (c) => {
+    const v = who(c);
+    const form = await c.req.parseBody();
+    const f = form['file'];
+    if (!(f instanceof File)) return c.json({ error: 'CSV か Excel のファイルを選んでください' }, 400);
+    if (f.size > TABLE_MAX_BYTES) return c.json({ error: 'ファイルが大きすぎます（5 MB まで）' }, 413);
+    const bytes = new Uint8Array(await f.arrayBuffer());
+    const kind = (bytes[0] === 0x50 && bytes[1] === 0x4b) || /\.xlsx$/i.test(f.name) ? 'xlsx' : 'csv';
+    let rows;
+    try {
+      rows = (await readSheet(bytes, kind, { maxRows: CARD_TABLE_MAX_ROWS + 1 })).rows;
+    } catch {
+      return c.json({ error: '表として読めませんでした（CSV か Excel のファイルを選んでください）' }, 400);
+    }
+    if (rows.length < 2) return c.json({ error: '見出しの行と、名刺の行が要ります' }, 400);
+    const scopeIn = String(form['scope'] ?? '');
+    const scope: ContactScope = scopeIn === 'company' || scopeIn === 'personal' ? scopeIn : c.get('cardsDefaultScope');
+    return c.json(await service.importTable(v, rows, scope));
+  });
+
+  /**
+   * 会社で共有の名刺を CSV・Excel で書き出す（第27.10節「書き出し」）。管理者だけ。`format`: `csv`（既定）・`xlsx`。
+   *
+   * @remarks 自分だけの名刺は入れない（管理者も見られないため）。監査ログに件数と形式を残す
+   */
+  app.get('/export', async (c) => {
+    const { user } = c.get('ctx');
+    if (!user.roles.includes('admin')) return c.json({ error: '名刺をまとめて書き出せるのは管理者です' }, 403);
+    const format = c.req.query('format') === 'xlsx' ? 'xlsx' : 'csv';
+    const { columns, rows } = await service.exportTable(who(c), format);
+    const bytes = await renderSheet('名刺', columns, rows, format);
+    const date = new Date().toISOString().slice(0, 10);
+    c.header('Content-Type', format === 'csv' ? 'text/csv; charset=utf-8' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    c.header('Content-Disposition', `attachment; filename="business-cards-${date}.${format}"`);
+    return c.body(bytes as unknown as ArrayBuffer);
   });
 
   /**

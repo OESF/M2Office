@@ -308,14 +308,15 @@ function parsePhones(v: unknown): ContactPhone[] {
   return out;
 }
 
-function parseEmails(v: unknown): string[] {
+/** メールアドレスの一覧を整える（小文字にし、形の違うものを捨て、5 つまで）。表からの取り込み（table.ts）でも使う。 */
+export function parseEmails(v: unknown): string[] {
   if (!Array.isArray(v)) return [];
   return [...new Set(v.filter((e): e is string => typeof e === 'string')
     .map((e) => e.trim().toLowerCase()).filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)))].slice(0, 5);
 }
 
 /** 郵便番号を `123-4567` の形にそろえる。形が違えば空にする（推測で直さない）。 */
-function normalizePostal(v: string): string {
+export function normalizePostal(v: string): string {
   const digits = v.replace(/[〒\s-]/g, '').replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0));
   return /^\d{7}$/.test(digits) ? `${digits.slice(0, 3)}-${digits.slice(3)}` : '';
 }

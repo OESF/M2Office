@@ -91,7 +91,8 @@ deepwiki-research/
 | `id` | 英小文字・数字・ハイフン。内蔵のツールの頭の部分（`gmail` など）やほかのコネクタと重ならないこと |
 | `transport` | `http`（MCP の Streamable HTTP）だけ。M2Office の中でプログラムを起動する方式（stdio）は使えない |
 | `url` | `https` に限る。開発用の `localhost` だけは `http` でよい |
-| `auth.type` | いまは `none` だけ |
+| `auth.type` | `none`（認証なし）・`oauth`（利用者ごとに許可）・`api_key`（会社の鍵）。仕様書 第12.11.6節 |
+| `auth.registrationUrl` | `oauth` で、相手がアプリの自動登録の口（認可サーバの情報の `registration_endpoint`）を持つときに書く。書けば、会社がアプリを登録しなくても導入した直後から使える（仕様書 第12.11.6.2節） |
 | `tools[].name` | MCP サーバでのツールの名前（`tools/list` で確かめる） |
 | `tools[].description` | すること。**導入の同意の画面とヘルプにそのまま出る**ので、業務の言葉で書く |
 | `tools[].risk` | 危険度。拡張機能が扱う最大の危険度は、SKILL.md の `allowed-tools` の道具の危険度から決まる。`external-send` 以上なら「作業 → 承認 → 送る」になる |

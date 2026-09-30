@@ -35,7 +35,9 @@ export interface NewCard {
 /**
  * 読み取り済みで作る名刺（1 枚の写真に何枚も写っていたときの 2 枚目から。第27.4節）。待ち行列に入れず、登録済みで作る。
  */
-export interface ReadCard extends NewCard {
+export interface ReadCard extends Omit<NewCard, 'frontFileId'> {
+  /** 画像。表から取り込んだ名刺（第27.4節）は画像が無く `null`。 */
+  frontFileId: string | null;
   contactId: string;
   extracted: CardFields;
   frontRotation: number;
@@ -109,8 +111,10 @@ export interface BatchProgress {
 /** 名刺と連絡先の置き場。 */
 export interface ContactStore {
   createCards(who: CardViewer, cards: NewCard[]): Promise<void>;
-  /** 読み取り済みの名刺を作る（1 枚の写真の 2 枚目から。第27.4節）。 */
+  /** 読み取り済みの名刺を作る（1 枚の写真の 2 枚目から・表からの取り込み。第27.4節）。 */
   createReadCard(who: CardViewer, card: ReadCard): Promise<void>;
+  /** 会社で共有の使っている連絡先と、最後に交換した日（まとめての書き出し。第27.10節）。 */
+  listCompanyContacts(who: CardViewer): Promise<{ contact: Contact; lastReceivedOn: string | null }[]>;
   /** 画像を、指定した名刺のほかに指している名刺があるか（写真を消す前に確かめる。第27.4節）。 */
   fileInUse(tenantId: string, fileId: string, exclude: string[]): Promise<boolean>;
   /** 次に読み取る名刺を 1 枚確保する（会社をまたぐ）。無ければ `null`。 */
@@ -229,6 +233,15 @@ export class PostgresContactStore implements ContactStore {
         c.contactId, JSON.stringify(c.extracted), c.frontRotation, c.frontCorners ? JSON.stringify(c.frontCorners) : null]);
   }
 
+  async listCompanyContacts(who: CardViewer): Promise<{ contact: Contact; lastReceivedOn: string | null }[]> {
+    const rows = await this.q<Contact & { lastReceivedOn: string | null }>(who,
+      `select ${CONTACT_COLUMNS},
+              (select to_char(max(c.received_on), 'YYYY-MM-DD') from contact_cards c where c.contact_id = contacts.id) as "lastReceivedOn"
+         from contacts where tenant_id = $1 and scope = 'company' and status = 'active' order by name_kana, name`,
+      [who.tenantId]);
+    return rows.map(({ lastReceivedOn, ...contact }) => ({ contact: contact as Contact, lastReceivedOn }));
+  }
+
   async fileInUse(tenantId: string, fileId: string, exclude: string[]): Promise<boolean> {
     const res = await this.pool.query<{ used: boolean }>('select m2o_card_file_in_use($1, $2, $3) as used', [tenantId, fileId, exclude]);
     return res.rows[0]?.used === true;
@@ -298,7 +311,8 @@ export class PostgresContactStore implements ContactStore {
   }
 
   async listContacts(who: CardViewer, query: ContactQuery): Promise<ContactSummary[]> {
-    // 空白で区切った言葉が、どれも項目のどれかに当たるものを返す（「ミライ工業 山本」で会社名と氏名に当たる）
+    // 空白で区切った言葉が、どれも項目のどれかに当たるものを返す（「ミライ工業 山本」で会社名と氏名に当たる）。
+    // 氏名・ふりがな・会社名・住所は空白を除いて比べる（名刺の「佐野 毅」を「佐野毅」でも探せるように。第27.8節）
     const terms = (query.q ?? '').trim().split(/[\s　]+/).filter(Boolean).slice(0, 4);
     const likes = terms.length > 0 ? terms.map((t) => `%${t.replace(/[\\%_]/g, '\\$&')}%`) : null;
     const digits = terms.length === 1 ? terms[0]!.replace(/[^0-9]/g, '') : '';
@@ -319,7 +333,11 @@ export class PostgresContactStore implements ContactStore {
           and ($3::text = 'all' or k.scope = $3)
           and ($4::text[] is null or not exists (
                 select 1 from unnest($4::text[]) t
-                 where not (k.name ilike t or k.name_kana ilike t or k.company ilike t or k.department ilike t or k.title ilike t
+                 where not (regexp_replace(k.name, '[[:space:]　]', '', 'g') ilike t
+                            or regexp_replace(coalesce(k.name_kana, ''), '[[:space:]　]', '', 'g') ilike t
+                            or regexp_replace(coalesce(k.company, ''), '[[:space:]　]', '', 'g') ilike t
+                            or regexp_replace(coalesce(k.address, ''), '[[:space:]　]', '', 'g') ilike t
+                            or k.department ilike t or k.title ilike t
                             or array_to_string(k.emails, ' ') ilike t or k.note ilike t))
                or ($5::text <> '' and regexp_replace(k.phones::text, '[^0-9]', '', 'g') like '%' || $5 || '%'))
           and ($6::date is null or exists (select 1 from contact_cards c where c.contact_id = k.id and c.received_on >= $6))

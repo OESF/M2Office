@@ -9,7 +9,8 @@ import { randomUUID } from 'node:crypto';
 import { Hono, type Context } from 'hono';
 import {
   CANCELLABLE, ConnectionOAuthError, buildConnectionAuthUrl, cancelRun, createPkce, discoverOAuthEndpoints,
-  exchangeConnectionCode, fetchAccountLabel, presetById, revokeConnectionToken, scopesForTools, type TenantConnection,
+  exchangeConnectionCode, fetchAccountLabel, presetById, registerOAuthClient, revokeConnectionToken, scopesForTools,
+  type ConnectionSecret, type TenantConnection,
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
@@ -32,15 +33,55 @@ export function requestedScopes(conn: TenantConnection, disabled: ReadonlySet<st
  *
  * @returns 口が分かった接続。見つからなければ `null`
  */
-export async function ensureEndpoints(deps: AppDeps, conn: TenantConnection): Promise<TenantConnection | null> {
-  if (conn.auth.authorizeUrl && conn.auth.tokenUrl) return conn;
+export async function ensureEndpoints(deps: AppDeps, conn: TenantConnection, needRegistration = false): Promise<TenantConnection | null> {
+  if (conn.auth.authorizeUrl && conn.auth.tokenUrl && (!needRegistration || conn.auth.registrationUrl)) return conn;
   const found = await discoverOAuthEndpoints(conn.url);
-  if (!found) return null;
+  if (!found) return conn.auth.authorizeUrl && conn.auth.tokenUrl ? conn : null;
   const next: TenantConnection = {
-    ...conn, auth: { ...conn.auth, authorizeUrl: found.authorizeUrl, tokenUrl: found.tokenUrl }, updatedAt: new Date().toISOString(),
+    ...conn,
+    auth: {
+      ...conn.auth, authorizeUrl: conn.auth.authorizeUrl ?? found.authorizeUrl, tokenUrl: conn.auth.tokenUrl ?? found.tokenUrl,
+      ...(found.registrationUrl ? { registrationUrl: found.registrationUrl, tokenAuthMethods: found.tokenAuthMethods } : {}),
+    },
+    updatedAt: new Date().toISOString(),
   };
   await deps.repo.saveConnection(next);
   return next;
+}
+
+/**
+ * 接続のアプリ（クライアント）を用意する。会社が登録していなければ、相手が自動登録の口を持つときに M2Office が自動で登録する
+ * （第12.11.6.2節「アプリの自動登録の決まり」、Q-99）。
+ *
+ * @returns 使えるアプリと、口の分かった接続
+ * @throws ConnectionOAuthError 会社の登録が無く、自動登録もできない
+ * @remarks 送るのはアプリの名前・戻り先・認可の型・求める権限だけ。返ってきたクライアント ID とシークレットは暗号化して持つ。監査ログ `connection.oauth.register`
+ */
+export async function ensureClient(
+  deps: AppDeps, tenantId: string, userId: string, conn: TenantConnection,
+): Promise<{ secret: ConnectionSecret; conn: TenantConnection }> {
+  const secret = await deps.repo.getConnectionSecret(tenantId, conn.id);
+  if (secret?.clientId) {
+    const ready = await ensureEndpoints(deps, conn);
+    if (!ready) throw new ConnectionOAuthError(`「${conn.name}」の許可の画面が分かりませんでした。管理者にお問い合わせください`);
+    return { secret, conn: ready };
+  }
+  const ready = await ensureEndpoints(deps, conn, true);
+  if (!ready?.auth.registrationUrl) throw new ConnectionOAuthError(`「${conn.name}」の接続の設定が済んでいません。管理者にお問い合わせください`);
+  const view = await deps.tenantView(tenantId);
+  const client = await registerOAuthClient({
+    registrationUrl: ready.auth.registrationUrl, redirectUri: deps.oauth.connectionRedirectUri,
+    scopes: requestedScopes(ready, view.disabledTools), authMethods: ready.auth.tokenAuthMethods ?? [],
+  });
+  const saved: ConnectionSecret = {
+    tenantId, connectionId: conn.id, clientId: client.clientId,
+    clientSecretEnc: client.clientSecret ? deps.box.encrypt(client.clientSecret) : null, apiKeyEnc: null, autoRegistered: true,
+    updatedBy: userId, updatedAt: new Date().toISOString(),
+  };
+  await deps.repo.saveConnectionSecret(saved);
+  // クライアント ID の値とシークレットは記録しない
+  await audit(deps, tenantId, userId, 'connection.oauth.register', conn.id, { authorizationServer: new URL(ready.auth.registrationUrl).host });
+  return { secret: saved, conn: ready };
 }
 
 /**
@@ -51,15 +92,12 @@ export async function ensureEndpoints(deps: AppDeps, conn: TenantConnection): Pr
 export async function beginConnectionAuth(
   deps: AppDeps, tenantId: string, userId: string, conn: TenantConnection, back: string,
 ): Promise<string> {
-  const secret = await deps.repo.getConnectionSecret(tenantId, conn.id);
-  if (!secret?.clientId || !secret.clientSecretEnc) throw new ConnectionOAuthError(`「${conn.name}」の接続の設定が済んでいません。管理者にお問い合わせください`);
-  const ready = await ensureEndpoints(deps, conn);
-  if (!ready) throw new ConnectionOAuthError(`「${conn.name}」の許可の画面が分かりませんでした。管理者にお問い合わせください`);
+  const { secret, conn: ready } = await ensureClient(deps, tenantId, userId, conn);
   const view = await deps.tenantView(tenantId);
   const pkce = createPkce();
   const state = deps.oauth.states.issue({ tenantId, userId, codeVerifier: pkce.verifier, returnTo: back, connectionId: conn.id });
   return buildConnectionAuthUrl({
-    authorizeUrl: ready.auth.authorizeUrl!, clientId: secret.clientId, redirectUri: deps.oauth.connectionRedirectUri,
+    authorizeUrl: ready.auth.authorizeUrl!, clientId: secret.clientId!, redirectUri: deps.oauth.connectionRedirectUri,
     scopes: requestedScopes(ready, view.disabledTools), state, codeChallenge: pkce.challenge,
   });
 }
@@ -88,11 +126,22 @@ export function registerConnectionCallback(app: Hono, deps: AppDeps): void {
     try {
       const conn = (await deps.repo.listConnections(pending.tenantId)).find((x) => x.id === connectionId);
       const secret = await deps.repo.getConnectionSecret(pending.tenantId, connectionId);
-      if (!conn || conn.auth.type !== 'oauth' || !conn.auth.tokenUrl || !secret?.clientId || !secret.clientSecretEnc) return back('failed');
-      const tokens = await exchangeConnectionCode({
-        tokenUrl: conn.auth.tokenUrl, clientId: secret.clientId, clientSecret: deps.box.decrypt(secret.clientSecretEnc),
-        code, redirectUri: deps.oauth.connectionRedirectUri, codeVerifier: pending.codeVerifier,
-      });
+      if (!conn || conn.auth.type !== 'oauth' || !conn.auth.tokenUrl || !secret?.clientId) return back('failed');
+      let tokens;
+      try {
+        tokens = await exchangeConnectionCode({
+          tokenUrl: conn.auth.tokenUrl, clientId: secret.clientId, clientSecret: secret.clientSecretEnc ? deps.box.decrypt(secret.clientSecretEnc) : null,
+          code, redirectUri: deps.oauth.connectionRedirectUri, codeVerifier: pending.codeVerifier,
+        });
+      } catch (err) {
+        // 自動で登録したアプリを相手が無効にしていたら、アプリを消し、次の接続で登録し直す。全員に接続し直しを促す（第12.11.6.2節）
+        if (secret.autoRegistered && err instanceof Error && /invalid_client/.test(err.message)) {
+          await deps.repo.saveConnectionSecret({ ...secret, clientId: null, clientSecretEnc: null, autoRegistered: false, updatedAt: new Date().toISOString() });
+          const reset = await deps.repo.deleteUserConnectionsFor(pending.tenantId, connectionId);
+          await audit(deps, pending.tenantId, pending.userId, 'connection.oauth.register_reset', connectionId, { reset });
+        }
+        throw err;
+      }
       const label = conn.auth.accountUrl ? await fetchAccountLabel(conn.auth.accountUrl, tokens.accessToken) : '';
       const now = new Date().toISOString();
       await deps.repo.saveUserConnection({
@@ -134,7 +183,8 @@ export function myConnectionsRoute(deps: AppDeps, returnTo: (c: Context<AppEnv>)
       const want = requestedScopes(conn, view.disabledTools);
       items.push({
         id: conn.id, name: conn.name, description: conn.description ?? '',
-        available: !!secret?.clientId && !!secret.clientSecretEnc,
+        // 会社が登録したアプリがあるか、相手がアプリの自動登録に対応していれば接続できる（第12.11.6.2節、Q-99）
+        available: !!secret?.clientId || !!conn.auth.registrationUrl,
         connected: !!uc, account: uc?.accountLabel ?? '', connectedAt: uc?.connectedAt ?? null,
         // 会社が道具を足して権限が増えたら、接続し直しを促す（第6.5.9節）。相手が権限を返さなければ判断しない
         needsReconnect: !!uc && uc.scopes.length > 0 && want.some((s) => !uc.scopes.includes(s)),

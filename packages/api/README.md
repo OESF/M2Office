@@ -141,6 +141,8 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `DELETE /v1/notifications/:id` ／ `POST /v1/notifications/delete` | 本人の通知を 1 件消す ／ 選んだものをまとめて消す（`ids`。100 件まで）。ほかの人の通知は消えない（第6.5.5節） |
 | `GET /v1/schedules` | 本人の定時実行 |
 | `GET /v1/cards` | 名刺の一覧と検索（`q`・`scope`・`trash=1`）。本人の読み取り中・読み取れなかった名刺（`unresolved`）と進み具合（`progress`）、会社の既定の範囲も返す。名刺管理を切っている会社と利用範囲の外の人には、`/v1/cards` のどの口も 403（仕様書 第27.8節） |
+| `POST /v1/cards/import` | 表（CSV・Excel。multipart の `file` と `scope`。5 MB・1,000 行まで）から名刺を取り込む。列の見出しはよくある言い方と推論で読み、1 行を 1 枚の名刺（画像なし）として登録し、同じ人はまとめる。登録した数・まとめた数・取り込めなかった行・列の読み方を返す（仕様書 第27.4節） |
+| `GET /v1/cards/export` | 管理者: 会社で共有の名刺を CSV（`format=csv`。BOM 付きの UTF-8）か Excel（`format=xlsx`）で書き出す。自分だけの名刺は入れない。監査ログ `contact.export`（第27.10節） |
 | `POST /v1/cards` | 名刺のファイルを受け付ける（multipart。`file` を 50 まで・`backOf`（裏を組にする表の番号の JSON）・`scope`）。読み取りを待たずに 202。受け付けなかったものは `rejected`（第27.4節） |
 | `GET /v1/cards/:id` | 名刺の詳細（連絡先・名刺ごとの受け取った人と日・向き・四隅（`frontCorners`・`backCorners`。画面が切り出しに使う。第27.5節）・名刺の履歴・範囲を変えられるか）。一覧の各行にも `frontCorners` を返す。1 枚の写真に何枚も写っていれば、名刺ごとに同じ画像を指す（写真は、指す名刺が残っている間は消さない） |
 | `PATCH /v1/cards/:id` | 項目とメモをその場で直す（見られる人の全員。直した値は名刺の「人が直した項目」にも残す） |
@@ -272,7 +274,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/me/google/impact` | 本人: 取り消すと止まる業務と、飛ばす定時実行の数 |
 | `DELETE /v1/me/google` | 本人: 接続を取り消す（Google 側の許可も取り消し、トークンを消す）。Google を使う動いている途中の業務を止め、終わった実行の中身を消す（仕様書 第6.5.2.1節・第14.3.2節） |
 | `GET /v1/me/connections` | 本人: 利用者ごとに許可する会社の接続（Slack など）と、接続しているか・許可したアカウント・接続し直しが要るか・使う業務（仕様書 第6.5.9節） |
-| `POST /v1/me/connections/:id/connect` | 本人: 接続を始める（相手の許可の画面の URL を返す。state と PKCE つき。会社の設定が済んでいなければ 409） |
+| `POST /v1/me/connections/:id/connect` | 本人: 接続を始める（相手の許可の画面の URL を返す。state と PKCE つき。会社のアプリが無く、相手が自動登録に対応していれば、ここで 1 度だけアプリを登録する。どちらも無ければ 409） |
 | `GET /v1/me/connections/:id/impact` | 本人: 取り消すと止まる業務・使えなくなる業務・飛ばす定時実行 |
 | `DELETE /v1/me/connections/:id` | 本人: 接続を取り消す（相手の取り消しの口があればそこでも取り消し、認可を消す）。その接続を使う本人の動いている業務を止める（仕様書 第12.11.6.5節） |
 | `GET /v1/oauth/google/callback` | Google からの戻り（ログイン不要。state で照合する） |
@@ -290,8 +292,8 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `PUT /v1/admin/extensions/hr/settings` | 管理者: 人事・給与の会社の設定（`office`・`health`・`socialApply`・`pay`・`procedures`・`work`・`agreement`・`leave`・`payroll`・`transfer`（振込元。番号の桁を確かめる）・`duties`（納期の特例・定期健康診断の月）・`notice`（労働条件通知書の会社の定め）・`insurance`（事業所整理記号・事業所番号・特定適用事業所 auto・yes・no・通常の労働者の週の所定労働時間 10〜60）・`labor`（雇用保険の事業の種類・労災保険の事業の種類の番号・労働保険番号）。第30.8.1節）。`GET /v1/admin/extensions/hr/labor-industries` で労災保険率表の事業の種類、`GET /v1/admin/extensions/hr/allowances` で手当の扱い（雇用条件の手当の名前と、割増の基礎・所得税の対象・設定したか）。送った項目だけを変える。人事・給与を `PUT /v1/admin/extensions/hr/enabled` で入れると、区画 `hr` が無ければ作り、入れた管理者を入れる |
 | `PUT /v1/admin/extensions/inventory/settings` | 管理者: 在庫管理の機能の入り切り（`features`）・残りわずかの既定の目安（`lowDefault`）・仕入れの日数（`leadDaysDefault`）・棚卸しの頻度（`countEveryDays`）。送った項目だけを変える（第29.4.1節） |
 | `GET /v1/admin/connections/mcp` | 管理者: 会社の接続（MCP）の一覧。道具ごとの危険度・有効かどうか・使っている業務、認証の状態（`authState`。秘密の値は返さない）、よく使うサービスの型（`presets`）（仕様書 第12.11節、ADR-0037・ADR-0044） |
-| `POST /v1/admin/connections/mcp` | 管理者: URL を受け取り、道具の一覧を取って会社の接続として登録する（読むだけの印が付いた道具は「読むだけ」、ほかは「社外へ送る」扱い）。`preset`（`slack`）で型から、`auth`（`oauth`・`api_key`）で認証の要る接続を登録する。認証の要る接続の道具は、認証情報のあとで取る |
-| `PUT /v1/admin/connections/mcp/:id/credentials` | 管理者: 認証情報を登録する。`oauth` はクライアント ID とシークレット（ID を替えると全員の認可を消す）、`api_key` は会社の鍵（その鍵で道具を問い合わせる）。値は暗号化し、返さない（仕様書 第12.11.6節） |
+| `POST /v1/admin/connections/mcp` | 管理者: URL を受け取り、道具の一覧を取って会社の接続として登録する（読むだけの印が付いた道具は「読むだけ」、ほかは「社外へ送る」扱い）。`preset`（`slack`）で型から、`auth`（`oauth`・`api_key`）で認証の要る接続を登録する。`oauth` は相手の認可サーバの情報を読み、アプリの自動登録の口（`registration_endpoint`）があれば控える（仕様書 第12.11.6.2節、Q-99）。認証の要る接続の道具は、認証情報のあとで取る |
+| `PUT /v1/admin/connections/mcp/:id/credentials` | 管理者: 認証情報を登録する。`oauth` はクライアント ID とシークレット（ID を替えると全員の認可を消す。自動で登録したアプリより先に使う）、`api_key` は会社の鍵（その鍵で道具を問い合わせる）。値は暗号化し、返さない（仕様書 第12.11.6節） |
 | `PUT /v1/admin/connections/mcp/:id` | 管理者: 接続の名前と、道具ごとの危険度を変える |
 | `POST /v1/admin/connections/mcp/:id/refresh` | 管理者: 道具の一覧を取り直す（決めた危険度は保つ）。認証の要る接続は管理者自身の認可（会社の鍵）で問い合わせる |
 | `POST /v1/admin/connections/mcp/:id/check` | 管理者: 接続の確認（宣言した道具が提供されているか） |

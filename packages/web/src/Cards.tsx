@@ -20,8 +20,10 @@ import { cropCard, prepareCardPhoto } from './card-image.js';
  * スマホでは HEIC を挙げない。iPhone の Safari は、受け付ける形式に HEIC が無ければ写真を JPEG にしてから渡すため
  * （サーバーで HEIC を JPEG に直さずに済む。Q-103）。パソコンでは HEIC も挙げる（挙げないと、選ぶ画面で HEIC が隠れる）
  */
-const ACCEPT_MOBILE = 'image/png,image/jpeg,image/webp,application/pdf,.webp,.pdf';
-const ACCEPT_DESKTOP = 'image/png,image/jpeg,image/heic,image/heif,image/webp,application/pdf,.heic,.heif,.webp,.pdf';
+const ACCEPT_MOBILE = 'image/png,image/jpeg,image/webp,application/pdf,.webp,.pdf,.csv,.xlsx,text/csv';
+const ACCEPT_DESKTOP = 'image/png,image/jpeg,image/heic,image/heif,image/webp,application/pdf,.heic,.heif,.webp,.pdf,.csv,.xlsx,text/csv';
+/** 表（CSV・Excel）のファイルか。表は画像の読み取りでなく、表からの取り込みに回す（第27.4節）。 */
+const isTable = (f: File) => /\.(csv|xlsx)$/i.test(f.name) || f.type === 'text/csv';
 
 /** スマホ（iPhone・iPad・Android）か。iPad は Mac と名乗るため、触れる点の数でも見る。 */
 function isMobile(): boolean {
@@ -38,21 +40,25 @@ const PHONE_LABELS: Record<PhoneKind, string> = { main: '代表', direct: '直�
  * @param onOpen 詳細を開く・一覧に戻る（URL を合わせる）
  * @param mailer メールの開き方（本人のアカウントの Gmail か `mailto:`）
  */
-export function Cards({ contactId, onOpen, mailer }: {
+export function Cards({ contactId, onOpen, mailer, admin = false }: {
   contactId: string | null;
   onOpen: (contactId: string | null) => void;
   mailer: Mailer;
+  /** 管理者か（会社の名刺のまとめての書き出しは管理者だけ。第27.10節）。 */
+  admin?: boolean;
 }) {
   if (contactId) return <CardDetailView id={contactId} onBack={() => onOpen(null)} onOpen={onOpen} mailer={mailer} />;
-  return <CardListView onOpen={onOpen} />;
+  return <CardListView onOpen={onOpen} admin={admin} />;
 }
 
-/** 一覧・撮る・ファイルを選ぶ・探す。 */
-function CardListView({ onOpen }: { onOpen: (id: string) => void }) {
+/** 一覧・撮る・ファイルを選ぶ・探す・書き出す。 */
+function CardListView({ onOpen, admin }: { onOpen: (id: string) => void; admin: boolean }) {
   const [list, setList] = useState<CardList | null>(null);
   const [q, setQ] = useState('');
   const [scope, setScope] = useState<'all' | ContactScope>('all');
   const [trash, setTrash] = useState(false);
+  // 表から取り込んだ結果など、うまくいった知らせ
+  const [notice, setNotice] = useState<string | null>(null);
   // ごみ箱で選んだ名刺（まとめて戻す・完全に削除する。第27.7節）。ごみ箱を開き直したら選び直す
   const [selected, setSelected] = useState<Set<string>>(new Set());
   useEffect(() => { setSelected(new Set()); }, [trash, scope, q]);
@@ -86,10 +92,26 @@ function CardListView({ onOpen }: { onOpen: (id: string) => void }) {
   }, [reading, load]);
 
   /** 渡して、読み取りの待ちに入れる。 */
-  const send = async (picked: File[], backOf?: (number | null)[]) => {
-    if (picked.length === 0) return;
+  const send = async (chosen: File[], backOf?: (number | null)[]) => {
+    if (chosen.length === 0) return;
     setBusy(true);
     setMessage(null);
+    setNotice(null);
+    // 表（CSV・Excel）は、1 行を 1 枚の名刺として、その場で取り込む（第27.4節「表から取り込む」）
+    const tables = backOf ? [] : chosen.filter(isTable);
+    const picked = chosen.filter((f) => !tables.includes(f));
+    const notes: string[] = [];
+    for (const t of tables) {
+      try {
+        const r = await api.cards.importTable(t, personal ? 'personal' : 'company');
+        notes.push(`${t.name}: ${r.created} 件を登録${r.merged ? `、${r.merged} 件を同じ人にまとめました` : 'しました'}`
+          + (r.skipped.length ? `（取り込めなかった行: ${r.skipped.slice(0, 5).map((x) => `${x.row} 行目 ${x.reason}`).join('、')}${r.skipped.length > 5 ? ` ほか ${r.skipped.length - 5} 行` : ''}）` : ''));
+      } catch (e) {
+        setMessage(describeError(e, `${t.name} を取り込めませんでした`));
+      }
+    }
+    if (notes.length) setNotice(notes.join(' / '));
+    if (picked.length === 0) { setBusy(false); load(); return; }
     try {
       // 写真の向きの情報を反映した画素にしてから送る（読み取りと画面が同じ画素を見るため。第27.4節）
       const files = await Promise.all(picked.map(prepareCardPhoto));
@@ -129,6 +151,14 @@ function CardListView({ onOpen }: { onOpen: (id: string) => void }) {
         <button className={mobile ? 'btn ghost' : 'btn'} disabled={busy || !!front} onClick={() => picker.current?.click()}>ファイルを選ぶ</button>
         {mobile && <label className="small check"><input type="checkbox" checked={withBack} disabled={!!front} onChange={(e) => setWithBack(e.target.checked)} /> 裏も撮る</label>}
         <label className="small check"><input type="checkbox" checked={!!personal} onChange={(e) => setPersonal(e.target.checked)} /> 自分だけ</label>
+        {admin && (
+          <select className="cards-export" value="" disabled={busy} aria-label="書き出す"
+            onChange={(e) => { const f = e.target.value as 'csv' | 'xlsx'; e.target.value = ''; if (f) void api.cards.exportTable(f).catch((err) => setMessage(describeError(err, '書き出せませんでした'))); }}>
+            <option value="">書き出す…</option>
+            <option value="csv">CSV</option>
+            <option value="xlsx">Excel</option>
+          </select>
+        )}
         <input ref={camera} type="file" accept="image/*" capture="environment" hidden
           onChange={(e) => { shot(e.target.files?.[0]); e.target.value = ''; }} />
         <input ref={picker} type="file" accept={mobile ? ACCEPT_MOBILE : ACCEPT_DESKTOP} multiple hidden
@@ -146,6 +176,7 @@ function CardListView({ onOpen }: { onOpen: (id: string) => void }) {
         </div>
       </div>
       {message && <p className="error">{message}</p>}
+      {notice && <p className="ok-msg">{notice}</p>}
       {list?.progress && (
         <div className="card-progress" role="status">
           <span>読み取っています {list.progress.finished} / {list.progress.total}</span>

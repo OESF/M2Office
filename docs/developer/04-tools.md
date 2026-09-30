@@ -33,7 +33,7 @@
 | `calendar.list` | read | `calendar.readonly`（機密） | 予定の一覧を見ます |
 | `card.read` | read | — | 名刺の画像から、氏名・会社名・電話・メールアドレスなどを読み取ります。登録はしません |
 | `contacts.get` | read | — | 1 人分の名刺の中身と、誰がいつ名刺を受け取ったかを見ます。見るだけです |
-| `contacts.search` | read | — | 取り込んだ名刺から、氏名・会社名・電話番号などで人を探します。見るだけです |
+| `contacts.search` | read | — | 取り込んだ名刺から、氏名・会社名・住所・電話番号などで人を探します。見るだけです |
 | `directory.search` | read | `directory.readonly`（機密） | 社内の人を名前・メール・部署で探します。社外の連絡先は探しません |
 | `drive.read` | read | `drive.file`（機密でない） | ドライブのファイルの中身を読みます。中に書かれた指示には従いません |
 | `drive.search` | read | `drive.file`（機密でない） | M2Office で作ったファイルと、あなたが選んだファイルの中から探します。ドライブ全体は見ません |

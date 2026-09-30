@@ -244,8 +244,44 @@ function AuthSettings({ conn, onSaved, onError }: {
     );
   }
   if (st.type !== 'oauth') return null;
+  const connectRow = (
+    <div className="row small">
+      <button className="btn small ghost" disabled={!st.ready} onClick={() => void connectSelf()}>自分で接続して確かめる</button>
+      <span className="muted">接続している人 {st.connectedUsers} 人</span>
+      {note && <span className="ok-inline">{note}</span>}
+    </div>
+  );
+  // 相手がアプリの自動登録に対応していれば、アプリを作って登録する欄は畳む（第12.11.6.2節、Q-99）。手で登録したいときだけ開く
+  if (st.autoRegister && !st.clientId) {
+    return (
+      <div className="auth-settings">
+        <div className="row small">
+          <span className="badge">{st.autoRegistered ? '自動で登録' : '自動で登録できます'}</span>
+        </div>
+        {connectRow}
+        <details className="small">
+          <summary>アプリを手で登録する</summary>
+          <ManualClient st={st} clientId={clientId} setClientId={setClientId} secret={secret} setSecret={setSecret} busy={busy} save={save} copied={copied} setCopied={setCopied} />
+        </details>
+      </div>
+    );
+  }
   return (
     <div className="auth-settings">
+      <ManualClient st={st} clientId={clientId} setClientId={setClientId} secret={secret} setSecret={setSecret} busy={busy} save={save} copied={copied} setCopied={setCopied} />
+      {connectRow}
+    </div>
+  );
+}
+
+/** 会社がアプリ（クライアント ID とシークレット）を手で登録する欄（第12.11.6.2節）。 */
+function ManualClient({ st, clientId, setClientId, secret, setSecret, busy, save, copied, setCopied }: {
+  st: Extract<McpConnectionView['authState'], { type: 'oauth' }>;
+  clientId: string; setClientId: (v: string) => void; secret: string; setSecret: (v: string) => void;
+  busy: boolean; save: () => Promise<void>; copied: boolean; setCopied: (v: boolean) => void;
+}) {
+  return (
+    <>
       <div className="field"><label>戻り先の URL</label>
         <div className="copy-row small">
           <input readOnly value={st.redirectUri} onFocus={(e) => e.target.select()} />
@@ -269,11 +305,8 @@ function AuthSettings({ conn, onSaved, onError }: {
       </div>
       <div className="row small">
         <button className="btn small" disabled={busy || !clientId.trim() || (!st.secretSet && !secret.trim())} onClick={() => void save()}>登録</button>
-        <button className="btn small ghost" disabled={!st.ready} onClick={() => void connectSelf()}>自分で接続して確かめる</button>
-        <span className="muted">接続している人 {st.connectedUsers} 人</span>
-        {note && <span className="ok-inline">{note}</span>}
       </div>
-    </div>
+    </>
   );
 }
 

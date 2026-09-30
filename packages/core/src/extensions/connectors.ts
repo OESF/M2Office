@@ -36,6 +36,10 @@ export interface ConnectorAuth {
   tokenUrl?: string;
   /** `oauth`: 求める権限。 */
   scopes?: string[];
+  /** `oauth`: アプリの自動登録の口（相手のサーバの案内から見つけたもの。第12.11.6.2節、Q-99）。あれば会社がアプリを登録しなくてよい。 */
+  registrationUrl?: string;
+  /** `oauth`: トークンの口で使えるクライアントの認証の方法（自動登録で選ぶ）。 */
+  tokenAuthMethods?: string[];
   /** `oauth`: 取り消しの URL（あれば、利用者が取り消すときに相手の側でも取り消す）。 */
   revokeUrl?: string;
   /** `oauth`: 許可したアカウントの表示名を問い合わせる URL（Slack の `auth.test` など）。 */
@@ -98,7 +102,7 @@ export function checkConnector(c: ConnectorDeclaration, reserved: ReadonlySet<st
     p.push(`auth.type は ${CONNECTOR_AUTH_TYPES.join('・')} のいずれかです`);
   } else {
     // 認可の口は https に限る（開発用の localhost を除く。第12.11.6.2節）
-    for (const k of ['authorizeUrl', 'tokenUrl', 'revokeUrl', 'accountUrl'] as const) {
+    for (const k of ['authorizeUrl', 'tokenUrl', 'registrationUrl', 'revokeUrl', 'accountUrl'] as const) {
       const v = c.auth[k];
       if (v !== undefined && !isAllowedUrl(v)) p.push(`auth.${k} は https で書いてください`);
     }

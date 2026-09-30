@@ -78,6 +78,9 @@ export const cardRead: Tool = {
   },
 };
 
+/** 秘書の検索で 1 度に返す連絡先の数。 */
+const SEARCH_LIMIT = 20;
+
 /**
  * 名刺（連絡先）を探す（第27.9節）。
  *
@@ -87,8 +90,8 @@ export const contactsSearch: Tool = {
   name: 'contacts.search',
   risk: 'read',
   activityLabel: '名刺を探しています',
-  helpText: '取り込んだ名刺から、氏名・会社名・電話番号などで人を探します。見るだけです',
-  description: '名刺（連絡先）を探す。query は氏名・ふりがな・会社名・部署・メールアドレス・電話番号の一部。from・to で名刺を交換した日（YYYY-MM-DD）の範囲に絞れる',
+  helpText: '取り込んだ名刺から、氏名・会社名・住所・電話番号などで人を探します。見るだけです',
+  description: '名刺（連絡先）を探す。query は氏名・ふりがな・会社名・部署・住所（「横浜市」など）・メールアドレス・電話番号の一部。空白で区切るとすべてに当たるものに絞る。from・to で名刺を交換した日（YYYY-MM-DD）の範囲に絞れる。more が true なら続きがある（言葉を足して絞る）',
   args: {
     properties: {
       query: { type: 'string', description: '探す言葉（空なら交換した日の範囲だけで絞る）' },
@@ -101,13 +104,14 @@ export const contactsSearch: Tool = {
     if (!cards) return UNAVAILABLE;
     const who = viewer(ctx);
     const date = (v: unknown) => (/^\d{4}-\d{2}-\d{2}$/.test(str(v)) ? str(v) : undefined);
+    // 1 件多く取り、続きがあるかを示す（「横浜市の人」のように多く当たる問いで、全部と取り違えないように）
     const found = await cards.store.listContacts(who, {
-      q: str(args['query']).slice(0, 100), limit: 10,
+      q: str(args['query']).slice(0, 100), limit: SEARCH_LIMIT + 1,
       ...(date(args['from']) ? { receivedFrom: date(args['from'])! } : {}),
       ...(date(args['to']) ? { receivedTo: date(args['to'])! } : {}),
     });
     const items = [];
-    for (const s of found) {
+    for (const s of found.slice(0, SEARCH_LIMIT)) {
       const c = await cards.store.getContact(who, s.id);
       if (!c) continue;
       items.push({
@@ -116,7 +120,11 @@ export const contactsSearch: Tool = {
         scope: c.scope === 'personal' ? '自分だけ' : '会社で共有',
       });
     }
-    return { available: true, untrusted: true, count: items.length, items, ...(items.length === 0 ? { note: '見つかりませんでした' } : {}) };
+    const more = found.length > SEARCH_LIMIT;
+    return {
+      available: true, untrusted: true, count: items.length, more, items,
+      ...(items.length === 0 ? { note: '見つかりませんでした' } : more ? { note: `${SEARCH_LIMIT} 件より多く当たりました。ここに無い人もいます` } : {}),
+    };
   },
 };
 

@@ -439,6 +439,13 @@ export interface CardList {
 /** 名刺の受け付けの結果。 */
 export interface CardAccept { batchId: string; queued: number; rejected: { name: string; reason: string }[] }
 
+/** 表からの名刺の取り込みの結果（仕様書 第27.4節）。 */
+export interface CardTableImport {
+  created: number; merged: number;
+  skipped: { row: number; reason: string }[];
+  mapping: { header: string; field: string | null }[];
+}
+
 /** 名刺の詳細（仕様書 第27.8節）。 */
 export interface CardDetail {
   contact: Contact;
@@ -918,8 +925,10 @@ export type McpAuthState =
   | { type: 'api_key'; text: string; ready: boolean; keySet: boolean; header: string }
   | {
     type: 'oauth'; text: string; ready: boolean;
-    /** クライアント ID（秘密ではない）。シークレットは登録したかだけ。 */
+    /** クライアント ID（秘密ではない）。シークレットは登録したかだけ。自動で登録したものは空。 */
     clientId: string; secretSet: boolean;
+    /** 相手がアプリの自動登録に対応しているか・M2Office が自動で登録したか（仕様書 第12.11.6.2節、Q-99）。 */
+    autoRegister: boolean; autoRegistered: boolean;
     /** 相手のサービスのアプリに登録する戻り先の URL。 */
     redirectUri: string;
     /** 求める権限（相手のアプリに足す）。 */
@@ -1056,6 +1065,19 @@ export const api = {
       const body = await res.json().catch(() => ({ error: '通信に失敗しました' }));
       if (!res.ok && !(body as CardAccept).rejected) throw new ApiError(body.error ?? `エラー (${res.status})`, res.status, false);
       return body as CardAccept;
+    },
+    /** 表（CSV・Excel）から名刺を取り込む（仕様書 第27.4節）。1 行を 1 枚として、その場で登録する。 */
+    importTable: (file: File, scope?: ContactScope) => {
+      const form = new FormData();
+      form.append('file', file);
+      if (scope) form.append('scope', scope);
+      return postForm<CardTableImport>('/cards/import', form);
+    },
+    /** 会社で共有の名刺を CSV・Excel で書き出す（管理者だけ。仕様書 第27.10節）。 */
+    exportTable: async (format: 'csv' | 'xlsx') => {
+      const blob = await fetchBlob(`/cards/export?format=${format}`);
+      if (!blob) throw new ApiError('書き出せませんでした', 404);
+      saveBlob(blob, `business-cards-${new Date().toISOString().slice(0, 10)}.${format}`);
     },
     get: (id: string) => call<CardDetail>(`/cards/${encodeURIComponent(id)}`),
     /** 項目とメモをその場で直す。 */

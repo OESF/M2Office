@@ -14,7 +14,7 @@ Node.js 22 以上。PostgreSQL への接続が必要です（`DATABASE_URL`）�
 ```
 src/engine/      実行エンジン。承認による中断と再開、ジョブの投入
 src/tools/       ツールの登録簿と内蔵ツール
-src/connectors/  メール・予定・タスク・チャットへの接続口（見本と Google の実装）と、MCP サーバのクライアント。認証の要る会社の接続の許可の流れ（oauth.ts）・登録の型（presets.ts。Slack）・呼ぶときの認可（credentials.ts。仕様書 第12.11.6節）
+src/connectors/  メール・予定・タスク・チャットへの接続口（見本と Google の実装）と、MCP サーバのクライアント。認証の要る会社の接続の許可の流れとアプリの自動登録（oauth.ts。動的クライアント登録）・登録の型（presets.ts。Slack）・呼ぶときの認可（credentials.ts。仕様書 第12.11.6節）
 src/files/       ファイルの置き場と、PDF・Excel・CSV・Word の読み書き。
                  to-text.ts は形式によらず「読むための文字」にし、指示ではないものとして囲う（第10.10節）
 src/log/         アプリログのロガー（レベル・JSON・伏せ字）
@@ -31,6 +31,7 @@ src/repository/  永続化。テナント境界の絞り込みを伴う
 src/agents/      公式エージェントの定義（AG-01〜05）
 src/cards/       名刺管理（内蔵の拡張。第27章）。置き場（自分だけの名刺は持ち主でも行を絞る）、読み取り（read.ts。写っている名刺ごとに項目・向き・四隅。
                  四隅は文字の向きに合わせて並べ直す orderCorners。1 枚の写真に 10 枚まで）、同じ人の見分け（identity.ts）、
+                 表（CSV・Excel）の取り込みと書き出し（table.ts。見出しはよくある言い方と推論で読む）、
                  取り込み・修正・範囲・分ける・消去（service.ts）、PDF の分け方と形式（formats.ts）、vCard、道具 4 つ、付属の業務
 src/signage/     店頭サイネージ（内蔵の拡張。第31章の段 1・段 2）。置き場（画面・ふだん動いている時間帯・登録の番号・素材・流れ・割り込みと出す先・
                  よく出す案内・呼び出しの受け口・会社の音。PostgreSQL）、割り込み（interrupts.ts。並び・まとめる・古いもの・消す・よく出す案内・

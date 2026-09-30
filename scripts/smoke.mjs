@@ -3044,8 +3044,94 @@ console.log('\n■ 56. 認証の要る会社の接続（oauth・api_key。第12.
   }
 }
 
+console.log('\n■ 56b. 接続のアプリの自動登録（動的クライアント登録。第12.11.6.2節、Q-99）');
+{
+  // 自動登録の口を持つ見本の認可サーバと MCP サーバ。/register でアプリを登録し、/token はそのアプリにだけ認可を渡す。
+  // コード revoked を受け取ると、アプリが無効になった（invalid_client）と答える
+  const { createServer } = await import('node:http');
+  const registered = [];
+  const server = createServer(async (req, res) => {
+    let raw = '';
+    for await (const ch of req) raw += ch;
+    const origin = `http://localhost:${server.address().port}`;
+    const json = (status, body) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
+    if (req.url === '/.well-known/oauth-protected-resource') return json(200, { authorization_servers: [origin] });
+    if (req.url === '/.well-known/oauth-authorization-server') {
+      return json(200, { authorization_endpoint: `${origin}/authorize`, token_endpoint: `${origin}/token`, registration_endpoint: `${origin}/register`,
+        code_challenge_methods_supported: ['S256'], token_endpoint_auth_methods_supported: ['client_secret_post'] });
+    }
+    if (req.url === '/register') {
+      const body = JSON.parse(raw || '{}');
+      registered.push(body);
+      return json(201, { client_id: `dyn-${registered.length}`, client_secret: `dsecret-${registered.length}` });
+    }
+    if (req.url === '/token') {
+      const f = new URLSearchParams(raw);
+      if (f.get('code') === 'revoked') return json(401, { error: 'invalid_client' });
+      if (!/^dyn-\d+$/.test(f.get('client_id') ?? '') || f.get('client_secret') !== `dsecret-${(f.get('client_id') ?? '').slice(4)}`) return json(401, { error: 'invalid_client' });
+      const who = (f.get('code') ?? '').replace(/^good-/, '');
+      return json(200, { access_token: `tok-${who}`, token_type: 'bearer', expires_in: 3600 });
+    }
+    return json(404, {});
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const base = `http://localhost:${server.address().port}`;
+  await call('a', '/v1/admin/connections/mcp/dcrcrm', { method: 'DELETE' });
+  const connectAs = async (who, code) => {
+    const start = await call('a', '/v1/me/connections/dcrcrm/connect', { method: 'POST' }, who);
+    const u = new URL(start.body.url ?? 'http://x/');
+    const back = await fetch(`${API}/v1/oauth/connection/callback?state=${encodeURIComponent(u.searchParams.get('state') ?? '')}&code=${code}`, { redirect: 'manual' });
+    return { start, u, back };
+  };
+  try {
+    const added = await call('a', '/v1/admin/connections/mcp', { method: 'POST', body: JSON.stringify({ id: 'dcrcrm', name: '自動登録の確認', url: `${base}/mcp`, auth: 'oauth' }) });
+    const { body: l1 } = await call('a', '/v1/admin/connections/mcp');
+    const s1 = l1.items?.find((x) => x.id === 'dcrcrm')?.authState;
+    const { body: mine0 } = await call('a', '/v1/me/connections', {}, 'member');
+    added.status === 201 && s1?.ready === true && s1.autoRegister === true && s1.autoRegistered === false && mine0.items?.find((x) => x.id === 'dcrcrm')?.available === true
+      ? ok('自動登録の口を持つ接続は、アプリを登録しなくても使える状態になる') : ng('自動登録の接続の状態が違う', JSON.stringify({ added: added.body, s1 }));
+
+    const first = await connectAs('member', 'good-member');
+    const second = await connectAs('admin', 'good-admin');
+    const { body: l2 } = await call('a', '/v1/admin/connections/mcp');
+    const s2 = l2.items?.find((x) => x.id === 'dcrcrm')?.authState;
+    const regAudit = (await call('a', '/v1/admin/audit-events')).body;
+    const acts = (regAudit.items ?? regAudit.events ?? []).map((e) => e.action);
+    registered.length === 1 && registered[0].client_name === 'M2Office' && /\/v1\/oauth\/connection\/callback$/.test(registered[0].redirect_uris?.[0] ?? '')
+      && !JSON.stringify(registered[0]).includes('アルファ') && first.u.searchParams.get('client_id') === 'dyn-1'
+      && /connection=connected/.test(first.back.headers.get('location') ?? '') && /connection=connected/.test(second.back.headers.get('location') ?? '')
+      && s2?.autoRegistered === true && s2.clientId === '' && !JSON.stringify(l2).includes('dsecret') && acts.includes('connection.oauth.register')
+      ? ok('最初の接続で M2Office がアプリを 1 度だけ自動で登録し（名前と戻り先だけを送る）、そのアプリで認可を受け取る。値は返さない')
+      : ng('アプリの自動登録が違う', JSON.stringify({ registered, first: first.start.body, loc: first.back.headers.get('location'), s2, acts: acts.slice(0, 10) }).slice(0, 700));
+
+    // 相手がアプリを無効にしたら、アプリを消して全員に接続し直しを促し、次の接続で登録し直す
+    const revoked = await connectAs('member', 'revoked');
+    const { body: mine1 } = await call('a', '/v1/me/connections', {}, 'admin');
+    const again = await connectAs('member', 'good-member');
+    registered.length === 2 && /connection=failed/.test(revoked.back.headers.get('location') ?? '') && mine1.items?.find((x) => x.id === 'dcrcrm')?.connected === false
+      && again.u.searchParams.get('client_id') === 'dyn-2' && /connection=connected/.test(again.back.headers.get('location') ?? '')
+      ? ok('相手がアプリを無効にしたら、全員の許可を消し、次の接続でアプリを登録し直す')
+      : ng('無効になったアプリの扱いが違う', JSON.stringify({ registered: registered.length, revoked: revoked.back.headers.get('location'), mine1: mine1.items, again: again.u.searchParams.get('client_id') }));
+
+    // 管理者が手で登録したアプリは、自動登録より先に使う
+    await call('a', '/v1/admin/connections/mcp/dcrcrm/credentials', { method: 'PUT', body: JSON.stringify({ clientId: 'manual-1', clientSecret: 'msecret' }) });
+    const manual = await call('a', '/v1/me/connections/dcrcrm/connect', { method: 'POST' }, 'admin');
+    const { body: l3 } = await call('a', '/v1/admin/connections/mcp');
+    new URL(manual.body.url ?? 'http://x/').searchParams.get('client_id') === 'manual-1' && l3.items?.find((x) => x.id === 'dcrcrm')?.authState?.autoRegistered === false && registered.length === 2
+      ? ok('管理者が手で登録したアプリがあれば、そちらを使う（自動で登録しない）') : ng('手で登録したアプリが使われない', JSON.stringify(manual.body));
+  } catch (err) {
+    ng('アプリの自動登録の確認が途中で止まった', String(err));
+  } finally {
+    await call('a', '/v1/admin/connections/mcp/dcrcrm', { method: 'DELETE' });
+    await new Promise((r) => server.close(r));
+  }
+}
+
 console.log('\n■ 57. 名刺管理（内蔵の拡張。第27章、ADR-0042）');
 {
+  const { default: pg57 } = await import('pg');
+  const owner57 = new pg57.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner57.connect();
   // 自動テストの推論（スタブ）は、画像に埋め込んだ見本の読み取り結果を返す（llm/stub.ts の extractFromImage）
   const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da6364f8ff0f0000050101005b1c4a1a0000000049454e44ae426082', 'hex');
   const tag = Date.now().toString(36);
@@ -3085,12 +3171,18 @@ console.log('\n■ 57. 名刺管理（内蔵の拡張。第27章、ADR-0042）')
       ? ok('名刺と見分けられないものは登録せず、「読み取れませんでした」と画像と一緒に残す') : ng('読み取れなかったものが残らない');
 
     // 別の人が同じ人の新しい名刺を取り込むと、1 つの連絡先にまとまり、中身は新しい名刺になる（第27.6節）
-    await upload('a', 'admin', [['c2.png', cardImage({ name: `田中 ${tag}`, company: '株式会社サンプル', title: '部長', emails: [email], phones: [{ kind: 'mobile', number: '090-3333-4444' }] })]]);
+    await upload('a', 'admin', [['c2.png', cardImage({ name: `田中 ${tag}`, company: '株式会社サンプル', title: '部長', emails: [email], phones: [{ kind: 'mobile', number: '090-3333-4444' }], address: '神奈川県横浜市 西区みなとみらい1-1' })]]);
     await settle('admin');
     const { body: merged } = await call('a', `/v1/cards/${tanaka?.id}`, {}, 'member');
     merged.cards?.length === 2 && merged.contact?.title === '部長' && merged.history?.some((h) => h.title === '課長')
       && merged.contact?.phones.length === 2
       ? ok('同じメールアドレスの名刺は 1 つにまとまり、新しい名刺の役職になり、以前の役職は履歴に残る') : ng('まとまらない', JSON.stringify(merged).slice(0, 300));
+    // 名刺の氏名は「田中 ○○」と空白を挟んで持つ。空白の無いフルネームでも探せる（第27.8節、第 0.203.1 版）
+    const fullName = (await list('member', `田中${tag}`)).items ?? [];
+    fullName.some((c) => c.id === tanaka?.id) ? ok('氏名は空白を除いて比べ、空白の無いフルネームでも探せる') : ng('空白の無いフルネームで見つからない', JSON.stringify(fullName).slice(0, 200));
+    // 住所でも探せる（「横浜市の人」。第27.8節、第 0.203.2 版）
+    const byAddress = (await list('member', `横浜市西区 ${tag}`)).items ?? [];
+    byAddress.some((c) => c.id === tanaka?.id) ? ok('住所の一部（空白を除いて比べる）でも探せる') : ng('住所で見つからない', JSON.stringify(byAddress).slice(0, 200));
 
     // 自分だけの名刺は、管理者も・ほかの会社も見られない（第27.7節）
     const mine = await upload('a', 'member', [['c3.png', cardImage({ name: `佐藤 ${tag}`, company: '個人の知り合い', emails: [`sato-${tag}@private.example`] })]], { scope: 'personal' });
@@ -3197,6 +3289,41 @@ console.log('\n■ 57. 名刺管理（内蔵の拡張。第27章、ADR-0042）')
       ? ok('1 枚の写真に写った何枚もの名刺を名刺ごとに登録し、四隅を文字の向きに並べ直して持ち、ほかの名刺が指す写真は消さない')
       : ng('何枚も写った名刺の扱いが違う', JSON.stringify({ sent: sent.body, rowA, rowB: rowB?.frontCorners, detailB: detailB.cards?.[0], purgeB: purgeB.status, imgA: imgA.status }).slice(0, 700));
 
+    // 表（CSV）から取り込み、同じ人はまとめる。書き出しは管理者だけで、会社で共有の名刺を CSV・Excel で出す（第27.4節・第27.10節）
+    {
+      const csv = [
+        '姓,名,セイ,メイ,会社名,部署名,役職,e-mail,携帯電話,名刺交換日,備考',
+        `表,一郎${tag},ヒョウ,イチロウ,株式会社ひょう,営業部,課長,hyo1-${tag}@table.example,090-1111-0000,2024/4/1,展示会`,
+        `表,二郎${tag},,,株式会社ひょう,,,hyo2-${tag}@table.example,,,`,
+        `,,,,,,,,,,`,
+        `,,,,,,部長,,,,`,
+        `田中 ${tag},,,,株式会社サンプル,,,${email},,,`,
+      ].join('\r\n');
+      const form = new FormData();
+      form.append('file', new Blob([csv], { type: 'text/csv' }), 'cards.csv');
+      const imp = await fetch(`${API}/v1/cards/import`, { method: 'POST', body: form, headers: { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' } }).then(async (r) => ({ status: r.status, body: await r.json() }));
+      const one = (await list('member', `一郎${tag}`)).items?.[0];
+      if (one) created.push(one.id);
+      const two = (await list('member', `二郎${tag}`)).items?.[0];
+      if (two) created.push(two.id);
+      const { body: oneDetail } = await call('a', `/v1/cards/${one?.id}`, {}, 'member');
+      const csvOut = await fetch(`${API}/v1/cards/export?format=csv`, { headers: { 'x-tenant': 'a', 'x-user': 'admin@alpha.example.jp' } });
+      const csvBytes = new Uint8Array(await csvOut.arrayBuffer());
+      // 読むときに BOM を取り除かせず、先頭の 3 バイトで確かめる（Excel で開いても化けないため）
+      const csvText = new TextDecoder('utf-8', { ignoreBOM: true }).decode(csvBytes);
+      const xlsxOut = await fetch(`${API}/v1/cards/export?format=xlsx`, { headers: { 'x-tenant': 'a', 'x-user': 'admin@alpha.example.jp' } });
+      const xlsxBytes = new Uint8Array(await xlsxOut.arrayBuffer());
+      const byMember = await fetch(`${API}/v1/cards/export`, { headers: { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' } });
+      const exportAudit = (await owner57.query(`select detail from audit_events where tenant_id = 't-alpha' and action = 'contact.export' order by occurred_at desc limit 1`)).rows[0]?.detail;
+      imp.status === 200 && imp.body.created === 2 && imp.body.merged === 1 && imp.body.skipped.length === 1 && imp.body.skipped[0].row === 5
+        && one?.name === `表 一郎${tag}` && one?.nameKana === 'ひょう いちろう' && oneDetail.contact?.note === '展示会' && oneDetail.cards?.[0]?.receivedOn === '2024-04-01'
+        && oneDetail.contact?.phones?.[0]?.kind === 'mobile'
+        && csvOut.status === 200 && csvText.charCodeAt(0) === 0xfeff && csvText.includes(`表 一郎${tag}`) && !csvText.includes(`佐藤 ${tag}`) && csvText.split('\r\n')[0].includes('最後に交換した日')
+        && xlsxOut.status === 200 && xlsxBytes[0] === 0x50 && xlsxBytes[1] === 0x4b && byMember.status === 403 && exportAudit?.count >= 2
+        ? ok('表（CSV）から名刺を取り込んで同じ人をまとめ、会社で共有の名刺を管理者だけが CSV・Excel で書き出す（自分だけの名刺は入れない）')
+        : ng('名刺の表の取り込み・書き出しが違う', JSON.stringify({ imp: imp.body, one, note: oneDetail.contact?.note, csv: csvOut.status, head: csvText.slice(0, 80), xlsx: xlsxOut.status, member: byMember.status, exportAudit }).slice(0, 800));
+    }
+
     // 退職（利用者を止める）: 自分だけの名刺の件数を管理者に示し、止めてから 30 日を過ぎたら期限の見回りの対象にする。戻せば外れる（第27.7節、Q-94）
     {
       const { default: pgr } = await import('pg');
@@ -3246,6 +3373,7 @@ console.log('\n■ 57. 名刺管理（内蔵の拡張。第27章、ADR-0042）')
       }
     }
     for (const u of (await list('member')).unresolved ?? []) await call('a', `/v1/cards/card/${u.id}`, { method: 'DELETE' }, 'member');
+    await owner57.end();
   }
 }
 

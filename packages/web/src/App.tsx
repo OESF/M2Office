@@ -609,7 +609,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
             <>
               <h1>名刺管理 <HelpTip article="start-cards">撮るかファイルを選ぶと、AI が読み取って登録します。秘書に「〇〇さんの電話番号は？」と聞けます。</HelpTip></h1>
               <Cards contactId={view.contactId} onOpen={(contactId) => setView({ kind: 'cards', contactId })}
-                mailer={{ email: me.user.email, google: me.workspaceSource === 'google' }} />
+                mailer={{ email: me.user.email, google: me.workspaceSource === 'google' }} admin={me.user.roles.includes('admin')} />
             </>
           )}
           {view.kind === 'inventory' && (

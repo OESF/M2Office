@@ -62,6 +62,8 @@ const ACTION_LABELS: Record<string, string> = {
   'connection.oauth.connect': 'サービスと接続した',
   'connection.oauth.disconnect': 'サービスとの接続を取り消した',
   'connection.oauth.lost': 'サービスとの接続が切れた',
+  'connection.oauth.register': '接続のアプリを自動で登録した',
+  'connection.oauth.register_reset': '無効になった接続のアプリを外した',
   'extension.import': '拡張機能を取り込んだ',
   'extension.install': '拡張機能を導入した',
   'extension.uninstall': '拡張機能を削除した',

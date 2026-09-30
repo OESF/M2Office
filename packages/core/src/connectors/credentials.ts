@@ -85,14 +85,15 @@ export class ConnectionCredentials implements ConnectionAuthProvider {
   }
 
   /** 会社が登録したアプリ（クライアント ID とシークレット）。 */
-  private async client(tenantId: string, c: ConnectorDeclaration): Promise<{ ok: true; clientId: string; clientSecret: string } | { ok: false; error: string }> {
+  private async client(tenantId: string, c: ConnectorDeclaration): Promise<{ ok: true; clientId: string; clientSecret: string | null } | { ok: false; error: string }> {
     const s = await this.deps.repo.getConnectionSecret(tenantId, c.id);
-    if (!s?.clientId || !s.clientSecretEnc) return { ok: false, error: `「${c.name}」の接続の設定が済んでいません（管理者ページの「接続」で設定します）` };
-    return { ok: true, clientId: s.clientId, clientSecret: this.deps.box.decrypt(s.clientSecretEnc) };
+    // 自動登録の公開クライアント（第12.11.6.2節）はシークレットを持たない
+    if (!s?.clientId) return { ok: false, error: `「${c.name}」の接続の設定が済んでいません（管理者ページの「接続」で設定します）` };
+    return { ok: true, clientId: s.clientId, clientSecret: s.clientSecretEnc ? this.deps.box.decrypt(s.clientSecretEnc) : null };
   }
 
   /** 更新用の認可で新しい認可を受け取り、保存する。できなければ認可を消す。 */
-  private async refresh(uc: UserConnection, c: ConnectorDeclaration, client: { clientId: string; clientSecret: string }): Promise<Result> {
+  private async refresh(uc: UserConnection, c: ConnectorDeclaration, client: { clientId: string; clientSecret: string | null }): Promise<Result> {
     if (!c.auth.tokenUrl || !uc.refreshTokenEnc) return this.lose(uc, c, '更新の口が分からない');
     try {
       const t = await refreshConnectionToken({

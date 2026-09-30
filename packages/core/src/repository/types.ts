@@ -884,6 +884,8 @@ export interface ConnectionSecret {
   clientSecretEnc: string | null;
   /** `api_key`: 会社の鍵（暗号化）。 */
   apiKeyEnc: string | null;
+  /** `oauth`: アプリを M2Office が自動で登録したか（第12.11.6.2節、Q-99）。 */
+  autoRegistered?: boolean;
   updatedBy: string;
   updatedAt: string;
 }

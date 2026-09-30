@@ -2,7 +2,8 @@
  * @file 認証の要る会社の接続（`oauth`）の、認可の流れ。相手のサーバの案内の発見、許可の画面の URL、認可の受け取りと更新、取り消し。
  *
  * MCP の認可の決まり（保護されたリソースの情報 RFC 9728 と、認可サーバの情報 RFC 8414）に従う。
- * 会社がアプリ（クライアント ID とシークレット）を登録する形だけを扱い、アプリの自動登録は行わない（Q-99）。
+ * 会社がアプリ（クライアント ID とシークレット）を登録する形と、相手が自動登録の口を持つときのアプリの自動登録（動的クライアント登録 RFC 7591。
+ * 第 0.203.0 版、Q-99）を扱う。自動登録で送るのはアプリの名前・戻り先・認可の型・求める権限だけ。
  * 認可の値は呼び出し側が暗号化して持つ。このファイルは記録に出さない。
  *
  * @see 仕様書 第12.11.6.2節・第12.11.6.3節・第12.11.6.4節
@@ -19,6 +20,17 @@ export interface OAuthEndpoints {
   scopesSupported: string[];
   /** PKCE（S256）に対応しているか。 */
   pkce: boolean;
+  /** アプリの自動登録の口（`registration_endpoint`）。無ければ `null`（会社がアプリを登録する）。 */
+  registrationUrl: string | null;
+  /** トークンの口で使えるクライアントの認証の方法（`client_secret_post`・`none` など）。 */
+  tokenAuthMethods: string[];
+}
+
+/** 自動で登録したアプリ。 */
+export interface RegisteredClient {
+  clientId: string;
+  /** シークレットを持たないアプリ（公開クライアント）では `null`。 */
+  clientSecret: string | null;
 }
 
 /** 受け取った認可。 */
@@ -57,14 +69,59 @@ export async function discoverOAuthEndpoints(mcpUrl: string, fetchImpl: FetchLik
     if (typeof authorizeUrl !== 'string' || typeof tokenUrl !== 'string') return null;
     const scopes = meta?.['scopes_supported'] ?? resource?.['scopes_supported'];
     const methods = meta?.['code_challenge_methods_supported'];
+    const registration = meta?.['registration_endpoint'];
+    const auth = meta?.['token_endpoint_auth_methods_supported'];
     return {
       authorizeUrl, tokenUrl,
       scopesSupported: Array.isArray(scopes) ? scopes.map(String) : [],
       pkce: Array.isArray(methods) && methods.includes('S256'),
+      // 口は https に限る（開発の手元のサーバだけ http を認める。第12.11.1節の接続先と同じ）
+      registrationUrl: typeof registration === 'string' && /^(https:\/\/|http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\/)/.test(registration) ? registration : null,
+      // 書いていなければ、決まりの既定（client_secret_basic）として扱う
+      tokenAuthMethods: Array.isArray(auth) ? auth.map(String) : ['client_secret_basic'],
     };
   } catch {
     return null;
   }
+}
+
+/**
+ * 相手の認可サーバにアプリを自動で登録する（動的クライアント登録 RFC 7591。第12.11.6.2節、Q-99）。
+ *
+ * @param p.authMethods 相手が使えるクライアントの認証の方法。シークレットを本文で送る方法（`client_secret_post`）を選び、
+ *   使えなければシークレットを持たない方法（`none`）にする
+ * @throws ConnectionOAuthError 相手に断られた・応答が読めない
+ * @remarks 送るのはアプリの名前（「M2Office」）・戻り先の URL・認可の型・求める権限だけ。会社の名前や利用者の情報は送らない
+ */
+export async function registerOAuthClient(p: {
+  registrationUrl: string; redirectUri: string; scopes: string[]; authMethods: string[];
+}, fetchImpl: FetchLike = fetch): Promise<RegisteredClient> {
+  const method = p.authMethods.includes('client_secret_post') ? 'client_secret_post' : p.authMethods.includes('none') ? 'none' : 'client_secret_post';
+  let res: Response;
+  try {
+    res = await fetchImpl(p.registrationUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({
+        client_name: 'M2Office', redirect_uris: [p.redirectUri], grant_types: ['authorization_code', 'refresh_token'],
+        response_types: ['code'], token_endpoint_auth_method: method, ...(p.scopes.length > 0 ? { scope: p.scopes.join(' ') } : {}),
+      }),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch {
+    throw new ConnectionOAuthError('相手のサービスにつながりませんでした（アプリの自動登録）');
+  }
+  let body: Record<string, unknown>;
+  try {
+    body = await res.json() as Record<string, unknown>;
+  } catch {
+    throw new ConnectionOAuthError(`相手のサービスの応答を読めませんでした（アプリの自動登録。HTTP ${res.status}）`);
+  }
+  if (!res.ok || typeof body['client_id'] !== 'string' || body['client_id'] === '') {
+    throw new ConnectionOAuthError(`相手のサービスにアプリの自動登録を断られました（${String(body['error'] ?? `HTTP ${res.status}`)}）`);
+  }
+  const secret = body['client_secret'];
+  return { clientId: body['client_id'], clientSecret: typeof secret === 'string' && secret !== '' ? secret : null };
 }
 
 /** 許可の画面の URL を作る。`state` と PKCE は呼び出し側が用意する（第12.11.6.3節）。 */
@@ -90,11 +147,12 @@ export function buildConnectionAuthUrl(p: {
  * @throws ConnectionOAuthError 相手に断られた・応答が読めない
  */
 export async function exchangeConnectionCode(p: {
-  tokenUrl: string; clientId: string; clientSecret: string; code: string; redirectUri: string; codeVerifier?: string;
+  tokenUrl: string; clientId: string; clientSecret: string | null; code: string; redirectUri: string; codeVerifier?: string;
 }, fetchImpl: FetchLike = fetch, now = new Date()): Promise<OAuthTokens> {
   return tokensOf(await postForm(p.tokenUrl, {
     grant_type: 'authorization_code', code: p.code, redirect_uri: p.redirectUri,
-    client_id: p.clientId, client_secret: p.clientSecret,
+    // シークレットを持たないアプリ（自動登録の公開クライアント）は送らない
+    client_id: p.clientId, ...(p.clientSecret ? { client_secret: p.clientSecret } : {}),
     ...(p.codeVerifier ? { code_verifier: p.codeVerifier } : {}),
   }, fetchImpl), now);
 }
@@ -105,10 +163,10 @@ export async function exchangeConnectionCode(p: {
  * @throws ConnectionOAuthError 更新できない（相手の側で許可が外れたなど）
  */
 export async function refreshConnectionToken(p: {
-  tokenUrl: string; clientId: string; clientSecret: string; refreshToken: string;
+  tokenUrl: string; clientId: string; clientSecret: string | null; refreshToken: string;
 }, fetchImpl: FetchLike = fetch, now = new Date()): Promise<OAuthTokens> {
   const t = tokensOf(await postForm(p.tokenUrl, {
-    grant_type: 'refresh_token', refresh_token: p.refreshToken, client_id: p.clientId, client_secret: p.clientSecret,
+    grant_type: 'refresh_token', refresh_token: p.refreshToken, client_id: p.clientId, ...(p.clientSecret ? { client_secret: p.clientSecret } : {}),
   }, fetchImpl), now);
   // 更新用の認可を返さない相手は、前のものを使い続ける
   return { ...t, refreshToken: t.refreshToken ?? p.refreshToken };

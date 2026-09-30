@@ -1772,7 +1772,7 @@ export class PostgresRepository implements Repository {
   async getConnectionSecret(tenantId: string, connectionId: string): Promise<ConnectionSecret | null> {
     const rows = await this.q<ConnectionSecret>(tenantId,
       `select tenant_id as "tenantId", connection_id as "connectionId", client_id as "clientId",
-              client_secret_enc as "clientSecretEnc", api_key_enc as "apiKeyEnc",
+              client_secret_enc as "clientSecretEnc", api_key_enc as "apiKeyEnc", auto_registered as "autoRegistered",
               updated_by as "updatedBy", updated_at as "updatedAt"
          from connection_secrets where tenant_id = $1 and connection_id = $2`, [tenantId, connectionId]);
     return rows[0] ?? null;
@@ -1780,12 +1780,12 @@ export class PostgresRepository implements Repository {
 
   async saveConnectionSecret(s: ConnectionSecret): Promise<void> {
     await this.q(s.tenantId,
-      `insert into connection_secrets (tenant_id, connection_id, client_id, client_secret_enc, api_key_enc, updated_by, updated_at)
-       values ($1,$2,$3,$4,$5,$6,$7)
+      `insert into connection_secrets (tenant_id, connection_id, client_id, client_secret_enc, api_key_enc, auto_registered, updated_by, updated_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8)
        on conflict (tenant_id, connection_id) do update set
          client_id = excluded.client_id, client_secret_enc = excluded.client_secret_enc, api_key_enc = excluded.api_key_enc,
-         updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
-      [s.tenantId, s.connectionId, s.clientId, s.clientSecretEnc, s.apiKeyEnc, s.updatedBy, s.updatedAt]);
+         auto_registered = excluded.auto_registered, updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
+      [s.tenantId, s.connectionId, s.clientId, s.clientSecretEnc, s.apiKeyEnc, s.autoRegistered ?? false, s.updatedBy, s.updatedAt]);
   }
 
   async getUserConnection(tenantId: string, userId: string, connectionId: string): Promise<UserConnection | null> {

@@ -82,9 +82,11 @@ export function mcpConnectionsRoute(deps: AppDeps) {
         return { type: 'api_key', text: AUTH_WORDS.api_key, ready: !!secret?.apiKeyEnc, keySet: !!secret?.apiKeyEnc, header: x.auth.header ?? 'Authorization' };
       }
       return {
-        type: 'oauth', text: AUTH_WORDS.oauth, ready: !!secret?.clientId && !!secret.clientSecretEnc,
-        // クライアント ID は秘密ではない。シークレットは登録したかだけを返す
-        clientId: secret?.clientId ?? '', secretSet: !!secret?.clientSecretEnc,
+        // 会社が登録したアプリがあるか、相手がアプリの自動登録に対応していれば使える（第12.11.6.2節、Q-99）
+        type: 'oauth', text: AUTH_WORDS.oauth, ready: !!secret?.clientId || !!x.auth.registrationUrl,
+        // クライアント ID は秘密ではない。シークレットは登録したかだけを返す。自動で登録したものは値を出さない
+        clientId: secret?.autoRegistered ? '' : secret?.clientId ?? '', secretSet: !!secret?.clientSecretEnc && !secret.autoRegistered,
+        autoRegister: !!x.auth.registrationUrl, autoRegistered: !!secret?.autoRegistered,
         redirectUri: deps.oauth.connectionRedirectUri,
         scopes: requestedScopes(x, view.disabledTools),
         connectedUsers: (await deps.repo.listUserConnections(tenant.id, { connectionId: x.id })).length,
@@ -138,7 +140,13 @@ export function mcpConnectionsRoute(deps: AppDeps) {
     } else if (type === 'oauth' && !preset) {
       // 認可の口は相手のサーバの案内から見つける。見つからなければ、あとで管理者が入れる（第12.11.6.2節）
       const found = await discoverOAuthEndpoints(url);
-      if (found) auth = { ...auth, authorizeUrl: found.authorizeUrl, tokenUrl: found.tokenUrl, ...(found.scopesSupported.length > 0 ? { scopes: found.scopesSupported } : {}) };
+      if (found) {
+        auth = {
+          ...auth, authorizeUrl: found.authorizeUrl, tokenUrl: found.tokenUrl, ...(found.scopesSupported.length > 0 ? { scopes: found.scopesSupported } : {}),
+          // 自動登録の口があれば、会社がアプリを登録しなくてよい（第12.11.6.2節、Q-99）
+          ...(found.registrationUrl ? { registrationUrl: found.registrationUrl, tokenAuthMethods: found.tokenAuthMethods } : {}),
+        };
+      }
     } else if (type === 'api_key' && body.header) {
       auth = { ...auth, header: String(body.header).trim() };
     }
@@ -177,9 +185,10 @@ export function mcpConnectionsRoute(deps: AppDeps) {
       if (!clientId) return c.json({ error: 'クライアント ID を入れてください' }, 400);
       if (!secret && !prev?.clientSecretEnc) return c.json({ error: 'クライアント シークレットを入れてください' }, 400);
       const changed = !!prev?.clientId && prev.clientId !== clientId;
+      // 管理者が手で登録したアプリは、自動で登録したものより先に使う（自動登録の印を外す）
       await deps.repo.saveConnectionSecret({
         tenantId: tenant.id, connectionId: conn.id, clientId,
-        clientSecretEnc: secret ? deps.box.encrypt(secret) : prev!.clientSecretEnc, apiKeyEnc: null, updatedBy: user.id, updatedAt: now,
+        clientSecretEnc: secret ? deps.box.encrypt(secret) : prev!.clientSecretEnc, apiKeyEnc: null, autoRegistered: false, updatedBy: user.id, updatedAt: now,
       });
       const reset = changed ? await deps.repo.deleteUserConnectionsFor(tenant.id, conn.id) : 0;
       await audit(deps, tenant.id, user.id, 'connection.secret.update', conn.id, { kind: 'oauth', clientIdChanged: changed, secretChanged: !!secret, reset });
