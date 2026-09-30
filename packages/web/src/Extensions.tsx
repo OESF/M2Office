@@ -238,11 +238,17 @@ function InstalledCard({ item: x, busy, focused = false, options, onChanged, onT
       {x.hr && <div className="small">利用できる人: 権限区画「hr」の人</div>}
       {x.cards && (
         // 名刺管理の会社の設定（仕様書 第27.7節）。すぐに反映する
-        <label className="small check">
-          <input type="checkbox" checked={x.cards.defaultScope === 'personal'} disabled={busy}
-            onChange={(e) => void api.admin.setCardsDefaultScope(e.target.checked ? 'personal' : 'company').then(onChanged)} />
-          取り込んだ名刺を、既定で自分だけにする
-        </label>
+        <div className="row small">
+          <span>取り込んだ名刺の既定の範囲</span>
+          <div className="segmented small" role="group" aria-label="取り込んだ名刺の既定の範囲">
+            {(['company', 'personal'] as const).map((s) => (
+              <button key={s} className={x.cards!.defaultScope === s ? 'on' : ''} aria-pressed={x.cards!.defaultScope === s} disabled={busy}
+                onClick={() => { if (x.cards!.defaultScope !== s) void api.admin.setCardsDefaultScope(s).then(onChanged); }}>
+                {s === 'company' ? '会社で共有' : '自分だけ'}
+              </button>
+            ))}
+          </div>
+        </div>
       )}
       {x.inventory && on && <InventoryFields settings={x.inventory} busy={busy} onChanged={onChanged} />}
       {x.hr && on && <HrFields settings={x.hr} busy={busy} onChanged={onChanged} />}

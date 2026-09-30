@@ -53,6 +53,9 @@ function CardListView({ onOpen }: { onOpen: (id: string) => void }) {
   const [q, setQ] = useState('');
   const [scope, setScope] = useState<'all' | ContactScope>('all');
   const [trash, setTrash] = useState(false);
+  // ごみ箱で選んだ名刺（まとめて戻す・完全に削除する。第27.7節）。ごみ箱を開き直したら選び直す
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  useEffect(() => { setSelected(new Set()); }, [trash, scope, q]);
   const [personal, setPersonal] = useState<boolean | null>(null);
   const [withBack, setWithBack] = useState(false);
   const [front, setFront] = useState<File | null>(null);
@@ -60,6 +63,7 @@ function CardListView({ onOpen }: { onOpen: (id: string) => void }) {
   const [busy, setBusy] = useState(false);
   const camera = useRef<HTMLInputElement>(null);
   const picker = useRef<HTMLInputElement>(null);
+  const mobile = isMobile();
 
   const load = useCallback(() => {
     api.cards.list({ q, scope, trash }).then((r) => {
@@ -115,16 +119,19 @@ function CardListView({ onOpen }: { onOpen: (id: string) => void }) {
   return (
     <div className="cards">
       <div className="cards-toolbar">
-        <button className="btn" disabled={busy} onClick={() => camera.current?.click()}>
-          {front ? '裏を撮る' : '撮る'}
-        </button>
+        {/* 「撮る」はスマホだけに出す。パソコンのブラウザはカメラの指定を無視し、「ファイルを選ぶ」と同じ画面になるため（第27.4節） */}
+        {mobile && (
+          <button className="btn" disabled={busy} onClick={() => camera.current?.click()}>
+            {front ? '裏を撮る' : '撮る'}
+          </button>
+        )}
         {front && <button className="btn ghost small" onClick={() => { const f = front; setFront(null); void send([f]); }}>裏は無し</button>}
-        <button className="btn ghost" disabled={busy || !!front} onClick={() => picker.current?.click()}>ファイルを選ぶ</button>
-        <label className="small check"><input type="checkbox" checked={withBack} disabled={!!front} onChange={(e) => setWithBack(e.target.checked)} /> 裏も撮る</label>
+        <button className={mobile ? 'btn ghost' : 'btn'} disabled={busy || !!front} onClick={() => picker.current?.click()}>ファイルを選ぶ</button>
+        {mobile && <label className="small check"><input type="checkbox" checked={withBack} disabled={!!front} onChange={(e) => setWithBack(e.target.checked)} /> 裏も撮る</label>}
         <label className="small check"><input type="checkbox" checked={!!personal} onChange={(e) => setPersonal(e.target.checked)} /> 自分だけ</label>
         <input ref={camera} type="file" accept="image/*" capture="environment" hidden
           onChange={(e) => { shot(e.target.files?.[0]); e.target.value = ''; }} />
-        <input ref={picker} type="file" accept={isMobile() ? ACCEPT_MOBILE : ACCEPT_DESKTOP} multiple hidden
+        <input ref={picker} type="file" accept={mobile ? ACCEPT_MOBILE : ACCEPT_DESKTOP} multiple hidden
           onChange={(e) => { void send(Array.from(e.target.files ?? []).slice(0, 50)); e.target.value = ''; }} />
       </div>
       <div className="cards-toolbar">
@@ -160,9 +167,13 @@ function CardListView({ onOpen }: { onOpen: (id: string) => void }) {
       {list && list.items.length === 0 && (list.unresolved.length === 0 || trash) && (
         <p className="muted">{trash ? 'ごみ箱は空です' : q ? '見つかりませんでした' : '名刺はまだありません'}</p>
       )}
+      {trash && list && list.items.length > 0 && (
+        <TrashBar items={list.items} selected={selected} onSelect={setSelected} onChanged={load} onMessage={setMessage} />
+      )}
       {list?.items.map((c) => (
         trash
-          ? <TrashRow key={c.id} item={c} onChanged={load} onError={setMessage} />
+          ? <TrashRow key={c.id} item={c} onChanged={load} onError={setMessage}
+            checked={selected.has(c.id)} onCheck={(on) => setSelected((cur) => { const n = new Set(cur); if (on) n.add(c.id); else n.delete(c.id); return n; })} />
           : <CardRow key={c.id} item={c} onOpen={() => onOpen(c.id)} />
       ))}
     </div>
@@ -186,11 +197,54 @@ function CardRow({ item: c, onOpen }: { item: CardSummary; onOpen: () => void })
   );
 }
 
-/** ごみ箱の 1 行。戻す・いま本当に消す。 */
-function TrashRow({ item: c, onChanged, onError }: { item: CardSummary; onChanged: () => void; onError: (m: string) => void }) {
+/**
+ * ごみ箱のまとめての操作（仕様書 第27.7節）。選んだ名刺をまとめて戻す・完全に削除する。
+ *
+ * @remarks 完全に削除は元に戻せないため、件数を示して 1 度だけ確かめる。できなかった名刺があっても、ほかは進める
+ */
+function TrashBar({ items, selected, onSelect, onChanged, onMessage }: {
+  items: CardSummary[]; selected: Set<string>; onSelect: (s: Set<string>) => void; onChanged: () => void; onMessage: (m: string | null) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const chosen = items.filter((c) => selected.has(c.id));
+  const all = chosen.length === items.length;
+  const run = async (label: string, one: (id: string) => Promise<unknown>) => {
+    setBusy(true);
+    onMessage(null);
+    let failed = 0;
+    for (const c of chosen) await one(c.id).catch(() => { failed++; });
+    setBusy(false);
+    onSelect(new Set());
+    onChanged();
+    if (failed > 0) onMessage(`${chosen.length - failed} 件を${label}。${failed} 件はできませんでした（完全に削除できるのは、取り込んだ本人と管理者です）`);
+  };
+  return (
+    <div className="cards-toolbar trash-bar">
+      <label className="small check">
+        <input type="checkbox" checked={all} onChange={() => onSelect(all ? new Set() : new Set(items.map((c) => c.id)))} /> すべて選ぶ
+      </label>
+      {chosen.length > 0 && (
+        <>
+          <button className="btn ghost small" disabled={busy} onClick={() => void run('戻しました', (id) => api.cards.restore(id))}>
+            選んだ {chosen.length} 件を戻す
+          </button>
+          <button className="btn ghost small danger" disabled={busy} onClick={() => {
+            if (window.confirm(`選んだ ${chosen.length} 件の名刺を、画像ごと削除します。元に戻せません。`)) void run('完全に削除しました', (id) => api.cards.purge(id));
+          }}>選んだ {chosen.length} 件を完全に削除</button>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** ごみ箱の 1 行。選ぶ・戻す・完全に削除。 */
+function TrashRow({ item: c, onChanged, onError, checked, onCheck }: {
+  item: CardSummary; onChanged: () => void; onError: (m: string) => void; checked: boolean; onCheck: (on: boolean) => void;
+}) {
   const act = (run: () => Promise<unknown>) => void run().then(onChanged).catch((e) => onError(describeError(e)));
   return (
     <div className="card-row">
+      <input type="checkbox" className="card-row-check" checked={checked} onChange={(e) => onCheck(e.target.checked)} aria-label={`${c.name || 'この名刺'}を選ぶ`} />
       <CardThumb cardId={c.cardId} rotation={c.frontRotation} corners={c.frontCorners} kind={c.frontKind} />
       <div className="card-row-main">
         <strong>{c.name || '（氏名なし）'}</strong>
@@ -198,7 +252,7 @@ function TrashRow({ item: c, onChanged, onError }: { item: CardSummary; onChange
       </div>
       <button className="btn ghost small" onClick={() => act(() => api.cards.restore(c.id))}>戻す</button>
       <button className="btn ghost small danger" onClick={() => {
-        if (window.confirm(`${c.name || 'この名刺'}を、画像ごと消します。元に戻せません。`)) act(() => api.cards.purge(c.id));
+        if (window.confirm(`${c.name || 'この名刺'}を、画像ごと削除します。元に戻せません。`)) act(() => api.cards.purge(c.id));
       }}>完全に削除</button>
     </div>
   );
@@ -351,15 +405,20 @@ function CardDetailView({ id, onBack, onOpen, mailer }: {
           {c.nameKana && <div className="small muted">{c.nameKana}{c.kanaEstimated ? '（推定）' : ''}</div>}
           <div>{c.company}</div>
           <div className="small muted">{[c.department, c.title].filter(Boolean).join('　')}</div>
-          <div className="small"><span className="badge">{c.scope === 'company' ? '会社で共有' : '自分だけ'}</span></div>
+          {/* 範囲は「会社で共有」「自分だけ」の 2 つの言葉だけで示す。変えられる人には切り替えで出す（第27.7節） */}
+          {d.canManage ? (
+            <div className="segmented small card-scope" role="group" aria-label="範囲">
+              {(['company', 'personal'] as const).map((s) => (
+                <button key={s} className={c.scope === s ? 'on' : ''} aria-pressed={c.scope === s}
+                  onClick={() => { if (c.scope !== s) act(() => api.cards.setScope(c.id, s)); }}>
+                  {s === 'company' ? '会社で共有' : '自分だけ'}
+                </button>
+              ))}
+            </div>
+          ) : <div className="small"><span className="badge">{c.scope === 'company' ? '会社で共有' : '自分だけ'}</span></div>}
           <div className="card-actions">
             {c.emails[0] && <button className="btn small" disabled={writing} onClick={() => void writeMail()}>{writing ? '用意しています…' : 'メールを書く'}</button>}
             <button className="btn ghost small" onClick={() => act(() => api.cards.downloadVCard(c.id, c.name))}>vCard</button>
-            {d.canManage && (
-              <button className="btn ghost small" onClick={() => act(() => api.cards.setScope(c.id, c.scope === 'company' ? 'personal' : 'company'))}>
-                {c.scope === 'company' ? '自分だけにする' : '会社で共有する'}
-              </button>
-            )}
             {d.canManage && (
               <button className="btn ghost small danger" onClick={() => act(() => api.cards.trash(c.id), () => onOpen(null))}>削除</button>
             )}

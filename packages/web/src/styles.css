@@ -1624,3 +1624,8 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .knowledge-table td.nowrap, .knowledge-table th.nowrap { white-space: nowrap; width: 1%; }
 /* 名刺の画像（詳細）を押すと元の写真に切り替わる（仕様書 第27.5節）。ボタンの見た目を消す */
 .card-img-toggle { padding: 0; border: 0; background: none; cursor: zoom-in; display: block; }
+/* 名刺のごみ箱: 選ぶ印とまとめての操作（仕様書 第27.7節） */
+.card-row-check { flex: none; margin: 0 4px 0 0; }
+.trash-bar { align-items: center; }
+/* 名刺の範囲の切り替え（会社で共有・自分だけ）は中身の幅にする */
+.card-scope { align-self: flex-start; width: fit-content; }
