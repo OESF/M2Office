@@ -75,6 +75,28 @@ export interface HrSettings {
   insurance: HrInsuranceSettings;
   /** 労働保険（雇用保険・労災保険）の事業の種類と労働保険番号（第30.13.1節）。 */
   labor: HrLaborSettings;
+  /** シフトと 1 か月単位の変形労働時間制（第30.6.2節）。 */
+  shift: HrShiftSettings;
+}
+
+/** 勤務の型（早番・遅番など）。 */
+export interface HrShiftPattern {
+  id: string;
+  name: string;
+  start: string;
+  end: string;
+  breakMinutes: number;
+}
+
+/** シフトと 1 か月単位の変形労働時間制の会社の決まり。 */
+export interface HrShiftSettings {
+  /** 1 か月単位の変形労働時間制を使うか（就業規則か労使協定で定めていること）。変形期間は締めの期間。 */
+  variable: boolean;
+  /** 特例措置対象事業場（常時 10 人未満の商業・映画演劇業・保健衛生業・接客娯楽業。週 44 時間）。 */
+  special44: boolean;
+  patterns: HrShiftPattern[];
+  /** 日ごとに要る人数（曜日 0〜6、祝日は 7。型ごと）。 */
+  needs: { day: number; patternId: string; count: number }[];
 }
 
 /** 労働保険の事業の種類。 */
@@ -200,6 +222,7 @@ export const DEFAULT_HR_SETTINGS: HrSettings = {
   notice: { raise: '', bonus: '', severance: '', retirement: '', consultation: '', other: '' },
   insurance: { officeSymbol: '', officeNumber: '', specificOffice: 'auto', fullTimeWeeklyHours: 40 },
   labor: { business: 'general', industry: '94', number: '' },
+  shift: { variable: false, special44: false, patterns: [], needs: [] },
 };
 
 /** 従業員（人事の台帳。第30.5節）。 */
@@ -260,6 +283,8 @@ export interface HrTerms {
   workScope: string;
   socialInsurance: boolean;
   employmentInsurance: boolean;
+  /** 働き方（固定の始業・終業か、シフトか。既定は固定。第30.6.2節）。 */
+  schedule?: 'fixed' | 'shift';
   createdAt: string;
 }
 
@@ -319,6 +344,9 @@ export interface AttDay {
   leaveDays: number;
   /** 点検の指摘（打刻漏れ・休憩の不足など）。 */
   issues: string[];
+  /** シフトの人の、その日の所定の時間（分。休みは 0）と勤務の型の名前（第30.6.2節）。 */
+  scheduledMinutes?: number;
+  shiftName?: string;
 }
 
 /** 期間（締めの期間）の集計（分）。 */
@@ -338,6 +366,8 @@ export interface AttTotals {
   leaveDays: number;
   /** 打刻の無い所定の労働日。 */
   missingDays: number;
+  /** 1 か月単位の変形労働時間制で、期間の総枠を超えた法定外のうち所定の時間の中の分（所定の賃金は払い済みで、割増だけを払う。第30.6.2節）。 */
+  overtimeWithinMinutes?: number;
 }
 
 /** 締めの期間。 */
@@ -813,4 +843,58 @@ export interface LaborInsuranceView {
   error: string | null;
   notes: string[];
   filedAt: string | null;
+}
+
+/** 1 人・1 日のシフト（第30.6.2節）。`patternId` が `null` なら休み。 */
+export interface HrShift {
+  employeeId: string;
+  date: string;
+  patternId: string | null;
+  start: string;
+  end: string;
+  breakMinutes: number;
+  /** 公開の後に直した。 */
+  changedAfterPublish?: boolean;
+}
+
+/** 締めの期間のシフトの組み（下書きか公開か。組んでいなければ none）。 */
+export interface HrShiftPlan {
+  periodStart: string;
+  periodEnd: string;
+  status: 'none' | 'draft' | 'published';
+  generatedAt: string | null;
+  publishedAt: string | null;
+}
+
+/** シフトの点検の指摘。`stop` は公開の前に直すべきもの。 */
+export interface ShiftIssue {
+  level: 'stop' | 'check';
+  code: string;
+  text: string;
+  employeeId?: string;
+  date?: string;
+}
+
+/** シフトに入る人と、期間の所定の時間。 */
+export interface ShiftMember {
+  employeeId: string;
+  name: string;
+  /** 雇用条件の週の所定労働日数・時間（案の目安）。 */
+  weeklyDays: number | null;
+  weeklyHours: number | null;
+  /** 組んだ所定の時間の合計（分）と、変形労働時間制の総枠（分。使わなければ `null`）。 */
+  scheduledMinutes: number;
+  capMinutes: number | null;
+}
+
+/** シフトの画面に出すもの。 */
+export interface ShiftView {
+  period: { start: string; end: string; label: string };
+  plan: HrShiftPlan;
+  members: ShiftMember[];
+  shifts: HrShift[];
+  /** 本人の休みの希望。 */
+  requests: { employeeId: string; date: string; note: string }[];
+  settings: HrShiftSettings;
+  issues: ShiftIssue[];
 }

@@ -14,7 +14,7 @@ import type {
   HrEmployee, HrEmployeeView, HrSettings, HrTask, HrTerms,
   AttClose, AttDay, AttPeriod, AttPunchKind, AttTotals, LeaveBalance, LeaveGrant, LeaveTake,
   HrFamilyMember, HrPayrollProfile, HrStandardPay, PayRun, PaySlip, PayCheck, HrNoticeSettings, HrDeadline, PayAdjustment, BonusPlan,
-  YeaDeclaration, YeaDeclarationView, YeaResult, SocialDetermination, SocialEvent, InsuranceEligibility, LaborInsuranceData, LaborInsuranceView,
+  YeaDeclaration, YeaDeclarationView, YeaResult, SocialDetermination, SocialEvent, InsuranceEligibility, LaborInsuranceData, LaborInsuranceView, ShiftView, HrShiftSettings, HrShift,
   InventoryCount, InventoryCountRow, InventoryCountScope, InventoryCountView, InventorySupplier,
   InventoryBooking, InventoryBookingMapping, InventoryBookingSource,
 } from '@m2office/shared';
@@ -1264,6 +1264,13 @@ export const api = {
         saveBlob(blob, `${name}（下書き）.xlsx`);
         return Number(headers.get('x-applied') ?? 0);
       },
+      /** シフト（仕様書 第30.6.2節）。`month` は締め日の月（省略すれば次の期間）。 */
+      shifts: (month?: string) => call<ShiftView>(`/hr/shifts${month ? `?month=${month}` : ''}`),
+      shiftSettings: (patch: Partial<HrShiftSettings>) => call<HrShiftSettings>('/hr/shifts/settings', { method: 'PUT', body: JSON.stringify(patch) }),
+      shiftGenerate: (month: string) => call<ShiftView>('/hr/shifts/generate', { method: 'POST', body: JSON.stringify({ month }) }),
+      shiftCell: (month: string, employeeId: string, date: string, patternId: string | null) =>
+        call<ShiftView>('/hr/shifts/cell', { method: 'PUT', body: JSON.stringify({ month, employeeId, date, patternId }) }),
+      shiftPublish: (month: string) => call<ShiftView>('/hr/shifts/publish', { method: 'POST', body: JSON.stringify({ month }) }),
       /** 労働保険の年度更新（仕様書 第30.13.1節）。 */
       labor: (year: number) => call<LaborInsuranceView>(`/hr/labor-insurance?year=${year}`),
       laborSave: (year: number, patch: Partial<LaborInsuranceData>) => call<LaborInsuranceView>('/hr/labor-insurance', { method: 'PUT', body: JSON.stringify({ year, ...patch }) }),
@@ -1319,6 +1326,9 @@ export const api = {
     fixDay: (date: string, fix: DayFixInput) => call<{ day: AttDay }>(`/me/hr/days/${date}`, { method: 'PUT', body: JSON.stringify(fix) }),
     leave: (date: string, days: number) => call<{ remaining: number }>('/me/hr/leave', { method: 'POST', body: JSON.stringify({ date, days }) }),
     cancelLeave: (id: string) => call<{ ok: true }>(`/me/hr/leave/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    /** 自分のシフトと休みの希望（仕様書 第30.6.2節）。 */
+    shifts: () => call<{ periods: { period: { start: string; end: string; label: string }; published: boolean; shifts: HrShift[]; requests: string[]; canRequest: boolean }[]; patterns: HrShiftSettings['patterns'] }>('/me/hr/shifts'),
+    shiftRequest: (date: string, on: boolean) => call<{ ok: true }>('/me/hr/shift-requests', { method: 'PUT', body: JSON.stringify({ date, on }) }),
     /** 給与明細（段 4。画面で受け取るには本人の同意が要る）。 */
     payslips: () => call<{ consentAt: string | null; slips: MySlipSummary[] }>('/me/hr/payslips'),
     payslip: (id: string) => call<{ slip: PaySlip & { run: { payMonth: string; payDate: string; periodStart: string; periodEnd: string } }; diff: string | null; previousNet: number | null }>(`/me/hr/payslips/${encodeURIComponent(id)}`),

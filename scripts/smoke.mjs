@@ -3807,6 +3807,27 @@ console.log('\n■ 61. 人事・給与（内蔵の拡張。第30章、段 1: 台
         && lbReport.status === 200 && lbText.includes('確定保険料') && lbNext.data?.declaredEstimate === lr.estimate.total && lbMember.status === 403
         ? ok('年度更新は確定した明細と足りない月の合計から、前年度の率で確定保険料を出し（今年度の率の表が無ければそう示す）、下書きの概算を次の年の申告済の額にする')
         : ng('年度更新が合わない', JSON.stringify({ missing: lb0.missing?.length, july, bonus: bonusRow, bad: badMonth.status, result: lr, err: lbSaved.body?.error ?? lbSaved.body?.error, report: lbReport.status, next: lbNext.data, member: lbMember.status }).slice(0, 900));
+
+      // Phase 2 段 5: シフトと 1 か月単位の変形労働時間制（第30.6.2節）。案を作り、直して公開する。公開した期間は作り直せない
+      const shSet = await call('a', '/v1/hr/shifts/settings', { method: 'PUT', body: JSON.stringify({ variable: true, patterns: [{ id: 'early', name: '早番', start: '09:00', end: '18:00', breakMinutes: 60 }], needs: [0, 1, 2, 3, 4, 5, 6].map((day) => ({ day, patternId: 'early', count: 1 })) }) });
+      const shEmp = await call('a', '/v1/hr/employees', { method: 'POST', body: JSON.stringify({ name: `${tag} シフト`, hiredOn: '2024-04-01', terms: { wageType: 'monthly', wageAmount: 250000, weeklyHours: 40, weeklyDays: 5, schedule: 'shift', socialInsurance: false, employmentInsurance: false } }) });
+      const shId = shEmp.body?.employee?.id;
+      const { body: sh0 } = await call('a', '/v1/hr/shifts');
+      const shMonth = sh0.period?.end?.slice(0, 7);
+      const shGen = await call('a', '/v1/hr/shifts/generate', { method: 'POST', body: JSON.stringify({ month: shMonth }) });
+      const shMine = (shGen.body?.shifts ?? []).filter((x) => x.employeeId === shId);
+      const member0 = (shGen.body?.members ?? []).find((m) => m.employeeId === shId);
+      const offDay = shMine[0]?.date;
+      const shCell = await call('a', '/v1/hr/shifts/cell', { method: 'PUT', body: JSON.stringify({ month: shMonth, employeeId: shId, date: offDay, patternId: null }) });
+      const shPub = await call('a', '/v1/hr/shifts/publish', { method: 'POST', body: JSON.stringify({ month: shMonth }) });
+      const shAgain = await call('a', '/v1/hr/shifts/generate', { method: 'POST', body: JSON.stringify({ month: shMonth }) });
+      const shMember = await call('a', '/v1/hr/shifts', {}, 'member');
+      const { body: shSelf } = await call('a', '/v1/me/hr/shifts', {}, 'member');
+      shSet.status === 200 && shGen.status === 200 && shMine.length > 0 && shMine.every((x) => x.date >= sh0.period.start && x.date <= sh0.period.end) && member0 && member0.scheduledMinutes <= member0.capMinutes
+        && (shGen.body.issues ?? []).some((x) => x.code === 'short') && !(shCell.body?.shifts ?? []).some((x) => x.employeeId === shId && x.date === offDay && x.patternId)
+        && shPub.status === 200 && shPub.body?.plan?.status === 'published' && shAgain.status === 400 && shMember.status === 403 && Array.isArray(shSelf.periods) && shSelf.periods.length === 0
+        ? ok('シフトは要る人数を総枠の内で割り当てた案を作り（足りない枠を示す）、直して公開でき、公開した期間は作り直さず、人事区画の外には見せない')
+        : ng('シフトが合わない', JSON.stringify({ inPeriod: shMine.every((x) => x.date >= sh0.period.start && x.date <= sh0.period.end), period: sh0.period, first: shMine[0], cellGone: !(shCell.body?.shifts ?? []).some((x) => x.employeeId === shId && x.date === offDay && x.patternId), cell: shCell.status, cellErr: shCell.body?.error, pub: shPub.status, plan: shPub.body?.plan, again: shAgain.status, m: shMember.status, self: shSelf.periods?.length }).slice(0, 900));
     } else {
       conf.status === 400 && (conf.body?.blockers ?? []).some((x) => x.code === 'unverified')
         ? ok('本番の環境では、監修前の法令の表で計算した回は確定できない') : ng('監修前でも確定できた', JSON.stringify(conf.body));
@@ -3862,6 +3883,7 @@ console.log('\n■ 61. 人事・給与（内蔵の拡張。第30章、段 1: 台
     await owner.query(`delete from pay_runs where tenant_id = 't-alpha' and calculated_at >= $1`, [hrStartedAt]);
     await owner.query(`delete from pay_bonus_plans where tenant_id = 't-alpha' and updated_at >= $1`, [hrStartedAt]);
     await owner.query(`delete from hr_labor_insurance where tenant_id = 't-alpha' and updated_at >= $1`, [hrStartedAt]);
+    await owner.query(`delete from hr_shift_plans where tenant_id = 't-alpha' and updated_at >= $1`, [hrStartedAt]);
     await owner.query(`delete from notifications where tenant_id = 't-alpha' and title like '年末調整%' and created_at >= $1`, [hrStartedAt]);
     await owner.query(`delete from notifications where tenant_id = 't-alpha' and title like '給与%' and created_at >= $1`, [hrStartedAt]);
     await owner.query(`delete from notifications where tenant_id = 't-alpha' and title like '賞与の明細%' and created_at >= $1`, [hrStartedAt]);

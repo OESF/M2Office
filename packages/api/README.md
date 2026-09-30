@@ -179,7 +179,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/hr/employees` | 人事・給与（第30章）: 従業員の一覧（いまの雇用条件の要点・済んでいない手続きの数）と、済んでいない手続き・会社の設定。**会社で入れていて人事区画 `hr` に入っている人だけ**。それ以外は `/v1/hr` のどの口も 403。一覧を開いたことも監査ログに残す |
 | `GET /v1/hr/employees/:id` | 1 人の台帳（雇用条件の履歴・手続き）。見たことを監査ログに残す（第30.21節） |
 | `POST /v1/hr/employees` ／ `PUT /v1/hr/employees/:id` | 従業員を作る（最初の雇用条件 `terms` と入社の手続きを作る）／ 台帳の基本の項目を直す（入社日を変えたら入社の手続きの期限を直す）。社員番号は会社の中で重ならない |
-| `POST /v1/hr/employees/:id/terms` | 雇用条件を足す（`effectiveOn` 必須。前の条件を引き継ぎ、送った項目だけを変える履歴） |
+| `POST /v1/hr/employees/:id/terms` | 雇用条件を足す（`effectiveOn` 必須。前の条件を引き継ぎ、送った項目だけを変える履歴。`schedule`: fixed・shift で働き方） |
 | `POST /v1/hr/employees/:id/leave` | 退職を記録する（`leftOn`・`reason`）。退職の手続きを期限つきで作る（第30.5.2節） |
 | `PUT /v1/hr/tasks/:id` | 手続きを済んだにする・戻す（`done`） |
 | `POST /v1/hr/import` | CSV・Excel から従業員を取り込む（`file`。見出しを推論で読む。入社・退職から 60 日を過ぎた人の手続きは作らない） |
@@ -207,6 +207,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/hr/yea/:employeeId/withholding.pdf` ／ `GET /v1/hr/yea/report` | 源泉徴収票（本人交付用）の PDF ／ 源泉徴収票（提出用）・給与支払報告書の下書き（`year`・`format`: csv・xlsx）。マイナンバーの欄は空ける |
 | `GET /v1/hr/social` | 社会保険（Phase 2 段 3。第30.12.1節）: 定時決定（`year`）・随時改定の候補・前後 60 日の資格の取得と喪失と 70 歳到達・加入の判定・特定適用事業所の見込み |
 | `POST /v1/hr/social/regular/report` ／ `POST .../social/change/report` ／ `POST .../social/events/:kind/report` | 算定基礎届（`year`）／ 月額変更届（`ids`）／ 資格取得届・資格喪失届・70 歳到達届（`kind`: acquire・lose・age70、`ids`）の表計算の下書き（`format`: xlsx・csv）。作った額を適用の月からの標準報酬月額として入れ、人数を `X-Applied` に返す。載せる人がいなければ 400 |
+| `GET /v1/hr/shifts` ／ `PUT .../shifts/settings` ／ `POST .../shifts/generate` ／ `PUT .../shifts/cell` ／ `POST .../shifts/publish` | シフト（Phase 2 段 5。第30.6.2節）: 期間のシフト・休みの希望・点検（`month`: 締め日の月。省略すれば次の期間）／ 勤務の型・要る人数・変形労働時間制（`patterns`・`needs`・`variable`・`special44`）／ 案を作る（`month`。公開した期間は 400）／ 1 人 1 日を直す（`month`・`employeeId`・`date`・`patternId`。null は休み）／ 公開する（止まっている点検があれば 400。シフトの人に知らせる） |
 | `GET /v1/hr/labor-insurance` ／ `PUT ...` ／ `POST .../report` | 労働保険の年度更新（Phase 2 段 4。第30.13.1節）: 前年度の月ごとの集計と計算（`year`: 申告する年。足りない月があれば `result` は `null` で `error` に理由）／ 足りない月の合計・申告済の概算保険料・見込みの賃金を残す（`year`・`supplements`・`declaredEstimate`・`estimateWages`）／ 算定基礎賃金集計表と申告書に書く額の下書き（`format`。結果を残す） |
 | `GET /v1/hr/users` | 台帳に結び付けられる利用者（名前とメールアドレス） |
 | `GET /v1/me/hr` | 本人の「給与・勤怠」（第30.25節）: 打刻の状態・期間の勤怠・有給の残りと取得義務。台帳に結び付いていなければ 404（同じメールアドレスなら自動で結び付く） |
@@ -214,6 +215,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/me/hr/leave` ／ `DELETE /v1/me/hr/leave/:id` | 本人が有給を取る（`date`・`days`: 1 か 0.5。承認の段は挟まず、人事区画の人に知らせる）／ 取り消す |
 | `GET /v1/me/hr/payslips` ／ `GET .../payslips/:id` ／ `GET .../payslips/:id/pdf` | 本人の確定した給与明細（**同意が無ければ出さない**）／ 1 つと前の回からの差の説明 ／ PDF |
 | `PUT /v1/me/hr/payslip-consent` | 明細を画面で受け取る同意（`consent`: true・false。いつでも取り消せる） |
+| `GET /v1/me/hr/shifts` ／ `PUT /v1/me/hr/shift-requests` | 本人のシフト（公開した期間）と休みの希望（シフトの人でなければ空）／ 休みの希望を入れるか外す（`date`・`on`。公開の前の、始まっていない期間の日だけ） |
 | `GET /v1/me/hr/yea` ／ `PUT /v1/me/hr/yea` | 本人の年末調整（`year`。申告・対象か・直せるか・不備・結果）／ 申告を残す・出す（`year`・`data`・`submit`。出すと人事区画の人に知らせる。確かめた後は 400） |
 | `POST /v1/me/hr/yea/certificate` ／ `GET /v1/me/hr/yea/withholding.pdf` | 控除証明書か前の勤め先の源泉徴収票を読む（`file`。申告には入れず、ファイルも残さない）／ 自分の源泉徴収票（確定した結果・明細の同意がある人） |
 | `GET /v1/hr/roster` | 労働者名簿を書き出す（`format=csv` か `xlsx`。事業主本人は載せない。監査ログに残す） |

@@ -1,5 +1,5 @@
 /**
- * @file 本人の「給与・勤怠」の画面（仕様書 第30.25節）。打刻・期間の勤怠と直し・有給の残りと申請・給与明細（同意して受け取る）・年末調整の申告。
+ * @file 本人の「給与・勤怠」の画面（仕様書 第30.25節）。打刻・シフトと休みの希望・期間の勤怠と直し・有給の残りと申請・給与明細（同意して受け取る）・年末調整の申告。
  *
  * 本人の分だけを扱う（API が確かめる）。スマホでも押しやすいよう、打刻のボタンを大きく上に置く。
  * 説明文は常に出さない（原則 u11）。分からなければ秘書に聞く（「有給あと何日？」「出勤」も秘書に言える）。
@@ -56,6 +56,7 @@ export function MyAttendance() {
       </div>
       {error && <p className="error">{error}</p>}
 
+      <MyShifts />
       <MyPayslips />
       <MyYearEnd />
 
@@ -196,6 +197,43 @@ function MyPayslips() {
 /**
  * 本人の年末調整の申告（仕様書 第30.15.1節）。10 月から翌年 1 月まで出す。控除証明書は写真か PDF を渡すと AI が読む。
  */
+/** 自分のシフト（公開した期間）と、次の期間の休みの希望。シフトの人でなければ出さない。 */
+function MyShifts() {
+  const [v, setV] = useState<Awaited<ReturnType<typeof api.myHr.shifts>> | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(() => { api.myHr.shifts().then(setV).catch(() => setV(null)); }, []);
+  useEffect(load, [load]);
+  if (!v || v.periods.length === 0) return null;
+  const name = new Map(v.patterns.map((p) => [p.id, p]));
+  const days = (p: { start: string; end: string }) => {
+    const out: string[] = [];
+    for (let d = p.start; d <= p.end; d = new Date(Date.parse(`${d}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10)) out.push(d);
+    return out;
+  };
+  const toggle = (date: string, on: boolean) => void api.myHr.shiftRequest(date, on).then(() => { setError(null); load(); }).catch((e) => setError(describeError(e, '休みの希望を出せませんでした')));
+  return (
+    <div className="card myhr-shifts">
+      {v.periods.filter((p) => p.published || p.canRequest).map((p) => (
+        <div key={p.period.start}>
+          <strong>シフト {p.period.label}</strong>
+          <div className="myhr-shift-days">
+            {days(p.period).map((d) => {
+              const s = p.shifts.find((x) => x.date === d && x.patternId);
+              const wish = p.requests.includes(d);
+              return p.published ? (
+                <span key={d} className={s ? 'on' : 'off'}>{md(d)} {s ? `${name.get(s.patternId!)?.name ?? ''} ${s.start}〜${s.end}` : '休み'}</span>
+              ) : (
+                <label key={d} className={`check ${wish ? 'wish' : ''}`}><input type="checkbox" checked={wish} onChange={(e) => toggle(d, e.target.checked)} aria-label={`${md(d)} 休みの希望`} />{md(d)}</label>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+      {error && <p className="error small">{error}</p>}
+    </div>
+  );
+}
+
 function MyYearEnd() {
   const now = new Date(Date.now() + 9 * 3_600_000);
   const m = now.getUTCMonth() + 1;

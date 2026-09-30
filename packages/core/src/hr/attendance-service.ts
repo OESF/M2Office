@@ -13,10 +13,11 @@ import {
   type HrEmployee, type HrSettings, type HrTerms, type LeaveBalance, type LeaveGrant, type LeaveTake,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
+import type { ShiftStore } from './shift-store.js';
 import type { HrStore } from './store.js';
 import type { AttendanceStore } from './attendance-store.js';
 import {
-  agreementAlerts, dayType, jstDate, jstTime, periodContaining, periodOf, periodTotals, shiftDate, summarizeDay, weekday,
+  agreementAlerts, dayType, jstDate, jstTime, periodContaining, periodOf, periodTotals, scheduledMinutes, shiftDate, summarizeDay, variableCapMinutes, variableTotals, weekday,
 } from './attendance.js';
 import { addMonths, dueGrantDates, grantDays, leaveBalance } from './leave.js';
 
@@ -44,6 +45,8 @@ export interface AttendanceServiceDeps {
   store: AttendanceStore;
   hrStore: HrStore;
   repo: Repository;
+  /** 公開したシフト（シフトの人の所定の始業・終業と休み。第30.6.2節）。 */
+  shiftStore?: ShiftStore;
   now?: () => Date;
 }
 
@@ -187,13 +190,45 @@ export class AttendanceService {
     // 打刻を始める前の日は「打刻がありません」と指摘しない（導入の前の日まで数えないため）
     const first = (preloaded ? preloaded.firstPunch : await this.deps.store.firstPunchDates(tenantId)).get(employee.id) ?? null;
     const today = first ? this.today() : '0000-00-00';
+    // シフトの人は、公開したシフトをその日の所定にする（シフトの無い日は休み。第30.6.2節）
+    const shiftTerms = termsOn(terms, period.end)?.schedule === 'shift' || terms.some((t) => t.schedule === 'shift');
+    const plans = shiftTerms && this.deps.shiftStore ? await this.deps.shiftStore.listPublished(tenantId, from, period.end) : [];
+    const planned = new Map((plans.length && this.deps.shiftStore ? await this.deps.shiftStore.listShifts(tenantId, from, period.end, employee.id) : []).map((s) => [s.date, s]));
+    const inPlan = (d: string) => plans.some((p) => p.periodStart <= d && d <= p.periodEnd);
+    const names = new Map(settings.shift.patterns.map((p) => [p.id, p.name]));
     const out: AttDay[] = [];
     for (let d = from; d <= period.end; d = shiftDate(d, 1)) {
       // 在籍の外の日は数えない
       if ((employee.hiredOn && d < employee.hiredOn) || (employee.leftOn && d > employee.leftOn)) continue;
       const t = termsOn(terms, d);
       const leave = takes.filter((x) => x.status === 'taken' && x.date === d).reduce((s, x) => s + x.days, 0);
-      out.push(summarizeDay(d, shifts.get(d) ?? [], dayType(d, settings.work), { start: t?.startTime || null, end: t?.endTime || null, breakMinutes: t?.breakMinutes ?? null }, leave, first && d >= first ? today : '0000-00-00'));
+      const byShift = t?.schedule === 'shift' && inPlan(d);
+      const s = byShift ? planned.get(d) : undefined;
+      const work = byShift && s?.patternId;
+      const sched = byShift ? (work ? { start: s!.start, end: s!.end, breakMinutes: s!.breakMinutes } : { start: null, end: null, breakMinutes: null })
+        : { start: t?.startTime || null, end: t?.endTime || null, breakMinutes: t?.breakMinutes ?? null };
+      const day = summarizeDay(d, shifts.get(d) ?? [], byShift ? (work ? 'workday' : 'dayoff') : dayType(d, settings.work), sched, leave, first && d >= first ? today : '0000-00-00');
+      if (byShift) { day.scheduledMinutes = work ? scheduledMinutes(sched) ?? 0 : 0; if (work) day.shiftName = names.get(s!.patternId!) ?? ''; }
+      out.push(day);
+    }
+    // シフトの人が暦週の 7 日とも働いたら、その週の最後の日を法定休日の労働にする（週に 1 日の休日が取れなかったため）
+    if (plans.length) {
+      for (let i = 0; i < out.length; i++) {
+        const d = out[i]!;
+        if (weekday(d.date) !== (settings.work.weekStart + 6) % 7 || d.scheduledMinutes === undefined) continue;
+        const week = out.filter((x) => x.date >= shiftDate(d.date, -6) && x.date <= d.date);
+        if (week.length === 7 && week.every((x) => x.workMinutes > 0 && x.scheduledMinutes !== undefined)) {
+          const t = termsOn(terms, d.date);
+          const s = planned.get(d.date);
+          out[i] = { ...summarizeDay(d.date, shifts.get(d.date) ?? [], 'legal-holiday', { start: s?.start || t?.startTime || null, end: s?.end || t?.endTime || null, breakMinutes: s?.breakMinutes ?? null }, d.leaveDays, first && d.date >= first ? today : '0000-00-00'), scheduledMinutes: d.scheduledMinutes, shiftName: d.shiftName };
+        }
+      }
+    }
+    // 1 か月単位の変形労働時間制（変形期間は締めの期間。期間のすべての日に公開したシフトがあるとき）
+    const variable = settings.shift.variable && termsOn(terms, period.end)?.schedule === 'shift' && plans.some((p) => p.periodStart <= period.start && period.end <= p.periodEnd);
+    if (variable) {
+      const n = Math.round((Date.parse(`${period.end}T00:00:00Z`) - Date.parse(`${period.start}T00:00:00Z`)) / 86_400_000) + 1;
+      return { days: out.filter((d) => d.date >= period.start), totals: variableTotals(out, period, settings.work.weekStart, variableCapMinutes(n, settings.shift.special44)) };
     }
     return { days: out.filter((d) => d.date >= period.start), totals: periodTotals(out, period, settings.work.weekStart) };
   }

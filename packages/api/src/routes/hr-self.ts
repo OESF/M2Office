@@ -117,6 +117,23 @@ export function hrSelfRoute(deps: AppDeps) {
     return c.json({ consentAt: await payroll.setConsent(tenant.id, user.id, c.get('employee'), b.consent) });
   });
 
+  // ---- シフト（Phase 2 段 5。第30.6.2節） ----
+
+  /** 本人のシフト（公開した期間）と休みの希望。 */
+  app.get('/shifts', async (c) => {
+    const { tenant } = c.get('ctx');
+    return c.json(await deps.hr.shifts.selfView(tenant.id, c.get('employee')));
+  });
+
+  /** 休みの希望を入れるか外す（`date`・`on`）。公開の前の、次の期間の日だけ。 */
+  app.put('/shift-requests', async (c) => {
+    const { tenant } = c.get('ctx');
+    const b = await c.req.json<{ date?: string; on?: boolean }>().catch(() => ({} as { date?: string; on?: boolean }));
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(b.date))) return c.json({ error: '日を YYYY-MM-DD で入れてください' }, 400);
+    const r = await deps.hr.shifts.setRequest(tenant.id, c.get('employee'), String(b.date), b.on !== false);
+    return 'error' in r ? c.json(r, 400) : c.json(r);
+  });
+
   // ---- 年末調整（Phase 2 段 2。第30.15.1節） ----
 
   const yea = deps.hr.yea;

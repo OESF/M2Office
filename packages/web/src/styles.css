@@ -1475,3 +1475,14 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .social-months span { white-space: nowrap; }
 .social-table td:first-child, .social-table td.nowrap { white-space: nowrap; }
 .social-table .badge { white-space: nowrap; }
+
+/* シフト（第30.6.2節） */
+.shift-grid th, .shift-grid td { padding: 2px 3px; text-align: center; }
+.shift-grid th.sun { color: var(--danger); }
+.shift-grid th.sat { color: var(--accent); }
+.shift-grid td.wish { background: var(--warn-soft); }
+.shift-grid select { font-size: calc(12px * var(--font-scale)); padding: 1px; }
+.shift-issues { margin: 4px 0 8px; padding-left: 1.2em; }
+.myhr-shift-days { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 6px 0; font-size: calc(13px * var(--font-scale)); }
+.myhr-shift-days .off { color: var(--muted); }
+.myhr-shift-days .wish { color: var(--warn); }

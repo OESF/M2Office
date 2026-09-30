@@ -606,6 +606,52 @@ export function hrRoute(deps: AppDeps) {
     return sheetResponse(c, await social.eventReport(tenant.id, user.id, kind, idsOf(c.req.query('ids'))), `${kind}`);
   });
 
+  // ---- シフト（Phase 2 段 5。第30.6.2節） ----
+
+  const shifts = deps.hr.shifts;
+  const monthOf = (v: unknown) => (typeof v === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(v) ? v : null);
+  const shiftResult = (c: Context<AppEnv>, r: object) => ('error' in r ? c.json(r, 400) : c.json(r));
+
+  /** シフトの画面（`month`: 締め日の月。省略すれば次の期間）。 */
+  app.get('/shifts', async (c) => {
+    const { tenant } = c.get('ctx');
+    const m = c.req.query('month');
+    if (m !== undefined && !monthOf(m)) return c.json({ error: '月を YYYY-MM で入れてください' }, 400);
+    return c.json(await shifts.view(tenant.id, m));
+  });
+
+  /** 勤務の型・日ごとに要る人数・変形労働時間制を直す。 */
+  app.put('/shifts/settings', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    return shiftResult(c, await shifts.saveSettings(tenant.id, user.id, await c.req.json().catch(() => ({}))));
+  });
+
+  /** シフトの案を作る（下書き。公開した期間は作り直せない）。 */
+  app.post('/shifts/generate', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const b = await c.req.json<{ month?: string }>().catch(() => ({} as { month?: string }));
+    const m = monthOf(b.month);
+    return m ? shiftResult(c, await shifts.generate(tenant.id, user.id, m)) : c.json({ error: '月を YYYY-MM で入れてください' }, 400);
+  });
+
+  /** 1 人 1 日のシフトを直す（`patternId` が null なら休み）。 */
+  app.put('/shifts/cell', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const b = await c.req.json<{ month?: string; employeeId?: string; date?: string; patternId?: string | null; start?: string; end?: string; breakMinutes?: number }>().catch(() => ({} as Record<string, never>));
+    const m = monthOf(b.month);
+    if (!m || !b.employeeId || !/^\d{4}-\d{2}-\d{2}$/.test(String(b.date))) return c.json({ error: '月・従業員・日を入れてください' }, 400);
+    if (!(await employeeOf(tenant.id, b.employeeId))) return c.json({ error: '従業員が見つかりません' }, 404);
+    return shiftResult(c, await shifts.setCell(tenant.id, user.id, m, b.employeeId, String(b.date), { patternId: b.patternId ?? null, start: b.start, end: b.end, breakMinutes: b.breakMinutes }));
+  });
+
+  /** 公開する（シフトの人に知らせ、勤怠の所定になる）。 */
+  app.post('/shifts/publish', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const b = await c.req.json<{ month?: string }>().catch(() => ({} as { month?: string }));
+    const m = monthOf(b.month);
+    return m ? shiftResult(c, await shifts.publish(tenant.id, user.id, m)) : c.json({ error: '月を YYYY-MM で入れてください' }, 400);
+  });
+
   // ---- 労働保険の年度更新（Phase 2 段 4。第30.13.1節） ----
 
   const labor = deps.hr.labor;

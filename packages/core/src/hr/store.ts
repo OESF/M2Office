@@ -60,12 +60,12 @@ interface TermsRow {
   id: string; employee_id: string; effective_on: unknown; contract_start: unknown; contract_end: unknown; renewal: string; renewal_limit: string;
   probation_until: unknown; weekly_hours: unknown; weekly_days: unknown; start_time: string; end_time: string; break_minutes: unknown;
   wage_type: HrTerms['wageType']; wage_amount: unknown; allowances: HrTerms['allowances']; workplace: string; work: string;
-  workplace_scope: string; work_scope: string; social_insurance: boolean; employment_insurance: boolean; created_at: unknown;
+  workplace_scope: string; work_scope: string; social_insurance: boolean; employment_insurance: boolean; created_at: unknown; schedule?: string;
 }
 
 const TERMS_SELECT = `select id, employee_id, effective_on::text, contract_start::text, contract_end::text, renewal, renewal_limit, probation_until::text,
   weekly_hours, weekly_days, start_time, end_time, break_minutes, wage_type, wage_amount, allowances, workplace, work,
-  workplace_scope, work_scope, social_insurance, employment_insurance, created_at from hr_terms`;
+  workplace_scope, work_scope, social_insurance, employment_insurance, created_at, schedule from hr_terms`;
 
 const toTerms = (r: TermsRow): HrTerms => ({
   id: r.id, employeeId: r.employee_id, effectiveOn: day(r.effective_on)!, contractStart: day(r.contract_start),
@@ -73,7 +73,7 @@ const toTerms = (r: TermsRow): HrTerms => ({
   weeklyDays: num(r.weekly_days), startTime: r.start_time, endTime: r.end_time, breakMinutes: num(r.break_minutes),
   wageType: r.wage_type, wageAmount: num(r.wage_amount), allowances: Array.isArray(r.allowances) ? r.allowances : [],
   workplace: r.workplace, work: r.work, workplaceScope: r.workplace_scope, workScope: r.work_scope,
-  socialInsurance: r.social_insurance, employmentInsurance: r.employment_insurance, createdAt: iso(r.created_at),
+  socialInsurance: r.social_insurance, employmentInsurance: r.employment_insurance, schedule: r.schedule === 'shift' ? 'shift' : 'fixed', createdAt: iso(r.created_at),
 });
 
 interface TaskRow {
@@ -155,11 +155,11 @@ export class PostgresHrStore implements HrStore {
   async addTerms(tenantId: string, t: TermsRecord): Promise<void> {
     await this.q(tenantId, `insert into hr_terms (id, tenant_id, employee_id, effective_on, contract_start, contract_end, renewal,
       probation_until, weekly_hours, weekly_days, start_time, end_time, break_minutes, wage_type, wage_amount, allowances, workplace,
-      work, workplace_scope, work_scope, social_insurance, employment_insurance, created_by, renewal_limit)
-      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb,$17,$18,$19,$20,$21,$22,$23,$24)`,
+      work, workplace_scope, work_scope, social_insurance, employment_insurance, created_by, renewal_limit, schedule)
+      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb,$17,$18,$19,$20,$21,$22,$23,$24,$25)`,
     [t.id, tenantId, t.employeeId, t.effectiveOn, t.contractStart, t.contractEnd, t.renewal, t.probationUntil, t.weeklyHours,
       t.weeklyDays, t.startTime, t.endTime, t.breakMinutes, t.wageType, t.wageAmount, JSON.stringify(t.allowances), t.workplace,
-      t.work, t.workplaceScope, t.workScope, t.socialInsurance, t.employmentInsurance, t.createdBy, t.renewalLimit ?? '']);
+      t.work, t.workplaceScope, t.workScope, t.socialInsurance, t.employmentInsurance, t.createdBy, t.renewalLimit ?? '', t.schedule === 'shift' ? 'shift' : 'fixed']);
   }
 
   async listTerms(tenantId: string, employeeId: string): Promise<HrTerms[]> {

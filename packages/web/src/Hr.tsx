@@ -14,6 +14,7 @@ import { api, describeError, type HrImportResult } from './api.js';
 import { YearEndTab } from './YearEnd.js';
 import { SocialTab } from './SocialInsurance.js';
 import { LaborTab } from './LaborInsurance.js';
+import { ShiftTab } from './ShiftPlan.js';
 
 const label = <T extends string>(list: { id: T; label: string }[], id: T) => list.find((x) => x.id === id)?.label ?? id;
 /** 日本時間の今日（YYYY-MM-DD）。 */
@@ -28,12 +29,12 @@ const wage = (t: Pick<HrTerms, 'wageType' | 'wageAmount'> | null) => (t && t.wag
  * @param onOpen 従業員を開く・一覧へ戻る
  */
 export function Hr({ employeeId, onOpen }: { employeeId: string | null; onOpen: (id: string | null) => void }) {
-  const [tab, setTab] = useState<'ledger' | 'calendar' | 'attendance' | 'leave' | 'payroll' | 'social' | 'labor' | 'yea'>('ledger');
+  const [tab, setTab] = useState<'ledger' | 'calendar' | 'attendance' | 'shift' | 'leave' | 'payroll' | 'social' | 'labor' | 'yea'>('ledger');
   if (employeeId) return <EmployeeDetail id={employeeId} onBack={() => onOpen(null)} />;
   return (
     <>
       <div className="hr-tabs" role="tablist">
-        {([['ledger', '台帳'], ['calendar', '期限'], ['attendance', '勤怠'], ['leave', '有給'], ['payroll', '給与'], ['social', '社会保険'], ['labor', '年度更新'], ['yea', '年末調整']] as const).map(([k, l]) => (
+        {([['ledger', '台帳'], ['calendar', '期限'], ['attendance', '勤怠'], ['shift', 'シフト'], ['leave', '有給'], ['payroll', '給与'], ['social', '社会保険'], ['labor', '年度更新'], ['yea', '年末調整']] as const).map(([k, l]) => (
           <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>
         ))}
       </div>
@@ -42,6 +43,7 @@ export function Hr({ employeeId, onOpen }: { employeeId: string | null; onOpen: 
       {tab === 'attendance' && <AttendanceTab />}
       {tab === 'leave' && <LeaveTab />}
       {tab === 'payroll' && <PayrollTab onOpen={onOpen} />}
+      {tab === 'shift' && <ShiftTab />}
       {tab === 'social' && <SocialTab />}
       {tab === 'labor' && <LaborTab />}
       {tab === 'yea' && <YearEndTab RunView={RunPanelFor} />}
@@ -715,6 +717,9 @@ function TermsFields({ t, set }: { t: Partial<HrTerms>; set: (p: Partial<HrTerms
       <input className="short" placeholder="就業場所" value={t.workplace ?? ''} onChange={(e) => set({ workplace: e.target.value })} aria-label="就業場所" />
       <label className="check"><input type="checkbox" checked={!!t.socialInsurance} onChange={(e) => set({ socialInsurance: e.target.checked })} /> 社会保険</label>
       <label className="check"><input type="checkbox" checked={!!t.employmentInsurance} onChange={(e) => set({ employmentInsurance: e.target.checked })} /> 雇用保険</label>
+      <select value={t.schedule ?? 'fixed'} onChange={(e) => set({ schedule: e.target.value as 'fixed' | 'shift' })} aria-label="働き方">
+        <option value="fixed">始業・終業が決まっている</option><option value="shift">シフト</option>
+      </select>
       </div>
       <div className="row wrap">
         <label className="small">始業 <input type="time" value={t.startTime ?? ''} onChange={(e) => set({ startTime: e.target.value })} /></label>
@@ -839,7 +844,7 @@ function EmployeeDetail({ id, onBack }: { id: string; onBack: () => void }) {
               <button className="btn small" onClick={() => act(() => api.hr.addTerms(id, {
                 effectiveOn: newTerms.effectiveOn, wageType: newTerms.wageType, wageAmount: newTerms.wageAmount, weeklyHours: newTerms.weeklyHours,
                 weeklyDays: newTerms.weeklyDays, work: newTerms.work, workplace: newTerms.workplace,
-                socialInsurance: newTerms.socialInsurance, employmentInsurance: newTerms.employmentInsurance,
+                socialInsurance: newTerms.socialInsurance, employmentInsurance: newTerms.employmentInsurance, schedule: newTerms.schedule,
                 startTime: newTerms.startTime, endTime: newTerms.endTime, breakMinutes: newTerms.breakMinutes, workplaceScope: newTerms.workplaceScope,
                 workScope: newTerms.workScope, contractStart: newTerms.contractStart, contractEnd: newTerms.contractEnd, renewal: newTerms.renewal, renewalLimit: newTerms.renewalLimit,
               }), '足せませんでした', () => setNewTerms(null))}>足す</button>

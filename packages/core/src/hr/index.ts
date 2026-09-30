@@ -17,7 +17,7 @@ export {
   AttendanceService, termsOn, groupShifts, type AttState, type DayFix, type AttSummaryRow, type AttendanceServiceDeps,
 } from './attendance-service.js';
 export {
-  summarizeDay, weeklyOvertime, periodTotals, periodOf, periodContaining, agreementAlerts, dayType, scheduledMinutes, jstDate, jstTime, shiftDate,
+  summarizeDay, weeklyOvertime, periodTotals, variableTotals, variableCapMinutes, periodOf, periodContaining, agreementAlerts, dayType, scheduledMinutes, jstDate, jstTime, shiftDate,
   DAILY_LIMIT, WEEKLY_LIMIT, OVER60, type AgreementAlert, type DaySchedule,
 } from './attendance.js';
 export { leaveBalance, dueGrantDates, grantDays, addMonths, LEAVE_NORMAL, LEAVE_PROPORTIONAL, LEAVE_OBLIGATION_DAYS } from './leave.js';
@@ -34,6 +34,9 @@ export { calcYea, declarationProblems, type YeaInput } from './yea-calc.js';
 export { readCertificate, parseCertificate, type CertificateReading, type CertificateKind } from './yea-certificate.js';
 export { renderWithholdingPdf, type WithholdingPdfInput } from './withholding-pdf.js';
 export { PostgresLaborStore, type LaborStore, type LaborRecord } from './labor-store.js';
+export { PostgresShiftStore, type ShiftStore } from './shift-store.js';
+export { ShiftService, type ShiftServiceDeps } from './shift-service.js';
+export { generatePlan, checkPlan, variableCap, needsOn, patternMinutes, MAX_STREAK, type PlanInput, type PlanMember } from './shift-plan.js';
 export { LaborInsuranceService, type LaborServiceDeps } from './labor-service.js';
 export { laborMonths, laborCalc, premium, installments, perMille, thousands, fiscalMonths, laborWage, type LaborInput, type LaborSlip } from './labor-insurance.js';
 export { PostgresSocialStore, type SocialStore, type HrFilingRecord } from './social-store.js';

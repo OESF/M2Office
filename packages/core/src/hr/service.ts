@@ -69,6 +69,8 @@ export interface TermsInput {
   workScope?: string;
   socialInsurance?: boolean;
   employmentInsurance?: boolean;
+  /** 働き方（固定かシフトか）。 */
+  schedule?: 'fixed' | 'shift';
 }
 
 /** 取り込みの結果。 */
@@ -326,7 +328,7 @@ export class HrService {
     const base = prev ?? {
       effectiveOn: fallbackOn, contractStart: null, contractEnd: null, renewal: '', renewalLimit: '', probationUntil: null, weeklyHours: null, weeklyDays: null,
       startTime: '', endTime: '', breakMinutes: null, wageType: 'monthly' as HrWageType, wageAmount: null, allowances: [], workplace: '',
-      work: '', workplaceScope: '', workScope: '', socialInsurance: false, employmentInsurance: false,
+      work: '', workplaceScope: '', workScope: '', socialInsurance: false, employmentInsurance: false, schedule: 'fixed' as const,
     };
     const eff = input.effectiveOn !== undefined ? toHrDate(input.effectiveOn) : fallbackOn;
     if (!eff) return { error: '適用日を YYYY-MM-DD で入れてください' };
@@ -361,6 +363,7 @@ export class HrService {
     }
     if (input.socialInsurance !== undefined) out.socialInsurance = !!input.socialInsurance;
     if (input.employmentInsurance !== undefined) out.employmentInsurance = !!input.employmentInsurance;
+    if (input.schedule !== undefined) out.schedule = input.schedule === 'shift' ? 'shift' : 'fixed';
     return out;
   }
 

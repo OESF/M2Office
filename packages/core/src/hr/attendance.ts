@@ -181,6 +181,83 @@ export function periodTotals(days: AttDay[], period: Pick<AttPeriod, 'start' | '
 }
 
 /**
+ * 1 か月単位の変形労働時間制の総枠（分）。週 40 時間（特例は 44 時間）× 期間の暦日数 ÷ 7 を、公式の表のとおり 0.1 時間未満を切り捨てる
+ * （31 日なら 177.1 時間。厚生労働省「1箇月単位の変形労働時間制」・モデル就業規則。第30.6.2節）。
+ */
+export function variableCapMinutes(days: number, special44 = false): number {
+  const hoursCap = Math.floor((((special44 ? 44 : 40) * days) / 7) * 10 + 1e-9) / 10;
+  return Math.round(hoursCap * 60);
+}
+
+/**
+ * 1 か月単位の変形労働時間制の期間の集計（昭63.1.1基発1号の 3 段）。所定は日ごとの `scheduledMinutes`（休みは 0）。
+ *
+ * 1. 日: 所定が 8 時間を超える日はその所定を、それ以外の日は 8 時間を超えた分
+ * 2. 週: 暦週（週の起算日から 7 日）のうち期間に丸ごと入る週で、所定が 40 時間を超える週はその所定を、それ以外の週は 40 時間を超えた分
+ *    （1 を除く）。所定を超えて働いた分から、週の終わりに近い日の分を先に当てる。期間の始めと終わりの 7 日に満たない週は 3 で見る
+ * 3. 期間: 総枠を超えた分（1・2 を除く）。期間の終わりの日から、所定を超えた分・所定の分の順に当てる。所定の中の分は割増だけを払う
+ *
+ * 法定休日の労働は時間外に数えない。`days` の日は書き換える（日ごとの法定外と所定外を、3 段の結果にする）。
+ */
+export function variableTotals(days: AttDay[], period: Pick<AttPeriod, 'start' | 'end'>, weekStart: number, capMinutes: number): AttTotals {
+  const inPeriod = days.filter((d) => d.date >= period.start && d.date <= period.end);
+  const row = inPeriod.map((d) => {
+    const sched = d.type === 'legal-holiday' ? 0 : d.scheduledMinutes ?? 0;
+    const work = d.type === 'legal-holiday' ? 0 : d.workMinutes;
+    const dayOt = Math.max(0, work - Math.max(sched, DAILY_LIMIT));
+    const nonOt = work - dayOt;
+    const schedPart = Math.min(nonOt, sched);
+    return { d, sched, dayOt, weekOt: 0, periodOt: 0, within: 0, schedPart, extra: nonOt - schedPart };
+  });
+  // 2. 週（期間に丸ごと入る暦週だけ）
+  const byWeek = new Map<string, typeof row>();
+  for (const r of row) {
+    const wk = shiftDate(r.d.date, -((weekday(r.d.date) - weekStart + 7) % 7));
+    byWeek.set(wk, [...(byWeek.get(wk) ?? []), r]);
+  }
+  for (const [wk, rs] of byWeek) {
+    if (wk < period.start || shiftDate(wk, 6) > period.end) continue;
+    const limit = Math.max(rs.reduce((s, r) => s + r.sched, 0), WEEKLY_LIMIT);
+    let over = Math.max(0, rs.reduce((s, r) => s + r.schedPart + r.extra, 0) - limit);
+    for (const r of [...rs].reverse()) {
+      const take = Math.min(over, r.extra);
+      r.extra -= take; r.weekOt += take; over -= take;
+    }
+  }
+  // 3. 期間の総枠
+  let over = Math.max(0, row.reduce((s, r) => s + r.schedPart + r.extra, 0) - capMinutes);
+  for (const r of [...row].reverse()) {
+    if (over <= 0) break;
+    const fromExtra = Math.min(over, r.extra);
+    r.extra -= fromExtra; r.periodOt += fromExtra; over -= fromExtra;
+    const fromSched = Math.min(over, r.schedPart);
+    r.schedPart -= fromSched; r.periodOt += fromSched; r.within += fromSched; over -= fromSched;
+  }
+  const t: AttTotals = {
+    workDays: 0, workMinutes: 0, overtimeMinutes: 0, weeklyOvertimeMinutes: 0, extraMinutes: 0, nightMinutes: 0, holidayMinutes: 0,
+    over60Minutes: 0, lateMinutes: 0, earlyMinutes: 0, leaveDays: 0, missingDays: 0, overtimeWithinMinutes: 0,
+  };
+  for (const r of row) {
+    const d = r.d;
+    if (d.type !== 'legal-holiday') { d.overtimeMinutes = r.dayOt + r.weekOt + r.periodOt; d.extraMinutes = r.extra; }
+    if (d.workMinutes > 0) t.workDays++;
+    t.workMinutes += d.workMinutes;
+    t.overtimeMinutes += r.dayOt + r.weekOt + r.periodOt;
+    t.weeklyOvertimeMinutes += r.weekOt;
+    t.overtimeWithinMinutes! += r.within;
+    t.extraMinutes += r.extra;
+    t.nightMinutes += d.nightMinutes;
+    t.holidayMinutes += d.holidayMinutes;
+    t.lateMinutes += d.lateMinutes;
+    t.earlyMinutes += d.earlyMinutes;
+    t.leaveDays += d.leaveDays;
+    if (d.issues.includes('打刻がありません')) t.missingDays++;
+  }
+  t.over60Minutes = Math.max(0, t.overtimeMinutes - OVER60);
+  return t;
+}
+
+/**
  * 締めの期間（締め日から）。`month` の締め日で終わる期間を返す。
  *
  * @param month 締め日の月（YYYY-MM）
