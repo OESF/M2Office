@@ -145,7 +145,7 @@ function MyPayslips() {
   useEffect(load, [load]);
   if (!data) return error ? <p className="error">{error}</p> : null;
   const consent = (v: boolean) => void api.myHr.consent(v).then(() => { setOpen(null); load(); }).catch((e) => setError(describeError(e, '変えられませんでした')));
-  const label = (ym: string) => `${Number(ym.slice(0, 4))} 年 ${Number(ym.slice(5, 7))} 月支給`;
+  const label = (ym: string, kind = 'monthly') => `${Number(ym.slice(0, 4))} 年 ${Number(ym.slice(5, 7))} 月支給${kind === 'bonus' ? 'の賞与' : kind === 'correction' ? 'の訂正' : ''}`;
   const yen = (n: number) => `${n.toLocaleString('ja-JP')} 円`;
   if (!data.consentAt) {
     return (
@@ -166,7 +166,7 @@ function MyPayslips() {
       <ul className="plain small">
         {data.slips.map((x) => (
           <li key={x.id}>
-            <button className="link grow" onClick={() => (open?.slip.id === x.id ? setOpen(null) : void api.myHr.payslip(x.id).then(setOpen).catch((e) => setError(describeError(e, '読み込めませんでした'))))}>{label(x.payMonth)}</button>
+            <button className="link grow" onClick={() => (open?.slip.id === x.id ? setOpen(null) : void api.myHr.payslip(x.id).then(setOpen).catch((e) => setError(describeError(e, '読み込めませんでした'))))}>{label(x.payMonth, x.kind)}</button>
             <span>差引支給 <strong>{yen(x.net)}</strong></span>
           </li>
         ))}

@@ -283,7 +283,77 @@ export function hrRoute(deps: AppDeps) {
   app.get('/payroll/runs/:id', async (c) => {
     const { tenant, user } = c.get('ctx');
     const r = await payroll.run(tenant.id, user.id, c.req.param('id'));
-    return r ? c.json({ ...r, blockers: payroll.blockers(r.run), canConfirm: user.roles.includes('admin') }) : c.json({ error: '回が見つかりません' }, 404);
+    if (!r) return c.json({ error: '回が見つかりません' }, 404);
+    const adjustments = r.run.kind === 'monthly' || r.run.kind === 'bonus' ? await payroll.adjustments(tenant.id, r.run.kind, r.run.payMonth) : [];
+    return c.json({ ...r, adjustments, blockers: payroll.blockers(r.run), canConfirm: user.roles.includes('admin') });
+  });
+
+  // ---- 調整の行・賞与・訂正の回（Phase 2 段 1。第30.10.4節・第30.11.1節） ----
+
+  /** 回の調整の行（`kind`: monthly・bonus、`month`）。 */
+  app.get('/payroll/adjustments', async (c) => {
+    const { tenant } = c.get('ctx');
+    const kind = c.req.query('kind') === 'bonus' ? 'bonus' : 'monthly';
+    return c.json({ adjustments: await payroll.adjustments(tenant.id, kind, String(c.req.query('month') ?? '')) });
+  });
+
+  /** 調整の行を足す（`employeeId`・`kind`・`payMonth`・`label`・`direction`・`amount`・`taxable`・`insurable`・`reason`）。 */
+  app.post('/payroll/adjustments', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const r = await payroll.addAdjustment(tenant.id, user.id, await c.req.json().catch(() => ({})));
+    return 'error' in r ? c.json(r, 400) : c.json(r, 201);
+  });
+
+  /** 調整の行を外す（`kind`・`month` の回が確定していなければ）。 */
+  app.delete('/payroll/adjustments/:id', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const kind = c.req.query('kind') === 'bonus' ? 'bonus' : 'monthly';
+    const r = await payroll.removeAdjustment(tenant.id, user.id, c.req.param('id'), kind, String(c.req.query('month') ?? ''));
+    return 'error' in r ? c.json(r, 400) : c.json(r);
+  });
+
+  /** 賞与の回の入力（`month`）と、入れられる従業員。 */
+  app.get('/payroll/bonus', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const month = String(c.req.query('month') ?? '');
+    if (!/^\d{4}-\d{2}$/.test(month)) return c.json({ error: '支給月を YYYY-MM で入れてください' }, 400);
+    const [plan, employees] = await Promise.all([payroll.bonusPlan(tenant.id, month), service.list(tenant.id, user.id)]);
+    return c.json({ plan, employees: employees.filter((e) => e.status === 'active' && e.category !== 'owner').map((e) => ({ id: e.id, name: e.name })) });
+  });
+
+  /** 賞与の回の入力を残す（`payDate`・`longPeriod`・`amounts`）。 */
+  app.put('/payroll/bonus', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const r = await payroll.saveBonusPlan(tenant.id, user.id, await c.req.json().catch(() => ({})));
+    return 'error' in r ? c.json(r, 400) : c.json(r);
+  });
+
+  /** 賞与を計算して下書きにする（`month`）。 */
+  app.post('/payroll/bonus/calculate', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const b = await c.req.json<{ month?: string }>().catch(() => ({} as { month?: string }));
+    const r = await payroll.calculateBonus(tenant.id, user.id, String(b.month ?? ''));
+    return 'error' in r ? c.json(r, 400) : c.json(r, 201);
+  });
+
+  /** 賞与支払届の下書き（確定した賞与の回。`format`: csv・xlsx）。 */
+  app.get('/payroll/runs/:id/bonus-report', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const r = await payroll.bonusReport(tenant.id, user.id, c.req.param('id'));
+    if ('error' in r) return c.json(r, 400);
+    const format = c.req.query('format') === 'xlsx' ? 'xlsx' : 'csv';
+    const bytes = await renderSheet('賞与支払届（下書き）', r.columns, r.rows, format);
+    c.header('Content-Type', format === 'csv' ? 'text/csv; charset=utf-8' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    c.header('Content-Disposition', `attachment; filename="bonus-report-${r.payDate}.${format}"`);
+    return c.body(bytes as unknown as ArrayBuffer);
+  });
+
+  /** 確定した月の給与の訂正の回を作る（`payDate`: 差額を払う日）。 */
+  app.post('/payroll/runs/:id/correction', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const b = await c.req.json<{ payDate?: string }>().catch(() => ({} as { payDate?: string }));
+    const r = await payroll.createCorrection(tenant.id, user.id, c.req.param('id'), String(b.payDate ?? ''));
+    return 'error' in r ? c.json(r, 400) : c.json(r, 201);
   });
 
   /**

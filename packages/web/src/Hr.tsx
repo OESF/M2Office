@@ -152,32 +152,44 @@ function EmployeeAttendance({ employeeId, month, closed, onChanged }: { employee
   );
 }
 
-/** 給与（支給月の計算・点検・確定・明細・振込データ。仕様書 第30.10.1節・第30.10.3節）。 */
+type RunData = Awaited<ReturnType<typeof api.hr.payroll.run>>;
+const KIND_NAME: Record<string, string> = { monthly: '月の給与', bonus: '賞与', correction: '訂正の回' };
+
+/**
+ * 給与（支給月の計算・点検・確定・明細・振込データ。仕様書 第30.10.1節・第30.10.3節・第30.10.4節・第30.11.1節）。
+ * 月の給与と賞与を切り替える。確定した月の給与は、訂正の回で直す。
+ */
 function PayrollTab({ onOpen }: { onOpen: (id: string) => void }) {
   const thisMonth = new Date(Date.now() + 9 * 3_600_000).toISOString().slice(0, 7);
   const [month, setMonth] = useState(thisMonth);
+  const [mode, setMode] = useState<'monthly' | 'bonus'>('monthly');
   const [info, setInfo] = useState<Awaited<ReturnType<typeof api.hr.payroll.runs>> | null>(null);
-  const [run, setRun] = useState<Awaited<ReturnType<typeof api.hr.payroll.run>> | null>(null);
-  const [trial, setTrial] = useState<Awaited<ReturnType<typeof api.hr.payroll.run>> | null>(null);
-  const [open, setOpen] = useState<string | null>(null);
+  const [main, setMain] = useState<RunData | null>(null);
+  const [fix, setFix] = useState<RunData | null>(null);
+  const [trial, setTrial] = useState<RunData | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [problems, setProblems] = useState<string[]>([]);
+  const [fixDate, setFixDate] = useState(today());
   const noticeRef = useRef<HTMLInputElement>(null);
   const trialRef = useRef<HTMLInputElement>(null);
   const load = useCallback(() => {
-    setRun(null);
+    setMain(null);
+    setFix(null);
     setTrial(null);
     api.hr.payroll.runs(month).then((r) => {
       setInfo(r);
       const mine = r.runs.filter((x) => x.payMonth === month);
-      const main = mine.find((x) => x.kind === 'monthly' && x.status !== 'draft') ?? mine.find((x) => x.kind === 'monthly');
-      if (main) api.hr.payroll.run(main.id).then(setRun).catch((e) => setError(describeError(e, '読み込めませんでした')));
-      const t = mine.find((x) => x.kind === 'trial');
+      const pick = (kind: string) => mine.find((x) => x.kind === kind && x.status !== 'draft') ?? mine.find((x) => x.kind === kind);
+      const m = pick(mode);
+      if (m) api.hr.payroll.run(m.id).then(setMain).catch((e) => setError(describeError(e, '読み込めませんでした')));
+      const c = mode === 'monthly' ? pick('correction') : undefined;
+      if (c) api.hr.payroll.run(c.id).then(setFix).catch(() => undefined);
+      const t = mode === 'monthly' ? mine.find((x) => x.kind === 'trial') : undefined;
       if (t) api.hr.payroll.run(t.id).then(setTrial).catch(() => undefined);
     }).catch((e) => setError(describeError(e, '読み込めませんでした')));
-  }, [month]);
+  }, [month, mode]);
   useEffect(load, [load]);
   const act = (f: () => Promise<unknown>, fail: string) => {
     setBusy(true);
@@ -186,84 +198,164 @@ function PayrollTab({ onOpen }: { onOpen: (id: string) => void }) {
     setProblems([]);
     void f().catch((e) => { setError(describeError(e, fail)); setProblems((e as { problems?: string[] }).problems ?? []); }).finally(() => setBusy(false));
   };
-  const calc = () => act(async () => { const r = await api.hr.payroll.calculate(month); setRun(await api.hr.payroll.run(r.run.id)); }, '計算できませんでした');
-  const confirm = () => act(async () => {
-    const r = await api.hr.payroll.confirm(run!.run.id);
-    setNote(`確定しました。${r.published} 人に明細を届けました${r.pdf.length ? `。PDF で渡す人: ${r.pdf.join('、')}` : ''}`);
-    setRun(await api.hr.payroll.run(r.run.id));
-  }, '確定できませんでした');
-  const request = () => act(async () => { const r = await api.hr.payroll.requestConfirm(run!.run.id); setNote(r.sent ? `管理者 ${r.sent} 人に確定を頼みました` : '知らせる管理者がいません'); }, '頼めませんでした');
-  const transfer = () => act(async () => {
-    const r = await api.hr.payroll.transfer(run!.run.id, month);
-    setNote(`振込データ（${r.count} 件）を保存しました${r.excluded.length ? `。入っていない人: ${r.excluded.join('、')}` : ''}`);
-    setRun(await api.hr.payroll.run(run!.run.id));
-  }, '振込データを作れませんでした');
+  const calc = () => act(async () => { const r = await api.hr.payroll.calculate(month); setMain(await api.hr.payroll.run(r.run.id)); }, '計算できませんでした');
+  const recalc = (kind: string) => (kind === 'bonus' ? api.hr.payroll.calculateBonus(month) : api.hr.payroll.calculate(month)).then(load);
   const readNotice = (f: File) => act(async () => {
     const r = await api.hr.payroll.readNotice(f);
     setNote(`住民税を ${r.applied.length} 人に入れました${r.applied.length ? `（${r.applied.map((a) => a.name).join('、')}）` : ''}`);
     setProblems(r.skipped.map((x) => `${x.name}: ${x.reason}`));
   }, '通知書を読めませんでした');
   const runTrial = (f: File) => act(async () => { const r = await api.hr.payroll.trial(month, f); setTrial(await api.hr.payroll.run(r.run.id)); }, '試しの計算ができませんでした');
-  const yenOf = (n: number) => n.toLocaleString('ja-JP');
-  const sum = (s: PaySlip, codes: string[]) => s.lines.filter((l) => codes.includes(l.code)).reduce((a, l) => a + l.amount, 0);
-  const r = run?.run;
-  const confirmed = r ? r.status !== 'draft' : false;
-  const stops = r?.checks.filter((c) => c.level === 'stop') ?? [];
-  const checks = r?.checks.filter((c) => c.level === 'check') ?? [];
-  const who = (c: PayCheck) => (c.employeeName ? `${c.employeeName}: ` : '');
   const at = (v?: string | null) => (v ? new Date(v).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }) : '');
+  const confirmed = main ? main.run.status !== 'draft' : false;
+  const panel = { busy, act, setNote, onOpen, month, recalc, at };
   return (
     <div className="hr">
       <div className="row wrap hr-toolbar">
         <button className="btn ghost small" onClick={() => setMonth(shiftMonth(month, -1))}>← 前</button>
         <strong>{Number(month.slice(0, 4))} 年 {Number(month.slice(5))} 月支給</strong>
         <button className="btn ghost small" onClick={() => setMonth(shiftMonth(month, 1))}>次 →</button>
-        {info?.schedule && <span className="small muted">支払日 {info.schedule.payDate}・勤怠 {info.schedule.period.label}</span>}
+        <span className="seg">
+          {(['monthly', 'bonus'] as const).map((k) => <button key={k} className={mode === k ? 'on' : ''} onClick={() => setMode(k)}>{KIND_NAME[k]}</button>)}
+        </span>
+        {mode === 'monthly' && info?.schedule && <span className="small muted">支払日 {info.schedule.payDate}・勤怠 {info.schedule.period.label}</span>}
         <span className="grow" />
-        {!confirmed && <button className="btn small" disabled={busy} onClick={calc}>{run ? '計算し直す' : '計算する'}</button>}
-        {r && !confirmed && (run?.canConfirm
-          ? <button className="btn primary small" disabled={busy || (run?.blockers.length ?? 0) > 0} onClick={confirm}>確定する</button>
-          : <button className="btn small" disabled={busy} onClick={request}>{r.confirmRequestedAt ? '管理者にもう一度頼む' : '管理者に確定を頼む'}</button>)}
-        {r && confirmed && run?.canConfirm && <button className="btn small" disabled={busy} onClick={transfer}>{r.transferAt ? '振込データを作り直す' : '振込データ'}</button>}
+        {mode === 'monthly' && !confirmed && <button className="btn small" disabled={busy} onClick={calc}>{main ? '計算し直す' : '計算する'}</button>}
       </div>
       <div className="row wrap hr-toolbar small">
         <button className="btn ghost small" onClick={() => act(() => api.hr.payroll.ledger(Number(month.slice(0, 4)), 'xlsx'), '書き出せませんでした')}>{month.slice(0, 4)} 年の賃金台帳</button>
         <button className="btn ghost small" disabled={busy} onClick={() => noticeRef.current?.click()}>住民税の通知書を読む</button>
-        <button className="btn ghost small" disabled={busy} onClick={() => trialRef.current?.click()}>今の明細と試しに比べる</button>
+        {mode === 'monthly' && <button className="btn ghost small" disabled={busy} onClick={() => trialRef.current?.click()}>今の明細と試しに比べる</button>}
         <input ref={noticeRef} type="file" accept="application/pdf,image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) readNotice(f); }} />
         <input ref={trialRef} type="file" accept=".csv,.xlsx,text/csv" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) runTrial(f); }} />
       </div>
       {error && <p className="error">{error}</p>}
       {problems.length > 0 && <ul className="error small">{problems.map((p) => <li key={p}>{p}</li>)}</ul>}
       {note && <p className="ok-msg small">{note}</p>}
-      {r && (
-        <>
-          <p className="small muted">
-            {confirmed ? `確定（${at(r.confirmedAt)}）` : `下書き（${at(r.calculatedAt)} に計算）`}
-            {r.confirmedUnverified && <span className="badge warn">監修前の表で確定（開発）</span>}
-            {r.transferAt && `・振込データ ${at(r.transferAt)}`}
-            {!confirmed && r.confirmRequestedAt && `・確定を頼みました（${at(r.confirmRequestedAt)}）`}
-          </p>
-          {!confirmed && stops.length > 0 && (
-            <div className="pay-checks stop"><strong className="small">止まっているもの</strong>
-              <ul className="small">{stops.map((c, i) => <li key={i}>{who(c)}{c.text}{run?.blockers.every((b) => b.code !== c.code) && <span className="muted">（開発の環境のため確定できます）</span>}</li>)}</ul>
-            </div>
-          )}
-          {!confirmed && checks.length > 0 && (
-            <div className="pay-checks"><strong className="small">確かめること</strong>
-              <ul className="small">{checks.map((c, i) => <li key={i}>{who(c)}{c.text}</li>)}</ul>
-            </div>
-          )}
-          <div className="pay-table">
-          <table className="table hr-table">
-            <thead><tr><th>氏名</th><th>総支給</th><th>社会保険</th><th>雇用保険</th><th>所得税</th><th>住民税</th><th>差引支給</th><th /></tr></thead>
-            <tbody>
-              {run!.slips.map((s) => (
+      {mode === 'bonus' && !confirmed && <BonusPlanEditor month={month} busy={busy} act={act} onCalculated={load} />}
+      {main && <RunPanel data={main} {...panel} onChanged={load} />}
+      {!main && info && mode === 'monthly' && <p className="muted small">まだ計算していません</p>}
+      {mode === 'monthly' && main && confirmed && !fix && (
+        <div className="row wrap hr-toolbar small">
+          <span className="muted">確定した給与に誤りがあれば、台帳や勤怠を直してから</span>
+          <label>差額を払う日 <input type="date" value={fixDate} onChange={(e) => setFixDate(e.target.value)} /></label>
+          <button className="btn small" disabled={busy} onClick={() => act(async () => { const r = await api.hr.payroll.correction(main.run.id, fixDate); setFix(await api.hr.payroll.run(r.run.id)); }, '訂正の回を作れませんでした')}>訂正の回を作る</button>
+        </div>
+      )}
+      {fix && <><h3 className="pay-sub">訂正の回</h3><RunPanel data={fix} {...panel} onChanged={load} /></>}
+      {trial?.run.compare && <TrialCompare compare={trial.run.compare} at={at(trial.run.calculatedAt)} />}
+    </div>
+  );
+}
+
+/** 賞与の回の入力（支払日・計算期間・人ごとの額）。保存して計算する。 */
+function BonusPlanEditor({ month, busy, act, onCalculated }: { month: string; busy: boolean; act: (f: () => Promise<unknown>, fail: string) => void; onCalculated: () => void }) {
+  const [data, setData] = useState<Awaited<ReturnType<typeof api.hr.payroll.bonus>> | null>(null);
+  const [plan, setPlan] = useState<{ payDate: string; longPeriod: boolean; amounts: Record<string, number> } | null>(null);
+  useEffect(() => {
+    setData(null);
+    api.hr.payroll.bonus(month).then((r) => { setData(r); setPlan({ payDate: r.plan.payDate || `${month}-10`, longPeriod: r.plan.longPeriod, amounts: r.plan.amounts }); }).catch(() => setData(null));
+  }, [month]);
+  if (!data || !plan) return null;
+  const total = Object.values(plan.amounts).reduce((s, v) => s + (Number(v) || 0), 0);
+  const save = () => act(async () => {
+    if (plan.payDate.slice(0, 7) !== month) throw new Error(`支払日は ${Number(month.slice(5))} 月の日にしてください`);
+    await api.hr.payroll.saveBonus(plan);
+    await api.hr.payroll.calculateBonus(month);
+    onCalculated();
+  }, '賞与を計算できませんでした');
+  return (
+    <div className="card hr-panel">
+      <div className="row wrap">
+        <label className="small">支払日 <input type="date" value={plan.payDate} onChange={(e) => setPlan({ ...plan, payDate: e.target.value })} /></label>
+        <label className="check small"><input type="checkbox" checked={plan.longPeriod} onChange={(e) => setPlan({ ...plan, longPeriod: e.target.checked })} /> 計算期間が 6 か月を超える</label>
+        <span className="grow" />
+        <span className="small muted">計 {total.toLocaleString('ja-JP')} 円</span>
+        <button className="btn small" disabled={busy} onClick={save}>{data.plan.saved ? '保存して計算し直す' : '保存して計算する'}</button>
+      </div>
+      <table className="table small hr-bonus">
+        <tbody>
+          {data.employees.map((e) => (
+            <tr key={e.id}>
+              <td>{e.name}</td>
+              <td><input className="num-input" type="number" min={0} step={1000} placeholder="0" value={plan.amounts[e.id] ?? ''} aria-label={`${e.name}の賞与`}
+                onChange={(x) => setPlan({ ...plan, amounts: { ...plan.amounts, [e.id]: Number(x.target.value) || 0 } })} /> 円</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** 回 1 つ（点検・確定・振込データ・明細・調整の行）。月の給与・賞与・訂正の回で同じ形。 */
+function RunPanel({ data, busy, act, setNote, onOpen, month, recalc, at, onChanged }: {
+  data: RunData; busy: boolean; act: (f: () => Promise<unknown>, fail: string) => void; setNote: (s: string | null) => void; onOpen: (id: string) => void;
+  month: string; recalc: (kind: string) => Promise<void>; at: (v?: string | null) => string; onChanged: () => void;
+}) {
+  const [open, setOpen] = useState<string | null>(null);
+  const [adj, setAdj] = useState<{ label: string; amount: string; direction: 'pay' | 'deduct'; taxable: boolean; insurable: boolean; reason: string }>({ label: '', amount: '', direction: 'pay', taxable: true, insurable: true, reason: '' });
+  const r = data.run;
+  const confirmed = r.status !== 'draft';
+  const adjustable = !confirmed && (r.kind === 'monthly' || r.kind === 'bonus');
+  const stops = r.checks.filter((c) => c.level === 'stop');
+  const checks = r.checks.filter((c) => c.level === 'check');
+  const who = (c: PayCheck) => (c.employeeName ? `${c.employeeName}: ` : '');
+  const yenOf = (n: number) => n.toLocaleString('ja-JP');
+  const sum = (s: PaySlip, codes: string[]) => s.lines.filter((l) => codes.includes(l.code)).reduce((a, l) => a + l.amount, 0);
+  const confirm = () => act(async () => {
+    const x = await api.hr.payroll.confirm(r.id);
+    setNote(`確定しました。${x.published} 人に明細を届けました${x.pdf.length ? `。PDF で渡す人: ${x.pdf.join('、')}` : ''}`);
+    onChanged();
+  }, '確定できませんでした');
+  const request = () => act(async () => { const x = await api.hr.payroll.requestConfirm(r.id); setNote(x.sent ? `管理者 ${x.sent} 人に確定を頼みました` : '知らせる管理者がいません'); }, '頼めませんでした');
+  const transfer = () => act(async () => {
+    const x = await api.hr.payroll.transfer(r.id, `${month}${r.kind === 'monthly' ? '' : `-${KIND_NAME[r.kind]}`}`);
+    setNote(`振込データ（${x.count} 件）を保存しました${x.excluded.length ? `。入っていない人: ${x.excluded.join('、')}` : ''}`);
+    onChanged();
+  }, '振込データを作れませんでした');
+  const addAdj = (employeeId: string) => act(async () => {
+    await api.hr.payroll.addAdjustment({ employeeId, kind: r.kind as 'monthly' | 'bonus', payMonth: r.payMonth, label: adj.label, amount: Number(adj.amount), direction: adj.direction, taxable: adj.taxable, insurable: adj.insurable, reason: adj.reason });
+    setAdj({ ...adj, label: '', amount: '', reason: '' });
+    await recalc(r.kind);
+  }, '調整を足せませんでした');
+  return (
+    <>
+      <p className="small muted">
+        {KIND_NAME[r.kind]}{r.kind !== 'monthly' && `（支払日 ${r.payDate}）`}・{confirmed ? `確定（${at(r.confirmedAt)}）` : `下書き（${at(r.calculatedAt)} に計算）`}
+        {r.confirmedUnverified && <span className="badge warn">監修前の表で確定（開発）</span>}
+        {r.transferAt && `・振込データ ${at(r.transferAt)}`}
+        {!confirmed && r.confirmRequestedAt && `・確定を頼みました（${at(r.confirmRequestedAt)}）`}
+      </p>
+      <div className="row wrap hr-toolbar">
+        {!confirmed && (data.canConfirm
+          ? <button className="btn primary small" disabled={busy || data.blockers.length > 0} onClick={confirm}>確定する</button>
+          : <button className="btn small" disabled={busy} onClick={request}>{r.confirmRequestedAt ? '管理者にもう一度頼む' : '管理者に確定を頼む'}</button>)}
+        {confirmed && data.canConfirm && <button className="btn small" disabled={busy} onClick={transfer}>{r.transferAt ? '振込データを作り直す' : '振込データ'}</button>}
+        {confirmed && r.kind === 'bonus' && <button className="btn ghost small" disabled={busy} onClick={() => act(() => api.hr.payroll.bonusReport(r.id, r.payDate), '出せませんでした')}>賞与支払届（下書き）</button>}
+      </div>
+      {!confirmed && stops.length > 0 && (
+        <div className="pay-checks stop"><strong className="small">止まっているもの</strong>
+          <ul className="small">{stops.map((c, i) => <li key={i}>{who(c)}{c.text}{data.blockers.every((b) => b.code !== c.code) && <span className="muted">（開発の環境のため確定できます）</span>}</li>)}</ul>
+        </div>
+      )}
+      {!confirmed && checks.length > 0 && (
+        <div className="pay-checks"><strong className="small">確かめること</strong>
+          <ul className="small">{checks.map((c, i) => <li key={i}>{who(c)}{c.text}</li>)}</ul>
+        </div>
+      )}
+      <div className="pay-table">
+        <table className="table hr-table">
+          <thead><tr><th>氏名</th><th>総支給</th><th>社会保険</th><th>雇用保険</th><th>所得税</th>{r.kind !== 'bonus' && <th>住民税</th>}<th>差引支給</th><th /></tr></thead>
+          <tbody>
+            {data.slips.map((s) => {
+              const mine = data.adjustments.filter((a) => a.employeeId === s.employeeId);
+              return (
                 <Fragment key={s.id}>
                   <tr>
                     <td><button className="link" onClick={() => setOpen(open === s.id ? null : s.id)}>{s.employeeName}</button></td>
                     <td>{yenOf(s.gross)}</td><td>{yenOf(sum(s, ['health', 'child', 'pension']))}</td><td>{yenOf(sum(s, ['employment']))}</td>
-                    <td>{yenOf(sum(s, ['income-tax']))}</td><td>{yenOf(sum(s, ['resident-tax']))}</td><td><strong>{yenOf(s.net)}</strong></td>
+                    <td>{yenOf(sum(s, ['income-tax']))}</td>{r.kind !== 'bonus' && <td>{yenOf(sum(s, ['resident-tax']))}</td>}<td><strong>{yenOf(s.net)}</strong></td>
                     <td className="small">{!confirmed && r.checks.some((c) => c.employeeId === s.employeeId) && <span className="badge warn">点検 {r.checks.filter((c) => c.employeeId === s.employeeId).length}</span>}</td>
                   </tr>
                   {open === s.id && (
@@ -280,24 +372,44 @@ function PayrollTab({ onOpen }: { onOpen: (id: string) => void }) {
                             ))}
                           </tbody>
                         </table>
+                        {mine.length > 0 && (
+                          <ul className="plain small">
+                            {mine.map((a) => (
+                              <li key={a.id} className="row">
+                                <span className="grow">調整: {a.label} {a.direction === 'deduct' ? '−' : '+'}{yenOf(a.amount)} 円{a.source === 'correction' ? '（訂正の回から）' : ''}</span>
+                                {adjustable && a.source === 'manual' && <button className="btn ghost small" onClick={() => act(async () => { await api.hr.payroll.removeAdjustment(a.id, a.kind, a.payMonth); await recalc(r.kind); }, '外せませんでした')}>外す</button>}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                        {adjustable && (
+                          <div className="row wrap small">
+                            <select value={adj.direction} aria-label="支給か控除か" onChange={(e) => { const d = e.target.value as 'pay' | 'deduct'; setAdj({ ...adj, direction: d, taxable: d === 'pay', insurable: d === 'pay' }); }}>
+                              <option value="pay">支給</option><option value="deduct">控除</option>
+                            </select>
+                            <input className="short" placeholder="調整の名前" value={adj.label} onChange={(e) => setAdj({ ...adj, label: e.target.value })} aria-label="調整の名前" />
+                            <input className="num-input" type="number" min={1} placeholder="額" value={adj.amount} onChange={(e) => setAdj({ ...adj, amount: e.target.value })} aria-label="額" />
+                            <label className="check"><input type="checkbox" checked={adj.taxable} onChange={(e) => setAdj({ ...adj, taxable: e.target.checked })} /> 所得税の対象</label>
+                            <label className="check"><input type="checkbox" checked={adj.insurable} onChange={(e) => setAdj({ ...adj, insurable: e.target.checked })} /> 雇用保険の賃金</label>
+                            <input className="short" placeholder="理由" value={adj.reason} onChange={(e) => setAdj({ ...adj, reason: e.target.value })} aria-label="理由" />
+                            <button className="btn small" disabled={busy || !adj.label || !Number(adj.amount)} onClick={() => addAdj(s.employeeId)}>調整を足す</button>
+                          </div>
+                        )}
                         <div className="row">
                           <button className="btn ghost small" onClick={() => onOpen(s.employeeId)}>台帳と給与の情報を開く</button>
-                          {confirmed && <button className="btn ghost small" onClick={() => act(() => api.hr.payroll.slipPdf(s.id, `給与明細-${month}-${s.employeeName ?? ''}.pdf`), 'PDF を出せませんでした')}>明細の PDF</button>}
+                          {confirmed && <button className="btn ghost small" onClick={() => act(() => api.hr.payroll.slipPdf(s.id, `${KIND_NAME[r.kind]}の明細-${month}-${s.employeeName ?? ''}.pdf`), 'PDF を出せませんでした')}>明細の PDF</button>}
                         </div>
                       </div>
                     </td></tr>
                   )}
                 </Fragment>
-              ))}
-              {run!.slips.length === 0 && <tr><td colSpan={8} className="muted">この月に計算する人はいません</td></tr>}
-            </tbody>
-          </table>
-          </div>
-        </>
-      )}
-      {!run && info && <p className="muted small">まだ計算していません</p>}
-      {trial?.run.compare && <TrialCompare compare={trial.run.compare} at={at(trial.run.calculatedAt)} />}
-    </div>
+              );
+            })}
+            {data.slips.length === 0 && <tr><td colSpan={8} className="muted">この回に計算する人はいません</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
 

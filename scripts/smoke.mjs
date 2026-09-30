@@ -3717,6 +3717,35 @@ console.log('\n■ 61. 人事・給与（内蔵の拡張。第30章、段 1: 台
       const { body: sayYes } = await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message: '今月の給与明細を見せて' }) }, 'member');
       before.body?.consentAt === null && (before.body?.slips ?? []).length === 0 && /同意が要ります/.test(sayNo.text ?? '') && mine?.payMonth === '2026-08' && /差引支給/.test(sayYes.text ?? '')
         ? ok('明細は本人が同意してから画面と秘書で見られる（同意の前は出さない）') : ng('本人の明細が合わない', JSON.stringify({ before: before.body, after: after.body, sayNo: sayNo.text, sayYes: sayYes.text }));
+
+      // Phase 2 段 1: 調整の行・訂正の回・賞与（第30.10.4節・第30.11.1節）
+      const adjClosed = await call('a', '/v1/hr/payroll/adjustments', { method: 'POST', body: JSON.stringify({ employeeId: staffId, kind: 'monthly', payMonth: '2026-08', label: '臨時の手当', amount: 5000 }) });
+      const adjOpen = await call('a', '/v1/hr/payroll/adjustments', { method: 'POST', body: JSON.stringify({ employeeId: staffId, kind: 'monthly', payMonth: '2026-09', label: '臨時の手当', amount: 5000 }) });
+      const { body: adjList } = await call('a', '/v1/hr/payroll/adjustments?kind=monthly&month=2026-09');
+      adjClosed.status === 400 && adjOpen.status === 201 && (adjList.adjustments ?? []).some((a) => a.label === '臨時の手当' && a.taxable === true)
+        ? ok('調整の行は確定していない月にだけ足せ、支給は既定で所得税の対象にする') : ng('調整の行が合わない', JSON.stringify({ closed: adjClosed.status, open: adjOpen.body }));
+      await call('a', `/v1/hr/payroll/adjustments/${adjOpen.body?.adjustment?.id}?kind=monthly&month=2026-09`, { method: 'DELETE' });
+      // 乙欄に直して訂正の回を作ると、所得税が増えて差額が控除になり、次の月の給与で差し引く
+      const noDiff = await call('a', `/v1/hr/payroll/runs/${run2}/correction`, { method: 'POST', body: JSON.stringify({ payDate: '2026-09-30' }) });
+      await call('a', `/v1/hr/payroll/employees/${staffId}/profile`, { method: 'PUT', body: JSON.stringify({ taxColumn: 'otsu' }) });
+      const corr = await call('a', `/v1/hr/payroll/runs/${run2}/correction`, { method: 'POST', body: JSON.stringify({ payDate: '2026-09-30' }) });
+      const corrSlip = (corr.body?.slips ?? []).find((x) => x.employeeId === staffId);
+      const corrConf = await call('a', `/v1/hr/payroll/runs/${corr.body?.run?.id}/confirm`, { method: 'POST' });
+      const { body: carried } = await call('a', '/v1/hr/payroll/adjustments?kind=monthly&month=2026-09');
+      noDiff.status === 400 && corr.status === 201 && corrSlip?.net < 0 && corrSlip.lines.some((l) => l.code === 'income-tax' && l.basis['訂正前']) && corrConf.status === 200
+        && (carried.adjustments ?? []).some((a) => a.source === 'correction' && a.label === '8 月分の訂正' && a.amount === -corrSlip.net)
+        ? ok('訂正の回は確定した明細との差額の明細を作り、控除になる差額は次の月の給与で差し引く') : ng('訂正の回が合わない', JSON.stringify({ noDiff: noDiff.status, corr: corr.body, conf: corrConf.status, carried }).slice(0, 600));
+      await call('a', `/v1/hr/payroll/employees/${staffId}/profile`, { method: 'PUT', body: JSON.stringify({ taxColumn: 'ko' }) });
+      // 賞与: 前の月に給与が無いので月額表で計算し、確定すると賞与支払届の下書きが出せる
+      const plan = await call('a', '/v1/hr/payroll/bonus', { method: 'PUT', body: JSON.stringify({ payDate: '2026-12-10', amounts: { [staffId]: 300500 } }) });
+      const bcalc = await call('a', '/v1/hr/payroll/bonus/calculate', { method: 'POST', body: JSON.stringify({ month: '2026-12' }) });
+      const bslip = (bcalc.body?.slips ?? []).find((x) => x.employeeId === staffId);
+      const bconf = await call('a', `/v1/hr/payroll/runs/${bcalc.body?.run?.id}/confirm`, { method: 'POST' });
+      const report = await raw(`/v1/hr/payroll/runs/${bcalc.body?.run?.id}/bonus-report?format=csv`);
+      const reportText = await report.text();
+      plan.status === 200 && bcalc.status === 201 && bslip?.meta?.stdBonusHealth === 300000 && !bslip.lines.some((l) => l.code === 'resident-tax')
+        && (bcalc.body.run.checks ?? []).some((c) => c.code === 'bonus-special') && bconf.status === 200 && report.status === 200 && reportText.includes('300000')
+        ? ok('賞与は標準賞与額（1,000 円未満切り捨て）で保険料を引き、前の月に給与が無ければ月額表で税を出し、確定すると賞与支払届の下書きを出せる') : ng('賞与が合わない', JSON.stringify({ plan: plan.status, calc: bcalc.body?.error ?? bslip?.meta, conf: bconf.status, report: report.status }).slice(0, 500));
     } else {
       conf.status === 400 && (conf.body?.blockers ?? []).some((x) => x.code === 'unverified')
         ? ok('本番の環境では、監修前の法令の表で計算した回は確定できない') : ng('監修前でも確定できた', JSON.stringify(conf.body));
@@ -3770,6 +3799,7 @@ console.log('\n■ 61. 人事・給与（内蔵の拡張。第30章、段 1: 台
     await owner.query(`delete from notifications where kind = 'attendance' and title like '%${tag}%'`);
     await owner.query(`delete from att_closes where tenant_id = 't-alpha' and closed_at >= $1`, [hrStartedAt]);
     await owner.query(`delete from pay_runs where tenant_id = 't-alpha' and calculated_at >= $1`, [hrStartedAt]);
+    await owner.query(`delete from pay_bonus_plans where tenant_id = 't-alpha' and updated_at >= $1`, [hrStartedAt]);
     await owner.query(`delete from notifications where tenant_id = 't-alpha' and title like '給与%' and created_at >= $1`, [hrStartedAt]);
     await owner.query(`delete from hr_employees where name like '${tag}%'`);
     for (const r of saved) await owner.query(`update tenant_settings set hr = $2 where tenant_id = $1`, [r.tenant_id, r.hr ? JSON.stringify(r.hr) : null]);

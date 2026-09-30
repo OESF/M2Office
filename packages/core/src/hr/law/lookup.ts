@@ -3,7 +3,7 @@
  */
 
 import type {
-  EmploymentRates, GradeRow, GradeTable, HealthRates, LawBook, LawMeta, MinimumWage, RateTable, WithholdingMonthly,
+  BonusRates, EmploymentRates, GradeRow, GradeTable, HealthRates, LawBook, LawMeta, MinimumWage, RateTable, WithholdingMonthly,
 } from './types.js';
 
 /** 引いた値と、使った表の版。 */
@@ -191,6 +191,29 @@ export class Law {
       if (inRange(d)) out.push({ label: '源泉徴収税額表（月額表）', date: d, applies: `${w.year} 年 1 月に支払う給与から`, detail: w.version });
     }
     return out;
+  }
+
+  /**
+   * 賞与に対する源泉徴収税額の算出率（%）。支払う日の年の表で引く。
+   *
+   * @param prevTaxable 前の月の給与の社会保険料等を引いた後の額
+   * @returns 率と当てた行（根拠）。その年の表が無いか、当たる行が無ければ `null`
+   */
+  bonusRate(prevTaxable: number, column: 'ko' | 'otsu', dependents: number, payDate: string): LawHit<{ rate: number; row: string }> | null {
+    const t: BonusRates | undefined = this.book.bonus.find((b) => b.year === Number(payDate.slice(0, 4)));
+    if (!t) return null;
+    const a = Math.max(0, Math.floor(prevTaxable));
+    const col = Math.min(Math.max(0, Math.floor(dependents)), 7);
+    const yen = (n: number) => n.toLocaleString('ja-JP');
+    for (const r of t.rows) {
+      const range = column === 'ko' ? r.ko[col] : r.otsu;
+      if (!range) continue;
+      if (a >= range[0] && (range[1] === null || a < range[1])) {
+        const where = `${yen(range[0])} 円以上${range[1] === null ? '' : ` ${yen(range[1])} 円未満`}`;
+        return { value: { rate: r.rate, row: column === 'ko' ? `甲欄（扶養親族等 ${col}${col === 7 ? ' 人以上' : ' 人'}）${where}` : `乙欄 ${where}` }, table: t };
+      }
+    }
+    return null;
   }
 
   /** 地域別最低賃金（円）。その日に効いている額。 */

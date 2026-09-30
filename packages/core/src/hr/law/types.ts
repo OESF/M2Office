@@ -91,6 +91,22 @@ export interface WithholdingMonthly extends LawMeta {
   extraDependentDeduction: number;
 }
 
+/** 賞与に対する源泉徴収税額の算出率の表の 1 行（率ごとに、扶養親族等の数 0〜7 人以上の前月の給与の範囲）。 */
+export interface BonusRateRow {
+  /** 賞与の金額に乗ずべき率（%）。 */
+  rate: number;
+  /** 甲欄: 扶養親族等の数 0〜7 人以上ごとの [以上, 未満]（円。未満が `null` なら上限なし。欄が無ければ `null`）。 */
+  ko: ([number, number | null] | null)[];
+  /** 乙欄の [以上, 未満]（欄が無ければ `null`）。 */
+  otsu: [number, number | null] | null;
+}
+
+/** 賞与に対する源泉徴収税額の算出率の表。その年に支払う賞与に使う。 */
+export interface BonusRates extends LawMeta {
+  year: number;
+  rows: BonusRateRow[];
+}
+
 /** 地域別最低賃金（都道府県ごと・発効日つき）。 */
 export interface MinimumWage extends LawMeta {
   prefectures: Record<string, { amount: number; from: string }[]>;
@@ -105,5 +121,7 @@ export interface LawBook {
   grades: GradeTable[];
   employment: EmploymentRates[];
   withholding: WithholdingMonthly[];
+  /** 賞与に対する源泉徴収税額の算出率の表。 */
+  bonus: BonusRates[];
   minimumWage: MinimumWage[];
 }

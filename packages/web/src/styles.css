@@ -1458,6 +1458,11 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .pay-checks.stop { border-color: var(--danger, #c0392b); }
 .pay-checks ul { margin: 4px 0 0; padding-left: 1.2em; }
 .pay-trial { margin-top: 16px; }
+.hr .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+.hr .seg button { background: none; border: 0; padding: 2px 10px; cursor: pointer; color: inherit; font: inherit; }
+.hr .seg button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.pay-sub { font-size: 1em; margin: 16px 0 4px; }
+.hr-bonus td:first-child { width: 40%; }
 .pay-trial h3 { font-size: 1em; display: flex; gap: 8px; align-items: center; }
 .pay-table td.pay-diff { background: var(--warn-soft, rgba(230, 160, 0, 0.12)); }
 .myhr-slips li { display: flex; gap: 8px; align-items: baseline; }

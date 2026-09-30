@@ -19,6 +19,8 @@ export interface PayslipPdfInput {
   employeeName: string;
   employeeCode?: string;
   company: string;
+  /** 題名（給与明細・賞与明細・給与の訂正明細）。無ければ給与明細。 */
+  title?: string;
 }
 
 const yen = (n: number) => n.toLocaleString('ja-JP');
@@ -33,7 +35,8 @@ export async function renderPayslipPdf(input: PayslipPdfInput): Promise<Uint8Arr
   const pdf = await PDFDocument.create();
   const { font, fit } = await embedJapaneseFonts(pdf, 'regular');
   const [y0, m0] = input.run.payMonth.split('-');
-  pdf.setTitle(`給与明細 ${y0}年${Number(m0)}月支給`);
+  const title = input.title ?? '給与明細';
+  pdf.setTitle(`${title} ${y0}年${Number(m0)}月支給`);
   const page = pdf.addPage([PAGE.width, PAGE.height]);
   const ink = rgb(0.1, 0.1, 0.1);
   const write = (t: string, x: number, y: number, size = 10, right?: number) => {
@@ -44,12 +47,12 @@ export async function renderPayslipPdf(input: PayslipPdfInput): Promise<Uint8Arr
   const right = PAGE.width - MARGIN;
   let y = PAGE.height - MARGIN;
 
-  write(`給与明細　${y0}年${Number(m0)}月支給`, MARGIN, y, 18);
+  write(`${title}　${y0}年${Number(m0)}月支給`, MARGIN, y, 18);
   write(input.company, 0, y, 10, right);
   y -= 30;
   write(`${input.employeeName}　様${input.employeeCode ? `（${input.employeeCode}）` : ''}`, MARGIN, y, 13);
   y -= 18;
-  write(`支払日 ${input.run.payDate}　計算期間 ${input.run.periodStart} 〜 ${input.run.periodEnd}`, MARGIN, y, 9);
+  write(input.run.kind === 'bonus' ? `支払日 ${input.run.payDate}` : `支払日 ${input.run.payDate}　計算期間 ${input.run.periodStart} 〜 ${input.run.periodEnd}`, MARGIN, y, 9);
   y -= 22;
 
   // 勤怠

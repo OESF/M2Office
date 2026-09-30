@@ -10,12 +10,13 @@ import { randomUUID } from 'node:crypto';
 import {
   HR_COMPARTMENT,
   type AuditEvent, type AttTotals, type HrEmployee, type HrFamilyMember, type HrPayrollProfile, type HrResidentTax, type HrStandardPay, type HrTerms,
-  type NotificationKind, type PayCheck, type PayRun, type PaySlip, type PayTrialCompare,
+  type BonusPlan, type NotificationKind, type PayAdjustment, type PayCheck, type PayLine, type PayRun, type PaySlip, type PayTrialCompare,
 } from '@m2office/shared';
+import { calcBonus } from './bonus.js';
 import type { LlmProvider } from '../llm/provider.js';
 import { scheduledMinutes } from './attendance.js';
 import type { SlipWithRun } from './payroll-store.js';
-import { reviewRun, explainDiff } from './payroll-review.js';
+import { reviewRun, reviewOther, explainDiff } from './payroll-review.js';
 import { buildZenginFile, toZenginKana, type ZenginPayee, type ZenginProblem } from './zengin.js';
 import { renderPayslipPdf } from './payslip-pdf.js';
 import { readResidentNotice, noticeProblem } from './resident-notice.js';
@@ -63,6 +64,9 @@ export interface NoticeApplyResult {
 }
 
 const payMonthLabel = (ym: string) => `${Number(ym.slice(0, 4))} 年 ${Number(ym.slice(5, 7))} 月支給`;
+/** 回の種類の呼び名（明細の題名と知らせに使う）。 */
+const KIND_LABEL: Record<PayRun['kind'], string> = { monthly: '給与', bonus: '賞与', correction: '給与の訂正', yea: '年末調整', trial: '試しの計算' };
+const YMD = /^\d{4}-\d{2}-\d{2}$/;
 
 const YM = /^\d{4}-(0[1-9]|1[0-2])$/;
 
@@ -196,7 +200,9 @@ export class PayrollService {
     const premiumMonth = settings.payroll.collect === 'next' ? shiftMonth(payMonth, -1) : payMonth;
     const employees = (await this.deps.hrStore.listEmployees(tenantId))
       .filter((e) => e.category !== 'owner' && (!e.hiredOn || e.hiredOn <= period.end) && (!e.leftOn || e.leftOn >= period.start));
-    const [profiles, stdAll] = await Promise.all([this.deps.store.listProfiles(tenantId), this.deps.store.listStandardPay(tenantId)]);
+    const [profiles, stdAll, adjustments] = await Promise.all([
+      this.deps.store.listProfiles(tenantId), this.deps.store.listStandardPay(tenantId), this.deps.store.listAdjustments(tenantId, 'monthly', payMonth),
+    ]);
     const law: PayRun['law'] = {};
     const slips: PaySlip[] = [];
     const termsBy = new Map<string, HrTerms[]>();
@@ -214,10 +220,10 @@ export class PayrollService {
       const std = stdAll.filter((x) => x.employeeId === e.id && x.fromMonth <= premiumMonth).sort((a, b) => b.fromMonth.localeCompare(a.fromMonth))[0]?.amount ?? null;
       const r = calcSlip({
         employee: e, terms, profile: profiles.find((p) => p.employeeId === e.id) ?? null, standardPay: std, totals, days: got.days, settings,
-        payMonth, payDate, periodEnd: period.end, law: this.law,
+        payMonth, payDate, periodEnd: period.end, law: this.law, adjustments: totalsOf ? [] : adjustments.filter((a) => a.employeeId === e.id),
       });
       for (const t of r.tables) law[t.version] = { version: t.version, source: t.source, reviewed: t.review.status === 'verified' };
-      slips.push({ id: randomUUID(), runId, employeeId: e.id, employeeName: e.name, gross: r.gross, deductions: r.deductions, net: r.net, lines: r.lines, warnings: r.warnings, attendance: totals });
+      slips.push({ id: randomUUID(), runId, employeeId: e.id, employeeName: e.name, gross: r.gross, deductions: r.deductions, net: r.net, lines: r.lines, warnings: r.warnings, attendance: totals, meta: r.meta });
     }
     return { settings, payDate, period, premiumMonth, employees, profiles, slips, law, termsBy };
   }
@@ -283,13 +289,25 @@ export class PayrollService {
       const e = await this.deps.hrStore.getEmployee(tenantId, sl.employeeId);
       const consent = profiles.find((p) => p.employeeId === sl.employeeId)?.payslipConsentAt;
       if (e?.userId && consent) {
-        await this.notify(tenantId, e.userId, 'attendance', `給与明細（${payMonthLabel(run.payMonth)}）が届きました`, `差引支給 ${sl.net.toLocaleString('ja-JP')} 円。「給与・勤怠」で見られます`);
+        await this.notify(tenantId, e.userId, 'attendance', `${KIND_LABEL[run.kind]}の明細（${payMonthLabel(run.payMonth)}）が届きました`, `差引支給 ${sl.net.toLocaleString('ja-JP')} 円。「給与・勤怠」で見られます`);
         published++;
       } else {
         pdf.push(sl.employeeName ?? '');
       }
     }
-    await this.audit(tenantId, userId, 'hr.payroll.confirm', runId, { payMonth: run.payMonth, slips: slips.length, published, unverified });
+    // 訂正の回で差額が控除になる人は、次の月の給与で差し引く（第30.10.4節。税と雇用保険は訂正の回で直し済み）
+    let carried = 0;
+    if (run.kind === 'correction') {
+      const next = shiftMonth(run.payMonth, 1);
+      for (const sl of slips.filter((x) => x.net < 0)) {
+        await this.deps.store.addAdjustment(tenantId, {
+          id: randomUUID(), employeeId: sl.employeeId, kind: 'monthly', payMonth: next, label: `${Number(run.payMonth.slice(5, 7))} 月分の訂正`, direction: 'deduct',
+          amount: -sl.net, taxable: false, insurable: false, reason: '訂正の回の差額（控除）', source: 'correction', createdBy: userId, sourceRunId: run.id,
+        });
+        carried++;
+      }
+    }
+    await this.audit(tenantId, userId, 'hr.payroll.confirm', runId, { kind: run.kind, payMonth: run.payMonth, slips: slips.length, published, unverified, carried });
     return { run: done, published, pdf };
   }
 
@@ -336,7 +354,7 @@ export class PayrollService {
     if ('problems' in built) return { error: '振込データを作れません', problems: built.problems };
     await this.deps.store.markTransfer(tenantId, runId, userId);
     await this.audit(tenantId, userId, 'hr.payroll.transfer', runId, { payMonth: run.payMonth, count: built.count, excluded: excluded.length });
-    return { bytes: built.bytes, filename: `furikomi-${run.payMonth}.txt`, count: built.count, excluded };
+    return { bytes: built.bytes, filename: `furikomi-${run.payMonth}${run.kind === 'monthly' ? '' : `-${run.kind}`}.txt`, count: built.count, excluded };
   }
 
   /** 明細の PDF（担当者が渡す。本人も自分の分を出せる）。 */
@@ -345,7 +363,7 @@ export class PayrollService {
     if (!sl || sl.run.kind === 'trial' || (onlyEmployeeId && (sl.employeeId !== onlyEmployeeId || sl.run.status === 'draft'))) return null;
     const settings = (await this.deps.repo.getTenantSettings(tenantId)).hr;
     const tenant = await this.deps.repo.findTenantById(tenantId);
-    const bytes = await renderPayslipPdf({ run: sl.run, slip: sl, employeeName: sl.employeeName ?? '', employeeCode: sl.employeeCode, company: settings.office.name || tenant?.name || '' });
+    const bytes = await renderPayslipPdf({ run: sl.run, slip: sl, employeeName: sl.employeeName ?? '', employeeCode: sl.employeeCode, company: settings.office.name || tenant?.name || '', title: `${KIND_LABEL[sl.run.kind]}明細` });
     await this.audit(tenantId, userId, 'hr.payroll.pdf', slipId, { self: !!onlyEmployeeId });
     return { bytes, filename: `payslip-${sl.run.payMonth}.pdf` };
   }
@@ -365,12 +383,12 @@ export class PayrollService {
     }
     const h = (m?: number) => (m === undefined ? null : Math.round((m / 60) * 100) / 100);
     const gender = (g?: string) => (g === 'male' ? '男' : g === 'female' ? '女' : '');
-    const columns = ['氏名', '社員番号', '性別', '支給月', '支払日', '賃金の計算期間', '労働日数', '労働時間数', '時間外労働時間数', '休日労働時間数', '深夜労働時間数',
+    const columns = ['氏名', '社員番号', '性別', '種類', '支給月', '支払日', '賃金の計算期間', '労働日数', '労働時間数', '時間外労働時間数', '休日労働時間数', '深夜労働時間数',
       ...payLabels, '総支給', ...dedLabels, '控除の計', '差引支給'];
     const rows = slips.map((sl) => {
       const a = sl.attendance ?? {};
       const amount = (kind: 'pay' | 'deduct', label: string) => sl.lines.filter((l) => l.kind === kind && l.label === label).reduce((s, l) => s + l.amount, 0) || null;
-      return [sl.employeeName ?? '', sl.employeeCode ?? '', gender(sl.employeeGender), sl.run.payMonth, sl.run.payDate, `${sl.run.periodStart}〜${sl.run.periodEnd}`,
+      return [sl.employeeName ?? '', sl.employeeCode ?? '', gender(sl.employeeGender), KIND_LABEL[sl.run.kind], sl.run.payMonth, sl.run.payDate, sl.run.kind === 'bonus' ? '' : `${sl.run.periodStart}〜${sl.run.periodEnd}`,
         a.workDays ?? null, h(a.workMinutes), h(a.overtimeMinutes), h(a.holidayMinutes), h(a.nightMinutes),
         ...payLabels.map((l) => amount('pay', l)), sl.gross, ...dedLabels.map((l) => amount('deduct', l)), sl.deductions, sl.net];
     });
@@ -487,12 +505,191 @@ export class PayrollService {
     if (!latest) return 'まだ確定した給与明細がありません。';
     const d = await this.mySlip(tenantId, userId, employee, latest.id);
     const y = (n: number) => `${n.toLocaleString('ja-JP')} 円`;
-    let text = `${payMonthLabel(latest.payMonth)}（支払日 ${latest.payDate}）の給与は、総支給 ${y(latest.gross)}、控除 ${y(latest.deductions)}、差引支給 ${y(latest.net)}です。`;
+    let text = `${payMonthLabel(latest.payMonth)}（支払日 ${latest.payDate}）の${KIND_LABEL[latest.kind]}は、総支給 ${y(latest.gross)}、控除 ${y(latest.deductions)}、差引支給 ${y(latest.net)}です。`;
     if (d?.previousNet !== null && d?.previousNet !== undefined) {
       const diff = latest.net - d.previousNet;
       text += diff === 0 ? '前の回と同じ手取りです。' : `前の回より手取りが ${y(Math.abs(diff))}${diff > 0 ? '増えました' : '減りました'}${d.diff ? `（${d.diff}）` : ''}。`;
     }
     return text + '行ごとの内訳は「給与・勤怠」の画面で見られます。';
+  }
+
+  // ---- 調整の行（第30.10.4節） ----
+
+  /** 回の調整の行。 */
+  async adjustments(tenantId: string, kind: PayAdjustment['kind'], payMonth: string): Promise<PayAdjustment[]> {
+    return this.deps.store.listAdjustments(tenantId, kind, payMonth);
+  }
+
+  /** その月のその種類の回が確定しているか。 */
+  private async confirmedRun(tenantId: string, kind: PayRun['kind'], payMonth: string): Promise<PayRun | undefined> {
+    return (await this.deps.store.listRuns(tenantId)).find((r) => r.kind === kind && r.payMonth === payMonth && (r.status === 'confirmed' || r.status === 'paid'));
+  }
+
+  /** 調整の行を足す（確定した月には足せない）。足したら、その月を計算し直すと入る。 */
+  async addAdjustment(tenantId: string, userId: string, input: Partial<PayAdjustment>): Promise<{ adjustment: PayAdjustment } | { error: string }> {
+    const kind = input.kind === 'bonus' ? 'bonus' : 'monthly';
+    const payMonth = String(input.payMonth ?? '');
+    if (!YM.test(payMonth)) return { error: '支給月を YYYY-MM で入れてください' };
+    if (!input.employeeId || !(await this.deps.hrStore.getEmployee(tenantId, input.employeeId))) return { error: '従業員が見つかりません' };
+    const label = String(input.label ?? '').trim().slice(0, 40);
+    if (!label) return { error: '調整の名前を入れてください' };
+    const amount = Math.round(Number(input.amount));
+    if (!Number.isFinite(amount) || amount <= 0 || amount > 100_000_000) return { error: '額は 1 円以上で入れてください' };
+    if (await this.confirmedRun(tenantId, kind, payMonth)) return { error: 'この月は確定しています。次の月に足してください' };
+    const direction = input.direction === 'deduct' ? 'deduct' : 'pay';
+    const a: PayAdjustment = {
+      id: randomUUID(), employeeId: input.employeeId, kind, payMonth, label, direction, amount,
+      // 既定: 支給は所得税と雇用保険の対象に入れ、控除は入れない
+      taxable: typeof input.taxable === 'boolean' ? input.taxable : direction === 'pay',
+      insurable: typeof input.insurable === 'boolean' ? input.insurable : direction === 'pay',
+      reason: String(input.reason ?? '').trim().slice(0, 200), source: 'manual',
+    };
+    await this.deps.store.addAdjustment(tenantId, { ...a, createdBy: userId });
+    await this.audit(tenantId, userId, 'hr.payroll.adjust', a.employeeId, { kind, payMonth, direction, add: true });
+    return { adjustment: a };
+  }
+
+  /** 調整の行を外す（確定した月の行は外せない）。 */
+  async removeAdjustment(tenantId: string, userId: string, id: string, kind: PayAdjustment['kind'], payMonth: string): Promise<{ ok: true } | { error: string }> {
+    if (await this.confirmedRun(tenantId, kind, payMonth)) return { error: 'この月は確定しているため、調整の行は外せません' };
+    const removed = await this.deps.store.removeAdjustment(tenantId, id);
+    if (!removed) return { error: '調整の行が見つかりません' };
+    await this.audit(tenantId, userId, 'hr.payroll.adjust', removed.employeeId, { kind: removed.kind, payMonth: removed.payMonth, remove: true });
+    return { ok: true };
+  }
+
+  // ---- 賞与（第30.11.1節） ----
+
+  /** 賞与の回の入力。無ければ、前の賞与の額を既定にした案（支払日は空）。 */
+  async bonusPlan(tenantId: string, payMonth: string): Promise<BonusPlan & { saved: boolean }> {
+    const plan = await this.deps.store.getBonusPlan(tenantId, payMonth);
+    if (plan) return { ...plan, saved: true };
+    const prev = await this.deps.store.previousConfirmed(tenantId, 'bonus', payMonth);
+    const amounts = Object.fromEntries(prev.map((s) => [s.employeeId, s.lines.find((l) => l.code === 'bonus')?.amount ?? 0]).filter(([, v]) => Number(v) > 0));
+    return { payMonth, payDate: '', longPeriod: false, amounts, saved: false };
+  }
+
+  /** 賞与の回の入力を残す（確定した月は変えられない）。 */
+  async saveBonusPlan(tenantId: string, userId: string, input: Partial<BonusPlan>): Promise<{ plan: BonusPlan } | { error: string }> {
+    const payDate = String(input.payDate ?? '');
+    if (!YMD.test(payDate)) return { error: '支払日を YYYY-MM-DD で入れてください' };
+    const payMonth = payDate.slice(0, 7);
+    if (await this.confirmedRun(tenantId, 'bonus', payMonth)) return { error: `${payMonthLabel(payMonth)}の賞与は確定しています` };
+    const amounts: Record<string, number> = {};
+    for (const [k, v] of Object.entries(input.amounts ?? {})) {
+      const n = Math.round(Number(v));
+      if (!Number.isFinite(n) || n < 0 || n > 1_000_000_000) return { error: '賞与の額は 0 以上の整数で入れてください' };
+      if (n > 0) amounts[k] = n;
+    }
+    const plan: BonusPlan = { payMonth, payDate, longPeriod: !!input.longPeriod, amounts };
+    await this.deps.store.saveBonusPlan(tenantId, plan, userId);
+    return { plan };
+  }
+
+  /**
+   * 賞与を計算して点検し、下書きとして残す（同じ月の下書きは置き換える）。確定した月は計算し直せない。
+   */
+  async calculateBonus(tenantId: string, userId: string, payMonth: string): Promise<{ run: PayRun; slips: PaySlip[] } | { error: string }> {
+    if (!YM.test(payMonth)) return { error: '支給月を YYYY-MM で入れてください' };
+    if (await this.confirmedRun(tenantId, 'bonus', payMonth)) return { error: `${payMonthLabel(payMonth)}の賞与は確定しています。確定した賞与は計算し直せません` };
+    const plan = await this.deps.store.getBonusPlan(tenantId, payMonth);
+    if (!plan) return { error: '先に支払日と賞与の額を入れてください' };
+    const settings = (await this.deps.repo.getTenantSettings(tenantId)).hr;
+    const prevMonth = shiftMonth(payMonth, -1);
+    const fyStart = Number(payMonth.slice(5, 7)) >= 4 ? `${payMonth.slice(0, 4)}-04` : `${Number(payMonth.slice(0, 4)) - 1}-04`;
+    const [profiles, prevSlips, soFar, adjustments] = await Promise.all([
+      this.deps.store.listProfiles(tenantId), this.deps.store.slipsPaidIn(tenantId, prevMonth, 'monthly'),
+      this.deps.store.bonusHealthSoFar(tenantId, fyStart, payMonth), this.deps.store.listAdjustments(tenantId, 'bonus', payMonth),
+    ]);
+    const employees = (await this.deps.hrStore.listEmployees(tenantId))
+      .filter((e) => e.category !== 'owner' && (plan.amounts[e.id] ?? 0) + adjustments.filter((a) => a.employeeId === e.id).length > 0);
+    const runId = randomUUID();
+    const law: PayRun['law'] = {};
+    const slips: PaySlip[] = [];
+    for (const e of employees) {
+      const terms = termsOn(await this.deps.hrStore.listTerms(tenantId, e.id), plan.payDate);
+      const prev = prevSlips.find((x) => x.employeeId === e.id);
+      const r = calcBonus({
+        employee: e, terms, profile: profiles.find((p) => p.employeeId === e.id) ?? null, settings, amount: plan.amounts[e.id] ?? 0, payDate: plan.payDate,
+        longPeriod: plan.longPeriod, prevTaxable: prev ? prevTaxableOf(prev) : null, prevTax: prev?.lines.find((l) => l.code === 'income-tax')?.amount ?? 0,
+        healthBonusSoFar: soFar.get(e.id) ?? 0, law: this.law, adjustments: adjustments.filter((a) => a.employeeId === e.id),
+      });
+      for (const t of r.tables) law[t.version] = { version: t.version, source: t.source, reviewed: t.review.status === 'verified' };
+      slips.push({ id: randomUUID(), runId, employeeId: e.id, employeeName: e.name, gross: r.gross, deductions: r.deductions, net: r.net, lines: r.lines, warnings: r.warnings, meta: r.meta });
+    }
+    const unverified = Object.values(law).some((l) => !l.reviewed);
+    const checks = reviewOther({ slips, employees: new Map(employees.map((e) => [e.id, e])), profiles: new Map(profiles.map((p) => [p.employeeId, p])), unverified });
+    const run: PayRun = {
+      id: runId, kind: 'bonus', payMonth, payDate: plan.payDate, periodStart: plan.payDate, periodEnd: plan.payDate, status: 'draft', law,
+      warnings: unverified ? [this.deps.allowUnverified ? '法令の表が監修前です。開発の環境のため確定できますが、本番では確定できません' : '法令の表が監修前です。この回は確定に使えません'] : [],
+      calculatedAt: new Date().toISOString(), checks,
+    };
+    await this.deps.store.replaceDraft(tenantId, { ...run, calculatedBy: userId }, slips);
+    await this.audit(tenantId, userId, 'hr.payroll.calculate', payMonth, { kind: 'bonus', employees: slips.length, stops: checks.filter((x) => x.level === 'stop').length });
+    return { run, slips };
+  }
+
+  /**
+   * 賞与支払届の下書き（被保険者ごとの賞与の額と標準賞与額）。マイナンバーは載せない。
+   */
+  async bonusReport(tenantId: string, userId: string, runId: string): Promise<{ columns: string[]; rows: (string | number | null)[][]; payDate: string } | { error: string }> {
+    const run = await this.deps.store.getRun(tenantId, runId);
+    if (!run || run.kind !== 'bonus') return { error: '賞与の回が見つかりません' };
+    if (run.status !== 'confirmed' && run.status !== 'paid') return { error: '賞与支払届は確定した回から作れます' };
+    const slips = await this.deps.store.listSlips(tenantId, runId);
+    const rows: (string | number | null)[][] = [];
+    for (const sl of slips) {
+      if (!sl.meta?.stdBonusHealth && !sl.meta?.stdBonusPension) continue;
+      const e = await this.deps.hrStore.getEmployee(tenantId, sl.employeeId);
+      const bonus = sl.lines.find((l) => l.code === 'bonus')?.amount ?? 0;
+      rows.push([e?.name ?? '', e?.kana ?? '', e?.birthDate ?? '', run.payDate, bonus, sl.meta?.stdBonusHealth ?? 0, sl.meta?.stdBonusPension ?? 0,
+        e?.birthDate && run.payMonth >= reachMonthOf(e.birthDate, 70) ? '70 歳以上被用者' : '']);
+    }
+    await this.audit(tenantId, userId, 'hr.payroll.bonus-report', runId, { rows: rows.length });
+    return { columns: ['氏名', 'ふりがな', '生年月日', '賞与の支払年月日', '賞与の額', '標準賞与額（健康保険）', '標準賞与額（厚生年金）', '備考'], rows, payDate: run.payDate };
+  }
+
+  // ---- 訂正の回（第30.10.4節） ----
+
+  /**
+   * 確定した月の給与の訂正の回を作る。今の情報で同じ月を計算し直し、確定した明細との差を人ごとの差額の明細にする。
+   *
+   * @param payDate 差額を払う日
+   */
+  async createCorrection(tenantId: string, userId: string, runId: string, payDate: string): Promise<{ run: PayRun; slips: PaySlip[] } | { error: string }> {
+    const original = await this.deps.store.getRun(tenantId, runId);
+    if (!original || original.kind !== 'monthly' || (original.status !== 'confirmed' && original.status !== 'paid')) return { error: '訂正できるのは確定した月の給与です' };
+    if (!YMD.test(payDate)) return { error: '差額を払う日を YYYY-MM-DD で入れてください' };
+    if (await this.confirmedRun(tenantId, 'correction', original.payMonth)) return { error: 'この月の訂正の回は確定しています。さらに直すときは、次の月の調整の行を使ってください' };
+    const newId = randomUUID();
+    const [before, c] = await Promise.all([this.deps.store.listSlips(tenantId, runId), this.compute(tenantId, original.payMonth, newId)]);
+    const ids = [...new Set([...before.map((s) => s.employeeId), ...c.slips.map((s) => s.employeeId)])];
+    const slips: PaySlip[] = [];
+    for (const id of ids) {
+      const a = before.find((s) => s.employeeId === id);
+      const b = c.slips.find((s) => s.employeeId === id);
+      const lines = diffLines(a?.lines ?? [], b?.lines ?? []);
+      if (lines.length === 0) continue;
+      const gross = (b?.gross ?? 0) - (a?.gross ?? 0);
+      const deductions = (b?.deductions ?? 0) - (a?.deductions ?? 0);
+      slips.push({
+        id: randomUUID(), runId: newId, employeeId: id, employeeName: b?.employeeName ?? a?.employeeName ?? '', gross, deductions, net: gross - deductions, lines,
+        warnings: (b?.warnings ?? []).filter((w) => !w.startsWith('法令の表が監修前')), meta: {},
+      });
+    }
+    if (slips.length === 0) return { error: '確定した明細と、今の情報で計算した額に差がありません' };
+    const unverified = Object.values(c.law).some((l) => !l.reviewed);
+    const checks = reviewOther({ slips, employees: new Map(c.employees.map((e) => [e.id, e])), profiles: new Map(c.profiles.map((p) => [p.employeeId, p])), unverified });
+    for (const sl of slips) {
+      checks.push({ level: 'check', code: 'correction', text: `差額 ${sl.net >= 0 ? '+' : '−'}${Math.abs(sl.net).toLocaleString('ja-JP')} 円${sl.net < 0 ? '（次の月の給与で差し引きます）' : ''}`, employeeId: sl.employeeId, employeeName: sl.employeeName ?? '' });
+    }
+    const run: PayRun = {
+      id: newId, kind: 'correction', payMonth: original.payMonth, payDate, periodStart: original.periodStart, periodEnd: original.periodEnd, status: 'draft', law: c.law,
+      warnings: unverified ? ['法令の表が監修前です'] : [], calculatedAt: new Date().toISOString(), checks, sourceRunId: original.id,
+    };
+    await this.deps.store.replaceDraft(tenantId, { ...run, calculatedBy: userId }, slips);
+    await this.audit(tenantId, userId, 'hr.payroll.correction', runId, { payMonth: original.payMonth, employees: slips.length });
+    return { run, slips };
   }
 
   /** 回の一覧（新しい順）。 */
@@ -530,4 +727,36 @@ export class PayrollService {
     };
     await this.deps.repo.appendAudit(ev);
   }
+}
+
+/** 明細から、社会保険料等を引いた後の額（控えが無い古い明細は、所得税の行の根拠から読む）。 */
+function prevTaxableOf(slip: PaySlip): number | null {
+  if (typeof slip.meta?.taxable === 'number') return slip.meta.taxable;
+  const v = slip.lines.find((l) => l.code === 'income-tax')?.basis['社会保険料等を引いた後の額'];
+  const n = typeof v === 'string' ? Number(v.replace(/[^\d]/g, '')) : typeof v === 'number' ? v : NaN;
+  return Number.isFinite(n) ? n : null;
+}
+
+/** 年齢に達した月（payroll.ts の reachMonth と同じ。賞与支払届の備考に使う）。 */
+function reachMonthOf(birthDate: string, age: number): string {
+  const [y, m, d] = birthDate.split('-').map(Number) as [number, number, number];
+  const t = new Date(Date.UTC(y + age, m - 1, d));
+  t.setUTCDate(t.getUTCDate() - 1);
+  return t.toISOString().slice(0, 7);
+}
+
+/** 訂正前と訂正後の行の差（行ごと。差の無い行は入れない）。 */
+function diffLines(before: PayLine[], after: PayLine[]): PayLine[] {
+  const codes = [...new Set([...before.map((l) => l.code), ...after.map((l) => l.code)])];
+  const out: PayLine[] = [];
+  const yen = (n: number) => `${n.toLocaleString('ja-JP')} 円`;
+  for (const code of codes) {
+    const a = before.find((l) => l.code === code);
+    const b = after.find((l) => l.code === code);
+    const d = (b?.amount ?? 0) - (a?.amount ?? 0);
+    if (d === 0) continue;
+    const kind = (b ?? a)!.kind;
+    out.push({ code, label: `${(b ?? a)!.label}（差額）`, amount: d, kind, basis: { 訂正前: yen(a?.amount ?? 0), 訂正後: yen(b?.amount ?? 0) } });
+  }
+  return out;
 }

@@ -13,7 +13,7 @@ import type {
   InventoryItem, InventoryItemView, InventoryLocation, InventoryMove, InventoryMoveKind, InventorySettings, InventoryStockRow,
   HrEmployee, HrEmployeeView, HrSettings, HrTask, HrTerms,
   AttClose, AttDay, AttPeriod, AttPunchKind, AttTotals, LeaveBalance, LeaveGrant, LeaveTake,
-  HrFamilyMember, HrPayrollProfile, HrStandardPay, PayRun, PaySlip, PayCheck, HrNoticeSettings, HrDeadline,
+  HrFamilyMember, HrPayrollProfile, HrStandardPay, PayRun, PaySlip, PayCheck, HrNoticeSettings, HrDeadline, PayAdjustment, BonusPlan,
   InventoryCount, InventoryCountRow, InventoryCountScope, InventoryCountView, InventorySupplier,
   InventoryBooking, InventoryBookingMapping, InventoryBookingSource,
 } from '@m2office/shared';
@@ -1200,7 +1200,22 @@ export const api = {
         call<{ ok: true }>(`/hr/payroll/employees/${encodeURIComponent(id)}/family/${encodeURIComponent(memberId)}`, { method: 'DELETE' }),
       runs: (month?: string) => call<{ runs: PayRun[]; schedule: { payDate: string; period: { start: string; end: string; label: string } } | null }>(`/hr/payroll/runs${month ? `?month=${month}` : ''}`),
       calculate: (month: string) => call<{ run: PayRun; slips: PaySlip[] }>('/hr/payroll/runs', { method: 'POST', body: JSON.stringify({ month }) }),
-      run: (id: string) => call<{ run: PayRun; slips: PaySlip[]; blockers: PayCheck[]; canConfirm: boolean }>(`/hr/payroll/runs/${encodeURIComponent(id)}`),
+      run: (id: string) => call<{ run: PayRun; slips: PaySlip[]; blockers: PayCheck[]; canConfirm: boolean; adjustments: PayAdjustment[] }>(`/hr/payroll/runs/${encodeURIComponent(id)}`),
+      /** 調整の行（仕様書 第30.10.4節）。 */
+      addAdjustment: (a: Partial<PayAdjustment>) => call<{ adjustment: PayAdjustment }>('/hr/payroll/adjustments', { method: 'POST', body: JSON.stringify(a) }),
+      removeAdjustment: (id: string, kind: 'monthly' | 'bonus', month: string) =>
+        call<{ ok: true }>(`/hr/payroll/adjustments/${encodeURIComponent(id)}?kind=${kind}&month=${month}`, { method: 'DELETE' }),
+      /** 賞与（仕様書 第30.11.1節）。 */
+      bonus: (month: string) => call<{ plan: BonusPlan & { saved: boolean }; employees: { id: string; name: string }[] }>(`/hr/payroll/bonus?month=${month}`),
+      saveBonus: (plan: Partial<BonusPlan>) => call<{ plan: BonusPlan }>('/hr/payroll/bonus', { method: 'PUT', body: JSON.stringify(plan) }),
+      calculateBonus: (month: string) => call<{ run: PayRun; slips: PaySlip[] }>('/hr/payroll/bonus/calculate', { method: 'POST', body: JSON.stringify({ month }) }),
+      bonusReport: async (id: string, date: string) => {
+        const blob = await fetchBlob(`/hr/payroll/runs/${encodeURIComponent(id)}/bonus-report?format=xlsx`);
+        if (!blob) throw new ApiError('賞与支払届の下書きを出せませんでした', 400);
+        saveBlob(blob, `賞与支払届（下書き）-${date}.xlsx`);
+      },
+      /** 確定した月の給与の訂正の回を作る。 */
+      correction: (id: string, payDate: string) => call<{ run: PayRun; slips: PaySlip[] }>(`/hr/payroll/runs/${encodeURIComponent(id)}/correction`, { method: 'POST', body: JSON.stringify({ payDate }) }),
       /** 確定する（管理者。お金の確定。仕様書 第30.10.3節）。 */
       confirm: (id: string) => call<{ run: PayRun; published: number; pdf: string[] }>(`/hr/payroll/runs/${encodeURIComponent(id)}/confirm`, { method: 'POST' }),
       requestConfirm: (id: string) => call<{ sent: number }>(`/hr/payroll/runs/${encodeURIComponent(id)}/request`, { method: 'POST' }),

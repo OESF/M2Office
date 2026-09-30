@@ -30,7 +30,7 @@ const yen = (n: number) => `${n.toLocaleString('ja-JP')} 円`;
 const signed = (n: number) => `${n > 0 ? '+' : n < 0 ? '−' : '±'}${Math.abs(n).toLocaleString('ja-JP')} 円`;
 
 /** 明細の注意のうち、使う表が無くて額を出せないもの（止める）。 */
-const MISSING_TABLE = /税額表が未登録|料率の表が未登録|料率か等級表が未登録|料率が分かりません|都道府県が会社の設定にありません|等級表が無く/;
+const MISSING_TABLE = /税額表が未登録|料率の表が未登録|料率か等級表が未登録|料率が分かりません|都道府県が会社の設定にありません|等級表が無く|算出率の表が未登録/;
 
 /** 前の回から変わった行（差の大きい順）。 */
 export function changedLines(cur: PaySlip, prev: PaySlip): { label: string; diff: number }[] {
@@ -115,6 +115,32 @@ export function reviewRun(input: ReviewInput): PayCheck[] {
     if (pm === 6 && p?.residentTax.find((r) => r.fiscalYear === year)?.source === 'notice') {
       checks.push({ level: 'check', code: 'resident-notice', text: `住民税は決定通知書から読み取った額（${year} 年度）で引いています`, ...who });
     }
+  }
+  return [...stops, ...checks];
+}
+
+/**
+ * 賞与の回と訂正の回を点検する（第30.11.1節・第30.10.4節）。月の給与と違い、勤怠の締めと前の回との差は見ない。
+ *
+ * @returns 止めるものを先に、確かめるものを後に
+ */
+export function reviewOther(input: { slips: PaySlip[]; employees: Map<string, HrEmployee>; profiles: Map<string, HrPayrollProfile>; unverified: boolean }): PayCheck[] {
+  const stops: PayCheck[] = [];
+  const checks: PayCheck[] = [];
+  if (input.unverified) stops.push({ level: 'stop', code: 'unverified', text: '法令の表が監修前です。監修が済むまで確定できません' });
+  for (const s of input.slips) {
+    const who = { employeeId: s.employeeId, employeeName: s.employeeName ?? '' };
+    const e = input.employees.get(s.employeeId);
+    const p = input.profiles.get(s.employeeId);
+    if (s.net < 0 && !s.lines.some((l) => l.basis['訂正前'] !== undefined)) stops.push({ level: 'stop', code: 'negative', text: `差引支給がマイナスです（${s.net.toLocaleString('ja-JP')} 円）`, ...who });
+    for (const w of s.warnings) {
+      if (w.startsWith('法令の表が監修前')) continue;
+      if (MISSING_TABLE.test(w)) stops.push({ level: 'stop', code: 'missing-table', text: w, ...who });
+      else checks.push({ level: 'check', code: /月額表で所得税/.test(w) ? 'bonus-special' : 'note', text: w, ...who });
+    }
+    const bank = p?.bank ?? {};
+    if (s.net > 0 && (!bank.bankCode || !bank.branchCode || !bank.number)) checks.push({ level: 'check', code: 'no-bank', text: '振込先（銀行と支店の番号・口座番号）が無いため、振込データに入りません', ...who });
+    if (!e?.userId || !p?.payslipConsentAt) checks.push({ level: 'check', code: 'no-consent', text: '明細を画面で受け取る同意が無いため、PDF で渡してください', ...who });
   }
   return [...stops, ...checks];
 }

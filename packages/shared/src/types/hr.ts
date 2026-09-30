@@ -101,7 +101,7 @@ export interface HrDeadline {
   date: string;
   /** 期間の始まり（年度更新のように期間があるもの）。 */
   from?: string;
-  kind: 'withholding' | 'resident' | 'resident-switch' | 'labor-insurance' | 'santei' | 'yea' | 'annual-report' | 'agreement' | 'health-check' | 'hire-check' | 'contract-end' | 'task' | 'leave-obligation' | 'law-change' | 'law-stale';
+  kind: 'withholding' | 'resident' | 'resident-switch' | 'labor-insurance' | 'santei' | 'yea' | 'annual-report' | 'agreement' | 'health-check' | 'hire-check' | 'contract-end' | 'task' | 'leave-obligation' | 'law-change' | 'law-stale' | 'bonus-report';
   title: string;
   detail: string;
   employeeId?: string;
@@ -436,6 +436,36 @@ export interface PaySlip {
   warnings: string[];
   /** 勤怠の期間の集計（賃金台帳に使う）。 */
   attendance?: Partial<AttTotals>;
+  /** 計算の控え（社会保険料等を引いた後の額・標準賞与額。次の賞与の税と上限に使う）。 */
+  meta?: { taxable?: number; stdBonusHealth?: number; stdBonusPension?: number };
+}
+
+/** 回ごと・人ごとの調整の行（第30.10.4節）。一回だけの支給か控除。 */
+export interface PayAdjustment {
+  id: string;
+  employeeId: string;
+  employeeName?: string;
+  kind: 'monthly' | 'bonus';
+  payMonth: string;
+  label: string;
+  direction: 'pay' | 'deduct';
+  amount: number;
+  /** 所得税の対象か。 */
+  taxable: boolean;
+  /** 雇用保険の賃金に入れるか。 */
+  insurable: boolean;
+  reason: string;
+  source: 'manual' | 'correction';
+}
+
+/** 賞与の回の入力（第30.11.1節）。 */
+export interface BonusPlan {
+  payMonth: string;
+  payDate: string;
+  /** 賞与の計算期間が 6 か月を超えるか。 */
+  longPeriod: boolean;
+  /** 人ごとの賞与の額（従業員の ID → 円）。 */
+  amounts: Record<string, number>;
 }
 
 /** 回の点検の 1 つ（第30.10.3節）。`stop` が残っていれば確定できない。 */
@@ -488,4 +518,6 @@ export interface PayRun {
   transferAt?: string | null;
   /** 試しの計算の比べ。 */
   compare?: PayTrialCompare | null;
+  /** 訂正の回の元の回。 */
+  sourceRunId?: string | null;
 }

@@ -6,7 +6,7 @@
  */
 
 import type {
-  AttDay, AttTotals, HrEmployee, HrPayItemRule, HrPayrollProfile, HrSettings, HrTerms, PayLine,
+  AttDay, AttTotals, HrEmployee, HrPayItemRule, HrPayrollProfile, HrSettings, HrTerms, PayAdjustment, PayLine,
 } from '@m2office/shared';
 import type { Law } from './law/lookup.js';
 import type { LawMeta } from './law/types.js';
@@ -28,6 +28,8 @@ export interface SlipInput {
   payDate: string;
   periodEnd: string;
   law: Law;
+  /** この回の調整の行（第30.10.4節）。 */
+  adjustments?: PayAdjustment[];
 }
 
 /** 1 人分の計算の結果。 */
@@ -39,6 +41,20 @@ export interface SlipResult {
   warnings: string[];
   /** 使った法令の表（版と監修の状態）。 */
   tables: LawMeta[];
+  /** 計算の控え（社会保険料等を引いた後の額。次の賞与の税に使う）。 */
+  meta: { taxable?: number; stdBonusHealth?: number; stdBonusPension?: number };
+}
+
+/** 調整の行を明細の行にし、所得税と雇用保険の対象から外す額を返す（第30.10.4節）。 */
+export function adjustmentLines(adjustments: PayAdjustment[]): { pays: PayLine[]; deducts: PayLine[]; notTaxable: number; notInsurable: number } {
+  const yen = (n: number) => `${n.toLocaleString('ja-JP')} 円`;
+  const basis = (a: PayAdjustment) => ({ 調整: a.source === 'correction' ? '訂正の回の差額' : '担当者が足した行', ...(a.reason ? { 理由: a.reason } : {}), 所得税: a.taxable ? '対象' : '対象外', 雇用保険: a.insurable ? '賃金に入れる' : '入れない', 額: yen(a.amount) });
+  const pays = adjustments.filter((a) => a.direction === 'pay').map((a): PayLine => ({ code: `adjust:${a.id}`, label: a.label, amount: a.amount, kind: 'pay', basis: basis(a) }));
+  const deducts = adjustments.filter((a) => a.direction === 'deduct').map((a): PayLine => ({ code: `adjust:${a.id}`, label: a.label, amount: a.amount, kind: 'deduct', basis: basis(a) }));
+  // 支給の調整で対象外のものは対象から外し、控除の調整で対象のもの（過払いの戻しなど）は対象から引く
+  const notTaxable = adjustments.reduce((s, a) => s + (a.direction === 'pay' ? (a.taxable ? 0 : a.amount) : (a.taxable ? a.amount : 0)), 0);
+  const notInsurable = adjustments.reduce((s, a) => s + (a.direction === 'pay' ? (a.insurable ? 0 : a.amount) : (a.insurable ? a.amount : 0)), 0);
+  return { pays, deducts, notTaxable, notInsurable };
 }
 
 /** 50 銭以下は切り捨て、50 銭を超えれば切り上げ（社会保険料・雇用保険料の本人負担）。 */
@@ -103,7 +119,7 @@ export function calcSlip(input: SlipInput): SlipResult {
 
   if (!t || t.wageAmount === null) {
     warnings.push('雇用条件に賃金の額がありません');
-    return { gross: 0, deductions: 0, net: 0, lines, warnings, tables: [] };
+    return { gross: 0, deductions: 0, net: 0, lines, warnings, tables: [], meta: {} };
   }
   const allowances = t.allowances.map((a) => ({ ...a, rule: itemRule(a.name, pr.items) }));
   const premiumAllowances = allowances.filter((a) => a.rule.premiumBase).reduce((s, a) => s + a.amount, 0);
@@ -161,6 +177,10 @@ export function calcSlip(input: SlipInput): SlipResult {
     const lateEarly = totals.lateMinutes + totals.earlyMinutes;
     pay('late', '遅刻早退控除', -round(unit * lateEarly / 60), { 単価: unitText, 遅刻と早退: hours(lateEarly) });
   }
+
+  // 調整の行（一回だけの支給と控除。社会保険の報酬には入れない）
+  const adj = adjustmentLines(input.adjustments ?? []);
+  lines.push(...adj.pays);
 
   const gross = lines.filter((l) => l.kind === 'pay').reduce((s, l) => s + l.amount, 0);
   const taxFreeItems = allowances.filter((a) => !a.rule.taxable).reduce((s, a) => s + a.amount, 0);
@@ -226,8 +246,9 @@ export function calcSlip(input: SlipInput): SlipResult {
     const r = law.employmentRate('general', input.periodEnd);
     if (r) {
       use(r.table);
-      employment = round50(gross * r.value);
-      deduct('employment', '雇用保険料', employment, { 賃金の総額: yen(gross), 労働者負担: `${Math.round(r.value * 100000) / 100} / 1,000`, 端数: '50 銭以下切り捨て', 表: r.table.version });
+      const wages = gross - adj.notInsurable;
+      employment = round50(wages * r.value);
+      deduct('employment', '雇用保険料', employment, { 賃金の総額: yen(wages), 労働者負担: `${Math.round(r.value * 100000) / 100} / 1,000`, 端数: '50 銭以下切り捨て', 表: r.table.version });
     } else {
       warnings.push('雇用保険料率の表が未登録です');
     }
@@ -236,7 +257,7 @@ export function calcSlip(input: SlipInput): SlipResult {
   }
 
   // 源泉所得税（月額表）
-  const taxable = gross - taxFreeCommute - taxFreeItems - social - employment;
+  const taxable = gross - taxFreeCommute - taxFreeItems - social - employment - adj.notTaxable;
   const column = p?.taxColumn ?? 'ko';
   const dependents = p?.dependents ?? 0;
   const w = law.withholding(Math.max(0, taxable), column, dependents, input.payDate);
@@ -259,6 +280,8 @@ export function calcSlip(input: SlipInput): SlipResult {
     deduct('resident-tax', '住民税', pm === 6 ? rt.june : rt.monthly, { 年度: `${fiscal} 年度`, 市区町村: rt.municipality, 月: pm === 6 ? '6 月分' : '7 月以降の月額' });
   }
 
+  lines.push(...adj.deducts);
+
   // 最低賃金（時間あたりの額）
   const pref = settings.health.prefecture;
   const mw = pref ? law.minimumWage(pref, input.periodEnd) : null;
@@ -277,5 +300,5 @@ export function calcSlip(input: SlipInput): SlipResult {
 
   const deductions = lines.filter((l) => l.kind === 'deduct').reduce((s, l) => s + l.amount, 0);
   for (const m of tables.values()) if (m.review.status !== 'verified') { warnings.push('法令の表が監修前です（確定には使えません）'); break; }
-  return { gross, deductions, net: gross - deductions, lines, warnings, tables: [...tables.values()] };
+  return { gross, deductions, net: gross - deductions, lines, warnings, tables: [...tables.values()], meta: { taxable: Math.max(0, taxable) } };
 }

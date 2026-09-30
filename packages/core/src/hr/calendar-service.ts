@@ -69,6 +69,12 @@ export class LaborCalendar {
       this.deps.payrollStore.monthlyTotals(tenantId, `${Number(today.slice(0, 4)) - 1}-01`),
     ]);
     const law = this.deps.law ? this.lawItems(new Law(this.deps.law), today, days, settings.health.prefecture) : [];
+    // 賞与支払届（支払日から 5 日以内。第30.11.1節）
+    for (const r of await this.deps.payrollStore.listRuns(tenantId)) {
+      if (r.kind !== 'bonus' || (r.status !== 'confirmed' && r.status !== 'paid')) continue;
+      const due = new Date(Date.parse(`${r.payDate}T00:00:00Z`) + 5 * 86_400_000).toISOString().slice(0, 10);
+      law.push({ date: due, kind: 'bonus-report', title: `賞与支払届（${Number(r.payMonth.slice(5, 7))} 月の賞与）`, detail: '「給与」の賞与の回で下書きを出し、年金事務所（健康保険組合）に届け出る' });
+    }
     return { items: buildDeadlines({ today, days, settings, employees, terms, tasks, obligations, payments, law }), usesPayroll: payments.length > 0 };
   }
 

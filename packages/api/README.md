@@ -195,6 +195,9 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/hr/payroll/runs` ／ `POST /v1/hr/payroll/runs` ／ `GET /v1/hr/payroll/runs/:id` | 給与の回の一覧（`month` で支払日と勤怠の期間も）／ 支給月（`month`）の月の給与を計算して点検し、下書きにする（同じ月の下書きは置き換える。確定した月は 400）／ 回と明細と点検（行ごとの根拠・確定を止めているもの `blockers`・確定できるか `canConfirm`。見たことを監査ログに残す） |
 | `GET /v1/hr/employees/:id/terms-notice` ／ `POST .../terms-notice` | 労働条件通知書（第30.5.3節）: 明示事項と足りない事項・会社の定めの既定 ／ PDF（本文 `notice`: 昇給・賞与・退職手当・退職に関する事項・相談の窓口・その他。書いた文を次からの既定として残す。`on`: 雇用条件を選ぶ日） |
 | `GET /v1/hr/calendar` | 労務の期限（第30.19.1節。`days` 既定 90。納付・年度更新・算定基礎届・36 協定・健康診断・契約の満了・入退社の手続き・有給の取得義務。過ぎて済んでいない手続きを先頭に） |
+| `GET /v1/hr/payroll/adjustments` ／ `POST .../adjustments` ／ `DELETE .../adjustments/:id` | 調整の行（第30.10.4節。`kind`: monthly・bonus、`month`）／ 足す（`employeeId`・`label`・`direction`・`amount`・`taxable`・`insurable`・`reason`。確定した月は 400）／ 外す |
+| `GET /v1/hr/payroll/bonus` ／ `PUT .../bonus` ／ `POST .../bonus/calculate` | 賞与の回の入力と入れられる従業員（`month`。前の賞与の額を既定に）／ 入力を残す（`payDate`・`longPeriod`・`amounts`）／ 賞与を計算して下書きにする（第30.11.1節） |
+| `GET /v1/hr/payroll/runs/:id/bonus-report` ／ `POST .../runs/:id/correction` | 賞与支払届の下書き（確定した賞与の回。`format`）／ 確定した月の給与の訂正の回を作る（`payDate`。差が無ければ 400） |
 | `POST /v1/hr/payroll/runs/:id/confirm` ／ `POST .../request` | 段 4（第30.10.3節）: 確定する（**管理者だけ**。押すことを承認とする。危険度 financial。点検で止まっていれば 400。監修前の表はデバッグモードのときだけ確定でき、回に残す。ADR-0053。確定すると同意した本人に明細を知らせる）／ 管理者に確定を頼む |
 | `POST /v1/hr/payroll/runs/:id/transfer` | 振込データ（全銀協の形式・シフト JIS・120 バイトの固定長）を作る。確定した回から**管理者だけ**。作れなければ 400 と `problems`。`X-Transfer-Count`・`X-Transfer-Excluded`（振込先の無い人） |
 | `GET /v1/hr/payroll/slips/:id/pdf` ／ `GET /v1/hr/payroll/ledger` | 明細の PDF ／ 賃金台帳（`year`・`format`: csv・xlsx。確定した月の給与と法定の記載事項） |

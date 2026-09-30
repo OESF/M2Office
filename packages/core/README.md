@@ -48,7 +48,8 @@ src/hr/          人事・給与（内蔵の拡張。第30章）。段 1: 置き
                  全銀協の形式（zengin.ts）・明細の PDF（payslip-pdf.ts）・住民税の決定通知書の読み取り（resident-notice.ts）・
                  試しの計算（payroll-trial.ts）。
                  労働条件通知書（terms-notice.ts）・労務カレンダー（calendar.ts・calendar-service.ts）・道具 hr.deadlines（tools.ts。朝のブリーフが読む）、
-                 規程から設定の案（rules-proposal.ts）・法令の表の見張り（law/lookup.ts の staleAt・changesBetween）
+                 規程から設定の案（rules-proposal.ts）・法令の表の見張り（law/lookup.ts の staleAt・changesBetween）。
+                 Phase 2 段 1: 賞与の計算（bonus.ts。算出率の表 law/bonus-2026.ts）・調整の行と訂正の回（payroll.ts・payroll-service.ts）
 src/secretary/   秘書。3 層の応答振り分け、定時実行の確認・停止・再開・今すぐ実行（推論なし。第10.9.8節）、
                  社内のお知らせを出す・取り下げる・並べる・済んだにする（notices.ts。第10.15節）
                  在庫の依頼の見分けと、在庫の数の問いへのその場の答え（inventory.ts。第29.15節）
