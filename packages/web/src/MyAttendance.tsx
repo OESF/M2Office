@@ -1,5 +1,5 @@
 /**
- * @file 本人の「給与・勤怠」の画面（仕様書 第30.25節。人事・給与の段 2）。打刻・期間の勤怠と直し・有給の残りと申請。
+ * @file 本人の「給与・勤怠」の画面（仕様書 第30.25節）。打刻・期間の勤怠と直し・有給の残りと申請・給与明細（同意して受け取る）。
  *
  * 本人の分だけを扱う（API が確かめる）。スマホでも押しやすいよう、打刻のボタンを大きく上に置く。
  * 説明文は常に出さない（原則 u11）。分からなければ秘書に聞く（「有給あと何日？」「出勤」も秘書に言える）。
@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { AttDay, AttPunchKind } from '@m2office/shared';
-import { api, describeError, type MyHrView } from './api.js';
+import { api, describeError, type MyHrView, type MySlipSummary } from './api.js';
 
 const WEEK = '日月火水木金土';
 const hm = (m: number) => (m ? `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}` : '');
@@ -54,6 +54,8 @@ export function MyAttendance() {
         </div>
       </div>
       {error && <p className="error">{error}</p>}
+
+      <MyPayslips />
 
       <div className="card myhr-leave">
         <div className="row wrap">
@@ -126,6 +128,65 @@ export function MyAttendance() {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+/**
+ * 本人の給与明細（仕様書 第30.10.3節）。画面で受け取るには本人の同意が要る（所得税法）。同意はいつでも取り消せる。
+ */
+function MyPayslips() {
+  const [data, setData] = useState<{ consentAt: string | null; slips: MySlipSummary[] } | null>(null);
+  const [open, setOpen] = useState<Awaited<ReturnType<typeof api.myHr.payslip>> | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(() => {
+    api.myHr.payslips().then(setData).catch((e) => setError(describeError(e, '読み込めませんでした')));
+  }, []);
+  useEffect(load, [load]);
+  if (!data) return error ? <p className="error">{error}</p> : null;
+  const consent = (v: boolean) => void api.myHr.consent(v).then(() => { setOpen(null); load(); }).catch((e) => setError(describeError(e, '変えられませんでした')));
+  const label = (ym: string) => `${Number(ym.slice(0, 4))} 年 ${Number(ym.slice(5, 7))} 月支給`;
+  const yen = (n: number) => `${n.toLocaleString('ja-JP')} 円`;
+  if (!data.consentAt) {
+    return (
+      <div className="card row wrap">
+        <strong className="grow">給与明細を画面で受け取りますか</strong>
+        <button className="btn small" onClick={() => consent(true)}>同意して受け取る</button>
+      </div>
+    );
+  }
+  return (
+    <div className="card myhr-slips">
+      <div className="row wrap">
+        <strong className="grow">給与明細</strong>
+        <button className="btn ghost small" onClick={() => consent(false)}>画面での受け取りをやめる</button>
+      </div>
+      {error && <p className="error">{error}</p>}
+      {data.slips.length === 0 && <p className="muted small">まだありません</p>}
+      <ul className="plain small">
+        {data.slips.map((x) => (
+          <li key={x.id}>
+            <button className="link grow" onClick={() => (open?.slip.id === x.id ? setOpen(null) : void api.myHr.payslip(x.id).then(setOpen).catch((e) => setError(describeError(e, '読み込めませんでした'))))}>{label(x.payMonth)}</button>
+            <span>差引支給 <strong>{yen(x.net)}</strong></span>
+          </li>
+        ))}
+      </ul>
+      {open && (
+        <div className="pay-slip">
+          {open.diff && open.previousNet !== null && <p className="small">前の回より {open.slip.net - open.previousNet >= 0 ? '+' : '−'}{Math.abs(open.slip.net - open.previousNet).toLocaleString('ja-JP')} 円（{open.diff}）</p>}
+          <table className="table small">
+            <tbody>
+              {open.slip.lines.map((l) => (
+                <tr key={l.code}><td>{l.kind === 'deduct' ? '控除' : '支給'}</td><td>{l.label}</td><td className="num">{l.amount.toLocaleString('ja-JP')}</td></tr>
+              ))}
+              <tr><td /><td><strong>総支給</strong></td><td className="num">{open.slip.gross.toLocaleString('ja-JP')}</td></tr>
+              <tr><td /><td><strong>控除の計</strong></td><td className="num">{open.slip.deductions.toLocaleString('ja-JP')}</td></tr>
+              <tr><td /><td><strong>差引支給</strong></td><td className="num"><strong>{open.slip.net.toLocaleString('ja-JP')}</strong></td></tr>
+            </tbody>
+          </table>
+          <button className="btn ghost small" onClick={() => void api.myHr.payslipPdf(open.slip.id, open.slip.run.payMonth).catch((e) => setError(describeError(e, 'PDF を出せませんでした')))}>PDF</button>
+        </div>
+      )}
     </div>
   );
 }

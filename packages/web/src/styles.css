@@ -1441,3 +1441,11 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .pay-table td.pay-line .muted { font-size: 0.9em; }
 .pay-slip { padding: 6px 0; }
 .pay-slip td.num { text-align: right; white-space: nowrap; }
+.hr input.tiny { width: 6em; flex: 0 1 6em; }
+.pay-checks { border: 1px solid var(--line); border-radius: 4px; padding: 6px 10px; margin: 6px 0; }
+.pay-checks.stop { border-color: var(--danger, #c0392b); }
+.pay-checks ul { margin: 4px 0 0; padding-left: 1.2em; }
+.pay-trial { margin-top: 16px; }
+.pay-trial h3 { font-size: 1em; display: flex; gap: 8px; align-items: center; }
+.pay-table td.pay-diff { background: var(--warn-soft, rgba(230, 160, 0, 0.12)); }
+.myhr-slips li { display: flex; gap: 8px; align-items: baseline; }

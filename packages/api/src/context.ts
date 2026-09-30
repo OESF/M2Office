@@ -219,10 +219,15 @@ export function buildDeps(): AppDeps {
     store: new PostgresAttendanceStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
     hrStore: hrService.deps.store, repo,
   });
+  // 給与（第30.10節）。秘書が本人の明細に答えるため、秘書より先に作る。監修前の表での確定はデバッグモードだけ（ADR-0053）
+  const payroll = new PayrollService({
+    store: new PostgresPayrollStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+    hrStore: hrService.deps.store, attendance, repo, law: LAW_BOOK, llm: (tenantId) => ai.llmFor(tenantId), allowUnverified: debug !== null,
+  });
   const help = new HelpCatalog(loadHelpArticles(helpDir(), log), OFFICIAL_AGENTS, registry);
   const secretary = new Secretary({
-    // 勤怠と有給（第30.20節）
-    attendance,
+    // 勤怠と有給・本人の給与明細（第30.20節）
+    attendance, payroll,
     repo, llm, connector, agents: OFFICIAL_AGENTS, help, agentsFor, llmFor: (t) => ai.llmFor(t), notices,
     // デバッグモードでは、振り分けの経過を記録に残す（仕様書 第20.4.1節「デバッグモード」）
     ...(debug ? { onTrace: (tenantId: string, userId: string, action: string, target: string, detail?: Record<string, unknown>) => {
@@ -296,10 +301,7 @@ export function buildDeps(): AppDeps {
     // 人事・給与（第30章）。台帳は人事区画の人だけが扱い、勤怠と有給は本人も扱う
     hr: {
       service: hrService, attendance, access: hrAccess(repo),
-      payroll: new PayrollService({
-        store: new PostgresPayrollStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
-        hrStore: hrService.deps.store, attendance, repo, law: LAW_BOOK,
-      }),
+      payroll,
     },
   };
 }

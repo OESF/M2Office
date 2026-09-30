@@ -1,9 +1,9 @@
 ---
 title: M2Office 仕様書
-version: 0.170.0
+version: 0.171.0
 status: draft
 created: 2026-09-20
-updated: 2026-09-29
+updated: 2026-09-30
 owner: 三浦
 tags: [M2Office, specification, ai-agent, sme, saas, platform, google-workspace, gemini, secretary-agent]
 ---
@@ -153,6 +153,7 @@ tags: [M2Office, specification, ai-agent, sme, saas, platform, google-workspace,
 | ADR-0050 | 在庫管理のバーコードの読み取りと棚のラベルに使う部品 | `docs/adr/0050-inventory-barcode-and-label-libraries.md` |
 | ADR-0051 | 店頭サイネージを内蔵の拡張にし、会社の画面に出すことを社外への送信としない | `docs/adr/0051-signage-own-screens-not-external.md` |
 | ADR-0052 | 源泉所得税は税額表で引き、法令の表は公式の発表から取り込んだデータのファイルとして持つ | `docs/adr/0052-payroll-law-tables-as-data.md` |
+| ADR-0053 | 給与の確定は管理者が給与の画面で押すことを承認とし、監修前の表での確定は開発の環境だけに許す | `docs/adr/0053-payroll-confirm-by-admin.md` |
 | 実地の確認の手順 | 自社で使いながら確かめる順番と、用意するもの | `docs/acceptance-test.md` |
 | プラットフォーム API リファレンス | 公開 API の仕様 | TBD: 実装から自動生成 |
 

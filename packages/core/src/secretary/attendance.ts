@@ -42,6 +42,16 @@ export function attendanceRequest(message: string): AttendanceRequest | null {
   return null;
 }
 
+/**
+ * 本人の給与明細の問いかを見分ける（「今月の給与明細」「手取りが減ったのはなぜ？」）。
+ * 計算や締めの依頼（担当者の仕事）・決まりの問い（「給与の締め日は？」）は当てない。
+ */
+export function payslipRequest(message: string): boolean {
+  const m = message.normalize('NFKC').replace(/\s+/g, '');
+  if (/(計算|締め|設定|方法|規程|規則|とは|振込データ|台帳)/.test(m)) return false;
+  return /(給与|給料|賞与)明細|明細を?(見|出|教)|手取り|(今月|先月|前回|直近|この前)の?(給与|給料)(は|って|を|いくら|見|教|確)/.test(m);
+}
+
 const WEEKDAYS = '日月火水木金土';
 
 /**

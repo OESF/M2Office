@@ -13,7 +13,7 @@ import type {
   InventoryItem, InventoryItemView, InventoryLocation, InventoryMove, InventoryMoveKind, InventorySettings, InventoryStockRow,
   HrEmployee, HrEmployeeView, HrSettings, HrTask, HrTerms,
   AttClose, AttDay, AttPeriod, AttPunchKind, AttTotals, LeaveBalance, LeaveGrant, LeaveTake,
-  HrFamilyMember, HrPayrollProfile, HrStandardPay, PayRun, PaySlip,
+  HrFamilyMember, HrPayrollProfile, HrStandardPay, PayRun, PaySlip, PayCheck,
   InventoryCount, InventoryCountRow, InventoryCountScope, InventoryCountView, InventorySupplier,
   InventoryBooking, InventoryBookingMapping, InventoryBookingSource,
 } from '@m2office/shared';
@@ -106,6 +106,42 @@ async function fetchBlob(path: string): Promise<Blob | null> {
     credentials: 'same-origin', headers: devTenant ? { 'x-tenant': devTenant } : {},
   });
   return res.ok ? res.blob() : null;
+}
+
+/** 本人の明細の一覧の 1 つ。 */
+export interface MySlipSummary {
+  id: string;
+  payMonth: string;
+  payDate: string;
+  kind: string;
+  gross: number;
+  deductions: number;
+  net: number;
+}
+
+/** ファイルを送る（multipart）。失敗なら ApiError（`problems` つき）。 */
+async function postForm<T>(path: string, form: FormData): Promise<T> {
+  const res = await fetch(`/v1${path}`, {
+    method: 'POST', credentials: 'same-origin', body: form,
+    headers: { ...(devTenant ? { 'x-tenant': devTenant } : {}), ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}) },
+  });
+  const body = await res.json().catch(() => ({ error: '通信に失敗しました' }));
+  if (!res.ok) throw new ApiError(body.error ?? `エラー (${res.status})`, res.status, false, null, Array.isArray(body.problems) ? body.problems : []);
+  return body as T;
+}
+
+/** POST で作ったファイルを受け取る（振込データ）。失敗なら ApiError（`problems` つき）。 */
+async function postBlob(path: string): Promise<{ blob: Blob; headers: Headers }> {
+  const res = await fetch(`/v1${path}`, {
+    method: 'POST', credentials: 'same-origin',
+    headers: { ...(devTenant ? { 'x-tenant': devTenant } : {}), ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}) },
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: '通信に失敗しました' }));
+    const problems = Array.isArray(body.problems) ? body.problems.map((p: unknown) => (typeof p === 'string' ? p : `${(p as { where: string }).where}: ${(p as { text: string }).text}`)) : [];
+    throw new ApiError(body.error ?? `エラー (${res.status})`, res.status, false, null, problems);
+  }
+  return { blob: await res.blob(), headers: res.headers };
 }
 
 /** 読んだ中身を、名前を付けて保存させる。 */
@@ -1140,7 +1176,38 @@ export const api = {
         call<{ ok: true }>(`/hr/payroll/employees/${encodeURIComponent(id)}/family/${encodeURIComponent(memberId)}`, { method: 'DELETE' }),
       runs: (month?: string) => call<{ runs: PayRun[]; schedule: { payDate: string; period: { start: string; end: string; label: string } } | null }>(`/hr/payroll/runs${month ? `?month=${month}` : ''}`),
       calculate: (month: string) => call<{ run: PayRun; slips: PaySlip[] }>('/hr/payroll/runs', { method: 'POST', body: JSON.stringify({ month }) }),
-      run: (id: string) => call<{ run: PayRun; slips: PaySlip[] }>(`/hr/payroll/runs/${encodeURIComponent(id)}`),
+      run: (id: string) => call<{ run: PayRun; slips: PaySlip[]; blockers: PayCheck[]; canConfirm: boolean }>(`/hr/payroll/runs/${encodeURIComponent(id)}`),
+      /** 確定する（管理者。お金の確定。仕様書 第30.10.3節）。 */
+      confirm: (id: string) => call<{ run: PayRun; published: number; pdf: string[] }>(`/hr/payroll/runs/${encodeURIComponent(id)}/confirm`, { method: 'POST' }),
+      requestConfirm: (id: string) => call<{ sent: number }>(`/hr/payroll/runs/${encodeURIComponent(id)}/request`, { method: 'POST' }),
+      /** 振込データ（全銀協の形式）を作って保存させる。入らなかった人を返す。 */
+      transfer: async (id: string, month: string): Promise<{ count: number; excluded: string[] }> => {
+        const { blob, headers } = await postBlob(`/hr/payroll/runs/${encodeURIComponent(id)}/transfer`);
+        saveBlob(blob, `振込データ-${month}.txt`);
+        const ex = decodeURIComponent(headers.get('x-transfer-excluded') ?? '');
+        return { count: Number(headers.get('x-transfer-count') ?? 0), excluded: ex ? ex.split('、') : [] };
+      },
+      slipPdf: async (slipId: string, name: string) => {
+        const blob = await fetchBlob(`/hr/payroll/slips/${encodeURIComponent(slipId)}/pdf`);
+        if (!blob) throw new ApiError('明細の PDF を出せませんでした', 404);
+        saveBlob(blob, name);
+      },
+      ledger: async (year: number, format: 'csv' | 'xlsx') => {
+        const blob = await fetchBlob(`/hr/payroll/ledger?year=${year}&format=${format}`);
+        if (!blob) throw new ApiError('書き出せませんでした', 403);
+        saveBlob(blob, `賃金台帳-${year}.${format}`);
+      },
+      readNotice: (file: File) => {
+        const form = new FormData();
+        form.append('file', file);
+        return postForm<{ applied: { employeeId: string; name: string; fiscalYear: number; june: number; monthly: number }[]; skipped: { name: string; reason: string }[] }>('/hr/payroll/resident-tax/read', form);
+      },
+      trial: (month: string, file: File) => {
+        const form = new FormData();
+        form.append('month', month);
+        form.append('file', file);
+        return postForm<{ run: PayRun; slips: PaySlip[] }>('/hr/payroll/trials', form);
+      },
     },
     /** 労働者名簿を書き出す。 */
     roster: async (format: 'csv' | 'xlsx') => {
@@ -1156,6 +1223,15 @@ export const api = {
     fixDay: (date: string, fix: DayFixInput) => call<{ day: AttDay }>(`/me/hr/days/${date}`, { method: 'PUT', body: JSON.stringify(fix) }),
     leave: (date: string, days: number) => call<{ remaining: number }>('/me/hr/leave', { method: 'POST', body: JSON.stringify({ date, days }) }),
     cancelLeave: (id: string) => call<{ ok: true }>(`/me/hr/leave/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    /** 給与明細（段 4。画面で受け取るには本人の同意が要る）。 */
+    payslips: () => call<{ consentAt: string | null; slips: MySlipSummary[] }>('/me/hr/payslips'),
+    payslip: (id: string) => call<{ slip: PaySlip & { run: { payMonth: string; payDate: string; periodStart: string; periodEnd: string } }; diff: string | null; previousNet: number | null }>(`/me/hr/payslips/${encodeURIComponent(id)}`),
+    payslipPdf: async (id: string, month: string) => {
+      const blob = await fetchBlob(`/me/hr/payslips/${encodeURIComponent(id)}/pdf`);
+      if (!blob) throw new ApiError('明細の PDF を出せませんでした', 404);
+      saveBlob(blob, `給与明細-${month}.pdf`);
+    },
+    consent: (consent: boolean) => call<{ consentAt: string | null }>('/me/hr/payslip-consent', { method: 'PUT', body: JSON.stringify({ consent }) }),
   },
   /** 会話の要約（仕様書 第11.9.6節）。 */
   myConversationDigests: () => call<{ items: { day: string; summary: string }[] }>('/me/conversation-digests'),

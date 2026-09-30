@@ -1,12 +1,12 @@
 /**
- * @file 人事・給与の担当者の API（仕様書 第30章。段 1: 台帳・雇用条件・入退社の手続き・取り込み・労働者名簿）。
+ * @file 人事・給与の担当者の API（仕様書 第30章）。台帳・勤怠・有給・給与の計算と点検・確定・振込データ・賃金台帳・住民税の通知書・試しの計算。
  *
  * 会社で入れていて、**人事区画に入っている人だけ**が使える（第30.2節）。それ以外は 403。
  * 他人の台帳を見ただけでも監査ログに残す（第30.21節。処理側で残す）。
  */
 
 import { Hono, type Context } from 'hono';
-import { readSheet, renderSheet, HR_IMPORT_MAX_ROWS, type DayFix, type EmployeeInput, type TermsInput } from '@m2office/core';
+import { readSheet, renderSheet, detectKind, HR_IMPORT_MAX_ROWS, MAX_FILE_BYTES, MIME, type DayFix, type EmployeeInput, type TermsInput } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 
@@ -279,11 +279,103 @@ export function hrRoute(deps: AppDeps) {
     return 'error' in r ? c.json(r, 400) : c.json(r, 201);
   });
 
-  /** 回と明細（見たことを監査ログに残す）。 */
+  /** 回と明細（見たことを監査ログに残す）。確定を止めているものも返す。 */
   app.get('/payroll/runs/:id', async (c) => {
     const { tenant, user } = c.get('ctx');
     const r = await payroll.run(tenant.id, user.id, c.req.param('id'));
-    return r ? c.json(r) : c.json({ error: '回が見つかりません' }, 404);
+    return r ? c.json({ ...r, blockers: payroll.blockers(r.run), canConfirm: user.roles.includes('admin') }) : c.json({ error: '回が見つかりません' }, 404);
+  });
+
+  /**
+   * 月の給与を確定する（お金の確定。管理者が押すことを承認とする。ADR-0053）。
+   *
+   * @remarks 危険度: financial。管理者でなければ 403
+   */
+  app.post('/payroll/runs/:id/confirm', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    if (!user.roles.includes('admin')) return c.json({ error: '給与の確定は管理者が行います。「管理者に確定を頼む」を使ってください' }, 403);
+    const r = await payroll.confirm(tenant.id, user.id, c.req.param('id'));
+    return 'error' in r ? c.json(r, 400) : c.json(r);
+  });
+
+  /** 管理者に確定を頼む（人事区画に入っている管理者に知らせる）。 */
+  app.post('/payroll/runs/:id/request', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const r = await payroll.requestConfirm(tenant.id, user.id, c.req.param('id'));
+    return 'error' in r ? c.json(r, 400) : c.json(r);
+  });
+
+  /**
+   * 振込データ（全銀協の形式・シフト JIS）を作る。確定した回からだけ。
+   *
+   * @remarks 危険度: financial（確定を承認とみなす）。管理者でなければ 403。送金はしない
+   */
+  app.post('/payroll/runs/:id/transfer', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    if (!user.roles.includes('admin')) return c.json({ error: '振込データは管理者が作ります' }, 403);
+    const r = await payroll.transfer(tenant.id, user.id, c.req.param('id'));
+    if ('error' in r) return c.json(r, 400);
+    c.header('Content-Type', 'text/plain; charset=Shift_JIS');
+    c.header('Content-Disposition', `attachment; filename="${r.filename}"`);
+    c.header('X-Transfer-Count', String(r.count));
+    c.header('X-Transfer-Excluded', encodeURIComponent(r.excluded.join('、')));
+    return c.body(r.bytes as unknown as ArrayBuffer);
+  });
+
+  /** 明細の PDF（同意の無い人・アカウントの無い人に渡す）。 */
+  app.get('/payroll/slips/:id/pdf', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const r = await payroll.slipPdf(tenant.id, user.id, c.req.param('id'));
+    if (!r) return c.json({ error: '明細が見つかりません' }, 404);
+    c.header('Content-Type', 'application/pdf');
+    c.header('Content-Disposition', `attachment; filename="${r.filename}"`);
+    return c.body(r.bytes as unknown as ArrayBuffer);
+  });
+
+  /** 賃金台帳を CSV・Excel で書き出す（年の確定した月の給与。監査ログに残す）。 */
+  app.get('/payroll/ledger', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const year = Number(c.req.query('year'));
+    if (!Number.isInteger(year) || year < 2000 || year > 2100) return c.json({ error: '年を入れてください' }, 400);
+    const format = c.req.query('format') === 'xlsx' ? 'xlsx' : 'csv';
+    const { columns, rows } = await payroll.ledger(tenant.id, user.id, year);
+    const bytes = await renderSheet(`賃金台帳 ${year}`, columns, rows, format);
+    c.header('Content-Type', format === 'csv' ? 'text/csv; charset=utf-8' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    c.header('Content-Disposition', `attachment; filename="wage-ledger-${year}.${format}"`);
+    return c.body(bytes as unknown as ArrayBuffer);
+  });
+
+  /** 住民税の決定通知書（PDF か写真）を読み、従業員の給与の情報に入れる。ファイルは残さない。 */
+  app.post('/payroll/resident-tax/read', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const form = await c.req.parseBody();
+    const f = form['file'];
+    if (!(f instanceof File)) return c.json({ error: '通知書の PDF か写真を選んでください' }, 400);
+    if (f.size > MAX_FILE_BYTES) return c.json({ error: 'ファイルが大きすぎます（10 MB まで）' }, 413);
+    const bytes = new Uint8Array(await f.arrayBuffer());
+    const kind = detectKind(f.name || 'notice.pdf', bytes);
+    if (!kind || !['png', 'jpeg', 'webp', 'pdf'].includes(kind)) return c.json({ error: '通知書の PDF か写真（PNG・JPEG・WebP）を選んでください' }, 400);
+    const r = await payroll.readNotice(tenant.id, user.id, bytes, MIME[kind]);
+    return 'error' in r ? c.json(r, 422) : c.json(r);
+  });
+
+  /** 試しの計算。支給月（`month`）と、今の方法の給与の表（`file`。CSV か Excel）を受け取り、並べて差を出す。 */
+  app.post('/payroll/trials', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const form = await c.req.parseBody();
+    const f = form['file'];
+    if (!(f instanceof File)) return c.json({ error: '今の方法の給与の表（CSV か Excel）を選んでください' }, 400);
+    if (f.size > IMPORT_MAX_BYTES) return c.json({ error: 'ファイルが大きすぎます（5 MB まで）' }, 413);
+    const bytes = new Uint8Array(await f.arrayBuffer());
+    const kind = (bytes[0] === 0x50 && bytes[1] === 0x4b) || /\.xlsx$/i.test(f.name) ? 'xlsx' : 'csv';
+    let rows;
+    try {
+      rows = (await readSheet(bytes, kind, { maxRows: HR_IMPORT_MAX_ROWS + 1 })).rows;
+    } catch {
+      return c.json({ error: '表として読めませんでした（CSV か Excel のファイルを選んでください）' }, 400);
+    }
+    const r = await payroll.trial(tenant.id, user.id, String(form['month'] ?? ''), rows);
+    return 'error' in r ? c.json(r, 400) : c.json(r, 201);
   });
 
   /** 台帳に結び付けられる利用者（名前とメールアドレスだけ）。 */

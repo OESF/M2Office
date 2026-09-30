@@ -155,6 +155,15 @@ const ACTION_LABELS: Record<string, string> = {
   'hr.payroll.family': '家族を直した',
   'hr.payroll.calculate': '給与を計算した（下書き）',
   'hr.payroll.view': '給与の明細を見た',
+  'hr.payroll.confirm': '給与を確定した（お金の確定）',
+  'hr.payroll.request': '管理者に給与の確定を頼んだ',
+  'hr.payroll.transfer': '振込データを作った（お金の確定）',
+  'hr.payroll.pdf': '給与明細の PDF を出した',
+  'hr.payroll.ledger': '賃金台帳を書き出した',
+  'hr.payroll.resident': '住民税の決定通知書を読み取った',
+  'hr.payroll.trial': '試しの計算をした',
+  'hr.payroll.self': '自分の給与明細を見た',
+  'hr.payroll.consent': '給与明細を画面で受け取る同意を変えた',
 };
 
 /** 操作の種類（絞り込みの単位）。`prefixes` のどれかで始まる操作が当たる。 */

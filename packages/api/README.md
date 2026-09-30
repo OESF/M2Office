@@ -191,11 +191,17 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/hr/payroll/employees/:id` ／ `PUT .../profile` | 給与（段 3。第30.10.1節）: 1 人の給与の情報・標準報酬月額・家族 ／ 給与の情報を直す（`taxColumn`・`dependents`・`residentTax`・`commute`・`bank`） |
 | `POST /v1/hr/payroll/employees/:id/standard-pay` | 標準報酬月額を足す（`fromMonth`・`pay`。報酬の額を等級表で標準報酬月額に直す） |
 | `POST /v1/hr/payroll/employees/:id/family` ／ `DELETE .../family/:memberId` | 家族を足す・外す |
-| `GET /v1/hr/payroll/runs` ／ `POST /v1/hr/payroll/runs` ／ `GET /v1/hr/payroll/runs/:id` | 給与の回の一覧（`month` で支払日と勤怠の期間も）／ 支給月（`month`）の月の給与を計算して下書きにする（同じ月の下書きは置き換える）／ 回と明細（行ごとの根拠つき。見たことを監査ログに残す） |
+| `GET /v1/hr/payroll/runs` ／ `POST /v1/hr/payroll/runs` ／ `GET /v1/hr/payroll/runs/:id` | 給与の回の一覧（`month` で支払日と勤怠の期間も）／ 支給月（`month`）の月の給与を計算して点検し、下書きにする（同じ月の下書きは置き換える。確定した月は 400）／ 回と明細と点検（行ごとの根拠・確定を止めているもの `blockers`・確定できるか `canConfirm`。見たことを監査ログに残す） |
+| `POST /v1/hr/payroll/runs/:id/confirm` ／ `POST .../request` | 段 4（第30.10.3節）: 確定する（**管理者だけ**。押すことを承認とする。危険度 financial。点検で止まっていれば 400。監修前の表はデバッグモードのときだけ確定でき、回に残す。ADR-0053。確定すると同意した本人に明細を知らせる）／ 管理者に確定を頼む |
+| `POST /v1/hr/payroll/runs/:id/transfer` | 振込データ（全銀協の形式・シフト JIS・120 バイトの固定長）を作る。確定した回から**管理者だけ**。作れなければ 400 と `problems`。`X-Transfer-Count`・`X-Transfer-Excluded`（振込先の無い人） |
+| `GET /v1/hr/payroll/slips/:id/pdf` ／ `GET /v1/hr/payroll/ledger` | 明細の PDF ／ 賃金台帳（`year`・`format`: csv・xlsx。確定した月の給与と法定の記載事項） |
+| `POST /v1/hr/payroll/resident-tax/read` ／ `POST /v1/hr/payroll/trials` | 住民税の決定通知書（`file`: PDF・写真）を AI で読み、氏名で当てて給与の情報に入れる（6 月分 ＋ 月額 × 11 ≠ 年税額は入れない。読めなければ 422）／ 試しの計算（`month`・`file`: 今の方法の給与の表。人ごと・項目ごとの差を `run.compare` に返す） |
 | `GET /v1/hr/users` | 台帳に結び付けられる利用者（名前とメールアドレス） |
 | `GET /v1/me/hr` | 本人の「給与・勤怠」（第30.25節）: 打刻の状態・期間の勤怠・有給の残りと取得義務。台帳に結び付いていなければ 404（同じメールアドレスなら自動で結び付く） |
 | `POST /v1/me/hr/punch` ／ `PUT /v1/me/hr/days/:date` | 本人が打刻する（`kind`: in・out・break_start・break_end。できない打刻は 409）／ 1 日を直す（人事区画の人に知らせる。締めた期間は 400） |
 | `POST /v1/me/hr/leave` ／ `DELETE /v1/me/hr/leave/:id` | 本人が有給を取る（`date`・`days`: 1 か 0.5。承認の段は挟まず、人事区画の人に知らせる）／ 取り消す |
+| `GET /v1/me/hr/payslips` ／ `GET .../payslips/:id` ／ `GET .../payslips/:id/pdf` | 本人の確定した給与明細（**同意が無ければ出さない**）／ 1 つと前の回からの差の説明 ／ PDF |
+| `PUT /v1/me/hr/payslip-consent` | 明細を画面で受け取る同意（`consent`: true・false。いつでも取り消せる） |
 | `GET /v1/hr/roster` | 労働者名簿を書き出す（`format=csv` か `xlsx`。事業主本人は載せない。監査ログに残す） |
 | `GET /v1/inventory/bookings` | 今日（日本時間）から先の予約と取り置き・予約の日を過ぎた取り置き（`overdue`）・使う品目の分からない予約（`unmapped`）。予約との引き当てを切っている会社は 403（第29.13節） |
 | `POST /v1/inventory/bookings` | 取り置く（`itemId`・`qty`・`startsAt`・任意の `externalId`・`menu`）。使える数から引く |
@@ -245,7 +251,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `PUT /v1/admin/extensions/business-cards/settings` | 管理者: 名刺管理の、取り込んだ名刺の既定の範囲（`defaultScope`。第27.7節） |
 | `GET /v1/admin/extensions/inventory/booking-sources` ／ `POST` | 管理者: 予約の受け口の一覧 ／ 作る（`name`）。作ったときだけ送り先の URL（鍵を含む）を返す。鍵はハッシュだけを持つ |
 | `PUT /v1/admin/extensions/inventory/booking-sources/:id/status` ／ `mapping` | 管理者: 受け口を止める・再開する（`status`）／ 項目の対応を直す・やり直す（`mapping`。`null` で次の予約から推論し直す） |
-| `PUT /v1/admin/extensions/hr/settings` | 管理者: 人事・給与の会社の設定（`office`・`health`・`socialApply`・`pay`・`procedures`。第30.8.1節）。送った項目だけを変える。人事・給与を `PUT /v1/admin/extensions/hr/enabled` で入れると、区画 `hr` が無ければ作り、入れた管理者を入れる |
+| `PUT /v1/admin/extensions/hr/settings` | 管理者: 人事・給与の会社の設定（`office`・`health`・`socialApply`・`pay`・`procedures`・`work`・`agreement`・`leave`・`payroll`・`transfer`（振込元。番号の桁を確かめる）。第30.8.1節）。送った項目だけを変える。人事・給与を `PUT /v1/admin/extensions/hr/enabled` で入れると、区画 `hr` が無ければ作り、入れた管理者を入れる |
 | `PUT /v1/admin/extensions/inventory/settings` | 管理者: 在庫管理の機能の入り切り（`features`）・残りわずかの既定の目安（`lowDefault`）・仕入れの日数（`leadDaysDefault`）・棚卸しの頻度（`countEveryDays`）。送った項目だけを変える（第29.4.1節） |
 | `GET /v1/admin/connections/mcp` | 管理者: 会社の接続（MCP）の一覧。道具ごとの危険度・有効かどうか・使っている業務、認証の状態（`authState`。秘密の値は返さない）、よく使うサービスの型（`presets`）（仕様書 第12.11節、ADR-0037・ADR-0044） |
 | `POST /v1/admin/connections/mcp` | 管理者: URL を受け取り、道具の一覧を取って会社の接続として登録する（読むだけの印が付いた道具は「読むだけ」、ほかは「社外へ送る」扱い）。`preset`（`slack`）で型から、`auth`（`oauth`・`api_key`）で認証の要る接続を登録する。認証の要る接続の道具は、認証情報のあとで取る |

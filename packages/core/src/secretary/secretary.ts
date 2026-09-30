@@ -23,8 +23,9 @@ import { expandQuery } from '../knowledge/expand.js';
 import { jstDay } from '../memory/learn.js';
 import { contactRequest } from './contacts.js';
 import { MAIL_TRIAGE_RULE, mailCheckRequest, mailCheckText, parseMailVerdicts } from './mail.js';
-import { answerAttendance, attendanceRequest } from './attendance.js';
+import { answerAttendance, attendanceRequest, payslipRequest } from './attendance.js';
 import type { AttendanceService } from '../hr/attendance-service.js';
+import type { PayrollService } from '../hr/payroll-service.js';
 import { CARD_UPDATE } from '../cards/agents.js';
 import { answerBriefSettings } from '../brief/settings.js';
 import type { NoticeService } from '../notices/service.js';
@@ -98,6 +99,8 @@ export interface SecretaryDeps {
   inventory?: { service: InventoryService; access(tenantId: string, userId: string): Promise<unknown> };
   /** 人事・給与の勤怠と有給（第30.20節）。本人の打刻・有給の残り・申請にその場で答える。 */
   attendance?: AttendanceService;
+  /** 給与（第30.20節）。本人の直近の明細にその場で答える（他人の分は答えない。H-3）。 */
+  payroll?: PayrollService;
   /**
    * 振り分けの経過を知らせる先（デバッグモード。仕様書 第20.4.1節「デバッグモード」）。どの定型の答え・どの業務に回したかと、その理由を受け取る。
    *
@@ -291,6 +294,13 @@ export class Secretary {
       const employee = await this.deps.attendance.selfEmployee(tenantId, userId);
       const text = await answerAttendance(this.deps.attendance, tenantId, userId, employee, att, message);
       await this.audit(tenantId, userId, 'secretary.attendance', att.kind);
+      return { reply: { layer: 'direct', text, evidence: [], tokensUsed: 0 }, keep: true };
+    }
+    // 本人の給与明細（「今月の給与明細」「手取りが減ったのはなぜ？」）。本人の分だけ答える
+    if (this.deps.payroll && this.deps.attendance && payslipRequest(message) && (await this.deps.attendance.settings(tenantId)).enabled) {
+      const employee = await this.deps.attendance.selfEmployee(tenantId, userId);
+      const text = employee ? await this.deps.payroll.answerMySlip(tenantId, userId, employee) : '人事の台帳にあなたが載っていないため、給与明細はお答えできません。';
+      await this.audit(tenantId, userId, 'secretary.payslip', employee ? 'self' : 'none');
       return { reply: { layer: 'direct', text, evidence: [], tokensUsed: 0 }, keep: true };
     }
 

@@ -3664,6 +3664,77 @@ console.log('\n■ 61. 人事・給与（内蔵の拡張。第30章、段 1: 台
     const crossRun = await call('b', `/v1/hr/payroll/runs/${again.body?.run?.id}`);
     (runs.runs ?? []).filter((r) => r.payMonth === '2026-08' && r.status === 'draft').length === 1 && (crossRun.status === 403 || crossRun.status === 404)
       ? ok('計算し直すと同じ月の下書きを置き換え、ほかの会社からは見えない') : ng('給与の回が合わない', JSON.stringify({ runs: runs.runs?.length, cross: crossRun.status }));
+
+    // 段 4: 点検・確定・明細・振込データ・賃金台帳（第30.10.3節）。勤怠が締まっていなければ確定できない
+    const raw = (path, init = {}, who = 'admin') => fetch(`${API}${path}`, { ...init, headers: { 'x-tenant': 'a', 'x-user': `${who}@alpha.example.jp`, ...(init.headers ?? {}) } });
+    const openRun = await call('a', `/v1/hr/payroll/runs/${again.body?.run?.id}`);
+    const notClosed = await call('a', `/v1/hr/payroll/runs/${again.body?.run?.id}/confirm`, { method: 'POST' });
+    notClosed.status === 400 && (openRun.body?.run?.checks ?? []).some((x) => x.code === 'not-closed' && x.level === 'stop') && (openRun.body?.run?.checks ?? []).some((x) => x.code === 'no-bank')
+      ? ok('点検で止まっているもの（勤怠が締まっていない）があれば確定できず、振込先の無い人を確かめることに挙げる') : ng('点検が合わない', JSON.stringify({ status: notClosed.status, checks: openRun.body?.run?.checks }));
+    await call('a', '/v1/hr/attendance/close', { method: 'POST', body: JSON.stringify({ month: '2026-08' }) });
+    const calc2 = await call('a', '/v1/hr/payroll/runs', { method: 'POST', body: JSON.stringify({ month: '2026-08' }) });
+    const run2 = calc2.body?.run?.id;
+    const conf = await call('a', `/v1/hr/payroll/runs/${run2}/confirm`, { method: 'POST' });
+    const { body: meDebug } = await call('a', '/v1/me');
+    if (meDebug.debug) {
+      const recalc = await call('a', '/v1/hr/payroll/runs', { method: 'POST', body: JSON.stringify({ month: '2026-08' }) });
+      conf.status === 200 && conf.body?.run?.status === 'confirmed' && conf.body.run.confirmedUnverified === true && recalc.status === 400
+        ? ok('開発の環境では監修前の表でも管理者が確定でき（「監修前の表で確定」と残す）、確定した月は計算し直せない') : ng('確定が合わない', JSON.stringify({ conf: conf.body, recalc: recalc.status }));
+      // 確定した明細は、アプリの利用者からは書き換えられない（データベースの段）
+      const app = new pg.Client({ connectionString: process.env.DATABASE_URL ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office' });
+      await app.connect();
+      let locked = false;
+      try {
+        await app.query('begin');
+        await app.query(`select set_config('app.tenant_id', 't-alpha', true)`);
+        await app.query(`update pay_slips set net = net + 1 where run_id = $1`, [run2]);
+      } catch (e) { locked = /書き換えられません/.test(String(e)); }
+      await app.query('rollback').catch(() => undefined);
+      await app.end();
+      locked ? ok('確定した明細は、データベースでも書き換えを拒む') : ng('確定した明細を書き換えられた');
+      // 振込データ: 振込元と振込先が無ければ作れず、揃えば全銀協の形式（120 バイト ＋ CRLF）で作る
+      const noPayee = await call('a', `/v1/hr/payroll/runs/${run2}/transfer`, { method: 'POST' });
+      await call('a', '/v1/admin/extensions/hr/settings', { method: 'PUT', body: JSON.stringify({ transfer: { clientCode: '1234567890', clientName: 'カ)カクニン', bankCode: '0005', branchCode: '001', accountNumber: '7654321' } }) });
+      await call('a', `/v1/hr/payroll/employees/${staffId}/profile`, { method: 'PUT', body: JSON.stringify({ bank: { bank: '確認銀行', bankCode: '0001', branch: '本店', branchCode: '100', type: '普通', number: '1234567', holder: 'カクニン キンタイ' } }) });
+      const tr = await raw(`/v1/hr/payroll/runs/${run2}/transfer`, { method: 'POST' });
+      const trBytes = new Uint8Array(await tr.arrayBuffer());
+      const byMember = await raw(`/v1/hr/payroll/runs/${run2}/transfer`, { method: 'POST' }, 'member');
+      noPayee.status === 400 && tr.status === 200 && trBytes.length % 122 === 0 && trBytes[0] === 0x31 && tr.headers.get('x-transfer-count') === '1' && byMember.status === 403
+        ? ok('振込データは確定した回から管理者だけが作り、全銀協の形式（120 バイトの固定長）で出す') : ng('振込データが合わない', JSON.stringify({ noPayee: noPayee.body, status: tr.status, len: trBytes.length, member: byMember.status }));
+      const slipId = (conf.body?.run && (await call('a', `/v1/hr/payroll/runs/${run2}`)).body?.slips?.find((x) => x.employeeId === staffId)?.id);
+      const pdf = await raw(`/v1/hr/payroll/slips/${slipId}/pdf`);
+      const pdfHead = new TextDecoder().decode(new Uint8Array(await pdf.arrayBuffer()).slice(0, 5));
+      const ledger = await raw('/v1/hr/payroll/ledger?year=2026&format=csv');
+      const ledgerText = await ledger.text();
+      pdf.status === 200 && pdfHead === '%PDF-' && ledger.status === 200 && ledgerText.includes('時間外労働時間数') && ledgerText.includes(`${tag} 勤怠`)
+        ? ok('明細の PDF と、法定の記載事項を持つ賃金台帳を出せる') : ng('帳票が合わない', `${pdf.status} ${pdfHead} ${ledger.status}`);
+      // 本人: 同意するまでは明細を出さず、同意すると画面と秘書で見られる
+      const before = await call('a', '/v1/me/hr/payslips', {}, 'member');
+      const { body: sayNo } = await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message: '今月の給与明細を見せて' }) }, 'member');
+      await call('a', '/v1/me/hr/payslip-consent', { method: 'PUT', body: JSON.stringify({ consent: true }) }, 'member');
+      const after = await call('a', '/v1/me/hr/payslips', {}, 'member');
+      const mine = after.body?.slips?.[0];
+      const { body: sayYes } = await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message: '今月の給与明細を見せて' }) }, 'member');
+      before.body?.consentAt === null && (before.body?.slips ?? []).length === 0 && /同意が要ります/.test(sayNo.text ?? '') && mine?.payMonth === '2026-08' && /差引支給/.test(sayYes.text ?? '')
+        ? ok('明細は本人が同意してから画面と秘書で見られる（同意の前は出さない）') : ng('本人の明細が合わない', JSON.stringify({ before: before.body, after: after.body, sayNo: sayNo.text, sayYes: sayYes.text }));
+    } else {
+      conf.status === 400 && (conf.body?.blockers ?? []).some((x) => x.code === 'unverified')
+        ? ok('本番の環境では、監修前の法令の表で計算した回は確定できない') : ng('監修前でも確定できた', JSON.stringify(conf.body));
+    }
+
+    // 試しの計算: 今の方法の表と並べて差を出す（確定できず、本人にも出さない）
+    const trialForm = new FormData();
+    trialForm.append('month', '2026-08');
+    trialForm.append('file', new Blob([`氏名,総支給,健康保険料,差引支給\n${tag} 勤怠,250000,12805,200000\n知らない人,1,1,1\n`], { type: 'text/csv' }), 'old.csv');
+    const trial = await raw('/v1/hr/payroll/trials', { method: 'POST', body: trialForm });
+    const trialBody = await trial.json();
+    const trow = trialBody.run?.compare?.rows?.find((x) => x.employeeId === staffId);
+    trial.status === 201 && trialBody.run?.kind === 'trial' && trow?.items?.find((i) => i.label === '健康保険料')?.diff === 0 && trialBody.run.compare.unmatched.includes('知らない人')
+      ? ok('試しの計算で、今の方法の表と人ごと・項目ごとに並べ、当てられない行を示す') : ng('試しの計算が合わない', JSON.stringify(trialBody).slice(0, 400));
+    const noticeForm = new FormData();
+    noticeForm.append('file', new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0])], { type: 'image/png' }), 'notice.png');
+    const notice = await raw('/v1/hr/payroll/resident-tax/read', { method: 'POST', body: noticeForm });
+    notice.status === 422 ? ok('住民税の決定通知書として読めないものは、給与の情報に入れない') : ng(`通知書でないものを受け付けた（${notice.status}）`);
   } catch (err) {
     ng('人事・給与の確認が途中で止まった', String(err));
   } finally {
@@ -3671,6 +3742,7 @@ console.log('\n■ 61. 人事・給与（内蔵の拡張。第30章、段 1: 台
     await owner.query(`delete from notifications where kind = 'attendance' and title like '%${tag}%'`);
     await owner.query(`delete from att_closes where tenant_id = 't-alpha' and closed_at >= $1`, [hrStartedAt]);
     await owner.query(`delete from pay_runs where tenant_id = 't-alpha' and calculated_at >= $1`, [hrStartedAt]);
+    await owner.query(`delete from notifications where tenant_id = 't-alpha' and title like '給与%' and created_at >= $1`, [hrStartedAt]);
     await owner.query(`delete from hr_employees where name like '${tag}%'`);
     for (const r of saved) await owner.query(`update tenant_settings set hr = $2 where tenant_id = $1`, [r.tenant_id, r.hr ? JSON.stringify(r.hr) : null]);
     if (hrComp) {

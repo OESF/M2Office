@@ -1,7 +1,7 @@
 /**
  * @file 本人の「給与・勤怠」の API（仕様書 第30.25節・第30.6.1節・第30.7.1節。人事・給与の段 2）。
  *
- * 打刻・日の直し・今月の勤怠・有給の残りと申請。**本人の分だけ**を扱う（H-3）。
+ * 打刻・日の直し・今月の勤怠・有給の残りと申請・給与明細（段 4）。**本人の分だけ**を扱う（H-3）。
  * 利用者が台帳に結び付いていなければ（同じメールアドレスなら自動で結び付く）404。人事・給与を切っている会社も 404。
  */
 
@@ -79,6 +79,42 @@ export function hrSelfRoute(deps: AppDeps) {
     const { tenant, user } = c.get('ctx');
     const r = await att.cancelLeave(tenant.id, user.id, c.get('employee'), c.req.param('id'), false);
     return 'error' in r ? c.json(r, 400) : c.json(r);
+  });
+
+  // ---- 給与明細（段 4。第30.10.3節）。画面で受け取るには本人の同意が要る ----
+
+  const payroll = deps.hr.payroll;
+
+  /** 明細の一覧と同意（同意が無ければ明細は出さない）。 */
+  app.get('/payslips', async (c) => {
+    const { tenant } = c.get('ctx');
+    return c.json(await payroll.mySlips(tenant.id, c.get('employee')));
+  });
+
+  /** 明細 1 つ（行と根拠）と、前の回からの差の説明。 */
+  app.get('/payslips/:id', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const r = await payroll.mySlip(tenant.id, user.id, c.get('employee'), c.req.param('id'));
+    return r ? c.json(r) : c.json({ error: '明細が見つかりません' }, 404);
+  });
+
+  /** 自分の明細の PDF。 */
+  app.get('/payslips/:id/pdf', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const employee = c.get('employee');
+    const r = await payroll.slipPdf(tenant.id, user.id, c.req.param('id'), employee.id);
+    if (!r) return c.json({ error: '明細が見つかりません' }, 404);
+    c.header('Content-Type', 'application/pdf');
+    c.header('Content-Disposition', `attachment; filename="${r.filename}"`);
+    return c.body(r.bytes as unknown as ArrayBuffer);
+  });
+
+  /** 明細を画面で受け取ることに同意する・取り消す（本文 `{ consent: true | false }`）。 */
+  app.put('/payslip-consent', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const b = await c.req.json<{ consent?: unknown }>().catch(() => ({} as { consent?: unknown }));
+    if (typeof b.consent !== 'boolean') return c.json({ error: 'consent に true か false を指定してください' }, 400);
+    return c.json({ consentAt: await payroll.setConsent(tenant.id, user.id, c.get('employee'), b.consent) });
   });
 
   return app;

@@ -65,6 +65,24 @@ export interface HrSettings {
   leave: { halfDay: boolean };
   /** 給与の計算（第30.10.1節）。 */
   payroll: HrPayrollSettings;
+  /** 振込データの振込元（第30.10.3節）。 */
+  transfer: HrTransferSettings;
+}
+
+/** 振込データ（全銀協の形式）の振込元。名前は半角のカナにして使う。 */
+export interface HrTransferSettings {
+  /** 総合振込（種別 21）か給与振込（種別 11）か。 */
+  format: 'sogo' | 'kyuyo';
+  /** 委託者コード（銀行が決める 10 桁）。 */
+  clientCode: string;
+  /** 委託者名（カナ）。 */
+  clientName: string;
+  bankCode: string;
+  bankName: string;
+  branchCode: string;
+  branchName: string;
+  accountType: '普通' | '当座';
+  accountNumber: string;
 }
 
 /** 給与の計算の会社の設定（第30.10.1節）。 */
@@ -111,6 +129,7 @@ export const DEFAULT_HR_SETTINGS: HrSettings = {
     kumiai: { health: null, care: null },
     items: [],
   },
+  transfer: { format: 'sogo', clientCode: '', clientName: '', bankCode: '', bankName: '', branchCode: '', branchName: '', accountType: '普通', accountNumber: '' },
 };
 
 /** 従業員（人事の台帳。第30.5節）。 */
@@ -307,6 +326,10 @@ export interface HrResidentTax {
   june: number;
   /** 7 月以降の月額。 */
   monthly: number;
+  /** 年税額（通知書から読んだとき）。 */
+  annual?: number;
+  /** 決定通知書から読み取った額か（第30.10.3節）。 */
+  source?: 'notice' | 'manual';
 }
 
 /** 従業員ごとの給与の情報（第30.5節・第30.10.1節）。 */
@@ -319,8 +342,10 @@ export interface HrPayrollProfile {
   residentTax: HrResidentTax[];
   /** 通勤手当の月額と、そのうち非課税の額。 */
   commute: { means?: string; monthly?: number; taxFree?: number };
-  /** 給与の振込先（段 4 の振込データに使う）。 */
-  bank: { bank?: string; branch?: string; type?: '普通' | '当座'; number?: string; holder?: string };
+  /** 給与の振込先（振込データに使う）。銀行コードは 4 桁、支店コードは 3 桁。名義はカナ（空なら台帳のふりがな）。 */
+  bank: { bank?: string; bankCode?: string; branch?: string; branchCode?: string; type?: '普通' | '当座'; number?: string; holder?: string };
+  /** 明細を画面で受け取ることに本人が同意した日時（無ければ `null`。第30.10.3節）。 */
+  payslipConsentAt?: string | null;
 }
 
 /** 標準報酬月額の履歴。 */
@@ -365,12 +390,41 @@ export interface PaySlip {
   net: number;
   lines: PayLine[];
   warnings: string[];
+  /** 勤怠の期間の集計（賃金台帳に使う）。 */
+  attendance?: Partial<AttTotals>;
+}
+
+/** 回の点検の 1 つ（第30.10.3節）。`stop` が残っていれば確定できない。 */
+export interface PayCheck {
+  level: 'stop' | 'check';
+  code: string;
+  text: string;
+  employeeId?: string;
+  employeeName?: string;
+}
+
+/** 試しの計算の比べ（1 人）。 */
+export interface PayTrialRow {
+  employeeId: string | null;
+  name: string;
+  items: { label: string; ours: number | null; theirs: number | null; diff: number | null }[];
+}
+
+/** 試しの計算の比べ。 */
+export interface PayTrialCompare {
+  /** 今の方法の表の列と、当てた項目。 */
+  columns: { header: string; item: string | null }[];
+  rows: PayTrialRow[];
+  /** 表にあって台帳に当てられなかった名前。 */
+  unmatched: string[];
+  /** 表に無く、M2Office だけで計算した人。 */
+  missing: string[];
 }
 
 /** 給与の回。 */
 export interface PayRun {
   id: string;
-  kind: 'monthly' | 'bonus' | 'yea' | 'correction';
+  kind: 'monthly' | 'bonus' | 'yea' | 'correction' | 'trial';
   payMonth: string;
   payDate: string;
   periodStart: string;
@@ -380,4 +434,14 @@ export interface PayRun {
   law: Record<string, { version: string; source: string; reviewed: boolean }>;
   warnings: string[];
   calculatedAt: string;
+  /** 点検（第30.10.3節）。 */
+  checks: PayCheck[];
+  confirmedAt?: string | null;
+  confirmedBy?: string | null;
+  /** 監修前の表で確定した（開発の環境だけ）。 */
+  confirmedUnverified?: boolean;
+  confirmRequestedAt?: string | null;
+  transferAt?: string | null;
+  /** 試しの計算の比べ。 */
+  compare?: PayTrialCompare | null;
 }

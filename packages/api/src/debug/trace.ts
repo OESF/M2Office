@@ -22,6 +22,7 @@ const ACTIONS: Record<string, string> = {
   'secretary.todo': 'ToDo',
   'secretary.mail': 'メールを確認して振り分けた',
   'secretary.attendance': '勤怠と有給',
+  'secretary.payslip': '本人の給与明細',
 };
 
 /**

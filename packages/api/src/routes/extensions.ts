@@ -171,7 +171,7 @@ export function extensionsRoute(deps: AppDeps) {
     const { tenant, user } = c.get('ctx');
     const b = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
     const cur = (await deps.repo.getTenantSettings(tenant.id)).hr;
-    const next: HrSettings = { ...cur, office: { ...cur.office }, health: { ...cur.health }, pay: { ...cur.pay }, work: { ...cur.work }, agreement: { ...cur.agreement }, leave: { ...cur.leave }, payroll: { ...cur.payroll } };
+    const next: HrSettings = { ...cur, office: { ...cur.office }, health: { ...cur.health }, pay: { ...cur.pay }, work: { ...cur.work }, agreement: { ...cur.agreement }, leave: { ...cur.leave }, payroll: { ...cur.payroll }, transfer: { ...cur.transfer } };
     const obj = (v: unknown) => (v && typeof v === 'object' ? v as Record<string, unknown> : null);
     const text = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : undefined);
     const day = (v: unknown) => (typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 31 ? v : undefined);
@@ -248,6 +248,26 @@ export function extensionsRoute(deps: AppDeps) {
           .map((x) => ({ name: String(x['name']).trim().slice(0, 50), premiumBase: x['premiumBase'] !== false, taxable: x['taxable'] !== false }));
       }
       next.payroll = p;
+    }
+    // 振込データの振込元（第30.10.3節）。番号は桁を確かめ、名前はそのまま持つ（作るときに半角のカナに直す）
+    const tr = obj(b['transfer']);
+    if (tr) {
+      const t = { ...next.transfer };
+      const digits = (k: 'clientCode' | 'bankCode' | 'branchCode' | 'accountNumber', re: RegExp, label: string): string | null => {
+        const v = tr[k];
+        if (v === undefined) return null;
+        const s = String(v).normalize('NFKC').trim();
+        if (s && !re.test(s)) return label;
+        t[k] = s;
+        return null;
+      };
+      const bad = digits('clientCode', /^\d{10}$/, '委託者コードは 10 桁の数字です') ?? digits('bankCode', /^\d{4}$/, '銀行コードは 4 桁の数字です')
+        ?? digits('branchCode', /^\d{3}$/, '支店コードは 3 桁の数字です') ?? digits('accountNumber', /^\d{1,7}$/, '口座番号は 7 桁までの数字です');
+      if (bad) return c.json({ error: bad }, 400);
+      for (const k of ['clientName', 'bankName', 'branchName'] as const) if (text(tr[k], 40) !== undefined) t[k] = text(tr[k], 40)!;
+      if (tr['format'] === 'sogo' || tr['format'] === 'kyuyo') t.format = tr['format'];
+      if (tr['accountType'] === '普通' || tr['accountType'] === '当座') t.accountType = tr['accountType'];
+      next.transfer = t;
     }
     await deps.repo.saveTenantSettings(tenant.id, 'hr', next, user.id);
     await deps.repo.appendAudit({

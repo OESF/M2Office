@@ -383,16 +383,21 @@ const DAYS = Array.from({ length: 31 }, (_, i) => i + 1);
 const dayLabel = (d: number) => (d === 31 ? '末日' : `${d} 日`);
 
 /**
- * 人事・給与の会社の設定（仕様書 第30.8.1節のうち段 1 の項目）。事業所・事業の形態・健康保険・適用・締めと支払・手続きを行う人。すぐに反映する。
+ * 人事・給与の会社の設定（仕様書 第30.8.1節）。事業所・保険・締めと支払・手続き・勤怠と休暇・給与の計算・振込元。すぐに反映する。
  *
  * @remarks 説明文は出さない（原則 u11）。何の設定かは秘書に聞けばよい
  */
 function HrFields({ settings, busy, onChanged }: { settings: HrSettings; busy: boolean; onChanged: () => void }) {
   const [name, setName] = useState(settings.office.name);
   const [address, setAddress] = useState(settings.office.address);
-  const save = (patch: Partial<HrSettings>) => void api.admin.setHrSettings(patch).then(onChanged);
+  const [error, setError] = useState<string | null>(null);
+  const save = (patch: Partial<HrSettings>) => {
+    setError(null);
+    void api.admin.setHrSettings(patch).then(onChanged).catch((e) => setError(describeError(e, '保存できませんでした')));
+  };
   return (
     <div className="small ext-inventory">
+      {error && <p className="error">{error}</p>}
       <div className="row wrap">
         <label>事業所 <input value={name} onChange={(e) => setName(e.target.value)} onBlur={() => name !== settings.office.name && save({ office: { ...settings.office, name } })} /></label>
         <label>所在地 <input value={address} onChange={(e) => setAddress(e.target.value)} onBlur={() => address !== settings.office.address && save({ office: { ...settings.office, address } })} /></label>
@@ -470,6 +475,19 @@ function HrFields({ settings, busy, onChanged }: { settings: HrSettings; busy: b
               onBlur={(e) => save({ payroll: { ...settings.payroll, kumiai: { ...settings.payroll.kumiai, care: e.target.value === '' ? null : Number(e.target.value) } } })} /> %</label>
           </>
         )}
+      </div>
+      <div className="row wrap">
+        <label>振込元 <select value={settings.transfer.format} disabled={busy} onChange={(e) => save({ transfer: { ...settings.transfer, format: e.target.value as 'sogo' | 'kyuyo' } })}>
+          <option value="sogo">総合振込</option><option value="kyuyo">給与振込</option>
+        </select></label>
+        {([['clientCode', '委託者コード', 10], ['clientName', '委託者名（カナ）', 40], ['bankCode', '銀行コード', 4], ['bankName', '銀行名（カナ）', 15],
+          ['branchCode', '支店コード', 3], ['branchName', '支店名（カナ）', 15], ['accountNumber', '口座番号', 7]] as const).map(([k, l, max]) => (
+          <input key={k} className={max <= 10 ? 'short' : ''} placeholder={l} aria-label={l} maxLength={max} defaultValue={settings.transfer[k]} disabled={busy}
+            onBlur={(e) => { if (e.target.value !== settings.transfer[k]) save({ transfer: { ...settings.transfer, [k]: e.target.value } }); }} />
+        ))}
+        <select value={settings.transfer.accountType} disabled={busy} aria-label="預金の種目" onChange={(e) => save({ transfer: { ...settings.transfer, accountType: e.target.value as '普通' | '当座' } })}>
+          <option>普通</option><option>当座</option>
+        </select>
       </div>
     </div>
   );

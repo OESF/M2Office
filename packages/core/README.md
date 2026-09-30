@@ -43,7 +43,10 @@ src/hr/          人事・給与（内蔵の拡張。第30章）。段 1: 置き
                  打刻・直し・締め・出勤簿・申請・管理簿・知らせ（attendance-service.ts）、置き場（attendance-store.ts）。
                  段 3: 月の給与の計算（payroll.ts。割増・欠勤控除・社会保険料・支援金・雇用保険料・所得税・住民税と行ごとの根拠）、
                  給与の情報・標準報酬月額・家族・下書きの回（payroll-service.ts・payroll-store.ts）、
-                 法令の表（law/。公式の発表から取り込んだデータのファイルと出典・監修の状態、使う日で引く Law）
+                 法令の表（law/。公式の発表から取り込んだデータのファイルと出典・監修の状態、使う日で引く Law）。
+                 段 4: 回の点検（payroll-review.ts）・確定と明細の配布と振込データと賃金台帳（payroll-service.ts）・
+                 全銀協の形式（zengin.ts）・明細の PDF（payslip-pdf.ts）・住民税の決定通知書の読み取り（resident-notice.ts）・
+                 試しの計算（payroll-trial.ts）
 src/secretary/   秘書。3 層の応答振り分け、定時実行の確認・停止・再開・今すぐ実行（推論なし。第10.9.8節）、
                  社内のお知らせを出す・取り下げる・並べる・済んだにする（notices.ts。第10.15節）
                  在庫の依頼の見分けと、在庫の数の問いへのその場の答え（inventory.ts。第29.15節）
