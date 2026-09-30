@@ -665,6 +665,15 @@ export class PostgresRepository implements Repository {
     );
   }
 
+  async deleteNotifications(tenantId: string, userId: string, ids: string[]): Promise<number> {
+    if (ids.length === 0) return 0;
+    const rows = await this.q<{ id: string }>(tenantId,
+      `delete from notifications where tenant_id = $1 and user_id = $2 and id = any($3::text[]) returning id`,
+      [tenantId, userId, ids],
+    );
+    return rows.length;
+  }
+
   async markNotificationRead(tenantId: string, userId: string, id: string): Promise<boolean> {
     const rows = await this.q<{ id: string }>(tenantId, 
       `update notifications set read_at = coalesce(read_at, now())

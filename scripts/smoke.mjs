@@ -3767,6 +3767,36 @@ console.log('\n■ 61. 人事・給与（内蔵の拡張。第30章、段 1: 台
   }
 }
 
+console.log('\n■ 62. お知らせを消す（第6.5.5節）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const tag = `確認用お知らせ${Date.now().toString(36)}`;
+  const ids = { m1: `${tag}-m1`, m2: `${tag}-m2`, a1: `${tag}-a1` };
+  try {
+    const { rows: users } = await owner.query(`select id, email from users where tenant_id = 't-alpha' and email in ('admin@alpha.example.jp', 'member@alpha.example.jp')`);
+    const uid = (mail) => users.find((u) => u.email === mail)?.id;
+    for (const [id, who] of [[ids.m1, 'member'], [ids.m2, 'member'], [ids.a1, 'admin']]) {
+      await owner.query(`insert into notifications (id, tenant_id, user_id, kind, title, body) values ($1, 't-alpha', $2, 'run', $3, '')`, [id, uid(`${who}@alpha.example.jp`), `${tag} ${who}`]);
+    }
+    const other = await call('a', `/v1/notifications/${ids.a1}`, { method: 'DELETE' }, 'member');
+    const bulk = await call('a', '/v1/notifications/delete', { method: 'POST', body: JSON.stringify({ ids: [ids.m1, ids.a1] }) }, 'member');
+    const one = await call('a', `/v1/notifications/${ids.m2}`, { method: 'DELETE' }, 'member');
+    const empty = await call('a', '/v1/notifications/delete', { method: 'POST', body: JSON.stringify({ ids: [] }) }, 'member');
+    const { body: mine } = await call('a', '/v1/notifications', {}, 'member');
+    const { body: admins } = await call('a', '/v1/notifications');
+    other.status === 404 && bulk.body?.deleted === 1 && one.status === 200 && empty.status === 400
+      && !(mine.items ?? []).some((n) => n.title.startsWith(tag)) && (admins.items ?? []).some((n) => n.id === ids.a1)
+      ? ok('本人は自分のお知らせを 1 件ずつ・選んでまとめて消せ、ほかの人のお知らせは消せない') : ng('お知らせを消すのが合わない', JSON.stringify({ other: other.status, bulk: bulk.body, one: one.status, empty: empty.status }));
+  } catch (err) {
+    ng('お知らせを消す確認が途中で止まった', String(err));
+  } finally {
+    await owner.query(`delete from notifications where id like $1`, [`${tag}%`]);
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

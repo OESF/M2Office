@@ -1280,6 +1280,9 @@ export const api = {
     compartments: string[]; groups: string[]; plan: null;
   }>('/me/usage'),
   readNotification: (id: string) => call(`/notifications/${id}/read`, { method: 'POST' }),
+  /** お知らせを消す（本人の分だけ。仕様書 第6.5.5節）。 */
+  deleteNotification: (id: string) => call<{ ok: true }>(`/notifications/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  deleteNotifications: (ids: string[]) => call<{ deleted: number }>('/notifications/delete', { method: 'POST', body: JSON.stringify({ ids }) }),
   schedules: () => call<{ items: ScheduleView[] }>('/schedules'),
   createSchedule: (agentId: string, rule: ScheduleRule, input: Record<string, unknown> = {}) =>
     call<ScheduleView>('/schedules', { method: 'POST', body: JSON.stringify({ agentId, rule, input }) }),

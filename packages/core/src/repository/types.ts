@@ -103,7 +103,6 @@ export interface Repository {
   createNotification(n: Notification): Promise<void>;
   /** 本人の通知を新しい順に返す。他人の通知は返さない。 */
   listNotifications(tenantId: string, userId: string, limit: number): Promise<Notification[]>;
-  /** 既読にする。本人の通知でなければ `false`。 */
   /**
    * まだ控えを届けていない通知（仕様書 第6.5.5.2節）。古い順に返す。
    *
@@ -119,7 +118,14 @@ export interface Repository {
   markNotificationDelivered(
     tenantId: string, id: string, deliveredAt: string | null, note: string,
   ): Promise<void>;
+  /** 既読にする。本人の通知でなければ `false`。 */
   markNotificationRead(tenantId: string, userId: string, id: string): Promise<boolean>;
+  /**
+   * 本人の通知を消す（仕様書 第6.5.5節）。ほかの人の通知は消さない。
+   *
+   * @returns 消した数
+   */
+  deleteNotifications(tenantId: string, userId: string, ids: string[]): Promise<number>;
 
   createSchedule(s: Schedule): Promise<void>;
   /** 利用者の定時実行を返す。`userId` が `null` ならテナント全体。 */

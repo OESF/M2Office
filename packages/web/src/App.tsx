@@ -1161,12 +1161,39 @@ function SecretaryBar({ lookups, avatar, captions, onResult, onVoice }: {
 const CAPTION_MAX = 60;
 const tail = (text: string) => (text.length > CAPTION_MAX ? `…${text.slice(-CAPTION_MAX)}` : text).trim();
 
-/** 本人宛の通知の一覧。開くと既読になる。 */
+/**
+ * 本人宛の通知の一覧。開くと既読になる。1 件ずつ、または選んだものをまとめて消せる（仕様書 第6.5.5節）。
+ *
+ * @remarks 本人の受け取り箱の整理なので、消す前に確認を挟まない（ADR-0028）
+ */
 function Notifications({ items, onRead }: { items: Notification[]; onRead: () => void }) {
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [error, setError] = useState<string | null>(null);
+  // 一覧が変わったら、無くなったお知らせを選んだままにしない
+  useEffect(() => {
+    setSelected((cur) => new Set([...cur].filter((id) => items.some((n) => n.id === id))));
+  }, [items]);
   if (items.length === 0) return <p className="muted">お知らせはありません</p>;
+  const all = selected.size === items.length;
+  const toggle = (id: string) => setSelected((cur) => {
+    const next = new Set(cur);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const remove = (fn: () => Promise<unknown>) => {
+    setError(null);
+    void fn().then(() => { setSelected(new Set()); onRead(); }).catch((e) => setError(describeError(e, '消せませんでした')));
+  };
   return (
     <>
-      {items.map((n) => <NoticeRow key={n.id} notice={n} onRead={onRead} />)}
+      <div className="row notice-tools">
+        <label className="check small"><input type="checkbox" checked={all} onChange={() => setSelected(all ? new Set() : new Set(items.map((n) => n.id)))} /> すべて選ぶ</label>
+        {selected.size > 0 && <button className="btn small" onClick={() => remove(() => api.deleteNotifications([...selected]))}>選んだ {selected.size} 件を消す</button>}
+      </div>
+      {error && <p className="error">{error}</p>}
+      {items.map((n) => (
+        <NoticeRow key={n.id} notice={n} onRead={onRead} selected={selected.has(n.id)} onSelect={() => toggle(n.id)} onDelete={() => remove(() => api.deleteNotification(n.id))} />
+      ))}
     </>
   );
 }
@@ -1177,25 +1204,31 @@ function Notifications({ items, onRead }: { items: Notification[]; onRead: () =>
  * @remarks
  * 開いたときに読んだことにする。**閉じても読んだままにする**（開き直すたびに未読へ戻さない）。
  */
-function NoticeRow({ notice, onRead }: { notice: Notification; onRead: () => void }) {
+function NoticeRow({ notice, onRead, selected, onSelect, onDelete }: {
+  notice: Notification; onRead: () => void; selected: boolean; onSelect: () => void; onDelete: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const unread = !notice.readAt;
   return (
     <div className={`card fold-row${open ? ' open' : ''}${unread ? ' unread' : ''}`}>
-      <button
-        className="fold-head" aria-expanded={open}
-        onClick={() => {
-          setOpen(!open);
-          if (!open && unread) void api.readNotification(notice.id).then(onRead);
-        }}
-      >
-        <Icon name={open ? 'caret-down' : 'caret-right'} className="nav-caret" />
-        <strong>{notice.title}</strong>
-        {unread && <span className="chip waiting">未読</span>}
-        <span className="muted small tail">
-          {new Date(notice.createdAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}
-        </span>
-      </button>
+      <div className="notice-line">
+        <input type="checkbox" className="notice-check" checked={selected} onChange={onSelect} aria-label={`「${notice.title}」を選ぶ`} />
+        <button
+          className="fold-head" aria-expanded={open}
+          onClick={() => {
+            setOpen(!open);
+            if (!open && unread) void api.readNotification(notice.id).then(onRead);
+          }}
+        >
+          <Icon name={open ? 'caret-down' : 'caret-right'} className="nav-caret" />
+          <strong>{notice.title}</strong>
+          {unread && <span className="chip waiting">未読</span>}
+          <span className="muted small tail">
+            {new Date(notice.createdAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}
+          </span>
+        </button>
+        <button className="btn ghost small notice-delete" onClick={onDelete} aria-label={`「${notice.title}」を消す`}>消す</button>
+      </div>
       {open && (
         <div className="fold-body">
           <div className="reply"><Markdown text={notice.body} lineBreaks /></div>

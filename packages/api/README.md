@@ -138,6 +138,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/secretary/lookups/claim` | **まだ伝えていない調べものを受け取る**（第10.11.7節「持ち越し」）。読むだけの口ではなく、返したものは「伝えた」として記録され、会話ログにも残る（続きの依頼に答えるため）。受け取ったら必ず画面に出すこと |
 | `GET /v1/notifications` | 本人宛の通知 |
 | `POST /v1/notifications/:id/read` | 既読にする |
+| `DELETE /v1/notifications/:id` ／ `POST /v1/notifications/delete` | 本人の通知を 1 件消す ／ 選んだものをまとめて消す（`ids`。100 件まで）。ほかの人の通知は消えない（第6.5.5節） |
 | `GET /v1/schedules` | 本人の定時実行 |
 | `GET /v1/cards` | 名刺の一覧と検索（`q`・`scope`・`trash=1`）。本人の読み取り中・読み取れなかった名刺（`unresolved`）と進み具合（`progress`）、会社の既定の範囲も返す。名刺管理を切っている会社と利用範囲の外の人には、`/v1/cards` のどの口も 403（仕様書 第27.8節） |
 | `POST /v1/cards` | 名刺のファイルを受け付ける（multipart。`file` を 50 まで・`backOf`（裏を組にする表の番号の JSON）・`scope`）。読み取りを待たずに 202。受け付けなかったものは `rejected`（第27.4節） |

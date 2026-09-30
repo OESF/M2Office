@@ -262,6 +262,12 @@ body.resizing { cursor: col-resize; user-select: none; }
 .fold-body .card + .card { border-top: 1px dashed var(--line); margin-top: calc(12px * var(--space-scale)); }
 /* まだ読んでいないお知らせは、左端で示す */
 .fold-row.unread { border-left: 3px solid var(--accent); }
+.notice-tools { gap: calc(12px * var(--space-scale)); align-items: center; margin-bottom: calc(8px * var(--space-scale)); min-height: 30px; }
+.notice-line { display: flex; align-items: center; }
+.notice-line .fold-head { flex: 1; min-width: 0; }
+.notice-check { margin-left: calc(10px * var(--space-scale)); flex: none; }
+.notice-delete { flex: none; margin-right: calc(8px * var(--space-scale)); }
+.notice-line .fold-head .chip { flex: none; white-space: nowrap; }
 .card h3 { margin: 0 0 calc(8px * var(--space-scale)); font-size: calc(14px * var(--font-scale)); }
 .card p { margin: 0 0 calc(10px * var(--space-scale)); color: var(--muted); }
 
