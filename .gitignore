@@ -17,6 +17,8 @@ specification.pdf
 docs/developer/developer-manual.pdf
 # 人事・給与のユーザーマニュアルの PDF は docs/manual/hr-payroll/*.md から作る（npm run docs:hr-manual-pdf）
 docs/manual/hr-payroll/hr-payroll-manual.pdf
+# 在庫管理のユーザーマニュアルの PDF は docs/manual/inventory/*.md から作る（npm run docs:inventory-manual-pdf）
+docs/manual/inventory/inventory-manual.pdf
 *.log
 
 # エディタと OS

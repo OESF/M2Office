@@ -4,7 +4,7 @@
 Markdown は章ごとに分けたまま保守し、配布と通読のときだけ 1 本にまとめる。
 
 使い方: python3 tools/pdf/build_manual.py [マニュアルの名前] [出力の PDF]
-  マニュアルの名前: developer（既定。docs/developer/）・hr-payroll（docs/manual/hr-payroll/）
+  マニュアルの名前: developer（既定。docs/developer/）・hr-payroll（docs/manual/hr-payroll/）・inventory（docs/manual/inventory/）
   既定の出力先は各マニュアルのディレクトリの PDF（版管理の対象外）
   前との互換のため、最初の引数が .pdf で終われば開発者マニュアルの出力先とみなす
 
@@ -23,6 +23,10 @@ MANUALS = {
     'developer': {
         'dir': os.path.join(ROOT, 'docs', 'developer'), 'pdf': 'developer-manual.pdf',
         'title': 'M2Office 開発者マニュアル', 'subtitle': '業務エージェントとコネクタの作り方',
+    },
+    'inventory': {
+        'dir': os.path.join(ROOT, 'docs', 'manual', 'inventory'), 'pdf': 'inventory-manual.pdf',
+        'title': 'M2Office 在庫管理 ユーザーマニュアル', 'subtitle': '担当者の手引きと研修の教材',
     },
     'hr-payroll': {
         'dir': os.path.join(ROOT, 'docs', 'manual', 'hr-payroll'), 'pdf': 'hr-payroll-manual.pdf',

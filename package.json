@@ -30,6 +30,7 @@
     "ext:pack": "node --import tsx scripts/pack-extension.mjs",
     "docs:manual-pdf": "python3 tools/pdf/build_manual.py",
     "docs:hr-manual-pdf": "python3 tools/pdf/build_manual.py hr-payroll",
+    "docs:inventory-manual-pdf": "python3 tools/pdf/build_manual.py inventory",
     "docs:tools": "node --import tsx scripts/gen-tool-docs.mjs",
     "tenant:create": "node --env-file-if-exists=.env scripts/create-tenant.mjs",
     "dev:cert": "node scripts/dev-cert.mjs"

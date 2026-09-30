@@ -73,11 +73,12 @@ PDF を作るだけなら、上の「使い方」の 2 つのコマンドで足�
 図を直すときは、罫線素片以外に幅の曖昧な文字（`●` `○` `□` `→` `…` など）を使わないでください。
 PDF の書体では全角で描かれ、桁がずれます。
 
-## 人事・給与のユーザーマニュアルを 1 冊の PDF にする
+## ユーザーマニュアル（人事・給与・在庫管理）を 1 冊の PDF にする
 
 ```bash
-npm run docs:hr-manual-pdf    # → docs/manual/hr-payroll/hr-payroll-manual.pdf
+npm run docs:hr-manual-pdf          # → docs/manual/hr-payroll/hr-payroll-manual.pdf
+npm run docs:inventory-manual-pdf   # → docs/manual/inventory/inventory-manual.pdf
 ```
 
-`build_manual.py` の最初の引数でマニュアルを選びます（`developer`・`hr-payroll`）。つなぎ方は開発者マニュアルと同じで、
-`docs/manual/hr-payroll/` の README（「はじめに」）と `01-`〜`10-` の章を番号順につなぎます。印刷ではチェックリストの `[ ]` を `□` にします。
+`build_manual.py` の最初の引数でマニュアルを選びます（`developer`・`hr-payroll`・`inventory`）。つなぎ方は開発者マニュアルと同じで、
+`docs/manual/<名前>/` の README（「はじめに」）と `01-`〜`10-` の章を番号順につなぎます。印刷ではチェックリストの `[ ]` を `□` にします。
