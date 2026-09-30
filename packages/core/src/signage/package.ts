@@ -24,6 +24,6 @@ export const SIGNAGE_PACKAGE: ExtensionPackage = {
   agents: [],
   connectors: [],
   readme: null,
-  icon: null,
+  icon: '/extensions/signage.png',
   dir: null,
 };

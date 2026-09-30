@@ -57,7 +57,7 @@ export interface ExtensionPackage {
   connectors: ConnectorDeclaration[];
   /** 管理者向けの説明（`README.md`）。 */
   readme: string | null;
-  /** アイコン（`icon.png`）。`data:` URL。 */
+  /** アイコン（`icon.png`）。`data:` URL。内蔵の拡張は、画面の置き場の画像のパス（`/extensions/{名前}.png`。256×256 の PNG）。 */
   icon: string | null;
   /** 読み込んだディレクトリ。ファイルから取り込んだものは `null`。 */
   dir: string | null;

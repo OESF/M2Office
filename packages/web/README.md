@@ -139,6 +139,7 @@ src/version.ts         画面の版。ビルドのときに vite.config.ts の d
 src/google-links.ts    Google のアプリの一覧に並べるリンク（本人のアカウントの指定だけを載せる）
 public/icons.svg       画面のアイコン（モノクロの線画。文字の色を引き継ぐ）
 public/avatars/        秘書のアバターの見本（第6.1.3節）。README を参照
+public/extensions/     内蔵の拡張のアイコン（名刺管理・在庫管理・人事・給与・店頭サイネージ。256×256 の PNG。仕様書 第12.13節）
 public/agents/         業務エージェントの絵 25 枚（第6.7.4.3節）。README を参照
 src/Settings.tsx    個人設定（秘書の「声を試す」、Slack などの「サービスとの接続」を含む）
 src/help.tsx        ヘルプ（ヘルプセンター: 左に区分の木と検索・右に本文、業務のマニュアルの章と前後の章、管理者ページは管理者向けだけ。記事・画面の「？」・初回の案内・業務の説明）

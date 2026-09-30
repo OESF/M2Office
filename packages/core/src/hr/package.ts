@@ -24,6 +24,6 @@ export const HR_PACKAGE: ExtensionPackage = {
   agents: [],
   connectors: [],
   readme: null,
-  icon: null,
+  icon: '/extensions/hr.png',
   dir: null,
 };

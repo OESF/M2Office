@@ -243,6 +243,6 @@ export const INVENTORY_PACKAGE: ExtensionPackage = {
   agents: INVENTORY_AGENTS,
   connectors: [],
   readme: null,
-  icon: null,
+  icon: '/extensions/inventory.png',
   dir: null,
 };

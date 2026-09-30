@@ -156,6 +156,6 @@ export const CARDS_PACKAGE: ExtensionPackage = {
   agents: CARD_AGENTS,
   connectors: [],
   readme: null,
-  icon: null,
+  icon: '/extensions/business-cards.png',
   dir: null,
 };
