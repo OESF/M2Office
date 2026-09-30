@@ -1623,8 +1623,9 @@ export const api = {
       call(`/admin/settings/${section}`, { method: 'PUT', body: JSON.stringify(value) }),
     inviteUser: (email: string, displayName: string, roles: string[]) =>
       call<User>('/admin/users', { method: 'POST', body: JSON.stringify({ email, displayName, roles }) }),
+    /** 利用者を直す。止めたときは、止めた業務の数と、30 日後に削除される自分だけの名刺の数を返す（仕様書 第27.7節）。 */
     updateUser: (id: string, patch: { displayName?: string; roles?: string[]; status?: string }) =>
-      call<User>(`/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+      call<User & { stoppedRuns?: number; personalCards?: number }>(`/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
     knowledge: () => call<{
       items: KnowledgeItemView[]; compartments: { id: string; name: string; description: string | null }[];
       consolidated: ConsolidationView | null;

@@ -317,7 +317,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/admin/settings` | 管理者: 会社の設定（会社情報・自社の書き方・自動化ポリシー・業務の有効化） |
 | `PUT /v1/admin/settings/:section` | 管理者: 設定の 1 区分を保存（`company`・`writingStyle`・`automation`・`agents`・`effect`・`slides`・`privacy`。`knowledge`（言い換えの登録）は 400 で断る（第 0.115.0 版から秘書が考える。第11.7.7.0節）。`privacy` は Google から取得したデータを残す日数） |
 | `POST /v1/admin/users` | 管理者: 利用者の招待（Workspace のドメインのみ） |
-| `PATCH /v1/admin/users/:id` | 管理者: 表示名・ロール・状態（管理者が 0 人になる変更は 409） |
+| `PATCH /v1/admin/users/:id` | 管理者: 表示名・ロール・状態（管理者が 0 人になる変更は 409）。止めたときは、止めた業務の数（`stoppedRuns`）と、30 日後に削除される自分だけの名刺の数（`personalCards`。仕様書 第27.7節、Q-94）を返す。止めた日時を持ち、戻すと空にする |
 | `GET /v1/admin/knowledge` | 管理者: 組織知識の一覧（種類 `category`: `rule`・`minutes`・`learned`、状態 `status`: `active`・`retired`・`archived`、施行日と施行日が先の版。廃止・しまったものを含む）と、最後に整理した日と数（`consolidated`。仕様書 第11.11節） |
 | `POST /v1/admin/knowledge` | 管理者: 社内規程の新規の登録（`effectiveFrom` を省くと今日）。ID を発行して 201 で返す（ADR-0019） |
 | `PUT /v1/admin/knowledge/:id` | 管理者: 更新（`new` を指すか、無い ID なら新しい社内規程）。社内規程は版を残し、施行日が先なら施行日まで前の版で答える（`applied: false`）。議事録と秘書が学んだことは版を残さずに直す。廃止・しまったものは 409。本文を節に分け、分けた節を返す（50 万字まで） |

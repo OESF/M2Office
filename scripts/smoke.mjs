@@ -3197,6 +3197,38 @@ console.log('\n■ 57. 名刺管理（内蔵の拡張。第27章、ADR-0042）')
       ? ok('1 枚の写真に写った何枚もの名刺を名刺ごとに登録し、四隅を文字の向きに並べ直して持ち、ほかの名刺が指す写真は消さない')
       : ng('何枚も写った名刺の扱いが違う', JSON.stringify({ sent: sent.body, rowA, rowB: rowB?.frontCorners, detailB: detailB.cards?.[0], purgeB: purgeB.status, imgA: imgA.status }).slice(0, 700));
 
+    // 退職（利用者を止める）: 自分だけの名刺の件数を管理者に示し、止めてから 30 日を過ぎたら期限の見回りの対象にする。戻せば外れる（第27.7節、Q-94）
+    {
+      const { default: pgr } = await import('pg');
+      const db = new pgr.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+      await db.connect();
+      const who = `retire-${tag}`;
+      try {
+        const invited = await call('a', '/v1/admin/users', { method: 'POST', body: JSON.stringify({ email: `${who}@alpha.example.jp`, displayName: '退職の確認', roles: ['member'] }) });
+        const uid = invited.body?.id;
+        await upload('a', who, [['r.png', cardImage({ name: `退職 ${tag}`, company: '私の知り合い', emails: [`retire-${tag}@private.example`] })]], { scope: 'personal' });
+        await settle(who);
+        const stop = await call('a', `/v1/admin/users/${uid}`, { method: 'PATCH', body: JSON.stringify({ status: 'disabled' }) });
+        const expiredIds = async () => (await db.query(`select card_id from m2o_expired_contact_cards() where tenant_id = 't-alpha'`)).rows.map((r) => r.card_id);
+        const cardIds = (await db.query(`select id from contact_cards where owner_user_id = $1`, [uid])).rows.map((r) => r.id);
+        const notYet = (await expiredIds()).some((x) => cardIds.includes(x));
+        await db.query(`update users set disabled_at = now() - interval '31 days' where id = $1`, [uid]);
+        const due = cardIds.length > 0 && (await expiredIds()).some((x) => cardIds.includes(x));
+        const back = await call('a', `/v1/admin/users/${uid}`, { method: 'PATCH', body: JSON.stringify({ status: 'active' }) });
+        const cleared = (await db.query(`select disabled_at from users where id = $1`, [uid])).rows[0]?.disabled_at === null;
+        const afterBack = (await expiredIds()).some((x) => cardIds.includes(x));
+        invited.status === 201 && stop.status === 200 && stop.body.personalCards === 1 && !notYet && due && back.status === 200 && cleared && !afterBack
+          ? ok('利用者を止めると自分だけの名刺の件数を示し、止めてから 30 日を過ぎたら削除の対象にする。戻せば対象から外す')
+          : ng('退職した人の自分だけの名刺の扱いが違う', JSON.stringify({ invited: invited.status, stop: stop.body, notYet, due, back: back.status, cleared, afterBack, cardIds }).slice(0, 500));
+      } finally {
+        const ids = (await db.query(`select c.id from contact_cards c join users u on u.id = c.owner_user_id where u.email = $1`, [`${who}@alpha.example.jp`])).rows.map((r) => r.id);
+        if (ids.length) await db.query('select m2o_purge_contact_cards($1)', [ids]);
+        await db.query(`delete from contacts where owner_user_id in (select id from users where email = $1)`, [`${who}@alpha.example.jp`]);
+        await db.query(`delete from users where email = $1`, [`${who}@alpha.example.jp`]);
+        await db.end();
+      }
+    }
+
     const { body: audits } = await call('a', '/v1/admin/audit-events?category=cards');
     const acts = (audits.items ?? []).map((e) => e.action);
     const names = (audits.items ?? []).map((e) => e.target);

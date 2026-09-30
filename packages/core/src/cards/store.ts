@@ -141,6 +141,8 @@ export interface ContactStore {
   expiredCards(): Promise<ExpiredCard[]>;
   /** 名刺を本当に消す（会社と持ち主をまたぐ）。名刺の無くなったごみ箱の連絡先と、画像のファイルの行も消す。 */
   purgeCards(ids: string[]): Promise<number>;
+  /** 利用者の自分だけの名刺（連絡先）の数。止めるときに管理者へ件数だけを示す（第27.7節、Q-94。中身は返さない）。 */
+  countPersonalContacts(tenantId: string, userId: string): Promise<number>;
   close?(): Promise<void>;
 }
 
@@ -386,6 +388,11 @@ export class PostgresContactStore implements ContactStore {
     return res.rows.map((r) => ({
       tenantId: r.tenant_id, cardId: r.card_id, contactId: r.contact_id, frontFileId: r.front_file_id, backFileId: r.back_file_id,
     }));
+  }
+
+  async countPersonalContacts(tenantId: string, userId: string): Promise<number> {
+    const res = await this.pool.query<{ n: number }>('select m2o_count_personal_contacts($1, $2) as n', [tenantId, userId]);
+    return res.rows[0]?.n ?? 0;
   }
 
   async purgeCards(ids: string[]): Promise<number> {

@@ -298,14 +298,17 @@ export function adminRoute(deps: AppDeps) {
     await deps.repo.updateUser(next);
     // 利用を停止したら、その人の Google を使う動いている途中の業務を止める（仕様書 第6.5.2.1節）
     let stoppedRuns = 0;
+    // 自分だけの名刺の数（止めてから 30 日で削除される。第27.7節、Q-94）。管理者には件数だけを示す
+    let personalCards = 0;
     if (target.status === 'active' && next.status === 'disabled') {
       const now = new Date();
       stoppedRuns = (await deps.revocation.stopUserRuns(tenant.id, next.id, 'user-suspended', now)).length;
       await deps.retention.purgeUser(tenant.id, next.id, now);
+      personalCards = await deps.cards.store.countPersonalContacts(tenant.id, next.id);
     }
     await audit(deps, tenant.id, user.id, 'user.update', 'user', next.id,
-      { roles: next.roles, status: next.status, ...(stoppedRuns > 0 ? { stoppedRuns } : {}) });
-    return c.json({ ...next, stoppedRuns });
+      { roles: next.roles, status: next.status, ...(stoppedRuns > 0 ? { stoppedRuns } : {}), ...(personalCards > 0 ? { personalCards } : {}) });
+    return c.json({ ...next, stoppedRuns, personalCards });
   });
 
   /**

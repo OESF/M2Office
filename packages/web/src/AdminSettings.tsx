@@ -554,9 +554,13 @@ export function UserSettings({ meId, page }: { meId: string; page: string }) {
   };
   const toggleStatus = (u: User) =>
     void saver.run(async () => {
-      await api.admin.updateUser(u.id, { status: u.status === 'active' ? 'disabled' : 'active' });
+      const r = await api.admin.updateUser(u.id, { status: u.status === 'active' ? 'disabled' : 'active' });
       await load();
-    });
+      return r;
+    }, (r) => (r.status === 'disabled' && (r.personalCards ?? 0) > 0
+      // 管理者は中身を見られないため件数だけを示す（仕様書 第27.7節、Q-94）
+      ? `停止しました。この人の「自分だけ」の名刺 ${r.personalCards} 件は、30 日後に削除されます（それまでに戻せば残ります）`
+      : '保存しました'));
 
   return (
     <>

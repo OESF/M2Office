@@ -951,7 +951,10 @@ export class PostgresRepository implements Repository {
 
   async updateUser(u: User): Promise<void> {
     await this.q(u.tenantId,
-      `update users set display_name = $3, roles = $4, status = $5 where tenant_id = $1 and id = $2`,
+      // 止めた日時を持つ（止めてから 30 日で自分だけの名刺を削除するため。第27.7節、Q-94）。戻したら空にする
+      `update users set display_name = $3, roles = $4, status = $5,
+              disabled_at = case when $5 = 'disabled' then coalesce(disabled_at, now()) else null end
+        where tenant_id = $1 and id = $2`,
       [u.tenantId, u.id, u.displayName, u.roles, u.status]);
   }
 
