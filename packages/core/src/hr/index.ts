@@ -53,6 +53,6 @@ export { buildZenginFile, toZenginKana, type ZenginClient, type ZenginPayee, typ
 export { renderPayslipPdf, type PayslipPdfInput } from './payslip-pdf.js';
 export { readResidentNotice, parseNoticeReading, noticeProblem, type NoticeEntry, type NoticeReading } from './resident-notice.js';
 export { mapTrialHeaders, trialTotals, trialNumber, compareTrialRow, TRIAL_ITEMS, type TrialItem } from './payroll-trial.js';
-export { calcSlip, adjustmentLines, round50, itemRule, reachMonth, insuredIn, shiftMonth as shiftPayMonth, type SlipInput, type SlipResult as PaySlipResult } from './payroll.js';
+export { calcSlip, adjustmentLines, round50, itemRule, carryMonth, reachMonth, insuredIn, shiftMonth as shiftPayMonth, type SlipInput, type SlipResult as PaySlipResult } from './payroll.js';
 export { LAW_BOOK, Law, type LawHit } from './law/index.js';
 export type { LawBook, LawMeta, LawReview, GradeRow, GradeTable, ChangeLimit, InsuranceRules, WorkersCompRates, WorkersCompRow, HealthRates, RateTable, EmploymentRates, WithholdingMonthly, WithholdingRow, WithholdingAbove, MinimumWage } from './law/types.js';

@@ -84,6 +84,17 @@ export function shiftMonth(ym: string, n: number): string {
   return `${Math.floor(t / 12)}-${String((t % 12) + 1).padStart(2, '0')}`;
 }
 
+/**
+ * 訂正の回・年末調整の回の不足を差し引く月（第30.10.4節）。元の月の翌月から、月の給与を確定していない最初の月。
+ *
+ * @param closed 月の給与を確定（または支払い済みに）した支給の月
+ */
+export function carryMonth(payMonth: string, closed: ReadonlySet<string>): string {
+  let m = shiftMonth(payMonth, 1);
+  while (closed.has(m)) m = shiftMonth(m, 1);
+  return m;
+}
+
 /** 年齢に「達した日」（誕生日の前の日）の月（YYYY-MM）。 */
 export function reachMonth(birthDate: string, age: number): string {
   const [y, m, d] = birthDate.split('-').map(Number) as [number, number, number];

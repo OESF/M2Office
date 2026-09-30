@@ -28,7 +28,7 @@ import type { AttendanceService } from './attendance-service.js';
 import { termsOn } from './attendance-service.js';
 import { periodOf } from './attendance.js';
 import { dayOfMonth } from './procedures.js';
-import { calcSlip, shiftMonth } from './payroll.js';
+import { calcSlip, carryMonth, shiftMonth } from './payroll.js';
 import { Law } from './law/lookup.js';
 import type { LawBook } from './law/types.js';
 
@@ -309,10 +309,12 @@ export class PayrollService {
         pdf.push(sl.employeeName ?? '');
       }
     }
-    // 訂正の回・年末調整の回で差額が控除（不足）になる人は、次の月の給与で差し引く（第30.10.4節・第30.15.1節。税と雇用保険は直し済み）
+    // 訂正の回・年末調整の回で差額が控除（不足）になる人は、次に払う月の給与で差し引く（第30.10.4節・第30.15.1節。税と雇用保険は直し済み）。
+    // 元の月の翌月の給与をもう確定しているときは、確定していない最初の月に入れる（確定した月に入れると差し引かれないため）
     let carried = 0;
     if (run.kind === 'correction' || run.kind === 'yea') {
-      const next = shiftMonth(run.payMonth, 1);
+      const closed = new Set((await this.deps.store.listRuns(tenantId)).filter((r) => r.kind === 'monthly' && (r.status === 'confirmed' || r.status === 'paid')).map((r) => r.payMonth));
+      const next = carryMonth(run.payMonth, closed);
       for (const sl of slips.filter((x) => x.net < 0)) {
         await this.deps.store.addAdjustment(tenantId, {
           id: randomUUID(), employeeId: sl.employeeId, kind: 'monthly', payMonth: next,
@@ -700,7 +702,7 @@ export class PayrollService {
     const unverified = Object.values(c.law).some((l) => !l.reviewed);
     const checks = reviewOther({ slips, employees: new Map(c.employees.map((e) => [e.id, e])), profiles: new Map(c.profiles.map((p) => [p.employeeId, p])), unverified });
     for (const sl of slips) {
-      checks.push({ level: 'check', code: 'correction', text: `差額 ${sl.net >= 0 ? '+' : '−'}${Math.abs(sl.net).toLocaleString('ja-JP')} 円${sl.net < 0 ? '（次の月の給与で差し引きます）' : ''}`, employeeId: sl.employeeId, employeeName: sl.employeeName ?? '' });
+      checks.push({ level: 'check', code: 'correction', text: `差額 ${sl.net >= 0 ? '+' : '−'}${Math.abs(sl.net).toLocaleString('ja-JP')} 円${sl.net < 0 ? '（次に払う月の給与で差し引きます）' : ''}`, employeeId: sl.employeeId, employeeName: sl.employeeName ?? '' });
     }
     const run: PayRun = {
       id: newId, kind: 'correction', payMonth: original.payMonth, payDate, periodStart: original.periodStart, periodEnd: original.periodEnd, status: 'draft', law: c.law,

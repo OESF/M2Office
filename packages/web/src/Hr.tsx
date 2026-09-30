@@ -551,7 +551,9 @@ function PayrollProfile({ employeeId }: { employeeId: string }) {
 function LeaveTab() {
   const [rows, setRows] = useState<Awaited<ReturnType<typeof api.hr.leaveOverview>>['rows'] | null>(null);
   const [grant, setGrant] = useState<{ employeeId: string; grantedOn: string; days: string; note: string } | null>(null);
+  const [take, setTake] = useState<{ employeeId: string; date: string; days: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const run = (p: Promise<unknown>, fail: string, done?: () => void) => void p.then(() => { setError(null); done?.(); load(); }).catch((e) => setError(describeError(e, fail)));
   const load = useCallback(() => {
     api.hr.leaveOverview().then((r) => setRows(r.rows)).catch((e) => setError(describeError(e, '読み込めませんでした')));
   }, []);
@@ -579,8 +581,30 @@ function LeaveTab() {
                     : <span className="badge warn">{r.balance.obligation.deadline} までにあと {r.balance.obligation.required - r.balance.obligation.taken} 日</span>)}
                   {r.lowAttendance !== null && <div className="error">出勤率 {Math.round(r.lowAttendance * 100)}%（付与を確かめる）</div>}
                 </td>
-                <td><button className="btn ghost small" onClick={() => setGrant(grant?.employeeId === r.employeeId ? null : { employeeId: r.employeeId, grantedOn: '', days: '', note: '導入のときの残日数' })}>付与を足す</button></td>
+                <td className="nowrap">
+                  <button className="btn ghost small" onClick={() => { setGrant(null); setTake(take?.employeeId === r.employeeId ? null : { employeeId: r.employeeId, date: today(), days: 1 }); }}>有給を入れる</button>
+                  <button className="btn ghost small" onClick={() => { setTake(null); setGrant(grant?.employeeId === r.employeeId ? null : { employeeId: r.employeeId, grantedOn: '', days: '', note: '導入のときの残日数' }); }}>付与を足す</button>
+                </td>
               </tr>
+              {take?.employeeId === r.employeeId && (
+                <tr><td colSpan={5}>
+                  <div className="row wrap">
+                    <label className="small">休む日 <input type="date" value={take.date} onChange={(e) => setTake({ ...take, date: e.target.value })} /></label>
+                    <select value={take.days} onChange={(e) => setTake({ ...take, days: Number(e.target.value) })} aria-label="日数">
+                      <option value={1}>1 日</option><option value={0.5}>半日</option>
+                    </select>
+                    <button className="btn small" disabled={!take.date} onClick={() => run(api.hr.takeLeave(take.employeeId, take.date, take.days), '入れられませんでした')}>入れる</button>
+                  </div>
+                  <ul className="plain small">
+                    {[...r.takes].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 12).map((x) => (
+                      <li key={x.id} className="row">
+                        <span>{x.date} {x.days === 0.5 ? '半日' : '1 日'}</span>
+                        <button className="btn ghost small" onClick={() => run(api.hr.cancelTake(x.id), '取り消せませんでした')}>取り消す</button>
+                      </li>
+                    ))}
+                  </ul>
+                </td></tr>
+              )}
               {grant?.employeeId === r.employeeId && (
                 <tr><td colSpan={5}>
                   <div className="row wrap">
@@ -745,7 +769,25 @@ function TermsFields({ t, set }: { t: Partial<HrTerms>; set: (p: Partial<HrTerms
           </>
         )}
       </div>
+      <Allowances list={t.allowances ?? []} set={(allowances) => set({ allowances })} />
     </>
+  );
+}
+
+/** 雇用条件の手当（名前と月の額）。扱い（割増の基礎・所得税）は名前から決め、違うものは管理者ページの「手当の扱い」で直す。 */
+function Allowances({ list, set }: { list: HrTerms['allowances']; set: (l: HrTerms['allowances']) => void }) {
+  const put = (i: number, p: Partial<HrTerms['allowances'][number]>) => set(list.map((a, j) => (j === i ? { ...a, ...p } : a)));
+  return (
+    <div className="row wrap">
+      {list.map((a, i) => (
+        <span key={i} className="hr-allowance">
+          <input className="short" placeholder="手当の名前" value={a.name} onChange={(e) => put(i, { name: e.target.value })} aria-label="手当の名前" />
+          <input className="num-input" type="number" min={0} placeholder="月の額（円）" value={Number.isFinite(a.amount) ? a.amount : ''} onChange={(e) => put(i, { amount: e.target.value === '' ? NaN : Number(e.target.value) })} aria-label="手当の月の額（円）" />
+          <button className="btn ghost small" onClick={() => set(list.filter((_, j) => j !== i))} aria-label="この手当を外す">×</button>
+        </span>
+      ))}
+      <button className="btn ghost small" onClick={() => set([...list, { name: '', amount: NaN }])}>手当を足す</button>
+    </div>
   );
 }
 
@@ -854,17 +896,19 @@ function EmployeeDetail({ id, onBack }: { id: string; onBack: () => void }) {
                 socialInsurance: newTerms.socialInsurance, employmentInsurance: newTerms.employmentInsurance, schedule: newTerms.schedule,
                 startTime: newTerms.startTime, endTime: newTerms.endTime, breakMinutes: newTerms.breakMinutes, workplaceScope: newTerms.workplaceScope,
                 workScope: newTerms.workScope, contractStart: newTerms.contractStart, contractEnd: newTerms.contractEnd, renewal: newTerms.renewal, renewalLimit: newTerms.renewalLimit,
+                allowances: newTerms.allowances,
               }), '足せませんでした', () => setNewTerms(null))}>足す</button>
             </div>
           </>
         )}
         <table className="table">
-          <thead><tr><th>適用日</th><th>賃金</th><th>週</th><th>業務・場所</th><th>保険</th></tr></thead>
+          <thead><tr><th>適用日</th><th>賃金</th><th>手当</th><th>週</th><th>業務・場所</th><th>保険</th></tr></thead>
           <tbody>
             {d.terms.map((t) => (
               <tr key={t.id}>
                 <td>{t.effectiveOn}</td>
                 <td>{wage(t)}</td>
+                <td>{t.allowances.map((a) => `${a.name} ${a.amount.toLocaleString('ja-JP')} 円`).join('・')}</td>
                 <td>{[t.weeklyHours !== null ? `${t.weeklyHours} 時間` : '', t.weeklyDays !== null ? `${t.weeklyDays} 日` : ''].filter(Boolean).join('・')}</td>
                 <td>{[t.work, t.workplace].filter(Boolean).join('・')}</td>
                 <td>{[t.socialInsurance ? '社会保険' : '', t.employmentInsurance ? '雇用保険' : ''].filter(Boolean).join('・')}</td>

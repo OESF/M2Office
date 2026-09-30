@@ -415,12 +415,12 @@ export class AttendanceService {
   /**
    * 有給の一覧（担当者の画面）。出勤率が 8 割に届かない見込みの人も示す（付与は止めない。第30.7.1節）。
    */
-  async leaveOverview(tenantId: string): Promise<{ employeeId: string; name: string; balance: LeaveBalance; lowAttendance: number | null }[]> {
+  async leaveOverview(tenantId: string): Promise<{ employeeId: string; name: string; balance: LeaveBalance; lowAttendance: number | null; takes: LeaveTake[] }[]> {
     const employees = (await this.deps.hrStore.listEmployees(tenantId)).filter((e) => e.category !== 'owner' && (!e.leftOn || e.leftOn >= this.today()));
     const out = [];
     for (const e of employees) {
       const bal = await this.balance(tenantId, e);
-      out.push({ employeeId: e.id, name: e.name, balance: { remaining: bal.remaining, grants: bal.grants, obligation: bal.obligation }, lowAttendance: await this.attendanceRate(tenantId, e, bal.grants) });
+      out.push({ employeeId: e.id, name: e.name, balance: { remaining: bal.remaining, grants: bal.grants, obligation: bal.obligation }, lowAttendance: await this.attendanceRate(tenantId, e, bal.grants), takes: bal.takes.filter((t) => t.status === 'taken') });
     }
     return out;
   }

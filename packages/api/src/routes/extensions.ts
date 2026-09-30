@@ -16,7 +16,7 @@ import {
 } from '@m2office/shared';
 import {
   bundledConnection, builtinSection, consentSnapshot, encodeFiles, unpackExtension, EXTENSION_FILE_MAX_BYTES,
-  ensureHrCompartment, detectKind, MAX_FILE_BYTES, LAW_BOOK, type ExtensionEntry, type ExtensionPackage, type TenantExtensions,
+  ensureHrCompartment, detectKind, MAX_FILE_BYTES, LAW_BOOK, itemRule, type ExtensionEntry, type ExtensionPackage, type TenantExtensions,
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { tenantOrigin } from '../tenant-origin.js';
@@ -189,6 +189,20 @@ export function extensionsRoute(deps: AppDeps) {
   /** 労災保険率表の事業の種類（いまの表。会社の設定で選ぶ。第30.13.1節）。 */
   const industries = () => [...LAW_BOOK.workersComp].sort((a, b) => b.effectiveFrom.localeCompare(a.effectiveFrom))[0]?.rows ?? [];
   app.get(`/${HR_EXTENSION_ID}/labor-industries`, (c) => c.json({ industries: industries() }));
+
+  /**
+   * 手当の扱い（第30.10.1節）。雇用条件に入っている手当の名前と会社の設定の手当を並べ、それぞれの扱い（設定があればそれ、無ければ名前から決めたもの）を返す。
+   * 人に手当の一覧を作らせない（ADR-0028）。名前だけを返し、額や人は返さない。
+   */
+  app.get(`/${HR_EXTENSION_ID}/allowances`, async (c) => {
+    const { tenant } = c.get('ctx');
+    const store = deps.hr.service.deps.store;
+    const rules = (await deps.repo.getTenantSettings(tenant.id)).hr.payroll.items;
+    const names = new Set(rules.map((r) => r.name));
+    for (const e of await store.listEmployees(tenant.id)) for (const t of await store.listTerms(tenant.id, e.id)) for (const a of t.allowances) names.add(a.name);
+    const items = [...names].sort((a, b) => a.localeCompare(b, 'ja')).map((name) => ({ ...itemRule(name, rules), set: rules.some((r) => r.name === name) }));
+    return c.json({ items });
+  });
 
   app.put(`/${HR_EXTENSION_ID}/settings`, async (c) => {
     const { tenant, user } = c.get('ctx');

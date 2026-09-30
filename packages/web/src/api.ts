@@ -1199,7 +1199,12 @@ export const api = {
       if (!blob) throw new ApiError('書き出せませんでした', 403);
       saveBlob(blob, `出勤簿-${month}.xlsx`);
     },
-    leaveOverview: () => call<{ rows: { employeeId: string; name: string; balance: LeaveBalance; lowAttendance: number | null }[] }>('/hr/leave'),
+    leaveOverview: () => call<{ rows: { employeeId: string; name: string; balance: LeaveBalance; lowAttendance: number | null; takes: LeaveTake[] }[] }>('/hr/leave'),
+    /** 担当者が有給の取得を記録する（締めた期間も入れられる）。 */
+    takeLeave: (employeeId: string, date: string, days: number) =>
+      call<{ remaining: number }>(`/hr/leave/${encodeURIComponent(employeeId)}/takes`, { method: 'POST', body: JSON.stringify({ date, days }) }),
+    /** 担当者が有給の取得を取り消す。 */
+    cancelTake: (id: string) => call<{ ok: true }>(`/hr/leave/takes/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     addGrant: (employeeId: string, grantedOn: string, days: number, note: string) =>
       call<{ grant: LeaveGrant }>(`/hr/leave/${encodeURIComponent(employeeId)}/grants`, { method: 'POST', body: JSON.stringify({ grantedOn, days, note }) }),
     leaveRegister: async () => {
@@ -1558,6 +1563,8 @@ export const api = {
       form.append('file', file);
       return postForm<{ fields: HrProposalField[] }>('/admin/extensions/hr/proposal', form);
     },
+    /** 手当の扱い（雇用条件の手当の名前と、割増の基礎・所得税の対象。設定が無ければ名前から決めたもの）。 */
+    hrAllowances: () => call<{ items: { name: string; premiumBase: boolean; taxable: boolean; set: boolean }[] }>('/admin/extensions/hr/allowances'),
     /** 労災保険率表の事業の種類（会社の設定で選ぶ）。 */
     hrLaborIndustries: () => call<{ industries: { code: string; category: string; name: string; rate: number }[] }>('/admin/extensions/hr/labor-industries'),
     setHrSettings: (patch: Partial<HrSettings>) =>

@@ -383,6 +383,37 @@ const DAYS = Array.from({ length: 31 }, (_, i) => i + 1);
 const dayLabel = (d: number) => (d === 31 ? '末日' : `${d} 日`);
 
 /**
+ * 手当の扱い（仕様書 第30.10.1節）。雇用条件に入っている手当を並べ、割増の単価の基礎に入れるか・所得税の対象かを手当ごとに直す。
+ * 設定していない手当は名前から決めた扱い。直した手当は会社の設定に残り、「戻す」で名前から決めた扱いに戻る。
+ */
+function HrAllowances({ settings, busy, save }: { settings: HrSettings; busy: boolean; save: (patch: Partial<HrSettings>) => void }) {
+  const [items, setItems] = useState<{ name: string; premiumBase: boolean; taxable: boolean; set: boolean }[] | null>(null);
+  const rules = settings.payroll.items;
+  useEffect(() => { api.admin.hrAllowances().then((r) => setItems(r.items)).catch(() => setItems([])); }, [rules]);
+  if (!items || items.length === 0) return null;
+  const put = (name: string, patch: { premiumBase?: boolean; taxable?: boolean } | null) => {
+    const cur = items.find((x) => x.name === name)!;
+    const rest = rules.filter((r) => r.name !== name);
+    save({ payroll: { ...settings.payroll, items: patch ? [...rest, { name, premiumBase: patch.premiumBase ?? cur.premiumBase, taxable: patch.taxable ?? cur.taxable }] : rest } });
+  };
+  return (
+    <table className="table hr-allowances">
+      <thead><tr><th>手当</th><th>割増の基礎に入れる</th><th>所得税の対象</th><th /></tr></thead>
+      <tbody>
+        {items.map((x) => (
+          <tr key={x.name}>
+            <td>{x.name}</td>
+            <td><input type="checkbox" checked={x.premiumBase} disabled={busy} onChange={(e) => put(x.name, { premiumBase: e.target.checked })} aria-label={`${x.name}を割増の基礎に入れる`} /></td>
+            <td><input type="checkbox" checked={x.taxable} disabled={busy} onChange={(e) => put(x.name, { taxable: e.target.checked })} aria-label={`${x.name}を所得税の対象にする`} /></td>
+            <td>{x.set && <button className="link small" disabled={busy} onClick={() => put(x.name, null)}>名前から決めた扱いに戻す</button>}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+/**
  * 人事・給与の会社の設定（仕様書 第30.8.1節）。事業所・保険・締めと支払・手続き・勤怠と休暇・給与の計算・振込元。すぐに反映する。
  *
  * @remarks 説明文は出さない（原則 u11）。何の設定かは秘書に聞けばよい
@@ -479,6 +510,7 @@ function HrFields({ settings, busy, onChanged }: { settings: HrSettings; busy: b
           </>
         )}
       </div>
+      <HrAllowances settings={settings} busy={busy} save={save} />
       <div className="row wrap">
         {([['officeSymbol', '事業所整理記号', 20], ['officeNumber', '事業所番号', 10]] as const).map(([k, l, max]) => (
           <input key={k} className="short" placeholder={l} aria-label={l} maxLength={max} defaultValue={settings.insurance[k]} disabled={busy}

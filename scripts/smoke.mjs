@@ -3633,6 +3633,17 @@ console.log('\n■ 61. 人事・給与（内蔵の拡張。第30章、段 1: 台
     const { body: askLeave } = await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message: '有給あと何日？' }) }, 'member');
     (myhr.leave?.grants ?? []).length >= 2 && take.status === 201 && takeDup.status === 400 && /有給の残りは/.test(askLeave.text ?? '')
       ? ok('有給は入社日から自動で付与し、本人が画面と秘書から取れる（同じ日は二度取れない）') : ng('有給が合わない', JSON.stringify({ grants: myhr.leave?.grants?.length, take: take.status, dup: takeDup.status, ask: askLeave.text }));
+    // 担当者が「有給」の画面で入れ、取り消す（一覧に取った日が出る）
+    const staffDay = new Date(Date.now() + 9 * 3_600_000 + 8 * 86_400_000).toISOString().slice(0, 10);
+    const staffTake = await call('a', `/v1/hr/leave/${staffId}/takes`, { method: 'POST', body: JSON.stringify({ date: staffDay, days: 1 }) });
+    const { body: ov1 } = await call('a', '/v1/hr/leave');
+    const takenRow = (ov1.rows ?? []).find((r) => r.employeeId === staffId);
+    const takeId = (takenRow?.takes ?? []).find((x) => x.date === staffDay)?.id;
+    const staffCancel = takeId ? await call('a', `/v1/hr/leave/takes/${takeId}`, { method: 'DELETE' }) : { status: 0 };
+    const { body: ov2 } = await call('a', '/v1/hr/leave');
+    staffTake.status === 201 && staffCancel.status === 200 && (takenRow?.takes ?? []).some((x) => x.date === leaveDay)
+      && !((ov2.rows ?? []).find((r) => r.employeeId === staffId)?.takes ?? []).some((x) => x.date === staffDay)
+      ? ok('担当者は有給の一覧で取った日を見て、有給を入れ・取り消せる') : ng('担当者の有給が合わない', JSON.stringify({ take: staffTake.status, cancel: staffCancel.status, takes: takenRow?.takes }));
     const { body: staffNotes } = await call('a', '/v1/notifications');
     (staffNotes.items ?? []).some((n) => n.kind === 'attendance' && n.title.includes(`${tag} 勤怠`))
       ? ok('打刻の直しと有給の申請を、人事区画の人に知らせる（種類「勤怠」）') : ng('勤怠の知らせが届かない', JSON.stringify((staffNotes.items ?? []).slice(0, 3)));
@@ -3644,6 +3655,15 @@ console.log('\n■ 61. 人事・給与（内蔵の拡張。第30章、段 1: 台
     await call('a', '/v1/admin/extensions/hr/settings', { method: 'PUT', body: JSON.stringify({ health: { kind: 'kyokai', prefecture: '東京都' }, payroll: { deductAbsence: false } }) });
     const low = await call('a', '/v1/admin/extensions/hr/settings', { method: 'PUT', body: JSON.stringify({ payroll: { premiums: { overtime: 20 } } }) });
     low.status === 400 ? ok('割増率は法定の下限より下げられない') : ng(`法定より低い割増率を受け付けた（${low.status}）`);
+    // 手当の扱い（第30.10.1節）: 手当ごとに直せて、戻すと名前から決めた扱いに戻る（設定に残らない）
+    await call('a', '/v1/admin/extensions/hr/settings', { method: 'PUT', body: JSON.stringify({ payroll: { items: [{ name: '住宅手当', premiumBase: true, taxable: true }] } }) });
+    const { body: allow1 } = await call('a', '/v1/admin/extensions/hr/allowances');
+    const allowMember = await call('a', '/v1/admin/extensions/hr/allowances', {}, 'member');
+    await call('a', '/v1/admin/extensions/hr/settings', { method: 'PUT', body: JSON.stringify({ payroll: { items: [] } }) });
+    const { body: allow2 } = await call('a', '/v1/admin/extensions/hr/allowances');
+    const house = (allow1.items ?? []).find((x) => x.name === '住宅手当');
+    house?.set === true && house.premiumBase === true && allowMember.status === 403 && !(allow2.items ?? []).some((x) => x.name === '住宅手当' && x.set)
+      ? ok('手当の扱いは管理者が手当ごとに直せ（名前から決めた扱いの上書き）、戻せる') : ng('手当の扱いが合わない', JSON.stringify({ allow1, member: allowMember.status, allow2 }).slice(0, 500));
     const sp = await call('a', `/v1/hr/payroll/employees/${staffId}/standard-pay`, { method: 'POST', body: JSON.stringify({ fromMonth: '2026-04', pay: 250000 }) });
     const prof = await call('a', `/v1/hr/payroll/employees/${staffId}/profile`, { method: 'PUT', body: JSON.stringify({ taxColumn: 'ko', dependents: 0 }) });
     const { body: payInfo } = await call('a', `/v1/hr/payroll/employees/${staffId}`);

@@ -8,7 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULT_HR_SETTINGS, type HrEmployee, type HrSettings, type HrTerms, type PayAdjustment } from '@m2office/shared';
-import { Law, LAW_BOOK, calcBonus, adjustmentLines, HEALTH_BONUS_CAP } from '../src/index.js';
+import { Law, LAW_BOOK, calcBonus, adjustmentLines, HEALTH_BONUS_CAP, carryMonth } from '../src/index.js';
 
 const law = new Law(LAW_BOOK);
 const settings: HrSettings = { ...DEFAULT_HR_SETTINGS, enabled: true, health: { kind: 'kyokai', prefecture: '東京都' } };
@@ -82,4 +82,10 @@ test('調整の行: 支給は既定で所得税と雇用保険の対象、控除
   assert.equal(x.notInsurable, 3000);
   const back = adjustmentLines([adj({ direction: 'deduct', taxable: true, insurable: true, amount: 2000 })]);
   assert.equal(back.notTaxable, 2000, '過払いの戻し（対象の控除）は対象から引く');
+});
+
+test('訂正の回の不足: 元の月の翌月から、月の給与を確定していない最初の月で差し引く', () => {
+  assert.equal(carryMonth('2026-08', new Set()), '2026-09');
+  assert.equal(carryMonth('2026-08', new Set(['2026-08', '2026-09', '2026-10'])), '2026-11');
+  assert.equal(carryMonth('2026-12', new Set(['2027-01'])), '2027-02');
 });

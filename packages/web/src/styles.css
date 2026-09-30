@@ -1486,3 +1486,8 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .myhr-shift-days { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 6px 0; font-size: calc(13px * var(--font-scale)); }
 .myhr-shift-days .off { color: var(--muted); }
 .myhr-shift-days .wish { color: var(--warn); }
+
+/* 手当の扱い（第30.10.1節） */
+.hr-allowance { display: inline-flex; gap: 4px; align-items: center; }
+.hr-allowances { width: auto; margin: 6px 0; }
+.hr-allowances th, .hr-allowances td { padding: 3px 10px; }
