@@ -13,6 +13,7 @@ import {
 import { api, describeError, type HrImportResult } from './api.js';
 import { YearEndTab } from './YearEnd.js';
 import { SocialTab } from './SocialInsurance.js';
+import { LaborTab } from './LaborInsurance.js';
 
 const label = <T extends string>(list: { id: T; label: string }[], id: T) => list.find((x) => x.id === id)?.label ?? id;
 /** 日本時間の今日（YYYY-MM-DD）。 */
@@ -27,12 +28,12 @@ const wage = (t: Pick<HrTerms, 'wageType' | 'wageAmount'> | null) => (t && t.wag
  * @param onOpen 従業員を開く・一覧へ戻る
  */
 export function Hr({ employeeId, onOpen }: { employeeId: string | null; onOpen: (id: string | null) => void }) {
-  const [tab, setTab] = useState<'ledger' | 'calendar' | 'attendance' | 'leave' | 'payroll' | 'social' | 'yea'>('ledger');
+  const [tab, setTab] = useState<'ledger' | 'calendar' | 'attendance' | 'leave' | 'payroll' | 'social' | 'labor' | 'yea'>('ledger');
   if (employeeId) return <EmployeeDetail id={employeeId} onBack={() => onOpen(null)} />;
   return (
     <>
       <div className="hr-tabs" role="tablist">
-        {([['ledger', '台帳'], ['calendar', '期限'], ['attendance', '勤怠'], ['leave', '有給'], ['payroll', '給与'], ['social', '社会保険'], ['yea', '年末調整']] as const).map(([k, l]) => (
+        {([['ledger', '台帳'], ['calendar', '期限'], ['attendance', '勤怠'], ['leave', '有給'], ['payroll', '給与'], ['social', '社会保険'], ['labor', '年度更新'], ['yea', '年末調整']] as const).map(([k, l]) => (
           <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>
         ))}
       </div>
@@ -42,6 +43,7 @@ export function Hr({ employeeId, onOpen }: { employeeId: string | null; onOpen: 
       {tab === 'leave' && <LeaveTab />}
       {tab === 'payroll' && <PayrollTab onOpen={onOpen} />}
       {tab === 'social' && <SocialTab />}
+      {tab === 'labor' && <LaborTab />}
       {tab === 'yea' && <YearEndTab RunView={RunPanelFor} />}
     </>
   );

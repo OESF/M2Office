@@ -59,6 +59,8 @@ export interface PayrollStore {
   listYearSlips(tenantId: string, year: number): Promise<SlipWithRun[]>;
   /** `fromMonth` 以上 `toMonth` 以下に支払った、確定した月の給与と訂正の回の明細（社会保険の報酬。第30.12.1節）。 */
   listPaidSlips(tenantId: string, fromMonth: string, toMonth: string): Promise<SlipWithRun[]>;
+  /** 労働保険の年度（`from`〜`to` の日）の、確定した月の給与と訂正の回（締めの日で）と賞与（支払った日で）の明細（第30.13.1節）。 */
+  listLaborSlips(tenantId: string, from: string, to: string): Promise<SlipWithRun[]>;
   /** 明細を画面で受け取る同意（`null` で取り消し）。 */
   setConsent(tenantId: string, employeeId: string, at: string | null): Promise<void>;
   /** 回ごと・人ごとの調整の行。 */
@@ -268,6 +270,14 @@ export class PostgresPayrollStore implements PayrollStore {
     const rows = await this.q<SlipRow>(tenantId, `${SLIP_RUN_SELECT}
       where s.tenant_id = $1 and r.kind in ('monthly', 'correction') and r.status in ('confirmed', 'paid')
         and to_char(r.pay_date, 'YYYY-MM') between $2 and $3 order by r.pay_date, r.kind`, [tenantId, fromMonth, toMonth]);
+    return rows.map(toSlipWithRun);
+  }
+
+  async listLaborSlips(tenantId: string, from: string, to: string): Promise<SlipWithRun[]> {
+    const rows = await this.q<SlipRow>(tenantId, `${SLIP_RUN_SELECT}
+      where s.tenant_id = $1 and r.status in ('confirmed', 'paid')
+        and ((r.kind in ('monthly', 'correction') and r.period_end between $2::date and $3::date) or (r.kind = 'bonus' and r.pay_date between $2::date and $3::date))
+      order by r.pay_date, r.kind`, [tenantId, from, to]);
     return rows.map(toSlipWithRun);
   }
 

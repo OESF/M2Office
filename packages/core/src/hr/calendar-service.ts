@@ -10,6 +10,7 @@ import { HR_COMPARTMENT, type HrDeadline, type HrTerms } from '@m2office/shared'
 import type { Repository } from '../repository/types.js';
 import type { HrStore } from './store.js';
 import type { PayrollStore } from './payroll-store.js';
+import type { LaborStore } from './labor-store.js';
 import type { AttendanceService } from './attendance-service.js';
 import { termsOn } from './attendance-service.js';
 import { buildDeadlines } from './calendar.js';
@@ -25,6 +26,8 @@ export interface LaborCalendarDeps {
   repo: Repository;
   /** 法令の表（変わり目と更新待ちを出す。第30.18.1節）。 */
   law?: LawBook;
+  /** 年度更新の下書きの結果（延納の第 2 期・第 3 期の納期限を出す。第30.13.1節）。 */
+  laborStore?: LaborStore;
   now?: () => Date;
 }
 
@@ -74,6 +77,17 @@ export class LaborCalendar {
       if (r.kind !== 'bonus' || (r.status !== 'confirmed' && r.status !== 'paid')) continue;
       const due = new Date(Date.parse(`${r.payDate}T00:00:00Z`) + 5 * 86_400_000).toISOString().slice(0, 10);
       law.push({ date: due, kind: 'bonus-report', title: `賞与支払届（${Number(r.payMonth.slice(5, 7))} 月の賞与）`, detail: '「給与」の賞与の回で下書きを出し、年金事務所（健康保険組合）に届け出る' });
+    }
+    // 労働保険の延納の第 2 期・第 3 期（年度更新の下書きを作った年）
+    if (this.deps.laborStore) {
+      const y = Number(today.slice(0, 4));
+      for (const year of [y - 1, y]) {
+        const rec = await this.deps.laborStore.get(tenantId, year);
+        for (const [i, p] of (rec?.result?.installments ?? []).entries()) {
+          if (i === 0 || p.amount <= 0) continue;
+          law.push({ date: p.due, kind: 'labor-insurance', title: `労働保険料の納付（${year} 年度・延納の第 ${i + 1} 期）`, detail: `${p.amount.toLocaleString('ja-JP')} 円（年度更新の下書きから）` });
+        }
+      }
     }
     return { items: buildDeadlines({ today, days, settings, employees, terms, tasks, obligations, payments, law }), usesPayroll: payments.length > 0 };
   }

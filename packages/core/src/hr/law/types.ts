@@ -74,6 +74,24 @@ export interface EmploymentRates extends LawMeta {
   general: number;
   agriculture: number;
   construction: number;
+  /** 労働者と事業主を合わせた率（1,000 分の。年度更新に使う。第30.13.1節）。 */
+  totalPerMille: { general: number; agriculture: number; construction: number };
+}
+
+/** 労災保険率表の 1 行（事業の種類の番号・分類・名前・1,000 分の率）。 */
+export interface WorkersCompRow {
+  code: string;
+  category: string;
+  name: string;
+  rate: number;
+}
+
+/** 労災保険率表と一般拠出金率（施行日 YYYY-MM-DD から。第30.13.1節）。 */
+export interface WorkersCompRates extends LawMeta {
+  effectiveFrom: string;
+  rows: WorkersCompRow[];
+  /** 一般拠出金率（1,000 分の）。 */
+  generalContribution: number;
 }
 
 /** 源泉徴収税額表（月額表）の 1 行。`ko` は扶養親族等の数 0〜7 人の甲欄。 */
@@ -198,4 +216,6 @@ export interface LawBook {
   yea: YeaRules[];
   /** 社会保険と雇用保険の適用の決まり（施行日ごと）。 */
   insurance: InsuranceRules[];
+  /** 労災保険率表（施行日ごと）。 */
+  workersComp: WorkersCompRates[];
 }

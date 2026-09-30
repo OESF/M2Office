@@ -301,6 +301,20 @@ export const EMPLOYMENT_R8: EmploymentRates = {
   general: 0.005,
   agriculture: 0.006,
   construction: 0.006,
+  totalPerMille: { general: 13.5, agriculture: 15.5, construction: 16.5 },
+};
+
+/** 雇用保険料率 令和7年度（令和8年度の年度更新の確定保険料と、令和7年度の締めの給与に使う）。 */
+export const EMPLOYMENT_R7: EmploymentRates = {
+  version: '雇用保険料率 令和7年度',
+  effectiveFrom: '2025-04-01',
+  source: 'https://www.mhlw.go.jp/content/001401966.pdf',
+  checkedOn: '2026-09-30',
+  review: { status: 'unverified' },
+  general: 0.0055,
+  agriculture: 0.0065,
+  construction: 0.0065,
+  totalPerMille: { general: 14.5, agriculture: 16.5, construction: 17.5 },
 };
 
 /** 地域別最低賃金（令和7年度の額と、答申された令和8年度の額。発効日の前にもう一度確かめる）。 */

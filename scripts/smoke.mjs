@@ -3788,6 +3788,25 @@ console.log('\n■ 61. 人事・給与（内蔵の拡張。第30章、段 1: 台
         && joinerPay.standardPays?.[0]?.kind === 'acquire' && joinerPay.standardPays[0].amount === 300000 && joinerPay.standardPays[0].fromMonth === todayJst.slice(0, 7) && noSantei.status === 400
         ? ok('社会保険は入社の資格取得届の下書きで標準報酬月額を入れ（二度は作らない）、加入の判定と雇用条件の違いを示し、人事区画の外には見せない')
         : ng('社会保険が合わない', JSON.stringify({ acq: acq?.grade, mism: mism?.employment, member: soMember.status, report: acqReport.status, applied: acqReport.headers.get('x-applied'), text: acqText.slice(0, 200), again: acqAgain.status, std: joinerPay.standardPays, santei: noSantei.status }).slice(0, 900));
+
+      // Phase 2 段 4: 労働保険の年度更新（第30.13.1節）。M2Office で確定した月（7 月締め）と賞与は明細から、足りない月は担当者の合計で計算する
+      const { body: lb0 } = await call('a', '/v1/hr/labor-insurance?year=2027');
+      const july = (lb0.months ?? []).find((m) => m.kind === 'month' && m.source === 'm2office');
+      const bonusRow = (lb0.months ?? []).find((m) => m.kind === 'bonus');
+      const supplements = Object.fromEntries((lb0.missing ?? []).map((m) => [m, { workers: 1, wages: 250000, insured: 1, insuredWages: 250000 }]));
+      const badMonth = await call('a', '/v1/hr/labor-insurance', { method: 'PUT', body: JSON.stringify({ year: 2027, supplements: { '2025-03': { workers: 1, wages: 1, insured: 0, insuredWages: 0 } } }) });
+      const lbSaved = await call('a', '/v1/hr/labor-insurance', { method: 'PUT', body: JSON.stringify({ year: 2027, supplements, declaredEstimate: 50000 }) });
+      const lbReport = await raw('/v1/hr/labor-insurance/report?year=2027&format=csv', { method: 'POST' });
+      const lbText = lbReport.status === 200 ? await lbReport.text() : '';
+      const { body: lbNext } = await call('a', '/v1/hr/labor-insurance?year=2028');
+      const lbMember = await call('a', '/v1/hr/labor-insurance?year=2027', {}, 'member');
+      const lr = lbSaved.body?.result;
+      lb0.result === null && (lb0.missing ?? []).length === 11 && july?.source === 'm2office' && july.insured === 1 && bonusRow?.wages === 300500 && badMonth.status === 400
+        && lbSaved.status === 200 && lr && lr.confirmed.employment.rate === 13.5 && lr.confirmed.workersComp.rate === 3 && lr.declaredEstimate === 50000 && lr.shortage === lr.confirmed.total - 50000
+        && (lbSaved.body.notes ?? []).some((n) => /2027 年度の雇用保険料率の表がまだ無い/.test(n))
+        && lbReport.status === 200 && lbText.includes('確定保険料') && lbNext.data?.declaredEstimate === lr.estimate.total && lbMember.status === 403
+        ? ok('年度更新は確定した明細と足りない月の合計から、前年度の率で確定保険料を出し（今年度の率の表が無ければそう示す）、下書きの概算を次の年の申告済の額にする')
+        : ng('年度更新が合わない', JSON.stringify({ missing: lb0.missing?.length, july, bonus: bonusRow, bad: badMonth.status, result: lr, err: lbSaved.body?.error ?? lbSaved.body?.error, report: lbReport.status, next: lbNext.data, member: lbMember.status }).slice(0, 900));
     } else {
       conf.status === 400 && (conf.body?.blockers ?? []).some((x) => x.code === 'unverified')
         ? ok('本番の環境では、監修前の法令の表で計算した回は確定できない') : ng('監修前でも確定できた', JSON.stringify(conf.body));
@@ -3842,6 +3861,7 @@ console.log('\n■ 61. 人事・給与（内蔵の拡張。第30章、段 1: 台
     await owner.query(`delete from att_closes where tenant_id = 't-alpha' and closed_at >= $1`, [hrStartedAt]);
     await owner.query(`delete from pay_runs where tenant_id = 't-alpha' and calculated_at >= $1`, [hrStartedAt]);
     await owner.query(`delete from pay_bonus_plans where tenant_id = 't-alpha' and updated_at >= $1`, [hrStartedAt]);
+    await owner.query(`delete from hr_labor_insurance where tenant_id = 't-alpha' and updated_at >= $1`, [hrStartedAt]);
     await owner.query(`delete from notifications where tenant_id = 't-alpha' and title like '年末調整%' and created_at >= $1`, [hrStartedAt]);
     await owner.query(`delete from notifications where tenant_id = 't-alpha' and title like '給与%' and created_at >= $1`, [hrStartedAt]);
     await owner.query(`delete from notifications where tenant_id = 't-alpha' and title like '賞与の明細%' and created_at >= $1`, [hrStartedAt]);

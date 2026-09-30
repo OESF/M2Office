@@ -606,6 +606,36 @@ export function hrRoute(deps: AppDeps) {
     return sheetResponse(c, await social.eventReport(tenant.id, user.id, kind, idsOf(c.req.query('ids'))), `${kind}`);
   });
 
+  // ---- 労働保険の年度更新（Phase 2 段 4。第30.13.1節） ----
+
+  const labor = deps.hr.labor;
+
+  /** 年度更新の画面（`year`: 申告する年）。 */
+  app.get('/labor-insurance', async (c) => {
+    const { tenant } = c.get('ctx');
+    const year = yearOf(c.req.query('year'));
+    return year ? c.json(await labor.view(tenant.id, year)) : c.json({ error: '年を入れてください' }, 400);
+  });
+
+  /** 足りない月の合計・申告済の概算保険料・見込みの賃金を残す（`year` と送った項目）。 */
+  app.put('/labor-insurance', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const b = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
+    const year = yearOf(String(b['year'] ?? ''));
+    if (!year) return c.json({ error: '年を入れてください' }, 400);
+    const r = await labor.save(tenant.id, user.id, year, b as never);
+    // 画面の形（months を持つ）なら保存できた。error は計算できない理由で、保存の失敗ではない
+    return 'months' in r ? c.json(r) : c.json(r, 400);
+  });
+
+  /** 算定基礎賃金集計表と申告書に書く額の下書き（結果を残し、次の年の申告済の概算保険料と延納の納期限に使う）。 */
+  app.post('/labor-insurance/report', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const year = yearOf(c.req.query('year'));
+    if (!year) return c.json({ error: '年を入れてください' }, 400);
+    return sheetResponse(c, await labor.report(tenant.id, user.id, year), `nendo-koshin-${year}`);
+  });
+
   /** 台帳に結び付けられる利用者（名前とメールアドレスだけ）。 */
   app.get('/users', async (c) => {
     const { tenant } = c.get('ctx');

@@ -388,6 +388,8 @@ const dayLabel = (d: number) => (d === 31 ? '末日' : `${d} 日`);
  * @remarks 説明文は出さない（原則 u11）。何の設定かは秘書に聞けばよい
  */
 function HrFields({ settings, busy, onChanged }: { settings: HrSettings; busy: boolean; onChanged: () => void }) {
+  const [industries, setIndustries] = useState<{ code: string; category: string; name: string; rate: number }[]>([]);
+  useEffect(() => { api.admin.hrLaborIndustries().then((r) => setIndustries(r.industries)).catch(() => setIndustries([])); }, []);
   const [name, setName] = useState(settings.office.name);
   const [address, setAddress] = useState(settings.office.address);
   const [error, setError] = useState<string | null>(null);
@@ -487,6 +489,17 @@ function HrFields({ settings, busy, onChanged }: { settings: HrSettings; busy: b
         </select>
         <label>通常の労働者の週の所定 <input type="number" min={10} max={60} step="0.5" className="num" defaultValue={settings.insurance.fullTimeWeeklyHours}
           onBlur={(e) => Number(e.target.value) !== settings.insurance.fullTimeWeeklyHours && save({ insurance: { ...settings.insurance, fullTimeWeeklyHours: Number(e.target.value) } })} /> 時間</label>
+      </div>
+      <div className="row wrap">
+        <select value={settings.labor.business} disabled={busy} aria-label="雇用保険の事業の種類" onChange={(e) => save({ labor: { ...settings.labor, business: e.target.value as HrSettings['labor']['business'] } })}>
+          <option value="general">雇用保険: 一般の事業</option><option value="agriculture">雇用保険: 農林水産・清酒製造</option><option value="construction">雇用保険: 建設</option>
+        </select>
+        <select value={settings.labor.industry} disabled={busy || industries.length === 0} aria-label="労災保険の事業の種類" onChange={(e) => save({ labor: { ...settings.labor, industry: e.target.value } })}>
+          {industries.length === 0 && <option value={settings.labor.industry}>労災保険: {settings.labor.industry}</option>}
+          {industries.map((r) => <option key={r.code} value={r.code}>労災保険: {r.code} {r.name}（{r.rate}/1000）</option>)}
+        </select>
+        <input className="short" placeholder="労働保険番号" aria-label="労働保険番号" maxLength={20} defaultValue={settings.labor.number} disabled={busy}
+          onBlur={(e) => { if (e.target.value !== settings.labor.number) save({ labor: { ...settings.labor, number: e.target.value } }); }} />
       </div>
       <div className="row wrap">
         <label>振込元 <select value={settings.transfer.format} disabled={busy} onChange={(e) => save({ transfer: { ...settings.transfer, format: e.target.value as 'sogo' | 'kyuyo' } })}>

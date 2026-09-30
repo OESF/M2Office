@@ -170,6 +170,8 @@ const ACTION_LABELS: Record<string, string> = {
   'hr.social.acquire': '資格取得届の下書きを作った（標準報酬月額を入れた）',
   'hr.social.lose': '資格喪失届の下書きを作った',
   'hr.social.age70': '70 歳到達届の下書きを作った',
+  'hr.labor.save': '年度更新の足りない月・申告済の概算保険料を入れた',
+  'hr.labor.report': '労働保険の年度更新の下書きを作った',
   'hr.payroll.bonus-report': '賞与支払届の下書きを出した',
   'hr.payroll.correction': '給与の訂正の回を作った',
   'hr.proposal': '規程から人事・給与の設定の案を作った',

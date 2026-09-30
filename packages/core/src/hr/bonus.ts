@@ -113,7 +113,7 @@ export function calcBonus(input: BonusInput): SlipResult {
   // 雇用保険料（賞与の額 × 労働者負担の率）
   let employment = 0;
   if (t?.employmentInsurance && e.category === 'employee') {
-    const r = law.employmentRate('general', input.payDate);
+    const r = law.employmentRate(settings.labor.business, input.payDate);
     if (r) {
       use(r.table);
       const wages = gross - adj.notInsurable;

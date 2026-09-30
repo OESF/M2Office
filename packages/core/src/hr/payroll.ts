@@ -257,7 +257,7 @@ export function calcSlip(input: SlipInput): SlipResult {
   // 雇用保険料（賃金の総額 × 労働者負担の率）
   let employment = 0;
   if (t.employmentInsurance && e.category === 'employee') {
-    const r = law.employmentRate('general', input.periodEnd);
+    const r = law.employmentRate(settings.labor.business, input.periodEnd);
     if (r) {
       use(r.table);
       const wages = gross - adj.notInsurable;

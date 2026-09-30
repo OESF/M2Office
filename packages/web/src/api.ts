@@ -14,7 +14,7 @@ import type {
   HrEmployee, HrEmployeeView, HrSettings, HrTask, HrTerms,
   AttClose, AttDay, AttPeriod, AttPunchKind, AttTotals, LeaveBalance, LeaveGrant, LeaveTake,
   HrFamilyMember, HrPayrollProfile, HrStandardPay, PayRun, PaySlip, PayCheck, HrNoticeSettings, HrDeadline, PayAdjustment, BonusPlan,
-  YeaDeclaration, YeaDeclarationView, YeaResult, SocialDetermination, SocialEvent, InsuranceEligibility,
+  YeaDeclaration, YeaDeclarationView, YeaResult, SocialDetermination, SocialEvent, InsuranceEligibility, LaborInsuranceData, LaborInsuranceView,
   InventoryCount, InventoryCountRow, InventoryCountScope, InventoryCountView, InventorySupplier,
   InventoryBooking, InventoryBookingMapping, InventoryBookingSource,
 } from '@m2office/shared';
@@ -1264,6 +1264,13 @@ export const api = {
         saveBlob(blob, `${name}（下書き）.xlsx`);
         return Number(headers.get('x-applied') ?? 0);
       },
+      /** 労働保険の年度更新（仕様書 第30.13.1節）。 */
+      labor: (year: number) => call<LaborInsuranceView>(`/hr/labor-insurance?year=${year}`),
+      laborSave: (year: number, patch: Partial<LaborInsuranceData>) => call<LaborInsuranceView>('/hr/labor-insurance', { method: 'PUT', body: JSON.stringify({ year, ...patch }) }),
+      laborReport: async (year: number) => {
+        const { blob } = await postBlob(`/hr/labor-insurance/report?year=${year}`);
+        saveBlob(blob, `労働保険の年度更新（下書き）-${year}.xlsx`);
+      },
       /** 確定した月の給与の訂正の回を作る。 */
       correction: (id: string, payDate: string) => call<{ run: PayRun; slips: PaySlip[] }>(`/hr/payroll/runs/${encodeURIComponent(id)}/correction`, { method: 'POST', body: JSON.stringify({ payDate }) }),
       /** 確定する（管理者。お金の確定。仕様書 第30.10.3節）。 */
@@ -1535,6 +1542,8 @@ export const api = {
       form.append('file', file);
       return postForm<{ fields: HrProposalField[] }>('/admin/extensions/hr/proposal', form);
     },
+    /** 労災保険率表の事業の種類（会社の設定で選ぶ）。 */
+    hrLaborIndustries: () => call<{ industries: { code: string; category: string; name: string; rate: number }[] }>('/admin/extensions/hr/labor-industries'),
     setHrSettings: (patch: Partial<HrSettings>) =>
       call<{ ok: true; hr: HrSettings }>('/admin/extensions/hr/settings', { method: 'PUT', body: JSON.stringify(patch) }),
     setExtensionEnabled: (id: string, enabled: boolean) =>

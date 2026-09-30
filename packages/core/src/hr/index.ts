@@ -33,6 +33,9 @@ export { YearEndService, type YearEndServiceDeps, type YearTotals, type YeaOverv
 export { calcYea, declarationProblems, type YeaInput } from './yea-calc.js';
 export { readCertificate, parseCertificate, type CertificateReading, type CertificateKind } from './yea-certificate.js';
 export { renderWithholdingPdf, type WithholdingPdfInput } from './withholding-pdf.js';
+export { PostgresLaborStore, type LaborStore, type LaborRecord } from './labor-store.js';
+export { LaborInsuranceService, type LaborServiceDeps } from './labor-service.js';
+export { laborMonths, laborCalc, premium, installments, perMille, thousands, fiscalMonths, laborWage, type LaborInput, type LaborSlip } from './labor-insurance.js';
 export { PostgresSocialStore, type SocialStore, type HrFilingRecord } from './social-store.js';
 export { SocialInsuranceService, type SocialServiceDeps, type SocialOverview, type SpecificOffice, type FilingSheet } from './social-service.js';
 export {
@@ -48,4 +51,4 @@ export { readResidentNotice, parseNoticeReading, noticeProblem, type NoticeEntry
 export { mapTrialHeaders, trialTotals, trialNumber, compareTrialRow, TRIAL_ITEMS, type TrialItem } from './payroll-trial.js';
 export { calcSlip, adjustmentLines, round50, itemRule, reachMonth, insuredIn, shiftMonth as shiftPayMonth, type SlipInput, type SlipResult as PaySlipResult } from './payroll.js';
 export { LAW_BOOK, Law, type LawHit } from './law/index.js';
-export type { LawBook, LawMeta, LawReview, GradeRow, GradeTable, ChangeLimit, InsuranceRules, HealthRates, RateTable, EmploymentRates, WithholdingMonthly, WithholdingRow, WithholdingAbove, MinimumWage } from './law/types.js';
+export type { LawBook, LawMeta, LawReview, GradeRow, GradeTable, ChangeLimit, InsuranceRules, WorkersCompRates, WorkersCompRow, HealthRates, RateTable, EmploymentRates, WithholdingMonthly, WithholdingRow, WithholdingAbove, MinimumWage } from './law/types.js';

@@ -842,6 +842,7 @@ export class PostgresRepository implements Repository {
         duties: { ...d.hr.duties, ...(r?.hr?.duties ?? {}) },
         notice: { ...d.hr.notice, ...(r?.hr?.notice ?? {}) },
         insurance: { ...d.hr.insurance, ...(r?.hr?.insurance ?? {}) },
+        labor: { ...d.hr.labor, ...(r?.hr?.labor ?? {}) },
       },
     };
   }

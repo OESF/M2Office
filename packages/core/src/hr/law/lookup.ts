@@ -3,7 +3,7 @@
  */
 
 import type {
-  BonusRates, YeaRules, EmploymentRates, InsuranceRules, GradeRow, GradeTable, HealthRates, LawBook, LawMeta, MinimumWage, RateTable, WithholdingMonthly,
+  BonusRates, YeaRules, EmploymentRates, InsuranceRules, WorkersCompRates, GradeRow, GradeTable, HealthRates, LawBook, LawMeta, MinimumWage, RateTable, WithholdingMonthly,
 } from './types.js';
 
 /** 引いた値と、使った表の版。 */
@@ -229,6 +229,16 @@ export class Law {
   /** その年の年末調整の決まり（無ければ `null`）。 */
   yeaRules(year: number): YeaRules | null {
     return this.book.yea.find((r) => r.year === year) ?? null;
+  }
+
+  /** 雇用保険料率の表（その日 YYYY-MM-DD に効いている版。年度更新は年度の 4 月 1 日で引く）。 */
+  employmentTable(date: string): EmploymentRates | null {
+    return latest(this.book.employment, date);
+  }
+
+  /** 労災保険率表（その日 YYYY-MM-DD に効いている版）。 */
+  workersComp(date: string): WorkersCompRates | null {
+    return latest(this.book.workersComp, date);
   }
 
   /** 社会保険と雇用保険の適用の決まり。その日（YYYY-MM-DD か YYYY-MM）に効いている版。 */

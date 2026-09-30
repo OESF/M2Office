@@ -73,6 +73,18 @@ export interface HrSettings {
   notice: HrNoticeSettings;
   /** 社会保険の届出と加入の判定に使う会社の決まり（第30.12.1節）。 */
   insurance: HrInsuranceSettings;
+  /** 労働保険（雇用保険・労災保険）の事業の種類と労働保険番号（第30.13.1節）。 */
+  labor: HrLaborSettings;
+}
+
+/** 労働保険の事業の種類。 */
+export interface HrLaborSettings {
+  /** 雇用保険の事業の種類（雇用保険料率を選ぶ）。 */
+  business: 'general' | 'agriculture' | 'construction';
+  /** 労災保険の事業の種類の番号（労災保険率表。既定は 94 その他の各種事業）。 */
+  industry: string;
+  /** 労働保険番号（申告書の頭に書く。無ければ空）。 */
+  number: string;
 }
 
 /** 社会保険の届出と加入の判定に使う会社の決まり。 */
@@ -187,6 +199,7 @@ export const DEFAULT_HR_SETTINGS: HrSettings = {
   duties: { withholdingSpecial: false, residentSpecial: false, healthCheckMonth: null },
   notice: { raise: '', bonus: '', severance: '', retirement: '', consultation: '', other: '' },
   insurance: { officeSymbol: '', officeNumber: '', specificOffice: 'auto', fullTimeWeeklyHours: 40 },
+  labor: { business: 'general', industry: '94', number: '' },
 };
 
 /** 従業員（人事の台帳。第30.5節）。 */
@@ -709,4 +722,95 @@ export interface InsuranceEligibility {
   employment: { should: boolean; reason: string };
   /** 雇用条件の加入。 */
   current: { social: boolean; employment: boolean };
+}
+
+/** 年度更新の、足りない月に担当者が入れる合計（第30.13.1節）。 */
+export interface LaborSupplement {
+  /** 労災保険の対象の人数と賃金（役員・同居の親族を除く、パート・アルバイトを含む全員）。 */
+  workers: number;
+  wages: number;
+  /** 雇用保険の被保険者の人数と賃金。 */
+  insured: number;
+  insuredWages: number;
+}
+
+/** 年度更新で担当者が入れるもの。 */
+export interface LaborInsuranceData {
+  /** M2Office で給与を確定していない月の合計（YYYY-MM ごと。賞与は支払った月に含める）。 */
+  supplements: Record<string, LaborSupplement>;
+  /** 前の年に申告した概算保険料（M2Office で前の年の下書きを作っていれば、その額を既定にする）。 */
+  declaredEstimate: number | null;
+  /** 今年度の賃金の見込み（前年度の 2 倍を超えるか 2 分の 1 未満になる見込みのときだけ入れる）。 */
+  estimateWages: { wages: number; insuredWages: number } | null;
+}
+
+/** 年度更新の月 1 つ（算定基礎賃金集計表の行）。 */
+export interface LaborMonth {
+  /** 月（YYYY-MM）か、賞与なら支払った日（YYYY-MM-DD）。 */
+  key: string;
+  kind: 'month' | 'bonus';
+  /** M2Office の確定した給与か、担当者が入れたものか、無いか。 */
+  source: 'm2office' | 'manual' | 'missing';
+  workers: number;
+  wages: number;
+  insured: number;
+  insuredWages: number;
+}
+
+/** 保険料の 1 つ（算定基礎額は 1,000 円未満切り捨て・率は 1,000 分の・額は 1 円未満切り捨て）。 */
+export interface LaborLine {
+  base: number;
+  /** 1,000 分の率。 */
+  rate: number;
+  amount: number;
+}
+
+/** 確定保険料か概算保険料。 */
+export interface LaborPremium {
+  /** 労災保険分と雇用保険分と、その合計（労働保険料）。 */
+  workersComp: LaborLine;
+  employment: LaborLine;
+  total: number;
+}
+
+/** 年度更新の計算の結果（下書きを作ったときに残す）。 */
+export interface LaborInsuranceResult {
+  year: number;
+  confirmed: LaborPremium;
+  /** 一般拠出金（労災保険の対象の賃金 × 率）。 */
+  generalContribution: LaborLine;
+  estimate: LaborPremium;
+  /** 前の年に申告した概算保険料（分からなければ `null`。差を出さない）。 */
+  declaredEstimate: number | null;
+  /** 申告済の概算保険料との差（不足は第 1 期に納める、超過は第 1 期から充当し、余れば還付）。 */
+  shortage: number;
+  surplus: number;
+  refund: number;
+  /** 延納（3 回に分けて納める）の期別の額。延納できなければ 1 回。 */
+  installments: { due: string; amount: number }[];
+  /** 常時使用労働者数と雇用保険の被保険者数（月ごとの人数の平均。1 人未満切り捨て）。 */
+  workers: number;
+  insured: number;
+  /** 労災保険の事業の種類。 */
+  industry: { code: string; name: string };
+}
+
+/** 年度更新の画面に出すもの。 */
+export interface LaborInsuranceView {
+  year: number;
+  /** 確定保険料の期間（前の年の 4 月〜その年の 3 月）と、概算保険料の期間。 */
+  period: { from: string; to: string };
+  estimatePeriod: { from: string; to: string };
+  months: LaborMonth[];
+  /** M2Office で給与を確定しておらず、担当者も入れていない月。 */
+  missing: string[];
+  data: LaborInsuranceData;
+  /** 計算できたときの結果（足りない月があれば `null`）。 */
+  result: LaborInsuranceResult | null;
+  /** 使った表（労災保険率・雇用保険料率）。 */
+  tables: { version: string; reviewed: boolean }[];
+  /** 計算できない理由（足りない月・表が無い・事業の種類が無い）。 */
+  error: string | null;
+  notes: string[];
+  filedAt: string | null;
 }

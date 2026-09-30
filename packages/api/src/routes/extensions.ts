@@ -16,7 +16,7 @@ import {
 } from '@m2office/shared';
 import {
   bundledConnection, builtinSection, consentSnapshot, encodeFiles, unpackExtension, EXTENSION_FILE_MAX_BYTES,
-  ensureHrCompartment, detectKind, MAX_FILE_BYTES, type ExtensionEntry, type ExtensionPackage, type TenantExtensions,
+  ensureHrCompartment, detectKind, MAX_FILE_BYTES, LAW_BOOK, type ExtensionEntry, type ExtensionPackage, type TenantExtensions,
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { tenantOrigin } from '../tenant-origin.js';
@@ -186,11 +186,15 @@ export function extensionsRoute(deps: AppDeps) {
     return 'error' in r ? c.json(r, 422) : c.json(r);
   });
 
+  /** 労災保険率表の事業の種類（いまの表。会社の設定で選ぶ。第30.13.1節）。 */
+  const industries = () => [...LAW_BOOK.workersComp].sort((a, b) => b.effectiveFrom.localeCompare(a.effectiveFrom))[0]?.rows ?? [];
+  app.get(`/${HR_EXTENSION_ID}/labor-industries`, (c) => c.json({ industries: industries() }));
+
   app.put(`/${HR_EXTENSION_ID}/settings`, async (c) => {
     const { tenant, user } = c.get('ctx');
     const b = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
     const cur = (await deps.repo.getTenantSettings(tenant.id)).hr;
-    const next: HrSettings = { ...cur, office: { ...cur.office }, health: { ...cur.health }, pay: { ...cur.pay }, work: { ...cur.work }, agreement: { ...cur.agreement }, leave: { ...cur.leave }, payroll: { ...cur.payroll }, transfer: { ...cur.transfer }, duties: { ...cur.duties }, notice: { ...cur.notice }, insurance: { ...cur.insurance } };
+    const next: HrSettings = { ...cur, office: { ...cur.office }, health: { ...cur.health }, pay: { ...cur.pay }, work: { ...cur.work }, agreement: { ...cur.agreement }, leave: { ...cur.leave }, payroll: { ...cur.payroll }, transfer: { ...cur.transfer }, duties: { ...cur.duties }, notice: { ...cur.notice }, insurance: { ...cur.insurance }, labor: { ...cur.labor } };
     const obj = (v: unknown) => (v && typeof v === 'object' ? v as Record<string, unknown> : null);
     const text = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : undefined);
     const day = (v: unknown) => (typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 31 ? v : undefined);
@@ -317,6 +321,18 @@ export function extensionsRoute(deps: AppDeps) {
         i.fullTimeWeeklyHours = Math.round(h * 100) / 100;
       }
       next.insurance = i;
+    }
+    // 労働保険の事業の種類と労働保険番号（第30.13.1節）
+    const lb = obj(b['labor']);
+    if (lb) {
+      const l = { ...next.labor };
+      if (lb['business'] === 'general' || lb['business'] === 'agriculture' || lb['business'] === 'construction') l.business = lb['business'];
+      if (lb['industry'] !== undefined) {
+        if (!industries().some((r) => r.code === lb['industry'])) return c.json({ error: '労災保険の事業の種類が労災保険率表にありません' }, 400);
+        l.industry = String(lb['industry']);
+      }
+      if (text(lb['number'], 20) !== undefined) l.number = text(lb['number'], 20)!;
+      next.labor = l;
     }
     await deps.repo.saveTenantSettings(tenant.id, 'hr', next, user.id);
     await deps.repo.appendAudit({
