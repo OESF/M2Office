@@ -49,6 +49,9 @@ title    = meta.get('title', 'specification')
 version  = meta.get('version', '')
 updated  = meta.get('updated', '')
 owner    = meta.get('owner', '')
+# 表紙の作成者の見出しと、担当（監修のお願いのように、利用する会社が出す資料で使う）
+owner_label = meta.get('owner_label', '作成')
+contact  = meta.get('contact', '')
 status   = meta.get('status', '')
 subtitle = meta.get('subtitle', '中小企業向け AI エージェントシステム')
 version_text = f'{version}（{status}）' if status else version
@@ -141,7 +144,8 @@ doc = f"""<!DOCTYPE html>
   <dl>
     <dt>版</dt><dd>{html.escape(version_text)}</dd>
     <dt>最終更新</dt><dd>{html.escape(updated)}</dd>
-    <dt>作成</dt><dd>{html.escape(owner)}</dd>
+    <dt>{html.escape(owner_label)}</dt><dd>{html.escape(owner)}</dd>
+    {f'<dt>担当</dt><dd>{html.escape(contact)}</dd>' if contact else ''}
   </dl>
 </section>
 <section class="toc"><h2>目次</h2>{toc}</section>

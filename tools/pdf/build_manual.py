@@ -3,8 +3,9 @@
 
 Markdown は章ごとに分けたまま保守し、配布と通読のときだけ 1 本にまとめる。
 
-使い方: python3 tools/pdf/build_manual.py [マニュアルの名前] [出力の PDF]
-  マニュアルの名前: developer（既定。docs/developer/）・hr-payroll（docs/manual/hr-payroll/）・inventory（docs/manual/inventory/）
+使い方: python3 tools/pdf/build_manual.py [マニュアルの名前] [出力の PDF] [--company=会社名 --contact=担当者 --to=宛先]
+  マニュアルの名前: developer（既定。docs/developer/）・hr-payroll（docs/manual/hr-payroll/）・inventory（docs/manual/inventory/）・
+    hr-review（人事・給与の監修のお願い。docs/review/hr-payroll/）
   既定の出力先は各マニュアルのディレクトリの PDF（版管理の対象外）
   前との互換のため、最初の引数が .pdf で終われば開発者マニュアルの出力先とみなす
 
@@ -32,8 +33,16 @@ MANUALS = {
         'dir': os.path.join(ROOT, 'docs', 'manual', 'hr-payroll'), 'pdf': 'hr-payroll-manual.pdf',
         'title': 'M2Office 人事・給与 ユーザーマニュアル', 'subtitle': '担当者の手引きと研修の教材',
     },
+    # 利用する会社が顧問の税理士事務所に出す資料。会社名・担当者・宛先は作るときに入れる（入れなければ書き込む空欄）
+    'hr-review': {
+        'dir': os.path.join(ROOT, 'docs', 'review', 'hr-payroll'), 'pdf': 'hr-payroll-review.pdf',
+        'title': 'M2Office 人事・給与 監修のお願い', 'subtitle': '計算の決まり・法令の表・確かめていただきたい点',
+        'owner_label': '差出人', 'fill': True,
+    },
 }
-args = sys.argv[1:]
+# --company=・--contact=・--to= は、利用する会社が出す資料（fill のあるもの）に入れる会社名・担当者・宛先
+OPTS = {k: v for k, v in (a[2:].split('=', 1) for a in sys.argv[1:] if a.startswith('--') and '=' in a)}
+args = [a for a in sys.argv[1:] if not a.startswith('--')]
 NAME = 'developer' if not args or args[0].endswith('.pdf') else args.pop(0)
 if NAME not in MANUALS:
     sys.exit(f'知らないマニュアルです: {NAME}（{"・".join(MANUALS)}）')
@@ -100,13 +109,24 @@ def main():
         parts.append(convert(f, io.open(os.path.join(DOC_DIR, f), encoding='utf-8').read(), None))
 
     version = spec_version()
+    owner = '株式会社M2ホールディングス'
+    contact = ''
+    if MANUAL.get('fill'):
+        # 本文の {{会社名}}・{{担当者}}・{{宛先}} を入れる。入れなければ手で書き込む空欄にする
+        blank = '＿＿＿＿＿＿＿＿＿＿'
+        values = {'会社名': OPTS.get('company', blank), '担当者': OPTS.get('contact', blank), '宛先': OPTS.get('to', blank)}
+        parts = [re.sub(r'\{\{(会社名|担当者|宛先)\}\}', lambda m: values[m.group(1)], p) for p in parts]
+        owner = OPTS.get('company', blank)
+        contact = OPTS.get('contact', blank)
     front = '\n'.join([
         '---',
         f"title: {MANUAL['title']}",
         f'version: 仕様書 第 {version} 版に対応',
         f"subtitle: {MANUAL['subtitle']}",
         f'updated: {__import__("datetime").date.today().isoformat()}',
-        'owner: 株式会社M2ホールディングス',
+        f'owner: {owner}',
+        f"owner_label: {MANUAL.get('owner_label', '作成')}",
+        f'contact: {contact}',
         'wrap_code: true',
         '---',
         f"# {MANUAL['title']}",  # build.py が表紙に回して本文から除く
