@@ -3,7 +3,7 @@
  */
 
 import type {
-  BonusRates, YeaRules, EmploymentRates, GradeRow, GradeTable, HealthRates, LawBook, LawMeta, MinimumWage, RateTable, WithholdingMonthly,
+  BonusRates, YeaRules, EmploymentRates, InsuranceRules, GradeRow, GradeTable, HealthRates, LawBook, LawMeta, MinimumWage, RateTable, WithholdingMonthly,
 } from './types.js';
 
 /** 引いた値と、使った表の版。 */
@@ -88,6 +88,11 @@ export class Law {
     const health = find(t.health);
     const pension = find(t.pension);
     return health && pension ? { value: { health, pension }, table: t } : null;
+  }
+
+  /** 保険料の月（YYYY-MM）に効いている等級表。 */
+  gradeTable(premiumMonth: string): GradeTable | null {
+    return latest(this.book.grades, premiumMonth);
   }
 
   /** 健康保険の標準報酬月額の額から、厚生年金の標準報酬月額（上限と下限で丸める）。 */
@@ -190,6 +195,11 @@ export class Law {
       const d = `${w.year}-01-01`;
       if (inRange(d)) out.push({ label: '源泉徴収税額表（月額表）', date: d, applies: `${w.year} 年 1 月に支払う給与から`, detail: w.version });
     }
+    // 社会保険と雇用保険の適用の決まり（第30.12.1節）。加入の判定が変わる
+    for (const t of this.book.insurance) {
+      if (!inRange(t.effectiveFrom) || t === this.book.insurance[0]) continue;
+      out.push({ label: '社会保険と雇用保険の適用', date: t.effectiveFrom, applies: `${t.effectiveFrom.slice(0, 4)} 年 ${Number(t.effectiveFrom.slice(5, 7))} 月 ${Number(t.effectiveFrom.slice(8, 10))} 日から`, detail: `${t.version}。「社会保険」の加入の判定で確かめる` });
+    }
     return out;
   }
 
@@ -219,6 +229,12 @@ export class Law {
   /** その年の年末調整の決まり（無ければ `null`）。 */
   yeaRules(year: number): YeaRules | null {
     return this.book.yea.find((r) => r.year === year) ?? null;
+  }
+
+  /** 社会保険と雇用保険の適用の決まり。その日（YYYY-MM-DD か YYYY-MM）に効いている版。 */
+  insuranceRules(date: string): InsuranceRules | null {
+    const key = date.length === 7 ? `${date}-01` : date;
+    return latest(this.book.insurance, key);
   }
 
   /** 地域別最低賃金（円）。その日に効いている額。 */

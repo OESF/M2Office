@@ -15,7 +15,7 @@ import {
   TenantAiResolver, platformAi, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID,
   defaultGeminiModels, ConnectionCredentials, type ConnectionAuthProvider,
   CardService, PostgresContactStore, cardsAccess, type ContactStore, NoticeService, PostgresNoticeStore,
-  InventoryService, InventoryWatch, InventoryBookings, PostgresInventoryStore, inventoryAccess, HrService, PostgresHrStore, hrAccess, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore,
+  InventoryService, InventoryWatch, InventoryBookings, PostgresInventoryStore, inventoryAccess, HrService, PostgresHrStore, hrAccess, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore,
   type SecretBox, type GeminiModels,
   type FileStore, type TenantExtensions, type HelpArticle, type LlmProvider, type Logger, type Repository, type WorkspaceConnector,
 } from '@m2office/core';
@@ -112,6 +112,8 @@ export interface AppDeps {
     calendar: LaborCalendar;
     /** 年末調整（第30.15.1節）。 */
     yea: YearEndService;
+    /** 社会保険の定時決定・随時改定・資格・加入の判定（第30.12.1節）。 */
+    social: SocialInsuranceService;
     access(tenantId: string, userId: string): Promise<HrSettings | null>;
   };
 }
@@ -228,9 +230,15 @@ export function buildDeps(): AppDeps {
   // デバッグモード（仕様書 第20.4.1節「デバッグモード」）。本番で有効にすると起動を断る
   const debug = debugEnabled() ? new DebugLog() : null;
   // 給与（第30.10節）。秘書が本人の明細に答えるため、秘書より先に作る。監修前の表での確定はデバッグモードだけ（ADR-0053）
+  // 社会保険（第30.12.1節）。月の給与の点検に随時改定と加入の判定の知らせを足す
+  const social = new SocialInsuranceService({
+    store: new PostgresSocialStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+    payrollStore, hrStore: hrService.deps.store, repo, law: LAW_BOOK,
+  });
   const payroll = new PayrollService({
     store: payrollStore,
     hrStore: hrService.deps.store, attendance, repo, law: LAW_BOOK, llm: (tenantId) => ai.llmFor(tenantId), allowUnverified: debug !== null,
+    socialHints: (tenantId) => social.hints(tenantId),
   });
   const help = new HelpCatalog(loadHelpArticles(helpDir(), log), OFFICIAL_AGENTS, registry);
   const secretary = new Secretary({
@@ -312,6 +320,7 @@ export function buildDeps(): AppDeps {
     hr: {
       service: hrService, attendance, access: hrAccess(repo),
       payroll, calendar: laborCalendar,
+      social,
       yea: new YearEndService({
         store: new PostgresYeaStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
         payrollStore, hrStore: hrService.deps.store, repo, law: LAW_BOOK, llm: (tenantId) => ai.llmFor(tenantId), allowUnverified: debug !== null,

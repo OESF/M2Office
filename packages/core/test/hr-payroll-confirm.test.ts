@@ -97,7 +97,7 @@ test('点検: 前の確定した回との差（1 割以上かつ 5,000 円以上
   assert.match(big[0]!.text, /差引支給が前の回より −40,000 円/);
 });
 
-test('点検: 介護保険の始まり・固定の賃金の変動・扶養の数の違い', () => {
+test('点検: 介護保険の始まり・扶養の数の違い（固定的賃金の変動は社会保険の処理が確定した明細から知らせる）', () => {
   const terms = (effectiveOn: string, wageAmount: number): HrTerms => ({
     id: effectiveOn, employeeId: 'e1', effectiveOn, contractStart: null, contractEnd: null, renewal: '', probationUntil: null, weeklyHours: 40, weeklyDays: 5, startTime: '09:00', endTime: '18:00',
     breakMinutes: 60, wageType: 'monthly', wageAmount, allowances: [], workplace: '', work: '', workplaceScope: '', workScope: '', socialInsurance: true, employmentInsurance: true, createdAt: '',
@@ -107,7 +107,7 @@ test('点検: 介護保険の始まり・固定の賃金の変動・扶養の数
     terms: new Map([['e1', [terms('2024-04-01', 280000), terms('2026-08-01', 300000)]]]),
     family: new Map([['e1', [{ id: 'f', employeeId: 'e1', name: '子', relation: '子', birthDate: '2008-01-01', cohabiting: true, incomeEstimate: 0, dependent: true }]]]),
   });
-  assert.deepEqual(checks.map((c) => c.code).sort(), ['care', 'dependents', 'fixed-wage']);
+  assert.deepEqual(checks.map((c) => c.code).sort(), ['care', 'dependents']);
 });
 
 test('試しの計算: 見出しを見分け（額の列を時間に当てない）、時間の値と勤怠を読む', async () => {

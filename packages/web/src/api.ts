@@ -14,7 +14,7 @@ import type {
   HrEmployee, HrEmployeeView, HrSettings, HrTask, HrTerms,
   AttClose, AttDay, AttPeriod, AttPunchKind, AttTotals, LeaveBalance, LeaveGrant, LeaveTake,
   HrFamilyMember, HrPayrollProfile, HrStandardPay, PayRun, PaySlip, PayCheck, HrNoticeSettings, HrDeadline, PayAdjustment, BonusPlan,
-  YeaDeclaration, YeaDeclarationView, YeaResult,
+  YeaDeclaration, YeaDeclarationView, YeaResult, SocialDetermination, SocialEvent, InsuranceEligibility,
   InventoryCount, InventoryCountRow, InventoryCountScope, InventoryCountView, InventorySupplier,
   InventoryBooking, InventoryBookingMapping, InventoryBookingSource,
 } from '@m2office/shared';
@@ -1251,6 +1251,18 @@ export const api = {
         const blob = await fetchBlob(`/hr/yea/report?year=${year}&format=xlsx`);
         if (!blob) throw new ApiError('書き出せませんでした', 403);
         saveBlob(blob, `源泉徴収票・給与支払報告書（下書き）-${year}.xlsx`);
+      },
+      /** 社会保険（仕様書 第30.12.1節）。 */
+      social: (year: number) => call<{
+        year: number; regular: SocialDetermination[]; changes: SocialDetermination[]; events: SocialEvent[]; eligibility: InsuranceEligibility[];
+        specificOffice: { value: boolean; auto: boolean; insured: number; size: number }; rules: { version: string; reviewed: boolean } | null;
+      }>(`/hr/social?year=${year}`),
+      /** 届出の下書き（表計算）を作って保存させる。標準報酬月額に入れた人数を返す。 */
+      socialReport: async (kind: 'regular' | 'change' | 'acquire' | 'lose' | 'age70', name: string, year?: number): Promise<number> => {
+        const path = kind === 'regular' ? `/hr/social/regular/report?year=${year}` : kind === 'change' ? '/hr/social/change/report' : `/hr/social/events/${kind}/report`;
+        const { blob, headers } = await postBlob(path);
+        saveBlob(blob, `${name}（下書き）.xlsx`);
+        return Number(headers.get('x-applied') ?? 0);
       },
       /** 確定した月の給与の訂正の回を作る。 */
       correction: (id: string, payDate: string) => call<{ run: PayRun; slips: PaySlip[] }>(`/hr/payroll/runs/${encodeURIComponent(id)}/correction`, { method: 'POST', body: JSON.stringify({ payDate }) }),

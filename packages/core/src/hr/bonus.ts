@@ -63,14 +63,19 @@ export function calcBonus(input: BonusInput): SlipResult {
   const socialOn = !!t?.socialInsurance && e.category !== 'owner' && settings.socialApply !== 'none' && settings.health.kind !== 'none';
   if (socialOn && insuredIn(e, month)) {
     const std = Math.floor(amount / 1000) * 1000;
-    stdHealth = Math.max(0, Math.min(std, HEALTH_BONUS_CAP - input.healthBonusSoFar));
+    // 75 歳の誕生日の月から後期高齢者医療（健康保険の分をかけない。第30.12.1節）
+    const healthOn = !e.birthDate || month < `${Number(e.birthDate.slice(0, 4)) + 75}-${e.birthDate.slice(5, 7)}`;
+    stdHealth = healthOn ? Math.max(0, Math.min(std, HEALTH_BONUS_CAP - input.healthBonusSoFar)) : 0;
+    if (!healthOn) warnings.push('75 歳に達したため、健康保険料・介護保険料・子ども・子育て支援金をかけません（後期高齢者医療）');
     const capNote = stdHealth < std ? `（年度の累計 ${yen(HEALTH_BONUS_CAP)} の上限まで。これまで ${yen(input.healthBonusSoFar)}）` : '';
     const careOn = !!e.birthDate && month >= reachMonth(e.birthDate, 40) && month < reachMonth(e.birthDate, 65);
     const kumiai = settings.health.kind === 'kumiai';
     const pr = settings.payroll;
     const h = kumiai ? (pr.kumiai.health !== null ? { value: pr.kumiai.health, table: null } : null) : settings.health.kind === 'kyokai' ? law.healthRate(settings.health.prefecture, month) : null;
     const c = careOn ? (kumiai ? (pr.kumiai.care !== null ? { value: pr.kumiai.care, table: null } : null) : law.careRate(month)) : { value: 0, table: null };
-    if (h && c) {
+    if (!healthOn) {
+      // 健康保険の被保険者でない
+    } else if (h && c) {
       if (h.table) use(h.table);
       if (c.table) use(c.table);
       const rate = Math.round((h.value + c.value) * 1000) / 1000;
@@ -83,7 +88,7 @@ export function calcBonus(input: BonusInput): SlipResult {
     } else {
       warnings.push('健康保険の料率が分かりません（表が未登録か、組合の料率が未設定）');
     }
-    const cs = law.childSupportRate(month);
+    const cs = healthOn ? law.childSupportRate(month) : null;
     if (cs) {
       use(cs.table);
       const v = round50((stdHealth * cs.value) / 100 / 2);

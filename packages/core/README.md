@@ -51,7 +51,9 @@ src/hr/          人事・給与（内蔵の拡張。第30章）。段 1: 置き
                  規程から設定の案（rules-proposal.ts）・法令の表の見張り（law/lookup.ts の staleAt・changesBetween）。
                  Phase 2 段 1: 賞与の計算（bonus.ts。算出率の表 law/bonus-2026.ts）・調整の行と訂正の回（payroll.ts・payroll-service.ts）。
                  段 2: 年末調整の計算（yea-calc.ts。年末調整の決まり law/yea-2026.ts）・申告（yea-store.ts）・年末調整の回と精算（yea-service.ts）・
-                 控除証明書の読み取り（yea-certificate.ts）・源泉徴収票の PDF（withholding-pdf.ts）
+                 控除証明書の読み取り（yea-certificate.ts）・源泉徴収票の PDF（withholding-pdf.ts）。
+                 段 3: 社会保険の判定（social.ts。適用の決まり law/insurance-2026.ts・等級表の随時改定の特例）・届出と標準報酬月額の反映（social-service.ts）・
+                 届出の記録（social-store.ts）
 src/secretary/   秘書。3 層の応答振り分け、定時実行の確認・停止・再開・今すぐ実行（推論なし。第10.9.8節）、
                  社内のお知らせを出す・取り下げる・並べる・済んだにする（notices.ts。第10.15節）
                  在庫の依頼の見分けと、在庫の数の問いへのその場の答え（inventory.ts。第29.15節）

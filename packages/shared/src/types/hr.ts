@@ -71,6 +71,20 @@ export interface HrSettings {
   duties: HrDutySettings;
   /** 労働条件通知書の会社の定め（第30.5.3節）。担当者が書いた文を次からの既定にする。 */
   notice: HrNoticeSettings;
+  /** 社会保険の届出と加入の判定に使う会社の決まり（第30.12.1節）。 */
+  insurance: HrInsuranceSettings;
+}
+
+/** 社会保険の届出と加入の判定に使う会社の決まり。 */
+export interface HrInsuranceSettings {
+  /** 事業所整理記号（届出の頭に書く。無ければ空）。 */
+  officeSymbol: string;
+  /** 事業所番号。 */
+  officeNumber: string;
+  /** 特定適用事業所か。`auto` は厚生年金の被保険者の数から見込む。任意特定適用事業所は `yes`。 */
+  specificOffice: 'auto' | 'yes' | 'no';
+  /** 通常の労働者の 1 週の所定労働時間（4 分の 3 の基準に使う）。 */
+  fullTimeWeeklyHours: number;
 }
 
 /** 労務カレンダーに使う会社の決まり。 */
@@ -101,7 +115,7 @@ export interface HrDeadline {
   date: string;
   /** 期間の始まり（年度更新のように期間があるもの）。 */
   from?: string;
-  kind: 'withholding' | 'resident' | 'resident-switch' | 'labor-insurance' | 'santei' | 'yea' | 'annual-report' | 'agreement' | 'health-check' | 'hire-check' | 'contract-end' | 'task' | 'leave-obligation' | 'law-change' | 'law-stale' | 'bonus-report';
+  kind: 'withholding' | 'resident' | 'resident-switch' | 'labor-insurance' | 'santei' | 'yea' | 'annual-report' | 'agreement' | 'health-check' | 'hire-check' | 'contract-end' | 'task' | 'leave-obligation' | 'law-change' | 'law-stale' | 'bonus-report' | 'age';
   title: string;
   detail: string;
   employeeId?: string;
@@ -172,6 +186,7 @@ export const DEFAULT_HR_SETTINGS: HrSettings = {
   transfer: { format: 'sogo', clientCode: '', clientName: '', bankCode: '', bankName: '', branchCode: '', branchName: '', accountType: '普通', accountNumber: '' },
   duties: { withholdingSpecial: false, residentSpecial: false, healthCheckMonth: null },
   notice: { raise: '', bonus: '', severance: '', retirement: '', consultation: '', other: '' },
+  insurance: { officeSymbol: '', officeNumber: '', specificOffice: 'auto', fullTimeWeeklyHours: 40 },
 };
 
 /** 従業員（人事の台帳。第30.5節）。 */
@@ -390,6 +405,18 @@ export interface HrPayrollProfile {
   bank: { bank?: string; bankCode?: string; branch?: string; branchCode?: string; type?: '普通' | '当座'; number?: string; holder?: string };
   /** 明細を画面で受け取ることに本人が同意した日時（無ければ `null`。第30.10.3節）。 */
   payslipConsentAt?: string | null;
+  /** 社会保険の届出と加入の判定に使うもの（第30.12.1節）。 */
+  insurance?: HrInsuranceProfile;
+}
+
+/** 1 人の社会保険の届出と加入の判定に使うもの。 */
+export interface HrInsuranceProfile {
+  /** 健康保険・厚生年金の被保険者整理番号（資格取得の後に年金事務所から届く）。 */
+  number?: string;
+  /** 学生か（昼間の学生は短時間労働者の社会保険と雇用保険の対象外）。 */
+  student?: boolean;
+  /** 資格取得のときの報酬月額に足す、見込みの時間外手当（月額）。 */
+  overtimeEstimate?: number;
 }
 
 /** 標準報酬月額の履歴。 */
@@ -437,7 +464,7 @@ export interface PaySlip {
   /** 勤怠の期間の集計（賃金台帳に使う）。 */
   attendance?: Partial<AttTotals>;
   /** 計算の控え（社会保険料等を引いた後の額・標準賞与額・課税の支給額・社会保険料等・所得税。賞与と年末調整に使う）。 */
-  meta?: { taxable?: number; stdBonusHealth?: number; stdBonusPension?: number; taxablePay?: number; social?: number; tax?: number; yea?: YeaResult };
+  meta?: { taxable?: number; stdBonusHealth?: number; stdBonusPension?: number; taxablePay?: number; social?: number; tax?: number; yea?: YeaResult; baseDays?: number };
 }
 
 /** 障害者の区分（年末調整。第30.15.1節）。 */
@@ -600,4 +627,86 @@ export interface PayRun {
   compare?: PayTrialCompare | null;
   /** 訂正の回の元の回。 */
   sourceRunId?: string | null;
+}
+
+/** 社会保険の届出の種類（第30.12.1節）。 */
+export type HrFilingKind = 'regular' | 'change' | 'acquire' | 'lose' | 'age70';
+export const HR_FILING_LABELS: Record<HrFilingKind, string> = {
+  regular: '算定基礎届', change: '月額変更届', acquire: '資格取得届', lose: '資格喪失届', age70: '70 歳到達届',
+};
+
+/** 報酬の月 1 つ（定時決定・随時改定）。 */
+export interface SocialMonth {
+  /** 支払った月（YYYY-MM）。 */
+  month: string;
+  /** 支払基礎日数（分からなければ `null`）。 */
+  baseDays: number | null;
+  /** 報酬（通貨によるもの。調整の行と訂正の回の差額を除く）。 */
+  pay: number;
+  /** 遡及支払額（その月に払った訂正の回の差額）。 */
+  retro: number;
+  /** 平均に入れる月か。 */
+  counted: boolean;
+}
+
+/** 標準報酬月額の等級（健康保険と厚生年金）。 */
+export interface SocialGrade {
+  amount: number;
+  grade: number;
+  pensionAmount: number;
+  pensionGrade: number;
+}
+
+/** 定時決定か随時改定の、1 人の決定（第30.12.1節）。 */
+export interface SocialDetermination {
+  employeeId: string;
+  name: string;
+  kind: 'regular' | 'change';
+  /** 適用の月（定時決定は 9 月、随時改定は改定の月）。 */
+  applyMonth: string;
+  months: SocialMonth[];
+  /** 平均額（遡及支払額を含む）と修正平均額（除く。等級はこちらで決める）。1 円未満切り捨て。 */
+  average: number | null;
+  adjustedAverage: number | null;
+  before: SocialGrade | null;
+  after: SocialGrade | null;
+  /** 随時改定の固定的賃金の増減。 */
+  direction?: 'up' | 'down';
+  /** 備考（70 歳以上被用者・短時間労働者・パート・二以上勤務 など）。 */
+  notes: string[];
+  /** 定時決定の対象でない理由・算定できない理由（無ければ `null`）。 */
+  excluded: string | null;
+  /** 届出の下書きを作った日時。 */
+  filedAt: string | null;
+}
+
+/** 資格の取得・喪失・70 歳到達の届出の 1 人分。 */
+export interface SocialEvent {
+  employeeId: string;
+  name: string;
+  kind: 'acquire' | 'lose' | 'age70';
+  /** 取得の日・喪失の日・到達の日。 */
+  date: string;
+  /** 届出の期限（事実のあった日から 5 日以内）。 */
+  dueOn: string;
+  /** 喪失の原因（退職・75 歳到達 など）。 */
+  cause: string;
+  /** 資格取得のときの報酬月額と等級。 */
+  pay: number | null;
+  grade: SocialGrade | null;
+  /** 取得の区分（健康保険・厚生年金）と備考。 */
+  notes: string[];
+  /** 届出が要るか（70 歳到達で標準報酬月額相当額が変わらなければ要らない）。 */
+  required: boolean;
+  filedAt: string | null;
+}
+
+/** 加入の判定（第30.12.1節）。 */
+export interface InsuranceEligibility {
+  employeeId: string;
+  name: string;
+  social: { should: boolean; reason: string };
+  employment: { should: boolean; reason: string };
+  /** 雇用条件の加入。 */
+  current: { social: boolean; employment: boolean };
 }

@@ -43,6 +43,8 @@ export interface PayrollServiceDeps {
   llm?: (tenantId: string) => Promise<LlmProvider>;
   /** 監修前の表でも確定できるか（デバッグモードのときだけ `true`。ADR-0053）。 */
   allowUnverified?: boolean;
+  /** 社会保険の知らせ（随時改定・加入の判定。第30.12.1節）。月の給与の点検に足す。 */
+  socialHints?: (tenantId: string) => Promise<PayCheck[]>;
 }
 
 /** 本人に見せる明細の一覧の 1 つ。 */
@@ -130,6 +132,14 @@ export class PayrollService {
         bank: String(b.bank ?? '').slice(0, 50), bankCode: code(b.bankCode), branch: String(b.branch ?? '').slice(0, 50), branchCode: code(b.branchCode),
         ...(b.type === '当座' ? { type: '当座' as const } : { type: '普通' as const }), number: code(b.number), holder,
       };
+    }
+    if (input.insurance !== undefined) {
+      const i = input.insurance ?? {};
+      const number = String(i.number ?? cur.insurance?.number ?? '').normalize('NFKC').trim();
+      if (number && !/^\d{1,10}$/.test(number)) return { error: '被保険者整理番号は数字で入れてください' };
+      const ot = i.overtimeEstimate === undefined ? cur.insurance?.overtimeEstimate : Number(i.overtimeEstimate);
+      if (ot !== undefined && (!Number.isFinite(ot) || ot < 0)) return { error: '見込みの時間外手当は 0 以上で入れてください' };
+      next.insurance = { number, student: i.student === undefined ? !!cur.insurance?.student : !!i.student, ...(ot !== undefined ? { overtimeEstimate: Math.round(ot) } : {}) };
     }
     await this.deps.store.saveProfile(tenantId, next, userId);
     await this.audit(tenantId, userId, 'hr.payroll.profile', employeeId, { fields: Object.keys(input) });
@@ -253,6 +263,10 @@ export class PayrollService {
       employees: new Map(c.employees.map((e) => [e.id, e])), profiles: new Map(c.profiles.map((p) => [p.employeeId, p])), family: new Map(family), terms: c.termsBy,
       attendanceClosed: closed, periodLabel: c.period.label, unverified,
     });
+    // 社会保険の知らせは、この回に入っている人の分だけ足す（取れなくても計算は止めない）
+    const inRun = new Set(c.slips.map((s) => s.employeeId));
+    const hints = this.deps.socialHints ? await this.deps.socialHints(tenantId).catch(() => [] as PayCheck[]) : [];
+    checks.push(...hints.filter((h) => h.employeeId && inRun.has(h.employeeId)));
     const run: PayRun = {
       id: runId, kind: 'monthly', payMonth, payDate: c.payDate, periodStart: c.period.start, periodEnd: c.period.end, status: 'draft', law: c.law, warnings: runWarnings,
       calculatedAt: new Date().toISOString(), checks,

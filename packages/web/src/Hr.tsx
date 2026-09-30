@@ -12,6 +12,7 @@ import {
 } from '@m2office/shared';
 import { api, describeError, type HrImportResult } from './api.js';
 import { YearEndTab } from './YearEnd.js';
+import { SocialTab } from './SocialInsurance.js';
 
 const label = <T extends string>(list: { id: T; label: string }[], id: T) => list.find((x) => x.id === id)?.label ?? id;
 /** 日本時間の今日（YYYY-MM-DD）。 */
@@ -26,12 +27,12 @@ const wage = (t: Pick<HrTerms, 'wageType' | 'wageAmount'> | null) => (t && t.wag
  * @param onOpen 従業員を開く・一覧へ戻る
  */
 export function Hr({ employeeId, onOpen }: { employeeId: string | null; onOpen: (id: string | null) => void }) {
-  const [tab, setTab] = useState<'ledger' | 'calendar' | 'attendance' | 'leave' | 'payroll' | 'yea'>('ledger');
+  const [tab, setTab] = useState<'ledger' | 'calendar' | 'attendance' | 'leave' | 'payroll' | 'social' | 'yea'>('ledger');
   if (employeeId) return <EmployeeDetail id={employeeId} onBack={() => onOpen(null)} />;
   return (
     <>
       <div className="hr-tabs" role="tablist">
-        {([['ledger', '台帳'], ['calendar', '期限'], ['attendance', '勤怠'], ['leave', '有給'], ['payroll', '給与'], ['yea', '年末調整']] as const).map(([k, l]) => (
+        {([['ledger', '台帳'], ['calendar', '期限'], ['attendance', '勤怠'], ['leave', '有給'], ['payroll', '給与'], ['social', '社会保険'], ['yea', '年末調整']] as const).map(([k, l]) => (
           <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>
         ))}
       </div>
@@ -40,6 +41,7 @@ export function Hr({ employeeId, onOpen }: { employeeId: string | null; onOpen: 
       {tab === 'attendance' && <AttendanceTab />}
       {tab === 'leave' && <LeaveTab />}
       {tab === 'payroll' && <PayrollTab onOpen={onOpen} />}
+      {tab === 'social' && <SocialTab />}
       {tab === 'yea' && <YearEndTab RunView={RunPanelFor} />}
     </>
   );
@@ -499,9 +501,16 @@ function PayrollProfile({ employeeId }: { employeeId: string }) {
         <input className="short" placeholder="口座番号" value={p.bank.number ?? ''} onChange={(e) => setP({ ...p, bank: { ...p.bank, number: e.target.value } })} aria-label="口座番号" />
         <input className="short" placeholder="名義（カナ）" value={p.bank.holder ?? ''} onChange={(e) => setP({ ...p, bank: { ...p.bank, holder: e.target.value } })} aria-label="名義" />
       </div>
+      <div className="row wrap">
+        <span className="small">社会保険</span>
+        <input className="short" placeholder="被保険者整理番号" inputMode="numeric" value={p.insurance?.number ?? ''} onChange={(e) => setP({ ...p, insurance: { ...p.insurance, number: e.target.value } })} aria-label="被保険者整理番号" />
+        <label className="small">見込みの時間外手当 <input className="num-input" type="number" min={0} value={p.insurance?.overtimeEstimate ?? 0} onChange={(e) => setP({ ...p, insurance: { ...p.insurance, overtimeEstimate: num(e.target.value) } })} /></label>
+        <label className="check small"><input type="checkbox" checked={!!p.insurance?.student} onChange={(e) => setP({ ...p, insurance: { ...p.insurance, student: e.target.checked } })} /> 学生</label>
+      </div>
       <div className="row">
         <button className="btn small" onClick={() => act(() => api.hr.payroll.saveProfile(employeeId, {
           taxColumn: p.taxColumn, dependents: p.dependents, residentTax: rt.municipality || rt.june || rt.monthly ? [rt, ...p.residentTax.slice(1)] : p.residentTax.slice(1), commute: p.commute, bank: p.bank,
+          insurance: p.insurance ?? {},
         }), '保存できませんでした', '保存しました')}>保存する</button>
         {note && <span className="small muted">{note}</span>}
       </div>

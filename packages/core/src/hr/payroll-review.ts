@@ -92,16 +92,7 @@ export function reviewRun(input: ReviewInput): PayCheck[] {
       if (now !== careIn(e.birthDate, monthPrev)) checks.push({ level: 'check', code: 'care', text: now ? '今月から介護保険料を引きます（40 歳）' : '今月から介護保険料を引きません（65 歳）', ...who });
       if (input.premiumMonth === reachMonth(e.birthDate, 70)) checks.push({ level: 'check', code: 'pension-end', text: '70 歳に達したため、今月から厚生年金保険料を引きません（70 歳以上被用者の届出を確かめてください）', ...who });
     }
-    // 直近 3 か月に固定の賃金が変わった（随時改定の対象か）
-    const hist = [...(input.terms.get(s.employeeId) ?? [])].sort((a, b) => a.effectiveOn.localeCompare(b.effectiveOn));
-    for (let i = 1; i < hist.length; i++) {
-      const a = hist[i - 1]!;
-      const b = hist[i]!;
-      const from = b.effectiveOn.slice(0, 7);
-      if (from > input.payMonth || from < shiftMonth(input.payMonth, -3)) continue;
-      const fixed = (t: HrTerms) => `${t.wageType}:${t.wageAmount}:${t.allowances.map((x) => `${x.name}=${x.amount}`).join(',')}`;
-      if (fixed(a) !== fixed(b)) checks.push({ level: 'check', code: 'fixed-wage', text: `固定の賃金が ${b.effectiveOn} から変わりました。変わった月から 3 か月の平均で、随時改定の対象か確かめてください`, ...who });
-    }
+    // 随時改定の判定は、確定した明細から社会保険の処理が行い、知らせとして足す（第30.12.1節）
     // 家族の扶養（16 歳以上）と源泉の扶養親族等の数
     const fam = input.family.get(s.employeeId) ?? [];
     if (fam.length > 0 && p) {

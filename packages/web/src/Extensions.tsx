@@ -478,6 +478,17 @@ function HrFields({ settings, busy, onChanged }: { settings: HrSettings; busy: b
         )}
       </div>
       <div className="row wrap">
+        {([['officeSymbol', '事業所整理記号', 20], ['officeNumber', '事業所番号', 10]] as const).map(([k, l, max]) => (
+          <input key={k} className="short" placeholder={l} aria-label={l} maxLength={max} defaultValue={settings.insurance[k]} disabled={busy}
+            onBlur={(e) => { if (e.target.value !== settings.insurance[k]) save({ insurance: { ...settings.insurance, [k]: e.target.value } }); }} />
+        ))}
+        <select value={settings.insurance.specificOffice} disabled={busy} aria-label="特定適用事業所" onChange={(e) => save({ insurance: { ...settings.insurance, specificOffice: e.target.value as HrSettings['insurance']['specificOffice'] } })}>
+          <option value="auto">特定適用事業所: 人数から見込む</option><option value="yes">特定適用事業所: 該当（任意特定を含む）</option><option value="no">特定適用事業所: 該当しない</option>
+        </select>
+        <label>通常の労働者の週の所定 <input type="number" min={10} max={60} step="0.5" className="num" defaultValue={settings.insurance.fullTimeWeeklyHours}
+          onBlur={(e) => Number(e.target.value) !== settings.insurance.fullTimeWeeklyHours && save({ insurance: { ...settings.insurance, fullTimeWeeklyHours: Number(e.target.value) } })} /> 時間</label>
+      </div>
+      <div className="row wrap">
         <label>振込元 <select value={settings.transfer.format} disabled={busy} onChange={(e) => save({ transfer: { ...settings.transfer, format: e.target.value as 'sogo' | 'kyuyo' } })}>
           <option value="sogo">総合振込</option><option value="kyuyo">給与振込</option>
         </select></label>

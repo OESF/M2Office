@@ -42,7 +42,7 @@ export interface SlipResult {
   /** 使った法令の表（版と監修の状態）。 */
   tables: LawMeta[];
   /** 計算の控え（社会保険料等を引いた後の額・課税の支給額・社会保険料等・所得税。賞与と年末調整に使う）。 */
-  meta: { taxable?: number; stdBonusHealth?: number; stdBonusPension?: number; taxablePay?: number; social?: number; tax?: number };
+  meta: { taxable?: number; stdBonusHealth?: number; stdBonusPension?: number; taxablePay?: number; social?: number; tax?: number; baseDays?: number };
 }
 
 /** 調整の行を明細の行にし、所得税と雇用保険の対象から外す額を返す（第30.10.4節）。 */
@@ -99,6 +99,17 @@ export function insuredIn(employee: Pick<HrEmployee, 'hiredOn' | 'leftOn'>, mont
   const loss = new Date(`${employee.leftOn}T00:00:00Z`);
   loss.setUTCDate(loss.getUTCDate() + 1);
   return month < loss.toISOString().slice(0, 7);
+}
+
+/**
+ * 支払基礎日数（第30.12.1節）。月給は締めの期間の暦日数（欠勤を引いた月は所定の労働日 − 欠勤の日数）、日給・時給は出勤した日と有給の日。
+ */
+function baseDaysOf(t: HrTerms, input: SlipInput): number {
+  if (t.wageType === 'monthly') {
+    const scheduled = input.days.filter((d) => d.type === 'workday').length;
+    return input.settings.payroll.deductAbsence && input.totals.missingDays > 0 ? Math.max(0, scheduled - input.totals.missingDays) : input.days.length;
+  }
+  return input.days.filter((d) => d.workMinutes > 0 || d.leaveDays > 0).length;
 }
 
 const yen = (n: number) => `${n.toLocaleString('ja-JP')} 円`;
@@ -199,7 +210,10 @@ export function calcSlip(input: SlipInput): SlipResult {
       std = g?.value.health.amount ?? null;
       warnings.push(`標準報酬月額が未登録のため、雇用条件から仮に ${std ? yen(std) : '（等級表が無く求められません）'} としました`);
     }
-    if (std) {
+    // 75 歳の誕生日の月から後期高齢者医療（健康保険料・介護保険料・子ども・子育て支援金を引かない。第30.12.1節）
+    const healthOn = !e.birthDate || premiumMonth < `${Number(e.birthDate.slice(0, 4)) + 75}-${e.birthDate.slice(5, 7)}`;
+    if (std && !healthOn) warnings.push('75 歳に達したため、健康保険料・介護保険料・子ども・子育て支援金を引きません（後期高齢者医療）');
+    if (std && healthOn) {
       const careOn = !!e.birthDate && premiumMonth >= reachMonth(e.birthDate, 40) && premiumMonth < reachMonth(e.birthDate, 65);
       const kumiai = settings.health.kind === 'kumiai';
       const h = kumiai ? (pr.kumiai.health !== null ? { value: pr.kumiai.health, table: null } : null) : settings.health.kind === 'kyokai' ? law.healthRate(settings.health.prefecture, premiumMonth) : null;
@@ -302,6 +316,6 @@ export function calcSlip(input: SlipInput): SlipResult {
   for (const m of tables.values()) if (m.review.status !== 'verified') { warnings.push('法令の表が監修前です（確定には使えません）'); break; }
   const tax = lines.find((l) => l.code === 'income-tax')?.amount ?? 0;
   return { gross, deductions, net: gross - deductions, lines, warnings, tables: [...tables.values()], meta: {
-    taxable: Math.max(0, taxable), taxablePay: gross - taxFreeCommute - taxFreeItems - adj.notTaxable, social: social + employment, tax,
+    taxable: Math.max(0, taxable), taxablePay: gross - taxFreeCommute - taxFreeItems - adj.notTaxable, social: social + employment, tax, baseDays: baseDaysOf(t, input),
   } };
 }

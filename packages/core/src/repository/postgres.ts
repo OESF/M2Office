@@ -841,6 +841,7 @@ export class PostgresRepository implements Repository {
         transfer: { ...d.hr.transfer, ...(r?.hr?.transfer ?? {}) },
         duties: { ...d.hr.duties, ...(r?.hr?.duties ?? {}) },
         notice: { ...d.hr.notice, ...(r?.hr?.notice ?? {}) },
+        insurance: { ...d.hr.insurance, ...(r?.hr?.insurance ?? {}) },
       },
     };
   }

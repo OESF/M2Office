@@ -6,7 +6,7 @@
  */
 
 import { Hono, type Context } from 'hono';
-import { readSheet, renderSheet, detectKind, HR_IMPORT_MAX_ROWS, MAX_FILE_BYTES, MIME, type DayFix, type EmployeeInput, type TermsInput } from '@m2office/core';
+import { readSheet, renderSheet, detectKind, HR_IMPORT_MAX_ROWS, MAX_FILE_BYTES, MIME, type DayFix, type EmployeeInput, type FilingSheet, type TermsInput } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 
@@ -559,6 +559,51 @@ export function hrRoute(deps: AppDeps) {
     c.header('Content-Type', 'application/pdf');
     c.header('Content-Disposition', `attachment; filename="withholding-${year}.pdf"`);
     return c.body(bytes as unknown as ArrayBuffer);
+  });
+
+  // ---- 社会保険（Phase 2 段 3。第30.12.1節） ----
+
+  const social = deps.hr.social;
+  /** 下書きの表を返す。標準報酬月額に入れた人数を X-Applied に入れる。 */
+  const sheetResponse = async (c: Context<AppEnv>, r: FilingSheet | { error: string }, name: string) => {
+    if ('error' in r) return c.json(r, 400);
+    const format = c.req.query('format') === 'csv' ? 'csv' : 'xlsx';
+    const bytes = await renderSheet(r.title, r.columns, r.rows, format);
+    c.header('Content-Type', format === 'csv' ? 'text/csv; charset=utf-8' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    c.header('Content-Disposition', `attachment; filename="${name}.${format}"`);
+    c.header('X-Applied', String(r.applied));
+    return c.body(bytes as unknown as ArrayBuffer);
+  };
+  const idsOf = (v: string | undefined) => (v ? v.split(',').map((x) => x.trim()).filter(Boolean).slice(0, 200) : undefined);
+
+  /** 社会保険の画面（定時決定の年・随時改定の候補・資格の取得と喪失・加入の判定）。 */
+  app.get('/social', async (c) => {
+    const { tenant } = c.get('ctx');
+    const year = yearOf(c.req.query('year'));
+    if (!year) return c.json({ error: '年を入れてください' }, 400);
+    return c.json(await social.overview(tenant.id, year));
+  });
+
+  /** 算定基礎届の下書き（9 月からの標準報酬月額を入れる）。 */
+  app.post('/social/regular/report', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const year = yearOf(c.req.query('year'));
+    if (!year) return c.json({ error: '年を入れてください' }, 400);
+    return sheetResponse(c, await social.regularReport(tenant.id, user.id, year), `santei-${year}`);
+  });
+
+  /** 月額変更届の下書き（改定の月からの標準報酬月額を入れる。`ids` で人を選べる）。 */
+  app.post('/social/change/report', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    return sheetResponse(c, await social.changeReport(tenant.id, user.id, idsOf(c.req.query('ids'))), 'getsuhen');
+  });
+
+  /** 資格取得届・資格喪失届・70 歳到達届の下書き（資格取得は取得の月からの標準報酬月額を入れる）。 */
+  app.post('/social/events/:kind/report', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const kind = c.req.param('kind');
+    if (kind !== 'acquire' && kind !== 'lose' && kind !== 'age70') return c.json({ error: '届出の種類が違います' }, 400);
+    return sheetResponse(c, await social.eventReport(tenant.id, user.id, kind, idsOf(c.req.query('ids'))), `${kind}`);
   });
 
   /** 台帳に結び付けられる利用者（名前とメールアドレスだけ）。 */

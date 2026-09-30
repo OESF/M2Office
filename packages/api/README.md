@@ -189,7 +189,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/hr/attendance/book` | 出勤簿を書き出す（`month`・`format`） |
 | `GET /v1/hr/leave` ／ `GET /v1/hr/leave/register` | 有給（第30.7.1節）: 全員の残り・付与・取得義務・出勤率の低い人 ／ 年次有給休暇の管理簿を書き出す |
 | `POST /v1/hr/leave/:employeeId/grants` ／ `POST /v1/hr/leave/:employeeId/takes` ／ `DELETE /v1/hr/leave/takes/:id` | 手作業の付与（導入のときの残日数）／ 担当者が取得を記録 ／ 取り消す |
-| `GET /v1/hr/payroll/employees/:id` ／ `PUT .../profile` | 給与（段 3。第30.10.1節）: 1 人の給与の情報・標準報酬月額・家族 ／ 給与の情報を直す（`taxColumn`・`dependents`・`residentTax`・`commute`・`bank`） |
+| `GET /v1/hr/payroll/employees/:id` ／ `PUT .../profile` | 給与（段 3。第30.10.1節）: 1 人の給与の情報・標準報酬月額・家族 ／ 給与の情報を直す（`taxColumn`・`dependents`・`residentTax`・`commute`・`bank`・`insurance`（被保険者整理番号・学生か・見込みの時間外手当）） |
 | `POST /v1/hr/payroll/employees/:id/standard-pay` | 標準報酬月額を足す（`fromMonth`・`pay`。報酬の額を等級表で標準報酬月額に直す） |
 | `POST /v1/hr/payroll/employees/:id/family` ／ `DELETE .../family/:memberId` | 家族を足す・外す |
 | `GET /v1/hr/payroll/runs` ／ `POST /v1/hr/payroll/runs` ／ `GET /v1/hr/payroll/runs/:id` | 給与の回の一覧（`month` で支払日と勤怠の期間も）／ 支給月（`month`）の月の給与を計算して点検し、下書きにする（同じ月の下書きは置き換える。確定した月は 400）／ 回と明細と点検（行ごとの根拠・確定を止めているもの `blockers`・確定できるか `canConfirm`。見たことを監査ログに残す） |
@@ -205,6 +205,8 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/hr/yea` ／ `POST .../yea/request` ／ `POST .../yea/calculate` | 年末調整（Phase 2 段 2。第30.15.1節）: 一覧（`year`。対象・申告の状態・不備・年末調整の回）／ 対象でまだ出していない人に申告を頼む ／ 計算して年末調整の回（下書き）にする（`year`・`payDate`: 還付を払う日） |
 | `GET /v1/hr/yea/:employeeId` ／ `PUT ...` ／ `POST .../check` | 1 人の申告（`year`）／ 担当者が直す（`year`・`data`）／ 確かめた（`checked`。本人は直せなくなる） |
 | `GET /v1/hr/yea/:employeeId/withholding.pdf` ／ `GET /v1/hr/yea/report` | 源泉徴収票（本人交付用）の PDF ／ 源泉徴収票（提出用）・給与支払報告書の下書き（`year`・`format`: csv・xlsx）。マイナンバーの欄は空ける |
+| `GET /v1/hr/social` | 社会保険（Phase 2 段 3。第30.12.1節）: 定時決定（`year`）・随時改定の候補・前後 60 日の資格の取得と喪失と 70 歳到達・加入の判定・特定適用事業所の見込み |
+| `POST /v1/hr/social/regular/report` ／ `POST .../social/change/report` ／ `POST .../social/events/:kind/report` | 算定基礎届（`year`）／ 月額変更届（`ids`）／ 資格取得届・資格喪失届・70 歳到達届（`kind`: acquire・lose・age70、`ids`）の表計算の下書き（`format`: xlsx・csv）。作った額を適用の月からの標準報酬月額として入れ、人数を `X-Applied` に返す。載せる人がいなければ 400 |
 | `GET /v1/hr/users` | 台帳に結び付けられる利用者（名前とメールアドレス） |
 | `GET /v1/me/hr` | 本人の「給与・勤怠」（第30.25節）: 打刻の状態・期間の勤怠・有給の残りと取得義務。台帳に結び付いていなければ 404（同じメールアドレスなら自動で結び付く） |
 | `POST /v1/me/hr/punch` ／ `PUT /v1/me/hr/days/:date` | 本人が打刻する（`kind`: in・out・break_start・break_end。できない打刻は 409）／ 1 日を直す（人事区画の人に知らせる。締めた期間は 400） |
@@ -263,7 +265,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/admin/extensions/inventory/booking-sources` ／ `POST` | 管理者: 予約の受け口の一覧 ／ 作る（`name`）。作ったときだけ送り先の URL（鍵を含む）を返す。鍵はハッシュだけを持つ |
 | `PUT /v1/admin/extensions/inventory/booking-sources/:id/status` ／ `mapping` | 管理者: 受け口を止める・再開する（`status`）／ 項目の対応を直す・やり直す（`mapping`。`null` で次の予約から推論し直す） |
 | `POST /v1/admin/extensions/hr/proposal` | 管理者: 就業規則・賃金規程（`file`: PDF・Word・文字・写真）から、人事・給与の設定の案を作る（第30.8.2節。項目・今・案・規程の抜き書き・採らない理由。保存しない。読めなければ 422） |
-| `PUT /v1/admin/extensions/hr/settings` | 管理者: 人事・給与の会社の設定（`office`・`health`・`socialApply`・`pay`・`procedures`・`work`・`agreement`・`leave`・`payroll`・`transfer`（振込元。番号の桁を確かめる）・`duties`（納期の特例・定期健康診断の月）・`notice`（労働条件通知書の会社の定め）。第30.8.1節）。送った項目だけを変える。人事・給与を `PUT /v1/admin/extensions/hr/enabled` で入れると、区画 `hr` が無ければ作り、入れた管理者を入れる |
+| `PUT /v1/admin/extensions/hr/settings` | 管理者: 人事・給与の会社の設定（`office`・`health`・`socialApply`・`pay`・`procedures`・`work`・`agreement`・`leave`・`payroll`・`transfer`（振込元。番号の桁を確かめる）・`duties`（納期の特例・定期健康診断の月）・`notice`（労働条件通知書の会社の定め）・`insurance`（事業所整理記号・事業所番号・特定適用事業所 auto・yes・no・通常の労働者の週の所定労働時間 10〜60）。第30.8.1節）。送った項目だけを変える。人事・給与を `PUT /v1/admin/extensions/hr/enabled` で入れると、区画 `hr` が無ければ作り、入れた管理者を入れる |
 | `PUT /v1/admin/extensions/inventory/settings` | 管理者: 在庫管理の機能の入り切り（`features`）・残りわずかの既定の目安（`lowDefault`）・仕入れの日数（`leadDaysDefault`）・棚卸しの頻度（`countEveryDays`）。送った項目だけを変える（第29.4.1節） |
 | `GET /v1/admin/connections/mcp` | 管理者: 会社の接続（MCP）の一覧。道具ごとの危険度・有効かどうか・使っている業務、認証の状態（`authState`。秘密の値は返さない）、よく使うサービスの型（`presets`）（仕様書 第12.11節、ADR-0037・ADR-0044） |
 | `POST /v1/admin/connections/mcp` | 管理者: URL を受け取り、道具の一覧を取って会社の接続として登録する（読むだけの印が付いた道具は「読むだけ」、ほかは「社外へ送る」扱い）。`preset`（`slack`）で型から、`auth`（`oauth`・`api_key`）で認証の要る接続を登録する。認証の要る接続の道具は、認証情報のあとで取る |

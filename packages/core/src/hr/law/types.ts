@@ -42,11 +42,30 @@ export interface GradeRow {
   max: number | null;
 }
 
+/**
+ * 随時改定の上限・下限の特例（1 等級の差でも改定する。仕様書 第30.12.1節）。従前の等級が `fromGrade` で、
+ * 従前の報酬月額と 3 か月の平均が条件に合えば `toGrade` にする。
+ */
+export interface ChangeLimit {
+  system: 'health' | 'pension';
+  direction: 'up' | 'down';
+  fromGrade: number;
+  /** 従前の報酬月額が この額未満（以上）であること。 */
+  priorPayBelow?: number;
+  priorPayAtLeast?: number;
+  /** 3 か月の平均が この額以上（未満）であること。 */
+  averageAtLeast?: number;
+  averageBelow?: number;
+  toGrade: number;
+}
+
 /** 標準報酬月額の等級表（健康保険と厚生年金）。 */
 export interface GradeTable extends LawMeta {
   effectiveFrom: string;
   health: GradeRow[];
   pension: GradeRow[];
+  /** 随時改定の上限・下限の特例（等級表とともに変わる）。 */
+  changeLimits?: ChangeLimit[];
 }
 
 /** 雇用保険料率（労働者負担。日付 YYYY-MM-DD から。賃金の締め日で選ぶ）。 */
@@ -145,6 +164,19 @@ export interface YeaRules extends LawMeta {
   surtax: number;
 }
 
+/** 社会保険と雇用保険の適用の決まり（仕様書 第30.12.1節）。施行日（YYYY-MM-DD）から効く。 */
+export interface InsuranceRules extends LawMeta {
+  effectiveFrom: string;
+  /** 支払基礎日数の要件（一般・短時間労働者・4 分の 3 以上のパートで 17 日以上の月が無いとき）。 */
+  baseDays: { general: number; shortTime: number; part: number };
+  /** 短時間労働者の適用の要件（週の所定労働時間・所定内賃金の月額（撤廃の後は `null`）・雇用の見込みの月数（を超える）・特定適用事業所の被保険者の数（以上））。 */
+  shortTime: { weeklyHours: number; monthlyWage: number | null; months: number; officeSize: number };
+  /** 雇用保険の適用の要件（週の所定労働時間（以上）・雇用の見込みの日数（以上））。 */
+  employment: { weeklyHours: number; days: number };
+  /** 随時改定の等級の差（以上）。 */
+  changeGrades: number;
+}
+
 /** 地域別最低賃金（都道府県ごと・発効日つき）。 */
 export interface MinimumWage extends LawMeta {
   prefectures: Record<string, { amount: number; from: string }[]>;
@@ -164,4 +196,6 @@ export interface LawBook {
   minimumWage: MinimumWage[];
   /** 年末調整の決まり（年ごと）。 */
   yea: YeaRules[];
+  /** 社会保険と雇用保険の適用の決まり（施行日ごと）。 */
+  insurance: InsuranceRules[];
 }

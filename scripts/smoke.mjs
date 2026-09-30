@@ -3766,6 +3766,28 @@ console.log('\n■ 61. 人事・給与（内蔵の拡張。第30章、段 1: 台
         && (ycalc.body.run.checks ?? []).some((c) => c.code === 'december') && yconf.status === 400 && wpdf.status === 200 && yreport.status === 200 && yreportText.includes('合計（')
         ? ok('年末調整は本人の申告を担当者が確かめてから計算し（改正前の 11 月には計算しない・23 歳未満の扶養がいれば生命保険料の上限 6 万円・特定扶養を数える）、12 月の給与が確定するまで確定できず、源泉徴収票を出せる')
         : ng('年末調整が合わない', JSON.stringify({ target: yeaSelf.target, submitted: submitted.status, checked: checked.status, selfAfter: selfAfter.status, early: yearly.status, calc: ycalc.body?.error ?? yres, conf: yconf.status, pdf: wpdf.status }).slice(0, 700));
+
+      // Phase 2 段 3: 社会保険（第30.12.1節）。入社した人の資格取得届の下書きを作ると、見込みの報酬月額の等級を標準報酬月額に入れる
+      const todayJst = new Date(Date.now() + 9 * 3_600_000).toISOString().slice(0, 10);
+      const joiner = await call('a', '/v1/hr/employees', { method: 'POST', body: JSON.stringify({
+        name: `${tag} 社保`, hiredOn: todayJst, birthDate: '1990-04-01',
+        terms: { wageType: 'monthly', wageAmount: 300000, weeklyHours: 40, weeklyDays: 5, startTime: '09:00', endTime: '18:00', breakMinutes: 60, socialInsurance: true, employmentInsurance: false },
+      }) });
+      const joinerId = joiner.body?.employee?.id;
+      const { body: so } = await call('a', '/v1/hr/social?year=2026');
+      const soMember = await call('a', '/v1/hr/social?year=2026', {}, 'member');
+      const acq = (so.events ?? []).find((x) => x.employeeId === joinerId && x.kind === 'acquire');
+      const mism = (so.eligibility ?? []).find((x) => x.employeeId === joinerId);
+      const acqReport = await raw('/v1/hr/social/events/acquire/report?format=csv', { method: 'POST' });
+      const acqText = acqReport.status === 200 ? await acqReport.text() : '';
+      const acqAgain = await call('a', '/v1/hr/social/events/acquire/report', { method: 'POST' });
+      const { body: joinerPay } = await call('a', `/v1/hr/payroll/employees/${joinerId}`);
+      const noSantei = await call('a', '/v1/hr/social/regular/report?year=2026', { method: 'POST' });
+      acq?.grade?.amount === 300000 && mism?.employment?.should === true && mism.current.employment === false && soMember.status === 403
+        && acqReport.status === 200 && acqReport.headers.get('x-applied') === '1' && acqText.includes(`${tag} 社保`) && acqAgain.status === 400
+        && joinerPay.standardPays?.[0]?.kind === 'acquire' && joinerPay.standardPays[0].amount === 300000 && joinerPay.standardPays[0].fromMonth === todayJst.slice(0, 7) && noSantei.status === 400
+        ? ok('社会保険は入社の資格取得届の下書きで標準報酬月額を入れ（二度は作らない）、加入の判定と雇用条件の違いを示し、人事区画の外には見せない')
+        : ng('社会保険が合わない', JSON.stringify({ acq: acq?.grade, mism: mism?.employment, member: soMember.status, report: acqReport.status, applied: acqReport.headers.get('x-applied'), text: acqText.slice(0, 200), again: acqAgain.status, std: joinerPay.standardPays, santei: noSantei.status }).slice(0, 900));
     } else {
       conf.status === 400 && (conf.body?.blockers ?? []).some((x) => x.code === 'unverified')
         ? ok('本番の環境では、監修前の法令の表で計算した回は確定できない') : ng('監修前でも確定できた', JSON.stringify(conf.body));
@@ -3822,6 +3844,7 @@ console.log('\n■ 61. 人事・給与（内蔵の拡張。第30章、段 1: 台
     await owner.query(`delete from pay_bonus_plans where tenant_id = 't-alpha' and updated_at >= $1`, [hrStartedAt]);
     await owner.query(`delete from notifications where tenant_id = 't-alpha' and title like '年末調整%' and created_at >= $1`, [hrStartedAt]);
     await owner.query(`delete from notifications where tenant_id = 't-alpha' and title like '給与%' and created_at >= $1`, [hrStartedAt]);
+    await owner.query(`delete from notifications where tenant_id = 't-alpha' and title like '賞与の明細%' and created_at >= $1`, [hrStartedAt]);
     await owner.query(`delete from hr_employees where name like '${tag}%'`);
     for (const r of saved) await owner.query(`update tenant_settings set hr = $2 where tenant_id = $1`, [r.tenant_id, r.hr ? JSON.stringify(r.hr) : null]);
     if (hrComp) {

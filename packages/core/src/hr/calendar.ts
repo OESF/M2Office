@@ -129,6 +129,14 @@ export function buildDeadlines(input: CalendarInput): HrDeadline[] {
   for (const e of active) {
     if (e.hiredOn && within(e.hiredOn)) push({ date: e.hiredOn, kind: 'hire-check', title: `雇入れ時の健康診断（${e.name}さん）`, detail: '雇い入れるときに受けさせる（3 か月以内に受けた診断の結果を出してもらえば省ける）', employeeId: e.id });
     const t = input.terms.get(e.id);
+    // 年齢の到達（第30.12.1節）。70 歳は誕生日の前の日に厚生年金の資格を失い、75 歳は誕生日に健康保険の資格を失う
+    if (t?.socialInsurance && e.birthDate) {
+      const y = Number(e.birthDate.slice(0, 4));
+      const d70 = addDays(`${y + 70}${e.birthDate.slice(4)}`, -1);
+      const d75 = `${y + 75}${e.birthDate.slice(4)}`;
+      push({ date: addDays(d70, 4), from: d70, kind: 'age', title: `70 歳到達（${e.name}さん）`, detail: '厚生年金の資格を失う。標準報酬月額相当額が変わるなら 70 歳到達届を出す（「社会保険」で下書き）', employeeId: e.id });
+      push({ date: addDays(d75, 4), from: d75, kind: 'age', title: `75 歳到達・健康保険の資格喪失届（${e.name}さん）`, detail: '後期高齢者医療に移る。「社会保険」で資格喪失届の下書きを作る', employeeId: e.id });
+    }
     if (t?.contractEnd) {
       push({ date: t.contractEnd, kind: 'contract-end', title: `契約期間の満了（${e.name}さん）`, detail: t.renewal ? `更新: ${t.renewal}` : '更新するかを決めて本人に伝える', employeeId: e.id });
       push({ date: addDays(t.contractEnd, -30), kind: 'contract-end', title: `更新しないなら予告（${e.name}さん）`, detail: `${md(t.contractEnd)} で契約が終わる。更新しないなら 30 日前までに予告する`, employeeId: e.id });

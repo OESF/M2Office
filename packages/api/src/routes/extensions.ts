@@ -190,7 +190,7 @@ export function extensionsRoute(deps: AppDeps) {
     const { tenant, user } = c.get('ctx');
     const b = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
     const cur = (await deps.repo.getTenantSettings(tenant.id)).hr;
-    const next: HrSettings = { ...cur, office: { ...cur.office }, health: { ...cur.health }, pay: { ...cur.pay }, work: { ...cur.work }, agreement: { ...cur.agreement }, leave: { ...cur.leave }, payroll: { ...cur.payroll }, transfer: { ...cur.transfer }, duties: { ...cur.duties }, notice: { ...cur.notice } };
+    const next: HrSettings = { ...cur, office: { ...cur.office }, health: { ...cur.health }, pay: { ...cur.pay }, work: { ...cur.work }, agreement: { ...cur.agreement }, leave: { ...cur.leave }, payroll: { ...cur.payroll }, transfer: { ...cur.transfer }, duties: { ...cur.duties }, notice: { ...cur.notice }, insurance: { ...cur.insurance } };
     const obj = (v: unknown) => (v && typeof v === 'object' ? v as Record<string, unknown> : null);
     const text = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : undefined);
     const day = (v: unknown) => (typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 31 ? v : undefined);
@@ -303,6 +303,20 @@ export function extensionsRoute(deps: AppDeps) {
       const n = { ...next.notice };
       for (const k of ['raise', 'bonus', 'severance', 'retirement', 'consultation', 'other'] as const) if (text(no[k], 1000) !== undefined) n[k] = text(no[k], 1000)!;
       next.notice = n;
+    }
+    // 社会保険の届出と加入の判定（第30.12.1節）
+    const ins = obj(b['insurance']);
+    if (ins) {
+      const i = { ...next.insurance };
+      if (text(ins['officeSymbol'], 20) !== undefined) i.officeSymbol = text(ins['officeSymbol'], 20)!;
+      if (text(ins['officeNumber'], 10) !== undefined) i.officeNumber = text(ins['officeNumber'], 10)!;
+      if (ins['specificOffice'] === 'auto' || ins['specificOffice'] === 'yes' || ins['specificOffice'] === 'no') i.specificOffice = ins['specificOffice'];
+      if (ins['fullTimeWeeklyHours'] !== undefined) {
+        const h = ins['fullTimeWeeklyHours'];
+        if (typeof h !== 'number' || !Number.isFinite(h) || h < 10 || h > 60) return c.json({ error: '通常の労働者の週の所定労働時間は 10〜60 時間で入れてください' }, 400);
+        i.fullTimeWeeklyHours = Math.round(h * 100) / 100;
+      }
+      next.insurance = i;
     }
     await deps.repo.saveTenantSettings(tenant.id, 'hr', next, user.id);
     await deps.repo.appendAudit({

@@ -193,6 +193,17 @@ export const GRADES_R8: GradeTable = {
       { grade: 31, amount: 620000, min: 605000, max: 635000 },
       { grade: 32, amount: 650000, min: 635000, max: null },
   ],
+  // 随時改定の上限・下限の特例（日本年金機構 https://www.nenkin.go.jp/service/kounen/hokenryo/hoshu/20150515-02.html。2026-09-30 に確認）
+  changeLimits: [
+    { system: 'pension', direction: 'up', fromGrade: 31, averageAtLeast: 665000, toGrade: 32 },
+    { system: 'pension', direction: 'up', fromGrade: 1, priorPayBelow: 83000, averageAtLeast: 93000, toGrade: 2 },
+    { system: 'pension', direction: 'down', fromGrade: 32, priorPayAtLeast: 665000, averageBelow: 635000, toGrade: 31 },
+    { system: 'pension', direction: 'down', fromGrade: 2, averageBelow: 83000, toGrade: 1 },
+    { system: 'health', direction: 'up', fromGrade: 49, averageAtLeast: 1415000, toGrade: 50 },
+    { system: 'health', direction: 'up', fromGrade: 1, priorPayBelow: 53000, averageAtLeast: 63000, toGrade: 2 },
+    { system: 'health', direction: 'down', fromGrade: 50, priorPayAtLeast: 1415000, averageBelow: 1355000, toGrade: 49 },
+    { system: 'health', direction: 'down', fromGrade: 2, averageBelow: 53000, toGrade: 1 },
+  ],
 };
 
 /** 賞与の上限（段 4 以降の賞与で使う）。 */

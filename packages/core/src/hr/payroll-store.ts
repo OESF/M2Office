@@ -57,6 +57,8 @@ export interface PayrollStore {
   getSlip(tenantId: string, slipId: string): Promise<SlipWithRun | null>;
   /** 年の確定した月の給与の明細（賃金台帳）。 */
   listYearSlips(tenantId: string, year: number): Promise<SlipWithRun[]>;
+  /** `fromMonth` 以上 `toMonth` 以下に支払った、確定した月の給与と訂正の回の明細（社会保険の報酬。第30.12.1節）。 */
+  listPaidSlips(tenantId: string, fromMonth: string, toMonth: string): Promise<SlipWithRun[]>;
   /** 明細を画面で受け取る同意（`null` で取り消し）。 */
   setConsent(tenantId: string, employeeId: string, at: string | null): Promise<void>;
   /** 回ごと・人ごとの調整の行。 */
@@ -74,13 +76,13 @@ export interface PayrollStore {
   monthlyTotals(tenantId: string, fromMonth: string): Promise<{ month: string; people: number; gross: number; tax: number; resident: number }[]>;
 }
 
-interface ProfileRow { employee_id: string; tax_column: 'ko' | 'otsu'; dependents: number; resident_tax: HrPayrollProfile['residentTax']; commute: HrPayrollProfile['commute']; bank: HrPayrollProfile['bank']; payslip_consent_at: unknown }
+interface ProfileRow { employee_id: string; tax_column: 'ko' | 'otsu'; dependents: number; resident_tax: HrPayrollProfile['residentTax']; commute: HrPayrollProfile['commute']; bank: HrPayrollProfile['bank']; payslip_consent_at: unknown; insurance: HrPayrollProfile['insurance'] | null }
 const toProfile = (r: ProfileRow): HrPayrollProfile => ({
   employeeId: r.employee_id, taxColumn: r.tax_column, dependents: r.dependents,
   residentTax: Array.isArray(r.resident_tax) ? r.resident_tax : [], commute: r.commute ?? {}, bank: r.bank ?? {},
-  payslipConsentAt: r.payslip_consent_at ? iso(r.payslip_consent_at) : null,
+  payslipConsentAt: r.payslip_consent_at ? iso(r.payslip_consent_at) : null, insurance: r.insurance ?? {},
 });
-const PROFILE_COLS = 'employee_id, tax_column, dependents, resident_tax, commute, bank, payslip_consent_at';
+const PROFILE_COLS = 'employee_id, tax_column, dependents, resident_tax, commute, bank, payslip_consent_at, insurance';
 
 interface RunRow {
   id: string; kind: PayRun['kind']; pay_month: string; pay_date: unknown; period_start: unknown; period_end: unknown; status: PayRun['status']; law: PayRun['law']; warnings: string[]; calculated_at: unknown;
@@ -156,11 +158,11 @@ export class PostgresPayrollStore implements PayrollStore {
   }
 
   async saveProfile(tenantId: string, p: HrPayrollProfile, by: string): Promise<void> {
-    await this.q(tenantId, `insert into hr_payroll_profiles (employee_id, tenant_id, tax_column, dependents, resident_tax, commute, bank, updated_by)
-      values ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7::jsonb,$8)
+    await this.q(tenantId, `insert into hr_payroll_profiles (employee_id, tenant_id, tax_column, dependents, resident_tax, commute, bank, insurance, updated_by)
+      values ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7::jsonb,$8::jsonb,$9)
       on conflict (employee_id) do update set tax_column = excluded.tax_column, dependents = excluded.dependents, resident_tax = excluded.resident_tax,
-        commute = excluded.commute, bank = excluded.bank, updated_by = excluded.updated_by, updated_at = now()`,
-    [p.employeeId, tenantId, p.taxColumn, p.dependents, JSON.stringify(p.residentTax), JSON.stringify(p.commute), JSON.stringify(p.bank), by]);
+        commute = excluded.commute, bank = excluded.bank, insurance = excluded.insurance, updated_by = excluded.updated_by, updated_at = now()`,
+    [p.employeeId, tenantId, p.taxColumn, p.dependents, JSON.stringify(p.residentTax), JSON.stringify(p.commute), JSON.stringify(p.bank), JSON.stringify(p.insurance ?? {}), by]);
   }
 
   async listStandardPay(tenantId: string, employeeId?: string): Promise<HrStandardPay[]> {
@@ -259,6 +261,13 @@ export class PostgresPayrollStore implements PayrollStore {
   async listYearSlips(tenantId: string, year: number): Promise<SlipWithRun[]> {
     const rows = await this.q<SlipRow>(tenantId, `${SLIP_RUN_SELECT}
       where s.tenant_id = $1 and r.kind <> 'trial' and r.status in ('confirmed', 'paid') and to_char(r.pay_date, 'YYYY') = $2 order by nullif(e.kana, ''), e.name, r.pay_date, r.kind`, [tenantId, String(year)]);
+    return rows.map(toSlipWithRun);
+  }
+
+  async listPaidSlips(tenantId: string, fromMonth: string, toMonth: string): Promise<SlipWithRun[]> {
+    const rows = await this.q<SlipRow>(tenantId, `${SLIP_RUN_SELECT}
+      where s.tenant_id = $1 and r.kind in ('monthly', 'correction') and r.status in ('confirmed', 'paid')
+        and to_char(r.pay_date, 'YYYY-MM') between $2 and $3 order by r.pay_date, r.kind`, [tenantId, fromMonth, toMonth]);
     return rows.map(toSlipWithRun);
   }
 

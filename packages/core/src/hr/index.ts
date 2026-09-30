@@ -33,6 +33,12 @@ export { YearEndService, type YearEndServiceDeps, type YearTotals, type YeaOverv
 export { calcYea, declarationProblems, type YeaInput } from './yea-calc.js';
 export { readCertificate, parseCertificate, type CertificateReading, type CertificateKind } from './yea-certificate.js';
 export { renderWithholdingPdf, type WithholdingPdfInput } from './withholding-pdf.js';
+export { PostgresSocialStore, type SocialStore, type HrFilingRecord } from './social-store.js';
+export { SocialInsuranceService, type SocialServiceDeps, type SocialOverview, type SpecificOffice, type FilingSheet } from './social-service.js';
+export {
+  regularDetermination, changeCandidates, changeQualifies, socialEvents, eligibility, acquirePay, averageOf, remunerationOf, fixedWageOf, baseDaysOfSlip, isShortTime,
+  gradeOf, standardPayAt, healthIn, day70, day75, type PaidSlip, type FixedWage,
+} from './social.js';
 export { PayrollService, type PayrollServiceDeps, type MySlipSummary, type NoticeApplyResult } from './payroll-service.js';
 export { reviewRun, reviewOther, changedLines, explainDiff, type ReviewInput } from './payroll-review.js';
 export { calcBonus, HEALTH_BONUS_CAP, PENSION_BONUS_CAP, type BonusInput } from './bonus.js';
@@ -42,4 +48,4 @@ export { readResidentNotice, parseNoticeReading, noticeProblem, type NoticeEntry
 export { mapTrialHeaders, trialTotals, trialNumber, compareTrialRow, TRIAL_ITEMS, type TrialItem } from './payroll-trial.js';
 export { calcSlip, adjustmentLines, round50, itemRule, reachMonth, insuredIn, shiftMonth as shiftPayMonth, type SlipInput, type SlipResult as PaySlipResult } from './payroll.js';
 export { LAW_BOOK, Law, type LawHit } from './law/index.js';
-export type { LawBook, LawMeta, LawReview, GradeRow, GradeTable, HealthRates, RateTable, EmploymentRates, WithholdingMonthly, WithholdingRow, WithholdingAbove, MinimumWage } from './law/types.js';
+export type { LawBook, LawMeta, LawReview, GradeRow, GradeTable, ChangeLimit, InsuranceRules, HealthRates, RateTable, EmploymentRates, WithholdingMonthly, WithholdingRow, WithholdingAbove, MinimumWage } from './law/types.js';
