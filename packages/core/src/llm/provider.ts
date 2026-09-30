@@ -84,6 +84,8 @@ export interface LlmExtractRequest {
   prompt: string;
   /** 出力の上限。 */
   maxOutputTokens?: number;
+  /** 使うモデルの区分。既定は標準。向きのように標準のモデルが取り違えるものは高性能にする（名刺。第27.5節）。 */
+  tier?: ModelTier;
 }
 
 export interface LlmProvider {

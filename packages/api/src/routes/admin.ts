@@ -423,7 +423,7 @@ export function adminRoute(deps: AppDeps) {
     const { tenant, user } = c.get('ctx');
     const item = (await deps.repo.listKnowledge(tenant.id, { all: true })).find((k) => k.id === c.req.param('id'));
     if (!item) return c.json({ error: '知識が見つかりません' }, 404);
-    if (item.category === 'learned') return c.json({ error: '秘書が学んだことは、廃止ではなく消します' }, 409);
+    if (item.category === 'learned') return c.json({ error: '秘書が学んだことは、廃止ではなく削除します' }, 409);
     if (item.status !== 'active') return c.json({ error: 'すでに廃止しています' }, 409);
     await deps.repo.setKnowledgeStatus(tenant.id, item.id, 'retired', null, null, new Date().toISOString());
     await audit(deps, tenant.id, user.id, item.category === 'rule' ? 'knowledge.rule.retire' : 'knowledge.minutes.retire', 'knowledge', item.id, {});
@@ -450,7 +450,7 @@ export function adminRoute(deps: AppDeps) {
     const { tenant, user } = c.get('ctx');
     const item = (await deps.repo.listKnowledge(tenant.id, { all: true })).find((k) => k.id === c.req.param('id'));
     if (!item) return c.json({ error: '知識が見つかりません' }, 404);
-    if (item.category !== 'learned') return c.json({ error: '社内規程と議事録は消さずに廃止します' }, 409);
+    if (item.category !== 'learned') return c.json({ error: '社内規程と議事録は削除せずに廃止します' }, 409);
     await deps.repo.deleteKnowledge(tenant.id, item.id);
     await audit(deps, tenant.id, user.id, 'knowledge.delete', 'knowledge', item.id, {});
     return c.json({ ok: true });

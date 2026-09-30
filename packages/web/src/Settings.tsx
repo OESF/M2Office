@@ -423,12 +423,12 @@ function ConversationSettings({ settings, onChange, onSave }: {
         <button className="btn ghost" onClick={() => void load()}>探す</button>
         {items.length > 0 && (
           <button className="btn danger" onClick={() => {
-            if (!confirm('会話ログをすべて消しますか。元に戻せません。')) return;
+            if (!confirm('会話ログをすべて削除しますか。元に戻せません。')) return;
             void api.clearConversations()
-              .then((r) => setMsg(`${r.removed} 件を消しました`))
+              .then((r) => setMsg(`${r.removed} 件を削除しました`))
               .then(() => load(''))
               .catch((e) => setMsg(describeError(e)));
-          }}>すべて消す</button>
+          }}>すべて削除</button>
         )}
       </div>
       {items.length === 0 ? (
@@ -446,7 +446,7 @@ function ConversationSettings({ settings, onChange, onSave }: {
                 <td className="num">
                   <button className="btn danger small"
                     onClick={() => void api.deleteConversation(c.id).then(() => load()).catch((e) => setMsg(describeError(e)))}>
-                    消す
+                    削除
                   </button>
                 </td>
               </tr>
@@ -590,8 +590,8 @@ function MemorySettings({ settings, onChange, onSave }: {
                     <>
                       <button className="btn ghost small" onClick={() => setEditing({ id: m.id, text: m.text })}>直す</button>{' '}
                       <button className="btn danger small"
-                        onClick={() => void api.deleteMemory(m.id).then(load).then(() => setMsg('消しました')).catch((e) => setMsg(describeError(e)))}>
-                        消す
+                        onClick={() => void api.deleteMemory(m.id).then(load).then(() => setMsg('削除しました')).catch((e) => setMsg(describeError(e)))}>
+                        削除
                       </button>
                     </>
                   )}
@@ -605,9 +605,9 @@ function MemorySettings({ settings, onChange, onSave }: {
         <div className="row">
           <button className="btn danger ghost small"
             onClick={() => {
-              if (!confirm('覚えていることをすべて消しますか。元に戻せません。')) return;
-              void api.clearMemories().then((r) => setMsg(`${r.removed} 件を消しました`)).then(load).catch((e) => setMsg(describeError(e)));
-            }}>すべて消す</button>
+              if (!confirm('覚えていることをすべて削除しますか。元に戻せません。')) return;
+              void api.clearMemories().then((r) => setMsg(`${r.removed} 件を削除しました`)).then(load).catch((e) => setMsg(describeError(e)));
+            }}>すべて削除</button>
         </div>
       )}
       <button className="link-btn small" onClick={() => {

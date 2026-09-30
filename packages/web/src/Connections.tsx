@@ -113,7 +113,7 @@ function RetentionCard() {
       <div className="field">
         <label>残す日数</label>
         <select value={days} onChange={(e) => setDays(Number(e.target.value))}>
-          {[7, 3, 1, 0].map((d) => <option key={d} value={d}>{d === 0 ? '業務が終わったらすぐ消す' : `${d} 日${d === 7 ? '（上限）' : ''}`}</option>)}
+          {[7, 3, 1, 0].map((d) => <option key={d} value={d}>{d === 0 ? '業務が終わったらすぐ削除' : `${d} 日${d === 7 ? '（上限）' : ''}`}</option>)}
         </select>
       </div>
       <div className="row">
@@ -307,8 +307,8 @@ function GoogleCard({ data, page, onSaved }: {
             <button className="btn danger" disabled={busy} onClick={() => void (async () => {
               const impact = await api.admin.googleClientImpact().catch(() => null);
               if (!confirm(clientChangeText(impact, 'OAuth クライアントの登録を消します'))) return;
-              await run(() => api.admin.deleteGoogleClient(), '登録を消しました');
-            })()}>登録を消す</button>
+              await run(() => api.admin.deleteGoogleClient(), '登録を削除しました');
+            })()}>登録を削除</button>
           )}
         </div>
         {msg && <p className={msg.ok ? 'ok-msg' : 'error'}>{msg.text}</p>}

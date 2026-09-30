@@ -75,7 +75,7 @@ export function ConnectorList() {
       : `接続「${c.name}」を消します。次の業務が使えなくなります。\n${names}\n${people}\nよろしいですか。`);
     if (!ok) return;
     await api.admin.deleteMcpConnection(c.id);
-  }, '消せませんでした');
+  }, '削除できませんでした');
 
   const check = async (c: McpConnectionView) => {
     setChecks((x) => ({ ...x, [c.id]: 'busy' }));
@@ -166,7 +166,7 @@ export function ConnectorList() {
                 onClick={() => void run(`${c.id}/refresh`, () => api.admin.refreshMcpConnection(c.id), '取り直せませんでした')}>
                 道具を取り直す
               </button>
-              <button className="btn small ghost danger" disabled={busy === `${c.id}/delete`} onClick={() => void remove(c)}>消す</button>
+              <button className="btn small ghost danger" disabled={busy === `${c.id}/delete`} onClick={() => void remove(c)}>削除</button>
               {st && st !== 'busy' && (st.ok
                 ? <span className="ok-inline">接続できました（提供のある道具 {st.tools.filter((t) => t.provided).length} ／ {st.tools.length}）</span>
                 : <span className="error">接続できませんでした: {st.error}</span>)}

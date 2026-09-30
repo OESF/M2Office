@@ -763,7 +763,7 @@ export function KnowledgeSettings({ page }: { page: string }) {
                   {isRule && <><button className="btn ghost small" onClick={() => toggleVersions(k.id)}>版</button>{' '}</>}
                   {category === 'learned' ? (
                     <button className="btn danger small" disabled={saver.busy}
-                      onClick={() => { if (confirm('この知識を消しますか')) act(() => api.admin.deleteKnowledge(k.id), '消しました'); }}>消す</button>
+                      onClick={() => { if (confirm('この知識を削除しますか')) act(() => api.admin.deleteKnowledge(k.id), '削除しました'); }}>削除</button>
                   ) : (
                     <button className="btn ghost small" disabled={saver.busy} onClick={() => act(() => api.admin.retireKnowledge(k.id), '廃止しました。1 年は戻せます')}>廃止</button>
                   )}
@@ -824,7 +824,7 @@ export function KnowledgeSettings({ page }: { page: string }) {
                       ? <button className="btn ghost small" disabled={saver.busy} onClick={() => act(() => api.admin.restoreKnowledge(k.id), '戻しました')}>戻す</button>
                       : <span className="muted small">1 年を過ぎました</span>}
                     {category === 'learned' && <>{' '}<button className="btn danger small" disabled={saver.busy}
-                      onClick={() => { if (confirm('この知識を消しますか')) act(() => api.admin.deleteKnowledge(k.id), '消しました'); }}>消す</button></>}
+                      onClick={() => { if (confirm('この知識を削除しますか')) act(() => api.admin.deleteKnowledge(k.id), '削除しました'); }}>削除</button></>}
                   </td>
                 </tr>
               ))}

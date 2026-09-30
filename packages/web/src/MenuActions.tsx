@@ -81,7 +81,7 @@ export function CategoryMenuActions({ category, onRename, onRemove, close }: {
   return (
     <>
       <RowMenuItem onSelect={() => setRenaming(true)}>名前を変える</RowMenuItem>
-      <RowMenuItem onSelect={() => { onRemove(); close(); }}>カテゴリーを消す</RowMenuItem>
+      <RowMenuItem onSelect={() => { onRemove(); close(); }}>カテゴリーを削除</RowMenuItem>
     </>
   );
 }

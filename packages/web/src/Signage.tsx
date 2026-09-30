@@ -409,7 +409,7 @@ function AssetList({ assets, screens, usage, sounds, thumbs, onFiles, onChanged,
                 {sounds.map((x) => <option key={x.id} value={x.id}>音: {x.name}</option>)}
               </select>
             )}
-            <button className="btn ghost small" onClick={() => void api.signage.deleteAsset(a.id).then(onChanged).catch((e) => onError(describeError(e, '消せませんでした')))}>消す</button>
+            <button className="btn ghost small" onClick={() => void api.signage.deleteAsset(a.id).then(onChanged).catch((e) => onError(describeError(e, '削除できませんでした')))}>削除</button>
           </div>
         ))}
       </div>

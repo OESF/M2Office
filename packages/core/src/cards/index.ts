@@ -10,7 +10,7 @@ export type {
 } from './store.js';
 export { CardService, CARD_FILE_MAX_BYTES, MULTIPLE_NOTE, canManage, cardsAccess, dateIn } from './service.js';
 export type { CardServiceDeps, CardUpload, AcceptResult, ContactDetail } from './service.js';
-export { CARD_PROMPT, CARD_MAX_PER_IMAGE, readCard, parseCardReading, orderCorners, type CardReading, type CardSide } from './read.js';
+export { CARD_PROMPT, CARD_MAX_PER_IMAGE, readCard, parseCardReading, orderCorners, orientationPrompt, flowRotation, type CardReading, type CardSide } from './read.js';
 export { resolveContact, judgeSamePerson, mergeFields, type IdentityMatch } from './identity.js';
 export { detectCardKind, splitCardPdf, CARD_BATCH_MAX, CARD_MIME, type CardFileKind, type CardPage } from './formats.js';
 export { toVCard } from './vcard.js';

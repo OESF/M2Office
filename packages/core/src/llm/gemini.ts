@@ -175,7 +175,7 @@ export class OpenAiCompatibleProvider implements LlmProvider {
    */
   async extractFromImage(req: LlmExtractRequest): Promise<LlmResponse> {
     const base = this.baseUrl.replace(/\/openai\/?$/, '');
-    const model = this.resolveModel('standard');
+    const model = this.resolveModel(req.tier ?? 'standard');
     const res = await fetch(`${base}/models/${encodeURIComponent(model)}:generateContent`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-goog-api-key': this.apiKey },

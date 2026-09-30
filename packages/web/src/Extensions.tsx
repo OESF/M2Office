@@ -396,7 +396,7 @@ function SignageFields({ settings, busy, onChanged }: { settings: SignageSetting
       <div className="row wrap">
         {sounds.map((x) => (
           <span key={x.id} className="ext-chip">{x.name}（{(x.durationMs / 1000).toFixed(1)} 秒）
-            <button className="link" onClick={() => void api.admin.deleteSignageSound(x.id).then(() => { reload(); onChanged(); }).catch((e) => fail(e, '消せませんでした'))} aria-label={`${x.name}を消す`}>×</button>
+            <button className="link" onClick={() => void api.admin.deleteSignageSound(x.id).then(() => { reload(); onChanged(); }).catch((e) => fail(e, '削除できませんでした'))} aria-label={`${x.name}を削除`}>×</button>
           </span>
         ))}
         <button className="btn ghost small" onClick={() => soundFile.current?.click()}>会社の音を入れる</button>

@@ -117,7 +117,7 @@ function DebugDrawer({ onClose }: { onClose: () => void }) {
         </div>
         <span className="spacer" />
         <button className="btn ghost small" onClick={copy}>{copied ? '写しました' : '写す'}</button>
-        <button className="btn ghost small" onClick={() => void clear()}>消す</button>
+        <button className="btn ghost small" onClick={() => void clear()}>削除</button>
         <button className="btn ghost small" onClick={onClose} aria-label="閉じる">×</button>
       </div>
       {tab === 'server' && (

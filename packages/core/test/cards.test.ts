@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { PDFDocument } from 'pdf-lib';
 import { EMPTY_CARD_FIELDS, type CardFields } from '@m2office/shared';
 import {
-  dateIn, detectCardKind, judgeSamePerson, mergeFields, orderCorners, parseCardReading, splitCardPdf, toVCard, canManage,
+  dateIn, detectCardKind, flowRotation, judgeSamePerson, mergeFields, orderCorners, parseCardReading, splitCardPdf, toVCard, canManage,
   type LlmProvider,
 } from '../src/index.js';
 import { contactRequest } from '../src/secretary/contacts.js';
@@ -52,6 +52,12 @@ test('読み取り結果: 名刺でない・氏名も会社名も無い・JSON �
   // 文字の上側の向きから、時計回りに回す角度を決める
   const turn = (top: string) => { const x = parseCardReading(`{"isCard": true, "name": "A", "textTop": "${top}"}`); return x.kind === 'card' ? x.cards[0]!.rotation : -1; };
   assert.deepEqual(['up', 'left', 'down', 'right'].map(turn), [0, 90, 180, 270]);
+  // 英数字の行が画像の中で進む向きから決める（文字の上側より確か。第27.5節）。両方あれば行の向きを採る
+  const flow = (f: string) => { const x = parseCardReading(`{"isCard": true, "name": "A", "lineFlow": "${f}", "textTop": "up"}`); return x.kind === 'card' ? x.cards[0]!.rotation : -1; };
+  assert.deepEqual(['left-to-right', 'top-to-bottom', 'right-to-left', 'bottom-to-top'].map(flow), [0, 270, 180, 90]);
+  assert.equal(flowRotation('{"lineFlow": "top-to-bottom"}'), 270);
+  assert.equal(flowRotation('{"lineFlow": "diagonal"}'), null);
+  assert.equal(flowRotation('読めません'), null);
 });
 
 test('1 枚の写真の何枚もの名刺: 名刺ごとに項目・向き・四隅を読み、氏名も会社名も無いものは除き、10 枚を超えたら知らせる（第27.4節）', () => {

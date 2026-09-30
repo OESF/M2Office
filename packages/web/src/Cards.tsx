@@ -153,7 +153,7 @@ function CardListView({ onOpen }: { onOpen: (id: string) => void }) {
             {u.failureReason && <span className="small muted">{u.failureReason}</span>}
           </div>
           {u.status === 'failed' && (
-            <button className="btn ghost small" onClick={() => void api.cards.dismiss(u.id).then(load).catch((e) => setMessage(describeError(e)))}>消す</button>
+            <button className="btn ghost small" onClick={() => void api.cards.dismiss(u.id).then(load).catch((e) => setMessage(describeError(e)))}>削除</button>
           )}
         </div>
       ))}
@@ -199,7 +199,7 @@ function TrashRow({ item: c, onChanged, onError }: { item: CardSummary; onChange
       <button className="btn ghost small" onClick={() => act(() => api.cards.restore(c.id))}>戻す</button>
       <button className="btn ghost small danger" onClick={() => {
         if (window.confirm(`${c.name || 'この名刺'}を、画像ごと消します。元に戻せません。`)) act(() => api.cards.purge(c.id));
-      }}>いま消す</button>
+      }}>完全に削除</button>
     </div>
   );
 }
@@ -361,7 +361,7 @@ function CardDetailView({ id, onBack, onOpen, mailer }: {
               </button>
             )}
             {d.canManage && (
-              <button className="btn ghost small danger" onClick={() => act(() => api.cards.trash(c.id), () => onOpen(null))}>消す</button>
+              <button className="btn ghost small danger" onClick={() => act(() => api.cards.trash(c.id), () => onOpen(null))}>削除</button>
             )}
           </div>
         </div>

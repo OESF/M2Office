@@ -1195,13 +1195,13 @@ function Notifications({ items, onRead }: { items: Notification[]; onRead: () =>
   });
   const remove = (fn: () => Promise<unknown>) => {
     setError(null);
-    void fn().then(() => { setSelected(new Set()); onRead(); }).catch((e) => setError(describeError(e, '消せませんでした')));
+    void fn().then(() => { setSelected(new Set()); onRead(); }).catch((e) => setError(describeError(e, '削除できませんでした')));
   };
   return (
     <>
       <div className="row notice-tools">
         <label className="check small"><input type="checkbox" checked={all} onChange={() => setSelected(all ? new Set() : new Set(items.map((n) => n.id)))} /> すべて選ぶ</label>
-        {selected.size > 0 && <button className="btn small" onClick={() => remove(() => api.deleteNotifications([...selected]))}>選んだ {selected.size} 件を消す</button>}
+        {selected.size > 0 && <button className="btn small" onClick={() => remove(() => api.deleteNotifications([...selected]))}>選んだ {selected.size} 件を削除</button>}
       </div>
       {error && <p className="error">{error}</p>}
       {items.map((n) => (
@@ -1240,7 +1240,7 @@ function NoticeRow({ notice, onRead, selected, onSelect, onDelete }: {
             {new Date(notice.createdAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}
           </span>
         </button>
-        <button className="btn ghost small notice-delete" onClick={onDelete} aria-label={`「${notice.title}」を消す`}>消す</button>
+        <button className="btn ghost small notice-delete" onClick={onDelete} aria-label={`「${notice.title}」を削除`}>削除</button>
       </div>
       {open && (
         <div className="fold-body">
