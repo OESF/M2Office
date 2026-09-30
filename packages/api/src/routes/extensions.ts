@@ -171,7 +171,7 @@ export function extensionsRoute(deps: AppDeps) {
     const { tenant, user } = c.get('ctx');
     const b = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
     const cur = (await deps.repo.getTenantSettings(tenant.id)).hr;
-    const next: HrSettings = { ...cur, office: { ...cur.office }, health: { ...cur.health }, pay: { ...cur.pay }, work: { ...cur.work }, agreement: { ...cur.agreement }, leave: { ...cur.leave }, payroll: { ...cur.payroll }, transfer: { ...cur.transfer } };
+    const next: HrSettings = { ...cur, office: { ...cur.office }, health: { ...cur.health }, pay: { ...cur.pay }, work: { ...cur.work }, agreement: { ...cur.agreement }, leave: { ...cur.leave }, payroll: { ...cur.payroll }, transfer: { ...cur.transfer }, duties: { ...cur.duties }, notice: { ...cur.notice } };
     const obj = (v: unknown) => (v && typeof v === 'object' ? v as Record<string, unknown> : null);
     const text = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : undefined);
     const day = (v: unknown) => (typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 31 ? v : undefined);
@@ -268,6 +268,22 @@ export function extensionsRoute(deps: AppDeps) {
       if (tr['format'] === 'sogo' || tr['format'] === 'kyuyo') t.format = tr['format'];
       if (tr['accountType'] === '普通' || tr['accountType'] === '当座') t.accountType = tr['accountType'];
       next.transfer = t;
+    }
+    // 労務カレンダーに使う決まり（第30.19.1節）と、労働条件通知書の会社の定め（第30.5.3節）
+    const du = obj(b['duties']);
+    if (du) {
+      const d = { ...next.duties };
+      if (typeof du['withholdingSpecial'] === 'boolean') d.withholdingSpecial = du['withholdingSpecial'];
+      if (typeof du['residentSpecial'] === 'boolean') d.residentSpecial = du['residentSpecial'];
+      if (du['healthCheckMonth'] === null) d.healthCheckMonth = null;
+      else if (Number.isInteger(du['healthCheckMonth']) && Number(du['healthCheckMonth']) >= 1 && Number(du['healthCheckMonth']) <= 12) d.healthCheckMonth = Number(du['healthCheckMonth']);
+      next.duties = d;
+    }
+    const no = obj(b['notice']);
+    if (no) {
+      const n = { ...next.notice };
+      for (const k of ['raise', 'bonus', 'severance', 'retirement', 'consultation', 'other'] as const) if (text(no[k], 1000) !== undefined) n[k] = text(no[k], 1000)!;
+      next.notice = n;
     }
     await deps.repo.saveTenantSettings(tenant.id, 'hr', next, user.id);
     await deps.repo.appendAudit({

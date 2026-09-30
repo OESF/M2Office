@@ -12,6 +12,7 @@ import type { ResearchProvider } from '../research/provider.js';
 import type { CardToolContext } from '../cards/tools.js';
 import type { NoticeService } from '../notices/service.js';
 import type { InventoryToolContext } from '../inventory/tools.js';
+import type { HrToolContext } from '../hr/tools.js';
 
 /** ツール呼び出しの文脈。テナント境界と実行の同一性を持ち回る。 */
 export interface ToolContext {
@@ -66,6 +67,12 @@ export interface ToolContext {
    * @remarks 無ければ在庫の道具は「使えない」と返す
    */
   inventory?: InventoryToolContext;
+  /**
+   * 人事・給与（内蔵の拡張。仕様書 第30章）。人事区画に入っているかは、道具が呼ぶたびに確かめる。
+   *
+   * @remarks 無ければ人事・給与の道具は「使えない」と返す
+   */
+  hr?: HrToolContext;
 }
 
 /** 引数 1 つの定義（JSON Schema の一部）。 */

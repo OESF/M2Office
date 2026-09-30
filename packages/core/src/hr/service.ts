@@ -1,5 +1,5 @@
 /**
- * @file 人事の台帳の処理（仕様書 第30.5節・第30.5.2節・第30.21節）。段 1（土台）の従業員・雇用条件・入退社の手続き・取り込み・労働者名簿。
+ * @file 人事の台帳の処理（仕様書 第30.5節・第30.5.2節・第30.5.3節・第30.21節）。従業員・雇用条件・入退社の手続き・取り込み・労働者名簿・労働条件通知書。
  *
  * 他人の台帳は人事区画の人だけが扱い、**参照だけでも監査ログに残す**（第30.21節）。監査ログには値を入れず、変えた項目の名前だけを入れる。
  * 手続きの期限は決まったプログラムで作る（procedures.ts）。取り込みの列の見出しだけを推論で読む（ADR-0028）。
@@ -9,8 +9,10 @@ import { randomUUID } from 'node:crypto';
 import {
   HR_COMPARTMENT, HR_EMPLOYMENTS, HR_CATEGORIES, HR_WAGE_TYPES, HR_EXTENSION_ID,
   type AuditEvent, type HrAllowance, type HrCategory, type HrEmployee, type HrEmployeeView, type HrEmployment,
-  type HrSettings, type HrTask, type HrTerms, type HrWageType,
+  type HrNoticeSettings, type HrSettings, type HrTask, type HrTerms, type HrWageType,
 } from '@m2office/shared';
+import { buildTermsNotice, renderTermsNoticePdf, type TermsNoticeDoc } from './terms-notice.js';
+import { termsOn } from './attendance-service.js';
 import type { Repository } from '../repository/types.js';
 import type { LlmProvider } from '../llm/provider.js';
 import { aiAvailable } from '../llm/unconfigured.js';
@@ -47,6 +49,8 @@ export interface TermsInput {
   contractStart?: string | null;
   contractEnd?: string | null;
   renewal?: string;
+  /** 更新の上限（通算の期間か回数。2024 年 4 月の改正の明示事項）。 */
+  renewalLimit?: string;
   probationUntil?: string | null;
   weeklyHours?: number | null;
   weeklyDays?: number | null;
@@ -211,6 +215,42 @@ export class HrService {
     return { employee, terms, tasks };
   }
 
+  /**
+   * 労働条件通知書の中身（第30.5.3節）。`notice` を渡せば、その文を会社の定めとして残し、次からの既定にする。
+   *
+   * @param on 雇用条件を選ぶ日（無ければ入社日か今日の遅いほう）
+   * @returns 中身。従業員か雇用条件が無ければ `null`
+   */
+  async termsNotice(tenantId: string, userId: string, id: string, notice?: Partial<HrNoticeSettings>, on?: string): Promise<TermsNoticeDoc | null> {
+    const employee = await this.deps.store.getEmployee(tenantId, id);
+    if (!employee) return null;
+    const today = jstToday();
+    const day = on && /^\d{4}-\d{2}-\d{2}$/.test(on) ? on : employee.hiredOn && employee.hiredOn > today ? employee.hiredOn : today;
+    const terms = termsOn(await this.deps.store.listTerms(tenantId, id), day);
+    if (!terms) return null;
+    const settings = await this.settings(tenantId);
+    let texts = settings.notice;
+    if (notice) {
+      const clean: HrNoticeSettings = { ...texts };
+      for (const k of ['raise', 'bonus', 'severance', 'retirement', 'consultation', 'other'] as const) {
+        if (notice[k] !== undefined) clean[k] = String(notice[k] ?? '').trim().slice(0, 1000);
+      }
+      if (JSON.stringify(clean) !== JSON.stringify(texts)) await this.deps.repo.saveTenantSettings(tenantId, 'hr', { ...settings, notice: clean }, userId);
+      texts = clean;
+    }
+    const tenant = await this.deps.repo.findTenantById(tenantId);
+    return buildTermsNotice({ employee, terms, settings, notice: texts, company: settings.office.name || tenant?.name || '', issuedOn: today });
+  }
+
+  /** 労働条件通知書の PDF（作ったことを監査ログに残す）。 */
+  async termsNoticePdf(tenantId: string, userId: string, id: string, notice?: Partial<HrNoticeSettings>, on?: string): Promise<{ bytes: Uint8Array; doc: TermsNoticeDoc } | null> {
+    const doc = await this.termsNotice(tenantId, userId, id, notice, on);
+    if (!doc) return null;
+    const bytes = await renderTermsNoticePdf(doc);
+    await this.audit(tenantId, userId, 'hr.notice', 'hr_employee', id, { missing: doc.missing.length });
+    return { bytes, doc };
+  }
+
   /** 済んでいない手続き（期限の近い順）。 */
   async openTasks(tenantId: string): Promise<HrTask[]> {
     return this.deps.store.listTasks(tenantId, { openOnly: true });
@@ -263,7 +303,7 @@ export class HrService {
   /** 雇用条件の入力を確かめる。 */
   private toTerms(input: TermsInput, prev: HrTerms | null, fallbackOn: string): Omit<HrTerms, 'id' | 'employeeId' | 'createdAt'> | { error: string } {
     const base = prev ?? {
-      effectiveOn: fallbackOn, contractStart: null, contractEnd: null, renewal: '', probationUntil: null, weeklyHours: null, weeklyDays: null,
+      effectiveOn: fallbackOn, contractStart: null, contractEnd: null, renewal: '', renewalLimit: '', probationUntil: null, weeklyHours: null, weeklyDays: null,
       startTime: '', endTime: '', breakMinutes: null, wageType: 'monthly' as HrWageType, wageAmount: null, allowances: [], workplace: '',
       work: '', workplaceScope: '', workScope: '', socialInsurance: false, employmentInsurance: false,
     };
@@ -288,7 +328,7 @@ export class HrService {
       if (!HR_WAGE_TYPES.some((x) => x.id === input.wageType)) return { error: '賃金の定めの値が違います' };
       out.wageType = input.wageType;
     }
-    for (const k of ['renewal', 'startTime', 'endTime', 'workplace', 'work', 'workplaceScope', 'workScope'] as const) {
+    for (const k of ['renewal', 'renewalLimit', 'startTime', 'endTime', 'workplace', 'work', 'workplaceScope', 'workScope'] as const) {
       if (input[k] !== undefined) out[k] = String(input[k] ?? '').trim().slice(0, 500);
     }
     if (input.allowances !== undefined) {

@@ -23,6 +23,10 @@ export {
 export { leaveBalance, dueGrantDates, grantDays, addMonths, LEAVE_NORMAL, LEAVE_PROPORTIONAL, LEAVE_OBLIGATION_DAYS } from './leave.js';
 export { japaneseHolidays, isJapaneseHoliday, equinoxDays } from './holidays.js';
 export { PostgresPayrollStore, type PayrollStore, type SlipWithRun } from './payroll-store.js';
+export { buildTermsNotice, renderTermsNoticePdf, type NoticeItem, type TermsNoticeDoc, type TermsNoticeInput } from './terms-notice.js';
+export { buildDeadlines, nextBusinessDay, isClosedDay, type CalendarInput, type MonthPayment } from './calendar.js';
+export { LaborCalendar, type LaborCalendarDeps } from './calendar-service.js';
+export { HR_TOOLS, hrDeadlines, type HrToolContext } from './tools.js';
 export { PayrollService, type PayrollServiceDeps, type MySlipSummary, type NoticeApplyResult } from './payroll-service.js';
 export { reviewRun, changedLines, explainDiff, type ReviewInput } from './payroll-review.js';
 export { buildZenginFile, toZenginKana, type ZenginClient, type ZenginPayee, type ZenginProblem } from './zengin.js';

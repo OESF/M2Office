@@ -378,6 +378,33 @@ export function hrRoute(deps: AppDeps) {
     return 'error' in r ? c.json(r, 400) : c.json(r, 201);
   });
 
+  // ---- 労働条件通知書と労務カレンダー（第30.5.3節・第30.19.1節） ----
+
+  /** 労働条件通知書の中身と足りない事項（作る前に見る）。`on` で雇用条件を選ぶ日。 */
+  app.get('/employees/:id/terms-notice', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const doc = await service.termsNotice(tenant.id, user.id, c.req.param('id'), undefined, c.req.query('on'));
+    return doc ? c.json({ notice: doc, texts: (await service.settings(tenant.id)).notice }) : c.json({ error: '従業員か雇用条件が見つかりません' }, 404);
+  });
+
+  /** 労働条件通知書の PDF。本文 `notice`（会社の定めの文。次からの既定として残す）・`on`。 */
+  app.post('/employees/:id/terms-notice', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const b = await c.req.json<{ notice?: Record<string, string>; on?: string }>().catch(() => ({} as { notice?: Record<string, string>; on?: string }));
+    const r = await service.termsNoticePdf(tenant.id, user.id, c.req.param('id'), b.notice, b.on);
+    if (!r) return c.json({ error: '従業員か雇用条件が見つかりません' }, 404);
+    c.header('Content-Type', 'application/pdf');
+    c.header('Content-Disposition', 'attachment; filename="terms-notice.pdf"');
+    return c.body(r.bytes as unknown as ArrayBuffer);
+  });
+
+  /** 労務の期限（今日から `days` 日。既定 90。過ぎて済んでいない手続きを含む）。 */
+  app.get('/calendar', async (c) => {
+    const { tenant } = c.get('ctx');
+    const days = Math.min(366, Math.max(1, Number(c.req.query('days')) || 90));
+    return c.json({ items: await deps.hr.calendar.list(tenant.id, days) });
+  });
+
   /** 台帳に結び付けられる利用者（名前とメールアドレスだけ）。 */
   app.get('/users', async (c) => {
     const { tenant } = c.get('ctx');

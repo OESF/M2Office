@@ -43,6 +43,7 @@
 | `gmail.list` | read | `gmail.readonly`（制限付き） | 受信トレイ（メイン）のメールの一覧を見ます |
 | `gmail.search` | read | `gmail.readonly`（制限付き） | 条件に合うメールを探します。本文は読みません |
 | `gmail.unread` | read | `gmail.readonly`（制限付き） | 受信トレイ（メイン）の未読のメールを見ます |
+| `hr.deadlines` | read | — | 源泉所得税と住民税の納付、年度更新、算定基礎届、入退社の手続き、契約の満了などの近い期限を調べます。人事の担当者だけが使えます |
 | `image.read_text` | read | — | 写真やスキャンした画像から文字を読み取ります。読み取りは確実ではないため、内容の確認が要ります |
 | `inventory.forecast` | read | — | 在庫の使う速さから、あと何日で無くなるか・残りわずか・使用期限の近いものと、発注の案を出します。見るだけです |
 | `inventory.history` | read | — | 入庫・使用・移動・調整の記録を、品目と期間で調べます。見るだけです |
@@ -110,6 +111,7 @@
 | `gmail.list` | `since`: この時刻以降（ISO 形式。任意）、`limit`: 件数（既定 20） |
 | `gmail.search` | `query`（必須）: 検索の条件、`limit`: 件数（既定 20） |
 | `gmail.unread` | `since`: この日時以降の未読だけ（ISO 形式。任意）、`limit`: 一覧の件数（既定 50、上限 50） |
+| `hr.deadlines` | `days`: 何日先までか（既定 7） |
 | `image.read_text` | `fileId`（必須）: ファイルの ID |
 | `inventory.forecast` | `query`: 品目の名前の一部（省けば全品目）、`all`: 足りている品目も返すか |
 | `inventory.history` | `query`: 品目の名前・コード（省けば全品目）、`from`: 期間の始め（YYYY-MM-DD）、`to`: 期間の終わり（YYYY-MM-DD。この日を含む）、`kind`: 記録の種類（in・out・transfer・adjust） |

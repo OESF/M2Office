@@ -8,7 +8,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import {
   HR_CATEGORIES, HR_EMPLOYMENTS, HR_WAGE_TYPES,
-  type HrEmployee, type HrEmployeeView, type HrPayrollProfile, type HrSettings, type HrTask, type HrTerms, type PayCheck, type PaySlip, type PayTrialCompare,
+  type HrDeadline, type HrEmployee, type HrEmployeeView, type HrNoticeSettings, type HrPayrollProfile, type HrSettings, type HrTask, type HrTerms, type PayCheck, type PaySlip, type PayTrialCompare,
 } from '@m2office/shared';
 import { api, describeError, type HrImportResult } from './api.js';
 
@@ -25,16 +25,17 @@ const wage = (t: Pick<HrTerms, 'wageType' | 'wageAmount'> | null) => (t && t.wag
  * @param onOpen 従業員を開く・一覧へ戻る
  */
 export function Hr({ employeeId, onOpen }: { employeeId: string | null; onOpen: (id: string | null) => void }) {
-  const [tab, setTab] = useState<'ledger' | 'attendance' | 'leave' | 'payroll'>('ledger');
+  const [tab, setTab] = useState<'ledger' | 'calendar' | 'attendance' | 'leave' | 'payroll'>('ledger');
   if (employeeId) return <EmployeeDetail id={employeeId} onBack={() => onOpen(null)} />;
   return (
     <>
       <div className="hr-tabs" role="tablist">
-        {([['ledger', '台帳'], ['attendance', '勤怠'], ['leave', '有給'], ['payroll', '給与']] as const).map(([k, l]) => (
+        {([['ledger', '台帳'], ['calendar', '期限'], ['attendance', '勤怠'], ['leave', '有給'], ['payroll', '給与']] as const).map(([k, l]) => (
           <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>
         ))}
       </div>
       {tab === 'ledger' && <EmployeeList onOpen={onOpen} />}
+      {tab === 'calendar' && <CalendarTab onOpen={onOpen} />}
       {tab === 'attendance' && <AttendanceTab />}
       {tab === 'leave' && <LeaveTab />}
       {tab === 'payroll' && <PayrollTab onOpen={onOpen} />}
@@ -577,7 +578,8 @@ function EmployeeList({ onOpen }: { onOpen: (id: string) => void }) {
 function TermsFields({ t, set }: { t: Partial<HrTerms>; set: (p: Partial<HrTerms>) => void }) {
   const num = (v: string) => (v === '' ? null : Number(v));
   return (
-    <div className="row wrap">
+    <>
+      <div className="row wrap">
       <select value={t.wageType ?? 'monthly'} onChange={(e) => set({ wageType: e.target.value as HrTerms['wageType'] })} aria-label="賃金の定め">
         {HR_WAGE_TYPES.map((w) => <option key={w.id} value={w.id}>{w.label}</option>)}
       </select>
@@ -588,7 +590,25 @@ function TermsFields({ t, set }: { t: Partial<HrTerms>; set: (p: Partial<HrTerms
       <input className="short" placeholder="就業場所" value={t.workplace ?? ''} onChange={(e) => set({ workplace: e.target.value })} aria-label="就業場所" />
       <label className="check"><input type="checkbox" checked={!!t.socialInsurance} onChange={(e) => set({ socialInsurance: e.target.checked })} /> 社会保険</label>
       <label className="check"><input type="checkbox" checked={!!t.employmentInsurance} onChange={(e) => set({ employmentInsurance: e.target.checked })} /> 雇用保険</label>
-    </div>
+      </div>
+      <div className="row wrap">
+        <label className="small">始業 <input type="time" value={t.startTime ?? ''} onChange={(e) => set({ startTime: e.target.value })} /></label>
+        <label className="small">終業 <input type="time" value={t.endTime ?? ''} onChange={(e) => set({ endTime: e.target.value })} /></label>
+        <input className="num-input" type="number" min={0} placeholder="休憩（分）" value={t.breakMinutes ?? ''} onChange={(e) => set({ breakMinutes: num(e.target.value) })} aria-label="休憩（分）" />
+        <input className="short" placeholder="就業場所の変更の範囲" value={t.workplaceScope ?? ''} onChange={(e) => set({ workplaceScope: e.target.value })} aria-label="就業場所の変更の範囲" />
+        <input className="short" placeholder="業務の変更の範囲" value={t.workScope ?? ''} onChange={(e) => set({ workScope: e.target.value })} aria-label="業務の変更の範囲" />
+      </div>
+      <div className="row wrap">
+        <label className="small">契約の始まり <input type="date" value={t.contractStart ?? ''} onChange={(e) => set({ contractStart: e.target.value || null })} /></label>
+        <label className="small">契約の終わり <input type="date" value={t.contractEnd ?? ''} onChange={(e) => set({ contractEnd: e.target.value || null })} /></label>
+        {t.contractEnd && (
+          <>
+            <input className="short" placeholder="更新の有無と基準" value={t.renewal ?? ''} onChange={(e) => set({ renewal: e.target.value })} aria-label="更新の有無と基準" />
+            <input className="short" placeholder="更新の上限" value={t.renewalLimit ?? ''} onChange={(e) => set({ renewalLimit: e.target.value })} aria-label="更新の上限" />
+          </>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -695,6 +715,8 @@ function EmployeeDetail({ id, onBack }: { id: string; onBack: () => void }) {
                 effectiveOn: newTerms.effectiveOn, wageType: newTerms.wageType, wageAmount: newTerms.wageAmount, weeklyHours: newTerms.weeklyHours,
                 weeklyDays: newTerms.weeklyDays, work: newTerms.work, workplace: newTerms.workplace,
                 socialInsurance: newTerms.socialInsurance, employmentInsurance: newTerms.employmentInsurance,
+                startTime: newTerms.startTime, endTime: newTerms.endTime, breakMinutes: newTerms.breakMinutes, workplaceScope: newTerms.workplaceScope,
+                workScope: newTerms.workScope, contractStart: newTerms.contractStart, contractEnd: newTerms.contractEnd, renewal: newTerms.renewal, renewalLimit: newTerms.renewalLimit,
               }), '足せませんでした', () => setNewTerms(null))}>足す</button>
             </div>
           </>
@@ -715,6 +737,8 @@ function EmployeeDetail({ id, onBack }: { id: string; onBack: () => void }) {
         </table>
       </div>
 
+      <TermsNotice employeeId={id} name={d.employee.name} />
+
       <PayrollProfile employeeId={id} />
 
       <div className="card hr-panel">
@@ -733,6 +757,73 @@ function EmployeeDetail({ id, onBack }: { id: string; onBack: () => void }) {
             <button className="btn small" onClick={() => act(() => api.hr.leave(id, leave.leftOn, leave.reason), '記録できませんでした', () => setLeave(null))}>記録する</button>
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+/** 労務の期限（仕様書 第30.19.1節）。過ぎて済んでいない手続きを先頭に、今日から 90 日を日付の順に出す。 */
+function CalendarTab({ onOpen }: { onOpen: (id: string) => void }) {
+  const [items, setItems] = useState<HrDeadline[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => { api.hr.calendar(90).then((r) => setItems(r.items)).catch((e) => setError(describeError(e, '読み込めませんでした'))); }, []);
+  if (!items) return <p className="muted">{error ?? '読み込んでいます…'}</p>;
+  const WEEK = '日月火水木金土';
+  const day = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}（${WEEK[new Date(`${d}T00:00:00Z`).getUTCDay()]}）`;
+  const left = (d: string) => Math.round((Date.parse(`${d}T00:00:00Z`) - Date.parse(`${today()}T00:00:00Z`)) / 86_400_000);
+  return (
+    <div className="hr">
+      {items.length === 0 && <p className="muted small">90 日以内の期限はありません</p>}
+      <table className="table hr-table hr-calendar">
+        <tbody>
+          {items.map((d, i) => (
+            <tr key={`${d.kind}-${d.date}-${i}`} className={d.overdue ? 'hr-overdue' : ''}>
+              <td className="nowrap">
+                {d.from ? `${day(d.from)}〜` : ''}{day(d.date)}
+                {d.overdue ? <div><span className="badge warn">過ぎています</span></div> : left(d.date) <= 7 ? <div><span className="badge warn">あと {left(d.date)} 日</span></div> : null}
+              </td>
+              <td>
+                {d.employeeId ? <button className="link" onClick={() => onOpen(d.employeeId!)}>{d.title}</button> : d.title}
+                <div className="small muted">{d.detail}</div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** 労働条件通知書（仕様書 第30.5.3節）。足りない事項を示し、会社の定めを書いて PDF を作る。 */
+function TermsNotice({ employeeId, name }: { employeeId: string; name: string }) {
+  const [data, setData] = useState<Awaited<ReturnType<typeof api.hr.termsNotice>> | null>(null);
+  const [texts, setTexts] = useState<HrNoticeSettings | null>(null);
+  const [open, setOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(() => {
+    api.hr.termsNotice(employeeId).then((r) => { setData(r); setTexts(r.texts); }).catch((e) => setError(describeError(e, '読み込めませんでした')));
+  }, [employeeId]);
+  useEffect(() => { if (open) load(); }, [open, load]);
+  const FIELDS: [keyof HrNoticeSettings, string][] = [['raise', '昇給'], ['bonus', '賞与'], ['severance', '退職手当'], ['retirement', '退職に関する事項（解雇の事由を含む）'], ['consultation', '相談の窓口'], ['other', 'その他']];
+  return (
+    <div className="card hr-panel">
+      <div className="row"><strong className="grow">労働条件通知書</strong>
+        <button className="btn ghost small" onClick={() => setOpen(!open)}>{open ? '閉じる' : '作る'}</button>
+      </div>
+      {open && error && <p className="error">{error}</p>}
+      {open && data && texts && (
+        <>
+          {data.notice.missing.length > 0 && <p className="small">足りない事項（空欄で出ます）: {data.notice.missing.join('、')}</p>}
+          {data.notice.notes.map((n) => <p key={n} className="small error">{n}</p>)}
+          {FIELDS.map(([k, l]) => (
+            <label key={k} className="small hr-notice-field">{l}
+              <textarea rows={k === 'retirement' ? 3 : 1} value={texts[k]} onChange={(e) => setTexts({ ...texts, [k]: e.target.value })} />
+            </label>
+          ))}
+          <div className="row">
+            <button className="btn small" onClick={() => void api.hr.termsNoticePdf(employeeId, texts, name).then(load).catch((e) => setError(describeError(e, '作れませんでした')))}>PDF を作る</button>
+          </div>
+        </>
       )}
     </div>
   );

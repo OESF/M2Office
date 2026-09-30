@@ -15,7 +15,7 @@ import {
   TenantAiResolver, platformAi, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID,
   defaultGeminiModels, ConnectionCredentials, type ConnectionAuthProvider,
   CardService, PostgresContactStore, cardsAccess, type ContactStore, NoticeService, PostgresNoticeStore,
-  InventoryService, InventoryWatch, InventoryBookings, PostgresInventoryStore, inventoryAccess, HrService, PostgresHrStore, hrAccess, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK,
+  InventoryService, InventoryWatch, InventoryBookings, PostgresInventoryStore, inventoryAccess, HrService, PostgresHrStore, hrAccess, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar,
   type SecretBox, type GeminiModels,
   type FileStore, type TenantExtensions, type HelpArticle, type LlmProvider, type Logger, type Repository, type WorkspaceConnector,
 } from '@m2office/core';
@@ -108,6 +108,8 @@ export interface AppDeps {
     attendance: AttendanceService;
     /** 給与の計算（段 3。第30.10.1節）。 */
     payroll: PayrollService;
+    /** 労務カレンダー（第30.19.1節）。 */
+    calendar: LaborCalendar;
     access(tenantId: string, userId: string): Promise<HrSettings | null>;
   };
 }
@@ -199,8 +201,21 @@ export function buildDeps(): AppDeps {
   });
   inventoryWatch = new InventoryWatch({ repo, service: inventoryService, bookings: inventoryBookings, logger: log });
   const inventory = { service: inventoryService, bookings: inventoryBookings, access: inventoryAccess(repo) };
+  // 人事・給与（第30章）。秘書が本人の打刻と有給に答え、朝のブリーフが労務の期限を読むため、業務と秘書より先に作る
+  const hrService = new HrService({
+    store: new PostgresHrStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+    repo, llm: (tenantId) => ai.llmFor(tenantId),
+  });
+  const attendance = new AttendanceService({
+    store: new PostgresAttendanceStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+    hrStore: hrService.deps.store, repo,
+  });
+  const payrollStore = new PostgresPayrollStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
+  // 労務カレンダー（第30.19.1節）
+  const laborCalendar = new LaborCalendar({ hrStore: hrService.deps.store, payrollStore, attendance, repo });
   const engine = new RunEngine({
     repo, llm, registry, connector, files, logger: log, research, cards, notices, inventory,
+    hr: { calendar: laborCalendar, access: hrAccess(repo) },
     llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId),
     resolveDefinition: async (id, version, tenantId) => (await tenantView(tenantId)).resolve(id, version),
     registryFor: async (tenantId) => (await tenantView(tenantId)).registry,
@@ -210,18 +225,9 @@ export function buildDeps(): AppDeps {
   });
   // デバッグモード（仕様書 第20.4.1節「デバッグモード」）。本番で有効にすると起動を断る
   const debug = debugEnabled() ? new DebugLog() : null;
-  // 人事・給与（第30章）。秘書が本人の打刻と有給に答えるため、秘書より先に作る
-  const hrService = new HrService({
-    store: new PostgresHrStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
-    repo, llm: (tenantId) => ai.llmFor(tenantId),
-  });
-  const attendance = new AttendanceService({
-    store: new PostgresAttendanceStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
-    hrStore: hrService.deps.store, repo,
-  });
   // 給与（第30.10節）。秘書が本人の明細に答えるため、秘書より先に作る。監修前の表での確定はデバッグモードだけ（ADR-0053）
   const payroll = new PayrollService({
-    store: new PostgresPayrollStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+    store: payrollStore,
     hrStore: hrService.deps.store, attendance, repo, law: LAW_BOOK, llm: (tenantId) => ai.llmFor(tenantId), allowUnverified: debug !== null,
   });
   const help = new HelpCatalog(loadHelpArticles(helpDir(), log), OFFICIAL_AGENTS, registry);
@@ -301,7 +307,7 @@ export function buildDeps(): AppDeps {
     // 人事・給与（第30章）。台帳は人事区画の人だけが扱い、勤怠と有給は本人も扱う
     hr: {
       service: hrService, attendance, access: hrAccess(repo),
-      payroll,
+      payroll, calendar: laborCalendar,
     },
   };
 }

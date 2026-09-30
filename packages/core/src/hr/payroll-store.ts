@@ -50,6 +50,8 @@ export interface PayrollStore {
   listYearSlips(tenantId: string, year: number): Promise<SlipWithRun[]>;
   /** 明細を画面で受け取る同意（`null` で取り消し）。 */
   setConsent(tenantId: string, employeeId: string, at: string | null): Promise<void>;
+  /** 確定した月の給与を、支払った月ごとに集計する（労務カレンダーの納付に使う）。 */
+  monthlyTotals(tenantId: string, fromMonth: string): Promise<{ month: string; people: number; gross: number; tax: number; resident: number }[]>;
 }
 
 interface ProfileRow { employee_id: string; tax_column: 'ko' | 'otsu'; dependents: number; resident_tax: HrPayrollProfile['residentTax']; commute: HrPayrollProfile['commute']; bank: HrPayrollProfile['bank']; payslip_consent_at: unknown }
@@ -235,6 +237,17 @@ export class PostgresPayrollStore implements PayrollStore {
     const rows = await this.q<SlipRow>(tenantId, `${SLIP_RUN_SELECT}
       where s.tenant_id = $1 and r.kind = 'monthly' and r.status in ('confirmed', 'paid') and r.pay_month like $2 order by nullif(e.kana, ''), e.name, r.pay_month`, [tenantId, `${year}-%`]);
     return rows.map(toSlipWithRun);
+  }
+
+  async monthlyTotals(tenantId: string, fromMonth: string): Promise<{ month: string; people: number; gross: number; tax: number; resident: number }[]> {
+    const rows = await this.q<{ month: string; people: string; gross: string; tax: string; resident: string }>(tenantId,
+      `select to_char(r.pay_date, 'YYYY-MM') as month, count(*) as people, sum(s.gross) as gross,
+         coalesce(sum((select sum((l->>'amount')::int) from jsonb_array_elements(s.lines) l where l->>'code' = 'income-tax')), 0) as tax,
+         coalesce(sum((select sum((l->>'amount')::int) from jsonb_array_elements(s.lines) l where l->>'code' = 'resident-tax')), 0) as resident
+       from pay_slips s join pay_runs r on r.id = s.run_id
+       where s.tenant_id = $1 and r.status in ('confirmed', 'paid') and r.kind <> 'trial' and to_char(r.pay_date, 'YYYY-MM') >= $2
+       group by 1 order by 1`, [tenantId, fromMonth]);
+    return rows.map((r) => ({ month: r.month, people: Number(r.people), gross: Number(r.gross), tax: Number(r.tax), resident: Number(r.resident) }));
   }
 
   async setConsent(tenantId: string, employeeId: string, at: string | null): Promise<void> {

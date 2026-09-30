@@ -18,6 +18,7 @@ import { CARD_TOOLS } from '../cards/tools.js';
 import { BRIEF_TOOLS } from '../brief/tools.js';
 import { NOTICE_TOOLS } from '../notices/tools.js';
 import { INVENTORY_TOOLS } from '../inventory/tools.js';
+import { HR_TOOLS } from '../hr/tools.js';
 import { rewriteNote } from '../knowledge/search.js';
 import { approvedArtifact, jstDate } from './approved-artifact.js';
 
@@ -184,4 +185,5 @@ export const BUILTIN_TOOLS: Tool[] = [
   ...NOTICE_TOOLS,
   // 在庫管理（内蔵の拡張。第29.15節）。会社が使っていて、依頼者が利用範囲の中のときだけ働く
   ...INVENTORY_TOOLS,
+  ...HR_TOOLS,
 ];

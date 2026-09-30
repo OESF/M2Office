@@ -1442,6 +1442,12 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .pay-slip { padding: 6px 0; }
 .pay-slip td.num { text-align: right; white-space: nowrap; }
 .hr input.tiny { width: 6em; flex: 0 1 6em; }
+.hr-notice-field { display: flex; flex-direction: column; gap: 2px; margin: 4px 0; }
+.hr-notice-field textarea { width: 100%; font: inherit; }
+.hr-table tr.hr-overdue td { background: var(--warn-soft); }
+.hr-table td.nowrap { white-space: nowrap; }
+.hr-calendar { table-layout: auto; }
+.hr-calendar td.nowrap { width: 1%; }
 .pay-checks { border: 1px solid var(--line); border-radius: 4px; padding: 6px 10px; margin: 6px 0; }
 .pay-checks.stop { border-color: var(--danger, #c0392b); }
 .pay-checks ul { margin: 4px 0 0; padding-left: 1.2em; }

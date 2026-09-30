@@ -3722,6 +3722,20 @@ console.log('\n■ 61. 人事・給与（内蔵の拡張。第30章、段 1: 台
         ? ok('本番の環境では、監修前の法令の表で計算した回は確定できない') : ng('監修前でも確定できた', JSON.stringify(conf.body));
     }
 
+    // 労働条件通知書（第30.5.3節）: 足りない事項を挙げ、書いた会社の定めを次からの既定にして PDF を出す
+    const { body: nt } = await call('a', `/v1/hr/employees/${staffId}/terms-notice`);
+    const ntPdf = await raw(`/v1/hr/employees/${staffId}/terms-notice`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ notice: { retirement: '定年 60 歳（確認用）' } }) });
+    const ntHead = new TextDecoder().decode(new Uint8Array(await ntPdf.arrayBuffer()).slice(0, 5));
+    const { body: nt2 } = await call('a', `/v1/hr/employees/${staffId}/terms-notice`);
+    (nt.notice?.missing ?? []).includes('就業の場所の変更の範囲') && (nt.notice?.missing ?? []).includes('退職に関する事項（解雇の事由を含む）') && ntPdf.status === 200 && ntHead === '%PDF-'
+      && nt2.texts?.retirement === '定年 60 歳（確認用）' && !(nt2.notice?.missing ?? []).includes('退職に関する事項（解雇の事由を含む）')
+      ? ok('労働条件通知書は足りない明示事項を挙げ、書いた会社の定めを次からの既定にして PDF で出す') : ng('労働条件通知書が合わない', JSON.stringify({ nt: nt.notice?.missing, status: ntPdf.status, nt2: nt2.texts }));
+    // 労務カレンダー（第30.19.1節）: 人事区画の人にだけ、決まったプログラムの期限を出す
+    const cal = await call('a', '/v1/hr/calendar?days=60');
+    const calMember = await call('a', '/v1/hr/calendar', {}, 'member');
+    (cal.body?.items ?? []).some((x) => x.kind === 'withholding' && /^\d{4}-\d{2}-\d{2}$/.test(x.date)) && calMember.status === 403
+      ? ok('労務カレンダーは源泉所得税の納付などの期限を出し、人事区画の外の人には見せない') : ng('労務カレンダーが合わない', JSON.stringify({ cal: cal.body, member: calMember.status }).slice(0, 300));
+
     // 試しの計算: 今の方法の表と並べて差を出す（確定できず、本人にも出さない）
     const trialForm = new FormData();
     trialForm.append('month', '2026-08');

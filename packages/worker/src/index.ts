@@ -11,7 +11,7 @@
 
 import {
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
-  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, InventoryService, InventoryWatch, InventoryBookings, PostgresInventoryStore, inventoryAccess, AttendanceService, PostgresAttendanceStore, PostgresHrStore, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention,
+  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, InventoryService, InventoryWatch, InventoryBookings, PostgresInventoryStore, inventoryAccess, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, LaborCalendar, hrAccess, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention,
   NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv,
   defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials,
@@ -93,15 +93,22 @@ const inventory = new InventoryService({
 const inventoryBookings = new InventoryBookings({ store: inventory.store, service: inventory, repo, llm: (tenantId) => ai.llmFor(tenantId) });
 inventoryWatch = new InventoryWatch({ repo, service: inventory, bookings: inventoryBookings, logger: log });
 // 人事・給与の勤怠と有給（第30.7.1節）。毎朝、付与の日が来た分を作り、有給の取得義務を知らせる
+const hrStore = new PostgresHrStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
 const attendance = new AttendanceService({
   store: new PostgresAttendanceStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
-  hrStore: new PostgresHrStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+  hrStore,
   repo,
+});
+// 労務カレンダー（第30.19.1節）。毎朝、期限の 14 日前と 3 日前に人事区画の人へ知らせ、朝のブリーフが読む
+const laborCalendar = new LaborCalendar({
+  hrStore, attendance, repo,
+  payrollStore: new PostgresPayrollStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
 });
 const engine = new RunEngine({
   repo, llm, registry, connector, files, resolveDefinition, isAvailable, logger: log, research, notices,
   cards: { store: contactStore, service: cards, access: cardsAccess(repo) },
   inventory: { service: inventory, bookings: inventoryBookings, access: inventoryAccess(repo) },
+  hr: { calendar: laborCalendar, access: hrAccess(repo) },
   llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId),
   registryFor: async (tenantId) => (await hub.forTenant(tenantId)).registry,
   // 止めた実行に後から書き込まれた中身も消す（仕様書 第6.5.2.1節）
@@ -328,7 +335,7 @@ while (running) {
     }
   }
 
-  // 有給の付与と取得義務の見回り（第30.7.1節）。会社ごとの失敗はほかの会社を止めない
+  // 有給の付与と取得義務の見回り（第30.7.1節）と労務の期限の知らせ（第30.19.1節）。会社ごとの失敗はほかの会社を止めない
   {
     const jst = new Date(Date.now() + 9 * 3_600_000);
     const today = jst.toISOString().slice(0, 10);
@@ -338,11 +345,12 @@ while (running) {
       for (const tenantId of await repo.listTenantIds()) {
         try {
           n += await attendance.daily(tenantId);
+          n += await laborCalendar.daily(tenantId);
         } catch (err) {
-          log.warn('有給の見回りに失敗しました', { tenantId, err });
+          log.warn('有給と労務の期限の見回りに失敗しました', { tenantId, err });
         }
       }
-      if (n > 0) log.info('有給の取得義務を知らせました', { notifications: n });
+      if (n > 0) log.info('有給の取得義務と労務の期限を知らせました', { notifications: n });
     }
   }
 

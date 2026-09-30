@@ -29,6 +29,8 @@ export interface HrStore {
   /** 手続きを作るか、済んでいなければ期限と名前を直す（同じ従業員・同じ手続きは 1 つ）。 */
   upsertTask(tenantId: string, t: Omit<HrTask, 'doneAt' | 'doneBy' | 'employeeName'>): Promise<void>;
   listTasks(tenantId: string, q: { employeeId?: string; openOnly?: boolean }): Promise<HrTask[]>;
+  /** 労務カレンダーの知らせを送ったことを残す（初めてなら `true`）。 */
+  markCalendarAlert(tenantId: string, key: string): Promise<boolean>;
   setTaskDone(tenantId: string, id: string, done: boolean, by: string): Promise<HrTask | null>;
 }
 
@@ -55,19 +57,19 @@ const toEmployee = (r: EmployeeRow): HrEmployee => ({
 });
 
 interface TermsRow {
-  id: string; employee_id: string; effective_on: unknown; contract_start: unknown; contract_end: unknown; renewal: string;
+  id: string; employee_id: string; effective_on: unknown; contract_start: unknown; contract_end: unknown; renewal: string; renewal_limit: string;
   probation_until: unknown; weekly_hours: unknown; weekly_days: unknown; start_time: string; end_time: string; break_minutes: unknown;
   wage_type: HrTerms['wageType']; wage_amount: unknown; allowances: HrTerms['allowances']; workplace: string; work: string;
   workplace_scope: string; work_scope: string; social_insurance: boolean; employment_insurance: boolean; created_at: unknown;
 }
 
-const TERMS_SELECT = `select id, employee_id, effective_on::text, contract_start::text, contract_end::text, renewal, probation_until::text,
+const TERMS_SELECT = `select id, employee_id, effective_on::text, contract_start::text, contract_end::text, renewal, renewal_limit, probation_until::text,
   weekly_hours, weekly_days, start_time, end_time, break_minutes, wage_type, wage_amount, allowances, workplace, work,
   workplace_scope, work_scope, social_insurance, employment_insurance, created_at from hr_terms`;
 
 const toTerms = (r: TermsRow): HrTerms => ({
   id: r.id, employeeId: r.employee_id, effectiveOn: day(r.effective_on)!, contractStart: day(r.contract_start),
-  contractEnd: day(r.contract_end), renewal: r.renewal, probationUntil: day(r.probation_until), weeklyHours: num(r.weekly_hours),
+  contractEnd: day(r.contract_end), renewal: r.renewal, renewalLimit: r.renewal_limit ?? '', probationUntil: day(r.probation_until), weeklyHours: num(r.weekly_hours),
   weeklyDays: num(r.weekly_days), startTime: r.start_time, endTime: r.end_time, breakMinutes: num(r.break_minutes),
   wageType: r.wage_type, wageAmount: num(r.wage_amount), allowances: Array.isArray(r.allowances) ? r.allowances : [],
   workplace: r.workplace, work: r.work, workplaceScope: r.workplace_scope, workScope: r.work_scope,
@@ -153,11 +155,11 @@ export class PostgresHrStore implements HrStore {
   async addTerms(tenantId: string, t: TermsRecord): Promise<void> {
     await this.q(tenantId, `insert into hr_terms (id, tenant_id, employee_id, effective_on, contract_start, contract_end, renewal,
       probation_until, weekly_hours, weekly_days, start_time, end_time, break_minutes, wage_type, wage_amount, allowances, workplace,
-      work, workplace_scope, work_scope, social_insurance, employment_insurance, created_by)
-      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb,$17,$18,$19,$20,$21,$22,$23)`,
+      work, workplace_scope, work_scope, social_insurance, employment_insurance, created_by, renewal_limit)
+      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb,$17,$18,$19,$20,$21,$22,$23,$24)`,
     [t.id, tenantId, t.employeeId, t.effectiveOn, t.contractStart, t.contractEnd, t.renewal, t.probationUntil, t.weeklyHours,
       t.weeklyDays, t.startTime, t.endTime, t.breakMinutes, t.wageType, t.wageAmount, JSON.stringify(t.allowances), t.workplace,
-      t.work, t.workplaceScope, t.workScope, t.socialInsurance, t.employmentInsurance, t.createdBy]);
+      t.work, t.workplaceScope, t.workScope, t.socialInsurance, t.employmentInsurance, t.createdBy, t.renewalLimit ?? '']);
   }
 
   async listTerms(tenantId: string, employeeId: string): Promise<HrTerms[]> {
@@ -178,6 +180,11 @@ export class PostgresHrStore implements HrStore {
     await this.q(tenantId, `insert into hr_tasks (id, tenant_id, employee_id, kind, code, title, due_on) values ($1,$2,$3,$4,$5,$6,$7)
       on conflict (tenant_id, employee_id, kind, code) do update set title = excluded.title, due_on = excluded.due_on
       where hr_tasks.done_at is null`, [t.id, tenantId, t.employeeId, t.kind, t.code, t.title, t.dueOn]);
+  }
+
+  async markCalendarAlert(tenantId: string, key: string): Promise<boolean> {
+    const rows = await this.q<{ key: string }>(tenantId, `insert into hr_calendar_alerts (tenant_id, key) values ($1, $2) on conflict do nothing returning key`, [tenantId, key]);
+    return rows.length > 0;
   }
 
   async listTasks(tenantId: string, q: { employeeId?: string; openOnly?: boolean }): Promise<HrTask[]> {

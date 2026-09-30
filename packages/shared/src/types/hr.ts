@@ -67,6 +67,46 @@ export interface HrSettings {
   payroll: HrPayrollSettings;
   /** 振込データの振込元（第30.10.3節）。 */
   transfer: HrTransferSettings;
+  /** 労務カレンダーに使う会社の決まり（第30.19.1節）。 */
+  duties: HrDutySettings;
+  /** 労働条件通知書の会社の定め（第30.5.3節）。担当者が書いた文を次からの既定にする。 */
+  notice: HrNoticeSettings;
+}
+
+/** 労務カレンダーに使う会社の決まり。 */
+export interface HrDutySettings {
+  /** 源泉所得税の納期の特例の承認を受けているか。 */
+  withholdingSpecial: boolean;
+  /** 住民税の納期の特例の承認を受けているか。 */
+  residentSpecial: boolean;
+  /** 定期健康診断の月（1〜12。決めていなければ `null`）。 */
+  healthCheckMonth: number | null;
+}
+
+/** 労働条件通知書の会社の定め（文のまま載せる）。 */
+export interface HrNoticeSettings {
+  raise: string;
+  bonus: string;
+  severance: string;
+  /** 退職に関する事項（解雇の事由を含む）。 */
+  retirement: string;
+  /** 相談の窓口（パート・有期の人に明示する）。 */
+  consultation: string;
+  other: string;
+}
+
+/** 労務カレンダーの期限 1 つ（第30.19.1節）。 */
+export interface HrDeadline {
+  /** 期限の日（YYYY-MM-DD）。 */
+  date: string;
+  /** 期間の始まり（年度更新のように期間があるもの）。 */
+  from?: string;
+  kind: 'withholding' | 'resident' | 'resident-switch' | 'labor-insurance' | 'santei' | 'yea' | 'annual-report' | 'agreement' | 'health-check' | 'hire-check' | 'contract-end' | 'task' | 'leave-obligation';
+  title: string;
+  detail: string;
+  employeeId?: string;
+  /** 過ぎていて済んでいない（手続き）。 */
+  overdue?: boolean;
 }
 
 /** 振込データ（全銀協の形式）の振込元。名前は半角のカナにして使う。 */
@@ -130,6 +170,8 @@ export const DEFAULT_HR_SETTINGS: HrSettings = {
     items: [],
   },
   transfer: { format: 'sogo', clientCode: '', clientName: '', bankCode: '', bankName: '', branchCode: '', branchName: '', accountType: '普通', accountNumber: '' },
+  duties: { withholdingSpecial: false, residentSpecial: false, healthCheckMonth: null },
+  notice: { raise: '', bonus: '', severance: '', retirement: '', consultation: '', other: '' },
 };
 
 /** 従業員（人事の台帳。第30.5節）。 */
@@ -171,6 +213,8 @@ export interface HrTerms {
   contractStart: string | null;
   contractEnd: string | null;
   renewal: string;
+  /** 更新の上限（通算の期間か回数。無ければ空）。 */
+  renewalLimit: string;
   probationUntil: string | null;
   weeklyHours: number | null;
   weeklyDays: number | null;

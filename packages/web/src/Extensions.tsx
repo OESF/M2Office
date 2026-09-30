@@ -489,6 +489,14 @@ function HrFields({ settings, busy, onChanged }: { settings: HrSettings; busy: b
           <option>普通</option><option>当座</option>
         </select>
       </div>
+      <div className="row wrap">
+        <label className="check"><input type="checkbox" checked={settings.duties.withholdingSpecial} disabled={busy} onChange={(e) => save({ duties: { ...settings.duties, withholdingSpecial: e.target.checked } })} /> 源泉所得税の納期の特例</label>
+        <label className="check"><input type="checkbox" checked={settings.duties.residentSpecial} disabled={busy} onChange={(e) => save({ duties: { ...settings.duties, residentSpecial: e.target.checked } })} /> 住民税の納期の特例</label>
+        <label>定期健康診断 <select value={settings.duties.healthCheckMonth ?? ''} disabled={busy} onChange={(e) => save({ duties: { ...settings.duties, healthCheckMonth: e.target.value ? Number(e.target.value) : null } })}>
+          <option value="">決めていない</option>
+          {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => <option key={m} value={m}>{m} 月</option>)}
+        </select></label>
+      </div>
     </div>
   );
 }

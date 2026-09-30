@@ -13,7 +13,7 @@ import type {
   InventoryItem, InventoryItemView, InventoryLocation, InventoryMove, InventoryMoveKind, InventorySettings, InventoryStockRow,
   HrEmployee, HrEmployeeView, HrSettings, HrTask, HrTerms,
   AttClose, AttDay, AttPeriod, AttPunchKind, AttTotals, LeaveBalance, LeaveGrant, LeaveTake,
-  HrFamilyMember, HrPayrollProfile, HrStandardPay, PayRun, PaySlip, PayCheck,
+  HrFamilyMember, HrPayrollProfile, HrStandardPay, PayRun, PaySlip, PayCheck, HrNoticeSettings, HrDeadline,
   InventoryCount, InventoryCountRow, InventoryCountScope, InventoryCountView, InventorySupplier,
   InventoryBooking, InventoryBookingMapping, InventoryBookingSource,
 } from '@m2office/shared';
@@ -1125,6 +1125,19 @@ export const api = {
       call<{ employee: HrEmployee }>(`/hr/employees/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(input) }),
     addTerms: (id: string, input: Partial<HrTerms>) =>
       call<{ terms: HrTerms }>(`/hr/employees/${encodeURIComponent(id)}/terms`, { method: 'POST', body: JSON.stringify(input) }),
+    /** 労働条件通知書の中身と足りない事項（仕様書 第30.5.3節）。 */
+    termsNotice: (id: string) => call<{ notice: { items: { label: string; value: string; missing: boolean }[]; missing: string[]; notes: string[] }; texts: HrNoticeSettings }>(`/hr/employees/${encodeURIComponent(id)}/terms-notice`),
+    /** 労働条件通知書の PDF を保存させる。書いた会社の定めは次からの既定になる。 */
+    termsNoticePdf: async (id: string, notice: HrNoticeSettings, name: string) => {
+      const res = await fetch(`/v1/hr/employees/${encodeURIComponent(id)}/terms-notice`, {
+        method: 'POST', credentials: 'same-origin', body: JSON.stringify({ notice }),
+        headers: { 'content-type': 'application/json', ...(devTenant ? { 'x-tenant': devTenant } : {}), ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}) },
+      });
+      if (!res.ok) throw new ApiError((await res.json().catch(() => ({})) as { error?: string }).error ?? `エラー (${res.status})`, res.status);
+      saveBlob(await res.blob(), `労働条件通知書-${name}.pdf`);
+    },
+    /** 労務の期限（仕様書 第30.19.1節）。 */
+    calendar: (days = 90) => call<{ items: HrDeadline[] }>(`/hr/calendar?days=${days}`),
     leave: (id: string, leftOn: string, reason: string) =>
       call<{ employee: HrEmployee; tasks: number }>(`/hr/employees/${encodeURIComponent(id)}/leave`, { method: 'POST', body: JSON.stringify({ leftOn, reason }) }),
     setTaskDone: (id: string, done: boolean) =>

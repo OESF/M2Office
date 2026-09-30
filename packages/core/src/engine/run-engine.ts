@@ -35,6 +35,7 @@ import type { ContactStore } from '../cards/store.js';
 import type { NoticeService } from '../notices/service.js';
 import type { InventoryService } from '../inventory/service.js';
 import type { InventoryBookings } from '../inventory/bookings.js';
+import type { LaborCalendar } from '../hr/calendar-service.js';
 import { answerOfSteps } from '../memory/work.js';
 import { substituteArguments } from '../extensions/skill.js';
 import { AI_NOT_CONFIGURED_MESSAGE, aiAvailable } from '../llm/unconfigured.js';
@@ -110,6 +111,15 @@ export interface RunEngineDeps {
     /** 予約との引き当て（第29.13節）。道具 `inventory.reserve` に渡す。 */
     bookings?: InventoryBookings;
     access(tenantId: string, userId: string): Promise<InventorySettings | null>;
+  };
+  /**
+   * 人事・給与の労務カレンダー（仕様書 第30.19.1節）。道具 `hr.deadlines` に渡す。
+   *
+   * @remarks `access` は、会社が人事・給与を使っていて依頼者が人事区画に入っていれば真を返す
+   */
+  hr?: {
+    calendar: LaborCalendar;
+    access(tenantId: string, userId: string): Promise<unknown>;
   };
 }
 
@@ -817,6 +827,10 @@ export class RunEngine {
           // 納品書の読み取り（第29.15節）。その会社の推論を使う
           ...(llm ? { llm: async () => llm } : {}),
         },
+      } : {}),
+      // 労務の期限（第30.19.1節）。人事区画の人にだけ返す
+      ...(this.deps.hr ? {
+        hr: { deadlines: async (days: number) => ((await this.deps.hr!.access(run.tenantId, requestedBy)) ? this.deps.hr!.calendar.list(run.tenantId, days) : null) },
       } : {}),
       // 社内のお知らせ（第10.15節）。朝のブリーフが読む
       ...(this.deps.notices ? { notices: this.deps.notices } : {}),

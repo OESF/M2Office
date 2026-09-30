@@ -26,12 +26,12 @@ export const MORNING_BRIEF: AgentDefinition = {
   version: 1,
   name: '朝のブリーフ',
   category: 'briefing',
-  description: '毎朝、社内のお知らせ・今日の予定と出発の目安・ToDo・返事の要るメール・承認待ち・自宅の地域の天気・関心の分野の動き・主なニュースをまとめて伝えます',
+  description: '毎朝、社内のお知らせ・今日の予定と出発の目安・ToDo・返事の要るメール・承認待ち・自宅の地域の天気・関心の分野の動き・主なニュースをまとめて伝えます（在庫管理を使う会社では在庫の見込み、人事の担当者には労務の期限も）',
   locale: 'ja-JP',
   compartment: null,
   // 秘書が毎朝自分で起こす。会話の中で「今日の段取りを教えて」と頼まれたら秘書が取り次いでもよい
   inputs: { type: 'object', properties: {} },
-  tools: ['profile.read', 'brief.settings', 'notices.list', 'calendar.list', 'tasks.list', 'gmail.unread', 'approvals.pending', 'inventory.forecast', 'web.research'],
+  tools: ['profile.read', 'brief.settings', 'notices.list', 'calendar.list', 'tasks.list', 'gmail.unread', 'approvals.pending', 'inventory.forecast', 'hr.deadlines', 'web.research'],
   steps: [
     {
       id: 'collect',
@@ -39,12 +39,14 @@ export const MORNING_BRIEF: AgentDefinition = {
       label: '集める',
       // 天気の地域は本人の情報を読んでから決める。同じ段で調べさせると、推論が地域を推測して検索した（2026-09-26 に oesf で確認）
       // 在庫（第29.14節）は在庫管理を使う会社だけ。使わない会社では道具が「使えない」と返す
-      tools: ['profile.read', 'brief.settings', 'notices.list', 'calendar.list', 'tasks.list', 'gmail.unread', 'approvals.pending', 'inventory.forecast'],
+      // 労務の期限（第30.19.1節）は人事区画の人だけ。区画の外の人には道具が「使えない」と返す
+      tools: ['profile.read', 'brief.settings', 'notices.list', 'calendar.list', 'tasks.list', 'gmail.unread', 'approvals.pending', 'inventory.forecast', 'hr.deadlines'],
       required: ['profile.read', 'brief.settings', 'notices.list'],
       instruction: [
         'profile.read（本人の自宅・勤務地・今日の日付）・brief.settings（関心の分野と外した項目）・notices.list（社内のお知らせ）を呼ぶ。',
         '続けて、外した項目に入っていないものだけ呼ぶ: calendar.list（今日の予定。外した項目「予定」なら呼ばない）・tasks.list（「ToDo」）・gmail.unread（「返事の要りそうなメール」）・approvals.pending（「承認待ち」）。',
         'あわせて inventory.forecast を 1 回呼ぶ（在庫の足りなくなりそうなものと使用期限。available が false なら在庫管理を使っていない会社なので、何も書かない）。',
+        'あわせて hr.deadlines を 1 回呼ぶ（7 日以内の労務の期限。available が false なら人事の担当者ではないので、何も書かない）。',
         '取れなかったものは、推測で埋めずに「取得できなかった」と書く。',
         '**この段ではブリーフの文章を書かない。** 道具を呼び終えたら、取れたものの要点だけを短い箇条書きで書く（予定は今日の分だけ、メールは差出人と件名、お知らせは題名・締切・isNew）。これから調べる天気やニュースについては何も書かない。',
       ].join('\n'),
@@ -81,6 +83,7 @@ export const MORNING_BRIEF: AgentDefinition = {
         '5. 返事の要りそうなメール（差出人と件名。多ければ主なもの 5 件まで）。広告・メールマガジン・請求や利用のお知らせ・自動送信の通知は入れない。人から届いた、返事や対応の要りそうなものだけにする。無ければ「返事の要りそうなメールはありません」と書く',
         '6. 承認待ち',
         '7. 在庫（inventory.forecast が品目を返したときだけ。足りなくなりそうなもの（あと何日・残りわずか）と発注の案を 1 行ずつ、使用期限の近いロットを期限の近い順に。数は道具の書き方のまま。無い・使っていない会社なら見出しごと書かない）',
+        '7-2. 労務の期限（hr.deadlines が items を返したときだけ。日付の順に「日付 題名」を 1 行ずつ。overdue は「過ぎています」と添えて先頭に。日付と題名は道具の値をそのまま書く）',
         '8. 関心の分野（brief.settings の topics の順に、分野の名前を小見出しにして 2〜3 件ずつ。一行ずつ）',
         '9. 主なニュース（3〜5 件。一行ずつ。最後に出典のリンクを、関心の分野と合わせて 5 件まで）',
         '予定の無い日は、その旨を一言で書く。取得できなかった項目は「取得できませんでした」と書き、「なし」と書かない。',
@@ -105,7 +108,7 @@ export const MORNING_BRIEF: AgentDefinition = {
     },
   ],
   help: {
-    summary: '平日の朝、社内のお知らせ・今日の予定と出発の目安・ToDo・返事の要るメール・承認待ち・自宅の地域の天気・あなたの関心の分野の動き・主なニュースを、秘書がまとめてお伝えします。',
+    summary: '平日の朝、社内のお知らせ・今日の予定と出発の目安・ToDo・返事の要るメール・承認待ち・自宅の地域の天気・あなたの関心の分野の動き・主なニュースを、秘書がまとめてお伝えします。在庫管理を使う会社では在庫の見込みを、人事の担当者には労務の期限もお伝えします。',
     examples: [{ title: '今すぐ今朝のブリーフを受け取る', input: {} }],
     notes: [
       '平日の朝 7:30 に、秘書が自動で用意します。時刻の変更や停止は「定時実行」で行えます',

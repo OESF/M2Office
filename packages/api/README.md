@@ -192,6 +192,8 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/hr/payroll/employees/:id/standard-pay` | 標準報酬月額を足す（`fromMonth`・`pay`。報酬の額を等級表で標準報酬月額に直す） |
 | `POST /v1/hr/payroll/employees/:id/family` ／ `DELETE .../family/:memberId` | 家族を足す・外す |
 | `GET /v1/hr/payroll/runs` ／ `POST /v1/hr/payroll/runs` ／ `GET /v1/hr/payroll/runs/:id` | 給与の回の一覧（`month` で支払日と勤怠の期間も）／ 支給月（`month`）の月の給与を計算して点検し、下書きにする（同じ月の下書きは置き換える。確定した月は 400）／ 回と明細と点検（行ごとの根拠・確定を止めているもの `blockers`・確定できるか `canConfirm`。見たことを監査ログに残す） |
+| `GET /v1/hr/employees/:id/terms-notice` ／ `POST .../terms-notice` | 労働条件通知書（第30.5.3節）: 明示事項と足りない事項・会社の定めの既定 ／ PDF（本文 `notice`: 昇給・賞与・退職手当・退職に関する事項・相談の窓口・その他。書いた文を次からの既定として残す。`on`: 雇用条件を選ぶ日） |
+| `GET /v1/hr/calendar` | 労務の期限（第30.19.1節。`days` 既定 90。納付・年度更新・算定基礎届・36 協定・健康診断・契約の満了・入退社の手続き・有給の取得義務。過ぎて済んでいない手続きを先頭に） |
 | `POST /v1/hr/payroll/runs/:id/confirm` ／ `POST .../request` | 段 4（第30.10.3節）: 確定する（**管理者だけ**。押すことを承認とする。危険度 financial。点検で止まっていれば 400。監修前の表はデバッグモードのときだけ確定でき、回に残す。ADR-0053。確定すると同意した本人に明細を知らせる）／ 管理者に確定を頼む |
 | `POST /v1/hr/payroll/runs/:id/transfer` | 振込データ（全銀協の形式・シフト JIS・120 バイトの固定長）を作る。確定した回から**管理者だけ**。作れなければ 400 と `problems`。`X-Transfer-Count`・`X-Transfer-Excluded`（振込先の無い人） |
 | `GET /v1/hr/payroll/slips/:id/pdf` ／ `GET /v1/hr/payroll/ledger` | 明細の PDF ／ 賃金台帳（`year`・`format`: csv・xlsx。確定した月の給与と法定の記載事項） |
@@ -251,7 +253,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `PUT /v1/admin/extensions/business-cards/settings` | 管理者: 名刺管理の、取り込んだ名刺の既定の範囲（`defaultScope`。第27.7節） |
 | `GET /v1/admin/extensions/inventory/booking-sources` ／ `POST` | 管理者: 予約の受け口の一覧 ／ 作る（`name`）。作ったときだけ送り先の URL（鍵を含む）を返す。鍵はハッシュだけを持つ |
 | `PUT /v1/admin/extensions/inventory/booking-sources/:id/status` ／ `mapping` | 管理者: 受け口を止める・再開する（`status`）／ 項目の対応を直す・やり直す（`mapping`。`null` で次の予約から推論し直す） |
-| `PUT /v1/admin/extensions/hr/settings` | 管理者: 人事・給与の会社の設定（`office`・`health`・`socialApply`・`pay`・`procedures`・`work`・`agreement`・`leave`・`payroll`・`transfer`（振込元。番号の桁を確かめる）。第30.8.1節）。送った項目だけを変える。人事・給与を `PUT /v1/admin/extensions/hr/enabled` で入れると、区画 `hr` が無ければ作り、入れた管理者を入れる |
+| `PUT /v1/admin/extensions/hr/settings` | 管理者: 人事・給与の会社の設定（`office`・`health`・`socialApply`・`pay`・`procedures`・`work`・`agreement`・`leave`・`payroll`・`transfer`（振込元。番号の桁を確かめる）・`duties`（納期の特例・定期健康診断の月）・`notice`（労働条件通知書の会社の定め）。第30.8.1節）。送った項目だけを変える。人事・給与を `PUT /v1/admin/extensions/hr/enabled` で入れると、区画 `hr` が無ければ作り、入れた管理者を入れる |
 | `PUT /v1/admin/extensions/inventory/settings` | 管理者: 在庫管理の機能の入り切り（`features`）・残りわずかの既定の目安（`lowDefault`）・仕入れの日数（`leadDaysDefault`）・棚卸しの頻度（`countEveryDays`）。送った項目だけを変える（第29.4.1節） |
 | `GET /v1/admin/connections/mcp` | 管理者: 会社の接続（MCP）の一覧。道具ごとの危険度・有効かどうか・使っている業務、認証の状態（`authState`。秘密の値は返さない）、よく使うサービスの型（`presets`）（仕様書 第12.11節、ADR-0037・ADR-0044） |
 | `POST /v1/admin/connections/mcp` | 管理者: URL を受け取り、道具の一覧を取って会社の接続として登録する（読むだけの印が付いた道具は「読むだけ」、ほかは「社外へ送る」扱い）。`preset`（`slack`）で型から、`auth`（`oauth`・`api_key`）で認証の要る接続を登録する。認証の要る接続の道具は、認証情報のあとで取る |
