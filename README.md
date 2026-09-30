@@ -299,6 +299,7 @@ API とワーカーは起動時にリポジトリ直下の `.env` を読みま�
 | [docs/adr/](docs/adr/) | 設計判断の記録 |
 | [docs/help/](docs/help/) | ヘルプセンターに出す公式の記事（書き方は docs/help/README.md） |
 | [docs/developer/](docs/developer/README.md) | 開発者マニュアル（拡張機能・業務エージェント・コネクタの作り方） |
+| [docs/manual/hr-payroll/](docs/manual/hr-payroll/README.md) | 人事・給与のユーザーマニュアル（担当者の手引きと研修の教材。`npm run docs:hr-manual-pdf` で PDF） |
 | [LICENSE](LICENSE) | ライセンス（Apache License 2.0） |
 
 ## ライセンス

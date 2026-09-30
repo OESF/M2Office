@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
-"""開発者マニュアル（docs/developer/*.md）を 1 冊にまとめ、PDF にする。
+"""マニュアル（開発者マニュアル・人事・給与のユーザーマニュアル）を 1 冊にまとめ、PDF にする。
 
 Markdown は章ごとに分けたまま保守し、配布と通読のときだけ 1 本にまとめる。
 
-使い方: python3 tools/pdf/build_manual.py [出力の PDF]
-  既定の出力先は docs/developer/developer-manual.pdf（版管理の対象外）
+使い方: python3 tools/pdf/build_manual.py [マニュアルの名前] [出力の PDF]
+  マニュアルの名前: developer（既定。docs/developer/）・hr-payroll（docs/manual/hr-payroll/）
+  既定の出力先は各マニュアルのディレクトリの PDF（版管理の対象外）
+  前との互換のため、最初の引数が .pdf で終われば開発者マニュアルの出力先とみなす
 
 行うこと:
   1. README（はじめに）と各章を番号順につなぐ
@@ -15,8 +17,25 @@ Markdown は章ごとに分けたまま保守し、配布と通読のときだ�
 import io, os, re, subprocess, sys, tempfile
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-DOC_DIR = os.path.join(ROOT, 'docs', 'developer')
-OUT = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else os.path.join(DOC_DIR, 'developer-manual.pdf')
+
+# マニュアルごとの置き場と表紙
+MANUALS = {
+    'developer': {
+        'dir': os.path.join(ROOT, 'docs', 'developer'), 'pdf': 'developer-manual.pdf',
+        'title': 'M2Office 開発者マニュアル', 'subtitle': '業務エージェントとコネクタの作り方',
+    },
+    'hr-payroll': {
+        'dir': os.path.join(ROOT, 'docs', 'manual', 'hr-payroll'), 'pdf': 'hr-payroll-manual.pdf',
+        'title': 'M2Office 人事・給与 ユーザーマニュアル', 'subtitle': '担当者の手引きと研修の教材',
+    },
+}
+args = sys.argv[1:]
+NAME = 'developer' if not args or args[0].endswith('.pdf') else args.pop(0)
+if NAME not in MANUALS:
+    sys.exit(f'知らないマニュアルです: {NAME}（{"・".join(MANUALS)}）')
+MANUAL = MANUALS[NAME]
+DOC_DIR = MANUAL['dir']
+OUT = os.path.abspath(args[0]) if args else os.path.join(DOC_DIR, MANUAL['pdf'])
 CHROME = os.environ.get('CHROME', '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome')
 
 chapters = sorted(f for f in os.listdir(DOC_DIR) if re.match(r'^\d{2}-.+\.md$', f))
@@ -40,6 +59,8 @@ def convert(name, text, first_heading):
         if in_code:
             out.append(line)
             continue
+        # 印刷では、チェックリストの「[ ]」を四角にする
+        line = re.sub(r'^(\s*)- \[ \] ', r'\1- □ ', line)
         m = re.match(r'^(#{1,5})\s+(.*)$', line)
         if m:
             level, title = len(m.group(1)), m.group(2)
@@ -77,14 +98,14 @@ def main():
     version = spec_version()
     front = '\n'.join([
         '---',
-        'title: M2Office 開発者マニュアル',
+        f"title: {MANUAL['title']}",
         f'version: 仕様書 第 {version} 版に対応',
-        'subtitle: 業務エージェントとコネクタの作り方',
+        f"subtitle: {MANUAL['subtitle']}",
         f'updated: {__import__("datetime").date.today().isoformat()}',
         'owner: 株式会社M2ホールディングス',
         'wrap_code: true',
         '---',
-        '# M2Office 開発者マニュアル',  # build.py が表紙に回して本文から除く
+        f"# {MANUAL['title']}",  # build.py が表紙に回して本文から除く
         '',
     ])
     work = tempfile.mkdtemp(prefix='m2o-manual-')
