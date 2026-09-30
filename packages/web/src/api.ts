@@ -554,6 +554,29 @@ export interface KnowledgeItemView {
   version?: number; sectionCount?: number;
   /** 業務から登録した場合、登録した実行の ID。Google から読んだデータで作ったか（仕様書 第9.5.2節）。 */
   originRunId?: string | null; googleDerived?: boolean;
+  /** 種類（社内規程・議事録・秘書が学んだこと）と状態（使う・廃止・しまった）。仕様書 第11.11節。 */
+  category?: 'rule' | 'minutes' | 'learned';
+  status?: 'active' | 'retired' | 'archived';
+  statusAt?: string | null;
+  /** しまった理由（merged・stale・unused・conflict）。 */
+  statusReason?: string | null;
+  /** 施行している版の施行日（社内規程）と、施行日が先の版。 */
+  effectiveFrom?: string | null;
+  pending?: { version: number; effectiveFrom: string } | null;
+  /** 答えの根拠に最後に使った日。 */
+  lastUsedAt?: string | null;
+}
+
+/** 社内規程の 1 つの版（仕様書 第11.11.2節）。 */
+export interface KnowledgeVersionView {
+  itemId: string; version: number; effectiveFrom: string; title: string; body: string; source: string;
+  savedAt: string; current: boolean; pending: boolean; chars: number;
+}
+
+/** 最後に秘書が学んだことを整理した日と数（仕様書 第11.11.4節）。 */
+export interface ConsolidationView {
+  at: string;
+  detail: { merged?: number; stale?: number; unused?: number; conflict?: number; ai?: boolean };
 }
 
 /** 知識の節（分け方の確認用。仕様書 第11.7.2節）。 */
@@ -576,6 +599,8 @@ export interface ConversationView {
 /** 個人記憶の 1 件（仕様書 第11.5.1節）。 */
 export interface MemoryView {
   id: string; text: string; source: string; createdAt: string;
+  /** しまった日と理由（しまったものの一覧でだけ。仕様書 第11.11.4節）。 */
+  archivedAt?: string | null; archiveReason?: string | null;
 }
 
 export interface AdminRun {
@@ -1473,6 +1498,9 @@ export const api = {
   updateMemory: (id: string, text: string) =>
     call(`/me/memories/${id}`, { method: 'PATCH', body: JSON.stringify({ text }) }),
   clearMemories: () => call<{ removed: number }>('/me/memories', { method: 'DELETE' }),
+  /** 整理でしまった記憶と、戻す（仕様書 第11.11.4節）。 */
+  myArchivedMemories: () => call<{ items: MemoryView[] }>('/me/memories/archived'),
+  restoreMemory: (id: string) => call(`/me/memories/${id}/restore`, { method: 'POST' }),
   saveDisplayName: (displayName: string) =>
     call('/me/profile', { method: 'PATCH', body: JSON.stringify({ displayName }) }),
   mySessions: () => call<{ items: {
@@ -1596,11 +1624,20 @@ export const api = {
       call<User>(`/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
     knowledge: () => call<{
       items: KnowledgeItemView[]; compartments: { id: string; name: string; description: string | null }[];
+      consolidated: ConsolidationView | null;
     }>('/admin/knowledge'),
-    saveKnowledge: (id: string | 'new', item: Omit<KnowledgeItemView, 'id' | 'updatedAt' | 'version' | 'sectionCount' | 'originRunId' | 'googleDerived'>) =>
-      call<{ id: string; sections: KnowledgeSectionView[] }>(`/admin/knowledge/${id}`, { method: 'PUT', body: JSON.stringify(item) }),
+    /** 登録・直す。社内規程は版を残し、施行日（`effectiveFrom`）が先なら施行日まで前の版で答える（仕様書 第11.11.2節）。 */
+    saveKnowledge: (id: string | 'new', item: { title: string; body: string; source: string; compartment: string | null; effectiveFrom?: string | null }) =>
+      call<{ id: string; sections: KnowledgeSectionView[]; version?: number; applied?: boolean }>(`/admin/knowledge/${id}`, { method: 'PUT', body: JSON.stringify(item) }),
     knowledgeSections: (id: string) =>
       call<{ sections: KnowledgeSectionView[] }>(`/admin/knowledge/${id}/sections`),
+    knowledgeVersions: (id: string) => call<{ versions: KnowledgeVersionView[] }>(`/admin/knowledge/${id}/versions`),
+    knowledgeVersion: (id: string, version: number) => call<{ version: KnowledgeVersionView }>(`/admin/knowledge/${id}/versions/${version}`),
+    /** 社内規程・議事録を廃止する（消さない。1 年は戻せる）。 */
+    retireKnowledge: (id: string) => call(`/admin/knowledge/${id}/retire`, { method: 'POST' }),
+    /** 廃止した・しまったものを戻す。 */
+    restoreKnowledge: (id: string) => call(`/admin/knowledge/${id}/restore`, { method: 'POST' }),
+    /** 秘書が学んだことを消す（社内規程と議事録は消せない）。 */
     deleteKnowledge: (id: string) => call(`/admin/knowledge/${id}`, { method: 'DELETE' }),
     extensions: () => call<{ items: ExtensionView[] }>('/admin/extensions'),
     installExtension: (id: string, scope: ScopeValue = 'all') =>
@@ -1656,6 +1693,12 @@ export const api = {
       form.append('file', file);
       return postForm<{ fields: HrProposalField[] }>('/admin/extensions/hr/proposal', form);
     },
+    /** 知識に登録した社内規程から、人事・給与の設定の案を作る（仕様書 第30.8.2節）。 */
+    hrProposalFromRule: (knowledgeId: string) =>
+      call<{ fields: HrProposalField[] }>('/admin/extensions/hr/proposal', { method: 'POST', body: JSON.stringify({ knowledgeId }) }),
+    /** 社内規程の登録・改定で見つかった、今の設定と食い違う項目（仕様書 第11.11.2節）。 */
+    hrRuleChecks: () => call<{ checks: { itemId: string; version: number; title: string; effectiveFrom: string; fields: HrProposalField[] }[] }>('/admin/extensions/hr/rule-checks'),
+    dismissHrRuleCheck: (itemId: string, version: number) => call(`/admin/extensions/hr/rule-checks/${itemId}/${version}/dismiss`, { method: 'POST' }),
     /** 手当の扱い（雇用条件の手当の名前と、割増の基礎・所得税の対象。設定が無ければ名前から決めたもの）。 */
     hrAllowances: () => call<{ items: { name: string; premiumBase: boolean; taxable: boolean; set: boolean }[] }>('/admin/extensions/hr/allowances'),
     /** 労災保険率表の事業の種類（会社の設定で選ぶ）。 */

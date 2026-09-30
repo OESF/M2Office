@@ -11,7 +11,7 @@ import { Fragment, useEffect, useState } from 'react';
 import type {
   AutomationPolicy, CompanyInfo, Role, SlideTemplate, TenantSettings, User, WritingStyle,
 } from '@m2office/shared';
-import { api, describeError, type KnowledgeItemView, type KnowledgeSectionView } from './api.js';
+import { api, describeError, type ConsolidationView, type KnowledgeItemView, type KnowledgeSectionView, type KnowledgeVersionView } from './api.js';
 import { PageTitle, type PageHelp } from './help.js';
 import { SaveButton } from './save.js';
 import { CompartmentSettings, GroupSettings, ScopeField, useAccessOptions } from './Scope.js';
@@ -619,91 +619,155 @@ export function UserSettings({ meId, page }: { meId: string; page: string }) {
   );
 }
 
-/** 知識管理（第6.6.6節）。規程の登録。 */
+/** 知識の種類ごとの小分け（仕様書 第11.11.5節）。以前の `items` は社内規程として開く。 */
+const KNOWLEDGE_CATEGORY: Record<string, 'rule' | 'minutes' | 'learned'> = { rules: 'rule', items: 'rule', minutes: 'minutes', learned: 'learned' };
+/** しまった理由の言い方。 */
+const ARCHIVE_REASON: Record<string, string> = { merged: 'まとめた', stale: '新しい事実で古くなった', unused: '半年使われていない', conflict: '社内規程と食い違う' };
+/** 廃止した・しまったものを戻せる期間。 */
+const RESTORE_MS = 365 * 86_400_000;
+/** 日本時間の今日。 */
+const jstToday = () => new Date(Date.now() + 9 * 3_600_000).toISOString().slice(0, 10);
+const day = (iso: string | null | undefined) => (iso ? iso.slice(0, 10) : '—');
+
+/**
+ * 知識管理（仕様書 第6.6.6節・第11.11節、ADR-0056）。社内規程・議事録・秘書が学んだことを別々の一覧にする。
+ *
+ * @remarks
+ * 社内規程は改定すると版を残し、消さずに廃止する（1 年は戻せる）。議事録も廃止する。消せるのは秘書が学んだことだけ。
+ * 同じ見た目の削除のボタンを、社内規程と議事録に置かない。
+ */
 export function KnowledgeSettings({ page }: { page: string }) {
+  const category = KNOWLEDGE_CATEGORY[page] ?? 'rule';
   const [items, setItems] = useState<KnowledgeItemView[]>([]);
   const [compartments, setCompartments] = useState<{ name: string; description: string | null }[]>([]);
-  const empty = { id: 'new', kind: 'rule', title: '', body: '', source: '', compartment: null as string | null };
+  const [consolidated, setConsolidated] = useState<ConsolidationView | null>(null);
+  const empty = { id: 'new', title: '', body: '', source: '', compartment: null as string | null, effectiveFrom: jstToday() };
   const [draft, setDraft] = useState(empty);
-  // 分け方を開いている知識と、その節（第11.7.2節）
-  const [open, setOpen] = useState<{ id: string; sections: KnowledgeSectionView[] } | null>(null);
+  // 開いている知識と、その節か版（第11.7.2節・第11.11.2節）
+  const [open, setOpen] = useState<{ id: string; sections?: KnowledgeSectionView[]; versions?: KnowledgeVersionView[] } | null>(null);
+  const [body, setBody] = useState<{ key: string; text: string } | null>(null);
   const saver = useSaver();
-  const load = () => api.admin.knowledge().then((r) => { setItems(r.items); setCompartments(r.compartments); });
-  const toggle = (id: string) => {
-    if (open?.id === id) { setOpen(null); return; }
+  const load = () => api.admin.knowledge().then((r) => { setItems(r.items); setCompartments(r.compartments); setConsolidated(r.consolidated); });
+  useEffect(() => { void load(); }, []);
+  useEffect(() => { setDraft(empty); setOpen(null); }, [category]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const mine = items.filter((k) => (k.category ?? 'rule') === category);
+  const active = mine.filter((k) => (k.status ?? 'active') === 'active');
+  const inactive = mine.filter((k) => (k.status ?? 'active') !== 'active');
+  const toggleSections = (id: string) => {
+    if (open?.id === id && open.sections) { setOpen(null); return; }
     api.admin.knowledgeSections(id).then((r) => setOpen({ id, sections: r.sections })).catch(() => setOpen(null));
   };
-  useEffect(() => { void load(); }, []);
+  const toggleVersions = (id: string) => {
+    if (open?.id === id && open.versions) { setOpen(null); return; }
+    api.admin.knowledgeVersions(id).then((r) => setOpen({ id, versions: r.versions })).catch(() => setOpen(null));
+  };
+  const showBody = (id: string, version: number) => {
+    const key = `${id}:${version}`;
+    if (body?.key === key) { setBody(null); return; }
+    void api.admin.knowledgeVersion(id, version).then((r) => setBody({ key, text: r.version.body }));
+  };
+  const act = (fn: () => Promise<unknown>, done: string) => void saver.run(async () => { await fn(); await load(); }, done);
+  const restorable = (k: KnowledgeItemView) => !k.statusAt || Date.now() - Date.parse(k.statusAt) <= RESTORE_MS;
+  const isRule = category === 'rule';
+  const colSpan = isRule ? 5 : 4;
 
   return (
     <>
-      <PageTitle trail={['知識', KNOWLEDGE_TITLES[page] ?? '']} help={KNOWLEDGE_HELP[page]} />
-      {page === 'items' && <>
-      {items.length === 0 && <p className="lead"><strong>空のままだと秘書は答えられません。</strong></p>}
-      <div className="card">
-        <h3>{draft.id === 'new' ? '新しく登録する' : '編集する'}</h3>
-        <Text label="題名" value={draft.title} onChange={(v) => setDraft({ ...draft, title: v })} />
-        <Text label="出典（条番号など）" value={draft.source} onChange={(v) => setDraft({ ...draft, source: v })}
-          hint="例: 就業規則（2024 年 4 月改定）" />
-        <Text label="本文" value={draft.body} onChange={(v) => setDraft({ ...draft, body: v })} multiline
-          hint="50 万字まで。見出しで節に分けます" />
-        <div className="field">
-          <label>権限区画</label>
-          <select value={draft.compartment ?? ''} onChange={(e) => setDraft({ ...draft, compartment: e.target.value || null })}>
-            <option value="">区画外（全員が参照できる）</option>
-            {compartments.map((c) => <option key={c.name} value={c.name}>{c.description ?? c.name}（{c.name}）</option>)}
-          </select>
+      <PageTitle trail={['知識', KNOWLEDGE_TITLES[page] ?? KNOWLEDGE_TITLES['rules']!]} help={KNOWLEDGE_HELP[page] ?? KNOWLEDGE_HELP['rules']} />
+      {isRule && active.length === 0 && <p className="lead"><strong>空のままだと秘書は答えられません。</strong></p>}
+      {category === 'learned' && consolidated && (
+        <p className="muted small">
+          最後に整理した日: {day(consolidated.at)}
+          {consolidated.detail.ai !== false && `（まとめた ${consolidated.detail.merged ?? 0}・古くなった ${consolidated.detail.stale ?? 0}・使われていない ${consolidated.detail.unused ?? 0}・社内規程と食い違う ${consolidated.detail.conflict ?? 0}）`}
+        </p>
+      )}
+      {(category !== 'learned' || draft.id !== 'new') && (category !== 'minutes' || draft.id !== 'new') && (
+        <div className="card">
+          <h3>{draft.id === 'new' ? '新しく登録する' : isRule ? '改定する' : '直す'}</h3>
+          <Text label="題名" value={draft.title} onChange={(v) => setDraft({ ...draft, title: v })} />
+          <Text label="出典（条番号など）" value={draft.source} onChange={(v) => setDraft({ ...draft, source: v })}
+            placeholder="就業規則（2024 年 4 月改定）" />
+          {isRule && (
+            <div className="field">
+              <label>施行日</label>
+              <input type="date" value={draft.effectiveFrom} onChange={(e) => setDraft({ ...draft, effectiveFrom: e.target.value })} />
+            </div>
+          )}
+          <Text label="本文" value={draft.body} onChange={(v) => setDraft({ ...draft, body: v })} multiline
+            hint="50 万字まで。見出しで節に分けます" />
+          <div className="field">
+            <label>権限区画</label>
+            <select value={draft.compartment ?? ''} onChange={(e) => setDraft({ ...draft, compartment: e.target.value || null })}>
+              <option value="">区画外（全員が参照できる）</option>
+              {compartments.map((c) => <option key={c.name} value={c.name}>{c.description ?? c.name}（{c.name}）</option>)}
+            </select>
+          </div>
+          <div className="row">
+            <SaveButton
+              run={async () => {
+                const saved = await api.admin.saveKnowledge(draft.id, {
+                  title: draft.title, body: draft.body, source: draft.source, compartment: draft.compartment,
+                  ...(isRule ? { effectiveFrom: draft.effectiveFrom } : {}),
+                });
+                setDraft(empty);
+                await load();
+                setOpen({ id: saved.id, sections: saved.sections });
+                return saved;
+              }}
+              done={(r) => (r.applied === false
+                ? `第 ${r.version} 版を保存しました。施行日から切り替わります`
+                : `${r.version ? `第 ${r.version} 版を保存しました。` : '保存しました。'}本文を ${r.sections.length} の節に分けました`)}
+            />
+            {draft.id !== 'new' && <button className="btn ghost" onClick={() => setDraft(empty)}>やめる</button>}
+          </div>
         </div>
-        <div className="row">
-          <SaveButton
-            run={async () => {
-              // 由来は保存し直しても変わらない（仕様書 第9.5.2節）。送らない
-              const { id: _id, version: _v, sectionCount: _n, updatedAt: _u, originRunId: _r, googleDerived: _g, ...rest } = draft as KnowledgeItemView;
-              const saved = await api.admin.saveKnowledge(draft.id, rest);
-              setDraft(empty);
-              await load();
-              setOpen({ id: saved.id, sections: saved.sections });
-              return saved.sections.length;
-            }}
-            done={(n) => `保存しました。本文を ${n} の節に分けました`}
-          />
-          {draft.id !== 'new' && <button className="btn ghost" onClick={() => setDraft(empty)}>やめる</button>}
-        </div>
-      </div>
+      )}
       {saver.view}
       <table className="table">
-        <thead><tr><th>題名</th><th>出典</th><th>区画</th><th>節</th><th /></tr></thead>
+        <thead><tr>
+          <th>{category === 'learned' ? '学んだこと' : '題名'}</th>
+          {isRule ? <th>施行</th> : <th>{category === 'learned' ? '最後に使った日' : '出典'}</th>}
+          {isRule && <th>出典</th>}
+          <th>節</th><th />
+        </tr></thead>
         <tbody>
-          {items.map((k) => (
+          {active.map((k) => (
             <Fragment key={k.id}>
-            <tr>
-              <td>{k.title}</td>
-              <td>
-                {k.source}
-                {/* 業務から登録した知識の由来。Google 由来のものを探して消せるようにする（第9.5.2節） */}
-                {k.originRunId && <>{' '}<span className="badge muted-badge" title="2 回の承認のあとに、業務が登録しました">業務から登録</span></>}
-                {k.googleDerived && <>{' '}<span className="badge muted-badge" title="Google から読んだ記録（会議の文字起こしなど）から作りました">Google 由来</span></>}
-                {/* 秘書が会話から学び、自分で会社の知識にしたもの（仕様書 第11.3節、ADR-0028）。違っていれば消す */}
-                {k.kind === 'promoted' && <>{' '}<span className="badge muted-badge" title="秘書が会話から学んで加えました">秘書が追加</span></>}
-              </td>
-              <td>{k.compartment ?? '—'}</td>
-              <td>
-                <button className="link-btn" onClick={() => toggle(k.id)} title="本文をどう分けたかを見る">
-                  {k.sectionCount ?? 0} 節{open?.id === k.id ? '（閉じる）' : ''}
-                </button>
-              </td>
-              <td className="num">
-                <button className="btn ghost small" onClick={() => setDraft({ ...k })}>編集</button>{' '}
-                <button className="btn danger small" disabled={saver.busy}
-                  onClick={() => { if (confirm(`「${k.title}」を削除しますか`)) void saver.run(async () => { await api.admin.deleteKnowledge(k.id); await load(); }, '削除しました'); }}>
-                  削除
-                </button>
-              </td>
-            </tr>
-            {open?.id === k.id && (
-              <tr className="sub-row">
-                <td colSpan={5}>
-                  {open.sections.length === 0 ? <p className="muted small">節がありません（本文が空です）。</p> : (
+              <tr>
+                <td>{category === 'learned' ? k.body : k.title}</td>
+                {isRule ? (
+                  <td>
+                    第 {k.version ?? 1} 版（{day(k.effectiveFrom)}）
+                    {k.pending && <>{' '}<span className="badge">次の版 {k.pending.effectiveFrom}</span></>}
+                  </td>
+                ) : category === 'learned' ? <td>{day(k.lastUsedAt)}</td> : (
+                  <td>
+                    {k.source}
+                    {k.originRunId && <>{' '}<span className="badge muted-badge">業務から登録</span></>}
+                    {k.googleDerived && <>{' '}<span className="badge muted-badge">Google 由来</span></>}
+                  </td>
+                )}
+                {isRule && <td>{k.source}{k.compartment && <span className="muted small">（{k.compartment}）</span>}</td>}
+                <td>
+                  <button className="link-btn" onClick={() => toggleSections(k.id)}>{k.sectionCount ?? 0} 節</button>
+                </td>
+                <td className="num">
+                  <button className="btn ghost small" onClick={() => setDraft({ id: k.id, title: k.title, body: k.body, source: k.source, compartment: k.compartment, effectiveFrom: jstToday() })}>
+                    {isRule ? '改定' : '直す'}
+                  </button>{' '}
+                  {isRule && <><button className="btn ghost small" onClick={() => toggleVersions(k.id)}>版</button>{' '}</>}
+                  {category === 'learned' ? (
+                    <button className="btn danger small" disabled={saver.busy}
+                      onClick={() => { if (confirm('この知識を消しますか')) act(() => api.admin.deleteKnowledge(k.id), '消しました'); }}>消す</button>
+                  ) : (
+                    <button className="btn ghost small" disabled={saver.busy} onClick={() => act(() => api.admin.retireKnowledge(k.id), '廃止しました。1 年は戻せます')}>廃止</button>
+                  )}
+                </td>
+              </tr>
+              {open?.id === k.id && open.sections && (
+                <tr className="sub-row"><td colSpan={colSpan}>
+                  {open.sections.length === 0 ? <p className="muted small">節がありません。</p> : (
                     <ol className="section-list">
                       {open.sections.map((x, i) => (
                         <li key={i}>
@@ -714,25 +778,73 @@ export function KnowledgeSettings({ page }: { page: string }) {
                       ))}
                     </ol>
                   )}
-                </td>
-              </tr>
-            )}
+                </td></tr>
+              )}
+              {open?.id === k.id && open.versions && (
+                <tr className="sub-row"><td colSpan={colSpan}>
+                  <table className="table small">
+                    <tbody>
+                      {open.versions.map((v) => (
+                        <Fragment key={v.version}>
+                          <tr>
+                            <td>第 {v.version} 版{v.current && <>{' '}<span className="badge">施行中</span></>}{v.pending && <>{' '}<span className="badge">施行前</span></>}</td>
+                            <td>施行 {v.effectiveFrom}</td>
+                            <td className="muted">保存 {day(v.savedAt)}・{v.chars.toLocaleString('ja-JP')} 字</td>
+                            <td className="num"><button className="link-btn" onClick={() => showBody(k.id, v.version)}>本文</button></td>
+                          </tr>
+                          {body?.key === `${k.id}:${v.version}` && <tr><td colSpan={4}><pre className="knowledge-body">{body.text}</pre></td></tr>}
+                        </Fragment>
+                      ))}
+                    </tbody>
+                  </table>
+                </td></tr>
+              )}
             </Fragment>
           ))}
         </tbody>
       </table>
-      </>}
+      {inactive.length > 0 && (
+        <>
+          <h4>{category === 'learned' ? 'しまったもの' : '廃止したもの'}</h4>
+          <table className="table">
+            <tbody>
+              {inactive.map((k) => (
+                <tr key={k.id}>
+                  <td>{category === 'learned' ? k.body : k.title}</td>
+                  <td className="muted">
+                    {day(k.statusAt)}
+                    {category === 'learned' && k.statusReason && `・${ARCHIVE_REASON[k.statusReason] ?? k.statusReason}`}
+                  </td>
+                  <td className="num">
+                    {restorable(k)
+                      ? <button className="btn ghost small" disabled={saver.busy} onClick={() => act(() => api.admin.restoreKnowledge(k.id), '戻しました')}>戻す</button>
+                      : <span className="muted small">1 年を過ぎました</span>}
+                    {category === 'learned' && <>{' '}<button className="btn danger small" disabled={saver.busy}
+                      onClick={() => { if (confirm('この知識を消しますか')) act(() => api.admin.deleteKnowledge(k.id), '消しました'); }}>消す</button></>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
     </>
   );
 }
 
 /** 小分けの題名（第6.6.0.1節）。 */
 const KNOWLEDGE_TITLES: Record<string, string> = {
-  items: '登録と一覧',
+  rules: '社内規程',
+  items: '社内規程',
+  minutes: '議事録',
+  learned: '秘書が学んだこと',
 };
 
 /** 小分けごとの「？」の説明（仕様書 第6.10.4.4節）。 */
 const KNOWLEDGE_HELP: Record<string, PageHelp> = {
-  items: { article: 'admin-knowledge', text: 'ここに登録した規程から、秘書と「社内ナレッジ Q&A」が出典つきで答えます。空のままだと答えられません。' },
+  rules: { article: 'admin-knowledge', text: 'ここに登録した規程から、秘書と「社内ナレッジ Q&A」が出典つきで答えます。改定すると前の版を残し、廃止しても 1 年は戻せます。' },
+  items: { article: 'admin-knowledge', text: 'ここに登録した規程から、秘書と「社内ナレッジ Q&A」が出典つきで答えます。改定すると前の版を残し、廃止しても 1 年は戻せます。' },
+  minutes: { article: 'admin-knowledge', text: '「議事録作成・共有」が、共有のあとに登録した議事録です。廃止しても 1 年は戻せます。' },
+  learned: { article: 'admin-knowledge', text: '秘書が会話から学び、ほかの人にも役立つと判断したことです。週 1 回、秘書がまとめ、古いものや使われないものをしまいます。' },
 };
 

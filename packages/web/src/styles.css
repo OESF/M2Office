@@ -1616,3 +1616,7 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .ext-signage-sources code { word-break: break-all; }
 .ext-signage-template { display: flex; flex-direction: column; gap: 4px; flex: 1 1 280px; }
 .ext-signage-template input { width: 100%; }
+
+/* 知識の版の本文と、規程の改定による人事・給与の設定の食い違い（仕様書 第11.11.2節） */
+.knowledge-body { white-space: pre-wrap; max-height: 320px; overflow: auto; font-size: 12px; background: var(--panel-2, rgba(127,127,127,0.08)); padding: 8px; border-radius: 6px; }
+.hr-rule-check { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; margin-bottom: 8px; }

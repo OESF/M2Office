@@ -136,7 +136,7 @@ export function parseProposal(text: string, current: HrSettings): ProposalField[
  */
 export async function proposeFromRules(
   llm: LlmProvider, current: HrSettings, text: string | null, file?: { bytes: Uint8Array; mimeType: string },
-): Promise<{ fields: ProposalField[] } | { error: string }> {
+): Promise<{ fields: ProposalField[]; raw: string } | { error: string }> {
   if (!aiAvailable(llm)) return { error: 'AI が使えないため、規程を読めません' };
   let answer: string;
   if (text && text.trim()) {
@@ -151,5 +151,6 @@ export async function proposeFromRules(
     return { error: '規程から文字を取り出せませんでした' };
   }
   const fields = parseProposal(answer, current);
-  return fields.length ? { fields } : { error: '規程から設定にできる項目を読めませんでした' };
+  // 読んだ答え（raw）は、規程の改定の見張りで残し、見るときの設定と並べ直すのに使う（第30.8.2節）
+  return fields.length ? { fields, raw: answer } : { error: '規程から設定にできる項目を読めませんでした' };
 }

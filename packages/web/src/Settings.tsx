@@ -511,6 +511,9 @@ function PresenceNotice() {
   );
 }
 
+/** しまった理由の言い方（仕様書 第11.11.4節）。 */
+const ARCHIVE_REASON: Record<string, string> = { merged: 'まとめた', stale: '新しい事実で古くなった', unused: '半年使われていない' };
+
 /**
  * 記憶とデータ（仕様書 第6.5.4節）。秘書が自分について覚えていることを、見たいときに見る場所。
  *
@@ -525,6 +528,8 @@ function MemorySettings({ settings, onChange, onSave }: {
   onSave: () => Promise<unknown>;
 }) {
   const [items, setItems] = useState<MemoryView[]>([]);
+  // 整理でしまったもの（仕様書 第11.11.4節）。見たいときに開く
+  const [archived, setArchived] = useState<MemoryView[] | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   // 直している 1 件（ID と書きかけの文）
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
@@ -605,6 +610,27 @@ function MemorySettings({ settings, onChange, onSave }: {
             }}>すべて消す</button>
         </div>
       )}
+      <button className="link-btn small" onClick={() => {
+        if (archived) { setArchived(null); return; }
+        void api.myArchivedMemories().then((r) => setArchived(r.items)).catch((e) => setMsg(describeError(e)));
+      }}>{archived ? 'しまったものを閉じる' : 'しまったもの'}</button>
+      {archived && (archived.length === 0 ? <p className="muted small">ありません。</p> : (
+        <table className="table">
+          <tbody>
+            {archived.map((m) => (
+              <tr key={m.id}>
+                <td>{m.text}</td>
+                <td className="muted small">{m.archivedAt?.slice(0, 10)}・{ARCHIVE_REASON[m.archiveReason ?? ''] ?? ''}</td>
+                <td className="num">
+                  <button className="btn ghost small" onClick={() => void api.restoreMemory(m.id)
+                    .then(() => Promise.all([load(), api.myArchivedMemories().then((r) => setArchived(r.items))]))
+                    .then(() => setMsg('戻しました')).catch((e) => setMsg(describeError(e)))}>戻す</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ))}
       {msg && <p className="muted small">{msg}</p>}
       <PromotionHistory />
     </div>

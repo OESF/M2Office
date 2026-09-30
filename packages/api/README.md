@@ -39,7 +39,7 @@ Cookie は `HttpOnly`・`SameSite=Lax` で、`Domain` 属性を付けません�
 
 `PUT /v1/admin/compartments/:id/enabled` と `DELETE /v1/admin/compartments/:id`（仕様書 第16.3.6.1節）。
 無効の間は誰も区画に入れません（`listUserCompartments()` が `enabled` で絞ります）。
-削除は、その区画の知識（`countKnowledgeInCompartment()`）と業務（会社から見える定義の `compartment`）が残っていれば 409 で断ります。
+削除は、その区画の使っている知識（`countKnowledgeInCompartment()`。廃止・しまったものは数えない）と業務（会社から見える定義の `compartment`）が残っていれば 409 で断ります。
 
 ### 音声の中継（WebSocket）
 
@@ -285,7 +285,8 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `PUT /v1/admin/extensions/business-cards/settings` | 管理者: 名刺管理の、取り込んだ名刺の既定の範囲（`defaultScope`。第27.7節） |
 | `GET /v1/admin/extensions/inventory/booking-sources` ／ `POST` | 管理者: 予約の受け口の一覧 ／ 作る（`name`）。作ったときだけ送り先の URL（鍵を含む）を返す。鍵はハッシュだけを持つ |
 | `PUT /v1/admin/extensions/inventory/booking-sources/:id/status` ／ `mapping` | 管理者: 受け口を止める・再開する（`status`）／ 項目の対応を直す・やり直す（`mapping`。`null` で次の予約から推論し直す） |
-| `POST /v1/admin/extensions/hr/proposal` | 管理者: 就業規則・賃金規程（`file`: PDF・Word・文字・写真）から、人事・給与の設定の案を作る（第30.8.2節。項目・今・案・規程の抜き書き・採らない理由。保存しない。読めなければ 422） |
+| `POST /v1/admin/extensions/hr/proposal` | 管理者: 就業規則・賃金規程（`file`: PDF・Word・文字・写真）から、人事・給与の設定の案を作る（第30.8.2節。項目・今・案・規程の抜き書き・採らない理由。保存しない。読めなければ 422）。JSON で `knowledgeId` を送ると、知識に登録した社内規程から作る |
+| `GET /v1/admin/extensions/hr/rule-checks` ／ `POST …/rule-checks/:itemId/:version/dismiss` | 管理者: 社内規程の登録・改定で見つかった今の設定との食い違い（残した答えを、いまの設定と並べ直す。第11.11.2節）／ 見終えた |
 | `PUT /v1/admin/extensions/hr/settings` | 管理者: 人事・給与の会社の設定（`office`・`health`・`socialApply`・`pay`・`procedures`・`work`・`agreement`・`leave`・`payroll`・`transfer`（振込元。番号の桁を確かめる）・`duties`（納期の特例・定期健康診断の月）・`notice`（労働条件通知書の会社の定め）・`insurance`（事業所整理記号・事業所番号・特定適用事業所 auto・yes・no・通常の労働者の週の所定労働時間 10〜60）・`labor`（雇用保険の事業の種類・労災保険の事業の種類の番号・労働保険番号）。第30.8.1節）。`GET /v1/admin/extensions/hr/labor-industries` で労災保険率表の事業の種類、`GET /v1/admin/extensions/hr/allowances` で手当の扱い（雇用条件の手当の名前と、割増の基礎・所得税の対象・設定したか）。送った項目だけを変える。人事・給与を `PUT /v1/admin/extensions/hr/enabled` で入れると、区画 `hr` が無ければ作り、入れた管理者を入れる |
 | `PUT /v1/admin/extensions/inventory/settings` | 管理者: 在庫管理の機能の入り切り（`features`）・残りわずかの既定の目安（`lowDefault`）・仕入れの日数（`leadDaysDefault`）・棚卸しの頻度（`countEveryDays`）。送った項目だけを変える（第29.4.1節） |
 | `GET /v1/admin/connections/mcp` | 管理者: 会社の接続（MCP）の一覧。道具ごとの危険度・有効かどうか・使っている業務、認証の状態（`authState`。秘密の値は返さない）、よく使うサービスの型（`presets`）（仕様書 第12.11節、ADR-0037・ADR-0044） |
@@ -317,11 +318,13 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `PUT /v1/admin/settings/:section` | 管理者: 設定の 1 区分を保存（`company`・`writingStyle`・`automation`・`agents`・`effect`・`slides`・`privacy`。`knowledge`（言い換えの登録）は 400 で断る（第 0.115.0 版から秘書が考える。第11.7.7.0節）。`privacy` は Google から取得したデータを残す日数） |
 | `POST /v1/admin/users` | 管理者: 利用者の招待（Workspace のドメインのみ） |
 | `PATCH /v1/admin/users/:id` | 管理者: 表示名・ロール・状態（管理者が 0 人になる変更は 409） |
-| `GET /v1/admin/knowledge` | 管理者: 組織知識の一覧 |
-| `POST /v1/admin/knowledge` | 管理者: 新規の登録。ID を発行して 201 で返す（ADR-0019） |
-| `PUT /v1/admin/knowledge/:id` | 管理者: 更新（`new` を指すと新規）。本文を節に分け、分けた節を返す（50 万字まで） |
+| `GET /v1/admin/knowledge` | 管理者: 組織知識の一覧（種類 `category`: `rule`・`minutes`・`learned`、状態 `status`: `active`・`retired`・`archived`、施行日と施行日が先の版。廃止・しまったものを含む）と、最後に整理した日と数（`consolidated`。仕様書 第11.11節） |
+| `POST /v1/admin/knowledge` | 管理者: 社内規程の新規の登録（`effectiveFrom` を省くと今日）。ID を発行して 201 で返す（ADR-0019） |
+| `PUT /v1/admin/knowledge/:id` | 管理者: 更新（`new` を指すか、無い ID なら新しい社内規程）。社内規程は版を残し、施行日が先なら施行日まで前の版で答える（`applied: false`）。議事録と秘書が学んだことは版を残さずに直す。廃止・しまったものは 409。本文を節に分け、分けた節を返す（50 万字まで） |
 | `GET /v1/admin/knowledge/:id/sections` | 管理者: 1 件の知識の節（見出しの経路と字数） |
-| `DELETE /v1/admin/knowledge/:id` | 管理者: 削除 |
+| `GET /v1/admin/knowledge/:id/versions` ／ `/versions/:version` | 管理者: 社内規程の版の一覧（施行中・施行前）／ 1 つの版の本文 |
+| `POST /v1/admin/knowledge/:id/retire` ／ `/restore` | 管理者: 社内規程・議事録を廃止する（消さない。秘書が学んだことは 409）／ 廃止した・しまったものを戻す（1 年を過ぎたら 409） |
+| `DELETE /v1/admin/knowledge/:id` | 管理者: 秘書が学んだことを消す（社内規程と議事録は 409） |
 | `GET /v1/me/settings` | 本人の個人設定 |
 | `PUT /v1/me/settings/:section` | 個人設定の 1 区分を保存（`profile`・`secretary`・`notifications`・`memory`・`menu`・`brief`）。`brief`（朝のブリーフの関心の分野と外した項目。第6.5.3.1節）は、秘書が最初の分野を選んだ印を画面から変えさせない |
 | `POST /v1/me/voice-test` | 声を試す。本文の秘書の設定（保存の前でもよい）で秘書に名乗らせ、話した文字と声（24 kHz・16 ビットの PCM を base64）を返す。保存しない（仕様書 第10.5.8節） |
@@ -333,6 +336,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `PATCH /v1/me/memories/:id` | 覚えていることを本人が直す（`{ text }`）。認証情報・覚えない言葉・200 字超は 400。秘書が覚えた文を直すと、元の文は再び覚えない |
 | `DELETE /v1/me/memories/:id` | 1 件を消す。秘書が覚えた文を消すと、同じ文は再び覚えない |
 | `DELETE /v1/me/memories` | すべて消す |
+| `GET /v1/me/memories/archived` ／ `POST /v1/me/memories/:id/restore` | 週 1 回の整理でしまった記憶（理由つき）／ 戻す（仕様書 第11.11.4節） |
 | `GET /v1/me/promotions` | 本人の記憶から、秘書が会社の知識にしたものの履歴（本人のものだけ。第6.5.4節）。本人が出す・管理者が承認する API は第 0.115.0 版でなくした |
 | `GET /v1/help/articles?scope=` | ヘルプの記事の一覧（役割と有効な業務で出し分け）と、読めるマニュアルの名前（`manuals`）。`scope=admin` は管理者ページ（管理者向けの記事だけ）、それ以外はワークスペース（管理者向けを除く）。業務のマニュアルの章（`docs/manual/`）は、その業務を使える人にだけ出す（第6.10.7節・第6.10.7.3節） |
 | `GET /v1/help/articles/:id` | 記事の本文。見られない記事は 404 |

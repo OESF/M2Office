@@ -38,7 +38,8 @@ export function onboardingRoute(deps: AppDeps) {
     const { tenant } = c.get('ctx');
     const [settings, knowledge, users] = await Promise.all([
       deps.repo.getTenantSettings(tenant.id),
-      deps.repo.countKnowledge(tenant.id),
+      // 規程を登録したか（秘書が学んだこと・議事録は数えない。第11.11.1節）
+      deps.repo.listKnowledge(tenant.id).then((ks) => ks.filter((k) => k.category === 'rule').length),
       deps.repo.listUsers(tenant.id),
     ]);
     const items = [

@@ -14,7 +14,7 @@ import {
   RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, InventoryService, InventoryWatch, InventoryBookings, PostgresInventoryStore, inventoryAccess, SignageService, SignageInterrupts, PostgresSignageStore, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention,
   NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv,
-  defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials,
+  defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator,
 } from '@m2office/core';
 import { canRunAgent } from '@m2office/shared';
 import { fileURLToPath } from 'node:url';
@@ -220,6 +220,10 @@ let lastProactiveCheck = 0;
 /** 店頭サイネージの見回りの間隔（つながらない画面の知らせ。第31.5.1節）。 */
 const SIGNAGE_INTERVAL_MS = Number(process.env['SIGNAGE_INTERVAL_MS'] ?? 60_000);
 let lastSignageCheck = 0;
+// 秘書が学んだことの週 1 回の整理と、残す期間の片付け（仕様書 第11.11.4節）。1 時間ごとに「日曜の深夜で、前の整理から 6 日より経ったか」を見る
+const CONSOLIDATE_INTERVAL_MS = Number(process.env['CONSOLIDATE_INTERVAL_MS'] ?? 3_600_000);
+let lastConsolidateCheck = 0;
+const consolidator = new Consolidator({ repo, llm: (tenantId) => ai.llmFor(tenantId) });
 
 process.on('SIGINT', () => { running = false; });
 process.on('SIGTERM', () => { running = false; });
@@ -376,6 +380,21 @@ while (running) {
         if (p.texts + p.rows > 0) log.info('サイネージの割り込みの文と古い行を消しました', { tenantId, texts: p.texts, rows: p.rows });
       } catch (err) {
         log.warn('サイネージの見回りに失敗しました', { tenantId, err });
+      }
+    }
+  }
+
+  // 秘書が学んだことの整理（第11.11.4節）。会社ごとの失敗はほかの会社を止めない
+  if (Date.now() - lastConsolidateCheck >= CONSOLIDATE_INTERVAL_MS) {
+    lastConsolidateCheck = Date.now();
+    for (const tenantId of await repo.listTenantIds()) {
+      try {
+        const now = new Date();
+        if (!(await consolidator.due(tenantId, now))) continue;
+        const r = await consolidator.run(tenantId, now);
+        log.info('秘書が学んだことを整理しました', { tenantId, knowledge: r.knowledge, memories: r.memories, purged: r.purged });
+      } catch (err) {
+        log.warn('秘書が学んだことの整理に失敗しました', { tenantId, err });
       }
     }
   }

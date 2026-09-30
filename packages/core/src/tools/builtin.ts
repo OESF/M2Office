@@ -19,7 +19,7 @@ import { BRIEF_TOOLS } from '../brief/tools.js';
 import { NOTICE_TOOLS } from '../notices/tools.js';
 import { INVENTORY_TOOLS } from '../inventory/tools.js';
 import { HR_TOOLS } from '../hr/tools.js';
-import { rewriteNote } from '../knowledge/search.js';
+import { KNOWLEDGE_CATEGORY_LABEL, KNOWLEDGE_PRIORITY_NOTE, rewriteNote } from '../knowledge/search.js';
 import { approvedArtifact, jstDate } from './approved-artifact.js';
 
 /**
@@ -41,8 +41,10 @@ export const knowledgeSearch: Tool = {
     const { hits, rewrites } = await ctx.repo.searchKnowledge(ctx.tenantId, query, ctx.compartment, synonyms);
     return {
       query,
-      hits: hits.map((h) => ({ citation: h.citation, title: h.title, heading: h.heading, source: h.source, body: h.body })),
+      // 種類（社内規程・議事録・秘書が学んだこと）を添え、食い違えば社内規程に従わせる（第11.7.3節・第11.11.1節）
+      hits: hits.map((h) => ({ kind: KNOWLEDGE_CATEGORY_LABEL[h.category], citation: h.citation, title: h.title, heading: h.heading, source: h.source, body: h.body })),
       found: hits.length,
+      ...(hits.length > 0 ? { priority: KNOWLEDGE_PRIORITY_NOTE } : {}),
       // 言い換えで読み替えた言葉。答えに「〜と読み替えて探しました」と示す（第11.7.7節）
       rewrites,
       ...(rewrites.length > 0 ? { note: rewriteNote(rewrites) } : {}),

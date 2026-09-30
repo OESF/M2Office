@@ -25,9 +25,10 @@
 | compartment_group | 区画のグループの割当 | tenant_id、compartment_id、group_id、割当者、割当日時（第16.7.5節） |
 | user_group | グループ | tenant_id、名前、説明（第16.7節） |
 | user_group_member | グループの所属 | tenant_id、group_id、user_id |
-| **memory_personal** | 個人記憶 | user_id、種別、内容、出典、確信度、最終更新、**区画除外の印** |
+| **memory_personal** | 個人記憶 | user_id、種別、内容、出典、確信度、最終更新、**区画除外の印**。第 0.193.0 版で、最後に使った日・状態（使う・しまった）・しまった理由と日・まとめた先（第11.11.4節） |
 | **memory_team** | チーム記憶 | team_id、内容、出典、昇華元 |
-| **knowledge_item** | 組織知識 | tenant_id、種別、内容、出典、版、公開範囲、登録者、**区画**、登録した実行・Google から読んだデータで作ったか（業務から登録したもの。第9.5.2節） |
+| **knowledge_item** | 組織知識 | tenant_id、種別、内容、出典、版、公開範囲、登録者、**区画**、登録した実行・Google から読んだデータで作ったか（業務から登録したもの。第9.5.2節）。第 0.193.0 版で、種類（社内規程・議事録・秘書が学んだこと）・状態（使う・廃止・しまった）と日・最後に使った日・まとめた先（第11.11節） |
+| **knowledge_item_version** | 社内規程の版（第 0.193.0 版、第11.11.2節） | tenant_id、knowledge_item の参照、版、施行日、題名、本文、出典、保存した人と日時。7 年で消す |
 | knowledge_section | 組織知識の節（検索と出典の単位） | tenant_id、knowledge_item の参照、順序、見出し、見出しの経路、本文（第11.7.2節）。Phase 2 で、本文のハッシュ・埋め込み・埋め込みのモデルと次元・作った日時（第11.7.6.1節） |
 | **promotion** | 昇華 | 元記憶、本人承認、組織承認、状態、日時 |
 | knowledge_source | 知識の取込元 | tenant_id、種別、対象パス、同期状態、**区画** |

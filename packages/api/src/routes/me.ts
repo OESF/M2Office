@@ -232,6 +232,23 @@ export function meRoute(deps: AppDeps) {
     return c.json({ items });
   });
 
+  /** 整理でしまった記憶（第11.11.4節）。理由（まとめた・古い・使われない）とともに返す。1 年で消える。 */
+  app.get('/memories/archived', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const items = await deps.repo.listArchivedMemories(tenant.id, user.id);
+    return c.json({ items });
+  });
+
+  /** しまった記憶を戻す（第11.11.4節）。 */
+  app.post('/memories/:id/restore', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const ok = await deps.repo.setMemoryStatus(tenant.id, user.id, c.req.param('id'), 'active', null, null, new Date().toISOString());
+    if (!ok) return c.json({ error: '記憶が見つかりません' }, 404);
+    // 戻した中身は監査ログに入れない（第11.5.1節）
+    await audit(deps, tenant.id, user.id, 'memory.restore', c.req.param('id'));
+    return c.json({ ok: true });
+  });
+
   /** 自分の記憶から、秘書が会社の知識にしたものの履歴（第6.5.4節「昇華の履歴」。判断は秘書が行う。第11.3節）。 */
   app.get('/promotions', async (c) => {
     const { tenant, user } = c.get('ctx');

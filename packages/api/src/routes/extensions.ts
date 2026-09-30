@@ -300,10 +300,17 @@ export function extensionsRoute(deps: AppDeps) {
    */
   /**
    * 就業規則・賃金規程（PDF・Word・文字・写真）から会社の設定の案を作る（第30.8.2節）。保存はしない（管理者が選んで設定に入れる）。
-   * ファイルは残さない。
+   * ファイルは残さない。JSON で `knowledgeId` を送ると、知識に登録した社内規程から作る（第11.11.2節。第 0.193.0 版）。
    */
   app.post(`/${HR_EXTENSION_ID}/proposal`, async (c) => {
     const { tenant, user } = c.get('ctx');
+    if ((c.req.header('content-type') ?? '').startsWith('application/json')) {
+      const b = await c.req.json<{ knowledgeId?: unknown }>().catch(() => ({} as { knowledgeId?: unknown }));
+      const rule = (await deps.repo.listKnowledge(tenant.id)).find((k) => k.id === b.knowledgeId && k.category === 'rule');
+      if (!rule) return c.json({ error: '社内規程が見つかりません' }, 404);
+      const r = await deps.hr.service.proposeFromText(tenant.id, user.id, rule.body);
+      return 'error' in r ? c.json(r, 422) : c.json({ fields: r.fields });
+    }
     const form = await c.req.parseBody();
     const f = form['file'];
     if (!(f instanceof File)) return c.json({ error: '就業規則か賃金規程のファイルを選んでください' }, 400);
@@ -314,7 +321,35 @@ export function extensionsRoute(deps: AppDeps) {
       : /\.(txt|md)$/i.test(f.name) ? 'txt' : null;
     if (!kind) return c.json({ error: 'PDF・Word・文字のファイルか、写真を選んでください' }, 400);
     const r = await deps.hr.service.proposeSettings(tenant.id, user.id, bytes, kind);
-    return 'error' in r ? c.json(r, 422) : c.json(r);
+    return 'error' in r ? c.json(r, 422) : c.json({ fields: r.fields });
+  });
+
+  /**
+   * 社内規程の登録・改定で見つかった、人事・給与の今の設定と食い違う項目（第11.11.2節・第30.8.2節）。
+   * 残した答えを、いまの設定と並べ直して返す（直した項目は出さない）。食い違いが無くなった版は返さない。
+   */
+  app.get(`/${HR_EXTENSION_ID}/rule-checks`, async (c) => {
+    const { tenant } = c.get('ctx');
+    const checks = [];
+    for (const v of await deps.repo.listRuleHrChecks(tenant.id)) {
+      const raw = (v.hrCheck as { raw?: unknown } | null)?.raw;
+      if (typeof raw !== 'string') continue;
+      const fields = await deps.hr.service.ruleDiffs(tenant.id, raw);
+      if (fields.length) checks.push({ itemId: v.itemId, version: v.version, title: v.title, effectiveFrom: v.effectiveFrom, fields });
+    }
+    return c.json({ checks });
+  });
+
+  /** 規程の改定で見つかった食い違いを見終えた（直さないと決めたときにも使う）。 */
+  app.post(`/${HR_EXTENSION_ID}/rule-checks/:itemId/:version/dismiss`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const ok = await deps.repo.dismissRuleHrCheck(tenant.id, c.req.param('itemId'), Number(c.req.param('version')), new Date().toISOString());
+    if (!ok) return c.json({ error: '見つかりません' }, 404);
+    await deps.repo.appendAudit({
+      id: randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id, action: 'hr.rule_check.dismiss',
+      targetType: 'knowledge', targetId: c.req.param('itemId'), detail: { version: Number(c.req.param('version')) }, occurredAt: new Date().toISOString(),
+    });
+    return c.json({ ok: true });
   });
 
   /** 労災保険率表の事業の種類（いまの表。会社の設定で選ぶ。第30.13.1節）。 */

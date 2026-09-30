@@ -110,6 +110,8 @@ export async function recall(
     ]),
   ];
   const memoryLines = pickedMemories.map((m) => `- ${cut(m.text, 200)}`);
+  // 使った日を記録する（使われない記憶を整理でしまうため。第11.11.4節）。記録できなくても答えは返す
+  if (pickedMemories.length) await Promise.resolve().then(() => repo.touchMemories(tenantId, userId, pickedMemories.map((m) => m.id), now.toISOString())).catch(() => undefined);
 
   // 本人の仕事の記録（新しいものから）
   const nameOf = (id: string) => agents.find((a) => a.id === id)?.name ?? '業務';

@@ -13,9 +13,23 @@ import type {
   StoredFile, Tenant, TenantSettings, User, UserGroup, UserSettings,
 } from '@m2office/shared';
 import { DEFAULT_TENANT_SETTINGS, DEFAULT_USER_SETTINGS, STANDARD_SYNONYMS } from '@m2office/shared';
-import type { AgentEvent, Plan, PlanStep, DecidedApproval, AuditQuery, CompartmentAssignment, Conversation, ConversationDigest, MemoryCandidate, Promotion, CredentialKind, GoogleConnection, UserPhoto, TenantCredential, TenantConnection, ConnectionSecret, UserConnection, DisabledConnectorTool, InstalledExtension, PrivateExtension, KnowledgeItem, KnowledgeSearchResult, KnowledgeSectionView, Memory, Repository, RunStatRow } from './types.js';
+import type { AgentEvent, Plan, PlanStep, DecidedApproval, AuditQuery, CompartmentAssignment, Conversation, ConversationDigest, MemoryCandidate, Promotion, CredentialKind, GoogleConnection, UserPhoto, TenantCredential, TenantConnection, ConnectionSecret, UserConnection, DisabledConnectorTool, InstalledExtension, PrivateExtension, KnowledgeItem, KnowledgeSearchOptions, KnowledgeSearchResult, KnowledgeSectionView, KnowledgeStatus, KnowledgeVersion, Memory, Repository, RunStatRow } from './types.js';
 import { SPLIT_VERSION, citationOf, splitKnowledge } from '../knowledge/sections.js';
-import { SEARCH_CANDIDATES, bigrams, expandTerms, extractTerms, normalizeForSearch, rankSections, rewritesOf } from '../knowledge/search.js';
+import { SEARCH_CANDIDATES, asksOldVersion, bigrams, expandTerms, extractTerms, normalizeForSearch, rankSections, rewritesOf } from '../knowledge/search.js';
+
+/** 日本時間の今日（`YYYY-MM-DD`）。社内規程の施行日で版を切り替えるのに使う（第11.11.2節）。 */
+const jstToday = (now = new Date()) => new Date(now.getTime() + 9 * 3_600_000).toISOString().slice(0, 10);
+/** 改定前の規程を探すときに見る古い版の数（第11.11.2節）。 */
+const OLD_VERSION_SCAN = 30;
+/** 知識の一覧の列（別名 `k`）。日付の列は文字にして返す（`date` を `Date` にしない）。 */
+const KNOWLEDGE_COLUMNS = `k.id, k.tenant_id as "tenantId", k.kind, k.title, k.body, k.source, k.compartment,
+  k.updated_at as "updatedAt", k.version, k.origin_run_id as "originRunId", k.google_derived as "googleDerived",
+  k.category, k.status, k.status_at as "statusAt", k.status_reason as "statusReason", k.effective_from::text as "effectiveFrom",
+  k.last_used_at as "lastUsedAt", k.merged_into as "mergedInto"`;
+/** 版の一覧の列（別名 `v` と、その知識 `k`）。 */
+const VERSION_COLUMNS = `v.item_id as "itemId", v.version, v.effective_from::text as "effectiveFrom", v.title, v.source,
+  v.compartment, v.saved_by as "savedBy", v.saved_at as "savedAt", (v.version = k.version) as current,
+  (v.version > k.version) as pending, char_length(v.body)::int as chars, v.hr_check as "hrCheck"`;
 
 /** 実行の列（別名 `r` の表から、`Run` の形で取り出す）。 */
 const RUN_COLUMNS = `r.id, r.job_id as "jobId", r.tenant_id as "tenantId", r.status, r.cursor,
@@ -514,9 +528,12 @@ export class PostgresRepository implements Repository {
     query: string,
     compartment: string | null,
     extraSynonyms: readonly (readonly string[])[] = [],
+    opts: KnowledgeSearchOptions = {},
   ): Promise<KnowledgeSearchResult> {
     const terms = extractTerms(query);
     if (terms.length === 0) return { hits: [], rewrites: [] };
+    // 施行日を迎えた規程の版に切り替えてから探す（夜中の処理を待たない。第11.11.2節）
+    await this.applyDueVersions(tenantId);
     await this.resplitStaleKnowledge(tenantId);
     // 言い換え（標準・以前に登録した組・秘書が考えたもの）を足す（第11.7.7節・第11.7.7.0節）
     const { knowledge } = await this.getTenantSettings(tenantId);
@@ -526,28 +543,87 @@ export class PostgresRepository implements Repository {
     const patterns = [...new Set(concepts.flatMap((c) => c.alternatives.flatMap(bigrams)))].map((g) => `%${escapeLike(g)}%`);
     const rows = await this.q<{
       id: string; title: string; heading: string; path: string[]; body: string; source: string;
-      compartment: string | null; updatedAt: string;
+      compartment: string | null; updatedAt: string; category: 'rule' | 'minutes' | 'learned';
     }>(tenantId,
       `select s.item_id as id, k.title, s.heading, s.path, s.body, k.source, s.compartment,
-              k.updated_at as "updatedAt"
+              k.updated_at as "updatedAt", k.category
          from knowledge_sections s
          join knowledge_items k on k.id = s.item_id and k.tenant_id = s.tenant_id
         where s.tenant_id = $1
+          and k.status = 'active'
+          and ($5::text[] is null or k.category = any($5::text[]))
           and (s.compartment is null or s.compartment = $3)
           and s.search_text like any($2)
         order by (select count(*) from unnest($2::text[]) p where s.search_text like p) desc,
                  k.updated_at desc
         limit $4`,
-      [tenantId, patterns, compartment, SEARCH_CANDIDATES],
+      [tenantId, patterns, compartment, SEARCH_CANDIDATES, opts.categories ?? null],
     );
     const ranked = rankSections(concepts, rows);
-    return {
-      hits: ranked.map((r) => ({
-        id: r.id, title: r.title, heading: r.heading, path: r.path, citation: citationOf(r.title, r),
-        body: r.body, source: r.source, compartment: r.compartment, score: Math.round(r.score * 100) / 100,
-      })),
-      rewrites: rewritesOf(concepts, ranked),
-    };
+    const hits: KnowledgeSearchResult['hits'] = ranked.map((r) => ({
+      id: r.id, title: r.title, heading: r.heading, path: r.path, citation: citationOf(r.title, r),
+      body: r.body, source: r.source, compartment: r.compartment, score: Math.round(r.score * 100) / 100, category: r.category,
+    }));
+    // 改定前の規程を尋ねられたら、古い版からも探し、版と施行日を添える（第11.11.2節）
+    if (asksOldVersion(query) && (!opts.categories || opts.categories.includes('rule'))) {
+      hits.push(...await this.searchOldVersions(tenantId, concepts, patterns, compartment));
+    }
+    if (opts.touch !== false && hits.length > 0) {
+      await this.touchKnowledge(tenantId, [...new Set(hits.filter((h) => !h.oldVersion).map((h) => h.id))], new Date().toISOString()).catch(() => undefined);
+    }
+    return { hits, rewrites: rewritesOf(concepts, ranked) };
+  }
+
+  /** 社内規程の古い版の節から探す（改定前を尋ねられたとき）。古い版は節に分けて持たないため、ここで分ける。 */
+  private async searchOldVersions(
+    tenantId: string, concepts: ReturnType<typeof expandTerms>, patterns: string[], compartment: string | null,
+  ): Promise<KnowledgeSearchResult['hits']> {
+    const versions = await this.q<{
+      id: string; version: number; effectiveFrom: string; title: string; body: string; source: string; compartment: string | null; savedAt: string;
+    }>(tenantId,
+      `select v.item_id as id, v.version, v.effective_from::text as "effectiveFrom", v.title, v.body, v.source, v.compartment,
+              v.saved_at as "savedAt"
+         from knowledge_item_versions v
+         join knowledge_items k on k.id = v.item_id and k.tenant_id = v.tenant_id
+        where v.tenant_id = $1 and k.status = 'active' and k.category = 'rule' and v.version < k.version
+          and (v.compartment is null or v.compartment = $2)
+          and v.body like any($3)
+        order by v.saved_at desc limit $4`,
+      [tenantId, compartment, patterns, OLD_VERSION_SCAN]);
+    const candidates = versions.flatMap((v) => splitKnowledge(v.body).map((x) => ({
+      id: v.id, title: v.title, heading: x.heading, path: x.path, body: x.body, source: v.source, compartment: v.compartment,
+      updatedAt: v.savedAt, category: 'rule' as const, oldVersion: { version: v.version, effectiveFrom: v.effectiveFrom },
+    })));
+    return rankSections(concepts, candidates).slice(0, 3).map((r) => ({
+      id: r.id, title: r.title, heading: r.heading, path: r.path,
+      citation: `${citationOf(r.title, r)}（第 ${r.oldVersion.version} 版・${r.oldVersion.effectiveFrom} 施行）`,
+      body: r.body, source: r.source, compartment: r.compartment, score: Math.round(r.score * 100) / 100, category: 'rule' as const,
+      oldVersion: r.oldVersion,
+    }));
+  }
+
+  /**
+   * 施行日を迎えた社内規程の版を、施行している版に写して節に分け直す（第11.11.2節）。
+   * 検索と一覧の前に呼ぶ。同じ規程に施行日を迎えた版がいくつもあれば、いちばん新しい版にする。
+   */
+  private async applyDueVersions(tenantId: string): Promise<void> {
+    const due = await this.q<{ id: string; version: number; effectiveFrom: string; title: string; body: string; source: string; compartment: string | null }>(tenantId,
+      `select distinct on (v.item_id) v.item_id as id, v.version, v.effective_from::text as "effectiveFrom", v.title, v.body, v.source, v.compartment
+         from knowledge_item_versions v
+         join knowledge_items k on k.id = v.item_id and k.tenant_id = v.tenant_id
+        where v.tenant_id = $1 and k.status = 'active' and v.version > k.version and v.effective_from <= $2::date
+        order by v.item_id, v.version desc`,
+      [tenantId, jstToday()]);
+    for (const v of due) {
+      await this.inTenant(tenantId, async (client) => {
+        await client.query(
+          `update knowledge_items set title = $3, body = $4, source = $5, compartment = $6, version = $7,
+                  effective_from = $8::date, updated_at = now()
+            where tenant_id = $1 and id = $2 and version < $7`,
+          [tenantId, v.id, v.title, v.body, v.source, v.compartment, v.version, v.effectiveFrom]);
+        await this.writeSections(client, tenantId, v);
+      });
+    }
   }
 
   /** 古い分け方で分けた（または、まだ分けていない）知識を分け直す（第11.7.5節）。 */
@@ -879,30 +955,35 @@ export class PostgresRepository implements Repository {
       [u.tenantId, u.id, u.displayName, u.roles, u.status]);
   }
 
-  async listKnowledge(tenantId: string): Promise<KnowledgeItem[]> {
+  async listKnowledge(tenantId: string, opts: { all?: boolean } = {}): Promise<KnowledgeItem[]> {
+    await this.applyDueVersions(tenantId);
     return this.q<KnowledgeItem>(tenantId,
-      `select id, tenant_id as "tenantId", kind, title, body, source, compartment,
-              updated_at as "updatedAt", version,
-              origin_run_id as "originRunId", google_derived as "googleDerived",
+      `select ${KNOWLEDGE_COLUMNS},
               (select count(*)::int from knowledge_sections s
-                where s.tenant_id = k.tenant_id and s.item_id = k.id) as "sectionCount"
-         from knowledge_items k where tenant_id = $1 order by updated_at desc`,
-      [tenantId]);
+                where s.tenant_id = k.tenant_id and s.item_id = k.id) as "sectionCount",
+              (select json_build_object('version', v.version, 'effectiveFrom', v.effective_from::text)
+                 from knowledge_item_versions v
+                where v.tenant_id = k.tenant_id and v.item_id = k.id and v.version > k.version
+                order by v.version desc limit 1) as pending
+         from knowledge_items k where k.tenant_id = $1 and ($2 or k.status = 'active') order by k.updated_at desc`,
+      [tenantId, !!opts.all]);
   }
 
   async saveKnowledge(k: KnowledgeItem): Promise<void> {
+    // 種類は登録の経路で決める（第11.11.1節）。最初の登録のときだけ書く
+    const category = k.category ?? (k.kind === 'promoted' ? 'learned' : k.originRunId ? 'minutes' : 'rule');
     await this.inTenant(k.tenantId, async (client) => {
       const res = await client.query(
         `insert into knowledge_items
-           (id, tenant_id, kind, title, body, source, compartment, updated_at, origin_run_id, google_derived)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+           (id, tenant_id, kind, title, body, source, compartment, updated_at, origin_run_id, google_derived, category, last_used_at)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$8)
          on conflict (id) do update set kind = excluded.kind, title = excluded.title,
            body = excluded.body, source = excluded.source, compartment = excluded.compartment,
            updated_at = excluded.updated_at, version = knowledge_items.version + 1
          where knowledge_items.tenant_id = excluded.tenant_id`,
         // 由来（origin_run_id・google_derived）は最初の登録のときだけ書く。上書きの対象に入れない（第9.5.2節）
         [k.id, k.tenantId, k.kind, k.title, k.body, k.source, k.compartment, k.updatedAt,
-          k.originRunId ?? null, k.googleDerived ?? false]);
+          k.originRunId ?? null, k.googleDerived ?? false, category]);
       // 他社の同じ ID には書かない（上の where で更新されない）。その場合は節も作らない
       if (res.rowCount === 0) return;
       await this.writeSections(client, k.tenantId, k);
@@ -917,6 +998,113 @@ export class PostgresRepository implements Repository {
     return this.q<KnowledgeSectionView>(tenantId,
       `select heading, path, char_length(body) as chars from knowledge_sections
         where tenant_id = $1 and item_id = $2 order by ordinal`, [tenantId, itemId]);
+  }
+
+  async saveRuleVersion(k: KnowledgeItem & { effectiveFrom: string }, savedBy: string, today: string): Promise<{ version: number; applied: boolean } | null> {
+    return this.inTenant(k.tenantId, async (client) => {
+      const found = await client.query<{ version: number }>(
+        `select version from knowledge_items where tenant_id = $1 and id = $2 for update`, [k.tenantId, k.id]);
+      if (found.rowCount === 0) {
+        // 新しい規程。施行日にかかわらず、すぐに探せるようにする（前の版が無いため）
+        const res = await client.query(
+          `insert into knowledge_items (id, tenant_id, kind, title, body, source, compartment, updated_at, category, effective_from, last_used_at)
+           values ($1,$2,$3,$4,$5,$6,$7,now(),'rule',$8::date,now()) on conflict (id) do nothing`,
+          [k.id, k.tenantId, k.kind, k.title, k.body, k.source, k.compartment, k.effectiveFrom]);
+        // ほかの会社の同じ ID（行レベルセキュリティで見えない）には書かない
+        if (res.rowCount === 0) return null;
+        await client.query(
+          `insert into knowledge_item_versions (tenant_id, item_id, version, effective_from, title, body, source, compartment, saved_by)
+           values ($1,$2,1,$3::date,$4,$5,$6,$7,$8)`,
+          [k.tenantId, k.id, k.effectiveFrom, k.title, k.body, k.source, k.compartment, savedBy]);
+        await this.writeSections(client, k.tenantId, k);
+        return { version: 1, applied: true };
+      }
+      const max = await client.query<{ v: number }>(
+        `select coalesce(max(version), 0)::int as v from knowledge_item_versions where tenant_id = $1 and item_id = $2`, [k.tenantId, k.id]);
+      const version = Math.max(max.rows[0]!.v, found.rows[0]!.version) + 1;
+      await client.query(
+        `insert into knowledge_item_versions (tenant_id, item_id, version, effective_from, title, body, source, compartment, saved_by)
+         values ($1,$2,$3,$4::date,$5,$6,$7,$8,$9)`,
+        [k.tenantId, k.id, version, k.effectiveFrom, k.title, k.body, k.source, k.compartment, savedBy]);
+      if (k.effectiveFrom > today) return { version, applied: false };
+      await client.query(
+        `update knowledge_items set title = $3, body = $4, source = $5, compartment = $6, version = $7, effective_from = $8::date,
+                updated_at = now() where tenant_id = $1 and id = $2`,
+        [k.tenantId, k.id, k.title, k.body, k.source, k.compartment, version, k.effectiveFrom]);
+      await this.writeSections(client, k.tenantId, k);
+      return { version, applied: true };
+    });
+  }
+
+  async listKnowledgeVersions(tenantId: string, itemId: string): Promise<KnowledgeVersion[] | null> {
+    const found = await this.q<{ id: string }>(tenantId, `select id from knowledge_items where tenant_id = $1 and id = $2`, [tenantId, itemId]);
+    if (found.length === 0) return null;
+    return this.q<KnowledgeVersion>(tenantId,
+      `select ${VERSION_COLUMNS}, '' as body from knowledge_item_versions v
+         join knowledge_items k on k.id = v.item_id and k.tenant_id = v.tenant_id
+        where v.tenant_id = $1 and v.item_id = $2 order by v.version desc`, [tenantId, itemId]);
+  }
+
+  async getKnowledgeVersion(tenantId: string, itemId: string, version: number): Promise<KnowledgeVersion | null> {
+    const rows = await this.q<KnowledgeVersion>(tenantId,
+      `select ${VERSION_COLUMNS}, v.body from knowledge_item_versions v
+         join knowledge_items k on k.id = v.item_id and k.tenant_id = v.tenant_id
+        where v.tenant_id = $1 and v.item_id = $2 and v.version = $3`, [tenantId, itemId, version]);
+    return rows[0] ?? null;
+  }
+
+  async setKnowledgeStatus(tenantId: string, id: string, status: KnowledgeStatus, reason: string | null, mergedInto: string | null, at: string): Promise<boolean> {
+    // 戻したものは、使った日を戻した日にする（戻した直後に「使われない」でしまわないように）
+    const rows = await this.q<{ id: string }>(tenantId,
+      `update knowledge_items set status = $3, status_at = $6, status_reason = $4, merged_into = $5,
+              last_used_at = case when $3 = 'active' then $6::timestamptz else last_used_at end
+        where tenant_id = $1 and id = $2 and status <> $3 returning id`,
+      [tenantId, id, status, reason, mergedInto, at]);
+    return rows.length > 0;
+  }
+
+  async touchKnowledge(tenantId: string, ids: string[], at: string): Promise<void> {
+    if (ids.length === 0) return;
+    await this.q(tenantId, `update knowledge_items set last_used_at = $3 where tenant_id = $1 and id = any($2::text[])`, [tenantId, ids, at]);
+  }
+
+  async purgeKnowledge(tenantId: string, now: Date): Promise<{ items: number; versions: number }> {
+    const year = new Date(now.getTime() - 365 * 86_400_000).toISOString();
+    const seven = new Date(now.getTime() - 7 * 365 * 86_400_000).toISOString();
+    const items = await this.q<{ id: string }>(tenantId,
+      `delete from knowledge_items where tenant_id = $1 and (
+          (category = 'learned' and status = 'archived' and status_at < $2)
+       or (category = 'minutes' and status = 'retired' and status_at < $2)
+       or (category = 'rule' and status = 'retired' and status_at < $3)) returning id`, [tenantId, year, seven]);
+    // 古い版は、次の版が施行されてから 7 年で消す（施行している版と施行日が先の版は消さない）
+    const versions = await this.q<{ version: number }>(tenantId,
+      `delete from knowledge_item_versions v using knowledge_items k
+        where v.tenant_id = $1 and k.tenant_id = v.tenant_id and k.id = v.item_id and v.version < k.version
+          and (select min(n.effective_from) from knowledge_item_versions n
+                where n.tenant_id = v.tenant_id and n.item_id = v.item_id and n.version > v.version) < $2::date
+        returning v.version`, [tenantId, seven.slice(0, 10)]);
+    return { items: items.length, versions: versions.length };
+  }
+
+  async setRuleHrCheck(tenantId: string, itemId: string, version: number, check: unknown): Promise<void> {
+    await this.q(tenantId,
+      `update knowledge_item_versions set hr_check = $4::jsonb, hr_check_dismissed_at = null
+        where tenant_id = $1 and item_id = $2 and version = $3`, [tenantId, itemId, version, JSON.stringify(check)]);
+  }
+
+  async listRuleHrChecks(tenantId: string): Promise<KnowledgeVersion[]> {
+    return this.q<KnowledgeVersion>(tenantId,
+      `select ${VERSION_COLUMNS}, '' as body from knowledge_item_versions v
+         join knowledge_items k on k.id = v.item_id and k.tenant_id = v.tenant_id
+        where v.tenant_id = $1 and k.status = 'active' and v.hr_check is not null and v.hr_check_dismissed_at is null
+        order by v.saved_at desc limit 10`, [tenantId]);
+  }
+
+  async dismissRuleHrCheck(tenantId: string, itemId: string, version: number, at: string): Promise<boolean> {
+    const rows = await this.q<{ version: number }>(tenantId,
+      `update knowledge_item_versions set hr_check_dismissed_at = $4
+        where tenant_id = $1 and item_id = $2 and version = $3 and hr_check is not null returning version`, [tenantId, itemId, version, at]);
+    return rows.length > 0;
   }
 
   async deleteKnowledge(tenantId: string, id: string): Promise<boolean> {
@@ -1211,15 +1399,49 @@ export class PostgresRepository implements Repository {
   async listMemories(tenantId: string, userId: string): Promise<Memory[]> {
     return this.q<Memory>(tenantId,
       `select id, tenant_id as "tenantId", user_id as "userId", text, source,
-              created_at as "createdAt"
-         from memories where tenant_id = $1 and user_id = $2 order by created_at desc`,
+              created_at as "createdAt", last_used_at as "lastUsedAt"
+         from memories where tenant_id = $1 and user_id = $2 and status = 'active' order by created_at desc`,
       [tenantId, userId]);
+  }
+
+  async listArchivedMemories(tenantId: string, userId: string): Promise<Memory[]> {
+    return this.q<Memory>(tenantId,
+      `select id, tenant_id as "tenantId", user_id as "userId", text, source, created_at as "createdAt",
+              last_used_at as "lastUsedAt", archived_at as "archivedAt", archive_reason as "archiveReason"
+         from memories where tenant_id = $1 and user_id = $2 and status = 'archived' order by archived_at desc`,
+      [tenantId, userId]);
+  }
+
+  async setMemoryStatus(tenantId: string, userId: string, id: string, status: 'active' | 'archived', reason: string | null, mergedInto: string | null, at: string): Promise<boolean> {
+    const rows = await this.q<{ id: string }>(tenantId,
+      `update memories set status = $4, archive_reason = $5, merged_into = $6,
+              archived_at = case when $4 = 'archived' then $7::timestamptz else null end,
+              last_used_at = case when $4 = 'active' then $7::timestamptz else last_used_at end
+        where tenant_id = $1 and user_id = $2 and id = $3 and status <> $4 returning id`,
+      [tenantId, userId, id, status, reason, mergedInto, at]);
+    return rows.length > 0;
+  }
+
+  async touchMemories(tenantId: string, userId: string, ids: string[], at: string): Promise<void> {
+    if (ids.length === 0) return;
+    await this.q(tenantId, `update memories set last_used_at = $4 where tenant_id = $1 and user_id = $2 and id = any($3::text[])`,
+      [tenantId, userId, ids, at]);
+  }
+
+  async listMemoryOwners(tenantId: string): Promise<string[]> {
+    return (await this.q<{ userId: string }>(tenantId,
+      `select distinct user_id as "userId" from memories where tenant_id = $1 and status = 'active'`, [tenantId])).map((r) => r.userId);
+  }
+
+  async purgeArchivedMemories(tenantId: string, before: string): Promise<number> {
+    return (await this.q<{ id: string }>(tenantId,
+      `delete from memories where tenant_id = $1 and status = 'archived' and archived_at < $2 returning id`, [tenantId, before])).length;
   }
 
   async createMemory(m: Memory): Promise<void> {
     await this.q(m.tenantId,
-      `insert into memories (id, tenant_id, user_id, text, source, created_at)
-       values ($1,$2,$3,$4,$5,$6)`,
+      `insert into memories (id, tenant_id, user_id, text, source, created_at, last_used_at)
+       values ($1,$2,$3,$4,$5,$6,$6)`,
       [m.id, m.tenantId, m.userId, m.text, m.source, m.createdAt]);
   }
 
@@ -1419,7 +1641,7 @@ export class PostgresRepository implements Repository {
 
   async countKnowledge(tenantId: string): Promise<number> {
     const rows = await this.q<{ n: number }>(tenantId,
-      `select count(*)::int as n from knowledge_items where tenant_id = $1`, [tenantId]);
+      `select count(*)::int as n from knowledge_items where tenant_id = $1 and status = 'active'`, [tenantId]);
     return rows[0]?.n ?? 0;
   }
 
@@ -1722,7 +1944,8 @@ export class PostgresRepository implements Repository {
 
   async countKnowledgeInCompartment(tenantId: string, compartment: string): Promise<number> {
     const rows = await this.q<{ n: number }>(tenantId,
-      `select count(*)::int as n from knowledge_items where tenant_id = $1 and compartment = $2`,
+      // 廃止した・しまった知識は数えない（区画を消すと、それらは誰の検索にも出ない。第11.11節）
+      `select count(*)::int as n from knowledge_items where tenant_id = $1 and compartment = $2 and status = 'active'`,
       [tenantId, compartment]);
     return rows[0]?.n ?? 0;
   }

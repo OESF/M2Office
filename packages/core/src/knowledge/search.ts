@@ -22,6 +22,24 @@ export interface ScoredCandidate {
   path: string[];
   body: string;
   updatedAt: string;
+  /** 知識の種類（第11.11.1節）。点が足りた節を、社内規程 → 議事録 → 秘書が学んだことの順に並べる。無ければ社内規程と同じ。 */
+  category?: 'rule' | 'minutes' | 'learned';
+}
+
+/** 知識の種類の呼び名（第11.11.1節）。根拠に添えて、推論と利用者に種類を示す。 */
+export const KNOWLEDGE_CATEGORY_LABEL = { rule: '社内規程', minutes: '議事録', learned: '秘書が学んだこと' } as const;
+
+/** 推論への指示: 種類が食い違うときの採り方（第11.7.3節）。 */
+export const KNOWLEDGE_PRIORITY_NOTE = '社内規程と、議事録や秘書が学んだことが食い違うときは、社内規程に従ってください。';
+
+/** 知識の種類の並び（第11.7.3節。社内規程を先にする）。 */
+const CATEGORY_ORDER = { rule: 0, minutes: 1, learned: 2 } as const;
+
+/**
+ * 改定前の規程を尋ねているか（第11.11.2節）。尋ねていれば、古い版も探す。
+ */
+export function asksOldVersion(query: string): boolean {
+  return /(改定前|改正前|改訂前|旧(?:規程|規定|版)|前の(?:規程|規定|版)|以前の(?:規程|規定)|変わる前|改定される前)/.test(query);
 }
 
 /** 漢字・カタカナ・英数字の連なり（ひらがなや記号で区切る）。 */
@@ -210,20 +228,24 @@ export function matchConcepts(
  *
  * @remarks
  * 言葉が 1 つもそのまま当たらない節（点が 1 未満）と、最上位の 3 割に満たない節は返さない。
- * 何にでも当たる長い文書を出さないため（第11.7.3節）。同点なら更新日の新しい順。
+ * 何にでも当たる長い文書を出さないため（第11.7.3節）。残った節は、社内規程 → 議事録 → 秘書が学んだことの順に並べ、
+ * 同じ種類の中を点の高い順（同点なら更新日の新しい順）にする（第11.11.1節。秘書が学んだ一文が規程の条文より先に出ないように）。
  */
 export function rankSections<T extends ScoredCandidate>(
   terms: SearchConcept[] | string[], candidates: T[],
 ): (T & { score: number })[] {
-  const scored = candidates
+  const all = candidates
     .map((c) => ({ ...c, score: scoreSection(terms, c) }))
-    .filter((c) => c.score >= 1)
-    .sort((a, b) => b.score - a.score || b.updatedAt.localeCompare(a.updatedAt));
-  const top = scored[0]?.score ?? 0;
+    .filter((c) => c.score >= 1);
+  const top = Math.max(0, ...all.map((c) => c.score));
+  const scored = all
+    .filter((c) => c.score >= top * 0.3)
+    .sort((a, b) => CATEGORY_ORDER[a.category ?? 'rule'] - CATEGORY_ORDER[b.category ?? 'rule']
+      || b.score - a.score || b.updatedAt.localeCompare(a.updatedAt));
   const out: (T & { score: number })[] = [];
   let chars = 0;
   for (const c of scored) {
-    if (out.length >= SEARCH_MAX_SECTIONS || c.score < top * 0.3) break;
+    if (out.length >= SEARCH_MAX_SECTIONS) break;
     if (out.length > 0 && chars + c.body.length > SEARCH_MAX_CHARS) break;
     out.push(c);
     chars += c.body.length;

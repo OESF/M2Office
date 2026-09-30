@@ -13,7 +13,7 @@ import {
 } from '@m2office/shared';
 import { buildTermsNotice, renderTermsNoticePdf, type TermsNoticeDoc } from './terms-notice.js';
 import { termsOn } from './attendance-service.js';
-import { proposeFromRules, type ProposalField } from './rules-proposal.js';
+import { parseProposal, proposeFromRules, type ProposalField } from './rules-proposal.js';
 import { extractPdfText } from '../files/pdf.js';
 import { extractDocxText } from '../files/docx.js';
 import type { Repository } from '../repository/types.js';
@@ -273,6 +273,40 @@ export class HrService {
     const r = await proposeFromRules(llm, await this.settings(tenantId), text && text.trim().length > 50 ? text : null, mime ? { bytes, mimeType: mime } : undefined);
     await this.audit(tenantId, userId, 'hr.proposal', 'hr', HR_EXTENSION_ID, 'fields' in r ? { fields: r.fields.length } : { error: true });
     return r;
+  }
+
+  /**
+   * 知識に登録した社内規程の本文から、会社の設定の案を作る（第30.8.2節。第 0.193.0 版）。
+   */
+  async proposeFromText(tenantId: string, userId: string, text: string): Promise<{ fields: ProposalField[]; raw: string } | { error: string }> {
+    if (!this.deps.llm) return { error: 'AI が使えないため、規程を読めません' };
+    const llm = await this.deps.llm(tenantId);
+    const r = await proposeFromRules(llm, await this.settings(tenantId), text.trim().length > 50 ? text : null);
+    await this.audit(tenantId, userId, 'hr.proposal', 'hr', HR_EXTENSION_ID, 'fields' in r ? { fields: r.fields.length, from: 'knowledge' } : { error: true });
+    return r;
+  }
+
+  /**
+   * 社内規程を登録・改定したとき、人事・給与の今の設定と食い違う項目を探す（第11.11.2節・第30.8.2節）。
+   * 食い違いがあれば、読んだ答えを規程の版に残す（見るときに、その時の設定と並べ直す）。人事・給与を使っていない会社と、推論が使えない環境では行わない。
+   *
+   * @returns 食い違う項目の数
+   * @remarks 危険度: read（設定は変えない。直すかは管理者が決める）
+   */
+  async checkRule(tenantId: string, body: string, record: (raw: string) => Promise<void>): Promise<number> {
+    if (!this.deps.llm || !(await this.settings(tenantId)).enabled) return 0;
+    const llm = await this.deps.llm(tenantId);
+    if (llm.name === 'stub' || llm.name === 'unconfigured') return 0;
+    const r = await proposeFromRules(llm, await this.settings(tenantId), body.trim().length > 50 ? body : null);
+    if ('error' in r) return 0;
+    const diffs = r.fields.filter((f) => !f.problem && f.current !== f.proposed).length;
+    if (diffs > 0) await record(r.raw);
+    return diffs;
+  }
+
+  /** 残した答えを、いまの設定と並べ直し、食い違う項目だけを返す。 */
+  async ruleDiffs(tenantId: string, raw: string): Promise<ProposalField[]> {
+    return parseProposal(raw, await this.settings(tenantId)).filter((f) => !f.problem && f.current !== f.proposed);
   }
 
   /** 済んでいない手続き（期限の近い順）。 */

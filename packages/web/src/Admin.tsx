@@ -82,9 +82,11 @@ const TABS: {
   },
   { id: 'extensions', label: '拡張機能', icon: 'extensions', description: '業務と、外部とのつながり（コネクタ）を追加する', group: '設定' },
   {
-    id: 'knowledge', label: '知識', icon: 'knowledge', description: '就業規則などの社内の規程と、秘書が加えた知識', group: '設定',
+    id: 'knowledge', label: '知識', icon: 'knowledge', description: '社内規程・議事録と、秘書が学んだこと', group: '設定',
     pages: [
-      { id: 'items', label: '登録と一覧' },
+      { id: 'rules', label: '社内規程' },
+      { id: 'minutes', label: '議事録' },
+      { id: 'learned', label: '秘書が学んだこと' },
     ],
   },
   { id: 'setup', label: 'はじめに行う設定', icon: 'help', description: '導入の流れと、残っている設定', group: '設定' },

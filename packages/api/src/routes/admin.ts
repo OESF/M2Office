@@ -308,27 +308,47 @@ export function adminRoute(deps: AppDeps) {
     return c.json({ ...next, stoppedRuns });
   });
 
-  /** 組織知識の一覧と、区画の選択肢（第6.6.6節）。 */
+  /**
+   * 組織知識の一覧と、区画の選択肢（第6.6.6節・第11.11.5節）。社内規程・議事録・秘書が学んだことを、廃止した・しまったものも含めて返す。
+   * 画面は種類ごとに分けて並べる。あわせて、最後に整理した日と数を返す（中身は返さない）。
+   */
   app.get('/knowledge', async (c) => {
     const { tenant } = c.get('ctx');
-    const [items, compartments] = await Promise.all([
-      deps.repo.listKnowledge(tenant.id), deps.repo.listCompartments(tenant.id),
+    const [items, compartments, last] = await Promise.all([
+      deps.repo.listKnowledge(tenant.id, { all: true }), deps.repo.listCompartments(tenant.id),
+      deps.repo.listAuditSince(tenant.id, ['knowledge.consolidate'], 1),
     ]);
-    return c.json({ items, compartments });
+    const consolidated = last[0] ? { at: last[0].occurredAt, detail: last[0].detail } : null;
+    return c.json({ items, compartments, consolidated });
   });
 
+  /** 日本時間の今日。 */
+  const today = () => new Date(Date.now() + 9 * 3_600_000).toISOString().slice(0, 10);
+  /** 廃止・しまったものを戻せる期間（第11.11.2節・第11.11.4節）。 */
+  const RESTORE_DAYS = 365;
+
   /**
-   * 規程などを組織知識として登録・更新する（第6.6.6節「規程の登録」）。
+   * 社内規程を登録・改定したら、人事・給与の設定と食い違う項目を探して版に残す（第11.11.2節・第30.8.2節）。
+   * 待たずに裏で行う（保存の答えを遅らせない）。失敗しても保存は取り消さない。
+   */
+  const checkHr = (tenantId: string, itemId: string, version: number, body: string) => {
+    void deps.hr.service.checkRule(tenantId, body, (raw) => deps.repo.setRuleHrCheck(tenantId, itemId, version, { raw }))
+      .catch(() => undefined);
+  };
+
+  /**
+   * 知識を登録・更新する（第6.6.6節「規程の登録」、第11.11節）。
    *
-   * @param newId ID を発行するか。`POST`（新規の登録）のときだけ真
+   * @param newId ID を発行するか。`POST`（新しい社内規程の登録）のときだけ真
    *
    * @remarks
-   * 導入時の初期投入に使う（第22.2節）。AG-04 はここに登録したものから答える。
+   * 管理者が登録するものは社内規程にする（種類は登録の経路で決め、人に選ばせない）。社内規程を直すと版を残す。施行日（`effectiveFrom`）が先なら、
+   * 施行日までは前の版で答える。議事録と秘書が学んだことは、版を残さずに直す。廃止した・しまったものは、戻してから直す。
    */
   const saveKnowledge = (newId: boolean) => async (c: Context<AppEnv>) => {
     const { tenant, user } = c.get('ctx');
     const body = await c.req.json<{
-      kind?: string; title?: string; body?: string; source?: string; compartment?: string | null;
+      kind?: string; title?: string; body?: string; source?: string; compartment?: string | null; effectiveFrom?: string | null;
     }>();
     const title = (body.title ?? '').trim();
     const text = (body.body ?? '').trim();
@@ -341,15 +361,31 @@ export function adminRoute(deps: AppDeps) {
       const names = (await deps.repo.listCompartments(tenant.id)).map((x) => x.name);
       if (!names.includes(compartment)) return c.json({ error: `区画が見つかりません: ${compartment}` }, 400);
     }
+    const effectiveFrom = body.effectiveFrom ? String(body.effectiveFrom) : today();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(effectiveFrom) || Number.isNaN(Date.parse(effectiveFrom))) return c.json({ error: '施行日を YYYY-MM-DD で入れてください' }, 400);
     const id = newId || c.req.param('id') === 'new' ? `k-${randomUUID()}` : c.req.param('id')!;
-    await deps.repo.saveKnowledge({
-      id, tenantId: tenant.id, kind: (body.kind ?? 'rule').trim() || 'rule', title, body: text,
-      source: (body.source ?? '').trim() || title, compartment, updatedAt: new Date().toISOString(),
-    });
-    await audit(deps, tenant.id, user.id, 'knowledge.save', 'knowledge', id, { compartment });
+    // 呼ぶ側が ID を指したときに無ければ、その ID で新しい社内規程として作る（第13.3節、ADR-0019）
+    const existing = (await deps.repo.listKnowledge(tenant.id, { all: true })).find((k) => k.id === id) ?? null;
+    if (existing && existing.status !== 'active') return c.json({ error: existing.status === 'retired' ? '廃止した知識です。戻してから直してください' : 'しまった知識です。戻してから直してください' }, 409);
+    const source = (body.source ?? '').trim() || title;
+    const item = {
+      id, tenantId: tenant.id, kind: existing?.kind ?? ((body.kind ?? 'rule').trim() || 'rule'), title, body: text,
+      source, compartment, updatedAt: new Date().toISOString(),
+    };
+    let extra: Record<string, unknown> = {};
+    if (!existing || existing.category === 'rule') {
+      const saved = await deps.repo.saveRuleVersion({ ...item, effectiveFrom }, user.id, today());
+      if (!saved) return c.json({ error: '知識が見つかりません' }, 404);
+      extra = { version: saved.version, applied: saved.applied, effectiveFrom };
+      await audit(deps, tenant.id, user.id, existing ? 'knowledge.rule.revise' : 'knowledge.rule.create', 'knowledge', id, { compartment, ...extra });
+      checkHr(tenant.id, id, saved.version, text);
+    } else {
+      await deps.repo.saveKnowledge({ ...item, originRunId: existing.originRunId ?? null, googleDerived: existing.googleDerived ?? false });
+      await audit(deps, tenant.id, user.id, 'knowledge.save', 'knowledge', id, { compartment, category: existing.category });
+    }
     // 分け方を管理者が確かめられるように、分けた節を返す（第11.7.2節）
     const sections = (await deps.repo.listKnowledgeSections(tenant.id, id)) ?? [];
-    return c.json({ id, sections }, newId ? 201 : 200);
+    return c.json({ id, sections, ...extra }, newId ? 201 : 200);
   };
 
   // 新規は ID を発行する。更新は呼ぶ側が ID を指す（仕様書 第13.3節、ADR-0019）
@@ -364,11 +400,59 @@ export function adminRoute(deps: AppDeps) {
     return c.json({ sections });
   });
 
+  /** 社内規程の版の一覧（第11.11.2節）。 */
+  app.get('/knowledge/:id/versions', async (c) => {
+    const { tenant } = c.get('ctx');
+    const versions = await deps.repo.listKnowledgeVersions(tenant.id, c.req.param('id'));
+    if (!versions) return c.json({ error: '知識が見つかりません' }, 404);
+    return c.json({ versions });
+  });
+
+  /** 社内規程の 1 つの版（本文つき）。 */
+  app.get('/knowledge/:id/versions/:version', async (c) => {
+    const { tenant } = c.get('ctx');
+    const v = await deps.repo.getKnowledgeVersion(tenant.id, c.req.param('id'), Number(c.req.param('version')));
+    if (!v) return c.json({ error: '版が見つかりません' }, 404);
+    return c.json({ version: v });
+  });
+
+  /**
+   * 社内規程・議事録を廃止する（第11.11.2節）。消さずに検索から外し、1 年は戻せる。確認の画面を挟まない（ADR-0028。戻せる形で守る）。
+   */
+  app.post('/knowledge/:id/retire', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const item = (await deps.repo.listKnowledge(tenant.id, { all: true })).find((k) => k.id === c.req.param('id'));
+    if (!item) return c.json({ error: '知識が見つかりません' }, 404);
+    if (item.category === 'learned') return c.json({ error: '秘書が学んだことは、廃止ではなく消します' }, 409);
+    if (item.status !== 'active') return c.json({ error: 'すでに廃止しています' }, 409);
+    await deps.repo.setKnowledgeStatus(tenant.id, item.id, 'retired', null, null, new Date().toISOString());
+    await audit(deps, tenant.id, user.id, item.category === 'rule' ? 'knowledge.rule.retire' : 'knowledge.minutes.retire', 'knowledge', item.id, {});
+    return c.json({ ok: true });
+  });
+
+  /** 廃止した社内規程・議事録と、しまった秘書が学んだことを戻す（1 年以内。第11.11.2節・第11.11.4節）。 */
+  app.post('/knowledge/:id/restore', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const item = (await deps.repo.listKnowledge(tenant.id, { all: true })).find((k) => k.id === c.req.param('id'));
+    if (!item) return c.json({ error: '知識が見つかりません' }, 404);
+    if (item.status === 'active') return c.json({ error: '使っている知識です' }, 409);
+    if (item.statusAt && Date.now() - Date.parse(item.statusAt) > RESTORE_DAYS * 86_400_000) return c.json({ error: '1 年を過ぎたため戻せません' }, 409);
+    await deps.repo.setKnowledgeStatus(tenant.id, item.id, 'active', null, null, new Date().toISOString());
+    const action = item.category === 'rule' ? 'knowledge.rule.restore' : item.category === 'minutes' ? 'knowledge.minutes.restore' : 'knowledge.restore';
+    await audit(deps, tenant.id, user.id, action, 'knowledge', item.id, {});
+    return c.json({ ok: true });
+  });
+
+  /**
+   * 秘書が学んだことを消す（第11.11.1節）。社内規程と議事録は消さない（廃止する）。
+   */
   app.delete('/knowledge/:id', async (c) => {
     const { tenant, user } = c.get('ctx');
-    const ok = await deps.repo.deleteKnowledge(tenant.id, c.req.param('id'));
-    if (!ok) return c.json({ error: '知識が見つかりません' }, 404);
-    await audit(deps, tenant.id, user.id, 'knowledge.delete', 'knowledge', c.req.param('id'), {});
+    const item = (await deps.repo.listKnowledge(tenant.id, { all: true })).find((k) => k.id === c.req.param('id'));
+    if (!item) return c.json({ error: '知識が見つかりません' }, 404);
+    if (item.category !== 'learned') return c.json({ error: '社内規程と議事録は消さずに廃止します' }, 409);
+    await deps.repo.deleteKnowledge(tenant.id, item.id);
+    await audit(deps, tenant.id, user.id, 'knowledge.delete', 'knowledge', item.id, {});
     return c.json({ ok: true });
   });
 

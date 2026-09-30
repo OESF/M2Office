@@ -25,6 +25,17 @@ const ng = (label, detail) => {
  * 開発用の `X-User` ヘッダーを使う（`AUTH_DEV_HEADERS=true` が前提）。
  * Cookie によるログインは「■ 9. ログイン」で別に確かめる。
  */
+/**
+ * 確認のために登録した知識を片付ける。社内規程と議事録は画面からは消せず廃止になるため（仕様書 第11.11節）、データベースの持ち主で消す。
+ */
+async function dropKnowledge(id) {
+  if (!id) return;
+  const { default: pgc } = await import('pg');
+  const db = new pgc.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await db.connect();
+  try { await db.query('delete from knowledge_items where id = $1', [id]); } finally { await db.end(); }
+}
+
 async function call(tenant, path, init = {}, who = 'admin') {
   const res = await fetch(`${API}${path}`, {
     ...init,
@@ -226,7 +237,7 @@ console.log('\n■ 4. 承認による再開（最重要）');
     : ng('登録した議事録が検索に出ない', qaHits.map((h) => h.title).join('、'));
 
   // 後片付け: 以降の確認（B 社との分離など）に影響させないよう、登録した議事録を消す
-  if (registered) await call('a', `/v1/admin/knowledge/${registered.id}`, { method: 'DELETE' });
+  if (registered) await dropKnowledge(registered.id);
 }
 
 console.log('\n■ 5. テナント分離');
@@ -610,7 +621,7 @@ console.log('\n■ 15. 管理者ページの設定');
   const hits = qa.steps.find((x) => x.stepId === 'search')?.output?.tools?.[0]?.result?.hits ?? [];
   hits.some((h) => h.source === '慶弔休暇規程 第3条')
     ? ok('管理者ページで登録した規程を AG-04 が出典つきで見つける') : ng('登録した規程が検索されない');
-  await call('a', `/v1/admin/knowledge/${saved2.id}`, { method: 'DELETE' });
+  await dropKnowledge(saved2.id);
 }
 
 console.log('\n■ 16. 個人設定');
@@ -1220,8 +1231,16 @@ console.log('\n■ 23. 権限区画をグループで割り当てる');
   busy.status === 409 && busy.body.knowledge === 1
     ? ok('区画に知識が残っていれば削除を断り、何が残っているかを示す') : ng(`断らない（${busy.status}）`, JSON.stringify(busy.body));
 
-  await call('a', '/v1/admin/knowledge/smoke-comp-doc', { method: 'DELETE' });
+  // 社内規程は消さずに廃止する（第11.11.2節）。廃止した知識は区画の削除を止めない
+  await call('a', '/v1/admin/knowledge/smoke-comp-doc/retire', { method: 'POST' });
   const removed = await call('a', `/v1/admin/compartments/${comp.id}`, { method: 'DELETE' });
+  {
+    const { default: pgc } = await import('pg');
+    const db = new pgc.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+    await db.connect();
+    await db.query(`delete from knowledge_items where id = 'smoke-comp-doc'`);
+    await db.end();
+  }
   const { body: left } = await call('a', '/v1/admin/compartments');
   removed.status === 200 && !(left.items ?? []).some((x) => x.id === comp.id)
     ? ok('残っていなければ区画を削除できる') : ng(`削除できない（${removed.status}）`, JSON.stringify(removed.body));
@@ -1519,9 +1538,19 @@ console.log('\n■ 29. 組織知識の節（章・条で分けて、条の単位
   });
   tooLong.status === 400 ? ok('50 万字を超える本文は断る') : ng(`受け付けてしまう（${tooLong.status}）`);
 
-  await call('a', `/v1/admin/knowledge/${saved.id}`, { method: 'DELETE' });
+  // 社内規程は消せず（409）、廃止すると検索から外れる（第11.11.2節）。確かめた後は片付ける
+  const refused = await call('a', `/v1/admin/knowledge/${saved.id}`, { method: 'DELETE' });
+  const retired = await call('a', `/v1/admin/knowledge/${saved.id}/retire`, { method: 'POST' });
+  refused.status === 409 && retired.status === 200 ? ok('社内規程は削除できず、廃止にする') : ng(`社内規程の削除の扱いが違う（削除 ${refused.status}・廃止 ${retired.status}）`);
+  {
+    const { default: pgc } = await import('pg');
+    const db = new pgc.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+    await db.connect();
+    await db.query(`delete from knowledge_items where id = $1`, [saved.id]);
+    await db.end();
+  }
   const gone = await call('a', `/v1/admin/knowledge/${saved.id}/sections`);
-  gone.status === 404 ? ok('知識を削除すると節も消える') : ng('節が残っている');
+  gone.status === 404 ? ok('知識を消すと節も消える') : ng('節が残っている');
 }
 
 console.log('\n■ 30. 言い換え（第11.7.7節。第 0.115.0 版から秘書が考え、新しくは登録しない）');
@@ -1754,7 +1783,7 @@ console.log('\n■ 35. 通知（画面内のお知らせと、Chat・メール�
   // 登録された議事録を消す（以降の確認に影響させない）
   const { body: kb } = await call('a', '/v1/admin/knowledge');
   const registered = (kb.items ?? []).find((k) => k.originRunId === job.runId);
-  if (registered) await call('a', `/v1/admin/knowledge/${registered.id}`, { method: 'DELETE' });
+  if (registered) await dropKnowledge(registered.id);
 }
 
 console.log('\n■ 36. 記憶とデータ（第6.5.4・11.5.1節）');
@@ -2216,7 +2245,7 @@ console.log('\n■ 43. 実行の中止と、知識の登録（第9.3.1節、第1
     ? ok(`知識を登録すると ID が発行される（${k.id}）`) : ng(`発行されない（${created}）`, JSON.stringify(k));
   (k.sections ?? []).length > 0
     ? ok('登録と同時に節へ分ける') : ng('節に分かれない', JSON.stringify(k.sections ?? []));
-  await call('a', `/v1/admin/knowledge/${k.id}`, { method: 'DELETE' });
+  await dropKnowledge(k.id);
 }
 
 console.log('\n■ 44. 秘書にファイルを渡す（第10.10節）');
@@ -4291,6 +4320,156 @@ console.log('\n■ 63. 店頭サイネージ（内蔵の拡張。第31章の段 
     await setEnabled('b', false).catch(() => undefined);
     await clean().catch(() => undefined);
     await owner.end();
+  }
+}
+
+console.log('\n■ 64. 知識の種類と管理（社内規程・議事録・秘書が学んだこと。第11.11節、ADR-0056）');
+{
+  const { default: pg } = await import('pg');
+  const { tsImport } = await import('tsx/esm/api');
+  const { PostgresRepository } = await tsImport('../packages/core/src/repository/postgres.ts', import.meta.url);
+  const { Consolidator } = await tsImport('../packages/core/src/knowledge/consolidate.ts', import.meta.url);
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const repo = new PostgresRepository(process.env.DATABASE_URL ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
+  const T = 't-alpha';
+  const made = [];
+  const adminId = (await owner.query(`select id from users where tenant_id = $1 and email = 'admin@alpha.example.jp'`, [T])).rows[0]?.id;
+  const today = new Date(Date.now() + 9 * 3_600_000).toISOString().slice(0, 10);
+  const later = new Date(Date.now() + 9 * 3_600_000 + 40 * 86_400_000).toISOString().slice(0, 10);
+  const WORD = `スモーク休暇${Date.now().toString(36)}`;
+  try {
+    // 社内規程: 管理者の登録は社内規程になり、版と施行日を持つ。施行日が先の版は施行日まで前の版で答える（第11.11.2節）
+    const created = await call('a', '/v1/admin/knowledge', { method: 'POST', body: JSON.stringify({ title: 'スモーク就業規則', body: `第1条（${WORD}）\n${WORD}は年 3 日とする。`, source: 'スモーク' }) });
+    const id = created.body?.id;
+    made.push(id);
+    const future = await call('a', `/v1/admin/knowledge/${id}`, { method: 'PUT', body: JSON.stringify({ title: 'スモーク就業規則', body: `第1条（${WORD}）\n${WORD}は年 5 日とする。`, source: 'スモーク', effectiveFrom: later }) });
+    const beforeDue = await repo.searchKnowledge(T, `${WORD}は何日`, null);
+    await owner.query(`update knowledge_item_versions set effective_from = $3::date where tenant_id = $1 and item_id = $2 and version = 2`, [T, id, today]);
+    const afterDue = await repo.searchKnowledge(T, `${WORD}は何日`, null);
+    const oldHit = await repo.searchKnowledge(T, `改定前の${WORD}は何日`, null);
+    const { body: versions } = await call('a', `/v1/admin/knowledge/${id}/versions`);
+    const v1 = await call('a', `/v1/admin/knowledge/${id}/versions/1`);
+    created.status === 201 && created.body.version === 1 && future.body?.version === 2 && future.body.applied === false
+      && beforeDue.hits[0]?.body.includes('年 3 日') && beforeDue.hits[0]?.category === 'rule'
+      && afterDue.hits[0]?.body.includes('年 5 日') && oldHit.hits.some((h) => h.oldVersion?.version === 1 && h.body.includes('年 3 日') && /第 1 版/.test(h.citation))
+      && versions?.versions?.length === 2 && versions.versions[0].current && v1.body?.version?.body.includes('年 3 日')
+      ? ok('社内規程は版を残し、施行日が先の版は施行日まで前の版で答え、施行日を迎えると検索の時点で切り替わる。改定前を尋ねれば古い版を版と施行日つきで返す')
+      : ng('社内規程の版が合わない', JSON.stringify({ created: created.body, future: future.body, before: beforeDue.hits[0], after: afterDue.hits[0], old: oldHit.hits.map((h) => h.citation), versions }).slice(0, 700));
+
+    // 廃止: 社内規程は消せず（409）、廃止すると検索から外れ、戻せる。1 年を過ぎたら戻せない。社員は触れない
+    const del = await call('a', `/v1/admin/knowledge/${id}`, { method: 'DELETE' });
+    const byMember = await call('a', `/v1/admin/knowledge/${id}/retire`, { method: 'POST' }, 'member');
+    const retire = await call('a', `/v1/admin/knowledge/${id}/retire`, { method: 'POST' });
+    const hidden = await repo.searchKnowledge(T, `${WORD}は何日`, null);
+    const editRetired = await call('a', `/v1/admin/knowledge/${id}`, { method: 'PUT', body: JSON.stringify({ title: 'x', body: 'y' }) });
+    const restore = await call('a', `/v1/admin/knowledge/${id}/restore`, { method: 'POST' });
+    const back = await repo.searchKnowledge(T, `${WORD}は何日`, null);
+    await call('a', `/v1/admin/knowledge/${id}/retire`, { method: 'POST' });
+    await owner.query(`update knowledge_items set status_at = now() - interval '400 days' where id = $1`, [id]);
+    const tooLate = await call('a', `/v1/admin/knowledge/${id}/restore`, { method: 'POST' });
+    const audits = (await owner.query(`select action from audit_events where tenant_id = $1 and target_id = $2`, [T, id])).rows.map((r) => r.action);
+    del.status === 409 && byMember.status === 403 && retire.status === 200 && hidden.hits.every((h) => h.id !== id) && editRetired.status === 409
+      && restore.status === 200 && back.hits.some((h) => h.id === id) && tooLate.status === 409
+      && ['knowledge.rule.create', 'knowledge.rule.revise', 'knowledge.rule.retire', 'knowledge.rule.restore'].every((a) => audits.includes(a))
+      ? ok('社内規程は消せず廃止にし、廃止すると検索から外れ、1 年以内なら戻せる。登録・改定・廃止・戻すを監査ログに残す')
+      : ng('社内規程の廃止が合わない', JSON.stringify({ del: del.status, member: byMember.status, retire: retire.status, hidden: hidden.hits.length, edit: editRetired.status, restore: restore.status, tooLate: tooLate.status, audits }));
+
+    // 種類は登録の経路で決まる。議事録は廃止だけ、秘書が学んだことは消せる。根拠は社内規程 → 議事録 → 秘書が学んだことの順
+    const W2 = `スモーク経費${Date.now().toString(36)}`;
+    const rule = await call('a', '/v1/admin/knowledge', { method: 'POST', body: JSON.stringify({ title: 'スモーク経費規程', body: `${W2}の上限は 1 万円とする。`, source: 'スモーク' }) });
+    made.push(rule.body?.id);
+    const now = new Date().toISOString();
+    await repo.saveKnowledge({ id: `smoke-min-${Date.now()}`, tenantId: T, kind: 'minutes', title: 'スモーク議事録', body: `${W2}について話した。${W2}は ${W2}`, source: '会議', compartment: null, updatedAt: now, originRunId: 'smoke-run' });
+    await repo.saveKnowledge({ id: `smoke-learn-${Date.now()}`, tenantId: T, kind: 'promoted', title: '学んだこと', body: `${W2}の上限は 2 万円。${W2}は ${W2} ${W2}`, source: '秘書が会話から学んだこと', compartment: null, updatedAt: now });
+    const { body: list } = await call('a', '/v1/admin/knowledge');
+    const minutes = list.items.find((k) => k.title === 'スモーク議事録' && k.body.includes(W2));
+    const learned = list.items.find((k) => k.body.startsWith(`${W2}の上限は 2 万円`));
+    made.push(minutes?.id, learned?.id);
+    const ranked = await repo.searchKnowledge(T, `${W2}の上限`, null);
+    const delMinutes = await call('a', `/v1/admin/knowledge/${minutes?.id}`, { method: 'DELETE' });
+    const retireLearned = await call('a', `/v1/admin/knowledge/${learned?.id}/retire`, { method: 'POST' });
+    minutes?.category === 'minutes' && learned?.category === 'learned' && list.items.find((k) => k.id === rule.body?.id)?.category === 'rule'
+      && ranked.hits.map((h) => h.category).join(',') === 'rule,minutes,learned' && delMinutes.status === 409 && retireLearned.status === 409
+      ? ok('知識の種類は登録の経路で決まり、根拠は社内規程 → 議事録 → 秘書が学んだことの順に並ぶ。議事録は消さずに廃止し、秘書が学んだことは廃止せずに消す')
+      : ng('知識の種類が合わない', JSON.stringify({ minutes: minutes?.category, learned: learned?.category, ranked: ranked.hits.map((h) => h.category), delMinutes: delMinutes.status, retireLearned: retireLearned.status }));
+
+    // 整理: 同じ事柄をまとめ、古い文と半年使われないものをしまう。しまったものは戻せ、1 年で消える（第11.11.4節）
+    const W3 = `スモーク整理${Date.now().toString(36)}`;
+    const ids = [1, 2, 3, 4].map((i) => `smoke-cons-${Date.now()}-${i}`);
+    const texts = [`${W3}の担当は山田さん`, `${W3}は山田さんが担当する`, `${W3}の窓口は佐藤さん`, `${W3}の古い話`];
+    for (const [i, kid] of ids.entries()) {
+      await repo.saveKnowledge({ id: kid, tenantId: T, kind: 'promoted', title: texts[i], body: texts[i], source: '秘書が会話から学んだこと', compartment: null, updatedAt: new Date(Date.now() - (4 - i) * 1000).toISOString() });
+    }
+    made.push(...ids);
+    await owner.query(`update knowledge_items set last_used_at = now() - interval '200 days' where id = $1`, [ids[3]]);
+    // 見本の推論: 一覧の中の W3 の文の番号を探し、1 と 2 をまとめ、3 を 2 で古くする
+    const fake = {
+      name: 'smoke',
+      async complete(req) {
+        const text = req.messages.at(-1).content;
+        if (text.includes('"conflicts"')) return { text: '{"conflicts":[]}', tokensUsed: 0 };
+        const num = (s) => Number(new RegExp(`(\\d+)\\. \\([^)]*\\) ${s}`).exec(text)?.[1]);
+        const [a, b, c] = [num(texts[0]), num(texts[1]), num(texts[2])];
+        if (a && b && c) return { text: JSON.stringify({ merge: [{ ids: [a, b], text: `${W3}の担当は山田さん（まとめ）` }], stale: [] }), tokensUsed: 0 };
+        const [m1, m2] = [num(`${W3}メモ1`), num(`${W3}メモ2`)];
+        if (m1 && m2) return { text: JSON.stringify({ merge: [{ ids: [m1, m2], text: `${W3}メモ（まとめ）` }], stale: [] }), tokensUsed: 0 };
+        return { text: '{"merge":[],"stale":[]}', tokensUsed: 0 };
+      },
+    };
+    const cons = new Consolidator({ repo, llm: () => fake });
+    const k = await cons.consolidateKnowledge(T, fake, new Date());
+    const { body: after } = await call('a', '/v1/admin/knowledge');
+    const st = (kid) => after.items.find((x) => x.id === kid);
+    const mergedInto = st(ids[0])?.mergedInto;
+    const mergedItem = after.items.find((x) => x.id === mergedInto);
+    made.push(mergedInto);
+    const restored = await call('a', `/v1/admin/knowledge/${ids[3]}/restore`, { method: 'POST' });
+    k.merged === 2 && k.unused === 1 && st(ids[0])?.status === 'archived' && st(ids[0])?.statusReason === 'merged' && st(ids[1])?.status === 'archived'
+      && st(ids[2])?.status === 'active' && st(ids[3])?.statusReason === 'unused' && mergedItem?.category === 'learned' && mergedItem.body.includes('まとめ')
+      && restored.status === 200
+      ? ok('秘書が学んだことは、同じ事柄をまとめ、半年使われないものをしまい、しまったものは管理者が戻せる')
+      : ng('秘書が学んだことの整理が合わない', JSON.stringify({ k, items: ids.map((x) => [st(x)?.status, st(x)?.statusReason]), merged: mergedItem?.body }));
+
+    // 本人の記憶の整理と、しまった記憶を本人が戻す。1 年を過ぎたしまったものと知識は消える
+    const mids = [1, 2].map((i) => `smoke-mem-${Date.now()}-${i}`);
+    for (const [i, mid] of mids.entries()) await repo.createMemory({ id: mid, tenantId: T, userId: adminId, text: `${W3}メモ${i + 1}`, source: 'learned', createdAt: new Date(Date.now() - (2 - i) * 1000).toISOString() });
+    const mc = await cons.consolidateMemories(T, adminId, fake, new Date());
+    const { body: archived } = await call('a', '/v1/me/memories/archived');
+    const { body: memNow } = await call('a', '/v1/me/memories');
+    const mergedMem = memNow.items.find((m) => m.text === `${W3}メモ（まとめ）`);
+    const restoreMem = await call('a', `/v1/me/memories/${mids[0]}/restore`, { method: 'POST' });
+    await owner.query(`update memories set archived_at = now() - interval '400 days' where id = $1`, [mids[1]]);
+    await owner.query(`update knowledge_items set status_at = now() - interval '400 days' where id = $1`, [ids[1]]);
+    const purgedMem = await repo.purgeArchivedMemories(T, new Date(Date.now() - 365 * 86_400_000).toISOString());
+    const purgedK = await repo.purgeKnowledge(T, new Date());
+    const gone = (await owner.query(`select count(*)::int as n from knowledge_items where id = $1`, [ids[1]])).rows[0].n;
+    mc.merged === 2 && archived.items.filter((m) => mids.includes(m.id)).every((m) => m.archiveReason === 'merged') && mergedMem && restoreMem.status === 200
+      && purgedMem >= 1 && purgedK.items >= 1 && gone === 0
+      ? ok('本人の記憶も同じくまとめてしまい、本人が「しまったもの」を見て戻せる。しまって 1 年を過ぎた記憶と知識は消える')
+      : ng('記憶の整理が合わない', JSON.stringify({ mc, archived: archived.items.map((m) => m.archiveReason), merged: !!mergedMem, restore: restoreMem.status, purgedMem, purgedK, gone }));
+    for (const m of (await repo.listMemories(T, adminId)).filter((m) => m.text.startsWith(W3))) await repo.deleteMemory(T, adminId, m.id);
+    for (const m of (await repo.listArchivedMemories(T, adminId)).filter((m) => m.text.startsWith(W3))) await repo.deleteMemory(T, adminId, m.id);
+
+    // 人事・給与: 登録した社内規程から案を作る口と、規程の改定で今の設定と食い違う項目（第30.8.2節）
+    const unknown = await call('a', '/v1/admin/extensions/hr/proposal', { method: 'POST', body: JSON.stringify({ knowledgeId: 'k-none' }) });
+    const fromRule = await call('a', '/v1/admin/extensions/hr/proposal', { method: 'POST', body: JSON.stringify({ knowledgeId: rule.body?.id }) });
+    await repo.setRuleHrCheck(T, rule.body.id, 1, { raw: '{"overtime":{"value":37,"quote":"時間外は 37%"}}' });
+    const { body: checks } = await call('a', '/v1/admin/extensions/hr/rule-checks');
+    const mineCheck = checks.checks.find((c) => c.itemId === rule.body.id);
+    const dismiss = await call('a', `/v1/admin/extensions/hr/rule-checks/${rule.body.id}/1/dismiss`, { method: 'POST' });
+    const { body: checks2 } = await call('a', '/v1/admin/extensions/hr/rule-checks');
+    unknown.status === 404 && [200, 422].includes(fromRule.status) && mineCheck?.fields?.some((f) => f.key === 'premium.overtime' || /時間外/.test(f.label))
+      && dismiss.status === 200 && !checks2.checks.some((c) => c.itemId === rule.body.id)
+      ? ok('人事・給与は登録した社内規程から案を作れ、規程の改定で今の設定と食い違う項目を、いまの設定と並べ直して示し、見終えたら外す')
+      : ng('人事・給与と規程のつながりが合わない', JSON.stringify({ unknown: unknown.status, fromRule: fromRule.status, mineCheck, dismiss: dismiss.status }).slice(0, 600));
+  } catch (err) {
+    ng('知識の種類の確認が途中で止まった', String(err?.stack ?? err));
+  } finally {
+    for (const kid of made.filter(Boolean)) await owner.query(`delete from knowledge_items where tenant_id = $1 and id = $2`, [T, kid]).catch(() => undefined);
+    await owner.query(`delete from knowledge_items where tenant_id = $1 and (title like 'スモーク%' or body like 'スモーク整理%')`, [T]).catch(() => undefined);
+    await owner.end();
+    await repo.close();
   }
 }
 

@@ -730,50 +730,81 @@ function proposalPatch(fields: HrProposalField[], current: HrSettings): Partial<
 }
 
 /**
+ * 規程から読んだ案と今の設定を並べた表。入れる項目を選ぶ（決まりに合わない案は選べない）。
+ */
+function ProposalTable({ fields, onApply, onCancel, cancelLabel = 'やめる' }: {
+  fields: HrProposalField[]; onApply: (chosen: HrProposalField[]) => void; onCancel: () => void; cancelLabel?: string;
+}) {
+  const [chosen, setChosen] = useState<Set<string>>(() => new Set(fields.filter((x) => !x.problem && x.current !== x.proposed).map((x) => x.key)));
+  return (
+    <>
+      <table className="table small">
+        <thead><tr><th /><th>項目</th><th>今</th><th>案</th><th>規程の文</th></tr></thead>
+        <tbody>
+          {fields.map((f) => (
+            <tr key={f.key}>
+              <td><input type="checkbox" disabled={!!f.problem} checked={chosen.has(f.key)} aria-label={`${f.label}を入れる`}
+                onChange={() => setChosen((cur) => { const n = new Set(cur); if (n.has(f.key)) n.delete(f.key); else n.add(f.key); return n; })} /></td>
+              <td>{f.label}</td>
+              <td className="muted">{f.current}</td>
+              <td>{f.proposed}{f.problem && <div className="error">{f.problem}</div>}</td>
+              <td className="muted">{f.quote}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="row">
+        <button className="btn small" disabled={chosen.size === 0} onClick={() => onApply(fields.filter((f) => chosen.has(f.key)))}>選んだ {chosen.size} 項目を入れる</button>
+        <button className="btn ghost small" onClick={onCancel}>{cancelLabel}</button>
+      </div>
+    </>
+  );
+}
+
+/**
  * 就業規則・賃金規程から設定の案を作る（仕様書 第30.8.2節）。AI が読み、今の設定と並べる。入れるかは管理者が選ぶ。
+ * ファイルのほか、知識に登録した社内規程からも読める。社内規程を登録・改定して今の設定と食い違う項目が見つかっていれば、ここに出す（第11.11.2節）。
  */
 function HrProposal({ settings, onApply }: { settings: HrSettings; onApply: (patch: Partial<HrSettings>) => void }) {
   const input = useRef<HTMLInputElement>(null);
   const [fields, setFields] = useState<HrProposalField[] | null>(null);
-  const [chosen, setChosen] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const read = (f: File) => {
+  const [rules, setRules] = useState<{ id: string; title: string }[]>([]);
+  const [checks, setChecks] = useState<{ itemId: string; version: number; title: string; effectiveFrom: string; fields: HrProposalField[] }[]>([]);
+  const loadChecks = () => api.admin.hrRuleChecks().then((r) => setChecks(r.checks)).catch(() => setChecks([]));
+  useEffect(() => {
+    void api.admin.knowledge().then((r) => setRules(r.items.filter((k) => k.category === 'rule' && (k.status ?? 'active') === 'active').map((k) => ({ id: k.id, title: k.title })))).catch(() => undefined);
+    void loadChecks();
+  }, []);
+  const read = (job: Promise<{ fields: HrProposalField[] }>) => {
     setBusy(true);
     setError(null);
-    void api.admin.hrProposal(f).then((r) => {
-      setFields(r.fields);
-      setChosen(new Set(r.fields.filter((x) => !x.problem && x.current !== x.proposed).map((x) => x.key)));
-    }).catch((e) => setError(describeError(e, '規程を読めませんでした'))).finally(() => setBusy(false));
+    setFields(null);
+    void job.then((r) => setFields(r.fields)).catch((e) => setError(describeError(e, '規程を読めませんでした'))).finally(() => setBusy(false));
   };
   return (
     <div className="hr-proposal">
-      <button className="btn ghost small" disabled={busy} onClick={() => input.current?.click()}>{busy ? '規程を読んでいます…' : '就業規則・賃金規程から設定の案を作る'}</button>
-      <input ref={input} type="file" hidden accept=".pdf,.docx,.txt,.md,image/*" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) read(f); }} />
+      {checks.map((c) => (
+        <div key={`${c.itemId}:${c.version}`} className="hr-rule-check">
+          <p><strong>「{c.title}」第 {c.version} 版（施行 {c.effectiveFrom}）</strong>と今の設定が食い違っています</p>
+          <ProposalTable fields={c.fields} cancelLabel="このままにする"
+            onApply={(chosen) => { onApply(proposalPatch(chosen, settings)); void api.admin.dismissHrRuleCheck(c.itemId, c.version).then(loadChecks); }}
+            onCancel={() => void api.admin.dismissHrRuleCheck(c.itemId, c.version).then(loadChecks)} />
+        </div>
+      ))}
+      <div className="row wrap">
+        <button className="btn ghost small" disabled={busy} onClick={() => input.current?.click()}>{busy ? '規程を読んでいます…' : '就業規則・賃金規程から設定の案を作る'}</button>
+        {rules.length > 0 && (
+          <select value="" disabled={busy} aria-label="登録した社内規程から案を作る" onChange={(e) => { if (e.target.value) read(api.admin.hrProposalFromRule(e.target.value)); }}>
+            <option value="">登録した社内規程から…</option>
+            {rules.map((r) => <option key={r.id} value={r.id}>{r.title}</option>)}
+          </select>
+        )}
+      </div>
+      <input ref={input} type="file" hidden accept=".pdf,.docx,.txt,.md,image/*" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) read(api.admin.hrProposal(f)); }} />
       {error && <p className="error">{error}</p>}
-      {fields && (
-        <>
-          <table className="table small">
-            <thead><tr><th /><th>項目</th><th>今</th><th>案</th><th>規程の文</th></tr></thead>
-            <tbody>
-              {fields.map((f) => (
-                <tr key={f.key}>
-                  <td><input type="checkbox" disabled={!!f.problem} checked={chosen.has(f.key)} aria-label={`${f.label}を入れる`}
-                    onChange={() => setChosen((cur) => { const n = new Set(cur); if (n.has(f.key)) n.delete(f.key); else n.add(f.key); return n; })} /></td>
-                  <td>{f.label}</td>
-                  <td className="muted">{f.current}</td>
-                  <td>{f.proposed}{f.problem && <div className="error">{f.problem}</div>}</td>
-                  <td className="muted">{f.quote}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div className="row">
-            <button className="btn small" disabled={chosen.size === 0} onClick={() => { onApply(proposalPatch(fields.filter((f) => chosen.has(f.key)), settings)); setFields(null); }}>選んだ {chosen.size} 項目を入れる</button>
-            <button className="btn ghost small" onClick={() => setFields(null)}>やめる</button>
-          </div>
-        </>
-      )}
+      {fields && <ProposalTable key={fields.map((f) => f.key).join()} fields={fields} onApply={(chosen) => { onApply(proposalPatch(chosen, settings)); setFields(null); }} onCancel={() => setFields(null)} />}
     </div>
   );
 }

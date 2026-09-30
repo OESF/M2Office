@@ -97,6 +97,7 @@ export interface Repository {
     compartment: string | null,
     /** 秘書が考えた言い換え（第11.7.7.0節）。登録した言い換えと同じように効かせる。 */
     extraSynonyms?: readonly (readonly string[])[],
+    opts?: KnowledgeSearchOptions,
   ): Promise<KnowledgeSearchResult>;
 
   /** 本人宛の通知を保存する。宛先の決定はツール側で行う。 */
@@ -244,8 +245,22 @@ export interface Repository {
   getPromotion(tenantId: string, id: string): Promise<Promotion | null>;
   updatePromotion(p: Promotion): Promise<void>;
 
-  /** 本人の個人記憶（新しい順。仕様書 第11.5.1節）。本人以外に渡さない。 */
+  /** 本人の個人記憶（使っているものだけ。新しい順。仕様書 第11.5.1節）。本人以外に渡さない。 */
   listMemories(tenantId: string, userId: string): Promise<Memory[]>;
+  /** 本人の記憶のうち、整理でしまったもの（新しい順。第11.11.4節）。 */
+  listArchivedMemories(tenantId: string, userId: string): Promise<Memory[]>;
+  /**
+   * 記憶をしまう・戻す（第11.11.4節）。本人のものでなければ変えず `false` を返す。
+   *
+   * @param reason しまう理由（`merged`・`stale`・`unused`）。戻すときは `null`
+   */
+  setMemoryStatus(tenantId: string, userId: string, id: string, status: 'active' | 'archived', reason: string | null, mergedInto: string | null, at: string): Promise<boolean>;
+  /** 会話の材料に使った記憶の、使った日を記録する（第11.11.4節「使われないもの」）。 */
+  touchMemories(tenantId: string, userId: string, ids: string[], at: string): Promise<void>;
+  /** 記憶を持っている利用者（週 1 回の整理の対象）。 */
+  listMemoryOwners(tenantId: string): Promise<string[]>;
+  /** しまってから指定の日時より前の記憶を消す。消した数を返す。 */
+  purgeArchivedMemories(tenantId: string, before: string): Promise<number>;
   createMemory(memory: Memory): Promise<void>;
   /** 1 件を消す。本人のものでなければ消さず `false` を返す。 */
   deleteMemory(tenantId: string, userId: string, id: string): Promise<boolean>;
@@ -406,8 +421,43 @@ export interface Repository {
   /** 表示名・ロール・状態を更新する。メールアドレスは変えない（Google 側で管理する）。 */
   updateUser(user: User): Promise<void>;
 
-  /** 組織知識の一覧（管理用）。本文を含む。 */
-  listKnowledge(tenantId: string): Promise<KnowledgeItem[]>;
+  /**
+   * 組織知識の一覧（管理用）。本文を含む。
+   *
+   * @param opts.all 廃止した・しまったものも返す（管理者の一覧）。既定は使っているものだけ
+   */
+  listKnowledge(tenantId: string, opts?: { all?: boolean }): Promise<KnowledgeItem[]>;
+  /**
+   * 社内規程の版を保存する（第11.11.2節）。新しい規程なら作る。施行日が今日（日本時間）までなら施行している版に写して節に分け直し、
+   * 先なら版だけを残す（施行日に検索の時点で切り替わる）。
+   *
+   * @returns 保存した版の番号と、施行している版に写したか。ほかの会社の同じ ID なら `null`
+   */
+  saveRuleVersion(item: KnowledgeItem & { effectiveFrom: string }, savedBy: string, today: string): Promise<{ version: number; applied: boolean } | null>;
+  /** 社内規程の版の一覧（新しい版から。本文は含めない）。知識が無ければ `null`。 */
+  listKnowledgeVersions(tenantId: string, itemId: string): Promise<KnowledgeVersion[] | null>;
+  /** 社内規程の 1 つの版（本文つき）。 */
+  getKnowledgeVersion(tenantId: string, itemId: string, version: number): Promise<KnowledgeVersion | null>;
+  /**
+   * 知識の状態を変える（廃止・しまう・戻す。第11.11節）。変えれば `true`。
+   *
+   * @param reason しまう理由。廃止と戻すは `null`
+   */
+  setKnowledgeStatus(tenantId: string, id: string, status: KnowledgeStatus, reason: string | null, mergedInto: string | null, at: string): Promise<boolean>;
+  /** 答えの根拠に使った知識の、使った日を記録する。 */
+  touchKnowledge(tenantId: string, ids: string[], at: string): Promise<void>;
+  /**
+   * 残す期間を過ぎた知識を消す（第11.11節）。しまった秘書が学んだことと廃止した議事録は 1 年、廃止した規程と古い版は 7 年。
+   *
+   * @returns 消した知識の数と版の数
+   */
+  purgeKnowledge(tenantId: string, now: Date): Promise<{ items: number; versions: number }>;
+  /** 規程の版に、人事・給与の設定と食い違う項目を残す（第30.8.2節）。 */
+  setRuleHrCheck(tenantId: string, itemId: string, version: number, check: unknown): Promise<void>;
+  /** 見終えていない、人事・給与の設定と食い違う項目のある規程の版（新しいものから）。 */
+  listRuleHrChecks(tenantId: string): Promise<KnowledgeVersion[]>;
+  /** 人事・給与の設定との食い違いを見終えた。 */
+  dismissRuleHrCheck(tenantId: string, itemId: string, version: number, at: string): Promise<boolean>;
   /** 保存し、本文を節に分け直す。古い節と新しい節は 1 つのトランザクションで入れ替える（第11.7.5節）。 */
   saveKnowledge(item: KnowledgeItem): Promise<void>;
   /** 1 件の知識の節（見出しと字数）。分け方の確認に使う（第6.6.6節）。知識が無ければ `null`。 */
@@ -472,6 +522,45 @@ export interface KnowledgeHit {
   compartment: string | null;
   /** 並べ替えの点数（第11.7.3節）。 */
   score: number;
+  /** 知識の種類（第11.11.1節）。根拠は社内規程 → 議事録 → 秘書が学んだことの順に並ぶ。 */
+  category: KnowledgeCategory;
+  /** 改定前の規程の版から見つけたとき、その版と施行日（第11.11.2節）。 */
+  oldVersion?: { version: number; effectiveFrom: string };
+}
+
+/** 知識の種類（第11.11.1節）。`rule`: 社内規程、`minutes`: 議事録、`learned`: 秘書が学んだこと。 */
+export type KnowledgeCategory = 'rule' | 'minutes' | 'learned';
+/** 知識の状態。`retired`: 廃止した（社内規程・議事録）、`archived`: しまった（秘書が学んだこと）。 */
+export type KnowledgeStatus = 'active' | 'retired' | 'archived';
+
+/** 組織知識の検索の選び方。 */
+export interface KnowledgeSearchOptions {
+  /** 探す種類。既定はすべて。 */
+  categories?: KnowledgeCategory[];
+  /** 見つけた知識の「使った日」を記録するか。既定は記録する（整理の確かめのための検索では記録しない）。 */
+  touch?: boolean;
+}
+
+/** 社内規程の 1 つの版（第11.11.2節）。 */
+export interface KnowledgeVersion {
+  itemId: string;
+  version: number;
+  effectiveFrom: string;
+  title: string;
+  /** 本文。一覧では空。 */
+  body: string;
+  source: string;
+  compartment: string | null;
+  savedBy: string | null;
+  savedAt: string;
+  /** いま施行している版か。 */
+  current: boolean;
+  /** 施行日が先の版か。 */
+  pending: boolean;
+  /** 本文の字数。 */
+  chars: number;
+  /** 人事・給与の設定と食い違う項目（第30.8.2節）。無ければ `null`。 */
+  hrCheck?: unknown;
 }
 
 /** 知識検索の結果。 */
@@ -636,6 +725,11 @@ export interface Memory {
   /** きっかけ（`secretary`: 本人の指示や本人が直したもの、`learned`: 秘書が会話から自分で覚えたもの。第11.5.2節）。 */
   source: string;
   createdAt: string;
+  /** しまった日と理由（`merged`・`stale`・`unused`。第11.11.4節）。しまったものの一覧でだけ返す。 */
+  archivedAt?: string | null;
+  archiveReason?: string | null;
+  /** 会話の材料に最後に使った日。 */
+  lastUsedAt?: string | null;
 }
 
 export interface KnowledgeItem {
@@ -664,6 +758,20 @@ export interface KnowledgeItem {
    * @remarks `originRunId` と同じく、最初に登録したときだけ書く。
    */
   googleDerived?: boolean;
+  /** 種類（第11.11.1節）。保存のときに省けば、`kind` と由来から決める（`promoted` は秘書が学んだこと、業務から登録したものは議事録、ほかは社内規程）。最初の登録のときだけ書く。 */
+  category?: KnowledgeCategory;
+  /** 状態と、変えた日・理由（一覧でだけ返す）。 */
+  status?: KnowledgeStatus;
+  statusAt?: string | null;
+  statusReason?: string | null;
+  /** 施行している版の施行日（社内規程）。 */
+  effectiveFrom?: string | null;
+  /** 答えの根拠に最後に使った日。 */
+  lastUsedAt?: string | null;
+  /** まとめた先（しまったもの）。 */
+  mergedInto?: string | null;
+  /** 施行日が先の版（社内規程。一覧でだけ返す）。 */
+  pending?: { version: number; effectiveFrom: string } | null;
 }
 
 /** 実行の集計の 1 行（日・時・エージェント・状態で束ねたもの）。 */
