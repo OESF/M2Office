@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { PDFDocument } from 'pdf-lib';
 import { EMPTY_CARD_FIELDS, type CardFields } from '@m2office/shared';
 import {
-  dateIn, detectCardKind, judgeSamePerson, mergeFields, parseCardReading, splitCardPdf, toVCard, canManage,
+  dateIn, detectCardKind, judgeSamePerson, mergeFields, orderCorners, parseCardReading, splitCardPdf, toVCard, canManage,
   type LlmProvider,
 } from '../src/index.js';
 import { contactRequest } from '../src/secretary/contacts.js';
@@ -26,15 +26,18 @@ test('読み取り結果: 項目ごとに取り出し、形の違う値は捨て
   }));
   assert.equal(r.kind, 'card');
   if (r.kind !== 'card') return;
-  assert.equal(r.fields.name, '田中 太郎');
-  assert.equal(r.fields.postalCode, '100-0001', '全角の数字と〒をそろえる');
-  assert.deepEqual(r.fields.phones, [{ kind: 'mobile', number: '090-1111-2222' }, { kind: 'main', number: '03-0000-0000' }]);
-  assert.deepEqual(r.fields.emails, ['tanaka@sample.example']);
-  assert.equal(r.fields.website, '', '文字列でない値は空にする');
-  assert.equal(r.fields.department, '', '名刺に無い項目は推測で埋めない');
-  assert.equal(r.rotation, 90);
-  assert.equal(r.multiple, true);
-  assert.equal(r.fields.kanaEstimated, true);
+  const c = r.cards[0]!;
+  assert.equal(r.cards.length, 1, '名刺ごとの配列の無い答え（以前の形）は 1 枚として読む');
+  assert.equal(c.fields.name, '田中 太郎');
+  assert.equal(c.fields.postalCode, '100-0001', '全角の数字と〒をそろえる');
+  assert.deepEqual(c.fields.phones, [{ kind: 'mobile', number: '090-1111-2222' }, { kind: 'main', number: '03-0000-0000' }]);
+  assert.deepEqual(c.fields.emails, ['tanaka@sample.example']);
+  assert.equal(c.fields.website, '', '文字列でない値は空にする');
+  assert.equal(c.fields.department, '', '名刺に無い項目は推測で埋めない');
+  assert.equal(c.rotation, 90);
+  assert.equal(c.corners, null, '四隅の無い答えは写真全体を出す');
+  assert.equal(r.truncated, false);
+  assert.equal(c.fields.kanaEstimated, true);
 });
 
 test('読み取り結果: 名刺でない・氏名も会社名も無い・JSON でないものは登録しない', () => {
@@ -45,10 +48,37 @@ test('読み取り結果: 名刺でない・氏名も会社名も無い・JSON �
   assert.equal(parseCardReading('結果: {"isCard": true, "company": "A社"} 以上').kind, 'card');
   // 変な角度は 0 にする
   const r = parseCardReading('{"isCard": true, "name": "A", "rotation": 45}');
-  assert.equal(r.kind === 'card' && r.rotation, 0);
+  assert.equal(r.kind === 'card' && r.cards[0]!.rotation, 0);
   // 文字の上側の向きから、時計回りに回す角度を決める
-  const turn = (top: string) => { const x = parseCardReading(`{"isCard": true, "name": "A", "textTop": "${top}"}`); return x.kind === 'card' ? x.rotation : -1; };
+  const turn = (top: string) => { const x = parseCardReading(`{"isCard": true, "name": "A", "textTop": "${top}"}`); return x.kind === 'card' ? x.cards[0]!.rotation : -1; };
   assert.deepEqual(['up', 'left', 'down', 'right'].map(turn), [0, 90, 180, 270]);
+});
+
+test('1 枚の写真の何枚もの名刺: 名刺ごとに項目・向き・四隅を読み、氏名も会社名も無いものは除き、10 枚を超えたら知らせる（第27.4節）', () => {
+  const card = (name: string, extra: object = {}) => ({ name, company: 'A社', textTop: 'up', corners: [[100, 100], [450, 100], [450, 300], [100, 300]], ...extra });
+  const r = parseCardReading(JSON.stringify({ isCard: true, cardCount: 3, cards: [card('田中'), { title: '部長' }, card('佐藤', { textTop: 'down', corners: [[900, 900], [550, 900], [550, 700], [900, 700]] })] }));
+  assert.equal(r.kind, 'card');
+  if (r.kind !== 'card') return;
+  assert.deepEqual(r.cards.map((c) => c.fields.name), ['田中', '佐藤'], '氏名も会社名も無いものは名刺にしない');
+  assert.deepEqual(r.cards[0]!.corners, [[100, 100], [450, 100], [450, 300], [100, 300]]);
+  assert.equal(r.cards[1]!.rotation, 180);
+  assert.deepEqual(r.cards[1]!.corners, [[900, 900], [550, 900], [550, 700], [900, 700]], '逆さの名刺は、文字の左上が画像の右下に来る');
+  const many = parseCardReading(JSON.stringify({ isCard: true, cardCount: 12, cards: Array.from({ length: 12 }, (_, i) => card(`名前${i}`)) }));
+  assert.ok(many.kind === 'card' && many.cards.length === 10 && many.truncated);
+});
+
+test('四隅: 文字の向きに合う並びに回し直し、裏返しの順を直し、画像の外・へこんだ形・小さすぎるものは捨てる', () => {
+  const upright = [[100, 100], [500, 100], [500, 350], [100, 350]];
+  // 推論が並びを 1 つずらして答えても、正しい向き（回さない）なら左上から始まる並びにする
+  assert.deepEqual(orderCorners([upright[2], upright[3], upright[0], upright[1]], 0), upright);
+  // 反時計回りの順も直す
+  assert.deepEqual(orderCorners([upright[0], upright[3], upright[2], upright[1]], 0), upright);
+  // 90 度回す（文字の上側が左）なら、左上から右上へ向かう辺が画像の上向きになる並び
+  assert.deepEqual(orderCorners(upright, 90), [[100, 350], [100, 100], [500, 100], [500, 350]]);
+  assert.equal(orderCorners([[0, 0], [1100, 0], [1000, 1000], [0, 1000]], 0), null, '画像の外');
+  assert.equal(orderCorners([[0, 0], [500, 400], [1000, 0], [500, 1000]], 0), null, 'へこんだ四角形');
+  assert.equal(orderCorners([[0, 0], [100, 0], [100, 100], [0, 100]], 0), null, '写真の 2% 未満');
+  assert.equal(orderCorners([[0, 0], [1, 0]], 0), null);
 });
 
 test('新しい名刺は現在の値になり、古い名刺は空の項目を埋めるだけ。名刺に無い項目で今の値を消さない', () => {

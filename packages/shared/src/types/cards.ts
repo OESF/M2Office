@@ -73,6 +73,12 @@ export interface ContactCard {
   /** 画像を正しい向きに回す角度（0・90・180・270）。 */
   frontRotation: number;
   backRotation: number;
+  /**
+   * 名刺の四隅（第27.5節「向きと切り出し」）。画面がこれで切り出して傾きを直す。無ければ写真全体を回して出す。
+   * 1 枚の写真に何枚も写っていれば、同じ画像を名刺ごとの四隅で指す（第27.4節）。
+   */
+  frontCorners: CardCorners | null;
+  backCorners: CardCorners | null;
   /** 撮るときに表と裏を組にしたか。 */
   paired: boolean;
   status: CardStatus;
@@ -85,6 +91,11 @@ export interface ContactCard {
   receivedOn: string;
   createdAt: string;
 }
+
+/**
+ * 名刺の四隅。画像の幅と高さをそれぞれ 1,000 とした割合の `[x, y]` を、名刺の文字の向きで左上・右上・右下・左下の順に並べる。
+ */
+export type CardCorners = [[number, number], [number, number], [number, number], [number, number]];
 
 /** 空の項目。読み取れなかった項目を空のまま持つための初期値。 */
 export const EMPTY_CARD_FIELDS: CardFields = {

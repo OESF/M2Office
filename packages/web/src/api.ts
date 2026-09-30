@@ -7,7 +7,7 @@
  * @see 仕様書 第20.7節 認証の実装方針
  */
 
-import type {
+import type { CardCorners,
   Approval, Artifact, Notification, Run, RunStep, Schedule, ScheduleRule, Tenant,
   TenantSettings, User, UserSettings, CardFields, Contact, ContactScope,
   InventoryItem, InventoryItemView, InventoryLocation, InventoryMove, InventoryMoveKind, InventorySettings, InventoryStockRow,
@@ -420,6 +420,8 @@ export interface CardSummary {
   id: string; scope: ContactScope; ownerUserId: string; name: string; nameKana: string; company: string;
   department: string; title: string; emails: string[]; status: 'active' | 'trash'; trashedAt: string | null;
   cardId: string | null; frontFileId: string | null; frontRotation: number; frontKind: string | null;
+  /** 名刺の四隅（画面が切り出しに使う。仕様書 第27.5節）。 */
+  frontCorners: CardCorners | null;
   lastReceivedOn: string | null; cardCount: number;
 }
 
@@ -445,6 +447,7 @@ export interface CardDetail {
   cards: {
     id: string; receivedOn: string; receivedBy: string | null; mine: boolean; hasFront: boolean; hasBack: boolean;
     frontRotation: number; backRotation: number; note: string | null;
+    frontCorners: CardCorners | null; backCorners: CardCorners | null;
   }[];
   history: { receivedOn: string; company: string; department: string; title: string }[];
   canManage: boolean;

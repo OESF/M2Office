@@ -142,6 +142,7 @@ export function cardsRoute(deps: AppDeps) {
       cards: d.cards.map((x) => ({
         id: x.id, receivedOn: x.receivedOn, receivedBy: nameOf(x.ownerUserId), mine: x.ownerUserId === user.id,
         hasFront: !!x.frontFileId, hasBack: !!x.backFileId, frontRotation: x.frontRotation, backRotation: x.backRotation,
+        frontCorners: x.frontCorners, backCorners: x.backCorners,
         note: x.failureReason,
       })),
       history: d.history,

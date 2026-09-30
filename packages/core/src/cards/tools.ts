@@ -14,7 +14,7 @@ import type { Tool, ToolContext } from '../tools/registry.js';
 import type { LlmProvider } from '../llm/provider.js';
 import { loadFile, saveFile } from '../files/service.js';
 import { CARD_MIME, type CardFileKind } from './formats.js';
-import { parseCardReading, readCard } from './read.js';
+import { CARD_MAX_PER_IMAGE, parseCardReading, readCard } from './read.js';
 import type { CardService } from './service.js';
 import type { ContactStore } from './store.js';
 
@@ -56,7 +56,7 @@ export const cardRead: Tool = {
   risk: 'read',
   activityLabel: '名刺を読み取っています',
   helpText: '名刺の画像から、氏名・会社名・電話・メールアドレスなどを読み取ります。登録はしません',
-  description: '名刺の画像（PNG・JPEG・HEIC・WebP・PDF）から項目を取り出す。結果を contacts.save の card に渡すと登録できる',
+  description: '名刺の画像（PNG・JPEG・HEIC・WebP・PDF）から項目を取り出す。何枚も写っていれば cards に名刺ごとに返す。名刺ごとに contacts.save の card（fileId・fields・rotation・corners）に渡すと登録できる',
   args: { properties: { fileId: { type: 'string', description: '名刺の画像のファイル ID' } }, required: ['fileId'] },
   async invoke(args, ctx) {
     const cards = await cardsOf(ctx);
@@ -68,9 +68,12 @@ export const cardRead: Tool = {
     const { reading } = await readCard(cards.llm, f.bytes, mime);
     if (reading.kind === 'unavailable') return { available: false, reason: reading.reason };
     if (reading.kind === 'not-card') return { available: true, isCard: false, note: '名刺と見分けられないか、文字が読めませんでした' };
+    const [first] = reading.cards;
     return {
-      available: true, isCard: true, untrusted: true, fileId: f.meta.id, fields: reading.fields, rotation: reading.rotation,
-      ...(reading.multiple ? { note: '何枚も写っていたため、いちばん大きい 1 枚だけを読み取りました' } : {}),
+      available: true, isCard: true, untrusted: true, fileId: f.meta.id, fields: first!.fields, rotation: first!.rotation, corners: first!.corners,
+      // 1 枚の写真に何枚も写っていれば、名刺ごとに返す（第27.4節）
+      ...(reading.cards.length > 1 ? { cards: reading.cards.map((c) => ({ fields: c.fields, rotation: c.rotation, corners: c.corners })) } : {}),
+      ...(reading.truncated ? { note: `${CARD_MAX_PER_IMAGE} 枚より多く写っていたため、${CARD_MAX_PER_IMAGE} 枚までを読み取りました` } : {}),
     };
   },
 };
@@ -203,8 +206,9 @@ export const contactsSave: Tool = {
     const f = await loadFile(ctx.repo, ctx.files, ctx.tenantId, fileId, { id: ctx.userId, roles: [] });
     if (!f || !CARD_MIME[f.meta.kind as CardFileKind]) return { saved: false, reason: '名刺の画像が見つかりません' };
     // 推論が書き写した項目を、読み取りの結果と同じ決まりで整える（知らない項目は捨てる・推測で埋めない）
-    const parsed = parseCardReading(JSON.stringify({ isCard: true, ...(card['fields'] as object ?? {}), rotation: card['rotation'] }));
-    if (parsed.kind !== 'card') return { saved: false, reason: '氏名も会社名も無いため、登録できません' };
+    const reading = parseCardReading(JSON.stringify({ isCard: true, ...(card['fields'] as object ?? {}), rotation: card['rotation'], corners: card['corners'] }));
+    if (reading.kind !== 'card') return { saved: false, reason: '氏名も会社名も無いため、登録できません' };
+    const parsed = reading.cards[0]!;
     // 秘書に渡したファイルは 4 週で消えるため、名刺の画像として写しを持つ（連絡先がある間は残す。第27.10節）
     const image = await saveFile(ctx.repo, ctx.files, {
       tenantId: ctx.tenantId, ownerUserId: ctx.userId, name: f.meta.name, kind: f.meta.kind, bytes: f.bytes, origin: 'card', runId: null,
@@ -214,7 +218,7 @@ export const contactsSave: Tool = {
     const today = await cards.service.today(who);
     await cards.store.createCards(who, [{ id: cardId, scope, batchId: `cb-${randomUUID()}`, seq: 0, frontFileId: image.id, backFileId: null, paired: false, receivedOn: today }]);
     const saved = await cards.service.register(who, { id: cardId, scope, receivedOn: today }, { ...EMPTY_CARD_FIELDS, ...parsed.fields }, ctx.userId);
-    await cards.store.updateCard(who, cardId, { status: 'done', contactId: saved, extracted: parsed.fields, frontRotation: parsed.rotation });
+    await cards.store.updateCard(who, cardId, { status: 'done', contactId: saved, extracted: parsed.fields, frontRotation: parsed.rotation, frontCorners: parsed.corners });
     return { saved: true, contactId: saved, name: parsed.fields.name, company: parsed.fields.company, scope: scope === 'personal' ? '自分だけ' : '会社で共有' };
   },
 };

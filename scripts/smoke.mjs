@@ -3173,6 +3173,29 @@ console.log('\n■ 57. 名刺管理（内蔵の拡張。第27章、ADR-0042）')
     const trashByOther = await call('a', `/v1/cards/${split.body?.contactId}`, { method: 'DELETE' }, 'member');
     trashByOther.status === 403 ? ok('取り込んだ本人でも管理者でもない人は消せない') : ng(`消せてしまう（${trashByOther.status}）`);
 
+    // 1 枚の写真に何枚も写っていれば、名刺ごとに登録し、同じ写真を名刺ごとの四隅で指す。写真はほかの名刺が指す間は消えない（第27.4節・第27.5節）
+    const multi = Buffer.concat([PNG, Buffer.from(`\nM2O-CARD:${JSON.stringify({ isCard: true, cardCount: 2, cards: [
+      { name: `並べA ${tag}`, company: '株式会社ならべ', emails: [`a-${tag}@row.example`], textTop: 'up', corners: [[50, 50], [450, 50], [450, 300], [50, 300]] },
+      { name: `並べB ${tag}`, company: '株式会社ならべ', emails: [`b-${tag}@row.example`], textTop: 'down', corners: [[450, 50], [950, 50], [950, 300], [450, 300]] },
+    ] })}\n`, 'utf8')]);
+    const sent = await upload('a', 'member', [['row.png', multi]]);
+    await settle('member');
+    const rowA = (await list('member', `並べA ${tag}`)).items?.[0];
+    const rowB = (await list('member', `並べB ${tag}`)).items?.[0];
+    if (rowA) created.push(rowA.id);
+    if (rowB) created.push(rowB.id);
+    const { body: detailB } = await call('a', `/v1/cards/${rowB?.id}`, {}, 'member');
+    // B を消しても、A の写真は残る
+    await call('a', `/v1/cards/${rowB?.id}`, { method: 'DELETE' }, 'member');
+    const purgeB = await call('a', `/v1/cards/${rowB?.id}/purge`, { method: 'DELETE' }, 'member');
+    const imgA = await fetch(`${API}/v1/cards/card/${rowA?.cardId}/front`, { headers: { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' } });
+    sent.status === 202 && sent.body.queued === 1 && rowA && rowB && rowA.frontFileId === rowB.frontFileId
+      && JSON.stringify(rowA.frontCorners) === JSON.stringify([[50, 50], [450, 50], [450, 300], [50, 300]])
+      && detailB.cards?.[0]?.frontRotation === 180 && JSON.stringify(detailB.cards[0].frontCorners) === JSON.stringify([[950, 300], [450, 300], [450, 50], [950, 50]])
+      && purgeB.status === 200 && imgA.status === 200
+      ? ok('1 枚の写真に写った何枚もの名刺を名刺ごとに登録し、四隅を文字の向きに並べ直して持ち、ほかの名刺が指す写真は消さない')
+      : ng('何枚も写った名刺の扱いが違う', JSON.stringify({ sent: sent.body, rowA, rowB: rowB?.frontCorners, detailB: detailB.cards?.[0], purgeB: purgeB.status, imgA: imgA.status }).slice(0, 700));
+
     const { body: audits } = await call('a', '/v1/admin/audit-events?category=cards');
     const acts = (audits.items ?? []).map((e) => e.action);
     const names = (audits.items ?? []).map((e) => e.target);

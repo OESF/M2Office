@@ -670,7 +670,9 @@ export function KnowledgeSettings({ page }: { page: string }) {
   const act = (fn: () => Promise<unknown>, done: string) => void saver.run(async () => { await fn(); await load(); }, done);
   const restorable = (k: KnowledgeItemView) => !k.statusAt || Date.now() - Date.parse(k.statusAt) <= RESTORE_MS;
   const isRule = category === 'rule';
-  const colSpan = isRule ? 5 : 4;
+  // 秘書が学んだことは 1 文なので、節の列を出さない
+  const showSections = category !== 'learned';
+  const colSpan = (isRule ? 4 : 3) + (showSections ? 1 : 0);
 
   return (
     <>
@@ -724,12 +726,12 @@ export function KnowledgeSettings({ page }: { page: string }) {
         </div>
       )}
       {saver.view}
-      <table className="table">
+      <table className="table knowledge-table">
         <thead><tr>
           <th>{category === 'learned' ? '学んだこと' : '題名'}</th>
-          {isRule ? <th>施行</th> : <th>{category === 'learned' ? '最後に使った日' : '出典'}</th>}
+          {isRule ? <th>施行</th> : <th className="nowrap">{category === 'learned' ? '最後に使った日' : '出典'}</th>}
           {isRule && <th>出典</th>}
-          <th>節</th><th />
+          {showSections && <th className="nowrap">節</th>}<th />
         </tr></thead>
         <tbody>
           {active.map((k) => (
@@ -741,7 +743,7 @@ export function KnowledgeSettings({ page }: { page: string }) {
                     第 {k.version ?? 1} 版（{day(k.effectiveFrom)}）
                     {k.pending && <>{' '}<span className="badge">次の版 {k.pending.effectiveFrom}</span></>}
                   </td>
-                ) : category === 'learned' ? <td>{day(k.lastUsedAt)}</td> : (
+                ) : category === 'learned' ? <td className="nowrap">{day(k.lastUsedAt)}</td> : (
                   <td>
                     {k.source}
                     {k.originRunId && <>{' '}<span className="badge muted-badge">業務から登録</span></>}
@@ -749,10 +751,12 @@ export function KnowledgeSettings({ page }: { page: string }) {
                   </td>
                 )}
                 {isRule && <td>{k.source}{k.compartment && <span className="muted small">（{k.compartment}）</span>}</td>}
-                <td>
-                  <button className="link-btn" onClick={() => toggleSections(k.id)}>{k.sectionCount ?? 0} 節</button>
-                </td>
-                <td className="num">
+                {showSections && (
+                  <td className="nowrap">
+                    <button className="link-btn" onClick={() => toggleSections(k.id)}>{k.sectionCount ?? 0} 節</button>
+                  </td>
+                )}
+                <td className="num nowrap">
                   <button className="btn ghost small" onClick={() => setDraft({ id: k.id, title: k.title, body: k.body, source: k.source, compartment: k.compartment, effectiveFrom: jstToday() })}>
                     {isRule ? '改定' : '直す'}
                   </button>{' '}
@@ -806,16 +810,16 @@ export function KnowledgeSettings({ page }: { page: string }) {
       {inactive.length > 0 && (
         <>
           <h4>{category === 'learned' ? 'しまったもの' : '廃止したもの'}</h4>
-          <table className="table">
+          <table className="table knowledge-table">
             <tbody>
               {inactive.map((k) => (
                 <tr key={k.id}>
                   <td>{category === 'learned' ? k.body : k.title}</td>
-                  <td className="muted">
+                  <td className="muted nowrap">
                     {day(k.statusAt)}
                     {category === 'learned' && k.statusReason && `・${ARCHIVE_REASON[k.statusReason] ?? k.statusReason}`}
                   </td>
-                  <td className="num">
+                  <td className="num nowrap">
                     {restorable(k)
                       ? <button className="btn ghost small" disabled={saver.busy} onClick={() => act(() => api.admin.restoreKnowledge(k.id), '戻しました')}>戻す</button>
                       : <span className="muted small">1 年を過ぎました</span>}

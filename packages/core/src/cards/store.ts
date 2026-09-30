@@ -11,7 +11,7 @@
  */
 
 import pg from 'pg';
-import type { CardFields, Contact, ContactCard, ContactScope } from '@m2office/shared';
+import type { CardCorners, CardFields, Contact, ContactCard, ContactScope } from '@m2office/shared';
 
 /** 誰として見るか。自分だけの名刺は `userId` の人のものだけが見える。 */
 export interface CardViewer {
@@ -32,6 +32,16 @@ export interface NewCard {
   receivedOn: string;
 }
 
+/**
+ * 読み取り済みで作る名刺（1 枚の写真に何枚も写っていたときの 2 枚目から。第27.4節）。待ち行列に入れず、登録済みで作る。
+ */
+export interface ReadCard extends NewCard {
+  contactId: string;
+  extracted: CardFields;
+  frontRotation: number;
+  frontCorners: CardCorners | null;
+}
+
 /** 一覧の 1 行。 */
 export interface ContactSummary {
   id: string;
@@ -49,6 +59,8 @@ export interface ContactSummary {
   cardId: string | null;
   frontFileId: string | null;
   frontRotation: number;
+  /** 名刺の四隅（第27.5節）。画面が切り出しに使う。 */
+  frontCorners: CardCorners | null;
   frontKind: string | null;
   /** 最後に交換した日。 */
   lastReceivedOn: string | null;
@@ -71,7 +83,7 @@ export interface ContactQuery {
 /** 名刺の更新。 */
 export type CardPatch = Partial<Pick<ContactCard,
   'contactId' | 'scope' | 'status' | 'failureReason' | 'extracted' | 'corrected' | 'frontRotation' | 'backRotation' | 'backFileId' | 'paired'
-  | 'receivedOn'>>;
+  | 'receivedOn' | 'frontCorners' | 'backCorners'>>;
 
 /** 連絡先の更新。 */
 export type ContactPatch = Partial<CardFields & Pick<Contact, 'note' | 'scope' | 'status' | 'trashedAt'>>;
@@ -97,6 +109,10 @@ export interface BatchProgress {
 /** 名刺と連絡先の置き場。 */
 export interface ContactStore {
   createCards(who: CardViewer, cards: NewCard[]): Promise<void>;
+  /** 読み取り済みの名刺を作る（1 枚の写真の 2 枚目から。第27.4節）。 */
+  createReadCard(who: CardViewer, card: ReadCard): Promise<void>;
+  /** 画像を、指定した名刺のほかに指している名刺があるか（写真を消す前に確かめる。第27.4節）。 */
+  fileInUse(tenantId: string, fileId: string, exclude: string[]): Promise<boolean>;
   /** 次に読み取る名刺を 1 枚確保する（会社をまたぐ）。無ければ `null`。 */
   claimNextCard(): Promise<{ id: string; tenantId: string; ownerUserId: string } | null>;
   getCard(who: CardViewer, id: string): Promise<ContactCard | null>;
@@ -137,7 +153,7 @@ const CONTACT_COLUMNS = `
 const CARD_COLUMNS = `
   id, tenant_id as "tenantId", contact_id as "contactId", scope, owner_user_id as "ownerUserId",
   batch_id as "batchId", seq, front_file_id as "frontFileId", back_file_id as "backFileId",
-  front_rotation as "frontRotation", back_rotation as "backRotation", paired, status,
+  front_rotation as "frontRotation", back_rotation as "backRotation", front_corners as "frontCorners", back_corners as "backCorners", paired, status,
   failure_reason as "failureReason", extracted, corrected, to_char(received_on, 'YYYY-MM-DD') as "receivedOn",
   created_at as "createdAt"`;
 
@@ -151,11 +167,11 @@ const CONTACT_FIELD_COLUMNS: Record<keyof ContactPatch, string> = {
 const CARD_FIELD_COLUMNS: Record<keyof CardPatch, string> = {
   contactId: 'contact_id', scope: 'scope', status: 'status', failureReason: 'failure_reason', extracted: 'extracted',
   corrected: 'corrected', frontRotation: 'front_rotation', backRotation: 'back_rotation', backFileId: 'back_file_id', paired: 'paired',
-  receivedOn: 'received_on',
+  receivedOn: 'received_on', frontCorners: 'front_corners', backCorners: 'back_corners',
 };
 
 /** JSON で持つ列（書くときに文字列にする）。 */
-const JSON_COLUMNS = new Set(['phones', 'extracted', 'corrected']);
+const JSON_COLUMNS = new Set(['phones', 'extracted', 'corrected', 'front_corners', 'back_corners']);
 
 /**
  * PostgreSQL の名刺の置き場。
@@ -200,6 +216,20 @@ export class PostgresContactStore implements ContactStore {
          values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
         [c.id, who.tenantId, c.scope, who.userId, c.batchId, c.seq, c.frontFileId, c.backFileId, c.paired, c.receivedOn]);
     }
+  }
+
+  async createReadCard(who: CardViewer, c: ReadCard): Promise<void> {
+    await this.q(who,
+      `insert into contact_cards (id, tenant_id, scope, owner_user_id, batch_id, seq, front_file_id, back_file_id, paired, received_on,
+                                  status, contact_id, extracted, front_rotation, front_corners)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'done', $11, $12, $13, $14)`,
+      [c.id, who.tenantId, c.scope, who.userId, c.batchId, c.seq, c.frontFileId, c.backFileId, c.paired, c.receivedOn,
+        c.contactId, JSON.stringify(c.extracted), c.frontRotation, c.frontCorners ? JSON.stringify(c.frontCorners) : null]);
+  }
+
+  async fileInUse(tenantId: string, fileId: string, exclude: string[]): Promise<boolean> {
+    const res = await this.pool.query<{ used: boolean }>('select m2o_card_file_in_use($1, $2, $3) as used', [tenantId, fileId, exclude]);
+    return res.rows[0]?.used === true;
   }
 
   async claimNextCard(): Promise<{ id: string; tenantId: string; ownerUserId: string } | null> {
@@ -274,11 +304,12 @@ export class PostgresContactStore implements ContactStore {
       `select k.id, k.scope, k.owner_user_id as "ownerUserId", k.name, k.name_kana as "nameKana", k.company,
               k.department, k.title, k.emails, k.status, k.trashed_at as "trashedAt",
               last.id as "cardId", last.front_file_id as "frontFileId", coalesce(last.front_rotation, 0) as "frontRotation",
+              last.front_corners as "frontCorners",
               f.kind as "frontKind", to_char(last.received_on, 'YYYY-MM-DD') as "lastReceivedOn",
               (select count(*)::int from contact_cards c where c.contact_id = k.id) as "cardCount"
          from contacts k
          left join lateral (
-           select c.id, c.front_file_id, c.front_rotation, c.received_on from contact_cards c
+           select c.id, c.front_file_id, c.front_rotation, c.front_corners, c.received_on from contact_cards c
             where c.contact_id = k.id order by c.received_on desc, c.created_at desc limit 1
          ) last on true
          left join files f on f.id = last.front_file_id

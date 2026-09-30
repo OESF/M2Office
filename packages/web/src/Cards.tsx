@@ -9,8 +9,9 @@
  */
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import type { CardFields, ContactPhone, ContactScope, PhoneKind } from '@m2office/shared';
+import type { CardCorners, CardFields, ContactPhone, ContactScope, PhoneKind } from '@m2office/shared';
 import { api, describeError, type CardDetail, type CardList, type CardMeetings, type CardSummary } from './api.js';
+import { cropCard, prepareCardPhoto } from './card-image.js';
 
 /**
  * ファイルを選ぶときに受け付ける形式（第27.4節）。
@@ -81,11 +82,13 @@ function CardListView({ onOpen }: { onOpen: (id: string) => void }) {
   }, [reading, load]);
 
   /** 渡して、読み取りの待ちに入れる。 */
-  const send = async (files: File[], backOf?: (number | null)[]) => {
-    if (files.length === 0) return;
+  const send = async (picked: File[], backOf?: (number | null)[]) => {
+    if (picked.length === 0) return;
     setBusy(true);
     setMessage(null);
     try {
+      // 写真の向きの情報を反映した画素にしてから送る（読み取りと画面が同じ画素を見るため。第27.4節）
+      const files = await Promise.all(picked.map(prepareCardPhoto));
       const r = await api.cards.upload(files, { scope: personal ? 'personal' : 'company', ...(backOf ? { backOf } : {}) });
       if (r.rejected.length > 0) setMessage(r.rejected.map((x) => (x.name ? `${x.name}: ${x.reason}` : x.reason)).join(' / '));
       load();
@@ -170,7 +173,7 @@ function CardListView({ onOpen }: { onOpen: (id: string) => void }) {
 function CardRow({ item: c, onOpen }: { item: CardSummary; onOpen: () => void }) {
   return (
     <button className="card-row" onClick={onOpen}>
-      <CardThumb cardId={c.cardId} rotation={c.frontRotation} kind={c.frontKind} />
+      <CardThumb cardId={c.cardId} rotation={c.frontRotation} corners={c.frontCorners} kind={c.frontKind} />
       <div className="card-row-main">
         <strong>{c.name || '（氏名なし）'}</strong>
         <span className="small muted">{[c.company, c.department, c.title].filter(Boolean).join('　')}</span>
@@ -188,7 +191,7 @@ function TrashRow({ item: c, onChanged, onError }: { item: CardSummary; onChange
   const act = (run: () => Promise<unknown>) => void run().then(onChanged).catch((e) => onError(describeError(e)));
   return (
     <div className="card-row">
-      <CardThumb cardId={c.cardId} rotation={c.frontRotation} kind={c.frontKind} />
+      <CardThumb cardId={c.cardId} rotation={c.frontRotation} corners={c.frontCorners} kind={c.frontKind} />
       <div className="card-row-main">
         <strong>{c.name || '（氏名なし）'}</strong>
         <span className="small muted">{c.company}{c.trashedAt ? `　${shortDate(c.trashedAt)} にごみ箱へ` : ''}</span>
@@ -205,38 +208,49 @@ function TrashRow({ item: c, onChanged, onError }: { item: CardSummary; onChange
  * 名刺の画像。読んだ中身を画面の中だけで出す（ログインと会社の指定をそのまま使うため）。
  *
  * @param rotation 読み取りで見分けた、正しい向きに回す角度
+ * @param corners 名刺の四隅。あれば名刺の範囲を切り出して傾きを直し（第27.5節）、無ければ写真全体を回して出す
  * @param kind 画像の形式。ページだけの PDF は画面の中で PDF として出す
+ * @remarks 詳細（`large`）では、押すと元の写真に切り替わる（切り出しがずれたときに確かめられるように）
  */
-function CardImage({ cardId, side, rotation, kind, large = false }: {
-  cardId: string | null; side: 'front' | 'back'; rotation: number; kind: string | null; large?: boolean;
+function CardImage({ cardId, side, rotation, corners, kind, large = false }: {
+  cardId: string | null; side: 'front' | 'back'; rotation: number; corners: CardCorners | null; kind: string | null; large?: boolean;
 }) {
   const [url, setUrl] = useState<string | null>(null);
   const [type, setType] = useState<string>('');
+  const [original, setOriginal] = useState(false);
+  const key = corners ? corners.flat().join(',') : '';
   useEffect(() => {
     if (!cardId) return;
     let cancelled = false;
     let made: string | null = null;
     void api.cards.image(cardId, side).then(async (b) => {
       if (!b || cancelled) return;
-      // 正しい向きに回した画像を作る。枠に収まるよう、見た目でなく画素を回す
-      const shown = rotation && b.type.startsWith('image/') ? await rotated(b, rotation).catch(() => b) : b;
+      const image = b.type.startsWith('image/');
+      // 名刺の範囲を切り出して傾きを直す。四隅が無いか、切り出せなければ、写真全体を正しい向きに回す（見た目でなく画素を回す）
+      const whole = async () => (rotation ? rotated(b, rotation).catch(() => b) : b);
+      const shown = !image ? b : corners && !original ? await cropCard(b, corners).catch(whole) : await whole();
       if (cancelled) return;
       made = URL.createObjectURL(shown);
       setType(b.type);
       setUrl(made);
     });
     return () => { cancelled = true; if (made) URL.revokeObjectURL(made); };
-  }, [cardId, side, rotation]);
+  }, [cardId, side, rotation, key, original]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!url) return <div className={`card-img placeholder${large ? ' large' : ''}`} />;
   if (type === 'application/pdf' || kind === 'pdf') {
     return large ? <iframe className="card-img large pdf" src={url} title="名刺" /> : <div className="card-img placeholder pdf">PDF</div>;
   }
   // HEIC は表示できないブラウザがある（Safari では出る）。出せなければ形だけ出す
-  return (
-    <div className={`card-img${large ? ' large' : ''}`}>
-      <img src={url} alt="名刺" onError={(e) => { (e.target as HTMLImageElement).style.visibility = 'hidden'; }} />
-    </div>
-  );
+  const img = <img src={url} alt="名刺" onError={(e) => { (e.target as HTMLImageElement).style.visibility = 'hidden'; }} />;
+  if (large && corners) {
+    return (
+      <button type="button" className="card-img large card-img-toggle" onClick={() => setOriginal((o) => !o)}
+        aria-label={original ? '名刺の範囲を出す' : '元の写真を出す'} title={original ? '名刺の範囲を出す' : '元の写真を出す'}>
+        {img}
+      </button>
+    );
+  }
+  return <div className={`card-img${large ? ' large' : ''}`}>{img}</div>;
 }
 
 /**
@@ -258,8 +272,8 @@ async function rotated(blob: Blob, degrees: number): Promise<Blob> {
   return new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob'))), 'image/jpeg', 0.9));
 }
 
-function CardThumb({ cardId, rotation, kind }: { cardId: string | null; rotation: number; kind: string | null }) {
-  return <CardImage cardId={cardId} side="front" rotation={rotation} kind={kind} />;
+function CardThumb({ cardId, rotation, corners = null, kind }: { cardId: string | null; rotation: number; corners?: CardCorners | null; kind: string | null }) {
+  return <CardImage cardId={cardId} side="front" rotation={rotation} corners={corners} kind={kind} />;
 }
 
 /** 詳細。画像の横に氏名と操作、その下に項目を狭い幅で並べる。項目はその場で直せる（第27.8節）。 */
@@ -329,8 +343,8 @@ function CardDetailView({ id, onBack, onOpen, mailer }: {
       {message && <p className="error">{message}</p>}
       <div className="card-head">
         <div className="card-images">
-          {latest?.hasFront && <CardImage cardId={latest.id} side="front" rotation={latest.frontRotation} kind={null} large />}
-          {latest?.hasBack && <CardImage cardId={latest.id} side="back" rotation={latest.backRotation} kind={null} large />}
+          {latest?.hasFront && <CardImage cardId={latest.id} side="front" rotation={latest.frontRotation} corners={latest.frontCorners} kind={null} large />}
+          {latest?.hasBack && <CardImage cardId={latest.id} side="back" rotation={latest.backRotation} corners={latest.backCorners} kind={null} large />}
         </div>
         <div className="card-summary">
           <h2>{c.name || '（氏名なし）'}</h2>

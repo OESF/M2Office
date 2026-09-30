@@ -17,15 +17,15 @@ import type { LlmProvider } from '../llm/provider.js';
 import { saveFile } from '../files/service.js';
 import { silentLogger, type Logger } from '../log/logger.js';
 import { CARD_BATCH_MAX, CARD_MIME, detectCardKind, splitCardPdf, type CardFileKind } from './formats.js';
-import { readCard, type CardReading } from './read.js';
+import { CARD_MAX_PER_IMAGE, readCard, type CardReading } from './read.js';
 import { mergeFields, resolveContact } from './identity.js';
 import type { CardViewer, ContactPatch, ContactStore, NewCard } from './store.js';
 
 /** 1 ファイルの上限（第9.4.1節と同じ 10 MB）。 */
 export const CARD_FILE_MAX_BYTES = 10 * 1024 * 1024;
 
-/** 何枚も写っていたときに添える知らせ（第27.4節）。 */
-export const MULTIPLE_NOTE = '1 枚の写真に何枚も写っていたため、いちばん大きい 1 枚だけを読み取りました。1 枚ずつ撮ってください';
+/** 1 枚の写真に上限より多く写っていたときに添える知らせ（第27.4節）。 */
+export const MULTIPLE_NOTE = `1 枚の写真に ${CARD_MAX_PER_IMAGE} 枚より多く写っていたため、${CARD_MAX_PER_IMAGE} 枚までを読み取りました`;
 
 export interface CardServiceDeps {
   store: ContactStore;
@@ -179,33 +179,37 @@ export class CardService {
     const card = await store.getCard(who, cardId);
     if (!card || card.status === 'done' || card.status === 'failed') return;
     const llm = await this.deps.llmFor(who.tenantId);
-    const front = card.frontFileId ? await this.readFile(llm, who.tenantId, card.frontFileId) : null;
-    if (!front || front.kind !== 'card') {
+    const reading = card.frontFileId ? await this.readFile(llm, who.tenantId, card.frontFileId) : null;
+    if (!reading || reading.kind !== 'card') {
       await store.updateCard(who, card.id, {
         status: 'failed',
-        failureReason: front?.kind === 'unavailable' ? front.reason : '名刺と見分けられないか、文字が読めませんでした',
+        failureReason: reading?.kind === 'unavailable' ? reading.reason : '名刺と見分けられないか、文字が読めませんでした',
       });
       await this.finishBatch(who, card.batchId);
       return;
     }
+    const [front, ...others] = reading.cards as [typeof reading.cards[number], ...typeof reading.cards];
+    const single = others.length === 0;
     let fields = front.fields;
     let backRotation = 0;
-    if (card.backFileId) {
+    let backCorners = null as typeof front.corners;
+    if (card.backFileId && single) {
       // 組にした裏は、表に無い項目を埋めるのに使う（英語の面のメールアドレスなど）
       const back = await this.readFile(llm, who.tenantId, card.backFileId);
       if (back?.kind === 'card') {
-        fields = fillBlanks(fields, back.fields);
-        backRotation = back.rotation;
+        fields = fillBlanks(fields, back.cards[0]!.fields);
+        backRotation = back.cards[0]!.rotation;
+        backCorners = back.cards[0]!.corners;
       }
     }
 
-    // 表裏を組にせずに続けて渡した同じ人の 2 枚は、1 枚の名刺（表と裏）にまとめる（第27.4節）
-    if (!card.paired && !card.backFileId) {
+    // 表裏を組にせずに続けて渡した同じ人の 2 枚は、1 枚の名刺（表と裏）にまとめる（第27.4節）。写真に 1 枚だけのときに限る
+    if (single && !card.paired && !card.backFileId) {
       const prev = await store.previousCardInBatch(who, card.batchId, card.seq);
       if (prev && prev.status === 'done' && prev.contactId && !prev.backFileId && !prev.paired) {
         const prevContact = await store.getContact(who, prev.contactId);
         if (prevContact && samePersonOnCard(prevContact, fields)) {
-          await store.updateCard(who, prev.id, { backFileId: card.frontFileId, backRotation: front.rotation, paired: true });
+          await store.updateCard(who, prev.id, { backFileId: card.frontFileId, backRotation: front.rotation, backCorners: front.corners, paired: true });
           const patch = mergeFields(prevContact, fields, false);
           if (Object.keys(patch).length > 0) await store.updateContact(who, prevContact.id, patch, who.userId);
           await store.deleteCard(who, card.id);
@@ -215,10 +219,21 @@ export class CardService {
       }
     }
 
+    // 1 枚の写真に何枚も写っていれば、2 枚目からを名刺ごとに登録する（同じ写真を名刺ごとの四隅で指す。第27.4節）。
+    // 表と裏の組にしないよう、同じ写真の名刺は組にした印を付ける
+    for (const other of others) {
+      const id = `cc-${randomUUID()}`;
+      const otherContact = await this.register(who, { id, scope: card.scope, receivedOn: card.receivedOn }, other.fields, 'system');
+      await store.createReadCard(who, {
+        id, scope: card.scope, batchId: card.batchId, seq: card.seq, frontFileId: card.frontFileId!, backFileId: null, paired: true,
+        receivedOn: card.receivedOn, contactId: otherContact, extracted: other.fields, frontRotation: other.rotation, frontCorners: other.corners,
+      });
+    }
     const contactId = await this.register(who, card, fields, 'system');
     await store.updateCard(who, card.id, {
-      status: 'done', contactId, extracted: fields, frontRotation: front.rotation, backRotation,
-      failureReason: front.multiple ? MULTIPLE_NOTE : null,
+      status: 'done', contactId, extracted: fields, frontRotation: front.rotation, frontCorners: front.corners, backRotation, backCorners,
+      ...(single ? {} : { paired: true }),
+      failureReason: reading.truncated ? MULTIPLE_NOTE : null,
     });
     await this.finishBatch(who, card.batchId);
   }
@@ -394,7 +409,7 @@ export class CardService {
     if (!contact || contact.status !== 'trash') return 'ごみ箱に見つかりません（先にごみ箱へ移してください）';
     if (!canManage(contact, user)) return '消せるのは、取り込んだ本人と管理者です';
     const cards = await store.listCardsOfContact(who, contactId);
-    await this.removeFiles(who.tenantId, cards.flatMap((c) => [c.frontFileId, c.backFileId]));
+    await this.removeFiles(who.tenantId, cards.flatMap((c) => [c.frontFileId, c.backFileId]), cards.map((c) => c.id));
     await store.purgeCards(cards.map((c) => c.id));
     await this.audit(who.tenantId, { type: 'user', id: user.id }, 'contact.purge', 'contact', contactId, { cards: cards.length });
     return null;
@@ -404,7 +419,7 @@ export class CardService {
   async dismissFailed(who: CardViewer, cardId: string): Promise<boolean> {
     const card = await this.deps.store.getCard(who, cardId);
     if (!card || card.status !== 'failed' || card.ownerUserId !== who.userId) return false;
-    await this.removeFiles(who.tenantId, [card.frontFileId, card.backFileId]);
+    await this.removeFiles(who.tenantId, [card.frontFileId, card.backFileId], [card.id]);
     await this.deps.store.purgeCards([card.id]);
     return true;
   }
@@ -417,7 +432,7 @@ export class CardService {
   async purgeExpired(): Promise<number> {
     const expired = await this.deps.store.expiredCards();
     if (expired.length === 0) return 0;
-    for (const e of expired) await this.removeFiles(e.tenantId, [e.frontFileId, e.backFileId]);
+    for (const e of expired) await this.removeFiles(e.tenantId, [e.frontFileId, e.backFileId], expired.map((x) => x.cardId));
     const n = await this.deps.store.purgeCards(expired.map((e) => e.cardId));
     for (const tenantId of new Set(expired.map((e) => e.tenantId))) {
       await this.audit(tenantId, { type: 'system', id: 'cards' }, 'contact.purge', 'card', 'expired',
@@ -426,8 +441,15 @@ export class CardService {
     return n;
   }
 
-  private async removeFiles(tenantId: string, ids: (string | null)[]): Promise<void> {
-    for (const id of ids) if (id) await this.deps.files.remove(tenantId, id);
+  /**
+   * 名刺の画像を置き場から消す。1 枚の写真に何枚も写っていたときは、ほかの名刺が指している間は消さない（第27.4節）。
+   *
+   * @param cardIds 消そうとしている名刺（これらのほかに指している名刺があるかを見る）
+   */
+  private async removeFiles(tenantId: string, ids: (string | null)[], cardIds: string[]): Promise<void> {
+    for (const id of new Set(ids)) {
+      if (id && !(await this.deps.store.fileInUse(tenantId, id, cardIds))) await this.deps.files.remove(tenantId, id);
+    }
   }
 
   private async audit(
