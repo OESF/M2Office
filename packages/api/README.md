@@ -152,13 +152,19 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/cards/card/:cardId/front` ／ `back` | 名刺の画像（見られる名刺のものだけ。ページだけの PDF は囲いの中で開かせる） |
 | `PUT /v1/cards/card/:cardId/received` | 受け取った日を直す（`receivedOn`。受け取った本人だけ。今日より後は 400。初めの値は取り込んだ人のタイムゾーンでの取り込んだ日。第27.3節） |
 | `DELETE /v1/cards/card/:cardId` | 読み取れなかった名刺を、待たずに消す（取り込んだ本人だけ） |
-| `GET /v1/signage` ／ `PATCH /v1/signage/screens/:id` | 店頭サイネージ（仕様書 第31章）: 画面の一覧と状態・使っている容量と上限・管理者か ／ 画面の名前・向き・回し方を直す。サイネージを切っている会社と利用範囲の外の人には、`/v1/signage` のどの口も 403 |
+| `GET /v1/signage` ／ `PATCH /v1/signage/screens/:id` | 店頭サイネージ（仕様書 第31章）: 画面の一覧と状態・使っている容量と上限・管理者か ／ 画面の名前・向き・回し方・音の大きさ（`volume` 0〜100）を直す。サイネージを切っている会社と利用範囲の外の人には、`/v1/signage` のどの口も 403 |
 | `GET` ／ `PUT /v1/signage/screens/:id/entries` | 画面の流れと版 ／ 並びごと置き換える（`version` が違えば 409） |
-| `GET` ／ `POST /v1/signage/assets` | 素材の一覧（どの画面の流れに入っているかつき）／ 足す（本文はファイルの中身そのもの。`x-file-name`・`x-width`・`x-height`。形式・縦横・長さをサーバーでも確かめ、H.264 でない動画は 422。同じ中身は 200 と前の素材） |
-| `PUT /v1/signage/assets/:id/thumbnail` ／ `PATCH` ／ `DELETE /v1/signage/assets/:id` | 縮小画像（JPEG・100 KB まで）／ 名前を直す ／ 消す（流れからも外し、外した画面の名前を返す） |
-| `GET /v1/signage/assets/:id/content` ／ `/thumbnail` | 素材の中身（`Range` に応じる）／ 縮小画像 |
-| `POST /v1/admin/extensions/signage/pairings/claim` ／ `DELETE /v1/admin/extensions/signage/screens/:id` ／ `PUT /v1/admin/extensions/signage/settings` | 管理者: 番号で画面を登録（1 社 3 台まで。外して 30 日以内の画面は引き継ぐ）／ 画面を外す（鍵はその場で効かない）／ 画像の秒数・店の色 |
-| `/v1/signage-play/...` | 再生のページ（端末）。**ログインを使わず、画面の鍵（`Authorization: Bearer`）で名乗る**。`POST /pairings`（登録の番号。1 時間に 20 回まで）・`GET /pairings/qr.svg`・`POST /pairings/poll`（登録されたら鍵を 1 度だけ返す）・`GET /state`・`GET /assets/:id`（`Range`）・`GET /assets/:id/thumbnail`・`GET /events`（SSE）・`POST /heartbeat`（停止中も受ける）。鍵が無い・違う会社は 401、切った会社は 404 |
+| `GET` ／ `POST /v1/signage/assets` | 素材の一覧（どの画面の流れに入っているかつき）／ 足す（本文はファイルの中身そのもの。`x-file-name`・`x-width`・`x-height`。形式・縦横・長さをサーバーでも確かめ、H.264 でない動画は 422。HTML は 10 MB・UTF-8 で、外への参照（`http:`・`https:`・`//`）が残れば 422、`<title>` を名前にする。同じ中身は 200 と前の素材） |
+| `PUT /v1/signage/assets/:id/thumbnail` ／ `PATCH` ／ `DELETE /v1/signage/assets/:id` | 縮小画像（JPEG・100 KB まで）／ 名前・割り込みの素材にするか（`isInterrupt`。画像と HTML だけ。50 個まで）・鳴らす音（`jingle`）を直す ／ 消す（流れからも外し、外した画面の名前を返す） |
+| `GET /v1/signage/assets/:id/content` ／ `/thumbnail` | 素材の中身（`Range` に応じる。HTML には外と通信させない `content-security-policy` を付ける）／ 縮小画像 |
+| `POST` ／ `GET /v1/signage/interrupts` | 割り込みを出す（`text` か `number`・`place` か `assetId`、`screens`・`seconds`・`chime`・`jingle`。文は 80 字まで。同じ中身が待っているか出している画面にはまとめる。201 と足した画面・まとめた画面）／ 最近 24 時間の割り込みと画面ごとの状態 |
+| `POST /v1/signage/interrupts/:id/clear` ／ `POST /v1/signage/clear` | その割り込みを消す ／ すべて消す（`screens` で画面を選べる） |
+| `GET /v1/signage/phrases` ／ `POST /v1/signage/phrases/:id/hide` | よく出す案内（14 日に 3 回以上出した形）と割り込みの素材の使った回数 ／ 案内を外す |
+| `GET /v1/signage/sounds` ／ `GET /v1/signage/mobile-qr.svg` | 会社のジングルの音の一覧 ／ スタッフのページ（`/m/signage`）の QR |
+| `POST /v1/admin/extensions/signage/pairings/claim` ／ `DELETE /v1/admin/extensions/signage/screens/:id` ／ `PUT /v1/admin/extensions/signage/settings` | 管理者: 番号で画面を登録（1 社 3 台まで。外して 30 日以内の画面は引き継ぐ）／ 画面を外す（鍵はその場で効かない）／ 画像の秒数・店の色・割り込みの秒数（5〜60）・ジングルの有無と既定の音・呼び出しの言い回し（`{番号}` と `{場所}`） |
+| `GET` ／ `POST /v1/admin/extensions/signage/sources` ／ `PUT …/sources/:id/status` ／ `POST …/sources/:id/reset-mapping` | 管理者: 呼び出しの受け口の一覧（今日の受け付けた数・断った数）／ 作る（URL と鍵は作ったときだけ返す）／ 止める・動かす ／ 項目の対応を忘れて推測し直す |
+| `GET` ／ `POST /v1/admin/extensions/signage/sounds` ／ `DELETE …/sounds/:id` | 管理者: 会社のジングルの音（本文は MP3・WAV そのもの。`x-sound-name`・`x-duration-ms`。5 秒・300 KB・10 個まで）／ 消す（既定の音なら「ピンポーン」に戻す） |
+| `/v1/signage-play/...` | 再生のページ（端末）。**ログインを使わず、画面の鍵（`Authorization: Bearer`）で名乗る**。`POST /pairings`（登録の番号。1 時間に 20 回まで）・`GET /pairings/qr.svg`・`POST /pairings/poll`（登録されたら鍵を 1 度だけ返す）・`GET /state`・`GET /assets/:id`（`Range`）・`GET /assets/:id/thumbnail`・`GET /events`（SSE。流れ・設定・外された・割り込み・消す・音の大きさ）・`POST /heartbeat`（停止中も受ける）・`GET /interrupts`（待っているものと出しているもの。経過はサーバーが数える）・`POST /interrupts/:id/started`・`/ended`（`ended` は停止中も受ける）・`GET /sounds/:id`。鍵が無い・違う会社は 401、切った会社は 404 |
 | `GET /v1/inventory` | 在庫の品目の一覧（`q`・`stopped=1`）と使える数・場所・会社の機能の入り切り。在庫管理を切っている会社と利用範囲の外の人には、`/v1/inventory` のどの口も 403（仕様書 第29章） |
 | `GET /v1/inventory/items/:id` | 品目の詳細（場所とロットごとの数・最近の記録） |
 | `POST /v1/inventory/items` ／ `PUT /v1/inventory/items/:id` | 品目を作る・直す（バーコードは `codes` で足す。会社の中で重ならない）。作るときは `initialQty`（いまの数）を入庫として記録し、単位の欄の数ははじめの数として読んで `note` で返す。直すときに単位へ数を入れると 400 |
@@ -234,6 +240,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/inventory/bookings` | 取り置く（`itemId`・`qty`・`startsAt`・任意の `externalId`・`menu`）。使える数から引く |
 | `POST /v1/inventory/bookings/:id/use` ／ `cancel` | 予約の人が来た（取り置きを使用の記録にする）／ 取り消す（使える数に戻す） |
 | `POST /v1/inventory/menus` | メニューで使う品目を覚える（`menu`・`items`: itemId と qty。空なら在庫を使わない）。品目の分からない予約を取り置き直す |
+| `POST /v1/hooks/signage/:key` ／ `POST /v1/hooks/signage`（`Authorization: Bearer`） | **認証なしの受け口**。受付などのシステムから店頭サイネージに割り込みを出す（第31.8.2節）。会社は鍵（32 文字）のハッシュから引く。JSON かフォーム（UTF-8）だけ（ほかは 415）、4 KB を超えれば 413、1 分 30 回を超えれば 429（`retry-after`）。知らない鍵・止めた受け口・切った会社はどれも 404、POST 以外は 405、読めない・知らない画面は 422。標準の形でない本文は、値を消した骨組みだけを推論に渡して対応を推測する（推論が使えなければ 503）。`requestId` を 10 分覚えて二度出さない。記録では URL の鍵を伏せる |
 | `POST /v1/hooks/inventory/:key` | **認証なしの受け口**。予約のシステムの Webhook を受ける（第29.13.1節）。会社は鍵（32 文字）のハッシュから引き、ホスト名は見ない。64 KB を超えれば 413。知らない鍵・止めた受け口・引き当てを切った会社はどれも 404、予約として読めなければ 422。項目の対応は最初の予約から推論して受け口に覚える。予約した人の名前・連絡先は残さない |
 | `GET /v1/notices` | 本人宛ての有効な社内のお知らせ（取り下げ・期間切れ・本人が済んだものを除く。`isNew`・`daysLeft` つき。仕様書 第10.15節） |
 | `POST /v1/notices` | 社内のお知らせを出す（`title`・`body`・`link`（https だけ）・`all` か `groupIds`・`dueOn`・`until`）。会社の全員が出せる。承認は挟まない。201 |

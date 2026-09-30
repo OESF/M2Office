@@ -10,3 +10,9 @@ export {
 } from './service.js';
 export { readMp4, type Mp4Info, type ReadAt } from './mp4.js';
 export { imageSize } from './image-size.js';
+export { externalRefs } from './service.js';
+export {
+  SignageInterrupts, normalizeText, fillTemplate, leadingNumber, phraseTemplate, valueSkeleton, pickPath, soundMime,
+  type SignageInterruptsDeps, type InterruptError,
+} from './interrupts.js';
+export { type TargetRecord, type InterruptRecord } from './store.js';

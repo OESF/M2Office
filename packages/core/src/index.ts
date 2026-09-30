@@ -141,3 +141,4 @@ export * from './signage/index.js';
 export * from './notices/index.js';
 export * from './brief/index.js';
 export { answerNotice, type NoticeAnswer } from './secretary/notices.js';
+export { signageRequest, answerSignage, type SignageSecretaryDeps, type SignageRequest } from './secretary/signage.js';

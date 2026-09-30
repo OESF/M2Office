@@ -27,6 +27,7 @@ import { answerAttendance, attendanceRequest, payslipRequest } from './attendanc
 import type { AttendanceService } from '../hr/attendance-service.js';
 import type { PayrollService } from '../hr/payroll-service.js';
 import { answerHrStaff, hrStaffRequest, type HrStaffDeps } from './hr-staff.js';
+import { signageRequest, answerSignage, type SignageSecretaryDeps } from './signage.js';
 import { jstDate } from '../hr/attendance.js';
 import { CARD_UPDATE } from '../cards/agents.js';
 import { answerBriefSettings } from '../brief/settings.js';
@@ -105,6 +106,8 @@ export interface SecretaryDeps {
   payroll?: PayrollService;
   /** 人事の担当者の依頼（第30.20.1節）。人事区画の人の「給与を計算して」「労働条件通知書」「労務の期限」にその場で答える。 */
   hrStaff?: HrStaffDeps;
+  /** 店頭サイネージ（第31.11.1節）。本人が話した回にだけ、割り込みを出す・消す・画面の状態に答える。 */
+  signage?: SignageSecretaryDeps;
   /**
    * 振り分けの経過を知らせる先（デバッグモード。仕様書 第20.4.1節「デバッグモード」）。どの定型の答え・どの業務に回したかと、その理由を受け取る。
    *
@@ -306,6 +309,16 @@ export class Secretary {
       const text = await answerHrStaff(this.deps.hrStaff, tenantId, userId, staffReq);
       await this.audit(tenantId, userId, 'secretary.hr', staffReq.kind);
       return { reply: { layer: 'direct', text, evidence: [], tokensUsed: 0 }, keep: true };
+    }
+    // 店頭サイネージ（第31.11.1節）。本人が秘書の欄で話した回にだけ届く（業務の実行・定時実行・ブリーフからは呼ばれない）。利用範囲の人だけ
+    const signReq = this.deps.signage ? signageRequest(message) : null;
+    if (signReq && this.deps.signage && await this.deps.signage.access(tenantId, userId)) {
+      const me = await this.deps.repo.findUserById(tenantId, userId);
+      const text = await answerSignage(this.deps.signage, tenantId, userId, !!me?.roles.includes('admin'), signReq);
+      if (text !== null) {
+        await this.audit(tenantId, userId, 'secretary.signage', signReq.kind);
+        return { reply: { layer: 'direct', text, evidence: [], tokensUsed: 0 }, keep: true };
+      }
     }
     // 本人の給与明細（「今月の給与明細」「手取りが減ったのはなぜ？」）。本人の分だけ答える
     if (this.deps.payroll && this.deps.attendance && payslipRequest(message) && (await this.deps.attendance.settings(tenantId)).enabled) {

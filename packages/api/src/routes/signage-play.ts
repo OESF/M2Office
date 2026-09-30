@@ -33,7 +33,7 @@ type C = Context<AppEnv & { Variables: { screen: ScreenRecord } }>;
  */
 export function signagePlayRoute(deps: AppDeps, version: string | null) {
   const app = new Hono<AppEnv & { Variables: { screen: ScreenRecord } }>();
-  const { service } = deps.signage;
+  const { service, interrupts } = deps.signage;
   const pairingHits = new Map<string, number[]>();
 
   const enabled = async (tenantId: string) => (await deps.repo.getTenantSettings(tenantId)).signage.enabled;
@@ -79,10 +79,39 @@ export function signagePlayRoute(deps: AppDeps, version: string | null) {
     return c.json(await service.pollPairing(tenant.id, b.secret));
   });
 
-  /** 画面の設定・流れと版・素材・店の色・会社の名前・サーバーの時刻。 */
+  /** 画面の設定・流れと版・素材（割り込みの素材を含む）・会社の音・店の色・会社の名前・サーバーの時刻・待っている割り込み。 */
   app.get('/state', async (c) => {
     const tenant = c.get('tenant');
-    return c.json({ ...(await service.playState(tenant.id, c.get('screen'))), pageVersion: version });
+    return c.json({
+      ...(await service.playState(tenant.id, c.get('screen'))), pageVersion: version,
+      interrupts: await interrupts.pending(tenant.id, c.get('screen').id),
+    });
+  });
+
+  /** 待っている割り込みと出している割り込み（経過はサーバーが数える。2 分を過ぎたものは出さない。第31.9.2節）。 */
+  app.get('/interrupts', async (c) => {
+    const tenant = c.get('tenant');
+    return c.json({ interrupts: await interrupts.pending(tenant.id, c.get('screen').id) });
+  });
+
+  /** 割り込みを出し始めた。 */
+  app.post('/interrupts/:id/started', async (c) => {
+    const tenant = c.get('tenant');
+    return c.json({ ok: await interrupts.started(tenant.id, c.get('screen').id, c.req.param('id')) });
+  });
+
+  /** 割り込みを出し終えた（秒数が過ぎた）。停止中も受ける。 */
+  app.post('/interrupts/:id/ended', async (c) => {
+    const tenant = c.get('tenant');
+    return c.json({ ok: await interrupts.ended(tenant.id, c.get('screen').id, c.req.param('id')) });
+  });
+
+  /** 会社のジングルの音の中身。 */
+  app.get('/sounds/:id', async (c) => {
+    const tenant = c.get('tenant');
+    const s = await service.deps.store.getSound(tenant.id, c.req.param('id'));
+    if (!s) return c.json({ error: '音がありません' }, 404);
+    return new Response(Buffer.from(s.data), { headers: { 'content-type': s.mime, 'x-content-type-options': 'nosniff', 'cache-control': 'private, max-age=86400' } });
   });
 
   /** 素材の中身（その画面の流れの素材だけ。`Range` に応じる）。 */
@@ -110,7 +139,8 @@ export function signagePlayRoute(deps: AppDeps, version: string | null) {
   });
 
   /**
-   * 即時の知らせ（SSE）。「流れが変わった（flow）」「画面の設定が変わった（screen）」「会社の設定が変わった（settings）」「外された（removed）」。
+   * 即時の知らせ（SSE）。「流れが変わった（flow）」「画面の設定が変わった（screen）」「会社の設定が変わった（settings）」「外された（removed）」、
+   * 「割り込み（interrupt）」「消す（clear）」「音の大きさ（volume）」。
    * 15 秒ごとに心拍を送る。知らせが届かない場合に備え、画面の状態も確かめ直す。
    */
   app.get('/events', (c) => {

@@ -39,7 +39,7 @@ export function requestLogger(log: Logger) {
     const fields = {
       requestId,
       method: c.req.method,
-      path: c.req.path, // 問い合わせ文字列は含めない
+      path: logPath(c.req.path), // 問い合わせ文字列は含めない。受け口の鍵は伏せる
       status,
       ms: Date.now() - startedAt,
       tenantId: ctx?.tenant.id ?? c.get('tenant')?.id,
@@ -49,6 +49,15 @@ export function requestLogger(log: Logger) {
     else if (status >= 500) log.error('要求', fields);
     else log.info('要求', fields);
   };
+}
+
+/**
+ * 記録に残す要求のパス。受け口（予約・サイネージ）の URL の鍵は伏せる（仕様書 第31.8.2節・第29.13.1節）。
+ *
+ * @example logPath('/v1/hooks/signage/abc…') // → '/v1/hooks/signage/***'
+ */
+export function logPath(path: string): string {
+  return path.replace(/^(\/v1\/hooks\/[a-z-]+)\/[^/]+/, '$1/***');
 }
 
 /**
@@ -65,7 +74,7 @@ export function onUnexpectedError(log: Logger) {
     if (err instanceof SyntaxError) {
       return c.json({ error: '要求の形式が正しくありません（JSON として読めません）', requestId }, 400);
     }
-    (c.get('log') ?? log).error('想定外のエラー', { requestId, method: c.req.method, path: c.req.path, err });
+    (c.get('log') ?? log).error('想定外のエラー', { requestId, method: c.req.method, path: logPath(c.req.path), err });
     return c.json({ error: '内部エラーが発生しました。時間をおいて、もう一度お試しください。', requestId }, 500);
   };
 }

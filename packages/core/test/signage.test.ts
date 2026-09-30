@@ -3,11 +3,15 @@
  *
  * MP4 の入れ物の記録の読み方（H.264 か・長さ・縦横。moov が後ろにある動画も）、画像の種類と縦横、
  * ふだん動いている時間帯の決め方、生きている知らせの整え方を確かめる。
+ * 段 2: 割り込みの文の整え方・よく出す案内の形・受け口の骨組み（値を渡さない）・音の形式・HTML の外への参照・秘書への依頼の見分け方（第31.7節〜第31.9節）。
  */
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readMp4, imageSize, usualSlot, jstSlot, cleanReport } from '../src/index.js';
+import {
+  readMp4, imageSize, usualSlot, jstSlot, cleanReport, normalizeText, fillTemplate, leadingNumber, phraseTemplate, valueSkeleton, pickPath,
+  soundMime, externalRefs, signageRequest,
+} from '../src/index.js';
 
 const box = (type: string, ...parts: Uint8Array[]) => {
   const body = Buffer.concat(parts);
@@ -75,6 +79,59 @@ test('ふだん動いている時間帯: 記録が 3 日未満は 7〜22 時、�
 
 test('生きている知らせ: 知らない項目と形の違う値を捨てる（割り込みの文を受けない）', () => {
   const r = cleanReport({ current: 'a-1', flowVersion: 3, cached: 2, uncached: ['x', 'bad id!'], failed: [], pageVersion: '0.11.0', viewport: { width: 1920, height: 1080 }, storageFree: 1e9, text: '12番の方' });
-  assert.deepEqual(r, { current: 'a-1', flowVersion: 3, cached: 2, uncached: ['x'], failed: [], pageVersion: '0.11.0', viewport: { width: 1920, height: 1080 }, storageFree: 1e9 });
+  assert.deepEqual(r, { current: 'a-1', flowVersion: 3, cached: 2, uncached: ['x'], failed: [], pageVersion: '0.11.0', viewport: { width: 1920, height: 1080 }, storageFree: 1e9, audio: null, interrupting: false });
   assert.equal(cleanReport('x'), null);
+});
+
+test('割り込みの文: 全角の英数字を半角に、改行と見えない文字を除き、先頭の番号を拾う', () => {
+  assert.equal(normalizeText('１２番の方、\nＸ線室へ\u200b  どうぞ'), '12番の方、 X線室へ どうぞ');
+  assert.equal(normalizeText('  \t '), '');
+  assert.equal(fillTemplate('{番号}番の方、{場所}へお越しください', '12', '2番診察室'), '12番の方、2番診察室へお越しください');
+  assert.equal(leadingNumber('105番の方'), '105');
+  assert.equal(leadingNumber('本日は105番まで'), null, '先頭にないものは大きくしない');
+  assert.equal(leadingNumber('12345番'), null, '5 桁は番号とみなさない');
+});
+
+test('よく出す案内: 先頭の番号だけを空けた形で数える', () => {
+  assert.deepEqual(phraseTemplate('12番の方、受付へ'), { template: '{番号}番の方、受付へ', hasNumber: true });
+  assert.deepEqual(phraseTemplate('焼き上がりました'), { template: '焼き上がりました', hasNumber: false });
+});
+
+test('受け口の骨組み: 項目の名前と値の種類だけにし、値を残さない（推論に渡すもの）', () => {
+  const payload = { ticket: { no: '0012', counter: 'レントゲン室', vip: true }, at: 1700000000, items: [{ a: 'x' }, { a: 'y' }, { a: 'z' }] };
+  const sk = valueSkeleton(payload);
+  assert.deepEqual(sk, { ticket: { no: '<数字の文字>', counter: '<文字>', vip: '<真偽>' }, at: '<数>', items: [{ a: '<文字>' }, { a: '<文字>' }] });
+  assert.ok(!JSON.stringify(sk).includes('レントゲン'), '値が入らない');
+  assert.equal(pickPath(payload, 'ticket.no'), '0012');
+  assert.equal(pickPath(payload, 'items.1.a'), 'y');
+  assert.equal(pickPath(payload, 'ticket.none.x'), undefined);
+});
+
+test('会社の音: 中身の先頭で MP3・WAV を見分け、ほかは断る', () => {
+  assert.equal(soundMime(new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x41, 0x56, 0x45])), 'audio/wav');
+  assert.equal(soundMime(new Uint8Array([0x49, 0x44, 0x33, 4])), 'audio/mpeg');
+  assert.equal(soundMime(new Uint8Array([0xff, 0xfb, 0x90])), 'audio/mpeg');
+  assert.equal(soundMime(new Uint8Array([0x4f, 0x67, 0x67, 0x53])), null, 'Ogg は受けない');
+});
+
+test('HTML: 外への参照（画像・スクリプト・CSS・移動）を拾い、中に入れたものと相対の参照は拾わない', () => {
+  const html = `<img src="https://a.example/x.png"><script src='//cdn.example/y.js'></script>
+    <style>@import "https://f.example/z.css"; .a{background:url(http://b.example/bg.png)}</style>
+    <meta http-equiv="refresh" content="0; url=https://c.example/">
+    <img srcset="data:image/png;base64,AA 1x, https://d.example/2x.png 2x"><img src="img/local.png"><a href="#top">上へ</a>`;
+  assert.deepEqual(externalRefs(html).sort(), ['//cdn.example/y.js', 'http://b.example/bg.png', 'https://a.example/x.png', 'https://c.example/', 'https://d.example/2x.png', 'https://f.example/z.css']);
+  assert.deepEqual(externalRefs('<img src="data:image/png;base64,AA"><link rel="stylesheet" href="a.css">'), []);
+});
+
+test('秘書への依頼: 番号の呼び出し・かぎかっこの文・画面の指定・消す・状態を見分け、やり方の質問は会話に回す', () => {
+  assert.deepEqual(signageRequest('14番の方を呼んで'), { kind: 'show', number: '14', screens: [], seconds: undefined, chime: undefined });
+  assert.deepEqual(signageRequest('12番、レントゲン室'), { kind: 'show', number: '12', place: 'レントゲン室', screens: [], seconds: undefined, chime: undefined });
+  const q = signageRequest('待合だけに「本日は17時まで」を出して、30秒、音なしで');
+  assert.deepEqual(q, { kind: 'show', text: '本日は17時まで', screens: ['待合'], seconds: 30, chime: false });
+  assert.deepEqual(signageRequest('入口と待合に「雨の日セール」を出して'), { kind: 'show', text: '雨の日セール', screens: ['入口', '待合'], seconds: undefined, chime: undefined });
+  assert.deepEqual(signageRequest('呼び出しを全部消して'), { kind: 'clear', all: true, screens: [] });
+  assert.deepEqual(signageRequest('サイネージはつながってる?'), { kind: 'status' });
+  assert.deepEqual(signageRequest('呼び出しの言い回しを「〇番の方、〇へどうぞ」にして'), { kind: 'template', template: '{番号}番の方、{場所}へどうぞ' });
+  assert.equal(signageRequest('サイネージに文字を出す方法は?'), null);
+  assert.equal(signageRequest('明日の予定を教えて'), null);
 });

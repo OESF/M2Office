@@ -12,7 +12,7 @@
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import {
-  CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, INVENTORY_FEATURES, SIGNAGE_EXTENSION_ID, type HrSettings, type InventorySettings, type RiskLevel, type SignageSettings,
+  CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, INVENTORY_FEATURES, SIGNAGE_EXTENSION_ID, SIGNAGE_JINGLES, type HrSettings, type InventorySettings, type RiskLevel, type SignageSettings,
 } from '@m2office/shared';
 import {
   bundledConnection, builtinSection, consentSnapshot, encodeFiles, unpackExtension, EXTENSION_FILE_MAX_BYTES,
@@ -137,7 +137,10 @@ export function extensionsRoute(deps: AppDeps) {
    *
    * @remarks 送られた項目だけを変える。切った機能の記録は消さない
    */
-  /** 店頭サイネージの会社の設定を変える（送った項目だけ。画像の秒数 3〜120・店の色 `#RRGGBB` か `null`。第31.4節）。すぐ画面に届く。 */
+  /**
+   * 店頭サイネージの会社の設定を変える（送った項目だけ。第31.4節）。すぐ画面に届く。
+   * 画像の秒数 3〜120・店の色 `#RRGGBB` か `null`・割り込みの秒数 5〜60・ジングルの入り切りと既定の音・呼び出しの言い回し（`{番号}` を含む 60 字まで）。
+   */
   app.put(`/${SIGNAGE_EXTENSION_ID}/settings`, async (c) => {
     const { tenant, user } = c.get('ctx');
     const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
@@ -156,6 +159,32 @@ export function extensionsRoute(deps: AppDeps) {
       next.color = v === null ? null : (v as string).toLowerCase();
       changed.push('color');
     }
+    if (body['interruptSeconds'] !== undefined) {
+      const n = body['interruptSeconds'];
+      if (typeof n !== 'number' || !Number.isInteger(n) || n < 5 || n > 60) return c.json({ error: '割り込みを出す秒数は 5〜60 秒にしてください' }, 400);
+      next.interruptSeconds = n;
+      changed.push('interruptSeconds');
+    }
+    if (body['chime'] !== undefined) {
+      if (typeof body['chime'] !== 'boolean') return c.json({ error: 'ジングルの入り切りは真偽で送ってください' }, 400);
+      next.chime = body['chime'];
+      changed.push('chime');
+    }
+    if (body['jingle'] !== undefined) {
+      const j = String(body['jingle'] ?? '');
+      const sounds = await deps.signage.service.deps.store.listSounds(tenant.id);
+      if (!SIGNAGE_JINGLES.some((x) => x.id === j) && !sounds.some((s) => s.id === j)) return c.json({ error: '知らない音です' }, 400);
+      next.jingle = j;
+      changed.push('jingle');
+    }
+    for (const k of ['callTemplate', 'callTemplateNoPlace'] as const) {
+      if (body[k] === undefined) continue;
+      const t = String(body[k] ?? '').trim();
+      if (!t.includes('{番号}') || [...t].length > 60) return c.json({ error: '呼び出しの言い回しは {番号} を含む 60 字までにしてください' }, 400);
+      if (k === 'callTemplate' && !t.includes('{場所}')) return c.json({ error: '番号と場所の言い回しには {場所} も入れてください' }, 400);
+      next[k] = t;
+      changed.push(k);
+    }
     await deps.repo.saveTenantSettings(tenant.id, 'signage', next, user.id);
     await deps.repo.appendAudit({
       id: randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id, action: 'settings.update',
@@ -172,6 +201,63 @@ export function extensionsRoute(deps: AppDeps) {
     const b = await c.req.json<{ code?: unknown }>().catch(() => ({} as { code?: unknown }));
     const r = await deps.signage.service.claim(tenant.id, user.id, b.code);
     return 'error' in r ? c.json({ error: r.error, ...(r.screens ? { screens: r.screens } : {}) }, r.status as 404) : c.json(r, 201);
+  });
+
+  /** 店頭サイネージの呼び出しの受け口の一覧（今日の受け付けた数と断った数つき。第31.8.2節）。 */
+  app.get(`/${SIGNAGE_EXTENSION_ID}/sources`, async (c) => {
+    const { tenant } = c.get('ctx');
+    return c.json({ sources: await deps.signage.service.deps.store.listSources(tenant.id) });
+  });
+
+  /** 呼び出しの受け口を作る（`name`）。URL は作ったときに 1 度だけ返す。 */
+  app.post(`/${SIGNAGE_EXTENSION_ID}/sources`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const b = await c.req.json<{ name?: unknown }>().catch(() => ({} as { name?: unknown }));
+    const r = await deps.signage.interrupts.createSource(tenant.id, user.id, b.name);
+    if ('error' in r) return c.json(r, 400);
+    return c.json({ source: r.source, url: `${tenantOrigin(c.req.header('origin'), c.req.header('host'))}/v1/hooks/signage/${r.key}`, key: r.key }, 201);
+  });
+
+  /** 受け口を止める・動かす（`status`: active・stopped）。 */
+  app.put(`/${SIGNAGE_EXTENSION_ID}/sources/:id/status`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const b = await c.req.json<{ status?: unknown }>().catch(() => ({} as { status?: unknown }));
+    if (b.status !== 'active' && b.status !== 'stopped') return c.json({ error: 'status は active か stopped です' }, 400);
+    return (await deps.signage.interrupts.setSourceStatus(tenant.id, user.id, c.req.param('id'), b.status)) ? c.json({ ok: true }) : c.json({ error: '受け口が見つかりません' }, 404);
+  });
+
+  /** 受け口の項目の対応を忘れ、次の呼び出しから推測し直す。 */
+  app.post(`/${SIGNAGE_EXTENSION_ID}/sources/:id/reset-mapping`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    return (await deps.signage.interrupts.resetMapping(tenant.id, user.id, c.req.param('id'))) ? c.json({ ok: true }) : c.json({ error: '受け口が見つかりません' }, 404);
+  });
+
+  /** 会社のジングルの音の一覧。 */
+  app.get(`/${SIGNAGE_EXTENSION_ID}/sounds`, async (c) => {
+    const { tenant } = c.get('ctx');
+    return c.json({ sounds: await deps.signage.service.deps.store.listSounds(tenant.id) });
+  });
+
+  /** 会社のジングルの音を入れる（本文は MP3・WAV そのもの。名前は `x-sound-name`、画面で調べた長さは `x-duration-ms`）。 */
+  app.post(`/${SIGNAGE_EXTENSION_ID}/sounds`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const data = new Uint8Array(await c.req.arrayBuffer());
+    let name = '';
+    try { name = decodeURIComponent(c.req.header('x-sound-name') ?? ''); } catch { name = ''; }
+    const r = await deps.signage.interrupts.addSound(tenant.id, user.id, name, data, c.req.header('x-duration-ms'));
+    if ('error' in r) return c.json(r, 400);
+    deps.signage.service.settingsChanged(tenant.id);
+    return c.json(r, 201);
+  });
+
+  /** 会社のジングルの音を消す（既定の音に選んでいれば「ピンポーン」に戻す）。 */
+  app.delete(`/${SIGNAGE_EXTENSION_ID}/sounds/:id`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const settings = (await deps.repo.getTenantSettings(tenant.id)).signage;
+    const r = await deps.signage.interrupts.deleteSound(tenant.id, user.id, c.req.param('id'), settings);
+    if (!r) return c.json({ error: '音が見つかりません' }, 404);
+    deps.signage.service.settingsChanged(tenant.id);
+    return c.json({ ok: true, ...r });
   });
 
   /** 店頭サイネージの画面を外す（管理者だけ。確認を挟まない。第31.5.1節）。鍵はその場で効かなくなる。 */

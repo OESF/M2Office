@@ -1,14 +1,16 @@
 /**
- * @file 店頭サイネージの管理の画面（パソコン。仕様書 第31.9.4節の段 1）。画面の一覧と状態・画面の登録と取り外し・流れ・素材。
+ * @file 店頭サイネージの管理の画面（パソコン。仕様書 第31.9.4節）。画面の一覧と状態・音の大きさ・画面の登録と取り外し・流れ・素材、
+ * 割り込みの素材とその音・最近の割り込みと消す・スタッフのページの QR。
  *
  * 素材はブラウザで確かめ、画像は長い辺 1,920 に縮めて位置などの情報を捨て、縮小画像を作ってから送る（第31.6.1節）。
  * PowerPoint のファイルは送らず、そのファイルに合わせて動画にする操作を示す（第31.6.4節）。説明文は常に出さない（原則 u11）。
  */
 
 import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
-import { SIGNAGE_LIMITS, type SignageEntry, type SignageScreen } from '@m2office/shared';
+import { SIGNAGE_JINGLES, SIGNAGE_LIMITS, type SignageEntry, type SignageInterruptView, type SignageScreen, type SignageSound } from '@m2office/shared';
 import { api, describeError, type SignageAssetView, type SignageOverview } from './api.js';
 import { inspectPptx } from './pptx.js';
+import { firstImage, inlineHtml } from './html-inline.js';
 
 const fmtBytes = (n: number) => (n >= 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(1)} GB` : n >= 1024 ** 2 ? `${(n / 1024 ** 2).toFixed(1)} MB` : `${n === 0 ? 0 : Math.max(1, Math.round(n / 1024))} KB`);
 const fmtDuration = (ms: number) => { const s = Math.round(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
@@ -33,10 +35,33 @@ async function thumbnailOf(source: CanvasImageSource, w: number, h: number): Pro
 }
 
 /** 送る前に確かめて整えた素材。 */
-type Prepared = { file: Blob; name: string; thumb: Blob; size?: { width: number; height: number } } | { error: string } | { guide: string };
+export type Prepared = { file: Blob; name: string; thumb: Blob | null; size?: { width: number; height: number } } | { error: string } | { guide: string };
+
+/**
+ * HTML の素材を整える（一緒に落とされたファイルを中に入れ、縮小画像を作る。第31.6.3節）。
+ *
+ * @param resources HTML と一緒に落とされたファイル（ZIP を含む）
+ */
+export async function prepareHtml(text: string, fileName: string, resources: File[]): Promise<Prepared> {
+  const { html, missing } = await inlineHtml(text, resources);
+  const blob = new Blob([html], { type: 'text/html' });
+  if (blob.size > SIGNAGE_LIMITS.htmlBytes) return { error: `${fileName}: HTML が大きすぎます（中に入れた後で 10 MB まで）` };
+  if (missing.length) return { error: `${fileName}: 次のファイルが見つかりません（一緒に落としてください）: ${missing.slice(0, 5).join('・')}` };
+  let thumb: Blob | null = null;
+  const img = firstImage(html);
+  if (img) {
+    try {
+      const bmp = await createImageBitmap(await (await fetch(img)).blob());
+      thumb = await thumbnailOf(bmp, bmp.width, bmp.height);
+      bmp.close();
+    } catch { thumb = null; }
+  }
+  const title = /<title[^>]*>([^<]{1,60})<\/title>/i.exec(html)?.[1]?.trim();
+  return { file: blob, name: title || fileName.replace(/\.html?$/i, ''), thumb };
+}
 
 /** ファイルを確かめて整える（第31.6.1節）。PowerPoint は送らずに操作を示す（第31.6.4節）。 */
-async function prepare(file: File): Promise<Prepared> {
+export async function prepare(file: File): Promise<Prepared> {
   const name = file.name.replace(/\.[A-Za-z0-9]{1,5}$/, '');
   if (/\.(pptx|ppsx)$/i.test(file.name)) {
     const info = await inspectPptx(file).catch(() => null);
@@ -87,7 +112,7 @@ async function prepare(file: File): Promise<Prepared> {
       URL.revokeObjectURL(url);
     }
   }
-  return { error: `${file.name}: 画像（JPEG・PNG）か動画（MP4）を選んでください` };
+  return { error: `${file.name}: 画像（JPEG・PNG）・動画（MP4）・HTML を選んでください` };
 }
 
 /** 縮小画像を読み込んでおく（画面を閉じるまで）。 */
@@ -114,6 +139,9 @@ export function Signage() {
   const [notes, setNotes] = useState<string[]>([]);
   const [uploading, setUploading] = useState<string | null>(null);
   const [code, setCode] = useState('');
+  const [recent, setRecent] = useState<SignageInterruptView[]>([]);
+  const [sounds, setSounds] = useState<SignageSound[]>([]);
+  const [qr, setQr] = useState<string | null>(null);
   const thumbs = useThumbs();
 
   const load = useCallback(() => {
@@ -122,24 +150,53 @@ export function Signage() {
       setSelected((s) => (s && d.screens.some((x) => x.id === s) ? s : d.screens[0]?.id ?? null));
     }).catch((e) => setError(describeError(e, '読み込めませんでした')));
     api.signage.assets().then((r) => setAssets(r.assets)).catch(() => undefined);
+    api.signage.interrupts().then((r) => setRecent(r.interrupts)).catch(() => undefined);
+    api.signage.sounds().then((r) => setSounds(r.sounds)).catch(() => undefined);
   }, []);
   useEffect(load, [load]);
   // 画面の状態（つながっているか・いま出しているもの）を 30 秒ごとに読み直す
-  useEffect(() => { const t = window.setInterval(() => api.signage.overview().then(setData).catch(() => undefined), 30_000); return () => clearInterval(t); }, []);
+  useEffect(() => {
+    const t = window.setInterval(() => {
+      api.signage.overview().then(setData).catch(() => undefined);
+      api.signage.interrupts().then((r) => setRecent(r.interrupts)).catch(() => undefined);
+    }, 30_000);
+    return () => clearInterval(t);
+  }, []);
 
   /** ファイルを素材にする。画面を選んでいれば、その流れの最後に足す。 */
   const addFiles = async (files: File[], toScreen: string | null) => {
     setError(null);
     const out: string[] = [];
     const added: string[] = [];
-    for (const f of files) {
-      setUploading(f.name);
-      const p = await prepare(f);
+    // HTML（か HTML の入った ZIP）と一緒に落とされたファイルは、HTML の中に入れる材料にする（第31.6.3節）
+    const htmls = files.filter((f) => /\.html?$/i.test(f.name));
+    const zips = files.filter((f) => /\.zip$/i.test(f.name));
+    const jobs: { name: string; run: () => Promise<Prepared> }[] = [];
+    if (htmls.length || zips.length) {
+      const resources = files.filter((f) => !/\.html?$/i.test(f.name));
+      for (const h of htmls) jobs.push({ name: h.name, run: async () => prepareHtml(await h.text(), h.name, resources) });
+      if (!htmls.length) {
+        for (const z of zips) jobs.push({ name: z.name, run: async () => {
+          const { readDirectory, readText } = await import('./zip.js');
+          const buf = await z.arrayBuffer();
+          const entries = readDirectory(buf).filter((e) => /\.html?$/i.test(e.name));
+          const entry = entries.find((e) => /(^|\/)index\.html?$/i.test(e.name)) ?? entries[0];
+          const text = entry ? await readText(buf, entry) : null;
+          return text ? prepareHtml(text, entry!.name.split('/').pop()!, [z]) : { error: `${z.name}: HTML が入っていません` };
+        } });
+      }
+    } else {
+      for (const f of files) jobs.push({ name: f.name, run: () => prepare(f) });
+    }
+    for (const job of jobs) {
+      setUploading(job.name);
+      const f = { name: job.name };
+      const p = await job.run();
       if ('guide' in p) { out.push(p.guide); continue; }
       if ('error' in p) { out.push(p.error); continue; }
       try {
         const r = await api.signage.upload(p.file, p.name, p.size);
-        if (!r.existing) await api.signage.setThumbnail(r.asset.id, p.thumb).catch(() => undefined);
+        if (!r.existing && p.thumb) await api.signage.setThumbnail(r.asset.id, p.thumb).catch(() => undefined);
         added.push(r.asset.id);
       } catch (e) {
         out.push(`${f.name}: ${describeError(e, '入れられませんでした')}`);
@@ -162,6 +219,14 @@ export function Signage() {
   const screen = data.screens.find((s) => s.id === selected) ?? null;
   return (
     <div className="signage">
+      <div className="row signage-top">
+        <span className="grow" />
+        <button className="btn ghost small" onClick={() => {
+          if (qr) { URL.revokeObjectURL(qr); setQr(null); return; }
+          void api.signage.mobileQr().then((b) => { if (b) setQr(URL.createObjectURL(b)); });
+        }}>スマホで開く</button>
+      </div>
+      {qr && <img className="signage-mobile-qr" src={qr} alt="" />}
       {error && <p className="error">{error}</p>}
       <div className="signage-screens">
         {data.screens.map((s) => (
@@ -184,7 +249,8 @@ export function Signage() {
           <button className="btn ghost small" onClick={() => setNotes([])}>閉じる</button>
         </div>
       )}
-      <AssetList assets={assets} screens={data.screens} usage={data.usage} thumbs={thumbs} onFiles={(fs) => void addFiles(fs, null)} onChanged={load} onError={setError} />
+      <RecentInterrupts recent={recent} screens={data.screens} assets={assets} onChanged={load} onError={setError} />
+      <AssetList assets={assets} screens={data.screens} usage={data.usage} sounds={sounds} thumbs={thumbs} onFiles={(fs) => void addFiles(fs, null)} onChanged={load} onError={setError} />
     </div>
   );
 }
@@ -194,7 +260,7 @@ function ScreenCard({ s, active, admin, thumb, wantThumb, onSelect, onChanged, o
   s: SignageScreen; active: boolean; admin: boolean; thumb?: string; wantThumb: (id: string) => void; onSelect: () => void; onChanged: () => void; onError: (m: string) => void;
 }) {
   useEffect(() => { if (s.lastReport?.current) wantThumb(s.lastReport.current); }, [s.lastReport?.current, wantThumb]);
-  const patch = (p: { name?: string; orientation?: 'landscape' | 'portrait'; rotation?: number }) =>
+  const patch = (p: { name?: string; orientation?: 'landscape' | 'portrait'; rotation?: number; volume?: number }) =>
     void api.signage.updateScreen(s.id, p).then(onChanged).catch((e) => onError(describeError(e, '直せませんでした')));
   const uncached = s.lastReport?.uncached.length ?? 0;
   return (
@@ -207,7 +273,14 @@ function ScreenCard({ s, active, admin, thumb, wantThumb, onSelect, onChanged, o
           <span className={`badge ${s.online ? 'ok' : 'warn'}`}>{s.online ? 'つながっている' : 'つながっていない'}</span>
           <span className="muted">{ago(s.lastSeenAt)}</span>
           {uncached > 0 && <span className="badge warn">取り置けていない {uncached}</span>}
+          {s.online && s.lastReport?.audio === false && <span className="badge warn">音が出せない</span>}
+          {s.online && s.lastReport?.interrupting && <span className="badge">割り込み中</span>}
         </div>
+        <label className="row small signage-volume" onClick={(e) => e.stopPropagation()}>音
+          <input type="range" min={0} max={100} step={5} defaultValue={s.volume} aria-label="音の大きさ"
+            onPointerUp={(e) => { const v = Number((e.target as HTMLInputElement).value); if (v !== s.volume) patch({ volume: v }); }}
+            onKeyUp={(e) => { const v = Number((e.target as HTMLInputElement).value); if (v !== s.volume) patch({ volume: v }); }} />
+        </label>
         <div className="row small" onClick={(e) => e.stopPropagation()}>
           <select value={s.orientation} onChange={(e) => patch({ orientation: e.target.value as 'landscape' | 'portrait' })} aria-label="向き">
             <option value="landscape">横</option><option value="portrait">縦</option>
@@ -294,7 +367,7 @@ function FlowEditor({ screen, screens, assets, thumbs, onFiles, onError, onChang
           {assets.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
         </select>
         <button className="btn ghost small" onClick={() => file.current?.click()}>ファイルを選ぶ</button>
-        <input ref={file} type="file" multiple hidden accept="image/jpeg,image/png,video/mp4,.pptx,.ppsx,.ppt"
+        <input ref={file} type="file" multiple hidden accept="image/jpeg,image/png,video/mp4,.html,.htm,.zip,.css,.js,.svg,.gif,.webp,.woff,.woff2,.ttf,.otf,.pptx,.ppsx,.ppt"
           onChange={(e) => { const fs = Array.from(e.target.files ?? []); e.target.value = ''; if (fs.length) onFiles(fs); }} />
       </div>
     </div>
@@ -302,8 +375,8 @@ function FlowEditor({ screen, screens, assets, thumbs, onFiles, onError, onChang
 }
 
 /** 会社の素材の一覧と、使っている容量。 */
-function AssetList({ assets, screens, usage, thumbs, onFiles, onChanged, onError }: {
-  assets: SignageAssetView[]; screens: SignageScreen[]; usage: { bytes: number; limit: number }; thumbs: ReturnType<typeof useThumbs>;
+function AssetList({ assets, screens, usage, sounds, thumbs, onFiles, onChanged, onError }: {
+  assets: SignageAssetView[]; screens: SignageScreen[]; usage: { bytes: number; limit: number }; sounds: SignageSound[]; thumbs: ReturnType<typeof useThumbs>;
   onFiles: (files: File[]) => void; onChanged: () => void; onError: (m: string) => void;
 }) {
   const file = useRef<HTMLInputElement>(null);
@@ -314,7 +387,7 @@ function AssetList({ assets, screens, usage, thumbs, onFiles, onChanged, onError
       <div className="row"><strong className="grow">素材</strong>
         <span className="small muted">{fmtBytes(usage.bytes)} / {fmtBytes(usage.limit)}</span>
         <button className="btn ghost small" onClick={() => file.current?.click()}>ファイルを選ぶ</button>
-        <input ref={file} type="file" multiple hidden accept="image/jpeg,image/png,video/mp4,.pptx,.ppsx,.ppt"
+        <input ref={file} type="file" multiple hidden accept="image/jpeg,image/png,video/mp4,.html,.htm,.zip,.css,.js,.svg,.gif,.webp,.woff,.woff2,.ttf,.otf,.pptx,.ppsx,.ppt"
           onChange={(e) => { const fs = Array.from(e.target.files ?? []); e.target.value = ''; if (fs.length) onFiles(fs); }} />
       </div>
       <div className="signage-asset-grid">
@@ -323,11 +396,55 @@ function AssetList({ assets, screens, usage, thumbs, onFiles, onChanged, onError
             <span className="signage-thumb large">{thumbs.urls[a.id] ? <img src={thumbs.urls[a.id]} alt="" /> : null}</span>
             <input className="signage-asset-name" defaultValue={a.name} maxLength={60} aria-label="素材の名前"
               onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== a.name) void api.signage.renameAsset(a.id, v).then(onChanged).catch((er) => onError(describeError(er, '直せませんでした'))); }} />
-            <span className="small muted">{a.kind === 'video' ? `動画 ${a.durationMs ? fmtDuration(a.durationMs) : ''}` : '画像'}・{fmtBytes(a.bytes)}{a.screens.length ? `・${names(a.screens)}` : ''}</span>
+            <span className="small muted">{a.kind === 'video' ? `動画 ${a.durationMs ? fmtDuration(a.durationMs) : ''}` : a.kind === 'html' ? 'HTML' : '画像'}・{fmtBytes(a.bytes)}{a.screens.length ? `・${names(a.screens)}` : ''}</span>
+            {a.kind !== 'video' && (
+              <label className="check small"><input type="checkbox" checked={a.isInterrupt}
+                onChange={(e) => void api.signage.setAssetInterrupt(a.id, { isInterrupt: e.target.checked }).then(onChanged).catch((er) => onError(describeError(er, '変えられませんでした')))} /> 割り込みに使う</label>
+            )}
+            {a.isInterrupt && (
+              <select className="small" value={a.jingle ?? ''} aria-label="割り込みの音"
+                onChange={(e) => void api.signage.setAssetInterrupt(a.id, { jingle: e.target.value || null }).then(onChanged).catch((er) => onError(describeError(er, '変えられませんでした')))}>
+                <option value="">音: 会社の既定</option>
+                {SIGNAGE_JINGLES.map((j) => <option key={j.id} value={j.id}>音: {j.label}</option>)}
+                {sounds.map((x) => <option key={x.id} value={x.id}>音: {x.name}</option>)}
+              </select>
+            )}
             <button className="btn ghost small" onClick={() => void api.signage.deleteAsset(a.id).then(onChanged).catch((e) => onError(describeError(e, '消せませんでした')))}>消す</button>
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+/** 最近 24 時間の割り込み（時刻・出す先・出どころ・状態。文は 24 時間の間だけ）と「消す」「すべて消す」。 */
+function RecentInterrupts({ recent, screens, assets, onChanged, onError }: {
+  recent: SignageInterruptView[]; screens: SignageScreen[]; assets: SignageAssetView[]; onChanged: () => void; onError: (m: string) => void;
+}) {
+  if (!recent.length) return null;
+  const name = (id: string) => screens.find((s) => s.id === id)?.name ?? '';
+  const STATE: Record<string, string> = { waiting: '待ち', showing: '出している', done: '済み', cleared: '消した', expired: '出せなかった' };
+  const ORIGIN: Record<string, string> = { staff: 'スタッフ', secretary: '秘書', hook: '受け口' };
+  const active = recent.some((i) => i.targets.some((t) => t.state === 'waiting' || t.state === 'showing'));
+  return (
+    <div className="card signage-recent">
+      <div className="row"><strong className="grow">最近の割り込み</strong>
+        {active && <button className="btn ghost small" onClick={() => void api.signage.clearAll().then(onChanged).catch((e) => onError(describeError(e, '消せませんでした')))}>すべて消す</button>}
+      </div>
+      <table className="table small">
+        <tbody>
+          {recent.slice(0, 30).map((i) => (
+            <tr key={i.id}>
+              <td className="nowrap">{new Date(i.createdAt).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}</td>
+              <td>{i.text ?? (i.assetId ? assets.find((a) => a.id === i.assetId)?.name ?? '' : '')}</td>
+              <td className="nowrap">{ORIGIN[i.origin] ?? ''}</td>
+              <td>{i.targets.map((t) => `${name(t.screenId)} ${STATE[t.state] ?? ''}`).join('・')}</td>
+              <td>{i.targets.some((t) => t.state === 'waiting' || t.state === 'showing')
+                && <button className="btn ghost small" onClick={() => void api.signage.clearInterrupt(i.id).then(onChanged).catch((e) => onError(describeError(e, '消せませんでした')))}>消す</button>}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

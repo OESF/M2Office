@@ -11,7 +11,7 @@
 
 import {
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
-  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, InventoryService, InventoryWatch, InventoryBookings, PostgresInventoryStore, inventoryAccess, SignageService, PostgresSignageStore, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention,
+  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, InventoryService, InventoryWatch, InventoryBookings, PostgresInventoryStore, inventoryAccess, SignageService, SignageInterrupts, PostgresSignageStore, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention,
   NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv,
   defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials,
@@ -110,6 +110,8 @@ const laborCalendar = new LaborCalendar({
 const signage = new SignageService({
   store: new PostgresSignageStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), repo, files,
 });
+// 割り込みの文を出し終えて 24 時間で消し、行を 90 日で消す（第31.13節）
+const signageInterrupts = new SignageInterrupts({ service: signage, repo });
 const engine = new RunEngine({
   repo, llm, registry, connector, files, resolveDefinition, isAvailable, logger: log, research, notices,
   cards: { store: contactStore, service: cards, access: cardsAccess(repo) },
@@ -370,6 +372,8 @@ while (running) {
       try {
         const r = await signage.sweep(tenantId);
         if (r.notified > 0) log.info('つながらないサイネージの画面を知らせました', { tenantId, screens: r.notified });
+        const p = await signageInterrupts.sweep(tenantId);
+        if (p.texts + p.rows > 0) log.info('サイネージの割り込みの文と古い行を消しました', { tenantId, texts: p.texts, rows: p.rows });
       } catch (err) {
         log.warn('サイネージの見回りに失敗しました', { tenantId, err });
       }

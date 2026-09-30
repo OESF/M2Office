@@ -15,7 +15,7 @@ import {
   TenantAiResolver, platformAi, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID,
   defaultGeminiModels, ConnectionCredentials, type ConnectionAuthProvider,
   CardService, PostgresContactStore, cardsAccess, type ContactStore, NoticeService, PostgresNoticeStore,
-  InventoryService, InventoryWatch, InventoryBookings, PostgresInventoryStore, inventoryAccess, HrService, PostgresHrStore, hrAccess, SignageService, PostgresSignageStore, signageAccess, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
+  InventoryService, InventoryWatch, InventoryBookings, PostgresInventoryStore, inventoryAccess, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
   type SecretBox, type GeminiModels,
   type FileStore, type TenantExtensions, type HelpArticle, type ManualMeta, type LlmProvider, type Logger, type Repository, type WorkspaceConnector,
 } from '@m2office/core';
@@ -108,7 +108,12 @@ export interface AppDeps {
    *
    * @remarks `access` は、会社がサイネージを使っていて利用者が利用範囲の中なら、会社のサイネージの設定を返す（使えなければ `null`）
    */
-  signage: { service: SignageService; access(tenantId: string, userId: string): Promise<SignageSettings | null> };
+  signage: {
+    service: SignageService;
+    /** 割り込み・よく出す案内・呼び出しの受け口・会社のジングルの音（段 2。第31.7節・第31.8節）。 */
+    interrupts: SignageInterrupts;
+    access(tenantId: string, userId: string): Promise<SignageSettings | null>;
+  };
   /** 人事・給与（内蔵の拡張。仕様書 第30章）。使えるのは会社で入れていて人事区画に入っている人だけ。 */
   hr: {
     service: HrService;
@@ -219,6 +224,9 @@ export function buildDeps(): AppDeps {
   });
   inventoryWatch = new InventoryWatch({ repo, service: inventoryService, bookings: inventoryBookings, logger: log });
   const inventory = { service: inventoryService, bookings: inventoryBookings, access: inventoryAccess(repo) };
+  // 店頭サイネージ（第31章）。秘書が割り込みを出すため、秘書より先に作る。画面と素材は会社で共有する
+  const signageService = new SignageService({ store: new PostgresSignageStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), repo, files });
+  const signage = { service: signageService, interrupts: new SignageInterrupts({ service: signageService, repo, llm: (tenantId) => ai.llmFor(tenantId) }), access: signageAccess(repo) };
   // 人事・給与（第30章）。秘書が本人の打刻と有給に答え、朝のブリーフが労務の期限を読むため、業務と秘書より先に作る
   const hrService = new HrService({
     store: new PostgresHrStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
@@ -268,6 +276,8 @@ export function buildDeps(): AppDeps {
     attendance, payroll,
     // 人事の担当者の依頼（第30.20.1節）
     hrStaff: { service: hrService, payroll, calendar: laborCalendar, access: hrAccess(repo) },
+    // 店頭サイネージ（第31.11.1節）。本人が話した回にだけ、割り込みを出す・消す
+    signage,
     repo, llm, connector, agents: OFFICIAL_AGENTS, help, agentsFor, llmFor: (t) => ai.llmFor(t), notices,
     // デバッグモードでは、振り分けの経過を記録に残す（仕様書 第20.4.1節「デバッグモード」）
     ...(debug ? { onTrace: (tenantId: string, userId: string, action: string, target: string, detail?: Record<string, unknown>) => {
@@ -338,11 +348,8 @@ export function buildDeps(): AppDeps {
     cards,
     notices,
     inventory,
-    // 店頭サイネージ（第31章）。画面と素材は会社で共有する
-    signage: {
-      service: new SignageService({ store: new PostgresSignageStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), repo, files }),
-      access: signageAccess(repo),
-    },
+    // 店頭サイネージ（第31章）
+    signage,
     // 人事・給与（第30章）。台帳は人事区画の人だけが扱い、勤怠と有給は本人も扱う
     hr: {
       service: hrService, attendance, access: hrAccess(repo),

@@ -1,5 +1,6 @@
 /**
- * @file 店頭サイネージ（内蔵の拡張）の使う人の API（段 1）。画面の一覧と状態・画面の名前と向きと回し方・流れ・素材。
+ * @file 店頭サイネージ（内蔵の拡張）の使う人の API。画面の一覧と状態・画面の名前と向きと回し方と音の大きさ・流れ・素材（段 1）、
+ * 割り込み・よく出す案内・割り込みの素材・スタッフのページの QR（段 2）。
  *
  * 会社がサイネージを切っているときと、利用範囲の外の人には、どの口も使わせない。
  * 画面と素材は会社で共有する。画面の登録と取り外しは管理者の API（`/v1/admin/extensions/signage`）で行う。
@@ -8,11 +9,13 @@
  */
 
 import { Hono } from 'hono';
+import QRCode from 'qrcode';
 import { assetKey } from '@m2office/core';
 import { SIGNAGE_LIMITS } from '@m2office/shared';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 import { receiveToTemp, serveAsset } from '../signage-files.js';
+import { tenantOrigin } from '../tenant-origin.js';
 
 /**
  * 店頭サイネージの使う人の API（`/v1/signage`）。
@@ -21,7 +24,7 @@ import { receiveToTemp, serveAsset } from '../signage-files.js';
  */
 export function signageRoute(deps: AppDeps) {
   const app = new Hono<AppEnv>();
-  const { service } = deps.signage;
+  const { service, interrupts } = deps.signage;
 
   // サイネージを使えない会社・人には、どの口も使わせない（第31.2節・第16.7.3節）
   app.use('*', async (c, next) => {
@@ -42,7 +45,7 @@ export function signageRoute(deps: AppDeps) {
   app.patch('/screens/:id', async (c) => {
     const { tenant, user } = c.get('ctx');
     const b = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
-    const r = await service.updateScreen(tenant.id, user.id, c.req.param('id'), { name: b['name'], orientation: b['orientation'], rotation: b['rotation'] });
+    const r = await service.updateScreen(tenant.id, user.id, c.req.param('id'), { name: b['name'], orientation: b['orientation'], rotation: b['rotation'], volume: b['volume'] });
     return 'error' in r ? c.json(r, r.error === '画面が見つかりません' ? 404 : 400) : c.json(r);
   });
 
@@ -93,12 +96,22 @@ export function signageRoute(deps: AppDeps) {
     return 'error' in r ? c.json(r, r.error === '素材が見つかりません' ? 404 : 400) : c.json(r);
   });
 
-  /** 素材の名前を直す。 */
+  /** 素材の名前を直す（`name`）・割り込みの素材にする（`isInterrupt`）・その音（`jingle`）。 */
   app.patch('/assets/:id', async (c) => {
     const { tenant, user } = c.get('ctx');
-    const b = await c.req.json<{ name?: unknown }>().catch(() => ({} as { name?: unknown }));
-    const r = await service.renameAsset(tenant.id, user.id, c.req.param('id'), b.name);
-    return 'error' in r ? c.json(r, r.error === '素材が見つかりません' ? 404 : 400) : c.json(r);
+    const b = await c.req.json<{ name?: unknown; isInterrupt?: unknown; jingle?: unknown }>().catch(() => ({} as { name?: unknown; isInterrupt?: unknown; jingle?: unknown }));
+    let out: unknown = null;
+    if (b.name !== undefined) {
+      const r = await service.renameAsset(tenant.id, user.id, c.req.param('id'), b.name);
+      if ('error' in r) return c.json(r, r.error === '素材が見つかりません' ? 404 : 400);
+      out = r;
+    }
+    if (b.isInterrupt !== undefined || b.jingle !== undefined) {
+      const r = await service.setInterruptAsset(tenant.id, user.id, c.req.param('id'), { isInterrupt: b.isInterrupt, jingle: b.jingle });
+      if ('error' in r) return c.json(r, r.error === '素材が見つかりません' ? 404 : 400);
+      out = r;
+    }
+    return out ? c.json(out) : c.json({ error: '直す項目がありません' }, 400);
   });
 
   /** 素材を消す（流れに入っていても断らず、流れからも外す。外した画面の名前を返す）。 */
@@ -108,12 +121,75 @@ export function signageRoute(deps: AppDeps) {
     return r ? c.json(r) : c.json({ error: '素材が見つかりません' }, 404);
   });
 
-  /** 素材の中身（`Range` に応じる）。 */
+  /** 素材の中身（`Range` に応じる。HTML は源の無い文書として開く見出しを付ける。第31.6.3節）。 */
   app.get('/assets/:id/content', async (c) => {
     const { tenant } = c.get('ctx');
     const a = await deps.signage.service.deps.store.getAsset(tenant.id, c.req.param('id'));
     if (!a) return c.json({ error: '素材が見つかりません' }, 404);
     return serveAsset(deps.files, tenant.id, assetKey(a.id), a.mime, c.req.header('range'));
+  });
+
+  /** 割り込みを出す（文・番号と場所・割り込みの素材・出す先・秒数・ジングル。第31.7.2節）。 */
+  app.post('/interrupts', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const b = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
+    const str = (v: unknown) => (typeof v === 'string' || typeof v === 'number' ? String(v) : undefined);
+    const r = await interrupts.create(tenant.id, user.id, {
+      ...(str(b['text']) !== undefined ? { text: str(b['text']) } : {}),
+      ...(str(b['number']) !== undefined ? { number: str(b['number']) } : {}),
+      ...(str(b['place']) !== undefined ? { place: str(b['place']) } : {}),
+      ...(typeof b['assetId'] === 'string' ? { assetId: b['assetId'] } : {}),
+      ...(Array.isArray(b['screens']) ? { screens: b['screens'].filter((x): x is string => typeof x === 'string') } : {}),
+      ...(b['seconds'] !== undefined ? { seconds: Number(b['seconds']) } : {}),
+      ...(typeof b['chime'] === 'boolean' ? { chime: b['chime'] } : {}),
+      ...(typeof b['jingle'] === 'string' ? { jingle: b['jingle'] } : {}),
+    }, 'staff');
+    return 'error' in r ? c.json({ error: r.error }, r.status) : c.json(r, 201);
+  });
+
+  /** 最近 24 時間の割り込みと、画面ごとのいま（出しているもの・待っている数）。 */
+  app.get('/interrupts', async (c) => {
+    const { tenant } = c.get('ctx');
+    return c.json({ interrupts: await interrupts.recent(tenant.id) });
+  });
+
+  /** その割り込みを消す（出しているすべての画面から。待っているものも外す）。 */
+  app.post('/interrupts/:id/clear', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    return c.json({ cleared: await interrupts.clear(tenant.id, user.id, c.req.param('id')) });
+  });
+
+  /** すべて消す（`screens` で画面を選べる。無ければすべての画面）。 */
+  app.post('/clear', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const b = await c.req.json<{ screens?: unknown }>().catch(() => ({} as { screens?: unknown }));
+    const screens = Array.isArray(b.screens) ? b.screens.filter((x): x is string => typeof x === 'string') : undefined;
+    return c.json({ cleared: await interrupts.clearAll(tenant.id, user.id, screens) });
+  });
+
+  /** よく出す案内（番号を空けた形。最近 14 日の回数の多い順）と、割り込みの素材の回数。 */
+  app.get('/phrases', async (c) => {
+    const { tenant } = c.get('ctx');
+    return c.json(await interrupts.phrases(tenant.id));
+  });
+
+  /** よく出す案内を外す（また 3 回使うまで出さない）。 */
+  app.post('/phrases/:id/hide', async (c) => {
+    const { tenant } = c.get('ctx');
+    return (await service.deps.store.hidePhrase(tenant.id, c.req.param('id'))) ? c.json({ ok: true }) : c.json({ error: '見つかりません' }, 404);
+  });
+
+  /** 会社のジングルの音の一覧（割り込みの素材の音を選ぶため）。 */
+  app.get('/sounds', async (c) => {
+    const { tenant } = c.get('ctx');
+    return c.json({ sounds: await service.deps.store.listSounds(tenant.id) });
+  });
+
+  /** スタッフのページ（/m/signage）を開く QR（パソコンの画面の「スマホで開く」）。 */
+  app.get('/mobile-qr.svg', async (c) => {
+    const url = `${tenantOrigin(c.req.header('origin'), c.req.header('host'))}/m/signage`;
+    const svg = await QRCode.toString(url, { type: 'svg', errorCorrectionLevel: 'M', margin: 2 });
+    return c.body(svg, 200, { 'content-type': 'image/svg+xml', 'cache-control': 'no-store' });
   });
 
   /** 縮小画像（JPEG）。 */

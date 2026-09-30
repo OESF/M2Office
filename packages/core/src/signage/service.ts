@@ -9,7 +9,7 @@ import { createHash, randomBytes, randomInt, randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { rm } from 'node:fs/promises';
 import {
-  canUseAgent, SIGNAGE_EXTENSION_ID, SIGNAGE_LIMITS, SIGNAGE_MAX_SCREENS, SIGNAGE_STORAGE_LIMIT, SIGNAGE_DEFAULT_COLOR,
+  canUseAgent, SIGNAGE_EXTENSION_ID, SIGNAGE_JINGLES, SIGNAGE_LIMITS, SIGNAGE_MAX_SCREENS, SIGNAGE_STORAGE_LIMIT, SIGNAGE_DEFAULT_COLOR,
   type AuditEvent, type SignageAsset, type SignageEntry, type SignageOrientation, type SignageReport, type SignageRotation,
   type SignageScreen, type SignageSettings,
 } from '@m2office/shared';
@@ -76,6 +76,8 @@ export function cleanReport(v: unknown): SignageReport | null {
     pageVersion: typeof o['pageVersion'] === 'string' ? o['pageVersion'].slice(0, 32) : '',
     viewport: { width: num(vp['width'], 10_000), height: num(vp['height'], 10_000) },
     storageFree: typeof o['storageFree'] === 'number' && Number.isFinite(o['storageFree']) ? Math.max(0, Math.round(o['storageFree'])) : null,
+    audio: typeof o['audio'] === 'boolean' ? o['audio'] : null,
+    interrupting: o['interrupting'] === true,
   };
 }
 
@@ -121,7 +123,7 @@ export class SignageService {
     return (await this.deps.repo.getTenantSettings(tenantId)).signage;
   }
 
-  private emit(tenantId: string, screenId: string | '*', kind: 'flow' | 'screen' | 'removed' | 'settings') {
+  private emit(tenantId: string, screenId: string | '*', kind: 'flow' | 'screen' | 'removed' | 'settings' | 'volume') {
     this.changes.emit(`${tenantId}:${screenId}`, kind);
   }
 
@@ -133,7 +135,7 @@ export class SignageService {
   private view(s: ScreenRecord): SignageScreen {
     const now = this.now().getTime();
     return {
-      id: s.id, name: s.name, orientation: s.orientation, rotation: s.rotation, flowVersion: s.flowVersion,
+      id: s.id, name: s.name, orientation: s.orientation, rotation: s.rotation, volume: s.volume, flowVersion: s.flowVersion,
       lastSeenAt: s.lastSeenAt, lastReport: s.lastReport, online: !!s.lastSeenAt && now - Date.parse(s.lastSeenAt) <= ONLINE_MS, registeredAt: s.registeredAt,
     };
   }
@@ -154,8 +156,13 @@ export class SignageService {
    *
    * @remarks 危険度: 低（社内の画面の設定を変える）
    */
-  async updateScreen(tenantId: string, userId: string, id: string, input: { name?: unknown; orientation?: unknown; rotation?: unknown }): Promise<{ screen: SignageScreen } | { error: string }> {
-    const patch: { name?: string; orientation?: SignageOrientation; rotation?: SignageRotation } = {};
+  async updateScreen(tenantId: string, userId: string, id: string, input: { name?: unknown; orientation?: unknown; rotation?: unknown; volume?: unknown }): Promise<{ screen: SignageScreen } | { error: string }> {
+    const patch: { name?: string; orientation?: SignageOrientation; rotation?: SignageRotation; volume?: number } = {};
+    if (input.volume !== undefined) {
+      const v = Number(input.volume);
+      if (!Number.isInteger(v) || v < 0 || v > 100) return { error: '音の大きさは 0〜100 にしてください' };
+      patch.volume = v;
+    }
     if (input.name !== undefined) {
       const name = String(input.name ?? '').trim();
       if (!name || [...name].length > 20) return { error: '画面の名前は 1〜20 字にしてください' };
@@ -178,7 +185,8 @@ export class SignageService {
     }
     if (!s) return { error: '画面が見つかりません' };
     await this.audit(tenantId, userId, 'signage.screen.update', id, { fields: Object.keys(patch) });
-    this.emit(tenantId, id, 'screen');
+    // 音の大きさを変えたら、その画面でジングルを 1 回鳴らす（試す専用のボタンを置かない。第31.9.2節）
+    this.emit(tenantId, id, patch.volume !== undefined ? 'volume' : 'screen');
     return { screen: this.view(s) };
   }
 
@@ -295,7 +303,6 @@ export class SignageService {
    */
   async addAsset(tenantId: string, userId: string, up: AssetUpload): Promise<{ asset: SignageAsset; existing: boolean } | { error: string; status: number }> {
     const drop = async <T>(r: T): Promise<T> => { await rm(up.path, { force: true }); return r; };
-    const name = up.name.trim().slice(0, 60) || '素材';
     const thumb = up.thumbnail && up.thumbnail.length > 0 ? up.thumbnail : null;
     if (thumb && (thumb.length > SIGNAGE_LIMITS.thumbnailBytes || !(thumb[0] === 0xff && thumb[1] === 0xd8))) return drop({ error: '縮小画像が違います', status: 400 });
     let kind: SignageAsset['kind'];
@@ -307,7 +314,20 @@ export class SignageService {
     try {
       const head = await reader.read(0, 64 * 1024);
       const img = imageSize(head);
-      if (img) {
+      if (!img && isHtml(up.mime, head)) {
+        // 会社が作った HTML（第31.6.3節）。外への参照が残っていれば受け取らない
+        if (up.bytes > SIGNAGE_LIMITS.htmlBytes) return drop({ error: 'HTML が大きすぎます（中に入れた後で 10 MB まで）', status: 413 });
+        let html: string;
+        try { html = new TextDecoder('utf-8', { fatal: true }).decode(await reader.read(0, up.bytes)); } catch { return drop({ error: 'HTML は UTF-8 の文字にしてください', status: 422 }); }
+        const refs = externalRefs(html);
+        if (refs.length) return drop({ error: `外への参照があります（${refs.slice(0, 5).join('・')}）。画像などは HTML の中に入れてください`, status: 422 });
+        kind = 'html';
+        mime = 'text/html';
+        width = Number(up.width) || 1920;
+        height = Number(up.height) || 1080;
+        const title = /<title[^>]*>([^<]{1,120})<\/title>/i.exec(html)?.[1]?.trim();
+        if (title && !up.name.trim()) up.name = title;
+      } else if (img) {
         kind = 'image';
         mime = img.mime;
         width = img.width;
@@ -316,7 +336,7 @@ export class SignageService {
         if (Math.max(width, height) > 1920) return drop({ error: '画像の長い辺が 1,920 を超えています', status: 422 });
       } else {
         const info = await readMp4(reader.read, reader.size);
-        if (!info.ok) return drop({ error: info.reason.includes('MP4 の動画ではありません') ? '画像（JPEG・PNG）か動画（MP4）を選んでください' : info.reason, status: 422 });
+        if (!info.ok) return drop({ error: info.reason.includes('MP4 の動画ではありません') ? '画像（JPEG・PNG）・動画（MP4）・HTML を選んでください' : info.reason, status: 422 });
         kind = 'video';
         mime = 'video/mp4';
         width = info.width || Number(up.width) || 0;
@@ -334,6 +354,7 @@ export class SignageService {
     if (same) return drop({ asset: same, existing: true });
     const used = await this.deps.store.totalBytes(tenantId);
     if (used + up.bytes > SIGNAGE_STORAGE_LIMIT) return drop({ error: `素材の置き場がいっぱいです（${fmtBytes(used)} / ${fmtBytes(SIGNAGE_STORAGE_LIMIT)}）。使っていない素材を消してください`, status: 413 });
+    const name = up.name.trim().slice(0, 60) || '素材';
     const id = randomUUID();
     const files = this.deps.files;
     if (files.putFile) await files.putFile(tenantId, assetKey(id), up.path);
@@ -351,6 +372,36 @@ export class SignageService {
   async setThumbnail(tenantId: string, id: string, bytes: Uint8Array): Promise<{ ok: true } | { error: string }> {
     if (bytes.length === 0 || bytes.length > SIGNAGE_LIMITS.thumbnailBytes || !(bytes[0] === 0xff && bytes[1] === 0xd8)) return { error: '縮小画像は 100 KB までの JPEG にしてください' };
     return (await this.deps.store.setThumbnail(tenantId, id, bytes)) ? { ok: true } : { error: '素材が見つかりません' };
+  }
+
+  /**
+   * 割り込みの素材にする・外す、その音を変える（画像か HTML だけ。会社で 50 まで。第31.7.3節）。
+   *
+   * @remarks 危険度: 低（会社の画面に出せる素材を選ぶ）
+   */
+  async setInterruptAsset(tenantId: string, userId: string, id: string, input: { isInterrupt?: unknown; jingle?: unknown }): Promise<{ asset: SignageAsset } | { error: string }> {
+    const a = await this.deps.store.getAsset(tenantId, id);
+    if (!a) return { error: '素材が見つかりません' };
+    const patch: { isInterrupt?: boolean; jingle?: string | null } = {};
+    if (input.isInterrupt !== undefined) {
+      if (typeof input.isInterrupt !== 'boolean') return { error: '割り込みの素材にするかは真偽で送ってください' };
+      if (input.isInterrupt && a.kind === 'video') return { error: '動画は割り込みの素材にできません' };
+      if (input.isInterrupt && !a.isInterrupt && (await this.deps.store.listAssets(tenantId)).filter((x) => x.isInterrupt).length >= SIGNAGE_LIMITS.interruptAssets) {
+        return { error: `割り込みの素材は ${SIGNAGE_LIMITS.interruptAssets} までです` };
+      }
+      patch.isInterrupt = input.isInterrupt;
+    }
+    if (input.jingle !== undefined) {
+      const j = input.jingle === null || input.jingle === '' ? null : String(input.jingle);
+      if (j && !SIGNAGE_JINGLES.some((x) => x.id === j) && !(await this.deps.store.listSounds(tenantId)).some((s) => s.id === j)) return { error: '知らない音です' };
+      patch.jingle = j;
+    }
+    const next = await this.deps.store.setAssetInterrupt(tenantId, id, patch, userId);
+    if (!next) return { error: '素材が見つかりません' };
+    if (patch.isInterrupt !== undefined) await this.audit(tenantId, userId, 'signage.interrupt_asset.set', id, { isInterrupt: patch.isInterrupt });
+    // 画面は割り込みの素材を取り置き直す
+    this.emit(tenantId, '*', 'settings');
+    return { asset: next };
   }
 
   /** 素材の名前を直す。 */
@@ -436,17 +487,25 @@ export class SignageService {
    * 再生のページに渡す状態（設定・流れと版・素材・店の色・会社の名前・サーバーの時刻。第31.15.2節）。
    */
   async playState(tenantId: string, s: ScreenRecord): Promise<{
-    screen: { id: string; name: string; orientation: SignageOrientation; rotation: SignageRotation; flowVersion: number };
-    entries: SignageEntry[]; assets: PlayAsset[]; imageSeconds: number; color: string; company: string; serverTime: string;
+    screen: { id: string; name: string; orientation: SignageOrientation; rotation: SignageRotation; volume: number; flowVersion: number };
+    entries: SignageEntry[]; assets: PlayAsset[]; interruptAssets: string[]; sounds: { id: string; mime: string }[]; jingle: string;
+    imageSeconds: number; color: string; company: string; serverTime: string;
   }> {
-    const [entries, all, tenantSettings, tenant] = await Promise.all([
+    const [entries, all, tenantSettings, tenant, sounds] = await Promise.all([
       this.deps.store.listEntries(tenantId, s.id), this.deps.store.listAssets(tenantId), this.deps.repo.getTenantSettings(tenantId), this.deps.repo.findTenantById(tenantId),
+      this.deps.store.listSounds(tenantId),
     ]);
     const used = new Set(entries.map((e) => e.assetId));
+    // 割り込みの素材も取り置く（つながらない間にも出せるように。第31.9.1節）
+    const interrupts = all.filter((a) => a.isInterrupt && a.kind !== 'video');
+    for (const a of interrupts) used.add(a.id);
     return {
-      screen: { id: s.id, name: s.name, orientation: s.orientation, rotation: s.rotation, flowVersion: s.flowVersion },
+      screen: { id: s.id, name: s.name, orientation: s.orientation, rotation: s.rotation, volume: s.volume, flowVersion: s.flowVersion },
       entries,
       assets: all.filter((a) => used.has(a.id)).map(({ id, kind, mime, sha256, bytes, width, height, durationMs }) => ({ id, kind, mime, sha256, bytes, width, height, durationMs })),
+      interruptAssets: interrupts.map((a) => a.id),
+      sounds: sounds.map((x) => ({ id: x.id, mime: x.mime })),
+      jingle: tenantSettings.signage.jingle,
       imageSeconds: tenantSettings.signage.imageSeconds,
       color: tenantSettings.signage.color ?? SIGNAGE_DEFAULT_COLOR,
       company: tenantSettings.company.legalName || tenant?.name || '',
@@ -454,11 +513,13 @@ export class SignageService {
     };
   }
 
-  /** 画面が読める素材か（その画面の流れの素材だけ。第31.5.1節）。 */
+  /** 画面が読める素材か（その画面の流れの素材と、会社の割り込みの素材だけ。第31.5.1節）。 */
   async screenCanRead(tenantId: string, screenId: string, assetId: string): Promise<SignageAsset | null> {
+    const a = await this.deps.store.getAsset(tenantId, assetId);
+    if (!a) return null;
+    if (a.isInterrupt && a.kind !== 'video') return a;
     const entries = await this.deps.store.listEntries(tenantId, screenId);
-    if (!entries.some((e) => e.assetId === assetId)) return null;
-    return this.deps.store.getAsset(tenantId, assetId);
+    return entries.some((e) => e.assetId === assetId) ? a : null;
   }
 
   /** 生きている知らせを受ける（第31.5.1節）。答えにサーバーの時刻と流れの版。 */
@@ -516,6 +577,37 @@ export class SignageService {
 /** 空いている「画面 N」の名前。 */
 function freeName(used: string[]): string {
   for (let i = 1; ; i++) if (!used.includes(`画面 ${i}`)) return `画面 ${i}`;
+}
+
+/** HTML の文書か（種類か、中身の先頭で決める）。 */
+function isHtml(mime: string, head: Uint8Array): boolean {
+  if (/^text\/html\b/i.test(mime)) return true;
+  const s = new TextDecoder().decode(head.slice(0, 512)).replace(/^\uFEFF/, '').trimStart().toLowerCase();
+  return s.startsWith('<!doctype html') || s.startsWith('<html');
+}
+
+/**
+ * HTML の中に残った外への参照（`http:`・`https:`・`//` で始まるもの）。画像・スクリプト・CSS・字体・囲い・フォームの送り先・移動の印（第31.6.3節）。
+ *
+ * @returns 見つかった参照（重ねない）
+ */
+export function externalRefs(html: string): string[] {
+  const out = new Set<string>();
+  const ext = /^\s*(?:https?:|\/\/)/i;
+  for (const m of html.matchAll(/\b(?:src|href|action|formaction|poster|data|background|xlink:href)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi)) {
+    const v = m[1] ?? m[2] ?? m[3] ?? '';
+    if (ext.test(v)) out.add(v.trim().slice(0, 80));
+  }
+  for (const m of html.matchAll(/\bsrcset\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)) {
+    for (const part of (m[1] ?? m[2] ?? '').split(',')) if (ext.test(part)) out.add(part.trim().split(/\s+/)[0]!.slice(0, 80));
+  }
+  for (const m of html.matchAll(/url\(\s*(['"]?)([^'")]*)\1\s*\)/gi)) if (ext.test(m[2] ?? '')) out.add(m[2]!.trim().slice(0, 80));
+  for (const m of html.matchAll(/@import\s+(['"])([^'"]+)\1/gi)) if (ext.test(m[2] ?? '')) out.add(m[2]!.trim().slice(0, 80));
+  for (const m of html.matchAll(/<meta[^>]+http-equiv\s*=\s*["']?refresh[^>]*>/gi)) {
+    const u = /url\s*=\s*([^"'>;]+)/i.exec(m[0])?.[1];
+    if (u && ext.test(u)) out.add(u.trim().slice(0, 80));
+  }
+  return [...out];
 }
 
 const fmtBytes = (n: number) => (n >= 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(1)} GB` : `${Math.round(n / 1024 ** 2)} MB`);

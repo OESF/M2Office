@@ -12,6 +12,7 @@ import { Board } from './Dashboard.js';
 import { Login, takeReturnPath } from './Login.js';
 import { MobileInventory } from './MobileInventory.js';
 import { SignagePair } from './SignagePair.js';
+import { MobileSignage } from './MobileSignage.js';
 import { api, ApiError, setUnauthorizedHandler, type Me } from './api.js';
 import './styles.css';
 import { applyTheme } from './theme.js';
@@ -77,6 +78,8 @@ function Root() {
   if (location.pathname.startsWith('/m/inventory')) return withDebug(<MobileInventory me={me} />);
   // 店頭サイネージの画面の登録（端末の QR を管理者がスマホで読む。仕様書 第31.5.1節）
   if (location.pathname.startsWith('/m/signage/pair')) return withDebug(<SignagePair me={me} />);
+  // 店頭サイネージのスタッフのページ（割り込みを出す・消す。仕様書 第31.9.3節）
+  if (location.pathname.startsWith('/m/signage')) return withDebug(<MobileSignage me={me} />);
   if (location.pathname.startsWith('/board')) {
     // 権限の判定は API が行う。ここは案内だけ（仕様書 第6.7.2.1節）
     if (!me.user.roles.includes('admin')) {

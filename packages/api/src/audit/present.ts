@@ -138,6 +138,13 @@ const ACTION_LABELS: Record<string, string> = {
   'signage.flow.update': 'サイネージの流れを直した',
   'signage.asset.add': 'サイネージの素材を足した',
   'signage.asset.remove': 'サイネージの素材を消した',
+  'signage.interrupt_asset.set': 'サイネージの割り込みの素材を変えた',
+  'signage.source.create': 'サイネージの呼び出しの受け口を作った',
+  'signage.source.stop': 'サイネージの呼び出しの受け口を止めた',
+  'signage.source.resume': 'サイネージの呼び出しの受け口を動かした',
+  'signage.source.reset_mapping': 'サイネージの呼び出しの受け口を推測し直した',
+  'signage.sound.add': 'サイネージのジングルの音を入れた',
+  'signage.sound.remove': 'サイネージのジングルの音を消した',
   // 人事・給与（仕様書 第30.21節。他人の台帳を見ただけでも残す）
   'hr.list': '従業員の一覧を見た',
   'hr.view': '従業員の台帳を見た',

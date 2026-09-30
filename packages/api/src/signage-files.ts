@@ -51,6 +51,9 @@ export async function receiveToTemp(body: ReadableStream<Uint8Array> | null, max
   return { path, bytes, sha256: hash.digest('hex') };
 }
 
+/** HTML の素材に付ける見出し（外と通信できない囲い。仕様書 第31.6.3節）。 */
+export const HTML_CSP = "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; form-action 'none'; frame-src 'none'";
+
 /**
  * 素材の中身を返す（`Range` に応じる）。
  *
@@ -58,9 +61,10 @@ export async function receiveToTemp(body: ReadableStream<Uint8Array> | null, max
  */
 export async function serveAsset(files: FileStore, tenantId: string, key: string, mime: string, range: string | undefined): Promise<Response> {
   const headers: Record<string, string> = {
-    'content-type': mime,
+    'content-type': mime === 'text/html' ? 'text/html; charset=utf-8' : mime,
     'x-content-type-options': 'nosniff',
-    'content-security-policy': "default-src 'none'; sandbox",
+    // HTML の素材は、源の無い文書として開き、外と通信させない（仕様書 第31.6.3節）。ほかは何も動かさない
+    'content-security-policy': mime === 'text/html' ? HTML_CSP : "default-src 'none'; sandbox",
     'accept-ranges': 'bytes',
     // 素材は中身が変わらない（同じ ID の中身は作り直さない）。端末は取り置きの場所にも置く
     'cache-control': 'private, max-age=86400',

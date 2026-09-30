@@ -9,8 +9,12 @@
  */
 
 import { useEffect, useRef, useState, type DragEvent } from 'react';
+import { JinglePlayer } from './signage-audio.js';
 import { api, ApiError, describeError, type AccessOptions, type ExtensionView, type HrProposalField, type ScopeValue } from './api.js';
-import { INVENTORY_FEATURES, SIGNAGE_DEFAULT_COLOR, type HrSettings, type InventoryBookingSource, type InventoryFeature, type InventorySettings, type SignageSettings } from '@m2office/shared';
+import {
+  INVENTORY_FEATURES, SIGNAGE_DEFAULT_COLOR, SIGNAGE_JINGLES, type HrSettings, type InventoryBookingSource, type InventoryFeature, type InventorySettings,
+  type SignageSettings, type SignageSound, type SignageSource,
+} from '@m2office/shared';
 import { HelpTip, Markdown } from './help.js';
 import { ScopeEditor, ScopeField, useAccessOptions } from './Scope.js';
 
@@ -344,8 +348,34 @@ const INVENTORY_READY: InventoryFeature[] = ['lots', 'units', 'order', 'reserve'
 /** 店頭サイネージの会社の設定（画像を出す秒数・店の色。仕様書 第31.4節）。画面の数と容量の上限は全社共通の決まり。 */
 function SignageFields({ settings, busy, onChanged }: { settings: SignageSettings; busy: boolean; onChanged: () => void }) {
   const [error, setError] = useState<string | null>(null);
-  const save = (patch: Partial<Pick<SignageSettings, 'imageSeconds' | 'color'>>) =>
-    void api.admin.setSignageSettings(patch).then(() => { setError(null); onChanged(); }).catch((e) => setError(describeError(e, '保存できませんでした')));
+  const [sounds, setSounds] = useState<SignageSound[]>([]);
+  const [sources, setSources] = useState<SignageSource[]>([]);
+  const [created, setCreated] = useState<string | null>(null);
+  const [sourceName, setSourceName] = useState('');
+  const soundFile = useRef<HTMLInputElement>(null);
+  const player = useRef<JinglePlayer | null>(null);
+  const reload = () => {
+    api.admin.signageSources().then((r) => setSources(r.sources)).catch(() => undefined);
+    api.signage.sounds().then((r) => setSounds(r.sounds)).catch(() => undefined);
+  };
+  useEffect(reload, []);
+  const fail = (e: unknown, text: string) => setError(describeError(e, text));
+  const save = (patch: Partial<Omit<SignageSettings, 'enabled'>>) =>
+    void api.admin.setSignageSettings(patch).then(() => { setError(null); onChanged(); }).catch((e) => fail(e, '保存できませんでした'));
+  /** 選んだ M2Office の音を手元で鳴らす（選ぶと鳴る。試す専用のボタンを置かない）。 */
+  const preview = async (id: string) => {
+    if (!SIGNAGE_JINGLES.some((j) => j.id === id)) return;
+    if (!player.current) player.current = new JinglePlayer();
+    await player.current.unlock();
+    void player.current.play(id, 70);
+  };
+  const addSound = async (f: File) => {
+    // 長さは手元で確かめる（5 秒まで）
+    const url = URL.createObjectURL(f);
+    const ms = await new Promise<number>((res) => { const a = new Audio(); a.preload = 'metadata'; a.onloadedmetadata = () => res(a.duration * 1000); a.onerror = () => res(0); a.src = url; });
+    URL.revokeObjectURL(url);
+    api.admin.addSignageSound(f, f.name.replace(/\.[a-z0-9]+$/i, '').slice(0, 20), ms).then(() => { setError(null); reload(); }).catch((e) => fail(e, '入れられませんでした'));
+  };
   return (
     <div className="small ext-inventory">
       <div className="row wrap">
@@ -353,6 +383,48 @@ function SignageFields({ settings, busy, onChanged }: { settings: SignageSetting
           onBlur={(e) => { const n = Number(e.target.value); if (Number.isInteger(n) && n !== settings.imageSeconds) save({ imageSeconds: n }); }} /> 秒</label>
         <label>店の色 <input type="color" value={settings.color ?? SIGNAGE_DEFAULT_COLOR} disabled={busy} onChange={(e) => save({ color: e.target.value })} aria-label="店の色" /></label>
         {settings.color && <button className="link" disabled={busy} onClick={() => save({ color: null })}>元の色に戻す</button>}
+      </div>
+      <div className="row wrap">
+        <label>割り込みを出す秒数 <input key={settings.interruptSeconds} type="number" min={5} max={60} className="num" defaultValue={settings.interruptSeconds} disabled={busy}
+          onBlur={(e) => { const n = Number(e.target.value); if (Number.isInteger(n) && n !== settings.interruptSeconds) save({ interruptSeconds: n }); }} /> 秒</label>
+        <label className="check"><input type="checkbox" checked={settings.chime} disabled={busy} onChange={(e) => save({ chime: e.target.checked })} /> ジングル</label>
+        <select value={settings.jingle} disabled={busy} aria-label="既定のジングル" onChange={(e) => { save({ jingle: e.target.value }); void preview(e.target.value); }}>
+          {SIGNAGE_JINGLES.map((j) => <option key={j.id} value={j.id}>{j.label}</option>)}
+          {sounds.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+        </select>
+      </div>
+      <div className="row wrap">
+        {sounds.map((x) => (
+          <span key={x.id} className="ext-chip">{x.name}（{(x.durationMs / 1000).toFixed(1)} 秒）
+            <button className="link" onClick={() => void api.admin.deleteSignageSound(x.id).then(() => { reload(); onChanged(); }).catch((e) => fail(e, '消せませんでした'))} aria-label={`${x.name}を消す`}>×</button>
+          </span>
+        ))}
+        <button className="btn ghost small" onClick={() => soundFile.current?.click()}>会社の音を入れる</button>
+        <input ref={soundFile} type="file" accept="audio/mpeg,audio/wav,.mp3,.wav" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void addSound(f); }} />
+      </div>
+      <div className="row wrap">
+        <label className="ext-signage-template">番号と場所の呼び出し <input key={settings.callTemplate} defaultValue={settings.callTemplate} disabled={busy} aria-label="番号と場所の呼び出しの言い回し"
+          onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== settings.callTemplate) save({ callTemplate: v }); }} /></label>
+        <label className="ext-signage-template">番号だけの呼び出し <input key={settings.callTemplateNoPlace} defaultValue={settings.callTemplateNoPlace} disabled={busy} aria-label="番号だけの呼び出しの言い回し"
+          onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== settings.callTemplateNoPlace) save({ callTemplateNoPlace: v }); }} /></label>
+      </div>
+      <div className="ext-signage-sources">
+        {sources.map((x) => (
+          <div key={x.id} className="row wrap">
+            <strong>{x.name}</strong>
+            <span className={`badge ${x.status === 'active' ? 'ok' : ''}`}>{x.status === 'active' ? '動いている' : '止めている'}</span>
+            <span className="muted">{x.lastReceivedAt ? `最後 ${new Date(x.lastReceivedAt).toLocaleString('ja-JP')}` : 'まだ受け取っていない'}
+              {x.stats.day ? `・今日 ${x.stats.accepted} 件${Object.values(x.stats.rejected).reduce((a, n) => a + n, 0) ? `（断った ${Object.values(x.stats.rejected).reduce((a, n) => a + n, 0)} 件）` : ''}` : ''}</span>
+            {(x.stats.rejected['unreadable'] ?? 0) > 0 && <span className="badge warn">読めない呼び出しが届いています</span>}
+            <button className="link" onClick={() => void api.admin.setSignageSourceStatus(x.id, x.status === 'active' ? 'stopped' : 'active').then(reload).catch((e) => fail(e, '変えられませんでした'))}>{x.status === 'active' ? '止める' : '動かす'}</button>
+            <button className="link" onClick={() => void api.admin.resetSignageSourceMapping(x.id).then(reload).catch((e) => fail(e, '変えられませんでした'))}>推測し直す</button>
+          </div>
+        ))}
+        <div className="row wrap">
+          <input placeholder="受付のシステムの名前" value={sourceName} maxLength={40} onChange={(e) => setSourceName(e.target.value)} aria-label="呼び出しの受け口の名前" />
+          <button className="btn ghost small" disabled={!sourceName.trim()} onClick={() => void api.admin.createSignageSource(sourceName.trim()).then((r) => { setCreated(r.url); setSourceName(''); reload(); }).catch((e) => fail(e, '作れませんでした'))}>受け口を作る</button>
+        </div>
+        {created && <p className="ok-msg"><code>{created}</code></p>}
       </div>
       {error && <p className="error">{error}</p>}
     </div>

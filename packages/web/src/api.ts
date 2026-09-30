@@ -17,7 +17,7 @@ import type {
   YeaDeclaration, YeaDeclarationView, YeaResult, SocialDetermination, SocialEvent, InsuranceEligibility, LaborInsuranceData, LaborInsuranceView, ShiftView, HrShiftSettings, HrShift,
   InventoryCount, InventoryCountRow, InventoryCountScope, InventoryCountView, InventorySupplier,
   InventoryBooking, InventoryBookingMapping, InventoryBookingSource,
-  SignageAsset, SignageEntry, SignageScreen, SignageSettings,
+  SignageAsset, SignageEntry, SignageScreen, SignageSettings, SignageInterruptInput, SignageInterruptView, SignagePhrase, SignageSound, SignageSource,
 } from '@m2office/shared';
 import { debugMode, recordCall } from './debug.js';
 
@@ -1083,6 +1083,26 @@ export const api = {
     deleteAsset: (id: string) => call<{ screens: string[] }>(`/signage/assets/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     /** 縮小画像（無ければ `null`）。 */
     thumbnail: (id: string) => fetchBlob(`/signage/assets/${encodeURIComponent(id)}/thumbnail`),
+    /** 素材の中身（HTML の見本に使う。無ければ `null`）。 */
+    content: (id: string) => fetchBlob(`/signage/assets/${encodeURIComponent(id)}/content`),
+    /** 割り込みの素材にする・外す、その音（`null` なら会社の既定）。 */
+    setAssetInterrupt: (id: string, patch: { isInterrupt?: boolean; jingle?: string | null }) =>
+      call<{ asset: SignageAsset }>(`/signage/assets/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    /** 割り込みを出す（仕様書 第31.7.2節）。まとめた画面は `merged`。 */
+    sendInterrupt: (input: SignageInterruptInput) =>
+      call<{ id: string; screens: string[]; merged: string[] }>('/signage/interrupts', { method: 'POST', body: JSON.stringify(input) }),
+    /** 最近 24 時間の割り込み。 */
+    interrupts: () => call<{ interrupts: SignageInterruptView[] }>('/signage/interrupts'),
+    clearInterrupt: (id: string) => call<{ cleared: number }>(`/signage/interrupts/${encodeURIComponent(id)}/clear`, { method: 'POST', body: '{}' }),
+    /** すべて消す（画面を選べる）。 */
+    clearAll: (screens?: string[]) => call<{ cleared: number }>('/signage/clear', { method: 'POST', body: JSON.stringify(screens ? { screens } : {}) }),
+    /** よく出す案内と、割り込みの素材の回数。 */
+    phrases: () => call<{ phrases: SignagePhrase[]; assets: { assetId: string; count: number }[] }>('/signage/phrases'),
+    hidePhrase: (id: string) => call<{ ok: true }>(`/signage/phrases/${encodeURIComponent(id)}/hide`, { method: 'POST', body: '{}' }),
+    /** 会社のジングルの音。 */
+    sounds: () => call<{ sounds: SignageSound[] }>('/signage/sounds'),
+    /** スタッフのページを開く QR。 */
+    mobileQr: () => fetchBlob('/signage/mobile-qr.svg'),
   },
   inventory: {
     list: (q: { q?: string; stopped?: boolean } = {}) => {
@@ -1643,11 +1663,22 @@ export const api = {
     setHrSettings: (patch: Partial<HrSettings>) =>
       call<{ ok: true; hr: HrSettings }>('/admin/extensions/hr/settings', { method: 'PUT', body: JSON.stringify(patch) }),
     /** 店頭サイネージの会社の設定（画像の秒数・店の色。仕様書 第31.4節）。送った項目だけを変える。 */
-    setSignageSettings: (patch: Partial<Pick<SignageSettings, 'imageSeconds' | 'color'>>) =>
+    setSignageSettings: (patch: Partial<Omit<SignageSettings, 'enabled'>>) =>
       call<{ ok: true; signage: SignageSettings }>('/admin/extensions/signage/settings', { method: 'PUT', body: JSON.stringify(patch) }),
     /** 番号で店頭サイネージの画面を登録する（管理者だけ。仕様書 第31.5.1節）。 */
     claimSignageScreen: (code: string) =>
       call<{ screen: SignageScreen; restored: boolean }>('/admin/extensions/signage/pairings/claim', { method: 'POST', body: JSON.stringify({ code }) }),
+    /** 店頭サイネージの呼び出しの受け口（仕様書 第31.8.2節）。 */
+    signageSources: () => call<{ sources: SignageSource[] }>('/admin/extensions/signage/sources'),
+    /** 受け口を作る。URL は作ったときだけ返る。 */
+    createSignageSource: (name: string) => call<{ source: SignageSource; url: string; key: string }>('/admin/extensions/signage/sources', { method: 'POST', body: JSON.stringify({ name }) }),
+    setSignageSourceStatus: (id: string, status: 'active' | 'stopped') =>
+      call<{ ok: true }>(`/admin/extensions/signage/sources/${encodeURIComponent(id)}/status`, { method: 'PUT', body: JSON.stringify({ status }) }),
+    resetSignageSourceMapping: (id: string) => call<{ ok: true }>(`/admin/extensions/signage/sources/${encodeURIComponent(id)}/reset-mapping`, { method: 'POST', body: '{}' }),
+    /** 会社のジングルの音を入れる（MP3・WAV。画面で調べた長さ）。 */
+    addSignageSound: (file: Blob, name: string, durationMs: number) =>
+      sendRaw<{ sound: SignageSound }>('POST', '/admin/extensions/signage/sounds', file, { 'x-sound-name': encodeURIComponent(name), 'x-duration-ms': String(Math.round(durationMs)) }),
+    deleteSignageSound: (id: string) => call<{ ok: true; resetDefault: boolean }>(`/admin/extensions/signage/sounds/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     /** 店頭サイネージの画面を外す（管理者だけ。確認を挟まない）。 */
     removeSignageScreen: (id: string) => call<{ ok: true }>(`/admin/extensions/signage/screens/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     setExtensionEnabled: (id: string, enabled: boolean) =>

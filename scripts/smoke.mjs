@@ -4015,7 +4015,7 @@ console.log('\n■ 62. お知らせを消す（第6.5.5節）');
   }
 }
 
-console.log('\n■ 63. 店頭サイネージ（内蔵の拡張。第31章の段 1、ADR-0051）');
+console.log('\n■ 63. 店頭サイネージ（内蔵の拡張。第31章の段 1・段 2、ADR-0051）');
 {
   const { default: pg } = await import('pg');
   const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
@@ -4024,6 +4024,7 @@ console.log('\n■ 63. 店頭サイネージ（内蔵の拡張。第31章の段 
     await owner.query(`delete from signage_screens where tenant_id in ('t-alpha', 't-beta')`);
     await owner.query(`delete from signage_assets where tenant_id in ('t-alpha', 't-beta')`);
     await owner.query(`delete from signage_pairings where tenant_id in ('t-alpha', 't-beta')`);
+    for (const t of ['signage_interrupts', 'signage_phrases', 'signage_sources', 'signage_sounds']) await owner.query(`delete from ${t} where tenant_id in ('t-alpha', 't-beta')`);
   };
   const play = async (path, init = {}, key = null, t = 'a') => {
     const res = await fetch(`${API}/v1/signage-play${path}`, { ...init, headers: { 'content-type': 'application/json', 'x-tenant': t, ...(key ? { authorization: `Bearer ${key}` } : {}), ...(init.headers ?? {}) } });
@@ -4133,12 +4134,159 @@ console.log('\n■ 63. 店頭サイネージ（内蔵の拡張。第31章の段 
       && back.status === 201 && back.body.restored === true && back.body.screen.id === third?.id && back.body.screen.name === third?.name
       ? ok('サイネージの画面は 1 社 3 台までで、外して 30 日以内の画面は登録し直すと名前と流れを引き継ぐ')
       : ng('サイネージの画面の上限が合わない', JSON.stringify({ made: made.map((m) => m.status), back: back.body }).slice(0, 400));
+
+    // ── 段 2: 割り込み・HTML・受け口・会社の音・秘書（第31.7節〜第31.9節） ──
+    const k3 = (await play('/pairings/poll', { method: 'POST', body: JSON.stringify({ secret: p5.secret }) })).body?.key;
+    const sid3 = back.body?.screen?.id;
+    const pendingOf = async (key) => (await play('/interrupts', {}, key)).body?.interrupts ?? [];
+
+    // 文の割り込み: 全角を整え、同じ文は二度足さない、番号は言い回しで文にし、81 字は断る。社員（管理者でない人）も出せる
+    const t1 = await call('a', '/v1/signage/interrupts', { method: 'POST', body: JSON.stringify({ text: '１２番の方、受付へ\n', screens: [sid3] }) }, 'member');
+    const t1dup = await call('a', '/v1/signage/interrupts', { method: 'POST', body: JSON.stringify({ text: '12番の方、受付へ', screens: [sid3] }) });
+    const t2 = await call('a', '/v1/signage/interrupts', { method: 'POST', body: JSON.stringify({ number: '13', place: 'レントゲン室', screens: [sid3], seconds: 99, chime: false }) });
+    const t3 = await call('a', '/v1/signage/interrupts', { method: 'POST', body: JSON.stringify({ text: 'あ'.repeat(81) }) });
+    const pend = await pendingOf(k3);
+    const p1i = pend.find((x) => x.id === t1.body?.id);
+    const p2i = pend.find((x) => x.id === t2.body?.id);
+    t1.status === 201 && t1dup.status === 201 && t1dup.body.screens.length === 0 && t1dup.body.merged[0] === sid3 && t2.status === 201 && t3.status === 422
+      && p1i?.text === '12番の方、受付へ' && p1i.number === '12' && p1i.jingle === 'pinpon' && p1i.seconds === 15
+      && p2i?.text === '13番の方、レントゲン室へお越しください' && p2i.jingle === null && p2i.seconds === 60
+      ? ok('サイネージの割り込みは文を整え、同じ文を二度足さず、番号は言い回しで文にし、80 字を超える文は断る（社員も出せる）')
+      : ng('サイネージの文の割り込みが合わない', JSON.stringify({ t1: t1.body, dup: t1dup.body, t2: t2.body, t3: t3.status, pend }).slice(0, 700));
+
+    // 画面の鍵では、その画面の割り込みだけを読む。出し始め・出し終わり・消すで状態が進み、2 分待った割り込みは出さない
+    const k1 = (await play('/state', {}, k3)).status === 200;
+    const otherScreen = made[0]?.body?.screen?.id;
+    const started = await play(`/interrupts/${t1.body.id}/started`, { method: 'POST' }, k3);
+    const ended = await play(`/interrupts/${t1.body.id}/ended`, { method: 'POST' }, k3);
+    const cleared = await call('a', `/v1/signage/interrupts/${t2.body.id}/clear`, { method: 'POST' }, 'member');
+    const t4 = await call('a', '/v1/signage/interrupts', { method: 'POST', body: JSON.stringify({ text: '古い案内', screens: [sid3] }) });
+    await owner.query(`update signage_interrupt_targets set created_at = now() - interval '3 minutes' where interrupt_id = $1`, [t4.body?.id]);
+    await owner.query(`update signage_interrupts set created_at = now() - interval '3 minutes' where id = $1`, [t4.body?.id]);
+    const afterExpire = await pendingOf(k3);
+    const recent = (await call('a', '/v1/signage/interrupts')).body?.interrupts ?? [];
+    const stateOf = (id) => recent.find((x) => x.id === id)?.targets.find((t) => t.screenId === sid3)?.state;
+    k1 && started.body?.ok === true && ended.body?.ok === true && cleared.body?.cleared === 1 && afterExpire.length === 0
+      && stateOf(t1.body.id) === 'done' && stateOf(t2.body.id) === 'cleared' && stateOf(t4.body?.id) === 'expired' && recent.every((x) => x.targets.every((t) => t.screenId !== otherScreen))
+      ? ok('サイネージの割り込みは画面が出し始め・出し終わりを知らせて進み、消せて、2 分待ったものは出さずに「出せなかった」にする')
+      : ng('サイネージの割り込みの状態が合わない', JSON.stringify({ started: started.body, ended: ended.body, cleared: cleared.body, afterExpire, recent }).slice(0, 700));
+
+    // 割り込みの素材と HTML: 画像と HTML だけを割り込みに使える。HTML は外への参照を断り、題名を名前にし、囲いの見出しを付けて返す
+    const pic = await upload(png(800, 600, 9), '焼き上がり.png');
+    const setInt = await call('a', `/v1/signage/assets/${pic.body.asset.id}`, { method: 'PATCH', body: JSON.stringify({ isInterrupt: true, jingle: 'bell' }) });
+    const vidInt = await call('a', `/v1/signage/assets/${video.body.asset.id}`, { method: 'PATCH', body: JSON.stringify({ isInterrupt: true }) });
+    const upHtml = async (text) => { const r = await fetch(`${API}/v1/signage/assets`, { method: 'POST', body: Buffer.from(text), headers: { 'x-tenant': 'a', 'x-user': 'admin@alpha.example.jp', 'content-type': 'text/html' } }); return { status: r.status, body: await r.json() }; };
+    const html = await upHtml('<!doctype html><html><head><title>本日のおすすめ</title></head><body><h1>メロンパン</h1><script>document.title="x"</script></body></html>');
+    const htmlBad = await upHtml('<!doctype html><img src="https://evil.example/x.png">');
+    const htmlInt = await call('a', `/v1/signage/assets/${html.body?.asset?.id}`, { method: 'PATCH', body: JSON.stringify({ isInterrupt: true }) });
+    const htmlGet = await fetch(`${API}/v1/signage-play/assets/${html.body?.asset?.id}`, { headers: { 'x-tenant': 'a', authorization: `Bearer ${k3}` } });
+    const csp = htmlGet.headers.get('content-security-policy') ?? '';
+    const i5 = await call('a', '/v1/signage/interrupts', { method: 'POST', body: JSON.stringify({ assetId: pic.body.asset.id, screens: [sid3] }) });
+    const i6 = await call('a', '/v1/signage/interrupts', { method: 'POST', body: JSON.stringify({ assetId: video.body.asset.id }) });
+    const st5 = await play('/state', {}, k3);
+    setInt.status === 200 && vidInt.status === 400 && htmlInt.status === 200 && html.status === 201 && html.body.asset.kind === 'html' && html.body.asset.name === '本日のおすすめ'
+      && htmlBad.status === 422 && htmlGet.status === 200 && /connect-src 'none'/.test(csp) && /default-src 'none'/.test(csp)
+      && i5.status === 201 && i6.status === 422 && st5.body?.interruptAssets?.includes(pic.body.asset.id) && st5.body.interrupts?.[0]?.jingle === 'bell'
+      ? ok('サイネージの割り込みの素材は画像と HTML だけで、素材ごとの音で鳴る。HTML は外への参照を断り、外と通信させない見出しを付けて返す')
+      : ng('サイネージの割り込みの素材・HTML が合わない', JSON.stringify({ setInt: setInt.status, vidInt: vidInt.status, html: html.body, bad: htmlBad.body, csp, i5: i5.body, i6: i6.status, st5: st5.body?.interrupts }).slice(0, 700));
+    await call('a', '/v1/signage/clear', { method: 'POST', body: '{}' });
+
+    // 呼び出しの受け口: 管理者だけが作り、URL は 1 度だけ返す。鍵は URL でも見出しでも受け、同じ requestId は 1 度だけ出す
+    const srcMember = await call('a', '/v1/admin/extensions/signage/sources', { method: 'POST', body: JSON.stringify({ name: '受付' }) }, 'member');
+    const src = await call('a', '/v1/admin/extensions/signage/sources', { method: 'POST', body: JSON.stringify({ name: '受付' }) });
+    const hk = src.body?.key;
+    const hook = async (body, type = 'application/json', k = hk, method = 'POST') => {
+      const r = await fetch(`${API}/v1/hooks/signage/${k}`, { method, ...(method === 'POST' ? { body } : {}), headers: { 'content-type': type } });
+      return r.status;
+    };
+    const h1 = await hook(JSON.stringify({ number: '21', place: '2番窓口', requestId: 'r1', screens: [back.body.screen.name] }));
+    const h1dup = await hook(JSON.stringify({ number: '21', place: '2番窓口', requestId: 'r1' }));
+    const h2 = await hook(`text=${encodeURIComponent('お知らせ')}&screens=${encodeURIComponent(back.body.screen.name)}`, 'application/x-www-form-urlencoded');
+    const h3 = await fetch(`${API}/v1/hooks/signage`, { method: 'POST', body: JSON.stringify({ image: '焼き上がり', screens: [back.body.screen.name] }), headers: { 'content-type': 'application/json', authorization: `Bearer ${hk}` } }).then((r) => r.status);
+    const hUnknown = await hook(JSON.stringify({ text: 'x', screens: ['無い画面'] }));
+    const hBadKey = await hook('{}', 'application/json', 'A'.repeat(32));
+    const hGet = await hook('', 'application/json', hk, 'GET');
+    const hType = await hook('x', 'text/plain');
+    const hBig = await hook(JSON.stringify({ text: 'x'.repeat(5000) }));
+    const hOdd = await hook(JSON.stringify({ ticket: { no: 55 } }));
+    const hookPend = await pendingOf(k3);
+    const srcs = (await call('a', '/v1/admin/extensions/signage/sources')).body?.sources ?? [];
+    const logged = (await owner.query(`select count(*)::int as n from signage_interrupts where tenant_id = 't-alpha' and origin = 'hook' and request_id = 'r1'`)).rows[0].n;
+    srcMember.status === 403 && src.status === 201 && /\/v1\/hooks\/signage\/[A-Za-z0-9_-]{32}$/.test(src.body.url ?? '') && !('key' in (srcs[0] ?? {})) && !('keyHash' in (srcs[0] ?? {}))
+      && h1 === 200 && h1dup === 200 && logged === 1 && h2 === 200 && h3 === 200 && hUnknown === 422 && hBadKey === 404 && hGet === 405 && hType === 415 && hBig === 413 && hOdd === 422
+      && hookPend.some((x) => x.text === '21番の方、2番窓口へお越しください') && hookPend.some((x) => x.text === 'お知らせ') && hookPend.some((x) => x.kind === 'asset')
+      ? ok('サイネージの呼び出しの受け口は管理者だけが作り、鍵を URL か見出しで受け、同じ requestId を 1 度だけ出し、形・大きさ・知らない画面を断る')
+      : ng('サイネージの受け口が合わない', JSON.stringify({ srcMember: srcMember.status, src: src.body, h1, h1dup, logged, h2, h3, hUnknown, hBadKey, hGet, hType, hBig, hOdd, hookPend, srcs }).slice(0, 800));
+
+    // 止めた受け口・切った会社では 404。1 分 30 回を超えると 429
+    await call('a', `/v1/admin/extensions/signage/sources/${src.body.source.id}/status`, { method: 'PUT', body: JSON.stringify({ status: 'stopped' }) });
+    const hStopped = await hook(JSON.stringify({ text: 'x' }));
+    await call('a', `/v1/admin/extensions/signage/sources/${src.body.source.id}/status`, { method: 'PUT', body: JSON.stringify({ status: 'active' }) });
+    await setEnabled('a', false);
+    const hOff = await hook(JSON.stringify({ text: 'x' }));
+    await setEnabled('a', true);
+    const burst = [];
+    for (let i = 0; i < 32; i++) burst.push(await hook(JSON.stringify({ text: '連打', requestId: `burst-${i}` })));
+    const srcAudit = (await owner.query(`select action from audit_events where tenant_id = 't-alpha' and action like 'signage.source.%' and occurred_at > now() - interval '5 minutes'`)).rows.map((r) => r.action);
+    hStopped === 404 && hOff === 404 && burst.includes(429) && ['signage.source.create', 'signage.source.stop', 'signage.source.resume'].every((a) => srcAudit.includes(a))
+      ? ok('サイネージの受け口は止めると・会社で切ると 404 になり、1 分 30 回を超えると 429 で断る。作る・止める・動かすは監査ログに残す')
+      : ng('サイネージの受け口の止め方が合わない', JSON.stringify({ hStopped, hOff, burst, srcAudit }).slice(0, 500));
+    await call('a', '/v1/signage/clear', { method: 'POST', body: '{}' });
+
+    // 会社の音と設定: 管理者だけが入れ、MP3・WAV で 5 秒まで。既定に選んだ音を消すと「ピンポーン」に戻る。言い回しは {番号} と {場所} が要る
+    const wav = Buffer.alloc(44); wav.write('RIFF', 0, 'latin1'); wav.write('WAVE', 8, 'latin1');
+    const addSound = async (bytes, ms, who = 'admin') => {
+      const r = await fetch(`${API}/v1/admin/extensions/signage/sounds`, { method: 'POST', body: bytes, headers: { 'x-tenant': 'a', 'x-user': `${who}@alpha.example.jp`, 'content-type': 'application/octet-stream', 'x-sound-name': encodeURIComponent('店の音'), 'x-duration-ms': String(ms) } });
+      return { status: r.status, body: await r.json() };
+    };
+    const sMember = await addSound(wav, 1000, 'member');
+    const sLong = await addSound(wav, 6000);
+    const sOgg = await addSound(Buffer.from('OggS0000'), 1000);
+    const sOk = await addSound(wav, 1200);
+    const soundId = sOk.body?.sound?.id;
+    const setJ = await call('a', '/v1/admin/extensions/signage/settings', { method: 'PUT', body: JSON.stringify({ jingle: soundId }) });
+    const soundGet = await fetch(`${API}/v1/signage-play/sounds/${soundId}`, { headers: { 'x-tenant': 'a', authorization: `Bearer ${k3}` } });
+    const badTpl = await call('a', '/v1/admin/extensions/signage/settings', { method: 'PUT', body: JSON.stringify({ callTemplate: 'お越しください' }) });
+    const badSec = await call('a', '/v1/admin/extensions/signage/settings', { method: 'PUT', body: JSON.stringify({ interruptSeconds: 100 }) });
+    const delSound = await call('a', `/v1/admin/extensions/signage/sounds/${soundId}`, { method: 'DELETE' });
+    const jAfter = (await call('a', '/v1/admin/extensions/signage/settings')).body?.signage?.jingle ?? (await call('a', '/v1/admin/settings')).body?.signage?.jingle;
+    sMember.status === 403 && sLong.status === 400 && sOgg.status === 400 && sOk.status === 201 && setJ.status === 200 && soundGet.status === 200
+      && soundGet.headers.get('content-type') === 'audio/wav' && badTpl.status === 400 && badSec.status === 400 && delSound.body?.resetDefault === true
+      ? ok('サイネージの会社の音は管理者だけが MP3・WAV（5 秒まで）で入れ、画面は鍵で読める。既定の音を消すと「ピンポーン」に戻り、言い回しと秒数は形を確かめる')
+      : ng('サイネージの会社の音・設定が合わない', JSON.stringify({ sMember: sMember.status, sLong: sLong.body, sOgg: sOgg.body, sOk: sOk.body, setJ: setJ.body, soundGet: soundGet.status, badTpl: badTpl.status, badSec: badSec.status, delSound: delSound.body, jAfter }).slice(0, 700));
+
+    // よく出す案内: 同じ形（番号を空けたもの）を 3 回出すとボタンに並び、外すと並ばない
+    for (const n of ['31', '32', '33']) await call('a', '/v1/signage/interrupts', { method: 'POST', body: JSON.stringify({ text: `${n}番の方、会計へ`, screens: [sid3] }) }, 'member');
+    await call('a', '/v1/signage/interrupts', { method: 'POST', body: JSON.stringify({ text: '一度だけの案内', screens: [sid3] }) });
+    const ph = (await call('a', '/v1/signage/phrases', {}, 'member')).body?.phrases ?? [];
+    const phr = ph.find((x) => x.template === '{番号}番の方、会計へ');
+    const hide = phr ? await call('a', `/v1/signage/phrases/${phr.id}/hide`, { method: 'POST' }, 'member') : { status: 0 };
+    const ph2 = (await call('a', '/v1/signage/phrases')).body?.phrases ?? [];
+    const stored = (await owner.query(`select count(*)::int as n from signage_phrases where tenant_id = 't-alpha' and template = '一度だけの案内'`)).rows[0].n;
+    phr?.hasNumber === true && !ph.some((x) => x.template === '一度だけの案内') && stored === 0 && hide.status === 200 && !ph2.some((x) => x.id === phr.id)
+      ? ok('サイネージのよく出す案内は、番号を空けた形で 3 回出したものだけを文として残してボタンに並べ、外せる')
+      : ng('サイネージのよく出す案内が合わない', JSON.stringify({ ph, hide: hide.status, ph2, stored }).slice(0, 600));
+    await call('a', '/v1/signage/clear', { method: 'POST', body: '{}' });
+
+    // 秘書: 番号の呼び出しとかぎかっこの文はその場で出す。言い回しを変えるのは管理者だけ
+    const ask = async (message, who = 'admin') => (await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message }) }, who)).body;
+    const a1 = await ask('41番の方を呼んで', 'member');
+    const a2 = await ask('「本日は18時まで」を出して');
+    const a3 = await ask('言い回しを『〇番の方、〇へ』にして', 'member');
+    const a4 = await ask('呼び出しを全部消して', 'member');
+    const recent2 = (await call('a', '/v1/signage/interrupts')).body?.interrupts ?? [];
+    a1?.layer === 'direct' && a2?.layer === 'direct' && a3?.layer === 'direct' && /管理者/.test(a3.text ?? '') && !/しました/.test(a3.text ?? '') && a4?.layer === 'direct'
+      && recent2.some((x) => x.text === '41番の方、お越しください' && x.origin === 'secretary') && recent2.some((x) => x.text === '本日は18時まで')
+      && recent2.filter((x) => x.origin === 'secretary').every((x) => x.targets.every((t) => t.state === 'cleared'))
+      ? ok('秘書はサイネージへの番号の呼び出しとかぎかっこの文をその場で出し、消せる。言い回しを変えるのは管理者だけ')
+      : ng('秘書のサイネージの扱いが合わない', JSON.stringify({ a1, a2, a3, a4, recent2 }).slice(0, 700));
   } catch (err) {
     ng('サイネージの確認が途中で止まった', String(err));
   } finally {
     // 素材は API で消す（置き場の中身も消すため）
     await setEnabled('a', true).catch(() => undefined);
     for (const x of (await call('a', '/v1/signage/assets')).body?.assets ?? []) await call('a', `/v1/signage/assets/${x.id}`, { method: 'DELETE' });
+    await call('a', '/v1/admin/extensions/signage/settings', { method: 'PUT', body: JSON.stringify({ callTemplate: '{番号}番の方、{場所}へお越しください', callTemplateNoPlace: '{番号}番の方、お越しください', jingle: 'pinpon' }) }).catch(() => undefined);
     await setEnabled('a', false).catch(() => undefined);
     await setEnabled('b', false).catch(() => undefined);
     await clean().catch(() => undefined);

@@ -1578,3 +1578,41 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .signage-notes { padding: calc(10px * var(--space-scale)); }
 .signage-pair-body { display: flex; flex-direction: column; gap: 12px; padding: 16px; }
 .signage-pair-code { font-size: 32px; font-weight: 700; letter-spacing: .1em; text-align: center; }
+
+/* 店頭サイネージの割り込み（仕様書 第31.7.1節）。0.3 秒で重ねて出す。点滅させない */
+.signage-int { position: absolute; inset: 0; z-index: 5; overflow: hidden; background: #000; animation: signage-in .3s ease both; }
+@keyframes signage-in { from { opacity: 0; } to { opacity: 1; } }
+.signage-int-text { position: absolute; inset: 0; display: grid; place-items: center; }
+.signage-int-box { width: 90%; height: 85%; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.signage-int-body { font-family: "BIZ UDPGothic", "BIZ UDPゴシック", "Yu Gothic", "游ゴシック", "Meiryo", sans-serif; font-weight: 700; line-height: 1.25;
+  text-align: center; word-break: auto-phrase; overflow-wrap: anywhere; max-width: 100%; }
+.signage-int-num { font-size: 1.6em; line-height: 1.1; white-space: nowrap; }
+.signage-html { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #fff; }
+.signage-mute { position: fixed; right: 1.2vmin; bottom: 1.2vmin; z-index: 20; background: rgba(0, 0, 0, .45); color: #fff; border: 0; border-radius: 50%;
+  width: 5vmin; height: 5vmin; font-size: 2.6vmin; cursor: pointer; opacity: .6; }
+
+/* 店頭サイネージのスタッフのページ（仕様書 第31.9.3節） */
+.m-sig-targets { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.m-chip { border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 999px; padding: 6px 14px; font-size: 14px; cursor: pointer; }
+.m-chip.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.m-sig-buttons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
+.m-sig-button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-height: 84px; padding: 6px;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--ink); font-size: 15px; font-weight: 600; cursor: pointer; touch-action: manipulation; user-select: none; }
+.m-sig-button img { width: 100%; max-height: 64px; object-fit: contain; border-radius: 6px; }
+.m-sig-button.text { font-size: 14px; }
+.m-sig-button:active { background: var(--accent-soft); }
+.m-sig-number, .m-sig-compose { display: flex; gap: 6px; align-items: stretch; margin-bottom: 8px; }
+.m-sig-number input { flex: 1; font-size: 28px; text-align: center; }
+.m-sig-compose textarea { flex: 1; font-size: 16px; resize: none; }
+.m-sig-screens { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
+.m-sig-screen { padding: 10px; }
+.m-sig-screen .row { gap: 6px; align-items: center; }
+.signage-top { margin-bottom: -4px; }
+.signage-mobile-qr { width: 180px; height: 180px; background: #fff; padding: 8px; border-radius: 8px; align-self: flex-end; }
+.signage-volume input { flex: 1; }
+.signage-recent { padding: calc(12px * var(--space-scale)); }
+.ext-chip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; }
+.ext-signage-sources { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.ext-signage-sources code { word-break: break-all; }
+.ext-signage-template { display: flex; flex-direction: column; gap: 4px; flex: 1 1 280px; }
+.ext-signage-template input { width: 100%; }

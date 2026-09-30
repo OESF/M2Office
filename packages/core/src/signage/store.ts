@@ -5,7 +5,10 @@
  */
 
 import pg from 'pg';
-import type { SignageAsset, SignageEntry, SignageOrientation, SignageReport, SignageRotation } from '@m2office/shared';
+import type {
+  SignageAsset, SignageEntry, SignageOrientation, SignageReport, SignageRotation, SignageOrigin, SignageTargetState, SignageInterruptView,
+  SignagePhrase, SignageSource, SignageSourceMapping, SignageSound,
+} from '@m2office/shared';
 
 const iso = (v: unknown): string => (v instanceof Date ? v.toISOString() : String(v ?? ''));
 
@@ -37,7 +40,39 @@ export interface PairingRecord {
 }
 
 /** 素材を足すときの値。 */
-export type AssetInput = Omit<SignageAsset, 'hasThumbnail' | 'createdAt'> & { thumbnail: Uint8Array | null };
+export type AssetInput = Omit<SignageAsset, 'hasThumbnail' | 'createdAt' | 'isInterrupt' | 'jingle'> & { thumbnail: Uint8Array | null };
+
+/** 置き場の中の割り込み（画面ごとの出す先の 1 行と、割り込みの中身）。 */
+export interface TargetRecord {
+  interruptId: string;
+  screenId: string;
+  state: SignageTargetState;
+  seconds: number;
+  startedAt: string | null;
+  kind: 'text' | 'asset';
+  text: string | null;
+  number: string | null;
+  assetId: string | null;
+  chime: boolean;
+  jingle: string | null;
+  createdAt: string;
+}
+
+/** 割り込みを作るときの値。 */
+export interface InterruptRecord {
+  id: string;
+  kind: 'text' | 'asset';
+  text: string | null;
+  number: string | null;
+  assetId: string | null;
+  seconds: number;
+  chime: boolean;
+  jingle: string | null;
+  origin: SignageOrigin;
+  createdBy: string | null;
+  sourceId: string | null;
+  requestId: string | null;
+}
 
 interface ScreenRow {
   id: string; name: string; orientation: SignageOrientation; rotation: number; volume: number; status: 'active' | 'removed';
@@ -52,12 +87,30 @@ const toScreen = (r: ScreenRow): ScreenRecord => ({
 
 interface AssetRow {
   id: string; kind: SignageAsset['kind']; name: string; mime: SignageAsset['mime']; bytes: string | number; sha256: string;
-  width: number; height: number; duration_ms: number | null; has_thumbnail: boolean; created_at: unknown;
+  width: number; height: number; duration_ms: number | null; has_thumbnail: boolean; is_interrupt: boolean; jingle: string | null; created_at: unknown;
 }
-const ASSET_COLS = 'id, kind, name, mime, bytes, sha256, width, height, duration_ms, thumbnail is not null as has_thumbnail, created_at';
+const ASSET_COLS = 'id, kind, name, mime, bytes, sha256, width, height, duration_ms, thumbnail is not null as has_thumbnail, is_interrupt, jingle, created_at';
 const toAsset = (r: AssetRow): SignageAsset => ({
   id: r.id, kind: r.kind, name: r.name, mime: r.mime, bytes: Number(r.bytes), sha256: r.sha256, width: r.width, height: r.height,
-  durationMs: r.duration_ms, hasThumbnail: r.has_thumbnail, createdAt: iso(r.created_at),
+  durationMs: r.duration_ms, hasThumbnail: r.has_thumbnail, isInterrupt: r.is_interrupt, jingle: r.jingle, createdAt: iso(r.created_at),
+});
+
+interface TargetRow {
+  interrupt_id: string; screen_id: string; state: SignageTargetState; seconds: number; started_at: unknown;
+  kind: 'text' | 'asset'; text: string | null; number: string | null; asset_id: string | null; chime: boolean; jingle: string | null; created_at: unknown;
+}
+const TARGET_SELECT = `select t.interrupt_id, t.screen_id, t.state, t.seconds, t.started_at, i.kind, i.text, i.number, i.asset_id, i.chime, i.jingle, i.created_at
+  from signage_interrupt_targets t join signage_interrupts i on i.id = t.interrupt_id`;
+const toTarget = (r: TargetRow): TargetRecord => ({
+  interruptId: r.interrupt_id, screenId: r.screen_id, state: r.state, seconds: r.seconds, startedAt: r.started_at ? iso(r.started_at) : null,
+  kind: r.kind, text: r.text, number: r.number, assetId: r.asset_id, chime: r.chime, jingle: r.jingle, createdAt: iso(r.created_at),
+});
+
+interface SourceRow { id: string; name: string; status: 'active' | 'stopped'; mapping: SignageSourceMapping | null; last_received_at: unknown; stats: SignageSource['stats'] | Record<string, never>; created_at: unknown }
+const SOURCE_COLS = 'id, name, status, mapping, last_received_at, stats, created_at';
+const toSource = (r: SourceRow): SignageSource => ({
+  id: r.id, name: r.name, status: r.status, mapping: r.mapping, lastReceivedAt: r.last_received_at ? iso(r.last_received_at) : null,
+  stats: 'day' in r.stats ? r.stats as SignageSource['stats'] : { day: '', accepted: 0, rejected: {} }, createdAt: iso(r.created_at),
 });
 
 /** 店頭サイネージの置き場。 */
@@ -106,6 +159,50 @@ export interface SignageStore {
   replaceEntries(tenantId: string, screenId: string, entries: SignageEntry[], expectedVersion: number, by: string): Promise<number | null>;
   /** 素材が入っている画面。 */
   screensUsing(tenantId: string, assetId: string): Promise<string[]>;
+
+  /** 割り込みの素材にする・外す（音も変えられる）。 */
+  setAssetInterrupt(tenantId: string, id: string, patch: { isInterrupt?: boolean; jingle?: string | null }, by: string): Promise<SignageAsset | null>;
+  /** 割り込みを作り、出す先を足す（同じトランザクション）。 */
+  createInterrupt(tenantId: string, i: InterruptRecord, targets: { screenId: string; seconds: number }[]): Promise<void>;
+  /** 画面の、待っているか出している割り込み（受け取った順）。 */
+  activeTargets(tenantId: string, screenId: string): Promise<TargetRecord[]>;
+  /** 出し始めた（待ち → 出している）。 */
+  startTarget(tenantId: string, interruptId: string, screenId: string): Promise<boolean>;
+  /** 出し終えた（秒数が過ぎた・消された）。 */
+  endTarget(tenantId: string, interruptId: string, screenId: string, state: 'done' | 'cleared', by: string | null): Promise<boolean>;
+  /** 割り込みを消す（`interruptId` が無ければ、選んだ画面のすべて）。消した出す先を返す。 */
+  clearTargets(tenantId: string, q: { interruptId?: string; screenIds?: string[] }, by: string): Promise<{ interruptId: string; screenId: string }[]>;
+  /** 古い割り込みを片付ける（作って 2 分を過ぎた待ちは出せなかった、出し始めから秒数 ＋ 30 秒は済み）。変えた画面を返す。 */
+  settleTargets(tenantId: string, now: Date): Promise<string[]>;
+  /** 最近の割り込み（出す先つき）。 */
+  listInterrupts(tenantId: string, since: Date): Promise<SignageInterruptView[]>;
+  /** 同じ受け口の同じ `requestId` が、`since` より後にあるか。 */
+  hasRequest(tenantId: string, sourceId: string, requestId: string, since: Date): Promise<boolean>;
+  /** 文を消す（出し終えて 24 時間）・行を消す（90 日）。 */
+  purgeInterrupts(tenantId: string, now: Date): Promise<{ texts: number; rows: number }>;
+  /** 最近 14 日の、割り込みの素材ごとの回数。 */
+  assetUse(tenantId: string, since: Date): Promise<Map<string, number>>;
+
+  /** よく出す案内の回数を足す。14 日のうちに 3 回以上なら形を持つ。 */
+  bumpPhrase(tenantId: string, p: { hash: string; template: string; hasNumber: boolean; day: string; since: string }): Promise<void>;
+  listPhrases(tenantId: string, since: string): Promise<SignagePhrase[]>;
+  hidePhrase(tenantId: string, id: string): Promise<boolean>;
+  purgePhrases(tenantId: string, now: Date): Promise<number>;
+
+  listSources(tenantId: string): Promise<SignageSource[]>;
+  getSource(tenantId: string, id: string): Promise<SignageSource | null>;
+  createSource(tenantId: string, s: { id: string; name: string; hookHash: string }, by: string): Promise<void>;
+  setSourceStatus(tenantId: string, id: string, status: 'active' | 'stopped'): Promise<boolean>;
+  setSourceMapping(tenantId: string, id: string, mapping: SignageSourceMapping | null): Promise<boolean>;
+  /** 受け口の今日の数を足す（受け付けた・断った理由）。 */
+  recordSource(tenantId: string, id: string, day: string, outcome: string): Promise<void>;
+  /** 鍵のハッシュから受け口を引く（会社をまたいで引くため、会社を決める前に呼ぶ）。 */
+  findSourceByHash(hash: string): Promise<{ id: string; tenantId: string; status: 'active' | 'stopped' } | null>;
+
+  listSounds(tenantId: string): Promise<SignageSound[]>;
+  getSound(tenantId: string, id: string): Promise<(SignageSound & { data: Uint8Array }) | null>;
+  addSound(tenantId: string, s: { id: string; name: string; mime: SignageSound['mime']; data: Uint8Array; sha256: string; durationMs: number }, by: string): Promise<void>;
+  deleteSound(tenantId: string, id: string): Promise<SignageSound | null>;
 }
 
 /** PostgreSQL の店頭サイネージの置き場。 */
@@ -335,5 +432,194 @@ export class PostgresSignageStore implements SignageStore {
   async screensUsing(tenantId: string, assetId: string): Promise<string[]> {
     const rows = await this.q<{ screen_id: string }>(tenantId, `select distinct screen_id from signage_entries where tenant_id = $1 and asset_id = $2`, [tenantId, assetId]);
     return rows.map((r) => r.screen_id);
+  }
+
+  async setAssetInterrupt(tenantId: string, id: string, patch: { isInterrupt?: boolean; jingle?: string | null }, by: string): Promise<SignageAsset | null> {
+    const rows = await this.q<AssetRow>(tenantId, `update signage_assets set is_interrupt = coalesce($3, is_interrupt),
+      jingle = case when $4 then $5 else jingle end, updated_by = $6, updated_at = now()
+      where tenant_id = $1 and id = $2 returning ${ASSET_COLS}`,
+    [tenantId, id, patch.isInterrupt ?? null, patch.jingle !== undefined, patch.jingle ?? null, by]);
+    return rows[0] ? toAsset(rows[0]) : null;
+  }
+
+  async createInterrupt(tenantId: string, i: InterruptRecord, targets: { screenId: string; seconds: number }[]): Promise<void> {
+    await this.tx(tenantId, async (c) => {
+      await c.query(`insert into signage_interrupts (id, tenant_id, kind, text, number, asset_id, seconds, chime, jingle, origin, created_by, source_id, request_id)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+      [i.id, tenantId, i.kind, i.text, i.number, i.assetId, i.seconds, i.chime, i.jingle, i.origin, i.createdBy, i.sourceId, i.requestId]);
+      for (const t of targets) {
+        await c.query(`insert into signage_interrupt_targets (tenant_id, interrupt_id, screen_id, seconds) values ($1, $2, $3, $4)`, [tenantId, i.id, t.screenId, t.seconds]);
+      }
+    });
+  }
+
+  async activeTargets(tenantId: string, screenId: string): Promise<TargetRecord[]> {
+    const rows = await this.q<TargetRow>(tenantId, `${TARGET_SELECT} where t.tenant_id = $1 and t.screen_id = $2 and t.state in ('waiting', 'showing')
+      order by i.created_at, i.id`, [tenantId, screenId]);
+    return rows.map(toTarget);
+  }
+
+  async startTarget(tenantId: string, interruptId: string, screenId: string): Promise<boolean> {
+    const rows = await this.q<{ interrupt_id: string }>(tenantId, `update signage_interrupt_targets set state = 'showing', started_at = now()
+      where tenant_id = $1 and interrupt_id = $2 and screen_id = $3 and state = 'waiting' returning interrupt_id`, [tenantId, interruptId, screenId]);
+    return rows.length > 0;
+  }
+
+  async endTarget(tenantId: string, interruptId: string, screenId: string, state: 'done' | 'cleared', by: string | null): Promise<boolean> {
+    const rows = await this.q<{ interrupt_id: string }>(tenantId, `update signage_interrupt_targets set state = $4, ended_at = now(), cleared_by = $5
+      where tenant_id = $1 and interrupt_id = $2 and screen_id = $3 and state in ('waiting', 'showing') returning interrupt_id`, [tenantId, interruptId, screenId, state, by]);
+    return rows.length > 0;
+  }
+
+  async clearTargets(tenantId: string, q: { interruptId?: string; screenIds?: string[] }, by: string): Promise<{ interruptId: string; screenId: string }[]> {
+    const params: unknown[] = [tenantId, by];
+    let where = `tenant_id = $1 and state in ('waiting', 'showing')`;
+    if (q.interruptId) { params.push(q.interruptId); where += ` and interrupt_id = $${params.length}`; }
+    if (q.screenIds) { params.push(q.screenIds); where += ` and screen_id = any($${params.length})`; }
+    const rows = await this.q<{ interrupt_id: string; screen_id: string }>(tenantId, `update signage_interrupt_targets set state = 'cleared', ended_at = now(), cleared_by = $2
+      where ${where} returning interrupt_id, screen_id`, params);
+    return rows.map((r) => ({ interruptId: r.interrupt_id, screenId: r.screen_id }));
+  }
+
+  async settleTargets(tenantId: string, now: Date): Promise<string[]> {
+    return this.tx(tenantId, async (c) => {
+      const expired = await c.query<{ screen_id: string }>(`update signage_interrupt_targets t set state = 'expired', ended_at = $2
+        from signage_interrupts i where i.id = t.interrupt_id and t.tenant_id = $1 and t.state = 'waiting' and i.created_at < $2::timestamptz - interval '2 minutes'
+        returning t.screen_id`, [tenantId, now]);
+      const done = await c.query<{ screen_id: string }>(`update signage_interrupt_targets set state = 'done', ended_at = $2
+        where tenant_id = $1 and state = 'showing' and started_at + make_interval(secs => seconds + 30) < $2 returning screen_id`, [tenantId, now]);
+      return [...new Set([...expired.rows, ...done.rows].map((r) => r.screen_id))];
+    });
+  }
+
+  async listInterrupts(tenantId: string, since: Date): Promise<SignageInterruptView[]> {
+    const rows = await this.q<{ id: string; kind: 'text' | 'asset'; text: string | null; asset_id: string | null; origin: SignageOrigin; seconds: number; created_at: unknown; targets: { screenId: string; state: SignageTargetState; startedAt: string | null; endedAt: string | null }[] }>(tenantId,
+      `select i.id, i.kind, i.text, i.asset_id, i.origin, i.seconds, i.created_at,
+        coalesce(json_agg(json_build_object('screenId', t.screen_id, 'state', t.state, 'startedAt', t.started_at, 'endedAt', t.ended_at) order by t.screen_id)
+          filter (where t.screen_id is not null), '[]') as targets
+       from signage_interrupts i left join signage_interrupt_targets t on t.interrupt_id = i.id
+       where i.tenant_id = $1 and i.created_at >= $2 group by i.id order by i.created_at desc limit 200`, [tenantId, since]);
+    return rows.map((r) => ({ id: r.id, kind: r.kind, text: r.text, assetId: r.asset_id, origin: r.origin, seconds: r.seconds, createdAt: iso(r.created_at), targets: r.targets }));
+  }
+
+  async hasRequest(tenantId: string, sourceId: string, requestId: string, since: Date): Promise<boolean> {
+    const rows = await this.q<{ id: string }>(tenantId, `select id from signage_interrupts where tenant_id = $1 and source_id = $2 and request_id = $3 and created_at >= $4 limit 1`,
+      [tenantId, sourceId, requestId, since]);
+    return rows.length > 0;
+  }
+
+  async purgeInterrupts(tenantId: string, now: Date): Promise<{ texts: number; rows: number }> {
+    return this.tx(tenantId, async (c) => {
+      // 文と番号は、どの画面でも出し終えて（済み・消した・出せなかった）から 24 時間で消す（第31.13節）
+      const texts = (await c.query(`update signage_interrupts i set text = null, number = null, text_purged_at = $2
+        where i.tenant_id = $1 and i.text_purged_at is null and (i.text is not null or i.number is not null)
+          and not exists (select 1 from signage_interrupt_targets t where t.interrupt_id = i.id and (t.state in ('waiting', 'showing') or t.ended_at >= $2::timestamptz - interval '24 hours'))
+          and i.created_at < $2::timestamptz - interval '24 hours'`, [tenantId, now])).rowCount ?? 0;
+      const rows = (await c.query(`delete from signage_interrupts where tenant_id = $1 and created_at < $2::timestamptz - interval '90 days'`, [tenantId, now])).rowCount ?? 0;
+      return { texts, rows };
+    });
+  }
+
+  async assetUse(tenantId: string, since: Date): Promise<Map<string, number>> {
+    const rows = await this.q<{ asset_id: string; n: string }>(tenantId, `select asset_id, count(*) as n from signage_interrupts
+      where tenant_id = $1 and kind = 'asset' and asset_id is not null and created_at >= $2 group by asset_id`, [tenantId, since]);
+    return new Map(rows.map((r) => [r.asset_id, Number(r.n)]));
+  }
+
+  async bumpPhrase(tenantId: string, p: { hash: string; template: string; hasNumber: boolean; day: string; since: string }): Promise<void> {
+    await this.tx(tenantId, async (c) => {
+      const cur = await c.query<{ id: string; daily_counts: Record<string, number> }>(`select id, daily_counts from signage_phrases where tenant_id = $1 and phrase_hash = $2 for update`, [tenantId, p.hash]);
+      const counts: Record<string, number> = {};
+      for (const [d, n] of Object.entries(cur.rows[0]?.daily_counts ?? {})) if (d >= p.since) counts[d] = n;
+      counts[p.day] = (counts[p.day] ?? 0) + 1;
+      const total = Object.values(counts).reduce((a, n) => a + n, 0);
+      // 14 日のうちに 3 回以上使った形だけを文として持つ（一度しか出さない名前入りの文を残さない。第31.9.3節）
+      const template = total >= 3 ? p.template : null;
+      if (cur.rows[0]) {
+        await c.query(`update signage_phrases set daily_counts = $3, last_used_at = now(), template = coalesce($4, template) where tenant_id = $1 and id = $2`,
+          [tenantId, cur.rows[0].id, JSON.stringify(counts), template]);
+      } else {
+        await c.query(`insert into signage_phrases (id, tenant_id, phrase_hash, template, has_number, daily_counts) values (gen_random_uuid()::text, $1, $2, $3, $4, $5)`,
+          [tenantId, p.hash, template, p.hasNumber, JSON.stringify(counts)]);
+      }
+    });
+  }
+
+  async listPhrases(tenantId: string, since: string): Promise<SignagePhrase[]> {
+    const rows = await this.q<{ id: string; template: string; has_number: boolean; daily_counts: Record<string, number> }>(tenantId,
+      `select id, template, has_number, daily_counts from signage_phrases where tenant_id = $1 and template is not null and not hidden`, [tenantId]);
+    return rows.map((r) => ({ id: r.id, template: r.template, hasNumber: r.has_number, count: Object.entries(r.daily_counts).filter(([d]) => d >= since).reduce((a, [, n]) => a + n, 0) }))
+      .filter((p) => p.count > 0).sort((a, b) => b.count - a.count);
+  }
+
+  async hidePhrase(tenantId: string, id: string): Promise<boolean> {
+    // 外した形は回数を 0 に戻す（また 3 回使うまで出さない）
+    const rows = await this.q<{ id: string }>(tenantId, `update signage_phrases set hidden = false, template = null, daily_counts = '{}'::jsonb where tenant_id = $1 and id = $2 returning id`, [tenantId, id]);
+    return rows.length > 0;
+  }
+
+  async purgePhrases(tenantId: string, now: Date): Promise<number> {
+    return (await this.tx(tenantId, (c) => c.query(`delete from signage_phrases where tenant_id = $1 and last_used_at < $2::timestamptz - interval '90 days'`, [tenantId, now]))).rowCount ?? 0;
+  }
+
+  async listSources(tenantId: string): Promise<SignageSource[]> {
+    return (await this.q<SourceRow>(tenantId, `select ${SOURCE_COLS} from signage_sources where tenant_id = $1 order by created_at`, [tenantId])).map(toSource);
+  }
+
+  async getSource(tenantId: string, id: string): Promise<SignageSource | null> {
+    const rows = await this.q<SourceRow>(tenantId, `select ${SOURCE_COLS} from signage_sources where tenant_id = $1 and id = $2`, [tenantId, id]);
+    return rows[0] ? toSource(rows[0]) : null;
+  }
+
+  async createSource(tenantId: string, s: { id: string; name: string; hookHash: string }, by: string): Promise<void> {
+    await this.q(tenantId, `insert into signage_sources (id, tenant_id, name, hook_hash, created_by) values ($1, $2, $3, $4, $5)`, [s.id, tenantId, s.name, s.hookHash, by]);
+  }
+
+  async setSourceStatus(tenantId: string, id: string, status: 'active' | 'stopped'): Promise<boolean> {
+    return (await this.q<{ id: string }>(tenantId, `update signage_sources set status = $3 where tenant_id = $1 and id = $2 returning id`, [tenantId, id, status])).length > 0;
+  }
+
+  async setSourceMapping(tenantId: string, id: string, mapping: SignageSourceMapping | null): Promise<boolean> {
+    return (await this.q<{ id: string }>(tenantId, `update signage_sources set mapping = $3 where tenant_id = $1 and id = $2 returning id`, [tenantId, id, mapping ? JSON.stringify(mapping) : null])).length > 0;
+  }
+
+  async recordSource(tenantId: string, id: string, day: string, outcome: string): Promise<void> {
+    await this.tx(tenantId, async (c) => {
+      const cur = (await c.query<{ stats: SignageSource['stats'] | Record<string, never> }>(`select stats from signage_sources where tenant_id = $1 and id = $2 for update`, [tenantId, id])).rows[0];
+      if (!cur) return;
+      const prev = 'day' in cur.stats && cur.stats.day === day ? cur.stats as SignageSource['stats'] : { day, accepted: 0, rejected: {} };
+      const next = outcome === 'accepted' ? { ...prev, accepted: prev.accepted + 1 } : { ...prev, rejected: { ...prev.rejected, [outcome]: (prev.rejected[outcome] ?? 0) + 1 } };
+      await c.query(`update signage_sources set stats = $3, last_received_at = now() where tenant_id = $1 and id = $2`, [tenantId, id, JSON.stringify(next)]);
+    });
+  }
+
+  async findSourceByHash(hash: string): Promise<{ id: string; tenantId: string; status: 'active' | 'stopped' } | null> {
+    const r = await this.pool.query<{ id: string; tenant_id: string; status: 'active' | 'stopped' }>('select * from m2o_signage_source($1)', [hash]);
+    return r.rows[0] ? { id: r.rows[0].id, tenantId: r.rows[0].tenant_id, status: r.rows[0].status } : null;
+  }
+
+  async listSounds(tenantId: string): Promise<SignageSound[]> {
+    const rows = await this.q<{ id: string; name: string; mime: SignageSound['mime']; n: number; duration_ms: number; created_at: unknown }>(tenantId,
+      `select id, name, mime, octet_length(bytes) as n, duration_ms, created_at from signage_sounds where tenant_id = $1 order by created_at`, [tenantId]);
+    return rows.map((r) => ({ id: r.id, name: r.name, mime: r.mime, bytes: Number(r.n), durationMs: r.duration_ms, createdAt: iso(r.created_at) }));
+  }
+
+  async getSound(tenantId: string, id: string): Promise<(SignageSound & { data: Uint8Array }) | null> {
+    const rows = await this.q<{ id: string; name: string; mime: SignageSound['mime']; bytes: Buffer; duration_ms: number; created_at: unknown }>(tenantId,
+      `select id, name, mime, bytes, duration_ms, created_at from signage_sounds where tenant_id = $1 and id = $2`, [tenantId, id]);
+    const r = rows[0];
+    return r ? { id: r.id, name: r.name, mime: r.mime, bytes: r.bytes.length, durationMs: r.duration_ms, createdAt: iso(r.created_at), data: new Uint8Array(r.bytes) } : null;
+  }
+
+  async addSound(tenantId: string, s: { id: string; name: string; mime: SignageSound['mime']; data: Uint8Array; sha256: string; durationMs: number }, by: string): Promise<void> {
+    await this.q(tenantId, `insert into signage_sounds (id, tenant_id, name, mime, bytes, sha256, duration_ms, created_by) values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [s.id, tenantId, s.name, s.mime, Buffer.from(s.data), s.sha256, s.durationMs, by]);
+  }
+
+  async deleteSound(tenantId: string, id: string): Promise<SignageSound | null> {
+    const rows = await this.q<{ id: string; name: string; mime: SignageSound['mime']; n: number; duration_ms: number; created_at: unknown }>(tenantId,
+      `delete from signage_sounds where tenant_id = $1 and id = $2 returning id, name, mime, octet_length(bytes) as n, duration_ms, created_at`, [tenantId, id]);
+    const r = rows[0];
+    return r ? { id: r.id, name: r.name, mime: r.mime, bytes: Number(r.n), durationMs: r.duration_ms, createdAt: iso(r.created_at) } : null;
   }
 }
