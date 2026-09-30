@@ -55,7 +55,8 @@ src/hr/          人事・給与（内蔵の拡張。第30章）。段 1: 置き
                  段 3: 社会保険の判定（social.ts。適用の決まり law/insurance-2026.ts・等級表の随時改定の特例）・届出と標準報酬月額の反映（social-service.ts）・
                  届出の記録（social-store.ts）。
                  段 4: 年度更新の計算（labor-insurance.ts。労災保険率表 law/workers-comp-2024.ts）・処理（labor-service.ts）・置き場（labor-store.ts）。
-                 段 5: シフトの案づくりと点検（shift-plan.ts）・処理（shift-service.ts）・置き場（shift-store.ts）・変形労働時間制の集計（attendance.ts の variableTotals）
+                 段 5: シフトの案づくりと点検（shift-plan.ts）・処理（shift-service.ts）・置き場（shift-store.ts）・変形労働時間制の集計（attendance.ts の variableTotals）。
+                 帳簿をまとめて ZIP で書き出す（books-export.ts。解約のときに渡す）
 src/secretary/   秘書。3 層の応答振り分け、定時実行の確認・停止・再開・今すぐ実行（推論なし。第10.9.8節）、
                  社内のお知らせを出す・取り下げる・並べる・済んだにする（notices.ts。第10.15節）
                  在庫の依頼の見分けと、在庫の数の問いへのその場の答え（inventory.ts。第29.15節）

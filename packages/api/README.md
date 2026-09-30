@@ -219,6 +219,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/me/hr/yea` ／ `PUT /v1/me/hr/yea` | 本人の年末調整（`year`。申告・対象か・直せるか・不備・結果）／ 申告を残す・出す（`year`・`data`・`submit`。出すと人事区画の人に知らせる。確かめた後は 400） |
 | `POST /v1/me/hr/yea/certificate` ／ `GET /v1/me/hr/yea/withholding.pdf` | 控除証明書か前の勤め先の源泉徴収票を読む（`file`。申告には入れず、ファイルも残さない）／ 自分の源泉徴収票（確定した結果・明細の同意がある人） |
 | `GET /v1/hr/roster` | 労働者名簿を書き出す（`format=csv` か `xlsx`。事業主本人は載せない。監査ログに残す） |
+| `POST /v1/hr/books/export` | 管理者: 人事・給与の帳簿を ZIP でまとめて書き出す（解約のときに渡す。第30.17節・ADR-0054）。労働者名簿・賃金台帳・出勤簿・年次有給休暇管理簿・源泉徴収の記録と源泉徴収票・年末調整の申告・社会保険の届出の記録・年度更新。ファイルの数を `X-Books-Files` に返し、監査ログに 1 つ残す |
 | `GET /v1/inventory/bookings` | 今日（日本時間）から先の予約と取り置き・予約の日を過ぎた取り置き（`overdue`）・使う品目の分からない予約（`unmapped`）。予約との引き当てを切っている会社は 403（第29.13節） |
 | `POST /v1/inventory/bookings` | 取り置く（`itemId`・`qty`・`startsAt`・任意の `externalId`・`menu`）。使える数から引く |
 | `POST /v1/inventory/bookings/:id/use` ／ `cancel` | 予約の人が来た（取り置きを使用の記録にする）／ 取り消す（使える数に戻す） |

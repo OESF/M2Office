@@ -37,6 +37,7 @@ export { PostgresLaborStore, type LaborStore, type LaborRecord } from './labor-s
 export { PostgresShiftStore, type ShiftStore } from './shift-store.js';
 export { ShiftService, type ShiftServiceDeps } from './shift-service.js';
 export { generatePlan, checkPlan, variableCap, needsOn, patternMinutes, MAX_STREAK, type PlanInput, type PlanMember } from './shift-plan.js';
+export { HrBooksExport, type BooksExportDeps, type BooksExportSummary } from './books-export.js';
 export { LaborInsuranceService, type LaborServiceDeps } from './labor-service.js';
 export { laborMonths, laborCalc, premium, installments, perMille, thousands, fiscalMonths, laborWage, type LaborInput, type LaborSlip } from './labor-insurance.js';
 export { PostgresSocialStore, type SocialStore, type HrFilingRecord } from './social-store.js';

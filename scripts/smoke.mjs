@@ -3828,6 +3828,17 @@ console.log('\n■ 61. 人事・給与（内蔵の拡張。第30章、段 1: 台
         && shPub.status === 200 && shPub.body?.plan?.status === 'published' && shAgain.status === 400 && shMember.status === 403 && Array.isArray(shSelf.periods) && shSelf.periods.length === 0
         ? ok('シフトは要る人数を総枠の内で割り当てた案を作り（足りない枠を示す）、直して公開でき、公開した期間は作り直さず、人事区画の外には見せない')
         : ng('シフトが合わない', JSON.stringify({ inPeriod: shMine.every((x) => x.date >= sh0.period.start && x.date <= sh0.period.end), period: sh0.period, first: shMine[0], cellGone: !(shCell.body?.shifts ?? []).some((x) => x.employeeId === shId && x.date === offDay && x.patternId), cell: shCell.status, cellErr: shCell.body?.error, pub: shPub.status, plan: shPub.body?.plan, again: shAgain.status, m: shMember.status, self: shSelf.periods?.length }).slice(0, 900));
+
+      // 解約のときに渡す帳簿（第30.17節・ADR-0054）。管理者が ZIP でまとめて書き出す
+      const books = await raw('/v1/hr/books/export', { method: 'POST' });
+      const booksMember = await raw('/v1/hr/books/export', { method: 'POST' }, 'member');
+      const { default: JSZipBooks } = await import('jszip');
+      const bookNames = books.status === 200 ? Object.keys((await JSZipBooks.loadAsync(new Uint8Array(await books.arrayBuffer()))).files) : [];
+      books.status === 200 && booksMember.status === 403 && bookNames.includes('01_労働者名簿.xlsx') && bookNames.includes('02_賃金台帳/賃金台帳_2026年.xlsx')
+        && bookNames.some((n) => n.startsWith('03_出勤簿/')) && bookNames.includes('04_年次有給休暇管理簿.xlsx') && bookNames.some((n) => n.startsWith('06_源泉徴収票/2026年分/') && n.endsWith('.pdf'))
+        && bookNames.includes('08_社会保険の届出の下書き.xlsx') && bookNames.includes('はじめにお読みください.txt')
+        ? ok('帳簿は管理者が ZIP でまとめて書き出せ（労働者名簿・賃金台帳・出勤簿・有給の管理簿・源泉徴収票・届出の記録）、人事区画の外の人は書き出せない')
+        : ng('帳簿のまとめての書き出しが合わない', JSON.stringify({ status: books.status, member: booksMember.status, names: bookNames.slice(0, 30) }).slice(0, 900));
     } else {
       conf.status === 400 && (conf.body?.blockers ?? []).some((x) => x.code === 'unverified')
         ? ok('本番の環境では、監修前の法令の表で計算した回は確定できない') : ng('監修前でも確定できた', JSON.stringify(conf.body));

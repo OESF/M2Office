@@ -15,7 +15,7 @@ import {
   TenantAiResolver, platformAi, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID,
   defaultGeminiModels, ConnectionCredentials, type ConnectionAuthProvider,
   CardService, PostgresContactStore, cardsAccess, type ContactStore, NoticeService, PostgresNoticeStore,
-  InventoryService, InventoryWatch, InventoryBookings, PostgresInventoryStore, inventoryAccess, HrService, PostgresHrStore, hrAccess, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore,
+  InventoryService, InventoryWatch, InventoryBookings, PostgresInventoryStore, inventoryAccess, HrService, PostgresHrStore, hrAccess, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
   type SecretBox, type GeminiModels,
   type FileStore, type TenantExtensions, type HelpArticle, type LlmProvider, type Logger, type Repository, type WorkspaceConnector,
 } from '@m2office/core';
@@ -118,6 +118,8 @@ export interface AppDeps {
     labor: LaborInsuranceService;
     /** シフト（第30.6.2節）。 */
     shifts: ShiftService;
+    /** 帳簿をまとめて書き出す（解約のときに渡す。第30.17節・ADR-0054）。 */
+    books: HrBooksExport;
     access(tenantId: string, userId: string): Promise<HrSettings | null>;
   };
 }
@@ -241,6 +243,11 @@ export function buildDeps(): AppDeps {
     store: new PostgresSocialStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
     payrollStore, hrStore: hrService.deps.store, repo, law: LAW_BOOK,
   });
+  const labor = new LaborInsuranceService({ store: laborStore, payrollStore, hrStore: hrService.deps.store, repo, law: LAW_BOOK });
+  const yea = new YearEndService({
+    store: new PostgresYeaStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+    payrollStore, hrStore: hrService.deps.store, repo, law: LAW_BOOK, llm: (tenantId) => ai.llmFor(tenantId), allowUnverified: debug !== null,
+  });
   const payroll = new PayrollService({
     store: payrollStore,
     hrStore: hrService.deps.store, attendance, repo, law: LAW_BOOK, llm: (tenantId) => ai.llmFor(tenantId), allowUnverified: debug !== null,
@@ -328,11 +335,8 @@ export function buildDeps(): AppDeps {
       payroll, calendar: laborCalendar,
       social,
       shifts: new ShiftService({ store: shiftStore, hrStore: hrService.deps.store, repo }),
-      labor: new LaborInsuranceService({ store: laborStore, payrollStore, hrStore: hrService.deps.store, repo, law: LAW_BOOK }),
-      yea: new YearEndService({
-        store: new PostgresYeaStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
-        payrollStore, hrStore: hrService.deps.store, repo, law: LAW_BOOK, llm: (tenantId) => ai.llmFor(tenantId), allowUnverified: debug !== null,
-      }),
+      labor, yea,
+      books: new HrBooksExport({ service: hrService, attendance, payroll, yea, social: social.deps.store, labor, repo }),
     },
   };
 }

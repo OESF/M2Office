@@ -387,9 +387,10 @@ export class PayrollService {
   /**
    * 賃金台帳（年の確定した月の給与。法定の記載事項）。
    *
+   * @param audit 監査ログに残すか（帳簿をまとめて書き出すときは `false`）
    * @returns 表計算に書き出す列と行
    */
-  async ledger(tenantId: string, userId: string, year: number): Promise<{ columns: string[]; rows: (string | number | null)[][] }> {
+  async ledger(tenantId: string, userId: string, year: number, audit = true): Promise<{ columns: string[]; rows: (string | number | null)[][] }> {
     const slips = await this.deps.store.listYearSlips(tenantId, year);
     const payLabels: string[] = [];
     const dedLabels: string[] = [];
@@ -408,7 +409,7 @@ export class PayrollService {
         a.workDays ?? null, h(a.workMinutes), h(a.overtimeMinutes), h(a.holidayMinutes), h(a.nightMinutes),
         ...payLabels.map((l) => amount('pay', l)), sl.gross, ...dedLabels.map((l) => amount('deduct', l)), sl.deductions, sl.net];
     });
-    await this.audit(tenantId, userId, 'hr.payroll.ledger', String(year), { rows: rows.length });
+    if (audit) await this.audit(tenantId, userId, 'hr.payroll.ledger', String(year), { rows: rows.length });
     return { columns, rows };
   }
 

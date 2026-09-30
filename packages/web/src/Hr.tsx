@@ -632,6 +632,8 @@ function EmployeeList({ onOpen }: { onOpen: (id: string) => void }) {
   const [showLeft, setShowLeft] = useState(false);
   const [adding, setAdding] = useState(false);
   const [imported, setImported] = useState<HrImportResult | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [booksNote, setBooksNote] = useState<string | null>(null);
   const file = useRef<HTMLInputElement>(null);
   const load = useCallback(() => {
     api.hr.list().then(setData).catch((e) => setError(describeError(e, '読み込めませんでした')));
@@ -658,8 +660,13 @@ function EmployeeList({ onOpen }: { onOpen: (id: string) => void }) {
         <button className="btn ghost" onClick={() => file.current?.click()}>取り込む</button>
         <input ref={file} type="file" accept=".csv,.xlsx" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void importFile(f); }} />
         <button className="btn ghost" onClick={() => void api.hr.roster('xlsx').catch((e) => setError(describeError(e, '書き出せませんでした')))}>労働者名簿</button>
+        <button className="btn ghost" disabled={exporting} onClick={() => {
+          setExporting(true); setError(null); setBooksNote(null);
+          void api.hr.books().then((n) => setBooksNote(`帳簿を ${n} ファイルにまとめて書き出しました`)).catch((e) => setError(describeError(e, '書き出せませんでした'))).finally(() => setExporting(false));
+        }}>{exporting ? 'まとめています…' : '帳簿をまとめて書き出す'}</button>
       </div>
       {error && <p className="error">{error}</p>}
+      {booksNote && <p className="ok-msg small">{booksNote}</p>}
       {imported && (
         <div className="card hr-panel">
           <p>{imported.created} 人を足し、{imported.updated} 人を直しました{imported.skipped.length ? `。${imported.skipped.length} 行は取り込めませんでした` : ''}。</p>

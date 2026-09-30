@@ -174,6 +174,7 @@ const ACTION_LABELS: Record<string, string> = {
   'hr.shift.generate': 'シフトの案を作った',
   'hr.shift.set': 'シフトを直した',
   'hr.shift.publish': 'シフトを公開した',
+  'hr.books.export': '人事・給与の帳簿をまとめて書き出した',
   'hr.labor.save': '年度更新の足りない月・申告済の概算保険料を入れた',
   'hr.labor.report': '労働保険の年度更新の下書きを作った',
   'hr.payroll.bonus-report': '賞与支払届の下書きを出した',

@@ -112,7 +112,23 @@ export class LaborInsuranceService {
   async report(tenantId: string, userId: string, year: number): Promise<FilingSheet | { error: string }> {
     const v = await this.view(tenantId, year);
     if (!v.result) return { error: v.error ?? '計算できません' };
-    const r = v.result;
+    const sheet = await this.sheetOf(tenantId, v);
+    await this.deps.store.file(tenantId, year, v.data, v.result, userId);
+    await this.audit(tenantId, userId, 'hr.labor.report', String(year), { installments: v.result.installments.length });
+    return sheet;
+  }
+
+  /**
+   * 年度更新の表（集計表と申告書に書く額）を、結果を残さずに作る（帳簿をまとめて書き出すときに使う）。計算できない年は `null`。
+   */
+  async bookSheet(tenantId: string, year: number): Promise<FilingSheet | null> {
+    const v = await this.view(tenantId, year);
+    return v.result ? this.sheetOf(tenantId, v) : null;
+  }
+
+  private async sheetOf(tenantId: string, v: LaborInsuranceView): Promise<FilingSheet> {
+    const r = v.result!;
+    const year = v.year;
     const settings = (await this.deps.repo.getTenantSettings(tenantId)).hr;
     const rows: (string | number | null)[][] = [];
     for (const m of v.months) {
@@ -141,8 +157,6 @@ export class LaborInsuranceService {
     put('⑱ 申告済概算保険料額', r.declaredEstimate === null ? '（前の年の申告書から書き入れる）' : yen(r.declaredEstimate));
     put('⑳ 差引額（充当額・還付額・不足額）', r.declaredEstimate === null ? '' : `${yen(Math.max(0, r.surplus - r.refund))}・${yen(r.refund)}・${yen(r.shortage)}`);
     for (const [i, p] of r.installments.entries()) put(`㉒ 第 ${i + 1} 期の納付額（納期限 ${p.due}）`, yen(p.amount));
-    await this.deps.store.file(tenantId, year, v.data, r, userId);
-    await this.audit(tenantId, userId, 'hr.labor.report', String(year), { installments: r.installments.length });
     return { title: `労働保険の年度更新（下書き）${year}`, columns: ['区分', '月', '労災保険の人数', '労災保険の賃金', '雇用保険の人数', '雇用保険の賃金', '出どころ・値'], rows, applied: 0 };
   }
 

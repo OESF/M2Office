@@ -689,6 +689,19 @@ export function hrRoute(deps: AppDeps) {
     return c.json({ users: users.map((u) => ({ id: u.id, name: u.displayName, email: u.email })) });
   });
 
+  /**
+   * 帳簿をまとめて ZIP で書き出す（解約のときに渡す。第30.17節・ADR-0054）。管理者だけ。まとめて書き出したことを監査ログに残す。
+   */
+  app.post('/books/export', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    if (!user.roles.includes('admin')) return c.json({ error: '帳簿をまとめて書き出すのは管理者です' }, 403);
+    const r = await deps.hr.books.build(tenant.id, user.id);
+    c.header('Content-Type', 'application/zip');
+    c.header('Content-Disposition', `attachment; filename="${r.filename}"`);
+    c.header('X-Books-Files', String(r.summary.files));
+    return c.body(r.bytes as unknown as ArrayBuffer);
+  });
+
   /** 労働者名簿を CSV・Excel で書き出す（監査ログに残す）。 */
   app.get('/roster', async (c) => {
     const { tenant, user } = c.get('ctx');

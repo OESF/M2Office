@@ -283,8 +283,12 @@ export class AttendanceService {
     return (await this.deps.store.listCloses(tenantId)).map(({ totals: _t, ...c }) => c);
   }
 
-  /** 出勤簿の表（期間の日ごと。第30.6.1節）。書き出したことを監査ログに残す。 */
-  async attendanceBook(tenantId: string, userId: string, period: AttPeriod): Promise<{ columns: string[]; rows: (string | number | null)[][] }> {
+  /**
+   * 出勤簿の表（期間の日ごと。第30.6.1節）。書き出したことを監査ログに残す。
+   *
+   * @param audit 監査ログに残すか（帳簿をまとめて書き出すときは、まとめて 1 つ残すため `false`）
+   */
+  async attendanceBook(tenantId: string, userId: string, period: AttPeriod, audit = true): Promise<{ columns: string[]; rows: (string | number | null)[][] }> {
     const employees = (await this.deps.hrStore.listEmployees(tenantId))
       .filter((e) => e.category !== 'owner' && (!e.hiredOn || e.hiredOn <= period.end) && (!e.leftOn || e.leftOn >= period.start));
     const hm = (m: number) => (m ? `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}` : '');
@@ -297,7 +301,7 @@ export class AttendanceService {
           hm(d.breakMinutes), hm(d.workMinutes), hm(d.overtimeMinutes), hm(d.nightMinutes), hm(d.holidayMinutes), d.leaveDays || '', d.issues.join('・')]);
       }
     }
-    await this.audit(tenantId, userId, 'hr.export', 'hr', `${period.start}..${period.end}`, { kind: 'attendance-book', rows: rows.length });
+    if (audit) await this.audit(tenantId, userId, 'hr.export', 'hr', `${period.start}..${period.end}`, { kind: 'attendance-book', rows: rows.length });
     return { columns: ['社員番号', '氏名', '日付', '曜日', '区分', '出勤', '退勤', '休憩', '労働時間', '法定外（日）', '深夜', '法定休日の労働', '有給', '点検'], rows };
   }
 
@@ -437,8 +441,12 @@ export class AttendanceService {
     return rate < 0.8 ? Math.round(rate * 100) / 100 : null;
   }
 
-  /** 年次有給休暇の管理簿の表（第30.7節）。書き出したことを監査ログに残す。 */
-  async leaveRegister(tenantId: string, userId: string): Promise<{ columns: string[]; rows: (string | number | null)[][] }> {
+  /**
+   * 年次有給休暇の管理簿の表（第30.7節）。書き出したことを監査ログに残す。
+   *
+   * @param audit 監査ログに残すか（帳簿をまとめて書き出すときは `false`）
+   */
+  async leaveRegister(tenantId: string, userId: string, audit = true): Promise<{ columns: string[]; rows: (string | number | null)[][] }> {
     const employees = (await this.deps.hrStore.listEmployees(tenantId)).filter((e) => e.category !== 'owner');
     const rows: (string | number | null)[][] = [];
     for (const e of employees) {
@@ -449,7 +457,7 @@ export class AttendanceService {
         rows.push([e.code, e.name, g.grantedOn, g.days, g.used, g.left, g.expiresOn, dates.join('、')]);
       }
     }
-    await this.audit(tenantId, userId, 'hr.export', 'hr', 'leave-register', { kind: 'leave-register', rows: rows.length });
+    if (audit) await this.audit(tenantId, userId, 'hr.export', 'hr', 'leave-register', { kind: 'leave-register', rows: rows.length });
     return { columns: ['社員番号', '氏名', '基準日（付与の日）', '付与日数', '使った日数', '残り', '時効', '1 年の間に取った日'], rows };
   }
 

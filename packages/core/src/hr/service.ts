@@ -609,8 +609,12 @@ export class HrService {
     return out;
   }
 
-  /** 労働者名簿（法定の記載事項。第30.5節）の表。書き出したことを監査ログに残す。 */
-  async rosterRows(tenantId: string, userId: string): Promise<{ columns: string[]; rows: (string | number | null)[][] }> {
+  /**
+   * 労働者名簿（法定の記載事項。第30.5節）の表。書き出したことを監査ログに残す。
+   *
+   * @param audit 監査ログに残すか（帳簿をまとめて書き出すときは `false`）
+   */
+  async rosterRows(tenantId: string, userId: string, audit = true): Promise<{ columns: string[]; rows: (string | number | null)[][] }> {
     const [employees, current] = await Promise.all([this.deps.store.listEmployees(tenantId), this.deps.store.currentTerms(tenantId, jstToday())]);
     const columns = ['社員番号', '氏名', 'ふりがな', '生年月日', '性別', '住所', '従事する業務の種類', '雇入れの年月日', '退職の年月日', '退職の事由', '雇用形態', '所属'];
     const label = <T extends string>(list: { id: T; label: string }[], id: T) => list.find((x) => x.id === id)?.label ?? id;
@@ -620,7 +624,7 @@ export class HrService {
       e.code, e.name, e.kana, e.birthDate ?? '', gender[e.gender], e.address, current.get(e.id)?.work ?? '', e.hiredOn ?? '',
       e.leftOn ?? '', e.leaveReason, label(HR_EMPLOYMENTS, e.employment), e.department,
     ]);
-    await this.audit(tenantId, userId, 'hr.export', 'hr', HR_EXTENSION_ID, { kind: 'roster', rows: rows.length });
+    if (audit) await this.audit(tenantId, userId, 'hr.export', 'hr', HR_EXTENSION_ID, { kind: 'roster', rows: rows.length });
     return { columns, rows };
   }
 

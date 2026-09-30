@@ -1318,6 +1318,12 @@ export const api = {
       if (!blob) throw new ApiError('書き出せませんでした', 403);
       saveBlob(blob, `労働者名簿-${new Date().toISOString().slice(0, 10)}.${format}`);
     },
+    /** 帳簿をまとめて ZIP で書き出す（管理者。解約のときに渡す。仕様書 第30.17節）。ファイルの数を返す。 */
+    books: async (): Promise<number> => {
+      const { blob, headers } = await postBlob('/hr/books/export');
+      saveBlob(blob, `人事・給与の帳簿-${new Date().toISOString().slice(0, 10)}.zip`);
+      return Number(headers.get('x-books-files') ?? 0);
+    },
   },
   /** 本人の「給与・勤怠」（人事・給与の段 2。仕様書 第30.25節）。 */
   myHr: {

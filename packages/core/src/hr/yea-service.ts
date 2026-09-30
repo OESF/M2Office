@@ -288,21 +288,27 @@ export class YearEndService {
     return { result: null, totals, adjusted: false };
   }
 
-  /** 源泉徴収票（本人交付用）の PDF。 */
-  async withholdingPdf(tenantId: string, userId: string, employee: HrEmployee, year: number): Promise<Uint8Array | null> {
+  /**
+   * 源泉徴収票（本人交付用）の PDF。
+   *
+   * @param audit 監査ログに残すか（帳簿をまとめて書き出すときは `false`）
+   */
+  async withholdingPdf(tenantId: string, userId: string, employee: HrEmployee, year: number, audit = true): Promise<Uint8Array | null> {
     const w = await this.withholding(tenantId, employee, year);
     if (!w.result && !w.totals) return null;
     const settings = (await this.deps.repo.getTenantSettings(tenantId)).hr;
     const tenant = await this.deps.repo.findTenantById(tenantId);
     const bytes = await renderWithholdingPdf({ year, employee, result: w.result, totals: w.totals, payer: { name: settings.office.name || tenant?.name || '', address: settings.office.address } });
-    await this.audit(tenantId, userId, 'hr.yea.withholding', employee.id, { year, adjusted: w.adjusted });
+    if (audit) await this.audit(tenantId, userId, 'hr.yea.withholding', employee.id, { year, adjusted: w.adjusted });
     return bytes;
   }
 
   /**
    * 税務署提出用の源泉徴収票・給与支払報告書・法定調書合計表の集計の下書き（表計算）。マイナンバーの欄は空ける。
+   *
+   * @param audit 監査ログに残すか（帳簿をまとめて書き出すときは `false`）
    */
-  async report(tenantId: string, userId: string, year: number): Promise<{ columns: string[]; rows: (string | number | null)[][] }> {
+  async report(tenantId: string, userId: string, year: number, audit = true): Promise<{ columns: string[]; rows: (string | number | null)[][] }> {
     const employees = await this.deps.hrStore.listEmployees(tenantId);
     const columns = ['氏名', 'ふりがな', '住所', '生年月日', '個人番号', '年末調整', '支払金額', '給与所得控除後の金額', '所得控除の額の合計額', '源泉徴収税額',
       '社会保険料等の金額', '生命保険料の控除額', '地震保険料の控除額', '住宅借入金等特別控除の額', '配偶者（特別）控除の額', '控除対象扶養親族の数（特定・老人・その他）', '16 歳未満の扶養親族の数', '退職年月日'];
@@ -319,7 +325,7 @@ export class YearEndService {
     // 法定調書合計表の「給与所得の源泉徴収票」の欄に写す集計（人員・支払金額・源泉徴収税額）
     const sum = (i: number) => rows.reduce((a, row) => a + (typeof row[i] === 'number' ? row[i] as number : 0), 0);
     if (rows.length > 0) rows.push([`合計（${rows.length} 人）`, '', '', '', '', '', sum(6), null, null, sum(9), sum(10), null, null, null, null, null, null, '']);
-    await this.audit(tenantId, userId, 'hr.yea.report', String(year), { rows: rows.length });
+    if (audit) await this.audit(tenantId, userId, 'hr.yea.report', String(year), { rows: rows.length });
     return { columns, rows };
   }
 
