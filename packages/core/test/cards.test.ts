@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { PDFDocument } from 'pdf-lib';
 import { EMPTY_CARD_FIELDS, type CardFields } from '@m2office/shared';
 import {
-  dateIn, detectCardKind, flowRotation, judgeSamePerson, mergeFields, orderCorners, parseCardReading, splitCardPdf, toVCard, canManage,
+  dateIn, detectCardKind, flowRotation, judgeSamePerson, mergeFields, orderCorners, parseCardReading, parseLocations, splitCardPdf, toVCard, canManage,
   type LlmProvider,
 } from '../src/index.js';
 import { contactRequest } from '../src/secretary/contacts.js';
@@ -85,6 +85,23 @@ test('四隅: 文字の向きに合う並びに回し直し、裏返しの順を
   assert.equal(orderCorners([[0, 0], [500, 400], [1000, 0], [500, 1000]], 0), null, 'へこんだ四角形');
   assert.equal(orderCorners([[0, 0], [100, 0], [100, 100], [0, 100]], 0), null, '写真の 2% 未満');
   assert.equal(orderCorners([[0, 0], [1, 0]], 0), null);
+});
+
+test('位置と向きの答え: [y, x] の点を [x, y] にし、英数字の行の向きで並べ、四隅が使えなければ囲む範囲から作る（第27.5節）', () => {
+  // 2026-09-30 に本番の写真で高性能のモデルが返した答え（逆さの名刺 2 枚）
+  const two = parseLocations('{"cards":[{"name":"楠本 和弘","box_2d":[76,325,442,794],"corners":[[76,328],[76,789],[442,792],[442,325]],"lineFlow":"right-to-left"},'
+    + '{"name":"佐野 毅","box_2d":[520,313,919,793],"corners":[[520,319],[546,792],[918,775],[894,314]],"lineFlow":"right-to-left"}]}');
+  assert.deepEqual(two.map((l) => l.rotation), [180, 180]);
+  assert.deepEqual(two[0]!.corners, [[792, 442], [325, 442], [328, 76], [789, 76]], '逆さなので、文字の左上は画像の右下');
+  // 横倒し（上から下へ進む）
+  const side = parseLocations('{"cards":[{"name":"小原 勝利","box_2d":[17,153,835,810],"corners":[[17,158],[44,807],[819,798],[833,157]],"lineFlow":"top-to-bottom"}]}');
+  assert.equal(side[0]!.rotation, 270);
+  assert.deepEqual(side[0]!.corners![0], [807, 44], '文字の左上は画像の右上');
+  // 四隅が使えなければ囲む範囲（入れ子でも読む）
+  const box = parseLocations('{"cards":[{"name":"A","box_2d":[[100,100,500,700]],"corners":[[0,0],[1,1]]}]}');
+  assert.deepEqual(box[0]!.corners, [[100, 100], [700, 100], [700, 500], [100, 500]]);
+  assert.equal(box[0]!.rotation, null);
+  assert.deepEqual(parseLocations('読めません'), []);
 });
 
 test('新しい名刺は現在の値になり、古い名刺は空の項目を埋めるだけ。名刺に無い項目で今の値を消さない', () => {

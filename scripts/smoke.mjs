@@ -3175,8 +3175,9 @@ console.log('\n■ 57. 名刺管理（内蔵の拡張。第27章、ADR-0042）')
 
     // 1 枚の写真に何枚も写っていれば、名刺ごとに登録し、同じ写真を名刺ごとの四隅で指す。写真はほかの名刺が指す間は消えない（第27.4節・第27.5節）
     const multi = Buffer.concat([PNG, Buffer.from(`\nM2O-CARD:${JSON.stringify({ isCard: true, cardCount: 2, cards: [
-      { name: `並べA ${tag}`, company: '株式会社ならべ', emails: [`a-${tag}@row.example`], textTop: 'up', corners: [[50, 50], [450, 50], [450, 300], [50, 300]] },
-      { name: `並べB ${tag}`, company: '株式会社ならべ', emails: [`b-${tag}@row.example`], textTop: 'down', corners: [[450, 50], [950, 50], [950, 300], [450, 300]] },
+      // 位置と向きの問い（第27.5節）の答えとしても読まれる。四隅は [y, x] で書く
+      { name: `並べA ${tag}`, company: '株式会社ならべ', emails: [`a-${tag}@row.example`], lineFlow: 'left-to-right', corners: [[50, 50], [50, 450], [300, 450], [300, 50]] },
+      { name: `並べB ${tag}`, company: '株式会社ならべ', emails: [`b-${tag}@row.example`], lineFlow: 'right-to-left', corners: [[50, 450], [50, 950], [300, 950], [300, 450]] },
     ] })}\n`, 'utf8')]);
     const sent = await upload('a', 'member', [['row.png', multi]]);
     await settle('member');
