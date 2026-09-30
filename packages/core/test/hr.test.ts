@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULT_HR_SETTINGS } from '@m2office/shared';
-import { hireProcedures, leaveProcedures, payDateFor, tenthOfNextMonth, addOneMonth, toHrDate, toFlag } from '../src/index.js';
+import { hireProcedures, leaveProcedures, payDateFor, tenthOfNextMonth, addOneMonth, toHrDate, toFlag, withinFiveDays } from '../src/index.js';
 
 const settings = { ...DEFAULT_HR_SETTINGS };
 
@@ -23,6 +23,12 @@ test('入社の手続き: 保険の加入に応じて並び、期限は入社日
   assert.deepEqual(hireProcedures({ category: 'owner', hiredOn: '2026-10-01', leftOn: null, socialInsurance: true, employmentInsurance: true }, settings), [], '事業主本人には作らない');
   const byExpert = hireProcedures({ category: 'employee', hiredOn: '2026-10-01', leftOn: null, socialInsurance: true, employmentInsurance: false }, { procedures: 'sharoushi' });
   assert.match(byExpert.find((t) => t.code === 'social-acquire')!.title, /^社会保険労務士へ依頼: /);
+});
+
+test('社会保険の届出の 5 日以内: 事実のあった日を 1 日目として 5 日目（資格取得・資格喪失・年齢の到達・賞与支払届でそろえる）', () => {
+  assert.equal(withinFiveDays('2026-07-10'), '2026-07-14', '7 月 10 日に払った賞与の支払届は 7 月 14 日まで');
+  assert.equal(withinFiveDays('2026-12-30'), '2027-01-03', '年をまたぐ。休みの日でもずらさない');
+  assert.equal(withinFiveDays('2027-02-26'), '2027-03-02', '月をまたぐ');
 });
 
 test('退職の手続き: 退職日の翌日から数え、最後の給与は会社の締めと支払で決まる', () => {

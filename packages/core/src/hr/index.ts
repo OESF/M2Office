@@ -10,7 +10,7 @@ export {
   type HrServiceDeps, type EmployeeInput, type TermsInput, type HrImportResult, type HrImportField,
 } from './service.js';
 export {
-  hireProcedures, leaveProcedures, payDateFor, addOneMonth, tenthOfNextMonth, dayOfMonth,
+  hireProcedures, leaveProcedures, payDateFor, addOneMonth, tenthOfNextMonth, dayOfMonth, withinFiveDays,
   type ProcedureDraft, type ProcedureSubject,
 } from './procedures.js';
 export { PostgresAttendanceStore, type AttendanceStore } from './attendance-store.js';

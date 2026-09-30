@@ -34,6 +34,18 @@ export function addDays(date: string, days: number): string {
   return ymd(d);
 }
 
+/**
+ * 社会保険の届出の「事実のあった日から 5 日以内」の期限（第30.5.2節）。**事実のあった日を 1 日目として 5 日目**。
+ *
+ * 資格取得届（入社日）・資格喪失届（喪失日 = 退職日の翌日）・70 歳到達届と 75 歳の資格喪失届（到達の日）・賞与支払届（支払日）で数え方をそろえる。
+ * 休みの日でも次の平日にずらさない（暦のまま）。
+ *
+ * @param factDate 事実のあった日（YYYY-MM-DD）
+ */
+export function withinFiveDays(factDate: string): string {
+  return addDays(factDate, 4);
+}
+
 /** その月の日（月の日数を超えれば末日）。 */
 export function dayOfMonth(year: number, month0: number, day: number): string {
   const last = new Date(Date.UTC(year, month0 + 1, 0)).getUTCDate();
@@ -79,8 +91,8 @@ export function hireProcedures(s: ProcedureSubject, settings: Pick<HrSettings, '
   if (s.category === 'owner' || !s.hiredOn) return [];
   const byExpert = settings.procedures === 'sharoushi' ? '社会保険労務士へ依頼: ' : '';
   const out: ProcedureDraft[] = [{ code: 'terms-notice', title: '労働条件通知書を渡す', dueOn: s.hiredOn }];
-  // 入社日を 1 日目として 5 日目まで
-  if (s.socialInsurance) out.push({ code: 'social-acquire', title: `${byExpert}健康保険・厚生年金の資格取得届`, dueOn: addDays(s.hiredOn, 4) });
+  // 入社日（資格取得日）を 1 日目として 5 日目まで
+  if (s.socialInsurance) out.push({ code: 'social-acquire', title: `${byExpert}健康保険・厚生年金の資格取得届`, dueOn: withinFiveDays(s.hiredOn) });
   if (s.employmentInsurance) out.push({ code: 'employment-acquire', title: `${byExpert}雇用保険の資格取得届`, dueOn: tenthOfNextMonth(s.hiredOn) });
   out.push({ code: 'dependents', title: '扶養控除等申告書を受け取る', dueOn: addOneMonth(s.hiredOn) });
   out.push({ code: 'resident-transfer', title: '住民税の特別徴収の継続を確かめる（前の勤め先からの異動届）', dueOn: tenthOfNextMonth(s.hiredOn) });
@@ -96,8 +108,8 @@ export function leaveProcedures(s: ProcedureSubject, settings: Pick<HrSettings, 
   if (s.category === 'owner' || !s.leftOn) return [];
   const byExpert = settings.procedures === 'sharoushi' ? '社会保険労務士へ依頼: ' : '';
   const out: ProcedureDraft[] = [];
-  // 退職日の翌日を 1 日目として数える
-  if (s.socialInsurance) out.push({ code: 'social-lose', title: `${byExpert}健康保険・厚生年金の資格喪失届（保険証の回収）`, dueOn: addDays(s.leftOn, 5) });
+  // 退職日の翌日（資格喪失日）を 1 日目として数える
+  if (s.socialInsurance) out.push({ code: 'social-lose', title: `${byExpert}健康保険・厚生年金の資格喪失届（保険証の回収）`, dueOn: withinFiveDays(addDays(s.leftOn, 1)) });
   if (s.employmentInsurance) out.push({ code: 'employment-lose', title: `${byExpert}雇用保険の資格喪失届・離職証明書`, dueOn: addDays(s.leftOn, 10) });
   out.push({ code: 'resident-change', title: '住民税の異動届出書（一括徴収か普通徴収への切り替え）', dueOn: tenthOfNextMonth(s.leftOn) });
   out.push({ code: 'withholding-slip', title: '源泉徴収票を渡す', dueOn: addOneMonth(s.leftOn) });

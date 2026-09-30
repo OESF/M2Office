@@ -14,6 +14,7 @@ import type { LaborStore } from './labor-store.js';
 import type { AttendanceService } from './attendance-service.js';
 import { termsOn } from './attendance-service.js';
 import { buildDeadlines } from './calendar.js';
+import { withinFiveDays } from './procedures.js';
 import { jstDate } from './attendance.js';
 import { Law } from './law/lookup.js';
 import type { LawBook } from './law/types.js';
@@ -72,10 +73,10 @@ export class LaborCalendar {
       this.deps.payrollStore.monthlyTotals(tenantId, `${Number(today.slice(0, 4)) - 1}-01`),
     ]);
     const law = this.deps.law ? this.lawItems(new Law(this.deps.law), today, days, settings.health.prefecture) : [];
-    // 賞与支払届（支払日から 5 日以内。第30.11.1節）
+    // 賞与支払届（支払日を 1 日目として 5 日目まで。資格取得届などとそろえる。第30.11.1節）
     for (const r of await this.deps.payrollStore.listRuns(tenantId)) {
       if (r.kind !== 'bonus' || (r.status !== 'confirmed' && r.status !== 'paid')) continue;
-      const due = new Date(Date.parse(`${r.payDate}T00:00:00Z`) + 5 * 86_400_000).toISOString().slice(0, 10);
+      const due = withinFiveDays(r.payDate);
       law.push({ date: due, kind: 'bonus-report', title: `賞与支払届（${Number(r.payMonth.slice(5, 7))} 月の賞与）`, detail: '「給与」の賞与の回で下書きを出し、年金事務所（健康保険組合）に届け出る' });
     }
     // 労働保険の延納の第 2 期・第 3 期（年度更新の下書きを作った年）

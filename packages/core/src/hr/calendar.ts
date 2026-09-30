@@ -7,7 +7,7 @@
 
 import type { HrDeadline, HrEmployee, HrSettings, HrTask, HrTerms } from '@m2office/shared';
 import { isJapaneseHoliday } from './holidays.js';
-import { dayOfMonth } from './procedures.js';
+import { dayOfMonth, withinFiveDays } from './procedures.js';
 
 /** 月ごとの給与の支払（確定した回から）。 */
 export interface MonthPayment {
@@ -134,8 +134,8 @@ export function buildDeadlines(input: CalendarInput): HrDeadline[] {
       const y = Number(e.birthDate.slice(0, 4));
       const d70 = addDays(`${y + 70}${e.birthDate.slice(4)}`, -1);
       const d75 = `${y + 75}${e.birthDate.slice(4)}`;
-      push({ date: addDays(d70, 4), from: d70, kind: 'age', title: `70 歳到達（${e.name}さん）`, detail: '厚生年金の資格を失う。標準報酬月額相当額が変わるなら 70 歳到達届を出す（「社会保険」で下書き）', employeeId: e.id });
-      push({ date: addDays(d75, 4), from: d75, kind: 'age', title: `75 歳到達・健康保険の資格喪失届（${e.name}さん）`, detail: '後期高齢者医療に移る。「社会保険」で資格喪失届の下書きを作る', employeeId: e.id });
+      push({ date: withinFiveDays(d70), from: d70, kind: 'age', title: `70 歳到達（${e.name}さん）`, detail: '厚生年金の資格を失う。標準報酬月額相当額が変わるなら 70 歳到達届を出す（「社会保険」で下書き）', employeeId: e.id });
+      push({ date: withinFiveDays(d75), from: d75, kind: 'age', title: `75 歳到達・健康保険の資格喪失届（${e.name}さん）`, detail: '後期高齢者医療に移る。「社会保険」で資格喪失届の下書きを作る', employeeId: e.id });
     }
     if (t?.contractEnd) {
       push({ date: t.contractEnd, kind: 'contract-end', title: `契約期間の満了（${e.name}さん）`, detail: t.renewal ? `更新: ${t.renewal}` : '更新するかを決めて本人に伝える', employeeId: e.id });
