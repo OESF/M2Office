@@ -14,6 +14,7 @@ import type {
   HrEmployee, HrEmployeeView, HrSettings, HrTask, HrTerms,
   AttClose, AttDay, AttPeriod, AttPunchKind, AttTotals, LeaveBalance, LeaveGrant, LeaveTake,
   HrFamilyMember, HrPayrollProfile, HrStandardPay, PayRun, PaySlip, PayCheck, HrNoticeSettings, HrDeadline, PayAdjustment, BonusPlan,
+  YeaDeclaration, YeaDeclarationView, YeaResult,
   InventoryCount, InventoryCountRow, InventoryCountScope, InventoryCountView, InventorySupplier,
   InventoryBooking, InventoryBookingMapping, InventoryBookingSource,
 } from '@m2office/shared';
@@ -118,6 +119,26 @@ export interface HrProposalField {
   quote: string;
   problem?: string;
 }
+
+/** 年末調整の本人の画面（仕様書 第30.15.1節）。 */
+export interface YeaSelfView {
+  declaration: YeaDeclarationView;
+  /** 年末調整の対象か（対象でなければ理由）。 */
+  target: boolean;
+  reason: string | null;
+  /** 本人が直せるか（担当者が確かめた後は直せない）。 */
+  canEdit: boolean;
+  /** 確定した年末調整の結果（同意のある人だけ）。 */
+  result: YeaResult | null;
+  /** 申告の不備の指摘。 */
+  problems: string[];
+}
+
+/** 控除証明書の読み取りの結果。 */
+export type CertificateReading =
+  | { status: 'insurance'; items: { kind: keyof YeaDeclaration['insurance']; amount: number; company: string }[] }
+  | { status: 'previous-job'; pay: number; social: number; tax: number; company: string }
+  | { status: 'unreadable'; reason: string };
 
 /** 本人の明細の一覧の 1 つ。 */
 export interface MySlipSummary {
@@ -1214,6 +1235,23 @@ export const api = {
         if (!blob) throw new ApiError('賞与支払届の下書きを出せませんでした', 400);
         saveBlob(blob, `賞与支払届（下書き）-${date}.xlsx`);
       },
+      /** 年末調整（仕様書 第30.15.1節）。 */
+      yea: (year: number) => call<{ rows: { employeeId: string; name: string; target: boolean; reason: string | null; submittedAt: string | null; checkedAt: string | null; problems: string[] }[]; runs: PayRun[]; decemberConfirmed: boolean }>(`/hr/yea?year=${year}`),
+      yeaRequest: (year: number) => call<{ sent: number }>('/hr/yea/request', { method: 'POST', body: JSON.stringify({ year }) }),
+      yeaCalculate: (year: number, payDate: string) => call<{ run: PayRun; slips: PaySlip[] }>('/hr/yea/calculate', { method: 'POST', body: JSON.stringify({ year, payDate }) }),
+      yeaDeclaration: (employeeId: string, year: number) => call<{ declaration: YeaDeclarationView }>(`/hr/yea/${encodeURIComponent(employeeId)}?year=${year}`),
+      yeaSave: (employeeId: string, year: number, data: YeaDeclaration) => call<{ declaration: YeaDeclarationView }>(`/hr/yea/${encodeURIComponent(employeeId)}`, { method: 'PUT', body: JSON.stringify({ year, data }) }),
+      yeaCheck: (employeeId: string, year: number, checked: boolean) => call<{ ok: true }>(`/hr/yea/${encodeURIComponent(employeeId)}/check`, { method: 'POST', body: JSON.stringify({ year, checked }) }),
+      yeaWithholding: async (employeeId: string, year: number, name: string) => {
+        const blob = await fetchBlob(`/hr/yea/${encodeURIComponent(employeeId)}/withholding.pdf?year=${year}`);
+        if (!blob) throw new ApiError('源泉徴収票を出せませんでした', 404);
+        saveBlob(blob, `源泉徴収票-${year}-${name}.pdf`);
+      },
+      yeaReport: async (year: number) => {
+        const blob = await fetchBlob(`/hr/yea/report?year=${year}&format=xlsx`);
+        if (!blob) throw new ApiError('書き出せませんでした', 403);
+        saveBlob(blob, `源泉徴収票・給与支払報告書（下書き）-${year}.xlsx`);
+      },
       /** 確定した月の給与の訂正の回を作る。 */
       correction: (id: string, payDate: string) => call<{ run: PayRun; slips: PaySlip[] }>(`/hr/payroll/runs/${encodeURIComponent(id)}/correction`, { method: 'POST', body: JSON.stringify({ payDate }) }),
       /** 確定する（管理者。お金の確定。仕様書 第30.10.3節）。 */
@@ -1271,6 +1309,19 @@ export const api = {
       saveBlob(blob, `給与明細-${month}.pdf`);
     },
     consent: (consent: boolean) => call<{ consentAt: string | null }>('/me/hr/payslip-consent', { method: 'PUT', body: JSON.stringify({ consent }) }),
+    /** 年末調整の申告（仕様書 第30.15.1節）。 */
+    yea: (year: number) => call<YeaSelfView>(`/me/hr/yea?year=${year}`),
+    saveYea: (year: number, data: YeaDeclaration, submit: boolean) => call<{ declaration: YeaDeclarationView }>('/me/hr/yea', { method: 'PUT', body: JSON.stringify({ year, data, submit }) }),
+    readCertificate: (file: File) => {
+      const form = new FormData();
+      form.append('file', file);
+      return postForm<CertificateReading>('/me/hr/yea/certificate', form);
+    },
+    withholdingPdf: async (year: number) => {
+      const blob = await fetchBlob(`/me/hr/yea/withholding.pdf?year=${year}`);
+      if (!blob) throw new ApiError('源泉徴収票を出せませんでした', 404);
+      saveBlob(blob, `源泉徴収票-${year}.pdf`);
+    },
   },
   /** 会話の要約（仕様書 第11.9.6節）。 */
   myConversationDigests: () => call<{ items: { day: string; summary: string }[] }>('/me/conversation-digests'),

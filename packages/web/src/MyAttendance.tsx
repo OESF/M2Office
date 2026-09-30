@@ -1,13 +1,14 @@
 /**
- * @file 本人の「給与・勤怠」の画面（仕様書 第30.25節）。打刻・期間の勤怠と直し・有給の残りと申請・給与明細（同意して受け取る）。
+ * @file 本人の「給与・勤怠」の画面（仕様書 第30.25節）。打刻・期間の勤怠と直し・有給の残りと申請・給与明細（同意して受け取る）・年末調整の申告。
  *
  * 本人の分だけを扱う（API が確かめる）。スマホでも押しやすいよう、打刻のボタンを大きく上に置く。
  * 説明文は常に出さない（原則 u11）。分からなければ秘書に聞く（「有給あと何日？」「出勤」も秘書に言える）。
  */
 
-import { useCallback, useEffect, useState } from 'react';
-import type { AttDay, AttPunchKind } from '@m2office/shared';
-import { api, describeError, type MyHrView, type MySlipSummary } from './api.js';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { AttDay, AttPunchKind, YeaDeclaration } from '@m2office/shared';
+import { YeaFields, INSURANCE } from './YearEndForm.js';
+import { api, describeError, type MyHrView, type MySlipSummary, type YeaSelfView } from './api.js';
 
 const WEEK = '日月火水木金土';
 const hm = (m: number) => (m ? `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}` : '');
@@ -56,6 +57,7 @@ export function MyAttendance() {
       {error && <p className="error">{error}</p>}
 
       <MyPayslips />
+      <MyYearEnd />
 
       <div className="card myhr-leave">
         <div className="row wrap">
@@ -186,6 +188,67 @@ function MyPayslips() {
           </table>
           <button className="btn ghost small" onClick={() => void api.myHr.payslipPdf(open.slip.id, open.slip.run.payMonth).catch((e) => setError(describeError(e, 'PDF を出せませんでした')))}>PDF</button>
         </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 本人の年末調整の申告（仕様書 第30.15.1節）。10 月から翌年 1 月まで出す。控除証明書は写真か PDF を渡すと AI が読む。
+ */
+function MyYearEnd() {
+  const now = new Date(Date.now() + 9 * 3_600_000);
+  const m = now.getUTCMonth() + 1;
+  const year = m >= 10 ? now.getUTCFullYear() : m <= 1 ? now.getUTCFullYear() - 1 : null;
+  const [v, setV] = useState<YeaSelfView | null>(null);
+  const [d, setD] = useState<YeaDeclaration | null>(null);
+  const [open, setOpen] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const cert = useRef<HTMLInputElement>(null);
+  const load = useCallback(() => {
+    if (year === null) return;
+    api.myHr.yea(year).then((r) => { setV(r); setD(r.declaration.data); }).catch(() => setV(null));
+  }, [year]);
+  useEffect(load, [load]);
+  if (year === null || !v || !d) return null;
+  const set = (p: Partial<YeaDeclaration>) => setD({ ...d, ...p });
+  const save = (submit: boolean) => void api.myHr.saveYea(year, d, submit).then(() => { setMsg(submit ? '出しました。担当者が確かめます' : '保存しました'); load(); }).catch((e) => setError(describeError(e, '保存できませんでした')));
+  const read = (f: File) => void api.myHr.readCertificate(f).then((r) => {
+    if (r.status === 'insurance') {
+      const ins = { ...d.insurance };
+      for (const it of r.items) ins[it.kind] += it.amount;
+      set({ insurance: ins });
+      setMsg(`${r.items.map((it) => `${INSURANCE.find(([k]) => k === it.kind)?.[1]} ${it.amount.toLocaleString('ja-JP')} 円`).join('・')} を足しました。額を確かめてください`);
+    } else if (r.status === 'previous-job') {
+      set({ previousJob: { pay: r.pay, social: r.social, tax: r.tax } });
+      setMsg('前の勤め先の額を入れました。源泉徴収票と見比べてください');
+    } else setError(r.reason);
+  }).catch((e) => setError(describeError(e, '読めませんでした')));
+  const state = v.declaration.checkedAt ? '担当者が確かめました' : v.declaration.submittedAt ? '出しました（担当者の確かめ待ち）' : 'まだ出していません';
+  return (
+    <div className="card myhr-yea">
+      <div className="row wrap">
+        <strong className="grow">{year} 年の年末調整</strong>
+        <span className="small muted">{v.target ? state : v.reason}</span>
+        {v.result && <button className="btn ghost small" onClick={() => void api.myHr.withholdingPdf(year).catch((e) => setError(describeError(e, '出せませんでした')))}>源泉徴収票</button>}
+        {v.target && <button className="btn ghost small" onClick={() => setOpen(!open)}>{open ? '閉じる' : v.canEdit ? '申告する' : '申告を見る'}</button>}
+      </div>
+      {v.result && <p className="small">年末調整で{v.result.difference >= 0 ? ` ${v.result.difference.toLocaleString('ja-JP')} 円が戻ります` : ` ${(-v.result.difference).toLocaleString('ja-JP')} 円が不足し、1 月の給与で差し引きます`}（年税額 {v.result.annualTax.toLocaleString('ja-JP')} 円）。</p>}
+      {error && <p className="error">{error}</p>}
+      {msg && <p className="ok-msg small">{msg}</p>}
+      {open && v.target && (
+        <fieldset disabled={!v.canEdit} className="yea-form">
+          {v.problems.length > 0 && <ul className="error small">{v.problems.map((p) => <li key={p}>{p}</li>)}</ul>}
+          <YeaFields d={d} set={set} onCertificate={() => cert.current?.click()} />
+          <input ref={cert} type="file" accept="image/*,application/pdf" capture="environment" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) read(f); }} />
+          {v.canEdit && (
+            <div className="row">
+              <button className="btn ghost small" onClick={() => save(false)}>保存する</button>
+              <button className="btn small" onClick={() => save(true)}>出す</button>
+            </div>
+          )}
+        </fieldset>
       )}
     </div>
   );

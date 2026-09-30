@@ -3746,6 +3746,26 @@ console.log('\n■ 61. 人事・給与（内蔵の拡張。第30章、段 1: 台
       plan.status === 200 && bcalc.status === 201 && bslip?.meta?.stdBonusHealth === 300000 && !bslip.lines.some((l) => l.code === 'resident-tax')
         && (bcalc.body.run.checks ?? []).some((c) => c.code === 'bonus-special') && bconf.status === 200 && report.status === 200 && reportText.includes('300000')
         ? ok('賞与は標準賞与額（1,000 円未満切り捨て）で保険料を引き、前の月に給与が無ければ月額表で税を出し、確定すると賞与支払届の下書きを出せる') : ng('賞与が合わない', JSON.stringify({ plan: plan.status, calc: bcalc.body?.error ?? bslip?.meta, conf: bconf.status, report: report.status }).slice(0, 500));
+
+      // Phase 2 段 2: 年末調整（第30.15.1節）。本人が申告を出し、担当者が確かめ、年末調整の回を計算する（12 月の給与が確定するまでは止まる）
+      const { body: yeaSelf } = await call('a', '/v1/me/hr/yea?year=2026', {}, 'member');
+      const decl = { ...yeaSelf.declaration?.data, insurance: { ...yeaSelf.declaration?.data?.insurance, lifeNewGeneral: 120000, earthquake: 60000 }, dependents: [{ name: `${tag} 子`, relation: '子', birthDate: '2006-05-01', incomeEstimate: 0, disability: 'none', cohabiting: true }] };
+      const submitted = await call('a', '/v1/me/hr/yea', { method: 'PUT', body: JSON.stringify({ year: 2026, data: decl, submit: true }) }, 'member');
+      const checked = await call('a', `/v1/hr/yea/${staffId}/check`, { method: 'POST', body: JSON.stringify({ year: 2026, checked: true }) });
+      const selfAfter = await call('a', '/v1/me/hr/yea', { method: 'PUT', body: JSON.stringify({ year: 2026, data: decl, submit: true }) }, 'member');
+      const yearly = await call('a', '/v1/hr/yea/calculate', { method: 'POST', body: JSON.stringify({ year: 2026, payDate: '2026-11-30' }) });
+      const ycalc = await call('a', '/v1/hr/yea/calculate', { method: 'POST', body: JSON.stringify({ year: 2026, payDate: '2026-12-25' }) });
+      const yslip = (ycalc.body?.slips ?? []).find((x) => x.employeeId === staffId);
+      const yres = yslip?.meta?.yea;
+      const yconf = await call('a', `/v1/hr/payroll/runs/${ycalc.body?.run?.id}/confirm`, { method: 'POST' });
+      const wpdf = await raw(`/v1/hr/yea/${staffId}/withholding.pdf?year=2026`);
+      const yreport = await raw('/v1/hr/yea/report?year=2026&format=csv');
+      const yreportText = yreport.status === 200 ? await yreport.text() : '';
+      yeaSelf.target === true && submitted.status === 200 && checked.status === 200 && selfAfter.status === 400 && yearly.status === 400 && ycalc.status === 201
+        && yres && yres.deductions.life === 60000 && yres.deductions.earthquake === 50000 && yres.counts.specific === 1 && yres.withheld > 0
+        && (ycalc.body.run.checks ?? []).some((c) => c.code === 'december') && yconf.status === 400 && wpdf.status === 200 && yreport.status === 200 && yreportText.includes('合計（')
+        ? ok('年末調整は本人の申告を担当者が確かめてから計算し（改正前の 11 月には計算しない・23 歳未満の扶養がいれば生命保険料の上限 6 万円・特定扶養を数える）、12 月の給与が確定するまで確定できず、源泉徴収票を出せる')
+        : ng('年末調整が合わない', JSON.stringify({ target: yeaSelf.target, submitted: submitted.status, checked: checked.status, selfAfter: selfAfter.status, early: yearly.status, calc: ycalc.body?.error ?? yres, conf: yconf.status, pdf: wpdf.status }).slice(0, 700));
     } else {
       conf.status === 400 && (conf.body?.blockers ?? []).some((x) => x.code === 'unverified')
         ? ok('本番の環境では、監修前の法令の表で計算した回は確定できない') : ng('監修前でも確定できた', JSON.stringify(conf.body));
@@ -3800,6 +3820,7 @@ console.log('\n■ 61. 人事・給与（内蔵の拡張。第30章、段 1: 台
     await owner.query(`delete from att_closes where tenant_id = 't-alpha' and closed_at >= $1`, [hrStartedAt]);
     await owner.query(`delete from pay_runs where tenant_id = 't-alpha' and calculated_at >= $1`, [hrStartedAt]);
     await owner.query(`delete from pay_bonus_plans where tenant_id = 't-alpha' and updated_at >= $1`, [hrStartedAt]);
+    await owner.query(`delete from notifications where tenant_id = 't-alpha' and title like '年末調整%' and created_at >= $1`, [hrStartedAt]);
     await owner.query(`delete from notifications where tenant_id = 't-alpha' and title like '給与%' and created_at >= $1`, [hrStartedAt]);
     await owner.query(`delete from hr_employees where name like '${tag}%'`);
     for (const r of saved) await owner.query(`update tenant_settings set hr = $2 where tenant_id = $1`, [r.tenant_id, r.hr ? JSON.stringify(r.hr) : null]);

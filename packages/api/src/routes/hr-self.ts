@@ -6,7 +6,7 @@
  */
 
 import { Hono } from 'hono';
-import { jstDate, type DayFix } from '@m2office/core';
+import { jstDate, detectKind, MAX_FILE_BYTES, MIME, type DayFix } from '@m2office/core';
 import type { AttPunchKind, HrEmployee } from '@m2office/shared';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
@@ -115,6 +115,57 @@ export function hrSelfRoute(deps: AppDeps) {
     const b = await c.req.json<{ consent?: unknown }>().catch(() => ({} as { consent?: unknown }));
     if (typeof b.consent !== 'boolean') return c.json({ error: 'consent に true か false を指定してください' }, 400);
     return c.json({ consentAt: await payroll.setConsent(tenant.id, user.id, c.get('employee'), b.consent) });
+  });
+
+  // ---- 年末調整（Phase 2 段 2。第30.15.1節） ----
+
+  const yea = deps.hr.yea;
+  const yearOf = (v: unknown) => { const n = Number(v); return Number.isInteger(n) && n >= 2000 && n <= 2100 ? n : null; };
+
+  /** 本人の年末調整（申告・対象か・直せるか・不備・結果）。 */
+  app.get('/yea', async (c) => {
+    const { tenant } = c.get('ctx');
+    const year = yearOf(c.req.query('year'));
+    return year ? c.json(await yea.selfView(tenant.id, c.get('employee'), year)) : c.json({ error: '年を入れてください' }, 400);
+  });
+
+  /** 申告を残す・出す（`year`・`data`・`submit`）。出したら人事区画の人に知らせる。 */
+  app.put('/yea', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const b = await c.req.json<{ year?: unknown; data?: unknown; submit?: boolean }>().catch(() => ({} as { year?: unknown; data?: unknown; submit?: boolean }));
+    const year = yearOf(b.year);
+    if (!year) return c.json({ error: '年を入れてください' }, 400);
+    const employee = c.get('employee');
+    const r = await yea.save(tenant.id, user.id, employee, year, (b.data ?? {}) as never, { submit: !!b.submit, byStaff: false });
+    if ('error' in r) return c.json(r, 400);
+    if (b.submit) await yea.notifyStaff(tenant.id, user.id, `年末調整: ${employee.name}さんが申告を出しました`, `${year} 年分。「人事・給与」の「年末調整」で確かめてください`);
+    return c.json(r);
+  });
+
+  /** 控除証明書か前の勤め先の源泉徴収票を読む（申告には入れない）。ファイルは残さない。 */
+  app.post('/yea/certificate', async (c) => {
+    const { tenant } = c.get('ctx');
+    const form = await c.req.parseBody();
+    const f = form['file'];
+    if (!(f instanceof File)) return c.json({ error: '証明書の写真か PDF を選んでください' }, 400);
+    if (f.size > MAX_FILE_BYTES) return c.json({ error: 'ファイルが大きすぎます（10 MB まで）' }, 413);
+    const bytes = new Uint8Array(await f.arrayBuffer());
+    const kind = detectKind(f.name || 'certificate.jpg', bytes);
+    if (!kind || !['png', 'jpeg', 'webp', 'heic', 'pdf'].includes(kind)) return c.json({ error: '証明書の写真（PNG・JPEG・WebP）か PDF を選んでください' }, 400);
+    return c.json(await yea.readCertificate(tenant.id, bytes, MIME[kind]));
+  });
+
+  /** 自分の源泉徴収票（確定した年末調整の結果。明細を画面で受け取る同意がある人）。 */
+  app.get('/yea/withholding.pdf', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const year = yearOf(c.req.query('year'));
+    const employee = c.get('employee');
+    if (!year || !(await yea.selfResult(tenant.id, employee, year))) return c.json({ error: '源泉徴収票がまだありません' }, 404);
+    const bytes = await yea.withholdingPdf(tenant.id, user.id, employee, year);
+    if (!bytes) return c.json({ error: '源泉徴収票がまだありません' }, 404);
+    c.header('Content-Type', 'application/pdf');
+    c.header('Content-Disposition', `attachment; filename="withholding-${year}.pdf"`);
+    return c.body(bytes as unknown as ArrayBuffer);
   });
 
   return app;

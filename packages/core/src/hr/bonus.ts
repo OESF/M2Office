@@ -162,5 +162,8 @@ export function calcBonus(input: BonusInput): SlipResult {
 
   const deductions = lines.filter((l) => l.kind === 'deduct').reduce((s, l) => s + l.amount, 0);
   for (const m of tables.values()) if (m.review.status !== 'verified') { warnings.push('法令の表が監修前です（確定には使えません）'); break; }
-  return { gross, deductions, net: gross - deductions, lines, warnings, tables: [...tables.values()], meta: { taxable: base, stdBonusHealth: stdHealth, stdBonusPension: stdPension } };
+  const tax = lines.find((l) => l.code === 'income-tax')?.amount ?? 0;
+  return { gross, deductions, net: gross - deductions, lines, warnings, tables: [...tables.values()], meta: {
+    taxable: base, stdBonusHealth: stdHealth, stdBonusPension: stdPension, taxablePay: gross - adj.notTaxable, social: social + employment, tax,
+  } };
 }

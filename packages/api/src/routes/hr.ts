@@ -475,6 +475,92 @@ export function hrRoute(deps: AppDeps) {
     return c.json({ items: await deps.hr.calendar.list(tenant.id, days) });
   });
 
+  // ---- 年末調整（Phase 2 段 2。第30.15.1節） ----
+
+  const yea = deps.hr.yea;
+  const yearOf = (v: string | undefined) => { const n = Number(v); return Number.isInteger(n) && n >= 2000 && n <= 2100 ? n : null; };
+
+  /** 年末調整の一覧（対象・申告の状態・不備）と、その年の年末調整の回。 */
+  app.get('/yea', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const year = yearOf(c.req.query('year'));
+    if (!year) return c.json({ error: '年を入れてください' }, 400);
+    return c.json(await yea.overview(tenant.id, user.id, year));
+  });
+
+  /** 対象の人に申告を頼む。 */
+  app.post('/yea/request', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const b = await c.req.json<{ year?: string }>().catch(() => ({} as { year?: string }));
+    const year = yearOf(String(b.year ?? ''));
+    return year ? c.json(await yea.request(tenant.id, user.id, year)) : c.json({ error: '年を入れてください' }, 400);
+  });
+
+  /** 年末調整を計算して、年末調整の回（下書き）にする（`year`・`payDate`: 還付を払う日）。 */
+  app.post('/yea/calculate', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const b = await c.req.json<{ year?: string; payDate?: string }>().catch(() => ({} as { year?: string; payDate?: string }));
+    const year = yearOf(String(b.year ?? ''));
+    if (!year) return c.json({ error: '年を入れてください' }, 400);
+    const r = await yea.calculate(tenant.id, user.id, year, String(b.payDate ?? ''));
+    return 'error' in r ? c.json(r, 400) : c.json(r, 201);
+  });
+
+  /** 源泉徴収票（提出用）・給与支払報告書・法定調書合計表の下書き（表計算）。 */
+  app.get('/yea/report', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const year = yearOf(c.req.query('year'));
+    if (!year) return c.json({ error: '年を入れてください' }, 400);
+    const format = c.req.query('format') === 'xlsx' ? 'xlsx' : 'csv';
+    const { columns, rows } = await yea.report(tenant.id, user.id, year);
+    const bytes = await renderSheet(`源泉徴収票・給与支払報告書 ${year}`, columns, rows, format);
+    c.header('Content-Type', format === 'csv' ? 'text/csv; charset=utf-8' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    c.header('Content-Disposition', `attachment; filename="withholding-${year}.${format}"`);
+    return c.body(bytes as unknown as ArrayBuffer);
+  });
+
+  /** 1 人の申告。 */
+  app.get('/yea/:employeeId', async (c) => {
+    const { tenant } = c.get('ctx');
+    const year = yearOf(c.req.query('year'));
+    const e = await employeeOf(tenant.id, c.req.param('employeeId'));
+    if (!year || !e) return c.json({ error: '従業員か年が見つかりません' }, 404);
+    return c.json({ declaration: await yea.declaration(tenant.id, e, year) });
+  });
+
+  /** 担当者が申告を直す（アカウントの無い人の分を入れる）。 */
+  app.put('/yea/:employeeId', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const b = await c.req.json<{ year?: string; data?: unknown }>().catch(() => ({} as { year?: string; data?: unknown }));
+    const year = yearOf(String(b.year ?? ''));
+    const e = await employeeOf(tenant.id, c.req.param('employeeId'));
+    if (!year || !e) return c.json({ error: '従業員か年が見つかりません' }, 404);
+    const r = await yea.save(tenant.id, user.id, e, year, (b.data ?? {}) as never, { submit: true, byStaff: true });
+    return 'error' in r ? c.json(r, 400) : c.json(r);
+  });
+
+  /** 担当者が申告を確かめた（`checked`: true・false）。 */
+  app.post('/yea/:employeeId/check', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const b = await c.req.json<{ year?: string; checked?: boolean }>().catch(() => ({} as { year?: string; checked?: boolean }));
+    const year = yearOf(String(b.year ?? ''));
+    if (!year) return c.json({ error: '年を入れてください' }, 400);
+    return (await yea.check(tenant.id, user.id, c.req.param('employeeId'), year, b.checked !== false)) ? c.json({ ok: true }) : c.json({ error: '申告が出ていません' }, 404);
+  });
+
+  /** 源泉徴収票（本人交付用）の PDF。 */
+  app.get('/yea/:employeeId/withholding.pdf', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const year = yearOf(c.req.query('year'));
+    const e = await employeeOf(tenant.id, c.req.param('employeeId'));
+    if (!year || !e) return c.json({ error: '従業員か年が見つかりません' }, 404);
+    const bytes = await yea.withholdingPdf(tenant.id, user.id, e, year);
+    if (!bytes) return c.json({ error: 'その年の給与がありません' }, 404);
+    c.header('Content-Type', 'application/pdf');
+    c.header('Content-Disposition', `attachment; filename="withholding-${year}.pdf"`);
+    return c.body(bytes as unknown as ArrayBuffer);
+  });
+
   /** 台帳に結び付けられる利用者（名前とメールアドレスだけ）。 */
   app.get('/users', async (c) => {
     const { tenant } = c.get('ctx');

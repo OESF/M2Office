@@ -28,6 +28,11 @@ export { buildDeadlines, nextBusinessDay, isClosedDay, type CalendarInput, type 
 export { LaborCalendar, type LaborCalendarDeps } from './calendar-service.js';
 export { HR_TOOLS, hrDeadlines, type HrToolContext } from './tools.js';
 export { parseProposal, proposeFromRules, type ProposalField } from './rules-proposal.js';
+export { PostgresYeaStore, type YeaStore } from './yea-store.js';
+export { YearEndService, type YearEndServiceDeps, type YearTotals, type YeaOverviewRow } from './yea-service.js';
+export { calcYea, declarationProblems, type YeaInput } from './yea-calc.js';
+export { readCertificate, parseCertificate, type CertificateReading, type CertificateKind } from './yea-certificate.js';
+export { renderWithholdingPdf, type WithholdingPdfInput } from './withholding-pdf.js';
 export { PayrollService, type PayrollServiceDeps, type MySlipSummary, type NoticeApplyResult } from './payroll-service.js';
 export { reviewRun, reviewOther, changedLines, explainDiff, type ReviewInput } from './payroll-review.js';
 export { calcBonus, HEALTH_BONUS_CAP, PENSION_BONUS_CAP, type BonusInput } from './bonus.js';

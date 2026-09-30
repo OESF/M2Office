@@ -295,14 +295,16 @@ export class PayrollService {
         pdf.push(sl.employeeName ?? '');
       }
     }
-    // 訂正の回で差額が控除になる人は、次の月の給与で差し引く（第30.10.4節。税と雇用保険は訂正の回で直し済み）
+    // 訂正の回・年末調整の回で差額が控除（不足）になる人は、次の月の給与で差し引く（第30.10.4節・第30.15.1節。税と雇用保険は直し済み）
     let carried = 0;
-    if (run.kind === 'correction') {
+    if (run.kind === 'correction' || run.kind === 'yea') {
       const next = shiftMonth(run.payMonth, 1);
       for (const sl of slips.filter((x) => x.net < 0)) {
         await this.deps.store.addAdjustment(tenantId, {
-          id: randomUUID(), employeeId: sl.employeeId, kind: 'monthly', payMonth: next, label: `${Number(run.payMonth.slice(5, 7))} 月分の訂正`, direction: 'deduct',
-          amount: -sl.net, taxable: false, insurable: false, reason: '訂正の回の差額（控除）', source: 'correction', createdBy: userId, sourceRunId: run.id,
+          id: randomUUID(), employeeId: sl.employeeId, kind: 'monthly', payMonth: next,
+          label: run.kind === 'yea' ? `${run.payMonth.slice(0, 4)} 年の年末調整の不足` : `${Number(run.payMonth.slice(5, 7))} 月分の訂正`, direction: 'deduct',
+          amount: -sl.net, taxable: false, insurable: false, reason: run.kind === 'yea' ? '年末調整の回の不足額' : '訂正の回の差額（控除）',
+          source: run.kind === 'yea' ? 'yea' : 'correction', createdBy: userId, sourceRunId: run.id,
         });
         carried++;
       }
@@ -674,7 +676,9 @@ export class PayrollService {
       const deductions = (b?.deductions ?? 0) - (a?.deductions ?? 0);
       slips.push({
         id: randomUUID(), runId: newId, employeeId: id, employeeName: b?.employeeName ?? a?.employeeName ?? '', gross, deductions, net: gross - deductions, lines,
-        warnings: (b?.warnings ?? []).filter((w) => !w.startsWith('法令の表が監修前')), meta: {},
+        warnings: (b?.warnings ?? []).filter((w) => !w.startsWith('法令の表が監修前')),
+        // 年末調整で足し合わせるため、課税の支給額・社会保険料等・所得税の差を控える
+        meta: { taxablePay: metaOf(b).taxablePay - metaOf(a).taxablePay, social: metaOf(b).social - metaOf(a).social, tax: metaOf(b).tax - metaOf(a).tax },
       });
     }
     if (slips.length === 0) return { error: '確定した明細と、今の情報で計算した額に差がありません' };
@@ -759,4 +763,16 @@ function diffLines(before: PayLine[], after: PayLine[]): PayLine[] {
     out.push({ code, label: `${(b ?? a)!.label}（差額）`, amount: d, kind, basis: { 訂正前: yen(a?.amount ?? 0), 訂正後: yen(b?.amount ?? 0) } });
   }
   return out;
+}
+
+/**
+ * 明細の課税の支給額・社会保険料等・所得税（年末調整で足し合わせる）。控えの無い古い明細は行から求める。
+ */
+export function metaOf(slip: PaySlip | undefined): { taxablePay: number; social: number; tax: number } {
+  if (!slip) return { taxablePay: 0, social: 0, tax: 0 };
+  const sum = (codes: string[]) => slip.lines.filter((l) => codes.includes(l.code)).reduce((s, l) => s + l.amount, 0);
+  const social = slip.meta?.social ?? sum(['health', 'child', 'pension', 'employment']);
+  const tax = slip.meta?.tax ?? sum(['income-tax']);
+  const taxablePay = slip.meta?.taxablePay ?? (slip.meta?.taxable !== undefined ? slip.meta.taxable + social : (prevTaxableOf(slip) ?? 0) + social);
+  return { taxablePay, social, tax };
 }

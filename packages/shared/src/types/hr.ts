@@ -436,8 +436,88 @@ export interface PaySlip {
   warnings: string[];
   /** 勤怠の期間の集計（賃金台帳に使う）。 */
   attendance?: Partial<AttTotals>;
-  /** 計算の控え（社会保険料等を引いた後の額・標準賞与額。次の賞与の税と上限に使う）。 */
-  meta?: { taxable?: number; stdBonusHealth?: number; stdBonusPension?: number };
+  /** 計算の控え（社会保険料等を引いた後の額・標準賞与額・課税の支給額・社会保険料等・所得税。賞与と年末調整に使う）。 */
+  meta?: { taxable?: number; stdBonusHealth?: number; stdBonusPension?: number; taxablePay?: number; social?: number; tax?: number; yea?: YeaResult };
+}
+
+/** 障害者の区分（年末調整。第30.15.1節）。 */
+export type YeaDisability = 'none' | 'general' | 'special' | 'special-cohabiting';
+
+/** 年末調整の申告の、配偶者・扶養親族の 1 人。 */
+export interface YeaPerson {
+  name: string;
+  relation: string;
+  birthDate: string | null;
+  /** その年の合計所得金額の見積もり（円）。 */
+  incomeEstimate: number;
+  disability: YeaDisability;
+  /** 同居しているか（同居老親等・同居特別障害者の判定）。 */
+  cohabiting: boolean;
+}
+
+/** 年末調整の申告（年ごと・人ごと。第30.15.1節）。 */
+export interface YeaDeclaration {
+  year: number;
+  self: {
+    /** 給与以外の所得の見積もり（合計所得金額に足す）。 */
+    otherIncome: number;
+    disability: 'none' | 'general' | 'special';
+    widow: 'none' | 'widow' | 'single-parent';
+    workingStudent: boolean;
+  };
+  spouse: YeaPerson | null;
+  dependents: YeaPerson[];
+  /** 保険料控除申告書の支払った保険料（円）。 */
+  insurance: {
+    lifeNewGeneral: number; lifeOldGeneral: number; lifeNewCare: number; lifeNewPension: number; lifeOldPension: number;
+    earthquake: number; oldLongTerm: number; social: number; smallBusiness: number;
+  };
+  /** 住宅借入金等特別控除申告書の控除額（年末調整で引く税額）。 */
+  housingCredit: number;
+  /** 年の途中で入社した人の、前の勤め先の源泉徴収票の額。 */
+  previousJob: { pay: number; social: number; tax: number } | null;
+}
+
+/** 年末調整の申告の状態。 */
+export interface YeaDeclarationView {
+  employeeId: string;
+  employeeName?: string;
+  year: number;
+  data: YeaDeclaration;
+  submittedAt: string | null;
+  checkedAt: string | null;
+}
+
+/** 年末調整の計算の結果（源泉徴収票に使う）。 */
+export interface YeaResult {
+  year: number;
+  /** 支払金額（この会社の分 ＋ 前の勤め先の分）。 */
+  pay: number;
+  payHere: number;
+  payPrevious: number;
+  /** 給与所得控除後の給与等の金額（所得金額調整控除の後）。 */
+  afterDeduction: number;
+  incomeAdjustment: number;
+  /** 所得控除の内訳（円）。 */
+  deductions: {
+    social: number; smallBusiness: number; life: number; earthquake: number; spouse: number; spouseSpecial: number;
+    dependents: number; specificRelative: number; basic: number; disability: number; widow: number; student: number;
+  };
+  deductionTotal: number;
+  /** 課税給与所得金額（1,000 円未満切り捨て）。 */
+  taxable: number;
+  calculatedTax: number;
+  housingCredit: number;
+  /** 年調年税額（復興特別所得税を含む。100 円未満切り捨て）。 */
+  annualTax: number;
+  /** 源泉徴収した額（この会社の分 ＋ 前の勤め先の分）。 */
+  withheld: number;
+  /** 過不足（プラスは還付、マイナスは不足）。 */
+  difference: number;
+  /** 扶養の数（源泉徴収票の記載事項）。 */
+  counts: { spouse: 'none' | 'general' | 'elderly' | 'special'; specific: number; elderly: number; elderlyCohabiting: number; general: number; under16: number; disabilityGeneral: number; disabilitySpecial: number; disabilitySpecialCohabiting: number; specificRelative: number };
+  /** 根拠（計算の順）。 */
+  basis: [string, string][];
 }
 
 /** 回ごと・人ごとの調整の行（第30.10.4節）。一回だけの支給か控除。 */
@@ -455,7 +535,7 @@ export interface PayAdjustment {
   /** 雇用保険の賃金に入れるか。 */
   insurable: boolean;
   reason: string;
-  source: 'manual' | 'correction';
+  source: 'manual' | 'correction' | 'yea';
 }
 
 /** 賞与の回の入力（第30.11.1節）。 */

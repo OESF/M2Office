@@ -11,6 +11,7 @@ import {
   type HrDeadline, type HrEmployee, type HrEmployeeView, type HrNoticeSettings, type HrPayrollProfile, type HrSettings, type HrTask, type HrTerms, type PayCheck, type PaySlip, type PayTrialCompare,
 } from '@m2office/shared';
 import { api, describeError, type HrImportResult } from './api.js';
+import { YearEndTab } from './YearEnd.js';
 
 const label = <T extends string>(list: { id: T; label: string }[], id: T) => list.find((x) => x.id === id)?.label ?? id;
 /** 日本時間の今日（YYYY-MM-DD）。 */
@@ -25,12 +26,12 @@ const wage = (t: Pick<HrTerms, 'wageType' | 'wageAmount'> | null) => (t && t.wag
  * @param onOpen 従業員を開く・一覧へ戻る
  */
 export function Hr({ employeeId, onOpen }: { employeeId: string | null; onOpen: (id: string | null) => void }) {
-  const [tab, setTab] = useState<'ledger' | 'calendar' | 'attendance' | 'leave' | 'payroll'>('ledger');
+  const [tab, setTab] = useState<'ledger' | 'calendar' | 'attendance' | 'leave' | 'payroll' | 'yea'>('ledger');
   if (employeeId) return <EmployeeDetail id={employeeId} onBack={() => onOpen(null)} />;
   return (
     <>
       <div className="hr-tabs" role="tablist">
-        {([['ledger', '台帳'], ['calendar', '期限'], ['attendance', '勤怠'], ['leave', '有給'], ['payroll', '給与']] as const).map(([k, l]) => (
+        {([['ledger', '台帳'], ['calendar', '期限'], ['attendance', '勤怠'], ['leave', '有給'], ['payroll', '給与'], ['yea', '年末調整']] as const).map(([k, l]) => (
           <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>
         ))}
       </div>
@@ -39,6 +40,7 @@ export function Hr({ employeeId, onOpen }: { employeeId: string | null; onOpen: 
       {tab === 'attendance' && <AttendanceTab />}
       {tab === 'leave' && <LeaveTab />}
       {tab === 'payroll' && <PayrollTab onOpen={onOpen} />}
+      {tab === 'yea' && <YearEndTab RunView={RunPanelFor} />}
     </>
   );
 }
@@ -153,7 +155,7 @@ function EmployeeAttendance({ employeeId, month, closed, onChanged }: { employee
 }
 
 type RunData = Awaited<ReturnType<typeof api.hr.payroll.run>>;
-const KIND_NAME: Record<string, string> = { monthly: '月の給与', bonus: '賞与', correction: '訂正の回' };
+const KIND_NAME: Record<string, string> = { monthly: '月の給与', bonus: '賞与', correction: '訂正の回', yea: '年末調整' };
 
 /**
  * 給与（支給月の計算・点検・確定・明細・振込データ。仕様書 第30.10.1節・第30.10.3節・第30.10.4節・第30.11.1節）。
@@ -938,5 +940,25 @@ function TermsNotice({ employeeId, name }: { employeeId: string; name: string })
         </>
       )}
     </div>
+  );
+}
+
+/** 年末調整の回を、月の給与と同じ形（点検・確定・振込データ・明細）で見せる。 */
+function RunPanelFor({ runId, onChanged }: { runId: string; onChanged: () => void }) {
+  const [data, setData] = useState<RunData | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const load = useCallback(() => { api.hr.payroll.run(runId).then(setData).catch((e) => setError(describeError(e, '読み込めませんでした'))); }, [runId]);
+  useEffect(load, [load]);
+  if (!data) return error ? <p className="error">{error}</p> : null;
+  const act = (f: () => Promise<unknown>, fail: string) => { setBusy(true); setError(null); void f().catch((e) => setError(describeError(e, fail))).finally(() => setBusy(false)); };
+  const at = (v?: string | null) => (v ? new Date(v).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }) : '');
+  return (
+    <>
+      {error && <p className="error">{error}</p>}
+      {note && <p className="ok-msg small">{note}</p>}
+      <RunPanel data={data} busy={busy} act={act} setNote={setNote} onOpen={() => undefined} month={data.run.payMonth} recalc={async () => undefined} at={at} onChanged={() => { load(); onChanged(); }} />
+    </>
   );
 }

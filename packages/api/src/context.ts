@@ -15,7 +15,7 @@ import {
   TenantAiResolver, platformAi, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID,
   defaultGeminiModels, ConnectionCredentials, type ConnectionAuthProvider,
   CardService, PostgresContactStore, cardsAccess, type ContactStore, NoticeService, PostgresNoticeStore,
-  InventoryService, InventoryWatch, InventoryBookings, PostgresInventoryStore, inventoryAccess, HrService, PostgresHrStore, hrAccess, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar,
+  InventoryService, InventoryWatch, InventoryBookings, PostgresInventoryStore, inventoryAccess, HrService, PostgresHrStore, hrAccess, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore,
   type SecretBox, type GeminiModels,
   type FileStore, type TenantExtensions, type HelpArticle, type LlmProvider, type Logger, type Repository, type WorkspaceConnector,
 } from '@m2office/core';
@@ -110,6 +110,8 @@ export interface AppDeps {
     payroll: PayrollService;
     /** 労務カレンダー（第30.19.1節）。 */
     calendar: LaborCalendar;
+    /** 年末調整（第30.15.1節）。 */
+    yea: YearEndService;
     access(tenantId: string, userId: string): Promise<HrSettings | null>;
   };
 }
@@ -310,6 +312,10 @@ export function buildDeps(): AppDeps {
     hr: {
       service: hrService, attendance, access: hrAccess(repo),
       payroll, calendar: laborCalendar,
+      yea: new YearEndService({
+        store: new PostgresYeaStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+        payrollStore, hrStore: hrService.deps.store, repo, law: LAW_BOOK, llm: (tenantId) => ai.llmFor(tenantId), allowUnverified: debug !== null,
+      }),
     },
   };
 }

@@ -3,7 +3,7 @@
  */
 
 import type {
-  BonusRates, EmploymentRates, GradeRow, GradeTable, HealthRates, LawBook, LawMeta, MinimumWage, RateTable, WithholdingMonthly,
+  BonusRates, YeaRules, EmploymentRates, GradeRow, GradeTable, HealthRates, LawBook, LawMeta, MinimumWage, RateTable, WithholdingMonthly,
 } from './types.js';
 
 /** 引いた値と、使った表の版。 */
@@ -214,6 +214,11 @@ export class Law {
       }
     }
     return null;
+  }
+
+  /** その年の年末調整の決まり（無ければ `null`）。 */
+  yeaRules(year: number): YeaRules | null {
+    return this.book.yea.find((r) => r.year === year) ?? null;
   }
 
   /** 地域別最低賃金（円）。その日に効いている額。 */

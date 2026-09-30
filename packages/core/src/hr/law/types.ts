@@ -107,6 +107,44 @@ export interface BonusRates extends LawMeta {
   rows: BonusRateRow[];
 }
 
+/** 控除の段階の式 [以下, 率, 足す額]（以下が `null` なら定額）。 */
+export type StepFormula = [number | null, number, number][];
+
+/** 年末調整の決まり（その年の版。仕様書 第30.15.1節）。 */
+export interface YeaRules extends LawMeta {
+  year: number;
+  /** この版を使う年末調整の日（令和8年分は 12 月 1 日以後）。 */
+  appliesFrom: string;
+  /** 年末調整の対象になる給与の上限。 */
+  payLimit: number;
+  /** 給与所得控除後の給与等の金額（表の外の式）。 */
+  employment: { zeroBelow: number; linearBelow: number; linearMinus: number; over: { min: number; max: number | null; rate: number; minus: number }[] };
+  /** 給与所得控除後の給与等の金額の表 [以上, 未満, 控除後]。 */
+  employmentTable: [number, number, number][];
+  incomeAdjustment: { payOver: number; payCap: number; rate: number; max: number };
+  /** 基礎控除（合計所得金額が max 以下の段。max が `null` は最後）。 */
+  basic: { max: number | null; amount: number }[];
+  /** 配偶者控除と配偶者特別控除。金額は本人の合計所得金額の段（selfBands）ごと。 */
+  spouse: { selfBands: number[]; incomeMax: number; general: number[]; elderly: number[]; special: { min: number; max: number; amounts: number[] }[] };
+  dependents: { incomeMax: number; general: number; specific: number; elderly: number; elderlyCohabiting: number };
+  /** 特定親族特別控除（親族の合計所得金額が min 超 max 以下）。 */
+  specificRelative: { min: number; max: number; amount: number }[];
+  disability: { general: number; special: number; specialCohabiting: number };
+  widow: number;
+  singleParent: number;
+  singleParentIncomeMax: number;
+  workingStudent: number;
+  workingStudentIncomeMax: number;
+  life: { formulaI: StepFormula; formulaII: StepFormula; formulaIII: StepFormula; generalMax: number; generalMaxSpecial: number; pensionMax: number; totalMax: number };
+  earthquake: { max: number; oldLongTerm: StepFormula };
+  /** 算出所得税額の速算表（課税給与所得金額が max 以下）。 */
+  rates: { max: number; rate: number; deduction: number }[];
+  /** これを超える課税給与所得金額は年末調整の対象外。 */
+  taxableLimit: number;
+  /** 復興特別所得税を含む倍率。 */
+  surtax: number;
+}
+
 /** 地域別最低賃金（都道府県ごと・発効日つき）。 */
 export interface MinimumWage extends LawMeta {
   prefectures: Record<string, { amount: number; from: string }[]>;
@@ -124,4 +162,6 @@ export interface LawBook {
   /** 賞与に対する源泉徴収税額の算出率の表。 */
   bonus: BonusRates[];
   minimumWage: MinimumWage[];
+  /** 年末調整の決まり（年ごと）。 */
+  yea: YeaRules[];
 }

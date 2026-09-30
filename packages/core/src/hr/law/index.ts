@@ -6,6 +6,7 @@ import type { LawBook } from './types.js';
 import { CARE_R8, CHILD_SUPPORT_R8, GRADES_R8, HEALTH_R8, PENSION } from './social-2026.js';
 import { EMPLOYMENT_R8, MINIMUM_WAGE, WITHHOLDING_R8 } from './tax-2026.js';
 import { BONUS_R8 } from './bonus-2026.js';
+import { YEA_R8 } from './yea-2026.js';
 
 /** いま本体が持つ法令の表。 */
 export const LAW_BOOK: LawBook = {
@@ -18,6 +19,7 @@ export const LAW_BOOK: LawBook = {
   withholding: [WITHHOLDING_R8],
   bonus: [BONUS_R8],
   minimumWage: [MINIMUM_WAGE],
+  yea: [YEA_R8],
 };
 
 export type * from './types.js';

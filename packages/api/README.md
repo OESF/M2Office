@@ -202,12 +202,17 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/hr/payroll/runs/:id/transfer` | 振込データ（全銀協の形式・シフト JIS・120 バイトの固定長）を作る。確定した回から**管理者だけ**。作れなければ 400 と `problems`。`X-Transfer-Count`・`X-Transfer-Excluded`（振込先の無い人） |
 | `GET /v1/hr/payroll/slips/:id/pdf` ／ `GET /v1/hr/payroll/ledger` | 明細の PDF ／ 賃金台帳（`year`・`format`: csv・xlsx。確定した月の給与と法定の記載事項） |
 | `POST /v1/hr/payroll/resident-tax/read` ／ `POST /v1/hr/payroll/trials` | 住民税の決定通知書（`file`: PDF・写真）を AI で読み、氏名で当てて給与の情報に入れる（6 月分 ＋ 月額 × 11 ≠ 年税額は入れない。読めなければ 422）／ 試しの計算（`month`・`file`: 今の方法の給与の表。人ごと・項目ごとの差を `run.compare` に返す） |
+| `GET /v1/hr/yea` ／ `POST .../yea/request` ／ `POST .../yea/calculate` | 年末調整（Phase 2 段 2。第30.15.1節）: 一覧（`year`。対象・申告の状態・不備・年末調整の回）／ 対象でまだ出していない人に申告を頼む ／ 計算して年末調整の回（下書き）にする（`year`・`payDate`: 還付を払う日） |
+| `GET /v1/hr/yea/:employeeId` ／ `PUT ...` ／ `POST .../check` | 1 人の申告（`year`）／ 担当者が直す（`year`・`data`）／ 確かめた（`checked`。本人は直せなくなる） |
+| `GET /v1/hr/yea/:employeeId/withholding.pdf` ／ `GET /v1/hr/yea/report` | 源泉徴収票（本人交付用）の PDF ／ 源泉徴収票（提出用）・給与支払報告書の下書き（`year`・`format`: csv・xlsx）。マイナンバーの欄は空ける |
 | `GET /v1/hr/users` | 台帳に結び付けられる利用者（名前とメールアドレス） |
 | `GET /v1/me/hr` | 本人の「給与・勤怠」（第30.25節）: 打刻の状態・期間の勤怠・有給の残りと取得義務。台帳に結び付いていなければ 404（同じメールアドレスなら自動で結び付く） |
 | `POST /v1/me/hr/punch` ／ `PUT /v1/me/hr/days/:date` | 本人が打刻する（`kind`: in・out・break_start・break_end。できない打刻は 409）／ 1 日を直す（人事区画の人に知らせる。締めた期間は 400） |
 | `POST /v1/me/hr/leave` ／ `DELETE /v1/me/hr/leave/:id` | 本人が有給を取る（`date`・`days`: 1 か 0.5。承認の段は挟まず、人事区画の人に知らせる）／ 取り消す |
 | `GET /v1/me/hr/payslips` ／ `GET .../payslips/:id` ／ `GET .../payslips/:id/pdf` | 本人の確定した給与明細（**同意が無ければ出さない**）／ 1 つと前の回からの差の説明 ／ PDF |
 | `PUT /v1/me/hr/payslip-consent` | 明細を画面で受け取る同意（`consent`: true・false。いつでも取り消せる） |
+| `GET /v1/me/hr/yea` ／ `PUT /v1/me/hr/yea` | 本人の年末調整（`year`。申告・対象か・直せるか・不備・結果）／ 申告を残す・出す（`year`・`data`・`submit`。出すと人事区画の人に知らせる。確かめた後は 400） |
+| `POST /v1/me/hr/yea/certificate` ／ `GET /v1/me/hr/yea/withholding.pdf` | 控除証明書か前の勤め先の源泉徴収票を読む（`file`。申告には入れず、ファイルも残さない）／ 自分の源泉徴収票（確定した結果・明細の同意がある人） |
 | `GET /v1/hr/roster` | 労働者名簿を書き出す（`format=csv` か `xlsx`。事業主本人は載せない。監査ログに残す） |
 | `GET /v1/inventory/bookings` | 今日（日本時間）から先の予約と取り置き・予約の日を過ぎた取り置き（`overdue`）・使う品目の分からない予約（`unmapped`）。予約との引き当てを切っている会社は 403（第29.13節） |
 | `POST /v1/inventory/bookings` | 取り置く（`itemId`・`qty`・`startsAt`・任意の `externalId`・`menu`）。使える数から引く |

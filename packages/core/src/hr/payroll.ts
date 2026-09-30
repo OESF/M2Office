@@ -41,8 +41,8 @@ export interface SlipResult {
   warnings: string[];
   /** 使った法令の表（版と監修の状態）。 */
   tables: LawMeta[];
-  /** 計算の控え（社会保険料等を引いた後の額。次の賞与の税に使う）。 */
-  meta: { taxable?: number; stdBonusHealth?: number; stdBonusPension?: number };
+  /** 計算の控え（社会保険料等を引いた後の額・課税の支給額・社会保険料等・所得税。賞与と年末調整に使う）。 */
+  meta: { taxable?: number; stdBonusHealth?: number; stdBonusPension?: number; taxablePay?: number; social?: number; tax?: number };
 }
 
 /** 調整の行を明細の行にし、所得税と雇用保険の対象から外す額を返す（第30.10.4節）。 */
@@ -300,5 +300,8 @@ export function calcSlip(input: SlipInput): SlipResult {
 
   const deductions = lines.filter((l) => l.kind === 'deduct').reduce((s, l) => s + l.amount, 0);
   for (const m of tables.values()) if (m.review.status !== 'verified') { warnings.push('法令の表が監修前です（確定には使えません）'); break; }
-  return { gross, deductions, net: gross - deductions, lines, warnings, tables: [...tables.values()], meta: { taxable: Math.max(0, taxable) } };
+  const tax = lines.find((l) => l.code === 'income-tax')?.amount ?? 0;
+  return { gross, deductions, net: gross - deductions, lines, warnings, tables: [...tables.values()], meta: {
+    taxable: Math.max(0, taxable), taxablePay: gross - taxFreeCommute - taxFreeItems - adj.notTaxable, social: social + employment, tax,
+  } };
 }
