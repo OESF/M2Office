@@ -77,7 +77,7 @@ export function reviewRun(input: ReviewInput): PayCheck[] {
       if (w.startsWith('法令の表が監修前')) continue;
       if (w.startsWith('雇用条件に賃金の額がありません')) stops.push({ level: 'stop', code: 'no-wage', text: w, ...who });
       else if (MISSING_TABLE.test(w)) stops.push({ level: 'stop', code: 'missing-table', text: w, ...who });
-      else checks.push({ level: 'check', code: /最低賃金/.test(w) ? 'min-wage' : /欠勤/.test(w) ? 'absence' : /標準報酬月額が未登録/.test(w) ? 'std-missing' : 'note', text: w, ...who });
+      else checks.push({ level: 'check', code: /最低賃金/.test(w) ? 'min-wage' : /欠勤/.test(w) ? 'absence' : /標準報酬月額が未登録/.test(w) ? 'std-missing' : /表に更新されていません/.test(w) ? 'stale-table' : 'note', text: w, ...who });
     }
     // 前の確定した回との差
     const prev = input.previous.get(s.employeeId);

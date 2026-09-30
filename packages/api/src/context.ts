@@ -212,7 +212,7 @@ export function buildDeps(): AppDeps {
   });
   const payrollStore = new PostgresPayrollStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
   // 労務カレンダー（第30.19.1節）
-  const laborCalendar = new LaborCalendar({ hrStore: hrService.deps.store, payrollStore, attendance, repo });
+  const laborCalendar = new LaborCalendar({ hrStore: hrService.deps.store, payrollStore, attendance, repo, law: LAW_BOOK });
   const engine = new RunEngine({
     repo, llm, registry, connector, files, logger: log, research, cards, notices, inventory,
     hr: { calendar: laborCalendar, access: hrAccess(repo) },
@@ -234,6 +234,8 @@ export function buildDeps(): AppDeps {
   const secretary = new Secretary({
     // 勤怠と有給・本人の給与明細（第30.20節）
     attendance, payroll,
+    // 人事の担当者の依頼（第30.20.1節）
+    hrStaff: { service: hrService, payroll, calendar: laborCalendar, access: hrAccess(repo) },
     repo, llm, connector, agents: OFFICIAL_AGENTS, help, agentsFor, llmFor: (t) => ai.llmFor(t), notices,
     // デバッグモードでは、振り分けの経過を記録に残す（仕様書 第20.4.1節「デバッグモード」）
     ...(debug ? { onTrace: (tenantId: string, userId: string, action: string, target: string, detail?: Record<string, unknown>) => {

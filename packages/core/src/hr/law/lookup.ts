@@ -12,9 +12,41 @@ export interface LawHit<T> {
   table: LawMeta;
 }
 
+/** 前の月（YYYY-MM）。 */
+function prevMonth(ym: string): string {
+  const [y, m] = ym.split('-').map(Number) as [number, number];
+  return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
+}
+
 /** 効き始めが `key` 以前で最も新しい表。 */
 function latest<T extends { effectiveFrom: string }>(list: T[], key: string): T | null {
   return [...list].filter((t) => t.effectiveFrom <= key).sort((a, b) => b.effectiveFrom.localeCompare(a.effectiveFrom))[0] ?? null;
+}
+
+/** 毎年変わる表と、変わる月（仕様書 第30.18.1節）。 */
+const YEARLY: { key: 'health' | 'care' | 'childSupport' | 'employment' | 'withholding'; label: string; month: number }[] = [
+  { key: 'health', label: '協会けんぽの健康保険料率', month: 3 },
+  { key: 'care', label: '介護保険料率', month: 3 },
+  { key: 'childSupport', label: '子ども・子育て支援金率', month: 4 },
+  { key: 'employment', label: '雇用保険料率', month: 4 },
+  { key: 'withholding', label: '源泉徴収税額表（月額表）', month: 1 },
+];
+
+/** 更新されていない表 1 つ。 */
+export interface StaleTable {
+  label: string;
+  /** 本来はこの月（YYYY-MM）から新しい表が効く。 */
+  expectedFrom: string;
+}
+
+/** これから効く表 1 つ。 */
+export interface LawChange {
+  label: string;
+  /** 効き始め（YYYY-MM-DD）。 */
+  date: string;
+  /** 保険料の月か、支払う給与か。 */
+  applies: string;
+  detail: string;
 }
 
 /** 法令の表を引く道具。 */
@@ -102,6 +134,63 @@ export class Law {
     const top = [...t.otsuAbove].sort((x, y) => y.min - x.min).find((x) => a >= x.min);
     if (!top) return null;
     return { value: { tax: Math.floor(top.base + ((a - top.min) * top.rate) / 100), row: `乙欄 ${top.base.toLocaleString('ja-JP')} 円 ＋ ${top.min.toLocaleString('ja-JP')} 円を超える分 × ${top.rate}%` }, table: t };
+  }
+
+  /** 表の種類ごとの、持っている版の効き始め（YYYY-MM）。 */
+  private starts(key: (typeof YEARLY)[number]['key']): string[] {
+    if (key === 'withholding') return this.book.withholding.map((w) => `${w.year}-01`);
+    return (this.book[key] as { effectiveFrom: string }[]).map((t) => t.effectiveFrom.slice(0, 7));
+  }
+
+  /**
+   * その月（YYYY-MM）に、毎年変わる表のうち更新されていないもの（H-8）。
+   *
+   * @remarks 表を 1 つも持たない種類は数えない（始まる前の制度など）
+   */
+  staleAt(month: string): StaleTable[] {
+    const out: StaleTable[] = [];
+    for (const y of YEARLY) {
+      const starts = this.starts(y.key);
+      if (starts.length === 0) continue;
+      const yr = Number(month.slice(0, 4));
+      const expected = `${Number(month.slice(5, 7)) >= y.month ? yr : yr - 1}-${String(y.month).padStart(2, '0')}`;
+      if (!starts.some((s) => s >= expected)) out.push({ label: y.label, expectedFrom: expected });
+    }
+    return out;
+  }
+
+  /**
+   * `from`〜`to`（YYYY-MM-DD）に効き始める表（仕様書 第30.18.1節）。協会けんぽは会社の都道府県の新旧の率を添える。
+   */
+  changesBetween(from: string, to: string, prefecture: string): LawChange[] {
+    const out: LawChange[] = [];
+    const inRange = (d: string) => d >= from && d <= to;
+    const month = (ym: string) => `${Number(ym.slice(0, 4))} 年 ${Number(ym.slice(5, 7))} 月分`;
+    for (const t of this.book.health) {
+      const d = `${t.effectiveFrom}-01`;
+      if (!inRange(d)) continue;
+      const before = this.healthRate(prefecture, prevMonth(t.effectiveFrom));
+      const now = t.prefectures[prefecture];
+      out.push({ label: '協会けんぽの健康保険料率', date: d, applies: `${month(t.effectiveFrom)}の保険料から`,
+        detail: prefecture && now !== undefined ? `${prefecture} ${before ? `${before.value}% → ` : ''}${now}%` : t.version });
+    }
+    for (const [label, list] of [['介護保険料率', this.book.care], ['子ども・子育て支援金率', this.book.childSupport], ['厚生年金保険料率', this.book.pension]] as const) {
+      for (const t of list) {
+        const d = `${t.effectiveFrom}-01`;
+        if (!inRange(d)) continue;
+        const before = latest(list.filter((x) => x !== t), prevMonth(t.effectiveFrom));
+        out.push({ label, date: d, applies: `${month(t.effectiveFrom)}の保険料から`, detail: `${before ? `${before.rate}% → ` : ''}${t.rate}%` });
+      }
+    }
+    for (const t of this.book.employment) {
+      if (!inRange(t.effectiveFrom)) continue;
+      out.push({ label: '雇用保険料率', date: t.effectiveFrom, applies: `${t.effectiveFrom.slice(0, 4)} 年 ${Number(t.effectiveFrom.slice(5, 7))} 月 ${Number(t.effectiveFrom.slice(8, 10))} 日から`, detail: `労働者負担 ${Math.round(t.general * 100000) / 100} / 1,000（一般の事業）` });
+    }
+    for (const w of this.book.withholding) {
+      const d = `${w.year}-01-01`;
+      if (inRange(d)) out.push({ label: '源泉徴収税額表（月額表）', date: d, applies: `${w.year} 年 1 月に支払う給与から`, detail: w.version });
+    }
+    return out;
   }
 
   /** 地域別最低賃金（円）。その日に効いている額。 */

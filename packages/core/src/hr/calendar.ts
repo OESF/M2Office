@@ -33,6 +33,8 @@ export interface CalendarInput {
   /** 有給の取得義務が足りない人。 */
   obligations: { employeeId: string; name: string; deadline: string; taken: number; required: number }[];
   payments: MonthPayment[];
+  /** 法令の表の変わり目と更新待ち（第30.18.1節。law から作る）。 */
+  law?: HrDeadline[];
 }
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
@@ -136,6 +138,7 @@ export function buildDeadlines(input: CalendarInput): HrDeadline[] {
     if (!k.dueOn || k.doneAt || k.dueOn > end) continue;
     out.push({ date: k.dueOn, kind: 'task', title: `${k.title}（${k.employeeName ?? ''}さん）`, detail: k.kind === 'hire' ? '入社の手続き' : '退職の手続き', employeeId: k.employeeId, overdue: k.dueOn < today });
   }
+  for (const d of input.law ?? []) push(d);
   for (const o of input.obligations) {
     if (o.deadline > end) continue;
     push({ date: o.deadline, kind: 'leave-obligation', title: `有給の取得義務（${o.name}さん）`, detail: `あと ${o.required - o.taken} 日取る必要がある`, employeeId: o.employeeId });

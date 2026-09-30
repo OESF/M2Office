@@ -27,6 +27,7 @@ export { buildTermsNotice, renderTermsNoticePdf, type NoticeItem, type TermsNoti
 export { buildDeadlines, nextBusinessDay, isClosedDay, type CalendarInput, type MonthPayment } from './calendar.js';
 export { LaborCalendar, type LaborCalendarDeps } from './calendar-service.js';
 export { HR_TOOLS, hrDeadlines, type HrToolContext } from './tools.js';
+export { parseProposal, proposeFromRules, type ProposalField } from './rules-proposal.js';
 export { PayrollService, type PayrollServiceDeps, type MySlipSummary, type NoticeApplyResult } from './payroll-service.js';
 export { reviewRun, changedLines, explainDiff, type ReviewInput } from './payroll-review.js';
 export { buildZenginFile, toZenginKana, type ZenginClient, type ZenginPayee, type ZenginProblem } from './zengin.js';

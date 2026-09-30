@@ -9,7 +9,7 @@
  */
 
 import { useEffect, useRef, useState, type DragEvent } from 'react';
-import { api, ApiError, describeError, type AccessOptions, type ExtensionView, type ScopeValue } from './api.js';
+import { api, ApiError, describeError, type AccessOptions, type ExtensionView, type HrProposalField, type ScopeValue } from './api.js';
 import { INVENTORY_FEATURES, type HrSettings, type InventoryBookingSource, type InventoryFeature, type InventorySettings } from '@m2office/shared';
 import { HelpTip, Markdown } from './help.js';
 import { ScopeEditor, ScopeField, useAccessOptions } from './Scope.js';
@@ -398,6 +398,7 @@ function HrFields({ settings, busy, onChanged }: { settings: HrSettings; busy: b
   return (
     <div className="small ext-inventory">
       {error && <p className="error">{error}</p>}
+      <HrProposal settings={settings} onApply={save} />
       <div className="row wrap">
         <label>事業所 <input value={name} onChange={(e) => setName(e.target.value)} onBlur={() => name !== settings.office.name && save({ office: { ...settings.office, name } })} /></label>
         <label>所在地 <input value={address} onChange={(e) => setAddress(e.target.value)} onBlur={() => address !== settings.office.address && save({ office: { ...settings.office, address } })} /></label>
@@ -543,6 +544,68 @@ function BookingSources() {
           .catch((e) => setError(describeError(e, '作れませんでした')))}>受け口を作る</button>
       </div>
       {error && <p className="error">{error}</p>}
+    </div>
+  );
+}
+
+/** 選んだ案を、会社の設定の変更にする（`pay.closingDay` のような場所に値を入れる）。 */
+function proposalPatch(fields: HrProposalField[], current: HrSettings): Partial<HrSettings> {
+  const patch: Record<string, Record<string, unknown>> = {};
+  for (const f of fields) {
+    if (f.problem) continue;
+    const [top, a, b] = f.key.split('.') as [string, string, string | undefined];
+    const base = (patch[top] ??= structuredClone((current as unknown as Record<string, Record<string, unknown>>)[top] ?? {}));
+    if (b === undefined) base[a] = f.value;
+    else (base[a] as Record<string, unknown>)[b] = f.value;
+  }
+  return patch as Partial<HrSettings>;
+}
+
+/**
+ * 就業規則・賃金規程から設定の案を作る（仕様書 第30.8.2節）。AI が読み、今の設定と並べる。入れるかは管理者が選ぶ。
+ */
+function HrProposal({ settings, onApply }: { settings: HrSettings; onApply: (patch: Partial<HrSettings>) => void }) {
+  const input = useRef<HTMLInputElement>(null);
+  const [fields, setFields] = useState<HrProposalField[] | null>(null);
+  const [chosen, setChosen] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const read = (f: File) => {
+    setBusy(true);
+    setError(null);
+    void api.admin.hrProposal(f).then((r) => {
+      setFields(r.fields);
+      setChosen(new Set(r.fields.filter((x) => !x.problem && x.current !== x.proposed).map((x) => x.key)));
+    }).catch((e) => setError(describeError(e, '規程を読めませんでした'))).finally(() => setBusy(false));
+  };
+  return (
+    <div className="hr-proposal">
+      <button className="btn ghost small" disabled={busy} onClick={() => input.current?.click()}>{busy ? '規程を読んでいます…' : '就業規則・賃金規程から設定の案を作る'}</button>
+      <input ref={input} type="file" hidden accept=".pdf,.docx,.txt,.md,image/*" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) read(f); }} />
+      {error && <p className="error">{error}</p>}
+      {fields && (
+        <>
+          <table className="table small">
+            <thead><tr><th /><th>項目</th><th>今</th><th>案</th><th>規程の文</th></tr></thead>
+            <tbody>
+              {fields.map((f) => (
+                <tr key={f.key}>
+                  <td><input type="checkbox" disabled={!!f.problem} checked={chosen.has(f.key)} aria-label={`${f.label}を入れる`}
+                    onChange={() => setChosen((cur) => { const n = new Set(cur); if (n.has(f.key)) n.delete(f.key); else n.add(f.key); return n; })} /></td>
+                  <td>{f.label}</td>
+                  <td className="muted">{f.current}</td>
+                  <td>{f.proposed}{f.problem && <div className="error">{f.problem}</div>}</td>
+                  <td className="muted">{f.quote}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="row">
+            <button className="btn small" disabled={chosen.size === 0} onClick={() => { onApply(proposalPatch(fields.filter((f) => chosen.has(f.key)), settings)); setFields(null); }}>選んだ {chosen.size} 項目を入れる</button>
+            <button className="btn ghost small" onClick={() => setFields(null)}>やめる</button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

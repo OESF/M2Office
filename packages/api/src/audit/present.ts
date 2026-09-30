@@ -157,6 +157,7 @@ const ACTION_LABELS: Record<string, string> = {
   'hr.payroll.view': '給与の明細を見た',
   'hr.payroll.confirm': '給与を確定した（お金の確定）',
   'hr.notice': '労働条件通知書を作った',
+  'hr.proposal': '規程から人事・給与の設定の案を作った',
   'hr.payroll.request': '管理者に給与の確定を頼んだ',
   'hr.payroll.transfer': '振込データを作った（お金の確定）',
   'hr.payroll.pdf': '給与明細の PDF を出した',

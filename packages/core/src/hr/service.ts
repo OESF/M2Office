@@ -13,6 +13,9 @@ import {
 } from '@m2office/shared';
 import { buildTermsNotice, renderTermsNoticePdf, type TermsNoticeDoc } from './terms-notice.js';
 import { termsOn } from './attendance-service.js';
+import { proposeFromRules, type ProposalField } from './rules-proposal.js';
+import { extractPdfText } from '../files/pdf.js';
+import { extractDocxText } from '../files/docx.js';
 import type { Repository } from '../repository/types.js';
 import type { LlmProvider } from '../llm/provider.js';
 import { aiAvailable } from '../llm/unconfigured.js';
@@ -249,6 +252,24 @@ export class HrService {
     const bytes = await renderTermsNoticePdf(doc);
     await this.audit(tenantId, userId, 'hr.notice', 'hr_employee', id, { missing: doc.missing.length });
     return { bytes, doc };
+  }
+
+  /**
+   * 就業規則・賃金規程から、会社の設定の案を作る（第30.8.2節）。ファイルは残さない。
+   *
+   * @param kind ファイルの形式（pdf・docx・txt・画像）
+   */
+  async proposeSettings(tenantId: string, userId: string, bytes: Uint8Array, kind: 'pdf' | 'docx' | 'txt' | 'png' | 'jpeg' | 'webp'): Promise<{ fields: ProposalField[] } | { error: string }> {
+    if (!this.deps.llm) return { error: 'AI が使えないため、規程を読めません' };
+    const llm = await this.deps.llm(tenantId);
+    let text: string | null = null;
+    if (kind === 'pdf') text = (await extractPdfText(bytes)).pages.map((p) => p.text).join('\n');
+    else if (kind === 'docx') text = await extractDocxText(bytes);
+    else if (kind === 'txt') text = new TextDecoder().decode(bytes);
+    const mime = { pdf: 'application/pdf', png: 'image/png', jpeg: 'image/jpeg', webp: 'image/webp', docx: '', txt: '' }[kind];
+    const r = await proposeFromRules(llm, await this.settings(tenantId), text && text.trim().length > 50 ? text : null, mime ? { bytes, mimeType: mime } : undefined);
+    await this.audit(tenantId, userId, 'hr.proposal', 'hr', HR_EXTENSION_ID, 'fields' in r ? { fields: r.fields.length } : { error: true });
+    return r;
   }
 
   /** 済んでいない手続き（期限の近い順）。 */

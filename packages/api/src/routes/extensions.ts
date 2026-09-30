@@ -16,7 +16,7 @@ import {
 } from '@m2office/shared';
 import {
   bundledConnection, builtinSection, consentSnapshot, encodeFiles, unpackExtension, EXTENSION_FILE_MAX_BYTES,
-  ensureHrCompartment, type ExtensionEntry, type ExtensionPackage, type TenantExtensions,
+  ensureHrCompartment, detectKind, MAX_FILE_BYTES, type ExtensionEntry, type ExtensionPackage, type TenantExtensions,
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { tenantOrigin } from '../tenant-origin.js';
@@ -167,6 +167,25 @@ export function extensionsRoute(deps: AppDeps) {
    *
    * @remarks 送られた項目だけを変える。変えた日から効き、作った手続きの期限は変えない
    */
+  /**
+   * 就業規則・賃金規程（PDF・Word・文字・写真）から会社の設定の案を作る（第30.8.2節）。保存はしない（管理者が選んで設定に入れる）。
+   * ファイルは残さない。
+   */
+  app.post(`/${HR_EXTENSION_ID}/proposal`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const form = await c.req.parseBody();
+    const f = form['file'];
+    if (!(f instanceof File)) return c.json({ error: '就業規則か賃金規程のファイルを選んでください' }, 400);
+    if (f.size > MAX_FILE_BYTES) return c.json({ error: 'ファイルが大きすぎます（10 MB まで）' }, 413);
+    const bytes = new Uint8Array(await f.arrayBuffer());
+    const detected = detectKind(f.name || 'rules.pdf', bytes);
+    const kind = detected === 'pdf' || detected === 'docx' || detected === 'png' || detected === 'jpeg' || detected === 'webp' ? detected
+      : /\.(txt|md)$/i.test(f.name) ? 'txt' : null;
+    if (!kind) return c.json({ error: 'PDF・Word・文字のファイルか、写真を選んでください' }, 400);
+    const r = await deps.hr.service.proposeSettings(tenant.id, user.id, bytes, kind);
+    return 'error' in r ? c.json(r, 422) : c.json(r);
+  });
+
   app.put(`/${HR_EXTENSION_ID}/settings`, async (c) => {
     const { tenant, user } = c.get('ctx');
     const b = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));

@@ -3736,6 +3736,20 @@ console.log('\n■ 61. 人事・給与（内蔵の拡張。第30章、段 1: 台
     (cal.body?.items ?? []).some((x) => x.kind === 'withholding' && /^\d{4}-\d{2}-\d{2}$/.test(x.date)) && calMember.status === 403
       ? ok('労務カレンダーは源泉所得税の納付などの期限を出し、人事区画の外の人には見せない') : ng('労務カレンダーが合わない', JSON.stringify({ cal: cal.body, member: calMember.status }).slice(0, 300));
 
+    // 秘書から担当者の仕事を頼む（第30.20.1節）。人事区画の人だけにその場で答える
+    const { body: askDeadlines } = await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message: '労務の期限は？' }) });
+    const { body: askNotice } = await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message: `${tag} 勤怠さんの労働条件通知書を作って` }) });
+    const { body: askCalc } = await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message: '10月の給与を計算して' }) });
+    const { body: askByMember } = await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message: '労務の期限は？' }) }, 'member');
+    /30 日以内の労務の期限/.test(askDeadlines.text ?? '') && /労働条件通知書は/.test(askNotice.text ?? '') && /2026 年 10 月支給の給与を計算しました/.test(askCalc.text ?? '') && !/30 日以内の労務の期限/.test(askByMember.text ?? '')
+      ? ok('人事区画の人は秘書に給与の計算・労働条件通知書・労務の期限を頼め、区画の外の人には答えない') : ng('秘書への担当者の依頼が合わない', JSON.stringify({ d: askDeadlines.text, n: askNotice.text, c: askCalc.text, m: askByMember.text }).slice(0, 500));
+    // 規程から設定の案（第30.8.2節）: 管理者だけ。読めなければ設定を変えない
+    const rulesForm = () => { const f = new FormData(); f.append('file', new Blob(['第1条 賃金は毎月20日に締め、当月25日に支払う。'.repeat(3)], { type: 'text/plain' }), 'rules.txt'); return f; };
+    const prop = await raw('/v1/admin/extensions/hr/proposal', { method: 'POST', body: rulesForm() });
+    const propMember = await raw('/v1/admin/extensions/hr/proposal', { method: 'POST', body: rulesForm() }, 'member');
+    (prop.status === 200 || prop.status === 422) && propMember.status === 403
+      ? ok('規程から設定の案を作れるのは管理者だけ（案を返すだけで、設定は変えない）') : ng('規程の案が合わない', `${prop.status} ${propMember.status}`);
+
     // 試しの計算: 今の方法の表と並べて差を出す（確定できず、本人にも出さない）
     const trialForm = new FormData();
     trialForm.append('month', '2026-08');

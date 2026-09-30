@@ -101,7 +101,7 @@ export interface HrDeadline {
   date: string;
   /** 期間の始まり（年度更新のように期間があるもの）。 */
   from?: string;
-  kind: 'withholding' | 'resident' | 'resident-switch' | 'labor-insurance' | 'santei' | 'yea' | 'annual-report' | 'agreement' | 'health-check' | 'hire-check' | 'contract-end' | 'task' | 'leave-obligation';
+  kind: 'withholding' | 'resident' | 'resident-switch' | 'labor-insurance' | 'santei' | 'yea' | 'annual-report' | 'agreement' | 'health-check' | 'hire-check' | 'contract-end' | 'task' | 'leave-obligation' | 'law-change' | 'law-stale';
   title: string;
   detail: string;
   employeeId?: string;

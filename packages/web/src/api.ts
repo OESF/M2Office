@@ -108,6 +108,17 @@ async function fetchBlob(path: string): Promise<Blob | null> {
   return res.ok ? res.blob() : null;
 }
 
+/** 規程から作った設定の案の 1 項目（仕様書 第30.8.2節）。 */
+export interface HrProposalField {
+  key: string;
+  label: string;
+  current: string;
+  proposed: string;
+  value: unknown;
+  quote: string;
+  problem?: string;
+}
+
 /** 本人の明細の一覧の 1 つ。 */
 export interface MySlipSummary {
   id: string;
@@ -1440,6 +1451,12 @@ export const api = {
     setInventorySettings: (patch: Partial<InventorySettings>) =>
       call<{ ok: true; inventory: InventorySettings }>('/admin/extensions/inventory/settings', { method: 'PUT', body: JSON.stringify(patch) }),
     /** 人事・給与の会社の設定（仕様書 第30.8.1節）。送った項目だけを変える。 */
+    /** 就業規則・賃金規程から、人事・給与の設定の案を作る（仕様書 第30.8.2節）。保存はしない。 */
+    hrProposal: (file: File) => {
+      const form = new FormData();
+      form.append('file', file);
+      return postForm<{ fields: HrProposalField[] }>('/admin/extensions/hr/proposal', form);
+    },
     setHrSettings: (patch: Partial<HrSettings>) =>
       call<{ ok: true; hr: HrSettings }>('/admin/extensions/hr/settings', { method: 'PUT', body: JSON.stringify(patch) }),
     setExtensionEnabled: (id: string, enabled: boolean) =>

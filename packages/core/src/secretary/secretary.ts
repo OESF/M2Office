@@ -26,6 +26,8 @@ import { MAIL_TRIAGE_RULE, mailCheckRequest, mailCheckText, parseMailVerdicts } 
 import { answerAttendance, attendanceRequest, payslipRequest } from './attendance.js';
 import type { AttendanceService } from '../hr/attendance-service.js';
 import type { PayrollService } from '../hr/payroll-service.js';
+import { answerHrStaff, hrStaffRequest, type HrStaffDeps } from './hr-staff.js';
+import { jstDate } from '../hr/attendance.js';
 import { CARD_UPDATE } from '../cards/agents.js';
 import { answerBriefSettings } from '../brief/settings.js';
 import type { NoticeService } from '../notices/service.js';
@@ -101,6 +103,8 @@ export interface SecretaryDeps {
   attendance?: AttendanceService;
   /** 給与（第30.20節）。本人の直近の明細にその場で答える（他人の分は答えない。H-3）。 */
   payroll?: PayrollService;
+  /** 人事の担当者の依頼（第30.20.1節）。人事区画の人の「給与を計算して」「労働条件通知書」「労務の期限」にその場で答える。 */
+  hrStaff?: HrStaffDeps;
   /**
    * 振り分けの経過を知らせる先（デバッグモード。仕様書 第20.4.1節「デバッグモード」）。どの定型の答え・どの業務に回したかと、その理由を受け取る。
    *
@@ -294,6 +298,13 @@ export class Secretary {
       const employee = await this.deps.attendance.selfEmployee(tenantId, userId);
       const text = await answerAttendance(this.deps.attendance, tenantId, userId, employee, att, message);
       await this.audit(tenantId, userId, 'secretary.attendance', att.kind);
+      return { reply: { layer: 'direct', text, evidence: [], tokensUsed: 0 }, keep: true };
+    }
+    // 人事の担当者の依頼（第30.20.1節）。人事区画の人のときだけ。区画の外の人の依頼はふつうの会話に回す
+    const staffReq = this.deps.hrStaff ? hrStaffRequest(message, jstDate(new Date())) : null;
+    if (staffReq && this.deps.hrStaff && await this.deps.hrStaff.access(tenantId, userId)) {
+      const text = await answerHrStaff(this.deps.hrStaff, tenantId, userId, staffReq);
+      await this.audit(tenantId, userId, 'secretary.hr', staffReq.kind);
       return { reply: { layer: 'direct', text, evidence: [], tokensUsed: 0 }, keep: true };
     }
     // 本人の給与明細（「今月の給与明細」「手取りが減ったのはなぜ？」）。本人の分だけ答える

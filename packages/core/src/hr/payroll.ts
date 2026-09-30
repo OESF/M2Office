@@ -268,6 +268,13 @@ export function calcSlip(input: SlipInput): SlipResult {
     if (perHour < mw.value) warnings.push(`時間あたり ${Math.floor(perHour)} 円で、${pref}の最低賃金 ${mw.value} 円を下回っています`);
   }
 
+  // 毎年変わる表が更新されていなければ、前の表で計算したことを示す（H-8・第30.18.1節）。税額表は無ければ計算できないため別に示す
+  const stale = [
+    ...(social > 0 ? law.staleAt(premiumMonth).filter((x) => x.label !== '源泉徴収税額表（月額表）' && x.label !== '雇用保険料率') : []),
+    ...(employment > 0 ? law.staleAt(input.periodEnd.slice(0, 7)).filter((x) => x.label === '雇用保険料率') : []),
+  ];
+  for (const x of stale) warnings.push(`${x.label}が ${Number(x.expectedFrom.slice(0, 4))} 年 ${Number(x.expectedFrom.slice(5, 7))} 月からの表に更新されていません（前の表で計算しました）`);
+
   const deductions = lines.filter((l) => l.kind === 'deduct').reduce((s, l) => s + l.amount, 0);
   for (const m of tables.values()) if (m.review.status !== 'verified') { warnings.push('法令の表が監修前です（確定には使えません）'); break; }
   return { gross, deductions, net: gross - deductions, lines, warnings, tables: [...tables.values()] };

@@ -23,6 +23,7 @@ const ACTIONS: Record<string, string> = {
   'secretary.mail': 'メールを確認して振り分けた',
   'secretary.attendance': '勤怠と有給',
   'secretary.payslip': '本人の給与明細',
+  'secretary.hr': '人事の担当者の依頼',
 };
 
 /**

@@ -14,6 +14,8 @@ import type { AttendanceService } from './attendance-service.js';
 import { termsOn } from './attendance-service.js';
 import { buildDeadlines } from './calendar.js';
 import { jstDate } from './attendance.js';
+import { Law } from './law/lookup.js';
+import type { LawBook } from './law/types.js';
 
 /** 労務カレンダーに要るもの。 */
 export interface LaborCalendarDeps {
@@ -21,6 +23,8 @@ export interface LaborCalendarDeps {
   payrollStore: PayrollStore;
   attendance: AttendanceService;
   repo: Repository;
+  /** 法令の表（変わり目と更新待ちを出す。第30.18.1節）。 */
+  law?: LawBook;
   now?: () => Date;
 }
 
@@ -64,7 +68,25 @@ export class LaborCalendar {
       this.deps.hrStore.listTasks(tenantId, { openOnly: true }),
       this.deps.payrollStore.monthlyTotals(tenantId, `${Number(today.slice(0, 4)) - 1}-01`),
     ]);
-    return { items: buildDeadlines({ today, days, settings, employees, terms, tasks, obligations, payments }), usesPayroll: payments.length > 0 };
+    const law = this.deps.law ? this.lawItems(new Law(this.deps.law), today, days, settings.health.prefecture) : [];
+    return { items: buildDeadlines({ today, days, settings, employees, terms, tasks, obligations, payments, law }), usesPayroll: payments.length > 0 };
+  }
+
+  /** 法令の表の変わり目と、更新待ち（時期の 45 日前から）。 */
+  private lawItems(law: Law, today: string, days: number, prefecture: string): HrDeadline[] {
+    const end = new Date(Date.parse(`${today}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
+    const items: HrDeadline[] = law.changesBetween(today, end, prefecture).map((c) => ({
+      date: c.date, kind: 'law-change', title: `${c.label}が変わります（${c.applies}）`, detail: `${c.detail}。計算は自動で新しい表に切り替わります`,
+    }));
+    const soon = new Date(Date.parse(`${today}T00:00:00Z`) + 45 * 86_400_000).toISOString().slice(0, 7);
+    for (const s of law.staleAt(soon)) {
+      const due = `${s.expectedFrom}-01`;
+      items.push({
+        date: due < today ? today : due, kind: 'law-stale', title: `法令の表の更新待ち（${s.label}・${Number(s.expectedFrom.slice(0, 4))} 年 ${Number(s.expectedFrom.slice(5, 7))} 月分から）`,
+        detail: '運営が表を更新します。更新されるまでは前の表で計算し、明細と点検に示します',
+      });
+    }
+    return items;
   }
 
   /**
