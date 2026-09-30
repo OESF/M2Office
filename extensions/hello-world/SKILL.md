@@ -5,7 +5,7 @@ argument-hint: こんにちは
 arguments: [あいさつ]
 allowed-tools: ""
 metadata:
-  author: 株式会社M2ホールディングス
+  author: M2Office
   version: "2.1.0"
   m2office-id: jp.m2office.samples.hello-world
   m2office-examples: |

@@ -1963,7 +1963,7 @@ console.log('\n■ 41. 帳票の PDF（第9.4.1節、Q-59・Q-57）');
       work: [{
         name: 'pdf.render',
         args: {
-          title: '請求書', to: '株式会社アルファ 御中', from: ['M2ホールディングス株式会社'],
+          title: '請求書', to: '株式会社アルファ 御中', from: ['見本商事株式会社'],
           fields: [{ label: '発行日', value: '2026-09-23' }],
           rows: [{ name: '月額利用料（9 月分）', quantity: 10, unitPrice: 3000 }],
           notes: ['お支払い期限: 2026-10-31'],

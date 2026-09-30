@@ -15,7 +15,7 @@ import {
 const DOC = {
   title: '請求書',
   to: '株式会社アルファ 御中',
-  from: ['M2ホールディングス株式会社'],
+  from: ['見本商事株式会社'],
   fields: [{ label: '発行日', value: '2026-09-23' }],
   rows: [
     { name: '月額利用料（9 月分）', quantity: 10, unitPrice: 3000 },
@@ -107,7 +107,7 @@ test('会社の帳票の体裁を帳票に出す（第15.2.2節、Q-57）', asyn
     notes: ['この帳票だけの備考'],
     style: {
       logo: { bytes: logo, kind: 'png' },
-      from: ['M2ホールディングス株式会社', '東京都…', '登録番号 T1234567890123'],
+      from: ['見本商事株式会社', '東京都…', '登録番号 T1234567890123'],
       bankAccount: '○○銀行 △△支店 普通 1234567',
       notes: '振込手数料は貴社にてご負担ください',
       sealBox: true,
@@ -115,7 +115,7 @@ test('会社の帳票の体裁を帳票に出す（第15.2.2節、Q-57）', asyn
   });
   const text = (await extractPdfText(bytes)).pages[0]?.text ?? '';
   for (const expected of [
-    'M2ホールディングス株式会社', '登録番号 T1234567890123', '印',
+    '見本商事株式会社', '登録番号 T1234567890123', '印',
     'お振込先: ○○銀行 △△支店 普通 1234567', 'この帳票だけの備考', '振込手数料は貴社にてご負担ください',
   ]) {
     assert.ok(text.includes(expected), `${expected} が出ていない: ${text}`);

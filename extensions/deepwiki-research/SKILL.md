@@ -4,7 +4,7 @@ description: GitHub で公開されているリポジトリについて DeepWiki
 when_to_use: 「〇〇（owner/repo）のリポジトリは何をするものか調べて」のように、公開リポジトリについて聞かれたとき
 allowed-tools: deepwiki.ask_wiki_question deepwiki.read_wiki_structure document.create
 metadata:
-  author: 株式会社M2ホールディングス
+  author: M2Office
   version: "2.0.0"
   m2office-id: jp.m2office.samples.deepwiki-research
   m2office-inputs: |

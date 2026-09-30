@@ -6,7 +6,7 @@ argument-hint: 損害賠償が心配。来月から取引を始める新しい�
 allowed-tools: file.read_text pdf.extract knowledge.search docx.render
 effort: xhigh
 metadata:
-  author: 株式会社M2ホールディングス
+  author: M2Office
   version: "1.0.0"
   m2office-id: jp.m2office.legal.contract-review
   m2office-private: "true"

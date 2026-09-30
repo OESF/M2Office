@@ -144,7 +144,7 @@ doc = f"""<!DOCTYPE html>
   <dl>
     <dt>版</dt><dd>{html.escape(version_text)}</dd>
     <dt>最終更新</dt><dd>{html.escape(updated)}</dd>
-    <dt>{html.escape(owner_label)}</dt><dd>{html.escape(owner)}</dd>
+    {f'<dt>{html.escape(owner_label)}</dt><dd>{html.escape(owner)}</dd>' if owner else ''}
     {f'<dt>担当</dt><dd>{html.escape(contact)}</dd>' if contact else ''}
   </dl>
 </section>

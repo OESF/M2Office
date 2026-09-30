@@ -3,7 +3,7 @@
 
 Markdown は章ごとに分けたまま保守し、配布と通読のときだけ 1 本にまとめる。
 
-使い方: python3 tools/pdf/build_manual.py [マニュアルの名前] [出力の PDF] [--company=会社名 --contact=担当者 --to=宛先]
+使い方: python3 tools/pdf/build_manual.py [マニュアルの名前] [出力の PDF] [--owner=作成の法人 --company=会社名 --contact=担当者 --to=宛先]
   マニュアルの名前: developer（既定。docs/developer/）・hr-payroll（docs/manual/hr-payroll/）・inventory（docs/manual/inventory/）・
     hr-review（人事・給与の監修のお願い。docs/review/hr-payroll/）
   既定の出力先は各マニュアルのディレクトリの PDF（版管理の対象外）
@@ -109,7 +109,8 @@ def main():
         parts.append(convert(f, io.open(os.path.join(DOC_DIR, f), encoding='utf-8').read(), None))
 
     version = spec_version()
-    owner = '株式会社M2ホールディングス'
+    # 運営主体の法人名は配備ごとに設定する（仕様書 第23.8.14節）。資料には書かず、当面は空欄（表紙に出さない）
+    owner = OPTS.get('owner', '')
     contact = ''
     if MANUAL.get('fill'):
         # 本文の {{会社名}}・{{担当者}}・{{宛先}} を入れる。入れなければ手で書き込む空欄にする

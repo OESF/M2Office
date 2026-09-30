@@ -5,7 +5,7 @@ when_to_use: 「〇〇について調べてスライドにして」「〇〇の�
 argument-hint: ローカルで動く LLM の最近の製品動向を 8 ページで
 allowed-tools: web.research slides.template slides.create
 metadata:
-  author: 株式会社M2ホールディングス
+  author: M2Office
   version: "2.1.1"
   m2office-id: jp.m2office.samples.research-slides
   m2office-examples: |

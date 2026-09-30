@@ -22,9 +22,12 @@ const F = 'Yu Gothic';
 const MONO = 'Consolas';
 const W = 13.33, H = 7.5, M = 0.7;
 
+/** 運営主体の法人名（配備ごとに決まる。仕様書 第23.8.14節）。当面は空で、表紙とまとめに出さない。M2O_OPERATOR で入れられる。 */
+const OPERATOR = process.env['M2O_OPERATOR'] ?? '';
+
 const p = new pptxgen();
 p.layout = 'LAYOUT_WIDE';
-p.author = '株式会社M2ホールディングス';
+p.author = OPERATOR || 'M2Office';
 p.title = 'M2Office 開発キックオフ';
 
 function darkSlide() { const s = p.addSlide(); s.background = { color: C.dark }; return s; }
@@ -67,7 +70,7 @@ function numberCircle(s, n, x, y, d = 0.5, fill = C.teal) {
   s.addText('中小企業のための AI エージェントプラットフォームを、一緒に作りませんか', {
     x: M, y: 4.25, w: 11, h: 0.4, isTextBox: true, margin: 0,
     fontFace: F, fontSize: 14, color: '7FA5A2' });
-  s.addText('株式会社M2ホールディングス', { x: M, y: 6.5, w: 6, h: 0.35, isTextBox: true, margin: 0,
+  if (OPERATOR) s.addText(OPERATOR, { x: M, y: 6.5, w: 6, h: 0.35, isTextBox: true, margin: 0,
     fontFace: F, fontSize: 12, color: '7FA5A2' });
   s.addNotes('これから作るものと、なぜ面白いかを共有します。');
 }
@@ -567,7 +570,7 @@ sectionSlide('04', 'これから', '何を、どの順で作るか');
     s.addText(v[1], { x: M + 0.8, y: y + 0.4, w: 9.5, h: 0.33, isTextBox: true, margin: 0,
       fontFace: F, fontSize: 13, color: 'A7C4C1' });
   });
-  s.addText('株式会社M2ホールディングス　　もっと自由で楽しい世界を実現したい', {
+  if (OPERATOR) s.addText(OPERATOR, {
     x: M, y: 6.6, w: 11, h: 0.35, isTextBox: true, margin: 0,
     fontFace: F, fontSize: 12, color: '7FA5A2' });
   s.addNotes('質疑へ。');
