@@ -1,6 +1,6 @@
 ---
 title: M2Office 仕様書
-version: 0.183.0
+version: 0.185.0
 status: draft
 created: 2026-09-20
 updated: 2026-09-30
@@ -153,6 +153,7 @@ tags: [M2Office, specification, ai-agent, sme, saas, platform, google-workspace,
 | ADR-0052 | 源泉所得税は税額表で引き、法令の表は公式の発表から取り込んだデータのファイルとして持つ | `docs/adr/0052-payroll-law-tables-as-data.md` |
 | ADR-0053 | 給与の確定は管理者が給与の画面で押すことを承認とし、監修前の表での確定は開発の環境だけに許す | `docs/adr/0053-payroll-confirm-by-admin.md` |
 | ADR-0054 | 人事・給与の責任の範囲（規約）と、記録の保存の期間・消し方 | `docs/adr/0054-payroll-liability-and-retention.md` |
+| ADR-0055 | 従業員の顔写真（取り込み方・見られる人・残す期間） | `docs/adr/0055-employee-photos.md` |
 | 実地の確認の手順 | 自社で使いながら確かめる順番と、用意するもの | `docs/acceptance-test.md` |
 | プラットフォーム API リファレンス | 公開 API の仕様 | TBD: 実装から自動生成 |
 

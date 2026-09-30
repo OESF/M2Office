@@ -32,6 +32,19 @@ export interface HrStore {
   /** 労務カレンダーの知らせを送ったことを残す（初めてなら `true`）。 */
   markCalendarAlert(tenantId: string, key: string): Promise<boolean>;
   setTaskDone(tenantId: string, id: string, done: boolean, by: string): Promise<HrTask | null>;
+  /** 顔写真（1 人 1 枚。無ければ `null`）。 */
+  getPhoto(tenantId: string, employeeId: string): Promise<HrPhoto | null>;
+  /** 顔写真を入れる（前の写真は残さない）。 */
+  setPhoto(tenantId: string, employeeId: string, photo: Omit<HrPhoto, 'updatedAt'>, by: string): Promise<void>;
+  /** 顔写真を外す（外したら `true`）。 */
+  deletePhoto(tenantId: string, employeeId: string): Promise<boolean>;
+}
+
+/** 従業員の顔写真（仕様書 第30.5.4節）。 */
+export interface HrPhoto {
+  mime: 'image/png' | 'image/jpeg';
+  bytes: Uint8Array;
+  updatedAt: string;
 }
 
 const iso = (v: unknown): string => (v instanceof Date ? v.toISOString() : String(v ?? ''));
@@ -43,17 +56,18 @@ interface EmployeeRow {
   id: string; code: string; name: string; kana: string; birth_date: unknown; gender: HrEmployee['gender']; address: string;
   phone: string; email: string; hired_on: unknown; left_on: unknown; leave_reason: string; employment: HrEmployee['employment'];
   category: HrEmployee['category']; department: string; title: string; user_id: string | null; status: HrEmployee['status'];
-  note: string; updated_at: unknown;
+  note: string; updated_at: unknown; photo_at: unknown;
 }
 
 const EMPLOYEE_SELECT = `select id, code, name, kana, birth_date::text, gender, address, phone, email, hired_on::text, left_on::text,
-  leave_reason, employment, category, department, title, user_id, status, note, updated_at from hr_employees`;
+  leave_reason, employment, category, department, title, user_id, status, note, updated_at,
+  (select p.updated_at from hr_employee_photos p where p.employee_id = hr_employees.id) as photo_at from hr_employees`;
 
 const toEmployee = (r: EmployeeRow): HrEmployee => ({
   id: r.id, code: r.code, name: r.name, kana: r.kana, birthDate: day(r.birth_date), gender: r.gender, address: r.address,
   phone: r.phone, email: r.email, hiredOn: day(r.hired_on), leftOn: day(r.left_on), leaveReason: r.leave_reason,
   employment: r.employment, category: r.category, department: r.department, title: r.title, userId: r.user_id,
-  status: r.status, note: r.note, updatedAt: iso(r.updated_at),
+  status: r.status, note: r.note, updatedAt: iso(r.updated_at), photoAt: r.photo_at ? iso(r.photo_at) : null,
 });
 
 interface TermsRow {
@@ -203,5 +217,22 @@ export class PostgresHrStore implements HrStore {
       done_by = case when $3 then $4 else null end where tenant_id = $1 and id = $2
       returning id, employee_id, kind, code, title, due_on::text, done_at, done_by`, [tenantId, id, done, by]);
     return rows[0] ? toTask(rows[0]) : null;
+  }
+
+  async getPhoto(tenantId: string, employeeId: string): Promise<HrPhoto | null> {
+    const rows = await this.q<{ mime: HrPhoto['mime']; bytes: Buffer; updated_at: unknown }>(tenantId,
+      `select mime, bytes, updated_at from hr_employee_photos where tenant_id = $1 and employee_id = $2`, [tenantId, employeeId]);
+    return rows[0] ? { mime: rows[0].mime, bytes: new Uint8Array(rows[0].bytes), updatedAt: iso(rows[0].updated_at) } : null;
+  }
+
+  async setPhoto(tenantId: string, employeeId: string, photo: Omit<HrPhoto, 'updatedAt'>, by: string): Promise<void> {
+    await this.q(tenantId, `insert into hr_employee_photos (tenant_id, employee_id, mime, bytes, updated_by) values ($1, $2, $3, $4, $5)
+      on conflict (tenant_id, employee_id) do update set mime = excluded.mime, bytes = excluded.bytes, updated_by = excluded.updated_by, updated_at = now()`,
+    [tenantId, employeeId, photo.mime, Buffer.from(photo.bytes), by]);
+  }
+
+  async deletePhoto(tenantId: string, employeeId: string): Promise<boolean> {
+    const rows = await this.q<{ employee_id: string }>(tenantId, `delete from hr_employee_photos where tenant_id = $1 and employee_id = $2 returning employee_id`, [tenantId, employeeId]);
+    return rows.length > 0;
   }
 }

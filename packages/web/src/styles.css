@@ -1489,5 +1489,18 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 
 /* 手当の扱い（第30.10.1節） */
 .hr-allowance { display: inline-flex; gap: 4px; align-items: center; }
+/* 従業員の顔写真（仕様書 第30.5.4節）。円に収め、無ければ人の形のアイコン */
+.hr-face {
+  flex: none; display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%;
+  background: var(--neutral-soft); color: var(--muted); overflow: hidden; vertical-align: middle;
+}
+.hr-face img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.hr-face.large { width: 72px; height: 72px; }
+.hr-name { white-space: nowrap; }
+.hr-name .hr-face { margin-right: 6px; }
+.hr-head { gap: calc(12px * var(--space-scale)); align-items: center; margin-bottom: calc(8px * var(--space-scale)); }
+.hr-head h2 { margin: 0; }
+.hr-photo { display: flex; gap: 8px; align-items: center; }
+.hr-photo-actions { display: flex; flex-direction: column; gap: 2px; }
 .hr-allowances { width: auto; margin: 6px 0; }
 .hr-allowances th, .hr-allowances td { padding: 3px 10px; }

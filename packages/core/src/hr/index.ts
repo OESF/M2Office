@@ -3,7 +3,8 @@
  */
 
 export { HR_PACKAGE, HR_EXTENSION_VERSION } from './package.js';
-export { PostgresHrStore, type HrStore, type EmployeeRecord, type TermsRecord } from './store.js';
+export { PostgresHrStore, type HrStore, type HrPhoto, type EmployeeRecord, type TermsRecord } from './store.js';
+export { matchText as matchPhotoText, parseNameTag, photoMime, HR_PHOTO_MAX_BYTES } from './photos.js';
 export {
   HrService, hrAccess, ensureHrCompartment, jstToday, toHrDate, toFlag, HR_IMPORT_FIELDS, HR_IMPORT_MAX_ROWS, HR_IMPORT_PROCEDURE_DAYS,
   type HrServiceDeps, type EmployeeInput, type TermsInput, type HrImportResult, type HrImportField,

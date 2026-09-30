@@ -151,10 +151,10 @@ export interface MySlipSummary {
   net: number;
 }
 
-/** ファイルを送る（multipart）。失敗なら ApiError（`problems` つき）。 */
-async function postForm<T>(path: string, form: FormData): Promise<T> {
+/** ファイルを送る（multipart。既定は POST）。失敗なら ApiError（`problems` つき）。 */
+async function postForm<T>(path: string, form: FormData, method: 'POST' | 'PUT' = 'POST'): Promise<T> {
   const res = await fetch(`/v1${path}`, {
-    method: 'POST', credentials: 'same-origin', body: form,
+    method, credentials: 'same-origin', body: form,
     headers: { ...(devTenant ? { 'x-tenant': devTenant } : {}), ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}) },
   });
   const body = await res.json().catch(() => ({ error: '通信に失敗しました' }));
@@ -1170,6 +1170,20 @@ export const api = {
     },
     /** 労務の期限（仕様書 第30.19.1節）。 */
     calendar: (days = 90) => call<{ items: HrDeadline[] }>(`/hr/calendar?days=${days}`),
+    /** 顔写真を入れる（縮めた JPEG。第30.5.4節）。 */
+    setPhoto: (id: string, photo: Blob) => {
+      const form = new FormData();
+      form.append('file', photo, 'photo.jpg');
+      return postForm<{ photoAt: string }>(`/hr/employees/${encodeURIComponent(id)}/photo`, form, 'PUT');
+    },
+    /** 顔写真を外す。 */
+    deletePhoto: (id: string) => call<{ ok: true }>(`/hr/employees/${encodeURIComponent(id)}/photo`, { method: 'DELETE' }),
+    /** まとめて取り込むときの 1 枚。ファイル名か写真の中の名札で人に当てる（当てられなければ ApiError）。 */
+    importPhoto: (name: string, photo: Blob) => {
+      const form = new FormData();
+      form.append('file', photo, name);
+      return postForm<{ employeeId: string; name: string; by: 'file-name' | 'name-tag' }>('/hr/photos/import', form);
+    },
     leave: (id: string, leftOn: string, reason: string) =>
       call<{ employee: HrEmployee; tasks: number }>(`/hr/employees/${encodeURIComponent(id)}/leave`, { method: 'POST', body: JSON.stringify({ leftOn, reason }) }),
     setTaskDone: (id: string, done: boolean) =>

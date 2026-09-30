@@ -5,12 +5,14 @@
  * 説明文は常に出さない（原則 u11）。分からなければ秘書に聞く。
  */
 
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
 import {
   HR_CATEGORIES, HR_EMPLOYMENTS, HR_WAGE_TYPES,
   type HrDeadline, type HrEmployee, type HrEmployeeView, type HrNoticeSettings, type HrPayrollProfile, type HrSettings, type HrTask, type HrTerms, type PayCheck, type PaySlip, type PayTrialCompare,
 } from '@m2office/shared';
 import { api, describeError, type HrImportResult } from './api.js';
+import { hrPhotoUrl, shrinkPhoto } from './photo.js';
+import { Icon } from './nav.js';
 import { YearEndTab } from './YearEnd.js';
 import { SocialTab } from './SocialInsurance.js';
 import { LaborTab } from './LaborInsurance.js';
@@ -658,7 +660,9 @@ function EmployeeList({ onOpen }: { onOpen: (id: string) => void }) {
   const [imported, setImported] = useState<HrImportResult | null>(null);
   const [exporting, setExporting] = useState(false);
   const [booksNote, setBooksNote] = useState<string | null>(null);
+  const [photos, setPhotos] = useState<{ done: number; total: number; set: string[]; failed: { file: string; reason: string }[] } | null>(null);
   const file = useRef<HTMLInputElement>(null);
+  const photoFiles = useRef<HTMLInputElement>(null);
   const load = useCallback(() => {
     api.hr.list().then(setData).catch((e) => setError(describeError(e, '読み込めませんでした')));
   }, []);
@@ -676,6 +680,22 @@ function EmployeeList({ onOpen }: { onOpen: (id: string) => void }) {
       setError(describeError(e, '取り込めませんでした'));
     }
   };
+  // 顔写真をまとめて取り込む（1 枚ずつ送り、ファイル名か写真の中の名札で人に当てる。第30.5.4節）
+  const importPhotos = async (files: File[]) => {
+    const r = { done: 0, total: files.length, set: [] as string[], failed: [] as { file: string; reason: string }[] };
+    setPhotos({ ...r });
+    for (const f of files) {
+      try {
+        const got = await api.hr.importPhoto(f.name, await shrinkPhoto(f, 1024));
+        r.set.push(got.name);
+      } catch (e) {
+        r.failed.push({ file: f.name, reason: e instanceof Error ? e.message : String(e) });
+      }
+      r.done++;
+      setPhotos({ ...r });
+    }
+    load();
+  };
   return (
     <div className="hr">
       <div className="row wrap hr-toolbar">
@@ -683,6 +703,8 @@ function EmployeeList({ onOpen }: { onOpen: (id: string) => void }) {
         <button className={adding ? 'btn' : 'btn ghost'} onClick={() => setAdding(!adding)}>従業員を足す</button>
         <button className="btn ghost" onClick={() => file.current?.click()}>取り込む</button>
         <input ref={file} type="file" accept=".csv,.xlsx" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void importFile(f); }} />
+        <button className="btn ghost" disabled={!!photos && photos.done < photos.total} onClick={() => photoFiles.current?.click()}>顔写真を取り込む</button>
+        <input ref={photoFiles} type="file" accept="image/*" multiple hidden onChange={(e) => { const fs = Array.from(e.target.files ?? []); e.target.value = ''; if (fs.length) void importPhotos(fs); }} />
         <button className="btn ghost" onClick={() => void api.hr.roster('xlsx').catch((e) => setError(describeError(e, '書き出せませんでした')))}>労働者名簿</button>
         <button className="btn ghost" disabled={exporting} onClick={() => {
           setExporting(true); setError(null); setBooksNote(null);
@@ -698,6 +720,13 @@ function EmployeeList({ onOpen }: { onOpen: (id: string) => void }) {
           <button className="btn ghost small" onClick={() => setImported(null)}>閉じる</button>
         </div>
       )}
+      {photos && (
+        <div className="card hr-panel">
+          <p>{photos.done < photos.total ? `顔写真を取り込んでいます（${photos.done} / ${photos.total}）…` : `顔写真を ${photos.set.length} 人に入れました${photos.failed.length ? `。${photos.failed.length} 枚は当てられませんでした` : ''}。`}</p>
+          {photos.failed.length > 0 && <ul className="small">{photos.failed.slice(0, 30).map((f) => <li key={f.file}>{f.file}: {f.reason}</li>)}</ul>}
+          {photos.done >= photos.total && <button className="btn ghost small" onClick={() => setPhotos(null)}>閉じる</button>}
+        </div>
+      )}
       {adding && <NewEmployee onSaved={(id) => { setAdding(false); onOpen(id); }} />}
       {data.tasks.length > 0 && (
         <div className="card hr-panel">
@@ -710,7 +739,8 @@ function EmployeeList({ onOpen }: { onOpen: (id: string) => void }) {
         <tbody>
           {shown.map((e) => (
             <tr key={e.id} className={e.status === 'left' ? 'muted' : ''}>
-              <td>
+              <td className="hr-name">
+                <Face employeeId={e.id} photoAt={e.photoAt} />
                 <button className="link" onClick={() => onOpen(e.id)}>{e.name}</button>
                 {e.code && <span className="small muted"> {e.code}</span>}
               </td>
@@ -728,6 +758,49 @@ function EmployeeList({ onOpen }: { onOpen: (id: string) => void }) {
         </tbody>
       </table>
       <label className="check small"><input type="checkbox" checked={showLeft} onChange={(e) => setShowLeft(e.target.checked)} /> 退職した人も出す</label>
+    </div>
+  );
+}
+
+/** 一覧の顔写真（無ければ人の形のアイコン）。 */
+function Face({ employeeId, photoAt, large = false }: { employeeId: string; photoAt?: string | null; large?: boolean }) {
+  const [broken, setBroken] = useState(false);
+  useEffect(() => setBroken(false), [photoAt]);
+  return (
+    <span className={`hr-face${large ? ' large' : ''}`}>
+      {photoAt && !broken ? <img src={hrPhotoUrl(employeeId, photoAt)} alt="" onError={() => setBroken(true)} /> : <Icon name="user" />}
+    </span>
+  );
+}
+
+/** 従業員の顔写真（選ぶ・撮る・外す）。画面で縮めてから送る。 */
+function PhotoBox({ employeeId, photoAt, onChanged, onError }: { employeeId: string; photoAt: string | null; onChanged: () => void; onError: (m: string | null) => void }) {
+  const pick = useRef<HTMLInputElement>(null);
+  const camera = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const put = async (f: File) => {
+    setBusy(true);
+    try {
+      await api.hr.setPhoto(employeeId, await shrinkPhoto(f));
+      onError(null);
+      onChanged();
+    } catch (e) {
+      onError(describeError(e, '写真を入れられませんでした'));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const chosen = (e: ChangeEvent<HTMLInputElement>) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void put(f); };
+  return (
+    <div className="hr-photo">
+      <Face employeeId={employeeId} photoAt={photoAt} large />
+      <div className="hr-photo-actions">
+        <button className="btn ghost small" disabled={busy} onClick={() => pick.current?.click()}>写真を選ぶ</button>
+        <button className="btn ghost small" disabled={busy} onClick={() => camera.current?.click()}>撮る</button>
+        {photoAt && <button className="btn ghost small" disabled={busy} onClick={() => void api.hr.deletePhoto(employeeId).then(() => onChanged()).catch((e) => onError(describeError(e, '外せませんでした')))}>外す</button>}
+      </div>
+      <input ref={pick} type="file" accept="image/*" hidden onChange={chosen} />
+      <input ref={camera} type="file" accept="image/*" capture="user" hidden onChange={chosen} />
     </div>
   );
 }
@@ -843,7 +916,10 @@ function EmployeeDetail({ id, onBack }: { id: string; onBack: () => void }) {
   return (
     <div className="hr">
       <div className="row"><button className="btn ghost small" onClick={onBack}>← 一覧</button></div>
-      <h2>{d.employee.name}{d.employee.leftOn ? <span className="small muted">（退職 {d.employee.leftOn}）</span> : null}</h2>
+      <div className="row hr-head">
+        <PhotoBox employeeId={id} photoAt={d.employee.photoAt ?? null} onChanged={load} onError={setError} />
+        <h2>{d.employee.name}{d.employee.leftOn ? <span className="small muted">（退職 {d.employee.leftOn}）</span> : null}</h2>
+      </div>
       {error && <p className="error">{error}</p>}
       <div className="card hr-panel">
         <div className="row wrap">

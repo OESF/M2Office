@@ -180,6 +180,9 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/hr/employees/:id` | 1 人の台帳（雇用条件の履歴・手続き）。見たことを監査ログに残す（第30.21節） |
 | `POST /v1/hr/employees` ／ `PUT /v1/hr/employees/:id` | 従業員を作る（最初の雇用条件 `terms` と入社の手続きを作る）／ 台帳の基本の項目を直す（入社日を変えたら入社の手続きの期限を直す）。社員番号は会社の中で重ならない |
 | `POST /v1/hr/employees/:id/terms` | 雇用条件を足す（`effectiveOn` 必須。前の条件を引き継ぎ、送った項目だけを変える履歴。`schedule`: fixed・shift で働き方） |
+| `PUT /v1/hr/employees/:id/photo` ／ `DELETE /v1/hr/employees/:id/photo` | 顔写真を入れる（`file`。JPEG か PNG・1 MB まで。前の写真は残さない）／ 外す（第30.5.4節、ADR-0055） |
+| `POST /v1/hr/photos/import` | 顔写真をまとめて取り込むときの 1 枚（`file`）。ファイル名（社員番号・氏名・ふりがな）か写真の中の名札で人に当てる。当てられなければ 422 と理由 |
+| `GET /v1/hr-photos/:employeeId` | 従業員の顔写真を見る。**社内の全員**が見られる（人事区画に入っていなくてよい。人事・給与を切っている会社は 404）。`/v1/me` の `photo` は、Google の写真が無ければ台帳の顔写真の URL になる |
 | `POST /v1/hr/employees/:id/leave` | 退職を記録する（`leftOn`・`reason`）。退職の手続きを期限つきで作る（第30.5.2節） |
 | `PUT /v1/hr/tasks/:id` | 手続きを済んだにする・戻す（`done`） |
 | `POST /v1/hr/import` | CSV・Excel から従業員を取り込む（`file`。見出しを推論で読む。入社・退職から 60 日を過ぎた人の手続きは作らない） |

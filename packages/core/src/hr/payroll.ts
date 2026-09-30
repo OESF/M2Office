@@ -180,7 +180,8 @@ export function calcSlip(input: SlipInput): SlipResult {
     { 単価: unitText, '変形期間の総枠を超えた所定の時間': hours(within), 割増率: `${pr.premiums.overtime}%（所定の賃金は払い済み）` });
   pay('over60', '時間外手当（月 60 時間超）', round((unit * totals.over60Minutes / 60) * ((hourly ? 0 : 100) + pr.premiums.over60) / 100),
     { 単価: unitText, '60 時間を超えた分': hours(totals.over60Minutes), 割増率: `${pr.premiums.over60}%` });
-  if (!hourly && t.wageType === 'monthly') {
+  // 所定を超え 8 時間までの分は割増なしで払う。月給と日給は所定の時間の分しか賃金に入っていないため（時給の人は実労働で払い済み）
+  if (!hourly) {
     pay('extra', '所定外手当', round(unit * totals.extraMinutes / 60), { 単価: unitText, 所定外: hours(totals.extraMinutes), 割増率: '0%' });
   }
   pay('night', '深夜手当', round((unit * totals.nightMinutes / 60) * pr.premiums.night / 100), { 単価: unitText, 深夜: hours(totals.nightMinutes), 割増率: `${pr.premiums.night}%` });

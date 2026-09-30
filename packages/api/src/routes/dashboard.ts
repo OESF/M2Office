@@ -172,6 +172,13 @@ export function dashboardRoute(deps: AppDeps) {
         deps.repo.listSecretarySettings(tenantId),
         deps.repo.listUserPhotoStamps(tenantId),
       ]);
+    // Google の写真が無い人は、人事の台帳の顔写真を使う（第30.5.4節。人事・給与を使っている会社だけ）
+    const hrPhotos = new Map<string, string>();
+    if (settings.hr.enabled) {
+      for (const e of await deps.hr.service.deps.store.listEmployees(tenantId)) {
+        if (e.userId && e.photoAt) hrPhotos.set(e.userId, `/v1/hr-photos/${encodeURIComponent(e.id)}?v=${encodeURIComponent(e.photoAt)}`);
+      }
+    }
     const nameOf = names(users);
 
     // 承認待ちを実行に結び付ける（誰の判断を待っているかを示すため）
@@ -264,7 +271,7 @@ export function dashboardRoute(deps: AppDeps) {
       const stamp = photos.get(p.userId);
       return {
         ...p,
-        photo: stamp ? `/v1/admin/dashboard/people/${encodeURIComponent(p.userId)}/photo?v=${encodeURIComponent(stamp)}` : null,
+        photo: stamp ? `/v1/admin/dashboard/people/${encodeURIComponent(p.userId)}/photo?v=${encodeURIComponent(stamp)}` : hrPhotos.get(p.userId) ?? null,
         secretary: {
           ...p.secretary,
           name: sec?.name?.trim() || '秘書',

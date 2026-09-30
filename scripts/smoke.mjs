@@ -3613,6 +3613,34 @@ console.log('\n■ 61. 人事・給与（内蔵の拡張。第30章、段 1: 台
     const { body: meM } = await call('a', '/v1/me', {}, 'member');
     const noLink = await call('a', '/v1/me/hr');
     meM.hrSelf === true && noLink.status === 404 ? ok('台帳のメールアドレスが同じ利用者は自動で結び付き、載っていない人には給与・勤怠を出さない') : ng('結び付きが合わない', `${meM.hrSelf} ${noLink.status}`);
+
+    // 顔写真（第30.5.4節、ADR-0055）: 人事区画の人が入れ、社内の全員が見られる。まとめての取り込みはファイル名か写真の中の名札で当てる
+    const jpeg = (text = '') => new Uint8Array([0xff, 0xd8, 0xff, 0xe0, ...new TextEncoder().encode(text), 0xff, 0xd9]);
+    const sendPhoto = async (path, name, bytes, method = 'POST', who = 'admin') => {
+      const form = new FormData();
+      form.append('file', new Blob([bytes], { type: 'image/jpeg' }), name);
+      const res = await fetch(`${API}${path}`, { method, body: form, headers: { 'x-tenant': 'a', 'x-user': `${who}@alpha.example.jp` } });
+      return { status: res.status, body: await res.json().catch(() => ({})) };
+    };
+    const put1 = await sendPhoto(`/v1/hr/employees/${staffId}/photo`, 'face.jpg', jpeg(), 'PUT');
+    const notImage = await sendPhoto(`/v1/hr/employees/${staffId}/photo`, 'face.svg', new TextEncoder().encode('<svg/>'), 'PUT');
+    const seeMember = await fetch(`${API}/v1/hr-photos/${staffId}`, { headers: { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' } });
+    const seeOther = await fetch(`${API}/v1/hr-photos/${staffId}`, { headers: { 'x-tenant': 'b', 'x-user': 'admin@beta.example.jp' } });
+    const { body: meFace } = await call('a', '/v1/me', {}, 'member');
+    put1.status === 200 && notImage.status === 400 && seeMember.status === 200 && seeMember.headers.get('content-type') === 'image/jpeg'
+      && seeMember.headers.get('x-content-type-options') === 'nosniff' && (seeOther.status === 404 || seeOther.status === 403)
+      && String(meFace.photo ?? '').startsWith(`/v1/hr-photos/${staffId}?v=`)
+      ? ok('顔写真は人事区画の人が入れ（JPEG と PNG だけ）、区画の外の人も含め社内の全員が見られ、ほかの会社からは見えない。Google の写真が無い人のアバターになる')
+      : ng('顔写真が合わない', JSON.stringify({ put1: put1.status, notImage: notImage.status, see: seeMember.status, other: seeOther.status, me: meFace.photo }));
+    const byName = await sendPhoto('/v1/hr/photos/import', `${tag} 勤怠.jpg`, jpeg());
+    const byTag = await sendPhoto('/v1/hr/photos/import', 'IMG_0001.jpg', jpeg(`M2O-CARD:${JSON.stringify({ name: `${tag} 勤怠`, code: null })}\n`));
+    const none = await sendPhoto('/v1/hr/photos/import', 'IMG_0002.jpg', jpeg());
+    const off = await call('a', `/v1/hr/employees/${staffId}/photo`, { method: 'DELETE' });
+    const gone = await fetch(`${API}/v1/hr-photos/${staffId}`, { headers: { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' } });
+    byName.status === 200 && byName.body.employeeId === staffId && byName.body.by === 'file-name' && byTag.status === 200 && byTag.body.by === 'name-tag'
+      && none.status === 422 && /当てられ|書かれていません/.test(none.body.error ?? '') && off.status === 200 && gone.status === 404
+      ? ok('顔写真をまとめて取り込むと、ファイル名か写真の中の名札で人に当て、当てられない写真は入れずに理由を返す。外せる')
+      : ng('顔写真の取り込みが合わない', JSON.stringify({ byName, byTag, none, off: off.status, gone: gone.status }).slice(0, 600));
     const in1 = await call('a', '/v1/me/hr/punch', { method: 'POST', body: JSON.stringify({ kind: 'in' }) }, 'member');
     const in2 = await call('a', '/v1/me/hr/punch', { method: 'POST', body: JSON.stringify({ kind: 'in' }) }, 'member');
     const { body: sayIn } = await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message: '出勤' }) }, 'member');
@@ -3671,6 +3699,10 @@ console.log('\n■ 61. 人事・給与（内蔵の拡張。第30章、段 1: 台
     // 人事区画を管理者だけにして、区画の外の人が給与を計算できないことを確かめる（割当は finally で元に戻す）
     await call('a', `/v1/admin/compartments/${hr.id}/assignment`, { method: 'PUT', body: JSON.stringify({ groups: [], users: ['u-a-admin'] }) });
     const runByMember = await call('a', '/v1/hr/payroll/runs', { method: 'POST', body: JSON.stringify({ month: '2026-08' }) }, 'member');
+    // 区画の外の人は顔写真を入れられない（見るのは全員ができる）
+    const photoByMember = await sendPhoto(`/v1/hr/employees/${staffId}/photo`, 'face.jpg', jpeg(), 'PUT', 'member');
+    const photoSeen = await fetch(`${API}/v1/hr-photos/${staffId}`, { headers: { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' } });
+    photoByMember.status === 403 && photoSeen.status === 404 ? ok('人事区画の外の人は顔写真を入れられない') : ng('区画の外の人が顔写真を入れられた', `${photoByMember.status} ${photoSeen.status}`);
     const calc = await call('a', '/v1/hr/payroll/runs', { method: 'POST', body: JSON.stringify({ month: '2026-08' }) });
     const runId = calc.body?.run?.id;
     const { body: runBody } = await call('a', `/v1/hr/payroll/runs/${runId}`);

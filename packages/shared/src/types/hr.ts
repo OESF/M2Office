@@ -248,6 +248,8 @@ export interface HrEmployee {
   status: 'active' | 'left';
   note: string;
   updatedAt: string;
+  /** 顔写真を入れた日時（無ければ `null`。取り込み直すと変わるので、画面は写真の URL に添えて古い写真を見せないようにする）。 */
+  photoAt?: string | null;
 }
 
 /** 手当の 1 つ（雇用条件の賃金の定め）。 */

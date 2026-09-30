@@ -6,7 +6,7 @@
  */
 
 import { Hono, type Context } from 'hono';
-import { readSheet, renderSheet, detectKind, HR_IMPORT_MAX_ROWS, MAX_FILE_BYTES, MIME, type DayFix, type EmployeeInput, type FilingSheet, type TermsInput } from '@m2office/core';
+import { readSheet, renderSheet, detectKind, HR_IMPORT_MAX_ROWS, HR_PHOTO_MAX_BYTES, MAX_FILE_BYTES, MIME, type DayFix, type EmployeeInput, type FilingSheet, type TermsInput } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 
@@ -85,6 +85,32 @@ export function hrRoute(deps: AppDeps) {
     if (typeof body.done !== 'boolean') return c.json({ error: 'done に true か false を指定してください' }, 400);
     const task = await service.setTaskDone(tenant.id, user.id, c.req.param('id'), body.done);
     return task ? c.json({ task }) : c.json({ error: '手続きが見つかりません' }, 404);
+  });
+
+  /** 顔写真を入れる（`file`。画面で縮めた JPEG か PNG。前の写真は残さない。第30.5.4節）。 */
+  app.put('/employees/:id/photo', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const f = (await c.req.parseBody())['file'];
+    if (!(f instanceof File)) return c.json({ error: '写真を選んでください' }, 400);
+    if (f.size > HR_PHOTO_MAX_BYTES) return c.json({ error: '写真が大きすぎます（1 MB まで）' }, 413);
+    const r = await service.setPhoto(tenant.id, user.id, c.req.param('id'), new Uint8Array(await f.arrayBuffer()));
+    return 'error' in r ? c.json(r, 400) : c.json(r);
+  });
+
+  /** 顔写真を外す。 */
+  app.delete('/employees/:id/photo', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    return (await service.deletePhoto(tenant.id, user.id, c.req.param('id'))) ? c.json({ ok: true }) : c.json({ error: '写真はありません' }, 404);
+  });
+
+  /** 顔写真をまとめて取り込むときの 1 枚（`file`）。ファイル名か写真の中の名札で人に当てる。当てられなければ入れずに理由を返す。 */
+  app.post('/photos/import', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const f = (await c.req.parseBody())['file'];
+    if (!(f instanceof File)) return c.json({ error: '写真を選んでください' }, 400);
+    if (f.size > HR_PHOTO_MAX_BYTES) return c.json({ error: '写真が大きすぎます（1 MB まで）' }, 413);
+    const r = await service.importPhoto(tenant.id, user.id, f.name, new Uint8Array(await f.arrayBuffer()));
+    return 'error' in r ? c.json(r, 422) : c.json(r);
   });
 
   /** 表計算（CSV・Excel）から従業員を取り込む。見出しは推論で読む。 */

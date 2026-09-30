@@ -80,7 +80,7 @@ test('給与: 基本給・手当・割増（家族手当は割増の基礎に入
   assert.ok(r.lines.find((l) => l.code === 'health')!.basis['表']);
 });
 
-test('給与: 月 60 時間超・欠勤と遅刻・介護保険の年齢・資格の月・時給の人', () => {
+test('給与: 月 60 時間超・欠勤と遅刻・介護保険の年齢・資格の月・時給の人・日給の人の所定外', () => {
   const r = slip({ totals: { ...zero, overtimeMinutes: 4200, over60Minutes: 600, missingDays: 2, lateMinutes: 30 }, days: Array.from({ length: 21 }, (_, i) => ({ date: `2026-09-${i + 1}`, type: 'workday' as const, in: null, out: null, breakMinutes: 0, workMinutes: 0, nightMinutes: 0, overtimeMinutes: 0, extraMinutes: 0, holidayMinutes: 0, lateMinutes: 0, earlyMinutes: 0, leaveDays: 0, issues: [] })) });
   assert.equal(line(r, 'over60'), Math.round((320000 / 170) * 10 * 1.5), '60 時間を超えた 10 時間は × 1.5');
   assert.equal(line(r, 'absence'), -Math.round((300000 / 21) * 2), '基本給 ÷ 所定の労働日 × 欠勤');
@@ -98,6 +98,10 @@ test('給与: 月 60 時間超・欠勤と遅刻・介護保険の年齢・資�
   assert.equal(line(part, 'base'), 96000, '時給 × 実労働 80 時間');
   assert.equal(line(part, 'overtime'), Math.round(1200 * 1 * 0.25), '時給の人は割増の分だけを足す');
   assert.ok(part.warnings.some((w) => w.includes('標準報酬月額が未登録')));
+  const day = slip({ terms: { ...terms, wageType: 'daily', wageAmount: 9000, allowances: [], startTime: '09:00', endTime: '16:00', breakMinutes: 60 }, totals: { ...zero, workDays: 10, extraMinutes: 120 }, standardPay: null });
+  assert.equal(line(day, 'base'), 90000, '日給 × 出勤 10 日');
+  assert.equal(line(day, 'extra'), 3000, '日給の人の所定外: 単価 9,000 ÷ 所定 6 時間 = 1,500 円 × 2 時間（割増なし）');
+  assert.equal(line(part, 'extra'), 0, '時給の人は実労働で払い済みなので所定外手当は無い');
   const low = slip({ terms: { ...terms, wageType: 'hourly', wageAmount: 1100, allowances: [] }, standardPay: null });
   assert.ok(low.warnings.some((w) => w.includes('東京都の最低賃金')), '東京都 1,226 円を下回る');
 });

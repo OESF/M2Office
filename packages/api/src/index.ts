@@ -44,6 +44,7 @@ import { myConnectionsRoute } from './routes/connection-auth.js';
 import { debugRoute } from './routes/debug.js';
 import { hrRoute } from './routes/hr.js';
 import { hrSelfRoute } from './routes/hr-self.js';
+import { hrPhotosRoute } from './routes/hr-photos.js';
 
 /**
  * API サーバー。
@@ -114,6 +115,8 @@ app.get('/v1/me', async (c) => {
   const auth = c.get('auth');
   // 本人のアバター（第6.5.1.1節）。取り込み直すと URL が変わり、画面が新しい写真を読む
   const photo = await deps.repo.getUserPhoto(ctx.tenant.id, ctx.user.id);
+  // Google の写真が無ければ、人事の台帳の顔写真を使う（第30.5.4節）
+  const hrPhoto = photo ? null : await deps.hr.service.photoOfUser(ctx.tenant.id, ctx.user.id);
   // 朝のブリーフの定時実行を、まだなら秘書が用意する（仕様書 第9.5.5.1節）。応答は待たせない
   // 週次ブリーフの定時実行も、まだなら秘書が用意する（仕様書 第9.5.5節、ADR-0048）。朝のブリーフの後に（同じ設定を書き換えるため）
   void ensureMorningBrief(deps, ctx.tenant.id, ctx.user.id)
@@ -128,7 +131,8 @@ app.get('/v1/me', async (c) => {
     // 画面に出す会社名は、会社情報の正式な会社名（仕様書 第6.6.1節）。入っていなければ申し込みのときの名前
     tenant: { ...ctx.tenant, ...(await companyView(deps, ctx.tenant)) },
     user: ctx.user,
-    photo: photo ? `/v1/me/photo?v=${encodeURIComponent(photo.fetchedAt)}` : null,
+    photo: photo ? `/v1/me/photo?v=${encodeURIComponent(photo.fetchedAt)}`
+      : hrPhoto ? `/v1/hr-photos/${encodeURIComponent(hrPhoto.employeeId)}?v=${encodeURIComponent(hrPhoto.photoAt)}` : null,
     // サーバーの版。画面の版と違えば、画面が再読み込みを促す（第6.1.1.1節）
     serverVersion: SERVER_VERSION,
     auth: { method: auth.method },
@@ -163,6 +167,8 @@ app.route('/v1/schedules', schedulesRoute(deps));
 app.route('/v1/cards', cardsRoute(deps));
 app.route('/v1/inventory', inventoryRoute(deps));
 app.route('/v1/hr', hrRoute(deps));
+// 従業員の顔写真（社内の全員が見られる。第30.5.4節）
+app.route('/v1/hr-photos', hrPhotosRoute(deps));
 app.route('/v1/notices', noticesRoute(deps));
 app.route('/v1/admin/dashboard', dashboardRoute(deps));
 app.route('/v1/admin/extensions', extensionsRoute(deps));

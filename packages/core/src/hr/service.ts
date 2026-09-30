@@ -19,7 +19,8 @@ import { extractDocxText } from '../files/docx.js';
 import type { Repository } from '../repository/types.js';
 import type { LlmProvider } from '../llm/provider.js';
 import { aiAvailable } from '../llm/unconfigured.js';
-import type { EmployeeRecord, HrStore } from './store.js';
+import type { EmployeeRecord, HrPhoto, HrStore } from './store.js';
+import { HR_PHOTO_MAX_BYTES, matchPhoto, photoMime } from './photos.js';
 import { hireProcedures, leaveProcedures, type ProcedureSubject } from './procedures.js';
 
 /** 取り込める行の上限（想定は 100 人まで。第30.1.1節）。 */
@@ -626,6 +627,59 @@ export class HrService {
     ]);
     if (audit) await this.audit(tenantId, userId, 'hr.export', 'hr', HR_EXTENSION_ID, { kind: 'roster', rows: rows.length });
     return { columns, rows };
+  }
+
+  /**
+   * 顔写真を入れる（前の写真は残さない。第30.5.4節）。画像は画面で縮めてから送る。
+   *
+   * @remarks 危険度: 低（社内の記録を書き換える。社外には出さない）
+   */
+  async setPhoto(tenantId: string, userId: string, employeeId: string, bytes: Uint8Array): Promise<{ photoAt: string } | { error: string }> {
+    const mime = photoMime(bytes);
+    if (!mime) return { error: '写真は JPEG か PNG にしてください' };
+    if (bytes.length > HR_PHOTO_MAX_BYTES) return { error: '写真が大きすぎます（1 MB まで）' };
+    if (!(await this.deps.store.getEmployee(tenantId, employeeId))) return { error: '従業員が見つかりません' };
+    await this.deps.store.setPhoto(tenantId, employeeId, { mime, bytes }, userId);
+    await this.audit(tenantId, userId, 'hr.employee.photo', 'hr_employee', employeeId, { set: true });
+    return { photoAt: (await this.deps.store.getPhoto(tenantId, employeeId))?.updatedAt ?? '' };
+  }
+
+  /** 顔写真を外す。 */
+  async deletePhoto(tenantId: string, userId: string, employeeId: string): Promise<boolean> {
+    const ok = await this.deps.store.deletePhoto(tenantId, employeeId);
+    if (ok) await this.audit(tenantId, userId, 'hr.employee.photo', 'hr_employee', employeeId, { set: false });
+    return ok;
+  }
+
+  /**
+   * まとめて取り込むときの 1 枚。ファイル名か写真の中の名札で人に当て、当たれば入れる（第30.5.4節）。
+   *
+   * @remarks 危険度: 低（社内の記録を書き換える。当てられない写真は入れずに理由を返す）
+   */
+  async importPhoto(tenantId: string, userId: string, fileName: string, bytes: Uint8Array): Promise<{ employeeId: string; name: string; by: 'file-name' | 'name-tag' } | { error: string }> {
+    const mime = photoMime(bytes);
+    if (!mime) return { error: '写真は JPEG か PNG にしてください' };
+    const employees = await this.deps.store.listEmployees(tenantId);
+    const llm = this.deps.llm ? await this.deps.llm(tenantId) : null;
+    const m = await matchPhoto(fileName, bytes, mime, employees, llm);
+    if (m.status === 'unmatched') return { error: m.reason };
+    const r = await this.setPhoto(tenantId, userId, m.employee.id, bytes);
+    return 'error' in r ? r : { employeeId: m.employee.id, name: m.employee.name, by: m.by };
+  }
+
+  /**
+   * 顔写真を見る（第30.5.4節。社内の全員が見られる。人事・給与を切っている会社では出さない）。
+   */
+  async photo(tenantId: string, employeeId: string): Promise<HrPhoto | null> {
+    if (!(await this.settings(tenantId)).enabled) return null;
+    return this.deps.store.getPhoto(tenantId, employeeId);
+  }
+
+  /** 利用者に結び付いた従業員の顔写真（Google の写真が無い人のアバターに使う）。 */
+  async photoOfUser(tenantId: string, userId: string): Promise<{ employeeId: string; photoAt: string } | null> {
+    if (!(await this.settings(tenantId)).enabled) return null;
+    const e = await this.deps.store.findEmployeeByUser(tenantId, userId);
+    return e?.photoAt ? { employeeId: e.id, photoAt: e.photoAt } : null;
   }
 
   private async audit(tenantId: string, userId: string, action: string, targetType: string, targetId: string, detail: Record<string, unknown>): Promise<void> {
