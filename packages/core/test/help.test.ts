@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import {
-  OFFICIAL_AGENTS, ToolRegistry, BUILTIN_TOOLS, HelpCatalog, buildAgentHelp, helpConcepts, parseArticle,
+  OFFICIAL_AGENTS, ToolRegistry, BUILTIN_TOOLS, HelpCatalog, buildAgentHelp, helpConcepts, parseArticle, parseManual,
   resolveOfficialAgent, type HelpContext,
 } from '../src/index.js';
 import { DEFAULT_TENANT_SETTINGS } from '@m2office/shared';
@@ -153,4 +153,35 @@ test('更新情報は、使い方の質問で案内の記事に勝たない（�
   // 下げるだけで、消しはしない。更新情報の中身を探せば出る
   const hits = catalog.search('会話できるようになりました', ctx).map((h) => h.article.id);
   assert.ok(hits.some((id) => id.startsWith('updates-')), `更新情報が出ない: ${hits.join('、')}`);
+});
+
+test('業務のマニュアル: README と番号の章を順に記事にし、章の題を最初の見出しから取る（第6.10.7.3節）', () => {
+  const chapters = parseManual('inventory', { title: '在庫管理', extension: 'inventory' }, [
+    { name: '02-items.md', text: '# 第 2 章 品目と場所\n\n## 品目を足す\n本文' },
+    { name: 'README.md', text: '# 在庫管理 ユーザーマニュアル\n\nこの手引きは…' },
+    { name: '01-setup.md', text: '# 第 1 章 導入\n本文' },
+    { name: 'manual.json', text: '{}' },
+  ]);
+  assert.deepEqual(chapters.map((c) => [c.id, c.title]), [
+    ['manual-inventory-00', 'はじめに'], ['manual-inventory-01', '第 1 章 導入'], ['manual-inventory-02', '第 2 章 品目と場所'],
+  ]);
+  assert.ok(!chapters[2]!.body.startsWith('# '), '章の題の見出しは本文から除く');
+  assert.ok(chapters.every((c) => c.category === 'manual' && c.business === 'inventory' && c.extension === 'inventory'));
+});
+
+test('ヘルプの出す所: ワークスペースは管理者向けを出さず、管理者ページは管理者向けだけ。マニュアルは使える人だけ（第6.10.7節）', () => {
+  const art = (id: string, category: string, audience = 'all') => parseArticle(`---\nid: ${id}\ntitle: ${id}\naudience: ${audience}\ncategory: ${category}\n---\n本文`);
+  const manual = parseManual('hr-payroll', { title: '人事・給与', extension: 'hr' }, [{ name: '01-setup.md', text: '# 第 1 章 導入\n給与の設定' }]);
+  const catalog = new HelpCatalog([
+    art('start-screen', 'start'), art('admin-users', 'admin', 'admin'), art('updates-v0-1-0', 'updates'), art('updates-v0-1-0-admin', 'updates', 'admin'),
+    art('glossary', 'glossary'), art('contact', 'contact'), ...manual,
+  ], [], registry);
+  const admin: HelpContext = { roles: ['admin'], disabledAgents: [], automation: DEFAULT_TENANT_SETTINGS.automation, agents: [] };
+  const ids = (list: { id: string }[]) => list.map((a) => a.id).sort();
+  assert.deepEqual(ids(catalog.list(admin, 'workspace')), ['contact', 'glossary', 'start-screen', 'updates-v0-1-0']);
+  assert.deepEqual(ids(catalog.list(admin, 'admin')), ['admin-users', 'contact', 'glossary', 'updates-v0-1-0-admin']);
+  assert.ok(!catalog.list({ ...admin, extensions: [] }, 'workspace').some((a) => a.category === 'manual'), '業務を使えない人にはマニュアルを出さない');
+  assert.ok(catalog.list({ ...admin, extensions: ['hr'] }, 'workspace').some((a) => a.id === 'manual-hr-payroll-01'), '使える人には出す');
+  assert.equal(catalog.search('給与の設定', admin, 3).length, 0, '使える業務を渡さない検索（秘書の答え）にはマニュアルを入れない');
+  assert.ok(catalog.get('admin-users', admin), '画面の「？」は出す所に関わらず、役割で見られる記事を開ける');
 });

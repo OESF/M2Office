@@ -4,6 +4,7 @@ title: 秘書に覚えてもらう・忘れてもらう
 audience: all
 category: start
 related: [start-secretary, start-settings, faq-privacy]
+order: 6
 ---
 秘書は、あなたとのやり取りを**ずっと覚えていきます**。決めたこと、頼んだこと、期限、よく使う言葉などを、会話から自分で覚えます。
 「〜を覚えておいて」と頼んだことも覚えます。覚えたことは、いつでも見て、直して、消せます。

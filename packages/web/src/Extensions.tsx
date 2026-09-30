@@ -382,6 +382,11 @@ const WEEK = ['日', '月', '火', '水', '木', '金', '土'];
 const DAYS = Array.from({ length: 31 }, (_, i) => i + 1);
 const dayLabel = (d: number) => (d === 31 ? '末日' : `${d} 日`);
 
+/** 割増率の欄（設定の名前・画面の名前・法定の下限 %）。下限より下はサーバーが断る（第30.10.1節）。 */
+const PREMIUMS: [keyof HrSettings['payroll']['premiums'], string, number][] = [
+  ['overtime', '時間外', 25], ['over60', '月 60 時間超', 50], ['night', '深夜', 25], ['holiday', '休日', 35],
+];
+
 /**
  * 手当の扱い（仕様書 第30.10.1節）。雇用条件に入っている手当を並べ、割増の単価の基礎に入れるか・所得税の対象かを手当ごとに直す。
  * 設定していない手当は名前から決めた扱い。直した手当は会社の設定に残り、「戻す」で名前から決めた扱いに戻る。
@@ -501,6 +506,22 @@ function HrFields({ settings, busy, onChanged }: { settings: HrSettings; busy: b
         <label>月の平均所定労働時間 <input type="number" min={1} max={250} step="0.01" className="num" defaultValue={settings.payroll.avgMonthlyHours ?? ''} placeholder="自動"
           onBlur={(e) => { const v = e.target.value === '' ? null : Number(e.target.value); if (v !== settings.payroll.avgMonthlyHours) save({ payroll: { ...settings.payroll, avgMonthlyHours: v } }); }} /> 時間</label>
         <label className="check"><input type="checkbox" checked={settings.payroll.deductAbsence} disabled={busy} onChange={(e) => save({ payroll: { ...settings.payroll, deductAbsence: e.target.checked } })} /> 欠勤・遅刻早退を引く</label>
+      </div>
+      <div className="row wrap">
+        {PREMIUMS.map(([k, label, floor]) => (
+          <label key={k}>{label} <input key={settings.payroll.premiums[k]} type="number" min={floor} max={200} step="1" className="num" defaultValue={settings.payroll.premiums[k]} aria-label={`${label}の割増率`}
+            onBlur={(e) => {
+              const empty = e.target.value === '';
+              const v = Number(e.target.value);
+              // 空や法定の下限より下は保存せず、今の率に戻す（下限より下なら理由を示す）
+              if (empty || v < floor) {
+                e.target.value = String(settings.payroll.premiums[k]);
+                if (!empty) setError(`${label}の割増率は法定の下限（${floor}%）以上で入れてください`);
+                return;
+              }
+              if (v !== settings.payroll.premiums[k]) save({ payroll: { ...settings.payroll, premiums: { ...settings.payroll.premiums, [k]: v } } });
+            }} /> %</label>
+        ))}
         {settings.health.kind === 'kumiai' && (
           <>
             <label>組合の健康保険料率 <input type="number" min={0} max={30} step="0.001" className="num" defaultValue={settings.payroll.kumiai.health ?? ''}

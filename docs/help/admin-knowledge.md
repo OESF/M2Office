@@ -4,6 +4,8 @@ title: 社内の知識を登録する（管理者）
 audience: admin
 category: admin
 related: [admin-setup]
+group: 設定
+order: 6
 ---
 管理者ページの「知識」で、就業規則・経費規程・価格表などを登録します。
 「社内ナレッジ Q&A」や秘書は、ここに登録したものから出典を添えて答えます。

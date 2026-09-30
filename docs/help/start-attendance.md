@@ -4,6 +4,7 @@ title: 給与・勤怠（打刻・有給・給与明細）
 audience: all
 category: start
 related: [start-hr, start-secretary]
+business: hr-payroll
 ---
 会社が人事・給与を使っていて、あなたが人事の台帳に載っていると、左の「自分の状況」に「**給与・勤怠**」が出ます。台帳のメールアドレスとログインのメールアドレスが同じなら、自動で結び付きます。
 

@@ -4,6 +4,7 @@ title: 音声で秘書に話しかける
 audience: all
 category: start
 related: [start-secretary, start-screen, start-settings, faq-privacy]
+order: 7
 ---
 秘書には、声でも話しかけられます。画面の下の秘書バーで「音声で話す」を押してください。
 

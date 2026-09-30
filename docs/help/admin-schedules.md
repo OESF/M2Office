@@ -4,6 +4,8 @@ title: 定時実行の一覧の見方（管理者）
 audience: admin
 category: admin
 related: [start-schedules, admin-runs, admin-connectors, admin-users]
+group: 記録
+order: 4
 ---
 管理者ページの左のメニュー、**記録の「定時実行の一覧」**には、会社の全員の定時実行が並びます。
 「毎朝のブリーフが届かない」と相談されたとき、業務やツールを止める前に誰の定時実行に響くかを見るとき、

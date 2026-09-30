@@ -4,6 +4,8 @@ title: 実行の一覧の見方（管理者）
 audience: admin
 category: admin
 related: [admin-usage, admin-audit, admin-dashboard]
+group: 記録
+order: 3
 ---
 管理者ページの左のメニュー、**記録の「実行の一覧」**には、会社の中で動いた業務が 1 件ずつ並びます。
 **新しい順に、直近の 100 件**を出します。

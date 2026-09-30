@@ -4,6 +4,8 @@ title: 監査ログの見方（管理者）
 audience: admin
 category: admin
 related: [admin-runs, admin-users, faq-privacy]
+group: 記録
+order: 5
 ---
 管理者ページの左のメニュー、**記録の「監査ログ」**には、「いつ・誰が・何をしたか」の記録が並びます。
 トラブルのとき（このメールは誰が承認して送られたか）、設定の変更を追うとき（誰が権限や接続を変えたか）、

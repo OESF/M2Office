@@ -11,13 +11,13 @@
 import {
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS, GoogleDataRetention, GoogleRevocation, agentUsesGoogle,
   RunEngine, Secretary, OFFICIAL_AGENTS, buildConnector, LocalFileStore,
-  createLoggerFromEnv, HelpCatalog, parseArticle, ExtensionHub, HttpMcpClient, loadExtensions,
+  createLoggerFromEnv, HelpCatalog, parseArticle, parseManual, ExtensionHub, HttpMcpClient, loadExtensions,
   TenantAiResolver, platformAi, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID,
   defaultGeminiModels, ConnectionCredentials, type ConnectionAuthProvider,
   CardService, PostgresContactStore, cardsAccess, type ContactStore, NoticeService, PostgresNoticeStore,
   InventoryService, InventoryWatch, InventoryBookings, PostgresInventoryStore, inventoryAccess, HrService, PostgresHrStore, hrAccess, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
   type SecretBox, type GeminiModels,
-  type FileStore, type TenantExtensions, type HelpArticle, type LlmProvider, type Logger, type Repository, type WorkspaceConnector,
+  type FileStore, type TenantExtensions, type HelpArticle, type ManualMeta, type LlmProvider, type Logger, type Repository, type WorkspaceConnector,
 } from '@m2office/core';
 import { canRunAgent, type AgentDefinition, type ContactScope, type HrSettings, type InventorySettings } from '@m2office/shared';
 import { readdirSync, readFileSync } from 'node:fs';
@@ -43,8 +43,10 @@ export interface AppDeps {
   log: Logger;
   /** デバッグモードの記録（仕様書 第20.4.1節「デバッグモード」）。`M2O_DEBUG=true` のときだけある。 */
   debug: DebugLog | null;
-  /** ヘルプの記事（仕様書 第6.10節）。 */
+  /** ヘルプの記事（仕様書 第6.10節）。業務のマニュアルの章を含む。 */
   help: HelpCatalog;
+  /** ヘルプで読める業務のマニュアル（名前・木の区分の名前・どの内蔵の拡張のものか。第6.10.7.3節）。 */
+  helpManuals: { id: string; title: string; extension: string }[];
   /** Google から取得したデータの保持（仕様書 第14.3.2節）。連携の解除のときに中身を消す。 */
   retention: GoogleDataRetention;
   /** Google の許可がなくなったとき（取り消し・OAuth クライアントの削除・利用者の停止）の後始末（仕様書 第6.5.2.1節）。 */
@@ -253,7 +255,8 @@ export function buildDeps(): AppDeps {
     hrStore: hrService.deps.store, attendance, repo, law: LAW_BOOK, llm: (tenantId) => ai.llmFor(tenantId), allowUnverified: debug !== null,
     socialHints: (tenantId) => social.hints(tenantId),
   });
-  const help = new HelpCatalog(loadHelpArticles(helpDir(), log), OFFICIAL_AGENTS, registry);
+  const manuals = loadManuals(manualDir(), log);
+  const help = new HelpCatalog([...loadHelpArticles(helpDir(), log), ...manuals.articles], OFFICIAL_AGENTS, registry);
   const secretary = new Secretary({
     // 勤怠と有給・本人の給与明細（第30.20節）
     attendance, payroll,
@@ -314,7 +317,7 @@ export function buildDeps(): AppDeps {
   });
   const googleRedirect = process.env['GOOGLE_OAUTH_REDIRECT_URI'] ?? 'http://localhost:3100/v1/oauth/google/callback';
   return {
-    repo, llm, connector, files, registry, engine, secretary, auth: loadAuthConfig(), log, debug, help, retention, revocation,
+    repo, llm, connector, files, registry, engine, secretary, auth: loadAuthConfig(), log, debug, help, helpManuals: manuals.list, retention, revocation,
     hub, tenantView, agentsFor, canUse, isAvailable, box, ai, connections,
     oauth: {
       // Google は http の戻り先を localhost にしか認めないため、開発では localhost の画面の転送を通す（ADR-0007）
@@ -394,6 +397,41 @@ export function loadHelpArticles(dir: string, log: Logger): HelpArticle[] {
   }
   log.info('ヘルプの記事を読み込みました', { count: articles.length });
   return articles;
+}
+
+function manualDir(): string {
+  return process.env['MANUAL_DIR'] ?? fileURLToPath(new URL('../../../docs/manual', import.meta.url));
+}
+
+/**
+ * 業務のマニュアル（`docs/manual/<名前>/`）を読み、章ごとのヘルプの記事にする（仕様書 第6.10.7.3節）。
+ *
+ * @remarks
+ * `manual.json`（名前と内蔵の拡張の ID）の無いフォルダーは読まない。読めないマニュアルがあっても起動は止めず、記録して飛ばす。
+ */
+export function loadManuals(dir: string, log: Logger): { list: { id: string; title: string; extension: string }[]; articles: HelpArticle[] } {
+  const list: { id: string; title: string; extension: string }[] = [];
+  const articles: HelpArticle[] = [];
+  let names: string[] = [];
+  try {
+    names = readdirSync(dir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).sort();
+  } catch (err) {
+    log.warn('業務のマニュアルを読み込めませんでした', { dir, err });
+    return { list, articles };
+  }
+  for (const id of names) {
+    try {
+      const meta = JSON.parse(readFileSync(join(dir, id, 'manual.json'), 'utf8')) as ManualMeta;
+      if (!meta.title || !meta.extension) throw new Error('manual.json に title と extension が要ります');
+      const files = readdirSync(join(dir, id)).filter((f) => f.endsWith('.md')).map((name) => ({ name, text: readFileSync(join(dir, id, name), 'utf8') }));
+      articles.push(...parseManual(id, meta, files));
+      list.push({ id, title: meta.title, extension: meta.extension });
+    } catch (err) {
+      log.warn('業務のマニュアルを読めませんでした', { manual: id, err });
+    }
+  }
+  log.info('業務のマニュアルを読み込みました', { manuals: list.length, chapters: articles.length });
+  return { list, articles };
 }
 
 /**

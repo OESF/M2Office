@@ -243,6 +243,8 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
             {tab === 'help' && (
               <HelpCenter
                 initial={helpArticle}
+                // 管理者ページのヘルプは管理者向けの記事だけ（仕様書 第6.10.7節）
+                scope="admin"
                 // 記事を開いたら URL も合わせる（/admin/help/{記事}。仕様書 第6.1.6節）
                 onArticle={setHelpArticle}
                 back={before.current ? {

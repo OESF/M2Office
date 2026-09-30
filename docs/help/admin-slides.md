@@ -4,6 +4,8 @@ title: スライドのテンプレート（管理者）
 audience: admin
 category: admin
 related: [admin-setup, admin-extensions]
+group: 設定
+order: 7
 ---
 「スライド作成」などの業務がスライドを作るときの見本（テンプレート）を登録します。
 管理者ページの「会社情報 › スライドの見本」で設定します。

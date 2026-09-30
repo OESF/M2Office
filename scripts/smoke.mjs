@@ -740,11 +740,30 @@ console.log('\n■ 18. ダッシュボード');
 console.log('\n■ 19. ヘルプと案内');
 {
   const { body: memberList } = await call('a', '/v1/help/articles', {}, 'member');
-  const { body: adminList } = await call('a', '/v1/help/articles');
+  const { body: memberAdmin } = await call('a', '/v1/help/articles?scope=admin', {}, 'member');
+  const { body: adminList } = await call('a', '/v1/help/articles?scope=admin');
   const memberIds = memberList.items.map((a) => a.id);
-  !memberIds.some((id) => id.startsWith('admin-')) && adminList.items.some((a) => a.id === 'admin-setup')
-    ? ok(`管理者向けの記事は一般の利用者に出ない（一般 ${memberIds.length} 件・管理者 ${adminList.items.length} 件）`)
+  !memberIds.some((id) => id.startsWith('admin-')) && !memberAdmin.items.some((a) => a.id.startsWith('admin-')) && adminList.items.some((a) => a.id === 'admin-setup')
+    ? ok(`管理者向けの記事は一般の利用者に出ない（一般 ${memberIds.length} 件・管理者ページ ${adminList.items.length} 件）`)
     : ng('記事の出し分けが効かない');
+
+  // 出す所（第6.10.7節）: ワークスペースは管理者向けを出さず、管理者ページは管理者向けだけ（用語と問い合わせは両方）
+  const { body: adminWork } = await call('a', '/v1/help/articles');
+  const { body: adminSearch } = await call('a', `/v1/help/search?q=${encodeURIComponent('監査ログ')}&scope=workspace`);
+  !adminWork.items.some((a) => a.id.startsWith('admin-') || a.id.endsWith('-admin')) && !adminList.items.some((a) => a.category === 'start' || a.category === 'faq')
+    && adminList.items.some((a) => a.id === 'glossary') && adminWork.items.some((a) => a.id === 'contact') && !(adminSearch.items ?? []).some((a) => a.id === 'admin-audit')
+    ? ok('ワークスペースのヘルプは管理者向けを出さず、管理者ページのヘルプは管理者向けの記事だけ（用語と問い合わせは両方）')
+    : ng('ヘルプの出す所が合わない', JSON.stringify({ work: adminWork.items.length, admin: adminList.items.map((a) => a.id) }).slice(0, 300));
+
+  // 業務のマニュアル（第6.10.7.3節）: その業務を使える人だけに章を出す
+  const { body: meHelp } = await call('a', '/v1/me');
+  const hrChapters = adminWork.items.filter((a) => a.category === 'manual' && a.business === 'hr-payroll');
+  const invChapters = adminWork.items.filter((a) => a.category === 'manual' && a.business === 'inventory');
+  const { body: chapter } = hrChapters[0] ? await call('a', `/v1/help/articles/${hrChapters[0].id}`) : { body: null };
+  (hrChapters.length > 0) === !!meHelp.hr && (invChapters.length > 0) === !!meHelp.inventory
+    && (!hrChapters.length || (adminWork.manuals ?? []).some((m) => m.id === 'hr-payroll' && m.title === '人事・給与') && typeof chapter?.body === 'string')
+    ? ok(`業務のマニュアルは、その業務を使える人にだけ章ごとに出す（人事・給与 ${hrChapters.length} 章・在庫管理 ${invChapters.length} 章）`)
+    : ng('マニュアルの出し分けが合わない', JSON.stringify({ hr: meHelp.hr, inv: meHelp.inventory, hrChapters: hrChapters.length, invChapters: invChapters.length }));
 
   const hidden = await call('a', '/v1/help/articles/admin-setup', {}, 'member');
   hidden.status === 404 ? ok('管理者向けの記事は、ID を指定しても一般の利用者には見えない（404）') : ng(`見えてしまう（${hidden.status}）`);
@@ -3682,7 +3701,11 @@ console.log('\n■ 61. 人事・給与（内蔵の拡張。第30章、段 1: 台
     // 段 3: 給与の計算（第30.10.1節）。保険料は公式の表の額と一致させる
     await call('a', '/v1/admin/extensions/hr/settings', { method: 'PUT', body: JSON.stringify({ health: { kind: 'kyokai', prefecture: '東京都' }, payroll: { deductAbsence: false } }) });
     const low = await call('a', '/v1/admin/extensions/hr/settings', { method: 'PUT', body: JSON.stringify({ payroll: { premiums: { overtime: 20 } } }) });
-    low.status === 400 ? ok('割増率は法定の下限より下げられない') : ng(`法定より低い割増率を受け付けた（${low.status}）`);
+    const high = await call('a', '/v1/admin/extensions/hr/settings', { method: 'PUT', body: JSON.stringify({ payroll: { premiums: { overtime: 30 } } }) });
+    const highMember = await call('a', '/v1/admin/extensions/hr/settings', { method: 'PUT', body: JSON.stringify({ payroll: { premiums: { overtime: 40 } } }) }, 'member');
+    await call('a', '/v1/admin/extensions/hr/settings', { method: 'PUT', body: JSON.stringify({ payroll: { premiums: { overtime: 25 } } }) });
+    low.status === 400 && high.status === 200 && high.body?.hr?.payroll?.premiums?.overtime === 30 && high.body.hr.payroll.premiums.night === 25 && highMember.status === 403
+      ? ok('割増率は管理者が上乗せでき（ほかの率は変えない）、法定の下限より下げられない') : ng('割増率の設定が合わない', JSON.stringify({ low: low.status, high: high.body?.hr?.payroll?.premiums ?? high.body, member: highMember.status }));
     // 手当の扱い（第30.10.1節）: 手当ごとに直せて、戻すと名前から決めた扱いに戻る（設定に残らない）
     await call('a', '/v1/admin/extensions/hr/settings', { method: 'PUT', body: JSON.stringify({ payroll: { items: [{ name: '住宅手当', premiumBase: true, taxable: true }] } }) });
     const { body: allow1 } = await call('a', '/v1/admin/extensions/hr/allowances');

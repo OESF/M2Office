@@ -4,6 +4,7 @@ title: 個人設定
 audience: all
 category: start
 related: [start-secretary, start-memory, faq-privacy]
+order: 8
 ---
 左のメニューのいちばん下、あなたの名前の右にある**歯車のボタン**を押すと、設定の項目が一覧で出ます。
 見たい項目を選ぶと、そこへ直接入ります。ここでの設定は、あなたにだけ効きます。

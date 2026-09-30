@@ -4,6 +4,8 @@ title: 業務と承認の設定（管理者）
 audience: admin
 category: admin
 related: [admin-setup, start-approvals, admin-groups]
+group: 設定
+order: 4
 ---
 管理者ページの「業務と承認」で設定します。
 

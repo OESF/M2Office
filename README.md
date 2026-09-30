@@ -301,6 +301,7 @@ API とワーカーは起動時にリポジトリ直下の `.env` を読みま�
 | [docs/developer/](docs/developer/README.md) | 開発者マニュアル（拡張機能・業務エージェント・コネクタの作り方） |
 | [docs/manual/hr-payroll/](docs/manual/hr-payroll/README.md) | 人事・給与のユーザーマニュアル（担当者の手引きと研修の教材。`npm run docs:hr-manual-pdf` で PDF） |
 | [docs/manual/inventory/](docs/manual/inventory/README.md) | 在庫管理のユーザーマニュアル（担当者の手引きと研修の教材。`npm run docs:inventory-manual-pdf` で PDF） |
+| docs/manual/*/manual.json | 業務のマニュアルをヘルプで章ごとに読むための名前と、どの内蔵の拡張のものか（仕様書 第6.10.7.3節。書き方は docs/help/README.md） |
 | [LICENSE](LICENSE) | ライセンス（Apache License 2.0） |
 
 ## ライセンス

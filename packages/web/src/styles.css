@@ -795,6 +795,37 @@ tr.muted td { color: var(--muted); }
 .help-search { display: flex; gap: calc(8px * var(--space-scale)); margin-bottom: calc(14px * var(--space-scale)); }
 .help-search input { flex: 1; padding: calc(8px * var(--space-scale)) calc(12px * var(--space-scale)); border: 1px solid var(--line); border-radius: 6px; font: inherit; }
 .help-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: calc(12px * var(--space-scale)); }
+/* ヘルプセンター（仕様書 第6.10.7節）。左に区分の木、右に本文。狭い画面では木と本文を切り替える */
+.help-layout { display: grid; grid-template-columns: minmax(200px, 260px) minmax(0, 1fr); gap: calc(16px * var(--space-scale)); align-items: start; }
+.help-tree { position: sticky; top: 0; max-height: calc(100vh - 120px); overflow-y: auto; padding-right: calc(4px * var(--space-scale)); }
+.help-tree h1 { font-size: calc(18px * var(--font-scale)); margin: 0 0 calc(8px * var(--space-scale)); }
+.help-tree .help-search { margin-bottom: calc(8px * var(--space-scale)); }
+.help-tree .help-search input { padding: calc(6px * var(--space-scale)) calc(10px * var(--space-scale)); }
+.help-branches, .help-leaves { list-style: none; margin: 0; padding: 0; }
+.help-leaves { padding-left: calc(14px * var(--space-scale)); }
+.help-branch-head { display: flex; align-items: center; gap: 4px; width: 100%; background: none; border: none; color: var(--ink);
+  font-weight: 600; font-size: calc(13px * var(--font-scale)); padding: calc(5px * var(--space-scale)) 0; text-align: left; cursor: pointer; }
+.help-branch.depth-1 > .help-branch-head, .help-branch.depth-2 > .help-branch-head { font-weight: 500; }
+.help-branch-head svg { width: 12px; height: 12px; flex: none; color: var(--muted); }
+.help-leaf { display: block; width: 100%; text-align: left; background: none; border: none; color: var(--ink); border-radius: 6px;
+  font-size: calc(13px * var(--font-scale)); padding: calc(4px * var(--space-scale)) calc(8px * var(--space-scale)); cursor: pointer; line-height: 1.4; }
+.help-leaf:hover { background: var(--accent-soft); }
+.help-leaf.current { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.help-footer { display: flex; gap: calc(12px * var(--space-scale)); border-top: 1px solid var(--line); margin-top: calc(10px * var(--space-scale)); padding-top: calc(6px * var(--space-scale)); }
+.help-small-link { background: none; border: none; padding: calc(4px * var(--space-scale)) 0; color: var(--muted); font-size: calc(12px * var(--font-scale)); cursor: pointer; text-align: left; }
+.help-small-link:hover { color: var(--accent); text-decoration: underline; }
+.help-body { min-width: 0; }
+.help-toc-link { display: none; }
+.help-pager { display: flex; justify-content: space-between; gap: 8px; margin-top: calc(20px * var(--space-scale)); padding-top: calc(10px * var(--space-scale)); border-top: 1px solid var(--line); }
+/* 欄が狭いとき（画面の幅ではなく、ヘルプの欄の幅で決める。右に秘書のキャンバスがあると狭くなる） */
+.help-center { container-type: inline-size; }
+@container (max-width: 640px) {
+  .help-layout { grid-template-columns: minmax(0, 1fr); }
+  .help-tree { position: static; max-height: none; }
+  .help-layout.reading .help-tree { display: none; }
+  .help-layout:not(.reading) .help-body { display: none; }
+  .help-toc-link { display: block; }
+}
 .help-item { display: block; width: 100%; text-align: left; background: none; border: none; padding: calc(6px * var(--space-scale)) 0;
   color: var(--accent); font-size: calc(14px * var(--font-scale)); border-bottom: 1px dashed var(--line); }
 .help-item:hover { text-decoration: underline; }

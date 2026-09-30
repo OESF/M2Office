@@ -4,6 +4,7 @@ title: 秘書の使い方
 audience: all
 category: start
 related: [start-screen, start-memory, start-voice, start-agents, faq-mistakes]
+order: 2
 ---
 画面の下の入力欄から、秘書に話しかけられます。答えは画面右の**秘書のキャンバス**に出ます
 （いちばん新しい答えだけが出て、次の答えで置き換わります）。

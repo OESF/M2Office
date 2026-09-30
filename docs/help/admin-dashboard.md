@@ -4,6 +4,8 @@ title: ダッシュボードの見方（管理者）
 audience: admin
 category: admin
 related: [faq-privacy, admin-agents]
+group: 記録
+order: 1
 ---
 管理者ページの最初の画面です。「いま」と「集計」を切り替えて見ます。
 

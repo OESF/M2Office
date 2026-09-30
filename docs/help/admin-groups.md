@@ -4,6 +4,8 @@ title: グループと利用できる人（管理者）
 audience: admin
 category: admin
 related: [admin-users, admin-agents, admin-extensions]
+group: 設定
+order: 3
 ---
 業務ごとに、使える人を決められます。全員が使う業務と、一部の人だけが使う業務（例: 人事の業務は人事部だけ）を分けるための仕組みです。
 

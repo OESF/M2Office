@@ -4,6 +4,8 @@ title: 利用状況の見方（管理者）
 audience: admin
 category: admin
 related: [admin-runs, admin-dashboard, admin-connectors]
+group: 記録
+order: 2
 ---
 管理者ページの左のメニュー、**記録の「利用状況」**では、業務ごとに何回動き、推論にどれだけの費用がかかったかを確かめられます。
 

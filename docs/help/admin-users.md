@@ -4,6 +4,8 @@ title: ユーザーと権限（管理者）
 audience: admin
 category: admin
 related: [admin-setup, admin-groups]
+group: 設定
+order: 2
 ---
 管理者ページの「ユーザーと権限」で設定します。
 

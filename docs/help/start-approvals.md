@@ -4,6 +4,7 @@ title: 承認のしかた
 audience: all
 category: start
 related: [start-agents, faq-sending]
+order: 4
 ---
 人の判断が要るのは、**社外に出るもの**と**お金の確定**だけです。
 メールの送信、社外の人が入れるチャットのスペースへの投稿、社外の人との共有や招待、請求の確定などがこれに当たります。

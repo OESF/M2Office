@@ -5,6 +5,7 @@
  * 2. 記事の `related` が実在する記事を指す
  * 3. 画面の `<HelpTip article="…">` と `openHelp('…')`、題名の説明（`article: '…'`）が実在する記事を指す
  * 4. 「？」を段落の中に置いていない（仕様書 第6.10.4.4節）。見出しの無い「？」と、文の途中の「？」を見つける
+ * 5. 業務のマニュアル（`docs/manual/<名前>/`）が `manual.json`（title・extension）を持ち、章が `#` の見出しで始まる。記事の `business` がマニュアルの名前か、要点の記事だけの業務を指す（仕様書 第6.10.7.3節）
  *
  * 業務の記事（`agent-<ID>`）は定義から自動で作るため、公式エージェントの ID と照合する。
  *
@@ -73,9 +74,22 @@ for (const m of onboarding.matchAll(/help: '([^']+)'/g)) {
   if (!exists(m[1])) problems.push(`packages/api/src/routes/onboarding.ts: 記事 ${m[1]} が見つかりません`);
 }
 
+// 業務のマニュアル（ヘルプで章ごとに読む。第6.10.7.3節）
+const manualDir = join(root, 'docs', 'manual');
+let chapters = 0;
+for (const d of readdirSync(manualDir, { withFileTypes: true }).filter((d) => d.isDirectory())) {
+  let meta = null;
+  try { meta = JSON.parse(readFileSync(join(manualDir, d.name, 'manual.json'), 'utf8')); } catch { problems.push(`docs/manual/${d.name}: manual.json が無いか読めません`); continue; }
+  if (!meta.title || !meta.extension) problems.push(`docs/manual/${d.name}/manual.json: title と extension が要ります`);
+  for (const f of readdirSync(join(manualDir, d.name)).filter((f) => /^\d{2}-.+\.md$/.test(f))) {
+    chapters++;
+    if (!/^# \S/m.test(readFileSync(join(manualDir, d.name, f), 'utf8'))) problems.push(`docs/manual/${d.name}/${f}: 章の題（# の見出し）がありません`);
+  }
+}
+
 if (problems.length > 0) {
   console.error('ヘルプの記事に問題があります:');
   for (const p of problems) console.error(`  ${p}`);
   process.exit(1);
 }
-console.log(`ヘルプ: 記事 ${articles.size} 件と、画面からの参照がすべて有効です。`);
+console.log(`ヘルプ: 記事 ${articles.size} 件・マニュアルの章 ${chapters} 件と、画面からの参照がすべて有効です。`);

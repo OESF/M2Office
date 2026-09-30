@@ -11,7 +11,7 @@ import {
   Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode,
 } from 'react';
 import { parseInline, parseMarkdown, type MdList } from './markdown.js';
-import { api, describeError, type AgentHelpView, type HelpArticleMeta } from './api.js';
+import { api, describeError, type AgentHelpView, type HelpArticleMeta, type HelpScope } from './api.js';
 import { Icon } from './nav.js';
 
 /** ヘルプセンターで記事を開く合図の名前。 */
@@ -124,18 +124,97 @@ function BackLink({ back }: { back?: { label: string; go: () => void } }) {
   );
 }
 
-const CATEGORY_LABELS: Record<string, string> = {
-  start: 'はじめに', agents: '業務', faq: 'よくある質問', admin: '管理者向け',
-  glossary: '用語', updates: '更新情報', contact: '問い合わせ',
+/** 木の 1 つの枝（区分・業務）。`items` は葉（記事）、`nodes` は下の枝。 */
+interface TreeNode { key: string; label: string; items: HelpArticleMeta[]; nodes?: TreeNode[]; closed?: boolean; itemsFirst?: boolean }
+
+/** 更新情報の版（`updates-v0-11-0` → [0, 11, 0]）。新しい順に並べるため。 */
+const versionOf = (id: string) => (/v(\d+)-(\d+)-(\d+)/.exec(id) ?? []).slice(1).map(Number);
+const newestFirst = (a: HelpArticleMeta, b: HelpArticleMeta) => {
+  const x = versionOf(a.id); const y = versionOf(b.id);
+  for (let i = 0; i < 3; i++) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (y[i] ?? 0) - (x[i] ?? 0);
+  return a.id.localeCompare(b.id);
 };
-const CATEGORY_ORDER = ['start', 'agents', 'faq', 'admin', 'glossary', 'updates', 'contact'];
+/** 記事の `order` の順（無いものは後ろ）。 */
+const byOrder = (a: HelpArticleMeta, b: HelpArticleMeta) => (a.order ?? 99) - (b.order ?? 99);
+/** 管理者ページの木では「（管理者）」を省く（管理者向けの記事だけを出すため）。 */
+const shortTitle = (t: string) => t.replace(/（管理者）$/, '');
+/** 管理者向けの記事の小分けの順。無い小分けは後ろへ。 */
+const ADMIN_GROUPS = ['はじめに', '設定', '記録'];
 
 /**
- * ヘルプセンター（仕様書 第6.10.7節）。記事の一覧・検索・本文。
+ * ヘルプの木を組み立てる（仕様書 第6.10.7節）。
+ *
+ * ワークスペース: はじめに・業務（業務の区分ごとに要点の記事とマニュアルの章、続けて業務エージェント）・よくある質問・更新情報。
+ * 管理者ページ: 管理者向けの記事を小分け（はじめに・設定・記録）ごとに・管理者向けの更新情報。
+ * 用語と問い合わせは木に入れず、木の下の小さな入口にする。
+ */
+function buildTree(items: HelpArticleMeta[], manuals: { id: string; title: string }[], scope: HelpScope): TreeNode[] {
+  const updates: TreeNode = { key: 'updates', label: '更新情報', items: items.filter((i) => i.category === 'updates').sort(newestFirst), closed: true };
+  if (scope === 'admin') {
+    const admin = items.filter((i) => i.category === 'admin');
+    const groups = [...new Set(admin.map((i) => i.group ?? 'そのほか'))]
+      .sort((a, b) => (ADMIN_GROUPS.indexOf(a) + 1 || 99) - (ADMIN_GROUPS.indexOf(b) + 1 || 99));
+    return [...groups.map((g) => ({ key: `admin:${g}`, label: g, items: admin.filter((i) => (i.group ?? 'そのほか') === g).sort(byOrder) })), updates];
+  }
+  const businessIds = [...new Set(items.filter((i) => i.business).map((i) => i.business!))];
+  const businesses: TreeNode[] = businessIds.map((id) => {
+    const own = items.filter((i) => i.business === id);
+    const guide = own.filter((i) => i.category !== 'manual');
+    const chapters = own.filter((i) => i.category === 'manual').sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    const manual = manuals.find((m) => m.id === id);
+    return {
+      key: `business:${id}`, label: manual?.title ?? guide[0]?.title ?? id, items: guide, closed: true, itemsFirst: true,
+      nodes: chapters.length ? [{ key: `manual:${id}`, label: 'マニュアル', items: chapters, closed: true }] : [],
+    };
+  });
+  return [
+    { key: 'start', label: 'はじめに', items: items.filter((i) => i.category === 'start' && !i.business).sort(byOrder) },
+    { key: 'business', label: '業務', items: items.filter((i) => i.category === 'agents'), nodes: businesses },
+    { key: 'faq', label: 'よくある質問', items: items.filter((i) => i.category === 'faq') },
+    updates,
+  ].filter((n) => n.items.length > 0 || (n.nodes?.length ?? 0) > 0);
+}
+
+/** 枝がこの記事を含むか。 */
+const holds = (n: TreeNode, id: string | null): boolean => !!id && (n.items.some((i) => i.id === id) || (n.nodes ?? []).some((c) => holds(c, id)));
+
+/** 木の枝。開いている記事を含む枝は開く。 */
+function TreeBranch({ node, current, onOpen, admin, depth = 0 }: {
+  node: TreeNode; current: string | null; onOpen: (id: string) => void; admin: boolean; depth?: number;
+}) {
+  const [open, setOpen] = useState(!node.closed || holds(node, current));
+  useEffect(() => { if (holds(node, current)) setOpen(true); }, [current]); // eslint-disable-line react-hooks/exhaustive-deps
+  const branches = (node.nodes ?? []).map((c) => <TreeBranch key={c.key} node={c} current={current} onOpen={onOpen} admin={admin} depth={depth + 1} />);
+  return (
+    <li className={`help-branch depth-${depth}`}>
+      <button className="help-branch-head" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <Icon name={open ? 'caret-down' : 'caret-right'} />{node.label}
+      </button>
+      {open && (
+        <ul className="help-leaves">
+          {!node.itemsFirst && branches}
+          {node.items.map((i) => (
+            <li key={i.id}>
+              <button className={`help-leaf${i.id === current ? ' current' : ''}`} aria-current={i.id === current ? 'page' : undefined} onClick={() => onOpen(i.id)}>
+                {/* 業務の区分と同じ名前の記事は、その業務の使い方の要点 */}
+                {i.title === node.label ? '使い方の要点' : admin ? shortTitle(i.title) : i.title}
+              </button>
+            </li>
+          ))}
+          {node.itemsFirst && branches}
+        </ul>
+      )}
+    </li>
+  );
+}
+
+/**
+ * ヘルプセンター（仕様書 第6.10.7節）。左に区分の木と検索、右に本文。
  *
  * @param initial 最初に開く記事
+ * @param scope 出す所。管理者ページは `admin`（管理者向けの記事だけ）、ワークスペースは管理者向けの記事を出さない
  */
-export function HelpCenter({ initial, back, onReplayTour, onArticle }: {
+export function HelpCenter({ initial, back, onReplayTour, onArticle, scope = 'workspace' }: {
   initial: string | null;
   /**
    * 開いている記事が変わったとき（一覧へ戻ったときは `null`）。画面の URL を合わせるのに使う（仕様書 第6.1.6節）
@@ -147,67 +226,84 @@ export function HelpCenter({ initial, back, onReplayTour, onArticle }: {
    */
   back?: { label: string; go: () => void };
   onReplayTour?: () => void;
+  scope?: HelpScope;
 }) {
   const [items, setItems] = useState<HelpArticleMeta[]>([]);
+  const [manuals, setManuals] = useState<{ id: string; title: string }[]>([]);
   const [articleId, setArticleId] = useState<string | null>(initial);
   const [q, setQ] = useState('');
   const [results, setResults] = useState<{ id: string; title: string; excerpt: string }[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => { api.help.list().then((r) => setItems(r.items)).catch((e) => setError(describeError(e))); }, []);
+  useEffect(() => { api.help.list(scope).then((r) => { setItems(r.items); setManuals(r.manuals ?? []); }).catch((e) => setError(describeError(e))); }, [scope]);
   useEffect(() => { setArticleId(initial); }, [initial]);
   useEffect(() => { onArticle?.(articleId); }, [articleId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function search() {
     if (!q.trim()) { setResults(null); return; }
-    try { setResults((await api.help.search(q)).items); } catch (e) { setError(describeError(e)); }
+    try { setResults((await api.help.search(q, scope)).items); } catch (e) { setError(describeError(e)); }
   }
+  const open = (id: string) => { setResults(null); setArticleId(id); };
+  const tree = buildTree(items, manuals, scope);
+  const admin = scope === 'admin';
+  const glossary = items.find((i) => i.category === 'glossary');
+  const contact = items.find((i) => i.category === 'contact');
 
-  // 記事を見ているときは、まず記事の一覧へ戻す（二段階。第6.10.7.2節）
-  if (articleId) {
-    return (
-      <>
-        <BackLink back={back} />
-        <ArticleView id={articleId} items={items} onOpen={setArticleId} onBack={() => setArticleId(null)} />
-      </>
-    );
-  }
   return (
     <>
       <BackLink back={back} />
-      <h1>ヘルプ</h1>
-      <p className="lead">秘書に聞くのが早道です</p>
-      {error && <p className="error">{error}</p>}
-      <div className="help-search">
-        <input value={q} placeholder="例: 承認のしかた、定時実行" onChange={(e) => setQ(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) void search(); }} />
-        <button className="btn" onClick={() => void search()}>探す</button>
-      </div>
-      {results && (
-        <div className="card">
-          <h3>「{q}」の検索結果</h3>
-          {results.length === 0 && <p>見つかりませんでした</p>}
-          {results.map((r) => (
-            <button key={r.id} className="help-item" onClick={() => setArticleId(r.id)}>
-              <strong>{r.title}</strong><span className="sub">{r.excerpt}</span>
-            </button>
-          ))}
+      <div className="help-center"><div className={`help-layout${articleId || results ? ' reading' : ''}`}>
+        <nav className="help-tree" aria-label="ヘルプの目次">
+          <h1>{admin ? '管理者のヘルプ' : 'ヘルプ'}</h1>
+          <div className="help-search">
+            <input value={q} placeholder="探す" aria-label="ヘルプを探す" onChange={(e) => setQ(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) void search(); }} />
+          </div>
+          {error && <p className="error small">{error}</p>}
+          <ul className="help-branches">
+            {tree.map((n) => <TreeBranch key={n.key} node={n} current={articleId} onOpen={open} admin={admin} />)}
+          </ul>
+          {!admin && onReplayTour && <button className="help-small-link" onClick={onReplayTour}>はじめの案内をもう一度見る</button>}
+          {(glossary || contact) && (
+            <div className="help-footer">
+              {glossary && <button className="help-small-link" onClick={() => open(glossary.id)}>{glossary.title}</button>}
+              {contact && <button className="help-small-link" onClick={() => open(contact.id)}>問い合わせ</button>}
+            </div>
+          )}
+        </nav>
+        <div className="help-body">
+          {results ? (
+            <div className="card">
+              <button className="link-btn help-toc-link" onClick={() => setResults(null)}>‹ 目次</button>
+              <h3>「{q}」の検索結果</h3>
+              {results.length === 0 && <p>見つかりませんでした</p>}
+              {results.map((r) => (
+                <button key={r.id} className="help-item" onClick={() => open(r.id)}>
+                  <strong>{admin ? shortTitle(r.title) : r.title}</strong><span className="sub">{r.excerpt}</span>
+                </button>
+              ))}
+            </div>
+          ) : articleId ? (
+            <ArticleView id={articleId} items={items} onOpen={open} onBack={() => setArticleId(null)} />
+          ) : (
+            <Landing tree={tree} onOpen={open} admin={admin} />
+          )}
         </div>
-      )}
-      <div className="help-grid">
-        {CATEGORY_ORDER.filter((c) => items.some((i) => i.category === c)).map((c) => (
-          <section className="card" key={c}>
-            <h3>{CATEGORY_LABELS[c] ?? c}</h3>
-            {items.filter((i) => i.category === c).map((i) => (
-              <button key={i.id} className="help-item" onClick={() => setArticleId(i.id)}>{i.title}</button>
-            ))}
-            {c === 'start' && onReplayTour && (
-              <button className="help-item" onClick={onReplayTour}>はじめの案内をもう一度見る</button>
-            )}
-          </section>
-        ))}
-      </div>
+      </div></div>
     </>
+  );
+}
+
+/** 何も開いていないときの本文の側。最初の区分の記事を並べる（説明の文は常には出さない。原則 u11）。 */
+function Landing({ tree, onOpen, admin }: { tree: TreeNode[]; onOpen: (id: string) => void; admin: boolean }) {
+  const first = tree[0];
+  if (!first) return null;
+  return (
+    <section className="card help-landing">
+      {!admin && <p className="lead">秘書に聞くのが早道です</p>}
+      <h3>{first.label}</h3>
+      {first.items.map((i) => <button key={i.id} className="help-item" onClick={() => onOpen(i.id)}>{admin ? shortTitle(i.title) : i.title}</button>)}
+    </section>
   );
 }
 
@@ -220,14 +316,26 @@ function ArticleView({ id, items, onOpen, onBack }: {
     setArticle(null); setError(null);
     api.help.get(id).then(setArticle).catch((e) => setError(describeError(e, '記事を開けませんでした')));
   }, [id]);
+  // マニュアルの章なら、前の章と次の章（仕様書 第6.10.7.3節）
+  const chapters = article?.category === 'manual'
+    ? items.filter((i) => i.category === 'manual' && i.business === article.business).sort((a, b) => (a.order ?? 0) - (b.order ?? 0)) : [];
+  const at = chapters.findIndex((c) => c.id === id);
+  const prev = at > 0 ? chapters[at - 1] : undefined;
+  const next = at >= 0 ? chapters[at + 1] : undefined;
   return (
     <>
-      <button className="link-btn" onClick={onBack}>‹ ヘルプの一覧へ</button>
+      <button className="link-btn help-toc-link" onClick={onBack}>‹ 目次</button>
       {error && <p className="error">{error}</p>}
       {article && (
         <article className="card article">
           <h1>{article.title}</h1>
           <Markdown text={article.body} />
+          {(prev || next) && (
+            <div className="help-pager">
+              {prev ? <button className="btn ghost small" onClick={() => onOpen(prev.id)}>‹ {prev.title}</button> : <span />}
+              {next && <button className="btn ghost small" onClick={() => onOpen(next.id)}>{next.title} ›</button>}
+            </div>
+          )}
           {article.related.length > 0 && (
             <div className="related">
               <h3>関連する記事</h3>

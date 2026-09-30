@@ -4,6 +4,8 @@ title: はじめに行う設定（管理者）
 audience: admin
 category: admin
 related: [admin-agents, admin-knowledge, admin-users]
+group: はじめに
+order: 1
 ---
 管理者ページの左のメニュー、**設定のいちばん下の「はじめに行う設定」**を開くと、
 何が済んでいて何が残っているかが分かります。**残りの数はメニューにも出ます**（「4 / 6」など）。

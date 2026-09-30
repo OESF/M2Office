@@ -216,8 +216,17 @@ export function describeError(err: unknown, fallback = 'うまくいきません
 
 /** ヘルプの記事の一覧の 1 件。 */
 export interface HelpArticleMeta {
-  id: string; title: string; audience: string; category: string; related: string[]; source: 'official' | 'agent';
+  id: string; title: string; audience: string; category: string; related: string[]; source: 'official' | 'agent' | 'manual';
+  /** 業務の区分（マニュアルの名前）。ヘルプの木で同じ業務の下にまとめる（仕様書 第6.10.7.3節）。 */
+  business?: string;
+  /** 木の中の小分け（管理者向けの「はじめに」「設定」「記録」）。 */
+  group?: string;
+  /** マニュアルの中の順（0 がはじめに）。 */
+  order?: number;
 }
+
+/** ヘルプを出す所（仕様書 第6.10.7節）。 */
+export type HelpScope = 'workspace' | 'admin';
 
 /** 業務の説明（仕様書 第6.10.5節）。 */
 export interface AgentHelpView {
@@ -890,10 +899,10 @@ export const api = {
     clear: () => call<{ ok: true }>('/debug/events', { method: 'DELETE' }),
   },
   help: {
-    list: () => call<{ items: HelpArticleMeta[] }>('/help/articles'),
+    list: (scope: HelpScope = 'workspace') => call<{ items: HelpArticleMeta[]; manuals: { id: string; title: string }[] }>(`/help/articles?scope=${scope}`),
     get: (id: string) => call<HelpArticleMeta & { body: string }>(`/help/articles/${encodeURIComponent(id)}`),
-    search: (q: string) => call<{ items: { id: string; title: string; category: string; excerpt: string }[] }>(
-      `/help/search?q=${encodeURIComponent(q)}`),
+    search: (q: string, scope: HelpScope = 'workspace') => call<{ items: { id: string; title: string; category: string; excerpt: string }[] }>(
+      `/help/search?q=${encodeURIComponent(q)}&scope=${scope}`),
     agent: (agentId: string) => call<AgentHelpView>(`/help/agents/${encodeURIComponent(agentId)}`),
   },
   onboarding: {

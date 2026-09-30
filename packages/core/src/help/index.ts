@@ -6,6 +6,6 @@
 
 export { buildAgentHelp, agentHelpMarkdown, type AgentHelpView } from './agent-help.js';
 export {
-  HelpCatalog, parseArticle, audiencesFor, helpTerms, helpConcepts, HELP_CATEGORIES,
-  type HelpArticle, type HelpAudience, type HelpCategory, type HelpHit, type HelpContext,
+  HelpCatalog, parseArticle, parseManual, audiencesFor, helpTerms, helpConcepts, HELP_CATEGORIES,
+  type HelpArticle, type HelpAudience, type HelpCategory, type HelpHit, type HelpContext, type HelpScope, type ManualMeta,
 } from './articles.js';

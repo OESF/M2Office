@@ -4,6 +4,7 @@ title: 在庫管理
 audience: all
 category: start
 related: [start-secretary, admin-extensions]
+business: inventory
 ---
 品目ごとの数を、入庫・使用・移動の記録から出します。左のメニューの「在庫管理」で見られます。
 会社が在庫管理を使っていて、使える人に入っているときだけ出ます。

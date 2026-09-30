@@ -4,6 +4,7 @@ title: 業務を実行する
 audience: all
 category: start
 related: [start-approvals, start-schedules]
+order: 3
 ---
 左のメニューから業務を選び、必要な項目を入れて「**実行**」を押します。
 入力欄には書き方の例が薄く出ているので、それにならって入れてください。

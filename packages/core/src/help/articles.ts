@@ -17,7 +17,7 @@ import { extractTerms, matchConcepts, normalizeForSearch, type SearchConcept } f
 /** 記事の読み手。`all` は全員、`approver` は承認者と管理者、`admin` は管理者だけ。 */
 export type HelpAudience = 'all' | 'approver' | 'admin';
 
-export const HELP_CATEGORIES = ['start', 'agents', 'faq', 'admin', 'glossary', 'updates', 'contact'] as const;
+export const HELP_CATEGORIES = ['start', 'agents', 'manual', 'faq', 'admin', 'glossary', 'updates', 'contact'] as const;
 export type HelpCategory = (typeof HELP_CATEGORIES)[number];
 
 export interface HelpArticle {
@@ -29,9 +29,20 @@ export interface HelpArticle {
   related: string[];
   /** 本文（Markdown）。 */
   body: string;
-  /** `official` は公式の記事、`agent` は定義から作った業務の記事。 */
-  source: 'official' | 'agent';
+  /** `official` は公式の記事、`agent` は定義から作った業務の記事、`manual` は業務のマニュアルの章。 */
+  source: 'official' | 'agent' | 'manual';
+  /** 業務の区分（マニュアルの名前。例: `inventory`）。ヘルプの木で、同じ業務の下にまとめる（第6.10.7.3節）。 */
+  business?: string;
+  /** 木の中の小分け（管理者向けの記事の「はじめに」「設定」「記録」など）。 */
+  group?: string;
+  /** この内蔵の拡張を使える人だけに出す（マニュアルの章）。 */
+  extension?: string;
+  /** 木の中の並びの順（記事の `order`。マニュアルの章は 0 がはじめに）。 */
+  order?: number;
 }
+
+/** ヘルプを出す所。ワークスペースは管理者向けの記事を出さず、管理者ページは管理者向けの記事だけを出す（第6.10.7節）。 */
+export type HelpScope = 'workspace' | 'admin';
 
 /**
  * 記事のファイル（先頭に `---` で囲んだ属性を持つ Markdown）を読む。
@@ -60,7 +71,52 @@ export function parseArticle(text: string): HelpArticle {
   return {
     id: attrs['id']!, title: attrs['title']!, audience: attrs['audience'] as HelpAudience,
     category: attrs['category'] as HelpCategory, related, body: m[2]!.trim(), source: 'official',
+    ...(attrs['business'] ? { business: attrs['business'] } : {}),
+    ...(attrs['group'] ? { group: attrs['group'] } : {}),
+    ...(/^\d+$/.test(attrs['order'] ?? '') ? { order: Number(attrs['order']) } : {}),
   };
+}
+
+/** 業務のマニュアルの `manual.json`（第6.10.7.3節）。 */
+export interface ManualMeta {
+  /** マニュアルの名前（ヘルプの木の業務の区分の名前）。 */
+  title: string;
+  /** どの内蔵の拡張のものか。使える人だけに出す。 */
+  extension: string;
+}
+
+/**
+ * 業務のマニュアル（`docs/manual/<id>/`）を、章ごとの記事にする。
+ *
+ * @param id マニュアルの名前（フォルダーの名前）
+ * @param files `README.md` と、番号で始まる章のファイル（`01-….md`）。ほかのファイルは読まない
+ * @remarks 章の題は最初の `#` の見出しから取り、本文からは除く。章の順は番号の順（README は 0）。ファイルの読み込みは呼び出し側（API）が行う
+ */
+export function parseManual(id: string, meta: ManualMeta, files: { name: string; text: string }[]): HelpArticle[] {
+  const out: HelpArticle[] = [];
+  for (const f of files) {
+    const num = /^(\d{2})-.+\.md$/.exec(f.name);
+    if (f.name !== 'README.md' && !num) continue;
+    const order = num ? Number(num[1]) : 0;
+    const lines = f.text.replace(/\r\n/g, '\n').split('\n');
+    const at = lines.findIndex((l) => /^#\s+/.test(l));
+    const heading = at >= 0 ? lines[at]!.replace(/^#\s+/, '').trim() : '';
+    const title = order === 0 ? 'はじめに' : heading || f.name;
+    const body = (at >= 0 ? [...lines.slice(0, at), ...lines.slice(at + 1)] : lines).join('\n').trim();
+    out.push({
+      id: `manual-${id}-${String(order).padStart(2, '0')}`, title, audience: 'all', category: 'manual', related: [], body,
+      source: 'manual', business: id, extension: meta.extension, order,
+    });
+  }
+  return out.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+}
+
+/** 出す所に合うか（第6.10.7節）。用語と問い合わせはどちらにも出す。 */
+function inScope(a: HelpArticle, scope: HelpScope | undefined): boolean {
+  if (!scope) return true;
+  if (a.category === 'glossary' || a.category === 'contact') return true;
+  if (scope === 'admin') return a.category === 'admin' || (a.category === 'updates' && a.audience === 'admin');
+  return a.audience !== 'admin';
 }
 
 /** 利用者の役割から、見られる読み手の区分を返す。 */
@@ -92,8 +148,12 @@ export class HelpCatalog {
     private readonly registry: ToolRegistry,
   ) {}
 
-  /** 見られる記事の一覧。 */
-  list(ctx: HelpContext): HelpArticle[] {
+  /**
+   * 見られる記事の一覧。
+   *
+   * @param scope 出す所（省略時はすべて。秘書の答えの材料など）
+   */
+  list(ctx: HelpContext, scope?: HelpScope): HelpArticle[] {
     const allowed = new Set(audiencesFor(ctx.roles));
     const agentArticles = (ctx.agents ?? this.agents)
       .filter((a) => !ctx.disabledAgents.includes(a.id))
@@ -101,7 +161,10 @@ export class HelpCatalog {
         id: `agent-${a.id}`, title: a.name, audience: 'all', category: 'agents', related: ['start-agents'],
         body: agentHelpMarkdown(this.agentHelp(a, ctx)), source: 'agent',
       }));
-    return [...this.official, ...agentArticles].filter((a) => allowed.has(a.audience));
+    // マニュアルの章は、その業務を使える人だけに出す（第6.10.7.3節）。使える業務を渡されなければ出さない
+    const usable = new Set(ctx.extensions ?? []);
+    return [...this.official, ...agentArticles]
+      .filter((a) => allowed.has(a.audience) && (!a.extension || usable.has(a.extension)) && inScope(a, scope));
   }
 
   /** 業務の説明を組み立てる（仕様書 第6.10.5節）。 */
@@ -125,11 +188,11 @@ export class HelpCatalog {
    * 「有給休暇は何日？」のような社内規程の質問に、本文の例に「有給」とあるだけの記事を返さないため（第6.10.6節）。
    * 最上位の 3 割に満たない記事も返さない。
    */
-  search(query: string, ctx: HelpContext, limit = 3): HelpHit[] {
+  search(query: string, ctx: HelpContext, limit = 3, scope?: HelpScope): HelpHit[] {
     const concepts = helpConcepts(query);
     if (concepts.length === 0) return [];
     const terms = concepts.flatMap((c) => c.alternatives);
-    const scored = this.list(ctx)
+    const scored = this.list(ctx, scope)
       .map((article) => {
         const m = matchConcepts(concepts, { heading: article.title, path: [], body: article.body });
         const relevant = m.inHeading > 0 || (m.total >= 2 && m.matched === m.total);
@@ -157,6 +220,8 @@ export interface HelpContext {
   agents?: AgentDefinition[];
   /** その会社で使えるツール（コネクタのツールを含む）。省略時は内蔵のツール。 */
   registry?: ToolRegistry;
+  /** 本人が使える内蔵の拡張の ID。マニュアルの章を出す。省略時は出さない（秘書の答えの材料には入れない。第6.10.7.3節）。 */
+  extensions?: readonly string[];
 }
 
 /**

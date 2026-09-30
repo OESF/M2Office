@@ -4,6 +4,8 @@ title: 接続の設定（管理者）
 audience: admin
 category: admin
 related: [admin-setup, admin-extensions]
+group: 設定
+order: 1
 ---
 管理者ページの「接続」で、Gemini（AI）と Google Workspace（メール・予定など）、ほかのサービス（コネクタ。MCP サーバ）への接続を設定します。
 鍵やシークレットは、登録したあとは画面に表示しません。変えるときは上書きし、要らなくなったら削除します。
