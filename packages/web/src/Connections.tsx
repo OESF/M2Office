@@ -222,7 +222,7 @@ function RequiredScopes({ scopes }: { scopes: ConnectionSettings['google']['requ
       <p className="muted small">制限付き＝公開時に CASA 評価が必要</p>
       {error && <p className="error">{error}</p>}
       <table className="table">
-        <thead><tr><th>許可</th><th>段階</th><th>使う業務</th></tr></thead>
+        <thead><tr><th>許可</th><th>段階</th><th>利用する業務</th></tr></thead>
         <tbody>
           {scopes.map((s) => (
             <tr key={s.scope}>

@@ -1,5 +1,5 @@
 /**
- * @file 本人の朝のブリーフ・週次ブリーフの中身を読む道具（`brief.settings`。仕様書 第9.5.5.1.1節、ADR-0047・ADR-0048）。
+ * @file 本人の朝のブリーフ・週次ブリーフの中身を読むツール（`brief.settings`。仕様書 第9.5.5.1.1節、ADR-0047・ADR-0048）。
  */
 
 import { BRIEF_SECTIONS, WEEKLY_SECTIONS } from '@m2office/shared';

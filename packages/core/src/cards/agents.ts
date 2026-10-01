@@ -12,7 +12,7 @@
 import { CARDS_EXTENSION_ID, type AgentDefinition } from '@m2office/shared';
 import type { ExtensionPackage } from '../extensions/loader.js';
 
-/** 内蔵の拡張の版。付属の業務や道具が変わったら上げる。 */
+/** 内蔵の拡張の版。付属の業務やツールが変わったら上げる。 */
 export const CARDS_EXTENSION_VERSION = '1.0.0';
 
 /** 付属の業務「名刺の取り込み」。 */
@@ -227,7 +227,7 @@ export const CARDS_PACKAGE: ExtensionPackage = {
     description: '名刺を撮るかスキャナーで読み込むと、AI が読み取って連絡先として登録します。秘書に聞けば名刺が出てきます。会社で共有するのを既定にし、1 枚ずつ「自分だけ」にできます',
     publisher: { name: 'M2Office', verified: true },
     platform_schema: '>=1 <2',
-    // まとめてのメール（第27.9.1節）は送る道具を使うため、最上位の危険度は「社外へ送る」（内蔵の拡張なので再同意は無い）
+    // まとめてのメール（第27.9.1節）は送るツールを使うため、最上位の危険度は「社外へ送る」（内蔵の拡張なので再同意は無い）
     permissions: {
       tools: ['card.read', 'contacts.search', 'contacts.get', 'contacts.save', 'contacts.bulk_draft', 'contacts.bulk_preview', 'mail.bulk_send'],
       max_risk_level: 'external-send',

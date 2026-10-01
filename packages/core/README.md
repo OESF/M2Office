@@ -34,19 +34,19 @@ src/cards/       名刺管理（内蔵の拡張。第27章）。置き場（自�
                  表（CSV・Excel）の取り込みと書き出し（table.ts。見出しはよくある言い方と推論で読む）、
                  メールの署名から異動・昇進・電話の変更を見つけて名刺を新しくする見張りと、戻す値の決め方（signature.ts。第27.6.1節）、
                  名刺の相手へのまとめてのメール（bulk.ts。下書き・除く人・見本・承認した要約の照合・1 人 1 通の送信・配信の停止。第27.9.1節）、
-                 取り込み・修正・範囲・分ける・消去（service.ts）、PDF の分け方と形式（formats.ts）、vCard、道具 4 つ、付属の業務
+                 取り込み・修正・範囲・分ける・消去（service.ts）、PDF の分け方と形式（formats.ts）、vCard、ツール 4 つ、付属の業務
 src/signage/     店頭サイネージ（内蔵の拡張。第31章の段 1・段 2）。置き場（画面・ふだん動いている時間帯・登録の番号・素材・流れ・割り込みと出す先・
                  よく出す案内・呼び出しの受け口・会社の音。PostgreSQL）、割り込み（interrupts.ts。並び・まとめる・古いもの・消す・よく出す案内・
                  受け口の読み方と骨組みからの推測・会社の音）、
                  処理（登録と画面の鍵・素材の確かめ・流れの版・再生のページへの答え・生きている知らせ・つながらない知らせ。service.ts）、
                  MP4 の入れ物の記録を読む（mp4.ts。H.264 か・長さ・縦横）・画像の縦横（image-size.ts）。
-                 秘書からの依頼は src/secretary/signage.ts（本人の発言を見分けてその場で行う。道具の一覧に載せない）
+                 秘書からの依頼は src/secretary/signage.ts（本人の発言を見分けてその場で行う。ツールの一覧に載せない）
 src/inventory/   在庫管理（内蔵の拡張。第29章）。置き場（入出庫の記録と同じトランザクションでいまの数を直す。PostgreSQL とメモリ）、
                  バーコードの読み方（gs1.ts。GS1・JAN・UPC）、品目・場所・入出庫・使用期限の近いロットから減らす・取り消し・
                  棚卸し（会社で 1 つ・数えた時点の帳簿と比べる・確定で差を調整に）・取り込みと書き出し（service.ts）、
                  棚のラベルの PDF（labels.ts。QR は qrcode）、見張りの計算（forecast.ts）と知らせ（watch.ts）、
                  納品書の読み取りと照らし合わせ（slip.ts）、予約との引き当て（bookings.ts。受け口・項目の対応の推論・メニューで使う品目の
-                 推論と学習・取り置き・使った・取り消し）、道具 7 つ、付属の業務「在庫の記録」「納品書から入庫」「発注の下書き」
+                 推論と学習・取り置き・使った・取り消し）、ツール 7 つ、付属の業務「在庫の記録」「納品書から入庫」「発注の下書き」
 src/hr/          人事・給与（内蔵の拡張。第30章）。段 1: 置き場（従業員・雇用条件の履歴・入退社の手続き。PostgreSQL）、
                  手続きの一覧と期限（procedures.ts。決まったプログラムで作る）、台帳・取り込み（見出しを推論で読む）・労働者名簿（service.ts）、
                  人事区画の確かめと用意（hrAccess・ensureHrCompartment）。段 2: 勤怠の集計（attendance.ts。日 8 時間・週 40 時間・
@@ -58,7 +58,7 @@ src/hr/          人事・給与（内蔵の拡張。第30章）。段 1: 置き
                  段 4: 回の点検（payroll-review.ts）・確定と明細の配布と振込データと賃金台帳（payroll-service.ts）・
                  全銀協の形式（zengin.ts）・明細の PDF（payslip-pdf.ts）・住民税の決定通知書の読み取り（resident-notice.ts）・
                  試しの計算（payroll-trial.ts）。
-                 労働条件通知書（terms-notice.ts）・労務カレンダー（calendar.ts・calendar-service.ts）・道具 hr.deadlines（tools.ts。朝のブリーフが読む）、
+                 労働条件通知書（terms-notice.ts）・労務カレンダー（calendar.ts・calendar-service.ts）・ツール hr.deadlines（tools.ts。朝のブリーフが読む）、
                  規程から設定の案（rules-proposal.ts）・法令の表の見張り（law/lookup.ts の staleAt・changesBetween）。
                  Phase 2 段 1: 賞与の計算（bonus.ts。算出率の表 law/bonus-2026.ts）・調整の行と訂正の回（payroll.ts・payroll-service.ts）。
                  段 2: 年末調整の計算（yea-calc.ts。年末調整の決まり law/yea-2026.ts）・申告（yea-store.ts）・年末調整の回と精算（yea-service.ts）・
@@ -72,8 +72,8 @@ src/hr/          人事・給与（内蔵の拡張。第30章）。段 1: 置き
 src/secretary/   秘書。3 層の応答振り分け、定時実行の確認・停止・再開・今すぐ実行（推論なし。第10.9.8節）、
                  社内のお知らせを出す・取り下げる・並べる・済んだにする（notices.ts。第10.15節）
                  在庫の依頼の見分けと、在庫の数の問いへのその場の答え（inventory.ts。第29.15節）
-src/brief/       朝のブリーフの人ごとの中身（第9.5.5.1.1節）。秘書が最初の関心の分野を選ぶ・会話で直す（settings.ts）、道具 brief.settings
-src/notices/     社内のお知らせ（第10.15節）。置き場（PostgreSQL とメモリ）、宛先・期間・初めて載せたか・済んだ・取り下げ（service.ts）、道具 notices.list
+src/brief/       朝のブリーフの人ごとの中身（第9.5.5.1.1節）。秘書が最初の関心の分野を選ぶ・会話で直す（settings.ts）、ツール brief.settings
+src/notices/     社内のお知らせ（第10.15節）。置き場（PostgreSQL とメモリ）、宛先・期間・初めて載せたか・済んだ・取り下げ（service.ts）、ツール notices.list
 test/            単体テスト（DB を使わない）
 ```
 
@@ -150,12 +150,12 @@ decideApproval(...)  →  承認を記録し、待ち行列へ戻す
 承認の段に来ると、エンジンは**その直後の段を先に組み立て**、社内への書き込みと社外への送信は記録だけして止まります（仕様書 第9.3.3節、ADR-0023）。
 承認の画面には「確認すること・判断するもの・承認すると行うこと」を業務の言葉で出し（`engine/approval-present.ts`・`engine/describe-call.ts`）、
 承認されたら**記録した操作をそのまま**実行します。承認のあとで推論し直さないので、承認した人が見た本文と送られる本文が同じになります。
-段が `tools` を宣言していれば、その段ではそれ以外の道具を呼ばせません（第9.2.7節）。推論には毎回、今日の日付（日本時間）を渡します。
+段が `tools` を宣言していれば、その段ではそれ以外のツールを呼ばせません（第9.2.7節）。推論には毎回、今日の日付（日本時間）を渡します。
 
 **人に判断を求めるのは、社外に出るものとお金の確定だけです**（仕様書 第9.4.0節、ADR-0028）。組み立てた操作を `needsHuman()` で見て、
-社外に出るもの（送る道具で、送り先が社内だけと確かめられなかったもの。メールは常に）・お金の確定（`financial`）・会社が「承認が必要」にした社内への書き込みのどれも無く、
+社外に出るもの（送るツールで、送り先が社内だけと確かめられなかったもの。メールは常に）・お金の確定（`financial`）・会社が「承認が必要」にした社内への書き込みのどれも無く、
 行えない操作も無ければ、承認の段を**人を待たずに通し**（`passAutomatically()`。記録は「自動で通過」、監査ログ `approval.auto`）、記録どおりに実行します。
-送り先の確かめは道具の `prepare` が返す `audience` で、Chat はスペースの `externalUserAllowed`、共有と招待は相手のドメイン（`audienceOf()`）で決めます。見本の接続口では常に社外です。
+送り先の確かめはツールの `prepare` が返す `audience` で、Chat はスペースの `externalUserAllowed`、共有と招待は相手のドメイン（`audienceOf()`）で決めます。見本の接続口では常に社外です。
 
 記録する前に、ツールが `prepare`（承認の前の確かめ。読むだけ）を持っていれば呼びます（ADR-0024）。
 `ready` なら確かめた引数で記録し（例: `chat.post` はスペースの名前を `spaces/…` にし、承認のあとは探し直さない）、
@@ -320,7 +320,7 @@ AG-02 議事録作成・共有は、承認②のあとに `knowledge.register` �
 画面内のお知らせが正で、Chat はその控えです（仕様書 第6.5.5.2節、ADR-0011）。メールは送りません（Q-86）。
 
 - 秘書の先回り（`secretary/proactive.ts` の `ProactiveWatcher`）は、ワーカーから 10 分ごとに呼び、会議の 20〜60 分前に会議の準備を、17 時以降に翌日の移動の調べものを起こします。「あとで〇〇する」を ToDo に入れるのは `Secretary` の中です（仕様書 第10.12節）
-- 朝のブリーフ（`agents/morning-brief.ts`）は通知を作らず、秘書の答えとして届けます（仕様書 第9.5.5.1節）。本人の自宅・勤務地は道具 `profile.read`（`tools/profile.ts`）で読みます
+- 朝のブリーフ（`agents/morning-brief.ts`）は通知を作らず、秘書の答えとして届けます（仕様書 第9.5.5.1節）。本人の自宅・勤務地はツール `profile.read`（`tools/profile.ts`）で読みます
 - 通知を作るのは実行エンジン（承認依頼・完了・失敗）と `notification.send`（週次ブリーフ）です。本人が受け取らないと決めた種類は作りません
 - 控えを届けるのは `NotificationDelivery.sweep()` で、ワーカーが一定の間隔で呼びます。送るのは種類・題名・画面へのリンクだけです
 - 送信口は `NotificationSender`。いまは `MockNotificationSender`（送ったことにして控える）で、会社の Chat アプリ（B-2）の後に差し替えます
@@ -336,19 +336,19 @@ AG-02 議事録作成・共有は、承認②のあとに `knowledge.register` �
 `buildSkillPackage()` がスキル（Claude Code の Skills・Agent Skills）の項目をスキルと同じ意味で読み、
 マニフェストとエージェント定義を組み立てて同じ検証に回します。`name`（省けばフォルダ名。`SKILL_FOLDER_ENTRY`）・`description`＋`when_to_use`（秘書の取り次ぎ）・
 `argument-hint`・`arguments`（入力の欄）・`disable-model-invocation`（`secretaryRoute: false`）・`user-invocable: false`（`menu: false`）・`effort`（`tier`）・
-`allowed-tools`（M2Office の道具と、同じフォルダの `connectors/*.json` で宣言したコネクタの道具。無い道具は無視して `notices`）。本文の `$ARGUMENTS`・`$N`・`$名前` は、実行エンジンが実行のときに入力で置き換えます（`substituteArguments()`）。
-段は本文を指示にした 1 つで、送る道具があれば「作業 → 承認 → 送る」を組みます。`HELP.md` は業務の説明の本文（`help.body`）になります。
-補助のファイル（Markdown・テキスト）は定義の `skill.files` に入れ、推論が道具 `skill.read` で必要なときに開きます。
+`allowed-tools`（M2Office のツールと、同じフォルダの `connectors/*.json` で宣言したコネクタのツール。無いツールは無視して `notices`）。本文の `$ARGUMENTS`・`$N`・`$名前` は、実行エンジンが実行のときに入力で置き換えます（`substituteArguments()`）。
+段は本文を指示にした 1 つで、送るツールがあれば「作業 → 承認 → 送る」を組みます。`HELP.md` は業務の説明の本文（`help.body`）になります。
+補助のファイル（Markdown・テキスト）は定義の `skill.files` に入れ、推論がツール `skill.read` で必要なときに開きます。
 `scripts/` などのプログラムと画像は除き、本文の `` !`コマンド` `` は消します（`notices` で知らせ、保存もしない）。
 フロントマターは依存を足さず、YAML の基本の形だけを読みます（`parseSkill()`）。SKILL.md 1 つのファイルも取り込めます。
 JSON の定義（`manifest.json`＋`agents/*.json`）は第 0.131.0 版で廃止し、`loadExtensionFiles()` は `JSON_FORMAT_RETIRED` を返して断ります。組み立てた後の形の検証の規則は `loadCompiledExtension()`（単体テスト用）で確かめます。
 
 `ExtensionHub.forTenant()` は、公式の配布元の拡張機能と、その会社がファイルから取り込んだもの（自社専用）を合わせ、
 **導入済み・有効・再同意が不要**なものだけを使える業務エージェントとツールにします。
-返す `registry` には、会社の接続（`tenant_connections`。仕様書 第12.11節、ADR-0037）の道具（`<接続の ID>.<道具の名前>`）が加わります。
+返す `registry` には、会社の接続（`tenant_connections`。仕様書 第12.11節、ADR-0037）のツール（`<接続の ID>.<ツールの名前>`）が加わります。
 接続は拡張機能とは別に会社が持つもので、有効な拡張機能に同梱の接続が未登録なら自動で登録し、拡張機能を消しても残します。
-業務が使う道具が会社の接続に無ければ、その業務は使えません（`missingToolsOf()`）。秘書の調べもの（`secretary-lookup`）には、会社の接続の読むだけの道具が加わります。
-SKILL.md で同梱していない接続の道具を `allowed-tools` に書くと、取り込むときは仮の道具（`connectionPlaceholder()`）で検証し、承認の段のあとでも使えるように組み立てます。
+業務が使うツールが会社の接続に無ければ、その業務は使えません（`missingToolsOf()`）。秘書の調べもの（`secretary-lookup`）には、会社の接続の読むだけのツールが加わります。
+SKILL.md で同梱していない接続のツールを `allowed-tools` に書くと、取り込むときは仮のツール（`connectionPlaceholder()`）で検証し、承認の段のあとでも使えるように組み立てます。
 実行エンジンとワーカーは、この会社ごとの見え方で定義とツールを引きます。
 
 コネクタのツールは `HttpMcpClient` で MCP サーバ（Streamable HTTP）の `tools/call` を呼びます。

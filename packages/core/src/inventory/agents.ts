@@ -12,7 +12,7 @@
 import { INVENTORY_EXTENSION_ID, type AgentDefinition } from '@m2office/shared';
 import type { ExtensionPackage } from '../extensions/loader.js';
 
-/** 内蔵の拡張の版。付属の業務や道具が変わったら上げる。 */
+/** 内蔵の拡張の版。付属の業務やツールが変わったら上げる。 */
 export const INVENTORY_EXTENSION_VERSION = '1.2.0';
 
 /** 付属の業務「在庫の記録」。 */

@@ -5,7 +5,7 @@
  * スキルの項目は、M2Office で意味のあるものは同じ意味で効かせ（`name`・`description`・`when_to_use`・`argument-hint`・
  * `arguments` と `$ARGUMENTS` の置き換え・`disable-model-invocation`・`user-invocable`・`effort`・補助のファイル）、
  * 意味の無いものは無視して知らせる。M2Office で覚えることは 4 つだけ（第12.12.1節）:
- * 道具は `allowed-tools` に M2Office の道具を書く・利用者向けの説明は `HELP.md`・プログラムは動かない・承認は書かない。
+ * ツールは `allowed-tools` に M2Office のツールを書く・利用者向けの説明は `HELP.md`・プログラムは動かない・承認は書かない。
  *
  * プログラム（`scripts/`、本文の `` !`コマンド` ``）は読み込まず、実行しない（不変則 I-7）。
  */
@@ -18,10 +18,10 @@ import { connectionPlaceholder, connectorTools, isConnectionToolName, type Conne
 /** 補助のファイルの合計の上限（字。第12.12.2節）。 */
 export const SKILL_FILES_MAX_CHARS = 500_000;
 
-/** 道具を書かないときに使う、読むだけの道具（第12.12.1節）。 */
+/** ツールを書かないときに使う、読むだけのツール（第12.12.1節）。 */
 export const SKILL_DEFAULT_TOOLS = ['knowledge.search', 'file.read_text'];
 
-/** 補助のファイルを読む道具（第12.12.2節）。補助のファイルがあるときだけ足す。 */
+/** 補助のファイルを読むツール（第12.12.2節）。補助のファイルがあるときだけ足す。 */
 export const SKILL_READ_TOOL = 'skill.read';
 
 /** フォルダの名前を覚えておくための、パッケージの中の印（`name` を省いたとき。第12.12.2節）。 */
@@ -32,7 +32,7 @@ const LIMITS = { maxSteps: 10, maxTokens: 100_000, timeoutSec: 300 };
 /**
  * 推論の強さが `xhigh`・`max`（高性能のモデル）のスキルの上限（第12.12.5節、第 0.146.0 版）。
  *
- * @remarks 契約書チェックのように、長い文書を道具を呼ぶたびに読み直す業務のため。強さを上げた業務だけが使う
+ * @remarks 契約書チェックのように、長い文書をツールを呼ぶたびに読み直す業務のため。強さを上げた業務だけが使う
  */
 const LIMITS_ADVANCED = { maxSteps: 10, maxTokens: 300_000, timeoutSec: 600 };
 
@@ -45,7 +45,7 @@ const IGNORED_FIELDS: Record<string, string> = {
   context: 'M2Office の業務は、もともと 1 件ずつ独立して動きます',
   agent: 'M2Office の業務は、もともと 1 件ずつ独立して動きます',
   background: 'M2Office の業務は、もともと 1 件ずつ独立して動きます',
-  'disallowed-tools': 'M2Office では、allowed-tools に書いた道具しか使えません',
+  'disallowed-tools': 'M2Office では、allowed-tools に書いたツールしか使えません',
   hooks: 'M2Office ではフックを動かしません',
   paths: 'M2Office にはファイルの場所がありません',
   shell: 'M2Office はコマンドを動かしません',
@@ -238,7 +238,7 @@ export interface SkillPackage {
 /**
  * SKILL.md を含むファイルの集まりを、拡張機能のファイルに組み立てる（仕様書 第12.12.5節）。
  *
- * @param registry 道具の登録簿（道具の有無と危険度で、承認の段と扱う最大の危険度を決める）
+ * @param registry ツールの登録簿（ツールの有無と危険度で、承認の段と扱う最大の危険度を決める）
  */
 export function buildSkillPackage(files: ExtensionFiles, registry: ToolRegistry): SkillPackage {
   const notices: string[] = [];
@@ -296,7 +296,7 @@ export function buildSkillPackage(files: ExtensionFiles, registry: ToolRegistry)
     problems.push(`補助のファイルが長すぎます（合計 ${chars.toLocaleString('ja-JP')} 字。${SKILL_FILES_MAX_CHARS.toLocaleString('ja-JP')} 字まで）`);
   }
 
-  // 同じフォルダのコネクタの道具も allowed-tools に書ける（<コネクタの ID>.<道具>）。宣言の検証は組み立てた後に行う
+  // 同じフォルダのコネクタのツールも allowed-tools に書ける（<コネクタの ID>.<ツール>）。宣言の検証は組み立てた後に行う
   const connectors: ConnectorDeclaration[] = [];
   for (const [path, bytes] of keep) {
     if (!/^connectors\/[^/]+\.json$/.test(path)) continue;
@@ -307,10 +307,10 @@ export function buildSkillPackage(files: ExtensionFiles, registry: ToolRegistry)
       // 読めない宣言は、組み立てた後の検証で理由を返す
     }
   }
-  // 道具は allowed-tools に M2Office の道具を書く。スキルの環境の道具は無視して知らせる（第12.12.1節 1）
+  // ツールは allowed-tools に M2Office のツールを書く。スキルの環境のツールは無視して知らせる（第12.12.1節 1）
   const declared = list(fm['allowed-tools']).map((t) => t.replace(/\(.*\)$/, ''));
-  // 同梱していない会社の接続の道具（<接続の ID>.<道具>）は、会社の接続の画面で登録したものを使う（第12.11.0節、ADR-0037）。
-  // 同梱したコネクタの ID と、内蔵の道具の頭の部分は除く
+  // 同梱していない会社の接続のツール（<接続の ID>.<ツール>）は、会社の接続の画面で登録したものを使う（第12.11.0節、ADR-0037）。
+  // 同梱したコネクタの ID と、内蔵のツールの頭の部分は除く
   const builtinPrefixes = new Set(registry.names().map((n) => n.split('.')[0]!));
   const bundledIds = new Set(connectors.map((c) => c.id));
   const connections = [...new Set(declared.filter((t) => isConnectionToolName(t, builtinPrefixes) && !bundledIds.has(t.split('.')[0]!)))];
@@ -320,12 +320,12 @@ export function buildSkillPackage(files: ExtensionFiles, registry: ToolRegistry)
   ]);
   if (connections.length > 0) {
     const ids = [...new Set(connections.map((n) => n.split('.')[0]!))];
-    notices.push(`会社の接続（${ids.join('・')}）の道具を使います。管理者ページの「接続」で登録されていない会社では、この業務は使えません`);
+    notices.push(`会社の接続（${ids.join('・')}）のツールを使います。管理者ページの「接続」で登録されていない会社では、この業務は使えません`);
   }
   const known = declared.filter((t) => local.get(t));
   const unknown = declared.filter((t) => !local.get(t));
-  if (unknown.length > 0) notices.push(`allowed-tools の ${[...new Set(unknown)].join('・')} は M2Office の道具ではないため使いません（M2Office の道具は開発者マニュアル 第4章）`);
-  // allowed-tools を空で書けば道具を使わない。書かない・M2Office の道具が 1 つも無いときは、読むだけの道具
+  if (unknown.length > 0) notices.push(`allowed-tools の ${[...new Set(unknown)].join('・')} は M2Office のツールではないため使いません（M2Office のツールは開発者マニュアル 第4章）`);
+  // allowed-tools を空で書けばツールを使わない。書かない・M2Office のツールが 1 つも無いときは、読むだけのツール
   const none = 'allowed-tools' in fm && declared.length === 0;
   const tools = [...new Set(none ? [] : known.length > 0 ? known : SKILL_DEFAULT_TOOLS), ...(supporting.length > 0 ? [SKILL_READ_TOOL] : [])];
 
@@ -347,8 +347,8 @@ export function buildSkillPackage(files: ExtensionFiles, registry: ToolRegistry)
     menu: !('user-invocable' in fm) || truthy(fm['user-invocable']),
     tier: EFFORT_TIER[effort],
   }, local);
-  // 会社の接続の道具は、組み立てのときには危険度が分からない。送る道具として数える（承認の段が入るのと同じ扱い。
-  // 仮の道具の危険度（read）のまま数えると、投稿する業務でも同意の画面に「読むだけ」と出ていた。仕様書 第12.11.2節）
+  // 会社の接続のツールは、組み立てのときには危険度が分からない。送るツールとして数える（承認の段が入るのと同じ扱い。
+  // 仮のツールの危険度（read）のまま数えると、投稿する業務でも同意の画面に「読むだけ」と出ていた。仕様書 第12.11.2節）
   const risks = tools.map((t): RiskLevel | undefined => (connections.includes(t) ? 'external-send' : local.get(t)?.risk))
     .filter((r): r is RiskLevel => !!r);
   const manifest: ExtensionManifest = {
@@ -381,7 +381,7 @@ const firstLine = (body: string) => (body.split('\n').find((l) => l.trim()) ?? '
  * スキルからエージェント定義を組み立てる（仕様書 第12.12.5節）。
  *
  * @remarks
- * 本文を指示にした段を 1 つ作る。送る道具（`external-send` 以上）があれば「作業 → 承認 → 送る」にする。
+ * 本文を指示にした段を 1 つ作る。送るツール（`external-send` 以上）があれば「作業 → 承認 → 送る」にする。
  * 承認は、社外にもお金にも関わらなければ自動で通る（ADR-0028）。
  */
 export function compileSkill(s: {
@@ -391,7 +391,7 @@ export function compileSkill(s: {
   arguments: string[]; route: boolean; menu: boolean; tier?: AgentDefinition['tier'];
   /** 学ばない業務（`metadata.m2office-private`。第12.12.3節）。 */
   private?: boolean;
-  /** 同梱していない会社の接続の道具。危険度が分からないため、作業の段と送る段の両方に置く（第12.11.2節）。 */
+  /** 同梱していない会社の接続のツール。危険度が分からないため、作業の段と送る段の両方に置く（第12.11.2節）。 */
   connections?: string[];
 }, registry: ToolRegistry): AgentDefinition {
   const connections = s.connections ?? [];
@@ -411,7 +411,7 @@ export function compileSkill(s: {
       : `${s.body}${files}`,
   };
   const steps: AgentDefinition['steps'] = [work];
-  // 会社の接続の道具は、送る・書き込む道具かもしれない。承認の後の段にも置く（読むだけなら、作業の段で使える）
+  // 会社の接続のツールは、送る・書き込むツールかもしれない。承認の後の段にも置く（読むだけなら、作業の段で使える）
   const afterGate = [...sends, ...connections];
   if (afterGate.length > 0) {
     const byRequester = !s.approver || /依頼|本人/.test(s.approver);
@@ -425,8 +425,8 @@ export function compileSkill(s: {
       id: 'send', type: 'agent', label: '送る', tools: afterGate, ...(sends.length > 0 ? { required: [sends[0]!] } : {}),
       instruction: sends.length > 0
         ? `${s.body}\n\n---\nこの段では、作業の段の答えに書いた中身を、そのとおりに送る。中身を書き換えない。作業の段で送らないと決めたものは送らない。`
-        : `${s.body}\n\n---\nこの段では、作業の段で「承認の直後の段でのみ実行できます」と断られた接続の道具があれば、作業の段の答えのとおりに行う。`
-          + '無ければ道具を呼ばない。最後に、作業の段の答えをそのまま示して終える。',
+        : `${s.body}\n\n---\nこの段では、作業の段で「承認の直後の段でのみ実行できます」と断られた接続のツールがあれば、作業の段の答えのとおりに行う。`
+          + '無ければツールを呼ばない。最後に、作業の段の答えをそのまま示して終える。',
     });
   }
   const firstField = Object.keys(s.inputs.properties)[0] ?? 'request';

@@ -48,14 +48,14 @@ Hono の外側（Node のサーバーの `upgrade`）で受け、ログイン状
 停止中の会社では開けません。送りは 16 kHz、受けは 24 kHz の PCM で、**音はどこにも書き出しません**。
 終わったときに、聞こえた文字と応答を会話ログへ 1 往復として残します。
 
-音声の相手には道具を 2 つ渡します（仕様書 第10.5.7節）。`ask_secretary` は本人の依頼を**画面の入力と同じ取次**（`Secretary.respond`）に渡し、
+音声の相手にはツールを 2 つ渡します（仕様書 第10.5.7節）。`ask_secretary` は本人の依頼を**画面の入力と同じ取次**（`Secretary.respond`）に渡し、
 答えを音声の相手へ返します。**声で返すのが基本**で、答えが大きいとき（`needsCanvas`）だけ画面へ `{ type: 'secretary', request, reply }` を送り、
 秘書のキャンバスに根拠や業務を開くボタンと一緒に出します（仕様書 第6.2.0節）。音声の相手には `shown_on_screen` で出したかを伝えます。
 `show_on_canvas` は、本人に「画面に出して」と頼まれたときに、直前の答え（または頼まれたもの）を画面へ送ります。直前の答えは対話の間だけ持ちます。
 終わった調べもの・頼んだ業務の結果も、大きければ画面へ送ります。声で頼まれた業務も、秘書が頼んで実行します（仕様書 第10.9.6節）。取次の 1 件ずつは会話ログに残しません（対話の終わりにまとめて残すため）。
 
 秘書の名乗り・呼び方・応対スタイル・話し方の指示は `voice/persona.ts` にまとめ、音声の対話と「声を試す」（`POST /v1/me/voice-test`、`voice/sample.ts`）が同じものを使います。
-声を試すときは同じ提供者を開き、挨拶だけを頼んで話し終わりまでの声を集めて返し、すぐ閉じます。道具は渡さず、会話ログ・監査ログの `secretary.voice` には残しません（仕様書 第10.5.8節）。
+声を試すときは同じ提供者を開き、挨拶だけを頼んで話し終わりまでの声を集めて返し、すぐ閉じます。ツールは渡さず、会話ログ・監査ログの `secretary.voice` には残しません（仕様書 第10.5.8節）。
 
 後ろへ回した調べもの（仕様書 第10.11節）が終わったら、この中継が伝えます。
 実行は別のプロセス（ワーカー）で進むため、3 秒ごとに終わったものを探します。
@@ -298,16 +298,16 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/admin/extensions/hr/rule-checks` ／ `POST …/rule-checks/:itemId/:version/dismiss` | 管理者: 社内規程の登録・改定で見つかった今の設定との食い違い（残した答えを、いまの設定と並べ直す。第11.11.2節）／ 見終えた |
 | `PUT /v1/admin/extensions/hr/settings` | 管理者: 人事・給与の会社の設定（`office`・`health`・`socialApply`・`pay`・`procedures`・`work`・`agreement`・`leave`・`payroll`・`transfer`（振込元。番号の桁を確かめる）・`duties`（納期の特例・定期健康診断の月）・`notice`（労働条件通知書の会社の定め）・`insurance`（事業所整理記号・事業所番号・特定適用事業所 auto・yes・no・通常の労働者の週の所定労働時間 10〜60）・`labor`（雇用保険の事業の種類・労災保険の事業の種類の番号・労働保険番号）。第30.8.1節）。`GET /v1/admin/extensions/hr/labor-industries` で労災保険率表の事業の種類、`GET /v1/admin/extensions/hr/allowances` で手当の扱い（雇用条件の手当の名前と、割増の基礎・所得税の対象・設定したか）。送った項目だけを変える。人事・給与を `PUT /v1/admin/extensions/hr/enabled` で入れると、区画 `hr` が無ければ作り、入れた管理者を入れる |
 | `PUT /v1/admin/extensions/inventory/settings` | 管理者: 在庫管理の機能の入り切り（`features`）・残りわずかの既定の目安（`lowDefault`）・仕入れの日数（`leadDaysDefault`）・棚卸しの頻度（`countEveryDays`）。送った項目だけを変える（第29.4.1節） |
-| `GET /v1/admin/connections/mcp` | 管理者: 会社の接続（MCP）の一覧。道具ごとの危険度・有効かどうか・使っている業務、認証の状態（`authState`。秘密の値は返さない）、よく使うサービスの型（`presets`）（仕様書 第12.11節、ADR-0037・ADR-0044） |
-| `POST /v1/admin/connections/mcp` | 管理者: URL を受け取り、道具の一覧を取って会社の接続として登録する（読むだけの印が付いた道具は「読むだけ」、ほかは「社外へ送る」扱い）。`preset`（`slack`）で型から、`auth`（`oauth`・`api_key`）で認証の要る接続を登録する。`oauth` は相手の認可サーバの情報を読み、アプリの自動登録の口（`registration_endpoint`）があれば控える（仕様書 第12.11.6.2節、Q-99）。認証の要る接続の道具は、認証情報のあとで取る |
-| `PUT /v1/admin/connections/mcp/:id/credentials` | 管理者: 認証情報を登録する。`oauth` はクライアント ID とシークレット（ID を替えると全員の認可を消す。自動で登録したアプリより先に使う）、`api_key` は会社の鍵（その鍵で道具を問い合わせる）。値は暗号化し、返さない（仕様書 第12.11.6節） |
-| `PUT /v1/admin/connections/mcp/:id` | 管理者: 接続の名前と、道具ごとの危険度を変える |
-| `POST /v1/admin/connections/mcp/:id/refresh` | 管理者: 道具の一覧を取り直す（決めた危険度は保つ）。認証の要る接続は管理者自身の認可（会社の鍵）で問い合わせる |
-| `POST /v1/admin/connections/mcp/:id/check` | 管理者: 接続の確認（宣言した道具が提供されているか） |
+| `GET /v1/admin/connections/mcp` | 管理者: 会社の接続（MCP）の一覧。ツールごとの危険度・有効かどうか・使っている業務、認証の状態（`authState`。秘密の値は返さない）、よく使うサービスの型（`presets`）（仕様書 第12.11節、ADR-0037・ADR-0044） |
+| `POST /v1/admin/connections/mcp` | 管理者: URL を受け取り、ツールの一覧を取って会社の接続として登録する（読むだけの印が付いたツールは「読むだけ」、ほかは「社外へ送る」扱い）。`preset`（`slack`）で型から、`auth`（`oauth`・`api_key`）で認証の要る接続を登録する。`oauth` は相手の認可サーバの情報を読み、アプリの自動登録の口（`registration_endpoint`）があれば控える（仕様書 第12.11.6.2節、Q-99）。認証の要る接続のツールは、認証情報のあとで取る |
+| `PUT /v1/admin/connections/mcp/:id/credentials` | 管理者: 認証情報を登録する。`oauth` はクライアント ID とシークレット（ID を替えると全員の認可を消す。自動で登録したアプリより先に使う）、`api_key` は会社の鍵（その鍵でツールを問い合わせる）。値は暗号化し、返さない（仕様書 第12.11.6節） |
+| `PUT /v1/admin/connections/mcp/:id` | 管理者: 接続の名前と、ツールごとの危険度を変える |
+| `POST /v1/admin/connections/mcp/:id/refresh` | 管理者: ツールの一覧を取り直す（決めた危険度は保つ）。認証の要る接続は管理者自身の認可（会社の鍵）で問い合わせる |
+| `POST /v1/admin/connections/mcp/:id/check` | 管理者: 接続の確認（宣言したツールが提供されているか） |
 | `GET /v1/admin/connections/mcp/:id/impact` | 管理者: 接続を消すと使えなくなる業務 |
-| `GET /v1/admin/connections/mcp/:id/tools/:tool/impact` | 管理者: その道具を止めると使えなくなる業務の名前と、飛ばす定時実行の数（仕様書 第6.6.3.1節） |
-| `PUT /v1/admin/connections/mcp/:id/tools/:tool/enabled` | 管理者: 道具を 1 つ、有効または無効にする。止めた道具を使う業務はメニュー・秘書・定時実行・API から消える。動いている実行は止めない |
-| `DELETE /v1/admin/connections/mcp/:id` | 管理者: 会社の接続を消す。その道具を使う業務は使えなくなる |
+| `GET /v1/admin/connections/mcp/:id/tools/:tool/impact` | 管理者: そのツールを止めると使えなくなる業務の名前と、飛ばす定時実行の数（仕様書 第6.6.3.1節） |
+| `PUT /v1/admin/connections/mcp/:id/tools/:tool/enabled` | 管理者: ツールを 1 つ、有効または無効にする。止めたツールを使う業務はメニュー・秘書・定時実行・API から消える。動いている実行は止めない |
+| `DELETE /v1/admin/connections/mcp/:id` | 管理者: 会社の接続を消す。そのツールを使う業務は使えなくなる |
 | `DELETE /v1/admin/extensions/:id` | 管理者: 削除する。自社専用のものは取り込んだファイルも消す |
 | `GET /v1/admin/groups` | 管理者: グループの一覧（所属する人と、割り当て先の区画・業務を含む。第16.7節） |
 | `POST /v1/admin/groups` | 管理者: グループを作る（名前は会社の中で重ならない） |

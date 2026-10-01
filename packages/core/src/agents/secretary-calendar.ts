@@ -13,7 +13,7 @@ import type { AgentDefinition } from '@m2office/shared';
  * 予定の登録。
  *
  * @remarks
- * `calendar.create` は相手に招待が届きうるため `external-send` の道具で、承認の段を置く。
+ * `calendar.create` は相手に招待が届きうるため `external-send` のツールで、承認の段を置く。
  * **本人だけ・社内の人だけの予定は自動で通り**、社外の人を招くときだけ本人が承認する（第9.4.0節、ADR-0028）。
  * 承認の前の組み立て（ADR-0023）で、入れる予定を記録してから判断する。
  */

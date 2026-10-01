@@ -82,7 +82,7 @@ test('カレンダー: 納期の特例・36 協定・健康診断・契約の満
   assert.equal(list.find((d) => /給与支払報告書/.test(d.title))?.date, '2027-02-01', '1 月 31 日は日曜');
 });
 
-test('道具 hr.deadlines: 人事区画の外の人には「使えない」と返す', async () => {
+test('ツール hr.deadlines: 人事区画の外の人には「使えない」と返す', async () => {
   const ctx = { tenantId: 't', userId: 'u', hr: { deadlines: async () => null } } as never;
   assert.deepEqual(await hrDeadlines.invoke({}, ctx), { available: false, reason: '人事・給与は使えません（会社で切っているか、人事区画の外です）' });
   const ok = await hrDeadlines.invoke({ days: 3 }, { tenantId: 't', userId: 'u', hr: { deadlines: async (d: number) => [{ date: '2026-10-13', kind: 'withholding', title: `期限 ${d}`, detail: '' }] } } as never) as { items: { title: string }[] };

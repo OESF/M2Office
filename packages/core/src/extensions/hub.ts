@@ -2,7 +2,7 @@
  * @file 会社ごとの拡張機能の見え方をまとめる。公式の配布元と、その会社が取り込んだファイルを合わせる。
  *
  * 会社で使えるのは、公式の業務エージェントと、**導入済み・有効・再同意が不要**な拡張機能の業務エージェント（仕様書 第12.10.4節）。
- * 道具は、内蔵の道具と**会社の接続**（コネクタ。MCP）の道具である（第12.11.0節、ADR-0037）。
+ * ツールは、内蔵のツールと**会社の接続**（コネクタ。MCP）のツールである（第12.11.0節、ADR-0037）。
  * 拡張機能に同梱した接続は、導入したときに会社の接続として登録する。
  * ファイルから取り込んだ拡張機能（自社専用）は、取り込んだ会社にだけ見える（第12.10.3節）。
  *
@@ -73,7 +73,7 @@ export interface TenantExtensions {
   /** 会社の接続（第12.11.0節）。 */
   connections: TenantConnection[];
   /**
-   * その業務が使う道具のうち、この会社に無いもの（会社の接続が登録されていない道具。第12.11.0節）。
+   * その業務が使うツールのうち、この会社に無いもの（会社の接続が登録されていないツール。第12.11.0節）。
    *
    * @remarks 1 つでもあれば、その業務は使えない（「接続が要ります」）
    */
@@ -81,7 +81,7 @@ export interface TenantExtensions {
 }
 
 /**
- * 秘書の調べもの（第10.11.4節）の ID。会社の接続の**読むだけの道具**を足して使わせる（第12.11.0節）。
+ * 秘書の調べもの（第10.11.4節）の ID。会社の接続の**読むだけのツール**を足して使わせる（第12.11.0節）。
  */
 const CONNECTION_READER_IDS = new Set(['secretary-lookup']);
 
@@ -114,7 +114,7 @@ export interface ExtensionHubDeps {
   /** コネクタの MCP サーバへの接続口。省略するとコネクタのツールは「接続されていません」を返す。 */
   mcp?: McpClient;
   /**
-   * 認証の要る接続の認可を用意する口（仕様書 第12.11.6.4節）。無ければ、認証の要る接続の道具は「準備がありません」を返す
+   * 認証の要る接続の認可を用意する口（仕様書 第12.11.6.4節）。無ければ、認証の要る接続のツールは「準備がありません」を返す
    */
   connectionAuth?: ConnectionAuthProvider;
   logger?: Logger;
@@ -196,16 +196,16 @@ export class ExtensionHub {
       connections.flatMap((c) => connectorTools(c, mcp, connectionAuth)).filter((t) => !disabledTools.has(t.name)),
     );
     const missingToolsOf = (def: AgentDefinition) => def.tools.filter((name) => !tenantRegistry.get(name));
-    // 秘書の調べものは、会社の接続の読むだけの道具を使える（第12.11.0節）
+    // 秘書の調べものは、会社の接続の読むだけのツールを使える（第12.11.0節）
     const readTools = connections.flatMap((c) => connectorTools(c)).filter((t) => t.risk === 'read' && tenantRegistry.get(t.name)).map((t) => t.name);
-    // 名刺管理を使う会社では、秘書の調べものが名刺を探せる（第27.9節）。利用範囲は道具を呼ぶときに確かめる
+    // 名刺管理を使う会社では、秘書の調べものが名刺を探せる（第27.9節）。利用範囲はツールを呼ぶときに確かめる
     if (settings.cards.enabled) readTools.push('contacts.search', 'contacts.get', 'contacts.changes');
     // 在庫管理を使う会社では、秘書の調べものが在庫と入出庫の記録を探せる（第29.15節）
     if (settings.inventory.enabled) readTools.push('inventory.search', 'inventory.history');
     const withReaders = (a: AgentDefinition) => (CONNECTION_READER_IDS.has(a.id) && readTools.length > 0
       ? { ...a, tools: [...new Set([...a.tools, ...readTools])] } : a);
     const allAgents = [...official, ...entries.flatMap((e) => e.pkg.agents)].map(withReaders);
-    // 止めたツール・会社に無い接続の道具を使う業務は、メニュー・秘書・定時実行・API から消す（第6.6.3.1節・第12.11.0節）
+    // 止めたツール・会社に無い接続のツールを使う業務は、メニュー・秘書・定時実行・API から消す（第6.6.3.1節・第12.11.0節）
     const activeIds = new Set([...official.map((a) => a.id), ...active.flatMap((e) => e.pkg.agents.map((a) => a.id))]);
     const agents = allAgents.filter((a) => activeIds.has(a.id) && !blockedByDisabledTool(a, disabledTools) && missingToolsOf(a).length === 0);
     const entryOf = (agentId: string) => {
@@ -236,16 +236,16 @@ export class ExtensionHub {
   }
 
   /**
-   * MCP サーバに道具の一覧を問い合わせる（会社の接続を登録するとき。仕様書 第12.11.0節）。
+   * MCP サーバにツールの一覧を問い合わせる（会社の接続を登録するとき。仕様書 第12.11.0節）。
    *
-   * @returns 道具の一覧（名前・説明・読むだけの目印）。接続できなければ理由
+   * @returns ツールの一覧（名前・説明・読むだけの目印）。接続できなければ理由
    */
   async listMcpTools(url: string, headers?: Record<string, string>): ReturnType<McpClient['listTools']> {
     if (!this.deps.mcp) return { ok: false, error: 'コネクタへの接続口が用意されていません' };
     return this.deps.mcp.listTools(url, headers);
   }
 
-  /** 内蔵の道具の名前の頭の部分（`gmail` など）。会社の接続の ID に使えない。 */
+  /** 内蔵のツールの名前の頭の部分（`gmail` など）。会社の接続の ID に使えない。 */
   builtinPrefixes(): Set<string> {
     return new Set(this.deps.registry.names().map((n) => n.split('.')[0]!));
   }

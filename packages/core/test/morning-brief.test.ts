@@ -1,7 +1,7 @@
 /**
  * @file 朝のブリーフと本人の情報の単体テスト（仕様書 第9.5.5.1節、ADR-0034）。
  *
- * 定時実行の「毎平日」、本人の情報を読む道具 `profile.read`、朝のブリーフの定義（読むだけ・天気とニュースを調べる）を確かめる。
+ * 定時実行の「毎平日」、本人の情報を読むツール `profile.read`、朝のブリーフの定義（読むだけ・天気とニュースを調べる）を確かめる。
  */
 
 import { test } from 'node:test';
@@ -47,7 +47,7 @@ test('profile.read: 本人の自宅・勤務地を返す。勤務地が空なら
   assert.equal(b['workplace'], '大阪支店');
 });
 
-test('朝のブリーフ: 公式の業務で、読むだけの道具だけを使い、天気とニュースを調べる', () => {
+test('朝のブリーフ: 公式の業務で、読むだけのツールだけを使い、天気とニュースを調べる', () => {
   assert.ok(OFFICIAL_AGENTS.includes(MORNING_BRIEF));
   assert.doesNotThrow(() => validateDefinition(MORNING_BRIEF, registry));
   for (const name of MORNING_BRIEF.tools) assert.equal(registry.get(name)?.risk, 'read', `${name} は読むだけ`);
@@ -68,7 +68,7 @@ test('朝のブリーフ: 関心の分野と社内のお知らせを最初の段
   assert.equal(MORNING_BRIEF.version, 1, '公式の業務は版を上げずに直す（定時実行が版を決め打ちで引く）');
 });
 
-test('週次ブリーフ: 読むだけで、配信の道具を使わない。週間天気・前週比・イベントを調べ、外した項目は調べない（第9.5.5節、ADR-0048）', async () => {
+test('週次ブリーフ: 読むだけで、配信のツールを使わない。週間天気・前週比・イベントを調べ、外した項目は調べない（第9.5.5節、ADR-0048）', async () => {
   const { AG05_WEEKLY_BRIEF } = await import('../src/index.js');
   assert.doesNotThrow(() => validateDefinition(AG05_WEEKLY_BRIEF, registry));
   for (const name of AG05_WEEKLY_BRIEF.tools) assert.equal(registry.get(name)?.risk, 'read', `${name} は読むだけ`);

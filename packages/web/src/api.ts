@@ -798,6 +798,8 @@ export interface RunDetail {
   artifacts: Artifact[];
   /** 誰がいつ判断したか（仕様書 第6.2.5節）。自動で通過した承認は判断した人が無い。 */
   decisions?: { runStepId: string; decision: string; decidedBy: string | null; decidedAt: string | null; comment: string | null }[];
+  /** 業務の段の並び（動いている間の進み具合に使う。仕様書 第6.2.2.2節）。 */
+  plan?: { stepId: string; label: string; kind: 'agent' | 'approval' }[];
 }
 
 /** 自分が判断した承認 1 件（仕様書 第6.2.5節）。 */
@@ -831,6 +833,8 @@ export interface Lookup {
   done: boolean;
   /** 何をしているか。終わっていれば `null`。見込みの時間は出さない（第10.11.5節）。 */
   progress: string | null;
+  /** いまの動きを始めた時刻（経過した時間を数える。第10.11.6節）。承認待ち・分からないときは `null`。 */
+  since: string | null;
   /** 答え。終わるまでは `null`。 */
   text: string | null;
   failureReason: string | null;
@@ -933,7 +937,7 @@ export interface McpConnectionView {
   origin: string;
   originText: string;
   tools: { name: string; description: string; risk: string; riskText: string; enabled: boolean }[];
-  /** その接続の道具を使う業務。 */
+  /** その接続のツールを使う業務。 */
   usedBy: { id: string; name: string }[];
   /** 認証の状態（仕様書 第12.11.6節）。秘密の値は返らない。 */
   authState: McpAuthState;
@@ -971,7 +975,7 @@ export interface MyConnectionView {
   /** 許可したアカウントの表示名。 */
   account: string;
   connectedAt: string | null;
-  /** 会社が道具を足して権限が増えた。接続し直しを促す。 */
+  /** 会社がツールを足して権限が増えた。接続し直しを促す。 */
   needsReconnect: boolean;
   usedBy: { id: string; name: string }[];
 }
@@ -1798,7 +1802,7 @@ export const api = {
     /** 会社の接続（コネクタ。仕様書 第12.11.0節）。 */
     mcpConnections: () => call<{ items: McpConnectionView[]; risks: { value: string; text: string }[]; presets: ConnectionPresetView[] }>('/admin/connections/mcp'),
     /**
-     * 接続を登録する。認証の要らない接続は、MCP サーバに道具の一覧を問い合わせる。
+     * 接続を登録する。認証の要らない接続は、MCP サーバにツールの一覧を問い合わせる。
      * `preset` を渡すと型（Slack など）から登録する（仕様書 第12.11.6.7節）。
      */
     addMcpConnection: (v: { url?: string; name?: string; id?: string; preset?: string; auth?: 'none' | 'oauth' | 'api_key'; header?: string }) =>
@@ -1806,7 +1810,7 @@ export const api = {
     /** 認証情報を登録する（仕様書 第12.11.6.2節）。値は暗号化され、返らない。 */
     setMcpCredentials: (id: string, v: { clientId?: string; clientSecret?: string; apiKey?: string }) =>
       call<{ ok: true; reset?: number; tools?: number; warning?: string }>(`${mcpPath(id)}/credentials`, { method: 'PUT', body: JSON.stringify(v) }),
-    /** 道具ごとの危険度などを変える。 */
+    /** ツールごとの危険度などを変える。 */
     updateMcpConnection: (id: string, v: { tools?: { name: string; risk: string }[]; name?: string }) =>
       call(mcpPath(id), { method: 'PUT', body: JSON.stringify(v) }),
     refreshMcpConnection: (id: string) =>

@@ -1,9 +1,9 @@
 /**
  * @file 会社の接続（コネクタ。MCP サーバ）を管理する API（仕様書 第12.11.0節・第6.6.3節、ADR-0037）。
  *
- * コネクタは拡張機能の一部ではなく、道具を供給する会社の資源である。
- * 管理者が URL から登録し、道具ごとに危険度と入り切りを決める。秘書・公式の業務・拡張機能のどれからでも使う。
- * 認証の要る接続（`oauth`・`api_key`）は、認証情報を登録してから道具を問い合わせる（仕様書 第12.11.6節）。
+ * コネクタは拡張機能の一部ではなく、ツールを供給する会社の資源である。
+ * 管理者が URL から登録し、ツールごとに危険度と入り切りを決める。秘書・公式の業務・拡張機能のどれからでも使う。
+ * 認証の要る接続（`oauth`・`api_key`）は、認証情報を登録してからツールを問い合わせる（仕様書 第12.11.6節）。
  * 秘密の値（クライアント シークレット・会社の鍵）は暗号化して持ち、登録後は返さない。
  */
 
@@ -28,7 +28,7 @@ const RISK_WORDS: Record<RiskLevel, string> = {
 };
 
 /**
- * MCP の道具の一覧を、会社の接続の道具にする（仕様書 第12.11.2節）。
+ * MCP のツールの一覧を、会社の接続のツールにする（仕様書 第12.11.2節）。
  *
  * @param keep 前に決めた危険度（取り直しのとき）。残す
  * @remarks 危険度の初期値は、読むだけの目印があれば read、無ければ external-send（承認が入る安全側）
@@ -70,7 +70,7 @@ export function mcpConnectionsRoute(deps: AppDeps) {
   const app = new Hono<AppEnv>();
   app.use('*', requireRole('admin'));
 
-  /** 会社の接続の一覧。道具ごとの危険度と入り切り、その接続を使う業務を返す。 */
+  /** 会社の接続の一覧。ツールごとの危険度と入り切り、その接続を使う業務を返す。 */
   app.get('/', async (c) => {
     const { tenant } = c.get('ctx');
     const view = await deps.tenantView(tenant.id);
@@ -102,7 +102,7 @@ export function mcpConnectionsRoute(deps: AppDeps) {
           name: t.name, description: t.description, risk: t.risk, riskText: RISK_WORDS[t.risk],
           enabled: !view.disabledTools.has(`${x.id}.${t.name}`),
         })),
-        // いま使える業務のうち、この接続の道具を使うもの（導入していない拡張機能の業務は数えない）
+        // いま使える業務のうち、この接続のツールを使うもの（導入していない拡張機能の業務は数えない）
         usedBy: view.agents.filter((a) => a.tools.some((n) => n.startsWith(`${x.id}.`))).map((a) => ({ id: a.id, name: a.name })),
       });
     }
@@ -115,9 +115,9 @@ export function mcpConnectionsRoute(deps: AppDeps) {
   });
 
   /**
-   * 接続を登録する。MCP サーバに道具の一覧を問い合わせ、危険度の初期値を付けて保存する。
+   * 接続を登録する。MCP サーバにツールの一覧を問い合わせ、危険度の初期値を付けて保存する。
    *
-   * @remarks ID を省けば URL から作る。内蔵の道具の頭の部分と、会社のほかの接続とは重ならない
+   * @remarks ID を省けば URL から作る。内蔵のツールの頭の部分と、会社のほかの接続とは重ならない
    */
   app.post('/', async (c) => {
     const { tenant, user } = c.get('ctx');
@@ -151,7 +151,7 @@ export function mcpConnectionsRoute(deps: AppDeps) {
       auth = { ...auth, header: String(body.header).trim() };
     }
     const now = new Date().toISOString();
-    // 認証の要る接続の道具は、認証情報を登録したあと（oauth は管理者が接続したあと）に問い合わせる
+    // 認証の要る接続のツールは、認証情報を登録したあと（oauth は管理者が接続したあと）に問い合わせる
     const conn: TenantConnection = {
       tenantId: tenant.id, id, name: String(body.name ?? '').trim() || preset?.name || id,
       description: String(body.description ?? '').trim() || preset?.description || '',
@@ -170,7 +170,7 @@ export function mcpConnectionsRoute(deps: AppDeps) {
    *
    * @remarks
    * `oauth`: クライアント ID とシークレット。**クライアント ID を替えたら、接続している全員の認可を消す**（シークレットだけなら消さない）。
-   * `api_key`: 会社の鍵。登録したら、その鍵で道具の一覧を問い合わせる。
+   * `api_key`: 会社の鍵。登録したら、その鍵でツールの一覧を問い合わせる。
    */
   app.put('/:id/credentials', async (c) => {
     const { tenant, user } = c.get('ctx');
@@ -202,10 +202,10 @@ export function mcpConnectionsRoute(deps: AppDeps) {
         updatedBy: user.id, updatedAt: now,
       });
       await audit(deps, tenant.id, user.id, 'connection.secret.update', conn.id, { kind: 'api_key' });
-      // 鍵で道具を問い合わせる。つながらなくても鍵は残す（相手の側の準備が後のことがある）
+      // 鍵でツールを問い合わせる。つながらなくても鍵は残す（相手の側の準備が後のことがある）
       const h = await deps.connections.headersFor(tenant.id, user.id, conn);
       const listed = h.ok ? await deps.hub.listMcpTools(conn.url, h.headers) : { ok: false as const, error: h.error };
-      if (!listed.ok) return c.json({ ok: true, tools: conn.tools.length, warning: `鍵は登録しました。道具を問い合わせられませんでした: ${listed.error}` });
+      if (!listed.ok) return c.json({ ok: true, tools: conn.tools.length, warning: `鍵は登録しました。ツールを問い合わせられませんでした: ${listed.error}` });
       const tools = toTools(listed.tools, conn.tools, presetById(conn.auth.preset));
       await deps.repo.saveConnection({ ...conn, tools, updatedAt: now });
       return c.json({ ok: true, tools: tools.length });
@@ -213,7 +213,7 @@ export function mcpConnectionsRoute(deps: AppDeps) {
     return c.json({ error: 'この接続は認証が要りません' }, 400);
   });
 
-  /** 名前・説明・道具ごとの危険度を変える。 */
+  /** 名前・説明・ツールごとの危険度を変える。 */
   app.put('/:id', async (c) => {
     const { tenant, user } = c.get('ctx');
     const conn = (await deps.repo.listConnections(tenant.id)).find((x) => x.id === c.req.param('id'));
@@ -239,7 +239,7 @@ export function mcpConnectionsRoute(deps: AppDeps) {
     return c.json({ ok: true });
   });
 
-  /** 道具の一覧を取り直す。決めた危険度は残し、増えた道具は初期値で足し、無くなった道具は外す。 */
+  /** ツールの一覧を取り直す。決めた危険度は残し、増えたツールは初期値で足し、無くなったツールは外す。 */
   app.post('/:id/refresh', async (c) => {
     const { tenant, user } = c.get('ctx');
     const conn = (await deps.repo.listConnections(tenant.id)).find((x) => x.id === c.req.param('id'));
@@ -257,7 +257,7 @@ export function mcpConnectionsRoute(deps: AppDeps) {
     return c.json({ ok: true, added, removed });
   });
 
-  /** 接続を確かめる（第12.11.3節）。登録した道具を MCP サーバが提供しているかを返す。状態は変えない。 */
+  /** 接続を確かめる（第12.11.3節）。登録したツールを MCP サーバが提供しているかを返す。状態は変えない。 */
   app.post('/:id/check', async (c) => {
     const { tenant, user } = c.get('ctx');
     const conn = (await deps.repo.listConnections(tenant.id)).find((x) => x.id === c.req.param('id'));
@@ -308,7 +308,7 @@ export function mcpConnectionsRoute(deps: AppDeps) {
     return c.json({ ok: true, enabled: body.enabled });
   });
 
-  /** 接続を消す。その道具を使う業務は使えなくなる（先に `impact` で確かめる）。 */
+  /** 接続を消す。そのツールを使う業務は使えなくなる（先に `impact` で確かめる）。 */
   app.delete('/:id', async (c) => {
     const { tenant, user } = c.get('ctx');
     const removed = await deps.repo.deleteConnection(tenant.id, c.req.param('id'));

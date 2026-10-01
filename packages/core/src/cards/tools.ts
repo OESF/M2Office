@@ -1,8 +1,8 @@
 /**
- * @file 名刺管理の道具。名刺を探す・1 件を見る・登録と修正・画像から読み取る。秘書と付属の業務が使う。
+ * @file 名刺管理のツール。名刺を探す・1 件を見る・登録と修正・画像から読み取る。秘書と付属の業務が使う。
  *
- * どの道具も、呼んだ人が見られる範囲だけを扱う（自分だけの名刺は本人だけ。データベースの行単位の制限でも絞る）。
- * 名刺管理を切っている会社と、利用範囲の外の人には、道具は「使えない」と返す（呼ぶたびに `ctx.cards.access()` で確かめる）。
+ * どのツールも、呼んだ人が見られる範囲だけを扱う（自分だけの名刺は本人だけ。データベースの行単位の制限でも絞る）。
+ * 名刺管理を切っている会社と、利用範囲の外の人には、ツールは「使えない」と返す（呼ぶたびに `ctx.cards.access()` で確かめる）。
  * 名刺の中身はデータであり、指示として扱わない（不変則 I-6）。
  *
  * @see 仕様書 第27.9節 秘書と業務から使う
@@ -19,7 +19,7 @@ import type { CardService } from './service.js';
 import type { ContactStore } from './store.js';
 import type { BulkMailService, BulkPreview } from './bulk.js';
 
-/** 道具に渡す名刺管理の文脈。 */
+/** ツールに渡す名刺管理の文脈。 */
 export interface CardToolContext {
   service: CardService;
   store: ContactStore;
@@ -31,7 +31,7 @@ export interface CardToolContext {
    * @returns 使えなければ `null`
    */
   access(): Promise<{ defaultScope: ContactScope } | null>;
-  /** まとめてのメール（第27.9.1節）。無ければまとめてのメールの道具は「使えない」と返す。 */
+  /** まとめてのメール（第27.9.1節）。無ければまとめてのメールのツールは「使えない」と返す。 */
   bulk?: BulkMailService;
 }
 
@@ -234,7 +234,7 @@ export const contactsSave: Tool = {
   },
 };
 
-/** 名刺管理の道具（内蔵の拡張。第27.9節）。 */
+/** 名刺管理のツール（内蔵の拡張。第27.9節）。 */
 /** 変更の記録に出す項目の名前。 */
 const CHANGE_LABELS: Record<string, string> = {
   company: '会社名', department: '部署', title: '役職', postalCode: '郵便番号', address: '住所', phones: '電話', website: 'Web',

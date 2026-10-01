@@ -71,7 +71,7 @@ const ai = new TenantAiResolver({
 });
 // Google から取得したデータの保持（仕様書 第14.3.2節）。Google のツールは、内蔵のツールのうち権限を宣言しているもの
 const retention = new GoogleDataRetention({ repo, isGoogleTool: (name) => !!registry.get(name)?.google, logger: log });
-// 名刺管理（内蔵の拡張。仕様書 第27章）。名刺の道具（第27.9節）と、後ろでの読み取り（第27.4節）が同じ置き場を使う
+// 名刺管理（内蔵の拡張。仕様書 第27章）。名刺のツール（第27.9節）と、後ろでの読み取り（第27.4節）が同じ置き場を使う
 const contactStore = new PostgresContactStore(
   process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office',
 );

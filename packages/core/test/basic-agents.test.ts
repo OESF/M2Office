@@ -23,7 +23,7 @@ test('基本の業務は公式に入り、定義の検証を通る', () => {
   }
 });
 
-test('基本の業務は送らない・共有しない（道具は read か draft、承認は無い）', () => {
+test('基本の業務は送らない・共有しない（ツールは read か draft、承認は無い）', () => {
   for (const id of IDS) {
     const def = OFFICIAL_AGENTS.find((a) => a.id === id)!;
     for (const name of def.tools) {

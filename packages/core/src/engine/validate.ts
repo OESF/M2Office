@@ -54,22 +54,22 @@ export function validateDefinition(def: AgentDefinition, registry: ToolRegistry)
     throw new DefinitionInvalidError('権限区画に属する業務では web.research を使えません（区画のデータを社外の検索に送らないため）');
   }
 
-  // 2c. 段ごとの道具は、定義の道具の一部でなければならない（第9.2.7節）
+  // 2c. 段ごとのツールは、定義のツールの一部でなければならない（第9.2.7節）
   for (const step of def.steps) {
     if (step.type !== 'agent' || !step.tools) continue;
     const outside = step.tools.filter((t) => !def.tools.includes(t));
     if (outside.length > 0) {
-      throw new DefinitionInvalidError(`段「${step.id}」が、定義の道具に無いものを使おうとしています: ${outside.join(', ')}`);
+      throw new DefinitionInvalidError(`段「${step.id}」が、定義のツールに無いものを使おうとしています: ${outside.join(', ')}`);
     }
   }
 
-  // 2d. 段が必ず呼ぶ道具は、その段で使える道具の一部でなければならない（第9.2.7節）
+  // 2d. 段が必ず呼ぶツールは、その段で使えるツールの一部でなければならない（第9.2.7節）
   for (const step of def.steps) {
     if (step.type !== 'agent' || !step.required) continue;
     const usable = step.tools ?? def.tools;
     const outside = step.required.filter((t) => !usable.includes(t));
     if (outside.length > 0) {
-      throw new DefinitionInvalidError(`段「${step.id}」が必ず呼ぶ道具が、その段で使えません: ${outside.join(', ')}`);
+      throw new DefinitionInvalidError(`段「${step.id}」が必ず呼ぶツールが、その段で使えません: ${outside.join(', ')}`);
     }
   }
 

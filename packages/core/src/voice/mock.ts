@@ -59,9 +59,9 @@ export class MockVoiceProvider implements VoiceProvider {
       },
       sendText(text) {
         session.onEvent({ type: 'heard', text });
-        // 道具があれば、書いた文字をそのまま最初の道具（秘書の取次）に渡す（仕様書 第10.5.7節）。
+        // ツールがあれば、書いた文字をそのまま最初のツール（秘書の取次）に渡す（仕様書 第10.5.7節）。
         // 推論は行わないため、取次の答えをそのまま返す。取次が動くことを確かめられるようにする
-        // 「画面に出して」だけは、画面に出す道具へ渡す（第6.2.0節）。見本でも確かめられるように
+        // 「画面に出して」だけは、画面に出すツールへ渡す（第6.2.0節）。見本でも確かめられるように
         const show = /(画面|キャンバス)に(出|表示)/.test(text) ? session.tools?.find((t) => t.name === 'show_on_canvas') : undefined;
         const tool = show ?? session.tools?.[0];
         if (!tool) {

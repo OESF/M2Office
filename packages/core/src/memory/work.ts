@@ -61,7 +61,7 @@ export function learnableWork(item: { run: Run; job: Job }, agents: AgentDefinit
 /**
  * 業務の答え。最後の段の文を使う。
  *
- * @remarks 途中の段の文には道具の呼び出しの結果が混じるため使わない。成果物の本文も使わない。
+ * @remarks 途中の段の文にはツールの呼び出しの結果が混じるため使わない。成果物の本文も使わない。
  */
 export function answerOfSteps(steps: Pick<RunStep, 'output'>[]): string {
   const last = steps.at(-1);

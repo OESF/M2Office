@@ -491,13 +491,13 @@ test('AG-02 は承認②のあと、承認①で見た議事録をそのまま�
 
 test('承認②の手前（承認①の直後）では、知識に登録しない', async () => {
   const extra = { tasks: [{ name: 'knowledge.register', args: { artifactId: 'x' } }] };
-  // 1. AG-02 の定義のまま: 「起票」の段では知識の登録を使えない（段ごとの道具。第9.2.7節）
+  // 1. AG-02 の定義のまま: 「起票」の段では知識の登録を使えない（段ごとのツール。第9.2.7節）
   const scoped = await runMinutes({ rejectShare: true, extra });
   const blocked = scoped.repo.steps.filter((x) => x.stepId === 'tasks')
     .flatMap((x) => ((x.output as { tools?: { name: string; error?: string }[] }).tools ?? []).filter((t) => t.name === 'knowledge.register'));
-  assert.match(String(blocked[0]?.error), /この段（起票）では使えない道具です/);
+  assert.match(String(blocked[0]?.error), /この段（起票）では使えないツールです/);
   assert.equal(scoped.repo.knowledge.length, 0);
-  // 2. 段ごとの道具が無くても、道具そのものが「すべての承認のあと」でなければ登録しない（二重の守り）
+  // 2. 段ごとのツールが無くても、ツールそのものが「すべての承認のあと」でなければ登録しない（二重の守り）
   const unscoped = { ...AG02_MINUTES, steps: AG02_MINUTES.steps.map((st) => (st.type === 'agent' ? { ...st, tools: undefined } : st)) };
   const { repo } = await runMinutes({ rejectShare: true, extra, def: unscoped });
   const early = resultsOf(repo, 'tasks', 'knowledge.register');
@@ -929,7 +929,7 @@ test('承認を却下したら、組み立てた送信は実行しない', async
   assert.equal(repo.knowledge.length, 0);
 });
 
-test('段が道具を宣言していれば、その段ではそれ以外を呼ばせない（第9.2.7節）', async () => {
+test('段がツールを宣言していれば、その段ではそれ以外を呼ばせない（第9.2.7節）', async () => {
   const DEF: AgentDefinition = {
     schemaVersion: 1, id: 'scoped', version: 1, name: 'テスト', category: 'test', description: 'テスト',
     locale: 'ja-JP', compartment: null, inputs: {}, tools: ['tasks.create', 'knowledge.search'],
@@ -940,12 +940,12 @@ test('段が道具を宣言していれば、その段ではそれ以外を呼�
   repo.settings.automation.writeInternal = 'allow';
   await engine.advance(run);
   const r = (repo.steps[0]!.output as { tools: { error?: string }[] }).tools[0]!;
-  assert.match(String(r.error), /この段（read）では使えない道具です/);
+  assert.match(String(r.error), /この段（read）では使えないツールです/);
   assert.equal(repo.audits.filter((a) => a.action === 'tool.invoke' && a.targetId === 'tasks.create').length, 0, '実行していない');
   const registry = new ToolRegistry();
   for (const t of BUILTIN_TOOLS) registry.register(t);
   assert.throws(() => validateDefinition({ ...DEF, steps: [{ id: 'x', type: 'agent', instruction: 'x', tools: ['chat.post'] }] }, registry),
-    /定義の道具に無いもの/);
+    /定義のツールに無いもの/);
 });
 
 test('推論に今日の日付（日本時間）を渡す（第9.3.2節）', async () => {
@@ -974,7 +974,7 @@ test('操作の確認を、業務の言葉で出す（ツール名・JSON・ID �
   assert.doesNotMatch(present, /tasks\.create|\{"/);
 });
 
-test('道具の呼び出しを業務の言葉にする（知らない道具は ID を出さない）', () => {
+test('ツールの呼び出しを業務の言葉にする（知らないツールは ID を出さない）', () => {
   assert.equal(jpDate('2026-09-29'), '2026年9月29日');
   assert.equal(jpDate('2026-09-30T10:00:00+09:00'), '2026年9月30日 10:00');
   assert.equal(describeCall({ name: 'tasks.complete', args: { taskId: 'abc' } }), '**ToDo を完了にします**');
@@ -1151,7 +1151,7 @@ test('人の判断が要るかは、社外に出るか・お金の確定か・�
   assert.equal(needsHuman([{ name: 'chat.post' }], registry, allow, 'x'), true, '確かめられなかった投稿は社外とみなす');
   assert.equal(needsHuman([{ name: 'gmail.send', internal: true }], registry, allow, 'x'), true, 'メールは確かめる手段を持たず、常に人');
   assert.equal(needsHuman([{ name: 'invoice.finalize', internal: true }], registry, allow, 'x'), true, 'お金の確定は常に人');
-  assert.equal(needsHuman([{ name: 'unknown.tool' }], registry, allow, 'x'), true, '知らない道具は人に回す');
+  assert.equal(needsHuman([{ name: 'unknown.tool' }], registry, allow, 'x'), true, '知らないツールは人に回す');
 });
 
 test('社外の人が入れないスペースへの投稿は、承認の段を自動で通って投稿する（第9.3.3節）', async () => {
@@ -1218,7 +1218,7 @@ function scriptedShare(def: AgentDefinition, replies: Parameters<typeof scripted
 
 test('組み立てで同じスペースへの投稿を言い直したら、後のものだけを記録する（投稿を 2 重にしない。2026-09-26）', async () => {
   const { connector, run, engine } = scriptedShare(SHARE_DEF, [
-    [], // 準備の段（道具を使わない）
+    [], // 準備の段（ツールを使わない）
     // 組み立て 1 往復目: 見つからない先への投稿と、リンク無しの投稿
     [{ name: 'chat.post', args: { space: '無い部', text: 'x' } }, { name: 'chat.post', args: { space: '営業部', text: 'リンク無し' } }],
     // 2 往復目: リンク付きで言い直す
@@ -1231,7 +1231,7 @@ test('組み立てで同じスペースへの投稿を言い直したら、後�
   assert.equal((posts[0]!.body as { text: string }).text, 'リンク付き', '後の言い直しを使う');
 });
 
-test('段が必ず呼ぶ道具を呼ばずに終えようとしたら、一度だけ促す（第9.2.7節。2026-09-26 の呼び忘れ）', async () => {
+test('段が必ず呼ぶツールを呼ばずに終えようとしたら、一度だけ促す（第9.2.7節。2026-09-26 の呼び忘れ）', async () => {
   const def: AgentDefinition = {
     ...SHARE_DEF, id: 'share-required', tools: ['chat.post', 'knowledge.register'],
     steps: SHARE_DEF.steps.map((s) => (s.id === 'share' ? { ...s, required: ['chat.post', 'knowledge.register'] } : s)),
@@ -1244,14 +1244,14 @@ test('段が必ず呼ぶ道具を呼ばずに終えようとしたら、一度�
     [],
   ]);
   await engine.advance(run);
-  assert.ok(llm.prompts.some((p) => p.includes('必ず呼ぶ道具を、まだ呼んでいません: knowledge.register')), '呼ぶよう促す');
+  assert.ok(llm.prompts.some((p) => p.includes('必ず呼ぶツールを、まだ呼んでいません: knowledge.register')), '呼ぶよう促す');
   const gate = repo.steps.find((s) => s.stepId === 'gate')!;
   assert.deepEqual(((gate.input as { toolCalls: { name: string }[] }).toolCalls).map((c) => c.name), ['chat.post', 'knowledge.register']);
 });
 
-test('段が必ず呼ぶ道具は、その段で使える道具でなければ定義を拒む', () => {
+test('段が必ず呼ぶツールは、その段で使えるツールでなければ定義を拒む', () => {
   const registry = new ToolRegistry();
   for (const t of BUILTIN_TOOLS) registry.register(t);
   const bad: AgentDefinition = { ...SHARE_DEF, steps: SHARE_DEF.steps.map((s) => (s.id === 'share' ? { ...s, required: ['gmail.send'] } : s)) };
-  assert.throws(() => validateDefinition(bad, registry), /必ず呼ぶ道具/);
+  assert.throws(() => validateDefinition(bad, registry), /必ず呼ぶツール/);
 });

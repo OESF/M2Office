@@ -193,7 +193,7 @@ function fit(text: string): string {
   return out;
 }
 
-/** 文字を描く小さな道具。 */
+/** 文字を描く小さなツール。 */
 function writer(page: PDFPage, font: PDFFont, boldFont: PDFFont) {
   return (text: string, x: number, y: number, opts: { size?: number; bold?: boolean; right?: number } = {}) => {
     const size = opts.size ?? 10;

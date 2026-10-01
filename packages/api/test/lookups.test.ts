@@ -155,3 +155,17 @@ test('朝のブリーフは、その日のうちだけ伝える（前の日の�
   const late = await claimUntold(repo, 't', 'u', new Date('2026-09-24T01:00:00.000Z'));
   assert.deepEqual(late, [], '翌日には伝えない');
 });
+
+test('動いている段の、いま呼んでいるツールの言葉と、その動きを始めた時刻を返す（経過した時間を数える。第10.11.6節）', async () => {
+  const { currentActivity } = await import('../src/secretary/lookups.js');
+  const started = '2026-10-01T03:00:00.000Z';
+  // ツールを呼んでいる間は、ツールの言葉と、呼び始めた時刻
+  assert.deepEqual(currentActivity([
+    { status: 'succeeded', input: {}, startedAt: '2026-10-01T02:59:00.000Z' },
+    { status: 'running', input: { activity: 'evidencemd に問い合わせています', activityAt: '2026-10-01T03:00:05.000Z' }, startedAt: started },
+  ]), { activity: 'evidencemd に問い合わせています', since: '2026-10-01T03:00:05.000Z' });
+  // ツールを呼んでいない間（推論が考えている）は、言葉は無く、段を始めた時刻
+  assert.deepEqual(currentActivity([{ status: 'running', input: {}, startedAt: new Date(started) }]), { activity: null, since: started });
+  // 動いている段が無ければ null
+  assert.equal(currentActivity([{ status: 'succeeded', input: {}, startedAt: started }]), null);
+});

@@ -957,7 +957,7 @@ console.log('\n■ 21. 持ち運べる拡張機能（ファイルからの取り
     const input = { リポジトリ: 'modelcontextprotocol/typescript-sdk', 知りたいこと: 'このリポジトリは何をするものですか？' };
     const { body: j } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: `${DW}:research`, input }) }, 'member');
     const r = await waitFor('a', j.runId, ['completed', 'failed'], 90000, 'member');
-    // スキルの段は 1 つ。DeepWiki の答えは道具の結果に残る
+    // スキルの段は 1 つ。DeepWiki の答えはツールの結果に残る
     const answer = r.steps?.find((x) => x.stepId === 'work')?.output?.tools?.find((t) => t.name === 'deepwiki.ask_wiki_question')?.result;
     const body = String(answer?.text ?? '');
     r.run?.status === 'completed' && body.length > 50 && r.artifacts?.length > 0
@@ -967,7 +967,7 @@ console.log('\n■ 21. 持ち運べる拡張機能（ファイルからの取り
     console.log('  - DeepWiki への実際の問い合わせは省略（SMOKE_EXTERNAL=1 で実行）');
   }
 
-  // 同梱の接続は、導入のときに会社の接続として登録する（第12.11.0節、ADR-0037）。道具は接続の画面で 1 つずつ止める（第6.6.3.1節）
+  // 同梱の接続は、導入のときに会社の接続として登録する（第12.11.0節、ADR-0037）。ツールは接続の画面で 1 つずつ止める（第6.6.3.1節）
   await call('a', `/v1/admin/extensions/${DW}/install`, { method: 'POST', body: JSON.stringify({ consent: true }) });
   const { body: mcpList } = await call('a', '/v1/admin/connections/mcp');
   const reg = mcpList.items?.find((x) => x.id === 'deepwiki');
@@ -1042,11 +1042,11 @@ console.log('\n■ 21b. 会社の接続（MCP を拡張機能から切り離し�
   const { body: l1 } = await call('a', '/v1/admin/connections/mcp');
   const crm = l1.items?.find((x) => x.id === 'crm');
   added.status === 201 && crm?.tools?.find((t) => t.name === 'list_deals')?.risk === 'read' && crm.tools.find((t) => t.name === 'create_invoice')?.risk === 'external-send'
-    ? ok('URL から登録すると道具の一覧を問い合わせ、読むだけの目印が無い道具は「社外に送る」にする') : ng('登録の結果が違う', JSON.stringify({ added: added.body, crm }));
+    ? ok('URL から登録するとツールの一覧を問い合わせ、読むだけの目印が無いツールは「社外に送る」にする') : ng('登録の結果が違う', JSON.stringify({ added: added.body, crm }));
   const dup = await call('a', '/v1/admin/connections/mcp', { method: 'POST', body: JSON.stringify({ id: 'gmail', url }) });
-  dup.status === 400 ? ok('内蔵の道具と重なる ID は登録できない') : ng(`登録できてしまう（${dup.status}）`);
+  dup.status === 400 ? ok('内蔵のツールと重なる ID は登録できない') : ng(`登録できてしまう（${dup.status}）`);
 
-  // 同梱していない会社の接続の道具を使う SKILL.md の業務
+  // 同梱していない会社の接続のツールを使う SKILL.md の業務
   const EXT = 'jp.example.crm-deals';
   const AG = `${EXT}:deals`;
   await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
@@ -1060,12 +1060,12 @@ console.log('\n■ 21b. 会社の接続（MCP を拡張機能から切り離し�
   const done = await waitFor('a', job.runId, ['completed', 'failed', 'awaiting_approval'], 20000, 'member');
   const called = done.steps?.find((x) => x.stepId === 'work')?.output?.tools?.find((t) => t.name === 'crm.list_deals')?.result;
   done.run?.status === 'completed' && /見本商事/.test(called?.text ?? '') && called?.source === 'external'
-    ? ok('業務が会社の接続の道具を使える（応答は外部のデータの印つき）') : ng('会社の接続の道具を使えない', JSON.stringify({ status: done.run?.status, called }));
+    ? ok('業務が会社の接続のツールを使える（応答は外部のデータの印つき）') : ng('会社の接続のツールを使えない', JSON.stringify({ status: done.run?.status, called }));
 
   const risk = await call('a', '/v1/admin/connections/mcp/crm', { method: 'PUT', body: JSON.stringify({ tools: [{ name: 'create_invoice', risk: 'financial' }] }) });
   const { body: l2 } = await call('a', '/v1/admin/connections/mcp');
   risk.status === 200 && l2.items?.find((x) => x.id === 'crm')?.tools?.find((t) => t.name === 'create_invoice')?.risk === 'financial'
-    ? ok('道具ごとの危険度を管理者が決められる') : ng('危険度を変えられない');
+    ? ok('ツールごとの危険度を管理者が決められる') : ng('危険度を変えられない');
 
   const check = await call('a', '/v1/admin/connections/mcp/crm/check', { method: 'POST' });
   check.body.ok && check.body.tools.every((t) => t.provided) ? ok('接続を確かめられる') : ng('確かめられない', JSON.stringify(check.body));
@@ -1076,7 +1076,7 @@ console.log('\n■ 21b. 会社の接続（MCP を拡張機能から切り離し�
   const { body: menu } = await call('a', '/v1/agents', {}, 'member');
   const gone = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: AG, input: { 会社: 'x' } }) }, 'member');
   !(menu.agents ?? []).some((a) => a.id === AG) && gone.status === 404
-    ? ok('接続を消すと、その道具を使う業務は使えなくなる（接続が要る）') : ng('接続が無くても使えてしまう');
+    ? ok('接続を消すと、そのツールを使う業務は使えなくなる（接続が要る）') : ng('接続が無くても使えてしまう');
   const { body: bList } = await call('b', '/v1/admin/connections/mcp');
   !(bList.items ?? []).some((x) => x.id === 'crm') ? ok('会社の接続は、ほかの会社には見えない') : ng('ほかの会社に見える');
   await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
@@ -1290,7 +1290,7 @@ console.log('\n■ 25. Google Workspace のツール（第 1 弾）');
   await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
   const tools = ['drive.search', 'drive.read', 'sheets.create', 'sheets.append', 'gmail.send'];
   const input = { memo: '営業会議メモ' };
-  // スキルの段は「作業 → 承認 → 送る」（送る道具があるため M2Office が組み立てる。第12.12.1節）
+  // スキルの段は「作業 → 承認 → 送る」（送るツールがあるため M2Office が組み立てる。第12.12.1節）
   const stub = {
     work: [
       { name: 'drive.search', args: { query: '営業会議メモ' } },
@@ -2296,7 +2296,7 @@ console.log('\n■ 44. 秘書にファイルを渡す（第10.10節）');
   finished?.text && finished.progress === null
     ? ok('終わると答えが返り、進み具合は消える') : ng('答えが返らない', JSON.stringify(finished ?? null));
 
-  // 調べものは読むだけ。送信・登録の道具を持たない（第10.11.4節）
+  // 調べものは読むだけ。送信・登録のツールを持たない（第10.11.4節）
   const { body: agentList } = await call('a', '/v1/agents', {}, 'member');
   const lookup = (agentList.agents ?? []).find((x) => x.id === 'secretary-lookup');
   lookup && !lookup.hasApproval
@@ -2960,7 +2960,7 @@ console.log('\n■ 56. 認証の要る会社の接続（oauth・api_key。第12.
     const { body: l1 } = await call('a', '/v1/admin/connections/mcp');
     const c1 = l1.items?.find((x) => x.id === 'oauthcrm');
     added.status === 201 && c1?.authState?.type === 'oauth' && c1.authState.ready === false && /\/v1\/oauth\/connection\/callback$/.test(c1.authState.redirectUri ?? '')
-      ? ok('利用者ごとに許可する接続を登録でき、戻り先の URL を示す（道具は許可のあとで問い合わせる）') : ng('登録の結果が違う', JSON.stringify({ added: added.body, c1 }));
+      ? ok('利用者ごとに許可する接続を登録でき、戻り先の URL を示す（ツールは許可のあとで問い合わせる）') : ng('登録の結果が違う', JSON.stringify({ added: added.body, c1 }));
 
     const memberCred = await call('a', '/v1/admin/connections/mcp/oauthcrm/credentials', { method: 'PUT', body: JSON.stringify({ clientId: 'cid', clientSecret: 'csecret' }) }, 'member');
     memberCred.status === 403 ? ok('一般の利用者は認証情報を登録できない（403）') : ng(`登録できてしまう（${memberCred.status}）`);
@@ -2985,14 +2985,14 @@ console.log('\n■ 56. 認証の要る会社の接続（oauth・api_key。第12.
     const { body: after } = await call('a', '/v1/me/connections', {}, 'member');
     after.items?.find((x) => x.id === 'oauthcrm')?.connected === true ? ok('接続したことが個人設定に出る') : ng('接続が出ない', JSON.stringify(after));
 
-    // 管理者も自分で接続して確かめ、自分の認可で道具を取り直す（第12.11.6.2節 手順 4）
+    // 管理者も自分で接続して確かめ、自分の認可でツールを取り直す（第12.11.6.2節 手順 4）
     const noAdmin = await call('a', '/v1/admin/connections/mcp/oauthcrm/refresh', { method: 'POST' });
-    noAdmin.status === 400 && /接続が要ります/.test(noAdmin.body.error ?? '') ? ok('管理者が接続する前は、道具を取り直せない（接続が要ると示す）') : ng('接続なしで取り直せてしまう', JSON.stringify(noAdmin.body));
+    noAdmin.status === 400 && /接続が要ります/.test(noAdmin.body.error ?? '') ? ok('管理者が接続する前は、ツールを取り直せない（接続が要ると示す）') : ng('接続なしで取り直せてしまう', JSON.stringify(noAdmin.body));
     await connectAs('admin', 'good-admin');
     const refreshed = await call('a', '/v1/admin/connections/mcp/oauthcrm/refresh', { method: 'POST' });
     const { body: l3 } = await call('a', '/v1/admin/connections/mcp');
     refreshed.status === 200 && l3.items?.find((x) => x.id === 'oauthcrm')?.tools?.find((t) => t.name === 'list_deals')?.risk === 'read'
-      ? ok('管理者の認可で道具を問い合わせて並べる') : ng('道具を取り直せない', JSON.stringify(refreshed.body));
+      ? ok('管理者の認可でツールを問い合わせて並べる') : ng('ツールを取り直せない', JSON.stringify(refreshed.body));
 
     // 業務は依頼した本人の認可で呼ぶ（不変則 I-9）
     const data = await skillZip({
@@ -3023,7 +3023,7 @@ console.log('\n■ 56. 認証の要る会社の接続（oauth・api_key。第12.
     const { body: l4 } = await call('a', '/v1/admin/connections/mcp');
     const k = l4.items?.find((x) => x.id === 'keycrm');
     key.status === 201 && keyCred.body.tools === 1 && k?.authState?.keySet === true && !JSON.stringify(l4).includes('KEY-1')
-      ? ok('会社の鍵を登録すると、その鍵で道具を問い合わせる。鍵は返さない') : ng('会社の鍵の登録が違う', JSON.stringify({ key: key.body, keyCred: keyCred.body, k: k?.authState }));
+      ? ok('会社の鍵を登録すると、その鍵でツールを問い合わせる。鍵は返さない') : ng('会社の鍵の登録が違う', JSON.stringify({ key: key.body, keyCred: keyCred.body, k: k?.authState }));
     const check = await call('a', '/v1/admin/connections/mcp/keycrm/check', { method: 'POST' });
     check.body.ok ? ok('会社の鍵で接続を確かめられる') : ng('確かめられない', JSON.stringify(check.body));
 
@@ -3235,6 +3235,10 @@ console.log('\n■ 57. 名刺管理（内蔵の拡張。第27章、ADR-0042）')
       const submit = await call('a', `/v1/cards/bulk-mails/${bulkId}/submit`, { method: 'POST', body: '{}' }, 'member');
       const run = await waitFor('a', submit.body.runId, ['awaiting_approval', 'failed', 'completed'], 20000, 'member');
       const appr = await approvalFor('a', submit.body.runId, 'member');
+      // 動いている間の進み具合に使う段の並び（第6.2.2.2節）
+      const rd = (await call('a', `/v1/runs/${submit.body.runId}`, {}, 'member')).body;
+      rd.plan?.length === 3 && rd.plan[1].kind === 'approval' && rd.plan.every((x) => x.label)
+        ? ok('実行の詳細に、段の並び（表示名と種類）を返す') : ng('段の並びが無い', JSON.stringify(rd.plan));
       const locked = await call('a', `/v1/cards/bulk-mails/${bulkId}`, { method: 'PUT', body: JSON.stringify({ subject: '変える' }) }, 'member');
       submit.status === 201 && run.run?.status === 'awaiting_approval' && appr && /まとめてのメールを送ります/.test(appr.present)
         && appr.present.includes(bm(1)) && appr.present.includes('配信を停止しています') && locked.status === 409

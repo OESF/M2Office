@@ -278,7 +278,7 @@ function InstalledCard({ item: x, busy, focused = false, options, onChanged, onT
 /**
  * 詳細。業務エージェント、同梱の接続、説明。
  *
- * @remarks 接続の道具の危険度と入り切りは「接続 › コネクタ（MCP）」で決める（会社の接続。仕様書 第12.11.0節）
+ * @remarks 接続のツールの危険度と入り切りは「接続 › コネクタ（MCP）」で決める（会社の接続。仕様書 第12.11.0節）
  */
 function Details({ item: x }: { item: ExtensionView; onChanged: () => void }) {
   return (
@@ -295,7 +295,7 @@ function Details({ item: x }: { item: ExtensionView; onChanged: () => void }) {
           <ul className="small">
             {x.connectors.map((c) => <li key={c.id}>{c.name}（<code>{c.id}</code>）: <code>{c.url}</code></li>)}
           </ul>
-          <p className="muted small">導入すると会社の接続として登録されます。道具の危険度と入り切りは「接続 › コネクタ（MCP）」で決めます。</p>
+          <p className="muted small">導入すると会社の接続として登録されます。ツールの危険度と入り切りは「接続 › コネクタ（MCP）」で決めます。</p>
         </>
       )}
       {x.readme && (

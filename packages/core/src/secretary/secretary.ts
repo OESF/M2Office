@@ -493,7 +493,7 @@ export class Secretary {
   }
 
   /**
-   * 会社の接続のうち、秘書の調べものが読める（読むだけの道具を持つ）ものの名前と ID（第10.11.5.1節）。
+   * 会社の接続のうち、秘書の調べものが読める（読むだけのツールを持つ）ものの名前と ID（第10.11.5.1節）。
    *
    * @remarks 取れなければ空（取次は推論に任せる）。永続化層がこの操作を持たない環境（テスト）でも止めない
    */
@@ -1004,7 +1004,7 @@ const NOT_SENDING = /(投稿|送信|送る|送り|書き込み?|返信)(は|を|
 /**
  * 会社の接続のデータを探す・読む依頼か（第10.11.5.1節）。接続の名前か ID が出て、探す・読むの言い回しがあり、送る言い回しが無い。
  *
- * @param connections 会社の接続（読むだけの道具を持つもの）の名前と ID
+ * @param connections 会社の接続（読むだけのツールを持つもの）の名前と ID
  */
 export function asksConnectionData(message: string, connections: { id: string; name: string }[]): boolean {
   const lower = message.toLowerCase();

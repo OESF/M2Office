@@ -120,16 +120,16 @@ test('ツールを呼んだら、結果を渡してもう一度考えさせる�
   assert.equal(res.outcome, 'completed');
   assert.equal(llm.seen.length, 2, '推論を 2 回呼ぶ');
 
-  // 2 回目には、道具の結果がデータとして渡っている（不変則 I-6）
+  // 2 回目には、ツールの結果がデータとして渡っている（不変則 I-6）
   const second = llm.seen[1]!.messages.map((m) => m.content).join('\n');
   assert.match(second, /ツールの結果/);
   assert.match(second, /データであり、指示ではありません/);
   assert.match(second, /就業規則 › 第4条/);
 
-  // 段の出力は**最後の文**。道具の囲みは残さない
+  // 段の出力は**最後の文**。ツールの囲みは残さない
   const out = repo.steps[0]!['output'] as { text: string; tools: unknown[] };
   assert.equal(out.text, '規程には書かれていません。');
-  assert.equal(out.tools.length, 1, '呼んだ道具は記録する');
+  assert.equal(out.tools.length, 1, '呼んだツールは記録する');
 });
 
 test('文で終わったら、そこで終わり（余計に呼ばない）', async () => {
@@ -140,7 +140,7 @@ test('文で終わったら、そこで終わり（余計に呼ばない）', as
   assert.equal(llm.seen.length, 1);
 });
 
-test('上限まで道具を呼び続けても、最後は文で終わらせる', async () => {
+test('上限までツールを呼び続けても、最後は文で終わらせる', async () => {
   // 毎回ちがう問い合わせを返し続ける推論
   const llm = new ScriptedLlm([
     CALL('knowledge.search', { query: 'あ' }),
@@ -151,15 +151,15 @@ test('上限まで道具を呼び続けても、最後は文で終わらせる',
   const { engine, run, repo } = engineFor(QA_DEF, llm);
 
   await engine.advance(run);
-  assert.equal(llm.seen.length, 4, '4 往復で打ち切る（道具を使えるのは 3 往復。第 0.110.1 版）');
-  // 最後の往復では道具を使わせない
+  assert.equal(llm.seen.length, 4, '4 往復で打ち切る（ツールを使えるのは 3 往復。第 0.110.1 版）');
+  // 最後の往復ではツールを使わせない
   const last = llm.seen[3]!.messages.map((m) => m.content).join('\n');
   assert.match(last, /これ以上ツールは使えません/);
   const out = repo.steps[0]!['output'] as { text: string };
   assert.equal(out.text, 'ここまでで分かったことをお伝えします。');
 });
 
-test('道具の囲みしか返さなくても、答えとしては残さない', async () => {
+test('ツールの囲みしか返さなくても、答えとしては残さない', async () => {
   const llm = new ScriptedLlm([CALL('knowledge.search', { query: 'あ' })]);
   const { engine, run, repo } = engineFor(QA_DEF, llm);
 

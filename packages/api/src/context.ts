@@ -78,7 +78,7 @@ export interface AppDeps {
    * `redirectUri` は Google、`connectionRedirectUri` は認証の要る会社の接続（仕様書 第12.11.6.2節）の戻り先
    */
   oauth: { redirectUri: string; connectionRedirectUri: string; states: OAuthStateStore };
-  /** 認証の要る会社の接続の認可（仕様書 第12.11.6.4節）。接続の確認と道具の取り直しで使う。 */
+  /** 認証の要る会社の接続の認可（仕様書 第12.11.6.4節）。接続の確認とツールの取り直しで使う。 */
   connections: ConnectionCredentials;
   /** ログインの `state`（仕様書 第16.1.2節）。業務の連携のものとは別に持つ。 */
   loginStates: OAuthStateStore;
@@ -163,7 +163,7 @@ export function buildDeps(): AppDeps {
   const registry = new ToolRegistry();
   for (const tool of BUILTIN_TOOLS) registry.register(tool);
 
-  // 認証の要る会社の接続の認可（仕様書 第12.11.6.4節）。道具を呼ぶときに依頼した本人の認可を付ける
+  // 認証の要る会社の接続の認可（仕様書 第12.11.6.4節）。ツールを呼ぶときに依頼した本人の認可を付ける
   const connections = new ConnectionCredentials({ repo, box });
   const hub = buildHub(repo, registry, log, connections);
   const platform = buildAi(hub);

@@ -8,20 +8,20 @@
  * @see 仕様書 第12.11.3節 呼び出し
  */
 
-/** 接続の始まりと道具の一覧の時間の上限（仕様書 第12.11.3節）。 */
+/** 接続の始まりとツールの一覧の時間の上限（仕様書 第12.11.3節）。 */
 export const MCP_TIMEOUT_MS = 60_000;
 
 /**
- * 道具の呼び出し（`tools/call`）の時間の上限（仕様書 第12.11.3節、第 0.207.2 版）。
+ * ツールの呼び出し（`tools/call`）の時間の上限（仕様書 第12.11.3節、第 0.207.2 版）。
  *
- * @remarks 文献を調べて考える道具（医学の根拠を調べるものなど）は、答えまでに 1 分を超えることがあるため、呼び出しだけを長くする
+ * @remarks 文献を調べて考えるツール（医学の根拠を調べるものなど）は、答えまでに 1 分を超えることがあるため、呼び出しだけを長くする
  */
 export const MCP_CALL_TIMEOUT_MS = 180_000;
 
 /**
  * ツールの応答として推論に渡す量の上限（文字数）。超えた分は切り詰め、切り詰めたことを書き添える。
  *
- * @remarks 第 0.207.2 版で 6,000 字から広げた（長い答えをそのまま返す道具で、後ろが切れないように）
+ * @remarks 第 0.207.2 版で 6,000 字から広げた（長い答えをそのまま返すツールで、後ろが切れないように）
  */
 export const MCP_RESULT_LIMIT = 20_000;
 
@@ -38,7 +38,7 @@ export interface McpToolInfo {
    */
   args?: ToolArgsSchema;
   /**
-   * 読むだけの道具だという MCP の目印（`annotations.readOnlyHint`）。
+   * 読むだけのツールだという MCP の目印（`annotations.readOnlyHint`）。
    * 会社の接続の危険度の初期値に使う（仕様書 第12.11.2節）。目印が無ければ `undefined`
    */
   readOnly?: boolean;
@@ -99,7 +99,7 @@ export class HttpMcpClient implements McpClient {
   async callTool(url: string, name: string, args: Record<string, unknown>, auth?: Record<string, string>): Promise<McpCallResult> {
     try {
       const session = await this.initialize(url, auth);
-      // 道具の呼び出しだけは長く待つ（答えまでに時間のかかる道具のため）
+      // ツールの呼び出しだけは長く待つ（答えまでに時間のかかるツールのため）
       const res = await this.rpc(url, 'tools/call', { name, arguments: args }, session, auth, this.callTimeoutMs);
       const text = textOf(res);
       if (res.isError === true) return { ok: false, error: text || 'MCP サーバがエラーを返しました' };

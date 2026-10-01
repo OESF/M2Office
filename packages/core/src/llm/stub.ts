@@ -57,7 +57,7 @@ export class StubLlmProvider implements LlmProvider {
     for (const call of calls) {
       lines.push('', '```tool', JSON.stringify(call), '```');
     }
-    // 道具を呼ばない段（まとめの段など）では、読み取った中身をそのまま添える。
+    // ツールを呼ばない段（まとめの段など）では、読み取った中身をそのまま添える。
     // 鍵が無い環境でも「読んだものが答えまで届く」ことを通しで確かめられるようにする
     if (calls.length === 0) {
       const read = readText(section(user, 'これまでの結果'));
@@ -234,7 +234,7 @@ function chooseTools(tools: string[], prompt: string): Call[] {
     }];
   }
   // 渡された書類を読む（秘書の調べもの。仕様書 第10.11.4節）。
-  // 語句ではなく、指示が道具の名前を挙げているかで見る。「利用者が読む文」のような
+  // 語句ではなく、指示がツールの名前を挙げているかで見る。「利用者が読む文」のような
   // 別の意味の「読む」に反応して、まとめの段でもう一度読んでしまうため
   if (has('file.read_text') && instruction.includes('file.read_text')) {
     const fileId = extractField(prompt, 'fileId');
@@ -307,7 +307,7 @@ function minutesStub(previous: string): string {
 /**
  * これまでの結果から、読み取った中身を拾う。
  *
- * @remarks 読み取りの道具（`file.read_text`）の結果だけを見る。応答文は見ない。
+ * @remarks 読み取りのツール（`file.read_text`）の結果だけを見る。応答文は見ない。
  */
 function readText(previous: string): string {
   const m = /"name":\s*"file\.read_text"[\s\S]*?"result":\s*\{[\s\S]*?"text":\s*"((?:[^"\\]|\\.)*)"/.exec(previous);

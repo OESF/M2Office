@@ -232,7 +232,7 @@ test('選んだ声が使えなければ、既定の声で開き直す（仕様�
   await live.close();
 });
 
-// ─── 秘書の取次を呼ぶ道具（仕様書 第10.5.7節） ─────────────────────────
+// ─── 秘書の取次を呼ぶツール（仕様書 第10.5.7節） ─────────────────────────
 
 const askTool = (calls: Record<string, string>[]) => ({
   name: 'ask_secretary',
@@ -245,7 +245,7 @@ const askTool = (calls: Record<string, string>[]) => ({
   },
 });
 
-test('道具を渡すと、Gemini Live に関数として宣言する。渡さなければ宣言しない', async () => {
+test('ツールを渡すと、Gemini Live に関数として宣言する。渡さなければ宣言しない', async () => {
   const live = await fakeLive();
   const s1 = await new GeminiLiveProvider({ apiKey: 'k', model: 'm', url: live.url }).open({
     instructions: 'x', speak: false, tools: [askTool([])], onEvent: () => undefined,
@@ -267,7 +267,7 @@ test('道具を渡すと、Gemini Live に関数として宣言する。渡さ�
   await live2.close();
 });
 
-test('Gemini Live が道具を呼んだら、取次の答えを同じ ID で返す。知らない道具・取りやめた呼び出しを扱う', async () => {
+test('Gemini Live がツールを呼んだら、取次の答えを同じ ID で返す。知らないツール・取りやめた呼び出しを扱う', async () => {
   const live = await fakeLive();
   const calls: Record<string, string>[] = [];
   const session = await new GeminiLiveProvider({ apiKey: 'k', model: 'm', url: live.url }).open({
@@ -280,8 +280,8 @@ test('Gemini Live が道具を呼んだら、取次の答えを同じ ID で返�
   assert.deepEqual(calls, [{ request: '明日の予定を教えて' }]);
   assert.deepEqual(response()!.toolResponse.functionResponses, [
     { id: 'c1', name: 'ask_secretary', response: { answer: '明日の予定は 2 件です（明日の予定を教えて）' } },
-    { id: 'c2', name: 'send_mail', response: { error: 'その道具はありません' } },
-  ], '知らない道具は動かさず、断りの文を返す');
+    { id: 'c2', name: 'send_mail', response: { error: 'そのツールはありません' } },
+  ], '知らないツールは動かさず、断りの文を返す');
 
   // 本人が話をさえぎって取りやめた呼び出しには、結果を返さない
   const before = live.received.length;
@@ -294,7 +294,7 @@ test('Gemini Live が道具を呼んだら、取次の答えを同じ ID で返�
   await live.close();
 });
 
-test('道具が失敗しても、音声の対話は続け、断りの文を返す', async () => {
+test('ツールが失敗しても、音声の対話は続け、断りの文を返す', async () => {
   const live = await fakeLive();
   const session = await new GeminiLiveProvider({ apiKey: 'k', model: 'm', url: live.url }).open({
     instructions: 'x', speak: false, onEvent: () => undefined,
@@ -321,7 +321,7 @@ test('見本の音声でも、書いた文字は秘書の取次に渡す（取�
   session.close();
 });
 
-test('見本の音声でも、「画面に出して」は画面に出す道具へ渡す（第6.2.0節）', async () => {
+test('見本の音声でも、「画面に出して」は画面に出すツールへ渡す（第6.2.0節）', async () => {
   const shown: Record<string, string>[] = [];
   const sink = collect();
   const show = {

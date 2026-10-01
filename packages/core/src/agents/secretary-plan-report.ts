@@ -11,7 +11,7 @@ import type { AgentDefinition } from '@m2office/shared';
  * 段取りの報告（中の業務。メニューには出さず、秘書も取り次がない）。
  *
  * @remarks
- * 危険度は `read` 相当（道具を持たない）。分身が、依頼と各段の業務の結果を入力に渡して起こす。
+ * 危険度は `read` 相当（ツールを持たない）。分身が、依頼と各段の業務の結果を入力に渡して起こす。
  * 業務の実行の形にしているのは、届け方・持ち越し・学び方を業務の結果と同じにするためである（第10.14節）。
  */
 export const SECRETARY_PLAN_REPORT: AgentDefinition = {

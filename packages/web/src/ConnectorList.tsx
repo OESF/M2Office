@@ -1,8 +1,8 @@
 /**
- * @file 管理者ページ「接続 › コネクタ（MCP）」。会社の接続を登録し、道具の危険度と入り切りを決める（仕様書 第6.6.3.0節、ADR-0037）。
+ * @file 管理者ページ「接続 › コネクタ（MCP）」。会社の接続を登録し、ツールの危険度と入り切りを決める（仕様書 第6.6.3.0節、ADR-0037）。
  *
- * コネクタは拡張機能の一部ではなく、道具を供給する会社の資源である。秘書・公式の業務・拡張機能のどれからでも使う。
- * 認証の要る接続（Slack など）は、認証情報を登録し、管理者が自分で接続して確かめてから道具を取り直す（仕様書 第12.11.6.2節）。
+ * コネクタは拡張機能の一部ではなく、ツールを供給する会社の資源である。秘書・公式の業務・拡張機能のどれからでも使う。
+ * 認証の要る接続（Slack など）は、認証情報を登録し、管理者が自分で接続して確かめてからツールを取り直す（仕様書 第12.11.6.2節）。
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -50,14 +50,14 @@ export function ConnectorList() {
   /** よく使うサービスの型から登録する（第12.11.6.7節）。 */
   const addPreset = (p: ConnectionPresetView) => run(`preset/${p.id}`, () => api.admin.addMcpConnection({ preset: p.id }), '登録できませんでした');
 
-  /** 道具を止めるときは、使えなくなる業務を先に示す（第6.6.3.1節）。 */
+  /** ツールを止めるときは、使えなくなる業務を先に示す（第6.6.3.1節）。 */
   const toggle = (c: McpConnectionView, tool: string, enabled: boolean) => run(`${c.id}/${tool}`, async () => {
     if (!enabled) {
       const impact = await api.admin.mcpToolImpact(c.id, tool);
       const names = impact.agents.map((a) => `・${a.name}`).join('\n');
       const ok = window.confirm(impact.agents.length === 0
-        ? `道具「${tool}」を止めます。いま止まる業務はありません。止めてよろしいですか。`
-        : `道具「${tool}」を止めます。次の業務が使えなくなります。\n${names}\n`
+        ? `ツール「${tool}」を止めます。いま止まる業務はありません。止めてよろしいですか。`
+        : `ツール「${tool}」を止めます。次の業務が使えなくなります。\n${names}\n`
           + (impact.schedules > 0 ? `\nこれらの定時実行 ${impact.schedules} 件も、次の回から飛ばします。\n` : '')
           + '\n止めてよろしいですか。');
       if (!ok) return;
@@ -129,9 +129,13 @@ export function ConnectorList() {
             </div>
             {c.description && <p className="small">{c.description}</p>}
             {c.authState.type !== 'none' && <AuthSettings conn={c} onSaved={load} onError={setError} />}
-            {c.tools.length === 0 && <p className="muted small">道具はまだありません</p>}
-            {c.tools.length > 0 && <table className="table small">
-              <thead><tr><th>道具</th><th>危険度</th><th>使う</th></tr></thead>
+            {c.tools.length === 0 && <p className="muted small">ツールはまだありません</p>}
+            {c.tools.length > 0 && (
+            // ツールが多い接続（Slack など）でも画面が埋まらないよう、ツールの一覧は畳んでおく（仕様書 第6.6.3.0節）
+            <details className="tool-list">
+              <summary>ツール {c.tools.length} 件（{toolSummary(c.tools, risks)}）</summary>
+            <table className="table small tool-table">
+              <thead><tr><th>ツール</th><th className="nowrap">危険度</th><th className="nowrap">利用</th></tr></thead>
               <tbody>
                 {c.tools.map((t) => {
                   const provided = st && st !== 'busy' && st.ok ? st.tools.find((x) => x.name === t.name)?.provided : undefined;
@@ -140,7 +144,8 @@ export function ConnectorList() {
                       <td title={t.description}>
                         <code>{t.name}</code>
                         {provided === false && <span className="status failed">提供なし</span>}
-                        <div className="muted small">{t.description}</div>
+                        {/* 説明は 2 行まで（長い英語の説明でも表が埋まらないように）。全文は指し示すと出る */}
+                        <div className="muted small tool-desc">{t.description}</div>
                       </td>
                       <td>
                         <select value={t.risk} disabled={busy === `${c.id}/risk`}
@@ -150,25 +155,27 @@ export function ConnectorList() {
                       </td>
                       <td>
                         <input type="checkbox" checked={t.enabled} disabled={busy === `${c.id}/${t.name}`}
-                          aria-label={`${t.name}を使う`} onChange={(e) => void toggle(c, t.name, e.target.checked)} />
+                          aria-label={`${t.name}を利用する`} onChange={(e) => void toggle(c, t.name, e.target.checked)} />
                       </td>
                     </tr>
                   );
                 })}
               </tbody>
-            </table>}
-            {c.usedBy.length > 0 && <p className="muted small">使う業務: {c.usedBy.map((a) => a.name).join('、')}</p>}
+            </table>
+            </details>
+            )}
+            {c.usedBy.length > 0 && <p className="muted small">利用する業務: {c.usedBy.map((a) => a.name).join('、')}</p>}
             <div className="row small">
               <button className="btn small ghost" disabled={st === 'busy'} onClick={() => void check(c)}>
                 {st === 'busy' ? '確認しています…' : '接続を確認'}
               </button>
               <button className="btn small ghost" disabled={busy === `${c.id}/refresh`}
                 onClick={() => void run(`${c.id}/refresh`, () => api.admin.refreshMcpConnection(c.id), '取り直せませんでした')}>
-                道具を取り直す
+                ツールを取り直す
               </button>
               <button className="btn small ghost danger" disabled={busy === `${c.id}/delete`} onClick={() => void remove(c)}>削除</button>
               {st && st !== 'busy' && (st.ok
-                ? <span className="ok-inline">接続できました（提供のある道具 {st.tools.filter((t) => t.provided).length} ／ {st.tools.length}）</span>
+                ? <span className="ok-inline">接続できました（提供のあるツール {st.tools.filter((t) => t.provided).length} ／ {st.tools.length}）</span>
                 : <span className="error">接続できませんでした: {st.error}</span>)}
             </div>
           </div>
@@ -183,8 +190,8 @@ export function ConnectorList() {
  *
  * @remarks
  * `oauth`: 戻り先の URL と求める権限を示し、クライアント ID とシークレットを登録する。管理者が自分で接続して確かめ、
- * そのあと「道具を取り直す」で道具が並ぶ。クライアント ID を替えると、接続している全員の許可が消える。
- * `api_key`: 会社の鍵を登録すると、その鍵で道具を問い合わせる。
+ * そのあと「ツールを取り直す」でツールが並ぶ。クライアント ID を替えると、接続している全員の許可が消える。
+ * `api_key`: 会社の鍵を登録すると、その鍵でツールを問い合わせる。
  */
 function AuthSettings({ conn, onSaved, onError }: {
   conn: McpConnectionView; onSaved: () => void; onError: (m: string | null) => void;
@@ -208,7 +215,7 @@ function AuthSettings({ conn, onSaved, onError }: {
         setNote(r.reset ? `登録しました。${r.reset} 人の許可を消しました` : '登録しました');
       } else {
         const r = await api.admin.setMcpCredentials(conn.id, { apiKey: secret.trim() });
-        setNote(r.warning ?? `登録しました（道具 ${r.tools ?? 0} 件）`);
+        setNote(r.warning ?? `登録しました（ツール ${r.tools ?? 0} 件）`);
       }
       setSecret('');
       onSaved();
@@ -219,7 +226,7 @@ function AuthSettings({ conn, onSaved, onError }: {
     }
   };
 
-  /** 管理者が自分で接続して確かめる（第12.11.6.2節 手順 4）。戻ってきたら「道具を取り直す」。 */
+  /** 管理者が自分で接続して確かめる（第12.11.6.2節 手順 4）。戻ってきたら「ツールを取り直す」。 */
   const connectSelf = async () => {
     try {
       location.href = (await api.connectConnection(conn.id)).url;
@@ -310,3 +317,12 @@ function ManualClient({ st, clientId, setClientId, secret, setSecret, busy, save
   );
 }
 
+
+/**
+ * 畳んだツールの一覧の見出しに添える、危険度ごとの数と止めている数（「読むだけ 7・社外や他の人へ送る 5・止めている 2」）。
+ */
+function toolSummary(tools: { risk: string; enabled: boolean }[], risks: { value: string; text: string }[]): string {
+  const parts = risks.map((r) => ({ text: r.text, n: tools.filter((t) => t.risk === r.value).length })).filter((x) => x.n > 0).map((x) => `${x.text} ${x.n}`);
+  const off = tools.filter((t) => !t.enabled).length;
+  return [...parts, ...(off > 0 ? [`止めている ${off}`] : [])].join('・');
+}

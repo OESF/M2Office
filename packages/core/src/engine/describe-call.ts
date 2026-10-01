@@ -1,5 +1,5 @@
 /**
- * @file 道具の呼び出しを、承認する人が読める業務の言葉にする（仕様書 第9.3.3節・第9.4節）。
+ * @file ツールの呼び出しを、承認する人が読める業務の言葉にする（仕様書 第9.3.3節・第9.4節）。
  *
  * 承認の画面と操作の確認に出す。**ツール名・JSON・内部の ID は出さない。**
  * 承認する人は、何が起きるかを読んで判断する。`tasks.create: {"due":…}` では判断できない
@@ -16,11 +16,11 @@ export interface DescribedCall {
 
 /** 言葉にするときに引くもの。 */
 export interface DescribeContext {
-  /** 道具の説明（業務の言葉）。知らない道具の言い方に使う。 */
+  /** ツールの説明（業務の言葉）。知らないツールの言い方に使う。 */
   helpText?(name: string): string | undefined;
   /** 成果物の ID から題名を引く（知識への登録などで、ID の代わりに題名を出す）。 */
   artifactTitle?(id: string): string | undefined;
-  /** 会社の接続の道具なら、接続の名前・相手の道具の名前・危険度（仕様書 第12.11節）。 */
+  /** 会社の接続のツールなら、接続の名前・相手のツールの名前・危険度（仕様書 第12.11節）。 */
   connectionOf?(name: string): { service: string; tool: string; risk: string; labels?: Record<string, string> } | undefined;
 }
 
@@ -106,11 +106,11 @@ export function describeCall(call: DescribedCall, ctx: DescribeContext = {}): st
     case 'sheets.append':
       return `**表に行を足します**: ${Array.isArray(a['rows']) ? a['rows'].length : 0} 行`;
     default: {
-      // 会社の接続の道具は、相手の説明が英語で長く、引数の意味も分からない。サービスと道具の名前と、
+      // 会社の接続のツールは、相手の説明が英語で長く、引数の意味も分からない。サービスとツールの名前と、
       // **送り先を含むすべての引数**を出す（承認する人が、どこへ何が行くかを見て判断できるように。2026-09-27 に Slack で確認）
       const conn = ctx.connectionOf?.(call.name);
       if (conn) return describeConnectionCall(conn, a, call.shown);
-      // 知らない道具は、道具の説明と、ID でない文字の引数だけを出す
+      // 知らないツールは、ツールの説明と、ID でない文字の引数だけを出す
       const help = ctx.helpText?.(call.name) ?? 'この業務の操作を行います';
       const shown = Object.entries(a)
         .filter(([k, v]) => typeof v === 'string' && v.trim() && !/id$/i.test(k))
@@ -120,7 +120,7 @@ export function describeCall(call: DescribedCall, ctx: DescribeContext = {}): st
   }
 }
 
-/** 会社の接続の道具の危険度ごとの言い方。 */
+/** 会社の接続のツールの危険度ごとの言い方。 */
 const CONNECTION_VERBS: Record<string, string> = {
   read: 'から読みます',
   draft: 'に下書きを作ります',
@@ -130,7 +130,7 @@ const CONNECTION_VERBS: Record<string, string> = {
 };
 
 /**
- * 会社の接続の道具の呼び出しを、承認の画面に出す言葉にする。
+ * 会社の接続のツールの呼び出しを、承認の画面に出す言葉にする。
  *
  * @param shown 承認の前に確かめた名前（`{"channel_id":"#研究開発"}` の形。型の `resolvers`）
  * @remarks
@@ -155,7 +155,7 @@ function describeConnectionCall(
 }
 
 /**
- * 承認の前の組み立てで**済ませたこと**（下書きの道具の結果）を、承認の画面に出す言葉にする（ADR-0025）。
+ * 承認の前の組み立てで**済ませたこと**（下書きのツールの結果）を、承認の画面に出す言葉にする（ADR-0025）。
  *
  * @returns 出す言葉。承認する人に知らせる必要の無いもの（M2Office の中の成果物など）は `null`
  */

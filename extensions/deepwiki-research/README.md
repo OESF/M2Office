@@ -8,7 +8,7 @@ GitHub で公開されているリポジトリについて質問すると、[Dee
 | 構成要素 | ファイル | 内容 |
 |---|---|---|
 | コネクタ | `connectors/deepwiki.json` | DeepWiki の MCP サーバ（`https://mcp.deepwiki.com/mcp`、認証なし）。使うツールは 2 つ |
-| 業務 | `SKILL.md` | DeepWiki に質問し、答えを資料にまとめる（`document.create`）。`allowed-tools` にコネクタの道具を書く |
+| 業務 | `SKILL.md` | DeepWiki に質問し、答えを資料にまとめる（`document.create`）。`allowed-tools` にコネクタのツールを書く |
 | 利用者向けの説明 | `HELP.md` | 業務の「？」とヘルプセンターに出る |
 | 評価のケース | `evals/research.json` | 評価のケース（入力と期待する結果）。中の `stub` は M2Office の自動テスト用で、拡張機能を作るときは書かない |
 

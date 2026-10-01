@@ -17,9 +17,9 @@ import type { AppEnv } from '../middleware/tenant.js';
 import { isOperational } from '../middleware/tenant.js';
 
 /**
- * その接続で求める権限（第12.11.6.2節「会社で使う道具が要るものだけ」）。
+ * その接続で求める権限（第12.11.6.2節「会社で使うツールが要るものだけ」）。
  *
- * @param disabled 管理者が止めた道具（`<接続の ID>.<道具>`）
+ * @param disabled 管理者が止めたツール（`<接続の ID>.<ツール>`）
  */
 export function requestedScopes(conn: TenantConnection, disabled: ReadonlySet<string>): string[] {
   const preset = presetById(conn.auth.preset);
@@ -186,7 +186,7 @@ export function myConnectionsRoute(deps: AppDeps, returnTo: (c: Context<AppEnv>)
         // 会社が登録したアプリがあるか、相手がアプリの自動登録に対応していれば接続できる（第12.11.6.2節、Q-99）
         available: !!secret?.clientId || !!conn.auth.registrationUrl,
         connected: !!uc, account: uc?.accountLabel ?? '', connectedAt: uc?.connectedAt ?? null,
-        // 会社が道具を足して権限が増えたら、接続し直しを促す（第6.5.9節）。相手が権限を返さなければ判断しない
+        // 会社がツールを足して権限が増えたら、接続し直しを促す（第6.5.9節）。相手が権限を返さなければ判断しない
         needsReconnect: !!uc && uc.scopes.length > 0 && want.some((s) => !uc.scopes.includes(s)),
         usedBy: agents.filter((a) => a.tools.some((n) => n.startsWith(`${conn.id}.`))).map((a) => ({ id: a.id, name: a.name })),
       });
@@ -236,7 +236,7 @@ export function myConnectionsRoute(deps: AppDeps, returnTo: (c: Context<AppEnv>)
   return app;
 }
 
-/** その人の、その接続の道具を使う、止められる業務。 */
+/** その人の、その接続のツールを使う、止められる業務。 */
 async function liveRunsUsing(deps: AppDeps, tenantId: string, userId: string, connectionId: string) {
   const view = await deps.tenantView(tenantId);
   const live = await deps.repo.listLiveRuns(tenantId, new Date().toISOString());

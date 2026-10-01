@@ -22,7 +22,7 @@ import { AppVersionBadge, GoogleLauncher } from './launcher.js';
 import { startVoice, type VoiceCall } from './voice.js';
 import { keyLabel, useHotkey, useNumberHotkeys } from './keys.js';
 import { timeGreeting } from './greeting.js';
-import { AgentForm, ApprovalTray, RunView, statusLabel, SuspendedBanner } from './components.js';
+import { AgentForm, ApprovalTray, Elapsed, RunView, statusLabel, SuspendedBanner } from './components.js';
 import { Sources } from './sources.js';
 import { Schedules } from './Schedules.js';
 import { Cards } from './Cards.js';
@@ -1162,6 +1162,8 @@ function SecretaryBar({ lookups, avatar, captions, onResult, onVoice }: {
           <span key={x.runId} className="lookup" title={x.request}>
             <span className="spin" aria-hidden="true" />
             {x.progress ?? 'お調べしています'}
+            {/* 経過した時間（第10.11.6節）。承認待ちには時刻が無い */}
+            {x.since && <Elapsed since={x.since} />}
           </span>
         ))}
         {hint && <span className="layer">{hint}</span>}

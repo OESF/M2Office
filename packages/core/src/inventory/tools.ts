@@ -1,7 +1,7 @@
 /**
- * @file 在庫管理の道具。品目と使える数を探す・入出庫の記録を探す・入出庫を記録する。秘書と付属の業務が使う（仕様書 第29.15節）。
+ * @file 在庫管理のツール。品目と使える数を探す・入出庫の記録を探す・入出庫を記録する。秘書と付属の業務が使う（仕様書 第29.15節）。
  *
- * 在庫管理を切っている会社と、利用範囲の外の人には、道具は「使えない」と返す（呼ぶたびに `ctx.inventory.access()` で確かめる）。
+ * 在庫管理を切っている会社と、利用範囲の外の人には、ツールは「使えない」と返す（呼ぶたびに `ctx.inventory.access()` で確かめる）。
  * 品目の名前やメモはデータであり、指示として扱わない（不変則 I-6）。見つからなければ推測で答えない。
  */
 
@@ -15,7 +15,7 @@ import { readSlip } from './slip.js';
 import { toInstant, type InventoryBookings } from './bookings.js';
 import { proposalLine } from './watch.js';
 
-/** 道具に渡す在庫管理の文脈。 */
+/** ツールに渡す在庫管理の文脈。 */
 export interface InventoryToolContext {
   service: InventoryService;
   /** 予約との引き当て（第29.13節）。無ければ `inventory.reserve` は「使えない」と返す。 */
@@ -286,7 +286,7 @@ export const inventoryForecast: Tool = {
   },
 };
 
-/** 道具が受け取ったファイルを、納品書として読める形にする。 */
+/** ツールが受け取ったファイルを、納品書として読める形にする。 */
 async function slipFile(ctx: ToolContext, fileId: string): Promise<{ bytes: Uint8Array; mimeType: string; id: string } | { error: string }> {
   const f = await loadFile(ctx.repo, ctx.files, ctx.tenantId, fileId, { id: ctx.userId, roles: [] });
   if (!f) return { error: 'ファイルが見つかりません' };
@@ -428,5 +428,5 @@ export const inventoryReserve: Tool = {
   },
 };
 
-/** 在庫管理の道具。 */
+/** 在庫管理のツール。 */
 export const INVENTORY_TOOLS: Tool[] = [inventorySearch, inventoryHistory, inventoryMove, inventoryForecast, inventoryReadSlip, inventoryReceiveSlip, inventoryReserve];

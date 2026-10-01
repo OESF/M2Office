@@ -29,7 +29,7 @@ export interface AgentHelpView {
   faq: { q: string; a: string }[];
   /**
    * 書き手が書いた利用者向けの説明（スキルの `HELP.md`。仕様書 第12.12.4節）。
-   * あれば説明の本文にする。スキルの業務では `does`（道具の説明）と `flow`（組み立てた段）を空にする
+   * あれば説明の本文にする。スキルの業務では `does`（ツールの説明）と `flow`（組み立てた段）を空にする
    */
   body?: string;
 }
@@ -70,7 +70,7 @@ export function buildAgentHelp(
     name: def.name,
     summary: def.help?.summary ?? def.description,
     inputs: Object.entries(props).map(([key, p]) => ({ key, title: p.title ?? key, required: required.has(key) })),
-    // スキルの業務では、組み立てた段の名前と道具の説明を出さない（仕組みを見せるだけ。第12.12.4節）
+    // スキルの業務では、組み立てた段の名前とツールの説明を出さない（仕組みを見せるだけ。第12.12.4節）
     flow: def.skill ? [] : def.steps.map((s) => stepLabel(s)),
     approvals,
     does: def.skill ? [] : [...new Set(tools.map((t) => t.helpText))],

@@ -51,7 +51,7 @@ test('実際の対話と同じ名乗りの指示と声で開き、挨拶の声�
   const r = await speakSample(provider, PERSONA, voiceNameOf('Kore'));
   assert.equal(seen.options?.speak, true);
   assert.equal(seen.options?.voice, 'Kore');
-  assert.equal(seen.options?.tools, undefined, '道具は渡さない');
+  assert.equal(seen.options?.tools, undefined, 'ツールは渡さない');
   for (const line of personaLines(PERSONA)) assert.ok(seen.options?.instructions.includes(line), '名乗りの指示は実際の対話と同じ');
   assert.ok(seen.options?.instructions.includes('話し方の指定: 関西弁で話して'));
   assert.equal(seen.notes.length, 1);

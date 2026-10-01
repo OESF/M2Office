@@ -24,7 +24,7 @@ const ACTION_LABELS: Record<string, string> = {
   'run.awaiting_approval': '業務が承認待ちになった',
   'run.await_confirmation': '業務が操作の確認待ちになった',
   'run.finished': '業務が終わった',
-  'tool.invoke': '業務が道具を使った',
+  'tool.invoke': '業務がツールを使った',
   'tool.blocked': '承認の前の送信を止めた',
   'secretary.chat': '秘書と話した',
   'secretary.direct': '秘書が定型の照会に答えた',
@@ -55,9 +55,9 @@ const ACTION_LABELS: Record<string, string> = {
   'connection.gemini.delete_key': 'Gemini の鍵を消した',
   'connection.mcp.create': 'コネクタを登録した',
   'connection.mcp.update': 'コネクタの危険度などを変えた',
-  'connection.mcp.refresh': 'コネクタの道具を取り直した',
+  'connection.mcp.refresh': 'コネクタのツールを取り直した',
   'connection.mcp.delete': 'コネクタを消した',
-  'connection.mcp.tool.toggle': 'コネクタの道具を入り切りした',
+  'connection.mcp.tool.toggle': 'コネクタのツールを入り切りした',
   'connection.secret.update': '接続の鍵・シークレットを登録した',
   'connection.oauth.connect': 'サービスと接続した',
   'connection.oauth.disconnect': 'サービスとの接続を取り消した',
@@ -75,7 +75,7 @@ const ACTION_LABELS: Record<string, string> = {
   'extension.uninstall': '拡張機能を削除した',
   'extension.enable': '拡張機能を有効にした',
   'extension.disable': '拡張機能を無効にした',
-  'extension.tool.toggle': '道具を入り切りした',
+  'extension.tool.toggle': 'ツールを入り切りした',
   'user.invite': '利用者を招待した',
   'user.update': '利用者の役割・状態を変えた',
   'group.create': 'グループを作った',
@@ -350,10 +350,10 @@ function targetOf(e: AuditEvent, names: AuditNames): string {
     // 従業員の名前は監査ログの画面に出さない（人事区画の外の管理者も見るため）。台帳の ID の頭だけ
     case 'hr_employee': return `従業員 ${id.slice(0, 8)}`;
     case 'tool': {
-      // 会社の接続の道具（`slack.slack_send_message`）は接続の名前を添える
+      // 会社の接続のツール（`slack.slack_send_message`）は接続の名前を添える
       const [head, ...rest] = id.split('.');
       const conn = head ? names.connection(head) : undefined;
-      return conn && rest.length > 0 ? `${conn} の道具 ${rest.join('.')}` : `道具 ${id}`;
+      return conn && rest.length > 0 ? `${conn} のツール ${rest.join('.')}` : `ツール ${id}`;
     }
     case 'job': {
       // 依頼の記録は、根拠に業務の ID を持つ

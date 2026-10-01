@@ -133,7 +133,7 @@ test('内蔵のツールと重なるコネクタの ID は拒否する', () => {
 });
 
 test('組み立てた後の形でも、コネクタのツールの危険度は最大の危険度を超えられない', () => {
-  // SKILL.md では最大の危険度を道具から決めるため、組み立てた後の形を直接書き換えて確かめる
+  // SKILL.md では最大の危険度をツールから決めるため、組み立てた後の形を直接書き換えて確かめる
   const built = buildSkillPackage(readExtensionDir(DEEPWIKI), registry).files;
   const c = JSON.parse(new TextDecoder().decode(built.get('connectors/deepwiki.json')));
   c.tools[0].risk = 'external-send';
@@ -277,7 +277,7 @@ test('MCP サーバのツールの一覧と呼び出し（SSE の応答）を読
   }
 });
 
-test('MCP の道具の呼び出しは、一覧より長く待つ（答えまでに時間のかかる道具。第12.11.3節）', async () => {
+test('MCP のツールの呼び出しは、一覧より長く待つ（答えまでに時間のかかるツール。第12.11.3節）', async () => {
   const srv = await mcpServer(async (method) => {
     if (method === 'initialize') return { protocolVersion: '2025-06-18', capabilities: {} };
     if (method === 'tools/list') { await new Promise((r) => setTimeout(r, 400)); return { tools: [] }; }

@@ -57,9 +57,9 @@ export interface ConnectorToolDeclaration {
   /** 推奨の危険度。導入の同意で管理者が認めたものを使う（仕様書 第12.11.2節）。 */
   risk: RiskLevel;
   /**
-   * 引数の定義。MCP サーバの道具の一覧（`inputSchema`）から取る。推論への説明と、呼ぶ前の確かめに使う（第9.4.4節）。
+   * 引数の定義。MCP サーバのツールの一覧（`inputSchema`）から取る。推論への説明と、呼ぶ前の確かめに使う（第9.4.4節）。
    *
-   * @remarks 無ければ推論は引数を知らずに呼ぶ。登録と「道具を取り直す」のときに入る
+   * @remarks 無ければ推論は引数を知らずに呼ぶ。登録と「ツールを取り直す」のときに入る
    */
   args?: ToolArgsSchema;
 }
@@ -113,7 +113,7 @@ export function checkConnector(c: ConnectorDeclaration, reserved: ReadonlySet<st
       p.push('auth.header は見出しの名前（英数字とハイフン）で書いてください');
     }
   }
-  // 認証の要る接続は、登録した直後は道具が分からない（認可のあとで問い合わせる。第12.11.6.2節）
+  // 認証の要る接続は、登録した直後はツールが分からない（認可のあとで問い合わせる。第12.11.6.2節）
   const needsAuth = c.auth?.type === 'oauth' || c.auth?.type === 'api_key';
   if (!Array.isArray(c.tools) || (c.tools.length === 0 && !needsAuth)) {
     p.push('tools に使うツールを 1 つ以上宣言してください');
@@ -151,32 +151,32 @@ function isAllowedUrl(url: unknown): boolean {
  * 内蔵のツールと同じくエンジンが扱う（仕様書 第12.11.3節）。
  * 応答は外部のデータとして返し、失敗は「取得できませんでした」として返す。推測で埋めない。
  */
-/** 会社の接続の道具の名前の形（`<接続の ID>.<道具>`）。 */
+/** 会社の接続のツールの名前の形（`<接続の ID>.<ツール>`）。 */
 const CONNECTION_TOOL = /^[a-z0-9][a-z0-9-]*\.[A-Za-z0-9_-]+$/;
 
 /**
- * 会社の接続の道具を指す名前か（仕様書 第12.11.0節）。内蔵の道具の頭の部分（`gmail` など）で始まるものは違う。
+ * 会社の接続のツールを指す名前か（仕様書 第12.11.0節）。内蔵のツールの頭の部分（`gmail` など）で始まるものは違う。
  *
- * @param builtinPrefixes 内蔵の道具の名前の頭の部分
+ * @param builtinPrefixes 内蔵のツールの名前の頭の部分
  */
 export function isConnectionToolName(name: string, builtinPrefixes: ReadonlySet<string>): boolean {
   return CONNECTION_TOOL.test(name) && !builtinPrefixes.has(name.split('.')[0]!);
 }
 
 /**
- * 同梱していない会社の接続の道具を、業務を組み立てるときだけの仮の道具にする（仕様書 第12.11.2節、ADR-0037）。
+ * 同梱していない会社の接続のツールを、業務を組み立てるときだけの仮のツールにする（仕様書 第12.11.2節、ADR-0037）。
  *
  * @remarks
  * 危険度は組み立てのときには分からない。業務の組み立て（`compileSkill`）が作業の段と送る段の両方に置き、
- * 実行のときは会社の接続（管理者が決めた危険度）の道具に置き換わる。会社に接続が無ければ、その業務は使えない
+ * 実行のときは会社の接続（管理者が決めた危険度）のツールに置き換わる。会社に接続が無ければ、その業務は使えない
  */
 export function connectionPlaceholder(name: string): Tool {
   const [id, tool] = [name.slice(0, name.indexOf('.')), name.slice(name.indexOf('.') + 1)];
   return {
     name, risk: 'read',
-    description: `会社の接続「${id}」の道具 ${tool}`,
+    description: `会社の接続「${id}」のツール ${tool}`,
     activityLabel: `${id}に問い合わせています`,
-    helpText: `会社の接続「${id}」の道具 ${tool} を使います（接続は管理者ページの「接続」で登録します）`,
+    helpText: `会社の接続「${id}」のツール ${tool} を使います（接続は管理者ページの「接続」で登録します）`,
     async invoke() {
       return { error: `取得できませんでした: 会社の接続「${id}」が登録されていません` };
     },
@@ -214,7 +214,7 @@ export function connectorTools(c: ConnectorDeclaration, client?: McpClient, auth
     description: `${t.description}（${c.name}）`,
     activityLabel: `${c.name}に問い合わせています`,
     // 相手の説明は英語で長いことがある（Slack）。推論には `description` で渡し、人に見せる文は短くする
-    helpText: `外部のサービス「${c.name}」の道具「${t.name}」を使います`,
+    helpText: `外部のサービス「${c.name}」のツール「${t.name}」を使います`,
     connection: { id: c.id, name: c.name, tool: t.name, ...(preset?.argLabels ? { labels: preset.argLabels } : {}) },
     ...(t.args ? { args: t.args } : {}),
     // 型が ID を名前に直す問い合わせを持てば、承認の前に送り先の名前を確かめる（読むだけ。第12.11.3節）

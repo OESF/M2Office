@@ -47,7 +47,7 @@ function repoOf(rows: Row[], events: Partial<AgentEvent>[], settings: UserSettin
     getJob: async (_t: string, id: string) => rows.find((r) => r.job['id'] === id)?.job ?? null,
     listRunsWithJobs: async () => rows.map(({ run, job }) => ({ run, job })),
     listRunSteps: async (_t: string, runId: string) => [
-      { stepId: 'search', output: { text: '（道具の結果）' } },
+      { stepId: 'search', output: { text: '（ツールの結果）' } },
       { stepId: 'answer', output: { text: rows.find((r) => r.run['id'] === runId)?.answer ?? '' } },
     ],
     getUserSettings: async () => settings,

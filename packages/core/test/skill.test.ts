@@ -62,8 +62,8 @@ test('スキルの項目が同じ意味で効く: 名前・説明・いつ使う
   assert.equal(def.help?.summary, '経費の申請を社内の規程と照らし合わせる');
   assert.deepEqual((def.inputs as { properties: Record<string, { examples?: string[] }> }).properties['request']!.examples, ['申請の内容を貼り付けてください']);
   assert.equal(def.tier, 'fast', 'effort: low は高速のモデル');
-  assert.deepEqual(def.tools, ['knowledge.search', 'skill.read'], 'M2Office の道具と、補助のファイルを読む道具');
-  assert.match(notices!.join('\n'), /Read・Bash は M2Office の道具ではない/);
+  assert.deepEqual(def.tools, ['knowledge.search', 'skill.read'], 'M2Office のツールと、補助のファイルを読むツール');
+  assert.match(notices!.join('\n'), /Read・Bash は M2Office のツールではない/);
   assert.equal(pkg!.manifest.version, '1.2.0');
   assert.equal(pkg!.manifest.publisher.name, '株式会社サンプル');
 });
@@ -94,12 +94,12 @@ test('disable-model-invocation は秘書が取り次がない。user-invocable: 
   assert.equal(background.secretaryRoute, undefined);
 });
 
-test('allowed-tools: 書かなければ読むだけの道具、空なら道具なし', () => {
+test('allowed-tools: 書かなければ読むだけのツール、空ならツールなし', () => {
   assert.deepEqual(load({ 'SKILL.md': '---\nname: a\ndescription: b\n---\n本文' }).pkg!.agents[0]!.tools, ['knowledge.search', 'file.read_text']);
   assert.deepEqual(load({ 'SKILL.md': '---\nname: a\ndescription: b\nallowed-tools: ""\n---\n本文' }).pkg!.agents[0]!.tools, []);
 });
 
-test('送る道具を書くと「作業 → 承認 → 送る」を組み立てる（書き手は承認を書かない）', () => {
+test('送るツールを書くと「作業 → 承認 → 送る」を組み立てる（書き手は承認を書かない）', () => {
   const { pkg, problems } = load({ 'SKILL.md': '---\nname: reply\ndescription: 返信する\nallowed-tools: gmail.get gmail.send\n---\n返信する' });
   assert.deepEqual(problems, []);
   const def = pkg!.agents[0]!;
@@ -108,7 +108,7 @@ test('送る道具を書くと「作業 → 承認 → 送る」を組み立て�
   assert.equal(pkg!.manifest.permissions.max_risk_level, 'external-send');
 });
 
-test('HELP.md を業務の説明の本文にし、道具の説明と組み立てた段は出さない', () => {
+test('HELP.md を業務の説明の本文にし、ツールの説明と組み立てた段は出さない', () => {
   const { pkg } = load({ 'SKILL.md': SKILL, 'HELP.md': '# 経費精算チェック\n\n申請を貼ると、規程に合わない点を指摘します。' });
   const def = pkg!.agents[0]!;
   assert.match(def.help?.body ?? '', /規程に合わない点/);

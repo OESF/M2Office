@@ -1,7 +1,7 @@
 /**
  * @file 社内のお知らせの処理（仕様書 第10.15節、ADR-0047）。出す・取り下げる・済んだ・本人宛てのものを並べる。
  *
- * 画面の API・秘書・朝のブリーフの道具（`notices.list`）が同じものを使う（第13.1節 A-2）。
+ * 画面の API・秘書・朝のブリーフのツール（`notices.list`）が同じものを使う（第13.1節 A-2）。
  */
 
 import { randomUUID } from 'node:crypto';
@@ -81,7 +81,7 @@ export class NoticeService {
   /**
    * 本人宛ての有効なお知らせ（済んだものを除く）。新しい順。
    *
-   * @param options.markShown 朝のブリーフに載せたとして記録するか（道具 `notices.list` だけが使う）
+   * @param options.markShown 朝のブリーフに載せたとして記録するか（ツール `notices.list` だけが使う）
    */
   async forUser(
     tenantId: string, userId: string, now: Date = new Date(), options: { markShown?: boolean } = {},

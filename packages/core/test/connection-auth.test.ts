@@ -1,10 +1,10 @@
 /**
  * @file 認証の要る会社の接続（`oauth`・`api_key`）の単体テスト。
  *
- * 道具を呼ぶときに依頼した本人の認可を付けること、接続していなければ「接続が要ります」で止めること、
+ * ツールを呼ぶときに依頼した本人の認可を付けること、接続していなければ「接続が要ります」で止めること、
  * 断られたら更新して 1 回だけ呼び直すこと、更新できなければ認可を消して本人に知らせること、
  * 会社の鍵を見出しに載せること、許可の流れ（相手の案内の発見・許可の画面の URL・認可の受け取り）、
- * Slack の型が道具から権限と危険度を決めること、アプリの自動登録（動的クライアント登録。Q-99）を確かめる。
+ * Slack の型がツールから権限と危険度を決めること、アプリの自動登録（動的クライアント登録。Q-99）を確かめる。
  *
  * @see 仕様書 第12.11.6節 認証の要る接続
  */
@@ -41,7 +41,7 @@ function fakeMcp(results: ({ ok: true; text: string } | { ok: false; error: stri
   return { client, calls };
 }
 
-test('認証の要る接続の道具は、依頼した本人の認可を付けて呼ぶ', async () => {
+test('認証の要る接続のツールは、依頼した本人の認可を付けて呼ぶ', async () => {
   const seen: string[] = [];
   const auth: ConnectionAuthProvider = {
     headersFor: async (_t, userId) => { seen.push(userId); return { ok: true, headers: { Authorization: `Bearer token-of-${userId}` } }; },
@@ -214,22 +214,22 @@ test('アプリの自動登録: 案内に口があれば見つけ、アプリの
   await assert.rejects(registerOAuthClient({ registrationUrl: 'https://auth.example/register', redirectUri: 'r', scopes: [], authMethods: [] }, refuse), /invalid_redirect_uri/);
 });
 
-test('Slack の型: 有効な道具から権限を決め、目印の無い書く道具は external-send にする', () => {
+test('Slack の型: 有効なツールから権限を決め、目印の無い書くツールは external-send にする', () => {
   const preset = presetById('slack')!;
   assert.ok(CONNECTION_PRESETS.includes(preset));
   assert.deepEqual(new Set(scopesForTools(preset, ['slack_search_public', 'slack_read_channel'])),
     new Set(['search:read.public', 'search:read.private', 'search:read.mpim', 'search:read.im', 'channels:history', 'groups:history', 'mpim:history', 'im:history']));
   assert.ok(scopesForTools(preset, ['slack_send_message']).includes('chat:write'));
-  assert.deepEqual(scopesForTools(preset, []), preset.defaultScopes, '道具が分からないときは最初の権限');
+  assert.deepEqual(scopesForTools(preset, []), preset.defaultScopes, 'ツールが分からないときは最初の権限');
   assert.equal(presetRisk(preset, 'slack_search_public'), 'read');
   assert.equal(presetRisk(preset, 'slack_read_channel'), 'read');
   assert.equal(presetRisk(preset, 'slack_send_message'), 'external-send');
   assert.equal(presetRisk(preset, 'slack_create_canvas'), 'external-send');
-  // 型の宣言そのものが接続の検証を通る（道具は認可のあとで問い合わせるため空でよい）
+  // 型の宣言そのものが接続の検証を通る（ツールは認可のあとで問い合わせるため空でよい）
   assert.deepEqual(checkConnector({ id: 'slack', name: 'Slack', transport: 'http', url: preset.url, auth: preset.auth, tools: [] }, new Set()), []);
 });
 
-test('MCP の道具の引数の定義（inputSchema）を推論に渡す形に直し、道具に付ける（引数なしで呼ばないため）', () => {
+test('MCP のツールの引数の定義（inputSchema）を推論に渡す形に直し、ツールに付ける（引数なしで呼ばないため）', () => {
   const args = argsFromInputSchema({
     type: 'object',
     properties: {
@@ -256,9 +256,9 @@ test('MCP の道具の引数の定義（inputSchema）を推論に渡す形に�
   assert.deepEqual(tool!.args, args);
 });
 
-test('承認の画面: 会社の接続の道具は、サービスと道具の名前と、送り先を含むすべての引数を出す（相手の長い説明は出さない）', () => {
+test('承認の画面: 会社の接続のツールは、サービスとツールの名前と、送り先を含むすべての引数を出す（相手の長い説明は出さない）', () => {
   const [tool] = connectorTools({ ...slack, auth: { type: 'none' }, tools: [{ name: 'slack_send_message', description: 'Sends a message to a Slack channel or user. '.repeat(20), risk: 'external-send' }] });
-  assert.equal(tool!.helpText, '外部のサービス「Slack」の道具「slack_send_message」を使います');
+  assert.equal(tool!.helpText, '外部のサービス「Slack」のツール「slack_send_message」を使います');
   assert.deepEqual(tool!.connection, { id: 'slack', name: 'Slack', tool: 'slack_send_message' });
   const text = describeCall(
     { name: 'slack.slack_send_message', args: { channel_id: 'C0C4WEH1TNY', message: 'M2Office からの投稿テストです' } },

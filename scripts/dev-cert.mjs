@@ -23,7 +23,7 @@ const cert = `${dir}/dev-cert.pem`;
 /** 証明書に載せる名前。ワイルドカードは 1 段しか効かないため、素のドメインも入れる。 */
 const NAMES = ['localhost', '127.0.0.1', 'lvh.me', '*.lvh.me'];
 
-/** その道具が使えるか。 */
+/** そのツールが使えるか。 */
 function has(cmd) {
   try {
     execFileSync('which', [cmd], { stdio: 'ignore' });

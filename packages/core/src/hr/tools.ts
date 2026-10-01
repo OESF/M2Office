@@ -1,5 +1,5 @@
 /**
- * @file 人事・給与の道具（仕様書 第30.19.1節・第30.20節）。朝のブリーフが労務の期限を読む。
+ * @file 人事・給与のツール（仕様書 第30.19.1節・第30.20節）。朝のブリーフが労務の期限を読む。
  *
  * 人事区画の人にだけ答える。区画の外の人・人事・給与を切っている会社には「使えない」と返す（H-3）。
  */
@@ -7,7 +7,7 @@
 import type { HrDeadline } from '@m2office/shared';
 import type { Tool } from '../tools/registry.js';
 
-/** 道具が人事・給与を使うための口。 */
+/** ツールが人事・給与を使うための口。 */
 export interface HrToolContext {
   /**
    * 依頼者が人事区画に入っていれば、今日から `days` 日の労務の期限を返す。
@@ -44,5 +44,5 @@ export const hrDeadlines: Tool = {
   },
 };
 
-/** 人事・給与の道具。 */
+/** 人事・給与のツール。 */
 export const HR_TOOLS: Tool[] = [hrDeadlines];

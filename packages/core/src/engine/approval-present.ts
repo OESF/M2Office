@@ -19,7 +19,7 @@ const TEXT_MAX = 4000;
 /** 成果物の本文を、この字数で切る。 */
 const ARTIFACT_MAX = 6000;
 
-/** 道具の説明と成果物の題名を引けるようにする。 */
+/** ツールの説明と成果物の題名を引けるようにする。 */
 export function describeContext(registry: ToolRegistry, artifacts: Artifact[]): DescribeContext {
   return {
     helpText: (name) => registry.get(name)?.helpText,

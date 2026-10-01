@@ -39,7 +39,7 @@ export interface ConnectionCredentialsDeps {
 }
 
 /**
- * 会社の接続の認可を用意する（{@link ConnectionAuthProvider} の実装）。ワーカーと API（接続の確認・道具の取り直し）が使う。
+ * 会社の接続の認可を用意する（{@link ConnectionAuthProvider} の実装）。ワーカーと API（接続の確認・ツールの取り直し）が使う。
  */
 export class ConnectionCredentials implements ConnectionAuthProvider {
   constructor(private readonly deps: ConnectionCredentialsDeps) {}

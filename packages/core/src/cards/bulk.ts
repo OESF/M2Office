@@ -201,7 +201,7 @@ export interface BulkMailServiceDeps {
   logger?: Logger;
 }
 
-/** まとめてのメールの操作。画面（API）・道具（秘書と業務）・ワーカー（送信）が同じものを使う。 */
+/** まとめてのメールの操作。画面（API）・ツール（秘書と業務）・ワーカー（送信）が同じものを使う。 */
 export class BulkMailService {
   private readonly log: Logger;
 

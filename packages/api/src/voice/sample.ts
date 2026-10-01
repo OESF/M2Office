@@ -73,7 +73,7 @@ export async function speakSample(
     void provider.open({
       speak: true,
       voice,
-      // 実際の対話と同じ名乗りと応対のしかた。道具は渡さない（話すのは挨拶だけ）
+      // 実際の対話と同じ名乗りと応対のしかた。ツールは渡さない（話すのは挨拶だけ）
       instructions: [...personaLines(persona), voiceStyleLine(persona)].filter(Boolean).join(''),
       onEvent: (event) => {
         switch (event.type) {

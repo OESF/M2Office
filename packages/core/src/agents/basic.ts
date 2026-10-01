@@ -53,7 +53,7 @@ export const MEETING_PREP: AgentDefinition = {
       label: '集める',
       tools: ['knowledge.search', 'gmail.search', 'drive.search', 'drive.read'],
       instruction: [
-        '前の段で会議が見つからなかったときは、道具を呼ばずに「会議が見つかりませんでした」とだけ書いて終える。',
+        '前の段で会議が見つからなかったときは、ツールを呼ばずに「会議が見つかりませんでした」とだけ書いて終える。',
         '前の段で選んだ会議について、要るものを同時に集める。',
         '・knowledge.search で、同じ会議（題名の主な言葉）の前回の議事録を探す',
         '・gmail.search で、参加者とのここ 30 日のやり取りや、題名の言葉を含むメールを探す（例: from:相手のアドレス newer_than:30d）',

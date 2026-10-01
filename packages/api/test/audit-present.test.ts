@@ -30,7 +30,7 @@ test('誰が・何をしたか・何に対してを、人の名前と業務の�
   assert.deepEqual([approve.who, approve.what, approve.target, approve.category], ['三浦雅孝', '却下した', '業務「議事録作成・共有」の承認', '承認']);
   const tool = presentAudit(ev({ actorType: 'agent', actorId: 'minutes', action: 'tool.invoke', targetType: 'tool', targetId: 'slack.slack_send_message', detail: { runId: 'r1' } }), names);
   assert.equal(tool.who, '業務「議事録作成・共有」（山田花子さんの依頼）', '業務が行ったものは指示した人を添える');
-  assert.equal(tool.target, 'Slack の道具 slack_send_message');
+  assert.equal(tool.target, 'Slack のツール slack_send_message');
   assert.equal(presentAudit(ev({ actorType: 'secretary', action: 'secretary.lookup' }), names).who, '秘書（三浦雅孝さんの依頼）');
   assert.equal(presentAudit(ev({ actorType: 'system', actorId: 'scheduler', action: 'schedule.skip' }), names).who, 'システム（定時実行）');
   assert.equal(presentAudit(ev({ action: 'connection.oauth.connect', targetType: 'connection', targetId: 'slack' }), names).what, 'サービスと接続した');

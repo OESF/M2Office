@@ -49,7 +49,7 @@ export interface LawChange {
   detail: string;
 }
 
-/** 法令の表を引く道具。 */
+/** 法令の表を引くツール。 */
 export class Law {
   constructor(readonly book: LawBook) {}
 

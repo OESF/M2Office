@@ -5,10 +5,10 @@ M2Office の業務は、**ふだん書いているスキル（SKILL.md）のま�
 
 | # | M2Office で覚えること |
 |---|---|
-| 1 | **道具は `allowed-tools` に M2Office の道具を書く**（第4章）。書かなければ読むだけの道具。`Bash`・`Read` などは M2Office には無い |
+| 1 | **ツールは `allowed-tools` に M2Office のツールを書く**（第4章）。書かなければ読むだけのツール。`Bash`・`Read` などは M2Office には無い |
 | 2 | **利用者向けの説明は `HELP.md` に書く**（SKILL.md の隣）。業務の題名の「？」とヘルプセンターに出る |
 | 3 | **プログラムは動かない**（`scripts/`・`` !`コマンド` ``）。処理が要るならコネクタ（第7章） |
-| 4 | **承認は書かない**。送る道具を書けば、M2Office が承認を組み立てる |
+| 4 | **承認は書かない**。送るツールを書けば、M2Office が承認を組み立てる |
 
 完成したものは [extensions/hello-world](../../extensions/hello-world/) にあります。
 
@@ -53,7 +53,7 @@ metadata:
 | `description` | メニューの説明と、**秘書が業務へ取り次ぐ手がかり**（スキルの自動の呼び出しと同じ） |
 | `argument-hint` | 入力の欄に薄く出る例 |
 | `arguments` と `$あいさつ` | 入力の欄が「あいさつ」になり、実行のときに本文の `$あいさつ` が置き換わる |
-| `allowed-tools: ""` | 道具を使わない（M2Office の道具の名前を書けば、その道具だけが使える） |
+| `allowed-tools: ""` | ツールを使わない（M2Office のツールの名前を書けば、そのツールだけが使える） |
 | `# あいさつ（サンプル）` | 本文の最初の見出しが、メニューに出る業務の名前 |
 | `metadata.m2office-id` | 他の会社に配るときの ID。自社だけで使うなら要らない |
 
@@ -99,7 +99,7 @@ npm run ext:validate extensions/hello-world
 
 （`extensions/hello-world` の完成品には `metadata.version` と評価のケースを 2 件足してあります。上の手順のとおりに作ると、版は `1.0.0`、ケースは 1 件と出ます。）
 
-スキルの項目のうち M2Office で使わないもの（`model`・`context`・`hooks` など）や、M2Office に無い道具は、ここと取り込みの画面で知らせます。
+スキルの項目のうち M2Office で使わないもの（`model`・`context`・`hooks` など）や、M2Office に無いツールは、ここと取り込みの画面で知らせます。
 
 ## 2.6 取り込んで動かす
 
@@ -112,5 +112,5 @@ npm run ext:validate extensions/hello-world
 ## 2.7 次に読むもの
 
 - スキルの項目と M2Office での扱いの一覧 → [第3章](03-agent-definition.md)
-- 使える道具 → [第4章](04-tools.md)
+- 使えるツール → [第4章](04-tools.md)
 - 外部のシステムとつなぐ → [第7章](07-connectors.md)

@@ -25,13 +25,13 @@ interface LiveMessage {
     turnComplete?: boolean;
     interrupted?: boolean;
   };
-  /** 道具の呼び出し（仕様書 第10.5.7節）。 */
+  /** ツールの呼び出し（仕様書 第10.5.7節）。 */
   toolCall?: { functionCalls?: { id?: string; name?: string; args?: Record<string, unknown> }[] };
   /** 音声の相手が取りやめた呼び出し（本人が話をさえぎったときなど）。 */
   toolCallCancellation?: { ids?: string[] };
 }
 
-/** 道具を Gemini の関数の宣言にする。型の名前は大文字で書く（Gemini の決まり）。 */
+/** ツールを Gemini の関数の宣言にする。型の名前は大文字で書く（Gemini の決まり）。 */
 function declarations(tools: VoiceTool[]) {
   return [{
     functionDeclarations: tools.map((t) => ({
@@ -159,7 +159,7 @@ export class GeminiLiveProvider implements VoiceProvider {
     });
 
     /**
-     * 道具の呼び出しに答える（仕様書 第10.5.7節）。知らない道具と、道具の失敗は、断りの文で返す。
+     * ツールの呼び出しに答える（仕様書 第10.5.7節）。知らないツールと、ツールの失敗は、断りの文で返す。
      *
      * @remarks 返すまで音声の相手は待つ。結果は話し終わりを待たずに返してよい（相手が求めているため）
      */
@@ -169,7 +169,7 @@ export class GeminiLiveProvider implements VoiceProvider {
         const tool = session.tools?.find((t) => t.name === call.name);
         let response: Record<string, unknown>;
         if (!tool) {
-          response = { error: 'その道具はありません' };
+          response = { error: 'そのツールはありません' };
         } else {
           try {
             const args = Object.fromEntries(Object.entries(call.args ?? {}).map(([k, v]) => [k, typeof v === 'string' ? v : String(v ?? '')]));

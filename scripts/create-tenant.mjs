@@ -2,7 +2,7 @@
  * @file 会社（テナント）と最初の管理者を作る（仕様書 第16.1.3節）。
  *
  * セルフサインアップ（Phase 3）とマスター管理画面（第23章）ができるまでの、
- * 運営の手元の道具である。画面からは行えない。
+ * 運営の手元のツールである。画面からは行えない。
  *
  * 使い方:
  *   npm run tenant:create -- --subdomain oesf --name "会社名" --domain oesf.jp --admin miura@oesf.jp

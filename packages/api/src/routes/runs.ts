@@ -59,7 +59,9 @@ export function runsRoute(deps: AppDeps) {
       const who = a.decidedBy ? (await deps.repo.findUserById(ctx.tenant.id, a.decidedBy))?.displayName ?? null : null;
       decisions.push({ runStepId: a.runStepId, decision: a.decision, decidedBy: who, decidedAt: a.decidedAt, comment: a.comment });
     }
-    return c.json({ run, job, steps: labelled, artifacts, decisions });
+    // 段の並び（動いている間の進み具合に使う。第6.2.2.2節）。定義が見つからなければ空
+    const plan = (def?.steps ?? []).map((st) => ({ stepId: st.id, label: stepLabel(st), kind: st.type }));
+    return c.json({ run, job, steps: labelled, artifacts, decisions, plan });
   });
 
   /**

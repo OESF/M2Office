@@ -42,7 +42,7 @@ export const AG01_INBOX: AgentDefinition = {
     {
       id: 'fetch',
       type: 'agent',
-      // この段で使える道具（仕様書 第9.2.7節）。段の区切りを推論の行儀に頼らない
+      // この段で使えるツール（仕様書 第9.2.7節）。段の区切りを推論の行儀に頼らない
       tools: ['gmail.unread', 'gmail.get'],
       // 対象は受信トレイの「メイン」の未読（仕様書 第9.5.1節）。推論に既読・未読を選ばせない
       required: ['gmail.unread'],
@@ -58,7 +58,7 @@ export const AG01_INBOX: AgentDefinition = {
     {
       id: 'classify',
       type: 'agent',
-      // この段で使える道具（仕様書 第9.2.7節）。段の区切りを推論の行儀に頼らない
+      // この段で使えるツール（仕様書 第9.2.7節）。段の区切りを推論の行儀に頼らない
       tools: ['gmail.get', 'knowledge.search', 'document.create'],
       label: '分類',
       instruction: [
@@ -71,7 +71,7 @@ export const AG01_INBOX: AgentDefinition = {
     {
       id: 'draft',
       type: 'agent',
-      // この段で使える道具（仕様書 第9.2.7節）。段の区切りを推論の行儀に頼らない
+      // この段で使えるツール（仕様書 第9.2.7節）。段の区切りを推論の行儀に頼らない
       tools: ['gmail.get', 'knowledge.search', 'gmail.create_draft'],
       label: '下書き',
       instruction: [

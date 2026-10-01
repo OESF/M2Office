@@ -37,9 +37,9 @@ export interface ExtensionManifest {
     /** 扱う最大の危険度。定義のツールもコネクタのツールもこれを超えられない。 */
     max_risk_level: RiskLevel;
     /**
-     * 同梱していない会社の接続の道具（`<接続の ID>.<道具>`。仕様書 第12.11.0節）。`tools` にも入る。
+     * 同梱していない会社の接続のツール（`<接続の ID>.<ツール>`。仕様書 第12.11.0節）。`tools` にも入る。
      *
-     * @remarks 危険度は会社の接続で決まる。その会社に接続が無ければ、その道具を使う業務は使えない
+     * @remarks 危険度は会社の接続で決まる。その会社に接続が無ければ、そのツールを使う業務は使えない
      */
     connections?: string[];
   };
@@ -205,7 +205,7 @@ export const JSON_FORMAT_RETIRED = 'JSON の定義（manifest.json と agents/*.
  *
  * @remarks
  * **利用者の拡張機能の取り込みには使わない**（JSON の定義は廃止した。{@link loadExtensionFiles} を使う）。
- * SKILL.md から組み立てた定義の検証の規則（道具の許可・危険度・承認ゲートなど）を、単体テストで直接確かめるために書き出す
+ * SKILL.md から組み立てた定義の検証の規則（ツールの許可・危険度・承認ゲートなど）を、単体テストで直接確かめるために書き出す
  */
 export function loadCompiledExtension(
   files: ExtensionFiles, registry: ToolRegistry, options: LoadOptions = {},
@@ -260,7 +260,7 @@ function loadPackageFiles(
       }
     }
   }
-  // この拡張機能の中で使えるツール = 内蔵のツール + この拡張機能のコネクタのツール + 会社の接続の道具（仮）
+  // この拡張機能の中で使えるツール = 内蔵のツール + この拡張機能のコネクタのツール + 会社の接続のツール（仮）
   const local = registry.extend([
     ...connectors.flatMap((c) => connectorTools(c)),
     ...(manifest.permissions.connections ?? []).map((n) => connectionPlaceholder(n)),

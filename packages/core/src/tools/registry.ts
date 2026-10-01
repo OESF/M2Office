@@ -52,9 +52,9 @@ export interface ToolContext {
   /** 組織知識を探す前に、言い換えを秘書に考えさせる（仕様書 第11.7.7.0節）。無ければ言い換えなしで探す。 */
   expandQuery?: (query: string) => Promise<string[][]>;
   /**
-   * 名刺管理（内蔵の拡張。仕様書 第27章）。使えるかどうか（会社の入り切り・利用範囲）は、道具が呼ぶたびに確かめる。
+   * 名刺管理（内蔵の拡張。仕様書 第27章）。使えるかどうか（会社の入り切り・利用範囲）は、ツールが呼ぶたびに確かめる。
    *
-   * @remarks 無ければ名刺の道具は「使えない」と返す
+   * @remarks 無ければ名刺のツールは「使えない」と返す
    */
   cards?: CardToolContext;
   /**
@@ -62,15 +62,15 @@ export interface ToolContext {
    */
   notices?: NoticeService;
   /**
-   * 在庫管理（内蔵の拡張。仕様書 第29章）。使えるかどうか（会社の入り切り・利用範囲）は、道具が呼ぶたびに確かめる。
+   * 在庫管理（内蔵の拡張。仕様書 第29章）。使えるかどうか（会社の入り切り・利用範囲）は、ツールが呼ぶたびに確かめる。
    *
-   * @remarks 無ければ在庫の道具は「使えない」と返す
+   * @remarks 無ければ在庫のツールは「使えない」と返す
    */
   inventory?: InventoryToolContext;
   /**
-   * 人事・給与（内蔵の拡張。仕様書 第30章）。人事区画に入っているかは、道具が呼ぶたびに確かめる。
+   * 人事・給与（内蔵の拡張。仕様書 第30章）。人事区画に入っているかは、ツールが呼ぶたびに確かめる。
    *
-   * @remarks 無ければ人事・給与の道具は「使えない」と返す
+   * @remarks 無ければ人事・給与のツールは「使えない」と返す
    */
   hr?: HrToolContext;
 }
@@ -137,9 +137,9 @@ export interface Tool {
   /** 引数の定義。推論への説明・呼び出しの検証・開発者マニュアルの一覧に使う（仕様書 第9.4.4節）。 */
   args?: ToolArgsSchema;
   /**
-   * 会社の接続（MCP）の道具なら、その接続の名前と相手の道具の名前（仕様書 第12.11節）。
+   * 会社の接続（MCP）のツールなら、その接続の名前と相手のツールの名前（仕様書 第12.11節）。
    *
-   * @remarks 承認の画面で「Slack へ送ります（slack_send_message）」のように出すのに使う。内蔵の道具は持たない
+   * @remarks 承認の画面で「Slack へ送ります（slack_send_message）」のように出すのに使う。内蔵のツールは持たない
    */
   connection?: { id: string; name: string; tool: string; labels?: Record<string, string> };
   /** 必要な Google の権限。Google を使わないツールは持たない（仕様書 第14.3.2節）。 */
@@ -160,7 +160,7 @@ export interface Tool {
   /**
    * 承認の前の組み立てで、同じ鍵の操作が後から記録されたら、前のものを置き換える（推論が言い直した）。
    *
-   * @remarks 1 つの段で 1 度しか行わない操作に付ける（同じスペースへの投稿など）。持たない道具は、引数が違えば別の操作として記録する
+   * @remarks 1 つの段で 1 度しか行わない操作に付ける（同じスペースへの投稿など）。持たないツールは、引数が違えば別の操作として記録する
    */
   planKey?(args: Record<string, unknown>): string;
   invoke(args: Record<string, unknown>, ctx: ToolContext): Promise<unknown>;
@@ -177,8 +177,8 @@ export type PreparedCall =
   | {
     kind: 'ready'; args: Record<string, unknown>; shown?: string;
     /**
-     * 送り先が社内だけと確かめられたか（仕様書 第9.4.0節、ADR-0028）。`internal` なら、送る道具でも承認の段を自動で通してよい。
-     * 返さなければ、送る道具（`external-send`）は社外とみなす
+     * 送り先が社内だけと確かめられたか（仕様書 第9.4.0節、ADR-0028）。`internal` なら、送るツールでも承認の段を自動で通してよい。
+     * 返さなければ、送るツール（`external-send`）は社外とみなす
      */
     audience?: 'internal' | 'external';
   }

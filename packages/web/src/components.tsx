@@ -282,7 +282,7 @@ function DateField({ name, label, optional, value, onChange }: {
  * 実行の答え（仕様書 第6.2.2節）。
  *
  * @remarks
- * **最後に文を返した段**の応答を使う。途中の段の文には道具の呼び出しが混じるため、
+ * **最後に文を返した段**の応答を使う。途中の段の文にはツールの呼び出しが混じるため、
  * その囲みは落とす。落とした結果が空なら、答えは無いものとして扱う。
  */
 function answerOf(steps: RunStep[]): string {
@@ -314,12 +314,57 @@ export function sameText(a: string, b: string): boolean {
 const CANCELLABLE = ['queued', 'running', 'awaiting_approval'];
 
 /**
+ * 経過した時間（「（28 秒）」「（1 分 20 秒）」）。1 秒ごとに数え直す（仕様書 第6.2.2.2節・第10.11.6節）。
+ *
+ * @param since その動きを始めた時刻
+ * @remarks 残りの時間の見込みは出さない（第10.11.5節）
+ */
+export function Elapsed({ since }: { since: string }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const start = new Date(since).getTime();
+  if (!Number.isFinite(start)) return null;
+  const sec = Math.max(0, Math.floor((now - start) / 1000));
+  return <span className="elapsed">（{sec < 60 ? `${sec} 秒` : `${Math.floor(sec / 60)} 分 ${sec % 60} 秒`}）</span>;
+}
+
+/**
+ * 段の進み具合（済んだ段 ✓・いまの段 ●・これからの段 ○）。段が 2 つ以上の業務だけに出す（仕様書 第6.2.2.2節）。
+ *
+ * @remarks 動いている間だけ呼ばれる（終わったら消す）
+ */
+function StepProgress({ plan, steps }: { plan: { stepId: string; label: string }[]; steps: RunStep[] }) {
+  if (plan.length < 2) return null;
+  const stateOf = (stepId: string) => {
+    const rows = steps.filter((s) => s.stepId === stepId);
+    if (rows.some((s) => s.status === 'running' || s.status === 'awaiting')) return 'now';
+    if (rows.some((s) => s.status === 'succeeded')) return 'done';
+    return 'next';
+  };
+  return (
+    <ol className="step-progress" aria-label="進み具合">
+      {plan.map((p) => {
+        const st = stateOf(p.stepId);
+        return (
+          <li key={p.stepId} className={st} aria-current={st === 'now' ? 'step' : undefined}>
+            <span aria-hidden="true">{st === 'done' ? '✓' : st === 'now' ? '●' : '○'}</span> {p.label}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+/**
  * 実行の詳細（仕様書 第6.2.2節・第6.2.2.2節）。
  *
  * @remarks
  * **本人が読むものと、本人が決めることだけを出す。**
  * 動いている間は「動いていること」と「いま何をしているか」だけ。終わったら途中の表示を消し、
- * 結果と成果物だけを残す。実行 ID・トークン数・費用・段の一覧・道具の一覧は、
+ * 結果と成果物だけを残す。実行 ID・トークン数・費用・段の一覧・ツールの一覧は、
  * 利用者が変えられないため既定では出さない（閉じた「実行の記録」の中に置く）。
  *
  * @param viewerId 見ている人。依頼した本人にだけ「中止」を出す（第9.3.1節）
@@ -346,6 +391,10 @@ export function RunView({
     待ち行列に入ったばかりで段がまだ無いこともある。**推測で名前を作らない。**
   */
   const doing = steps.find((x) => x.status === 'running');
+  // ツールを呼んでいる間はツールの言葉と、その動きを始めた時刻（第6.2.2.2節）。無ければ段の表示名と段を始めた時刻
+  const doingInput = (doing?.input ?? {}) as { activity?: unknown; activityAt?: unknown };
+  const activity = typeof doingInput.activity === 'string' && doingInput.activity ? doingInput.activity : null;
+  const since = activity && typeof doingInput.activityAt === 'string' ? doingInput.activityAt : doing?.startedAt ?? null;
 
   async function cancel() {
     // 中止は、すでに起きたことを取り消さない。押す前に伝える（第9.3.1節）
@@ -379,8 +428,11 @@ export function RunView({
             {run.status !== 'awaiting_approval' && <span className="spin" aria-hidden="true" />}
             {run.status === 'awaiting_approval'
               ? '承認をお待ちしています'
-              : `${doing?.label ?? '準備しています'}…`}
+              : `${activity ?? doing?.label ?? '準備しています'}…`}
+            {/* 経過した時間（第6.2.2.2節）。承認待ちは人の番なので数えない */}
+            {run.status !== 'awaiting_approval' && since && <Elapsed since={String(since)} />}
           </p>
+          <StepProgress plan={detail.plan ?? []} steps={steps} />
           {canCancel && (
             <button className="btn ghost small" onClick={() => void cancel()} disabled={cancelling}>
               {cancelling ? '止めています…' : '中止'}
@@ -427,7 +479,7 @@ export function RunView({
       ))}
       {/*
         承認する人は、判断の前に中身を確かめる必要がある（原則 u2）。
-        **既定は閉じる。** 開いたときだけ段・道具・ID を出す（仕様書 第6.2.2.2節）
+        **既定は閉じる。** 開いたときだけ段・ツール・ID を出す（仕様書 第6.2.2.2節）
       */}
       {done && (
         <details className="record">
@@ -446,7 +498,7 @@ export function RunView({
               </li>
             ))}
           </ul>
-          <h4>使った道具</h4>
+          <h4>使ったツール</h4>
           <Evidence steps={steps} />
           <p className="muted small">実行 ID: {run.id}</p>
         </details>

@@ -16,11 +16,11 @@ export interface ConnectionPreset {
   /** MCP サーバの URL。 */
   url: string;
   auth: ConnectorAuth;
-  /** 道具の名前に含まれる語と、その道具が要る権限。上から順に当てはめ、当たったものをすべて足す。 */
+  /** ツールの名前に含まれる語と、そのツールが要る権限。上から順に当てはめ、当たったものをすべて足す。 */
   scopeRules: { match: RegExp; scopes: string[] }[];
-  /** 道具がまだ分からないとき（最初の接続）に求める権限。 */
+  /** ツールがまだ分からないとき（最初の接続）に求める権限。 */
   defaultScopes: string[];
-  /** 読むだけの道具とみなす名前（MCP の目印が無いときの危険度の初期値に使う）。 */
+  /** 読むだけのツールとみなす名前（MCP の目印が無いときの危険度の初期値に使う）。 */
   readOnly: RegExp;
   /** 相手の側で要ること（管理者に示す）。 */
   setup: string[];
@@ -44,7 +44,7 @@ export interface ConnectionPreset {
  *
  * @remarks
  * 会社がワークスペースに社内向けのアプリを作り、利用者ごとにユーザートークンを受け取る。
- * 投稿などの書く道具は、社外の人がいる Slack コネクトのチャンネルがありうるため `external-send` を既定にする（第9.4.0節）。
+ * 投稿などの書くツールは、社外の人がいる Slack コネクトのチャンネルがありうるため `external-send` を既定にする（第9.4.0節）。
  */
 const SLACK: ConnectionPreset = {
   id: 'slack',
@@ -111,9 +111,9 @@ export function presetById(id: string | undefined): ConnectionPreset | undefined
 }
 
 /**
- * 有効な道具が要る権限を、型の規則から求める（第12.11.6.2節「会社で使う道具が要るものだけ」）。
+ * 有効なツールが要る権限を、型の規則から求める（第12.11.6.2節「会社で使うツールが要るものだけ」）。
  *
- * @param toolNames 有効な道具の名前。空なら、型の最初に求める権限を返す
+ * @param toolNames 有効なツールの名前。空なら、型の最初に求める権限を返す
  */
 export function scopesForTools(preset: ConnectionPreset, toolNames: string[]): string[] {
   if (toolNames.length === 0) return [...preset.defaultScopes];
@@ -125,7 +125,7 @@ export function scopesForTools(preset: ConnectionPreset, toolNames: string[]): s
 }
 
 /**
- * MCP の目印が無い道具の危険度の初期値（第12.11.2節）。読むだけの名前なら `read`、ほかは `external-send`。
+ * MCP の目印が無いツールの危険度の初期値（第12.11.2節）。読むだけの名前なら `read`、ほかは `external-send`。
  */
 export function presetRisk(preset: ConnectionPreset, toolName: string): RiskLevel {
   return preset.readOnly.test(toolName) ? 'read' : 'external-send';

@@ -2,7 +2,7 @@
  * @file 朝のブリーフの人ごとの中身と、社内のお知らせの単体テスト（仕様書 第9.5.5.1.1節・第10.15節、ADR-0047）。
  *
  * お知らせの宛先・期間・初めて載せたか・済んだ・取り下げ（出した人と管理者だけ）・会社の境界、
- * 道具 `notices.list`・`brief.settings`、秘書が最初の分野を選ぶこと、会話で中身を直すこと、
+ * ツール `notices.list`・`brief.settings`、秘書が最初の分野を選ぶこと、会話で中身を直すこと、
  * 秘書がお知らせを出す・取り下げること、ブリーフが「完了」でなく「ブリーフ」の通知として中身ごと届くことを確かめる。
  */
 
@@ -122,7 +122,7 @@ function ctx(repo: ReturnType<typeof fakeRepo>, notices?: NoticeService, userId 
   };
 }
 
-test('道具 notices.list: 本人宛てを返し、初めて返したものを「載せた」と記録する。読むだけ', async () => {
+test('ツール notices.list: 本人宛てを返し、初めて返したものを「載せた」と記録する。読むだけ', async () => {
   const { repo, notices } = setup();
   await notices.create('t1', 'u-a', { title: '年末調整の書類', body: '総務へ', all: true, dueOn: '2026-12-05' }, NOW);
   const tool = registry.get('notices.list')!;
@@ -136,7 +136,7 @@ test('道具 notices.list: 本人宛てを返し、初めて返したものを�
   assert.match(String(none.note), /読めませんでした/, '読めないときは空として扱わせない');
 });
 
-test('道具 brief.settings: 分野と外した項目を返し、秘書が選んだことは一度だけ伝える', async () => {
+test('ツール brief.settings: 分野と外した項目を返し、秘書が選んだことは一度だけ伝える', async () => {
   const { repo } = setup();
   await repo.saveUserSettings('t1', 'u-b', 'brief', {
     topics: [{ label: '技術の動き', query: '生成AI 最新ニュース' }], omit: ['weather'], seededAt: NOW.toISOString(), seedNote: true,

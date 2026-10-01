@@ -91,7 +91,7 @@ export interface RunEngineDeps {
    */
   onCancelled?(run: Run): Promise<void>;
   /**
-   * 名刺管理（内蔵の拡張。仕様書 第27章）。道具に渡す。無ければ名刺の道具は「使えない」と返す。
+   * 名刺管理（内蔵の拡張。仕様書 第27章）。ツールに渡す。無ければ名刺のツールは「使えない」と返す。
    *
    * @remarks `access` は、会社が名刺管理を使っていて依頼者が利用範囲の中なら、取り込んだ名刺の既定の範囲を返す
    */
@@ -102,21 +102,21 @@ export interface RunEngineDeps {
     /** まとめてのメール（第27.9.1節）。 */
     bulk?: BulkMailService;
   };
-  /** 社内のお知らせ（仕様書 第10.15節）。道具 `notices.list` に渡す。無ければ「読めなかった」と返す。 */
+  /** 社内のお知らせ（仕様書 第10.15節）。ツール `notices.list` に渡す。無ければ「読めなかった」と返す。 */
   notices?: NoticeService;
   /**
-   * 在庫管理（内蔵の拡張。仕様書 第29章）。道具に渡す。無ければ在庫の道具は「使えない」と返す。
+   * 在庫管理（内蔵の拡張。仕様書 第29章）。ツールに渡す。無ければ在庫のツールは「使えない」と返す。
    *
    * @remarks `access` は、会社が在庫管理を使っていて依頼者が利用範囲の中なら、会社の在庫管理の設定を返す
    */
   inventory?: {
     service: InventoryService;
-    /** 予約との引き当て（第29.13節）。道具 `inventory.reserve` に渡す。 */
+    /** 予約との引き当て（第29.13節）。ツール `inventory.reserve` に渡す。 */
     bookings?: InventoryBookings;
     access(tenantId: string, userId: string): Promise<InventorySettings | null>;
   };
   /**
-   * 人事・給与の労務カレンダー（仕様書 第30.19.1節）。道具 `hr.deadlines` に渡す。
+   * 人事・給与の労務カレンダー（仕様書 第30.19.1節）。ツール `hr.deadlines` に渡す。
    *
    * @remarks `access` は、会社が人事・給与を使っていて依頼者が人事区画に入っていれば真を返す
    */
@@ -522,7 +522,7 @@ export class RunEngine {
     ai: { llm: LlmProvider; research?: ResearchProvider },
     /**
      * `plan` は、承認の直後の段を承認の前に組み立てる（仕様書 第9.3.3節、ADR-0023）。
-     * 読む道具と下書きの道具だけを実行し、社内への書き込み以上は記録だけして実行しない。
+     * 読むツールと下書きのツールだけを実行し、社内への書き込み以上は記録だけして実行しない。
      */
     mode: 'run' | 'plan' = 'run',
   ): Promise<
@@ -545,13 +545,13 @@ export class RunEngine {
     await repo.appendRunStep(run.tenantId, runStep);
 
     try {
-      // 段が道具を宣言していれば、その段ではそれだけを使わせる（仕様書 第9.2.7節）
+      // 段がツールを宣言していれば、その段ではそれだけを使わせる（仕様書 第9.2.7節）
       const stepTools = step.tools ?? def.tools;
-      // 承認の直後でない段（組み立てを除く）では、社外への送信とお金の道具を推論に見せない。呼んでも止めるだけで、
+      // 承認の直後でない段（組み立てを除く）では、社外への送信とお金のツールを推論に見せない。呼んでも止めるだけで、
       // 推論が「エラーが発生しました」と書き、その文が承認の画面に出てしまう（2026-09-27 に Slack への投稿で確認）
       const allowed = registry.allowed(stepTools);
       const tools = allowed.filter((t) => gatedByApproval || mode === 'plan' || !alwaysRequiresApproval(t.risk));
-      // 見せなかった道具があれば、それは承認のあとの段で行うことを伝える。伝えないと推論が「道具が使えないため行えない」と
+      // 見せなかったツールがあれば、それは承認のあとの段で行うことを伝える。伝えないと推論が「ツールが使えないため行えない」と
       // 書き、承認の前の組み立てがその文をなぞって送る操作を記録せず、承認が自動で通ってしまった（2026-09-27 に Slack で確認）
       const held = allowed.length - tools.length;
       const system = buildSystemPrompt(def, tools, settings.writingStyle, await this.companyNames(run.tenantId, settings));
@@ -581,11 +581,11 @@ export class RunEngine {
       let text = '';
       let tokensUsed = 0;
       let spent = 0;
-      // 必ず呼ぶ道具を促したか（一度だけ）
+      // 必ず呼ぶツールを促したか（一度だけ）
       let nudged = false;
 
       for (let round = 1; round <= MAX_TOOL_ROUNDS; round++) {
-        // 最後の往復では道具を使わせない。ここまでに分かったことで答えさせる
+        // 最後の往復ではツールを使わせない。ここまでに分かったことで答えさせる
         const lastRound = round === MAX_TOOL_ROUNDS;
         const res = await llm.complete({
           // スキルの effort から決まる推論の強さ（仕様書 第12.12.2節）。無ければ標準
@@ -604,18 +604,18 @@ export class RunEngine {
 
         // ツール呼び出しを取り出して実行する
         const calls = lastRound ? [] : parseToolCalls(res.text);
-        // 段が必ず呼ぶと決めた道具を呼ばずに終えようとしたら、一度だけ呼ぶよう促す（仕様書 第9.2.7節）。
+        // 段が必ず呼ぶと決めたツールを呼ばずに終えようとしたら、一度だけ呼ぶよう促す（仕様書 第9.2.7節）。
         // 2026-09-26 に oesf で、議事録の共有の段が知識への登録を呼び忘れた
         const called = new Set([...toolResults.map((t) => (t as { name?: string }).name), ...deferred.map((d) => d.name)]);
         const missing = (step.required ?? []).filter((n) => !called.has(n) && stepTools.includes(n));
         if (calls.length === 0 && missing.length > 0 && !nudged && round < MAX_TOOL_ROUNDS - 1) {
           nudged = true;
           history.push({ role: 'assistant', content: res.text });
-          history.push({ role: 'user', content: `この段で必ず呼ぶ道具を、まだ呼んでいません: ${missing.join('、')}。指示に従って呼んでください。` });
+          history.push({ role: 'user', content: `この段で必ず呼ぶツールを、まだ呼んでいません: ${missing.join('、')}。指示に従って呼んでください。` });
           continue;
         }
         if (calls.length === 0) {
-          // 文で終わった。道具の囲みが混じっていても、答えとしては残さない
+          // 文で終わった。ツールの囲みが混じっていても、答えとしては残さない
           text = withoutToolBlocks(res.text);
           break;
         }
@@ -628,8 +628,8 @@ export class RunEngine {
             continue;
           }
           if (!stepTools.includes(call.name)) {
-            // 段の区切りを推論の行儀に頼らない。この段で使えない道具は呼ばない（仕様書 第9.2.7節）
-            roundResults.push({ name: call.name, error: `この段（${stepLabel(step)}）では使えない道具です` });
+            // 段の区切りを推論の行儀に頼らない。この段で使えないツールは呼ばない（仕様書 第9.2.7節）
+            roundResults.push({ name: call.name, error: `この段（${stepLabel(step)}）では使えないツールです` });
             continue;
           }
           if (mode === 'plan' && tool.risk !== 'read' && tool.risk !== 'draft') {
@@ -661,7 +661,7 @@ export class RunEngine {
               : check?.kind === 'unchecked' ? { ...call, caution: check.reason } : call;
             // 同じ操作は 1 度だけ記録する（二重に実行しない）。印には中身の鍵を持たせ、実行後に結果と突き合わせる
             const key = callKey(recorded);
-            // 推論が言い直したもの（同じ投稿先への投稿など、道具の `planKey` が同じもの）は、後のもので置き換える。
+            // 推論が言い直したもの（同じ投稿先への投稿など、ツールの `planKey` が同じもの）は、後のもので置き換える。
             // 2026-09-26 に、下書きの結果を待たずにリンク無しの投稿を記録し、次の往復でリンク付きの投稿を記録して、投稿が 2 重になった
             const slot = tool.planKey?.(recorded.args);
             // 同じ中身の呼び直しは置き換えず、1 度だけ記録する（下の突き合わせで同じ結果になる）
@@ -678,7 +678,7 @@ export class RunEngine {
               }
             }
             else if (!deferred.some((d) => callKey(d) === key)) deferred.push(recorded);
-            // 前の往復で行えなかった同じ道具の操作は、推論が正しく呼び直したので、行えないことから外す
+            // 前の往復で行えなかった同じツールの操作は、推論が正しく呼び直したので、行えないことから外す
             for (let i = unable.length - 1; i >= 0; i--) {
               if (unable[i]!.name === recorded.name && (unable[i]!.round ?? round) < round) unable.splice(i, 1);
             }
@@ -727,12 +727,12 @@ export class RunEngine {
           await this.markActivity(run.tenantId, runStep, tool.activityLabel);
           const result = await this.invokeTool(run, def, run.cursor, call, requestedBy, registry, ai.research, llm);
           await this.markActivity(run.tenantId, runStep, null);
-          // 記録は `{ name, risk, result }` で包まれている。道具が返したもの（result）を出す
+          // 記録は `{ name, risk, result }` で包まれている。ツールが返したもの（result）を出す
           if (mode === 'plan' && tool.risk === 'draft') done.push({ name: call.name, args: call.args, result: (result as { result?: unknown } | null)?.result });
           alreadyCalled.set(key, result);
           roundResults.push(result);
         }
-        // 呼んだ道具は、往復のどれで呼んだものもすべて記録する（仕様書 第9.3.2節）
+        // 呼んだツールは、往復のどれで呼んだものもすべて記録する（仕様書 第9.3.2節）
         toolResults.push(...roundResults);
         // 確認を求めるものがあれば、往復を続けずにここで止める。
         // 組み立て（plan）では止めない。その段で行う操作を最後まで出させる
@@ -776,12 +776,15 @@ export class RunEngine {
    * 実行中のステップに、いま呼んでいるツールの活動の表示名を書く（消すときは `null`）。
    *
    * @remarks
-   * ダッシュボードの「活動中」（仕様書 第6.7.4.1節）はこれを読む。状態のための表は作らず、
-   * 実行のステップに一時的に持たせるだけである（第6.7.10節「履歴を保存しない」）。
+   * ダッシュボードの「活動中」（仕様書 第6.7.4.1節）と、実行の画面・秘書バーの「いま何をしているか」と経過した時間
+   * （第6.2.2.2節・第10.11.6節）はこれを読む。状態のための表は作らず、実行のステップに一時的に持たせるだけである（第6.7.10節「履歴を保存しない」）。
    */
   private async markActivity(tenantId: string, runStep: RunStep, activity: string | null): Promise<void> {
-    const input = { ...(runStep.input as Record<string, unknown> | null), ...(activity ? { activity } : {}) };
-    if (!activity) delete input['activity'];
+    const input = {
+      ...(runStep.input as Record<string, unknown> | null),
+      ...(activity ? { activity, activityAt: new Date().toISOString() } : {}),
+    };
+    if (!activity) { delete input['activity']; delete input['activityAt']; }
     await this.deps.repo.updateRunStep(tenantId, { ...runStep, input });
   }
 
@@ -815,7 +818,7 @@ export class RunEngine {
       ...(llm ? { expandQuery: (q: string) => expandQuery(llm, q) } : {}),
       // スキルの補助のファイル。skill.read で開く（仕様書 第12.12.2節）
       ...(def.skill?.files.length ? { skillFiles: def.skill.files } : {}),
-      // 名刺管理（第27.9節）。使えるかどうかは道具が呼ぶたびに確かめる
+      // 名刺管理（第27.9節）。使えるかどうかはツールが呼ぶたびに確かめる
       ...(this.deps.cards && llm ? {
         cards: {
           service: this.deps.cards.service, store: this.deps.cards.store, llm,
@@ -823,7 +826,7 @@ export class RunEngine {
           ...(this.deps.cards.bulk ? { bulk: this.deps.cards.bulk } : {}),
         },
       } : {}),
-      // 在庫管理（第29.15節）。使えるかどうかは道具が呼ぶたびに確かめる
+      // 在庫管理（第29.15節）。使えるかどうかはツールが呼ぶたびに確かめる
       ...(this.deps.inventory ? {
         inventory: {
           service: this.deps.inventory.service, access: () => this.deps.inventory!.access(run.tenantId, requestedBy),
@@ -931,7 +934,7 @@ export class RunEngine {
   ): Promise<Run> {
     const { repo } = this.deps;
     const steps = await repo.listRunSteps(run.tenantId, run.id);
-    // 道具の文脈（名刺管理など）は推論を持つときだけ組み立てるため、記録した操作の実行にも推論を渡す（第27.9.1節）
+    // ツールの文脈（名刺管理など）は推論を持つときだけ組み立てるため、記録した操作の実行にも推論を渡す（第27.9.1節）
     const llm = this.deps.llmFor ? await this.deps.llmFor(run.tenantId) : this.deps.llm;
     let current = run;
     for (const s of steps) {
@@ -1055,7 +1058,7 @@ type ToolCall = {
   shown?: string;
   /** 承認の前に確かめられなかった理由。 */
   caution?: string;
-  /** 送り先が社内だけと確かめられた（仕様書 第9.4.0節）。送る道具でも、人の判断を要しない。 */
+  /** 送り先が社内だけと確かめられた（仕様書 第9.4.0節）。送るツールでも、人の判断を要しない。 */
   internal?: boolean;
 };
 
@@ -1066,8 +1069,8 @@ export const AUTO_PASS_REASON = '社外への送信とお金の確定が無い�
  * 承認の後に行う操作に、人の判断が要るものがあるか（仕様書 第9.4.0節、ADR-0028）。
  *
  * @remarks
- * 人の判断が要るのは、社外に出るもの（送る道具で、送り先が社内だけと確かめられなかったもの）とお金の確定。
- * 会社が「社内への書き込み: 承認が必要」にしていれば、社内への書き込みも人に回す。知らない道具は人に回す。
+ * 人の判断が要るのは、社外に出るもの（送るツールで、送り先が社内だけと確かめられなかったもの）とお金の確定。
+ * 会社が「社内への書き込み: 承認が必要」にしていれば、社内への書き込みも人に回す。知らないツールは人に回す。
  */
 export function needsHuman(
   calls: { name: string; internal?: boolean }[],
@@ -1084,13 +1087,13 @@ export function needsHuman(
   });
 }
 
-/** 送り先に関わらず、いつも人に判断を求める道具。メールは宛先に関わらず人が見る（仕様書 第9.4.0節）。 */
+/** 送り先に関わらず、いつも人に判断を求めるツール。メールは宛先に関わらず人が見る（仕様書 第9.4.0節）。 */
 const ALWAYS_ASK = new Set(['gmail.send', 'mail.bulk_send']);
 
 /** 承認の前の確かめで、行えないと分かった操作（記録しない。ADR-0024）。 */
 type UnableCall = {
   name: string; args: Record<string, unknown>; reason: string;
-  /** 行えないと分かった往復。後の往復で同じ道具を正しく呼び直したら外す。 */
+  /** 行えないと分かった往復。後の往復で同じツールを正しく呼び直したら外す。 */
   round?: number;
 };
 
@@ -1098,7 +1101,7 @@ type UnableCall = {
 type DoneCall = { name: string; args: Record<string, unknown>; result: unknown };
 
 /**
- * 呼び出しの中身の鍵。同じ道具を同じ引数で呼んだものは同じ鍵になる。
+ * 呼び出しの中身の鍵。同じツールを同じ引数で呼んだものは同じ鍵になる。
  *
  * @remarks
  * **キーの並びによらない形にする。** データベース（PostgreSQL の jsonb）は保存するときにキーの並びを変えるため、
@@ -1231,7 +1234,7 @@ const MAX_TOOL_ROUNDS = 4;
  * 段の 1 回の推論で出してよい量（トークン）。
  *
  * @remarks
- * 2,000 では、道具の引数が大きい段で途中で切れる。スライドの構成（本文 12 枚と出典）は日本語で 3,000 字を超え、
+ * 2,000 では、ツールの引数が大きい段で途中で切れる。スライドの構成（本文 12 枚と出典）は日本語で 3,000 字を超え、
  * Gemini の考える分もこの量に数えられる（第 0.122.0 版で 2,000 から 8,000 に）。実行全体の量は `limits.maxTokens` で抑える
  */
 const STEP_OUTPUT_TOKENS = 8000;
@@ -1297,7 +1300,7 @@ export function todayJst(now: Date = new Date()): string {
  *
  * @remarks
  * 上限（{@link PREVIOUS_RESULTS_LIMIT}）に収まればそのまま渡す。超えるときは、**各段の文を先に残し**、
- * 道具の生の結果を段ごとに均等に削る。頭から切ると、後ろの段の結果が丸ごと落ちる
+ * ツールの生の結果を段ごとに均等に削る。頭から切ると、後ろの段の結果が丸ごと落ちる
  * （2026-09-28 に、朝のブリーフの天気とニュースの結果が最後の段に届かなかった）。
  */
 export function previousResults(done: Pick<RunStep, 'stepId' | 'kind' | 'output'>[]): string {

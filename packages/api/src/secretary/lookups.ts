@@ -27,6 +27,10 @@ export interface LookupView {
   done: boolean;
   /** 何をしているか。終わっていれば `null`。**いつ終わるかの見込みは作らない**（第10.11.5節）。 */
   progress: string | null;
+  /**
+   * いまの動きを始めた時刻。画面が経過した時間を数える（第10.11.6節）。承認待ち・終わったもの・分からないときは `null`。
+   */
+  since: string | null;
   /** 答え。終わるまでは `null`。 */
   text: string | null;
   failureReason: string | null;
@@ -72,6 +76,8 @@ export async function listLookups(
     const name = isLookup ? null : (nameOf(job.agentId) ?? '業務');
     const steps = await repo.listRunSteps(tenantId, run.id);
     const firstText = Object.values(job.input).find((v): v is string => typeof v === 'string' && v.trim() !== '');
+    // いま呼んでいるツールの言葉と、その動きを始めた時刻（第10.11.6節）
+    const now = done || run.status === 'awaiting_approval' ? null : currentActivity(steps);
     out.push({
       runId: run.id,
       request: job.agentId === MORNING_BRIEF.id ? '今朝のブリーフ' : job.agentId === AG05_WEEKLY_BRIEF.id ? '今週のブリーフ' : String(job.input['request'] ?? firstText ?? name ?? ''),
@@ -80,7 +86,9 @@ export async function listLookups(
       proactive: job.input['trigger'] === PROACTIVE_TRIGGER,
       status: run.status,
       done,
-      progress: done ? null : run.status === 'awaiting_approval' ? '承認を待っています' : job.agentId === PLAN_REPORT_AGENT_ID ? 'まとめています' : isLookup ? progressOf(steps) : `「${name}」を進めています`,
+      progress: done ? null : run.status === 'awaiting_approval' ? '承認を待っています' : job.agentId === PLAN_REPORT_AGENT_ID ? 'まとめています'
+        : isLookup ? progressOf(steps) : now?.activity ? `${name}：${now.activity}` : `「${name}」を進めています`,
+      since: now?.since ?? null,
       text: run.status === 'completed' ? await resultOf(repo, tenantId, run.id, steps) : null,
       failureReason: done && run.status !== 'completed' ? (run.failureReason ?? (run.status === 'cancelled' ? '中止されました' : '期限が切れました')) : run.failureReason,
       endedAt: run.endedAt,
@@ -93,7 +101,7 @@ export async function listLookups(
     const steps = await repo.listPlanSteps(tenantId, plan.id);
     out.unshift({
       runId: `plan:${plan.id}`, request: plan.request, agentName: null, agentId: 'plan', proactive: false,
-      status: plan.status, done: false, progress: planProgress(plan, steps), text: null, failureReason: null,
+      status: plan.status, done: false, progress: planProgress(plan, steps), since: null, text: null, failureReason: null,
       endedAt: null, told: false,
     });
   }
@@ -197,6 +205,20 @@ async function remember(repo: Repository, tenantId: string, userId: string, x: L
 }
 
 /** 何をしているか。段の ID から作る。見込みの時間は出さない。 */
+/**
+ * 動いている段の、いま呼んでいるツールの言葉と、その動きを始めた時刻（第6.2.2.2節・第10.11.6節）。
+ *
+ * @returns ツールを呼んでいなければ言葉は `null` で、時刻は段を始めた時刻。動いている段が無ければ `null`
+ */
+export function currentActivity(steps: { status: string; input: unknown; startedAt: string | Date }[]): { activity: string | null; since: string } | null {
+  const running = [...steps].reverse().find((s) => s.status === 'running');
+  if (!running) return null;
+  const input = (running.input ?? {}) as { activity?: unknown; activityAt?: unknown };
+  const activity = typeof input.activity === 'string' && input.activity ? input.activity : null;
+  const since = activity && typeof input.activityAt === 'string' ? input.activityAt : new Date(running.startedAt).toISOString();
+  return { activity, since };
+}
+
 function progressOf(steps: { stepId: string; status: string }[]): string {
   const current = [...steps].reverse().find((s) => s.status === 'running') ?? steps.at(-1);
   return current?.stepId === 'answer' ? 'まとめています' : 'お調べしています';
@@ -206,7 +228,7 @@ function progressOf(steps: { stepId: string; status: string }[]): string {
  * 調べものの答え。
  *
  * @remarks
- * **最後の段の文**を使う。途中の段の文には道具の呼び出しが混じることがあり、
+ * **最後の段の文**を使う。途中の段の文にはツールの呼び出しが混じることがあり、
  * それを利用者に見せない。
  */
 function answerOf(steps: { output: unknown }[]): string {
