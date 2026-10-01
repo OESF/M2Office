@@ -104,7 +104,7 @@ export function PublishPanel({ items }: { items: InventoryItemView[] }) {
   return (
     <div className="card inventory-publish">
       <div className="publish-head">
-        <h3>Web への公開</h3>
+        <h3>Web へ公開</h3>
         {pub && (
           <span className={live ? 'chip current' : 'chip todo'}>
             {live ? '公開中' : '止めています'}

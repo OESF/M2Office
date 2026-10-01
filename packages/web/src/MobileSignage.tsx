@@ -166,7 +166,7 @@ export function MobileSignage({ me }: { me: Me }) {
       </div>
       {chosen?.length === 1 && (
         <>
-          <button className="btn ghost" onClick={() => photo.current?.click()}>写真・動画を流れに足す</button>
+          <button className="btn ghost" onClick={() => photo.current?.click()}>写真・動画を流れに追加</button>
           <input ref={photo} type="file" accept="image/jpeg,image/png,video/mp4" capture="environment" hidden
             onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void addPhoto(f); }} />
         </>

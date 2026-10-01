@@ -1688,3 +1688,6 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .copy-row { display: flex; gap: calc(6px * var(--space-scale)); }
 .copy-row input { flex: 1; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: calc(12px * var(--font-scale)); }
 @media (max-width: 720px) { .publish-body { grid-template-columns: 1fr; } }
+
+/* 在庫の画面の作業の欄から一覧へ戻る（第29.11節「作業の欄」） */
+.inventory-back { display: inline-block; margin: calc(4px * var(--space-scale)) 0; }

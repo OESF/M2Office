@@ -57,7 +57,7 @@ export function Cards({ contactId, onOpen, mailer, admin = false, onApprovals }:
   return <CardListView onOpen={onOpen} admin={admin} onBulk={setBulk} />;
 }
 
-/** 一覧・撮る・ファイルを選ぶ・探す・書き出す・まとめてメール。 */
+/** 一覧・撮る・ファイルを選ぶ・探す・書き出し・まとめてメール。 */
 function CardListView({ onOpen, admin, onBulk }: { onOpen: (id: string) => void; admin: boolean; onBulk: (initial: CardSummary[]) => void }) {
   const [list, setList] = useState<CardList | null>(null);
   const [q, setQ] = useState('');
@@ -162,9 +162,9 @@ function CardListView({ onOpen, admin, onBulk }: { onOpen: (id: string) => void;
         <label className="small check"><input type="checkbox" checked={!!personal} onChange={(e) => setPersonal(e.target.checked)} /> 自分だけ</label>
         <button className="btn ghost" disabled={busy || trash} onClick={() => onBulk([...picked.values()])}>まとめてメール</button>
         {admin && (
-          <select className="cards-export" value="" disabled={busy} aria-label="書き出す"
+          <select className="cards-export" value="" disabled={busy} aria-label="書き出し"
             onChange={(e) => { const f = e.target.value as 'csv' | 'xlsx'; e.target.value = ''; if (f) void api.cards.exportTable(f).catch((err) => setMessage(describeError(err, '書き出せませんでした'))); }}>
-            <option value="">書き出す…</option>
+            <option value="">書き出し…</option>
             <option value="csv">CSV</option>
             <option value="xlsx">Excel</option>
           </select>

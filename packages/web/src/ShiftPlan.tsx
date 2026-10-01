@@ -37,7 +37,7 @@ function ShiftSettingsForm({ settings, onSaved }: { settings: HrShiftSettings; o
           <button className="btn ghost small" onClick={() => setS({ ...s, patterns: s.patterns.filter((_, k) => k !== i) })}>外す</button>
         </div>
       ))}
-      <button className="btn ghost small" onClick={() => setS({ ...s, patterns: [...s.patterns, { id: `p${Date.now().toString(36)}`, name: '', start: '09:00', end: '18:00', breakMinutes: 60 }] })}>型を足す</button>
+      <button className="btn ghost small" onClick={() => setS({ ...s, patterns: [...s.patterns, { id: `p${Date.now().toString(36)}`, name: '', start: '09:00', end: '18:00', breakMinutes: 60 }] })}>型を追加</button>
       {s.patterns.length > 0 && (
         <div className="pay-table">
           <table className="table hr-table small">

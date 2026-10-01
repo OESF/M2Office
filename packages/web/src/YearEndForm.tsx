@@ -57,7 +57,7 @@ export function YeaFields({ d, set, onCertificate }: { d: YeaDeclaration; set: (
       {d.spouse && <PersonFields p={d.spouse} change={(x) => set({ spouse: x })} />}
       <h4>扶養する親族</h4>
       {d.dependents.map((p, i) => <PersonFields key={i} p={p} change={(x) => set({ dependents: d.dependents.map((y, j) => (j === i ? x : y)) })} remove={() => set({ dependents: d.dependents.filter((_, j) => j !== i) })} />)}
-      <button className="btn ghost small" onClick={() => set({ dependents: [...d.dependents, blank()] })}>親族を足す</button>
+      <button className="btn ghost small" onClick={() => set({ dependents: [...d.dependents, blank()] })}>親族を追加</button>
       <h4>保険料 {onCertificate && <button className="btn ghost small" onClick={onCertificate}>控除証明書を撮って入れる</button>}</h4>
       <div className="yea-grid small">
         {INSURANCE.map(([k, l]) => (

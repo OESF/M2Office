@@ -352,11 +352,12 @@ function Consent({ item: x, busy, options, onAgree, onCancel }: {
 }
 
 /**
- * 画面で入り切りできる在庫管理の機能。Web への公開は、その段を作ったときに足す（仕様書 第24.4節）。
+ * 画面で入り切りできる在庫管理の機能（仕様書 第29.4節）。Web への公開は段 5（第 0.213.0 版）で足した。
  *
- * @remarks 働かない機能のスイッチを出さない（入れても何も起きないと、管理者を惑わせるため）
+ * @remarks 働かない機能のスイッチを出さない（入れても何も起きないと、管理者を惑わせるため）。
+ * 新しい機能を作ったら、ここに足すのを忘れない（`INVENTORY_FEATURES` のすべてが揃えば、この絞り込みは要らない）
  */
-const INVENTORY_READY: InventoryFeature[] = ['lots', 'units', 'order', 'reserve'];
+const INVENTORY_READY: InventoryFeature[] = ['lots', 'units', 'order', 'reserve', 'publish'];
 
 /**
  * 在庫管理の会社の設定（仕様書 第29.4節・第29.4.1節）。機能の入り切りと、残りわずか・仕入れの日数の既定。すぐに反映する。

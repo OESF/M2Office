@@ -402,7 +402,7 @@ function RunPanel({ data, busy, act, setNote, onOpen, month, recalc, at, onChang
                             <label className="check"><input type="checkbox" checked={adj.taxable} onChange={(e) => setAdj({ ...adj, taxable: e.target.checked })} /> 所得税の対象</label>
                             <label className="check"><input type="checkbox" checked={adj.insurable} onChange={(e) => setAdj({ ...adj, insurable: e.target.checked })} /> 雇用保険の賃金</label>
                             <input className="short" placeholder="理由" value={adj.reason} onChange={(e) => setAdj({ ...adj, reason: e.target.value })} aria-label="理由" />
-                            <button className="btn small" disabled={busy || !adj.label || !Number(adj.amount)} onClick={() => addAdj(s.employeeId)}>調整を足す</button>
+                            <button className="btn small" disabled={busy || !adj.label || !Number(adj.amount)} onClick={() => addAdj(s.employeeId)}>調整を追加</button>
                           </div>
                         )}
                         <div className="row">
@@ -525,7 +525,7 @@ function PayrollProfile({ employeeId }: { employeeId: string }) {
         <span className="small">標準報酬月額 {d.standardPays[0] ? `${d.standardPays[0].amount.toLocaleString('ja-JP')} 円（${d.standardPays[0].fromMonth} から）` : '未登録'}</span>
         <input type="month" value={std.fromMonth} onChange={(e) => setStd({ ...std, fromMonth: e.target.value })} aria-label="適用の月" />
         <input className="num-input" type="number" min={0} placeholder="報酬の額" value={std.pay} onChange={(e) => setStd({ ...std, pay: e.target.value })} aria-label="報酬の額" />
-        <button className="btn ghost small" disabled={!std.pay} onClick={() => act(() => api.hr.payroll.addStandardPay(employeeId, std.fromMonth, Number(std.pay)), '足せませんでした', '等級表で標準報酬月額に直して足しました')}>足す</button>
+        <button className="btn ghost small" disabled={!std.pay} onClick={() => act(() => api.hr.payroll.addStandardPay(employeeId, std.fromMonth, Number(std.pay)), '足せませんでした', '等級表で標準報酬月額に直して足しました')}>追加</button>
       </div>
       <div className="small">
         家族
@@ -542,7 +542,7 @@ function PayrollProfile({ employeeId }: { employeeId: string }) {
           <input className="short" placeholder="続柄" value={fam.relation} onChange={(e) => setFam({ ...fam, relation: e.target.value })} aria-label="続柄" />
           <input type="date" value={fam.birthDate} onChange={(e) => setFam({ ...fam, birthDate: e.target.value })} aria-label="生年月日" />
           <label className="check"><input type="checkbox" checked={fam.dependent} onChange={(e) => setFam({ ...fam, dependent: e.target.checked })} /> 扶養</label>
-          <button className="btn ghost small" disabled={!fam.name} onClick={() => act(() => api.hr.payroll.addFamily(employeeId, { ...fam, birthDate: fam.birthDate || null }), '足せませんでした')}>足す</button>
+          <button className="btn ghost small" disabled={!fam.name} onClick={() => act(() => api.hr.payroll.addFamily(employeeId, { ...fam, birthDate: fam.birthDate || null }), '足せませんでした')}>追加</button>
         </div>
       </div>
     </div>
@@ -585,7 +585,7 @@ function LeaveTab() {
                 </td>
                 <td className="nowrap">
                   <button className="btn ghost small" onClick={() => { setGrant(null); setTake(take?.employeeId === r.employeeId ? null : { employeeId: r.employeeId, date: today(), days: 1 }); }}>有給を入れる</button>
-                  <button className="btn ghost small" onClick={() => { setTake(null); setGrant(grant?.employeeId === r.employeeId ? null : { employeeId: r.employeeId, grantedOn: '', days: '', note: '導入のときの残日数' }); }}>付与を足す</button>
+                  <button className="btn ghost small" onClick={() => { setTake(null); setGrant(grant?.employeeId === r.employeeId ? null : { employeeId: r.employeeId, grantedOn: '', days: '', note: '導入のときの残日数' }); }}>付与を追加</button>
                 </td>
               </tr>
               {take?.employeeId === r.employeeId && (
@@ -614,7 +614,7 @@ function LeaveTab() {
                     <input className="num-input" type="number" min={0} step="0.5" placeholder="日数" value={grant.days} onChange={(e) => setGrant({ ...grant, days: e.target.value })} aria-label="日数" />
                     <input className="grow" placeholder="理由" value={grant.note} onChange={(e) => setGrant({ ...grant, note: e.target.value })} aria-label="理由" />
                     <button className="btn small" disabled={!grant.grantedOn || grant.days === ''} onClick={() => void api.hr.addGrant(grant.employeeId, grant.grantedOn, Number(grant.days), grant.note)
-                      .then(() => { setGrant(null); load(); }).catch((e) => setError(describeError(e, '付与を足せませんでした')))}>足す</button>
+                      .then(() => { setGrant(null); load(); }).catch((e) => setError(describeError(e, '付与を足せませんでした')))}>追加</button>
                   </div>
                 </td></tr>
               )}
@@ -650,7 +650,7 @@ function TaskList({ tasks, onChanged, withName = false }: { tasks: HrTask[]; onC
   );
 }
 
-/** 従業員の一覧・手続き・足す・取り込む・書き出す。 */
+/** 従業員の一覧・手続き・追加・取り込み・書き出し。 */
 function EmployeeList({ onOpen }: { onOpen: (id: string) => void }) {
   const [data, setData] = useState<{ employees: HrEmployeeView[]; tasks: HrTask[]; settings: HrSettings } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -700,16 +700,16 @@ function EmployeeList({ onOpen }: { onOpen: (id: string) => void }) {
     <div className="hr">
       <div className="row wrap hr-toolbar">
         <input type="search" className="grow" placeholder="氏名・ふりがな・社員番号・所属" value={q} onChange={(e) => setQ(e.target.value)} aria-label="従業員を探す" />
-        <button className={adding ? 'btn' : 'btn ghost'} onClick={() => setAdding(!adding)}>従業員を足す</button>
-        <button className="btn ghost" onClick={() => file.current?.click()}>取り込む</button>
+        <button className={adding ? 'btn' : 'btn ghost'} onClick={() => setAdding(!adding)}>従業員を追加</button>
+        <button className="btn ghost" onClick={() => file.current?.click()}>取り込み</button>
         <input ref={file} type="file" accept=".csv,.xlsx" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void importFile(f); }} />
-        <button className="btn ghost" disabled={!!photos && photos.done < photos.total} onClick={() => photoFiles.current?.click()}>顔写真を取り込む</button>
+        <button className="btn ghost" disabled={!!photos && photos.done < photos.total} onClick={() => photoFiles.current?.click()}>顔写真の取り込み</button>
         <input ref={photoFiles} type="file" accept="image/*" multiple hidden onChange={(e) => { const fs = Array.from(e.target.files ?? []); e.target.value = ''; if (fs.length) void importPhotos(fs); }} />
         <button className="btn ghost" onClick={() => void api.hr.roster('xlsx').catch((e) => setError(describeError(e, '書き出せませんでした')))}>労働者名簿</button>
         <button className="btn ghost" disabled={exporting} onClick={() => {
           setExporting(true); setError(null); setBooksNote(null);
           void api.hr.books().then((n) => setBooksNote(`帳簿を ${n} ファイルにまとめて書き出しました`)).catch((e) => setError(describeError(e, '書き出せませんでした'))).finally(() => setExporting(false));
-        }}>{exporting ? 'まとめています…' : '帳簿をまとめて書き出す'}</button>
+        }}>{exporting ? 'まとめています…' : '帳簿の一括書き出し'}</button>
       </div>
       {error && <p className="error">{error}</p>}
       {booksNote && <p className="ok-msg small">{booksNote}</p>}
@@ -859,7 +859,7 @@ function Allowances({ list, set }: { list: HrTerms['allowances']; set: (l: HrTer
           <button className="btn ghost small" onClick={() => set(list.filter((_, j) => j !== i))} aria-label="この手当を外す">×</button>
         </span>
       ))}
-      <button className="btn ghost small" onClick={() => set([...list, { name: '', amount: NaN }])}>手当を足す</button>
+      <button className="btn ghost small" onClick={() => set([...list, { name: '', amount: NaN }])}>手当を追加</button>
     </div>
   );
 }
@@ -973,7 +973,7 @@ function EmployeeDetail({ id, onBack }: { id: string; onBack: () => void }) {
                 startTime: newTerms.startTime, endTime: newTerms.endTime, breakMinutes: newTerms.breakMinutes, workplaceScope: newTerms.workplaceScope,
                 workScope: newTerms.workScope, contractStart: newTerms.contractStart, contractEnd: newTerms.contractEnd, renewal: newTerms.renewal, renewalLimit: newTerms.renewalLimit,
                 allowances: newTerms.allowances,
-              }), '足せませんでした', () => setNewTerms(null))}>足す</button>
+              }), '足せませんでした', () => setNewTerms(null))}>追加</button>
             </div>
           </>
         )}

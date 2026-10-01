@@ -1,5 +1,5 @@
 /**
- * @file 在庫管理のパソコンの画面。品目の一覧と検索・バーコードで引く（USB のリーダー）・スマホで開く・品目を足す・知らないバーコードの結び付け・
+ * @file 在庫管理のパソコンの画面。品目の一覧と検索・バーコードで引く（USB のリーダー）・スマホで開く・品目を追加・知らないバーコードの結び付け・
  * 取り込みと書き出し・場所と棚のラベル・棚卸しへの入口・品目の詳細と入出庫の記録と取り消し。
  *
  * 数は使える数（在庫 − 引き当て − 期限切れ）を先に出す。説明文を常に出さない（原則 u11）。分からなければ秘書に聞けばよい。
@@ -61,22 +61,37 @@ function Marks({ item }: { item: InventoryItemView }) {
   );
 }
 
-/** 一覧・探す（バーコードも）・品目を足す・取り込みと書き出し・場所。 */
+/** 一覧・探す（バーコードも）・品目を追加・取り込みと書き出し・場所。 */
 function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string | null) => void; onStocktake: () => void }) {
   const [list, setList] = useState<InventoryList | null>(null);
   const [q, setQ] = useState('');
   const [stopped, setStopped] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [adding, setAdding] = useState<{ name: string; code: string } | null>(null);
-  // 一覧の上に開く欄（1 つずつ）
+  // 一覧の上に開く欄。一度に 1 つだけ開き、開いているあいだは品目の一覧を出さない（第29.11節「作業の欄」）
   const [panel, setPanel] = useState<'places' | 'orders' | 'suppliers' | 'bookings' | 'publish' | null>(null);
-  const toggle = (p: 'places' | 'orders' | 'suppliers' | 'bookings' | 'publish') => setPanel((cur) => (cur === p ? null : p));
   const [slip, setSlip] = useState<InventorySlipResult | null>(null);
   const slipPicker = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [mobileQr, setMobileQr] = useState<string | null>(null);
   // 知らないバーコード。新しい品目にするか、既にある品目に結び付ける（第29.11節）
   const [unknown, setUnknown] = useState<string | null>(null);
+  /** 開いている作業の欄をすべて閉じる（一覧に戻る）。 */
+  const closeWork = () => {
+    setPanel(null);
+    setAdding(null);
+    setSlip(null);
+    setUnknown(null);
+    if (mobileQr) URL.revokeObjectURL(mobileQr);
+    setMobileQr(null);
+  };
+  /** 欄を開く（ほかの欄は閉じる）。開いている欄のボタンをもう一度押すと閉じる。 */
+  const toggle = (p: 'places' | 'orders' | 'suppliers' | 'bookings' | 'publish') => {
+    if (panel === p) { setPanel(null); return; }
+    closeWork();
+    setPanel(p);
+  };
+  const working = panel !== null || adding !== null || slip !== null || mobileQr !== null || unknown !== null;
   const picker = useRef<HTMLInputElement>(null);
 
   const load = useCallback(() => {
@@ -95,7 +110,7 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
       const r = await api.inventory.lookup(code);
       if (r.item) { onOpen(r.item.id); return; }
       if (r.location) { setQ(''); setMessage(`棚「${placeName(r.location)}」のラベルです`); return; }
-      if (r.parsed.kind !== 'other') setUnknown(r.parsed.code);
+      if (r.parsed.kind !== 'other') { closeWork(); setUnknown(r.parsed.code); }
     } catch (e) {
       setMessage(describeError(e, '読めませんでした'));
     }
@@ -108,7 +123,9 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
     setBusy(true);
     setMessage('納品書を読み取っています…');
     try {
-      setSlip(await api.inventory.slip(f));
+      const result = await api.inventory.slip(f);
+      closeWork();
+      setSlip(result);
       setMessage(null);
       load();
     } catch (e) {
@@ -143,24 +160,28 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
       <div className="cards-toolbar">
         <input className="cards-search" type="search" placeholder="品名・コード・バーコード" value={q} aria-label="品目を探す"
           onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void scan(); }} />
-        <button className="btn" onClick={() => setAdding({ name: q.trim(), code: '' })}>品目を足す</button>
+        <button className={adding ? 'btn' : 'btn ghost'} onClick={() => {
+          if (adding) { setAdding(null); return; }
+          closeWork();
+          setAdding({ name: q.trim(), code: '' });
+        }}>品目を追加</button>
         <button className="btn ghost" onClick={onStocktake}>棚卸し</button>
-        <button className="btn ghost" disabled={busy} onClick={() => picker.current?.click()}>取り込む</button>
-        <button className="btn ghost" onClick={() => void api.inventory.exportFile('csv').catch((e) => setMessage(describeError(e, '書き出せませんでした')))}>書き出す</button>
+        <button className="btn ghost" disabled={busy} onClick={() => picker.current?.click()}>取り込み</button>
+        <button className="btn ghost" onClick={() => void api.inventory.exportFile('csv').catch((e) => setMessage(describeError(e, '書き出せませんでした')))}>書き出し</button>
         <button className="btn ghost" onClick={() => {
           if (mobileQr) { URL.revokeObjectURL(mobileQr); setMobileQr(null); return; }
-          void api.inventory.mobileQrUrl().then(setMobileQr).catch((e) => setMessage(describeError(e, 'QR を作れませんでした')));
+          void api.inventory.mobileQrUrl().then((url) => { closeWork(); setMobileQr(url); }).catch((e) => setMessage(describeError(e, 'QR を作れませんでした')));
         }}>スマホで開く</button>
         {/* 棚のラベルと場所は、ほかの操作と同じ並びに置く（一覧の下の小さな文字では見つけにくかった） */}
         <button className="btn ghost" disabled={!list || list.locations.length === 0}
-          onClick={() => void api.inventory.downloadLabels().catch((e) => setMessage(describeError(e, 'ラベルを作れませんでした')))}>棚のラベルを印刷</button>
+          onClick={() => void api.inventory.downloadLabels().catch((e) => setMessage(describeError(e, 'ラベルを作れませんでした')))}>棚ラベルの印刷</button>
         <button className={panel === 'places' ? 'btn' : 'btn ghost'} onClick={() => toggle('places')}>場所（{list?.locations.length ?? 0}）</button>
         <button className={panel === 'orders' ? 'btn' : 'btn ghost'} onClick={() => toggle('orders')}>
           発注の案
         </button>
         <button className={panel === 'suppliers' ? 'btn' : 'btn ghost'} onClick={() => toggle('suppliers')}>仕入先</button>
         {list?.settings.features.reserve && <button className={panel === 'bookings' ? 'btn' : 'btn ghost'} onClick={() => toggle('bookings')}>取り置き</button>}
-        {list?.admin && list.settings.features.publish && <button className={panel === 'publish' ? 'btn' : 'btn ghost'} onClick={() => toggle('publish')}>Web への公開</button>}
+        {list?.admin && list.settings.features.publish && <button className={panel === 'publish' ? 'btn' : 'btn ghost'} onClick={() => toggle('publish')}>Web へ公開</button>}
         <button className="btn ghost" disabled={busy} onClick={() => slipPicker.current?.click()}>納品書から入庫</button>
         <input ref={slipPicker} type="file" hidden accept="image/png,image/jpeg,image/webp,application/pdf"
           onChange={(e) => void readSlipFile(e.target.files?.[0])} />
@@ -168,6 +189,7 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
           onChange={(e) => void importFile(e.target.files?.[0])} />
       </div>
       {message && <p className="small muted" role="status">{message}</p>}
+      {working && <button className="link-btn inventory-back" onClick={closeWork}>‹ 品目の一覧</button>}
       {panel === 'places' && list && <Places locations={list.locations} admin={list.admin} onChanged={load} />}
       {panel === 'orders' && <OrderPanel onOpenItem={(id) => onOpen(id)} />}
       {panel === 'suppliers' && <SuppliersPanel />}
@@ -188,8 +210,8 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
         <NewItem initial={adding} onCancel={() => setAdding(null)}
           onSaved={(id, note) => { setAdding(null); onOpen(id, note); }} />
       )}
-      {list && list.items.length === 0 && !adding && <p className="muted">{q ? '見つかりませんでした' : '品目はまだありません'}</p>}
-      {list && list.items.length > 0 && (
+      {!working && list && list.items.length === 0 && <p className="muted">{q ? '見つかりませんでした' : '品目はまだありません'}</p>}
+      {!working && list && list.items.length > 0 && (
         <table className="table inventory-table">
           <thead>
             <tr><th>品名</th><th className="num">使える数</th><th className="num onhand">在庫</th><th>期限</th><th /></tr>
@@ -210,9 +232,11 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
           </tbody>
         </table>
       )}
-      <div className="row small inventory-foot">
-        <label className="check"><input type="checkbox" checked={stopped} onChange={(e) => setStopped(e.target.checked)} /> 止めた品目も出す</label>
-      </div>
+      {!working && (
+        <div className="row small inventory-foot">
+          <label className="check"><input type="checkbox" checked={stopped} onChange={(e) => setStopped(e.target.checked)} /> 止めた品目も出す</label>
+        </div>
+      )}
     </div>
   );
 }
@@ -249,7 +273,7 @@ function UnknownCode({ code, items, onNew, onLinked, onCancel }: {
 }
 
 /**
- * 品目を足す欄（名前・はじめの数・単位・分類と、読んだバーコード）。
+ * 品目を追加する欄（名前・はじめの数・単位・分類と、読んだバーコード）。
  *
  * @remarks 数と単位を並べて置く（「3」「本」）。単位の欄に数が入っても、サーバーが数として読む（第29.6節）
  */
@@ -285,7 +309,7 @@ function NewItem({ initial, onCancel, onSaved }: {
           onChange={(e) => setQty(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void save(); }} aria-label="いまの数" />
         <input className="unit-input" placeholder="個・本・冊" value={unit} onChange={(e) => setUnit(e.target.value)} aria-label="単位（数え方）" />
         <input className="short" placeholder="分類" value={category} onChange={(e) => setCategory(e.target.value)} aria-label="分類" />
-        <button className="btn" disabled={!name.trim()} onClick={() => void save()}>足す</button>
+        <button className="btn" disabled={!name.trim()} onClick={() => void save()}>追加</button>
         <button className="btn ghost" onClick={onCancel}>やめる</button>
       </div>
       {error && <p className="error small">{error}</p>}
@@ -329,7 +353,7 @@ function Places({ locations, admin, onChanged }: { locations: InventoryLocation[
       <div className="row wrap">
         <input className="short" placeholder="倉庫" value={warehouse} onChange={(e) => setWarehouse(e.target.value)} aria-label="倉庫" />
         <input className="short" placeholder="棚" value={shelf} onChange={(e) => setShelf(e.target.value)} aria-label="棚" />
-        <button className="btn small" disabled={!warehouse.trim()} onClick={() => void add()}>足す</button>
+        <button className="btn small" disabled={!warehouse.trim()} onClick={() => void add()}>追加</button>
       </div>
       {error && <p className="error small">{error}</p>}
     </div>

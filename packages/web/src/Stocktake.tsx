@@ -267,7 +267,7 @@ function Counting({ view, locations, items, userId, admin, onChanged, onDone }: 
           <div className="row wrap">
             {canClose && <button className="btn" onClick={() => void close()}>確定する</button>}
             {canClose && view.uncounted > 0 && <span className="small muted">数えていない {view.uncounted} 件はそのままにします</span>}
-            <button className="btn ghost" onClick={() => void api.inventory.counts.exportFile(count.id).catch((e) => setNote(describeError(e, '書き出せませんでした')))}>書き出す</button>
+            <button className="btn ghost" onClick={() => void api.inventory.counts.exportFile(count.id).catch((e) => setNote(describeError(e, '書き出せませんでした')))}>書き出し</button>
             {canClose && <button className="link danger small" onClick={() => void cancel()}>やめる</button>}
           </div>
           {note && <p className="small muted" role="status">{note}</p>}

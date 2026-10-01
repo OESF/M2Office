@@ -237,7 +237,7 @@ export function Signage() {
           <div className="card signage-add">
             <input className="signage-code-input" inputMode="numeric" maxLength={7} placeholder="画面の番号" value={code} onChange={(e) => setCode(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) claim(); }} aria-label="画面に出ている番号" />
-            <button className="btn small" disabled={!/^\d{3}\s?\d{3}$/.test(code.trim())} onClick={claim}>画面を足す</button>
+            <button className="btn small" disabled={!/^\d{3}\s?\d{3}$/.test(code.trim())} onClick={claim}>画面を追加</button>
           </div>
         )}
       </div>
@@ -363,7 +363,7 @@ function FlowEditor({ screen, screens, assets, thumbs, onFiles, onError, onChang
       </ol>
       <div className="row wrap">
         <select value="" onChange={(e) => { if (e.target.value) save([...flow.entries, { assetId: e.target.value, seconds: null }]); }} aria-label="素材を足す">
-          <option value="">素材を足す</option>
+          <option value="">素材を追加</option>
           {assets.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
         </select>
         <button className="btn ghost small" onClick={() => file.current?.click()}>ファイルを選ぶ</button>
