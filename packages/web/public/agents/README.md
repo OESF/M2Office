@@ -23,7 +23,7 @@ agent01.png ～ agent50.png
 |---|---|
 | 1 | 社内ナレッジ Q&A（`knowledge-qa`） |
 | 2 | 議事録作成・共有（`minutes`） |
-| 3 | 受信箱整理・返信起案（`inbox-triage`） |
+| 3 | メール整理・下書き作成（`inbox-triage`） |
 | 4 | 日程調整（`scheduling`） |
 | 5 | 週次ブリーフ（`weekly-brief`） |
 | 6 | 秘書の調べもの（`secretary-lookup`） |

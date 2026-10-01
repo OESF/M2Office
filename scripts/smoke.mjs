@@ -351,13 +351,13 @@ console.log('\n■ 8. ダミー接続による照会（Google 未接続）');
     method: 'POST', body: JSON.stringify({ message: 'メールの返信を下書きして' }),
   });
   // 専門の業務は、本人に実行の可否を聞かずに頼んで実行し、結果をあとで伝える（第10.9.6節、ADR-0033）
-  routed.lookup?.runId && /「受信箱整理・返信起案」に頼みました/.test(routed.text) && !routed.suggestedAgent
+  routed.lookup?.runId && /「メール整理・下書き作成」に頼みました/.test(routed.text) && !routed.suggestedAgent
     ? ok('作業の依頼は照会と取り違えず、受信箱整理に頼んで実行した（実行してよいかを聞かない）')
     : ng('依頼を照会として処理してしまう、または実行してよいかを聞く', JSON.stringify(routed).slice(0, 160));
   const delegated = routed.lookup?.runId ? await waitFor('a', routed.lookup.runId, ['completed', 'failed', 'awaiting_approval'], 20000) : null;
   const { body: bar } = await call('a', '/v1/secretary/lookups');
   const item = (bar.items ?? []).find((x) => x.runId === routed.lookup?.runId);
-  item?.agentName === '受信箱整理・返信起案' && delegated?.run?.status === 'completed' && item.done
+  item?.agentName === 'メール整理・下書き作成' && delegated?.run?.status === 'completed' && item.done
     ? ok('頼んだ業務は秘書バーの一覧に名前つきで並び、終わると伝える対象になる')
     : ng('頼んだ業務が秘書バーに並ばない', JSON.stringify(item));
 }

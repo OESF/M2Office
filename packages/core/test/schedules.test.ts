@@ -42,7 +42,7 @@ function fakeRepo(items: Schedule[]) {
 const AGENTS = [
   { id: 'morning-brief', name: '朝のブリーフ' },
   { id: 'weekly-brief', name: '週次ブリーフ' },
-  { id: 'inbox-triage', name: '受信箱整理・返信起案' },
+  { id: 'inbox-triage', name: 'メール整理・下書き作成' },
 ];
 
 test('ファイルを受け取る業務と秘書の調べものは、定時実行に登録できない', () => {
