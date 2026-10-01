@@ -163,6 +163,12 @@ export interface Tool {
    * @remarks 1 つの段で 1 度しか行わない操作に付ける（同じスペースへの投稿など）。持たないツールは、引数が違えば別の操作として記録する
    */
   planKey?(args: Record<string, unknown>): string;
+  /**
+   * 会社のデータを読まず、外部の AI に渡しても会社や顧客の個人の情報が出ないツールか（仕様書 第16.3.7.1節、ADR-0059）。
+   *
+   * @remarks 印のあるツールだけを持つ業務は「外部の AI を使ってよい」業務にできる。迷うツールには付けない
+   */
+  externalSafe?: boolean;
   invoke(args: Record<string, unknown>, ctx: ToolContext): Promise<unknown>;
 }
 

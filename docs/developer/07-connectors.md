@@ -109,8 +109,8 @@ allowed-tools: deepwiki.ask_wiki_question deepwiki.read_wiki_structure document.
 metadata:
   m2office-id: jp.m2office.samples.deepwiki-research
   m2office-inputs: |
-    リポジトリ: 短文
-    知りたいこと: 長文
+    リポジトリ: text
+    知りたいこと: textarea
 ---
 
 # リポジトリ調査（DeepWiki）

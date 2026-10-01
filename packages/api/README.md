@@ -267,6 +267,8 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/admin/audit-events/export` | 管理者: 同じ絞り込みで CSV（BOM 付き UTF-8）を返す。出力したことを `audit.export` として記録する |
 | `GET /v1/admin/connectors` | 管理者: 接続の状態（Google Workspace が本物か見本か、LLM の提供者）。画面からは使っていない（仕様書 第6.6.3.0節）。後方互換のために残す |
 | `GET /v1/admin/connections` | 管理者: 接続の設定（Gemini の契約の形態・鍵の登録の有無・モデル、Google の OAuth クライアント・リダイレクト URI・求める許可・従業員の接続状況）。秘密の値は返さない |
+| `PUT /v1/admin/connections/ai-policy` | 管理者: 会社の AI の方針（`mode`: `cloud`・`local-first`・`local-only`）。ローカルの方針はローカルの形（`M2O_DEPLOYMENT=onsite`）でだけ選べ、クラウドの形では 400（仕様書 第16.3.7.1節）。`GET /v1/admin/connections` の `ai` に配備の形・方針・ローカル AI の設定の有無が出る |
+| `POST /v1/admin/connections/local-llm/test` | 管理者: ローカル AI に届くかを確かめる（使えるモデルの名前を返す。何も変えない） |
 | `PUT /v1/admin/connections/gemini` | 管理者: Gemini の設定（`mode`・`apiKey`（渡したときだけ上書き）・`models`）。鍵は暗号化して保存 |
 | `DELETE /v1/admin/connections/gemini/key` | 管理者: 自社の鍵を削除（運営一括に戻る） |
 | `POST /v1/admin/connections/gemini/test` | 管理者: 接続の確認（`kind`: `text` か `live`） |

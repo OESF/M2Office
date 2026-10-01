@@ -878,7 +878,8 @@ export class PostgresRepository implements Repository {
       dashboard: TenantSettings['dashboard'] | null; invoice: TenantSettings['invoice'] | null;
       cards: TenantSettings['cards'] | null; inventory: Partial<TenantSettings['inventory']> | null;
       hr: Partial<TenantSettings['hr']> | null; signage: Partial<TenantSettings['signage']> | null;
-    }>(tenantId, `select company, writing_style, automation, agents, effect, onboarding, access, slides, knowledge, privacy, dashboard, invoice, cards, inventory, hr, signage
+      ai_policy: Partial<TenantSettings['aiPolicy']> | null;
+    }>(tenantId, `select company, writing_style, automation, agents, effect, onboarding, access, slides, knowledge, privacy, dashboard, invoice, cards, inventory, hr, signage, ai_policy
                     from tenant_settings where tenant_id = $1`,
       [tenantId]);
     const r = rows[0];
@@ -922,6 +923,7 @@ export class PostgresRepository implements Repository {
         shift: { ...d.hr.shift, ...(r?.hr?.shift ?? {}) },
       },
       signage: { ...d.signage, ...(r?.signage ?? {}) },
+      aiPolicy: { ...d.aiPolicy, ...(r?.ai_policy ?? {}) },
     };
   }
 
@@ -932,6 +934,7 @@ export class PostgresRepository implements Repository {
       company: 'company', writingStyle: 'writing_style', automation: 'automation', agents: 'agents',
       effect: 'effect', onboarding: 'onboarding', access: 'access', slides: 'slides', knowledge: 'knowledge', privacy: 'privacy',
       dashboard: 'dashboard', invoice: 'invoice', cards: 'cards', inventory: 'inventory', hr: 'hr', signage: 'signage',
+      aiPolicy: 'ai_policy',
     } as const)[section];
     // 列名は上の固定の対応表からのみ取る。利用者の入力を SQL に埋め込まない
     await this.q(tenantId,
@@ -1747,6 +1750,7 @@ export class PostgresRepository implements Repository {
   async listConnections(tenantId: string): Promise<TenantConnection[]> {
     return this.q<TenantConnection>(tenantId,
       `select tenant_id as "tenantId", id, name, description, transport, url, auth, tools, origin,
+              coalesce(send_policy, 'block') as "sendPolicy",
               created_by as "createdBy", created_at as "createdAt", updated_at as "updatedAt"
          from tenant_connections where tenant_id = $1 order by id`,
       [tenantId]);
@@ -1754,13 +1758,14 @@ export class PostgresRepository implements Repository {
 
   async saveConnection(c: TenantConnection): Promise<void> {
     await this.q(c.tenantId,
-      `insert into tenant_connections (tenant_id, id, name, description, transport, url, auth, tools, origin, created_by, created_at, updated_at)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+      `insert into tenant_connections (tenant_id, id, name, description, transport, url, auth, tools, origin, created_by, created_at, updated_at, send_policy)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
        on conflict (tenant_id, id) do update set
          name = excluded.name, description = excluded.description, transport = excluded.transport, url = excluded.url,
-         auth = excluded.auth, tools = excluded.tools, origin = excluded.origin, updated_at = excluded.updated_at`,
+         auth = excluded.auth, tools = excluded.tools, origin = excluded.origin, updated_at = excluded.updated_at,
+         send_policy = excluded.send_policy`,
       [c.tenantId, c.id, c.name, c.description, c.transport, c.url, JSON.stringify(c.auth), JSON.stringify(c.tools),
-        c.origin, c.createdBy, c.createdAt, c.updatedAt]);
+        c.origin, c.createdBy, c.createdAt, c.updatedAt, c.sendPolicy ?? 'block']);
   }
 
   async deleteConnection(tenantId: string, id: string): Promise<boolean> {

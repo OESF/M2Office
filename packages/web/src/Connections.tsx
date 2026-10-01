@@ -56,6 +56,8 @@ export function Connections({ page }: { page: string }) {
   return (
     <>
       <PageTitle trail={['接続', TITLES[page] ?? '']} help={CONNECTION_HELP[page]} />
+      {/* 会社の AI の方針は、ローカルの形（社内の 1 台に入れた M2Office）でだけ出す（仕様書 第8.6節・第16.3.7.1節） */}
+      {page === 'gemini' && data.ai.deployment === 'onsite' && <AiPolicyCard data={data.ai} onSaved={() => void load()} />}
       {page === 'gemini' && <GeminiCard data={data.gemini} onSaved={() => void load()} />}
       {(page === 'google' || page === 'permissions' || page === 'people') && (
         <GoogleCard data={data.google} page={page} onSaved={() => void load()} />
@@ -125,6 +127,47 @@ function RetentionCard() {
         }}>保存</button>
       </div>
       {msg && <p className={msg.ok ? 'ok-msg' : 'error'}>{msg.text}</p>}
+    </div>
+  );
+}
+
+/**
+ * 会社の AI の方針（仕様書 第16.3.7.1節、ADR-0059）。顧客の個人の情報を外部の AI に渡さないことを、仕組みで守る。
+ *
+ * @remarks ローカルの形でだけ出す。ローカル AI に届くかをその場で確かめられる
+ */
+function AiPolicyCard({ data, onSaved }: { data: ConnectionSettings['ai']; onSaved: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const choose = async (mode: ConnectionSettings['ai']['policy']) => {
+    setBusy(true);
+    setNote(null);
+    try { await api.admin.saveAiPolicy(mode); onSaved(); } catch (e) { setNote(describeError(e, '変えられませんでした')); } finally { setBusy(false); }
+  };
+  const test = async () => {
+    setBusy(true);
+    try {
+      const r = await api.admin.testLocalLlm();
+      setNote(r.ok ? `ローカル AI に届きました（モデル: ${(r.models ?? []).join('、') || '一覧なし'}）` : `ローカル AI に届きません: ${r.error ?? ''}`);
+    } finally { setBusy(false); }
+  };
+  const options: { value: ConnectionSettings['ai']['policy']; label: string }[] = [
+    { value: 'local-first', label: 'ローカルを既定' }, { value: 'local-only', label: 'ローカルだけ' }, { value: 'cloud', label: 'クラウド' },
+  ];
+  return (
+    <div className="card">
+      <h3>AI の方針</h3>
+      <div className="segmented small" role="group" aria-label="AI の方針">
+        {options.map((o) => (
+          <button key={o.value} className={data.policy === o.value ? 'on' : ''} aria-pressed={data.policy === o.value} disabled={busy}
+            onClick={() => { if (data.policy !== o.value) void choose(o.value); }}>{o.label}</button>
+        ))}
+      </div>
+      <div className="row small">
+        <span className={data.localConfigured ? 'muted' : 'error-inline'}>{data.localConfigured ? 'ローカル AI: 設定あり' : 'ローカル AI: 設定がありません'}</span>
+        <button className="btn ghost small" disabled={busy || !data.localConfigured} onClick={() => void test()}>ローカル AI を確かめる</button>
+        {note && <span className="small">{note}</span>}
+      </div>
     </div>
   );
 }

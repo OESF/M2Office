@@ -44,11 +44,11 @@ $ARGUMENTS
 `;
 
 test('フロントマターを読む（一覧・真偽・複数行の文字・metadata）。無くても全体を本文として読む', () => {
-  const p = parseSkill('---\nname: x\narguments: [a, b]\ntags:\n  - one\n  - "two"\nuser-invocable: no\nmetadata:\n  m2office-inputs: |\n    申請: 長文\n    期限: 日付（任意）\n---\n本文');
+  const p = parseSkill('---\nname: x\narguments: [a, b]\ntags:\n  - one\n  - "two"\nuser-invocable: no\nmetadata:\n  m2office-inputs: |\n    申請: textarea\n    期限?: date\n---\n本文');
   assert.deepEqual(p.frontmatter['arguments'], ['a', 'b']);
   assert.deepEqual(p.frontmatter['tags'], ['one', 'two']);
   assert.equal(p.frontmatter['user-invocable'], 'no');
-  assert.equal((p.frontmatter['metadata'] as Record<string, string>)['m2office-inputs'], '申請: 長文\n期限: 日付（任意）');
+  assert.equal((p.frontmatter['metadata'] as Record<string, string>)['m2office-inputs'], '申請: textarea\n期限?: date');
   assert.deepEqual(parseSkill('# 見出しだけ'), { frontmatter: {}, body: '# 見出しだけ' });
 });
 
@@ -75,14 +75,31 @@ test('$ARGUMENTS・$N・$名前 を入力で置き換える（スキルと同じ
   assert.equal(substituteArguments('依頼: $ARGUMENTS', { request: '見積を確認して' }, []), '依頼: 見積を確認して');
 });
 
-test('arguments から入力の欄を作る。m2office-inputs があれば種類付きの欄にする', () => {
+test('arguments から入力の欄を作る。m2office-inputs があれば型付きの欄にする（欄の名前: 型。任意は名前の後ろに ?）', () => {
   const byArgs = parseInputs(undefined, ['会議名', '記録'], '9月度 営業定例');
   assert.deepEqual(byArgs.schema.required, ['会議名', '記録']);
   assert.deepEqual(byArgs.schema.properties['会議名']!.examples, ['9月度 営業定例']);
-  const typed = parseInputs('申請の内容: 長文\n対象期間を指定: 日付（任意）', ['無視される']);
-  assert.deepEqual(typed.schema.required, ['申請の内容']);
+  const typed = parseInputs('申請の内容: textarea\n対象期間を指定?: date\n- 宛先 : Text\n添付 ？: file', ['無視される']);
+  assert.deepEqual(typed.problems, []);
+  assert.deepEqual(typed.schema.required, ['申請の内容', '宛先']);
+  assert.equal(typed.schema.properties['申請の内容']!.format, 'textarea');
   assert.equal(typed.schema.properties['対象期間を指定']!.format, 'date');
-  assert.match(parseInputs('期限: 時刻').problems[0]!, /種類は/);
+  assert.equal(typed.schema.properties['宛先']!.format, undefined, 'text は 1 行の欄。型は大文字でもよい');
+  assert.equal(typed.schema.properties['添付']!.format, 'file');
+  assert.match(parseInputs('期限: time').problems[0]!, /型は text・textarea・date・file/);
+  assert.equal(parseInputs('?: text').problems.length, 1, '名前の無い欄は読めない');
+  // 型の後ろの "…" は欄に薄く出す例。argument-hint より先に効き、「例:」は付けなくてよい
+  const hinted = parseInputs('臨床の質問: textarea "58 歳男性。2 週間続く咳"\n専門分野?: text "例: 呼吸器内科"\nメモ?: text', [], '引数の例');
+  assert.deepEqual(hinted.problems, []);
+  assert.deepEqual(hinted.schema.properties['臨床の質問']!.examples, ['58 歳男性。2 週間続く咳']);
+  assert.deepEqual(hinted.schema.properties['専門分野']!.examples, ['呼吸器内科']);
+  assert.equal(hinted.schema.properties['メモ']!.examples, undefined);
+  assert.deepEqual(parseInputs('記録: file\n要点: textarea', [], '引数の例').schema.properties['要点']!.examples, ['引数の例'], '欄ごとの例が無ければ argument-hint');
+  assert.match(parseInputs('契約書: file "NDA"').problems[0]!, /ファイルの欄には例を出せません/);
+  assert.equal(parseInputs('名前: text 例').problems.length, 1, '例は "…" で囲む');
+  // 第 0.210.0 版までの日本語の書き方も同じ欄になる（配った拡張機能を壊さない）
+  const legacy = parseInputs('申請の内容: 長文\n対象期間を指定: 日付（任意）\n宛先: 短文\n添付: ファイル(任意)');
+  assert.deepEqual(legacy.schema, parseInputs('申請の内容: textarea\n対象期間を指定?: date\n宛先: text\n添付?: file').schema);
 });
 
 test('disable-model-invocation は秘書が取り次がない。user-invocable: false はメニューに出さない', () => {
@@ -206,7 +223,7 @@ test('学ばない業務の印・推論の強さの上限・ファイルの欄�
     'SKILL.md': [
       '---', 'name: contract-review', 'description: 契約書を読んで注意したい点をまとめる', 'effort: xhigh', 'argument-hint: 損害賠償が心配',
       'allowed-tools: file.read_text docx.render', 'metadata:', '  m2office-private: "true"', '  m2office-inputs: |',
-      '    契約書: ファイル', '    気になる点・背景: 長文（任意）', '---', '# 契約書チェック', '契約書: $契約書',
+      '    契約書: file', '    気になる点・背景?: textarea', '---', '# 契約書チェック', '契約書: $契約書',
     ].join('\n'),
   });
   assert.deepEqual(problems, []);

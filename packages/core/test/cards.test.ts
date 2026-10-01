@@ -220,7 +220,7 @@ test('メールの確認: 推論の振り分けを読み、返信・対応が要
   assert.match(text, /宣伝・お知らせ（1）\*\*\nBvlgari$/m, '宣伝は差出人だけ');
   assert.match(text, /ほかに 26 件の未読は見ていません/);
   assert.deepEqual(parseMailVerdicts('読めない答え', 2).map((v) => v.group), ['read', 'read'], '読めなければ推測で返信にしない');
-  assert.equal(senderName('"山田 太郎" <a@b.jp>'), '山田 太郎');
+  assert.equal(senderName('"山田 太郎" <a@b.example>'), '山田 太郎');
 });
 
 test('未読メールの定型の答えは、人の連絡先を尋ねる依頼に当てない', () => {

@@ -95,6 +95,8 @@ export const meetingGetTranscript: Tool = {
 /** 文書を生成して成果物として保存する。 */
 export const documentCreate: Tool = {
   name: 'document.create',
+  // 推論が書いた文を会社の置き場に保存するだけで、会社のデータを読まない（第16.3.7.1節）
+  externalSafe: true,
   risk: 'draft',
   activityLabel: '資料を作成しています',
   helpText: '文書を作り、成果物として保存します。社外へは出しません',

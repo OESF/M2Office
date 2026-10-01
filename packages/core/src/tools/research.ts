@@ -21,6 +21,8 @@ import { SlidePlanError, normalizeSlidePlan, planOutline } from '../slides/plan.
  */
 export const webResearch: Tool = {
   name: 'web.research',
+  // 調べる言葉だけを外部（Google）に送り、会社のデータを読まない（第16.3.7.1節）
+  externalSafe: true,
   risk: 'read',
   activityLabel: 'Web で調べています（リサーチ中）',
   helpText: 'テーマを Google 検索で調べ、出典つきでまとめます。調べる言葉は Google に送られますが、どこにも書き込みません',

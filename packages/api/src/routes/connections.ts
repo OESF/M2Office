@@ -122,7 +122,15 @@ export function connectionsRoute(deps: AppDeps) {
     ]);
     const gmeta = (gemini?.meta ?? {}) as GeminiSettingsMeta;
     const need = required.map((r) => r.scope);
+    const settings = await deps.repo.getTenantSettings(tenant.id);
     return c.json({
+      // 配備の形と会社の AI の方針（仕様書 第8.6節・第16.3.7.1節）。ローカルの方針はローカルの形でだけ選べる
+      ai: {
+        deployment: deps.ai.deployment(),
+        policy: settings.aiPolicy.mode,
+        effective: await deps.ai.policyFor(tenant.id),
+        localConfigured: deps.ai.localLlm().name === 'local',
+      },
       gemini: {
         mode: gmeta.mode ?? 'platform',
         keyRegistered: !!gemini?.secretEnc,
@@ -150,6 +158,35 @@ export function connectionsRoute(deps: AppDeps) {
         }),
       },
     });
+  });
+
+  /**
+   * 会社の AI の方針を変える（仕様書 第16.3.7.1節、ADR-0059）。本文 `{ mode }`（`cloud`・`local-first`・`local-only`）。
+   *
+   * @remarks ローカルを既定・ローカルだけは、ローカルの形（第8.6節）でだけ選べる。クラウドの形では 400
+   */
+  app.put('/ai-policy', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const body = await c.req.json<{ mode?: unknown }>().catch(() => ({} as { mode?: unknown }));
+    if (body.mode !== 'cloud' && body.mode !== 'local-first' && body.mode !== 'local-only') {
+      return c.json({ error: 'mode は cloud・local-first・local-only のどれかです' }, 400);
+    }
+    if (body.mode !== 'cloud' && deps.ai.deployment() !== 'onsite') {
+      return c.json({ error: 'ローカル AI の方針は、ローカルの形（会社の中の 1 台に入れた M2Office）でだけ選べます' }, 400);
+    }
+    await deps.repo.saveTenantSettings(tenant.id, 'aiPolicy', { mode: body.mode }, user.id);
+    await deps.repo.appendAudit({
+      id: randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id, action: 'settings.update',
+      targetType: 'settings', targetId: 'aiPolicy', detail: { mode: body.mode }, occurredAt: new Date().toISOString(),
+    });
+    return c.json({ ok: true, mode: body.mode });
+  });
+
+  /** ローカル AI に届くかを確かめる（第16.3.7.1節）。届けば使えるモデルの名前を返す。何も変えない。 */
+  app.post('/local-llm/test', async (c) => {
+    const llm = deps.ai.localLlm() as { name: string; check?: () => Promise<{ ok: boolean; models?: string[]; error?: string }> };
+    if (llm.name !== 'local' || !llm.check) return c.json({ ok: false, error: 'ローカル AI が設定されていません（LOCAL_LLM_URL・LOCAL_LLM_MODEL）' });
+    return c.json(await llm.check());
   });
 
   /**

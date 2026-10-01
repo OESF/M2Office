@@ -20,7 +20,13 @@ import { MockResearchProvider } from '../research/provider.js';
 import { StubLlmProvider } from '../llm/stub.js';
 import { AiNotConfiguredError, UnconfiguredLlmProvider, UnconfiguredResearchProvider } from '../llm/unconfigured.js';
 import { defaultGeminiModels } from '../llm/models.js';
-import type { EvalCase } from '@m2office/shared';
+import type { AgentDefinition, AiPolicyMode, EvalCase } from '@m2office/shared';
+import { LocalLlmProvider, type LocalLlmConfig } from '../llm/local.js';
+import {
+  AiPolicyBlockedError, LOCAL_AI_NOT_CONFIGURED, PolicyBlockedLlmProvider, PolicyBlockedResearchProvider, effectiveAiPolicy, externalAiAllowed,
+  isLocalPolicy, type AiKind, type Deployment,
+} from '../llm/policy.js';
+import type { ToolRegistry } from '../tools/registry.js';
 
 /** 役割ごとのモデル名。 */
 export interface GeminiModels {
@@ -58,6 +64,12 @@ export interface TenantAiResolverDeps {
   baseUrl: string;
   /** 自動テストか（`LLM_PROVIDER=stub`）。見本の音声を使ってよいのはこのときだけ（仕様書 第20.2.4節）。 */
   testMode?: boolean;
+  /** 配備の形（仕様書 第8.6節）。既定はクラウド。 */
+  deployment?: Deployment;
+  /** ローカル AI（ローカル LLM）の口。ローカルの形で、ローカルの方針の会社が使う（第16.3.7.1節）。無ければ `null`。 */
+  local?: LocalLlmConfig | null;
+  /** ローカル AI の代わり（自動テスト用）。与えれば `local` より優先する。 */
+  localLlm?: LlmProvider;
 }
 
 /**
@@ -111,8 +123,73 @@ export class TenantAiResolver {
     return { source: this.deps.platformKey ? 'platform' : 'none', apiKey: this.deps.platformKey, models };
   }
 
-  /** 会社の推論。会社の鍵があればその鍵、無ければ既定。 */
+  /** 配備の形。 */
+  deployment(): Deployment {
+    return this.deps.deployment ?? 'cloud';
+  }
+
+  /** 実際に効く会社の AI の方針（ローカルの形でだけローカルの方針が効く。第16.3.7.1節）。 */
+  async policyFor(tenantId: string): Promise<AiPolicyMode> {
+    if (this.deployment() !== 'onsite') return 'cloud';
+    return effectiveAiPolicy('onsite', await this.deps.repo.getTenantSettings(tenantId));
+  }
+
+  /** ローカル AI。設定が無ければ、使えないことを伝える推論。 */
+  localLlm(): LlmProvider {
+    if (this.deps.localLlm) return this.deps.localLlm;
+    return this.deps.local ? (this.localProvider ??= new LocalLlmProvider(this.deps.local)) : new PolicyBlockedLlmProvider(LOCAL_AI_NOT_CONFIGURED);
+  }
+
+  private localProvider: LocalLlmProvider | undefined;
+
+  /**
+   * 会社の推論。**ローカルの方針の会社ではローカル AI を返す**（秘書・記憶・名刺の読み取りなど、業務の外の推論はすべてこれを使う）。
+   * クラウドの方針の会社では、会社の鍵があればその鍵、無ければ既定。
+   */
   async llmFor(tenantId: string): Promise<LlmProvider> {
+    if (isLocalPolicy(await this.policyFor(tenantId))) return this.localLlm();
+    return this.cloudLlm(tenantId);
+  }
+
+  /**
+   * 業務の 1 回の実行に使う推論と、その種類（第16.3.7.1節「途中で切り替えない」）。
+   *
+   * @remarks ローカルを既定の会社では、「外部の AI を使ってよい」印があり、会社のデータを読むツールとファイルの欄を持たない業務だけ外部の AI。
+   * それ以外と、ローカルだけの会社はローカル AI
+   */
+  async llmForRun(
+    tenantId: string, def: AgentDefinition, registry: Pick<ToolRegistry, 'get'>, previous?: AiKind,
+  ): Promise<{ llm: LlmProvider; kind: AiKind; note?: string }> {
+    const mode = await this.policyFor(tenantId);
+    // 1 つの実行の中で AI を切り替えない。前の段がローカル AI なら、方針が変わってもローカル AI のまま続ける。
+    // 前の段が外部の AI でも、いまの方針が外部を許さなければ続けない（厳しい方を採る）
+    if (previous === 'local') return { llm: this.localLlm(), kind: 'local' };
+    if (previous && isLocalPolicy(mode) && !(mode === 'local-first' && previous === 'external')) {
+      return { llm: new PolicyBlockedLlmProvider('会社の AI の方針が変わったため、外部の AI で始めたこの業務は続けられません。もう一度依頼してください'), kind: previous };
+    }
+    if (mode === 'cloud') return { llm: await this.cloudLlm(tenantId), kind: 'cloud' };
+    if (mode === 'local-first' && def.externalAi) {
+      const check = externalAiAllowed(def, registry);
+      if (check.ok) return { llm: await this.cloudLlm(tenantId), kind: 'external' };
+      return { llm: this.localLlm(), kind: 'local', note: check.reason };
+    }
+    return { llm: this.localLlm(), kind: 'local' };
+  }
+
+  /**
+   * 会社の接続（社外のサービス）に送ってよいか（第16.3.7.1節「外部のサービスへの接続」）。
+   *
+   * @returns 送れなければ理由。クラウドの方針の会社と、管理者が「個人を特定する情報を除いて送ってよい」と決めた接続は `null`
+   */
+  async connectionBlocked(tenantId: string, connectionId: string): Promise<string | null> {
+    if (!isLocalPolicy(await this.policyFor(tenantId))) return null;
+    const conn = (await this.deps.repo.listConnections(tenantId)).find((c) => c.id === connectionId);
+    if (conn?.sendPolicy === 'deidentified') return null;
+    return 'ローカルの方針のため、この接続（社外のサービス）には送りません。送ってよい場合は、管理者ページの「接続」で決めてください';
+  }
+
+  /** クラウドの AI（Gemini）。会社の鍵があればその鍵、無ければ既定。 */
+  private async cloudLlm(tenantId: string): Promise<LlmProvider> {
     return (await this.entry(tenantId))?.llm ?? this.deps.fallbackLlm;
   }
 
@@ -123,6 +200,10 @@ export class TenantAiResolver {
    * @throws {AiNotConfiguredError} 鍵が無いとき（自動テストを除く）
    */
   async voiceFor(tenantId: string): Promise<VoiceProvider> {
+    // 音声の秘書は外部の音声のサービスを使う。ローカルの方針の会社では使わない（第8.6節、Q-157）
+    if (isLocalPolicy(await this.policyFor(tenantId))) {
+      throw new AiPolicyBlockedError('ローカルの方針のため、音声の秘書は使えません（外部の音声のサービスを使うため）。文字で話しかけてください');
+    }
     const g = await this.geminiFor(tenantId);
     if (!g.apiKey) {
       if (this.deps.testMode) return new MockVoiceProvider();
@@ -131,8 +212,13 @@ export class TenantAiResolver {
     return new GeminiLiveProvider({ apiKey: g.apiKey, model: g.models.live });
   }
 
-  /** 会社の Web の調査。 */
+  /**
+   * 会社の Web の調査。調べる言葉だけを外部（Google）に送る。ローカルだけの会社では使わない（第16.3.7.1節）。
+   */
   async researchFor(tenantId: string): Promise<ResearchProvider> {
+    if ((await this.policyFor(tenantId)) === 'local-only') {
+      return new PolicyBlockedResearchProvider('ローカルだけの方針のため、Web の調べものは使えません');
+    }
     return (await this.entry(tenantId))?.research ?? this.deps.fallbackResearch;
   }
 

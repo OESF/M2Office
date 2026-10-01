@@ -978,8 +978,8 @@ test('ツールの呼び出しを業務の言葉にする（知らないツー�
   assert.equal(jpDate('2026-09-29'), '2026年9月29日');
   assert.equal(jpDate('2026-09-30T10:00:00+09:00'), '2026年9月30日 10:00');
   assert.equal(describeCall({ name: 'tasks.complete', args: { taskId: 'abc' } }), '**ToDo を完了にします**');
-  assert.equal(describeCall({ name: 'gmail.send', args: { to: ['a@x.jp'], cc: [], subject: '件', body: '本文' } }),
-    '**メールを送ります**: 宛先 a@x.jp／件名「件」\n> 本文');
+  assert.equal(describeCall({ name: 'gmail.send', args: { to: ['a@x.example'], cc: [], subject: '件', body: '本文' } }),
+    '**メールを送ります**: 宛先 a@x.example／件名「件」\n> 本文');
   const unknown = describeCall({ name: 'x.do', args: { fileId: 'secret-id', title: '報告' } }, { helpText: () => '報告を作ります。社外へは出しません' });
   assert.equal(unknown, '**報告を作ります**: 報告');
 });

@@ -23,9 +23,9 @@ function setup(features: Partial<InventorySettings['features']> = {}) {
   const notifications: Notification[] = [];
   const prefs = new Map<string, UserSettings>();
   const users: User[] = [
-    { id: 'u-admin', tenantId: 't1', email: 'a@x.jp', displayName: '管理者', roles: ['admin'], status: 'active' } as User,
-    { id: 'u-staff', tenantId: 't1', email: 's@x.jp', displayName: '担当', roles: ['member'], status: 'active' } as User,
-    { id: 'u-other', tenantId: 't1', email: 'o@x.jp', displayName: 'ほか', roles: ['member'], status: 'active' } as User,
+    { id: 'u-admin', tenantId: 't1', email: 'a@x.example', displayName: '管理者', roles: ['admin'], status: 'active' } as User,
+    { id: 'u-staff', tenantId: 't1', email: 's@x.example', displayName: '担当', roles: ['member'], status: 'active' } as User,
+    { id: 'u-other', tenantId: 't1', email: 'o@x.example', displayName: 'ほか', roles: ['member'], status: 'active' } as User,
   ];
   const repo = {
     getTenantSettings: async () => ({ ...DEFAULT_TENANT_SETTINGS, inventory: settings }),

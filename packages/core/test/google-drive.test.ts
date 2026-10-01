@@ -139,7 +139,7 @@ async function withDrive(fn: (c: GoogleWorkspaceConnector, seen: Seen[]) => Prom
   const g = await fakeDrive(pdf);
   const box = new SecretBox('テストの鍵');
   const repo = {
-    getGoogleConnection: async () => ({ tenantId: P.tenantId, userId: P.userId, refreshTokenEnc: box.encrypt('rt'), googleEmail: 'u1@x.jp', scopes: [], connectedAt: '', checkedAt: '' }),
+    getGoogleConnection: async () => ({ tenantId: P.tenantId, userId: P.userId, refreshTokenEnc: box.encrypt('rt'), googleEmail: 'u1@x.example', scopes: [], connectedAt: '', checkedAt: '' }),
     getTenantCredential: async () => ({ tenantId: P.tenantId, kind: 'google_oauth', secretEnc: box.encrypt('s'), meta: { clientId: 'cid' }, updatedBy: 'x', updatedAt: '' }),
   } as unknown as Repository;
   try { await fn(new GoogleWorkspaceConnector(repo, box, g.endpoints), g.seen); } finally { await g.close(); }
@@ -186,13 +186,13 @@ test('ドライブ: フォルダを作る。共有は指定した人にだけで
     assert.deepEqual(JSON.parse(seen.find((s) => s.path === '/drive/files' && s.method === 'POST')!.body), { name: '2026 年の議事録', mimeType: `${G}folder` });
     await assert.rejects(c.drive.createFolder(P, { name: 'x', parentId: 'NOPE' }), /親のフォルダが見つかりません/);
 
-    assert.deepEqual(await c.drive.share(P, { fileId: 'DOC1', emails: ['a@x.jp', ' ', 'b@x.jp'], role: 'commenter' }), { fileId: 'DOC1', sharedWith: ['a@x.jp', 'b@x.jp'] });
+    assert.deepEqual(await c.drive.share(P, { fileId: 'DOC1', emails: ['a@x.example', ' ', 'b@x.example'], role: 'commenter' }), { fileId: 'DOC1', sharedWith: ['a@x.example', 'b@x.example'] });
     const perms = seen.filter((s) => s.path === '/drive/files/DOC1/permissions');
     assert.deepEqual(perms.map((s) => JSON.parse(s.body)), [
-      { type: 'user', role: 'commenter', emailAddress: 'a@x.jp' }, { type: 'user', role: 'commenter', emailAddress: 'b@x.jp' },
+      { type: 'user', role: 'commenter', emailAddress: 'a@x.example' }, { type: 'user', role: 'commenter', emailAddress: 'b@x.example' },
     ]);
     assert.ok(perms.every((s) => !s.body.includes('anyone')), 'リンクを知っている全員への公開は作らない');
-    assert.equal(await c.drive.share(P, { fileId: 'NOPE', emails: ['a@x.jp'], role: 'reader' }), null, '見えないファイルは共有しない');
+    assert.equal(await c.drive.share(P, { fileId: 'NOPE', emails: ['a@x.example'], role: 'reader' }), null, '見えないファイルは共有しない');
     await assert.rejects(c.drive.share(P, { fileId: 'DOC1', emails: ['z@outside.example'], role: 'reader' }), /要求を受け付けませんでした（HTTP 403・publishOutNotPermitted）/, '社外への共有を会社が禁じていれば、Google が断る');
   });
 });

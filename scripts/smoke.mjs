@@ -68,7 +68,7 @@ async function waitFor(tenant, runId, statuses, timeoutMs = 20000, who = 'admin'
 /**
  * SKILL.md の拡張機能を ZIP にする（仕様書 第12.12節。JSON の定義は第 0.131.0 版で廃止した）。
  *
- * @param o.inputs 入力の欄（`m2office-inputs` の行。例: `memo: 短文`）
+ * @param o.inputs 入力の欄（`m2office-inputs` の行。例: `memo: text`）
  * @param o.stub 自動テスト用の見本の応答（段の ID ごと。スキルの段は work・approve・send）
  */
 async function skillZip(o) {
@@ -1051,7 +1051,7 @@ console.log('\n■ 21b. 会社の接続（MCP を拡張機能から切り離し�
   const AG = `${EXT}:deals`;
   await call('a', `/v1/admin/extensions/${EXT}`, { method: 'DELETE' });
   const data = await skillZip({
-    id: EXT, name: 'deals', title: '確認用: 商談を探す', tools: ['crm.list_deals'], inputs: ['会社: 短文'], input: { 会社: '見本商事' },
+    id: EXT, name: 'deals', title: '確認用: 商談を探す', tools: ['crm.list_deals'], inputs: ['会社: text'], input: { 会社: '見本商事' },
     stub: { work: [{ name: 'crm.list_deals', args: { company: '見本商事' } }] },
   });
   await call('a', '/v1/admin/extensions/import', { method: 'POST', body: data, headers: { 'content-type': 'application/octet-stream' } });
@@ -1300,7 +1300,7 @@ console.log('\n■ 25. Google Workspace のツール（第 1 弾）');
     ],
     send: [{ name: 'gmail.send', args: { to: ['sato@customer.example.jp'], subject: '決定事項（確認用）', body: '確認用の本文' } }],
   };
-  const pack = () => skillZip({ id: EXT, name: 'memo-to-sheet', title: '確認用: 会議メモを表にして送る', tools, inputs: ['memo: 短文'], input, stub });
+  const pack = () => skillZip({ id: EXT, name: 'memo-to-sheet', title: '確認用: 会議メモを表にして送る', tools, inputs: ['memo: text'], input, stub });
   const upload = async (data) => call('a', '/v1/admin/extensions/import', { method: 'POST', body: data, headers: { 'content-type': 'application/octet-stream' } });
 
   const imp = await upload(await pack());
@@ -1355,7 +1355,7 @@ console.log('\n■ 26. Google Workspace のツール（第 2 弾）');
       { name: 'docs.create', args: { title: '営業定例の記録（確認用）', body: '営業定例の記録の見本' } },
     ],
   };
-  const data = await skillZip({ id: EXT, name: 'meeting-share', title: '確認用: 会議の記録を共有する', tools, inputs: ['meeting: 短文'], input, stub });
+  const data = await skillZip({ id: EXT, name: 'meeting-share', title: '確認用: 会議の記録を共有する', tools, inputs: ['meeting: text'], input, stub });
   await call('a', '/v1/admin/extensions/import', { method: 'POST', body: data, headers: { 'content-type': 'application/octet-stream' } });
   await call('a', `/v1/admin/extensions/${EXT}/install`, { method: 'POST', body: JSON.stringify({ consent: true }) });
   const { body: job } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: AG, input }) }, 'member');
@@ -1390,7 +1390,7 @@ console.log('\n■ 27. Google Workspace のツール（第 3 弾: フォーム�
       { name: 'sheets.create', args: { title: 'アンケートの集計（確認用）', columns: ['回答'], rows: [['回答の見本']] } },
     ],
   };
-  const data = await skillZip({ id: EXT, name: 'survey-summary', title: '確認用: アンケートを表にまとめる', tools, inputs: ['form: 短文'], input, stub });
+  const data = await skillZip({ id: EXT, name: 'survey-summary', title: '確認用: アンケートを表にまとめる', tools, inputs: ['form: text'], input, stub });
   await call('a', '/v1/admin/extensions/import', { method: 'POST', body: data, headers: { 'content-type': 'application/octet-stream' } });
   await call('a', `/v1/admin/extensions/${EXT}/install`, { method: 'POST', body: JSON.stringify({ consent: true }) });
   const { body: job } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: AG, input }) }, 'member');
@@ -2007,7 +2007,7 @@ console.log('\n■ 41. 帳票の PDF（第9.4.1節、Q-59・Q-57）');
 
   const bytes = await skillZip({
     id: EXT, name: 'invoice', title: '請求書の下書き', author: 'サンプル株式会社', description: '明細から請求書の PDF を作る（送信しない）',
-    tools: ['pdf.render'], inputs: ['to: 短文'], input: { to: '株式会社アルファ 御中' },
+    tools: ['pdf.render'], inputs: ['to: text'], input: { to: '株式会社アルファ 御中' },
     body: 'pdf.render で請求書を作る。送信しない。',
     stub: {
       work: [{
@@ -2996,7 +2996,7 @@ console.log('\n■ 56. 認証の要る会社の接続（oauth・api_key。第12.
 
     // 業務は依頼した本人の認可で呼ぶ（不変則 I-9）
     const data = await skillZip({
-      id: EXT, name: 'deals', title: '確認用: 許可の要る商談', tools: ['oauthcrm.list_deals'], inputs: ['会社: 短文'], input: { 会社: '見本商事' },
+      id: EXT, name: 'deals', title: '確認用: 許可の要る商談', tools: ['oauthcrm.list_deals'], inputs: ['会社: text'], input: { 会社: '見本商事' },
       stub: { work: [{ name: 'oauthcrm.list_deals', args: { company: '見本商事' } }] },
     });
     await call('a', '/v1/admin/extensions/import', { method: 'POST', body: data, headers: { 'content-type': 'application/octet-stream' } });
@@ -3113,6 +3113,14 @@ console.log('\n■ 56b. 接続のアプリの自動登録（動的クライア�
       ? ok('相手がアプリを無効にしたら、全員の許可を消し、次の接続でアプリを登録し直す')
       : ng('無効になったアプリの扱いが違う', JSON.stringify({ registered: registered.length, revoked: revoked.back.headers.get('location'), mine1: mine1.items, again: again.u.searchParams.get('client_id') }));
 
+    // ローカルの方針のときに社外の接続へ送ってよいもの（第16.3.7.1節）。クラウドの形でも決めておける
+    const sp = await call('a', '/v1/admin/connections/mcp/dcrcrm', { method: 'PUT', body: JSON.stringify({ sendPolicy: 'deidentified' }) });
+    const spBad = await call('a', '/v1/admin/connections/mcp/dcrcrm', { method: 'PUT', body: JSON.stringify({ sendPolicy: 'all' }) });
+    const { body: l4 } = await call('a', '/v1/admin/connections/mcp');
+    sp.status === 200 && spBad.status === 400 && l4.items?.find((x) => x.id === 'dcrcrm')?.sendPolicy === 'deidentified' && l4.localPolicy === false
+      ? ok('接続ごとに、ローカルの方針のときに社外へ送ってよいもの（送らない・個人を特定する情報を除いて送る）を決められる')
+      : ng('接続の送る方針が違う', JSON.stringify({ sp: sp.status, bad: spBad.status, item: l4.items?.find((x) => x.id === 'dcrcrm')?.sendPolicy, lp: l4.localPolicy }));
+
     // 管理者が手で登録したアプリは、自動登録より先に使う
     await call('a', '/v1/admin/connections/mcp/dcrcrm/credentials', { method: 'PUT', body: JSON.stringify({ clientId: 'manual-1', clientSecret: 'msecret' }) });
     const manual = await call('a', '/v1/me/connections/dcrcrm/connect', { method: 'POST' }, 'admin');
@@ -3125,6 +3133,22 @@ console.log('\n■ 56b. 接続のアプリの自動登録（動的クライア�
     await call('a', '/v1/admin/connections/mcp/dcrcrm', { method: 'DELETE' });
     await new Promise((r) => server.close(r));
   }
+}
+
+console.log('\n■ 56c. 配備の形と会社の AI の方針（第8.6節・第16.3.7.1節、ADR-0059）');
+{
+  const { body: conn } = await call('a', '/v1/admin/connections');
+  const localFirst = await call('a', '/v1/admin/connections/ai-policy', { method: 'PUT', body: JSON.stringify({ mode: 'local-first' }) });
+  const bad = await call('a', '/v1/admin/connections/ai-policy', { method: 'PUT', body: JSON.stringify({ mode: 'everything' }) });
+  const cloud = await call('a', '/v1/admin/connections/ai-policy', { method: 'PUT', body: JSON.stringify({ mode: 'cloud' }) });
+  const byMember = await call('a', '/v1/admin/connections/ai-policy', { method: 'PUT', body: JSON.stringify({ mode: 'cloud' }) }, 'member');
+  conn.ai?.deployment === 'cloud' && conn.ai.effective === 'cloud' && localFirst.status === 400 && /ローカルの形/.test(localFirst.body.error ?? '')
+    && bad.status === 400 && cloud.status === 200 && byMember.status === 403
+    ? ok('クラウドの形では、ローカルの AI の方針は選べない（クラウドだけ。管理者だけが変えられる）')
+    : ng('AI の方針の扱いが違う', JSON.stringify({ ai: conn.ai, lf: localFirst.status, bad: bad.status, cloud: cloud.status, m: byMember.status }));
+  const test = await call('a', '/v1/admin/connections/local-llm/test', { method: 'POST', body: '{}' });
+  test.status === 200 && test.body.ok === false && /ローカル AI が設定されていません/.test(test.body.error ?? '')
+    ? ok('ローカル AI の口が無ければ、確かめると「設定されていません」と返す') : ng('ローカル AI の確かめが違う', JSON.stringify(test.body));
 }
 
 console.log('\n■ 57. 名刺管理（内蔵の拡張。第27章、ADR-0042）');
@@ -3239,6 +3263,9 @@ console.log('\n■ 57. 名刺管理（内蔵の拡張。第27章、ADR-0042）')
       const rd = (await call('a', `/v1/runs/${submit.body.runId}`, {}, 'member')).body;
       rd.plan?.length === 3 && rd.plan[1].kind === 'approval' && rd.plan.every((x) => x.label)
         ? ok('実行の詳細に、段の並び（表示名と種類）を返す') : ng('段の並びが無い', JSON.stringify(rd.plan));
+      // どの AI で動かしたかを段に残す（第16.3.7.1節）。クラウドの形の会社はクラウド
+      rd.steps?.find((x) => x.kind === 'agent')?.input?.ai === 'cloud'
+        ? ok('業務の段に、どの AI で動かしたか（クラウド）を残す') : ng('段に AI の種類が無い', JSON.stringify(rd.steps?.[0]?.input).slice(0, 200));
       const locked = await call('a', `/v1/cards/bulk-mails/${bulkId}`, { method: 'PUT', body: JSON.stringify({ subject: '変える' }) }, 'member');
       submit.status === 201 && run.run?.status === 'awaiting_approval' && appr && /まとめてのメールを送ります/.test(appr.present)
         && appr.present.includes(bm(1)) && appr.present.includes('配信を停止しています') && locked.status === 409

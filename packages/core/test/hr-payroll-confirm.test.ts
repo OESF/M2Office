@@ -44,7 +44,7 @@ test('全銀: 名前を半角のカナに直し、小さいカナは大きく、
 });
 
 test('全銀: 総合振込のファイルは 120 バイトの固定長 4 種で、件数と合計が合う', () => {
-  const client = { format: 'sogo' as const, clientCode: '1234567890', clientName: 'カ)エムツー', bankCode: '0005', bankName: 'ミツビシUFJ', branchCode: '001', branchName: 'ホンテン', accountType: '普通' as const, accountNumber: '7654321' };
+  const client = { format: 'sogo' as const, clientCode: '1234567890', clientName: 'カ)マルマル', bankCode: '0005', bankName: 'ミツビシUFJ', branchCode: '001', branchName: 'ホンテン', accountType: '普通' as const, accountNumber: '7654321' };
   const r = buildZenginFile(client, '2026-10-23', [
     { bankCode: '0001', branchCode: '100', accountType: '普通', accountNumber: '1234567', holder: 'ヤマダ ハナコ', amount: 240000, customerCode: 'A1' },
     { bankCode: '0009', branchCode: '200', accountType: '当座', accountNumber: '12', holder: 'スズキ タロウ', amount: 1000 },
@@ -62,7 +62,7 @@ test('全銀: 総合振込のファイルは 120 バイトの固定長 4 種で�
 });
 
 test('全銀: 番号の桁が違う・名義に漢字がある振込は作らずに理由を返す（漢字の銀行名は空にする）', () => {
-  const client = { format: 'kyuyo' as const, clientCode: '123', clientName: 'エムツー', bankCode: '0005', bankName: '', branchCode: '001', branchName: '', accountType: '普通' as const, accountNumber: '1' };
+  const client = { format: 'kyuyo' as const, clientCode: '123', clientName: 'マルマル', bankCode: '0005', bankName: '', branchCode: '001', branchName: '', accountType: '普通' as const, accountNumber: '1' };
   const r = buildZenginFile(client, '2026-10-23', [{ bankCode: '1', branchCode: '100', accountType: '普通', accountNumber: '1', holder: '山田', amount: 1 }]);
   assert.ok('problems' in r);
   const text = r.problems.map((p) => p.text).join('|');

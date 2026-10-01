@@ -1,0 +1,6 @@
+M2Office
+Copyright 2026 The M2Office Authors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+It includes third-party software; see the license files of each dependency
+(package.json and node_modules/*/LICENSE*) for their terms.

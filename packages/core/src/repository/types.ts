@@ -867,6 +867,11 @@ export interface TenantConnection extends ConnectorDeclaration {
   tenantId: string;
   /** 登録の由来。`manual`（管理者が登録）か `extension:<拡張機能の ID>`（同梱）。 */
   origin: string;
+  /**
+   * 会社の AI の方針が社内のとき、この接続（社外）に送ってよいもの（仕様書 第16.3.7.1節）。
+   * `deidentified`: 個人を特定する情報を除いてから送ってよい。`block`（既定）: 送らない。クラウドの方針では使わない
+   */
+  sendPolicy?: 'block' | 'deidentified';
   createdBy: string;
   createdAt: string;
   updatedAt: string;

@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import { RISK_LEVELS, type RiskLevel } from '@m2office/shared';
 import {
-  CONNECTION_PRESETS, checkConnector, discoverOAuthEndpoints, presetById, presetRisk,
+  CONNECTION_PRESETS, checkConnector, discoverOAuthEndpoints, isLocalPolicy, presetById, presetRisk,
   type ConnectorAuth, type ConnectionPreset, type TenantConnection,
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
@@ -104,10 +104,14 @@ export function mcpConnectionsRoute(deps: AppDeps) {
         })),
         // いま使える業務のうち、この接続のツールを使うもの（導入していない拡張機能の業務は数えない）
         usedBy: view.agents.filter((a) => a.tools.some((n) => n.startsWith(`${x.id}.`))).map((a) => ({ id: a.id, name: a.name })),
+        // ローカルの方針のときに、この接続（社外）に送ってよいもの（第16.3.7.1節）
+        sendPolicy: x.sendPolicy ?? 'block',
       });
     }
     return c.json({
       items,
+      // ローカルの方針か（ローカルの方針の会社だけ、接続ごとに送ってよいものを決める。第16.3.7.1節）
+      localPolicy: isLocalPolicy(await deps.ai.policyFor(tenant.id)),
       risks: RISK_LEVELS.map((r) => ({ value: r, text: RISK_WORDS[r] })),
       // よく使うサービスの型（第12.11.6.7節）。すでに登録したものも出す（同じ型を 2 つ登録するには ID を変える）
       presets: CONNECTION_PRESETS.map((p) => ({ id: p.id, name: p.name, description: p.description, url: p.url })),
@@ -218,9 +222,13 @@ export function mcpConnectionsRoute(deps: AppDeps) {
     const { tenant, user } = c.get('ctx');
     const conn = (await deps.repo.listConnections(tenant.id)).find((x) => x.id === c.req.param('id'));
     if (!conn) return c.json({ error: '接続が見つかりません' }, 404);
-    const body = await c.req.json<{ name?: string; description?: string; tools?: { name: string; risk: string }[] }>().catch(() => ({}) as Record<string, never>);
+    const body = await c.req.json<{ name?: string; description?: string; tools?: { name: string; risk: string }[]; sendPolicy?: string }>().catch(() => ({}) as Record<string, never>);
     for (const t of body.tools ?? []) {
       if (!RISK_LEVELS.includes(t.risk as RiskLevel)) return c.json({ error: `危険度は ${RISK_LEVELS.join('・')} のどれかです` }, 400);
+    }
+    // ローカルの方針のときに、この接続（社外）に送ってよいもの（第16.3.7.1節）
+    if (body.sendPolicy !== undefined && body.sendPolicy !== 'block' && body.sendPolicy !== 'deidentified') {
+      return c.json({ error: 'sendPolicy は block か deidentified です' }, 400);
     }
     const next: TenantConnection = {
       ...conn,
@@ -230,11 +238,13 @@ export function mcpConnectionsRoute(deps: AppDeps) {
         const want = body.tools?.find((x) => x.name === t.name);
         return want ? { ...t, risk: want.risk as RiskLevel } : t;
       }),
+      ...(body.sendPolicy ? { sendPolicy: body.sendPolicy as 'block' | 'deidentified' } : {}),
       updatedAt: new Date().toISOString(),
     };
     await deps.repo.saveConnection(next);
     await audit(deps, tenant.id, user.id, 'connection.mcp.update', conn.id, {
       risks: next.tools.filter((t, i) => t.risk !== conn.tools[i]?.risk).map((t) => ({ tool: t.name, risk: t.risk })),
+      ...(body.sendPolicy && body.sendPolicy !== (conn.sendPolicy ?? 'block') ? { sendPolicy: body.sendPolicy } : {}),
     });
     return c.json({ ok: true });
   });

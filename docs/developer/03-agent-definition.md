@@ -17,7 +17,7 @@ JSON で書く定義（`manifest.json`＋`agents/*.json`）は**第 0.131.0 版�
 | `when_to_use` | `description` に添えて、秘書の取り次ぎの手がかりにする |
 | 本文の最初の見出し（`# 〇〇`） | 画面に出す業務の名前。無ければ `name` |
 | 本文 | 業務の指示（推論が読む） |
-| `argument-hint` | 入力の欄に薄く出る例 |
+| `argument-hint` | 入力の欄に薄く出る例（ファイルでない最初の欄。欄ごとに変えるときは `m2office-inputs` の `"…"`） |
 | `arguments` | 入力の欄（1 つの名前が 1 つの欄）。無ければ自由記入の「依頼」の欄 1 つ |
 | `$ARGUMENTS`・`$ARGUMENTS[N]`・`$N`・`$名前` | 実行のときに入力で置き換える（`\$` は `$` のまま） |
 | `disable-model-invocation: true` | 秘書は取り次がない。メニューからだけ使う |
@@ -37,10 +37,11 @@ JSON で書く定義（`manifest.json`＋`agents/*.json`）は**第 0.131.0 版�
 |---|---|
 | `HELP.md` | 利用者向けの説明。業務の題名の「？」とヘルプセンターに出る |
 | `metadata.m2office-id` | 他の会社に配るときの ID（逆ドメイン名）。無ければ `skill.<name>`（自社専用） |
-| `metadata.m2office-inputs` | 欄に種類を付けたいとき。1 行に 1 つ「欄の名前: 種類」（`短文`・`長文`・`日付`・`ファイル`、後ろに「（任意）」） |
+| `metadata.m2office-inputs` | 欄に型を付けたいとき。1 行に 1 つ `欄の名前: 型`。型は `text`（1 行）・`textarea`（複数行）・`date`・`file`。任意の欄は名前の後ろに `?`（例: `専門分野?: text`）。欄に薄く出す例は型の後ろに `"…"`（例: `臨床の質問: textarea "60 代男性。2 週間続く咳"`。「例: 」は画面が付ける） |
 | `metadata.m2office-examples` | 業務の説明に実行例のボタンを出したいとき（1 行に 1 つ） |
 | `metadata.m2office-approver` | 社外に出すものを依頼した本人以外が承認するとき（`承認者`・`管理者`） |
 | `metadata.m2office-private` | 結果を秘書の記憶に入れたくないとき（契約書など機密の業務）。`"true"` と書くと、秘書はその結果から学ばない |
+| `metadata.m2office-external-ai` | ローカルの方針（ローカル AI を既定にする会社）でも、外部の AI（Gemini）を使ってよい業務にしたいとき。`"true"`。会社のデータを読むツール（`web.research`・`document.create` 以外）やファイルの欄を持つと効かず、ローカル AI で動く（仕様書 第16.3.7.1節） |
 
 ### M2Office が組み立てるもの
 

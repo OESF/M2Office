@@ -10,7 +10,7 @@ import {
   BRIEF_SECTIONS, WEEKLY_SECTIONS, VOICE_CHOICES, VOICE_STYLE_MAX, isValidAvatar, type UserSettings, type MenuCategory,
   CARDS_EXTENSION_ID, HR_EXTENSION_ID, SIGNAGE_EXTENSION_ID, INVENTORY_EXTENSION_ID, MENU_CATEGORY_MAX, MENU_CATEGORY_NAME_MAX,
 } from '@m2office/shared';
-import { AUDIO, AiNotConfiguredError, LEARNED_SOURCE, cleanTopics, buildPresence, loadFile, refusalMessage, refuseToRemember } from '@m2office/core';
+import { AUDIO, AiNotConfiguredError, AiPolicyBlockedError, LEARNED_SOURCE, cleanTopics, buildPresence, loadFile, refusalMessage, refuseToRemember } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 import { speakSample } from '../voice/sample.js';
@@ -156,7 +156,7 @@ export function meRoute(deps: AppDeps) {
     try {
       provider = await deps.ai.voiceFor(tenant.id);
     } catch (err) {
-      if (err instanceof AiNotConfiguredError) return c.json({ error: err.message }, 409);
+      if (err instanceof AiNotConfiguredError || err instanceof AiPolicyBlockedError) return c.json({ error: err.message }, 409);
       throw err;
     }
     // 会社の呼び方は略称（無ければ正式な会社名。仕様書 第6.6.1節）

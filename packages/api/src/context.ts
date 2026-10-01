@@ -12,7 +12,7 @@ import {
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS, GoogleDataRetention, GoogleRevocation, agentUsesGoogle,
   RunEngine, Secretary, OFFICIAL_AGENTS, buildConnector, LocalFileStore,
   createLoggerFromEnv, HelpCatalog, parseArticle, parseManual, ExtensionHub, HttpMcpClient, loadExtensions,
-  TenantAiResolver, platformAi, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID,
+  TenantAiResolver, platformAi, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, ConnectionCredentials, type ConnectionAuthProvider,
   CardService, PostgresContactStore, cardsAccess, type ContactStore, BulkMailService, PostgresBulkMailStore, NoticeService, PostgresNoticeStore,
   InventoryService, InventoryWatch, InventoryBookings, PostgresInventoryStore, inventoryAccess, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
@@ -71,8 +71,14 @@ export interface AppDeps {
   isAvailable(tenantId: string, agentId: string): Promise<boolean>;
   /** 秘密の値の暗号化（仕様書 第14.3.3節「保存」）。 */
   box: SecretBox;
-  /** 会社ごとの Gemini（自社の鍵か運営の設定）。 */
+  /** 会社ごとの AI（Gemini・ローカル AI と、会社の AI の方針。仕様書 第16.3.7.1節）。 */
   ai: TenantAiResolver;
+  /**
+   * ローカルの形（仕様書 第8.6節）で入っている 1 社のサブドメイン（`M2O_ONSITE_TENANT`）。クラウドの形では `null`。
+   *
+   * @remarks ローカルの形では、アドレスにかかわらずこの会社に決める
+   */
+  onsiteTenant: string | null;
   /**
    * OAuth の戻り先の URI と、使い捨ての state の置き場。
    * `redirectUri` は Google、`connectionRedirectUri` は認証の要る会社の接続（仕様書 第12.11.6.2節）の戻り先
@@ -199,6 +205,8 @@ export function buildDeps(): AppDeps {
     platformKey: platform.platformKey, testMode: platform.testMode,
     defaults: defaultGeminiModels(),
     baseUrl: platform.baseUrl,
+    // 配備の形とローカル AI（仕様書 第8.6節・第16.3.7.1節、ADR-0059）
+    deployment: deploymentFromEnv(process.env), local: localLlmFromEnv(process.env),
   });
   // 名刺管理（内蔵の拡張。仕様書 第27章）。自分だけの名刺は持ち主でも絞るため、置き場は利用者を設定して問い合わせる
   const contactStore = new PostgresContactStore(
@@ -253,6 +261,9 @@ export function buildDeps(): AppDeps {
     repo, llm, registry, connector, files, logger: log, research, cards, notices, inventory,
     hr: { calendar: laborCalendar, access: hrAccess(repo) },
     llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId),
+    // 業務ごとの AI（ローカル・外部）と、社外の接続に送ってよいか（第16.3.7.1節）
+    llmForRun: (tenantId, def, registry, previous) => ai.llmForRun(tenantId, def, registry, previous),
+    connectionBlocked: (tenantId, connectionId) => ai.connectionBlocked(tenantId, connectionId),
     resolveDefinition: async (id, version, tenantId) => (await tenantView(tenantId)).resolve(id, version),
     registryFor: async (tenantId) => (await tenantView(tenantId)).registry,
     isAvailable,
@@ -343,6 +354,7 @@ export function buildDeps(): AppDeps {
   return {
     repo, llm, connector, files, registry, engine, secretary, auth: loadAuthConfig(), log, debug, help, helpManuals: manuals.list, retention, revocation,
     hub, tenantView, agentsFor, canUse, isAvailable, box, ai, connections,
+    onsiteTenant: ai.deployment() === 'onsite' ? (process.env['M2O_ONSITE_TENANT']?.trim() || null) : null,
     oauth: {
       // Google は http の戻り先を localhost にしか認めないため、開発では localhost の画面の転送を通す（ADR-0007）
       redirectUri: googleRedirect,

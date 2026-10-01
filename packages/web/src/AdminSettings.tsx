@@ -281,7 +281,7 @@ function InvoiceStyleSettings({ initial, onSaved }: {
         )}
       </div>
       <Text label="振込先" value={style.bankAccount} onChange={(v) => set({ bankAccount: v })}
-        hint="例: ○○銀行 △△支店 普通 1234567 カ）エムツーホールディングス" />
+        hint="例: ○○銀行 △△支店 普通 1234567 カ）マルマルショウジ" />
       <Text label="支払期限の既定" value={style.paymentDue} onChange={(v) => set({ paymentDue: v })}
         hint="例: 翌月末" />
       <Text label="備考の定型文" value={style.notes} onChange={(v) => set({ notes: v })} multiline

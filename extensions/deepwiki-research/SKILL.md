@@ -8,8 +8,8 @@ metadata:
   version: "2.0.0"
   m2office-id: jp.m2office.samples.deepwiki-research
   m2office-inputs: |
-    リポジトリ: 短文
-    知りたいこと: 長文
+    リポジトリ: text
+    知りたいこと: textarea
   m2office-examples: |
     modelcontextprotocol/typescript-sdk
 ---

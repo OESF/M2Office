@@ -226,6 +226,23 @@ export interface TenantSettings {
   hr: HrSettings;
   /** 店頭サイネージ（第31章）。 */
   signage: SignageSettings;
+  /** 会社の AI の方針（第16.3.7.1節、ADR-0059）。 */
+  aiPolicy: AiPolicySettings;
+}
+
+/**
+ * 会社の AI の方針（仕様書 第16.3.7.1節、ADR-0059）。
+ *
+ * - `cloud`: クラウドの AI（Gemini）を使う（いまの形）
+ * - `local-first`: ローカル AI を既定にし、外部の AI は「外部の AI を使ってよい」印を付けた業務だけ
+ * - `local-only`: 外部の AI を使わない
+ *
+ * @remarks `local-first`・`local-only` はローカルの形（第8.6節）でだけ効く。クラウドの形では `cloud` として扱う
+ */
+export type AiPolicyMode = 'cloud' | 'local-first' | 'local-only';
+
+export interface AiPolicySettings {
+  mode: AiPolicyMode;
 }
 
 /** 設定が未保存の会社に使う既定値。 */
@@ -260,6 +277,7 @@ export const DEFAULT_TENANT_SETTINGS: TenantSettings = {
   hr: DEFAULT_HR_SETTINGS,
   // 店頭サイネージは既定で切り。料金は取らない標準の機能で、使う会社が入れる（第31.2節）
   signage: DEFAULT_SIGNAGE_SETTINGS,
+  aiPolicy: { mode: 'cloud' },
 };
 
 /**

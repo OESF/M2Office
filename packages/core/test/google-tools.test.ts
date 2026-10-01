@@ -36,9 +36,9 @@ test('制限付きの権限を使うツールは Gmail の読み取り・下書�
 
 test('引数の検証: 必須・型・選択肢を確かめ、数字だけの文字列は数値として受け付ける', () => {
   const schema = registry.get('gmail.send')!.args!;
-  assert.deepEqual(validateToolArgs(schema, { to: ['a@x.jp'], subject: 's', body: 'b' }), []);
-  assert.ok(validateToolArgs(schema, { to: ['a@x.jp'], body: 'b' }).some((p) => p.includes('subject')));
-  assert.ok(validateToolArgs(schema, { to: 'a@x.jp', subject: 's', body: 'b' }).some((p) => p.includes('文字列の配列')));
+  assert.deepEqual(validateToolArgs(schema, { to: ['a@x.example'], subject: 's', body: 'b' }), []);
+  assert.ok(validateToolArgs(schema, { to: ['a@x.example'], body: 'b' }).some((p) => p.includes('subject')));
+  assert.ok(validateToolArgs(schema, { to: 'a@x.example', subject: 's', body: 'b' }).some((p) => p.includes('文字列の配列')));
   assert.deepEqual(validateToolArgs(registry.get('gmail.search')!.args!, { query: 'x', limit: '5' }), []);
   assert.ok(validateToolArgs(registry.get('sheet.render')!.args!, { title: 't', columns: [], rows: [], format: 'pdf' }).some((p) => p.includes('xlsx')));
 });
@@ -121,9 +121,9 @@ test('第 2 弾: ファイルの共有は M2Office が作ったファイルだ�
   const shared = await run('drive.share', { fileId: doc['file'].id, emails: ['sato@customer.example.jp'], role: 'commenter' }, ctx);
   assert.equal(shared['shared'], true);
   assert.equal(shared['roleLabel'], 'コメント');
-  assert.equal((await run('drive.share', { fileId: 'mock-file-t-1', emails: ['x@y.jp'] }, ctx))['shared'], false, '見本のファイル（M2Office が作っていない）は共有しない');
+  assert.equal((await run('drive.share', { fileId: 'mock-file-t-1', emails: ['x@y.example'] }, ctx))['shared'], false, '見本のファイル（M2Office が作っていない）は共有しない');
   assert.equal((await run('drive.share', { fileId: doc['file'].id, emails: [] }, ctx))['shared'], false);
-  assert.ok(validateToolArgs(registry.get('drive.share')!.args!, { fileId: 'f', emails: ['a@b.jp'], role: 'anyone' }).some((p) => p.includes('reader')), 'リンクによる一般公開のような役割は受け付けない');
+  assert.ok(validateToolArgs(registry.get('drive.share')!.args!, { fileId: 'f', emails: ['a@b.example'], role: 'anyone' }).some((p) => p.includes('reader')), 'リンクによる一般公開のような役割は受け付けない');
 });
 
 test('第 2 弾: 社内の人を探せる', async () => {

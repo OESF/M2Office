@@ -13,6 +13,8 @@ import { PageTitle } from './help.js';
 export function ConnectorList() {
   const [items, setItems] = useState<McpConnectionView[] | null>(null);
   const [risks, setRisks] = useState<{ value: string; text: string }[]>([]);
+  // ローカルの方針の会社か（接続ごとに、社外に送ってよいものを決める。仕様書 第16.3.7.1節）
+  const [localPolicy, setLocalPolicy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checks, setChecks] = useState<Record<string, ConnectorCheck | 'busy'>>({});
   const [busy, setBusy] = useState<string | null>(null);
@@ -22,7 +24,7 @@ export function ConnectorList() {
   const [presets, setPresets] = useState<ConnectionPresetView[]>([]);
   const load = useCallback(() => {
     api.admin.mcpConnections()
-      .then((r) => { setItems(r.items); setRisks(r.risks); setPresets(r.presets ?? []); })
+      .then((r) => { setItems(r.items); setRisks(r.risks); setPresets(r.presets ?? []); setLocalPolicy(!!r.localPolicy); })
       .catch((e) => setError(describeError(e, '読み込めませんでした')));
   }, []);
   useEffect(load, [load]);
@@ -128,6 +130,17 @@ export function ConnectorList() {
               </div>
             </div>
             {c.description && <p className="small">{c.description}</p>}
+            {localPolicy && (
+              // ローカルの方針の会社では、送ってよいと決めた接続にだけ送る。既定は送らない（仕様書 第16.3.7.1節）
+              <div className="row small">
+                <span>この接続（社外）に送るもの</span>
+                <select value={c.sendPolicy} disabled={busy === `${c.id}/send`}
+                  onChange={(e) => void run(`${c.id}/send`, () => api.admin.updateMcpConnection(c.id, { sendPolicy: e.target.value as 'block' | 'deidentified' }), '変えられませんでした')}>
+                  <option value="block">送らない</option>
+                  <option value="deidentified">個人を特定する情報を除いて送る</option>
+                </select>
+              </div>
+            )}
             {c.authState.type !== 'none' && <AuthSettings conn={c} onSaved={load} onError={setError} />}
             {c.tools.length === 0 && <p className="muted small">ツールはまだありません</p>}
             {c.tools.length > 0 && (

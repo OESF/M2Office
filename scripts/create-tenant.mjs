@@ -5,7 +5,7 @@
  * 運営の手元のツールである。画面からは行えない。
  *
  * 使い方:
- *   npm run tenant:create -- --subdomain oesf --name "会社名" --domain oesf.jp --admin miura@oesf.jp
+ *   npm run tenant:create -- --subdomain example --name "会社名" --domain example.co.jp --admin admin@example.co.jp
  *
  * すでにあるサブドメインなら、何も変えずに終わる（何度実行しても同じ結果になる）。
  */
@@ -42,7 +42,7 @@ const admin = (a.admin ?? '').trim().toLowerCase();
 function usage(reason) {
   console.error(`エラー: ${reason}\n`);
   console.error('使い方:');
-  console.error('  npm run tenant:create -- --subdomain oesf --name "会社名" --domain oesf.jp --admin miura@oesf.jp\n');
+  console.error('  npm run tenant:create -- --subdomain example --name "会社名" --domain example.co.jp --admin admin@example.co.jp\n');
   console.error('  --subdomain  会社のサブドメイン（英小文字・数字・ハイフン、3 文字以上）');
   console.error('  --name       会社の名前');
   console.error('  --domain     Google Workspace のドメイン');

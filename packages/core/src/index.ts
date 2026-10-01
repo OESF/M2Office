@@ -15,6 +15,11 @@ export {
 export * from './llm/provider.js';
 export { StubLlmProvider } from './llm/stub.js';
 export { AI_NOT_CONFIGURED_MESSAGE, AiNotConfiguredError, UnconfiguredLlmProvider, UnconfiguredResearchProvider, aiAvailable } from './llm/unconfigured.js';
+export { LocalLlmProvider, localLlmFromEnv, type LocalLlmConfig } from './llm/local.js';
+export {
+  deploymentFromEnv, effectiveAiPolicy, isLocalPolicy, externalAiAllowed, PolicyBlockedLlmProvider, PolicyBlockedResearchProvider,
+  AiPolicyBlockedError, LOCAL_AI_NOT_CONFIGURED, type Deployment, type AiKind,
+} from './llm/policy.js';
 export { OpenAiCompatibleProvider, LlmRequestError } from './llm/gemini.js';
 export type { GeminiModelMap } from './llm/gemini.js';
 

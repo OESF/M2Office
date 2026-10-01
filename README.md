@@ -80,7 +80,7 @@ WEB_HTTPS=true npm run dev
 マスター管理画面ができるまでの暫定として、手元のツールで作ります（仕様書 第16.1.3節）。
 
 ```bash
-npm run tenant:create -- --subdomain oesf --name "会社名" --domain oesf.jp --admin miura@oesf.jp
+npm run tenant:create -- --subdomain example --name "会社名" --domain example.co.jp --admin admin@example.co.jp
 ```
 
 ## 動作確認
@@ -207,6 +207,11 @@ docs/            開発規約・リリース規定・設計判断記録
 | `INVENTORY_WATCH_HOUR` | 7 | 在庫の毎朝の見直しを始める時刻（日本時間の時。この時刻を過ぎたら 1 日 1 回。仕様書 第29.14節） |
 | `CARD_PURGE_INTERVAL_MS` | 3600000 | 期限を過ぎた名刺（ごみ箱に 30 日・読み取れなかったもの 4 週）を消す見回りの間隔（仕様書 第27.7節） |
 | `SIGNATURE_INTERVAL_MS` | 3600000 | 名刺を交換した相手のメールの署名を見て、名刺を新しくする見回りの間隔（仕様書 第27.6.1節） |
+| `M2O_DEPLOYMENT` | cloud | 配備の形。`cloud`（多数の会社・サブドメイン）か `onsite`（社内の 1 台に 1 社だけ。ローカルの形）（仕様書 第8.6節） |
+| `M2O_ONSITE_TENANT` | （なし） | ローカルの形で入っている 1 社のサブドメイン。アドレスにかかわらずこの会社に決める |
+| `LOCAL_LLM_URL` | （なし） | ローカル AI の OpenAI 互換の口（例: `http://127.0.0.1:11434/v1`）。ローカルの方針の会社が使う（仕様書 第16.3.7.1節） |
+| `LOCAL_LLM_MODEL` | （なし） | ローカル AI のモデル。`LOCAL_LLM_MODEL_FAST`・`_STANDARD`・`_ADVANCED` で役割ごとに変えられる |
+| `LOCAL_LLM_KEY`・`LOCAL_LLM_TIMEOUT_MS` | （なし）・300000 | ローカル AI の口が鍵を求めるときの鍵と、1 回の問い合わせを待つ時間 |
 | `RETENTION_INTERVAL_MS` | 本番 600000 / 開発 15000 | Google から取得したデータの保持期間の見回り間隔（仕様書 第14.3.2節） |
 | `LOG_LEVEL` | 開発 debug / 本番 info | アプリログのレベル（`error`・`warn`・`info`・`debug`） |
 | `LOG_FORMAT` | 開発 pretty / 本番 json | アプリログの形式 |
@@ -305,7 +310,19 @@ API とワーカーは起動時にリポジトリ直下の `.env` を読みま�
 | [docs/manual/inventory/](docs/manual/inventory/README.md) | 在庫管理のユーザーマニュアル（担当者の手引きと研修の教材。`npm run docs:inventory-manual-pdf` で PDF） |
 | docs/manual/*/manual.json | 業務のマニュアルをヘルプで章ごとに読むための名前と、どの内蔵の拡張のものか（仕様書 第6.10.7.3節。書き方は docs/help/README.md） |
 | [LICENSE](LICENSE) | ライセンス（Apache License 2.0） |
+| [NOTICE](NOTICE) | 著作権の表示（Apache License 2.0 の第4節） |
 
 ## ライセンス
 
 [Apache License 2.0](LICENSE) で公開しています。
+
+公開は、履歴を引き継がない別のリポジトリに、いまのコミットの中身だけを書き出して行います（仕様書 第22.5節、ADR-0060）。
+お客様に合わせる部分とお客様のデータは公開しません。
+
+```bash
+npm run publish:check                          # 公開の前の点検（秘密の値・見本でないメールアドレス・出してはならない言葉・依存のライセンス）
+npm run publish:export -- ../m2office-public   # 点検を通してから、空のフォルダに書き出す（コミットと push は中身を確かめてから人が行う）
+```
+
+出してはならない言葉は、公開しないリポジトリ（既定は `../M2Office-private/publish-denylist.txt`。`M2O_PUBLISH_DENYLIST` で変えられる）に
+ハッシュだけで置きます。言葉を足すときは `node scripts/check-publish.mjs --hash` に 1 行ずつ渡し、出た行を追記します。

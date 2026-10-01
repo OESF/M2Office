@@ -15,7 +15,7 @@ import {
 const at = (iso: string) => new Date(iso);
 const ev = (o: Partial<CalendarEvent> & { start: string }): CalendarEvent => ({
   id: o.id ?? 'e1', title: o.title ?? '営業定例', start: o.start, end: o.end ?? o.start,
-  attendees: o.attendees ?? ['me@x.jp', 'yamada@x.jp'], location: o.location ?? null, ...(o.allDay ? { allDay: true } : {}),
+  attendees: o.attendees ?? ['me@x.example', 'yamada@x.example'], location: o.location ?? null, ...(o.allDay ? { allDay: true } : {}),
 });
 
 function world(o: { source?: 'google' | 'mock'; proactivity?: 'low' | 'normal'; events: CalendarEvent[] }) {
@@ -24,7 +24,7 @@ function world(o: { source?: 'google' | 'mock'; proactivity?: 'low' | 'normal'; 
     listTenantIds: async () => ['t'],
     getTenantSettings: async () => ({ agents: { disabled: [] } }),
     listGoogleConnections: async () => [{ userId: 'u' }],
-    listUsers: async () => [{ id: 'u', email: 'me@x.jp', status: 'active' }],
+    listUsers: async () => [{ id: 'u', email: 'me@x.example', status: 'active' }],
     getUserSettings: async () => ({ ...DEFAULT_USER_SETTINGS, secretary: { ...DEFAULT_USER_SETTINGS.secretary, proactivity: o.proactivity ?? 'normal' } }),
     listRunsWithJobs: async () => jobs.map((job) => ({ job, run: {} })),
     createJob: async (j: { agentId: string; input: Record<string, unknown>; origin: string }) => { jobs.push(j); },
@@ -50,10 +50,10 @@ test('ほかの人のいる会議の 20〜60 分前に、会議の準備を一�
 
 test('ひとりの予定・終日の予定・まだ先の会議には起こさない', () => {
   const now = at('2026-09-28T01:00:00Z');
-  assert.equal(isMeetingSoon(ev({ start: '2026-09-28T01:30:00Z', attendees: ['me@x.jp'] }), 'me@x.jp', now), false);
-  assert.equal(isMeetingSoon(ev({ start: '2026-09-28T01:30:00Z', allDay: true }), 'me@x.jp', now), false);
-  assert.equal(isMeetingSoon(ev({ start: '2026-09-28T02:30:00Z' }), 'me@x.jp', now), false, '90 分後はまだ');
-  assert.equal(isMeetingSoon(ev({ start: '2026-09-28T01:10:00Z' }), 'me@x.jp', now), false, '10 分後は近すぎる');
+  assert.equal(isMeetingSoon(ev({ start: '2026-09-28T01:30:00Z', attendees: ['me@x.example'] }), 'me@x.example', now), false);
+  assert.equal(isMeetingSoon(ev({ start: '2026-09-28T01:30:00Z', allDay: true }), 'me@x.example', now), false);
+  assert.equal(isMeetingSoon(ev({ start: '2026-09-28T02:30:00Z' }), 'me@x.example', now), false, '90 分後はまだ');
+  assert.equal(isMeetingSoon(ev({ start: '2026-09-28T01:10:00Z' }), 'me@x.example', now), false, '10 分後は近すぎる');
 });
 
 test('17 時以降に、翌日の場所のある予定の出発時刻と行き方を一度だけ調べる。題名は渡さない', async () => {

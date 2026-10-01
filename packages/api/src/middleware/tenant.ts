@@ -47,8 +47,12 @@ export interface AppEnv {
 export function resolveTenant(deps: AppDeps) {
   return async (c: Context<AppEnv>, next: Next) => {
     const host = c.req.header('host') ?? '';
+    // ローカルの形（第8.6節）では、アドレスにかかわらず入っている 1 社に決める
+    if (deps.ai.deployment() === 'onsite' && !deps.onsiteTenant) {
+      return c.json({ error: 'ローカルの形の会社が設定されていません（M2O_ONSITE_TENANT）' }, 500);
+    }
     const explicit = deps.auth.devHeaders ? c.req.header('x-tenant') : undefined;
-    const subdomain = explicit ?? extractSubdomain(host);
+    const subdomain = deps.onsiteTenant ?? explicit ?? extractSubdomain(host);
 
     if (!subdomain) {
       return c.json({ error: 'テナントを特定できません。サブドメインを指定してください。' }, 400);

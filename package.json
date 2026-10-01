@@ -34,7 +34,9 @@
     "docs:hr-review-pdf": "python3 tools/pdf/build_manual.py hr-review",
     "docs:tools": "node --import tsx scripts/gen-tool-docs.mjs",
     "tenant:create": "node --env-file-if-exists=.env scripts/create-tenant.mjs",
-    "dev:cert": "node scripts/dev-cert.mjs"
+    "dev:cert": "node scripts/dev-cert.mjs",
+    "publish:check": "node scripts/check-publish.mjs",
+    "publish:export": "node scripts/export-public.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
@@ -46,6 +48,7 @@
   "overrides": {
     "exceljs": {
       "uuid": "^11.1.1"
-    }
+    },
+    "unzipper": "0.12.3"
   }
 }

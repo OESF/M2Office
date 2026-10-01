@@ -153,7 +153,7 @@ async function fakeGoogle(behave: (s: Seen) => { status: number; json?: unknown 
     if (s.path === '/cal/calendars/primary/events' && s.method === 'GET') {
       return send(200, {
         items: [
-          { id: 'e1', summary: '朝会', start: { dateTime: '2026-09-26T09:00:00+09:00' }, end: { dateTime: '2026-09-26T09:15:00+09:00' }, attendees: [{ email: 'a@x.jp' }], location: '会議室 A' },
+          { id: 'e1', summary: '朝会', start: { dateTime: '2026-09-26T09:00:00+09:00' }, end: { dateTime: '2026-09-26T09:15:00+09:00' }, attendees: [{ email: 'a@x.example' }], location: '会議室 A' },
           { id: 'e2', start: { date: '2026-09-27' }, end: { date: '2026-09-28' } },
         ],
       });
@@ -161,8 +161,8 @@ async function fakeGoogle(behave: (s: Seen) => { status: number; json?: unknown 
     if (s.path === '/cal/freeBusy') {
       return send(200, {
         calendars: {
-          'a@x.jp': { busy: [{ start: '2026-09-26T01:00:00Z', end: '2026-09-26T02:00:00Z' }] },
-          'outside@other.jp': { errors: [{ domain: 'global', reason: 'notFound' }], busy: [] },
+          'a@x.example': { busy: [{ start: '2026-09-26T01:00:00Z', end: '2026-09-26T02:00:00Z' }] },
+          'outside@other.example': { errors: [{ domain: 'global', reason: 'notFound' }], busy: [] },
         },
       });
     }
@@ -219,7 +219,7 @@ function repoWith(opts: { connected?: boolean; client?: boolean; refreshToken?: 
   const repo = {
     getGoogleConnection: async () => (opts.connected === false ? null : {
       tenantId: P.tenantId, userId: P.userId, refreshTokenEnc: box.encrypt(opts.refreshToken ?? 'rt-good'),
-      googleEmail: 'u1@x.jp', scopes: [], connectedAt: '', checkedAt: '',
+      googleEmail: 'u1@x.example', scopes: [], connectedAt: '', checkedAt: '',
     }),
     getTenantCredential: async () => (opts.client === false ? null : {
       tenantId: P.tenantId, kind: 'google_oauth', secretEnc: box.encrypt('secret'), meta: { clientId: 'cid' }, updatedBy: 'x', updatedAt: '',
@@ -340,11 +340,11 @@ test('Gmail: 下書きと送信は、返信なら元のメールのスレッド�
     assert.match(mime, /In-Reply-To: <m1@mail\.example>/);
     assert.match(mime, /References: <m1@mail\.example>/);
 
-    const s = await c.mail.send(P, { to: ['a@x.jp'], cc: ['b@x.jp'], subject: '新しい件', body: '本文', replyTo: null });
+    const s = await c.mail.send(P, { to: ['a@x.example'], cc: ['b@x.example'], subject: '新しい件', body: '本文', replyTo: null });
     assert.equal(s.messageId, 'sent-1');
     const sent = g.seen.find((x) => x.path === '/gmail/users/me/messages/send')!.body;
     assert.equal(sent.threadId, undefined, '返信でなければスレッドを指定しない');
-    assert.match(Buffer.from(sent.raw, 'base64url').toString('utf-8'), /Cc: b@x\.jp/);
+    assert.match(Buffer.from(sent.raw, 'base64url').toString('utf-8'), /Cc: b@x\.example/);
   });
 });
 
@@ -359,7 +359,7 @@ test('カレンダー: 繰り返しを展開して開始順に。終日の予定
     assert.equal(q.get('timeMin'), '2026-09-25T15:00:00.000Z');
     assert.deepEqual(items[0], {
       id: 'e1', title: '朝会', start: '2026-09-26T09:00:00+09:00', end: '2026-09-26T09:15:00+09:00',
-      attendees: ['a@x.jp'], location: '会議室 A',
+      attendees: ['a@x.example'], location: '会議室 A',
     });
     assert.deepEqual(items[1], {
       id: 'e2', title: '（件名なし）', start: '2026-09-27T00:00:00+09:00', end: '2026-09-28T00:00:00+09:00',
@@ -370,19 +370,19 @@ test('カレンダー: 繰り返しを展開して開始順に。終日の予定
 
 test('カレンダー: 見られなかった人を「空き」とみなさない', async () => {
   await withConnector(async (c) => {
-    const r = await c.calendar.freeBusy(P, { emails: ['a@x.jp', 'outside@other.jp', 'missing@x.jp'], from: '2026-09-26', to: '2026-09-27' });
-    assert.deepEqual(r.busy, [{ email: 'a@x.jp', start: '2026-09-26T01:00:00Z', end: '2026-09-26T02:00:00Z' }]);
-    assert.deepEqual(r.unknown, ['outside@other.jp', 'missing@x.jp']);
+    const r = await c.calendar.freeBusy(P, { emails: ['a@x.example', 'outside@other.example', 'missing@x.example'], from: '2026-09-26', to: '2026-09-27' });
+    assert.deepEqual(r.busy, [{ email: 'a@x.example', start: '2026-09-26T01:00:00Z', end: '2026-09-26T02:00:00Z' }]);
+    assert.deepEqual(r.unknown, ['outside@other.example', 'missing@x.example']);
   });
 });
 
 test('カレンダー: 作成・変更・取り消しは参加者に知らせる。無い予定は null', async () => {
   await withConnector(async (c, g) => {
-    const made = await c.calendar.create(P, { title: '定例', start: '2026-09-30T10:00:00+09:00', end: '2026-09-30T11:00:00+09:00', attendees: ['a@x.jp'] });
+    const made = await c.calendar.create(P, { title: '定例', start: '2026-09-30T10:00:00+09:00', end: '2026-09-30T11:00:00+09:00', attendees: ['a@x.example'] });
     assert.equal(made.eventId, 'new-1');
     const post = g.seen.find((s) => s.method === 'POST' && s.path === '/cal/calendars/primary/events')!;
     assert.equal(post.query.get('sendUpdates'), 'all');
-    assert.deepEqual(post.body.attendees, [{ email: 'a@x.jp' }]);
+    assert.deepEqual(post.body.attendees, [{ email: 'a@x.example' }]);
     assert.deepEqual(await c.calendar.update(P, { eventId: 'e1', title: '変更' }), { eventId: 'e1' });
     assert.deepEqual(g.seen.find((s) => s.method === 'PATCH')!.body, { summary: '変更' }, '渡したものだけを変える');
     assert.deepEqual(await c.calendar.cancel(P, { eventId: 'e1' }), { eventId: 'e1' });
@@ -595,7 +595,7 @@ test('エンジン: 読むツールで断られたら、止めずに「取得で
 });
 
 test('エンジン: 書くツールで断られたら、ステップを失敗にする（書いたつもりで進ませない）', async () => {
-  const llm = new ScriptedLlm([CALL('gmail.create_draft', { to: 'a@x.jp', subject: '件', body: '本文' }), '下書きを作りました。']);
+  const llm = new ScriptedLlm([CALL('gmail.create_draft', { to: 'a@x.example', subject: '件', body: '本文' }), '下書きを作りました。']);
   const { engine, run, steps } = engineWith(['gmail.create_draft'], llm, refusing());
   const res = await engine.advance(run);
   assert.equal(res.outcome, 'failed');

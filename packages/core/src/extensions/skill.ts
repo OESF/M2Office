@@ -151,10 +151,14 @@ const list = (v: Frontmatter[string] | undefined): string[] =>
 /** 真偽の値（スキルと同じく yes・on・1 も真）。 */
 const truthy = (v: Frontmatter[string] | undefined): boolean => /^(true|yes|on|1)$/i.test(text(v).trim());
 
-/** 入力の欄の種類（`m2office-inputs`。第12.12.3節）。 */
-const INPUT_KINDS: Record<string, { format?: string }> = {
-  短文: {}, 長文: { format: 'textarea' }, 日付: { format: 'date' }, ファイル: { format: 'file' },
+/** 入力の欄の型（`m2office-inputs`。第12.12.3節）。名前は HTML の部品に合わせる。 */
+const INPUT_TYPES: Record<string, { format?: string }> = {
+  text: {}, textarea: { format: 'textarea' }, date: { format: 'date' }, file: { format: 'file' },
 };
+/** 第 0.210.0 版までの日本語の種類の名前。配った拡張機能を壊さないために読み続ける。 */
+const LEGACY_INPUT_TYPES: Record<string, string> = { 短文: 'text', 長文: 'textarea', 日付: 'date', ファイル: 'file' };
+/** 第 0.210.0 版までの任意の印。 */
+const LEGACY_OPTIONAL = /[（(]任意[）)]/;
 
 type InputSchema = {
   type: 'object'; required: string[];
@@ -177,17 +181,27 @@ export function parseInputs(
     for (const raw of inputs.split('\n')) {
       const line = raw.replace(/^[-*・\s]+/, '').trim();
       if (!line) continue;
+      // `欄の名前: 型`。任意の欄は名前の後ろに `?`（TypeScript の型注釈と同じ）
       const m = /^(.+?)\s*[:：]\s*(.+)$/.exec(line);
-      const optional = m ? /[（(]任意[）)]/.test(m[2]!) : false;
-      const kind = m ? m[2]!.replace(/[（(]任意[）)]/, '').trim() : '';
-      if (!m || !(kind in INPUT_KINDS)) {
-        problems.push(`m2office-inputs の「${line}」が読めません。「欄の名前: 種類」で、種類は ${Object.keys(INPUT_KINDS).join('・')} のどれかです`);
+      const marked = m ? /[?？]$/.test(m[1]!) : false;
+      const name = m ? m[1]!.replace(/\s*[?？]$/, '').trim() : '';
+      // 型の後ろの "…" は、欄に薄く出す例（placeholder）。画面が「例: 」を付けるので、書かれていれば外す
+      const typed = m ? /^(\S+?)(?:\s+"(.*)")?$/.exec(m[2]!.replace(LEGACY_OPTIONAL, '').trim()) : null;
+      const type = typed ? LEGACY_INPUT_TYPES[typed[1]!] ?? typed[1]!.toLowerCase() : '';
+      if (!m || !name || !typed || !(type in INPUT_TYPES)) {
+        problems.push(`m2office-inputs の「${line}」が読めません。「欄の名前: 型」で、型は ${Object.keys(INPUT_TYPES).join('・')} のどれかです（任意の欄は名前の後ろに ?、欄に薄く出す例は型の後ろに "…"）`);
         continue;
       }
-      const name = m[1]!.trim();
-      // 例は、ファイルでない最初の欄に置く（ファイルの欄には例を出す場所が無い。第6.10.4.1節）
-      const first = kind !== 'ファイル' && !Object.values(properties).some((p) => p.format !== 'file');
-      properties[name] = { type: 'string', title: name, ...INPUT_KINDS[kind], ...(first ? examples : {}) };
+      const optional = marked || LEGACY_OPTIONAL.test(m[2]!);
+      const placeholder = typed[2]?.replace(/^例\s*[:：]\s*/, '').trim();
+      if (placeholder && type === 'file') {
+        problems.push(`m2office-inputs の「${line}」: ファイルの欄には例を出せません（"…" を外してください）`);
+        continue;
+      }
+      // 欄ごとの例が無ければ、argument-hint をファイルでない最初の欄に置く（ファイルの欄には例を出す場所が無い。第6.10.4.1節）
+      const first = type !== 'file' && !Object.values(properties).some((p) => p.format !== 'file');
+      const example = placeholder ? { examples: [placeholder] } : first ? examples : {};
+      properties[name] = { type: 'string', title: name, ...INPUT_TYPES[type], ...example };
       if (!optional) required.push(name);
     }
     return { schema: { type: 'object', required, properties }, problems };
@@ -344,6 +358,8 @@ export function buildSkillPackage(files: ExtensionFiles, registry: ToolRegistry)
     route: !truthy(fm['disable-model-invocation']),
     // 学ばない業務の印（第12.12.3節。契約書チェックなど）
     private: truthy(meta['m2office-private']),
+    // 外部の AI を使ってよい業務の印（第16.3.7.1節、ADR-0059）。会社のデータを読むツールを持てば、実行のときに無視される
+    externalAi: truthy(meta['m2office-external-ai']),
     menu: !('user-invocable' in fm) || truthy(fm['user-invocable']),
     tier: EFFORT_TIER[effort],
   }, local);
@@ -391,6 +407,8 @@ export function compileSkill(s: {
   arguments: string[]; route: boolean; menu: boolean; tier?: AgentDefinition['tier'];
   /** 学ばない業務（`metadata.m2office-private`。第12.12.3節）。 */
   private?: boolean;
+  /** 外部の AI を使ってよい業務（`metadata.m2office-external-ai`。第16.3.7.1節）。 */
+  externalAi?: boolean;
   /** 同梱していない会社の接続のツール。危険度が分からないため、作業の段と送る段の両方に置く（第12.11.2節）。 */
   connections?: string[];
 }, registry: ToolRegistry): AgentDefinition {
@@ -439,6 +457,7 @@ export function compileSkill(s: {
     ...(s.menu ? {} : { menu: false }),
     ...(s.tier ? { tier: s.tier } : {}),
     ...(s.private ? { private: true } : {}),
+    ...(s.externalAi ? { externalAi: true } : {}),
     skill: { arguments: s.arguments, files: s.supporting },
     inputs: s.inputs, tools: s.tools, steps, constraints: [], limits: s.tier === 'advanced' ? LIMITS_ADVANCED : LIMITS,
     help: {

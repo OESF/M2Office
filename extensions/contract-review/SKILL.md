@@ -7,12 +7,12 @@ allowed-tools: file.read_text pdf.extract knowledge.search docx.render
 effort: xhigh
 metadata:
   author: M2Office
-  version: "1.0.0"
+  version: "1.0.1"
   m2office-id: jp.m2office.legal.contract-review
   m2office-private: "true"
   m2office-inputs: |
-    契約書: ファイル
-    気になる点・背景: 長文（任意）
+    契約書: file
+    気になる点・背景?: textarea
   m2office-examples: |
     損害賠償が心配
     今週中に返事が要る。年 1,000 万円の取引

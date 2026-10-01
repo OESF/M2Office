@@ -732,6 +732,14 @@ export type SignageAssetView = SignageAsset & { screens: string[] };
 
 /** 管理者ページ「接続」の設定（仕様書 第14.3.3節）。秘密の値は含まない。 */
 export interface ConnectionSettings {
+  /** 配備の形と会社の AI の方針（仕様書 第8.6節・第16.3.7.1節）。 */
+  ai: {
+    deployment: 'cloud' | 'onsite';
+    policy: 'cloud' | 'local-first' | 'local-only';
+    effective: 'cloud' | 'local-first' | 'local-only';
+    /** ローカル AI の口が設定されているか。 */
+    localConfigured: boolean;
+  };
   gemini: {
     mode: 'platform' | 'byok'; keyRegistered: boolean; updatedAt: string | null;
     models: Record<string, string>; defaults: Record<string, string>;
@@ -941,6 +949,8 @@ export interface McpConnectionView {
   usedBy: { id: string; name: string }[];
   /** 認証の状態（仕様書 第12.11.6節）。秘密の値は返らない。 */
   authState: McpAuthState;
+  /** ローカルの方針のときに、この接続（社外）に送ってよいもの（仕様書 第16.3.7.1節）。 */
+  sendPolicy: 'block' | 'deidentified';
 }
 
 /** 会社の接続の認証の状態。 */
@@ -1614,6 +1624,11 @@ export const api = {
     saveGemini: (v: { mode: 'platform' | 'byok'; apiKey?: string; models?: Record<string, string> }) =>
       call('/admin/connections/gemini', { method: 'PUT', body: JSON.stringify(v) }),
     deleteGeminiKey: () => call('/admin/connections/gemini/key', { method: 'DELETE' }),
+    /** 会社の AI の方針（仕様書 第16.3.7.1節）。ローカルの方針はローカルの形でだけ選べる。 */
+    saveAiPolicy: (mode: 'cloud' | 'local-first' | 'local-only') =>
+      call<{ ok: true }>('/admin/connections/ai-policy', { method: 'PUT', body: JSON.stringify({ mode }) }),
+    /** ローカル AI に届くかを確かめる。 */
+    testLocalLlm: () => call<{ ok: boolean; models?: string[]; error?: string }>('/admin/connections/local-llm/test', { method: 'POST', body: JSON.stringify({}) }),
     testGemini: (kind: 'text' | 'live') =>
       call<{ ok: boolean; ms: number; error?: string; source: string; model: string }>('/admin/connections/gemini/test', { method: 'POST', body: JSON.stringify({ kind }) }),
     /**
@@ -1800,7 +1815,7 @@ export const api = {
     setExtensionEnabled: (id: string, enabled: boolean) =>
       call(`/admin/extensions/${encodeURIComponent(id)}/enabled`, { method: 'PUT', body: JSON.stringify({ enabled }) }),
     /** 会社の接続（コネクタ。仕様書 第12.11.0節）。 */
-    mcpConnections: () => call<{ items: McpConnectionView[]; risks: { value: string; text: string }[]; presets: ConnectionPresetView[] }>('/admin/connections/mcp'),
+    mcpConnections: () => call<{ items: McpConnectionView[]; risks: { value: string; text: string }[]; presets: ConnectionPresetView[]; localPolicy: boolean }>('/admin/connections/mcp'),
     /**
      * 接続を登録する。認証の要らない接続は、MCP サーバにツールの一覧を問い合わせる。
      * `preset` を渡すと型（Slack など）から登録する（仕様書 第12.11.6.7節）。
@@ -1811,7 +1826,7 @@ export const api = {
     setMcpCredentials: (id: string, v: { clientId?: string; clientSecret?: string; apiKey?: string }) =>
       call<{ ok: true; reset?: number; tools?: number; warning?: string }>(`${mcpPath(id)}/credentials`, { method: 'PUT', body: JSON.stringify(v) }),
     /** ツールごとの危険度などを変える。 */
-    updateMcpConnection: (id: string, v: { tools?: { name: string; risk: string }[]; name?: string }) =>
+    updateMcpConnection: (id: string, v: { tools?: { name: string; risk: string }[]; name?: string; sendPolicy?: 'block' | 'deidentified' }) =>
       call(mcpPath(id), { method: 'PUT', body: JSON.stringify(v) }),
     refreshMcpConnection: (id: string) =>
       call<{ ok: true; added: string[]; removed: string[] }>(`${mcpPath(id)}/refresh`, { method: 'POST' }),

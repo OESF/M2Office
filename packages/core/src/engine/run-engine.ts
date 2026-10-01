@@ -33,6 +33,7 @@ import { expandQuery } from '../knowledge/expand.js';
 import type { CardService } from '../cards/service.js';
 import type { ContactStore } from '../cards/store.js';
 import type { BulkMailService } from '../cards/bulk.js';
+import type { AiKind } from '../llm/policy.js';
 import type { NoticeService } from '../notices/service.js';
 import type { InventoryService } from '../inventory/service.js';
 import type { InventoryBookings } from '../inventory/bookings.js';
@@ -64,6 +65,17 @@ export interface RunEngineDeps {
   research?: ResearchProvider;
   /** 会社ごとの推論（会社が自社の鍵を登録していればその鍵。仕様書 第14.3.3節）。省略時は `llm`。 */
   llmFor?(tenantId: string): Promise<LlmProvider>;
+  /**
+   * 業務の 1 回の実行に使う推論と、その種類（ローカル・外部・クラウド。仕様書 第16.3.7.1節、ADR-0059）。省略時は `llmFor`。
+   *
+   * @param previous 同じ実行の前の段で使った種類（途中で切り替えないため）
+   */
+  llmForRun?(tenantId: string, def: AgentDefinition, registry: ToolRegistry, previous?: AiKind): Promise<{ llm: LlmProvider; kind: AiKind; note?: string }>;
+  /**
+   * 会社の接続（社外のサービス）に送ってよいか（第16.3.7.1節「外部のサービスへの接続」）。送れなければ理由、送ってよければ `null`。
+   * 省略時は送ってよい
+   */
+  connectionBlocked?(tenantId: string, connectionId: string): Promise<string | null>;
   /** 会社ごとの Web の調査。省略時は `research`。 */
   researchFor?(tenantId: string): Promise<ResearchProvider>;
   /**
@@ -163,12 +175,26 @@ export class RunEngine {
     const def = await this.deps.resolveDefinition(job.agentId, job.agentVersion, run.tenantId);
     if (!def) return this.fail(run, `エージェント定義が見つかりません: ${job.agentId}`);
     const registry = this.deps.registryFor ? await this.deps.registryFor(run.tenantId) : this.deps.registry;
+    // 使う AI を決める。前の段で使った種類があれば、それを受け継ぐ（途中で切り替えない。第16.3.7.1節）
+    const before = this.deps.llmForRun
+      ? (await repo.listRunSteps(run.tenantId, run.id)).map((s) => (s.input as { ai?: AiKind } | null)?.ai).find((k): k is AiKind => !!k)
+      : undefined;
+    const chosen = this.deps.llmForRun
+      ? await this.deps.llmForRun(run.tenantId, def, registry, before)
+      : { llm: this.deps.llmFor ? await this.deps.llmFor(run.tenantId) : this.deps.llm, kind: 'cloud' as AiKind };
     const ai = {
-      llm: this.deps.llmFor ? await this.deps.llmFor(run.tenantId) : this.deps.llm,
+      llm: chosen.llm, kind: chosen.kind,
       research: this.deps.researchFor ? await this.deps.researchFor(run.tenantId) : this.deps.research,
     };
-    // 推論が使えない会社では進めない。定時実行もここで失敗にする（仕様書 第20.2.4節、ADR-0030）
-    if (!aiAvailable(ai.llm)) return this.fail(run, AI_NOT_CONFIGURED_MESSAGE);
+    // 推論が使えない会社では進めない。定時実行もここで失敗にする（仕様書 第20.2.4節、ADR-0030）。ローカル AI が無いときはその理由を出す
+    if (!aiAvailable(ai.llm)) return this.fail(run, (ai.llm as { unavailableReason?: string }).unavailableReason ?? AI_NOT_CONFIGURED_MESSAGE);
+    // どの AI で始めたかを、最初の 1 回だけ監査ログに残す（第16.3.7.1節「記録」）
+    if (!before && this.deps.llmForRun) {
+      await repo.appendAudit({
+        id: randomUUID(), tenantId: run.tenantId, actorType: 'agent', actorId: def.id, action: 'run.ai', targetType: 'run', targetId: run.id,
+        detail: { kind: chosen.kind, provider: chosen.llm.name, ...(chosen.note ? { note: chosen.note } : {}) }, occurredAt: new Date().toISOString(),
+      });
+    }
 
     try {
       validateDefinition(def, registry);
@@ -519,7 +545,7 @@ export class RunEngine {
     requestedBy: string,
     settings: TenantSettings,
     registry: ToolRegistry,
-    ai: { llm: LlmProvider; research?: ResearchProvider },
+    ai: { llm: LlmProvider; research?: ResearchProvider; kind?: AiKind },
     /**
      * `plan` は、承認の直後の段を承認の前に組み立てる（仕様書 第9.3.3節、ADR-0023）。
      * 読むツールと下書きのツールだけを実行し、社内への書き込み以上は記録だけして実行しない。
@@ -539,7 +565,8 @@ export class RunEngine {
     const now = new Date().toISOString();
     const runStep: RunStep = {
       id: randomUUID(), runId: run.id, seq: run.cursor, stepId: step.id,
-      kind: 'agent', status: 'running', input: { instruction: step.instruction },
+      // どの AI で動かしたか（ローカル・外部・クラウド）を段に残す。次の段はこれを受け継ぐ（第16.3.7.1節）
+      kind: 'agent', status: 'running', input: { instruction: step.instruction, ...(ai.kind ? { ai: ai.kind } : {}) },
       output: null, startedAt: now, endedAt: null,
     };
     await repo.appendRunStep(run.tenantId, runStep);
@@ -857,6 +884,12 @@ export class RunEngine {
     const { repo, connector, files } = this.deps;
     const tool = registry.get(call.name);
     if (!tool) return { name: call.name, error: '許可されていないツールです' };
+    // ローカルの方針の会社では、送ってよいと決めていない社外の接続には送らない（第16.3.7.1節）
+    const conn = (tool as { connection?: { id: string } }).connection;
+    if (conn && this.deps.connectionBlocked) {
+      const why = await this.deps.connectionBlocked(run.tenantId, conn.id);
+      if (why) return { name: call.name, risk: tool.risk, result: { available: false, reason: why } };
+    }
     this.log.debug('ツールを呼び出し', { runId: run.id, tenantId: run.tenantId, tool: call.name, risk: tool.risk });
     let out: unknown;
     try {

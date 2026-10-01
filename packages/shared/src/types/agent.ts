@@ -165,6 +165,13 @@ export interface AgentDefinition {
    */
   secretaryRoute?: boolean;
   /**
+   * 外部の AI を使ってよい業務（仕様書 第16.3.7.1節、ADR-0059）。会社の AI の方針が「ローカルを既定」のときだけ意味を持つ。
+   *
+   * @remarks 会社のデータを読むツールとファイルの欄を持たない業務だけに効く。満たさなければ印は無視してローカル AI で動かす。
+   * スキルでは `metadata.m2office-external-ai: true`
+   */
+  externalAi?: boolean;
+  /**
    * メニューに出すか（仕様書 第12.12.2節）。既定は `true`。スキルの `user-invocable: false` で `false` になる。
    *
    * @remarks `false` の業務は、秘書が取り次いだときだけ使う
@@ -214,7 +221,7 @@ export interface AgentDefinition {
  * 業務の入力のうち、ファイルを受け取る欄の名前（仕様書 第10.10.3節）。無ければ `null`。
  *
  * @remarks
- * 公式の業務は `fileId`、スキルの業務は `m2office-inputs` で「ファイル」と書いた欄（名前は「契約書」など）。
+ * 公式の業務は `fileId`、スキルの業務は `m2office-inputs` で型を `file` にした欄（名前は「契約書」など）。
  * 秘書に渡したファイルは、この欄に入れる
  */
 export function fileInputKey(def: Pick<AgentDefinition, 'inputs'>): string | null {

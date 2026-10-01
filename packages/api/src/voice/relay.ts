@@ -15,7 +15,7 @@ import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket as NodeWebSocket } from 'ws';
 import { canDecide } from '@m2office/shared';
-import { AiNotConfiguredError, needsCanvas, type Logger, type SecretaryReply, type VoiceEvent, type VoiceSession, type VoiceTool } from '@m2office/core';
+import { AiNotConfiguredError, AiPolicyBlockedError, needsCanvas, type Logger, type SecretaryReply, type VoiceEvent, type VoiceSession, type VoiceTool } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { SESSION_COOKIE, sessionIdOf } from '../auth/session.js';
 import { extractSubdomain } from '../middleware/tenant.js';
@@ -296,7 +296,8 @@ async function start(
   try {
     provider = await deps.ai.voiceFor(tenantId);
   } catch (err) {
-    send({ type: 'error', message: err instanceof AiNotConfiguredError ? err.message : '音声の対話を始められませんでした。しばらくしてからお試しください' });
+    // ローカルの方針で音声を使わない会社には、その理由を伝える（第8.6節、Q-157）
+    send({ type: 'error', message: err instanceof AiNotConfiguredError || err instanceof AiPolicyBlockedError ? err.message : '音声の対話を始められませんでした。しばらくしてからお試しください' });
     ws.close();
     return;
   }

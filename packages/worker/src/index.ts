@@ -13,7 +13,7 @@ import {
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
   RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, PostgresInventoryStore, inventoryAccess, SignageService, SignageInterrupts, PostgresSignageStore, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention,
   NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
-  loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv,
+  loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator,
 } from '@m2office/core';
 import { canRunAgent } from '@m2office/shared';
@@ -68,6 +68,8 @@ const ai = new TenantAiResolver({
   platformKey: platform.platformKey, testMode: platform.testMode,
   defaults: models,
   baseUrl: platform.baseUrl,
+  // 配備の形とローカル AI（仕様書 第8.6節・第16.3.7.1節、ADR-0059）
+  deployment: deploymentFromEnv(process.env), local: localLlmFromEnv(process.env),
 });
 // Google から取得したデータの保持（仕様書 第14.3.2節）。Google のツールは、内蔵のツールのうち権限を宣言しているもの
 const retention = new GoogleDataRetention({ repo, isGoogleTool: (name) => !!registry.get(name)?.google, logger: log });
@@ -129,6 +131,9 @@ const engine = new RunEngine({
   inventory: { service: inventory, bookings: inventoryBookings, access: inventoryAccess(repo) },
   hr: { calendar: laborCalendar, access: hrAccess(repo) },
   llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId),
+  // 業務ごとの AI（ローカル・外部）と、社外の接続に送ってよいか（第16.3.7.1節）
+  llmForRun: (tenantId, def, registry, previous) => ai.llmForRun(tenantId, def, registry, previous),
+  connectionBlocked: (tenantId, connectionId) => ai.connectionBlocked(tenantId, connectionId),
   registryFor: async (tenantId) => (await hub.forTenant(tenantId)).registry,
   // 止めた実行に後から書き込まれた中身も消す（仕様書 第6.5.2.1節）
   onCancelled: async (run) => { await retention.purgeRun(run, 'disconnect', new Date()); },
