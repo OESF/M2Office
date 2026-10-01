@@ -9,7 +9,8 @@
 
 import { randomUUID } from 'node:crypto';
 import {
-  CARDS_EXTENSION_ID, EMPTY_CARD_FIELDS, canUseAgent, type AuditEvent, type CardFields, type Contact, type ContactCard, type ContactScope, type User,
+  CARDS_EXTENSION_ID, EMPTY_CARD_FIELDS, canUseAgent, type AuditEvent, type CardFields, type Contact, type ContactCard, type ContactChange,
+  type ContactScope, type User,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { FileStore } from '../files/store.js';
@@ -19,6 +20,7 @@ import { silentLogger, type Logger } from '../log/logger.js';
 import { CARD_BATCH_MAX, CARD_MIME, detectCardKind, splitCardPdf, type CardFileKind } from './formats.js';
 import { CARD_MAX_PER_IMAGE, readCard, type CardReading } from './read.js';
 import { mergeFields, resolveContact } from './identity.js';
+import { revertPatch } from './signature.js';
 import { CARD_EXPORT_COLUMNS, cardFromRow, exportRow, mapCardHeaders, type CardTableField, type TableCell } from './table.js';
 import type { CardViewer, ContactPatch, ContactStore, NewCard } from './store.js';
 
@@ -75,6 +77,8 @@ export interface ContactDetail {
   cards: ContactCard[];
   /** 名刺の履歴（以前の会社・役職）。新しい順。 */
   history: { receivedOn: string; company: string; department: string; title: string }[];
+  /** メールの署名から新しくした記録（戻していないもの。新しい順。第27.6.1節）。誰のメールからかは含めない。 */
+  changes: ContactChange[];
 }
 
 export class CardService {
@@ -388,7 +392,58 @@ export class CardService {
       if (history.some((h) => h.company === f.company && h.department === f.department && h.title === f.title)) continue;
       history.push({ receivedOn: c.receivedOn, company: f.company, department: f.department, title: f.title });
     }
-    return { contact, cards, history };
+    const changes = await this.deps.store.listChanges(who, { contactId, limit: 20 });
+    return { contact, cards, history, changes };
+  }
+
+  /**
+   * メールの署名から新しくした記録を戻す（第27.6.1節）。見られる人の全員が戻せる（直せる人と同じ。第27.7節）。
+   *
+   * @returns 戻せなければ理由
+   * @remarks 今の値が署名から変えた値のままの項目だけを戻す。戻した項目は、署名が同じ値を示している間は再び変えない
+   */
+  async revertChange(who: CardViewer, contactId: string, changeId: string): Promise<string | null> {
+    const { store } = this.deps;
+    const change = await store.getChange(who, changeId);
+    if (!change || change.contactId !== contactId) return '記録が見つかりません';
+    if (change.revertedAt) return null;
+    const contact = await store.getContact(who, contactId);
+    if (!contact || contact.status !== 'active') return '名刺が見つかりません';
+    const patch = revertPatch(contact, change.fields);
+    if (Object.keys(patch).length > 0) await store.updateContact(who, contactId, patch, who.userId);
+    await store.markChangeReverted(who, changeId, who.userId);
+    await this.audit(who.tenantId, { type: 'user', id: who.userId }, 'contact.signature_revert', 'contact', contactId, { fields: Object.keys(patch) });
+    return null;
+  }
+
+  /**
+   * 本人か会社から Google のデータの削除を求められたとき、その人のメールの署名から変えた値を前の値に戻し、変更の記録を消す
+   * （第27.6.1節、Q-152）。Google の連携の解除では呼ばない。
+   *
+   * @param mailboxUserId メールを受け取った人
+   * @param by 求めに応じて操作した人
+   * @returns 消した変更の記録の数
+   * @remarks その後にほかの出どころで変わった項目は戻さない。見張りの状態（その人のメールで見た署名の値）も消す
+   */
+  async forgetMailSignatures(tenantId: string, mailboxUserId: string, by: string): Promise<number> {
+    const { store } = this.deps;
+    // その人として見る（会社で共有の名刺と、その人の自分だけの名刺。署名から変えるのはこの範囲だけ）
+    const who: CardViewer = { tenantId, userId: mailboxUserId };
+    const changes = await store.listChanges(who, { mailboxUserId, includeReverted: true, limit: 100_000 });
+    const touched = new Set<string>();
+    // 新しい順に戻すと、同じ項目を何度も変えていても最初の値まで戻る（今の値が後の記録の「後」と合う間だけ戻す）
+    for (const change of changes) {
+      touched.add(change.contactId);
+      if (change.revertedAt) continue;
+      const contact = await store.getContact(who, change.contactId);
+      if (!contact) continue;
+      const patch = revertPatch(contact, change.fields);
+      if (Object.keys(patch).length > 0) await store.updateContact(who, change.contactId, patch, by);
+    }
+    for (const contactId of touched) await store.saveSignatureState(who, contactId, {});
+    const n = await store.deleteChanges(who, changes.map((c) => c.id));
+    await this.audit(tenantId, { type: 'user', id: by }, 'contact.signature_forget', 'user', mailboxUserId, { count: n });
+    return n;
   }
 
   /**

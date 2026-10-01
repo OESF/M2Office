@@ -250,6 +250,18 @@ function InstalledCard({ item: x, busy, focused = false, options, onChanged, onT
           </div>
         </div>
       )}
+      {x.cards && (
+        // メールの署名から異動・昇進・電話の変更を名刺に反映する（仕様書 第27.6.1節）。すぐに反映する
+        <div className="small">
+          <label className="check">
+            <input type="checkbox" checked={x.cards.mailSignature} disabled={busy}
+              onChange={(e) => void api.admin.setCardsMailSignature(e.target.checked).then(onChanged)} />
+            メールの署名から名刺を新しくする
+          </label>
+          {/* まとめてメールで配信の停止を申し出た人の数（仕様書 第27.9.1節）。アドレスは出さない */}
+          {x.cards.optOuts > 0 && <span className="muted">　配信の停止 {x.cards.optOuts} 件</span>}
+        </div>
+      )}
       {x.inventory && on && <InventoryFields settings={x.inventory} busy={busy} onChanged={onChanged} />}
       {x.hr && on && <HrFields settings={x.hr} busy={busy} onChanged={onChanged} />}
       {x.signage && on && <SignageFields settings={x.signage} busy={busy} onChanged={onChanged} />}

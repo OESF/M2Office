@@ -55,6 +55,34 @@ export interface Contact extends CardFields {
   updatedAt: string;
 }
 
+/** メールの署名から新しくできる項目（第27.6.1節）。氏名・ふりがな・メールアドレス・メモ・範囲は変えない。 */
+export type SignatureField = 'company' | 'department' | 'title' | 'postalCode' | 'address' | 'phones' | 'website';
+
+/** 署名から新しくできる項目の並び（画面・比べる順）。 */
+export const SIGNATURE_FIELDS: readonly SignatureField[] = ['company', 'department', 'title', 'postalCode', 'address', 'phones', 'website'];
+
+/** 変えた 1 項目の前と後。電話は並び全体。 */
+export interface ContactFieldChange {
+  before: string | ContactPhone[];
+  after: string | ContactPhone[];
+}
+
+/**
+ * 連絡先の変更の記録（第27.6.1節・第27.11節）。いまはメールの署名からの更新だけを残す。
+ *
+ * @remarks メールの件名・本文は持たない。どのメールからかは画面に出さない
+ */
+export interface ContactChange {
+  id: string;
+  contactId: string;
+  source: 'mail_signature';
+  fields: Partial<Record<SignatureField, ContactFieldChange>>;
+  /** メールの日時。 */
+  occurredAt: string;
+  revertedAt: string | null;
+  createdAt: string;
+}
+
 /** 名刺の読み取りの状態。 */
 export type CardStatus = 'pending' | 'reading' | 'done' | 'failed';
 

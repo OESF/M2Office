@@ -32,6 +32,8 @@
 | `calendar.freebusy` | read | `calendar.readonly`（機密） | 参加者の予定の空きを調べます |
 | `calendar.list` | read | `calendar.readonly`（機密） | 予定の一覧を見ます |
 | `card.read` | read | — | 名刺の画像から、氏名・会社名・電話・メールアドレスなどを読み取ります。登録はしません |
+| `contacts.bulk_preview` | read | — | まとめてのメールの宛先・除いた人・見本を確かめます。見るだけです |
+| `contacts.changes` | read | — | メールの署名から、会社・部署・役職・電話などが新しくなった名刺を調べます。見るだけです |
 | `contacts.get` | read | — | 1 人分の名刺の中身と、誰がいつ名刺を受け取ったかを見ます。見るだけです |
 | `contacts.search` | read | — | 取り込んだ名刺から、氏名・会社名・住所・電話番号などで人を探します。見るだけです |
 | `directory.search` | read | `directory.readonly`（機密） | 社内の人を名前・メール・部署で探します。社外の連絡先は探しません |
@@ -71,6 +73,7 @@
 | `sheet.render` | draft | — | 表を Excel・CSV として作り、成果物として保存します |
 | `sheets.create` | draft | `drive.file`（機密でない） | あなたのドライブに Google スプレッドシートを作ります。共有はしません |
 | `slides.create` | draft | `drive.file`（機密でない）・`drive`（制限付き） | 調べた内容をスライドにまとめ、あなたのドライブに作ります。PowerPoint 形式でも取り出せます。共有はしません |
+| `contacts.bulk_draft` | write-internal | — | 名刺の相手へのまとめてのメールの下書きを作ります。送りません |
 | `contacts.save` | write-internal | — | 名刺を連絡先として登録するか、電話番号やメモなどを直します。社内の名刺の置き場に書くだけで、誰にも送りません |
 | `drive.share_company` | write-internal | `drive.file`（機密でない） | M2Office で作ったファイルを、会社の全員が閲覧できるようにします。社外の人は見られません。リンクで誰にでも公開することはしません |
 | `inventory.move` | write-internal | — | 入庫・使用・移動を在庫に記録します。社内の記録に足すだけで、誰にも送りません |
@@ -87,6 +90,7 @@
 | `chat.post` | external-send | `chat.messages.create`（機密）・`chat.spaces.readonly`（機密） | チャットへ投稿します。社外の人が入れるスペースへの投稿は、承認のあとに行います |
 | `drive.share` | external-send | `drive.file`（機密でない） | M2Office で作ったファイルを、指定した人と共有します。社外の人との共有は、承認のあとに行います。リンクで誰にでも公開することはしません |
 | `gmail.send` | external-send | `gmail.send`（機密） | メールを送ります。必ず承認のあとに行います |
+| `mail.bulk_send` | external-send | `gmail.send`（機密） | 承認されたまとめてのメールを、あなたの Gmail から 1 人に 1 通ずつ送ります |
 
 ## 4.3 引数
 
@@ -100,6 +104,8 @@
 | `calendar.freebusy` | `emails`（必須）: 参加者のメールアドレス、`from`: 期間の始まり（任意）、`to`: 期間の終わり（任意） |
 | `calendar.list` | `from`: 期間の始まり（ISO 形式。既定は今日）、`to`: 期間の終わり（既定は 7 日後） |
 | `card.read` | `fileId`（必須）: 名刺の画像のファイル ID |
+| `contacts.bulk_preview` | `bulkMailId`（必須）: まとめてのメールの ID |
+| `contacts.changes` | `days`: 何日前までを見るか（既定 30、最大 90）、`mine`: 自分が受け取ったメールから分かったものだけにする |
 | `contacts.get` | `contactId`（必須）: 連絡先の ID（contacts.search の結果） |
 | `contacts.search` | `query`: 探す言葉（空なら交換した日の範囲だけで絞る）、`from`: 交換した日の始め（YYYY-MM-DD）、`to`: 交換した日の終わり（YYYY-MM-DD） |
 | `directory.search` | `query`（必須）: 名前・メール・部署に含まれる言葉、`limit`: 件数（既定 20） |
@@ -139,6 +145,8 @@
 | `sheet.render` | `title`（必須）: 題名、`format`: 形式（xlsx・csv）、`columns`（必須）: 列名、`rows`（必須）: 行の配列（各行は値の配列） |
 | `sheets.create` | `title`（必須）: 題名、`columns`（必須）: 列名、`rows`: 行の配列（各行は値の配列）、`folderId`: 入れるフォルダの ID（任意） |
 | `slides.create` | `title`（必須）: 表紙の題名、`subtitle`: 副題（任意）、`slides`（必須）: 本文のスライドの配列（layout・title ほか。12 枚まで）、`sources`: 出典（title・url）の配列、`template`: 会社が登録したテンプレートの名前（任意） |
+| `contacts.bulk_draft` | `contactIds`（必須）: 宛先の連絡先の ID（contacts.search の結果の contactId）。100 人まで、`subject`（必須）: 件名（{会社名}・{氏名} を使える）、`body`（必須）: 本文。宛名は「{会社名}
+{氏名} 様」のように差し込む。末尾の会社の表示と配信の停止の URL は入れない（自動で入る） |
 | `contacts.save` | `contactId`: 直す連絡先の ID。新しく登録するときは書かない、`fields`: 直す項目（name・nameKana・company・department・title・postalCode・address・phones・emails・website・extra）、`note`: メモ（「展示会で会った」など）。書くと置き換える、`card`: 登録する名刺。card.read の結果の fileId・fields・rotation、`receivedOn`: 名刺を受け取った日（YYYY-MM-DD）。直すときだけ書く、`cardId`: 受け取った日を直す名刺（contacts.get の exchanges の cardId）。省くと呼んだ人のいちばん新しい名刺 |
 | `drive.share_company` | `fileId`（必須）: ファイルの ID（docs.create の結果の file.id） |
 | `inventory.move` | `kind`（必須）: 記録の種類（in・out・transfer）、`item`（必須）: 品目（品名・自社のコード・バーコード）、`qty`（必須）: 数（正の数）、`unit`: 数の単位（unit は使う単位、pack は仕入れの単位）（unit・pack）、`place`: 場所（省けば今ある場所）、`to`: 移動の先の場所、`lot`: ロット、`expiresOn`: 使用期限（YYYY-MM-DD）、`reason`: 理由（例: 販売・使用・廃棄・仕入） |
@@ -155,6 +163,7 @@
 | `chat.post` | `space`: スペースの名前（例: 営業部）か、スペースのリンク、`text`（必須）: 本文 |
 | `drive.share` | `fileId`（必須）: ファイルの ID、`emails`（必須）: 共有する相手のメールアドレス、`role`: 役割（reader・commenter・writer） |
 | `gmail.send` | `to`（必須）: 宛先のメールアドレス、`cc`: CC（任意）、`subject`（必須）: 件名、`body`（必須）: 本文、`replyTo`: 返信するメールの ID（任意） |
+| `mail.bulk_send` | `bulkMailId`（必須）: まとめてのメールの ID |
 
 <!-- tools:end -->
 

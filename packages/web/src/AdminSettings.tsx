@@ -552,6 +552,11 @@ export function UserSettings({ meId, page }: { meId: string; page: string }) {
     const roles = u.roles.includes(role) ? u.roles.filter((r) => r !== role) : [...u.roles, role];
     void saver.run(async () => { await api.admin.updateUser(u.id, { roles }); await load(); });
   };
+  // Google のデータの削除を求められたとき（仕様書 第27.6.1節、Q-152）。値は前に戻り、記録は取り戻せないため確かめる
+  const forgetSignatures = (u: User) => {
+    if (!confirm(`${u.displayName}さんのメールの署名から新しくした名刺の値を前に戻し、その記録を削除します。よろしいですか？`)) return;
+    void saver.run(async () => api.admin.forgetMailSignatures(u.id), (r) => `${r.count} 件の記録を削除しました`);
+  };
   const toggleStatus = (u: User) =>
     void saver.run(async () => {
       const r = await api.admin.updateUser(u.id, { status: u.status === 'active' ? 'disabled' : 'active' });
@@ -586,6 +591,7 @@ export function UserSettings({ meId, page }: { meId: string; page: string }) {
                 <button className="btn ghost small" disabled={saver.busy} onClick={() => toggleStatus(u)}>
                   {u.status === 'active' ? '利用中（停止する）' : '停止中（再開する）'}
                 </button>
+                <button className="btn ghost small" disabled={saver.busy} onClick={() => forgetSignatures(u)}>メールから得た名刺の変更を削除</button>
               </td>
             </tr>
           ))}

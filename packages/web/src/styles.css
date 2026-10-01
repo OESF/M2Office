@@ -1629,3 +1629,13 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .trash-bar { align-items: center; }
 /* 名刺の範囲の切り替え（会社で共有・自分だけ）は中身の幅にする */
 .card-scope { align-self: flex-start; width: fit-content; }
+
+/* まとめてのメール（仕様書 第27.9.1節）。宛先の一覧・見本 */
+.bulk-mail h3 { margin-top: calc(16px * var(--space-scale)); }
+.bulk-search { align-items: center; flex-wrap: wrap; }
+.bulk-recipients td { vertical-align: middle; }
+.bulk-recipients tr.muted td { color: var(--muted); }
+.bulk-sample { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: calc(10px * var(--space-scale)) calc(14px * var(--space-scale)); }
+.bulk-sample pre { white-space: pre-wrap; word-break: break-word; font-family: inherit; margin: calc(6px * var(--space-scale)) 0 0; }
+.bulk-problems { padding-left: 1.2em; }
+.bulk-mail textarea { width: 100%; }

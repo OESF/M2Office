@@ -199,7 +199,7 @@ export class ExtensionHub {
     // 秘書の調べものは、会社の接続の読むだけの道具を使える（第12.11.0節）
     const readTools = connections.flatMap((c) => connectorTools(c)).filter((t) => t.risk === 'read' && tenantRegistry.get(t.name)).map((t) => t.name);
     // 名刺管理を使う会社では、秘書の調べものが名刺を探せる（第27.9節）。利用範囲は道具を呼ぶときに確かめる
-    if (settings.cards.enabled) readTools.push('contacts.search', 'contacts.get');
+    if (settings.cards.enabled) readTools.push('contacts.search', 'contacts.get', 'contacts.changes');
     // 在庫管理を使う会社では、秘書の調べものが在庫と入出庫の記録を探せる（第29.15節）
     if (settings.inventory.enabled) readTools.push('inventory.search', 'inventory.history');
     const withReaders = (a: AgentDefinition) => (CONNECTION_READER_IDS.has(a.id) && readTools.length > 0

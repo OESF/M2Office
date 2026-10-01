@@ -195,6 +195,8 @@ export interface CardsSettings {
   enabled: boolean;
   /** 取り込んだ名刺の既定の範囲。既定は会社で共有（第27.7節）。 */
   defaultScope: 'company' | 'personal';
+  /** 名刺を交換した相手のメールの署名から、異動・昇進・電話の変更を名刺に反映するか。既定は入（第27.6.1節、ADR-0057）。 */
+  mailSignature: boolean;
 }
 
 export interface TenantSettings {
@@ -251,7 +253,7 @@ export const DEFAULT_TENANT_SETTINGS: TenantSettings = {
   // 帳票の体裁。未設定でも帳票は出せる（無い欄は出さない）
   invoice: { logoFileId: null, bankAccount: '', paymentDue: '', notes: '', sealBox: false },
   // 名刺は会社の資産として共有するのを既定にする（第27.7節）
-  cards: { enabled: true, defaultScope: 'company' },
+  cards: { enabled: true, defaultScope: 'company', mailSignature: true },
   // 在庫管理は既定で切り。使う会社が導入のときに入れる（第29.2節）
   inventory: DEFAULT_INVENTORY_SETTINGS,
   // 人事・給与は既定で切り。給与 SaaS を使っている会社は入れなくてよい（第30.2節）

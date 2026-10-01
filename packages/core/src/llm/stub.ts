@@ -149,6 +149,16 @@ function chooseTools(tools: string[], prompt: string): Call[] {
   // 語句は「〜を収集」「〜を取得」のように目的語つきで見る。
   // 「収集した内容を要約する」のような後段の指示で、同じツールを呼び直さないため
 
+  // まとめてのメール（仕様書 第27.9.1節）: 名刺の画面で作った下書きを確かめ、承認の後に送る
+  if (has('contacts.bulk_preview') && instruction.includes('contacts.bulk_preview')) {
+    const id = extractField(prompt, 'bulkMailId');
+    if (id) return [{ name: 'contacts.bulk_preview', args: { bulkMailId: id } }];
+  }
+  if (has('mail.bulk_send') && instruction.includes('mail.bulk_send')) {
+    const id = extractField(prompt, 'bulkMailId');
+    if (id) return [{ name: 'mail.bulk_send', args: { bulkMailId: id } }];
+  }
+
   // 収集: 読み取り系をまとめて呼ぶ（AG-05。仕様書 第9.5.5節）
   if (/を収集/.test(instruction)) {
     const collectors: Call[] = [];

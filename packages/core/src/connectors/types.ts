@@ -63,6 +63,11 @@ export interface MailSummary {
 
 export interface MailMessage extends MailSummary {
   body: string;
+  /**
+   * 差出人のドメインの認証が通ったか（Gmail が付けた認証の結果で、DMARC か、差出人のドメインに合う DKIM が通っている）。
+   * 分からない接続口（見本）では未定義。未定義は通っていないものとして扱う（名刺の署名。第27.6.1節）。
+   */
+  senderAuthenticated?: boolean;
 }
 
 export interface CalendarEvent {
@@ -118,10 +123,14 @@ export interface MailConnector {
   get(p: ConnectorPrincipal, id: string): Promise<MailMessage | null>;
   /** 検索の条件（Gmail の検索の書き方）で探す。本文は返さない。 */
   search(p: ConnectorPrincipal, q: { query: string; limit?: number }): Promise<MailSummary[]>;
-  /** メールを送る。承認ステップの直後でしか呼ばれない（危険度 external-send。仕様書 第9.4節）。 */
+  /**
+   * メールを送る。承認ステップの直後か、承認したまとめてのメールの送信でしか呼ばれない（危険度 external-send。仕様書 第9.4節・第27.9.1節）。
+   *
+   * @param mail.listUnsubscribe 配信の停止の URL（宣伝のメール。見出しの `List-Unsubscribe` と、押すだけで止まる `List-Unsubscribe-Post` を付ける）
+   */
   send(
     p: ConnectorPrincipal,
-    mail: { to: string[]; cc: string[]; subject: string; body: string; replyTo: string | null },
+    mail: { to: string[]; cc: string[]; subject: string; body: string; replyTo: string | null; listUnsubscribe?: string },
   ): Promise<{ messageId: string }>;
   /** 返信の下書きを作る。**送信はしない**（仕様書 第9.5.1節）。 */
   createDraft(

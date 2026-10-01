@@ -70,6 +70,9 @@ export function describeCall(call: DescribedCall, ctx: DescribeContext = {}): st
         quote(str(a['body'])),
       ].join('\n');
     }
+    case 'mail.bulk_send':
+      // 宛先の一覧・除いた人・見本は、承認の前の確かめで組み立てたもの（仕様書 第27.9.1節）
+      return `**まとめてのメールを送ります**（あなたの Gmail から 1 人に 1 通ずつ）\n${call.shown ?? ''}`;
     case 'gmail.create_draft':
       return [`**メールの下書きを作ります**（送りません）: 宛先 ${str(a['to']) || '（なし）'}／件名「${str(a['subject']) || '（件名なし）'}」`, quote(str(a['body']))].join('\n');
     case 'calendar.create': {

@@ -9,7 +9,7 @@
 
 import type { CardCorners,
   Approval, Artifact, Notification, Run, RunStep, Schedule, ScheduleRule, Tenant,
-  TenantSettings, User, UserSettings, CardFields, Contact, ContactScope,
+  TenantSettings, User, UserSettings, CardFields, Contact, ContactChange, ContactScope,
   InventoryItem, InventoryItemView, InventoryLocation, InventoryMove, InventoryMoveKind, InventorySettings, InventoryStockRow,
   HrEmployee, HrEmployeeView, HrSettings, HrTask, HrTerms,
   AttClose, AttDay, AttPeriod, AttPunchKind, AttTotals, LeaveBalance, LeaveGrant, LeaveTake,
@@ -425,6 +425,22 @@ export interface CardSummary {
   lastReceivedOn: string | null; cardCount: number;
 }
 
+/** まとめてのメールの宛先 1 人。 */
+export interface BulkMailRecipient { contactId: string | null; name: string; company: string; email: string }
+
+/** まとめてのメールの見本と、送る前の確かめ（仕様書 第27.9.1節）。 */
+export interface BulkMailPreview {
+  id: string;
+  status: 'draft' | 'awaiting' | 'sending' | 'done' | 'cancelled';
+  subject: string; body: string;
+  advertising: boolean | null;
+  recipients: BulkMailRecipient[];
+  excluded: (BulkMailRecipient & { reason: string })[];
+  sample: { to: string; subject: string; body: string } | null;
+  problems: string[];
+  progress: { total: number; sent: number; failed: number; skipped: number; pending: number };
+}
+
 /** 名刺の一覧。 */
 export interface CardList {
   items: CardSummary[];
@@ -457,6 +473,10 @@ export interface CardDetail {
     frontCorners: CardCorners | null; backCorners: CardCorners | null;
   }[];
   history: { receivedOn: string; company: string; department: string; title: string }[];
+  /** メールの署名から新しくした記録（仕様書 第27.6.1節）。 */
+  changes: Pick<ContactChange, 'id' | 'occurredAt' | 'fields'>[];
+  /** 自分がこの人に送ったまとめてのメール（仕様書 第27.9.1節）。 */
+  bulkMails: { bulkMailId: string; subject: string; sentAt: string }[];
   canManage: boolean;
 }
 
@@ -689,7 +709,7 @@ export interface ExtensionView {
   /** 利用できる人（第16.7節）。 */
   scope: ScopeValue;
   /** 名刺管理の会社の設定（取り込んだ名刺の既定の範囲。仕様書 第27.7節）。名刺管理のときだけある。 */
-  cards?: { defaultScope: ContactScope };
+  cards?: { defaultScope: ContactScope; mailSignature: boolean; optOuts: number };
   /** 在庫管理の会社の設定（機能の入り切りと既定の目安。仕様書 第29.4.1節）。在庫管理のときだけある。 */
   inventory?: InventorySettings;
   /** 人事・給与の会社の設定（仕様書 第30.8.1節）。人事・給与のときだけある。 */
@@ -1041,12 +1061,26 @@ export const api = {
   /** 名刺管理（内蔵の拡張。仕様書 第27章）。 */
   cards: {
     /** 一覧と検索。本人の読み取り中・読み取れなかった名刺と、進み具合も返る（第27.8節）。 */
-    list: (q: { q?: string; scope?: 'all' | ContactScope; trash?: boolean } = {}) => {
+    list: (q: { q?: string; scope?: 'all' | ContactScope; trash?: boolean; from?: string; to?: string } = {}) => {
       const p = new URLSearchParams();
       if (q.q) p.set('q', q.q);
       if (q.scope && q.scope !== 'all') p.set('scope', q.scope);
       if (q.trash) p.set('trash', '1');
+      // 交換した日の範囲（まとめてのメールの宛先を探す。第27.9.1節）
+      if (q.from) p.set('from', q.from);
+      if (q.to) p.set('to', q.to);
       return call<CardList>(`/cards?${p.toString()}`);
+    },
+    /** まとめてのメール（仕様書 第27.9.1節）。下書きは作った本人だけが見られる。 */
+    bulk: {
+      create: (d: { contactIds: string[]; subject: string; body: string }) =>
+        call<{ id: string }>('/cards/bulk-mails', { method: 'POST', body: JSON.stringify(d) }),
+      get: (id: string) => call<BulkMailPreview>(`/cards/bulk-mails/${encodeURIComponent(id)}`),
+      update: (id: string, d: { contactIds?: string[]; subject?: string; body?: string }) =>
+        call<{ ok: true }>(`/cards/bulk-mails/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(d) }),
+      remove: (id: string) => call<{ ok: true }>(`/cards/bulk-mails/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+      /** 承認へ進める（業務「まとめてのメール」を始め、本人の承認を待つ）。 */
+      submit: (id: string) => call<{ runId: string }>(`/cards/bulk-mails/${encodeURIComponent(id)}/submit`, { method: 'POST', body: JSON.stringify({}) }),
     },
     /**
      * 名刺のファイルを渡す（第27.4節）。読み取りは後ろで進むため、受け付けだけを待つ。
@@ -1085,6 +1119,9 @@ export const api = {
       call<{ ok: true }>(`/cards/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
     setScope: (id: string, scope: ContactScope) =>
       call<{ ok: true }>(`/cards/${encodeURIComponent(id)}/scope`, { method: 'PUT', body: JSON.stringify({ scope }) }),
+    /** メールの署名から新しくした記録を戻す（仕様書 第27.6.1節）。 */
+    revertChange: (id: string, changeId: string) =>
+      call<{ ok: true }>(`/cards/${encodeURIComponent(id)}/changes/${encodeURIComponent(changeId)}/revert`, { method: 'POST' }),
     split: (id: string, cardId: string) =>
       call<{ contactId: string }>(`/cards/${encodeURIComponent(id)}/split`, { method: 'POST', body: JSON.stringify({ cardId }) }),
     trash: (id: string) => call<{ ok: true }>(`/cards/${encodeURIComponent(id)}`, { method: 'DELETE' }),
@@ -1648,6 +1685,9 @@ export const api = {
     /** 利用者を直す。止めたときは、止めた業務の数と、30 日後に削除される自分だけの名刺の数を返す（仕様書 第27.7節）。 */
     updateUser: (id: string, patch: { displayName?: string; roles?: string[]; status?: string }) =>
       call<User & { stoppedRuns?: number; personalCards?: number }>(`/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    /** その人のメールの署名から名刺を新しくした値を戻し、記録を削除する（Google のデータの削除の求め。仕様書 第27.6.1節、Q-152）。 */
+    forgetMailSignatures: (id: string) =>
+      call<{ ok: true; count: number }>(`/admin/users/${id}/forget-mail-signatures`, { method: 'POST' }),
     knowledge: () => call<{
       items: KnowledgeItemView[]; compartments: { id: string; name: string; description: string | null }[];
       consolidated: ConsolidationView | null;
@@ -1699,6 +1739,9 @@ export const api = {
     /** 名刺管理の、取り込んだ名刺の既定の範囲（仕様書 第27.7節）。 */
     setCardsDefaultScope: (defaultScope: ContactScope) =>
       call<{ ok: true }>('/admin/extensions/business-cards/settings', { method: 'PUT', body: JSON.stringify({ defaultScope }) }),
+    /** メールの署名から名刺を新しくするかの入り切り（仕様書 第27.6.1節）。 */
+    setCardsMailSignature: (mailSignature: boolean) =>
+      call<{ ok: true }>('/admin/extensions/business-cards/settings', { method: 'PUT', body: JSON.stringify({ mailSignature }) }),
     /** 在庫管理の予約の受け口（仕様書 第29.13.1節）。 */
     bookingSources: () => call<{ sources: InventoryBookingSource[] }>('/admin/extensions/inventory/booking-sources'),
     /** 予約の受け口を作る。URL（鍵を含む）はこの応答で一度だけ返る。 */

@@ -13,7 +13,7 @@ import {
   type MailSummary, type TaskItem, type WorkspaceConnector,
 } from '../types.js';
 import { GOOGLE_API_ENDPOINTS, GoogleTokenSource, callGoogle, type GoogleApiEndpoints } from './http.js';
-import { buildRawMessage, decodeEntities, decodeHeaderWords, extractBody, header, type GmailPart } from './mime.js';
+import { buildRawMessage, decodeEntities, decodeHeaderWords, extractBody, header, senderAuthenticated, type GmailPart } from './mime.js';
 import { externalOf, pickSpace, spaceIdOf, toChatText } from './chat.js';
 import { googleDocs, googleDrive } from './drive.js';
 import { googleSheets } from './sheets.js';
@@ -178,13 +178,16 @@ export class GoogleWorkspaceConnector implements WorkspaceConnector {
     get: async (p: ConnectorPrincipal, id: string): Promise<MailMessage | null> => {
       const m = await this.gmail(p, `/messages/${encodeURIComponent(id)}?format=full`) as GmailMessage | null;
       if (!m) return null;
-      return { ...toSummary(m), body: m.payload ? extractBody(m.payload) : '' };
+      const summary = toSummary(m);
+      // 差出人のドメインの認証の結果（名刺の署名で、なりすましを使わないため。第27.6.1節）
+      const address = /<([^>]+)>/.exec(summary.from)?.[1] ?? summary.from;
+      return { ...summary, body: m.payload ? extractBody(m.payload) : '', senderAuthenticated: senderAuthenticated(m.payload?.headers, address.trim()) };
     },
     search: async (p: ConnectorPrincipal, q: { query: string; limit?: number }) => {
       const params = new URLSearchParams({ q: q.query, maxResults: String(clampLimit(q.limit)) });
       return this.summaries(p, await this.listIds(p, params));
     },
-    send: async (p: ConnectorPrincipal, mail: { to: string[]; cc: string[]; subject: string; body: string; replyTo: string | null }) => {
+    send: async (p: ConnectorPrincipal, mail: { to: string[]; cc: string[]; subject: string; body: string; replyTo: string | null; listUnsubscribe?: string }) => {
       const thread = mail.replyTo ? await this.threadOf(p, mail.replyTo) : null;
       const raw = buildRawMessage({ ...mail, inReplyTo: thread?.messageId, references: thread?.references });
       const res = await this.gmail(p, '/messages/send', { method: 'POST', body: { raw, ...(thread ? { threadId: thread.threadId } : {}) } });

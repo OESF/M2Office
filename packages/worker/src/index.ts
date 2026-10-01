@@ -11,7 +11,7 @@
 
 import {
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
-  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, InventoryService, InventoryWatch, InventoryBookings, PostgresInventoryStore, inventoryAccess, SignageService, SignageInterrupts, PostgresSignageStore, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention,
+  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, PostgresInventoryStore, inventoryAccess, SignageService, SignageInterrupts, PostgresSignageStore, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention,
   NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv,
   defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator,
@@ -76,6 +76,17 @@ const contactStore = new PostgresContactStore(
   process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office',
 );
 const cards = new CardService({ store: contactStore, repo, files, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log });
+// まとめてのメール（仕様書 第27.9.1節、ADR-0058）。承認されたものを 1 人に 1 通ずつ送る
+const bulkMail = new BulkMailService({
+  store: new PostgresBulkMailStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+  repo, box, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
+});
+// メールの署名から異動・昇進・電話の変更を見つけて名刺に反映する見張り（仕様書 第27.6.1節、ADR-0057）。
+// 同じ見回りで、まとめてのメールへの「配信停止」の返信も見つける（第27.9.1節）
+const signatures = new SignatureWatcher({
+  repo, store: contactStore, connector, llmFor: (tenantId) => ai.llmFor(tenantId), access: cardsAccess(repo), logger: log,
+  optOutFromReplies: (who, mails) => bulkMail.optOutFromReplies(who, mails),
+});
 // 社内のお知らせ（仕様書 第10.15節）。朝のブリーフが本人宛てのものを読む
 const notices = new NoticeService({
   store: new PostgresNoticeStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
@@ -114,7 +125,7 @@ const signage = new SignageService({
 const signageInterrupts = new SignageInterrupts({ service: signage, repo });
 const engine = new RunEngine({
   repo, llm, registry, connector, files, resolveDefinition, isAvailable, logger: log, research, notices,
-  cards: { store: contactStore, service: cards, access: cardsAccess(repo) },
+  cards: { store: contactStore, service: cards, access: cardsAccess(repo), bulk: bulkMail },
   inventory: { service: inventory, bookings: inventoryBookings, access: inventoryAccess(repo) },
   hr: { calendar: laborCalendar, access: hrAccess(repo) },
   llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId),
@@ -188,6 +199,9 @@ const conductor = new SecretaryConductor({
 /** 処理済みのイベントを残す日数。 */
 const AGENT_EVENT_KEEP_DAYS = 7;
 
+/** メールの署名を見る見回りの間隔（第27.6.1節。1 時間ごと）。 */
+const SIGNATURE_INTERVAL_MS = Number(process.env['SIGNATURE_INTERVAL_MS'] ?? 3_600_000);
+let lastSignatureCheck = 0;
 /** 期限を過ぎた名刺（ごみ箱に 30 日・読み取れなかったもの 4 週）を消す見回りの間隔。 */
 const CARD_PURGE_INTERVAL_MS = Number(process.env['CARD_PURGE_INTERVAL_MS'] ?? 3_600_000);
 let lastCardPurge = 0;
@@ -325,6 +339,12 @@ while (running) {
   } catch (err) {
     log.error('名刺の読み取りで例外が発生しました', { err });
   }
+  // 承認されたまとめてのメールを 1 通送る（第27.9.1節）。1 つのまとめてのメールは数秒おきに送る
+  try {
+    if (await bulkMail.processNext(connector, async (tenantId) => appUrl((await repo.findTenantById(tenantId))?.subdomain ?? ''))) handled = true;
+  } catch (err) {
+    log.error('まとめてのメールの送信で例外が発生しました', { err });
+  }
   if (Date.now() - lastCardPurge >= CARD_PURGE_INTERVAL_MS) {
     lastCardPurge = Date.now();
     try {
@@ -332,6 +352,15 @@ while (running) {
       if (n > 0) log.info('期限を過ぎた名刺を消しました', { cards: n });
     } catch (err) {
       log.error('名刺の消去の見回りで例外が発生しました', { err });
+    }
+  }
+  if (Date.now() - lastSignatureCheck >= SIGNATURE_INTERVAL_MS) {
+    lastSignatureCheck = Date.now();
+    try {
+      const { applied } = await signatures.tick(new Date());
+      if (applied > 0) log.info('メールの署名から名刺を新しくしました', { contacts: applied });
+    } catch (err) {
+      log.error('メールの署名の見回りで例外が発生しました', { err });
     }
   }
 

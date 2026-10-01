@@ -21,7 +21,7 @@ import { cancelPlan, createPlan, planStatusText } from './plan.js';
 import { AI_NOT_CONFIGURED_MESSAGE, aiAvailable } from '../llm/unconfigured.js';
 import { expandQuery } from '../knowledge/expand.js';
 import { jstDay } from '../memory/learn.js';
-import { contactRequest } from './contacts.js';
+import { bulkMailRequest, contactRequest } from './contacts.js';
 import { MAIL_TRIAGE_RULE, mailCheckRequest, mailCheckText, parseMailVerdicts } from './mail.js';
 import { answerAttendance, attendanceRequest, payslipRequest } from './attendance.js';
 import type { AttendanceService } from '../hr/attendance-service.js';
@@ -29,7 +29,7 @@ import type { PayrollService } from '../hr/payroll-service.js';
 import { answerHrStaff, hrStaffRequest, type HrStaffDeps } from './hr-staff.js';
 import { signageRequest, answerSignage, type SignageSecretaryDeps } from './signage.js';
 import { jstDate } from '../hr/attendance.js';
-import { CARD_UPDATE } from '../cards/agents.js';
+import { CARD_BULK_MAIL, CARD_UPDATE } from '../cards/agents.js';
 import { answerBriefSettings } from '../brief/settings.js';
 import type { NoticeService } from '../notices/service.js';
 import { answerNotice } from './notices.js';
@@ -392,6 +392,12 @@ export class Secretary {
     // 名刺（第27.9節）。名刺管理を使える人（付属の業務が候補にある人）の「〇〇さんの電話番号は？」は名刺を探す調べものへ、
     // 「直して・メモして」は名刺の修正へ回す。推論に選ばせない（名刺の問いに「分かりません」と答えないように）
     const cardUpdate = enabled.find((a) => a.id === CARD_UPDATE.id);
+    // 名刺の相手へのまとめてのメール（第27.9.1節）。宛先を集めて下書きを作り、本人の承認を待つ
+    const bulkMail = enabled.find((a) => a.id === CARD_BULK_MAIL.id);
+    if (bulkMail && !pastOnly && bulkMailRequest(message)) {
+      await this.audit(tenantId, userId, 'secretary.route', bulkMail.id);
+      return this.delegate(tenantId, userId, message, bulkMail, '名刺の相手へのまとめてのメールの依頼', llm);
+    }
     const contact = cardUpdate && !pastOnly ? contactRequest(message) : null;
     if (contact === 'fix' && cardUpdate) {
       await this.audit(tenantId, userId, 'secretary.route', cardUpdate.id);

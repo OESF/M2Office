@@ -3184,6 +3184,211 @@ console.log('\n■ 57. 名刺管理（内蔵の拡張。第27章、ADR-0042）')
     const byAddress = (await list('member', `横浜市西区 ${tag}`)).items ?? [];
     byAddress.some((c) => c.id === tanaka?.id) ? ok('住所の一部（空白を除いて比べる）でも探せる') : ng('住所で見つからない', JSON.stringify(byAddress).slice(0, 200));
 
+    // 名刺の相手へのまとめてのメール（第27.9.1節、ADR-0058）。画面から宛先を選んで確かめ、承認すると 1 人に 1 通ずつ送る
+    {
+      const bm = (n) => `bulk${n}-${tag}@sample.example`;
+      await upload('a', 'member', [
+        ['b1.png', cardImage({ name: `一斉一 ${tag}`, company: '株式会社一斉', emails: [bm(1)] })],
+        ['b2.png', cardImage({ name: `一斉二 ${tag}`, company: '株式会社一斉', emails: [bm(2)] })],
+        ['b3.png', cardImage({ name: `一斉三 ${tag}`, company: '株式会社一斉' })],
+      ]);
+      await settle('member');
+      // 表から取り込んだだけの名刺（名刺を交換した人か確かめられない）
+      const csv = new FormData();
+      csv.append('file', new Blob([`氏名,会社名,メールアドレス\n一斉表 ${tag},株式会社一斉,${bm(4)}\n`], { type: 'text/csv' }), 'b.csv');
+      await fetch(`${API}/v1/cards/import`, { method: 'POST', body: csv, headers: { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' } });
+      const found = (await list('member', `一斉 ${tag}`)).items ?? [];
+      const byName = (n) => found.find((c) => c.name === `${n} ${tag}`);
+      const [b1, b2, b3, b4] = ['一斉一', '一斉二', '一斉三', '一斉表'].map(byName);
+      for (const c of [b1, b2, b3, b4]) if (c) created.push(c.id);
+      const draft = await call('a', '/v1/cards/bulk-mails', { method: 'POST', body: JSON.stringify({
+        contactIds: [b1?.id, b2?.id, b3?.id, b4?.id], subject: '{氏名}様 発表会のお礼', body: '{会社名}\n{氏名} 様\n\n本日はご来場ありがとうございました。',
+      }) }, 'member');
+      const bulkId = draft.body.id;
+      const p1 = (await call('a', `/v1/cards/bulk-mails/${bulkId}`, {}, 'member')).body;
+      const reasons = Object.fromEntries((p1.excluded ?? []).map((x) => [x.name, x.reason]));
+      draft.status === 201 && p1.recipients?.length === 2 && /メールアドレスがありません/.test(reasons[`一斉三 ${tag}`] ?? '')
+        && /名刺を交換していません/.test(reasons[`一斉表 ${tag}`] ?? '') && p1.advertising === true
+        && p1.sample?.subject === `一斉一 ${tag}様 発表会のお礼` && p1.sample.body.startsWith(`株式会社一斉\n一斉一 ${tag} 様`)
+        && p1.sample.body.includes('株式会社アルファ商事') && p1.sample.body.includes('配信を停止') && (p1.problems ?? []).length === 0
+        ? ok('まとめてのメールの下書き: 宛名を差し込んだ見本を出し、メールアドレスの無い人と、宣伝なら表から取り込んだだけの人を理由つきで除く')
+        : ng('まとめてのメールの下書きが違う', JSON.stringify(p1).slice(0, 700));
+
+      const other = await call('a', `/v1/cards/bulk-mails/${bulkId}`, {}, 'admin');
+      other.status === 404 ? ok('まとめてのメールの下書きは、作った本人だけが見られる') : ng('ほかの人が下書きを見られる', String(other.status));
+
+      // 配信の停止（URL）。ログインなしに開ける。停止した人は、以後のまとめてのメールから外す
+      const { tsImport } = await import('tsx/esm/api');
+      const { secretBoxFromEnv } = await tsImport('../packages/core/src/secrets/box.ts', import.meta.url);
+      const { BulkMailService } = await tsImport('../packages/core/src/cards/bulk.ts', import.meta.url);
+      const token = new BulkMailService({ store: null, repo: null, box: secretBoxFromEnv().box, llmFor: async () => null }).unsubscribeToken('t-alpha', bm(2));
+      const page = await fetch(`${API}/v1/unsubscribe/${token}`);
+      const stop = await fetch(`${API}/v1/unsubscribe/${token}`, { method: 'POST', body: 'List-Unsubscribe=One-Click', headers: { 'content-type': 'application/x-www-form-urlencoded' } });
+      const bad = await fetch(`${API}/v1/unsubscribe/${token.slice(0, -4)}abcd`);
+      const p2 = (await call('a', `/v1/cards/bulk-mails/${bulkId}`, {}, 'member')).body;
+      page.status === 200 && (await page.text()).includes('配信を停止する') && stop.status === 200 && bad.status === 404
+        && p2.recipients?.length === 1 && (p2.excluded ?? []).some((x) => x.email === bm(2) && /配信を停止/.test(x.reason))
+        ? ok('配信の停止の URL はログインなしに開け、押すと止まり、そのアドレスを宛先から外す（読めない鍵は 404）')
+        : ng('配信の停止が違う', JSON.stringify({ page: page.status, stop: stop.status, bad: bad.status, r: p2.recipients?.length }));
+
+      // 承認へ進めると、承認トレイに宛先の一覧・除いた人・見本が出る。承認待ちの間は直せない
+      const submit = await call('a', `/v1/cards/bulk-mails/${bulkId}/submit`, { method: 'POST', body: '{}' }, 'member');
+      const run = await waitFor('a', submit.body.runId, ['awaiting_approval', 'failed', 'completed'], 20000, 'member');
+      const appr = await approvalFor('a', submit.body.runId, 'member');
+      const locked = await call('a', `/v1/cards/bulk-mails/${bulkId}`, { method: 'PUT', body: JSON.stringify({ subject: '変える' }) }, 'member');
+      submit.status === 201 && run.run?.status === 'awaiting_approval' && appr && /まとめてのメールを送ります/.test(appr.present)
+        && appr.present.includes(bm(1)) && appr.present.includes('配信を停止しています') && locked.status === 409
+        ? ok('承認へ進めると本人の承認を待ち、承認の画面に宛先の一覧・除いた人と理由・見本を出す。承認待ちの間は直せない')
+        : ng('承認へ進めたときが違う', JSON.stringify({ submit: submit.body, status: run.run?.status, present: appr?.present?.slice(0, 300), locked: locked.status }));
+
+      // 承認すると、本人の Gmail から 1 人に 1 通ずつ送り、送り終えたら知らせる
+      await call('a', `/v1/approvals/${appr?.id}`, { method: 'POST', body: JSON.stringify({ decision: 'approved' }) }, 'member');
+      let p3 = null;
+      for (let i = 0; i < 40; i++) {
+        p3 = (await call('a', `/v1/cards/bulk-mails/${bulkId}`, {}, 'member')).body;
+        if (p3.status === 'done') break;
+        await sleep(500);
+      }
+      const { body: d58 } = await call('a', `/v1/cards/${b1?.id}`, {}, 'member');
+      const { body: notes } = await call('a', '/v1/notifications', {}, 'member');
+      p3?.status === 'done' && p3.progress?.sent === 1 && p3.progress.skipped === 3 && d58.bulkMails?.some((m) => m.subject === '{氏名}様 発表会のお礼')
+        && (notes.items ?? notes.notifications ?? []).some((n) => /まとめてのメールを 1 人に送りました/.test(n.title))
+        ? ok('承認すると 1 人に 1 通ずつ送り、除いた人には送らず、送り終えたら知らせ、名刺の詳細に送った記録を出す')
+        : ng('まとめてのメールの送信が違う', JSON.stringify({ status: p3?.status, progress: p3?.progress, bulk: d58.bulkMails }).slice(0, 400));
+
+      // 却下すると下書きに戻り、直せる
+      const d2 = await call('a', '/v1/cards/bulk-mails', { method: 'POST', body: JSON.stringify({ contactIds: [b1?.id], subject: 'お知らせ', body: '{氏名} 様' }) }, 'member');
+      const s2 = await call('a', `/v1/cards/bulk-mails/${d2.body.id}/submit`, { method: 'POST', body: '{}' }, 'member');
+      await waitFor('a', s2.body.runId, ['awaiting_approval', 'failed', 'completed'], 20000, 'member');
+      const a2 = await approvalFor('a', s2.body.runId, 'member');
+      await call('a', `/v1/approvals/${a2?.id}`, { method: 'POST', body: JSON.stringify({ decision: 'rejected' }) }, 'member');
+      await waitFor('a', s2.body.runId, ['cancelled', 'failed', 'completed'], 10000, 'member');
+      const back = (await call('a', `/v1/cards/bulk-mails/${d2.body.id}`, {}, 'member')).body;
+      const edit = await call('a', `/v1/cards/bulk-mails/${d2.body.id}`, { method: 'PUT', body: JSON.stringify({ subject: '直した' }) }, 'member');
+      back.status === 'draft' && edit.status === 200 ? ok('承認を却下すると下書きに戻り、直せる') : ng('却下の後が違う', JSON.stringify({ status: back.status, edit: edit.status }));
+      await call('a', `/v1/cards/bulk-mails/${d2.body.id}`, { method: 'DELETE' }, 'member');
+
+      const { body: ext58 } = await call('a', '/v1/admin/extensions');
+      (ext58.items ?? []).find((x) => x.id === 'business-cards')?.cards?.optOuts >= 1
+        ? ok('管理者は、配信を停止したアドレスの数を見られる（アドレスは出さない）') : ng('停止の数が出ない');
+      await owner57.query(`delete from mail_opt_outs where tenant_id = 't-alpha' and email like $1`, [`%-${tag}@sample.example`]);
+      await owner57.query(`delete from bulk_mails where tenant_id = 't-alpha' and id = $1`, [bulkId]);
+    }
+
+    // メールの署名から異動を見つけて名刺を新しくする（第27.6.1節、ADR-0057）。見本の会社では見張りが動かないため、
+    // Google のメールを返す見本の接続口と見本の推論を渡して、1 人分の見回りを直接動かす（会社全体の見回りは呼ばない）
+    {
+      const { tsImport } = await import('tsx/esm/api');
+      const { PostgresRepository } = await tsImport('../packages/core/src/repository/postgres.ts', import.meta.url);
+      const { PostgresContactStore } = await tsImport('../packages/core/src/cards/store.ts', import.meta.url);
+      const { SignatureWatcher } = await tsImport('../packages/core/src/cards/signature.ts', import.meta.url);
+      const { contactsChanges } = await tsImport('../packages/core/src/cards/tools.ts', import.meta.url);
+      const dbUrl = process.env.DATABASE_URL ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office';
+      const repo58 = new PostgresRepository(dbUrl);
+      const store58 = new PostgresContactStore(dbUrl);
+      const memberId = (await call('a', '/v1/me', {}, 'member')).body.user.id;
+      const sigMail = `sig-${tag}@sample.example`;
+      await upload('a', 'member', [['sig.png', cardImage({ name: `署名 ${tag}`, company: '株式会社サンプル', department: '営業部', title: '課長', emails: [sigMail], phones: [{ kind: 'main', number: '03-1111-2222' }] })]]);
+      await settle('member');
+      const sig = ((await list('member', `署名 ${tag}`)).items ?? [])[0];
+      if (sig) created.push(sig.id);
+      // 名刺はメールより前に受け取ったことにする
+      await owner57.query(`update contact_cards set received_on = current_date - 10 where contact_id = $1`, [sig?.id]);
+      await owner57.query(`update contacts set updated_at = now() - interval '10 days' where id = $1`, [sig?.id]);
+      let mail = { id: `m-${tag}-1`, title: '部長', authenticated: true, at: new Date(Date.now() - 3600_000) };
+      const connector = {
+        sourceFor: () => 'google',
+        mail: {
+          list: async () => [{ id: mail.id, from: `署名 ${tag} <${sigMail.toUpperCase()}>`, subject: '件名', snippet: '', receivedAt: mail.at.toISOString(), unread: true, labels: [] }],
+          get: async (_p, id) => ({ id, from: `署名 ${tag} <${sigMail}>`, subject: '件名', snippet: '', receivedAt: mail.at.toISOString(), unread: true, labels: [],
+            senderAuthenticated: mail.authenticated,
+            body: `お世話になっております。\n\n署名 ${tag}\n株式会社サンプル 営業本部 ${mail.title}\n直通 03-7777-8888\n\n> 引用\n> 株式会社別会社 社長` }),
+        },
+      };
+      let llmCalls = 0;
+      const llm = {
+        name: 'smoke',
+        async complete(req) {
+          llmCalls++;
+          const input = JSON.parse(req.messages[1].content);
+          const changed = input.mail.includes('別会社') ? ['company'] : ['department', 'title', 'phones'];
+          return { tokensUsed: 1, text: JSON.stringify({ hasSignature: true, name: `署名 ${tag}`, company: '株式会社サンプル', department: '営業本部', title: mail.title,
+            phones: [{ kind: 'direct', number: '03-7777-8888' }], changed }) };
+        },
+      };
+      const watcher = new SignatureWatcher({ repo: repo58, store: store58, connector, llmFor: async () => llm, access: async () => ({}) });
+      const resetCheck = () => owner57.query(`update contacts set signature_state = signature_state - 'checkedAt' where id = $1`, [sig?.id]);
+      try {
+        const applied = await watcher.scanUser('t-alpha', memberId, llm, new Date());
+        const { body: d1 } = await call('a', `/v1/cards/${sig?.id}`, {}, 'admin');
+        const { body: audit58 } = await call('a', '/v1/admin/audit-events');
+        applied === 1 && d1.contact?.title === '部長' && d1.contact?.department === '営業本部' && d1.contact?.name === `署名 ${tag}`
+          && d1.contact?.phones?.some((x) => x.kind === 'direct' && x.number === '03-7777-8888') && d1.contact?.phones?.some((x) => x.kind === 'main')
+          && d1.changes?.length === 1 && d1.changes[0].fields?.title?.before === '課長' && d1.updatedByName === null
+          && d1.changes[0].mailboxUserId === undefined && (audit58.items ?? []).some((e) => e.action === 'contact.update_from_signature')
+          && !JSON.stringify(audit58.items ?? []).includes(tag)
+          ? ok('名刺の相手からの、ドメインの認証が通ったメールの署名で、変わった項目だけを新しくする（引用の署名は使わず、誰のメールからかは出さない）')
+          : ng('署名から名刺が新しくならない', JSON.stringify({ applied, contact: d1.contact, changes: d1.changes, llmCalls }).slice(0, 600));
+
+        const again = await watcher.scanUser('t-alpha', memberId, llm, new Date());
+        again === 0 && llmCalls === 1 ? ok('同じ連絡先は 7 日に 1 度しか推論を呼ばない') : ng('推論を何度も呼ぶ', `${again} ${llmCalls}`);
+
+        const tool = await contactsChanges.invoke({ days: 7, mine: true }, {
+          tenantId: 't-alpha', userId: memberId, cards: { store: store58, access: async () => ({ defaultScope: 'company' }) },
+        });
+        tool.available && tool.items?.some((x) => x.contactId === sig?.id && x.changes.some((c) => c.field === '役職' && c.after === '部長'))
+          ? ok('「最近異動した人は？」と週次ブリーフに、署名から新しくなった名刺を返す（contacts.changes）') : ng('変更の一覧が違う', JSON.stringify(tool).slice(0, 300));
+
+        await owner57.query(`update contact_changes set created_at = now() - interval '8 days' where contact_id = $1`, [sig?.id]);
+        await store58.forgetChangeMessages();
+        const { rows: mids } = await owner57.query(`select message_id from contact_changes where contact_id = $1`, [sig?.id]);
+        mids.length === 1 && mids[0].message_id === null ? ok('どのメールかを示す ID は 7 日で消す（値と前後は残す）') : ng('メールの ID が残る', JSON.stringify(mids));
+
+        const rev = await call('a', `/v1/cards/${sig?.id}/changes/${d1.changes?.[0]?.id}/revert`, { method: 'POST' }, 'admin');
+        const { body: d2 } = await call('a', `/v1/cards/${sig?.id}`, {}, 'member');
+        rev.status === 200 && d2.contact?.title === '課長' && d2.contact?.department === '営業部' && !d2.contact?.phones?.some((x) => x.kind === 'direct') && d2.changes?.length === 0
+          ? ok('「戻す」で前の値に戻せる') : ng('戻せない', JSON.stringify({ rev: rev.body, contact: d2.contact }).slice(0, 300));
+
+        // 戻した値は、同じ署名が届いても再び変えない
+        await resetCheck();
+        mail = { ...mail, id: `m-${tag}-2`, at: new Date() };
+        const afterRevert = await watcher.scanUser('t-alpha', memberId, llm, new Date(Date.now() + 1000));
+        const { body: d3 } = await call('a', `/v1/cards/${sig?.id}`, {}, 'member');
+        afterRevert === 0 && d3.contact?.title === '課長' ? ok('戻した値は、署名が同じ値を示している間は再び変えない') : ng('戻した値をまた変えた', JSON.stringify(d3.contact?.title));
+
+        // ドメインの認証が通らないメールは、署名が変わっていても使わない（推論も呼ばない）
+        await resetCheck();
+        const callsBefore = llmCalls;
+        mail = { ...mail, id: `m-${tag}-3`, title: '本部長', authenticated: false, at: new Date(Date.now() + 2000) };
+        const spoofed = await watcher.scanUser('t-alpha', memberId, llm, new Date(Date.now() + 3000));
+        spoofed === 0 && llmCalls === callsBefore ? ok('差出人のドメインの認証が通らないメールは使わない（なりすましを防ぐ）') : ng('認証の通らないメールを使った', `${spoofed} ${llmCalls}`);
+
+        // 署名が変われば改めて新しくし、Google のデータの削除を求められたら、その人のメールから変えた値を戻して記録を消す（Q-152）
+        mail = { ...mail, id: `m-${tag}-4`, authenticated: true, at: new Date(Date.now() + 4000) };
+        const promoted = await watcher.scanUser('t-alpha', memberId, llm, new Date(Date.now() + 5000));
+        const { body: d4 } = await call('a', `/v1/cards/${sig?.id}`, {}, 'member');
+        const forget = await call('a', `/v1/admin/users/${memberId}/forget-mail-signatures`, { method: 'POST' });
+        const { body: d5 } = await call('a', `/v1/cards/${sig?.id}`, {}, 'member');
+        const { rows: left } = await owner57.query(`select count(*)::int as n from contact_changes where contact_id = $1`, [sig?.id]);
+        const forgetByMember = await call('a', `/v1/admin/users/${memberId}/forget-mail-signatures`, { method: 'POST' }, 'member');
+        promoted === 1 && d4.contact?.title === '本部長' && forget.status === 200 && forget.body.count === 2 && d5.contact?.title === '課長'
+          && left[0].n === 0 && forgetByMember.status === 403
+          ? ok('署名が変われば改めて新しくし、削除を求められたら、その人のメールから変えた値を戻して記録を消す（管理者だけ）')
+          : ng('削除の求めの扱いが違う', JSON.stringify({ promoted, t4: d4.contact?.title, forget: forget.body, t5: d5.contact?.title, left, m: forgetByMember.status }));
+
+        const off = await call('a', '/v1/admin/extensions/business-cards/settings', { method: 'PUT', body: JSON.stringify({ mailSignature: false }) });
+        const { body: ext } = await call('a', '/v1/admin/extensions');
+        const cardsExt = (ext.items ?? []).find((x) => x.id === 'business-cards');
+        await call('a', '/v1/admin/extensions/business-cards/settings', { method: 'PUT', body: JSON.stringify({ mailSignature: true }) });
+        off.status === 200 && cardsExt?.cards?.mailSignature === false && cardsExt.cards.defaultScope === 'company'
+          ? ok('管理者が「メールの署名から名刺を新しくする」を切れる（既定の範囲は変わらない）') : ng('切り替えが違う', JSON.stringify(cardsExt?.cards));
+      } finally {
+        await owner57.query(`delete from mail_signature_cursors where tenant_id = 't-alpha' and user_id = $1`, [memberId]);
+        await store58.close();
+        await repo58.close?.();
+      }
+    }
+
     // 自分だけの名刺は、管理者も・ほかの会社も見られない（第27.7節）
     const mine = await upload('a', 'member', [['c3.png', cardImage({ name: `佐藤 ${tag}`, company: '個人の知り合い', emails: [`sato-${tag}@private.example`] })]], { scope: 'personal' });
     await settle('member');

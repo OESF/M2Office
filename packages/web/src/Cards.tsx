@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { CardCorners, CardFields, ContactPhone, ContactScope, PhoneKind } from '@m2office/shared';
 import { api, describeError, type CardDetail, type CardList, type CardMeetings, type CardSummary } from './api.js';
+import { BulkMailView } from './BulkMail.js';
 import { cropCard, prepareCardPhoto } from './card-image.js';
 
 /**
@@ -40,19 +41,24 @@ const PHONE_LABELS: Record<PhoneKind, string> = { main: '代表', direct: '直�
  * @param onOpen 詳細を開く・一覧に戻る（URL を合わせる）
  * @param mailer メールの開き方（本人のアカウントの Gmail か `mailto:`）
  */
-export function Cards({ contactId, onOpen, mailer, admin = false }: {
+export function Cards({ contactId, onOpen, mailer, admin = false, onApprovals }: {
   contactId: string | null;
   onOpen: (contactId: string | null) => void;
   mailer: Mailer;
   /** 管理者か（会社の名刺のまとめての書き出しは管理者だけ。第27.10節）。 */
   admin?: boolean;
+  /** 承認トレイへ移る（まとめてのメールを承認へ進めた後。第27.9.1節）。 */
+  onApprovals?: () => void;
 }) {
+  // まとめてのメールの画面（第27.9.1節）。一覧で選んだ名刺をはじめの宛先にする
+  const [bulk, setBulk] = useState<CardSummary[] | null>(null);
   if (contactId) return <CardDetailView id={contactId} onBack={() => onOpen(null)} onOpen={onOpen} mailer={mailer} />;
-  return <CardListView onOpen={onOpen} admin={admin} />;
+  if (bulk) return <BulkMailView initial={bulk} onClose={() => setBulk(null)} onSubmitted={() => { setBulk(null); onApprovals?.(); }} />;
+  return <CardListView onOpen={onOpen} admin={admin} onBulk={setBulk} />;
 }
 
-/** 一覧・撮る・ファイルを選ぶ・探す・書き出す。 */
-function CardListView({ onOpen, admin }: { onOpen: (id: string) => void; admin: boolean }) {
+/** 一覧・撮る・ファイルを選ぶ・探す・書き出す・まとめてメール。 */
+function CardListView({ onOpen, admin, onBulk }: { onOpen: (id: string) => void; admin: boolean; onBulk: (initial: CardSummary[]) => void }) {
   const [list, setList] = useState<CardList | null>(null);
   const [q, setQ] = useState('');
   const [scope, setScope] = useState<'all' | ContactScope>('all');
@@ -61,7 +67,10 @@ function CardListView({ onOpen, admin }: { onOpen: (id: string) => void; admin: 
   const [notice, setNotice] = useState<string | null>(null);
   // ごみ箱で選んだ名刺（まとめて戻す・完全に削除する。第27.7節）。ごみ箱を開き直したら選び直す
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  useEffect(() => { setSelected(new Set()); }, [trash, scope, q]);
+  useEffect(() => { setSelected(new Set()); }, [trash, scope]);
+  // 一覧で名刺を選ぶ（まとめてのメールの宛先。第27.9.1節）。探す言葉を変えても選んだものは残す
+  const [selecting, setSelecting] = useState(false);
+  const [picked, setPicked] = useState<Map<string, CardSummary>>(new Map());
   const [personal, setPersonal] = useState<boolean | null>(null);
   const [withBack, setWithBack] = useState(false);
   const [front, setFront] = useState<File | null>(null);
@@ -151,6 +160,7 @@ function CardListView({ onOpen, admin }: { onOpen: (id: string) => void; admin: 
         <button className={mobile ? 'btn ghost' : 'btn'} disabled={busy || !!front} onClick={() => picker.current?.click()}>ファイルを選ぶ</button>
         {mobile && <label className="small check"><input type="checkbox" checked={withBack} disabled={!!front} onChange={(e) => setWithBack(e.target.checked)} /> 裏も撮る</label>}
         <label className="small check"><input type="checkbox" checked={!!personal} onChange={(e) => setPersonal(e.target.checked)} /> 自分だけ</label>
+        <button className="btn ghost" disabled={busy || trash} onClick={() => onBulk([...picked.values()])}>まとめてメール</button>
         {admin && (
           <select className="cards-export" value="" disabled={busy} aria-label="書き出す"
             onChange={(e) => { const f = e.target.value as 'csv' | 'xlsx'; e.target.value = ''; if (f) void api.cards.exportTable(f).catch((err) => setMessage(describeError(err, '書き出せませんでした'))); }}>
@@ -174,7 +184,29 @@ function CardListView({ onOpen, admin }: { onOpen: (id: string) => void; admin: 
           ))}
           <button className={trash ? 'on' : ''} onClick={() => setTrash(!trash)}>ごみ箱</button>
         </div>
+        {!trash && (
+          <button className={`btn ghost small${selecting ? ' on' : ''}`} aria-pressed={selecting}
+            onClick={() => { setSelecting(!selecting); if (selecting) setPicked(new Map()); }}>{selecting ? '選ぶのをやめる' : '選ぶ'}</button>
+        )}
       </div>
+      {selecting && !trash && (
+        <div className="cards-toolbar trash-bar">
+          <label className="small check">
+            <input type="checkbox" checked={!!list && list.items.length > 0 && list.items.every((c) => picked.has(c.id))}
+              onChange={(e) => {
+                // 値は先に取り出す（状態を更新する時点では、チェック欄が元の値に戻っているため）
+                const on = e.target.checked;
+                setPicked((cur) => {
+                  const n = new Map(cur);
+                  for (const c of list?.items ?? []) { if (on) n.set(c.id, c); else n.delete(c.id); }
+                  return n;
+                });
+              }} /> 表示している名刺をすべて選ぶ
+          </label>
+          <span className="small">{picked.size} 件を選択中</span>
+          {picked.size > 0 && <button className="btn small" onClick={() => onBulk([...picked.values()])}>選んだ {picked.size} 件にまとめてメール</button>}
+        </div>
+      )}
       {message && <p className="error">{message}</p>}
       {notice && <p className="ok-msg">{notice}</p>}
       {list?.progress && (
@@ -205,7 +237,10 @@ function CardListView({ onOpen, admin }: { onOpen: (id: string) => void; admin: 
         trash
           ? <TrashRow key={c.id} item={c} onChanged={load} onError={setMessage}
             checked={selected.has(c.id)} onCheck={(on) => setSelected((cur) => { const n = new Set(cur); if (on) n.add(c.id); else n.delete(c.id); return n; })} />
-          : <CardRow key={c.id} item={c} onOpen={() => onOpen(c.id)} />
+          : selecting
+            ? <PickRow key={c.id} item={c} checked={picked.has(c.id)}
+              onCheck={(on) => setPicked((cur) => { const n = new Map(cur); if (on) n.set(c.id, c); else n.delete(c.id); return n; })} />
+            : <CardRow key={c.id} item={c} onOpen={() => onOpen(c.id)} />
       ))}
     </div>
   );
@@ -225,6 +260,24 @@ function CardRow({ item: c, onOpen }: { item: CardSummary; onOpen: () => void })
         {c.lastReceivedOn && <span>{shortDate(c.lastReceivedOn)}</span>}
       </div>
     </button>
+  );
+}
+
+/** 選ぶときの一覧の 1 行（まとめてのメールの宛先。第27.9.1節）。押すと選ぶ・外す。 */
+function PickRow({ item: c, checked, onCheck }: { item: CardSummary; checked: boolean; onCheck: (on: boolean) => void }) {
+  return (
+    <label className="card-row">
+      <input type="checkbox" className="card-row-check" checked={checked} onChange={(e) => onCheck(e.target.checked)} />
+      <CardThumb cardId={c.cardId} rotation={c.frontRotation} corners={c.frontCorners} kind={c.frontKind} />
+      <div className="card-row-main">
+        <strong>{c.name || '（氏名なし）'}</strong>
+        <span className="small muted">{[c.company, c.emails[0]].filter(Boolean).join('　')}</span>
+      </div>
+      <div className="card-row-tail small muted">
+        {c.scope === 'personal' && <span className="badge">自分だけ</span>}
+        {c.lastReceivedOn && <span>{shortDate(c.lastReceivedOn)}</span>}
+      </div>
+    </label>
   );
 }
 
@@ -508,10 +561,25 @@ function CardDetailView({ id, onBack, onOpen, mailer }: {
       </ul>
       {meetings && !meetings.available && <p className="small muted">{meetings.reason}</p>}
 
-      {d.history.length > 0 && (
+      {d.bulkMails.length > 0 && (
+        <>
+          <h3>まとめてのメール</h3>
+          <ul className="card-exchanges">
+            {d.bulkMails.map((m) => <li key={m.bulkMailId}>{signatureDate(m.sentAt)}　{m.subject}</li>)}
+          </ul>
+        </>
+      )}
+      {(d.history.length > 0 || d.changes.length > 0) && (
         <>
           <h3>以前の会社・役職</h3>
           <ul className="card-exchanges">
+            {d.changes.map((ch) => (
+              // メールの署名から新しくしたもの。「戻す」で前の値に戻せる（仕様書 第27.6.1節）
+              <li key={ch.id}>
+                {signatureDate(ch.occurredAt)}　メールの署名から　{changeText(ch.fields)}
+                <button className="link small" onClick={() => act(() => api.cards.revertChange(c.id, ch.id), load)}>戻す</button>
+              </li>
+            ))}
             {d.history.map((h) => (
               <li key={`${h.receivedOn}-${h.company}-${h.title}`}>{h.receivedOn}　{[h.company, h.department, h.title].filter(Boolean).join('　')}</li>
             ))}
@@ -521,6 +589,27 @@ function CardDetailView({ id, onBack, onOpen, mailer }: {
       <p className="small muted">{d.ownerName ? `取り込んだ人: ${d.ownerName}` : ''}{d.updatedByName ? `　最後に直した人: ${d.updatedByName}` : ''}</p>
     </div>
   );
+}
+
+/** 署名から新しくした日（「10 月 1 日」。仕様書 第27.6.1節）。 */
+function signatureDate(at: string): string {
+  const d = new Date(at);
+  return Number.isNaN(d.getTime()) ? '' : `${d.getMonth() + 1} 月 ${d.getDate()} 日`;
+}
+
+/** 署名から新しくした項目の名前。 */
+const CHANGE_LABELS: Record<string, string> = {
+  company: '会社名', department: '部署', title: '役職', postalCode: '郵便番号', address: '住所', phones: '電話', website: 'Web',
+};
+
+/** 変えた項目を「役職: 課長 → 部長」の形で並べる。 */
+function changeText(fields: CardDetail['changes'][number]['fields']): string {
+  const text = (v: unknown) => (Array.isArray(v) ? (v as { number: string }[]).map((p) => p.number).join('・') : String(v ?? '')) || '（なし）';
+  // データベースは項目の順番を保たないため、会社名・部署・役職…の順に並べる
+  return Object.keys(CHANGE_LABELS).filter((f) => f in fields).map((f) => {
+    const v = fields[f as keyof typeof fields];
+    return `${CHANGE_LABELS[f]}: ${text(v?.before)} → ${text(v?.after)}`;
+  }).join('　');
 }
 
 /** メールの開き方。会社が Google とつないでいれば、本人のアカウントの Gmail で開く（第27.8節）。 */

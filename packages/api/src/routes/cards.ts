@@ -8,7 +8,10 @@
  */
 
 import { Hono, type Context } from 'hono';
-import { CARD_BATCH_MAX, CARD_TABLE_MAX_ROWS, canManage, draftThanksMail, readSheet, renderSheet, toVCard, type CardUpload, type CardViewer } from '@m2office/core';
+import {
+  AI_NOT_CONFIGURED_MESSAGE, CARD_BATCH_MAX, CARD_BULK_MAIL, CARD_TABLE_MAX_ROWS, aiAvailable, canManage, draftThanksMail, enqueueJob, readSheet, renderSheet, toVCard,
+  type CardUpload, type CardViewer,
+} from '@m2office/core';
 import type { CardFields, ContactScope } from '@m2office/shared';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
@@ -55,6 +58,9 @@ export function cardsRoute(deps: AppDeps) {
       store.listContacts(v, {
         q: (c.req.query('q') ?? '').slice(0, 100),
         scope: scope === 'company' || scope === 'personal' ? scope : 'all',
+        // 交換した日の範囲（まとめてのメールの宛先を探す。第27.9.1節）
+        ...(/^\d{4}-\d{2}-\d{2}$/.test(c.req.query('from') ?? '') ? { receivedFrom: c.req.query('from')! } : {}),
+        ...(/^\d{4}-\d{2}-\d{2}$/.test(c.req.query('to') ?? '') ? { receivedTo: c.req.query('to')! } : {}),
         status: c.req.query('trash') === '1' ? 'trash' : 'active',
         limit: 100, offset: Math.max(0, Number(c.req.query('offset')) || 0),
       }),
@@ -172,13 +178,85 @@ export function cardsRoute(deps: AppDeps) {
   });
 
   /** 詳細（第27.8節）。項目・名刺（表と裏）・交換の記録（誰が・いつ）・名刺の履歴・操作できるか。 */
+  /**
+   * まとめてのメールの下書きを作る（第27.9.1節）。本文は `contactIds`・`subject`・`body`。宛先は見られる連絡先だけを写す。
+   */
+  app.post('/bulk-mails', async (c) => {
+    const body = await c.req.json<{ contactIds?: unknown; subject?: unknown; body?: unknown }>().catch(() => ({} as Record<string, unknown>));
+    const res = await deps.cards.bulk.createDraft(who(c), {
+      contactIds: Array.isArray(body.contactIds) ? body.contactIds.map(String).slice(0, 500) : [],
+      subject: typeof body.subject === 'string' ? body.subject : '', body: typeof body.body === 'string' ? body.body : '',
+    });
+    return 'error' in res ? c.json({ error: res.error }, 400) : c.json(res, 201);
+  });
+
+  /** まとめてのメールの宛先・除いた人と理由・見本・送れない理由・送った数（第27.9.1節）。作った本人だけが見られる。 */
+  app.get('/bulk-mails/:bulkId', async (c) => {
+    const v = who(c);
+    await syncAwaiting(v, c.req.param('bulkId'));
+    const p = await deps.cards.bulk.preview(v, c.req.param('bulkId'));
+    return p ? c.json(p) : c.json({ error: 'まとめてのメールが見つかりません' }, 404);
+  });
+
+  /** まとめてのメールの下書きを直す（宛先・件名・本文）。承認待ちにした後は直せない。 */
+  app.put('/bulk-mails/:bulkId', async (c) => {
+    const v = who(c);
+    await syncAwaiting(v, c.req.param('bulkId'));
+    const body = await c.req.json<{ contactIds?: unknown; subject?: unknown; body?: unknown }>().catch(() => ({} as Record<string, unknown>));
+    const err = await deps.cards.bulk.update(v, c.req.param('bulkId'), {
+      ...(Array.isArray(body.contactIds) ? { contactIds: body.contactIds.map(String).slice(0, 500) } : {}),
+      ...(typeof body.subject === 'string' ? { subject: body.subject } : {}),
+      ...(typeof body.body === 'string' ? { body: body.body } : {}),
+    });
+    return err ? c.json({ error: err }, 409) : c.json({ ok: true });
+  });
+
+  /** まとめてのメールの下書きを削除する（送ったものは削除しない）。 */
+  app.delete('/bulk-mails/:bulkId', async (c) => {
+    const err = await deps.cards.bulk.remove(who(c), c.req.param('bulkId'));
+    return err ? c.json({ error: err }, 409) : c.json({ ok: true });
+  });
+
+  /**
+   * まとめてのメールを承認へ進める（業務「まとめてのメール」を始め、本人の承認を待つ。第27.9.1節）。
+   *
+   * @returns 実行の ID。送れない理由があれば 400
+   */
+  app.post('/bulk-mails/:bulkId/submit', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const v = who(c);
+    const id = c.req.param('bulkId');
+    await syncAwaiting(v, id);
+    const p = await deps.cards.bulk.preview(v, id);
+    if (!p) return c.json({ error: 'まとめてのメールが見つかりません' }, 404);
+    if (p.status !== 'draft') return c.json({ error: 'すでに承認へ進めています' }, 409);
+    if (p.problems.length > 0) return c.json({ error: p.problems.join('／') }, 400);
+    const def = (await deps.tenantView(tenant.id)).resolve(CARD_BULK_MAIL.id, CARD_BULK_MAIL.version);
+    if (!def) return c.json({ error: 'まとめてのメールの業務が見つかりません' }, 404);
+    if (!aiAvailable(await deps.ai.llmFor(tenant.id))) return c.json({ error: AI_NOT_CONFIGURED_MESSAGE }, 409);
+    const { runId } = await enqueueJob(deps.repo, {
+      tenantId: tenant.id, requestedBy: user.id, def, input: { bulkMailId: id }, origin: 'menu', actor: { type: 'user', id: user.id },
+    });
+    await deps.cards.bulk.markAwaiting(v, id, runId);
+    return c.json({ runId }, 201);
+  });
+
+  /** 承認待ちのまとめてのメールで、実行が承認を待たなくなっていれば（却下・失敗）、下書きに戻す。 */
+  const syncAwaiting = async (v: CardViewer, id: string): Promise<void> => {
+    const mail = await deps.cards.bulk.store.getMail(v, id);
+    if (mail?.status !== 'awaiting' || !mail.runId) return;
+    const run = await deps.repo.getRun(v.tenantId, mail.runId);
+    if (!run || ['completed', 'failed', 'cancelled', 'expired'].includes(run.status)) await deps.cards.bulk.backToDraft(v, id);
+  };
+
   app.get('/:id', async (c) => {
     const v = who(c);
     const { user } = c.get('ctx');
     const d = await service.detail(v, c.req.param('id'));
     if (!d) return c.json({ error: '名刺が見つかりません' }, 404);
     const users = await deps.repo.listUsers(v.tenantId);
-    const nameOf = (id: string | null) => (id ? users.find((u) => u.id === id)?.displayName ?? '（取得できませんでした）' : null);
+    // メールの署名から新しくしたもの（system）は人の名前を出さない（第27.6.1節）
+    const nameOf = (id: string | null) => (id && id !== 'system' ? users.find((u) => u.id === id)?.displayName ?? '（取得できませんでした）' : null);
     return c.json({
       contact: d.contact,
       ownerName: nameOf(d.contact.ownerUserId),
@@ -190,6 +268,10 @@ export function cardsRoute(deps: AppDeps) {
         note: x.failureReason,
       })),
       history: d.history,
+      // メールの署名から新しくした記録。誰のメールからかは出さない（第27.6.1節）
+      changes: d.changes.map((x) => ({ id: x.id, occurredAt: x.occurredAt, fields: x.fields })),
+      // 自分がこの人に送ったまとめてのメール（第27.9.1節）
+      bulkMails: await deps.cards.bulk.store.sentForContact(v, d.contact.id),
       canManage: canManage(d.contact, user),
     });
   });
@@ -216,6 +298,12 @@ export function cardsRoute(deps: AppDeps) {
     const body = await c.req.json<{ cardId?: string }>().catch(() => ({ cardId: undefined }));
     const res = await service.split(who(c), user, c.req.param('id'), String(body.cardId ?? ''));
     return 'error' in res ? c.json({ error: res.error }, 400) : c.json(res);
+  });
+
+  /** メールの署名から新しくした記録を戻す（第27.6.1節）。見られる人の全員が戻せる。 */
+  app.post('/:id/changes/:changeId/revert', async (c) => {
+    const err = await service.revertChange(who(c), c.req.param('id'), c.req.param('changeId'));
+    return err ? c.json({ error: err }, 404) : c.json({ ok: true });
   });
 
   /** ごみ箱へ移す（30 日で本当に消す）。 */

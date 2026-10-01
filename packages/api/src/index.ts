@@ -32,6 +32,7 @@ import { inventoryHooksRoute } from './routes/inventory-hooks.js';
 import { signageRoute } from './routes/signage.js';
 import { signagePlayRoute } from './routes/signage-play.js';
 import { signageHooksRoute } from './routes/signage-hooks.js';
+import { unsubscribeRoute } from './routes/unsubscribe.js';
 import { noticesRoute } from './routes/notices.js';
 import { adminRoute } from './routes/admin.js';
 import { mcpConnectionsRoute } from './routes/mcp-connections.js';
@@ -100,6 +101,8 @@ app.route('/v1/oauth', oauthCallbackRoute(deps));
 app.route('/v1/hooks/inventory', inventoryHooksRoute(deps));
 // 店頭サイネージの呼び出しの受け口（第31.8.2節）。受付のシステムがログインの無いまま呼ぶ。鍵から会社を引くため、会社の判定より前に置く
 app.route('/v1/hooks/signage', signageHooksRoute(deps));
+// まとめてのメールの配信の停止（第27.9.1節）。受け取った人がログインなしに開く。URL の鍵から会社を決めるため、会社の判定より前に置く
+app.route('/v1/unsubscribe', unsubscribeRoute(deps));
 app.use('/v1/*', resolveTenant(deps));
 app.route('/v1/auth', authRoute(deps));
 // 店頭サイネージの再生のページ（第31.9.1節）。ログインを使わず、画面の鍵で名乗る。会社はアドレスで決まるため、会社の判定の後・ログインの確かめより前に置く

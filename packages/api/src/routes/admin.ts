@@ -312,6 +312,18 @@ export function adminRoute(deps: AppDeps) {
   });
 
   /**
+   * 本人か会社から Google のデータの削除を求められたとき、その人のメールの署名から名刺を新しくした値を前の値に戻し、
+   * 変更の記録を消す（第27.6.1節、Q-152）。Google の連携の解除では戻さないため、求めがあったときにだけ管理者が行う。
+   */
+  app.post('/users/:id/forget-mail-signatures', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const target = (await deps.repo.listUsers(tenant.id)).find((u) => u.id === c.req.param('id'));
+    if (!target) return c.json({ error: '利用者が見つかりません' }, 404);
+    const count = await deps.cards.service.forgetMailSignatures(tenant.id, target.id, user.id);
+    return c.json({ ok: true, count });
+  });
+
+  /**
    * 組織知識の一覧と、区画の選択肢（第6.6.6節・第11.11.5節）。社内規程・議事録・秘書が学んだことを、廃止した・しまったものも含めて返す。
    * 画面は種類ごとに分けて並べる。あわせて、最後に整理した日と数を返す（中身は返さない）。
    */

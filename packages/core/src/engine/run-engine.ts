@@ -32,6 +32,7 @@ import { validateDefinition } from './validate.js';
 import { expandQuery } from '../knowledge/expand.js';
 import type { CardService } from '../cards/service.js';
 import type { ContactStore } from '../cards/store.js';
+import type { BulkMailService } from '../cards/bulk.js';
 import type { NoticeService } from '../notices/service.js';
 import type { InventoryService } from '../inventory/service.js';
 import type { InventoryBookings } from '../inventory/bookings.js';
@@ -98,6 +99,8 @@ export interface RunEngineDeps {
     service: CardService;
     store: ContactStore;
     access(tenantId: string, userId: string): Promise<{ defaultScope: ContactScope } | null>;
+    /** まとめてのメール（第27.9.1節）。 */
+    bulk?: BulkMailService;
   };
   /** 社内のお知らせ（仕様書 第10.15節）。道具 `notices.list` に渡す。無ければ「読めなかった」と返す。 */
   notices?: NoticeService;
@@ -641,7 +644,7 @@ export class RunEngine {
             let check: PreparedCall | null = null;
             if (tool.prepare) {
               const original = callKey(call);
-              check = prepared.get(original) ?? await tool.prepare(call.args, this.toolContext(run, def, run.cursor, requestedBy, registry, ai.research));
+              check = prepared.get(original) ?? await tool.prepare(call.args, this.toolContext(run, def, run.cursor, requestedBy, registry, ai.research, ai.llm));
               prepared.set(original, check);
             }
             if (check?.kind === 'problem') {
@@ -817,6 +820,7 @@ export class RunEngine {
         cards: {
           service: this.deps.cards.service, store: this.deps.cards.store, llm,
           access: () => this.deps.cards!.access(run.tenantId, requestedBy),
+          ...(this.deps.cards.bulk ? { bulk: this.deps.cards.bulk } : {}),
         },
       } : {}),
       // 在庫管理（第29.15節）。使えるかどうかは道具が呼ぶたびに確かめる
@@ -927,6 +931,8 @@ export class RunEngine {
   ): Promise<Run> {
     const { repo } = this.deps;
     const steps = await repo.listRunSteps(run.tenantId, run.id);
+    // 道具の文脈（名刺管理など）は推論を持つときだけ組み立てるため、記録した操作の実行にも推論を渡す（第27.9.1節）
+    const llm = this.deps.llmFor ? await this.deps.llmFor(run.tenantId) : this.deps.llm;
     let current = run;
     for (const s of steps) {
       const input = s.input as { toolCalls?: ToolCall[]; plannedStep?: number } | null;
@@ -936,7 +942,7 @@ export class RunEngine {
       const stepIndex = input.plannedStep ?? current.cursor - 1;
       const results: unknown[] = [];
       for (const call of input.toolCalls) {
-        results.push(await this.invokeTool(current, def, stepIndex, call, requestedBy, registry, research));
+        results.push(await this.invokeTool(current, def, stepIndex, call, requestedBy, registry, research, llm));
       }
       await repo.updateRunStep(current.tenantId, {
         ...s, output: { ...(s.output as object), executed: true, tools: results },
@@ -1079,7 +1085,7 @@ export function needsHuman(
 }
 
 /** 送り先に関わらず、いつも人に判断を求める道具。メールは宛先に関わらず人が見る（仕様書 第9.4.0節）。 */
-const ALWAYS_ASK = new Set(['gmail.send']);
+const ALWAYS_ASK = new Set(['gmail.send', 'mail.bulk_send']);
 
 /** 承認の前の確かめで、行えないと分かった操作（記録しない。ADR-0024）。 */
 type UnableCall = {

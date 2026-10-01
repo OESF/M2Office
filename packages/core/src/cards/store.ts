@@ -11,7 +11,7 @@
  */
 
 import pg from 'pg';
-import type { CardCorners, CardFields, Contact, ContactCard, ContactScope } from '@m2office/shared';
+import type { CardCorners, CardFields, Contact, ContactCard, ContactChange, ContactScope } from '@m2office/shared';
 
 /** 誰として見るか。自分だけの名刺は `userId` の人のものだけが見える。 */
 export interface CardViewer {
@@ -99,6 +99,47 @@ export interface ExpiredCard {
   backFileId: string | null;
 }
 
+/**
+ * 連絡先ごとの署名の見張りの状態（第27.6.1節）。
+ *
+ * @remarks `seen` は最後に見た署名の値。戻した・人が直した項目を、署名が同じ値を示している間は再び変えないために使う
+ */
+export interface SignatureState {
+  /** 最後に推論を呼んだ日時（同じ連絡先は 7 日に 1 度まで）。 */
+  checkedAt?: string;
+  /** 最後に署名から変えた日時（それより後に人が直したかを見分ける）。 */
+  appliedAt?: string;
+  /** 最後に見た署名の値（項目ごと。電話は並びを JSON にした文字列）。 */
+  seen?: Record<string, string>;
+}
+
+/** 署名で見る連絡先（今の値と見張りの状態、いちばん新しい名刺を受け取った日）。 */
+export interface SignatureTarget {
+  contact: Contact;
+  state: SignatureState;
+  lastReceivedOn: string | null;
+}
+
+/** 変更の記録を新しく残すときの中身。 */
+export interface NewContactChange extends Omit<ContactChange, 'revertedAt' | 'createdAt'> {
+  scope: ContactScope;
+  ownerUserId: string;
+  mailboxUserId: string;
+  messageId: string | null;
+}
+
+/** 変更の記録の絞り込み。 */
+export interface ContactChangeQuery {
+  contactId?: string;
+  /** そのメールを受け取った人のものだけ（週次ブリーフ・削除の求め）。 */
+  mailboxUserId?: string;
+  /** この日時より後に残したもの。 */
+  since?: string;
+  /** 戻したものも含めるか。既定は含めない。 */
+  includeReverted?: boolean;
+  limit: number;
+}
+
 /** まとまりの進み具合。 */
 export interface BatchProgress {
   batchId: string;
@@ -147,8 +188,26 @@ export interface ContactStore {
   purgeCards(ids: string[]): Promise<number>;
   /** 利用者の自分だけの名刺（連絡先）の数。止めるときに管理者へ件数だけを示す（第27.7節、Q-94。中身は返さない）。 */
   countPersonalContacts(tenantId: string, userId: string): Promise<number>;
+  /** メールアドレスのどれかが当たる、使っている連絡先と見張りの状態（小文字で比べる。第27.6.1節）。 */
+  signatureTargets(who: CardViewer, emails: string[]): Promise<SignatureTarget[]>;
+  saveSignatureState(who: CardViewer, contactId: string, state: SignatureState): Promise<void>;
+  insertChange(who: CardViewer, change: NewContactChange): Promise<void>;
+  listChanges(who: CardViewer, query: ContactChangeQuery): Promise<ContactChange[]>;
+  /** 変更の記録 1 件と、メールを受け取った人。見られなければ `null`。 */
+  getChange(who: CardViewer, id: string): Promise<(ContactChange & { mailboxUserId: string }) | null>;
+  markChangeReverted(who: CardViewer, id: string, by: string): Promise<void>;
+  deleteChanges(who: CardViewer, ids: string[]): Promise<number>;
+  /** 人ごとの見回りの位置。まだ見ていなければ `null`。 */
+  getMailCursor(tenantId: string, userId: string): Promise<string | null>;
+  setMailCursor(tenantId: string, userId: string, checkedUntil: string): Promise<void>;
+  /** 7 日を過ぎた変更の記録から、どのメールかを示す ID を消す（会社をまたぐ。第14.3.2節）。 */
+  forgetChangeMessages(): Promise<number>;
   close?(): Promise<void>;
 }
+
+const CHANGE_COLUMNS = `
+  id, contact_id as "contactId", source, fields, to_json(occurred_at) #>> '{}' as "occurredAt",
+  to_json(reverted_at) #>> '{}' as "revertedAt", to_json(created_at) #>> '{}' as "createdAt"`;
 
 const CONTACT_COLUMNS = `
   id, tenant_id as "tenantId", scope, owner_user_id as "ownerUserId", name, name_kana as "nameKana",
@@ -398,6 +457,78 @@ export class PostgresContactStore implements ContactStore {
   async setCardsScope(who: CardViewer, contactId: string, scope: ContactScope): Promise<void> {
     await this.q(who, `update contact_cards set scope = $3, updated_at = now() where tenant_id = $1 and contact_id = $2`,
       [who.tenantId, contactId, scope]);
+    // 変更の記録も連絡先と同じ範囲で絞る（第27.6.1節）
+    await this.q(who, `update contact_changes set scope = $3 where tenant_id = $1 and contact_id = $2`, [who.tenantId, contactId, scope]);
+  }
+
+  async signatureTargets(who: CardViewer, emails: string[]): Promise<SignatureTarget[]> {
+    const lower = [...new Set(emails.map((e) => e.trim().toLowerCase()).filter(Boolean))];
+    if (lower.length === 0) return [];
+    const rows = await this.q<Contact & { state: SignatureState | null; lastReceivedOn: string | null }>(who,
+      `select ${CONTACT_COLUMNS}, signature_state as state,
+              (select to_char(max(c.received_on), 'YYYY-MM-DD') from contact_cards c where c.contact_id = contacts.id) as "lastReceivedOn"
+         from contacts
+        where tenant_id = $1 and status = 'active'
+          and exists (select 1 from unnest(emails) e where lower(e) = any($2::text[]))`,
+      [who.tenantId, lower]);
+    return rows.map(({ state, lastReceivedOn, ...contact }) => ({ contact: contact as Contact, state: state ?? {}, lastReceivedOn }));
+  }
+
+  async saveSignatureState(who: CardViewer, contactId: string, state: SignatureState): Promise<void> {
+    await this.q(who, `update contacts set signature_state = $3 where tenant_id = $1 and id = $2`, [who.tenantId, contactId, JSON.stringify(state)]);
+  }
+
+  async insertChange(who: CardViewer, c: NewContactChange): Promise<void> {
+    await this.q(who,
+      `insert into contact_changes (id, tenant_id, contact_id, scope, owner_user_id, source, fields, occurred_at, mailbox_user_id, message_id)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [c.id, who.tenantId, c.contactId, c.scope, c.ownerUserId, c.source, JSON.stringify(c.fields), c.occurredAt, c.mailboxUserId, c.messageId]);
+  }
+
+  async listChanges(who: CardViewer, query: ContactChangeQuery): Promise<ContactChange[]> {
+    return this.q<ContactChange>(who,
+      `select ${CHANGE_COLUMNS} from contact_changes
+        where tenant_id = $1
+          and ($2::text is null or contact_id = $2)
+          and ($3::text is null or mailbox_user_id = $3)
+          and ($4::timestamptz is null or created_at > $4)
+          and ($5::boolean or reverted_at is null)
+        order by occurred_at desc, created_at desc limit $6`,
+      [who.tenantId, query.contactId ?? null, query.mailboxUserId ?? null, query.since ?? null, query.includeReverted ?? false, query.limit]);
+  }
+
+  async getChange(who: CardViewer, id: string): Promise<(ContactChange & { mailboxUserId: string }) | null> {
+    const rows = await this.q<ContactChange & { mailboxUserId: string }>(who,
+      `select ${CHANGE_COLUMNS}, mailbox_user_id as "mailboxUserId" from contact_changes where tenant_id = $1 and id = $2`, [who.tenantId, id]);
+    return rows[0] ?? null;
+  }
+
+  async markChangeReverted(who: CardViewer, id: string, by: string): Promise<void> {
+    await this.q(who, `update contact_changes set reverted_at = now(), reverted_by = $3 where tenant_id = $1 and id = $2`, [who.tenantId, id, by]);
+  }
+
+  async deleteChanges(who: CardViewer, ids: string[]): Promise<number> {
+    if (ids.length === 0) return 0;
+    const rows = await this.q<{ id: string }>(who, `delete from contact_changes where tenant_id = $1 and id = any($2::text[]) returning id`, [who.tenantId, ids]);
+    return rows.length;
+  }
+
+  async getMailCursor(tenantId: string, userId: string): Promise<string | null> {
+    const rows = await this.q<{ at: string }>({ tenantId, userId },
+      `select checked_until as at from mail_signature_cursors where tenant_id = $1 and user_id = $2`, [tenantId, userId]);
+    return rows[0] ? new Date(rows[0].at).toISOString() : null;
+  }
+
+  async setMailCursor(tenantId: string, userId: string, checkedUntil: string): Promise<void> {
+    await this.q({ tenantId, userId },
+      `insert into mail_signature_cursors (tenant_id, user_id, checked_until) values ($1, $2, $3)
+       on conflict (tenant_id, user_id) do update set checked_until = excluded.checked_until, updated_at = now()`,
+      [tenantId, userId, checkedUntil]);
+  }
+
+  async forgetChangeMessages(): Promise<number> {
+    const res = await this.pool.query<{ n: number }>('select m2o_forget_contact_change_messages() as n');
+    return res.rows[0]?.n ?? 0;
   }
 
   async expiredCards(): Promise<ExpiredCard[]> {

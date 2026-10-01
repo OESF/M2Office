@@ -17,6 +17,7 @@ import { CARD_MIME, type CardFileKind } from './formats.js';
 import { CARD_MAX_PER_IMAGE, parseCardReading, readCard } from './read.js';
 import type { CardService } from './service.js';
 import type { ContactStore } from './store.js';
+import type { BulkMailService, BulkPreview } from './bulk.js';
 
 /** 道具に渡す名刺管理の文脈。 */
 export interface CardToolContext {
@@ -30,6 +31,8 @@ export interface CardToolContext {
    * @returns 使えなければ `null`
    */
   access(): Promise<{ defaultScope: ContactScope } | null>;
+  /** まとめてのメール（第27.9.1節）。無ければまとめてのメールの道具は「使えない」と返す。 */
+  bulk?: BulkMailService;
 }
 
 /** 名刺管理を使えるなら文脈と既定の範囲を返す。使えなければ `null`。 */
@@ -232,4 +235,173 @@ export const contactsSave: Tool = {
 };
 
 /** 名刺管理の道具（内蔵の拡張。第27.9節）。 */
-export const CARD_TOOLS: Tool[] = [cardRead, contactsSearch, contactsGet, contactsSave];
+/** 変更の記録に出す項目の名前。 */
+const CHANGE_LABELS: Record<string, string> = {
+  company: '会社名', department: '部署', title: '役職', postalCode: '郵便番号', address: '住所', phones: '電話', website: 'Web',
+};
+
+/** 電話の並びを 1 行にする（記録を読みやすくする）。 */
+const phonesText = (v: unknown) => (Array.isArray(v) ? (v as { number?: unknown }[]).map((p) => String(p.number ?? '')).join('・') : String(v ?? ''));
+
+/**
+ * 最近、メールの署名から新しくした名刺を返す（「最近異動した人は？」・週次ブリーフ。第27.6.1節）。
+ *
+ * @remarks 危険度 `read`。呼んだ人が見られる連絡先だけ。戻した記録は返さない。誰のメールからかは返さない（`mine` で自分のものに絞るだけ）
+ */
+export const contactsChanges: Tool = {
+  name: 'contacts.changes',
+  risk: 'read',
+  activityLabel: '名刺の変更を調べています',
+  helpText: 'メールの署名から、会社・部署・役職・電話などが新しくなった名刺を調べます。見るだけです',
+  description: '最近、取引先から届いたメールの署名で会社・部署・役職・電話などが新しくなった名刺（異動・昇進）を新しい順に返す。days で何日前まで（既定 30・最大 90）、mine が true なら自分が受け取ったメールから分かったものだけ',
+  args: {
+    properties: {
+      days: { type: 'number', description: '何日前までを見るか（既定 30、最大 90）' },
+      mine: { type: 'boolean', description: '自分が受け取ったメールから分かったものだけにする' },
+    },
+  },
+  async invoke(args, ctx) {
+    const cards = await cardsOf(ctx);
+    if (!cards) return UNAVAILABLE;
+    const who = viewer(ctx);
+    const days = Math.min(90, Math.max(1, typeof args['days'] === 'number' ? Math.floor(args['days']) : 30));
+    const since = new Date(Date.now() - days * 86_400_000).toISOString();
+    const changes = await cards.store.listChanges(who, { since, limit: 30, ...(args['mine'] === true ? { mailboxUserId: ctx.userId } : {}) });
+    const items = [];
+    for (const ch of changes) {
+      const c = await cards.store.getContact(who, ch.contactId);
+      if (!c || c.status !== 'active') continue;
+      items.push({
+        contactId: c.id, name: c.name, company: c.company, date: ch.occurredAt.slice(0, 10),
+        // データベースは項目の順番を保たないため、会社名・部署・役職…の順に並べる
+        changes: Object.keys(CHANGE_LABELS).filter((f) => f in ch.fields).map((f) => [f, ch.fields[f as keyof typeof ch.fields]] as const).map(([f, v]) => ({
+          field: CHANGE_LABELS[f] ?? f,
+          before: f === 'phones' ? phonesText(v?.before) : String(v?.before ?? ''),
+          after: f === 'phones' ? phonesText(v?.after) : String(v?.after ?? ''),
+        })),
+      });
+    }
+    return { available: true, untrusted: true, count: items.length, items, ...(items.length === 0 ? { note: '新しくなった名刺はありません' } : {}) };
+  },
+};
+
+/** まとめてのメールの見本を、推論と承認の画面に渡す形にする。 */
+function previewResult(p: BulkPreview) {
+  return {
+    available: true, untrusted: true, bulkMailId: p.id, status: p.status, subject: p.subject,
+    advertising: p.advertising !== false, recipientCount: p.recipients.length,
+    recipients: p.recipients.map((r) => ({ name: r.name, company: r.company, email: r.email })),
+    excluded: p.excluded.map((r) => ({ name: r.name, company: r.company, email: r.email, reason: r.reason })),
+    sample: p.sample, problems: p.problems,
+  };
+}
+
+/** 承認の画面に出す、まとめてのメールの中身（Markdown。第27.9.1節）。 */
+export function describeBulk(p: BulkPreview): string {
+  const ad = p.advertising !== false;
+  const lines = [
+    `宛先 ${p.recipients.length} 人／件名「${p.sample?.subject ?? p.subject}」／${ad ? '宣伝を含む（末尾に会社の名称・住所・問い合わせ先・配信の停止の方法を入れます）' : '宣伝を含まない（お礼・あいさつなど）'}`,
+    '',
+    '**宛先**',
+    ...p.recipients.map((r) => `- ${r.name || '（氏名なし）'}${r.company ? `（${r.company}）` : ''} ${r.email}`),
+  ];
+  if (p.excluded.length > 0) {
+    lines.push('', `**除いた人（${p.excluded.length} 人）**`, ...p.excluded.map((r) => `- ${r.name || '（氏名なし）'}${r.company ? `（${r.company}）` : ''}: ${r.reason}`));
+  }
+  if (p.sample) {
+    const body = p.sample.body.length > 3000 ? `${p.sample.body.slice(0, 3000)}\n…（長いため、ここで切りました）` : p.sample.body;
+    lines.push('', `**見本（${p.sample.to} に送る文）**`, ...body.split('\n').map((l) => `> ${l}`));
+  }
+  return lines.join('\n');
+}
+
+/** まとめてのメールを使えるなら文脈を返す。 */
+async function bulkOf(ctx: ToolContext): Promise<(CardToolContext & { bulk: BulkMailService }) | null> {
+  const cards = await cardsOf(ctx);
+  return cards?.bulk ? { ...cards, bulk: cards.bulk } : null;
+}
+
+/**
+ * 秘書から頼まれたまとめてのメールの下書きを作る（第27.9.1節）。送らない。
+ *
+ * @remarks 危険度 `write-internal`（本人だけの下書き）。宛先は呼んだ人が見られる連絡先だけ
+ */
+export const contactsBulkDraft: Tool = {
+  name: 'contacts.bulk_draft',
+  risk: 'write-internal',
+  activityLabel: 'まとめてのメールの下書きを作っています',
+  helpText: '名刺の相手へのまとめてのメールの下書きを作ります。送りません',
+  description: 'contacts.search で集めた連絡先（contactIds）と、1 つの文面（subject・body）で、まとめてのメールの下書きを作る。'
+    + '本文の {会社名}・{氏名} に宛名を差し込む。人ごとに違う文は書かない。返す bulkMailId と見本・除いた人を確かめる。送るのは承認の後の mail.bulk_send',
+  args: {
+    properties: {
+      contactIds: { type: 'array', items: { type: 'string', description: '連絡先の ID' }, description: '宛先の連絡先の ID（contacts.search の結果の contactId）。100 人まで' },
+      subject: { type: 'string', description: '件名（{会社名}・{氏名} を使える）' },
+      body: { type: 'string', description: '本文。宛名は「{会社名}\n{氏名} 様」のように差し込む。末尾の会社の表示と配信の停止の URL は入れない（自動で入る）' },
+    },
+    required: ['contactIds', 'subject', 'body'],
+  },
+  async invoke(args, ctx) {
+    const b = await bulkOf(ctx);
+    if (!b) return UNAVAILABLE;
+    const who = viewer(ctx);
+    const ids = Array.isArray(args['contactIds']) ? (args['contactIds'] as unknown[]).map(String) : [];
+    const res = await b.bulk.createDraft(who, { contactIds: ids, subject: str(args['subject']), body: str(args['body']) });
+    if ('error' in res) return { available: false, reason: res.error };
+    const p = await b.bulk.preview(who, res.id);
+    return p ? previewResult(p) : { available: false, reason: '下書きが見つかりません' };
+  },
+};
+
+/**
+ * まとめてのメールの下書きの、宛先・除いた人・見本・送れない理由を返す（第27.9.1節）。
+ *
+ * @remarks 危険度 `read`。下書きは作った本人だけが見られる
+ */
+export const contactsBulkPreview: Tool = {
+  name: 'contacts.bulk_preview',
+  risk: 'read',
+  activityLabel: 'まとめてのメールを確かめています',
+  helpText: 'まとめてのメールの宛先・除いた人・見本を確かめます。見るだけです',
+  description: 'まとめてのメールの下書き（bulkMailId）の、送る宛先・除いた人と理由・1 人目に差し込んだ見本・宣伝かどうか・送れない理由（problems）を返す',
+  args: { properties: { bulkMailId: { type: 'string', description: 'まとめてのメールの ID' } }, required: ['bulkMailId'] },
+  async invoke(args, ctx) {
+    const b = await bulkOf(ctx);
+    if (!b) return UNAVAILABLE;
+    const p = await b.bulk.preview(viewer(ctx), str(args['bulkMailId']));
+    return p ? previewResult(p) : { available: false, reason: 'まとめてのメールが見つかりません' };
+  },
+};
+
+/**
+ * 承認されたまとめてのメールを、本人の Gmail から 1 人に 1 通ずつ送る（第27.9.1節）。送るのはワーカーが後ろで行う。
+ *
+ * @remarks 危険度 `external-send`。承認の段の直後でしか呼べない。承認の前の確かめ（`prepare`）で宛先と文面の要約を記録し、
+ * 承認の後に下書きが変わっていれば送らない
+ */
+export const mailBulkSend: Tool = {
+  name: 'mail.bulk_send',
+  risk: 'external-send',
+  activityLabel: 'まとめてのメールを送っています',
+  helpText: '承認されたまとめてのメールを、あなたの Gmail から 1 人に 1 通ずつ送ります',
+  description: '承認されたまとめてのメール（bulkMailId）を、本人の Gmail から 1 人に 1 通ずつ送る',
+  google: { scope: 'gmail.send', level: 'sensitive' },
+  args: { properties: { bulkMailId: { type: 'string', description: 'まとめてのメールの ID' } }, required: ['bulkMailId'] },
+  planKey: (args) => `bulk:${str(args['bulkMailId'])}`,
+  async prepare(args, ctx) {
+    const b = await bulkOf(ctx);
+    if (!b) return { kind: 'problem', reason: UNAVAILABLE.reason };
+    const p = await b.bulk.preview(viewer(ctx), str(args['bulkMailId'])).catch(() => null);
+    if (!p) return { kind: 'problem', reason: 'まとめてのメールが見つかりません' };
+    if (p.problems.length > 0) return { kind: 'problem', reason: p.problems.join('／') };
+    return { kind: 'ready', args: { bulkMailId: p.id, digest: p.digest }, shown: describeBulk(p), audience: 'external' };
+  },
+  async invoke(args, ctx) {
+    const b = await bulkOf(ctx);
+    if (!b) return UNAVAILABLE;
+    const res = await b.bulk.start(viewer(ctx), str(args['bulkMailId']), str(args['digest']));
+    return 'error' in res ? { available: false, reason: res.error } : { available: true, queued: res.queued, note: `${res.queued} 人に順に送ります。送り終えたら知らせます` };
+  },
+};
+
+export const CARD_TOOLS: Tool[] = [cardRead, contactsSearch, contactsGet, contactsSave, contactsChanges, contactsBulkDraft, contactsBulkPreview, mailBulkSend];

@@ -140,7 +140,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/notifications/:id/read` | 既読にする |
 | `DELETE /v1/notifications/:id` ／ `POST /v1/notifications/delete` | 本人の通知を 1 件消す ／ 選んだものをまとめて消す（`ids`。100 件まで）。ほかの人の通知は消えない（第6.5.5節） |
 | `GET /v1/schedules` | 本人の定時実行 |
-| `GET /v1/cards` | 名刺の一覧と検索（`q`・`scope`・`trash=1`）。本人の読み取り中・読み取れなかった名刺（`unresolved`）と進み具合（`progress`）、会社の既定の範囲も返す。名刺管理を切っている会社と利用範囲の外の人には、`/v1/cards` のどの口も 403（仕様書 第27.8節） |
+| `GET /v1/cards` | 名刺の一覧と検索（`q`・`scope`・`trash=1`、交換した日の範囲 `from`・`to`）。本人の読み取り中・読み取れなかった名刺（`unresolved`）と進み具合（`progress`）、会社の既定の範囲も返す。名刺管理を切っている会社と利用範囲の外の人には、`/v1/cards` のどの口も 403（仕様書 第27.8節） |
 | `POST /v1/cards/import` | 表（CSV・Excel。multipart の `file` と `scope`。5 MB・1,000 行まで）から名刺を取り込む。列の見出しはよくある言い方と推論で読み、1 行を 1 枚の名刺（画像なし）として登録し、同じ人はまとめる。登録した数・まとめた数・取り込めなかった行・列の読み方を返す（仕様書 第27.4節） |
 | `GET /v1/cards/export` | 管理者: 会社で共有の名刺を CSV（`format=csv`。BOM 付きの UTF-8）か Excel（`format=xlsx`）で書き出す。自分だけの名刺は入れない。監査ログ `contact.export`（第27.10節） |
 | `POST /v1/cards` | 名刺のファイルを受け付ける（multipart。`file` を 50 まで・`backOf`（裏を組にする表の番号の JSON）・`scope`）。読み取りを待たずに 202。受け付けなかったものは `rejected`（第27.4節） |
@@ -148,6 +148,12 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `PATCH /v1/cards/:id` | 項目とメモをその場で直す（見られる人の全員。直した値は名刺の「人が直した項目」にも残す） |
 | `PUT /v1/cards/:id/scope` | 範囲を変える（`company`・`personal`。自分だけにできるのは本人で、ほかの人の名刺がまとまっていないとき） |
 | `POST /v1/cards/:id/split` | まとめた名刺を別の連絡先に分ける（`cardId`） |
+| `POST /v1/cards/bulk-mails` | まとめてのメールの下書きを作る（`contactIds`・`subject`・`body`。仕様書 第27.9.1節）。下書きは作った本人だけが見られる |
+| `GET /v1/cards/bulk-mails/:bulkId` | 送る宛先・除いた人と理由・1 人目に差し込んだ見本・宣伝かどうか・送れない理由（`problems`）・送った数 |
+| `PUT /v1/cards/bulk-mails/:bulkId` | 下書きの宛先・件名・本文を直す（承認待ちにした後は 409） |
+| `DELETE /v1/cards/bulk-mails/:bulkId` | 下書きを削除する（送ったものは 409） |
+| `POST /v1/cards/bulk-mails/:bulkId/submit` | 承認へ進める（業務「まとめてのメール」を始め、本人の承認を待つ。`runId`）。送れない理由があれば 400 |
+| `POST /v1/cards/:id/changes/:changeId/revert` | メールの署名から新しくした記録を戻す（今の値が署名の値のままの項目だけ。仕様書 第27.6.1節）。詳細（`GET /v1/cards/:id`）の `changes` に記録が並ぶ（誰のメールからかは返さない） |
 | `DELETE /v1/cards/:id` ／ `POST /v1/cards/:id/restore` ／ `DELETE /v1/cards/:id/purge` | ごみ箱へ移す／戻す／ごみ箱からいま本当に消す（画像ごと。取り込んだ本人と、会社で共有のものは管理者） |
 | `GET /v1/cards/:id/vcard` | 1 件を vCard（3.0）で書き出す |
 | `GET /v1/cards/:id/meetings` | 本人が名刺を受け取った日の本人の予定（開くたびにカレンダーから引く。保存しない。第27.8節） |
@@ -278,13 +284,14 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/me/connections/:id/impact` | 本人: 取り消すと止まる業務・使えなくなる業務・飛ばす定時実行 |
 | `DELETE /v1/me/connections/:id` | 本人: 接続を取り消す（相手の取り消しの口があればそこでも取り消し、認可を消す）。その接続を使う本人の動いている業務を止める（仕様書 第12.11.6.5節） |
 | `GET /v1/oauth/google/callback` | Google からの戻り（ログイン不要。state で照合する） |
+| `GET /v1/unsubscribe/:token`・`POST /v1/unsubscribe/:token` | まとめてのメールの配信の停止（ログイン不要。鍵は会社とアドレスを暗号化したもの。GET は「配信を停止する」の画面、POST で止める。`List-Unsubscribe-Post` も同じ URL。仕様書 第27.9.1節） |
 | `GET /v1/oauth/connection/callback` | 認証の要る会社の接続（Slack など）の相手からの戻り（ログイン不要。state で照合し、認可を暗号化して保存して個人設定へ戻す。仕様書 第12.11.6.3節） |
 | `GET /v1/admin/google-permissions` | 管理者: この会社の業務が求める Google の権限と段階（制限付きかどうか）、使うツールと業務 |
 | `GET /v1/admin/extensions` | 管理者: 拡張機能の一覧（公式・自社専用）、構成要素、必要な権限の説明、導入と有効・無効の状態 |
 | `POST /v1/admin/extensions/import` | 管理者: `.m2ext` を取り込む（本文はファイルのバイト列。5 MB まで）。検証を通らなければ `problems` を返す |
 | `POST /v1/admin/extensions/:id/install` | 管理者: 同意して導入（本文に `consent: true`）。導入すると有効になる。同梱の接続は会社の接続として登録する（同じ ID が別の接続先で登録済みなら `notices` で知らせる） |
 | `PUT /v1/admin/extensions/:id/enabled` | 管理者: 有効・無効の切り替え（本文に `enabled`）。権限が増えた版は 409。内蔵の拡張（名刺管理・在庫管理）は会社の設定で入り切りし、データは消さない（導入と削除は 409。仕様書 第12.13節） |
-| `PUT /v1/admin/extensions/business-cards/settings` | 管理者: 名刺管理の、取り込んだ名刺の既定の範囲（`defaultScope`。第27.7節） |
+| `PUT /v1/admin/extensions/business-cards/settings` | 管理者: 名刺管理の、取り込んだ名刺の既定の範囲（`defaultScope`。第27.7節）と、メールの署名からの更新の入り切り（`mailSignature`。第27.6.1節）。渡した項目だけを変える |
 | `GET /v1/admin/extensions/inventory/booking-sources` ／ `POST` | 管理者: 予約の受け口の一覧 ／ 作る（`name`）。作ったときだけ送り先の URL（鍵を含む）を返す。鍵はハッシュだけを持つ |
 | `PUT /v1/admin/extensions/inventory/booking-sources/:id/status` ／ `mapping` | 管理者: 受け口を止める・再開する（`status`）／ 項目の対応を直す・やり直す（`mapping`。`null` で次の予約から推論し直す） |
 | `POST /v1/admin/extensions/hr/proposal` | 管理者: 就業規則・賃金規程（`file`: PDF・Word・文字・写真）から、人事・給与の設定の案を作る（第30.8.2節。項目・今・案・規程の抜き書き・採らない理由。保存しない。読めなければ 422）。JSON で `knowledgeId` を送ると、知識に登録した社内規程から作る |
@@ -319,6 +326,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/admin/settings` | 管理者: 会社の設定（会社情報・自社の書き方・自動化ポリシー・業務の有効化） |
 | `PUT /v1/admin/settings/:section` | 管理者: 設定の 1 区分を保存（`company`・`writingStyle`・`automation`・`agents`・`effect`・`slides`・`privacy`。`knowledge`（言い換えの登録）は 400 で断る（第 0.115.0 版から秘書が考える。第11.7.7.0節）。`privacy` は Google から取得したデータを残す日数） |
 | `POST /v1/admin/users` | 管理者: 利用者の招待（Workspace のドメインのみ） |
+| `POST /v1/admin/users/:id/forget-mail-signatures` | 管理者: Google のデータの削除を求められたとき、その人のメールの署名から名刺を新しくした値を前の値に戻し、変更の記録を消す（`count`。仕様書 第27.6.1節、Q-152） |
 | `PATCH /v1/admin/users/:id` | 管理者: 表示名・ロール・状態（管理者が 0 人になる変更は 409）。止めたときは、止めた業務の数（`stoppedRuns`）と、30 日後に削除される自分だけの名刺の数（`personalCards`。仕様書 第27.7節、Q-94）を返す。止めた日時を持ち、戻すと空にする |
 | `GET /v1/admin/knowledge` | 管理者: 組織知識の一覧（種類 `category`: `rule`・`minutes`・`learned`、状態 `status`: `active`・`retired`・`archived`、施行日と施行日が先の版。廃止・しまったものを含む）と、最後に整理した日と数（`consolidated`。仕様書 第11.11節） |
 | `POST /v1/admin/knowledge` | 管理者: 社内規程の新規の登録（`effectiveFrom` を省くと今日）。ID を発行して 201 で返す（ADR-0019） |

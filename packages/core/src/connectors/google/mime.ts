@@ -28,6 +28,33 @@ export function header(part: { headers?: { name: string; value: string }[] }, na
   return h?.value ?? '';
 }
 
+/**
+ * 差出人のドメインの認証が通ったかを、Gmail が付けた認証の結果（`Authentication-Results`）から見る（仕様書 第27.6.1節）。
+ *
+ * @param headers メールの見出し
+ * @param fromAddress 差出人のメールアドレス
+ * @returns DMARC が通っているか、差出人のドメイン（かその上のドメイン）の DKIM が通っていれば `true`
+ * @remarks 差出人のアドレスは偽れるため、Gmail（`mx.google.com`）が付けた結果だけを見る。途中の中継が付けた結果は信じない
+ */
+export function senderAuthenticated(headers: { name: string; value: string }[] | undefined, fromAddress: string): boolean {
+  const domain = fromAddress.split('@')[1]?.trim().toLowerCase();
+  if (!domain) return false;
+  const aligned = (d: string) => { const x = d.toLowerCase().replace(/^@/, ''); return domain === x || domain.endsWith(`.${x}`); };
+  for (const h of headers ?? []) {
+    if (h.name.toLowerCase() !== 'authentication-results') continue;
+    const value = h.value.replace(/\s+/g, ' ');
+    if (!/^\s*mx\.google\.com\s*;/i.test(value)) continue;
+    for (const clause of value.split(';').slice(1)) {
+      const c = clause.trim();
+      const dmarc = /^dmarc=pass\b.*header\.from=([^\s;]+)/i.exec(c);
+      if (dmarc && aligned(dmarc[1]!)) return true;
+      const dkim = /^dkim=pass\b.*header\.(?:i|d)=([^\s;]+)/i.exec(c);
+      if (dkim && aligned(dkim[1]!.includes('@') ? dkim[1]!.split('@')[1]! : dkim[1]!)) return true;
+    }
+  }
+  return false;
+}
+
 /** `Content-Type` から文字コードを取り出す。無ければ `utf-8`。 */
 export function charsetOf(part: GmailPart): string {
   const m = /charset\s*=\s*"?([^";\s]+)"?/i.exec(header(part, 'Content-Type'));
@@ -164,13 +191,18 @@ export function encodeAddress(v: string): string {
 export function buildRawMessage(m: {
   to: string[]; cc: string[]; subject: string; body: string;
   inReplyTo?: string | null; references?: string | null;
+  /** 配信の停止の URL（第27.9.1節）。`http(s)` の URL だけを見出しに入れる（開発は http）。 */
+  listUnsubscribe?: string | null;
 }): string {
+  const unsubscribe = m.listUnsubscribe && /^https?:\/\/\S+$/.test(m.listUnsubscribe) ? oneLine(m.listUnsubscribe) : null;
   const lines = [
     `To: ${m.to.map(encodeAddress).join(', ')}`,
     ...(m.cc.length > 0 ? [`Cc: ${m.cc.map(encodeAddress).join(', ')}`] : []),
     `Subject: ${encodeHeaderWord(m.subject)}`,
     ...(m.inReplyTo ? [`In-Reply-To: ${oneLine(m.inReplyTo)}`] : []),
     ...(m.references ? [`References: ${oneLine(m.references)}`] : []),
+    // 押すだけで止まる配信の停止（RFC 8058）
+    ...(unsubscribe ? [`List-Unsubscribe: <${unsubscribe}>`, 'List-Unsubscribe-Post: List-Unsubscribe=One-Click'] : []),
     'MIME-Version: 1.0',
     'Content-Type: text/plain; charset=UTF-8',
     'Content-Transfer-Encoding: base64',

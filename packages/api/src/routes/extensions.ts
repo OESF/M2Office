@@ -98,14 +98,20 @@ export function extensionsRoute(deps: AppDeps) {
 
   app.get('/', async (c) => {
     const { tenant } = c.get('ctx');
-    const [view, settings] = await Promise.all([deps.tenantView(tenant.id), deps.repo.getTenantSettings(tenant.id)]);
+    const [view, settings, optOuts] = await Promise.all([
+      deps.tenantView(tenant.id), deps.repo.getTenantSettings(tenant.id), deps.cards.bulk.store.countOptOuts(tenant.id),
+    ]);
     return c.json({
       items: view.entries.map((e) => ({
         ...describe(e.pkg, view), ...stateOf(e),
         // 利用できる人（第16.7節）。設定が無ければ全員
         scope: settings.access.scopes[e.pkg.manifest.id] ?? 'all',
         // 内蔵の拡張の会社の設定（名刺管理: 取り込んだ名刺の既定の範囲。第27.7節）
-        ...(e.pkg.manifest.id === CARDS_EXTENSION_ID ? { cards: { defaultScope: settings.cards.defaultScope } } : {}),
+        // メールの署名からの更新の入り切り（第27.6.1節）
+        // 配信を停止したアドレスの数（まとめてのメール。第27.9.1節）。アドレスそのものは返さない
+        ...(e.pkg.manifest.id === CARDS_EXTENSION_ID ? {
+          cards: { defaultScope: settings.cards.defaultScope, mailSignature: settings.cards.mailSignature, optOuts },
+        } : {}),
         // 在庫管理: 機能の入り切りと既定の目安（第29.4.1節）
         ...(e.pkg.manifest.id === INVENTORY_EXTENSION_ID ? { inventory: settings.inventory } : {}),
         // 人事・給与: 事業所・保険・締めと支払・手続きを行う人（第30.8.1節）
@@ -117,19 +123,29 @@ export function extensionsRoute(deps: AppDeps) {
   });
 
   /**
-   * 名刺管理の、取り込んだ名刺の既定の範囲を変える（第27.7節「会社は自分だけを既定にできる」）。すぐに反映する。
+   * 名刺管理の会社の設定を変える。取り込んだ名刺の既定の範囲（第27.7節「会社は自分だけを既定にできる」）と、
+   * メールの署名からの更新の入り切り（第27.6.1節）。渡した項目だけを変え、すぐに反映する。
    */
   app.put(`/${CARDS_EXTENSION_ID}/settings`, async (c) => {
     const { tenant, user } = c.get('ctx');
-    const body = await c.req.json<{ defaultScope?: unknown }>().catch(() => ({ defaultScope: undefined }));
-    if (body.defaultScope !== 'company' && body.defaultScope !== 'personal') return c.json({ error: 'defaultScope は company か personal です' }, 400);
+    const body = await c.req.json<{ defaultScope?: unknown; mailSignature?: unknown }>().catch(() => ({} as { defaultScope?: unknown; mailSignature?: unknown }));
+    if (body.defaultScope !== undefined && body.defaultScope !== 'company' && body.defaultScope !== 'personal') return c.json({ error: 'defaultScope は company か personal です' }, 400);
+    if (body.mailSignature !== undefined && typeof body.mailSignature !== 'boolean') return c.json({ error: 'mailSignature は true か false です' }, 400);
+    if (body.defaultScope === undefined && body.mailSignature === undefined) return c.json({ error: '変える項目がありません' }, 400);
     const current = (await deps.repo.getTenantSettings(tenant.id)).cards;
-    await deps.repo.saveTenantSettings(tenant.id, 'cards', { ...current, defaultScope: body.defaultScope }, user.id);
+    const next = {
+      ...current,
+      ...(body.defaultScope !== undefined ? { defaultScope: body.defaultScope as 'company' | 'personal' } : {}),
+      ...(body.mailSignature !== undefined ? { mailSignature: body.mailSignature as boolean } : {}),
+    };
+    await deps.repo.saveTenantSettings(tenant.id, 'cards', next, user.id);
     await deps.repo.appendAudit({
       id: randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id, action: 'settings.update',
-      targetType: 'settings', targetId: 'cards', detail: { defaultScope: body.defaultScope }, occurredAt: new Date().toISOString(),
+      targetType: 'settings', targetId: 'cards',
+      detail: { ...(body.defaultScope !== undefined ? { defaultScope: next.defaultScope } : {}), ...(body.mailSignature !== undefined ? { mailSignature: next.mailSignature } : {}) },
+      occurredAt: new Date().toISOString(),
     });
-    return c.json({ ok: true, defaultScope: body.defaultScope });
+    return c.json({ ok: true, defaultScope: next.defaultScope, mailSignature: next.mailSignature });
   });
 
   /**

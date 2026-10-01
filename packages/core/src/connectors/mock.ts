@@ -75,7 +75,7 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
     },
     send: async (
       p: ConnectorPrincipal,
-      mail: { to: string[]; cc: string[]; subject: string; body: string; replyTo: string | null },
+      mail: { to: string[]; cc: string[]; subject: string; body: string; replyTo: string | null; listUnsubscribe?: string },
     ) => {
       this.outbox.push({ kind: 'mail', principal: p, body: mail });
       return { messageId: `mock-sent-${randomUUID().slice(0, 8)}` };

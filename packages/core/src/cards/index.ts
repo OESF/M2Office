@@ -7,6 +7,7 @@
 export { PostgresContactStore } from './store.js';
 export type {
   CardViewer, ContactStore, ContactSummary, ContactQuery, NewCard, BatchProgress, ExpiredCard, CardPatch, ContactPatch,
+  SignatureState, SignatureTarget, NewContactChange, ContactChangeQuery,
 } from './store.js';
 export { CardService, CARD_FILE_MAX_BYTES, CARD_TABLE_MAX_ROWS, MULTIPLE_NOTE, canManage, cardsAccess, dateIn } from './service.js';
 export type { CardServiceDeps, CardUpload, AcceptResult, ContactDetail, TableImportResult } from './service.js';
@@ -17,4 +18,14 @@ export { detectCardKind, splitCardPdf, CARD_BATCH_MAX, CARD_MIME, type CardFileK
 export { toVCard } from './vcard.js';
 export { draftThanksMail, templateThanks, type ThanksMail, type ThanksMailInput } from './mail.js';
 export { CARD_TOOLS, type CardToolContext } from './tools.js';
-export { CARD_AGENTS, CARD_IMPORT, CARD_UPDATE, CARDS_PACKAGE, CARDS_EXTENSION_VERSION } from './agents.js';
+export { CARD_AGENTS, CARD_IMPORT, CARD_UPDATE, CARD_BULK_MAIL, CARDS_PACKAGE, CARDS_EXTENSION_VERSION } from './agents.js';
+export {
+  SignatureWatcher, SIGNATURE_PROMPT, SIGNATURE_RECHECK_MS, SIGNATURE_DAILY_LIMIT, SIGNATURE_BACKFILL_DAYS, SIGNATURE_MAIL_BATCH,
+  ownPart, signatureLooksSame, nameMatches, parseSignature, readSignature, signatureChanges, revertPatch, phonesKey, senderAddress,
+  type SignatureReading, type SignatureChanges, type SignatureWatcherDeps,
+} from './signature.js';
+export {
+  BulkMailService, PostgresBulkMailStore, BULK_MAX_RECIPIENTS, BULK_DAILY_LIMIT, BULK_GAP_SECONDS, BULK_PLACEHOLDERS,
+  renderBulk, adFooter, judgeAdvertising,
+  type BulkMail, type BulkMailStatus, type BulkRecipient, type BulkPreview, type BulkPreviewRecipient, type BulkMailStore, type BulkMailServiceDeps,
+} from './bulk.js';
