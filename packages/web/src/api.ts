@@ -1297,6 +1297,8 @@ export const api = {
       call<InventoryPublicationView>('/inventory/publication', { method: 'PUT', body: JSON.stringify(scope) }),
     /** 公開を止める。 */
     stopPublication: () => call<InventoryPublicationView>('/inventory/publication/stop', { method: 'POST' }),
+    /** JAN から商品名を引く（Gemini の Google 検索。仕様書 第29.6節）。見つからなければ `found: false`。 */
+    jan: (code: string) => call<{ found: boolean; name?: string; maker?: string; category?: string }>(`/inventory/jan/${encodeURIComponent(code)}`),
     /** 仕入先（仕様書 第29.4.1節）。 */
     suppliers: () => call<{ suppliers: InventorySupplier[] }>('/inventory/suppliers'),
     /** 仕入先を足す（`id` があれば直す）。 */

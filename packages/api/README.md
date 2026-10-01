@@ -179,6 +179,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `PUT /v1/inventory/items/:id/status` | 管理者: 品目を止める・使うに戻す（在庫が残れば止められない） |
 | `DELETE /v1/inventory/items/:id/codes/:code` | 品目からバーコードを外す |
 | `GET /v1/inventory/lookup` | 読んだ値（`code`。GS1・JAN・棚のラベル）から品目か棚を引く。GS1 なら使用期限とロットも返す |
+| `GET /v1/inventory/jan/:code` | JAN（GTIN）から商品名・メーカー・分類を Gemini の Google 検索で引く（第29.6節）。一致を確かめられたときだけ `found: true`。見つからない・調べられない（鍵が無い・「ローカルだけ」の会社）ときも 200 で `found: false`。同じ会社の同じコードは 24 時間使い回す |
 | `POST /v1/inventory/locations` ／ `DELETE /v1/inventory/locations/:id` | 場所を足す・外す（外すのは管理者。在庫が残れば外せない） |
 | `POST /v1/inventory/moves` | 入庫・使用・移動・調整を記録する（`kind`・`itemId`・`qty`・`unit`・場所・ロット・理由）。在庫がマイナスになれば `warnings` で知らせる |
 | `POST /v1/inventory/moves/:id/undo` | 自分の記録をその日のうちに取り消す（逆の記録を操作の組で足す） |

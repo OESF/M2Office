@@ -287,6 +287,21 @@ function NewItem({ initial, onCancel, onSaved }: {
   const [unit, setUnit] = useState('個');
   const [category, setCategory] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // 知らないバーコードから作るときは、JAN から商品名を引いて欄に入れておく（第29.6節）。入れ始めた欄は上書きしない
+  const [looking, setLooking] = useState<'busy' | 'none' | null>(null);
+  useEffect(() => {
+    if (!initial.code || initial.name || !/^\d{8,14}$/.test(initial.code)) return undefined;
+    let alive = true;
+    setLooking('busy');
+    api.inventory.jan(initial.code).then((r) => {
+      if (!alive) return;
+      setLooking(r.found ? null : 'none');
+      if (!r.found) return;
+      setName((cur) => cur || r.name || '');
+      setCategory((cur) => cur || r.category || '');
+    }).catch(() => { if (alive) setLooking('none'); });
+    return () => { alive = false; };
+  }, [initial.code, initial.name]);
   const save = async () => {
     try {
       const n = qty.trim() === '' ? null : Number(qty);
@@ -302,6 +317,8 @@ function NewItem({ initial, onCancel, onSaved }: {
       <div className="row wrap">
         <input className="grow" autoFocus placeholder="品名" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void save(); }} />
         {initial.code && <span className="small muted">{initial.code}</span>}
+        {looking === 'busy' && <span className="small muted" role="status">商品名を調べています…</span>}
+        {looking === 'none' && <span className="small muted" role="status">商品名は見つかりませんでした</span>}
       </div>
       {/* 数と単位は同じ行に並べる（「3」「本」）。単位の欄に数を入れる取り違えを防ぐ */}
       <div className="row wrap">

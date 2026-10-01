@@ -465,6 +465,15 @@ export function inventoryRoute(deps: AppDeps) {
     return c.body(bytes as unknown as ArrayBuffer);
   });
 
+  /**
+   * JAN から商品名を引く（第29.6節、Q-111）。知らないバーコードから品目を作る欄に入れておくため。
+   * 見つからない・調べられないときも 200 で `found: false` を返す（品目は空の欄で作れる）
+   */
+  app.get('/jan/:code', async (c) => {
+    const code = c.req.param('code').replace(/\D/g, '').slice(0, 14);
+    return c.json(await deps.inventory.jan.lookup(c.get('ctx').tenant.id, code));
+  });
+
   // ---- Web への公開（第29.12節・第29.12.1節。段 5）-------------------------------
 
   /** 公開の画面を開けるか（管理者で、会社の設定で「Web への公開」が入）。 */

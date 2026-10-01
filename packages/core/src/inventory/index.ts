@@ -23,3 +23,4 @@ export {
   type InventoryBookingsDeps, type BookingEvent, type IngestResult,
 } from './bookings.js';
 export { InventoryPublisher, buildPublicSnapshot, renderPublicPage, PUBLICATION_KEY, type InventoryPublisherDeps, type PublicationView } from './publication.js';
+export { JanLookupService, JAN_CACHE_MS, type JanLookup, type JanLookupDeps } from './jan.js';

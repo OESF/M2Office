@@ -3965,6 +3965,13 @@ console.log('\n■ 60. 在庫管理（内蔵の拡張。第29章、ADR-0045）')
     const stopped = await hook({ ...pii, id: `${tag}-EXT2` });
     stopped.status === 404 ? ok('止めた受け口は受け取らない') : ng(`止めた受け口が受け取った（${stopped.status}）`);
 
+    // JAN から商品名を引く（第29.6節）。検査数字の誤ったコードは外へ調べに行かず、見つからないとして 200 を返す
+    // （正しいコードは本物の Google 検索になり、結果が外部で変わるため、通しの確認では使わない。単体テストで確かめる）
+    const janBad = await call('a', '/v1/inventory/jan/4901234567890', {}, 'member');
+    const janShort = await call('a', '/v1/inventory/jan/123', {}, 'member');
+    janBad.status === 200 && janBad.body?.found === false && janShort.status === 200 && janShort.body?.found === false
+      ? ok('JAN から商品名を引く口は、引けないコードでは空のまま 200 で返す（推測で埋めない）') : ng('JAN の口が違う', `${janBad.status} ${JSON.stringify(janBad.body)} ${janShort.status}`);
+
     // Web への公開（第29.12.1節。段 5）。管理者が一度承認し、鍵の URL でログインなしに読める。数が変わると作り直し、止めると出ない
     const pubOff = await call('a', '/v1/inventory/publication');
     await call('a', '/v1/admin/extensions/inventory/settings', { method: 'PUT', body: JSON.stringify({ features: { lots: true, units: true, reserve: true, publish: true } }) });
