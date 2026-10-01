@@ -249,6 +249,11 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/inventory/bookings/:id/use` ／ `cancel` | 予約の人が来た（取り置きを使用の記録にする）／ 取り消す（使える数に戻す） |
 | `POST /v1/inventory/menus` | メニューで使う品目を覚える（`menu`・`items`: itemId と qty。空なら在庫を使わない）。品目の分からない予約を取り置き直す |
 | `POST /v1/hooks/signage/:key` ／ `POST /v1/hooks/signage`（`Authorization: Bearer`） | **認証なしの受け口**。受付などのシステムから店頭サイネージに割り込みを出す（第31.8.2節）。会社は鍵（32 文字）のハッシュから引く。JSON かフォーム（UTF-8）だけ（ほかは 415）、4 KB を超えれば 413、1 分 30 回を超えれば 429（`retry-after`）。知らない鍵・止めた受け口・切った会社はどれも 404、POST 以外は 405、読めない・知らない画面は 422。標準の形でない本文は、値を消した骨組みだけを推論に渡して対応を推測する（推論が使えなければ 503）。`requestId` を 10 分覚えて二度出さない。記録では URL の鍵を伏せる |
+| `GET /v1/inventory/publication` | 管理者: Web への公開の状態（承認した中身・承認した人と日時・貼る URL）。「Web への公開」を切った会社と管理者でない人は 403（第29.12.1節） |
+| `POST /v1/inventory/publication/preview` | 管理者: 承認する前の見本（`itemIds`・`fields`（`category`・`price`）・`showCount`）。公開されるとおりの中身を返す |
+| `PUT /v1/inventory/publication` | 管理者: この内容で公開する（押した管理者が承認者。中身の変更・再開も同じ）。鍵は最初の承認で作り変えない。監査ログ `inventory.publication.approve` |
+| `POST /v1/inventory/publication/stop` | 管理者: 公開を止める。監査ログ `inventory.publication.stop` |
+| `GET /v1/public/inventory/:key` ／ `:key.json` | **認証なし**。在庫の公開のページ（他のサイトの iframe に入れてよい。`frame-ancestors *`・スクリプトなし）とデータ（`Access-Control-Allow-Origin: *`）。作り直して置いた中身だけを返す。知らない鍵・止めた公開・公開を切った会社はどれも 404 |
 | `POST /v1/hooks/inventory/:key` | **認証なしの受け口**。予約のシステムの Webhook を受ける（第29.13.1節）。会社は鍵（32 文字）のハッシュから引き、ホスト名は見ない。64 KB を超えれば 413。知らない鍵・止めた受け口・引き当てを切った会社はどれも 404、予約として読めなければ 422。項目の対応は最初の予約から推論して受け口に覚える。予約した人の名前・連絡先は残さない |
 | `GET /v1/notices` | 本人宛ての有効な社内のお知らせ（取り下げ・期間切れ・本人が済んだものを除く。`isNew`・`daysLeft` つき。仕様書 第10.15節） |
 | `POST /v1/notices` | 社内のお知らせを出す（`title`・`body`・`link`（https だけ）・`all` か `groupIds`・`dueOn`・`until`）。会社の全員が出せる。承認は挟まない。201 |

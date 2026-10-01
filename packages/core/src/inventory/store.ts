@@ -9,7 +9,8 @@ import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import type {
   InventoryBooking, InventoryBookingMapping, InventoryBookingSource, InventoryBookingStatus, InventoryCount, InventoryItem,
-  InventoryLocation, InventoryMove, InventoryMoveKind, InventoryReservationLine, InventorySupplier,
+  InventoryLocation, InventoryMove, InventoryMoveKind, InventoryPublicationScope, InventoryPublicSnapshot, InventoryReservationLine,
+  InventorySupplier,
 } from '@m2office/shared';
 
 /** 置き場に渡す品目（バーコードは別に持つ）。 */
@@ -142,6 +143,17 @@ export interface MoveQuery {
  *
  * @remarks どの操作も会社（テナント）で絞る（不変則 I-2）
  */
+/** 公開の行（第29.12節）。 */
+export interface PublicationRecord {
+  key: string;
+  scope: InventoryPublicationScope;
+  approvedBy: string;
+  approvedAt: string;
+  status: 'live' | 'stopped';
+  snapshot: InventoryPublicSnapshot | null;
+  snapshotAt: string | null;
+}
+
 export interface InventoryStore {
   listItems(tenantId: string, opts?: { includeStopped?: boolean }): Promise<InventoryItem[]>;
   getItem(tenantId: string, id: string): Promise<InventoryItem | null>;
@@ -208,6 +220,15 @@ export interface InventoryStore {
   listMenuItems(tenantId: string, menuKey: string): Promise<MenuItemRecord[]>;
   /** メニューの対応を置き換える。 */
   setMenuItems(tenantId: string, menuKey: string, rows: MenuItemRecord[], at: string): Promise<void>;
+
+  /** 会社の公開（第29.12節）。まだ一度も承認していなければ `null`。 */
+  getPublication(tenantId: string): Promise<PublicationRecord | null>;
+  /** 公開の中身を承認して保存する（公開中にする）。鍵は最初の承認のときに作ったものを使い続ける。 */
+  approvePublication(tenantId: string, p: { key: string; scope: InventoryPublicationScope; approvedBy: string; approvedAt: string }): Promise<void>;
+  setPublicationStatus(tenantId: string, status: 'live' | 'stopped'): Promise<void>;
+  savePublicationSnapshot(tenantId: string, snapshot: InventoryPublicSnapshot, at: string): Promise<void>;
+  /** 鍵から公開を引く（会社の判定より前に呼ぶ）。 */
+  findPublicationByKey(key: string): Promise<{ tenantId: string; status: 'live' | 'stopped'; snapshot: InventoryPublicSnapshot | null } | null>;
 }
 
 // ---- PostgreSQL ----------------------------------------------------------
@@ -660,6 +681,44 @@ export class PostgresInventoryStore implements InventoryStore {
       }
     });
   }
+
+  async getPublication(tenantId: string): Promise<PublicationRecord | null> {
+    const rows = await this.q<{ public_key: string; approved: InventoryPublicationScope; approved_by: string; approved_at: unknown; status: 'live' | 'stopped'; snapshot: InventoryPublicSnapshot | null; snapshot_at: unknown }>(
+      tenantId, 'select public_key, approved, approved_by, approved_at, status, snapshot, snapshot_at from inventory_publications where tenant_id = $1', [tenantId]);
+    const r = rows[0];
+    return r ? {
+      key: r.public_key, scope: r.approved, approvedBy: r.approved_by, approvedAt: iso(r.approved_at), status: r.status,
+      snapshot: r.snapshot, snapshotAt: r.snapshot_at ? iso(r.snapshot_at) : null,
+    } : null;
+  }
+
+  async approvePublication(tenantId: string, p: { key: string; scope: InventoryPublicationScope; approvedBy: string; approvedAt: string }): Promise<void> {
+    await this.q(tenantId, `insert into inventory_publications (tenant_id, public_key, approved, approved_by, approved_at, status)
+      values ($1, $2, $3, $4, $5, 'live')
+      on conflict (tenant_id) do update set approved = excluded.approved, approved_by = excluded.approved_by,
+        approved_at = excluded.approved_at, status = 'live'`, [tenantId, p.key, JSON.stringify(p.scope), p.approvedBy, p.approvedAt]);
+  }
+
+  async setPublicationStatus(tenantId: string, status: 'live' | 'stopped'): Promise<void> {
+    await this.q(tenantId, 'update inventory_publications set status = $2 where tenant_id = $1', [tenantId, status]);
+  }
+
+  async savePublicationSnapshot(tenantId: string, snapshot: InventoryPublicSnapshot, at: string): Promise<void> {
+    await this.q(tenantId, 'update inventory_publications set snapshot = $2, snapshot_at = $3 where tenant_id = $1', [tenantId, JSON.stringify(snapshot), at]);
+  }
+
+  async findPublicationByKey(key: string): Promise<{ tenantId: string; status: 'live' | 'stopped'; snapshot: InventoryPublicSnapshot | null } | null> {
+    // 会社の判定より前に呼ぶ。鍵で 1 行だけ返す関数を使う（移行 038）
+    const client = await this.pool.connect();
+    try {
+      const { rows } = await client.query<{ tenant_id: string; status: 'live' | 'stopped'; snapshot: InventoryPublicSnapshot | null }>(
+        'select tenant_id, status, snapshot from m2o_inventory_publication($1)', [key]);
+      const r = rows[0];
+      return r ? { tenantId: r.tenant_id, status: r.status, snapshot: r.snapshot } : null;
+    } finally {
+      client.release();
+    }
+  }
 }
 
 // ---- メモリ（自動テスト用） ----------------------------------------------
@@ -956,5 +1015,32 @@ export class MemoryInventoryStore implements InventoryStore {
 
   async setMenuItems(tenantId: string, menuKey: string, rows: MenuItemRecord[]): Promise<void> {
     this.menuItems.set(`${tenantId}\u0000${menuKey}`, [...rows]);
+  }
+
+  readonly publications = new Map<string, PublicationRecord>();
+
+  async getPublication(tenantId: string): Promise<PublicationRecord | null> {
+    const p = this.publications.get(tenantId);
+    return p ? { ...p } : null;
+  }
+
+  async approvePublication(tenantId: string, p: { key: string; scope: InventoryPublicationScope; approvedBy: string; approvedAt: string }): Promise<void> {
+    const prev = this.publications.get(tenantId);
+    this.publications.set(tenantId, { snapshot: null, snapshotAt: null, ...prev, ...p, key: prev?.key ?? p.key, status: 'live' });
+  }
+
+  async setPublicationStatus(tenantId: string, status: 'live' | 'stopped'): Promise<void> {
+    const p = this.publications.get(tenantId);
+    if (p) p.status = status;
+  }
+
+  async savePublicationSnapshot(tenantId: string, snapshot: InventoryPublicSnapshot, at: string): Promise<void> {
+    const p = this.publications.get(tenantId);
+    if (p) { p.snapshot = snapshot; p.snapshotAt = at; }
+  }
+
+  async findPublicationByKey(key: string): Promise<{ tenantId: string; status: 'live' | 'stopped'; snapshot: InventoryPublicSnapshot | null } | null> {
+    for (const [tenantId, p] of this.publications) if (p.key === key) return { tenantId, status: p.status, snapshot: p.snapshot };
+    return null;
   }
 }

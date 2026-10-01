@@ -16,7 +16,7 @@ import type { CardCorners,
   HrFamilyMember, HrPayrollProfile, HrStandardPay, PayRun, PaySlip, PayCheck, HrNoticeSettings, HrDeadline, PayAdjustment, BonusPlan,
   YeaDeclaration, YeaDeclarationView, YeaResult, SocialDetermination, SocialEvent, InsuranceEligibility, LaborInsuranceData, LaborInsuranceView, ShiftView, HrShiftSettings, HrShift,
   InventoryCount, InventoryCountRow, InventoryCountScope, InventoryCountView, InventorySupplier,
-  InventoryBooking, InventoryBookingMapping, InventoryBookingSource,
+  InventoryBooking, InventoryBookingMapping, InventoryBookingSource, InventoryPublication, InventoryPublicationScope, InventoryPublicSnapshot,
   SignageAsset, SignageEntry, SignageScreen, SignageSettings, SignageInterruptInput, SignageInterruptView, SignagePhrase, SignageSound, SignageSource,
 } from '@m2office/shared';
 import { debugMode, recordCall } from './debug.js';
@@ -386,6 +386,15 @@ export interface InventoryForecastRow {
     qty: number; packs: number | null; supplierId: string | null; supplierName: string | null;
     method: InventorySupplier['method'] | null; contact: string | null; reason: string;
   } | null;
+}
+
+/** 在庫の Web への公開の状態（管理者向け。仕様書 第29.12.1節）。 */
+export interface InventoryPublicationView {
+  publication: InventoryPublication | null;
+  /** 承認した品目のうち、いま止めている品目の数（出ていない）。 */
+  stoppedInScope: number;
+  /** 貼るための URL（埋め込みのページと公開のデータ）。まだ公開していなければ `null`。 */
+  urls: { page: string; data: string } | null;
 }
 
 /** 納品書から入庫した結果（仕様書 第29.9節）。 */
@@ -1278,6 +1287,16 @@ export const api = {
     /** メニューで使う品目を覚えさせる（`items` が空なら在庫を使わない）。 */
     teachMenu: (menu: string, items: { itemId: string; qty: number }[]) =>
       call<{ ok: true; applied: number }>('/inventory/menus', { method: 'POST', body: JSON.stringify({ menu, items }) }),
+    /** Web への公開の状態と貼るための URL（管理者。仕様書 第29.12.1節）。 */
+    publication: () => call<InventoryPublicationView>('/inventory/publication'),
+    /** 承認する前の見本（公開されるとおりの中身）。 */
+    previewPublication: (scope: InventoryPublicationScope) =>
+      call<{ snapshot: InventoryPublicSnapshot }>('/inventory/publication/preview', { method: 'POST', body: JSON.stringify(scope) }),
+    /** この内容で公開する（押した管理者が承認者。中身を変えたとき・止めたあとの再開も同じ）。 */
+    approvePublication: (scope: InventoryPublicationScope) =>
+      call<InventoryPublicationView>('/inventory/publication', { method: 'PUT', body: JSON.stringify(scope) }),
+    /** 公開を止める。 */
+    stopPublication: () => call<InventoryPublicationView>('/inventory/publication/stop', { method: 'POST' }),
     /** 仕入先（仕様書 第29.4.1節）。 */
     suppliers: () => call<{ suppliers: InventorySupplier[] }>('/inventory/suppliers'),
     /** 仕入先を足す（`id` があれば直す）。 */

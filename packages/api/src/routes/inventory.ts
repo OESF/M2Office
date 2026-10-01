@@ -1,6 +1,6 @@
 /**
  * @file 在庫管理（内蔵の拡張）の API。品目の一覧と詳細・作成と修正・止め・バーコードで引く・場所と棚のラベル・入出庫の記録と取り消し・
- * 棚卸し・取り込みと書き出し。
+ * 棚卸し・取り込みと書き出し・Web への公開（承認と停止）。
  *
  * 会社が在庫管理を切っているときと、利用範囲の外の人には、どの口も使わせない。
  * 在庫は会社で共有する。品目の止めと場所の削除は管理者だけ（第29.16節）。
@@ -12,9 +12,9 @@ import { Hono } from 'hono';
 import QRCode from 'qrcode';
 import {
   readSheet, renderSheet, renderShelfLabels, saveFile, detectKind, enqueueJob, toInstant, IMPORT_MAX_ROWS, INVENTORY_ORDER, MAX_FILE_BYTES, MIME,
-  MOBILE_INVENTORY_PATH, type ItemInput, type MoveInput,
+  MOBILE_INVENTORY_PATH, type ItemInput, type MoveInput, type PublicationView,
 } from '@m2office/core';
-import type { InventoryMoveKind } from '@m2office/shared';
+import type { InventoryMoveKind, InventoryPublicationScope, InventoryPublicField } from '@m2office/shared';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 import { tenantOrigin } from '../tenant-origin.js';
@@ -463,6 +463,59 @@ export function inventoryRoute(deps: AppDeps) {
     c.header('Content-Type', format === 'csv' ? 'text/csv; charset=utf-8' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     c.header('Content-Disposition', `attachment; filename="inventory-${date}.${format}"`);
     return c.body(bytes as unknown as ArrayBuffer);
+  });
+
+  // ---- Web への公開（第29.12節・第29.12.1節。段 5）-------------------------------
+
+  /** 公開の画面を開けるか（管理者で、会社の設定で「Web への公開」が入）。 */
+  const publishGate = async (c: { get(k: 'ctx'): AppEnv['Variables']['ctx'] }): Promise<string | null> => {
+    if (!isAdmin(c)) return 'Web への公開を決められるのは管理者です';
+    const settings = await service.settings(c.get('ctx').tenant.id);
+    return settings.features.publish ? null : '会社の設定で「Web への公開」が切られています';
+  };
+  /** 公開の状態に、貼るための URL を添える。 */
+  const withUrls = (c: { req: { header(k: string): string | undefined } }, view: PublicationView) => {
+    const p = view.publication;
+    if (!p) return { ...view, urls: null };
+    const page = `${tenantOrigin(c.req.header('origin'), c.req.header('host'))}/v1/public/inventory/${p.key}`;
+    return { ...view, urls: { page, data: `${page}.json` } };
+  };
+  const scopeOf = (body: Record<string, unknown>): InventoryPublicationScope => ({
+    itemIds: Array.isArray(body['itemIds']) ? body['itemIds'].filter((x): x is string => typeof x === 'string').slice(0, 5000) : [],
+    fields: Array.isArray(body['fields']) ? body['fields'].filter((x): x is InventoryPublicField => x === 'category' || x === 'price') : [],
+    showCount: body['showCount'] === true,
+  });
+
+  /** 公開の状態（承認した中身・承認した人と日時・貼るための URL）。 */
+  app.get('/publication', async (c) => {
+    const denied = await publishGate(c);
+    if (denied) return c.json({ error: denied }, 403);
+    return c.json(withUrls(c, await deps.inventory.publisher.view(c.get('ctx').tenant.id)));
+  });
+
+  /** 承認する前の見本。公開されるとおりの中身を返す。 */
+  app.post('/publication/preview', async (c) => {
+    const denied = await publishGate(c);
+    if (denied) return c.json({ error: denied }, 403);
+    const res = await deps.inventory.publisher.preview(c.get('ctx').tenant.id, scopeOf(await c.req.json().catch(() => ({}))));
+    return 'error' in res ? c.json(res, 400) : c.json({ snapshot: res });
+  });
+
+  /** この内容で公開する（押した管理者が承認者。中身を変えたとき・止めたあとの再開も同じ）。 */
+  app.put('/publication', async (c) => {
+    const denied = await publishGate(c);
+    if (denied) return c.json({ error: denied }, 403);
+    const { tenant, user } = c.get('ctx');
+    const res = await deps.inventory.publisher.approve(tenant.id, user.id, scopeOf(await c.req.json().catch(() => ({}))));
+    return 'error' in res ? c.json(res, 400) : c.json(withUrls(c, res));
+  });
+
+  /** 公開を止める。埋め込みのページは「表示できません」になる。 */
+  app.post('/publication/stop', async (c) => {
+    if (!isAdmin(c)) return c.json({ error: '公開を止められるのは管理者です' }, 403);
+    const { tenant, user } = c.get('ctx');
+    const res = await deps.inventory.publisher.stop(tenant.id, user.id);
+    return 'error' in res ? c.json(res, 400) : c.json(withUrls(c, res));
   });
 
   return app;

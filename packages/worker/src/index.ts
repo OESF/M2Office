@@ -11,7 +11,7 @@
 
 import {
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
-  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, PostgresInventoryStore, inventoryAccess, SignageService, SignageInterrupts, PostgresSignageStore, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention,
+  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, PostgresInventoryStore, inventoryAccess, SignageService, SignageInterrupts, PostgresSignageStore, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention,
   NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator,
@@ -96,12 +96,16 @@ const notices = new NoticeService({
 });
 // 在庫管理（内蔵の拡張。仕様書 第29章）。秘書から頼まれた入出庫の記録（第29.15節）が使う
 let inventoryWatch: InventoryWatch | null = null;
+// 秘書から頼まれた記録のあとも、Web への公開を作り直す（第29.12.1節）
+let inventoryPublisher: InventoryPublisher | null = null;
 const inventory = new InventoryService({
   store: new PostgresInventoryStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
   repo, llm: (tenantId) => ai.llmFor(tenantId),
   // 秘書から頼まれた記録のあとも、見張りが見直す（第29.14節）
   onChanged: async (tenantId, itemIds) => inventoryWatch?.afterMoves(tenantId, itemIds),
+  onPublicChange: (tenantId) => inventoryPublisher?.changed(tenantId),
 });
+inventoryPublisher = new InventoryPublisher({ store: inventory.store, service: inventory, repo, logger: log });
 // 予約との引き当て（第29.13節）。秘書から頼まれた取り置きと、毎朝の見直しが使う
 const inventoryBookings = new InventoryBookings({ store: inventory.store, service: inventory, repo, llm: (tenantId) => ai.llmFor(tenantId) });
 inventoryWatch = new InventoryWatch({ repo, service: inventory, bookings: inventoryBookings, logger: log });
@@ -214,6 +218,8 @@ let lastCardPurge = 0;
 const INVENTORY_WATCH_HOUR = Number(process.env['INVENTORY_WATCH_HOUR'] ?? 7);
 /** 在庫の毎朝の見直しを済ませた日（日本時間）。1 日 1 回にする。 */
 let inventoryWatchedOn = '';
+/** Web への公開を作り直した日本時間の日付（日付が変わったら、使用期限を過ぎた数を外すために作り直す。第29.12.1節）。 */
+let publicationRefreshedOn = '';
 /** 有給の毎朝の見回りをした日（在庫と同じ時刻を過ぎたら 1 日 1 回）。 */
 let leaveWatchedOn = '';
 
@@ -366,6 +372,20 @@ while (running) {
       if (applied > 0) log.info('メールの署名から名刺を新しくしました', { contacts: applied });
     } catch (err) {
       log.error('メールの署名の見回りで例外が発生しました', { err });
+    }
+  }
+
+  // 在庫の Web への公開を、日本時間の日付が変わったら作り直す（第29.12.1節）。使用期限を過ぎた数を外す
+  {
+    const today = new Date(Date.now() + 9 * 3_600_000).toISOString().slice(0, 10);
+    if (publicationRefreshedOn !== today) {
+      publicationRefreshedOn = today;
+      try {
+        const n = await inventoryPublisher.refreshAll(new Date());
+        if (n > 0) log.info('在庫の公開を作り直しました', { tenants: n });
+      } catch (err) {
+        log.error('在庫の公開の作り直しで例外が発生しました', { err });
+      }
     }
   }
 

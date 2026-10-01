@@ -205,6 +205,11 @@ export interface InventoryServiceDeps {
    * @param itemIds 数が変わった品目
    */
   onChanged?: (tenantId: string, itemIds: string[]) => Promise<unknown>;
+  /**
+   * 公開に出るもの（使える数・品目の名前と価格・止め・取り置き）が変わったあとに呼ぶ（Web への公開の作り直し。第29.12.1節）。
+   * 待たずに呼び、失敗しても記録は止めない。
+   */
+  onPublicChange?: (tenantId: string) => void;
 }
 
 /**
@@ -222,8 +227,23 @@ export class InventoryService {
 
   /** 見張りに知らせる（待たない・失敗を記録に持ち込まない）。 */
   private changed(tenantId: string, itemIds: string[]): void {
+    this.touch(tenantId);
     if (!this.deps.onChanged || itemIds.length === 0) return;
     void Promise.resolve().then(() => this.deps.onChanged!(tenantId, [...new Set(itemIds)])).catch(() => undefined);
+  }
+
+  /**
+   * 公開に出るものが変わったことを知らせる（Web への公開の作り直し）。取り置きの出し入れ（{@link InventoryBookings}）からも呼ぶ。
+   *
+   * @remarks 待たない・失敗を持ち込まない
+   */
+  touch(tenantId: string): void {
+    if (!this.deps.onPublicChange) return;
+    try {
+      this.deps.onPublicChange(tenantId);
+    } catch {
+      // 公開の作り直しの失敗は、記録を止めない
+    }
   }
 
   /** 会社の在庫管理の設定。 */
@@ -329,6 +349,7 @@ export class InventoryService {
       if (!(await this.deps.store.addCode(tenantId, rec.id, code, parseCode(raw).kind))) taken.push(code);
     }
     const item = (await this.deps.store.getItem(tenantId, rec.id))!;
+    this.touch(tenantId);
     if (taken.length) return { error: `バーコード ${taken.join('・')} はほかの品目に付いています（品目は保存しました）` };
     return { item, created: !prev };
   }
@@ -382,6 +403,7 @@ export class InventoryService {
     }
     const { codes: _c, updatedAt: _u, ...rec } = item;
     await this.deps.store.saveItem(tenantId, { ...rec, status }, userId, now());
+    this.touch(tenantId);
     await this.audit(tenantId, userId, status === 'stopped' ? 'inventory.item.stop' : 'inventory.item.resume', 'inventory_item', itemId, { name: item.name });
     return { ok: true };
   }

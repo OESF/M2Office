@@ -3965,6 +3965,43 @@ console.log('\n■ 60. 在庫管理（内蔵の拡張。第29章、ADR-0045）')
     const stopped = await hook({ ...pii, id: `${tag}-EXT2` });
     stopped.status === 404 ? ok('止めた受け口は受け取らない') : ng(`止めた受け口が受け取った（${stopped.status}）`);
 
+    // Web への公開（第29.12.1節。段 5）。管理者が一度承認し、鍵の URL でログインなしに読める。数が変わると作り直し、止めると出ない
+    const pubOff = await call('a', '/v1/inventory/publication');
+    await call('a', '/v1/admin/extensions/inventory/settings', { method: 'PUT', body: JSON.stringify({ features: { lots: true, units: true, reserve: true, publish: true } }) });
+    const scopeOne = { itemIds: [itemId], fields: ['price'], showCount: true };
+    const pubByMember = await call('a', '/v1/inventory/publication', { method: 'PUT', body: JSON.stringify(scopeOne) }, 'member');
+    const pubPreview = await call('a', '/v1/inventory/publication/preview', { method: 'POST', body: JSON.stringify({ itemIds: [itemId], fields: [], showCount: false }) });
+    const pub = await call('a', '/v1/inventory/publication', { method: 'PUT', body: JSON.stringify({ itemIds: [itemId], fields: [], showCount: true }) });
+    pubOff.status === 403 && pubByMember.status === 403 && pubPreview.status === 200 && pubPreview.body.snapshot?.items?.[0]?.available === undefined
+      && pub.status === 200 && pub.body.publication?.status === 'live' && pub.body.publication?.approvedBy && /\/v1\/public\/inventory\/[A-Za-z0-9_-]{32}$/.test(pub.body.urls?.page ?? '')
+      ? ok('Web への公開は、公開を入れた会社の管理者だけが承認でき、見本と貼る URL を返す')
+      : ng('公開の承認が違う', `${pubOff.status} ${pubByMember.status} ${pubPreview.status} ${pub.status} ${JSON.stringify(pub.body)}`);
+    const pubKey = pub.body?.publication?.key ?? '';
+    const pubAvail = (await call('a', `/v1/inventory/items/${itemId}`, {}, 'member')).body?.item?.available;
+    const page = await fetch(`${API}/v1/public/inventory/${pubKey}`);
+    const pageHtml = await page.text();
+    const pubData = await fetch(`${API}/v1/public/inventory/${pubKey}.json`);
+    const pubJson = await pubData.json().catch(() => ({}));
+    page.status === 200 && (page.headers.get('content-security-policy') ?? '').includes('frame-ancestors *') && !/<script/i.test(pageHtml) && pageHtml.includes('ハンドクリーム')
+      && pubData.headers.get('access-control-allow-origin') === '*' && pubJson.items?.length === 1 && pubJson.items[0].available === Math.max(0, pubAvail)
+      && !('price' in pubJson.items[0]) && !JSON.stringify(pubJson).includes('4912345678904')
+      ? ok('公開のページは iframe に入れられスクリプトを持たず、データはどこからでも読め、承認した項目だけを出す')
+      : ng('公開のページかデータが違う', `${page.status} ${page.headers.get('content-security-policy')} ${JSON.stringify(pubJson)}`);
+    await call('a', '/v1/inventory/moves', { method: 'POST', body: JSON.stringify({ kind: 'in', itemId, qty: 2 }) }, 'member');
+    await sleep(1800);
+    const pubJson2 = await (await fetch(`${API}/v1/public/inventory/${pubKey}.json`)).json().catch(() => ({}));
+    await call('a', '/v1/inventory/moves', { method: 'POST', body: JSON.stringify({ kind: 'out', itemId, qty: 2, reason: '確認の戻し' }) }, 'member');
+    pubJson2.items?.[0]?.available === Math.max(0, pubAvail + 2) ? ok('数が変わると、公開の中身を作り直す') : ng('公開の数が変わらない', JSON.stringify(pubJson2));
+    const pubStop = await call('a', '/v1/inventory/publication/stop', { method: 'POST' });
+    const goneP = await fetch(`${API}/v1/public/inventory/${pubKey}`);
+    const goneJ = await fetch(`${API}/v1/public/inventory/${pubKey}.json`);
+    const badKeyP = await fetch(`${API}/v1/public/inventory/${'x'.repeat(32)}.json`);
+    const { rows: pubAudit } = await owner.query(`select action from audit_events where tenant_id = 't-alpha' and action like 'inventory.publication.%' and occurred_at >= $1`, [startedAt]);
+    pubStop.status === 200 && goneP.status === 404 && /表示できません/.test(await goneP.text()) && goneJ.status === 404 && badKeyP.status === 404
+      && pubAudit.some((r) => r.action === 'inventory.publication.approve') && pubAudit.some((r) => r.action === 'inventory.publication.stop')
+      ? ok('止めた公開と知らない鍵は同じ 404 で、承認と停止は監査ログに残る')
+      : ng('止めた公開が出ている', `${pubStop.status} ${goneP.status} ${goneJ.status} ${badKeyP.status} ${JSON.stringify(pubAudit)}`);
+
     // 左のメニュー（第6.1.1節）と入り切り（第12.13節）
     const { body: mySettings } = await call('a', '/v1/me/settings', {}, 'member');
     const pin = await call('a', '/v1/me/settings/menu', { method: 'PUT', body: JSON.stringify({ ...mySettings.menu, pinned: ['inventory'] }) }, 'member');
@@ -3996,6 +4033,7 @@ console.log('\n■ 60. 在庫管理（内蔵の拡張。第29章、ADR-0045）')
     await owner.query(`delete from inventory_moves where item_id in (${items})`);
     await owner.query(`delete from inventory_lots where item_id in (${items})`);
     await owner.query(`delete from inventory_codes where item_id in (${items})`);
+    await owner.query(`delete from inventory_publications where tenant_id = 't-alpha' and approved_at >= $1`, [startedAt]);
     await owner.query(`delete from inventory_items where name like '${tag}%'`);
     // 確認の間にできた場所（既定の「倉庫」を含む）も消す。在庫の残る場所は残す
     await owner.query(`delete from inventory_locations l where tenant_id in ('t-alpha', 't-beta') and (warehouse = $1 or warehouse = $3 or created_at >= $2)

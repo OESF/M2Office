@@ -254,3 +254,53 @@ export interface InventoryBooking {
   lines: InventoryReservationLine[];
   updatedAt: string;
 }
+
+/** Web への公開に出せる項目（第29.12.1節）。名前と状態はいつも出す。 */
+export type InventoryPublicField = 'category' | 'price';
+
+/** 管理者が承認する公開の中身（第29.12節）。 */
+export interface InventoryPublicationScope {
+  /** 公開する品目。承認のあとに足した品目は、承認し直すまで出さない。 */
+  itemIds: string[];
+  fields: InventoryPublicField[];
+  /** 使える数を出すか。`false` なら状態（在庫あり・残りわずか・終了）だけ。 */
+  showCount: boolean;
+}
+
+/** 公開する状態。 */
+export type InventoryPublicStatus = 'in' | 'low' | 'out';
+
+/** 公開する状態の呼び方（第29.12節）。 */
+export const INVENTORY_PUBLIC_STATUS_LABELS: Record<InventoryPublicStatus, string> = { in: '在庫あり', low: '残りわずか', out: '終了' };
+
+/** 公開の 1 行。承認した項目だけが入る。 */
+export interface InventoryPublicRow {
+  name: string;
+  category?: string;
+  price?: number;
+  priceTaxIncluded?: boolean;
+  /** 使える数（数を出す会社だけ。0 未満は 0）。 */
+  available?: number;
+  unit?: string;
+  status: InventoryPublicStatus;
+}
+
+/** 作り直して置いておく公開の中身。埋め込みのページと公開のデータはこれだけを返す。 */
+export interface InventoryPublicSnapshot {
+  generatedAt: string;
+  showCount: boolean;
+  items: InventoryPublicRow[];
+}
+
+/** 会社の公開の状態（管理者に見せる）。 */
+export interface InventoryPublication {
+  scope: InventoryPublicationScope;
+  /** 承認した管理者。 */
+  approvedBy: string;
+  approvedByName?: string;
+  approvedAt: string;
+  status: 'live' | 'stopped';
+  /** 公開の URL の鍵。 */
+  key: string;
+  snapshotAt: string | null;
+}

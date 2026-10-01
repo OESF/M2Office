@@ -140,6 +140,8 @@ const ACTION_LABELS: Record<string, string> = {
   'inventory.export': '在庫を書き出した',
   'inventory.adjust': '在庫を調整した',
   'inventory.item.stop': '在庫の品目を止めた',
+  'inventory.publication.approve': '在庫の Web への公開を承認した',
+  'inventory.publication.stop': '在庫の Web への公開を止めた',
   'inventory.item.resume': '在庫の品目を使うに戻した',
   'inventory.location.remove': '在庫の場所を外した',
   'inventory.count.start': '棚卸しを始めた',

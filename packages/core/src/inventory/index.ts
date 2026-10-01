@@ -5,7 +5,7 @@
  */
 
 export { PostgresInventoryStore, MemoryInventoryStore } from './store.js';
-export type { InventoryStore, ItemRecord, NewMove, StockRecord, LotRecord, MoveQuery, CountEntry, CountLineRecord, BookingRecord, ReservationRecord, MenuItemRecord, BookingQuery } from './store.js';
+export type { InventoryStore, PublicationRecord, ItemRecord, NewMove, StockRecord, LotRecord, MoveQuery, CountEntry, CountLineRecord, BookingRecord, ReservationRecord, MenuItemRecord, BookingQuery } from './store.js';
 export { parseCode, gs1Date, validGtin, type ParsedCode } from './gs1.js';
 export {
   InventoryService, inventoryAccess, formatQty, toNumber, toDate, splitUnit, UNIT_IS_NAME, MOVE_KIND_LABELS, DEFAULT_WAREHOUSE, IMPORT_MAX_ROWS,
@@ -22,3 +22,4 @@ export {
   InventoryBookings, STANDARD_BOOKING_MAPPING, BOOKING_PAYLOAD_MAX_BYTES, hookHash, menuKey, pick, toInstant, toBookingEvent, skeleton,
   type InventoryBookingsDeps, type BookingEvent, type IngestResult,
 } from './bookings.js';
+export { InventoryPublisher, buildPublicSnapshot, renderPublicPage, PUBLICATION_KEY, type InventoryPublisherDeps, type PublicationView } from './publication.js';

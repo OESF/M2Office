@@ -301,6 +301,8 @@ export class InventoryBookings {
       }
     }
     booking = (await this.deps.store.getBooking(tenantId, id))!;
+    // 取り置きは使える数を変える（Web への公開を作り直す。第29.12.1節）
+    this.deps.service.touch(tenantId);
     return booking;
   }
 
@@ -413,6 +415,7 @@ export class InventoryBookings {
     const at = new Date().toISOString();
     for (const l of b.lines.filter((x) => x.status === 'held')) await this.deps.store.setReservationStatus(tenantId, l.id, 'cancelled', at);
     await this.deps.store.updateBooking(tenantId, bookingId, { status: 'cancelled', at });
+    this.deps.service.touch(tenantId);
     return (await this.deps.store.getBooking(tenantId, bookingId))!;
   }
 

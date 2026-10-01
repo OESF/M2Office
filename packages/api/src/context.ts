@@ -15,7 +15,7 @@ import {
   TenantAiResolver, platformAi, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, ConnectionCredentials, type ConnectionAuthProvider,
   CardService, PostgresContactStore, cardsAccess, type ContactStore, BulkMailService, PostgresBulkMailStore, NoticeService, PostgresNoticeStore,
-  InventoryService, InventoryWatch, InventoryBookings, PostgresInventoryStore, inventoryAccess, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
+  InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, PostgresInventoryStore, inventoryAccess, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
   type SecretBox, type GeminiModels,
   type FileStore, type TenantExtensions, type HelpArticle, type ManualMeta, type LlmProvider, type Logger, type Repository, type WorkspaceConnector,
 } from '@m2office/core';
@@ -111,6 +111,8 @@ export interface AppDeps {
     service: InventoryService;
     /** 予約との引き当て（第29.13節）。 */
     bookings: InventoryBookings;
+    /** Web への公開（第29.12節）。 */
+    publisher: InventoryPublisher;
     access(tenantId: string, userId: string): Promise<InventorySettings | null>;
   };
   /**
@@ -229,17 +231,21 @@ export function buildDeps(): AppDeps {
   // 在庫管理（内蔵の拡張。仕様書 第29章）。在庫は会社で共有する
   // 数が変わったら見張りが見直す（第29.14節）。見張りは処理を使うため、後から結び付ける
   let inventoryWatch: InventoryWatch | null = null;
+  // 在庫が変わったら Web への公開を作り直す（第29.12.1節）。公開は処理を使うため、後から結び付ける
+  let inventoryPublisher: InventoryPublisher | null = null;
   const inventoryService = new InventoryService({
     store: new PostgresInventoryStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
     repo, llm: (tenantId) => ai.llmFor(tenantId),
     onChanged: async (tenantId, itemIds) => inventoryWatch?.afterMoves(tenantId, itemIds),
+    onPublicChange: (tenantId) => inventoryPublisher?.changed(tenantId),
   });
+  inventoryPublisher = new InventoryPublisher({ store: inventoryService.store, service: inventoryService, repo, logger: log });
   // 予約との引き当て（第29.13節）
   const inventoryBookings = new InventoryBookings({
     store: inventoryService.store, service: inventoryService, repo, llm: (tenantId) => ai.llmFor(tenantId),
   });
   inventoryWatch = new InventoryWatch({ repo, service: inventoryService, bookings: inventoryBookings, logger: log });
-  const inventory = { service: inventoryService, bookings: inventoryBookings, access: inventoryAccess(repo) };
+  const inventory = { service: inventoryService, bookings: inventoryBookings, publisher: inventoryPublisher, access: inventoryAccess(repo) };
   // 店頭サイネージ（第31章）。秘書が割り込みを出すため、秘書より先に作る。画面と素材は会社で共有する
   const signageService = new SignageService({ store: new PostgresSignageStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), repo, files });
   const signage = { service: signageService, interrupts: new SignageInterrupts({ service: signageService, repo, llm: (tenantId) => ai.llmFor(tenantId) }), access: signageAccess(repo) };

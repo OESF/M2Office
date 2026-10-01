@@ -14,6 +14,7 @@ import type { InventoryItem, InventoryItemView, InventoryLocation, InventoryMove
 import { api, describeError, type InventoryDetail, type InventoryList } from './api.js';
 import { Stocktake } from './Stocktake.js';
 import { BookingsPanel, OrderPanel, SlipResultPanel, SuppliersPanel } from './InventoryOrders.js';
+import { PublishPanel } from './InventoryPublish.js';
 import type { InventorySlipResult } from './api.js';
 
 const KIND_LABELS: Record<InventoryMoveKind, string> = { in: '入庫', out: '使用', transfer: '移動', adjust: '調整' };
@@ -68,8 +69,8 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
   const [message, setMessage] = useState<string | null>(null);
   const [adding, setAdding] = useState<{ name: string; code: string } | null>(null);
   // 一覧の上に開く欄（1 つずつ）
-  const [panel, setPanel] = useState<'places' | 'orders' | 'suppliers' | 'bookings' | null>(null);
-  const toggle = (p: 'places' | 'orders' | 'suppliers' | 'bookings') => setPanel((cur) => (cur === p ? null : p));
+  const [panel, setPanel] = useState<'places' | 'orders' | 'suppliers' | 'bookings' | 'publish' | null>(null);
+  const toggle = (p: 'places' | 'orders' | 'suppliers' | 'bookings' | 'publish') => setPanel((cur) => (cur === p ? null : p));
   const [slip, setSlip] = useState<InventorySlipResult | null>(null);
   const slipPicker = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
@@ -159,6 +160,7 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
         </button>
         <button className={panel === 'suppliers' ? 'btn' : 'btn ghost'} onClick={() => toggle('suppliers')}>仕入先</button>
         {list?.settings.features.reserve && <button className={panel === 'bookings' ? 'btn' : 'btn ghost'} onClick={() => toggle('bookings')}>取り置き</button>}
+        {list?.admin && list.settings.features.publish && <button className={panel === 'publish' ? 'btn' : 'btn ghost'} onClick={() => toggle('publish')}>Web への公開</button>}
         <button className="btn ghost" disabled={busy} onClick={() => slipPicker.current?.click()}>納品書から入庫</button>
         <input ref={slipPicker} type="file" hidden accept="image/png,image/jpeg,image/webp,application/pdf"
           onChange={(e) => void readSlipFile(e.target.files?.[0])} />
@@ -170,6 +172,7 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
       {panel === 'orders' && <OrderPanel onOpenItem={(id) => onOpen(id)} />}
       {panel === 'suppliers' && <SuppliersPanel />}
       {panel === 'bookings' && list && <BookingsPanel items={list.items} onChanged={load} />}
+      {panel === 'publish' && list && <PublishPanel items={list.items} />}
       {slip && list && <SlipResultPanel result={slip} items={list.items} onRecorded={load} onClose={() => setSlip(null)} />}
       {mobileQr && (
         <div className="card inventory-new mobile-qr">

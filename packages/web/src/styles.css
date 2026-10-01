@@ -1663,3 +1663,26 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .tool-list[open] > summary { margin-bottom: calc(4px * var(--space-scale)); }
 .tool-table th.nowrap, .tool-table td:nth-child(2), .tool-table td:nth-child(3) { white-space: nowrap; width: 1%; }
 .tool-table .tool-desc { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* 在庫の Web への公開（仕様書 第29.12.1節）。左に品目を選び、右に公開されるとおりの見本を出す */
+.inventory-publish { display: flex; flex-direction: column; gap: calc(10px * var(--space-scale)); }
+.publish-head { display: flex; flex-wrap: wrap; align-items: center; gap: calc(8px * var(--space-scale)); }
+.publish-head h3 { margin: 0; }
+.publish-options { display: flex; flex-wrap: wrap; align-items: center; gap: calc(12px * var(--space-scale)); }
+.publish-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: calc(12px * var(--space-scale)); }
+.publish-items { border: 1px solid var(--line); border-radius: 6px; padding: calc(6px * var(--space-scale)) calc(10px * var(--space-scale)); min-width: 0; }
+.publish-items-head { display: flex; align-items: center; gap: calc(10px * var(--space-scale)); padding-bottom: calc(4px * var(--space-scale)); border-bottom: 1px solid var(--line); }
+.publish-items ul { list-style: none; margin: 0; padding: calc(4px * var(--space-scale)) 0 0; max-height: 300px; overflow-y: auto; }
+.publish-items li .check { display: flex; align-items: baseline; gap: calc(6px * var(--space-scale)); padding: 2px 0; }
+.publish-preview { border: 1px dashed var(--line); border-radius: 6px; padding: calc(6px * var(--space-scale)) calc(10px * var(--space-scale)); max-height: 340px; overflow-y: auto; min-width: 0; }
+.publish-preview h4 { margin: calc(8px * var(--space-scale)) 0 2px; font-size: calc(12px * var(--font-scale)); color: var(--muted); }
+.publish-status { white-space: nowrap; font-weight: 600; }
+.publish-status.in { color: var(--ok); }
+.publish-status.low { color: var(--warn); }
+.publish-status.out { color: var(--danger); }
+.publish-actions { display: flex; flex-wrap: wrap; gap: calc(8px * var(--space-scale)); }
+.publish-urls { display: flex; flex-direction: column; gap: calc(6px * var(--space-scale)); }
+.publish-urls label { display: flex; flex-direction: column; gap: 2px; }
+.copy-row { display: flex; gap: calc(6px * var(--space-scale)); }
+.copy-row input { flex: 1; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: calc(12px * var(--font-scale)); }
+@media (max-width: 720px) { .publish-body { grid-template-columns: 1fr; } }
