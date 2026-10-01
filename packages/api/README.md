@@ -321,7 +321,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `PUT /v1/admin/compartments/:id/assignment` | 管理者: 区画に入れるグループと人を置き換える。入れる人が変われば記録し、管理者全員に通知する |
 | `GET /v1/admin/access` | 管理者: 業務・拡張機能ごとの利用範囲と、選択肢（グループ・利用者・対象） |
 | `PUT /v1/admin/access/:target` | 管理者: 1 つの業務（または拡張機能）の利用範囲。本文 `{ scope: "all" \| { groups, users } }` |
-| `GET /v1/admin/dashboard/live` | 管理者: ダッシュボードの「いま」（数値・業務の流れ・承認の滞留・出来事・本人と秘書の 1 組）。中身は返さない |
+| `GET /v1/admin/dashboard/live` | 管理者: ダッシュボードの「いま」（数値・業務の流れ・承認の滞留・出来事・本人と秘書の 1 組）。業務の状態の各行にまとまり（`group`。拡張機能か業務の分野）を付ける。中身は返さない |
 | `GET /v1/admin/dashboard/people/:userId/photo` | 管理者: 人の状態に添える本人のプロフィール写真。**個人名で表示する会社の、停止していない利用者のものだけ**（仕様書 第6.7.4.4節） |
 | `GET /v1/admin/dashboard/people/:userId/secretary-avatar` | 管理者: その人の秘書のアバター（本人が上げた画像）。**本人が個人設定に登録した画像だけ**を返し、ファイルの ID は受け取らない。同じく個人名で表示する会社だけ |
 | `GET /v1/admin/dashboard/stats?days=1\|7\|30` | 管理者: ダッシュボードの集計（日ごと・時間帯・業務ごと・秘書の層・削減時間） |

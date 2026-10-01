@@ -8,7 +8,7 @@
  */
 
 import { Hono } from 'hono';
-import { isValidAvatar, type Approval, type AuditEvent, type Job, type Run, type User } from '@m2office/shared';
+import { AGENT_GROUP_LABELS, isValidAvatar, type AgentDefinition, type Approval, type AuditEvent, type Job, type Run, type User } from '@m2office/shared';
 import {
   ACTIVE_WINDOW_MIN, agentFace, buildPresence, summarizePresence, stepLabel,
   type TenantExtensions,
@@ -304,7 +304,7 @@ export function dashboardRoute(deps: AppDeps) {
       const busy = byAgent.get(def.id) ?? { running: 0, awaiting: 0, queued: 0 };
       const t = todayByAgent.get(def.id) ?? { runs: 0, failed: 0 };
       return {
-        agentId: def.id, name: def.name, face: agentFace(def),
+        agentId: def.id, name: def.name, face: agentFace(def), group: agentGroup(view, def),
         ...busy, todayRuns: t.runs, todayFailed: t.failed,
       };
     });
@@ -492,6 +492,18 @@ function approverText(a: Approval, nameOf: (id: string) => string): string {
 function names(users: User[]): (id: string | null | undefined) => string {
   const m = new Map(users.map((u) => [u.id, u.displayName]));
   return (id) => (id ? m.get(id) ?? '不明な利用者' : '—');
+}
+
+/**
+ * 業務のまとまり（仕様書 第6.7.4.2.1節、ADR-0061）。拡張機能の業務はその拡張機能、公式の業務は分野で決める。
+ *
+ * @returns 分野の名前が無い公式の業務は、その業務だけのまとまり（画面は業務 1 つの囲みで出す）
+ */
+function agentGroup(view: TenantExtensions, def: AgentDefinition): { id: string; name: string } {
+  const ext = view.entryOf(def.id)?.pkg;
+  if (ext) return { id: `ext:${ext.manifest.id}`, name: ext.manifest.name };
+  const label = AGENT_GROUP_LABELS[def.category];
+  return label ? { id: `cat:${def.category}`, name: label } : { id: `agent:${def.id}`, name: def.name };
 }
 
 function nameOfAgent(view: TenantExtensions, id: string): string {

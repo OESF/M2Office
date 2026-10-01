@@ -230,3 +230,19 @@ export function fileInputKey(def: Pick<AgentDefinition, 'inputs'>): string | nul
   return Object.entries(props).find(([, p]) => p?.format === 'file')?.[0] ?? null;
 }
 
+
+/**
+ * ダッシュボードの「業務の状態」で、公式の業務をまとめる分野の名前（仕様書 第6.7.4.2.1節、ADR-0061）。
+ *
+ * @remarks
+ * 鍵はエージェント定義の `category`。ここに無い分野の公式の業務は、業務 1 つの囲みで出す。
+ * 拡張機能の業務は分野ではなく、その拡張機能でまとめる
+ */
+export const AGENT_GROUP_LABELS: Readonly<Record<string, string>> = {
+  mail: 'メール',
+  calendar: '予定',
+  meeting: '会議',
+  briefing: 'ブリーフ',
+  document: '資料',
+  knowledge: '知識と調べもの',
+};

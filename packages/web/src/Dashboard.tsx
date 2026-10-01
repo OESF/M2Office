@@ -7,10 +7,11 @@
  * @see 仕様書 第6.7節 ダッシュボード
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { api, describeError, type ChecklistItem, type DashboardLive, type DashboardStats } from './api.js';
 import { HelpTip, openHelp } from './help.js';
 import { Icon } from './nav.js';
+import { busyOf, groupAgents, type AgentGroupView, type AgentLoad } from './agent-groups.js';
 
 /** 「いま」を取り直す間隔（ミリ秒）。 */
 const LIVE_INTERVAL_MS = 5000;
@@ -330,11 +331,13 @@ function Live({ board = false }: { board?: boolean }) {
 }
 
 /**
- * 業務エージェントごとの受け持ち（仕様書 第6.7.4.2節）。
+ * 業務エージェントの受け持ち（仕様書 第6.7.4.2節）。拡張機能と業務の分野ごとのまとまりで並べる（第6.7.4.2.1節）。
  *
  * @remarks
  * **動いていない業務も「待機」として出す。** 動いているものだけを並べると、
  * 導入したのに誰にも使われていない業務があることに気づけない。
+ * 業務が増えても並ぶ数を増やさないよう、まとまりに 1 つの囲みを出し、
+ * 動いている業務と今日失敗した業務だけを囲みの中に出す。中の業務が 1 つだけなら、業務 1 つの囲みで出す。
  */
 function Agents({ data, board = false }: { data: DashboardLive; board?: boolean }) {
   if (data.agents.length === 0) return null;
@@ -344,37 +347,85 @@ function Agents({ data, board = false }: { data: DashboardLive; board?: boolean 
         業務の状態{' '}
         {!board && (
           <HelpTip article="admin-dashboard">
-            使える業務ごとに、いま何件を受け持っているかを出します。どれも 0 なら「待機」です。
+            業務を、拡張機能や分野ごとにまとめて、いま何件を受け持っているかを出します。どれも 0 なら「待機」です。
           </HelpTip>
         )}
       </h3>
       <div className="agent-grid">
-        {data.agents.map((a) => {
-          const busy = a.running + a.awaiting + a.queued;
-          return (
-            <div className={`agent-state${busy > 0 ? ' busy' : ''}`} key={a.agentId}>
-              <AgentFace face={a.face} busy={busy > 0} />
-              <div className="agent-body">
-                <div className="agent-name">{a.name}</div>
-                <div className="agent-now">
-                  {busy === 0 ? <span className="muted">待機</span> : (
-                    <>
-                      {a.running > 0 && <span className="chip current">実行中 {a.running}</span>}
-                      {a.awaiting > 0 && <span className="chip waiting">承認待ち {a.awaiting}</span>}
-                      {a.queued > 0 && <span className="chip todo">待ち行列 {a.queued}</span>}
-                    </>
-                  )}
-                </div>
-                <div className="muted small">
-                  今日 {a.todayRuns} 件
-                  {a.todayFailed > 0 && <span className="warn-text">（失敗 {a.todayFailed}）</span>}
-                </div>
-              </div>
-            </div>
-          );
-        })}
+        {groupAgents(data.agents).map((g) => (g.items.length === 1
+          ? <AgentState key={g.id} name={g.items[0]!.name} load={g.items[0]!} face={g.face} />
+          : <AgentGroup key={g.id} group={g} board={board} />))}
       </div>
     </section>
+  );
+}
+
+/** 業務 1 つ、またはまとまり 1 つの囲み。 */
+function AgentState({ name, load, face, children }: {
+  name: ReactNode; load: Omit<AgentLoad, 'agentId' | 'name' | 'face'>; face: number; children?: ReactNode;
+}) {
+  const busy = busyOf(load) > 0;
+  return (
+    <div className={`agent-state${busy ? ' busy' : ''}`}>
+      <AgentFace face={face} busy={busy} />
+      <div className="agent-body">
+        <div className="agent-name">{name}</div>
+        <div className="agent-now"><LoadChips load={load} /></div>
+        <div className="muted small">
+          今日 {load.todayRuns} 件
+          {load.todayFailed > 0 && <span className="warn-text">（失敗 {load.todayFailed}）</span>}
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/** 受け持ちの件数。どれも 0 なら「待機」。 */
+function LoadChips({ load }: { load: { running: number; awaiting: number; queued: number } }) {
+  if (busyOf(load) === 0) return <span className="muted">待機</span>;
+  return (
+    <>
+      {load.running > 0 && <span className="chip current">実行中 {load.running}</span>}
+      {load.awaiting > 0 && <span className="chip waiting">承認待ち {load.awaiting}</span>}
+      {load.queued > 0 && <span className="chip todo">待ち行列 {load.queued}</span>}
+    </>
+  );
+}
+
+/**
+ * まとまり 1 つの囲み（第6.7.4.2.1節）。
+ *
+ * @remarks
+ * 動いている業務と今日失敗した業務は、開かなくても名前と受け持ちで出す。
+ * 中の業務をすべて見る操作は、掛け通しの画面（`board`）では出さない（触らずに眺める画面のため）。
+ */
+function AgentGroup({ group, board }: { group: AgentGroupView; board: boolean }) {
+  return (
+    <AgentState name={<>{group.name} <span className="muted small">{group.items.length} 業務</span></>} load={group} face={group.face}>
+      {group.active.length > 0 && <AgentMembers items={group.active} />}
+      {!board && (
+        <details className="agent-all">
+          <summary>中の業務</summary>
+          <AgentMembers items={group.items} />
+        </details>
+      )}
+    </AgentState>
+  );
+}
+
+/** まとまりの中の業務の行（名前・受け持ち・今日の失敗）。 */
+function AgentMembers({ items }: { items: AgentLoad[] }) {
+  return (
+    <ul className="agent-members">
+      {items.map((a) => (
+        <li key={a.agentId}>
+          <span className="agent-member-name">{a.name}</span>
+          <span className="agent-now"><LoadChips load={a} /></span>
+          {a.todayFailed > 0 && <span className="warn-text small">失敗 {a.todayFailed}</span>}
+        </li>
+      ))}
+    </ul>
   );
 }
 

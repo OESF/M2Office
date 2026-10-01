@@ -266,7 +266,7 @@ export const SLIDES: AgentDefinition = {
   id: 'slides',
   version: 1,
   name: 'スライド作成',
-  category: 'research',
+  category: 'document',
   description: 'テーマを Web で調べ、出典つきのスライド（Google スライド）にまとめます。会社のテンプレートがあればその見た目で作ります',
   locale: 'ja-JP',
   compartment: null,
