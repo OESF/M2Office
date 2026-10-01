@@ -1,6 +1,6 @@
 {
   "name": "@m2office/api",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "private": true,
   "type": "module",
   "description": "公開 API。画面も外部アプリも同じ API を経由する",

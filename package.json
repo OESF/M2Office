@@ -1,6 +1,6 @@
 {
   "name": "m2office",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "private": true,
   "type": "module",
   "description": "中小企業向け AI エージェントシステム",
