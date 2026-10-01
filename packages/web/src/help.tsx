@@ -13,6 +13,7 @@ import {
 import { parseInline, parseMarkdown, type MdList } from './markdown.js';
 import { api, describeError, type AgentHelpView, type HelpArticleMeta, type HelpScope } from './api.js';
 import { Icon } from './nav.js';
+import { allBranches, defaultOpenKeys, loadHelpState, openTo, saveHelpState } from './help-state.js';
 
 /** ヘルプセンターで記事を開く合図の名前。 */
 const OPEN_EVENT = 'm2o:open-help';
@@ -175,19 +176,22 @@ function buildTree(items: HelpArticleMeta[], manuals: { id: string; title: strin
   ].filter((n) => n.items.length > 0 || (n.nodes?.length ?? 0) > 0);
 }
 
-/** 枝がこの記事を含むか。 */
-const holds = (n: TreeNode, id: string | null): boolean => !!id && (n.items.some((i) => i.id === id) || (n.nodes ?? []).some((c) => holds(c, id)));
-
-/** 木の枝。開いている記事を含む枝は開く。 */
-function TreeBranch({ node, current, onOpen, admin, depth = 0 }: {
-  node: TreeNode; current: string | null; onOpen: (id: string) => void; admin: boolean; depth?: number;
+/**
+ * 木の枝。開け閉めはヘルプセンターが持ち、端末に覚える（第6.10.7節）。
+ *
+ * @param openKeys 開いている枝の鍵
+ */
+function TreeBranch({ node, current, onOpen, admin, openKeys, onToggle, depth = 0 }: {
+  node: TreeNode; current: string | null; onOpen: (id: string) => void; admin: boolean;
+  openKeys: ReadonlySet<string>; onToggle: (key: string) => void; depth?: number;
 }) {
-  const [open, setOpen] = useState(!node.closed || holds(node, current));
-  useEffect(() => { if (holds(node, current)) setOpen(true); }, [current]); // eslint-disable-line react-hooks/exhaustive-deps
-  const branches = (node.nodes ?? []).map((c) => <TreeBranch key={c.key} node={c} current={current} onOpen={onOpen} admin={admin} depth={depth + 1} />);
+  const open = openKeys.has(node.key);
+  const branches = (node.nodes ?? []).map((c) => (
+    <TreeBranch key={c.key} node={c} current={current} onOpen={onOpen} admin={admin} openKeys={openKeys} onToggle={onToggle} depth={depth + 1} />
+  ));
   return (
     <li className={`help-branch depth-${depth}`}>
-      <button className="help-branch-head" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <button className="help-branch-head" aria-expanded={open} onClick={() => onToggle(node.key)}>
         <Icon name={open ? 'caret-down' : 'caret-right'} />{node.label}
       </button>
       {open && (
@@ -230,13 +234,23 @@ export function HelpCenter({ initial, back, onReplayTour, onArticle, scope = 'wo
 }) {
   const [items, setItems] = useState<HelpArticleMeta[]>([]);
   const [manuals, setManuals] = useState<{ id: string; title: string }[]>([]);
-  const [articleId, setArticleId] = useState<string | null>(initial);
+  // 開いた枝と開いていた記事を端末に覚え、開き直すと前の状態で開く（第6.10.7節）。記事を指定して開いたときはその記事
+  const [stored] = useState(() => loadHelpState(scope));
+  const restored = useRef(!initial && !!stored.article);
+  const [articleId, setArticleId] = useState<string | null>(initial ?? stored.article);
+  const [openKeys, setOpenKeys] = useState<string[] | null>(stored.open);
   const [q, setQ] = useState('');
   const [results, setResults] = useState<{ id: string; title: string; excerpt: string }[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => { api.help.list(scope).then((r) => { setItems(r.items); setManuals(r.manuals ?? []); }).catch((e) => setError(describeError(e))); }, [scope]);
-  useEffect(() => { setArticleId(initial); }, [initial]);
+  // 指定（URL の記事）が変わったときだけ従う。開いた直後は、指定が無ければ覚えていた記事を残す
+  const lastInitial = useRef(initial);
+  useEffect(() => {
+    if (lastInitial.current === initial) return;
+    lastInitial.current = initial;
+    setArticleId(initial);
+  }, [initial]);
   useEffect(() => { onArticle?.(articleId); }, [articleId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function search() {
@@ -245,6 +259,25 @@ export function HelpCenter({ initial, back, onReplayTour, onArticle, scope = 'wo
   }
   const open = (id: string) => { setResults(null); setArticleId(id); };
   const tree = buildTree(items, manuals, scope);
+  const openSet = new Set(openKeys ?? defaultOpenKeys(tree));
+  const toggle = (key: string) => setOpenKeys((prev) => {
+    const base = prev ?? defaultOpenKeys(tree);
+    return base.includes(key) ? base.filter((k) => k !== key) : [...base, key];
+  });
+  // 開いている記事を含む枝を開き足す。覚えていた記事が無くなっていたら目次を開く
+  useEffect(() => {
+    if (items.length === 0) return;
+    if (restored.current) {
+      restored.current = false;
+      if (articleId && !items.some((i) => i.id === articleId)) { setArticleId(null); return; }
+    }
+    setOpenKeys((prev) => {
+      const base = prev ?? defaultOpenKeys(tree);
+      const next = openTo(base, tree, articleId);
+      return next === base ? prev : next;
+    });
+  }, [articleId, items]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { saveHelpState(scope, { open: openKeys, article: articleId }); }, [scope, openKeys, articleId]);
   const admin = scope === 'admin';
   const glossary = items.find((i) => i.category === 'glossary');
   const contact = items.find((i) => i.category === 'contact');
@@ -260,8 +293,12 @@ export function HelpCenter({ initial, back, onReplayTour, onArticle, scope = 'wo
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) void search(); }} />
           </div>
           {error && <p className="error small">{error}</p>}
+          <div className="help-tree-tools">
+            <button className="help-small-link" onClick={() => setOpenKeys(allBranches(tree).map((n) => n.key))}>すべて開く</button>
+            <button className="help-small-link" onClick={() => setOpenKeys([])}>すべて閉じる</button>
+          </div>
           <ul className="help-branches">
-            {tree.map((n) => <TreeBranch key={n.key} node={n} current={articleId} onOpen={open} admin={admin} />)}
+            {tree.map((n) => <TreeBranch key={n.key} node={n} current={articleId} onOpen={open} admin={admin} openKeys={openSet} onToggle={toggle} />)}
           </ul>
           {!admin && onReplayTour && <button className="help-small-link" onClick={onReplayTour}>はじめの案内をもう一度見る</button>}
           {(glossary || contact) && (
