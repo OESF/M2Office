@@ -8,11 +8,22 @@
  * @see 仕様書 第12.11.3節 呼び出し
  */
 
-/** 1 回の呼び出しの時間の上限（仕様書 第12.11.3節）。 */
+/** 接続の始まりと道具の一覧の時間の上限（仕様書 第12.11.3節）。 */
 export const MCP_TIMEOUT_MS = 60_000;
 
-/** ツールの応答として推論に渡す量の上限（文字数）。超えた分は切り詰める。 */
-export const MCP_RESULT_LIMIT = 6000;
+/**
+ * 道具の呼び出し（`tools/call`）の時間の上限（仕様書 第12.11.3節、第 0.207.2 版）。
+ *
+ * @remarks 文献を調べて考える道具（医学の根拠を調べるものなど）は、答えまでに 1 分を超えることがあるため、呼び出しだけを長くする
+ */
+export const MCP_CALL_TIMEOUT_MS = 180_000;
+
+/**
+ * ツールの応答として推論に渡す量の上限（文字数）。超えた分は切り詰め、切り詰めたことを書き添える。
+ *
+ * @remarks 第 0.207.2 版で 6,000 字から広げた（長い答えをそのまま返す道具で、後ろが切れないように）
+ */
+export const MCP_RESULT_LIMIT = 20_000;
 
 import type { ArgSpec, ToolArgsSchema } from '../tools/registry.js';
 
@@ -62,7 +73,7 @@ interface RpcResponse {
  * サーバがセッション ID を返した場合だけ、それを続く要求に付ける。
  */
 export class HttpMcpClient implements McpClient {
-  constructor(private readonly timeoutMs = MCP_TIMEOUT_MS) {}
+  constructor(private readonly timeoutMs = MCP_TIMEOUT_MS, private readonly callTimeoutMs = MCP_CALL_TIMEOUT_MS) {}
 
   async listTools(url: string, auth?: Record<string, string>) {
     try {
@@ -88,7 +99,8 @@ export class HttpMcpClient implements McpClient {
   async callTool(url: string, name: string, args: Record<string, unknown>, auth?: Record<string, string>): Promise<McpCallResult> {
     try {
       const session = await this.initialize(url, auth);
-      const res = await this.rpc(url, 'tools/call', { name, arguments: args }, session, auth);
+      // 道具の呼び出しだけは長く待つ（答えまでに時間のかかる道具のため）
+      const res = await this.rpc(url, 'tools/call', { name, arguments: args }, session, auth, this.callTimeoutMs);
       const text = textOf(res);
       if (res.isError === true) return { ok: false, error: text || 'MCP サーバがエラーを返しました' };
       return text.length > MCP_RESULT_LIMIT
@@ -110,8 +122,8 @@ export class HttpMcpClient implements McpClient {
     return session;
   }
 
-  private async rpc(url: string, method: string, params: unknown, session: string | null, auth?: Record<string, string>) {
-    const { body } = await this.post(url, { jsonrpc: '2.0', id: 1, method, params }, session, true, auth);
+  private async rpc(url: string, method: string, params: unknown, session: string | null, auth?: Record<string, string>, timeoutMs = this.timeoutMs) {
+    const { body } = await this.post(url, { jsonrpc: '2.0', id: 1, method, params }, session, true, auth, timeoutMs);
     if (!body) throw new Error('MCP サーバから応答がありません');
     if (body.error) throw new Error(`MCP のエラー: ${body.error.message}`);
     return body.result ?? {};
@@ -124,6 +136,7 @@ export class HttpMcpClient implements McpClient {
    */
   private async post(
     url: string, payload: Record<string, unknown>, session: string | null, expectBody = true, auth?: Record<string, string>,
+    timeoutMs = this.timeoutMs,
   ): Promise<{ headers: Headers; body: RpcResponse | null }> {
     const res = await fetch(url, {
       method: 'POST',
@@ -134,7 +147,7 @@ export class HttpMcpClient implements McpClient {
         ...(auth ?? {}),
       },
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(this.timeoutMs),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (!res.ok && res.status !== 202) {
       if (res.status === 401) throw new Error('認証が必要です（401）');

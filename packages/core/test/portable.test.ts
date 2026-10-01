@@ -240,13 +240,13 @@ test('公式の拡張機能と同じ ID のファイルは取り込めない', a
 // ---- MCP の呼び出し（第12.11.3節） ----
 
 /** SSE で応答する、テスト用の MCP サーバ。 */
-async function mcpServer(handle: (method: string, params: any) => unknown) {
+async function mcpServer(handle: (method: string, params: any) => unknown | Promise<unknown>) {
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     let body = '';
     for await (const chunk of req) body += chunk;
     const msg = JSON.parse(body);
     if (msg.id === undefined) { res.writeHead(202).end(); return; }
-    const result = handle(msg.method, msg.params);
+    const result = await handle(msg.method, msg.params);
     res.writeHead(200, { 'content-type': 'text/event-stream' });
     res.end(`event: message\ndata: ${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result })}\n\n`);
   });
@@ -260,7 +260,7 @@ test('MCP サーバのツールの一覧と呼び出し（SSE の応答）を読
     if (method === 'initialize') return { protocolVersion: '2025-06-18', capabilities: {} };
     if (method === 'tools/list') return { tools: [{ name: 'ask', description: '質問する' }] };
     if (method === 'tools/call') {
-      return { content: [{ type: 'text', text: params.arguments.long ? 'あ'.repeat(10_000) : `答え: ${params.arguments.q}` }] };
+      return { content: [{ type: 'text', text: params.arguments.long ? 'あ'.repeat(30_000) : `答え: ${params.arguments.q}` }] };
     }
     return {};
   });
@@ -270,6 +270,25 @@ test('MCP サーバのツールの一覧と呼び出し（SSE の応答）を読
     assert.deepEqual(await client.callTool(srv.url, 'ask', { q: 'x' }), { ok: true, text: '答え: x', truncated: false });
     const long = await client.callTool(srv.url, 'ask', { long: true });
     assert.ok(long.ok && long.truncated && long.text.endsWith('（以降は省略）'));
+    // 20,000 字までは切り詰めない（第 0.207.2 版）
+    assert.equal(long.ok && long.text.length, 20_000 + '\n…（以降は省略）'.length);
+  } finally {
+    await srv.close();
+  }
+});
+
+test('MCP の道具の呼び出しは、一覧より長く待つ（答えまでに時間のかかる道具。第12.11.3節）', async () => {
+  const srv = await mcpServer(async (method) => {
+    if (method === 'initialize') return { protocolVersion: '2025-06-18', capabilities: {} };
+    if (method === 'tools/list') { await new Promise((r) => setTimeout(r, 400)); return { tools: [] }; }
+    if (method === 'tools/call') { await new Promise((r) => setTimeout(r, 400)); return { content: [{ type: 'text', text: '考えた答え' }] }; }
+    return {};
+  });
+  try {
+    // 一覧は 200 ミリ秒で打ち切り、呼び出しは 2 秒まで待つ
+    const client = new HttpMcpClient(200, 2000);
+    assert.equal((await client.listTools(srv.url)).ok, false);
+    assert.deepEqual(await client.callTool(srv.url, 'ask', {}), { ok: true, text: '考えた答え', truncated: false });
   } finally {
     await srv.close();
   }
