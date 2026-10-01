@@ -316,12 +316,12 @@ API とワーカーは起動時にリポジトリ直下の `.env` を読みま�
 
 [Apache License 2.0](LICENSE) で公開しています。
 
-公開は、履歴を引き継がない別のリポジトリに、いまのコミットの中身だけを書き出して行います（仕様書 第22.5節、ADR-0060）。
+このリポジトリ（`OESF/M2Office`）をそのまま公開しています（仕様書 第22.5節、ADR-0060）。push したものはすぐ誰でも読めるため、push の前に点検を通します。
 お客様に合わせる部分とお客様のデータは公開しません。
 
 ```bash
-npm run publish:check                          # 公開の前の点検（秘密の値・見本でないメールアドレス・出してはならない言葉・依存のライセンス）
-npm run publish:export -- ../m2office-public   # 点検を通してから、空のフォルダに書き出す（コミットと push は中身を確かめてから人が行う）
+npm run publish:check                          # push の前の点検（秘密の値・見本でないメールアドレス・出してはならない言葉・依存のライセンス）
+npm run publish:export -- ../m2office-export   # 履歴を含めたくない配布物を作るときだけ。点検を通してから、空のフォルダに書き出す
 ```
 
 出してはならない言葉は、公開しないリポジトリ（既定は `../M2Office-private/publish-denylist.txt`。`M2O_PUBLISH_DENYLIST` で変えられる）に

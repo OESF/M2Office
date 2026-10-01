@@ -1,12 +1,13 @@
 /**
- * @file 公開用のリポジトリへの書き出し（仕様書 第22.5節、ADR-0060）。
+ * @file 履歴を含まない書き出し（仕様書 第22.5節、ADR-0060）。
  *
- * 開発用のリポジトリの履歴は引き継がない。いまのコミット（HEAD）の、追跡しているファイルだけを空のフォルダに書き出す。
+ * 開発用のリポジトリ（`OESF/M2Office`）はそのまま公開している。配布物などに履歴を含めたくないときだけ使い、
+ * いまのコミット（HEAD）の、追跡しているファイルだけを空のフォルダに書き出す。
  * 書き出す前に公開の前の点検（`scripts/check-publish.mjs`）を通し、問題があれば書き出さない。
- * 公開用のリポジトリへのコミットと push は、書き出した中身を人が確かめてから行う（このスクリプトは行わない）。
+ * 書き出した先でのコミットと push は、中身を人が確かめてから行う（このスクリプトは行わない）。
  *
  * 使い方:
- *   npm run publish:export -- ../m2office-public
+ *   npm run publish:export -- ../m2office-export
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -16,7 +17,7 @@ import { dirname, resolve } from 'node:path';
 const root = resolve(dirname(new URL(import.meta.url).pathname), '..');
 const dest = process.argv[2] ? resolve(process.argv[2]) : null;
 if (!dest) {
-  console.error('書き出す先のフォルダを指定してください（例: npm run publish:export -- ../m2office-public）');
+  console.error('書き出す先のフォルダを指定してください（例: npm run publish:export -- ../m2office-export）');
   process.exit(2);
 }
 if (existsSync(dest) && readdirSync(dest).filter((f) => f !== '.git').length > 0) {
@@ -38,4 +39,4 @@ const archive = execFileSync('git', ['archive', '--format=tar', 'HEAD'], { cwd: 
 execFileSync('tar', ['-x', '-C', dest], { input: archive });
 const head = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
 console.log(`書き出しました: ${dest}（開発用のリポジトリの ${head} の中身。履歴は含みません）`);
-console.log('次に、中身を確かめてから、公開用のリポジトリでコミットして push してください。');
+console.log('次に、中身を確かめてから使ってください。');
