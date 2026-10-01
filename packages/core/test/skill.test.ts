@@ -86,20 +86,49 @@ test('arguments から入力の欄を作る。m2office-inputs があれば型付
   assert.equal(typed.schema.properties['対象期間を指定']!.format, 'date');
   assert.equal(typed.schema.properties['宛先']!.format, undefined, 'text は 1 行の欄。型は大文字でもよい');
   assert.equal(typed.schema.properties['添付']!.format, 'file');
-  assert.match(parseInputs('期限: time').problems[0]!, /型は text・textarea・date・file/);
+  assert.match(parseInputs('期限: time').problems[0]!, /型「time」はありません/);
   assert.equal(parseInputs('?: text').problems.length, 1, '名前の無い欄は読めない');
-  // 型の後ろの "…" は欄に薄く出す例。argument-hint より先に効き、「例:」は付けなくてよい
-  const hinted = parseInputs('臨床の質問: textarea "58 歳男性。2 週間続く咳"\n専門分野?: text "例: 呼吸器内科"\nメモ?: text', [], '引数の例');
+  assert.match(parseInputs('メモ: text\nメモ: textarea').problems[0]!, /同じ名前の欄/);
+  // @placeholder は欄に薄く出す例。argument-hint より先に効き、「例:」は付けなくてよい。# の行は注釈
+  const hinted = parseInputs([
+    '# 臨床の質問の欄',
+    '臨床の質問: textarea @placeholder("58 歳男性。\\"咳\\"が 2 週間")',
+    '専門分野?: text @placeholder("例: 呼吸器内科")',
+    'メモ?: text',
+  ].join('\n'), [], '引数の例');
   assert.deepEqual(hinted.problems, []);
-  assert.deepEqual(hinted.schema.properties['臨床の質問']!.examples, ['58 歳男性。2 週間続く咳']);
+  assert.deepEqual(Object.keys(hinted.schema.properties), ['臨床の質問', '専門分野', 'メモ']);
+  assert.deepEqual(hinted.schema.properties['臨床の質問']!.examples, ['58 歳男性。"咳"が 2 週間'], '"…" の中の \\" は逃がす');
   assert.deepEqual(hinted.schema.properties['専門分野']!.examples, ['呼吸器内科']);
   assert.equal(hinted.schema.properties['メモ']!.examples, undefined);
-  assert.deepEqual(parseInputs('記録: file\n要点: textarea', [], '引数の例').schema.properties['要点']!.examples, ['引数の例'], '欄ごとの例が無ければ argument-hint');
-  assert.match(parseInputs('契約書: file "NDA"').problems[0]!, /ファイルの欄には例を出せません/);
+  assert.deepEqual(parseInputs('記録: file\n期限: date\n要点: textarea', [], '引数の例').schema.properties['要点']!.examples, ['引数の例'],
+    '欄ごとの例が無ければ、ファイルでない最初の 1 行・複数行の欄に argument-hint');
+  assert.match(parseInputs('契約書: file @placeholder("NDA")').problems[0]!, /@placeholder は text と textarea/);
   assert.equal(parseInputs('名前: text 例').problems.length, 1, '例は "…" で囲む');
+  assert.equal(parseInputs('名前: text @placeholder(例)').problems.length, 1, '属性の値も "…" で囲む');
+  // 第 0.211.0 版の型の後ろの "…" は @placeholder と同じ
+  assert.deepEqual(parseInputs('臨床の質問: textarea "58 歳男性"').schema, parseInputs('臨床の質問: textarea @placeholder("58 歳男性")').schema);
   // 第 0.210.0 版までの日本語の書き方も同じ欄になる（配った拡張機能を壊さない）
   const legacy = parseInputs('申請の内容: 長文\n対象期間を指定: 日付（任意）\n宛先: 短文\n添付: ファイル(任意)');
   assert.deepEqual(legacy.schema, parseInputs('申請の内容: textarea\n対象期間を指定?: date\n宛先: text\n添付?: file').schema);
+});
+
+test('入力の欄の文法（第12.12.3.1節）: まだ実装していない型と属性は取り込まずに知らせ、知らない属性は無視して知らせる', () => {
+  // 文法には入っているが、この版では使えない（書き方は実装しても変わらない）
+  for (const line of ['専門分野: select("内科", "外科")', '急ぎ: radio("至急", "今週中")', '同意: checkbox', '資料?: checkbox("論文", "ガイドライン")']) {
+    assert.match(parseInputs(line).problems[0] ?? '', /この版ではまだ使えません/, line);
+  }
+  assert.match(parseInputs('メモ: text @label("備考")').problems[0]!, /@label はこの版ではまだ使えません/);
+  assert.match(parseInputs('急ぎ: text @default("今日中")').problems[0]!, /@default はこの版ではまだ使えません/);
+  // 型と選択肢の組み合わせの誤り
+  assert.match(parseInputs('専門分野: select').problems[0]!, /選択肢を/);
+  assert.match(parseInputs('メモ: text("a")').problems[0]!, /選択肢を書けません/);
+  assert.match(parseInputs('専門分野: select("内科"').problems[0]!, /「\)」がありません/);
+  // 知らない属性は無視して欄は作る（新しい版のスキルを古い M2Office に入れても欄が出る）
+  const future = parseInputs('メモ: textarea @rows("5") @placeholder("要点")');
+  assert.deepEqual(future.problems, []);
+  assert.match(future.notices[0]!, /@rows は知らない属性/);
+  assert.deepEqual(future.schema.properties['メモ']!.examples, ['要点']);
 });
 
 test('disable-model-invocation は秘書が取り次がない。user-invocable: false はメニューに出さない', () => {

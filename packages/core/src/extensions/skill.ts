@@ -151,69 +151,194 @@ const list = (v: Frontmatter[string] | undefined): string[] =>
 /** 真偽の値（スキルと同じく yes・on・1 も真）。 */
 const truthy = (v: Frontmatter[string] | undefined): boolean => /^(true|yes|on|1)$/i.test(text(v).trim());
 
-/** 入力の欄の型（`m2office-inputs`。第12.12.3節）。名前は HTML の部品に合わせる。 */
-const INPUT_TYPES: Record<string, { format?: string }> = {
-  text: {}, textarea: { format: 'textarea' }, date: { format: 'date' }, file: { format: 'file' },
+/**
+ * 入力の欄の型（`m2office-inputs`。第12.12.3.1節）。名前は HTML の部品に合わせる。
+ *
+ * @remarks `implemented` が偽の型は文法の中に場所を決めてあるが、この版では使えない（取り込まずに知らせる）
+ */
+const INPUT_TYPES: Record<string, { format?: string; implemented: boolean; choice: 'none' | 'required' | 'optional' }> = {
+  text: { implemented: true, choice: 'none' },
+  textarea: { format: 'textarea', implemented: true, choice: 'none' },
+  date: { format: 'date', implemented: true, choice: 'none' },
+  file: { format: 'file', implemented: true, choice: 'none' },
+  select: { implemented: false, choice: 'required' },
+  radio: { format: 'radio', implemented: false, choice: 'required' },
+  // 選択肢が無ければチェックボックス 1 つ（真か偽）、あればチェックボックスの組
+  checkbox: { implemented: false, choice: 'optional' },
+};
+/** 欄の属性（第12.12.3.1節）。`implemented` が偽の属性は、この版では使えない。 */
+const INPUT_ATTRIBUTES: Record<string, { implemented: boolean }> = {
+  label: { implemented: false },
+  placeholder: { implemented: true },
+  default: { implemented: false },
 };
 /** 第 0.210.0 版までの日本語の種類の名前。配った拡張機能を壊さないために読み続ける。 */
 const LEGACY_INPUT_TYPES: Record<string, string> = { 短文: 'text', 長文: 'textarea', 日付: 'date', ファイル: 'file' };
 /** 第 0.210.0 版までの任意の印。 */
-const LEGACY_OPTIONAL = /[（(]任意[）)]/;
+const LEGACY_OPTIONAL = /^[（(]任意[）)]/;
 
 type InputSchema = {
   type: 'object'; required: string[];
   properties: Record<string, { type: 'string'; title: string; format?: string; examples?: string[] }>;
 };
 
+/** 読み取った 1 つの欄（文法どおりの形。第12.12.3.1節）。 */
+interface InputLine {
+  name: string;
+  optional: boolean;
+  type: string;
+  /** 型の後ろの選択肢。書かれていなければ `null`。 */
+  options: string[] | null;
+  attributes: { name: string; args: (string | boolean)[] }[];
+}
+
+/**
+ * `m2office-inputs` の 1 行を文法どおりに読む（第12.12.3.1節）。
+ *
+ * @returns 読めなければ理由。古い書き方（日本語の型・「（任意）」・型の後ろの `"…"`）も読む
+ */
+function readInputLine(line: string): InputLine | { error: string } {
+  const head = /^(.+?)\s*[:：]\s*(.*)$/.exec(line);
+  if (!head) return { error: '「欄の名前: 型」の形ではありません' };
+  const optional = /[?？]$/.test(head[1]!);
+  const name = head[1]!.replace(/\s*[?？]$/, '').trim();
+  if (!name || /[?？@]/.test(name)) return { error: '欄の名前がありません（名前に ? と @ は使えません）' };
+  const rest = head[2]!;
+  let pos = 0;
+  const space = () => { while (pos < rest.length && /\s/.test(rest[pos]!)) pos++; };
+  /** `"…"` を読む（`\"` と `\\` を逃がす）。無ければ `null`。 */
+  const str = (): string | null => {
+    if (rest[pos] !== '"') return null;
+    let out = '';
+    for (pos++; pos < rest.length; pos++) {
+      const ch = rest[pos]!;
+      if (ch === '\\' && pos + 1 < rest.length) { out += rest[++pos]; continue; }
+      if (ch === '"') { pos++; return out; }
+      out += ch;
+    }
+    return null;
+  };
+  /** `( 値 , … )` を読む。 */
+  const list = (allowBool: boolean): (string | boolean)[] | { error: string } => {
+    pos++; // "("
+    const out: (string | boolean)[] = [];
+    space();
+    if (rest[pos] === ')') { pos++; return out; }
+    for (;;) {
+      space();
+      const s = str();
+      if (s !== null) out.push(s);
+      else {
+        const word = /^(true|false)\b/.exec(rest.slice(pos));
+        if (!allowBool || !word) return { error: '値は "…" で囲んでください' };
+        out.push(word[1] === 'true');
+        pos += word[1]!.length;
+      }
+      space();
+      if (rest[pos] === ',') { pos++; continue; }
+      if (rest[pos] === ')') { pos++; return out; }
+      return { error: '「)」がありません' };
+    }
+  };
+
+  const typeWord = /^[A-Za-z]+|^[^\s(（@"]+/.exec(rest);
+  if (!typeWord) return { error: '型がありません' };
+  const legacy = LEGACY_INPUT_TYPES[typeWord[0]];
+  const type = legacy ?? typeWord[0].toLowerCase();
+  pos = typeWord[0].length;
+  let options: string[] | null = null;
+  let legacyOptional = false;
+  if (legacy) {
+    // 古い書き方の「（任意）」は、日本語の型のすぐ後ろにだけ書かれていた
+    space();
+    const lo = LEGACY_OPTIONAL.exec(rest.slice(pos));
+    if (lo) { legacyOptional = true; pos += lo[0].length; }
+  } else if (rest[pos] === '(') {
+    const got = list(false);
+    if ('error' in got) return got;
+    options = got as string[];
+  }
+  const attributes: InputLine['attributes'] = [];
+  for (;;) {
+    space();
+    if (pos >= rest.length) break;
+    if (rest[pos] === '@') {
+      const a = /^@([a-z][a-z0-9]*)/.exec(rest.slice(pos));
+      if (!a) return { error: '属性は @名前(…) の形で書きます' };
+      pos += a[0].length;
+      if (rest[pos] !== '(') return { error: `@${a[1]} の後ろに (…) がありません` };
+      const args = list(true);
+      if ('error' in args) return args;
+      attributes.push({ name: a[1]!, args });
+      continue;
+    }
+    // 第 0.211.0 版の、型の後ろの "…"（@placeholder と同じ）
+    const s = str();
+    if (s !== null) { attributes.push({ name: 'placeholder', args: [s] }); continue; }
+    return { error: `「${rest.slice(pos)}」が読めません` };
+  }
+  return { name, optional: optional || legacyOptional, type, options, attributes };
+}
+
 /**
  * 入力のフォームを作る（第12.12.5節）。`m2office-inputs`、無ければ `arguments`、無ければ「依頼」の欄 1 つ。
  *
- * @param hint `argument-hint`。依頼の欄（または最初の欄）に薄く置く例
+ * @param hint `argument-hint`。欄ごとの例が無いときに、ファイルでない最初の 1 行・複数行の欄に薄く置く
+ * @returns 欄の定義と、取り込めない理由（`problems`）・知らせること（`notices`。知らない属性を無視したなど）
  */
 export function parseInputs(
   inputs: string | undefined, args: string[] = [], hint = '',
-): { schema: InputSchema; problems: string[] } {
+): { schema: InputSchema; problems: string[]; notices: string[] } {
   const examples = hint ? { examples: [hint] } : {};
   if (inputs?.trim()) {
     const properties: InputSchema['properties'] = {};
     const required: string[] = [];
     const problems: string[] = [];
+    const notices: string[] = [];
+    const typeNames = Object.keys(INPUT_TYPES).join('・');
     for (const raw of inputs.split('\n')) {
       const line = raw.replace(/^[-*・\s]+/, '').trim();
-      if (!line) continue;
-      // `欄の名前: 型`。任意の欄は名前の後ろに `?`（TypeScript の型注釈と同じ）
-      const m = /^(.+?)\s*[:：]\s*(.+)$/.exec(line);
-      const marked = m ? /[?？]$/.test(m[1]!) : false;
-      const name = m ? m[1]!.replace(/\s*[?？]$/, '').trim() : '';
-      // 型の後ろの "…" は、欄に薄く出す例（placeholder）。画面が「例: 」を付けるので、書かれていれば外す
-      const typed = m ? /^(\S+?)(?:\s+"(.*)")?$/.exec(m[2]!.replace(LEGACY_OPTIONAL, '').trim()) : null;
-      const type = typed ? LEGACY_INPUT_TYPES[typed[1]!] ?? typed[1]!.toLowerCase() : '';
-      if (!m || !name || !typed || !(type in INPUT_TYPES)) {
-        problems.push(`m2office-inputs の「${line}」が読めません。「欄の名前: 型」で、型は ${Object.keys(INPUT_TYPES).join('・')} のどれかです（任意の欄は名前の後ろに ?、欄に薄く出す例は型の後ろに "…"）`);
-        continue;
+      if (!line || line.startsWith('#')) continue;
+      const bad = (why: string) => problems.push(`m2office-inputs の「${line}」: ${why}`);
+      const read = readInputLine(line);
+      if ('error' in read) { bad(`${read.error}（書き方は「欄の名前: 型 @属性(…)」。型は ${typeNames}）`); continue; }
+      const spec = INPUT_TYPES[read.type];
+      if (!spec) { bad(`型「${read.type}」はありません（型は ${typeNames}）`); continue; }
+      if (spec.choice === 'none' && read.options) { bad(`${read.type} には選択肢を書けません`); continue; }
+      if (spec.choice === 'required' && !read.options?.length) { bad(`${read.type} には選択肢を ("…", "…") で書きます`); continue; }
+      if (!spec.implemented) { bad(`${read.type}${read.options ? '(…)' : ''} はこの版ではまだ使えません`); continue; }
+      if (properties[read.name]) { bad('同じ名前の欄がほかにあります'); continue; }
+      let placeholder: string | undefined;
+      let failed = false;
+      for (const a of read.attributes) {
+        const attr = INPUT_ATTRIBUTES[a.name];
+        if (!attr) { notices.push(`m2office-inputs の「${read.name}」の @${a.name} は知らない属性のため使いません`); continue; }
+        if (!attr.implemented) { bad(`@${a.name} はこの版ではまだ使えません`); failed = true; break; }
+        if (a.name === 'placeholder') {
+          if (read.type !== 'text' && read.type !== 'textarea') { bad('@placeholder は text と textarea の欄に付けます'); failed = true; break; }
+          if (a.args.length !== 1 || typeof a.args[0] !== 'string') { bad('@placeholder には "…" を 1 つ書きます'); failed = true; break; }
+          // 画面が「例: 」を付けるので、書かれていれば外す
+          placeholder = a.args[0].replace(/^例\s*[:：]\s*/, '').trim();
+        }
       }
-      const optional = marked || LEGACY_OPTIONAL.test(m[2]!);
-      const placeholder = typed[2]?.replace(/^例\s*[:：]\s*/, '').trim();
-      if (placeholder && type === 'file') {
-        problems.push(`m2office-inputs の「${line}」: ファイルの欄には例を出せません（"…" を外してください）`);
-        continue;
-      }
-      // 欄ごとの例が無ければ、argument-hint をファイルでない最初の欄に置く（ファイルの欄には例を出す場所が無い。第6.10.4.1節）
-      const first = type !== 'file' && !Object.values(properties).some((p) => p.format !== 'file');
+      if (failed) continue;
+      // 欄ごとの例が無ければ、argument-hint をファイルでない最初の 1 行・複数行の欄に置く（第6.10.4.1節）
+      const textual = read.type === 'text' || read.type === 'textarea';
+      const first = textual && !Object.values(properties).some((p) => p.format === undefined || p.format === 'textarea');
       const example = placeholder ? { examples: [placeholder] } : first ? examples : {};
-      properties[name] = { type: 'string', title: name, ...INPUT_TYPES[type], ...example };
-      if (!optional) required.push(name);
+      properties[read.name] = { type: 'string', title: read.name, ...(spec.format ? { format: spec.format } : {}), ...example };
+      if (!read.optional) required.push(read.name);
     }
-    return { schema: { type: 'object', required, properties }, problems };
+    return { schema: { type: 'object', required, properties }, problems, notices };
   }
   if (args.length > 0) {
     const properties: InputSchema['properties'] = {};
     for (const [n, a] of args.entries()) properties[a] = { type: 'string', title: a, ...(n === 0 ? examples : {}) };
-    return { schema: { type: 'object', required: [...args], properties }, problems: [] };
+    return { schema: { type: 'object', required: [...args], properties }, problems: [], notices: [] };
   }
   return {
     schema: { type: 'object', required: ['request'], properties: { request: { type: 'string', title: '依頼', format: 'textarea', ...examples } } },
-    problems: [],
+    problems: [], notices: [],
   };
 }
 
@@ -344,8 +469,9 @@ export function buildSkillPackage(files: ExtensionFiles, registry: ToolRegistry)
   const tools = [...new Set(none ? [] : known.length > 0 ? known : SKILL_DEFAULT_TOOLS), ...(supporting.length > 0 ? [SKILL_READ_TOOL] : [])];
 
   const args = list(fm['arguments']);
-  const { schema, problems: inputProblems } = parseInputs(meta['m2office-inputs'], args, text(fm['argument-hint']));
+  const { schema, problems: inputProblems, notices: inputNotices } = parseInputs(meta['m2office-inputs'], args, text(fm['argument-hint']));
   problems.push(...inputProblems);
+  notices.push(...inputNotices);
   if (problems.length > 0) return { files: new Map(), keep, notices, problems };
 
   const effort = text(fm['effort']).trim().toLowerCase();
