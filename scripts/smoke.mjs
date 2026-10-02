@@ -4012,13 +4012,15 @@ console.log('\n■ 60. 在庫管理（内蔵の拡張。第29章、ADR-0045）')
       ? ok('JAN から商品名を引く口は、引けないコードでは空のまま 200 で返す（推測で埋めない）') : ng('JAN の口が違う', `${janBad.status} ${JSON.stringify(janBad.body)} ${janShort.status}`);
 
     // Web への公開（第29.12.1節。段 5）。管理者が一度承認し、鍵の URL でログインなしに読める。数が変わると作り直し、止めると出ない
-    const pubOff = await call('a', '/v1/inventory/publication');
+    const pubOff = await call('a', '/v1/inventory/publications');
     await call('a', '/v1/admin/extensions/inventory/settings', { method: 'PUT', body: JSON.stringify({ features: { lots: true, units: true, reserve: true, publish: true } }) });
     const scopeOne = { itemIds: [itemId], fields: ['price'], showCount: true };
-    const pubByMember = await call('a', '/v1/inventory/publication', { method: 'PUT', body: JSON.stringify(scopeOne) }, 'member');
-    const pubPreview = await call('a', '/v1/inventory/publication/preview', { method: 'POST', body: JSON.stringify({ itemIds: [itemId], fields: [], showCount: false }) });
-    const pub = await call('a', '/v1/inventory/publication', { method: 'PUT', body: JSON.stringify({ itemIds: [itemId], fields: [], showCount: true }) });
-    pubOff.status === 403 && pubByMember.status === 403 && pubPreview.status === 200 && pubPreview.body.snapshot?.items?.[0]?.available === undefined
+    const pubNew = await call('a', '/v1/inventory/publications', { method: 'POST', body: JSON.stringify({ name: `${tag} 店頭` }) });
+    const pubId = pubNew.body?.publication?.id;
+    const pubByMember = await call('a', `/v1/inventory/publications/${pubId}`, { method: 'PUT', body: JSON.stringify(scopeOne) }, 'member');
+    const pubPreview = await call('a', '/v1/inventory/publications/preview', { method: 'POST', body: JSON.stringify({ itemIds: [itemId], fields: [], showCount: false }) });
+    const pub = await call('a', `/v1/inventory/publications/${pubId}`, { method: 'PUT', body: JSON.stringify({ itemIds: [itemId], fields: [], showCount: true }) });
+    pubOff.status === 403 && pubNew.status === 201 && pubNew.body.urls === null && pubByMember.status === 403 && pubPreview.status === 200 && pubPreview.body.snapshot?.items?.[0]?.available === undefined
       && pub.status === 200 && pub.body.publication?.status === 'live' && pub.body.publication?.approvedBy && /\/v1\/public\/inventory\/[A-Za-z0-9_-]{32}$/.test(pub.body.urls?.page ?? '')
       ? ok('Web への公開は、公開を入れた会社の管理者だけが承認でき、見本と貼る URL を返す')
       : ng('公開の承認が違う', `${pubOff.status} ${pubByMember.status} ${pubPreview.status} ${pub.status} ${JSON.stringify(pub.body)}`);
@@ -4038,7 +4040,23 @@ console.log('\n■ 60. 在庫管理（内蔵の拡張。第29章、ADR-0045）')
     const pubJson2 = await (await fetch(`${API}/v1/public/inventory/${pubKey}.json`)).json().catch(() => ({}));
     await call('a', '/v1/inventory/moves', { method: 'POST', body: JSON.stringify({ kind: 'out', itemId, qty: 2, reason: '確認の戻し' }) }, 'member');
     pubJson2.items?.[0]?.available === Math.max(0, pubAvail + 2) ? ok('数が変わると、公開の中身を作り直す') : ng('公開の数が変わらない', JSON.stringify(pubJson2));
-    const pubStop = await call('a', '/v1/inventory/publication/stop', { method: 'POST' });
+    // まとまりを分ける（第29.12.2節）。別のまとまりは別の URL で、別の品目を出す。止めてあるものだけ削除できる
+    const otherItem = withQty.body?.item?.id;
+    const pub2 = await call('a', '/v1/inventory/publications', { method: 'POST', body: '{}' });
+    const pub2Ok = await call('a', `/v1/inventory/publications/${pub2.body?.publication?.id}`, { method: 'PUT', body: JSON.stringify({ itemIds: [otherItem], fields: [], showCount: false }) });
+    const pub2Json = await (await fetch(`${API}/v1/public/inventory/${pub2Ok.body?.publication?.key}.json`)).json().catch(() => ({}));
+    const pubList = await call('a', '/v1/inventory/publications');
+    const delLive = await call('a', `/v1/inventory/publications/${pub2.body?.publication?.id}`, { method: 'DELETE' });
+    await call('a', `/v1/inventory/publications/${pub2.body?.publication?.id}/stop`, { method: 'POST' });
+    const delStopped = await call('a', `/v1/inventory/publications/${pub2.body?.publication?.id}`, { method: 'DELETE' });
+    const gone2 = await fetch(`${API}/v1/public/inventory/${pub2Ok.body?.publication?.key}.json`);
+    const renamed = await call('a', `/v1/inventory/publications/${pubId}/name`, { method: 'PUT', body: JSON.stringify({ name: `${tag} 店頭の販売品` }) });
+    pub2Ok.status === 200 && pub2Ok.body.publication.key !== pubKey && pub2Json.items?.length === 1 && /トナー/.test(pub2Json.items[0].name)
+      && (pubList.body.items ?? []).length >= 2 && pubList.body.max === 8 && delLive.status === 409 && delStopped.status === 200 && gone2.status === 404
+      && renamed.status === 200 && renamed.body.publication.status === 'live'
+      ? ok('公開をまとまりに分けられ（8 つまで）、まとまりごとに別の URL と品目で出し、止めてあるものだけ削除できる。名前を変えても公開は続く')
+      : ng('公開のまとまりが違う', JSON.stringify({ p2: pub2Ok.status, json: pub2Json, list: pubList.body.items?.length, delLive: delLive.status, del: delStopped.status, gone: gone2.status, ren: renamed.status }));
+    const pubStop = await call('a', `/v1/inventory/publications/${pubId}/stop`, { method: 'POST' });
     const goneP = await fetch(`${API}/v1/public/inventory/${pubKey}`);
     const goneJ = await fetch(`${API}/v1/public/inventory/${pubKey}.json`);
     const badKeyP = await fetch(`${API}/v1/public/inventory/${'x'.repeat(32)}.json`);
@@ -4079,7 +4097,7 @@ console.log('\n■ 60. 在庫管理（内蔵の拡張。第29章、ADR-0045）')
     await owner.query(`delete from inventory_moves where item_id in (${items})`);
     await owner.query(`delete from inventory_lots where item_id in (${items})`);
     await owner.query(`delete from inventory_codes where item_id in (${items})`);
-    await owner.query(`delete from inventory_publications where tenant_id = 't-alpha' and approved_at >= $1`, [startedAt]);
+    await owner.query(`delete from inventory_publications where tenant_id = 't-alpha' and created_at >= $1`, [startedAt]);
     await owner.query(`delete from inventory_items where name like '${tag}%'`);
     // 確認の間にできた場所（既定の「倉庫」を含む）も消す。在庫の残る場所は残す
     await owner.query(`delete from inventory_locations l where tenant_id in ('t-alpha', 't-beta') and (warehouse = $1 or warehouse = $3 or created_at >= $2)

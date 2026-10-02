@@ -388,12 +388,12 @@ export interface InventoryForecastRow {
   } | null;
 }
 
-/** 在庫の Web への公開の状態（管理者向け。仕様書 第29.12.1節）。 */
+/** 在庫の Web への公開のまとまり 1 つ（管理者向け。仕様書 第29.12.1節・第29.12.2節）。 */
 export interface InventoryPublicationView {
-  publication: InventoryPublication | null;
+  publication: InventoryPublication;
   /** 承認した品目のうち、いま止めている品目の数（出ていない）。 */
   stoppedInScope: number;
-  /** 貼るための URL（埋め込みのページと公開のデータ）。まだ公開していなければ `null`。 */
+  /** 貼るための URL（埋め込みのページと公開のデータ）。承認する前は `null`。 */
   urls: { page: string; data: string } | null;
 }
 
@@ -1287,16 +1287,24 @@ export const api = {
     /** メニューで使う品目を覚えさせる（`items` が空なら在庫を使わない）。 */
     teachMenu: (menu: string, items: { itemId: string; qty: number }[]) =>
       call<{ ok: true; applied: number }>('/inventory/menus', { method: 'POST', body: JSON.stringify({ menu, items }) }),
-    /** Web への公開の状態と貼るための URL（管理者。仕様書 第29.12.1節）。 */
-    publication: () => call<InventoryPublicationView>('/inventory/publication'),
+    /** Web への公開のまとまりの一覧（管理者。仕様書 第29.12.2節）。 */
+    publications: () => call<{ items: InventoryPublicationView[]; max: number }>('/inventory/publications'),
+    /** まとまりを足す（名前を省けば「公開 N」）。 */
+    createPublication: (name?: string) =>
+      call<InventoryPublicationView>('/inventory/publications', { method: 'POST', body: JSON.stringify(name ? { name } : {}) }),
+    /** まとまりの名前を変える。 */
+    renamePublication: (id: string, name: string) =>
+      call<InventoryPublicationView>(`/inventory/publications/${encodeURIComponent(id)}/name`, { method: 'PUT', body: JSON.stringify({ name }) }),
     /** 承認する前の見本（公開されるとおりの中身）。 */
     previewPublication: (scope: InventoryPublicationScope) =>
-      call<{ snapshot: InventoryPublicSnapshot }>('/inventory/publication/preview', { method: 'POST', body: JSON.stringify(scope) }),
+      call<{ snapshot: InventoryPublicSnapshot }>('/inventory/publications/preview', { method: 'POST', body: JSON.stringify(scope) }),
     /** この内容で公開する（押した管理者が承認者。中身を変えたとき・止めたあとの再開も同じ）。 */
-    approvePublication: (scope: InventoryPublicationScope) =>
-      call<InventoryPublicationView>('/inventory/publication', { method: 'PUT', body: JSON.stringify(scope) }),
-    /** 公開を止める。 */
-    stopPublication: () => call<InventoryPublicationView>('/inventory/publication/stop', { method: 'POST' }),
+    approvePublication: (id: string, scope: InventoryPublicationScope) =>
+      call<InventoryPublicationView>(`/inventory/publications/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(scope) }),
+    /** まとまりの公開を止める。 */
+    stopPublication: (id: string) => call<InventoryPublicationView>(`/inventory/publications/${encodeURIComponent(id)}/stop`, { method: 'POST' }),
+    /** まとまりを削除する（止めてあるものだけ）。 */
+    deletePublication: (id: string) => call<{ ok: true }>(`/inventory/publications/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     /** JAN から商品名を引く（Gemini の Google 検索。仕様書 第29.6節）。見つからなければ `found: false`。 */
     jan: (code: string) => call<{ found: boolean; name?: string; maker?: string; category?: string }>(`/inventory/jan/${encodeURIComponent(code)}`),
     /** 仕入先（仕様書 第29.4.1節）。 */

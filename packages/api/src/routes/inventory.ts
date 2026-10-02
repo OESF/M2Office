@@ -14,7 +14,7 @@ import {
   readSheet, renderSheet, renderShelfLabels, saveFile, detectKind, enqueueJob, toInstant, IMPORT_MAX_ROWS, INVENTORY_ORDER, MAX_FILE_BYTES, MIME,
   MOBILE_INVENTORY_PATH, type ItemInput, type MoveInput, type PublicationView,
 } from '@m2office/core';
-import type { InventoryMoveKind, InventoryPublicationScope, InventoryPublicField } from '@m2office/shared';
+import { INVENTORY_PUBLICATION_MAX, type InventoryMoveKind, type InventoryPublicationScope, type InventoryPublicField } from '@m2office/shared';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 import { tenantOrigin } from '../tenant-origin.js';
@@ -482,11 +482,11 @@ export function inventoryRoute(deps: AppDeps) {
     const settings = await service.settings(c.get('ctx').tenant.id);
     return settings.features.publish ? null : '会社の設定で「Web への公開」が切られています';
   };
-  /** 公開の状態に、貼るための URL を添える。 */
+  /** まとまりの状態に、貼るための URL を添える（承認する前は `null`）。 */
   const withUrls = (c: { req: { header(k: string): string | undefined } }, view: PublicationView) => {
-    const p = view.publication;
-    if (!p) return { ...view, urls: null };
-    const page = `${tenantOrigin(c.req.header('origin'), c.req.header('host'))}/v1/public/inventory/${p.key}`;
+    const key = view.publication.key;
+    if (!key) return { ...view, urls: null };
+    const page = `${tenantOrigin(c.req.header('origin'), c.req.header('host'))}/v1/public/inventory/${key}`;
     return { ...view, urls: { page, data: `${page}.json` } };
   };
   const scopeOf = (body: Record<string, unknown>): InventoryPublicationScope => ({
@@ -494,37 +494,65 @@ export function inventoryRoute(deps: AppDeps) {
     fields: Array.isArray(body['fields']) ? body['fields'].filter((x): x is InventoryPublicField => x === 'category' || x === 'price') : [],
     showCount: body['showCount'] === true,
   });
+  const publisher = deps.inventory.publisher;
 
-  /** 公開の状態（承認した中身・承認した人と日時・貼るための URL）。 */
-  app.get('/publication', async (c) => {
+  /** 公開のまとまりの一覧（作った順。承認した中身・承認した人と日時・貼るための URL。第29.12.2節）。 */
+  app.get('/publications', async (c) => {
     const denied = await publishGate(c);
     if (denied) return c.json({ error: denied }, 403);
-    return c.json(withUrls(c, await deps.inventory.publisher.view(c.get('ctx').tenant.id)));
+    const items = await publisher.list(c.get('ctx').tenant.id, { ensureOne: true });
+    return c.json({ items: items.map((v) => withUrls(c, v)), max: INVENTORY_PUBLICATION_MAX });
+  });
+
+  /** まとまりを足す（承認する前の形。名前を省けば「公開 N」）。 */
+  app.post('/publications', async (c) => {
+    const denied = await publishGate(c);
+    if (denied) return c.json({ error: denied }, 403);
+    const body = await c.req.json<{ name?: unknown }>().catch(() => ({} as { name?: unknown }));
+    const res = await publisher.create(c.get('ctx').tenant.id, typeof body.name === 'string' ? body.name : undefined);
+    return 'error' in res ? c.json(res, 400) : c.json(withUrls(c, res), 201);
   });
 
   /** 承認する前の見本。公開されるとおりの中身を返す。 */
-  app.post('/publication/preview', async (c) => {
+  app.post('/publications/preview', async (c) => {
     const denied = await publishGate(c);
     if (denied) return c.json({ error: denied }, 403);
-    const res = await deps.inventory.publisher.preview(c.get('ctx').tenant.id, scopeOf(await c.req.json().catch(() => ({}))));
+    const res = await publisher.preview(c.get('ctx').tenant.id, scopeOf(await c.req.json().catch(() => ({}))));
     return 'error' in res ? c.json(res, 400) : c.json({ snapshot: res });
   });
 
-  /** この内容で公開する（押した管理者が承認者。中身を変えたとき・止めたあとの再開も同じ）。 */
-  app.put('/publication', async (c) => {
+  /** まとまりの名前を変える（承認し直さない）。 */
+  app.put('/publications/:id/name', async (c) => {
     const denied = await publishGate(c);
     if (denied) return c.json({ error: denied }, 403);
-    const { tenant, user } = c.get('ctx');
-    const res = await deps.inventory.publisher.approve(tenant.id, user.id, scopeOf(await c.req.json().catch(() => ({}))));
+    const body = await c.req.json<{ name?: unknown }>().catch(() => ({} as { name?: unknown }));
+    const res = await publisher.rename(c.get('ctx').tenant.id, c.req.param('id'), typeof body.name === 'string' ? body.name : '');
     return 'error' in res ? c.json(res, 400) : c.json(withUrls(c, res));
   });
 
-  /** 公開を止める。埋め込みのページは「表示できません」になる。 */
-  app.post('/publication/stop', async (c) => {
+  /** この内容で公開する（押した管理者が承認者。中身を変えたとき・止めたあとの再開も同じ）。 */
+  app.put('/publications/:id', async (c) => {
+    const denied = await publishGate(c);
+    if (denied) return c.json({ error: denied }, 403);
+    const { tenant, user } = c.get('ctx');
+    const res = await publisher.approve(tenant.id, user.id, c.req.param('id'), scopeOf(await c.req.json().catch(() => ({}))));
+    return 'error' in res ? c.json(res, 400) : c.json(withUrls(c, res));
+  });
+
+  /** まとまりの公開を止める。埋め込みのページは「表示できません」になる。 */
+  app.post('/publications/:id/stop', async (c) => {
     if (!isAdmin(c)) return c.json({ error: '公開を止められるのは管理者です' }, 403);
     const { tenant, user } = c.get('ctx');
-    const res = await deps.inventory.publisher.stop(tenant.id, user.id);
+    const res = await publisher.stop(tenant.id, user.id, c.req.param('id'));
     return 'error' in res ? c.json(res, 400) : c.json(withUrls(c, res));
+  });
+
+  /** まとまりを削除する（止めてあるものだけ。URL は 404 になる）。 */
+  app.delete('/publications/:id', async (c) => {
+    if (!isAdmin(c)) return c.json({ error: '公開を削除できるのは管理者です' }, 403);
+    const { tenant, user } = c.get('ctx');
+    const res = await publisher.remove(tenant.id, user.id, c.req.param('id'));
+    return 'error' in res ? c.json(res, 409) : c.json(res);
   });
 
   return app;

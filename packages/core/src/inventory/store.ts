@@ -143,15 +143,18 @@ export interface MoveQuery {
  *
  * @remarks どの操作も会社（テナント）で絞る（不変則 I-2）
  */
-/** 公開の行（第29.12節）。 */
+/** 公開のまとまり 1 つ（第29.12節・第29.12.2節）。承認する前（`draft`）は鍵・中身・承認した人を持たない。 */
 export interface PublicationRecord {
-  key: string;
-  scope: InventoryPublicationScope;
-  approvedBy: string;
-  approvedAt: string;
-  status: 'live' | 'stopped';
+  id: string;
+  name: string;
+  key: string | null;
+  scope: InventoryPublicationScope | null;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  status: 'draft' | 'live' | 'stopped';
   snapshot: InventoryPublicSnapshot | null;
   snapshotAt: string | null;
+  createdAt: string;
 }
 
 export interface InventoryStore {
@@ -221,14 +224,19 @@ export interface InventoryStore {
   /** メニューの対応を置き換える。 */
   setMenuItems(tenantId: string, menuKey: string, rows: MenuItemRecord[], at: string): Promise<void>;
 
-  /** 会社の公開（第29.12節）。まだ一度も承認していなければ `null`。 */
-  getPublication(tenantId: string): Promise<PublicationRecord | null>;
-  /** 公開の中身を承認して保存する（公開中にする）。鍵は最初の承認のときに作ったものを使い続ける。 */
-  approvePublication(tenantId: string, p: { key: string; scope: InventoryPublicationScope; approvedBy: string; approvedAt: string }): Promise<void>;
-  setPublicationStatus(tenantId: string, status: 'live' | 'stopped'): Promise<void>;
-  savePublicationSnapshot(tenantId: string, snapshot: InventoryPublicSnapshot, at: string): Promise<void>;
+  /** 会社の公開のまとまり（作った順。第29.12.2節）。 */
+  listPublications(tenantId: string): Promise<PublicationRecord[]>;
+  getPublication(tenantId: string, id: string): Promise<PublicationRecord | null>;
+  /** まとまりを作る（承認する前。鍵は最初の承認のときに作る）。 */
+  createPublication(tenantId: string, p: { id: string; name: string; at: string }): Promise<void>;
+  renamePublication(tenantId: string, id: string, name: string): Promise<void>;
+  /** 中身を承認して保存する（公開中にする）。鍵は最初の承認のときに作ったものを使い続ける。 */
+  approvePublication(tenantId: string, id: string, p: { key: string; scope: InventoryPublicationScope; approvedBy: string; approvedAt: string }): Promise<void>;
+  setPublicationStatus(tenantId: string, id: string, status: 'live' | 'stopped'): Promise<void>;
+  savePublicationSnapshot(tenantId: string, id: string, snapshot: InventoryPublicSnapshot, at: string): Promise<void>;
+  deletePublication(tenantId: string, id: string): Promise<void>;
   /** 鍵から公開を引く（会社の判定より前に呼ぶ）。 */
-  findPublicationByKey(key: string): Promise<{ tenantId: string; status: 'live' | 'stopped'; snapshot: InventoryPublicSnapshot | null } | null>;
+  findPublicationByKey(key: string): Promise<{ tenantId: string; status: 'draft' | 'live' | 'stopped'; snapshot: InventoryPublicSnapshot | null } | null>;
 }
 
 // ---- PostgreSQL ----------------------------------------------------------
@@ -302,6 +310,21 @@ function toCountLine(r: CountLineRow): CountLineRecord {
   return {
     itemId: r.item_id, locationId: r.location_id, lotId: r.lot_id, lot: r.lot, expiresOn: day(r.expires_on),
     counted: num(r.counted), bookAtCount: num(r.book_at_count), countedBy: r.counted_by, updatedAt: iso(r.updated_at),
+  };
+}
+
+interface PublicationRow {
+  id: string; name: string; public_key: string | null; approved: InventoryPublicationScope | null; approved_by: string | null;
+  approved_at: unknown; status: 'draft' | 'live' | 'stopped'; snapshot: InventoryPublicSnapshot | null; snapshot_at: unknown; created_at: unknown;
+}
+
+const PUBLICATION_SELECT = `select id, name, public_key, approved, approved_by, approved_at, status, snapshot, snapshot_at, created_at
+  from inventory_publications`;
+
+function toPublication(r: PublicationRow): PublicationRecord {
+  return {
+    id: r.id, name: r.name, key: r.public_key, scope: r.approved, approvedBy: r.approved_by, approvedAt: r.approved_at ? iso(r.approved_at) : null,
+    status: r.status, snapshot: r.snapshot, snapshotAt: r.snapshot_at ? iso(r.snapshot_at) : null, createdAt: iso(r.created_at),
   };
 }
 
@@ -682,36 +705,51 @@ export class PostgresInventoryStore implements InventoryStore {
     });
   }
 
-  async getPublication(tenantId: string): Promise<PublicationRecord | null> {
-    const rows = await this.q<{ public_key: string; approved: InventoryPublicationScope; approved_by: string; approved_at: unknown; status: 'live' | 'stopped'; snapshot: InventoryPublicSnapshot | null; snapshot_at: unknown }>(
-      tenantId, 'select public_key, approved, approved_by, approved_at, status, snapshot, snapshot_at from inventory_publications where tenant_id = $1', [tenantId]);
-    const r = rows[0];
-    return r ? {
-      key: r.public_key, scope: r.approved, approvedBy: r.approved_by, approvedAt: iso(r.approved_at), status: r.status,
-      snapshot: r.snapshot, snapshotAt: r.snapshot_at ? iso(r.snapshot_at) : null,
-    } : null;
+  async listPublications(tenantId: string): Promise<PublicationRecord[]> {
+    const rows = await this.q<PublicationRow>(tenantId, `${PUBLICATION_SELECT} where tenant_id = $1 order by created_at, id`, [tenantId]);
+    return rows.map(toPublication);
   }
 
-  async approvePublication(tenantId: string, p: { key: string; scope: InventoryPublicationScope; approvedBy: string; approvedAt: string }): Promise<void> {
-    await this.q(tenantId, `insert into inventory_publications (tenant_id, public_key, approved, approved_by, approved_at, status)
-      values ($1, $2, $3, $4, $5, 'live')
-      on conflict (tenant_id) do update set approved = excluded.approved, approved_by = excluded.approved_by,
-        approved_at = excluded.approved_at, status = 'live'`, [tenantId, p.key, JSON.stringify(p.scope), p.approvedBy, p.approvedAt]);
+  async getPublication(tenantId: string, id: string): Promise<PublicationRecord | null> {
+    const rows = await this.q<PublicationRow>(tenantId, `${PUBLICATION_SELECT} where tenant_id = $1 and id = $2`, [tenantId, id]);
+    return rows[0] ? toPublication(rows[0]) : null;
   }
 
-  async setPublicationStatus(tenantId: string, status: 'live' | 'stopped'): Promise<void> {
-    await this.q(tenantId, 'update inventory_publications set status = $2 where tenant_id = $1', [tenantId, status]);
+  async createPublication(tenantId: string, p: { id: string; name: string; at: string }): Promise<void> {
+    // 同じ ID を重ねて作らない（最初のまとまりを、同時に開いた画面が重ねて作らないため）
+    await this.q(tenantId, `insert into inventory_publications (tenant_id, id, name, status, created_at) values ($1, $2, $3, 'draft', $4)
+      on conflict (tenant_id, id) do nothing`,
+      [tenantId, p.id, p.name, p.at]);
   }
 
-  async savePublicationSnapshot(tenantId: string, snapshot: InventoryPublicSnapshot, at: string): Promise<void> {
-    await this.q(tenantId, 'update inventory_publications set snapshot = $2, snapshot_at = $3 where tenant_id = $1', [tenantId, JSON.stringify(snapshot), at]);
+  async renamePublication(tenantId: string, id: string, name: string): Promise<void> {
+    await this.q(tenantId, 'update inventory_publications set name = $3 where tenant_id = $1 and id = $2', [tenantId, id, name]);
   }
 
-  async findPublicationByKey(key: string): Promise<{ tenantId: string; status: 'live' | 'stopped'; snapshot: InventoryPublicSnapshot | null } | null> {
+  async approvePublication(tenantId: string, id: string, p: { key: string; scope: InventoryPublicationScope; approvedBy: string; approvedAt: string }): Promise<void> {
+    // 鍵は最初の承認のときだけ入れる（承認し直しても変えない）
+    await this.q(tenantId, `update inventory_publications set public_key = coalesce(public_key, $3), approved = $4, approved_by = $5,
+      approved_at = $6, status = 'live' where tenant_id = $1 and id = $2`, [tenantId, id, p.key, JSON.stringify(p.scope), p.approvedBy, p.approvedAt]);
+  }
+
+  async setPublicationStatus(tenantId: string, id: string, status: 'live' | 'stopped'): Promise<void> {
+    await this.q(tenantId, 'update inventory_publications set status = $3 where tenant_id = $1 and id = $2', [tenantId, id, status]);
+  }
+
+  async savePublicationSnapshot(tenantId: string, id: string, snapshot: InventoryPublicSnapshot, at: string): Promise<void> {
+    await this.q(tenantId, 'update inventory_publications set snapshot = $3, snapshot_at = $4 where tenant_id = $1 and id = $2',
+      [tenantId, id, JSON.stringify(snapshot), at]);
+  }
+
+  async deletePublication(tenantId: string, id: string): Promise<void> {
+    await this.q(tenantId, 'delete from inventory_publications where tenant_id = $1 and id = $2', [tenantId, id]);
+  }
+
+  async findPublicationByKey(key: string): Promise<{ tenantId: string; status: 'draft' | 'live' | 'stopped'; snapshot: InventoryPublicSnapshot | null } | null> {
     // 会社の判定より前に呼ぶ。鍵で 1 行だけ返す関数を使う（移行 038）
     const client = await this.pool.connect();
     try {
-      const { rows } = await client.query<{ tenant_id: string; status: 'live' | 'stopped'; snapshot: InventoryPublicSnapshot | null }>(
+      const { rows } = await client.query<{ tenant_id: string; status: 'draft' | 'live' | 'stopped'; snapshot: InventoryPublicSnapshot | null }>(
         'select tenant_id, status, snapshot from m2o_inventory_publication($1)', [key]);
       const r = rows[0];
       return r ? { tenantId: r.tenant_id, status: r.status, snapshot: r.snapshot } : null;
@@ -1017,30 +1055,59 @@ export class MemoryInventoryStore implements InventoryStore {
     this.menuItems.set(`${tenantId}\u0000${menuKey}`, [...rows]);
   }
 
-  readonly publications = new Map<string, PublicationRecord>();
+  readonly publications = new Map<string, PublicationRecord & { tenantId: string }>();
 
-  async getPublication(tenantId: string): Promise<PublicationRecord | null> {
-    const p = this.publications.get(tenantId);
-    return p ? { ...p } : null;
+  private pub(tenantId: string, id: string) {
+    const p = this.publications.get(`${tenantId}\u0000${id}`);
+    return p && p.tenantId === tenantId ? p : null;
   }
 
-  async approvePublication(tenantId: string, p: { key: string; scope: InventoryPublicationScope; approvedBy: string; approvedAt: string }): Promise<void> {
-    const prev = this.publications.get(tenantId);
-    this.publications.set(tenantId, { snapshot: null, snapshotAt: null, ...prev, ...p, key: prev?.key ?? p.key, status: 'live' });
+  async listPublications(tenantId: string): Promise<PublicationRecord[]> {
+    return [...this.publications.values()].filter((p) => p.tenantId === tenantId)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)).map(({ tenantId: _t, ...p }) => ({ ...p }));
   }
 
-  async setPublicationStatus(tenantId: string, status: 'live' | 'stopped'): Promise<void> {
-    const p = this.publications.get(tenantId);
+  async getPublication(tenantId: string, id: string): Promise<PublicationRecord | null> {
+    const p = this.pub(tenantId, id);
+    if (!p) return null;
+    const { tenantId: _t, ...rest } = p;
+    return { ...rest };
+  }
+
+  async createPublication(tenantId: string, p: { id: string; name: string; at: string }): Promise<void> {
+    if (this.publications.has(`${tenantId}\u0000${p.id}`)) return;
+    this.publications.set(`${tenantId}\u0000${p.id}`, {
+      tenantId, id: p.id, name: p.name, key: null, scope: null, approvedBy: null, approvedAt: null, status: 'draft', snapshot: null, snapshotAt: null, createdAt: p.at,
+    });
+  }
+
+  async renamePublication(tenantId: string, id: string, name: string): Promise<void> {
+    const p = this.pub(tenantId, id);
+    if (p) p.name = name;
+  }
+
+  async approvePublication(tenantId: string, id: string, a: { key: string; scope: InventoryPublicationScope; approvedBy: string; approvedAt: string }): Promise<void> {
+    const p = this.pub(tenantId, id);
+    if (!p) return;
+    Object.assign(p, { key: p.key ?? a.key, scope: a.scope, approvedBy: a.approvedBy, approvedAt: a.approvedAt, status: 'live' });
+  }
+
+  async setPublicationStatus(tenantId: string, id: string, status: 'live' | 'stopped'): Promise<void> {
+    const p = this.pub(tenantId, id);
     if (p) p.status = status;
   }
 
-  async savePublicationSnapshot(tenantId: string, snapshot: InventoryPublicSnapshot, at: string): Promise<void> {
-    const p = this.publications.get(tenantId);
+  async savePublicationSnapshot(tenantId: string, id: string, snapshot: InventoryPublicSnapshot, at: string): Promise<void> {
+    const p = this.pub(tenantId, id);
     if (p) { p.snapshot = snapshot; p.snapshotAt = at; }
   }
 
-  async findPublicationByKey(key: string): Promise<{ tenantId: string; status: 'live' | 'stopped'; snapshot: InventoryPublicSnapshot | null } | null> {
-    for (const [tenantId, p] of this.publications) if (p.key === key) return { tenantId, status: p.status, snapshot: p.snapshot };
+  async deletePublication(tenantId: string, id: string): Promise<void> {
+    this.publications.delete(`${tenantId}\u0000${id}`);
+  }
+
+  async findPublicationByKey(key: string): Promise<{ tenantId: string; status: 'draft' | 'live' | 'stopped'; snapshot: InventoryPublicSnapshot | null } | null> {
+    for (const p of this.publications.values()) if (p.key === key) return { tenantId: p.tenantId, status: p.status, snapshot: p.snapshot };
     return null;
   }
 }

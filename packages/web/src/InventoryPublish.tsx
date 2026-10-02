@@ -1,18 +1,19 @@
 /**
- * @file 在庫管理のパソコンの画面の「Web への公開」の欄（仕様書 第29.12節・第29.12.1節。段 5）。
+ * @file 在庫管理のパソコンの画面の「Web へ公開」の欄（仕様書 第29.12節・第29.12.1節・第29.12.2節。段 5）。
  *
- * 管理者が、公開する品目・分類で分けるか・販売価格を出すか・数か状態かを選び、見本で確かめて「この内容で公開する」を押す。
+ * 公開は 1 社でいくつものまとまりに分けられる（Web サイトのページごとに違う品目を出すため）。まとまりはタブで切り替える。
+ * 管理者が、まとまりごとに公開する品目・分類で分けるか・販売価格を出すか・数か状態かを選び、見本で確かめて「この内容で公開する」を押す。
  * 押すことが承認である（社外に出るもの。第9.4.0節）。承認した範囲の数の変化は、承認なしに自動で流れる。
  * 公開したら、Web サイトに貼る iframe の 1 行と公開のデータの URL を出す。説明文を常に出さない（原則 u11）。
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   INVENTORY_PUBLIC_STATUS_LABELS, type InventoryItemView, type InventoryPublicationScope, type InventoryPublicField, type InventoryPublicSnapshot,
 } from '@m2office/shared';
 import { api, describeError, type InventoryPublicationView } from './api.js';
 
-/** 何も承認していない会社の、はじめの選び方（品目はすべて・分類と価格あり・状態だけ）。 */
+/** 承認する前のまとまりの、はじめの選び方（品目はすべて・分類と価格あり・状態だけ）。 */
 function initialScope(items: InventoryItemView[]): InventoryPublicationScope {
   return { itemIds: items.filter((i) => i.status === 'active').map((i) => i.id), fields: ['category', 'price'], showCount: false };
 }
@@ -29,71 +30,132 @@ const when = (iso: string) => new Date(iso).toLocaleString('ja-JP', { dateStyle:
 /** Web サイトに貼る 1 行。 */
 const iframeTag = (url: string) => `<iframe src="${url}" title="在庫の状況" style="width:100%;height:480px;border:0" loading="lazy"></iframe>`;
 
+/** タブに添える状態の印。 */
+const STATUS_MARK: Record<'draft' | 'live' | 'stopped', string> = { draft: '未公開', live: '公開中', stopped: '止めています' };
+
 /**
- * Web への公開の欄。管理者にだけ出す（呼ぶ側で、管理者で「Web への公開」が入のときだけ出す）。
+ * Web へ公開の欄。管理者にだけ出す（呼ぶ側で、管理者で「Web への公開」が入のときだけ出す）。
  *
  * @param items 品目の一覧（止めた品目を含まない）
  */
 export function PublishPanel({ items }: { items: InventoryItemView[] }) {
-  const [view, setView] = useState<InventoryPublicationView | null>(null);
-  const [scope, setScope] = useState<InventoryPublicationScope | null>(null);
+  const [list, setList] = useState<InventoryPublicationView[] | null>(null);
+  const [max, setMax] = useState(8);
+  const [current, setCurrent] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const load = useCallback(async (select?: string | null) => {
+    try {
+      const r = await api.inventory.publications();
+      setMax(r.max);
+      // まだ 1 つも無い会社には、サーバーが最初のまとまりを作って返す（「＋」を押さなくても始められる）
+      const rows = r.items;
+      if (rows.length === 0) return;
+      setList(rows);
+      setCurrent((cur) => {
+        const want = select !== undefined ? select : cur;
+        return want && rows.some((v) => v.publication.id === want) ? want : rows[0]!.publication.id;
+      });
+    } catch (e) {
+      setMessage(describeError(e, '読み込めませんでした'));
+    }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  const add = async () => {
+    try {
+      const v = await api.inventory.createPublication();
+      await load(v.publication.id);
+    } catch (e) {
+      setMessage(describeError(e, '足せませんでした'));
+    }
+  };
+
+  if (!list) return <div className="card inventory-publish">{message ? <p className="error">{message}</p> : <p className="muted">読み込み中…</p>}</div>;
+  const view = list.find((v) => v.publication.id === current) ?? list[0]!;
+
+  return (
+    <div className="card inventory-publish">
+      <div className="publish-tabs" role="tablist" aria-label="公開のまとまり">
+        {list.map((v) => (
+          <button key={v.publication.id} role="tab" aria-selected={v.publication.id === view.publication.id}
+            className={`publish-tab${v.publication.id === view.publication.id ? ' on' : ''}`} onClick={() => setCurrent(v.publication.id)}>
+            {v.publication.name}
+            <span className={`publish-tab-mark ${v.publication.status}`}>{STATUS_MARK[v.publication.status]}</span>
+          </button>
+        ))}
+        {list.length < max && <button className="publish-tab add" onClick={() => void add()} aria-label="公開のまとまりを足す">＋</button>}
+      </div>
+      {message && <p className="small muted" role="status">{message}</p>}
+      <PublicationEditor key={view.publication.id} view={view} items={items} onChanged={(select) => void load(select)} />
+    </div>
+  );
+}
+
+/**
+ * まとまり 1 つの欄（名前・出し方・品目・見本・承認・止める・削除・貼る URL）。
+ *
+ * @param onChanged 状態が変わったとき（削除したら `null` を渡し、別のまとまりを選ぶ）
+ */
+function PublicationEditor({ view: initial, items, onChanged }: {
+  view: InventoryPublicationView; items: InventoryItemView[]; onChanged: (select?: string | null) => void;
+}) {
+  const [view, setView] = useState(initial);
+  const active = useMemo(() => items.filter((i) => i.status === 'active'), [items]);
+  const [scope, setScope] = useState<InventoryPublicationScope>(initial.publication.scope ?? initialScope(items));
+  const [name, setName] = useState(initial.publication.name);
   const [preview, setPreview] = useState<InventoryPublicSnapshot | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const active = useMemo(() => items.filter((i) => i.status === 'active'), [items]);
-
-  useEffect(() => {
-    api.inventory.publication().then((v) => {
-      setView(v);
-      setScope(v.publication ? v.publication.scope : initialScope(active));
-    }).catch((e) => setMessage(describeError(e, '読み込めませんでした')));
-    // 開いたときに 1 回だけ読む（品目の一覧が変わっても、選んでいる途中の中身は変えない）
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // 選び方が変わったら、少し待って見本を取り直す
   useEffect(() => {
-    if (!scope) return;
-    if (scope.itemIds.length === 0) { setPreview(null); return; }
+    if (scope.itemIds.length === 0) { setPreview(null); return undefined; }
     const t = setTimeout(() => {
       api.inventory.previewPublication(scope).then((r) => setPreview(r.snapshot)).catch((e) => setMessage(describeError(e, '見本を作れませんでした')));
     }, 300);
     return () => clearTimeout(t);
   }, [scope]);
 
-  if (!view || !scope) return <div className="card inventory-publish">{message ? <p className="error">{message}</p> : <p className="muted">読み込み中…</p>}</div>;
-
   const pub = view.publication;
-  const live = pub?.status === 'live';
-  const unchanged = !!pub && live && sameScope(pub.scope, scope);
+  const live = pub.status === 'live';
+  const unchanged = live && !!pub.scope && sameScope(pub.scope, scope);
   const chosen = new Set(scope.itemIds);
-  const notInScope = pub ? active.filter((i) => !pub.scope.itemIds.includes(i.id)).length : 0;
+  const notInScope = pub.scope ? active.filter((i) => !pub.scope!.itemIds.includes(i.id)).length : 0;
+  const categories = [...new Set(active.map((i) => i.category).filter(Boolean))];
   const setField = (f: InventoryPublicField, on: boolean) =>
     setScope({ ...scope, fields: on ? [...new Set([...scope.fields, f])] : scope.fields.filter((x) => x !== f) });
   const toggleItem = (id: string, on: boolean) =>
     setScope({ ...scope, itemIds: on ? [...scope.itemIds, id] : scope.itemIds.filter((x) => x !== id) });
+  const selectCategory = (cat: string) =>
+    setScope({ ...scope, itemIds: [...new Set([...scope.itemIds, ...active.filter((i) => i.category === cat).map((i) => i.id)])] });
 
-  const approve = async () => {
+  const act = async (fn: () => Promise<InventoryPublicationView>, failed: string) => {
     setBusy(true);
     setMessage(null);
     try {
-      const v = await api.inventory.approvePublication(scope);
+      const v = await fn();
       setView(v);
-      if (v.publication) setScope(v.publication.scope);
+      if (v.publication.scope) setScope(v.publication.scope);
+      onChanged(v.publication.id);
     } catch (e) {
-      setMessage(describeError(e, '公開できませんでした'));
+      setMessage(describeError(e, failed));
     } finally {
       setBusy(false);
     }
   };
-  const stop = async () => {
+  const saveName = () => {
+    const n = name.trim();
+    if (!n || n === pub.name) { setName(pub.name); return; }
+    void act(() => api.inventory.renamePublication(pub.id, n), '名前を変えられませんでした');
+  };
+  const remove = async () => {
     setBusy(true);
-    setMessage(null);
     try {
-      setView(await api.inventory.stopPublication());
+      await api.inventory.deletePublication(pub.id);
+      onChanged(null);
     } catch (e) {
-      setMessage(describeError(e, '止められませんでした'));
-    } finally {
+      setMessage(describeError(e, '削除できませんでした'));
       setBusy(false);
     }
   };
@@ -102,15 +164,11 @@ export function PublishPanel({ items }: { items: InventoryItemView[] }) {
   };
 
   return (
-    <div className="card inventory-publish">
+    <>
       <div className="publish-head">
-        <h3>Web へ公開</h3>
-        {pub && (
-          <span className={live ? 'chip current' : 'chip todo'}>
-            {live ? '公開中' : '止めています'}
-          </span>
-        )}
-        {pub && <span className="muted small">{pub.approvedByName ?? '管理者'}さんが {when(pub.approvedAt)} に承認</span>}
+        <input className="publish-name" value={name} onChange={(e) => setName(e.target.value)} onBlur={saveName}
+          onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} aria-label="公開の名前" maxLength={40} />
+        {pub.approvedAt && <span className="muted small">{pub.approvedByName ?? '管理者'}さんが {when(pub.approvedAt)} に承認</span>}
       </div>
 
       <div className="publish-options">
@@ -129,6 +187,11 @@ export function PublishPanel({ items }: { items: InventoryItemView[] }) {
             <button className="link small" onClick={() => setScope({ ...scope, itemIds: active.map((i) => i.id) })}>すべて</button>
             <button className="link small" onClick={() => setScope({ ...scope, itemIds: [] })}>外す</button>
           </div>
+          {categories.length > 1 && (
+            <div className="publish-categories">
+              {categories.map((c) => <button key={c} className="chip-btn small" onClick={() => selectCategory(c)}>{c}</button>)}
+            </div>
+          )}
           <ul>
             {active.map((i) => (
               <li key={i.id}>
@@ -150,10 +213,12 @@ export function PublishPanel({ items }: { items: InventoryItemView[] }) {
       {view.stoppedInScope > 0 && <p className="small muted">止めた品目 {view.stoppedInScope} 件は出ていません</p>}
 
       <div className="publish-actions">
-        <button className="btn" disabled={busy || unchanged || scope.itemIds.length === 0} onClick={() => void approve()}>
+        <button className="btn" disabled={busy || unchanged || scope.itemIds.length === 0}
+          onClick={() => void act(() => api.inventory.approvePublication(pub.id, scope), '公開できませんでした')}>
           {unchanged ? '公開中' : 'この内容で公開する'}
         </button>
-        {live && <button className="btn ghost danger" disabled={busy} onClick={() => void stop()}>公開を止める</button>}
+        {live && <button className="btn ghost danger" disabled={busy} onClick={() => void act(() => api.inventory.stopPublication(pub.id), '止められませんでした')}>公開を止める</button>}
+        {!live && <button className="btn ghost danger" disabled={busy} onClick={() => void remove()}>削除</button>}
       </div>
 
       {view.urls && (
@@ -174,7 +239,7 @@ export function PublishPanel({ items }: { items: InventoryItemView[] }) {
         </div>
       )}
       {message && <p className="small muted" role="status">{message}</p>}
-    </div>
+    </>
   );
 }
 

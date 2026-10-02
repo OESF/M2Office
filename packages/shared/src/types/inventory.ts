@@ -292,15 +292,21 @@ export interface InventoryPublicSnapshot {
   items: InventoryPublicRow[];
 }
 
-/** 会社の公開の状態（管理者に見せる）。 */
+/** 1 社で持てる公開のまとまりの数（第29.12.2節）。 */
+export const INVENTORY_PUBLICATION_MAX = 8;
+
+/** 公開のまとまり 1 つの状態（管理者に見せる。第29.12.2節）。承認する前（`draft`）は中身・鍵・承認した人を持たない。 */
 export interface InventoryPublication {
-  scope: InventoryPublicationScope;
+  id: string;
+  /** タブに出す名前（公開のページには出さない）。 */
+  name: string;
+  scope: InventoryPublicationScope | null;
   /** 承認した管理者。 */
-  approvedBy: string;
+  approvedBy: string | null;
   approvedByName?: string;
-  approvedAt: string;
-  status: 'live' | 'stopped';
-  /** 公開の URL の鍵。 */
-  key: string;
+  approvedAt: string | null;
+  status: 'draft' | 'live' | 'stopped';
+  /** 公開の URL の鍵。最初の承認のときに作る。 */
+  key: string | null;
   snapshotAt: string | null;
 }

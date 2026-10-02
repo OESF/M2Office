@@ -1696,3 +1696,14 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .opt-outs-body { margin-top: calc(4px * var(--space-scale)); display: flex; flex-direction: column; gap: calc(4px * var(--space-scale)); max-width: 560px; }
 .opt-outs-body ul { list-style: none; margin: 0; padding: 0; max-height: 240px; overflow-y: auto; }
 .opt-outs-body li { display: flex; flex-wrap: wrap; align-items: baseline; gap: calc(8px * var(--space-scale)); padding: 2px 0; border-bottom: 1px solid var(--line); }
+
+/* 在庫の公開のまとまりのタブ（第29.12.2節）。名前と状態の印を並べ、「＋」で足す */
+.publish-tabs { display: flex; flex-wrap: wrap; gap: calc(4px * var(--space-scale)); border-bottom: 1px solid var(--line); padding-bottom: calc(6px * var(--space-scale)); }
+.publish-tab { background: none; border: 1px solid var(--line); border-radius: 6px; padding: calc(4px * var(--space-scale)) calc(10px * var(--space-scale)); cursor: pointer; display: inline-flex; align-items: center; gap: calc(6px * var(--space-scale)); color: inherit; font: inherit; font-size: calc(13px * var(--font-scale)); }
+.publish-tab.on { border-color: var(--accent); background: var(--accent-soft, transparent); font-weight: 600; }
+.publish-tab.add { font-weight: 600; min-width: 2.4em; justify-content: center; }
+.publish-tab-mark { font-size: calc(11px * var(--font-scale)); color: var(--muted); font-weight: normal; }
+.publish-tab-mark.live { color: var(--ok); }
+.publish-name { font-weight: 600; font-size: calc(15px * var(--font-scale)); max-width: 20em; }
+.publish-categories { display: flex; flex-wrap: wrap; gap: calc(4px * var(--space-scale)); padding: calc(4px * var(--space-scale)) 0; }
+.chip-btn { background: none; border: 1px solid var(--line); border-radius: 999px; padding: 1px calc(8px * var(--space-scale)); cursor: pointer; color: inherit; font: inherit; font-size: calc(12px * var(--font-scale)); }
