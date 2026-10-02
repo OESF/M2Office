@@ -49,6 +49,20 @@ export function filesRoute(deps: AppDeps) {
     return c.json(f.meta);
   });
 
+  /**
+   * 画像（PNG・JPEG）を画面に出す（承認の画面のカバー画像など。仕様書 第32.18.2節）。読める人は中身と同じ（所有者と、判断する承認者）。
+   *
+   * @remarks 画像のほかは返さない（PDF などを画面の権限で開かせない）。中身を実行させない見出しを付ける
+   */
+  app.get('/:id/view', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const f = await loadFile(deps.repo, deps.files, tenant.id, c.req.param('id'), user);
+    if (!f || (f.meta.kind !== 'png' && f.meta.kind !== 'jpeg')) return c.json({ error: 'ファイルが見つかりません' }, 404);
+    return new Response(Buffer.from(f.bytes), {
+      headers: { 'content-type': f.meta.mime, 'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'none'; sandbox", 'cache-control': 'private, max-age=3600' },
+    });
+  });
+
   app.get('/:id/content', async (c) => {
     const { tenant, user } = c.get('ctx');
     const f = await loadFile(deps.repo, deps.files, tenant.id, c.req.param('id'), user);

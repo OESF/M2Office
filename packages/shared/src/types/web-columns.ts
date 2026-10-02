@@ -37,11 +37,13 @@ export interface WebColumnSettings {
   aiNotice: boolean;
   /** WordPress の入れ先。無ければ承認で「承認済み」にするだけ。 */
   wordpress: ColumnWordPress | null;
+  /** カバー画像の背景を生成 AI で描くか（第32.7.1節。既定は切り）。 */
+  aiIllustration: boolean;
 }
 
 /** 既定の設定。既定は切り（第32.2節）。 */
 export const DEFAULT_WEB_COLUMN_SETTINGS: WebColumnSettings = {
-  enabled: false, topics: [], audience: '', industry: 'general', supervisor: null, aiNotice: true, wordpress: null,
+  enabled: false, topics: [], audience: '', industry: 'general', supervisor: null, aiNotice: true, wordpress: null, aiIllustration: false,
 };
 
 /** コラムの状態。 */
@@ -65,6 +67,40 @@ export interface ColumnReviewItem {
   kind: 'expression' | 'source' | 'privacy' | 'readability';
 }
 
+/** カバー画像の背景の種類（第32.7.1節）。template（型）・ai（AI の挿絵）・photo（会社の写真）。 */
+export type ColumnCoverKind = 'template' | 'ai' | 'photo';
+
+/** カバー画像の背景の呼び方。 */
+export const COLUMN_COVER_KIND_LABELS: Record<ColumnCoverKind, string> = {
+  template: '型', ai: 'AI が描いた挿絵', photo: '会社の写真',
+};
+
+/** 版のカバー画像（第32.18.2節）。 */
+export interface WebColumnCover {
+  /** 組み立てた PNG（1,200×630）のファイル。 */
+  fileId: string;
+  kind: ColumnCoverKind;
+  /** 型の模様（型のときだけ）。 */
+  pattern: string | null;
+  /** 会社の写真（写真のときだけ）。 */
+  photoId: string | null;
+  /** 代わりの文。 */
+  alt: string;
+  /** このカバーを作るときに AI の挿絵を描いた枚数（確かめを通らなかった分も数える）。 */
+  aiAttempts: number;
+  /** 確かめの結果や、型にした理由（無ければ空）。 */
+  note: string;
+}
+
+/** 会社の写真の置き場の 1 枚（第32.18.2節）。 */
+export interface ColumnPhoto {
+  id: string;
+  fileId: string;
+  description: string;
+  hasPeople: boolean;
+  createdAt: string;
+}
+
 /** 出典 1 つ。 */
 export interface ColumnSource {
   title: string;
@@ -85,7 +121,9 @@ export interface WebColumnVersion {
   sns: { short: string; long: string };
   sources: ColumnSource[];
   review: ColumnReviewItem[];
-  origin: 'writer' | 'rewrite' | 'edit' | 'suggestion' | 'restore';
+  /** カバー画像。まだ作っていなければ `null`。 */
+  cover: WebColumnCover | null;
+  origin: 'writer' | 'rewrite' | 'edit' | 'suggestion' | 'restore' | 'cover';
   createdBy: string;
   createdByName?: string;
   createdAt: string;

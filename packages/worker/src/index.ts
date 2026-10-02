@@ -131,7 +131,7 @@ const signage = new SignageService({
 const signageInterrupts = new SignageInterrupts({ service: signage, repo });
 // Web のコラム（内蔵の拡張。仕様書 第32章）。秘書から頼まれた下書きと、承認の後に WordPress に入れるのが使う
 const columns = new ColumnService({
-  store: new PostgresColumnStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+  store: new PostgresColumnStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), files,
   repo, box, llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId), logger: log,
 });
 const engine = new RunEngine({

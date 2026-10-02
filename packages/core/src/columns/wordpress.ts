@@ -1,7 +1,7 @@
 /**
  * @file WordPress への書き込み（仕様書 第32.10節・第32.18.1節）。REST API（`wp-json/wp/v2`）を、アプリケーションパスワードで呼ぶ。
  *
- * 段 1 は**下書き**として入れるだけで、公開は WordPress の側で押す（Q-162 の案）。
+ * 段 1 は**下書き**として入れるだけで、公開は WordPress の側で押す（Q-162）。
  * パスワードは会社の接続の秘密の値として暗号化して預け（移行 062）、呼ぶときだけ取り出す。画面にも記録にも出さない。
  * 相手の応答は外部のデータとして扱う。
  */
@@ -60,17 +60,47 @@ export function columnHtml(markdown: string): string {
  *
  * @returns 記事の ID と、WordPress の編集の画面の URL
  */
-export async function createWordPressDraft(a: WordPressAuth, post: { title: string; html: string; excerpt: string }): Promise<{ id: string; editUrl: string } | { error: string }> {
+export async function createWordPressDraft(a: WordPressAuth, post: { title: string; html: string; excerpt: string; featuredMedia?: string | null }): Promise<{ id: string; editUrl: string } | { error: string }> {
   try {
     const res = await fetch(`${a.siteUrl}/wp-json/wp/v2/posts`, {
       method: 'POST', headers: headers(a), signal: AbortSignal.timeout(TIMEOUT_MS),
-      body: JSON.stringify({ title: post.title, content: post.html, excerpt: post.excerpt, status: 'draft' }),
+      body: JSON.stringify({
+        title: post.title, content: post.html, excerpt: post.excerpt, status: 'draft',
+        ...(post.featuredMedia ? { featured_media: Number(post.featuredMedia) } : {}),
+      }),
     });
     if (!res.ok) return { error: `WordPress に入れられませんでした（${res.status}）` };
     const body = await res.json() as { id?: unknown };
     const id = String(body.id ?? '');
     if (!id) return { error: 'WordPress の応答に記事の ID がありません' };
     return { id, editUrl: `${a.siteUrl}/wp-admin/post.php?post=${encodeURIComponent(id)}&action=edit` };
+  } catch (err) {
+    return { error: `WordPress に届きませんでした（${err instanceof Error ? err.message : String(err)}）` };
+  }
+}
+
+/**
+ * 画像を WordPress のメディアに入れる（カバー画像。仕様書 第32.18.2節）。代わりの文も付ける。
+ *
+ * @returns メディアの ID。入れられなければ理由
+ */
+export async function uploadWordPressMedia(a: WordPressAuth, img: { bytes: Uint8Array; fileName: string; mimeType: string; alt: string }): Promise<{ id: string } | { error: string }> {
+  try {
+    const h = headers(a);
+    const res = await fetch(`${a.siteUrl}/wp-json/wp/v2/media`, {
+      method: 'POST', signal: AbortSignal.timeout(TIMEOUT_MS),
+      headers: { authorization: h['authorization']!, accept: 'application/json', 'content-type': img.mimeType, 'content-disposition': `attachment; filename="${img.fileName.replace(/[^\w.-]/g, '_')}"` },
+      body: Buffer.from(img.bytes),
+    });
+    if (!res.ok) return { error: `カバー画像を WordPress に入れられませんでした（${res.status}）` };
+    const body = await res.json() as { id?: unknown };
+    const id = String(body.id ?? '');
+    if (!id) return { error: 'WordPress の応答にメディアの ID がありません' };
+    // 代わりの文は入れた後に付ける（入れるときの口では受け取らないため）。付けられなくても記事は作る
+    await fetch(`${a.siteUrl}/wp-json/wp/v2/media/${encodeURIComponent(id)}`, {
+      method: 'POST', headers: h, signal: AbortSignal.timeout(TIMEOUT_MS), body: JSON.stringify({ alt_text: img.alt }),
+    }).catch(() => undefined);
+    return { id };
   } catch (err) {
     return { error: `WordPress に届きませんでした（${err instanceof Error ? err.message : String(err)}）` };
   }

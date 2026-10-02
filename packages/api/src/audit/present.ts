@@ -174,6 +174,7 @@ const ACTION_LABELS: Record<string, string> = {
   'column.approve': 'Web のコラムを承認した',
   'column.place': 'Web のコラムを WordPress に入れた',
   'column.delete': 'Web のコラムを削除した',
+  'column.photo_add': 'Web のコラムの写真を入れた',
   'column.wordpress_save': 'Web のコラムの WordPress の鍵を預けた',
   'column.wordpress_remove': 'Web のコラムの WordPress の鍵を外した',
   // 人事・給与（仕様書 第30.21節。他人の台帳を見ただけでも残す）

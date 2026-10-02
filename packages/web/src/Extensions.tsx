@@ -271,7 +271,7 @@ function InstalledCard({ item: x, busy, focused = false, options, onChanged, onT
       {x.inventory && on && <InventoryFields settings={x.inventory} busy={busy} onChanged={onChanged} />}
       {x.hr && on && <HrFields settings={x.hr} busy={busy} onChanged={onChanged} />}
       {x.signage && on && <SignageFields settings={x.signage} busy={busy} onChanged={onChanged} />}
-      {x.webColumns && on && <WebColumnsFields settings={x.webColumns} busy={busy} onChanged={onChanged} />}
+      {x.webColumns && on && <WebColumnsFields settings={x.webColumns} usage={x.columnAiUsage ?? null} busy={busy} onChanged={onChanged} />}
       <div className="row small">
         <button className="link" onClick={() => setOpen(!open)}>{open ? '詳細を閉じる' : '詳細'}</button>
         {/* 内蔵の拡張は削除しない。スイッチで切る（データは消えない。第12.13節） */}
@@ -512,7 +512,7 @@ function SignageFields({ settings, busy, onChanged }: { settings: SignageSetting
  *
  * @remarks アプリケーションパスワードは預けたら画面に戻さない。つながるかを確かめてから預ける
  */
-function WebColumnsFields({ settings, busy, onChanged }: { settings: WebColumnSettings; busy: boolean; onChanged: () => void }) {
+function WebColumnsFields({ settings, usage, busy, onChanged }: { settings: WebColumnSettings; usage: { used: number; limit: number } | null; busy: boolean; onChanged: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [wp, setWp] = useState({ siteUrl: settings.wordpress?.siteUrl ?? '', username: settings.wordpress?.username ?? '', password: '' });
   const [connecting, setConnecting] = useState(false);
@@ -532,6 +532,9 @@ function WebColumnsFields({ settings, busy, onChanged }: { settings: WebColumnSe
           {(Object.keys(COLUMN_INDUSTRY_LABELS) as ColumnIndustry[]).map((k) => <option key={k} value={k}>{COLUMN_INDUSTRY_LABELS[k]}</option>)}
         </select></label>
         <label className="check"><input type="checkbox" checked={settings.aiNotice} disabled={busy} onChange={(e) => save({ aiNotice: e.target.checked })} /> AI が書いたことを記事の末尾に入れる</label>
+        {/* カバー画像の背景を生成 AI で描く（第32.7.1節。既定は切り）。今月の枚数と上限を添える */}
+        <label className="check"><input type="checkbox" checked={settings.aiIllustration} disabled={busy} onChange={(e) => save({ aiIllustration: e.target.checked })} /> AI で挿絵を描く</label>
+        {settings.aiIllustration && usage && <span className="muted">今月 {usage.used} / {usage.limit} 枚</span>}
       </div>
       <label className="ext-columns-wide">読み手 <input key={settings.audience} defaultValue={settings.audience} maxLength={200} disabled={busy} placeholder="市内の子育て世帯"
         onBlur={(e) => { const v = e.target.value.trim(); if (v !== settings.audience) save({ audience: v }); }} /></label>

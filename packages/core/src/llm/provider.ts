@@ -105,4 +105,21 @@ export interface LlmProvider {
    * @remarks 持たない提供者では未定義にし、呼び出し側は「読み取る準備ができていない」として扱う。返す文は JSON（解釈は呼び出し側）
    */
   extractFromImage?(req: LlmExtractRequest): Promise<LlmResponse>;
+  /**
+   * 画像を作る（Web のコラムのカバーの挿絵。仕様書 第32.18.2節）。
+   *
+   * @remarks 持たない提供者（見本・ローカル AI）では未定義にし、呼び出し側は「描けない」として型にする。
+   * 作った画像は社外に出る前に、呼び出し側が確かめる
+   */
+  generateImage?(req: LlmImageGenerateRequest): Promise<{ bytes: Uint8Array; mimeType: string } | null>;
+}
+
+/** 画像を作る依頼（{@link LlmProvider.generateImage}）。 */
+export interface LlmImageGenerateRequest {
+  /** 何を描くかの指示。 */
+  prompt: string;
+  /** 縦横の比（例: `16:9`）。 */
+  aspectRatio: string;
+  /** 使うモデル（例: `gemini-3.1-flash-image`）。 */
+  model: string;
 }

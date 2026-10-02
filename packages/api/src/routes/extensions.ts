@@ -98,8 +98,9 @@ export function extensionsRoute(deps: AppDeps) {
 
   app.get('/', async (c) => {
     const { tenant } = c.get('ctx');
-    const [view, settings, optOuts] = await Promise.all([
+    const [view, settings, optOuts, columnAiUsage] = await Promise.all([
       deps.tenantView(tenant.id), deps.repo.getTenantSettings(tenant.id), deps.cards.bulk.store.countOptOuts(tenant.id),
+      deps.columns.service.aiUsage(tenant.id),
     ]);
     return c.json({
       items: view.entries.map((e) => ({
@@ -119,7 +120,7 @@ export function extensionsRoute(deps: AppDeps) {
         // 店頭サイネージ: 画像の秒数・店の色（第31.4節）
         ...(e.pkg.manifest.id === SIGNAGE_EXTENSION_ID ? { signage: settings.signage } : {}),
         // Web のコラム: 分野・読み手・業種・監修者・AI の表示・WordPress の入れ先（第32.18.1節）。パスワードは返さない
-        ...(e.pkg.manifest.id === WEB_COLUMNS_EXTENSION_ID ? { webColumns: settings.webColumns } : {}),
+        ...(e.pkg.manifest.id === WEB_COLUMNS_EXTENSION_ID ? { webColumns: settings.webColumns, columnAiUsage } : {}),
       })),
     });
   });
@@ -335,11 +336,16 @@ export function extensionsRoute(deps: AppDeps) {
       if (typeof body['aiNotice'] !== 'boolean') return c.json({ error: 'aiNotice は true か false です' }, 400);
       next.aiNotice = body['aiNotice'];
     }
+    // カバー画像の背景を生成 AI で描くか（第32.7.1節。既定は切り）
+    if (body['aiIllustration'] !== undefined) {
+      if (typeof body['aiIllustration'] !== 'boolean') return c.json({ error: 'aiIllustration は true か false です' }, 400);
+      next.aiIllustration = body['aiIllustration'];
+    }
     await deps.repo.saveTenantSettings(tenant.id, 'webColumns', next, user.id);
     await deps.repo.appendAudit({
       id: randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id, action: 'settings.update',
       targetType: 'settings', targetId: 'webColumns',
-      detail: { topics: next.topics.length, industry: next.industry, supervisor: !!next.supervisor, aiNotice: next.aiNotice },
+      detail: { topics: next.topics.length, industry: next.industry, supervisor: !!next.supervisor, aiNotice: next.aiNotice, aiIllustration: next.aiIllustration },
       occurredAt: new Date().toISOString(),
     });
     return c.json({ ok: true, webColumns: next });

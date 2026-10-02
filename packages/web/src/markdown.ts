@@ -24,7 +24,9 @@ export type MdBlock =
   | { kind: 'table'; header: string[]; rows: string[][] }
   | { kind: 'code'; lang: string; text: string }
   /** 引用（`>` で始まる行の並び）。**改行を保つ**。承認の画面で、送る本文をそのまま見せるのに使う（仕様書 第9.3.3節）。 */
-  | { kind: 'quote'; lines: string[] };
+  | { kind: 'quote'; lines: string[] }
+  /** M2Office の画像（承認の画面のカバー画像など）。`/v1/files/{ID}/view` だけを出し、外の画像は読まない。 */
+  | { kind: 'image'; alt: string; src: string };
 
 /** 行の中の書式。 */
 export type MdInline =
@@ -53,6 +55,9 @@ export function splitTableRow(line: string): string[] {
   cells.push(cur.trim());
   return cells;
 }
+
+/** 画像の行（`![代わりの文](/v1/files/{ID}/view)`）。 */
+const IMAGE_LINE = /^!\[([^\]]*)\]\((\/v1\/files\/[A-Za-z0-9_-]{1,128}\/view)\)$/;
 
 /**
  * Markdown を、表示のまとまりに分ける。
@@ -98,6 +103,13 @@ export function parseMarkdown(text: string, opts: { lineBreaks?: boolean } = {})
       continue;
     }
     if (line.trim() === '') { flush(); continue; }
+    // 1 行だけの画像。M2Office のファイルの画像だけを出す（外の画像を読ませない。仕様書 第32.18.2節）
+    const img = IMAGE_LINE.exec(line.trim());
+    if (img) {
+      flush();
+      blocks.push({ kind: 'image', alt: img[1]!, src: img[2]! });
+      continue;
+    }
     // 引用。続く行も `>` で始まるかぎり 1 つのまとまりにし、行の区切りを保つ
     if (/^\s*>/.test(line)) {
       flush();

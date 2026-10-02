@@ -168,6 +168,12 @@ function chooseTools(tools: string[], prompt: string): Call[] {
     const id = extractField(prompt, 'columnId');
     if (id) return [{ name: 'columns.place', args: { columnId: id } }];
   }
+  if (has('columns.cover') && instruction.includes('columns.cover')) {
+    const req = extractField(prompt, 'request');
+    const kind = /写真/.test(req) ? 'photo' : /型/.test(req) ? 'template' : /挿絵|AI の絵/.test(req) ? 'ai' : '';
+    const column = /^(.+?)のコラム/.exec(req)?.[1] ?? '';
+    return [{ name: 'columns.cover', args: { ...(column ? { column } : {}), ...(kind ? { kind } : {}) } }];
+  }
   if (has('columns.draft') && instruction.includes('columns.draft')) {
     const theme = extractField(prompt, 'request').replace(/(について|で|の)?コラムを書いて(ください)?[。.]?$/, '').trim();
     if (theme) return [{ name: 'columns.draft', args: { theme } }];

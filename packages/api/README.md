@@ -261,7 +261,9 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/columns/:id/rewrite` ／ `/retry` | 指示（`instruction`）で書き直してもらう ／ 書けなかったコラムをもう一度書く |
 | `POST /v1/columns/:id/suggestions/:index` ／ `/versions/:version/restore` | 赤入れの直し案に置き換える ／ 前の版に戻す（どちらも新しい版になる） |
 | `GET /v1/columns/:id/export` | 記事に入れる形（Markdown と HTML。末尾に出典・監修者・AI の表示） |
-| `POST /v1/columns/:id/submit` | 承認へ進める（業務「コラムを WordPress に入れる」を始め、管理者か承認者の承認を待つ。版の指紋を残す。入れられない理由があれば 400） |
+| `GET` ／ `POST /v1/columns/:id/cover` | カバー画像（PNG。`version` で前の版、`download=1` で保存させる）／ 作り直す（`kind`: template・ai・photo、`hint`。新しい版になる） |
+| `POST /v1/columns/:id/photos` | 写真を入れ、そのコラムのカバーにする（本文は写真の中身。JPEG・PNG、10 MB まで。会社の写真の置き場にも入る） |
+| `POST /v1/columns/:id/submit` | 承認へ進める（業務「コラムを WordPress に入れる」を始め、管理者か承認者の承認を待つ。版の指紋を残す。入力にカバーのファイルを含め、承認する人がその画像を見られるようにする。入れられない理由があれば 400） |
 | `GET /v1/public/inventory/:key` ／ `:key.json` | **認証なし**。在庫の公開のページ（他のサイトの iframe に入れてよい。`frame-ancestors *`・スクリプトなし）とデータ（`Access-Control-Allow-Origin: *`）。作り直して置いた中身だけを返す。知らない鍵・止めた公開・公開を切った会社はどれも 404 |
 | `POST /v1/hooks/inventory/:key` | **認証なしの受け口**。予約のシステムの Webhook を受ける（第29.13.1節）。会社は鍵（32 文字）のハッシュから引き、ホスト名は見ない。64 KB を超えれば 413。知らない鍵・止めた受け口・引き当てを切った会社はどれも 404、予約として読めなければ 422。項目の対応は最初の予約から推論して受け口に覚える。予約した人の名前・連絡先は残さない |
 | `GET /v1/notices` | 本人宛ての有効な社内のお知らせ（取り下げ・期間切れ・本人が済んだものを除く。`isNew`・`daysLeft` つき。仕様書 第10.15節） |
@@ -315,7 +317,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/admin/extensions/hr/rule-checks` ／ `POST …/rule-checks/:itemId/:version/dismiss` | 管理者: 社内規程の登録・改定で見つかった今の設定との食い違い（残した答えを、いまの設定と並べ直す。第11.11.2節）／ 見終えた |
 | `PUT /v1/admin/extensions/hr/settings` | 管理者: 人事・給与の会社の設定（`office`・`health`・`socialApply`・`pay`・`procedures`・`work`・`agreement`・`leave`・`payroll`・`transfer`（振込元。番号の桁を確かめる）・`duties`（納期の特例・定期健康診断の月）・`notice`（労働条件通知書の会社の定め）・`insurance`（事業所整理記号・事業所番号・特定適用事業所 auto・yes・no・通常の労働者の週の所定労働時間 10〜60）・`labor`（雇用保険の事業の種類・労災保険の事業の種類の番号・労働保険番号）。第30.8.1節）。`GET /v1/admin/extensions/hr/labor-industries` で労災保険率表の事業の種類、`GET /v1/admin/extensions/hr/allowances` で手当の扱い（雇用条件の手当の名前と、割増の基礎・所得税の対象・設定したか）。送った項目だけを変える。人事・給与を `PUT /v1/admin/extensions/hr/enabled` で入れると、区画 `hr` が無ければ作り、入れた管理者を入れる |
 | `PUT /v1/admin/extensions/inventory/settings` | 管理者: 在庫管理の機能の入り切り（`features`）・残りわずかの既定の目安（`lowDefault`）・仕入れの日数（`leadDaysDefault`）・棚卸しの頻度（`countEveryDays`）。送った項目だけを変える（第29.4.1節） |
-| `PUT /v1/admin/extensions/web-columns/settings` | 管理者: Web のコラムの分野（`topics`）・読み手（`audience`）・業種（`industry`）・監修者（`supervisor`）・AI の表示（`aiNotice`）。送った項目だけを変える（第32.18.1節） |
+| `PUT /v1/admin/extensions/web-columns/settings` | 管理者: Web のコラムの分野（`topics`）・読み手（`audience`）・業種（`industry`）・監修者（`supervisor`）・AI の表示（`aiNotice`）・AI で挿絵を描くか（`aiIllustration`）。送った項目だけを変える（第32.18.1節） |
 | `PUT` ／ `DELETE /v1/admin/extensions/web-columns/wordpress` | 管理者: WordPress の入れ先（`siteUrl`・`username`）とアプリケーションパスワード（`password`）を、つながるかを確かめてから暗号化して預ける（つながらなければ 400。パスワードは返さない）／ 外す |
 | `GET /v1/admin/connections/mcp` | 管理者: 会社の接続（MCP）の一覧。ツールごとの危険度・有効かどうか・使っている業務、認証の状態（`authState`。秘密の値は返さない）、よく使うサービスの型（`presets`）（仕様書 第12.11節、ADR-0037・ADR-0044） |
 | `POST /v1/admin/connections/mcp` | 管理者: URL を受け取り、ツールの一覧を取って会社の接続として登録する（読むだけの印が付いたツールは「読むだけ」、ほかは「社外へ送る」扱い）。`preset`（`slack`）で型から、`auth`（`oauth`・`api_key`）で認証の要る接続を登録する。`oauth` は相手の認可サーバの情報を読み、アプリの自動登録の口（`registration_endpoint`）があれば控える（仕様書 第12.11.6.2節、Q-99）。認証の要る接続のツールは、認証情報のあとで取る |
@@ -379,6 +381,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/files` | ファイルの受け取り（multipart の `file`。10 MB まで） |
 | `GET /v1/files/:id` | メタデータ。所有者と承認者のみ |
 | `GET /v1/files/:id/content` | 中身。必ず保存させる（`attachment`） |
+| `GET /v1/files/:id/view` | 画像（PNG・JPEG）だけを画面に出す（承認の画面のカバー画像など）。読める人は中身と同じ。ほかの形は 404 |
 
 ## 承認の扱い
 

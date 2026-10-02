@@ -6,7 +6,7 @@
 
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
-import type { ColumnReviewItem, ColumnSource, WebColumn, WebColumnStatus, WebColumnVersion } from '@m2office/shared';
+import type { ColumnPhoto, ColumnReviewItem, ColumnSource, WebColumn, WebColumnCover, WebColumnStatus, WebColumnVersion } from '@m2office/shared';
 
 /** 足す版（番号は置き場が決める）。 */
 export type NewColumnVersion = Omit<WebColumnVersion, 'version' | 'createdAt' | 'createdByName'>;
@@ -28,6 +28,14 @@ export interface ColumnStore {
   versions(tenantId: string, columnId: string): Promise<WebColumnVersion[]>;
   /** 決まった時間より前から「書いています」のままのもの（書き上げの途中で止まった）。 */
   stuckWriting(tenantId: string, beforeIso: string): Promise<string[]>;
+  /** この日時より後に作った版の、AI の挿絵を描いた枚数の合計（月の上限。第32.18.2節）。 */
+  aiAttemptsSince(tenantId: string, sinceIso: string): Promise<number>;
+  /** 最近の版の型の模様（新しい順。直前と同じ模様を続けないため）。 */
+  recentPatterns(tenantId: string, limit: number): Promise<string[]>;
+  /** 会社の写真の置き場に足す。 */
+  addPhoto(tenantId: string, p: { fileId: string; description: string; hasPeople: boolean; createdBy: string }): Promise<ColumnPhoto>;
+  /** 会社の写真（新しい順）。 */
+  photos(tenantId: string, limit?: number): Promise<ColumnPhoto[]>;
 }
 
 interface ColumnRow {
@@ -35,6 +43,8 @@ interface ColumnRow {
   run_id: string | null; wp_edit_url: string | null; failure: string | null; created_by: string; created_at: Date | string; updated_at: Date | string;
   title: string | null; review: ColumnReviewItem[] | null;
 }
+
+interface PhotoRow { id: string; file_id: string; description: string; has_people: boolean; created_at: Date | string }
 
 const COLUMN_SELECT = `select c.id, c.theme, c.memo, c.status, c.current_version, c.submitted_version, c.run_id, c.wp_edit_url, c.failure,
     c.created_by, c.created_at, c.updated_at, v.title, v.review
@@ -53,13 +63,13 @@ function toColumn(r: ColumnRow): WebColumn {
 
 interface VersionRow {
   version: number; title: string; titles: string[]; body: string; description: string; sns: { short?: string; long?: string };
-  sources: ColumnSource[]; review: ColumnReviewItem[]; origin: WebColumnVersion['origin']; created_by: string; created_at: Date | string;
+  sources: ColumnSource[]; review: ColumnReviewItem[]; cover: WebColumnCover | null; origin: WebColumnVersion['origin']; created_by: string; created_at: Date | string;
 }
 
 function toVersion(r: VersionRow): WebColumnVersion {
   return {
     version: r.version, title: r.title, titles: r.titles ?? [], body: r.body, description: r.description,
-    sns: { short: r.sns?.short ?? '', long: r.sns?.long ?? '' }, sources: r.sources ?? [], review: r.review ?? [],
+    sns: { short: r.sns?.short ?? '', long: r.sns?.long ?? '' }, sources: r.sources ?? [], review: r.review ?? [], cover: r.cover ?? null,
     origin: r.origin, createdBy: r.created_by, createdAt: iso(r.created_at),
   };
 }
@@ -144,22 +154,49 @@ export class PostgresColumnStore implements ColumnStore {
         [tenantId, columnId]);
       const n = rows[0]?.n;
       if (!n) throw new Error('コラムが見つかりません');
-      await c.query(`insert into web_column_versions (tenant_id, column_id, version, title, titles, body, description, sns, sources, review, origin, created_by)
-        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+      await c.query(`insert into web_column_versions (tenant_id, column_id, version, title, titles, body, description, sns, sources, review, cover, origin, created_by)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
       [tenantId, columnId, n, v.title, JSON.stringify(v.titles), v.body, v.description, JSON.stringify(v.sns), JSON.stringify(v.sources),
-        JSON.stringify(v.review), v.origin, v.createdBy]);
+        JSON.stringify(v.review), v.cover ? JSON.stringify(v.cover) : null, v.origin, v.createdBy]);
       return n;
     });
   }
 
   async versions(tenantId: string, columnId: string): Promise<WebColumnVersion[]> {
-    return (await this.q<VersionRow>(tenantId, `select version, title, titles, body, description, sns, sources, review, origin, created_by, created_at
+    return (await this.q<VersionRow>(tenantId, `select version, title, titles, body, description, sns, sources, review, cover, origin, created_by, created_at
       from web_column_versions where tenant_id = $1 and column_id = $2 order by version desc`, [tenantId, columnId])).map(toVersion);
   }
 
   async stuckWriting(tenantId: string, beforeIso: string): Promise<string[]> {
     return (await this.q<{ id: string }>(tenantId, `select id from web_columns where tenant_id = $1 and status = 'writing' and updated_at < $2`, [tenantId, beforeIso])).map((r) => r.id);
   }
+
+  async aiAttemptsSince(tenantId: string, sinceIso: string): Promise<number> {
+    const rows = await this.q<{ n: string | null }>(tenantId,
+      `select sum(coalesce((cover->>'aiAttempts')::int, 0)) as n from web_column_versions where tenant_id = $1 and created_at >= $2 and cover is not null`, [tenantId, sinceIso]);
+    return Number(rows[0]?.n ?? 0);
+  }
+
+  async recentPatterns(tenantId: string, limit: number): Promise<string[]> {
+    return (await this.q<{ p: string }>(tenantId,
+      `select cover->>'pattern' as p from web_column_versions where tenant_id = $1 and cover->>'pattern' is not null order by created_at desc limit $2`, [tenantId, limit])).map((r) => r.p);
+  }
+
+  async addPhoto(tenantId: string, p: { fileId: string; description: string; hasPeople: boolean; createdBy: string }): Promise<ColumnPhoto> {
+    const id = `cp-${randomUUID()}`;
+    const rows = await this.q<PhotoRow>(tenantId, `insert into web_column_photos (id, tenant_id, file_id, description, has_people, created_by)
+      values ($1, $2, $3, $4, $5, $6) returning id, file_id, description, has_people, created_at`, [id, tenantId, p.fileId, p.description, p.hasPeople, p.createdBy]);
+    return toPhoto(rows[0]!);
+  }
+
+  async photos(tenantId: string, limit = 200): Promise<ColumnPhoto[]> {
+    return (await this.q<PhotoRow>(tenantId,
+      'select id, file_id, description, has_people, created_at from web_column_photos where tenant_id = $1 order by created_at desc limit $2', [tenantId, limit])).map(toPhoto);
+  }
+}
+
+function toPhoto(r: PhotoRow): ColumnPhoto {
+  return { id: r.id, fileId: r.file_id, description: r.description, hasPeople: r.has_people, createdAt: iso(r.created_at) };
 }
 
 // ---- メモリ（自動テスト用） ----------------------------------------------
@@ -168,6 +205,7 @@ export class PostgresColumnStore implements ColumnStore {
 export class MemoryColumnStore implements ColumnStore {
   readonly columns = new Map<string, WebColumn & { tenantId: string; submittedDigest: string | null; wpPostId: string | null }>();
   readonly allVersions = new Map<string, WebColumnVersion[]>();
+  readonly allPhotos: (ColumnPhoto & { tenantId: string })[] = [];
 
   private col(tenantId: string, id: string) {
     const c = this.columns.get(id);
@@ -229,5 +267,28 @@ export class MemoryColumnStore implements ColumnStore {
 
   async stuckWriting(tenantId: string, beforeIso: string): Promise<string[]> {
     return [...this.columns.values()].filter((c) => c.tenantId === tenantId && c.status === 'writing' && c.updatedAt < beforeIso).map((c) => c.id);
+  }
+
+  private tenantVersions(tenantId: string): WebColumnVersion[] {
+    return [...this.columns.values()].filter((c) => c.tenantId === tenantId).flatMap((c) => this.allVersions.get(c.id) ?? [])
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  async aiAttemptsSince(tenantId: string, sinceIso: string): Promise<number> {
+    return this.tenantVersions(tenantId).filter((v) => v.createdAt >= sinceIso).reduce((n, v) => n + (v.cover?.aiAttempts ?? 0), 0);
+  }
+
+  async recentPatterns(tenantId: string, limit: number): Promise<string[]> {
+    return this.tenantVersions(tenantId).flatMap((v) => (v.cover?.pattern ? [v.cover.pattern] : [])).slice(0, limit);
+  }
+
+  async addPhoto(tenantId: string, p: { fileId: string; description: string; hasPeople: boolean; createdBy: string }): Promise<ColumnPhoto> {
+    const photo = { id: `cp-${randomUUID()}`, fileId: p.fileId, description: p.description, hasPeople: p.hasPeople, createdAt: new Date().toISOString() };
+    this.allPhotos.unshift({ ...photo, tenantId });
+    return photo;
+  }
+
+  async photos(tenantId: string): Promise<ColumnPhoto[]> {
+    return this.allPhotos.filter((x) => x.tenantId === tenantId).map(({ tenantId: _t, ...rest }) => rest);
   }
 }

@@ -4,7 +4,7 @@
  * @see 仕様書 第20.2節 LLM 抽象化層
  */
 
-import type { LlmExtractRequest, LlmProvider, LlmRequest, LlmResponse, ModelTier } from './provider.js';
+import type { LlmExtractRequest, LlmImageGenerateRequest, LlmProvider, LlmRequest, LlmResponse, ModelTier } from './provider.js';
 
 /** 役割ごとのモデル名。設定で差し替えられる（仕様書 第20.2節）。 */
 export interface GeminiModelMap {
@@ -207,6 +207,32 @@ export class OpenAiCompatibleProvider implements LlmProvider {
       ...(used.candidatesTokenCount !== undefined ? { outputTokens: used.candidatesTokenCount } : {}),
       model: json.modelVersion ?? model,
     };
+  }
+
+  /**
+   * 画像を作る（Web のコラムのカバーの挿絵。仕様書 第32.18.2節）。
+   *
+   * @remarks Gemini の `generateContent` に画像だけを返させる（`responseModalities: ['IMAGE']`）。
+   * 画像が返らなければ `null`（安全の判定で止められたときなど）。作った画像には SynthID が入る
+   */
+  async generateImage(req: LlmImageGenerateRequest): Promise<{ bytes: Uint8Array; mimeType: string } | null> {
+    const base = this.baseUrl.replace(/\/openai\/?$/, '');
+    const res = await fetch(`${base}/models/${encodeURIComponent(req.model)}:generateContent`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-goog-api-key': this.apiKey },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: req.prompt }] }],
+        generationConfig: { responseModalities: ['IMAGE'], imageConfig: { aspectRatio: req.aspectRatio } },
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      throw new LlmRequestError(`画像を作れませんでした (${res.status})`, body);
+    }
+    const json = (await res.json()) as { candidates?: { content?: { parts?: { inlineData?: { mimeType?: string; data?: string } }[] } }[] };
+    const part = (json.candidates?.[0]?.content?.parts ?? []).find((p) => p.inlineData?.data);
+    if (!part?.inlineData?.data) return null;
+    return { bytes: new Uint8Array(Buffer.from(part.inlineData.data, 'base64')), mimeType: part.inlineData.mimeType ?? 'image/png' };
   }
 
   private resolveModel(tier: ModelTier): string {

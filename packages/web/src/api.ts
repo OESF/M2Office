@@ -732,6 +732,8 @@ export interface ExtensionView {
   signage?: SignageSettings;
   /** Web のコラムの会社の設定（仕様書 第32.18.1節）。Web のコラムのときだけある。パスワードは含まない。 */
   webColumns?: WebColumnSettings;
+  /** 今月、カバーの AI の挿絵を描いた枚数と上限（第32.18.2節）。Web のコラムのときだけある。 */
+  columnAiUsage?: { used: number; limit: number };
 }
 
 /** Web のコラム 1 つと版（仕様書 第32.18.1節）。 */
@@ -1204,6 +1206,21 @@ export const api = {
     exported: (id: string) => call<{ title: string; markdown: string; html: string; description: string }>(`/columns/${encodeURIComponent(id)}/export`),
     submit: (id: string) => call<{ runId: string }>(`/columns/${encodeURIComponent(id)}/submit`, { method: 'POST' }),
     remove: (id: string) => call<{ ok: true }>(`/columns/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    /** カバー画像の URL（`<img>` に使う。版を変えると URL が変わる）。 */
+    coverUrl: (id: string, fileId: string) => `/v1/columns/${encodeURIComponent(id)}/cover?v=${encodeURIComponent(fileId)}`,
+    /** カバーを作り直す（新しい版になる）。 */
+    recover: (id: string, req: { kind?: 'template' | 'ai' | 'photo'; hint?: string } = {}) =>
+      call<{ ok: true }>(`/columns/${encodeURIComponent(id)}/cover`, { method: 'POST', body: JSON.stringify(req) }),
+    /** 写真を入れ、そのコラムのカバーにする（会社の写真の置き場にも入る）。 */
+    addPhoto: (id: string, file: File) => call<{ ok: true }>(`/columns/${encodeURIComponent(id)}/photos`, {
+      method: 'POST', body: file, headers: { 'content-type': file.type, 'x-file-name': encodeURIComponent(file.name) },
+    }),
+    /** カバー画像を保存する。 */
+    downloadCover: async (id: string, title: string) => {
+      const blob = await fetchBlob(`/columns/${encodeURIComponent(id)}/cover?download=1`);
+      if (!blob) throw new ApiError('書き出せませんでした', 404);
+      saveBlob(blob, `${title.slice(0, 40) || 'column-cover'}.png`);
+    },
   },
   /** 店頭サイネージ（仕様書 第31章）。 */
   signage: {

@@ -7,7 +7,7 @@
  * @see 仕様書 第32.18.1節 段 1 の実装の決まり
  */
 
-import type { WebColumnSettings } from '@m2office/shared';
+import { COLUMN_COVER_KIND_LABELS, type ColumnCoverKind, type WebColumnSettings } from '@m2office/shared';
 import type { Tool, ToolContext } from '../tools/registry.js';
 import type { ColumnPreview, ColumnService } from './service.js';
 
@@ -43,7 +43,10 @@ function describePreview(p: ColumnPreview): string {
     `字数: ${p.chars.toLocaleString('ja-JP')} 字`,
     `残った指摘: ${p.reviewCount} 件`,
     `入れ先: ${p.destination}`,
-  ].join('\n');
+    p.cover ? `カバー画像: ${COLUMN_COVER_KIND_LABELS[p.cover.kind]}` : '',
+    // 承認する人が画像を見て判断できるように、カバーを出す（第32.18.2節。入れ先の業務の入力にカバーのファイルを含める）
+    p.cover ? `\n![${p.cover.alt.replace(/[[\]]/g, '')}](/v1/files/${encodeURIComponent(p.cover.fileId)}/view)` : '',
+  ].filter(Boolean).join('\n');
 }
 
 /**
@@ -129,5 +132,46 @@ export const columnsPlace: Tool = {
   },
 };
 
+/** 比べる形の言葉（空白と記号を除き、小文字にする）。 */
+const norm = (s: string) => s.toLowerCase().replace(/[\s　「」『』【】（）()［］・、。!！?？]/g, '');
+
+/**
+ * コラムのカバー画像を作り直す（第32.18.2節）。題名やテーマの言葉でコラムを探し、頼まれた種類と雰囲気で作り直す。
+ *
+ * @remarks 危険度 `write-internal`。社内のコラムの置き場に新しい版を足すだけで、WordPress には入れない
+ */
+export const columnsCover: Tool = {
+  name: 'columns.cover',
+  risk: 'write-internal',
+  activityLabel: 'コラムのカバーを作り直しています',
+  helpText: 'コラムのカバー画像を作り直します（型・AI の挿絵・会社の写真）。新しい版になるだけで、Web には出しません',
+  description: 'コラムのカバー画像を作り直す。column はコラムの題名かテーマの言葉（無ければいちばん新しいコラム）。kind は template（型）・ai（AI の挿絵）・photo（会社の写真）、hint は雰囲気（「もっと明るく」など）。1 つに決まらなければ候補を返す',
+  args: {
+    properties: {
+      column: { type: 'string', description: 'コラムの題名かテーマの言葉' },
+      kind: { type: 'string', description: '背景の種類', enum: ['template', 'ai', 'photo'] },
+      hint: { type: 'string', description: '雰囲気の頼み（「もっと明るく」など）' },
+    },
+  },
+  async invoke(args, ctx) {
+    const service = await columnsOf(ctx);
+    if (!service) return UNAVAILABLE;
+    const words = norm(str(args['column']));
+    const all = (await service.store.list(ctx.tenantId, 100)).filter((c) => c.status !== 'writing' && c.status !== 'failed');
+    const found = words ? all.filter((c) => norm(`${c.title}${c.theme}`).includes(words)) : all.slice(0, 1);
+    if (found.length === 0) return { available: false, reason: 'そのコラムが見つかりません' };
+    if (found.length > 1) return { available: false, reason: 'コラムが 1 つに決まりません', candidates: found.slice(0, 8).map((c) => c.title || c.theme) };
+    const c = found[0]!;
+    const kind = ['template', 'ai', 'photo'].includes(str(args['kind'])) ? (str(args['kind']) as ColumnCoverKind) : undefined;
+    const err = await service.recover({ tenantId: ctx.tenantId, userId: ctx.userId }, c.id, { ...(kind ? { kind } : {}), hint: str(args['hint']) });
+    if (err) return { available: false, reason: err };
+    const v = (await service.store.versions(ctx.tenantId, c.id))[0];
+    return {
+      available: true, title: c.title || c.theme, path: columnPath(c.id),
+      cover: v?.cover ? COLUMN_COVER_KIND_LABELS[v.cover.kind] : null, note: v?.cover?.note || null,
+    };
+  },
+};
+
 /** Web のコラムのツール。 */
-export const COLUMN_TOOLS: Tool[] = [columnsDraft, columnsPreview, columnsPlace];
+export const COLUMN_TOOLS: Tool[] = [columnsDraft, columnsPreview, columnsPlace, columnsCover];

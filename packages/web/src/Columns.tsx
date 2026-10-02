@@ -1,5 +1,5 @@
 /**
- * @file Web のコラムの画面（仕様書 第32.18.1節）。一覧・書く・直す・赤入れ・書き直しを頼む・版・承認へ進む・写す。
+ * @file Web のコラムの画面（仕様書 第32.18.1節・第32.18.2節）。一覧・書く・カバー画像・直す・赤入れ・書き直しを頼む・版・承認へ進む・写す。
  *
  * 「コラムを書く」でテーマと取材メモを入れると、裏で書き上げる（書いている間は読み直して待つ）。
  * 直して保存するたびに新しい版になり、赤入れをやり直す。承認へ進めたら承認トレイで責任者が承認し、
@@ -7,8 +7,8 @@
  * 説明文は常には出さない（原則 u11）。分からなければ秘書に聞けばよい。
  */
 
-import { useCallback, useEffect, useState } from 'react';
-import { WEB_COLUMN_STATUS_LABELS, type ColumnReviewItem, type WebColumn, type WebColumnStatus, type WebColumnVersion } from '@m2office/shared';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { COLUMN_COVER_KIND_LABELS, WEB_COLUMN_STATUS_LABELS, type ColumnReviewItem, type WebColumn, type WebColumnStatus, type WebColumnVersion } from '@m2office/shared';
 import { api, describeError, type ColumnDetail } from './api.js';
 import { Markdown } from './help.js';
 
@@ -17,7 +17,7 @@ const POLL_MS = 4000;
 
 /** 版の出どころの呼び方。 */
 const ORIGIN_LABELS: Record<WebColumnVersion['origin'], string> = {
-  writer: 'AI が書いた', rewrite: 'AI が書き直した', edit: '直した', suggestion: '直し案に置き換えた', restore: '前の版に戻した',
+  writer: 'AI が書いた', rewrite: 'AI が書き直した', edit: '直した', suggestion: '直し案に置き換えた', restore: '前の版に戻した', cover: 'カバーを作り直した',
 };
 
 /** 指摘の種類の呼び方。 */
@@ -132,6 +132,8 @@ function ColumnEditor({ id, onBack, onApprovals }: { id: string; onBack: () => v
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const [showVersions, setShowVersions] = useState(false);
+  const [covering, setCovering] = useState(false);
+  const photoInput = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     try {
@@ -193,6 +195,12 @@ function ColumnEditor({ id, onBack, onApprovals }: { id: string; onBack: () => v
       setMessage({ kind: 'error', text: describeError(err, '写せませんでした') });
     }
   };
+  /** カバーを作り直す・写真を入れる。AI の挿絵は時間がかかるため、作っている間は知らせる。 */
+  const cover = async (fn: () => Promise<unknown>) => {
+    setCovering(true);
+    await act(fn, null, 'カバーを作れませんでした');
+    setCovering(false);
+  };
   const remove = () => {
     if (!confirm(`「${column.title || column.theme}」を削除しますか？`)) return;
     void act(() => api.columns.remove(id), null, '削除できませんでした').then(onBack);
@@ -219,6 +227,25 @@ function ColumnEditor({ id, onBack, onApprovals }: { id: string; onBack: () => v
 
       {current && draft && (
         <>
+          <div className="columns-cover">
+            {current.cover
+              ? <img src={api.columns.coverUrl(id, current.cover.fileId)} alt={current.cover.alt} />
+              : <div className="columns-cover-empty muted">{covering ? 'カバーを作っています…' : 'カバーがありません'}</div>}
+            <div className="columns-cover-side">
+              {current.cover && <span className="badge">{COLUMN_COVER_KIND_LABELS[current.cover.kind]}</span>}
+              {current.cover?.note && <span className="small muted">{current.cover.note}</span>}
+              <button className="btn ghost small" disabled={busy || locked || dirty} onClick={() => void cover(() => api.columns.recover(id))}>
+                {covering ? '作っています…' : current.cover ? 'カバーを作り直す' : 'カバーを作る'}
+              </button>
+              <button className="btn ghost small" disabled={busy || locked || dirty} onClick={() => photoInput.current?.click()}>写真を入れる</button>
+              <input ref={photoInput} type="file" accept="image/jpeg,image/png" hidden
+                onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void cover(() => api.columns.addPhoto(id, f)); }} />
+              {current.cover && (
+                <button className="btn ghost small" onClick={() => void api.columns.downloadCover(id, current.title)
+                  .catch((err) => setMessage({ kind: 'error', text: describeError(err, '書き出せませんでした') }))}>画像を書き出す</button>
+              )}
+            </div>
+          </div>
           <div className="row columns-tabs">
             <button className={tab === 'edit' ? 'btn small' : 'btn ghost small'} onClick={() => setTab('edit')}>直す</button>
             <button className={tab === 'view' ? 'btn small' : 'btn ghost small'} onClick={() => setTab('view')}>見え方</button>

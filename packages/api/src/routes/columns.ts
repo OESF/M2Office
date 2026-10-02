@@ -1,6 +1,6 @@
 /**
  * @file Web のコラム（内蔵の拡張）の API。一覧・書く・詳細・直す・書き直しを頼む・直し案に置き換える・前の版に戻す・
- * 承認へ進める・写す形・削除。
+ * 承認へ進める・写す形・削除・カバー画像（見る・作り直す・写真を入れる）。
  *
  * 会社が Web のコラムを切っているときと、利用範囲の外の人には、どの口も使わせない。コラムは会社で共有する。
  * 設定と WordPress の鍵は管理者の口（拡張機能）で扱う。
@@ -9,7 +9,7 @@
  */
 
 import { Hono, type Context } from 'hono';
-import { AI_NOT_CONFIGURED_MESSAGE, WEB_COLUMN_PLACE, aiAvailable, enqueueJob, type ColumnViewer } from '@m2office/core';
+import { AI_NOT_CONFIGURED_MESSAGE, COLUMN_PHOTO_MAX_BYTES, WEB_COLUMN_PLACE, aiAvailable, enqueueJob, type ColumnViewer } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 
@@ -107,6 +107,44 @@ export function columnsRoute(deps: AppDeps) {
     return err ? c.json({ error: err }, 409) : c.json({ ok: true });
   });
 
+  /**
+   * カバー画像（PNG）。`version` で前の版、`download=1` で保存させる（第32.18.2節）。
+   *
+   * @remarks 画面に埋め込むため inline で返す。M2Office が組み立てた PNG だけを返し、中身を実行させない見出しを付ける
+   */
+  app.get('/:id/cover', async (c) => {
+    const version = c.req.query('version') ? Number(c.req.query('version')) : undefined;
+    const bytes = await service.coverBytes(who(c), c.req.param('id'), Number.isInteger(version) ? version : undefined);
+    if (!bytes) return c.json({ error: 'カバー画像がありません' }, 404);
+    return new Response(Buffer.from(bytes), {
+      headers: {
+        'content-type': 'image/png', 'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'none'; sandbox",
+        'cache-control': 'private, max-age=3600',
+        ...(c.req.query('download') === '1' ? { 'content-disposition': 'attachment; filename="column-cover.png"' } : {}),
+      },
+    });
+  });
+
+  /** カバーを作り直す（`kind`・`hint`。新しい版になる）。 */
+  app.post('/:id/cover', async (c) => {
+    const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
+    const kind = ['template', 'ai', 'photo'].includes(String(body['kind'])) ? (body['kind'] as 'template' | 'ai' | 'photo') : undefined;
+    const err = await service.recover(who(c), c.req.param('id'), { ...(kind ? { kind } : {}), ...(str(body['hint']) ? { hint: str(body['hint'])! } : {}) });
+    return err ? c.json({ error: err }, 409) : c.json({ ok: true });
+  });
+
+  /**
+   * 写真を入れ、そのコラムのカバーにする（会社の写真の置き場にも入る）。本文は写真の中身そのもの（JPEG・PNG、10 MB まで）。
+   */
+  app.post('/:id/photos', async (c) => {
+    const size = Number(c.req.header('content-length') ?? '0');
+    if (size > COLUMN_PHOTO_MAX_BYTES) return c.json({ error: '写真は 10 MB までです' }, 413);
+    const bytes = new Uint8Array(await c.req.arrayBuffer());
+    const name = decodeURIComponent(c.req.header('x-file-name') ?? 'photo').slice(0, 200);
+    const err = await service.addPhoto(who(c), c.req.param('id'), { bytes, mimeType: (c.req.header('content-type') ?? '').split(';')[0]!.trim(), name });
+    return err ? c.json({ error: err }, 400) : c.json({ ok: true }, 201);
+  });
+
   /** 記事に入れる形（Markdown と HTML）。写して使う。 */
   app.get('/:id/export', async (c) => {
     const e = await service.exported(who(c), c.req.param('id'));
@@ -133,7 +171,8 @@ export function columnsRoute(deps: AppDeps) {
     if (!def) return c.json({ error: 'コラムを WordPress に入れる業務が見つかりません' }, 404);
     if (!aiAvailable(await deps.ai.llmFor(tenant.id))) return c.json({ error: AI_NOT_CONFIGURED_MESSAGE }, 409);
     const { runId } = await enqueueJob(deps.repo, {
-      tenantId: tenant.id, requestedBy: user.id, def, input: { columnId: id }, origin: 'menu', actor: { type: 'user', id: user.id },
+      // カバーのファイルを入力に含め、承認する人がその画像を見られるようにする（第32.18.2節）
+      tenantId: tenant.id, requestedBy: user.id, def, input: { columnId: id, ...(p.cover ? { coverFileId: p.cover.fileId } : {}) }, origin: 'menu', actor: { type: 'user', id: user.id },
     });
     await service.markAwaiting(v, id, runId, p);
     return c.json({ runId }, 201);

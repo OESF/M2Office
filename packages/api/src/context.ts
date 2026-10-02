@@ -279,7 +279,7 @@ export function buildDeps(): AppDeps {
   // Web のコラム（内蔵の拡張。仕様書 第32章）。コラムは会社で共有する
   const columns = {
     service: new ColumnService({
-      store: new PostgresColumnStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+      store: new PostgresColumnStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), files,
       repo, box, llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId), logger: log,
     }),
     access: webColumnsAccess(repo),

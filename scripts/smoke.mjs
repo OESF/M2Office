@@ -5009,6 +5009,7 @@ console.log('\n■ 65. Web のコラム（内蔵の拡張。第32.18.1節）');
   const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
   await owner.connect();
   const tag = `確認用コラム${Date.now().toString(36)}`;
+  const columnsStartedAt = new Date().toISOString();
   const { rows: saved } = await owner.query(`select tenant_id, web_columns from tenant_settings where tenant_id in ('t-alpha', 't-beta')`);
   try {
     // 既定は切り。切っている会社には画面も API も出さない
@@ -5048,6 +5049,23 @@ console.log('\n■ 65. Web のコラム（内蔵の拡張。第32.18.1節）');
       ? ok('直して保存すると新しい版になり、業種（医療）の表現の決まりで赤入れをやり直す')
       : ng('直したときが違う', JSON.stringify({ edit: edit.status, v: col.column?.currentVersion, rv }).slice(0, 400));
 
+    // カバー画像（第32.18.2節）: 書き上げで型のカバーを作り、作り直しと写真で新しい版になる
+    const raw = (path, init = {}, who = 'member', tenant = 'a') => fetch(`${API}${path}`, {
+      ...init, headers: { 'x-tenant': tenant, 'x-user': `${who}@${tenant === 'a' ? 'alpha' : 'beta'}.example.jp`, ...(init.headers ?? {}) },
+    });
+    const coverRes = await raw(`/v1/columns/${id}/cover`);
+    const coverPng = new Uint8Array(await coverRes.arrayBuffer());
+    const remade = await call('a', `/v1/columns/${id}/cover`, { method: 'POST', body: JSON.stringify({ kind: 'template' }) }, 'member');
+    const photo = await raw(`/v1/columns/${id}/photos`, { method: 'POST', body: coverPng, headers: { 'content-type': 'image/png', 'x-file-name': 'shop.png' } });
+    const badPhoto = await raw(`/v1/columns/${id}/photos`, { method: 'POST', body: 'GIF89a', headers: { 'content-type': 'image/gif' } });
+    col = (await call('a', `/v1/columns/${id}`, {}, 'member')).body;
+    const covers = (col.versions ?? []).map((v) => [v.origin, v.cover?.kind]);
+    col.versions?.[2]?.cover?.kind === 'template' && coverRes.headers.get('content-type') === 'image/png' && coverPng.length > 1000
+      && remade.status === 200 && photo.status === 201 && badPhoto.status === 400
+      && JSON.stringify(covers.slice(0, 2)) === JSON.stringify([['cover', 'photo'], ['cover', 'template']])
+      ? ok('書き上げると型のカバー（PNG）を作り、作り直しと写真を入れることで新しい版になる。JPEG・PNG のほかの写真は断る')
+      : ng('カバー画像が違う', JSON.stringify({ covers, type: coverRes.headers.get('content-type'), len: coverPng.length, remade: remade.status, photo: photo.status, bad: badPhoto.status }));
+
     // 承認へ進める: 承認できるのは管理者と承認者。承認待ちの間は直せない
     const submit = await call('a', `/v1/columns/${id}/submit`, { method: 'POST', body: '{}' }, 'member');
     const run = await waitFor('a', submit.body.runId, ['awaiting_approval', 'failed', 'completed'], 20000, 'member');
@@ -5058,6 +5076,13 @@ console.log('\n■ 65. Web のコラム（内蔵の拡張。第32.18.1節）');
       && /承認済みにするだけ/.test(appr?.present ?? '') && locked.status === 409 && byMember.status >= 400
       ? ok('承認へ進めると責任者の承認を待ち、承認の画面に題名・字数・入れ先を出す。承認待ちの間は直せず、一般の人は承認できない')
       : ng('承認へ進めたときが違う', JSON.stringify({ submit: submit.body, status: run.run?.status, present: appr?.present?.slice(0, 300), locked: locked.status, byMember: byMember.status }));
+    // 承認の画面にカバーを出し、承認する人はその画像を見られる。ほかの会社からは見えない
+    const coverFile = col.versions?.[0]?.cover?.fileId;
+    const viewAdmin = await raw(`/v1/files/${coverFile}/view`, {}, 'admin');
+    const viewOther = await raw(`/v1/files/${coverFile}/view`, {}, 'admin', 'b');
+    (appr?.present ?? '').includes(`](/v1/files/${coverFile}/view)`) && viewAdmin.status === 200 && viewAdmin.headers.get('content-type') === 'image/png' && viewOther.status === 404
+      ? ok('承認の画面にカバー画像を出し、承認する人はその画像を見られる（ほかの会社からは見えない）')
+      : ng('承認の画面のカバーが違う', JSON.stringify({ has: (appr?.present ?? '').includes('/view)'), admin: viewAdmin.status, other: viewOther.status }));
 
     // 承認すると、WordPress につないでいない会社では承認済みになる
     await call('a', `/v1/approvals/${appr?.id}`, { method: 'POST', body: JSON.stringify({ decision: 'approved' }) }, 'admin');
@@ -5083,6 +5108,9 @@ console.log('\n■ 65. Web のコラム（内蔵の拡張。第32.18.1節）');
     ng('Web のコラムの確認が途中で止まった', String(err?.stack ?? err));
   } finally {
     await owner.query(`delete from web_columns where tenant_id in ('t-alpha', 't-beta') and theme like '${tag}%'`);
+    // 確かめの間に入れた写真と、作ったカバーのファイルの記録も消す
+    await owner.query(`delete from web_column_photos where tenant_id = 't-alpha' and created_at >= $1`, [columnsStartedAt]);
+    await owner.query(`delete from files where tenant_id = 't-alpha' and created_at >= $1 and name in ('column-cover.png', 'shop.png')`, [columnsStartedAt]);
     for (const r of saved) await owner.query(`update tenant_settings set web_columns = $2 where tenant_id = $1`, [r.tenant_id, r.web_columns ? JSON.stringify(r.web_columns) : null]);
     await owner.end();
   }

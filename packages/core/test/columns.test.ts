@@ -5,13 +5,14 @@
  * 書き上げ（見本の下書き・調べもの・「ローカルだけ」の会社で書かないこと）、版（直す・直し案・戻す）、承認待ちの間は直せないこと、
  * 承認した版の指紋と違えば入れないこと、WordPress が無ければ承認済みにすること、WordPress に下書きとして入れること、
  * 削除できるのは下書きだけ、使えない人にはツールが「使えない」と返すことを確かめる。
+ * カバー画像（第32.18.2節）: 型・AI の挿絵と描いた後の確かめ・月の上限・会社の写真・作り直し・承認の指紋・WordPress のアイキャッチ・題名の折り返し。
  */
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULT_TENANT_SETTINGS, type TenantSettings, type WebColumnSettings } from '@m2office/shared';
 import {
-  ColumnService, MemoryColumnStore, StubLlmProvider, MockResearchProvider, PolicyBlockedResearchProvider, COLUMN_TOOLS,
+  ColumnService, MemoryColumnStore, MemoryFileStore, StubLlmProvider, renderCover, wrapTitle, coverSvg, COVER_AI_TRIES, MockResearchProvider, PolicyBlockedResearchProvider, COLUMN_TOOLS,
   ruleReview, aiReview, parseDraft, writeColumn, finalMarkdown, columnHtml, normalizeSiteUrl,
   type LlmProvider, type Repository, type ResearchProvider, type TenantCredential, type ToolContext,
 } from '../src/index.js';
@@ -35,7 +36,10 @@ function setup(opts: { columns?: Partial<WebColumnSettings>; llm?: LlmProvider; 
     webColumns: { ...DEFAULT_TENANT_SETTINGS.webColumns, enabled: true, ...opts.columns },
   };
   const creds = new Map<string, TenantCredential>();
+  const fileMetas = new Map<string, { id: string; kind: string; mime: string }>();
   const repo = {
+    createFile: async (f: { id: string; kind: string; mime: string }) => { fileMetas.set(f.id, f); },
+    getFile: async (_t: string, id: string) => fileMetas.get(id) ?? null,
     getTenantSettings: async () => settings,
     saveTenantSettings: async (_t: string, section: keyof TenantSettings, value: unknown) => { settings = { ...settings, [section]: value }; },
     listUserGroupIds: async () => [],
@@ -48,13 +52,14 @@ function setup(opts: { columns?: Partial<WebColumnSettings>; llm?: LlmProvider; 
     appendAudit: async (e: { action: string; detail: Record<string, unknown> }) => { audits.push(e); },
   } as unknown as Repository;
   const store = new MemoryColumnStore();
+  const files = new MemoryFileStore();
   const service = new ColumnService({
-    store, repo,
+    store, repo, files,
     box: { encrypt: (s: string) => `enc:${s}`, decrypt: (s: string) => s.slice(4) } as never,
     llmFor: async () => opts.llm ?? new StubLlmProvider(),
     researchFor: async () => opts.research ?? new MockResearchProvider(),
   });
-  return { service, store, audits, creds, settings: () => settings };
+  return { service, store, files, audits, creds, settings: () => settings };
 }
 
 const who = { tenantId: 't1', userId: 'u1' };
@@ -165,6 +170,7 @@ test('WordPress: つながるかを確かめてから鍵を預け、承認の後
     calls.push({ url, ...(init ? { init } : {}) });
     if (url.endsWith('/users/me?context=edit')) return new Response(JSON.stringify({ name: '投稿者', capabilities: { edit_posts: true } }), { status: 200 });
     if (url.endsWith('/wp/v2/posts')) return new Response(JSON.stringify({ id: 42 }), { status: 201 });
+    if (url.includes('/wp/v2/media')) return new Response(JSON.stringify({ id: 9 }), { status: 201 });
     return new Response('', { status: 404 });
   });
   const bad = await service.saveWordPress(who, { siteUrl: 'ftp://x', username: 'a', password: 'b' });
@@ -216,4 +222,153 @@ test('削除: 下書きだけ。ツール: 使えない人には使えないと�
   assert.ok(prepared.kind === 'ready' && typeof prepared.args['digest'] === 'string' && prepared.audience === 'external');
   assert.equal(await service.remove(who, created.id), null);
   assert.equal(await service.store.get('t1', created.id), null);
+});
+
+/** 挿絵の代わりに使う PNG（型で組み立てたもの）。 */
+const samplePng = () => renderCover({ title: '見本', background: { kind: 'template', pattern: 'dots', color: '#335577' }, logo: null, company: '' });
+
+/** 下書きを書き、挿絵を描き、確かめの答えを順に返す推論。 */
+function coverLlm(checks: string[]): LlmProvider & { drawn: number; prompts: string[] } {
+  const llm = {
+    name: 'fake', drawn: 0, prompts: [] as string[],
+    complete: async (req: { messages: { content: unknown }[] }) => {
+      const p = String(req.messages.at(-1)?.content ?? '');
+      if (p.includes('コラムを書いてください')) return { text: '{"titles":["歯みがきのコツ"],"body":"## はじめに\\n本文 [1]","description":"説明","sns":{"short":"s","long":"l"}}', tokensUsed: 1 };
+      if (p.includes('写真を、下の一覧から')) return { text: '{"index": -1}', tokensUsed: 1 };
+      return { text: '[]', tokensUsed: 1 };
+    },
+    extractFromImage: async () => ({ text: checks.shift() ?? '{"people": false, "text": false, "logo": false, "body": false}', tokensUsed: 1 }),
+    generateImage: async (req: { prompt: string }) => { llm.drawn += 1; llm.prompts.push(req.prompt); return { bytes: samplePng(), mimeType: 'image/png' }; },
+  };
+  return llm as never;
+}
+
+test('カバー: 書き上げると型のカバーを作り、作り直すと新しい版になり、直前と同じ模様を続けない', async () => {
+  const { service, files } = setup();
+  const created = await service.create(who, { theme: 'テーマ' }, true);
+  assert.ok('id' in created);
+  let d = (await service.detail(who, created.id))!;
+  const first = d.versions[0]!.cover!;
+  assert.equal(first.kind, 'template');
+  const png = await files.get('t1', first.fileId);
+  assert.deepEqual([...png!.slice(1, 4)].map((b) => String.fromCharCode(b)).join(''), 'PNG');
+  assert.equal(await service.recover(who, created.id, { kind: 'template' }), null);
+  d = (await service.detail(who, created.id))!;
+  assert.equal(d.versions[0]!.origin, 'cover');
+  assert.notEqual(d.versions[0]!.cover!.pattern, first.pattern, '直前と同じ模様を続けない');
+  assert.equal(d.versions[0]!.body, d.versions[1]!.body, '本文はそのまま');
+  // 直してもカバーは引き継ぐ
+  assert.equal(await service.saveEdit(who, created.id, { title: '新しい題名' }), null);
+  d = (await service.detail(who, created.id))!;
+  assert.equal(d.versions[0]!.cover!.fileId, d.versions[1]!.cover!.fileId);
+});
+
+test('カバー: AI の挿絵は描いた後に確かめ、通らなければ描き直す。3 枚とも通らなければ型にする。設定が切りなら描かない', async () => {
+  const off = coverLlm([]);
+  const a = setup({ llm: off, research: fakeResearch });
+  const c0 = await a.service.create(who, { theme: '歯みがき' }, true);
+  assert.ok('id' in c0);
+  assert.equal(off.drawn, 0, '既定は切り');
+
+  const llm = coverLlm(['{"people": true, "text": false, "logo": false, "body": false}', '{"people": false, "text": false, "logo": false, "body": false}']);
+  const { service } = setup({ llm, research: fakeResearch, columns: { aiIllustration: true, industry: 'medical' } });
+  const c1 = await service.create(who, { theme: '歯みがき' }, true);
+  assert.ok('id' in c1);
+  const v = (await service.detail(who, c1.id))!.versions[0]!;
+  assert.equal(v.cover!.kind, 'ai');
+  assert.equal(v.cover!.aiAttempts, 2, '人物が写った 1 枚目を捨てて描き直した');
+  assert.ok(llm.prompts[0]!.includes('人物を描かない') && llm.prompts[0]!.includes('体の部位'), '医療の業種では体の部位も描かない');
+  const md = (await service.exported(who, c1.id))!.markdown;
+  assert.ok(md.includes('カバー画像は AI が描いた挿絵です'));
+
+  const bad = coverLlm(Array(5).fill('{"people": false, "text": true, "logo": false, "body": false}'));
+  const b = setup({ llm: bad, research: fakeResearch, columns: { aiIllustration: true } });
+  const c2 = await b.service.create(who, { theme: '歯みがき' }, true);
+  assert.ok('id' in c2);
+  const v2 = (await b.service.detail(who, c2.id))!.versions[0]!;
+  assert.equal(bad.drawn, COVER_AI_TRIES);
+  assert.deepEqual([v2.cover!.kind, v2.cover!.aiAttempts], ['template', 3]);
+  assert.match(v2.cover!.note, /文字が写っていました/);
+});
+
+test('カバー: AI の挿絵は会社で月に 100 枚まで。超えたら型にする', async () => {
+  const llm = coverLlm([]);
+  const { service, store } = setup({ llm, research: fakeResearch, columns: { aiIllustration: true } });
+  const old = await store.create('t1', { theme: '前', memo: '', createdBy: 'u1' });
+  await store.addVersion('t1', old, {
+    title: '前', titles: [], body: '本文', description: '', sns: { short: '', long: '' }, sources: [], review: [], origin: 'writer', createdBy: 'u1',
+    cover: { fileId: 'f-x', kind: 'ai', pattern: null, photoId: null, alt: '', aiAttempts: 100, note: '' },
+  });
+  assert.deepEqual(await service.aiUsage('t1'), { used: 100, limit: 100 });
+  const c = await service.create(who, { theme: '歯みがき' }, true);
+  assert.ok('id' in c);
+  const v = (await service.detail(who, c.id))!.versions[0]!;
+  assert.equal(llm.drawn, 0);
+  assert.equal(v.cover!.kind, 'template');
+  assert.match(v.cover!.note, /上限/);
+});
+
+test('カバー: 写真を入れるとそのコラムのカバーになり、置き場に残る。JPEG と PNG のほかは断る', async () => {
+  const { service, store } = setup();
+  const c = await service.create(who, { theme: 'テーマ' }, true);
+  assert.ok('id' in c);
+  assert.match((await service.addPhoto(who, c.id, { bytes: new Uint8Array([1, 2]), mimeType: 'image/gif', name: 'a.gif' }))!, /JPEG か PNG/);
+  assert.equal(await service.addPhoto(who, c.id, { bytes: samplePng(), mimeType: 'image/png', name: 'shop.png' }), null);
+  const v = (await service.detail(who, c.id))!.versions[0]!;
+  assert.equal(v.cover!.kind, 'photo');
+  assert.equal((await store.photos('t1')).length, 1);
+  assert.equal(v.cover!.photoId, (await store.photos('t1'))[0]!.id);
+  assert.match((await service.recover(who, c.id, { kind: 'photo', photoId: 'cp-none' }))!, /見つかりません/);
+});
+
+test('カバー: 承認の指紋はカバーを含み、承認の画面にカバーの画像を出す', async () => {
+  const { service } = setup();
+  const c = await service.create(who, { theme: 'テーマ' }, true);
+  assert.ok('id' in c);
+  const p1 = (await service.preview(who, c.id))!;
+  const place = COLUMN_TOOLS.find((x) => x.name === 'columns.place')!;
+  const on = { tenantId: 't1', userId: 'u1', columns: { service, access: async () => DEFAULT_TENANT_SETTINGS.webColumns } } as unknown as ToolContext;
+  const prepared = await place.prepare!({ columnId: c.id }, on);
+  assert.ok(prepared.kind === 'ready' && prepared.shown!.includes(`](/v1/files/${p1.cover!.fileId}/view)`) && prepared.shown!.includes('カバー画像: 型'));
+  await service.recover(who, c.id, { kind: 'template' });
+  const p2 = (await service.preview(who, c.id))!;
+  assert.notEqual(p1.digest, p2.digest, 'カバーを作り直すと指紋が変わる');
+});
+
+test('カバー: WordPress ではメディアに入れてアイキャッチにする', async (t) => {
+  const { service } = setup({ runStatus: 'awaiting_approval' });
+  const bodies: { url: string; init?: RequestInit }[] = [];
+  t.mock.method(globalThis, 'fetch', async (url: string, init?: RequestInit) => {
+    bodies.push({ url, ...(init ? { init } : {}) });
+    if (url.endsWith('/users/me?context=edit')) return new Response(JSON.stringify({ name: 'x' }), { status: 200 });
+    if (url.endsWith('/wp/v2/media')) return new Response(JSON.stringify({ id: 7 }), { status: 201 });
+    if (url.includes('/wp/v2/media/7')) return new Response('{}', { status: 200 });
+    if (url.endsWith('/wp/v2/posts')) return new Response(JSON.stringify({ id: 42 }), { status: 201 });
+    return new Response('', { status: 404 });
+  });
+  await service.saveWordPress(who, { siteUrl: 'https://www.example.jp', username: 'editor', password: 'pw' });
+  const c = await service.create(who, { theme: 'テーマ' }, true);
+  assert.ok('id' in c);
+  const p = (await service.preview(who, c.id))!;
+  await service.markAwaiting(who, c.id, 'run-1', p);
+  const res = await service.place(who, c.id, p.digest);
+  assert.ok(!('error' in res) && res.placed);
+  const media = bodies.find((b) => b.url.endsWith('/wp/v2/media'))!;
+  assert.equal((media.init!.headers as Record<string, string>)['content-type'], 'image/png');
+  const alt = JSON.parse(String(bodies.find((b) => b.url.includes('/wp/v2/media/7'))!.init!.body)) as { alt_text: string };
+  assert.ok(alt.alt_text.includes('カバー'));
+  const post = JSON.parse(String(bodies.find((b) => b.url.endsWith('/wp/v2/posts'))!.init!.body)) as { featured_media: number; status: string };
+  assert.deepEqual([post.featured_media, post.status], [7, 'draft']);
+});
+
+test('カバー: 題名は 3 行まで。収まらなければ末尾を「…」にし、句読点を行の頭に置かない。文字は SVG の文字で重ねる', () => {
+  const short = wrapTitle('子どもの歯みがき', 1056);
+  assert.deepEqual([short.lines.length, short.fontSize], [1, 68]);
+  const long = wrapTitle('あ'.repeat(200), 1056);
+  assert.equal(long.lines.length, 3);
+  assert.ok(long.lines[2]!.endsWith('…'));
+  const punct = wrapTitle(`${'あ'.repeat(15)}、いいい`, 1056);
+  assert.ok(punct.lines.every((l) => !l.startsWith('、')));
+  const svg = coverSvg({ title: 'A & <B>', background: { kind: 'template', pattern: 'waves', color: '#123456' }, logo: null, company: '見本' });
+  assert.ok(svg.includes('A &amp; &lt;B&gt;') && svg.includes('見本'));
 });

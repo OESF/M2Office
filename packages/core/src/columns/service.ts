@@ -4,22 +4,30 @@
  * 書く（裏で書き上げる）・直す（版を足す）・書き直しを頼む・直し案に置き換える・前の版に戻す・承認へ進める・
  * WordPress に下書きとして入れる・削除する。**承認した版だけを入れる。** 承認の後に版が変わっていれば入れない。
  * WordPress のアプリケーションパスワードは会社の接続の秘密の値として暗号化して預け、ここでだけ取り出す。
+ * カバー画像（第32.7.1節・第32.18.2節）は版に含め、書き上げたときと「作り直す」で作る。
  */
 
 import { createHash, randomUUID } from 'node:crypto';
 import {
   canUseAgent, WEB_COLUMNS_EXTENSION_ID,
-  type ColumnReviewItem, type ColumnWordPress, type WebColumn, type WebColumnSettings, type WebColumnVersion,
+  type ColumnCoverKind, type ColumnReviewItem, type ColumnWordPress, type WebColumn, type WebColumnCover,
+  type WebColumnSettings, type WebColumnVersion,
 } from '@m2office/shared';
 import type { LlmProvider } from '../llm/provider.js';
 import type { ResearchProvider } from '../research/provider.js';
 import type { Repository } from '../repository/types.js';
 import type { SecretBox } from '../secrets/box.js';
+import type { FileStore } from '../files/store.js';
+import { saveFile } from '../files/service.js';
 import { silentLogger, type Logger } from '../log/logger.js';
 import type { ColumnStore, NewColumnVersion } from './store.js';
 import { aiReview, mergeReview, ruleReview } from './review.js';
 import { ColumnWriteError, rewriteColumn, writeColumn } from './writer.js';
-import { checkWordPress, columnHtml, createWordPressDraft, normalizeSiteUrl, type WordPressAuth } from './wordpress.js';
+import { checkWordPress, columnHtml, createWordPressDraft, normalizeSiteUrl, uploadWordPressMedia, type WordPressAuth } from './wordpress.js';
+import {
+  COVER_AI_MODEL, COVER_AI_MONTHLY_LIMIT, COVER_AI_TRIES, brandColor, checkIllustration, choosePhoto, describePhoto, fallbackColor,
+  illustrationPrompt, pickPattern, renderCover, type CoverInput,
+} from './cover.js';
 
 /** コラムを扱う人。 */
 export interface ColumnViewer {
@@ -34,8 +42,25 @@ export interface ColumnServiceDeps {
   box: SecretBox;
   llmFor(tenantId: string): Promise<LlmProvider>;
   researchFor(tenantId: string): Promise<ResearchProvider>;
+  /** カバー画像と会社の写真の置き場。 */
+  files: FileStore;
   logger?: Logger;
 }
+
+/** カバーを作り直すときの頼み方（画面と秘書）。 */
+export interface CoverRequest {
+  /** 背景の種類。無ければ決まった順（AI の挿絵 → 会社の写真 → 型）で選ぶ。 */
+  kind?: ColumnCoverKind;
+  /** 雰囲気の頼み（「もっと明るく」など）。AI の挿絵に渡す。 */
+  hint?: string;
+  /** 使う会社の写真（写真を入れたとき）。 */
+  photoId?: string;
+}
+
+/** 写真として受け取れる形。 */
+const PHOTO_MIME: Record<string, 'png' | 'jpeg'> = { 'image/png': 'png', 'image/jpeg': 'jpeg' };
+/** 写真の大きさの上限。 */
+export const COLUMN_PHOTO_MAX_BYTES = 10 * 1024 * 1024;
 
 /** 1 つのコラムと版の一覧。 */
 export interface ColumnDetail {
@@ -57,6 +82,8 @@ export interface ColumnPreview {
   reviewCount: number;
   /** 入れ先（「WordPress（https://…）の下書き」か「承認済みにするだけ」）。 */
   destination: string;
+  /** 今の版のカバー画像（無ければ `null`）。 */
+  cover: WebColumnCover | null;
   /** 入れられない理由。空なら承認へ進める。 */
   problems: string[];
   digest: string;
@@ -75,8 +102,14 @@ const WRITING_STUCK_MS = 15 * 60_000;
 const WP_KIND = 'wordpress' as const;
 
 /** 版の指紋（承認の後に版が変わっていないかを確かめる）。 */
-function versionDigest(id: string, v: Pick<WebColumnVersion, 'version' | 'title' | 'body' | 'description'>): string {
-  return createHash('sha256').update(JSON.stringify([id, v.version, v.title, v.body, v.description])).digest('hex');
+function versionDigest(id: string, v: Pick<WebColumnVersion, 'version' | 'title' | 'body' | 'description' | 'cover'>): string {
+  return createHash('sha256').update(JSON.stringify([id, v.version, v.title, v.body, v.description, v.cover?.fileId ?? null])).digest('hex');
+}
+
+/** 今月の始まり（日本の時刻。月の上限を数える）。 */
+function monthStartIso(now = new Date()): string {
+  const jst = new Date(now.getTime() + 9 * 3600_000);
+  return new Date(Date.UTC(jst.getUTCFullYear(), jst.getUTCMonth(), 1) - 9 * 3600_000).toISOString();
 }
 
 /** 文字の数（空白を除く）。 */
@@ -85,11 +118,11 @@ const charCount = (s: string) => s.replace(/\s/g, '').length;
 /**
  * 記事に入れる本文（Markdown）。末尾に出典・監修者・AI が書いたことの表示（入のとき）を足す（第32.9節）。
  */
-export function finalMarkdown(v: Pick<WebColumnVersion, 'body' | 'sources'>, s: Pick<WebColumnSettings, 'supervisor' | 'aiNotice'>): string {
+export function finalMarkdown(v: Pick<WebColumnVersion, 'body' | 'sources'> & { cover?: WebColumnCover | null }, s: Pick<WebColumnSettings, 'supervisor' | 'aiNotice'>): string {
   const parts = [v.body.trim()];
   if (v.sources.length > 0) parts.push(['## 出典', '', ...v.sources.map((x, i) => `${i + 1}. [${x.title || x.url}](${x.url})`)].join('\n'));
   if (s.supervisor?.name) parts.push(`監修: ${[s.supervisor.title, s.supervisor.name].filter(Boolean).join(' ')}`);
-  if (s.aiNotice) parts.push('この記事は AI の下書きをもとに、担当者が確かめて掲載しています。');
+  if (s.aiNotice) parts.push(`この記事は AI の下書きをもとに、担当者が確かめて掲載しています。${v.cover?.kind === 'ai' ? 'カバー画像は AI が描いた挿絵です。' : ''}`);
   return parts.join('\n\n');
 }
 
@@ -115,6 +148,8 @@ export function webColumnsAccess(repo: Repository) {
  */
 export class ColumnService {
   private readonly log: Logger;
+  /** 会社のロゴから選んだ色（会社とロゴのファイルごと）。ロゴを替えると選び直す。 */
+  private readonly colors = new Map<string, string | null>();
 
   constructor(private readonly deps: ColumnServiceDeps) {
     this.log = deps.logger ?? silentLogger;
@@ -197,9 +232,16 @@ export class ColumnService {
         ruleReview(draft.body, settings.webColumns.industry, draft.sources.length),
         await aiReview(llm, draft.body, settings.webColumns.industry),
       );
+      const title = draft.titles[0] ?? c.theme;
+      // カバーを作れなくても、下書きは残す（画面の「カバーを作る」で作り直せる）
+      const made = await this.makeCover(who, { title, description: draft.description }, {}).catch((err: unknown) => {
+        this.log.warn('column.cover_failed', { columnId: id, error: err instanceof Error ? err.message : String(err) });
+        return null;
+      });
+      const cover = typeof made === 'string' ? null : made;
       await store.addVersion(who.tenantId, id, {
-        title: draft.titles[0] ?? c.theme, titles: draft.titles, body: draft.body, description: draft.description, sns: draft.sns,
-        sources: draft.sources, review, origin: 'writer', createdBy: who.userId,
+        title, titles: draft.titles, body: draft.body, description: draft.description, sns: draft.sns,
+        sources: draft.sources, review, cover, origin: 'writer', createdBy: who.userId,
       });
       await store.update(who.tenantId, id, { status: 'draft', failure: null });
     } catch (err) {
@@ -304,10 +346,11 @@ export class ColumnService {
     if (c.status === 'failed') problems.push('書けなかったコラムです。書き直してください');
     if (c.status === 'placed' && c.submittedVersion === c.currentVersion) problems.push('この版は WordPress に入れてあります');
     if (wp && !hasKey) problems.push('WordPress のアプリケーションパスワードが預けられていません。管理者に頼んでください');
+    if (v && !v.cover) problems.push('カバー画像がありません。「カバーを作る」で作ってください');
     return {
       id, version: c.currentVersion, title: v?.title ?? '', chars: v ? charCount(v.body) : 0, reviewCount: v?.review.length ?? 0,
       destination: wp ? `WordPress（${wp.siteUrl}）の下書き` : 'WordPress につないでいないため、承認済みにするだけ',
-      problems, digest: v ? versionDigest(id, v) : '',
+      cover: v?.cover ?? null, problems, digest: v ? versionDigest(id, v) : '',
     };
   }
 
@@ -351,11 +394,155 @@ export class ColumnService {
     }
     const auth = await this.wordpressAuth(who.tenantId, settings.wordpress);
     if (!auth) return { error: 'WordPress のアプリケーションパスワードが預けられていません' };
-    const res = await createWordPressDraft(auth, { title: v.title, html: columnHtml(finalMarkdown(v, settings)), excerpt: v.description });
+    // カバーをメディアに入れ、アイキャッチにする（第32.18.2節）
+    let media: string | null = null;
+    if (v.cover) {
+      const bytes = await this.deps.files.get(who.tenantId, v.cover.fileId);
+      if (!bytes) return { error: 'カバー画像を読めませんでした。カバーを作り直してから、もう一度承認へ進めてください' };
+      const up = await uploadWordPressMedia(auth, { bytes, fileName: `column-cover-${id.slice(4, 12)}.png`, mimeType: 'image/png', alt: v.cover.alt });
+      if ('error' in up) return { error: up.error };
+      media = up.id;
+    }
+    const res = await createWordPressDraft(auth, { title: v.title, html: columnHtml(finalMarkdown(v, settings)), excerpt: v.description, featuredMedia: media });
     if ('error' in res) return { error: res.error };
     await store.update(who.tenantId, id, { status: 'placed', submittedVersion: v.version, wpPostId: res.id, wpEditUrl: res.editUrl, runId: null });
     await this.audit(who, 'column.place', id, { version: v.version, site: settings.wordpress.siteUrl, postId: res.id });
     return { placed: true, editUrl: res.editUrl };
+  }
+
+  // ---- カバー画像（第32.7.1節・第32.18.2節） -----------------------------------
+
+  /**
+   * カバーを作り直す（新しい版になる）。
+   *
+   * @returns 作り直せなければ理由
+   */
+  async recover(who: ColumnViewer, id: string, req: CoverRequest = {}): Promise<string | null> {
+    const cur = await this.editable(who, id);
+    if (typeof cur === 'string') return cur;
+    if (req.photoId && !(await this.deps.store.photos(who.tenantId)).some((p) => p.id === req.photoId)) return 'その写真が見つかりません';
+    const cover = await this.makeCover(who, { title: cur.version.title, description: cur.version.description }, req);
+    if (typeof cover === 'string') return cover;
+    await this.addVersion(who, id, cur.version, { ...cur.version, cover, origin: 'cover' }, cur.version.review);
+    return null;
+  }
+
+  /**
+   * 会社の写真の置き場に写真を入れ、そのコラムのカバーにする。写真の説明と人が写っているかは推論が読む。
+   *
+   * @returns 入れられなければ理由
+   */
+  async addPhoto(who: ColumnViewer, id: string, photo: { bytes: Uint8Array; mimeType: string; name: string }): Promise<string | null> {
+    const kind = PHOTO_MIME[photo.mimeType];
+    if (!kind) return '写真は JPEG か PNG にしてください';
+    if (photo.bytes.byteLength > COLUMN_PHOTO_MAX_BYTES) return '写真は 10 MB までです';
+    const cur = await this.editable(who, id);
+    if (typeof cur === 'string') return cur;
+    const llm = await this.deps.llmFor(who.tenantId);
+    const meta = await saveFile(this.deps.repo, this.deps.files, {
+      tenantId: who.tenantId, ownerUserId: who.userId, name: photo.name || `photo.${kind === 'png' ? 'png' : 'jpg'}`, kind, bytes: photo.bytes, origin: 'upload', runId: null,
+    });
+    const read = await describePhoto(llm, { bytes: photo.bytes, mimeType: photo.mimeType });
+    const saved = await this.deps.store.addPhoto(who.tenantId, { fileId: meta.id, description: read.description, hasPeople: read.hasPeople, createdBy: who.userId });
+    await this.audit(who, 'column.photo_add', id, { photoId: saved.id });
+    return this.recover(who, id, { kind: 'photo', photoId: saved.id });
+  }
+
+  /** カバー画像の中身（PNG）。見つからなければ `null`。 */
+  async coverBytes(who: ColumnViewer, id: string, version?: number): Promise<Uint8Array | null> {
+    const c = await this.deps.store.get(who.tenantId, id);
+    if (!c) return null;
+    const v = (await this.deps.store.versions(who.tenantId, id)).find((x) => x.version === (version ?? c.currentVersion));
+    return v?.cover ? this.deps.files.get(who.tenantId, v.cover.fileId) : null;
+  }
+
+  /** 今月、AI の挿絵を描いた枚数と上限。 */
+  async aiUsage(tenantId: string): Promise<{ used: number; limit: number }> {
+    return { used: await this.deps.store.aiAttemptsSince(tenantId, monthStartIso()), limit: COVER_AI_MONTHLY_LIMIT };
+  }
+
+  /**
+   * カバーを作る。決まった順（頼まれた種類があればそれ）で背景を選び、題名を重ねて PNG にする。
+   *
+   * @returns 作ったカバー。頼まれた種類で作れなければ理由
+   */
+  private async makeCover(who: ColumnViewer, a: { title: string; description: string }, req: CoverRequest): Promise<WebColumnCover | string> {
+    const { repo, store } = this.deps;
+    const settings = await repo.getTenantSettings(who.tenantId);
+    const llm = await this.deps.llmFor(who.tenantId);
+    const [logo, company] = await Promise.all([this.logo(who.tenantId, settings.company.logoFileId), this.companyName(who.tenantId, settings.company.legalName)]);
+    const base = { title: a.title, logo, company };
+    const notes: string[] = [];
+    let aiAttempts = 0;
+
+    // ① AI の挿絵（会社が入れていて、描けて確かめられ、今月の上限の内のとき）
+    const wantAi = req.kind === 'ai' || (!req.kind && settings.webColumns.aiIllustration);
+    if (wantAi) {
+      const can = settings.webColumns.aiIllustration && llm.generateImage && llm.extractFromImage;
+      const usage = can ? await this.aiUsage(who.tenantId) : null;
+      if (!settings.webColumns.aiIllustration) notes.push('AI で挿絵を描く設定が切りのため、型にしました');
+      else if (!can) notes.push('この会社の AI では挿絵を描けないため、型にしました');
+      else if (usage && usage.used >= usage.limit) notes.push(`今月の AI の挿絵の上限（${usage.limit} 枚）に達したため、型にしました`);
+      else {
+        const tries = Math.min(COVER_AI_TRIES, usage!.limit - usage!.used);
+        for (let i = 0; i < tries; i++) {
+          aiAttempts += 1;
+          const img = await llm.generateImage!({
+            model: COVER_AI_MODEL, aspectRatio: '16:9',
+            prompt: illustrationPrompt({ title: a.title, description: a.description, industry: settings.webColumns.industry, hint: (req.hint ?? '').slice(0, 200) }),
+          }).catch(() => null);
+          if (!img) { notes.push('挿絵を描けませんでした'); continue; }
+          const check = await checkIllustration(llm, img, settings.webColumns.industry);
+          if (!check.ok) { notes.push(check.reason); continue; }
+          return this.saveCover(who, { ...base, background: { kind: 'image', image: img } }, { kind: 'ai', pattern: null, photoId: null, aiAttempts, note: '', alt: altText(a.title, 'ai') });
+        }
+        notes.push('確かめを通る挿絵ができなかったため、型にしました');
+      }
+    }
+
+    // ② 会社の写真（選んだ写真か、推論が記事に合うと選んだもの）
+    if (req.kind === 'photo' || (!req.kind && req.photoId === undefined)) {
+      const photos = await store.photos(who.tenantId);
+      const photo = req.photoId ? photos.find((p) => p.id === req.photoId) ?? null : await choosePhoto(llm, photos, a);
+      if (photo) {
+        const bytes = await this.deps.files.get(who.tenantId, photo.fileId);
+        const meta = bytes ? await repo.getFile(who.tenantId, photo.fileId) : null;
+        if (bytes && meta) {
+          return this.saveCover(who, { ...base, background: { kind: 'image', image: { bytes, mimeType: meta.mime } } },
+            { kind: 'photo', pattern: null, photoId: photo.id, aiAttempts, note: notes.join('／'), alt: photo.description || altText(a.title, 'photo') });
+        }
+      }
+      if (req.kind === 'photo') return photos.length === 0 ? 'まだ会社の写真がありません。「写真を入れる」で入れてください' : '記事に合う写真が見つかりませんでした。「写真を入れる」で選んでください';
+    }
+
+    // ③ 型
+    const pattern = pickPattern(await store.recentPatterns(who.tenantId, 6));
+    const color = (logo ? await this.logoColor(who.tenantId, settings.company.logoFileId!, llm, logo) : null) ?? fallbackColor(a.title);
+    return this.saveCover(who, { ...base, background: { kind: 'template', pattern, color } },
+      { kind: 'template', pattern, photoId: null, aiAttempts, note: notes.join('／'), alt: altText(a.title, 'template') });
+  }
+
+  private async saveCover(who: ColumnViewer, input: CoverInput, cover: Omit<WebColumnCover, 'fileId'>): Promise<WebColumnCover> {
+    const bytes = renderCover(input);
+    const meta = await saveFile(this.deps.repo, this.deps.files, {
+      tenantId: who.tenantId, ownerUserId: who.userId, name: 'column-cover.png', kind: 'png', bytes, origin: 'generated', runId: null,
+    });
+    return { fileId: meta.id, ...cover };
+  }
+
+  /** 会社のロゴ（PNG・JPEG）。無ければ `null`。 */
+  private async logo(tenantId: string, fileId: string | null): Promise<{ bytes: Uint8Array; mimeType: string } | null> {
+    if (!fileId) return null;
+    const meta = await this.deps.repo.getFile(tenantId, fileId).catch(() => null);
+    if (!meta || (meta.kind !== 'png' && meta.kind !== 'jpeg')) return null;
+    const bytes = await this.deps.files.get(tenantId, fileId);
+    return bytes ? { bytes, mimeType: meta.mime } : null;
+  }
+
+  private async logoColor(tenantId: string, fileId: string, llm: LlmProvider, logo: { bytes: Uint8Array; mimeType: string }): Promise<string | null> {
+    const key = `${tenantId}:${fileId}`;
+    if (!this.colors.has(key)) this.colors.set(key, await brandColor(llm, logo));
+    return this.colors.get(key) ?? null;
   }
 
   /** 削除する（承認へ進めていないものだけ）。 */
@@ -434,7 +621,7 @@ export class ColumnService {
   private async addVersion(who: ColumnViewer, id: string, cur: WebColumnVersion, next: Omit<NewColumnVersion, 'review' | 'createdBy'>, review: ColumnReviewItem[]): Promise<void> {
     await this.deps.store.addVersion(who.tenantId, id, {
       title: next.title, titles: next.titles ?? cur.titles, body: next.body, description: next.description, sns: next.sns, sources: next.sources,
-      review, origin: next.origin, createdBy: who.userId,
+      review, cover: next.cover === undefined ? cur.cover : next.cover, origin: next.origin, createdBy: who.userId,
     });
     await this.deps.store.update(who.tenantId, id, { status: 'draft', failure: null });
   }
@@ -465,6 +652,11 @@ export class ColumnService {
       detail, occurredAt: new Date().toISOString(),
     });
   }
+}
+
+/** カバー画像の代わりの文。 */
+function altText(title: string, kind: ColumnCoverKind): string {
+  return kind === 'ai' ? `「${title}」のカバーの挿絵` : kind === 'photo' ? `「${title}」のカバーの写真` : `「${title}」のカバー`;
 }
 
 /** 自社の書き方（第15.2.1節）を、コラムを書く指示に渡す短い文にする。 */

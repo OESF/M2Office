@@ -418,6 +418,7 @@ export function Markdown({ text, lineBreaks = false }: {
             </div>
           );
           case 'code': return <pre key={i} className="md-pre"><code>{b.text}</code></pre>;
+          case 'image': return <img key={i} className="md-img" src={b.src} alt={b.alt} loading="lazy" />;
           // 引用の中も書式として読み、改行を保つ（送る本文を、読める形で見せる。仕様書 第9.3.3節）
           case 'quote': return (
             <blockquote key={i} className="md-quote"><Markdown text={b.lines.join('\n')} lineBreaks /></blockquote>
