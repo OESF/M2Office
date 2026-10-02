@@ -27,5 +27,5 @@ export {
 export {
   BulkMailService, PostgresBulkMailStore, BULK_MAX_RECIPIENTS, BULK_DAILY_LIMIT, BULK_GAP_SECONDS, BULK_PLACEHOLDERS,
   renderBulk, adFooter, judgeAdvertising,
-  type BulkMail, type BulkMailStatus, type BulkRecipient, type BulkPreview, type BulkPreviewRecipient, type BulkMailStore, type BulkMailServiceDeps,
+  type BulkMail, type BulkMailStatus, type BulkRecipient, type OptOutRecord, type BulkPreview, type BulkPreviewRecipient, type BulkMailStore, type BulkMailServiceDeps,
 } from './bulk.js';

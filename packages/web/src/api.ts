@@ -720,7 +720,7 @@ export interface ExtensionView {
   /** 利用できる人（第16.7節）。 */
   scope: ScopeValue;
   /** 名刺管理の会社の設定（取り込んだ名刺の既定の範囲。仕様書 第27.7節）。名刺管理のときだけある。 */
-  cards?: { defaultScope: ContactScope; mailSignature: boolean; optOuts: number };
+  cards?: { defaultScope: ContactScope; mailSignature: boolean; bulkMailAdminApproval: boolean; optOuts: number };
   /** 在庫管理の会社の設定（機能の入り切りと既定の目安。仕様書 第29.4.1節）。在庫管理のときだけある。 */
   inventory?: InventorySettings;
   /** 人事・給与の会社の設定（仕様書 第30.8.1節）。人事・給与のときだけある。 */
@@ -1784,6 +1784,15 @@ export const api = {
     /** メールの署名から名刺を新しくするかの入り切り（仕様書 第27.6.1節）。 */
     setCardsMailSignature: (mailSignature: boolean) =>
       call<{ ok: true }>('/admin/extensions/business-cards/settings', { method: 'PUT', body: JSON.stringify({ mailSignature }) }),
+    /** まとめてのメールで、本人の承認のあとに管理者の承認を加えるか（仕様書 第27.9.1節）。 */
+    setCardsBulkMailAdminApproval: (bulkMailAdminApproval: boolean) =>
+      call<{ ok: true }>('/admin/extensions/business-cards/settings', { method: 'PUT', body: JSON.stringify({ bulkMailAdminApproval }) }),
+    /** 配信を停止したアドレスの一覧（新しい順。`q` はアドレスの一部。仕様書 第27.9.1節）。 */
+    cardsOptOuts: (q = '') =>
+      call<{ items: { email: string; source: 'url' | 'reply'; createdAt: string }[] }>(`/admin/extensions/business-cards/opt-outs?q=${encodeURIComponent(q)}`),
+    /** 配信の停止を外す（本人から求められたとき）。 */
+    removeCardsOptOut: (email: string) =>
+      call<{ ok: true }>('/admin/extensions/business-cards/opt-outs/remove', { method: 'POST', body: JSON.stringify({ email }) }),
     /** 在庫管理の予約の受け口（仕様書 第29.13.1節）。 */
     bookingSources: () => call<{ sources: InventoryBookingSource[] }>('/admin/extensions/inventory/booking-sources'),
     /** 予約の受け口を作る。URL（鍵を含む）はこの応答で一度だけ返る。 */

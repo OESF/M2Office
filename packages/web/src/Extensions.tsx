@@ -8,7 +8,7 @@
  * @see 仕様書 第12.10.5節 画面（管理者ページ「拡張機能」）
  */
 
-import { useEffect, useRef, useState, type DragEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
 import { JinglePlayer } from './signage-audio.js';
 import { api, ApiError, describeError, type AccessOptions, type ExtensionView, type HrProposalField, type ScopeValue } from './api.js';
 import {
@@ -258,8 +258,14 @@ function InstalledCard({ item: x, busy, focused = false, options, onChanged, onT
               onChange={(e) => void api.admin.setCardsMailSignature(e.target.checked).then(onChanged)} />
             メールの署名から名刺を新しくする
           </label>
-          {/* まとめてメールで配信の停止を申し出た人の数（仕様書 第27.9.1節）。アドレスは出さない */}
-          {x.cards.optOuts > 0 && <span className="muted">　配信の停止 {x.cards.optOuts} 件</span>}
+          {/* まとめてのメールで、本人の承認のあとに管理者の承認を加える（仕様書 第27.9.1節） */}
+          <label className="check">
+            <input type="checkbox" checked={x.cards.bulkMailAdminApproval} disabled={busy}
+              onChange={(e) => void api.admin.setCardsBulkMailAdminApproval(e.target.checked).then(onChanged)} />
+            まとめてのメールは管理者も承認する
+          </label>
+          {/* まとめてメールで配信の停止を申し出た人（仕様書 第27.9.1節「停止を外す」）。開いたときだけアドレスを出す */}
+          {x.cards.optOuts > 0 && <OptOuts count={x.cards.optOuts} onChanged={onChanged} />}
         </div>
       )}
       {x.inventory && on && <InventoryFields settings={x.inventory} busy={busy} onChanged={onChanged} />}
@@ -364,6 +370,56 @@ const INVENTORY_READY: InventoryFeature[] = ['lots', 'units', 'order', 'reserve'
  *
  * @remarks 説明文は出さない（原則 u11）。何の機能かは秘書に聞けばよい
  */
+/**
+ * 配信を停止したアドレスの一覧と「停止を外す」（仕様書 第27.9.1節）。管理者ページだけに出す。
+ *
+ * @remarks アドレスは相手の個人情報なので、開いたときだけ読む。外すのは本人から「また送ってほしい」と求められたときだけ
+ */
+function OptOuts({ count, onChanged }: { count: number; onChanged: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const [items, setItems] = useState<{ email: string; source: 'url' | 'reply'; createdAt: string }[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(() => {
+    api.admin.cardsOptOuts(q).then((r) => setItems(r.items)).catch((e) => setError(describeError(e, '読み込めませんでした')));
+  }, [q]);
+  useEffect(() => {
+    if (!open) return undefined;
+    const t = setTimeout(load, q ? 250 : 0);
+    return () => clearTimeout(t);
+  }, [open, q, load]);
+  const remove = async (email: string) => {
+    try {
+      await api.admin.removeCardsOptOut(email);
+      load();
+      onChanged();
+    } catch (e) {
+      setError(describeError(e, '外せませんでした'));
+    }
+  };
+  return (
+    <div className="opt-outs">
+      <button className="link" onClick={() => setOpen(!open)}>配信の停止 {count} 件</button>
+      {open && (
+        <div className="opt-outs-body">
+          <input type="search" placeholder="アドレスで探す" value={q} onChange={(e) => setQ(e.target.value)} aria-label="停止したアドレスを探す" />
+          {error && <p className="error small">{error}</p>}
+          <ul>
+            {(items ?? []).map((o) => (
+              <li key={o.email}>
+                <span>{o.email}</span>
+                <span className="muted">{new Date(o.createdAt).toLocaleDateString('ja-JP')}・{o.source === 'url' ? '停止の URL' : '返信'}</span>
+                <button className="link small" onClick={() => void remove(o.email)}>停止を外す</button>
+              </li>
+            ))}
+          </ul>
+          {items && items.length === 0 && <p className="muted">見つかりませんでした</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** 店頭サイネージの会社の設定（画像を出す秒数・店の色。仕様書 第31.4節）。画面の数と容量の上限は全社共通の決まり。 */
 function SignageFields({ settings, busy, onChanged }: { settings: SignageSettings; busy: boolean; onChanged: () => void }) {
   const [error, setError] = useState<string | null>(null);

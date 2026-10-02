@@ -358,6 +358,11 @@ export class RunEngine {
       throw new RunNotResumableError(run.id, run.status);
     }
 
+    // 会社の設定で、本人の承認のあとに管理者の承認を加える段（仕様書 第9.2.3節「adminAlsoWhen」）
+    if (decision === 'approved' && approval.approverUserId && await this.escalateToAdmin(run, stepRow, approval, decider, comment)) {
+      return { runId: run.id };
+    }
+
     const now = new Date().toISOString();
     await repo.updateApproval({
       ...approval, decision, decidedBy, comment, decidedAt: now,
@@ -385,6 +390,57 @@ export class RunEngine {
     // 承認された。次のステップから再開できるよう待ち行列へ戻す
     await repo.updateRun({ ...run, status: 'queued', cursor: run.cursor + 1 });
     return { runId: run.id };
+  }
+
+  /**
+   * 本人の承認のあとに、同じ段で管理者の承認を加える（仕様書 第9.2.3節「adminAlsoWhen」、第27.9.1節）。
+   *
+   * @returns 加えたら `true`（実行は承認待ちのまま。段は管理者が承認して初めて済む）。加えない段・設定・本人が管理者なら `false`
+   *
+   * @remarks 加えるかは本人が承認した時点の会社の設定で決める。管理者の承認には、本人が見た中身に「承認しました」を添える
+   */
+  private async escalateToAdmin(
+    run: Run, stepRow: RunStep, approval: Approval, decider: { id: string; roles: readonly string[] }, comment: string | null,
+  ): Promise<boolean> {
+    const { repo } = this.deps;
+    if (decider.roles.includes('admin')) return false;
+    const job = await repo.getJob(run.tenantId, run.jobId);
+    if (!job) return false;
+    const def = await this.deps.resolveDefinition(job.agentId, job.agentVersion, run.tenantId);
+    const step = def?.steps.find((s) => s.id === stepRow.stepId);
+    if (!step || step.type !== 'approval' || !step.adminAlsoWhen) return false;
+    const settings = await repo.getTenantSettings(run.tenantId);
+    if (!settingIsOn(settings, step.adminAlsoWhen)) return false;
+
+    const now = new Date().toISOString();
+    await repo.updateApproval({ ...approval, decision: 'approved', decidedBy: decider.id, comment, decidedAt: now });
+    await repo.appendAudit({
+      id: randomUUID(), tenantId: run.tenantId, actorType: 'user', actorId: decider.id,
+      action: 'approval.decide', targetType: 'approval', targetId: approval.id,
+      detail: { decision: 'approved', runId: run.id, adminNext: true }, occurredAt: now,
+    });
+    const users = await repo.listUsers(run.tenantId);
+    const name = users.find((u) => u.id === decider.id)?.displayName ?? '依頼した人';
+    // 1 行目は定義の present のまま（一覧・通知は 1 行目だけを出す）。2 行目に本人が承認したことを添える
+    const [first, ...rest] = approval.present.split('\n');
+    const admin: Approval = {
+      id: randomUUID(), runStepId: approval.runStepId, tenantId: run.tenantId, approverRole: ['admin'], approverUserId: null,
+      present: [first, `${name}さん（依頼した人）が承認しました。管理者の承認を待っています`, ...rest].join('\n'),
+      decision: null, decidedBy: null, comment: null, decidedAt: null, createdAt: now,
+    };
+    await repo.createApproval(admin);
+    await repo.appendAudit({
+      id: randomUUID(), tenantId: run.tenantId, actorType: 'system', actorId: 'engine',
+      action: 'run.await_approval', targetType: 'run', targetId: run.id,
+      detail: { stepId: step.id, approvalId: admin.id, admin: true }, occurredAt: now,
+    });
+    for (const user of users) {
+      if (user.status !== 'active' || !canDecide(admin, user)) continue;
+      await this.notify(run.tenantId, user.id, {
+        kind: 'approval', title: `承認をお願いします: ${def!.name}`, body: step.present, runId: run.id, at: now,
+      });
+    }
+    return true;
   }
 
   /**
@@ -1379,4 +1435,11 @@ function buildStepPrompt(step: Step, input: Record<string, unknown>, previous: R
     );
   }
   return lines.join('\n');
+}
+
+/** 会社の設定の真偽の値（`cards.bulkMailAdminApproval` のような点でつないだ名前）。 */
+function settingIsOn(settings: TenantSettings, path: string): boolean {
+  let cur: unknown = settings;
+  for (const k of path.split('.')) cur = cur && typeof cur === 'object' ? (cur as Record<string, unknown>)[k] : undefined;
+  return cur === true;
 }

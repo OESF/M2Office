@@ -110,7 +110,7 @@ export function extensionsRoute(deps: AppDeps) {
         // メールの署名からの更新の入り切り（第27.6.1節）
         // 配信を停止したアドレスの数（まとめてのメール。第27.9.1節）。アドレスそのものは返さない
         ...(e.pkg.manifest.id === CARDS_EXTENSION_ID ? {
-          cards: { defaultScope: settings.cards.defaultScope, mailSignature: settings.cards.mailSignature, optOuts },
+          cards: { defaultScope: settings.cards.defaultScope, mailSignature: settings.cards.mailSignature, bulkMailAdminApproval: settings.cards.bulkMailAdminApproval, optOuts },
         } : {}),
         // 在庫管理: 機能の入り切りと既定の目安（第29.4.1節）
         ...(e.pkg.manifest.id === INVENTORY_EXTENSION_ID ? { inventory: settings.inventory } : {}),
@@ -128,24 +128,47 @@ export function extensionsRoute(deps: AppDeps) {
    */
   app.put(`/${CARDS_EXTENSION_ID}/settings`, async (c) => {
     const { tenant, user } = c.get('ctx');
-    const body = await c.req.json<{ defaultScope?: unknown; mailSignature?: unknown }>().catch(() => ({} as { defaultScope?: unknown; mailSignature?: unknown }));
+    type Body = { defaultScope?: unknown; mailSignature?: unknown; bulkMailAdminApproval?: unknown };
+    const body = await c.req.json<Body>().catch(() => ({} as Body));
     if (body.defaultScope !== undefined && body.defaultScope !== 'company' && body.defaultScope !== 'personal') return c.json({ error: 'defaultScope は company か personal です' }, 400);
     if (body.mailSignature !== undefined && typeof body.mailSignature !== 'boolean') return c.json({ error: 'mailSignature は true か false です' }, 400);
-    if (body.defaultScope === undefined && body.mailSignature === undefined) return c.json({ error: '変える項目がありません' }, 400);
+    if (body.bulkMailAdminApproval !== undefined && typeof body.bulkMailAdminApproval !== 'boolean') return c.json({ error: 'bulkMailAdminApproval は true か false です' }, 400);
+    if (body.defaultScope === undefined && body.mailSignature === undefined && body.bulkMailAdminApproval === undefined) return c.json({ error: '変える項目がありません' }, 400);
     const current = (await deps.repo.getTenantSettings(tenant.id)).cards;
     const next = {
       ...current,
       ...(body.defaultScope !== undefined ? { defaultScope: body.defaultScope as 'company' | 'personal' } : {}),
       ...(body.mailSignature !== undefined ? { mailSignature: body.mailSignature as boolean } : {}),
+      // まとめてのメールで、本人の承認のあとに管理者の承認を加えるか（第27.9.1節）
+      ...(body.bulkMailAdminApproval !== undefined ? { bulkMailAdminApproval: body.bulkMailAdminApproval as boolean } : {}),
     };
     await deps.repo.saveTenantSettings(tenant.id, 'cards', next, user.id);
     await deps.repo.appendAudit({
       id: randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id, action: 'settings.update',
       targetType: 'settings', targetId: 'cards',
-      detail: { ...(body.defaultScope !== undefined ? { defaultScope: next.defaultScope } : {}), ...(body.mailSignature !== undefined ? { mailSignature: next.mailSignature } : {}) },
+      detail: {
+        ...(body.defaultScope !== undefined ? { defaultScope: next.defaultScope } : {}),
+        ...(body.mailSignature !== undefined ? { mailSignature: next.mailSignature } : {}),
+        ...(body.bulkMailAdminApproval !== undefined ? { bulkMailAdminApproval: next.bulkMailAdminApproval } : {}),
+      },
       occurredAt: new Date().toISOString(),
     });
-    return c.json({ ok: true, defaultScope: next.defaultScope, mailSignature: next.mailSignature });
+    return c.json({ ok: true, defaultScope: next.defaultScope, mailSignature: next.mailSignature, bulkMailAdminApproval: next.bulkMailAdminApproval });
+  });
+
+  /** 配信を停止したアドレスの一覧（新しい順。`q` でアドレスの一部を探す。第27.9.1節「停止を外す」）。 */
+  app.get(`/${CARDS_EXTENSION_ID}/opt-outs`, async (c) => {
+    const { tenant } = c.get('ctx');
+    return c.json({ items: await deps.cards.bulk.optOuts(tenant.id, (c.req.query('q') ?? '').slice(0, 200)) });
+  });
+
+  /** 配信の停止を外す（本人から「また送ってほしい」と求められたとき）。外したことは監査ログに残す。 */
+  app.post(`/${CARDS_EXTENSION_ID}/opt-outs/remove`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const body = await c.req.json<{ email?: unknown }>().catch(() => ({} as { email?: unknown }));
+    if (typeof body.email !== 'string' || !body.email.includes('@')) return c.json({ error: 'メールアドレスを渡してください' }, 400);
+    const removed = await deps.cards.bulk.removeOptOut(tenant.id, user.id, body.email);
+    return removed ? c.json({ ok: true }) : c.json({ error: 'このアドレスは停止されていません' }, 404);
   });
 
   /**

@@ -1691,3 +1691,8 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 
 /* 在庫の画面の作業の欄から一覧へ戻る（第29.11節「作業の欄」） */
 .inventory-back { display: inline-block; margin: calc(4px * var(--space-scale)) 0; }
+
+/* 名刺管理の配信の停止の一覧（第27.9.1節「停止を外す」）。開いたときだけアドレスを出す */
+.opt-outs-body { margin-top: calc(4px * var(--space-scale)); display: flex; flex-direction: column; gap: calc(4px * var(--space-scale)); max-width: 560px; }
+.opt-outs-body ul { list-style: none; margin: 0; padding: 0; max-height: 240px; overflow-y: auto; }
+.opt-outs-body li { display: flex; flex-wrap: wrap; align-items: baseline; gap: calc(8px * var(--space-scale)); padding: 2px 0; border-bottom: 1px solid var(--line); }

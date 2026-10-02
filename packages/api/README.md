@@ -299,7 +299,8 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/admin/extensions/import` | 管理者: `.m2ext` を取り込む（本文はファイルのバイト列。5 MB まで）。検証を通らなければ `problems` を返す |
 | `POST /v1/admin/extensions/:id/install` | 管理者: 同意して導入（本文に `consent: true`）。導入すると有効になる。同梱の接続は会社の接続として登録する（同じ ID が別の接続先で登録済みなら `notices` で知らせる） |
 | `PUT /v1/admin/extensions/:id/enabled` | 管理者: 有効・無効の切り替え（本文に `enabled`）。権限が増えた版は 409。内蔵の拡張（名刺管理・在庫管理）は会社の設定で入り切りし、データは消さない（導入と削除は 409。仕様書 第12.13節） |
-| `PUT /v1/admin/extensions/business-cards/settings` | 管理者: 名刺管理の、取り込んだ名刺の既定の範囲（`defaultScope`。第27.7節）と、メールの署名からの更新の入り切り（`mailSignature`。第27.6.1節）。渡した項目だけを変える |
+| `PUT /v1/admin/extensions/business-cards/settings` | 管理者: 名刺管理の、取り込んだ名刺の既定の範囲（`defaultScope`。第27.7節）と、メールの署名からの更新の入り切り（`mailSignature`。第27.6.1節）。渡した項目だけを変える。まとめてのメールで管理者の承認を加えるか（`bulkMailAdminApproval`。第27.9.1節） |
+| `GET /v1/admin/extensions/business-cards/opt-outs` ／ `POST …/opt-outs/remove` | 管理者: まとめてのメールの配信を停止したアドレスの一覧（`q` で探す）と、停止を外す（`email`。本人から求められたとき。監査ログ `mail.opt_out.remove` にはアドレスそのものを残さない） |
 | `GET /v1/admin/extensions/inventory/booking-sources` ／ `POST` | 管理者: 予約の受け口の一覧 ／ 作る（`name`）。作ったときだけ送り先の URL（鍵を含む）を返す。鍵はハッシュだけを持つ |
 | `PUT /v1/admin/extensions/inventory/booking-sources/:id/status` ／ `mapping` | 管理者: 受け口を止める・再開する（`status`）／ 項目の対応を直す・やり直す（`mapping`。`null` で次の予約から推論し直す） |
 | `POST /v1/admin/extensions/hr/proposal` | 管理者: 就業規則・賃金規程（`file`: PDF・Word・文字・写真）から、人事・給与の設定の案を作る（第30.8.2節。項目・今・案・規程の抜き書き・採らない理由。保存しない。読めなければ 422）。JSON で `knowledgeId` を送ると、知識に登録した社内規程から作る |

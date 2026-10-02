@@ -183,6 +183,8 @@ export const CARD_BULK_MAIL: AgentDefinition = {
       approverRole: [],
       present: 'まとめてのメール（宛先・件名・本文）',
       onReject: 'stop',
+      // 会社の設定「まとめてのメールは管理者も承認する」が入なら、本人の承認のあとに管理者の承認を加える（第27.9.1節）
+      adminAlsoWhen: 'cards.bulkMailAdminApproval',
     },
     {
       id: 'send',

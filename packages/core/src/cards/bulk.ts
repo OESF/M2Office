@@ -122,6 +122,10 @@ export interface BulkMailStore {
   optedOut(tenantId: string, emails: string[]): Promise<Set<string>>;
   addOptOut(tenantId: string, email: string, source: 'url' | 'reply'): Promise<boolean>;
   countOptOuts(tenantId: string): Promise<number>;
+  /** 配信を停止したアドレスの一覧（新しい順。`q` はアドレスの一部）。 */
+  listOptOuts(tenantId: string, q: string, limit: number): Promise<OptOutRecord[]>;
+  /** 配信の停止を外す。外したら `true`。 */
+  removeOptOut(tenantId: string, email: string): Promise<boolean>;
   /** 本人がこの日時より後に送った数（1 日の上限）。 */
   sentSince(who: CardViewer, since: string): Promise<number>;
   /** 本人がまとめてのメールを送ったアドレス（返信の「配信停止」を見分ける）。 */
@@ -202,6 +206,14 @@ export interface BulkMailServiceDeps {
 }
 
 /** まとめてのメールの操作。画面（API）・ツール（秘書と業務）・ワーカー（送信）が同じものを使う。 */
+/** 配信を停止したアドレス 1 つ（管理者の画面に出す。第27.9.1節「停止を外す」）。 */
+export interface OptOutRecord {
+  email: string;
+  /** `url`（停止の URL）か `reply`（返信の「配信停止」）。 */
+  source: 'url' | 'reply';
+  createdAt: string;
+}
+
 export class BulkMailService {
   private readonly log: Logger;
 
@@ -459,6 +471,27 @@ export class BulkMailService {
     return added;
   }
 
+  /** 配信を停止したアドレスの一覧（管理者の画面。第27.9.1節「停止を外す」）。 */
+  async optOuts(tenantId: string, q = ''): Promise<OptOutRecord[]> {
+    return this.deps.store.listOptOuts(tenantId, q.trim().slice(0, 200), 200);
+  }
+
+  /**
+   * 配信の停止を外す（本人から「また送ってほしい」と求められたとき。第27.9.1節）。
+   *
+   * @remarks 管理者だけが呼べる（呼ぶ側の API で確かめる）。監査ログには、停止のときと同じくアドレスそのものではなく照らし合わせの印を残す
+   */
+  async removeOptOut(tenantId: string, userId: string, email: string): Promise<boolean> {
+    const removed = await this.deps.store.removeOptOut(tenantId, lower(email));
+    if (removed) {
+      await this.deps.repo.appendAudit({
+        id: randomUUID(), tenantId, actorType: 'user', actorId: userId, action: 'mail.opt_out.remove', targetType: 'mail_opt_out',
+        targetId: createHash('sha256').update(lower(email)).digest('hex').slice(0, 16), detail: {}, occurredAt: new Date().toISOString(),
+      });
+    }
+    return removed;
+  }
+
   /**
    * 本人が受け取ったメールのうち、まとめてのメールを送った相手からの「配信停止」の返信を見つけて、配信を停止する（第27.9.1節）。
    *
@@ -615,6 +648,19 @@ export class PostgresBulkMailStore implements BulkMailStore {
   async countOptOuts(tenantId: string): Promise<number> {
     const rows = await this.q<{ n: number }>({ tenantId, userId: '' }, `select count(*)::int as n from mail_opt_outs where tenant_id = $1`, [tenantId]);
     return rows[0]?.n ?? 0;
+  }
+
+  async listOptOuts(tenantId: string, q: string, limit: number): Promise<OptOutRecord[]> {
+    const rows = await this.q<{ email: string; source: 'url' | 'reply'; created_at: Date | string }>({ tenantId, userId: '' },
+      `select email, source, created_at from mail_opt_outs where tenant_id = $1 and ($2 = '' or strpos(email, $2) > 0)
+        order by created_at desc limit $3`, [tenantId, lower(q), limit]);
+    return rows.map((r) => ({ email: r.email, source: r.source, createdAt: new Date(r.created_at).toISOString() }));
+  }
+
+  async removeOptOut(tenantId: string, email: string): Promise<boolean> {
+    const rows = await this.q<{ email: string }>({ tenantId, userId: '' },
+      `delete from mail_opt_outs where tenant_id = $1 and email = $2 returning email`, [tenantId, lower(email)]);
+    return rows.length > 0;
   }
 
   async sentSince(who: CardViewer, since: string): Promise<number> {

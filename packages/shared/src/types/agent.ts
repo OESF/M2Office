@@ -80,7 +80,16 @@ export interface ApprovalStep {
   present: string;
   /** 却下された場合の扱い。既定は `stop`。 */
   onReject?: 'stop' | { restartFrom: string };
+  /**
+   * 会社の設定が入なら、本人（`requester`）が承認したあとに、同じ段で管理者の承認を加える（仕様書 第9.2.3節）。
+   *
+   * @remarks 公式・内蔵の業務だけが使う。条件で段を分ける仕組みではない（段の並びは変わらない）
+   */
+  adminAlsoWhen?: AdminApprovalSetting;
 }
+
+/** 管理者の承認を加えるかを決める会社の設定（{@link ApprovalStep.adminAlsoWhen}）。 */
+export type AdminApprovalSetting = 'cards.bulkMailAdminApproval';
 
 export type Step = AgentStep | ApprovalStep;
 

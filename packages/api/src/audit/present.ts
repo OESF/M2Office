@@ -67,6 +67,7 @@ const ACTION_LABELS: Record<string, string> = {
   'bulk_mail.start': 'まとめてのメールを送り始めた',
   'bulk_mail.done': 'まとめてのメールを送り終えた',
   'mail.opt_out': 'まとめてのメールの配信の停止を受けた',
+  'mail.opt_out.remove': 'まとめてのメールの配信の停止を外した',
   'contact.signature_revert': 'メールの署名からの変更を戻した',
   'contact.signature_forget': 'メールの署名からの変更を削除した',
   'connection.oauth.register_reset': '無効になった接続のアプリを外した',

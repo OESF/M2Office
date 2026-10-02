@@ -3307,9 +3307,48 @@ console.log('\n■ 57. 名刺管理（内蔵の拡張。第27章、ADR-0042）')
       back.status === 'draft' && edit.status === 200 ? ok('承認を却下すると下書きに戻り、直せる') : ng('却下の後が違う', JSON.stringify({ status: back.status, edit: edit.status }));
       await call('a', `/v1/cards/bulk-mails/${d2.body.id}`, { method: 'DELETE' }, 'member');
 
+      // 管理者も承認する（第27.9.1節）。入なら、本人の承認のあとに同じ段で管理者の承認を待ち、管理者が承認して初めて送る
+      const adminOnByMember = await call('a', '/v1/admin/extensions/business-cards/settings', { method: 'PUT', body: JSON.stringify({ bulkMailAdminApproval: true }) }, 'member');
+      const adminOn = await call('a', '/v1/admin/extensions/business-cards/settings', { method: 'PUT', body: JSON.stringify({ bulkMailAdminApproval: true }) });
+      const d3 = await call('a', '/v1/cards/bulk-mails', { method: 'POST', body: JSON.stringify({ contactIds: [b1?.id], subject: '管理者の承認の確認', body: '{氏名} 様' }) }, 'member');
+      const s3 = await call('a', `/v1/cards/bulk-mails/${d3.body.id}/submit`, { method: 'POST', body: '{}' }, 'member');
+      await waitFor('a', s3.body.runId, ['awaiting_approval', 'failed', 'completed'], 20000, 'member');
+      const a3 = await approvalFor('a', s3.body.runId, 'member');
+      await call('a', `/v1/approvals/${a3?.id}`, { method: 'POST', body: JSON.stringify({ decision: 'approved' }) }, 'member');
+      await sleep(500);
+      const afterMember = (await call('a', `/v1/runs/${s3.body.runId}`, {}, 'member')).body;
+      const adminAp = await approvalFor('a', s3.body.runId, 'admin');
+      const memberTray = (await call('a', '/v1/approvals', {}, 'member')).body;
+      afterMember.run?.status === 'awaiting_approval' && adminAp && /（依頼した人）が承認しました/.test(adminAp.present)
+        && !(memberTray.items ?? []).some((x) => x.id === adminAp.id) && adminOnByMember.status === 403 && adminOn.status === 200
+        ? ok('「管理者も承認する」を入れると、本人の承認のあとに管理者の承認を待つ（本人には出さない。設定を変えられるのは管理者だけ）')
+        : ng('管理者の承認が加わらない', JSON.stringify({ status: afterMember.run?.status, present: adminAp?.present?.slice(0, 200), on: adminOn.status, byMember: adminOnByMember.status }));
+      await call('a', `/v1/approvals/${adminAp?.id}`, { method: 'POST', body: JSON.stringify({ decision: 'approved' }) }, 'admin');
+      let p4 = null;
+      for (let i = 0; i < 40; i++) {
+        p4 = (await call('a', `/v1/cards/bulk-mails/${d3.body.id}`, {}, 'member')).body;
+        if (p4.status === 'done') break;
+        await sleep(500);
+      }
+      await call('a', '/v1/admin/extensions/business-cards/settings', { method: 'PUT', body: JSON.stringify({ bulkMailAdminApproval: false }) });
+      p4?.status === 'done' && p4.progress?.sent === 1 ? ok('管理者が承認して初めて送る') : ng('管理者の承認のあとに送られない', JSON.stringify({ status: p4?.status, progress: p4?.progress }));
+      await owner57.query(`delete from bulk_mails where tenant_id = 't-alpha' and id = $1`, [d3.body.id]);
+
+      // 配信の停止を外す（第27.9.1節）。管理者だけがアドレスの一覧を見て外せ、外したことは監査ログに残す
+      const oo = await call('a', `/v1/admin/extensions/business-cards/opt-outs?q=${encodeURIComponent(bm(2))}`);
+      const ooByMember = await call('a', '/v1/admin/extensions/business-cards/opt-outs', {}, 'member');
+      const rm = await call('a', '/v1/admin/extensions/business-cards/opt-outs/remove', { method: 'POST', body: JSON.stringify({ email: bm(2).toUpperCase() }) });
+      const rmAgain = await call('a', '/v1/admin/extensions/business-cards/opt-outs/remove', { method: 'POST', body: JSON.stringify({ email: bm(2) }) });
+      const oo2 = await call('a', `/v1/admin/extensions/business-cards/opt-outs?q=${encodeURIComponent(bm(2))}`);
+      const { rows: rmAudit } = await owner57.query(`select target_id from audit_events where tenant_id = 't-alpha' and action = 'mail.opt_out.remove' order by occurred_at desc limit 1`);
+      oo.status === 200 && oo.body.items?.length === 1 && oo.body.items[0].source === 'url' && ooByMember.status === 403
+        && rm.status === 200 && rmAgain.status === 404 && oo2.body.items?.length === 0 && rmAudit[0] && !String(rmAudit[0].target_id).includes('@')
+        ? ok('管理者は停止したアドレスを探して停止を外せ（大文字小文字は問わない）、監査ログにはアドレスそのものを残さない')
+        : ng('停止を外す操作が違う', JSON.stringify({ list: oo.body, member: ooByMember.status, rm: rm.status, again: rmAgain.status, after: oo2.body, audit: rmAudit }));
+
       const { body: ext58 } = await call('a', '/v1/admin/extensions');
-      (ext58.items ?? []).find((x) => x.id === 'business-cards')?.cards?.optOuts >= 1
-        ? ok('管理者は、配信を停止したアドレスの数を見られる（アドレスは出さない）') : ng('停止の数が出ない');
+      typeof (ext58.items ?? []).find((x) => x.id === 'business-cards')?.cards?.optOuts === 'number'
+        ? ok('管理者は、配信を停止したアドレスの数を見られる（一覧は開いたときだけ）') : ng('停止の数が出ない');
       await owner57.query(`delete from mail_opt_outs where tenant_id = 't-alpha' and email like $1`, [`%-${tag}@sample.example`]);
       await owner57.query(`delete from bulk_mails where tenant_id = 't-alpha' and id = $1`, [bulkId]);
     }

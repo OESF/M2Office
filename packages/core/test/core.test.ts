@@ -204,6 +204,50 @@ test('approver: requester の承認は、依頼した本人だけが判断でき
   assert.equal((await repo.getRun('t', 'r1'))!.status, 'queued', '本人の承認で再開できる');
 });
 
+test('adminAlsoWhen: 会社の設定が入なら、本人の承認のあとに同じ段で管理者の承認を加える（本人が管理者なら加えない）', async () => {
+  const def: AgentDefinition = {
+    ...SHARE_DEF, id: 'admin-also-test',
+    steps: SHARE_DEF.steps.map((s) =>
+      s.type === 'approval' ? { ...s, approver: 'requester' as const, approverRole: [], adminAlsoWhen: 'cards.bulkMailAdminApproval' as const } : s),
+  };
+  const { repo, engine, run } = setup(def, { name: 'chat.post', args: { text: '共有します' } });
+  repo.users = [
+    { id: 'u-member', tenantId: 't', email: 'm@x.example', displayName: '依頼 花子', roles: ['member'], status: 'active' },
+    { id: 'u-admin', tenantId: 't', email: 'a@x.example', displayName: '管理 太郎', roles: ['admin'], status: 'active' },
+  ] as never;
+  repo.settings.cards = { ...repo.settings.cards, bulkMailAdminApproval: true };
+  const first = await engine.advance(run);
+  if (first.outcome !== 'awaiting_approval') assert.fail('承認待ちにならない');
+  await engine.decideApproval('t', first.approvalId, 'approved', { id: 'u-member', roles: ['member'] }, null);
+  assert.equal((await repo.getRun('t', 'r1'))!.status, 'awaiting_approval', '本人の承認だけでは進まない');
+  const admin = repo.approvals.find((a) => a.decision === null)!;
+  assert.deepEqual([admin.approverRole, admin.approverUserId], [['admin'], null]);
+  assert.equal(admin.runStepId, repo.approvals[0]!.runStepId, '同じ段の承認');
+  assert.equal(admin.present.split('\n')[0], repo.approvals[0]!.present.split('\n')[0], '1 行目は定義の present のまま');
+  assert.match(admin.present, /依頼 花子さん（依頼した人）が承認しました/);
+  assert.ok(repo.notifications.some((n) => n.userId === 'u-admin'), '管理者に知らせる');
+  await assert.rejects(engine.decideApproval('t', admin.id, 'approved', { id: 'u-member', roles: ['member'] }, null), ApprovalForbiddenError);
+  await engine.decideApproval('t', admin.id, 'approved', { id: 'u-admin', roles: ['admin'] }, null);
+  assert.equal((await repo.getRun('t', 'r1'))!.status, 'queued', '管理者が承認して初めて進む');
+
+  // 依頼した本人が管理者なら、本人の承認で足りる（管理者が 1 人の会社で止まらない）
+  const self = setup(def, { name: 'chat.post', args: { text: '共有します' } });
+  self.repo.settings.cards = { ...self.repo.settings.cards, bulkMailAdminApproval: true };
+  self.repo.jobs = self.repo.jobs.map((j) => ({ ...j, requestedBy: 'u-admin' }));
+  const own = await self.engine.advance(self.run);
+  if (own.outcome !== 'awaiting_approval') assert.fail('承認待ちにならない');
+  await self.engine.decideApproval('t', own.approvalId, 'approved', { id: 'u-admin', roles: ['admin'] }, null);
+  assert.equal((await self.repo.getRun('t', 'r1'))!.status, 'queued');
+  assert.equal(self.repo.approvals.length, 1);
+
+  // 設定が切りなら加えない
+  const off = setup(def, { name: 'chat.post', args: { text: '共有します' } });
+  const o = await off.engine.advance(off.run);
+  if (o.outcome !== 'awaiting_approval') assert.fail('承認待ちにならない');
+  await off.engine.decideApproval('t', o.approvalId, 'approved', { id: 'u-member', roles: ['member'] }, null);
+  assert.equal((await off.repo.getRun('t', 'r1'))!.status, 'queued');
+});
+
 test('ロールで判断する承認に、ロールの指定が無い定義は拒否する', () => {
   const registry = new ToolRegistry();
   for (const t of BUILTIN_TOOLS) registry.register(t);
