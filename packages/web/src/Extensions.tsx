@@ -13,7 +13,7 @@ import { JinglePlayer } from './signage-audio.js';
 import { api, ApiError, describeError, type AccessOptions, type ExtensionView, type HrProposalField, type ScopeValue } from './api.js';
 import {
   INVENTORY_FEATURES, SIGNAGE_DEFAULT_COLOR, SIGNAGE_JINGLES, type HrSettings, type InventoryBookingSource, type InventoryFeature, type InventorySettings,
-  type SignageSettings, type SignageSound, type SignageSource,
+  type SignageSettings, type SignageSound, type SignageSource, COLUMN_INDUSTRY_LABELS, type ColumnIndustry, type WebColumnSettings,
 } from '@m2office/shared';
 import { HelpTip, Markdown } from './help.js';
 import { ScopeEditor, ScopeField, useAccessOptions } from './Scope.js';
@@ -271,6 +271,7 @@ function InstalledCard({ item: x, busy, focused = false, options, onChanged, onT
       {x.inventory && on && <InventoryFields settings={x.inventory} busy={busy} onChanged={onChanged} />}
       {x.hr && on && <HrFields settings={x.hr} busy={busy} onChanged={onChanged} />}
       {x.signage && on && <SignageFields settings={x.signage} busy={busy} onChanged={onChanged} />}
+      {x.webColumns && on && <WebColumnsFields settings={x.webColumns} busy={busy} onChanged={onChanged} />}
       <div className="row small">
         <button className="link" onClick={() => setOpen(!open)}>{open ? '詳細を閉じる' : '詳細'}</button>
         {/* 内蔵の拡張は削除しない。スイッチで切る（データは消えない。第12.13節） */}
@@ -500,6 +501,63 @@ function SignageFields({ settings, busy, onChanged }: { settings: SignageSetting
           <button className="btn ghost small" disabled={!sourceName.trim()} onClick={() => void api.admin.createSignageSource(sourceName.trim()).then((r) => { setCreated(r.url); setSourceName(''); reload(); }).catch((e) => fail(e, '作れませんでした'))}>受け口を作る</button>
         </div>
         {created && <p className="ok-msg"><code>{created}</code></p>}
+      </div>
+      {error && <p className="error">{error}</p>}
+    </div>
+  );
+}
+
+/**
+ * Web のコラムの会社の設定（仕様書 第32.18.1節）。分野・読み手・業種・監修者・AI の表示と、WordPress の入れ先。
+ *
+ * @remarks アプリケーションパスワードは預けたら画面に戻さない。つながるかを確かめてから預ける
+ */
+function WebColumnsFields({ settings, busy, onChanged }: { settings: WebColumnSettings; busy: boolean; onChanged: () => void }) {
+  const [error, setError] = useState<string | null>(null);
+  const [wp, setWp] = useState({ siteUrl: settings.wordpress?.siteUrl ?? '', username: settings.wordpress?.username ?? '', password: '' });
+  const [connecting, setConnecting] = useState(false);
+  const fail = (e: unknown, text: string) => setError(describeError(e, text));
+  const save = (patch: Partial<Omit<WebColumnSettings, 'enabled' | 'wordpress'>>) =>
+    void api.admin.setWebColumnSettings(patch).then(() => { setError(null); onChanged(); }).catch((e) => fail(e, '保存できませんでした'));
+  const connect = () => {
+    setConnecting(true);
+    api.admin.saveWordPress(wp).then(() => { setError(null); setWp({ ...wp, password: '' }); onChanged(); })
+      .catch((e) => fail(e, 'WordPress につなげませんでした')).finally(() => setConnecting(false));
+  };
+  const topics = settings.topics.join('\n');
+  return (
+    <div className="small ext-inventory ext-columns">
+      <div className="row wrap">
+        <label>業種 <select value={settings.industry} disabled={busy} onChange={(e) => save({ industry: e.target.value as ColumnIndustry })}>
+          {(Object.keys(COLUMN_INDUSTRY_LABELS) as ColumnIndustry[]).map((k) => <option key={k} value={k}>{COLUMN_INDUSTRY_LABELS[k]}</option>)}
+        </select></label>
+        <label className="check"><input type="checkbox" checked={settings.aiNotice} disabled={busy} onChange={(e) => save({ aiNotice: e.target.checked })} /> AI が書いたことを記事の末尾に入れる</label>
+      </div>
+      <label className="ext-columns-wide">読み手 <input key={settings.audience} defaultValue={settings.audience} maxLength={200} disabled={busy} placeholder="市内の子育て世帯"
+        onBlur={(e) => { const v = e.target.value.trim(); if (v !== settings.audience) save({ audience: v }); }} /></label>
+      <label className="ext-columns-wide">分野 <textarea key={topics} rows={3} defaultValue={topics} disabled={busy} placeholder={'1 行に 1 つ'}
+        onBlur={(e) => { const v = e.target.value.split('\n').map((t) => t.trim()).filter(Boolean); if (v.join('\n') !== topics) save({ topics: v }); }} /></label>
+      <div className="row wrap">
+        <label>監修者 <input key={`n${settings.supervisor?.name ?? ''}`} defaultValue={settings.supervisor?.name ?? ''} maxLength={60} disabled={busy} placeholder="名前" aria-label="監修者の名前"
+          onBlur={(e) => { const name = e.target.value.trim(); if (name !== (settings.supervisor?.name ?? '')) save({ supervisor: name ? { name, title: settings.supervisor?.title ?? '' } : null }); }} /></label>
+        <input key={`t${settings.supervisor?.title ?? ''}`} defaultValue={settings.supervisor?.title ?? ''} maxLength={60} disabled={busy || !settings.supervisor} placeholder="肩書" aria-label="監修者の肩書"
+          onBlur={(e) => { const title = e.target.value.trim(); if (settings.supervisor && title !== settings.supervisor.title) save({ supervisor: { ...settings.supervisor, title } }); }} />
+      </div>
+      <div className="row wrap">
+        <strong>WordPress</strong>
+        {settings.wordpress
+          ? <>
+            <span className="badge ok">つないでいる</span>
+            <span className="muted">{settings.wordpress.siteUrl}（{settings.wordpress.username}）</span>
+            <button className="link danger" disabled={busy} onClick={() => void api.admin.removeWordPress().then(() => { setError(null); onChanged(); }).catch((e) => fail(e, '外せませんでした'))}>外す</button>
+          </>
+          : <>
+            <input value={wp.siteUrl} placeholder="https://www.example.jp" aria-label="WordPress のサイトの URL" onChange={(e) => setWp({ ...wp, siteUrl: e.target.value })} />
+            <input value={wp.username} placeholder="利用者名" aria-label="WordPress の利用者名" autoComplete="off" onChange={(e) => setWp({ ...wp, username: e.target.value })} />
+            <input value={wp.password} type="password" placeholder="アプリケーションパスワード" aria-label="WordPress のアプリケーションパスワード" autoComplete="new-password"
+              onChange={(e) => setWp({ ...wp, password: e.target.value })} />
+            <button className="btn ghost small" disabled={connecting || !wp.siteUrl.trim() || !wp.username.trim() || !wp.password.trim()} onClick={connect}>{connecting ? 'つないでいます…' : 'つなぐ'}</button>
+          </>}
       </div>
       {error && <p className="error">{error}</p>}
     </div>

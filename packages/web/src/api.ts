@@ -18,6 +18,7 @@ import type { CardCorners,
   InventoryCount, InventoryCountRow, InventoryCountScope, InventoryCountView, InventorySupplier,
   InventoryBooking, InventoryBookingMapping, InventoryBookingSource, InventoryPublication, InventoryPublicationScope, InventoryPublicSnapshot,
   SignageAsset, SignageEntry, SignageScreen, SignageSettings, SignageInterruptInput, SignageInterruptView, SignagePhrase, SignageSound, SignageSource,
+  ColumnWordPress, WebColumn, WebColumnSettings, WebColumnVersion,
 } from '@m2office/shared';
 import { debugMode, recordCall } from './debug.js';
 
@@ -279,6 +280,8 @@ export interface Me {
   hr?: boolean;
   /** 店頭サイネージを使えるか（会社の入り切りと利用範囲。仕様書 第31.2節）。 */
   signage?: boolean;
+  /** Web のコラムを使えるか（会社の入り切りと利用範囲。仕様書 第32.18.1節）。 */
+  webColumns?: boolean;
   /** 本人の「給与・勤怠」を使えるか（台帳に結び付いているか。仕様書 第30.25節）。 */
   hrSelf?: boolean;
   /** デバッグモードか（`M2O_DEBUG=true`。仕様書 第20.4.1節「デバッグモード」）。 */
@@ -727,6 +730,16 @@ export interface ExtensionView {
   hr?: HrSettings;
   /** 店頭サイネージの会社の設定（仕様書 第31.4節）。店頭サイネージのときだけある。 */
   signage?: SignageSettings;
+  /** Web のコラムの会社の設定（仕様書 第32.18.1節）。Web のコラムのときだけある。パスワードは含まない。 */
+  webColumns?: WebColumnSettings;
+}
+
+/** Web のコラム 1 つと版（仕様書 第32.18.1節）。 */
+export interface ColumnDetail {
+  column: WebColumn;
+  /** 版（新しい順）。 */
+  versions: WebColumnVersion[];
+  wordpress: ColumnWordPress | null;
 }
 
 /** 店頭サイネージの管理の画面の中身（仕様書 第31.9.4節）。 */
@@ -1174,6 +1187,24 @@ export const api = {
     },
   },
   /** 在庫管理（内蔵の拡張。仕様書 第29章）。 */
+  /** Web のコラム（内蔵の拡張。仕様書 第32章）。 */
+  columns: {
+    list: () => call<{ columns: WebColumn[]; wordpress: ColumnWordPress | null }>('/columns'),
+    /** 書き始める。書き上げは裏で進む。 */
+    create: (theme: string, memo: string) => call<{ id: string }>('/columns', { method: 'POST', body: JSON.stringify({ theme, memo }) }),
+    get: (id: string) => call<ColumnDetail>(`/columns/${encodeURIComponent(id)}`),
+    /** 直して保存する（新しい版になる）。 */
+    save: (id: string, patch: { title?: string; body?: string; description?: string; sns?: { short?: string; long?: string } }) =>
+      call<{ ok: true }>(`/columns/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(patch) }),
+    rewrite: (id: string, instruction: string) =>
+      call<{ ok: true }>(`/columns/${encodeURIComponent(id)}/rewrite`, { method: 'POST', body: JSON.stringify({ instruction }) }),
+    retry: (id: string) => call<{ ok: true }>(`/columns/${encodeURIComponent(id)}/retry`, { method: 'POST' }),
+    applySuggestion: (id: string, index: number) => call<{ ok: true }>(`/columns/${encodeURIComponent(id)}/suggestions/${index}`, { method: 'POST' }),
+    restore: (id: string, version: number) => call<{ ok: true }>(`/columns/${encodeURIComponent(id)}/versions/${version}/restore`, { method: 'POST' }),
+    exported: (id: string) => call<{ title: string; markdown: string; html: string; description: string }>(`/columns/${encodeURIComponent(id)}/export`),
+    submit: (id: string) => call<{ runId: string }>(`/columns/${encodeURIComponent(id)}/submit`, { method: 'POST' }),
+    remove: (id: string) => call<{ ok: true }>(`/columns/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  },
   /** 店頭サイネージ（仕様書 第31章）。 */
   signage: {
     overview: () => call<SignageOverview>('/signage'),
@@ -1833,6 +1864,13 @@ export const api = {
     hrLaborIndustries: () => call<{ industries: { code: string; category: string; name: string; rate: number }[] }>('/admin/extensions/hr/labor-industries'),
     setHrSettings: (patch: Partial<HrSettings>) =>
       call<{ ok: true; hr: HrSettings }>('/admin/extensions/hr/settings', { method: 'PUT', body: JSON.stringify(patch) }),
+    /** Web のコラムの会社の設定（仕様書 第32.18.1節）。送った項目だけを変える。 */
+    setWebColumnSettings: (patch: Partial<Omit<WebColumnSettings, 'enabled' | 'wordpress'>>) =>
+      call<{ ok: true; webColumns: WebColumnSettings }>('/admin/extensions/web-columns/settings', { method: 'PUT', body: JSON.stringify(patch) }),
+    /** WordPress の入れ先とアプリケーションパスワードを預ける。つながるかを確かめてから預ける。 */
+    saveWordPress: (input: { siteUrl: string; username: string; password: string }) =>
+      call<{ ok: true; wordpress: ColumnWordPress }>('/admin/extensions/web-columns/wordpress', { method: 'PUT', body: JSON.stringify(input) }),
+    removeWordPress: () => call<{ ok: true }>('/admin/extensions/web-columns/wordpress', { method: 'DELETE' }),
     /** 店頭サイネージの会社の設定（画像の秒数・店の色。仕様書 第31.4節）。送った項目だけを変える。 */
     setSignageSettings: (patch: Partial<Omit<SignageSettings, 'enabled'>>) =>
       call<{ ok: true; signage: SignageSettings }>('/admin/extensions/signage/settings', { method: 'PUT', body: JSON.stringify(patch) }),

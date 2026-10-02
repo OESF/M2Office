@@ -1,0 +1,233 @@
+/**
+ * @file Web のコラムの置き場（仕様書 第32.17節・第32.18.1節、移行 062）。PostgreSQL と、自動テスト用のメモリの 2 つ。
+ *
+ * コラムは会社で共有する。版は直すたびに足し、前の版を消さない。会社の境界はデータベースの行単位の制限でも効く。
+ */
+
+import { randomUUID } from 'node:crypto';
+import pg from 'pg';
+import type { ColumnReviewItem, ColumnSource, WebColumn, WebColumnStatus, WebColumnVersion } from '@m2office/shared';
+
+/** 足す版（番号は置き場が決める）。 */
+export type NewColumnVersion = Omit<WebColumnVersion, 'version' | 'createdAt' | 'createdByName'>;
+
+/** コラムの置き場。 */
+export interface ColumnStore {
+  list(tenantId: string, limit?: number): Promise<WebColumn[]>;
+  get(tenantId: string, id: string): Promise<WebColumn | null>;
+  create(tenantId: string, c: { theme: string; memo: string; createdBy: string }): Promise<string>;
+  update(tenantId: string, id: string, patch: Partial<{
+    status: WebColumnStatus; submittedVersion: number | null; submittedDigest: string | null; runId: string | null;
+    wpPostId: string | null; wpEditUrl: string | null; failure: string | null;
+  }>): Promise<void>;
+  /** 承認へ進めた版の指紋（承認の後に版が変わっていないかを確かめる）。 */
+  submittedDigest(tenantId: string, id: string): Promise<string | null>;
+  delete(tenantId: string, id: string): Promise<void>;
+  /** 版を足し、今の版にする。足した版の番号を返す。 */
+  addVersion(tenantId: string, columnId: string, v: NewColumnVersion): Promise<number>;
+  versions(tenantId: string, columnId: string): Promise<WebColumnVersion[]>;
+  /** 決まった時間より前から「書いています」のままのもの（書き上げの途中で止まった）。 */
+  stuckWriting(tenantId: string, beforeIso: string): Promise<string[]>;
+}
+
+interface ColumnRow {
+  id: string; theme: string; memo: string; status: WebColumnStatus; current_version: number; submitted_version: number | null;
+  run_id: string | null; wp_edit_url: string | null; failure: string | null; created_by: string; created_at: Date | string; updated_at: Date | string;
+  title: string | null; review: ColumnReviewItem[] | null;
+}
+
+const COLUMN_SELECT = `select c.id, c.theme, c.memo, c.status, c.current_version, c.submitted_version, c.run_id, c.wp_edit_url, c.failure,
+    c.created_by, c.created_at, c.updated_at, v.title, v.review
+  from web_columns c left join web_column_versions v on v.tenant_id = c.tenant_id and v.column_id = c.id and v.version = c.current_version`;
+
+/** 日時を ISO の文字にする（つなぎの設定で Date でも文字でも返るため）。 */
+const iso = (v: Date | string) => new Date(v).toISOString();
+
+function toColumn(r: ColumnRow): WebColumn {
+  return {
+    id: r.id, theme: r.theme, memo: r.memo, status: r.status, currentVersion: r.current_version, title: r.title ?? '',
+    reviewCount: (r.review ?? []).length, submittedVersion: r.submitted_version, runId: r.run_id, wpEditUrl: r.wp_edit_url,
+    failure: r.failure, createdBy: r.created_by, createdAt: iso(r.created_at), updatedAt: iso(r.updated_at),
+  };
+}
+
+interface VersionRow {
+  version: number; title: string; titles: string[]; body: string; description: string; sns: { short?: string; long?: string };
+  sources: ColumnSource[]; review: ColumnReviewItem[]; origin: WebColumnVersion['origin']; created_by: string; created_at: Date | string;
+}
+
+function toVersion(r: VersionRow): WebColumnVersion {
+  return {
+    version: r.version, title: r.title, titles: r.titles ?? [], body: r.body, description: r.description,
+    sns: { short: r.sns?.short ?? '', long: r.sns?.long ?? '' }, sources: r.sources ?? [], review: r.review ?? [],
+    origin: r.origin, createdBy: r.created_by, createdAt: iso(r.created_at),
+  };
+}
+
+/** PostgreSQL のコラムの置き場。問い合わせごとにトランザクションを張り、`app.tenant_id` を設定する。 */
+export class PostgresColumnStore implements ColumnStore {
+  private readonly pool: pg.Pool;
+
+  constructor(connectionString: string) {
+    this.pool = new pg.Pool({ connectionString, max: 4 });
+  }
+
+  async close(): Promise<void> {
+    await this.pool.end();
+  }
+
+  private async tx<T>(tenantId: string, fn: (c: pg.PoolClient) => Promise<T>): Promise<T> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      await client.query(`select set_config('app.tenant_id', $1, true)`, [tenantId]);
+      const out = await fn(client);
+      await client.query('commit');
+      return out;
+    } catch (err) {
+      await client.query('rollback').catch(() => undefined);
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  private async q<T extends pg.QueryResultRow>(tenantId: string, text: string, params: unknown[] = []): Promise<T[]> {
+    return this.tx(tenantId, async (c) => (await c.query<T>(text, params as never[])).rows);
+  }
+
+  async list(tenantId: string, limit = 200): Promise<WebColumn[]> {
+    return (await this.q<ColumnRow>(tenantId, `${COLUMN_SELECT} where c.tenant_id = $1 order by c.updated_at desc limit $2`, [tenantId, limit])).map(toColumn);
+  }
+
+  async get(tenantId: string, id: string): Promise<WebColumn | null> {
+    const rows = await this.q<ColumnRow>(tenantId, `${COLUMN_SELECT} where c.tenant_id = $1 and c.id = $2`, [tenantId, id]);
+    return rows[0] ? toColumn(rows[0]) : null;
+  }
+
+  async create(tenantId: string, c: { theme: string; memo: string; createdBy: string }): Promise<string> {
+    const id = `col-${randomUUID()}`;
+    await this.q(tenantId, `insert into web_columns (id, tenant_id, theme, memo, created_by) values ($1, $2, $3, $4, $5)`,
+      [id, tenantId, c.theme, c.memo, c.createdBy]);
+    return id;
+  }
+
+  async update(tenantId: string, id: string, patch: Parameters<ColumnStore['update']>[2]): Promise<void> {
+    const cols: Record<string, string> = {
+      status: 'status', submittedVersion: 'submitted_version', submittedDigest: 'submitted_digest', runId: 'run_id',
+      wpPostId: 'wp_post_id', wpEditUrl: 'wp_edit_url', failure: 'failure',
+    };
+    const sets: string[] = [];
+    const params: unknown[] = [tenantId, id];
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === undefined || !cols[k]) continue;
+      params.push(v);
+      sets.push(`${cols[k]} = $${params.length}`);
+    }
+    if (sets.length === 0) return;
+    await this.q(tenantId, `update web_columns set ${sets.join(', ')}, updated_at = now() where tenant_id = $1 and id = $2`, params);
+  }
+
+  async submittedDigest(tenantId: string, id: string): Promise<string | null> {
+    const rows = await this.q<{ submitted_digest: string | null }>(tenantId, 'select submitted_digest from web_columns where tenant_id = $1 and id = $2', [tenantId, id]);
+    return rows[0]?.submitted_digest ?? null;
+  }
+
+  async delete(tenantId: string, id: string): Promise<void> {
+    await this.q(tenantId, 'delete from web_columns where tenant_id = $1 and id = $2', [tenantId, id]);
+  }
+
+  async addVersion(tenantId: string, columnId: string, v: NewColumnVersion): Promise<number> {
+    return this.tx(tenantId, async (c) => {
+      const { rows } = await c.query<{ n: number }>(
+        'update web_columns set current_version = current_version + 1, updated_at = now() where tenant_id = $1 and id = $2 returning current_version as n',
+        [tenantId, columnId]);
+      const n = rows[0]?.n;
+      if (!n) throw new Error('コラムが見つかりません');
+      await c.query(`insert into web_column_versions (tenant_id, column_id, version, title, titles, body, description, sns, sources, review, origin, created_by)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+      [tenantId, columnId, n, v.title, JSON.stringify(v.titles), v.body, v.description, JSON.stringify(v.sns), JSON.stringify(v.sources),
+        JSON.stringify(v.review), v.origin, v.createdBy]);
+      return n;
+    });
+  }
+
+  async versions(tenantId: string, columnId: string): Promise<WebColumnVersion[]> {
+    return (await this.q<VersionRow>(tenantId, `select version, title, titles, body, description, sns, sources, review, origin, created_by, created_at
+      from web_column_versions where tenant_id = $1 and column_id = $2 order by version desc`, [tenantId, columnId])).map(toVersion);
+  }
+
+  async stuckWriting(tenantId: string, beforeIso: string): Promise<string[]> {
+    return (await this.q<{ id: string }>(tenantId, `select id from web_columns where tenant_id = $1 and status = 'writing' and updated_at < $2`, [tenantId, beforeIso])).map((r) => r.id);
+  }
+}
+
+// ---- メモリ（自動テスト用） ----------------------------------------------
+
+/** メモリのコラムの置き場。自動テストに使う。 */
+export class MemoryColumnStore implements ColumnStore {
+  readonly columns = new Map<string, WebColumn & { tenantId: string; submittedDigest: string | null; wpPostId: string | null }>();
+  readonly allVersions = new Map<string, WebColumnVersion[]>();
+
+  private col(tenantId: string, id: string) {
+    const c = this.columns.get(id);
+    return c && c.tenantId === tenantId ? c : null;
+  }
+
+  private view(c: WebColumn & { tenantId: string }): WebColumn {
+    const v = (this.allVersions.get(c.id) ?? []).find((x) => x.version === c.currentVersion);
+    const { tenantId: _t, submittedDigest: _d, wpPostId: _w, ...rest } = c as WebColumn & { tenantId: string; submittedDigest: string | null; wpPostId: string | null };
+    return { ...rest, title: v?.title ?? '', reviewCount: v?.review.length ?? 0 };
+  }
+
+  async list(tenantId: string): Promise<WebColumn[]> {
+    return [...this.columns.values()].filter((c) => c.tenantId === tenantId).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map((c) => this.view(c));
+  }
+
+  async get(tenantId: string, id: string): Promise<WebColumn | null> {
+    const c = this.col(tenantId, id);
+    return c ? this.view(c) : null;
+  }
+
+  async create(tenantId: string, c: { theme: string; memo: string; createdBy: string }): Promise<string> {
+    const id = `col-${randomUUID()}`;
+    const at = new Date().toISOString();
+    this.columns.set(id, {
+      id, tenantId, theme: c.theme, memo: c.memo, status: 'writing', currentVersion: 0, title: '', reviewCount: 0, submittedVersion: null,
+      runId: null, wpEditUrl: null, failure: null, createdBy: c.createdBy, createdAt: at, updatedAt: at, submittedDigest: null, wpPostId: null,
+    });
+    return id;
+  }
+
+  async update(tenantId: string, id: string, patch: Parameters<ColumnStore['update']>[2]): Promise<void> {
+    const c = this.col(tenantId, id);
+    if (!c) return;
+    for (const [k, v] of Object.entries(patch)) if (v !== undefined) (c as unknown as Record<string, unknown>)[k] = v;
+    c.updatedAt = new Date().toISOString();
+  }
+
+  async submittedDigest(tenantId: string, id: string): Promise<string | null> {
+    return this.col(tenantId, id)?.submittedDigest ?? null;
+  }
+
+  async delete(tenantId: string, id: string): Promise<void> {
+    if (this.col(tenantId, id)) { this.columns.delete(id); this.allVersions.delete(id); }
+  }
+
+  async addVersion(tenantId: string, columnId: string, v: NewColumnVersion): Promise<number> {
+    const c = this.col(tenantId, columnId);
+    if (!c) throw new Error('コラムが見つかりません');
+    c.currentVersion += 1;
+    c.updatedAt = new Date().toISOString();
+    this.allVersions.set(columnId, [{ ...v, version: c.currentVersion, createdAt: c.updatedAt }, ...(this.allVersions.get(columnId) ?? [])]);
+    return c.currentVersion;
+  }
+
+  async versions(tenantId: string, columnId: string): Promise<WebColumnVersion[]> {
+    return this.col(tenantId, columnId) ? [...(this.allVersions.get(columnId) ?? [])] : [];
+  }
+
+  async stuckWriting(tenantId: string, beforeIso: string): Promise<string[]> {
+    return [...this.columns.values()].filter((c) => c.tenantId === tenantId && c.status === 'writing' && c.updatedAt < beforeIso).map((c) => c.id);
+  }
+}

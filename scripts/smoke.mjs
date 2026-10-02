@@ -5003,6 +5003,91 @@ console.log('\n■ 64. 知識の種類と管理（社内規程・議事録・秘
   }
 }
 
+console.log('\n■ 65. Web のコラム（内蔵の拡張。第32.18.1節）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const tag = `確認用コラム${Date.now().toString(36)}`;
+  const { rows: saved } = await owner.query(`select tenant_id, web_columns from tenant_settings where tenant_id in ('t-alpha', 't-beta')`);
+  try {
+    // 既定は切り。切っている会社には画面も API も出さない
+    await call('b', '/v1/admin/extensions/web-columns/enabled', { method: 'PUT', body: JSON.stringify({ enabled: false }) });
+    const offB = await call('b', '/v1/columns');
+    const { body: meB } = await call('b', '/v1/me');
+    offB.status === 403 && meB.webColumns === false ? ok('Web のコラムを切っている会社では、API も左のメニューも使えない') : ng('切っていても使える', `${offB.status} ${meB.webColumns}`);
+    await call('a', '/v1/admin/extensions/web-columns/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const set = await call('a', '/v1/admin/extensions/web-columns/settings', { method: 'PUT', body: JSON.stringify({ industry: 'medical', topics: ['小児歯科', ' ', '小児歯科'], audience: '子育て世帯' }) });
+    const setByMember = await call('a', '/v1/admin/extensions/web-columns/settings', { method: 'PUT', body: JSON.stringify({ industry: 'legal' }) }, 'member');
+    const badWp = await call('a', '/v1/admin/extensions/web-columns/wordpress', { method: 'PUT', body: JSON.stringify({ siteUrl: 'ftp://example.jp', username: 'a', password: 'b' }) });
+    const { body: meA } = await call('a', '/v1/me', {}, 'member');
+    set.body?.webColumns?.industry === 'medical' && set.body.webColumns.topics.join() === '小児歯科' && setByMember.status === 403 && badWp.status === 400 && meA.webColumns === true
+      ? ok('管理者が入れると使え、業種・分野・読み手を設定できる。設定と WordPress の鍵は管理者だけ。読めないサイトの URL は預けない')
+      : ng('設定が違う', JSON.stringify({ set: set.body, member: setByMember.status, wp: badWp.status, me: meA.webColumns }));
+
+    // 書く: 裏で書き上げ、下書きになる（開発の環境では見本の下書き）
+    const created = await call('a', '/v1/columns', { method: 'POST', body: JSON.stringify({ theme: `${tag} 子どもの歯みがき`, memo: '仕上げみがき' }) }, 'member');
+    const id = created.body?.id;
+    let col = null;
+    for (let i = 0; i < 40; i++) {
+      col = (await call('a', `/v1/columns/${id}`, {}, 'member')).body;
+      if (col.column?.status !== 'writing') break;
+      await sleep(250);
+    }
+    created.status === 201 && col?.column?.status === 'draft' && col.versions?.length === 1 && col.versions[0].title.includes('見本')
+      ? ok('コラムを書くと裏で書き上げ、下書きになる（開発の環境では見本と分かる下書き）')
+      : ng('書き上げが違う', JSON.stringify({ created: created.body, col: col?.column }).slice(0, 400));
+    const otherTenant = await call('b', `/v1/columns/${id}`);
+    otherTenant.status === 403 || otherTenant.status === 404 ? ok('ほかの会社のコラムは見られない') : ng(`ほかの会社から見える（${otherTenant.status}）`);
+
+    // 直す: 新しい版になり、赤入れをやり直す
+    const edit = await call('a', `/v1/columns/${id}`, { method: 'PUT', body: JSON.stringify({ body: '## はじめに\n\nこの治療で必ず治ります。' }) }, 'member');
+    col = (await call('a', `/v1/columns/${id}`, {}, 'member')).body;
+    const rv = col.versions?.[0]?.review ?? [];
+    edit.status === 200 && col.column.currentVersion === 2 && rv.some((r) => /医療広告/.test(r.reason))
+      ? ok('直して保存すると新しい版になり、業種（医療）の表現の決まりで赤入れをやり直す')
+      : ng('直したときが違う', JSON.stringify({ edit: edit.status, v: col.column?.currentVersion, rv }).slice(0, 400));
+
+    // 承認へ進める: 承認できるのは管理者と承認者。承認待ちの間は直せない
+    const submit = await call('a', `/v1/columns/${id}/submit`, { method: 'POST', body: '{}' }, 'member');
+    const run = await waitFor('a', submit.body.runId, ['awaiting_approval', 'failed', 'completed'], 20000, 'member');
+    const appr = await approvalFor('a', submit.body.runId, 'admin');
+    const locked = await call('a', `/v1/columns/${id}`, { method: 'PUT', body: JSON.stringify({ body: '変える' }) }, 'member');
+    const byMember = appr ? await call('a', `/v1/approvals/${appr.id}`, { method: 'POST', body: JSON.stringify({ decision: 'approved' }) }, 'member') : { status: 0 };
+    submit.status === 201 && run.run?.status === 'awaiting_approval' && /コラムを WordPress に下書きとして入れます/.test(appr?.present ?? '')
+      && /承認済みにするだけ/.test(appr?.present ?? '') && locked.status === 409 && byMember.status >= 400
+      ? ok('承認へ進めると責任者の承認を待ち、承認の画面に題名・字数・入れ先を出す。承認待ちの間は直せず、一般の人は承認できない')
+      : ng('承認へ進めたときが違う', JSON.stringify({ submit: submit.body, status: run.run?.status, present: appr?.present?.slice(0, 300), locked: locked.status, byMember: byMember.status }));
+
+    // 承認すると、WordPress につないでいない会社では承認済みになる
+    await call('a', `/v1/approvals/${appr?.id}`, { method: 'POST', body: JSON.stringify({ decision: 'approved' }) }, 'admin');
+    await waitFor('a', submit.body.runId, ['completed', 'failed'], 20000, 'member');
+    col = (await call('a', `/v1/columns/${id}`, {}, 'member')).body;
+    const exp = (await call('a', `/v1/columns/${id}/export`, {}, 'member')).body;
+    const del = await call('a', `/v1/columns/${id}`, { method: 'DELETE' }, 'member');
+    col.column?.status === 'approved' && /AI の下書き/.test(exp.markdown ?? '') && !/<html/.test(exp.html ?? '') && del.status === 409
+      ? ok('承認すると、WordPress につないでいない会社では承認済みになり、本文を写せる。承認したものは削除できない')
+      : ng('承認の後が違う', JSON.stringify({ status: col.column?.status, exp: Object.keys(exp ?? {}), del: del.status }));
+
+    // 下書きは削除できる
+    const c2 = await call('a', '/v1/columns', { method: 'POST', body: JSON.stringify({ theme: `${tag} 削除の確認` }) }, 'member');
+    for (let i = 0; i < 40; i++) { if ((await call('a', `/v1/columns/${c2.body.id}`, {}, 'member')).body.column?.status !== 'writing') break; await sleep(250); }
+    const del2 = await call('a', `/v1/columns/${c2.body.id}`, { method: 'DELETE' }, 'member');
+    const gone = await call('a', `/v1/columns/${c2.body.id}`, {}, 'member');
+    const { body: audits } = await call('a', '/v1/admin/audit-events');
+    const actions = (audits.items ?? []).map((e) => e.action);
+    del2.status === 200 && gone.status === 404 && ['column.create', 'column.submit', 'column.approve', 'column.delete'].every((a) => actions.includes(a))
+      ? ok('下書きは削除でき、書く・承認へ進める・承認・削除を監査ログに残す')
+      : ng('削除か監査ログが違う', JSON.stringify({ del2: del2.status, gone: gone.status, actions: actions.filter((a) => a.startsWith('column')) }));
+  } catch (err) {
+    ng('Web のコラムの確認が途中で止まった', String(err?.stack ?? err));
+  } finally {
+    await owner.query(`delete from web_columns where tenant_id in ('t-alpha', 't-beta') and theme like '${tag}%'`);
+    for (const r of saved) await owner.query(`update tenant_settings set web_columns = $2 where tenant_id = $1`, [r.tenant_id, r.web_columns ? JSON.stringify(r.web_columns) : null]);
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

@@ -1707,3 +1707,21 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .publish-name { font-weight: 600; font-size: calc(15px * var(--font-scale)); max-width: 20em; }
 .publish-categories { display: flex; flex-wrap: wrap; gap: calc(4px * var(--space-scale)); padding: calc(4px * var(--space-scale)) 0; }
 .chip-btn { background: none; border: 1px solid var(--line); border-radius: 999px; padding: 1px calc(8px * var(--space-scale)); cursor: pointer; color: inherit; font: inherit; font-size: calc(12px * var(--font-scale)); }
+
+/* Web のコラム（仕様書 第32.18.1節） */
+.columns { display: flex; flex-direction: column; gap: calc(8px * var(--space-scale)); }
+.columns .badge.ok { background: var(--ok-soft, var(--accent-soft)); color: var(--ok); }
+.columns .badge.danger { background: var(--danger-soft, var(--warn-soft)); color: var(--danger); }
+.columns-list tr.clickable { cursor: pointer; }
+.columns-list tr.clickable:hover td { background: var(--accent-soft); }
+.columns-new { display: flex; flex-direction: column; gap: calc(6px * var(--space-scale)); max-width: 44em; }
+.columns-edit { display: flex; flex-direction: column; gap: calc(6px * var(--space-scale)); max-width: 52em; }
+.columns-edit textarea { width: 100%; font-family: inherit; line-height: 1.7; }
+.columns-view { max-width: 44em; line-height: 1.8; border: 1px solid var(--line); border-radius: 8px; padding: calc(12px * var(--space-scale)) calc(16px * var(--space-scale)); }
+.columns-review { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: calc(8px * var(--space-scale)); max-width: 52em; }
+.columns-review li { border-left: 3px solid var(--warn); padding: calc(4px * var(--space-scale)) calc(10px * var(--space-scale)); }
+.columns-review blockquote { margin: calc(4px * var(--space-scale)) 0; color: var(--muted); }
+.columns-review .badge { margin-right: calc(4px * var(--space-scale)); }
+.columns-rewrite input { flex: 1; max-width: 36em; }
+.ext-columns .ext-columns-wide { display: flex; flex-direction: column; gap: 2px; max-width: 36em; }
+.ext-columns textarea { font-family: inherit; }

@@ -7,7 +7,7 @@
  */
 
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
-import { CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID, showsCaptions, type Notification, type UserSettings } from '@m2office/shared';
+import { CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, showsCaptions, type Notification, type UserSettings } from '@m2office/shared';
 import {
   addCategory, assignCategory, checkCategoryName, groupMenu, removeCategory, togglePinned, type MenuSection,
 } from './menu.js';
@@ -27,6 +27,7 @@ import { Sources } from './sources.js';
 import { Schedules } from './Schedules.js';
 import { Cards } from './Cards.js';
 import { Inventory } from './Inventory.js';
+import { Columns } from './Columns.js';
 import { Signage } from './Signage.js';
 import { Hr } from './Hr.js';
 import { MyAttendance } from './MyAttendance.js';
@@ -104,6 +105,7 @@ type View =
   | { kind: 'hr'; employeeId: string | null }
   | { kind: 'attendance' }
   | { kind: 'signage' }
+  | { kind: 'columns'; columnId: string | null }
   | { kind: 'settings'; section: SettingsSection }
   | { kind: 'help'; articleId: string | null };
 
@@ -116,6 +118,7 @@ function viewPath(v: View): string {
     case 'cards': return routePath({ kind: 'cards', contactId: v.contactId });
     case 'inventory': return routePath({ kind: 'inventory', itemId: v.itemId });
     case 'hr': return routePath({ kind: 'hr', employeeId: v.employeeId });
+    case 'columns': return routePath({ kind: 'columns', columnId: v.columnId });
     case 'help': return routePath({ kind: 'help', articleId: v.articleId });
     default: return routePath({ kind: v.kind });
   }
@@ -136,6 +139,7 @@ function viewOf(r: Route): View | null {
     case 'cards': return { kind: 'cards', contactId: r.contactId };
     case 'inventory': return { kind: 'inventory', itemId: r.itemId };
     case 'hr': return { kind: 'hr', employeeId: r.employeeId };
+    case 'columns': return { kind: 'columns', columnId: r.columnId };
     case 'help': return { kind: 'help', articleId: r.articleId };
     default: return { kind: r.kind };
   }
@@ -365,6 +369,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ...(me.hr ? [{ id: HR_EXTENSION_ID, name: '人事・給与', description: '従業員の台帳・雇用条件・入社と退職の手続き', icon: 'users' as IconName, agent: null }] : []),
     // 店頭サイネージ（仕様書 第31.2節）。会社で入れていて利用範囲の人にだけ出す
     ...(me.signage ? [{ id: SIGNAGE_EXTENSION_ID, name: 'サイネージ', description: '店頭や待合の画面に、画像と動画を流す', icon: 'signage' as IconName, agent: null }] : []),
+    // Web のコラム（仕様書 第32.18.1節）。会社で入れていて利用範囲の人にだけ出す
+    ...(me.webColumns ? [{ id: WEB_COLUMNS_EXTENSION_ID, name: 'Web のコラム', description: 'テーマを調べて出典つきのコラムを書き、承認して WordPress に入れる', icon: 'doc' as IconName, agent: null }] : []),
   ];
   const allMenuAgents = orderAgents(menuItems, menu.order).filter((a) => !menu.hidden.includes(a.id));
   // ピン止めした業務だけを上に出し、ほかはカテゴリーごと・「ほかの業務」にたたむ（仕様書 第6.1.1節「業務の並び」）。
@@ -373,10 +379,11 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const openItem = (m: MenuItem) => (m.agent ? setView({ kind: 'agent', agent: m.agent })
     : m.id === INVENTORY_EXTENSION_ID ? setView({ kind: 'inventory', itemId: null })
       : m.id === HR_EXTENSION_ID ? setView({ kind: 'hr', employeeId: null })
-        : m.id === SIGNAGE_EXTENSION_ID ? setView({ kind: 'signage' }) : setView({ kind: 'cards', contactId: null }));
+        : m.id === SIGNAGE_EXTENSION_ID ? setView({ kind: 'signage' })
+          : m.id === WEB_COLUMNS_EXTENSION_ID ? setView({ kind: 'columns', columnId: null }) : setView({ kind: 'cards', contactId: null }));
   const isOpen = (m: MenuItem) => (m.agent ? view.kind === 'agent' && view.agent.id === m.id
     : m.id === INVENTORY_EXTENSION_ID ? view.kind === 'inventory' : m.id === HR_EXTENSION_ID ? view.kind === 'hr'
-      : m.id === SIGNAGE_EXTENSION_ID ? view.kind === 'signage' : view.kind === 'cards');
+      : m.id === SIGNAGE_EXTENSION_ID ? view.kind === 'signage' : m.id === WEB_COLUMNS_EXTENSION_ID ? view.kind === 'columns' : view.kind === 'cards');
   // ピン止めとカテゴリーは個人設定（メニュー）に保存し、端末をまたいで同じにする。保存に失敗したら読み直す
   const saveMenu = (saved: UserSettings['menu']) => {
     setMenu(saved);
@@ -619,6 +626,13 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
               <Inventory itemId={view.itemId} onOpen={(itemId) => setView({ kind: 'inventory', itemId })} userId={me.user.id} />
             </>
           )}
+          {view.kind === 'columns' && (
+            <>
+              <h1>Web のコラム <HelpTip article="start-web-columns">テーマを入れると、AI が調べて出典つきのコラムを書き、表現の決まりに照らして赤入れします。</HelpTip></h1>
+              <Columns columnId={view.columnId} onOpen={(columnId) => setView({ kind: 'columns', columnId })}
+                onApprovals={() => { void refresh(); setView({ kind: 'approvals' }); }} />
+            </>
+          )}
           {view.kind === 'signage' && (
             <>
               <h1>サイネージ <HelpTip article="start-signage">店頭や待合の画面に、画像と動画を繰り返し流します。</HelpTip></h1>
@@ -795,6 +809,7 @@ const VIEW_LABELS: Record<string, string> = {
   hr: '人事・給与',
   attendance: '給与・勤怠',
   signage: 'サイネージ',
+  columns: 'Web のコラム',
   settings: '個人設定',
 };
 

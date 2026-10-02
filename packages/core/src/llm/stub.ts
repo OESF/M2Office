@@ -159,6 +159,20 @@ function chooseTools(tools: string[], prompt: string): Call[] {
     if (id) return [{ name: 'mail.bulk_send', args: { bulkMailId: id } }];
   }
 
+  // Web のコラム（仕様書 第32.18.1節）: 承認へ進めたコラムを確かめ、承認の後に WordPress に入れる。秘書から下書きを書く
+  if (has('columns.preview') && instruction.includes('columns.preview')) {
+    const id = extractField(prompt, 'columnId');
+    if (id) return [{ name: 'columns.preview', args: { columnId: id } }];
+  }
+  if (has('columns.place') && instruction.includes('columns.place')) {
+    const id = extractField(prompt, 'columnId');
+    if (id) return [{ name: 'columns.place', args: { columnId: id } }];
+  }
+  if (has('columns.draft') && instruction.includes('columns.draft')) {
+    const theme = extractField(prompt, 'request').replace(/(について|で|の)?コラムを書いて(ください)?[。.]?$/, '').trim();
+    if (theme) return [{ name: 'columns.draft', args: { theme } }];
+  }
+
   // 収集: 読み取り系をまとめて呼ぶ（AG-05。仕様書 第9.5.5節）
   if (/を収集/.test(instruction)) {
     const collectors: Call[] = [];

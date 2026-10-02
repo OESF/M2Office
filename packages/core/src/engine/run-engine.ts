@@ -14,7 +14,7 @@ import {
   alwaysRequiresApproval, canDecide, canUseAgent, writeInternalNeedsApproval,
   type AutomationPolicy, type TenantSettings, type WritingStyle,
   type AgentDefinition, type AgentStep, type ApprovalStep, type Approval, type Run,
-  type RunStep, type Step, type ContactScope, type InventorySettings,
+  type RunStep, type Step, type ContactScope, type InventorySettings, type WebColumnSettings,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { LlmMessage, LlmProvider, LlmResponse } from '../llm/provider.js';
@@ -37,6 +37,7 @@ import type { AiKind } from '../llm/policy.js';
 import type { NoticeService } from '../notices/service.js';
 import type { InventoryService } from '../inventory/service.js';
 import type { InventoryBookings } from '../inventory/bookings.js';
+import type { ColumnService } from '../columns/service.js';
 import type { LaborCalendar } from '../hr/calendar-service.js';
 import { answerOfSteps } from '../memory/work.js';
 import { substituteArguments } from '../extensions/skill.js';
@@ -135,6 +136,15 @@ export interface RunEngineDeps {
   hr?: {
     calendar: LaborCalendar;
     access(tenantId: string, userId: string): Promise<unknown>;
+  };
+  /**
+   * Web のコラム（内蔵の拡張。仕様書 第32章）。ツールに渡す。無ければコラムのツールは「使えない」と返す。
+   *
+   * @remarks `access` は、会社が Web のコラムを使っていて依頼者が利用範囲の中なら、会社の設定を返す
+   */
+  columns?: {
+    service: ColumnService;
+    access(tenantId: string, userId: string): Promise<WebColumnSettings | null>;
   };
 }
 
@@ -918,6 +928,10 @@ export class RunEngine {
           ...(llm ? { llm: async () => llm } : {}),
         },
       } : {}),
+      // Web のコラム（第32.18.1節）。使えるかどうかはツールが呼ぶたびに確かめる
+      ...(this.deps.columns ? {
+        columns: { service: this.deps.columns.service, access: () => this.deps.columns!.access(run.tenantId, requestedBy) },
+      } : {}),
       // 労務の期限（第30.19.1節）。人事区画の人にだけ返す
       ...(this.deps.hr ? {
         hr: { deadlines: async (days: number) => ((await this.deps.hr!.access(run.tenantId, requestedBy)) ? this.deps.hr!.calendar.list(run.tenantId, days) : null) },
@@ -1176,8 +1190,8 @@ export function needsHuman(
   });
 }
 
-/** 送り先に関わらず、いつも人に判断を求めるツール。メールは宛先に関わらず人が見る（仕様書 第9.4.0節）。 */
-const ALWAYS_ASK = new Set(['gmail.send', 'mail.bulk_send']);
+/** 送り先に関わらず、いつも人に判断を求めるツール。メールは宛先に関わらず人が見る。Web に載せるものも人が見る（仕様書 第9.4.0節・第32.18.1節）。 */
+const ALWAYS_ASK = new Set(['gmail.send', 'mail.bulk_send', 'columns.place']);
 
 /** 承認の前の確かめで、行えないと分かった操作（記録しない。ADR-0024）。 */
 type UnableCall = {

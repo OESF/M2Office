@@ -12,7 +12,7 @@
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import {
-  CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, INVENTORY_FEATURES, SIGNAGE_EXTENSION_ID, SIGNAGE_JINGLES, type HrSettings, type InventorySettings, type RiskLevel, type SignageSettings,
+  CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, INVENTORY_FEATURES, SIGNAGE_EXTENSION_ID, SIGNAGE_JINGLES, WEB_COLUMNS_EXTENSION_ID, COLUMN_INDUSTRY_LABELS, type ColumnIndustry, type WebColumnSettings, type HrSettings, type InventorySettings, type RiskLevel, type SignageSettings,
 } from '@m2office/shared';
 import {
   bundledConnection, builtinSection, consentSnapshot, encodeFiles, unpackExtension, EXTENSION_FILE_MAX_BYTES,
@@ -118,6 +118,8 @@ export function extensionsRoute(deps: AppDeps) {
         ...(e.pkg.manifest.id === HR_EXTENSION_ID ? { hr: settings.hr } : {}),
         // 店頭サイネージ: 画像の秒数・店の色（第31.4節）
         ...(e.pkg.manifest.id === SIGNAGE_EXTENSION_ID ? { signage: settings.signage } : {}),
+        // Web のコラム: 分野・読み手・業種・監修者・AI の表示・WordPress の入れ先（第32.18.1節）。パスワードは返さない
+        ...(e.pkg.manifest.id === WEB_COLUMNS_EXTENSION_ID ? { webColumns: settings.webColumns } : {}),
       })),
     });
   });
@@ -303,6 +305,66 @@ export function extensionsRoute(deps: AppDeps) {
   app.delete(`/${SIGNAGE_EXTENSION_ID}/screens/:id`, async (c) => {
     const { tenant, user } = c.get('ctx');
     return (await deps.signage.service.removeScreen(tenant.id, user.id, c.req.param('id'))) ? c.json({ ok: true }) : c.json({ error: '画面が見つかりません' }, 404);
+  });
+
+  /**
+   * Web のコラムの会社の設定を変える（第32.18.1節）。分野・読み手・業種・監修者・AI が書いたことの表示。
+   * 渡した項目だけを変え、すぐに反映する。WordPress の入れ先は下の口で、つながるかを確かめてから預ける。
+   */
+  app.put(`/${WEB_COLUMNS_EXTENSION_ID}/settings`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
+    const current = (await deps.repo.getTenantSettings(tenant.id)).webColumns;
+    const next: WebColumnSettings = { ...current };
+    if (Array.isArray(body['topics'])) {
+      next.topics = [...new Set(body['topics'].filter((t): t is string => typeof t === 'string').map((t) => t.trim().slice(0, 60)).filter(Boolean))].slice(0, 30);
+    }
+    if (typeof body['audience'] === 'string') next.audience = body['audience'].trim().slice(0, 200);
+    if (body['industry'] !== undefined) {
+      if (typeof body['industry'] !== 'string' || !(body['industry'] in COLUMN_INDUSTRY_LABELS)) return c.json({ error: '業種が正しくありません' }, 400);
+      next.industry = body['industry'] as ColumnIndustry;
+    }
+    if (body['supervisor'] === null) next.supervisor = null;
+    else if (body['supervisor'] && typeof body['supervisor'] === 'object') {
+      const sv = body['supervisor'] as Record<string, unknown>;
+      const name = typeof sv['name'] === 'string' ? sv['name'].trim().slice(0, 60) : '';
+      const title = typeof sv['title'] === 'string' ? sv['title'].trim().slice(0, 60) : '';
+      next.supervisor = name ? { name, title } : null;
+    }
+    if (body['aiNotice'] !== undefined) {
+      if (typeof body['aiNotice'] !== 'boolean') return c.json({ error: 'aiNotice は true か false です' }, 400);
+      next.aiNotice = body['aiNotice'];
+    }
+    await deps.repo.saveTenantSettings(tenant.id, 'webColumns', next, user.id);
+    await deps.repo.appendAudit({
+      id: randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id, action: 'settings.update',
+      targetType: 'settings', targetId: 'webColumns',
+      detail: { topics: next.topics.length, industry: next.industry, supervisor: !!next.supervisor, aiNotice: next.aiNotice },
+      occurredAt: new Date().toISOString(),
+    });
+    return c.json({ ok: true, webColumns: next });
+  });
+
+  /**
+   * WordPress の入れ先とアプリケーションパスワードを預ける（第32.18.1節）。つながるかを確かめてから、暗号化して預ける。
+   *
+   * @returns 預けた入れ先（パスワードは返さない）。つながらなければ 400
+   */
+  app.put(`/${WEB_COLUMNS_EXTENSION_ID}/wordpress`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
+    const s = (v: unknown) => (typeof v === 'string' ? v : '');
+    const res = await deps.columns.service.saveWordPress({ tenantId: tenant.id, userId: user.id }, {
+      siteUrl: s(body['siteUrl']), username: s(body['username']), password: s(body['password']),
+    });
+    return 'error' in res ? c.json({ error: res.error }, 400) : c.json({ ok: true, wordpress: res.wordpress });
+  });
+
+  /** WordPress の入れ先と鍵を外す（コラムは消さない）。 */
+  app.delete(`/${WEB_COLUMNS_EXTENSION_ID}/wordpress`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    await deps.columns.service.removeWordPress({ tenantId: tenant.id, userId: user.id });
+    return c.json({ ok: true });
   });
 
   app.put(`/${INVENTORY_EXTENSION_ID}/settings`, async (c) => {
@@ -701,6 +763,7 @@ export function extensionsRoute(deps: AppDeps) {
       const settings = await deps.repo.getTenantSettings(tenant.id);
       if (section === 'cards') await deps.repo.saveTenantSettings(tenant.id, 'cards', { ...settings.cards, enabled: body.enabled }, user.id);
       else if (section === 'inventory') await deps.repo.saveTenantSettings(tenant.id, 'inventory', { ...settings.inventory, enabled: body.enabled }, user.id);
+      else if (section === 'webColumns') await deps.repo.saveTenantSettings(tenant.id, 'webColumns', { ...settings.webColumns, enabled: body.enabled }, user.id);
       else if (section === 'signage') {
         await deps.repo.saveTenantSettings(tenant.id, 'signage', { ...settings.signage, enabled: body.enabled }, user.id);
         // 切ったら、画面は無地にする（登録・素材・流れは消さない。第31.2節）

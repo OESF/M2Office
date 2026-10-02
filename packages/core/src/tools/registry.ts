@@ -13,6 +13,7 @@ import type { CardToolContext } from '../cards/tools.js';
 import type { NoticeService } from '../notices/service.js';
 import type { InventoryToolContext } from '../inventory/tools.js';
 import type { HrToolContext } from '../hr/tools.js';
+import type { ColumnToolContext } from '../columns/tools.js';
 
 /** ツール呼び出しの文脈。テナント境界と実行の同一性を持ち回る。 */
 export interface ToolContext {
@@ -73,6 +74,12 @@ export interface ToolContext {
    * @remarks 無ければ人事・給与のツールは「使えない」と返す
    */
   hr?: HrToolContext;
+  /**
+   * Web のコラム（内蔵の拡張。仕様書 第32章）。使えるかどうか（会社の入り切り・利用範囲）は、ツールが呼ぶたびに確かめる。
+   *
+   * @remarks 無ければコラムのツールは「使えない」と返す
+   */
+  columns?: ColumnToolContext;
 }
 
 /** 引数 1 つの定義（JSON Schema の一部）。 */

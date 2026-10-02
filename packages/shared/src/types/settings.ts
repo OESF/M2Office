@@ -11,6 +11,7 @@ import type { AccessSettings } from './access.js';
 import { DEFAULT_INVENTORY_SETTINGS, type InventorySettings } from './inventory.js';
 import { DEFAULT_HR_SETTINGS, type HrSettings } from './hr.js';
 import { DEFAULT_SIGNAGE_SETTINGS, type SignageSettings } from './signage.js';
+import { DEFAULT_WEB_COLUMN_SETTINGS, type WebColumnSettings } from './web-columns.js';
 
 /** 会社情報（仕様書 第6.6.1節）。帳票とメールの署名に使う。 */
 export interface CompanyInfo {
@@ -228,6 +229,8 @@ export interface TenantSettings {
   hr: HrSettings;
   /** 店頭サイネージ（第31章）。 */
   signage: SignageSettings;
+  /** Web のコラム（第32章）。 */
+  webColumns: WebColumnSettings;
   /** 会社の AI の方針（第16.3.7.1節、ADR-0059）。 */
   aiPolicy: AiPolicySettings;
 }
@@ -279,6 +282,7 @@ export const DEFAULT_TENANT_SETTINGS: TenantSettings = {
   hr: DEFAULT_HR_SETTINGS,
   // 店頭サイネージは既定で切り。料金は取らない標準の機能で、使う会社が入れる（第31.2節）
   signage: DEFAULT_SIGNAGE_SETTINGS,
+  webColumns: DEFAULT_WEB_COLUMN_SETTINGS,
   aiPolicy: { mode: 'cloud' },
 };
 

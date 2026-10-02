@@ -32,6 +32,7 @@
 | `calendar.freebusy` | read | `calendar.readonly`（機密） | 参加者の予定の空きを調べます |
 | `calendar.list` | read | `calendar.readonly`（機密） | 予定の一覧を見ます |
 | `card.read` | read | — | 名刺の画像から、氏名・会社名・電話・メールアドレスなどを読み取ります。登録はしません |
+| `columns.preview` | read | — | コラムの題名・字数・残った指摘・入れ先を確かめます。見るだけです |
 | `contacts.bulk_preview` | read | — | まとめてのメールの宛先・除いた人・見本を確かめます。見るだけです |
 | `contacts.changes` | read | — | メールの署名から、会社・部署・役職・電話などが新しくなった名刺を調べます。見るだけです |
 | `contacts.get` | read | — | 1 人分の名刺の中身と、誰がいつ名刺を受け取ったかを見ます。見るだけです |
@@ -73,6 +74,7 @@
 | `sheet.render` | draft | — | 表を Excel・CSV として作り、成果物として保存します |
 | `sheets.create` | draft | `drive.file`（機密でない） | あなたのドライブに Google スプレッドシートを作ります。共有はしません |
 | `slides.create` | draft | `drive.file`（機密でない）・`drive`（制限付き） | 調べた内容をスライドにまとめ、あなたのドライブに作ります。PowerPoint 形式でも取り出せます。共有はしません |
+| `columns.draft` | write-internal | — | テーマを Web で調べ、出典つきのコラムの下書きを書きます。下書きにするだけで、Web には出しません |
 | `contacts.bulk_draft` | write-internal | — | 名刺の相手へのまとめてのメールの下書きを作ります。送りません |
 | `contacts.save` | write-internal | — | 名刺を連絡先として登録するか、電話番号やメモなどを直します。社内の名刺の置き場に書くだけで、誰にも送りません |
 | `drive.share_company` | write-internal | `drive.file`（機密でない） | M2Office で作ったファイルを、会社の全員が閲覧できるようにします。社外の人は見られません。リンクで誰にでも公開することはしません |
@@ -88,6 +90,7 @@
 | `calendar.create` | external-send | `calendar.events`（機密） | 予定を登録し、参加者を招待します。社外の人を招くときは、承認のあとに行います |
 | `calendar.update` | external-send | `calendar.events`（機密） | 予定の日時・題名・参加者を変えます。参加者に通知が届くため、必ず承認のあとに行います |
 | `chat.post` | external-send | `chat.messages.create`（機密）・`chat.spaces.readonly`（機密） | チャットへ投稿します。社外の人が入れるスペースへの投稿は、承認のあとに行います |
+| `columns.place` | external-send | — | 承認されたコラムを、会社の WordPress に下書きとして入れます。公開は WordPress の側で行います |
 | `drive.share` | external-send | `drive.file`（機密でない） | M2Office で作ったファイルを、指定した人と共有します。社外の人との共有は、承認のあとに行います。リンクで誰にでも公開することはしません |
 | `gmail.send` | external-send | `gmail.send`（機密） | メールを送ります。必ず承認のあとに行います |
 | `mail.bulk_send` | external-send | `gmail.send`（機密） | 承認されたまとめてのメールを、あなたの Gmail から 1 人に 1 通ずつ送ります |
@@ -104,6 +107,7 @@
 | `calendar.freebusy` | `emails`（必須）: 参加者のメールアドレス、`from`: 期間の始まり（任意）、`to`: 期間の終わり（任意） |
 | `calendar.list` | `from`: 期間の始まり（ISO 形式。既定は今日）、`to`: 期間の終わり（既定は 7 日後） |
 | `card.read` | `fileId`（必須）: 名刺の画像のファイル ID |
+| `columns.preview` | `columnId`（必須）: コラムの ID |
 | `contacts.bulk_preview` | `bulkMailId`（必須）: まとめてのメールの ID |
 | `contacts.changes` | `days`: 何日前までを見るか（既定 30、最大 90）、`mine`: 自分が受け取ったメールから分かったものだけにする |
 | `contacts.get` | `contactId`（必須）: 連絡先の ID（contacts.search の結果） |
@@ -145,6 +149,7 @@
 | `sheet.render` | `title`（必須）: 題名、`format`: 形式（xlsx・csv）、`columns`（必須）: 列名、`rows`（必須）: 行の配列（各行は値の配列） |
 | `sheets.create` | `title`（必須）: 題名、`columns`（必須）: 列名、`rows`: 行の配列（各行は値の配列）、`folderId`: 入れるフォルダの ID（任意） |
 | `slides.create` | `title`（必須）: 表紙の題名、`subtitle`: 副題（任意）、`slides`（必須）: 本文のスライドの配列（layout・title ほか。12 枚まで）、`sources`: 出典（title・url）の配列、`template`: 会社が登録したテンプレートの名前（任意） |
+| `columns.draft` | `theme`（必須）: コラムのテーマ（一言。例: 「子どもの歯みがきのコツ」）、`memo`: 取材メモ（書く人の経験や考え。任意） |
 | `contacts.bulk_draft` | `contactIds`（必須）: 宛先の連絡先の ID（contacts.search の結果の contactId）。100 人まで、`subject`（必須）: 件名（{会社名}・{氏名} を使える）、`body`（必須）: 本文。宛名は「{会社名}
 {氏名} 様」のように差し込む。末尾の会社の表示と配信の停止の URL は入れない（自動で入る） |
 | `contacts.save` | `contactId`: 直す連絡先の ID。新しく登録するときは書かない、`fields`: 直す項目（name・nameKana・company・department・title・postalCode・address・phones・emails・website・extra）、`note`: メモ（「展示会で会った」など）。書くと置き換える、`card`: 登録する名刺。card.read の結果の fileId・fields・rotation、`receivedOn`: 名刺を受け取った日（YYYY-MM-DD）。直すときだけ書く、`cardId`: 受け取った日を直す名刺（contacts.get の exchanges の cardId）。省くと呼んだ人のいちばん新しい名刺 |
@@ -161,6 +166,7 @@
 | `calendar.create` | `title`（必須）: 予定の題名、`start`（必須）: 開始（ISO 形式）、`end`（必須）: 終了（ISO 形式）、`attendees`: 参加者のメールアドレス |
 | `calendar.update` | `eventId`（必須）: 予定の ID、`title`: 新しい題名（任意）、`start`: 新しい開始（ISO 形式。任意）、`end`: 新しい終了（任意）、`attendees`: 新しい参加者（任意） |
 | `chat.post` | `space`: スペースの名前（例: 営業部）か、スペースのリンク、`text`（必須）: 本文 |
+| `columns.place` | `columnId`（必須）: コラムの ID |
 | `drive.share` | `fileId`（必須）: ファイルの ID、`emails`（必須）: 共有する相手のメールアドレス、`role`: 役割（reader・commenter・writer） |
 | `gmail.send` | `to`（必須）: 宛先のメールアドレス、`cc`: CC（任意）、`subject`（必須）: 件名、`body`（必須）: 本文、`replyTo`: 返信するメールの ID（任意） |
 | `mail.bulk_send` | `bulkMailId`（必須）: まとめてのメールの ID |
