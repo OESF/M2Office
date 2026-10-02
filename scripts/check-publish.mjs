@@ -39,7 +39,9 @@ if (process.argv.includes('--hash')) {
 }
 
 const problems = [];
-const files = execFileSync('git', ['ls-files'], { cwd: root, encoding: 'utf8' }).split('\n').filter(Boolean);
+// 追跡しているファイルに加えて、まだ追跡していない新しいファイル（.gitignore の対象を除く）も見る。
+// コミットの前に点検すると、そのコミットで足すファイルが ls-files に出ず、見落とした（2026-10-03）
+const files = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard'], { cwd: root, encoding: 'utf8' }).split('\n').filter(Boolean);
 const TEXT = /\.(md|ts|tsx|mjs|js|cjs|json|sql|ya?ml|txt|html|css|sh|py|env\.example|example)$|^[^.]+$/i;
 
 // 1. 鍵のファイル

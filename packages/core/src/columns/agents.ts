@@ -281,6 +281,6 @@ export const WEB_COLUMNS_PACKAGE: ExtensionPackage = {
   agents: WEB_COLUMN_AGENTS,
   connectors: [],
   readme: null,
-  icon: null,
+  icon: '/extensions/web-columns.png',
   dir: null,
 };
