@@ -111,6 +111,7 @@ src/signage-audio.ts 店頭サイネージのジングル（M2Office の音 4 �
 src/html-inline.ts  会社の HTML の中の参照（画像・CSS・スクリプト・字体）を、一緒に落としたファイルか ZIP から中に入れる
 src/zip.ts          ZIP の目次と中身をブラウザで読む（pptx.ts と html-inline.ts が使う）
 src/pptx.ts         PowerPoint のファイルの枚数・アニメーション・向きをブラウザで数える（送らない）
+public/favicon.ico ほか アイコン（favicon.ico・apple-touch-icon.png・icon-192/512.png・icon-maskable-512.png）と manifest.webmanifest。assets/brand/ の元の画像から `npm run icons` で作る（第6.1.1.3節）
 public/signage-sw.js 再生のページを端末に取り置く serviceWorker（範囲は /signage/）
 src/Hr.tsx          人事・給与の担当者の画面（台帳: 一覧・手続き・足す・取り込む・顔写真（選ぶ・撮る・まとめて取り込む。photo.ts で縮める）・労働者名簿・帳簿をまとめて書き出す・台帳と雇用条件（手当を含む）の履歴・利用者との結び付け・退職、勤怠: 期間の集計・日ごとの直し・締め・出勤簿、有給: 残り・取得義務・有給を入れる・取り消す・付与・管理簿、期限: 労務カレンダー（法令の表の変わり目と更新待ちを含む）、給与: 月の給与と賞与の計算・点検・確定・振込データ・調整の行・訂正の回・賃金台帳・住民税の通知書・試しの計算・明細の行と根拠・従業員の給与の情報と労働条件通知書、社会保険: 随時改定の候補・資格の取得と喪失・定時決定・加入の判定と各届出の下書き（SocialInsurance.tsx）、年度更新: 月ごとの集計・足りない月の合計・確定と概算と延納・申告書の下書き（LaborInsurance.tsx）、シフト: 勤務の型と要る人数・案・直す・公開（ShiftPlan.tsx）、年末調整: 申告の一覧と直す・確かめた・計算・年末調整の回・源泉徴収票（YearEnd.tsx・YearEndForm.tsx）。第30章）
 src/MyAttendance.tsx 本人の「給与・勤怠」（打刻・期間の勤怠と直し・有給の残りと申請・給与明細（同意して受け取る）・年末調整の申告と控除証明書の読み取りと結果（10 月〜1 月）・シフトと休みの希望。第30.25節）

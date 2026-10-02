@@ -4,6 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>M2Office</title>
+    <!-- 画面のタブとホーム画面のアイコン（仕様書 第6.1.1.3節。元の画像は assets/brand/、作り直しは scripts/build-icons.mjs） -->
+    <!-- ?v= はブラウザーがアイコンを覚えたままにしないための印。アイコンを作り直したら数を上げる -->
+    <link rel="icon" href="/favicon.ico?v=1" sizes="16x16 32x32 48x48" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png?v=1" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=1" />
+    <link rel="manifest" href="/manifest.webmanifest?v=1" />
     <script>
       // 画面の明るさを描画の前に反映する（読み込みの途中で白く光らないように。仕様書 第6.1.2節）
       try {
