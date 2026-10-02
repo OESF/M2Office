@@ -97,7 +97,7 @@ function ColumnList({ onOpen }: { onOpen: (id: string) => void }) {
           </div>
           <div className="row">
             <button className="btn" disabled={busy || !theme.trim()} onClick={() => void create()}>書く</button>
-            <button className="btn ghost" onClick={() => setWriting(false)}>やめる</button>
+            <button className="btn ghost" onClick={() => setWriting(false)}>キャンセル</button>
           </div>
         </div>
       )}
@@ -277,7 +277,7 @@ function ColumnEditor({ id, onBack, onApprovals }: { id: string; onBack: () => v
               </div>
               <div className="row">
                 <button className="btn" disabled={busy || locked || !dirty} onClick={() => void save()}>保存</button>
-                {dirty && <button className="btn ghost" disabled={busy} onClick={() => setDraft({ title: current.title, body: current.body, description: current.description, short: current.sns.short, long: current.sns.long })}>直したのをやめる</button>}
+                {dirty && <button className="btn ghost" disabled={busy} onClick={() => setDraft({ title: current.title, body: current.body, description: current.description, short: current.sns.short, long: current.sns.long })}>キャンセル</button>}
               </div>
             </div>
           ) : (

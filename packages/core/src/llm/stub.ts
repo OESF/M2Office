@@ -168,6 +168,12 @@ function chooseTools(tools: string[], prompt: string): Call[] {
     const id = extractField(prompt, 'columnId');
     if (id) return [{ name: 'columns.place', args: { columnId: id } }];
   }
+  if (has('columns.rules') && instruction.includes('columns.rules')) {
+    const req = extractField(prompt, 'request');
+    const pick = (s: string) => [/医療|歯科|クリニック/.test(s) ? 'medical' : '', /薬機法|化粧品|健康食品|サプリ|薬局/.test(s) ? 'health-products' : '', /士業|弁護士|税理士/.test(s) ? 'legal' : ''].filter(Boolean);
+    if (/任せ|自動に戻/.test(req)) return [{ name: 'columns.rules', args: { auto: true } }];
+    return [{ name: 'columns.rules', args: /外/.test(req) ? { remove: pick(req) } : { add: pick(req) } }];
+  }
   if (has('columns.cover') && instruction.includes('columns.cover')) {
     const req = extractField(prompt, 'request');
     const kind = /写真/.test(req) ? 'photo' : /型/.test(req) ? 'template' : /挿絵|AI の絵/.test(req) ? 'ai' : '';

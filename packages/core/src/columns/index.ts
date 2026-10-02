@@ -6,7 +6,8 @@
 
 export { PostgresColumnStore, MemoryColumnStore, type ColumnStore, type NewColumnVersion } from './store.js';
 export { ruleReview, aiReview, mergeReview } from './review.js';
-export { writeColumn, rewriteColumn, parseDraft, ColumnWriteError, type ColumnBrief, type ColumnDraft } from './writer.js';
+export { inferRuleSets, guessRuleSets, type RuleClues } from './rules.js';
+export { writeColumn, rewriteColumn, parseDraft, selfReferenceRule, ColumnWriteError, type ColumnBrief, type ColumnDraft } from './writer.js';
 export { checkWordPress, createWordPressDraft, uploadWordPressMedia, columnHtml, normalizeSiteUrl, type WordPressAuth } from './wordpress.js';
 export {
   renderCover, coverSvg, wrapTitle, pickPattern, fallbackColor, readableColor, brandColor, illustrationPrompt, checkIllustration, describePhoto, choosePhoto,
@@ -14,4 +15,4 @@ export {
 } from './cover.js';
 export { ColumnService, webColumnsAccess, finalMarkdown, COLUMN_PHOTO_MAX_BYTES, type CoverRequest, type ColumnServiceDeps, type ColumnViewer, type ColumnDetail, type ColumnPreview } from './service.js';
 export { COLUMN_TOOLS, type ColumnToolContext } from './tools.js';
-export { WEB_COLUMN_AGENTS, WEB_COLUMN_DRAFT, WEB_COLUMN_PLACE, WEB_COLUMN_COVER, WEB_COLUMNS_PACKAGE, WEB_COLUMNS_EXTENSION_VERSION } from './agents.js';
+export { WEB_COLUMN_AGENTS, WEB_COLUMN_DRAFT, WEB_COLUMN_PLACE, WEB_COLUMN_COVER, WEB_COLUMN_RULES, WEB_COLUMNS_PACKAGE, WEB_COLUMNS_EXTENSION_VERSION } from './agents.js';

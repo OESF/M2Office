@@ -13,7 +13,7 @@ import { JinglePlayer } from './signage-audio.js';
 import { api, ApiError, describeError, type AccessOptions, type ExtensionView, type HrProposalField, type ScopeValue } from './api.js';
 import {
   INVENTORY_FEATURES, SIGNAGE_DEFAULT_COLOR, SIGNAGE_JINGLES, type HrSettings, type InventoryBookingSource, type InventoryFeature, type InventorySettings,
-  type SignageSettings, type SignageSound, type SignageSource, COLUMN_INDUSTRY_LABELS, type ColumnIndustry, type WebColumnSettings,
+  type SignageSettings, type SignageSound, type SignageSource, COLUMN_INDUSTRIES, COLUMN_RULE_SET_LABELS, type WebColumnSettings,
 } from '@m2office/shared';
 import { HelpTip, Markdown } from './help.js';
 import { ScopeEditor, ScopeField, useAccessOptions } from './Scope.js';
@@ -352,7 +352,7 @@ function Consent({ item: x, busy, options, onAgree, onCancel }: {
       )}
       <div className="row">
         <button className="btn" disabled={busy || empty} onClick={() => onAgree(scope)}>同意して導入する</button>
-        <button className="btn ghost" onClick={onCancel}>やめる</button>
+        <button className="btn ghost" onClick={onCancel}>キャンセル</button>
       </div>
     </div>
   );
@@ -528,9 +528,11 @@ function WebColumnsFields({ settings, usage, busy, onChanged }: { settings: WebC
   return (
     <div className="small ext-inventory ext-columns">
       <div className="row wrap">
-        <label>業種 <select value={settings.industry} disabled={busy} onChange={(e) => save({ industry: e.target.value as ColumnIndustry })}>
-          {(Object.keys(COLUMN_INDUSTRY_LABELS) as ColumnIndustry[]).map((k) => <option key={k} value={k}>{COLUMN_INDUSTRY_LABELS[k]}</option>)}
+        <label>業種 <select value={settings.industry} disabled={busy} onChange={(e) => save({ industry: e.target.value })}>
+          {COLUMN_INDUSTRIES.map((i) => <option key={i.code} value={i.code}>{i.name}</option>)}
         </select></label>
+        {/* 当てる表現の決まり（AI が選ぶ。違っていれば秘書に頼んで直す。第32.18.3節） */}
+        <span className="muted">表現の決まり: {['景品表示法', ...settings.rules.map((r) => COLUMN_RULE_SET_LABELS[r])].join('・')}{settings.rulesBy === 'person' ? '（秘書で直した）' : ''}</span>
         <label className="check"><input type="checkbox" checked={settings.aiNotice} disabled={busy} onChange={(e) => save({ aiNotice: e.target.checked })} /> AI が書いたことを記事の末尾に入れる</label>
         {/* カバー画像の背景を生成 AI で描く（第32.7.1節。既定は切り）。今月の枚数と上限を添える */}
         <label className="check"><input type="checkbox" checked={settings.aiIllustration} disabled={busy} onChange={(e) => save({ aiIllustration: e.target.checked })} /> AI で挿絵を描く</label>
@@ -868,7 +870,7 @@ function proposalPatch(fields: HrProposalField[], current: HrSettings): Partial<
 /**
  * 規程から読んだ案と今の設定を並べた表。入れる項目を選ぶ（決まりに合わない案は選べない）。
  */
-function ProposalTable({ fields, onApply, onCancel, cancelLabel = 'やめる' }: {
+function ProposalTable({ fields, onApply, onCancel, cancelLabel = 'キャンセル' }: {
   fields: HrProposalField[]; onApply: (chosen: HrProposalField[]) => void; onCancel: () => void; cancelLabel?: string;
 }) {
   const [chosen, setChosen] = useState<Set<string>>(() => new Set(fields.filter((x) => !x.problem && x.current !== x.proposed).map((x) => x.key)));

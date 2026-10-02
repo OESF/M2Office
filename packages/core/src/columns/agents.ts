@@ -13,7 +13,7 @@ import { WEB_COLUMNS_EXTENSION_ID, type AgentDefinition } from '@m2office/shared
 import type { ExtensionPackage } from '../extensions/loader.js';
 
 /** 内蔵の拡張の版。付属の業務やツールが変わったら上げる。 */
-export const WEB_COLUMNS_EXTENSION_VERSION = '1.1.0';
+export const WEB_COLUMNS_EXTENSION_VERSION = '1.2.0';
 
 /** 付属の業務「コラムの下書き」（秘書から）。 */
 export const WEB_COLUMN_DRAFT: AgentDefinition = {
@@ -205,8 +205,62 @@ export const WEB_COLUMN_COVER: AgentDefinition = {
   face: 39,
 };
 
+/** 付属の業務「コラムの表現の決まり」（秘書から。管理者だけ。第32.18.3節）。 */
+export const WEB_COLUMN_RULES: AgentDefinition = {
+  schemaVersion: 1,
+  id: `${WEB_COLUMNS_EXTENSION_ID}:rules`,
+  version: 1,
+  name: 'コラムの表現の決まり',
+  category: 'sample',
+  description: 'Web のコラムの赤入れで当てる表現の決まり（医療広告ガイドライン・薬機法・士業の広告の規程）を足したり外したりします。管理者だけが直せます',
+  locale: 'ja-JP',
+  compartment: null,
+  menu: false,
+  inputs: {
+    type: 'object',
+    required: ['request'],
+    properties: {
+      request: { type: 'string', title: '頼みたいこと', format: 'textarea', examples: ['コラムの表現の決まりに薬機法を足して'] },
+      context: { type: 'string', title: 'これまでの会話', format: 'textarea' },
+    },
+  },
+  tools: ['columns.rules'],
+  steps: [
+    {
+      id: 'rules',
+      type: 'agent',
+      tools: ['columns.rules'],
+      required: ['columns.rules'],
+      label: '表現の決まりを直す',
+      instruction: [
+        '依頼から、足す決まりを add、外す決まりを remove に入れて columns.rules を 1 回だけ呼ぶ。',
+        '医療広告・医療・クリニック・歯科は medical、薬機法・化粧品・健康食品・サプリ・薬局は health-products、士業・弁護士・税理士などは legal。',
+        '「AI に任せて」「自動に戻して」なら auto を true にする。',
+      ].join('\n'),
+      onError: 'stop',
+    },
+    {
+      id: 'answer',
+      type: 'agent',
+      label: '結果を伝える',
+      instruction: '今当てている決まり（columns.rules の結果の rules）を一文で伝える。直せなかったときは理由を伝える。',
+    },
+  ],
+  constraints: ['社外へ送らない', '頼まれていない決まりを変えない'],
+  limits: { maxSteps: 6, maxTokens: 30_000, timeoutSec: 120 },
+  help: {
+    summary: '秘書に頼むと、Web のコラムの赤入れで当てる表現の決まりを直します（管理者だけ）。',
+    examples: [
+      { title: '決まりを足す', input: { request: 'コラムの表現の決まりに薬機法を足して' } },
+      { title: 'AI に任せる', input: { request: 'コラムの表現の決まりを AI に任せて' } },
+    ],
+    notes: ['ふだんは、業種・分野・読み手・監修者から AI が選びます', '直した後は AI は選び直しません。「AI に任せて」で戻せます'],
+  },
+  face: 40,
+};
+
 /** Web のコラムの付属の業務。 */
-export const WEB_COLUMN_AGENTS: AgentDefinition[] = [WEB_COLUMN_DRAFT, WEB_COLUMN_PLACE, WEB_COLUMN_COVER];
+export const WEB_COLUMN_AGENTS: AgentDefinition[] = [WEB_COLUMN_DRAFT, WEB_COLUMN_PLACE, WEB_COLUMN_COVER, WEB_COLUMN_RULES];
 
 /**
  * Web のコラムを、拡張機能の一覧に並べるための形（第12.13節「公式・内蔵」）。
@@ -222,7 +276,7 @@ export const WEB_COLUMNS_PACKAGE: ExtensionPackage = {
     publisher: { name: 'M2Office', verified: true },
     platform_schema: '>=1 <2',
     // WordPress に書き込むため、最上位の危険度は「社外へ送る」（内蔵の拡張なので再同意は無い）
-    permissions: { tools: ['columns.draft', 'columns.preview', 'columns.place', 'columns.cover'], max_risk_level: 'external-send' },
+    permissions: { tools: ['columns.draft', 'columns.preview', 'columns.place', 'columns.cover', 'columns.rules'], max_risk_level: 'external-send' },
   },
   agents: WEB_COLUMN_AGENTS,
   connectors: [],

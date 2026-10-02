@@ -5,6 +5,7 @@
  * 書き上げ（見本の下書き・調べもの・「ローカルだけ」の会社で書かないこと）、版（直す・直し案・戻す）、承認待ちの間は直せないこと、
  * 承認した版の指紋と違えば入れないこと、WordPress が無ければ承認済みにすること、WordPress に下書きとして入れること、
  * 削除できるのは下書きだけ、使えない人にはツールが「使えない」と返すことを確かめる。
+ * 表現の決まり（第32.18.3節）: 業種と言葉と推論で選び、秘書で直せる（管理者だけ）。
  * カバー画像（第32.18.2節）: 型・AI の挿絵と描いた後の確かめ・月の上限・会社の写真・作り直し・承認の指紋・WordPress のアイキャッチ・題名の折り返し。
  */
 
@@ -13,7 +14,7 @@ import assert from 'node:assert/strict';
 import { DEFAULT_TENANT_SETTINGS, type TenantSettings, type WebColumnSettings } from '@m2office/shared';
 import {
   ColumnService, MemoryColumnStore, MemoryFileStore, StubLlmProvider, renderCover, wrapTitle, coverSvg, COVER_AI_TRIES, MockResearchProvider, PolicyBlockedResearchProvider, COLUMN_TOOLS,
-  ruleReview, aiReview, parseDraft, writeColumn, finalMarkdown, columnHtml, normalizeSiteUrl,
+  ruleReview, aiReview, parseDraft, guessRuleSets, inferRuleSets, selfReferenceRule, writeColumn, finalMarkdown, columnHtml, normalizeSiteUrl,
   type LlmProvider, type Repository, type ResearchProvider, type TenantCredential, type ToolContext,
 } from '../src/index.js';
 
@@ -37,7 +38,9 @@ function setup(opts: { columns?: Partial<WebColumnSettings>; llm?: LlmProvider; 
   };
   const creds = new Map<string, TenantCredential>();
   const fileMetas = new Map<string, { id: string; kind: string; mime: string }>();
+  const users: Record<string, { roles: string[] }> = { u1: { roles: ['member'] }, boss: { roles: ['admin'] } };
   const repo = {
+    findUserById: async (_t: string, id: string) => (users[id] ? { id, ...users[id] } : null),
     createFile: async (f: { id: string; kind: string; mime: string }) => { fileMetas.set(f.id, f); },
     getFile: async (_t: string, id: string) => fileMetas.get(id) ?? null,
     getTenantSettings: async () => settings,
@@ -66,15 +69,15 @@ const who = { tenantId: 't1', userId: 'u1' };
 
 test('赤入れ: 業種ごとの言葉・個人の情報・出典の無さを挙げ、言い切りには直し案を付ける', () => {
   const body = '当院の治療で必ず良くなります。\n患者様の声も届いています。\nお問い合わせは 03-1234-5678 まで。';
-  const general = ruleReview(body, 'general', 1);
+  const general = ruleReview(body, [], 1);
   assert.ok(general.some((r) => r.reason.includes('言い切る') && r.suggestion.includes('多くの場合')), '「必ず」に直し案');
   assert.ok(!general.some((r) => r.reason.includes('体験談')), '全般では体験談を見ない');
   assert.ok(general.some((r) => r.kind === 'privacy'), '電話番号');
-  const medical = ruleReview(body, 'medical', 1);
+  const medical = ruleReview(body, ['medical'], 1);
   assert.ok(medical.some((r) => r.reason.includes('体験談')), '医療では体験談を挙げる');
-  assert.ok(ruleReview('健康食品で血圧が下がる', 'health-products', 1).some((r) => r.reason.includes('薬機法')));
-  assert.ok(ruleReview('必ず勝てます', 'legal', 1).some((r) => r.reason.includes('士業')));
-  const none = ruleReview('ふつうの文です。', 'general', 0);
+  assert.ok(ruleReview('健康食品で血圧が下がる', ['health-products'], 1).some((r) => r.reason.includes('薬機法')));
+  assert.ok(ruleReview('必ず勝てます', ['legal'], 1).some((r) => r.reason.includes('士業')));
+  const none = ruleReview('ふつうの文です。', [], 0);
   assert.deepEqual(none.map((r) => r.kind), ['source'], '出典が無ければ出典の指摘だけ');
 });
 
@@ -84,9 +87,9 @@ test('推論の赤入れ: 本文にそのまま無い箇所は捨てる。見本
     { quote: '歯みがきは大切です', reason: '出典が無い', suggestion: '', kind: 'source' },
     { quote: '本文に無い文', reason: '言い換えた', suggestion: '', kind: 'expression' },
   ]));
-  const items = await aiReview(llm, body, 'medical');
+  const items = await aiReview(llm, body, ['medical']);
   assert.deepEqual(items.map((i) => [i.quote, i.by]), [['歯みがきは大切です', 'ai']]);
-  assert.deepEqual(await aiReview(new StubLlmProvider(), body, 'medical'), []);
+  assert.deepEqual(await aiReview(new StubLlmProvider(), body, ['medical']), []);
 });
 
 test('下書きの読み取り: JSON を取り出し、題名と本文が無ければ読めないとする', () => {
@@ -225,7 +228,7 @@ test('削除: 下書きだけ。ツール: 使えない人には使えないと�
 });
 
 /** 挿絵の代わりに使う PNG（型で組み立てたもの）。 */
-const samplePng = () => renderCover({ title: '見本', background: { kind: 'template', pattern: 'dots', color: '#335577' }, logo: null, company: '' });
+const samplePng = () => renderCover({ title: '見本', background: { kind: 'template', pattern: 'dots', color: '#335577' }, logo: null });
 
 /** 下書きを書き、挿絵を描き、確かめの答えを順に返す推論。 */
 function coverLlm(checks: string[]): LlmProvider & { drawn: number; prompts: string[] } {
@@ -271,7 +274,7 @@ test('カバー: AI の挿絵は描いた後に確かめ、通らなければ描
   assert.equal(off.drawn, 0, '既定は切り');
 
   const llm = coverLlm(['{"people": true, "text": false, "logo": false, "body": false}', '{"people": false, "text": false, "logo": false, "body": false}']);
-  const { service } = setup({ llm, research: fakeResearch, columns: { aiIllustration: true, industry: 'medical' } });
+  const { service } = setup({ llm, research: fakeResearch, columns: { aiIllustration: true, industry: '9050', rules: ['medical'] } });
   const c1 = await service.create(who, { theme: '歯みがき' }, true);
   assert.ok('id' in c1);
   const v = (await service.detail(who, c1.id))!.versions[0]!;
@@ -367,8 +370,55 @@ test('カバー: 題名は 3 行まで。収まらなければ末尾を「…」
   const long = wrapTitle('あ'.repeat(200), 1056);
   assert.equal(long.lines.length, 3);
   assert.ok(long.lines[2]!.endsWith('…'));
+  const words = wrapTitle('冬の乾燥から肌を守る 3 つの習慣', 1056);
+  assert.deepEqual(words.lines, ['冬の乾燥から肌を守る', '3 つの習慣'], '言葉の切れ目で割り、「習慣」を割らない');
+  assert.ok(wrapTitle('知っておきたい花粉症の時期の過ごし方と、早めに相談したほうがよいサイン', 1056).lines.every((l) => !/^[のを、]/.test(l)), '助詞と句読点を行の頭に置かない');
   const punct = wrapTitle(`${'あ'.repeat(15)}、いいい`, 1056);
   assert.ok(punct.lines.every((l) => !l.startsWith('、')));
-  const svg = coverSvg({ title: 'A & <B>', background: { kind: 'template', pattern: 'waves', color: '#123456' }, logo: null, company: '見本' });
-  assert.ok(svg.includes('A &amp; &lt;B&gt;') && svg.includes('見本'));
+  const svg = coverSvg({ title: 'A & <B>', background: { kind: 'template', pattern: 'waves', color: '#123456' }, logo: null });
+  assert.ok(svg.includes('A &amp; &lt;B&gt;'));
+  assert.equal((svg.match(/<text /g) ?? []).length, 1, '題名のほかに文字を入れない（会社の名前は出さない）');
+});
+
+test('表現の決まり: 決まった言葉と業種で選び、推論の選んだものも足す（当てる側に倒す）', async () => {
+  const base = { industry: '9050', topics: [], audience: '', supervisorTitle: '', company: '' };
+  assert.deepEqual(guessRuleSets({ ...base, topics: ['小児歯科', '矯正'] }), ['medical']);
+  assert.deepEqual(guessRuleSets({ ...base, supervisorTitle: '院長' }), ['medical']);
+  assert.deepEqual(guessRuleSets({ ...base, industry: '3250' }), ['health-products'], '医薬品の業種は薬機法');
+  assert.deepEqual(guessRuleSets({ ...base, company: '見本税理士事務所' }), ['legal']);
+  assert.deepEqual(guessRuleSets({ ...base, industry: '3600', topics: ['工作機械'] }), []);
+  const llm = fakeLlm(() => '{"rules": ["health-products", "unknown"]}');
+  assert.deepEqual(await inferRuleSets(llm, { ...base, topics: ['小児歯科'] }), ['medical', 'health-products'], '推論と言葉の両方を当て、知らない値は捨てる');
+});
+
+test('表現の決まり: 業種などを変えると AI が選び直し、秘書で直した後は選び直さない。直せるのは管理者だけ', async () => {
+  const { service, settings, audits } = setup({ columns: { industry: '9050', topics: ['小児歯科'] } });
+  let s = await service.refreshRules('t1', 'boss');
+  assert.deepEqual([s.rules, s.rulesBy], [['medical'], 'ai']);
+  assert.ok(audits.some((a) => a.action === 'column.rules' && a.detail['by'] === 'ai'));
+  assert.deepEqual(await service.setRules(who, { add: ['legal'] }), { error: '表現の決まりを直せるのは管理者だけです' });
+  const boss = { tenantId: 't1', userId: 'boss' };
+  assert.deepEqual(await service.setRules(boss, { add: ['health-products'], remove: ['medical'] }), { rules: ['health-products'], by: 'person' });
+  s = await service.refreshRules('t1', 'boss');
+  assert.deepEqual([s.rules, s.rulesBy], [['health-products'], 'person'], '人が直した後は選び直さない');
+  assert.deepEqual(await service.setRules(boss, { auto: true }), { rules: ['medical'], by: 'ai' });
+  assert.equal(settings().webColumns.rulesBy, 'ai');
+});
+
+test('表現の決まり: ツール columns.rules は管理者の依頼で直し、ほかの人には直せないと返す', async () => {
+  const { service } = setup({ columns: { industry: '9050' } });
+  const tool = COLUMN_TOOLS.find((x) => x.name === 'columns.rules')!;
+  const ctxOf = (userId: string) => ({ tenantId: 't1', userId, columns: { service, access: async () => DEFAULT_TENANT_SETTINGS.webColumns } }) as unknown as ToolContext;
+  assert.deepEqual(await tool.invoke({ add: ['legal'] }, ctxOf('u1')), { available: false, reason: '表現の決まりを直せるのは管理者だけです' });
+  assert.deepEqual(await tool.invoke({ add: ['legal', 'nonsense'] }, ctxOf('boss')),
+    { available: true, by: '人が直した', rules: ['景品表示法（どの会社にも当てる）', '士業の広告の規程'] });
+});
+
+test('自社の呼び方: 決めていればその言い方でそろえ、空なら会社の種類に合った言い方を選ばせる', async () => {
+  assert.equal(selfReferenceRule('当院'), '- 自社のことは「当院」と書き、記事の中でそろえる');
+  assert.match(selfReferenceRule(''), /医院・病院・クリニック・歯科は「当院」/);
+  let prompt = '';
+  const llm = fakeLlm((p) => { prompt = p; return '{"titles":["題"],"body":"本文","description":"説明","sns":{"short":"s","long":"l"}}'; });
+  await writeColumn(llm, fakeResearch, { theme: 't', memo: '', company: '見本', audience: '', topics: [], style: '', selfReference: '弊法人' });
+  assert.ok(prompt.includes('自社のことは「弊法人」と書き'));
 });

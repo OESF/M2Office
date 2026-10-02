@@ -5018,13 +5018,24 @@ console.log('\n■ 65. Web のコラム（内蔵の拡張。第32.18.1節）');
     const { body: meB } = await call('b', '/v1/me');
     offB.status === 403 && meB.webColumns === false ? ok('Web のコラムを切っている会社では、API も左のメニューも使えない') : ng('切っていても使える', `${offB.status} ${meB.webColumns}`);
     await call('a', '/v1/admin/extensions/web-columns/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
-    const set = await call('a', '/v1/admin/extensions/web-columns/settings', { method: 'PUT', body: JSON.stringify({ industry: 'medical', topics: ['小児歯科', ' ', '小児歯科'], audience: '子育て世帯' }) });
+    const set = await call('a', '/v1/admin/extensions/web-columns/settings', { method: 'PUT', body: JSON.stringify({ industry: '9050', topics: ['小児歯科', ' ', '小児歯科'], audience: '子育て世帯' }) });
     const setByMember = await call('a', '/v1/admin/extensions/web-columns/settings', { method: 'PUT', body: JSON.stringify({ industry: 'legal' }) }, 'member');
+    const badIndustry = await call('a', '/v1/admin/extensions/web-columns/settings', { method: 'PUT', body: JSON.stringify({ industry: 'medical' }) });
     const badWp = await call('a', '/v1/admin/extensions/web-columns/wordpress', { method: 'PUT', body: JSON.stringify({ siteUrl: 'ftp://example.jp', username: 'a', password: 'b' }) });
     const { body: meA } = await call('a', '/v1/me', {}, 'member');
-    set.body?.webColumns?.industry === 'medical' && set.body.webColumns.topics.join() === '小児歯科' && setByMember.status === 403 && badWp.status === 400 && meA.webColumns === true
-      ? ok('管理者が入れると使え、業種・分野・読み手を設定できる。設定と WordPress の鍵は管理者だけ。読めないサイトの URL は預けない')
-      : ng('設定が違う', JSON.stringify({ set: set.body, member: setByMember.status, wp: badWp.status, me: meA.webColumns }));
+    // 使える人にはヘルプの記事が開き、メニューでピン止めできる。切っている会社には記事を出さない（2026-10-03 に記事が開かなかった）
+    const helpA = await call('a', '/v1/help/articles/start-web-columns', {}, 'member');
+    const helpB = await call('b', '/v1/help/articles/start-web-columns');
+    const { body: mineMenu } = await call('a', '/v1/me/settings', {}, 'member');
+    await call('a', '/v1/me/settings/menu', { method: 'PUT', body: JSON.stringify({ ...mineMenu.menu, pinned: ['web-columns'] }) }, 'member');
+    const pinnedCol = (await call('a', '/v1/me/settings', {}, 'member')).body.menu?.pinned ?? [];
+    await call('a', '/v1/me/settings/menu', { method: 'PUT', body: JSON.stringify(mineMenu.menu) }, 'member');
+    helpA.status === 200 && helpB.status === 404 && pinnedCol.includes('web-columns')
+      ? ok('使える人には Web のコラムのヘルプの記事が開き、メニューでピン止めできる。切っている会社には記事を出さない')
+      : ng('ヘルプの記事かピン止めが違う', JSON.stringify({ a: helpA.status, b: helpB.status, pinnedCol }));
+    set.body?.webColumns?.industry === '9050' && set.body.webColumns.rules?.join() === 'medical' && set.body.webColumns.topics.join() === '小児歯科' && setByMember.status === 403 && badIndustry.status === 400 && badWp.status === 400 && meA.webColumns === true
+      ? ok('管理者が入れると使え、業種（33 業種）・分野・読み手を設定でき、表現の決まりは分野から選ぶ（サービス業の小児歯科なら医療広告）。設定と WordPress の鍵は管理者だけ。読めないサイトの URL は預けない')
+      : ng('設定が違う', JSON.stringify({ set: set.body, member: setByMember.status, badIndustry: badIndustry.status, wp: badWp.status, me: meA.webColumns }));
 
     // 書く: 裏で書き上げ、下書きになる（開発の環境では見本の下書き）
     const created = await call('a', '/v1/columns', { method: 'POST', body: JSON.stringify({ theme: `${tag} 子どもの歯みがき`, memo: '仕上げみがき' }) }, 'member');

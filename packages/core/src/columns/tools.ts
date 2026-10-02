@@ -7,7 +7,7 @@
  * @see 仕様書 第32.18.1節 段 1 の実装の決まり
  */
 
-import { COLUMN_COVER_KIND_LABELS, type ColumnCoverKind, type WebColumnSettings } from '@m2office/shared';
+import { COLUMN_COVER_KIND_LABELS, COLUMN_RULE_SET_LABELS, type ColumnCoverKind, type ColumnRuleSet, type WebColumnSettings } from '@m2office/shared';
 import type { Tool, ToolContext } from '../tools/registry.js';
 import type { ColumnPreview, ColumnService } from './service.js';
 
@@ -173,5 +173,40 @@ export const columnsCover: Tool = {
   },
 };
 
+const RULE_SETS: ColumnRuleSet[] = ['medical', 'health-products', 'legal'];
+const ruleList = (v: unknown): ColumnRuleSet[] => (Array.isArray(v) ? v.filter((x): x is ColumnRuleSet => RULE_SETS.includes(x as ColumnRuleSet)) : []);
+
+/**
+ * コラムの赤入れで当てる表現の決まりを直す（第32.18.3節）。足す・外す・AI に任せる。管理者だけ。
+ *
+ * @remarks 危険度 `write-internal`。会社の設定を直すだけで、社外には何も送らない
+ */
+export const columnsRules: Tool = {
+  name: 'columns.rules',
+  risk: 'write-internal',
+  activityLabel: 'コラムの表現の決まりを直しています',
+  helpText: 'Web のコラムの赤入れで当てる表現の決まり（医療広告・薬機法・士業）を直します。管理者だけが直せます',
+  description: 'Web のコラムの赤入れで当てる表現の決まりを直す。add と remove に medical（医療広告ガイドライン）・health-products（薬機法・健康増進法）・legal（士業の広告の規程）を入れる。auto を true にすると AI に任せる形に戻す。今の決まりを返す',
+  args: {
+    properties: {
+      add: { type: 'array', description: '足す決まり', items: { type: 'string', description: '決まり', enum: RULE_SETS } },
+      remove: { type: 'array', description: '外す決まり', items: { type: 'string', description: '決まり', enum: RULE_SETS } },
+      auto: { type: 'boolean', description: 'AI に任せる形に戻す' },
+    },
+  },
+  async invoke(args, ctx) {
+    const service = await columnsOf(ctx);
+    if (!service) return UNAVAILABLE;
+    const res = await service.setRules({ tenantId: ctx.tenantId, userId: ctx.userId }, {
+      add: ruleList(args['add']), remove: ruleList(args['remove']), auto: args['auto'] === true,
+    });
+    if ('error' in res) return { available: false, reason: res.error };
+    return {
+      available: true, by: res.by === 'ai' ? 'AI が選ぶ' : '人が直した',
+      rules: ['景品表示法（どの会社にも当てる）', ...res.rules.map((r) => COLUMN_RULE_SET_LABELS[r])],
+    };
+  },
+};
+
 /** Web のコラムのツール。 */
-export const COLUMN_TOOLS: Tool[] = [columnsDraft, columnsPreview, columnsPlace, columnsCover];
+export const COLUMN_TOOLS: Tool[] = [columnsDraft, columnsPreview, columnsPlace, columnsCover, columnsRules];

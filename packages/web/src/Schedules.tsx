@@ -165,7 +165,7 @@ function ScheduleEditor({ agents, schedule, onSaved, onCancel }: {
       {error && <p className="error">{error}</p>}
       <div className="row">
         <button className="btn" onClick={() => void save()} disabled={busy}>{busy ? '保存しています…' : '保存'}</button>
-        <button className="btn ghost" onClick={onCancel} disabled={busy}>やめる</button>
+        <button className="btn ghost" onClick={onCancel} disabled={busy}>キャンセル</button>
       </div>
     </div>
   );

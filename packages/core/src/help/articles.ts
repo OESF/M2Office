@@ -33,7 +33,10 @@ export interface HelpArticle {
   source: 'official' | 'agent' | 'manual';
   /** 業務の区分（マニュアルの名前。例: `inventory`）。ヘルプの木で、同じ業務の下にまとめる（第6.10.7.3節）。 */
   business?: string;
-  /** 木の中の小分け（管理者向けの記事の「はじめに」「設定」「記録」など）。 */
+  /**
+   * 木の中の小分け。管理者向けの記事は「はじめに」「設定」「記録」など。
+   * 業務の記事は、業務のまとまりの名前（分野の「メール」など・拡張機能の名前。第6.10.7節）。
+   */
   group?: string;
   /** この内蔵の拡張を使える人だけに出す（マニュアルの章と、業務の要点の記事）。`hr-self` は本人の「給与・勤怠」を使える人。 */
   extension?: string;
@@ -160,13 +163,29 @@ export class HelpCatalog {
       .filter((a) => !ctx.disabledAgents.includes(a.id))
       .map((a): HelpArticle => ({
         id: `agent-${a.id}`, title: a.name, audience: 'all', category: 'agents', related: ['start-agents'],
-        body: agentHelpMarkdown(this.agentHelp(a, ctx)), source: 'agent',
+        body: agentHelpMarkdown(this.agentHelp(a, ctx)), source: 'agent', ...this.placeOf(a.id, ctx),
       }));
     // 業務のマニュアルの章と要点の記事は、その業務を使える人だけに出す（第6.10.7節・第6.10.7.3節）。
     // 使える業務を渡されないとき（秘書の答えの材料）は、マニュアルの章だけを出さない
     const usable = ctx.extensions ? new Set(ctx.extensions) : null;
     const shown = (a: HelpArticle) => (usable ? !a.extension || usable.has(a.extension) : a.category !== 'manual');
     return [...this.official, ...agentArticles].filter((a) => allowed.has(a.audience) && shown(a) && inScope(a, scope));
+  }
+
+  /**
+   * 業務の記事を木のどこに置くか（第6.10.7節）。内蔵の拡張の付属の業務は、その拡張の要点の記事と同じ区分（`business`）。
+   * ほかは、まとまりの名前（`group`）。業務 1 つだけのまとまりは置き場を持たない（「業務」の直下）。
+   */
+  private placeOf(agentId: string, ctx: HelpContext): Pick<HelpArticle, 'business' | 'extension' | 'group'> {
+    const g = ctx.groupOf?.(agentId);
+    if (!g || g.id.startsWith('agent:')) return {};
+    if (g.id.startsWith('ext:')) {
+      const ext = g.id.slice(4);
+      // 要点の記事を持つ内蔵の拡張は、その区分に入れる（使えない人には区分ごと出さない）
+      const guide = this.official.find((x) => x.extension === ext && x.business);
+      if (guide) return { business: guide.business!, extension: ext };
+    }
+    return { group: g.name };
   }
 
   /** 業務の説明を組み立てる（仕様書 第6.10.5節）。 */
@@ -227,6 +246,11 @@ export interface HelpContext {
    * 省略時は、マニュアルの章だけを出さない（秘書の答えの材料。第6.10.7.3節）。
    */
   extensions?: readonly string[];
+  /**
+   * 業務のまとまり（ダッシュボードと同じ。第6.7.4.2.1節）。`ext:<拡張機能の ID>` は拡張機能、`cat:<分野>` は公式の業務の分野、
+   * `agent:<ID>` は業務 1 つだけ。省略時は、業務の記事をまとめない。
+   */
+  groupOf?: (agentId: string) => { id: string; name: string };
 }
 
 /**

@@ -12,7 +12,7 @@
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import {
-  CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, INVENTORY_FEATURES, SIGNAGE_EXTENSION_ID, SIGNAGE_JINGLES, WEB_COLUMNS_EXTENSION_ID, COLUMN_INDUSTRY_LABELS, type ColumnIndustry, type WebColumnSettings, type HrSettings, type InventorySettings, type RiskLevel, type SignageSettings,
+  CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, INVENTORY_FEATURES, SIGNAGE_EXTENSION_ID, SIGNAGE_JINGLES, WEB_COLUMNS_EXTENSION_ID, COLUMN_INDUSTRIES, type WebColumnSettings, type HrSettings, type InventorySettings, type RiskLevel, type SignageSettings,
 } from '@m2office/shared';
 import {
   bundledConnection, builtinSection, consentSnapshot, encodeFiles, unpackExtension, EXTENSION_FILE_MAX_BYTES,
@@ -322,8 +322,8 @@ export function extensionsRoute(deps: AppDeps) {
     }
     if (typeof body['audience'] === 'string') next.audience = body['audience'].trim().slice(0, 200);
     if (body['industry'] !== undefined) {
-      if (typeof body['industry'] !== 'string' || !(body['industry'] in COLUMN_INDUSTRY_LABELS)) return c.json({ error: '業種が正しくありません' }, 400);
-      next.industry = body['industry'] as ColumnIndustry;
+      if (typeof body['industry'] !== 'string' || !COLUMN_INDUSTRIES.some((i) => i.code === body['industry'])) return c.json({ error: '業種が正しくありません' }, 400);
+      next.industry = body['industry'];
     }
     if (body['supervisor'] === null) next.supervisor = null;
     else if (body['supervisor'] && typeof body['supervisor'] === 'object') {
@@ -342,13 +342,16 @@ export function extensionsRoute(deps: AppDeps) {
       next.aiIllustration = body['aiIllustration'];
     }
     await deps.repo.saveTenantSettings(tenant.id, 'webColumns', next, user.id);
+    // 業種・分野・読み手・監修者が変わったら、当てる表現の決まりを AI が選び直す（第32.18.3節。秘書で直した後は選び直さない）
+    const clues = (w: WebColumnSettings) => JSON.stringify([w.industry, w.topics, w.audience, w.supervisor?.title ?? '']);
+    const saved = clues(next) !== clues(current) ? await deps.columns.service.refreshRules(tenant.id, user.id) : next;
     await deps.repo.appendAudit({
       id: randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id, action: 'settings.update',
       targetType: 'settings', targetId: 'webColumns',
       detail: { topics: next.topics.length, industry: next.industry, supervisor: !!next.supervisor, aiNotice: next.aiNotice, aiIllustration: next.aiIllustration },
       occurredAt: new Date().toISOString(),
     });
-    return c.json({ ok: true, webColumns: next });
+    return c.json({ ok: true, webColumns: saved });
   });
 
   /**

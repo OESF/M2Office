@@ -12,6 +12,7 @@ import {
 } from 'react';
 import { parseInline, parseMarkdown, type MdList } from './markdown.js';
 import { api, describeError, type AgentHelpView, type HelpArticleMeta, type HelpScope } from './api.js';
+import { AGENT_GROUP_LABELS } from '@m2office/shared';
 import { Icon } from './nav.js';
 import { allBranches, defaultOpenKeys, loadHelpState, openTo, saveHelpState } from './help-state.js';
 
@@ -145,7 +146,9 @@ const ADMIN_GROUPS = ['はじめに', '設定', '記録'];
 /**
  * ヘルプの木を組み立てる（仕様書 第6.10.7節）。
  *
- * ワークスペース: はじめに・業務（業務の区分ごとに要点の記事とマニュアルの章、続けて業務エージェント）・よくある質問・更新情報。
+ * ワークスペース: はじめに・業務・よくある質問・更新情報。「業務」の下は、ダッシュボードの業務のまとまりと同じ形にする:
+ * 公式の業務は分野（メール・予定など）の区分、内蔵の拡張はその区分（要点の記事・付属の業務・マニュアルの章）、
+ * ほかの拡張機能は拡張機能の名前の区分。まとまりを持たない業務だけ「業務」の直下に置く。
  * 管理者ページ: 管理者向けの記事を小分け（はじめに・設定・記録）ごとに・管理者向けの更新情報。
  * 用語と問い合わせは木に入れず、木の下の小さな入口にする。
  */
@@ -157,20 +160,30 @@ function buildTree(items: HelpArticleMeta[], manuals: { id: string; title: strin
       .sort((a, b) => (ADMIN_GROUPS.indexOf(a) + 1 || 99) - (ADMIN_GROUPS.indexOf(b) + 1 || 99));
     return [...groups.map((g) => ({ key: `admin:${g}`, label: g, items: admin.filter((i) => (i.group ?? 'そのほか') === g).sort(byOrder) })), updates];
   }
+  const agents = items.filter((i) => i.category === 'agents');
+  // 公式の業務の分野の区分（メール・予定など）。分野の決まった順（ダッシュボードと同じ）、そのほかの拡張機能は後ろ
+  const fieldOrder = Object.values(AGENT_GROUP_LABELS);
+  const rank = (g: string) => (fieldOrder.indexOf(g) + 1) || 99;
+  const groupNames = [...new Set(agents.filter((i) => !i.business && i.group).map((i) => i.group!))].sort((x, y) => rank(x) - rank(y));
+  const groups: TreeNode[] = groupNames.map((g) => ({
+    key: `group:${g}`, label: g, items: agents.filter((i) => !i.business && i.group === g), closed: true,
+  }));
+  // 内蔵の拡張の区分: 要点の記事、付属の業務、マニュアルの章の順
   const businessIds = [...new Set(items.filter((i) => i.business).map((i) => i.business!))];
   const businesses: TreeNode[] = businessIds.map((id) => {
     const own = items.filter((i) => i.business === id);
-    const guide = own.filter((i) => i.category !== 'manual');
+    const guide = own.filter((i) => i.category !== 'manual' && i.category !== 'agents').sort(byOrder);
     const chapters = own.filter((i) => i.category === 'manual').sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
     const manual = manuals.find((m) => m.id === id);
     return {
-      key: `business:${id}`, label: manual?.title ?? guide[0]?.title ?? id, items: guide, closed: true, itemsFirst: true,
+      key: `business:${id}`, label: manual?.title ?? guide[0]?.title ?? id,
+      items: [...guide, ...own.filter((i) => i.category === 'agents')], closed: true, itemsFirst: true,
       nodes: chapters.length ? [{ key: `manual:${id}`, label: 'マニュアル', items: chapters, closed: true }] : [],
     };
   });
   return [
     { key: 'start', label: 'はじめに', items: items.filter((i) => i.category === 'start' && !i.business).sort(byOrder) },
-    { key: 'business', label: '業務', items: items.filter((i) => i.category === 'agents'), nodes: businesses },
+    { key: 'business', label: '業務', items: agents.filter((i) => !i.business && !i.group), nodes: [...groups, ...businesses] },
     { key: 'faq', label: 'よくある質問', items: items.filter((i) => i.category === 'faq') },
     updates,
   ].filter((n) => n.items.length > 0 || (n.nodes?.length ?? 0) > 0);

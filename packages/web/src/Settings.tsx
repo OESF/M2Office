@@ -584,7 +584,7 @@ function MemorySettings({ settings, onChange, onSave }: {
                   {editing?.id === m.id ? (
                     <>
                       <button className="btn small" disabled={!editing.text.trim()} onClick={() => void saveEdit()}>保存</button>{' '}
-                      <button className="btn ghost small" onClick={() => setEditing(null)}>やめる</button>
+                      <button className="btn ghost small" onClick={() => setEditing(null)}>キャンセル</button>
                     </>
                   ) : (
                     <>

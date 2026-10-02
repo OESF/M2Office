@@ -7,12 +7,59 @@
 /** Web のコラムの拡張の ID（内蔵の拡張。第12.13節）。 */
 export const WEB_COLUMNS_EXTENSION_ID = 'web-columns';
 
-/** 業種。赤入れで照らす表現の決まりを選ぶ（第32.8節）。 */
-export type ColumnIndustry = 'general' | 'medical' | 'health-products' | 'legal';
+/**
+ * 業種（東証の 33 業種と「その他」。第32.18.3節、ADR-0066）。コードで持ち、画面には名称を出す。
+ *
+ * @remarks 赤入れで照らす表現の決まりは、業種だけでは決まらない（クリニックも法律事務所もサービス業）ため、AI が別に選ぶ（{@link ColumnRuleSet}）
+ */
+export const COLUMN_INDUSTRIES: readonly { code: string; name: string }[] = [
+  { code: '0050', name: '水産・農林業' },
+  { code: '1050', name: '鉱業' },
+  { code: '2050', name: '建設業' },
+  { code: '3050', name: '食料品' },
+  { code: '3100', name: '繊維製品' },
+  { code: '3150', name: 'パルプ・紙' },
+  { code: '3200', name: '化学' },
+  { code: '3250', name: '医薬品' },
+  { code: '3300', name: '石油・石炭製品' },
+  { code: '3350', name: 'ゴム製品' },
+  { code: '3400', name: 'ガラス・土石製品' },
+  { code: '3450', name: '鉄鋼' },
+  { code: '3500', name: '非鉄金属' },
+  { code: '3550', name: '金属製品' },
+  { code: '3600', name: '機械' },
+  { code: '3650', name: '電気機器' },
+  { code: '3700', name: '輸送用機器' },
+  { code: '3750', name: '精密機器' },
+  { code: '3800', name: 'その他製品' },
+  { code: '4050', name: '電気・ガス業' },
+  { code: '5050', name: '陸運業' },
+  { code: '5100', name: '海運業' },
+  { code: '5150', name: '空運業' },
+  { code: '5200', name: '倉庫・運輸関連業' },
+  { code: '5250', name: '情報・通信業' },
+  { code: '6050', name: '卸売業' },
+  { code: '6100', name: '小売業' },
+  { code: '7050', name: '銀行業' },
+  { code: '7100', name: '証券・商品先物取引業' },
+  { code: '7150', name: '保険業' },
+  { code: '7200', name: 'その他金融業' },
+  { code: '8050', name: '不動産業' },
+  { code: '9050', name: 'サービス業' },
+  { code: '9999', name: 'その他' },
+];
 
-/** 業種の呼び方。 */
-export const COLUMN_INDUSTRY_LABELS: Record<ColumnIndustry, string> = {
-  general: '全般', medical: '医療・歯科', 'health-products': '薬局・化粧品・健康食品', legal: '士業',
+/** 業種のコードから名称を引く。知らないコードは「その他」。 */
+export function columnIndustryName(code: string): string {
+  return COLUMN_INDUSTRIES.find((i) => i.code === code)?.name ?? 'その他';
+}
+
+/** 全般（景品表示法）のほかに当てうる表現の決まり（第32.8節）。 */
+export type ColumnRuleSet = 'medical' | 'health-products' | 'legal';
+
+/** 表現の決まりの呼び方。 */
+export const COLUMN_RULE_SET_LABELS: Record<ColumnRuleSet, string> = {
+  medical: '医療広告ガイドライン', 'health-products': '薬機法・健康増進法', legal: '士業の広告の規程',
 };
 
 /** WordPress の入れ先（パスワードは会社の接続の秘密の値として別に預ける）。 */
@@ -30,7 +77,12 @@ export interface WebColumnSettings {
   topics: string[];
   /** 読み手（例: 「市内の子育て世帯」）。 */
   audience: string;
-  industry: ColumnIndustry;
+  /** 業種のコード（{@link COLUMN_INDUSTRIES}）。 */
+  industry: string;
+  /** 全般のほかに当てる表現の決まり（AI が選ぶ。秘書で直せる）。 */
+  rules: ColumnRuleSet[];
+  /** 表現の決まりを選んだのは AI か、人（秘書で直した）か。人なら AI は選び直さない。 */
+  rulesBy: 'ai' | 'person';
   /** 記事の末尾に出す監修者。 */
   supervisor: { name: string; title: string } | null;
   /** AI が書いたことを記事の末尾に入れるか（Q-164）。 */
@@ -43,7 +95,7 @@ export interface WebColumnSettings {
 
 /** 既定の設定。既定は切り（第32.2節）。 */
 export const DEFAULT_WEB_COLUMN_SETTINGS: WebColumnSettings = {
-  enabled: false, topics: [], audience: '', industry: 'general', supervisor: null, aiNotice: true, wordpress: null, aiIllustration: false,
+  enabled: false, topics: [], audience: '', industry: '9999', rules: [], rulesBy: 'ai', supervisor: null, aiNotice: true, wordpress: null, aiIllustration: false,
 };
 
 /** コラムの状態。 */

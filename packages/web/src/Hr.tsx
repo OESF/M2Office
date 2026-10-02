@@ -145,7 +145,7 @@ function EmployeeAttendance({ employeeId, month, closed, onChanged }: { employee
                   <input type="time" value={fixing.bs} onChange={(e) => setFixing({ ...fixing, bs: e.target.value })} aria-label="休憩の始め" />〜
                   <input type="time" value={fixing.be} onChange={(e) => setFixing({ ...fixing, be: e.target.value })} aria-label="休憩の終わり" />
                 </td>
-                <td colSpan={3}><button className="btn small" onClick={save}>保存</button><button className="btn ghost small" onClick={() => setFixing(null)}>やめる</button></td>
+                <td colSpan={3}><button className="btn small" onClick={save}>保存</button><button className="btn ghost small" onClick={() => setFixing(null)}>キャンセル</button></td>
               </tr>
             ) : (
               <tr key={d.date} className={d.type !== 'workday' ? 'muted' : ''}>

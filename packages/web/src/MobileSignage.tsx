@@ -125,7 +125,7 @@ export function MobileSignage({ me }: { me: Me }) {
         <div className="m-sig-number">
           <input inputMode="numeric" autoFocus maxLength={4} value={num} onChange={(e) => setNum(e.target.value.replace(/\D/g, ''))} aria-label="番号" />
           <button className="btn" disabled={!num} onClick={() => void send({ text: numberFor.template.replace('{番号}', num) })}>出す</button>
-          <button className="btn ghost" onClick={() => setNumberFor(null)} aria-label="やめる">×</button>
+          <button className="btn ghost" onClick={() => setNumberFor(null)} aria-label="キャンセル">×</button>
         </div>
       )}
       <div className="m-sig-compose">

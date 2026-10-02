@@ -115,7 +115,7 @@ export function MyAttendance() {
                   <button className="btn small" onClick={() => act(() => api.myHr.fixDay(d.date, {
                     in: fixing.in, out: fixing.out || null, breaks: fixing.bs && fixing.be ? [{ start: fixing.bs, end: fixing.be }] : [],
                   }), '直せませんでした', () => setFixing(null))}>保存</button>
-                  <button className="btn ghost small" onClick={() => setFixing(null)}>やめる</button>
+                  <button className="btn ghost small" onClick={() => setFixing(null)}>キャンセル</button>
                 </td>
               </tr>
             ) : (

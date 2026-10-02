@@ -262,7 +262,7 @@ function UnknownCode({ code, items, onNew, onLinked, onCancel }: {
         <span className="small">{code}</span>
         <button className="btn small" onClick={onNew}>新しい品目にする</button>
         <input className="grow" placeholder="既にある品目に結び付ける（名前で探す）" value={q} onChange={(e) => setQ(e.target.value)} aria-label="結び付ける品目を探す" />
-        <button className="btn ghost small" onClick={onCancel}>やめる</button>
+        <button className="btn ghost small" onClick={onCancel}>キャンセル</button>
       </div>
       {hits.length > 0 && (
         <ul className="plain">{hits.map((i) => <li key={i.id}><button className="link" onClick={() => void link(i.id)}>{i.name}</button></li>)}</ul>
@@ -327,7 +327,7 @@ function NewItem({ initial, onCancel, onSaved }: {
         <input className="unit-input" placeholder="個・本・冊" value={unit} onChange={(e) => setUnit(e.target.value)} aria-label="単位（数え方）" />
         <input className="short" placeholder="分類" value={category} onChange={(e) => setCategory(e.target.value)} aria-label="分類" />
         <button className="btn" disabled={!name.trim()} onClick={() => void save()}>追加</button>
-        <button className="btn ghost" onClick={onCancel}>やめる</button>
+        <button className="btn ghost" onClick={onCancel}>キャンセル</button>
       </div>
       {error && <p className="error small">{error}</p>}
     </div>

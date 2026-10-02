@@ -10,7 +10,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
   canUseAgent, WEB_COLUMNS_EXTENSION_ID,
-  type ColumnCoverKind, type ColumnReviewItem, type ColumnWordPress, type WebColumn, type WebColumnCover,
+  type ColumnCoverKind, type ColumnReviewItem, type ColumnRuleSet, type ColumnWordPress, type WebColumn, type WebColumnCover,
   type WebColumnSettings, type WebColumnVersion,
 } from '@m2office/shared';
 import type { LlmProvider } from '../llm/provider.js';
@@ -22,6 +22,7 @@ import { saveFile } from '../files/service.js';
 import { silentLogger, type Logger } from '../log/logger.js';
 import type { ColumnStore, NewColumnVersion } from './store.js';
 import { aiReview, mergeReview, ruleReview } from './review.js';
+import { inferRuleSets } from './rules.js';
 import { ColumnWriteError, rewriteColumn, writeColumn } from './writer.js';
 import { checkWordPress, columnHtml, createWordPressDraft, normalizeSiteUrl, uploadWordPressMedia, type WordPressAuth } from './wordpress.js';
 import {
@@ -226,11 +227,11 @@ export class ColumnService {
       ]);
       const draft = await writeColumn(llm, research, {
         theme: c.theme, memo: c.memo, company, audience: settings.webColumns.audience, topics: settings.webColumns.topics,
-        style: styleText(settings.writingStyle),
+        style: styleText({ ...settings.writingStyle, selfReference: '' }), selfReference: settings.writingStyle.selfReference,
       });
       const review = mergeReview(
-        ruleReview(draft.body, settings.webColumns.industry, draft.sources.length),
-        await aiReview(llm, draft.body, settings.webColumns.industry),
+        ruleReview(draft.body, settings.webColumns.rules, draft.sources.length),
+        await aiReview(llm, draft.body, settings.webColumns.rules),
       );
       const title = draft.titles[0] ?? c.theme;
       // カバーを作れなくても、下書きは残す（画面の「カバーを作る」で作り直せる）
@@ -271,7 +272,7 @@ export class ColumnService {
     if (!next.title || !next.body.trim()) return '題名と本文を入れてください';
     if (next.title === cur.version.title && next.body === cur.version.body && next.description === cur.version.description
       && next.sns.short === cur.version.sns.short && next.sns.long === cur.version.sns.long) return null;
-    await this.addVersion(who, id, cur.version, { ...cur.version, ...next, origin: 'edit' }, ruleReview(next.body, cur.settings.industry, cur.version.sources.length));
+    await this.addVersion(who, id, cur.version, { ...cur.version, ...next, origin: 'edit' }, ruleReview(next.body, cur.settings.rules, cur.version.sources.length));
     return null;
   }
 
@@ -289,7 +290,7 @@ export class ColumnService {
     const llm = await this.deps.llmFor(who.tenantId);
     try {
       const res = await rewriteColumn(llm, cur.version, text, styleText(settings.writingStyle));
-      const review = mergeReview(ruleReview(res.body, cur.settings.industry, cur.version.sources.length), await aiReview(llm, res.body, cur.settings.industry));
+      const review = mergeReview(ruleReview(res.body, cur.settings.rules, cur.version.sources.length), await aiReview(llm, res.body, cur.settings.rules));
       await this.addVersion(who, id, cur.version, { ...cur.version, body: res.body, description: res.description, origin: 'rewrite' }, review);
       return null;
     } catch (err) {
@@ -312,7 +313,7 @@ export class ColumnService {
     // 置き換えた指摘を除き、残りはそのまま引き継ぐ（推論の指摘も残す）。決まったプログラムの指摘は新しい本文で数え直す
     const kept = cur.version.review.filter((r, i) => i !== index && r.by === 'ai' && body.includes(r.quote));
     await this.addVersion(who, id, cur.version, { ...cur.version, body, origin: 'suggestion' },
-      mergeReview(ruleReview(body, cur.settings.industry, cur.version.sources.length), kept));
+      mergeReview(ruleReview(body, cur.settings.rules, cur.version.sources.length), kept));
     return null;
   }
 
@@ -470,8 +471,8 @@ export class ColumnService {
     const { repo, store } = this.deps;
     const settings = await repo.getTenantSettings(who.tenantId);
     const llm = await this.deps.llmFor(who.tenantId);
-    const [logo, company] = await Promise.all([this.logo(who.tenantId, settings.company.logoFileId), this.companyName(who.tenantId, settings.company.legalName)]);
-    const base = { title: a.title, logo, company };
+    const logo = await this.logo(who.tenantId, settings.company.logoFileId);
+    const base = { title: a.title, logo };
     const notes: string[] = [];
     let aiAttempts = 0;
 
@@ -489,10 +490,10 @@ export class ColumnService {
           aiAttempts += 1;
           const img = await llm.generateImage!({
             model: COVER_AI_MODEL, aspectRatio: '16:9',
-            prompt: illustrationPrompt({ title: a.title, description: a.description, industry: settings.webColumns.industry, hint: (req.hint ?? '').slice(0, 200) }),
+            prompt: illustrationPrompt({ title: a.title, description: a.description, rules: settings.webColumns.rules, hint: (req.hint ?? '').slice(0, 200) }),
           }).catch(() => null);
           if (!img) { notes.push('挿絵を描けませんでした'); continue; }
-          const check = await checkIllustration(llm, img, settings.webColumns.industry);
+          const check = await checkIllustration(llm, img, settings.webColumns.rules);
           if (!check.ok) { notes.push(check.reason); continue; }
           return this.saveCover(who, { ...base, background: { kind: 'image', image: img } }, { kind: 'ai', pattern: null, photoId: null, aiAttempts, note: '', alt: altText(a.title, 'ai') });
         }
@@ -565,6 +566,54 @@ export class ColumnService {
     if (!v) return null;
     const markdown = finalMarkdown(v, (await this.deps.repo.getTenantSettings(who.tenantId)).webColumns);
     return { title: v.title, markdown, html: columnHtml(markdown), description: v.description };
+  }
+
+  // ---- 表現の決まり（第32.18.3節） --------------------------------------------
+
+  /**
+   * 当てる表現の決まりを AI に選び直させる（業種・分野・読み手・監修者を変えたとき）。秘書で直した後は選び直さない。
+   *
+   * @returns 選び直した後の設定
+   */
+  async refreshRules(tenantId: string, userId: string): Promise<WebColumnSettings> {
+    const { repo } = this.deps;
+    const settings = await repo.getTenantSettings(tenantId);
+    const cur = settings.webColumns;
+    if (cur.rulesBy === 'person') return cur;
+    const rules = await inferRuleSets(await this.deps.llmFor(tenantId), {
+      industry: cur.industry, topics: cur.topics, audience: cur.audience, supervisorTitle: cur.supervisor?.title ?? '',
+      company: await this.companyName(tenantId, settings.company.legalName),
+    });
+    if (rules.join() === cur.rules.join()) return cur;
+    const next = { ...cur, rules };
+    await repo.saveTenantSettings(tenantId, 'webColumns', next, userId);
+    await this.audit({ tenantId, userId }, 'column.rules', tenantId, { rules, by: 'ai' });
+    return next;
+  }
+
+  /**
+   * 表現の決まりを人が直す（秘書から。管理者だけ）。`auto` なら AI に任せる形に戻し、選び直す。
+   *
+   * @returns 直した後の決まり。直せなければ理由
+   */
+  async setRules(who: ColumnViewer, change: { add?: ColumnRuleSet[]; remove?: ColumnRuleSet[]; auto?: boolean }): Promise<{ rules: ColumnRuleSet[]; by: 'ai' | 'person' } | { error: string }> {
+    const { repo } = this.deps;
+    const user = await repo.findUserById(who.tenantId, who.userId);
+    if (!user?.roles.includes('admin')) return { error: '表現の決まりを直せるのは管理者だけです' };
+    const settings = await repo.getTenantSettings(who.tenantId);
+    if (change.auto) {
+      await repo.saveTenantSettings(who.tenantId, 'webColumns', { ...settings.webColumns, rulesBy: 'ai' }, who.userId);
+      const next = await this.refreshRules(who.tenantId, who.userId);
+      return { rules: next.rules, by: 'ai' };
+    }
+    const order: ColumnRuleSet[] = ['medical', 'health-products', 'legal'];
+    const set = new Set(settings.webColumns.rules);
+    for (const r of change.add ?? []) if (order.includes(r)) set.add(r);
+    for (const r of change.remove ?? []) set.delete(r);
+    const rules = order.filter((r) => set.has(r));
+    await repo.saveTenantSettings(who.tenantId, 'webColumns', { ...settings.webColumns, rules, rulesBy: 'person' }, who.userId);
+    await this.audit(who, 'column.rules', who.tenantId, { rules, by: 'person' });
+    return { rules, by: 'person' };
   }
 
   // ---- WordPress の鍵（管理者） ----------------------------------------------

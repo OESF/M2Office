@@ -190,3 +190,17 @@ test('ヘルプの出す所: ワークスペースは管理者向けを出さず
   assert.equal(withGuide.list({ ...admin, extensions: ['hr'] }).length, 1);
   assert.equal(withGuide.list(admin).length, 1, '使える業務を渡さない秘書の答えの材料には、要点の記事を残す');
 });
+
+test('業務の記事の置き場: 内蔵の拡張の付属の業務はその拡張の要点の記事と同じ区分、公式の業務は分野のまとまり（第6.10.7節）', () => {
+  const guide = parseArticle('---\nid: start-web-columns\ntitle: Web のコラム\naudience: all\ncategory: start\nbusiness: web-columns\nextension: web-columns\n---\n本文');
+  const columnAgent = { ...resolveOfficialAgent('scheduling', 1)!, id: 'web-columns:draft', name: 'コラムの下書き' };
+  const catalog = new HelpCatalog([guide], [...OFFICIAL_AGENTS, columnAgent], registry);
+  const groupOf = (id: string) => (id.startsWith('web-columns:') ? { id: 'ext:web-columns', name: 'Web のコラム' }
+    : id === 'scheduling' ? { id: 'cat:calendar', name: '予定' } : { id: `agent:${id}`, name: id });
+  const list = catalog.list({ ...ctx(['member']), groupOf, extensions: ['web-columns'] });
+  const col = list.find((a) => a.id === 'agent-web-columns:draft');
+  assert.deepEqual([col?.business, col?.extension, col?.group], ['web-columns', 'web-columns', undefined]);
+  assert.equal(list.find((a) => a.id === 'agent-scheduling')?.group, '予定');
+  // 使えない拡張の付属の業務は、要点の記事と一緒に出さない
+  assert.ok(!catalog.list({ ...ctx(['member']), groupOf, extensions: [] }).some((a) => a.id === 'agent-web-columns:draft'));
+});

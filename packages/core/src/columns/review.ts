@@ -4,10 +4,10 @@
  * **赤入れは助言である。** 公開してよいかを決めるのは責任者で、本文を勝手に直さない（直し案を示すだけ）。
  * 決まったプログラムの確かめは、業種ごとの言葉の一覧（断定・最上級・効き目の保証・体験談・治療の前後・費用の強調）と、
  * 個人の情報らしい書き方と、出典の無さを見る。推論の確かめは、表現の決まりと出典の無い断定を文脈で読む。
- * 言葉の一覧は運営が持ち、会社に作らせない（ADR-0028）。
+ * 言葉の一覧は運営が持ち、会社に作らせない（ADR-0028）。どの決まりを当てるかは AI が選ぶ（rules.ts。第32.18.3節）。
  */
 
-import type { ColumnIndustry, ColumnReviewItem } from '@m2office/shared';
+import type { ColumnReviewItem, ColumnRuleSet } from '@m2office/shared';
 import type { LlmProvider } from '../llm/provider.js';
 
 /** 言葉の決まり 1 つ。`pattern` に当たった箇所を指摘する。 */
@@ -55,12 +55,11 @@ const PRIVACY: Rule[] = [
   { pattern: /[一-龯]{1,4}(様|さん)（\d{1,3}歳/g, reason: 'お客様・患者を特定しうる書き方です。名前を出さず、年代と性別だけにしてください', kind: 'privacy' },
 ];
 
-/** 業種ごとの決まり。 */
-const RULES: Record<ColumnIndustry, Rule[]> = {
-  general: GENERAL,
-  medical: [...GENERAL, ...MEDICAL],
-  'health-products': [...GENERAL, ...HEALTH_PRODUCTS],
-  legal: [...GENERAL, ...LEGAL],
+/** 全般のほかに当てうる決まり。全般はどの会社にも当てる。 */
+const RULE_SETS: Record<ColumnRuleSet, Rule[]> = {
+  medical: MEDICAL,
+  'health-products': HEALTH_PRODUCTS,
+  legal: LEGAL,
 };
 
 /** 当たった箇所の前後を少し含めて抜き出す（本文の中で見つけやすくするため）。 */
@@ -77,10 +76,10 @@ function around(body: string, index: number, length: number): string {
  * @param sources 出典の数（0 なら出典が無いと指摘する）
  * @returns 指摘（同じ箇所・同じ理由は 1 つにまとめる）
  */
-export function ruleReview(body: string, industry: ColumnIndustry, sources: number): ColumnReviewItem[] {
+export function ruleReview(body: string, rules: readonly ColumnRuleSet[], sources: number): ColumnReviewItem[] {
   const out: ColumnReviewItem[] = [];
   const seen = new Set<string>();
-  for (const rule of [...RULES[industry], ...PRIVACY]) {
+  for (const rule of [...GENERAL, ...rules.flatMap((r) => RULE_SETS[r] ?? []), ...PRIVACY]) {
     for (const m of body.matchAll(rule.pattern)) {
       const quote = around(body, m.index ?? 0, m[0].length);
       const key = `${quote}\u0000${rule.reason}`;
@@ -101,13 +100,13 @@ export function ruleReview(body: string, industry: ColumnIndustry, sources: numb
 }
 
 /** 推論の赤入れの指示。本文はデータとして渡す。 */
-function reviewPrompt(body: string, industry: ColumnIndustry): string {
-  const law = {
-    general: '景品表示法（誇大な表示・根拠の無い断定）',
-    medical: '医療広告ガイドライン（医療法）と景品表示法。治療の効果の保証、体験談、比較、誇大な表現、費用の強調',
-    'health-products': '薬機法・健康増進法・景品表示法。医薬品でないものの効き目、承認の範囲を超える効能、推薦',
-    legal: '各士業の広告の規程と景品表示法。結果の約束、比較',
-  }[industry];
+function reviewPrompt(body: string, rules: readonly ColumnRuleSet[]): string {
+  const words: Record<ColumnRuleSet, string> = {
+    medical: '医療広告ガイドライン（医療法）。治療の効果の保証、体験談、比較、誇大な表現、費用の強調',
+    'health-products': '薬機法・健康増進法。医薬品でないものの効き目、承認の範囲を超える効能、推薦',
+    legal: '各士業の広告の規程。結果の約束、比較',
+  };
+  const law = ['景品表示法（誇大な表示・根拠の無い断定）', ...rules.map((r) => words[r]).filter(Boolean)].join('／');
   return [
     'あなたは Web のコラムの校閲担当です。下の本文を読み、次の点で問題のある箇所を挙げてください。',
     `1. 表現の決まり: ${law}`,
@@ -131,10 +130,10 @@ function reviewPrompt(body: string, industry: ColumnIndustry): string {
  *
  * @remarks 本文にそのまま無い quote は捨てる（推論が言い換えた箇所は、本文の中で見つけられないため）
  */
-export async function aiReview(llm: LlmProvider | null, body: string, industry: ColumnIndustry): Promise<ColumnReviewItem[]> {
+export async function aiReview(llm: LlmProvider | null, body: string, rules: readonly ColumnRuleSet[]): Promise<ColumnReviewItem[]> {
   if (!llm || llm.name === 'stub' || llm.name === 'unconfigured') return [];
   try {
-    const res = await llm.complete({ tier: 'standard', maxOutputTokens: 2000, messages: [{ role: 'user', content: reviewPrompt(body, industry) }] });
+    const res = await llm.complete({ tier: 'standard', maxOutputTokens: 2000, messages: [{ role: 'user', content: reviewPrompt(body, rules) }] });
     const m = /\[[\s\S]*\]/.exec(res.text);
     if (!m) return [];
     const items = JSON.parse(m[0]) as Record<string, unknown>[];

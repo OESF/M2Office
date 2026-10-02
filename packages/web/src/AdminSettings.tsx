@@ -195,7 +195,7 @@ export function CompanySettings({ page }: { page: string }) {
 
       {page === 'writing' && (
       <div className="card">
-        <Text label="自社の呼び方" value={style.selfReference} onChange={w('selfReference')} hint="例: 弊社／当社" />
+        <Text label="自社の呼び方" value={style.selfReference} onChange={w('selfReference')} hint="例: 当社／当院／弊社" />
         <Text label="社外宛ての書き出し" value={style.greeting} onChange={w('greeting')} multiline />
         <Text label="社外宛ての結び" value={style.closing} onChange={w('closing')} multiline />
         <Text label="署名" value={style.signature} onChange={w('signature')} multiline />
@@ -731,7 +731,7 @@ export function KnowledgeSettings({ page }: { page: string }) {
                 ? `第 ${r.version} 版を保存しました。施行日から切り替わります`
                 : `${r.version ? `第 ${r.version} 版を保存しました。` : '保存しました。'}本文を ${r.sections.length} の節に分けました`)}
             />
-            {draft.id !== 'new' && <button className="btn ghost" onClick={() => setDraft(empty)}>やめる</button>}
+            {draft.id !== 'new' && <button className="btn ghost" onClick={() => setDraft(empty)}>キャンセル</button>}
           </div>
         </div>
       )}
