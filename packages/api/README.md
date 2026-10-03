@@ -276,7 +276,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/inquiries/:id/replies` ／ `PUT`・`DELETE /v1/inquiries/replies/:replyId` | 返事の下書きを AI に書かせる（`instruction`）／ 直す（`to`・`subject`・`body`。下書きのときだけ）・削除 |
 | `POST /v1/inquiries/replies/:replyId/submit` | 返事を承認へ進める（業務「問い合わせの返事を送る」。管理者か承認者の承認の後に、窓口のアカウントから届いた宛先で送る） |
 | `GET /v1/inquiries/review` | 月の振り返り（`month`: YYYY-MM。無ければ先月。数はプログラムが数える） |
-| `PUT /v1/admin/extensions/competitors/settings` | 管理者: 競合の分析で自動で覚える数（`autoMax`。1〜20。範囲の外は 400）を変える。次に探すときから効く |
+| `PUT /v1/admin/extensions/competitors/settings` | 管理者: 競合の分析で自動で覚える数（`autoMax`。1〜20）と、定期の見回りの間隔（`watch`: monthly・weekly・off）を変える。範囲の外は 400 |
 | `PUT` ／ `DELETE /v1/admin/extensions/competitors/map-key` | 管理者: 競合の分析の地図の鍵（Google Cloud の API キー。`key`）を預ける（Places API を使えるかを確かめてから。使えなければ 400 と理由。見本の会社では確かめない）／ 外す |
 | `GET /v1/competitors` | 競合の分析（仕様書 第36.18節）: 全体（自社の像・競合・動いている作業・最後の作業・地図の注意）。地図で見つけた競合の名前と Web サイトはここで引き直す。使えない会社と利用範囲の外の人には、`/v1/competitors` のどの口も 403 |
 | `POST /v1/competitors/discover` ／ `POST /v1/competitors/check` | 競合を探す作業（`radiusKm`・`nationwide`・`auto` で商圏を変える）／ 今すぐ見回る作業を受け付ける（202。ワーカーが行う。動いていれば `already`） |

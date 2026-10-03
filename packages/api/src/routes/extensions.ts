@@ -427,11 +427,14 @@ export function extensionsRoute(deps: AppDeps) {
     return c.json({ ok: true });
   });
 
-  /** 競合の分析の設定（自動で覚える数。第 0.239.0 版）。 */
+  /** 競合の分析の設定（自動で覚える数 `autoMax`・定期の見回りの間隔 `watch`。第 0.239.0 版・第36.19節）。 */
   app.put(`/${COMPETITORS_EXTENSION_ID}/settings`, async (c) => {
     const { tenant, user } = c.get('ctx');
-    const body = await c.req.json<{ autoMax?: unknown }>().catch(() => ({} as { autoMax?: unknown }));
-    const problem = await deps.competitors.service.setAutoMax({ tenantId: tenant.id, userId: user.id }, Number(body.autoMax));
+    const body = await c.req.json<{ autoMax?: unknown; watch?: unknown }>().catch(() => ({} as { autoMax?: unknown; watch?: unknown }));
+    const problem = await deps.competitors.service.setSettings({ tenantId: tenant.id, userId: user.id }, {
+      ...(body.autoMax !== undefined ? { autoMax: Number(body.autoMax) } : {}),
+      ...(body.watch !== undefined ? { watch: String(body.watch) } : {}),
+    });
     if (problem) return c.json({ error: problem }, 400);
     return c.json({ ok: true });
   });

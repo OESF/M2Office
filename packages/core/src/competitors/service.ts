@@ -8,8 +8,8 @@
 
 import { randomUUID } from 'node:crypto';
 import {
-  COMPETITORS_AUTO_RANGE, COMPETITORS_EXTENSION_ID, competitorAutoMax, competitorsMax, canUseAgent,
-  type Competitor, type CompetitorFact, type CompetitorJob, type CompetitorOverview, type CompetitorProfile, type CompetitorReport, type CompetitorSettings,
+  COMPETITORS_AUTO_RANGE, COMPETITORS_EXTENSION_ID, competitorAutoMax, competitorsMax, competitorWatch, canUseAgent,
+  type Competitor, type CompetitorFact, type CompetitorWatchInterval, type CompetitorJob, type CompetitorOverview, type CompetitorProfile, type CompetitorReport, type CompetitorSettings,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { SecretBox } from '../secrets/box.js';
@@ -17,7 +17,7 @@ import type { LlmProvider } from '../llm/provider.js';
 import { silentLogger, type Logger } from '../log/logger.js';
 import { dateIn } from '../cards/service.js';
 import {
-  changedFacts, checkCandidates, decideArea, extractFacts, findUrlByName, suggestCompetitors, summarizeProfile, writeReport,
+  checkCandidates, movesOf, decideArea, extractFacts, findUrlByName, suggestCompetitors, summarizeProfile, writeReport,
   type AreaDecision, type Candidate, type ExtractedFact, type ReportSubject,
 } from './analyze.js';
 import { HttpPageFetcher, MockPageFetcher, checkUrl, type PageFetcher } from './fetcher.js';
@@ -90,7 +90,43 @@ export function competitorsAccess(repo: Repository) {
 }
 
 /** 回（日本の年月）。 */
-export const competitorPeriodOf = (now: Date) => dateIn('Asia/Tokyo', now).slice(0, 7);
+export const competitorPeriodOf = (now: Date) => dateIn('Asia/Tokyo', now);
+
+/** 競合ごとに残す回の数（第36.19節）。 */
+const KEEP_PERIODS = 13;
+/** 探し直すまでの日数（第36.5節・第36.19節）。 */
+const REDISCOVER_DAYS = 90;
+/** 定期の見回りを始める時刻（日本時間の時。朝には届いているように）。 */
+const WATCH_HOUR_JST = 3;
+/** 仕組みが行ったことを示す人の ID。 */
+export const COMPETITOR_SYSTEM = 'system';
+
+/**
+ * いまの回の始まり（毎月は 1 日、毎週は月曜の、日本時間 3 時）。
+ *
+ * @returns 始まりの日時。`now` がまだ今の回の始まりより前なら、前の回の始まり
+ */
+export function watchPeriodStart(interval: 'monthly' | 'weekly', now: Date): Date {
+  const jst = new Date(now.getTime() + 9 * 3_600_000);
+  const y = jst.getUTCFullYear();
+  const m = jst.getUTCMonth();
+  const at = (yy: number, mm: number, dd: number) => new Date(Date.UTC(yy, mm, dd, WATCH_HOUR_JST - 9));
+  if (interval === 'monthly') {
+    const start = at(y, m, 1);
+    return start <= now ? start : at(y, m - 1, 1);
+  }
+  const dow = (jst.getUTCDay() + 6) % 7; // 月曜を 0
+  const start = at(y, m, jst.getUTCDate() - dow);
+  return start <= now ? start : new Date(start.getTime() - 7 * 86_400_000);
+}
+
+/** 次の回の始まり。 */
+export function nextWatchStart(interval: 'monthly' | 'weekly', now: Date): Date {
+  const cur = watchPeriodStart(interval, now);
+  if (interval === 'weekly') return new Date(cur.getTime() + 7 * 86_400_000);
+  const jst = new Date(cur.getTime() + 9 * 3_600_000);
+  return new Date(Date.UTC(jst.getUTCFullYear(), jst.getUTCMonth() + 1, 1, WATCH_HOUR_JST - 9));
+}
 
 /** 社名の比べ方（株式会社などを外して、頭の 4 字が含まれるか）。 */
 function sameName(a: string, b: string): boolean {
@@ -196,13 +232,30 @@ export class CompetitorService {
    * @returns 変えられなければ理由
    */
   async setAutoMax(who: CompetitorViewer, value: number): Promise<string | null> {
-    const n = Math.round(value);
-    if (!Number.isFinite(n) || n < COMPETITORS_AUTO_RANGE.min || n > COMPETITORS_AUTO_RANGE.max) {
-      return `自動で覚える数は ${COMPETITORS_AUTO_RANGE.min}〜${COMPETITORS_AUTO_RANGE.max} 社です`;
+    return this.setSettings(who, { autoMax: value });
+  }
+
+  /**
+   * 競合の分析の設定を変える（管理者だけ。呼ぶ側が確かめる）。自動で覚える数（1〜20）と、定期の見回りの間隔（第36.19節）。
+   *
+   * @returns 変えられなければ理由
+   */
+  async setSettings(who: CompetitorViewer, patch: { autoMax?: number; watch?: string }): Promise<string | null> {
+    const next: Partial<CompetitorSettings> = {};
+    if (patch.autoMax !== undefined) {
+      const n = Math.round(patch.autoMax);
+      if (!Number.isFinite(n) || n < COMPETITORS_AUTO_RANGE.min || n > COMPETITORS_AUTO_RANGE.max) {
+        return `自動で覚える数は ${COMPETITORS_AUTO_RANGE.min}〜${COMPETITORS_AUTO_RANGE.max} 社です`;
+      }
+      next.autoMax = n;
+    }
+    if (patch.watch !== undefined) {
+      if (patch.watch !== 'monthly' && patch.watch !== 'weekly' && patch.watch !== 'off') return '見回りの間隔は 毎月・毎週・しない のどれかです';
+      next.watch = patch.watch as CompetitorWatchInterval;
     }
     const settings = await this.deps.repo.getTenantSettings(who.tenantId);
-    await this.deps.repo.saveTenantSettings(who.tenantId, 'competitors', { ...settings.competitors, autoMax: n }, who.userId);
-    await this.audit(who, 'competitor.settings', 'settings', { autoMax: n });
+    await this.deps.repo.saveTenantSettings(who.tenantId, 'competitors', { ...settings.competitors, ...next }, who.userId);
+    await this.audit(who, 'competitor.settings', 'settings', next);
     return null;
   }
 
@@ -216,7 +269,8 @@ export class CompetitorService {
 
   private async audit(who: CompetitorViewer, action: string, id: string, detail: Record<string, unknown>): Promise<void> {
     await this.deps.repo.appendAudit({
-      id: randomUUID(), tenantId: who.tenantId, actorType: 'user', actorId: who.userId, action, targetType: 'competitor', targetId: id,
+      id: randomUUID(), tenantId: who.tenantId, actorType: who.userId === COMPETITOR_SYSTEM ? 'system' : 'user', actorId: who.userId === COMPETITOR_SYSTEM ? 'competitor-watch' : who.userId,
+      action, targetType: 'competitor', targetId: id,
       detail, occurredAt: new Date().toISOString(),
     });
   }
@@ -238,7 +292,51 @@ export class CompetitorService {
     competitors.sort((a, b) => (a.distanceM ?? Number.MAX_SAFE_INTEGER) - (b.distanceM ?? Number.MAX_SAFE_INTEGER));
     const self = profile?.selfPlaceId && client ? await client.details(profile.selfPlaceId).catch(() => null) : null;
     const selfRating = self?.rating != null && self.ratingCount != null ? { rating: self.rating, count: self.ratingCount } : null;
-    return { profile: profile ? publicProfile(profile) : null, competitors, job: job ? publicJob(job) : null, lastJob: lastJob ? publicJob(lastJob) : null, mapNote: note, selfRating };
+    const interval = competitorWatch((await this.deps.repo.getTenantSettings(who.tenantId)).competitors);
+    const nextWatchAt = profile && interval !== 'off' ? await this.nextWatchAt(who.tenantId, interval, new Date()) : null;
+    return { profile: profile ? publicProfile(profile) : null, competitors, job: job ? publicJob(job) : null, lastJob: lastJob ? publicJob(lastJob) : null, mapNote: note, selfRating, nextWatchAt };
+  }
+
+  /** 次の定期の見回りの日時（今の回をまだ見回っていなければ今の回の始まり、見回っていれば次の回の始まり）。 */
+  private async nextWatchAt(tenantId: string, interval: 'monthly' | 'weekly', now: Date): Promise<string> {
+    const start = watchPeriodStart(interval, now);
+    const last = await this.deps.store.lastFullRunAt(tenantId);
+    return (last && last >= start.toISOString() ? nextWatchStart(interval, now) : start).toISOString();
+  }
+
+  /**
+   * 定期の見回りの番か確かめ、番なら作業を受け付ける（ワーカーが呼ぶ。第36.19節）。
+   * 会社情報の住所か Web サイトが自社の像と違えば、すぐに探し直す。前に探してから 90 日を過ぎていれば、見回りの代わりに探し直す。
+   *
+   * @returns 受け付けた作業の種類。番でなければ `null`
+   */
+  async scheduleIfDue(tenantId: string, now: Date = new Date()): Promise<'discover' | 'check' | null> {
+    const { store, repo } = this.deps;
+    const settings = await repo.getTenantSettings(tenantId);
+    if (!settings.competitors.enabled) return null;
+    const profile = await store.profile(tenantId);
+    // 一度も探していない会社では行わない
+    if (!profile) return null;
+    if (await store.activeJob(tenantId)) return null;
+    const enqueue = async (kind: 'discover' | 'check', reason: string) => {
+      await store.addJob(tenantId, { kind, args: { scheduled: true, reason }, requestedBy: COMPETITOR_SYSTEM });
+      return kind;
+    };
+    const addressChanged = !!settings.company.address && settings.company.address !== profile.location;
+    const websiteChanged = !!settings.company.website && hostOf(settings.company.website) !== hostOf(profile.website);
+    if (addressChanged || websiteChanged) {
+      // 同じ理由で何度も探し直さないよう、最後に探してから 1 時間は待つ
+      const lastDiscover = await store.lastDiscoverAt(tenantId);
+      if (!lastDiscover || lastDiscover < new Date(now.getTime() - 3_600_000).toISOString()) return enqueue('discover', 'company');
+    }
+    const interval = competitorWatch(settings.competitors);
+    if (interval === 'off') return null;
+    const start = watchPeriodStart(interval, now);
+    const last = await store.lastFullRunAt(tenantId);
+    if (last && last >= start.toISOString()) return null;
+    const lastDiscover = await store.lastDiscoverAt(tenantId);
+    const stale = !lastDiscover || lastDiscover < new Date(now.getTime() - REDISCOVER_DAYS * 86_400_000).toISOString();
+    return enqueue(stale ? 'discover' : 'check', stale ? 'rediscover' : 'watch');
   }
 
   /** 画面と秘書に返す 1 社の形（名前・Web サイトは地図から引き直す）。 */
@@ -399,6 +497,11 @@ export class CompetitorService {
    * いまある事実から、その場のレポートを作る（読み直さない。第36.8節）。
    */
   async makeReport(who: CompetitorViewer, now = new Date()): Promise<CompetitorReport> {
+    return (await this.writeReportNow(who, now)).report;
+  }
+
+  /** レポートを作り、動きのはじめの 3 件（知らせに使う）も返す。 */
+  private async writeReportNow(who: CompetitorViewer, now = new Date()): Promise<{ report: CompetitorReport; highlights: string[] }> {
     const { store } = this.deps;
     const [profile, rows] = await Promise.all([store.profile(who.tenantId), store.list(who.tenantId)]);
     const { client } = await this.places(who.tenantId);
@@ -408,18 +511,23 @@ export class CompetitorService {
       const all = await store.facts(who.tenantId, c.id);
       const periods = [...new Set(all.map((f) => f.period))].sort().reverse();
       const pick = (p: string | undefined) => all.filter((f) => f.period === p).map((f) => ({ kind: f.kind, text: f.text, sourceUrl: f.sourceUrl }));
+      // 変わったページ（印が前の回と違う・新しいページ）。印の無い古い回なら事実の文の違いで数える
+      const pages = await store.pages(who.tenantId, c.id);
+      const nowPages = pages.filter((p) => p.period === periods[0]);
+      const prevPages = new Map(pages.filter((p) => p.period === periods[1]).map((p) => [p.url, p.hash]));
+      const changedUrls = nowPages.length && prevPages.size ? nowPages.filter((p) => prevPages.get(p.url) !== p.hash).map((p) => p.url) : undefined;
       subjects.push({
         name: v.name || 'Google Maps の店（名前を引けませんでした）', url: v.url, distanceM: v.distanceM, rating: v.rating, ratingCount: v.ratingCount,
-        facts: pick(periods[0]), previous: pick(periods[1]), readNote: c.lastReadAt ? c.readNote : 'まだ読んでいません',
+        facts: pick(periods[0]), previous: pick(periods[1]), ...(changedUrls ? { changedUrls } : {}), readNote: c.lastReadAt ? c.readNote : 'まだ読んでいません',
       });
     }
     const llm = await this.deps.llmFor(who.tenantId).catch(() => null);
     const text = await writeReport(llm, profile, subjects);
-    const changes = subjects.reduce((n, x) => n + changedFacts(x.facts, x.previous).length, 0);
-    const report = { period: competitorPeriodOf(now), text, changes, createdBy: who.userId };
+    const moves = subjects.flatMap((x) => movesOf(x).map((f) => `${x.name}: ${f.text}`));
+    const report = { period: competitorPeriodOf(now), text, changes: moves.length, createdBy: who.userId };
     const id = await store.addReport(who.tenantId, report);
-    await this.audit(who, 'competitor.report', id, { competitors: subjects.length, changes });
-    return { ...report, id, createdAt: new Date().toISOString() };
+    await this.audit(who, 'competitor.report', id, { competitors: subjects.length, changes: moves.length });
+    return { report: { ...report, id, createdAt: new Date().toISOString() }, highlights: moves.slice(0, 3) };
   }
 
   // ---- 作業を行う（ワーカー） -------------------------------------------------------------
@@ -435,9 +543,35 @@ export class CompetitorService {
       return { ok: false, message: '社内の機械だけで AI を使う会社では、競合の分析を使えません' };
     }
     const progress = (m: string) => this.deps.store.setJobMessage(tenantId, job.id, m).catch(() => undefined);
-    if (job.kind === 'discover') return this.discover(who, progress);
+    const scheduled = job.args['scheduled'] === true;
+    if (job.kind === 'discover') return this.discover(who, progress, { scheduled });
     const one = typeof job.args['competitorId'] === 'string' ? job.args['competitorId'] : '';
-    return one ? this.checkOne(who, one) : this.checkAll(who, progress);
+    return one ? this.checkOne(who, one) : this.checkAll(who, progress, { scheduled });
+  }
+
+  /**
+   * 定期の見回りの結果を、利用範囲の中の管理者に届ける（第36.19節。個人設定で切っていれば届けない）。
+   *
+   * @param highlights 動きのはじめの 3 件（「競合の名前: 事実」）
+   */
+  private async deliver(tenantId: string, changes: number, highlights: string[], now: Date): Promise<number> {
+    const { repo } = this.deps;
+    const settings = await repo.getTenantSettings(tenantId);
+    const day = dateIn('Asia/Tokyo', now);
+    const title = `競合の動き（${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))} の見回り）`;
+    const body = changes ? `前の回から ${changes} 件の動きがありました。${highlights.join('／')}` : '前の回から大きな動きはありませんでした';
+    let sent = 0;
+    for (const u of await repo.listUsers(tenantId)) {
+      if (u.status !== 'active' || !u.roles.includes('admin')) continue;
+      const groups = await repo.listUserGroupIds(tenantId, u.id);
+      if (!canUseAgent(settings.access, COMPETITORS_EXTENSION_ID, u.id, groups)) continue;
+      const prefs = await repo.getUserSettings(tenantId, u.id).catch(() => null);
+      if (prefs?.notifications.kinds.competitor === false) continue;
+      await repo.createNotification({
+        id: randomUUID(), tenantId, userId: u.id, kind: 'competitor', title, body: body.slice(0, 300), runId: null, readAt: null, createdAt: now.toISOString(),
+      }).then(() => { sent += 1; }).catch((err: unknown) => this.log.warn('競合の動きを知らせられませんでした', { error: String(err) }));
+    }
+    return sent;
   }
 
   /** 読むのに使うもの。 */
@@ -486,9 +620,7 @@ export class CompetitorService {
     const area: AreaDecision = override
       ? { ...decided, local: override.local, radiusM: override.local ? override.radiusM ?? decided.radiusM ?? 2000 : null, reason: override.local ? '指定された半径で探します' : '全国で探すように言われたため' }
       : decided;
-    const facts = await extractFacts(r.llm, reading.pages);
-    const period = competitorPeriodOf(new Date());
-    await this.deps.store.replaceFacts(who.tenantId, null, period, facts.map((f) => ({ ...f, pageHash: reading.pages.find((p) => p.url === f.sourceUrl)?.hash ?? '' })));
+    if (reading.read > 0) await this.keepFacts(who.tenantId, null, competitorPeriodOf(new Date()), reading, r.llm);
     const profile: CompetitorProfile = {
       ...summary, area: { local: area.local, radiusM: area.radiusM, keyword: area.keyword, reason: area.reason },
       pagesRead: reading.read, pagesFailed: reading.failed, updatedAt: new Date().toISOString(),
@@ -501,7 +633,7 @@ export class CompetitorService {
   }
 
   /** 競合を探す（第36.5節）。探したら、見ている競合を読んでレポートを作る。 */
-  private async discover(who: CompetitorViewer, progress: (m: string) => Promise<void>): Promise<{ ok: boolean; message: string }> {
+  private async discover(who: CompetitorViewer, progress: (m: string) => Promise<void>, opts: { scheduled?: boolean } = {}): Promise<{ ok: boolean; message: string }> {
     const { store } = this.deps;
     await progress('自社の像をまとめています');
     const built = await this.buildProfile(who, progress);
@@ -576,10 +708,30 @@ export class CompetitorService {
     }
     const dropped = await store.dropAutoExcept(who.tenantId, keep);
     await this.audit(who, 'competitor.discover', 'discover', { local: profile.area.local, radiusM: profile.area.radiusM, found: keep.length, dropped });
-    const checked = await this.checkAll(who, progress, { quietIfNone: true });
+    const checked = await this.checkAll(who, progress, { quietIfNone: true, ...(opts.scheduled ? { scheduled: true } : {}) });
     const found = `競合を ${keep.length} 社見つけました${note ? `（${note}）` : ''}`;
-    await this.notify(who, '競合を探し終えました', found);
+    if (!opts.scheduled) await this.notify(who, '競合を探し終えました', found);
     return { ok: true, message: `${found}。${checked.message}` };
+  }
+
+  /**
+   * 読んだページから、その回の事実とページの印を残す（第36.19節）。印が前の回と同じページは、前の回の事実をそのまま使い、
+   * 推論に取り出し直させない（言い回しの揺れを変化と取り違えないため）。変わったページ・新しいページだけ取り出す。
+   */
+  private async keepFacts(tenantId: string, competitorId: string | null, period: string, reading: SiteReading, llm: LlmProvider | null): Promise<void> {
+    const { store } = this.deps;
+    const prevPages = (await store.pages(tenantId, competitorId)).filter((p) => p.period !== period);
+    const prevPeriod = prevPages[0]?.period;
+    const prevHash = new Map(prevPages.filter((p) => p.period === prevPeriod).map((p) => [p.url, p.hash]));
+    const prevFacts = prevPeriod ? (await store.facts(tenantId, competitorId)).filter((f) => f.period === prevPeriod) : [];
+    const same = reading.pages.filter((p) => prevHash.get(p.url) === p.hash);
+    const changed = reading.pages.filter((p) => prevHash.get(p.url) !== p.hash);
+    const sameUrls = new Set(same.map((p) => p.url));
+    const reused = prevFacts.filter((f) => sameUrls.has(f.sourceUrl)).map((f) => ({ kind: f.kind, text: f.text, sourceUrl: f.sourceUrl, pageHash: f.pageHash }));
+    const fresh = changed.length ? (await extractFacts(llm, changed)).map((f) => ({ ...f, pageHash: changed.find((p) => p.url === f.sourceUrl)?.hash ?? '' })) : [];
+    await store.replaceFacts(tenantId, competitorId, period, [...reused, ...fresh]);
+    await store.replacePages(tenantId, competitorId, period, reading.pages.map((p) => ({ url: p.url, hash: p.hash })));
+    await store.prune(tenantId, competitorId, KEEP_PERIODS);
   }
 
   /** 1 社を読み、事実を置き換える。 */
@@ -601,10 +753,7 @@ export class CompetitorService {
       return { read: 0, failed: 0 };
     }
     const reading = await readSite(r, url);
-    if (reading.read > 0) {
-      const facts: ExtractedFact[] = await extractFacts(r.llm, reading.pages);
-      await store.replaceFacts(who.tenantId, c.id, period, facts.map((f) => ({ ...f, pageHash: reading.pages.find((p) => p.url === f.sourceUrl)?.hash ?? '' })));
-    }
+    if (reading.read > 0) await this.keepFacts(who.tenantId, c.id, period, reading, r.llm);
     // 読めなかったときは、前の回の事実を今の事実として扱わない（今の回の事実は作らない）
     await store.update(who.tenantId, c.id, { lastReadAt: new Date().toISOString(), pagesRead: reading.read, pagesFailed: reading.failed, readNote: reading.note });
     return { read: reading.read, failed: reading.failed };
@@ -620,7 +769,7 @@ export class CompetitorService {
   }
 
   /** 自社と見ている競合を読み、レポートを作る。 */
-  private async checkAll(who: CompetitorViewer, progress: (m: string) => Promise<void>, opts: { quietIfNone?: boolean } = {}): Promise<{ ok: boolean; message: string }> {
+  private async checkAll(who: CompetitorViewer, progress: (m: string) => Promise<void>, opts: { quietIfNone?: boolean; scheduled?: boolean } = {}): Promise<{ ok: boolean; message: string }> {
     const { store } = this.deps;
     const period = competitorPeriodOf(new Date());
     const watching = (await store.list(who.tenantId)).filter((c) => c.status === 'watching');
@@ -638,15 +787,17 @@ export class CompetitorService {
       failed += r.failed;
     }
     await progress('レポートを書いています');
-    const report = await this.makeReport(who);
-    await this.audit(who, 'competitor.check', 'all', { competitors: watching.length, pages: read, failed });
+    const { report, highlights } = await this.writeReportNow(who);
+    await this.audit(who, 'competitor.check', 'all', { competitors: watching.length, pages: read, failed, scheduled: !!opts.scheduled });
     const message = `${watching.length} 社を見回り、${read} ページを読みました${failed ? `（${failed} ページは読めませんでした）` : ''}。レポートを作りました`;
-    if (!opts.quietIfNone) await this.notify(who, '競合を見回りました', `${message}${report.changes ? `。前の回から ${report.changes} 件変わっていました` : ''}`);
+    if (opts.scheduled) await this.deliver(who.tenantId, report.changes, highlights, new Date());
+    else if (!opts.quietIfNone) await this.notify(who, '競合を見回りました', `${message}${report.changes ? `。前の回から ${report.changes} 件変わっていました` : ''}`);
     return { ok: true, message };
   }
 
   /** 頼んだ人に知らせる（個人設定で切っていれば知らせない）。 */
   private async notify(who: CompetitorViewer, title: string, body: string): Promise<void> {
+    if (who.userId === COMPETITOR_SYSTEM) return;
     const prefs = await this.deps.repo.getUserSettings(who.tenantId, who.userId).catch(() => null);
     if (prefs?.notifications.kinds.competitor === false) return;
     await this.deps.repo.createNotification({
@@ -696,9 +847,10 @@ export class CompetitorWatch {
    * 1 回分。待っている作業があれば 1 つ取り、終わるまで待たずに返す（長い作業でワーカーを止めない）。
    *
    * @param wait 終わるまで待つ（自動テスト）
+   * @param now 今の日時（自動テストで、見回りの番を確かめる）
    * @returns 始めた作業の数
    */
-  async tick(opts: { wait?: boolean } = {}): Promise<number> {
+  async tick(opts: { wait?: boolean; now?: Date } = {}): Promise<number> {
     if (this.busy) return 0;
     const { store, repo, service } = this.deps;
     const log = this.deps.logger ?? silentLogger;
@@ -706,6 +858,8 @@ export class CompetitorWatch {
       const settings = await repo.getTenantSettings(tenantId).catch(() => null);
       if (!settings?.competitors.enabled) continue;
       await store.failStale(tenantId, new Date(Date.now() - STALE_MS).toISOString());
+      // 定期の見回り・探し直しの番なら受け付ける（第36.19節）
+      await service.scheduleIfDue(tenantId, opts.now ?? new Date()).catch((err: unknown) => log.warn('競合の見回りの番を確かめられませんでした', { tenantId, error: String(err) }));
       const job = await store.claimJob(tenantId);
       if (!job) continue;
       this.busy = true;

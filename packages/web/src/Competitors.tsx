@@ -16,6 +16,8 @@ import { api, describeError } from './api.js';
 import { Markdown } from './help.js';
 import { stripTableLinks } from './table-links.js';
 
+/** 回の見出し（見回った日の回は「10 月 4 日」、年月の回は「2026 年 10 月」）。 */
+const periodLabel = (p: string) => (p.length === 10 ? `${Number(p.slice(5, 7))} 月 ${Number(p.slice(8, 10))} 日` : `${p.slice(0, 4)} 年 ${Number(p.slice(5, 7))} 月`);
 const day = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric' }) : '—');
 const km = (m: number | null) => (m === null ? '—' : m < 1000 ? `${m} m` : `${(m / 1000).toFixed(1)} km`);
 
@@ -40,7 +42,7 @@ function Facts({ id }: { id: string }) {
     <div className="competitors-facts">
       {periods.map((p) => (
         <div key={p}>
-          <h4>{p.replace('-', ' 年 ')} 月</h4>
+          <h4>{periodLabel(p)}</h4>
           <ul>
             {facts.filter((f) => f.period === p).map((f) => (
               <li key={f.id}>
@@ -150,8 +152,9 @@ export function Competitors({ changeKey = '' }: { changeKey?: string }) {
           <button className="btn ghost small" disabled={busy || working || o.competitors.length === 0} onClick={() => run(() => api.competitors.check(), 'チェックを始めました', setTopNote)}>今すぐチェック</button>
           {p && <button className="link small" onClick={() => setOpenId(openId === 'self' ? null : 'self')}>{openId === 'self' ? '自社のデータを閉じる' : '自社のデータ'}</button>}
         </div>
-        {o.job && <p className="small competitors-working" role="status">{o.job.message || (o.job.kind === 'discover' ? '競合を探しています' : '見回っています')}…</p>}
+        {o.job && <p className="small competitors-working" role="status">{o.job.message || (o.job.kind === 'discover' ? '競合を探しています' : 'チェックしています')}…</p>}
         {!o.job && o.lastJob?.status === 'failed' && <p className="error small">{o.lastJob.message}</p>}
+        {o.nextWatchAt && !o.job && <p className="small muted">次の見回り: {day(o.nextWatchAt)}</p>}
         {o.mapNote && <p className="small muted">{o.mapNote}</p>}
         <NoteText note={topNote} />
         {openId === 'self' && <Facts id="self" />}

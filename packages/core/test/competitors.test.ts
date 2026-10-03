@@ -17,28 +17,34 @@ function setup(over: Partial<TenantSettings['company']> = {}) {
   let settings: TenantSettings = {
     ...DEFAULT_TENANT_SETTINGS,
     company: { ...DEFAULT_TENANT_SETTINGS.company, legalName: '株式会社アルファ商事', address: '東京都千代田区丸の内一丁目', ...over },
-    competitors: { enabled: true, areaOverride: null, mapKey: null, autoMax: 10 },
+    competitors: { enabled: true, areaOverride: null, mapKey: null, autoMax: 10, watch: 'monthly' },
   };
   const audits: { action: string; detail: Record<string, unknown> }[] = [];
-  const notes: { title: string; body: string }[] = [];
+  const notes: { title: string; body: string; userId?: string }[] = [];
+  const users = [
+    { id: 'boss', email: 'boss@alpha.example.jp', displayName: '責任者', roles: ['admin'], status: 'active' },
+    { id: 'u1', email: 'u1@alpha.example.jp', displayName: '受付', roles: ['member'], status: 'active' },
+  ];
   const repo = {
+    listUsers: async () => users,
     getTenantSettings: async () => settings,
     saveTenantSettings: async (_t: string, section: keyof TenantSettings, value: unknown) => { settings = { ...settings, [section]: value }; },
     findTenantById: async () => ({ id: 't1', name: '株式会社アルファ商事' }),
     listTenantIds: async () => ['t1'],
     listUserGroupIds: async () => [],
     getUserSettings: async () => ({ notifications: { kinds: { competitor: true } } }),
-    createNotification: async (n: { title: string; body: string }) => { notes.push(n); },
+    createNotification: async (n: { title: string; body: string; userId: string }) => { notes.push(n); },
     appendAudit: async (e: { action: string; detail: Record<string, unknown> }) => { audits.push(e); },
   } as unknown as Repository;
   const store = new MemoryCompetitorStore();
-  const fetcher = new MockPageFetcher(MOCK_SITES);
+  const pages = { ...MOCK_SITES };
+  const fetcher = new MockPageFetcher(pages);
   const service = new CompetitorService({
     store, repo, llmFor: async () => new StubLlmProvider(), placesKeyFor: async () => null, sourceFor: () => 'mock',
     userAgent: 'test', fetcherFor: () => fetcher,
   });
   const watch = new CompetitorWatch({ service, store, repo });
-  return { service, store, watch, fetcher, audits, notes, settings: () => settings };
+  return { service, store, watch, fetcher, pages, audits, notes, settings: () => settings, setCompany: (c: Partial<TenantSettings['company']>) => { settings = { ...settings, company: { ...settings.company, ...c } }; } };
 }
 
 const who = { tenantId: 't1', userId: 'u1' };
@@ -150,7 +156,7 @@ test('ツール: 切っている会社では使えない。一覧・違い・レ
   const { service, watch } = setup();
   await service.requestDiscover(who);
   await watch.tick({ wait: true });
-  const ctx = (on: boolean) => ({ tenantId: 't1', userId: 'u1', competitors: { service, access: async () => (on ? { enabled: true, areaOverride: null, mapKey: null } : null) } } as unknown as ToolContext);
+  const ctx = (on: boolean) => ({ tenantId: 't1', userId: 'u1', competitors: { service, access: async () => (on ? { enabled: true, areaOverride: null, mapKey: null, autoMax: 10, watch: 'monthly' } : null) } } as unknown as ToolContext);
   const tool = (name: string) => COMPETITOR_TOOLS.find((t) => t.name === name)!;
   assert.deepEqual(await tool('competitors.list').invoke({}, ctx(false)), { available: false, reason: '競合の分析は使えません（会社で切っているか、利用範囲の外です）' });
   const list = await tool('competitors.list').invoke({}, ctx(true)) as { competitors: { name: string; source: string | null }[] };
@@ -159,7 +165,7 @@ test('ツール: 切っている会社では使えない。一覧・違い・レ
   assert.equal(facts.competitors.length, 1);
   assert.ok(facts.self.length > 0);
   const report = await tool('competitors.report').invoke({}, ctx(true)) as { report: string };
-  assert.match(report.report, /今月の動き/);
+  assert.match(report.report, /前の回からの動き/);
   const removed = await tool('competitors.remove').invoke({ q: '競合 B' }, ctx(true)) as { removed: string };
   assert.equal(removed.removed, '見本の競合 B');
   assert.equal(tool('competitors.discover').risk, 'write-internal');
@@ -175,7 +181,7 @@ test('地図の鍵の断り: Gemini 専用の鍵・Places API が切り・鍵の
 
 test('地図の鍵: 預けた鍵を先に使い、無ければ昔の形（AIza）の Gemini の鍵だけを使う。Gemini 専用の鍵では理由を出す', async () => {
   const creds = new Map<string, { secretEnc: string }>();
-  let settings: TenantSettings = { ...DEFAULT_TENANT_SETTINGS, competitors: { enabled: true, areaOverride: null, mapKey: null } };
+  let settings: TenantSettings = { ...DEFAULT_TENANT_SETTINGS, competitors: { enabled: true, areaOverride: null, mapKey: null, autoMax: 10, watch: 'monthly' } };
   const audits: string[] = [];
   const repo = {
     getTenantSettings: async () => settings,
@@ -245,4 +251,84 @@ test('上限: 自動で覚える数は既定 10 社で、管理者が 1〜20 社
   await watch.tick({ wait: true });
   assert.deepEqual((await service.overview(who)).competitors.map((c) => c.name), ['見本の競合 A'], '1 社にすると、いちばん近い 1 社だけ覚える');
   assert.ok(audits.some((a) => a.action === 'competitor.settings'));
+});
+
+test('見回りの回: 毎月は 1 日、毎週は月曜の、日本時間 3 時に始まる', async () => {
+  const { watchPeriodStart, nextWatchStart } = await import('../src/index.js');
+  // 2026-10-04（日）12:00 JST
+  const now = new Date('2026-10-04T03:00:00Z');
+  assert.equal(watchPeriodStart('monthly', now).toISOString(), '2026-09-30T18:00:00.000Z', '10 月 1 日 3 時（日本）');
+  assert.equal(nextWatchStart('monthly', now).toISOString(), '2026-10-31T18:00:00.000Z', '11 月 1 日 3 時（日本）');
+  assert.equal(watchPeriodStart('weekly', now).toISOString(), '2026-09-27T18:00:00.000Z', '9 月 28 日（月）3 時（日本）');
+  assert.equal(nextWatchStart('weekly', now).toISOString(), '2026-10-04T18:00:00.000Z');
+  // 1 日の 2 時（日本）はまだ前の回
+  assert.equal(watchPeriodStart('monthly', new Date('2026-09-30T17:00:00Z')).toISOString(), '2026-08-31T18:00:00.000Z');
+});
+
+test('定期の見回り: 探した回は行わず、次の回に見回る。90 日を過ぎたら探し直し、会社情報の住所が変わったらすぐ探し直す。しないなら行わない', async () => {
+  const { service, watch, store, settings, setCompany } = setup();
+  assert.equal(await service.scheduleIfDue('t1'), null, '一度も探していなければ行わない');
+  await service.requestDiscover(who);
+  await watch.tick({ wait: true });
+  const day = 86_400_000;
+  assert.equal(await service.scheduleIfDue('t1', new Date()), null, '探した回は行わない');
+  assert.equal(await service.scheduleIfDue('t1', new Date(Date.now() + 35 * day)), 'check', '次の回は見回る');
+  const job = await store.activeJob('t1');
+  assert.deepEqual([job?.kind, job?.args['scheduled'], job?.requestedBy], ['check', true, 'system']);
+  assert.equal(await service.scheduleIfDue('t1', new Date(Date.now() + 35 * day)), null, '動いている作業があれば受け付けない');
+  await watch.tick({ wait: true, now: new Date(Date.now() + 35 * day) });
+  assert.equal(await service.scheduleIfDue('t1', new Date(Date.now() + 100 * day)), 'discover', '90 日を過ぎたら探し直す');
+  await watch.tick({ wait: true, now: new Date(Date.now() + 100 * day) });
+  setCompany({ address: '東京都江東区' });
+  assert.equal(await service.scheduleIfDue('t1', new Date(Date.now() + 2 * 3_600_000)), 'discover', '住所が変わったらすぐ探し直す');
+  await watch.tick({ wait: true });
+  assert.equal(settings().competitors.watch, 'monthly');
+  assert.equal(await service.setSettings(who, { watch: 'off' }), null);
+  assert.equal(await service.scheduleIfDue('t1', new Date(Date.now() + 40 * day)), null, 'しないなら行わない');
+  assert.match(await service.setSettings(who, { watch: 'daily' }) ?? '', /毎月・毎週・しない/);
+});
+
+test('変わったかの見分け: 印が同じページは前の回の事実を使い、動きにしない。ページが変わったら動きとして管理者に届ける', async () => {
+  const { service, watch, store, pages, notes } = setup();
+  await service.requestDiscover(who);
+  await watch.tick({ wait: true });
+  const [a] = (await service.overview(who)).competitors;
+  const day = 86_400_000;
+  // 次の回（ページは変わっていない）
+  await service.scheduleIfDue('t1', new Date(Date.now() + 35 * day));
+  // 回は見回った日にするため、同じ日の中で比べられるよう、前の回の事実と印を前の日にずらす
+  const shift = async (cid: string | null) => {
+    const facts = await store.facts('t1', cid);
+    const pg = await store.pages('t1', cid);
+    const today = facts[0]?.period ?? pg[0]?.period;
+    if (!today) return;
+    await store.replaceFacts('t1', cid, '2026-01-01', facts.filter((f) => f.period === today).map((f) => ({ kind: f.kind, text: f.text, sourceUrl: f.sourceUrl, pageHash: f.pageHash })));
+    await store.replacePages('t1', cid, '2026-01-01', pg.filter((p) => p.period === today));
+    await store.replaceFacts('t1', cid, today, []);
+    await store.replacePages('t1', cid, today, []);
+  };
+  for (const c of await store.list('t1')) await shift(c.id);
+  await shift(null);
+  await watch.tick({ wait: true, now: new Date(Date.now() + 35 * day) });
+  const [r1] = await service.reports(who);
+  assert.equal(r1!.changes, 0, 'ページが変わっていなければ動きにしない');
+  assert.ok((await service.facts(who, a!.id)).some((f) => f.period === new Date(Date.now() + 9 * 3_600_000).toISOString().slice(0, 10)), '前の回の事実を今の回に引き継ぐ');
+  const toBoss = notes.filter((n) => n.userId === 'boss' && /競合の動き/.test(n.title));
+  assert.equal(toBoss.length, 1, '定期の見回りは管理者に届ける');
+  assert.match(toBoss[0]!.body, /大きな動きはありませんでした/);
+  assert.equal(notes.filter((n) => n.userId === 'u1' && /競合の動き/.test(n.title)).length, 0, '管理者でない人には届けない');
+  // ページが変わった（キャンペーンの中身が変わった）
+  pages['https://shop-a.example.jp/campaign'] = { body: '<html><head><title>キャンペーン</title></head><body><h2>11 月のキャンペーン 2 回目 30% 引き</h2></body></html>' };
+  for (const c of await store.list('t1')) await shift(c.id);
+  await shift(null);
+  await service.requestCheck({ tenantId: 't1', userId: 'system' });
+  const job = await store.activeJob('t1');
+  job!.args['scheduled'] = true;
+  await store.finishJob('t1', job!.id, 'done', '');
+  await store.addJob('t1', { kind: 'check', args: { scheduled: true }, requestedBy: 'system' });
+  await watch.tick({ wait: true });
+  const [r2] = await service.reports(who);
+  assert.ok(r2!.changes >= 1, '変わったページの新しい事実を動きとして数える');
+  const last = notes.filter((n) => n.userId === 'boss' && /競合の動き/.test(n.title)).at(-1);
+  assert.match(last!.body, /件の動き.*見本の競合 A/);
 });

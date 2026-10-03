@@ -1973,6 +1973,8 @@ export const api = {
     removeCompetitorMapKey: () => call<{ ok: true }>('/admin/extensions/competitors/map-key', { method: 'DELETE' }),
     /** 競合の分析で自動で覚える数（1〜20）を変える。 */
     setCompetitorAutoMax: (autoMax: number) => call<{ ok: true }>('/admin/extensions/competitors/settings', { method: 'PUT', body: JSON.stringify({ autoMax }) }),
+    /** 競合の分析の定期の見回りの間隔（毎月・毎週・しない）を変える。 */
+    setCompetitorWatch: (watch: 'monthly' | 'weekly' | 'off') => call<{ ok: true }>('/admin/extensions/competitors/settings', { method: 'PUT', body: JSON.stringify({ watch }) }),
     setWebColumnSettings: (patch: Partial<Omit<WebColumnSettings, 'enabled' | 'wordpress'>>) =>
       call<{ ok: true; webColumns: WebColumnSettings }>('/admin/extensions/web-columns/settings', { method: 'PUT', body: JSON.stringify(patch) }),
     /** WordPress の入れ先とアプリケーションパスワードを預ける。つながるかを確かめてから預ける。 */

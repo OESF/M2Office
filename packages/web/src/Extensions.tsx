@@ -14,7 +14,7 @@ import { JinglePlayer } from './signage-audio.js';
 import { api, ApiError, describeError, type AccessOptions, type ExtensionView, type HrProposalField, type ScopeValue } from './api.js';
 import {
   INVENTORY_FEATURES, SIGNAGE_DEFAULT_COLOR, SIGNAGE_JINGLES, type HrSettings, type InventoryBookingSource, type InventoryFeature, type InventorySettings,
-  type SignageSettings, type SignageSound, type SignageSource, COLUMN_INDUSTRIES, COLUMN_RULE_SET_LABELS, type WebColumnSettings, type InquirySettings, COMPETITORS_AUTO_RANGE, competitorAutoMax, competitorsMax, type CompetitorSettings,
+  type SignageSettings, type SignageSound, type SignageSource, COLUMN_INDUSTRIES, COLUMN_RULE_SET_LABELS, type WebColumnSettings, type InquirySettings, COMPETITORS_AUTO_RANGE, COMPETITOR_WATCH_LABELS, competitorAutoMax, competitorWatch, competitorsMax, type CompetitorSettings,
 } from '@m2office/shared';
 import { HelpTip, Markdown } from './help.js';
 import { ScopeEditor, ScopeField, useAccessOptions } from './Scope.js';
@@ -637,6 +637,18 @@ function CompetitorMapKeyFields({ settings, busy, onChanged }: { settings: Compe
           </select>
         </label>
         <span className="muted">（手で入れるのを含めて {competitorsMax(autoMax)} 社まで）</span>
+      </div>
+      <div className="row wrap">
+        <label className="row">見回り
+          <select value={competitorWatch(settings)} disabled={busy || working} aria-label="定期の見回りの間隔"
+            onChange={(e) => {
+              setWorking(true);
+              api.admin.setCompetitorWatch(e.target.value as 'monthly' | 'weekly' | 'off').then(() => { setError(null); onChanged(); })
+                .catch((err) => setError(describeError(err, '変えられませんでした'))).finally(() => setWorking(false));
+            }}>
+            {(['monthly', 'weekly', 'off'] as const).map((w) => <option key={w} value={w}>{COMPETITOR_WATCH_LABELS[w]}</option>)}
+          </select>
+        </label>
       </div>
       <div className="row wrap">
         <span>地図の鍵: {settings.mapKey ? <strong>預けています</strong> : <span className="muted">預けていません</span>}</span>

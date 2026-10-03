@@ -50,6 +50,13 @@ export interface StoredFact {
 /** 新しい事実。 */
 export type NewFact = Pick<StoredFact, 'kind' | 'text' | 'sourceUrl' | 'pageHash'>;
 
+/** 読んだページの印（文字の指紋。ページの文字は残さない）。 */
+export interface StoredPage {
+  period: string;
+  url: string;
+  hash: string;
+}
+
 /** 置き場の作業（引数を含む）。 */
 export interface StoredJob extends CompetitorJob {
   args: Record<string, unknown>;
@@ -87,6 +94,16 @@ export interface CompetitorStore {
   finishJob(tenantId: string, id: string, status: 'done' | 'failed', message: string): Promise<void>;
   /** 決まった日時より前に動き始めたまま止まった作業を失敗にする（ワーカーが止まったとき） */
   failStale(tenantId: string, before: string): Promise<number>;
+  /** 1 社（自社なら `null`）のページの印（新しい回から） */
+  pages(tenantId: string, competitorId: string | null): Promise<StoredPage[]>;
+  /** その回のページの印を置き換える */
+  replacePages(tenantId: string, competitorId: string | null, period: string, pages: { url: string; hash: string }[]): Promise<void>;
+  /** 1 社（自社なら `null`）の事実とページの印を、新しい `keep` 回分だけ残す */
+  prune(tenantId: string, competitorId: string | null, keep: number): Promise<void>;
+  /** 最後に終わった、全体の見回り（探すか、1 社だけでない見回り）の日時。無ければ `null` */
+  lastFullRunAt(tenantId: string): Promise<string | null>;
+  /** 最後に終わった探す作業の日時。無ければ `null` */
+  lastDiscoverAt(tenantId: string): Promise<string | null>;
 }
 
 const newId = (p: string) => `${p}-${randomUUID()}`;
@@ -293,6 +310,42 @@ export class PostgresCompetitorStore implements CompetitorStore {
       where tenant_id = $1 and status = 'running' and started_at < $2 returning id`, [tenantId, before]);
     return rows.length;
   }
+
+  async pages(tenantId: string, competitorId: string | null): Promise<StoredPage[]> {
+    return this.q<StoredPage>(tenantId, `select period, url, hash from competitor_pages
+      where tenant_id = $1 and competitor_id is not distinct from $2 order by period desc, url`, [tenantId, competitorId]);
+  }
+
+  async replacePages(tenantId: string, competitorId: string | null, period: string, pages: { url: string; hash: string }[]): Promise<void> {
+    await this.tx(tenantId, async (c) => {
+      await c.query('delete from competitor_pages where tenant_id = $1 and competitor_id is not distinct from $2 and period = $3', [tenantId, competitorId, period]);
+      for (const p of pages) {
+        await c.query('insert into competitor_pages (tenant_id, competitor_id, period, url, hash) values ($1, $2, $3, $4, $5)', [tenantId, competitorId, period, p.url, p.hash]);
+      }
+    });
+  }
+
+  async prune(tenantId: string, competitorId: string | null, keep: number): Promise<void> {
+    await this.tx(tenantId, async (c) => {
+      for (const table of ['competitor_facts', 'competitor_pages']) {
+        // 表の名前は上の固定の一覧からのみ取る
+        await c.query(`delete from ${table} where tenant_id = $1 and competitor_id is not distinct from $2 and period not in (
+          select period from (select distinct period from ${table} where tenant_id = $1 and competitor_id is not distinct from $2) p order by period desc limit $3)`,
+        [tenantId, competitorId, keep]);
+      }
+    });
+  }
+
+  async lastFullRunAt(tenantId: string): Promise<string | null> {
+    const rows = await this.q<{ at: Date | string | null }>(tenantId, `select max(finished_at) as at from competitor_jobs
+      where tenant_id = $1 and status = 'done' and (kind = 'discover' or not (args ? 'competitorId'))`, [tenantId]);
+    return iso(rows[0]?.at ?? null);
+  }
+
+  async lastDiscoverAt(tenantId: string): Promise<string | null> {
+    const rows = await this.q<{ at: Date | string | null }>(tenantId, `select max(finished_at) as at from competitor_jobs where tenant_id = $1 and status = 'done' and kind = 'discover'`, [tenantId]);
+    return iso(rows[0]?.at ?? null);
+  }
 }
 
 /** メモリの置き場（自動テスト用）。 */
@@ -302,6 +355,7 @@ export class MemoryCompetitorStore implements CompetitorStore {
   private factRows: (StoredFact & { tenantId: string })[] = [];
   private reportRows: (CompetitorReport & { tenantId: string })[] = [];
   private jobs: (StoredJob & { tenantId: string })[] = [];
+  private pageRows: (StoredPage & { tenantId: string; competitorId: string | null })[] = [];
 
   async profile(tenantId: string) { return this.profiles.get(tenantId) ?? null; }
   async saveProfile(tenantId: string, profile: CompetitorProfile) { this.profiles.set(tenantId, profile); }
@@ -420,5 +474,32 @@ export class MemoryCompetitorStore implements CompetitorStore {
       if (j.tenantId === tenantId && j.status === 'running' && (j.startedAt ?? '') < before) { j.status = 'failed'; j.message = '途中で止まりました。もう一度頼んでください'; j.finishedAt = new Date().toISOString(); n += 1; }
     }
     return n;
+  }
+
+  async pages(tenantId: string, competitorId: string | null) {
+    return this.pageRows.filter((p) => p.tenantId === tenantId && p.competitorId === competitorId)
+      .sort((a, b) => b.period.localeCompare(a.period) || a.url.localeCompare(b.url)).map(({ period, url, hash }) => ({ period, url, hash }));
+  }
+
+  async replacePages(tenantId: string, competitorId: string | null, period: string, pages: { url: string; hash: string }[]) {
+    this.pageRows = this.pageRows.filter((p) => !(p.tenantId === tenantId && p.competitorId === competitorId && p.period === period));
+    for (const p of pages) this.pageRows.push({ ...p, tenantId, competitorId, period });
+  }
+
+  async prune(tenantId: string, competitorId: string | null, keep: number) {
+    const mine = <T extends { tenantId: string; competitorId: string | null; period: string }>(rows: T[]) => rows.filter((r) => r.tenantId === tenantId && r.competitorId === competitorId);
+    const keepFacts = new Set([...new Set(mine(this.factRows).map((f) => f.period))].sort().reverse().slice(0, keep));
+    const keepPages = new Set([...new Set(mine(this.pageRows).map((p) => p.period))].sort().reverse().slice(0, keep));
+    this.factRows = this.factRows.filter((f) => !(f.tenantId === tenantId && f.competitorId === competitorId) || keepFacts.has(f.period));
+    this.pageRows = this.pageRows.filter((p) => !(p.tenantId === tenantId && p.competitorId === competitorId) || keepPages.has(p.period));
+  }
+
+  async lastFullRunAt(tenantId: string) {
+    const done = this.jobs.filter((j) => j.tenantId === tenantId && j.status === 'done' && (j.kind === 'discover' || !j.args['competitorId']));
+    return done.map((j) => j.finishedAt ?? '').sort().at(-1) || null;
+  }
+
+  async lastDiscoverAt(tenantId: string) {
+    return this.jobs.filter((j) => j.tenantId === tenantId && j.status === 'done' && j.kind === 'discover').map((j) => j.finishedAt ?? '').sort().at(-1) || null;
   }
 }

@@ -5512,6 +5512,15 @@ console.log('\n■ 69. 競合の分析の段 1（探す・読む・事実・レ�
     const ce2 = (ext2.items ?? ext2.extensions ?? []).find((x) => x.competitors);
     maxByMember.status === 403 && maxBad.status === 400 && maxOk.status === 200 && ce2?.competitors?.autoMax === 3
       ? ok('自動で覚える数を変えられるのは管理者だけ（1〜20 社）') : ng('自動で覚える数が違う', JSON.stringify({ member: maxByMember.status, bad: maxBad.status, ok: maxOk.status, v: ce2?.competitors?.autoMax }));
+    // 定期の見回りの間隔（第36.19節）。次の見回りの日を画面に出す
+    const watchBad = await call('a', '/v1/admin/extensions/competitors/settings', { method: 'PUT', body: JSON.stringify({ watch: 'daily' }) });
+    const watchOk = await call('a', '/v1/admin/extensions/competitors/settings', { method: 'PUT', body: JSON.stringify({ watch: 'weekly' }) });
+    const ow = (await call('a', '/v1/competitors', {}, 'member')).body;
+    const watchOff = await call('a', '/v1/admin/extensions/competitors/settings', { method: 'PUT', body: JSON.stringify({ watch: 'off' }) });
+    const ow2 = (await call('a', '/v1/competitors', {}, 'member')).body;
+    watchBad.status === 400 && watchOk.status === 200 && watchOff.status === 200 && typeof ow.nextWatchAt === 'string' && new Date(ow.nextWatchAt) > new Date() && ow2.nextWatchAt === null
+      ? ok('見回りの間隔（毎月・毎週・しない）を管理者が選べ、画面に次の見回りの日が出る（しないなら出ない）')
+      : ng('見回りの間隔が違う', JSON.stringify({ bad: watchBad.status, ok: watchOk.status, next: ow.nextWatchAt, off: ow2.nextWatchAt }));
 
 
     // 秘書から: 付属の業務「競合の分析」（読むだけ）

@@ -113,7 +113,7 @@ export const competitorsReport: Tool = {
   name: 'competitors.report',
   risk: 'read',
   activityLabel: '競合のレポートを読んでいます',
-  helpText: 'いちばん新しい競合のレポート（今月の動き・自社との違い・相手の強み・次の一手）を読みます',
+  helpText: 'いちばん新しい競合のレポート（前の回からの動き・自社との違い・相手の強み・次の一手）を読みます',
   description: 'いちばん新しい競合のレポートを返す。まだ無ければ、その旨を返す',
   args: { properties: {} },
   async invoke(_args, ctx) {

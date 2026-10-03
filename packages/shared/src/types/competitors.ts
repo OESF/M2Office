@@ -165,10 +165,24 @@ export interface CompetitorSettings {
    * 自動で覚える競合の数（第 0.239.0 版）。都心と山あい、業種で同業の数が違うため、管理者が拡張機能の設定で変えられる。既定は 10
    */
   autoMax: number;
+  /** 定期の見回りの間隔（第36.19節。既定は毎月。毎週・しない も選べる） */
+  watch: CompetitorWatchInterval;
 }
 
+/** 定期の見回りの間隔。 */
+export type CompetitorWatchInterval = 'monthly' | 'weekly' | 'off';
+
+/** 見回りの間隔の呼び方。 */
+export const COMPETITOR_WATCH_LABELS: Record<CompetitorWatchInterval, string> = { monthly: '毎月', weekly: '毎週', off: 'しない' };
+
 /** 既定（切り）。 */
-export const DEFAULT_COMPETITOR_SETTINGS: CompetitorSettings = { enabled: false, areaOverride: null, mapKey: null, autoMax: COMPETITORS_AUTO_MAX };
+export const DEFAULT_COMPETITOR_SETTINGS: CompetitorSettings = { enabled: false, areaOverride: null, mapKey: null, autoMax: COMPETITORS_AUTO_MAX, watch: 'monthly' };
+
+/** 会社の設定から、見回りの間隔を読む（古い設定は毎月）。 */
+export function competitorWatch(settings: Pick<CompetitorSettings, 'watch'> | null | undefined): CompetitorWatchInterval {
+  const w = settings?.watch;
+  return w === 'weekly' || w === 'off' ? w : 'monthly';
+}
 
 /** 会社の設定から、自動で覚える数を読む（範囲の外や古い設定は既定にする）。 */
 export function competitorAutoMax(settings: Pick<CompetitorSettings, 'autoMax'> | null | undefined): number {
@@ -188,4 +202,6 @@ export interface CompetitorOverview {
   mapNote: string;
   /** 自社の Google の評価と件数（地図から引き直したもの。引けなければ `null`） */
   selfRating: { rating: number; count: number } | null;
+  /** 次の定期の見回りの日時（見回りが「しない」か、まだ探していなければ `null`） */
+  nextWatchAt: string | null;
 }

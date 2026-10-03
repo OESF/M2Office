@@ -276,7 +276,20 @@ export interface ReportSubject {
   facts: ExtractedFact[];
   /** 前の回の事実（無ければ空） */
   previous: ExtractedFact[];
+  /**
+   * 前の回から変わったページ（印が違う・新しいページ）の URL（第36.19節）。分かれば、動きはこのページの事実だけから数える。
+   * `undefined` はページの印が無い古い回で、事実の文の違いで数える
+   */
+  changedUrls?: string[];
   readNote: string;
+}
+
+/** 1 社の動き（変わったページの、前の回に無かった事実）。 */
+export function movesOf(x: Pick<ReportSubject, 'facts' | 'previous' | 'changedUrls'>): ExtractedFact[] {
+  const changed = changedFacts(x.facts, x.previous);
+  if (!x.changedUrls) return changed;
+  const urls = new Set(x.changedUrls);
+  return changed.filter((f) => urls.has(f.sourceUrl));
 }
 
 /** 前の回と比べて、新しく出た事実（同じ種類で同じ文が無いもの）。 */
@@ -288,8 +301,8 @@ export function changedFacts(now: ExtractedFact[], previous: ExtractedFact[]): E
 
 /** 決まった形のレポート（推論が使えないとき）。 */
 export function plainReport(profile: { business: string } | null, subjects: ReportSubject[]): string {
-  const lines = ['## 今月の動き'];
-  const moves = subjects.map((x) => ({ x, changed: changedFacts(x.facts, x.previous) }));
+  const lines = ['## 前の回からの動き'];
+  const moves = subjects.map((x) => ({ x, changed: movesOf(x) }));
   if (moves.every((m) => m.changed.length === 0)) lines.push('前の回と比べられる大きな動きはありませんでした（はじめての見回りのときは、比べる前の回がありません）。');
   for (const { x, changed } of moves) for (const f of changed.slice(0, 5)) lines.push(`- ${x.name}: ${f.text} [🔗](${f.sourceUrl})`);
   lines.push('', '## 自社との違い', `自社: ${profile?.business || '（自社の像がまだありません）'}`);
@@ -314,8 +327,9 @@ export async function writeReport(llm: LlmProvider | null, profile: CompetitorPr
       messages: [{
         role: 'user',
         content: [
-          '自社と競合の事実から、社内向けのレポートを書いてください。見出しは「## 今月の動き」「## 自社との違い」「## 相手の強み」「## 自社の次の一手」の 4 つ。',
-          '今月の動きは、前の回から変わったこと（新しいサービス・値段の変更・キャンペーン・お知らせ）だけ。前の回が無ければ「はじめての見回りのため、比べる前の回がありません」と書く。',
+          '自社と競合の事実から、社内向けのレポートを書いてください。見出しは「## 前の回からの動き」「## 自社との違い」「## 相手の強み」「## 自社の次の一手」の 4 つ。いちばん大事なのは動き（競合の変化）で、経営者が手を打つ材料にする。',
+          '前の回からの動きは、変わったページの前の事実（before）と今の事実（changed）を比べ、本当に変わったこと（新しいサービス・値段の変更・営業時間や休みの変更・キャンペーン・お知らせ）だけを書く。言い換えだけのものは動きにしない。前の回が無ければ「はじめての見回りのため、比べる前の回がありません」と書く。動きが無ければ「大きな動きはありませんでした」と書く。',
+          '次の一手は、動きに対して自社が打てる手を先に書く。',
           '自社との違いは、サービス・価格帯・対応の範囲・打ち出していること・Google の評価と件数の Markdown の表にする（空行を入れない）。評価と件数は書いた時点の値で、出典は「Google Maps」と書く。口コミの文は書かない。',
           '表の外の事実には出典を [🔗](URL) の形で付ける。表の中にはリンクを付けない（会社名にも出典にも）。推測は「推測:」と書く。相手を悪く書く言葉を使わない。長く引用しない。',
           '次の一手は 1〜3 つ、自社が書けるコラムの話題・出せるお知らせ・Web サイトの直すべき所から。',
@@ -323,7 +337,8 @@ export async function writeReport(llm: LlmProvider | null, profile: CompetitorPr
           `自社（データ）: ${JSON.stringify(profile ? { business: profile.business, services: profile.services, coverage: profile.coverage, strengths: profile.strengths } : {})}`,
           `競合（データ）: ${JSON.stringify(subjects.map((x) => ({
             name: x.name, url: x.url, distanceM: x.distanceM, googleRating: x.rating ?? undefined, googleRatingCount: x.ratingCount ?? undefined, note: x.readNote || undefined,
-            facts: x.facts.slice(0, 30), changed: changedFacts(x.facts, x.previous).slice(0, 15), hasPrevious: x.previous.length > 0,
+            facts: x.facts.slice(0, 30), changed: movesOf(x).slice(0, 15),
+            before: x.changedUrls ? x.previous.filter((f) => x.changedUrls!.includes(f.sourceUrl)).slice(0, 15) : undefined, hasPrevious: x.previous.length > 0,
           }))).slice(0, 30_000)}`,
         ].join('\n'),
       }],
