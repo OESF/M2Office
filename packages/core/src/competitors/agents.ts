@@ -12,7 +12,7 @@ import { COMPETITORS_EXTENSION_ID, type AgentDefinition } from '@m2office/shared
 import type { ExtensionPackage } from '../extensions/loader.js';
 
 /** 内蔵の拡張の版。付属の業務やツールが変わったら上げる。 */
-export const COMPETITORS_EXTENSION_VERSION = '1.0.0';
+export const COMPETITORS_EXTENSION_VERSION = '1.0.1';
 
 /** 付属の業務「競合を探す」（秘書から）。 */
 export const COMPETITOR_FIND: AgentDefinition = {
@@ -58,7 +58,7 @@ export const COMPETITOR_FIND: AgentDefinition = {
       label: '結果を伝える',
       instruction: [
         '行ったことを一文で伝える（「競合を探し始めました。数分かかります。終わったらお知らせします」）。確認を求めない。',
-        '一覧を返したときは、商圏と、競合を名前・距離・見つけ方で短く並べる。見つけ方が地図のものには「Google Maps」と添える。',
+        '一覧を返したときは、商圏と、競合を名前・距離・見つけ方で短く並べる。見つけ方の「Google Maps」は訳さずにそのまま書く。',
         '結果の path を [競合の分析](path) の形で添える。できなかったときは理由を伝える。候補が返ったときはどれかを尋ねる。',
       ].join('\n'),
     },

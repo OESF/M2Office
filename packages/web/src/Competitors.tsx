@@ -2,7 +2,8 @@
  * @file 競合の分析の画面（仕様書 第36.11節・第36.18節）。自社の像と商圏・競合の一覧・1 社の事実・レポート。
  *
  * 「探す」で、AI が自社の像をまとめて近くの同業か同じような事業の会社を探し、読んでレポートを作る（数分かかる。作業の間は読み直す）。
- * 一覧の上の 1 行の欄に URL か店の名前を入れて「足す」。競合ごとに「外す」。名前を押すと、取り出した事実を出典つきで出す。
+ * 一覧の上の 1 行の欄に URL か店の名前を入れて「追加」。競合ごとに「削除」。名前を押すと、取り出した事実を出典つきで出す。
+ * レポートの表の中のリンクは外す（2026-10-04 に三浦さんが指摘。名前がすべて同じ先へのリンクで見づらく、意味が無かった）。
  * 地図（Places API）で見つけたものには「Google Maps」と添える（訳さない。第36.13節）。説明文は常には出さない（原則 u11）。
  */
 
@@ -13,6 +14,7 @@ import {
 } from '@m2office/shared';
 import { api, describeError } from './api.js';
 import { Markdown } from './help.js';
+import { stripTableLinks } from './table-links.js';
 
 const day = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric' }) : '—');
 const km = (m: number | null) => (m === null ? '—' : m < 1000 ? `${m} m` : `${(m / 1000).toFixed(1)} km`);
@@ -65,12 +67,13 @@ function Row({ c, open, onToggle, onRemove, busy }: { c: Competitor; open: boole
         <td>{km(c.distanceM)}</td>
         <td>{c.rating !== null ? <>{c.rating.toFixed(1)}<span className="muted small">（{c.ratingCount ?? 0}）</span></> : '—'}</td>
         <td>
-          {COMPETITOR_ORIGIN_LABELS[c.origin]}
-          {c.origin === 'map' && <div className="small muted"><span translate="no" className="gmaps">Google Maps</span>{c.attributions.length ? ` / ${c.attributions.join('、')}` : ''}</div>}
+          {/* 地図で見つけたものは「Google Maps」の 1 つで、出典の表記を兼ねる（訳さない。第36.13節） */}
+          {c.origin === 'map' ? <span translate="no" className="gmaps">Google Maps</span> : COMPETITOR_ORIGIN_LABELS[c.origin]}
+          {c.origin === 'map' && c.attributions.length > 0 && <div className="small muted">{c.attributions.join('、')}</div>}
         </td>
         <td>{day(c.lastReadAt)}{c.readNote && <div className="small muted">{c.readNote}</div>}</td>
         <td>{c.factCount}</td>
-        <td><button className="btn ghost small" disabled={busy} onClick={onRemove}>外す</button></td>
+        <td><button className="btn ghost small" disabled={busy} onClick={onRemove}>削除</button></td>
       </tr>
       {open && (
         <tr className="competitors-open">
@@ -144,8 +147,8 @@ export function Competitors({ changeKey = '' }: { changeKey?: string }) {
             ) : <span className="muted">まだ探していません</span>}
           </div>
           <button className="btn small" disabled={busy || working} onClick={() => run(() => api.competitors.discover({}), '探し始めました', setTopNote)}>{p ? '探し直す' : '探す'}</button>
-          <button className="btn ghost small" disabled={busy || working || o.competitors.length === 0} onClick={() => run(() => api.competitors.check(), '見回りを始めました', setTopNote)}>今すぐ見回る</button>
-          {p && <button className="link small" onClick={() => setOpenId(openId === 'self' ? null : 'self')}>{openId === 'self' ? '自社の事実を閉じる' : '自社の事実'}</button>}
+          <button className="btn ghost small" disabled={busy || working || o.competitors.length === 0} onClick={() => run(() => api.competitors.check(), 'チェックを始めました', setTopNote)}>今すぐチェック</button>
+          {p && <button className="link small" onClick={() => setOpenId(openId === 'self' ? null : 'self')}>{openId === 'self' ? '自社のデータを閉じる' : '自社のデータ'}</button>}
         </div>
         {o.job && <p className="small competitors-working" role="status">{o.job.message || (o.job.kind === 'discover' ? '競合を探しています' : '見回っています')}…</p>}
         {!o.job && o.lastJob?.status === 'failed' && <p className="error small">{o.lastJob.message}</p>}
@@ -156,18 +159,18 @@ export function Competitors({ changeKey = '' }: { changeKey?: string }) {
 
       <div className="row wrap competitors-add">
         <input value={text} maxLength={300} placeholder="URL か店の名前" aria-label="競合の URL か店の名前" onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && text.trim() && !busy) run(() => api.competitors.add(text.trim()).then(() => setText('')), '入れました。サイトを読んでいます', setNote); }} />
-        <button className="btn small" disabled={busy || !text.trim()} onClick={() => run(() => api.competitors.add(text.trim()).then(() => setText('')), '入れました。サイトを読んでいます', setNote)}>足す</button>
+          onKeyDown={(e) => { if (e.key === 'Enter' && text.trim() && !busy) run(() => api.competitors.add(text.trim()).then(() => setText('')), '追加しました。サイトを読んでいます', setNote); }} />
+        <button className="btn small" disabled={busy || !text.trim()} onClick={() => run(() => api.competitors.add(text.trim()).then(() => setText('')), '追加しました。サイトを読んでいます', setNote)}>追加</button>
         <NoteText note={note} />
       </div>
 
       {o.competitors.length > 0 ? (
         <table className="table competitors-table">
-          <thead><tr><th>競合</th><th>距離</th><th><span translate="no">Google</span> の評価</th><th>見つけ方</th><th>読んだ日</th><th>事実</th><th /></tr></thead>
+          <thead><tr><th>競合</th><th>距離</th><th><span translate="no">Google</span> の評価</th><th>取得方法</th><th>取得日</th><th>データ数</th><th /></tr></thead>
           <tbody>
             {o.competitors.map((c) => (
               <Row key={c.id} c={c} open={openId === c.id} busy={busy} onToggle={() => setOpenId(openId === c.id ? null : c.id)}
-                onRemove={() => { if (window.confirm(`${c.name || 'この競合'}を外しますか。次に自動で探しても入れません`)) run(() => api.competitors.remove(c.id), '外しました', setNote); }} />
+                onRemove={() => { if (window.confirm(`${c.name || 'この競合'}を削除しますか。次に自動で探しても入れません`)) run(() => api.competitors.remove(c.id), '削除しました', setNote); }} />
             ))}
           </tbody>
         </table>
@@ -176,7 +179,7 @@ export function Competitors({ changeKey = '' }: { changeKey?: string }) {
       <div className="card competitors-reports">
         <div className="row wrap">
           <h3>レポート</h3>
-          <button className="btn ghost small" disabled={busy || working || o.competitors.length === 0} onClick={() => run(() => api.competitors.makeReport(), 'レポートを作りました', setTopNote)}>レポートを作る</button>
+          <button className="btn ghost small" disabled={busy || working || o.competitors.length === 0} onClick={() => run(() => api.competitors.makeReport(), 'レポートを作成しました', setTopNote)}>レポートの作成</button>
         </div>
         {reports.length === 0 && <p className="muted small">まだありません</p>}
         {reports.map((r) => (
@@ -185,7 +188,7 @@ export function Competitors({ changeKey = '' }: { changeKey?: string }) {
               {new Date(r.createdAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
               {r.changes ? `（前の回から ${r.changes} 件の動き）` : ''}
             </button>
-            {shownReport === r.id && <div className="competitors-report-body"><Markdown text={r.text} lineBreaks /></div>}
+            {shownReport === r.id && <div className="competitors-report-body"><Markdown text={stripTableLinks(r.text)} lineBreaks /></div>}
           </div>
         ))}
       </div>

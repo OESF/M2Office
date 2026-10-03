@@ -1,7 +1,9 @@
 -- 問い合わせの記録の段 2: 窓口のアカウント・返事・月の振り返り（仕様書 第33.6節・第33.9節・第33.18節）
 -- 1. 窓口のアカウントのリフレッシュ トークンは、会社の接続の秘密の値として暗号化して預ける（アドレスは meta）
 alter table tenant_credentials drop constraint if exists tenant_credentials_kind_check;
-alter table tenant_credentials add constraint tenant_credentials_kind_check check (kind in ('gemini', 'google_oauth', 'wordpress', 'inquiry_mailbox'));
+-- 移行は毎回はじめから流し直すため、後の移行で増えた種類の行があっても止まらないよう、ここでは今ある行を確かめない（not valid）。
+-- 種類の一覧の正は最後の移行（071 以降）が確かめつきで張り直す
+alter table tenant_credentials add constraint tenant_credentials_kind_check check (kind in ('gemini', 'google_oauth', 'wordpress', 'inquiry_mailbox')) not valid;
 
 -- 2. 会話の履歴のうちメールのもの。本文は写さず、元のメールの参照と、どの宛先（別名）に届いたかだけを持つ
 alter table inquiry_events add column if not exists mail_message_id text;

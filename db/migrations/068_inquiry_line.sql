@@ -1,7 +1,9 @@
 -- 問い合わせの記録の段 3: LINE 公式アカウント（仕様書 第33.6.2節・第33.19節）
 -- 1. チャネルのシークレットとアクセストークンは、会社の接続の秘密の値として暗号化して預ける
 alter table tenant_credentials drop constraint if exists tenant_credentials_kind_check;
-alter table tenant_credentials add constraint tenant_credentials_kind_check check (kind in ('gemini', 'google_oauth', 'wordpress', 'inquiry_mailbox', 'line'));
+-- 移行は毎回はじめから流し直すため、後の移行で増えた種類の行があっても止まらないよう、ここでは今ある行を確かめない（not valid）。
+-- 種類の一覧の正は最後の移行（071 以降）が確かめつきで張り直す
+alter table tenant_credentials add constraint tenant_credentials_kind_check check (kind in ('gemini', 'google_oauth', 'wordpress', 'inquiry_mailbox', 'line')) not valid;
 
 -- 2. 受け口（Webhook の URL の鍵）。M2Office は鍵のハッシュだけを持つ。会社ごとに 1 つ
 create table if not exists inquiry_line_hooks (

@@ -597,7 +597,7 @@ export class CompetitorService {
       }
     }
     if (!url) {
-      await store.update(who.tenantId, c.id, { lastReadAt: new Date().toISOString(), pagesRead: 0, pagesFailed: 0, readNote: 'Web サイトが分からないため、読めませんでした' });
+      await store.update(who.tenantId, c.id, { lastReadAt: new Date().toISOString(), pagesRead: 0, pagesFailed: 0, readNote: 'Web サイトなし' });
       return { read: 0, failed: 0 };
     }
     const reading = await readSite(r, url);

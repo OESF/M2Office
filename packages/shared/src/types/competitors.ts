@@ -30,8 +30,10 @@ export const COMPETITOR_PAGES_MAX = 10;
 /** 競合の見つけ方。地図（Places API）・AI が挙げた・人が入れた。 */
 export type CompetitorOrigin = 'map' | 'ai' | 'manual';
 
-/** 見つけ方の呼び方。 */
-export const COMPETITOR_ORIGIN_LABELS: Record<CompetitorOrigin, string> = { map: '地図', ai: 'AI', manual: '手で入れた' };
+/**
+ * 見つけ方の呼び方。地図で見つけたものは「Google Maps」（Google の決まりの出典の表記を兼ねる。訳さない。第 0.239.2 版で「地図」から改めた）。
+ */
+export const COMPETITOR_ORIGIN_LABELS: Record<CompetitorOrigin, string> = { map: 'Google Maps', ai: 'AI', manual: '手で入れた' };
 
 /** 商圏（第36.5節）。`radiusM` は商圏ありのときの半径（メートル）。 */
 export interface CompetitorArea {

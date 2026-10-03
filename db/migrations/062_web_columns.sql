@@ -4,7 +4,9 @@ alter table tenant_settings add column if not exists web_columns jsonb;
 
 -- 2. WordPress のアプリケーションパスワードは、会社の接続の秘密の値として暗号化して預ける（サイトの URL と利用者名は meta）
 alter table tenant_credentials drop constraint if exists tenant_credentials_kind_check;
-alter table tenant_credentials add constraint tenant_credentials_kind_check check (kind in ('gemini', 'google_oauth', 'wordpress'));
+-- 移行は毎回はじめから流し直すため、後の移行で増えた種類の行があっても止まらないよう、ここでは今ある行を確かめない（not valid）。
+-- 種類の一覧の正は最後の移行（071 以降）が確かめつきで張り直す
+alter table tenant_credentials add constraint tenant_credentials_kind_check check (kind in ('gemini', 'google_oauth', 'wordpress')) not valid;
 
 -- 3. コラム。会社で共有する。状態: writing（書いています）・draft（下書き）・awaiting（承認待ち）・approved（承認済み）・placed（WordPress に入れた）・failed（書けなかった）
 create table if not exists web_columns (
