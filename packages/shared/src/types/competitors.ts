@@ -9,11 +9,20 @@
 /** 競合の分析の拡張の ID（内蔵の拡張。第12.13節）。 */
 export const COMPETITORS_EXTENSION_ID = 'competitors';
 
-/** 自動で覚える競合の上限（第36.5節）。 */
-export const COMPETITORS_AUTO_MAX = 5;
+/** 自動で覚える競合の数の既定（第36.5節。第 0.238.0 版で 5 社から 10 社に上げた。第 0.239.0 版から管理者が変えられる）。 */
+export const COMPETITORS_AUTO_MAX = 10;
 
-/** 人が入れるのを含めた競合の上限（第36.5節）。 */
-export const COMPETITORS_MAX = 10;
+/** 自動で覚える競合の数として選べる範囲（第 0.239.0 版）。上は読む時間と推論の費用で決めた。 */
+export const COMPETITORS_AUTO_RANGE = { min: 1, max: 20 } as const;
+
+/** 自動で覚える数に加えて、人が入れられる数（第 0.239.0 版）。全体の上限は「自動で覚える数 + 5」。 */
+export const COMPETITORS_MANUAL_EXTRA = 5;
+
+/** 全体の上限（人が入れるのを含める）。 */
+export const competitorsMax = (autoMax: number) => autoMax + COMPETITORS_MANUAL_EXTRA;
+
+/** 既定のときの全体の上限（第 0.238.0 版の 15 社）。 */
+export const COMPETITORS_MAX = competitorsMax(COMPETITORS_AUTO_MAX);
 
 /** 1 社で読むページの上限（第36.7節）。 */
 export const COMPETITOR_PAGES_MAX = 10;
@@ -57,6 +66,8 @@ export interface CompetitorProfile {
    * 自社の位置（地図で引いたもの。30 日まで。距離を計算するためだけに持ち、画面と秘書には出さない）。
    */
   geo?: { lat: number; lng: number; at: string } | null;
+  /** 地図の自社の place ID（評価と件数を引き直すため。place ID は残してよい。第36.13節） */
+  selfPlaceId?: string | null;
 }
 
 /** 競合 1 社（画面と秘書に返す形）。地図で見つけたものの名前・URL は残さず、表示のたびに引き直す。 */
@@ -81,6 +92,11 @@ export interface Competitor {
   factCount: number;
   /** 地図の出典の表示（Places が返したもの。無ければ空） */
   attributions: string[];
+  /**
+   * Google の評価（1〜5）と件数（第 0.238.0 版）。地図から表示のたびに引き直し、残さない。地図で引けないもの（AI が挙げた会社など）は `null`
+   */
+  rating: number | null;
+  ratingCount: number | null;
   createdBy: string;
   createdAt: string;
 }
@@ -138,10 +154,25 @@ export interface CompetitorSettings {
    * 商圏の上書き（秘書や画面で「半径 2 km で」「全国で」と言われたとき）。`null` なら AI が決める。
    */
   areaOverride: { local: boolean; radiusM: number | null } | null;
+  /**
+   * 地図の鍵（Google Cloud コンソールで作った API キー。第 0.237.0 版）を預けたか。鍵そのものは会社の鍵の置き場に暗号化して置き、ここには持たない。
+   * 預けていなければ `null`（Gemini の鍵が昔の形のときだけ、それを使う）。
+   */
+  mapKey: { setBy: string; setAt: string } | null;
+  /**
+   * 自動で覚える競合の数（第 0.239.0 版）。都心と山あい、業種で同業の数が違うため、管理者が拡張機能の設定で変えられる。既定は 10
+   */
+  autoMax: number;
 }
 
 /** 既定（切り）。 */
-export const DEFAULT_COMPETITOR_SETTINGS: CompetitorSettings = { enabled: false, areaOverride: null };
+export const DEFAULT_COMPETITOR_SETTINGS: CompetitorSettings = { enabled: false, areaOverride: null, mapKey: null, autoMax: COMPETITORS_AUTO_MAX };
+
+/** 会社の設定から、自動で覚える数を読む（範囲の外や古い設定は既定にする）。 */
+export function competitorAutoMax(settings: Pick<CompetitorSettings, 'autoMax'> | null | undefined): number {
+  const n = Math.round(Number(settings?.autoMax));
+  return Number.isFinite(n) && n >= COMPETITORS_AUTO_RANGE.min && n <= COMPETITORS_AUTO_RANGE.max ? n : COMPETITORS_AUTO_MAX;
+}
 
 /** 競合の分析の画面の全体。 */
 export interface CompetitorOverview {
@@ -153,4 +184,6 @@ export interface CompetitorOverview {
   lastJob: CompetitorJob | null;
   /** 地図（Places API）を使えるか。使えなければ理由 */
   mapNote: string;
+  /** 自社の Google の評価と件数（地図から引き直したもの。引けなければ `null`） */
+  selfRating: { rating: number; count: number } | null;
 }

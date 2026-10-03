@@ -184,6 +184,9 @@ const ACTION_LABELS: Record<string, string> = {
   'competitor.discover': '競合を探した',
   'competitor.check': '競合のサイトを読んだ',
   'competitor.report': '競合のレポートを作った',
+  'competitor.settings': '競合の分析の設定を変えた',
+  'competitor.map_key_set': '競合の分析の地図の鍵を預けた',
+  'competitor.map_key_remove': '競合の分析の地図の鍵を外した',
   'inquiry.create': '問い合わせを残した',
   'inquiry.append': '問い合わせに続きを足した',
   'inquiry.update': '問い合わせを直した',
@@ -392,7 +395,7 @@ function targetOf(e: AuditEvent, names: AuditNames): string {
     // コラムの題名は出さない（テーマは記録の詳細にある）
     case 'web_column': return id.startsWith('col-') ? `コラム ${id.slice(4, 12)}` : 'コラムの作成の設定';
     // 問い合わせはお客様の名前を出さない。ID の頭だけ
-    case 'competitor': return id === 'discover' ? '競合の分析（探す）' : id === 'all' ? '競合の分析（見回り）' : `競合の分析 ${id.slice(4, 12)}`;
+    case 'competitor': return id === 'settings' ? '競合の分析の設定' : id === 'map-key' ? '競合の分析の地図の鍵' : id === 'discover' ? '競合の分析（探す）' : id === 'all' ? '競合の分析（見回り）' : `競合の分析 ${id.slice(4, 12)}`;
     case 'inquiry': return id === 'mailbox' ? '問い合わせの窓口のアカウント' : id === 'line' ? '問い合わせの LINE 公式アカウント' : `問い合わせ ${id.slice(4, 12)}`;
     case 'tool': {
       // 会社の接続のツール（`slack.slack_send_message`）は接続の名前を添える

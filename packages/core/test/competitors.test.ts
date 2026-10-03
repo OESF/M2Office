@@ -17,7 +17,7 @@ function setup(over: Partial<TenantSettings['company']> = {}) {
   let settings: TenantSettings = {
     ...DEFAULT_TENANT_SETTINGS,
     company: { ...DEFAULT_TENANT_SETTINGS.company, legalName: '株式会社アルファ商事', address: '東京都千代田区丸の内一丁目', ...over },
-    competitors: { enabled: true, areaOverride: null },
+    competitors: { enabled: true, areaOverride: null, mapKey: null, autoMax: 10 },
   };
   const audits: { action: string; detail: Record<string, unknown> }[] = [];
   const notes: { title: string; body: string }[] = [];
@@ -93,8 +93,13 @@ test('探す: 地図で半径の中の同業を近い順に覚え、自社と遠
   assert.equal('geo' in (o.profile ?? {}), false, '自社の位置は画面に出さない');
   assert.deepEqual(o.competitors.map((c) => c.name), ['見本の競合 A', '見本の競合 B']);
   assert.ok(o.competitors.every((c) => c.origin === 'map' && c.distanceM !== null && c.distanceM < 2000));
+  // 評価と件数は地図から表示のたびに引き直し、残さない（第 0.238.0 版）
+  assert.deepEqual(o.competitors.map((c) => [c.rating, c.ratingCount]), [[4.3, 52], [3.9, 40]]);
+  assert.deepEqual(o.selfRating, { rating: 4.2, count: 39 });
+  assert.equal('selfPlaceId' in (o.profile ?? {}), false, '自社の place ID は画面に出さない');
   const stored = await store.list('t1');
   assert.ok(stored.every((c) => c.name === '' && c.url === '' && c.placeId), '地図の名前と URL は残さない');
+  assert.ok(!JSON.stringify(stored).includes('4.3') && !JSON.stringify(await store.profile('t1')).includes('4.2'), '評価は残さない');
   // robots.txt で断られたページは読まない
   assert.ok(fetcher.requested.includes('https://shop-b.example.jp/service'));
   assert.ok(!fetcher.requested.includes('https://shop-b.example.jp/private/price'));
@@ -145,7 +150,7 @@ test('ツール: 切っている会社では使えない。一覧・違い・レ
   const { service, watch } = setup();
   await service.requestDiscover(who);
   await watch.tick({ wait: true });
-  const ctx = (on: boolean) => ({ tenantId: 't1', userId: 'u1', competitors: { service, access: async () => (on ? { enabled: true, areaOverride: null } : null) } } as unknown as ToolContext);
+  const ctx = (on: boolean) => ({ tenantId: 't1', userId: 'u1', competitors: { service, access: async () => (on ? { enabled: true, areaOverride: null, mapKey: null } : null) } } as unknown as ToolContext);
   const tool = (name: string) => COMPETITOR_TOOLS.find((t) => t.name === name)!;
   assert.deepEqual(await tool('competitors.list').invoke({}, ctx(false)), { available: false, reason: '競合の分析は使えません（会社で切っているか、利用範囲の外です）' });
   const list = await tool('competitors.list').invoke({}, ctx(true)) as { competitors: { name: string; source: string | null }[] };
@@ -158,4 +163,86 @@ test('ツール: 切っている会社では使えない。一覧・違い・レ
   const removed = await tool('competitors.remove').invoke({ q: '競合 B' }, ctx(true)) as { removed: string };
   assert.equal(removed.removed, '見本の競合 B');
   assert.equal(tool('competitors.discover').risk, 'write-internal');
+});
+
+test('地図の鍵の断り: Gemini 専用の鍵・Places API が切り・鍵の制限を、直せる言葉にする', async () => {
+  const { placesRefusal } = await import('../src/index.js');
+  assert.match(placesRefusal('{"error":{"message":"API keys are not supported by this API."}}', 'AIzaX'), /Gemini 専用/);
+  assert.match(placesRefusal('', 'AQ.Ab'), /AIza で始まる/);
+  assert.match(placesRefusal('{"error":{"details":[{"reason":"SERVICE_DISABLED"}]}}', 'AIzaX'), /有効になっていません/);
+  assert.match(placesRefusal('{"error":{"details":[{"reason":"API_KEY_SERVICE_BLOCKED"}]}}', 'AIzaX'), /API の制限/);
+});
+
+test('地図の鍵: 預けた鍵を先に使い、無ければ昔の形（AIza）の Gemini の鍵だけを使う。Gemini 専用の鍵では理由を出す', async () => {
+  const creds = new Map<string, { secretEnc: string }>();
+  let settings: TenantSettings = { ...DEFAULT_TENANT_SETTINGS, competitors: { enabled: true, areaOverride: null, mapKey: null } };
+  const audits: string[] = [];
+  const repo = {
+    getTenantSettings: async () => settings,
+    saveTenantSettings: async (_t: string, section: keyof TenantSettings, value: unknown) => { settings = { ...settings, [section]: value }; },
+    getTenantCredential: async (_t: string, kind: string) => creds.get(kind) ?? null,
+    saveTenantCredential: async (c: { kind: string; secretEnc: string }) => { creds.set(c.kind, c); },
+    deleteTenantCredential: async (_t: string, kind: string) => creds.delete(kind),
+    appendAudit: async (e: { action: string }) => { audits.push(e.action); },
+    listTenantIds: async () => ['t1'],
+  } as unknown as Repository;
+  let gemini = 'AQ.gemini-only';
+  const service = new CompetitorService({
+    store: new MemoryCompetitorStore(), repo, llmFor: async () => new StubLlmProvider(), placesKeyFor: async () => gemini, sourceFor: () => 'real',
+    userAgent: 'test', box: { encrypt: (v: string) => `enc:${v}`, decrypt: (v: string) => v.slice(4) } as never,
+  });
+  const key = (svc: CompetitorService) => (svc as unknown as { mapKey(t: string): Promise<string | null> }).mapKey('t1');
+  assert.equal(await key(service), null, 'Gemini 専用の鍵は地図に使わない');
+  assert.match((await service.overview(who)).mapNote, /地図の鍵がありません/);
+  gemini = 'AIzaOldStyleKey';
+  assert.equal(await key(service), 'AIzaOldStyleKey');
+  assert.match(await service.setMapKey(who, 'AQ.xyz', false) ?? '', /Gemini 専用/);
+  assert.equal(await service.setMapKey(who, 'AIzaMapKey', true), null);
+  assert.equal(await key(service), 'AIzaMapKey', '預けた鍵を先に使う');
+  assert.equal(settings.competitors.mapKey?.setBy, 'u1');
+  assert.ok(!JSON.stringify(settings).includes('AIzaMapKey'), '鍵そのものは設定に置かない');
+  await service.removeMapKey(who);
+  assert.equal(settings.competitors.mapKey, null);
+  assert.equal(await key(service), 'AIzaOldStyleKey');
+  assert.deepEqual(audits, ['competitor.map_key_set', 'competitor.map_key_remove']);
+});
+
+test('自社の見分け: 地図の名前がかな書きでも、Web サイトが同じなら自社として外す。業種の言葉の検索と種類の検索を合わせる', async () => {
+  const { setup: _s } = { setup };
+  const ctx = setup({ website: 'https://www.alpha.example.jp/' });
+  const center = { lat: 35.68, lng: 139.76 };
+  const hit = (id: string, name: string, website: string, dLat: number, primaryType = 'doctor') => ({ id, name, website, lat: center.lat + dLat, lng: center.lng, primaryType, attributions: [] });
+  const self = hit('place-self-000000', 'あるふぁしょうじ', 'https://alpha.example.jp/', 0);
+  const calls: string[] = [];
+  const places = {
+    search: async (q: string) => { calls.push(`search:${q}`); return q.includes('アルファ') ? [self] : [self, hit('place-kw-0000001', 'ショップ A', 'https://shop-a.example.jp/', 0.003)]; },
+    nearby: async () => { calls.push('nearby'); return [self, hit('place-ty-0000002', 'ショップ B', 'https://shop-b.example.jp/', 0.004)]; },
+    details: async (id: string) => [self, hit('place-kw-0000001', 'ショップ A', 'https://shop-a.example.jp/', 0.003), hit('place-ty-0000002', 'ショップ B', 'https://shop-b.example.jp/', 0.004)].find((h) => h.id === id) ?? null,
+  };
+  const service = new CompetitorService({
+    store: ctx.store, repo: (ctx.service as unknown as { deps: { repo: Repository } }).deps.repo, llmFor: async () => new StubLlmProvider(), placesKeyFor: async () => null, sourceFor: () => 'real',
+    userAgent: 'test', fetcherFor: () => ctx.fetcher, placesFor: async () => places,
+  });
+  await service.requestDiscover(who);
+  await new CompetitorWatch({ service, store: ctx.store, repo: (ctx.service as unknown as { deps: { repo: Repository } }).deps.repo }).tick({ wait: true });
+  const names = (await service.overview(who)).competitors.map((c) => c.name).sort();
+  assert.deepEqual(names, ['ショップ A', 'ショップ B'], '自社（かな書き）を外し、言葉と種類の両方の検索から拾う');
+  assert.ok(calls.includes('nearby') && calls.some((c) => c.startsWith('search:') && !c.includes('アルファ')));
+});
+
+test('上限: 自動で覚える数は既定 10 社で、管理者が 1〜20 社に変えられる。全体はその数 + 5 社', async () => {
+  const shared = await import('@m2office/shared');
+  assert.equal(shared.COMPETITORS_AUTO_MAX, 10);
+  assert.equal(shared.COMPETITORS_MAX, 15);
+  assert.equal(shared.competitorAutoMax({ autoMax: 99 }), 10, '範囲の外は既定');
+  assert.equal(shared.competitorAutoMax(undefined), 10, '古い設定は既定');
+  const { service, watch, settings, audits } = setup();
+  assert.match(await service.setAutoMax(who, 0) ?? '', /1〜20 社/);
+  assert.match(await service.setAutoMax(who, 21) ?? '', /1〜20 社/);
+  assert.equal(await service.setAutoMax(who, 1), null);
+  assert.equal(settings().competitors.autoMax, 1);
+  await service.requestDiscover(who);
+  await watch.tick({ wait: true });
+  assert.deepEqual((await service.overview(who)).competitors.map((c) => c.name), ['見本の競合 A'], '1 社にすると、いちばん近い 1 社だけ覚える');
+  assert.ok(audits.some((a) => a.action === 'competitor.settings'));
 });

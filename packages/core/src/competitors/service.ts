@@ -8,10 +8,11 @@
 
 import { randomUUID } from 'node:crypto';
 import {
-  COMPETITORS_AUTO_MAX, COMPETITORS_EXTENSION_ID, COMPETITORS_MAX, canUseAgent,
+  COMPETITORS_AUTO_RANGE, COMPETITORS_EXTENSION_ID, competitorAutoMax, competitorsMax, canUseAgent,
   type Competitor, type CompetitorFact, type CompetitorJob, type CompetitorOverview, type CompetitorProfile, type CompetitorReport, type CompetitorSettings,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
+import type { SecretBox } from '../secrets/box.js';
 import type { LlmProvider } from '../llm/provider.js';
 import { silentLogger, type Logger } from '../log/logger.js';
 import { dateIn } from '../cards/service.js';
@@ -20,7 +21,7 @@ import {
   type AreaDecision, type Candidate, type ExtractedFact, type ReportSubject,
 } from './analyze.js';
 import { HttpPageFetcher, MockPageFetcher, checkUrl, type PageFetcher } from './fetcher.js';
-import { GooglePlacesClient, MockPlaces, PlacesUnavailableError, distanceM, type PlaceHit, type PlacesClient } from './places.js';
+import { GooglePlacesClient, MockPlaces, PlacesUnavailableError, checkPlacesKey, distanceM, type PlaceHit, type PlacesClient } from './places.js';
 import { readSite, type SiteReading } from './reader.js';
 import { RobotsCache } from './robots.js';
 import { MOCK_SITES } from './mock-sites.js';
@@ -31,8 +32,12 @@ export interface CompetitorServiceDeps {
   store: CompetitorStore;
   repo: Repository;
   llmFor(tenantId: string): Promise<LlmProvider>;
-  /** 会社の Gemini の鍵（同じプロジェクトで Places API を使う）。無ければ `null` */
+  /**
+   * 会社の Gemini の鍵（地図の鍵を預けていないとき、昔の形 `AIza` の鍵だけを地図に使う）。無ければ `null`
+   */
   placesKeyFor(tenantId: string): Promise<string | null>;
+  /** 地図の鍵を預ける・取り出すための暗号（無ければ地図の鍵を預けられない） */
+  box?: SecretBox;
   /** その会社の出どころ（`mock` なら外に出ない見本の地図とサイト） */
   sourceFor(tenantId: string): string;
   /** 外部の AI と地図を使ってよいか（ローカルだけの会社は使えない。第36.13節）。無ければ使ってよい */
@@ -142,9 +147,71 @@ export class CompetitorService {
       return { client, note: client ? '' : '地図（Places API）を使えません' };
     }
     if (this.mock(tenantId)) return { client: new MockPlaces(), note: '' };
-    const key = await this.deps.placesKeyFor(tenantId).catch(() => null);
-    if (!key) return { client: null, note: 'Gemini の鍵が無いため、地図（Places API）を使えません' };
+    const key = await this.mapKey(tenantId);
+    if (!key) return { client: null, note: '地図の鍵がありません。管理者が拡張機能の「競合の分析」の設定で、地図の鍵（Google Cloud の API キー）を入れてください' };
     return { client: new GooglePlacesClient(key), note: '' };
+  }
+
+  /** 地図に使う鍵。預けた地図の鍵を先に、無ければ昔の形（AIza）の Gemini の鍵（第 0.237.0 版）。 */
+  private async mapKey(tenantId: string): Promise<string | null> {
+    const cred = await this.deps.repo.getTenantCredential(tenantId, 'places').catch(() => null);
+    if (cred?.secretEnc && this.deps.box) {
+      try {
+        return this.deps.box.decrypt(cred.secretEnc);
+      } catch {
+        return null;
+      }
+    }
+    const gemini = await this.deps.placesKeyFor(tenantId).catch(() => null);
+    return gemini?.startsWith('AIza') ? gemini : null;
+  }
+
+  /**
+   * 地図の鍵を預ける（管理者だけ。呼ぶ側が確かめる）。Places API を使えるかを確かめてから、会社の鍵の置き場に暗号化して置く。
+   *
+   * @param mock 開発の見本の会社（鍵を確かめない）
+   * @returns 預けられなければ理由
+   */
+  async setMapKey(who: CompetitorViewer, key: string, mock: boolean): Promise<string | null> {
+    const value = key.trim();
+    if (!value) return '地図の鍵を入れてください';
+    if (!this.deps.box) return '鍵を預ける仕組みがありません';
+    if (!mock) {
+      const problem = await checkPlacesKey(value);
+      if (problem) return problem;
+    }
+    const now = new Date().toISOString();
+    await this.deps.repo.saveTenantCredential({
+      tenantId: who.tenantId, kind: 'places', secretEnc: this.deps.box.encrypt(value), meta: mock ? { mock: true } : {}, updatedBy: who.userId, updatedAt: now,
+    });
+    const settings = await this.deps.repo.getTenantSettings(who.tenantId);
+    await this.deps.repo.saveTenantSettings(who.tenantId, 'competitors', { ...settings.competitors, mapKey: { setBy: who.userId, setAt: now } }, who.userId);
+    await this.audit(who, 'competitor.map_key_set', 'map-key', {});
+    return null;
+  }
+
+  /**
+   * 自動で覚える競合の数を変える（管理者だけ。呼ぶ側が確かめる）。次に探すときから効く。
+   *
+   * @returns 変えられなければ理由
+   */
+  async setAutoMax(who: CompetitorViewer, value: number): Promise<string | null> {
+    const n = Math.round(value);
+    if (!Number.isFinite(n) || n < COMPETITORS_AUTO_RANGE.min || n > COMPETITORS_AUTO_RANGE.max) {
+      return `自動で覚える数は ${COMPETITORS_AUTO_RANGE.min}〜${COMPETITORS_AUTO_RANGE.max} 社です`;
+    }
+    const settings = await this.deps.repo.getTenantSettings(who.tenantId);
+    await this.deps.repo.saveTenantSettings(who.tenantId, 'competitors', { ...settings.competitors, autoMax: n }, who.userId);
+    await this.audit(who, 'competitor.settings', 'settings', { autoMax: n });
+    return null;
+  }
+
+  /** 地図の鍵を外す（管理者だけ）。 */
+  async removeMapKey(who: CompetitorViewer): Promise<void> {
+    await this.deps.repo.deleteTenantCredential(who.tenantId, 'places');
+    const settings = await this.deps.repo.getTenantSettings(who.tenantId);
+    await this.deps.repo.saveTenantSettings(who.tenantId, 'competitors', { ...settings.competitors, mapKey: null }, who.userId);
+    await this.audit(who, 'competitor.map_key_remove', 'map-key', {});
   }
 
   private async audit(who: CompetitorViewer, action: string, id: string, detail: Record<string, unknown>): Promise<void> {
@@ -169,7 +236,9 @@ export class CompetitorService {
     const watching = rows.filter((c) => c.status === 'watching');
     const competitors = await Promise.all(watching.map((c) => this.view(c, profile, counts.get(c.id) ?? 0, client)));
     competitors.sort((a, b) => (a.distanceM ?? Number.MAX_SAFE_INTEGER) - (b.distanceM ?? Number.MAX_SAFE_INTEGER));
-    return { profile: profile ? publicProfile(profile) : null, competitors, job: job ? publicJob(job) : null, lastJob: lastJob ? publicJob(lastJob) : null, mapNote: note };
+    const self = profile?.selfPlaceId && client ? await client.details(profile.selfPlaceId).catch(() => null) : null;
+    const selfRating = self?.rating != null && self.ratingCount != null ? { rating: self.rating, count: self.ratingCount } : null;
+    return { profile: profile ? publicProfile(profile) : null, competitors, job: job ? publicJob(job) : null, lastJob: lastJob ? publicJob(lastJob) : null, mapNote: note, selfRating };
   }
 
   /** 画面と秘書に返す 1 社の形（名前・Web サイトは地図から引き直す）。 */
@@ -177,19 +246,24 @@ export class CompetitorService {
     let name = c.name;
     let url = c.url;
     let attributions: string[] = [];
-    if (c.placeId && client && (!name || !url)) {
+    let rating: number | null = null;
+    let ratingCount: number | null = null;
+    // 地図の店は、名前・Web サイト・評価と件数を表示のたびに引き直す（残さない。第36.13節）
+    if (c.placeId && client) {
       const hit = await client.details(c.placeId).catch(() => null);
       if (hit) {
         name ||= hit.name;
         url ||= hit.website;
         attributions = hit.attributions;
+        rating = hit.rating;
+        ratingCount = hit.ratingCount;
       }
     }
     const geo = profile?.geo;
     const distance = geo && c.lat !== null && c.lng !== null ? distanceM(geo, { lat: c.lat, lng: c.lng }) : null;
     return {
       id: c.id, origin: c.origin, name, url, distanceM: distance, reason: c.reason, status: c.status, lastReadAt: c.lastReadAt,
-      pagesRead: c.pagesRead, pagesFailed: c.pagesFailed, readNote: c.readNote, factCount, attributions, createdBy: c.createdBy, createdAt: c.createdAt,
+      pagesRead: c.pagesRead, pagesFailed: c.pagesFailed, readNote: c.readNote, factCount, attributions, rating, ratingCount, createdBy: c.createdBy, createdAt: c.createdAt,
     };
   }
 
@@ -227,7 +301,8 @@ export class CompetitorService {
     if (!text) return { error: 'URL か店の名前を入れてください' };
     const { store } = this.deps;
     const rows = await store.list(who.tenantId);
-    if (rows.filter((c) => c.status === 'watching').length >= COMPETITORS_MAX) return { error: `競合は ${COMPETITORS_MAX} 社までです。外してから入れてください` };
+    const max = competitorsMax(competitorAutoMax((await this.deps.repo.getTenantSettings(who.tenantId)).competitors));
+    if (rows.filter((c) => c.status === 'watching').length >= max) return { error: `競合は ${max} 社までです。外してから入れてください` };
     if (this.deps.externalAllowed && !(await this.deps.externalAllowed(who.tenantId))) return { error: '社内の機械だけで AI を使う会社では、競合の分析を使えません' };
     const fetcher = this.fetcher(who.tenantId);
     const robots = this.robotsFor(who.tenantId, fetcher);
@@ -334,7 +409,7 @@ export class CompetitorService {
       const periods = [...new Set(all.map((f) => f.period))].sort().reverse();
       const pick = (p: string | undefined) => all.filter((f) => f.period === p).map((f) => ({ kind: f.kind, text: f.text, sourceUrl: f.sourceUrl }));
       subjects.push({
-        name: v.name || 'Google Maps の店（名前を引けませんでした）', url: v.url, distanceM: v.distanceM,
+        name: v.name || 'Google Maps の店（名前を引けませんでした）', url: v.url, distanceM: v.distanceM, rating: v.rating, ratingCount: v.ratingCount,
         facts: pick(periods[0]), previous: pick(periods[1]), readNote: c.lastReadAt ? c.readNote : 'まだ読んでいません',
       });
     }
@@ -385,7 +460,9 @@ export class CompetitorService {
     if (client) {
       try {
         const hits = await client.search(`${companyName} ${address}`.trim());
-        selfPlace = hits.find((h) => sameName(h.name, companyName)) ?? null;
+        // 地図の名前はかな書き・略称のことがあるため、Web サイトが会社情報と同じものを先に自社とみなす
+        const own = hostOf(settings.company.website);
+        selfPlace = (own ? hits.find((h) => hostOf(h.website) === own) : undefined) ?? hits.find((h) => sameName(h.name, companyName)) ?? null;
         if (selfPlace?.lat != null && selfPlace.lng != null) geo = { lat: selfPlace.lat, lng: selfPlace.lng };
         if (!geo && address) {
           const at = (await client.search(address))[0];
@@ -416,6 +493,7 @@ export class CompetitorService {
       ...summary, area: { local: area.local, radiusM: area.radiusM, keyword: area.keyword, reason: area.reason },
       pagesRead: reading.read, pagesFailed: reading.failed, updatedAt: new Date().toISOString(),
       geo: geo ? { ...geo, at: new Date().toISOString() } : null,
+      selfPlaceId: selfPlace?.id ?? null,
     };
     await this.deps.store.saveProfile(who.tenantId, profile);
     const missingGeo = profile.area.local && !geo && !mapNote ? '地図から自社の場所を引けませんでした（会社情報の住所を確かめてください）' : mapNote;
@@ -430,7 +508,8 @@ export class CompetitorService {
     const { profile, selfPlaceId, places, mapNote } = built;
     const rows = await store.list(who.tenantId);
     const manual = rows.filter((c) => c.origin === 'manual' && c.status === 'watching').length;
-    const room = Math.max(0, Math.min(COMPETITORS_AUTO_MAX, COMPETITORS_MAX - manual));
+    const autoMax = competitorAutoMax((await this.deps.repo.getTenantSettings(who.tenantId)).competitors);
+    const room = Math.max(0, Math.min(autoMax, competitorsMax(autoMax) - manual));
     const removedPlaces = new Set(rows.filter((c) => c.status === 'removed' && c.placeId).map((c) => c.placeId!));
     const removedOrigins = new Set(rows.filter((c) => c.status === 'removed' && c.url).map((c) => safeOrigin(c.url)));
     const manualOrigins = new Set(rows.filter((c) => c.origin === 'manual' && c.url).map((c) => safeOrigin(c.url)));
@@ -447,20 +526,28 @@ export class CompetitorService {
         note = note || '地図から探せませんでした';
       } else {
         let hits: PlaceHit[] = [];
+        const fromKeyword = new Set<string>();
+        const radius = profile.area.radiusM ?? 2000;
         try {
-          hits = built.types.length
-            ? await places.nearby(profile.geo, profile.area.radiusM ?? 2000, built.types)
-            : await places.search(profile.area.keyword || profile.business, { lat: profile.geo.lat, lng: profile.geo.lng, radiusM: profile.area.radiusM ?? 2000 });
+          // 種類（医院・店など）は広すぎることがあるため、業種の言葉（例: 歯科）での検索と合わせる
+          const byKeyword = await places.search(profile.area.keyword || profile.business, { lat: profile.geo.lat, lng: profile.geo.lng, radiusM: radius });
+          const byType = built.types.length ? await places.nearby(profile.geo, radius, built.types) : [];
+          const seen = new Set<string>();
+          hits = [...byKeyword, ...byType].filter((h) => (seen.has(h.id) ? false : (seen.add(h.id), true)));
+          for (const h of byKeyword) fromKeyword.add(h.id);
         } catch (err) {
           note = err instanceof PlacesUnavailableError ? err.message : '地図から探せませんでした';
         }
-        const radius = profile.area.radiusM ?? 2000;
+        const ownHosts = new Set([hostOf(settings.company.website), hostOf(profile.website)].filter(Boolean));
         const pool = hits.filter((h) => h.id !== selfPlaceId && !removedPlaces.has(h.id) && !manualPlaces.has(h.id) && !sameName(h.name, companyName)
+          && !(h.website && ownHosts.has(hostOf(h.website)))
           && h.lat !== null && h.lng !== null && distanceM(profile.geo!, { lat: h.lat, lng: h.lng }) <= radius)
-          .sort((a, b) => distanceM(profile.geo!, { lat: a.lat!, lng: a.lng! }) - distanceM(profile.geo!, { lat: b.lat!, lng: b.lng! }))
-          .slice(0, 15);
+          // 業種の言葉で見つけたものを先に、それぞれ近い順（種類だけで見つけたものは業種が違うことが多い）
+          .sort((a, b) => (Number(!fromKeyword.has(a.id)) - Number(!fromKeyword.has(b.id)))
+            || distanceM(profile.geo!, { lat: a.lat!, lng: a.lng! }) - distanceM(profile.geo!, { lat: b.lat!, lng: b.lng! }))
+          .slice(0, Math.max(20, room * 2));
         const candidates: Candidate[] = pool.map((h) => ({ name: h.name, url: h.website, primaryType: h.primaryType, summary: '' }));
-        const kept = (await checkCandidates(r.llm, profile, companyName, candidates)).slice(0, room);
+        const kept = (await checkCandidates(r.llm, profile, companyName, candidates, profile.website)).slice(0, room);
         for (const k of kept) {
           const h = pool[k.index]!;
           keep.push(await store.add(who.tenantId, { origin: 'map', placeId: h.id, name: '', url: '', lat: h.lat, lng: h.lng, reason: k.reason, createdBy: who.userId }));
@@ -468,7 +555,7 @@ export class CompetitorService {
       }
     } else {
       const exclude = rows.map((c) => c.name || c.url).filter(Boolean);
-      const suggested = await suggestCompetitors(r.llm, profile, companyName, exclude);
+      const suggested = await suggestCompetitors(r.llm, profile, companyName, exclude, room);
       const candidates: Candidate[] = [];
       for (const sgt of suggested) {
         const origin = safeOrigin(sgt.url);
@@ -568,6 +655,16 @@ export class CompetitorService {
   }
 }
 
+/** URL のホスト（www. を除く。読めなければ空）。自社の見分けに使う。 */
+function hostOf(url: string | null | undefined): string {
+  if (!url) return '';
+  try {
+    return new URL(url).hostname.replace(/^www\./, '').toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
 function safeOrigin(url: string): string {
   try {
     return new URL(url).origin;
@@ -578,7 +675,7 @@ function safeOrigin(url: string): string {
 
 /** 画面と秘書に返す自社の像（位置は出さない）。 */
 function publicProfile(p: CompetitorProfile): CompetitorProfile {
-  const { geo: _g, ...rest } = p;
+  const { geo: _g, selfPlaceId: _s, ...rest } = p;
   return rest;
 }
 

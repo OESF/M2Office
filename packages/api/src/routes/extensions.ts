@@ -12,7 +12,7 @@
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import {
-  CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, INVENTORY_FEATURES, SIGNAGE_EXTENSION_ID, SIGNAGE_JINGLES, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COLUMN_INDUSTRIES, type WebColumnSettings, type HrSettings, type InventorySettings, type RiskLevel, type SignageSettings,
+  CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, INVENTORY_FEATURES, SIGNAGE_EXTENSION_ID, SIGNAGE_JINGLES, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, COLUMN_INDUSTRIES, type WebColumnSettings, type HrSettings, type InventorySettings, type RiskLevel, type SignageSettings,
 } from '@m2office/shared';
 import {
   bundledConnection, builtinSection, consentSnapshot, encodeFiles, unpackExtension, EXTENSION_FILE_MAX_BYTES,
@@ -124,6 +124,8 @@ export function extensionsRoute(deps: AppDeps) {
         ...(e.pkg.manifest.id === WEB_COLUMNS_EXTENSION_ID ? { webColumns: settings.webColumns, columnAiUsage } : {}),
         // 問い合わせの記録: 窓口のアカウント（第33.18節）。アドレスだけを返す
         ...(e.pkg.manifest.id === INQUIRIES_EXTENSION_ID ? { inquiries: settings.inquiries } : {}),
+        // 競合の分析: 地図の鍵を預けたか（第36.18節）。鍵そのものは返さない
+        ...(e.pkg.manifest.id === COMPETITORS_EXTENSION_ID ? { competitors: settings.competitors } : {}),
       })),
     });
   });
@@ -410,6 +412,35 @@ export function extensionsRoute(deps: AppDeps) {
     });
     if ('error' in res) return c.json({ error: res.error }, 400);
     return c.json({ ok: true, webhookUrl: `${tenantOrigin(c.req.header('origin'), c.req.header('host'))}/v1/hooks/line/${res.key}` });
+  });
+
+  /**
+   * 競合の分析の地図の鍵を預ける（第36.18節）。Google Cloud コンソールで作った API キーで、Places API を使えるかを確かめてから預ける。
+   * 開発の見本の会社では確かめない。
+   */
+  app.put(`/${COMPETITORS_EXTENSION_ID}/map-key`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const body = await c.req.json<{ key?: unknown }>().catch(() => ({} as { key?: unknown }));
+    const problem = await deps.competitors.service.setMapKey({ tenantId: tenant.id, userId: user.id }, typeof body.key === 'string' ? body.key.slice(0, 200) : '',
+      deps.connector.sourceFor(tenant.id) === 'mock');
+    if (problem) return c.json({ error: problem }, 400);
+    return c.json({ ok: true });
+  });
+
+  /** 競合の分析の設定（自動で覚える数。第 0.239.0 版）。 */
+  app.put(`/${COMPETITORS_EXTENSION_ID}/settings`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const body = await c.req.json<{ autoMax?: unknown }>().catch(() => ({} as { autoMax?: unknown }));
+    const problem = await deps.competitors.service.setAutoMax({ tenantId: tenant.id, userId: user.id }, Number(body.autoMax));
+    if (problem) return c.json({ error: problem }, 400);
+    return c.json({ ok: true });
+  });
+
+  /** 競合の分析の地図の鍵を外す。 */
+  app.delete(`/${COMPETITORS_EXTENSION_ID}/map-key`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    await deps.competitors.service.removeMapKey({ tenantId: tenant.id, userId: user.id });
+    return c.json({ ok: true });
   });
 
   /** LINE 公式アカウントを外す。受け口も止める（問い合わせは消さない）。 */

@@ -14,7 +14,7 @@ import { JinglePlayer } from './signage-audio.js';
 import { api, ApiError, describeError, type AccessOptions, type ExtensionView, type HrProposalField, type ScopeValue } from './api.js';
 import {
   INVENTORY_FEATURES, SIGNAGE_DEFAULT_COLOR, SIGNAGE_JINGLES, type HrSettings, type InventoryBookingSource, type InventoryFeature, type InventorySettings,
-  type SignageSettings, type SignageSound, type SignageSource, COLUMN_INDUSTRIES, COLUMN_RULE_SET_LABELS, type WebColumnSettings, type InquirySettings,
+  type SignageSettings, type SignageSound, type SignageSource, COLUMN_INDUSTRIES, COLUMN_RULE_SET_LABELS, type WebColumnSettings, type InquirySettings, COMPETITORS_AUTO_RANGE, competitorAutoMax, competitorsMax, type CompetitorSettings,
 } from '@m2office/shared';
 import { HelpTip, Markdown } from './help.js';
 import { ScopeEditor, ScopeField, useAccessOptions } from './Scope.js';
@@ -274,6 +274,7 @@ function InstalledCard({ item: x, busy, focused = false, options, onChanged, onT
       {x.signage && on && <SignageFields settings={x.signage} busy={busy} onChanged={onChanged} />}
       {x.webColumns && on && <WebColumnsFields settings={x.webColumns} usage={x.columnAiUsage ?? null} busy={busy} onChanged={onChanged} />}
       {x.inquiries && on && <InquiryMailboxFields settings={x.inquiries} busy={busy} onChanged={onChanged} />}
+      {x.competitors && on && <CompetitorMapKeyFields settings={x.competitors} busy={busy} onChanged={onChanged} />}
       <div className="row small">
         <button className="link" onClick={() => setOpen(!open)}>{open ? '詳細を閉じる' : '詳細'}</button>
         {/* 内蔵の拡張は削除しない。スイッチで切る（データは消えない。第12.13節） */}
@@ -598,6 +599,53 @@ function InquiryLineFields({ settings, busy, onChanged }: { settings: InquirySet
           <button className="btn ghost small" onClick={() => void copyText(url).then((ok) => { if (ok) { setCopied(true); setTimeout(() => setCopied(false), 1500); } })}>{copied ? 'コピーしました' : 'コピー'}</button>
         </div>
       )}
+      {error && <p className="error">{error}</p>}
+    </div>
+  );
+}
+
+/**
+ * 競合の分析の設定（仕様書 第36.18節）。自動で覚える数（既定 10。都心と山あい・業種で同業の数が違うため）と、地図の鍵（Google Cloud コンソールで作った API キー。鍵そのものは画面に出さない）。
+ */
+function CompetitorMapKeyFields({ settings, busy, onChanged }: { settings: CompetitorSettings; busy: boolean; onChanged: () => void }) {
+  const [key, setKey] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [working, setWorking] = useState(false);
+  const save = () => {
+    setWorking(true);
+    api.admin.setCompetitorMapKey(key.trim()).then(() => { setKey(''); setError(null); onChanged(); })
+      .catch((e) => setError(describeError(e, '預けられませんでした'))).finally(() => setWorking(false));
+  };
+  const remove = () => {
+    if (!window.confirm('地図の鍵を外しますか。近くの同業を地図から探せなくなります（覚えた競合は消えません）')) return;
+    setWorking(true);
+    api.admin.removeCompetitorMapKey().then(() => { setError(null); onChanged(); })
+      .catch((e) => setError(describeError(e, '外せませんでした'))).finally(() => setWorking(false));
+  };
+  const autoMax = competitorAutoMax(settings);
+  const changeAutoMax = (n: number) => {
+    setWorking(true);
+    api.admin.setCompetitorAutoMax(n).then(() => { setError(null); onChanged(); })
+      .catch((e) => setError(describeError(e, '変えられませんでした'))).finally(() => setWorking(false));
+  };
+  return (
+    <div className="small ext-inventory">
+      <div className="row wrap">
+        <label className="row">自動で覚える数
+          <select value={autoMax} disabled={busy || working} onChange={(e) => changeAutoMax(Number(e.target.value))} aria-label="自動で覚える競合の数">
+            {Array.from({ length: COMPETITORS_AUTO_RANGE.max - COMPETITORS_AUTO_RANGE.min + 1 }, (_, i) => i + COMPETITORS_AUTO_RANGE.min).map((n) => <option key={n} value={n}>{n} 社</option>)}
+          </select>
+        </label>
+        <span className="muted">（手で入れるのを含めて {competitorsMax(autoMax)} 社まで）</span>
+      </div>
+      <div className="row wrap">
+        <span>地図の鍵: {settings.mapKey ? <strong>預けています</strong> : <span className="muted">預けていません</span>}</span>
+        {settings.mapKey && <button className="btn ghost small" disabled={busy || working} onClick={remove}>外す</button>}
+      </div>
+      <div className="row wrap">
+        <input type="password" value={key} autoComplete="off" placeholder="Google Cloud の API キー（AIza…）" aria-label="地図の鍵" onChange={(e) => setKey(e.target.value)} />
+        <button className="btn small" disabled={busy || working || !key.trim()} onClick={save}>{working ? '確かめています…' : settings.mapKey ? '預け直す' : '預ける'}</button>
+      </div>
       {error && <p className="error">{error}</p>}
     </div>
   );

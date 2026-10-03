@@ -1799,5 +1799,5 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .competitors-report-body { padding: 4px 0 8px; overflow-x: auto; }
 .gmaps { font-family: Roboto, sans-serif; }
 @media (max-width: 640px) {
-  .competitors-table th:nth-child(3), .competitors-table td:nth-child(3), .competitors-table th:nth-child(5), .competitors-table td:nth-child(5) { display: none; }
+  .competitors-table th:nth-child(4), .competitors-table td:nth-child(4), .competitors-table th:nth-child(6), .competitors-table td:nth-child(6) { display: none; }
 }

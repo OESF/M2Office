@@ -5494,6 +5494,26 @@ console.log('\n■ 69. 競合の分析の段 1（探す・読む・事実・レ�
       ? ok('社内のアドレスは入れない。外した競合は、探し直しても入れない')
       : ng('入れる・外すが違う', JSON.stringify({ bad: bad.body, del: del.status, names: (o2?.competitors ?? []).map((c) => c.name) }).slice(0, 300));
 
+    // 地図の鍵（管理者だけ。鍵そのものは返さない）
+    const keyByMember = await call('a', '/v1/admin/extensions/competitors/map-key', { method: 'PUT', body: JSON.stringify({ key: 'AIzaSmokeMapKey0000000000000000000000' }) }, 'member');
+    const keySet = await call('a', '/v1/admin/extensions/competitors/map-key', { method: 'PUT', body: JSON.stringify({ key: 'AIzaSmokeMapKey0000000000000000000000' }) });
+    const extList = (await call('a', '/v1/admin/extensions')).body;
+    const ce = (extList.items ?? extList.extensions ?? []).find((x) => x.competitors);
+    const keyOff = await call('a', '/v1/admin/extensions/competitors/map-key', { method: 'DELETE' });
+    keyByMember.status === 403 && keySet.status === 200 && ce?.competitors?.mapKey?.setBy && !JSON.stringify(extList).includes('AIzaSmokeMapKey') && keyOff.status === 200
+      ? ok('地図の鍵を預けられるのは管理者だけ。預けたことだけを返し、鍵そのものは返さない')
+      : ng('地図の鍵が違う', JSON.stringify({ member: keyByMember.status, set: keySet.body, mapKey: ce?.competitors?.mapKey, off: keyOff.status }).slice(0, 300));
+    await owner.query(`delete from tenant_credentials where tenant_id = 't-alpha' and kind = 'places'`);
+    // 自動で覚える数（管理者だけ。1〜20）
+    const maxByMember = await call('a', '/v1/admin/extensions/competitors/settings', { method: 'PUT', body: JSON.stringify({ autoMax: 3 }) }, 'member');
+    const maxBad = await call('a', '/v1/admin/extensions/competitors/settings', { method: 'PUT', body: JSON.stringify({ autoMax: 50 }) });
+    const maxOk = await call('a', '/v1/admin/extensions/competitors/settings', { method: 'PUT', body: JSON.stringify({ autoMax: 3 }) });
+    const ext2 = (await call('a', '/v1/admin/extensions')).body;
+    const ce2 = (ext2.items ?? ext2.extensions ?? []).find((x) => x.competitors);
+    maxByMember.status === 403 && maxBad.status === 400 && maxOk.status === 200 && ce2?.competitors?.autoMax === 3
+      ? ok('自動で覚える数を変えられるのは管理者だけ（1〜20 社）') : ng('自動で覚える数が違う', JSON.stringify({ member: maxByMember.status, bad: maxBad.status, ok: maxOk.status, v: ce2?.competitors?.autoMax }));
+
+
     // 秘書から: 付属の業務「競合の分析」（読むだけ）
     const job = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: 'competitors:analyze', input: { request: '競合の動きは？' } }) }, 'member');
     const jobRun = job.body?.runId ? await waitFor('a', job.body.runId, ['completed', 'failed', 'awaiting_approval'], 20000, 'member') : null;

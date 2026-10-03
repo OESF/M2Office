@@ -63,6 +63,7 @@ function Row({ c, open, onToggle, onRemove, busy }: { c: Competitor; open: boole
           {c.url && <div className="small"><a href={c.url} target="_blank" rel="noopener noreferrer nofollow">{new URL(c.url).hostname}</a></div>}
         </td>
         <td>{km(c.distanceM)}</td>
+        <td>{c.rating !== null ? <>{c.rating.toFixed(1)}<span className="muted small">（{c.ratingCount ?? 0}）</span></> : '—'}</td>
         <td>
           {COMPETITOR_ORIGIN_LABELS[c.origin]}
           {c.origin === 'map' && <div className="small muted"><span translate="no" className="gmaps">Google Maps</span>{c.attributions.length ? ` / ${c.attributions.join('、')}` : ''}</div>}
@@ -73,7 +74,7 @@ function Row({ c, open, onToggle, onRemove, busy }: { c: Competitor; open: boole
       </tr>
       {open && (
         <tr className="competitors-open">
-          <td colSpan={6}>
+          <td colSpan={7}>
             {c.reason && <p className="small muted">{c.reason}</p>}
             <Facts id={c.id} />
           </td>
@@ -137,7 +138,7 @@ export function Competitors({ changeKey = '' }: { changeKey?: string }) {
             {p ? (
               <>
                 <strong>{p.business || '自社の像'}</strong>
-                <span className="muted">　{p.area.local ? `半径 ${km(p.area.radiusM)}` : '全国'}{p.website ? `・${new URL(p.website).hostname}` : ''}</span>
+                <span className="muted">　{p.area.local ? `半径 ${km(p.area.radiusM)}` : '全国'}{p.website ? `・${new URL(p.website).hostname}` : ''}{o.selfRating ? `・Google の評価 ${o.selfRating.rating.toFixed(1)}（${o.selfRating.count}）` : ''}</span>
                 {p.area.reason && <div className="small muted">{p.area.reason}</div>}
               </>
             ) : <span className="muted">まだ探していません</span>}
@@ -162,7 +163,7 @@ export function Competitors({ changeKey = '' }: { changeKey?: string }) {
 
       {o.competitors.length > 0 ? (
         <table className="table competitors-table">
-          <thead><tr><th>競合</th><th>距離</th><th>見つけ方</th><th>読んだ日</th><th>事実</th><th /></tr></thead>
+          <thead><tr><th>競合</th><th>距離</th><th><span translate="no">Google</span> の評価</th><th>見つけ方</th><th>読んだ日</th><th>事実</th><th /></tr></thead>
           <tbody>
             {o.competitors.map((c) => (
               <Row key={c.id} c={c} open={openId === c.id} busy={busy} onToggle={() => setOpenId(openId === c.id ? null : c.id)}

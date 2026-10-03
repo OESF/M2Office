@@ -20,7 +20,7 @@ import type { CardCorners,
   SignageAsset, SignageEntry, SignageScreen, SignageSettings, SignageInterruptInput, SignageInterruptView, SignagePhrase, SignageSound, SignageSource,
   ColumnWordPress, WebColumn, WebColumnSettings, WebColumnVersion,
   Inquiry, InquiryDetail, InquiryParty, InquiryTask, InquiryReply, InquiryMailSkipped, InquiryMonthStats, InquirySettings, InquiryFaqTopic,
-  CompetitorOverview, CompetitorFact, CompetitorReport,
+  CompetitorOverview, CompetitorFact, CompetitorReport, CompetitorSettings,
 } from '@m2office/shared';
 import { debugMode, recordCall } from './debug.js';
 
@@ -742,6 +742,8 @@ export interface ExtensionView {
   columnAiUsage?: { used: number; limit: number };
   /** 問い合わせの記録の設定（窓口のアカウント。第33.18節）。問い合わせの記録のときだけある。 */
   inquiries?: InquirySettings;
+  /** 競合の分析の設定（地図の鍵を預けたか。第36.18節）。競合の分析のときだけある。 */
+  competitors?: CompetitorSettings;
 }
 
 /** 問い合わせを残した結果（仕様書 第33.17節）。どの続きか決まらなければ `ambiguous` と候補。 */
@@ -1966,6 +1968,11 @@ export const api = {
     connectInquiryLine: (secret: string, token: string) =>
       call<{ ok: true; webhookUrl: string }>('/admin/extensions/inquiries/line', { method: 'PUT', body: JSON.stringify({ secret, token }) }),
     disconnectInquiryLine: () => call<{ ok: true }>('/admin/extensions/inquiries/line', { method: 'DELETE' }),
+    /** 競合の分析の地図の鍵（Google Cloud の API キー）を預ける。Places API を使えるかを確かめてから預ける。 */
+    setCompetitorMapKey: (key: string) => call<{ ok: true }>('/admin/extensions/competitors/map-key', { method: 'PUT', body: JSON.stringify({ key }) }),
+    removeCompetitorMapKey: () => call<{ ok: true }>('/admin/extensions/competitors/map-key', { method: 'DELETE' }),
+    /** 競合の分析で自動で覚える数（1〜20）を変える。 */
+    setCompetitorAutoMax: (autoMax: number) => call<{ ok: true }>('/admin/extensions/competitors/settings', { method: 'PUT', body: JSON.stringify({ autoMax }) }),
     setWebColumnSettings: (patch: Partial<Omit<WebColumnSettings, 'enabled' | 'wordpress'>>) =>
       call<{ ok: true; webColumns: WebColumnSettings }>('/admin/extensions/web-columns/settings', { method: 'PUT', body: JSON.stringify(patch) }),
     /** WordPress の入れ先とアプリケーションパスワードを預ける。つながるかを確かめてから預ける。 */

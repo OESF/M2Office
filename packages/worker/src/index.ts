@@ -148,7 +148,7 @@ const inquiryWatch = new InquiryWatch({ store: inquiryStore, repo, logger: log }
 // 競合の分析（内蔵の拡張。仕様書 第36章）。受け付けた探す・読む作業を 1 つずつ行う（相手のサイトは間を空けて 1 本ずつ読む）
 const competitorStore = new PostgresCompetitorStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
 const competitors = new CompetitorService({
-  store: competitorStore, repo, llmFor: (tenantId) => ai.llmFor(tenantId), placesKeyFor: async (tenantId) => (await ai.geminiFor(tenantId)).apiKey,
+  store: competitorStore, repo, box, llmFor: (tenantId) => ai.llmFor(tenantId), placesKeyFor: async (tenantId) => (await ai.geminiFor(tenantId)).apiKey,
   sourceFor: (tenantId) => connector.sourceFor(tenantId), externalAllowed: async (tenantId) => !isLocalPolicy(await ai.policyFor(tenantId)),
   userAgent: crawlerUserAgent(appVersion(), process.env['CRAWLER_CONTACT_URL']), logger: log,
 });

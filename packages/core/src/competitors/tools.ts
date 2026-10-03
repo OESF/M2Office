@@ -40,6 +40,7 @@ function brief(c: Competitor) {
     name: c.name || '（名前を引けませんでした）', url: c.url, foundBy: COMPETITOR_ORIGIN_LABELS[c.origin],
     distance: c.distanceM !== null ? `${(c.distanceM / 1000).toFixed(1)} km` : null, reason: c.reason,
     lastRead: c.lastReadAt, facts: c.factCount, note: c.readNote || null,
+    googleRating: c.rating !== null ? `${c.rating}（${c.ratingCount ?? 0} 件）` : null,
     // 地図の情報を見せるときの表記（訳さない。第36.13節）
     source: c.origin === 'map' ? 'Google Maps' : null,
   };
@@ -66,6 +67,7 @@ export const competitorsList: Tool = {
       profile: o.profile ? {
         business: o.profile.business, area: o.profile.area.local ? `半径 ${((o.profile.area.radiusM ?? 0) / 1000).toFixed(1)} km` : '全国（商圏なし）',
         areaReason: o.profile.area.reason, website: o.profile.website || null,
+        googleRating: o.selfRating ? `${o.selfRating.rating}（${o.selfRating.count} 件）` : null,
       } : null,
       competitors: o.competitors.map(brief),
       working: o.job ? o.job.message || (o.job.kind === 'discover' ? '競合を探しています' : '見回っています') : null,

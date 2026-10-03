@@ -7,6 +7,13 @@
       "runtimeArgs": ["run", "dev"],
       "port": 3100,
       "url": "http://a.lvh.me:3100"
+    },
+    {
+      "name": "dev-https",
+      "runtimeExecutable": "env",
+      "runtimeArgs": ["WEB_HTTPS=true", "npm", "run", "dev"],
+      "port": 3100,
+      "url": "https://a.lvh.me:3100"
     }
   ]
 }
