@@ -48,7 +48,7 @@ Hono の外側（Node のサーバーの `upgrade`）で受け、ログイン状
 停止中の会社では開けません。送りは 16 kHz、受けは 24 kHz の PCM で、**音はどこにも書き出しません**。
 終わったときに、聞こえた文字と応答を会話ログへ 1 往復として残します。
 
-音声の相手にはツールを 2 つ渡します（仕様書 第10.5.7節）。`ask_secretary` は本人の依頼を**画面の入力と同じ取次**（`Secretary.respond`）に渡し、
+音声の相手にはツールを 2 つ渡します（仕様書 第10.5.7節）。`handle_request` は本人の依頼を**画面の入力と同じ取次**（`Secretary.respond`）に渡し、
 答えを音声の相手へ返します。**声で返すのが基本**で、答えが大きいとき（`needsCanvas`）だけ画面へ `{ type: 'secretary', request, reply }` を送り、
 秘書のキャンバスに根拠や業務を開くボタンと一緒に出します（仕様書 第6.2.0節）。音声の相手には `shown_on_screen` で出したかを伝えます。
 `show_on_canvas` は、本人に「画面に出して」と頼まれたときに、直前の答え（または頼まれたもの）を画面へ送ります。直前の答えは対話の間だけ持ちます。
@@ -270,6 +270,12 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/inquiries/:id/events` ／ `/tasks` | その問い合わせに続きを足す（`text`）／ 次にやることを足す（`what`・`due`・`assignee`） |
 | `POST /v1/inquiries/events/:eventId/split` | 会話の履歴 1 つを、別の問い合わせに分ける（その履歴から生まれた次にやることも移す。最初の履歴は 400） |
 | `PATCH /v1/inquiries/tasks/:taskId` | 次にやることを直す・済みにする（`what`・`due`・`assignee`・`done`） |
+| `POST /v1/inquiries/mail/check` ／ `GET /v1/inquiries/mail/skipped` | 窓口のアカウントの新しいメールを今すぐ読む（会社ごとに 30 秒に 1 回まで）／ 問い合わせでないと見分けたメール（仕様書 第33.18節） |
+| `POST /v1/inquiries/mail/:messageId/promote` ／ `GET /v1/inquiries/events/:eventId/mail` | 問い合わせでないとしたメールを問い合わせにする ／ 会話の履歴のメールの中身（窓口のアカウントから読む。本文は写していない） |
+| `POST /v1/inquiries/:id/replies` ／ `PUT`・`DELETE /v1/inquiries/replies/:replyId` | 返事の下書きを AI に書かせる（`instruction`）／ 直す（`to`・`subject`・`body`。下書きのときだけ）・削除 |
+| `POST /v1/inquiries/replies/:replyId/submit` | 返事を承認へ進める（業務「問い合わせの返事を送る」。管理者か承認者の承認の後に、窓口のアカウントから届いた宛先で送る） |
+| `GET /v1/inquiries/review` | 月の振り返り（`month`: YYYY-MM。無ければ先月。数はプログラムが数える） |
+| `POST /v1/admin/extensions/inquiries/mailbox/connect` ／ `DELETE /v1/admin/extensions/inquiries/mailbox` | 管理者: 窓口のアカウントをつなぐ（Google の認可の URL。アカウントを選ばせる。見本の会社ではすぐつながる）／ 外す（Google の許可も取り消す）。戻りは `/v1/oauth/google/callback` |
 | `GET /v1/public/inventory/:key` ／ `:key.json` | **認証なし**。在庫の公開のページ（他のサイトの iframe に入れてよい。`frame-ancestors *`・スクリプトなし）とデータ（`Access-Control-Allow-Origin: *`）。作り直して置いた中身だけを返す。知らない鍵・止めた公開・公開を切った会社はどれも 404 |
 | `POST /v1/hooks/inventory/:key` | **認証なしの受け口**。予約のシステムの Webhook を受ける（第29.13.1節）。会社は鍵（32 文字）のハッシュから引き、ホスト名は見ない。64 KB を超えれば 413。知らない鍵・止めた受け口・引き当てを切った会社はどれも 404、予約として読めなければ 422。項目の対応は最初の予約から推論して受け口に覚える。予約した人の名前・連絡先は残さない |
 | `GET /v1/notices` | 本人宛ての有効な社内のお知らせ（取り下げ・期間切れ・本人が済んだものを除く。`isNew`・`daysLeft` つき。仕様書 第10.15節） |

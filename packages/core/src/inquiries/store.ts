@@ -1,5 +1,5 @@
 /**
- * @file 問い合わせの記録の置き場（仕様書 第33.13節・第33.17節、移行 065）。PostgreSQL と、自動テスト用のメモリの 2 つ。
+ * @file 問い合わせの記録の置き場（仕様書 第33.13節・第33.17節・第33.18節、移行 065〜067）。PostgreSQL と、自動テスト用のメモリの 2 つ。
  *
  * 問い合わせは利用範囲の中で会社で共有する。会社の境界はデータベースの行単位の制限でも効く。
  * 利用者の名前は置き場では持たず、処理（InquiryService）が埋める。
@@ -8,7 +8,7 @@
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import type {
-  Inquiry, InquiryChannel, InquiryEvent, InquiryParty, InquiryStatus, InquiryTask, InquiryTemperature,
+  Inquiry, InquiryChannel, InquiryEvent, InquiryMailSkipped, InquiryMonthStats, InquiryParty, InquiryReply, InquiryReplyStatus, InquiryStatus, InquiryTask, InquiryTemperature,
 } from '@m2office/shared';
 
 /** 新しい問い合わせ。 */
@@ -50,6 +50,47 @@ export interface NewInquiryEvent {
   body: string | null;
   createdBy: string;
   at?: string;
+  /** 窓口のアカウントのメールなら、元のメールの参照と届いた宛先。 */
+  mail?: { messageId: string; threadId: string; to: string } | null;
+}
+
+/** 窓口のアカウントで見たメールの記録（同じメールを 2 度読まない。問い合わせでないものの一覧）。 */
+export interface MailLog {
+  messageId: string;
+  threadId: string;
+  direction: 'in' | 'out';
+  status: 'inquiry' | 'skipped';
+  inquiryId: string | null;
+  from: string;
+  subject: string;
+  to: string;
+  reason: string;
+  receivedAt: string;
+}
+
+/** 足す返事。 */
+export interface NewReply {
+  inquiryId: string;
+  to: string;
+  from: string;
+  subject: string;
+  body: string;
+  replyToMessage: string | null;
+  threadId: string | null;
+  createdBy: string;
+}
+
+/** 返事と、返す元のメール。 */
+export type StoredReply = InquiryReply & { replyToMessage: string | null; threadId: string | null };
+
+/** 月の振り返りに数える 1 件。 */
+export interface MonthRow {
+  channel: InquiryChannel;
+  source: string;
+  category: string;
+  temperature: InquiryTemperature;
+  /** 最初の履歴が窓口のアカウントのメールなら、その宛先。 */
+  mailTo: string | null;
 }
 
 /** 期限の見張りに使う、次にやること。 */
@@ -84,6 +125,31 @@ export interface InquiryStore {
   idle(tenantId: string, before: string): Promise<Inquiry[]>;
   /** この日時より前の会話の履歴の原文を消す（要約は残す）。消した数。 */
   forgetBodies(tenantId: string, before: string): Promise<number>;
+
+  // ---- 段 2: 窓口のアカウント・返事・月の振り返り（第33.18節） ----
+  /** すでに見たメール（渡した ID のうち）。 */
+  seenMail(tenantId: string, messageIds: string[]): Promise<Set<string>>;
+  /** 見たメールを記録する（同じ ID なら置き換える）。 */
+  logMail(tenantId: string, m: MailLog): Promise<void>;
+  mailLog(tenantId: string, messageId: string): Promise<MailLog | null>;
+  /** そのスレッドを問い合わせにしたなら、その問い合わせ。 */
+  inquiryOfThread(tenantId: string, threadId: string): Promise<string | null>;
+  /** 問い合わせでないと見分けたメール（新しい順）。 */
+  skippedMails(tenantId: string, limit?: number): Promise<InquiryMailSkipped[]>;
+  mailCursor(tenantId: string): Promise<string | null>;
+  setMailCursor(tenantId: string, at: string): Promise<void>;
+  addReply(tenantId: string, r: NewReply): Promise<string>;
+  /** 問い合わせの返事（新しい順）。 */
+  replies(tenantId: string, inquiryId: string): Promise<InquiryReply[]>;
+  reply(tenantId: string, id: string): Promise<StoredReply | null>;
+  updateReply(tenantId: string, id: string, patch: Partial<{ to: string; subject: string; body: string; status: InquiryReplyStatus; runId: string | null; sentMessageId: string; sentAt: string }>): Promise<void>;
+  deleteReply(tenantId: string, id: string): Promise<void>;
+  /** 対応中で、最後の履歴がお客様から届いたメール・フォーム・LINE のもの（返事を待たせている）。 */
+  waitingReplies(tenantId: string, limit?: number): Promise<Inquiry[]>;
+  /** この期間（ISO の日時。始まりを含み終わりを含まない）に最初に届いた問い合わせ。 */
+  monthRows(tenantId: string, from: string, to: string): Promise<MonthRow[]>;
+  /** 月の振り返りを記録する。すでにあれば何もせず `false`。 */
+  saveReview(tenantId: string, stats: InquiryMonthStats): Promise<boolean>;
 }
 
 interface InquiryRow {
@@ -100,7 +166,24 @@ interface TaskRow {
 
 interface EventRow {
   id: string; at: Date | string; direction: 'in' | 'out'; channel: InquiryChannel; summary: string; body: string | null; created_by: string;
+  mail_message_id: string | null; mail_thread_id: string | null; mail_to: string | null;
 }
+
+interface ReplyRow {
+  id: string; inquiry_id: string; to_address: string; from_address: string; subject: string; body: string; reply_to_message: string | null;
+  thread_id: string | null; status: InquiryReplyStatus; run_id: string | null; created_by: string; created_at: Date | string; sent_at: Date | string | null;
+}
+
+const toEvent = (r: EventRow): InquiryEvent => ({
+  id: r.id, at: iso(r.at), direction: r.direction, channel: r.channel, summary: r.summary, body: r.body, createdBy: r.created_by, createdByName: '',
+  mail: r.mail_message_id ? { messageId: r.mail_message_id, threadId: r.mail_thread_id ?? '', to: r.mail_to ?? '' } : null,
+});
+
+const toReply = (r: ReplyRow): StoredReply => ({
+  id: r.id, inquiryId: r.inquiry_id, to: r.to_address, from: r.from_address, subject: r.subject, body: r.body, status: r.status, runId: r.run_id,
+  createdBy: r.created_by, createdByName: '', createdAt: iso(r.created_at), sentAt: r.sent_at == null ? null : iso(r.sent_at),
+  replyToMessage: r.reply_to_message, threadId: r.thread_id,
+});
 
 /** 日時を ISO の文字にする（つなぎの設定で Date でも文字でも返るため）。 */
 const iso = (v: Date | string) => new Date(v).toISOString();
@@ -228,19 +311,16 @@ export class PostgresInquiryStore implements InquiryStore {
   async addEvent(tenantId: string, inquiryId: string, e: NewInquiryEvent): Promise<string> {
     const id = `iqe-${randomUUID()}`;
     await this.q(tenantId,
-      `insert into inquiry_events (id, tenant_id, inquiry_id, at, direction, channel, summary, body, created_by)
-       values ($1, $2, $3, coalesce($4::timestamptz, now()), $5, $6, $7, $8, $9)`,
-      [id, tenantId, inquiryId, e.at ?? null, e.direction, e.channel, e.summary, e.body, e.createdBy]);
+      `insert into inquiry_events (id, tenant_id, inquiry_id, at, direction, channel, summary, body, created_by, mail_message_id, mail_thread_id, mail_to)
+       values ($1, $2, $3, coalesce($4::timestamptz, now()), $5, $6, $7, $8, $9, $10, $11, $12)`,
+      [id, tenantId, inquiryId, e.at ?? null, e.direction, e.channel, e.summary, e.body, e.createdBy, e.mail?.messageId ?? null, e.mail?.threadId ?? null, e.mail?.to ?? null]);
     return id;
   }
 
   async events(tenantId: string, inquiryId: string): Promise<InquiryEvent[]> {
     const rows = await this.q<EventRow>(tenantId,
-      `select id, at, direction, channel, summary, body, created_by from inquiry_events where tenant_id = $1 and inquiry_id = $2 order by at asc, created_at asc`,
-      [tenantId, inquiryId]);
-    return rows.map((r) => ({
-      id: r.id, at: iso(r.at), direction: r.direction, channel: r.channel, summary: r.summary, body: r.body, createdBy: r.created_by, createdByName: '',
-    }));
+      `select * from inquiry_events where tenant_id = $1 and inquiry_id = $2 order by at asc, created_at asc`, [tenantId, inquiryId]);
+    return rows.map(toEvent);
   }
 
   async addTask(tenantId: string, inquiryId: string, t: { assignee: string; what: string; due: string | null; createdBy: string; eventId?: string | null }): Promise<string> {
@@ -252,13 +332,8 @@ export class PostgresInquiryStore implements InquiryStore {
   }
 
   async event(tenantId: string, eventId: string): Promise<(InquiryEvent & { inquiryId: string }) | null> {
-    const rows = await this.q<EventRow & { inquiry_id: string }>(tenantId,
-      `select id, inquiry_id, at, direction, channel, summary, body, created_by from inquiry_events where tenant_id = $1 and id = $2`, [tenantId, eventId]);
-    const r = rows[0];
-    return r ? {
-      id: r.id, inquiryId: r.inquiry_id, at: iso(r.at), direction: r.direction, channel: r.channel, summary: r.summary, body: r.body,
-      createdBy: r.created_by, createdByName: '',
-    } : null;
+    const rows = await this.q<EventRow & { inquiry_id: string }>(tenantId, `select * from inquiry_events where tenant_id = $1 and id = $2`, [tenantId, eventId]);
+    return rows[0] ? { ...toEvent(rows[0]), inquiryId: rows[0].inquiry_id } : null;
   }
 
   async moveEvent(tenantId: string, eventId: string, toInquiryId: string): Promise<void> {
@@ -319,12 +394,129 @@ export class PostgresInquiryStore implements InquiryStore {
       `update inquiry_events set body = null where tenant_id = $1 and body is not null and created_at < $2 returning id`, [tenantId, before]);
     return rows.length;
   }
+
+  async seenMail(tenantId: string, messageIds: string[]): Promise<Set<string>> {
+    if (messageIds.length === 0) return new Set();
+    const rows = await this.q<{ message_id: string }>(tenantId,
+      `select message_id from inquiry_mail_messages where tenant_id = $1 and message_id = any($2::text[])`, [tenantId, messageIds]);
+    return new Set(rows.map((r) => r.message_id));
+  }
+
+  async logMail(tenantId: string, m: MailLog): Promise<void> {
+    await this.q(tenantId,
+      `insert into inquiry_mail_messages (tenant_id, message_id, thread_id, direction, status, inquiry_id, from_text, subject, mail_to, reason, received_at)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       on conflict (tenant_id, message_id) do update set status = excluded.status, inquiry_id = excluded.inquiry_id, reason = excluded.reason`,
+      [tenantId, m.messageId, m.threadId, m.direction, m.status, m.inquiryId, m.from.slice(0, 300), m.subject.slice(0, 300), m.to, m.reason, m.receivedAt]);
+  }
+
+  async mailLog(tenantId: string, messageId: string): Promise<MailLog | null> {
+    const rows = await this.q<{ message_id: string; thread_id: string; direction: 'in' | 'out'; status: 'inquiry' | 'skipped'; inquiry_id: string | null; from_text: string; subject: string; mail_to: string; reason: string; received_at: Date | string }>(tenantId,
+      `select * from inquiry_mail_messages where tenant_id = $1 and message_id = $2`, [tenantId, messageId]);
+    const r = rows[0];
+    return r ? {
+      messageId: r.message_id, threadId: r.thread_id, direction: r.direction, status: r.status, inquiryId: r.inquiry_id, from: r.from_text,
+      subject: r.subject, to: r.mail_to, reason: r.reason, receivedAt: iso(r.received_at),
+    } : null;
+  }
+
+  async inquiryOfThread(tenantId: string, threadId: string): Promise<string | null> {
+    const rows = await this.q<{ inquiry_id: string }>(tenantId,
+      `select m.inquiry_id from inquiry_mail_messages m join inquiries i on i.tenant_id = m.tenant_id and i.id = m.inquiry_id
+        where m.tenant_id = $1 and m.thread_id = $2 and m.status = 'inquiry' order by m.received_at desc limit 1`, [tenantId, threadId]);
+    return rows[0]?.inquiry_id ?? null;
+  }
+
+  async skippedMails(tenantId: string, limit = 100): Promise<InquiryMailSkipped[]> {
+    const rows = await this.q<{ message_id: string; from_text: string; subject: string; reason: string; received_at: Date | string }>(tenantId,
+      `select message_id, from_text, subject, reason, received_at from inquiry_mail_messages
+        where tenant_id = $1 and status = 'skipped' and direction = 'in' order by received_at desc limit $2`, [tenantId, limit]);
+    return rows.map((r) => ({ messageId: r.message_id, from: r.from_text, subject: r.subject, reason: r.reason, receivedAt: iso(r.received_at) }));
+  }
+
+  async mailCursor(tenantId: string): Promise<string | null> {
+    const rows = await this.q<{ checked_until: Date | string }>(tenantId, `select checked_until from inquiry_mail_cursors where tenant_id = $1`, [tenantId]);
+    return rows[0] ? iso(rows[0].checked_until) : null;
+  }
+
+  async setMailCursor(tenantId: string, at: string): Promise<void> {
+    await this.q(tenantId,
+      `insert into inquiry_mail_cursors (tenant_id, checked_until) values ($1, $2) on conflict (tenant_id) do update set checked_until = excluded.checked_until`,
+      [tenantId, at]);
+  }
+
+  async addReply(tenantId: string, r: NewReply): Promise<string> {
+    const id = `iqr-${randomUUID()}`;
+    await this.q(tenantId,
+      `insert into inquiry_replies (id, tenant_id, inquiry_id, to_address, from_address, subject, body, reply_to_message, thread_id, created_by)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [id, tenantId, r.inquiryId, r.to, r.from, r.subject, r.body, r.replyToMessage, r.threadId, r.createdBy]);
+    return id;
+  }
+
+  async replies(tenantId: string, inquiryId: string): Promise<InquiryReply[]> {
+    const rows = await this.q<ReplyRow>(tenantId, `select * from inquiry_replies where tenant_id = $1 and inquiry_id = $2 order by created_at desc`, [tenantId, inquiryId]);
+    return rows.map((r) => { const { replyToMessage: _m, threadId: _t, ...rest } = toReply(r); return rest; });
+  }
+
+  async reply(tenantId: string, id: string): Promise<StoredReply | null> {
+    const rows = await this.q<ReplyRow>(tenantId, `select * from inquiry_replies where tenant_id = $1 and id = $2`, [tenantId, id]);
+    return rows[0] ? toReply(rows[0]) : null;
+  }
+
+  async updateReply(tenantId: string, id: string, patch: Parameters<InquiryStore['updateReply']>[2]): Promise<void> {
+    // 列名は下の固定の対応表からのみ取る。利用者の入力を SQL に埋め込まない
+    const cols: Record<string, string> = { to: 'to_address', subject: 'subject', body: 'body', status: 'status', runId: 'run_id', sentMessageId: 'sent_message_id', sentAt: 'sent_at' };
+    const sets: string[] = [];
+    const params: unknown[] = [tenantId, id];
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === undefined || !cols[k]) continue;
+      params.push(v);
+      sets.push(`${cols[k]} = $${params.length}`);
+    }
+    if (sets.length === 0) return;
+    await this.q(tenantId, `update inquiry_replies set ${sets.join(', ')}, updated_at = now() where tenant_id = $1 and id = $2`, params);
+  }
+
+  async deleteReply(tenantId: string, id: string): Promise<void> {
+    await this.q(tenantId, `delete from inquiry_replies where tenant_id = $1 and id = $2`, [tenantId, id]);
+  }
+
+  async waitingReplies(tenantId: string, limit = 50): Promise<Inquiry[]> {
+    const rows = await this.q<InquiryRow>(tenantId,
+      `${INQUIRY_SELECT}
+        join lateral (
+          select direction, channel from inquiry_events e where e.tenant_id = i.tenant_id and e.inquiry_id = i.id order by e.at desc, e.created_at desc limit 1
+        ) last on true
+        where i.tenant_id = $1 and i.status = 'open' and last.direction = 'in' and last.channel in ('mail', 'form', 'line')
+        order by i.last_at asc limit $2`, [tenantId, limit]);
+    return rows.map(toInquiry);
+  }
+
+  async monthRows(tenantId: string, from: string, to: string): Promise<MonthRow[]> {
+    const rows = await this.q<{ channel: InquiryChannel; source: string; category: string; temperature: InquiryTemperature; mail_to: string | null }>(tenantId,
+      `select i.channel, i.source, i.category, i.temperature,
+              (select e.mail_to from inquiry_events e where e.tenant_id = i.tenant_id and e.inquiry_id = i.id order by e.at asc limit 1) as mail_to
+         from inquiries i where i.tenant_id = $1 and i.first_at >= $2 and i.first_at < $3`, [tenantId, from, to]);
+    return rows.map((r) => ({ channel: r.channel, source: r.source, category: r.category, temperature: r.temperature, mailTo: r.mail_to }));
+  }
+
+  async saveReview(tenantId: string, stats: InquiryMonthStats): Promise<boolean> {
+    const rows = await this.q<{ month: string }>(tenantId,
+      `insert into inquiry_reviews (tenant_id, month, stats) values ($1, $2, $3) on conflict (tenant_id, month) do nothing returning month`,
+      [tenantId, stats.month, JSON.stringify(stats)]);
+    return rows.length > 0;
+  }
 }
 
 /** 自動テスト用のメモリの置き場。 */
 export class MemoryInquiryStore implements InquiryStore {
   readonly rows = new Map<string, Omit<Inquiry, 'nextTask'> & { tenantId: string; idleNotifiedAt: string | null }>();
   readonly allEvents: (InquiryEvent & { tenantId: string; inquiryId: string; createdAt: string })[] = [];
+  readonly mails: (MailLog & { tenantId: string })[] = [];
+  readonly cursors = new Map<string, string>();
+  readonly allReplies: (StoredReply & { tenantId: string })[] = [];
+  readonly reviews = new Map<string, InquiryMonthStats>();
   readonly allTasks: (DueTask & { tenantId: string; eventId: string | null })[] = [];
 
   private next(tenantId: string, id: string): InquiryTask | null {
@@ -389,13 +581,13 @@ export class MemoryInquiryStore implements InquiryStore {
     const now = new Date().toISOString();
     this.allEvents.push({
       id, tenantId, inquiryId, at: e.at ?? now, direction: e.direction, channel: e.channel, summary: e.summary, body: e.body,
-      createdBy: e.createdBy, createdByName: '', createdAt: now,
+      createdBy: e.createdBy, createdByName: '', createdAt: now, mail: e.mail ?? null,
     });
     return id;
   }
 
   async events(tenantId: string, inquiryId: string): Promise<InquiryEvent[]> {
-    return this.allEvents.filter((e) => e.tenantId === tenantId && e.inquiryId === inquiryId).sort((a, b) => a.at.localeCompare(b.at))
+    return this.allEvents.filter((e) => e.tenantId === tenantId && e.inquiryId === inquiryId).sort((a, b) => a.at.localeCompare(b.at) || a.createdAt.localeCompare(b.createdAt))
       .map(({ tenantId: _t, inquiryId: _i, createdAt: _c, ...e }) => e);
   }
 
@@ -460,5 +652,99 @@ export class MemoryInquiryStore implements InquiryStore {
     let n = 0;
     for (const e of this.allEvents) if (e.tenantId === tenantId && e.body !== null && e.createdAt < before) { e.body = null; n += 1; }
     return n;
+  }
+
+  async seenMail(tenantId: string, messageIds: string[]): Promise<Set<string>> {
+    return new Set(this.mails.filter((m) => m.tenantId === tenantId && messageIds.includes(m.messageId)).map((m) => m.messageId));
+  }
+
+  async logMail(tenantId: string, m: MailLog): Promise<void> {
+    const i = this.mails.findIndex((x) => x.tenantId === tenantId && x.messageId === m.messageId);
+    if (i >= 0) this.mails[i] = { ...this.mails[i]!, status: m.status, inquiryId: m.inquiryId, reason: m.reason };
+    else this.mails.push({ ...m, tenantId });
+  }
+
+  async mailLog(tenantId: string, messageId: string): Promise<MailLog | null> {
+    const m = this.mails.find((x) => x.tenantId === tenantId && x.messageId === messageId);
+    if (!m) return null;
+    const { tenantId: _t, ...rest } = m;
+    return rest;
+  }
+
+  async inquiryOfThread(tenantId: string, threadId: string): Promise<string | null> {
+    const hit = this.mails.filter((m) => m.tenantId === tenantId && m.threadId === threadId && m.status === 'inquiry' && m.inquiryId && this.rows.has(m.inquiryId))
+      .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt))[0];
+    return hit?.inquiryId ?? null;
+  }
+
+  async skippedMails(tenantId: string, limit = 100): Promise<InquiryMailSkipped[]> {
+    return this.mails.filter((m) => m.tenantId === tenantId && m.status === 'skipped' && m.direction === 'in')
+      .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt)).slice(0, limit)
+      .map((m) => ({ messageId: m.messageId, from: m.from, subject: m.subject, reason: m.reason, receivedAt: m.receivedAt }));
+  }
+
+  async mailCursor(tenantId: string): Promise<string | null> {
+    return this.cursors.get(tenantId) ?? null;
+  }
+
+  async setMailCursor(tenantId: string, at: string): Promise<void> {
+    this.cursors.set(tenantId, at);
+  }
+
+  async addReply(tenantId: string, r: NewReply): Promise<string> {
+    const id = `iqr-${randomUUID()}`;
+    this.allReplies.push({
+      id, tenantId, inquiryId: r.inquiryId, to: r.to, from: r.from, subject: r.subject, body: r.body, status: 'draft', runId: null,
+      createdBy: r.createdBy, createdByName: '', createdAt: new Date().toISOString(), sentAt: null, replyToMessage: r.replyToMessage, threadId: r.threadId,
+    });
+    return id;
+  }
+
+  async replies(tenantId: string, inquiryId: string): Promise<InquiryReply[]> {
+    return this.allReplies.filter((r) => r.tenantId === tenantId && r.inquiryId === inquiryId).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .map(({ tenantId: _t, replyToMessage: _m, threadId: _h, ...r }) => r);
+  }
+
+  async reply(tenantId: string, id: string): Promise<StoredReply | null> {
+    const r = this.allReplies.find((x) => x.tenantId === tenantId && x.id === id);
+    if (!r) return null;
+    const { tenantId: _t, ...rest } = r;
+    return rest;
+  }
+
+  async updateReply(tenantId: string, id: string, patch: Parameters<InquiryStore['updateReply']>[2]): Promise<void> {
+    const r = this.allReplies.find((x) => x.tenantId === tenantId && x.id === id);
+    if (!r) return;
+    const { sentMessageId: _s, ...rest } = patch;
+    Object.assign(r, Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined)));
+  }
+
+  async deleteReply(tenantId: string, id: string): Promise<void> {
+    const i = this.allReplies.findIndex((x) => x.tenantId === tenantId && x.id === id);
+    if (i >= 0) this.allReplies.splice(i, 1);
+  }
+
+  async waitingReplies(tenantId: string, limit = 50): Promise<Inquiry[]> {
+    const out: Inquiry[] = [];
+    for (const r of this.rows.values()) {
+      if (r.tenantId !== tenantId || r.status !== 'open') continue;
+      const last = this.allEvents.filter((e) => e.tenantId === tenantId && e.inquiryId === r.id).sort((a, b) => b.at.localeCompare(a.at) || b.createdAt.localeCompare(a.createdAt))[0];
+      if (last && last.direction === 'in' && ['mail', 'form', 'line'].includes(last.channel)) out.push(this.view(r));
+    }
+    return out.sort((a, b) => a.lastAt.localeCompare(b.lastAt)).slice(0, limit);
+  }
+
+  async monthRows(tenantId: string, from: string, to: string): Promise<MonthRow[]> {
+    return [...this.rows.values()].filter((r) => r.tenantId === tenantId && r.firstAt >= from && r.firstAt < to).map((r) => {
+      const first = this.allEvents.filter((e) => e.inquiryId === r.id).sort((a, b) => a.at.localeCompare(b.at))[0];
+      return { channel: r.channel, source: r.source, category: r.category, temperature: r.temperature, mailTo: first?.mail?.to ?? null };
+    });
+  }
+
+  async saveReview(tenantId: string, stats: InquiryMonthStats): Promise<boolean> {
+    const key = `${tenantId}:${stats.month}`;
+    if (this.reviews.has(key)) return false;
+    this.reviews.set(key, stats);
+    return true;
   }
 }

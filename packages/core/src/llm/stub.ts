@@ -159,6 +159,18 @@ function chooseTools(tools: string[], prompt: string): Call[] {
     if (id) return [{ name: 'mail.bulk_send', args: { bulkMailId: id } }];
   }
 
+  // 問い合わせの返事（仕様書 第33.18節）: 「〇〇さんへの返事を書いて」で下書き、承認の後に送る
+  if (has('inquiries.reply_send') && instruction.includes('inquiries.reply_send')) {
+    const id = extractField(prompt, 'replyId');
+    if (id) return [{ name: 'inquiries.reply_send', args: { replyId: id } }];
+  }
+  if (has('inquiries.reply_draft') && instruction.includes('inquiries.reply_draft')) {
+    const q = /(.+?)(さん|様|社)?への返事/.exec(extractField(prompt, 'request'))?.[1]?.trim() ?? '';
+    if (q) return [{ name: 'inquiries.reply_draft', args: { q } }];
+  }
+  if (has('inquiries.review') && instruction.includes('inquiries.review') && /先月|件数|何件|どこから/.test(extractField(prompt, 'request'))) {
+    return [{ name: 'inquiries.review', args: {} }];
+  }
   // 問い合わせの記録（仕様書 第33.17節）: 話した文をそのまま残す。「今週の」「返事してない」で一覧を読む
   if (has('inquiries.record') && instruction.includes('inquiries.record')) {
     const text = extractField(prompt, 'request').replace(/(と|って)?(残して|記録して)(おいて)?(ください)?[。.]?$/, '').trim();

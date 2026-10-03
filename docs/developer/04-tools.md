@@ -48,7 +48,9 @@
 | `gmail.unread` | read | `gmail.readonly`（制限付き） | 受信トレイ（メイン）の未読のメールを見ます |
 | `hr.deadlines` | read | — | 源泉所得税と住民税の納付、年度更新、算定基礎届、入退社の手続き、契約の満了などの近い期限を調べます。人事の担当者だけが使えます |
 | `image.read_text` | read | — | 写真やスキャンした画像から文字を読み取ります。読み取りは確実ではないため、内容の確認が要ります |
+| `inquiries.brief` | read | — | 朝のブリーフに載せる、今日が期限の問い合わせと返事を待たせている問い合わせを読みます |
 | `inquiries.list` | read | — | 問い合わせの記録を読みます（対応中・最近のもの・人や会社の名前で探す） |
+| `inquiries.review` | read | — | ある月の問い合わせの件数・経路・どこで知ったか・分類を数えます |
 | `inventory.forecast` | read | — | 在庫の使う速さから、あと何日で無くなるか・残りわずか・使用期限の近いものと、発注の案を出します。見るだけです |
 | `inventory.history` | read | — | 入庫・使用・移動・調整の記録を、品目と期間で調べます。見るだけです |
 | `inventory.read_slip` | read | — | 納品書の写真や PDF から、品名・品番・数・ロット・使用期限を読み取ります。入庫はしません |
@@ -82,6 +84,7 @@
 | `contacts.save` | write-internal | — | 名刺を連絡先として登録するか、電話番号やメモなどを直します。社内の名刺の置き場に書くだけで、誰にも送りません |
 | `drive.share_company` | write-internal | `drive.file`（機密でない） | M2Office で作ったファイルを、会社の全員が閲覧できるようにします。社外の人は見られません。リンクで誰にでも公開することはしません |
 | `inquiries.record` | write-internal | — | 電話や来店の問い合わせを、話した文から項目に分けて残します。前の問い合わせの続きなら、同じ問い合わせに足します。お客様には何も送りません |
+| `inquiries.reply_draft` | write-internal | — | 問い合わせへの返事の下書きを書きます。送るのは、画面で確かめて承認へ進め、承認された後です |
 | `inventory.move` | write-internal | — | 入庫・使用・移動を在庫に記録します。社内の記録に足すだけで、誰にも送りません |
 | `inventory.receive_slip` | write-internal | — | 納品書の写真や PDF を読み取り、在庫の品目に当てはまる行を入庫にします。当てはまらない行は残します。誰にも送りません |
 | `inventory.reserve` | write-internal | — | 予約に合わせて品目を取り置き（使える数だけを減らす）、取り消し・使ったにし、メニューで使う品目を覚えます。誰にも送りません |
@@ -97,6 +100,7 @@
 | `columns.place` | external-send | — | 承認されたコラムを、会社の WordPress に下書きとして入れます。公開は WordPress の側で行います |
 | `drive.share` | external-send | `drive.file`（機密でない） | M2Office で作ったファイルを、指定した人と共有します。社外の人との共有は、承認のあとに行います。リンクで誰にでも公開することはしません |
 | `gmail.send` | external-send | `gmail.send`（機密） | メールを送ります。必ず承認のあとに行います |
+| `inquiries.reply_send` | external-send | — | 承認された問い合わせの返事を、会社の窓口のアカウントから送ります |
 | `mail.bulk_send` | external-send | `gmail.send`（機密） | 承認されたまとめてのメールを、あなたの Gmail から 1 人に 1 通ずつ送ります |
 
 ## 4.3 引数
@@ -127,7 +131,9 @@
 | `gmail.unread` | `since`: この日時以降の未読だけ（ISO 形式。任意）、`limit`: 一覧の件数（既定 50、上限 50） |
 | `hr.deadlines` | `days`: 何日先までか（既定 7） |
 | `image.read_text` | `fileId`（必須）: ファイルの ID |
+| `inquiries.brief` | なし |
 | `inquiries.list` | `status`: 対応中か、すべてか（open・all）、`days`: 最近何日に動いたもの、`q`: 人・会社・用件の言葉、`waiting`: 次にやることが残っているものだけ |
+| `inquiries.review` | `month`: 月（YYYY-MM） |
 | `inventory.forecast` | `query`: 品目の名前の一部（省けば全品目）、`all`: 足りている品目も返すか |
 | `inventory.history` | `query`: 品目の名前・コード（省けば全品目）、`from`: 期間の始め（YYYY-MM-DD）、`to`: 期間の終わり（YYYY-MM-DD。この日を含む）、`kind`: 記録の種類（in・out・transfer・adjust） |
 | `inventory.read_slip` | `fileId`（必須）: 納品書の画像か PDF のファイル ID |
@@ -162,6 +168,7 @@
 | `contacts.save` | `contactId`: 直す連絡先の ID。新しく登録するときは書かない、`fields`: 直す項目（name・nameKana・company・department・title・postalCode・address・phones・emails・website・extra）、`note`: メモ（「展示会で会った」など）。書くと置き換える、`card`: 登録する名刺。card.read の結果の fileId・fields・rotation、`receivedOn`: 名刺を受け取った日（YYYY-MM-DD）。直すときだけ書く、`cardId`: 受け取った日を直す名刺（contacts.get の exchanges の cardId）。省くと呼んだ人のいちばん新しい名刺 |
 | `drive.share_company` | `fileId`（必須）: ファイルの ID（docs.create の結果の file.id） |
 | `inquiries.record` | `text`（必須）: 依頼者が話した・書いた文（そのまま）、`inquiryId`: 続きを足す問い合わせ（分かっているときだけ） |
+| `inquiries.reply_draft` | `inquiryId`: 問い合わせの ID（分かっているとき）、`q`: 人・会社の言葉、`instruction`: 書き方の頼み |
 | `inventory.move` | `kind`（必須）: 記録の種類（in・out・transfer）、`item`（必須）: 品目（品名・自社のコード・バーコード）、`qty`（必須）: 数（正の数）、`unit`: 数の単位（unit は使う単位、pack は仕入れの単位）（unit・pack）、`place`: 場所（省けば今ある場所）、`to`: 移動の先の場所、`lot`: ロット、`expiresOn`: 使用期限（YYYY-MM-DD）、`reason`: 理由（例: 販売・使用・廃棄・仕入） |
 | `inventory.receive_slip` | `fileId`（必須）: 納品書の画像か PDF のファイル ID、`place`: 入れる場所（倉庫や棚の名前。省けば品目ごとに今ある場所） |
 | `inventory.reserve` | `action`（必須）: hold・cancel・use・teach（hold・cancel・use・teach）、`item`: 品目（品名・自社のコード・バーコード）、`qty`: 数（使う単位）、`when`: 予約の日時、`booking`: 予約番号、`menu`: 予約のメニュー（コース・施術・プラン）の名前 |
@@ -177,6 +184,7 @@
 | `columns.place` | `columnId`（必須）: コラムの ID |
 | `drive.share` | `fileId`（必須）: ファイルの ID、`emails`（必須）: 共有する相手のメールアドレス、`role`: 役割（reader・commenter・writer） |
 | `gmail.send` | `to`（必須）: 宛先のメールアドレス、`cc`: CC（任意）、`subject`（必須）: 件名、`body`（必須）: 本文、`replyTo`: 返信するメールの ID（任意） |
+| `inquiries.reply_send` | `replyId`（必須）: 返事の ID |
 | `mail.bulk_send` | `bulkMailId`（必須）: まとめてのメールの ID |
 
 <!-- tools:end -->

@@ -4,6 +4,7 @@
  * - 次にやることの期限の前の日と、期限を過ぎたときに、担当に 1 回ずつ知らせる
  * - 次にやることが無く、3 営業日動いていない対応中の問い合わせを、残した人に一度だけ知らせる
  * - 会話の履歴の原文（秘書に話した文）を 90 日で消す（要約は残す）
+ * - 毎月 1 日の朝に、前の月の振り返り（数はプログラムで数える）を、利用範囲の管理者と窓口の担当に知らせる（第33.9節・第33.18節）
  *
  * 知らせの題と本文に用件の中身は入れない（誰からの、何をする、だけ）。本人が「問い合わせ」の知らせを切っていれば送らない。
  */
@@ -14,6 +15,11 @@ import type { Repository } from '../repository/types.js';
 import { silentLogger, type Logger } from '../log/logger.js';
 import { dateIn } from '../cards/service.js';
 import type { InquiryStore } from './store.js';
+import { MAILBOX_ACTOR } from './service.js';
+import { monthStats, previousMonth, reviewText } from './review.js';
+
+/** 月の振り返りを知らせる時刻（日本時間の時。毎月 1 日）。 */
+export const INQUIRY_REVIEW_HOUR = 8;
 
 /** 手つかずとみなす営業日の数（第33.7節。案）。 */
 export const INQUIRY_IDLE_BUSINESS_DAYS = 3;
@@ -51,6 +57,25 @@ const whoOf = (from: { name: string; company: string }) => (from.name ? `${from.
 
 /** 問い合わせの見張り。 */
 export class InquiryWatch {
+  /**
+   * 毎月 1 日の朝（日本時間）に、前の月の振り返りを、利用範囲の管理者と窓口の担当に 1 回だけ知らせる。
+   *
+   * @returns 知らせた数
+   */
+  private async monthly(tenantId: string, mailboxOwner: string | null, now: Date): Promise<number> {
+    const jst = new Date(now.getTime() + 9 * 3_600_000);
+    if (jst.getUTCDate() !== 1 || jst.getUTCHours() < INQUIRY_REVIEW_HOUR) return 0;
+    const stats = await monthStats(this.deps.store, tenantId, previousMonth(now));
+    if (!(await this.deps.store.saveReview(tenantId, stats))) return 0;
+    const admins = (await this.deps.repo.listUsers(tenantId)).filter((u) => u.status === 'active' && u.roles.includes('admin')).map((u) => u.id);
+    const to = [...new Set([...admins, ...(mailboxOwner ? [mailboxOwner] : [])])];
+    let n = 0;
+    for (const userId of to) {
+      if (await this.notify(tenantId, userId, `${Number(stats.month.slice(5))} 月の問い合わせの振り返り`, reviewText(stats), now)) n += 1;
+    }
+    return n;
+  }
+
   private readonly log: Logger;
 
   constructor(private readonly deps: InquiryWatchDeps) {
@@ -100,10 +125,13 @@ export class InquiryWatch {
         }
         // 手つかず: 「閉じてよいか」と聞かず、済んだなら言ってもらう（第33.7節）
         for (const i of await store.idle(tenantId, businessDaysAgo(now, INQUIRY_IDLE_BUSINESS_DAYS).toISOString())) {
-          if (await this.notify(tenantId, i.createdBy, `対応中のままの問い合わせ: ${whoOf(i.from)}`, '対応が済んだなら秘書に言ってください。次にやることがあれば、問い合わせの画面で足せます', now)) notified += 1;
+          // 窓口のアカウントが残したものは、窓口の担当（つないだ管理者）に知らせる
+          const to = i.createdBy === MAILBOX_ACTOR ? settings.inquiries.mailbox?.connectedBy ?? '' : i.createdBy;
+          if (to && await this.notify(tenantId, to, `対応中のままの問い合わせ: ${whoOf(i.from)}`, '対応が済んだなら秘書に言ってください。次にやることがあれば、問い合わせの画面で足せます', now)) notified += 1;
           await store.update(tenantId, i.id, { idleNotifiedAt: now.toISOString() });
         }
         forgotten += await store.forgetBodies(tenantId, new Date(now.getTime() - INQUIRY_BODY_DAYS * 86_400_000).toISOString());
+        notified += await this.monthly(tenantId, settings.inquiries.mailbox?.connectedBy ?? null, now);
       } catch (err) {
         this.log.warn('inquiry.watch_failed', { tenantId, error: err instanceof Error ? err.message : String(err) });
       }

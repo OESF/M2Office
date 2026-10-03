@@ -73,11 +73,13 @@ export function createPkce(): { verifier: string; challenge: string } {
  */
 export function buildGoogleAuthUrl(p: {
   clientId: string; redirectUri: string; scopes: string[]; state: string; codeChallenge: string; loginHint?: string;
+  /** アカウントを選ばせる（本人ではない窓口のアカウントでつなぐとき。第33.18節）。 */
+  selectAccount?: boolean;
 }, endpoints: GoogleOAuthEndpoints = GOOGLE_OAUTH_ENDPOINTS): string {
   const scope = [...new Set([...GOOGLE_LOGIN_SCOPES, ...p.scopes])].map(googleScopeUrl).join(' ');
   const q = new URLSearchParams({
     client_id: p.clientId, redirect_uri: p.redirectUri, response_type: 'code', scope,
-    access_type: 'offline', prompt: 'consent', include_granted_scopes: 'true',
+    access_type: 'offline', prompt: p.selectAccount ? 'consent select_account' : 'consent', include_granted_scopes: 'true',
     state: p.state, code_challenge: p.codeChallenge, code_challenge_method: 'S256',
     ...(p.loginHint ? { login_hint: p.loginHint } : {}),
   });

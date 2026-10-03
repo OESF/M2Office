@@ -51,7 +51,8 @@ src/columns/     Web のコラム（内蔵の拡張。第32章の段 1）。置�
 src/inquiries/   問い合わせの記録（内蔵の拡張。第33章の段 1）。置き場（問い合わせ・会話の履歴・次にやること。PostgreSQL とメモリ。store.ts）、
                  項目の取り出し（extract.ts。推論の JSON と決まった言葉・期限の読み方・要配慮個人情報を除く）、処理（service.ts。残す・続き・直す・
                  次にやること・削除）、名刺管理とのつなぎ（contacts.ts）、見張り（watch.ts。期限と手つかずの知らせ・原文を 90 日で消す）、
-                 ツール（tools.ts。inquiries.record・inquiries.list）、付属の業務（agents.ts。問い合わせを残す・調べる）
+                 窓口のアカウント（mailbox.ts。Gmail API と見本の箱）、メールの見分け（mail.ts）、月の振り返り（review.ts）、
+                 ツール（tools.ts。inquiries.record・list・reply_draft・reply_send・brief・review）、付属の業務（agents.ts。残す・調べる・返事の下書き・返事を送る）
 src/inventory/   在庫管理（内蔵の拡張。第29章）。置き場（入出庫の記録と同じトランザクションでいまの数を直す。PostgreSQL とメモリ）、
                  バーコードの読み方（gs1.ts。GS1・JAN・UPC）、品目・場所・入出庫・使用期限の近いロットから減らす・取り消し・
                  棚卸し（会社で 1 つ・数えた時点の帳簿と比べる・確定で差を調整に）・取り込みと書き出し（service.ts）、

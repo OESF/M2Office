@@ -138,6 +138,8 @@ const columns = new ColumnService({
 const inquiryStore = new PostgresInquiryStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
 const inquiries = new InquiryService({
   store: inquiryStore, repo, llmFor: (tenantId) => ai.llmFor(tenantId), contacts: contactBookFrom(contactStore, cardsAccess(repo)), logger: log,
+  // 窓口のアカウント（第33.18節）。見本の会社では見本の箱
+  mailbox: { repo, box, sourceFor: (tenantId) => connector.sourceFor(tenantId) },
 });
 const inquiryWatch = new InquiryWatch({ store: inquiryStore, repo, logger: log });
 const engine = new RunEngine({
@@ -261,6 +263,9 @@ let lastSignageCheck = 0;
 /** 問い合わせの見張りの間隔（期限の知らせ・手つかずの知らせ・原文の片付け。第33.7節）。 */
 const INQUIRY_INTERVAL_MS = Number(process.env['INQUIRY_INTERVAL_MS'] ?? 900_000);
 let lastInquiryCheck = 0;
+/** 問い合わせの窓口のアカウントのメールを読む間隔（第33.18節）。 */
+const INQUIRY_MAIL_INTERVAL_MS = Number(process.env['INQUIRY_MAIL_INTERVAL_MS'] ?? 300_000);
+let lastInquiryMailCheck = 0;
 // 秘書が学んだことの週 1 回の整理と、残す期間の片付け（仕様書 第11.11.4節）。1 時間ごとに「日曜の深夜で、前の整理から 6 日より経ったか」を見る
 const CONSOLIDATE_INTERVAL_MS = Number(process.env['CONSOLIDATE_INTERVAL_MS'] ?? 3_600_000);
 let lastConsolidateCheck = 0;
@@ -462,6 +467,19 @@ while (running) {
       if (r.notified + r.forgotten > 0) log.info('問い合わせの期限を知らせ、古い原文を消しました', { notified: r.notified, forgotten: r.forgotten });
     } catch (err) {
       log.warn('問い合わせの見張りに失敗しました', { err });
+    }
+  }
+
+  // 問い合わせの窓口のアカウントのメールを読む（第33.18節）。会社ごとの失敗はほかの会社を止めない
+  if (Date.now() - lastInquiryMailCheck >= INQUIRY_MAIL_INTERVAL_MS) {
+    lastInquiryMailCheck = Date.now();
+    for (const tenantId of await repo.listTenantIds()) {
+      try {
+        const r = await inquiries.ingest(tenantId, new Date());
+        if (r.created + r.appended + r.skipped + r.sent > 0) log.info('問い合わせの窓口のメールを読みました', { tenantId, ...r });
+      } catch (err) {
+        log.warn('問い合わせの窓口のメールを読めませんでした', { tenantId, err: err instanceof Error ? err.message : String(err) });
+      }
     }
   }
 

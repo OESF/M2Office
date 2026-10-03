@@ -19,7 +19,7 @@ import type { CardCorners,
   InventoryBooking, InventoryBookingMapping, InventoryBookingSource, InventoryPublication, InventoryPublicationScope, InventoryPublicSnapshot,
   SignageAsset, SignageEntry, SignageScreen, SignageSettings, SignageInterruptInput, SignageInterruptView, SignagePhrase, SignageSound, SignageSource,
   ColumnWordPress, WebColumn, WebColumnSettings, WebColumnVersion,
-  Inquiry, InquiryDetail, InquiryParty, InquiryTask,
+  Inquiry, InquiryDetail, InquiryParty, InquiryTask, InquiryReply, InquiryMailSkipped, InquiryMonthStats, InquirySettings,
 } from '@m2office/shared';
 import { debugMode, recordCall } from './debug.js';
 
@@ -737,6 +737,8 @@ export interface ExtensionView {
   webColumns?: WebColumnSettings;
   /** 今月、カバーの AI の挿絵を描いた枚数と上限（第32.18.2節）。Web のコラムのときだけある。 */
   columnAiUsage?: { used: number; limit: number };
+  /** 問い合わせの記録の設定（窓口のアカウント。第33.18節）。問い合わせの記録のときだけある。 */
+  inquiries?: InquirySettings;
 }
 
 /** 問い合わせを残した結果（仕様書 第33.17節）。どの続きか決まらなければ `ambiguous` と候補。 */
@@ -1220,6 +1222,23 @@ export const api = {
     remove: (id: string) => call<{ ok: true }>(`/inquiries/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     /** 会話の履歴 1 つを、別の問い合わせに分ける。 */
     split: (eventId: string) => call<{ id: string }>(`/inquiries/events/${encodeURIComponent(eventId)}/split`, { method: 'POST', body: '{}' }),
+    /** 窓口のアカウントの新しいメールを今すぐ読む（30 秒に 1 回まで）。 */
+    checkMail: () => call<{ created: number; appended: number; skipped: number; sent: number; throttled?: boolean }>('/inquiries/mail/check', { method: 'POST', body: '{}' }),
+    /** 窓口のアカウントのメールのうち、問い合わせでないと見分けたもの。 */
+    skipped: () => call<{ items: InquiryMailSkipped[] }>('/inquiries/mail/skipped'),
+    /** 問い合わせでないとしたメールを、問い合わせにする。 */
+    promote: (messageId: string) => call<{ id: string }>(`/inquiries/mail/${encodeURIComponent(messageId)}/promote`, { method: 'POST', body: '{}' }),
+    /** 会話の履歴のメールの中身（窓口のアカウントから読む）。 */
+    mail: (eventId: string) => call<{ from: string; to: string[]; subject: string; date: string; body: string }>(`/inquiries/events/${encodeURIComponent(eventId)}/mail`),
+    /** 返事の下書きを書いてもらう（下書きがあれば書き直す）。 */
+    draftReply: (id: string, instruction = '') => call<{ reply: InquiryReply }>(`/inquiries/${encodeURIComponent(id)}/replies`, { method: 'POST', body: JSON.stringify({ instruction }) }),
+    updateReply: (replyId: string, patch: Partial<{ to: string; subject: string; body: string }>) =>
+      call<{ ok: true }>(`/inquiries/replies/${encodeURIComponent(replyId)}`, { method: 'PUT', body: JSON.stringify(patch) }),
+    deleteReply: (replyId: string) => call<{ ok: true }>(`/inquiries/replies/${encodeURIComponent(replyId)}`, { method: 'DELETE' }),
+    /** 返事を承認へ進める（承認の後に窓口のアカウントから送る）。 */
+    submitReply: (replyId: string) => call<{ runId: string }>(`/inquiries/replies/${encodeURIComponent(replyId)}/submit`, { method: 'POST', body: '{}' }),
+    /** 月の振り返り（無ければ先月）。 */
+    review: (month?: string) => call<{ stats: InquiryMonthStats; text: string }>(`/inquiries/review${month ? `?month=${encodeURIComponent(month)}` : ''}`),
   },
   /** Web のコラム（内蔵の拡張。仕様書 第32章）。 */
   columns: {
@@ -1918,6 +1937,9 @@ export const api = {
     setHrSettings: (patch: Partial<HrSettings>) =>
       call<{ ok: true; hr: HrSettings }>('/admin/extensions/hr/settings', { method: 'PUT', body: JSON.stringify(patch) }),
     /** Web のコラムの会社の設定（仕様書 第32.18.1節）。送った項目だけを変える。 */
+    /** 問い合わせの窓口のアカウントをつなぐ（Google の認可の URL。見本の会社ではすぐつながる）。 */
+    connectInquiryMailbox: () => call<{ url?: string; connected?: boolean }>('/admin/extensions/inquiries/mailbox/connect', { method: 'POST', body: '{}' }),
+    disconnectInquiryMailbox: () => call<{ ok: true }>('/admin/extensions/inquiries/mailbox', { method: 'DELETE' }),
     setWebColumnSettings: (patch: Partial<Omit<WebColumnSettings, 'enabled' | 'wordpress'>>) =>
       call<{ ok: true; webColumns: WebColumnSettings }>('/admin/extensions/web-columns/settings', { method: 'PUT', body: JSON.stringify(patch) }),
     /** WordPress の入れ先とアプリケーションパスワードを預ける。つながるかを確かめてから預ける。 */

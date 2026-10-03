@@ -61,6 +61,7 @@ test('期限の言い方を日付に直す（明日・曜日・来週・月日�
   assert.equal(dueFrom('10月12日に', today), '2026-10-12');
   assert.equal(dueFrom('3/2 まで', today), '2027-03-02', '今日より前の月日は来年');
   assert.equal(dueFrom('今週中に', today), '2026-10-09');
+  assert.equal(dueFrom('来週中に検討したい', today), '2026-10-16', '来週中は来週の金曜日');
   assert.equal(dueFrom('そのうち', today), null);
 });
 

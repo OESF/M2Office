@@ -14,7 +14,7 @@ import { JinglePlayer } from './signage-audio.js';
 import { api, ApiError, describeError, type AccessOptions, type ExtensionView, type HrProposalField, type ScopeValue } from './api.js';
 import {
   INVENTORY_FEATURES, SIGNAGE_DEFAULT_COLOR, SIGNAGE_JINGLES, type HrSettings, type InventoryBookingSource, type InventoryFeature, type InventorySettings,
-  type SignageSettings, type SignageSound, type SignageSource, COLUMN_INDUSTRIES, COLUMN_RULE_SET_LABELS, type WebColumnSettings,
+  type SignageSettings, type SignageSound, type SignageSource, COLUMN_INDUSTRIES, COLUMN_RULE_SET_LABELS, type WebColumnSettings, type InquirySettings,
 } from '@m2office/shared';
 import { HelpTip, Markdown } from './help.js';
 import { ScopeEditor, ScopeField, useAccessOptions } from './Scope.js';
@@ -273,6 +273,7 @@ function InstalledCard({ item: x, busy, focused = false, options, onChanged, onT
       {x.hr && on && <HrFields settings={x.hr} busy={busy} onChanged={onChanged} />}
       {x.signage && on && <SignageFields settings={x.signage} busy={busy} onChanged={onChanged} />}
       {x.webColumns && on && <WebColumnsFields settings={x.webColumns} usage={x.columnAiUsage ?? null} busy={busy} onChanged={onChanged} />}
+      {x.inquiries && on && <InquiryMailboxFields settings={x.inquiries} busy={busy} onChanged={onChanged} />}
       <div className="row small">
         <button className="link" onClick={() => setOpen(!open)}>{open ? '詳細を閉じる' : '詳細'}</button>
         {/* 内蔵の拡張は削除しない。スイッチで切る（データは消えない。第12.13節） */}
@@ -513,6 +514,47 @@ function SignageFields({ settings, busy, onChanged }: { settings: SignageSetting
  *
  * @remarks アプリケーションパスワードは預けたら画面に戻さない。つながるかを確かめてから預ける
  */
+/**
+ * 問い合わせの窓口のアカウント（仕様書 第33.18節）。「つなぐ」で Google の認可の画面へ移り、窓口のアカウント（info@ など）を選ぶ。
+ * 戻ってきたら結果（`?mailbox=`）を出す。
+ */
+function InquiryMailboxFields({ settings, busy, onChanged }: { settings: InquirySettings; busy: boolean; onChanged: () => void }) {
+  const [error, setError] = useState<string | null>(null);
+  const [working, setWorking] = useState(false);
+  const [result] = useState(() => {
+    const r = new URLSearchParams(location.search).get('mailbox');
+    if (r) history.replaceState(null, '', location.pathname);
+    return r;
+  });
+  const RESULT_TEXT: Record<string, string> = {
+    connected: '窓口のアカウントをつなぎました', cancelled: 'つなぐのをキャンセルしました', scopes: 'メールを読む・送るの許可が足りません。もう一度つないで、すべて許可してください',
+    domain: '会社のドメインのアカウントではありません。会社の Google Workspace の窓口のアカウントを選んでください', client: '会社の Google 接続の設定に誤りがあります', failed: 'つなげませんでした',
+  };
+  const connect = () => {
+    setWorking(true);
+    api.admin.connectInquiryMailbox().then((r) => { if (r.url) location.href = r.url; else { setError(null); onChanged(); } })
+      .catch((e) => setError(describeError(e, 'つなげませんでした'))).finally(() => setWorking(false));
+  };
+  const disconnect = () => {
+    if (!window.confirm('窓口のアカウントを外しますか。メールを読まなくなり、返事も送れなくなります（問い合わせは消えません）')) return;
+    setWorking(true);
+    api.admin.disconnectInquiryMailbox().then(() => { setError(null); onChanged(); })
+      .catch((e) => setError(describeError(e, '外せませんでした'))).finally(() => setWorking(false));
+  };
+  return (
+    <div className="small ext-inventory">
+      <div className="row wrap">
+        <span>窓口のアカウント: {settings.mailbox ? <strong>{settings.mailbox.email}</strong> : <span className="muted">つないでいません</span>}</span>
+        {settings.mailbox
+          ? <button className="btn ghost small" disabled={busy || working} onClick={disconnect}>外す</button>
+          : <button className="btn small" disabled={busy || working} onClick={connect}>{working ? 'つないでいます…' : 'つなぐ'}</button>}
+        {result && <span className={`inquiries-note is-${result === 'connected' ? 'ok' : 'error'}`}>{RESULT_TEXT[result] ?? 'つなげませんでした'}</span>}
+      </div>
+      {error && <p className="error">{error}</p>}
+    </div>
+  );
+}
+
 function WebColumnsFields({ settings, usage, busy, onChanged }: { settings: WebColumnSettings; usage: { used: number; limit: number } | null; busy: boolean; onChanged: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [wp, setWp] = useState({ siteUrl: settings.wordpress?.siteUrl ?? '', username: settings.wordpress?.username ?? '', password: '' });

@@ -15,7 +15,7 @@ import {
   buildGoogleAuthUrl, checkGeminiLive, checkGeminiText, checkGoogleClient, createPkce, exchangeGoogleCode, exchangeGoogleLoginCode,
   fetchGooglePhoto, googleGrantedScopes, googleScopeLabel, googleUserInfo, isGoogleClientError, refreshGoogleAccessToken,
   revokeGoogleToken, toolGoogleScopes,
-  GoogleOAuthError,
+  GoogleOAuthError, MAILBOX_SCOPES,
   type GeminiModels, type GeminiSettingsMeta, type GoogleClientVerdict,
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
@@ -44,7 +44,7 @@ export async function requiredGoogleScopes(deps: AppDeps, tenantId: string): Pro
 }
 
 /** 会社の OAuth クライアント（ID と、復号したシークレット）。未登録なら `null`。 */
-async function googleClient(deps: AppDeps, tenantId: string): Promise<{ clientId: string; clientSecret: string } | null> {
+export async function googleClient(deps: AppDeps, tenantId: string): Promise<{ clientId: string; clientSecret: string } | null> {
   const cred = await deps.repo.getTenantCredential(tenantId, 'google_oauth');
   const clientId = typeof cred?.meta['clientId'] === 'string' ? cred.meta['clientId'] : '';
   if (!cred?.secretEnc || !clientId) return null;
@@ -443,8 +443,35 @@ export function oauthCallbackRoute(deps: AppDeps) {
     const pending = deps.oauth.states.take(state);
     // 会社の接続（第12.11.6節）の要求の state では受けない（取り違えを防ぐ）
     if (!pending || pending.connectionId) return c.text('この接続の要求は無効か、期限が切れています。M2Office の画面からもう一度「Google と接続する」を押してください。', 400);
-    const back = (result: string) => c.redirect(`${pending.returnTo}${pending.returnTo.includes('?') ? '&' : '?'}google=${result}`);
+    const back = (result: string) => c.redirect(`${pending.returnTo}${pending.returnTo.includes('?') ? '&' : '?'}${pending.purpose === 'inquiry-mailbox' ? 'mailbox' : 'google'}=${result}`);
     if (c.req.query('error')) return back('cancelled');
+    // 問い合わせの窓口のアカウント（仕様書 第33.18節）。本人の接続ではなく、会社の接続として預ける
+    if (pending.purpose === 'inquiry-mailbox') {
+      const code = c.req.query('code');
+      if (!code) return back('failed');
+      const tenant = await deps.repo.findTenantById(pending.tenantId);
+      if (!tenant || !isOperational(tenant)) return back('failed');
+      try {
+        const client = await googleClient(deps, pending.tenantId);
+        if (!client) return back('client');
+        const tokens = await exchangeGoogleCode({ ...client, code, redirectUri: deps.oauth.redirectUri, codeVerifier: pending.codeVerifier });
+        const [scopes, info] = await Promise.all([googleGrantedScopes(tokens.accessToken).catch(() => tokens.scopes), googleUserInfo(tokens.accessToken)]);
+        // 読む・送るの両方が許されていなければ預けない（一部だけ拒まれたとき）
+        if (!MAILBOX_SCOPES.every((s) => scopes.includes(s)) || !info.email) {
+          await revokeGoogleToken(tokens.refreshToken).catch(() => false);
+          return back('scopes');
+        }
+        const err = await deps.inquiries.service.connectMailbox({ tenantId: pending.tenantId, userId: pending.userId }, { email: info.email, refreshToken: tokens.refreshToken });
+        if (err) {
+          await revokeGoogleToken(tokens.refreshToken).catch(() => false);
+          return back('domain');
+        }
+        return back('connected');
+      } catch (err) {
+        deps.log.warn('問い合わせの窓口のアカウントをつなげませんでした', { tenantId: pending.tenantId, err: err instanceof Error ? err.message : String(err) });
+        return back(isGoogleClientError(err) ? 'client' : 'failed');
+      }
+    }
     const code = c.req.query('code');
     if (!code) return back('failed');
     // 要求のあとに停止された会社では接続を保存しない。停止中は Google との接続を受け付けない（仕様書 第23.8.6節）

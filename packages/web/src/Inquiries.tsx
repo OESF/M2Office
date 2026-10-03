@@ -5,12 +5,13 @@
  * 前の問い合わせの続き（「田中さんに見積もりを送った」）なら同じ問い合わせに足す。どの続きか決まらなければ候補を出す。
  * 項目ごとの入力の欄は並べない。説明文は常には出さない（原則 u11）。結果の知らせは押したボタンの横に出す（原則 u12）。
  * 秘書が問い合わせを残し終えたら読み直す（`changeKey`）。「更新」でも読み直せる（ページを読み直すと秘書との会話が切れるため）。
+ * 段 2（第33.18節）: 窓口のアカウントのメールのうち問い合わせでないもの（戻せる）・月の振り返り・メールを開く・返事（下書き・承認へ進む）。
  */
 
 import { useCallback, useEffect, useState } from 'react';
 import {
-  INQUIRY_CHANNEL_LABELS, INQUIRY_STATUS_LABELS, INQUIRY_TEMPERATURE_LABELS,
-  type Inquiry, type InquiryChannel, type InquiryDetail, type InquiryStatus, type InquiryTemperature,
+  INQUIRY_CHANNEL_LABELS, INQUIRY_REPLY_STATUS_LABELS, INQUIRY_STATUS_LABELS, INQUIRY_TEMPERATURE_LABELS,
+  type Inquiry, type InquiryChannel, type InquiryDetail, type InquiryMailSkipped, type InquiryReply, type InquiryStatus, type InquiryTemperature,
 } from '@m2office/shared';
 import { api, describeError, type InquiryRecorded } from './api.js';
 
@@ -75,6 +76,7 @@ function InquiryList({ onOpen, changeKey }: { onOpen: (id: string) => void; chan
   const [note, setNote] = useState<Note>(null);
   const [candidates, setCandidates] = useState<Inquiry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [panel, setPanel] = useState<'skipped' | 'review' | null>(null);
 
   const load = useCallback(() => {
     api.inquiries.list({ status, ...(q.trim() ? { q: q.trim() } : {}) })
@@ -131,8 +133,12 @@ function InquiryList({ onOpen, changeKey }: { onOpen: (id: string) => void; chan
         <button className={status === 'open' ? 'btn small' : 'btn ghost small'} onClick={() => setStatus('open')}>対応中</button>
         <button className={status === 'all' ? 'btn small' : 'btn ghost small'} onClick={() => setStatus('all')}>すべて</button>
         <input className="inquiries-search" value={q} placeholder="検索" aria-label="検索" onChange={(e) => setQ(e.target.value)} />
-        <button className="btn ghost small" onClick={load}>更新</button>
+        <button className="btn ghost small" onClick={() => { void api.inquiries.checkMail().catch(() => undefined).finally(load); }}>更新</button>
+        <button className={panel === 'skipped' ? 'btn small' : 'btn ghost small'} onClick={() => setPanel(panel === 'skipped' ? null : 'skipped')}>問い合わせでないもの</button>
+        <button className={panel === 'review' ? 'btn small' : 'btn ghost small'} onClick={() => setPanel(panel === 'review' ? null : 'review')}>振り返り</button>
       </div>
+      {panel === 'skipped' && <SkippedMails onOpen={onOpen} onChanged={load} />}
+      {panel === 'review' && <MonthReview />}
       {error && <p className="error">{error}</p>}
       {items && items.length === 0 && <p className="muted">{q ? '見つかりません。' : status === 'open' ? '対応中の問い合わせはありません。' : 'まだ問い合わせがありません。'}</p>}
       {items && items.length > 0 && (
@@ -289,6 +295,7 @@ function InquiryView({ id, onBack, onContact, onOpen, changeKey }: {
             )}
             <div>{e.summary}</div>
             {e.body && e.body !== e.summary && <details><summary className="small">書いた文</summary><p className="small">{e.body}</p></details>}
+            {e.mail && <MailBody eventId={e.id} />}
           </li>
         ))}
       </ol>
@@ -301,6 +308,8 @@ function InquiryView({ id, onBack, onContact, onOpen, changeKey }: {
         <button className="btn ghost" disabled={busy || !more.trim()}
           onClick={() => void act(async () => { const r = await api.inquiries.append(i.id, more.trim()); setMore(''); return r; }, '足しました', '足せませんでした')}>続きを足す</button>
       </div>
+
+      <Replies inquiryId={i.id} replies={d.replies} onChanged={load} />
 
       <div className="row inquiries-danger">
         <button className="btn ghost small danger" disabled={busy}
@@ -337,3 +346,143 @@ export function ContactInquiries({ contactId, onOpen }: { contactId: string; onO
     </>
   );
 }
+
+/** 会話の履歴のメールの中身を、開いたときだけ窓口のアカウントから読む（本文は M2Office に写していない）。 */
+function MailBody({ eventId }: { eventId: string }) {
+  const [mail, setMail] = useState<{ from: string; subject: string; date: string; body: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const toggle = () => {
+    if (open) { setOpen(false); return; }
+    setOpen(true);
+    if (!mail) api.inquiries.mail(eventId).then((m) => { setMail(m); setError(null); }).catch((e) => setError(describeError(e, 'メールを読めませんでした')));
+  };
+  return (
+    <div className="inquiries-mail">
+      <button className="link small" onClick={toggle}>{open ? 'メールを閉じる' : 'メールを開く'}</button>
+      {open && error && <p className="error small">{error}</p>}
+      {open && mail && (
+        <div className="inquiries-mail-body small">
+          <div className="muted">{mail.from}・{when(mail.date)}</div>
+          <div><strong>{mail.subject}</strong></div>
+          <pre>{mail.body}</pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 返事（第33.18節）。下書きを書いてもらい、直して「承認へ進む」。承認の後に窓口のアカウントから送る。 */
+function Replies({ inquiryId, replies, onChanged }: { inquiryId: string; replies: InquiryReply[]; onChanged: () => void }) {
+  const draft = replies.find((r) => r.status === 'draft') ?? null;
+  const [edit, setEdit] = useState<{ to: string; subject: string; body: string } | null>(draft ? { to: draft.to, subject: draft.subject, body: draft.body } : null);
+  const [instruction, setInstruction] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<Note>(null);
+  useEffect(() => { setEdit(draft ? { to: draft.to, subject: draft.subject, body: draft.body } : null); }, [draft?.id, draft?.body, draft?.subject, draft?.to]); // eslint-disable-line react-hooks/exhaustive-deps
+  const run = async (fn: () => Promise<unknown>, ok: string | null, fail: string) => {
+    setBusy(true);
+    try { await fn(); setNote(ok ? { kind: 'ok', text: ok } : null); onChanged(); } catch (e) { setNote({ kind: 'error', text: describeError(e, fail) }); } finally { setBusy(false); }
+  };
+  const dirty = !!draft && !!edit && (edit.to !== draft.to || edit.subject !== draft.subject || edit.body !== draft.body);
+  return (
+    <div className="inquiries-replies">
+      <h3>返事</h3>
+      <div className="row">
+        <input value={instruction} maxLength={200} aria-label="書き方の頼み" placeholder="書き方の頼み（もっと丁寧に・来週伺えると伝える など）" onChange={(e) => setInstruction(e.target.value)} />
+        <button className="btn ghost small" disabled={busy} onClick={() => void run(() => api.inquiries.draftReply(inquiryId, instruction.trim()).then(() => setInstruction('')), draft ? '書き直しました' : '下書きを書きました', '下書きを書けませんでした')}>
+          {busy ? '書いています…' : draft ? '下書きを書き直す' : '返事の下書き'}
+        </button>
+        <NoteText note={note} />
+      </div>
+      {draft && edit && (
+        <div className="inquiries-reply-edit">
+          <label>宛先<input value={edit.to} maxLength={200} onChange={(e) => setEdit({ ...edit, to: e.target.value })} /></label>
+          <label>差出人<input value={draft.from} disabled /></label>
+          <label>件名<input value={edit.subject} maxLength={200} onChange={(e) => setEdit({ ...edit, subject: e.target.value })} /></label>
+          <label>本文<textarea rows={10} value={edit.body} onChange={(e) => setEdit({ ...edit, body: e.target.value })} /></label>
+          <div className="row">
+            <button className="btn ghost small" disabled={busy || !dirty} onClick={() => void run(() => api.inquiries.updateReply(draft.id, edit), '保存しました', '保存できませんでした')}>保存</button>
+            <button className="btn small" disabled={busy}
+              onClick={() => void run(async () => { if (dirty) await api.inquiries.updateReply(draft.id, edit); await api.inquiries.submitReply(draft.id); }, '承認へ進めました。承認されると送ります', '承認へ進められませんでした')}>承認へ進む</button>
+            <button className="btn ghost small danger" disabled={busy} onClick={() => void run(() => api.inquiries.deleteReply(draft.id), '下書きを削除しました', '削除できませんでした')}>削除</button>
+          </div>
+        </div>
+      )}
+      {replies.filter((r) => r.status !== 'draft').map((r) => (
+        <details key={r.id} className="inquiries-reply-sent">
+          <summary className="small">
+            <span className={r.status === 'sent' ? 'badge ok' : 'badge warn'}>{INQUIRY_REPLY_STATUS_LABELS[r.status]}</span>
+            {' '}{r.subject}・{r.to}{r.sentAt ? `・${when(r.sentAt)}` : ''}
+          </summary>
+          <pre className="small">{r.body}</pre>
+        </details>
+      ))}
+    </div>
+  );
+}
+
+/** 窓口のアカウントのメールのうち、問い合わせでないと見分けたもの。「問い合わせにする」で戻せる。 */
+function SkippedMails({ onOpen, onChanged }: { onOpen: (id: string) => void; onChanged: () => void }) {
+  const [items, setItems] = useState<InquiryMailSkipped[] | null>(null);
+  const [note, setNote] = useState<Note>(null);
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(() => {
+    api.inquiries.skipped().then((r) => setItems(r.items)).catch((e) => setNote({ kind: 'error', text: describeError(e, '読めませんでした') }));
+  }, []);
+  useEffect(load, [load]);
+  const promote = async (messageId: string) => {
+    setBusy(true);
+    try {
+      const r = await api.inquiries.promote(messageId);
+      setNote({ kind: 'ok', text: '問い合わせにしました', open: () => onOpen(r.id) });
+      load(); onChanged();
+    } catch (e) {
+      setNote({ kind: 'error', text: describeError(e, '問い合わせにできませんでした') });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="inquiries-panel">
+      <NoteText note={note} />
+      {items && items.length === 0 && <p className="muted small">ありません。</p>}
+      {items && items.length > 0 && (
+        <table className="table small">
+          <thead><tr><th>届いた</th><th>差出人</th><th>件名</th><th>見分けた理由</th><th /></tr></thead>
+          <tbody>
+            {items.map((m) => (
+              <tr key={m.messageId}>
+                <td>{when(m.receivedAt)}</td><td>{m.from}</td><td>{m.subject}</td><td className="muted">{m.reason}</td>
+                <td><button className="btn ghost small" disabled={busy} onClick={() => void promote(m.messageId)}>問い合わせにする</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+/** 月の振り返り（数はプログラムが数える。第33.9節）。 */
+function MonthReview() {
+  const [which, setWhich] = useState<'prev' | 'this'>('prev');
+  const [text, setText] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    // 今月は日本時間の今日の月。先月はサーバーが決める（月の指定なし）
+    const month = which === 'this' ? today().slice(0, 7) : undefined;
+    api.inquiries.review(month).then((r) => { setText(r.text); setError(null); }).catch((e) => setError(describeError(e, '読めませんでした')));
+  }, [which]);
+  return (
+    <div className="inquiries-panel">
+      <div className="row">
+        <button className={which === 'prev' ? 'btn small' : 'btn ghost small'} onClick={() => setWhich('prev')}>先月</button>
+        <button className={which === 'this' ? 'btn small' : 'btn ghost small'} onClick={() => setWhich('this')}>今月</button>
+      </div>
+      {error && <p className="error small">{error}</p>}
+      {text && <p className="inquiries-review">{text}</p>}
+    </div>
+  );
+}
+

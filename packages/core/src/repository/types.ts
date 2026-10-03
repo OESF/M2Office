@@ -791,7 +791,7 @@ export interface RunStatRow {
 }
 
 /** 接続の設定の種類。 */
-export type CredentialKind = 'gemini' | 'google_oauth' | 'wordpress';
+export type CredentialKind = 'gemini' | 'google_oauth' | 'wordpress' | 'inquiry_mailbox';
 
 /** 会社の接続の設定。`secretEnc` は暗号化した秘密の値、`meta` は秘密でない値。 */
 export interface TenantCredential {

@@ -186,16 +186,19 @@ export function encodeAddress(v: string): string {
  * @remarks
  * 本文は UTF-8 のプレーンテキストを base64 で送る（日本語を 7 ビットの経路でも崩さないため）。
  * 返信のときは `inReplyTo`（元のメールの `Message-ID`）と `references` を付け、同じスレッドに置く。
- * `From` は付けない。Gmail が本人のアドレスを入れる。
+ * `From` は、`from` を渡したときだけ付ける（別名から送るとき。問い合わせの窓口のアカウント。第33.18節）。渡さなければ Gmail が本人のアドレスを入れる。
  */
 export function buildRawMessage(m: {
   to: string[]; cc: string[]; subject: string; body: string;
+  /** 差出人（Gmail の「送信元として使うアドレス」に登録した別名だけが使える）。 */
+  from?: string | null;
   inReplyTo?: string | null; references?: string | null;
   /** 配信の停止の URL（第27.9.1節）。`http(s)` の URL だけを見出しに入れる（開発は http）。 */
   listUnsubscribe?: string | null;
 }): string {
   const unsubscribe = m.listUnsubscribe && /^https?:\/\/\S+$/.test(m.listUnsubscribe) ? oneLine(m.listUnsubscribe) : null;
   const lines = [
+    ...(m.from ? [`From: ${encodeAddress(m.from)}`] : []),
     `To: ${m.to.map(encodeAddress).join(', ')}`,
     ...(m.cc.length > 0 ? [`Cc: ${m.cc.map(encodeAddress).join(', ')}`] : []),
     `Subject: ${encodeHeaderWord(m.subject)}`,

@@ -1204,8 +1204,8 @@ export function needsHuman(
   });
 }
 
-/** 送り先に関わらず、いつも人に判断を求めるツール。メールは宛先に関わらず人が見る。Web に載せるものも人が見る（仕様書 第9.4.0節・第32.18.1節）。 */
-const ALWAYS_ASK = new Set(['gmail.send', 'mail.bulk_send', 'columns.place']);
+/** 送り先に関わらず、いつも人に判断を求めるツール。メールは宛先に関わらず人が見る。Web に載せるもの・問い合わせの返事も人が見る（仕様書 第9.4.0節・第32.18.1節・第33.18節）。 */
+const ALWAYS_ASK = new Set(['gmail.send', 'mail.bulk_send', 'columns.place', 'inquiries.reply_send']);
 
 /** 承認の前の確かめで、行えないと分かった操作（記録しない。ADR-0024）。 */
 type UnableCall = {

@@ -663,8 +663,8 @@ export class Secretary {
       reply: {
         layer: 'light',
         text: started.already
-          ? `「${agent.name}」で同じご依頼を進めています。終わりましたらお伝えします。`
-          : `「${agent.name}」に頼みました。終わりましたらお伝えします。`,
+          ? `担当の業務「${agent.name}」で同じご依頼を進めています。終わりましたらお伝えします。`
+          : `担当の業務「${agent.name}」に頼みました。終わりましたらお伝えします。`,
         evidence: [{ label: '判定', value: reason }],
         lookup: { runId: started.runId, request: message },
         tokensUsed: filled.tokensUsed,

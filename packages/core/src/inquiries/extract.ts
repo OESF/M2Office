@@ -126,6 +126,8 @@ export function dueFrom(text: string, today: Today): string | null {
     return addDays(t, (target - weekdayOf(t) + 7) % 7);
   }
   if (/今週中|今週まで/.test(text)) return addDays(t, (5 - weekdayOf(t) + 7) % 7);
+  // 「来週中」「来週まで」は来週の金曜日、ただの「来週」は来週の月曜日
+  if (/来週中|来週まで|来週いっぱい/.test(text)) return addDays(t, (((8 - weekdayOf(t)) % 7) || 7) + 4);
   if (/来週/.test(text)) return addDays(t, ((8 - weekdayOf(t)) % 7) || 7);
   return null;
 }

@@ -298,6 +298,8 @@ export function buildDeps(): AppDeps {
     service: new InquiryService({
       store: new PostgresInquiryStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
       repo, llmFor: (tenantId) => ai.llmFor(tenantId), contacts: contactBookFrom(contactStore, cardsAccess(repo)), logger: log,
+      // 窓口のアカウント（第33.18節）。見本の会社では見本の箱
+      mailbox: { repo, box, sourceFor: (tenantId) => connector.sourceFor(tenantId) },
     }),
     access: inquiriesAccess(repo),
   };

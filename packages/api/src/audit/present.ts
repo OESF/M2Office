@@ -187,6 +187,14 @@ const ACTION_LABELS: Record<string, string> = {
   'inquiry.task_done': '問い合わせの次にやることを済みにした',
   'inquiry.delete': '問い合わせを削除した',
   'inquiry.split': '問い合わせの履歴を別の問い合わせに分けた',
+  'inquiry.mailbox_connect': '問い合わせの窓口のアカウントをつないだ',
+  'inquiry.mailbox_disconnect': '問い合わせの窓口のアカウントを外した',
+  'inquiry.mail_create': '窓口のメールから問い合わせを残した',
+  'inquiry.mail_append': '窓口のメールを問い合わせに足した',
+  'inquiry.mail_promote': '問い合わせでないとしたメールを問い合わせにした',
+  'inquiry.reply_draft': '問い合わせの返事の下書きを書いた',
+  'inquiry.reply_submit': '問い合わせの返事を承認へ進めた',
+  'inquiry.reply_send': '問い合わせの返事を送った',
   // 人事・給与（仕様書 第30.21節。他人の台帳を見ただけでも残す）
   'hr.list': '従業員の一覧を見た',
   'hr.view': '従業員の台帳を見た',
@@ -375,7 +383,7 @@ function targetOf(e: AuditEvent, names: AuditNames): string {
     // コラムの題名は出さない（テーマは記録の詳細にある）
     case 'web_column': return id.startsWith('col-') ? `コラム ${id.slice(4, 12)}` : 'コラムの作成の設定';
     // 問い合わせはお客様の名前を出さない。ID の頭だけ
-    case 'inquiry': return `問い合わせ ${id.slice(4, 12)}`;
+    case 'inquiry': return id === 'mailbox' ? '問い合わせの窓口のアカウント' : `問い合わせ ${id.slice(4, 12)}`;
     case 'tool': {
       // 会社の接続のツール（`slack.slack_send_message`）は接続の名前を添える
       const [head, ...rest] = id.split('.');

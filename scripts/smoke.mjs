@@ -351,7 +351,7 @@ console.log('\n■ 8. ダミー接続による照会（Google 未接続）');
     method: 'POST', body: JSON.stringify({ message: 'メールの返信を下書きして' }),
   });
   // 専門の業務は、本人に実行の可否を聞かずに頼んで実行し、結果をあとで伝える（第10.9.6節、ADR-0033）
-  routed.lookup?.runId && /「メールの整理・下書きの作成」に頼みました/.test(routed.text) && !routed.suggestedAgent
+  routed.lookup?.runId && /担当の業務「メールの整理・下書きの作成」に頼みました/.test(routed.text) && !routed.suggestedAgent
     ? ok('作業の依頼は照会と取り違えず、受信箱整理に頼んで実行した（実行してよいかを聞かない）')
     : ng('依頼を照会として処理してしまう、または実行してよいかを聞く', JSON.stringify(routed).slice(0, 160));
   const delegated = routed.lookup?.runId ? await waitFor('a', routed.lookup.runId, ['completed', 'failed', 'awaiting_approval'], 20000) : null;
@@ -5228,6 +5228,103 @@ console.log('\n■ 66. 問い合わせの記録（内蔵の拡張。第33.17節�
     await owner.query(`delete from inquiries where tenant_id in ('t-alpha', 't-beta') and from_name like 'スモーク確認%'`);
     // 問い合わせから名刺管理に作った連絡先も消す（第33.6.1節）
     await owner.query(`delete from contacts where tenant_id in ('t-alpha', 't-beta') and note = '出どころ: 問い合わせの記録' and name like 'スモーク確認%'`);
+    for (const r of saved) await owner.query(`update tenant_settings set inquiries = $2 where tenant_id = $1`, [r.tenant_id, r.inquiries ? JSON.stringify(r.inquiries) : null]);
+    await owner.end();
+  }
+}
+
+console.log('\n■ 67. 問い合わせの記録の段 2（窓口のアカウント・返事・振り返り。第33.18節）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const startedAt = new Date().toISOString();
+  const { rows: saved } = await owner.query(`select tenant_id, inquiries from tenant_settings where tenant_id in ('t-alpha', 't-beta')`);
+  const cleanup = async () => {
+    await owner.query(`delete from inquiries where tenant_id = 't-alpha' and created_at >= $1`, [startedAt]);
+    await owner.query(`delete from inquiry_mail_messages where tenant_id = 't-alpha'`);
+    await owner.query(`delete from inquiry_mail_cursors where tenant_id = 't-alpha'`);
+    await owner.query(`delete from tenant_credentials where tenant_id = 't-alpha' and kind = 'inquiry_mailbox'`);
+    await owner.query(`delete from contacts where tenant_id = 't-alpha' and note = '出どころ: 問い合わせの記録' and created_at >= $1`, [startedAt]);
+  };
+  await cleanup();
+  try {
+    await call('a', '/v1/admin/extensions/inquiries/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    // つなぐのは管理者だけ。見本の会社では認可を経ずに見本の箱（info@ 会社のドメイン）をつなぐ
+    const byMember = await call('a', '/v1/admin/extensions/inquiries/mailbox/connect', { method: 'POST', body: '{}' }, 'member');
+    const conn = await call('a', '/v1/admin/extensions/inquiries/mailbox/connect', { method: 'POST', body: '{}' });
+    const { body: ext } = await call('a', '/v1/admin/extensions');
+    const mailbox = (ext.items ?? ext.extensions ?? []).find((x) => x.id === 'inquiries' || x.pkg?.manifest?.id === 'inquiries' || x.manifest?.id === 'inquiries')?.inquiries?.mailbox;
+    byMember.status === 403 && conn.body?.connected === true && mailbox?.email === 'info@alpha.example.jp'
+      ? ok('窓口のアカウントをつなげるのは管理者だけ（見本の会社では見本の箱）')
+      : ng('窓口のアカウントのつなぎが違う', JSON.stringify({ member: byMember.status, conn: conn.body, mailbox }).slice(0, 300));
+
+    // 読む: 問い合わせ 2 通と、問い合わせでないもの 2 通（メールマガジン・営業の売り込み）
+    const check = await call('a', '/v1/inquiries/mail/check', { method: 'POST', body: '{}' }, 'member');
+    const again = await call('a', '/v1/inquiries/mail/check', { method: 'POST', body: '{}' }, 'member');
+    const items = (await call('a', '/v1/inquiries?status=open', {}, 'member')).body.items ?? [];
+    const form = items.find((i) => i.channel === 'form');
+    const direct = items.find((i) => i.channel === 'mail' && i.from?.email === 'sasaki@example.net');
+    const skipped = (await call('a', '/v1/inquiries/mail/skipped', {}, 'member')).body.items ?? [];
+    check.body?.created === 2 && check.body?.skipped === 2 && again.body?.throttled === true
+      && form?.from?.name === '山本 太郎' && form.source === '検索' && direct && skipped.length === 2
+      ? ok('窓口のメールを読み、問い合わせ（フォームの通知・別名に届いたメール）を残し、メールマガジンと営業の売り込みは問い合わせにしない')
+      : ng('窓口のメールの読み方が違う', JSON.stringify({ check: check.body, again: again.body, form: form?.from, skipped: skipped.length }).slice(0, 400));
+    const other = await call('b', `/v1/inquiries/${direct?.id}`);
+    other.status === 403 || other.status === 404 ? ok('ほかの会社からは窓口の問い合わせが見えない') : ng(`ほかの会社から見える（${other.status}）`);
+
+    // メールを開く（本文は写さず、窓口のアカウントから読む）
+    const detail = (await call('a', `/v1/inquiries/${direct?.id}`, {}, 'member')).body;
+    const ev = detail.events?.[0];
+    const mail = ev ? await call('a', `/v1/inquiries/events/${ev.id}/mail`, {}, 'member') : { status: 0, body: {} };
+    ev?.body === null && ev?.mail?.to === 'sales@alpha.example.jp' && mail.status === 200 && /見積もり/.test(mail.body.body ?? '')
+      ? ok('メールの本文は M2Office に写さず、開いたときに窓口のアカウントから読む。届いた宛先（別名）を残す')
+      : ng('メールの開き方が違う', JSON.stringify({ ev, mail: mail.status }).slice(0, 300));
+
+    // 問い合わせでないものを戻す
+    const promote = await call('a', `/v1/inquiries/mail/${encodeURIComponent(skipped[0]?.messageId ?? '')}/promote`, { method: 'POST', body: '{}' }, 'member');
+    const skippedAfter = (await call('a', '/v1/inquiries/mail/skipped', {}, 'member')).body.items ?? [];
+    promote.status === 201 && skippedAfter.length === 1 ? ok('問い合わせでないとしたメールを、問い合わせに戻せる') : ng('戻せない', JSON.stringify({ promote: promote.body, left: skippedAfter.length }));
+
+    // 返事: 下書き → 承認へ進む → 管理者が承認 → 窓口のアカウントから送る
+    const draft = await call('a', `/v1/inquiries/${direct?.id}/replies`, { method: 'POST', body: '{}' }, 'member');
+    const r = draft.body?.reply;
+    const submit = await call('a', `/v1/inquiries/replies/${r?.id}/submit`, { method: 'POST', body: '{}' }, 'member');
+    const run = submit.body?.runId ? await waitFor('a', submit.body.runId, ['awaiting_approval', 'failed', 'completed'], 20000, 'member') : null;
+    const appr = submit.body?.runId ? await approvalFor('a', submit.body.runId, 'admin') : null;
+    const locked = await call('a', `/v1/inquiries/replies/${r?.id}`, { method: 'PUT', body: JSON.stringify({ body: '変える' }) }, 'member');
+    const byMemberAppr = appr ? await call('a', `/v1/approvals/${appr.id}`, { method: 'POST', body: JSON.stringify({ decision: 'approved' }) }, 'member') : { status: 0 };
+    draft.status === 201 && r?.to === 'sasaki@example.net' && r?.from === 'sales@alpha.example.jp' && submit.status === 201
+      && run?.run?.status === 'awaiting_approval' && /宛先: sasaki@example.net/.test(appr?.present ?? '') && locked.status === 409 && byMemberAppr.status >= 400
+      ? ok('返事の下書きは届いた宛先（別名）から返す形になり、承認へ進めると宛先と本文を承認の画面に出す。承認待ちの間は直せず、一般の人は承認できない')
+      : ng('返事の承認までが違う', JSON.stringify({ draft: draft.status, to: r?.to, from: r?.from, submit: submit.body, status: run?.run?.status, present: appr?.present?.slice(0, 200), locked: locked.status }).slice(0, 500));
+    if (appr) await call('a', `/v1/approvals/${appr.id}`, { method: 'POST', body: JSON.stringify({ decision: 'approved' }) }, 'admin');
+    const done = submit.body?.runId ? await waitFor('a', submit.body.runId, ['completed', 'failed'], 20000, 'member') : null;
+    const after = (await call('a', `/v1/inquiries/${direct?.id}`, {}, 'member')).body;
+    done?.run?.status === 'completed' && after.replies?.[0]?.status === 'sent' && after.events?.at(-1)?.direction === 'out' && !after.inquiry?.nextTask
+      ? ok('承認されると窓口のアカウントから送り、会話の履歴に足して「返事をする」を済みにする')
+      : ng('送ったあとが違う', JSON.stringify({ status: done?.run?.status, reason: done?.run?.failureReason, reply: after.replies?.[0]?.status, last: after.events?.at(-1)?.direction }).slice(0, 400));
+
+    // 月の振り返り（数はプログラムで数える）
+    const month = new Date(Date.now() + 9 * 3_600_000).toISOString().slice(0, 7);
+    const review = await call('a', `/v1/inquiries/review?month=${month}`, {}, 'member');
+    review.status === 200 && review.body.stats?.total >= 3 && /問い合わせは \d+ 件でした/.test(review.body.text ?? '')
+      ? ok('月の振り返りで、件数・経路・どこで知ったかを数える')
+      : ng('振り返りが違う', JSON.stringify(review.body).slice(0, 300));
+
+    // 外す
+    const off = await call('a', '/v1/admin/extensions/inquiries/mailbox', { method: 'DELETE' });
+    const draft2 = await call('a', `/v1/inquiries/${form?.id}/replies`, { method: 'POST', body: '{}' }, 'member');
+    const { body: audits } = await call('a', '/v1/admin/audit-events');
+    const acts = (audits.items ?? []).map((e) => e.action);
+    off.status === 200 && draft2.status === 400 && ['inquiry.mailbox_connect', 'inquiry.mail_create', 'inquiry.reply_send', 'inquiry.mailbox_disconnect'].every((a) => acts.includes(a))
+      && !JSON.stringify((audits.items ?? []).filter((e) => String(e.action).startsWith('inquiry.'))).includes('sasaki@')
+      ? ok('窓口のアカウントを外すと返事を書かない。つなぐ・読む・送る・外すを監査ログに残す（お客様のアドレスは残さない）')
+      : ng('外したときか監査ログが違う', JSON.stringify({ off: off.status, draft2: draft2.status, acts: acts.filter((a) => a.startsWith('inquiry.')) }));
+  } catch (err) {
+    ng('問い合わせの記録の段 2 の確認が途中で止まった', String(err?.stack ?? err));
+  } finally {
+    await cleanup();
     for (const r of saved) await owner.query(`update tenant_settings set inquiries = $2 where tenant_id = $1`, [r.tenant_id, r.inquiries ? JSON.stringify(r.inquiries) : null]);
     await owner.end();
   }

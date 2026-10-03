@@ -3,6 +3,7 @@
  *
  * 電話・来店などの問い合わせを、秘書に話すか画面の 1 行の欄に書くだけで残す。AI が誰から・用件・分類・どこで知ったか・
  * 次にやること・温度感に分ける。問い合わせは利用範囲の中で会社で共有する。
+ * 段 2（第33.18節）で、会社の窓口のアカウント（info@ など）のメールを読み、返事を承認の後に送り、月の振り返りを出す。
  */
 
 /** 問い合わせの記録の拡張の ID（内蔵の拡張。第12.13節）。 */
@@ -66,6 +67,8 @@ export interface InquiryEvent {
   body: string | null;
   createdBy: string;
   createdByName: string;
+  /** 窓口のアカウントのメールなら、元のメールの参照と、どの宛先（別名）に届いたか。本文は持たない（開いたときに読む）。 */
+  mail: { messageId: string; threadId: string; to: string } | null;
 }
 
 /** 問い合わせ 1 件。 */
@@ -95,18 +98,78 @@ export interface Inquiry {
   updatedAt: string;
 }
 
+/** 返事の状態。 */
+export type InquiryReplyStatus = 'draft' | 'awaiting' | 'sent';
+
+/** 返事の状態の呼び方。 */
+export const INQUIRY_REPLY_STATUS_LABELS: Record<InquiryReplyStatus, string> = { draft: '下書き', awaiting: '承認待ち', sent: '送った' };
+
+/** 窓口のアカウントから送る返事（第33.6節）。承認の後に送る。 */
+export interface InquiryReply {
+  id: string;
+  inquiryId: string;
+  to: string;
+  /** 差出人（お客様が送った宛先。別名から送れなければ窓口のアカウントの本来のアドレス）。 */
+  from: string;
+  subject: string;
+  body: string;
+  status: InquiryReplyStatus;
+  runId: string | null;
+  createdBy: string;
+  createdByName: string;
+  createdAt: string;
+  sentAt: string | null;
+}
+
 /** 1 件の画面に出すもの。 */
 export interface InquiryDetail {
   inquiry: Inquiry;
   events: InquiryEvent[];
   tasks: InquiryTask[];
+  /** 返事（新しい順）。 */
+  replies: InquiryReply[];
 }
 
-/** 会社の問い合わせの記録の設定（第33.4節）。段 1 では入り切りだけ。 */
+/** 窓口のアカウントのメールのうち、問い合わせでないと見分けたもの（第33.6節「問い合わせにしないもの」）。 */
+export interface InquiryMailSkipped {
+  messageId: string;
+  from: string;
+  subject: string;
+  /** 見分けた理由（営業の売り込み・メールマガジン・自動の知らせなど）。 */
+  reason: string;
+  receivedAt: string;
+}
+
+/** 窓口のアカウント（会社の接続。秘密の値は別に預け、ここにはアドレスだけを持つ）。 */
+export interface InquiryMailbox {
+  email: string;
+  /** つないだ管理者。メールから生まれた次にやることの担当と、手つかずの知らせの相手（窓口の担当）。 */
+  connectedBy: string;
+  connectedAt: string;
+}
+
+/** 月の振り返りの数（第33.9節。数はプログラムが数える）。 */
+export interface InquiryMonthStats {
+  /** `YYYY-MM`。 */
+  month: string;
+  total: number;
+  /** 前の月の件数。 */
+  previousTotal: number;
+  byChannel: Record<string, number>;
+  bySource: Record<string, number>;
+  byCategory: Record<string, number>;
+  byTemperature: Record<string, number>;
+  /** 窓口のアカウントの宛先（別名）ごと。 */
+  byMailTo: Record<string, number>;
+}
+
+/** 会社の問い合わせの記録の設定（第33.4節）。 */
 export interface InquirySettings {
   /** 使うか（既定は切り）。 */
   enabled: boolean;
+  /** 窓口のアカウント（第33.6節）。つないでいなければ `null`。 */
+  mailbox: InquiryMailbox | null;
 }
 
 /** 既定の設定。既定は切り（第33.2節）。 */
-export const DEFAULT_INQUIRY_SETTINGS: InquirySettings = { enabled: false };
+export const DEFAULT_INQUIRY_SETTINGS: InquirySettings = { enabled: false, mailbox: null };

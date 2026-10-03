@@ -12,16 +12,17 @@
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import {
-  CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, INVENTORY_FEATURES, SIGNAGE_EXTENSION_ID, SIGNAGE_JINGLES, WEB_COLUMNS_EXTENSION_ID, COLUMN_INDUSTRIES, type WebColumnSettings, type HrSettings, type InventorySettings, type RiskLevel, type SignageSettings,
+  CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, INVENTORY_FEATURES, SIGNAGE_EXTENSION_ID, SIGNAGE_JINGLES, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COLUMN_INDUSTRIES, type WebColumnSettings, type HrSettings, type InventorySettings, type RiskLevel, type SignageSettings,
 } from '@m2office/shared';
 import {
   bundledConnection, builtinSection, consentSnapshot, encodeFiles, unpackExtension, EXTENSION_FILE_MAX_BYTES,
-  ensureHrCompartment, detectKind, MAX_FILE_BYTES, LAW_BOOK, itemRule, type ExtensionEntry, type ExtensionPackage, type TenantExtensions,
+  ensureHrCompartment, detectKind, MAX_FILE_BYTES, LAW_BOOK, itemRule, createPkce, buildGoogleAuthUrl, revokeGoogleToken, MAILBOX_SCOPES, type ExtensionEntry, type ExtensionPackage, type TenantExtensions,
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { tenantOrigin } from '../tenant-origin.js';
 import { requireRole, type AppEnv } from '../middleware/tenant.js';
 import { parseScope, saveScope } from './access.js';
+import { googleClient, returnTo } from './connections.js';
 
 /** 危険度を利用者向けの言葉にする。 */
 const RISK_WORDS: Record<RiskLevel, string> = {
@@ -121,6 +122,8 @@ export function extensionsRoute(deps: AppDeps) {
         ...(e.pkg.manifest.id === SIGNAGE_EXTENSION_ID ? { signage: settings.signage } : {}),
         // Web のコラム: 分野・読み手・業種・監修者・AI の表示・WordPress の入れ先（第32.18.1節）。パスワードは返さない
         ...(e.pkg.manifest.id === WEB_COLUMNS_EXTENSION_ID ? { webColumns: settings.webColumns, columnAiUsage } : {}),
+        // 問い合わせの記録: 窓口のアカウント（第33.18節）。アドレスだけを返す
+        ...(e.pkg.manifest.id === INQUIRIES_EXTENSION_ID ? { inquiries: settings.inquiries } : {}),
       })),
     });
   });
@@ -367,6 +370,36 @@ export function extensionsRoute(deps: AppDeps) {
       siteUrl: s(body['siteUrl']), username: s(body['username']), password: s(body['password']),
     });
     return 'error' in res ? c.json({ error: res.error }, 400) : c.json({ ok: true, wordpress: res.wordpress });
+  });
+
+  /**
+   * 問い合わせの窓口のアカウントをつなぐ（第33.18節）。Google の認可の画面の URL を返す（アカウントを選ばせる）。
+   * 開発の見本の会社では、認可を経ずに見本の箱（`info@` 会社のドメイン）をつなぐ。
+   *
+   * @returns `{ url }` か、見本なら `{ connected: true }`。会社の Google のクライアントが無ければ 409
+   */
+  app.post(`/${INQUIRIES_EXTENSION_ID}/mailbox/connect`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    if (deps.connector.sourceFor(tenant.id) === 'mock') {
+      const err = await deps.inquiries.service.connectMailbox({ tenantId: tenant.id, userId: user.id }, { email: `info@${user.email.split('@')[1] ?? 'example.jp'}`, refreshToken: null });
+      return err ? c.json({ error: err }, 400) : c.json({ connected: true });
+    }
+    const client = await googleClient(deps, tenant.id);
+    if (!client) return c.json({ error: '会社の Google 接続の設定がありません。「接続」の「Google Workspace」で登録してください' }, 409);
+    const { verifier, challenge } = createPkce();
+    // 戻り先は管理者ページの拡張機能（問い合わせの記録の設定）
+    const back = returnTo(c).replace(/\/(\?|$)/, '/admin/extensions$1');
+    const state = deps.oauth.states.issue({ tenantId: tenant.id, userId: user.id, codeVerifier: verifier, returnTo: back, purpose: 'inquiry-mailbox' });
+    const url = buildGoogleAuthUrl({ clientId: client.clientId, redirectUri: deps.oauth.redirectUri, scopes: MAILBOX_SCOPES, state, codeChallenge: challenge, selectAccount: true });
+    return c.json({ url });
+  });
+
+  /** 問い合わせの窓口のアカウントを外す。Google の許可も取り消す（問い合わせは消さない）。 */
+  app.delete(`/${INQUIRIES_EXTENSION_ID}/mailbox`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const { refreshToken } = await deps.inquiries.service.disconnectMailbox({ tenantId: tenant.id, userId: user.id });
+    if (refreshToken) await revokeGoogleToken(refreshToken).catch(() => false);
+    return c.json({ ok: true });
   });
 
   /** WordPress の入れ先と鍵を外す（コラムは消さない）。 */

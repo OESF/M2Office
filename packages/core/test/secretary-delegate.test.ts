@@ -62,7 +62,7 @@ test('専門の業務は、入力を埋めて頼んで実行する。「実行�
   const s = new Secretary({ repo: d.repo, llm, connector: {} as never, agents: [agent('scheduling')], startAgent: d.startAgent, startLookup: d.startLookup });
   const reply = await s.respond('t', 'u1', '来週、山田さん（yamada@example.jp）と企画会議を調整してください');
   assert.deepEqual(d.started, [{ agentId: 'scheduling', input: { title: '企画会議', attendees: 'yamada@example.jp', period: '来週' } }]);
-  assert.match(reply.text, /「日程調整」に頼みました。終わりましたらお伝えします/);
+  assert.match(reply.text, /担当の業務「日程調整」に頼みました。終わりましたらお伝えします/);
   assert.doesNotMatch(reply.text, /よろしいですか/);
   assert.deepEqual(reply.lookup, { runId: 'run-scheduling', request: '来週、山田さん（yamada@example.jp）と企画会議を調整してください' }, '結果はあとで伝える');
   assert.equal(reply.suggestedAgent, undefined);
