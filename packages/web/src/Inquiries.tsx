@@ -4,6 +4,7 @@
  * 一覧の上の 1 行の欄に書いて「残す」を押すと、AI が誰から・用件・どこで知ったか・次にやることに分けて残す。
  * 前の問い合わせの続き（「田中さんに見積もりを送った」）なら同じ問い合わせに足す。どの続きか決まらなければ候補を出す。
  * 項目ごとの入力の欄は並べない。説明文は常には出さない（原則 u11）。結果の知らせは押したボタンの横に出す（原則 u12）。
+ * 秘書が問い合わせを残し終えたら読み直す（`changeKey`）。「更新」でも読み直せる（ページを読み直すと秘書との会話が切れるため）。
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -22,10 +23,14 @@ const whoOf = (i: Pick<Inquiry, 'from'>) => (i.from.name ? `${i.from.name}さん
 
 const STATUS_BADGE: Record<InquiryStatus, string> = { open: 'badge warn', done: 'badge ok', dropped: 'badge' };
 
-/** 押したボタンの横に出す知らせ。 */
-type Note = { kind: 'ok' | 'error'; text: string } | null;
+/** 押したボタンの横に出す知らせ。`open` があれば、その問い合わせを開くリンクを添える。 */
+type Note = { kind: 'ok' | 'error'; text: string; open?: () => void } | null;
 function NoteText({ note }: { note: Note }) {
-  return note ? <span className={`inquiries-note is-${note.kind}`} role={note.kind === 'error' ? 'alert' : 'status'}>{note.text}</span> : null;
+  return note
+    ? <span className={`inquiries-note is-${note.kind}`} role={note.kind === 'error' ? 'alert' : 'status'}>
+      {note.text}{note.open && <> <button className="link small" onClick={note.open}>開く</button></>}
+    </span>
+    : null;
 }
 
 /** 残した結果の一言。 */
@@ -47,19 +52,21 @@ function recordedText(r: Extract<InquiryRecorded, { kind: string }>): string {
  * @param onOpen 問い合わせを開く・一覧に戻る（`null`）
  * @param onContact 名刺管理の連絡先を開く
  */
-export function Inquiries({ inquiryId, onOpen, onContact }: {
+export function Inquiries({ inquiryId, onOpen, onContact, changeKey = '' }: {
   inquiryId: string | null;
   onOpen: (inquiryId: string | null) => void;
   onContact: (contactId: string) => void;
   userId: string;
+  /** 秘書が問い合わせを残し終えるたびに変わる値。変わったら読み直す。 */
+  changeKey?: string;
 }) {
   return inquiryId
-    ? <InquiryView key={inquiryId} id={inquiryId} onBack={() => onOpen(null)} onContact={onContact} />
-    : <InquiryList onOpen={(id) => onOpen(id)} />;
+    ? <InquiryView key={inquiryId} id={inquiryId} onBack={() => onOpen(null)} onContact={onContact} onOpen={(id) => onOpen(id)} changeKey={changeKey} />
+    : <InquiryList onOpen={(id) => onOpen(id)} changeKey={changeKey} />;
 }
 
 /** 1 行の欄と一覧。 */
-function InquiryList({ onOpen }: { onOpen: (id: string) => void }) {
+function InquiryList({ onOpen, changeKey }: { onOpen: (id: string) => void; changeKey: string }) {
   const [items, setItems] = useState<Inquiry[] | null>(null);
   const [status, setStatus] = useState<'open' | 'all'>('open');
   const [q, setQ] = useState('');
@@ -74,6 +81,8 @@ function InquiryList({ onOpen }: { onOpen: (id: string) => void }) {
       .then((r) => { setItems(r.items); setError(null); }).catch((e) => setError(describeError(e, '読めませんでした')));
   }, [status, q]);
   useEffect(() => { const t = setTimeout(load, q ? 250 : 0); return () => clearTimeout(t); }, [load, q]);
+  // 秘書が問い合わせを残したら読み直す（はじめの 1 回は上で読む）
+  useEffect(() => { if (changeKey) load(); }, [changeKey]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (note?.kind !== 'ok') return;
     const t = setTimeout(() => setNote(null), 6000);
@@ -122,6 +131,7 @@ function InquiryList({ onOpen }: { onOpen: (id: string) => void }) {
         <button className={status === 'open' ? 'btn small' : 'btn ghost small'} onClick={() => setStatus('open')}>対応中</button>
         <button className={status === 'all' ? 'btn small' : 'btn ghost small'} onClick={() => setStatus('all')}>すべて</button>
         <input className="inquiries-search" value={q} placeholder="検索" aria-label="検索" onChange={(e) => setQ(e.target.value)} />
+        <button className="btn ghost small" onClick={load}>更新</button>
       </div>
       {error && <p className="error">{error}</p>}
       {items && items.length === 0 && <p className="muted">{q ? '見つかりません。' : status === 'open' ? '対応中の問い合わせはありません。' : 'まだ問い合わせがありません。'}</p>}
@@ -153,7 +163,9 @@ function InquiryList({ onOpen }: { onOpen: (id: string) => void }) {
 }
 
 /** 1 件の問い合わせ。 */
-function InquiryView({ id, onBack, onContact }: { id: string; onBack: () => void; onContact: (contactId: string) => void }) {
+function InquiryView({ id, onBack, onContact, onOpen, changeKey }: {
+  id: string; onBack: () => void; onContact: (contactId: string) => void; onOpen: (id: string) => void; changeKey: string;
+}) {
   const [d, setD] = useState<InquiryDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<Note>(null);
@@ -166,8 +178,10 @@ function InquiryView({ id, onBack, onContact }: { id: string; onBack: () => void
     api.inquiries.get(id).then((r) => { setD(r); setError(null); }).catch((e) => setError(describeError(e, '読めませんでした')));
   }, [id]);
   useEffect(load, [load]);
+  // 秘書が問い合わせを残したら読み直す（はじめの 1 回は上で読む）
+  useEffect(() => { if (changeKey) load(); }, [changeKey]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (note?.kind !== 'ok') return;
+    if (note?.kind !== 'ok' || note.open) return;
     const t = setTimeout(() => setNote(null), 5000);
     return () => clearTimeout(t);
   }, [note]);
@@ -195,6 +209,7 @@ function InquiryView({ id, onBack, onContact }: { id: string; onBack: () => void
     <div className="inquiries">
       <div className="row">
         <button className="link small" onClick={onBack}>‹ 問い合わせの一覧</button>
+        <button className="btn ghost small" onClick={load}>更新</button>
         <NoteText note={note} />
       </div>
       <h2>{whoOf(i)} <span className={STATUS_BADGE[i.status]}>{INQUIRY_STATUS_LABELS[i.status]}</span></h2>
@@ -253,9 +268,25 @@ function InquiryView({ id, onBack, onContact }: { id: string; onBack: () => void
 
       <h3>会話の履歴</h3>
       <ol className="inquiries-events">
-        {events.map((e) => (
+        {events.map((e, n) => (
           <li key={e.id} className={e.direction === 'out' ? 'out' : 'in'}>
             <span className="small muted">{when(e.at)}・{INQUIRY_CHANNEL_LABELS[e.channel]}・{e.direction === 'out' ? 'こちらから' : '届いた'}・{e.createdByName}</span>
+            {/* 続きとして入ったのが別の用件なら、別の問い合わせに分ける（最初の履歴は分けない） */}
+            {n > 0 && (
+              <button className="link small inquiries-split" disabled={busy}
+                onClick={() => void (async () => {
+                  setBusy(true);
+                  try {
+                    const r = await api.inquiries.split(e.id);
+                    setNote({ kind: 'ok', text: '別の問い合わせに分けました', open: () => onOpen(r.id) });
+                    load();
+                  } catch (err) {
+                    setNote({ kind: 'error', text: describeError(err, '分けられませんでした') });
+                  } finally {
+                    setBusy(false);
+                  }
+                })()}>別の問い合わせに分ける</button>
+            )}
             <div>{e.summary}</div>
             {e.body && e.body !== e.summary && <details><summary className="small">書いた文</summary><p className="small">{e.body}</p></details>}
           </li>

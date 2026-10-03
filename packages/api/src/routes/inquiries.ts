@@ -1,5 +1,5 @@
 /**
- * @file 問い合わせの記録（内蔵の拡張）の API。一覧・残す（1 行の欄）・1 件・続きを足す・直す・次にやること・削除。
+ * @file 問い合わせの記録（内蔵の拡張）の API。一覧・残す（1 行の欄）・1 件・続きを足す・別の問い合わせに分ける・直す・次にやること・削除。
  *
  * 会社が問い合わせの記録を切っているときと、利用範囲の外の人には、どの口も使わせない。問い合わせは会社で共有する。
  *
@@ -115,6 +115,13 @@ export function inquiriesRoute(deps: AppDeps) {
     });
     if (err) return c.json({ error: err }, err.includes('見つかりません') ? 404 : 400);
     return c.json({ ok: true });
+  });
+
+  /** 会話の履歴 1 つを、別の問い合わせに分ける（続きとして入ったのが別の用件だったとき）。 */
+  app.post('/events/:eventId/split', async (c) => {
+    const res = await service.split(who(c), c.req.param('eventId'));
+    if ('error' in res) return c.json({ error: res.error }, res.error.includes('見つかりません') ? 404 : 400);
+    return c.json(res, 201);
   });
 
   /** 削除する（残した本人と管理者だけ）。 */

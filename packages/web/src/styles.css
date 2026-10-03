@@ -1766,3 +1766,4 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .inquiries-events li { border-left: 3px solid var(--line); padding: 4px 0 4px 10px; margin-bottom: 6px; }
 .inquiries-events li.out { border-left-color: var(--accent); }
 .inquiries-danger { margin-top: calc(18px * var(--space-scale)); }
+.inquiries-split { margin-left: calc(8px * var(--space-scale)); }

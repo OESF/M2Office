@@ -5171,6 +5171,16 @@ console.log('\n■ 66. 問い合わせの記録（内蔵の拡張。第33.17節�
       ? ok('「見積もりを送った」は同じ問い合わせに足し、次にやることを済みにする')
       : ng('続きが違う', JSON.stringify({ next: next.body, events: detail.events?.length }).slice(0, 400));
 
+    // 分ける: 続きとして入った履歴を、別の問い合わせにする（2026-10-03 に、別の電話が続きとして入った）
+    const later = detail.events?.[1];
+    const split = later ? await call('a', `/v1/inquiries/events/${later.id}/split`, { method: 'POST', body: '{}' }, 'member') : { status: 0, body: {} };
+    const firstSplit = await call('a', `/v1/inquiries/events/${detail.events?.[0]?.id}/split`, { method: 'POST', body: '{}' }, 'member');
+    const afterSplit = (await call('a', `/v1/inquiries/${inq?.id}`, {}, 'member')).body;
+    const newOne = split.body?.id ? (await call('a', `/v1/inquiries/${split.body.id}`, {}, 'member')).body : null;
+    split.status === 201 && firstSplit.status === 400 && afterSplit.events?.length === 1 && newOne?.events?.length === 1
+      ? ok('続きとして入った履歴を、別の問い合わせに分けられる（最初の履歴は分けない）')
+      : ng('分けるときが違う', JSON.stringify({ split: split.status, first: firstSplit.status, left: afterSplit.events?.length, moved: newOne?.events?.length }));
+
     // 要配慮個人情報: 原文も要約も残さない
     const sens = await call('a', '/v1/inquiries', { method: 'POST', body: JSON.stringify({ text: `いま${name}二さんから電話。持病で通院中なので、午前に予約したい` }) }, 'member');
     const sensDetail = (await call('a', `/v1/inquiries/${sens.body?.inquiry?.id}`, {}, 'member')).body;

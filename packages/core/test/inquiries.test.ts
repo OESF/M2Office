@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULT_TENANT_SETTINGS, type Notification, type TenantSettings } from '@m2office/shared';
 import {
-  InquiryService, InquiryWatch, MemoryInquiryStore, StubLlmProvider, INQUIRY_TOOLS, businessDaysAgo, dueFrom, guessInquiry, readInquiry, stripSensitive,
+  InquiryService, InquiryWatch, MemoryInquiryStore, StubLlmProvider, INQUIRY_TOOLS, businessDaysAgo, dueFrom, guessInquiry, readInquiry, sameParty, stripSensitive,
   type InquiryContactBook, type LlmProvider, type Repository, type ToolContext,
 } from '../src/index.js';
 
@@ -138,6 +138,46 @@ test('続き: 「見積もりを送った」は同じ問い合わせに足し、
   // 画面から問い合わせを選べば、その問い合わせに足す
   const picked = await service.record(who, '田中さんに折り返した', { inquiryId: first.inquiry.id });
   assert.equal(picked.kind, 'appended');
+});
+
+test('続き: 推論が選んでも、同じ人とはっきり分からなければ別の問い合わせにする（名前の無い別の電話を混ぜない）', async () => {
+  // 2026-10-03 に、名前の無い「来週の水曜日は営業しているか」に、名前の無い「見積もりを送って」の電話が続きとして入った
+  let firstId = '';
+  const llm = fakeLlm((p) => p.includes('対応中の問い合わせ（データ）')
+    ? `{"intent":"followup","inquiryId":"${firstId}","from":{"name":"","company":"","phone":"","email":""},"channel":"phone","direction":"in","category":"見積もり","summary":"見積もりを送ってほしい","source":"不明","temperature":"normal","task":{"what":"見積もりを送る","due":"2026-10-15"},"closesTask":false,"sensitive":false}`
+    : '{"intent":"new","inquiryId":null,"from":{"name":"","company":"","phone":"","email":""},"channel":"phone","direction":"in","category":"質問","summary":"来週の水曜日に営業しているか","source":"不明","temperature":"normal","task":null,"closesTask":false,"sensitive":false}');
+  const { service, store } = setup({ llm });
+  const first = await service.record(who, '来週の水曜日に営業しているかという問い合わせ');
+  if (first.kind !== 'created') throw new Error('残せない');
+  firstId = first.inquiry.id;
+  const second = await service.record(who, '来週の木曜日までに、お願いしていた見積もりを送ってくださいという電話を受けました');
+  assert.equal(second.kind, 'created', '続きにしない');
+  if (second.kind !== 'created') return;
+  assert.notEqual(second.inquiry.id, firstId);
+  assert.equal((await store.get('t1', firstId))?.nextTask, null, '前の問い合わせに次にやることを足さない');
+  assert.equal(sameParty({ name: '田中', company: '', phone: '', email: '' }, { name: '田中さん', company: '', phone: '', email: '' }), true);
+  assert.equal(sameParty({ name: '', company: '', phone: '03-1234-5678', email: '' }, { name: '', company: '', phone: '0312345678', email: '' }), true);
+  assert.equal(sameParty({ name: '', company: '', phone: '', email: '' }, { name: '', company: '', phone: '', email: '' }), false);
+});
+
+test('分ける: 続きとして入った履歴を、その履歴から生まれた次にやることと一緒に、別の問い合わせにする', async () => {
+  const { service, store, audits } = setup();
+  const first = await service.record(who, 'いま田中さんから電話。営業日を知りたい');
+  if (first.kind !== 'created') throw new Error('残せない');
+  const appended = await service.record(who, '田中さんから電話。見積もりがほしい。明日までに送る', { inquiryId: first.inquiry.id });
+  if (appended.kind !== 'appended') throw new Error('足せない');
+  const events = await store.events('t1', first.inquiry.id);
+  assert.equal((await service.split(who, events[0]!.id) as { error: string }).error, '最初の履歴は分けられません。後の履歴を分けてください');
+  const res = await service.split(who, events[1]!.id);
+  assert.ok('id' in res);
+  if (!('id' in res)) return;
+  assert.equal((await store.events('t1', first.inquiry.id)).length, 1);
+  assert.equal((await store.events('t1', res.id)).length, 1);
+  const moved = await store.get('t1', res.id);
+  assert.equal(moved?.from.name, '田中', '原文から読み直す');
+  assert.equal(moved?.nextTask?.what, appended.task?.what, '次にやることも移る');
+  assert.equal((await store.get('t1', first.inquiry.id))?.nextTask, null);
+  assert.ok(audits.some((a) => a.action === 'inquiry.split'));
 });
 
 test('要配慮個人情報: 話に出ても原文を残さず、要約からも除く', async () => {

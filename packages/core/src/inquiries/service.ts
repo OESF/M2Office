@@ -65,6 +65,20 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 /** 比べる形の言葉（空白と敬称を除く）。 */
 const norm = (s: string) => s.replace(/[\s　]/g, '').replace(/(さん|様|さま)$/, '').toLowerCase();
+/** 数字だけ（電話番号を比べる）。 */
+const digits = (s: string) => s.replace(/\D/g, '');
+
+/**
+ * 同じ人とはっきり分かるか（名前・会社・電話・メールのどれかが同じ）。
+ *
+ * @remarks どちらにも名前などが無ければ `false`（2026-10-03 に、名前の無い別の電話が、名前の無い前の問い合わせに続きとして入った）
+ */
+export function sameParty(a: InquiryParty, b: InquiryParty): boolean {
+  if (a.name && b.name && norm(a.name) === norm(b.name)) return true;
+  if (a.company && b.company && norm(a.company) === norm(b.company)) return true;
+  if (digits(a.phone).length >= 9 && digits(a.phone) === digits(b.phone)) return true;
+  return !!a.email && a.email.toLowerCase() === b.email.toLowerCase();
+}
 
 /**
  * 会社が問い合わせの記録を使っていて、利用者が利用範囲の中なら、会社の設定を返す。
@@ -145,7 +159,9 @@ export class InquiryService {
       target = await store.get(who.tenantId, opts.inquiryId);
       if (!target) return { kind: 'error', error: '問い合わせが見つかりません' };
     } else if (draft.intent === 'followup') {
-      target = draft.inquiryId ? await store.get(who.tenantId, draft.inquiryId) : null;
+      // 推論が選んだ問い合わせでも、同じ人とはっきり分からなければ続きにしない（別の電話を混ぜない）
+      const chosen = draft.inquiryId ? await store.get(who.tenantId, draft.inquiryId) : null;
+      target = chosen && sameParty(chosen.from, draft.from) ? chosen : null;
       if (!target) {
         const name = norm(draft.from.name);
         const company = norm(draft.from.company);
@@ -171,10 +187,10 @@ export class InquiryService {
       from: draft.from, contactId: linked?.contactId ?? null, channel: draft.channel, category: draft.category, summary,
       source: draft.source || INQUIRY_SOURCE_UNKNOWN, temperature: draft.temperature, receivedBy: who.userId, createdBy: who.userId,
     });
-    await store.addEvent(who.tenantId, id, { direction: draft.direction, channel: draft.channel, summary, body, createdBy: who.userId });
+    const eventId = await store.addEvent(who.tenantId, id, { direction: draft.direction, channel: draft.channel, summary, body, createdBy: who.userId });
     let task: InquiryTask | null = null;
     if (draft.task) {
-      const taskId = await store.addTask(who.tenantId, id, { assignee: who.userId, what: draft.task.what, due: draft.task.due, createdBy: who.userId });
+      const taskId = await store.addTask(who.tenantId, id, { assignee: who.userId, what: draft.task.what, due: draft.task.due, createdBy: who.userId, eventId });
       task = (await store.task(who.tenantId, taskId)) ?? null;
     }
     // 監査ログには、お客様の名前や用件を残さない（経路と、要配慮の情報を除いたかだけ）
@@ -192,7 +208,7 @@ export class InquiryService {
     who: InquiryViewer, target: Inquiry, draft: Awaited<ReturnType<typeof readInquiry>>, e: { summary: string; body: string | null; sensitive: boolean },
   ): Promise<RecordResult> {
     const { store } = this.deps;
-    await store.addEvent(who.tenantId, target.id, { direction: draft.direction, channel: draft.channel, summary: e.summary, body: e.body, createdBy: who.userId });
+    const eventId = await store.addEvent(who.tenantId, target.id, { direction: draft.direction, channel: draft.channel, summary: e.summary, body: e.body, createdBy: who.userId });
     let closedTask: InquiryTask | null = null;
     if (draft.closesTask && target.nextTask) {
       await store.updateTask(who.tenantId, target.nextTask.id, { done: true });
@@ -200,7 +216,7 @@ export class InquiryService {
     }
     let task: InquiryTask | null = null;
     if (draft.task && draft.direction === 'in') {
-      const taskId = await store.addTask(who.tenantId, target.id, { assignee: who.userId, what: draft.task.what, due: draft.task.due, createdBy: who.userId });
+      const taskId = await store.addTask(who.tenantId, target.id, { assignee: who.userId, what: draft.task.what, due: draft.task.due, createdBy: who.userId, eventId });
       task = await store.task(who.tenantId, taskId);
     }
     // 空の項目だけを、新しく分かったことで埋める。お客様からまた届いたら、対応中に戻す
@@ -329,6 +345,33 @@ export class InquiryService {
     await store.update(who.tenantId, t.inquiryId, { lastAt: new Date().toISOString() });
     await this.audit(who, input.done ? 'inquiry.task_done' : 'inquiry.task_update', t.inquiryId, {});
     return null;
+  }
+
+  /**
+   * 会話の履歴 1 つを、別の問い合わせに分ける（続きとして入ったのが別の用件だったとき）。
+   * 原文が残っていれば読み直して項目を作り、無ければ要約と経路だけで作る。その履歴から生まれた次にやることも移す。
+   *
+   * @returns 新しい問い合わせの ID。分けられなければ理由
+   */
+  async split(who: InquiryViewer, eventId: string): Promise<{ id: string } | { error: string }> {
+    const { store } = this.deps;
+    const ev = await store.event(who.tenantId, eventId);
+    if (!ev) return { error: '会話の履歴が見つかりません' };
+    const events = await store.events(who.tenantId, ev.inquiryId);
+    if (events.length < 2) return { error: '会話の履歴が 1 つだけの問い合わせは分けられません' };
+    if (events[0]!.id === ev.id) return { error: '最初の履歴は分けられません。後の履歴を分けてください' };
+    let fields = { from: { name: '', company: '', phone: '', email: '' } as InquiryParty, channel: ev.channel, category: '', summary: ev.summary, source: INQUIRY_SOURCE_UNKNOWN, temperature: 'normal' as InquiryTemperature };
+    if (ev.body) {
+      const llm = await this.deps.llmFor(who.tenantId).catch(() => null);
+      const d = await readInquiry(llm, ev.body, { date: await this.today(who) }, []);
+      fields = { from: d.from, channel: d.channel, category: d.category, summary: ev.summary, source: d.source || INQUIRY_SOURCE_UNKNOWN, temperature: d.temperature };
+    }
+    const linked = fields.from.name || fields.from.email || fields.from.phone ? await this.deps.contacts?.link(who, fields.from).catch(() => null) ?? null : null;
+    const id = await store.create(who.tenantId, { ...fields, contactId: linked?.contactId ?? null, receivedBy: ev.createdBy, createdBy: who.userId });
+    await store.moveEvent(who.tenantId, ev.id, id);
+    await store.update(who.tenantId, id, { lastAt: ev.at });
+    await this.audit(who, 'inquiry.split', ev.inquiryId, { to: id });
+    return { id };
   }
 
   /**

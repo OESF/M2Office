@@ -170,6 +170,7 @@ function readPrompt(text: string, today: Today, open: Pick<Inquiry, 'id' | 'from
     `今日は ${today.date}（${WEEKDAYS[weekdayOf(today.date)]}曜日）。`,
     '決まり:',
     '- 新しい問い合わせなら intent は new。すでにある問い合わせへの対応の報告（「見積もりを送った」「折り返した」）や、同じ人からの続きなら followup にし、下の対応中の問い合わせから inquiryId を選ぶ（1 つに決まらなければ null）',
+    '- followup にするのは、文と選ぶ問い合わせに**同じ名前・会社・電話・メール**がはっきり出ているときだけ。誰からか分からない文は、用件が似ていても new にする（別の電話を混ぜない）',
     '- channel は phone（電話）・mail・form（Web のフォーム）・line・visit（来店）・other。direction は、お客様から届いたなら in、こちらからしたことなら out',
     '- category は短い言葉（見積もり・予約・質問・苦情・採用・営業の売り込み など。会社の扱うものに合わせてよい）',
     '- summary は用件を 1〜2 文で。誰から・いつ・どこで知ったかは summary に繰り返さない',

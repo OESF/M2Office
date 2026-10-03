@@ -186,6 +186,7 @@ const ACTION_LABELS: Record<string, string> = {
   'inquiry.task_update': '問い合わせの次にやることを直した',
   'inquiry.task_done': '問い合わせの次にやることを済みにした',
   'inquiry.delete': '問い合わせを削除した',
+  'inquiry.split': '問い合わせの履歴を別の問い合わせに分けた',
   // 人事・給与（仕様書 第30.21節。他人の台帳を見ただけでも残す）
   'hr.list': '従業員の一覧を見た',
   'hr.view': '従業員の台帳を見た',

@@ -1218,6 +1218,8 @@ export const api = {
     updateTask: (taskId: string, patch: Partial<{ what: string; due: string | null; done: boolean }>) =>
       call<{ ok: true }>(`/inquiries/tasks/${encodeURIComponent(taskId)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
     remove: (id: string) => call<{ ok: true }>(`/inquiries/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    /** 会話の履歴 1 つを、別の問い合わせに分ける。 */
+    split: (eventId: string) => call<{ id: string }>(`/inquiries/events/${encodeURIComponent(eventId)}/split`, { method: 'POST', body: '{}' }),
   },
   /** Web のコラム（内蔵の拡張。仕様書 第32章）。 */
   columns: {

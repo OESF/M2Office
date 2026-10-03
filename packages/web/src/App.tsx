@@ -293,6 +293,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   }, [refresh]);
   // 離れていた画面に本人が戻ったら、待っていたもの（朝のブリーフなど）をすぐ受け取る
   useAttention(() => void refresh());
+  // 秘書が問い合わせを残し終えたら、開いている問い合わせの画面を読み直す（第33.17節。2026-10-03 に三浦さんが、秘書が書いた内容が画面に出ないと指摘）
+  const inquiryChangeKey = history.filter((h) => h.job?.agentId === 'inquiries:record' && h.run.status === 'completed').map((h) => h.run.id).join(',');
 
   // 実行を表示している間は詳細も追う
   useEffect(() => {
@@ -646,7 +648,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
             <>
               <h1>問い合わせの記録 <HelpTip article="start-inquiries">電話や来店の問い合わせを、1 行書くか秘書に話すだけで残します。次にやることの期限が近づくと知らせます。</HelpTip></h1>
               <Inquiries inquiryId={view.inquiryId} onOpen={(inquiryId) => setView({ kind: 'inquiries', inquiryId })}
-                onContact={(contactId) => setView({ kind: 'cards', contactId })} userId={me.user.id} />
+                onContact={(contactId) => setView({ kind: 'cards', contactId })} userId={me.user.id} changeKey={inquiryChangeKey} />
             </>
           )}
           {view.kind === 'signage' && (

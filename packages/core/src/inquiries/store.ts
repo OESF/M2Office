@@ -68,7 +68,11 @@ export interface InquiryStore {
   delete(tenantId: string, id: string): Promise<void>;
   addEvent(tenantId: string, inquiryId: string, e: NewInquiryEvent): Promise<string>;
   events(tenantId: string, inquiryId: string): Promise<InquiryEvent[]>;
-  addTask(tenantId: string, inquiryId: string, t: { assignee: string; what: string; due: string | null; createdBy: string }): Promise<string>;
+  addTask(tenantId: string, inquiryId: string, t: { assignee: string; what: string; due: string | null; createdBy: string; eventId?: string | null }): Promise<string>;
+  /** 会話の履歴 1 つと、その問い合わせの ID。 */
+  event(tenantId: string, eventId: string): Promise<(InquiryEvent & { inquiryId: string }) | null>;
+  /** 会話の履歴 1 つと、その履歴から生まれた次にやることを、別の問い合わせに移す（別の問い合わせに分けるとき）。 */
+  moveEvent(tenantId: string, eventId: string, toInquiryId: string): Promise<void>;
   tasks(tenantId: string, inquiryId: string): Promise<InquiryTask[]>;
   /** 次にやること 1 つと、その問い合わせの ID。 */
   task(tenantId: string, taskId: string): Promise<(InquiryTask & { inquiryId: string }) | null>;
@@ -239,12 +243,29 @@ export class PostgresInquiryStore implements InquiryStore {
     }));
   }
 
-  async addTask(tenantId: string, inquiryId: string, t: { assignee: string; what: string; due: string | null; createdBy: string }): Promise<string> {
+  async addTask(tenantId: string, inquiryId: string, t: { assignee: string; what: string; due: string | null; createdBy: string; eventId?: string | null }): Promise<string> {
     const id = `iqt-${randomUUID()}`;
     await this.q(tenantId,
-      `insert into inquiry_tasks (id, tenant_id, inquiry_id, assignee, what, due, created_by) values ($1, $2, $3, $4, $5, $6, $7)`,
-      [id, tenantId, inquiryId, t.assignee, t.what, t.due, t.createdBy]);
+      `insert into inquiry_tasks (id, tenant_id, inquiry_id, assignee, what, due, created_by, event_id) values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [id, tenantId, inquiryId, t.assignee, t.what, t.due, t.createdBy, t.eventId ?? null]);
     return id;
+  }
+
+  async event(tenantId: string, eventId: string): Promise<(InquiryEvent & { inquiryId: string }) | null> {
+    const rows = await this.q<EventRow & { inquiry_id: string }>(tenantId,
+      `select id, inquiry_id, at, direction, channel, summary, body, created_by from inquiry_events where tenant_id = $1 and id = $2`, [tenantId, eventId]);
+    const r = rows[0];
+    return r ? {
+      id: r.id, inquiryId: r.inquiry_id, at: iso(r.at), direction: r.direction, channel: r.channel, summary: r.summary, body: r.body,
+      createdBy: r.created_by, createdByName: '',
+    } : null;
+  }
+
+  async moveEvent(tenantId: string, eventId: string, toInquiryId: string): Promise<void> {
+    await this.tx(tenantId, async (c) => {
+      await c.query(`update inquiry_events set inquiry_id = $3 where tenant_id = $1 and id = $2`, [tenantId, eventId, toInquiryId]);
+      await c.query(`update inquiry_tasks set inquiry_id = $3 where tenant_id = $1 and event_id = $2`, [tenantId, eventId, toInquiryId]);
+    });
   }
 
   async tasks(tenantId: string, inquiryId: string): Promise<InquiryTask[]> {
@@ -304,7 +325,7 @@ export class PostgresInquiryStore implements InquiryStore {
 export class MemoryInquiryStore implements InquiryStore {
   readonly rows = new Map<string, Omit<Inquiry, 'nextTask'> & { tenantId: string; idleNotifiedAt: string | null }>();
   readonly allEvents: (InquiryEvent & { tenantId: string; inquiryId: string; createdAt: string })[] = [];
-  readonly allTasks: (DueTask & { tenantId: string })[] = [];
+  readonly allTasks: (DueTask & { tenantId: string; eventId: string | null })[] = [];
 
   private next(tenantId: string, id: string): InquiryTask | null {
     const open = this.allTasks.filter((t) => t.tenantId === tenantId && t.inquiryId === id && !t.doneAt)
@@ -378,24 +399,36 @@ export class MemoryInquiryStore implements InquiryStore {
       .map(({ tenantId: _t, inquiryId: _i, createdAt: _c, ...e }) => e);
   }
 
-  async addTask(tenantId: string, inquiryId: string, t: { assignee: string; what: string; due: string | null; createdBy: string }): Promise<string> {
+  async addTask(tenantId: string, inquiryId: string, t: { assignee: string; what: string; due: string | null; createdBy: string; eventId?: string | null }): Promise<string> {
     const id = `iqt-${randomUUID()}`;
     this.allTasks.push({
       id, tenantId, inquiryId, assignee: t.assignee, assigneeName: '', what: t.what, due: t.due, doneAt: null, createdAt: new Date().toISOString(),
-      notifiedBeforeAt: null, notifiedOverdueAt: null,
+      notifiedBeforeAt: null, notifiedOverdueAt: null, eventId: t.eventId ?? null,
     });
     return id;
   }
 
+  async event(tenantId: string, eventId: string): Promise<(InquiryEvent & { inquiryId: string }) | null> {
+    const e = this.allEvents.find((x) => x.tenantId === tenantId && x.id === eventId);
+    if (!e) return null;
+    const { tenantId: _t, createdAt: _c, ...rest } = e;
+    return rest;
+  }
+
+  async moveEvent(tenantId: string, eventId: string, toInquiryId: string): Promise<void> {
+    for (const e of this.allEvents) if (e.tenantId === tenantId && e.id === eventId) e.inquiryId = toInquiryId;
+    for (const t of this.allTasks) if (t.tenantId === tenantId && t.eventId === eventId) t.inquiryId = toInquiryId;
+  }
+
   async tasks(tenantId: string, inquiryId: string): Promise<InquiryTask[]> {
     return this.allTasks.filter((t) => t.tenantId === tenantId && t.inquiryId === inquiryId)
-      .map(({ tenantId: _t, inquiryId: _i, notifiedBeforeAt: _b, notifiedOverdueAt: _o, ...t }) => t);
+      .map(({ tenantId: _t, inquiryId: _i, notifiedBeforeAt: _b, notifiedOverdueAt: _o, eventId: _e, ...t }) => t);
   }
 
   async task(tenantId: string, taskId: string): Promise<(InquiryTask & { inquiryId: string }) | null> {
     const t = this.allTasks.find((x) => x.tenantId === tenantId && x.id === taskId);
     if (!t) return null;
-    const { tenantId: _t, notifiedBeforeAt: _b, notifiedOverdueAt: _o, ...rest } = t;
+    const { tenantId: _t, notifiedBeforeAt: _b, notifiedOverdueAt: _o, eventId: _e, ...rest } = t;
     return rest;
   }
 
@@ -410,7 +443,7 @@ export class MemoryInquiryStore implements InquiryStore {
 
   async dueTasks(tenantId: string, until: string): Promise<DueTask[]> {
     return this.allTasks.filter((t) => t.tenantId === tenantId && !t.doneAt && t.due && t.due <= until && this.rows.get(t.inquiryId)?.status === 'open')
-      .map(({ tenantId: _t, ...t }) => t);
+      .map(({ tenantId: _t, eventId: _e, ...t }) => t);
   }
 
   async markNotified(tenantId: string, taskId: string, kind: 'before' | 'overdue'): Promise<void> {
