@@ -54,6 +54,11 @@ src/inquiries/   問い合わせの記録（内蔵の拡張。第33章の段 1�
                  窓口のアカウント（mailbox.ts。Gmail API と見本の箱）、メールの見分け（mail.ts）、月の振り返り（review.ts）、
                  LINE 公式アカウント（line.ts。署名の確かめ・Messaging API と見本の口・メッセージの読み方）、
                  ツール（tools.ts。inquiries.record・list・reply_draft・reply_send・brief・review・faq）、付属の業務（agents.ts。残す・調べる・返事の下書き・返事を送る）
+src/competitors/ 競合の分析（内蔵の拡張。第36章の段 1）。公開のページを読む口（fetcher.ts。つなぐ瞬間に社内のアドレスを断る・見本の口）、
+                 robots.txt（robots.ts。RFC 9309・24 時間覚える）、HTML の読み方（html.ts）、Places API（places.ts。見本の地図）、
+                 推論（analyze.ts。自社の像・商圏・候補の確かめ・読むページ・事実・レポート）、1 サイトを読む（reader.ts）、
+                 置き場（store.ts。PostgreSQL とメモリ）、処理と作業（service.ts。探す・入れる・外す・読む・レポート・ワーカーの CompetitorWatch）、
+                 ツール（tools.ts。competitors.list・facts・report・discover・add・remove・check）、付属の業務（agents.ts。探す・分析）
 src/inventory/   在庫管理（内蔵の拡張。第29章）。置き場（入出庫の記録と同じトランザクションでいまの数を直す。PostgreSQL とメモリ）、
                  バーコードの読み方（gs1.ts。GS1・JAN・UPC）、品目・場所・入出庫・使用期限の近いロットから減らす・取り消し・
                  棚卸し（会社で 1 つ・数えた時点の帳簿と比べる・確定で差を調整に）・取り込みと書き出し（service.ts）、

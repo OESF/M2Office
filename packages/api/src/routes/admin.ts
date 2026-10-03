@@ -552,6 +552,9 @@ function validateSection(
       }
       const postal = str('postalCode', 10).trim();
       if (postal && !/^\d{3}-?\d{4}$/.test(postal)) return { error: '郵便番号は 123-4567 の形で書いてください' };
+      // 自社の Web サイト（第36.4節）。http か https の URL だけ
+      const website = str('website', 300).trim();
+      if (website && !/^https?:\/\/[^\s/]+\.[^\s]+$/i.test(website)) return { error: 'Web サイトは https:// から始まる URL で書いてください' };
       const value: CompanyInfo = {
         legalName: str('legalName', 200), shortName: str('shortName', 30).trim(),
         postalCode: postal && !postal.includes('-') ? `${postal.slice(0, 3)}-${postal.slice(3)}` : postal,
@@ -560,6 +563,7 @@ function validateSection(
         closingDay: closing, paymentTerms: str('paymentTerms', 200),
         // 画面の左上のロゴ（仕様書 第6.6.1節）。会社が上げた画像のファイル ID
         logoFileId: str('logoFileId', 100).trim() || null,
+        website,
       };
       return { section: 'company', value };
     }

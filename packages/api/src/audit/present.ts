@@ -179,6 +179,11 @@ const ACTION_LABELS: Record<string, string> = {
   'column.wordpress_save': 'コラムの WordPress の鍵を預けた',
   'column.wordpress_remove': 'コラムの WordPress の鍵を外した',
   // 問い合わせの記録（仕様書 第33.17節。お客様の名前と用件は記録に残さない）
+  'competitor.add': '競合を入れた',
+  'competitor.remove': '競合を外した',
+  'competitor.discover': '競合を探した',
+  'competitor.check': '競合のサイトを読んだ',
+  'competitor.report': '競合のレポートを作った',
   'inquiry.create': '問い合わせを残した',
   'inquiry.append': '問い合わせに続きを足した',
   'inquiry.update': '問い合わせを直した',
@@ -387,6 +392,7 @@ function targetOf(e: AuditEvent, names: AuditNames): string {
     // コラムの題名は出さない（テーマは記録の詳細にある）
     case 'web_column': return id.startsWith('col-') ? `コラム ${id.slice(4, 12)}` : 'コラムの作成の設定';
     // 問い合わせはお客様の名前を出さない。ID の頭だけ
+    case 'competitor': return id === 'discover' ? '競合の分析（探す）' : id === 'all' ? '競合の分析（見回り）' : `競合の分析 ${id.slice(4, 12)}`;
     case 'inquiry': return id === 'mailbox' ? '問い合わせの窓口のアカウント' : id === 'line' ? '問い合わせの LINE 公式アカウント' : `問い合わせ ${id.slice(4, 12)}`;
     case 'tool': {
       // 会社の接続のツール（`slack.slack_send_message`）は接続の名前を添える

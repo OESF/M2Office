@@ -33,6 +33,9 @@
 | `calendar.list` | read | `calendar.readonly`（機密） | 予定の一覧を見ます |
 | `card.read` | read | — | 名刺の画像から、氏名・会社名・電話・メールアドレスなどを読み取ります。登録はしません |
 | `columns.preview` | read | — | コラムの題名・字数・残った指摘・入れ先を確かめます。見るだけです |
+| `competitors.facts` | read | — | 競合と自社の Web サイトから取り出した事実（サービスと値段・キャンペーン・お知らせ・営業時間）を、出典の URL と一緒に読みます |
+| `competitors.list` | read | — | 自社の像と商圏、覚えている競合（名前・距離・見つけ方・最後に読んだ日）を読みます |
+| `competitors.report` | read | — | いちばん新しい競合のレポート（今月の動き・自社との違い・相手の強み・次の一手）を読みます |
 | `contacts.bulk_preview` | read | — | まとめてのメールの宛先・除いた人・見本を確かめます。見るだけです |
 | `contacts.changes` | read | — | メールの署名から、会社・部署・役職・電話などが新しくなった名刺を調べます。見るだけです |
 | `contacts.get` | read | — | 1 人分の名刺の中身と、誰がいつ名刺を受け取ったかを見ます。見るだけです |
@@ -81,6 +84,10 @@
 | `columns.cover` | write-internal | — | コラムのカバー画像を作り直します（型・AI の挿絵・会社の写真）。新しい版になるだけで、Web には出しません |
 | `columns.draft` | write-internal | — | テーマを Web で調べ、出典つきのコラムの下書きを書きます。下書きにするだけで、Web には出しません |
 | `columns.rules` | write-internal | — | コラムの赤入れで当てる表現の決まり（医療広告・薬機法・士業）を直します。管理者だけが直せます |
+| `competitors.add` | write-internal | — | URL か店の名前で、競合を入れます。Web サイトのトップを読んで確かめてから入れます |
+| `competitors.check` | write-internal | — | 自社と競合のサイトを今すぐ読み、レポートを作る作業を始めます |
+| `competitors.discover` | write-internal | — | 自社の像をまとめ、近くの同業か同じような事業の会社を探して覚え、読んでレポートを作る作業を始めます |
+| `competitors.remove` | write-internal | — | 覚えている競合を外します。次に自動で探しても入れません |
 | `contacts.bulk_draft` | write-internal | — | 名刺の相手へのまとめてのメールの下書きを作ります。送りません |
 | `contacts.save` | write-internal | — | 名刺を連絡先として登録するか、電話番号やメモなどを直します。社内の名刺の置き場に書くだけで、誰にも送りません |
 | `drive.share_company` | write-internal | `drive.file`（機密でない） | M2Office で作ったファイルを、会社の全員が閲覧できるようにします。社外の人は見られません。リンクで誰にでも公開することはしません |
@@ -117,6 +124,9 @@
 | `calendar.list` | `from`: 期間の始まり（ISO 形式。既定は今日）、`to`: 期間の終わり（既定は 7 日後） |
 | `card.read` | `fileId`（必須）: 名刺の画像のファイル ID |
 | `columns.preview` | `columnId`（必須）: コラムの ID |
+| `competitors.facts` | `q`: 競合の名前か URL の言葉（無ければ全社） |
+| `competitors.list` | なし |
+| `competitors.report` | なし |
 | `contacts.bulk_preview` | `bulkMailId`（必須）: まとめてのメールの ID |
 | `contacts.changes` | `days`: 何日前までを見るか（既定 30、最大 90）、`mine`: 自分が受け取ったメールから分かったものだけにする |
 | `contacts.get` | `contactId`（必須）: 連絡先の ID（contacts.search の結果） |
@@ -165,6 +175,10 @@
 | `columns.cover` | `column`: コラムの題名かテーマの言葉、`kind`: 背景の種類（template・ai・photo）、`hint`: 雰囲気の頼み（「もっと明るく」など）、`previous`: 作り直す前の画像に戻す |
 | `columns.draft` | `theme`（必須）: コラムのテーマ（一言。例: 「子どもの歯みがきのコツ」）、`memo`: リクエスト（書く人の希望・経験・考え。カバー画像の希望も書ける。任意） |
 | `columns.rules` | `add`: 足す決まり、`remove`: 外す決まり、`auto`: AI に任せる形に戻す |
+| `competitors.add` | `text`（必須）: URL か店・会社の名前 |
+| `competitors.check` | なし |
+| `competitors.discover` | `radiusKm`: 商圏の半径（キロメートル）、`nationwide`: 全国で探す、`auto`: 商圏を AI に決め直させる |
+| `competitors.remove` | `q`（必須）: 競合の名前か URL の言葉 |
 | `contacts.bulk_draft` | `contactIds`（必須）: 宛先の連絡先の ID（contacts.search の結果の contactId）。100 人まで、`subject`（必須）: 件名（{会社名}・{氏名} を使える）、`body`（必須）: 本文。宛名は「{会社名}
 {氏名} 様」のように差し込む。末尾の会社の表示と配信の停止の URL は入れない（自動で入る） |
 | `contacts.save` | `contactId`: 直す連絡先の ID。新しく登録するときは書かない、`fields`: 直す項目（name・nameKana・company・department・title・postalCode・address・phones・emails・website・extra）、`note`: メモ（「展示会で会った」など）。書くと置き換える、`card`: 登録する名刺。card.read の結果の fileId・fields・rotation、`receivedOn`: 名刺を受け取った日（YYYY-MM-DD）。直すときだけ書く、`cardId`: 受け取った日を直す名刺（contacts.get の exchanges の cardId）。省くと呼んだ人のいちばん新しい名刺 |

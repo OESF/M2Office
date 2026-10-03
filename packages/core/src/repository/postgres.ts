@@ -880,7 +880,8 @@ export class PostgresRepository implements Repository {
       hr: Partial<TenantSettings['hr']> | null; signage: Partial<TenantSettings['signage']> | null;
       ai_policy: Partial<TenantSettings['aiPolicy']> | null; web_columns: Partial<TenantSettings['webColumns']> | null;
       inquiries: Partial<TenantSettings['inquiries']> | null;
-    }>(tenantId, `select company, writing_style, automation, agents, effect, onboarding, access, slides, knowledge, privacy, dashboard, invoice, cards, inventory, hr, signage, ai_policy, web_columns, inquiries
+      competitors: Partial<TenantSettings['competitors']> | null;
+    }>(tenantId, `select company, writing_style, automation, agents, effect, onboarding, access, slides, knowledge, privacy, dashboard, invoice, cards, inventory, hr, signage, ai_policy, web_columns, inquiries, competitors
                     from tenant_settings where tenant_id = $1`,
       [tenantId]);
     const r = rows[0];
@@ -927,6 +928,7 @@ export class PostgresRepository implements Repository {
       aiPolicy: { ...d.aiPolicy, ...(r?.ai_policy ?? {}) },
       webColumns: { ...d.webColumns, ...(r?.web_columns ?? {}) },
       inquiries: { ...d.inquiries, ...(r?.inquiries ?? {}) },
+      competitors: { ...d.competitors, ...(r?.competitors ?? {}) },
     };
   }
 
@@ -937,7 +939,7 @@ export class PostgresRepository implements Repository {
       company: 'company', writingStyle: 'writing_style', automation: 'automation', agents: 'agents',
       effect: 'effect', onboarding: 'onboarding', access: 'access', slides: 'slides', knowledge: 'knowledge', privacy: 'privacy',
       dashboard: 'dashboard', invoice: 'invoice', cards: 'cards', inventory: 'inventory', hr: 'hr', signage: 'signage',
-      aiPolicy: 'ai_policy', webColumns: 'web_columns', inquiries: 'inquiries',
+      aiPolicy: 'ai_policy', webColumns: 'web_columns', inquiries: 'inquiries', competitors: 'competitors',
     } as const)[section];
     // 列名は上の固定の対応表からのみ取る。利用者の入力を SQL に埋め込まない
     await this.q(tenantId,

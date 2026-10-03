@@ -5430,6 +5430,89 @@ console.log('\n■ 68. 問い合わせの記録の段 3（LINE 公式アカウ�
   }
 }
 
+console.log('\n■ 69. 競合の分析の段 1（探す・読む・事実・レポート・入れる・外す。第36.18節）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const { rows: saved } = await owner.query(`select tenant_id, competitors from tenant_settings where tenant_id in ('t-alpha', 't-beta')`);
+  const cleanup = async () => {
+    for (const t of ['competitor_jobs', 'competitor_reports', 'competitor_facts', 'competitors', 'competitor_profiles']) {
+      await owner.query(`delete from ${t} where tenant_id in ('t-alpha', 't-beta')`);
+    }
+  };
+  /** 作業が終わるまで待つ（ワーカーが 10 秒ごとに見る） */
+  const settle = async (tenant, who = 'member', ms = 60000) => {
+    const deadline = Date.now() + ms;
+    for (;;) {
+      const o = (await call(tenant, '/v1/competitors', {}, who)).body;
+      if (!o?.job || Date.now() > deadline) return o;
+      await sleep(1000);
+    }
+  };
+  await cleanup();
+  try {
+    const off = await call('a', '/v1/competitors', {}, 'member');
+    await call('a', '/v1/admin/extensions/competitors/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const me = (await call('a', '/v1/me', {}, 'member')).body;
+    off.status === 403 && me.competitors === true ? ok('競合の分析は既定で切り。入れると使える') : ng('入り切りが違う', JSON.stringify({ off: off.status, me: me.competitors }));
+
+    // 探す: 見本の地図で近くの同業（自社と遠い店は外す）を覚え、見本のサイトを読んでレポートを作る
+    const start = await call('a', '/v1/competitors/discover', { method: 'POST', body: '{}' }, 'member');
+    const o = await settle('a');
+    const names = (o?.competitors ?? []).map((c) => c.name);
+    const { rows: stored } = await owner.query(`select origin, place_id, name, url from competitors where tenant_id = 't-alpha'`);
+    start.status === 202 && !o?.job && o?.lastJob?.status === 'done' && JSON.stringify(names) === JSON.stringify(['見本の競合 A', '見本の競合 B'])
+      && o.profile?.area?.local === true && !('geo' in (o.profile ?? {}))
+      && stored.length === 2 && stored.every((r) => r.origin === 'map' && r.place_id && r.name === '' && r.url === '')
+      ? ok('探すと、地図で半径の中の同業を近い順に覚える（自社と遠い店は外す）。地図の名前と URL は残さず、place ID だけを残す')
+      : ng('探し方が違う', JSON.stringify({ start: start.status, job: o?.job, last: o?.lastJob, names, profile: o?.profile, stored }).slice(0, 500));
+
+    const a = o?.competitors?.[0];
+    const facts = a ? (await call('a', `/v1/competitors/${a.id}/facts`, {}, 'member')).body.facts ?? [] : [];
+    const self = (await call('a', '/v1/competitors/self/facts', {}, 'member')).body.facts ?? [];
+    const reports = (await call('a', '/v1/competitors/reports/list', {}, 'member')).body.reports ?? [];
+    facts.length > 0 && facts.every((f) => f.sourceUrl.startsWith('https://shop-a.example.jp/')) && self.length > 0
+      && reports.length === 1 && /## 自社との違い/.test(reports[0].text) && /見本の競合 A/.test(reports[0].text)
+      ? ok('競合と自社のサイトから事実を出典つきで取り出し、レポートを作る（名前はレポートに書いてよい）')
+      : ng('事実かレポートが違う', JSON.stringify({ facts: facts.slice(0, 2), self: self.length, reports: reports.length }).slice(0, 400));
+
+    // ほかの会社からは見えない
+    await call('b', '/v1/admin/extensions/competitors/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const ob = (await call('b', '/v1/competitors')).body;
+    const fb = a ? (await call('b', `/v1/competitors/${a.id}/facts`)).body.facts ?? [] : ['x'];
+    const rb = (await call('b', '/v1/competitors/reports/list')).body.reports ?? ['x'];
+    (ob.competitors ?? ['x']).length === 0 && fb.length === 0 && rb.length === 0
+      ? ok('ほかの会社からは、競合・事実・レポートが見えない') : ng('ほかの会社から見える', JSON.stringify({ c: ob.competitors?.length, f: fb.length, r: rb.length }));
+
+    // 入れる・外す
+    const bad = await call('a', '/v1/competitors', { method: 'POST', body: JSON.stringify({ text: 'http://127.0.0.1/' }) }, 'member');
+    const del = a ? await call('a', `/v1/competitors/${a.id}`, { method: 'DELETE' }, 'member') : { status: 0 };
+    const again = await call('a', '/v1/competitors/discover', { method: 'POST', body: '{}' }, 'member');
+    const o2 = again.status === 202 ? await settle('a') : null;
+    bad.status === 400 && /社内のアドレス/.test(bad.body.error ?? '') && del.status === 200 && JSON.stringify((o2?.competitors ?? []).map((c) => c.name)) === JSON.stringify(['見本の競合 B'])
+      ? ok('社内のアドレスは入れない。外した競合は、探し直しても入れない')
+      : ng('入れる・外すが違う', JSON.stringify({ bad: bad.body, del: del.status, names: (o2?.competitors ?? []).map((c) => c.name) }).slice(0, 300));
+
+    // 秘書から: 付属の業務「競合の分析」（読むだけ）
+    const job = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: 'competitors:analyze', input: { request: '競合の動きは？' } }) }, 'member');
+    const jobRun = job.body?.runId ? await waitFor('a', job.body.runId, ['completed', 'failed', 'awaiting_approval'], 20000, 'member') : null;
+    jobRun?.run?.status === 'completed' ? ok('秘書から「競合の動きは？」と聞くと、付属の業務「競合の分析」がレポートから答える')
+      : ng('秘書からの問い合わせが違う', JSON.stringify({ status: jobRun?.run?.status, reason: jobRun?.run?.failureReason }).slice(0, 300));
+
+    const { body: audits } = await call('a', '/v1/admin/audit-events');
+    const acts = (audits.items ?? []).map((e) => e.action);
+    ['competitor.discover', 'competitor.check', 'competitor.report', 'competitor.remove'].every((x) => acts.includes(x))
+      ? ok('探す・読む・レポート・外すを監査ログに残す') : ng('監査ログが違う', JSON.stringify(acts.filter((x) => x.startsWith('competitor.'))));
+  } catch (err) {
+    ng('競合の分析の段 1 の確認が途中で止まった', String(err?.stack ?? err));
+  } finally {
+    await cleanup();
+    for (const r of saved) await owner.query(`update tenant_settings set competitors = $2 where tenant_id = $1`, [r.tenant_id, r.competitors ? JSON.stringify(r.competitors) : null]);
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

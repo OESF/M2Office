@@ -11,13 +11,14 @@
 
 import {
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
-  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, SignageService, SignageInterrupts, PostgresSignageStore, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention,
+  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, SignageService, SignageInterrupts, PostgresSignageStore, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention,
   NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator,
 } from '@m2office/core';
 import { canRunAgent } from '@m2office/shared';
 import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
 
 const log = createLoggerFromEnv('worker');
 
@@ -144,6 +145,14 @@ const inquiries = new InquiryService({
   line: { repo, box, sourceFor: (tenantId) => connector.sourceFor(tenantId) },
 });
 const inquiryWatch = new InquiryWatch({ store: inquiryStore, repo, logger: log });
+// 競合の分析（内蔵の拡張。仕様書 第36章）。受け付けた探す・読む作業を 1 つずつ行う（相手のサイトは間を空けて 1 本ずつ読む）
+const competitorStore = new PostgresCompetitorStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
+const competitors = new CompetitorService({
+  store: competitorStore, repo, llmFor: (tenantId) => ai.llmFor(tenantId), placesKeyFor: async (tenantId) => (await ai.geminiFor(tenantId)).apiKey,
+  sourceFor: (tenantId) => connector.sourceFor(tenantId), externalAllowed: async (tenantId) => !isLocalPolicy(await ai.policyFor(tenantId)),
+  userAgent: crawlerUserAgent(appVersion(), process.env['CRAWLER_CONTACT_URL']), logger: log,
+});
+const competitorWatch = new CompetitorWatch({ service: competitors, store: competitorStore, repo, logger: log });
 const engine = new RunEngine({
   repo, llm, registry, connector, files, resolveDefinition, isAvailable, logger: log, research, notices,
   cards: { store: contactStore, service: cards, access: cardsAccess(repo), bulk: bulkMail },
@@ -151,6 +160,7 @@ const engine = new RunEngine({
   hr: { calendar: laborCalendar, access: hrAccess(repo) },
   columns: { service: columns, access: webColumnsAccess(repo) },
   inquiries: { service: inquiries, access: inquiriesAccess(repo) },
+  competitors: { service: competitors, access: competitorsAccess(repo) },
   llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId),
   // 業務ごとの AI（ローカル・外部）と、社外の接続に送ってよいか（第16.3.7.1節）
   llmForRun: (tenantId, def, registry, previous) => ai.llmForRun(tenantId, def, registry, previous),
@@ -268,6 +278,9 @@ let lastInquiryCheck = 0;
 /** 問い合わせの窓口のアカウントのメールを読む間隔（第33.18節）。 */
 const INQUIRY_MAIL_INTERVAL_MS = Number(process.env['INQUIRY_MAIL_INTERVAL_MS'] ?? 300_000);
 let lastInquiryMailCheck = 0;
+/** 競合の分析の作業を見る間隔（第36.18節）。 */
+const COMPETITOR_INTERVAL_MS = Number(process.env['COMPETITOR_INTERVAL_MS'] ?? 10_000);
+let lastCompetitorCheck = 0;
 // 秘書が学んだことの週 1 回の整理と、残す期間の片付け（仕様書 第11.11.4節）。1 時間ごとに「日曜の深夜で、前の整理から 6 日より経ったか」を見る
 const CONSOLIDATE_INTERVAL_MS = Number(process.env['CONSOLIDATE_INTERVAL_MS'] ?? 3_600_000);
 let lastConsolidateCheck = 0;
@@ -485,6 +498,16 @@ while (running) {
     }
   }
 
+  // 競合の分析の作業（第36.18節）。待っている作業を 1 つ取り、終わるのを待たずに次へ進む
+  if (Date.now() - lastCompetitorCheck >= COMPETITOR_INTERVAL_MS) {
+    lastCompetitorCheck = Date.now();
+    try {
+      await competitorWatch.tick();
+    } catch (err) {
+      log.warn('競合の分析の作業を始められませんでした', { err });
+    }
+  }
+
   // 秘書が学んだことの整理（第11.11.4節）。会社ごとの失敗はほかの会社を止めない
   if (Date.now() - lastConsolidateCheck >= CONSOLIDATE_INTERVAL_MS) {
     lastConsolidateCheck = Date.now();
@@ -524,3 +547,11 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+/** サービス本体の版（ルートの package.json。競合の分析が読むときの名乗りに入れる）。 */
+function appVersion(): string {
+  try {
+    return (JSON.parse(readFileSync(fileURLToPath(new URL('../../../package.json', import.meta.url)), 'utf8')) as { version?: string }).version ?? '0';
+  } catch {
+    return '0';
+  }
+}

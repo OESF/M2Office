@@ -15,11 +15,11 @@ import {
   TenantAiResolver, platformAi, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, ConnectionCredentials, type ConnectionAuthProvider,
   CardService, PostgresContactStore, cardsAccess, type ContactStore, BulkMailService, PostgresBulkMailStore, NoticeService, PostgresNoticeStore,
-  InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, JanLookupService, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, InquiryService, PostgresInquiryStore, inquiriesAccess, contactBookFrom, webColumnsAccess, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
+  InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, JanLookupService, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, InquiryService, PostgresInquiryStore, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, competitorsAccess, crawlerUserAgent, isLocalPolicy, webColumnsAccess, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
   type SecretBox, type GeminiModels,
   type FileStore, type TenantExtensions, type HelpArticle, type ManualMeta, type LlmProvider, type Logger, type Repository, type WorkspaceConnector,
 } from '@m2office/core';
-import { canRunAgent, type AgentDefinition, type ContactScope, type HrSettings, type InventorySettings, type SignageSettings, type WebColumnSettings, type InquirySettings } from '@m2office/shared';
+import { canRunAgent, type AgentDefinition, type ContactScope, type HrSettings, type InventorySettings, type SignageSettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings } from '@m2office/shared';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -145,6 +145,15 @@ export interface AppDeps {
   inquiries: {
     service: InquiryService;
     access(tenantId: string, userId: string): Promise<InquirySettings | null>;
+  };
+  /**
+   * 競合の分析（内蔵の拡張。仕様書 第36章）。探す・読むはワーカーが行い、API は受け付けと画面の読み出しをする。
+   *
+   * @remarks `access` は、会社が競合の分析を使っていて利用者が利用範囲の中なら、会社の設定を返す（使えなければ `null`）
+   */
+  competitors: {
+    service: CompetitorService;
+    access(tenantId: string, userId: string): Promise<CompetitorSettings | null>;
   };
   /** 人事・給与（内蔵の拡張。仕様書 第30章）。使えるのは会社で入れていて人事区画に入っている人だけ。 */
   hr: {
@@ -305,8 +314,18 @@ export function buildDeps(): AppDeps {
     }),
     access: inquiriesAccess(repo),
   };
+  // 競合の分析（内蔵の拡張。仕様書 第36章）。地図は会社の Gemini の鍵で Places API を呼ぶ。見本の会社では見本の地図とサイト
+  const competitors = {
+    service: new CompetitorService({
+      store: new PostgresCompetitorStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+      repo, llmFor: (tenantId) => ai.llmFor(tenantId), placesKeyFor: async (tenantId) => (await ai.geminiFor(tenantId)).apiKey,
+      sourceFor: (tenantId) => connector.sourceFor(tenantId), externalAllowed: async (tenantId) => !isLocalPolicy(await ai.policyFor(tenantId)),
+      userAgent: crawlerUserAgent(appVersion(), process.env['CRAWLER_CONTACT_URL']), logger: log,
+    }),
+    access: competitorsAccess(repo),
+  };
   const engine = new RunEngine({
-    repo, llm, registry, connector, files, logger: log, research, cards, notices, inventory, columns, inquiries,
+    repo, llm, registry, connector, files, logger: log, research, cards, notices, inventory, columns, inquiries, competitors,
     hr: { calendar: laborCalendar, access: hrAccess(repo) },
     llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId),
     // 業務ごとの AI（ローカル・外部）と、社外の接続に送ってよいか（第16.3.7.1節）
@@ -418,6 +437,7 @@ export function buildDeps(): AppDeps {
     inventory,
     columns,
     inquiries,
+    competitors,
     // 店頭サイネージ（第31章）
     signage,
     // 人事・給与（第30章）。台帳は人事区画の人だけが扱い、勤怠と有給は本人も扱う
@@ -566,4 +586,13 @@ export async function companyView(
     shortName: company?.shortName?.trim() || name,
     logo: company?.logoFileId ? `/v1/me/company-logo?v=${encodeURIComponent(company.logoFileId)}` : null,
   };
+}
+
+/** サービス本体の版（ルートの package.json。競合の分析が読むときの名乗りに入れる）。 */
+function appVersion(): string {
+  try {
+    return (JSON.parse(readFileSync(fileURLToPath(new URL('../../../package.json', import.meta.url)), 'utf8')) as { version?: string }).version ?? '0';
+  } catch {
+    return '0';
+  }
 }

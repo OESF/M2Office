@@ -15,6 +15,7 @@ import type { InventoryToolContext } from '../inventory/tools.js';
 import type { HrToolContext } from '../hr/tools.js';
 import type { ColumnToolContext } from '../columns/tools.js';
 import type { InquiryToolContext } from '../inquiries/tools.js';
+import type { CompetitorToolContext } from '../competitors/tools.js';
 
 /** ツール呼び出しの文脈。テナント境界と実行の同一性を持ち回る。 */
 export interface ToolContext {
@@ -83,6 +84,8 @@ export interface ToolContext {
   columns?: ColumnToolContext;
   /** 問い合わせの記録（内蔵の拡張。仕様書 第33章）。使えるかどうか（会社の入り切り・利用範囲）は、ツールが呼ぶたびに確かめる。 */
   inquiries?: InquiryToolContext;
+  /** 競合の分析（内蔵の拡張。仕様書 第36章）。使えるかどうか（会社の入り切り・利用範囲）は、ツールが呼ぶたびに確かめる。 */
+  competitors?: CompetitorToolContext;
 }
 
 /** 引数 1 つの定義（JSON Schema の一部）。 */

@@ -1782,3 +1782,22 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .inquiries-faq ul { margin: 4px 0 0; padding-left: 1.2em; }
 .inquiries-faq li { margin: 4px 0; }
 .inquiries-faq button { margin-left: 8px; }
+
+/* 競合の分析（仕様書 第36.11節） */
+.competitors { display: flex; flex-direction: column; gap: calc(12px * var(--space-scale)); }
+.competitors-self-text { flex: 1 1 320px; min-width: 0; }
+.competitors-working { color: var(--accent); }
+.competitors-add input { flex: 1 1 280px; min-width: 0; }
+.competitors-table td { vertical-align: top; }
+.competitors-table td:first-child { word-break: break-word; }
+.competitors-open td { background: var(--surface-2, transparent); }
+.competitors-facts h4 { margin: 8px 0 4px; font-size: calc(13px * var(--font-scale)); }
+.competitors-facts ul { margin: 0; padding-left: 1.2em; }
+.competitors-facts li { margin: 3px 0; }
+.competitors-reports h3 { margin: 0; flex: 1 1 auto; }
+.competitors-report { border-top: 1px solid var(--border); padding: 6px 0; }
+.competitors-report-body { padding: 4px 0 8px; overflow-x: auto; }
+.gmaps { font-family: Roboto, sans-serif; }
+@media (max-width: 640px) {
+  .competitors-table th:nth-child(3), .competitors-table td:nth-child(3), .competitors-table th:nth-child(5), .competitors-table td:nth-child(5) { display: none; }
+}

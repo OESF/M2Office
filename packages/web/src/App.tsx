@@ -7,7 +7,7 @@
  */
 
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
-import { CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, showsCaptions, type Notification, type UserSettings } from '@m2office/shared';
+import { CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, showsCaptions, type Notification, type UserSettings } from '@m2office/shared';
 import {
   addCategory, assignCategory, checkCategoryName, groupMenu, removeCategory, togglePinned, type MenuSection,
 } from './menu.js';
@@ -29,6 +29,7 @@ import { Cards } from './Cards.js';
 import { Inventory } from './Inventory.js';
 import { Columns } from './Columns.js';
 import { Inquiries } from './Inquiries.js';
+import { Competitors } from './Competitors.js';
 import { Signage } from './Signage.js';
 import { Hr } from './Hr.js';
 import { MyAttendance } from './MyAttendance.js';
@@ -108,6 +109,7 @@ type View =
   | { kind: 'signage' }
   | { kind: 'columns'; columnId: string | null }
   | { kind: 'inquiries'; inquiryId: string | null }
+  | { kind: 'competitors' }
   | { kind: 'settings'; section: SettingsSection }
   | { kind: 'help'; articleId: string | null };
 
@@ -295,6 +297,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   useAttention(() => void refresh());
   // 秘書が問い合わせを残し終えたら、開いている問い合わせの画面を読み直す（第33.17節。2026-10-03 に三浦さんが、秘書が書いた内容が画面に出ないと指摘）
   const inquiryChangeKey = history.filter((h) => h.job?.agentId === 'inquiries:record' && h.run.status === 'completed').map((h) => h.run.id).join(',');
+  // 秘書が競合を探す・入れる・外すを終えたら、競合の分析の画面を読み直す
+  const competitorChangeKey = history.filter((h) => h.job?.agentId?.startsWith('competitors:') && h.run.status === 'completed').map((h) => h.run.id).join(',');
 
   // 実行を表示している間は詳細も追う
   useEffect(() => {
@@ -378,6 +382,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
     // Web のコラム（仕様書 第32.18.1節）。会社で入れていて利用範囲の人にだけ出す
     // 問い合わせの記録（仕様書 第33.17節）。会社で入れていて利用範囲の人にだけ出す
     ...(me.inquiries ? [{ id: INQUIRIES_EXTENSION_ID, name: '問い合わせの記録', description: '電話や来店の問い合わせを、話すか書くだけで残し、次にやることを知らせる', icon: 'chat' as IconName, agent: null }] : []),
+    // 競合の分析（仕様書 第36.18節）。会社で入れていて利用範囲の人にだけ出す
+    ...(me.competitors ? [{ id: COMPETITORS_EXTENSION_ID, name: '競合の分析', description: '近くの同業や同じような事業の会社を探し、公開のページから動きと違いをまとめる', icon: 'research' as IconName, agent: null }] : []),
     ...(me.webColumns ? [{ id: WEB_COLUMNS_EXTENSION_ID, name: 'コラムの作成', description: 'テーマを調べて出典つきのコラムを書き、承認して WordPress に入れる', icon: 'doc' as IconName, agent: null }] : []),
   ];
   const allMenuAgents = orderAgents(menuItems, menu.order).filter((a) => !menu.hidden.includes(a.id));
@@ -389,11 +395,12 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
       : m.id === HR_EXTENSION_ID ? setView({ kind: 'hr', employeeId: null })
         : m.id === SIGNAGE_EXTENSION_ID ? setView({ kind: 'signage' })
           : m.id === WEB_COLUMNS_EXTENSION_ID ? setView({ kind: 'columns', columnId: null })
-            : m.id === INQUIRIES_EXTENSION_ID ? setView({ kind: 'inquiries', inquiryId: null }) : setView({ kind: 'cards', contactId: null }));
+            : m.id === INQUIRIES_EXTENSION_ID ? setView({ kind: 'inquiries', inquiryId: null })
+              : m.id === COMPETITORS_EXTENSION_ID ? setView({ kind: 'competitors' }) : setView({ kind: 'cards', contactId: null }));
   const isOpen = (m: MenuItem) => (m.agent ? view.kind === 'agent' && view.agent.id === m.id
     : m.id === INVENTORY_EXTENSION_ID ? view.kind === 'inventory' : m.id === HR_EXTENSION_ID ? view.kind === 'hr'
       : m.id === SIGNAGE_EXTENSION_ID ? view.kind === 'signage' : m.id === WEB_COLUMNS_EXTENSION_ID ? view.kind === 'columns'
-        : m.id === INQUIRIES_EXTENSION_ID ? view.kind === 'inquiries' : view.kind === 'cards');
+        : m.id === INQUIRIES_EXTENSION_ID ? view.kind === 'inquiries' : m.id === COMPETITORS_EXTENSION_ID ? view.kind === 'competitors' : view.kind === 'cards');
   // ピン止めとカテゴリーは個人設定（メニュー）に保存し、端末をまたいで同じにする。保存に失敗したら読み直す
   const saveMenu = (saved: UserSettings['menu']) => {
     setMenu(saved);
@@ -652,6 +659,12 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
                 {...(me.webColumns ? { onColumn: async (theme: string) => { const { id } = await api.columns.create(theme, 'お客様からよく聞かれる質問です'); setView({ kind: 'columns', columnId: id }); } } : {})} />
             </>
           )}
+          {view.kind === 'competitors' && (
+            <>
+              <h1>競合の分析 <HelpTip article="start-competitors">近くの同業や同じような事業の会社を AI が探し、公開のページから動きと違いをまとめます。</HelpTip></h1>
+              <Competitors changeKey={competitorChangeKey} />
+            </>
+          )}
           {view.kind === 'signage' && (
             <>
               <h1>サイネージ <HelpTip article="start-signage">店頭や待合の画面に、画像と動画を繰り返し流します。</HelpTip></h1>
@@ -830,6 +843,7 @@ const VIEW_LABELS: Record<string, string> = {
   signage: 'サイネージ',
   columns: 'コラムの作成',
   inquiries: '問い合わせの記録',
+  competitors: '競合の分析',
   settings: '個人設定',
 };
 

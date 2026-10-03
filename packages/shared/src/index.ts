@@ -21,5 +21,6 @@ export * from './types/hr.js';
 export * from './types/signage.js';
 export * from './types/web-columns.js';
 export * from './types/inquiries.js';
+export * from './types/competitors.js';
 export * from './text/internal-ids.js';
 export * from './text/paths.js';

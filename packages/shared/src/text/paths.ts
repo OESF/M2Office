@@ -19,6 +19,8 @@ export function notificationPath(n: { kind: string; runId: string | null }): str
   if (n.kind === 'signage') return '/signage';
   // 問い合わせの次にやることの知らせは、問い合わせの記録を開く（期限の近い順に並ぶ。第33.7節）
   if (n.kind === 'inquiry') return '/inquiries';
+  // 競合を探し終えた・見回り終えた知らせは、競合の分析を開く（第36.18節）
+  if (n.kind === 'competitor') return '/competitors';
   if (n.runId && RUN_ID.test(n.runId)) return `/runs/${encodeURIComponent(n.runId)}`;
   return '/';
 }

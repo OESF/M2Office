@@ -14,7 +14,7 @@ import {
   alwaysRequiresApproval, canDecide, canUseAgent, writeInternalNeedsApproval,
   type AutomationPolicy, type TenantSettings, type WritingStyle,
   type AgentDefinition, type AgentStep, type ApprovalStep, type Approval, type Run,
-  type RunStep, type Step, type ContactScope, type InventorySettings, type WebColumnSettings, type InquirySettings,
+  type RunStep, type Step, type ContactScope, type InventorySettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { LlmMessage, LlmProvider, LlmResponse } from '../llm/provider.js';
@@ -39,6 +39,7 @@ import type { InventoryService } from '../inventory/service.js';
 import type { InventoryBookings } from '../inventory/bookings.js';
 import type { ColumnService } from '../columns/service.js';
 import type { InquiryService } from '../inquiries/service.js';
+import type { CompetitorService } from '../competitors/service.js';
 import type { LaborCalendar } from '../hr/calendar-service.js';
 import { answerOfSteps } from '../memory/work.js';
 import { substituteArguments } from '../extensions/skill.js';
@@ -155,6 +156,15 @@ export interface RunEngineDeps {
   inquiries?: {
     service: InquiryService;
     access(tenantId: string, userId: string): Promise<InquirySettings | null>;
+  };
+  /**
+   * 競合の分析（内蔵の拡張。仕様書 第36章）。ツールに渡す。無ければ競合のツールは「使えない」と返す。
+   *
+   * @remarks `access` は、会社が競合の分析を使っていて依頼者が利用範囲の中なら、会社の設定を返す
+   */
+  competitors?: {
+    service: CompetitorService;
+    access(tenantId: string, userId: string): Promise<CompetitorSettings | null>;
   };
 }
 
@@ -945,6 +955,10 @@ export class RunEngine {
       // 問い合わせの記録（第33.17節）。使えるかどうかはツールが呼ぶたびに確かめる
       ...(this.deps.inquiries ? {
         inquiries: { service: this.deps.inquiries.service, access: () => this.deps.inquiries!.access(run.tenantId, requestedBy) },
+      } : {}),
+      // 競合の分析（第36.18節）。使えるかどうかはツールが呼ぶたびに確かめる
+      ...(this.deps.competitors ? {
+        competitors: { service: this.deps.competitors.service, access: () => this.deps.competitors!.access(run.tenantId, requestedBy) },
       } : {}),
       // 労務の期限（第30.19.1節）。人事区画の人にだけ返す
       ...(this.deps.hr ? {

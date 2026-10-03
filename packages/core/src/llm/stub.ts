@@ -190,6 +190,26 @@ function chooseTools(tools: string[], prompt: string): Call[] {
     } }];
   }
 
+  // 競合の分析（仕様書 第36.18節）: 探す・入れる・外す・見回る・動き・違い
+  if (has('competitors.discover') && instruction.includes('competitors.discover')) {
+    const req = extractField(prompt, 'request');
+    const add = /(https?:\/\/\S+|.+?)を競合に入れて/.exec(req)?.[1]?.trim();
+    if (add && has('competitors.add')) return [{ name: 'competitors.add', args: { text: add } }];
+    const remove = /(.+?)(は競合じゃない|を外して)/.exec(req)?.[1]?.trim();
+    if (remove && has('competitors.remove')) return [{ name: 'competitors.remove', args: { q: remove } }];
+    if (/どこ|一覧/.test(req) && has('competitors.list')) return [{ name: 'competitors.list', args: {} }];
+    const km = /半径\s*([0-9.]+)\s*km/.exec(req)?.[1];
+    return [{ name: 'competitors.discover', args: { ...(km ? { radiusKm: Number(km) } : {}), ...(/全国/.test(req) ? { nationwide: true } : {}) } }];
+  }
+  if (has('competitors.report') && instruction.includes('competitors.report')) {
+    const req = extractField(prompt, 'request');
+    if (/見回って/.test(req)) return [{ name: 'competitors.check', args: {} }];
+    const name = /(.+?)とうちの違い/.exec(req)?.[1]?.trim();
+    if (name) return [{ name: 'competitors.facts', args: { q: name } }];
+    if (/どこ|一覧/.test(req)) return [{ name: 'competitors.list', args: {} }];
+    return [{ name: 'competitors.report', args: {} }];
+  }
+
   // Web のコラム（仕様書 第32.18.1節）: 承認へ進めたコラムを確かめ、承認の後に WordPress に入れる。秘書から下書きを書く
   if (has('columns.preview') && instruction.includes('columns.preview')) {
     const id = extractField(prompt, 'columnId');

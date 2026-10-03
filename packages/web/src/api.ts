@@ -20,6 +20,7 @@ import type { CardCorners,
   SignageAsset, SignageEntry, SignageScreen, SignageSettings, SignageInterruptInput, SignageInterruptView, SignagePhrase, SignageSound, SignageSource,
   ColumnWordPress, WebColumn, WebColumnSettings, WebColumnVersion,
   Inquiry, InquiryDetail, InquiryParty, InquiryTask, InquiryReply, InquiryMailSkipped, InquiryMonthStats, InquirySettings, InquiryFaqTopic,
+  CompetitorOverview, CompetitorFact, CompetitorReport,
 } from '@m2office/shared';
 import { debugMode, recordCall } from './debug.js';
 
@@ -285,6 +286,8 @@ export interface Me {
   webColumns?: boolean;
   /** 問い合わせの記録を使えるか（会社の入り切りと利用範囲。仕様書 第33.17節）。 */
   inquiries?: boolean;
+  /** 競合の分析を使えるか（会社の入り切りと利用範囲。仕様書 第36.18節）。 */
+  competitors?: boolean;
   /** 本人の「給与・勤怠」を使えるか（台帳に結び付いているか。仕様書 第30.25節）。 */
   hrSelf?: boolean;
   /** デバッグモードか（`M2O_DEBUG=true`。仕様書 第20.4.1節「デバッグモード」）。 */
@@ -1241,6 +1244,23 @@ export const api = {
     faq: () => call<{ topics: InquiryFaqTopic[] }>('/inquiries/faq'),
     /** 月の振り返り（無ければ先月）。 */
     review: (month?: string) => call<{ stats: InquiryMonthStats; text: string }>(`/inquiries/review${month ? `?month=${encodeURIComponent(month)}` : ''}`),
+  },
+  /** 競合の分析（内蔵の拡張。仕様書 第36章）。 */
+  competitors: {
+    overview: () => call<CompetitorOverview>('/competitors'),
+    /** 競合を探す作業を受け付ける（`radiusKm`・`nationwide`・`auto` で商圏を変える）。 */
+    discover: (area: { radiusKm?: number; nationwide?: boolean; auto?: boolean }) =>
+      call<{ jobId: string; already: boolean }>('/competitors/discover', { method: 'POST', body: JSON.stringify(area) }),
+    /** 今すぐ見回る作業を受け付ける。 */
+    check: () => call<{ jobId: string; already: boolean }>('/competitors/check', { method: 'POST', body: '{}' }),
+    /** URL か店の名前で競合を入れる。 */
+    add: (text: string) => call<{ id: string; jobId: string }>('/competitors', { method: 'POST', body: JSON.stringify({ text }) }),
+    remove: (id: string) => call<{ ok: true }>(`/competitors/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    /** 1 社（`self` なら自社）の事実。 */
+    facts: (id: string) => call<{ facts: CompetitorFact[] }>(`/competitors/${encodeURIComponent(id)}/facts`),
+    reports: () => call<{ reports: CompetitorReport[] }>('/competitors/reports/list'),
+    /** いまある事実から、その場のレポートを作る。 */
+    makeReport: () => call<{ report: CompetitorReport }>('/competitors/reports', { method: 'POST', body: '{}' }),
   },
   /** Web のコラム（内蔵の拡張。仕様書 第32章）。 */
   columns: {

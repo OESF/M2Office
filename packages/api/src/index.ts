@@ -30,6 +30,7 @@ import { cardsRoute } from './routes/cards.js';
 import { inventoryRoute } from './routes/inventory.js';
 import { columnsRoute } from './routes/columns.js';
 import { inquiriesRoute } from './routes/inquiries.js';
+import { competitorsRoute } from './routes/competitors.js';
 import { inventoryHooksRoute } from './routes/inventory-hooks.js';
 import { signageRoute } from './routes/signage.js';
 import { signagePlayRoute } from './routes/signage-play.js';
@@ -167,6 +168,8 @@ app.get('/v1/me', async (c) => {
     webColumns: !!(await deps.columns.access(ctx.tenant.id, ctx.user.id)),
     // 問い合わせの記録を使えるか（会社の入り切りと利用範囲。仕様書 第33.17節）。使えなければ左ペインに「問い合わせの記録」を出さない
     inquiries: !!(await deps.inquiries.access(ctx.tenant.id, ctx.user.id)),
+    // 競合の分析を使えるか（会社の入り切りと利用範囲。仕様書 第36.18節）。使えなければ左ペインに「競合の分析」を出さない
+    competitors: !!(await deps.competitors.access(ctx.tenant.id, ctx.user.id)),
     // 人事・給与の担当者の画面を使えるか（会社の入り切りと人事区画。仕様書 第30.2節）
     hr: !!(await deps.hr.access(ctx.tenant.id, ctx.user.id)),
     // 本人の「給与・勤怠」を使えるか（台帳に結び付いているか。同じメールアドレスなら自動で結び付く。第30.25節）
@@ -192,6 +195,7 @@ app.route('/v1/cards', cardsRoute(deps));
 app.route('/v1/inventory', inventoryRoute(deps));
 app.route('/v1/columns', columnsRoute(deps));
 app.route('/v1/inquiries', inquiriesRoute(deps));
+app.route('/v1/competitors', competitorsRoute(deps));
 app.route('/v1/signage', signageRoute(deps));
 app.route('/v1/hr', hrRoute(deps));
 // 従業員の顔写真（社内の全員が見られる。第30.5.4節）

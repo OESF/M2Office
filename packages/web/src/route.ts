@@ -29,6 +29,8 @@ export type Route =
   | { kind: 'columns'; columnId: string | null }
   /** 問い合わせの記録（仕様書 第33.17節）。`inquiryId` があれば 1 件。 */
   | { kind: 'inquiries'; inquiryId: string | null }
+  /** 競合の分析（仕様書 第36.18節）。 */
+  | { kind: 'competitors' }
   | { kind: 'settings'; section: string | null }
   | { kind: 'help'; articleId: string | null }
   | { kind: 'unknown' };
@@ -65,6 +67,7 @@ export function parseRoute(pathname: string): Route {
     case 'inventory': return second === undefined ? { kind: 'inventory', itemId: null } : id(second) ? { kind: 'inventory', itemId: id(second) } : { kind: 'unknown' };
     case 'attendance': return second === undefined ? { kind: 'attendance' } : { kind: 'unknown' };
     case 'signage': return second === undefined ? { kind: 'signage' } : { kind: 'unknown' };
+    case 'competitors': return second === undefined ? { kind: 'competitors' } : { kind: 'unknown' };
     case 'columns': return second === undefined ? { kind: 'columns', columnId: null } : id(second) ? { kind: 'columns', columnId: id(second) } : { kind: 'unknown' };
     case 'inquiries': return second === undefined ? { kind: 'inquiries', inquiryId: null } : id(second) ? { kind: 'inquiries', inquiryId: id(second) } : { kind: 'unknown' };
     case 'hr': return second === undefined ? { kind: 'hr', employeeId: null } : id(second) ? { kind: 'hr', employeeId: id(second) } : { kind: 'unknown' };
@@ -81,7 +84,7 @@ export function routePath(route: Route): string {
     case 'home': case 'unknown': return '/';
     case 'agent': return `/agents/${enc(route.agentId)}`;
     case 'run': return `/runs/${enc(route.runId)}`;
-    case 'approvals': case 'history': case 'notifications': case 'schedules': case 'attendance': case 'signage': return `/${route.kind}`;
+    case 'approvals': case 'history': case 'notifications': case 'schedules': case 'attendance': case 'signage': case 'competitors': return `/${route.kind}`;
     case 'cards': return route.contactId ? `/cards/${enc(route.contactId)}` : '/cards';
     case 'inventory': return route.itemId ? `/inventory/${enc(route.itemId)}` : '/inventory';
     case 'hr': return route.employeeId ? `/hr/${enc(route.employeeId)}` : '/hr';

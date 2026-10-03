@@ -134,6 +134,8 @@ export function CompanySettings({ page }: { page: string }) {
           <Text span={2} label="郵便番号" value={company.postalCode ?? ''} onChange={c('postalCode')} placeholder="123-4567" />
           <Text span={7} label="住所" value={company.address} onChange={c('address')} />
           <Text span={3} label="電話番号" value={company.phone} onChange={c('phone')} placeholder="03-0000-0000" />
+          {/* 自社の Web サイト（仕様書 第36.4節）。競合の分析が自社の像をまとめるときに読む */}
+          <Text span={6} label="Web サイト" value={company.website ?? ''} onChange={c('website')} placeholder="https://www.example.jp/" />
           <Text span={4} label="適格請求書発行事業者の登録番号" value={company.invoiceRegistrationNumber}
             onChange={c('invoiceRegistrationNumber')} placeholder="T1234567890123（未登録なら空欄）" />
           <div className="field span-2">

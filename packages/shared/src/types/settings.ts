@@ -13,6 +13,7 @@ import { DEFAULT_HR_SETTINGS, type HrSettings } from './hr.js';
 import { DEFAULT_SIGNAGE_SETTINGS, type SignageSettings } from './signage.js';
 import { DEFAULT_WEB_COLUMN_SETTINGS, type WebColumnSettings } from './web-columns.js';
 import { DEFAULT_INQUIRY_SETTINGS, type InquirySettings } from './inquiries.js';
+import { DEFAULT_COMPETITOR_SETTINGS, type CompetitorSettings } from './competitors.js';
 
 /** 会社情報（仕様書 第6.6.1節）。帳票とメールの署名に使う。 */
 export interface CompanyInfo {
@@ -36,6 +37,8 @@ export interface CompanyInfo {
   paymentTerms: string;
   /** 会社のロゴ（PNG・JPEG のファイル ID。仕様書 第6.6.1節）。画面の左上に出す。無ければ `null`。 */
   logoFileId: string | null;
+  /** 自社の Web サイト（仕様書 第36.4節）。競合の分析が自社の像をまとめるときに読む。無ければ空文字。 */
+  website: string;
 }
 
 /** 自社の書き方（仕様書 第15.2.1節）。すべてのエージェントに同じものを差し込む。 */
@@ -234,6 +237,8 @@ export interface TenantSettings {
   webColumns: WebColumnSettings;
   /** 問い合わせの記録（第33章）。 */
   inquiries: InquirySettings;
+  /** 競合の分析（第36章）。 */
+  competitors: CompetitorSettings;
   /** 会社の AI の方針（第16.3.7.1節、ADR-0059）。 */
   aiPolicy: AiPolicySettings;
 }
@@ -257,7 +262,7 @@ export interface AiPolicySettings {
 export const DEFAULT_TENANT_SETTINGS: TenantSettings = {
   company: {
     legalName: '', shortName: '', postalCode: '', address: '', phone: '', fiscalYearStartMonth: 4,
-    invoiceRegistrationNumber: '', taxRounding: 'floor', closingDay: 'end', paymentTerms: '', logoFileId: null,
+    invoiceRegistrationNumber: '', taxRounding: 'floor', closingDay: 'end', paymentTerms: '', logoFileId: null, website: '',
   },
   writingStyle: { selfReference: '弊社', greeting: '', closing: '', signature: '', terms: [], notes: '' },
   // 社内への書き込みは既定で承認なし。人に判断を求めるのは社外とお金だけ（第9.4.0節、ADR-0028）
@@ -288,6 +293,8 @@ export const DEFAULT_TENANT_SETTINGS: TenantSettings = {
   webColumns: DEFAULT_WEB_COLUMN_SETTINGS,
   // 問い合わせの記録は既定で切り（第33.2節）
   inquiries: DEFAULT_INQUIRY_SETTINGS,
+  // 競合の分析は既定で切り（第36.2節）
+  competitors: DEFAULT_COMPETITOR_SETTINGS,
   aiPolicy: { mode: 'cloud' },
 };
 
@@ -368,7 +375,7 @@ export interface UserSettings {
   };
   notifications: {
     /** 受け取る種類（第6.5.5節）。`false` にしたものは届けない。 */
-    kinds: Record<'brief' | 'run' | 'approval' | 'failure' | 'inventory' | 'attendance' | 'signage' | 'inquiry', boolean>;
+    kinds: Record<'brief' | 'run' | 'approval' | 'failure' | 'inventory' | 'attendance' | 'signage' | 'inquiry' | 'competitor', boolean>;
     /** 通知しない時間帯（例: 22:00〜7:00）。`null` は指定なし。 */
     quietHours: { from: string; to: string } | null;
     /**
@@ -496,7 +503,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   profile: { furigana: '', title: '', timezone: 'Asia/Tokyo', home: '', workplace: '' },
   secretary: { name: '', callMe: '', style: 'polite', proactivity: 'normal', speak: true, captions: true, voice: '', voiceStyle: '', avatar: '' },
   notifications: {
-    kinds: { brief: true, run: true, approval: true, failure: true, inventory: true, attendance: true, signage: true, inquiry: true },
+    kinds: { brief: true, run: true, approval: true, failure: true, inventory: true, attendance: true, signage: true, inquiry: true, competitor: true },
     quietHours: null,
     channels: { chat: false },
   },
