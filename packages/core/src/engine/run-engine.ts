@@ -14,7 +14,7 @@ import {
   alwaysRequiresApproval, canDecide, canUseAgent, writeInternalNeedsApproval,
   type AutomationPolicy, type TenantSettings, type WritingStyle,
   type AgentDefinition, type AgentStep, type ApprovalStep, type Approval, type Run,
-  type RunStep, type Step, type ContactScope, type InventorySettings, type WebColumnSettings,
+  type RunStep, type Step, type ContactScope, type InventorySettings, type WebColumnSettings, type InquirySettings,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { LlmMessage, LlmProvider, LlmResponse } from '../llm/provider.js';
@@ -38,6 +38,7 @@ import type { NoticeService } from '../notices/service.js';
 import type { InventoryService } from '../inventory/service.js';
 import type { InventoryBookings } from '../inventory/bookings.js';
 import type { ColumnService } from '../columns/service.js';
+import type { InquiryService } from '../inquiries/service.js';
 import type { LaborCalendar } from '../hr/calendar-service.js';
 import { answerOfSteps } from '../memory/work.js';
 import { substituteArguments } from '../extensions/skill.js';
@@ -145,6 +146,15 @@ export interface RunEngineDeps {
   columns?: {
     service: ColumnService;
     access(tenantId: string, userId: string): Promise<WebColumnSettings | null>;
+  };
+  /**
+   * 問い合わせの記録（内蔵の拡張。仕様書 第33章）。ツールに渡す。無ければ問い合わせのツールは「使えない」と返す。
+   *
+   * @remarks `access` は、会社が問い合わせの記録を使っていて依頼者が利用範囲の中なら、会社の設定を返す
+   */
+  inquiries?: {
+    service: InquiryService;
+    access(tenantId: string, userId: string): Promise<InquirySettings | null>;
   };
 }
 
@@ -931,6 +941,10 @@ export class RunEngine {
       // Web のコラム（第32.18.1節）。使えるかどうかはツールが呼ぶたびに確かめる
       ...(this.deps.columns ? {
         columns: { service: this.deps.columns.service, access: () => this.deps.columns!.access(run.tenantId, requestedBy) },
+      } : {}),
+      // 問い合わせの記録（第33.17節）。使えるかどうかはツールが呼ぶたびに確かめる
+      ...(this.deps.inquiries ? {
+        inquiries: { service: this.deps.inquiries.service, access: () => this.deps.inquiries!.access(run.tenantId, requestedBy) },
       } : {}),
       // 労務の期限（第30.19.1節）。人事区画の人にだけ返す
       ...(this.deps.hr ? {

@@ -142,6 +142,7 @@ export {
 export * from './cards/index.js';
 export * from './inventory/index.js';
 export * from './columns/index.js';
+export * from './inquiries/index.js';
 export * from './hr/index.js';
 export * from './signage/index.js';
 export * from './notices/index.js';

@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { CardCorners, CardFields, ContactPhone, ContactScope, PhoneKind } from '@m2office/shared';
+import { ContactInquiries } from './Inquiries.js';
 import { api, describeError, type CardDetail, type CardList, type CardMeetings, type CardSummary } from './api.js';
 import { BulkMailView } from './BulkMail.js';
 import { cropCard, prepareCardPhoto } from './card-image.js';
@@ -41,7 +42,7 @@ const PHONE_LABELS: Record<PhoneKind, string> = { main: '代表', direct: '直�
  * @param onOpen 詳細を開く・一覧に戻る（URL を合わせる）
  * @param mailer メールの開き方（本人のアカウントの Gmail か `mailto:`）
  */
-export function Cards({ contactId, onOpen, mailer, admin = false, onApprovals }: {
+export function Cards({ contactId, onOpen, mailer, admin = false, onApprovals, onInquiry }: {
   contactId: string | null;
   onOpen: (contactId: string | null) => void;
   mailer: Mailer;
@@ -49,10 +50,12 @@ export function Cards({ contactId, onOpen, mailer, admin = false, onApprovals }:
   admin?: boolean;
   /** 承認トレイへ移る（まとめてのメールを承認へ進めた後。第27.9.1節）。 */
   onApprovals?: () => void;
+  /** 問い合わせを開く（問い合わせの記録を使えるときだけ渡す。第33.6.1節）。 */
+  onInquiry?: (inquiryId: string) => void;
 }) {
   // まとめてのメールの画面（第27.9.1節）。一覧で選んだ名刺をはじめの宛先にする
   const [bulk, setBulk] = useState<CardSummary[] | null>(null);
-  if (contactId) return <CardDetailView id={contactId} onBack={() => onOpen(null)} onOpen={onOpen} mailer={mailer} />;
+  if (contactId) return <CardDetailView id={contactId} onBack={() => onOpen(null)} onOpen={onOpen} mailer={mailer} {...(onInquiry ? { onInquiry } : {})} />;
   if (bulk) return <BulkMailView initial={bulk} onClose={() => setBulk(null)} onSubmitted={() => { setBulk(null); onApprovals?.(); }} />;
   return <CardListView onOpen={onOpen} admin={admin} onBulk={setBulk} />;
 }
@@ -415,8 +418,8 @@ function CardThumb({ cardId, rotation, corners = null, kind }: { cardId: string 
 }
 
 /** 詳細。画像の横に氏名と操作、その下に項目を狭い幅で並べる。項目はその場で直せる（第27.8節）。 */
-function CardDetailView({ id, onBack, onOpen, mailer }: {
-  id: string; onBack: () => void; onOpen: (id: string | null) => void; mailer: Mailer;
+function CardDetailView({ id, onBack, onOpen, mailer, onInquiry }: {
+  id: string; onBack: () => void; onOpen: (id: string | null) => void; mailer: Mailer; onInquiry?: (inquiryId: string) => void;
 }) {
   const [d, setD] = useState<CardDetail | null>(null);
   const [meetings, setMeetings] = useState<CardMeetings | null>(null);
@@ -561,6 +564,7 @@ function CardDetailView({ id, onBack, onOpen, mailer }: {
       </ul>
       {meetings && !meetings.available && <p className="small muted">{meetings.reason}</p>}
 
+      {onInquiry && <ContactInquiries contactId={id} onOpen={onInquiry} />}
       {d.bulkMails.length > 0 && (
         <>
           <h3>まとめてのメール</h3>

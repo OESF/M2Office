@@ -178,6 +178,14 @@ const ACTION_LABELS: Record<string, string> = {
   'column.rules': 'コラムの表現の決まりを選んだ',
   'column.wordpress_save': 'コラムの WordPress の鍵を預けた',
   'column.wordpress_remove': 'コラムの WordPress の鍵を外した',
+  // 問い合わせの記録（仕様書 第33.17節。お客様の名前と用件は記録に残さない）
+  'inquiry.create': '問い合わせを残した',
+  'inquiry.append': '問い合わせに続きを足した',
+  'inquiry.update': '問い合わせを直した',
+  'inquiry.task_add': '問い合わせの次にやることを足した',
+  'inquiry.task_update': '問い合わせの次にやることを直した',
+  'inquiry.task_done': '問い合わせの次にやることを済みにした',
+  'inquiry.delete': '問い合わせを削除した',
   // 人事・給与（仕様書 第30.21節。他人の台帳を見ただけでも残す）
   'hr.list': '従業員の一覧を見た',
   'hr.view': '従業員の台帳を見た',
@@ -365,6 +373,8 @@ function targetOf(e: AuditEvent, names: AuditNames): string {
     case 'hr_employee': return `従業員 ${id.slice(0, 8)}`;
     // コラムの題名は出さない（テーマは記録の詳細にある）
     case 'web_column': return id.startsWith('col-') ? `コラム ${id.slice(4, 12)}` : 'コラムの作成の設定';
+    // 問い合わせはお客様の名前を出さない。ID の頭だけ
+    case 'inquiry': return `問い合わせ ${id.slice(4, 12)}`;
     case 'tool': {
       // 会社の接続のツール（`slack.slack_send_message`）は接続の名前を添える
       const [head, ...rest] = id.split('.');

@@ -159,6 +159,22 @@ function chooseTools(tools: string[], prompt: string): Call[] {
     if (id) return [{ name: 'mail.bulk_send', args: { bulkMailId: id } }];
   }
 
+  // 問い合わせの記録（仕様書 第33.17節）: 話した文をそのまま残す。「今週の」「返事してない」で一覧を読む
+  if (has('inquiries.record') && instruction.includes('inquiries.record')) {
+    const text = extractField(prompt, 'request').replace(/(と|って)?(残して|記録して)(おいて)?(ください)?[。.]?$/, '').trim();
+    if (text) return [{ name: 'inquiries.record', args: { text } }];
+  }
+  if (has('inquiries.list') && instruction.includes('inquiries.list')) {
+    const req = extractField(prompt, 'request');
+    const name = /(.+?)(さん|様|社)の問い合わせ/.exec(req)?.[1] ?? '';
+    return [{ name: 'inquiries.list', args: {
+      ...(/今週/.test(req) ? { days: 7 } : /今月/.test(req) ? { days: 31 } : {}),
+      ...(/返事して(い)?ない|待たせ/.test(req) ? { waiting: true } : {}),
+      ...(/済んだ|すべて|全部/.test(req) ? { status: 'all' } : {}),
+      ...(name ? { q: name } : {}),
+    } }];
+  }
+
   // Web のコラム（仕様書 第32.18.1節）: 承認へ進めたコラムを確かめ、承認の後に WordPress に入れる。秘書から下書きを書く
   if (has('columns.preview') && instruction.includes('columns.preview')) {
     const id = extractField(prompt, 'columnId');

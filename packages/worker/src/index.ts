@@ -11,7 +11,7 @@
 
 import {
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
-  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, SignageService, SignageInterrupts, PostgresSignageStore, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention,
+  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, SignageService, SignageInterrupts, PostgresSignageStore, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention,
   NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator,
@@ -134,12 +134,19 @@ const columns = new ColumnService({
   store: new PostgresColumnStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), files,
   repo, box, llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId), logger: log,
 });
+// 問い合わせの記録（内蔵の拡張。仕様書 第33章）。秘書から頼まれた記録と、期限の知らせ・原文の片付けが使う
+const inquiryStore = new PostgresInquiryStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
+const inquiries = new InquiryService({
+  store: inquiryStore, repo, llmFor: (tenantId) => ai.llmFor(tenantId), contacts: contactBookFrom(contactStore, cardsAccess(repo)), logger: log,
+});
+const inquiryWatch = new InquiryWatch({ store: inquiryStore, repo, logger: log });
 const engine = new RunEngine({
   repo, llm, registry, connector, files, resolveDefinition, isAvailable, logger: log, research, notices,
   cards: { store: contactStore, service: cards, access: cardsAccess(repo), bulk: bulkMail },
   inventory: { service: inventory, bookings: inventoryBookings, access: inventoryAccess(repo) },
   hr: { calendar: laborCalendar, access: hrAccess(repo) },
   columns: { service: columns, access: webColumnsAccess(repo) },
+  inquiries: { service: inquiries, access: inquiriesAccess(repo) },
   llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId),
   // 業務ごとの AI（ローカル・外部）と、社外の接続に送ってよいか（第16.3.7.1節）
   llmForRun: (tenantId, def, registry, previous) => ai.llmForRun(tenantId, def, registry, previous),
@@ -251,6 +258,9 @@ let lastProactiveCheck = 0;
 /** 店頭サイネージの見回りの間隔（つながらない画面の知らせ。第31.5.1節）。 */
 const SIGNAGE_INTERVAL_MS = Number(process.env['SIGNAGE_INTERVAL_MS'] ?? 60_000);
 let lastSignageCheck = 0;
+/** 問い合わせの見張りの間隔（期限の知らせ・手つかずの知らせ・原文の片付け。第33.7節）。 */
+const INQUIRY_INTERVAL_MS = Number(process.env['INQUIRY_INTERVAL_MS'] ?? 900_000);
+let lastInquiryCheck = 0;
 // 秘書が学んだことの週 1 回の整理と、残す期間の片付け（仕様書 第11.11.4節）。1 時間ごとに「日曜の深夜で、前の整理から 6 日より経ったか」を見る
 const CONSOLIDATE_INTERVAL_MS = Number(process.env['CONSOLIDATE_INTERVAL_MS'] ?? 3_600_000);
 let lastConsolidateCheck = 0;
@@ -441,6 +451,17 @@ while (running) {
       } catch (err) {
         log.warn('サイネージの見回りに失敗しました', { tenantId, err });
       }
+    }
+  }
+
+  // 問い合わせの見張り（第33.7節）。期限の前の日・期限を過ぎたとき・手つかずを知らせ、90 日を過ぎた原文を消す
+  if (Date.now() - lastInquiryCheck >= INQUIRY_INTERVAL_MS) {
+    lastInquiryCheck = Date.now();
+    try {
+      const r = await inquiryWatch.tick(new Date());
+      if (r.notified + r.forgotten > 0) log.info('問い合わせの期限を知らせ、古い原文を消しました', { notified: r.notified, forgotten: r.forgotten });
+    } catch (err) {
+      log.warn('問い合わせの見張りに失敗しました', { err });
     }
   }
 

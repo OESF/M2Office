@@ -5127,6 +5127,102 @@ console.log('\n■ 65. Web のコラム（内蔵の拡張。第32.18.1節）');
   }
 }
 
+console.log('\n■ 66. 問い合わせの記録（内蔵の拡張。第33.17節）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  // 名字に見える確かめ用の名前（漢字とカタカナ。終わりに消す）
+  const name = 'スモーク確認';
+  const { rows: saved } = await owner.query(`select tenant_id, inquiries from tenant_settings where tenant_id in ('t-alpha', 't-beta')`);
+  await owner.query(`delete from inquiries where tenant_id in ('t-alpha', 't-beta') and from_name like 'スモーク確認%'`);
+  try {
+    // 既定は切り。切っている会社には画面も API も出さない
+    await call('b', '/v1/admin/extensions/inquiries/enabled', { method: 'PUT', body: JSON.stringify({ enabled: false }) });
+    const offB = await call('b', '/v1/inquiries');
+    const { body: meB } = await call('b', '/v1/me');
+    offB.status === 403 && meB.inquiries === false ? ok('問い合わせの記録を切っている会社では、API も左のメニューも使えない') : ng('切っていても使える', `${offB.status} ${meB.inquiries}`);
+    await call('a', '/v1/admin/extensions/inquiries/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const { body: meA } = await call('a', '/v1/me', {}, 'member');
+    const helpA = await call('a', '/v1/help/articles/start-inquiries', {}, 'member');
+    const helpB = await call('b', '/v1/help/articles/start-inquiries');
+    meA.inquiries === true && helpA.status === 200 && helpB.status === 404
+      ? ok('管理者が入れると使え、ヘルプの記事が開く。切っている会社には記事を出さない')
+      : ng('入れたときが違う', JSON.stringify({ me: meA.inquiries, a: helpA.status, b: helpB.status }));
+
+    // 残す: 1 行の文から項目に分け、期限を日付にする
+    const rec = await call('a', '/v1/inquiries', { method: 'POST', body: JSON.stringify({ text: `いま${name}さんから電話 03-1234-5678。見積もりがほしい。ホームページを見たって。明日までに送る` }) }, 'member');
+    const inq = rec.body?.inquiry;
+    rec.status === 201 && inq?.from?.name === name && inq.channel === 'phone' && inq.source === 'Web サイト' && /^\d{4}-\d{2}-\d{2}$/.test(rec.body.task?.due ?? '')
+      ? ok('1 行の文から、誰から・経路・どこで知ったか・次にやること（期限は日付）に分けて残す')
+      : ng('残したときが違う', JSON.stringify(rec.body).slice(0, 400));
+    // ほかの会社からは見えない（入れていても）
+    await call('b', '/v1/admin/extensions/inquiries/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const other = await call('b', `/v1/inquiries/${inq?.id}`);
+    const otherList = await call('b', '/v1/inquiries');
+    other.status === 404 && !(otherList.body.items ?? []).some((i) => i.id === inq?.id) ? ok('ほかの会社の問い合わせは見られない') : ng(`ほかの会社から見える（${other.status}）`);
+    await call('b', '/v1/admin/extensions/inquiries/enabled', { method: 'PUT', body: JSON.stringify({ enabled: false }) });
+
+    // 続き: 同じ問い合わせに足し、次にやることを済みにする
+    const next = await call('a', '/v1/inquiries', { method: 'POST', body: JSON.stringify({ text: `${name}さんに見積もりを送った` }) }, 'member');
+    const detail = (await call('a', `/v1/inquiries/${inq?.id}`, {}, 'member')).body;
+    next.status === 200 && next.body.kind === 'appended' && next.body.inquiry?.id === inq?.id && next.body.closedTask
+      && detail.events?.length === 2 && detail.events[1].direction === 'out' && detail.tasks?.every((t) => t.doneAt)
+      ? ok('「見積もりを送った」は同じ問い合わせに足し、次にやることを済みにする')
+      : ng('続きが違う', JSON.stringify({ next: next.body, events: detail.events?.length }).slice(0, 400));
+
+    // 要配慮個人情報: 原文も要約も残さない
+    const sens = await call('a', '/v1/inquiries', { method: 'POST', body: JSON.stringify({ text: `いま${name}二さんから電話。持病で通院中なので、午前に予約したい` }) }, 'member');
+    const sensDetail = (await call('a', `/v1/inquiries/${sens.body?.inquiry?.id}`, {}, 'member')).body;
+    sens.body?.sensitive === true && !/通院|持病/.test(sens.body.inquiry?.summary ?? '') && sensDetail.events?.[0]?.body === null
+      ? ok('健康のことが話に出たら、要約にも原文にも残さない')
+      : ng('要配慮個人情報が残る', JSON.stringify({ sens: sens.body, ev: sensDetail.events?.[0] }).slice(0, 400));
+
+    // 直す・次にやること
+    const bad = await call('a', `/v1/inquiries/${inq?.id}`, { method: 'PATCH', body: JSON.stringify({ channel: 'fax' }) }, 'member');
+    const fix = await call('a', `/v1/inquiries/${inq?.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'done', temperature: 'high' }) }, 'member');
+    const addTask = await call('a', `/v1/inquiries/${inq?.id}/tasks`, { method: 'POST', body: JSON.stringify({ what: 'お礼の電話', due: '2099-01-05' }) }, 'member');
+    const afterFix = (await call('a', `/v1/inquiries/${inq?.id}`, {}, 'member')).body;
+    const task = afterFix.tasks?.find((t) => t.what === 'お礼の電話');
+    const doneTask = task ? await call('a', `/v1/inquiries/tasks/${task.id}`, { method: 'PATCH', body: JSON.stringify({ done: true }) }, 'member') : { status: 0 };
+    bad.status === 400 && fix.status === 200 && afterFix.inquiry?.status === 'done' && addTask.status === 201 && doneTask.status === 200
+      ? ok('項目をその場で直し、次にやることを足して済みにできる。読めない値は断る')
+      : ng('直すときが違う', JSON.stringify({ bad: bad.status, fix: fix.status, add: addTask.status, done: doneTask.status }));
+
+    // 秘書から: 付属の業務「問い合わせを残す」
+    const job = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: 'inquiries:record', input: { request: `いま${name}三さんが来店。カタログがほしいとのこと` } }) }, 'member');
+    let jobRun = job.body?.runId ? await waitFor('a', job.body.runId, ['completed', 'failed', 'awaiting_approval'], 20000, 'member') : null;
+    // 確かめ用の会社は「社内への書き込みに確認を求める」設定のため、本人が確認してから残す（会社の自動化ポリシーのとおり）
+    if (jobRun?.run?.status === 'awaiting_approval') {
+      const conf = await approvalFor('a', job.body.runId, 'member');
+      if (conf) await call('a', `/v1/approvals/${conf.id}`, { method: 'POST', body: JSON.stringify({ decision: 'approved' }) }, 'member');
+      jobRun = await waitFor('a', job.body.runId, ['completed', 'failed'], 20000, 'member');
+    }
+    const listed = (await call('a', `/v1/inquiries?status=all&q=${encodeURIComponent(`${name}三`)}`, {}, 'member')).body.items ?? [];
+    jobRun?.run?.status === 'completed' && listed.length === 1 && listed[0].channel === 'visit'
+      ? ok('秘書から頼むと、付属の業務「問い合わせを残す」が記録に残す（社内への書き込みに確認を求める会社では、本人の確認の後）')
+      : ng('秘書からの記録が違う', JSON.stringify({ status: jobRun?.run?.status, reason: jobRun?.run?.failureReason, listed: listed.length }).slice(0, 400));
+
+    // 削除と監査ログ（お客様の名前は監査ログに残さない）
+    const del = await call('a', `/v1/inquiries/${inq?.id}`, { method: 'DELETE' }, 'member');
+    const gone = await call('a', `/v1/inquiries/${inq?.id}`, {}, 'member');
+    const { body: audits } = await call('a', '/v1/admin/audit-events');
+    const mine = (audits.items ?? []).filter((e) => String(e.action).startsWith('inquiry.'));
+    del.status === 200 && gone.status === 404 && ['inquiry.create', 'inquiry.append', 'inquiry.delete'].every((a) => mine.some((e) => e.action === a))
+      && !JSON.stringify(mine).includes(name)
+      ? ok('削除でき、残す・続き・削除を監査ログに残す（お客様の名前は残さない）')
+      : ng('削除か監査ログが違う', JSON.stringify({ del: del.status, gone: gone.status, actions: mine.map((e) => e.action) }));
+  } catch (err) {
+    ng('問い合わせの記録の確認が途中で止まった', String(err?.stack ?? err));
+  } finally {
+    await owner.query(`delete from inquiries where tenant_id in ('t-alpha', 't-beta') and from_name like 'スモーク確認%'`);
+    // 問い合わせから名刺管理に作った連絡先も消す（第33.6.1節）
+    await owner.query(`delete from contacts where tenant_id in ('t-alpha', 't-beta') and note = '出どころ: 問い合わせの記録' and name like 'スモーク確認%'`);
+    for (const r of saved) await owner.query(`update tenant_settings set inquiries = $2 where tenant_id = $1`, [r.tenant_id, r.inquiries ? JSON.stringify(r.inquiries) : null]);
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

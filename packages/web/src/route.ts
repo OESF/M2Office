@@ -27,6 +27,8 @@ export type Route =
   | { kind: 'signage' }
   /** Web のコラム（仕様書 第32.18.1節）。`columnId` があれば 1 つのコラム。 */
   | { kind: 'columns'; columnId: string | null }
+  /** 問い合わせの記録（仕様書 第33.17節）。`inquiryId` があれば 1 件。 */
+  | { kind: 'inquiries'; inquiryId: string | null }
   | { kind: 'settings'; section: string | null }
   | { kind: 'help'; articleId: string | null }
   | { kind: 'unknown' };
@@ -64,6 +66,7 @@ export function parseRoute(pathname: string): Route {
     case 'attendance': return second === undefined ? { kind: 'attendance' } : { kind: 'unknown' };
     case 'signage': return second === undefined ? { kind: 'signage' } : { kind: 'unknown' };
     case 'columns': return second === undefined ? { kind: 'columns', columnId: null } : id(second) ? { kind: 'columns', columnId: id(second) } : { kind: 'unknown' };
+    case 'inquiries': return second === undefined ? { kind: 'inquiries', inquiryId: null } : id(second) ? { kind: 'inquiries', inquiryId: id(second) } : { kind: 'unknown' };
     case 'hr': return second === undefined ? { kind: 'hr', employeeId: null } : id(second) ? { kind: 'hr', employeeId: id(second) } : { kind: 'unknown' };
     case 'settings': return { kind: 'settings', section: id(second) };
     case 'help': return { kind: 'help', articleId: id(second) };
@@ -83,6 +86,7 @@ export function routePath(route: Route): string {
     case 'inventory': return route.itemId ? `/inventory/${enc(route.itemId)}` : '/inventory';
     case 'hr': return route.employeeId ? `/hr/${enc(route.employeeId)}` : '/hr';
     case 'columns': return route.columnId ? `/columns/${enc(route.columnId)}` : '/columns';
+    case 'inquiries': return route.inquiryId ? `/inquiries/${enc(route.inquiryId)}` : '/inquiries';
     case 'settings': return route.section ? `/settings/${enc(route.section)}` : '/settings';
     case 'help': return route.articleId ? `/help/${enc(route.articleId)}` : '/help';
   }

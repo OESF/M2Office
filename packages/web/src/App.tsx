@@ -7,7 +7,7 @@
  */
 
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
-import { CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, showsCaptions, type Notification, type UserSettings } from '@m2office/shared';
+import { CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, showsCaptions, type Notification, type UserSettings } from '@m2office/shared';
 import {
   addCategory, assignCategory, checkCategoryName, groupMenu, removeCategory, togglePinned, type MenuSection,
 } from './menu.js';
@@ -28,6 +28,7 @@ import { Schedules } from './Schedules.js';
 import { Cards } from './Cards.js';
 import { Inventory } from './Inventory.js';
 import { Columns } from './Columns.js';
+import { Inquiries } from './Inquiries.js';
 import { Signage } from './Signage.js';
 import { Hr } from './Hr.js';
 import { MyAttendance } from './MyAttendance.js';
@@ -106,6 +107,7 @@ type View =
   | { kind: 'attendance' }
   | { kind: 'signage' }
   | { kind: 'columns'; columnId: string | null }
+  | { kind: 'inquiries'; inquiryId: string | null }
   | { kind: 'settings'; section: SettingsSection }
   | { kind: 'help'; articleId: string | null };
 
@@ -119,6 +121,7 @@ function viewPath(v: View): string {
     case 'inventory': return routePath({ kind: 'inventory', itemId: v.itemId });
     case 'hr': return routePath({ kind: 'hr', employeeId: v.employeeId });
     case 'columns': return routePath({ kind: 'columns', columnId: v.columnId });
+    case 'inquiries': return routePath({ kind: 'inquiries', inquiryId: v.inquiryId });
     case 'help': return routePath({ kind: 'help', articleId: v.articleId });
     default: return routePath({ kind: v.kind });
   }
@@ -140,6 +143,7 @@ function viewOf(r: Route): View | null {
     case 'inventory': return { kind: 'inventory', itemId: r.itemId };
     case 'hr': return { kind: 'hr', employeeId: r.employeeId };
     case 'columns': return { kind: 'columns', columnId: r.columnId };
+    case 'inquiries': return { kind: 'inquiries', inquiryId: r.inquiryId };
     case 'help': return { kind: 'help', articleId: r.articleId };
     default: return { kind: r.kind };
   }
@@ -370,6 +374,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
     // 店頭サイネージ（仕様書 第31.2節）。会社で入れていて利用範囲の人にだけ出す
     ...(me.signage ? [{ id: SIGNAGE_EXTENSION_ID, name: 'サイネージ', description: '店頭や待合の画面に、画像と動画を流す', icon: 'signage' as IconName, agent: null }] : []),
     // Web のコラム（仕様書 第32.18.1節）。会社で入れていて利用範囲の人にだけ出す
+    // 問い合わせの記録（仕様書 第33.17節）。会社で入れていて利用範囲の人にだけ出す
+    ...(me.inquiries ? [{ id: INQUIRIES_EXTENSION_ID, name: '問い合わせの記録', description: '電話や来店の問い合わせを、話すか書くだけで残し、次にやることを知らせる', icon: 'chat' as IconName, agent: null }] : []),
     ...(me.webColumns ? [{ id: WEB_COLUMNS_EXTENSION_ID, name: 'コラムの作成', description: 'テーマを調べて出典つきのコラムを書き、承認して WordPress に入れる', icon: 'doc' as IconName, agent: null }] : []),
   ];
   const allMenuAgents = orderAgents(menuItems, menu.order).filter((a) => !menu.hidden.includes(a.id));
@@ -380,10 +386,12 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
     : m.id === INVENTORY_EXTENSION_ID ? setView({ kind: 'inventory', itemId: null })
       : m.id === HR_EXTENSION_ID ? setView({ kind: 'hr', employeeId: null })
         : m.id === SIGNAGE_EXTENSION_ID ? setView({ kind: 'signage' })
-          : m.id === WEB_COLUMNS_EXTENSION_ID ? setView({ kind: 'columns', columnId: null }) : setView({ kind: 'cards', contactId: null }));
+          : m.id === WEB_COLUMNS_EXTENSION_ID ? setView({ kind: 'columns', columnId: null })
+            : m.id === INQUIRIES_EXTENSION_ID ? setView({ kind: 'inquiries', inquiryId: null }) : setView({ kind: 'cards', contactId: null }));
   const isOpen = (m: MenuItem) => (m.agent ? view.kind === 'agent' && view.agent.id === m.id
     : m.id === INVENTORY_EXTENSION_ID ? view.kind === 'inventory' : m.id === HR_EXTENSION_ID ? view.kind === 'hr'
-      : m.id === SIGNAGE_EXTENSION_ID ? view.kind === 'signage' : m.id === WEB_COLUMNS_EXTENSION_ID ? view.kind === 'columns' : view.kind === 'cards');
+      : m.id === SIGNAGE_EXTENSION_ID ? view.kind === 'signage' : m.id === WEB_COLUMNS_EXTENSION_ID ? view.kind === 'columns'
+        : m.id === INQUIRIES_EXTENSION_ID ? view.kind === 'inquiries' : view.kind === 'cards');
   // ピン止めとカテゴリーは個人設定（メニュー）に保存し、端末をまたいで同じにする。保存に失敗したら読み直す
   const saveMenu = (saved: UserSettings['menu']) => {
     setMenu(saved);
@@ -617,7 +625,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
               <h1>名刺管理 <HelpTip article="start-cards">撮るかファイルを選ぶと、AI が読み取って登録します。秘書に「〇〇さんの電話番号は？」と聞けます。</HelpTip></h1>
               <Cards contactId={view.contactId} onOpen={(contactId) => setView({ kind: 'cards', contactId })}
                 mailer={{ email: me.user.email, google: me.workspaceSource === 'google' }} admin={me.user.roles.includes('admin')}
-                onApprovals={() => { void refresh(); setView({ kind: 'approvals' }); }} />
+                onApprovals={() => { void refresh(); setView({ kind: 'approvals' }); }}
+                {...(me.inquiries ? { onInquiry: (inquiryId: string) => setView({ kind: 'inquiries', inquiryId }) } : {})} />
             </>
           )}
           {view.kind === 'inventory' && (
@@ -631,6 +640,13 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
               <h1>コラムの作成 <HelpTip article="start-web-columns">テーマを入れると、AI が調べて出典つきのコラムを書き、表現の決まりに照らして赤入れします。</HelpTip></h1>
               <Columns columnId={view.columnId} onOpen={(columnId) => setView({ kind: 'columns', columnId })}
                 onApprovals={() => { void refresh(); setView({ kind: 'approvals' }); }} />
+            </>
+          )}
+          {view.kind === 'inquiries' && (
+            <>
+              <h1>問い合わせの記録 <HelpTip article="start-inquiries">電話や来店の問い合わせを、1 行書くか秘書に話すだけで残します。次にやることの期限が近づくと知らせます。</HelpTip></h1>
+              <Inquiries inquiryId={view.inquiryId} onOpen={(inquiryId) => setView({ kind: 'inquiries', inquiryId })}
+                onContact={(contactId) => setView({ kind: 'cards', contactId })} userId={me.user.id} />
             </>
           )}
           {view.kind === 'signage' && (
@@ -810,6 +826,7 @@ const VIEW_LABELS: Record<string, string> = {
   attendance: '給与・勤怠',
   signage: 'サイネージ',
   columns: 'コラムの作成',
+  inquiries: '問い合わせの記録',
   settings: '個人設定',
 };
 

@@ -265,6 +265,10 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET` ／ `POST /v1/columns/:id/cover` | カバー画像（PNG。`version` で前の版、`download=1` で保存させる）／ 作り直す（`kind`: template・ai・photo、`hint`。新しい版になる） |
 | `POST /v1/columns/:id/photos` | 写真を入れ、そのコラムのカバーにする（本文は写真の中身。JPEG・PNG、10 MB まで。会社の写真の置き場にも入る） |
 | `POST /v1/columns/:id/submit` | 承認へ進める（業務「コラムを WordPress に入れる」を始め、管理者か承認者の承認を待つ。版の指紋を残す。入力にカバーのファイルを含め、承認する人がその画像を見られるようにする。入れられない理由があれば 400） |
+| `GET` ／ `POST /v1/inquiries` | 問い合わせの記録（仕様書 第33.17節）: 一覧（`status`: open・done・dropped・all、`q`、`contactId`）／ 1 行の文から残す（`text`。新しければ 201、前の問い合わせの続きなら 200、どの続きか決まらなければ `ambiguous` と候補）。使えない会社と利用範囲の外の人には、`/v1/inquiries` のどの口も 403 |
+| `GET` ／ `PATCH` ／ `DELETE /v1/inquiries/:id` | 1 件と会話の履歴と次にやること ／ 項目を直す（`from`・`channel`・`category`・`summary`・`source`・`temperature`・`status`）／ 削除（残した本人と管理者だけ） |
+| `POST /v1/inquiries/:id/events` ／ `/tasks` | その問い合わせに続きを足す（`text`）／ 次にやることを足す（`what`・`due`・`assignee`） |
+| `PATCH /v1/inquiries/tasks/:taskId` | 次にやることを直す・済みにする（`what`・`due`・`assignee`・`done`） |
 | `GET /v1/public/inventory/:key` ／ `:key.json` | **認証なし**。在庫の公開のページ（他のサイトの iframe に入れてよい。`frame-ancestors *`・スクリプトなし）とデータ（`Access-Control-Allow-Origin: *`）。作り直して置いた中身だけを返す。知らない鍵・止めた公開・公開を切った会社はどれも 404 |
 | `POST /v1/hooks/inventory/:key` | **認証なしの受け口**。予約のシステムの Webhook を受ける（第29.13.1節）。会社は鍵（32 文字）のハッシュから引き、ホスト名は見ない。64 KB を超えれば 413。知らない鍵・止めた受け口・引き当てを切った会社はどれも 404、予約として読めなければ 422。項目の対応は最初の予約から推論して受け口に覚える。予約した人の名前・連絡先は残さない |
 | `GET /v1/notices` | 本人宛ての有効な社内のお知らせ（取り下げ・期間切れ・本人が済んだものを除く。`isNew`・`daysLeft` つき。仕様書 第10.15節） |

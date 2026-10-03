@@ -773,6 +773,7 @@ export function extensionsRoute(deps: AppDeps) {
       if (section === 'cards') await deps.repo.saveTenantSettings(tenant.id, 'cards', { ...settings.cards, enabled: body.enabled }, user.id);
       else if (section === 'inventory') await deps.repo.saveTenantSettings(tenant.id, 'inventory', { ...settings.inventory, enabled: body.enabled }, user.id);
       else if (section === 'webColumns') await deps.repo.saveTenantSettings(tenant.id, 'webColumns', { ...settings.webColumns, enabled: body.enabled }, user.id);
+      else if (section === 'inquiries') await deps.repo.saveTenantSettings(tenant.id, 'inquiries', { ...settings.inquiries, enabled: body.enabled }, user.id);
       else if (section === 'signage') {
         await deps.repo.saveTenantSettings(tenant.id, 'signage', { ...settings.signage, enabled: body.enabled }, user.id);
         // 切ったら、画面は無地にする（登録・素材・流れは消さない。第31.2節）

@@ -19,6 +19,7 @@ import type { CardCorners,
   InventoryBooking, InventoryBookingMapping, InventoryBookingSource, InventoryPublication, InventoryPublicationScope, InventoryPublicSnapshot,
   SignageAsset, SignageEntry, SignageScreen, SignageSettings, SignageInterruptInput, SignageInterruptView, SignagePhrase, SignageSound, SignageSource,
   ColumnWordPress, WebColumn, WebColumnSettings, WebColumnVersion,
+  Inquiry, InquiryDetail, InquiryParty, InquiryTask,
 } from '@m2office/shared';
 import { debugMode, recordCall } from './debug.js';
 
@@ -282,6 +283,8 @@ export interface Me {
   signage?: boolean;
   /** Web のコラムを使えるか（会社の入り切りと利用範囲。仕様書 第32.18.1節）。 */
   webColumns?: boolean;
+  /** 問い合わせの記録を使えるか（会社の入り切りと利用範囲。仕様書 第33.17節）。 */
+  inquiries?: boolean;
   /** 本人の「給与・勤怠」を使えるか（台帳に結び付いているか。仕様書 第30.25節）。 */
   hrSelf?: boolean;
   /** デバッグモードか（`M2O_DEBUG=true`。仕様書 第20.4.1節「デバッグモード」）。 */
@@ -736,6 +739,11 @@ export interface ExtensionView {
   columnAiUsage?: { used: number; limit: number };
 }
 
+/** 問い合わせを残した結果（仕様書 第33.17節）。どの続きか決まらなければ `ambiguous` と候補。 */
+export type InquiryRecorded =
+  | { kind: 'created' | 'appended'; inquiry: Inquiry; task: InquiryTask | null; closedTask: InquiryTask | null; sensitive: boolean; contactCreated: boolean }
+  | { ambiguous: true; candidates: Inquiry[] };
+
 /** Web のコラム 1 つと版（仕様書 第32.18.1節）。 */
 export interface ColumnDetail {
   column: WebColumn;
@@ -1189,6 +1197,28 @@ export const api = {
     },
   },
   /** 在庫管理（内蔵の拡張。仕様書 第29章）。 */
+  /** 問い合わせの記録（内蔵の拡張。仕様書 第33章）。 */
+  inquiries: {
+    list: (q: { status?: 'open' | 'all'; q?: string; contactId?: string } = {}) => {
+      const p = new URLSearchParams();
+      if (q.status) p.set('status', q.status);
+      if (q.q) p.set('q', q.q);
+      if (q.contactId) p.set('contactId', q.contactId);
+      return call<{ items: Inquiry[] }>(`/inquiries${p.size ? `?${p}` : ''}`);
+    },
+    /** 1 行の欄に書いた文から残す。続きなら同じ問い合わせに足す。どの続きか決まらなければ候補が返る。 */
+    record: (text: string) => call<InquiryRecorded>('/inquiries', { method: 'POST', body: JSON.stringify({ text }) }),
+    get: (id: string) => call<InquiryDetail>(`/inquiries/${encodeURIComponent(id)}`),
+    /** 1 件の画面から続きを足す。 */
+    append: (id: string, text: string) => call<InquiryRecorded>(`/inquiries/${encodeURIComponent(id)}/events`, { method: 'POST', body: JSON.stringify({ text }) }),
+    update: (id: string, patch: Partial<{ from: Partial<InquiryParty>; channel: string; category: string; summary: string; source: string; temperature: string; status: string }>) =>
+      call<{ ok: true }>(`/inquiries/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    addTask: (id: string, task: { what: string; due: string | null }) =>
+      call<{ ok: true }>(`/inquiries/${encodeURIComponent(id)}/tasks`, { method: 'POST', body: JSON.stringify(task) }),
+    updateTask: (taskId: string, patch: Partial<{ what: string; due: string | null; done: boolean }>) =>
+      call<{ ok: true }>(`/inquiries/tasks/${encodeURIComponent(taskId)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    remove: (id: string) => call<{ ok: true }>(`/inquiries/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  },
   /** Web のコラム（内蔵の拡張。仕様書 第32章）。 */
   columns: {
     list: () => call<{ columns: WebColumn[]; wordpress: ColumnWordPress | null }>('/columns'),

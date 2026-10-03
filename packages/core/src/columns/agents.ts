@@ -13,7 +13,7 @@ import { WEB_COLUMNS_EXTENSION_ID, type AgentDefinition } from '@m2office/shared
 import type { ExtensionPackage } from '../extensions/loader.js';
 
 /** 内蔵の拡張の版。付属の業務やツールが変わったら上げる。 */
-export const WEB_COLUMNS_EXTENSION_VERSION = '1.2.0';
+export const WEB_COLUMNS_EXTENSION_VERSION = '1.2.1';
 
 /** 付属の業務「コラムの下書き」（秘書から）。 */
 export const WEB_COLUMN_DRAFT: AgentDefinition = {
@@ -54,6 +54,8 @@ export const WEB_COLUMN_DRAFT: AgentDefinition = {
     {
       id: 'answer',
       type: 'agent',
+      // 伝えるだけ。ツールは呼ばない（記録や下書きを 2 度作らない）
+      tools: [],
       label: '結果を伝える',
       instruction: [
         '書いたコラムの題名と、赤入れの数を一文で伝える（「「〇〇」の下書きを書きました。直したほうがよい箇所が 3 つあります」）。',
@@ -185,6 +187,8 @@ export const WEB_COLUMN_COVER: AgentDefinition = {
     {
       id: 'answer',
       type: 'agent',
+      // 伝えるだけ。ツールは呼ばない（記録や下書きを 2 度作らない）
+      tools: [],
       label: '結果を伝える',
       instruction: [
         '作り直したコラムの題名と、カバーの種類を一文で伝え、columns.cover の結果の path を [コラムを開く](path) の形で添える。',
@@ -244,6 +248,8 @@ export const WEB_COLUMN_RULES: AgentDefinition = {
     {
       id: 'answer',
       type: 'agent',
+      // 伝えるだけ。ツールは呼ばない（記録や下書きを 2 度作らない）
+      tools: [],
       label: '結果を伝える',
       instruction: '今当てている決まり（columns.rules の結果の rules）を一文で伝える。直せなかったときは理由を伝える。',
     },

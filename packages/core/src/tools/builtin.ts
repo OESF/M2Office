@@ -19,6 +19,7 @@ import { BRIEF_TOOLS } from '../brief/tools.js';
 import { NOTICE_TOOLS } from '../notices/tools.js';
 import { INVENTORY_TOOLS } from '../inventory/tools.js';
 import { COLUMN_TOOLS } from '../columns/tools.js';
+import { INQUIRY_TOOLS } from '../inquiries/tools.js';
 import { HR_TOOLS } from '../hr/tools.js';
 import { KNOWLEDGE_CATEGORY_LABEL, KNOWLEDGE_PRIORITY_NOTE, rewriteNote } from '../knowledge/search.js';
 import { approvedArtifact, jstDate } from './approved-artifact.js';
@@ -192,5 +193,7 @@ export const BUILTIN_TOOLS: Tool[] = [
   ...INVENTORY_TOOLS,
   // Web のコラム（内蔵の拡張。第32.18.1節）。会社が使っていて、依頼者が利用範囲の中のときだけ働く
   ...COLUMN_TOOLS,
+  // 問い合わせの記録（内蔵の拡張。第33.17節）。会社が使っていて、依頼者が利用範囲の中のときだけ働く
+  ...INQUIRY_TOOLS,
   ...HR_TOOLS,
 ];

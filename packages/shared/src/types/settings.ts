@@ -12,6 +12,7 @@ import { DEFAULT_INVENTORY_SETTINGS, type InventorySettings } from './inventory.
 import { DEFAULT_HR_SETTINGS, type HrSettings } from './hr.js';
 import { DEFAULT_SIGNAGE_SETTINGS, type SignageSettings } from './signage.js';
 import { DEFAULT_WEB_COLUMN_SETTINGS, type WebColumnSettings } from './web-columns.js';
+import { DEFAULT_INQUIRY_SETTINGS, type InquirySettings } from './inquiries.js';
 
 /** 会社情報（仕様書 第6.6.1節）。帳票とメールの署名に使う。 */
 export interface CompanyInfo {
@@ -231,6 +232,8 @@ export interface TenantSettings {
   signage: SignageSettings;
   /** Web のコラム（第32章）。 */
   webColumns: WebColumnSettings;
+  /** 問い合わせの記録（第33章）。 */
+  inquiries: InquirySettings;
   /** 会社の AI の方針（第16.3.7.1節、ADR-0059）。 */
   aiPolicy: AiPolicySettings;
 }
@@ -283,6 +286,8 @@ export const DEFAULT_TENANT_SETTINGS: TenantSettings = {
   // 店頭サイネージは既定で切り。料金は取らない標準の機能で、使う会社が入れる（第31.2節）
   signage: DEFAULT_SIGNAGE_SETTINGS,
   webColumns: DEFAULT_WEB_COLUMN_SETTINGS,
+  // 問い合わせの記録は既定で切り（第33.2節）
+  inquiries: DEFAULT_INQUIRY_SETTINGS,
   aiPolicy: { mode: 'cloud' },
 };
 
@@ -363,7 +368,7 @@ export interface UserSettings {
   };
   notifications: {
     /** 受け取る種類（第6.5.5節）。`false` にしたものは届けない。 */
-    kinds: Record<'brief' | 'run' | 'approval' | 'failure' | 'inventory' | 'attendance' | 'signage', boolean>;
+    kinds: Record<'brief' | 'run' | 'approval' | 'failure' | 'inventory' | 'attendance' | 'signage' | 'inquiry', boolean>;
     /** 通知しない時間帯（例: 22:00〜7:00）。`null` は指定なし。 */
     quietHours: { from: string; to: string } | null;
     /**
@@ -491,7 +496,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   profile: { furigana: '', title: '', timezone: 'Asia/Tokyo', home: '', workplace: '' },
   secretary: { name: '', callMe: '', style: 'polite', proactivity: 'normal', speak: true, captions: true, voice: '', voiceStyle: '', avatar: '' },
   notifications: {
-    kinds: { brief: true, run: true, approval: true, failure: true, inventory: true, attendance: true, signage: true },
+    kinds: { brief: true, run: true, approval: true, failure: true, inventory: true, attendance: true, signage: true, inquiry: true },
     quietHours: null,
     channels: { chat: false },
   },

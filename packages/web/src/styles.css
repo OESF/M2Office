@@ -1740,3 +1740,29 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .columns-past figure { margin: 0; display: flex; flex-direction: column; gap: 4px; width: 200px; }
 .columns-past img { width: 200px; aspect-ratio: 1200 / 630; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); }
 .columns-past figcaption { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+
+/* 問い合わせの記録（仕様書 第33.8節・第33.17節） */
+.inquiries-entry { display: flex; flex-wrap: wrap; gap: calc(8px * var(--space-scale)); align-items: center; margin-bottom: calc(10px * var(--space-scale)); }
+.inquiries-entry input { flex: 1 1 360px; min-width: 0; }
+.inquiries-note { font-size: calc(13px * var(--font-scale)); flex: 1 1 100%; }
+.inquiries-entry .inquiries-note { flex-basis: 100%; }
+.inquiries-note.is-ok { color: var(--ok); }
+.inquiries-note.is-ok::before { content: '✓ '; }
+.inquiries-note.is-error { color: var(--danger); }
+.inquiries-candidates { border: 1px solid var(--line); border-radius: 8px; padding: calc(8px * var(--space-scale)) calc(12px * var(--space-scale)); margin-bottom: calc(10px * var(--space-scale)); }
+.inquiries-candidates .row { justify-content: space-between; }
+.inquiries-filter { margin-bottom: calc(8px * var(--space-scale)); }
+.inquiries-search { margin-left: auto; max-width: 220px; }
+.inquiries-summary { max-width: 32em; }
+.inquiries-overdue { color: var(--danger); }
+.inquiries-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: calc(8px * var(--space-scale)) calc(14px * var(--space-scale)); max-width: 960px; }
+.inquiries-fields label { display: flex; flex-direction: column; gap: 2px; font-size: calc(12px * var(--font-scale)); color: var(--muted); }
+.inquiries-fields label input, .inquiries-fields label select, .inquiries-fields label textarea { color: var(--ink); font-size: calc(14px * var(--font-scale)); }
+.inquiries-fields .wide { grid-column: 1 / -1; }
+.inquiries-tasks { list-style: none; padding: 0; margin: 0 0 calc(8px * var(--space-scale)); }
+.inquiries-tasks li { display: flex; flex-wrap: wrap; gap: calc(10px * var(--space-scale)); align-items: center; padding: 4px 0; }
+.inquiries-tasks li.done { color: var(--muted); text-decoration: line-through; }
+.inquiries-events { list-style: none; padding: 0; margin: 0 0 calc(10px * var(--space-scale)); }
+.inquiries-events li { border-left: 3px solid var(--line); padding: 4px 0 4px 10px; margin-bottom: 6px; }
+.inquiries-events li.out { border-left-color: var(--accent); }
+.inquiries-danger { margin-top: calc(18px * var(--space-scale)); }

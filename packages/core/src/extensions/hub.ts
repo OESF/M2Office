@@ -21,11 +21,12 @@ import { INVENTORY_PACKAGE } from '../inventory/agents.js';
 import { HR_PACKAGE } from '../hr/package.js';
 import { SIGNAGE_PACKAGE } from '../signage/package.js';
 import { WEB_COLUMNS_PACKAGE } from '../columns/agents.js';
+import { INQUIRIES_PACKAGE } from '../inquiries/agents.js';
 
 /**
  * 内蔵の拡張（第12.13節）と、入り切りを持つ会社の設定の区分。導入の手順は無く、この区分の `enabled` だけで決まる。
  *
- * @remarks 名刺管理は既定で入、在庫管理と人事・給与と店頭サイネージと Web のコラムは既定で切り（第27.2節・第29.2節・第30.2節・第31.2節・第32.18.1節）
+ * @remarks 名刺管理は既定で入、在庫管理と人事・給与と店頭サイネージとコラムの作成と問い合わせの記録は既定で切り（第27.2節・第29.2節・第30.2節・第31.2節・第32.18.1節・第33.2節）
  */
 export const BUILTIN_EXTENSIONS: { pkg: ExtensionPackage; section: BuiltinSection }[] = [
   { pkg: CARDS_PACKAGE, section: 'cards' },
@@ -33,10 +34,11 @@ export const BUILTIN_EXTENSIONS: { pkg: ExtensionPackage; section: BuiltinSectio
   { pkg: HR_PACKAGE, section: 'hr' },
   { pkg: SIGNAGE_PACKAGE, section: 'signage' },
   { pkg: WEB_COLUMNS_PACKAGE, section: 'webColumns' },
+  { pkg: INQUIRIES_PACKAGE, section: 'inquiries' },
 ];
 
 /** 内蔵の拡張の入り切りを持つ会社の設定の区分。 */
-export type BuiltinSection = 'cards' | 'inventory' | 'hr' | 'signage' | 'webColumns';
+export type BuiltinSection = 'cards' | 'inventory' | 'hr' | 'signage' | 'webColumns' | 'inquiries';
 
 /** 内蔵の拡張なら、入り切りを持つ会社の設定の区分を返す。 */
 export function builtinSection(extensionId: string): BuiltinSection | null {
