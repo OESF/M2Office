@@ -8,6 +8,7 @@
  * @see 仕様書 第12.10.5節 画面（管理者ページ「拡張機能」）
  */
 
+import { copyText } from './clipboard.js';
 import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
 import { JinglePlayer } from './signage-audio.js';
 import { api, ApiError, describeError, type AccessOptions, type ExtensionView, type HrProposalField, type ScopeValue } from './api.js';
@@ -840,7 +841,7 @@ function BookingSources() {
         <div className="booking-created">
           <div>{created.name}の送り先（この画面を閉じると二度と出ません）</div>
           <code className="copyable">{created.url}</code>
-          <button className="btn ghost small" onClick={() => void navigator.clipboard?.writeText(created.url)}>写す</button>
+          <button className="btn ghost small" onClick={() => void copyText(created.url)}>コピー</button>
         </div>
       )}
       <div className="row">

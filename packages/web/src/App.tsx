@@ -370,7 +370,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
     // 店頭サイネージ（仕様書 第31.2節）。会社で入れていて利用範囲の人にだけ出す
     ...(me.signage ? [{ id: SIGNAGE_EXTENSION_ID, name: 'サイネージ', description: '店頭や待合の画面に、画像と動画を流す', icon: 'signage' as IconName, agent: null }] : []),
     // Web のコラム（仕様書 第32.18.1節）。会社で入れていて利用範囲の人にだけ出す
-    ...(me.webColumns ? [{ id: WEB_COLUMNS_EXTENSION_ID, name: 'Web のコラム', description: 'テーマを調べて出典つきのコラムを書き、承認して WordPress に入れる', icon: 'doc' as IconName, agent: null }] : []),
+    ...(me.webColumns ? [{ id: WEB_COLUMNS_EXTENSION_ID, name: 'コラムの作成', description: 'テーマを調べて出典つきのコラムを書き、承認して WordPress に入れる', icon: 'doc' as IconName, agent: null }] : []),
   ];
   const allMenuAgents = orderAgents(menuItems, menu.order).filter((a) => !menu.hidden.includes(a.id));
   // ピン止めした業務だけを上に出し、ほかはカテゴリーごと・「ほかの業務」にたたむ（仕様書 第6.1.1節「業務の並び」）。
@@ -628,7 +628,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
           )}
           {view.kind === 'columns' && (
             <>
-              <h1>Web のコラム <HelpTip article="start-web-columns">テーマを入れると、AI が調べて出典つきのコラムを書き、表現の決まりに照らして赤入れします。</HelpTip></h1>
+              <h1>コラムの作成 <HelpTip article="start-web-columns">テーマを入れると、AI が調べて出典つきのコラムを書き、表現の決まりに照らして赤入れします。</HelpTip></h1>
               <Columns columnId={view.columnId} onOpen={(columnId) => setView({ kind: 'columns', columnId })}
                 onApprovals={() => { void refresh(); setView({ kind: 'approvals' }); }} />
             </>
@@ -809,7 +809,7 @@ const VIEW_LABELS: Record<string, string> = {
   hr: '人事・給与',
   attendance: '給与・勤怠',
   signage: 'サイネージ',
-  columns: 'Web のコラム',
+  columns: 'コラムの作成',
   settings: '個人設定',
 };
 

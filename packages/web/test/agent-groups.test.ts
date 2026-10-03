@@ -30,7 +30,7 @@ test('まとまり: 同じまとまりの受け持ちと今日の件数を足し
 
 test('まとまりの並び: 忙しい順、同じなら今日の件数の多い順。group の無い業務はその業務だけのまとまり', () => {
   const groups = groupAgents([
-    load('メール整理', MAIL, { todayRuns: 5 }),
+    load('メールの整理', MAIL, { todayRuns: 5 }),
     load('取り込み', CARDS),
     load('返信待ち', MAIL, { todayRuns: 1 }),
     load('古い API の業務', undefined, { queued: 1 }),

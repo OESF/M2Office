@@ -10,6 +10,7 @@
  * @see ADR-0007 接続の設定
  */
 
+import { copyText } from './clipboard.js';
 import { useEffect, useState } from 'react';
 import { api, describeError, type ConnectionSettings, type GoogleClientVerdict } from './api.js';
 import { PageTitle, type PageHelp } from './help.js';
@@ -312,7 +313,7 @@ function GoogleCard({ data, page, onSaved }: {
           <div className="row">
             <code className="uri">{data.redirectUri}</code>
             <button className="btn ghost small" onClick={() => {
-              void navigator.clipboard?.writeText(data.redirectUri).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); });
+              void copyText(data.redirectUri).then((ok) => { if (ok) { setCopied(true); setTimeout(() => setCopied(false), 1500); } });
             }}>{copied ? 'コピーしました' : 'コピー'}</button>
           </div>
         </div>

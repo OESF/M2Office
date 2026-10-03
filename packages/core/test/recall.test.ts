@@ -45,7 +45,7 @@ test('答えるときに、今日のやり取り・会話の要約・覚えた�
   assert.match(r.text, /2026-08-01: B 社の保守契約の更新について相談した/, '古くても、依頼に近い要約を渡す');
   assert.match(r.text, /2026-09-24: 営業定例の議事録を作り/, '新しい要約はいつも渡す');
   assert.ok(!r.text.includes('評価面談'), '権限区画の印の付いた要約は使わない');
-  assert.match(r.text, /- 2026-09-24 議事録作成・共有「営業定例」 — 承認待ち/, '頼んだ業務は題名と状態だけ');
+  assert.match(r.text, /- 2026-09-24 議事録の作成・共有「営業定例」 — 承認待ち/, '頼んだ業務は題名と状態だけ');
   assert.ok(!r.text.includes('長い記録'), '業務の入力の中身は渡さない');
   assert.deepEqual(asked, ['u1'], '本人が頼んだ業務だけを読む');
   assert.deepEqual(r.evidence, [{ label: '参照した記憶', value: '覚えている事実 1 件・今日のやり取り 1 件・会話の要約 2 日分・頼んだ業務 1 件' }]);
@@ -90,8 +90,8 @@ test('「あれ、どうなった」は業務へ取り次がず、覚えてい�
       // 言い換えを考えさせる呼び出し（第11.7.7.0節）は取次の判定ではない。数えない
       if (req.messages.at(-1)!.content.startsWith('社内の規程や文書を探します')) return { text: '', tokensUsed: 0 };
       seen.push(req);
-      // 取次の判定（高速）なら議事録作成を選ぶ、という推論を置く。呼ばれてはならない
-      return req.tier === 'fast' ? { text: 'minutes', tokensUsed: 1 } : { text: '議事録作成は承認待ちです。', tokensUsed: 3 };
+      // 取次の判定（高速）なら議事録の作成を選ぶ、という推論を置く。呼ばれてはならない
+      return req.tier === 'fast' ? { text: 'minutes', tokensUsed: 1 } : { text: '議事録の作成は承認待ちです。', tokensUsed: 3 };
     },
   } as unknown as LlmProvider;
   const s = new Secretary({ repo, llm, connector: {} as never, agents: OFFICIAL_AGENTS });
@@ -100,7 +100,7 @@ test('「あれ、どうなった」は業務へ取り次がず、覚えてい�
   assert.equal(reply.suggestedAgent, undefined, '業務を提案しない');
   assert.ok(seen.every((x) => x.tier !== 'fast'), '取次の判定をしない');
   const sent = seen.at(-1)!.messages.map((m) => m.content).join('\n');
-  assert.match(sent, /議事録作成・共有「営業定例」 — 承認待ち/, '頼んだ業務を渡す');
+  assert.match(sent, /議事録の作成・共有「営業定例」 — 承認待ち/, '頼んだ業務を渡す');
   assert.ok(seen.at(-1)!.messages.findIndex((m) => m.content.includes('覚えていること')) < seen.at(-1)!.messages.length - 1, '覚えていることは本人の依頼とは別のメッセージ');
   assert.ok(reply.evidence.some((e) => e.label === '参照した記憶'));
 });

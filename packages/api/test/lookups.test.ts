@@ -119,17 +119,17 @@ test('秘書が頼んだ業務も並べ、名前・承認待ち・成果物の�
     getUserSettings: async () => ({ memory: { keepConversations: true } }),
     appendConversation: async (c: { message: string; reply: string; runId: string }) => { logged.push(c); },
   } as unknown as Repository;
-  const names = (id: string) => (id === 'jp.x:research-slides' ? 'スライド作成' : id === 'minutes' ? '議事録作成・共有' : undefined);
+  const names = (id: string) => (id === 'jp.x:research-slides' ? 'スライドの作成' : id === 'minutes' ? '議事録の作成・共有' : undefined);
   const list = await listLookups(repo, 't', 'u', names);
   assert.deepEqual(list.map((x) => x.runId), ['s1', 's2'], 'メニューから起こした業務は並べない');
-  assert.equal(list[0]!.agentName, 'スライド作成');
+  assert.equal(list[0]!.agentName, 'スライドの作成');
   assert.match(list[0]!.text!, /スライドを作りました\n\n作ったもの:\n- ローカル LLM https:\/\/docs\.google\.com\/presentation\/d\/X\/edit/);
   assert.equal(list[1]!.progress, '承認を待っています');
   assert.equal(list[1]!.request, '定例', '依頼の文が無ければ最初の入力');
   const claimed = await claimUntold(repo, 't', 'u', NOW, names);
   assert.deepEqual(claimed.map((x) => x.runId), ['s1'], '承認待ちはまだ伝えない');
   assert.equal(logged.length, 1);
-  assert.match(logged[0]!.message, /「スライド作成」に頼んだ結果/);
+  assert.match(logged[0]!.message, /「スライドの作成」に頼んだ結果/);
   assert.equal(logged[0]!.runId, 's1');
 });
 

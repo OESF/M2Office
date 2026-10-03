@@ -22,8 +22,8 @@ agent01.png ～ agent50.png
 | 番号 | 業務 |
 |---|---|
 | 1 | 社内ナレッジ Q&A（`knowledge-qa`） |
-| 2 | 議事録作成・共有（`minutes`） |
-| 3 | メール整理・下書き作成（`inbox-triage`） |
+| 2 | 議事録の作成・共有（`minutes`） |
+| 3 | メールの整理・下書きの作成（`inbox-triage`） |
 | 4 | 日程調整（`scheduling`） |
 | 5 | 週次ブリーフ（`weekly-brief`） |
 | 6 | 秘書の調べもの（`secretary-lookup`） |
@@ -33,7 +33,7 @@ agent01.png ～ agent50.png
 | 10 | 返信待ちの追跡（`reply-followup`） |
 | 11 | 文書の作成（`document-draft`） |
 | 12 | 表の作成（`sheet-builder`） |
-| 13 | スライド作成（`slides`） |
+| 13 | スライドの作成（`slides`） |
 | 14 | 段取りの報告（`secretary-plan-report`） |
 | 15 以降 | 未使用 |
 

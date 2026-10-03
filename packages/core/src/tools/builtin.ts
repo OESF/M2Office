@@ -119,7 +119,7 @@ export const documentCreate: Tool = {
 };
 
 /** 業務から登録した知識の出典。業務の名前を添えて、どこから来た知識かを示す。 */
-const REGISTER_SOURCE = '業務「議事録作成・共有」で作成';
+const REGISTER_SOURCE = '業務「議事録の作成・共有」で作成';
 
 /**
  * 実行で作った成果物を、そのまま組織知識として登録する（仕様書 第9.5.2節の手順 7、ADR-0010）。

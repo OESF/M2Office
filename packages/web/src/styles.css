@@ -1730,3 +1730,13 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .columns-cover img, .columns-cover-empty { width: min(100%, 480px); aspect-ratio: 1200 / 630; border-radius: 8px; border: 1px solid var(--line); object-fit: cover; }
 .columns-cover-empty { display: flex; align-items: center; justify-content: center; }
 .columns-cover-side { display: flex; flex-direction: column; align-items: flex-start; gap: calc(6px * var(--space-scale)); max-width: 20em; }
+.columns-note { font-size: calc(13px * var(--font-scale)); font-weight: normal; }
+.columns-note.is-ok { color: var(--ok); }
+.columns-note.is-ok::before { content: '✓ '; }
+.columns-note.is-error { color: var(--danger); }
+/* 開いたときに画面の中へ送る（Columns.tsx の reveal）。端に付きすぎないよう余白をとる */
+.columns-past, .columns-versions { scroll-margin: 16px; }
+.columns-past { display: flex; flex-wrap: wrap; gap: calc(10px * var(--space-scale)); }
+.columns-past figure { margin: 0; display: flex; flex-direction: column; gap: 4px; width: 200px; }
+.columns-past img { width: 200px; aspect-ratio: 1200 / 630; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); }
+.columns-past figcaption { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }

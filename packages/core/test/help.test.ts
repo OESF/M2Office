@@ -110,7 +110,7 @@ test('使い方の質問には、その記事を最初に返す（公式の記�
     ['秘書の使い方を教えて', 'start-secretary', ['member']],
     ['個人設定はどこで変える？', 'start-settings', ['member']],
     ['業務を実行するにはどうすればいい？', 'start-agents', ['member']],
-    ['議事録作成・共有は何をする？', 'agent-minutes', ['member']],
+    ['議事録の作成・共有は何をする？', 'agent-minutes', ['member']],
     ['画面の見方を教えて', 'start-screen', ['member']],
     ['困ったときの問い合わせ先は？', 'contact', ['member']],
     ['ユーザーを招待するには？', 'admin-users', ['admin']],
@@ -192,10 +192,10 @@ test('ヘルプの出す所: ワークスペースは管理者向けを出さず
 });
 
 test('業務の記事の置き場: 内蔵の拡張の付属の業務はその拡張の要点の記事と同じ区分、公式の業務は分野のまとまり（第6.10.7節）', () => {
-  const guide = parseArticle('---\nid: start-web-columns\ntitle: Web のコラム\naudience: all\ncategory: start\nbusiness: web-columns\nextension: web-columns\n---\n本文');
+  const guide = parseArticle('---\nid: start-web-columns\ntitle: コラムの作成\naudience: all\ncategory: start\nbusiness: web-columns\nextension: web-columns\n---\n本文');
   const columnAgent = { ...resolveOfficialAgent('scheduling', 1)!, id: 'web-columns:draft', name: 'コラムの下書き' };
   const catalog = new HelpCatalog([guide], [...OFFICIAL_AGENTS, columnAgent], registry);
-  const groupOf = (id: string) => (id.startsWith('web-columns:') ? { id: 'ext:web-columns', name: 'Web のコラム' }
+  const groupOf = (id: string) => (id.startsWith('web-columns:') ? { id: 'ext:web-columns', name: 'コラムの作成' }
     : id === 'scheduling' ? { id: 'cat:calendar', name: '予定' } : { id: `agent:${id}`, name: id });
   const list = catalog.list({ ...ctx(['member']), groupOf, extensions: ['web-columns'] });
   const col = list.find((a) => a.id === 'agent-web-columns:draft');

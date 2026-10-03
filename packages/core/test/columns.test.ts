@@ -11,9 +11,10 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { Resvg } from '@resvg/resvg-js';
 import { DEFAULT_TENANT_SETTINGS, type TenantSettings, type WebColumnSettings } from '@m2office/shared';
 import {
-  ColumnService, MemoryColumnStore, MemoryFileStore, StubLlmProvider, renderCover, wrapTitle, coverSvg, COVER_AI_TRIES, MockResearchProvider, PolicyBlockedResearchProvider, COLUMN_TOOLS,
+  ColumnService, MemoryColumnStore, MemoryFileStore, StubLlmProvider, renderCover, wrapTitle, coverSvg, brightness, illustrationPrompt, imageWish, wantsDark, COVER_AI_TRIES, MockResearchProvider, PolicyBlockedResearchProvider, COLUMN_TOOLS,
   ruleReview, aiReview, parseDraft, guessRuleSets, inferRuleSets, selfReferenceRule, writeColumn, finalMarkdown, columnHtml, normalizeSiteUrl,
   type LlmProvider, type Repository, type ResearchProvider, type TenantCredential, type ToolContext,
 } from '../src/index.js';
@@ -218,7 +219,7 @@ test('削除: 下書きだけ。ツール: 使えない人には使えないと�
   assert.ok('id' in created);
   const place = COLUMN_TOOLS.find((x) => x.name === 'columns.place')!;
   const off = { tenantId: 't1', userId: 'u1', columns: { service, access: async () => null } } as unknown as ToolContext;
-  assert.deepEqual(await place.invoke({ columnId: created.id }, off), { available: false, reason: 'Web のコラムは使えません（会社で切っているか、利用範囲の外です）' });
+  assert.deepEqual(await place.invoke({ columnId: created.id }, off), { available: false, reason: 'コラムの作成は使えません（会社で切っているか、利用範囲の外です）' });
   const on = { tenantId: 't1', userId: 'u1', columns: { service, access: async () => DEFAULT_TENANT_SETTINGS.webColumns } } as unknown as ToolContext;
   const prepared = await place.prepare!({ columnId: created.id }, on);
   assert.equal(prepared.kind, 'ready');
@@ -228,10 +229,13 @@ test('削除: 下書きだけ。ツール: 使えない人には使えないと�
 });
 
 /** 挿絵の代わりに使う PNG（型で組み立てたもの）。 */
-const samplePng = () => renderCover({ title: '見本', background: { kind: 'template', pattern: 'dots', color: '#335577' }, logo: null });
+const samplePng = () => renderCover({ title: '見本', background: { kind: 'template', pattern: 'dots', color: '#335577' } });
 
-/** 下書きを書き、挿絵を描き、確かめの答えを順に返す推論。 */
-function coverLlm(checks: string[]): LlmProvider & { drawn: number; prompts: string[] } {
+/** 暗い画像（夜の絵の代わり）。 */
+const darkPng = () => renderCover({ title: '夜', background: { kind: 'image', image: { bytes: new Uint8Array(new Resvg('<svg xmlns="http://www.w3.org/2000/svg" width="120" height="63"><rect width="120" height="63" fill="#101418"/></svg>').render().asPng()), mimeType: 'image/png' } } });
+
+/** 下書きを書き、挿絵を描き、確かめの答えを順に返す推論。`images` を渡すと、描く画像を順に返す。 */
+function coverLlm(checks: string[], images: (() => Uint8Array)[] = []): LlmProvider & { drawn: number; prompts: string[] } {
   const llm = {
     name: 'fake', drawn: 0, prompts: [] as string[],
     complete: async (req: { messages: { content: unknown }[] }) => {
@@ -241,7 +245,7 @@ function coverLlm(checks: string[]): LlmProvider & { drawn: number; prompts: str
       return { text: '[]', tokensUsed: 1 };
     },
     extractFromImage: async () => ({ text: checks.shift() ?? '{"people": false, "text": false, "logo": false, "body": false}', tokensUsed: 1 }),
-    generateImage: async (req: { prompt: string }) => { llm.drawn += 1; llm.prompts.push(req.prompt); return { bytes: samplePng(), mimeType: 'image/png' }; },
+    generateImage: async (req: { prompt: string }) => { llm.drawn += 1; llm.prompts.push(req.prompt); return { bytes: (images.shift() ?? samplePng)(), mimeType: 'image/png' }; },
   };
   return llm as never;
 }
@@ -282,7 +286,7 @@ test('カバー: AI の挿絵は描いた後に確かめ、通らなければ描
   assert.equal(v.cover!.aiAttempts, 2, '人物が写った 1 枚目を捨てて描き直した');
   assert.ok(llm.prompts[0]!.includes('人物を描かない') && llm.prompts[0]!.includes('体の部位'), '医療の業種では体の部位も描かない');
   const md = (await service.exported(who, c1.id))!.markdown;
-  assert.ok(md.includes('カバー画像は AI が描いた挿絵です'));
+  assert.ok(md.includes('カバー画像は AI で作成しました'));
 
   const bad = coverLlm(Array(5).fill('{"people": false, "text": true, "logo": false, "body": false}'));
   const b = setup({ llm: bad, research: fakeResearch, columns: { aiIllustration: true } });
@@ -292,6 +296,52 @@ test('カバー: AI の挿絵は描いた後に確かめ、通らなければ描
   assert.equal(bad.drawn, COVER_AI_TRIES);
   assert.deepEqual([v2.cover!.kind, v2.cover!.aiAttempts], ['template', 3]);
   assert.match(v2.cover!.note, /文字が写っていました/);
+});
+
+test('カバー: 明るくする。型は淡い地、画像は暗くせず白い帯に題名を置き、暗い挿絵は描き直す', async () => {
+  assert.ok(brightness({ bytes: samplePng(), mimeType: 'image/png' })! > 0.8, '型は淡い地');
+  assert.ok(brightness({ bytes: darkPng(), mimeType: 'image/png' })! < 0.3);
+  const svg = coverSvg({ title: '題名', background: { kind: 'image', image: { bytes: samplePng(), mimeType: 'image/png' } } });
+  assert.ok(!svg.includes('stop-color="#000"') && svg.includes('fill="#fff" fill-opacity="0.9"'), '黒い影を重ねず、白い帯に置く');
+
+  const plain = illustrationPrompt({ title: 't', description: '', rules: [], hint: '' });
+  assert.ok(plain.includes('明るく軽やかな色合い') && !plain.includes('落ち着いた色合い'));
+  assert.ok(!illustrationPrompt({ title: 't', description: '', rules: [], hint: '夜の静かな感じ' }).includes('明るく軽やかな色合い'), '暗い雰囲気を頼まれたら従う');
+
+  const llm = coverLlm([], [darkPng]);
+  const { service } = setup({ llm, research: fakeResearch, columns: { aiIllustration: true } });
+  const c = await service.create(who, { theme: '歯みがき' }, true);
+  assert.ok('id' in c);
+  const v = (await service.detail(who, c.id))!.versions[0]!;
+  assert.deepEqual([v.cover!.kind, v.cover!.aiAttempts], ['ai', 2], '暗い 1 枚目を捨てて描き直した');
+  assert.match(v.cover!.note, /暗い画像/);
+
+  // 暗い雰囲気を頼まれたときは描き直さない
+  const night = coverLlm([], [samplePng, darkPng]);
+  const n = setup({ llm: night, research: fakeResearch, columns: { aiIllustration: true } });
+  const c2 = await n.service.create(who, { theme: '星空' }, true);
+  assert.ok('id' in c2);
+  assert.equal(await n.service.recover(who, c2.id, { kind: 'ai', hint: '夜の雰囲気で' }), null);
+  assert.equal((await n.service.detail(who, c2.id))!.versions[0]!.cover!.aiAttempts, 1);
+});
+
+test('カバー: 「リクエスト」に書いた画像の希望を、AI 作成の画像に渡す（お客様のことは渡さない）', async () => {
+  const stub = new StubLlmProvider();
+  const wish = await imageWish(stub, '患者さんによく聞かれる質問を入れてください。画像は明るくパステル画のようにしてください。');
+  assert.match(wish, /パステル画/);
+  assert.ok(!wish.includes('患者'), '画像の希望でない文は渡さない');
+  assert.equal(await imageWish(stub, 'よく聞かれる質問を入れてください。'), '');
+  assert.ok(!wantsDark('明るくパステル画のように') && !wantsDark('暗い感じは避けて') && wantsDark('夜の静かな雰囲気'));
+
+  const llm = coverLlm([]);
+  const { service } = setup({ llm, research: fakeResearch, columns: { aiIllustration: true } });
+  const c = await service.create(who, { theme: '歯みがき', memo: '家での工夫を書いてください。画像は明るくパステル画のようにしてください。' }, true);
+  assert.ok('id' in c);
+  assert.match(llm.prompts[0]!, /雰囲気の頼み: .*パステル画/);
+  assert.ok(!llm.prompts[0]!.includes('家での工夫'), '記事への希望は画像の指示に入れない');
+  // 秘書に頼んだ雰囲気は、リクエストより先に使う
+  assert.equal(await service.recover(who, c.id, { kind: 'ai', hint: '水彩画で' }), null);
+  assert.match(llm.prompts.at(-1)!, /雰囲気の頼み: 水彩画で/);
 });
 
 test('カバー: AI の挿絵は会社で月に 100 枚まで。超えたら型にする', async () => {
@@ -375,9 +425,10 @@ test('カバー: 題名は 3 行まで。収まらなければ末尾を「…」
   assert.ok(wrapTitle('知っておきたい花粉症の時期の過ごし方と、早めに相談したほうがよいサイン', 1056).lines.every((l) => !/^[のを、]/.test(l)), '助詞と句読点を行の頭に置かない');
   const punct = wrapTitle(`${'あ'.repeat(15)}、いいい`, 1056);
   assert.ok(punct.lines.every((l) => !l.startsWith('、')));
-  const svg = coverSvg({ title: 'A & <B>', background: { kind: 'template', pattern: 'waves', color: '#123456' }, logo: null });
+  const svg = coverSvg({ title: 'A & <B>', background: { kind: 'template', pattern: 'waves', color: '#123456' } });
   assert.ok(svg.includes('A &amp; &lt;B&gt;'));
   assert.equal((svg.match(/<text /g) ?? []).length, 1, '題名のほかに文字を入れない（会社の名前は出さない）');
+  assert.ok(!svg.includes('<image'), '型のカバーに画像（ロゴ）を入れない');
 });
 
 test('表現の決まり: 決まった言葉と業種で選び、推論の選んだものも足す（当てる側に倒す）', async () => {
@@ -421,4 +472,23 @@ test('自社の呼び方: 決めていればその言い方でそろえ、空な
   const llm = fakeLlm((p) => { prompt = p; return '{"titles":["題"],"body":"本文","description":"説明","sns":{"short":"s","long":"l"}}'; });
   await writeColumn(llm, fakeResearch, { theme: 't', memo: '', company: '見本', audience: '', topics: [], style: '', selfReference: '弊法人' });
   assert.ok(prompt.includes('自社のことは「弊法人」と書き'));
+});
+
+test('カバー: 作り直した後で、前に作った画像に戻せる（本文はいまのまま、新しい版になる）', async () => {
+  const { service } = setup();
+  const c = await service.create(who, { theme: 'テーマ' }, true);
+  assert.ok('id' in c);
+  const first = (await service.detail(who, c.id))!.versions[0]!.cover!.fileId;
+  await service.recover(who, c.id, { kind: 'template' });
+  await service.saveEdit(who, c.id, { body: '直した本文' });
+  const second = (await service.detail(who, c.id))!.versions[0]!.cover!.fileId;
+  assert.notEqual(first, second);
+  const past = service.pastCovers((await service.detail(who, c.id))!.versions, second);
+  assert.deepEqual(past.map((p) => p.cover.fileId), [first], 'いまの画像と同じものは除き、同じ画像は 1 つにする');
+  assert.equal(await service.useCover(who, c.id, first), null);
+  const d = (await service.detail(who, c.id))!;
+  assert.deepEqual([d.versions[0]!.cover!.fileId, d.versions[0]!.body, d.versions[0]!.origin], [first, '直した本文', 'cover']);
+  assert.equal(await service.useCover(who, c.id, 'previous'), null, '秘書の「前の画像に戻して」');
+  assert.equal((await service.detail(who, c.id))!.versions[0]!.cover!.fileId, second);
+  assert.match((await service.useCover(who, c.id, 'f-none'))!, /見つかりません/);
 });

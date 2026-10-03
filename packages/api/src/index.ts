@@ -159,7 +159,7 @@ app.get('/v1/me', async (c) => {
     inventory: !!(await deps.inventory.access(ctx.tenant.id, ctx.user.id)),
     // 店頭サイネージを使えるか（会社の入り切りと利用範囲。仕様書 第31.2節）。使えなければ左ペインに「サイネージ」を出さない
     signage: !!(await deps.signage.access(ctx.tenant.id, ctx.user.id)),
-    // Web のコラムを使えるか（会社の入り切りと利用範囲。仕様書 第32.18.1節）。使えなければ左ペインに「Web のコラム」を出さない
+    // Web のコラムを使えるか（会社の入り切りと利用範囲。仕様書 第32.18.1節）。使えなければ左ペインに「コラムの作成」を出さない
     webColumns: !!(await deps.columns.access(ctx.tenant.id, ctx.user.id)),
     // 人事・給与の担当者の画面を使えるか（会社の入り切りと人事区画。仕様書 第30.2節）
     hr: !!(await deps.hr.access(ctx.tenant.id, ctx.user.id)),

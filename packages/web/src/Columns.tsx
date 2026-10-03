@@ -1,23 +1,35 @@
 /**
  * @file Web のコラムの画面（仕様書 第32.18.1節・第32.18.2節）。一覧・書く・カバー画像・直す・赤入れ・書き直しを頼む・版・承認へ進む・写す。
  *
- * 「コラムを書く」でテーマと取材メモを入れると、裏で書き上げる（書いている間は読み直して待つ）。
+ * 「コラムを書く」でテーマとリクエスト（記事と画像の希望）を入れると、裏で書き上げる（書いている間は読み直して待つ）。
  * 直して保存するたびに新しい版になり、赤入れをやり直す。承認へ進めたら承認トレイで責任者が承認し、
- * WordPress に下書きとして入る（WordPress につないでいなければ承認済みになり、本文を写して使う）。
+ * WordPress に下書きとして入る（WordPress につないでいなければ承認済みになり、本文をコピーして使う）。
  * 説明文は常には出さない（原則 u11）。分からなければ秘書に聞けばよい。
  */
 
+import { copyText } from './clipboard.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { COLUMN_COVER_KIND_LABELS, WEB_COLUMN_STATUS_LABELS, type ColumnReviewItem, type WebColumn, type WebColumnStatus, type WebColumnVersion } from '@m2office/shared';
 import { api, describeError, type ColumnDetail } from './api.js';
 import { Markdown } from './help.js';
+
+/**
+ * 開いた一覧を画面の中まで送る（ref に渡す。開いた所が画面の外で、開いたことに気づかないのを防ぐ）。
+ * モジュールの関数にして同じものを渡し続けるため、送るのは開いたときの 1 回だけ。
+ */
+function reveal(el: HTMLElement | null): void {
+  el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+/** 結果の知らせを出す所（押したボタンの近く）。 */
+type Spot = 'top' | 'cover' | 'edit' | 'review' | 'rewrite' | 'submit' | 'versions';
 
 /** 書いている間に読み直す間隔（ミリ秒）。 */
 const POLL_MS = 4000;
 
 /** 版の出どころの呼び方。 */
 const ORIGIN_LABELS: Record<WebColumnVersion['origin'], string> = {
-  writer: 'AI が書いた', rewrite: 'AI が書き直した', edit: '直した', suggestion: '直し案に置き換えた', restore: '前の版に戻した', cover: 'カバーを作り直した',
+  writer: 'AI が書いた', rewrite: 'AI が書き直した', edit: '直した', suggestion: '直し案に置き換えた', restore: '前の版に戻した', cover: '画像を変えた',
 };
 
 /** 指摘の種類の呼び方。 */
@@ -92,8 +104,8 @@ function ColumnList({ onOpen }: { onOpen: (id: string) => void }) {
             <input value={theme} maxLength={200} placeholder="子どもの歯みがきのコツ" autoFocus onChange={(e) => setTheme(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && theme.trim() && !e.nativeEvent.isComposing) void create(); }} />
           </div>
-          <div className="field"><label>取材メモ</label>
-            <textarea rows={4} value={memo} maxLength={4000} placeholder="お客様によく聞かれること、うちで工夫していること など" onChange={(e) => setMemo(e.target.value)} />
+          <div className="field"><label>リクエスト</label>
+            <textarea rows={4} value={memo} maxLength={4000} placeholder="お客様によく聞かれること、うちで工夫していること、画像は明るいパステル画のように など" onChange={(e) => setMemo(e.target.value)} />
           </div>
           <div className="row">
             <button className="btn" disabled={busy || !theme.trim()} onClick={() => void create()}>書く</button>
@@ -123,16 +135,25 @@ function ColumnList({ onOpen }: { onOpen: (id: string) => void }) {
   );
 }
 
-/** 1 つのコラム。直す・赤入れ・書き直しを頼む・版・承認へ進む・写す。 */
+/** 1 つのコラム。直す・赤入れ・書き直しを頼む・版・承認へ進む・コピー。結果の知らせは押したボタンの横に出す。 */
 function ColumnEditor({ id, onBack, onApprovals }: { id: string; onBack: () => void; onApprovals: () => void }) {
   const [detail, setDetail] = useState<ColumnDetail | null>(null);
   const [draft, setDraft] = useState<{ title: string; body: string; description: string; short: string; long: string } | null>(null);
   const [tab, setTab] = useState<'edit' | 'view'>('edit');
   const [instruction, setInstruction] = useState('');
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
+  // 結果の知らせは、押したボタンの近くに出す（画面の下に出すと気付きにくい）。うまくいった知らせは少しで消す
+  const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string; at: Spot } | null>(null);
+  useEffect(() => {
+    if (message?.kind !== 'ok') return;
+    const t = setTimeout(() => setMessage(null), 4000);
+    return () => clearTimeout(t);
+  }, [message]);
+  const note = (at: Spot) => (message?.at === at
+    ? <span className={`columns-note is-${message.kind}`} role={message.kind === 'error' ? 'alert' : 'status'}>{message.text}</span> : null);
   const [showVersions, setShowVersions] = useState(false);
   const [covering, setCovering] = useState(false);
+  const [showPast, setShowPast] = useState(false);
   const photoInput = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -142,7 +163,7 @@ function ColumnEditor({ id, onBack, onApprovals }: { id: string; onBack: () => v
       const v = d.versions[0];
       setDraft(v ? { title: v.title, body: v.body, description: v.description, short: v.sns.short, long: v.sns.long } : null);
     } catch (e) {
-      setMessage({ kind: 'error', text: describeError(e, '読めませんでした') });
+      setMessage({ kind: 'error', text: describeError(e, '読めませんでした'), at: 'top' });
     }
   }, [id]);
   useEffect(() => { void load(); }, [load]);
@@ -153,57 +174,67 @@ function ColumnEditor({ id, onBack, onApprovals }: { id: string; onBack: () => v
     return () => clearTimeout(t);
   }, [detail, load]);
 
-  if (!detail) return <div className="columns">{message && <p className="error">{message.text}</p>}</div>;
+  if (!detail) return <div className="columns">{note('top')}</div>;
   const { column, versions } = detail;
   const current = versions[0] ?? null;
   const dirty = !!current && !!draft && (draft.title !== current.title || draft.body !== current.body || draft.description !== current.description
     || draft.short !== current.sns.short || draft.long !== current.sns.long);
   const locked = column.status === 'awaiting' || column.status === 'writing';
+  // 前に作った画像（新しい順。いまの画像と同じものは除き、同じ画像は 1 つにする）
+  const past = (() => {
+    const seen = new Set<string>(current?.cover ? [current.cover.fileId] : []);
+    return versions.flatMap((v) => {
+      if (!v.cover || seen.has(v.cover.fileId)) return [];
+      seen.add(v.cover.fileId);
+      return [{ version: v.version, cover: v.cover }];
+    });
+  })();
 
   /** 操作して読み直す。失敗したら理由を出す。 */
-  const act = async (fn: () => Promise<unknown>, ok: string | null, fail: string) => {
+  const act = async (fn: () => Promise<unknown>, ok: string | null, fail: string, at: Spot) => {
     setBusy(true);
     try {
       await fn();
-      setMessage(ok ? { kind: 'ok', text: ok } : null);
+      setMessage(ok ? { kind: 'ok', text: ok, at } : null);
       await load();
     } catch (e) {
-      setMessage({ kind: 'error', text: describeError(e, fail) });
+      setMessage({ kind: 'error', text: describeError(e, fail), at });
     } finally {
       setBusy(false);
     }
   };
   const save = () => draft && act(() => api.columns.save(id, {
     title: draft.title, body: draft.body, description: draft.description, sns: { short: draft.short, long: draft.long },
-  }), '保存しました', '保存できませんでした');
+  }), '保存しました', '保存できませんでした', 'edit');
   const submit = async () => {
     setBusy(true);
     try {
       await api.columns.submit(id);
       onApprovals();
     } catch (e) {
-      setMessage({ kind: 'error', text: describeError(e, '承認へ進められませんでした') });
+      setMessage({ kind: 'error', text: describeError(e, '承認へ進められませんでした'), at: 'submit' });
       setBusy(false);
     }
   };
   const copy = async (kind: 'html' | 'markdown') => {
     try {
       const e = await api.columns.exported(id);
-      await navigator.clipboard.writeText(kind === 'html' ? e.html : e.markdown);
-      setMessage({ kind: 'ok', text: kind === 'html' ? 'HTML を写しました' : 'Markdown を写しました' });
+      const ok = await copyText(kind === 'html' ? e.html : e.markdown);
+      setMessage(ok ? { kind: 'ok', text: kind === 'html' ? 'HTML をコピーしました' : 'Markdown をコピーしました', at: 'top' }
+        : { kind: 'error', text: 'コピーできませんでした。ブラウザーがクリップボードへの書き込みを許していません', at: 'top' });
     } catch (err) {
-      setMessage({ kind: 'error', text: describeError(err, '写せませんでした') });
+      setMessage({ kind: 'error', text: describeError(err, 'コピーできませんでした'), at: 'top' });
     }
   };
-  /** カバーを作り直す・写真を入れる。AI の挿絵は時間がかかるため、作っている間は知らせる。 */
-  const cover = async (fn: () => Promise<unknown>) => {
+  /** 画像を再作成・ファイルから選択。AI 作成の画像は時間がかかるため、作っている間は知らせる。 */
+  const cover = async (fn: () => Promise<unknown>, ok = '画像を再作成しました') => {
     setCovering(true);
-    await act(fn, null, 'カバーを作れませんでした');
+    await act(fn, ok, '画像を作れませんでした', 'cover');
     setCovering(false);
   };
   const remove = () => {
     if (!confirm(`「${column.title || column.theme}」を削除しますか？`)) return;
-    void act(() => api.columns.remove(id), null, '削除できませんでした').then(onBack);
+    void act(() => api.columns.remove(id), null, '削除できませんでした', 'top').then(onBack);
   };
 
   return (
@@ -212,16 +243,17 @@ function ColumnEditor({ id, onBack, onApprovals }: { id: string; onBack: () => v
         <button className="btn ghost small" onClick={onBack}>一覧に戻る</button>
         <span className={STATUS_BADGE[column.status]}>{WEB_COLUMN_STATUS_LABELS[column.status]}</span>
         {column.wpEditUrl && <a className="btn ghost small" href={column.wpEditUrl} target="_blank" rel="noreferrer">WordPress で開く</a>}
-        {current && <button className="btn ghost small" onClick={() => void copy('html')}>HTML を写す</button>}
-        {current && <button className="btn ghost small" onClick={() => void copy('markdown')}>Markdown を写す</button>}
+        {current && <button className="btn ghost small" onClick={() => void copy('html')}>HTML をコピー</button>}
+        {current && <button className="btn ghost small" onClick={() => void copy('markdown')}>Markdown をコピー</button>}
         {(column.status === 'draft' || column.status === 'failed') && <button className="btn ghost small danger" disabled={busy} onClick={remove}>削除</button>}
+        {note('top')}
       </div>
 
       {column.status === 'writing' && <p className="muted">「{column.theme}」を書いています…</p>}
       {column.status === 'failed' && (
         <div className="row">
           <p className="error">{column.failure ?? '書けませんでした'}</p>
-          <button className="btn small" disabled={busy} onClick={() => void act(() => api.columns.retry(id), null, '書き直せませんでした')}>もう一度書く</button>
+          <button className="btn small" disabled={busy} onClick={() => void act(() => api.columns.retry(id), null, '書き直せませんでした', 'top')}>もう一度書く</button>
         </div>
       )}
 
@@ -235,20 +267,39 @@ function ColumnEditor({ id, onBack, onApprovals }: { id: string; onBack: () => v
               {current.cover && <span className="badge">{COLUMN_COVER_KIND_LABELS[current.cover.kind]}</span>}
               {current.cover?.note && <span className="small muted">{current.cover.note}</span>}
               <button className="btn ghost small" disabled={busy || locked || dirty} onClick={() => void cover(() => api.columns.recover(id))}>
-                {covering ? '作っています…' : current.cover ? 'カバーを作り直す' : 'カバーを作る'}
+                {covering ? '作っています…' : current.cover ? '画像を再作成' : '画像を作成'}
               </button>
-              <button className="btn ghost small" disabled={busy || locked || dirty} onClick={() => photoInput.current?.click()}>写真を入れる</button>
+              <button className="btn ghost small" disabled={busy || locked || dirty} onClick={() => photoInput.current?.click()}>ファイルから選択</button>
               <input ref={photoInput} type="file" accept="image/jpeg,image/png" hidden
-                onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void cover(() => api.columns.addPhoto(id, f)); }} />
+                onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void cover(() => api.columns.addPhoto(id, f), '画像を変えました'); }} />
               {current.cover && (
                 <button className="btn ghost small" onClick={() => void api.columns.downloadCover(id, current.title)
-                  .catch((err) => setMessage({ kind: 'error', text: describeError(err, '書き出せませんでした') }))}>画像を書き出す</button>
+                  .catch((err) => setMessage({ kind: 'error', text: describeError(err, '書き出せませんでした'), at: 'cover' }))}>画像を書き出す</button>
               )}
+              {past.length > 0 && (
+                <button className="link small" onClick={() => setShowPast(!showPast)}>{showPast ? '以前の画像を閉じる' : `以前の画像（${past.length}）`}</button>
+              )}
+              {note('cover')}
             </div>
           </div>
+          {/* 前に作った画像（第32.18.2節）。選ぶとその画像に戻る（本文はいまのまま、新しい版になる） */}
+          {showPast && past.length > 0 && (
+            <div className="columns-past" ref={reveal}>
+              {past.map((p) => (
+                <figure key={p.cover.fileId}>
+                  <img src={api.columns.coverUrlOf(id, p.version)} alt={p.cover.alt} loading="lazy" />
+                  <figcaption className="small">
+                    <span className="muted">第 {p.version} 版・{COLUMN_COVER_KIND_LABELS[p.cover.kind]}</span>
+                    <button className="btn ghost small" disabled={busy || locked || dirty}
+                      onClick={() => void cover(() => api.columns.useCover(id, p.cover.fileId), '前の画像に戻しました').then(() => setShowPast(false))}>この画像に戻す</button>
+                  </figcaption>
+                </figure>
+              ))}
+            </div>
+          )}
           <div className="row columns-tabs">
-            <button className={tab === 'edit' ? 'btn small' : 'btn ghost small'} onClick={() => setTab('edit')}>直す</button>
-            <button className={tab === 'view' ? 'btn small' : 'btn ghost small'} onClick={() => setTab('view')}>見え方</button>
+            <button className={tab === 'edit' ? 'btn small' : 'btn ghost small'} onClick={() => setTab('edit')}>編集</button>
+            <button className={tab === 'view' ? 'btn small' : 'btn ghost small'} onClick={() => setTab('view')}>プレビュー</button>
           </div>
           {tab === 'edit' ? (
             <div className="columns-edit">
@@ -278,6 +329,7 @@ function ColumnEditor({ id, onBack, onApprovals }: { id: string; onBack: () => v
               <div className="row">
                 <button className="btn" disabled={busy || locked || !dirty} onClick={() => void save()}>保存</button>
                 {dirty && <button className="btn ghost" disabled={busy} onClick={() => setDraft({ title: current.title, body: current.body, description: current.description, short: current.sns.short, long: current.sns.long })}>キャンセル</button>}
+                {note('edit')}
               </div>
             </div>
           ) : (
@@ -293,7 +345,7 @@ function ColumnEditor({ id, onBack, onApprovals }: { id: string; onBack: () => v
             </article>
           )}
 
-          <h3>赤入れ {current.review.length > 0 && <span className="badge warn">{current.review.length}</span>}</h3>
+          <h3>赤入れ {current.review.length > 0 && <span className="badge warn">{current.review.length}</span>} {note('review')}</h3>
           {current.review.length === 0 ? <p className="small muted">指摘はありません。</p> : (
             <ul className="columns-review">
               {current.review.map((r, i) => (
@@ -304,7 +356,7 @@ function ColumnEditor({ id, onBack, onApprovals }: { id: string; onBack: () => v
                   {r.quote && r.suggestion && (
                     <div className="row small">
                       <span>直し案: {r.suggestion}</span>
-                      <button className="btn ghost small" disabled={busy || locked || dirty} onClick={() => void act(() => api.columns.applySuggestion(id, i), null, '置き換えられませんでした')}>直し案に置き換える</button>
+                      <button className="btn ghost small" disabled={busy || locked || dirty} onClick={() => void act(() => api.columns.applySuggestion(id, i), '直し案に置き換えました', '置き換えられませんでした', 'review')}>直し案に置き換える</button>
                     </div>
                   )}
                 </li>
@@ -316,20 +368,24 @@ function ColumnEditor({ id, onBack, onApprovals }: { id: string; onBack: () => v
             <input value={instruction} maxLength={1000} placeholder="もっと短く／高齢の方にも分かるように" disabled={locked} aria-label="書き直しの指示"
               onChange={(e) => setInstruction(e.target.value)} />
             <button className="btn ghost" disabled={busy || locked || dirty || !instruction.trim()}
-              onClick={() => void act(() => api.columns.rewrite(id, instruction.trim()), '書き直しました', '書き直せませんでした').then(() => setInstruction(''))}>書き直しを頼む</button>
+              onClick={() => void act(() => api.columns.rewrite(id, instruction.trim()), '書き直しました', '書き直せませんでした', 'rewrite').then(() => setInstruction(''))}>書き直しを頼む</button>
+            {note('rewrite')}
           </div>
 
-          {message && <p className={message.kind === 'ok' ? 'ok-msg' : 'error'}>{message.text}</p>}
           <div className="row">
             {column.status === 'awaiting'
               ? <button className="btn ghost" onClick={onApprovals}>承認トレイを開く</button>
               : <button className="btn" disabled={busy || dirty || (column.status === 'placed' && column.submittedVersion === column.currentVersion) || column.status === 'approved' && column.submittedVersion === column.currentVersion}
                 onClick={() => void submit()}>{detail.wordpress ? '承認へ進む（WordPress の下書きに入れる）' : '承認へ進む'}</button>}
+            {note('submit')}
           </div>
 
-          <button className="link small" onClick={() => setShowVersions(!showVersions)}>{showVersions ? '版を閉じる' : `版（${versions.length}）`}</button>
+          <div className="row">
+            <button className="link small" onClick={() => setShowVersions(!showVersions)}>{showVersions ? '版を閉じる' : `版（${versions.length}）`}</button>
+            {note('versions')}
+          </div>
           {showVersions && (
-            <table className="table small columns-versions">
+            <table className="table small columns-versions" ref={reveal}>
               <tbody>
                 {versions.map((v) => (
                   <tr key={v.version}>
@@ -338,7 +394,7 @@ function ColumnEditor({ id, onBack, onApprovals }: { id: string; onBack: () => v
                     <td>{v.createdByName}</td>
                     <td>{when(v.createdAt)}</td>
                     <td>{v.version !== column.currentVersion && (
-                      <button className="link" disabled={busy || locked || dirty} onClick={() => void act(() => api.columns.restore(id, v.version), `第 ${v.version} 版に戻しました`, '戻せませんでした')}>この版に戻す</button>
+                      <button className="link" disabled={busy || locked || dirty} onClick={() => void act(() => api.columns.restore(id, v.version), `第 ${v.version} 版に戻しました`, '戻せませんでした', 'versions')}>この版に戻す</button>
                     )}</td>
                   </tr>
                 ))}
@@ -347,7 +403,7 @@ function ColumnEditor({ id, onBack, onApprovals }: { id: string; onBack: () => v
           )}
         </>
       )}
-      {!current && message && <p className={message.kind === 'ok' ? 'ok-msg' : 'error'}>{message.text}</p>}
+
     </div>
   );
 }

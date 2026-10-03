@@ -169,15 +169,15 @@ const ACTION_LABELS: Record<string, string> = {
   'signage.sound.add': 'サイネージのジングルの音を入れた',
   'signage.sound.remove': 'サイネージのジングルの音を消した',
   // Web のコラム（仕様書 第32.18.1節）
-  'column.create': 'Web のコラムを書き始めた',
-  'column.submit': 'Web のコラムを承認へ進めた',
-  'column.approve': 'Web のコラムを承認した',
-  'column.place': 'Web のコラムを WordPress に入れた',
-  'column.delete': 'Web のコラムを削除した',
-  'column.photo_add': 'Web のコラムの写真を入れた',
-  'column.rules': 'Web のコラムの表現の決まりを選んだ',
-  'column.wordpress_save': 'Web のコラムの WordPress の鍵を預けた',
-  'column.wordpress_remove': 'Web のコラムの WordPress の鍵を外した',
+  'column.create': 'コラムを書き始めた',
+  'column.submit': 'コラムを承認へ進めた',
+  'column.approve': 'コラムを承認した',
+  'column.place': 'コラムを WordPress に入れた',
+  'column.delete': 'コラムを削除した',
+  'column.photo_add': 'コラムの写真を入れた',
+  'column.rules': 'コラムの表現の決まりを選んだ',
+  'column.wordpress_save': 'コラムの WordPress の鍵を預けた',
+  'column.wordpress_remove': 'コラムの WordPress の鍵を外した',
   // 人事・給与（仕様書 第30.21節。他人の台帳を見ただけでも残す）
   'hr.list': '従業員の一覧を見た',
   'hr.view': '従業員の台帳を見た',
@@ -364,7 +364,7 @@ function targetOf(e: AuditEvent, names: AuditNames): string {
     // 従業員の名前は監査ログの画面に出さない（人事区画の外の管理者も見るため）。台帳の ID の頭だけ
     case 'hr_employee': return `従業員 ${id.slice(0, 8)}`;
     // コラムの題名は出さない（テーマは記録の詳細にある）
-    case 'web_column': return id.startsWith('col-') ? `コラム ${id.slice(4, 12)}` : 'Web のコラムの設定';
+    case 'web_column': return id.startsWith('col-') ? `コラム ${id.slice(4, 12)}` : 'コラムの作成の設定';
     case 'tool': {
       // 会社の接続のツール（`slack.slack_send_message`）は接続の名前を添える
       const [head, ...rest] = id.split('.');

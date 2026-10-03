@@ -295,7 +295,7 @@ function ScreenCard({ s, active, admin, thumb, wantThumb, onSelect, onChanged, o
   );
 }
 
-/** 画面の流れ（並べ替え・秒数・外す・素材を足す・ほかの画面から写す）。直したらすぐ保存する。 */
+/** 画面の流れ（並べ替え・秒数・外す・素材を足す・ほかの画面からコピー）。直したらすぐ保存する。 */
 function FlowEditor({ screen, screens, assets, thumbs, onFiles, onError, onChanged }: {
   screen: SignageScreen; screens: SignageScreen[]; assets: SignageAssetView[]; thumbs: ReturnType<typeof useThumbs>;
   onFiles: (files: File[]) => void; onError: (m: string) => void; onChanged: () => void;
@@ -334,8 +334,8 @@ function FlowEditor({ screen, screens, assets, thumbs, onFiles, onError, onChang
         <select value="" onChange={(e) => {
           const from = e.target.value;
           if (from) void api.signage.flow(from).then((f) => save(f.entries));
-        }} aria-label="ほかの画面の流れを写す">
-          <option value="">ほかの画面から写す</option>
+        }} aria-label="ほかの画面の流れをコピー">
+          <option value="">ほかの画面からコピー</option>
           {screens.filter((s) => s.id !== screen.id).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
       </div>

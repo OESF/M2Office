@@ -1,6 +1,6 @@
 /**
  * @file Web のコラム（内蔵の拡張）の API。一覧・書く・詳細・直す・書き直しを頼む・直し案に置き換える・前の版に戻す・
- * 承認へ進める・写す形・削除・カバー画像（見る・作り直す・写真を入れる）。
+ * 承認へ進める・コピーする形・削除・カバー画像（見る・再作成・ファイルから選択・以前の画像に戻す）。
  *
  * 会社が Web のコラムを切っているときと、利用範囲の外の人には、どの口も使わせない。コラムは会社で共有する。
  * 設定と WordPress の鍵は管理者の口（拡張機能）で扱う。
@@ -32,7 +32,7 @@ export function columnsRoute(deps: AppDeps) {
   app.use('*', async (c, next) => {
     const { tenant, user } = c.get('ctx');
     if (!(await deps.columns.access(tenant.id, user.id))) {
-      return c.json({ error: 'Web のコラムは使えません（会社で切っているか、利用範囲の外です）' }, 403);
+      return c.json({ error: 'コラムの作成は使えません（会社で切っているか、利用範囲の外です）' }, 403);
     }
     await next();
   });
@@ -123,6 +123,13 @@ export function columnsRoute(deps: AppDeps) {
         ...(c.req.query('download') === '1' ? { 'content-disposition': 'attachment; filename="column-cover.png"' } : {}),
       },
     });
+  });
+
+  /** 前に作ったカバーに戻す（`fileId`。本文はいまのまま、新しい版になる）。 */
+  app.post('/:id/cover/restore', async (c) => {
+    const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
+    const err = await service.useCover(who(c), c.req.param('id'), str(body['fileId']) ?? '');
+    return err ? c.json({ error: err }, 409) : c.json({ ok: true });
   });
 
   /** カバーを作り直す（`kind`・`hint`。新しい版になる）。 */

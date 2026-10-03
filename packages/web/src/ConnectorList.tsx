@@ -5,6 +5,7 @@
  * 認証の要る接続（Slack など）は、認証情報を登録し、管理者が自分で接続して確かめてからツールを取り直す（仕様書 第12.11.6.2節）。
  */
 
+import { copyText } from './clipboard.js';
 import { useCallback, useEffect, useState } from 'react';
 import { api, describeError, type ConnectionPresetView, type ConnectorCheck, type McpConnectionView } from './api.js';
 import { PageTitle } from './help.js';
@@ -306,8 +307,8 @@ function ManualClient({ st, clientId, setClientId, secret, setSecret, busy, save
         <div className="copy-row small">
           <input readOnly value={st.redirectUri} onFocus={(e) => e.target.select()} />
           <button className="btn small ghost" onClick={() => {
-            void navigator.clipboard?.writeText(st.redirectUri).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); });
-          }}>{copied ? '写しました' : '写す'}</button>
+            void copyText(st.redirectUri).then((ok) => { if (ok) { setCopied(true); setTimeout(() => setCopied(false), 1500); } });
+          }}>{copied ? 'コピーしました' : 'コピー'}</button>
         </div>
       </div>
       <details className="small">

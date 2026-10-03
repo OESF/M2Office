@@ -1211,6 +1211,10 @@ export const api = {
     /** カバーを作り直す（新しい版になる）。 */
     recover: (id: string, req: { kind?: 'template' | 'ai' | 'photo'; hint?: string } = {}) =>
       call<{ ok: true }>(`/columns/${encodeURIComponent(id)}/cover`, { method: 'POST', body: JSON.stringify(req) }),
+    /** 前に作ったカバーに戻す（新しい版になる。本文はいまのまま）。 */
+    useCover: (id: string, fileId: string) => call<{ ok: true }>(`/columns/${encodeURIComponent(id)}/cover/restore`, { method: 'POST', body: JSON.stringify({ fileId }) }),
+    /** 前の版のカバー画像の URL。 */
+    coverUrlOf: (id: string, version: number) => `/v1/columns/${encodeURIComponent(id)}/cover?version=${version}`,
     /** 写真を入れ、そのコラムのカバーにする（会社の写真の置き場にも入る）。 */
     addPhoto: (id: string, file: File) => call<{ ok: true }>(`/columns/${encodeURIComponent(id)}/photos`, {
       method: 'POST', body: file, headers: { 'content-type': file.type, 'x-file-name': encodeURIComponent(file.name) },

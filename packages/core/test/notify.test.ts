@@ -44,7 +44,7 @@ function setup(): { repo: NotifyRepo; sender: MockNotificationSender; delivery: 
     linkFor: (tenant) => `http://${tenant.subdomain}.lvh.me:3100`,
   });
   repo.notifications.push({
-    id: 'n1', tenantId: 't1', userId: 'u1', kind: 'approval', title: '承認をお願いします: 議事録作成・共有',
+    id: 'n1', tenantId: 't1', userId: 'u1', kind: 'approval', title: '承認をお願いします: 議事録の作成・共有',
     body: '議事録の内容と、抽出した決定事項', runId: 'r1', readAt: null,
     createdAt: '2026-09-23T01:00:00.000Z', deliveredAt: null, deliveryNote: null,
   });
@@ -77,7 +77,7 @@ test('Chat を選んだ人には、種類・題名・リンクだけを送り、
   assert.deepEqual(sender.outbox.map((x) => x.channel), ['chat']);
   const sent = sender.outbox[0]!;
   assert.equal(sent.kindLabel, '承認依頼');
-  assert.equal(sent.title, '承認をお願いします: 議事録作成・共有');
+  assert.equal(sent.title, '承認をお願いします: 議事録の作成・共有');
   assert.equal(sent.link, 'http://a.lvh.me:3100/approvals', '承認の依頼は、承認トレイへ直接入るリンク（仕様書 第6.1.6節）');
   assert.equal(JSON.stringify(sent).includes('抽出した決定事項'), false, '本文は送らない');
   assert.ok(repo.audits.some((a) => a.action === 'notification.deliver'));

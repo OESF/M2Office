@@ -261,6 +261,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/columns/:id/rewrite` ／ `/retry` | 指示（`instruction`）で書き直してもらう ／ 書けなかったコラムをもう一度書く |
 | `POST /v1/columns/:id/suggestions/:index` ／ `/versions/:version/restore` | 赤入れの直し案に置き換える ／ 前の版に戻す（どちらも新しい版になる） |
 | `GET /v1/columns/:id/export` | 記事に入れる形（Markdown と HTML。末尾に出典・監修者・AI の表示） |
+| `POST /v1/columns/:id/cover/restore` | 前に作ったカバーに戻す（`fileId`。このコラムの前の版のカバーだけ。本文はいまのまま、新しい版になる） |
 | `GET` ／ `POST /v1/columns/:id/cover` | カバー画像（PNG。`version` で前の版、`download=1` で保存させる）／ 作り直す（`kind`: template・ai・photo、`hint`。新しい版になる） |
 | `POST /v1/columns/:id/photos` | 写真を入れ、そのコラムのカバーにする（本文は写真の中身。JPEG・PNG、10 MB まで。会社の写真の置き場にも入る） |
 | `POST /v1/columns/:id/submit` | 承認へ進める（業務「コラムを WordPress に入れる」を始め、管理者か承認者の承認を待つ。版の指紋を残す。入力にカバーのファイルを含め、承認する人がその画像を見られるようにする。入れられない理由があれば 400） |

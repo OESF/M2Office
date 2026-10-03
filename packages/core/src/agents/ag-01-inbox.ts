@@ -1,5 +1,5 @@
 /**
- * @file AG-01 メール整理・下書き作成のエージェント定義。
+ * @file AG-01 メールの整理・下書きの作成のエージェント定義。
  *
  * @see 仕様書 第9.5.1節
  */
@@ -7,7 +7,7 @@
 import type { AgentDefinition } from '@m2office/shared';
 
 /**
- * AG-01 メール整理・下書き作成。
+ * AG-01 メールの整理・下書きの作成。
  *
  * 未処理のメールを分類し、返信が必要なものに下書きを作る。
  *
@@ -24,7 +24,7 @@ export const AG01_INBOX: AgentDefinition = {
   schemaVersion: 1,
   id: 'inbox-triage',
   version: 1,
-  name: 'メール整理・下書き作成',
+  name: 'メールの整理・下書きの作成',
   category: 'mail',
   description: '未処理のメールを分類し、返信が必要なものに下書きを作ります（送信はしません）',
   locale: 'ja-JP',

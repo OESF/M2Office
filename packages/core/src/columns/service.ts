@@ -26,8 +26,8 @@ import { inferRuleSets } from './rules.js';
 import { ColumnWriteError, rewriteColumn, writeColumn } from './writer.js';
 import { checkWordPress, columnHtml, createWordPressDraft, normalizeSiteUrl, uploadWordPressMedia, type WordPressAuth } from './wordpress.js';
 import {
-  COVER_AI_MODEL, COVER_AI_MONTHLY_LIMIT, COVER_AI_TRIES, brandColor, checkIllustration, choosePhoto, describePhoto, fallbackColor,
-  illustrationPrompt, pickPattern, renderCover, type CoverInput,
+  COVER_AI_MODEL, COVER_AI_MONTHLY_LIMIT, COVER_AI_TRIES, COVER_MIN_BRIGHTNESS, COVER_MIN_PHOTO_BRIGHTNESS, brandColor, brightness, checkIllustration, choosePhoto, describePhoto, fallbackColor,
+  illustrationPrompt, imageWish, pickPattern, renderCover, wantsDark, type CoverInput,
 } from './cover.js';
 
 /** コラムを扱う人。 */
@@ -92,7 +92,7 @@ export interface ColumnPreview {
 
 /** テーマの長さの上限。 */
 const THEME_MAX = 200;
-/** 取材メモの長さの上限。 */
+/** リクエスト（書く人の希望・経験・考え。画像の希望も書ける）の長さの上限。 */
 const MEMO_MAX = 4000;
 /** 本文の長さの上限。 */
 const BODY_MAX = 40_000;
@@ -123,7 +123,7 @@ export function finalMarkdown(v: Pick<WebColumnVersion, 'body' | 'sources'> & { 
   const parts = [v.body.trim()];
   if (v.sources.length > 0) parts.push(['## 出典', '', ...v.sources.map((x, i) => `${i + 1}. [${x.title || x.url}](${x.url})`)].join('\n'));
   if (s.supervisor?.name) parts.push(`監修: ${[s.supervisor.title, s.supervisor.name].filter(Boolean).join(' ')}`);
-  if (s.aiNotice) parts.push(`この記事は AI の下書きをもとに、担当者が確かめて掲載しています。${v.cover?.kind === 'ai' ? 'カバー画像は AI が描いた挿絵です。' : ''}`);
+  if (s.aiNotice) parts.push(`この記事は AI の下書きをもとに、担当者が確かめて掲載しています。${v.cover?.kind === 'ai' ? 'カバー画像は AI で作成しました。' : ''}`);
   return parts.join('\n\n');
 }
 
@@ -234,8 +234,8 @@ export class ColumnService {
         await aiReview(llm, draft.body, settings.webColumns.rules),
       );
       const title = draft.titles[0] ?? c.theme;
-      // カバーを作れなくても、下書きは残す（画面の「カバーを作る」で作り直せる）
-      const made = await this.makeCover(who, { title, description: draft.description }, {}).catch((err: unknown) => {
+      // カバーを作れなくても、下書きは残す（画面の「画像を作成」で作れる）
+      const made = await this.makeCover(who, { title, description: draft.description, request: c.memo }, {}).catch((err: unknown) => {
         this.log.warn('column.cover_failed', { columnId: id, error: err instanceof Error ? err.message : String(err) });
         return null;
       });
@@ -347,7 +347,7 @@ export class ColumnService {
     if (c.status === 'failed') problems.push('書けなかったコラムです。書き直してください');
     if (c.status === 'placed' && c.submittedVersion === c.currentVersion) problems.push('この版は WordPress に入れてあります');
     if (wp && !hasKey) problems.push('WordPress のアプリケーションパスワードが預けられていません。管理者に頼んでください');
-    if (v && !v.cover) problems.push('カバー画像がありません。「カバーを作る」で作ってください');
+    if (v && !v.cover) problems.push('カバー画像がありません。「画像を作成」で作ってください');
     return {
       id, version: c.currentVersion, title: v?.title ?? '', chars: v ? charCount(v.body) : 0, reviewCount: v?.review.length ?? 0,
       destination: wp ? `WordPress（${wp.siteUrl}）の下書き` : 'WordPress につないでいないため、承認済みにするだけ',
@@ -422,10 +422,39 @@ export class ColumnService {
     const cur = await this.editable(who, id);
     if (typeof cur === 'string') return cur;
     if (req.photoId && !(await this.deps.store.photos(who.tenantId)).some((p) => p.id === req.photoId)) return 'その写真が見つかりません';
-    const cover = await this.makeCover(who, { title: cur.version.title, description: cur.version.description }, req);
+    const request = (await this.deps.store.get(who.tenantId, id))?.memo ?? '';
+    const cover = await this.makeCover(who, { title: cur.version.title, description: cur.version.description, request }, req);
     if (typeof cover === 'string') return cover;
     await this.addVersion(who, id, cur.version, { ...cur.version, cover, origin: 'cover' }, cur.version.review);
     return null;
+  }
+
+  /**
+   * 前に作ったカバーに戻す（そのカバーを写した新しい版を足す。本文はいまのまま。第32.18.2節）。
+   *
+   * @param fileId このコラムの前の版のカバーのファイル。`previous` なら、いまのカバーの 1 つ前のもの
+   * @returns 戻せなければ理由
+   */
+  async useCover(who: ColumnViewer, id: string, fileId: string | 'previous'): Promise<string | null> {
+    const cur = await this.editable(who, id);
+    if (typeof cur === 'string') return cur;
+    const covers = this.pastCovers(await this.deps.store.versions(who.tenantId, id), cur.version.cover?.fileId ?? null);
+    const pick = fileId === 'previous' ? covers[0] : covers.find((c) => c.cover.fileId === fileId);
+    if (!pick) return fileId === 'previous' ? '前に作った画像がありません' : 'その画像が見つかりません';
+    await this.addVersion(who, id, cur.version, { ...cur.version, cover: pick.cover, origin: 'cover' }, cur.version.review);
+    return null;
+  }
+
+  /** 前に作ったカバー（新しい順。いまのカバーと同じものは除き、同じ画像は 1 つにする）。画面の「以前の画像」に出す。 */
+  pastCovers(versions: WebColumnVersion[], currentFileId: string | null): { version: number; cover: WebColumnCover }[] {
+    const seen = new Set<string>(currentFileId ? [currentFileId] : []);
+    const out: { version: number; cover: WebColumnCover }[] = [];
+    for (const v of versions) {
+      if (!v.cover || seen.has(v.cover.fileId)) continue;
+      seen.add(v.cover.fileId);
+      out.push({ version: v.version, cover: v.cover });
+    }
+    return out;
   }
 
   /**
@@ -467,12 +496,13 @@ export class ColumnService {
    *
    * @returns 作ったカバー。頼まれた種類で作れなければ理由
    */
-  private async makeCover(who: ColumnViewer, a: { title: string; description: string }, req: CoverRequest): Promise<WebColumnCover | string> {
+  private async makeCover(who: ColumnViewer, a: { title: string; description: string; request?: string }, req: CoverRequest): Promise<WebColumnCover | string> {
     const { repo, store } = this.deps;
     const settings = await repo.getTenantSettings(who.tenantId);
     const llm = await this.deps.llmFor(who.tenantId);
     const logo = await this.logo(who.tenantId, settings.company.logoFileId);
-    const base = { title: a.title, logo };
+    // ロゴは画像に入れず、型の色を選ぶのにだけ使う（第32.18.2節）
+    const base = { title: a.title };
     const notes: string[] = [];
     let aiAttempts = 0;
 
@@ -486,16 +516,20 @@ export class ColumnService {
       else if (usage && usage.used >= usage.limit) notes.push(`今月の AI の挿絵の上限（${usage.limit} 枚）に達したため、型にしました`);
       else {
         const tries = Math.min(COVER_AI_TRIES, usage!.limit - usage!.used);
+        // 雰囲気: 秘書への頼みを先に、無ければ「リクエスト」に書いた画像の希望（画像の希望だけを取り出し、会社やお客様の情報は渡さない）
+        const hint = (req.hint?.trim() || (a.request ? await imageWish(llm, a.request) : '')).slice(0, 200);
         for (let i = 0; i < tries; i++) {
           aiAttempts += 1;
           const img = await llm.generateImage!({
             model: COVER_AI_MODEL, aspectRatio: '16:9',
-            prompt: illustrationPrompt({ title: a.title, description: a.description, rules: settings.webColumns.rules, hint: (req.hint ?? '').slice(0, 200) }),
+            prompt: illustrationPrompt({ title: a.title, description: a.description, rules: settings.webColumns.rules, hint }),
           }).catch(() => null);
           if (!img) { notes.push('挿絵を描けませんでした'); continue; }
+          // 暗い挿絵は Web のページを暗く見せるため描き直す（暗い雰囲気を頼まれたときは除く）
+          if (!wantsDark(hint) && (brightness(img) ?? 1) < COVER_MIN_BRIGHTNESS) { notes.push('暗い画像だったため描き直しました'); continue; }
           const check = await checkIllustration(llm, img, settings.webColumns.rules);
           if (!check.ok) { notes.push(check.reason); continue; }
-          return this.saveCover(who, { ...base, background: { kind: 'image', image: img } }, { kind: 'ai', pattern: null, photoId: null, aiAttempts, note: '', alt: altText(a.title, 'ai') });
+          return this.saveCover(who, { ...base, background: { kind: 'image', image: img } }, { kind: 'ai', pattern: null, photoId: null, aiAttempts, note: notes.join('／'), alt: altText(a.title, 'ai') });
         }
         notes.push('確かめを通る挿絵ができなかったため、型にしました');
       }
@@ -508,12 +542,15 @@ export class ColumnService {
       if (photo) {
         const bytes = await this.deps.files.get(who.tenantId, photo.fileId);
         const meta = bytes ? await repo.getFile(who.tenantId, photo.fileId) : null;
-        if (bytes && meta) {
+        // 推論が選んだ写真が暗ければ使わない（人が選んだ写真はそのまま使う）
+        const dark = !req.photoId && bytes && meta && (brightness({ bytes, mimeType: meta.mime }) ?? 1) < COVER_MIN_PHOTO_BRIGHTNESS;
+        if (dark) notes.push('記事に合う写真が暗かったため、型にしました');
+        else if (bytes && meta) {
           return this.saveCover(who, { ...base, background: { kind: 'image', image: { bytes, mimeType: meta.mime } } },
             { kind: 'photo', pattern: null, photoId: photo.id, aiAttempts, note: notes.join('／'), alt: photo.description || altText(a.title, 'photo') });
         }
       }
-      if (req.kind === 'photo') return photos.length === 0 ? 'まだ会社の写真がありません。「写真を入れる」で入れてください' : '記事に合う写真が見つかりませんでした。「写真を入れる」で選んでください';
+      if (req.kind === 'photo') return photos.length === 0 ? 'まだ会社の写真がありません。「ファイルから選択」で選んでください' : '記事に合う写真が見つかりませんでした。「ファイルから選択」で選んでください';
     }
 
     // ③ 型

@@ -858,7 +858,7 @@ const KNOWLEDGE_TITLES: Record<string, string> = {
 const KNOWLEDGE_HELP: Record<string, PageHelp> = {
   rules: { article: 'admin-knowledge', text: 'ここに登録した規程から、秘書と「社内ナレッジ Q&A」が出典つきで答えます。改定すると前の版を残し、廃止しても 1 年は戻せます。' },
   items: { article: 'admin-knowledge', text: 'ここに登録した規程から、秘書と「社内ナレッジ Q&A」が出典つきで答えます。改定すると前の版を残し、廃止しても 1 年は戻せます。' },
-  minutes: { article: 'admin-knowledge', text: '「議事録作成・共有」が、共有のあとに登録した議事録です。廃止しても 1 年は戻せます。' },
+  minutes: { article: 'admin-knowledge', text: '「議事録の作成・共有」が、共有のあとに登録した議事録です。廃止しても 1 年は戻せます。' },
   learned: { article: 'admin-knowledge', text: '秘書が会話から学び、ほかの人にも役立つと判断したことです。週 1 回、秘書がまとめ、古いものや使われないものをしまいます。' },
 };
 

@@ -2,9 +2,10 @@
  * @file デバッグモードの印と記録の画面（仕様書 第20.4.1節「デバッグモード」）。どの画面でも上に赤い「Debug mode」を出し、押すと右から記録を開く。
  *
  * サーバーの記録（音声の聞き取りと発話・ツールに渡した文と答え・秘書の振り分け・失敗した呼び出し）と、
- * この画面から呼んだ API の直近 100 件を時刻順に並べる。「写す」で文字にして写し、AI への報告に貼れるようにする。
+ * この画面から呼んだ API の直近 100 件を時刻順に並べる。「コピー」で文字にして写し、AI への報告に貼れるようにする。
  */
 
+import { copyText } from './clipboard.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type DebugEvent } from './api.js';
 import { OPEN_DEBUG_EVENT, clearClientCalls, clientCalls, onClientCalls, type ClientCall } from './debug.js';
@@ -95,7 +96,8 @@ function DebugDrawer({ onClose }: { onClose: () => void }) {
     : [...calls].reverse().map((c) => `[${hms(c.at)}] ${c.method} ${c.path} → ${c.status}（${c.ms} ms）${c.request ? `\n送った: ${c.request}` : ''}${c.response ? `\n応答: ${c.response}` : ''}`)
   ).join('\n\n');
   const copy = () => {
-    void navigator.clipboard?.writeText(asText()).then(() => {
+    void copyText(asText()).then((ok) => {
+      if (!ok) return;
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     });
@@ -116,7 +118,7 @@ function DebugDrawer({ onClose }: { onClose: () => void }) {
           <button role="tab" aria-selected={tab === 'client'} className={tab === 'client' ? 'on' : ''} onClick={() => setTab('client')}>画面の呼び出し（{calls.length}）</button>
         </div>
         <span className="spacer" />
-        <button className="btn ghost small" onClick={copy}>{copied ? '写しました' : '写す'}</button>
+        <button className="btn ghost small" onClick={copy}>{copied ? 'コピーしました' : 'コピー'}</button>
         <button className="btn ghost small" onClick={() => void clear()}>削除</button>
         <button className="btn ghost small" onClick={onClose} aria-label="閉じる">×</button>
       </div>

@@ -142,7 +142,7 @@ let qaRunId;
     : ng('知識が検索できていない');
 }
 
-console.log('\n■ 3. 承認ありの経路（AG-02 議事録作成・共有）');
+console.log('\n■ 3. 承認ありの経路（AG-02 議事録の作成・共有）');
 let runId;
 {
   const { body } = await call('a', '/v1/jobs', {
@@ -351,13 +351,13 @@ console.log('\n■ 8. ダミー接続による照会（Google 未接続）');
     method: 'POST', body: JSON.stringify({ message: 'メールの返信を下書きして' }),
   });
   // 専門の業務は、本人に実行の可否を聞かずに頼んで実行し、結果をあとで伝える（第10.9.6節、ADR-0033）
-  routed.lookup?.runId && /「メール整理・下書き作成」に頼みました/.test(routed.text) && !routed.suggestedAgent
+  routed.lookup?.runId && /「メールの整理・下書きの作成」に頼みました/.test(routed.text) && !routed.suggestedAgent
     ? ok('作業の依頼は照会と取り違えず、受信箱整理に頼んで実行した（実行してよいかを聞かない）')
     : ng('依頼を照会として処理してしまう、または実行してよいかを聞く', JSON.stringify(routed).slice(0, 160));
   const delegated = routed.lookup?.runId ? await waitFor('a', routed.lookup.runId, ['completed', 'failed', 'awaiting_approval'], 20000) : null;
   const { body: bar } = await call('a', '/v1/secretary/lookups');
   const item = (bar.items ?? []).find((x) => x.runId === routed.lookup?.runId);
-  item?.agentName === 'メール整理・下書き作成' && delegated?.run?.status === 'completed' && item.done
+  item?.agentName === 'メールの整理・下書きの作成' && delegated?.run?.status === 'completed' && item.done
     ? ok('頼んだ業務は秘書バーの一覧に名前つきで並び、終わると伝える対象になる')
     : ng('頼んだ業務が秘書バーに並ばない', JSON.stringify(item));
 }
@@ -752,7 +752,7 @@ console.log('\n■ 18. ダッシュボード');
   done.run.savedMinutes === 10 ? ok('完了した実行に標準所要時間（10 分）が記録される') : ng(`記録されない（${done.run.savedMinutes}）`);
 
   const { body: b } = await call('b', '/v1/admin/dashboard/live', {}, 'admin');
-  JSON.stringify(b).includes('管理者さんが「議事録作成') && b.flows.some((f) => f.runId === job.runId)
+  JSON.stringify(b).includes('管理者さんが「議事録の作成') && b.flows.some((f) => f.runId === job.runId)
     ? ng('他社の業務が見える') : ok('他社のダッシュボードに A 社の業務は出ない');
 }
 
@@ -1261,7 +1261,7 @@ console.log('\n■ 23. 権限区画をグループで割り当てる');
   await call('a', `/v1/admin/groups/${legal.id}`, { method: 'DELETE' });
 }
 
-console.log('\n■ 24. スライド作成（web.research・slides.create）');
+console.log('\n■ 24. スライドの作成（web.research・slides.create）');
 {
   const EXT = 'jp.m2office.samples.research-slides';
   const AG = `${EXT}:research-slides`;
@@ -1677,7 +1677,7 @@ console.log('\n■ 33. 許可がなくなったときの業務の扱い（第6.5
   await waitFor('a', m.runId, ['awaiting_approval', 'failed', 'completed'], 20000, 'member');
 
   const { body: impact } = await call('a', '/v1/me/google/impact', {}, 'member');
-  impact.runs?.some((r) => r.runId === m.runId && r.agentName === '議事録作成・共有')
+  impact.runs?.some((r) => r.runId === m.runId && r.agentName === '議事録の作成・共有')
     ? ok(`取り消す前に、止まる業務を示す（${impact.runs.length} 件、定時実行 ${impact.schedules} 件）`) : ng('止まる業務を示さない', JSON.stringify(impact));
   const { body: clientImpact, status: ciStatus } = await call('a', '/v1/admin/connections/google/impact');
   ciStatus === 200 && typeof clientImpact.users === 'number' ? ok(`OAuth クライアントを消す前に、影響する人数を示す（${clientImpact.users} 人）`) : ng(`影響を示さない（${ciStatus}）`);

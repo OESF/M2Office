@@ -10,8 +10,8 @@ export { inferRuleSets, guessRuleSets, type RuleClues } from './rules.js';
 export { writeColumn, rewriteColumn, parseDraft, selfReferenceRule, ColumnWriteError, type ColumnBrief, type ColumnDraft } from './writer.js';
 export { checkWordPress, createWordPressDraft, uploadWordPressMedia, columnHtml, normalizeSiteUrl, type WordPressAuth } from './wordpress.js';
 export {
-  renderCover, coverSvg, wrapTitle, pickPattern, fallbackColor, readableColor, brandColor, illustrationPrompt, checkIllustration, describePhoto, choosePhoto,
-  COVER_WIDTH, COVER_HEIGHT, COVER_AI_MODEL, COVER_AI_TRIES, COVER_AI_MONTHLY_LIMIT, COVER_PATTERNS, type CoverInput, type CoverPattern,
+  renderCover, coverSvg, wrapTitle, pickPattern, fallbackColor, readableColor, tint, brightness, wantsDark, imageWish, brandColor, illustrationPrompt, checkIllustration, describePhoto, choosePhoto,
+  COVER_WIDTH, COVER_HEIGHT, COVER_AI_MODEL, COVER_AI_TRIES, COVER_AI_MONTHLY_LIMIT, COVER_MIN_BRIGHTNESS, COVER_MIN_PHOTO_BRIGHTNESS, COVER_PATTERNS, type CoverInput, type CoverPattern,
 } from './cover.js';
 export { ColumnService, webColumnsAccess, finalMarkdown, COLUMN_PHOTO_MAX_BYTES, type CoverRequest, type ColumnServiceDeps, type ColumnViewer, type ColumnDetail, type ColumnPreview } from './service.js';
 export { COLUMN_TOOLS, type ColumnToolContext } from './tools.js';

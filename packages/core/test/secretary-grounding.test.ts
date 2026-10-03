@@ -104,7 +104,7 @@ test('見つからなければ、根拠を渡さない（作られた根拠を�
 test('照会には取り次がない。作業の依頼には取り次ぐ（仕様書 第10.9.4.1節）', async () => {
   const minutes = OFFICIAL_AGENTS.find((a) => a.id === 'minutes')!;
 
-  // 「会議費の上限は」を「議事録作成」に取り次いでしまった。照会は秘書が答える
+  // 「会議費の上限は」を「議事録の作成」に取り次いでしまった。照会は秘書が答える
   const ask = fake();
   const askLlm = fakeLlm();
   const s1 = new Secretary({ repo: ask.repo, llm: askLlm, connector: {} as never, agents: [minutes] });

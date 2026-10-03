@@ -124,7 +124,7 @@ export type ColumnCoverKind = 'template' | 'ai' | 'photo';
 
 /** カバー画像の背景の呼び方。 */
 export const COLUMN_COVER_KIND_LABELS: Record<ColumnCoverKind, string> = {
-  template: '型', ai: 'AI が描いた挿絵', photo: '会社の写真',
+  template: '型', ai: 'AI 作成の画像', photo: '会社の写真',
 };
 
 /** 版のカバー画像（第32.18.2節）。 */

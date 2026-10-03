@@ -56,7 +56,7 @@ export interface Presence {
   userId: string;
   name: string;
   state: PresenceState;
-  /** 状態に添える言葉（「議事録作成・共有を実行中」「リサーチ中」「承認の依頼 2 件」など）。 */
+  /** 状態に添える言葉（「議事録の作成・共有を実行中」「リサーチ中」「承認の依頼 2 件」など）。 */
   detail: string;
   /** いま使っている業務の名前。無ければ `null`。 */
   agentName: string | null;

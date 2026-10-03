@@ -120,7 +120,7 @@ export function composeApprovalPresent(p: {
     if (!text) continue;
     const repeated = shownArtifacts.find((a) => repeatsArtifact(text, a.body));
     if (repeated) {
-      // 2026-09-25 に、議事録作成の「取得」の段が議事録そのものを書き、承認①の画面に同じ議事録が 2 回並んだ
+      // 2026-09-25 に、業務「議事録の作成・共有」の「取得」の段が議事録そのものを書き、承認①の画面に同じ議事録が 2 回並んだ
       material.push(`### ${label}`, '', `（下の成果物「${repeated.title}」と同じ内容のため、省きました）`, '');
       continue;
     }

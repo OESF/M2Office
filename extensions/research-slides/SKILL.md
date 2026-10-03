@@ -6,14 +6,14 @@ argument-hint: ローカルで動く LLM の最近の製品動向を 8 ページ
 allowed-tools: web.research slides.template slides.create
 metadata:
   author: M2Office
-  version: "2.1.1"
+  version: "2.1.2"
   m2office-id: jp.m2office.samples.research-slides
   m2office-examples: |
     ローカルで動く LLM の最近の製品動向を 8 ページで
     国内の生成 AI の導入事例を 6 ページで
 ---
 
-# スライド作成（見本）
+# スライドの作成（見本）
 
 次の依頼のテーマを Web で調べ、出典つきのスライドにまとめる。
 

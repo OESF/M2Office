@@ -22,7 +22,7 @@ export interface ColumnToolContext {
   access(): Promise<WebColumnSettings | null>;
 }
 
-const UNAVAILABLE = { available: false, reason: 'Web のコラムは使えません（会社で切っているか、利用範囲の外です）' };
+const UNAVAILABLE = { available: false, reason: 'コラムの作成は使えません（会社で切っているか、利用範囲の外です）' };
 
 const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
 
@@ -59,11 +59,11 @@ export const columnsDraft: Tool = {
   risk: 'write-internal',
   activityLabel: 'コラムを書いています',
   helpText: 'テーマを Web で調べ、出典つきのコラムの下書きを書きます。下書きにするだけで、Web には出しません',
-  description: 'テーマ（theme）と取材メモ（memo。任意）から、Web で調べて出典つきのコラムの下書きを書く。題名・字数・赤入れの数・画面の場所（path）を返す',
+  description: 'テーマ（theme）とリクエスト（memo。任意。画像の希望も書ける）から、Web で調べて出典つきのコラムの下書きを書く。題名・字数・赤入れの数・画面の場所（path）を返す',
   args: {
     properties: {
       theme: { type: 'string', description: 'コラムのテーマ（一言。例: 「子どもの歯みがきのコツ」）' },
-      memo: { type: 'string', description: '取材メモ（書く人の経験や考え。任意）' },
+      memo: { type: 'string', description: 'リクエスト（書く人の希望・経験・考え。カバー画像の希望も書ける。任意）' },
     },
     required: ['theme'],
   },
@@ -145,12 +145,13 @@ export const columnsCover: Tool = {
   risk: 'write-internal',
   activityLabel: 'コラムのカバーを作り直しています',
   helpText: 'コラムのカバー画像を作り直します（型・AI の挿絵・会社の写真）。新しい版になるだけで、Web には出しません',
-  description: 'コラムのカバー画像を作り直す。column はコラムの題名かテーマの言葉（無ければいちばん新しいコラム）。kind は template（型）・ai（AI の挿絵）・photo（会社の写真）、hint は雰囲気（「もっと明るく」など）。1 つに決まらなければ候補を返す',
+  description: 'コラムのカバー画像を作り直す。column はコラムの題名かテーマの言葉（無ければいちばん新しいコラム）。kind は template（型）・ai（AI 作成の画像）・photo（会社の写真）、hint は雰囲気（「もっと明るく」など）。previous を true にすると、作り直す前の画像に戻す。1 つに決まらなければ候補を返す',
   args: {
     properties: {
       column: { type: 'string', description: 'コラムの題名かテーマの言葉' },
       kind: { type: 'string', description: '背景の種類', enum: ['template', 'ai', 'photo'] },
       hint: { type: 'string', description: '雰囲気の頼み（「もっと明るく」など）' },
+      previous: { type: 'boolean', description: '作り直す前の画像に戻す' },
     },
   },
   async invoke(args, ctx) {
@@ -163,7 +164,10 @@ export const columnsCover: Tool = {
     if (found.length > 1) return { available: false, reason: 'コラムが 1 つに決まりません', candidates: found.slice(0, 8).map((c) => c.title || c.theme) };
     const c = found[0]!;
     const kind = ['template', 'ai', 'photo'].includes(str(args['kind'])) ? (str(args['kind']) as ColumnCoverKind) : undefined;
-    const err = await service.recover({ tenantId: ctx.tenantId, userId: ctx.userId }, c.id, { ...(kind ? { kind } : {}), hint: str(args['hint']) });
+    const who = { tenantId: ctx.tenantId, userId: ctx.userId };
+    const err = args['previous'] === true
+      ? await service.useCover(who, c.id, 'previous')
+      : await service.recover(who, c.id, { ...(kind ? { kind } : {}), hint: str(args['hint']) });
     if (err) return { available: false, reason: err };
     const v = (await service.store.versions(ctx.tenantId, c.id))[0];
     return {
@@ -185,8 +189,8 @@ export const columnsRules: Tool = {
   name: 'columns.rules',
   risk: 'write-internal',
   activityLabel: 'コラムの表現の決まりを直しています',
-  helpText: 'Web のコラムの赤入れで当てる表現の決まり（医療広告・薬機法・士業）を直します。管理者だけが直せます',
-  description: 'Web のコラムの赤入れで当てる表現の決まりを直す。add と remove に medical（医療広告ガイドライン）・health-products（薬機法・健康増進法）・legal（士業の広告の規程）を入れる。auto を true にすると AI に任せる形に戻す。今の決まりを返す',
+  helpText: 'コラムの赤入れで当てる表現の決まり（医療広告・薬機法・士業）を直します。管理者だけが直せます',
+  description: 'コラムの赤入れで当てる表現の決まりを直す。add と remove に medical（医療広告ガイドライン）・health-products（薬機法・健康増進法）・legal（士業の広告の規程）を入れる。auto を true にすると AI に任せる形に戻す。今の決まりを返す',
   args: {
     properties: {
       add: { type: 'array', description: '足す決まり', items: { type: 'string', description: '決まり', enum: RULE_SETS } },

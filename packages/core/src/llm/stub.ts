@@ -178,6 +178,7 @@ function chooseTools(tools: string[], prompt: string): Call[] {
     const req = extractField(prompt, 'request');
     const kind = /写真/.test(req) ? 'photo' : /型/.test(req) ? 'template' : /挿絵|AI の絵/.test(req) ? 'ai' : '';
     const column = /^(.+?)のコラム/.exec(req)?.[1] ?? '';
+    if (/前の画像|戻して/.test(req)) return [{ name: 'columns.cover', args: { ...(column ? { column } : {}), previous: true } }];
     return [{ name: 'columns.cover', args: { ...(column ? { column } : {}), ...(kind ? { kind } : {}) } }];
   }
   if (has('columns.draft') && instruction.includes('columns.draft')) {
@@ -229,7 +230,7 @@ function chooseTools(tools: string[], prompt: string): Call[] {
       },
     }];
   }
-  // メール整理は、受信トレイの「メイン」の未読を取る（仕様書 第9.5.1節）
+  // メールの整理は、受信トレイの「メイン」の未読を取る（仕様書 第9.5.1節）
   if (has('gmail.unread') && /取得/.test(instruction)) {
     return [{ name: 'gmail.unread', args: {} }];
   }

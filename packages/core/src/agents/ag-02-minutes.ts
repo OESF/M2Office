@@ -1,5 +1,5 @@
 /**
- * @file AG-02 議事録作成・共有のエージェント定義。
+ * @file AG-02 議事録の作成・共有のエージェント定義。
  *
  * @see 仕様書 第9.5.2節
  */
@@ -7,7 +7,7 @@
 import type { AgentDefinition } from '@m2office/shared';
 
 /**
- * AG-02 議事録作成・共有。
+ * AG-02 議事録の作成・共有。
  *
  * プロトタイプで危険度の全レンジを 1 つで通す役割を持つ。
  * `read` → `draft` → 承認 → `write-internal` → 承認 → `external-send`
@@ -25,7 +25,7 @@ export const AG02_MINUTES: AgentDefinition = {
   schemaVersion: 1,
   id: 'minutes',
   version: 1,
-  name: '議事録作成・共有',
+  name: '議事録の作成・共有',
   category: 'meeting',
   description: '会議の記録から議事録を作り、タスクを起票して共有し、社内の知識に登録します',
   locale: 'ja-JP',

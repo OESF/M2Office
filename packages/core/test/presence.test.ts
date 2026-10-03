@@ -42,7 +42,7 @@ const approval = (approverRole: string[], approverUserId: string | null): Approv
 function build(over: Partial<Parameters<typeof buildPresence>[0]> = {}) {
   return buildPresence({
     now: NOW, users, sessions: [], liveRuns: [], stepsByRun: new Map(), pending: [],
-    secretaryEvents: [], agentName: () => '議事録作成・共有', ...over,
+    secretaryEvents: [], agentName: () => '議事録の作成・共有', ...over,
   });
 }
 
@@ -77,7 +77,7 @@ test('強い順に決める: 承認の依頼 → 活動中 → 実行中 → 秘
   assert.deepEqual(people.map((p) => p.state), ['approval', 'activity']);
   assert.equal(people[0]!.detail, '承認の依頼 1 件');
   assert.equal(people[1]!.detail, 'リサーチ中');
-  assert.equal(people[1]!.agentName, '議事録作成・共有');
+  assert.equal(people[1]!.agentName, '議事録の作成・共有');
 
   // 活動の表示名が無ければ「業務を実行中」
   const running = build({
@@ -86,7 +86,7 @@ test('強い順に決める: 承認の依頼 → 活動中 → 実行中 → 秘
     stepsByRun: new Map([['r1', [step({ instruction: '作成する' })]]]),
   });
   assert.equal(running[1]!.state, 'running');
-  assert.equal(running[1]!.detail, '議事録作成・共有を実行中');
+  assert.equal(running[1]!.detail, '議事録の作成・共有を実行中');
 
   // 業務が無く、直近に秘書へ依頼していれば「秘書と会話中」
   const talking = build({ sessions, secretaryEvents: [{ actorId: 'u-member', occurredAt: ago(1) }] });
@@ -128,7 +128,7 @@ test('粒度が「人数と業務だけ」なら、誰かを示さない', () =>
   });
   const summary = summarizePresence(people);
   assert.equal(JSON.stringify(summary).includes('一般'), false, '名前を含めない');
-  assert.deepEqual(summary.agents, ['議事録作成・共有']);
+  assert.deepEqual(summary.agents, ['議事録の作成・共有']);
   assert.equal(summary.counts.find((x) => x.state === 'running')?.n, 1);
   assert.equal(summary.counts.length, 7, '人数 0 の状態も落とさない');
 });
@@ -143,7 +143,7 @@ test('本人がオフラインでも、秘書は定時実行の業務を進め�
   });
   const member = people.find((p) => p.userId === 'u-member')!;
   assert.deepEqual(member.self, { state: 'offline', detail: 'オフライン' });
-  assert.deepEqual(member.secretary, { state: 'running', detail: '議事録作成・共有を実行中（ほか 1 件）', busy: true });
+  assert.deepEqual(member.secretary, { state: 'running', detail: '議事録の作成・共有を実行中（ほか 1 件）', busy: true });
   const admin = people.find((p) => p.userId === 'u-admin')!;
   assert.deepEqual(admin.secretary, { state: 'idle', detail: '待機', busy: false }, '何も無ければ秘書は待機');
 });
@@ -158,9 +158,9 @@ test('秘書の状態は強い順に決める: 活動中 → 実行中 → 承�
     stepsByRun: new Map([['r1', [step({ activity: 'メールを確認中' })]]]),
   }).detail, 'メールを確認中');
   assert.deepEqual(secretaryOfMember({ liveRuns: [{ run: run('r1', 'awaiting_approval'), job: job('r1', 'u-member') }] }),
-    { state: 'awaiting', detail: '議事録作成・共有の承認を待っています', busy: true });
+    { state: 'awaiting', detail: '議事録の作成・共有の承認を待っています', busy: true });
   assert.deepEqual(secretaryOfMember({ liveRuns: [{ run: run('r1', 'queued'), job: job('r1', 'u-member') }] }),
-    { state: 'queued', detail: '議事録作成・共有の順番待ち', busy: true });
+    { state: 'queued', detail: '議事録の作成・共有の順番待ち', busy: true });
   assert.deepEqual(secretaryOfMember({ secretaryEvents: [{ actorId: 'u-member', occurredAt: ago(1) }] }),
     { state: 'talking', detail: '応対中', busy: true });
 });

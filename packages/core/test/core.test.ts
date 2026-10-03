@@ -847,7 +847,7 @@ function minutesDocsLlm(repo: MemoryRepo, connector: MockWorkspaceConnector): Ll
   };
 }
 
-/** 議事録作成を、Google ドキュメントに保存する形で承認②まで進める。 */
+/** 議事録の作成を、Google ドキュメントに保存する形で承認②まで進める。 */
 async function minutesWithDocs(user: { email?: string } = {}) {
   const ctx = setup(AG02_MINUTES, { name: 'noop', args: {} });
   if (user.email) ctx.repo.users = ctx.repo.users.map((u) => (u.id === 'u-member' ? { ...u, email: user.email! } : u));

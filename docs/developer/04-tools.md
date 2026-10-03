@@ -76,7 +76,7 @@
 | `slides.create` | draft | `drive.file`（機密でない）・`drive`（制限付き） | 調べた内容をスライドにまとめ、あなたのドライブに作ります。PowerPoint 形式でも取り出せます。共有はしません |
 | `columns.cover` | write-internal | — | コラムのカバー画像を作り直します（型・AI の挿絵・会社の写真）。新しい版になるだけで、Web には出しません |
 | `columns.draft` | write-internal | — | テーマを Web で調べ、出典つきのコラムの下書きを書きます。下書きにするだけで、Web には出しません |
-| `columns.rules` | write-internal | — | Web のコラムの赤入れで当てる表現の決まり（医療広告・薬機法・士業）を直します。管理者だけが直せます |
+| `columns.rules` | write-internal | — | コラムの赤入れで当てる表現の決まり（医療広告・薬機法・士業）を直します。管理者だけが直せます |
 | `contacts.bulk_draft` | write-internal | — | 名刺の相手へのまとめてのメールの下書きを作ります。送りません |
 | `contacts.save` | write-internal | — | 名刺を連絡先として登録するか、電話番号やメモなどを直します。社内の名刺の置き場に書くだけで、誰にも送りません |
 | `drive.share_company` | write-internal | `drive.file`（機密でない） | M2Office で作ったファイルを、会社の全員が閲覧できるようにします。社外の人は見られません。リンクで誰にでも公開することはしません |
@@ -151,8 +151,8 @@
 | `sheet.render` | `title`（必須）: 題名、`format`: 形式（xlsx・csv）、`columns`（必須）: 列名、`rows`（必須）: 行の配列（各行は値の配列） |
 | `sheets.create` | `title`（必須）: 題名、`columns`（必須）: 列名、`rows`: 行の配列（各行は値の配列）、`folderId`: 入れるフォルダの ID（任意） |
 | `slides.create` | `title`（必須）: 表紙の題名、`subtitle`: 副題（任意）、`slides`（必須）: 本文のスライドの配列（layout・title ほか。12 枚まで）、`sources`: 出典（title・url）の配列、`template`: 会社が登録したテンプレートの名前（任意） |
-| `columns.cover` | `column`: コラムの題名かテーマの言葉、`kind`: 背景の種類（template・ai・photo）、`hint`: 雰囲気の頼み（「もっと明るく」など） |
-| `columns.draft` | `theme`（必須）: コラムのテーマ（一言。例: 「子どもの歯みがきのコツ」）、`memo`: 取材メモ（書く人の経験や考え。任意） |
+| `columns.cover` | `column`: コラムの題名かテーマの言葉、`kind`: 背景の種類（template・ai・photo）、`hint`: 雰囲気の頼み（「もっと明るく」など）、`previous`: 作り直す前の画像に戻す |
+| `columns.draft` | `theme`（必須）: コラムのテーマ（一言。例: 「子どもの歯みがきのコツ」）、`memo`: リクエスト（書く人の希望・経験・考え。カバー画像の希望も書ける。任意） |
 | `columns.rules` | `add`: 足す決まり、`remove`: 外す決まり、`auto`: AI に任せる形に戻す |
 | `contacts.bulk_draft` | `contactIds`（必須）: 宛先の連絡先の ID（contacts.search の結果の contactId）。100 人まで、`subject`（必須）: 件名（{会社名}・{氏名} を使える）、`body`（必須）: 本文。宛名は「{会社名}
 {氏名} 様」のように差し込む。末尾の会社の表示と配信の停止の URL は入れない（自動で入る） |
@@ -193,7 +193,7 @@
 ## 4.5 スライドを作る（調べてスライドにまとめる）
 
 `web.research` と `slides.create` を組み合わせると、「〇〇について調べて、8 ページほどのスライドにまとめて」という業務を作れます。
-サンプルは [extensions/research-slides](../../extensions/research-slides/)（「スライド作成（見本）」。SKILL.md。公式の「スライド作成」と同じ動き）です（仕様書 第9.4.2節）。
+サンプルは [extensions/research-slides](../../extensions/research-slides/)（「スライドの作成（見本）」。SKILL.md。公式の「スライドの作成」と同じ動き）です（仕様書 第9.4.2節）。
 
 ```markdown
 ---
@@ -202,7 +202,7 @@ description: テーマを Web で調べ、出典つきのスライド（Google �
 allowed-tools: web.research slides.template slides.create
 ---
 
-# スライド作成
+# スライドの作成
 
 1. `web.research` で調べる
 2. 調べた結果から構成を決め、`slides.create` を 1 回だけ呼ぶ

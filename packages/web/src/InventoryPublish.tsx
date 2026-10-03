@@ -7,6 +7,7 @@
  * 公開したら、Web サイトに貼る iframe の 1 行と公開のデータの URL を出す。説明文を常に出さない（原則 u11）。
  */
 
+import { copyText } from './clipboard.js';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   INVENTORY_PUBLIC_STATUS_LABELS, type InventoryItemView, type InventoryPublicationScope, type InventoryPublicField, type InventoryPublicSnapshot,
@@ -160,7 +161,7 @@ function PublicationEditor({ view: initial, items, onChanged }: {
     }
   };
   const copy = (text: string) => {
-    void navigator.clipboard?.writeText(text).then(() => setMessage('写しました')).catch(() => setMessage('写せませんでした'));
+    void copyText(text).then((ok) => setMessage(ok ? 'コピーしました' : 'コピーできませんでした'));
   };
 
   return (
@@ -226,13 +227,13 @@ function PublicationEditor({ view: initial, items, onChanged }: {
           <label className="small">Web サイトに貼る
             <span className="copy-row">
               <input readOnly value={iframeTag(view.urls.page)} onFocus={(e) => e.currentTarget.select()} />
-              <button className="btn ghost small" onClick={() => copy(iframeTag(view.urls!.page))}>写す</button>
+              <button className="btn ghost small" onClick={() => copy(iframeTag(view.urls!.page))}>コピー</button>
             </span>
           </label>
           <label className="small">データ（JSON）
             <span className="copy-row">
               <input readOnly value={view.urls.data} onFocus={(e) => e.currentTarget.select()} />
-              <button className="btn ghost small" onClick={() => copy(view.urls!.data)}>写す</button>
+              <button className="btn ghost small" onClick={() => copy(view.urls!.data)}>コピー</button>
             </span>
           </label>
           {live && <a className="small" href={view.urls.page} target="_blank" rel="noreferrer">公開のページを開く</a>}
