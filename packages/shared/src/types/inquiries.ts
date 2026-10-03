@@ -4,6 +4,7 @@
  * 電話・来店などの問い合わせを、秘書に話すか画面の 1 行の欄に書くだけで残す。AI が誰から・用件・分類・どこで知ったか・
  * 次にやること・温度感に分ける。問い合わせは利用範囲の中で会社で共有する。
  * 段 2（第33.18節）で、会社の窓口のアカウント（info@ など）のメールを読み、返事を承認の後に送り、月の振り返りを出す。
+ * 段 3（第33.19節）で、LINE 公式アカウントのやり取りを同じ台帳に入れ、よくある質問をコラムのテーマにつなぐ。
  */
 
 /** 問い合わせの記録の拡張の ID（内蔵の拡張。第12.13節）。 */
@@ -108,6 +109,9 @@ export const INQUIRY_REPLY_STATUS_LABELS: Record<InquiryReplyStatus, string> = {
 export interface InquiryReply {
   id: string;
   inquiryId: string;
+  /** 送る経路（窓口のアカウントのメールか、LINE 公式アカウント）。 */
+  channel: 'mail' | 'line';
+  /** 宛先（メールならアドレス、LINE なら相手の LINE の利用者 ID）。 */
   to: string;
   /** 差出人（お客様が送った宛先。別名から送れなければ窓口のアカウントの本来のアドレス）。 */
   from: string;
@@ -148,6 +152,23 @@ export interface InquiryMailbox {
   connectedAt: string;
 }
 
+/** LINE 公式アカウント（会社の接続。シークレットとトークンは別に預け、ここには名前だけを持つ。第33.6.2節）。 */
+export interface InquiryLine {
+  /** 公式アカウントの名前。 */
+  botName: string;
+  /** LINE の ID（@ で始まる）。 */
+  basicId: string;
+  /** つないだ管理者（LINE から生まれた次にやることの担当）。 */
+  connectedBy: string;
+  connectedAt: string;
+}
+
+/** よくある質問の話題（第33.9節。誰が聞いたかは持たない）。 */
+export interface InquiryFaqTopic {
+  topic: string;
+  count: number;
+}
+
 /** 月の振り返りの数（第33.9節。数はプログラムが数える）。 */
 export interface InquiryMonthStats {
   /** `YYYY-MM`。 */
@@ -169,7 +190,9 @@ export interface InquirySettings {
   enabled: boolean;
   /** 窓口のアカウント（第33.6節）。つないでいなければ `null`。 */
   mailbox: InquiryMailbox | null;
+  /** LINE 公式アカウント（第33.6.2節）。つないでいなければ `null`。 */
+  line: InquiryLine | null;
 }
 
 /** 既定の設定。既定は切り（第33.2節）。 */
-export const DEFAULT_INQUIRY_SETTINGS: InquirySettings = { enabled: false, mailbox: null };
+export const DEFAULT_INQUIRY_SETTINGS: InquirySettings = { enabled: false, mailbox: null, line: null };

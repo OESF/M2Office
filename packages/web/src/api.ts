@@ -19,7 +19,7 @@ import type { CardCorners,
   InventoryBooking, InventoryBookingMapping, InventoryBookingSource, InventoryPublication, InventoryPublicationScope, InventoryPublicSnapshot,
   SignageAsset, SignageEntry, SignageScreen, SignageSettings, SignageInterruptInput, SignageInterruptView, SignagePhrase, SignageSound, SignageSource,
   ColumnWordPress, WebColumn, WebColumnSettings, WebColumnVersion,
-  Inquiry, InquiryDetail, InquiryParty, InquiryTask, InquiryReply, InquiryMailSkipped, InquiryMonthStats, InquirySettings,
+  Inquiry, InquiryDetail, InquiryParty, InquiryTask, InquiryReply, InquiryMailSkipped, InquiryMonthStats, InquirySettings, InquiryFaqTopic,
 } from '@m2office/shared';
 import { debugMode, recordCall } from './debug.js';
 
@@ -1237,6 +1237,8 @@ export const api = {
     deleteReply: (replyId: string) => call<{ ok: true }>(`/inquiries/replies/${encodeURIComponent(replyId)}`, { method: 'DELETE' }),
     /** 返事を承認へ進める（承認の後に窓口のアカウントから送る）。 */
     submitReply: (replyId: string) => call<{ runId: string }>(`/inquiries/replies/${encodeURIComponent(replyId)}/submit`, { method: 'POST', body: '{}' }),
+    /** よくある質問の話題（誰が聞いたかは返さない）。 */
+    faq: () => call<{ topics: InquiryFaqTopic[] }>('/inquiries/faq'),
     /** 月の振り返り（無ければ先月）。 */
     review: (month?: string) => call<{ stats: InquiryMonthStats; text: string }>(`/inquiries/review${month ? `?month=${encodeURIComponent(month)}` : ''}`),
   },
@@ -1940,6 +1942,10 @@ export const api = {
     /** 問い合わせの窓口のアカウントをつなぐ（Google の認可の URL。見本の会社ではすぐつながる）。 */
     connectInquiryMailbox: () => call<{ url?: string; connected?: boolean }>('/admin/extensions/inquiries/mailbox/connect', { method: 'POST', body: '{}' }),
     disconnectInquiryMailbox: () => call<{ ok: true }>('/admin/extensions/inquiries/mailbox', { method: 'DELETE' }),
+    /** LINE 公式アカウントをつなぐ（受け口の URL が返る。1 度だけ）。 */
+    connectInquiryLine: (secret: string, token: string) =>
+      call<{ ok: true; webhookUrl: string }>('/admin/extensions/inquiries/line', { method: 'PUT', body: JSON.stringify({ secret, token }) }),
+    disconnectInquiryLine: () => call<{ ok: true }>('/admin/extensions/inquiries/line', { method: 'DELETE' }),
     setWebColumnSettings: (patch: Partial<Omit<WebColumnSettings, 'enabled' | 'wordpress'>>) =>
       call<{ ok: true; webColumns: WebColumnSettings }>('/admin/extensions/web-columns/settings', { method: 'PUT', body: JSON.stringify(patch) }),
     /** WordPress の入れ先とアプリケーションパスワードを預ける。つながるかを確かめてから預ける。 */

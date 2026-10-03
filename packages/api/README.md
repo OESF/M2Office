@@ -249,6 +249,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/inventory/bookings` | 取り置く（`itemId`・`qty`・`startsAt`・任意の `externalId`・`menu`）。使える数から引く |
 | `POST /v1/inventory/bookings/:id/use` ／ `cancel` | 予約の人が来た（取り置きを使用の記録にする）／ 取り消す（使える数に戻す） |
 | `POST /v1/inventory/menus` | メニューで使う品目を覚える（`menu`・`items`: itemId と qty。空なら在庫を使わない）。品目の分からない予約を取り置き直す |
+| `POST /v1/hooks/line/:key` | **認証なしの受け口**。LINE 公式アカウントの Webhook（仕様書 第33.19節）。会社は鍵（32 文字）のハッシュから引き、その会社のチャネルのシークレットで `X-Line-Signature` を確かめる。知らない鍵・問い合わせの記録か LINE を切った会社は 404、署名が違えば 401、1 MB を超えれば 413。確かめたらすぐ 200 を返し、取り込みは後ろで行う（出来事の ID で 2 度残さない） |
 | `POST /v1/hooks/signage/:key` ／ `POST /v1/hooks/signage`（`Authorization: Bearer`） | **認証なしの受け口**。受付などのシステムから店頭サイネージに割り込みを出す（第31.8.2節）。会社は鍵（32 文字）のハッシュから引く。JSON かフォーム（UTF-8）だけ（ほかは 415）、4 KB を超えれば 413、1 分 30 回を超えれば 429（`retry-after`）。知らない鍵・止めた受け口・切った会社はどれも 404、POST 以外は 405、読めない・知らない画面は 422。標準の形でない本文は、値を消した骨組みだけを推論に渡して対応を推測する（推論が使えなければ 503）。`requestId` を 10 分覚えて二度出さない。記録では URL の鍵を伏せる |
 | `GET /v1/inventory/publications` | 管理者: Web への公開のまとまりの一覧（作った順。`max` は 1 社の上限 8）。1 つも無ければ「公開 1」を作って返す。「Web への公開」を切った会社と管理者でない人は 403（第29.12.1節・第29.12.2節） |
 | `POST /v1/inventory/publications` | 管理者: まとまりを足す（承認する前の形。`name` を省けば「公開 N」）。8 つを超えると 400 |
@@ -275,6 +276,8 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/inquiries/:id/replies` ／ `PUT`・`DELETE /v1/inquiries/replies/:replyId` | 返事の下書きを AI に書かせる（`instruction`）／ 直す（`to`・`subject`・`body`。下書きのときだけ）・削除 |
 | `POST /v1/inquiries/replies/:replyId/submit` | 返事を承認へ進める（業務「問い合わせの返事を送る」。管理者か承認者の承認の後に、窓口のアカウントから届いた宛先で送る） |
 | `GET /v1/inquiries/review` | 月の振り返り（`month`: YYYY-MM。無ければ先月。数はプログラムが数える） |
+| `GET /v1/inquiries/faq` | よくある質問の話題（`days`。既定 90 日。2 件以上・5 つまで。誰が聞いたかは返さない。仕様書 第33.19節） |
+| `PUT` ／ `DELETE /v1/admin/extensions/inquiries/line` | 管理者: LINE 公式アカウントをつなぐ（`secret`・`token`。鍵を確かめて預け、受け口の URL `webhookUrl` を 1 度だけ返す。見本の会社では鍵を確かめない。ローカルの形では 409）／ 外す（受け口も止める） |
 | `POST /v1/admin/extensions/inquiries/mailbox/connect` ／ `DELETE /v1/admin/extensions/inquiries/mailbox` | 管理者: 窓口のアカウントをつなぐ（Google の認可の URL。アカウントを選ばせる。見本の会社ではすぐつながる）／ 外す（Google の許可も取り消す）。戻りは `/v1/oauth/google/callback` |
 | `GET /v1/public/inventory/:key` ／ `:key.json` | **認証なし**。在庫の公開のページ（他のサイトの iframe に入れてよい。`frame-ancestors *`・スクリプトなし）とデータ（`Access-Control-Allow-Origin: *`）。作り直して置いた中身だけを返す。知らない鍵・止めた公開・公開を切った会社はどれも 404 |
 | `POST /v1/hooks/inventory/:key` | **認証なしの受け口**。予約のシステムの Webhook を受ける（第29.13.1節）。会社は鍵（32 文字）のハッシュから引き、ホスト名は見ない。64 KB を超えれば 413。知らない鍵・止めた受け口・引き当てを切った会社はどれも 404、予約として読めなければ 422。項目の対応は最初の予約から推論して受け口に覚える。予約した人の名前・連絡先は残さない |

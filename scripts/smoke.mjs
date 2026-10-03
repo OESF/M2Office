@@ -5330,6 +5330,106 @@ console.log('\n■ 67. 問い合わせの記録の段 2（窓口のアカウン�
   }
 }
 
+console.log('\n■ 68. 問い合わせの記録の段 3（LINE 公式アカウント・よくある質問。第33.19節）');
+{
+  const { default: pg } = await import('pg');
+  const { createHmac } = await import('node:crypto');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const startedAt = new Date().toISOString();
+  const { rows: saved } = await owner.query(`select tenant_id, inquiries from tenant_settings where tenant_id in ('t-alpha', 't-beta')`);
+  const SECRET = 'smoke-line-secret';
+  const cleanup = async () => {
+    await owner.query(`delete from inquiries where tenant_id = 't-alpha' and created_at >= $1`, [startedAt]);
+    await owner.query(`delete from inquiry_line_users where tenant_id = 't-alpha'`);
+    await owner.query(`delete from inquiry_line_events where tenant_id = 't-alpha'`);
+    await owner.query(`delete from inquiry_line_hooks where tenant_id = 't-alpha'`);
+    await owner.query(`delete from tenant_credentials where tenant_id = 't-alpha' and kind = 'line'`);
+  };
+  const hook = (key, body, signature) => fetch(`${API}/v1/hooks/line/${key}`, {
+    method: 'POST', body, headers: { 'content-type': 'application/json', 'x-line-signature': signature },
+  }).then((r) => r.status);
+  const sign = (body, secret = SECRET) => createHmac('sha256', secret).update(body, 'utf8').digest('base64');
+  await cleanup();
+  try {
+    await call('a', '/v1/admin/extensions/inquiries/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const byMember = await call('a', '/v1/admin/extensions/inquiries/line', { method: 'PUT', body: JSON.stringify({ secret: SECRET, token: '' }) }, 'member');
+    const conn = await call('a', '/v1/admin/extensions/inquiries/line', { method: 'PUT', body: JSON.stringify({ secret: SECRET, token: '' }) });
+    const key = String(conn.body?.webhookUrl ?? '').split('/').at(-1);
+    const { rows: stored } = await owner.query(`select hook_hash from inquiry_line_hooks where tenant_id = 't-alpha'`);
+    byMember.status === 403 && conn.status === 200 && /\/v1\/hooks\/line\/[A-Za-z0-9_-]{32}$/.test(conn.body.webhookUrl ?? '') && stored.length === 1 && stored[0].hook_hash !== key
+      ? ok('LINE をつなげるのは管理者だけ。受け口の URL を 1 度だけ返し、鍵はハッシュだけを持つ')
+      : ng('LINE のつなぎが違う', JSON.stringify({ member: byMember.status, conn: conn.body }).slice(0, 300));
+
+    // 受け口: 署名の違うもの・知らない鍵は断る
+    const empty = '{"destination":"U0","events":[]}';
+    const verify = await hook(key, empty, sign(empty));
+    const badSig = await hook(key, empty, sign(empty, 'other'));
+    const unknown = await hook('x'.repeat(32), empty, sign(empty));
+    verify === 200 && badSig === 401 && unknown === 404
+      ? ok('受け口は、その会社のチャネルのシークレットで署名を確かめる（違えば 401、知らない鍵は 404）')
+      : ng('受け口の確かめ方が違う', JSON.stringify({ verify, badSig, unknown }));
+
+    // メッセージ → 問い合わせ（同じ出来事は 2 度残さない）
+    const now = Date.now();
+    const msg = (id, text, t) => ({ type: 'message', mode: 'active', webhookEventId: id, timestamp: t, source: { type: 'user', userId: 'Usmoke0001' }, replyToken: 'r', message: { type: 'text', id: `m${id}`, text } });
+    const b1 = JSON.stringify({ destination: 'U0', events: [msg('smoke-e1', '見積もりをお願いしたいです', now)] });
+    await hook(key, b1, sign(b1));
+    await hook(key, b1, sign(b1));
+    const b2 = JSON.stringify({ destination: 'U0', events: [msg('smoke-e2', '追加でもう 1 点あります', now + 1000)] });
+    await hook(key, b2, sign(b2));
+    let line;
+    for (let i = 0; i < 20 && !(line && line.events?.length >= 2); i += 1) {
+      await sleep(300);
+      const items = (await call('a', '/v1/inquiries?status=open', {}, 'member')).body.items ?? [];
+      const it = items.find((x) => x.channel === 'line');
+      line = it ? (await call('a', `/v1/inquiries/${it.id}`, {}, 'member')).body : null;
+    }
+    const other = line ? await call('b', `/v1/inquiries/${line.inquiry.id}`) : { status: 0 };
+    line?.events?.length === 2 && line.inquiry.from?.name === 'LINE の見本（0001）' && (other.status === 403 || other.status === 404)
+      ? ok('友だちからのメッセージを問い合わせにし、続きは同じ問い合わせに足す。送り直しは 2 度残さない。ほかの会社からは見えない')
+      : ng('LINE のメッセージの取り込みが違う', JSON.stringify({ events: line?.events?.length, from: line?.inquiry?.from, other: other.status }).slice(0, 300));
+
+    // 返事: LINE で返す下書き → 承認 → 見本の口で送る
+    const draft = await call('a', `/v1/inquiries/${line?.inquiry?.id}/replies`, { method: 'POST', body: '{}' }, 'member');
+    const r = draft.body?.reply;
+    const submit = await call('a', `/v1/inquiries/replies/${r?.id}/submit`, { method: 'POST', body: '{}' }, 'member');
+    const run = submit.body?.runId ? await waitFor('a', submit.body.runId, ['awaiting_approval', 'failed', 'completed'], 20000, 'member') : null;
+    const appr = submit.body?.runId ? await approvalFor('a', submit.body.runId, 'admin') : null;
+    draft.status === 201 && r?.channel === 'line' && r?.subject === '' && run?.run?.status === 'awaiting_approval' && /LINE の見本（0001）/.test(appr?.present ?? '')
+      ? ok('LINE の問い合わせの返事は LINE で返す形になり、承認の画面に相手の表示名と本文を出す')
+      : ng('LINE の返事の承認までが違う', JSON.stringify({ draft: draft.status, channel: r?.channel, status: run?.run?.status, present: appr?.present?.slice(0, 200) }).slice(0, 400));
+    if (appr) await call('a', `/v1/approvals/${appr.id}`, { method: 'POST', body: JSON.stringify({ decision: 'approved' }) }, 'admin');
+    const done = submit.body?.runId ? await waitFor('a', submit.body.runId, ['completed', 'failed'], 20000, 'member') : null;
+    const after = (await call('a', `/v1/inquiries/${line?.inquiry?.id}`, {}, 'member')).body;
+    done?.run?.status === 'completed' && after.replies?.[0]?.status === 'sent' && after.events?.at(-1)?.direction === 'out' && after.events?.at(-1)?.channel === 'line'
+      ? ok('承認されると LINE で送り、会話の履歴に足す')
+      : ng('LINE で送ったあとが違う', JSON.stringify({ status: done?.run?.status, reason: done?.run?.failureReason, reply: after.replies?.[0]?.status }).slice(0, 300));
+
+    // よくある質問（誰が聞いたかは返さない）
+    const faq = await call('a', '/v1/inquiries/faq', {}, 'member');
+    faq.status === 200 && Array.isArray(faq.body.topics) && !JSON.stringify(faq.body).includes('Usmoke')
+      ? ok('よくある質問の話題を返す（誰が聞いたかは返さない）')
+      : ng('よくある質問が違う', JSON.stringify(faq.body).slice(0, 300));
+
+    // 外すと受け口も止まる
+    const off = await call('a', '/v1/admin/extensions/inquiries/line', { method: 'DELETE' });
+    const afterOff = await hook(key, empty, sign(empty));
+    const { body: audits } = await call('a', '/v1/admin/audit-events');
+    const acts = (audits.items ?? []).map((e) => e.action);
+    off.status === 200 && afterOff === 404 && ['inquiry.line_connect', 'inquiry.line_create', 'inquiry.line_append', 'inquiry.line_disconnect'].every((a) => acts.includes(a))
+      && !JSON.stringify((audits.items ?? []).filter((e) => String(e.action).startsWith('inquiry.'))).includes('Usmoke')
+      ? ok('LINE を外すと受け口も止まる。つなぐ・受け取る・外すを監査ログに残す（相手の LINE の ID は残さない）')
+      : ng('外したときか監査ログが違う', JSON.stringify({ off: off.status, afterOff, acts: acts.filter((a) => a.startsWith('inquiry.')) }));
+  } catch (err) {
+    ng('問い合わせの記録の段 3 の確認が途中で止まった', String(err?.stack ?? err));
+  } finally {
+    await cleanup();
+    for (const r of saved) await owner.query(`update tenant_settings set inquiries = $2 where tenant_id = $1`, [r.tenant_id, r.inquiries ? JSON.stringify(r.inquiries) : null]);
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

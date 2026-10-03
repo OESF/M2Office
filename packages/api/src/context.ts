@@ -300,6 +300,8 @@ export function buildDeps(): AppDeps {
       repo, llmFor: (tenantId) => ai.llmFor(tenantId), contacts: contactBookFrom(contactStore, cardsAccess(repo)), logger: log,
       // 窓口のアカウント（第33.18節）。見本の会社では見本の箱
       mailbox: { repo, box, sourceFor: (tenantId) => connector.sourceFor(tenantId) },
+      // LINE 公式アカウント（第33.19節）。見本の会社では見本の口
+      line: { repo, box, sourceFor: (tenantId) => connector.sourceFor(tenantId) },
     }),
     access: inquiriesAccess(repo),
   };

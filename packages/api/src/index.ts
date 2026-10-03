@@ -34,6 +34,7 @@ import { inventoryHooksRoute } from './routes/inventory-hooks.js';
 import { signageRoute } from './routes/signage.js';
 import { signagePlayRoute } from './routes/signage-play.js';
 import { signageHooksRoute } from './routes/signage-hooks.js';
+import { lineHooksRoute } from './routes/line-hooks.js';
 import { unsubscribeRoute } from './routes/unsubscribe.js';
 import { inventoryPublicRoute } from './routes/inventory-public.js';
 import { noticesRoute } from './routes/notices.js';
@@ -106,6 +107,8 @@ app.route('/v1/hooks/inventory', inventoryHooksRoute(deps));
 app.route('/v1/public/inventory', inventoryPublicRoute(deps));
 // 店頭サイネージの呼び出しの受け口（第31.8.2節）。受付のシステムがログインの無いまま呼ぶ。鍵から会社を引くため、会社の判定より前に置く
 app.route('/v1/hooks/signage', signageHooksRoute(deps));
+// LINE 公式アカウントの受け口（仕様書 第33.19節）。会社の判定とログインより前に置く
+app.route('/v1/hooks/line', lineHooksRoute(deps));
 // まとめてのメールの配信の停止（第27.9.1節）。受け取った人がログインなしに開く。URL の鍵から会社を決めるため、会社の判定より前に置く
 app.route('/v1/unsubscribe', unsubscribeRoute(deps));
 app.use('/v1/*', resolveTenant(deps));

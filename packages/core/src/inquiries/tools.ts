@@ -186,6 +186,15 @@ export const inquiriesReplySend: Tool = {
     if (!p) return { kind: 'problem', reason: '返事が見つかりません' };
     if (p.problems.length > 0) return { kind: 'problem', reason: p.problems.join('／') };
     const r = p.reply;
+    if (r.channel === 'line') {
+      // LINE は相手の表示名と、今月の残りの通数を見せる（第33.6.2節）
+      const u = await service.store.lineUser(ctx.tenantId, r.to).catch(() => null);
+      const left = p.quota ? (p.quota.limit === null ? '上限なし' : `今月の残り ${Math.max(0, p.quota.limit - p.quota.used)} 通（この返事で 1 通使います）`) : '今月の残りの通数を確かめられませんでした';
+      return {
+        kind: 'ready', args: { replyId: r.id, digest: p.digest }, audience: 'external',
+        shown: [`宛先: LINE の「${u?.displayName || '相手'}」`, `差出人: LINE 公式アカウント「${r.from}」`, `通数: ${left}`, '', r.body].join('\n'),
+      };
+    }
     return {
       kind: 'ready', args: { replyId: r.id, digest: p.digest }, audience: 'external',
       shown: [`宛先: ${r.to}`, `差出人: ${r.from}`, `件名: ${r.subject}`, '', r.body].join('\n'),
@@ -251,5 +260,25 @@ export const inquiriesReview: Tool = {
   },
 };
 
+/**
+ * よくある質問の話題（第33.19節）。誰が聞いたかは返さない。コラムのテーマ案に使う。
+ *
+ * @remarks 危険度 `read`
+ */
+export const inquiriesFaq: Tool = {
+  name: 'inquiries.faq',
+  risk: 'read',
+  activityLabel: 'よくある質問を調べています',
+  helpText: '最近の問い合わせから、何度も聞かれている話題を挙げます（コラムのテーマ案にできます）',
+  description: '最近（days 日。既定 90 日）の問い合わせから、何度も聞かれている話題を件数つきで 5 つまで返す。人や会社の名前は返さない',
+  args: { properties: { days: { type: 'number', description: 'さかのぼる日数' } } },
+  async invoke(args, ctx) {
+    const service = await inquiriesOf(ctx);
+    if (!service) return UNAVAILABLE;
+    const days = typeof args['days'] === 'number' && args['days'] > 0 ? Math.min(args['days'], 366) : 90;
+    return { available: true, days, topics: await service.faq(viewer(ctx), days) };
+  },
+};
+
 /** 問い合わせの記録のツール。 */
-export const INQUIRY_TOOLS: Tool[] = [inquiriesRecord, inquiriesList, inquiriesReplyDraft, inquiriesReplySend, inquiriesBrief, inquiriesReview];
+export const INQUIRY_TOOLS: Tool[] = [inquiriesRecord, inquiriesList, inquiriesReplyDraft, inquiriesReplySend, inquiriesBrief, inquiriesReview, inquiriesFaq];

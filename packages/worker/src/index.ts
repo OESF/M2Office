@@ -140,6 +140,8 @@ const inquiries = new InquiryService({
   store: inquiryStore, repo, llmFor: (tenantId) => ai.llmFor(tenantId), contacts: contactBookFrom(contactStore, cardsAccess(repo)), logger: log,
   // 窓口のアカウント（第33.18節）。見本の会社では見本の箱
   mailbox: { repo, box, sourceFor: (tenantId) => connector.sourceFor(tenantId) },
+  // LINE 公式アカウント（第33.19節）。承認の後に返事を送るのに使う
+  line: { repo, box, sourceFor: (tenantId) => connector.sourceFor(tenantId) },
 });
 const inquiryWatch = new InquiryWatch({ store: inquiryStore, repo, logger: log });
 const engine = new RunEngine({

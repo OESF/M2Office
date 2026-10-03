@@ -1776,3 +1776,9 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .inquiries-reply-edit label { display: flex; flex-direction: column; gap: 2px; font-size: calc(12px * var(--font-scale)); color: var(--muted); }
 .inquiries-reply-edit label input, .inquiries-reply-edit label textarea { color: var(--ink); font-size: calc(14px * var(--font-scale)); }
 .inquiries-reply-sent { margin: 4px 0; }
+.ext-line { margin-top: calc(8px * var(--space-scale)); }
+.ext-line input { min-width: 220px; }
+.ext-line-url { word-break: break-all; font-size: calc(12px * var(--font-scale)); }
+.inquiries-faq ul { margin: 4px 0 0; padding-left: 1.2em; }
+.inquiries-faq li { margin: 4px 0; }
+.inquiries-faq button { margin-left: 8px; }

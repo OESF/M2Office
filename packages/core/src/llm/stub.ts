@@ -168,6 +168,9 @@ function chooseTools(tools: string[], prompt: string): Call[] {
     const q = /(.+?)(さん|様|社)?への返事/.exec(extractField(prompt, 'request'))?.[1]?.trim() ?? '';
     if (q) return [{ name: 'inquiries.reply_draft', args: { q } }];
   }
+  if (has('inquiries.faq') && instruction.includes('inquiries.faq') && /よくある質問|よく聞かれ/.test(extractField(prompt, 'request'))) {
+    return [{ name: 'inquiries.faq', args: {} }];
+  }
   if (has('inquiries.review') && instruction.includes('inquiries.review') && /先月|件数|何件|どこから/.test(extractField(prompt, 'request'))) {
     return [{ name: 'inquiries.review', args: {} }];
   }

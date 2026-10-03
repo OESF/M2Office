@@ -394,6 +394,31 @@ export function extensionsRoute(deps: AppDeps) {
     return c.json({ url });
   });
 
+  /**
+   * LINE 公式アカウントをつなぐ（第33.19節）。チャネルのシークレットとアクセストークンを確かめて預け、受け口の URL を返す（1 度だけ）。
+   * ローカルの形では使えない（社外から届く受け口が要るため。Q-176）。開発の見本の会社では、鍵を確かめず外に送らない口にする。
+   *
+   * @returns 受け口の URL（LINE の管理画面の Webhook に入れる）
+   */
+  app.put(`/${INQUIRIES_EXTENSION_ID}/line`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    if (deps.onsiteTenant) return c.json({ error: '社内の機械だけで動かす形（ローカルの形）では、LINE を使えません。社外から届く受け口が要るためです' }, 409);
+    const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
+    const s = (v: unknown) => (typeof v === 'string' ? v : '');
+    const res = await deps.inquiries.service.connectLine({ tenantId: tenant.id, userId: user.id }, {
+      secret: s(body['secret']), token: s(body['token']), mock: deps.connector.sourceFor(tenant.id) === 'mock',
+    });
+    if ('error' in res) return c.json({ error: res.error }, 400);
+    return c.json({ ok: true, webhookUrl: `${tenantOrigin(c.req.header('origin'), c.req.header('host'))}/v1/hooks/line/${res.key}` });
+  });
+
+  /** LINE 公式アカウントを外す。受け口も止める（問い合わせは消さない）。 */
+  app.delete(`/${INQUIRIES_EXTENSION_ID}/line`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    await deps.inquiries.service.disconnectLine({ tenantId: tenant.id, userId: user.id });
+    return c.json({ ok: true });
+  });
+
   /** 問い合わせの窓口のアカウントを外す。Google の許可も取り消す（問い合わせは消さない）。 */
   app.delete(`/${INQUIRIES_EXTENSION_ID}/mailbox`, async (c) => {
     const { tenant, user } = c.get('ctx');

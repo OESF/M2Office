@@ -648,7 +648,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
             <>
               <h1>問い合わせの記録 <HelpTip article="start-inquiries">電話や来店の問い合わせを、1 行書くか秘書に話すだけで残します。次にやることの期限が近づくと知らせます。</HelpTip></h1>
               <Inquiries inquiryId={view.inquiryId} onOpen={(inquiryId) => setView({ kind: 'inquiries', inquiryId })}
-                onContact={(contactId) => setView({ kind: 'cards', contactId })} userId={me.user.id} changeKey={inquiryChangeKey} />
+                onContact={(contactId) => setView({ kind: 'cards', contactId })} userId={me.user.id} changeKey={inquiryChangeKey}
+                {...(me.webColumns ? { onColumn: async (theme: string) => { const { id } = await api.columns.create(theme, 'お客様からよく聞かれる質問です'); setView({ kind: 'columns', columnId: id }); } } : {})} />
             </>
           )}
           {view.kind === 'signage' && (

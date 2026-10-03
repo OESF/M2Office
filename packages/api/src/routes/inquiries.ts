@@ -97,6 +97,12 @@ export function inquiriesRoute(deps: AppDeps) {
     }
   });
 
+  /** よくある質問の話題（`days`。既定 90 日。誰が聞いたかは返さない）。コラムのテーマ案にする。 */
+  app.get('/faq', async (c) => {
+    const days = Number(c.req.query('days') ?? '90');
+    return c.json({ topics: await service.faq(who(c), Number.isFinite(days) && days > 0 ? Math.min(days, 366) : 90) });
+  });
+
   /** 窓口のアカウントのメールのうち、問い合わせでないと見分けたもの（新しい順）。 */
   app.get('/mail/skipped', async (c) => c.json({ items: await service.skippedMails(who(c)) }));
 

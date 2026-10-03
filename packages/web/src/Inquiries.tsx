@@ -53,21 +53,23 @@ function recordedText(r: Extract<InquiryRecorded, { kind: string }>): string {
  * @param onOpen 問い合わせを開く・一覧に戻る（`null`）
  * @param onContact 名刺管理の連絡先を開く
  */
-export function Inquiries({ inquiryId, onOpen, onContact, changeKey = '' }: {
+export function Inquiries({ inquiryId, onOpen, onContact, changeKey = '', onColumn }: {
   inquiryId: string | null;
   onOpen: (inquiryId: string | null) => void;
   onContact: (contactId: string) => void;
   userId: string;
+  /** よくある質問の話題でコラムを書き始める（コラムの作成を使える人だけに渡す）。 */
+  onColumn?: (theme: string) => Promise<void>;
   /** 秘書が問い合わせを残し終えるたびに変わる値。変わったら読み直す。 */
   changeKey?: string;
 }) {
   return inquiryId
     ? <InquiryView key={inquiryId} id={inquiryId} onBack={() => onOpen(null)} onContact={onContact} onOpen={(id) => onOpen(id)} changeKey={changeKey} />
-    : <InquiryList onOpen={(id) => onOpen(id)} changeKey={changeKey} />;
+    : <InquiryList onOpen={(id) => onOpen(id)} changeKey={changeKey} {...(onColumn ? { onColumn } : {})} />;
 }
 
 /** 1 行の欄と一覧。 */
-function InquiryList({ onOpen, changeKey }: { onOpen: (id: string) => void; changeKey: string }) {
+function InquiryList({ onOpen, changeKey, onColumn }: { onOpen: (id: string) => void; changeKey: string; onColumn?: (theme: string) => Promise<void> }) {
   const [items, setItems] = useState<Inquiry[] | null>(null);
   const [status, setStatus] = useState<'open' | 'all'>('open');
   const [q, setQ] = useState('');
@@ -138,7 +140,7 @@ function InquiryList({ onOpen, changeKey }: { onOpen: (id: string) => void; chan
         <button className={panel === 'review' ? 'btn small' : 'btn ghost small'} onClick={() => setPanel(panel === 'review' ? null : 'review')}>振り返り</button>
       </div>
       {panel === 'skipped' && <SkippedMails onOpen={onOpen} onChanged={load} />}
-      {panel === 'review' && <MonthReview />}
+      {panel === 'review' && <MonthReview {...(onColumn ? { onColumn } : {})} />}
       {error && <p className="error">{error}</p>}
       {items && items.length === 0 && <p className="muted">{q ? '見つかりません。' : status === 'open' ? '対応中の問い合わせはありません。' : 'まだ問い合わせがありません。'}</p>}
       {items && items.length > 0 && (
@@ -397,9 +399,11 @@ function Replies({ inquiryId, replies, onChanged }: { inquiryId: string; replies
       </div>
       {draft && edit && (
         <div className="inquiries-reply-edit">
-          <label>宛先<input value={edit.to} maxLength={200} onChange={(e) => setEdit({ ...edit, to: e.target.value })} /></label>
-          <label>差出人<input value={draft.from} disabled /></label>
-          <label>件名<input value={edit.subject} maxLength={200} onChange={(e) => setEdit({ ...edit, subject: e.target.value })} /></label>
+          {draft.channel === 'line'
+            ? <label>宛先<input value="この問い合わせの LINE の相手" disabled /></label>
+            : <label>宛先<input value={edit.to} maxLength={200} onChange={(e) => setEdit({ ...edit, to: e.target.value })} /></label>}
+          <label>差出人<input value={draft.channel === 'line' ? `LINE 公式アカウント「${draft.from}」` : draft.from} disabled /></label>
+          {draft.channel === 'mail' && <label>件名<input value={edit.subject} maxLength={200} onChange={(e) => setEdit({ ...edit, subject: e.target.value })} /></label>}
           <label>本文<textarea rows={10} value={edit.body} onChange={(e) => setEdit({ ...edit, body: e.target.value })} /></label>
           <div className="row">
             <button className="btn ghost small" disabled={busy || !dirty} onClick={() => void run(() => api.inquiries.updateReply(draft.id, edit), '保存しました', '保存できませんでした')}>保存</button>
@@ -413,7 +417,7 @@ function Replies({ inquiryId, replies, onChanged }: { inquiryId: string; replies
         <details key={r.id} className="inquiries-reply-sent">
           <summary className="small">
             <span className={r.status === 'sent' ? 'badge ok' : 'badge warn'}>{INQUIRY_REPLY_STATUS_LABELS[r.status]}</span>
-            {' '}{r.subject}・{r.to}{r.sentAt ? `・${when(r.sentAt)}` : ''}
+            {' '}{r.channel === 'line' ? 'LINE' : `${r.subject}・${r.to}`}{r.sentAt ? `・${when(r.sentAt)}` : ''}
           </summary>
           <pre className="small">{r.body}</pre>
         </details>
@@ -464,8 +468,8 @@ function SkippedMails({ onOpen, onChanged }: { onOpen: (id: string) => void; onC
   );
 }
 
-/** 月の振り返り（数はプログラムが数える。第33.9節）。 */
-function MonthReview() {
+/** 月の振り返り（数はプログラムが数える。第33.9節）と、よくある質問の話題（第33.19節）。 */
+function MonthReview({ onColumn }: { onColumn?: (theme: string) => Promise<void> }) {
   const [which, setWhich] = useState<'prev' | 'this'>('prev');
   const [text, setText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -482,6 +486,36 @@ function MonthReview() {
       </div>
       {error && <p className="error small">{error}</p>}
       {text && <p className="inquiries-review">{text}</p>}
+      <FaqTopics onColumn={onColumn} />
+    </div>
+  );
+}
+
+/** よくある質問の話題。コラムの作成を使える人には「コラムにする」を出す（話題だけを渡す。誰が聞いたかは渡さない）。 */
+function FaqTopics({ onColumn }: { onColumn?: (theme: string) => Promise<void> }) {
+  const [topics, setTopics] = useState<{ topic: string; count: number }[] | null>(null);
+  const [note, setNote] = useState<Note>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { api.inquiries.faq().then((r) => setTopics(r.topics)).catch(() => setTopics([])); }, []);
+  if (!topics || topics.length === 0) return null;
+  return (
+    <div className="inquiries-faq">
+      <h4>よくある質問（最近 90 日）</h4>
+      <ul>
+        {topics.map((t) => (
+          <li key={t.topic}>
+            {t.topic}（{t.count} 件）
+            {onColumn && (
+              <button className="btn ghost small" disabled={busy}
+                onClick={() => void (async () => {
+                  setBusy(true);
+                  try { await onColumn(t.topic); } catch (e) { setNote({ kind: 'error', text: describeError(e, 'コラムを書き始められませんでした') }); } finally { setBusy(false); }
+                })()}>コラムにする</button>
+            )}
+          </li>
+        ))}
+      </ul>
+      <NoteText note={note} />
     </div>
   );
 }

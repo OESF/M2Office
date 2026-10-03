@@ -551,6 +551,54 @@ function InquiryMailboxFields({ settings, busy, onChanged }: { settings: Inquiry
         {result && <span className={`inquiries-note is-${result === 'connected' ? 'ok' : 'error'}`}>{RESULT_TEXT[result] ?? 'つなげませんでした'}</span>}
       </div>
       {error && <p className="error">{error}</p>}
+      <InquiryLineFields settings={settings} busy={busy || working} onChanged={onChanged} />
+    </div>
+  );
+}
+
+/**
+ * LINE 公式アカウント（仕様書 第33.19節）。チャネルのシークレットとアクセストークンを入れて「つなぐ」と、受け口の URL を 1 度だけ出す。
+ * その URL を LINE の管理画面の Webhook に入れる。
+ */
+function InquiryLineFields({ settings, busy, onChanged }: { settings: InquirySettings; busy: boolean; onChanged: () => void }) {
+  const [secret, setSecret] = useState('');
+  const [token, setToken] = useState('');
+  const [url, setUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [working, setWorking] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const connect = () => {
+    setWorking(true);
+    api.admin.connectInquiryLine(secret.trim(), token.trim()).then((r) => { setUrl(r.webhookUrl); setSecret(''); setToken(''); setError(null); onChanged(); })
+      .catch((e) => setError(describeError(e, 'つなげませんでした'))).finally(() => setWorking(false));
+  };
+  const disconnect = () => {
+    if (!window.confirm('LINE 公式アカウントを外しますか。メッセージを受け取らなくなり、LINE で返事も送れなくなります（問い合わせは消えません）')) return;
+    setWorking(true);
+    api.admin.disconnectInquiryLine().then(() => { setUrl(null); setError(null); onChanged(); })
+      .catch((e) => setError(describeError(e, '外せませんでした'))).finally(() => setWorking(false));
+  };
+  return (
+    <div className="ext-line">
+      <div className="row wrap">
+        <span>LINE 公式アカウント: {settings.line ? <strong>{settings.line.botName}{settings.line.basicId ? `（${settings.line.basicId}）` : ''}</strong> : <span className="muted">つないでいません</span>}</span>
+        {settings.line && <button className="btn ghost small" disabled={busy || working} onClick={disconnect}>外す</button>}
+      </div>
+      {!settings.line && (
+        <div className="row wrap">
+          <input type="password" value={secret} autoComplete="off" placeholder="チャネルのシークレット" aria-label="チャネルのシークレット" onChange={(e) => setSecret(e.target.value)} />
+          <input type="password" value={token} autoComplete="off" placeholder="チャネルのアクセストークン（長期）" aria-label="チャネルのアクセストークン" onChange={(e) => setToken(e.target.value)} />
+          <button className="btn small" disabled={busy || working || !secret.trim()} onClick={connect}>{working ? 'つないでいます…' : 'つなぐ'}</button>
+        </div>
+      )}
+      {url && (
+        <div className="row wrap">
+          <span className="muted">受け口の URL（LINE の管理画面の Webhook に入れてください。いまだけ出ます）:</span>
+          <code className="ext-line-url">{url}</code>
+          <button className="btn ghost small" onClick={() => void copyText(url).then((ok) => { if (ok) { setCopied(true); setTimeout(() => setCopied(false), 1500); } })}>{copied ? 'コピーしました' : 'コピー'}</button>
+        </div>
+      )}
+      {error && <p className="error">{error}</p>}
     </div>
   );
 }

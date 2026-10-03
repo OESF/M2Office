@@ -195,6 +195,10 @@ const ACTION_LABELS: Record<string, string> = {
   'inquiry.reply_draft': '問い合わせの返事の下書きを書いた',
   'inquiry.reply_submit': '問い合わせの返事を承認へ進めた',
   'inquiry.reply_send': '問い合わせの返事を送った',
+  'inquiry.line_connect': '問い合わせの LINE 公式アカウントをつないだ',
+  'inquiry.line_disconnect': '問い合わせの LINE 公式アカウントを外した',
+  'inquiry.line_create': 'LINE のメッセージから問い合わせを残した',
+  'inquiry.line_append': 'LINE のメッセージを問い合わせに足した',
   // 人事・給与（仕様書 第30.21節。他人の台帳を見ただけでも残す）
   'hr.list': '従業員の一覧を見た',
   'hr.view': '従業員の台帳を見た',
@@ -383,7 +387,7 @@ function targetOf(e: AuditEvent, names: AuditNames): string {
     // コラムの題名は出さない（テーマは記録の詳細にある）
     case 'web_column': return id.startsWith('col-') ? `コラム ${id.slice(4, 12)}` : 'コラムの作成の設定';
     // 問い合わせはお客様の名前を出さない。ID の頭だけ
-    case 'inquiry': return id === 'mailbox' ? '問い合わせの窓口のアカウント' : `問い合わせ ${id.slice(4, 12)}`;
+    case 'inquiry': return id === 'mailbox' ? '問い合わせの窓口のアカウント' : id === 'line' ? '問い合わせの LINE 公式アカウント' : `問い合わせ ${id.slice(4, 12)}`;
     case 'tool': {
       // 会社の接続のツール（`slack.slack_send_message`）は接続の名前を添える
       const [head, ...rest] = id.split('.');

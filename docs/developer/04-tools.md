@@ -49,6 +49,7 @@
 | `hr.deadlines` | read | — | 源泉所得税と住民税の納付、年度更新、算定基礎届、入退社の手続き、契約の満了などの近い期限を調べます。人事の担当者だけが使えます |
 | `image.read_text` | read | — | 写真やスキャンした画像から文字を読み取ります。読み取りは確実ではないため、内容の確認が要ります |
 | `inquiries.brief` | read | — | 朝のブリーフに載せる、今日が期限の問い合わせと返事を待たせている問い合わせを読みます |
+| `inquiries.faq` | read | — | 最近の問い合わせから、何度も聞かれている話題を挙げます（コラムのテーマ案にできます） |
 | `inquiries.list` | read | — | 問い合わせの記録を読みます（対応中・最近のもの・人や会社の名前で探す） |
 | `inquiries.review` | read | — | ある月の問い合わせの件数・経路・どこで知ったか・分類を数えます |
 | `inventory.forecast` | read | — | 在庫の使う速さから、あと何日で無くなるか・残りわずか・使用期限の近いものと、発注の案を出します。見るだけです |
@@ -132,6 +133,7 @@
 | `hr.deadlines` | `days`: 何日先までか（既定 7） |
 | `image.read_text` | `fileId`（必須）: ファイルの ID |
 | `inquiries.brief` | なし |
+| `inquiries.faq` | `days`: さかのぼる日数 |
 | `inquiries.list` | `status`: 対応中か、すべてか（open・all）、`days`: 最近何日に動いたもの、`q`: 人・会社・用件の言葉、`waiting`: 次にやることが残っているものだけ |
 | `inquiries.review` | `month`: 月（YYYY-MM） |
 | `inventory.forecast` | `query`: 品目の名前の一部（省けば全品目）、`all`: 足りている品目も返すか |

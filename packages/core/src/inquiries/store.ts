@@ -1,5 +1,5 @@
 /**
- * @file 問い合わせの記録の置き場（仕様書 第33.13節・第33.17節・第33.18節、移行 065〜067）。PostgreSQL と、自動テスト用のメモリの 2 つ。
+ * @file 問い合わせの記録の置き場（仕様書 第33.13節・第33.17節・第33.18節・第33.19節、移行 065〜068）。PostgreSQL と、自動テスト用のメモリの 2 つ。
  *
  * 問い合わせは利用範囲の中で会社で共有する。会社の境界はデータベースの行単位の制限でも効く。
  * 利用者の名前は置き場では持たず、処理（InquiryService）が埋める。
@@ -22,6 +22,8 @@ export interface NewInquiry {
   temperature: InquiryTemperature;
   receivedBy: string;
   createdBy: string;
+  /** LINE の相手のものなら、その LINE の利用者 ID。 */
+  lineUserId?: string | null;
 }
 
 /** 直せる項目。 */
@@ -71,6 +73,8 @@ export interface MailLog {
 /** 足す返事。 */
 export interface NewReply {
   inquiryId: string;
+  /** 既定は `mail`。 */
+  channel?: 'mail' | 'line';
   to: string;
   from: string;
   subject: string;
@@ -82,6 +86,16 @@ export interface NewReply {
 
 /** 返事と、返す元のメール。 */
 export type StoredReply = InquiryReply & { replyToMessage: string | null; threadId: string | null };
+
+/** LINE の相手（友だち）。 */
+export interface LineUser {
+  lineUserId: string;
+  displayName: string;
+  /** いま続いている問い合わせ。 */
+  inquiryId: string | null;
+  following: boolean;
+  lastAt: string;
+}
 
 /** 月の振り返りに数える 1 件。 */
 export interface MonthRow {
@@ -150,6 +164,18 @@ export interface InquiryStore {
   monthRows(tenantId: string, from: string, to: string): Promise<MonthRow[]>;
   /** 月の振り返りを記録する。すでにあれば何もせず `false`。 */
   saveReview(tenantId: string, stats: InquiryMonthStats): Promise<boolean>;
+
+  // ---- 段 3: LINE 公式アカウント（第33.6.2節・第33.19節） ----
+  /** 受け口の鍵のハッシュから会社を引く（会社の境界の外から呼ぶ。鍵を知る相手だけが会社に届く）。 */
+  lineTenantOf(hash: string): Promise<string | null>;
+  setLineHook(tenantId: string, hash: string): Promise<void>;
+  deleteLineHook(tenantId: string): Promise<void>;
+  lineUser(tenantId: string, lineUserId: string): Promise<LineUser | null>;
+  saveLineUser(tenantId: string, u: LineUser): Promise<void>;
+  /** 出来事を記録する。すでに受け取っていれば `false`（送り直し）。 */
+  takeLineEvent(tenantId: string, eventId: string): Promise<boolean>;
+  /** 問い合わせの LINE の相手（LINE のものでなければ `null`）。 */
+  lineUserIdOf(tenantId: string, inquiryId: string): Promise<string | null>;
 }
 
 interface InquiryRow {
@@ -170,7 +196,7 @@ interface EventRow {
 }
 
 interface ReplyRow {
-  id: string; inquiry_id: string; to_address: string; from_address: string; subject: string; body: string; reply_to_message: string | null;
+  id: string; inquiry_id: string; channel: 'mail' | 'line'; to_address: string; from_address: string; subject: string; body: string; reply_to_message: string | null;
   thread_id: string | null; status: InquiryReplyStatus; run_id: string | null; created_by: string; created_at: Date | string; sent_at: Date | string | null;
 }
 
@@ -180,7 +206,7 @@ const toEvent = (r: EventRow): InquiryEvent => ({
 });
 
 const toReply = (r: ReplyRow): StoredReply => ({
-  id: r.id, inquiryId: r.inquiry_id, to: r.to_address, from: r.from_address, subject: r.subject, body: r.body, status: r.status, runId: r.run_id,
+  id: r.id, inquiryId: r.inquiry_id, channel: r.channel ?? 'mail', to: r.to_address, from: r.from_address, subject: r.subject, body: r.body, status: r.status, runId: r.run_id,
   createdBy: r.created_by, createdByName: '', createdAt: iso(r.created_at), sentAt: r.sent_at == null ? null : iso(r.sent_at),
   replyToMessage: r.reply_to_message, threadId: r.thread_id,
 });
@@ -281,9 +307,9 @@ export class PostgresInquiryStore implements InquiryStore {
     const id = `inq-${randomUUID()}`;
     await this.q(tenantId,
       `insert into inquiries (id, tenant_id, from_name, from_company, from_phone, from_email, contact_id, channel, category, summary, source,
-         temperature, received_by, created_by) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+         temperature, received_by, created_by, line_user_id) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
       [id, tenantId, n.from.name, n.from.company, n.from.phone, n.from.email, n.contactId, n.channel, n.category, n.summary, n.source,
-        n.temperature, n.receivedBy, n.createdBy]);
+        n.temperature, n.receivedBy, n.createdBy, n.lineUserId ?? null]);
     return id;
   }
 
@@ -448,9 +474,9 @@ export class PostgresInquiryStore implements InquiryStore {
   async addReply(tenantId: string, r: NewReply): Promise<string> {
     const id = `iqr-${randomUUID()}`;
     await this.q(tenantId,
-      `insert into inquiry_replies (id, tenant_id, inquiry_id, to_address, from_address, subject, body, reply_to_message, thread_id, created_by)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-      [id, tenantId, r.inquiryId, r.to, r.from, r.subject, r.body, r.replyToMessage, r.threadId, r.createdBy]);
+      `insert into inquiry_replies (id, tenant_id, inquiry_id, to_address, from_address, subject, body, reply_to_message, thread_id, created_by, channel)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      [id, tenantId, r.inquiryId, r.to, r.from, r.subject, r.body, r.replyToMessage, r.threadId, r.createdBy, r.channel ?? 'mail']);
     return id;
   }
 
@@ -507,16 +533,61 @@ export class PostgresInquiryStore implements InquiryStore {
       [tenantId, stats.month, JSON.stringify(stats)]);
     return rows.length > 0;
   }
+
+  async lineTenantOf(hash: string): Promise<string | null> {
+    // 会社が決まる前に引く。行単位の制限を越えるのは、鍵のハッシュから会社だけを返す関数に限る（移行 068）
+    const r = await this.pool.query<{ t: string | null }>(`select m2o_inquiry_line_tenant($1) as t`, [hash]);
+    return r.rows[0]?.t ?? null;
+  }
+
+  async setLineHook(tenantId: string, hash: string): Promise<void> {
+    await this.q(tenantId,
+      `insert into inquiry_line_hooks (tenant_id, hook_hash) values ($1, $2) on conflict (tenant_id) do update set hook_hash = excluded.hook_hash, created_at = now()`,
+      [tenantId, hash]);
+  }
+
+  async deleteLineHook(tenantId: string): Promise<void> {
+    await this.q(tenantId, `delete from inquiry_line_hooks where tenant_id = $1`, [tenantId]);
+  }
+
+  async lineUser(tenantId: string, lineUserId: string): Promise<LineUser | null> {
+    const rows = await this.q<{ line_user_id: string; display_name: string; inquiry_id: string | null; following: boolean; last_at: Date | string }>(tenantId,
+      `select * from inquiry_line_users where tenant_id = $1 and line_user_id = $2`, [tenantId, lineUserId]);
+    const r = rows[0];
+    return r ? { lineUserId: r.line_user_id, displayName: r.display_name, inquiryId: r.inquiry_id, following: r.following, lastAt: iso(r.last_at) } : null;
+  }
+
+  async saveLineUser(tenantId: string, u: LineUser): Promise<void> {
+    await this.q(tenantId,
+      `insert into inquiry_line_users (tenant_id, line_user_id, display_name, inquiry_id, following, last_at) values ($1, $2, $3, $4, $5, $6)
+       on conflict (tenant_id, line_user_id) do update set display_name = excluded.display_name, inquiry_id = excluded.inquiry_id,
+         following = excluded.following, last_at = excluded.last_at`,
+      [tenantId, u.lineUserId, u.displayName.slice(0, 100), u.inquiryId, u.following, u.lastAt]);
+  }
+
+  async lineUserIdOf(tenantId: string, inquiryId: string): Promise<string | null> {
+    const rows = await this.q<{ line_user_id: string | null }>(tenantId, `select line_user_id from inquiries where tenant_id = $1 and id = $2`, [tenantId, inquiryId]);
+    return rows[0]?.line_user_id ?? null;
+  }
+
+  async takeLineEvent(tenantId: string, eventId: string): Promise<boolean> {
+    const rows = await this.q<{ event_id: string }>(tenantId,
+      `insert into inquiry_line_events (tenant_id, event_id) values ($1, $2) on conflict do nothing returning event_id`, [tenantId, eventId]);
+    return rows.length > 0;
+  }
 }
 
 /** 自動テスト用のメモリの置き場。 */
 export class MemoryInquiryStore implements InquiryStore {
-  readonly rows = new Map<string, Omit<Inquiry, 'nextTask'> & { tenantId: string; idleNotifiedAt: string | null }>();
+  readonly rows = new Map<string, Omit<Inquiry, 'nextTask'> & { tenantId: string; idleNotifiedAt: string | null; lineUserId?: string | null }>();
   readonly allEvents: (InquiryEvent & { tenantId: string; inquiryId: string; createdAt: string })[] = [];
   readonly mails: (MailLog & { tenantId: string })[] = [];
   readonly cursors = new Map<string, string>();
   readonly allReplies: (StoredReply & { tenantId: string })[] = [];
   readonly reviews = new Map<string, InquiryMonthStats>();
+  readonly lineHooks = new Map<string, string>();
+  readonly lineUsers = new Map<string, LineUser>();
+  readonly lineEvents = new Set<string>();
   readonly allTasks: (DueTask & { tenantId: string; eventId: string | null })[] = [];
 
   private next(tenantId: string, id: string): InquiryTask | null {
@@ -526,8 +597,8 @@ export class MemoryInquiryStore implements InquiryStore {
     return t ? { id: t.id, assignee: t.assignee, assigneeName: '', what: t.what, due: t.due, doneAt: null, createdAt: t.createdAt } : null;
   }
 
-  private view(r: Omit<Inquiry, 'nextTask'> & { tenantId: string; idleNotifiedAt: string | null }): Inquiry {
-    const { tenantId, idleNotifiedAt: _i, ...rest } = r;
+  private view(r: Omit<Inquiry, 'nextTask'> & { tenantId: string; idleNotifiedAt: string | null; lineUserId?: string | null }): Inquiry {
+    const { tenantId, idleNotifiedAt: _i, lineUserId: _l, ...rest } = r;
     return { ...rest, nextTask: this.next(tenantId, r.id) };
   }
 
@@ -556,7 +627,7 @@ export class MemoryInquiryStore implements InquiryStore {
     this.rows.set(id, {
       id, tenantId, from: { ...n.from }, contactId: n.contactId, channel: n.channel, category: n.category, summary: n.summary, source: n.source,
       temperature: n.temperature, status: 'open', receivedBy: n.receivedBy, receivedByName: '', firstAt: at, lastAt: at,
-      createdBy: n.createdBy, createdAt: at, updatedAt: at, idleNotifiedAt: null,
+      createdBy: n.createdBy, createdAt: at, updatedAt: at, idleNotifiedAt: null, lineUserId: n.lineUserId ?? null,
     });
     return id;
   }
@@ -694,7 +765,7 @@ export class MemoryInquiryStore implements InquiryStore {
   async addReply(tenantId: string, r: NewReply): Promise<string> {
     const id = `iqr-${randomUUID()}`;
     this.allReplies.push({
-      id, tenantId, inquiryId: r.inquiryId, to: r.to, from: r.from, subject: r.subject, body: r.body, status: 'draft', runId: null,
+      id, tenantId, inquiryId: r.inquiryId, channel: r.channel ?? 'mail', to: r.to, from: r.from, subject: r.subject, body: r.body, status: 'draft', runId: null,
       createdBy: r.createdBy, createdByName: '', createdAt: new Date().toISOString(), sentAt: null, replyToMessage: r.replyToMessage, threadId: r.threadId,
     });
     return id;
@@ -745,6 +816,40 @@ export class MemoryInquiryStore implements InquiryStore {
     const key = `${tenantId}:${stats.month}`;
     if (this.reviews.has(key)) return false;
     this.reviews.set(key, stats);
+    return true;
+  }
+
+  async lineTenantOf(hash: string): Promise<string | null> {
+    for (const [tenantId, h] of this.lineHooks) if (h === hash) return tenantId;
+    return null;
+  }
+
+  async setLineHook(tenantId: string, hash: string): Promise<void> {
+    this.lineHooks.set(tenantId, hash);
+  }
+
+  async deleteLineHook(tenantId: string): Promise<void> {
+    this.lineHooks.delete(tenantId);
+  }
+
+  async lineUser(tenantId: string, lineUserId: string): Promise<LineUser | null> {
+    const u = this.lineUsers.get(`${tenantId}:${lineUserId}`);
+    return u ? { ...u } : null;
+  }
+
+  async saveLineUser(tenantId: string, u: LineUser): Promise<void> {
+    this.lineUsers.set(`${tenantId}:${u.lineUserId}`, { ...u });
+  }
+
+  async lineUserIdOf(tenantId: string, inquiryId: string): Promise<string | null> {
+    const r = this.rows.get(inquiryId);
+    return r && r.tenantId === tenantId ? r.lineUserId ?? null : null;
+  }
+
+  async takeLineEvent(tenantId: string, eventId: string): Promise<boolean> {
+    const key = `${tenantId}:${eventId}`;
+    if (this.lineEvents.has(key)) return false;
+    this.lineEvents.add(key);
     return true;
   }
 }
