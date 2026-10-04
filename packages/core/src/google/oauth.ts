@@ -54,6 +54,8 @@ export function googleScopeLabel(name: string): string {
     'drive.file': 'M2Office で作った・あなたが選んだファイルを扱う',
     drive: 'ドライブのファイルを扱う（会社のスライドのテンプレートを複製するため）',
     'directory.readonly': '社内の人を探す',
+    'analytics.readonly': 'Google アナリティクスの数字を見る',
+    'webmasters.readonly': 'Search Console の数字を見る',
     'meetings.space.readonly': '参加した会議の文字起こしを読む',
     openid: 'ログイン', email: 'メールアドレスを知る',
   };
@@ -75,11 +77,16 @@ export function buildGoogleAuthUrl(p: {
   clientId: string; redirectUri: string; scopes: string[]; state: string; codeChallenge: string; loginHint?: string;
   /** アカウントを選ばせる（本人ではない窓口のアカウントでつなぐとき。第33.18節）。 */
   selectAccount?: boolean;
+  /**
+   * 前に許した権限を引き継がない（`include_granted_scopes` を付けない）。Web の振り返りの許可のように、
+   * 決まった権限だけを別に預けるときに使う（本人の接続の権限まで預けないため。第34.18節）。
+   */
+  onlyTheseScopes?: boolean;
 }, endpoints: GoogleOAuthEndpoints = GOOGLE_OAUTH_ENDPOINTS): string {
   const scope = [...new Set([...GOOGLE_LOGIN_SCOPES, ...p.scopes])].map(googleScopeUrl).join(' ');
   const q = new URLSearchParams({
     client_id: p.clientId, redirect_uri: p.redirectUri, response_type: 'code', scope,
-    access_type: 'offline', prompt: p.selectAccount ? 'consent select_account' : 'consent', include_granted_scopes: 'true',
+    access_type: 'offline', prompt: p.selectAccount ? 'consent select_account' : 'consent', ...(p.onlyTheseScopes ? {} : { include_granted_scopes: 'true' }),
     state: p.state, code_challenge: p.codeChallenge, code_challenge_method: 'S256',
     ...(p.loginHint ? { login_hint: p.loginHint } : {}),
   });

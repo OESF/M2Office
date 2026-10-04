@@ -7,7 +7,7 @@
  */
 
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
-import { CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, showsCaptions, type Notification, type UserSettings } from '@m2office/shared';
+import { CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, showsCaptions, type Notification, type UserSettings } from '@m2office/shared';
 import {
   addCategory, assignCategory, checkCategoryName, groupMenu, removeCategory, togglePinned, type MenuSection,
 } from './menu.js';
@@ -31,6 +31,7 @@ import { Columns } from './Columns.js';
 import { Inquiries } from './Inquiries.js';
 import { Competitors } from './Competitors.js';
 import { Announcements } from './Announcements.js';
+import { WebReview } from './WebReview.js';
 import { Signage } from './Signage.js';
 import { Hr } from './Hr.js';
 import { MyAttendance } from './MyAttendance.js';
@@ -112,6 +113,7 @@ type View =
   | { kind: 'inquiries'; inquiryId: string | null }
   | { kind: 'competitors' }
   | { kind: 'announcements'; announcementId: string | null }
+  | { kind: 'webReview'; month: string | null }
   | { kind: 'settings'; section: SettingsSection }
   | { kind: 'help'; articleId: string | null };
 
@@ -127,6 +129,7 @@ function viewPath(v: View): string {
     case 'columns': return routePath({ kind: 'columns', columnId: v.columnId });
     case 'inquiries': return routePath({ kind: 'inquiries', inquiryId: v.inquiryId });
     case 'announcements': return routePath({ kind: 'announcements', announcementId: v.announcementId });
+    case 'webReview': return routePath({ kind: 'webReview', month: v.month });
     case 'help': return routePath({ kind: 'help', articleId: v.articleId });
     default: return routePath({ kind: v.kind });
   }
@@ -150,6 +153,7 @@ function viewOf(r: Route): View | null {
     case 'columns': return { kind: 'columns', columnId: r.columnId };
     case 'inquiries': return { kind: 'inquiries', inquiryId: r.inquiryId };
     case 'announcements': return { kind: 'announcements', announcementId: r.announcementId };
+    case 'webReview': return { kind: 'webReview', month: r.month };
     case 'help': return { kind: 'help', articleId: r.articleId };
     default: return { kind: r.kind };
   }
@@ -390,6 +394,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ...(me.inquiries ? [{ id: INQUIRIES_EXTENSION_ID, name: '問い合わせの記録', description: '電話や来店の問い合わせを、話すか書くだけで残し、次にやることを知らせる', icon: 'chat' as IconName, agent: null }] : []),
     // お知らせの作成（仕様書 第35.17節）。会社で入れていて利用範囲の人にだけ出す
     ...(me.announcements ? [{ id: ANNOUNCEMENTS_EXTENSION_ID, name: 'お知らせの作成', description: '休業などのお知らせを 1 つ作り、Web サイト・LINE・店頭の画面にまとめて出す', icon: 'notifications' as IconName, agent: null }] : []),
+    // Web の振り返り（仕様書 第34.18節）。会社で入れていて利用範囲の人にだけ出す
+    ...(me.webReview ? [{ id: WEB_REVIEW_EXTENSION_ID, name: 'Web の振り返り', description: '会社の Web サイトの数字を月に 1 回、ふつうの言葉で届ける', icon: 'usage' as IconName, agent: null }] : []),
     // 競合の分析（仕様書 第36.18節）。会社で入れていて利用範囲の人にだけ出す
     ...(me.competitors ? [{ id: COMPETITORS_EXTENSION_ID, name: '競合の分析', description: '近くの同業や同じような事業の会社を探し、公開のページから動きと違いをまとめる', icon: 'research' as IconName, agent: null }] : []),
     ...(me.webColumns ? [{ id: WEB_COLUMNS_EXTENSION_ID, name: 'コラムの作成', description: 'テーマを調べて出典つきのコラムを書き、承認して WordPress に入れる', icon: 'doc' as IconName, agent: null }] : []),
@@ -405,11 +411,12 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
           : m.id === WEB_COLUMNS_EXTENSION_ID ? setView({ kind: 'columns', columnId: null })
             : m.id === INQUIRIES_EXTENSION_ID ? setView({ kind: 'inquiries', inquiryId: null })
               : m.id === COMPETITORS_EXTENSION_ID ? setView({ kind: 'competitors' })
-                : m.id === ANNOUNCEMENTS_EXTENSION_ID ? setView({ kind: 'announcements', announcementId: null }) : setView({ kind: 'cards', contactId: null }));
+                : m.id === ANNOUNCEMENTS_EXTENSION_ID ? setView({ kind: 'announcements', announcementId: null })
+                  : m.id === WEB_REVIEW_EXTENSION_ID ? setView({ kind: 'webReview', month: null }) : setView({ kind: 'cards', contactId: null }));
   const isOpen = (m: MenuItem) => (m.agent ? view.kind === 'agent' && view.agent.id === m.id
     : m.id === INVENTORY_EXTENSION_ID ? view.kind === 'inventory' : m.id === HR_EXTENSION_ID ? view.kind === 'hr'
       : m.id === SIGNAGE_EXTENSION_ID ? view.kind === 'signage' : m.id === WEB_COLUMNS_EXTENSION_ID ? view.kind === 'columns'
-        : m.id === INQUIRIES_EXTENSION_ID ? view.kind === 'inquiries' : m.id === COMPETITORS_EXTENSION_ID ? view.kind === 'competitors' : m.id === ANNOUNCEMENTS_EXTENSION_ID ? view.kind === 'announcements' : view.kind === 'cards');
+        : m.id === INQUIRIES_EXTENSION_ID ? view.kind === 'inquiries' : m.id === COMPETITORS_EXTENSION_ID ? view.kind === 'competitors' : m.id === ANNOUNCEMENTS_EXTENSION_ID ? view.kind === 'announcements' : m.id === WEB_REVIEW_EXTENSION_ID ? view.kind === 'webReview' : view.kind === 'cards');
   // ピン止めとカテゴリーは個人設定（メニュー）に保存し、端末をまたいで同じにする。保存に失敗したら読み直す
   const saveMenu = (saved: UserSettings['menu']) => {
     setMenu(saved);
@@ -675,6 +682,12 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
                 onApprovals={() => { void refresh(); }} changeKey={announcementChangeKey} />
             </>
           )}
+          {view.kind === 'webReview' && (
+            <>
+              <h1>Web の振り返り <HelpTip article="start-web-review">会社の Web サイトの数字（アナリティクスと Search Console）を、月に 1 回ふつうの言葉で届けます。秘書に聞けば数字を答えます。</HelpTip></h1>
+              <WebReview month={view.month} onOpen={(month) => setView({ kind: 'webReview', month })} />
+            </>
+          )}
           {view.kind === 'competitors' && (
             <>
               <h1>競合の分析 <HelpTip article="start-competitors">近くの同業や同じような事業の会社を AI が探し、公開のページから動きと違いをまとめます。</HelpTip></h1>
@@ -862,6 +875,7 @@ const VIEW_LABELS: Record<string, string> = {
   inquiries: '問い合わせの記録',
   competitors: '競合の分析',
   announcements: 'お知らせの作成',
+  webReview: 'Web の振り返り',
   settings: '個人設定',
 };
 

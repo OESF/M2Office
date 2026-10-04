@@ -18,8 +18,11 @@ export interface OAuthPending {
   returnTo: string;
   /** 会社の接続の認可のとき、その接続の ID（仕様書 第12.11.6.3節）。Google のときは無い。 */
   connectionId?: string;
-  /** 問い合わせの窓口のアカウントをつなぐとき（仕様書 第33.18節）。本人の Google の接続としては保存しない。 */
-  purpose?: 'inquiry-mailbox';
+  /**
+   * 本人の Google の接続としては保存しない、会社の接続の許可。問い合わせの窓口のアカウント（仕様書 第33.18節）と、
+   * Web の振り返りの担当の許可（第34.18節）。
+   */
+  purpose?: 'inquiry-mailbox' | 'web-review';
   expiresAt: number;
 }
 

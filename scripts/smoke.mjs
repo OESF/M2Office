@@ -5681,6 +5681,97 @@ console.log('\n■ 71. お知らせの作成の段 2（メール・休業の期�
   }
 }
 
+console.log('\n■ 72. Web の振り返りの段 1（担当の許可・サイトの選び方・月の便り・秘書に聞く。第34.18節）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const { rows: saved } = await owner.query(`select tenant_id, web_review, company from tenant_settings where tenant_id = 't-alpha'`);
+  const { tsImport } = await import('tsx/esm/api');
+  const core = await tsImport('../packages/core/src/index.ts', import.meta.url);
+  const repo = new core.PostgresRepository(process.env.DATABASE_URL ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
+  const store = new core.PostgresWebReviewStore(process.env.DATABASE_URL ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
+  const cleanup = async () => {
+    await owner.query(`delete from web_review_reports where tenant_id = 't-alpha'`);
+    await owner.query(`delete from tenant_credentials where tenant_id = 't-alpha' and kind = 'web_review'`);
+  };
+  await cleanup();
+  try {
+    const off = await call('a', '/v1/web-review', {}, 'member');
+    off.status === 403 ? ok('Web の振り返りは既定で切り') : ng(`切っているのに使える（${off.status}）`);
+    await call('a', '/v1/admin/extensions/web-review/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    // 会社情報の Web サイト（見本の口のサイトと合う）
+    await owner.query(`update tenant_settings set company = coalesce(company, '{}'::jsonb) || '{"website":"https://www.alpha.example.jp/"}'::jsonb where tenant_id = 't-alpha'`);
+    const before = (await call('a', '/v1/web-review', {}, 'member')).body;
+    before?.status?.state === 'notConnected' && before.admin === false && before.latest === null
+      ? ok('つないでいなければ「つないでいない」と返す（便りは無い）') : ng('つなぐ前の状態が違う', JSON.stringify(before).slice(0, 300));
+    const byMember = await call('a', '/v1/admin/extensions/web-review/connect', { method: 'POST', body: '{}' }, 'member');
+    const conn = await call('a', '/v1/admin/extensions/web-review/connect', { method: 'POST', body: '{}' });
+    byMember.status === 403 && conn.status === 200 && conn.body.connected === true && conn.body.status?.state === 'ready'
+      && conn.body.status.property?.id === 'properties/100001' && conn.body.status.siteUrl === 'sc-domain:alpha.example.jp'
+      ? ok('管理者がつなぐと、会社の Web サイトに合うプロパティとサイトを選ぶ（社員はつなげない）')
+      : ng('つなぐが違う', JSON.stringify({ member: byMember.status, status: conn.status, body: conn.body }).slice(0, 400));
+    const cand = (await call('a', '/v1/admin/extensions/web-review/candidates')).body;
+    const badPick = await call('a', '/v1/admin/extensions/web-review/selection', { method: 'PUT', body: JSON.stringify({ siteUrl: 'sc-domain:other.example.jp' }) });
+    cand?.candidates?.properties?.length === 1 && cand.candidates.sites.length === 1 && badPick.status === 400
+      ? ok('候補を出し、見られないサイトは選べない') : ng('候補か選び方が違う', JSON.stringify({ cand, bad: badPick.status }).slice(0, 300));
+    const ext = (await call('a', '/v1/admin/extensions')).body;
+    const entry = (ext.extensions ?? ext.items ?? []).find((x) => (x.id ?? x.manifest?.id) === 'web-review');
+    entry && !JSON.stringify(entry).includes('refresh') && JSON.stringify(entry).includes('alpha.example.jp')
+      ? ok('拡張機能の一覧に担当のアカウントと選んだサイトを出し、許可の鍵は返さない') : ng('拡張機能の一覧が違う', JSON.stringify(entry ?? ext).slice(0, 300));
+
+    // 月の便り（ワーカーが毎月 3 日に作る。ここでは同じ処理を直接呼ぶ）
+    const service = new core.WebReviewService({ store, repo, data: { repo, box: { encrypt: (v) => v, decrypt: (v) => v }, sourceFor: () => 'mock' }, llmFor: async () => null });
+    const month = core.lastMonthOf(new Date());
+    await service.createMonthly('t-alpha', month);
+    const after = (await call('a', '/v1/web-review', {}, 'member')).body;
+    const r = after?.latest;
+    r?.month === month && r.summary && r.next?.length >= 1 && r.figures?.analytics?.users?.value > 0 && r.figures?.search?.clicks?.value > 0
+      && after.reports?.length === 1
+      ? ok('月の便りに、プログラムが計算した数字と、要約・よかったこと・気になること・次にやることを入れる')
+      : ng('月の便りが違う', JSON.stringify(after).slice(0, 400));
+    await service.createMonthly('t-alpha', month);
+    const { rows: count } = await owner.query(`select count(*)::int as n from web_review_reports where tenant_id = 't-alpha'`);
+    count[0].n === 1 ? ok('月の便りは月に 1 回だけ') : ng(`便りが ${count[0].n} 個ある`);
+    const { body: notes } = await call('a', '/v1/notifications');
+    (notes.items ?? notes.notifications ?? []).some((n) => n.kind === 'webReview' && /Web の便りが届きました/.test(n.title))
+      ? ok('月の便りを、担当と管理者のお知らせに届ける') : ng('便りの知らせが無い');
+    const other = await call('b', `/v1/web-review/reports/${month}`);
+    other.status === 403 || other.status === 404 ? ok('ほかの会社からは月の便りが見えない') : ng(`ほかの会社から見える（${other.status}）`);
+
+    // 秘書から聞く（付属の業務「Web について聞く」）
+    const ask = async (request) => {
+      const job = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: 'web-review:ask', input: { request } }) }, 'member');
+      const done = job.body?.runId ? await waitFor('a', job.body.runId, ['completed', 'failed'], 30000, 'member') : null;
+      const tool = (done?.steps ?? []).flatMap((st) => st.output?.toolCalls ?? st.output?.tools ?? []);
+      return { status: done?.run?.status, text: JSON.stringify(done?.steps ?? []), tool };
+    };
+    const q1 = await ask('先月、料金のページは何人見た？');
+    q1.status === 'completed' && /web_review\.ask/.test(q1.text) && /9 月|月/.test(q1.text)
+      ? ok('秘書に聞くと、決まった指標と切り口に直して数字を読む') : ng('数字の問いが違う', JSON.stringify(q1).slice(0, 400));
+    const q2 = await ask('先月の Web はどうだった？');
+    q2.status === 'completed' && /web_review\.report/.test(q2.text) ? ok('「先月の Web はどうだった？」には月の便りで答える') : ng('便りの問いが違う', JSON.stringify(q2).slice(0, 300));
+
+    const { body: audits } = await call('a', '/v1/admin/audit-events');
+    const acts = (audits.items ?? []).map((e) => e.action);
+    ['web_review.connect', 'web_review.select', 'web_review.report'].every((x) => acts.includes(x))
+      ? ok('つないだ・選んだ・便りを作ったを監査ログに残す') : ng('監査ログが違う', JSON.stringify(acts.filter((x) => x.startsWith('web_review.'))));
+    const disc = await call('a', '/v1/admin/extensions/web-review/connection', { method: 'DELETE' });
+    const gone = (await call('a', '/v1/web-review', {}, 'member')).body;
+    disc.status === 200 && gone?.status?.state === 'notConnected' && gone.latest?.month === month
+      ? ok('外すとすぐ読まなくなり、これまでの便りは残る') : ng('外したときが違う', JSON.stringify(gone).slice(0, 300));
+  } catch (err) {
+    ng('Web の振り返りの段 1 の確認が途中で止まった', String(err?.stack ?? err));
+  } finally {
+    await cleanup();
+    await owner.query(`delete from notifications where tenant_id = 't-alpha' and kind = 'webReview'`).catch(() => undefined);
+    for (const r of saved) await owner.query(`update tenant_settings set web_review = $2, company = $3 where tenant_id = $1`, [r.tenant_id, r.web_review ? JSON.stringify(r.web_review) : null, r.company ? JSON.stringify(r.company) : null]);
+    await store.close();
+    await repo.close?.();
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

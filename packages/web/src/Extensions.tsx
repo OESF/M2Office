@@ -14,7 +14,7 @@ import { JinglePlayer } from './signage-audio.js';
 import { api, ApiError, describeError, type AccessOptions, type ExtensionView, type HrProposalField, type ScopeValue } from './api.js';
 import {
   INVENTORY_FEATURES, SIGNAGE_DEFAULT_COLOR, SIGNAGE_JINGLES, type HrSettings, type InventoryBookingSource, type InventoryFeature, type InventorySettings,
-  type SignageSettings, type SignageSound, type SignageSource, COLUMN_INDUSTRIES, COLUMN_RULE_SET_LABELS, type WebColumnSettings, type InquirySettings, COMPETITORS_AUTO_RANGE, COMPETITOR_WATCH_LABELS, competitorAutoMax, competitorWatch, competitorsMax, type CompetitorSettings, type AnnouncementSettings,
+  type SignageSettings, type SignageSound, type SignageSource, COLUMN_INDUSTRIES, COLUMN_RULE_SET_LABELS, type WebColumnSettings, type InquirySettings, COMPETITORS_AUTO_RANGE, COMPETITOR_WATCH_LABELS, competitorAutoMax, competitorWatch, competitorsMax, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type WebReviewCandidates, type WebReviewStatus,
 } from '@m2office/shared';
 import { HelpTip, Markdown } from './help.js';
 import { ScopeEditor, ScopeField, useAccessOptions } from './Scope.js';
@@ -276,6 +276,7 @@ function InstalledCard({ item: x, busy, focused = false, options, onChanged, onT
       {x.inquiries && on && <InquiryMailboxFields settings={x.inquiries} busy={busy} onChanged={onChanged} />}
       {x.competitors && on && <CompetitorMapKeyFields settings={x.competitors} busy={busy} onChanged={onChanged} />}
       {x.announcements && on && <AnnouncementFields settings={x.announcements} busy={busy} onChanged={onChanged} />}
+      {x.webReview && on && <WebReviewFields settings={x.webReview} busy={busy} onChanged={onChanged} />}
       <div className="row small">
         <button className="link" onClick={() => setOpen(!open)}>{open ? '詳細を閉じる' : '詳細'}</button>
         {/* 内蔵の拡張は削除しない。スイッチで切る（データは消えない。第12.13節） */}
@@ -516,6 +517,76 @@ function SignageFields({ settings, busy, onChanged }: { settings: SignageSetting
  *
  * @remarks アプリケーションパスワードは預けたら画面に戻さない。つながるかを確かめてから預ける
  */
+/**
+ * Web の振り返りの担当の許可（仕様書 第34.18節）。「Google とつなぐ」で Google の認可の画面へ移り、アナリティクスと Search Console を
+ * 見られるアカウントを選んで、読み取りの 2 つだけを許す。つないだ管理者が担当。戻ってきたら結果（`?webreview=`）を出す。
+ * 会社の Web サイトに合うプロパティとサイトを決められなかったときだけ、候補から選ぶ欄を出す。
+ */
+function WebReviewFields({ settings, busy, onChanged }: { settings: WebReviewSettings; busy: boolean; onChanged: () => void }) {
+  const [error, setError] = useState<string | null>(null);
+  const [working, setWorking] = useState(false);
+  const [view, setView] = useState<{ candidates: WebReviewCandidates | null; status: WebReviewStatus } | null>(null);
+  const [result] = useState(() => {
+    const r = new URLSearchParams(location.search).get('webreview');
+    if (r) history.replaceState(null, '', location.pathname);
+    return r;
+  });
+  const RESULT_TEXT: Record<string, string> = {
+    connected: 'Google とつなぎました', cancelled: 'つなぐのをキャンセルしました', scopes: 'アナリティクスと Search Console を見る許可が足りません。もう一度つないで、どちらも許可してください',
+    client: '会社の Google 接続の設定に誤りがあります', failed: 'つなげませんでした',
+  };
+  const connected = !!settings.connection;
+  useEffect(() => {
+    if (!connected) { setView(null); return; }
+    api.admin.webReviewCandidates().then((r) => setView({ candidates: r.candidates, status: r.status })).catch(() => setView(null));
+  }, [connected, settings.property?.id, settings.siteUrl]);
+  const run = (p: Promise<unknown>, fallback: string) => {
+    setWorking(true);
+    p.then(() => { setError(null); onChanged(); }).catch((e) => setError(describeError(e, fallback))).finally(() => setWorking(false));
+  };
+  const connect = () => {
+    setWorking(true);
+    api.admin.connectWebReview().then((r) => { if (r.url) location.href = r.url; else { setError(null); onChanged(); } })
+      .catch((e) => setError(describeError(e, 'つなげませんでした'))).finally(() => setWorking(false));
+  };
+  const disconnect = () => {
+    if (!window.confirm('Google の許可を外しますか。Web の数字を読まなくなり、月の便りも届かなくなります（これまでの便りは消えません）')) return;
+    run(api.admin.disconnectWebReview(), '外せませんでした');
+  };
+  const c = view?.candidates;
+  return (
+    <div className="small ext-inventory">
+      <div className="row wrap">
+        <span>担当のアカウント: {settings.connection ? <strong>{settings.connection.email}</strong> : <span className="muted">つないでいません</span>}</span>
+        {connected
+          ? <button className="btn ghost small" disabled={busy || working} onClick={disconnect}>外す</button>
+          : <button className="btn small" disabled={busy || working} onClick={connect}>{working ? 'つないでいます…' : 'Google とつなぐ'}</button>}
+        {result && <span className={`inquiries-note is-${result === 'connected' ? 'ok' : 'error'}`}>{RESULT_TEXT[result] ?? 'つなげませんでした'}</span>}
+      </div>
+      {connected && c && (
+        <div className="row wrap">
+          <label className="row">アナリティクス
+            <select value={settings.property?.id ?? ''} disabled={busy || working} aria-label="アナリティクスのプロパティ"
+              onChange={(e) => run(api.admin.selectWebReview({ propertyId: e.target.value || null }), '選べませんでした')}>
+              <option value="">選ばない</option>
+              {c.properties.map((p) => <option key={p.id} value={p.id}>{p.name}{p.uris[0] ? `（${p.uris[0]}）` : ''}</option>)}
+            </select>
+          </label>
+          <label className="row">Search Console
+            <select value={settings.siteUrl ?? ''} disabled={busy || working} aria-label="Search Console のサイト"
+              onChange={(e) => run(api.admin.selectWebReview({ siteUrl: e.target.value || null }), '選べませんでした')}>
+              <option value="">選ばない</option>
+              {c.sites.map((s) => <option key={s.siteUrl} value={s.siteUrl}>{s.siteUrl}</option>)}
+            </select>
+          </label>
+        </div>
+      )}
+      {view && view.status.state !== 'ready' && view.status.advice && <p className="muted">{view.status.advice}</p>}
+      {error && <p className="error">{error}</p>}
+    </div>
+  );
+}
+
 /**
  * 問い合わせの窓口のアカウント（仕様書 第33.18節）。「つなぐ」で Google の認可の画面へ移り、窓口のアカウント（info@ など）を選ぶ。
  * 戻ってきたら結果（`?mailbox=`）を出す。

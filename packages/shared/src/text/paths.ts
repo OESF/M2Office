@@ -23,6 +23,8 @@ export function notificationPath(n: { kind: string; runId: string | null }): str
   if (n.kind === 'competitor') return '/competitors';
   // お知らせを出せなかった出し先の知らせは、お知らせの作成を開く（第35.17節）
   if (n.kind === 'announcement') return '/announcements';
+  // Web の振り返りの月の便りは、Web の振り返りを開く（第34.18節）
+  if (n.kind === 'webReview') return '/web-review';
   if (n.runId && RUN_ID.test(n.runId)) return `/runs/${encodeURIComponent(n.runId)}`;
   return '/';
 }

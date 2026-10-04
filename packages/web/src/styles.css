@@ -1818,3 +1818,14 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .announcements-recipients { margin: 0; padding-left: 1.2em; max-height: 240px; overflow-y: auto; }
 .announcements-recipients li { margin: 2px 0; }
 .announcements-recipients button { margin-left: 8px; }
+/* Web の振り返り（仕様書 第34.18節） */
+.web-review { display: grid; gap: 12px; }
+.web-review-summary { white-space: pre-line; font-size: 1.05em; }
+.web-review-points { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.web-review-points p { margin: 4px 0 0; }
+.web-review-figures { margin-top: 12px; display: grid; gap: 12px; }
+.web-review-lists { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.web-review-lists ul { margin: 4px 0 0; padding-left: 1.2em; }
+.web-review-months { display: flex; flex-wrap: wrap; gap: 8px 16px; list-style: none; padding: 0; margin: 0; }
+.web-review-months [aria-current="true"] { font-weight: 600; }
+.web-review-draft { white-space: pre-wrap; font-family: inherit; background: var(--bg); border: 1px solid var(--line); padding: 8px; border-radius: 6px; }

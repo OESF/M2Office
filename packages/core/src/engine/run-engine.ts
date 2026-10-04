@@ -14,7 +14,7 @@ import {
   alwaysRequiresApproval, canDecide, canUseAgent, writeInternalNeedsApproval,
   type AutomationPolicy, type TenantSettings, type WritingStyle,
   type AgentDefinition, type AgentStep, type ApprovalStep, type Approval, type Run,
-  type RunStep, type Step, type ContactScope, type InventorySettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings,
+  type RunStep, type Step, type ContactScope, type InventorySettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { LlmMessage, LlmProvider, LlmResponse } from '../llm/provider.js';
@@ -41,6 +41,7 @@ import type { ColumnService } from '../columns/service.js';
 import type { InquiryService } from '../inquiries/service.js';
 import type { CompetitorService } from '../competitors/service.js';
 import type { AnnouncementService } from '../announcements/service.js';
+import type { WebReviewService } from '../web-review/service.js';
 import type { LaborCalendar } from '../hr/calendar-service.js';
 import { answerOfSteps } from '../memory/work.js';
 import { substituteArguments } from '../extensions/skill.js';
@@ -171,6 +172,11 @@ export interface RunEngineDeps {
   announcements?: {
     service: AnnouncementService;
     access(tenantId: string, userId: string): Promise<AnnouncementSettings | null>;
+  };
+  /** Web の振り返り（内蔵の拡張。仕様書 第34章）。ツールに渡す。 */
+  webReview?: {
+    service: WebReviewService;
+    access(tenantId: string, userId: string): Promise<WebReviewSettings | null>;
   };
 }
 
@@ -969,6 +975,10 @@ export class RunEngine {
       // お知らせの作成（第35.17節）
       ...(this.deps.announcements ? {
         announcements: { service: this.deps.announcements.service, access: () => this.deps.announcements!.access(run.tenantId, requestedBy) },
+      } : {}),
+      // Web の振り返り（第34.18節）
+      ...(this.deps.webReview ? {
+        webReview: { service: this.deps.webReview.service, access: () => this.deps.webReview!.access(run.tenantId, requestedBy) },
       } : {}),
       // 労務の期限（第30.19.1節）。人事区画の人にだけ返す
       ...(this.deps.hr ? {

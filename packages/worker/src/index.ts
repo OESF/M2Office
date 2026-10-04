@@ -11,7 +11,7 @@
 
 import {
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
-  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, SignageService, SignageInterrupts, PostgresSignageStore, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention,
+  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, SignageService, SignageInterrupts, PostgresSignageStore, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention,
   NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator,
@@ -162,6 +162,11 @@ const competitors = new CompetitorService({
     ? (await inquiryStore.list(tenantId, { status: 'all', since, limit: 500 })).map((i) => i.source) : []),
 });
 const competitorWatch = new CompetitorWatch({ service: competitors, store: competitorStore, repo, logger: log });
+// Web の振り返り（内蔵の拡張。仕様書 第34章）。毎月 3 日の 8 時（日本時間）を過ぎたら、先月の便りを 1 回だけ作る
+const webReview = new WebReviewService({
+  store: new PostgresWebReviewStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+  repo, data: { repo, box, sourceFor: (tenantId) => connector.sourceFor(tenantId) }, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
+});
 // お知らせの作成（内蔵の拡張。仕様書 第35章）。承認の後に出し、予約の時刻と期間の後を見回る
 const announcements = new AnnouncementService({
   store: announcementStore,
@@ -189,6 +194,7 @@ const engine = new RunEngine({
   inquiries: { service: inquiries, access: inquiriesAccess(repo) },
   competitors: { service: competitors, access: competitorsAccess(repo) },
   announcements: { service: announcements, access: announcementsAccess(repo) },
+  webReview: { service: webReview, access: webReviewAccess(repo) },
   llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId),
   // 業務ごとの AI（ローカル・外部）と、社外の接続に送ってよいか（第16.3.7.1節）
   llmForRun: (tenantId, def, registry, previous) => ai.llmForRun(tenantId, def, registry, previous),
@@ -316,6 +322,9 @@ let lastCompetitorCheck = 0;
 /** お知らせの予約と期間の後を見回る間隔（第35.17節）。 */
 const ANNOUNCEMENT_INTERVAL_MS = Number(process.env['ANNOUNCEMENT_INTERVAL_MS'] ?? 60_000);
 let lastAnnouncementCheck = 0;
+// Web の振り返りの月の便り（第34.18節）。既定は 10 分ごとに「3 日の 8 時を過ぎ、先月の便りがまだ無いか」を見る
+const WEB_REVIEW_INTERVAL_MS = Number(process.env['WEB_REVIEW_INTERVAL_MS'] ?? 600_000);
+let lastWebReviewCheck = 0;
 // 秘書が学んだことの週 1 回の整理と、残す期間の片付け（仕様書 第11.11.4節）。1 時間ごとに「日曜の深夜で、前の整理から 6 日より経ったか」を見る
 const CONSOLIDATE_INTERVAL_MS = Number(process.env['CONSOLIDATE_INTERVAL_MS'] ?? 3_600_000);
 let lastConsolidateCheck = 0;
@@ -551,6 +560,17 @@ while (running) {
       if (r.published + r.ended > 0) log.info('お知らせの予約を出し、期間の後を片付けました', { published: r.published, ended: r.ended });
     } catch (err) {
       log.warn('お知らせの見回りに失敗しました', { err });
+    }
+  }
+
+  // Web の振り返りの月の便り（第34.18節）。会社ごとの失敗はほかの会社を止めない
+  if (Date.now() - lastWebReviewCheck >= WEB_REVIEW_INTERVAL_MS) {
+    lastWebReviewCheck = Date.now();
+    try {
+      const r = await webReview.tick(new Date());
+      if (r.created > 0) log.info('Web の月の便りを作りました', { created: r.created });
+    } catch (err) {
+      log.warn('Web の月の便りの見回りに失敗しました', { err });
     }
   }
 

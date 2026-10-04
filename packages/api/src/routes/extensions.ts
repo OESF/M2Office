@@ -12,7 +12,7 @@
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import {
-  CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, INVENTORY_FEATURES, SIGNAGE_EXTENSION_ID, SIGNAGE_JINGLES, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, COLUMN_INDUSTRIES, type WebColumnSettings, type HrSettings, type InventorySettings, type RiskLevel, type SignageSettings,
+  CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, INVENTORY_FEATURES, SIGNAGE_EXTENSION_ID, SIGNAGE_JINGLES, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, WEB_REVIEW_SCOPES, COLUMN_INDUSTRIES, type WebColumnSettings, type HrSettings, type InventorySettings, type RiskLevel, type SignageSettings,
 } from '@m2office/shared';
 import {
   bundledConnection, builtinSection, consentSnapshot, encodeFiles, unpackExtension, EXTENSION_FILE_MAX_BYTES,
@@ -128,6 +128,8 @@ export function extensionsRoute(deps: AppDeps) {
         ...(e.pkg.manifest.id === COMPETITORS_EXTENSION_ID ? { competitors: settings.competitors } : {}),
         // お知らせの作成: Web を公開まで行うか・カテゴリー・流す画面（第35.4節）
         ...(e.pkg.manifest.id === ANNOUNCEMENTS_EXTENSION_ID ? { announcements: settings.announcements } : {}),
+        // Web の振り返り: 担当の許可・選んだプロパティとサイト（第34.18節。トークンは返さない）
+        ...(e.pkg.manifest.id === WEB_REVIEW_EXTENSION_ID ? { webReview: settings.webReview } : {}),
       })),
     });
   });
@@ -481,6 +483,52 @@ export function extensionsRoute(deps: AppDeps) {
     const { refreshToken } = await deps.inquiries.service.disconnectMailbox({ tenantId: tenant.id, userId: user.id });
     if (refreshToken) await revokeGoogleToken(refreshToken).catch(() => false);
     return c.json({ ok: true });
+  });
+
+  /**
+   * Web の振り返りの担当の許可をつなぐ（第34.18節）。Google の認可の画面の URL を返す（アカウントを選ばせ、読み取りの 2 つだけを求める。
+   * 前に許した権限は引き継がない）。開発の見本の会社では、認可を経ずに見本の口をつなぐ。
+   *
+   * @returns `{ url }` か、見本なら `{ connected: true, status }`。会社の Google のクライアントが無ければ 409
+   */
+  app.post(`/${WEB_REVIEW_EXTENSION_ID}/connect`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    if (deps.connector.sourceFor(tenant.id) === 'mock') {
+      const status = await deps.webReview.service.connect({ tenantId: tenant.id, userId: user.id }, { email: user.email, refreshToken: null });
+      return c.json({ connected: true, status });
+    }
+    const client = await googleClient(deps, tenant.id);
+    if (!client) return c.json({ error: '会社の Google 接続の設定がありません。「接続」の「Google Workspace」で登録してください' }, 409);
+    const { verifier, challenge } = createPkce();
+    const back = returnTo(c).replace(/\/(\?|$)/, '/admin/extensions$1');
+    const state = deps.oauth.states.issue({ tenantId: tenant.id, userId: user.id, codeVerifier: verifier, returnTo: back, purpose: 'web-review' });
+    const url = buildGoogleAuthUrl({ clientId: client.clientId, redirectUri: deps.oauth.redirectUri, scopes: WEB_REVIEW_SCOPES, state, codeChallenge: challenge, selectAccount: true, onlyTheseScopes: true });
+    return c.json({ url });
+  });
+
+  /** Web の振り返りの担当の許可を外す。Google の許可も取り消す（月の便りは消さない）。 */
+  app.delete(`/${WEB_REVIEW_EXTENSION_ID}/connection`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const { refreshToken } = await deps.webReview.service.disconnect({ tenantId: tenant.id, userId: user.id });
+    if (refreshToken) await revokeGoogleToken(refreshToken).catch(() => false);
+    return c.json({ ok: true });
+  });
+
+  /** Web の振り返り: 担当が見られるプロパティとサイトと、いまの状態（設定の画面で選ぶ）。 */
+  app.get(`/${WEB_REVIEW_EXTENSION_ID}/candidates`, async (c) => {
+    const { tenant } = c.get('ctx');
+    const [candidates, status] = await Promise.all([deps.webReview.service.candidates(tenant.id), deps.webReview.service.status(tenant.id)]);
+    return c.json({ candidates: 'error' in candidates ? null : candidates, error: 'error' in candidates ? candidates.error : null, status });
+  });
+
+  /** Web の振り返り: プロパティとサイトを選ぶ（`propertyId`・`siteUrl`。`null` で選ばない）。 */
+  app.put(`/${WEB_REVIEW_EXTENSION_ID}/selection`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
+    const pick = (v: unknown) => (v === undefined ? undefined : v === null ? null : String(v));
+    const err = await deps.webReview.service.select({ tenantId: tenant.id, userId: user.id }, { propertyId: pick(body['propertyId']), siteUrl: pick(body['siteUrl']) });
+    if (err) return c.json({ error: err }, 400);
+    return c.json({ ok: true, status: await deps.webReview.service.status(tenant.id) });
   });
 
   /** WordPress の入れ先と鍵を外す（コラムは消さない）。 */
@@ -890,6 +938,7 @@ export function extensionsRoute(deps: AppDeps) {
       else if (section === 'inquiries') await deps.repo.saveTenantSettings(tenant.id, 'inquiries', { ...settings.inquiries, enabled: body.enabled }, user.id);
       else if (section === 'competitors') await deps.repo.saveTenantSettings(tenant.id, 'competitors', { ...settings.competitors, enabled: body.enabled }, user.id);
       else if (section === 'announcements') await deps.repo.saveTenantSettings(tenant.id, 'announcements', { ...settings.announcements, enabled: body.enabled }, user.id);
+      else if (section === 'webReview') await deps.repo.saveTenantSettings(tenant.id, 'webReview', { ...settings.webReview, enabled: body.enabled }, user.id);
       else if (section === 'signage') {
         await deps.repo.saveTenantSettings(tenant.id, 'signage', { ...settings.signage, enabled: body.enabled }, user.id);
         // 切ったら、画面は無地にする（登録・素材・流れは消さない。第31.2節）

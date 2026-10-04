@@ -204,6 +204,23 @@ function chooseTools(tools: string[], prompt: string): Call[] {
     if (req) return [{ name: 'announcements.draft', args: { request: req } }];
   }
 
+  // Web の振り返り（仕様書 第34.18節）: 便り・数字の問い・状態
+  if (has('web_review.ask') && instruction.includes('web_review.ask')) {
+    const req = extractField(prompt, 'request');
+    if (/つなぎ|つなが|制作会社/.test(req)) return [{ name: 'web_review.status', args: {} }];
+    if (/何人|何回|どこから|スマホ|検索され/.test(req)) {
+      const page = /(.+?)のページ/.exec(req)?.[1]?.replace(/^.*[、,]\s*/, '').trim();
+      const word = /[“"「](.+?)[”"」]\s*で検索/.exec(req)?.[1];
+      return [{ name: 'web_review.ask', args: {
+        metric: word ? 'searchClicks' : 'users',
+        breakdown: word ? 'searchQuery' : /どこから/.test(req) ? 'source' : /スマホ/.test(req) ? 'device' : 'none',
+        period: /先週/.test(req) ? 'lastWeek' : /今月/.test(req) ? 'thisMonth' : 'lastMonth',
+        ...(word ? { contains: word } : page ? { contains: page === '料金' ? 'price' : page } : {}),
+      } }];
+    }
+    return [{ name: 'web_review.report', args: {} }];
+  }
+
   // 競合の分析（仕様書 第36.18節）: 探す・入れる・外す・見回る・動き・違い
   if (has('competitors.discover') && instruction.includes('competitors.discover')) {
     const req = extractField(prompt, 'request');

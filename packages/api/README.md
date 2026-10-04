@@ -283,6 +283,9 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/announcements/:id/preview` ／ `POST /v1/announcements/:id/submit` | 承認の前の確かめ（出せない理由・LINE の送る数と残り・流す画面・Web の出し方）／ 承認へ進める（付属の業務「お知らせを出す」。管理者か承認者の承認の後に出す） |
 | `POST /v1/announcements/:id/cancel` ／ `GET /v1/announcements/:id/copy` ／ `GET /v1/announcements/:id/screen.png` | 予約を取り消す ／ Web の文を写す（HTML とテキスト）／ 店頭の画面の 1 枚の見本（PNG） |
 | `GET /v1/announcements/:id/recipients` | メールの宛先（名刺管理の連絡先の名前・会社・アドレス） |
+| `GET /v1/web-review` ／ `GET /v1/web-review/reports` ／ `GET /v1/web-review/reports/:month` | Web の振り返り（仕様書 第34.18節）: 状態（始める前の手伝いと依頼文の下書き）・いちばん新しい月の便り・便りの一覧・管理者か ／ 便りの一覧 ／ 月ごとの便り（`YYYY-MM`）。使えない会社と利用範囲の外の人には 403 |
+| `POST /v1/admin/extensions/web-review/connect` ／ `DELETE /v1/admin/extensions/web-review/connection` | 管理者: 担当の許可をつなぐ（Google の認可の URL。アナリティクスと Search Console の読み取りだけを求め、前に許した権限を引き継がない。見本の会社ではすぐつながる）／ 外す（Google の許可も取り消す。便りは消さない） |
+| `GET /v1/admin/extensions/web-review/candidates` ／ `PUT /v1/admin/extensions/web-review/selection` | 管理者: 担当が見られるプロパティとサイトと状態 ／ プロパティとサイトを選ぶ（`propertyId`・`siteUrl`。見られるものの中からだけ） |
 | `GET /v1/announcements/line/status` ／ `PUT /v1/admin/extensions/announcements/settings` | LINE の友だちの数と今月の残り ／ 管理者: Web の出し方（`webPublish`: publish・draft）・カテゴリー（`webCategory`）・流す画面（`screens`） |
 | `GET /v1/competitors` | 競合の分析（仕様書 第36.18節）: 全体（自社の像・競合・動いている作業・最後の作業・地図の注意）。地図で見つけた競合の名前と Web サイトはここで引き直す。使えない会社と利用範囲の外の人には、`/v1/competitors` のどの口も 403 |
 | `POST /v1/competitors/discover` ／ `POST /v1/competitors/check` | 競合を探す作業（`radiusKm`・`nationwide`・`auto` で商圏を変える）／ 今すぐ見回る作業を受け付ける（202。ワーカーが行う。動いていれば `already`） |

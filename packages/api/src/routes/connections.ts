@@ -18,7 +18,7 @@ import {
   GoogleOAuthError, MAILBOX_SCOPES,
   type GeminiModels, type GeminiSettingsMeta, type GoogleClientVerdict,
 } from '@m2office/core';
-import { agentDisplayName } from '@m2office/shared';
+import { agentDisplayName, WEB_REVIEW_SCOPES } from '@m2office/shared';
 import type { AppDeps } from '../context.js';
 import { isOperational, requireRole, type AppEnv } from '../middleware/tenant.js';
 import { registerConnectionCallback } from './connection-auth.js';
@@ -444,7 +444,7 @@ export function oauthCallbackRoute(deps: AppDeps) {
     const pending = deps.oauth.states.take(state);
     // 会社の接続（第12.11.6節）の要求の state では受けない（取り違えを防ぐ）
     if (!pending || pending.connectionId) return c.text('この接続の要求は無効か、期限が切れています。M2Office の画面からもう一度「Google と接続する」を押してください。', 400);
-    const back = (result: string) => c.redirect(`${pending.returnTo}${pending.returnTo.includes('?') ? '&' : '?'}${pending.purpose === 'inquiry-mailbox' ? 'mailbox' : 'google'}=${result}`);
+    const back = (result: string) => c.redirect(`${pending.returnTo}${pending.returnTo.includes('?') ? '&' : '?'}${pending.purpose === 'inquiry-mailbox' ? 'mailbox' : pending.purpose === 'web-review' ? 'webreview' : 'google'}=${result}`);
     if (c.req.query('error')) return back('cancelled');
     // 問い合わせの窓口のアカウント（仕様書 第33.18節）。本人の接続ではなく、会社の接続として預ける
     if (pending.purpose === 'inquiry-mailbox') {
@@ -470,6 +470,29 @@ export function oauthCallbackRoute(deps: AppDeps) {
         return back('connected');
       } catch (err) {
         deps.log.warn('問い合わせの窓口のアカウントをつなげませんでした', { tenantId: pending.tenantId, err: err instanceof Error ? err.message : String(err) });
+        return back(isGoogleClientError(err) ? 'client' : 'failed');
+      }
+    }
+    // Web の振り返りの担当の許可（仕様書 第34.18節）。本人の接続ではなく、会社の接続として預ける
+    if (pending.purpose === 'web-review') {
+      const code = c.req.query('code');
+      if (!code) return back('failed');
+      const tenant = await deps.repo.findTenantById(pending.tenantId);
+      if (!tenant || !isOperational(tenant)) return back('failed');
+      try {
+        const client = await googleClient(deps, pending.tenantId);
+        if (!client) return back('client');
+        const tokens = await exchangeGoogleCode({ ...client, code, redirectUri: deps.oauth.redirectUri, codeVerifier: pending.codeVerifier });
+        const [scopes, info] = await Promise.all([googleGrantedScopes(tokens.accessToken).catch(() => tokens.scopes), googleUserInfo(tokens.accessToken)]);
+        // 読み取りの 2 つがそろわなければ預けない（一部だけ拒まれたとき）
+        if (!WEB_REVIEW_SCOPES.every((s) => scopes.includes(s)) || !info.email) {
+          await revokeGoogleToken(tokens.refreshToken).catch(() => false);
+          return back('scopes');
+        }
+        await deps.webReview.service.connect({ tenantId: pending.tenantId, userId: pending.userId }, { email: info.email, refreshToken: tokens.refreshToken });
+        return back('connected');
+      } catch (err) {
+        deps.log.warn('Web の振り返りの許可をつなげませんでした', { tenantId: pending.tenantId, err: err instanceof Error ? err.message : String(err) });
         return back(isGoogleClientError(err) ? 'client' : 'failed');
       }
     }

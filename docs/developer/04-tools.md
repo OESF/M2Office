@@ -72,6 +72,9 @@
 | `skill.read` | read | — | このスキルに入っている資料を読みます |
 | `slides.template` | read | `drive`（制限付き） | 会社が登録したスライドのテンプレートの、使えるレイアウトを確かめます。どこにも書き込みません |
 | `tasks.list` | read | `tasks`（機密） | ToDo の一覧を見ます |
+| `web_review.ask` | read | — | アナリティクスと Search Console から、決まった指標と切り口で数字を読みます。期間と比べた相手を添えて答えます |
+| `web_review.report` | read | — | 会社の Web サイトの月の便り（要約・よかったこと・気になること・次にやること）を読みます |
+| `web_review.status` | read | — | Google とつないだか・選んだプロパティとサイト・次にすることを読みます。制作会社への依頼文の下書きも作ります（送りません） |
 | `web.research` | read | — | テーマを Google 検索で調べ、出典つきでまとめます。調べる言葉は Google に送られますが、どこにも書き込みません |
 | `docs.append` | draft | `drive.file`（機密でない） | M2Office で作った文書の末尾に書き足します |
 | `docs.create` | draft | `drive.file`（機密でない） | あなたのドライブに Google ドキュメントを作ります。共有はしません |
@@ -106,6 +109,7 @@
 | `sheets.append` | write-internal | `drive.file`（機密でない） | M2Office で作った表に行を足します |
 | `tasks.complete` | write-internal | `tasks`（機密） | ToDo を完了にします |
 | `tasks.create` | write-internal | `tasks`（機密） | ToDo を登録します |
+| `web_review.select` | write-internal | — | 見るアナリティクスのプロパティと Search Console のサイトを、見られるものの中から選び直します（管理者だけ） |
 | `announcements.publish` | external-send | — | 承認されたお知らせを、Web サイト・LINE・店頭の画面に出します（予約があればその時刻に） |
 | `calendar.cancel` | external-send | `calendar.events`（機密） | 予定を取り消します。参加者に通知が届くため、必ず承認のあとに行います |
 | `calendar.create` | external-send | `calendar.events`（機密） | 予定を登録し、参加者を招待します。社外の人を招くときは、承認のあとに行います |
@@ -169,6 +173,9 @@
 | `skill.read` | `path`（必須）: ファイルの相対パス |
 | `slides.template` | `template`: テンプレートの名前（任意） |
 | `tasks.list` | なし |
+| `web_review.ask` | `metric`（必須）: 指標（users・newUsers・sessions・pageViews・engagementRate・keyEvents・searchImpressions・searchClicks・searchCtr・searchPosition）、`breakdown`: 切り口（none・page・source・device・region・searchQuery・searchPage）、`period`: 期間（lastMonth・thisMonth・lastWeek・last7Days・last28Days・custom）、`start`: 期間の始め（custom のとき。YYYY-MM-DD）、`end`: 期間の終わり（custom のとき。YYYY-MM-DD）、`contains`: ページの URL か検索の言葉に含む文字 |
+| `web_review.report` | `month`: 月（YYYY-MM）、`recent`: この 8 日に届いた便りの要点だけ |
+| `web_review.status` | なし |
 | `web.research` | `topic`（必須）: 調べるテーマ、`focus`: 特に知りたいこと（任意） |
 | `docs.append` | `documentId`（必須）: 文書の ID、`text`（必須）: 追記する文 |
 | `docs.create` | `title`: 題名（artifactId のときは省略できる。成果物の題名に日付を添える）、`body`: 本文（Markdown。artifactId のときは渡さない）、`artifactId`: 保存する成果物の ID（document.create の結果）。本文はそこから取る、`folderId`: 入れるフォルダの ID（任意）、`folderName`: 入れるフォルダの名前（任意。M2Office が作ったその名前のフォルダに入れ、無ければ作る） |
@@ -204,6 +211,7 @@
 | `sheets.append` | `spreadsheetId`（必須）: スプレッドシートの ID、`rows`（必須）: 足す行の配列（各行は値の配列） |
 | `tasks.complete` | `taskId`（必須）: ToDo の ID |
 | `tasks.create` | `title`（必須）: ToDo の題名、`due`: 期限（YYYY-MM-DD。任意） |
+| `web_review.select` | `property`: プロパティの名前か URL の一部、`site`: サイトの URL の一部 |
 | `announcements.publish` | `announcementId`（必須）: お知らせの ID |
 | `calendar.cancel` | `eventId`（必須）: 予定の ID |
 | `calendar.create` | `title`（必須）: 予定の題名、`start`（必須）: 開始（ISO 形式）、`end`（必須）: 終了（ISO 形式）、`attendees`: 参加者のメールアドレス |
