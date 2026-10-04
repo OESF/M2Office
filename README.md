@@ -188,6 +188,7 @@ docs/            開発規約・リリース規定・設計判断記録
 | `MODEL_STANDARD` | `gemini-3.5-flash-lite` | 業務のステップ・秘書の対話・文字の読み取り |
 | `MODEL_ADVANCED` | `gemini-3.8-flash` | 難しい計画・長文の分析（いまは使っていない） |
 | `MODEL_RESEARCH` | `MODEL_STANDARD` と同じ | Web の調査（`web.research`） |
+| `MODEL_FALLBACK` | — | 推論が混雑・障害などで失敗したときに最初に試す退避先。未設定なら、ほかの役割のモデルに退避する（同じ鍵の中だけ。仕様書 第20.2.5節） |
 | `MODEL_LIVE` | `gemini-3.1-flash-live-preview` | 音声の対話（Gemini Live） |
 | `USD_JPY` | 155 | 費用を円で示すときの為替（概算） |
 | `GOOGLE_LOGIN_CLIENT_ID` / `GOOGLE_LOGIN_CLIENT_SECRET` | — | Google ログインに使う**運営の** OAuth クライアント（仕様書 第16.1.1節）。求める権限は openid・email・profile だけ。未設定なら Google ログインは無効 |

@@ -60,7 +60,8 @@ const isAvailable = async (tenantId: string, agentId: string) => (await hub.forT
 
 // 会社の鍵が無いときの推論と Web の調査（第20.2.4節）。運営の鍵があれば Gemini、無ければ「設定されていない」。
 // スタブは自動テスト専用（LLM_PROVIDER=stub）。API と同じ判定
-const platform = platformAi(process.env, (agentId) => hub.officialAgents().find((a) => a.id === agentId)?.evals);
+// 別のモデルへ退避したことはアプリのログに残す（仕様書 第20.2.5節）
+const platform = platformAi(process.env, (agentId) => hub.officialAgents().find((a) => a.id === agentId)?.evals, log);
 const llm = platform.llm;
 const research = platform.research;
 // 会社ごとの Gemini（会社が自社の鍵を登録していればその鍵。仕様書 第14.3.3節）
@@ -72,6 +73,7 @@ const ai = new TenantAiResolver({
   platformKey: platform.platformKey, testMode: platform.testMode,
   defaults: models,
   baseUrl: platform.baseUrl,
+  logger: log,
   // 配備の形とローカル AI（仕様書 第8.6節・第16.3.7.1節、ADR-0059）
   deployment: deploymentFromEnv(process.env), local: localLlmFromEnv(process.env),
 });

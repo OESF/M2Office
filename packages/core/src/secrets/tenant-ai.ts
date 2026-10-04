@@ -20,6 +20,7 @@ import { MockResearchProvider } from '../research/provider.js';
 import { StubLlmProvider } from '../llm/stub.js';
 import { AiNotConfiguredError, UnconfiguredLlmProvider, UnconfiguredResearchProvider } from '../llm/unconfigured.js';
 import { defaultGeminiModels } from '../llm/models.js';
+import type { Logger } from '../log/logger.js';
 import type { AgentDefinition, AiPolicyMode, EvalCase } from '@m2office/shared';
 import { LocalLlmProvider, type LocalLlmConfig } from '../llm/local.js';
 import {
@@ -35,6 +36,8 @@ export interface GeminiModels {
   advanced: string;
   research: string;
   live: string;
+  /** 失敗したときに最初に試す退避先（仕様書 第20.2.5節）。空なら、ほかの役割のモデルだけに退避する。 */
+  fallback?: string;
 }
 
 /** 会社の Gemini の設定（`tenant_credentials.meta`）。 */
@@ -70,6 +73,8 @@ export interface TenantAiResolverDeps {
   local?: LocalLlmConfig | null;
   /** ローカル AI の代わり（自動テスト用）。与えれば `local` より優先する。 */
   localLlm?: LlmProvider;
+  /** 別のモデルへ退避したことを残すロガー（仕様書 第20.2.5節）。 */
+  logger?: Pick<Logger, 'warn'>;
 }
 
 /**
@@ -81,6 +86,7 @@ export interface TenantAiResolverDeps {
 export function platformAi(
   env: Record<string, string | undefined>,
   evalsFor?: (agentId: string) => EvalCase[] | undefined,
+  logger?: Pick<Logger, 'warn'>,
 ): { llm: LlmProvider; research: ResearchProvider; platformKey: string | null; testMode: boolean; baseUrl: string } {
   const baseUrl = env['GEMINI_BASE_URL'] ?? 'https://generativelanguage.googleapis.com/v1beta/openai';
   if ((env['LLM_PROVIDER'] ?? 'gemini') === 'stub') {
@@ -90,7 +96,7 @@ export function platformAi(
   if (key) {
     const models = defaultGeminiModels();
     return {
-      llm: new OpenAiCompatibleProvider(key, models, baseUrl), research: new GeminiResearchProvider(key, models.research),
+      llm: new OpenAiCompatibleProvider(key, models, baseUrl, 'gemini', logger), research: new GeminiResearchProvider(key, models.research),
       platformKey: key, testMode: false, baseUrl,
     };
   }
@@ -234,7 +240,7 @@ export class TenantAiResolver {
     const models = { ...this.deps.defaults, ...dropEmpty(meta.models ?? {}) };
     const next = {
       stamp,
-      llm: new OpenAiCompatibleProvider(key, { fast: models.fast, standard: models.standard, advanced: models.advanced }, this.deps.baseUrl),
+      llm: new OpenAiCompatibleProvider(key, { fast: models.fast, standard: models.standard, advanced: models.advanced, fallback: models.fallback ?? '' }, this.deps.baseUrl, 'gemini', this.deps.logger),
       research: new GeminiResearchProvider(key, models.research),
     };
     this.cache.set(tenantId, next);

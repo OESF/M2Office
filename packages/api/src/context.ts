@@ -226,7 +226,8 @@ export function buildDeps(): AppDeps {
   // 認証の要る会社の接続の認可（仕様書 第12.11.6.4節）。ツールを呼ぶときに依頼した本人の認可を付ける
   const connections = new ConnectionCredentials({ repo, box });
   const hub = buildHub(repo, registry, log, connections);
-  const platform = buildAi(hub);
+  // 別のモデルへ退避したことはアプリのログに残す（仕様書 第20.2.5節）
+  const platform = buildAi(hub, log);
   const llm = platform.llm;
   const tenantView = (tenantId: string) => hub.forTenant(tenantId);
   /** その人の利用範囲の判定を作る。会社の設定と、その人の所属するグループを読む。 */
@@ -259,6 +260,7 @@ export function buildDeps(): AppDeps {
     platformKey: platform.platformKey, testMode: platform.testMode,
     defaults: defaultGeminiModels(),
     baseUrl: platform.baseUrl,
+    logger: log,
     // 配備の形とローカル AI（仕様書 第8.6節・第16.3.7.1節、ADR-0059）
     deployment: deploymentFromEnv(process.env), local: localLlmFromEnv(process.env),
   });
@@ -649,8 +651,8 @@ export function fileStorageDir(): string {
  * 運営の鍵があれば Gemini。`LLM_PROVIDER=stub` は自動テスト専用のスタブ（見本の応答を再生する）。
  * どちらでもなければ「設定されていない」になり、秘書も業務も動かさない（ADR-0030）。ワーカーと同じ判定。
  */
-export function buildAi(hub?: ExtensionHub) {
-  return platformAi(process.env, (agentId) => hub?.officialAgents().find((a) => a.id === agentId)?.evals);
+export function buildAi(hub?: ExtensionHub, logger?: Pick<Logger, 'warn'>) {
+  return platformAi(process.env, (agentId) => hub?.officialAgents().find((a) => a.id === agentId)?.evals, logger);
 }
 
 /**

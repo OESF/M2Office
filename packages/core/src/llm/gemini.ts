@@ -4,6 +4,7 @@
  * @see 仕様書 第20.2節 LLM 抽象化層
  */
 
+import type { Logger } from '../log/logger.js';
 import type { LlmExtractRequest, LlmImageGenerateRequest, LlmProvider, LlmRequest, LlmResponse, ModelTier } from './provider.js';
 
 /** 役割ごとのモデル名。設定で差し替えられる（仕様書 第20.2節）。 */
@@ -11,6 +12,32 @@ export interface GeminiModelMap {
   fast: string;
   standard: string;
   advanced: string;
+  /** 失敗したときに最初に試す退避先（仕様書 第20.2.5節）。空なら、ほかの役割のモデルだけに退避する。 */
+  fallback?: string;
+}
+
+/** 1 回の依頼で呼ぶ回数の上限（最初を含む。仕様書 第20.2.5節）。 */
+export const LLM_ATTEMPTS_MAX = 3;
+
+/**
+ * 別のモデルで呼び直してよい失敗か（仕様書 第20.2.5節）。
+ *
+ * @param status 応答の状態。通信そのものが失敗したときは `null`
+ * @remarks 混雑・上限・時間切れ・提供者の障害・届かない・モデルが無い。依頼の形の誤りと鍵の誤りは、別のモデルでも同じく失敗するため退避しない
+ */
+export function isFallbackStatus(status: number | null): boolean {
+  return status === null || [404, 408, 429, 500, 502, 503, 504].includes(status);
+}
+
+/**
+ * 依頼の役割に対して、呼ぶモデルを順に並べる（仕様書 第20.2.5節）。
+ *
+ * @returns 最初は役割のモデル。続いて退避先（設定があれば）、ほかの役割のモデル（高性能・標準・高速の順）。同じ名前は 1 度だけ、{@link LLM_ATTEMPTS_MAX} 個まで
+ * @remarks 設定にあるモデルだけから選ぶ。確かめていないモデル名をここで持ち込まない
+ */
+export function modelCandidates(models: GeminiModelMap, tier: ModelTier): string[] {
+  const order = [models[tier], models.fallback ?? '', models.advanced, models.standard, models.fast];
+  return [...new Set(order.map((m) => m.trim()).filter(Boolean))].slice(0, LLM_ATTEMPTS_MAX);
 }
 
 /**
@@ -51,28 +78,55 @@ export class OpenAiCompatibleProvider implements LlmProvider {
     private readonly models: GeminiModelMap,
     private readonly baseUrl: string,
     name = 'gemini',
+    /** 退避したことを残すロガー（仕様書 第20.2.5節）。無ければ残さない。 */
+    private readonly log?: Pick<Logger, 'warn'>,
   ) {
     this.name = name;
   }
 
+  /**
+   * 役割のモデルで呼び、一時的な失敗なら別のモデルで呼び直す（仕様書 第20.2.5節）。
+   *
+   * @param send 指定したモデルで 1 回呼ぶ
+   * @param failure 失敗のときの文（状態を添える）
+   * @returns うまくいった応答と、答えたモデル
+   * @throws {LlmRequestError} 退避しない失敗か、すべてのモデルで失敗したとき（最後の失敗）
+   * @remarks 同じ鍵・同じ窓口の中だけで呼び直す。ほかの鍵や社外の AI には切り替えない。ログには依頼の中身を残さない
+   */
+  private async withFallback(tier: ModelTier, send: (model: string) => Promise<Response>, failure: string): Promise<{ res: Response; model: string }> {
+    const candidates = modelCandidates(this.models, tier);
+    let last: LlmRequestError | null = null;
+    for (let i = 0; i < candidates.length; i++) {
+      const model = candidates[i]!;
+      let res: Response | null = null;
+      try {
+        res = await send(model);
+      } catch (err) {
+        last = new LlmRequestError(`${failure}（届きませんでした）`, err instanceof Error ? err.message : String(err));
+      }
+      if (res?.ok) return { res, model };
+      if (res) last = new LlmRequestError(`${failure} (${res.status})`, await res.text().catch(() => ''));
+      const status = res ? res.status : null;
+      const next = candidates[i + 1];
+      if (!isFallbackStatus(status) || !next) break;
+      this.log?.warn('推論に失敗したため、別のモデルで呼び直します', { provider: this.name, from: model, to: next, status: status ?? 'network' });
+    }
+    throw last ?? new LlmRequestError(failure, '');
+  }
+
   async complete(req: LlmRequest): Promise<LlmResponse> {
-    const res = await fetch(`${this.baseUrl}/chat/completions`, {
+    const { res, model } = await this.withFallback(req.tier, (m) => fetch(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
         authorization: `Bearer ${this.apiKey}`,
       },
       body: JSON.stringify({
-        model: this.resolveModel(req.tier),
+        model: m,
         messages: req.messages,
         max_tokens: req.maxOutputTokens,
       }),
-    });
-
-    if (!res.ok) {
-      const body = await res.text();
-      throw new LlmRequestError(`LLM 呼び出しに失敗しました (${res.status})`, body);
-    }
+    }), 'LLM 呼び出しに失敗しました');
 
     const json = (await res.json()) as {
       model?: string;
@@ -86,7 +140,7 @@ export class OpenAiCompatibleProvider implements LlmProvider {
       tokensUsed: used.total_tokens ?? (used.prompt_tokens ?? 0) + (used.completion_tokens ?? 0),
       ...(used.prompt_tokens !== undefined ? { inputTokens: used.prompt_tokens } : {}),
       ...(used.completion_tokens !== undefined ? { outputTokens: used.completion_tokens } : {}),
-      model: json.model ?? this.resolveModel(req.tier),
+      model: json.model ?? model,
     };
   }
 
@@ -101,11 +155,11 @@ export class OpenAiCompatibleProvider implements LlmProvider {
     // PDF は OpenAI 互換の `image_url` では送れない。Gemini の口へ、そのまま添えて送る
     if (req.mimeType === 'application/pdf') return this.readDocument(req);
     const dataUrl = `data:${req.mimeType};base64,${Buffer.from(req.bytes).toString('base64')}`;
-    const res = await fetch(`${this.baseUrl}/chat/completions`, {
+    const { res } = await this.withFallback('standard', (m) => fetch(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${this.apiKey}` },
       body: JSON.stringify({
-        model: this.resolveModel('standard'),
+        model: m,
         messages: [
           {
             role: 'user',
@@ -117,11 +171,7 @@ export class OpenAiCompatibleProvider implements LlmProvider {
         ],
         max_tokens: 2000,
       }),
-    });
-    if (!res.ok) {
-      const body = await res.text();
-      throw new LlmRequestError(`画像の読み取りに失敗しました (${res.status})`, body);
-    }
+    }), '画像の読み取りに失敗しました');
     const json = (await res.json()) as {
       choices?: { message?: { content?: string } }[];
       usage?: { total_tokens?: number };
@@ -139,8 +189,7 @@ export class OpenAiCompatibleProvider implements LlmProvider {
   private async readDocument(req: { bytes: Uint8Array; mimeType: string }): Promise<LlmResponse> {
     // OpenAI 互換の窓口（`.../v1beta/openai`）から、Gemini の窓口（`.../v1beta`）へ読み替える
     const base = this.baseUrl.replace(/\/openai\/?$/, '');
-    const model = this.resolveModel('standard');
-    const res = await fetch(`${base}/models/${encodeURIComponent(model)}:generateContent`, {
+    const { res } = await this.withFallback('standard', (m) => fetch(`${base}/models/${encodeURIComponent(m)}:generateContent`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-goog-api-key': this.apiKey },
       body: JSON.stringify({
@@ -153,11 +202,7 @@ export class OpenAiCompatibleProvider implements LlmProvider {
         }],
         generationConfig: { maxOutputTokens: 4000 },
       }),
-    });
-    if (!res.ok) {
-      const body = await res.text();
-      throw new LlmRequestError(`文書の読み取りに失敗しました (${res.status})`, body);
-    }
+    }), '文書の読み取りに失敗しました');
     const json = (await res.json()) as {
       candidates?: { content?: { parts?: { text?: string }[] } }[];
       usageMetadata?: { totalTokenCount?: number };
@@ -175,8 +220,7 @@ export class OpenAiCompatibleProvider implements LlmProvider {
    */
   async extractFromImage(req: LlmExtractRequest): Promise<LlmResponse> {
     const base = this.baseUrl.replace(/\/openai\/?$/, '');
-    const model = this.resolveModel(req.tier ?? 'standard');
-    const res = await fetch(`${base}/models/${encodeURIComponent(model)}:generateContent`, {
+    const { res, model } = await this.withFallback(req.tier ?? 'standard', (m) => fetch(`${base}/models/${encodeURIComponent(m)}:generateContent`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-goog-api-key': this.apiKey },
       body: JSON.stringify({
@@ -189,11 +233,7 @@ export class OpenAiCompatibleProvider implements LlmProvider {
         }],
         generationConfig: { maxOutputTokens: req.maxOutputTokens ?? 2000, responseMimeType: 'application/json' },
       }),
-    });
-    if (!res.ok) {
-      const body = await res.text();
-      throw new LlmRequestError(`画像の読み取りに失敗しました (${res.status})`, body);
-    }
+    }), '画像の読み取りに失敗しました');
     const json = (await res.json()) as {
       modelVersion?: string;
       candidates?: { content?: { parts?: { text?: string }[] } }[];
@@ -233,10 +273,6 @@ export class OpenAiCompatibleProvider implements LlmProvider {
     const part = (json.candidates?.[0]?.content?.parts ?? []).find((p) => p.inlineData?.data);
     if (!part?.inlineData?.data) return null;
     return { bytes: new Uint8Array(Buffer.from(part.inlineData.data, 'base64')), mimeType: part.inlineData.mimeType ?? 'image/png' };
-  }
-
-  private resolveModel(tier: ModelTier): string {
-    return this.models[tier];
   }
 }
 

@@ -136,6 +136,8 @@ export function defaultGeminiModels(): GeminiModels {
     advanced: process.env['MODEL_ADVANCED'] ?? DEFAULT_MODELS.advanced,
     research: process.env['MODEL_RESEARCH'] ?? standard,
     live: process.env['MODEL_LIVE'] ?? DEFAULT_LIVE_MODEL,
+    // 退避先（仕様書 第20.2.5節）。既定は置かない（設定にあるほかの役割のモデルに退避する）
+    fallback: process.env['MODEL_FALLBACK']?.trim() ?? '',
   };
 }
 
