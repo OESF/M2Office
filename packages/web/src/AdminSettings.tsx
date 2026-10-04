@@ -136,6 +136,24 @@ export function CompanySettings({ page }: { page: string }) {
           <Text span={3} label="電話番号" value={company.phone} onChange={c('phone')} placeholder="03-0000-0000" />
           {/* 自社の Web サイト（仕様書 第36.4節）。競合の分析が自社の像をまとめるときに読む */}
           <Text span={6} label="Web サイト" value={company.website ?? ''} onChange={c('website')} placeholder="https://www.example.jp/" />
+          {/* 営業日（第 0.243.0 版）。朝のブリーフなど「会社の営業日」の定時実行は、この曜日にだけ動く */}
+          <div className="field">
+            <label>営業日</label>
+            <div className="row wrap">
+              {'日月火水木金土'.split('').map((label, i) => (
+                <label key={label} className="check">
+                  <input type="checkbox" checked={(company.businessDays ?? [1, 2, 3, 4, 5]).includes(i)}
+                    onChange={(e) => {
+                      const cur = company.businessDays ?? [1, 2, 3, 4, 5];
+                      setCompany({ ...company, businessDays: e.target.checked ? [...new Set([...cur, i])].sort() : cur.filter((d) => d !== i) });
+                    }} />{label}
+                </label>
+              ))}
+              <label className="check">
+                <input type="checkbox" checked={company.holidaysClosed ?? true} onChange={(e) => setCompany({ ...company, holidaysClosed: e.target.checked })} />祝日は休み
+              </label>
+            </div>
+          </div>
           <Text span={4} label="適格請求書発行事業者の登録番号" value={company.invoiceRegistrationNumber}
             onChange={c('invoiceRegistrationNumber')} placeholder="T1234567890123（未登録なら空欄）" />
           <div className="field span-2">

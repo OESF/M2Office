@@ -13,10 +13,12 @@
  * 利用者が画面で選べる粒度にとどめる（毎日／毎平日／毎週）。
  * cron 式は利用者に見せない（原則 u1）。月次は Phase 2 で追加する。
  * 毎平日（月〜金）は朝のブリーフのために足した（仕様書 第9.5.5.1節）。祝日は考えない。
+ * 会社の営業日（`business`）は、会社情報の営業日（曜日と祝日）と、お知らせで出した休業の期間に合わせる（第 0.243.0 版。朝のブリーフの既定）。
  */
 export type ScheduleRule =
   | { kind: 'daily'; hour: number; minute: number }
   | { kind: 'weekdays'; hour: number; minute: number }
+  | { kind: 'business'; hour: number; minute: number }
   | { kind: 'weekly'; weekday: number; hour: number; minute: number };
 
 export interface Schedule {

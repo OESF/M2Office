@@ -28,11 +28,11 @@ function deps(o: { proactivity?: 'low' | 'normal'; canUse?: boolean; disabled?: 
 
 const NOW = new Date('2026-09-28T01:00:00Z'); // 月曜 10:00（日本時間）
 
-test('まだなら、平日 7:30 の定時実行を用意し、用意したことを記録する。二度目は作らない', async () => {
+test('まだなら、会社の営業日 7:30 の定時実行を用意し、用意したことを記録する。二度目は作らない', async () => {
   const { d, created, prefs } = deps();
   const s = await ensureMorningBrief(d, 't', 'u', NOW);
   assert.equal(s?.agentId, 'morning-brief');
-  assert.deepEqual(s?.rule, { kind: 'weekdays', hour: 7, minute: 30 });
+  assert.deepEqual(s?.rule, { kind: 'business', hour: 7, minute: 30 });
   assert.equal(s?.nextRunAt, '2026-09-28T22:30:00.000Z', '次は火曜の 7:30');
   assert.ok(prefs().onboarding.morningBriefAt);
   assert.equal(await ensureMorningBrief(d, 't', 'u', NOW), null);

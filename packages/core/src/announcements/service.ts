@@ -88,6 +88,9 @@ export function announcementDigest(a: Pick<StoredAnnouncement, 'title' | 'body' 
 /** 期間の後の Web の題名。 */
 export const endedTitle = (title: string) => (title.startsWith('（終了しました）') ? title : `（終了しました）${title}`);
 
+/** 休業のお知らせか（題名と本文の言葉から）。期間を会社の休業日として覚える（第35.7節）。 */
+export const isClosure = (a: Pick<StoredAnnouncement, 'title' | 'body'>) => /(休業|休診|休館|休店|臨時休|お休みをいただ|お休みとさせ)/.test(`${a.title} ${a.body}`);
+
 /** 期間が終わったか（終わりの日の次の日（日本時間）になったら）。 */
 const endedBy = (endDate: string | null, now: Date) => !!endDate && dateIn('Asia/Tokyo', now) > endDate;
 
@@ -392,6 +395,11 @@ export class AnnouncementService {
       if (r) failed.push(`${ANNOUNCEMENT_CHANNEL_LABELS[c]}: ${r}`);
     }
     await this.deps.store.update(who.tenantId, a.id, { status: 'published', publishedAt: now.toISOString() });
+    // 休業のお知らせなら、その期間を会社の休業日として覚える（朝のブリーフなどが休む。第35.7節）
+    if (isClosure(a) && (a.startDate || a.endDate)) {
+      await this.deps.store.addClosure(who.tenantId, a.id, (a.startDate ?? a.endDate)!, (a.endDate ?? a.startDate)!);
+      await this.audit(who, 'announcement.closure', a.id, { startDate: a.startDate, endDate: a.endDate });
+    }
     await this.audit(who, 'announcement.publish', a.id, { channels: a.channels, failed: failed.length });
     if (failed.length) await this.notify(who.tenantId, a.createdBy, `お知らせを出せなかった出し先があります（${a.title.slice(0, 30)}）`, failed.join('／'));
   }

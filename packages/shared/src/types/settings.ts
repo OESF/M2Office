@@ -40,6 +40,13 @@ export interface CompanyInfo {
   logoFileId: string | null;
   /** 自社の Web サイト（仕様書 第36.4節）。競合の分析が自社の像をまとめるときに読む。無ければ空文字。 */
   website: string;
+  /**
+   * 営業する曜日（0=日曜〜6=土曜。第6.6.1節・第 0.243.0 版）。朝のブリーフなど「会社の営業日」の定時実行は、この曜日にだけ動く。
+   * 土日に営業する店・年中無休の会社は、ここで選ぶ
+   */
+  businessDays: number[];
+  /** 祝日を休みにするか（会社の営業日から祝日を外す） */
+  holidaysClosed: boolean;
 }
 
 /** 自社の書き方（仕様書 第15.2.1節）。すべてのエージェントに同じものを差し込む。 */
@@ -266,6 +273,8 @@ export const DEFAULT_TENANT_SETTINGS: TenantSettings = {
   company: {
     legalName: '', shortName: '', postalCode: '', address: '', phone: '', fiscalYearStartMonth: 4,
     invoiceRegistrationNumber: '', taxRounding: 'floor', closingDay: 'end', paymentTerms: '', logoFileId: null, website: '',
+    // 営業日は既定で月〜金・祝日は休み（第 0.243.0 版）
+    businessDays: [1, 2, 3, 4, 5], holidaysClosed: true,
   },
   writingStyle: { selfReference: '弊社', greeting: '', closing: '', signature: '', terms: [], notes: '' },
   // 社内への書き込みは既定で承認なし。人に判断を求めるのは社外とお金だけ（第9.4.0節、ADR-0028）

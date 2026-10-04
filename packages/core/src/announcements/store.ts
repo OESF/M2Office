@@ -47,6 +47,10 @@ export interface AnnouncementStore {
   due(tenantId: string, now: string): Promise<StoredAnnouncement[]>;
   /** 出したもの（期間の後の扱いを確かめる） */
   published(tenantId: string): Promise<StoredAnnouncement[]>;
+  /** 休業の期間を覚える（休業のお知らせを出したとき。第35.7節）。同じお知らせの期間は置き換える */
+  addClosure(tenantId: string, announcementId: string, startDate: string, endDate: string): Promise<void>;
+  /** その日（YYYY-MM-DD）が休業の期間に入るか */
+  closedOn(tenantId: string, day: string): Promise<boolean>;
 }
 
 const iso = (d: Date | string | null) => (d ? new Date(d).toISOString() : null);
@@ -154,6 +158,16 @@ export class PostgresAnnouncementStore implements AnnouncementStore {
     return (await this.q<Row>(tenantId, `select id, title, body, start_date::text, end_date::text, publish_at, status, channels, texts, approved_digest, run_id,
       created_by, created_at, updated_at, published_at, ended_at from announcements where tenant_id = $1 and status = 'published'`, [tenantId])).map(toAnnouncement);
   }
+
+  async addClosure(tenantId: string, announcementId: string, startDate: string, endDate: string): Promise<void> {
+    await this.q(tenantId, 'delete from business_closures where tenant_id = $1 and announcement_id = $2', [tenantId, announcementId]);
+    await this.q(tenantId, 'insert into business_closures (id, tenant_id, start_date, end_date, announcement_id) values ($1, $2, $3, $4, $5)',
+      [`clo-${randomUUID()}`, tenantId, startDate, endDate, announcementId]);
+  }
+
+  async closedOn(tenantId: string, day: string): Promise<boolean> {
+    return (await this.q<{ id: string }>(tenantId, 'select id from business_closures where tenant_id = $1 and start_date <= $2 and end_date >= $2 limit 1', [tenantId, day])).length > 0;
+  }
 }
 
 /** メモリの置き場（自動テスト用）。 */
@@ -210,5 +224,16 @@ export class MemoryAnnouncementStore implements AnnouncementStore {
 
   async published(tenantId: string) {
     return this.rows.filter((r) => r.tenantId === tenantId && r.status === 'published').map((r) => this.strip(r));
+  }
+
+  private closures: { tenantId: string; announcementId: string; startDate: string; endDate: string }[] = [];
+
+  async addClosure(tenantId: string, announcementId: string, startDate: string, endDate: string) {
+    this.closures = this.closures.filter((c) => !(c.tenantId === tenantId && c.announcementId === announcementId));
+    this.closures.push({ tenantId, announcementId, startDate, endDate });
+  }
+
+  async closedOn(tenantId: string, day: string) {
+    return this.closures.some((c) => c.tenantId === tenantId && c.startDate <= day && c.endDate >= day);
   }
 }

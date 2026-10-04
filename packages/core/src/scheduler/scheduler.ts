@@ -9,7 +9,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Repository } from '../repository/types.js';
 import { enqueueJob } from '../engine/enqueue.js';
-import { nextRunAt } from './rule.js';
+import { localDay, nextRunAt } from './rule.js';
 import { scheduleBlocker, type ScheduleChecks } from './blocker.js';
 import { silentLogger, type Logger } from '../log/logger.js';
 
@@ -17,6 +17,11 @@ import { silentLogger, type Logger } from '../log/logger.js';
 export interface SchedulerDeps extends ScheduleChecks {
   /** アプリログ。省略時は何も書かない。 */
   logger?: Logger;
+  /**
+   * その日（YYYY-MM-DD）が会社の営業日か（第 0.243.0 版）。「会社の営業日」の定時実行は、営業日でない日には動かさない。
+   * 無ければ、毎日動かす
+   */
+  businessDay?(tenantId: string, day: string): Promise<boolean>;
 }
 
 /** 接続が無いために定時実行を飛ばしたときの知らせの題名。未読の同じ知らせがあれば重ねて知らせない。 */
@@ -57,6 +62,10 @@ export class Scheduler {
       // 次回は「今」より後に置く。止まっていた間の回は飛ばす
       const due = await repo.claimDueSchedule(now, (s) => nextRunAt(s.rule, s.timezone, now));
       if (!due) break;
+
+      // 会社の営業日でない日（営業しない曜日・祝日・休業の期間）は動かさない。次の回はもう先に置いてある
+      if (due.rule.kind === 'business' && this.deps.businessDay
+        && !(await this.deps.businessDay(due.tenantId, localDay(now, due.timezone)).catch(() => true))) continue;
 
       const { def, block } = await scheduleBlocker(this.deps, due);
       const reason = block?.reason ?? null;

@@ -9,8 +9,8 @@ import { AG05_WEEKLY_BRIEF, MORNING_BRIEF, describeRule, nextRunAt } from '@m2of
 import type { Schedule, ScheduleRule } from '@m2office/shared';
 import type { AppDeps } from '../context.js';
 
-/** 朝のブリーフの既定の時刻（平日 7:30。本人の地域の時刻）。 */
-export const MORNING_BRIEF_RULE: ScheduleRule = { kind: 'weekdays', hour: 7, minute: 30 };
+/** 朝のブリーフの既定の時刻（会社の営業日の 7:30。本人の地域の時刻。第 0.243.0 版で「毎平日」から改めた）。 */
+export const MORNING_BRIEF_RULE: ScheduleRule = { kind: 'business', hour: 7, minute: 30 };
 
 /** 週次ブリーフの既定の時刻（月曜 7:00。朝のブリーフより先に届く。ADR-0048）。 */
 export const WEEKLY_BRIEF_RULE: ScheduleRule = { kind: 'weekly', weekday: 1, hour: 7, minute: 0 };

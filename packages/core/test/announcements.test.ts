@@ -99,6 +99,9 @@ test('出す: 承認した中身だけを出し、Web（WordPress が無けれ�
   const outs = await store.outputs('t1', id);
   assert.deepEqual(outs.map((o) => [o.channel, o.status]).sort(), [['line', 'done'], ['signage', 'done'], ['web', 'done']]);
   assert.equal(outs.find((o) => o.channel === 'web')!.result.draft, true, 'WordPress が無ければ写して使う');
+  // 休業のお知らせの期間を、会社の休業日として覚える（朝のブリーフなどが休む。第35.7節）
+  assert.equal(await store.closedOn('t1', r.announcement.startDate!), true);
+  assert.ok(audits.includes('announcement.closure'));
   assert.ok(['announcement.draft', 'announcement.submit', 'announcement.approve', 'announcement.line', 'announcement.signage', 'announcement.publish'].every((x) => audits.includes(x)));
   assert.match((await service.copy(who, id))!.html, /<h2>直した題名|<h2>年末年始/);
 });

@@ -11,7 +11,7 @@ import { InputFields } from './components.js';
 
 type Kind = ScheduleRule['kind'];
 
-const KIND_LABELS: Record<Kind, string> = { daily: '毎日', weekdays: '毎平日（月〜金）', weekly: '毎週' };
+const KIND_LABELS: Record<Kind, string> = { daily: '毎日', weekdays: '毎平日（月〜金）', business: '会社の営業日', weekly: '毎週' };
 const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
 
 /**

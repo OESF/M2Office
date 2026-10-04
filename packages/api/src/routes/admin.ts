@@ -554,6 +554,9 @@ function validateSection(
       if (postal && !/^\d{3}-?\d{4}$/.test(postal)) return { error: '郵便番号は 123-4567 の形で書いてください' };
       // 自社の Web サイト（第36.4節）。http か https の URL だけ
       const website = str('website', 300).trim();
+      // 営業する曜日（0=日〜6=土）と祝日を休みにするか（第 0.243.0 版）。選ばれていなければ月〜金
+      const days = Array.isArray(o['businessDays']) ? [...new Set((o['businessDays'] as unknown[]).map(Number).filter((n) => Number.isInteger(n) && n >= 0 && n <= 6))].sort() : [1, 2, 3, 4, 5];
+      if (days.length === 0) return { error: '営業する曜日を 1 つ以上選んでください' };
       if (website && !/^https?:\/\/[^\s/]+\.[^\s]+$/i.test(website)) return { error: 'Web サイトは https:// から始まる URL で書いてください' };
       const value: CompanyInfo = {
         legalName: str('legalName', 200), shortName: str('shortName', 30).trim(),
@@ -564,6 +567,8 @@ function validateSection(
         // 画面の左上のロゴ（仕様書 第6.6.1節）。会社が上げた画像のファイル ID
         logoFileId: str('logoFileId', 100).trim() || null,
         website,
+        businessDays: days,
+        holidaysClosed: o['holidaysClosed'] !== false,
       };
       return { section: 'company', value };
     }
