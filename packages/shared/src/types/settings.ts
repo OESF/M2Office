@@ -415,6 +415,17 @@ export interface UserSettings {
     /** 秘書とのやり取りを会話ログに残すか（第11.9.4.1節）。切ると 1 件も残さない。 */
     keepConversations: boolean;
   };
+  /**
+   * アプリの一覧（上の帯の格子のボタン。仕様書 第6.1.1.2節）。本人だけのもの。
+   *
+   * @remarks 会社が Google につないでいなければ、Google のサービスは `hidden` によらず並べない
+   */
+  launcher: {
+    /** 出さない Google のサービス（{@link GOOGLE_APP_IDS} のどれか）。既定はすべて出す。 */
+    hidden: string[];
+    /** 本人が登録したほかのサイト。登録した順に、Google のサービスの後ろに並べる。 */
+    links: LauncherLink[];
+  };
   menu: {
     /** メニューに出さない業務。使える業務を増やすことはできない（第6.5.6節）。 */
     hidden: string[];
@@ -516,6 +527,48 @@ export const MENU_CATEGORY_NAME_MAX = 20;
 
 /** まだピン止めを変えていない人に、はじめからピン止めしておく業務（仕様書 第6.1.1節）。 */
 // 'business-cards' は名刺、'inventory' は在庫（内蔵の拡張。業務の 1 つとして並べる。使える人にだけ出る。仕様書 第6.1.1節）
+/** アプリの一覧に並べる Google のサービスの ID（仕様書 第6.1.1.2節）。`admin-console` は管理者にだけ並べる。 */
+export const GOOGLE_APP_IDS = ['gmail', 'calendar', 'tasks', 'chat', 'drive', 'docs', 'sheets', 'slides', 'meet', 'forms', 'admin-console'] as const;
+
+/** アプリの一覧に本人が登録したリンク 1 つ（仕様書 第6.1.1.2節）。 */
+export interface LauncherLink {
+  /** 一覧の中で見分けるための ID（画面が作る）。 */
+  id: string;
+  /** 一覧に出す名前（{@link LAUNCHER_LABEL_MAX} 字まで）。 */
+  label: string;
+  /** 開く先（`https://` か `http://`。ID とパスワードを含まない）。 */
+  url: string;
+}
+
+/** 1 人が登録できるリンクの数（仕様書 第6.1.1.2節）。 */
+export const LAUNCHER_LINK_MAX = 20;
+/** 登録したリンクの名前の長さ（字）。 */
+export const LAUNCHER_LABEL_MAX = 20;
+/** 登録したリンクの URL の長さ（字）。 */
+export const LAUNCHER_URL_MAX = 500;
+
+/**
+ * アプリの一覧に登録できる URL かを確かめる（仕様書 第6.1.1.2節「受け付ける URL」）。
+ *
+ * @returns 受け付けるなら整えた URL、断るなら理由
+ * @remarks 画面とサーバーが同じ決まりを使う。`javascript:` などは断り、ID とパスワードを含む URL も断る（パスワードを残さないため）
+ */
+export function checkLauncherUrl(raw: string): { url: string } | { error: string } {
+  const text = raw.trim();
+  if (!text) return { error: 'URL を入れてください' };
+  if (text.length > LAUNCHER_URL_MAX) return { error: `URL は ${LAUNCHER_URL_MAX} 字までにしてください` };
+  let u: URL;
+  try {
+    u = new URL(/^[a-z][a-z0-9+.-]*:/i.test(text) ? text : `https://${text}`);
+  } catch {
+    return { error: 'URL の形が正しくありません' };
+  }
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') return { error: 'https:// か http:// で始まる URL にしてください' };
+  if (u.username || u.password) return { error: 'ID やパスワードを含む URL は登録できません' };
+  if (!u.hostname) return { error: 'URL の形が正しくありません' };
+  return { url: u.toString() };
+}
+
 export const DEFAULT_PINNED = ['minutes', 'inbox-triage', 'knowledge-qa', 'scheduling', 'slides', 'document-draft', 'business-cards', 'inventory'];
 
 export const DEFAULT_USER_SETTINGS: UserSettings = {
@@ -527,6 +580,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
     channels: { chat: false },
   },
   memory: { learning: true, excludes: [], keepConversations: true },
+  launcher: { hidden: [], links: [] },
   menu: { hidden: [], order: [], pinned: null, categories: [], categoryOf: {} },
   brief: { topics: [], omit: [], weeklyOmit: [], seededAt: null, seedNote: false },
   onboarding: { tourCompletedAt: null, morningBriefAt: null, weeklyBriefAt: null },

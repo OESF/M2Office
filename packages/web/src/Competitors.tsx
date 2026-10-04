@@ -4,12 +4,12 @@
  * 「探す」で、AI が自社の像をまとめて近くの同業か同じような事業の会社を探し、読んでレポートを作る（数分かかる。作業の間は読み直す）。
  * 一覧の上の 1 行の欄に URL か店の名前を入れて「追加」。競合ごとに「削除」。名前を押すと、取り出した事実を出典つきで出す。
  * レポートの表の中のリンクは外す（2026-10-04 に三浦さんが指摘。名前がすべて同じ先へのリンクで見づらく、意味が無かった）。
- * 地図（Places API）で見つけたものには「Google Maps」と添える（訳さない。第36.13節）。説明文は常には出さない（原則 u11）。
+ * 地図（Places API）の情報の出典「Google Maps」は、表の下に 1 度だけ出す（訳さない。第36.11節・第36.13節）。説明文は常には出さない（原則 u11）。
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  COMPETITOR_FACT_LABELS, COMPETITOR_ORIGIN_LABELS,
+  COMPETITOR_FACT_LABELS, gatherMapSource,
   type Competitor, type CompetitorFact, type CompetitorOverview, type CompetitorReport,
 } from '@m2office/shared';
 import { api, describeError } from './api.js';
@@ -27,7 +27,23 @@ function NoteText({ note }: { note: Note }) {
   return note ? <span className={`inquiries-note is-${note.kind}`} role={note.kind === 'error' ? 'alert' : 'status'}>{note.text}</span> : null;
 }
 
-/** 1 社（か自社）の事実を、回ごとに出典つきで並べる。 */
+/** 出典のページを、見分けられる短い形にする（ホスト名とパス。トップページはホスト名だけ）。 */
+function pageLabel(url: string): string {
+  try {
+    const u = new URL(url);
+    const path = decodeURIComponent(u.pathname).replace(/\/$/, '');
+    return path ? `${u.hostname}${path}` : u.hostname;
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * 1 社（か自社）の事実を、回ごとに出典つきで並べる。
+ *
+ * @remarks 回の中の出典がすべて同じページなら、見出しの下に 1 度だけ出す（行ごとに同じものを並べても意味がないため。第 0.252.3 版）。
+ * ページが分かれているときは、行ごとにどのページかを出す
+ */
 function Facts({ id }: { id: string }) {
   const [facts, setFacts] = useState<CompetitorFact[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -43,17 +59,47 @@ function Facts({ id }: { id: string }) {
       {periods.map((p) => (
         <div key={p}>
           <h4>{periodLabel(p)}</h4>
-          <ul>
-            {facts.filter((f) => f.period === p).map((f) => (
-              <li key={f.id}>
-                <span className="badge">{COMPETITOR_FACT_LABELS[f.kind]}</span> {f.text}{' '}
-                <a href={f.sourceUrl} target="_blank" rel="noopener noreferrer nofollow" className="small">出典</a>
-              </li>
-            ))}
-          </ul>
+          {(() => {
+            const list = facts.filter((f) => f.period === p);
+            const sources = [...new Set(list.map((f) => f.sourceUrl))];
+            const one = sources.length === 1 ? sources[0]! : null;
+            return (
+              <>
+                {one && (
+                  <p className="small muted">出典: <a href={one} target="_blank" rel="noopener noreferrer nofollow">{pageLabel(one)}</a></p>
+                )}
+                <ul>
+                  {list.map((f) => (
+                    <li key={f.id}>
+                      <span className="badge">{COMPETITOR_FACT_LABELS[f.kind]}</span> {f.text}
+                      {!one && <>{' '}<a href={f.sourceUrl} target="_blank" rel="noopener noreferrer nofollow" className="small">{pageLabel(f.sourceUrl)}</a></>}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            );
+          })()}
         </div>
       ))}
     </div>
+  );
+}
+
+/**
+ * 地図（Places API）の情報の出典。表の下に 1 度だけ出す（仕様書 第36.11節）。
+ *
+ * @remarks Google の決まりで、地図なしで出すときは「Google Maps」と表記する（訳さない・12〜16 の大きさ・隠さない）。
+ * 場所ごとに返った出典（attributions）も添える。地図で見つけた競合が無ければ出さない
+ */
+function MapSource({ competitors }: { competitors: Competitor[] }) {
+  const fromMap = competitors.filter((c) => c.origin === 'map');
+  if (!fromMap.length) return null;
+  const extra = [...new Set(fromMap.flatMap((c) => c.attributions))];
+  return (
+    <p className="competitors-source">
+      <span translate="no" className="gmaps">Google Maps</span>
+      {extra.length > 0 && <>（{extra.join('、')}）</>}
+    </p>
   );
 }
 
@@ -68,18 +114,18 @@ function Row({ c, open, onToggle, onRemove, busy }: { c: Competitor; open: boole
         </td>
         <td>{km(c.distanceM)}</td>
         <td>{c.rating !== null ? <>{c.rating.toFixed(1)}<span className="muted small">（{c.ratingCount ?? 0}）</span></> : '—'}</td>
-        <td>
-          {/* 地図で見つけたものは「Google Maps」の 1 つで、出典の表記を兼ねる（訳さない。第36.13節） */}
-          {c.origin === 'map' ? <span translate="no" className="gmaps">Google Maps</span> : COMPETITOR_ORIGIN_LABELS[c.origin]}
-          {c.origin === 'map' && c.attributions.length > 0 && <div className="small muted">{c.attributions.join('、')}</div>}
-        </td>
         <td>{day(c.lastReadAt)}{c.readNote && <div className="small muted">{c.readNote}</div>}</td>
-        <td>{c.factCount}</td>
+        <td>
+          {/* 数を押すと、名前を押したときと同じく取り出した事実を開く */}
+          {c.factCount > 0
+            ? <button className="link" onClick={onToggle} aria-expanded={open} title="取り出した事実を見る">{c.factCount}</button>
+            : c.factCount}
+        </td>
         <td><button className="btn ghost small" disabled={busy} onClick={onRemove}>削除</button></td>
       </tr>
       {open && (
         <tr className="competitors-open">
-          <td colSpan={7}>
+          <td colSpan={6}>
             {c.reason && <p className="small muted">{c.reason}</p>}
             <Facts id={c.id} />
           </td>
@@ -175,7 +221,7 @@ export function Competitors({ changeKey = '', onColumn, onAnnouncement }: {
 
       {o.competitors.length > 0 ? (
         <table className="table competitors-table">
-          <thead><tr><th>競合</th><th>距離</th><th><span translate="no">Google</span> の評価</th><th>取得方法</th><th>取得日</th><th>データ数</th><th /></tr></thead>
+          <thead><tr><th>競合</th><th>距離</th><th><span translate="no">Google</span> の評価</th><th>取得日</th><th>データ数</th><th /></tr></thead>
           <tbody>
             {o.competitors.map((c) => (
               <Row key={c.id} c={c} open={openId === c.id} busy={busy} onToggle={() => setOpenId(openId === c.id ? null : c.id)}
@@ -184,6 +230,12 @@ export function Competitors({ changeKey = '', onColumn, onAnnouncement }: {
           </tbody>
         </table>
       ) : p && !o.job && <p className="muted">覚えている競合はありません</p>}
+      {/*
+        地図（Places API）の情報の出典は、表の下に 1 度だけ出す（第36.11節。第 0.252.1 版）。
+        Google の決まり: 地図なしで出すときは「Google Maps」と表記する（訳さない・12〜16 の大きさ・隠さない）。
+        場所ごとに返った出典（attributions）も添える
+      */}
+      <MapSource competitors={o.competitors} />
 
       <div className="card competitors-reports">
         <div className="row wrap">
@@ -197,7 +249,7 @@ export function Competitors({ changeKey = '', onColumn, onAnnouncement }: {
               {new Date(r.createdAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
               {r.changes ? `（前の回から ${r.changes} 件の動き）` : ''}
             </button>
-            {shownReport === r.id && <div className="competitors-report-body"><Markdown text={stripTableLinks(r.text)} lineBreaks /></div>}
+            {shownReport === r.id && <div className="competitors-report-body"><Markdown text={gatherMapSource(stripTableLinks(r.text))} lineBreaks /></div>}
             {shownReport === r.id && r.themes.length > 0 && (
               <div className="competitors-themes">
                 <h4>コラムの話題</h4>

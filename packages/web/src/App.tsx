@@ -18,7 +18,7 @@ import {
   type AgentSummary, type ApprovalView, type Lookup, type Me, type RunDetail, type SecretaryReply,
 } from './api.js';
 import { AgentHelpTip, HelpCenter, HelpTip, Markdown, PageTitle, Tour, openHelp, useOpenHelp } from './help.js';
-import { AppVersionBadge, GoogleLauncher } from './launcher.js';
+import { AppLauncher, AppVersionBadge } from './launcher.js';
 import { startVoice, type VoiceCall } from './voice.js';
 import { keyLabel, useHotkey, useNumberHotkeys } from './keys.js';
 import { timeGreeting } from './greeting.js';
@@ -495,8 +495,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
         )}
         <span className="spacer" />
         {isAdmin && <a className="link" href={`/admin${location.search}`}>管理者ページ</a>}
-        {/* 見本のデータの会社では出さない。見本と開いた先の本物が食い違うため（仕様書 第6.1.1.2節） */}
-        {me.workspaceSource === 'google' && <GoogleLauncher email={me.user.email} admin={isAdmin} />}
+        {/* Google のサービスは、見本のデータの会社では並べない。見本と開いた先の本物が食い違うため。登録したリンクは出す（仕様書 第6.1.1.2節） */}
+        <AppLauncher email={me.user.email} admin={isAdmin} google={me.workspaceSource === 'google'} />
         <ThemeToggle />
         <span className="badge">{me.user.displayName}</span>
         <button className="btn ghost small" onClick={onLogout}>ログアウト</button>

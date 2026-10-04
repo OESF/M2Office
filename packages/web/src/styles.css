@@ -162,6 +162,21 @@ button { font: inherit; cursor: pointer; }
 }
 .launcher-item:hover, .launcher-item:focus-visible { background: var(--accent-soft); color: var(--accent); }
 .launcher-item .icon { width: 28px; height: 28px; }
+.launcher-head { display: flex; align-items: baseline; justify-content: space-between; }
+button.launcher-item { background: none; border: 0; cursor: pointer; font: inherit; }
+.launcher-item.off { opacity: .35; }
+.launcher-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.launcher-letter {
+  display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; flex: none;
+  border-radius: 50%; border: 1.5px solid currentColor; font-size: calc(14px * var(--font-scale)); font-weight: 600;
+}
+.launcher-letter.small { width: 22px; height: 22px; font-size: calc(12px * var(--font-scale)); }
+.launcher-links { list-style: none; margin: calc(8px * var(--space-scale)) 0 0; padding: 0; }
+.launcher-links li { display: flex; align-items: center; gap: calc(8px * var(--space-scale)); padding: calc(6px * var(--space-scale)) calc(4px * var(--space-scale)); border-top: 1px solid var(--line); }
+.launcher-link-text { display: flex; flex-direction: column; min-width: 0; flex: 1; font-size: calc(13px * var(--font-scale)); }
+.launcher-link-text .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.launcher-add { display: grid; grid-template-columns: 1fr 1.6fr auto; gap: calc(6px * var(--space-scale)); margin-top: calc(10px * var(--space-scale)); }
+.launcher-add input { min-width: 0; }
 .badge {
   background: var(--accent-soft); color: var(--accent);
   border-radius: 999px; padding: calc(2px * var(--space-scale)) calc(10px * var(--space-scale)); font-size: calc(12px * var(--font-scale));
@@ -891,6 +906,26 @@ tr.muted td { color: var(--muted); }
 .ext-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: calc(12px * var(--space-scale)); }
 .ext-card.off { opacity: .72; }
 .ext-row { display: flex; align-items: center; justify-content: space-between; gap: calc(12px * var(--space-scale)); }
+/* 導入済みの拡張機能はアコーディオン。閉じているときはどれも同じ形（仕様書 第6.6.5節）。
+   名前は左、スイッチはどのカードも同じ列、開く印はいちばん右に置く（列の幅を決めてそろえる） */
+.ext-acc-row { display: grid; grid-template-columns: minmax(0, 1fr) calc(92px * var(--font-scale)) calc(96px * var(--font-scale)) 32px; align-items: center; gap: calc(12px * var(--space-scale)); }
+.ext-head {
+  display: flex; justify-content: flex-start; align-items: center; min-width: 0; width: 100%;
+  background: none; border: 0; padding: 0; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.ext-head .ext-title { justify-content: flex-start; text-align: left; min-width: 0; }
+.ext-origin { justify-self: start; white-space: nowrap; }
+.ext-switch { justify-self: end; display: inline-flex; align-items: center; gap: calc(8px * var(--space-scale)); }
+.ext-caret {
+  justify-self: end; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px;
+  background: none; border: 0; border-radius: 6px; color: var(--muted); cursor: pointer;
+}
+.ext-caret .icon { width: 16px; height: 16px; }
+.ext-caret:hover, .ext-caret:focus-visible, .ext-head:hover ~ .ext-caret { color: var(--accent); background: var(--accent-soft); }
+.ext-accordion { padding-top: calc(10px * var(--space-scale)); padding-bottom: calc(10px * var(--space-scale)); }
+.ext-body { border-top: 1px solid var(--line); margin-top: calc(10px * var(--space-scale)); padding-top: calc(10px * var(--space-scale)); display: grid; gap: calc(8px * var(--space-scale)); }
+.ext-body .ext-details { border-top: 0; margin-top: 0; padding-top: 0; }
+.ext-foot { justify-content: flex-end; }
 .ext-title { display: flex; align-items: center; gap: calc(10px * var(--space-scale)); }
 .ext-icon { width: 36px; height: 36px; border-radius: 8px; flex: none; }
 .ext-icon.blank { display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); font-weight: bold; }
@@ -1798,6 +1833,8 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .competitors-report { border-top: 1px solid var(--border); padding: 6px 0; }
 .competitors-report-body { padding: 4px 0 8px; overflow-x: auto; }
 .gmaps { font-family: Roboto, sans-serif; }
+/* Google の決まりで、出典の表記は 12〜16 の大きさにする。文字を小さくする設定でも 12px を下回らない（第36.11節） */
+.competitors-source { margin: calc(4px * var(--space-scale)) 0 0; text-align: right; color: var(--muted); font-size: max(12px, min(16px, calc(12px * var(--font-scale)))); }
 @media (max-width: 640px) {
   .competitors-table th:nth-child(4), .competitors-table td:nth-child(4), .competitors-table th:nth-child(6), .competitors-table td:nth-child(6) { display: none; }
 }

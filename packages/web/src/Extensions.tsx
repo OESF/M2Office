@@ -17,6 +17,7 @@ import {
   type SignageSettings, type SignageSound, type SignageSource, COLUMN_INDUSTRIES, COLUMN_RULE_SET_LABELS, COLUMN_PLAN_FREQUENCY_LABELS, type ColumnPlanFrequency, type WebColumnSettings, type InquirySettings, COMPETITORS_AUTO_RANGE, COMPETITOR_WATCH_LABELS, competitorAutoMax, competitorWatch, competitorsMax, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type WebReviewCandidates, type WebReviewStatus,
 } from '@m2office/shared';
 import { HelpTip, Markdown } from './help.js';
+import { Icon } from './nav.js';
 import { ScopeEditor, ScopeField, useAccessOptions } from './Scope.js';
 
 /** 画面の下に出す知らせ。 */
@@ -174,8 +175,17 @@ export function ExtensionSettings({ focus = null }: { focus?: string | null } = 
   );
 }
 
-/** アイコン・名前・版・区分・提供者・構成要素の数。 */
-function Title({ item: x }: { item: ExtensionView }) {
+/** 区分（公式・内蔵・自社専用など）の印。 */
+function OriginBadge({ item: x }: { item: ExtensionView }) {
+  return <span className={x.origin === 'private' ? 'badge warn' : 'badge'}>{x.originText}</span>;
+}
+
+/**
+ * アイコン・名前・版・区分・提供者・構成要素の数。
+ *
+ * @param badge 区分の印を名前の横に出すか。導入済みの一覧では、列をそろえるため別の列に出す（`false`）
+ */
+function Title({ item: x, badge = true }: { item: ExtensionView; badge?: boolean }) {
   const parts = [
     x.counts.agents > 0 && `業務エージェント ${x.counts.agents}`,
     x.counts.connectors > 0 && `コネクタ ${x.counts.connectors}`,
@@ -186,8 +196,8 @@ function Title({ item: x }: { item: ExtensionView }) {
       {x.icon ? <img src={x.icon} alt="" className="ext-icon" /> : <div className="ext-icon blank">{x.name.slice(0, 1)}</div>}
       <div>
         <div>
-          <strong>{x.name}</strong> <span className="muted small">{x.version}</span>{' '}
-          <span className={x.origin === 'private' ? 'badge warn' : 'badge'}>{x.originText}</span>
+          <strong>{x.name}</strong> <span className="muted small">{x.version}</span>
+          {badge && <>{' '}<OriginBadge item={x} /></>}
         </div>
         <div className="muted small">提供: {x.publisher.name}{parts.length > 0 && `・${parts.join('・')}`}</div>
       </div>
@@ -195,7 +205,12 @@ function Title({ item: x }: { item: ExtensionView }) {
   );
 }
 
-/** 導入済みの拡張機能のカード。スイッチ・詳細・削除。 */
+/**
+ * 導入済みの拡張機能のカード（仕様書 第6.6.5節。第 0.252.2 版でアコーディオンにした）。
+ *
+ * どのカードも、閉じているときは同じ形（アイコン・名前・提供者・スイッチ）で並べる。名前の行を押すと開き、
+ * 利用できる人・拡張ごとの設定・業務と説明・削除が出る。同意のやり直しが要るときは、閉じていても出す（使えないため）。
+ */
 function InstalledCard({ item: x, busy, focused = false, options, onChanged, onToggle, onReconsent, onDelete }: {
   item: ExtensionView; busy: boolean;
   /** 詳細を開いた状態で出し、画面の中へ送る（「接続 › コネクタ」から移ったとき） */
@@ -214,10 +229,14 @@ function InstalledCard({ item: x, busy, focused = false, options, onChanged, onT
   }, [focused]);
   const on = x.enabled && !x.needsReconsent;
   return (
-    <div ref={card} className={on ? 'card ext-card' : 'card ext-card off'}>
-      <div className="ext-row">
-        <Title item={x} />
-        <label className="switch-label">
+    <div ref={card} className={`card ext-card ext-accordion${on ? '' : ' off'}${open ? ' open' : ''}`}>
+      {/* 名前は左・区分の印とスイッチはどのカードも同じ列・開く印はいちばん右（4 列の格子） */}
+      <div className="ext-acc-row">
+        <button type="button" className="ext-head" aria-expanded={open} onClick={() => setOpen(!open)}>
+          <Title item={x} badge={false} />
+        </button>
+        <span className="ext-origin"><OriginBadge item={x} /></span>
+        <label className="switch-label ext-switch">
           <span className="small">{on ? '有効' : '無効'}</span>
           <button
             type="button" role="switch" aria-checked={on} aria-label={`${x.name}を${on ? '無効' : '有効'}にする`}
@@ -225,6 +244,9 @@ function InstalledCard({ item: x, busy, focused = false, options, onChanged, onT
             onClick={() => onToggle(!on)}
           ><span /></button>
         </label>
+        <button type="button" className="ext-caret" aria-expanded={open} aria-label={open ? `${x.name}を閉じる` : `${x.name}を開く`} onClick={() => setOpen(!open)}>
+          <Icon name={open ? 'caret-down' : 'caret-right'} />
+        </button>
       </div>
       {x.needsReconsent && (
         <p className="warn-msg small">
@@ -232,6 +254,7 @@ function InstalledCard({ item: x, busy, focused = false, options, onChanged, onT
           <button className="btn small" onClick={onReconsent}>内容を確認して同意する</button>
         </p>
       )}
+      {open && <div className="ext-body">
       {/* 人事・給与は利用範囲ではなく人事区画で決まる（仕様書 第30.2節）。区画の画面で人を足す */}
       {options && !x.hr && (
         <div className="small">利用できる人: <ScopeField target={x.id} options={options} onSaved={onChanged} /></div>
@@ -277,12 +300,12 @@ function InstalledCard({ item: x, busy, focused = false, options, onChanged, onT
       {x.competitors && on && <CompetitorMapKeyFields settings={x.competitors} busy={busy} onChanged={onChanged} />}
       {x.announcements && on && <AnnouncementFields settings={x.announcements} busy={busy} onChanged={onChanged} />}
       {x.webReview && on && <WebReviewFields settings={x.webReview} busy={busy} onChanged={onChanged} />}
-      <div className="row small">
-        <button className="link" onClick={() => setOpen(!open)}>{open ? '詳細を閉じる' : '詳細'}</button>
-        {/* 内蔵の拡張は削除しない。スイッチで切る（データは消えない。第12.13節） */}
-        {x.origin !== 'builtin' && <button className="link danger" disabled={busy} onClick={onDelete}>削除</button>}
-      </div>
-      {open && <Details item={x} onChanged={onChanged} />}
+      <Details item={x} onChanged={onChanged} />
+      {/* 内蔵の拡張は削除しない。スイッチで切る（データは消えない。第12.13節） */}
+      {x.origin !== 'builtin' && (
+        <div className="row small ext-foot"><button className="link danger" disabled={busy} onClick={onDelete}>削除</button></div>
+      )}
+      </div>}
     </div>
   );
 }
@@ -311,10 +334,10 @@ function Details({ item: x }: { item: ExtensionView; onChanged: () => void }) {
         </>
       )}
       {x.readme && (
-        <>
-          <h4>説明</h4>
+        <details className="fold">
+          <summary>説明</summary>
           <div className="ext-readme"><Markdown text={x.readme} /></div>
-        </>
+        </details>
       )}
     </div>
   );

@@ -211,3 +211,47 @@ export interface CompetitorOverview {
   /** 次の定期の見回りの日時（見回りが「しない」か、まだ探していなければ `null`） */
   nextWatchAt: string | null;
 }
+
+/** レポートの表の下に 1 度だけ置く、評価と件数の出典の行（仕様書 第36.8節。Google の決まりで「Google Maps」は訳さない）。 */
+export const REPORT_MAP_SOURCE_LINE = 'Google の評価と件数の出典: Google Maps';
+
+/**
+ * レポートの表の中の「出典: Google Maps」を取り除き、その表のすぐ下に 1 度だけまとめる（仕様書 第36.8節。第 0.252.4 版）。
+ *
+ * どの行にも同じ出典が並んでも読み手には意味がない。Google の決まりは、表記を中身の上か下に置けばよい。
+ * 推論が書いたレポートを残す前と、前に残したレポートを出すときの両方で使う。
+ *
+ * @returns 整えたレポート。表の中に出典が無ければそのまま
+ */
+export function gatherMapSource(text: string): string {
+  // 「（出典: Google Maps）」はかっこごと、「…、出典: Google Maps）」は閉じかっこを残して取り除く
+  const wrapped = /\s*[（(]\s*出典\s*[:：]\s*Google\s*Maps\s*[）)]/g;
+  const inline = /[、,/／]?\s*出典\s*[:：]\s*Google\s*Maps/g;
+  const lines = text.split('\n');
+  const out: string[] = [];
+  let pending = false;
+  const flush = (next: string | undefined) => {
+    if (!pending) return;
+    pending = false;
+    // すでに表の下に出典の行があれば足さない
+    if (next !== undefined && /出典\s*[:：]\s*Google\s*Maps/.test(next)) return;
+    out.push('', REPORT_MAP_SOURCE_LINE);
+  };
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    const inTable = line.trimStart().startsWith('|');
+    if (inTable) {
+      const cleaned = line.replace(wrapped, '').replace(inline, '');
+      if (cleaned !== line) pending = true;
+      out.push(cleaned);
+      continue;
+    }
+    if (pending) {
+      const next = line.trim() ? line : lines.slice(i).find((l) => l.trim());
+      flush(next);
+    }
+    out.push(line);
+  }
+  flush(undefined);
+  return out.join('\n');
+}

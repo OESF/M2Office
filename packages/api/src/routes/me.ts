@@ -10,6 +10,7 @@ import {
   agentDisplayName,
   BRIEF_SECTIONS, WEEKLY_SECTIONS, VOICE_CHOICES, VOICE_STYLE_MAX, isValidAvatar, type UserSettings, type MenuCategory,
   CARDS_EXTENSION_ID, HR_EXTENSION_ID, SIGNAGE_EXTENSION_ID, INVENTORY_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, MENU_CATEGORY_MAX, MENU_CATEGORY_NAME_MAX,
+  GOOGLE_APP_IDS, LAUNCHER_LABEL_MAX, LAUNCHER_LINK_MAX, checkLauncherUrl, type LauncherLink,
 } from '@m2office/shared';
 import { AUDIO, AiNotConfiguredError, AiPolicyBlockedError, LEARNED_SOURCE, cleanTopics, buildPresence, loadFile, refusalMessage, refuseToRemember } from '@m2office/core';
 import type { AppDeps } from '../context.js';
@@ -518,6 +519,26 @@ function validate(
         value.categoryOf = of;
       }
       return { section, value };
+    }
+    case 'launcher': {
+      // アプリの一覧（第6.1.1.2節）。出さない Google のサービスと、本人が登録したリンク
+      const hiddenIn = Array.isArray(o['hidden']) ? o['hidden'].map(String) : [];
+      const hidden = GOOGLE_APP_IDS.filter((id) => hiddenIn.includes(id));
+      const linksIn = Array.isArray(o['links']) ? o['links'] : [];
+      if (linksIn.length > LAUNCHER_LINK_MAX) return { error: `リンクは ${LAUNCHER_LINK_MAX} 件までです` };
+      const links: LauncherLink[] = [];
+      for (const x of linksIn) {
+        const l = (x ?? {}) as Record<string, unknown>;
+        const id = typeof l['id'] === 'string' ? l['id'].trim() : '';
+        if (!/^[A-Za-z0-9_-]{1,40}$/.test(id) || links.some((y) => y.id === id)) return { error: 'リンクの形が違います' };
+        const checked = checkLauncherUrl(String(l['url'] ?? ''));
+        if ('error' in checked) return checked;
+        // 名前が空なら、URL のホスト名を名前にする
+        const label = [...str(l['label'], 200)].length ? str(l['label'], 200) : new URL(checked.url).hostname;
+        if ([...label].length > LAUNCHER_LABEL_MAX) return { error: `リンクの名前は ${LAUNCHER_LABEL_MAX} 字までにしてください` };
+        links.push({ id, label, url: checked.url });
+      }
+      return { section, value: { hidden, links } };
     }
     case 'brief': {
       // 朝のブリーフの中身（第6.5.3.1節）。画面では消す・戻すだけだが、形はここで整える

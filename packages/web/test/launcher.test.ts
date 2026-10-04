@@ -1,5 +1,5 @@
 /**
- * @file 上の帯の版の表示と Google のアプリの一覧の単体テスト。版の食い違いの判定と、並べるリンクが本人のアカウントだけを載せること。
+ * @file 上の帯の版の表示とアプリの一覧の単体テスト。版の食い違いの判定と、並べるリンクが本人のアカウントだけを載せること。
  *
  * @see 仕様書 第6.1.1.1節 版の表示
  * @see 仕様書 第6.1.1.2節 Google のサービスへのリンク
@@ -7,6 +7,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { GOOGLE_APP_IDS, LAUNCHER_URL_MAX, checkLauncherUrl } from '@m2office/shared';
 import { googleLinks } from '../src/google-links.js';
 import { APP_VERSION, versionMismatch } from '../src/version.js';
 
@@ -49,4 +50,27 @@ test('管理コンソールは管理者にだけ並べる', () => {
 
 test('メールアドレスが無ければ、アカウントを指定せずに開く', () => {
   assert.equal(googleLinks('')[0]?.href, 'https://mail.google.com/mail/');
+});
+
+test('Google のサービスには、出さないと選べるよう ID を付ける（仕様書 第6.1.1.2節）', () => {
+  const ids = googleLinks('a@example.com', { admin: true }).map((l) => l.id);
+  assert.deepEqual(ids, [...GOOGLE_APP_IDS]);
+});
+
+test('登録できる URL は https と http だけ。スキームが無ければ https を補う', () => {
+  assert.deepEqual(checkLauncherUrl('https://www.example.co.jp/order'), { url: 'https://www.example.co.jp/order' });
+  assert.deepEqual(checkLauncherUrl('  www.example.co.jp '), { url: 'https://www.example.co.jp/' });
+  assert.deepEqual(checkLauncherUrl('http://192.168.0.10:8080/'), { url: 'http://192.168.0.10:8080/' });
+  assert.ok('error' in checkLauncherUrl('javascript:alert(1)'));
+  assert.ok('error' in checkLauncherUrl('ftp://example.com/'));
+  assert.ok('error' in checkLauncherUrl(''));
+});
+
+test('ID とパスワードを含む URL は断る（パスワードを残さないため）', () => {
+  const r = checkLauncherUrl('https://user:secret@example.com/');
+  assert.ok('error' in r && r.error.includes('パスワード'));
+});
+
+test('長すぎる URL は断る', () => {
+  assert.ok('error' in checkLauncherUrl(`https://example.com/${'a'.repeat(LAUNCHER_URL_MAX)}`));
 });

@@ -6,7 +6,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_TENANT_SETTINGS, type TenantSettings } from '@m2office/shared';
+import { DEFAULT_TENANT_SETTINGS, REPORT_MAP_SOURCE_LINE, gatherMapSource, type TenantSettings } from '@m2office/shared';
 import {
   CompetitorService, CompetitorWatch, MemoryCompetitorStore, MockPageFetcher, MOCK_SITES, StubLlmProvider, COMPETITOR_TOOLS,
   checkUrl, crawlerUserAgent, isBlockedAddress, parseRobots, readHtml, robotsAllows,
@@ -387,4 +387,28 @@ test('ほかの拡張へのつなぎ: 月の動きの数を種類ごとに数え
   assert.equal(counts.get('花粉'), 0);
   settings = { ...settings, competitors: { ...settings.competitors, enabled: false } };
   assert.equal(await links.monthMoves('t1', month), null, '切っている会社では返さない');
+});
+
+test('レポートの表の中の「出典: Google Maps」は、表の下に 1 度だけまとめる（第36.8節）', () => {
+  const text = [
+    '## 自社との違い',
+    '| 会社 | Google の評価と件数 |',
+    '|---|---|',
+    '| 自社 | 4.5（120 件、出典: Google Maps） |',
+    '| A 社 | 4.1（80 件）出典：Google Maps |',
+    '## 相手の強み',
+  ].join('\n');
+  const out = gatherMapSource(text);
+  assert.ok(!out.split('\n').filter((l) => l.startsWith('|')).some((l) => l.includes('Google Maps')));
+  assert.ok(out.includes('| 自社 | 4.5（120 件） |'));
+  assert.equal(out.split(REPORT_MAP_SOURCE_LINE).length - 1, 1);
+  // 表と出典の行のあいだは空行（表の行に取り込まれないため）
+  assert.ok(out.includes(`| A 社 | 4.1（80 件） |\n\n${REPORT_MAP_SOURCE_LINE}\n## 相手の強み`));
+});
+
+test('表の下にすでに出典の行があれば、もう 1 行は足さない。表に出典が無ければ変えない', () => {
+  const already = '| a | 4.0（出典: Google Maps） |\n\nGoogle の評価と件数の出典: Google Maps';
+  assert.equal(gatherMapSource(already).split('Google Maps').length - 1, 1);
+  const plain = '| a | b |\n|---|---|\n| 1 | 2 |';
+  assert.equal(gatherMapSource(plain), plain);
 });

@@ -1485,7 +1485,7 @@ export class PostgresRepository implements Repository {
 
   async getUserSettings(tenantId: string, userId: string): Promise<UserSettings> {
     const rows = await this.q<Partial<Record<keyof UserSettings, unknown>>>(tenantId,
-      `select profile, secretary, notifications, memory, menu, brief, onboarding from user_settings
+      `select profile, secretary, notifications, memory, menu, brief, onboarding, launcher from user_settings
         where tenant_id = $1 and user_id = $2`, [tenantId, userId]);
     const r = rows[0] ?? {};
     const d = DEFAULT_USER_SETTINGS;
@@ -1499,6 +1499,8 @@ export class PostgresRepository implements Repository {
         channels: { ...d.notifications.channels, ...(n.channels ?? {}) },
       },
       memory: { ...d.memory, ...(r.memory ?? {}) },
+      // アプリの一覧（移行 085。仕様書 第6.1.1.2節）
+      launcher: { ...d.launcher, ...(r.launcher ?? {}) },
       menu: { ...d.menu, ...(r.menu ?? {}) },
       // 朝のブリーフの中身（移行 037。仕様書 第9.5.5.1.1節）
       brief: { ...d.brief, ...(r.brief ?? {}) },
@@ -1517,7 +1519,7 @@ export class PostgresRepository implements Repository {
   ): Promise<void> {
     const column = ({
       profile: 'profile', secretary: 'secretary', notifications: 'notifications', memory: 'memory',
-      menu: 'menu', brief: 'brief', onboarding: 'onboarding',
+      menu: 'menu', brief: 'brief', onboarding: 'onboarding', launcher: 'launcher',
     } as const)[section];
     await this.q(tenantId,
       `insert into user_settings (tenant_id, user_id, ${column}, updated_at)

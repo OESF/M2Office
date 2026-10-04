@@ -396,7 +396,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/admin/knowledge/:id/retire` ／ `/restore` | 管理者: 社内規程・議事録を廃止する（消さない。秘書が学んだことは 409）／ 廃止した・しまったものを戻す（1 年を過ぎたら 409） |
 | `DELETE /v1/admin/knowledge/:id` | 管理者: 秘書が学んだことを消す（社内規程と議事録は 409） |
 | `GET /v1/me/settings` | 本人の個人設定 |
-| `PUT /v1/me/settings/:section` | 個人設定の 1 区分を保存（`profile`・`secretary`・`notifications`・`memory`・`menu`・`brief`）。`brief`（朝のブリーフの関心の分野と外した項目。第6.5.3.1節）は、秘書が最初の分野を選んだ印を画面から変えさせない |
+| `PUT /v1/me/settings/:section` | 個人設定の 1 区分を保存（`profile`・`secretary`・`notifications`・`memory`・`menu`・`brief`・`launcher`）。`launcher`（アプリの一覧。第6.1.1.2節）は、出さない Google のサービスと登録したリンク（20 件まで・名前 20 字まで・https と http だけ・ID とパスワードを含む URL は断る）。`brief`（朝のブリーフの関心の分野と外した項目。第6.5.3.1節）は、秘書が最初の分野を選んだ印を画面から変えさせない |
 | `POST /v1/me/voice-test` | 声を試す。本文の秘書の設定（保存の前でもよい）で秘書に名乗らせ、話した文字と声（24 kHz・16 ビットの PCM を base64）を返す。保存しない（仕様書 第10.5.8節） |
 | `PATCH /v1/me/profile` | 表示名の変更 |
 | `GET /v1/me/sessions` | ログイン中の端末 |

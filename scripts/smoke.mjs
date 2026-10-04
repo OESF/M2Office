@@ -5947,6 +5947,32 @@ console.log('\n■ 73. コラムの作成の段 2（テーマ案・予定表・�
   }
 }
 
+console.log('\n■ 74. アプリの一覧を人ごとに編集する（Google のサービスを出す・出さない・ほかのサイトのリンク。第6.1.1.2節）');
+{
+  const put = (body, who = 'member') => call('a', '/v1/me/settings/launcher', { method: 'PUT', body: JSON.stringify(body) }, who);
+  const { body: before } = await call('a', '/v1/me/settings', {}, 'member');
+  try {
+    const saved = await put({ hidden: ['chat', 'meet', 'not-an-app'], links: [{ id: 'l-1', label: '', url: 'www.example.co.jp/order' }, { id: 'l-2', label: '問屋の受発注', url: 'https://example.com/b2b' }] });
+    const { body: mine } = await call('a', '/v1/me/settings', {}, 'member');
+    const { body: admins } = await call('a', '/v1/me/settings');
+    saved.status === 200 && JSON.stringify(mine.launcher?.hidden) === '["chat","meet"]'
+      && mine.launcher?.links?.[0]?.label === 'www.example.co.jp' && mine.launcher?.links?.[0]?.url === 'https://www.example.co.jp/order'
+      && mine.launcher?.links?.[1]?.label === '問屋の受発注'
+      && !(admins.launcher?.links ?? []).some((l) => l.id === 'l-2')
+      ? ok('出さない Google のサービスと登録したリンクを本人だけに残す（知らない ID は落とし、名前が空ならホスト名・https を補う）')
+      : ng('アプリの一覧の保存が違う', JSON.stringify({ status: saved.status, launcher: mine.launcher }));
+    const js = await put({ hidden: [], links: [{ id: 'x', label: 'x', url: 'javascript:alert(1)' }] });
+    const cred = await put({ hidden: [], links: [{ id: 'x', label: 'x', url: 'https://u:p@example.com/' }] });
+    const many = await put({ hidden: [], links: Array.from({ length: 21 }, (_, i) => ({ id: `l${i}`, label: `${i}`, url: 'https://example.com/' })) });
+    const long = await put({ hidden: [], links: [{ id: 'x', label: 'あ'.repeat(21), url: 'https://example.com/' }] });
+    js.status === 400 && cred.status === 400 && many.status === 400 && long.status === 400
+      ? ok('https と http 以外・ID とパスワードを含む URL・21 件目・21 字の名前を断る')
+      : ng('断るべき登録が通った', JSON.stringify([js.status, cred.status, many.status, long.status]));
+  } finally {
+    await put(before.launcher ?? { hidden: [], links: [] });
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');
