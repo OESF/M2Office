@@ -210,3 +210,25 @@ test('休業中に届いた問い合わせ: 「〇日から順にお返事しま
   const d2 = (await s2.list(member, { status: 'open' })).find((i) => i.channel === 'mail')!;
   assert.equal((await st2.replies('t1', d2.id)).length, 0);
 });
+
+test('返事から会社の知識にする: ほかのお客様にも答えられる情報だけを、名前と連絡先を除いて登録し、重ねない（第33.20節）', async () => {
+  const saved: { title: string; body: string; source: string; kind: string }[] = [];
+  let answer = '{"knowledge":true,"title":"駐車場はありますか？","body":"問い: 駐車場はありますか？\\n答え: 建物の裏に 3 台分あります。電話 090-1234-5678 の佐藤様のように満車のときは近くのコインパーキングをご案内します"}';
+  const llm = { name: 'fake', complete: async () => ({ text: answer, tokensUsed: 1 }) };
+  const { service, store, repo } = setup();
+  Object.assign(repo, {
+    listKnowledge: async () => saved,
+    saveKnowledge: async (k: { title: string; body: string; source: string; kind: string }) => { saved.push(k); },
+  });
+  (service as unknown as { deps: { llmFor: unknown } }).deps.llmFor = async () => llm;
+  const id = await store.create('t1', { channel: 'phone', summary: '駐車場の有無', category: '問い合わせ', from: { name: '佐藤', email: '', phone: '' }, source: '検索', createdBy: 'u1' } as never);
+  const k = await service.learnFromReply('t1', { inquiryId: id, body: '建物の裏に 3 台分あります。' });
+  assert.ok(k);
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0]!.source, '問い合わせの返事から');
+  assert.ok(!saved[0]!.body.includes('090-1234-5678'), '電話番号は除く');
+  assert.equal(await service.learnFromReply('t1', { inquiryId: id, body: '同じ返事' }), null, '同じ題名は重ねない');
+  answer = '{"knowledge":false}';
+  assert.equal(await service.learnFromReply('t1', { inquiryId: id, body: '日程を調整します' }), null, '本人だけの返事は知識にしない');
+  assert.equal(saved.length, 1);
+});

@@ -532,6 +532,15 @@ export function extensionsRoute(deps: AppDeps) {
     return c.json({ candidates: 'error' in candidates ? null : candidates, error: 'error' in candidates ? candidates.error : null, status });
   });
 
+  /** Web の振り返り: 制作会社の宛先（`email`・`name`。`null` で外す。第34.21節）。 */
+  app.put(`/${WEB_REVIEW_EXTENSION_ID}/agency`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
+    const agency = body['email'] === null || body['email'] === '' ? null : { email: String(body['email'] ?? ''), name: String(body['name'] ?? '') };
+    const err = await deps.webReview.service.setAgency({ tenantId: tenant.id, userId: user.id }, agency);
+    return err ? c.json({ error: err }, 400) : c.json({ ok: true });
+  });
+
   /** Web の振り返り: プロパティとサイトを選ぶ（`propertyId`・`siteUrl`。`null` で選ばない）。 */
   app.put(`/${WEB_REVIEW_EXTENSION_ID}/selection`, async (c) => {
     const { tenant, user } = c.get('ctx');

@@ -206,5 +206,39 @@ export const webReviewFindings: Tool = {
   },
 };
 
+/**
+ * 制作会社に依頼文を送る（付属の業務「Web の依頼文を送る」が承認の後に呼ぶ。第34.21節）。
+ *
+ * @remarks 危険度 `external-send`。承認の画面に宛先・差出人・件名・本文を出す。窓口のアカウントが無ければ本人の Gmail で送る
+ */
+export const webReviewRequestSend: Tool = {
+  name: 'web_review.request_send',
+  risk: 'external-send',
+  activityLabel: '制作会社に依頼文を送っています',
+  helpText: '直すべき所の依頼文を、承認の後に制作会社へ送ります',
+  description: '直すべき所（findingId）の依頼文を、宛先（to）に送る。承認の後だけ',
+  args: { properties: { findingId: { type: 'string', description: '直すべき所の ID' }, to: { type: 'string', description: '宛先のメールアドレス' } }, required: ['findingId', 'to'] },
+  google: { scope: 'gmail.send', level: 'sensitive' },
+  planKey: (args) => `web-review-request:${str(args['findingId'])}`,
+  async prepare(args, ctx) {
+    const service = await serviceOf(ctx);
+    if (!service) return { kind: 'problem', reason: UNAVAILABLE.reason };
+    const p = await service.requestPreview(ctx.tenantId, str(args['findingId']), str(args['to']) || undefined);
+    if ('error' in p) return { kind: 'problem', reason: p.error };
+    return {
+      kind: 'ready', args: { findingId: str(args['findingId']), to: p.to, digest: p.digest }, audience: 'external',
+      shown: [`宛先: ${p.to}`, `差出人: ${p.from}`, `件名: ${p.subject}`, '', p.body].join('\n'),
+    };
+  },
+  async invoke(args, ctx) {
+    const service = await serviceOf(ctx);
+    if (!service) return UNAVAILABLE;
+    const r = await service.sendRequest({ tenantId: ctx.tenantId, userId: ctx.userId }, str(args['findingId']), str(args['to']), str(args['digest']),
+      (m) => ctx.connector.mail.send({ tenantId: ctx.tenantId, userId: ctx.userId }, { to: [m.to], cc: [], subject: m.subject, body: m.body, replyTo: null }));
+    if ('error' in r) return { available: false, reason: r.error };
+    return { available: true, sent: true, to: r.to, path: PATH };
+  },
+};
+
 /** Web の振り返りのツール。 */
-export const WEB_REVIEW_TOOLS: Tool[] = [webReviewReport, webReviewAsk, webReviewStatus, webReviewSelect, webReviewFindings];
+export const WEB_REVIEW_TOOLS: Tool[] = [webReviewReport, webReviewAsk, webReviewStatus, webReviewSelect, webReviewFindings, webReviewRequestSend];

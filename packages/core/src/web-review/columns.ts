@@ -14,6 +14,8 @@ import { getWordPressPost } from '../columns/wordpress.js';
 export interface WebReviewColumns {
   /** WordPress で公開されたコラム（URL がまだ分からないものは WordPress に問い合わせる） */
   published(tenantId: string): Promise<{ id: string; title: string; url: string }[]>;
+  /** コラムの形（入れた版の本文の字数と、`##` の見出しの数。書き方の傾向に使う。第32.18.5節） */
+  shape?(tenantId: string, columnId: string): Promise<{ chars: number; headings: number } | null>;
 }
 
 /**
@@ -45,6 +47,13 @@ export function webReviewColumnsFrom(deps: { store: ColumnStore; repo: Repositor
         }
       }
       return out;
+    },
+    async shape(tenantId, columnId) {
+      const c = await deps.store.get(tenantId, columnId);
+      if (!c) return null;
+      const v = (await deps.store.versions(tenantId, columnId)).find((x) => x.version === (c.submittedVersion ?? c.currentVersion));
+      if (!v) return null;
+      return { chars: v.body.replace(/\s/g, '').length, headings: v.body.split('\n').filter((l) => /^##\s/.test(l)).length };
     },
   };
 }

@@ -35,6 +35,8 @@ export interface WebReviewSettings {
   checkedAt?: string | null;
   /** 管理者が「今すぐチェック」を頼んだ日時（ワーカーが次の見回りで行う）。 */
   checkRequestedAt?: string | null;
+  /** 制作会社の宛先（依頼文を承認の後に送る。第34.21節）。 */
+  agency?: { email: string; name: string } | null;
 }
 
 export const DEFAULT_WEB_REVIEW_SETTINGS: WebReviewSettings = { enabled: false, connection: null, property: null, siteUrl: null, checkedAt: null, checkRequestedAt: null };
@@ -228,6 +230,8 @@ export interface WebReviewFinding {
   status: WebReviewFindingStatus;
   foundAt: string;
   updatedAt: string;
+  /** 制作会社に依頼文を送った日時（第34.21節。送っていなければ `null`） */
+  requestSentAt?: string | null;
 }
 
 /** ページごとの数字（この 28 日。コラムの画面に出す）。 */

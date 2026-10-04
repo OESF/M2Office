@@ -24,6 +24,8 @@ export interface ColumnBrief {
   style: string;
   /** 自社の呼び方（自社の書き方の「自社の呼び方」）。空なら AI が会社の種類から選ぶ（第32.18.1節）。 */
   selfReference?: string;
+  /** これまでの読まれ方から出した書き方の傾向（第32.18.5節。プログラムが計算した一文。無ければ足さない） */
+  tendency?: string;
 }
 
 /** 記事の中の自社の呼び方の決まり。決めていなければ、会社の種類に合った言い方を選ばせる。 */
@@ -78,6 +80,7 @@ function composePrompt(b: ColumnBrief, research: string, sources: ColumnSource[]
     b.topics.length ? `会社が扱う分野: ${b.topics.join('、')}` : '',
     b.memo ? `リクエスト（書く人の希望・経験・考え。記事の独自性になるので活かす。カバー画像についての希望は本文に書かない）: ${b.memo}` : '',
     b.style ? `会社の書き方: ${b.style}` : '',
+    b.tendency ? `これまでの読まれ方（決まりの字数の範囲の中で目安にする）: ${b.tendency}` : '',
     '',
     '決まり:',
     `- 本文は ${BODY_CHARS}。Markdown で、## の見出しで 3〜5 つに分け、最後に「まとめ」を置く。導入の段落から始める`,

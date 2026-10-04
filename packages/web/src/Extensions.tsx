@@ -581,6 +581,14 @@ function WebReviewFields({ settings, busy, onChanged }: { settings: WebReviewSet
           </label>
         </div>
       )}
+      {connected && (
+        <div className="row wrap">
+          <label className="row">制作会社のメールアドレス
+            <input type="email" key={settings.agency?.email ?? ''} defaultValue={settings.agency?.email ?? ''} disabled={busy || working} aria-label="制作会社のメールアドレス"
+              onBlur={(e) => { const v = e.target.value.trim(); if (v !== (settings.agency?.email ?? '')) run(api.admin.setWebReviewAgency(v || null), '保存できませんでした'); }} />
+          </label>
+        </div>
+      )}
       {view && view.status.state !== 'ready' && view.status.advice && <p className="muted">{view.status.advice}</p>}
       {error && <p className="error">{error}</p>}
     </div>

@@ -179,7 +179,8 @@ test('ツール: 使えない人には使えないと返し、選び直しは管
   assert.equal((await tool('web_review.select').invoke({ site: 'alpha' }, ctx('boss')) as { available: boolean }).available, true);
   const report = await tool('web_review.report').invoke({}, ctx('u1')) as { report: null; note: string };
   assert.match(report.note, /毎月 3 日/);
-  for (const t of WEB_REVIEW_TOOLS) assert.ok(t.risk === 'read' || t.risk === 'write-internal', '社外には何も出さない');
+  // 社外に出すのは、承認の後に依頼文を送るツールだけ（第34.21節）
+  for (const t of WEB_REVIEW_TOOLS.filter((x) => x.name !== 'web_review.request_send')) assert.ok(t.risk === 'read' || t.risk === 'write-internal', '社外には何も出さない');
 });
 
 const COLUMN_URL = 'https://www.alpha.example.jp/column/spring/';
@@ -323,3 +324,51 @@ test('予定の空き: 会社の営業日でない日を添え、候補にしな
   assert.match(r.closedNote, /候補を出さない/);
 });
 
+test('依頼文を承認の後に送る: 宛先が無ければ進めず、承認した中身と違えば送らない。送ったら日時を残して「見た」にする（第34.21節）', async () => {
+  const runs: unknown[] = [];
+  const { service, store, audits } = setup({ columns: fakeColumns });
+  (service as unknown as { deps: { submitter: unknown } }).deps.submitter = async (_t: string, _u: string, input: unknown) => { runs.push(input); return 'run-1'; };
+  await service.connect(boss, { email: 'boss@alpha.example.jp', refreshToken: null });
+  await service.checkFindings('t1', OCT4);
+  const slow = (await service.findings('t1')).find((f) => f.kind === 'slowMobile')!;
+  assert.deepEqual(await service.requestPreview('t1', slow.id), { error: '制作会社のメールアドレスを入れてください' });
+  assert.equal(await service.setAgency(boss, { email: 'あて先', name: '' }), 'メールアドレスが読めません');
+  assert.equal(await service.setAgency(boss, { email: 'Web@Agency.example.jp', name: '制作会社' }), null);
+  const p = await service.requestPreview('t1', slow.id);
+  assert.ok(!('error' in p) && p.to === 'web@agency.example.jp' && /Gmail/.test(p.from));
+  assert.deepEqual(await service.submitRequest(boss, slow.id), { runId: 'run-1' });
+  assert.deepEqual(runs, [{ findingId: slow.id, to: 'web@agency.example.jp' }]);
+  if ('error' in p) return;
+  const sent: { to: string; subject: string }[] = [];
+  const fallback = async (m: { to: string; subject: string; body: string }) => { sent.push(m); };
+  assert.ok('error' in (await service.sendRequest(boss, slow.id, 'other@agency.example.jp', p.digest, fallback)), '宛先が変われば送らない');
+  assert.deepEqual(await service.sendRequest(boss, slow.id, p.to, p.digest, fallback), { sent: true, to: 'web@agency.example.jp' });
+  assert.equal(sent.length, 1);
+  assert.match(sent[0]!.subject, /Web サイトの直しのお願い/);
+  const after = (await store.finding('t1', slow.id))!;
+  assert.ok(after.requestSentAt);
+  assert.equal(after.status, 'seen');
+  assert.ok(audits.some((a) => a.action === 'web_review.request_send' && (a.detail as { toDomain: string }).toDomain === 'agency.example.jp'));
+  const tool = WEB_REVIEW_TOOLS.find((t) => t.name === 'web_review.request_send')!;
+  assert.equal(tool.risk, 'external-send');
+  const ctx = { tenantId: 't1', userId: 'boss', webReview: { service, access: async () => ({ enabled: true }) } } as unknown as ToolContext;
+  const prepared = await tool.prepare!({ findingId: slow.id, to: 'web@agency.example.jp' }, ctx);
+  assert.ok(prepared.kind === 'ready' && /宛先: web@agency\.example\.jp/.test(prepared.shown ?? '') && prepared.audience === 'external');
+});
+
+test('書き方の傾向: 読まれた時間の長い上半分のコラムの、字数と見出しの数の真ん中の値を一文にする。3 本に満たなければ出さない（第32.18.5節）', async () => {
+  const shapes: Record<string, { chars: number; headings: number }> = {
+    a: { chars: 2380, headings: 5 }, b: { chars: 2620, headings: 4 }, c: { chars: 1200, headings: 3 }, d: { chars: 900, headings: 2 },
+  };
+  const urls = Object.keys(shapes).map((id) => ({ id, title: id, url: `https://www.alpha.example.jp/column/${id}/` }));
+  const cols: WebReviewColumns = { published: async () => urls, shape: async (_t, id) => shapes[id] ?? null };
+  const { service, store } = setup({ columns: cols });
+  await service.connect(boss, { email: 'boss@alpha.example.jp', refreshToken: null });
+  const put = (id: string, views: number, read: number) => store.putPageMetrics('t1', { path: `/column/${id}/`, start: '2026-09-06', end: '2026-10-03', views, readSeconds: read, searchClicks: 0, searchImpressions: 0, queries: [] });
+  await put('a', 100, 120);
+  await put('b', 80, 95);
+  assert.equal(await service.columnTendency('t1'), null, '3 本に満たない');
+  await put('c', 50, 40);
+  await put('d', 10, 300);
+  assert.equal(await service.columnTendency('t1'), 'これまでのコラムのうち、じっくり読まれたものは 2,400 字前後・見出し 4 つ前後でした。長さと見出しの数の目安にしてください');
+});

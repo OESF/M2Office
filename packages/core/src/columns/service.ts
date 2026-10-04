@@ -49,6 +49,8 @@ export interface ColumnServiceDeps {
   files: FileStore;
   /** 出典のページを読む口（似すぎの確かめ。第32.18.4節）。見本の会社・読めない環境では `null` */
   pagesFor?(tenantId: string): PageFetcher | null;
+  /** 読まれたコラムの書き方の傾向（Web の振り返り。第32.18.5節）。無ければ `null` */
+  tendencyFor?(tenantId: string): Promise<string | null>;
   logger?: Logger;
 }
 
@@ -232,9 +234,11 @@ export class ColumnService {
       const [llm, research, company] = await Promise.all([
         this.deps.llmFor(who.tenantId), this.deps.researchFor(who.tenantId), this.companyName(who.tenantId, settings.company.legalName),
       ]);
+      const tendency = this.deps.tendencyFor ? await this.deps.tendencyFor(who.tenantId).catch(() => null) : null;
       const draft = await writeColumn(llm, research, {
         theme: c.theme, memo: c.memo, company, audience: settings.webColumns.audience, topics: settings.webColumns.topics,
         style: styleText({ ...settings.writingStyle, selfReference: '' }), selfReference: settings.writingStyle.selfReference,
+        ...(tendency ? { tendency } : {}),
       });
       const review = [...mergeReview(
         ruleReview(draft.body, settings.webColumns.rules, draft.sources.length),

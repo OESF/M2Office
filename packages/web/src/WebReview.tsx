@@ -100,11 +100,13 @@ export interface WebReviewColumnLinks {
 const day = (iso: string) => new Date(iso).toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric' });
 
 /** 直すべき所 1 つ。 */
-function Finding({ f, columns, onStatus, onError }: {
-  f: WebReviewFinding; columns: WebReviewColumnLinks | null; onStatus: (s: WebReviewFindingStatus) => void; onError: (text: string) => void;
+function Finding({ f, columns, agency, onStatus, onError }: {
+  f: WebReviewFinding; columns: WebReviewColumnLinks | null; agency: string; onStatus: (s: WebReviewFindingStatus) => void; onError: (text: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  // 制作会社の宛先（設定の宛先が既定。ここで変えてもよい。第34.21節）
+  const [to, setTo] = useState(agency);
   const run = async (fn: () => Promise<unknown>, ok: string | null, fail: string) => {
     setBusy(true);
     try { await fn(); if (ok) setNote(ok); } catch (e) { onError(describeError(e, fail)); } finally { setBusy(false); }
@@ -123,9 +125,15 @@ function Finding({ f, columns, onStatus, onError }: {
           <summary>制作会社への依頼文（下書き）</summary>
           <p><strong>{f.requestDraft.subject}</strong></p>
           <pre className="web-review-draft">{f.requestDraft.body}</pre>
-          <button className="btn ghost small" disabled={busy} onClick={() => void copy(`${f.requestDraft!.subject}\n\n${f.requestDraft!.body}`)}>コピー</button>
+          <div className="row wrap">
+            <button className="btn ghost small" disabled={busy} onClick={() => void copy(`${f.requestDraft!.subject}\n\n${f.requestDraft!.body}`)}>コピー</button>
+            <input type="email" value={to} placeholder="制作会社のメールアドレス" aria-label="制作会社のメールアドレス" onChange={(e) => setTo(e.target.value)} />
+            <button className="btn small" disabled={busy || !to.trim()}
+              onClick={() => void run(() => api.webReview.sendRequest(f.id, to.trim()), '承認へ進めました。管理者が承認すると送ります', '承認へ進められませんでした')}>制作会社に送る</button>
+          </div>
         </details>
       )}
+      {f.requestSentAt && <p className="small muted">依頼を送りました（{day(f.requestSentAt)}）</p>}
       <div className="row wrap">
         {columns && f.columnId && (
           <>
@@ -158,7 +166,7 @@ function Finding({ f, columns, onStatus, onError }: {
 export function WebReview({ month, onOpen, columns = null }: { month: string | null; onOpen: (month: string | null) => void; columns?: WebReviewColumnLinks | null }) {
   const [data, setData] = useState<{
     status: WebReviewStatus; latest: WebReviewReport | null; reports: WebReviewReportBrief[]; admin: boolean;
-    findings: WebReviewFinding[]; checkedAt: string | null; checkRequested: boolean;
+    findings: WebReviewFinding[]; checkedAt: string | null; checkRequested: boolean; agency?: { email: string; name: string } | null;
   } | null>(null);
   const [shown, setShown] = useState<WebReviewReport | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -203,7 +211,7 @@ export function WebReview({ month, onOpen, columns = null }: { month: string | n
           </div>
           {data.findings.length === 0
             ? <p className="muted">{data.checkedAt ? '直すべき所は見つかっていません' : 'まだ確かめていません'}</p>
-            : <ul className="web-review-findings">{data.findings.map((f) => <Finding key={f.id} f={f} columns={columns} onStatus={(s) => setStatus(f.id, s)} onError={setError} />)}</ul>}
+            : <ul className="web-review-findings">{data.findings.map((f) => <Finding key={f.id} f={f} columns={columns} agency={data.agency?.email ?? ''} onStatus={(s) => setStatus(f.id, s)} onError={setError} />)}</ul>}
         </div>
       )}
       {report ? <Report r={report} /> : st.state === 'ready' && <div className="card"><p className="muted">まだ便りがありません。毎月 3 日の朝に、先月の分が届きます</p></div>}

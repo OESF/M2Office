@@ -204,6 +204,12 @@ function chooseTools(tools: string[], prompt: string): Call[] {
     if (req) return [{ name: 'announcements.draft', args: { request: req } }];
   }
 
+  // Web の振り返りの依頼文を送る（第34.21節）。承認の後に 1 回だけ
+  if (has('web_review.request_send') && instruction.includes('web_review.request_send')) {
+    const findingId = extractField(prompt, 'findingId');
+    const to = extractField(prompt, 'to');
+    if (findingId && to) return [{ name: 'web_review.request_send', args: { findingId, to } }];
+  }
   // Web の振り返り（仕様書 第34.18節）: 便り・数字の問い・状態
   if (has('web_review.ask') && instruction.includes('web_review.ask')) {
     const req = extractField(prompt, 'request');

@@ -43,6 +43,8 @@ export interface WebReviewStore {
   findings(tenantId: string, statuses?: WebReviewFindingStatus[], limit?: number): Promise<WebReviewFinding[]>;
   finding(tenantId: string, id: string): Promise<WebReviewFinding | null>;
   setFindingStatus(tenantId: string, id: string, status: WebReviewFindingStatus): Promise<void>;
+  /** 制作会社に依頼文を送ったことを残す（状態は「見た」にする） */
+  markRequestSent(tenantId: string, id: string, at: string): Promise<void>;
   /** ページごとの数字（この 28 日）を置き換える */
   putPageMetrics(tenantId: string, m: Omit<WebPageMetrics, 'updatedAt'>): Promise<void>;
   pageMetrics(tenantId: string, path: string): Promise<WebPageMetrics | null>;
@@ -60,14 +62,16 @@ interface FindingRow {
   status: WebReviewFindingStatus;
   found_at: Date | string;
   updated_at: Date | string;
+  request_sent_at: Date | string | null;
 }
 
 const toFinding = (r: FindingRow): WebReviewFinding => ({
   id: r.id, kind: r.kind, target: r.target, title: r.title, figures: r.figures ?? {}, advice: r.advice, requestDraft: r.request_draft,
   columnId: r.column_id, status: r.status, foundAt: new Date(r.found_at).toISOString(), updatedAt: new Date(r.updated_at).toISOString(),
+  requestSentAt: r.request_sent_at ? new Date(r.request_sent_at).toISOString() : null,
 });
 
-const FINDING_COLUMNS = 'id, kind, target, title, figures, advice, request_draft, column_id, status, found_at, updated_at';
+const FINDING_COLUMNS = 'id, kind, target, title, figures, advice, request_draft, column_id, status, found_at, updated_at, request_sent_at';
 
 /** また見つかったときの状態（見送りはそのまま、済んだは 28 日を過ぎていれば新しいに戻す）。 */
 function nextStatus(status: WebReviewFindingStatus, updatedAt: string, now: Date): WebReviewFindingStatus {
@@ -175,6 +179,10 @@ export class PostgresWebReviewStore implements WebReviewStore {
     await this.q(tenantId, `update web_review_findings set status = $3, updated_at = now() where tenant_id = $1 and id = $2`, [tenantId, id, status]);
   }
 
+  async markRequestSent(tenantId: string, id: string, at: string): Promise<void> {
+    await this.q(tenantId, `update web_review_findings set request_sent_at = $3, status = 'seen', updated_at = now() where tenant_id = $1 and id = $2`, [tenantId, id, at]);
+  }
+
   async putPageMetrics(tenantId: string, m: Omit<WebPageMetrics, 'updatedAt'>): Promise<void> {
     const { path, start, end, ...metrics } = m;
     await this.q(tenantId, `insert into web_page_metrics (tenant_id, path, start_date, end_date, metrics) values ($1, $2, $3, $4, $5)
@@ -249,6 +257,11 @@ export class MemoryWebReviewStore implements WebReviewStore {
   async setFindingStatus(tenantId: string, id: string, status: WebReviewFindingStatus): Promise<void> {
     const x = this.found.get(id);
     if (x && x.tenantId === tenantId) this.found.set(id, { ...x, status, updatedAt: new Date().toISOString() });
+  }
+
+  async markRequestSent(tenantId: string, id: string, at: string): Promise<void> {
+    const x = this.found.get(id);
+    if (x && x.tenantId === tenantId) this.found.set(id, { ...x, status: 'seen', requestSentAt: at, updatedAt: at });
   }
 
   async putPageMetrics(tenantId: string, m: Omit<WebPageMetrics, 'updatedAt'>): Promise<void> {

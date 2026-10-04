@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { DEFAULT_TENANT_SETTINGS, type Notification, type TenantSettings, type WebColumnSettings } from '@m2office/shared';
 import {
   ColumnService, ColumnPlanner, MemoryColumnStore, MemoryFileStore, StubLlmProvider, MockResearchProvider, COLUMN_TOOLS,
-  monthSlots, plainThemes, writeThemes, overlapRatio, similarityReview, slotTime,
+  monthSlots, plainThemes, writeThemes, overlapRatio, similarityReview, slotTime, writeColumn,
   type ColumnThemeMaterials, type PageFetcher, type Repository, type ToolContext,
 } from '../src/index.js';
 
@@ -208,4 +208,12 @@ test('ツール: テーマ案と予定表を返し、本数を言われたらテ
   assert.ok(listed.plan.some((s) => s.status !== '空き'));
   assert.equal(tool('columns.prepare').risk, 'write-internal');
   for (const c of await store.list('t1')) await settled(store, c.id);
+});
+
+test('書き方の傾向: 下書きを書くときの指示に、読まれたコラムの字数と見出しの目安を足す（第32.18.5節）', async () => {
+  let prompt = '';
+  const llm = { name: 'fake', complete: async (req: { messages: { content: unknown }[] }) => { prompt = String(req.messages.at(-1)?.content ?? ''); return { text: '{"titles":["t"],"body":"## a\\n本文","description":"d","sns":{"short":"s","long":"l"}}', tokensUsed: 1 }; } };
+  const research = { name: 'fake', research: async () => ({ text: '調べた結果', sources: [{ title: '手引き', url: 'https://example.go.jp/guide' }] }) };
+  await writeColumn(llm as never, research as never, { theme: 'テーマ', memo: '', company: '見本', audience: '', topics: [], style: '', tendency: 'じっくり読まれたものは 2,400 字前後・見出し 4 つ前後でした' });
+  assert.match(prompt, /これまでの読まれ方（決まりの字数の範囲の中で目安にする）: じっくり読まれたものは 2,400 字前後/);
 });

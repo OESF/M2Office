@@ -7,7 +7,7 @@
  * 段 2 で、週に 1 回の直すべき所の見回り（{@link findIssues}）と、コラムごとの数字を足した（第34.19節）。
  */
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   WEB_REVIEW_EXTENSION_ID, WEB_REVIEW_REPORT_DAY, WEB_REVIEW_REPORT_HOUR, canUseAgent,
   type WebPageMetrics, type WebReviewCandidates, type WebReviewFigures, type WebReviewFinding, type WebReviewFindingStatus,
@@ -23,6 +23,7 @@ import { findIssues, pathOf, requestDraftFor, writeSuggestions } from './finding
 import type { WebReviewColumns } from './columns.js';
 import type { InquiryCounts } from '../inquiries/links.js';
 import type { CompetitorLinks } from '../competitors/links.js';
+import { openMailbox } from '../inquiries/mailbox.js';
 
 /** 処理に要るもの。 */
 export interface WebReviewServiceDeps {
@@ -39,6 +40,8 @@ export interface WebReviewServiceDeps {
   competitors?: CompetitorLinks;
   /** その日がお知らせで出した休業の期間に入るか（休業の月は、数の上下を休業のせいと添える。第35.7節） */
   closedOn?(tenantId: string, day: string): Promise<boolean>;
+  /** 依頼文を送る業務（「Web の依頼文を送る」）を始める。実行の ID を返す（第34.21節） */
+  submitter?(tenantId: string, userId: string, input: { findingId: string; to: string }): Promise<string>;
   logger?: Logger;
 }
 
@@ -542,6 +545,90 @@ export class WebReviewService {
     if (!this.deps.columns) return null;
     const c = (await this.deps.columns.published(tenantId).catch(() => [])).find((x) => x.id === columnId);
     return c ? this.deps.store.pageMetrics(tenantId, pathOf(c.url)) : null;
+  }
+
+  // ---- 依頼文を承認の後に送る（第34.21節） -------------------------------------------------------
+
+  /** 制作会社の宛先を決める（管理者）。`null` で外す。 */
+  async setAgency(who: WebReviewViewer, agency: { email: string; name: string } | null): Promise<string | null> {
+    if (agency && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(agency.email.trim())) return 'メールアドレスが読めません';
+    await this.save(who.tenantId, who.userId, { agency: agency ? { email: agency.email.trim().toLowerCase(), name: agency.name.trim().slice(0, 60) } : null });
+    return null;
+  }
+
+  /**
+   * 依頼文の送る前の確かめ（宛先・差出人・件名・本文と、承認した中身の指紋）。
+   *
+   * @returns 送れなければ理由
+   */
+  async requestPreview(tenantId: string, findingId: string, to?: string): Promise<{ to: string; from: string; subject: string; body: string; digest: string } | { error: string }> {
+    const f = await this.deps.store.finding(tenantId, findingId);
+    if (!f) return { error: '直すべき所が見つかりません' };
+    if (!f.requestDraft) return { error: 'この直すべき所には依頼文がありません' };
+    const settings = await this.deps.repo.getTenantSettings(tenantId);
+    const addr = (to ?? settings.webReview.agency?.email ?? '').trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr)) return { error: '制作会社のメールアドレスを入れてください' };
+    const box = await openMailbox(this.deps.data, tenantId).catch(() => null);
+    const from = box ? `窓口のアカウント（${box.address}）` : '承認へ進めた人の Gmail';
+    const digest = createHash('sha256').update(JSON.stringify([findingId, addr, f.requestDraft.subject, f.requestDraft.body])).digest('hex').slice(0, 32);
+    return { to: addr, from, subject: f.requestDraft.subject, body: f.requestDraft.body, digest };
+  }
+
+  /** 依頼文を送る業務を始める（承認の後に送る）。 */
+  async submitRequest(who: WebReviewViewer, findingId: string, to?: string): Promise<{ runId: string } | { error: string }> {
+    const p = await this.requestPreview(who.tenantId, findingId, to);
+    if ('error' in p) return p;
+    if (!this.deps.submitter) return { error: '承認へ進める仕組みがありません' };
+    const runId = await this.deps.submitter(who.tenantId, who.userId, { findingId, to: p.to });
+    await this.audit(who.tenantId, who.userId, 'web_review.request_submit', { findingId });
+    return { runId };
+  }
+
+  /**
+   * 依頼文を送る（承認の後に `web_review.request_send` が呼ぶ）。窓口のアカウントがあればそこから、無ければ `fallback`（本人の Gmail）で送る。
+   *
+   * @returns 送れなければ理由
+   */
+  async sendRequest(who: WebReviewViewer, findingId: string, to: string, digest: string,
+    fallback: (m: { to: string; subject: string; body: string }) => Promise<unknown>): Promise<{ sent: true; to: string } | { error: string }> {
+    const p = await this.requestPreview(who.tenantId, findingId, to);
+    if ('error' in p) return p;
+    if (p.digest !== digest) return { error: '承認した後に依頼文か宛先が変わったため、送りませんでした。もう一度承認へ進めてください' };
+    const box = await openMailbox(this.deps.data, who.tenantId).catch(() => null);
+    try {
+      if (box) await box.send({ from: box.address, to: p.to, subject: p.subject, body: p.body, inReplyTo: null, references: null, threadId: null });
+      else await fallback({ to: p.to, subject: p.subject, body: p.body });
+    } catch (err) {
+      return { error: `送れませんでした（${err instanceof Error ? err.message : String(err)}）` };
+    }
+    await this.deps.store.markRequestSent(who.tenantId, findingId, new Date().toISOString());
+    // 監査ログには宛先のドメインだけを残す
+    await this.audit(who.tenantId, who.userId, 'web_review.request_send', { findingId, toDomain: p.to.split('@')[1] ?? '' });
+    return { sent: true, to: p.to };
+  }
+
+  /**
+   * 読まれたコラムの書き方の傾向（第32.18.5節）。見られた回数が 20 回以上で読まれた時間が分かるコラムが 3 本以上あれば、
+   * 読まれた時間の長い順に上半分の、字数と見出しの数の真ん中の値を一文にする（プログラムが計算する）。
+   *
+   * @returns 材料が足りなければ `null`
+   */
+  async columnTendency(tenantId: string): Promise<string | null> {
+    if (!this.deps.columns?.shape) return null;
+    const w = (await this.deps.repo.getTenantSettings(tenantId)).webReview;
+    if (!w.enabled || !w.connection) return null;
+    const rows: { read: number; chars: number; headings: number }[] = [];
+    for (const c of await this.deps.columns.published(tenantId).catch(() => [])) {
+      const m = await this.deps.store.pageMetrics(tenantId, pathOf(c.url));
+      if (!m || (m.views ?? 0) < 20 || m.readSeconds === null) continue;
+      const shape = await this.deps.columns.shape(tenantId, c.id).catch(() => null);
+      if (shape) rows.push({ read: m.readSeconds, ...shape });
+    }
+    if (rows.length < 3) return null;
+    const top = rows.sort((a, b) => b.read - a.read).slice(0, Math.ceil(rows.length / 2));
+    const mid = (xs: number[]) => { const s = [...xs].sort((a, b) => a - b); return s[Math.floor((s.length - 1) / 2)]!; };
+    const chars = Math.round(mid(top.map((r) => r.chars)) / 100) * 100;
+    return `これまでのコラムのうち、じっくり読まれたものは ${chars.toLocaleString('ja-JP')} 字前後・見出し ${mid(top.map((r) => r.headings))} つ前後でした。長さと見出しの数の目安にしてください`;
   }
 
   /** 週に 1 回の見回りの番か（初めて・頼まれた・月曜の 5 時を過ぎて前から 6 日より経った・8 日より経った）。 */

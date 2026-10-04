@@ -5765,6 +5765,22 @@ console.log('\n■ 72. Web の振り返りの段 1・段 2（担当の許可・�
     seen.status === 200 && (otherPatch.status === 403 || otherPatch.status === 404) && !(afterSeen?.findings ?? []).some((f) => f.id === slow?.id)
       ? ok('直すべき所を見送りにでき、ほかの会社からは変えられない') : ng('状態を変えるのが違う', JSON.stringify({ seen: seen.status, other: otherPatch.status }));
 
+    // 依頼文を承認の後に送る（第34.21節）。宛先は管理者が設定し、承認は管理者
+    const target = (afterSeen?.findings ?? []).find((f) => f.requestDraft);
+    const agencyByMember = await call('a', '/v1/admin/extensions/web-review/agency', { method: 'PUT', body: JSON.stringify({ email: 'web@agency.example.jp', name: '制作会社' }) }, 'member');
+    await call('a', '/v1/admin/extensions/web-review/agency', { method: 'PUT', body: JSON.stringify({ email: 'web@agency.example.jp', name: '制作会社' }) });
+    const sendReq = target ? await call('a', `/v1/web-review/findings/${target.id}/send`, { method: 'POST', body: '{}' }, 'member') : { status: 0, body: {} };
+    const sendRun = sendReq.body?.runId ? await waitFor('a', sendReq.body.runId, ['awaiting_approval', 'failed', 'completed'], 20000, 'member') : null;
+    const sendAppr = sendReq.body?.runId ? await approvalFor('a', sendReq.body.runId, 'admin') : null;
+    if (sendAppr) await call('a', `/v1/approvals/${sendAppr.id}`, { method: 'POST', body: JSON.stringify({ decision: 'approved' }) }, 'admin');
+    const sendDone = sendReq.body?.runId ? await waitFor('a', sendReq.body.runId, ['completed', 'failed'], 20000, 'member') : null;
+    const sentFinding = ((await call('a', '/v1/web-review/findings?all=1', {}, 'member')).body.findings ?? []).find((f) => f.id === target?.id);
+    agencyByMember.status === 403 && sendReq.status === 201 && sendRun?.run?.status === 'awaiting_approval'
+      && /制作会社に Web の直しの依頼文を送ります/.test(sendAppr?.present ?? '') && /宛先: web@agency\.example\.jp/.test(sendAppr?.present ?? '')
+      && sendDone?.run?.status === 'completed' && sentFinding?.requestSentAt
+      ? ok('依頼文は承認の後に送り、承認の画面に宛先と本文を出し、送った日時を残す（宛先の設定は管理者だけ）')
+      : ng('依頼文を送るのが違う', JSON.stringify({ member: agencyByMember.status, req: sendReq.status, status: sendRun?.run?.status, present: sendAppr?.present?.slice(0, 200), done: sendDone?.run?.status, reason: sendDone?.run?.failureReason, sent: sentFinding?.requestSentAt }).slice(0, 500));
+
     // 秘書から聞く（付属の業務「Web について聞く」）
     const ask = async (request) => {
       const job = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: 'web-review:ask', input: { request } }) }, 'member');
@@ -5783,7 +5799,7 @@ console.log('\n■ 72. Web の振り返りの段 1・段 2（担当の許可・�
 
     const { body: audits } = await call('a', '/v1/admin/audit-events');
     const acts = (audits.items ?? []).map((e) => e.action);
-    ['web_review.connect', 'web_review.select', 'web_review.report', 'web_review.check', 'web_review.finding'].every((x) => acts.includes(x))
+    ['web_review.connect', 'web_review.select', 'web_review.report', 'web_review.check', 'web_review.finding', 'web_review.request_send'].every((x) => acts.includes(x))
       ? ok('つないだ・選んだ・便りを作った・直すべき所を探した・状態を変えたを監査ログに残す') : ng('監査ログが違う', JSON.stringify(acts.filter((x) => x.startsWith('web_review.'))));
     // お知らせを流す画面の選び先（第35.17節）。管理者の口
     const scrMember = await call('a', '/v1/admin/extensions/announcements/screens', {}, 'member');

@@ -1264,7 +1264,9 @@ export const api = {
   /** Web の振り返り（内蔵の拡張。仕様書 第34章）。 */
   webReview: {
     /** 状態（始める前の手伝い）といちばん新しい便りと、便りの一覧。 */
-    overview: () => call<{ status: WebReviewStatus; latest: WebReviewReport | null; reports: WebReviewReportBrief[]; admin: boolean; findings: WebReviewFinding[]; checkedAt: string | null; checkRequested: boolean }>('/web-review'),
+    overview: () => call<{ status: WebReviewStatus; latest: WebReviewReport | null; reports: WebReviewReportBrief[]; admin: boolean; findings: WebReviewFinding[]; checkedAt: string | null; checkRequested: boolean; agency: { email: string; name: string } | null }>('/web-review'),
+    /** 依頼文を制作会社に送る業務を始める（承認の後に送る。第34.21節）。 */
+    sendRequest: (findingId: string, to?: string) => call<{ runId: string }>(`/web-review/findings/${encodeURIComponent(findingId)}/send`, { method: 'POST', body: JSON.stringify(to ? { to } : {}) }),
     report: (month: string) => call<{ report: WebReviewReport }>(`/web-review/reports/${encodeURIComponent(month)}`),
     /** 直すべき所の状態を変える（見た・済んだ・見送り。第34.19節）。 */
     setFinding: (id: string, status: WebReviewFindingStatus) =>
@@ -2024,6 +2026,8 @@ export const api = {
     disconnectWebReview: () => call<{ ok: true }>('/admin/extensions/web-review/connection', { method: 'DELETE' }),
     /** 担当が見られるプロパティとサイトと、いまの状態。 */
     webReviewCandidates: () => call<{ candidates: WebReviewCandidates | null; error: string | null; status: WebReviewStatus }>('/admin/extensions/web-review/candidates'),
+    /** 制作会社の宛先（依頼文を承認の後に送る。第34.21節）。 */
+    setWebReviewAgency: (email: string | null, name = '') => call<{ ok: true }>('/admin/extensions/web-review/agency', { method: 'PUT', body: JSON.stringify({ email, name }) }),
     selectWebReview: (p: { propertyId?: string | null; siteUrl?: string | null }) =>
       call<{ ok: true; status: WebReviewStatus }>('/admin/extensions/web-review/selection', { method: 'PUT', body: JSON.stringify(p) }),
     /** LINE 公式アカウントをつなぐ（受け口の URL が返る。1 度だけ）。 */

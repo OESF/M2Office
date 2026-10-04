@@ -133,11 +133,13 @@ const signage = new SignageService({
 // 割り込みの文を出し終えて 24 時間で消し、行を 90 日で消す（第31.13節）
 const signageInterrupts = new SignageInterrupts({ service: signage, repo });
 // Web のコラム（内蔵の拡張。仕様書 第32章）。秘書から頼まれた下書きと、承認の後に WordPress に入れるのが使う
-const columns = new ColumnService({
+const columns: ColumnService = new ColumnService({
   store: new PostgresColumnStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), files,
   repo, box, llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId), logger: log,
   // 似すぎの確かめで出典のページを読む口（見本の会社では読まない。第32.18.4節）
   pagesFor: (tenantId) => (connector.sourceFor(tenantId) === 'mock' ? null : new HttpPageFetcher(crawlerUserAgent(appVersion(), process.env['CRAWLER_CONTACT_URL']), 1_000)),
+  // 読まれたコラムの書き方の傾向（Web の振り返り。第32.18.5節）。Web の振り返りは後で作るので、呼ぶときに引く
+  tendencyFor: (tenantId: string): Promise<string | null> => webReview.columnTendency(tenantId),
 });
 // 問い合わせの記録（内蔵の拡張。仕様書 第33章）。秘書から頼まれた記録と、期限の知らせ・原文の片付けが使う
 // お知らせの置き場（休業の期間を、問い合わせの記録と定時実行も読む。第35.7節）
@@ -165,7 +167,7 @@ const competitors = new CompetitorService({
 });
 const competitorWatch = new CompetitorWatch({ service: competitors, store: competitorStore, repo, logger: log });
 // Web の振り返り（内蔵の拡張。仕様書 第34章）。毎月 3 日の 8 時（日本時間）を過ぎたら、先月の便りを 1 回だけ作る
-const webReview = new WebReviewService({
+const webReview: WebReviewService = new WebReviewService({
   store: new PostgresWebReviewStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
   repo, data: { repo, box, sourceFor: (tenantId) => connector.sourceFor(tenantId) }, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
   // 公開されたコラムの数字を読む（段 2。第34.19節）

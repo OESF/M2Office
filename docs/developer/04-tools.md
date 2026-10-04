@@ -123,6 +123,7 @@
 | `gmail.send` | external-send | `gmail.send`（機密） | メールを送ります。必ず承認のあとに行います |
 | `inquiries.reply_send` | external-send | — | 承認された問い合わせの返事を、会社の窓口のアカウントから送ります |
 | `mail.bulk_send` | external-send | `gmail.send`（機密） | 承認されたまとめてのメールを、あなたの Gmail から 1 人に 1 通ずつ送ります |
+| `web_review.request_send` | external-send | `gmail.send`（機密） | 直すべき所の依頼文を、承認の後に制作会社へ送ります |
 
 ## 4.3 引数
 
@@ -228,6 +229,7 @@
 | `gmail.send` | `to`（必須）: 宛先のメールアドレス、`cc`: CC（任意）、`subject`（必須）: 件名、`body`（必須）: 本文、`replyTo`: 返信するメールの ID（任意） |
 | `inquiries.reply_send` | `replyId`（必須）: 返事の ID |
 | `mail.bulk_send` | `bulkMailId`（必須）: まとめてのメールの ID |
+| `web_review.request_send` | `findingId`（必須）: 直すべき所の ID、`to`（必須）: 宛先のメールアドレス |
 
 <!-- tools:end -->
 

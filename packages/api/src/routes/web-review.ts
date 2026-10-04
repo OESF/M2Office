@@ -39,7 +39,7 @@ export function webReviewRoute(deps: AppDeps) {
       service.status(tenant.id), service.report(tenant.id), service.reports(tenant.id), service.isAdmin(tenant.id, user.id),
       service.findings(tenant.id), deps.repo.getTenantSettings(tenant.id),
     ]);
-    return c.json({ status, latest, reports, admin, findings, checkedAt: settings.webReview.checkedAt ?? null, checkRequested: !!settings.webReview.checkRequestedAt });
+    return c.json({ status, latest, reports, admin, findings, checkedAt: settings.webReview.checkedAt ?? null, checkRequested: !!settings.webReview.checkRequestedAt, agency: settings.webReview.agency ?? null });
   });
 
   /** 直すべき所（`all=1` なら済んだ・見送りも）。 */
@@ -51,6 +51,14 @@ export function webReviewRoute(deps: AppDeps) {
     const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
     const err = await service.setFindingStatus({ tenantId: tenant.id, userId: user.id }, c.req.param('id'), String(body['status'] ?? '') as WebReviewFindingStatus);
     return err ? c.json({ error: err }, err.includes('見つかりません') ? 404 : 400) : c.json({ ok: true });
+  });
+
+  /** 依頼文を制作会社に送る業務を始める（承認の後に送る。`to` で宛先を変えられる。第34.21節）。 */
+  app.post('/findings/:id/send', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
+    const r = await service.submitRequest({ tenantId: tenant.id, userId: user.id }, c.req.param('id'), typeof body['to'] === 'string' && body['to'].trim() ? body['to'] : undefined);
+    return 'error' in r ? c.json({ error: r.error }, 400) : c.json(r, 201);
   });
 
   /** 今すぐチェック（管理者）。ワーカーが次の見回り（1 分ごと）で探す。 */
