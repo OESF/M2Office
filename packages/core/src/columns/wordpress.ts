@@ -105,3 +105,68 @@ export async function uploadWordPressMedia(a: WordPressAuth, img: { bytes: Uint8
     return { error: `WordPress に届きませんでした（${err instanceof Error ? err.message : String(err)}）` };
   }
 }
+
+/**
+ * 記事を作る（お知らせの作成。仕様書 第35.6.1節）。公開・予約公開・下書きを選べる。
+ *
+ * @param post.status `publish`（すぐ公開）・`future`（`date` に予約公開）・`draft`（下書き）
+ * @param post.date 予約公開の日時（ISO。`future` のとき）
+ * @returns 記事の ID・記事の URL・編集の画面の URL
+ */
+export async function createWordPressPost(a: WordPressAuth, post: {
+  title: string; html: string; status: 'publish' | 'future' | 'draft'; date?: string; categories?: number[];
+}): Promise<{ id: string; link: string; editUrl: string } | { error: string }> {
+  try {
+    const res = await fetch(`${a.siteUrl}/wp-json/wp/v2/posts`, {
+      method: 'POST', headers: headers(a), signal: AbortSignal.timeout(TIMEOUT_MS),
+      body: JSON.stringify({
+        title: post.title, content: post.html, status: post.status,
+        ...(post.status === 'future' && post.date ? { date_gmt: post.date.replace(/\.\d{3}Z$/, '').replace(/Z$/, '') } : {}),
+        ...(post.categories?.length ? { categories: post.categories } : {}),
+      }),
+    });
+    if (!res.ok) return { error: `WordPress に記事を入れられませんでした（${res.status}）` };
+    const body = await res.json() as { id?: unknown; link?: unknown };
+    const id = String(body.id ?? '');
+    if (!id) return { error: 'WordPress の応答に記事の ID がありません' };
+    return { id, link: typeof body.link === 'string' ? body.link : '', editUrl: `${a.siteUrl}/wp-admin/post.php?post=${encodeURIComponent(id)}&action=edit` };
+  } catch (err) {
+    return { error: `WordPress に届きませんでした（${err instanceof Error ? err.message : String(err)}）` };
+  }
+}
+
+/**
+ * カテゴリーの ID を引く。無ければ作る（お知らせの作成。第35.4節）。
+ *
+ * @returns カテゴリーの ID。引けず作れなければ `null`（カテゴリーなしで入れる）
+ */
+export async function ensureWordPressCategory(a: WordPressAuth, name: string): Promise<number | null> {
+  try {
+    const found = await fetch(`${a.siteUrl}/wp-json/wp/v2/categories?search=${encodeURIComponent(name)}&per_page=20`, { headers: headers(a), signal: AbortSignal.timeout(TIMEOUT_MS) });
+    if (found.ok) {
+      const list = await found.json() as { id?: number; name?: string }[];
+      const hit = list.find((c) => c.name === name);
+      if (hit?.id) return hit.id;
+    }
+    const made = await fetch(`${a.siteUrl}/wp-json/wp/v2/categories`, {
+      method: 'POST', headers: headers(a), signal: AbortSignal.timeout(TIMEOUT_MS), body: JSON.stringify({ name }),
+    });
+    if (!made.ok) return null;
+    const body = await made.json() as { id?: number };
+    return typeof body.id === 'number' ? body.id : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 記事の題名を変える（お知らせの期間の後に「（終了しました）」を付ける。第35.6.1節）。 */
+export async function updateWordPressTitle(a: WordPressAuth, id: string, title: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${a.siteUrl}/wp-json/wp/v2/posts/${encodeURIComponent(id)}`, {
+      method: 'POST', headers: headers(a), signal: AbortSignal.timeout(TIMEOUT_MS), body: JSON.stringify({ title }),
+    });
+    return res.ok ? null : `WordPress の記事を直せませんでした（${res.status}）`;
+  } catch (err) {
+    return `WordPress に届きませんでした（${err instanceof Error ? err.message : String(err)}）`;
+  }
+}

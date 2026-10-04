@@ -5542,6 +5542,72 @@ console.log('\n■ 69. 競合の分析の段 1（探す・読む・事実・レ�
   }
 }
 
+console.log('\n■ 70. お知らせの作成の段 1（下書き・1 回の承認・Web・LINE の一斉配信。第35.17節）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const { rows: saved } = await owner.query(`select tenant_id, announcements, inquiries from tenant_settings where tenant_id in ('t-alpha', 't-beta')`);
+  const cleanup = async () => {
+    await owner.query(`delete from announcements where tenant_id in ('t-alpha', 't-beta')`);
+    await owner.query(`delete from inquiry_line_hooks where tenant_id = 't-alpha'`);
+    await owner.query(`delete from tenant_credentials where tenant_id = 't-alpha' and kind = 'line'`);
+  };
+  await cleanup();
+  try {
+    const off = await call('a', '/v1/announcements', {}, 'member');
+    await call('a', '/v1/admin/extensions/announcements/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    // LINE は問い合わせの記録でつないだものを使う（見本の会社では外に送らない見本の口）
+    await call('a', '/v1/admin/extensions/inquiries/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    await call('a', '/v1/admin/extensions/inquiries/line', { method: 'PUT', body: JSON.stringify({ secret: 'smoke-line-secret', token: '' }) });
+    off.status === 403 ? ok('お知らせの作成は既定で切り') : ng(`切っているのに使える（${off.status}）`);
+
+    const made = await call('a', '/v1/announcements', { method: 'POST', body: JSON.stringify({ text: '年末年始の休業のお知らせを出して。12/28〜1/5' }) }, 'member');
+    const a = made.body?.announcement;
+    const d = a ? (await call('a', `/v1/announcements/${a.id}`, {}, 'member')).body : null;
+    made.status === 201 && /休業/.test(a?.title ?? '') && a?.startDate?.endsWith('-12-28') && a?.endDate?.endsWith('-01-05')
+      && JSON.stringify(a?.channels) === JSON.stringify(['web', 'line']) && d?.available?.line === true && d?.wordpress === false
+      ? ok('1 行の頼みから、題名・期間と、出し先ごとの文の下書きを作る（つないでいる出し先だけ。店頭の画面を使っていない会社では外す）')
+      : ng('下書きが違う', JSON.stringify({ status: made.status, title: a?.title, start: a?.startDate, end: a?.endDate, channels: a?.channels, available: d?.available }).slice(0, 400));
+    const other = a ? await call('b', `/v1/announcements/${a.id}`) : { status: 0 };
+    other.status === 403 || other.status === 404 ? ok('ほかの会社からはお知らせが見えない') : ng(`ほかの会社から見える（${other.status}）`);
+
+    // 承認へ進める → 管理者が承認 → 出す
+    const pv = (await call('a', `/v1/announcements/${a?.id}/preview`, {}, 'member')).body;
+    const submit = await call('a', `/v1/announcements/${a?.id}/submit`, { method: 'POST', body: '{}' }, 'member');
+    const run = submit.body?.runId ? await waitFor('a', submit.body.runId, ['awaiting_approval', 'failed', 'completed'], 20000, 'member') : null;
+    const appr = submit.body?.runId ? await approvalFor('a', submit.body.runId, 'admin') : null;
+    const locked = await call('a', `/v1/announcements/${a?.id}`, { method: 'PATCH', body: JSON.stringify({ title: '変える' }) }, 'member');
+    pv?.problems?.length === 0 && pv?.line?.followers === 37 && submit.status === 201 && run?.run?.status === 'awaiting_approval'
+      && /■ LINE（友だち 37 人に一斉配信/.test(appr?.present ?? '') && /■ Web サイト/.test(appr?.present ?? '') && locked.status === 400
+      ? ok('承認へ進めると、承認の画面に出し先ごとの見え方と LINE の送る数・今月の残りを出す。承認待ちの間は直せない')
+      : ng('承認までが違う', JSON.stringify({ problems: pv?.problems, line: pv?.line, submit: submit.body, status: run?.run?.status, present: appr?.present?.slice(0, 300), locked: locked.status }).slice(0, 500));
+    if (appr) await call('a', `/v1/approvals/${appr.id}`, { method: 'POST', body: JSON.stringify({ decision: 'approved' }) }, 'admin');
+    const done = submit.body?.runId ? await waitFor('a', submit.body.runId, ['completed', 'failed'], 20000, 'member') : null;
+    const after = (await call('a', `/v1/announcements/${a?.id}`, {}, 'member')).body;
+    const outs = Object.fromEntries((after?.outputs ?? []).map((o) => [o.channel, o]));
+    done?.run?.status === 'completed' && after?.announcement?.status === 'published' && outs.line?.status === 'done' && outs.line?.result?.sent === 37
+      && outs.web?.status === 'done' && outs.web?.result?.draft === true
+      ? ok('承認されると、LINE の友だち全員に一斉配信し、WordPress の無い会社では Web の文を写して使える形にする')
+      : ng('出した後が違う', JSON.stringify({ status: done?.run?.status, reason: done?.run?.failureReason, ann: after?.announcement?.status, outs }).slice(0, 400));
+    const copy = (await call('a', `/v1/announcements/${a?.id}/copy`, {}, 'member')).body;
+    const png = await fetch(`${API}/v1/announcements/${a?.id}/screen.png`, { headers: { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' } });
+    /<h2>/.test(copy?.html ?? '') && png.status === 200 && png.headers.get('content-type') === 'image/png'
+      ? ok('Web の文を HTML とテキストで写せ、店頭の画面の 1 枚の見本を出せる') : ng('写す文か見本が違う', JSON.stringify({ copy: copy?.html?.slice(0, 60), png: png.status }));
+
+    const { body: audits } = await call('a', '/v1/admin/audit-events');
+    const acts = (audits.items ?? []).map((e) => e.action);
+    ['announcement.draft', 'announcement.submit', 'announcement.approve', 'announcement.line', 'announcement.publish'].every((x) => acts.includes(x))
+      ? ok('下書き・承認へ進めた・承認・一斉配信・出したを監査ログに残す') : ng('監査ログが違う', JSON.stringify(acts.filter((x) => x.startsWith('announcement.'))));
+  } catch (err) {
+    ng('お知らせの作成の段 1 の確認が途中で止まった', String(err?.stack ?? err));
+  } finally {
+    await cleanup();
+    for (const r of saved) await owner.query(`update tenant_settings set announcements = $2, inquiries = $3 where tenant_id = $1`, [r.tenant_id, r.announcements ? JSON.stringify(r.announcements) : null, r.inquiries ? JSON.stringify(r.inquiries) : null]);
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

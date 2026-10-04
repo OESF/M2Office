@@ -21,6 +21,7 @@ import type { CardCorners,
   ColumnWordPress, WebColumn, WebColumnSettings, WebColumnVersion,
   Inquiry, InquiryDetail, InquiryParty, InquiryTask, InquiryReply, InquiryMailSkipped, InquiryMonthStats, InquirySettings, InquiryFaqTopic,
   CompetitorOverview, CompetitorFact, CompetitorReport, CompetitorSettings,
+  Announcement, AnnouncementDetail, AnnouncementPreview, AnnouncementSettings, AnnouncementTexts,
 } from '@m2office/shared';
 import { debugMode, recordCall } from './debug.js';
 
@@ -288,6 +289,8 @@ export interface Me {
   inquiries?: boolean;
   /** 競合の分析を使えるか（会社の入り切りと利用範囲。仕様書 第36.18節）。 */
   competitors?: boolean;
+  /** お知らせの作成を使えるか（会社の入り切りと利用範囲。仕様書 第35.17節）。 */
+  announcements?: boolean;
   /** 本人の「給与・勤怠」を使えるか（台帳に結び付いているか。仕様書 第30.25節）。 */
   hrSelf?: boolean;
   /** デバッグモードか（`M2O_DEBUG=true`。仕様書 第20.4.1節「デバッグモード」）。 */
@@ -744,6 +747,8 @@ export interface ExtensionView {
   inquiries?: InquirySettings;
   /** 競合の分析の設定（地図の鍵を預けたか。第36.18節）。競合の分析のときだけある。 */
   competitors?: CompetitorSettings;
+  /** お知らせの作成の設定（Web の出し方・カテゴリー。第35.4節）。お知らせの作成のときだけある。 */
+  announcements?: AnnouncementSettings;
 }
 
 /** 問い合わせを残した結果（仕様書 第33.17節）。どの続きか決まらなければ `ambiguous` と候補。 */
@@ -1246,6 +1251,25 @@ export const api = {
     faq: () => call<{ topics: InquiryFaqTopic[] }>('/inquiries/faq'),
     /** 月の振り返り（無ければ先月）。 */
     review: (month?: string) => call<{ stats: InquiryMonthStats; text: string }>(`/inquiries/review${month ? `?month=${encodeURIComponent(month)}` : ''}`),
+  },
+  /** お知らせの作成（内蔵の拡張。仕様書 第35章）。 */
+  announcements: {
+    list: () => call<{ items: Announcement[] }>('/announcements'),
+    /** 1 行の欄に書いた頼みから下書きを作る。 */
+    draft: (text: string) => call<{ announcement: Announcement }>('/announcements', { method: 'POST', body: JSON.stringify({ text }) }),
+    get: (id: string) => call<AnnouncementDetail>(`/announcements/${encodeURIComponent(id)}`),
+    update: (id: string, patch: Partial<{ title: string; body: string; startDate: string | null; endDate: string | null; publishAt: string | null; channels: string[]; texts: AnnouncementTexts }>) =>
+      call<{ ok: true }>(`/announcements/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    remove: (id: string) => call<{ ok: true }>(`/announcements/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    preview: (id: string) => call<AnnouncementPreview>(`/announcements/${encodeURIComponent(id)}/preview`),
+    /** 承認へ進める（管理者か承認者が承認すると出る）。 */
+    submit: (id: string) => call<{ runId: string }>(`/announcements/${encodeURIComponent(id)}/submit`, { method: 'POST', body: '{}' }),
+    cancel: (id: string) => call<{ ok: true }>(`/announcements/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: '{}' }),
+    /** WordPress が無い会社が写して使う文。 */
+    copy: (id: string) => call<{ html: string; text: string }>(`/announcements/${encodeURIComponent(id)}/copy`),
+    lineStatus: () => call<{ line: { followers: number | null; limit: number | null; used: number; remaining: number | null } | null }>('/announcements/line/status'),
+    /** 店頭の画面の 1 枚の見本（直したら変わる）。 */
+    screenUrl: (id: string, v: string) => `/v1/announcements/${encodeURIComponent(id)}/screen.png?v=${encodeURIComponent(v)}`,
   },
   /** 競合の分析（内蔵の拡張。仕様書 第36章）。 */
   competitors: {
@@ -1971,6 +1995,9 @@ export const api = {
     /** 競合の分析の地図の鍵（Google Cloud の API キー）を預ける。Places API を使えるかを確かめてから預ける。 */
     setCompetitorMapKey: (key: string) => call<{ ok: true }>('/admin/extensions/competitors/map-key', { method: 'PUT', body: JSON.stringify({ key }) }),
     removeCompetitorMapKey: () => call<{ ok: true }>('/admin/extensions/competitors/map-key', { method: 'DELETE' }),
+    /** お知らせの作成の設定（Web の出し方・カテゴリー。第35.4節）。 */
+    setAnnouncementSettings: (patch: Partial<{ webPublish: 'publish' | 'draft'; webCategory: string; screens: string[] | null }>) =>
+      call<{ ok: true }>('/admin/extensions/announcements/settings', { method: 'PUT', body: JSON.stringify(patch) }),
     /** 競合の分析で自動で覚える数（1〜20）を変える。 */
     setCompetitorAutoMax: (autoMax: number) => call<{ ok: true }>('/admin/extensions/competitors/settings', { method: 'PUT', body: JSON.stringify({ autoMax }) }),
     /** 競合の分析の定期の見回りの間隔（毎月・毎週・しない）を変える。 */

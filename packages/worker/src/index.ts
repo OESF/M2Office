@@ -11,7 +11,7 @@
 
 import {
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
-  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, SignageService, SignageInterrupts, PostgresSignageStore, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention,
+  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, SignageService, SignageInterrupts, PostgresSignageStore, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention,
   NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator,
@@ -156,6 +156,19 @@ const competitors = new CompetitorService({
     ? (await inquiryStore.list(tenantId, { status: 'all', since, limit: 500 })).map((i) => i.source) : []),
 });
 const competitorWatch = new CompetitorWatch({ service: competitors, store: competitorStore, repo, logger: log });
+// お知らせの作成（内蔵の拡張。仕様書 第35章）。承認の後に出し、予約の時刻と期間の後を見回る
+const announcements = new AnnouncementService({
+  store: new PostgresAnnouncementStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+  repo, box, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
+  line: { repo, box, sourceFor: (tenantId) => connector.sourceFor(tenantId) },
+  signage: signageForAnnouncements(signage),
+  submitter: async (tenantId, userId, announcementId) => {
+    const def = await resolveDefinition(ANNOUNCEMENT_PUBLISH.id, ANNOUNCEMENT_PUBLISH.version, tenantId);
+    if (!def) throw new Error('お知らせを出す業務が見つかりません');
+    return (await enqueueJob(repo, { tenantId, requestedBy: userId, def, input: { announcementId }, origin: 'menu', actor: { type: 'user', id: userId } })).runId;
+  },
+  runStatus: async (tenantId, runId) => (await repo.getRun(tenantId, runId))?.status ?? null,
+});
 const engine = new RunEngine({
   repo, llm, registry, connector, files, resolveDefinition, isAvailable, logger: log, research, notices,
   cards: { store: contactStore, service: cards, access: cardsAccess(repo), bulk: bulkMail },
@@ -164,6 +177,7 @@ const engine = new RunEngine({
   columns: { service: columns, access: webColumnsAccess(repo) },
   inquiries: { service: inquiries, access: inquiriesAccess(repo) },
   competitors: { service: competitors, access: competitorsAccess(repo) },
+  announcements: { service: announcements, access: announcementsAccess(repo) },
   llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId),
   // 業務ごとの AI（ローカル・外部）と、社外の接続に送ってよいか（第16.3.7.1節）
   llmForRun: (tenantId, def, registry, previous) => ai.llmForRun(tenantId, def, registry, previous),
@@ -284,6 +298,9 @@ let lastInquiryMailCheck = 0;
 /** 競合の分析の作業を見る間隔（第36.18節）。 */
 const COMPETITOR_INTERVAL_MS = Number(process.env['COMPETITOR_INTERVAL_MS'] ?? 10_000);
 let lastCompetitorCheck = 0;
+/** お知らせの予約と期間の後を見回る間隔（第35.17節）。 */
+const ANNOUNCEMENT_INTERVAL_MS = Number(process.env['ANNOUNCEMENT_INTERVAL_MS'] ?? 60_000);
+let lastAnnouncementCheck = 0;
 // 秘書が学んだことの週 1 回の整理と、残す期間の片付け（仕様書 第11.11.4節）。1 時間ごとに「日曜の深夜で、前の整理から 6 日より経ったか」を見る
 const CONSOLIDATE_INTERVAL_MS = Number(process.env['CONSOLIDATE_INTERVAL_MS'] ?? 3_600_000);
 let lastConsolidateCheck = 0;
@@ -508,6 +525,17 @@ while (running) {
       await competitorWatch.tick();
     } catch (err) {
       log.warn('競合の分析の作業を始められませんでした', { err });
+    }
+  }
+
+  // お知らせの予約の時刻と期間の後（第35.17節）
+  if (Date.now() - lastAnnouncementCheck >= ANNOUNCEMENT_INTERVAL_MS) {
+    lastAnnouncementCheck = Date.now();
+    try {
+      const r = await announcements.tick(new Date());
+      if (r.published + r.ended > 0) log.info('お知らせの予約を出し、期間の後を片付けました', { published: r.published, ended: r.ended });
+    } catch (err) {
+      log.warn('お知らせの見回りに失敗しました', { err });
     }
   }
 

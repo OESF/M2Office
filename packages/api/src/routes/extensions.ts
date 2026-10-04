@@ -12,7 +12,7 @@
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import {
-  CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, INVENTORY_FEATURES, SIGNAGE_EXTENSION_ID, SIGNAGE_JINGLES, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, COLUMN_INDUSTRIES, type WebColumnSettings, type HrSettings, type InventorySettings, type RiskLevel, type SignageSettings,
+  CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, INVENTORY_FEATURES, SIGNAGE_EXTENSION_ID, SIGNAGE_JINGLES, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, COLUMN_INDUSTRIES, type WebColumnSettings, type HrSettings, type InventorySettings, type RiskLevel, type SignageSettings,
 } from '@m2office/shared';
 import {
   bundledConnection, builtinSection, consentSnapshot, encodeFiles, unpackExtension, EXTENSION_FILE_MAX_BYTES,
@@ -126,6 +126,8 @@ export function extensionsRoute(deps: AppDeps) {
         ...(e.pkg.manifest.id === INQUIRIES_EXTENSION_ID ? { inquiries: settings.inquiries } : {}),
         // 競合の分析: 地図の鍵を預けたか（第36.18節）。鍵そのものは返さない
         ...(e.pkg.manifest.id === COMPETITORS_EXTENSION_ID ? { competitors: settings.competitors } : {}),
+        // お知らせの作成: Web を公開まで行うか・カテゴリー・流す画面（第35.4節）
+        ...(e.pkg.manifest.id === ANNOUNCEMENTS_EXTENSION_ID ? { announcements: settings.announcements } : {}),
       })),
     });
   });
@@ -437,6 +439,26 @@ export function extensionsRoute(deps: AppDeps) {
     });
     if (problem) return c.json({ error: problem }, 400);
     return c.json({ ok: true });
+  });
+
+  /** お知らせの作成の設定（第35.4節）: Web を公開まで行うか（`webPublish`）・WordPress のカテゴリー（`webCategory`）・流す画面（`screens`。`null` ならすべて）。 */
+  app.put(`/${ANNOUNCEMENTS_EXTENSION_ID}/settings`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
+    const settings = await deps.repo.getTenantSettings(tenant.id);
+    const next = { ...settings.announcements };
+    if (body['webPublish'] !== undefined) {
+      if (body['webPublish'] !== 'publish' && body['webPublish'] !== 'draft') return c.json({ error: 'Web の出し方は 公開 か 下書き です' }, 400);
+      next.webPublish = body['webPublish'];
+    }
+    if (body['webCategory'] !== undefined) next.webCategory = String(body['webCategory']).trim().slice(0, 40);
+    if (body['screens'] !== undefined) {
+      if (body['screens'] === null) next.screens = null;
+      else if (Array.isArray(body['screens'])) next.screens = (body['screens'] as unknown[]).map(String).slice(0, 50);
+      else return c.json({ error: '流す画面の形が違います' }, 400);
+    }
+    await deps.repo.saveTenantSettings(tenant.id, 'announcements', next, user.id);
+    return c.json({ ok: true, settings: next });
   });
 
   /** 競合の分析の地図の鍵を外す。 */
@@ -867,6 +889,7 @@ export function extensionsRoute(deps: AppDeps) {
       else if (section === 'webColumns') await deps.repo.saveTenantSettings(tenant.id, 'webColumns', { ...settings.webColumns, enabled: body.enabled }, user.id);
       else if (section === 'inquiries') await deps.repo.saveTenantSettings(tenant.id, 'inquiries', { ...settings.inquiries, enabled: body.enabled }, user.id);
       else if (section === 'competitors') await deps.repo.saveTenantSettings(tenant.id, 'competitors', { ...settings.competitors, enabled: body.enabled }, user.id);
+      else if (section === 'announcements') await deps.repo.saveTenantSettings(tenant.id, 'announcements', { ...settings.announcements, enabled: body.enabled }, user.id);
       else if (section === 'signage') {
         await deps.repo.saveTenantSettings(tenant.id, 'signage', { ...settings.signage, enabled: body.enabled }, user.id);
         // 切ったら、画面は無地にする（登録・素材・流れは消さない。第31.2節）

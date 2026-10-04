@@ -1805,3 +1805,13 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .competitors-themes ul { margin: 0; padding-left: 1.2em; }
 .competitors-themes li { margin: 4px 0; }
 .competitors-themes button { margin-left: 8px; }
+
+/* お知らせの作成（仕様書 第35.8節） */
+.announcements { display: flex; flex-direction: column; gap: calc(12px * var(--space-scale)); }
+.announcements-head label, .announcements-channel label { display: flex; flex-direction: column; gap: 4px; }
+.announcements-head input[type="date"], .announcements-head input[type="datetime-local"] { width: auto; }
+.announcements-channel textarea { width: 100%; }
+.announcements-web-preview { border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; }
+.announcements-web-preview h3 { margin-top: 0; }
+.announcements-line-bubble { align-self: flex-start; max-width: 360px; background: #e3f5e1; color: #1d2733; border-radius: 16px; padding: 10px 14px; white-space: pre-wrap; }
+.announcements-screen { width: 100%; max-width: 720px; border: 1px solid var(--border); border-radius: 8px; }

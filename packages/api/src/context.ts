@@ -15,11 +15,11 @@ import {
   TenantAiResolver, platformAi, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, ConnectionCredentials, type ConnectionAuthProvider,
   CardService, PostgresContactStore, cardsAccess, type ContactStore, BulkMailService, PostgresBulkMailStore, NoticeService, PostgresNoticeStore,
-  InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, JanLookupService, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, InquiryService, PostgresInquiryStore, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, competitorsAccess, crawlerUserAgent, isLocalPolicy, webColumnsAccess, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
+  InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, JanLookupService, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, InquiryService, PostgresInquiryStore, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, webColumnsAccess, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
   type SecretBox, type GeminiModels,
   type FileStore, type TenantExtensions, type HelpArticle, type ManualMeta, type LlmProvider, type Logger, type Repository, type WorkspaceConnector,
 } from '@m2office/core';
-import { canRunAgent, type AgentDefinition, type ContactScope, type HrSettings, type InventorySettings, type SignageSettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings } from '@m2office/shared';
+import { canRunAgent, type AgentDefinition, type ContactScope, type HrSettings, type InventorySettings, type SignageSettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings } from '@m2office/shared';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -154,6 +154,15 @@ export interface AppDeps {
   competitors: {
     service: CompetitorService;
     access(tenantId: string, userId: string): Promise<CompetitorSettings | null>;
+  };
+  /**
+   * お知らせの作成（内蔵の拡張。仕様書 第35章）。出すのは承認の後だけ（付属の業務「お知らせを出す」）。
+   *
+   * @remarks `access` は、会社がお知らせの作成を使っていて利用者が利用範囲の中なら、会社の設定を返す（使えなければ `null`）
+   */
+  announcements: {
+    service: AnnouncementService;
+    access(tenantId: string, userId: string): Promise<AnnouncementSettings | null>;
   };
   /** 人事・給与（内蔵の拡張。仕様書 第30章）。使えるのは会社で入れていて人事区画に入っている人だけ。 */
   hr: {
@@ -327,8 +336,25 @@ export function buildDeps(): AppDeps {
     }),
     access: competitorsAccess(repo),
   };
+  // お知らせの作成（内蔵の拡張。仕様書 第35章）。Web はコラムの作成の WordPress、LINE は問い合わせの記録の接続、店頭の画面は店頭サイネージを使う
+  const announcements = {
+    service: new AnnouncementService({
+      store: new PostgresAnnouncementStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+      repo, box, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
+      line: { repo, box, sourceFor: (tenantId) => connector.sourceFor(tenantId) },
+      signage: signageForAnnouncements(signageService),
+      // 承認へ進める（付属の業務「お知らせを出す」を始める）
+      submitter: async (tenantId, userId, announcementId) => {
+        const def = (await tenantView(tenantId)).resolve(ANNOUNCEMENT_PUBLISH.id, ANNOUNCEMENT_PUBLISH.version);
+        if (!def) throw new Error('お知らせを出す業務が見つかりません');
+        return (await enqueueJob(repo, { tenantId, requestedBy: userId, def, input: { announcementId }, origin: 'menu', actor: { type: 'user', id: userId } })).runId;
+      },
+      runStatus: async (tenantId, runId) => (await repo.getRun(tenantId, runId))?.status ?? null,
+    }),
+    access: announcementsAccess(repo),
+  };
   const engine = new RunEngine({
-    repo, llm, registry, connector, files, logger: log, research, cards, notices, inventory, columns, inquiries, competitors,
+    repo, llm, registry, connector, files, logger: log, research, cards, notices, inventory, columns, inquiries, competitors, announcements,
     hr: { calendar: laborCalendar, access: hrAccess(repo) },
     llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId),
     // 業務ごとの AI（ローカル・外部）と、社外の接続に送ってよいか（第16.3.7.1節）
@@ -441,6 +467,7 @@ export function buildDeps(): AppDeps {
     columns,
     inquiries,
     competitors,
+    announcements,
     // 店頭サイネージ（第31章）
     signage,
     // 人事・給与（第30章）。台帳は人事区画の人だけが扱い、勤怠と有給は本人も扱う

@@ -30,6 +30,9 @@ src/llm/         LLM 抽象化層（OpenAI 互換、設定されていない会�
                  models.ts は役割ごとの既定のモデルと、モデルごとの値段の表（出どころと確認日つき。第20.2.2節）
 src/repository/  永続化。テナント境界の絞り込みを伴う
 src/agents/      公式エージェントの定義（AG-01〜05）
+src/announcements/ お知らせの作成（内蔵の拡張。第35章の段 1）。置き場（store.ts）、下書き（draft.ts。推論と期間の読み方）、
+                 店頭の画面の 1 枚（screen-image.ts）、処理（service.ts。直す・承認の前の確かめ・Web・LINE の一斉配信・店頭の画面・予約・期間の後）、
+                 ツール（tools.ts。announcements.draft・revise・submit・list・publish）、付属の業務（agents.ts。下書き・出す）
 src/cards/       名刺管理（内蔵の拡張。第27章）。置き場（自分だけの名刺は持ち主でも行を絞る）、読み取り（read.ts。写っている名刺ごとに項目・向き・四隅。
                  四隅は文字の向きに合わせて並べ直す orderCorners。1 枚の写真に 10 枚まで）、同じ人の見分け（identity.ts）、
                  表（CSV・Excel）の取り込みと書き出し（table.ts。見出しはよくある言い方と推論で読む）、

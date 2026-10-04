@@ -114,7 +114,10 @@ const widthOf = (s: string) => [...s].reduce((n, ch) => n + charWidth(ch), 0);
  * 言葉の切れ目（`Intl.Segmenter`）で行に分け、行の長さをそろえる（「習慣」を「習／慣」のように割らない）。
  * 句読点などは前の言葉に付け、1 行に収まらない長い言葉だけ字で割る。
  */
-function wrapAt(text: string, perLine: number): string[] {
+/**
+ * 文を、1 行の字数（全角 1・半角 0.55 で数える）の目安で、言葉の切れ目で割る。お知らせの店頭の画面の 1 枚でも使う。
+ */
+export function wrapAt(text: string, perLine: number): string[] {
   const words: string[] = [];
   for (const { segment } of new Intl.Segmenter('ja', { granularity: 'word' }).segment(text)) {
     // 句読点・空白・助詞（「の」「を」など）は前の言葉に付ける（行の頭に置かない）
@@ -255,6 +258,18 @@ export function wantsDark(hint: string): boolean {
   // 「明るく」「暗いのは避けて」のように、暗さを打ち消す言い方なら求めていない
   if (/(明る|パステル|淡い)/.test(hint) || /(暗|黒)[^。、]{0,8}(避け|やめ|ない|NG|ダメ)/.test(hint)) return false;
   return /(暗|夜|黒|ダーク|シック|重厚|モノクロ|夕暮れ|夕方)/.test(hint);
+}
+
+/**
+ * SVG を、同梱の日本語の書体（Noto Sans JP）で PNG にする（お知らせの店頭の画面の 1 枚。第35.6.4節）。字は M2Office が組む。
+ *
+ * @param width 横の画素数
+ */
+export function renderSvgPng(svg: string, width: number): Uint8Array {
+  return new Uint8Array(new Resvg(svg, {
+    fitTo: { mode: 'width', value: width },
+    font: { fontFiles: FONT_FILES, loadSystemFonts: false, defaultFontFamily: 'Noto Sans JP' },
+  }).render().asPng());
 }
 
 /** カバーを PNG にする。 */

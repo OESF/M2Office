@@ -21,6 +21,8 @@ export function notificationPath(n: { kind: string; runId: string | null }): str
   if (n.kind === 'inquiry') return '/inquiries';
   // 競合を探し終えた・見回り終えた知らせは、競合の分析を開く（第36.18節）
   if (n.kind === 'competitor') return '/competitors';
+  // お知らせを出せなかった出し先の知らせは、お知らせの作成を開く（第35.17節）
+  if (n.kind === 'announcement') return '/announcements';
   if (n.runId && RUN_ID.test(n.runId)) return `/runs/${encodeURIComponent(n.runId)}`;
   return '/';
 }

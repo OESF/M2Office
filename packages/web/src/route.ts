@@ -31,6 +31,8 @@ export type Route =
   | { kind: 'inquiries'; inquiryId: string | null }
   /** 競合の分析（仕様書 第36.18節）。 */
   | { kind: 'competitors' }
+  /** お知らせの作成（仕様書 第35.17節）。`announcementId` があれば 1 件。 */
+  | { kind: 'announcements'; announcementId: string | null }
   | { kind: 'settings'; section: string | null }
   | { kind: 'help'; articleId: string | null }
   | { kind: 'unknown' };
@@ -68,6 +70,7 @@ export function parseRoute(pathname: string): Route {
     case 'attendance': return second === undefined ? { kind: 'attendance' } : { kind: 'unknown' };
     case 'signage': return second === undefined ? { kind: 'signage' } : { kind: 'unknown' };
     case 'competitors': return second === undefined ? { kind: 'competitors' } : { kind: 'unknown' };
+    case 'announcements': return second === undefined ? { kind: 'announcements', announcementId: null } : id(second) ? { kind: 'announcements', announcementId: id(second) } : { kind: 'unknown' };
     case 'columns': return second === undefined ? { kind: 'columns', columnId: null } : id(second) ? { kind: 'columns', columnId: id(second) } : { kind: 'unknown' };
     case 'inquiries': return second === undefined ? { kind: 'inquiries', inquiryId: null } : id(second) ? { kind: 'inquiries', inquiryId: id(second) } : { kind: 'unknown' };
     case 'hr': return second === undefined ? { kind: 'hr', employeeId: null } : id(second) ? { kind: 'hr', employeeId: id(second) } : { kind: 'unknown' };
@@ -90,6 +93,7 @@ export function routePath(route: Route): string {
     case 'hr': return route.employeeId ? `/hr/${enc(route.employeeId)}` : '/hr';
     case 'columns': return route.columnId ? `/columns/${enc(route.columnId)}` : '/columns';
     case 'inquiries': return route.inquiryId ? `/inquiries/${enc(route.inquiryId)}` : '/inquiries';
+    case 'announcements': return route.announcementId ? `/announcements/${enc(route.announcementId)}` : '/announcements';
     case 'settings': return route.section ? `/settings/${enc(route.section)}` : '/settings';
     case 'help': return route.articleId ? `/help/${enc(route.articleId)}` : '/help';
   }

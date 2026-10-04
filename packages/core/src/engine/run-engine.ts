@@ -14,7 +14,7 @@ import {
   alwaysRequiresApproval, canDecide, canUseAgent, writeInternalNeedsApproval,
   type AutomationPolicy, type TenantSettings, type WritingStyle,
   type AgentDefinition, type AgentStep, type ApprovalStep, type Approval, type Run,
-  type RunStep, type Step, type ContactScope, type InventorySettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings,
+  type RunStep, type Step, type ContactScope, type InventorySettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { LlmMessage, LlmProvider, LlmResponse } from '../llm/provider.js';
@@ -40,6 +40,7 @@ import type { InventoryBookings } from '../inventory/bookings.js';
 import type { ColumnService } from '../columns/service.js';
 import type { InquiryService } from '../inquiries/service.js';
 import type { CompetitorService } from '../competitors/service.js';
+import type { AnnouncementService } from '../announcements/service.js';
 import type { LaborCalendar } from '../hr/calendar-service.js';
 import { answerOfSteps } from '../memory/work.js';
 import { substituteArguments } from '../extensions/skill.js';
@@ -165,6 +166,11 @@ export interface RunEngineDeps {
   competitors?: {
     service: CompetitorService;
     access(tenantId: string, userId: string): Promise<CompetitorSettings | null>;
+  };
+  /** お知らせの作成（内蔵の拡張。仕様書 第35章）。ツールに渡す。 */
+  announcements?: {
+    service: AnnouncementService;
+    access(tenantId: string, userId: string): Promise<AnnouncementSettings | null>;
   };
 }
 
@@ -960,6 +966,10 @@ export class RunEngine {
       ...(this.deps.competitors ? {
         competitors: { service: this.deps.competitors.service, access: () => this.deps.competitors!.access(run.tenantId, requestedBy) },
       } : {}),
+      // お知らせの作成（第35.17節）
+      ...(this.deps.announcements ? {
+        announcements: { service: this.deps.announcements.service, access: () => this.deps.announcements!.access(run.tenantId, requestedBy) },
+      } : {}),
       // 労務の期限（第30.19.1節）。人事区画の人にだけ返す
       ...(this.deps.hr ? {
         hr: { deadlines: async (days: number) => ((await this.deps.hr!.access(run.tenantId, requestedBy)) ? this.deps.hr!.calendar.list(run.tenantId, days) : null) },
@@ -1219,7 +1229,7 @@ export function needsHuman(
 }
 
 /** 送り先に関わらず、いつも人に判断を求めるツール。メールは宛先に関わらず人が見る。Web に載せるもの・問い合わせの返事も人が見る（仕様書 第9.4.0節・第32.18.1節・第33.18節）。 */
-const ALWAYS_ASK = new Set(['gmail.send', 'mail.bulk_send', 'columns.place', 'inquiries.reply_send']);
+const ALWAYS_ASK = new Set(['gmail.send', 'mail.bulk_send', 'columns.place', 'inquiries.reply_send', 'announcements.publish']);
 
 /** 承認の前の確かめで、行えないと分かった操作（記録しない。ADR-0024）。 */
 type UnableCall = {

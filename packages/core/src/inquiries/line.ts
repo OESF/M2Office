@@ -29,6 +29,14 @@ export interface LineClient {
   push(to: string, text: string): Promise<void>;
   /** 今月の通数の上限（無制限なら `null`）と、使った数。 */
   quota(): Promise<{ limit: number | null; used: number }>;
+  /**
+   * 友だち全員に送る（一斉配信。友だち 1 人に 1 通として今月の通数に数えられる。お知らせの作成 第35.6.2節）。
+   */
+  broadcast(text: string): Promise<void>;
+  /**
+   * 送れる友だちの数（ブロックした人を除く）。LINE の統計は前の日までのため、引けなければ `null`（お知らせの作成 第35.6.2節）。
+   */
+  followers(): Promise<number | null>;
 }
 
 /** LINE を使えない（預けていない・鍵が違う・LINE に届かない）。 */
@@ -88,17 +96,37 @@ export class LineApiClient implements LineClient {
     ]);
     return { limit: q.type === 'limited' ? Number(q.value ?? 0) : null, used: Number(c.totalUsage ?? 0) };
   }
+
+  async broadcast(text: string): Promise<void> {
+    await this.call('/v2/bot/message/broadcast', { method: 'POST', body: JSON.stringify({ messages: [{ type: 'text', text: text.slice(0, 5000) }] }) });
+  }
+
+  async followers(): Promise<number | null> {
+    // 統計は前の日の分まで（日本時間）。届いていなければ引けない
+    const day = new Date(Date.now() + 9 * 3_600_000 - 86_400_000).toISOString().slice(0, 10).replace(/-/g, '');
+    try {
+      const r = await this.call<{ status?: string; followers?: number; targetedReaches?: number; blocks?: number }>(`/v2/bot/insight/followers?date=${day}`);
+      if (r.status !== 'ready') return null;
+      if (typeof r.followers === 'number') return Math.max(0, r.followers - (r.blocks ?? 0));
+      return typeof r.targetedReaches === 'number' ? r.targetedReaches : null;
+    } catch {
+      return null;
+    }
+  }
 }
 
-/** 見本の口が送ったもの（会社ごと。プロセスの記憶だけ。外には何も送らない）。 */
-const mockPushed = new Map<string, { to: string; text: string }[]>();
+/** 見本の口が送ったもの（会社ごと。プロセスの記憶だけ。外には何も送らない）。一斉配信は `to` が `*` で、`count` に友だちの数。 */
+const mockPushed = new Map<string, { to: string; text: string; count?: number }[]>();
+
+/** 見本の口の友だちの数。 */
+export const MOCK_LINE_FOLLOWERS = 37;
 
 /** 開発の見本の会社の LINE。表示名は決まった見本、送ったものは記憶に置くだけ、今月の上限は 200 通。 */
 export class MockLineClient implements LineClient {
   constructor(private readonly tenantId: string) {}
 
   /** 見本の口が送ったもの（自動テストと smoke で確かめる）。 */
-  static pushed(tenantId: string): { to: string; text: string }[] {
+  static pushed(tenantId: string): { to: string; text: string; count?: number }[] {
     return [...(mockPushed.get(tenantId) ?? [])];
   }
 
@@ -122,7 +150,17 @@ export class MockLineClient implements LineClient {
   }
 
   async quota(): Promise<{ limit: number | null; used: number }> {
-    return { limit: 200, used: (mockPushed.get(this.tenantId) ?? []).length };
+    return { limit: 200, used: (mockPushed.get(this.tenantId) ?? []).reduce((n, p) => n + (p.count ?? 1), 0) };
+  }
+
+  async broadcast(text: string): Promise<void> {
+    const list = mockPushed.get(this.tenantId) ?? [];
+    list.push({ to: '*', text, count: MOCK_LINE_FOLLOWERS });
+    mockPushed.set(this.tenantId, list);
+  }
+
+  async followers(): Promise<number | null> {
+    return MOCK_LINE_FOLLOWERS;
   }
 }
 

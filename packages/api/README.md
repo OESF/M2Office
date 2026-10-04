@@ -278,6 +278,11 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/inquiries/review` | 月の振り返り（`month`: YYYY-MM。無ければ先月。数はプログラムが数える） |
 | `PUT /v1/admin/extensions/competitors/settings` | 管理者: 競合の分析で自動で覚える数（`autoMax`。1〜20）と、定期の見回りの間隔（`watch`: monthly・weekly・off）を変える。範囲の外は 400 |
 | `PUT` ／ `DELETE /v1/admin/extensions/competitors/map-key` | 管理者: 競合の分析の地図の鍵（Google Cloud の API キー。`key`）を預ける（Places API を使えるかを確かめてから。使えなければ 400 と理由。見本の会社では確かめない）／ 外す |
+| `GET` ／ `POST /v1/announcements` | お知らせの作成（仕様書 第35.17節）: 一覧 ／ 1 行の頼み（`text`）から下書きを作る（201）。使えない会社と利用範囲の外の人には、`/v1/announcements` のどの口も 403 |
+| `GET` ／ `PATCH` ／ `DELETE /v1/announcements/:id` | 1 件と出し先ごとの結果・使える出し先 ／ 下書きを直す（題名・本文・期間・予約・出し先・出し先ごとの文。下書きのときだけ）／ 削除（下書き・取り消し・終わったものだけ） |
+| `GET /v1/announcements/:id/preview` ／ `POST /v1/announcements/:id/submit` | 承認の前の確かめ（出せない理由・LINE の送る数と残り・流す画面・Web の出し方）／ 承認へ進める（付属の業務「お知らせを出す」。管理者か承認者の承認の後に出す） |
+| `POST /v1/announcements/:id/cancel` ／ `GET /v1/announcements/:id/copy` ／ `GET /v1/announcements/:id/screen.png` | 予約を取り消す ／ Web の文を写す（HTML とテキスト）／ 店頭の画面の 1 枚の見本（PNG） |
+| `GET /v1/announcements/line/status` ／ `PUT /v1/admin/extensions/announcements/settings` | LINE の友だちの数と今月の残り ／ 管理者: Web の出し方（`webPublish`: publish・draft）・カテゴリー（`webCategory`）・流す画面（`screens`） |
 | `GET /v1/competitors` | 競合の分析（仕様書 第36.18節）: 全体（自社の像・競合・動いている作業・最後の作業・地図の注意）。地図で見つけた競合の名前と Web サイトはここで引き直す。使えない会社と利用範囲の外の人には、`/v1/competitors` のどの口も 403 |
 | `POST /v1/competitors/discover` ／ `POST /v1/competitors/check` | 競合を探す作業（`radiusKm`・`nationwide`・`auto` で商圏を変える）／ 今すぐ見回る作業を受け付ける（202。ワーカーが行う。動いていれば `already`） |
 | `POST /v1/competitors` ／ `DELETE /v1/competitors/:id` | URL か店の名前で競合を入れる（`text`。トップを読めたときだけ。社内のアドレスは 400）／ 外す（次に探しても入れない） |

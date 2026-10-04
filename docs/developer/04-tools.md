@@ -27,6 +27,7 @@
 
 | ツール | 危険度 | Google の権限 | すること |
 |---|---|---|---|
+| `announcements.list` | read | — | お知らせの一覧（下書き・予約・出したもの）と、LINE の友だちの数・今月あと何通送れるかを読みます |
 | `approvals.pending` | read | — | 本人が判断できる承認待ちを見ます |
 | `brief.settings` | read | — | あなたのブリーフ（朝・週）に入れる関心の分野と、外した項目を確かめます。設定を書き換えることはしません |
 | `calendar.freebusy` | read | `calendar.readonly`（機密） | 参加者の予定の空きを調べます |
@@ -81,6 +82,9 @@
 | `sheet.render` | draft | — | 表を Excel・CSV として作り、成果物として保存します |
 | `sheets.create` | draft | `drive.file`（機密でない） | あなたのドライブに Google スプレッドシートを作ります。共有はしません |
 | `slides.create` | draft | `drive.file`（機密でない）・`drive`（制限付き） | 調べた内容をスライドにまとめ、あなたのドライブに作ります。PowerPoint 形式でも取り出せます。共有はしません |
+| `announcements.draft` | write-internal | — | 頼みから、お知らせの題名・本文・期間と、Web サイト・LINE・店頭の画面ごとの文を作ります。出すのは承認の後です |
+| `announcements.revise` | write-internal | — | いちばん新しいお知らせの下書きを、頼みに合わせて直します（書き方・予約の日時） |
+| `announcements.submit` | write-internal | — | いちばん新しいお知らせの下書きを、承認へ進めます。出すのは承認の後です |
 | `columns.cover` | write-internal | — | コラムのカバー画像を作り直します（型・AI の挿絵・会社の写真）。新しい版になるだけで、Web には出しません |
 | `columns.draft` | write-internal | — | テーマを Web で調べ、出典つきのコラムの下書きを書きます。下書きにするだけで、Web には出しません |
 | `columns.rules` | write-internal | — | コラムの赤入れで当てる表現の決まり（医療広告・薬機法・士業）を直します。管理者だけが直せます |
@@ -101,6 +105,7 @@
 | `sheets.append` | write-internal | `drive.file`（機密でない） | M2Office で作った表に行を足します |
 | `tasks.complete` | write-internal | `tasks`（機密） | ToDo を完了にします |
 | `tasks.create` | write-internal | `tasks`（機密） | ToDo を登録します |
+| `announcements.publish` | external-send | — | 承認されたお知らせを、Web サイト・LINE・店頭の画面に出します（予約があればその時刻に） |
 | `calendar.cancel` | external-send | `calendar.events`（機密） | 予定を取り消します。参加者に通知が届くため、必ず承認のあとに行います |
 | `calendar.create` | external-send | `calendar.events`（機密） | 予定を登録し、参加者を招待します。社外の人を招くときは、承認のあとに行います |
 | `calendar.update` | external-send | `calendar.events`（機密） | 予定の日時・題名・参加者を変えます。参加者に通知が届くため、必ず承認のあとに行います |
@@ -118,6 +123,7 @@
 
 | ツール | 引数 |
 |---|---|
+| `announcements.list` | なし |
 | `approvals.pending` | なし |
 | `brief.settings` | なし |
 | `calendar.freebusy` | `emails`（必須）: 参加者のメールアドレス、`from`: 期間の始まり（任意）、`to`: 期間の終わり（任意） |
@@ -172,6 +178,9 @@
 | `sheet.render` | `title`（必須）: 題名、`format`: 形式（xlsx・csv）、`columns`（必須）: 列名、`rows`（必須）: 行の配列（各行は値の配列） |
 | `sheets.create` | `title`（必須）: 題名、`columns`（必須）: 列名、`rows`: 行の配列（各行は値の配列）、`folderId`: 入れるフォルダの ID（任意） |
 | `slides.create` | `title`（必須）: 表紙の題名、`subtitle`: 副題（任意）、`slides`（必須）: 本文のスライドの配列（layout・title ほか。12 枚まで）、`sources`: 出典（title・url）の配列、`template`: 会社が登録したテンプレートの名前（任意） |
+| `announcements.draft` | `request`（必須）: 依頼者の頼み（そのまま） |
+| `announcements.revise` | `instruction`: 書き方の頼み、`publishAt`: 予約の日時（ISO 8601） |
+| `announcements.submit` | なし |
 | `columns.cover` | `column`: コラムの題名かテーマの言葉、`kind`: 背景の種類（template・ai・photo）、`hint`: 雰囲気の頼み（「もっと明るく」など）、`previous`: 作り直す前の画像に戻す |
 | `columns.draft` | `theme`（必須）: コラムのテーマ（一言。例: 「子どもの歯みがきのコツ」）、`memo`: リクエスト（書く人の希望・経験・考え。カバー画像の希望も書ける。任意） |
 | `columns.rules` | `add`: 足す決まり、`remove`: 外す決まり、`auto`: AI に任せる形に戻す |
@@ -193,6 +202,7 @@
 | `sheets.append` | `spreadsheetId`（必須）: スプレッドシートの ID、`rows`（必須）: 足す行の配列（各行は値の配列） |
 | `tasks.complete` | `taskId`（必須）: ToDo の ID |
 | `tasks.create` | `title`（必須）: ToDo の題名、`due`: 期限（YYYY-MM-DD。任意） |
+| `announcements.publish` | `announcementId`（必須）: お知らせの ID |
 | `calendar.cancel` | `eventId`（必須）: 予定の ID |
 | `calendar.create` | `title`（必須）: 予定の題名、`start`（必須）: 開始（ISO 形式）、`end`（必須）: 終了（ISO 形式）、`attendees`: 参加者のメールアドレス |
 | `calendar.update` | `eventId`（必須）: 予定の ID、`title`: 新しい題名（任意）、`start`: 新しい開始（ISO 形式。任意）、`end`: 新しい終了（任意）、`attendees`: 新しい参加者（任意） |

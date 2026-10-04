@@ -79,6 +79,9 @@ export function describeCall(call: DescribedCall, ctx: DescribeContext = {}): st
     case 'inquiries.reply_send':
       // 宛先・差出人・件名・本文は、承認の前の確かめで組み立てたもの（仕様書 第33.18節）
       return `**問い合わせの返事を、会社の窓口のアカウントから送ります**\n${call.shown ?? ''}`;
+    case 'announcements.publish':
+      // 出し先ごとの見え方・送る数・出す日時は、確かめた結果の文に入っている（第35.5節 ③）
+      return `**お知らせを出します**（Web サイトへの公開・LINE の一斉配信は社外への送信です）\n${call.shown ?? ''}`;
     case 'gmail.create_draft':
       return [`**メールの下書きを作ります**（送りません）: 宛先 ${str(a['to']) || '（なし）'}／件名「${str(a['subject']) || '（件名なし）'}」`, quote(str(a['body']))].join('\n');
     case 'calendar.create': {

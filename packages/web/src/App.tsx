@@ -7,7 +7,7 @@
  */
 
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
-import { CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, showsCaptions, type Notification, type UserSettings } from '@m2office/shared';
+import { CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, showsCaptions, type Notification, type UserSettings } from '@m2office/shared';
 import {
   addCategory, assignCategory, checkCategoryName, groupMenu, removeCategory, togglePinned, type MenuSection,
 } from './menu.js';
@@ -30,6 +30,7 @@ import { Inventory } from './Inventory.js';
 import { Columns } from './Columns.js';
 import { Inquiries } from './Inquiries.js';
 import { Competitors } from './Competitors.js';
+import { Announcements } from './Announcements.js';
 import { Signage } from './Signage.js';
 import { Hr } from './Hr.js';
 import { MyAttendance } from './MyAttendance.js';
@@ -110,6 +111,7 @@ type View =
   | { kind: 'columns'; columnId: string | null }
   | { kind: 'inquiries'; inquiryId: string | null }
   | { kind: 'competitors' }
+  | { kind: 'announcements'; announcementId: string | null }
   | { kind: 'settings'; section: SettingsSection }
   | { kind: 'help'; articleId: string | null };
 
@@ -124,6 +126,7 @@ function viewPath(v: View): string {
     case 'hr': return routePath({ kind: 'hr', employeeId: v.employeeId });
     case 'columns': return routePath({ kind: 'columns', columnId: v.columnId });
     case 'inquiries': return routePath({ kind: 'inquiries', inquiryId: v.inquiryId });
+    case 'announcements': return routePath({ kind: 'announcements', announcementId: v.announcementId });
     case 'help': return routePath({ kind: 'help', articleId: v.articleId });
     default: return routePath({ kind: v.kind });
   }
@@ -146,6 +149,7 @@ function viewOf(r: Route): View | null {
     case 'hr': return { kind: 'hr', employeeId: r.employeeId };
     case 'columns': return { kind: 'columns', columnId: r.columnId };
     case 'inquiries': return { kind: 'inquiries', inquiryId: r.inquiryId };
+    case 'announcements': return { kind: 'announcements', announcementId: r.announcementId };
     case 'help': return { kind: 'help', articleId: r.articleId };
     default: return { kind: r.kind };
   }
@@ -299,6 +303,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const inquiryChangeKey = history.filter((h) => h.job?.agentId === 'inquiries:record' && h.run.status === 'completed').map((h) => h.run.id).join(',');
   // 秘書が競合を探す・入れる・外すを終えたら、競合の分析の画面を読み直す
   const competitorChangeKey = history.filter((h) => h.job?.agentId?.startsWith('competitors:') && h.run.status === 'completed').map((h) => h.run.id).join(',');
+  // 秘書がお知らせを作り終えた・出し終えたら、お知らせの作成の画面を読み直す
+  const announcementChangeKey = history.filter((h) => h.job?.agentId?.startsWith('announcements:') && ['completed', 'failed', 'rejected', 'cancelled'].includes(h.run.status)).map((h) => `${h.run.id}:${h.run.status}`).join(',');
 
   // 実行を表示している間は詳細も追う
   useEffect(() => {
@@ -382,6 +388,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
     // Web のコラム（仕様書 第32.18.1節）。会社で入れていて利用範囲の人にだけ出す
     // 問い合わせの記録（仕様書 第33.17節）。会社で入れていて利用範囲の人にだけ出す
     ...(me.inquiries ? [{ id: INQUIRIES_EXTENSION_ID, name: '問い合わせの記録', description: '電話や来店の問い合わせを、話すか書くだけで残し、次にやることを知らせる', icon: 'chat' as IconName, agent: null }] : []),
+    // お知らせの作成（仕様書 第35.17節）。会社で入れていて利用範囲の人にだけ出す
+    ...(me.announcements ? [{ id: ANNOUNCEMENTS_EXTENSION_ID, name: 'お知らせの作成', description: '休業などのお知らせを 1 つ作り、Web サイト・LINE・店頭の画面にまとめて出す', icon: 'notifications' as IconName, agent: null }] : []),
     // 競合の分析（仕様書 第36.18節）。会社で入れていて利用範囲の人にだけ出す
     ...(me.competitors ? [{ id: COMPETITORS_EXTENSION_ID, name: '競合の分析', description: '近くの同業や同じような事業の会社を探し、公開のページから動きと違いをまとめる', icon: 'research' as IconName, agent: null }] : []),
     ...(me.webColumns ? [{ id: WEB_COLUMNS_EXTENSION_ID, name: 'コラムの作成', description: 'テーマを調べて出典つきのコラムを書き、承認して WordPress に入れる', icon: 'doc' as IconName, agent: null }] : []),
@@ -396,11 +404,12 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
         : m.id === SIGNAGE_EXTENSION_ID ? setView({ kind: 'signage' })
           : m.id === WEB_COLUMNS_EXTENSION_ID ? setView({ kind: 'columns', columnId: null })
             : m.id === INQUIRIES_EXTENSION_ID ? setView({ kind: 'inquiries', inquiryId: null })
-              : m.id === COMPETITORS_EXTENSION_ID ? setView({ kind: 'competitors' }) : setView({ kind: 'cards', contactId: null }));
+              : m.id === COMPETITORS_EXTENSION_ID ? setView({ kind: 'competitors' })
+                : m.id === ANNOUNCEMENTS_EXTENSION_ID ? setView({ kind: 'announcements', announcementId: null }) : setView({ kind: 'cards', contactId: null }));
   const isOpen = (m: MenuItem) => (m.agent ? view.kind === 'agent' && view.agent.id === m.id
     : m.id === INVENTORY_EXTENSION_ID ? view.kind === 'inventory' : m.id === HR_EXTENSION_ID ? view.kind === 'hr'
       : m.id === SIGNAGE_EXTENSION_ID ? view.kind === 'signage' : m.id === WEB_COLUMNS_EXTENSION_ID ? view.kind === 'columns'
-        : m.id === INQUIRIES_EXTENSION_ID ? view.kind === 'inquiries' : m.id === COMPETITORS_EXTENSION_ID ? view.kind === 'competitors' : view.kind === 'cards');
+        : m.id === INQUIRIES_EXTENSION_ID ? view.kind === 'inquiries' : m.id === COMPETITORS_EXTENSION_ID ? view.kind === 'competitors' : m.id === ANNOUNCEMENTS_EXTENSION_ID ? view.kind === 'announcements' : view.kind === 'cards');
   // ピン止めとカテゴリーは個人設定（メニュー）に保存し、端末をまたいで同じにする。保存に失敗したら読み直す
   const saveMenu = (saved: UserSettings['menu']) => {
     setMenu(saved);
@@ -659,6 +668,13 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
                 {...(me.webColumns ? { onColumn: async (theme: string) => { const { id } = await api.columns.create(theme, 'お客様からよく聞かれる質問です'); setView({ kind: 'columns', columnId: id }); } } : {})} />
             </>
           )}
+          {view.kind === 'announcements' && (
+            <>
+              <h1>お知らせの作成 <HelpTip article="start-announcements">休業などのお知らせを 1 つ作ると、Web サイト・LINE・店頭の画面ごとの文を作り、承認の後にまとめて出します。</HelpTip></h1>
+              <Announcements announcementId={view.announcementId} onOpen={(announcementId) => setView({ kind: 'announcements', announcementId })}
+                onApprovals={() => { void refresh(); }} changeKey={announcementChangeKey} />
+            </>
+          )}
           {view.kind === 'competitors' && (
             <>
               <h1>競合の分析 <HelpTip article="start-competitors">近くの同業や同じような事業の会社を AI が探し、公開のページから動きと違いをまとめます。</HelpTip></h1>
@@ -845,6 +861,7 @@ const VIEW_LABELS: Record<string, string> = {
   columns: 'コラムの作成',
   inquiries: '問い合わせの記録',
   competitors: '競合の分析',
+  announcements: 'お知らせの作成',
   settings: '個人設定',
 };
 

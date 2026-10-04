@@ -179,6 +179,18 @@ const ACTION_LABELS: Record<string, string> = {
   'column.wordpress_save': 'コラムの WordPress の鍵を預けた',
   'column.wordpress_remove': 'コラムの WordPress の鍵を外した',
   // 問い合わせの記録（仕様書 第33.17節。お客様の名前と用件は記録に残さない）
+  'announcement.draft': 'お知らせの下書きを作った',
+  'announcement.revise': 'お知らせを直した',
+  'announcement.submit': 'お知らせを承認へ進めた',
+  'announcement.approve': 'お知らせが承認された',
+  'announcement.schedule': 'お知らせを予約した',
+  'announcement.publish': 'お知らせを出した',
+  'announcement.web': 'お知らせを Web サイトに出した',
+  'announcement.line': 'お知らせを LINE で一斉配信した',
+  'announcement.signage': 'お知らせを店頭の画面に流した',
+  'announcement.cancel': 'お知らせの予約を取り消した',
+  'announcement.end': 'お知らせの期間の後を片付けた',
+  'announcement.remove': 'お知らせを削除した',
   'competitor.add': '競合を入れた',
   'competitor.remove': '競合を外した',
   'competitor.discover': '競合を探した',
@@ -395,6 +407,7 @@ function targetOf(e: AuditEvent, names: AuditNames): string {
     // コラムの題名は出さない（テーマは記録の詳細にある）
     case 'web_column': return id.startsWith('col-') ? `コラム ${id.slice(4, 12)}` : 'コラムの作成の設定';
     // 問い合わせはお客様の名前を出さない。ID の頭だけ
+    case 'announcement': return `お知らせ ${id.slice(4, 12)}`;
     case 'competitor': return id === 'settings' ? '競合の分析の設定' : id === 'map-key' ? '競合の分析の地図の鍵' : id === 'discover' ? '競合の分析（探す）' : id === 'all' ? '競合の分析（見回り）' : `競合の分析 ${id.slice(4, 12)}`;
     case 'inquiry': return id === 'mailbox' ? '問い合わせの窓口のアカウント' : id === 'line' ? '問い合わせの LINE 公式アカウント' : `問い合わせ ${id.slice(4, 12)}`;
     case 'tool': {

@@ -190,6 +190,19 @@ function chooseTools(tools: string[], prompt: string): Call[] {
     } }];
   }
 
+  // お知らせの作成（仕様書 第35.17節）: 下書き・直す・承認へ進める・一覧。承認の後に出す
+  if (has('announcements.publish') && instruction.includes('announcements.publish')) {
+    const id = extractField(prompt, 'announcementId');
+    if (id) return [{ name: 'announcements.publish', args: { announcementId: id } }];
+  }
+  if (has('announcements.draft') && instruction.includes('announcements.draft')) {
+    const req = extractField(prompt, 'request');
+    if (/承認へ進めて|それで出して/.test(req)) return [{ name: 'announcements.submit', args: {} }];
+    if (/友だち|何通|一覧/.test(req)) return [{ name: 'announcements.list', args: {} }];
+    if (/丁寧|短く|直して/.test(req)) return [{ name: 'announcements.revise', args: { instruction: req } }];
+    if (req) return [{ name: 'announcements.draft', args: { request: req } }];
+  }
+
   // 競合の分析（仕様書 第36.18節）: 探す・入れる・外す・見回る・動き・違い
   if (has('competitors.discover') && instruction.includes('competitors.discover')) {
     const req = extractField(prompt, 'request');

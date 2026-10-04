@@ -14,7 +14,7 @@ import { JinglePlayer } from './signage-audio.js';
 import { api, ApiError, describeError, type AccessOptions, type ExtensionView, type HrProposalField, type ScopeValue } from './api.js';
 import {
   INVENTORY_FEATURES, SIGNAGE_DEFAULT_COLOR, SIGNAGE_JINGLES, type HrSettings, type InventoryBookingSource, type InventoryFeature, type InventorySettings,
-  type SignageSettings, type SignageSound, type SignageSource, COLUMN_INDUSTRIES, COLUMN_RULE_SET_LABELS, type WebColumnSettings, type InquirySettings, COMPETITORS_AUTO_RANGE, COMPETITOR_WATCH_LABELS, competitorAutoMax, competitorWatch, competitorsMax, type CompetitorSettings,
+  type SignageSettings, type SignageSound, type SignageSource, COLUMN_INDUSTRIES, COLUMN_RULE_SET_LABELS, type WebColumnSettings, type InquirySettings, COMPETITORS_AUTO_RANGE, COMPETITOR_WATCH_LABELS, competitorAutoMax, competitorWatch, competitorsMax, type CompetitorSettings, type AnnouncementSettings,
 } from '@m2office/shared';
 import { HelpTip, Markdown } from './help.js';
 import { ScopeEditor, ScopeField, useAccessOptions } from './Scope.js';
@@ -275,6 +275,7 @@ function InstalledCard({ item: x, busy, focused = false, options, onChanged, onT
       {x.webColumns && on && <WebColumnsFields settings={x.webColumns} usage={x.columnAiUsage ?? null} busy={busy} onChanged={onChanged} />}
       {x.inquiries && on && <InquiryMailboxFields settings={x.inquiries} busy={busy} onChanged={onChanged} />}
       {x.competitors && on && <CompetitorMapKeyFields settings={x.competitors} busy={busy} onChanged={onChanged} />}
+      {x.announcements && on && <AnnouncementFields settings={x.announcements} busy={busy} onChanged={onChanged} />}
       <div className="row small">
         <button className="link" onClick={() => setOpen(!open)}>{open ? '詳細を閉じる' : '詳細'}</button>
         {/* 内蔵の拡張は削除しない。スイッチで切る（データは消えない。第12.13節） */}
@@ -657,6 +658,38 @@ function CompetitorMapKeyFields({ settings, busy, onChanged }: { settings: Compe
       <div className="row wrap">
         <input type="password" value={key} autoComplete="off" placeholder="Google Cloud の API キー（AIza…）" aria-label="地図の鍵" onChange={(e) => setKey(e.target.value)} />
         <button className="btn small" disabled={busy || working || !key.trim()} onClick={save}>{working ? '確かめています…' : settings.mapKey ? '預け直す' : '預ける'}</button>
+      </div>
+      {error && <p className="error">{error}</p>}
+    </div>
+  );
+}
+
+/**
+ * お知らせの作成の設定（仕様書 第35.4節）。Web サイト（WordPress）に公開まで行うか下書きまでか、お知らせを入れるカテゴリー。
+ * WordPress・LINE・店頭の画面は、ほかの拡張でつないだものを使う（同じ接続を 2 度預けさせない）。
+ */
+function AnnouncementFields({ settings, busy, onChanged }: { settings: AnnouncementSettings; busy: boolean; onChanged: () => void }) {
+  const [category, setCategory] = useState(settings.webCategory);
+  const [error, setError] = useState<string | null>(null);
+  const [working, setWorking] = useState(false);
+  const save = (patch: Partial<{ webPublish: 'publish' | 'draft'; webCategory: string }>) => {
+    setWorking(true);
+    api.admin.setAnnouncementSettings(patch).then(() => { setError(null); onChanged(); })
+      .catch((e) => setError(describeError(e, '変えられませんでした'))).finally(() => setWorking(false));
+  };
+  return (
+    <div className="small ext-inventory">
+      <div className="row wrap">
+        <label className="row">Web サイト
+          <select value={settings.webPublish} disabled={busy || working} aria-label="Web サイトの出し方" onChange={(e) => save({ webPublish: e.target.value as 'publish' | 'draft' })}>
+            <option value="publish">承認の後に公開まで</option>
+            <option value="draft">下書きまで</option>
+          </select>
+        </label>
+        <label className="row">カテゴリー
+          <input value={category} maxLength={40} disabled={busy || working} aria-label="WordPress のカテゴリー" onChange={(e) => setCategory(e.target.value)}
+            onBlur={() => { if (category.trim() !== settings.webCategory) save({ webCategory: category.trim() }); }} />
+        </label>
       </div>
       {error && <p className="error">{error}</p>}
     </div>
