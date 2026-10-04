@@ -23,7 +23,7 @@ export function notificationPath(n: { kind: string; runId: string | null }): str
   if (n.kind === 'competitor') return '/competitors';
   // お知らせを出せなかった出し先の知らせは、お知らせの作成を開く（第35.17節）
   if (n.kind === 'announcement') return '/announcements';
-  // Web の振り返りの月の便りは、Web の振り返りを開く（第34.18節）
+  // Web の分析の月の便りは、Web の分析を開く（第34.18節）
   if (n.kind === 'webReview') return '/web-review';
   // コラムの作成のテーマ案・予定表・予約の知らせは、コラムの作成を開く（第32.18.4節）
   if (n.kind === 'column') return '/columns';

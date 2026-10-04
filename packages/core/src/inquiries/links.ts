@@ -1,5 +1,5 @@
 /**
- * @file 問い合わせの記録からほかの拡張へのつなぎ（仕様書 第34.9節・第34.20節）。Web の振り返りの月の便りに並べる、月の問い合わせの件数。
+ * @file 問い合わせの記録からほかの拡張へのつなぎ（仕様書 第34.9節・第34.20節）。Web の分析の月の便りに並べる、月の問い合わせの件数。
  *
  * **件数だけを渡す**（プログラムが数える）。名前・用件・連絡先は渡さない（ADR-0067 決定 7）。
  * 問い合わせの記録を切っている会社では、何も返さない。
@@ -9,7 +9,7 @@ import { INQUIRY_SOURCE_UNKNOWN } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { InquiryStore } from './store.js';
 
-/** Web の振り返りから見た問い合わせの記録。 */
+/** Web の分析から見た問い合わせの記録。 */
 export interface InquiryCounts {
   /**
    * その月（`YYYY-MM`。日本時間）に届いた問い合わせの件数と、前の月の件数、どこで知ったかの内訳（多い順）。

@@ -31,7 +31,7 @@ export interface ColumnStore {
   setThemeStatus(tenantId: string, id: string, status: ColumnThemeStatus): Promise<void>;
   /** 貼るだけのページの鍵から会社を引く（ログインの無い人が読む）。無ければ `null` */
   tenantByPageKey(key: string): Promise<string | null>;
-  /** WordPress に入れたコラム（記事の ID と、公開された URL。Web の振り返りが読む。第34.19節） */
+  /** WordPress に入れたコラム（記事の ID と、公開された URL。Web の分析が読む。第34.19節） */
   placed(tenantId: string): Promise<{ id: string; title: string; wpPostId: string | null; webUrl: string | null }[]>;
   /** 承認へ進めた版の指紋（承認の後に版が変わっていないかを確かめる）。 */
   submittedDigest(tenantId: string, id: string): Promise<string | null>;

@@ -250,7 +250,7 @@ export interface TenantSettings {
   competitors: CompetitorSettings;
   /** お知らせの作成（第35章）。 */
   announcements: AnnouncementSettings;
-  /** Web の振り返り（第34章）。 */
+  /** Web の分析（第34章）。 */
   webReview: WebReviewSettings;
   /** 会社の AI の方針（第16.3.7.1節、ADR-0059）。 */
   aiPolicy: AiPolicySettings;
@@ -312,7 +312,7 @@ export const DEFAULT_TENANT_SETTINGS: TenantSettings = {
   competitors: DEFAULT_COMPETITOR_SETTINGS,
   // お知らせの作成は既定で切り（第35.2節）
   announcements: DEFAULT_ANNOUNCEMENT_SETTINGS,
-  // Web の振り返りは既定で切り（第34.2節）
+  // Web の分析は既定で切り（第34.2節）
   webReview: DEFAULT_WEB_REVIEW_SETTINGS,
   aiPolicy: { mode: 'cloud' },
 };

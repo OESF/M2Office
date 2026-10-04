@@ -22,13 +22,13 @@ import { monthSlots, slotTime, writeThemes } from './plan.js';
 
 /** ほかの拡張から来るテーマ案の材料（使っていなければ空）。 */
 export interface ColumnThemeMaterials {
-  /** 検索の言葉（Web の振り返りの合う記事が無い言葉と伸びた言葉） */
+  /** 検索の言葉（Web の分析の合う記事が無い言葉と伸びた言葉） */
   searchWords?(tenantId: string): Promise<string[]>;
   /** 競合の話題（競合の分析のいちばん新しいレポートのコラムの話題） */
   competitorThemes?(tenantId: string): Promise<string[]>;
   /** よく来る質問の話題（問い合わせの記録。誰からかは渡さない） */
   questions?(tenantId: string): Promise<string[]>;
-  /** 書き直しの案（Web の振り返りの直すべき所のうちコラムのもの） */
+  /** 書き直しの案（Web の分析の直すべき所のうちコラムのもの） */
   rewrites?(tenantId: string): Promise<{ columnId: string; theme: string; why: string }[]>;
 }
 

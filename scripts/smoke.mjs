@@ -5681,7 +5681,7 @@ console.log('\n■ 71. お知らせの作成の段 2（メール・休業の期�
   }
 }
 
-console.log('\n■ 72. Web の振り返りの段 1・段 2（担当の許可・サイトの選び方・月の便り・秘書に聞く・直すべき所。第34.18節・第34.19節）');
+console.log('\n■ 72. Web の分析の段 1・段 2（担当の許可・サイトの選び方・月の便り・秘書に聞く・直すべき所。第34.18節・第34.19節）');
 {
   const { default: pg } = await import('pg');
   const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
@@ -5700,7 +5700,7 @@ console.log('\n■ 72. Web の振り返りの段 1・段 2（担当の許可・�
   await cleanup();
   try {
     const off = await call('a', '/v1/web-review', {}, 'member');
-    off.status === 403 ? ok('Web の振り返りは既定で切り') : ng(`切っているのに使える（${off.status}）`);
+    off.status === 403 ? ok('Web の分析は既定で切り') : ng(`切っているのに使える（${off.status}）`);
     await call('a', '/v1/admin/extensions/web-review/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
     // 会社情報の Web サイト（見本の口のサイトと合う）
     await owner.query(`update tenant_settings set company = coalesce(company, '{}'::jsonb) || '{"website":"https://www.alpha.example.jp/"}'::jsonb where tenant_id = 't-alpha'`);
@@ -5811,7 +5811,7 @@ console.log('\n■ 72. Web の振り返りの段 1・段 2（担当の許可・�
     disc.status === 200 && gone?.status?.state === 'notConnected' && gone.latest?.month === month
       ? ok('外すとすぐ読まなくなり、これまでの便りは残る') : ng('外したときが違う', JSON.stringify(gone).slice(0, 300));
   } catch (err) {
-    ng('Web の振り返りの段 1 の確認が途中で止まった', String(err?.stack ?? err));
+    ng('Web の分析の段 1 の確認が途中で止まった', String(err?.stack ?? err));
   } finally {
     await cleanup();
     await owner.query(`delete from notifications where tenant_id = 't-alpha' and kind = 'webReview'`).catch(() => undefined);

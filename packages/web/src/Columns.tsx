@@ -341,7 +341,7 @@ function ColumnEditor({ id, onBack, onApprovals }: { id: string; onBack: () => v
         </div>
       )}
 
-      {/* 公開されたコラムの数字（この 28 日。Web の振り返りを使っているとき。第34.19節） */}
+      {/* 公開されたコラムの数字（この 28 日。Web の分析を使っているとき。第34.19節） */}
       {detail?.webMetrics && (
         <p className="small columns-metrics">
           {Number(detail.webMetrics.start.slice(5, 7))} 月 {Number(detail.webMetrics.start.slice(8))} 日〜{Number(detail.webMetrics.end.slice(5, 7))} 月 {Number(detail.webMetrics.end.slice(8))} 日:

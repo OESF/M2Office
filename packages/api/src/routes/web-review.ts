@@ -1,7 +1,7 @@
 /**
- * @file Web の振り返り（内蔵の拡張）の API。状態といちばん新しい月の便り・便りの一覧・月ごとの便り・直すべき所（段 2）。
+ * @file Web の分析（内蔵の拡張）の API。状態といちばん新しい月の便り・便りの一覧・月ごとの便り・直すべき所（段 2）。
  *
- * 会社が Web の振り返りを切っているときと、利用範囲の外の人には、どの口も使わせない。
+ * 会社が Web の分析を切っているときと、利用範囲の外の人には、どの口も使わせない。
  * つなぐ・外す・サイトを選ぶは管理者ページの拡張機能の口（`/v1/admin/extensions/web-review/…`）で行う。
  *
  * @see 仕様書 第34.18節 段 1 の実装の決まり
@@ -15,7 +15,7 @@ import type { AppEnv } from '../middleware/tenant.js';
 const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
 
 /**
- * Web の振り返りの API（仕様書 第34章）。
+ * Web の分析の API（仕様書 第34章）。
  *
  * @remarks 便りは集計の数字だけで、個人の情報を含まない（第34.13節）。利用範囲の中の人が見られる
  */
@@ -23,11 +23,11 @@ export function webReviewRoute(deps: AppDeps) {
   const app = new Hono<AppEnv>();
   const { service } = deps.webReview;
 
-  // Web の振り返りを使えない会社・人には、どの口も使わせない（第12.13節・第16.7.3節）
+  // Web の分析を使えない会社・人には、どの口も使わせない（第12.13節・第16.7.3節）
   app.use('*', async (c, next) => {
     const { tenant, user } = c.get('ctx');
     if (!(await deps.webReview.access(tenant.id, user.id))) {
-      return c.json({ error: 'Web の振り返りは使えません（会社で切っているか、利用範囲の外です）' }, 403);
+      return c.json({ error: 'Web の分析は使えません（会社で切っているか、利用範囲の外です）' }, 403);
     }
     await next();
   });

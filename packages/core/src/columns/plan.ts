@@ -40,7 +40,7 @@ export interface ThemeMaterials {
   audience: string;
   /** 今日（日本時間。季節を決める） */
   today: string;
-  /** 検索の言葉（Web の振り返り） */
+  /** 検索の言葉（Web の分析） */
   searchWords: string[];
   /** 競合の話題（競合の分析のコラムの話題） */
   competitorThemes: string[];

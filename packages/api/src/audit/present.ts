@@ -204,9 +204,9 @@ const ACTION_LABELS: Record<string, string> = {
   'announcement.mail': 'お知らせをメールで送り始めた',
   'announcement.closure': '休業の期間を覚えた',
   'inquiry.closure_reply': '休業中の問い合わせに返事の下書きを用意した',
-  'web_review.connect': 'Web の振り返りの担当の Google の許可をつないだ',
-  'web_review.disconnect': 'Web の振り返りの担当の Google の許可を外した',
-  'web_review.select': 'Web の振り返りで見るプロパティとサイトを選んだ',
+  'web_review.connect': 'Web の分析の担当の Google の許可をつないだ',
+  'web_review.disconnect': 'Web の分析の担当の Google の許可を外した',
+  'web_review.select': 'Web の分析で見るプロパティとサイトを選んだ',
   'web_review.report': 'Web の月の便りを作った',
   'web_review.check': 'Web の直すべき所を探した',
   'web_review.finding': 'Web の直すべき所の状態を変えた',
@@ -430,7 +430,7 @@ function targetOf(e: AuditEvent, names: AuditNames): string {
     case 'web_column': return id.startsWith('col-') ? `コラム ${id.slice(4, 12)}` : 'コラムの作成の設定';
     // 問い合わせはお客様の名前を出さない。ID の頭だけ
     case 'announcement': return `お知らせ ${id.slice(4, 12)}`;
-    case 'web_review': return 'Web の振り返り';
+    case 'web_review': return 'Web の分析';
     case 'competitor': return id === 'settings' ? '競合の分析の設定' : id === 'map-key' ? '競合の分析の地図の鍵' : id === 'discover' ? '競合の分析（探す）' : id === 'all' ? '競合の分析（見回り）' : `競合の分析 ${id.slice(4, 12)}`;
     case 'inquiry': return id === 'mailbox' ? '問い合わせの窓口のアカウント' : id === 'line' ? '問い合わせの LINE 公式アカウント' : `問い合わせ ${id.slice(4, 12)}`;
     case 'tool': {

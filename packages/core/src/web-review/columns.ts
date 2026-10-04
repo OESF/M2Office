@@ -1,5 +1,5 @@
 /**
- * @file Web の振り返りとコラムの作成のつなぎ（仕様書 第34.8節・第34.19節）。WordPress で公開されたコラムの URL を知る。
+ * @file Web の分析とコラムの作成のつなぎ（仕様書 第34.8節・第34.19節）。WordPress で公開されたコラムの URL を知る。
  *
  * コラムの作成は、承認の後に WordPress へ下書きとして入れる（公開は WordPress の側で行う）。そのため、公開されたかと URL は、
  * 見回りのときに WordPress に問い合わせて知り、`web_columns.web_url` に残す。コラムの作成を使っていない会社では何もしない。
@@ -10,7 +10,7 @@ import type { SecretBox } from '../secrets/box.js';
 import type { ColumnStore } from '../columns/store.js';
 import { getWordPressPost } from '../columns/wordpress.js';
 
-/** Web の振り返りから見たコラム。 */
+/** Web の分析から見たコラム。 */
 export interface WebReviewColumns {
   /** WordPress で公開されたコラム（URL がまだ分からないものは WordPress に問い合わせる） */
   published(tenantId: string): Promise<{ id: string; title: string; url: string }[]>;

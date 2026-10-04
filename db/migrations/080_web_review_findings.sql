@@ -1,4 +1,4 @@
--- Web の振り返りの段 2: 直すべき所とページごとの数字（仕様書 第34.19節）
+-- Web の分析の段 2: 直すべき所とページごとの数字（仕様書 第34.19節）
 -- 1. 直すべき所。同じ種類・同じ対象は 1 つにまとめ、また見つかったら数字と案を新しくする
 create table if not exists web_review_findings (
   id             text primary key,

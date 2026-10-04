@@ -1818,7 +1818,7 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .announcements-recipients { margin: 0; padding-left: 1.2em; max-height: 240px; overflow-y: auto; }
 .announcements-recipients li { margin: 2px 0; }
 .announcements-recipients button { margin-left: 8px; }
-/* Web の振り返り（仕様書 第34.18節） */
+/* Web の分析（仕様書 第34.18節） */
 .web-review { display: grid; gap: 12px; }
 .web-review-summary { white-space: pre-line; font-size: 1.05em; }
 .web-review-points { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }

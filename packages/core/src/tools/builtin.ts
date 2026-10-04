@@ -202,7 +202,7 @@ export const BUILTIN_TOOLS: Tool[] = [
   ...COMPETITOR_TOOLS,
   // お知らせの作成（内蔵の拡張。第35.17節）。会社が使っていて、依頼者が利用範囲の中のときだけ働く
   ...ANNOUNCEMENT_TOOLS,
-  // Web の振り返り（内蔵の拡張。第34.18節）。会社が使っていて、依頼者が利用範囲の中のときだけ働く
+  // Web の分析（内蔵の拡張。第34.18節）。会社が使っていて、依頼者が利用範囲の中のときだけ働く
   ...WEB_REVIEW_TOOLS,
   ...HR_TOOLS,
 ];

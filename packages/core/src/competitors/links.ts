@@ -1,7 +1,7 @@
 /**
- * @file 競合の分析からほかの拡張へのつなぎ（仕様書 第36.9節・第36.21節）。Web の振り返りが読む、月の動きの数と、話題を載せている競合の数。
+ * @file 競合の分析からほかの拡張へのつなぎ（仕様書 第36.9節・第36.21節）。Web の分析が読む、月の動きの数と、話題を載せている競合の数。
  *
- * **競合の名前は渡さない。** 数だけを渡す（地図で見つけた競合の名前は残さない決まりがあり、Web の振り返りの便りと直すべき所は残る文のため。第36.13節）。
+ * **競合の名前は渡さない。** 数だけを渡す（地図で見つけた競合の名前は残さない決まりがあり、Web の分析の便りと直すべき所は残る文のため。第36.13節）。
  * 競合の分析を切っている会社では、何も返さない。
  */
 
@@ -9,7 +9,7 @@ import { COMPETITOR_FACT_LABELS, type CompetitorFactKind } from '@m2office/share
 import type { Repository } from '../repository/types.js';
 import type { CompetitorStore } from './store.js';
 
-/** Web の振り返りから見た競合の分析。 */
+/** Web の分析から見た競合の分析。 */
 export interface CompetitorLinks {
   /**
    * その月（`YYYY-MM`。日本時間）に作ったレポートの、前の回からの動きの数（種類ごと）。

@@ -473,7 +473,7 @@ export function oauthCallbackRoute(deps: AppDeps) {
         return back(isGoogleClientError(err) ? 'client' : 'failed');
       }
     }
-    // Web の振り返りの担当の許可（仕様書 第34.18節）。本人の接続ではなく、会社の接続として預ける
+    // Web の分析の担当の許可（仕様書 第34.18節）。本人の接続ではなく、会社の接続として預ける
     if (pending.purpose === 'web-review') {
       const code = c.req.query('code');
       if (!code) return back('failed');
@@ -492,7 +492,7 @@ export function oauthCallbackRoute(deps: AppDeps) {
         await deps.webReview.service.connect({ tenantId: pending.tenantId, userId: pending.userId }, { email: info.email, refreshToken: tokens.refreshToken });
         return back('connected');
       } catch (err) {
-        deps.log.warn('Web の振り返りの許可をつなげませんでした', { tenantId: pending.tenantId, err: err instanceof Error ? err.message : String(err) });
+        deps.log.warn('Web の分析の許可をつなげませんでした', { tenantId: pending.tenantId, err: err instanceof Error ? err.message : String(err) });
         return back(isGoogleClientError(err) ? 'client' : 'failed');
       }
     }

@@ -40,7 +40,7 @@ export const AG05_WEEKLY_BRIEF: AgentDefinition = {
       type: 'agent',
       // この段で使えるツール（仕様書 第9.2.7節）。段の区切りを推論の行儀に頼らない
       // 名刺が新しくなった人（contacts.changes）は、名刺管理を使える人だけが取れる（第27.6.1節、第 0.205.0 版）
-      // Web の月の便りの要点（web_review.report）は、Web の振り返りを使える人だけが取れる（第34.4節、第 0.245.0 版）
+      // Web の月の便りの要点（web_review.report）は、Web の分析を使える人だけが取れる（第34.4節、第 0.245.0 版）
       tools: ['profile.read', 'brief.settings', 'notices.list', 'calendar.list', 'tasks.list', 'gmail.unread', 'approvals.pending', 'contacts.changes', 'web_review.report'],
       required: ['profile.read', 'brief.settings', 'notices.list'],
       label: '収集',
@@ -112,7 +112,7 @@ export const AG05_WEEKLY_BRIEF: AgentDefinition = {
         '6. 今週のイベント（前の段「今週のイベント」の結果から。日付・名前・場所・関係する分野を一行ずつ）',
         '7. 承認待ちと返事の要りそうなメール（件数と主なもの 5 件まで。広告・メールマガジン・自動送信の通知は入れない）',
         '8. 名刺が新しくなった人（【名刺】があるときだけ。「〇〇社 田中さん: 課長 → 部長」の形で 1 人 1 行。メールの署名から分かったもので、名刺管理の詳細で戻せる。【名刺】が無ければ見出しごと書かない）',
-        '9. Web の便り（【Web】があるときだけ。要約を 1〜2 行と、次にやることを 1 つ。[Web の振り返りを開く](path) を添える。数字を足したり計算したりしない。【Web】が無ければ見出しごと書かない）',
+        '9. Web の便り（【Web】があるときだけ。要約を 1〜2 行と、次にやることを 1 つ。[Web の分析を開く](path) を添える。数字を足したり計算したりしない。【Web】が無ければ見出しごと書かない）',
         '最後に、出典のリンクを 5 件までまとめる。取得できなかった項目は「取得できませんでした」と書き、「なし」と書かない。',
         'brief.settings の seededTopics が true なら、最後に一度だけ「関心の分野を「〇〇」にしました。変えたいときはお申し付けください」と添える。',
       ].join('\n'),

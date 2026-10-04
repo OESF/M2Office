@@ -537,7 +537,7 @@ export class CompetitorService {
       : written;
     const moved = subjects.flatMap((x) => movesOf(x).map((f) => ({ name: x.name, f })));
     const moves = moved.map((m) => `${m.name}: ${m.f.text}`);
-    // 変わった事実の種類ごとの数（Web の振り返りの月の便りに添える。第36.21節）
+    // 変わった事実の種類ごとの数（Web の分析の月の便りに添える。第36.21節）
     const changeKinds: Partial<Record<CompetitorFactKind, number>> = {};
     for (const { f } of moved) changeKinds[f.kind] = (changeKinds[f.kind] ?? 0) + 1;
     const report = { period: competitorPeriodOf(now), text, changes: moves.length, themes, announcementIdeas, changeKinds, createdBy: who.userId };

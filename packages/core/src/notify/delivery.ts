@@ -30,7 +30,7 @@ const KIND_LABELS: Record<string, string> = {
   inquiry: '問い合わせ',
   competitor: '競合の分析',
   announcement: 'お知らせの作成',
-  webReview: 'Web の振り返り',
+  webReview: 'Web の分析',
   column: 'コラムの作成',
 };
 

@@ -178,7 +178,7 @@ export interface RunEngineDeps {
   };
   /** その日がお知らせで出した休業の期間に入るか（予定の候補で休業日を避ける。第35.7節）。 */
   closedOn?(tenantId: string, day: string): Promise<boolean>;
-  /** Web の振り返り（内蔵の拡張。仕様書 第34章）。ツールに渡す。 */
+  /** Web の分析（内蔵の拡張。仕様書 第34章）。ツールに渡す。 */
   webReview?: {
     service: WebReviewService;
     access(tenantId: string, userId: string): Promise<WebReviewSettings | null>;
@@ -986,7 +986,7 @@ export class RunEngine {
       ...(this.deps.announcements ? {
         announcements: { service: this.deps.announcements.service, access: () => this.deps.announcements!.access(run.tenantId, requestedBy) },
       } : {}),
-      // Web の振り返り（第34.18節）
+      // Web の分析（第34.18節）
       ...(this.deps.webReview ? {
         webReview: { service: this.deps.webReview.service, access: () => this.deps.webReview!.access(run.tenantId, requestedBy) },
       } : {}),
