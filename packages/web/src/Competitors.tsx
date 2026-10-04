@@ -94,7 +94,11 @@ function Row({ c, open, onToggle, onRemove, busy }: { c: Competitor; open: boole
  *
  * @param changeKey 秘書が競合の分析を動かしたら変わる（読み直す）
  */
-export function Competitors({ changeKey = '' }: { changeKey?: string }) {
+export function Competitors({ changeKey = '', onColumn }: {
+  changeKey?: string;
+  /** コラムの話題でコラムを書き始める（コラムの作成を使える人だけに渡す） */
+  onColumn?: (theme: string) => Promise<void>;
+}) {
   const [o, setO] = useState<CompetitorOverview | null>(null);
   const [reports, setReports] = useState<CompetitorReport[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -192,6 +196,16 @@ export function Competitors({ changeKey = '' }: { changeKey?: string }) {
               {r.changes ? `（前の回から ${r.changes} 件の動き）` : ''}
             </button>
             {shownReport === r.id && <div className="competitors-report-body"><Markdown text={stripTableLinks(r.text)} lineBreaks /></div>}
+            {shownReport === r.id && r.themes.length > 0 && (
+              <div className="competitors-themes">
+                <h4>コラムの話題</h4>
+                <ul>
+                  {r.themes.map((t) => (
+                    <li key={t}>{t}{onColumn && <button className="btn ghost small" disabled={busy} onClick={() => run(() => onColumn(t), 'コラムを書き始めました', setTopNote)}>コラムにする</button>}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         ))}
       </div>

@@ -1801,3 +1801,7 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 @media (max-width: 640px) {
   .competitors-table th:nth-child(4), .competitors-table td:nth-child(4), .competitors-table th:nth-child(6), .competitors-table td:nth-child(6) { display: none; }
 }
+.competitors-themes h4 { margin: 8px 0 4px; font-size: calc(13px * var(--font-scale)); }
+.competitors-themes ul { margin: 0; padding-left: 1.2em; }
+.competitors-themes li { margin: 4px 0; }
+.competitors-themes button { margin-left: 8px; }

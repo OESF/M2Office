@@ -17,7 +17,7 @@ import type { LlmProvider } from '../llm/provider.js';
 import { silentLogger, type Logger } from '../log/logger.js';
 import { dateIn } from '../cards/service.js';
 import {
-  checkCandidates, movesOf, decideArea, extractFacts, findUrlByName, suggestCompetitors, summarizeProfile, writeReport,
+  checkCandidates, movesOf, suggestThemes, decideArea, extractFacts, findUrlByName, suggestCompetitors, summarizeProfile, writeReport,
   type AreaDecision, type Candidate, type ExtractedFact, type ReportSubject,
 } from './analyze.js';
 import { HttpPageFetcher, MockPageFetcher, checkUrl, type PageFetcher } from './fetcher.js';
@@ -47,6 +47,10 @@ export interface CompetitorServiceDeps {
   /** ページの間を空ける時間（既定 5 秒。第36.7節） */
   delayMs?: number;
   logger?: Logger;
+  /**
+   * 問い合わせの記録の「どこで知ったか」（第36.9節・第36.20節）。決まった日時より後の問い合わせのもの。問い合わせの記録を使っていなければ空
+   */
+  inquirySources?(tenantId: string, since: string): Promise<string[]>;
   /** 自動テスト用: 読む口・地図の口・待ち方の差し替え */
   fetcherFor?(tenantId: string): PageFetcher;
   placesFor?(tenantId: string): Promise<PlacesClient | null>;
@@ -522,12 +526,38 @@ export class CompetitorService {
       });
     }
     const llm = await this.deps.llmFor(who.tenantId).catch(() => null);
-    const text = await writeReport(llm, profile, subjects);
+    const names = subjects.map((x) => x.name);
+    const [written, themes, mentions] = await Promise.all([
+      writeReport(llm, profile, subjects), suggestThemes(llm, profile, subjects, names), this.inquiryMentions(who.tenantId, names, now),
+    ]);
+    // 問い合わせで名前が出た競合は、件数だけを添える（誰からの問い合わせかは入れない。第36.9節）
+    const text = mentions.length
+      ? `${written}\n\n## 問い合わせで名前が出た競合\n${mentions.map((m) => `- ${m.name}: ${m.count} 件`).join('\n')}`
+      : written;
     const moves = subjects.flatMap((x) => movesOf(x).map((f) => `${x.name}: ${f.text}`));
-    const report = { period: competitorPeriodOf(now), text, changes: moves.length, createdBy: who.userId };
+    const report = { period: competitorPeriodOf(now), text, changes: moves.length, themes, createdBy: who.userId };
     const id = await store.addReport(who.tenantId, report);
     await this.audit(who, 'competitor.report', id, { competitors: subjects.length, changes: moves.length });
     return { report: { ...report, id, createdAt: new Date().toISOString() }, highlights: moves.slice(0, 3) };
+  }
+
+  /**
+   * 前のレポートの後（無ければ 31 日）の問い合わせのうち、「どこで知ったか」に競合の名前が出たものの数（第36.9節）。
+   */
+  private async inquiryMentions(tenantId: string, names: string[], now: Date): Promise<{ name: string; count: number }[]> {
+    if (!this.deps.inquirySources) return [];
+    const [prev] = await this.deps.store.reports(tenantId, 1);
+    const since = prev?.createdAt ?? new Date(now.getTime() - 31 * 86_400_000).toISOString();
+    const sources = await this.deps.inquirySources(tenantId, since).catch(() => [] as string[]);
+    if (!sources.length) return [];
+    const out: { name: string; count: number }[] = [];
+    for (const name of names) {
+      const core = name.replace(/株式会社|有限会社|合同会社|医療法人(社団|財団)?|（.*?）|\(.*?\)|\s/g, '');
+      if (core.length < 3) continue;
+      const count = sources.filter((src) => src.replace(/\s/g, '').includes(core)).length;
+      if (count) out.push({ name, count });
+    }
+    return out;
   }
 
   // ---- 作業を行う（ワーカー） -------------------------------------------------------------

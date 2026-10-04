@@ -132,6 +132,8 @@ export interface CompetitorReport {
   text: string;
   /** 前の回から変わった事実の数 */
   changes: number;
+  /** コラムの話題の案（第36.20節。競合の名前は入れない） */
+  themes: string[];
   createdBy: string;
   createdAt: string;
 }

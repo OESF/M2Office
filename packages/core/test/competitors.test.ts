@@ -331,4 +331,28 @@ test('変わったかの見分け: 印が同じページは前の回の事実を
   assert.ok(r2!.changes >= 1, '変わったページの新しい事実を動きとして数える');
   const last = notes.filter((n) => n.userId === 'boss' && /競合の動き/.test(n.title)).at(-1);
   assert.match(last!.body, /件の動き.*見本の競合 A/);
+  // コラムの話題（第36.20節）: 動きから作り、競合の名前は入れない
+  assert.ok(r2!.themes.length >= 1, '動きがあればコラムの話題を添える');
+  assert.ok(r2!.themes.every((t) => !t.includes('見本の競合')), '話題に競合の名前を入れない');
+});
+
+test('問い合わせとのつなぎ: 「どこで知ったか」に競合の名前が出た件数だけをレポートに添える', async () => {
+  const ctx = setup();
+  const repo = (ctx.service as unknown as { deps: { repo: Repository } }).deps.repo;
+  const service = new CompetitorService({
+    store: ctx.store, repo, llmFor: async () => new StubLlmProvider(), placesKeyFor: async () => null, sourceFor: () => 'mock',
+    userAgent: 'test', fetcherFor: () => ctx.fetcher,
+    inquirySources: async () => ['見本の競合 A と比べて', 'Web 検索', '見本の競合 A の紹介', '紹介'],
+  });
+  await service.requestDiscover(who);
+  await new CompetitorWatch({ service, store: ctx.store, repo }).tick({ wait: true });
+  const [r] = await service.reports(who);
+  assert.match(r!.text, /## 問い合わせで名前が出た競合\n- 見本の競合 A: 2 件/);
+  assert.doesNotMatch(r!.text, /見本の競合 B: /, '名前が出ていない競合は書かない');
+});
+
+test('コラムの赤入れ: 他社と比べる表現（景品表示法の比較広告）を指摘する', async () => {
+  const { ruleReview } = await import('../src/columns/review.js');
+  const items = ruleReview('当店は他店より安く、地域最安です。', [], 1);
+  assert.ok(items.some((i) => /比較広告/.test(i.reason)));
 });

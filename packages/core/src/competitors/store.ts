@@ -260,15 +260,15 @@ export class PostgresCompetitorStore implements CompetitorStore {
 
   async addReport(tenantId: string, r: Omit<CompetitorReport, 'id' | 'createdAt'>): Promise<string> {
     const id = newId('crp');
-    await this.q(tenantId, 'insert into competitor_reports (id, tenant_id, period, text, changes, created_by) values ($1, $2, $3, $4, $5, $6)',
-      [id, tenantId, r.period, r.text, r.changes, r.createdBy]);
+    await this.q(tenantId, 'insert into competitor_reports (id, tenant_id, period, text, changes, themes, created_by) values ($1, $2, $3, $4, $5, $6, $7)',
+      [id, tenantId, r.period, r.text, r.changes, JSON.stringify(r.themes ?? []), r.createdBy]);
     return id;
   }
 
   async reports(tenantId: string, limit: number): Promise<CompetitorReport[]> {
-    const rows = await this.q<{ id: string; period: string; text: string; changes: number; created_by: string; created_at: Date | string }>(tenantId,
+    const rows = await this.q<{ id: string; period: string; text: string; changes: number; themes: string[] | null; created_by: string; created_at: Date | string }>(tenantId,
       'select * from competitor_reports where tenant_id = $1 order by created_at desc limit $2', [tenantId, limit]);
-    return rows.map((r) => ({ id: r.id, period: r.period, text: r.text, changes: r.changes, createdBy: r.created_by, createdAt: isoNow(r.created_at) }));
+    return rows.map((r) => ({ id: r.id, period: r.period, text: r.text, changes: r.changes, themes: r.themes ?? [], createdBy: r.created_by, createdAt: isoNow(r.created_at) }));
   }
 
   async addJob(tenantId: string, job: { kind: CompetitorJob['kind']; args: Record<string, unknown>; requestedBy: string }): Promise<string> {
