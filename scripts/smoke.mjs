@@ -5461,7 +5461,7 @@ console.log('\n■ 69. 競合の分析の段 1（探す・読む・事実・レ�
   await owner.connect();
   const { rows: saved } = await owner.query(`select tenant_id, competitors from tenant_settings where tenant_id in ('t-alpha', 't-beta')`);
   const cleanup = async () => {
-    for (const t of ['competitor_jobs', 'competitor_reports', 'competitor_facts', 'competitors', 'competitor_profiles']) {
+    for (const t of ['competitor_jobs', 'competitor_reports', 'competitor_facts', 'competitor_pages', 'competitors', 'competitor_profiles']) {
       await owner.query(`delete from ${t} where tenant_id in ('t-alpha', 't-beta')`);
     }
   };
@@ -5499,7 +5499,7 @@ console.log('\n■ 69. 競合の分析の段 1（探す・読む・事実・レ�
     facts.length > 0 && facts.every((f) => f.sourceUrl.startsWith('https://shop-a.example.jp/')) && self.length > 0
       && reports.length === 1 && /## 自社との違い/.test(reports[0].text) && /見本の競合 A/.test(reports[0].text)
       ? ok('競合と自社のサイトから事実を出典つきで取り出し、レポートを作る（名前はレポートに書いてよい）')
-      : ng('事実かレポートが違う', JSON.stringify({ facts: facts.slice(0, 2), self: self.length, reports: reports.length }).slice(0, 400));
+      : ng('事実かレポートが違う', JSON.stringify({ facts: facts.length, badSource: facts.filter((f) => !f.sourceUrl.startsWith('https://shop-a.example.jp/')).map((f) => f.sourceUrl).slice(0, 3), self: self.length, reports: reports.length, text: reports[0]?.text?.slice(0, 300) }).slice(0, 600));
 
     // ほかの会社からは見えない
     await call('b', '/v1/admin/extensions/competitors/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
@@ -5970,6 +5970,42 @@ console.log('\n■ 74. アプリの一覧を人ごとに編集する（Google �
       : ng('断るべき登録が通った', JSON.stringify([js.status, cred.status, many.status, long.status]));
   } finally {
     await put(before.launcher ?? { hidden: [], links: [] });
+  }
+}
+
+console.log('\n■ 75. 接続先の健全性（AI・Google の各サービス・会社の接続の状態。中身は持たない。第6.7.6節）');
+{
+  const { status, body } = await call('a', '/v1/admin/dashboard/live');
+  const items = body.connections ?? [];
+  const states = new Set(['ok', 'slow', 'fail', 'off']);
+  status === 200 && items.some((x) => x.target === 'ai') && ['google:gmail', 'google:calendar', 'google:tasks', 'google:chat', 'google:drive'].every((t) => items.some((x) => x.target === t))
+    && items.every((x) => states.has(x.state) && typeof x.calls === 'number' && typeof x.active === 'boolean' && x.name)
+    ? ok(`ダッシュボードに接続先を並べる（${items.length} 件。AI・Google の 5 つ・会社の接続）`) : ng('接続先が足りないか形が違う', JSON.stringify(items));
+  items.filter((x) => x.group === 'google').every((x) => x.state === 'off')
+    ? ok('見本のデータの会社では、Google を未接続として出す') : ng('見本のデータの会社で Google が未接続になっていない', JSON.stringify(items.filter((x) => x.group === 'google')));
+  const keys = new Set(items.flatMap((x) => Object.keys(x)));
+  ['target', 'group', 'name', 'state', 'active', 'calls', 'fails', 'avgMs', 'lastError'].every((k) => keys.has(k)) && keys.size === 9
+    ? ok('返すのは状態と回数・時間・失敗の種類だけ（中身や誰の呼び出しかは無い）') : ng('接続先に余計な項目がある', JSON.stringify([...keys]));
+  const member = await call('a', '/v1/admin/dashboard/connections', {}, 'member');
+  const admin = await call('a', '/v1/admin/dashboard/connections');
+  member.status === 403 && admin.status === 200 && Array.isArray(admin.body.items)
+    ? ok('接続先は管理者だけが見られる') : ng(`接続先の見られる人が違う（${member.status}・${admin.status}）`);
+  // 置き場: 会社の境界（行単位の制限）と足し込み
+  const { default: pg } = await import('pg');
+  const app = new pg.Client({ connectionString: process.env.DATABASE_URL ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office' });
+  await app.connect();
+  try {
+    const minute = new Date(Math.floor(Date.now() / 60_000) * 60_000).toISOString();
+    await app.query('begin');
+    await app.query(`select set_config('app.tenant_id', 't-beta', true)`);
+    let refused = false;
+    try {
+      await app.query(`insert into connection_health (tenant_id, target, minute, ok) values ('t-alpha', 'smoke', $1, 1)`, [minute]);
+    } catch { refused = true; }
+    await app.query('rollback');
+    refused ? ok('接続先の記録は、ほかの会社の行を書けない（行単位の制限）') : ng('ほかの会社の接続先の記録を書けた');
+  } finally {
+    await app.end();
   }
 }
 

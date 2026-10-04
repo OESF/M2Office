@@ -11,6 +11,27 @@ import {
   GOOGLE_OAUTH_ENDPOINTS, GoogleOAuthError, refreshGoogleAccessToken, type GoogleOAuthEndpoints,
 } from '../../google/oauth.js';
 import { ConnectorUnavailableError, type ConnectorPrincipal } from '../types.js';
+import { recordHealth } from '../../health/recorder.js';
+
+/** 接続先の健全性の記録に使う、サービスの呼び名（ドキュメント・スプレッドシート・スライドはドライブにまとめる。仕様書 第6.7.6節）。 */
+const HEALTH_TARGET: Record<GoogleApiName, string> = {
+  Gmail: 'google:gmail', カレンダー: 'google:calendar', ToDo: 'google:tasks', Chat: 'google:chat',
+  ドライブ: 'google:drive', ドキュメント: 'google:drive', スプレッドシート: 'google:drive', スライド: 'google:drive',
+};
+
+/**
+ * 失敗を健全性の種類に直す（仕様書 第6.7.6節）。
+ *
+ * @returns 種類。本人の事情による断り（未接続・取り消し・許可の不足）と準備中は `null`（接続先の不調に数えない）
+ */
+function healthKindOf(err: unknown): string | null {
+  if (err instanceof ConnectorUnavailableError) {
+    if (err.kind === 'not-connected' || err.kind === 'revoked' || err.kind === 'insufficient-scope' || err.kind === 'not-implemented') return null;
+    if (err.kind === 'unreachable') return /混み合/.test(err.message) ? 'busy' : 'unreachable';
+    return 'setup';
+  }
+  return 'error';
+}
 
 /** 呼び先。テストでは手元の偽の Google に向ける。 */
 export interface GoogleApiEndpoints {
@@ -184,6 +205,23 @@ export async function downloadGoogle(
  * @returns 成功した応答。`404`・`410`（と `missingOn400` の `400`）なら `null`
  */
 async function requestGoogle(
+  tokens: GoogleTokenSource, p: ConnectorPrincipal, api: GoogleApiName, url: string, init: GoogleRequestInit,
+): Promise<Response | null> {
+  // 接続先の健全性に、成否と時間だけを残す（仕様書 第6.7.6節。中身と誰の呼び出しかは残さない）
+  const started = Date.now();
+  try {
+    const res = await requestGoogleOnce(tokens, p, api, url, init);
+    recordHealth(p.tenantId, HEALTH_TARGET[api], true, Date.now() - started);
+    return res;
+  } catch (err) {
+    const kind = healthKindOf(err);
+    if (kind) recordHealth(p.tenantId, HEALTH_TARGET[api], false, Date.now() - started, kind);
+    throw err;
+  }
+}
+
+/** Google の API を 1 回呼ぶ（401・429・5xx・届かないときの 1 回の呼び直しを含む）。 */
+async function requestGoogleOnce(
   tokens: GoogleTokenSource, p: ConnectorPrincipal, api: GoogleApiName, url: string, init: GoogleRequestInit,
 ): Promise<Response | null> {
   for (let attempt = 1; ; attempt++) {

@@ -11,7 +11,7 @@
 import {
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS, GoogleDataRetention, GoogleRevocation, agentUsesGoogle,
   RunEngine, Secretary, OFFICIAL_AGENTS, buildConnector, LocalFileStore,
-  createLoggerFromEnv, HelpCatalog, parseArticle, parseManual, ExtensionHub, HttpMcpClient, loadExtensions,
+  createLoggerFromEnv, HelpCatalog, BufferedHealthSink, PostgresHealthStore, installHealthSink, type HealthStore, parseArticle, parseManual, ExtensionHub, HttpMcpClient, loadExtensions,
   TenantAiResolver, platformAi, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, ConnectionCredentials, type ConnectionAuthProvider,
   CardService, PostgresContactStore, cardsAccess, type ContactStore, BulkMailService, PostgresBulkMailStore, NoticeService, PostgresNoticeStore,
@@ -41,6 +41,8 @@ export interface AppDeps {
   auth: AuthConfig;
   /** アプリログ（開発規約 第7章）。 */
   log: Logger;
+  /** 接続先の健全性の置き場（仕様書 第6.7.6節）。ダッシュボードの「接続先」が読む。 */
+  health: HealthStore;
   /** デバッグモードの記録（仕様書 第20.4.1節「デバッグモード」）。`M2O_DEBUG=true` のときだけある。 */
   debug: DebugLog | null;
   /** ヘルプの記事（仕様書 第6.10節）。業務のマニュアルの章を含む。 */
@@ -213,6 +215,11 @@ export function buildDeps(): AppDeps {
   );
   // 秘密の値の箱。接続口（google）がリフレッシュ トークンを戻すのにも使う
   const { box, devKey } = secretBoxFromEnv();
+  // 接続先の健全性（仕様書 第6.7.6節）。呼び出しの成否と時間を手元に貯め、30 秒ごとに置き場へ流す
+  const health = new PostgresHealthStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
+  const healthSink = new BufferedHealthSink(health);
+  installHealthSink(healthSink);
+  setInterval(() => { void healthSink.flush(); }, 30_000).unref();
   // Google の側で許可が外されたときの後始末（仕様書 第6.5.2.1節 経路 2・3）。後始末の役は下で組み立ててから結び付ける
   let onGrantLost: ((tenantId: string, userId: string, refreshTokenEnc: string) => Promise<unknown>) | null = null;
   const connector = buildConnector(process.env['CONNECTOR_MODE'] ?? 'mock', {
@@ -510,7 +517,7 @@ export function buildDeps(): AppDeps {
   onGrantLost = (tenantId, userId, enc) => revocation.lostGrant(tenantId, userId, enc, new Date());
   const googleRedirect = process.env['GOOGLE_OAUTH_REDIRECT_URI'] ?? 'http://localhost:3100/v1/oauth/google/callback';
   return {
-    repo, llm, connector, files, registry, engine, secretary, auth: loadAuthConfig(), log, debug, help, helpManuals: manuals.list, retention, revocation,
+    repo, llm, connector, files, registry, engine, secretary, auth: loadAuthConfig(), log, health, debug, help, helpManuals: manuals.list, retention, revocation,
     hub, tenantView, agentsFor, canUse, isAvailable, box, ai, connections,
     onsiteTenant: ai.deployment() === 'onsite' ? (process.env['M2O_ONSITE_TENANT']?.trim() || null) : null,
     oauth: {

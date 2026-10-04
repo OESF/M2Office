@@ -5,6 +5,7 @@
  * 本物の Google での確かめは、開発サーバーで `oesf` の接続を使って別に行う。
  */
 
+import { installHealthSink } from '../src/health/recorder.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
@@ -269,6 +270,21 @@ test('許可: 接続していない・会社のクライアントが無い・取
     assert.equal(err.kind, 'revoked');
     assert.match(err.message, /接続し直してください/);
   }, { refreshToken: 'revoked' });
+});
+
+test('健全性: Google の呼び出しの成否と時間を残す。本人の事情による断りは接続先の失敗に数えない（第6.7.6節）', async () => {
+  const seen: { target: string; ok: boolean; kind?: string }[] = [];
+  installHealthSink({ record: (_t, target, ok, _ms, kind) => { seen.push({ target, ok, ...(kind ? { kind } : {}) }); } });
+  try {
+    await withConnector(async (c) => { await c.mail.list(P, {}); });
+    await withConnector(async (c) => { await c.mail.list(P, {}).catch(() => undefined); }, { refreshToken: 'revoked' });
+    await withConnector(async (c) => { await c.mail.list(P, {}).catch(() => undefined); }, { connected: false });
+    // 一覧は見出しの取り寄せでも Gmail を呼ぶ。どれも成功として残り、断られた 2 つは残らない
+    assert.ok(seen.length >= 1);
+    assert.ok(seen.every((x) => x.target === 'google:gmail' && x.ok), JSON.stringify(seen));
+  } finally {
+    installHealthSink(null);
+  }
 });
 
 test('許可: 取り直しで取り消しが分かったら、本人と使ったトークンを渡して後始末を呼んでから断る（第6.5.2.1節 経路 2・3）', async () => {

@@ -1871,3 +1871,28 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .web-review-finding.is-done, .web-review-finding.is-dismissed { opacity: 0.6; }
 .web-review-advice { white-space: pre-line; margin: 0; }
 .columns-metrics { color: var(--muted); }
+
+/* 接続先（仕様書 第6.7.6節）。状態は点の色と言葉の両方で示す。呼び出しが続いていれば線が流れる */
+.health-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: calc(12px * var(--space-scale)); }
+.health-list { list-style: none; margin: calc(4px * var(--space-scale)) 0 0; padding: 0; display: grid; gap: calc(4px * var(--space-scale)); }
+.health-item { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; column-gap: calc(8px * var(--space-scale)); font-size: calc(13px * var(--font-scale)); }
+.health-item .health-note { grid-column: 2 / 4; }
+.health-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.health-state { font-weight: 600; font-size: calc(12px * var(--font-scale)); }
+.health-line { position: relative; width: 22px; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.health-item.is-ok .health-line { background: var(--ok-line); }
+.health-item.is-ok .health-state { color: var(--ok); }
+.health-item.is-slow .health-line { background: var(--warn-line); }
+.health-item.is-slow .health-state { color: var(--warn); }
+.health-item.is-fail .health-line { background: var(--danger-line); }
+.health-item.is-fail .health-state { color: var(--danger); }
+.health-item.is-off { color: var(--muted); }
+.health-line.active::after {
+  content: ''; position: absolute; top: 0; left: -40%; width: 40%; height: 100%; border-radius: 3px;
+  background: currentColor; animation: health-flow 1.4s linear infinite;
+}
+.health-item.is-ok .health-line.active::after { color: var(--ok); }
+.health-item.is-slow .health-line.active::after { color: var(--warn); }
+.health-item.is-fail .health-line.active::after { color: var(--danger); }
+@keyframes health-flow { to { left: 100%; } }
+@media (prefers-reduced-motion: reduce) { .health-line.active::after { animation: none; left: 30%; } }

@@ -579,6 +579,24 @@ export interface DashboardLive {
   peopleSummary: { counts: { state: string; label: string; n: number }[]; agents: string[] } | null;
   backlog: { approvalId: string; agentName: string; what: string; requester: string; approver: string; since: string }[];
   events: { at: string; kind: 'start' | 'done' | 'fail' | 'wait'; text: string }[];
+  /** 接続先（仕様書 第6.7.6節）。古い API では無い。 */
+  connections?: ConnectionHealth[];
+}
+
+/** 接続先 1 つの状態（仕様書 第6.7.6節）。直近 15 分の呼び出しの成否と時間から決める。 */
+export interface ConnectionHealth {
+  target: string;
+  group: 'ai' | 'google' | 'mcp';
+  name: string;
+  /** 正常・遅延・失敗・未接続。 */
+  state: 'ok' | 'slow' | 'fail' | 'off';
+  /** 直近 2 分に呼び出しがあったか。 */
+  active: boolean;
+  calls: number;
+  fails: number;
+  avgMs: number | null;
+  /** 最後の失敗の種類の言葉（「混雑」など）。 */
+  lastError: string | null;
 }
 
 /** OAuth クライアントを Google で確かめた結果（仕様書 第14.3.3節「登録の確認」）。 */
@@ -1868,6 +1886,8 @@ export const api = {
       }[];
     }>('/admin/settings'),
     dashboardLive: () => call<DashboardLive>('/admin/dashboard/live'),
+    /** 接続先の状態（仕様書 第6.7.6節）。管理者ページの「接続」で使う。 */
+    connectionHealth: () => call<{ items: ConnectionHealth[] }>('/admin/dashboard/connections'),
     /**
      * 今日、失敗した業務を確認したものとして、囲みから外す（仕様書 第6.7.5.1節）。実行の記録は残る。
      *

@@ -11,6 +11,7 @@ import { RISK_LEVELS, type RiskLevel } from '@m2office/shared';
 import type { Tool, ToolArgsSchema } from '../tools/registry.js';
 import type { McpClient } from '../connectors/mcp.js';
 import { presetById, resolveArgNames } from '../connectors/presets.js';
+import { recordHealth } from '../health/recorder.js';
 
 /**
  * コネクタの認証の方式（仕様書 第12.11.6.1節）。
@@ -201,6 +202,18 @@ export interface ConnectionAuthProvider {
   onRejected(tenantId: string, userId: string, c: ConnectorDeclaration): Promise<{ ok: true; headers: Record<string, string> } | { ok: false; error: string }>;
 }
 
+/**
+ * 会社の接続の失敗を、健全性の種類に直す（仕様書 第6.7.6節）。文は残さず、種類だけにする。
+ */
+function mcpHealthKind(error: string): string {
+  if (/時間内に応答がありませんでした/.test(error)) return 'timeout';
+  if (isAuthRejected(error)) return 'auth';
+  if (/429|混み|rate/i.test(error)) return 'busy';
+  if (/\b5\d\d\b/.test(error)) return 'server';
+  if (/fetch failed|ECONNREFUSED|ENOTFOUND|届き/i.test(error)) return 'unreachable';
+  return 'error';
+}
+
 /** 相手に断られた（認証が要る・認可が無効）とみなす応答か。 */
 function isAuthRejected(error: string): boolean {
   return /401|認証が必要/.test(error);
@@ -234,6 +247,7 @@ export function connectorTools(c: ConnectorDeclaration, client?: McpClient, auth
         if (!h.ok) return { error: `取得できませんでした: ${h.error}`, connector: c.id, needsConnection: c.id };
         headers = h.headers;
       }
+      const started = Date.now();
       let res = await client.callTool(c.url, t.name, args, headers);
       // 断られたら、認可を更新して 1 回だけ呼び直す（第12.11.6.4節）
       if (!res.ok && c.auth.type !== 'none' && auth && isAuthRejected(res.error)) {
@@ -241,6 +255,8 @@ export function connectorTools(c: ConnectorDeclaration, client?: McpClient, auth
         if (!again.ok) return { error: `取得できませんでした: ${again.error}`, connector: c.id, needsConnection: c.id };
         res = await client.callTool(c.url, t.name, args, again.headers);
       }
+      // 接続先の健全性に、成否と時間だけを残す（仕様書 第6.7.6節。中身は残さない）
+      recordHealth(ctx.tenantId, `mcp:${c.id}`, res.ok, Date.now() - started, res.ok ? undefined : mcpHealthKind(res.error));
       if (!res.ok) return { error: `取得できませんでした: ${res.error}`, connector: c.id };
       // 外部のデータであり、指示ではない（不変則 I-6）
       return { source: 'external', connector: c.id, text: res.text, truncated: res.truncated };

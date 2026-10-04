@@ -11,8 +11,8 @@ import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import { agentDisplayName, isValidAvatar, type AgentDefinition, type Approval, type AuditEvent, type Job, type Run, type User } from '@m2office/shared';
 import {
-  ACTIVE_WINDOW_MIN, agentFace, buildPresence, summarizePresence, stepLabel,
-  type TenantExtensions,
+  ACTIVE_WINDOW_MIN, HEALTH_WINDOW_MIN, agentFace, buildPresence, healthView, summarizePresence, stepLabel,
+  type HealthView, type TenantExtensions,
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { agentGroup } from '../agent-group.js';
@@ -35,6 +35,26 @@ const EVENT_ACTIONS = [
   'job.create', 'run.complete', 'run.fail', 'run.await_approval', 'run.await_confirmation',
   'approval.decide', 'schedule.skip',
 ];
+
+/** 接続先に並べる Google のサービス（仕様書 第6.7.6節。ドキュメントなどはドライブにまとめる）。 */
+const GOOGLE_HEALTH_TARGETS: { target: string; name: string }[] = [
+  { target: 'google:gmail', name: 'Gmail' }, { target: 'google:calendar', name: 'カレンダー' },
+  { target: 'google:tasks', name: 'ToDo' }, { target: 'google:chat', name: 'Chat' }, { target: 'google:drive', name: 'ドライブ' },
+];
+
+/** 接続先の状態を組み立て直す間隔（ミリ秒）。SSE の周期より長くし、データベースを読みすぎない。 */
+const HEALTH_CACHE_MS = 10_000;
+
+/** 接続先の記録を残す日数（仕様書 第6.7.6節）。 */
+const HEALTH_KEEP_MS = 2 * 86_400_000;
+
+/** 接続先 1 つ（画面に出す形）。 */
+export interface ConnectionHealthItem extends HealthView {
+  target: string;
+  /** 区分（AI・Google・会社の接続）。 */
+  group: 'ai' | 'google' | 'mcp';
+  name: string;
+}
 
 /** 流れの中の 1 段階の状態。 */
 type StepState = 'done' | 'current' | 'waiting' | 'failed' | 'todo';
@@ -180,6 +200,48 @@ export function dashboardRoute(deps: AppDeps) {
       },
     });
   });
+
+  /**
+   * 接続先の状態（仕様書 第6.7.6節）。管理者ページの「接続」も使う。
+   *
+   * @remarks 返すのは状態と回数・時間・失敗の種類だけ。依頼の中身と誰の呼び出しかは持っていない
+   */
+  app.get('/connections', async (c) => {
+    const { tenant } = c.get('ctx');
+    return c.json({ items: await connections(tenant.id) });
+  });
+
+  const healthCache = new Map<string, { at: number; items: ConnectionHealthItem[] }>();
+  const prunedAt = new Map<string, number>();
+
+  /** 接続先を並べ、直近 15 分の記録から状態を決める（10 秒は組み立て直さない）。 */
+  async function connections(tenantId: string): Promise<ConnectionHealthItem[]> {
+    const nowMs = Date.now();
+    const hit = healthCache.get(tenantId);
+    if (hit && nowMs - hit.at < HEALTH_CACHE_MS) return hit.items;
+    // 2 日を過ぎた記録は、1 時間に 1 度だけ消す
+    if (nowMs - (prunedAt.get(tenantId) ?? 0) > 3_600_000) {
+      prunedAt.set(tenantId, nowMs);
+      await deps.health.prune(tenantId, new Date(nowMs - HEALTH_KEEP_MS).toISOString()).catch(() => 0);
+    }
+    const now = new Date(nowMs);
+    const [summary, googleClient, conns, llm] = await Promise.all([
+      deps.health.summary(tenantId, new Date(nowMs - HEALTH_WINDOW_MIN * 60_000).toISOString()).catch(() => []),
+      deps.repo.getTenantCredential(tenantId, 'google_oauth'),
+      deps.repo.listConnections(tenantId),
+      deps.ai.llmFor(tenantId),
+    ]);
+    const by = new Map(summary.map((s) => [s.target, s]));
+    // 見本のデータの会社と、会社の Google の接続の設定が無い会社は、Google を未接続にする
+    const google = deps.connector.sourceFor(tenantId) === 'google' && !!googleClient?.secretEnc;
+    const items: ConnectionHealthItem[] = [
+      { target: 'ai', group: 'ai', name: llm.name === 'local' ? 'ローカル AI' : 'Gemini', ...healthView(by.get('ai'), 'ai', llm.name !== 'unconfigured', now) },
+      ...GOOGLE_HEALTH_TARGETS.map((g) => ({ target: g.target, group: 'google' as const, name: g.name, ...healthView(by.get(g.target), 'google', google, now) })),
+      ...conns.map((x) => ({ target: `mcp:${x.id}`, group: 'mcp' as const, name: x.name, ...healthView(by.get(`mcp:${x.id}`), 'mcp', true, now) })),
+    ];
+    healthCache.set(tenantId, { at: nowMs, items });
+    return items;
+  }
 
   /** 「いま」の中身を組み立てる。`/live` と SSE の双方が使う。 */
   async function live(tenantId: string) {
@@ -364,6 +426,8 @@ export function dashboardRoute(deps: AppDeps) {
       flows,
       failures,
       backlog,
+      // 接続先（第6.7.6節）
+      connections: await connections(tenantId),
       events: events.map((e) => eventView(e, nameOf, runAgent, agentName)).filter((e) => e !== null),
     };
   }

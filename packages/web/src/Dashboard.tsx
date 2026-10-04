@@ -9,6 +9,7 @@
 
 import { useEffect, useState, type ReactNode } from 'react';
 import { api, describeError, type ChecklistItem, type DashboardLive, type DashboardStats } from './api.js';
+import { HealthList } from './health.js';
 import { HelpTip, openHelp } from './help.js';
 import { Icon } from './nav.js';
 import { busyOf, groupAgents, type AgentGroupView, type AgentLoad } from './agent-groups.js';
@@ -279,6 +280,8 @@ function Live({ board = false }: { board?: boolean }) {
       </div>
 
       <Agents data={data} board={board} />
+
+      <HealthList items={data.connections ?? []} />
 
       <div className="dash-grid">
         <section className="card">

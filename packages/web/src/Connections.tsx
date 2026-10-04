@@ -12,7 +12,8 @@
 
 import { copyText } from './clipboard.js';
 import { useEffect, useState } from 'react';
-import { api, describeError, type ConnectionSettings, type GoogleClientVerdict } from './api.js';
+import { api, describeError, type ConnectionHealth, type ConnectionSettings, type GoogleClientVerdict } from './api.js';
+import { HealthList } from './health.js';
 import { PageTitle, type PageHelp } from './help.js';
 import { SaveButton } from './save.js';
 
@@ -63,9 +64,26 @@ export function Connections({ page }: { page: string }) {
       {(page === 'google' || page === 'permissions' || page === 'people') && (
         <GoogleCard data={data.google} page={page} onSaved={() => void load()} />
       )}
+      {/* 接続の健全性（仕様書 第6.6.2節・第6.7.6節）。ダッシュボードの「接続先」と同じ記録から出す */}
+      {page === 'google' && <HealthCard group="google" />}
+      {page === 'gemini' && <HealthCard group="ai" />}
       {page === 'retention' && <RetentionCard />}
     </>
   );
+}
+
+/**
+ * 接続の健全性（仕様書 第6.6.2節）。直近 15 分の状態を、ダッシュボードの「接続先」と同じ形で出す。
+ *
+ * @param group 出す区分（Google の各サービスか AI）
+ */
+function HealthCard({ group }: { group: ConnectionHealth['group'] }) {
+  const [items, setItems] = useState<ConnectionHealth[] | null>(null);
+  useEffect(() => {
+    api.admin.connectionHealth().then((r) => setItems(r.items.filter((x) => x.group === group))).catch(() => setItems(null));
+  }, [group]);
+  if (!items || items.length === 0) return null;
+  return <HealthList items={items} />;
 }
 
 /**

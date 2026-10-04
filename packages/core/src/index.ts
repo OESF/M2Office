@@ -41,6 +41,7 @@ export * from './notify/sender.js';
 export * from './notify/delivery.js';
 export * from './retention/google-data.js';
 export * from './retention/revocation.js';
+export * from './health/index.js';
 export * from './knowledge/index.js';
 
 export {

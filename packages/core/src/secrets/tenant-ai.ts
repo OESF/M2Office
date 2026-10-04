@@ -21,6 +21,7 @@ import { StubLlmProvider } from '../llm/stub.js';
 import { AiNotConfiguredError, UnconfiguredLlmProvider, UnconfiguredResearchProvider } from '../llm/unconfigured.js';
 import { defaultGeminiModels } from '../llm/models.js';
 import type { Logger } from '../log/logger.js';
+import { observeLlm } from '../health/llm.js';
 import type { AgentDefinition, AiPolicyMode, EvalCase } from '@m2office/shared';
 import { LocalLlmProvider, type LocalLlmConfig } from '../llm/local.js';
 import {
@@ -153,8 +154,9 @@ export class TenantAiResolver {
    * クラウドの方針の会社では、会社の鍵があればその鍵、無ければ既定。
    */
   async llmFor(tenantId: string): Promise<LlmProvider> {
-    if (isLocalPolicy(await this.policyFor(tenantId))) return this.localLlm();
-    return this.cloudLlm(tenantId);
+    // 接続先の健全性に、成否と時間だけを残す（仕様書 第6.7.6節）
+    if (isLocalPolicy(await this.policyFor(tenantId))) return observeLlm(tenantId, this.localLlm());
+    return observeLlm(tenantId, await this.cloudLlm(tenantId));
   }
 
   /**
@@ -164,6 +166,15 @@ export class TenantAiResolver {
    * それ以外と、ローカルだけの会社はローカル AI
    */
   async llmForRun(
+    tenantId: string, def: AgentDefinition, registry: Pick<ToolRegistry, 'get'>, previous?: AiKind,
+  ): Promise<{ llm: LlmProvider; kind: AiKind; note?: string }> {
+    // 接続先の健全性に、成否と時間だけを残す（仕様書 第6.7.6節）
+    const r = await this.chooseForRun(tenantId, def, registry, previous);
+    return { ...r, llm: observeLlm(tenantId, r.llm) };
+  }
+
+  /** 業務の 1 回の実行に使う推論を選ぶ（{@link llmForRun} の中身）。 */
+  private async chooseForRun(
     tenantId: string, def: AgentDefinition, registry: Pick<ToolRegistry, 'get'>, previous?: AiKind,
   ): Promise<{ llm: LlmProvider; kind: AiKind; note?: string }> {
     const mode = await this.policyFor(tenantId);
