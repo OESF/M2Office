@@ -27,6 +27,7 @@
 
 | ツール | 危険度 | Google の権限 | すること |
 |---|---|---|---|
+| `announcements.closures` | read | — | 会社の営業日（曜日と祝日）と、お知らせで出した休業の期間を読みます |
 | `announcements.list` | read | — | お知らせの一覧（下書き・予約・出したもの）と、LINE の友だちの数・今月あと何通送れるかを読みます |
 | `approvals.pending` | read | — | 本人が判断できる承認待ちを見ます |
 | `brief.settings` | read | — | あなたのブリーフ（朝・週）に入れる関心の分野と、外した項目を確かめます。設定を書き換えることはしません |
@@ -123,6 +124,7 @@
 
 | ツール | 引数 |
 |---|---|
+| `announcements.closures` | なし |
 | `announcements.list` | なし |
 | `approvals.pending` | なし |
 | `brief.settings` | なし |

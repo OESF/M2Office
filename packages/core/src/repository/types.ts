@@ -819,6 +819,8 @@ export interface DecidedApproval extends Approval {
   agentId: string;
   agentVersion: number;
   requestedBy: string;
+  /** 依頼のときの業務の名前（移行 078 より前の依頼には無い） */
+  agentName?: string | null;
 }
 
 /** 監査ログの絞り込み（仕様書 第6.6.8.1節）。 */

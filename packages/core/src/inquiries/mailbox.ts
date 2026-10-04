@@ -50,7 +50,7 @@ export interface Mailbox {
   get(id: string): Promise<MailItem | null>;
   /** 差出人に使えるアドレス（本来のアドレスと、Gmail に登録した別名。小文字）。 */
   sendAs(): Promise<string[]>;
-  send(m: { from: string; to: string; subject: string; body: string; inReplyTo: string | null; references: string | null; threadId: string | null }): Promise<{ messageId: string }>;
+  send(m: { from: string; to: string; subject: string; body: string; inReplyTo: string | null; references: string | null; threadId: string | null; listUnsubscribe?: string | null }): Promise<{ messageId: string }>;
 }
 
 /** 窓口のアカウントを読めない（預けていない・許可が取り消された・Google に届かない）。 */
@@ -143,7 +143,7 @@ export class GoogleMailbox implements Mailbox {
   }
 
   async send(m: Parameters<Mailbox['send']>[0]): Promise<{ messageId: string }> {
-    const raw = buildRawMessage({ from: m.from, to: [m.to], cc: [], subject: m.subject, body: m.body, inReplyTo: m.inReplyTo, references: m.references });
+    const raw = buildRawMessage({ from: m.from, to: [m.to], cc: [], subject: m.subject, body: m.body, inReplyTo: m.inReplyTo, references: m.references, ...(m.listUnsubscribe ? { listUnsubscribe: m.listUnsubscribe } : {}) });
     const r = await this.call<{ id: string }>('/messages/send', { method: 'POST', body: JSON.stringify({ raw, ...(m.threadId ? { threadId: m.threadId } : {}) }) });
     return { messageId: r.id };
   }

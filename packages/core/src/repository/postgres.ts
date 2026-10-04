@@ -178,10 +178,10 @@ export class PostgresRepository implements Repository {
   async createJob(job: Job): Promise<void> {
     await this.q(job.tenantId, 
       `insert into jobs (id, tenant_id, agent_id, agent_version, requested_by,
-                         origin, input, created_at, plan_step_id)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+                         origin, input, created_at, plan_step_id, agent_name)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
       [job.id, job.tenantId, job.agentId, job.agentVersion, job.requestedBy,
-       job.origin, JSON.stringify(job.input), job.createdAt, job.planStepId ?? null],
+       job.origin, JSON.stringify(job.input), job.createdAt, job.planStepId ?? null, job.agentName ?? null],
     );
   }
 
@@ -189,7 +189,7 @@ export class PostgresRepository implements Repository {
     const rows = await this.q<Job>(tenantId, 
       `select id, tenant_id as "tenantId", agent_id as "agentId",
               agent_version as "agentVersion", requested_by as "requestedBy",
-              origin, input, created_at as "createdAt", plan_step_id as "planStepId"
+              origin, input, created_at as "createdAt", plan_step_id as "planStepId", agent_name as "agentName"
          from jobs where tenant_id = $1 and id = $2`,
       [tenantId, jobId],
     );
@@ -388,7 +388,8 @@ export class PostgresRepository implements Repository {
               a.approver_role as "approverRole", a.approver_user_id as "approverUserId", a.present,
               a.decision, a.decided_by as "decidedBy", a.comment, a.decided_at as "decidedAt",
               a.created_at as "createdAt",
-              s.run_id as "runId", j.agent_id as "agentId", j.agent_version as "agentVersion", j.requested_by as "requestedBy"
+              s.run_id as "runId", j.agent_id as "agentId", j.agent_version as "agentVersion", j.requested_by as "requestedBy",
+              j.agent_name as "agentName"
          from approvals a
          join run_steps s on s.id = a.run_step_id
          join runs r on r.id = s.run_id and r.tenant_id = a.tenant_id
@@ -1604,7 +1605,7 @@ export class PostgresRepository implements Repository {
               json_build_object(
                 'id', j.id, 'tenantId', j.tenant_id, 'agentId', j.agent_id,
                 'agentVersion', j.agent_version, 'requestedBy', j.requested_by,
-                'origin', j.origin, 'input', '{}'::jsonb, 'createdAt', j.created_at) as job
+                'origin', j.origin, 'input', '{}'::jsonb, 'createdAt', j.created_at, 'agentName', j.agent_name) as job
          from runs r join jobs j on j.id = r.job_id and j.tenant_id = r.tenant_id
         where r.tenant_id = $1
           and (r.status in ('queued', 'running', 'awaiting_approval')

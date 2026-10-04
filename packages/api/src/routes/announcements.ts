@@ -100,6 +100,13 @@ export function announcementsRoute(deps: AppDeps) {
     return c.json({ ok: true });
   });
 
+  /** メールの宛先（名刺管理の連絡先の名前とアドレス）。 */
+  app.get('/:id/recipients', async (c) => {
+    const id = c.req.param('id');
+    if (!ID.test(id)) return c.json({ error: 'お知らせが見つかりません' }, 404);
+    return c.json({ recipients: await service.mailRecipients(who(c), id) });
+  });
+
   /** WordPress が無い会社が写して使う文（HTML とテキスト）。 */
   app.get('/:id/copy', async (c) => {
     const id = c.req.param('id');

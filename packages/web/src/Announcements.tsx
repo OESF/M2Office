@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   ANNOUNCEMENT_CHANNELS, ANNOUNCEMENT_CHANNEL_LABELS, ANNOUNCEMENT_LINE_MAX, ANNOUNCEMENT_STATUS_LABELS,
-  type Announcement, type AnnouncementChannel, type AnnouncementDetail, type AnnouncementPreview, type AnnouncementTexts,
+  type Announcement, type AnnouncementChannel, type AnnouncementDetail, type AnnouncementPreview, type AnnouncementRecipient, type AnnouncementTexts,
 } from '@m2office/shared';
 import { api, describeError } from './api.js';
 import { copyText } from './clipboard.js';
@@ -83,7 +83,8 @@ function List({ onOpen, changeKey }: { onOpen: (id: string) => void; changeKey: 
 function Detail({ id, onBack, onApprovals, changeKey }: { id: string; onBack: () => void; onApprovals: () => void; changeKey: string }) {
   const [d, setD] = useState<AnnouncementDetail | null>(null);
   const [p, setP] = useState<AnnouncementPreview | null>(null);
-  const [edit, setEdit] = useState<{ title: string; startDate: string; endDate: string; publishAt: string; channels: AnnouncementChannel[]; texts: AnnouncementTexts } | null>(null);
+  const [edit, setEdit] = useState<{ title: string; startDate: string; endDate: string; publishAt: string; channels: AnnouncementChannel[]; texts: AnnouncementTexts; mailContactIds: string[] } | null>(null);
+  const [recipients, setRecipients] = useState<AnnouncementRecipient[]>([]);
   const [tab, setTab] = useState<AnnouncementChannel>('web');
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<Note>(null);
@@ -92,7 +93,8 @@ function Detail({ id, onBack, onApprovals, changeKey }: { id: string; onBack: ()
     api.announcements.get(id).then((r) => {
       setD(r);
       const a = r.announcement;
-      setEdit({ title: a.title, startDate: a.startDate ?? '', endDate: a.endDate ?? '', publishAt: toLocal(a.publishAt), channels: a.channels, texts: a.texts });
+      setEdit({ title: a.title, startDate: a.startDate ?? '', endDate: a.endDate ?? '', publishAt: toLocal(a.publishAt), channels: a.channels, texts: a.texts, mailContactIds: a.mailContactIds });
+      if (a.mailContactIds.length) api.announcements.recipients(id).then((x) => setRecipients(x.recipients)).catch(() => setRecipients([]));
       if (a.channels.length && !a.channels.includes(tab)) setTab(a.channels[0]!);
       if (a.status === 'draft') api.announcements.preview(id).then(setP).catch(() => setP(null));
       else setP(null);
@@ -106,7 +108,7 @@ function Detail({ id, onBack, onApprovals, changeKey }: { id: string; onBack: ()
   const editable = a.status === 'draft';
   const save = async () => {
     await api.announcements.update(id, {
-      title: edit.title, startDate: edit.startDate || null, endDate: edit.endDate || null, publishAt: fromLocal(edit.publishAt), channels: edit.channels, texts: edit.texts,
+      title: edit.title, startDate: edit.startDate || null, endDate: edit.endDate || null, publishAt: fromLocal(edit.publishAt), channels: edit.channels, texts: edit.texts, mailContactIds: edit.mailContactIds,
     });
   };
   const run = (fn: () => Promise<unknown>, ok: string) => {
@@ -166,6 +168,21 @@ function Detail({ id, onBack, onApprovals, changeKey }: { id: string; onBack: ()
           <div className="announcements-line-bubble">{edit.texts.line}</div>
         </div>
       )}
+      {tab === 'mail' && edit.channels.includes('mail') && (
+        <div className="card announcements-channel">
+          <label>件名<input value={edit.texts.mail.subject} maxLength={200} disabled={!editable} onChange={(e) => setTexts({ mail: { ...edit.texts.mail, subject: e.target.value } })} /></label>
+          <label>本文<textarea rows={8} value={edit.texts.mail.body} disabled={!editable} onChange={(e) => setTexts({ mail: { ...edit.texts.mail, body: e.target.value } })} /></label>
+          <h4>宛先（{edit.mailContactIds.length} 人）</h4>
+          <ul className="announcements-recipients">
+            {recipients.filter((r) => edit.mailContactIds.includes(r.contactId)).map((r) => (
+              <li key={r.contactId}>
+                {r.name}{r.company ? `（${r.company}）` : ''} <span className="small muted">{r.email}</span>
+                {editable && <button className="link small" onClick={() => setEdit({ ...edit, mailContactIds: edit.mailContactIds.filter((x) => x !== r.contactId) })}>削除</button>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {tab === 'signage' && edit.channels.includes('signage') && (
         <div className="card announcements-channel">
           <div className="row wrap">
@@ -188,6 +205,7 @@ function Detail({ id, onBack, onApprovals, changeKey }: { id: string; onBack: ()
                   {ANNOUNCEMENT_CHANNEL_LABELS[c]}: {o.status === 'done' ? '出しました' : o.status === 'waiting' ? '予約' : o.status === 'ended' ? '期間が終わりました' : '出せませんでした'}
                   {o.result.link && <> <a href={o.result.link} target="_blank" rel="noopener noreferrer">記事を開く</a></>}
                   {o.result.sent !== undefined && `（${o.result.sent} 人に送りました）`}
+                  {o.result.queued !== undefined && `（${o.result.queued} 人に 1 通ずつ送っています）`}
                   {o.result.screens?.length ? `（${o.result.screens.join('・')}）` : ''}
                   {o.reason && <span className="small muted">　{o.reason}</span>}
                 </li>

@@ -11,7 +11,7 @@ import {
   type Repository, type TenantCredential, type ToolContext,
 } from '../src/index.js';
 
-function setup() {
+function setup(opts: { closureOn?: (tenantId: string, day: string) => Promise<{ startDate: string; endDate: string } | null> } = {}) {
   MockMailbox.clear();
   let settings: TenantSettings = { ...DEFAULT_TENANT_SETTINGS, inquiries: { enabled: true, mailbox: null } };
   const creds = new Map<string, TenantCredential>();
@@ -40,6 +40,7 @@ function setup() {
   const service = new InquiryService({
     store, repo, llmFor: async () => new StubLlmProvider(),
     mailbox: { repo, box: { encrypt: (s: string) => `enc:${s}`, decrypt: (s: string) => s.slice(4) } as never, sourceFor: () => 'mock' },
+    ...(opts.closureOn ? { closureOn: opts.closureOn } : {}),
   });
   return { service, store, repo, notes, audits, settings: () => settings, creds };
 }
@@ -189,4 +190,23 @@ test('ツール: 朝のブリーフは本人が担当の期限と返事待ちを
   assert.match(prepared.shown ?? '', /宛先: sasaki@example.net/);
   assert.equal(prepared.audience, 'external');
   assert.equal(sentSummary({ subject: 's', body: 'お世話になります。\n> 前のメール' } as never), 'お世話になります。');
+});
+
+test('休業中に届いた問い合わせ: 「〇日から順にお返事します」の返事の下書きを用意する（送るのは承認の後。第35.7節）', async () => {
+  const { service, store, audits } = setup({ closureOn: async () => ({ startDate: '2026-12-28', endDate: '2027-01-05' }) });
+  await service.connectMailbox(admin, { email: 'info@alpha.example.jp', refreshToken: null });
+  await service.ingest('t1');
+  const direct = (await service.list(member, { status: 'open' })).find((i) => i.channel === 'mail')!;
+  const replies = await store.replies('t1', direct.id);
+  assert.equal(replies.length, 1, '下書きを 1 つ用意する');
+  assert.equal(replies[0]!.status, 'draft', '送らない');
+  assert.match(replies[0]!.body, /12 月 28 日（月）〜1 月 5 日（火）は休業/);
+  assert.match(replies[0]!.body, /1 月 6 日（水）から順にお返事/);
+  assert.ok(audits.some((a) => a.action === 'inquiry.closure_reply'));
+  // 休業でなければ下書きを作らない
+  const { service: s2, store: st2 } = setup({ closureOn: async () => null });
+  await s2.connectMailbox(admin, { email: 'info@alpha.example.jp', refreshToken: null });
+  await s2.ingest('t1');
+  const d2 = (await s2.list(member, { status: 'open' })).find((i) => i.channel === 'mail')!;
+  assert.equal((await st2.replies('t1', d2.id)).length, 0);
 });

@@ -25,3 +25,4 @@ export * from './types/competitors.js';
 export * from './types/announcements.js';
 export * from './text/internal-ids.js';
 export * from './text/paths.js';
+export * from './text/agent-name.js';

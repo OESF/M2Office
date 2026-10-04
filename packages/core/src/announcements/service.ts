@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   ANNOUNCEMENTS_EXTENSION_ID, ANNOUNCEMENT_CHANNELS, ANNOUNCEMENT_CHANNEL_LABELS, ANNOUNCEMENT_LINE_MAX, ANNOUNCEMENT_SIGNAGE_DAYS, canUseAgent,
-  type Announcement, type AnnouncementChannel, type AnnouncementDetail, type AnnouncementOutput, type AnnouncementPreview, type AnnouncementSettings, type AnnouncementTexts,
+  type Announcement, type AnnouncementChannel, type AnnouncementDetail, type AnnouncementOutput, type AnnouncementPreview, type AnnouncementRecipient, type AnnouncementSettings, type AnnouncementTexts,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { LlmProvider } from '../llm/provider.js';
@@ -24,6 +24,7 @@ import { openLine, LineUnavailableError, type LineDeps } from '../inquiries/line
 import { periodText, writeDraft } from './draft.js';
 import { renderScreenCard } from './screen-image.js';
 import type { AnnouncementPatch, AnnouncementStore, StoredAnnouncement } from './store.js';
+import type { AnnouncementMail } from './mail.js';
 
 /** 店頭の画面（店頭サイネージ）とのつなぎ。 */
 export interface AnnouncementSignage {
@@ -49,6 +50,8 @@ export interface AnnouncementServiceDeps {
   line?: LineDeps;
   /** 店頭の画面 */
   signage?: AnnouncementSignage;
+  /** メール（名刺管理のまとめてのメール。段 2） */
+  mail?: AnnouncementMail;
   /** 承認へ進める（付属の業務「お知らせを出す」を始める）。実行の ID を返す */
   submitter?(tenantId: string, userId: string, announcementId: string): Promise<string>;
   /** 実行の状態（承認待ちのまま却下・失敗したら下書きに戻すため） */
@@ -81,8 +84,8 @@ export function announcementsAccess(repo: Repository) {
 }
 
 /** 承認した中身の指紋（題名・本文・期間・予約・出し先・出し先ごとの文）。 */
-export function announcementDigest(a: Pick<StoredAnnouncement, 'title' | 'body' | 'startDate' | 'endDate' | 'publishAt' | 'channels' | 'texts'>): string {
-  return createHash('sha256').update(JSON.stringify([a.title, a.body, a.startDate, a.endDate, a.publishAt, [...a.channels].sort(), a.texts])).digest('hex').slice(0, 32);
+export function announcementDigest(a: Pick<StoredAnnouncement, 'title' | 'body' | 'startDate' | 'endDate' | 'publishAt' | 'channels' | 'texts' | 'mailContactIds'>): string {
+  return createHash('sha256').update(JSON.stringify([a.title, a.body, a.startDate, a.endDate, a.publishAt, [...a.channels].sort(), a.texts, [...(a.mailContactIds ?? [])].sort()])).digest('hex').slice(0, 32);
 }
 
 /** 期間の後の Web の題名。 */
@@ -128,11 +131,12 @@ export class AnnouncementService {
   }
 
   /** いま使える出し先。Web は WordPress が無くても、文を写して使える。 */
-  async available(tenantId: string): Promise<{ channels: Record<AnnouncementChannel, boolean>; wordpress: boolean }> {
+  async available(tenantId: string, userId = ''): Promise<{ channels: Record<AnnouncementChannel, boolean>; wordpress: boolean }> {
     const settings = await this.deps.repo.getTenantSettings(tenantId);
     const line = !!settings.inquiries.line && !!this.deps.line && !!(await openLine(this.deps.line, tenantId).catch(() => null));
     const signage = !!this.deps.signage && (await this.deps.signage.enabled(tenantId).catch(() => false)) && (await this.deps.signage.screens(tenantId).catch(() => [])).length > 0;
-    return { channels: { web: true, line, signage }, wordpress: !!(await this.wordpress(tenantId)) };
+    const mail = !!this.deps.mail && !!userId && (await this.deps.mail.available(tenantId, userId).catch(() => false));
+    return { channels: { web: true, line, signage, mail }, wordpress: !!(await this.wordpress(tenantId)) };
   }
 
   private async names(tenantId: string): Promise<Map<string, string>> {
@@ -166,7 +170,10 @@ export class AnnouncementService {
     const text = request.trim().slice(0, 2000);
     if (!text) return { error: 'どんなお知らせかを書いてください' };
     const settings = await this.deps.repo.getTenantSettings(who.tenantId);
-    const avail = await this.available(who.tenantId);
+    const avail = await this.available(who.tenantId, who.userId);
+    // メールの宛先の案（取引先・最近のお客様）。案が無ければメールを出し先に入れない
+    const suggested = avail.channels.mail && this.deps.mail ? await this.deps.mail.suggest(who.tenantId, who.userId).catch(() => []) : [];
+    if (!suggested.length) avail.channels.mail = false;
     const llm = await this.deps.llmFor(who.tenantId).catch(() => null);
     const tenant = await this.deps.repo.findTenantById(who.tenantId).catch(() => null);
     const d = await writeDraft(llm, {
@@ -175,7 +182,7 @@ export class AnnouncementService {
       selfReference: settings.writingStyle.selfReference,
       available: ANNOUNCEMENT_CHANNELS.filter((c) => avail.channels[c]),
     });
-    const id = await this.deps.store.create(who.tenantId, { ...d, createdBy: who.userId });
+    const id = await this.deps.store.create(who.tenantId, { ...d, mailContactIds: d.channels.includes('mail') ? suggested.map((r) => r.contactId) : [], createdBy: who.userId });
     await this.audit(who, 'announcement.draft', id, { channels: d.channels });
     const a = (await this.deps.store.get(who.tenantId, id))!;
     return { announcement: this.toView(a, await this.names(who.tenantId)) };
@@ -194,7 +201,7 @@ export class AnnouncementService {
     const raw = await this.deps.store.get(who.tenantId, id);
     if (!raw) return null;
     const a = await this.sync(who.tenantId, raw);
-    const avail = await this.available(who.tenantId);
+    const avail = await this.available(who.tenantId, who.userId);
     return { announcement: this.toView(a, await this.names(who.tenantId)), outputs: await this.deps.store.outputs(who.tenantId, id), available: avail.channels, wordpress: avail.wordpress };
   }
 
@@ -204,7 +211,7 @@ export class AnnouncementService {
    * @returns 直せなければ理由
    */
   async update(who: AnnouncementViewer, id: string, patch: Partial<{
-    title: string; body: string; startDate: string | null; endDate: string | null; publishAt: string | null; channels: string[]; texts: Partial<AnnouncementTexts>;
+    title: string; body: string; startDate: string | null; endDate: string | null; publishAt: string | null; channels: string[]; texts: Partial<AnnouncementTexts>; mailContactIds: string[];
   }>): Promise<string | null> {
     const a = await this.deps.store.get(who.tenantId, id);
     if (!a) return 'お知らせが見つかりません';
@@ -241,7 +248,12 @@ export class AnnouncementService {
           period: String(t.signage?.period ?? a.texts.signage.period).slice(0, 60),
           note: String(t.signage?.note ?? a.texts.signage.note).slice(0, 40),
         },
+        mail: { subject: String(t.mail?.subject ?? a.texts.mail.subject).slice(0, 200), body: String(t.mail?.body ?? a.texts.mail.body).slice(0, 20_000) },
       };
+    }
+    if (patch.mailContactIds !== undefined) {
+      if (!Array.isArray(patch.mailContactIds)) return 'メールの宛先の形が違います';
+      next.mailContactIds = [...new Set(patch.mailContactIds.map(String).filter(Boolean))].slice(0, 200);
     }
     await this.deps.store.update(who.tenantId, id, next);
     return null;
@@ -307,7 +319,7 @@ export class AnnouncementService {
     const a = await this.deps.store.get(who.tenantId, id);
     if (!a) return null;
     const settings = (await this.deps.repo.getTenantSettings(who.tenantId)).announcements;
-    const avail = await this.available(who.tenantId);
+    const avail = await this.available(who.tenantId, who.userId);
     const problems: string[] = [];
     if (a.channels.length === 0) problems.push('出し先がありません');
     if (!a.title.trim()) problems.push('題名がありません');
@@ -332,7 +344,14 @@ export class AnnouncementService {
     const web = !a.channels.includes('web') ? '' : !avail.wordpress ? 'WordPress につないでいないため、承認の後に文を写して使う'
       : settings.webPublish === 'draft' ? `WordPress（${wp?.siteUrl}）に下書きとして入れる`
         : a.publishAt ? `WordPress（${wp?.siteUrl}）に予約公開で入れる` : `WordPress（${wp?.siteUrl}）に公開する`;
-    return { id, digest: announcementDigest(a), problems, line, screens: screens.map((s) => s.name), web };
+    let mail: AnnouncementPreview['mail'] = null;
+    if (a.channels.includes('mail') && this.deps.mail) {
+      mail = { count: a.mailContactIds.length, from: await this.deps.mail.sender(who.tenantId) };
+      if (a.mailContactIds.length === 0) problems.push('メールの宛先がいません');
+      else if (a.mailContactIds.length > 100) problems.push(`メールの宛先が 100 人を超えています（${a.mailContactIds.length} 人）。削除してから承認へ進めてください`);
+      if (!a.texts.mail.subject.trim() || !a.texts.mail.body.trim()) problems.push('メールの件名と本文を入れてください');
+    }
+    return { id, digest: announcementDigest(a), problems, line, screens: screens.map((s) => s.name), web, mail };
   }
 
   /** 承認へ進める（付属の業務「お知らせを出す」を始める）。 */
@@ -391,7 +410,7 @@ export class AnnouncementService {
     const failed: string[] = [];
     for (const c of a.channels) {
       if (done(c)) continue;
-      const r = c === 'web' ? await this.publishWeb(who, a, false) : c === 'line' ? await this.publishLine(who, a) : await this.publishSignage(who, a);
+      const r = c === 'web' ? await this.publishWeb(who, a, false) : c === 'line' ? await this.publishLine(who, a) : c === 'mail' ? await this.publishMail(who, a) : await this.publishSignage(who, a);
       if (r) failed.push(`${ANNOUNCEMENT_CHANNEL_LABELS[c]}: ${r}`);
     }
     await this.deps.store.update(who.tenantId, a.id, { status: 'published', publishedAt: now.toISOString() });
@@ -454,6 +473,29 @@ export class AnnouncementService {
     await this.deps.store.setOutput(who.tenantId, a.id, 'line', { status: 'done', result: { sent: followers }, reason: '', doneAt: at });
     await this.audit(who, 'announcement.line', a.id, { sent: followers });
     return null;
+  }
+
+  /** メールで送る（名刺管理のまとめてのメール。送るのはワーカーが 1 通ずつ。第35.6.3節）。 */
+  private async publishMail(who: AnnouncementViewer, a: StoredAnnouncement): Promise<string | null> {
+    const at = new Date().toISOString();
+    const fail = async (reason: string) => {
+      await this.deps.store.setOutput(who.tenantId, a.id, 'mail', { status: 'failed', result: {}, reason, doneAt: at });
+      return reason;
+    };
+    if (!this.deps.mail) return fail('メールを送る仕組みがありません');
+    // 送るのは作った人の名前で（予約の時刻に仕組みが出すときも同じ）
+    const r = await this.deps.mail.send(who.tenantId, who.userId === SYSTEM ? a.createdBy : who.userId, { contactIds: a.mailContactIds, subject: a.texts.mail.subject, body: a.texts.mail.body });
+    if ('error' in r) return fail(r.error);
+    await this.deps.store.setOutput(who.tenantId, a.id, 'mail', { status: 'done', result: { bulkMailId: r.bulkMailId, queued: r.queued }, reason: r.excluded ? `${r.excluded} 人は除きました（配信の停止・アドレス無しなど）` : '', doneAt: at });
+    await this.audit(who, 'announcement.mail', a.id, { queued: r.queued, excluded: r.excluded });
+    return null;
+  }
+
+  /** メールの宛先（画面に出す）。 */
+  async mailRecipients(who: AnnouncementViewer, id: string): Promise<AnnouncementRecipient[]> {
+    const a = await this.deps.store.get(who.tenantId, id);
+    if (!a || !this.deps.mail) return [];
+    return this.deps.mail.recipients(who.tenantId, who.userId, a.mailContactIds);
   }
 
   /** 流す画面（会社の設定。無ければすべて）。 */
@@ -557,6 +599,20 @@ export class AnnouncementService {
     const limit = quota?.limit ?? null;
     const used = quota?.used ?? 0;
     return { followers, limit, used, remaining: limit === null ? null : Math.max(0, limit - used) };
+  }
+
+  /**
+   * 会社の営業日と、これからの休業の期間（秘書の「年末は何日まで営業？」に答える。第35.7節）。
+   */
+  async closures(tenantId: string, now = new Date()): Promise<{ businessDays: string; holidaysClosed: boolean; closures: { period: string; startDate: string; endDate: string }[] }> {
+    const settings = await this.deps.repo.getTenantSettings(tenantId);
+    const days = settings.company.businessDays?.length ? settings.company.businessDays : [1, 2, 3, 4, 5];
+    const list = await this.deps.store.closuresFrom(tenantId, dateIn('Asia/Tokyo', now));
+    return {
+      businessDays: days.map((d) => '日月火水木金土'[d]).join('・'),
+      holidaysClosed: settings.company.holidaysClosed ?? true,
+      closures: list.map((c) => ({ ...c, period: periodText(c.startDate, c.endDate) })),
+    };
   }
 
   /** WordPress が無い会社が写して使う文（HTML とテキスト）。 */

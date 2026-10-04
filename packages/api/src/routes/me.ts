@@ -7,6 +7,7 @@
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import {
+  agentDisplayName,
   BRIEF_SECTIONS, WEEKLY_SECTIONS, VOICE_CHOICES, VOICE_STYLE_MAX, isValidAvatar, type UserSettings, type MenuCategory,
   CARDS_EXTENSION_ID, HR_EXTENSION_ID, SIGNAGE_EXTENSION_ID, INVENTORY_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, MENU_CATEGORY_MAX, MENU_CATEGORY_NAME_MAX,
 } from '@m2office/shared';
@@ -348,7 +349,7 @@ export function meRoute(deps: AppDeps) {
       now, users: [user], sessions, liveRuns: mine, stepsByRun, pending,
       secretaryEvents: secretaryEvents.map((e) => ({ actorId: e.actorId, occurredAt: e.occurredAt })),
       voiceEvents: voiceEvents.map((e) => ({ actorId: e.actorId, occurredAt: e.occurredAt, targetId: e.targetId })),
-      agentName: (id) => view.allAgents.find((a) => a.id === id)?.name ?? id,
+      agentName: (id) => agentDisplayName(view.allAgents.find((a) => a.id === id)?.name, id),
     });
     return c.json({
       presence,

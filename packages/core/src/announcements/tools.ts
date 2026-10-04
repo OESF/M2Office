@@ -156,12 +156,15 @@ export const announcementsPublish: Tool = {
     if (!p || !d) return { kind: 'problem', reason: 'お知らせが見つかりません' };
     if (p.problems.length > 0) return { kind: 'problem', reason: p.problems.join('／') };
     const a = d.announcement;
+    // メールの宛先は 1 人ずつ出す（承認する人が、誰に届くかを見て判断できるように。まとめてのメールと同じ）
+    const people = a.channels.includes('mail') ? await service.mailRecipients(who(ctx), id).catch(() => []) : [];
     const lines = [
       `題名: ${a.title}`,
       a.startDate || a.endDate ? `期間: ${periodText(a.startDate, a.endDate)}（期間が終わったら店頭の画面から外し、Web の記事の題名に「（終了しました）」を付けます）` : '',
       `出す日時: ${a.publishAt ? new Date(a.publishAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }) : '承認したとき'}`,
       a.channels.includes('web') ? `■ Web サイト（${p.web}）\n${a.texts.web.title}\n${a.texts.web.body}` : '',
       a.channels.includes('line') ? `■ LINE（友だち ${p.line?.followers ?? '?'} 人に一斉配信。今月の残り ${p.line?.limit !== null && p.line ? `${Math.max(0, p.line.limit - p.line.used)} 通` : '上限なし'}。送った後は取り消せません）\n${a.texts.line}` : '',
+      a.channels.includes('mail') && p.mail ? `■ メール（${p.mail.count} 人に、${p.mail.from}から 1 人に 1 通ずつ。配信を停止した人などは除きます。送った後は取り消せません）\n件名: ${a.texts.mail.subject}\n${a.texts.mail.body}\n宛先:\n${people.map((r) => `- ${r.name}${r.company ? `（${r.company}）` : ''} ${r.email}`).join('\n')}` : '',
       a.channels.includes('signage') ? `■ 店頭の画面（${p.screens.join('・')}）\n${a.texts.signage.headline}／${a.texts.signage.period}／${a.texts.signage.note}` : '',
     ].filter(Boolean);
     return { kind: 'ready', args: { announcementId: id, digest: p.digest }, shown: lines.join('\n'), audience: 'external' };
@@ -178,5 +181,25 @@ export const announcementsPublish: Tool = {
   },
 };
 
+/**
+ * 会社の営業日と、これからの休業の期間（「年末は何日まで営業？」「次の休みはいつ？」）。
+ *
+ * @remarks 危険度 `read`
+ */
+export const announcementsClosures: Tool = {
+  name: 'announcements.closures',
+  risk: 'read',
+  activityLabel: '休業の予定を調べています',
+  helpText: '会社の営業日（曜日と祝日）と、お知らせで出した休業の期間を読みます',
+  description: '会社の営業する曜日・祝日を休むか・これからの休業の期間（お知らせで出したもの）を返す。「年末は何日まで営業？」「次の休みはいつ？」に答えるのに使う',
+  args: { properties: {} },
+  async invoke(_args, ctx) {
+    const service = await serviceOf(ctx);
+    if (!service) return UNAVAILABLE;
+    const r = await service.closures(ctx.tenantId);
+    return { available: true, ...r, note: r.closures.length ? null : 'お知らせで出した休業の期間はありません' };
+  },
+};
+
 /** お知らせの作成のツール。 */
-export const ANNOUNCEMENT_TOOLS: Tool[] = [announcementsDraft, announcementsRevise, announcementsSubmit, announcementsList, announcementsPublish];
+export const ANNOUNCEMENT_TOOLS: Tool[] = [announcementsDraft, announcementsRevise, announcementsSubmit, announcementsList, announcementsPublish, announcementsClosures];

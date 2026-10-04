@@ -5,7 +5,7 @@
  * 引けない名前は推測で作らず、記録の値のまま出す。
  */
 
-import type { AuditEvent } from '@m2office/shared';
+import { agentDisplayName, type AuditEvent } from '@m2office/shared';
 
 /** 操作の名前を業務の言葉にする。無い名前は記録の名前のまま出す。 */
 const ACTION_LABELS: Record<string, string> = {
@@ -363,7 +363,7 @@ export function presentAudit(e: AuditEvent, names: AuditNames): AuditRow {
   const run = runId ? names.run(runId) : undefined;
   const who = e.actorType === 'user' ? person(e.actorId)
     : e.actorType === 'secretary' ? `秘書（${person(e.actorId)}さんの依頼）`
-    : e.actorType === 'agent' ? `業務「${names.agent(e.actorId) ?? run?.agentName ?? e.actorId}」${run ? `（${person(run.requestedBy)}さんの依頼）` : ''}`
+    : e.actorType === 'agent' ? `業務「${names.agent(e.actorId) ?? run?.agentName ?? agentDisplayName(null, e.actorId)}」${run ? `（${person(run.requestedBy)}さんの依頼）` : ''}`
     : e.actorType === 'api_client' ? `外部アプリ（${e.actorId}）`
     : `システム（${SYSTEM_LABELS[e.actorId] ?? e.actorId}）`;
   return {

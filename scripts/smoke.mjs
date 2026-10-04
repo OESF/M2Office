@@ -5608,6 +5608,79 @@ console.log('\n■ 70. お知らせの作成の段 1（下書き・1 回の承�
   }
 }
 
+console.log('\n■ 71. お知らせの作成の段 2（メール・休業の期間。第35.18節）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const { rows: saved } = await owner.query(`select tenant_id, announcements from tenant_settings where tenant_id = 't-alpha'`);
+  const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da6364f8ff0f0000050101005b1c4a1a0000000049454e44ae426082', 'hex');
+  const tag = Date.now().toString(36);
+  const contactIds = [];
+  const cleanup = async () => {
+    await owner.query(`delete from bulk_mails where tenant_id = 't-alpha' and id in (select (o.result->>'bulkMailId') from announcement_outputs o where o.tenant_id = 't-alpha' and o.channel = 'mail')`);
+    await owner.query(`delete from announcements where tenant_id = 't-alpha'`);
+    await owner.query(`delete from business_closures where tenant_id = 't-alpha'`);
+  };
+  await cleanup();
+  try {
+    await call('a', '/v1/admin/extensions/announcements/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    // 名刺を交換した取引先（会社で共有）を 1 人登録する。宛先の案に入る
+    const form = new FormData();
+    form.append('file', new Blob([Buffer.concat([PNG, Buffer.from(`\nM2O-CARD:${JSON.stringify({ isCard: true, cardCount: 1, textTop: 'up', name: `お知 ${tag}`, company: '株式会社取引', emails: [`ann-${tag}@sample.example`] })}\n`, 'utf8')])]), 'ann.png');
+    await fetch(`${API}/v1/cards`, { method: 'POST', body: form, headers: { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' } });
+    let contact = null;
+    for (let i = 0; i < 40 && !contact; i++) {
+      contact = ((await call('a', `/v1/cards?q=${encodeURIComponent(`お知 ${tag}`)}`, {}, 'member')).body.items ?? [])[0] ?? null;
+      if (!contact) await sleep(500);
+    }
+    if (contact) contactIds.push(contact.id);
+
+    const made = await call('a', '/v1/announcements', { method: 'POST', body: JSON.stringify({ text: '臨時休業のお知らせ、メールで。10/10' }) }, 'member');
+    const a = made.body?.announcement;
+    const rc = a ? (await call('a', `/v1/announcements/${a.id}/recipients`, {}, 'member')).body : null;
+    a?.channels?.includes('mail') && a?.mailContactIds?.includes(contact?.id) && (rc?.recipients ?? []).some((r) => r.contactId === contact?.id && r.email === `ann-${tag}@sample.example`)
+      && /臨時休業/.test(a?.texts?.mail?.subject ?? '') && /\{氏名\} 様/.test(a?.texts?.mail?.body ?? '')
+      ? ok('下書きに、メールの件名・本文と、名刺を交換した取引先の宛先の案を入れ、宛先の名前とアドレスを読める')
+      : ng('メールの下書きが違う', JSON.stringify({ status: made.status, channels: a?.channels, ids: a?.mailContactIds?.length, rc: rc?.recipients?.length, subject: a?.texts?.mail?.subject }).slice(0, 400));
+    const other = a ? await call('b', `/v1/announcements/${a.id}/recipients`) : { status: 0 };
+    other.status === 403 || other.status === 404 || (other.body?.recipients ?? []).length === 0
+      ? ok('ほかの会社からはメールの宛先が見えない') : ng(`ほかの会社から宛先が見える（${other.status}）`);
+
+    const pv = (await call('a', `/v1/announcements/${a?.id}/preview`, {}, 'member')).body;
+    const submit = await call('a', `/v1/announcements/${a?.id}/submit`, { method: 'POST', body: '{}' }, 'member');
+    const run = submit.body?.runId ? await waitFor('a', submit.body.runId, ['awaiting_approval', 'failed', 'completed'], 20000, 'member') : null;
+    const appr = submit.body?.runId ? await approvalFor('a', submit.body.runId, 'admin') : null;
+    pv?.problems?.length === 0 && pv?.mail?.count >= 1 && run?.run?.status === 'awaiting_approval' && /■ メール（\d+ 人に、/.test(appr?.present ?? '')
+      && (appr?.present ?? '').includes(`ann-${tag}@sample.example`)
+      ? ok('承認の画面に、メールの人数・差出人・件名と本文と、宛先を 1 人ずつ出す')
+      : ng('メールの承認の画面が違う', JSON.stringify({ problems: pv?.problems, mail: pv?.mail, status: run?.run?.status, present: appr?.present?.slice(0, 300) }).slice(0, 500));
+    if (appr) await call('a', `/v1/approvals/${appr.id}`, { method: 'POST', body: JSON.stringify({ decision: 'approved' }) }, 'admin');
+    const done = submit.body?.runId ? await waitFor('a', submit.body.runId, ['completed', 'failed'], 20000, 'member') : null;
+    const after = (await call('a', `/v1/announcements/${a?.id}`, {}, 'member')).body;
+    const mailOut = (after?.outputs ?? []).find((o) => o.channel === 'mail');
+    const { rows: bulk } = mailOut?.result?.bulkMailId
+      ? await owner.query(`select status, from_mailbox from bulk_mails where tenant_id = 't-alpha' and id = $1`, [mailOut.result.bulkMailId]) : { rows: [] };
+    done?.run?.status === 'completed' && mailOut?.status === 'done' && mailOut.result.queued >= 1 && bulk[0] && bulk[0].status !== 'draft'
+      ? ok('承認されると、名刺管理のまとめてのメールにして 1 人に 1 通ずつ送り始める（窓口のアカウントが無ければ本人の Gmail から）')
+      : ng('メールを送った後が違う', JSON.stringify({ status: done?.run?.status, reason: done?.run?.failureReason, mailOut, bulk }).slice(0, 400));
+
+    // 休業の期間を覚え、秘書のツールが答える（第35.7節）
+    const { rows: closures } = await owner.query(`select count(*)::int as n from business_closures where tenant_id = 't-alpha'`);
+    closures[0]?.n >= 1 ? ok('出した休業のお知らせの期間を、会社の休業日として覚える') : ng('休業の期間を覚えていない');
+  } catch (err) {
+    ng('お知らせの作成の段 2 の確認が途中で止まった', String(err?.stack ?? err));
+  } finally {
+    await cleanup();
+    for (const id of contactIds) {
+      await call('a', `/v1/cards/${id}`, { method: 'DELETE' }, 'member');
+      await call('a', `/v1/cards/${id}/purge`, { method: 'DELETE' }, 'member');
+    }
+    for (const r of saved) await owner.query(`update tenant_settings set announcements = $2 where tenant_id = $1`, [r.tenant_id, r.announcements ? JSON.stringify(r.announcements) : null]);
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

@@ -8,3 +8,4 @@ export * from './screen-image.js';
 export * from './service.js';
 export * from './tools.js';
 export * from './agents.js';
+export * from './mail.js';

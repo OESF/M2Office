@@ -20,6 +20,7 @@ import type { LlmProvider } from '../llm/provider.js';
 import type { Repository } from '../repository/types.js';
 import { silentLogger, type Logger } from '../log/logger.js';
 import { dateIn } from '../cards/service.js';
+import { jpDate, periodText } from '../announcements/draft.js';
 import type { InquiryContactBook } from './contacts.js';
 import { hasSensitive, readInquiry, stripSensitive } from './extract.js';
 import type { InquiryPatch, InquiryQuery, InquiryStore, StoredReply } from './store.js';
@@ -59,6 +60,10 @@ export interface InquiryServiceDeps {
   mailbox?: MailboxDeps | null;
   /** LINE 公式アカウントを開くもの（第33.6.2節）。無ければ LINE を扱わない。 */
   line?: LineDeps | null;
+  /**
+   * その日（YYYY-MM-DD）を含む休業の期間（お知らせで出した休業。第35.7節）。休業中に届いた問い合わせに「〇日から順にお返事します」の下書きを用意する
+   */
+  closureOn?(tenantId: string, day: string): Promise<{ startDate: string; endDate: string } | null>;
   logger?: Logger;
 }
 
@@ -590,6 +595,7 @@ export class InquiryService {
     if (reading.task) await store.addTask(tenantId, id, { assignee: owner, what: reading.task.what, due: reading.task.due, createdBy: MAILBOX_ACTOR, eventId });
     await store.logMail(tenantId, { ...log, status: 'inquiry', inquiryId: id, reason: '' });
     await this.auditSystem(tenantId, 'inquiry.mail_create', id, { channel: reading.channel, sensitiveRemoved: reading.sensitive, contactCreated: !!linked?.created });
+    await this.closureReply(tenantId, id, owner, m.date);
     return 'created';
   }
 
@@ -996,6 +1002,7 @@ export class InquiryService {
         const eventId2 = await store.addEvent(tenantId, inquiryId, { direction: 'in', channel: 'line', summary, body, createdBy: LINE_ACTOR, at });
         await store.addTask(tenantId, inquiryId, { assignee: settings.line.connectedBy, what: reading?.task.what ?? '返事をする', due: reading?.task.due ?? null, createdBy: LINE_ACTOR, eventId: eventId2 });
         await this.auditSystem(tenantId, 'inquiry.line_create', inquiryId, { sensitiveRemoved: !!reading?.sensitive });
+        await this.closureReply(tenantId, inquiryId, settings.line.connectedBy, at);
         out.created += 1;
       }
       await store.saveLineUser(tenantId, { lineUserId: userId, displayName, inquiryId, following: true, lastAt: at });
@@ -1091,6 +1098,34 @@ export class InquiryService {
       return topics.length ? topics : byCategory();
     } catch {
       return byCategory();
+    }
+  }
+
+  /**
+   * 休業中に届いた問い合わせに、「〇日から順にお返事します」の返事の下書きを用意する（第35.7節）。**送るのは承認の後**（いつもの返事と同じ）。
+   * 文は決まった形（期間と、休業の次の日）。下書きを書けなければ何もしない。
+   */
+  private async closureReply(tenantId: string, inquiryId: string, owner: string, at: string): Promise<void> {
+    if (!this.deps.closureOn) return;
+    try {
+      const closure = await this.deps.closureOn(tenantId, dateIn('Asia/Tokyo', new Date(at)));
+      if (!closure) return;
+      const who = { tenantId, userId: owner };
+      const d = await this.draftReply(who, inquiryId);
+      if (!('reply' in d)) return;
+      const settings = await this.deps.repo.getTenantSettings(tenantId);
+      const company = settings.company.shortName || settings.company.legalName;
+      const next = new Date(Date.parse(`${closure.endDate}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+      const inquiry = await this.deps.store.get(tenantId, inquiryId);
+      const name = inquiry?.from.name ? `${inquiry.from.name} 様` : '';
+      const body = d.reply.channel === 'line'
+        ? [`${name ? `${name}、` : ''}お問い合わせありがとうございます。${company ? `${company}です。` : ''}`, `${periodText(closure.startDate, closure.endDate)}は休業しております。${jpDate(next)}から順にお返事しますので、今しばらくお待ちください。`].join('\n')
+        : [name || 'お客様', '', `お問い合わせいただき、ありがとうございます。${company ? `${company}でございます。` : ''}`,
+          `誠に勝手ながら、${periodText(closure.startDate, closure.endDate)}は休業しております。`, `${jpDate(next)}から順にお返事いたしますので、今しばらくお待ちください。`, '', company].join('\n');
+      await this.updateReply(who, d.reply.id, { body });
+      await this.auditSystem(tenantId, 'inquiry.closure_reply', inquiryId, { until: closure.endDate });
+    } catch (err) {
+      this.log.warn('休業中の返事の下書きを用意できませんでした', { tenantId, error: String(err) });
     }
   }
 

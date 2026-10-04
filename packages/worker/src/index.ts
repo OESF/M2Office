@@ -11,7 +11,7 @@
 
 import {
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
-  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, SignageService, SignageInterrupts, PostgresSignageStore, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention,
+  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, SignageService, SignageInterrupts, PostgresSignageStore, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention,
   NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator,
@@ -83,6 +83,8 @@ const cards = new CardService({ store: contactStore, repo, files, llmFor: (tenan
 const bulkMail = new BulkMailService({
   store: new PostgresBulkMailStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
   repo, box, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
+  // お知らせの作成のメールは窓口のアカウントから送る（第35.6.3節）
+  mailbox: { repo, box, sourceFor: (tenantId) => connector.sourceFor(tenantId) },
 });
 // メールの署名から異動・昇進・電話の変更を見つけて名刺に反映する見張り（仕様書 第27.6.1節、ADR-0057）。
 // 同じ見回りで、まとめてのメールへの「配信停止」の返信も見つける（第27.9.1節）
@@ -136,6 +138,8 @@ const columns = new ColumnService({
   repo, box, llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId), logger: log,
 });
 // 問い合わせの記録（内蔵の拡張。仕様書 第33章）。秘書から頼まれた記録と、期限の知らせ・原文の片付けが使う
+// お知らせの置き場（休業の期間を、問い合わせの記録と定時実行も読む。第35.7節）
+const announcementStore = new PostgresAnnouncementStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
 const inquiryStore = new PostgresInquiryStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
 const inquiries = new InquiryService({
   store: inquiryStore, repo, llmFor: (tenantId) => ai.llmFor(tenantId), contacts: contactBookFrom(contactStore, cardsAccess(repo)), logger: log,
@@ -143,6 +147,8 @@ const inquiries = new InquiryService({
   mailbox: { repo, box, sourceFor: (tenantId) => connector.sourceFor(tenantId) },
   // LINE 公式アカウント（第33.19節）。承認の後に返事を送るのに使う
   line: { repo, box, sourceFor: (tenantId) => connector.sourceFor(tenantId) },
+  // 休業中に届いた問い合わせに「〇日から順にお返事します」の下書きを用意する（第35.7節）
+  closureOn: (tenantId, day) => announcementStore.closureOn(tenantId, day),
 });
 const inquiryWatch = new InquiryWatch({ store: inquiryStore, repo, logger: log });
 // 競合の分析（内蔵の拡張。仕様書 第36章）。受け付けた探す・読む作業を 1 つずつ行う（相手のサイトは間を空けて 1 本ずつ読む）
@@ -157,12 +163,16 @@ const competitors = new CompetitorService({
 });
 const competitorWatch = new CompetitorWatch({ service: competitors, store: competitorStore, repo, logger: log });
 // お知らせの作成（内蔵の拡張。仕様書 第35章）。承認の後に出し、予約の時刻と期間の後を見回る
-const announcementStore = new PostgresAnnouncementStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
 const announcements = new AnnouncementService({
   store: announcementStore,
   repo, box, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
   line: { repo, box, sourceFor: (tenantId) => connector.sourceFor(tenantId) },
   signage: signageForAnnouncements(signage),
+  // メール（名刺管理のまとめてのメール。段 2。第35.18節）
+  mail: announcementMailFrom({
+    bulk: bulkMail, contacts: contactStore, cardsAccess: cardsAccess(repo), mailbox: { repo, box, sourceFor: (tenantId) => connector.sourceFor(tenantId) },
+    inquiries: async (tenantId) => ((await repo.getTenantSettings(tenantId)).inquiries.enabled ? inquiryStore : null),
+  }),
   submitter: async (tenantId, userId, announcementId) => {
     const def = await resolveDefinition(ANNOUNCEMENT_PUBLISH.id, ANNOUNCEMENT_PUBLISH.version, tenantId);
     if (!def) throw new Error('お知らせを出す業務が見つかりません');

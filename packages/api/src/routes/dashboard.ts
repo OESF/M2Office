@@ -8,7 +8,7 @@
  */
 
 import { Hono } from 'hono';
-import { isValidAvatar, type AgentDefinition, type Approval, type AuditEvent, type Job, type Run, type User } from '@m2office/shared';
+import { agentDisplayName, isValidAvatar, type AgentDefinition, type Approval, type AuditEvent, type Job, type Run, type User } from '@m2office/shared';
 import {
   ACTIVE_WINDOW_MIN, agentFace, buildPresence, summarizePresence, stepLabel,
   type TenantExtensions,
@@ -496,7 +496,7 @@ function names(users: User[]): (id: string | null | undefined) => string {
 }
 
 function nameOfAgent(view: TenantExtensions, id: string): string {
-  return view.allAgents.find((a) => a.id === id)?.name ?? (id || '不明な業務');
+  return agentDisplayName(view.allAgents.find((a) => a.id === id)?.name, id);
 }
 
 function firstLine(text: string): string {

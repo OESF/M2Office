@@ -31,6 +31,8 @@ export interface Job {
   createdAt: string;
   /** 秘書の段取りの段として起こしたなら、その段の ID（仕様書 第10.14節）。 */
   planStepId?: string | null;
+  /** 依頼のときの業務の名前（業務を削除した後も画面に出すため。移行 078 より前の依頼には無い）。 */
+  agentName?: string | null;
 }
 
 export interface Run {

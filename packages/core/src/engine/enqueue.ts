@@ -37,7 +37,7 @@ export async function enqueueJob(
   const now = new Date().toISOString();
   const job: Job = {
     id: randomUUID(), tenantId: p.tenantId, agentId: p.def.id, agentVersion: p.def.version,
-    requestedBy: p.requestedBy, origin: p.origin, input: p.input, createdAt: now,
+    requestedBy: p.requestedBy, origin: p.origin, input: p.input, createdAt: now, agentName: p.def.name,
     ...(p.planStepId ? { planStepId: p.planStepId } : {}),
   };
   const run: Run = {

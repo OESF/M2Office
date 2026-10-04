@@ -199,6 +199,7 @@ function chooseTools(tools: string[], prompt: string): Call[] {
     const req = extractField(prompt, 'request');
     if (/承認へ進めて|それで出して/.test(req)) return [{ name: 'announcements.submit', args: {} }];
     if (/友だち|何通|一覧/.test(req)) return [{ name: 'announcements.list', args: {} }];
+    if (/営業|休み/.test(req) && /何日|いつ|\?|？/.test(req)) return [{ name: 'announcements.closures', args: {} }];
     if (/丁寧|短く|直して/.test(req)) return [{ name: 'announcements.revise', args: { instruction: req } }];
     if (req) return [{ name: 'announcements.draft', args: { request: req } }];
   }

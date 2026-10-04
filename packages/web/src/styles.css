@@ -1815,3 +1815,6 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .announcements-web-preview h3 { margin-top: 0; }
 .announcements-line-bubble { align-self: flex-start; max-width: 360px; background: #e3f5e1; color: #1d2733; border-radius: 16px; padding: 10px 14px; white-space: pre-wrap; }
 .announcements-screen { width: 100%; max-width: 720px; border: 1px solid var(--border); border-radius: 8px; }
+.announcements-recipients { margin: 0; padding-left: 1.2em; max-height: 240px; overflow-y: auto; }
+.announcements-recipients li { margin: 2px 0; }
+.announcements-recipients button { margin-left: 8px; }

@@ -9,12 +9,12 @@
 /** お知らせの作成の拡張の ID（内蔵の拡張。第12.13節）。 */
 export const ANNOUNCEMENTS_EXTENSION_ID = 'announcements';
 
-/** 出し先（段 1）。 */
-export type AnnouncementChannel = 'web' | 'line' | 'signage';
+/** 出し先（段 1 は Web・LINE・店頭の画面。段 2 でメール）。 */
+export type AnnouncementChannel = 'web' | 'line' | 'signage' | 'mail';
 
 /** 出し先の並びと呼び方。 */
-export const ANNOUNCEMENT_CHANNELS: AnnouncementChannel[] = ['web', 'line', 'signage'];
-export const ANNOUNCEMENT_CHANNEL_LABELS: Record<AnnouncementChannel, string> = { web: 'Web サイト', line: 'LINE', signage: '店頭の画面' };
+export const ANNOUNCEMENT_CHANNELS: AnnouncementChannel[] = ['web', 'line', 'mail', 'signage'];
+export const ANNOUNCEMENT_CHANNEL_LABELS: Record<AnnouncementChannel, string> = { web: 'Web サイト', line: 'LINE', mail: 'メール', signage: '店頭の画面' };
 
 /** お知らせの状態。 */
 export type AnnouncementStatus = 'draft' | 'awaiting' | 'scheduled' | 'published' | 'ended' | 'cancelled';
@@ -32,6 +32,8 @@ export interface AnnouncementTexts {
   line: string;
   /** 店頭の画面の 1 枚（見出し・期間の書き方・一言） */
   signage: { headline: string; period: string; note: string };
+  /** メール（件名と本文。宛名は名刺管理のまとめてのメールで差し込む。第35.6.3節） */
+  mail: { subject: string; body: string };
 }
 
 /** お知らせ 1 つ。 */
@@ -47,6 +49,8 @@ export interface Announcement {
   status: AnnouncementStatus;
   channels: AnnouncementChannel[];
   texts: AnnouncementTexts;
+  /** メールの宛先（名刺管理の連絡先の ID。AI が案を出し、画面で外せる） */
+  mailContactIds: string[];
   /** 承認へ進めたときの実行 */
   runId: string | null;
   createdBy: string;
@@ -61,7 +65,7 @@ export interface AnnouncementOutput {
   channel: AnnouncementChannel;
   status: 'waiting' | 'done' | 'failed' | 'ended';
   /** 結果（Web は記事の URL・LINE は送った数・店頭の画面は流した画面） */
-  result: { link?: string; editUrl?: string; postId?: string; sent?: number; assetId?: string; screens?: string[]; draft?: boolean };
+  result: { link?: string; editUrl?: string; postId?: string; sent?: number; assetId?: string; screens?: string[]; draft?: boolean; bulkMailId?: string; queued?: number };
   reason: string;
   doneAt: string | null;
 }
@@ -88,6 +92,16 @@ export interface AnnouncementPreview {
   screens: string[];
   /** Web の出し方（「WordPress（https://…）に公開」「予約公開」「下書き」「文を写して使う」） */
   web: string;
+  /** メールの宛先の数と差出人（メールを出し先にしているときだけ） */
+  mail: { count: number; from: string } | null;
+}
+
+/** メールの宛先の候補 1 人（名刺管理の連絡先）。 */
+export interface AnnouncementRecipient {
+  contactId: string;
+  name: string;
+  company: string;
+  email: string;
 }
 
 /** 会社の設定 `announcements`（第35.4節）。 */

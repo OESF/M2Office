@@ -15,7 +15,7 @@ import {
   TenantAiResolver, platformAi, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, ConnectionCredentials, type ConnectionAuthProvider,
   CardService, PostgresContactStore, cardsAccess, type ContactStore, BulkMailService, PostgresBulkMailStore, NoticeService, PostgresNoticeStore,
-  InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, JanLookupService, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, InquiryService, PostgresInquiryStore, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, webColumnsAccess, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
+  InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, JanLookupService, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, InquiryService, PostgresInquiryStore, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, announcementMailFrom, webColumnsAccess, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
   type SecretBox, type GeminiModels,
   type FileStore, type TenantExtensions, type HelpArticle, type ManualMeta, type LlmProvider, type Logger, type Repository, type WorkspaceConnector,
 } from '@m2office/core';
@@ -259,6 +259,8 @@ export function buildDeps(): AppDeps {
     bulk: new BulkMailService({
       store: new PostgresBulkMailStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
       repo, box, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
+      // お知らせの作成のメールは窓口のアカウントから送る（第35.6.3節）
+      mailbox: { repo, box, sourceFor: (tenantId) => connector.sourceFor(tenantId) },
     }),
   };
   // 社内のお知らせ（仕様書 第10.15節）
@@ -312,6 +314,8 @@ export function buildDeps(): AppDeps {
     access: webColumnsAccess(repo),
   };
   // 問い合わせの記録（内蔵の拡張。仕様書 第33章）。問い合わせは会社で共有し、名刺管理が使えれば連絡先とつなぐ
+  // お知らせの置き場（休業の期間を、問い合わせの記録と定時実行も読む。第35.7節）
+  const announcementStore = new PostgresAnnouncementStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
   const inquiries = {
     service: new InquiryService({
       store: new PostgresInquiryStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
@@ -320,6 +324,8 @@ export function buildDeps(): AppDeps {
       mailbox: { repo, box, sourceFor: (tenantId) => connector.sourceFor(tenantId) },
       // LINE 公式アカウント（第33.19節）。見本の会社では見本の口
       line: { repo, box, sourceFor: (tenantId) => connector.sourceFor(tenantId) },
+      // 休業中に届いた問い合わせに「〇日から順にお返事します」の下書きを用意する（第35.7節）
+      closureOn: (tenantId, day) => announcementStore.closureOn(tenantId, day),
     }),
     access: inquiriesAccess(repo),
   };
@@ -339,8 +345,13 @@ export function buildDeps(): AppDeps {
   // お知らせの作成（内蔵の拡張。仕様書 第35章）。Web はコラムの作成の WordPress、LINE は問い合わせの記録の接続、店頭の画面は店頭サイネージを使う
   const announcements = {
     service: new AnnouncementService({
-      store: new PostgresAnnouncementStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+      store: announcementStore,
       repo, box, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
+      // メール（名刺管理のまとめてのメール。段 2。第35.18節）
+      mail: announcementMailFrom({
+        bulk: cards.bulk, contacts: contactStore, cardsAccess: cardsAccess(repo), mailbox: { repo, box, sourceFor: (tenantId) => connector.sourceFor(tenantId) },
+        inquiries: async (tenantId) => ((await repo.getTenantSettings(tenantId)).inquiries.enabled ? inquiries.service.store : null),
+      }),
       line: { repo, box, sourceFor: (tenantId) => connector.sourceFor(tenantId) },
       signage: signageForAnnouncements(signageService),
       // 承認へ進める（付属の業務「お知らせを出す」を始める）

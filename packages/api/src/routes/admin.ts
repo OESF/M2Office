@@ -9,6 +9,7 @@
 import { randomUUID } from 'node:crypto';
 import { Hono, type Context } from 'hono';
 import {
+  agentDisplayName,
   isValidInvoiceNumber, parsePresentationId, type AutomationPolicy, type CompanyInfo, type Role, type SlideTemplate, type TenantSettings,
   type AuditEvent, type User, type WritingStyle,
 } from '@m2office/shared';
@@ -50,7 +51,7 @@ export function adminRoute(deps: AppDeps) {
     const items = rows.map(({ run: r, job }) => ({
       id: r.id, status: r.status, startedAt: r.startedAt, endedAt: r.endedAt,
       tokensUsed: r.tokensUsed, costJpy: r.costJpy,
-      agentId: job.agentId, agentName: allAgents.find((a) => a.id === job.agentId)?.name ?? job.agentId,
+      agentId: job.agentId, agentName: agentDisplayName(allAgents.find((a) => a.id === job.agentId)?.name, job.agentId, job.agentName),
       origin: job.origin, requestedBy: job.requestedBy,
     }));
     return c.json({ items });
@@ -76,7 +77,7 @@ export function adminRoute(deps: AppDeps) {
         // 名前を引けなければ記録の値のまま出す（推測で名前を作らない）
         userName: users.find((u) => u.id === s.userId)?.displayName ?? s.userId,
         agentId: s.agentId,
-        agentName: def?.name ?? view.allAgents.find((a) => a.id === s.agentId)?.name ?? s.agentId,
+        agentName: agentDisplayName(def?.name ?? view.allAgents.find((a) => a.id === s.agentId)?.name, s.agentId),
         label: describeRule(s.rule), timezone: s.timezone,
         nextRunAt: s.nextRunAt, lastRunAt: s.lastRunAt,
         state: !s.enabled ? 'paused' as const : block ? 'blocked' as const : 'active' as const,
@@ -135,7 +136,7 @@ export function adminRoute(deps: AppDeps) {
     const { allAgents } = await deps.tenantView(tenant.id);
     const items = rows.map((r) => ({
       ...r,
-      name: allAgents.find((a) => a.id === r.agentId)?.name ?? r.agentId,
+      name: agentDisplayName(allAgents.find((a) => a.id === r.agentId)?.name, r.agentId),
       costJpy: Math.round(r.costJpy * 100) / 100,
     }));
     return c.json({
@@ -731,7 +732,7 @@ async function auditNames(deps: AppDeps, tenantId: string, events: AuditEvent[])
   for (const id of runIds) {
     const run = await deps.repo.getRun(tenantId, id).catch(() => null);
     const job = run ? await deps.repo.getJob(tenantId, run.jobId).catch(() => null) : null;
-    if (job) runs.set(id, { agentName: view.allAgents.find((a) => a.id === job.agentId)?.name ?? job.agentId, requestedBy: job.requestedBy });
+    if (job) runs.set(id, { agentName: agentDisplayName(view.allAgents.find((a) => a.id === job.agentId)?.name, job.agentId, job.agentName), requestedBy: job.requestedBy });
   }
   return {
     user: (id) => users.find((u) => u.id === id)?.displayName,

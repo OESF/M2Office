@@ -30,14 +30,15 @@ src/llm/         LLM 抽象化層（OpenAI 互換、設定されていない会�
                  models.ts は役割ごとの既定のモデルと、モデルごとの値段の表（出どころと確認日つき。第20.2.2節）
 src/repository/  永続化。テナント境界の絞り込みを伴う
 src/agents/      公式エージェントの定義（AG-01〜05）
-src/announcements/ お知らせの作成（内蔵の拡張。第35章の段 1）。置き場（store.ts）、下書き（draft.ts。推論と期間の読み方）、
-                 店頭の画面の 1 枚（screen-image.ts）、処理（service.ts。直す・承認の前の確かめ・Web・LINE の一斉配信・店頭の画面・予約・期間の後）、
-                 ツール（tools.ts。announcements.draft・revise・submit・list・publish）、付属の業務（agents.ts。下書き・出す）
+src/announcements/ お知らせの作成（内蔵の拡張。第35章の段 1・段 2）。置き場（store.ts。休業の期間も）、下書き（draft.ts。推論と期間の読み方）、
+                 店頭の画面の 1 枚（screen-image.ts）、メール（mail.ts。宛先の案と、名刺管理のまとめてのメールで送る口）、
+                 処理（service.ts。直す・承認の前の確かめ・Web・LINE の一斉配信・メール・店頭の画面・予約・期間の後）、
+                 ツール（tools.ts。announcements.draft・revise・submit・list・publish・closures）、付属の業務（agents.ts。下書き・出す）
 src/cards/       名刺管理（内蔵の拡張。第27章）。置き場（自分だけの名刺は持ち主でも行を絞る）、読み取り（read.ts。写っている名刺ごとに項目・向き・四隅。
                  四隅は文字の向きに合わせて並べ直す orderCorners。1 枚の写真に 10 枚まで）、同じ人の見分け（identity.ts）、
                  表（CSV・Excel）の取り込みと書き出し（table.ts。見出しはよくある言い方と推論で読む）、
                  メールの署名から異動・昇進・電話の変更を見つけて名刺を新しくする見張りと、戻す値の決め方（signature.ts。第27.6.1節）、
-                 名刺の相手へのまとめてのメール（bulk.ts。下書き・除く人・見本・承認した要約の照合・1 人 1 通の送信・配信の停止。第27.9.1節）、
+                 名刺の相手へのまとめてのメール（bulk.ts。下書き・除く人・見本・承認した要約の照合・1 人 1 通の送信（お知らせの作成では窓口のアカウントから）・配信の停止。第27.9.1節）、
                  取り込み・修正・範囲・分ける・消去（service.ts）、PDF の分け方と形式（formats.ts）、vCard、ツール 4 つ、付属の業務
 src/signage/     店頭サイネージ（内蔵の拡張。第31章の段 1・段 2）。置き場（画面・ふだん動いている時間帯・登録の番号・素材・流れ・割り込みと出す先・
                  よく出す案内・呼び出しの受け口・会社の音。PostgreSQL）、割り込み（interrupts.ts。並び・まとめる・古いもの・消す・よく出す案内・

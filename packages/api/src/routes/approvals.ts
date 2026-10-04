@@ -7,7 +7,7 @@
  */
 
 import { Hono } from 'hono';
-import { canDecide } from '@m2office/shared';
+import { agentDisplayName, canDecide } from '@m2office/shared';
 import { ApprovalForbiddenError, RunNotResumableError, describeContext, executedCalls } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
@@ -34,7 +34,7 @@ export function approvalsRoute(deps: AppDeps) {
     /*
       どの業務の承認かを添える（仕様書 第6.2.4節）。
       **開く前に、何を判断するのかが分かること。** 「承認の依頼」が並ぶだけでは選べない。
-      定義が見つからないときは業務の ID を返す。**推測で名前を作らない。**
+      定義が見つからない（業務を削除した）ときは、依頼のときに残した名前を出す。ID をそのまま出さない。**推測で名前を作らない。**
     */
     const view = await deps.tenantView(ctx.tenant.id);
     const items = [];
@@ -43,7 +43,7 @@ export function approvalsRoute(deps: AppDeps) {
       const run = step ? await deps.repo.getRun(ctx.tenant.id, step.runId) : null;
       const job = run ? await deps.repo.getJob(ctx.tenant.id, run.jobId) : null;
       const agentName = job
-        ? (view.allAgents.find((x) => x.id === job.agentId)?.name ?? job.agentId)
+        ? agentDisplayName(view.allAgents.find((x) => x.id === job.agentId)?.name, job.agentId, job.agentName)
         : null;
       items.push({ ...a, agentName });
     }
@@ -73,8 +73,8 @@ export function approvalsRoute(deps: AppDeps) {
       ]);
       items.push({
         id: a.id, runId: a.runId,
-        // 定義が見つからなければ業務の ID を出す。推測で名前を作らない
-        agentName: view.resolve(a.agentId, a.agentVersion)?.name ?? view.allAgents.find((x) => x.id === a.agentId)?.name ?? a.agentId,
+        // 定義が見つからなければ、依頼のときに残した名前を出す。推測で名前を作らない
+        agentName: agentDisplayName(view.resolve(a.agentId, a.agentVersion)?.name ?? view.allAgents.find((x) => x.id === a.agentId)?.name, a.agentId, a.agentName),
         decision: a.decision, decidedAt: a.decidedAt, comment: a.comment, present: a.present,
         // 自分が依頼したものでなければ、依頼した人を出す
         requestedBy: a.requestedBy === ctx.user.id ? null : await nameOf(a.requestedBy),

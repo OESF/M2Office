@@ -18,6 +18,7 @@ import {
   GoogleOAuthError, MAILBOX_SCOPES,
   type GeminiModels, type GeminiSettingsMeta, type GoogleClientVerdict,
 } from '@m2office/core';
+import { agentDisplayName } from '@m2office/shared';
 import type { AppDeps } from '../context.js';
 import { isOperational, requireRole, type AppEnv } from '../middleware/tenant.js';
 import { registerConnectionCallback } from './connection-auth.js';
@@ -371,7 +372,7 @@ export function myGoogleRoute(deps: AppDeps) {
     const { allAgents } = await deps.tenantView(tenant.id);
     const impact = await deps.revocation.impact(tenant.id, user.id);
     return c.json({
-      runs: impact.runs.map((r) => ({ ...r, agentName: allAgents.find((a) => a.id === r.agentId)?.name ?? r.agentId })),
+      runs: impact.runs.map((r) => ({ ...r, agentName: agentDisplayName(allAgents.find((a) => a.id === r.agentId)?.name, r.agentId) })),
       schedules: impact.schedules,
     });
   });

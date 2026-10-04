@@ -19,6 +19,7 @@ import type { MailSummary, WorkspaceConnector } from '../connectors/types.js';
 import type { SecretBox } from '../secrets/box.js';
 import { silentLogger, type Logger } from '../log/logger.js';
 import type { CardViewer } from './store.js';
+import { openMailbox, type MailboxDeps } from '../inquiries/mailbox.js';
 
 /** 1 回の配信の宛先の上限（初めの値）。 */
 export const BULK_MAX_RECIPIENTS = 100;
@@ -49,6 +50,8 @@ export interface BulkMail {
   approvedAt: string | null;
   finishedAt: string | null;
   createdAt: string;
+  /** 窓口のアカウントから送るか（お知らせの作成のメール。第35.6.3節・Q-178）。`false` なら本人の Gmail から送る */
+  fromMailbox?: boolean;
 }
 
 /** 宛先 1 人（選んだときに写した名前とアドレス）。 */
@@ -108,7 +111,7 @@ export interface BulkPreview {
 export interface BulkMailStore {
   insertMail(who: CardViewer, m: Pick<BulkMail, 'id' | 'subject' | 'body'>): Promise<void>;
   getMail(who: CardViewer, id: string): Promise<BulkMail | null>;
-  updateMail(who: CardViewer, id: string, patch: Partial<Pick<BulkMail, 'subject' | 'body' | 'advertising' | 'judgedDigest' | 'status' | 'runId' | 'approvedDigest' | 'approvedAt' | 'finishedAt'>>): Promise<void>;
+  updateMail(who: CardViewer, id: string, patch: Partial<Pick<BulkMail, 'subject' | 'body' | 'advertising' | 'judgedDigest' | 'status' | 'runId' | 'approvedDigest' | 'approvedAt' | 'finishedAt' | 'fromMailbox'>>): Promise<void>;
   deleteMail(who: CardViewer, id: string): Promise<void>;
   /** 選んだ宛先を入れ替える（下書きのときだけ）。 */
   replaceRecipients(who: CardViewer, mailId: string, rows: Omit<BulkRecipient, 'id' | 'status' | 'reason' | 'sentAt'>[]): Promise<void>;
@@ -202,6 +205,8 @@ export interface BulkMailServiceDeps {
   repo: Repository;
   box: SecretBox;
   llmFor(tenantId: string): Promise<LlmProvider>;
+  /** 窓口のアカウント（お知らせの作成のメールを、窓口のアカウントから送るため。第35.6.3節） */
+  mailbox?: MailboxDeps;
   logger?: Logger;
 }
 
@@ -230,11 +235,12 @@ export class BulkMailService {
    *
    * @returns 作った下書きの ID。作れなければ理由
    */
-  async createDraft(who: CardViewer, input: { contactIds: string[]; subject: string; body: string }): Promise<{ id: string } | { error: string }> {
+  async createDraft(who: CardViewer, input: { contactIds: string[]; subject: string; body: string; fromMailbox?: boolean }): Promise<{ id: string } | { error: string }> {
     const ids = [...new Set(input.contactIds.filter((x) => typeof x === 'string' && x))];
     if (ids.length === 0) return { error: '宛先を選んでください' };
     const id = randomUUID();
     await this.deps.store.insertMail(who, { id, subject: input.subject.slice(0, 200), body: input.body.slice(0, 20_000) });
+    if (input.fromMailbox) await this.deps.store.updateMail(who, id, { fromMailbox: true });
     await this.setRecipients(who, id, ids);
     return { id };
   }
@@ -313,8 +319,7 @@ export class BulkMailService {
       }
     }
     const settings = await repo.getTenantSettings(who.tenantId);
-    const sender = (await repo.listUsers(who.tenantId)).find((u) => u.id === who.userId);
-    const footer = ad ? adFooter(settings.company, sender?.email ?? '', UNSUBSCRIBE_SHOWN) : '';
+    const footer = ad ? adFooter(settings.company, await this.contactAddress(who, mail), UNSUBSCRIBE_SHOWN) : '';
     const problems: string[] = [];
     if (!mail.subject.trim()) problems.push('件名を入れてください');
     if (!mail.body.trim()) problems.push('本文を入れてください');
@@ -411,13 +416,19 @@ export class BulkMailService {
         let listUnsubscribe: string | undefined;
         if (ad) {
           const settings = await repo.getTenantSettings(who.tenantId);
-          const sender = (await repo.listUsers(who.tenantId)).find((u) => u.id === who.userId);
           listUnsubscribe = `${await appUrl(who.tenantId)}/v1/unsubscribe/${this.unsubscribeToken(who.tenantId, r.email)}`;
-          body += adFooter(settings.company, sender?.email ?? '', listUnsubscribe);
+          body += adFooter(settings.company, await this.contactAddress(who, mail), listUnsubscribe);
         }
-        await connector.mail.send(who, {
-          to: [r.email], cc: [], subject: renderBulk(mail.subject, r), body, replyTo: null, ...(listUnsubscribe ? { listUnsubscribe } : {}),
-        });
+        if (mail.fromMailbox) {
+          // お知らせの作成のメールは、窓口のアカウントから送る（第35.6.3節・Q-178）
+          const mb = this.deps.mailbox ? await openMailbox(this.deps.mailbox, who.tenantId).catch(() => null) : null;
+          if (!mb) throw new Error('窓口のアカウントを開けません');
+          await mb.send({ from: mb.address, to: r.email, subject: renderBulk(mail.subject, r), body, inReplyTo: null, references: null, threadId: null, ...(listUnsubscribe ? { listUnsubscribe } : {}) });
+        } else {
+          await connector.mail.send(who, {
+            to: [r.email], cc: [], subject: renderBulk(mail.subject, r), body, replyTo: null, ...(listUnsubscribe ? { listUnsubscribe } : {}),
+          });
+        }
         await store.setRecipient(who, r.id, 'sent', null);
       }
     } catch (err) {
@@ -441,6 +452,15 @@ export class BulkMailService {
       body: `「${mail.subject}」`, runId: null, readAt: null, createdAt: new Date().toISOString(),
     });
     await this.audit(who, 'bulk_mail.done', mail.id, { sent, failed });
+  }
+
+  /** 宣伝の表示に書く問い合わせ先（窓口のアカウントから送るならそのアドレス、ほかは本人のアドレス）。 */
+  private async contactAddress(who: CardViewer, mail: BulkMail): Promise<string> {
+    if (mail.fromMailbox && this.deps.mailbox) {
+      const mb = await openMailbox(this.deps.mailbox, who.tenantId).catch(() => null);
+      if (mb) return mb.address;
+    }
+    return (await this.deps.repo.listUsers(who.tenantId)).find((u) => u.id === who.userId)?.email ?? '';
   }
 
   /** 配信の停止の URL に入れる鍵（会社とアドレスを暗号化したもの。中身は外から読めない）。 */
@@ -526,13 +546,14 @@ export class BulkMailService {
 const MAIL_COLUMNS = `
   id, tenant_id as "tenantId", owner_user_id as "ownerUserId", subject, body, advertising, judged_digest as "judgedDigest", status,
   run_id as "runId", approved_digest as "approvedDigest", to_json(approved_at) #>> '{}' as "approvedAt",
-  to_json(finished_at) #>> '{}' as "finishedAt", to_json(created_at) #>> '{}' as "createdAt"`;
+  to_json(finished_at) #>> '{}' as "finishedAt", to_json(created_at) #>> '{}' as "createdAt", from_mailbox as "fromMailbox"`;
 
 const RECIPIENT_COLUMNS = `
   id, contact_id as "contactId", seq, email, name, company, status, reason, to_json(sent_at) #>> '{}' as "sentAt"`;
 
 /** 書き換えてよい列（利用者の入力を列名に使わない）。 */
 const MAIL_FIELD_COLUMNS: Record<string, string> = {
+  fromMailbox: 'from_mailbox',
   subject: 'subject', body: 'body', advertising: 'advertising', judgedDigest: 'judged_digest', status: 'status', runId: 'run_id',
   approvedDigest: 'approved_digest', approvedAt: 'approved_at', finishedAt: 'finished_at',
 };

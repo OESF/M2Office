@@ -19,6 +19,7 @@ export interface StoredAnnouncement {
   status: AnnouncementStatus;
   channels: AnnouncementChannel[];
   texts: AnnouncementTexts;
+  mailContactIds: string[];
   approvedDigest: string | null;
   runId: string | null;
   createdBy: string;
@@ -29,10 +30,10 @@ export interface StoredAnnouncement {
 }
 
 /** 新しいお知らせ。 */
-export type NewAnnouncement = Pick<StoredAnnouncement, 'title' | 'body' | 'startDate' | 'endDate' | 'publishAt' | 'channels' | 'texts' | 'createdBy'>;
+export type NewAnnouncement = Pick<StoredAnnouncement, 'title' | 'body' | 'startDate' | 'endDate' | 'publishAt' | 'channels' | 'texts' | 'mailContactIds' | 'createdBy'>;
 
 /** 直せる項目。 */
-export type AnnouncementPatch = Partial<Pick<StoredAnnouncement, 'title' | 'body' | 'startDate' | 'endDate' | 'publishAt' | 'status' | 'channels' | 'texts' | 'approvedDigest' | 'runId' | 'publishedAt' | 'endedAt'>>;
+export type AnnouncementPatch = Partial<Pick<StoredAnnouncement, 'title' | 'body' | 'startDate' | 'endDate' | 'publishAt' | 'status' | 'channels' | 'texts' | 'mailContactIds' | 'approvedDigest' | 'runId' | 'publishedAt' | 'endedAt'>>;
 
 /** お知らせの置き場。 */
 export interface AnnouncementStore {
@@ -51,21 +52,28 @@ export interface AnnouncementStore {
   addClosure(tenantId: string, announcementId: string, startDate: string, endDate: string): Promise<void>;
   /** その日（YYYY-MM-DD）が休業の期間に入るか */
   closedOn(tenantId: string, day: string): Promise<boolean>;
+  /** その日（YYYY-MM-DD）を含む休業の期間。無ければ `null` */
+  closureOn(tenantId: string, day: string): Promise<{ startDate: string; endDate: string } | null>;
+  /** その日より後に終わる休業の期間（近い順） */
+  closuresFrom(tenantId: string, day: string): Promise<{ startDate: string; endDate: string }[]>;
 }
 
 const iso = (d: Date | string | null) => (d ? new Date(d).toISOString() : null);
+
+/** 段 1 で作ったお知らせ（メールの文が無い）にも、メールの文を足して返す。 */
+const withMail = (t: AnnouncementTexts, title: string, body: string): AnnouncementTexts => (t.mail ? t : { ...t, mail: { subject: title, body } });
 const day = (d: Date | string | null) => (d ? (typeof d === 'string' ? d.slice(0, 10) : new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 10)) : null);
 
 interface Row {
   id: string; title: string; body: string; start_date: Date | string | null; end_date: Date | string | null; publish_at: Date | string | null;
-  status: AnnouncementStatus; channels: AnnouncementChannel[]; texts: AnnouncementTexts; approved_digest: string | null; run_id: string | null;
+  status: AnnouncementStatus; channels: AnnouncementChannel[]; texts: AnnouncementTexts; mail_contact_ids: string[] | null; approved_digest: string | null; run_id: string | null;
   created_by: string; created_at: Date | string; updated_at: Date | string; published_at: Date | string | null; ended_at: Date | string | null;
 }
 
 function toAnnouncement(r: Row): StoredAnnouncement {
   return {
     id: r.id, title: r.title, body: r.body, startDate: day(r.start_date), endDate: day(r.end_date), publishAt: iso(r.publish_at), status: r.status,
-    channels: r.channels ?? [], texts: r.texts, approvedDigest: r.approved_digest, runId: r.run_id, createdBy: r.created_by,
+    channels: r.channels ?? [], texts: withMail(r.texts, r.title, r.body), mailContactIds: r.mail_contact_ids ?? [], approvedDigest: r.approved_digest, runId: r.run_id, createdBy: r.created_by,
     createdAt: iso(r.created_at)!, updatedAt: iso(r.updated_at)!, publishedAt: iso(r.published_at), endedAt: iso(r.ended_at),
   };
 }
@@ -99,28 +107,28 @@ export class PostgresAnnouncementStore implements AnnouncementStore {
   }
 
   async list(tenantId: string, limit: number): Promise<StoredAnnouncement[]> {
-    return (await this.q<Row>(tenantId, `select id, title, body, start_date::text, end_date::text, publish_at, status, channels, texts, approved_digest, run_id,
+    return (await this.q<Row>(tenantId, `select id, title, body, start_date::text, end_date::text, publish_at, status, channels, texts, mail_contact_ids, approved_digest, run_id,
       created_by, created_at, updated_at, published_at, ended_at from announcements where tenant_id = $1 order by created_at desc limit $2`, [tenantId, limit])).map(toAnnouncement);
   }
 
   async get(tenantId: string, id: string): Promise<StoredAnnouncement | null> {
-    const rows = await this.q<Row>(tenantId, `select id, title, body, start_date::text, end_date::text, publish_at, status, channels, texts, approved_digest, run_id,
+    const rows = await this.q<Row>(tenantId, `select id, title, body, start_date::text, end_date::text, publish_at, status, channels, texts, mail_contact_ids, approved_digest, run_id,
       created_by, created_at, updated_at, published_at, ended_at from announcements where tenant_id = $1 and id = $2`, [tenantId, id]);
     return rows[0] ? toAnnouncement(rows[0]) : null;
   }
 
   async create(tenantId: string, a: NewAnnouncement): Promise<string> {
     const id = `ann-${randomUUID()}`;
-    await this.q(tenantId, `insert into announcements (id, tenant_id, title, body, start_date, end_date, publish_at, channels, texts, created_by)
-      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-    [id, tenantId, a.title, a.body, a.startDate, a.endDate, a.publishAt, a.channels, JSON.stringify(a.texts), a.createdBy]);
+    await this.q(tenantId, `insert into announcements (id, tenant_id, title, body, start_date, end_date, publish_at, channels, texts, mail_contact_ids, created_by)
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+    [id, tenantId, a.title, a.body, a.startDate, a.endDate, a.publishAt, a.channels, JSON.stringify(a.texts), a.mailContactIds, a.createdBy]);
     return id;
   }
 
   async update(tenantId: string, id: string, patch: AnnouncementPatch): Promise<void> {
     const cols: Record<string, string> = {
       title: 'title', body: 'body', startDate: 'start_date', endDate: 'end_date', publishAt: 'publish_at', status: 'status', channels: 'channels',
-      texts: 'texts', approvedDigest: 'approved_digest', runId: 'run_id', publishedAt: 'published_at', endedAt: 'ended_at',
+      texts: 'texts', mailContactIds: 'mail_contact_ids', approvedDigest: 'approved_digest', runId: 'run_id', publishedAt: 'published_at', endedAt: 'ended_at',
     };
     const sets = ['updated_at = now()'];
     const params: unknown[] = [tenantId, id];
@@ -150,12 +158,12 @@ export class PostgresAnnouncementStore implements AnnouncementStore {
   }
 
   async due(tenantId: string, now: string): Promise<StoredAnnouncement[]> {
-    return (await this.q<Row>(tenantId, `select id, title, body, start_date::text, end_date::text, publish_at, status, channels, texts, approved_digest, run_id,
+    return (await this.q<Row>(tenantId, `select id, title, body, start_date::text, end_date::text, publish_at, status, channels, texts, mail_contact_ids, approved_digest, run_id,
       created_by, created_at, updated_at, published_at, ended_at from announcements where tenant_id = $1 and status = 'scheduled' and publish_at <= $2`, [tenantId, now])).map(toAnnouncement);
   }
 
   async published(tenantId: string): Promise<StoredAnnouncement[]> {
-    return (await this.q<Row>(tenantId, `select id, title, body, start_date::text, end_date::text, publish_at, status, channels, texts, approved_digest, run_id,
+    return (await this.q<Row>(tenantId, `select id, title, body, start_date::text, end_date::text, publish_at, status, channels, texts, mail_contact_ids, approved_digest, run_id,
       created_by, created_at, updated_at, published_at, ended_at from announcements where tenant_id = $1 and status = 'published'`, [tenantId])).map(toAnnouncement);
   }
 
@@ -166,7 +174,19 @@ export class PostgresAnnouncementStore implements AnnouncementStore {
   }
 
   async closedOn(tenantId: string, day: string): Promise<boolean> {
-    return (await this.q<{ id: string }>(tenantId, 'select id from business_closures where tenant_id = $1 and start_date <= $2 and end_date >= $2 limit 1', [tenantId, day])).length > 0;
+    return (await this.closureOn(tenantId, day)) !== null;
+  }
+
+  async closureOn(tenantId: string, day: string): Promise<{ startDate: string; endDate: string } | null> {
+    const rows = await this.q<{ start_date: string; end_date: string }>(tenantId,
+      'select start_date::text, end_date::text from business_closures where tenant_id = $1 and start_date <= $2 and end_date >= $2 order by end_date desc limit 1', [tenantId, day]);
+    return rows[0] ? { startDate: rows[0].start_date, endDate: rows[0].end_date } : null;
+  }
+
+  async closuresFrom(tenantId: string, day: string): Promise<{ startDate: string; endDate: string }[]> {
+    const rows = await this.q<{ start_date: string; end_date: string }>(tenantId,
+      'select start_date::text, end_date::text from business_closures where tenant_id = $1 and end_date >= $2 order by start_date limit 20', [tenantId, day]);
+    return rows.map((r) => ({ startDate: r.start_date, endDate: r.end_date }));
   }
 }
 
@@ -177,7 +197,7 @@ export class MemoryAnnouncementStore implements AnnouncementStore {
 
   private strip(r: StoredAnnouncement & { tenantId: string }): StoredAnnouncement {
     const { tenantId: _t, ...rest } = r;
-    return { ...rest, channels: [...rest.channels], texts: structuredClone(rest.texts) };
+    return { ...rest, channels: [...rest.channels], texts: structuredClone(rest.texts), mailContactIds: [...rest.mailContactIds] };
   }
 
   async list(tenantId: string, limit: number) {
@@ -192,7 +212,7 @@ export class MemoryAnnouncementStore implements AnnouncementStore {
   async create(tenantId: string, a: NewAnnouncement) {
     const id = `ann-${randomUUID()}`;
     const now = new Date(Date.now() + this.rows.length).toISOString();
-    this.rows.push({ ...a, texts: structuredClone(a.texts), id, tenantId, status: 'draft', approvedDigest: null, runId: null, createdAt: now, updatedAt: now, publishedAt: null, endedAt: null });
+    this.rows.push({ ...a, texts: structuredClone(a.texts), mailContactIds: [...(a.mailContactIds ?? [])], id, tenantId, status: 'draft', approvedDigest: null, runId: null, createdAt: now, updatedAt: now, publishedAt: null, endedAt: null });
     return id;
   }
 
@@ -234,6 +254,16 @@ export class MemoryAnnouncementStore implements AnnouncementStore {
   }
 
   async closedOn(tenantId: string, day: string) {
-    return this.closures.some((c) => c.tenantId === tenantId && c.startDate <= day && c.endDate >= day);
+    return (await this.closureOn(tenantId, day)) !== null;
+  }
+
+  async closureOn(tenantId: string, day: string) {
+    const c = this.closures.find((x) => x.tenantId === tenantId && x.startDate <= day && x.endDate >= day);
+    return c ? { startDate: c.startDate, endDate: c.endDate } : null;
+  }
+
+  async closuresFrom(tenantId: string, day: string) {
+    return this.closures.filter((c) => c.tenantId === tenantId && c.endDate >= day).sort((a, b) => a.startDate.localeCompare(b.startDate))
+      .map((c) => ({ startDate: c.startDate, endDate: c.endDate }));
   }
 }

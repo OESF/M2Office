@@ -1,6 +1,7 @@
 /**
- * @file お知らせの作成の段 1 の単体テスト（仕様書 第35.17節）。期間の読み方・下書き・承認した中身だけを出す・Web（WordPress が無いときは写す）・
- * LINE の一斉配信（無料の範囲を超えたら送らない）・店頭の画面・予約・期間の後。見本の LINE と、記憶だけの店頭の画面で確かめる。
+ * @file お知らせの作成の段 1・段 2 の単体テスト（仕様書 第35.17節・第35.18節）。期間の読み方・下書き・承認した中身だけを出す・Web（WordPress が無いときは写す）・
+ * LINE の一斉配信（無料の範囲を超えたら送らない）・店頭の画面・予約・期間の後・メール（段 2）・休業の期間を答える。
+ * 見本の LINE と、記憶だけの店頭の画面・メールの口で確かめる。
  */
 
 import { test } from 'node:test';
@@ -8,10 +9,10 @@ import assert from 'node:assert/strict';
 import { DEFAULT_TENANT_SETTINGS, type TenantSettings } from '@m2office/shared';
 import {
   AnnouncementService, MemoryAnnouncementStore, MockLineClient, StubLlmProvider, ANNOUNCEMENT_TOOLS, plainDraft, readPeriod, announcementDigest, endedTitle,
-  type AnnouncementSignage, type Repository, type TenantCredential, type ToolContext,
+  type AnnouncementMail, type AnnouncementSignage, type Repository, type TenantCredential, type ToolContext,
 } from '../src/index.js';
 
-function setup(opts: { line?: boolean; signage?: boolean } = {}) {
+function setup(opts: { line?: boolean; signage?: boolean; mail?: AnnouncementMail } = {}) {
   MockLineClient.clear();
   let settings: TenantSettings = {
     ...DEFAULT_TENANT_SETTINGS,
@@ -49,6 +50,7 @@ function setup(opts: { line?: boolean; signage?: boolean } = {}) {
     store, repo, box: { encrypt: (v: string) => `enc:${v}`, decrypt: (v: string) => v.slice(4) } as never, llmFor: async () => new StubLlmProvider(),
     line: { repo, box: { encrypt: (v: string) => `enc:${v}`, decrypt: (v: string) => v.slice(4) } as never, sourceFor: () => 'mock' },
     signage, submitter: async () => 'run-1',
+    ...(opts.mail ? { mail: opts.mail } : {}),
   });
   return { service, store, screens, assets, audits, notes, settings: () => settings };
 }
@@ -166,4 +168,76 @@ test('ツール: 承認の前に出し先ごとの見え方と送る数を見せ
   }
   const off = { ...ctx, announcements: { service, access: async () => null } } as unknown as ToolContext;
   assert.equal((await ANNOUNCEMENT_TOOLS.find((t) => t.name === 'announcements.list')!.invoke({}, off) as { available: boolean }).available, false);
+});
+
+/** 記憶だけのメールの口。送った中身を覚える。 */
+function fakeMail(people: { contactId: string; name: string }[]) {
+  const sent: { userId: string; contactIds: string[]; subject: string; body: string }[] = [];
+  const mail: AnnouncementMail = {
+    available: async () => true,
+    suggest: async () => people.map((p) => ({ ...p, company: '株式会社ベータ', email: `${p.contactId}@example.com` })),
+    recipients: async (_t, _u, ids) => people.filter((p) => ids.includes(p.contactId)).map((p) => ({ ...p, company: '株式会社ベータ', email: `${p.contactId}@example.com` })),
+    sender: async () => '窓口のアカウント（info@example.com）',
+    send: async (_t, userId, m) => { sent.push({ userId, ...m }); return { bulkMailId: 'bulk-1', queued: m.contactIds.length, excluded: 0 }; },
+  };
+  return { mail, sent };
+}
+
+test('メール（段 2）: 宛先の案を下書きに入れ、承認の画面に人数と差出人を出し、承認した宛先と中身だけを送る', async () => {
+  const { mail, sent } = fakeMail([{ contactId: 'c1', name: '佐藤' }, { contactId: 'c2', name: '鈴木' }, { contactId: 'c3', name: '高橋' }]);
+  const { service, store, audits } = setup({ mail });
+  const r = await service.draft(who, '年末年始の休業のお知らせ 12/28〜1/5');
+  if (!('announcement' in r)) throw new Error('下書きを作れない');
+  const id = r.announcement.id;
+  assert.ok(r.announcement.channels.includes('mail'));
+  assert.deepEqual(r.announcement.mailContactIds, ['c1', 'c2', 'c3']);
+  assert.match(r.announcement.texts.mail.subject, /年末年始/);
+  assert.match(r.announcement.texts.mail.body, /\{氏名\} 様/);
+  // 宛先から 1 人削除する（画面の「削除」）
+  assert.equal(await service.update(who, id, { mailContactIds: ['c1', 'c3'] }), null);
+  const p = await service.preview(who, id);
+  assert.deepEqual(p!.mail, { count: 2, from: '窓口のアカウント（info@example.com）' });
+  const ctx = { tenantId: 't1', userId: 'boss', announcements: { service, access: async () => ({ enabled: true }) } } as unknown as ToolContext;
+  const prepared = await ANNOUNCEMENT_TOOLS.find((t) => t.name === 'announcements.publish')!.prepare!({ announcementId: id }, ctx);
+  assert.ok(prepared.kind === 'ready' && /■ メール（2 人に、窓口のアカウント（info@example.com）から 1 人に 1 通ずつ/.test(prepared.shown ?? ''));
+  assert.ok(prepared.kind === 'ready' && /- 佐藤（株式会社ベータ） c1@example.com/.test(prepared.shown ?? '') && !/鈴木/.test(prepared.shown ?? ''), '宛先を 1 人ずつ出す（削除した人は出さない）');
+  // 宛先を変えたら、承認した中身と違うので出さない
+  const before = p!.digest;
+  await store.update('t1', id, { mailContactIds: ['c1', 'c2', 'c3'] });
+  assert.ok('error' in await service.publish(who, id, before));
+  assert.equal(sent.length, 0);
+  await store.update('t1', id, { mailContactIds: ['c1', 'c3'] });
+  await service.publish(who, id, announcementDigest((await store.get('t1', id))!));
+  assert.deepEqual(sent.map((m) => m.contactIds), [['c1', 'c3']]);
+  const out = (await store.outputs('t1', id)).find((o) => o.channel === 'mail')!;
+  assert.equal(out.status, 'done');
+  assert.equal(out.result.queued, 2);
+  assert.ok(audits.includes('announcement.mail'));
+});
+
+test('メール（段 2）: 宛先の案が無ければメールを出し先に入れず、宛先が空なら承認へ進めない', async () => {
+  const { service } = setup({ mail: fakeMail([]).mail });
+  const r = await service.draft(who, '臨時休業のお知らせ 10/10');
+  if (!('announcement' in r)) throw new Error('下書きを作れない');
+  assert.equal(r.announcement.channels.includes('mail'), false);
+  const { service: s2 } = setup({ mail: fakeMail([{ contactId: 'c1', name: '佐藤' }]).mail });
+  const r2 = await s2.draft(who, '臨時休業のお知らせ 10/10');
+  if (!('announcement' in r2)) throw new Error('下書きを作れない');
+  await s2.update(who, r2.announcement.id, { mailContactIds: [] });
+  assert.ok((await s2.preview(who, r2.announcement.id))!.problems.includes('メールの宛先がいません'));
+});
+
+test('休業の期間: 出した休業のお知らせを覚え、秘書のツールが答える（第35.7節）', async () => {
+  const { service, store } = setup();
+  const r = await service.draft(who, '年末年始の休業のお知らせ 12/28〜1/5');
+  if (!('announcement' in r)) throw new Error('下書きを作れない');
+  await service.publish(who, r.announcement.id, announcementDigest((await store.get('t1', r.announcement.id))!));
+  const { startDate, endDate } = r.announcement;
+  const next = new Date(Date.parse(`${endDate}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+  assert.deepEqual(await store.closureOn('t1', endDate!), { startDate, endDate });
+  assert.equal(await store.closureOn('t1', next), null);
+  const ctx = { tenantId: 't1', userId: 'boss', announcements: { service, access: async () => ({ enabled: true }) } } as unknown as ToolContext;
+  const res = await ANNOUNCEMENT_TOOLS.find((t) => t.name === 'announcements.closures')!.invoke({}, ctx) as { available: boolean; closures: { startDate: string }[] };
+  assert.equal(res.available, true);
+  assert.ok(res.closures.some((c) => c.startDate === r.announcement.startDate));
 });

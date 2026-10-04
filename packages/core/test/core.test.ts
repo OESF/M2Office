@@ -10,7 +10,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  DEFAULT_TENANT_SETTINGS, DEFAULT_USER_SETTINGS,
+  DEFAULT_TENANT_SETTINGS, DEFAULT_USER_SETTINGS, agentDisplayName,
   type AgentDefinition, type Approval, type Artifact, type AuditEvent, type Job, type Notification, type Run,
   type RunStep, type TenantSettings,
 } from '@m2office/shared';
@@ -1298,4 +1298,13 @@ test('段が必ず呼ぶツールは、その段で使えるツールでなけ�
   for (const t of BUILTIN_TOOLS) registry.register(t);
   const bad: AgentDefinition = { ...SHARE_DEF, steps: SHARE_DEF.steps.map((s) => (s.id === 'share' ? { ...s, required: ['gmail.send'] } : s)) };
   assert.throws(() => validateDefinition(bad, registry), /必ず呼ぶツール/);
+});
+
+test('業務の名前: 削除した業務でも ID をそのまま出さない（仕様書 第6.2.5節）', () => {
+  assert.equal(agentDisplayName('Slack に投稿', 'skill.slack-post:slack-post', '古い名前'), 'Slack に投稿');
+  // 定義が無ければ、依頼のときに残した名前
+  assert.equal(agentDisplayName(undefined, 'skill.slack-post:slack-post', 'Slack に投稿'), 'Slack に投稿');
+  // 移行 078 より前の依頼は、削除したことが分かる形にする
+  assert.equal(agentDisplayName(undefined, 'skill.slack-post:slack-post', null), '削除した業務（slack-post）');
+  assert.equal(agentDisplayName(null, ''), '不明な業務');
 });

@@ -21,7 +21,7 @@ import type { CardCorners,
   ColumnWordPress, WebColumn, WebColumnSettings, WebColumnVersion,
   Inquiry, InquiryDetail, InquiryParty, InquiryTask, InquiryReply, InquiryMailSkipped, InquiryMonthStats, InquirySettings, InquiryFaqTopic,
   CompetitorOverview, CompetitorFact, CompetitorReport, CompetitorSettings,
-  Announcement, AnnouncementDetail, AnnouncementPreview, AnnouncementSettings, AnnouncementTexts,
+  Announcement, AnnouncementDetail, AnnouncementPreview, AnnouncementRecipient, AnnouncementSettings, AnnouncementTexts,
 } from '@m2office/shared';
 import { debugMode, recordCall } from './debug.js';
 
@@ -1258,13 +1258,15 @@ export const api = {
     /** 1 行の欄に書いた頼みから下書きを作る。 */
     draft: (text: string) => call<{ announcement: Announcement }>('/announcements', { method: 'POST', body: JSON.stringify({ text }) }),
     get: (id: string) => call<AnnouncementDetail>(`/announcements/${encodeURIComponent(id)}`),
-    update: (id: string, patch: Partial<{ title: string; body: string; startDate: string | null; endDate: string | null; publishAt: string | null; channels: string[]; texts: AnnouncementTexts }>) =>
+    update: (id: string, patch: Partial<{ title: string; body: string; startDate: string | null; endDate: string | null; publishAt: string | null; channels: string[]; texts: AnnouncementTexts; mailContactIds: string[] }>) =>
       call<{ ok: true }>(`/announcements/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
     remove: (id: string) => call<{ ok: true }>(`/announcements/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     preview: (id: string) => call<AnnouncementPreview>(`/announcements/${encodeURIComponent(id)}/preview`),
     /** 承認へ進める（管理者か承認者が承認すると出る）。 */
     submit: (id: string) => call<{ runId: string }>(`/announcements/${encodeURIComponent(id)}/submit`, { method: 'POST', body: '{}' }),
     cancel: (id: string) => call<{ ok: true }>(`/announcements/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: '{}' }),
+    /** メールの宛先（名刺管理の連絡先）。 */
+    recipients: (id: string) => call<{ recipients: AnnouncementRecipient[] }>(`/announcements/${encodeURIComponent(id)}/recipients`),
     /** WordPress が無い会社が写して使う文。 */
     copy: (id: string) => call<{ html: string; text: string }>(`/announcements/${encodeURIComponent(id)}/copy`),
     lineStatus: () => call<{ line: { followers: number | null; limit: number | null; used: number; remaining: number | null } | null }>('/announcements/line/status'),
