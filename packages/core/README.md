@@ -57,12 +57,14 @@ src/inquiries/   問い合わせの記録（内蔵の拡張。第33章の段 1�
                  次にやること・削除）、名刺管理とのつなぎ（contacts.ts）、見張り（watch.ts。期限と手つかずの知らせ・原文を 90 日で消す）、
                  窓口のアカウント（mailbox.ts。Gmail API と見本の箱）、メールの見分け（mail.ts）、月の振り返り（review.ts）、
                  LINE 公式アカウント（line.ts。署名の確かめ・Messaging API と見本の口・メッセージの読み方）、
-                 ツール（tools.ts。inquiries.record・list・reply_draft・reply_send・brief・review・faq）、付属の業務（agents.ts。残す・調べる・返事の下書き・返事を送る）
-src/competitors/ 競合の分析（内蔵の拡張。第36章の段 1・段 2・段 3 の一部）。公開のページを読む口（fetcher.ts。つなぐ瞬間に社内のアドレスを断る・見本の口）、
+                 ツール（tools.ts。inquiries.record・list・reply_draft・reply_send・brief・review・faq）、付属の業務（agents.ts。残す・調べる・返事の下書き・返事を送る）、
+                 ほかの拡張へのつなぎ（links.ts。Web の振り返りの月の便りに並べる月の件数。件数だけ）
+src/competitors/ 競合の分析（内蔵の拡張。第36章の段 1〜3）。公開のページを読む口（fetcher.ts。つなぐ瞬間に社内のアドレスを断る・見本の口）、
                  robots.txt（robots.ts。RFC 9309・24 時間覚える）、HTML の読み方（html.ts）、Places API（places.ts。見本の地図）、
                  推論（analyze.ts。自社の像・商圏・候補の確かめ・読むページ・事実・レポート）、1 サイトを読む（reader.ts）、
                  置き場（store.ts。PostgreSQL とメモリ）、処理と作業（service.ts。探す・入れる・外す・読む・レポート・ワーカーの CompetitorWatch）、
-                 ツール（tools.ts。competitors.list・facts・report・discover・add・remove・check）、付属の業務（agents.ts。探す・分析）
+                 ツール（tools.ts。competitors.list・facts・report・discover・add・remove・check）、付属の業務（agents.ts。探す・分析）、
+                 ほかの拡張へのつなぎ（links.ts。月の動きの数・話題を載せている競合の数。名前は渡さない）
 src/web-review/  Web の振り返り（内蔵の拡張。第34章の段 1・段 2）。担当の許可で読む口（data.ts。GA4 のデータと管理の API・Search Console の API と URL の検査・PageSpeed Insights・
                  見本の口 MockWebData）、数字（figures.ts。期間・サイトの選び方・月の便りの数字・秘書の問い。数字はここで計算する）、
                  置き場（store.ts。月の便り・直すべき所・ページごとの数字。PostgreSQL とメモリ）、処理（service.ts。つなぐ・外す・選ぶ・状態と依頼文の下書き・問い・

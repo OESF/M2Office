@@ -34,6 +34,36 @@ export function closedReason(settings: { businessDays?: number[]; holidaysClosed
   return null;
 }
 
+/** 営業日でない理由の言い方（秘書が候補を出すときに添える）。 */
+export const CLOSED_REASON_LABELS: Record<Exclude<ClosedReason, null>, string> = {
+  weekday: '営業しない曜日', holiday: '祝日（休み）', closure: '休業（お知らせで出した期間）',
+};
+
+/**
+ * 期間の中の、会社の営業日でない日（秘書が予定の候補を出すときに避ける。第35.7節。第 0.247.0 版）。
+ *
+ * @param from 期間の始め（ISO の日時か日付。日本時間の日付で見る）
+ * @param to 期間の終わり
+ * @returns 日付と理由。多くて 62 日分を見る
+ */
+export async function closedDaysBetween(
+  settings: { businessDays?: number[]; holidaysClosed?: boolean }, from: string, to: string,
+  closedOn?: (day: string) => Promise<boolean>,
+): Promise<{ date: string; reason: string }[]> {
+  const day = (v: string) => new Date(Date.parse(v) + 9 * 3_600_000).toISOString().slice(0, 10);
+  if (Number.isNaN(Date.parse(from)) || Number.isNaN(Date.parse(to))) return [];
+  const out: { date: string; reason: string }[] = [];
+  let d = day(from);
+  const end = day(to);
+  for (let i = 0; i < 62 && d <= end; i++) {
+    const closed = closedOn ? await closedOn(d).catch(() => false) : false;
+    const why = closedReason(settings, d, closed);
+    if (why) out.push({ date: d, reason: CLOSED_REASON_LABELS[why] });
+    d = new Date(Date.parse(`${d}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+  }
+  return out;
+}
+
 /**
  * その日が会社の営業日かを確かめる関数を作る（定時実行が使う）。
  */

@@ -2025,6 +2025,8 @@ export const api = {
     /** お知らせの作成の設定（Web の出し方・カテゴリー。第35.4節）。 */
     setAnnouncementSettings: (patch: Partial<{ webPublish: 'publish' | 'draft'; webCategory: string; screens: string[] | null }>) =>
       call<{ ok: true }>('/admin/extensions/announcements/settings', { method: 'PUT', body: JSON.stringify(patch) }),
+    /** お知らせを流す画面の選び先（店頭サイネージの画面。`selected` が `null` ならすべて）。 */
+    announcementScreens: () => call<{ screens: { id: string; name: string }[]; selected: string[] | null }>('/admin/extensions/announcements/screens'),
     /** 競合の分析で自動で覚える数（1〜20）を変える。 */
     setCompetitorAutoMax: (autoMax: number) => call<{ ok: true }>('/admin/extensions/competitors/settings', { method: 'PUT', body: JSON.stringify({ autoMax }) }),
     /** 競合の分析の定期の見回りの間隔（毎月・毎週・しない）を変える。 */

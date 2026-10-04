@@ -9,11 +9,11 @@ import assert from 'node:assert/strict';
 import { DEFAULT_TENANT_SETTINGS, type Notification, type TenantCredential, type TenantSettings } from '@m2office/shared';
 import {
   MemoryWebReviewStore, MockWebData, WebReviewService, WEB_REVIEW_TOOLS, accessRequestDraft, answerAsk, checkAsk, monthFigures, periodRange, pickSite, plainWebReport,
-  findIssues, rankBand, requestDraftFor, type WebReviewColumns,
+  findIssues, rankBand, requestDraftFor, inquiryCountsFrom, closedDaysBetween, MockWorkspaceConnector, BUILTIN_TOOLS, type WebReviewColumns, type InquiryStore,
   type Repository, type ToolContext,
 } from '../src/index.js';
 
-function setup(opts: { website?: string; columns?: WebReviewColumns } = {}) {
+function setup(opts: { website?: string; columns?: WebReviewColumns; links?: Partial<Pick<ConstructorParameters<typeof WebReviewService>[0], 'inquiries' | 'competitors' | 'closedOn'>> } = {}) {
   let settings: TenantSettings = {
     ...DEFAULT_TENANT_SETTINGS,
     company: { ...DEFAULT_TENANT_SETTINGS.company, legalName: '株式会社アルファ商事', shortName: 'アルファ', website: opts.website ?? 'https://www.alpha.example.jp/' },
@@ -43,7 +43,7 @@ function setup(opts: { website?: string; columns?: WebReviewColumns } = {}) {
   } as unknown as Repository;
   const store = new MemoryWebReviewStore();
   const service = new WebReviewService({
-    store, repo, llmFor: async () => null, ...(opts.columns ? { columns: opts.columns } : {}),
+    store, repo, llmFor: async () => null, ...(opts.columns ? { columns: opts.columns } : {}), ...(opts.links ?? {}),
     data: { repo, box: { encrypt: (s: string) => `enc:${s}`, decrypt: (s: string) => s.slice(4) } as never, sourceFor: () => 'mock' },
   });
   return { service, store, notes, audits, creds, settings: () => settings };
@@ -265,5 +265,61 @@ test('ツール: 直すべき所を理由と依頼文つきで返す（送らな
   assert.equal(r.items.length, 1);
   assert.equal(r.items[0]!.kind, 'スマホで遅いページ');
   assert.match(r.items[0]!.requestDraft!.subject, /Web サイトの直しのお願い/);
+});
+
+test('段 3: 月の便りに問い合わせの件数と競合の動きを並べる（件数だけ。問い合わせは推論に渡さない）', async () => {
+  const { service, store } = setup({ links: {
+    inquiries: { monthCounts: async () => ({ value: 12, previous: 8, bySource: [{ label: '検索', count: 5 }, { label: '紹介', count: 4 }] }) },
+    competitors: { monthMoves: async () => ({ changes: 3, kinds: [{ label: 'キャンペーン', count: 3 }] }), topicCounts: async (_t, words) => new Map(words.map((w) => [w, 2])) },
+    closedOn: async (_t, d) => d >= '2026-09-21' && d <= '2026-09-23',
+  } });
+  await service.connect(boss, { email: 'boss@alpha.example.jp', refreshToken: null });
+  await service.createMonthly('t1', '2026-09');
+  const r = (await store.get('t1', '2026-09'))!;
+  assert.deepEqual(r.figures.inquiryRecords, { value: 12, previous: 8, bySource: [{ label: '検索', count: 5 }, { label: '紹介', count: 4 }] });
+  assert.match(r.summary, /問い合わせの記録では、問い合わせが 12 件（前の月 8 件）、そのうち Web や検索で知った人が 5 件でした/);
+  assert.equal(r.figures.competitors?.changes, 3);
+  assert.equal(r.figures.closureDays, 3);
+  assert.match(r.concern, /9 月は休業の期間が 3 日あり/);
+  assert.ok(r.next.some((x) => /近くの同業の動き（3 件）/.test(x)));
+  // 合う記事が無い言葉には、その話題を載せている競合の数を添える（名前は入れない）
+  await service.checkFindings('t1', OCT4);
+  const missing = (await service.findings('t1')).find((f) => f.kind === 'missingContent')!;
+  assert.match(missing.advice, /見ている競合のうち 2 社が、この話題をページに載せています/);
+});
+
+test('問い合わせの件数: 届いた月で数え、前の月と、どこで知ったかの内訳を返す。使っていない会社では返さない', async () => {
+  let enabled = true;
+  const repo = { getTenantSettings: async () => ({ ...DEFAULT_TENANT_SETTINGS, inquiries: { ...DEFAULT_TENANT_SETTINGS.inquiries, enabled } }) } as unknown as Repository;
+  const at = (d: string) => new Date(`${d}T10:00:00+09:00`).toISOString();
+  const items = [
+    { createdAt: at('2026-09-02'), source: '検索' }, { createdAt: at('2026-09-20'), source: '検索' }, { createdAt: at('2026-09-30'), source: '' },
+    { createdAt: at('2026-08-15'), source: '紹介' }, { createdAt: at('2026-10-01'), source: '検索' },
+  ];
+  const store = { list: async () => items } as unknown as InquiryStore;
+  const c = inquiryCountsFrom({ store, repo });
+  assert.deepEqual(await c.monthCounts('t1', '2026-09'), { value: 3, previous: 1, bySource: [{ label: '検索', count: 2 }, { label: '不明', count: 1 }] });
+  enabled = false;
+  assert.equal(await c.monthCounts('t1', '2026-09'), null);
+});
+
+test('予定の候補: 会社の営業日でない日（営業しない曜日・祝日・休業の期間）を返す（第35.7節）', async () => {
+  const days = await closedDaysBetween({ businessDays: [1, 2, 3, 4, 5], holidaysClosed: true }, '2026-11-01T00:00:00+09:00', '2026-11-05T00:00:00+09:00',
+    async (d) => d === '2026-11-04');
+  assert.deepEqual(days, [
+    { date: '2026-11-01', reason: '営業しない曜日' }, { date: '2026-11-03', reason: '祝日（休み）' }, { date: '2026-11-04', reason: '休業（お知らせで出した期間）' },
+  ]);
+});
+
+test('予定の空き: 会社の営業日でない日を添え、候補にしないよう伝える（お知らせで出した休業も）', async () => {
+  const freebusy = BUILTIN_TOOLS.find((t) => t.name === 'calendar.freebusy')!;
+  const ctx = {
+    tenantId: 't1', userId: 'u1', connector: new MockWorkspaceConnector(),
+    repo: { getTenantSettings: async () => ({ ...DEFAULT_TENANT_SETTINGS, company: { ...DEFAULT_TENANT_SETTINGS.company, businessDays: [1, 2, 3, 4, 5], holidaysClosed: true } }) },
+    closedOn: async (d: string) => d === '2026-11-04',
+  } as unknown as ToolContext;
+  const r = await freebusy.invoke({ emails: ['u1@alpha.example.jp'], from: '2026-11-02T00:00:00+09:00', to: '2026-11-06T00:00:00+09:00' }, ctx) as { companyClosed: { date: string }[]; closedNote: string };
+  assert.deepEqual(r.companyClosed.map((x) => x.date), ['2026-11-03', '2026-11-04']);
+  assert.match(r.closedNote, /候補を出さない/);
 });
 

@@ -287,6 +287,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/web-review/findings` ／ `PATCH /v1/web-review/findings/:id` ／ `POST /v1/web-review/check` | 直すべき所（第34.19節。`all=1` で済んだ・見送りも）／ 状態を変える（`status`: new・seen・done・dismissed）／ 管理者: 今すぐチェック（ワーカーが次の見回りで探す）。`GET /v1/columns/:id` は、Web の振り返りを使える人に公開されたコラムの数字（`webMetrics`）を添える |
 | `POST /v1/admin/extensions/web-review/connect` ／ `DELETE /v1/admin/extensions/web-review/connection` | 管理者: 担当の許可をつなぐ（Google の認可の URL。アナリティクスと Search Console の読み取りだけを求め、前に許した権限を引き継がない。見本の会社ではすぐつながる）／ 外す（Google の許可も取り消す。便りは消さない） |
 | `GET /v1/admin/extensions/web-review/candidates` ／ `PUT /v1/admin/extensions/web-review/selection` | 管理者: 担当が見られるプロパティとサイトと状態 ／ プロパティとサイトを選ぶ（`propertyId`・`siteUrl`。見られるものの中からだけ） |
+| `GET /v1/admin/extensions/announcements/screens` | 管理者: お知らせを流す画面の選び先（店頭サイネージの画面）と、いま選んでいる画面（`selected`。`null` ならすべて。第35.17節） |
 | `GET /v1/announcements/line/status` ／ `PUT /v1/admin/extensions/announcements/settings` | LINE の友だちの数と今月の残り ／ 管理者: Web の出し方（`webPublish`: publish・draft）・カテゴリー（`webCategory`）・流す画面（`screens`） |
 | `GET /v1/competitors` | 競合の分析（仕様書 第36.18節）: 全体（自社の像・競合・動いている作業・最後の作業・地図の注意）。地図で見つけた競合の名前と Web サイトはここで引き直す。使えない会社と利用範囲の外の人には、`/v1/competitors` のどの口も 403 |
 | `POST /v1/competitors/discover` ／ `POST /v1/competitors/check` | 競合を探す作業（`radiusKm`・`nationwide`・`auto` で商圏を変える）／ 今すぐ見回る作業を受け付ける（202。ワーカーが行う。動いていれば `already`） |

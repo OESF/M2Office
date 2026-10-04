@@ -94,10 +94,12 @@ function Row({ c, open, onToggle, onRemove, busy }: { c: Competitor; open: boole
  *
  * @param changeKey 秘書が競合の分析を動かしたら変わる（読み直す）
  */
-export function Competitors({ changeKey = '', onColumn }: {
+export function Competitors({ changeKey = '', onColumn, onAnnouncement }: {
   changeKey?: string;
   /** コラムの話題でコラムを書き始める（コラムの作成を使える人だけに渡す） */
   onColumn?: (theme: string) => Promise<void>;
+  /** お知らせの案でお知らせの下書きを作る（お知らせの作成を使える人だけに渡す。第36.21節） */
+  onAnnouncement?: (text: string) => Promise<void>;
 }) {
   const [o, setO] = useState<CompetitorOverview | null>(null);
   const [reports, setReports] = useState<CompetitorReport[]>([]);
@@ -202,6 +204,17 @@ export function Competitors({ changeKey = '', onColumn }: {
                 <ul>
                   {r.themes.map((t) => (
                     <li key={t}>{t}{onColumn && <button className="btn ghost small" disabled={busy} onClick={() => run(() => onColumn(t), 'コラムを書き始めました', setTopNote)}>コラムにする</button>}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {shownReport === r.id && (r.announcementIdeas ?? []).length > 0 && (
+              <div className="competitors-themes">
+                <h4>お知らせの案</h4>
+                <ul>
+                  {r.announcementIdeas!.map((x) => (
+                    <li key={x.text}>{x.text} <span className="muted small">{x.why}</span>
+                      {onAnnouncement && <button className="btn ghost small" disabled={busy} onClick={() => run(() => onAnnouncement(x.text), 'お知らせの下書きを作りました', setTopNote)}>お知らせにする</button>}</li>
                   ))}
                 </ul>
               </div>

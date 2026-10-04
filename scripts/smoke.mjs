@@ -5686,7 +5686,7 @@ console.log('\n■ 72. Web の振り返りの段 1・段 2（担当の許可・�
   const { default: pg } = await import('pg');
   const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
   await owner.connect();
-  const { rows: saved } = await owner.query(`select tenant_id, web_review, company from tenant_settings where tenant_id = 't-alpha'`);
+  const { rows: saved } = await owner.query(`select tenant_id, web_review, company, inquiries, announcements from tenant_settings where tenant_id = 't-alpha'`);
   const { tsImport } = await import('tsx/esm/api');
   const core = await tsImport('../packages/core/src/index.ts', import.meta.url);
   const repo = new core.PostgresRepository(process.env.DATABASE_URL ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
@@ -5722,17 +5722,24 @@ console.log('\n■ 72. Web の振り返りの段 1・段 2（担当の許可・�
     entry && !JSON.stringify(entry).includes('refresh') && JSON.stringify(entry).includes('alpha.example.jp')
       ? ok('拡張機能の一覧に担当のアカウントと選んだサイトを出し、許可の鍵は返さない') : ng('拡張機能の一覧が違う', JSON.stringify(entry ?? ext).slice(0, 300));
 
-    // 月の便り（ワーカーが毎月 3 日に作る。ここでは同じ処理を直接呼ぶ）
-    const service = new core.WebReviewService({ store, repo, data: { repo, box: { encrypt: (v) => v, decrypt: (v) => v }, sourceFor: () => 'mock' }, llmFor: async () => null });
+    // 月の便り（ワーカーが毎月 3 日に作る。ここでは同じ処理を直接呼ぶ）。問い合わせの記録を使っていれば件数を並べる（段 3）
+    await call('a', '/v1/admin/extensions/inquiries/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const inquiryStore = new core.PostgresInquiryStore(process.env.DATABASE_URL ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
+    const service = new core.WebReviewService({
+      store, repo, data: { repo, box: { encrypt: (v) => v, decrypt: (v) => v }, sourceFor: () => 'mock' }, llmFor: async () => null,
+      inquiries: core.inquiryCountsFrom({ store: inquiryStore, repo }),
+    });
     const month = core.lastMonthOf(new Date());
     await service.createMonthly('t-alpha', month);
     const after = (await call('a', '/v1/web-review', {}, 'member')).body;
     const r = after?.latest;
     r?.month === month && r.summary && r.next?.length >= 1 && r.figures?.analytics?.users?.value > 0 && r.figures?.search?.clicks?.value > 0
       && after.reports?.length === 1
-      ? ok('月の便りに、プログラムが計算した数字と、要約・よかったこと・気になること・次にやることを入れる')
+      && r.figures?.inquiryRecords && typeof r.figures.inquiryRecords.value === 'number' && /問い合わせの記録では/.test(r.summary)
+      ? ok('月の便りに、プログラムが計算した数字と、要約・よかったこと・気になること・次にやることと、問い合わせの記録の件数を入れる')
       : ng('月の便りが違う', JSON.stringify(after).slice(0, 400));
     await service.createMonthly('t-alpha', month);
+    await inquiryStore.close?.();
     const { rows: count } = await owner.query(`select count(*)::int as n from web_review_reports where tenant_id = 't-alpha'`);
     count[0].n === 1 ? ok('月の便りは月に 1 回だけ') : ng(`便りが ${count[0].n} 個ある`);
     const { body: notes } = await call('a', '/v1/notifications');
@@ -5778,6 +5785,11 @@ console.log('\n■ 72. Web の振り返りの段 1・段 2（担当の許可・�
     const acts = (audits.items ?? []).map((e) => e.action);
     ['web_review.connect', 'web_review.select', 'web_review.report', 'web_review.check', 'web_review.finding'].every((x) => acts.includes(x))
       ? ok('つないだ・選んだ・便りを作った・直すべき所を探した・状態を変えたを監査ログに残す') : ng('監査ログが違う', JSON.stringify(acts.filter((x) => x.startsWith('web_review.'))));
+    // お知らせを流す画面の選び先（第35.17節）。管理者の口
+    const scrMember = await call('a', '/v1/admin/extensions/announcements/screens', {}, 'member');
+    const scr = await call('a', '/v1/admin/extensions/announcements/screens');
+    scrMember.status === 403 && scr.status === 200 && Array.isArray(scr.body?.screens) && 'selected' in (scr.body ?? {})
+      ? ok('お知らせを流す画面の選び先を管理者に返す') : ng('流す画面の選び先が違う', JSON.stringify({ member: scrMember.status, status: scr.status, body: scr.body }));
     const disc = await call('a', '/v1/admin/extensions/web-review/connection', { method: 'DELETE' });
     const gone = (await call('a', '/v1/web-review', {}, 'member')).body;
     disc.status === 200 && gone?.status?.state === 'notConnected' && gone.latest?.month === month
@@ -5787,7 +5799,8 @@ console.log('\n■ 72. Web の振り返りの段 1・段 2（担当の許可・�
   } finally {
     await cleanup();
     await owner.query(`delete from notifications where tenant_id = 't-alpha' and kind = 'webReview'`).catch(() => undefined);
-    for (const r of saved) await owner.query(`update tenant_settings set web_review = $2, company = $3 where tenant_id = $1`, [r.tenant_id, r.web_review ? JSON.stringify(r.web_review) : null, r.company ? JSON.stringify(r.company) : null]);
+    for (const r of saved) await owner.query(`update tenant_settings set web_review = $2, company = $3, inquiries = $4, announcements = $5 where tenant_id = $1`,
+      [r.tenant_id, r.web_review ? JSON.stringify(r.web_review) : null, r.company ? JSON.stringify(r.company) : null, r.inquiries ? JSON.stringify(r.inquiries) : null, r.announcements ? JSON.stringify(r.announcements) : null]);
     await store.close();
     await repo.close?.();
     await owner.end();

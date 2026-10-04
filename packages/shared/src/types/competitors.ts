@@ -134,6 +134,10 @@ export interface CompetitorReport {
   changes: number;
   /** コラムの話題の案（第36.20節。競合の名前は入れない） */
   themes: string[];
+  /** 出すとよいお知らせの案（第36.21節。競合の名前は入れない。`text` はお知らせの作成への頼みにそのまま使う） */
+  announcementIdeas?: { text: string; why: string }[];
+  /** 前の回から変わった事実の種類ごとの数（第36.21節。Web の振り返りの月の便りに添える） */
+  changeKinds?: Partial<Record<CompetitorFactKind, number>>;
   createdBy: string;
   createdAt: string;
 }

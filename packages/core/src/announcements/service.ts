@@ -498,6 +498,15 @@ export class AnnouncementService {
     return this.deps.mail.recipients(who.tenantId, who.userId, a.mailContactIds);
   }
 
+  /**
+   * 流す画面の選び先（拡張機能の設定の欄。第35.17節。第 0.247.0 版）。店頭サイネージを使っていなければ空。
+   */
+  async screenChoices(tenantId: string): Promise<{ screens: { id: string; name: string }[]; selected: string[] | null }> {
+    const settings = (await this.deps.repo.getTenantSettings(tenantId)).announcements;
+    if (!this.deps.signage || !(await this.deps.signage.enabled(tenantId).catch(() => false))) return { screens: [], selected: settings.screens };
+    return { screens: await this.deps.signage.screens(tenantId).catch(() => []), selected: settings.screens };
+  }
+
   /** 流す画面（会社の設定。無ければすべて）。 */
   private async targetScreens(tenantId: string, settings: AnnouncementSettings): Promise<{ id: string; name: string }[]> {
     const all = await this.deps.signage!.screens(tenantId).catch(() => []);

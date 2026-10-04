@@ -121,7 +121,7 @@ export const competitorsReport: Tool = {
     if (!service) return UNAVAILABLE;
     const [r] = await service.reports(who(ctx), 1);
     if (!r) return { available: false, reason: 'レポートはまだありません。「競合を探して」か「今すぐ見回って」と頼んでください', path: PATH };
-    return { available: true, untrusted: true, path: PATH, period: r.period, createdAt: r.createdAt, changes: r.changes, columnThemes: r.themes, report: r.text };
+    return { available: true, untrusted: true, path: PATH, period: r.period, createdAt: r.createdAt, changes: r.changes, columnThemes: r.themes, announcementIdeas: r.announcementIdeas ?? [], report: r.text };
   },
 };
 

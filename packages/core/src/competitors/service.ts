@@ -9,7 +9,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   COMPETITORS_AUTO_RANGE, COMPETITORS_EXTENSION_ID, competitorAutoMax, competitorsMax, competitorWatch, canUseAgent,
-  type Competitor, type CompetitorFact, type CompetitorWatchInterval, type CompetitorJob, type CompetitorOverview, type CompetitorProfile, type CompetitorReport, type CompetitorSettings,
+  type Competitor, type CompetitorFact, type CompetitorFactKind, type CompetitorWatchInterval, type CompetitorJob, type CompetitorOverview, type CompetitorProfile, type CompetitorReport, type CompetitorSettings,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { SecretBox } from '../secrets/box.js';
@@ -17,7 +17,7 @@ import type { LlmProvider } from '../llm/provider.js';
 import { silentLogger, type Logger } from '../log/logger.js';
 import { dateIn } from '../cards/service.js';
 import {
-  checkCandidates, movesOf, suggestThemes, decideArea, extractFacts, findUrlByName, suggestCompetitors, summarizeProfile, writeReport,
+  checkCandidates, movesOf, suggestThemes, suggestAnnouncements, decideArea, extractFacts, findUrlByName, suggestCompetitors, summarizeProfile, writeReport,
   type AreaDecision, type Candidate, type ExtractedFact, type ReportSubject,
 } from './analyze.js';
 import { HttpPageFetcher, MockPageFetcher, checkUrl, type PageFetcher } from './fetcher.js';
@@ -527,15 +527,20 @@ export class CompetitorService {
     }
     const llm = await this.deps.llmFor(who.tenantId).catch(() => null);
     const names = subjects.map((x) => x.name);
-    const [written, themes, mentions] = await Promise.all([
+    const [written, themes, mentions, announcementIdeas] = await Promise.all([
       writeReport(llm, profile, subjects), suggestThemes(llm, profile, subjects, names), this.inquiryMentions(who.tenantId, names, now),
+      suggestAnnouncements(llm, profile, subjects, names),
     ]);
     // 問い合わせで名前が出た競合は、件数だけを添える（誰からの問い合わせかは入れない。第36.9節）
     const text = mentions.length
       ? `${written}\n\n## 問い合わせで名前が出た競合\n${mentions.map((m) => `- ${m.name}: ${m.count} 件`).join('\n')}`
       : written;
-    const moves = subjects.flatMap((x) => movesOf(x).map((f) => `${x.name}: ${f.text}`));
-    const report = { period: competitorPeriodOf(now), text, changes: moves.length, themes, createdBy: who.userId };
+    const moved = subjects.flatMap((x) => movesOf(x).map((f) => ({ name: x.name, f })));
+    const moves = moved.map((m) => `${m.name}: ${m.f.text}`);
+    // 変わった事実の種類ごとの数（Web の振り返りの月の便りに添える。第36.21節）
+    const changeKinds: Partial<Record<CompetitorFactKind, number>> = {};
+    for (const { f } of moved) changeKinds[f.kind] = (changeKinds[f.kind] ?? 0) + 1;
+    const report = { period: competitorPeriodOf(now), text, changes: moves.length, themes, announcementIdeas, changeKinds, createdBy: who.userId };
     const id = await store.addReport(who.tenantId, report);
     await this.audit(who, 'competitor.report', id, { competitors: subjects.length, changes: moves.length });
     return { report: { ...report, id, createdAt: new Date().toISOString() }, highlights: moves.slice(0, 3) };

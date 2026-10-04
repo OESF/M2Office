@@ -696,7 +696,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
             <>
               <h1>競合の分析 <HelpTip article="start-competitors">近くの同業や同じような事業の会社を AI が探し、公開のページから動きと違いをまとめます。</HelpTip></h1>
               <Competitors changeKey={competitorChangeKey}
-                {...(me.webColumns ? { onColumn: async (theme: string) => { const { id } = await api.columns.create(theme, '競合の動きから（競合の名前は入れていません。他社と比べる書き方にしないでください）'); setView({ kind: 'columns', columnId: id }); } } : {})} />
+                {...(me.webColumns ? { onColumn: async (theme: string) => { const { id } = await api.columns.create(theme, '競合の動きから（競合の名前は入れていません。他社と比べる書き方にしないでください）'); setView({ kind: 'columns', columnId: id }); } } : {})}
+                {...(me.announcements ? { onAnnouncement: async (text: string) => { const r = await api.announcements.draft(text); setView({ kind: 'announcements', announcementId: r.announcement.id }); } } : {})} />
             </>
           )}
           {view.kind === 'signage' && (

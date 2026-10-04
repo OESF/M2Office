@@ -13,3 +13,4 @@ export * from './service.js';
 export * from './tools.js';
 export * from './agents.js';
 export { MOCK_SITES } from './mock-sites.js';
+export { competitorLinksFrom, type CompetitorLinks } from './links.js';

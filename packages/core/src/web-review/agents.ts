@@ -11,7 +11,7 @@ import { WEB_REVIEW_EXTENSION_ID, type AgentDefinition } from '@m2office/shared'
 import type { ExtensionPackage } from '../extensions/loader.js';
 
 /** 内蔵の拡張の版。付属の業務やツールが変わったら上げる。 */
-export const WEB_REVIEW_EXTENSION_VERSION = '1.1.0';
+export const WEB_REVIEW_EXTENSION_VERSION = '1.2.0';
 
 const TOOLS = ['web_review.report', 'web_review.ask', 'web_review.status', 'web_review.select', 'web_review.findings'];
 

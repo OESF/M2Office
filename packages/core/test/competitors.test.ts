@@ -11,6 +11,7 @@ import {
   CompetitorService, CompetitorWatch, MemoryCompetitorStore, MockPageFetcher, MOCK_SITES, StubLlmProvider, COMPETITOR_TOOLS,
   checkUrl, crawlerUserAgent, isBlockedAddress, parseRobots, readHtml, robotsAllows,
   type Repository, type ToolContext,
+  suggestAnnouncements, competitorLinksFrom,
 } from '../src/index.js';
 
 function setup(over: Partial<TenantSettings['company']> = {}) {
@@ -355,4 +356,35 @@ test('コラムの赤入れ: 他社と比べる表現（景品表示法の比較
   const { ruleReview } = await import('../src/columns/review.js');
   const items = ruleReview('当店は他店より安く、地域最安です。', [], 1);
   assert.ok(items.some((i) => /比較広告/.test(i.reason)));
+});
+
+test('お知らせの案: 営業時間・キャンペーン・サービスの動きから 2 つまで挙げ、競合の名前を入れない。動きが無ければ出さない（第36.21節）', async () => {
+  const subject = (facts: { kind: 'hours' | 'campaign' | 'news'; text: string }[], previous: typeof facts) => ({
+    name: '見本の店', url: 'https://rival.example.jp', distanceM: 300, rating: null, ratingCount: null, readNote: '',
+    facts: facts.map((f) => ({ ...f, sourceUrl: 'https://rival.example.jp/news' })), previous: previous.map((f) => ({ ...f, sourceUrl: 'https://rival.example.jp/news' })),
+  });
+  const moved = subject([{ kind: 'hours', text: '見本の店は年末年始 12/29〜1/3 休み' }, { kind: 'campaign', text: '冬のキャンペーン 10% 引き' }], [{ kind: 'news', text: '前の回の事実' }]);
+  const ideas = await suggestAnnouncements(null, { business: '見本の業種' }, [moved], ['見本の店']);
+  assert.equal(ideas.length, 2);
+  assert.ok(ideas.every((x) => !x.text.includes('見本の店') && !x.why.includes('見本の店')));
+  assert.match(ideas[0]!.text, /営業時間/);
+  assert.deepEqual(await suggestAnnouncements(null, null, [subject([{ kind: 'news', text: 'お知らせ' }], [{ kind: 'news', text: 'お知らせ' }])], []), [], '動きが無ければ出さない');
+});
+
+test('ほかの拡張へのつなぎ: 月の動きの数を種類ごとに数え、話題を載せている競合の数だけを返す（名前は渡さない）', async () => {
+  let settings: TenantSettings = { ...DEFAULT_TENANT_SETTINGS, competitors: { ...DEFAULT_TENANT_SETTINGS.competitors, enabled: true } };
+  const repo = { getTenantSettings: async () => settings } as unknown as Repository;
+  const store = new MemoryCompetitorStore();
+  await store.addReport('t1', { period: '2026-09', text: '', changes: 3, themes: [], changeKinds: { campaign: 2, hours: 1 }, createdBy: 'boss' });
+  const links = competitorLinksFrom({ store, repo });
+  const month = new Date(Date.now() + 9 * 3_600_000).toISOString().slice(0, 7);
+  assert.deepEqual(await links.monthMoves('t1', month), { changes: 3, kinds: [{ label: 'キャンペーン', count: 2 }, { label: '営業時間', count: 1 }] });
+  assert.equal(await links.monthMoves('t1', '2001-01'), null);
+  const id = await store.add('t1', { name: '', url: 'https://rival.example.jp', origin: 'manual', status: 'watching' } as never);
+  await store.replaceFacts('t1', id, '2026-09', [{ kind: 'service', text: '冬の乾燥 対策 の相談', sourceUrl: 'https://rival.example.jp/s' }] as never);
+  const counts = await links.topicCounts('t1', ['冬 乾燥 対策', '花粉']);
+  assert.equal(counts.get('冬 乾燥 対策'), 1);
+  assert.equal(counts.get('花粉'), 0);
+  settings = { ...settings, competitors: { ...settings.competitors, enabled: false } };
+  assert.equal(await links.monthMoves('t1', month), null, '切っている会社では返さない');
 });

@@ -59,6 +59,15 @@ function Figures({ r }: { r: WebReviewReport }) {
           <div><h4>押された検索の言葉</h4><ul>{s.topQueries.map((q) => <li key={q.query}>{q.query} <span className="muted">{num(q.clicks)} 回</span></li>)}</ul></div>
         )}
       </div>
+      {r.figures.inquiryRecords && (
+        <p className="small">問い合わせの記録: {r.figures.inquiryRecords.value} 件（前の月 {r.figures.inquiryRecords.previous} 件）
+          {r.figures.inquiryRecords.bySource.length > 0 && <span className="muted">　{r.figures.inquiryRecords.bySource.slice(0, 5).map((x) => `${x.label} ${x.count}`).join('・')}</span>}</p>
+      )}
+      {!!r.figures.closureDays && <p className="small">休業の期間: {r.figures.closureDays} 日</p>}
+      {r.figures.competitors && r.figures.competitors.changes > 0 && (
+        <p className="small">近くの同業の動き: {r.figures.competitors.changes} 件
+          <span className="muted">　{r.figures.competitors.kinds.map((x) => `${x.label} ${x.count}`).join('・')}</span></p>
+      )}
       {r.figures.missing.length > 0 && <p className="muted small">取得できなかったもの: {r.figures.missing.join('／')}</p>}
     </div>
   );

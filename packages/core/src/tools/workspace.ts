@@ -10,6 +10,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { closedDaysBetween } from '../scheduler/business-days.js';
 import type { PreparedCall, Tool, ToolContext } from './registry.js';
 import { canDecide } from '@m2office/shared';
 import { addDays, jst, ymd } from '../connectors/mock.js';
@@ -163,8 +164,12 @@ export const calendarFreeBusy: Tool = {
     const from = str(args['from']) || jst(addDays(today, 1), 0);
     const to = str(args['to']) || jst(addDays(today, 8), 0);
     const { busy, unknown } = await ctx.connector.calendar.freeBusy(principal(ctx), { emails, from, to });
+    // 会社の営業日でない日（営業しない曜日・祝日・お知らせで出した休業。第35.7節）。候補から外す
+    const company = (await ctx.repo.getTenantSettings(ctx.tenantId).catch(() => null))?.company;
+    const companyClosed = company ? await closedDaysBetween(company, from, to, ctx.closedOn ? (d) => ctx.closedOn!(d) : undefined) : [];
     return {
       source: ctx.connector.sourceFor(ctx.tenantId), available: true, from, to, busy,
+      ...(companyClosed.length > 0 ? { companyClosed, closedNote: '会社の営業日でない日です。依頼で日にちを指定されたときを除き、この日には候補を出さないでください' } : {}),
       // 予定を見られなかった人を「空き」とみなさない（仕様書 第14.3.4節）
       ...(unknown.length > 0 ? { unknown, note: '次の人は予定を見られなかったため、空いているかどうか分かりません。候補を出すときは、そのことを書いてください' } : {}),
     };

@@ -443,6 +443,9 @@ export function extensionsRoute(deps: AppDeps) {
     return c.json({ ok: true });
   });
 
+  /** お知らせの作成: 流す画面の選び先（店頭サイネージの画面）と、いま選んでいる画面（`null` ならすべて）。 */
+  app.get(`/${ANNOUNCEMENTS_EXTENSION_ID}/screens`, async (c) => c.json(await deps.announcements.service.screenChoices(c.get('ctx').tenant.id)));
+
   /** お知らせの作成の設定（第35.4節）: Web を公開まで行うか（`webPublish`）・WordPress のカテゴリー（`webCategory`）・流す画面（`screens`。`null` ならすべて）。 */
   app.put(`/${ANNOUNCEMENTS_EXTENSION_ID}/settings`, async (c) => {
     const { tenant, user } = c.get('ctx');

@@ -173,6 +173,8 @@ export interface RunEngineDeps {
     service: AnnouncementService;
     access(tenantId: string, userId: string): Promise<AnnouncementSettings | null>;
   };
+  /** その日がお知らせで出した休業の期間に入るか（予定の候補で休業日を避ける。第35.7節）。 */
+  closedOn?(tenantId: string, day: string): Promise<boolean>;
   /** Web の振り返り（内蔵の拡張。仕様書 第34章）。ツールに渡す。 */
   webReview?: {
     service: WebReviewService;
@@ -937,6 +939,8 @@ export class RunEngine {
     return {
       tenantId: run.tenantId, userId: requestedBy, runId: run.id,
       compartment: def.compartment, repo, connector, files, research,
+      // お知らせで出した休業の期間（予定の候補で休業日を避ける。第35.7節）
+      ...(this.deps.closedOn ? { closedOn: (day: string) => this.deps.closedOn!(run.tenantId, day) } : {}),
       approvalsAhead, isGoogleTool: (name) => !!registry.get(name)?.google,
       // 画像から文字を読む手段。推論が持っていなければ渡さない（第9.4.1節、Q-56）
       ...(llm?.readImage ? { ocr: async (r) => (await llm.readImage!(r)).text } : {}),

@@ -27,6 +27,11 @@ export interface ToolContext {
   runId: string;
   /** 実行中のエージェントが属する権限区画。区画外は `null`。 */
   compartment: string | null;
+  /**
+   * その日（YYYY-MM-DD）が、お知らせで出した休業の期間に入るか（予定の候補で休業日を避ける。第35.7節）。
+   * お知らせの作成を使っていない環境では無い
+   */
+  closedOn?(day: string): Promise<boolean>;
   repo: Repository;
   /** メール・予定・タスク・チャットへの接続口。Google を直接呼ばない。 */
   connector: WorkspaceConnector;

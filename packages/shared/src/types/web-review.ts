@@ -122,6 +122,12 @@ export interface WebReviewFigures {
   } | null;
   /** 取れなかったもの（理由つき） */
   missing: string[];
+  /** 問い合わせの記録の件数（段 3。第34.9節。プログラムが数えた件数だけ。使っていなければ無い） */
+  inquiryRecords?: { value: number; previous: number; bySource: { label: string; count: number }[] } | null;
+  /** 競合の分析の、その月の動きの数（第36.21節。競合の名前は入れない。使っていなければ無い） */
+  competitors?: { changes: number; kinds: { label: string; count: number }[] } | null;
+  /** その月の休業の日数（お知らせで出した休業の期間。第35.7節。無ければ 0） */
+  closureDays?: number;
 }
 
 /** 月の便り（第34.4節）。 */

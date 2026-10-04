@@ -743,7 +743,16 @@ function AnnouncementFields({ settings, busy, onChanged }: { settings: Announcem
   const [category, setCategory] = useState(settings.webCategory);
   const [error, setError] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
-  const save = (patch: Partial<{ webPublish: 'publish' | 'draft'; webCategory: string }>) => {
+  // 流す画面（店頭サイネージの画面。既定はすべて。第35.17節）
+  const [screens, setScreens] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => { api.admin.announcementScreens().then((r) => setScreens(r.screens)).catch(() => setScreens([])); }, []);
+  const chosen = settings.screens ?? screens.map((s) => s.id);
+  const toggle = (id: string, on: boolean) => {
+    const next = on ? [...new Set([...chosen, id])] : chosen.filter((x) => x !== id);
+    // すべて選んだら「すべて」（あとで足した画面にも流す）に戻す
+    save({ screens: screens.every((s) => next.includes(s.id)) ? null : next });
+  };
+  const save = (patch: Partial<{ webPublish: 'publish' | 'draft'; webCategory: string; screens: string[] | null }>) => {
     setWorking(true);
     api.admin.setAnnouncementSettings(patch).then(() => { setError(null); onChanged(); })
       .catch((e) => setError(describeError(e, '変えられませんでした'))).finally(() => setWorking(false));
@@ -762,6 +771,17 @@ function AnnouncementFields({ settings, busy, onChanged }: { settings: Announcem
             onBlur={() => { if (category.trim() !== settings.webCategory) save({ webCategory: category.trim() }); }} />
         </label>
       </div>
+      {screens.length > 1 && (
+        <div className="row wrap">
+          <span>流す画面</span>
+          {screens.map((s) => (
+            <label key={s.id} className="row">
+              <input type="checkbox" checked={chosen.includes(s.id)} disabled={busy || working || (chosen.length === 1 && chosen.includes(s.id))}
+                onChange={(e) => toggle(s.id, e.target.checked)} />{s.name}
+            </label>
+          ))}
+        </div>
+      )}
       {error && <p className="error">{error}</p>}
     </div>
   );

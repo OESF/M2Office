@@ -15,3 +15,4 @@ export { openMailbox, GoogleMailbox, MockMailbox, MailboxUnavailableError, parse
 export { readMail, guessMail, sentSummary, type MailReading } from './mail.js';
 export { monthStats, monthRange, previousMonth, reviewText } from './review.js';
 export { openLine, LineApiClient, MockLineClient, LineUnavailableError, verifyLineSignature, readLine, guessLine, LINE_KIND, LINE_THREAD_DAYS, type LineClient, type LineDeps, type LineReading } from './line.js';
+export { inquiryCountsFrom, type InquiryCounts } from './links.js';
