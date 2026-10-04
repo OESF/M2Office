@@ -213,9 +213,12 @@ export function buildDeps(): AppDeps {
   );
   // 秘密の値の箱。接続口（google）がリフレッシュ トークンを戻すのにも使う
   const { box, devKey } = secretBoxFromEnv();
+  // Google の側で許可が外されたときの後始末（仕様書 第6.5.2.1節 経路 2・3）。後始末の役は下で組み立ててから結び付ける
+  let onGrantLost: ((tenantId: string, userId: string, refreshTokenEnc: string) => Promise<unknown>) | null = null;
   const connector = buildConnector(process.env['CONNECTOR_MODE'] ?? 'mock', {
     repo, box, mockTenants: (process.env['CONNECTOR_MOCK_TENANTS'] ?? '').split(','),
     production: process.env['NODE_ENV'] === 'production',
+    onRevoked: async (p, enc) => { await onGrantLost?.(p.tenantId, p.userId, enc); },
   });
   const registry = new ToolRegistry();
   for (const tool of BUILTIN_TOOLS) registry.register(tool);
@@ -500,7 +503,9 @@ export function buildDeps(): AppDeps {
       const def = view.resolve(agentId, version);
       return !!def && agentUsesGoogle(def, view.registry);
     },
+    purgeUser: (tenantId, userId, now) => retention.purgeUser(tenantId, userId, now),
   });
+  onGrantLost = (tenantId, userId, enc) => revocation.lostGrant(tenantId, userId, enc, new Date());
   const googleRedirect = process.env['GOOGLE_OAUTH_REDIRECT_URI'] ?? 'http://localhost:3100/v1/oauth/google/callback';
   return {
     repo, llm, connector, files, registry, engine, secretary, auth: loadAuthConfig(), log, debug, help, helpManuals: manuals.list, retention, revocation,

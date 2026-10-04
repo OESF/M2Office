@@ -395,6 +395,13 @@ export interface Repository {
   listGoogleConnections(tenantId: string): Promise<GoogleConnection[]>;
   saveGoogleConnection(c: GoogleConnection): Promise<void>;
   deleteGoogleConnection(tenantId: string, userId: string): Promise<boolean>;
+  /**
+   * 指定したリフレッシュ トークン（暗号化したもの）のままなら、本人の Google 接続を消す（仕様書 第6.5.2.1節 経路 2・3）。
+   *
+   * @remarks 取り直しに失敗したあとで本人が接続し直していれば、新しい接続は消さない
+   * @returns 消したら `true`
+   */
+  deleteGoogleConnectionIf(tenantId: string, userId: string, refreshTokenEnc: string): Promise<boolean>;
   /** 会社のグループ（仕様書 第16.7節）。所属する人の ID を含む。名前の順。 */
   listGroups(tenantId: string): Promise<UserGroup[]>;
   /** グループを作る、または名前と説明を変える。 */

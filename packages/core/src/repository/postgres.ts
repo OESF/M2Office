@@ -1941,6 +1941,13 @@ export class PostgresRepository implements Repository {
     return rows.length > 0;
   }
 
+  async deleteGoogleConnectionIf(tenantId: string, userId: string, refreshTokenEnc: string): Promise<boolean> {
+    const rows = await this.q<{ user_id: string }>(tenantId,
+      `delete from user_google_connections where tenant_id = $1 and user_id = $2 and refresh_token_enc = $3 returning user_id`,
+      [tenantId, userId, refreshTokenEnc]);
+    return rows.length > 0;
+  }
+
   async listCompartmentAssignments(tenantId: string): Promise<CompartmentAssignment[]> {
     const rows = await this.q<Omit<CompartmentAssignment, 'groups' | 'users'> & { groups: string[] | null; users: string[] | null }>(tenantId,
       `select c.id, c.name, c.description, c.enabled,

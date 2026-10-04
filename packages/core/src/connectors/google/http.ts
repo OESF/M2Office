@@ -69,6 +69,11 @@ export class GoogleTokenSource {
     private readonly box: SecretBox,
     private readonly endpoints: GoogleOAuthEndpoints = GOOGLE_OAUTH_ENDPOINTS,
     private readonly now: () => number = () => Date.now(),
+    /**
+     * 取り直しで許可が無いと分かったとき（`invalid_grant`）に呼ぶ。後始末（接続を消し、業務を止め、知らせる）を行う口（仕様書 第6.5.2.1節 経路 2・3）。
+     * 渡すのは本人と、取り直しに使ったリフレッシュ トークン（暗号化したもの）。失敗しても呼び出し元の断りは変えない
+     */
+    private readonly onRevoked?: (p: ConnectorPrincipal, refreshTokenEnc: string) => Promise<void>,
   ) {}
 
   /**
@@ -100,6 +105,9 @@ export class GoogleTokenSource {
       return r.accessToken;
     } catch (err) {
       if (err instanceof GoogleOAuthError && err.detail === 'invalid_grant') {
+        // Google の側で許可が外された（本人の取り消し・Workspace の管理者・アカウントの停止）。後始末を行ってから断る
+        this.cache.delete(key);
+        await this.onRevoked?.(p, conn.refreshTokenEnc).catch(() => undefined);
         throw new ConnectorUnavailableError('revoked', 'Google の許可が取り消されたか、期限が切れています。個人設定の「Google 連携」で接続し直してください');
       }
       if (err instanceof GoogleOAuthError && err.detail === 'invalid_client') {

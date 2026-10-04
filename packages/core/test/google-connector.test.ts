@@ -271,6 +271,30 @@ test('許可: 接続していない・会社のクライアントが無い・取
   }, { refreshToken: 'revoked' });
 });
 
+test('許可: 取り直しで取り消しが分かったら、本人と使ったトークンを渡して後始末を呼んでから断る（第6.5.2.1節 経路 2・3）', async () => {
+  const g = await fakeGoogle();
+  const { repo, box } = repoWith({ refreshToken: 'revoked' });
+  const calls: { tenantId: string; userId: string; enc: string }[] = [];
+  try {
+    const c = new GoogleWorkspaceConnector(repo, box, g.endpoints, undefined, async (p, enc) => { calls.push({ tenantId: p.tenantId, userId: p.userId, enc }); });
+    assert.equal(await kindOf(c.mail.list(P, {})), 'revoked');
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]!.userId, P.userId);
+    assert.equal(box.decrypt(calls[0]!.enc), 'revoked', '取り直しに使ったトークンを渡す（接続し直した新しい接続を消さないため）');
+  } finally {
+    await g.close();
+  }
+  // 後始末が失敗しても、断りの理由は変えない
+  const g2 = await fakeGoogle();
+  const r2 = repoWith({ refreshToken: 'revoked' });
+  try {
+    const c = new GoogleWorkspaceConnector(r2.repo, r2.box, g2.endpoints, undefined, async () => { throw new Error('boom'); });
+    assert.equal(await kindOf(c.mail.list(P, {})), 'revoked');
+  } finally {
+    await g2.close();
+  }
+});
+
 test('許可: 権限が足りない・API が無効・混み合っている、を見分ける。断りの文に応答の中身を入れない', async () => {
   await withConnector(async (c) => assert.equal(await kindOf(c.mail.list(P, {})), 'insufficient-scope'), {},
     (s) => (!s.path.startsWith('/gmail') ? undefined : {

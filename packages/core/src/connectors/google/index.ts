@@ -121,8 +121,10 @@ export class GoogleWorkspaceConnector implements WorkspaceConnector {
     repo: Repository, box: SecretBox,
     private readonly endpoints: GoogleApiEndpoints = GOOGLE_API_ENDPOINTS,
     now: () => number = () => Date.now(),
+    /** Google の側で許可が外されたと分かったときの後始末（仕様書 第6.5.2.1節 経路 2・3）。 */
+    onRevoked?: (p: ConnectorPrincipal, refreshTokenEnc: string) => Promise<void>,
   ) {
-    this.tokens = new GoogleTokenSource(repo, box, endpoints.oauth, now);
+    this.tokens = new GoogleTokenSource(repo, box, endpoints.oauth, now, onRevoked);
   }
 
   sourceFor(_tenantId: string): 'google' {

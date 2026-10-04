@@ -7,7 +7,7 @@
 
 import type { Repository } from '../repository/types.js';
 import type { SecretBox } from '../secrets/box.js';
-import type { DataSource, WorkspaceConnector } from './types.js';
+import type { ConnectorPrincipal, DataSource, WorkspaceConnector } from './types.js';
 import { MockWorkspaceConnector } from './mock.js';
 import { GoogleWorkspaceConnector } from './google/index.js';
 
@@ -65,6 +65,12 @@ export interface ConnectorDeps {
   mockTenants?: string[];
   /** `NODE_ENV=production` か。見本の会社を指定していたら起動を拒否する。 */
   production?: boolean;
+  /**
+   * Google の側で許可が外されたと分かったとき（トークンの取り直しの失敗）に呼ぶ後始末（仕様書 第6.5.2.1節 経路 2・3）。
+   *
+   * @remarks 後始末の役（`GoogleRevocation`）は接続口より後に組み立てるため、呼ぶ側で後から結び付けられる形で渡す
+   */
+  onRevoked?: (p: ConnectorPrincipal, refreshTokenEnc: string) => Promise<void>;
 }
 
 /**
@@ -85,7 +91,7 @@ export function buildConnector(mode: string, deps?: ConnectorDeps): WorkspaceCon
       return new MockWorkspaceConnector();
     case 'google': {
       if (!deps) throw new Error('CONNECTOR_MODE=google には、データベースと暗号の箱が要ります');
-      const real = new GoogleWorkspaceConnector(deps.repo, deps.box);
+      const real = new GoogleWorkspaceConnector(deps.repo, deps.box, undefined, undefined, deps.onRevoked);
       const mockTenants = (deps.mockTenants ?? []).map((t) => t.trim()).filter(Boolean);
       if (mockTenants.length === 0) return real;
       if (deps.production) {

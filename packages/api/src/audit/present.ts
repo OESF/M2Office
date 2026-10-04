@@ -49,6 +49,7 @@ const ACTION_LABELS: Record<string, string> = {
   'secretary.plan.answer': '段取りの問いに答えた',
   'connection.google.connect': 'Google と接続した',
   'connection.google.disconnect': 'Google との接続を取り消した',
+  'connection.google.lost': 'Google の側で許可が外されたため接続を消した',
   'connection.google.update': 'Google の接続の設定を変えた',
   'connection.google.update_rejected': 'Google の接続の設定が確かめで断られた',
   'connection.google.delete': 'Google の接続の設定を消した',

@@ -16,12 +16,13 @@ import type { Repository } from '../repository/types.js';
 import type { Logger } from '../log/logger.js';
 
 /** 止めた理由。知らせる文と、実行の失敗の理由に使う。 */
-export type RevocationCause = 'disconnect' | 'client-removed' | 'user-suspended';
+export type RevocationCause = 'disconnect' | 'client-removed' | 'user-suspended' | 'grant-lost';
 
 const REASON: Record<RevocationCause, string> = {
   disconnect: 'Google との連携を解除したため止めました',
   'client-removed': '会社の Google Workspace の接続の設定が削除されたため止めました',
   'user-suspended': '依頼した人の利用が停止されたため止めました',
+  'grant-lost': 'Google の側で M2Office への許可が外されたため止めました',
 };
 
 /**
@@ -37,6 +38,8 @@ export interface GoogleRevocationDeps {
   /** その依頼の業務が Google のツールを使うか（定義のツールに、権限 `google` を宣言したものがあるか）。 */
   usesGoogle(tenantId: string, agentId: string, agentVersion: number): Promise<boolean>;
   logger: Logger;
+  /** 終わった実行から Google 由来の中身を消す（第14.3.2節）。Google の側で外されたときの後始末に使う。 */
+  purgeUser?(tenantId: string, userId: string, now: Date): Promise<number>;
 }
 
 /** 取り消しで影響を受けるもの（取り消す前の確認に示す）。 */
@@ -106,6 +109,36 @@ export class GoogleRevocation {
     }
     if (stopped.length > 0) this.deps.logger.info('許可がなくなったため業務を止めました', { tenantId, userId, cause, runs: stopped.length });
     return stopped;
+  }
+
+  /**
+   * Google の側で許可が外されたときの後始末（仕様書 第6.5.2.1節 経路 2・3）。トークンの取り直しに失敗した時点で呼ぶ。
+   *
+   * 保存しているトークンを消し、Google を使う動いている途中の業務を止め、終わった実行から Google 由来の中身を消し、
+   * 本人に「接続し直してください」と一度だけ知らせ、監査ログに残す。定時実行は消さない（接続が無い間は起動を飛ばす）。
+   *
+   * @param refreshTokenEnc 取り直しに使ったリフレッシュ トークン（暗号化したもの）。**いまもそのままのときだけ**消す
+   * @returns 後始末をしたら `true`。すでに後始末をした・接続し直していたら `false`（何もしない）
+   * @remarks 同じ人の呼び出しが重なっても、接続を消せた 1 回だけが後始末を行う
+   */
+  async lostGrant(tenantId: string, userId: string, refreshTokenEnc: string, now: Date): Promise<boolean> {
+    const { repo } = this.deps;
+    if (!(await repo.deleteGoogleConnectionIf(tenantId, userId, refreshTokenEnc))) return false;
+    const stopped = await this.stopUserRuns(tenantId, userId, 'grant-lost', now);
+    const purged = (await this.deps.purgeUser?.(tenantId, userId, now)) ?? 0;
+    const at = now.toISOString();
+    await repo.createNotification({
+      id: randomUUID(), tenantId, userId, kind: 'failure',
+      title: 'Google との接続が切れました',
+      body: `Google の側で M2Office への許可が外されたか、期限が切れました。個人設定の「Google 連携」から接続し直してください。${stopped.length ? `Google を使う業務を ${stopped.length} 件止めました。` : ''}定時実行は、接続し直すと次から動きます。`,
+      runId: null, readAt: null, createdAt: at,
+    });
+    await repo.appendAudit({
+      id: randomUUID(), tenantId, actorType: 'system', actorId: 'revocation', action: 'connection.google.lost',
+      targetType: 'user', targetId: userId, detail: { stoppedRuns: stopped.length, purgedRuns: purged }, occurredAt: at,
+    });
+    this.deps.logger.info('Google の側で許可が外されたため、接続を消して後始末をしました', { tenantId, userId, stoppedRuns: stopped.length });
+    return true;
   }
 
   /** その人の、Google のツールを使う動いている途中の業務。 */

@@ -113,3 +113,47 @@ test('Google と接続していない人の、Google を使う定時実行は飛
   assert.equal(audits.filter((a) => a.action === 'schedule.skip').length, 2, '飛ばしたことは毎回記録する');
   assert.equal(notifications.filter((n) => n.title === SCHEDULE_SKIP_TITLE).length, 1, '知らせは一度だけ');
 });
+
+test('Google の側で外されたら、接続を消し、業務を止め、中身を消し、本人に一度だけ知らせる（第6.5.2.1節 経路 2・3）', async () => {
+  const { repo, state } = fake();
+  let conn: string | null = 'enc-old';
+  const audits: string[] = [];
+  const purged: string[] = [];
+  Object.assign(repo, {
+    deleteGoogleConnectionIf: async (_t: string, _u: string, enc: string) => {
+      if (conn !== enc) return false;
+      conn = null;
+      return true;
+    },
+    appendAudit: async (e: { action: string }) => { audits.push(e.action); },
+  });
+  const r = new GoogleRevocation({
+    repo, usesGoogle: async (_t, agentId) => agentId !== 'knowledge-qa', logger: silentLogger,
+    purgeUser: async (_t, userId) => { purged.push(userId); return 2; },
+  });
+  assert.equal(await r.lostGrant('t', 'u-member', 'enc-old', new Date(at)), true);
+  assert.equal(conn, null, '保存しているトークンを消す');
+  const byId = Object.fromEntries(state.live.map((l) => [l.run.id, l.run]));
+  assert.equal(byId['r-inbox']!.status, 'cancelled');
+  assert.equal(byId['r-inbox']!.failureReason, 'Google の側で M2Office への許可が外されたため止めました');
+  assert.equal(byId['r-kb']!.status, 'queued', 'Google を使わない業務は止めない');
+  assert.deepEqual(purged, ['u-member'], '終わった実行から Google 由来の中身を消す');
+  const lost = state.notifications.filter((n) => n.title === 'Google との接続が切れました');
+  assert.equal(lost.length, 1);
+  assert.equal(lost[0]!.userId, 'u-member');
+  assert.match(lost[0]!.body, /接続し直してください/);
+  assert.ok(audits.includes('connection.google.lost'));
+
+  // 重ねて呼ばれても、後始末は 1 回だけ
+  assert.equal(await r.lostGrant('t', 'u-member', 'enc-old', new Date(at)), false);
+  assert.equal(state.notifications.filter((n) => n.title === 'Google との接続が切れました').length, 1);
+});
+
+test('取り直しのあとで接続し直していれば、新しい接続は消さず、何もしない', async () => {
+  const { repo, state } = fake();
+  Object.assign(repo, { deleteGoogleConnectionIf: async (_t: string, _u: string, enc: string) => enc === 'enc-new' });
+  const r = new GoogleRevocation({ repo, usesGoogle: async () => true, logger: silentLogger });
+  assert.equal(await r.lostGrant('t', 'u-member', 'enc-old', new Date(at)), false);
+  assert.equal(state.notifications.length, 0);
+  assert.ok(state.live.every((l) => l.run.status !== 'cancelled'), '業務は止めない');
+});
