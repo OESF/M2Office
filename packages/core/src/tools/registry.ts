@@ -95,7 +95,7 @@ export interface ToolContext {
   competitors?: CompetitorToolContext;
   /** お知らせの作成（内蔵の拡張。仕様書 第35章）。使えるかどうかは、ツールが呼ぶたびに確かめる。 */
   announcements?: AnnouncementToolContext;
-  /** Web の分析（内蔵の拡張。仕様書 第34章）。使えるかどうかは、ツールが呼ぶたびに確かめる。 */
+  /** Webの分析（内蔵の拡張。仕様書 第34章）。使えるかどうかは、ツールが呼ぶたびに確かめる。 */
   webReview?: WebReviewToolContext;
 }
 

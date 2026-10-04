@@ -138,7 +138,7 @@ const columns: ColumnService = new ColumnService({
   repo, box, llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId), logger: log,
   // 似すぎの確かめで出典のページを読む口（見本の会社では読まない。第32.18.4節）
   pagesFor: (tenantId) => (connector.sourceFor(tenantId) === 'mock' ? null : new HttpPageFetcher(crawlerUserAgent(appVersion(), process.env['CRAWLER_CONTACT_URL']), 1_000)),
-  // 読まれたコラムの書き方の傾向（Web の分析。第32.18.5節）。Web の分析は後で作るので、呼ぶときに引く
+  // 読まれたコラムの書き方の傾向（Webの分析。第32.18.5節）。Webの分析は後で作るので、呼ぶときに引く
   tendencyFor: (tenantId: string): Promise<string | null> => webReview.columnTendency(tenantId),
 });
 // 問い合わせの記録（内蔵の拡張。仕様書 第33章）。秘書から頼まれた記録と、期限の知らせ・原文の片付けが使う
@@ -166,7 +166,7 @@ const competitors = new CompetitorService({
     ? (await inquiryStore.list(tenantId, { status: 'all', since, limit: 500 })).map((i) => i.source) : []),
 });
 const competitorWatch = new CompetitorWatch({ service: competitors, store: competitorStore, repo, logger: log });
-// Web の分析（内蔵の拡張。仕様書 第34章）。毎月 3 日の 8 時（日本時間）を過ぎたら、先月の便りを 1 回だけ作る
+// Webの分析（内蔵の拡張。仕様書 第34章）。毎月 3 日の 8 時（日本時間）を過ぎたら、先月の便りを 1 回だけ作る
 const webReview: WebReviewService = new WebReviewService({
   store: new PostgresWebReviewStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
   repo, data: { repo, box, sourceFor: (tenantId) => connector.sourceFor(tenantId) }, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
@@ -339,7 +339,7 @@ let lastCompetitorCheck = 0;
 /** お知らせの予約と期間の後を見回る間隔（第35.17節）。 */
 const ANNOUNCEMENT_INTERVAL_MS = Number(process.env['ANNOUNCEMENT_INTERVAL_MS'] ?? 60_000);
 let lastAnnouncementCheck = 0;
-// Web の分析（第34.18節・第34.19節）。既定は 1 分ごとに、月の便り（3 日の 8 時を過ぎ、先月の便りがまだ無いか）と、
+// Webの分析（第34.18節・第34.19節）。既定は 1 分ごとに、月の便り（3 日の 8 時を過ぎ、先月の便りがまだ無いか）と、
 // 直すべき所の見回りの番（週に 1 回・今すぐチェック）を見る
 const WEB_REVIEW_INTERVAL_MS = Number(process.env['WEB_REVIEW_INTERVAL_MS'] ?? 60_000);
 let lastWebReviewCheck = 0;
@@ -595,14 +595,14 @@ while (running) {
     }
   }
 
-  // Web の分析の月の便り（第34.18節）。会社ごとの失敗はほかの会社を止めない
+  // Webの分析の月の便り（第34.18節）。会社ごとの失敗はほかの会社を止めない
   if (Date.now() - lastWebReviewCheck >= WEB_REVIEW_INTERVAL_MS) {
     lastWebReviewCheck = Date.now();
     try {
       const r = await webReview.tick(new Date());
       if (r.created + r.checked > 0) log.info('Web の月の便りを作り、直すべき所を探しました', { created: r.created, checked: r.checked });
     } catch (err) {
-      log.warn('Web の分析の見回りに失敗しました', { err });
+      log.warn('Webの分析の見回りに失敗しました', { err });
     }
   }
 

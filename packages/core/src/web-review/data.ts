@@ -1,5 +1,5 @@
 /**
- * @file Web の分析の口（仕様書 第34.3節・第34.18節）。アナリティクス（GA4 のデータと管理の API）と Search Console の API を、
+ * @file Webの分析の口（仕様書 第34.3節・第34.18節）。アナリティクス（GA4 のデータと管理の API）と Search Console の API を、
  * 担当が許した読み取りの権限だけで読む。開発の見本の会社では、Google に問い合わせず決まった数字を返す口（{@link MockWebData}）を使う。
  *
  * 担当の許可は、本人の Google の接続とは別に、会社の鍵の置き場（種類 `web_review`）に暗号化して預けてある。
@@ -78,7 +78,7 @@ export interface PageSpeedResult {
   opportunities: { title: string; savingsMs: number }[];
 }
 
-/** Web の分析が使う口。 */
+/** Webの分析が使う口。 */
 export interface WebData {
   /** 見られるプロパティ（データ ストリームの URL つき） */
   properties(): Promise<WebProperty[]>;

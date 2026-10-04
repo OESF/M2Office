@@ -167,9 +167,9 @@ export interface AppDeps {
     access(tenantId: string, userId: string): Promise<AnnouncementSettings | null>;
   };
   /**
-   * Web の分析（内蔵の拡張。仕様書 第34章）。担当の許可で読み、月の便りはワーカーが作る。API は画面と設定の読み書きをする。
+   * Webの分析（内蔵の拡張。仕様書 第34章）。担当の許可で読み、月の便りはワーカーが作る。API は画面と設定の読み書きをする。
    *
-   * @remarks `access` は、会社が Web の分析を使っていて利用者が利用範囲の中なら、会社の設定を返す（使えなければ `null`）
+   * @remarks `access` は、会社が Webの分析を使っていて利用者が利用範囲の中なら、会社の設定を返す（使えなければ `null`）
    */
   webReview: {
     service: WebReviewService;
@@ -317,7 +317,7 @@ export function buildDeps(): AppDeps {
   const laborStore = new PostgresLaborStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
   const laborCalendar = new LaborCalendar({ hrStore: hrService.deps.store, payrollStore, attendance, repo, law: LAW_BOOK, laborStore });
   // Web のコラム（内蔵の拡張。仕様書 第32章）。コラムは会社で共有する
-  // Web の分析への参照（コラムの作成が書き方の傾向を読む。Web の分析はこの後で作る）
+  // Webの分析への参照（コラムの作成が書き方の傾向を読む。Webの分析はこの後で作る）
   const webReviewRef: { service?: WebReviewService } = {};
   const columns = {
     service: new ColumnService({
@@ -325,7 +325,7 @@ export function buildDeps(): AppDeps {
       repo, box, llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId), logger: log,
       // 似すぎの確かめで出典のページを読む口（見本の会社では読まない。第32.18.4節）
       pagesFor: (tenantId) => (connector.sourceFor(tenantId) === 'mock' ? null : new HttpPageFetcher(crawlerUserAgent(appVersion(), process.env['CRAWLER_CONTACT_URL']), 1_000)),
-      // 読まれたコラムの書き方の傾向（Web の分析。第32.18.5節）。Web の分析は後で作るので、呼ぶときに引く
+      // 読まれたコラムの書き方の傾向（Webの分析。第32.18.5節）。Webの分析は後で作るので、呼ぶときに引く
       tendencyFor: (tenantId) => webReviewRef.service?.columnTendency(tenantId) ?? Promise.resolve(null),
     }),
     access: webColumnsAccess(repo),
@@ -381,7 +381,7 @@ export function buildDeps(): AppDeps {
     }),
     access: announcementsAccess(repo),
   };
-  // Web の分析（内蔵の拡張。仕様書 第34章）。担当の許可（アナリティクスと Search Console の読み取りだけ）で読む
+  // Webの分析（内蔵の拡張。仕様書 第34章）。担当の許可（アナリティクスと Search Console の読み取りだけ）で読む
   const webReview = {
     service: new WebReviewService({
       store: new PostgresWebReviewStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),

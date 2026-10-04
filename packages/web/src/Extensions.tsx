@@ -518,7 +518,7 @@ function SignageFields({ settings, busy, onChanged }: { settings: SignageSetting
  * @remarks アプリケーションパスワードは預けたら画面に戻さない。つながるかを確かめてから預ける
  */
 /**
- * Web の分析の担当の許可（仕様書 第34.18節）。「Google とつなぐ」で Google の認可の画面へ移り、アナリティクスと Search Console を
+ * Webの分析の担当の許可（仕様書 第34.18節）。「Google とつなぐ」で Google の認可の画面へ移り、アナリティクスと Search Console を
  * 見られるアカウントを選んで、読み取りの 2 つだけを許す。つないだ管理者が担当。戻ってきたら結果（`?webreview=`）を出す。
  * 会社の Web サイトに合うプロパティとサイトを決められなかったときだけ、候補から選ぶ欄を出す。
  */

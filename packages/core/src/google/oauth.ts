@@ -78,7 +78,7 @@ export function buildGoogleAuthUrl(p: {
   /** アカウントを選ばせる（本人ではない窓口のアカウントでつなぐとき。第33.18節）。 */
   selectAccount?: boolean;
   /**
-   * 前に許した権限を引き継がない（`include_granted_scopes` を付けない）。Web の分析の許可のように、
+   * 前に許した権限を引き継がない（`include_granted_scopes` を付けない）。Webの分析の許可のように、
    * 決まった権限だけを別に預けるときに使う（本人の接続の権限まで預けないため。第34.18節）。
    */
   onlyTheseScopes?: boolean;

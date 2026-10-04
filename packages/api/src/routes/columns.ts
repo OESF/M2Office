@@ -107,7 +107,7 @@ export function columnsRoute(deps: AppDeps) {
   app.get('/:id', async (c) => {
     const d = await service.detail(who(c), c.req.param('id'));
     if (!d) return c.json({ error: 'コラムが見つかりません' }, 404);
-    // 公開されたコラムの数字（この 28 日）。Web の分析を使える人にだけ添える（第34.19節）
+    // 公開されたコラムの数字（この 28 日）。Webの分析を使える人にだけ添える（第34.19節）
     const { tenant, user } = c.get('ctx');
     const metrics = (await deps.webReview.access(tenant.id, user.id)) ? await deps.webReview.service.columnMetrics(tenant.id, d.column.id).catch(() => null) : null;
     // 公開の URL（SNS の告知文に足す。WordPress で公開された URL か、貼るだけのページの記事の URL。第32.18.4節）

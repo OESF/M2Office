@@ -49,7 +49,7 @@ export interface ColumnServiceDeps {
   files: FileStore;
   /** 出典のページを読む口（似すぎの確かめ。第32.18.4節）。見本の会社・読めない環境では `null` */
   pagesFor?(tenantId: string): PageFetcher | null;
-  /** 読まれたコラムの書き方の傾向（Web の分析。第32.18.5節）。無ければ `null` */
+  /** 読まれたコラムの書き方の傾向（Webの分析。第32.18.5節）。無ければ `null` */
   tendencyFor?(tenantId: string): Promise<string | null>;
   logger?: Logger;
 }

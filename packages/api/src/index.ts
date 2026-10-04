@@ -177,7 +177,7 @@ app.get('/v1/me', async (c) => {
     competitors: !!(await deps.competitors.access(ctx.tenant.id, ctx.user.id)),
     // お知らせの作成を使えるか（会社の入り切りと利用範囲。仕様書 第35.17節）
     announcements: !!(await deps.announcements.access(ctx.tenant.id, ctx.user.id)),
-    // Web の分析を使えるか（会社の入り切りと利用範囲。仕様書 第34.18節）
+    // Webの分析を使えるか（会社の入り切りと利用範囲。仕様書 第34.18節）
     webReview: !!(await deps.webReview.access(ctx.tenant.id, ctx.user.id)),
     // 人事・給与の担当者の画面を使えるか（会社の入り切りと人事区画。仕様書 第30.2節）
     hr: !!(await deps.hr.access(ctx.tenant.id, ctx.user.id)),

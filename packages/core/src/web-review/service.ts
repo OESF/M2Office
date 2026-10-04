@@ -1,5 +1,5 @@
 /**
- * @file Web の分析の処理（仕様書 第34章・第34.18節）。担当の許可・サイトの選び方・始める前の手伝い・秘書の問い・月の便り。
+ * @file Webの分析の処理（仕様書 第34章・第34.18節）。担当の許可・サイトの選び方・始める前の手伝い・秘書の問い・月の便り。
  *
  * 担当の許可（アナリティクスと Search Console の読み取りだけ）は、本人の Google の接続とは別に、会社の鍵の置き場に預ける。
  * 数字は {@link monthFigures}・{@link answerAsk} がプログラムで計算し、推論は月の便りの文を書くだけ（ADR-0067 決定 6）。
@@ -54,7 +54,7 @@ export interface WebReviewViewer {
 const SYSTEM = 'system';
 
 /**
- * 利用者がいま Web の分析を使えるか（会社の入り切りと利用範囲。第34.12節）。
+ * 利用者がいま Webの分析を使えるか（会社の入り切りと利用範囲。第34.12節）。
  *
  * @returns 使えるなら会社の設定、使えなければ `null`
  */
@@ -193,7 +193,7 @@ export function accessRequestDraft(email: string, company: string, website: stri
 }
 
 /**
- * Web の分析の操作。
+ * Webの分析の操作。
  *
  * @remarks 呼ぶ前に、利用者が使えるかを {@link webReviewAccess} で確かめること。つなぐ・外す・サイトを選ぶは管理者だけ（呼び出し側で確かめる）
  */
@@ -332,7 +332,7 @@ export class WebReviewService {
       ? { email: w.connection.email, connectedByName: (await this.deps.repo.findUserById(tenantId, w.connection.connectedBy).catch(() => null))?.displayName ?? '', connectedAt: w.connection.connectedAt }
       : null;
     const base = { connection: conn, property: w.property, siteUrl: w.siteUrl, requestDraft: null };
-    if (!w.enabled) return { ...base, state: 'off', advice: '管理者が拡張機能で「Web の分析」を有効にすると使えます' };
+    if (!w.enabled) return { ...base, state: 'off', advice: '管理者が拡張機能で「Webの分析」を有効にすると使えます' };
     if (!w.connection) return { ...base, state: 'notConnected', advice: '管理者が拡張機能の設定で「Google とつなぐ」を押し、アナリティクスと Search Console の読み取りを許すと使えます' };
     if (w.property || w.siteUrl) return { ...base, state: 'ready', advice: '' };
     const c = await this.candidates(tenantId);
@@ -432,7 +432,7 @@ export class WebReviewService {
       if (prefs?.notifications.kinds.webReview === false) continue;
       await this.deps.repo.createNotification({
         id: randomUUID(), tenantId, userId, kind: 'webReview', title, body: body.slice(0, 300), runId: null, readAt: null, createdAt: new Date().toISOString(),
-      }).catch((err: unknown) => this.log.warn('Web の分析の知らせを作れませんでした', { error: String(err) }));
+      }).catch((err: unknown) => this.log.warn('Webの分析の知らせを作れませんでした', { error: String(err) }));
     }
   }
 
@@ -454,7 +454,7 @@ export class WebReviewService {
         // 直すべき所の見回り（週に 1 回・今すぐチェック。第34.19節）
         if ((w.property || w.siteUrl) && this.checkDue(w, now) && await this.checkFindings(tenantId, now)) checked += 1;
       } catch (err) {
-        this.log.warn('Web の分析の見回りに失敗しました', { tenantId, error: String(err) });
+        this.log.warn('Webの分析の見回りに失敗しました', { tenantId, error: String(err) });
       }
     }
     return { created, checked };

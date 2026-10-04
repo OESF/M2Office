@@ -1,5 +1,5 @@
 /**
- * @file Web の分析（内蔵の拡張。仕様書 第34章）の入口。
+ * @file Webの分析（内蔵の拡張。仕様書 第34章）の入口。
  */
 
 export { WebReviewService, webReviewAccess, plainReport as plainWebReport, writeReport as writeWebReport, accessRequestDraft, type WebReviewServiceDeps, type WebReviewViewer, type ReportText } from './service.js';

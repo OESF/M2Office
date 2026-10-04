@@ -292,7 +292,7 @@ export interface Me {
   competitors?: boolean;
   /** お知らせの作成を使えるか（会社の入り切りと利用範囲。仕様書 第35.17節）。 */
   announcements?: boolean;
-  /** Web の分析を使えるか（会社の入り切りと利用範囲。仕様書 第34.18節）。 */
+  /** Webの分析を使えるか（会社の入り切りと利用範囲。仕様書 第34.18節）。 */
   webReview?: boolean;
   /** 本人の「給与・勤怠」を使えるか（台帳に結び付いているか。仕様書 第30.25節）。 */
   hrSelf?: boolean;
@@ -752,7 +752,7 @@ export interface ExtensionView {
   competitors?: CompetitorSettings;
   /** お知らせの作成の設定（Web の出し方・カテゴリー。第35.4節）。お知らせの作成のときだけある。 */
   announcements?: AnnouncementSettings;
-  /** Web の分析の設定（担当の許可・選んだプロパティとサイト。第34.18節）。Web の分析のときだけある。 */
+  /** Webの分析の設定（担当の許可・選んだプロパティとサイト。第34.18節）。Webの分析のときだけある。 */
   webReview?: WebReviewSettings;
 }
 
@@ -767,7 +767,7 @@ export interface ColumnDetail {
   /** 版（新しい順）。 */
   versions: WebColumnVersion[];
   wordpress: ColumnWordPress | null;
-  /** 公開されたコラムの数字（この 28 日。Web の分析を使える人にだけある。第34.19節）。 */
+  /** 公開されたコラムの数字（この 28 日。Webの分析を使える人にだけある。第34.19節）。 */
   webMetrics?: WebPageMetrics | null;
   /** 公開の URL（WordPress で公開された URL か、貼るだけのページの記事の URL。SNS の告知文に足す。第32.18.4節）。 */
   publicUrl?: string | null;
@@ -1261,7 +1261,7 @@ export const api = {
     /** 月の振り返り（無ければ先月）。 */
     review: (month?: string) => call<{ stats: InquiryMonthStats; text: string }>(`/inquiries/review${month ? `?month=${encodeURIComponent(month)}` : ''}`),
   },
-  /** Web の分析（内蔵の拡張。仕様書 第34章）。 */
+  /** Webの分析（内蔵の拡張。仕様書 第34章）。 */
   webReview: {
     /** 状態（始める前の手伝い）といちばん新しい便りと、便りの一覧。 */
     overview: () => call<{ status: WebReviewStatus; latest: WebReviewReport | null; reports: WebReviewReportBrief[]; admin: boolean; findings: WebReviewFinding[]; checkedAt: string | null; checkRequested: boolean; agency: { email: string; name: string } | null }>('/web-review'),
@@ -2021,7 +2021,7 @@ export const api = {
     /** 問い合わせの窓口のアカウントをつなぐ（Google の認可の URL。見本の会社ではすぐつながる）。 */
     connectInquiryMailbox: () => call<{ url?: string; connected?: boolean }>('/admin/extensions/inquiries/mailbox/connect', { method: 'POST', body: '{}' }),
     disconnectInquiryMailbox: () => call<{ ok: true }>('/admin/extensions/inquiries/mailbox', { method: 'DELETE' }),
-    /** Web の分析の担当の許可をつなぐ（Google の認可の URL。見本の会社ではすぐつながる。第34.18節）。 */
+    /** Webの分析の担当の許可をつなぐ（Google の認可の URL。見本の会社ではすぐつながる。第34.18節）。 */
     connectWebReview: () => call<{ url?: string; connected?: boolean }>('/admin/extensions/web-review/connect', { method: 'POST', body: '{}' }),
     disconnectWebReview: () => call<{ ok: true }>('/admin/extensions/web-review/connection', { method: 'DELETE' }),
     /** 担当が見られるプロパティとサイトと、いまの状態。 */

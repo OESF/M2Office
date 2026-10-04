@@ -247,7 +247,7 @@ export function Settings({ me, agents, onChanged, section }: {
           ...(me.inquiries ? [['inquiry', '問い合わせ（次にやることの期限・対応中のまま）']] as const : []),
           ...(me.competitors ? [['competitor', '競合の分析（探し終えた・見回り終えた）']] as const : []),
           ...(me.announcements ? [['announcement', 'お知らせの作成（出せなかった出し先）']] as const : []),
-          ...(me.webReview ? [['webReview', 'Web の分析（月の便り）']] as const : []),
+          ...(me.webReview ? [['webReview', 'Webの分析（月の便り）']] as const : []),
           ...(me.webColumns ? [['column', 'コラムの作成（テーマ案・予定表・予約）']] as const : [])] as const).map(([k, label]) => (
           <label key={k} className="check">
             <input type="checkbox" checked={s.notifications.kinds[k]}

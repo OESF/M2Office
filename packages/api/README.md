@@ -287,9 +287,9 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/announcements/:id/preview` ／ `POST /v1/announcements/:id/submit` | 承認の前の確かめ（出せない理由・LINE の送る数と残り・流す画面・Web の出し方）／ 承認へ進める（付属の業務「お知らせを出す」。管理者か承認者の承認の後に出す） |
 | `POST /v1/announcements/:id/cancel` ／ `GET /v1/announcements/:id/copy` ／ `GET /v1/announcements/:id/screen.png` | 予約を取り消す ／ Web の文を写す（HTML とテキスト）／ 店頭の画面の 1 枚の見本（PNG） |
 | `GET /v1/announcements/:id/recipients` | メールの宛先（名刺管理の連絡先の名前・会社・アドレス） |
-| `GET /v1/web-review` ／ `GET /v1/web-review/reports` ／ `GET /v1/web-review/reports/:month` | Web の分析（仕様書 第34.18節）: 状態（始める前の手伝いと依頼文の下書き）・いちばん新しい月の便り・便りの一覧・管理者か・直すべき所（新しい・見たもの）と最後に確かめた日時 ／ 便りの一覧 ／ 月ごとの便り（`YYYY-MM`）。使えない会社と利用範囲の外の人には 403 |
+| `GET /v1/web-review` ／ `GET /v1/web-review/reports` ／ `GET /v1/web-review/reports/:month` | Webの分析（仕様書 第34.18節）: 状態（始める前の手伝いと依頼文の下書き）・いちばん新しい月の便り・便りの一覧・管理者か・直すべき所（新しい・見たもの）と最後に確かめた日時 ／ 便りの一覧 ／ 月ごとの便り（`YYYY-MM`）。使えない会社と利用範囲の外の人には 403 |
 | `POST /v1/web-review/findings/:id/send` ／ `PUT /v1/admin/extensions/web-review/agency` | 依頼文を制作会社に送る業務を始める（`to` で宛先を変えられる。管理者の承認の後に送る。第34.21節）／ 管理者: 制作会社の宛先（`email`・`name`。null で外す） |
-| `GET /v1/web-review/findings` ／ `PATCH /v1/web-review/findings/:id` ／ `POST /v1/web-review/check` | 直すべき所（第34.19節。`all=1` で済んだ・見送りも）／ 状態を変える（`status`: new・seen・done・dismissed）／ 管理者: 今すぐチェック（ワーカーが次の見回りで探す）。`GET /v1/columns/:id` は、Web の分析を使える人に公開されたコラムの数字（`webMetrics`）を添える |
+| `GET /v1/web-review/findings` ／ `PATCH /v1/web-review/findings/:id` ／ `POST /v1/web-review/check` | 直すべき所（第34.19節。`all=1` で済んだ・見送りも）／ 状態を変える（`status`: new・seen・done・dismissed）／ 管理者: 今すぐチェック（ワーカーが次の見回りで探す）。`GET /v1/columns/:id` は、Webの分析を使える人に公開されたコラムの数字（`webMetrics`）を添える |
 | `POST /v1/admin/extensions/web-review/connect` ／ `DELETE /v1/admin/extensions/web-review/connection` | 管理者: 担当の許可をつなぐ（Google の認可の URL。アナリティクスと Search Console の読み取りだけを求め、前に許した権限を引き継がない。見本の会社ではすぐつながる）／ 外す（Google の許可も取り消す。便りは消さない） |
 | `GET /v1/admin/extensions/web-review/candidates` ／ `PUT /v1/admin/extensions/web-review/selection` | 管理者: 担当が見られるプロパティとサイトと状態 ／ プロパティとサイトを選ぶ（`propertyId`・`siteUrl`。見られるものの中からだけ） |
 | `GET /v1/admin/extensions/announcements/screens` | 管理者: お知らせを流す画面の選び先（店頭サイネージの画面）と、いま選んでいる画面（`selected`。`null` ならすべて。第35.17節） |

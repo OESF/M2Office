@@ -1,8 +1,8 @@
 /**
- * @file Web の分析のツール（仕様書 第34.10節・第34.18節・第34.19節）。月の便り・数字の問い・状態（始める前の手伝い）・サイトの選び直し・直すべき所。
+ * @file Webの分析のツール（仕様書 第34.10節・第34.18節・第34.19節）。月の便り・数字の問い・状態（始める前の手伝い）・サイトの選び直し・直すべき所。
  * 秘書と付属の業務「Web について聞く」、週次ブリーフが使う。
  *
- * 会社が Web の分析を切っているときと、利用範囲の外の人には「使えない」と返す（呼ぶたびに `ctx.webReview.access()` で確かめる）。
+ * 会社が Webの分析を切っているときと、利用範囲の外の人には「使えない」と返す（呼ぶたびに `ctx.webReview.access()` で確かめる）。
  * 数字はプログラムが計算したものを返す。推論はそれを言葉にするだけ（ADR-0067 決定 6）。
  */
 
@@ -13,18 +13,18 @@ import {
 import type { Tool, ToolContext } from '../tools/registry.js';
 import type { WebReviewService } from './service.js';
 
-/** ツールに渡す Web の分析の文脈。 */
+/** ツールに渡す Webの分析の文脈。 */
 export interface WebReviewToolContext {
   service: WebReviewService;
   /**
-   * 依頼者がいま Web の分析を使えるか。使えるなら会社の設定を返す。
+   * 依頼者がいま Webの分析を使えるか。使えるなら会社の設定を返す。
    *
    * @returns 使えなければ `null`
    */
   access(): Promise<WebReviewSettings | null>;
 }
 
-const UNAVAILABLE = { available: false, reason: 'Web の分析は使えません（会社で切っているか、利用範囲の外です）' };
+const UNAVAILABLE = { available: false, reason: 'Webの分析は使えません（会社で切っているか、利用範囲の外です）' };
 const PATH = '/web-review';
 const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
 
@@ -124,9 +124,9 @@ export const webReviewAsk: Tool = {
 export const webReviewStatus: Tool = {
   name: 'web_review.status',
   risk: 'read',
-  activityLabel: 'Web の分析の状態を調べています',
+  activityLabel: 'Webの分析の状態を調べています',
   helpText: 'Google とつないだか・選んだプロパティとサイト・次にすることを読みます。制作会社への依頼文の下書きも作ります（送りません）',
-  description: 'Web の分析の状態（つないだか・選んだアナリティクスのプロパティと Search Console のサイト・次にすること・制作会社に閲覧の権限をもらう依頼文の下書き）を返す',
+  description: 'Webの分析の状態（つないだか・選んだアナリティクスのプロパティと Search Console のサイト・次にすること・制作会社に閲覧の権限をもらう依頼文の下書き）を返す',
   args: { properties: {} },
   async invoke(_args, ctx) {
     const service = await serviceOf(ctx);
@@ -143,7 +143,7 @@ export const webReviewStatus: Tool = {
 export const webReviewSelect: Tool = {
   name: 'web_review.select',
   risk: 'write-internal',
-  activityLabel: 'Web の分析のサイトを選び直しています',
+  activityLabel: 'Webの分析のサイトを選び直しています',
   helpText: '見るアナリティクスのプロパティと Search Console のサイトを、見られるものの中から選び直します（管理者だけ）',
   description: '見るアナリティクスのプロパティか Search Console のサイトを選び直す（管理者だけ）。property と site には、名前か URL の一部を入れる（見られるものの中から、それを含むものが 1 つに決まれば選ぶ）',
   args: {
@@ -240,5 +240,5 @@ export const webReviewRequestSend: Tool = {
   },
 };
 
-/** Web の分析のツール。 */
+/** Webの分析のツール。 */
 export const WEB_REVIEW_TOOLS: Tool[] = [webReviewReport, webReviewAsk, webReviewStatus, webReviewSelect, webReviewFindings, webReviewRequestSend];

@@ -160,7 +160,7 @@ export async function ensureWordPressCategory(a: WordPressAuth, name: string): P
 }
 
 /**
- * 記事の公開の状態と URL（Web の分析が、公開されたコラムの数字を読むため。第34.19節）。
+ * 記事の公開の状態と URL（Webの分析が、公開されたコラムの数字を読むため。第34.19節）。
  *
  * @returns 読めなければ `null`
  */

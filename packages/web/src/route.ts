@@ -33,7 +33,7 @@ export type Route =
   | { kind: 'competitors' }
   /** お知らせの作成（仕様書 第35.17節）。`announcementId` があれば 1 件。 */
   | { kind: 'announcements'; announcementId: string | null }
-  /** Web の分析（仕様書 第34.18節）。`month`（YYYY-MM）があればその月の便り。 */
+  /** Webの分析（仕様書 第34.18節）。`month`（YYYY-MM）があればその月の便り。 */
   | { kind: 'webReview'; month: string | null }
   | { kind: 'settings'; section: string | null }
   | { kind: 'help'; articleId: string | null }

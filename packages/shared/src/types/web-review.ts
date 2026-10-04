@@ -1,12 +1,12 @@
 /**
- * @file Web の分析（内蔵の拡張）の型（仕様書 第34章・第34.18節）。
+ * @file Webの分析（内蔵の拡張）の型（仕様書 第34章・第34.18節）。
  *
  * 担当の Google アカウントの許可（アナリティクスと Search Console の読み取りだけ）で、会社の Web サイトの集計の数字を読み、
  * 月に 1 回の便りと、秘書への問いの答えにする。数字はプログラムが API の値から計算し、推論は言葉にするだけ。
  * 段 1 は、担当の許可・サイトの選び方・始める前の手伝い・秘書に聞く・月の便り。直すべき所は段 2。
  */
 
-/** Web の分析の拡張の ID（内蔵の拡張。第12.13節）。 */
+/** Webの分析の拡張の ID（内蔵の拡張。第12.13節）。 */
 export const WEB_REVIEW_EXTENSION_ID = 'web-review';
 
 /** 担当が許す Google の権限（読み取りだけ。第34.3節）。 */
@@ -166,7 +166,7 @@ export type WebReviewSetupState =
   | 'choose' // 候補が複数あり、選ぶのを待つ
   | 'ready';
 
-/** Web の分析の状態（画面と秘書に返す）。 */
+/** Webの分析の状態（画面と秘書に返す）。 */
 export interface WebReviewStatus {
   state: WebReviewSetupState;
   /** 担当のアカウントと、つないだ人の名前 */

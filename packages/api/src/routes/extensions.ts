@@ -128,7 +128,7 @@ export function extensionsRoute(deps: AppDeps) {
         ...(e.pkg.manifest.id === COMPETITORS_EXTENSION_ID ? { competitors: settings.competitors } : {}),
         // お知らせの作成: Web を公開まで行うか・カテゴリー・流す画面（第35.4節）
         ...(e.pkg.manifest.id === ANNOUNCEMENTS_EXTENSION_ID ? { announcements: settings.announcements } : {}),
-        // Web の分析: 担当の許可・選んだプロパティとサイト（第34.18節。トークンは返さない）
+        // Webの分析: 担当の許可・選んだプロパティとサイト（第34.18節。トークンは返さない）
         ...(e.pkg.manifest.id === WEB_REVIEW_EXTENSION_ID ? { webReview: settings.webReview } : {}),
       })),
     });
@@ -497,7 +497,7 @@ export function extensionsRoute(deps: AppDeps) {
   });
 
   /**
-   * Web の分析の担当の許可をつなぐ（第34.18節）。Google の認可の画面の URL を返す（アカウントを選ばせ、読み取りの 2 つだけを求める。
+   * Webの分析の担当の許可をつなぐ（第34.18節）。Google の認可の画面の URL を返す（アカウントを選ばせ、読み取りの 2 つだけを求める。
    * 前に許した権限は引き継がない）。開発の見本の会社では、認可を経ずに見本の口をつなぐ。
    *
    * @returns `{ url }` か、見本なら `{ connected: true, status }`。会社の Google のクライアントが無ければ 409
@@ -517,7 +517,7 @@ export function extensionsRoute(deps: AppDeps) {
     return c.json({ url });
   });
 
-  /** Web の分析の担当の許可を外す。Google の許可も取り消す（月の便りは消さない）。 */
+  /** Webの分析の担当の許可を外す。Google の許可も取り消す（月の便りは消さない）。 */
   app.delete(`/${WEB_REVIEW_EXTENSION_ID}/connection`, async (c) => {
     const { tenant, user } = c.get('ctx');
     const { refreshToken } = await deps.webReview.service.disconnect({ tenantId: tenant.id, userId: user.id });
@@ -525,14 +525,14 @@ export function extensionsRoute(deps: AppDeps) {
     return c.json({ ok: true });
   });
 
-  /** Web の分析: 担当が見られるプロパティとサイトと、いまの状態（設定の画面で選ぶ）。 */
+  /** Webの分析: 担当が見られるプロパティとサイトと、いまの状態（設定の画面で選ぶ）。 */
   app.get(`/${WEB_REVIEW_EXTENSION_ID}/candidates`, async (c) => {
     const { tenant } = c.get('ctx');
     const [candidates, status] = await Promise.all([deps.webReview.service.candidates(tenant.id), deps.webReview.service.status(tenant.id)]);
     return c.json({ candidates: 'error' in candidates ? null : candidates, error: 'error' in candidates ? candidates.error : null, status });
   });
 
-  /** Web の分析: 制作会社の宛先（`email`・`name`。`null` で外す。第34.21節）。 */
+  /** Webの分析: 制作会社の宛先（`email`・`name`。`null` で外す。第34.21節）。 */
   app.put(`/${WEB_REVIEW_EXTENSION_ID}/agency`, async (c) => {
     const { tenant, user } = c.get('ctx');
     const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
@@ -541,7 +541,7 @@ export function extensionsRoute(deps: AppDeps) {
     return err ? c.json({ error: err }, 400) : c.json({ ok: true });
   });
 
-  /** Web の分析: プロパティとサイトを選ぶ（`propertyId`・`siteUrl`。`null` で選ばない）。 */
+  /** Webの分析: プロパティとサイトを選ぶ（`propertyId`・`siteUrl`。`null` で選ばない）。 */
   app.put(`/${WEB_REVIEW_EXTENSION_ID}/selection`, async (c) => {
     const { tenant, user } = c.get('ctx');
     const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));

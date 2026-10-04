@@ -1,4 +1,4 @@
--- Web の分析（内蔵の拡張。仕様書 第34章・第34.18節）
+-- Webの分析（内蔵の拡張。仕様書 第34章・第34.18節）
 -- 1. 会社の設定の区分（入り切り・担当の許可・選んだプロパティとサイト）
 alter table tenant_settings add column if not exists web_review jsonb;
 
