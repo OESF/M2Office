@@ -9,9 +9,10 @@
  */
 
 import { Hono, type Context } from 'hono';
-import { AI_NOT_CONFIGURED_MESSAGE, COLUMN_PHOTO_MAX_BYTES, WEB_COLUMN_PLACE, aiAvailable, enqueueJob, type ColumnViewer } from '@m2office/core';
+import { AI_NOT_CONFIGURED_MESSAGE, COLUMN_PHOTO_MAX_BYTES, WEB_COLUMN_PLACE, aiAvailable, columnPublicUrl, enqueueJob, type ColumnViewer } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
+import { tenantOrigin } from '../tenant-origin.js';
 
 const str = (v: unknown) => (typeof v === 'string' ? v : undefined);
 
@@ -37,11 +38,56 @@ export function columnsRoute(deps: AppDeps) {
     await next();
   });
 
-  /** コラムの一覧（新しい順）と、入れ先の WordPress。 */
+  /** 貼るだけのページの URL の頭（使っていなければ `null`）。 */
+  const pageBase = (c: Context<AppEnv>, key: string | null | undefined) => (key ? `${tenantOrigin(c.req.header('origin'), c.req.header('host'))}/v1/public/columns/${key}` : null);
+
+  /** コラムの一覧（新しい順）と、入れ先の WordPress・テーマ案・予定表・貼るだけのページ（段 2。第32.18.4節）。 */
   app.get('/', async (c) => {
     const { tenant } = c.get('ctx');
-    const [columns, settings] = await Promise.all([service.list(tenant.id), deps.repo.getTenantSettings(tenant.id)]);
-    return c.json({ columns, wordpress: settings.webColumns.wordpress });
+    const [columns, settings, themes, plan] = await Promise.all([
+      service.list(tenant.id), deps.repo.getTenantSettings(tenant.id),
+      deps.columns.planner?.themes(tenant.id) ?? [], deps.columns.planner?.plan(tenant.id) ?? [],
+    ]);
+    return c.json({ columns, wordpress: settings.webColumns.wordpress, themes, plan, pageUrl: pageBase(c, settings.webColumns.pastePage?.key) });
+  });
+
+  /** テーマ案を作る（画面の「テーマ案を出す」）。 */
+  app.post('/themes', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    if (!deps.columns.planner) return c.json({ error: 'テーマ案は使えません' }, 409);
+    const r = await deps.columns.planner.generateThemes(tenant.id, user.id, new Date(), false);
+    return 'error' in r ? c.json({ error: r.error }, 400) : c.json(r, 201);
+  });
+
+  /** テーマ案から書き始める（書き直しの案なら書き直す）。 */
+  app.post('/themes/:id/write', async (c) => {
+    if (!deps.columns.planner) return c.json({ error: 'テーマ案は使えません' }, 409);
+    const r = await deps.columns.planner.writeFromTheme(who(c), c.req.param('id'));
+    return 'error' in r ? c.json({ error: r.error }, 400) : c.json(r, 201);
+  });
+
+  /** テーマ案を見送りにする。 */
+  app.post('/themes/:id/dismiss', async (c) => {
+    if (!deps.columns.planner) return c.json({ error: 'テーマ案は使えません' }, 409);
+    const err = await deps.columns.planner.dismissTheme(who(c), c.req.param('id'));
+    return err ? c.json({ error: err }, 400) : c.json({ ok: true });
+  });
+
+  /** 公開の日時（予約）を入れる・外す（`publishAt`: ISO か `null`。下書きのときだけ）。 */
+  app.put('/:id/publish-at', async (c) => {
+    const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
+    const at = body['publishAt'] === null ? null : typeof body['publishAt'] === 'string' ? body['publishAt'] : undefined;
+    if (at === undefined) return c.json({ error: '公開の日時が読めません' }, 400);
+    const err = await service.setPublishAt(who(c), c.req.param('id'), at);
+    return err ? c.json({ error: err }, 400) : c.json({ ok: true });
+  });
+
+  /** 取り下げる（承認済み・予約・入れたもの。管理者と承認者だけ）。 */
+  app.post('/:id/withdraw', async (c) => {
+    const { user } = c.get('ctx');
+    if (!user.roles.includes('admin') && !user.roles.includes('approver')) return c.json({ error: '取り下げられるのは管理者と承認者です' }, 403);
+    const err = await service.withdraw(who(c), c.req.param('id'));
+    return err ? c.json({ error: err }, 400) : c.json({ ok: true });
   });
 
   /**
@@ -64,7 +110,10 @@ export function columnsRoute(deps: AppDeps) {
     // 公開されたコラムの数字（この 28 日）。Web の振り返りを使える人にだけ添える（第34.19節）
     const { tenant, user } = c.get('ctx');
     const metrics = (await deps.webReview.access(tenant.id, user.id)) ? await deps.webReview.service.columnMetrics(tenant.id, d.column.id).catch(() => null) : null;
-    return c.json({ ...d, webMetrics: metrics });
+    // 公開の URL（SNS の告知文に足す。WordPress で公開された URL か、貼るだけのページの記事の URL。第32.18.4節）
+    const [settings, placed] = await Promise.all([deps.repo.getTenantSettings(tenant.id), service.store.placed(tenant.id)]);
+    const publicUrl = columnPublicUrl({ ...d.column, webUrl: placed.find((x) => x.id === d.column.id)?.webUrl ?? null }, pageBase(c, settings.webColumns.pastePage?.key));
+    return c.json({ ...d, webMetrics: metrics, publicUrl });
   });
 
   /** 直して保存する（新しい版になる）。 */

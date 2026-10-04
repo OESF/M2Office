@@ -5807,6 +5807,106 @@ console.log('\n■ 72. Web の振り返りの段 1・段 2（担当の許可・�
   }
 }
 
+console.log('\n■ 73. コラムの作成の段 2（テーマ案・予定表・予約・貼るだけのページ・取り下げ。第32.18.4節）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const startedAt = new Date().toISOString();
+  const { rows: saved } = await owner.query(`select tenant_id, web_columns from tenant_settings where tenant_id = 't-alpha'`);
+  const cleanup = async () => {
+    await owner.query(`delete from web_columns where tenant_id = 't-alpha' and created_at >= $1`, [startedAt]);
+    await owner.query(`delete from web_column_themes where tenant_id = 't-alpha' and created_at >= $1`, [startedAt]);
+    await owner.query(`delete from files where tenant_id = 't-alpha' and created_at >= $1 and name = 'column-cover.png'`, [startedAt]);
+  };
+  const settle = async (id) => {
+    for (let i = 0; i < 60; i++) { const b = (await call('a', `/v1/columns/${id}`, {}, 'member')).body; if (b.column?.status !== 'writing') return b; await sleep(250); }
+    return (await call('a', `/v1/columns/${id}`, {}, 'member')).body;
+  };
+  const approve = async (id) => {
+    const submit = await call('a', `/v1/columns/${id}/submit`, { method: 'POST', body: '{}' }, 'member');
+    await waitFor('a', submit.body.runId, ['awaiting_approval', 'failed', 'completed'], 20000, 'member');
+    const appr = await approvalFor('a', submit.body.runId, 'admin');
+    if (appr) await call('a', `/v1/approvals/${appr.id}`, { method: 'POST', body: JSON.stringify({ decision: 'approved' }) }, 'admin');
+    await waitFor('a', submit.body.runId, ['completed', 'failed'], 20000, 'member');
+    return appr;
+  };
+  try {
+    await call('a', '/v1/admin/extensions/web-columns/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const plan = await call('a', '/v1/admin/extensions/web-columns/settings', { method: 'PUT', body: JSON.stringify({ topics: ['歯みがき'], plan: { perMonth: 4, weekday: 3 } }) });
+    const badPlan = await call('a', '/v1/admin/extensions/web-columns/settings', { method: 'PUT', body: JSON.stringify({ plan: { perMonth: 3, weekday: 9 } }) });
+    const planned = (await call('a', '/v1/columns', {}, 'member')).body;
+    // ワーカーの先回り（1 分ごと）がテーマ案を使わないよう、予定表を確かめたら外す
+    await call('a', '/v1/admin/extensions/web-columns/settings', { method: 'PUT', body: JSON.stringify({ plan: null }) });
+    // テーマ案を出す（開発の環境では推論の見本のため、決まった形の案）
+    const made = await call('a', '/v1/columns/themes', { method: 'POST', body: '{}' }, 'member');
+    const list = (await call('a', '/v1/columns', {}, 'member')).body;
+    plan.status === 200 && badPlan.status === 400 && made.status === 201 && made.body.added?.length >= 1 && list.themes?.length >= 1 && planned.plan?.length >= 8
+      ? ok('テーマ案を出し、予定表（毎週・水曜）の今月と来月の回を並べる。読めない予定表は断る')
+      : ng('テーマ案か予定表が違う', JSON.stringify({ plan: plan.status, bad: badPlan.status, made: made.body, themes: list.themes?.length, slots: planned.plan?.length }).slice(0, 400));
+    const theme = list.themes[0];
+    const w = await call('a', `/v1/columns/themes/${theme.id}/write`, { method: 'POST', body: '{}' }, 'member');
+    const col = w.body?.columnId ? await settle(w.body.columnId) : null;
+    const after = (await call('a', '/v1/columns', {}, 'member')).body;
+    w.status === 201 && col?.column?.status === 'draft' && col.column.theme === theme.theme && !after.themes.some((t) => t.id === theme.id)
+      ? ok('テーマ案の「書く」で書き始め、案は使ったにする') : ng('テーマ案から書くのが違う', JSON.stringify({ w: w.body, status: col?.column?.status }).slice(0, 300));
+
+    // 予約: 公開の日時を入れて承認すると、予約にして待つ
+    const id = w.body.columnId;
+    const at = new Date(Date.now() + 2 * 86_400_000).toISOString();
+    const past = await call('a', `/v1/columns/${id}/publish-at`, { method: 'PUT', body: JSON.stringify({ publishAt: new Date(Date.now() - 60_000).toISOString() }) }, 'member');
+    const setAt = await call('a', `/v1/columns/${id}/publish-at`, { method: 'PUT', body: JSON.stringify({ publishAt: at }) }, 'member');
+    const appr = await approve(id);
+    const scheduled = (await call('a', `/v1/columns/${id}`, {}, 'member')).body;
+    past.status === 400 && setAt.status === 200 && /予約/.test(appr?.present ?? '') && scheduled.column?.status === 'scheduled' && scheduled.column.publishAt === at
+      ? ok('公開の日時を入れて承認すると予約になり、承認の画面に日時を出す（過ぎた日時は入れられない）')
+      : ng('予約が違う', JSON.stringify({ past: past.status, set: setAt.status, present: appr?.present?.slice(0, 200), status: scheduled.column?.status }).slice(0, 400));
+
+    // 貼るだけのページ: 承認済みのものだけを出す（予約の間は出さない）
+    const byMember = await call('a', '/v1/admin/extensions/web-columns/page', { method: 'POST', body: '{}' }, 'member');
+    const page = await call('a', '/v1/admin/extensions/web-columns/page', { method: 'POST', body: '{}' });
+    const key = page.body?.urls?.page?.split('/').pop();
+    const c2 = await call('a', '/v1/columns', { method: 'POST', body: JSON.stringify({ theme: '貼るだけのページの確認' }) }, 'member');
+    await settle(c2.body.id);
+    await approve(c2.body.id);
+    const html = await fetch(`${API}/v1/public/columns/${key}`);
+    const htmlText = await html.text();
+    const json = await (await fetch(`${API}/v1/public/columns/${key}.json`)).json();
+    const rss = await fetch(`${API}/v1/public/columns/${key}.rss`);
+    const article = await fetch(`${API}/v1/public/columns/${key}/${c2.body.id}`);
+    const cover = await fetch(`${API}/v1/public/columns/${key}/${c2.body.id}/cover.png`);
+    const scheduledHidden = await fetch(`${API}/v1/public/columns/${key}/${id}`);
+    const wrong = await fetch(`${API}/v1/public/columns/${'x'.repeat(32)}`);
+    byMember.status === 403 && html.status === 200 && /script-src|default-src 'none'/.test(html.headers.get('content-security-policy') ?? '') && !/<script/i.test(htmlText)
+      && json.columns?.length === 1 && json.columns[0].id === c2.body.id && rss.status === 200 && /<rss/.test(await rss.text())
+      && article.status === 200 && cover.status === 200 && cover.headers.get('content-type') === 'image/png' && scheduledHidden.status === 404 && wrong.status === 404
+      ? ok('貼るだけのページは鍵の URL で、承認済みのコラムだけをページ・記事・JSON・RSS・カバー画像で出す（予約の間は出さない。スクリプトを持たない。入れるのは管理者）')
+      : ng('貼るだけのページが違う', JSON.stringify({ member: byMember.status, html: html.status, json: json.columns?.length, rss: rss.status, article: article.status, cover: cover.status, hidden: scheduledHidden.status, wrong: wrong.status }));
+    const detail = (await call('a', `/v1/columns/${c2.body.id}`, {}, 'member')).body;
+    detail.publicUrl?.endsWith(`/v1/public/columns/${key}/${c2.body.id}`) ? ok('承認済みのコラムに、SNS の告知文に足す公開の URL を返す') : ng('公開の URL が無い', String(detail.publicUrl));
+
+    // 取り下げ: 管理者と承認者だけ。貼るだけのページから外す
+    const wdMember = await call('a', `/v1/columns/${c2.body.id}/withdraw`, { method: 'POST', body: '{}' }, 'member');
+    const wd = await call('a', `/v1/columns/${c2.body.id}/withdraw`, { method: 'POST', body: '{}' });
+    const json2 = await (await fetch(`${API}/v1/public/columns/${key}.json`)).json();
+    await call('a', '/v1/admin/extensions/web-columns/page', { method: 'DELETE' });
+    const stopped = await fetch(`${API}/v1/public/columns/${key}`);
+    wdMember.status === 403 && wd.status === 200 && json2.columns?.length === 0 && stopped.status === 404
+      ? ok('取り下げると貼るだけのページから外し（管理者と承認者だけ）、ページを止めるとすぐ見られなくなる')
+      : ng('取り下げか止めるのが違う', JSON.stringify({ member: wdMember.status, wd: wd.status, left: json2.columns?.length, stopped: stopped.status }));
+    const { body: audits } = await call('a', '/v1/admin/audit-events');
+    const acts = (audits.items ?? []).map((e) => e.action);
+    ['column.themes', 'column.theme_use', 'column.publish_at', 'column.schedule', 'column.page_enable', 'column.withdraw', 'column.page_disable'].every((x) => acts.includes(x))
+      ? ok('テーマ案・案から書く・公開の日時・予約・貼るだけのページ・取り下げを監査ログに残す') : ng('監査ログが違う', JSON.stringify(acts.filter((x) => x.startsWith('column.'))));
+  } catch (err) {
+    ng('コラムの作成の段 2 の確認が途中で止まった', String(err?.stack ?? err));
+  } finally {
+    await cleanup();
+    for (const r of saved) await owner.query(`update tenant_settings set web_columns = $2 where tenant_id = $1`, [r.tenant_id, r.web_columns ? JSON.stringify(r.web_columns) : null]);
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

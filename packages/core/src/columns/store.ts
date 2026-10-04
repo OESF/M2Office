@@ -6,7 +6,9 @@
 
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
-import type { ColumnPhoto, ColumnReviewItem, ColumnSource, WebColumn, WebColumnCover, WebColumnStatus, WebColumnVersion } from '@m2office/shared';
+import type {
+  ColumnPhoto, ColumnReviewItem, ColumnSource, ColumnThemeSource, ColumnThemeStatus, WebColumn, WebColumnCover, WebColumnStatus, WebColumnTheme, WebColumnVersion,
+} from '@m2office/shared';
 
 /** 足す版（番号は置き場が決める）。 */
 export type NewColumnVersion = Omit<WebColumnVersion, 'version' | 'createdAt' | 'createdByName'>;
@@ -19,7 +21,16 @@ export interface ColumnStore {
   update(tenantId: string, id: string, patch: Partial<{
     status: WebColumnStatus; submittedVersion: number | null; submittedDigest: string | null; runId: string | null;
     wpPostId: string | null; wpEditUrl: string | null; failure: string | null; webUrl: string | null;
+    plannedFor: string | null; publishAt: string | null;
   }>): Promise<void>;
+  /** 予約で、公開の日時を過ぎたもの（ワーカーが入れる。第32.18.4節） */
+  dueScheduled(tenantId: string, nowIso: string): Promise<string[]>;
+  /** テーマ案（新しい順）。状態を渡せばその状態だけ */
+  themes(tenantId: string, statuses?: ColumnThemeStatus[], limit?: number): Promise<WebColumnTheme[]>;
+  addTheme(tenantId: string, t: { theme: string; why: string; source: ColumnThemeSource; columnId: string | null }): Promise<string>;
+  setThemeStatus(tenantId: string, id: string, status: ColumnThemeStatus): Promise<void>;
+  /** 貼るだけのページの鍵から会社を引く（ログインの無い人が読む）。無ければ `null` */
+  tenantByPageKey(key: string): Promise<string | null>;
   /** WordPress に入れたコラム（記事の ID と、公開された URL。Web の振り返りが読む。第34.19節） */
   placed(tenantId: string): Promise<{ id: string; title: string; wpPostId: string | null; webUrl: string | null }[]>;
   /** 承認へ進めた版の指紋（承認の後に版が変わっていないかを確かめる）。 */
@@ -43,13 +54,13 @@ export interface ColumnStore {
 interface ColumnRow {
   id: string; theme: string; memo: string; status: WebColumnStatus; current_version: number; submitted_version: number | null;
   run_id: string | null; wp_edit_url: string | null; failure: string | null; created_by: string; created_at: Date | string; updated_at: Date | string;
-  title: string | null; review: ColumnReviewItem[] | null;
+  title: string | null; review: ColumnReviewItem[] | null; planned_for: string | null; publish_at: Date | string | null;
 }
 
 interface PhotoRow { id: string; file_id: string; description: string; has_people: boolean; created_at: Date | string }
 
 const COLUMN_SELECT = `select c.id, c.theme, c.memo, c.status, c.current_version, c.submitted_version, c.run_id, c.wp_edit_url, c.failure,
-    c.created_by, c.created_at, c.updated_at, v.title, v.review
+    c.created_by, c.created_at, c.updated_at, v.title, v.review, c.planned_for::text as planned_for, c.publish_at
   from web_columns c left join web_column_versions v on v.tenant_id = c.tenant_id and v.column_id = c.id and v.version = c.current_version`;
 
 /** 日時を ISO の文字にする（つなぎの設定で Date でも文字でも返るため）。 */
@@ -59,9 +70,14 @@ function toColumn(r: ColumnRow): WebColumn {
   return {
     id: r.id, theme: r.theme, memo: r.memo, status: r.status, currentVersion: r.current_version, title: r.title ?? '',
     reviewCount: (r.review ?? []).length, submittedVersion: r.submitted_version, runId: r.run_id, wpEditUrl: r.wp_edit_url,
-    failure: r.failure, createdBy: r.created_by, createdAt: iso(r.created_at), updatedAt: iso(r.updated_at),
+    failure: r.failure, plannedFor: r.planned_for, publishAt: r.publish_at ? iso(r.publish_at) : null,
+    createdBy: r.created_by, createdAt: iso(r.created_at), updatedAt: iso(r.updated_at),
   };
 }
+
+interface ThemeRow { id: string; theme: string; why: string; source: ColumnThemeSource; column_id: string | null; status: ColumnThemeStatus; created_at: Date | string }
+
+const toTheme = (r: ThemeRow): WebColumnTheme => ({ id: r.id, theme: r.theme, why: r.why, source: r.source, columnId: r.column_id, status: r.status, createdAt: iso(r.created_at) });
 
 interface VersionRow {
   version: number; title: string; titles: string[]; body: string; description: string; sns: { short?: string; long?: string };
@@ -127,7 +143,7 @@ export class PostgresColumnStore implements ColumnStore {
   async update(tenantId: string, id: string, patch: Parameters<ColumnStore['update']>[2]): Promise<void> {
     const cols: Record<string, string> = {
       status: 'status', submittedVersion: 'submitted_version', submittedDigest: 'submitted_digest', runId: 'run_id',
-      wpPostId: 'wp_post_id', wpEditUrl: 'wp_edit_url', failure: 'failure', webUrl: 'web_url',
+      wpPostId: 'wp_post_id', wpEditUrl: 'wp_edit_url', failure: 'failure', webUrl: 'web_url', plannedFor: 'planned_for', publishAt: 'publish_at',
     };
     const sets: string[] = [];
     const params: unknown[] = [tenantId, id];
@@ -138,6 +154,31 @@ export class PostgresColumnStore implements ColumnStore {
     }
     if (sets.length === 0) return;
     await this.q(tenantId, `update web_columns set ${sets.join(', ')}, updated_at = now() where tenant_id = $1 and id = $2`, params);
+  }
+
+  async dueScheduled(tenantId: string, nowIso: string): Promise<string[]> {
+    return (await this.q<{ id: string }>(tenantId, `select id from web_columns where tenant_id = $1 and status = 'scheduled' and publish_at <= $2 order by publish_at`, [tenantId, nowIso])).map((r) => r.id);
+  }
+
+  async themes(tenantId: string, statuses?: ColumnThemeStatus[], limit = 50): Promise<WebColumnTheme[]> {
+    return (await this.q<ThemeRow>(tenantId, `select id, theme, why, source, column_id, status, created_at from web_column_themes
+      where tenant_id = $1 and ($2::text[] is null or status = any($2)) order by created_at desc limit $3`, [tenantId, statuses ?? null, limit])).map(toTheme);
+  }
+
+  async addTheme(tenantId: string, t: { theme: string; why: string; source: ColumnThemeSource; columnId: string | null }): Promise<string> {
+    const id = `cth-${randomUUID()}`;
+    await this.q(tenantId, `insert into web_column_themes (id, tenant_id, theme, why, source, column_id) values ($1, $2, $3, $4, $5, $6)`,
+      [id, tenantId, t.theme, t.why, t.source, t.columnId]);
+    return id;
+  }
+
+  async setThemeStatus(tenantId: string, id: string, status: ColumnThemeStatus): Promise<void> {
+    await this.q(tenantId, `update web_column_themes set status = $3, updated_at = now() where tenant_id = $1 and id = $2`, [tenantId, id, status]);
+  }
+
+  async tenantByPageKey(key: string): Promise<string | null> {
+    const rows = await this.q<{ t: string | null }>('', 'select m2o_column_page($1) as t', [key]);
+    return rows[0]?.t ?? null;
   }
 
   async placed(tenantId: string): Promise<{ id: string; title: string; wpPostId: string | null; webUrl: string | null }[]> {
@@ -252,6 +293,34 @@ export class MemoryColumnStore implements ColumnStore {
     if (!c) return;
     for (const [k, v] of Object.entries(patch)) if (v !== undefined) (c as unknown as Record<string, unknown>)[k] = v;
     c.updatedAt = new Date().toISOString();
+  }
+
+  readonly allThemes: (WebColumnTheme & { tenantId: string })[] = [];
+  /** 貼るだけのページの鍵と会社（自動テスト用） */
+  readonly pageKeys = new Map<string, string>();
+
+  async dueScheduled(tenantId: string, nowIso: string): Promise<string[]> {
+    return [...this.columns.values()].filter((c) => c.tenantId === tenantId && c.status === 'scheduled' && c.publishAt && c.publishAt <= nowIso).map((c) => c.id);
+  }
+
+  async themes(tenantId: string, statuses?: ColumnThemeStatus[], limit = 50): Promise<WebColumnTheme[]> {
+    return this.allThemes.filter((t) => t.tenantId === tenantId && (!statuses || statuses.includes(t.status)))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit).map(({ tenantId: _t, ...t }) => ({ ...t }));
+  }
+
+  async addTheme(tenantId: string, t: { theme: string; why: string; source: ColumnThemeSource; columnId: string | null }): Promise<string> {
+    const id = `cth-${randomUUID()}`;
+    this.allThemes.push({ ...t, id, tenantId, status: 'new', createdAt: new Date(Date.now() + this.allThemes.length).toISOString() });
+    return id;
+  }
+
+  async setThemeStatus(tenantId: string, id: string, status: ColumnThemeStatus): Promise<void> {
+    const t = this.allThemes.find((x) => x.id === id && x.tenantId === tenantId);
+    if (t) t.status = status;
+  }
+
+  async tenantByPageKey(key: string): Promise<string | null> {
+    return this.pageKeys.get(key) ?? null;
   }
 
   async placed(tenantId: string): Promise<{ id: string; title: string; wpPostId: string | null; webUrl: string | null }[]> {

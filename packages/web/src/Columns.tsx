@@ -9,7 +9,10 @@
 
 import { copyText } from './clipboard.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { COLUMN_COVER_KIND_LABELS, WEB_COLUMN_STATUS_LABELS, type ColumnReviewItem, type WebColumn, type WebColumnStatus, type WebColumnVersion } from '@m2office/shared';
+import {
+  COLUMN_COVER_KIND_LABELS, COLUMN_THEME_SOURCE_LABELS, WEB_COLUMN_STATUS_LABELS,
+  type ColumnPlanSlot, type ColumnReviewItem, type WebColumn, type WebColumnStatus, type WebColumnTheme, type WebColumnVersion,
+} from '@m2office/shared';
 import { api, describeError, type ColumnDetail } from './api.js';
 import { Markdown } from './help.js';
 
@@ -38,10 +41,12 @@ const KIND_LABELS: Record<ColumnReviewItem['kind'], string> = {
 };
 
 const STATUS_BADGE: Record<WebColumnStatus, string> = {
-  writing: 'badge', draft: 'badge', awaiting: 'badge warn', approved: 'badge ok', placed: 'badge ok', failed: 'badge danger',
+  writing: 'badge', draft: 'badge', awaiting: 'badge warn', approved: 'badge ok', scheduled: 'badge ok', placed: 'badge ok', withdrawn: 'badge', failed: 'badge danger',
 };
 
 const when = (iso: string) => new Date(iso).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+/** datetime-local の欄の値（端末の時刻）。 */
+const toLocalInput = (iso: string) => { const d = new Date(iso); return new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16); };
 
 /**
  * Web のコラムの画面。
@@ -63,6 +68,10 @@ export function Columns({ columnId, onOpen, onApprovals }: {
 /** コラムの一覧と「コラムを書く」。 */
 function ColumnList({ onOpen }: { onOpen: (id: string) => void }) {
   const [columns, setColumns] = useState<WebColumn[] | null>(null);
+  // テーマ案と予定表（段 2。第32.18.4節）
+  const [themes, setThemes] = useState<WebColumnTheme[]>([]);
+  const [plan, setPlan] = useState<ColumnPlanSlot[]>([]);
+  const [themeNote, setThemeNote] = useState<string | null>(null);
   const [writing, setWriting] = useState(false);
   const [theme, setTheme] = useState('');
   const [memo, setMemo] = useState('');
@@ -70,7 +79,7 @@ function ColumnList({ onOpen }: { onOpen: (id: string) => void }) {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
-    api.columns.list().then((r) => { setColumns(r.columns); setError(null); }).catch((e) => setError(describeError(e, '読めませんでした')));
+    api.columns.list().then((r) => { setColumns(r.columns); setThemes(r.themes ?? []); setPlan(r.plan ?? []); setError(null); }).catch((e) => setError(describeError(e, '読めませんでした')));
   }, []);
   useEffect(load, [load]);
   // 書いているコラムがあれば、書き上がるまで読み直す
@@ -93,11 +102,74 @@ function ColumnList({ onOpen }: { onOpen: (id: string) => void }) {
     }
   };
 
+  const makeThemes = async () => {
+    setBusy(true);
+    try {
+      const r = await api.columns.makeThemes();
+      setThemeNote(r.added.length ? null : '新しいテーマ案はありませんでした');
+      load();
+    } catch (e) {
+      setError(describeError(e, 'テーマ案を作れませんでした'));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const writeTheme = async (t: WebColumnTheme) => {
+    setBusy(true);
+    try {
+      const { columnId } = await api.columns.writeTheme(t.id);
+      onOpen(columnId);
+    } catch (e) {
+      setError(describeError(e, '書き始められませんでした'));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const dismiss = (t: WebColumnTheme) => {
+    api.columns.dismissTheme(t.id).then(load).catch((e) => setError(describeError(e, '見送りにできませんでした')));
+  };
+  const slotDay = (d: string) => `${Number(d.slice(5, 7))} 月 ${Number(d.slice(8, 10))} 日（${'日月火水木金土'[new Date(`${d}T00:00:00Z`).getUTCDay()]}）`;
+
   return (
     <div className="columns">
       <div className="cards-toolbar">
         <button className={writing ? 'btn' : 'btn ghost'} onClick={() => setWriting(!writing)}>コラムを書く</button>
+        <button className="btn ghost" disabled={busy} onClick={() => void makeThemes()}>テーマ案を出す</button>
+        {themeNote && <span className="muted small">{themeNote}</span>}
       </div>
+      {!writing && themes.length > 0 && (
+        <div className="card columns-themes">
+          <h3>テーマ案</h3>
+          <ul>
+            {themes.map((t) => (
+              <li key={t.id}>
+                <span className="badge">{COLUMN_THEME_SOURCE_LABELS[t.source]}</span> <strong>{t.theme}</strong>
+                {t.why && <span className="muted small">　{t.why}</span>}
+                <span className="row">
+                  <button className="btn small" disabled={busy} onClick={() => void writeTheme(t)}>{t.columnId ? '書き直しを頼む' : '書く'}</button>
+                  <button className="btn ghost small" disabled={busy} onClick={() => dismiss(t)}>見送り</button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {!writing && plan.length > 0 && (
+        <div className="card columns-plan">
+          <h3>予定表</h3>
+          <table className="table">
+            <tbody>
+              {plan.map((s) => (
+                <tr key={s.date}>
+                  <td className="small">{slotDay(s.date)}</td>
+                  <td>{s.columnId ? <button className="link" onClick={() => onOpen(s.columnId!)}>{s.title || '（書いています）'}</button> : <span className="muted">空き</span>}</td>
+                  <td>{s.status && <span className={STATUS_BADGE[s.status]}>{WEB_COLUMN_STATUS_LABELS[s.status]}</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
       {writing && (
         <div className="columns-new">
           <div className="field"><label>テーマ</label>
@@ -246,8 +318,28 @@ function ColumnEditor({ id, onBack, onApprovals }: { id: string; onBack: () => v
         {current && <button className="btn ghost small" onClick={() => void copy('html')}>HTML をコピー</button>}
         {current && <button className="btn ghost small" onClick={() => void copy('markdown')}>Markdown をコピー</button>}
         {(column.status === 'draft' || column.status === 'failed') && <button className="btn ghost small danger" disabled={busy} onClick={remove}>削除</button>}
+        {(column.status === 'approved' || column.status === 'scheduled' || column.status === 'placed') && (
+          <button className="btn ghost small" disabled={busy}
+            onClick={() => { if (confirm(`「${column.title || column.theme}」を取り下げますか？`)) void act(() => api.columns.withdraw(id), '取り下げました', '取り下げられませんでした', 'top'); }}>取り下げ</button>
+        )}
         {note('top')}
       </div>
+      {/* 公開の日時（予約。第32.18.4節）。下書きのときだけ直せる */}
+      {(column.status === 'draft' || column.status === 'scheduled' || column.publishAt) && (
+        <div className="row small columns-publish">
+          <span>公開の日時</span>
+          {column.status === 'draft'
+            ? (
+              <>
+                <input type="datetime-local" value={column.publishAt ? toLocalInput(column.publishAt) : ''} disabled={busy}
+                  onChange={(e) => { if (e.target.value) void act(() => api.columns.setPublishAt(id, new Date(e.target.value).toISOString()), null, '公開の日時を入れられませんでした', 'top'); }} />
+                {column.publishAt && <button className="btn ghost small" disabled={busy} onClick={() => void act(() => api.columns.setPublishAt(id, null), null, '外せませんでした', 'top')}>外す</button>}
+              </>
+            )
+            : <strong>{column.publishAt ? when(column.publishAt) : '—'}</strong>}
+          {column.plannedFor && <span className="muted">予定表の回</span>}
+        </div>
+      )}
 
       {/* 公開されたコラムの数字（この 28 日。Web の振り返りを使っているとき。第34.19節） */}
       {detail?.webMetrics && (
@@ -329,6 +421,11 @@ function ColumnEditor({ id, onBack, onApprovals }: { id: string; onBack: () => v
               </div>
               <div className="field"><label>説明文</label>
                 <textarea rows={2} value={draft.description} maxLength={300} disabled={locked} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
+              </div>
+              {/* SNS の告知文をコピー（公開の URL が分かれば末尾に足す。第32.18.4節） */}
+              <div className="row small">
+                <button className="btn ghost small" disabled={!draft.short} onClick={() => void copyText(detail?.publicUrl ? `${draft.short} ${detail.publicUrl}` : draft.short)}>短い文をコピー</button>
+                <button className="btn ghost small" disabled={!draft.long} onClick={() => void copyText(detail?.publicUrl ? `${draft.long}\n${detail.publicUrl}` : draft.long)}>長い文をコピー</button>
               </div>
               <div className="field"><label>SNS の告知（短い）</label>
                 <input value={draft.short} maxLength={200} disabled={locked} onChange={(e) => setDraft({ ...draft, short: e.target.value })} />

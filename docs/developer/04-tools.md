@@ -35,6 +35,7 @@
 | `calendar.list` | read | `calendar.readonly`（機密） | 予定の一覧を見ます |
 | `card.read` | read | — | 名刺の画像から、氏名・会社名・電話・メールアドレスなどを読み取ります。登録はしません |
 | `columns.preview` | read | — | コラムの題名・字数・残った指摘・入れ先を確かめます。見るだけです |
+| `columns.themes` | read | — | まだ使っていないコラムのテーマ案（なぜ今か・材料の印）と、今月と来月の予定表の回を読みます |
 | `competitors.facts` | read | — | 競合と自社の Web サイトから取り出した事実（サービスと値段・キャンペーン・お知らせ・営業時間）を、出典の URL と一緒に読みます |
 | `competitors.list` | read | — | 自社の像と商圏、覚えている競合（名前・距離・見つけ方・最後に読んだ日）を読みます |
 | `competitors.report` | read | — | いちばん新しい競合のレポート（前の回からの動き・自社との違い・相手の強み・次の一手）を読みます |
@@ -92,6 +93,7 @@
 | `announcements.submit` | write-internal | — | いちばん新しいお知らせの下書きを、承認へ進めます。出すのは承認の後です |
 | `columns.cover` | write-internal | — | コラムのカバー画像を作り直します（型・AI の挿絵・会社の写真）。新しい版になるだけで、Web には出しません |
 | `columns.draft` | write-internal | — | テーマを Web で調べ、出典つきのコラムの下書きを書きます。下書きにするだけで、Web には出しません |
+| `columns.prepare` | write-internal | — | コラムのテーマ案を作ります。本数を言われたら、上から順にテーマ案で書き始めます（予定表があれば空いている回に入れます）。Web には出しません |
 | `columns.rules` | write-internal | — | コラムの赤入れで当てる表現の決まり（医療広告・薬機法・士業）を直します。管理者だけが直せます |
 | `competitors.add` | write-internal | — | URL か店の名前で、競合を入れます。Web サイトのトップを読んで確かめてから入れます |
 | `competitors.check` | write-internal | — | 自社と競合のサイトを今すぐ読み、レポートを作る作業を始めます |
@@ -137,6 +139,7 @@
 | `calendar.list` | `from`: 期間の始まり（ISO 形式。既定は今日）、`to`: 期間の終わり（既定は 7 日後） |
 | `card.read` | `fileId`（必須）: 名刺の画像のファイル ID |
 | `columns.preview` | `columnId`（必須）: コラムの ID |
+| `columns.themes` | なし |
 | `competitors.facts` | `q`: 競合の名前か URL の言葉（無ければ全社） |
 | `competitors.list` | なし |
 | `competitors.report` | なし |
@@ -194,6 +197,7 @@
 | `announcements.submit` | なし |
 | `columns.cover` | `column`: コラムの題名かテーマの言葉、`kind`: 背景の種類（template・ai・photo）、`hint`: 雰囲気の頼み（「もっと明るく」など）、`previous`: 作り直す前の画像に戻す |
 | `columns.draft` | `theme`（必須）: コラムのテーマ（一言。例: 「子どもの歯みがきのコツ」）、`memo`: リクエスト（書く人の希望・経験・考え。カバー画像の希望も書ける。任意） |
+| `columns.prepare` | `count`: 書き始める本数（無ければテーマ案を作るだけ） |
 | `columns.rules` | `add`: 足す決まり、`remove`: 外す決まり、`auto`: AI に任せる形に戻す |
 | `competitors.add` | `text`（必須）: URL か店・会社の名前 |
 | `competitors.check` | なし |

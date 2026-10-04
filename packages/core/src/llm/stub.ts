@@ -265,6 +265,12 @@ function chooseTools(tools: string[], prompt: string): Call[] {
     return [{ name: 'columns.cover', args: { ...(column ? { column } : {}), ...(kind ? { kind } : {}) } }];
   }
   if (has('columns.draft') && instruction.includes('columns.draft')) {
+    const req = extractField(prompt, 'request');
+    // テーマ案・本数・予定表（第32.18.4節）
+    const count = /(\d+)\s*本/.exec(req)?.[1];
+    if (has('columns.prepare') && /用意して/.test(req) && count) return [{ name: 'columns.prepare', args: { count: Number(count) } }];
+    if (has('columns.prepare') && /テーマ案を出して|何を書けば/.test(req)) return [{ name: 'columns.prepare', args: {} }];
+    if (has('columns.themes') && /テーマ案は|予定は/.test(req)) return [{ name: 'columns.themes', args: {} }];
     const theme = extractField(prompt, 'request').replace(/(について|で|の)?コラムを書いて(ください)?[。.]?$/, '').trim();
     if (theme) return [{ name: 'columns.draft', args: { theme } }];
   }

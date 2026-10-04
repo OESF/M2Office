@@ -14,7 +14,7 @@ import { JinglePlayer } from './signage-audio.js';
 import { api, ApiError, describeError, type AccessOptions, type ExtensionView, type HrProposalField, type ScopeValue } from './api.js';
 import {
   INVENTORY_FEATURES, SIGNAGE_DEFAULT_COLOR, SIGNAGE_JINGLES, type HrSettings, type InventoryBookingSource, type InventoryFeature, type InventorySettings,
-  type SignageSettings, type SignageSound, type SignageSource, COLUMN_INDUSTRIES, COLUMN_RULE_SET_LABELS, type WebColumnSettings, type InquirySettings, COMPETITORS_AUTO_RANGE, COMPETITOR_WATCH_LABELS, competitorAutoMax, competitorWatch, competitorsMax, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type WebReviewCandidates, type WebReviewStatus,
+  type SignageSettings, type SignageSound, type SignageSource, COLUMN_INDUSTRIES, COLUMN_RULE_SET_LABELS, COLUMN_PLAN_FREQUENCY_LABELS, type ColumnPlanFrequency, type WebColumnSettings, type InquirySettings, COMPETITORS_AUTO_RANGE, COMPETITOR_WATCH_LABELS, competitorAutoMax, competitorWatch, competitorsMax, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type WebReviewCandidates, type WebReviewStatus,
 } from '@m2office/shared';
 import { HelpTip, Markdown } from './help.js';
 import { ScopeEditor, ScopeField, useAccessOptions } from './Scope.js';
@@ -787,6 +787,33 @@ function AnnouncementFields({ settings, busy, onChanged }: { settings: Announcem
   );
 }
 
+/**
+ * コラムの貼るだけのページ（第32.10節・第32.18.4節）。WordPress につないでいない会社だけに出す。入れると鍵の URL を作り、ページ・埋め込みの文・RSS を出す。
+ */
+function ColumnPageFields({ settings, busy, onChanged }: { settings: WebColumnSettings; busy: boolean; onChanged: () => void }) {
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const url = settings.pastePage ? `${location.origin}/v1/public/columns/${settings.pastePage.key}` : null;
+  const toggle = (on: boolean) => {
+    if (!on && !window.confirm('貼るだけのページを止めますか。貼ってあるページは見られなくなります（コラムは消えません）')) return;
+    (on ? api.admin.enableColumnPage() : api.admin.disableColumnPage()).then(() => { setError(null); onChanged(); }).catch((e) => setError(describeError(e, '変えられませんでした')));
+  };
+  const embed = url ? `<iframe src="${url}" style="width:100%;min-height:800px;border:0" title="コラム"></iframe>` : '';
+  return (
+    <div className="row wrap">
+      <label className="check"><input type="checkbox" checked={!!settings.pastePage} disabled={busy} onChange={(e) => toggle(e.target.checked)} /> 貼るだけのページ</label>
+      {url && (
+        <>
+          <a href={url} target="_blank" rel="noreferrer">ページを開く</a>
+          <button className="btn ghost small" onClick={() => void copyText(embed).then((ok) => setCopied(ok))}>{copied ? 'コピーしました' : '埋め込みの文をコピー'}</button>
+          <a href={`${url}.rss`} target="_blank" rel="noreferrer">RSS</a>
+        </>
+      )}
+      {error && <p className="error">{error}</p>}
+    </div>
+  );
+}
+
 function WebColumnsFields({ settings, usage, busy, onChanged }: { settings: WebColumnSettings; usage: { used: number; limit: number } | null; busy: boolean; onChanged: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [wp, setWp] = useState({ siteUrl: settings.wordpress?.siteUrl ?? '', username: settings.wordpress?.username ?? '', password: '' });
@@ -823,6 +850,20 @@ function WebColumnsFields({ settings, usage, busy, onChanged }: { settings: WebC
         <input key={`t${settings.supervisor?.title ?? ''}`} defaultValue={settings.supervisor?.title ?? ''} maxLength={60} disabled={busy || !settings.supervisor} placeholder="肩書" aria-label="監修者の肩書"
           onBlur={(e) => { const title = e.target.value.trim(); if (settings.supervisor && title !== settings.supervisor.title) save({ supervisor: { ...settings.supervisor, title } }); }} />
       </div>
+      {/* 予定表（月の本数と曜日。第32.18.4節）。決めると、公開の 7 日前に下書きを先回りで用意する */}
+      <div className="row wrap">
+        <label>予定表 <select value={settings.plan ? String(settings.plan.perMonth) : ''} disabled={busy} aria-label="月の本数"
+          onChange={(e) => save({ plan: e.target.value ? { perMonth: Number(e.target.value) as ColumnPlanFrequency, weekday: settings.plan?.weekday ?? 3 } : null })}>
+          <option value="">作らない</option>
+          {([1, 2, 4] as const).map((n) => <option key={n} value={n}>{COLUMN_PLAN_FREQUENCY_LABELS[n]}</option>)}
+        </select></label>
+        {settings.plan && (
+          <select value={settings.plan.weekday} disabled={busy} aria-label="曜日" onChange={(e) => save({ plan: { ...settings.plan!, weekday: Number(e.target.value) } })}>
+            {[...'日月火水木金土'].map((d, i) => <option key={d} value={i}>{d}曜日</option>)}
+          </select>
+        )}
+      </div>
+      {!settings.wordpress && <ColumnPageFields settings={settings} busy={busy} onChanged={onChanged} />}
       <div className="row wrap">
         <strong>WordPress</strong>
         {settings.wordpress

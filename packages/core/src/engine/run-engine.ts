@@ -41,6 +41,7 @@ import type { ColumnService } from '../columns/service.js';
 import type { InquiryService } from '../inquiries/service.js';
 import type { CompetitorService } from '../competitors/service.js';
 import type { AnnouncementService } from '../announcements/service.js';
+import type { ColumnPlanner } from '../columns/planner.js';
 import type { WebReviewService } from '../web-review/service.js';
 import type { LaborCalendar } from '../hr/calendar-service.js';
 import { answerOfSteps } from '../memory/work.js';
@@ -149,6 +150,8 @@ export interface RunEngineDeps {
   columns?: {
     service: ColumnService;
     access(tenantId: string, userId: string): Promise<WebColumnSettings | null>;
+    /** テーマ案と予定表（段 2。第32.18.4節） */
+    planner?: ColumnPlanner;
   };
   /**
    * 問い合わせの記録（内蔵の拡張。仕様書 第33章）。ツールに渡す。無ければ問い合わせのツールは「使えない」と返す。
@@ -966,7 +969,10 @@ export class RunEngine {
       } : {}),
       // Web のコラム（第32.18.1節）。使えるかどうかはツールが呼ぶたびに確かめる
       ...(this.deps.columns ? {
-        columns: { service: this.deps.columns.service, access: () => this.deps.columns!.access(run.tenantId, requestedBy) },
+        columns: {
+          service: this.deps.columns.service, access: () => this.deps.columns!.access(run.tenantId, requestedBy),
+          ...(this.deps.columns.planner ? { planner: this.deps.columns.planner } : {}),
+        },
       } : {}),
       // 問い合わせの記録（第33.17節）。使えるかどうかはツールが呼ぶたびに確かめる
       ...(this.deps.inquiries ? {

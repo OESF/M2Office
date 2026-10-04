@@ -7,13 +7,16 @@
  * @see 仕様書 第32.18.1節 段 1 の実装の決まり
  */
 
-import { COLUMN_COVER_KIND_LABELS, COLUMN_RULE_SET_LABELS, type ColumnCoverKind, type ColumnRuleSet, type WebColumnSettings } from '@m2office/shared';
+import { COLUMN_COVER_KIND_LABELS, COLUMN_RULE_SET_LABELS, COLUMN_THEME_SOURCE_LABELS, WEB_COLUMN_STATUS_LABELS, type ColumnCoverKind, type ColumnRuleSet, type WebColumnSettings } from '@m2office/shared';
 import type { Tool, ToolContext } from '../tools/registry.js';
 import type { ColumnPreview, ColumnService } from './service.js';
+import type { ColumnPlanner } from './planner.js';
 
 /** ツールに渡す Web のコラムの文脈。 */
 export interface ColumnToolContext {
   service: ColumnService;
+  /** テーマ案と予定表（段 2。第32.18.4節）。無い環境では、テーマ案のツールは「使えない」と返す */
+  planner?: ColumnPlanner;
   /**
    * 依頼者がいま Web のコラムを使えるか。使えるなら会社の設定を返す。
    *
@@ -126,9 +129,10 @@ export const columnsPlace: Tool = {
     if (!service) return UNAVAILABLE;
     const res = await service.place(viewer(ctx), str(args['columnId']), str(args['digest']));
     if ('error' in res) return { available: false, reason: res.error };
+    if (res.scheduledAt) return { available: true, placed: false, scheduledAt: res.scheduledAt, note: '予約にしました。公開の日時に入れます' };
     return res.placed
       ? { available: true, placed: true, editUrl: res.editUrl, note: 'WordPress に下書きとして入れました。公開は WordPress の編集の画面で行ってください' }
-      : { available: true, placed: false, note: '承認済みにしました。コラムの画面から本文を写して使えます' };
+      : { available: true, placed: false, note: '承認済みにしました。貼るだけのページを使っていれば、そこに出ます。コラムの画面から本文を写しても使えます' };
   },
 };
 
@@ -213,4 +217,60 @@ export const columnsRules: Tool = {
 };
 
 /** Web のコラムのツール。 */
-export const COLUMN_TOOLS: Tool[] = [columnsDraft, columnsPreview, columnsPlace, columnsCover, columnsRules];
+/**
+ * テーマ案と予定表を読む（「今週のテーマ案は？」「コラムの予定は？」。第32.18.4節）。
+ *
+ * @remarks 危険度 `read`
+ */
+export const columnsThemes: Tool = {
+  name: 'columns.themes',
+  risk: 'read',
+  activityLabel: 'コラムのテーマ案を調べています',
+  helpText: 'まだ使っていないコラムのテーマ案（なぜ今か・材料の印）と、今月と来月の予定表の回を読みます',
+  description: 'まだ使っていないコラムのテーマ案（theme・why・source）と、予定表の回（date・入れたコラムの題名と状態）を返す',
+  args: { properties: {} },
+  async invoke(_args, ctx) {
+    const service = await columnsOf(ctx);
+    if (!service || !ctx.columns?.planner) return UNAVAILABLE;
+    const [themes, plan] = await Promise.all([ctx.columns.planner.themes(ctx.tenantId), ctx.columns.planner.plan(ctx.tenantId)]);
+    return {
+      available: true, path: '/columns',
+      themes: themes.slice(0, 10).map((t) => ({ theme: t.theme, why: t.why, source: COLUMN_THEME_SOURCE_LABELS[t.source], rewrite: !!t.columnId })),
+      plan: plan.map((s) => ({ date: s.date, title: s.title || null, status: s.status ? WEB_COLUMN_STATUS_LABELS[s.status] : '空き' })),
+      note: themes.length ? null : 'まだテーマ案がありません。「テーマ案を出して」と頼めば作ります',
+    };
+  },
+};
+
+/**
+ * テーマ案を作る・案から書き始める（「テーマ案を出して」「来月の分を 4 本用意して」。第32.18.4節）。
+ *
+ * @remarks 危険度 `write-internal`。社内のコラムの置き場に書くだけで、Web には出さない（出すのは承認の後）
+ */
+export const columnsPrepare: Tool = {
+  name: 'columns.prepare',
+  risk: 'write-internal',
+  activityLabel: 'コラムを用意しています',
+  helpText: 'コラムのテーマ案を作ります。本数を言われたら、上から順にテーマ案で書き始めます（予定表があれば空いている回に入れます）。Web には出しません',
+  description: 'count が無ければテーマ案を作って返す。count（1〜8）があれば、上から count 本のテーマ案で下書きを書き始める（予定表があれば空いている回に入れる）',
+  args: { properties: { count: { type: 'number', description: '書き始める本数（無ければテーマ案を作るだけ）' } } },
+  async invoke(args, ctx) {
+    const service = await columnsOf(ctx);
+    if (!service || !ctx.columns?.planner) return UNAVAILABLE;
+    const planner = ctx.columns.planner;
+    if (typeof args['count'] !== 'number') {
+      const r = await planner.generateThemes(ctx.tenantId, ctx.userId, new Date(), false);
+      if ('error' in r) return { available: false, reason: r.error };
+      return { available: true, path: '/columns', themes: r.added.map((t) => ({ theme: t.theme, why: t.why, source: COLUMN_THEME_SOURCE_LABELS[t.source] })) };
+    }
+    const r = await planner.prepare(viewer(ctx), args['count']);
+    if ('error' in r) return { available: false, reason: r.error };
+    const items = await Promise.all(r.columnIds.map((id) => service.store.get(ctx.tenantId, id)));
+    return {
+      available: true, path: '/columns', note: '書き始めました。書き上がると下書きになります。直して承認へ進めると出ます',
+      columns: items.filter(Boolean).map((c) => ({ theme: c!.theme, plannedFor: c!.plannedFor ?? null, path: columnPath(c!.id) })),
+    };
+  },
+};
+
+export const COLUMN_TOOLS: Tool[] = [columnsDraft, columnsPreview, columnsPlace, columnsCover, columnsRules, columnsThemes, columnsPrepare];

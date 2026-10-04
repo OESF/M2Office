@@ -175,6 +175,22 @@ export async function getWordPressPost(a: WordPressAuth, id: string): Promise<{ 
   }
 }
 
+/**
+ * 記事の公開の状態を変える（コラムの取り下げで下書きに戻す。第32.10節）。
+ *
+ * @returns 変えられなければ理由
+ */
+export async function setWordPressStatus(a: WordPressAuth, id: string, status: 'draft' | 'publish'): Promise<string | null> {
+  try {
+    const res = await fetch(`${a.siteUrl}/wp-json/wp/v2/posts/${encodeURIComponent(id)}`, {
+      method: 'POST', headers: headers(a), signal: AbortSignal.timeout(TIMEOUT_MS), body: JSON.stringify({ status }),
+    });
+    return res.ok ? null : `WordPress の記事を下書きに戻せませんでした（${res.status}）`;
+  } catch (err) {
+    return `WordPress に届きませんでした（${err instanceof Error ? err.message : String(err)}）`;
+  }
+}
+
 /** 記事の題名を変える（お知らせの期間の後に「（終了しました）」を付ける。第35.6.1節）。 */
 export async function updateWordPressTitle(a: WordPressAuth, id: string, title: string): Promise<string | null> {
   try {

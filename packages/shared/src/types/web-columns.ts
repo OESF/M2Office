@@ -91,7 +91,66 @@ export interface WebColumnSettings {
   wordpress: ColumnWordPress | null;
   /** カバー画像の背景を生成 AI で描くか（第32.7.1節。既定は切り）。 */
   aiIllustration: boolean;
+  /** 予定表（月の本数と曜日。第32.11節・第32.18.4節）。無ければ予定を作らない。 */
+  plan?: ColumnPlan | null;
+  /** 貼るだけのページ（第32.10節・第32.18.4節）。使っていなければ `null`。 */
+  pastePage?: { key: string; enabledAt: string } | null;
+  /** テーマ案を最後に作った日時（週に 1 回）。 */
+  themesAt?: string | null;
 }
+
+/** 予定表の本数（月に 1 本・2 本・毎週）。 */
+export type ColumnPlanFrequency = 1 | 2 | 4;
+
+/** 予定表の本数の呼び方。 */
+export const COLUMN_PLAN_FREQUENCY_LABELS: Record<ColumnPlanFrequency, string> = { 1: '月に 1 本', 2: '月に 2 本', 4: '毎週' };
+
+/** 予定表（第32.18.4節）。`weekday` は 0（日）〜6（土）。 */
+export interface ColumnPlan {
+  perMonth: ColumnPlanFrequency;
+  weekday: number;
+}
+
+/** 予定表の回 1 つ。 */
+export interface ColumnPlanSlot {
+  /** 公開の日（YYYY-MM-DD。公開は 9 時） */
+  date: string;
+  /** この回に入れたコラム（無ければ空いている回） */
+  columnId: string | null;
+  title: string;
+  status: WebColumnStatus | null;
+}
+
+/** テーマ案の材料（第32.6節）。 */
+export type ColumnThemeSource = 'topic' | 'season' | 'search' | 'competitor' | 'question' | 'rewrite';
+
+/** 材料の呼び方（画面の印）。 */
+export const COLUMN_THEME_SOURCE_LABELS: Record<ColumnThemeSource, string> = {
+  topic: '分野', season: '季節', search: '検索', competitor: '競合', question: '質問', rewrite: '書き直し',
+};
+
+/** テーマ案の状態。 */
+export type ColumnThemeStatus = 'new' | 'used' | 'dismissed';
+
+/** テーマ案 1 つ（第32.6節）。 */
+export interface WebColumnTheme {
+  id: string;
+  /** テーマ（問い） */
+  theme: string;
+  /** なぜ今か（一言） */
+  why: string;
+  source: ColumnThemeSource;
+  /** 書き直しの案なら、そのコラム */
+  columnId: string | null;
+  status: ColumnThemeStatus;
+  createdAt: string;
+}
+
+/** 1 回に作るテーマ案の数（第32.6節「5 つ前後」）。 */
+export const COLUMN_THEMES_PER_WEEK = 5;
+
+/** 予定表の回の何日前に下書きを用意するか（第32.11節）。 */
+export const COLUMN_PREPARE_DAYS = 7;
 
 /** 既定の設定。既定は切り（第32.2節）。 */
 export const DEFAULT_WEB_COLUMN_SETTINGS: WebColumnSettings = {
@@ -99,11 +158,11 @@ export const DEFAULT_WEB_COLUMN_SETTINGS: WebColumnSettings = {
 };
 
 /** コラムの状態。 */
-export type WebColumnStatus = 'writing' | 'draft' | 'awaiting' | 'approved' | 'placed' | 'failed';
+export type WebColumnStatus = 'writing' | 'draft' | 'awaiting' | 'approved' | 'scheduled' | 'placed' | 'withdrawn' | 'failed';
 
 /** 状態の呼び方。 */
 export const WEB_COLUMN_STATUS_LABELS: Record<WebColumnStatus, string> = {
-  writing: '書いています', draft: '下書き', awaiting: '承認待ち', approved: '承認済み', placed: 'WordPress に入れた', failed: '書けませんでした',
+  writing: '書いています', draft: '下書き', awaiting: '承認待ち', approved: '承認済み', scheduled: '予約', placed: 'WordPress に入れた', withdrawn: '取り下げ', failed: '書けませんでした',
 };
 
 /** 赤入れの指摘 1 つ（第32.8節）。 */
@@ -196,6 +255,10 @@ export interface WebColumn {
   runId: string | null;
   wpEditUrl: string | null;
   failure: string | null;
+  /** 予定表の回（YYYY-MM-DD。第32.18.4節） */
+  plannedFor?: string | null;
+  /** 公開の日時（予約。ISO） */
+  publishAt?: string | null;
   createdBy: string;
   createdByName?: string;
   createdAt: string;

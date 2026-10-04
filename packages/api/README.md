@@ -262,6 +262,10 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/columns/:id/rewrite` ／ `/retry` | 指示（`instruction`）で書き直してもらう ／ 書けなかったコラムをもう一度書く |
 | `POST /v1/columns/:id/suggestions/:index` ／ `/versions/:version/restore` | 赤入れの直し案に置き換える ／ 前の版に戻す（どちらも新しい版になる） |
 | `GET /v1/columns/:id/export` | 記事に入れる形（Markdown と HTML。末尾に出典・監修者・AI の表示） |
+| `POST /v1/columns/themes` ／ `POST /v1/columns/themes/:id/write` ／ `/dismiss` | コラムの段 2（第32.18.4節）: テーマ案を作る ／ 案から書き始める（書き直しの案なら書き直す）／ 見送り。`GET /v1/columns` はテーマ案（`themes`）・予定表（`plan`）・貼るだけのページの URL（`pageUrl`）も返す |
+| `PUT /v1/columns/:id/publish-at` ／ `POST /v1/columns/:id/withdraw` | 公開の日時（予約。`publishAt`: ISO か null。下書きのときだけ）／ 取り下げる（管理者と承認者だけ）。`GET /v1/columns/:id` は公開の URL（`publicUrl`）も返す |
+| `POST` ／ `DELETE /v1/admin/extensions/web-columns/page` | 管理者: 貼るだけのページを入れる（鍵の URL を作り、ページ・JSON・RSS の URL を返す）／ 止める。設定の `plan`（`perMonth`: 1・2・4、`weekday`: 0〜6。null で作らない）は `PUT /v1/admin/extensions/web-columns/settings` |
+| `GET /v1/public/columns/:key` ／ `:key.json` ／ `:key.rss` ／ `:key/:id` ／ `:key/:id/cover.png` | 貼るだけのページ（ログインなし。会社の判定より前）: 承認済みで公開の日時を過ぎたコラムの一覧 ／ データ ／ RSS ／ 記事 ／ カバー画像。鍵が違う・止めた会社は 404。ページはスクリプトを持たない |
 | `POST /v1/columns/:id/cover/restore` | 前に作ったカバーに戻す（`fileId`。このコラムの前の版のカバーだけ。本文はいまのまま、新しい版になる） |
 | `GET` ／ `POST /v1/columns/:id/cover` | カバー画像（PNG。`version` で前の版、`download=1` で保存させる）／ 作り直す（`kind`: template・ai・photo、`hint`。新しい版になる） |
 | `POST /v1/columns/:id/photos` | 写真を入れ、そのコラムのカバーにする（本文は写真の中身。JPEG・PNG、10 MB まで。会社の写真の置き場にも入る） |

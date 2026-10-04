@@ -25,6 +25,8 @@ export function notificationPath(n: { kind: string; runId: string | null }): str
   if (n.kind === 'announcement') return '/announcements';
   // Web の振り返りの月の便りは、Web の振り返りを開く（第34.18節）
   if (n.kind === 'webReview') return '/web-review';
+  // コラムの作成のテーマ案・予定表・予約の知らせは、コラムの作成を開く（第32.18.4節）
+  if (n.kind === 'column') return '/columns';
   if (n.runId && RUN_ID.test(n.runId)) return `/runs/${encodeURIComponent(n.runId)}`;
   return '/';
 }

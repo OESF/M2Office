@@ -350,6 +350,14 @@ export function extensionsRoute(deps: AppDeps) {
       if (typeof body['aiIllustration'] !== 'boolean') return c.json({ error: 'aiIllustration は true か false です' }, 400);
       next.aiIllustration = body['aiIllustration'];
     }
+    // 予定表（月の本数と曜日。第32.18.4節）。null で予定を作らない
+    if (body['plan'] !== undefined) {
+      const p = body['plan'] as Record<string, unknown> | null;
+      if (p === null) next.plan = null;
+      else if (p && [1, 2, 4].includes(Number(p['perMonth'])) && Number.isInteger(Number(p['weekday'])) && Number(p['weekday']) >= 0 && Number(p['weekday']) <= 6) {
+        next.plan = { perMonth: Number(p['perMonth']) as 1 | 2 | 4, weekday: Number(p['weekday']) };
+      } else return c.json({ error: '予定表は、本数（1・2・4）と曜日（0〜6）です' }, 400);
+    }
     await deps.repo.saveTenantSettings(tenant.id, 'webColumns', next, user.id);
     // 業種・分野・読み手・監修者が変わったら、当てる表現の決まりを AI が選び直す（第32.18.3節。秘書で直した後は選び直さない）
     const clues = (w: WebColumnSettings) => JSON.stringify([w.industry, w.topics, w.audience, w.supervisor?.title ?? '']);
@@ -532,6 +540,23 @@ export function extensionsRoute(deps: AppDeps) {
     const err = await deps.webReview.service.select({ tenantId: tenant.id, userId: user.id }, { propertyId: pick(body['propertyId']), siteUrl: pick(body['siteUrl']) });
     if (err) return c.json({ error: err }, 400);
     return c.json({ ok: true, status: await deps.webReview.service.status(tenant.id) });
+  });
+
+  /** コラムの貼るだけのページを入れる（鍵の URL を作る。第32.18.4節）。 */
+  app.post(`/${WEB_COLUMNS_EXTENSION_ID}/page`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    if (!deps.columns.planner) return c.json({ error: '貼るだけのページは使えません' }, 409);
+    const { key } = await deps.columns.planner.enablePage({ tenantId: tenant.id, userId: user.id });
+    const page = `${tenantOrigin(c.req.header('origin'), c.req.header('host'))}/v1/public/columns/${key}`;
+    return c.json({ ok: true, urls: { page, data: `${page}.json`, rss: `${page}.rss` } });
+  });
+
+  /** コラムの貼るだけのページを止める（鍵を捨てる。すぐ 404 になる）。 */
+  app.delete(`/${WEB_COLUMNS_EXTENSION_ID}/page`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    if (!deps.columns.planner) return c.json({ error: '貼るだけのページは使えません' }, 409);
+    await deps.columns.planner.disablePage({ tenantId: tenant.id, userId: user.id });
+    return c.json({ ok: true });
   });
 
   /** WordPress の入れ先と鍵を外す（コラムは消さない）。 */

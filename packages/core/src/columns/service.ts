@@ -24,7 +24,9 @@ import type { ColumnStore, NewColumnVersion } from './store.js';
 import { aiReview, mergeReview, ruleReview } from './review.js';
 import { inferRuleSets } from './rules.js';
 import { ColumnWriteError, rewriteColumn, writeColumn } from './writer.js';
-import { checkWordPress, columnHtml, createWordPressDraft, normalizeSiteUrl, uploadWordPressMedia, type WordPressAuth } from './wordpress.js';
+import { checkWordPress, columnHtml, createWordPressDraft, normalizeSiteUrl, setWordPressStatus, uploadWordPressMedia, type WordPressAuth } from './wordpress.js';
+import { similarityReview } from './plan.js';
+import type { PageFetcher } from '../competitors/fetcher.js';
 import {
   COVER_AI_MODEL, COVER_AI_MONTHLY_LIMIT, COVER_AI_TRIES, COVER_MIN_BRIGHTNESS, COVER_MIN_PHOTO_BRIGHTNESS, brandColor, brightness, checkIllustration, choosePhoto, describePhoto, fallbackColor,
   illustrationPrompt, imageWish, pickPattern, renderCover, wantsDark, type CoverInput,
@@ -45,6 +47,8 @@ export interface ColumnServiceDeps {
   researchFor(tenantId: string): Promise<ResearchProvider>;
   /** カバー画像と会社の写真の置き場。 */
   files: FileStore;
+  /** 出典のページを読む口（似すぎの確かめ。第32.18.4節）。見本の会社・読めない環境では `null` */
+  pagesFor?(tenantId: string): PageFetcher | null;
   logger?: Logger;
 }
 
@@ -88,6 +92,8 @@ export interface ColumnPreview {
   /** 入れられない理由。空なら承認へ進める。 */
   problems: string[];
   digest: string;
+  /** 公開の日時（予約。無ければ `null`。第32.18.4節） */
+  publishAt: string | null;
 }
 
 /** テーマの長さの上限。 */
@@ -103,8 +109,9 @@ const WRITING_STUCK_MS = 15 * 60_000;
 const WP_KIND = 'wordpress' as const;
 
 /** 版の指紋（承認の後に版が変わっていないかを確かめる）。 */
-function versionDigest(id: string, v: Pick<WebColumnVersion, 'version' | 'title' | 'body' | 'description' | 'cover'>): string {
-  return createHash('sha256').update(JSON.stringify([id, v.version, v.title, v.body, v.description, v.cover?.fileId ?? null])).digest('hex');
+function versionDigest(id: string, v: Pick<WebColumnVersion, 'version' | 'title' | 'body' | 'description' | 'cover'>, publishAt: string | null = null): string {
+  // 公開の日時（予約）も承認した中身に含める（第32.18.4節）。日時が無い版は前と同じ指紋になる
+  return createHash('sha256').update(JSON.stringify([id, v.version, v.title, v.body, v.description, v.cover?.fileId ?? null, ...(publishAt ? [publishAt] : [])])).digest('hex');
 }
 
 /** 今月の始まり（日本の時刻。月の上限を数える）。 */
@@ -229,10 +236,10 @@ export class ColumnService {
         theme: c.theme, memo: c.memo, company, audience: settings.webColumns.audience, topics: settings.webColumns.topics,
         style: styleText({ ...settings.writingStyle, selfReference: '' }), selfReference: settings.writingStyle.selfReference,
       });
-      const review = mergeReview(
+      const review = [...mergeReview(
         ruleReview(draft.body, settings.webColumns.rules, draft.sources.length),
         await aiReview(llm, draft.body, settings.webColumns.rules),
-      );
+      ), ...(await this.similar(who.tenantId, draft.body, draft.sources))];
       const title = draft.titles[0] ?? c.theme;
       // カバーを作れなくても、下書きは残す（画面の「画像を作成」で作れる）
       const made = await this.makeCover(who, { title, description: draft.description, request: c.memo }, {}).catch((err: unknown) => {
@@ -290,7 +297,8 @@ export class ColumnService {
     const llm = await this.deps.llmFor(who.tenantId);
     try {
       const res = await rewriteColumn(llm, cur.version, text, styleText(settings.writingStyle));
-      const review = mergeReview(ruleReview(res.body, cur.settings.rules, cur.version.sources.length), await aiReview(llm, res.body, cur.settings.rules));
+      const review = [...mergeReview(ruleReview(res.body, cur.settings.rules, cur.version.sources.length), await aiReview(llm, res.body, cur.settings.rules)),
+        ...(await this.similar(who.tenantId, res.body, cur.version.sources))];
       await this.addVersion(who, id, cur.version, { ...cur.version, body: res.body, description: res.description, origin: 'rewrite' }, review);
       return null;
     } catch (err) {
@@ -348,10 +356,14 @@ export class ColumnService {
     if (c.status === 'placed' && c.submittedVersion === c.currentVersion) problems.push('この版は WordPress に入れてあります');
     if (wp && !hasKey) problems.push('WordPress のアプリケーションパスワードが預けられていません。管理者に頼んでください');
     if (v && !v.cover) problems.push('カバー画像がありません。「画像を作成」で作ってください');
+    const publishAt = c.publishAt ?? null;
+    if (publishAt && c.status !== 'scheduled' && Date.parse(publishAt) < Date.now()) problems.push('公開の日時が過ぎています。日時を直すか、外してください');
+    const at = publishAt ? new Date(publishAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+    const page = settings.webColumns.pastePage ? '貼るだけのページに出す' : '承認済みにするだけ（本文をコピーして使う）';
     return {
       id, version: c.currentVersion, title: v?.title ?? '', chars: v ? charCount(v.body) : 0, reviewCount: v?.review.length ?? 0,
-      destination: wp ? `WordPress（${wp.siteUrl}）の下書き` : 'WordPress につないでいないため、承認済みにするだけ',
-      cover: v?.cover ?? null, problems, digest: v ? versionDigest(id, v) : '',
+      destination: `${wp ? `WordPress（${wp.siteUrl}）の下書き` : `WordPress につないでいないため、${page}`}${at ? `（${at} に入れる。予約）` : ''}`,
+      cover: v?.cover ?? null, problems, digest: v ? versionDigest(id, v, publishAt) : '', publishAt,
     };
   }
 
@@ -377,7 +389,7 @@ export class ColumnService {
    * @param digest 承認したときの版の指紋。今の版と違えば入れない
    * @returns 入れた先（編集の画面の URL）。入れられなければ理由
    */
-  async place(who: ColumnViewer, id: string, digest: string): Promise<{ placed: boolean; editUrl: string | null } | { error: string }> {
+  async place(who: ColumnViewer, id: string, digest: string): Promise<{ placed: boolean; editUrl: string | null; scheduledAt?: string } | { error: string }> {
     const { store, repo } = this.deps;
     const c = await store.get(who.tenantId, id);
     if (!c) return { error: 'コラムが見つかりません' };
@@ -386,7 +398,37 @@ export class ColumnService {
     if (!p) return { error: 'コラムが見つかりません' };
     if (p.problems.length > 0) return { error: p.problems.join('／') };
     if (p.digest !== digest) return { error: '承認した後にコラムが直されたため、入れませんでした。もう一度承認へ進めてください' };
-    const v = (await store.versions(who.tenantId, id)).find((x) => x.version === p.version)!;
+    // 公開の日時が先なら予約にして待つ（その日時にワーカーが入れる。第32.18.4節）
+    if (p.publishAt && Date.parse(p.publishAt) > Date.now()) {
+      await store.update(who.tenantId, id, { status: 'scheduled', submittedVersion: p.version, submittedDigest: p.digest, runId: null });
+      await this.audit(who, 'column.schedule', id, { version: p.version, publishAt: p.publishAt });
+      return { placed: false, editUrl: null, scheduledAt: p.publishAt };
+    }
+    return this.placeVersion(who, id, p.version);
+  }
+
+  /**
+   * 予約のコラムを、公開の日時に入れる（ワーカーが呼ぶ）。承認した版の指紋と違えば入れず、下書きに戻す。
+   *
+   * @returns 入れた先。入れられなければ理由
+   */
+  async placeScheduled(who: ColumnViewer, id: string): Promise<{ placed: boolean; editUrl: string | null } | { error: string }> {
+    const { store } = this.deps;
+    const c = await store.get(who.tenantId, id);
+    if (c?.status !== 'scheduled') return { error: 'このコラムは予約ではありません' };
+    const v = (await store.versions(who.tenantId, id)).find((x) => x.version === c.currentVersion);
+    const approved = await store.submittedDigest(who.tenantId, id);
+    if (!v || !approved || versionDigest(id, v, c.publishAt ?? null) !== approved) {
+      await store.update(who.tenantId, id, { status: 'draft' });
+      return { error: '承認した後にコラムが直されたため、入れませんでした。もう一度承認へ進めてください' };
+    }
+    return this.placeVersion(who, id, v.version);
+  }
+
+  /** 承認した版を入れる（WordPress の下書き。無ければ承認済みにする）。 */
+  private async placeVersion(who: ColumnViewer, id: string, version: number): Promise<{ placed: boolean; editUrl: string | null } | { error: string }> {
+    const { store, repo } = this.deps;
+    const v = (await store.versions(who.tenantId, id)).find((x) => x.version === version)!;
     const settings = (await repo.getTenantSettings(who.tenantId)).webColumns;
     if (!settings.wordpress) {
       await store.update(who.tenantId, id, { status: 'approved', submittedVersion: v.version, runId: null });
@@ -409,6 +451,53 @@ export class ColumnService {
     await store.update(who.tenantId, id, { status: 'placed', submittedVersion: v.version, wpPostId: res.id, wpEditUrl: res.editUrl, runId: null });
     await this.audit(who, 'column.place', id, { version: v.version, site: settings.wordpress.siteUrl, postId: res.id });
     return { placed: true, editUrl: res.editUrl };
+  }
+
+  /**
+   * 公開の日時（予約）を入れる・外す（下書きのときだけ。第32.18.4節）。
+   *
+   * @param at ISO の日時。`null` で外す
+   * @returns 入れられなければ理由
+   */
+  async setPublishAt(who: ColumnViewer, id: string, at: string | null): Promise<string | null> {
+    const c = await this.deps.store.get(who.tenantId, id);
+    if (!c) return 'コラムが見つかりません';
+    if (c.status !== 'draft' && c.status !== 'writing' && c.status !== 'failed' && c.status !== 'withdrawn') return '下書きのときだけ、公開の日時を変えられます';
+    if (at !== null && (Number.isNaN(Date.parse(at)) || Date.parse(at) < Date.now())) return '公開の日時は、これからの日時にしてください';
+    await this.deps.store.update(who.tenantId, id, { publishAt: at === null ? null : new Date(at).toISOString() });
+    await this.audit(who, 'column.publish_at', id, { publishAt: at });
+    return null;
+  }
+
+  /**
+   * 取り下げる（承認済み・予約・入れたもの。第32.10節）。貼るだけのページから外し、WordPress では記事を下書きに戻す。
+   *
+   * @returns 取り下げられなければ理由
+   */
+  async withdraw(who: ColumnViewer, id: string): Promise<string | null> {
+    const { store, repo } = this.deps;
+    const c = await store.get(who.tenantId, id);
+    if (!c) return 'コラムが見つかりません';
+    if (c.status !== 'approved' && c.status !== 'scheduled' && c.status !== 'placed') return '承認済み・予約・入れたコラムだけを取り下げられます';
+    if (c.status === 'placed') {
+      const settings = (await repo.getTenantSettings(who.tenantId)).webColumns;
+      const postId = (await store.placed(who.tenantId)).find((x) => x.id === id)?.wpPostId ?? null;
+      const auth = settings.wordpress ? await this.wordpressAuth(who.tenantId, settings.wordpress) : null;
+      if (postId && auth) {
+        const err = await setWordPressStatus(auth, postId, 'draft');
+        if (err) return err;
+      }
+    }
+    await store.update(who.tenantId, id, { status: 'withdrawn', webUrl: null });
+    await this.audit(who, 'column.withdraw', id, { from: c.status });
+    return null;
+  }
+
+  /** 似すぎの確かめ（出典のページを読める会社だけ。読めなければ空）。 */
+  private async similar(tenantId: string, body: string, sources: { title: string; url: string }[]): Promise<ColumnReviewItem[]> {
+    const fetcher = this.deps.pagesFor?.(tenantId) ?? null;
+    if (!fetcher || !sources.length) return [];
+    return similarityReview(body, sources, fetcher).catch(() => []);
   }
 
   // ---- カバー画像（第32.7.1節・第32.18.2節） -----------------------------------
@@ -734,7 +823,9 @@ export class ColumnService {
 
   private async audit(who: ColumnViewer, action: string, id: string, detail: Record<string, unknown>): Promise<void> {
     await this.deps.repo.appendAudit({
-      id: randomUUID(), tenantId: who.tenantId, actorType: 'user', actorId: who.userId, action, targetType: 'web_column', targetId: id,
+      // 予定表の先回りと予約から入れるのは仕組み（ワーカー）が行う（第32.18.4節）
+      id: randomUUID(), tenantId: who.tenantId, actorType: who.userId === 'system' ? 'system' : 'user', actorId: who.userId === 'system' ? 'column-watch' : who.userId,
+      action, targetType: 'web_column', targetId: id,
       detail, occurredAt: new Date().toISOString(),
     });
   }

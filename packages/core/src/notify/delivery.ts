@@ -31,6 +31,7 @@ const KIND_LABELS: Record<string, string> = {
   competitor: '競合の分析',
   announcement: 'お知らせの作成',
   webReview: 'Web の振り返り',
+  column: 'コラムの作成',
 };
 
 /** 会社が業務を受け付ける状態か（仕様書 第23.8.6節）。停止中の会社へは控えを送らない。 */

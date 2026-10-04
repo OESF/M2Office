@@ -11,7 +11,7 @@
 
 import {
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
-  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, SignageService, SignageInterrupts, PostgresSignageStore, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention,
+  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, SignageService, SignageInterrupts, PostgresSignageStore, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention,
   NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator,
@@ -136,6 +136,8 @@ const signageInterrupts = new SignageInterrupts({ service: signage, repo });
 const columns = new ColumnService({
   store: new PostgresColumnStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), files,
   repo, box, llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId), logger: log,
+  // 似すぎの確かめで出典のページを読む口（見本の会社では読まない。第32.18.4節）
+  pagesFor: (tenantId) => (connector.sourceFor(tenantId) === 'mock' ? null : new HttpPageFetcher(crawlerUserAgent(appVersion(), process.env['CRAWLER_CONTACT_URL']), 1_000)),
 });
 // 問い合わせの記録（内蔵の拡張。仕様書 第33章）。秘書から頼まれた記録と、期限の知らせ・原文の片付けが使う
 // お知らせの置き場（休業の期間を、問い合わせの記録と定時実行も読む。第35.7節）
@@ -191,6 +193,11 @@ const announcements = new AnnouncementService({
   },
   runStatus: async (tenantId, runId) => (await repo.getRun(tenantId, runId))?.status ?? null,
 });
+// コラムのテーマ案・予定表と先回り・予約から入れる（第32.18.4節）。材料はほかの拡張から（使っていなければ空）
+const columnPlanner = new ColumnPlanner({
+  service: columns, store: columns.store, repo, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
+  materials: columnMaterialsFrom({ repo, webReview, competitorStore, inquiries }),
+});
 const engine = new RunEngine({
   repo, llm, registry, connector, files, resolveDefinition, isAvailable, logger: log, research, notices,
   // お知らせで出した休業の期間（予定の候補で休業日を避ける。第35.7節）
@@ -198,7 +205,7 @@ const engine = new RunEngine({
   cards: { store: contactStore, service: cards, access: cardsAccess(repo), bulk: bulkMail },
   inventory: { service: inventory, bookings: inventoryBookings, access: inventoryAccess(repo) },
   hr: { calendar: laborCalendar, access: hrAccess(repo) },
-  columns: { service: columns, access: webColumnsAccess(repo) },
+  columns: { service: columns, access: webColumnsAccess(repo), planner: columnPlanner },
   inquiries: { service: inquiries, access: inquiriesAccess(repo) },
   competitors: { service: competitors, access: competitorsAccess(repo) },
   announcements: { service: announcements, access: announcementsAccess(repo) },
@@ -334,6 +341,9 @@ let lastAnnouncementCheck = 0;
 // 直すべき所の見回りの番（週に 1 回・今すぐチェック）を見る
 const WEB_REVIEW_INTERVAL_MS = Number(process.env['WEB_REVIEW_INTERVAL_MS'] ?? 60_000);
 let lastWebReviewCheck = 0;
+// コラムの作成（第32.18.4節）。既定は 1 分ごとに、予約の日時・飛ばす回・週に 1 回のテーマ案・7 日前の先回りを見る
+const COLUMN_PLAN_INTERVAL_MS = Number(process.env['COLUMN_PLAN_INTERVAL_MS'] ?? 60_000);
+let lastColumnPlanCheck = 0;
 // 秘書が学んだことの週 1 回の整理と、残す期間の片付け（仕様書 第11.11.4節）。1 時間ごとに「日曜の深夜で、前の整理から 6 日より経ったか」を見る
 const CONSOLIDATE_INTERVAL_MS = Number(process.env['CONSOLIDATE_INTERVAL_MS'] ?? 3_600_000);
 let lastConsolidateCheck = 0;
@@ -569,6 +579,17 @@ while (running) {
       if (r.published + r.ended > 0) log.info('お知らせの予約を出し、期間の後を片付けました', { published: r.published, ended: r.ended });
     } catch (err) {
       log.warn('お知らせの見回りに失敗しました', { err });
+    }
+  }
+
+  // コラムの作成の予約・予定表・テーマ案（第32.18.4節）。会社ごとの失敗はほかの会社を止めない
+  if (Date.now() - lastColumnPlanCheck >= COLUMN_PLAN_INTERVAL_MS) {
+    lastColumnPlanCheck = Date.now();
+    try {
+      const r = await columnPlanner.tick(new Date());
+      if (r.themes + r.prepared + r.skipped + r.placed > 0) log.info('コラムの予約・予定表・テーマ案を見回りました', r);
+    } catch (err) {
+      log.warn('コラムの作成の見回りに失敗しました', { err });
     }
   }
 

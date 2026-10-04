@@ -18,7 +18,7 @@ import type { CardCorners,
   InventoryCount, InventoryCountRow, InventoryCountScope, InventoryCountView, InventorySupplier,
   InventoryBooking, InventoryBookingMapping, InventoryBookingSource, InventoryPublication, InventoryPublicationScope, InventoryPublicSnapshot,
   SignageAsset, SignageEntry, SignageScreen, SignageSettings, SignageInterruptInput, SignageInterruptView, SignagePhrase, SignageSound, SignageSource,
-  ColumnWordPress, WebColumn, WebColumnSettings, WebColumnVersion,
+  ColumnWordPress, WebColumn, WebColumnSettings, WebColumnVersion, WebColumnTheme, ColumnPlanSlot,
   Inquiry, InquiryDetail, InquiryParty, InquiryTask, InquiryReply, InquiryMailSkipped, InquiryMonthStats, InquirySettings, InquiryFaqTopic,
   CompetitorOverview, CompetitorFact, CompetitorReport, CompetitorSettings,
   Announcement, AnnouncementDetail, AnnouncementPreview, AnnouncementRecipient, AnnouncementSettings, AnnouncementTexts,
@@ -769,6 +769,8 @@ export interface ColumnDetail {
   wordpress: ColumnWordPress | null;
   /** 公開されたコラムの数字（この 28 日。Web の振り返りを使える人にだけある。第34.19節）。 */
   webMetrics?: WebPageMetrics | null;
+  /** 公開の URL（WordPress で公開された URL か、貼るだけのページの記事の URL。SNS の告知文に足す。第32.18.4節）。 */
+  publicUrl?: string | null;
 }
 
 /** 店頭サイネージの管理の画面の中身（仕様書 第31.9.4節）。 */
@@ -1310,7 +1312,16 @@ export const api = {
   },
   /** Web のコラム（内蔵の拡張。仕様書 第32章）。 */
   columns: {
-    list: () => call<{ columns: WebColumn[]; wordpress: ColumnWordPress | null }>('/columns'),
+    list: () => call<{ columns: WebColumn[]; wordpress: ColumnWordPress | null; themes: WebColumnTheme[]; plan: ColumnPlanSlot[]; pageUrl: string | null }>('/columns'),
+    /** テーマ案を作る（第32.18.4節）。 */
+    makeThemes: () => call<{ added: WebColumnTheme[] }>('/columns/themes', { method: 'POST', body: '{}' }),
+    /** テーマ案から書き始める（書き直しの案なら書き直す）。 */
+    writeTheme: (id: string) => call<{ columnId: string }>(`/columns/themes/${encodeURIComponent(id)}/write`, { method: 'POST', body: '{}' }),
+    dismissTheme: (id: string) => call<{ ok: true }>(`/columns/themes/${encodeURIComponent(id)}/dismiss`, { method: 'POST', body: '{}' }),
+    /** 公開の日時（予約）を入れる・外す（下書きのときだけ）。 */
+    setPublishAt: (id: string, publishAt: string | null) => call<{ ok: true }>(`/columns/${encodeURIComponent(id)}/publish-at`, { method: 'PUT', body: JSON.stringify({ publishAt }) }),
+    /** 取り下げる（管理者と承認者）。 */
+    withdraw: (id: string) => call<{ ok: true }>(`/columns/${encodeURIComponent(id)}/withdraw`, { method: 'POST', body: '{}' }),
     /** 書き始める。書き上げは裏で進む。 */
     create: (theme: string, memo: string) => call<{ id: string }>('/columns', { method: 'POST', body: JSON.stringify({ theme, memo }) }),
     get: (id: string) => call<ColumnDetail>(`/columns/${encodeURIComponent(id)}`),
@@ -2031,6 +2042,9 @@ export const api = {
     setCompetitorAutoMax: (autoMax: number) => call<{ ok: true }>('/admin/extensions/competitors/settings', { method: 'PUT', body: JSON.stringify({ autoMax }) }),
     /** 競合の分析の定期の見回りの間隔（毎月・毎週・しない）を変える。 */
     setCompetitorWatch: (watch: 'monthly' | 'weekly' | 'off') => call<{ ok: true }>('/admin/extensions/competitors/settings', { method: 'PUT', body: JSON.stringify({ watch }) }),
+    /** コラムの貼るだけのページを入れる・止める（第32.18.4節）。 */
+    enableColumnPage: () => call<{ ok: true; urls: { page: string; data: string; rss: string } }>('/admin/extensions/web-columns/page', { method: 'POST', body: '{}' }),
+    disableColumnPage: () => call<{ ok: true }>('/admin/extensions/web-columns/page', { method: 'DELETE' }),
     setWebColumnSettings: (patch: Partial<Omit<WebColumnSettings, 'enabled' | 'wordpress'>>) =>
       call<{ ok: true; webColumns: WebColumnSettings }>('/admin/extensions/web-columns/settings', { method: 'PUT', body: JSON.stringify(patch) }),
     /** WordPress の入れ先とアプリケーションパスワードを預ける。つながるかを確かめてから預ける。 */
