@@ -198,6 +198,8 @@ const ACTION_LABELS: Record<string, string> = {
   'web_review.disconnect': 'Web の振り返りの担当の Google の許可を外した',
   'web_review.select': 'Web の振り返りで見るプロパティとサイトを選んだ',
   'web_review.report': 'Web の月の便りを作った',
+  'web_review.check': 'Web の直すべき所を探した',
+  'web_review.finding': 'Web の直すべき所の状態を変えた',
   'competitor.add': '競合を入れた',
   'competitor.remove': '競合を外した',
   'competitor.discover': '競合を探した',

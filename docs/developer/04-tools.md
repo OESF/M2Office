@@ -73,6 +73,7 @@
 | `slides.template` | read | `drive`（制限付き） | 会社が登録したスライドのテンプレートの、使えるレイアウトを確かめます。どこにも書き込みません |
 | `tasks.list` | read | `tasks`（機密） | ToDo の一覧を見ます |
 | `web_review.ask` | read | — | アナリティクスと Search Console から、決まった指標と切り口で数字を読みます。期間と比べた相手を添えて答えます |
+| `web_review.findings` | read | — | 週に 1 回の見回りで見つけた、Web サイトの直すべき所（理由・直し方・制作会社への依頼文の下書き）を読みます |
 | `web_review.report` | read | — | 会社の Web サイトの月の便り（要約・よかったこと・気になること・次にやること）を読みます |
 | `web_review.status` | read | — | Google とつないだか・選んだプロパティとサイト・次にすることを読みます。制作会社への依頼文の下書きも作ります（送りません） |
 | `web.research` | read | — | テーマを Google 検索で調べ、出典つきでまとめます。調べる言葉は Google に送られますが、どこにも書き込みません |
@@ -174,6 +175,7 @@
 | `slides.template` | `template`: テンプレートの名前（任意） |
 | `tasks.list` | なし |
 | `web_review.ask` | `metric`（必須）: 指標（users・newUsers・sessions・pageViews・engagementRate・keyEvents・searchImpressions・searchClicks・searchCtr・searchPosition）、`breakdown`: 切り口（none・page・source・device・region・searchQuery・searchPage）、`period`: 期間（lastMonth・thisMonth・lastWeek・last7Days・last28Days・custom）、`start`: 期間の始め（custom のとき。YYYY-MM-DD）、`end`: 期間の終わり（custom のとき。YYYY-MM-DD）、`contains`: ページの URL か検索の言葉に含む文字 |
+| `web_review.findings` | `kind`: 種類で絞る（lowCtr・nearFirstPage・missingContent・notIndexed・slowMobile・fading） |
 | `web_review.report` | `month`: 月（YYYY-MM）、`recent`: この 8 日に届いた便りの要点だけ |
 | `web_review.status` | なし |
 | `web.research` | `topic`（必須）: 調べるテーマ、`focus`: 特に知りたいこと（任意） |

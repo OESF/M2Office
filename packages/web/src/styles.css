@@ -1829,3 +1829,8 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .web-review-months { display: flex; flex-wrap: wrap; gap: 8px 16px; list-style: none; padding: 0; margin: 0; }
 .web-review-months [aria-current="true"] { font-weight: 600; }
 .web-review-draft { white-space: pre-wrap; font-family: inherit; background: var(--bg); border: 1px solid var(--line); padding: 8px; border-radius: 6px; }
+.web-review-findings { list-style: none; padding: 0; margin: 8px 0 0; display: grid; gap: 12px; }
+.web-review-finding { border-top: 1px solid var(--line); padding-top: 10px; display: grid; gap: 6px; }
+.web-review-finding.is-done, .web-review-finding.is-dismissed { opacity: 0.6; }
+.web-review-advice { white-space: pre-line; margin: 0; }
+.columns-metrics { color: var(--muted); }

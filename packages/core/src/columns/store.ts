@@ -18,8 +18,10 @@ export interface ColumnStore {
   create(tenantId: string, c: { theme: string; memo: string; createdBy: string }): Promise<string>;
   update(tenantId: string, id: string, patch: Partial<{
     status: WebColumnStatus; submittedVersion: number | null; submittedDigest: string | null; runId: string | null;
-    wpPostId: string | null; wpEditUrl: string | null; failure: string | null;
+    wpPostId: string | null; wpEditUrl: string | null; failure: string | null; webUrl: string | null;
   }>): Promise<void>;
+  /** WordPress に入れたコラム（記事の ID と、公開された URL。Web の振り返りが読む。第34.19節） */
+  placed(tenantId: string): Promise<{ id: string; title: string; wpPostId: string | null; webUrl: string | null }[]>;
   /** 承認へ進めた版の指紋（承認の後に版が変わっていないかを確かめる）。 */
   submittedDigest(tenantId: string, id: string): Promise<string | null>;
   delete(tenantId: string, id: string): Promise<void>;
@@ -125,7 +127,7 @@ export class PostgresColumnStore implements ColumnStore {
   async update(tenantId: string, id: string, patch: Parameters<ColumnStore['update']>[2]): Promise<void> {
     const cols: Record<string, string> = {
       status: 'status', submittedVersion: 'submitted_version', submittedDigest: 'submitted_digest', runId: 'run_id',
-      wpPostId: 'wp_post_id', wpEditUrl: 'wp_edit_url', failure: 'failure',
+      wpPostId: 'wp_post_id', wpEditUrl: 'wp_edit_url', failure: 'failure', webUrl: 'web_url',
     };
     const sets: string[] = [];
     const params: unknown[] = [tenantId, id];
@@ -136,6 +138,14 @@ export class PostgresColumnStore implements ColumnStore {
     }
     if (sets.length === 0) return;
     await this.q(tenantId, `update web_columns set ${sets.join(', ')}, updated_at = now() where tenant_id = $1 and id = $2`, params);
+  }
+
+  async placed(tenantId: string): Promise<{ id: string; title: string; wpPostId: string | null; webUrl: string | null }[]> {
+    const rows = await this.q<{ id: string; title: string | null; wp_post_id: string | null; web_url: string | null }>(tenantId,
+      `select c.id, v.title, c.wp_post_id, c.web_url from web_columns c
+         left join web_column_versions v on v.tenant_id = c.tenant_id and v.column_id = c.id and v.version = coalesce(c.submitted_version, c.current_version)
+        where c.tenant_id = $1 and c.wp_post_id is not null order by c.updated_at desc limit 200`, [tenantId]);
+    return rows.map((r) => ({ id: r.id, title: r.title ?? '', wpPostId: r.wp_post_id, webUrl: r.web_url }));
   }
 
   async submittedDigest(tenantId: string, id: string): Promise<string | null> {
@@ -242,6 +252,11 @@ export class MemoryColumnStore implements ColumnStore {
     if (!c) return;
     for (const [k, v] of Object.entries(patch)) if (v !== undefined) (c as unknown as Record<string, unknown>)[k] = v;
     c.updatedAt = new Date().toISOString();
+  }
+
+  async placed(tenantId: string): Promise<{ id: string; title: string; wpPostId: string | null; webUrl: string | null }[]> {
+    return [...this.columns.values()].filter((c) => c.tenantId === tenantId && c.wpPostId)
+      .map((c) => ({ id: c.id, title: c.title, wpPostId: c.wpPostId, webUrl: (c as { webUrl?: string | null }).webUrl ?? null }));
   }
 
   async submittedDigest(tenantId: string, id: string): Promise<string | null> {

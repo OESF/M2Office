@@ -1,5 +1,5 @@
 /**
- * @file Web の振り返りのツール（仕様書 第34.10節・第34.18節）。月の便り・数字の問い・状態（始める前の手伝い）・サイトの選び直し。
+ * @file Web の振り返りのツール（仕様書 第34.10節・第34.18節・第34.19節）。月の便り・数字の問い・状態（始める前の手伝い）・サイトの選び直し・直すべき所。
  * 秘書と付属の業務「Web について聞く」、週次ブリーフが使う。
  *
  * 会社が Web の振り返りを切っているときと、利用範囲の外の人には「使えない」と返す（呼ぶたびに `ctx.webReview.access()` で確かめる）。
@@ -7,7 +7,7 @@
  */
 
 import {
-  WEB_REVIEW_BREAKDOWNS, WEB_REVIEW_METRICS, WEB_REVIEW_PERIODS,
+  WEB_REVIEW_BREAKDOWNS, WEB_REVIEW_FINDING_LABELS, WEB_REVIEW_FINDING_STATUS_LABELS, WEB_REVIEW_METRICS, WEB_REVIEW_PERIODS,
   type WebReviewBreakdown, type WebReviewMetric, type WebReviewPeriod, type WebReviewSettings,
 } from '@m2office/shared';
 import type { Tool, ToolContext } from '../tools/registry.js';
@@ -172,5 +172,39 @@ export const webReviewSelect: Tool = {
   },
 };
 
+/**
+ * 直すべき所（「Web で直したほうがいい所は？」「制作会社に頼む文を書いて」）。
+ *
+ * @remarks 危険度 `read`。依頼文は下書きを返すだけで、送らない
+ */
+export const webReviewFindings: Tool = {
+  name: 'web_review.findings',
+  risk: 'read',
+  activityLabel: 'Web の直すべき所を調べています',
+  helpText: '週に 1 回の見回りで見つけた、Web サイトの直すべき所（理由・直し方・制作会社への依頼文の下書き）を読みます',
+  description: 'Web サイトの直すべき所（新しい・見たもの。見つけた新しい順に 10 まで）を返す。種類・ページか検索の言葉・理由と直し方（advice）・制作会社への依頼文の下書き（requestDraft。コラムには無い）・コラムならその印。kind で種類を絞れる',
+  args: {
+    properties: {
+      kind: { type: 'string', enum: Object.keys(WEB_REVIEW_FINDING_LABELS), description: '種類で絞る' },
+    },
+  },
+  async invoke(args, ctx) {
+    const service = await serviceOf(ctx);
+    if (!service) return UNAVAILABLE;
+    const kind = str(args['kind']);
+    const items = (await service.findings(ctx.tenantId)).filter((f) => !kind || f.kind === kind).slice(0, 10);
+    const checkedAt = (await ctx.webReview!.access())?.checkedAt ?? null;
+    return {
+      available: true, checkedAt,
+      items: items.map((f) => ({
+        kind: WEB_REVIEW_FINDING_LABELS[f.kind], page: f.title, target: f.target, status: WEB_REVIEW_FINDING_STATUS_LABELS[f.status],
+        advice: f.advice, requestDraft: f.requestDraft, column: f.columnId ? 'コラム（画面の「書き直しを頼む」で直せる）' : null,
+      })),
+      note: items.length ? null : checkedAt ? '直すべき所は見つかっていません' : 'まだ見回っていません。週に 1 回、自動で探します',
+      path: PATH,
+    };
+  },
+};
+
 /** Web の振り返りのツール。 */
-export const WEB_REVIEW_TOOLS: Tool[] = [webReviewReport, webReviewAsk, webReviewStatus, webReviewSelect];
+export const WEB_REVIEW_TOOLS: Tool[] = [webReviewReport, webReviewAsk, webReviewStatus, webReviewSelect, webReviewFindings];

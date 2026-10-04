@@ -1,12 +1,16 @@
 /**
- * @file Web の振り返りの画面（仕様書 第34.18節）。いちばん新しい月の便り（4 つの見出しと数字の短い表）と、前の月の便りの一覧。
+ * @file Web の振り返りの画面（仕様書 第34.18節・第34.19節）。いちばん新しい月の便り（4 つの見出しと数字の短い表）・前の月の便りの一覧・
+ * 直すべき所（理由と直し方・制作会社への依頼文の下書き・コラムなら書き直しを頼む・合う記事の無い言葉はコラムにする）。
  *
  * 数字はプログラムが API の値から計算したもので、文は推論が書いたもの。取れなかった数字は「取得できませんでした」と出す。
  * つないでいなければ、管理者には設定への道、ほかの人には「管理者がつなぐと届きます」だけを出す。説明文は常には出さない（原則 u11）。
  */
 
 import { useEffect, useState } from 'react';
-import type { WebReviewNumber, WebReviewReport, WebReviewReportBrief, WebReviewStatus } from '@m2office/shared';
+import {
+  WEB_REVIEW_FINDING_LABELS,
+  type WebReviewFinding, type WebReviewFindingStatus, type WebReviewNumber, type WebReviewReport, type WebReviewReportBrief, type WebReviewStatus,
+} from '@m2office/shared';
 import { api, describeError } from './api.js';
 
 const monthLabel = (m: string) => `${m.slice(0, 4)} 年 ${Number(m.slice(5, 7))} 月`;
@@ -76,18 +80,88 @@ function Report({ r }: { r: WebReviewReport }) {
   );
 }
 
+/** コラムの作成とのつなぎ（コラムの作成を使える人だけ）。 */
+export interface WebReviewColumnLinks {
+  /** その言葉をテーマにコラムを書き始めて開く */
+  create(theme: string, memo: string): Promise<void>;
+  /** コラムを開く */
+  open(columnId: string): void;
+}
+
+const day = (iso: string) => new Date(iso).toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric' });
+
+/** 直すべき所 1 つ。 */
+function Finding({ f, columns, onStatus, onError }: {
+  f: WebReviewFinding; columns: WebReviewColumnLinks | null; onStatus: (s: WebReviewFindingStatus) => void; onError: (text: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const run = async (fn: () => Promise<unknown>, ok: string | null, fail: string) => {
+    setBusy(true);
+    try { await fn(); if (ok) setNote(ok); } catch (e) { onError(describeError(e, fail)); } finally { setBusy(false); }
+  };
+  const copy = (text: string) => run(() => navigator.clipboard.writeText(text), 'コピーしました', 'コピーできませんでした');
+  return (
+    <li className={`web-review-finding is-${f.status}`}>
+      <div className="row wrap">
+        <span className="badge">{WEB_REVIEW_FINDING_LABELS[f.kind]}</span>
+        <strong>{f.title}</strong>
+        {f.title !== f.target && <span className="muted small">{f.target}</span>}
+      </div>
+      <p className="web-review-advice">{f.advice}</p>
+      {f.requestDraft && (
+        <details>
+          <summary>制作会社への依頼文（下書き）</summary>
+          <p><strong>{f.requestDraft.subject}</strong></p>
+          <pre className="web-review-draft">{f.requestDraft.body}</pre>
+          <button className="btn ghost small" disabled={busy} onClick={() => void copy(`${f.requestDraft!.subject}\n\n${f.requestDraft!.body}`)}>コピー</button>
+        </details>
+      )}
+      <div className="row wrap">
+        {columns && f.columnId && (
+          <>
+            <button className="btn small" disabled={busy}
+              onClick={() => void run(async () => { await api.columns.rewrite(f.columnId!, f.advice); onStatus('seen'); columns.open(f.columnId!); }, null, '書き直しを頼めませんでした')}>書き直しを頼む</button>
+            <button className="btn ghost small" onClick={() => columns.open(f.columnId!)}>コラムを開く</button>
+          </>
+        )}
+        {columns && f.kind === 'missingContent' && (
+          <button className="btn small" disabled={busy}
+            onClick={() => void run(async () => { await columns.create(f.target, '検索で探されているのに、合う記事が無い言葉です'); onStatus('done'); }, null, '書き始められませんでした')}>コラムにする</button>
+        )}
+        {(['seen', 'done', 'dismissed'] as const).map((s) => (
+          <button key={s} className={`btn ghost small${f.status === s ? ' is-active' : ''}`} disabled={busy || f.status === s} onClick={() => onStatus(s)}>
+            {s === 'seen' ? '見た' : s === 'done' ? '済んだ' : '見送り'}
+          </button>
+        ))}
+        {note && <span className="inquiries-note is-ok" role="status">{note}</span>}
+      </div>
+    </li>
+  );
+}
+
 /**
  * Web の振り返りの画面。
  *
  * @param month 開く月（`YYYY-MM`）。`null` ならいちばん新しい便り
+ * @param columns コラムの作成とのつなぎ（使えない人には `null`）
  */
-export function WebReview({ month, onOpen }: { month: string | null; onOpen: (month: string | null) => void }) {
-  const [data, setData] = useState<{ status: WebReviewStatus; latest: WebReviewReport | null; reports: WebReviewReportBrief[]; admin: boolean } | null>(null);
+export function WebReview({ month, onOpen, columns = null }: { month: string | null; onOpen: (month: string | null) => void; columns?: WebReviewColumnLinks | null }) {
+  const [data, setData] = useState<{
+    status: WebReviewStatus; latest: WebReviewReport | null; reports: WebReviewReportBrief[]; admin: boolean;
+    findings: WebReviewFinding[]; checkedAt: string | null; checkRequested: boolean;
+  } | null>(null);
   const [shown, setShown] = useState<WebReviewReport | null>(null);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    api.webReview.overview().then((r) => { setData(r); setError(null); }).catch((e) => setError(describeError(e, '読み込めませんでした')));
-  }, []);
+  const load = () => api.webReview.overview().then((r) => { setData(r); setError(null); }).catch((e) => setError(describeError(e, '読み込めませんでした')));
+  useEffect(() => { void load(); }, []);
+  const setStatus = (id: string, status: WebReviewFindingStatus) => {
+    api.webReview.setFinding(id, status).then(() => setData((d) => (d ? { ...d, findings: d.findings.map((f) => (f.id === id ? { ...f, status } : f)) } : d)))
+      .catch((e) => setError(describeError(e, '変えられませんでした')));
+  };
+  const check = () => {
+    api.webReview.check().then(() => setData((d) => (d ? { ...d, checkRequested: true } : d))).catch((e) => setError(describeError(e, '頼めませんでした')));
+  };
   useEffect(() => {
     if (!month) { setShown(null); return; }
     api.webReview.report(month).then((r) => setShown(r.report)).catch((e) => setError(describeError(e, 'その月の便りを読めませんでした')));
@@ -109,6 +183,18 @@ export function WebReview({ month, onOpen }: { month: string | null; onOpen: (mo
               <pre className="web-review-draft">{st.requestDraft.body}</pre>
             </details>
           )}
+        </div>
+      )}
+      {st.state === 'ready' && (
+        <div className="card">
+          <div className="row wrap">
+            <h2>直すべき所</h2>
+            {data.checkedAt && <span className="muted small">{day(data.checkedAt)}に確かめました</span>}
+            {data.admin && <button className="btn ghost small" disabled={data.checkRequested} onClick={check}>{data.checkRequested ? 'まもなく確かめます' : '今すぐチェック'}</button>}
+          </div>
+          {data.findings.length === 0
+            ? <p className="muted">{data.checkedAt ? '直すべき所は見つかっていません' : 'まだ確かめていません'}</p>
+            : <ul className="web-review-findings">{data.findings.map((f) => <Finding key={f.id} f={f} columns={columns} onStatus={(s) => setStatus(f.id, s)} onError={setError} />)}</ul>}
         </div>
       )}
       {report ? <Report r={report} /> : st.state === 'ready' && <div className="card"><p className="muted">まだ便りがありません。毎月 3 日の朝に、先月の分が届きます</p></div>}

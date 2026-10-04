@@ -1,5 +1,5 @@
 /**
- * @file Web の振り返り（内蔵の拡張）の API。状態といちばん新しい月の便り・便りの一覧・月ごとの便り。
+ * @file Web の振り返り（内蔵の拡張）の API。状態といちばん新しい月の便り・便りの一覧・月ごとの便り・直すべき所（段 2）。
  *
  * 会社が Web の振り返りを切っているときと、利用範囲の外の人には、どの口も使わせない。
  * つなぐ・外す・サイトを選ぶは管理者ページの拡張機能の口（`/v1/admin/extensions/web-review/…`）で行う。
@@ -8,6 +8,7 @@
  */
 
 import { Hono } from 'hono';
+import type { WebReviewFindingStatus } from '@m2office/shared';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 
@@ -31,13 +32,33 @@ export function webReviewRoute(deps: AppDeps) {
     await next();
   });
 
-  /** 状態（始める前の手伝い）と、いちばん新しい月の便りと、便りの一覧。 */
+  /** 状態（始める前の手伝い）と、いちばん新しい月の便りと、便りの一覧と、直すべき所（新しい・見たもの）。 */
   app.get('/', async (c) => {
     const { tenant, user } = c.get('ctx');
-    const [status, latest, reports, admin] = await Promise.all([
+    const [status, latest, reports, admin, findings, settings] = await Promise.all([
       service.status(tenant.id), service.report(tenant.id), service.reports(tenant.id), service.isAdmin(tenant.id, user.id),
+      service.findings(tenant.id), deps.repo.getTenantSettings(tenant.id),
     ]);
-    return c.json({ status, latest, reports, admin });
+    return c.json({ status, latest, reports, admin, findings, checkedAt: settings.webReview.checkedAt ?? null, checkRequested: !!settings.webReview.checkRequestedAt });
+  });
+
+  /** 直すべき所（`all=1` なら済んだ・見送りも）。 */
+  app.get('/findings', async (c) => c.json({ findings: await service.findings(c.get('ctx').tenant.id, c.req.query('all') === '1') }));
+
+  /** 直すべき所の状態を変える（`status`: new・seen・done・dismissed）。 */
+  app.patch('/findings/:id', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
+    const err = await service.setFindingStatus({ tenantId: tenant.id, userId: user.id }, c.req.param('id'), String(body['status'] ?? '') as WebReviewFindingStatus);
+    return err ? c.json({ error: err }, err.includes('見つかりません') ? 404 : 400) : c.json({ ok: true });
+  });
+
+  /** 今すぐチェック（管理者）。ワーカーが次の見回り（1 分ごと）で探す。 */
+  app.post('/check', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    if (!(await service.isAdmin(tenant.id, user.id))) return c.json({ error: '今すぐチェックを頼めるのは管理者だけです' }, 403);
+    const err = await service.requestCheck({ tenantId: tenant.id, userId: user.id });
+    return err ? c.json({ error: err }, 409) : c.json({ ok: true });
   });
 
   /** 便りの一覧（新しい順）。 */

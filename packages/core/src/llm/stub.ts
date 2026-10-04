@@ -207,7 +207,8 @@ function chooseTools(tools: string[], prompt: string): Call[] {
   // Web の振り返り（仕様書 第34.18節）: 便り・数字の問い・状態
   if (has('web_review.ask') && instruction.includes('web_review.ask')) {
     const req = extractField(prompt, 'request');
-    if (/つなぎ|つなが|制作会社/.test(req)) return [{ name: 'web_review.status', args: {} }];
+    if (/直した|直すべき|遅いページ|制作会社に頼む/.test(req)) return [{ name: 'web_review.findings', args: {} }];
+    if (/つなぎ|つなが|閲覧の権限/.test(req)) return [{ name: 'web_review.status', args: {} }];
     if (/何人|何回|どこから|スマホ|検索され/.test(req)) {
       const page = /(.+?)のページ/.exec(req)?.[1]?.replace(/^.*[、,]\s*/, '').trim();
       const word = /[“"「](.+?)[”"」]\s*で検索/.exec(req)?.[1];

@@ -31,9 +31,13 @@ export interface WebReviewSettings {
   property: { id: string; name: string } | null;
   /** 選んだ Search Console のサイト（`sc-domain:example.jp` か `https://www.example.jp/`）。 */
   siteUrl: string | null;
+  /** 直すべき所を最後に探した日時（段 2。週に 1 回）。 */
+  checkedAt?: string | null;
+  /** 管理者が「今すぐチェック」を頼んだ日時（ワーカーが次の見回りで行う）。 */
+  checkRequestedAt?: string | null;
 }
 
-export const DEFAULT_WEB_REVIEW_SETTINGS: WebReviewSettings = { enabled: false, connection: null, property: null, siteUrl: null };
+export const DEFAULT_WEB_REVIEW_SETTINGS: WebReviewSettings = { enabled: false, connection: null, property: null, siteUrl: null, checkedAt: null, checkRequestedAt: null };
 
 /** 秘書に聞ける指標（第34.18節。M2Office が持つ決まった一覧）。 */
 export const WEB_REVIEW_METRICS = {
@@ -171,4 +175,66 @@ export interface WebReviewStatus {
 export interface WebReviewCandidates {
   properties: { id: string; name: string; account: string; uris: string[] }[];
   sites: { siteUrl: string; permission: string }[];
+}
+
+// ---- 段 2: 直すべき所（第34.6節・第34.19節） ----------------------------------------------------
+
+/** 直すべき所の種類。 */
+export type WebReviewFindingKind = 'lowCtr' | 'nearFirstPage' | 'missingContent' | 'notIndexed' | 'slowMobile' | 'fading';
+
+/** 種類の呼び方（画面と秘書）。 */
+export const WEB_REVIEW_FINDING_LABELS: Record<WebReviewFindingKind, string> = {
+  lowCtr: '検索に出るのに押されないページ',
+  nearFirstPage: 'あと少しで検索の 1 ページ目に入るページ',
+  missingContent: '検索されているのに合う記事が無い言葉',
+  notIndexed: 'Google に登録されていないページ',
+  slowMobile: 'スマホで遅いページ',
+  fading: '読まれなくなった記事',
+};
+
+/** 直すべき所の状態。 */
+export type WebReviewFindingStatus = 'new' | 'seen' | 'done' | 'dismissed';
+
+export const WEB_REVIEW_FINDING_STATUS_LABELS: Record<WebReviewFindingStatus, string> = { new: '新しい', seen: '見た', done: '済んだ', dismissed: '見送り' };
+
+/** 1 回の見回りで、種類ごとに出す数の上限。 */
+export const WEB_REVIEW_FINDINGS_PER_KIND = 5;
+
+/** 表示の速さと登録の状態を確かめるページの数の上限。 */
+export const WEB_REVIEW_PAGES_TO_CHECK = 10;
+
+/** 直すべき所 1 つ。 */
+export interface WebReviewFinding {
+  id: string;
+  kind: WebReviewFindingKind;
+  /** 対象（ページの URL かパス、または検索の言葉） */
+  target: string;
+  /** 画面に出す名前（ページの題名か検索の言葉） */
+  title: string;
+  /** 見つけた根拠の数字（プログラムが計算したもの。種類ごとに違う） */
+  figures: Record<string, number | string | null>;
+  /** 何が起きているか・どう直すとよいか（ふつうの言葉） */
+  advice: string;
+  /** 制作会社への依頼文の下書き（コラムと検索の言葉には無い） */
+  requestDraft: { subject: string; body: string } | null;
+  /** コラムのページならそのコラム */
+  columnId: string | null;
+  status: WebReviewFindingStatus;
+  foundAt: string;
+  updatedAt: string;
+}
+
+/** ページごとの数字（この 28 日。コラムの画面に出す）。 */
+export interface WebPageMetrics {
+  path: string;
+  start: string;
+  end: string;
+  views: number | null;
+  /** 読まれた時間の平均（秒） */
+  readSeconds: number | null;
+  searchClicks: number | null;
+  searchImpressions: number | null;
+  /** 主な検索の言葉（押された回数の多い順に 3 つまで） */
+  queries: string[];
+  updatedAt: string;
 }

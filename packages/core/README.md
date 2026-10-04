@@ -63,10 +63,12 @@ src/competitors/ 競合の分析（内蔵の拡張。第36章の段 1・段 2・
                  推論（analyze.ts。自社の像・商圏・候補の確かめ・読むページ・事実・レポート）、1 サイトを読む（reader.ts）、
                  置き場（store.ts。PostgreSQL とメモリ）、処理と作業（service.ts。探す・入れる・外す・読む・レポート・ワーカーの CompetitorWatch）、
                  ツール（tools.ts。competitors.list・facts・report・discover・add・remove・check）、付属の業務（agents.ts。探す・分析）
-src/web-review/  Web の振り返り（内蔵の拡張。第34章の段 1）。担当の許可で読む口（data.ts。GA4 のデータと管理の API・Search Console の API・
+src/web-review/  Web の振り返り（内蔵の拡張。第34章の段 1・段 2）。担当の許可で読む口（data.ts。GA4 のデータと管理の API・Search Console の API と URL の検査・PageSpeed Insights・
                  見本の口 MockWebData）、数字（figures.ts。期間・サイトの選び方・月の便りの数字・秘書の問い。数字はここで計算する）、
-                 置き場（store.ts。月の便り。PostgreSQL とメモリ）、処理（service.ts。つなぐ・外す・選ぶ・状態と依頼文の下書き・問い・
-                 月の便りと知らせ・ワーカーの tick）、ツール（tools.ts。web_review.report・ask・status・select）、付属の業務（agents.ts。Web について聞く）
+                 置き場（store.ts。月の便り・直すべき所・ページごとの数字。PostgreSQL とメモリ）、処理（service.ts。つなぐ・外す・選ぶ・状態と依頼文の下書き・問い・
+                 月の便りと知らせ・直すべき所の見回り・ワーカーの tick）、直すべき所（findings.ts。6 つの種類の基準・依頼文の下書き・案の推論）、
+                 コラムとのつなぎ（columns.ts。公開されたコラムの URL を WordPress から読む）、
+                 ツール（tools.ts。web_review.report・ask・status・select・findings）、付属の業務（agents.ts。Web について聞く）
 src/inventory/   在庫管理（内蔵の拡張。第29章）。置き場（入出庫の記録と同じトランザクションでいまの数を直す。PostgreSQL とメモリ）、
                  バーコードの読み方（gs1.ts。GS1・JAN・UPC）、品目・場所・入出庫・使用期限の近いロットから減らす・取り消し・
                  棚卸し（会社で 1 つ・数えた時点の帳簿と比べる・確定で差を調整に）・取り込みと書き出し（service.ts）、

@@ -685,7 +685,11 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
           {view.kind === 'webReview' && (
             <>
               <h1>Web の振り返り <HelpTip article="start-web-review">会社の Web サイトの数字（アナリティクスと Search Console）を、月に 1 回ふつうの言葉で届けます。秘書に聞けば数字を答えます。</HelpTip></h1>
-              <WebReview month={view.month} onOpen={(month) => setView({ kind: 'webReview', month })} />
+              <WebReview month={view.month} onOpen={(month) => setView({ kind: 'webReview', month })}
+                columns={me.webColumns ? {
+                  create: async (theme, memo) => { const { id } = await api.columns.create(theme, memo); setView({ kind: 'columns', columnId: id }); },
+                  open: (columnId) => setView({ kind: 'columns', columnId }),
+                } : null} />
             </>
           )}
           {view.kind === 'competitors' && (

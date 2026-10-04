@@ -4,12 +4,14 @@
  * 担当の許可（アナリティクスと Search Console の読み取りだけ）は、本人の Google の接続とは別に、会社の鍵の置き場に預ける。
  * 数字は {@link monthFigures}・{@link answerAsk} がプログラムで計算し、推論は月の便りの文を書くだけ（ADR-0067 決定 6）。
  * 月の便りは、毎月 3 日の 8 時（日本時間）以降に、ワーカーが先月分を 1 回だけ作る。
+ * 段 2 で、週に 1 回の直すべき所の見回り（{@link findIssues}）と、コラムごとの数字を足した（第34.19節）。
  */
 
 import { randomUUID } from 'node:crypto';
 import {
   WEB_REVIEW_EXTENSION_ID, WEB_REVIEW_REPORT_DAY, WEB_REVIEW_REPORT_HOUR, canUseAgent,
-  type WebReviewCandidates, type WebReviewFigures, type WebReviewReport, type WebReviewReportBrief, type WebReviewSettings, type WebReviewStatus,
+  type WebPageMetrics, type WebReviewCandidates, type WebReviewFigures, type WebReviewFinding, type WebReviewFindingStatus,
+  type WebReviewReport, type WebReviewReportBrief, type WebReviewSettings, type WebReviewStatus,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { LlmProvider } from '../llm/provider.js';
@@ -17,6 +19,8 @@ import { silentLogger, type Logger } from '../log/logger.js';
 import { WEB_REVIEW_KIND, WebDataError, openWebData, type WebData, type WebDataDeps } from './data.js';
 import { answerAsk, changeRate, hostOf, lastMonthOf, monthFigures, pickSite, type WebAnswer, type WebAsk } from './figures.js';
 import type { WebReviewStore } from './store.js';
+import { findIssues, pathOf, requestDraftFor, writeSuggestions } from './findings.js';
+import type { WebReviewColumns } from './columns.js';
 
 /** 処理に要るもの。 */
 export interface WebReviewServiceDeps {
@@ -25,6 +29,8 @@ export interface WebReviewServiceDeps {
   /** 担当の許可で読む口を開くのに要るもの */
   data: WebDataDeps;
   llmFor(tenantId: string): Promise<LlmProvider | null>;
+  /** コラムの作成とのつなぎ（公開されたコラムの URL。段 2） */
+  columns?: WebReviewColumns;
   logger?: Logger;
 }
 
@@ -397,22 +403,115 @@ export class WebReviewService {
 
   /**
    * 1 回分の見回り（ワーカー）。毎月 3 日の 8 時（日本時間）を過ぎたら、使っている会社ごとに先月の便りを 1 回だけ作る。
+   * 直すべき所は、つないで初めての見回り・今すぐチェック・週に 1 回（月曜の 5 時を過ぎてから）に探す。
    */
-  async tick(now: Date = new Date()): Promise<{ created: number }> {
+  async tick(now: Date = new Date()): Promise<{ created: number; checked: number }> {
     const jst = new Date(now.getTime() + 9 * 3_600_000);
-    if (jst.getUTCDate() < WEB_REVIEW_REPORT_DAY || (jst.getUTCDate() === WEB_REVIEW_REPORT_DAY && jst.getUTCHours() < WEB_REVIEW_REPORT_HOUR)) return { created: 0 };
+    const reportTime = !(jst.getUTCDate() < WEB_REVIEW_REPORT_DAY || (jst.getUTCDate() === WEB_REVIEW_REPORT_DAY && jst.getUTCHours() < WEB_REVIEW_REPORT_HOUR));
     const month = lastMonthOf(now);
     let created = 0;
+    let checked = 0;
     for (const tenantId of await this.deps.repo.listTenantIds()) {
       try {
         const w = (await this.deps.repo.getTenantSettings(tenantId)).webReview;
         if (!w.enabled || !w.connection) continue;
-        if (await this.createMonthly(tenantId, month)) created += 1;
+        if (reportTime && await this.createMonthly(tenantId, month)) created += 1;
+        // 直すべき所の見回り（週に 1 回・今すぐチェック。第34.19節）
+        if ((w.property || w.siteUrl) && this.checkDue(w, now) && await this.checkFindings(tenantId, now)) checked += 1;
       } catch (err) {
-        this.log.warn('Web の便りを作れませんでした', { tenantId, error: String(err) });
+        this.log.warn('Web の振り返りの見回りに失敗しました', { tenantId, error: String(err) });
       }
     }
-    return { created };
+    return { created, checked };
+  }
+
+  // ---- 直すべき所（段 2。第34.19節） ---------------------------------------------------------
+
+  /** サイトの入口（ページの URL を組み立てる）。会社情報の Web サイト、無ければ選んだサイトから。 */
+  private originOf(website: string, siteUrl: string | null): string {
+    for (const v of [website, siteUrl ?? '']) {
+      if (/^https?:\/\//.test(v)) {
+        try { return new URL(v).origin; } catch { /* 次を見る */ }
+      }
+    }
+    return siteUrl?.startsWith('sc-domain:') ? `https://${siteUrl.slice('sc-domain:'.length)}` : '';
+  }
+
+  /**
+   * 直すべき所を探して置く（週に 1 回・今すぐチェック）。コラムごとの数字も置き換える。新しく見つかったものがあれば担当に知らせる。
+   *
+   * @returns 見つけた数と、そのうち新しいもの。つないでいない・選んでいなければ `null`
+   */
+  async checkFindings(tenantId: string, now: Date = new Date()): Promise<{ found: number; fresh: number; missing: string[] } | null> {
+    const settings = await this.deps.repo.getTenantSettings(tenantId);
+    const w = settings.webReview;
+    if (!w.enabled || !w.connection || (!w.property && !w.siteUrl)) return null;
+    const data = await this.open(tenantId);
+    if (!data) return null;
+    const columns = this.deps.columns ? await this.deps.columns.published(tenantId).catch(() => []) : [];
+    const company = settings.company.shortName || settings.company.legalName;
+    const names = [settings.company.shortName, settings.company.legalName.replace(/(株式会社|有限会社|合同会社|一般社団法人|医療法人社団|医療法人)/g, '').trim()].filter(Boolean);
+    const r = await findIssues(data, {
+      propertyId: w.property?.id ?? null, siteUrl: w.siteUrl, origin: this.originOf(settings.company.website, w.siteUrl), companyNames: names, columns,
+    }, company, now);
+    // 押されないページの題名と説明文・足す見出しの案（推論）。案があれば説明に足し、依頼文を作り直す
+    const ideas = await writeSuggestions(await this.deps.llmFor(tenantId).catch(() => null), r.findings);
+    const origin = this.originOf(settings.company.website, w.siteUrl);
+    let fresh = 0;
+    for (const f of r.findings) {
+      const idea = ideas.get(`${f.kind}:${f.target}`);
+      const advice = idea ? `${f.advice}\n案:\n${idea}` : f.advice;
+      const requestDraft = f.requestDraft ? requestDraftFor(f.kind, { url: origin ? `${origin}${f.target}` : f.target, title: f.title }, advice, company) : null;
+      if ((await this.deps.store.putFinding(tenantId, { kind: f.kind, target: f.target, title: f.title, figures: f.figures, advice, requestDraft, columnId: f.columnId }, now)) === 'new') fresh += 1;
+    }
+    for (const m of r.pageMetrics) await this.deps.store.putPageMetrics(tenantId, m);
+    await this.save(tenantId, SYSTEM, { checkedAt: now.toISOString(), checkRequestedAt: null });
+    await this.audit(tenantId, SYSTEM, 'web_review.check', { found: r.findings.length, fresh, missing: r.missing.length });
+    if (fresh > 0) await this.notify(tenantId, [w.connection.connectedBy], `Web の直すべき所が ${fresh} 件見つかりました`, r.findings.slice(0, 3).map((f) => f.title).join('・'));
+    return { found: r.findings.length, fresh, missing: r.missing };
+  }
+
+  /** 直すべき所（新しい・見たもの。`all` なら済んだ・見送りも）。 */
+  async findings(tenantId: string, all = false): Promise<WebReviewFinding[]> {
+    return this.deps.store.findings(tenantId, all ? undefined : ['new', 'seen']);
+  }
+
+  /**
+   * 直すべき所の状態を変える（見た・済んだ・見送り）。
+   *
+   * @returns 失敗の理由。成功なら `null`
+   */
+  async setFindingStatus(who: WebReviewViewer, id: string, status: WebReviewFindingStatus): Promise<string | null> {
+    if (!['new', 'seen', 'done', 'dismissed'].includes(status)) return '状態が読めません';
+    const f = await this.deps.store.finding(who.tenantId, id);
+    if (!f) return '直すべき所が見つかりません';
+    await this.deps.store.setFindingStatus(who.tenantId, id, status);
+    await this.audit(who.tenantId, who.userId, 'web_review.finding', { kind: f.kind, status });
+    return null;
+  }
+
+  /** 管理者の「今すぐチェック」。ワーカーが次の見回りで探す。 */
+  async requestCheck(who: WebReviewViewer): Promise<string | null> {
+    const w = (await this.deps.repo.getTenantSettings(who.tenantId)).webReview;
+    if (!w.connection) return '担当がまだ Google とつないでいません';
+    await this.save(who.tenantId, who.userId, { checkRequestedAt: new Date().toISOString() });
+    return null;
+  }
+
+  /** コラムの数字（この 28 日。見回りのときに置いたもの）。公開されていない・まだ見回っていなければ `null`。 */
+  async columnMetrics(tenantId: string, columnId: string): Promise<WebPageMetrics | null> {
+    if (!this.deps.columns) return null;
+    const c = (await this.deps.columns.published(tenantId).catch(() => [])).find((x) => x.id === columnId);
+    return c ? this.deps.store.pageMetrics(tenantId, pathOf(c.url)) : null;
+  }
+
+  /** 週に 1 回の見回りの番か（初めて・頼まれた・月曜の 5 時を過ぎて前から 6 日より経った・8 日より経った）。 */
+  private checkDue(w: WebReviewSettings, now: Date): boolean {
+    if (w.checkRequestedAt || !w.checkedAt) return true;
+    const since = now.getTime() - Date.parse(w.checkedAt);
+    const jst = new Date(now.getTime() + 9 * 3_600_000);
+    const mondayMorning = jst.getUTCDay() === 1 && jst.getUTCHours() >= 5;
+    return (mondayMorning && since > 6 * 86_400_000) || since > 8 * 86_400_000;
   }
 
   /** 週次ブリーフに載せる要点（この 8 日のうちに届いた便りがあれば）。 */

@@ -249,6 +249,16 @@ function ColumnEditor({ id, onBack, onApprovals }: { id: string; onBack: () => v
         {note('top')}
       </div>
 
+      {/* 公開されたコラムの数字（この 28 日。Web の振り返りを使っているとき。第34.19節） */}
+      {detail?.webMetrics && (
+        <p className="small columns-metrics">
+          {Number(detail.webMetrics.start.slice(5, 7))} 月 {Number(detail.webMetrics.start.slice(8))} 日〜{Number(detail.webMetrics.end.slice(5, 7))} 月 {Number(detail.webMetrics.end.slice(8))} 日:
+          {' '}見られた回数 {detail.webMetrics.views ?? '—'} 回
+          {detail.webMetrics.readSeconds !== null && <>・読まれた時間の平均 {detail.webMetrics.readSeconds} 秒</>}
+          {detail.webMetrics.searchClicks !== null && <>・検索で押された回数 {detail.webMetrics.searchClicks} 回（表示 {detail.webMetrics.searchImpressions ?? 0} 回）</>}
+          {detail.webMetrics.queries.length > 0 && <>・主な検索の言葉: {detail.webMetrics.queries.join('、')}</>}
+        </p>
+      )}
       {column.status === 'writing' && <p className="muted">「{column.theme}」を書いています…</p>}
       {column.status === 'failed' && (
         <div className="row">

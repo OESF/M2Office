@@ -60,7 +60,11 @@ export function columnsRoute(deps: AppDeps) {
   /** 1 つのコラムと版の一覧。 */
   app.get('/:id', async (c) => {
     const d = await service.detail(who(c), c.req.param('id'));
-    return d ? c.json(d) : c.json({ error: 'コラムが見つかりません' }, 404);
+    if (!d) return c.json({ error: 'コラムが見つかりません' }, 404);
+    // 公開されたコラムの数字（この 28 日）。Web の振り返りを使える人にだけ添える（第34.19節）
+    const { tenant, user } = c.get('ctx');
+    const metrics = (await deps.webReview.access(tenant.id, user.id)) ? await deps.webReview.service.columnMetrics(tenant.id, d.column.id).catch(() => null) : null;
+    return c.json({ ...d, webMetrics: metrics });
   });
 
   /** 直して保存する（新しい版になる）。 */

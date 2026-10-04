@@ -22,7 +22,7 @@ import type { CardCorners,
   Inquiry, InquiryDetail, InquiryParty, InquiryTask, InquiryReply, InquiryMailSkipped, InquiryMonthStats, InquirySettings, InquiryFaqTopic,
   CompetitorOverview, CompetitorFact, CompetitorReport, CompetitorSettings,
   Announcement, AnnouncementDetail, AnnouncementPreview, AnnouncementRecipient, AnnouncementSettings, AnnouncementTexts,
-  WebReviewCandidates, WebReviewReport, WebReviewReportBrief, WebReviewSettings, WebReviewStatus,
+  WebReviewCandidates, WebReviewReport, WebReviewReportBrief, WebReviewSettings, WebReviewStatus, WebReviewFinding, WebReviewFindingStatus, WebPageMetrics,
 } from '@m2office/shared';
 import { debugMode, recordCall } from './debug.js';
 
@@ -767,6 +767,8 @@ export interface ColumnDetail {
   /** 版（新しい順）。 */
   versions: WebColumnVersion[];
   wordpress: ColumnWordPress | null;
+  /** 公開されたコラムの数字（この 28 日。Web の振り返りを使える人にだけある。第34.19節）。 */
+  webMetrics?: WebPageMetrics | null;
 }
 
 /** 店頭サイネージの管理の画面の中身（仕様書 第31.9.4節）。 */
@@ -1260,8 +1262,13 @@ export const api = {
   /** Web の振り返り（内蔵の拡張。仕様書 第34章）。 */
   webReview: {
     /** 状態（始める前の手伝い）といちばん新しい便りと、便りの一覧。 */
-    overview: () => call<{ status: WebReviewStatus; latest: WebReviewReport | null; reports: WebReviewReportBrief[]; admin: boolean }>('/web-review'),
+    overview: () => call<{ status: WebReviewStatus; latest: WebReviewReport | null; reports: WebReviewReportBrief[]; admin: boolean; findings: WebReviewFinding[]; checkedAt: string | null; checkRequested: boolean }>('/web-review'),
     report: (month: string) => call<{ report: WebReviewReport }>(`/web-review/reports/${encodeURIComponent(month)}`),
+    /** 直すべき所の状態を変える（見た・済んだ・見送り。第34.19節）。 */
+    setFinding: (id: string, status: WebReviewFindingStatus) =>
+      call<{ ok: true }>(`/web-review/findings/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
+    /** 今すぐチェック（管理者。ワーカーが次の見回りで探す）。 */
+    check: () => call<{ ok: true }>('/web-review/check', { method: 'POST', body: '{}' }),
   },
   /** お知らせの作成（内蔵の拡張。仕様書 第35章）。 */
   announcements: {

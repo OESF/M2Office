@@ -5681,7 +5681,7 @@ console.log('\n■ 71. お知らせの作成の段 2（メール・休業の期�
   }
 }
 
-console.log('\n■ 72. Web の振り返りの段 1（担当の許可・サイトの選び方・月の便り・秘書に聞く。第34.18節）');
+console.log('\n■ 72. Web の振り返りの段 1・段 2（担当の許可・サイトの選び方・月の便り・秘書に聞く・直すべき所。第34.18節・第34.19節）');
 {
   const { default: pg } = await import('pg');
   const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
@@ -5693,6 +5693,8 @@ console.log('\n■ 72. Web の振り返りの段 1（担当の許可・サイト
   const store = new core.PostgresWebReviewStore(process.env.DATABASE_URL ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
   const cleanup = async () => {
     await owner.query(`delete from web_review_reports where tenant_id = 't-alpha'`);
+    await owner.query(`delete from web_review_findings where tenant_id = 't-alpha'`);
+    await owner.query(`delete from web_page_metrics where tenant_id = 't-alpha'`);
     await owner.query(`delete from tenant_credentials where tenant_id = 't-alpha' and kind = 'web_review'`);
   };
   await cleanup();
@@ -5739,6 +5741,23 @@ console.log('\n■ 72. Web の振り返りの段 1（担当の許可・サイト
     const other = await call('b', `/v1/web-review/reports/${month}`);
     other.status === 403 || other.status === 404 ? ok('ほかの会社からは月の便りが見えない') : ng(`ほかの会社から見える（${other.status}）`);
 
+    // 直すべき所（段 2。第34.19節）。今すぐチェックは管理者だけ。見回りはワーカーと同じ処理を直接呼ぶ
+    const checkByMember = await call('a', '/v1/web-review/check', { method: 'POST', body: '{}' }, 'member');
+    const checkByAdmin = await call('a', '/v1/web-review/check', { method: 'POST', body: '{}' });
+    await service.checkFindings('t-alpha');
+    const withFindings = (await call('a', '/v1/web-review', {}, 'member')).body;
+    const kinds = new Set((withFindings?.findings ?? []).map((f) => f.kind));
+    const slow = (withFindings?.findings ?? []).find((f) => f.kind === 'slowMobile');
+    checkByMember.status === 403 && checkByAdmin.status === 200 && ['lowCtr', 'nearFirstPage', 'missingContent', 'notIndexed', 'slowMobile', 'fading'].every((k) => kinds.has(k))
+      && /Web サイトの直しのお願い/.test(slow?.requestDraft?.subject ?? '') && withFindings.checkedAt
+      ? ok('週に 1 回の見回りで、6 つの種類の直すべき所を見つけ、制作会社への依頼文を下書きする（今すぐチェックは管理者だけ）')
+      : ng('直すべき所が違う', JSON.stringify({ member: checkByMember.status, admin: checkByAdmin.status, kinds: [...kinds], slow, checkedAt: withFindings?.checkedAt }).slice(0, 400));
+    const seen = slow ? await call('a', `/v1/web-review/findings/${slow.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'dismissed' }) }, 'member') : { status: 0 };
+    const otherPatch = slow ? await call('b', `/v1/web-review/findings/${slow.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'done' }) }) : { status: 0 };
+    const afterSeen = (await call('a', '/v1/web-review', {}, 'member')).body;
+    seen.status === 200 && (otherPatch.status === 403 || otherPatch.status === 404) && !(afterSeen?.findings ?? []).some((f) => f.id === slow?.id)
+      ? ok('直すべき所を見送りにでき、ほかの会社からは変えられない') : ng('状態を変えるのが違う', JSON.stringify({ seen: seen.status, other: otherPatch.status }));
+
     // 秘書から聞く（付属の業務「Web について聞く」）
     const ask = async (request) => {
       const job = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: 'web-review:ask', input: { request } }) }, 'member');
@@ -5751,11 +5770,14 @@ console.log('\n■ 72. Web の振り返りの段 1（担当の許可・サイト
       ? ok('秘書に聞くと、決まった指標と切り口に直して数字を読む') : ng('数字の問いが違う', JSON.stringify(q1).slice(0, 400));
     const q2 = await ask('先月の Web はどうだった？');
     q2.status === 'completed' && /web_review\.report/.test(q2.text) ? ok('「先月の Web はどうだった？」には月の便りで答える') : ng('便りの問いが違う', JSON.stringify(q2).slice(0, 300));
+    const q3 = await ask('Web で直したほうがいい所は？');
+    q3.status === 'completed' && /web_review\.findings/.test(q3.text) && /直しのお願い/.test(q3.text)
+      ? ok('「Web で直したほうがいい所は？」には直すべき所と依頼文の下書きで答える') : ng('直すべき所の問いが違う', JSON.stringify(q3).slice(0, 300));
 
     const { body: audits } = await call('a', '/v1/admin/audit-events');
     const acts = (audits.items ?? []).map((e) => e.action);
-    ['web_review.connect', 'web_review.select', 'web_review.report'].every((x) => acts.includes(x))
-      ? ok('つないだ・選んだ・便りを作ったを監査ログに残す') : ng('監査ログが違う', JSON.stringify(acts.filter((x) => x.startsWith('web_review.'))));
+    ['web_review.connect', 'web_review.select', 'web_review.report', 'web_review.check', 'web_review.finding'].every((x) => acts.includes(x))
+      ? ok('つないだ・選んだ・便りを作った・直すべき所を探した・状態を変えたを監査ログに残す') : ng('監査ログが違う', JSON.stringify(acts.filter((x) => x.startsWith('web_review.'))));
     const disc = await call('a', '/v1/admin/extensions/web-review/connection', { method: 'DELETE' });
     const gone = (await call('a', '/v1/web-review', {}, 'member')).body;
     disc.status === 200 && gone?.status?.state === 'notConnected' && gone.latest?.month === month

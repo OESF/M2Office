@@ -159,6 +159,22 @@ export async function ensureWordPressCategory(a: WordPressAuth, name: string): P
   }
 }
 
+/**
+ * 記事の公開の状態と URL（Web の振り返りが、公開されたコラムの数字を読むため。第34.19節）。
+ *
+ * @returns 読めなければ `null`
+ */
+export async function getWordPressPost(a: WordPressAuth, id: string): Promise<{ status: string; link: string } | null> {
+  try {
+    const res = await fetch(`${a.siteUrl}/wp-json/wp/v2/posts/${encodeURIComponent(id)}?context=edit&_fields=status,link`, { headers: headers(a), signal: AbortSignal.timeout(TIMEOUT_MS) });
+    if (!res.ok) return null;
+    const v = await res.json() as { status?: string; link?: string };
+    return { status: v.status ?? '', link: v.link ?? '' };
+  } catch {
+    return null;
+  }
+}
+
 /** 記事の題名を変える（お知らせの期間の後に「（終了しました）」を付ける。第35.6.1節）。 */
 export async function updateWordPressTitle(a: WordPressAuth, id: string, title: string): Promise<string | null> {
   try {

@@ -1,6 +1,7 @@
 /**
- * @file Web の振り返りの段 1 の単体テスト（仕様書 第34.18節）。期間の決め方・サイトの選び方・月の便りの数字（プログラムが計算する）・
- * 秘書の問い（決まった一覧の外は呼ばない）・担当の許可とサイトの自動の選択・月に 1 回の便りと知らせ・ツール。見本の口（MockWebData）で確かめる。
+ * @file Web の振り返りの段 1・段 2 の単体テスト（仕様書 第34.18節・第34.19節）。期間の決め方・サイトの選び方・月の便りの数字（プログラムが計算する）・
+ * 秘書の問い（決まった一覧の外は呼ばない）・担当の許可とサイトの自動の選択・月に 1 回の便りと知らせ・ツール・
+ * 直すべき所（6 つの種類・依頼文・状態・また見つかったとき）・コラムごとの数字。見本の口（MockWebData）で確かめる。
  */
 
 import { test } from 'node:test';
@@ -8,10 +9,11 @@ import assert from 'node:assert/strict';
 import { DEFAULT_TENANT_SETTINGS, type Notification, type TenantCredential, type TenantSettings } from '@m2office/shared';
 import {
   MemoryWebReviewStore, MockWebData, WebReviewService, WEB_REVIEW_TOOLS, accessRequestDraft, answerAsk, checkAsk, monthFigures, periodRange, pickSite, plainWebReport,
+  findIssues, rankBand, requestDraftFor, type WebReviewColumns,
   type Repository, type ToolContext,
 } from '../src/index.js';
 
-function setup(opts: { website?: string } = {}) {
+function setup(opts: { website?: string; columns?: WebReviewColumns } = {}) {
   let settings: TenantSettings = {
     ...DEFAULT_TENANT_SETTINGS,
     company: { ...DEFAULT_TENANT_SETTINGS.company, legalName: '株式会社アルファ商事', shortName: 'アルファ', website: opts.website ?? 'https://www.alpha.example.jp/' },
@@ -41,7 +43,7 @@ function setup(opts: { website?: string } = {}) {
   } as unknown as Repository;
   const store = new MemoryWebReviewStore();
   const service = new WebReviewService({
-    store, repo, llmFor: async () => null,
+    store, repo, llmFor: async () => null, ...(opts.columns ? { columns: opts.columns } : {}),
     data: { repo, box: { encrypt: (s: string) => `enc:${s}`, decrypt: (s: string) => s.slice(4) } as never, sourceFor: () => 'mock' },
   });
   return { service, store, notes, audits, creds, settings: () => settings };
@@ -150,13 +152,13 @@ test('制作会社への依頼文: 担当のアドレスを閲覧者と制限付
 test('月の便り: 3 日の 8 時を過ぎたら先月分を 1 回だけ作り、担当と管理者に知らせる（切っている人には知らせない）', async () => {
   const { service, store, notes, audits } = setup();
   await service.connect(boss, { email: 'boss@alpha.example.jp', refreshToken: null });
-  assert.deepEqual(await service.tick(new Date('2026-10-02T22:59:00Z')), { created: 0 }, '日本時間 3 日の 7 時 59 分は作らない');
-  assert.deepEqual(await service.tick(new Date('2026-10-03T00:00:00Z')), { created: 1 });
-  assert.deepEqual(await service.tick(new Date('2026-10-03T01:00:00Z')), { created: 0 }, '月に 1 回だけ');
+  assert.equal((await service.tick(new Date('2026-10-02T22:59:00Z'))).created, 0, '日本時間 3 日の 7 時 59 分は作らない');
+  assert.equal((await service.tick(new Date('2026-10-03T00:00:00Z'))).created, 1);
+  assert.equal((await service.tick(new Date('2026-10-03T01:00:00Z'))).created, 0, '月に 1 回だけ');
   const r = (await store.get('t1', '2026-09'))!;
   assert.ok(r.summary.length > 0 && r.next.length >= 1);
   assert.equal(r.figures.analytics?.users.value !== null, true);
-  assert.deepEqual(notes.map((n) => [n.userId, n.kind, n.title]), [['boss', 'webReview', '9 月の Web の便りが届きました']], '担当と管理者に。切っている管理者には届けない');
+  assert.deepEqual(notes.filter((n) => /便り/.test(n.title)).map((n) => [n.userId, n.kind, n.title]), [['boss', 'webReview', '9 月の Web の便りが届きました']], '担当と管理者に。切っている管理者には届けない');
   assert.ok(audits.some((a) => a.action === 'web_review.report'));
   assert.equal((await service.recentSummary('t1', new Date(Date.parse(r.createdAt) + 86_400_000)))?.month, '2026-09');
   assert.equal(await service.recentSummary('t1', new Date(Date.parse(r.createdAt) + 9 * 86_400_000)), null, '週次ブリーフには 8 日のうちだけ');
@@ -179,3 +181,89 @@ test('ツール: 使えない人には使えないと返し、選び直しは管
   assert.match(report.note, /毎月 3 日/);
   for (const t of WEB_REVIEW_TOOLS) assert.ok(t.risk === 'read' || t.risk === 'write-internal', '社外には何も出さない');
 });
+
+const COLUMN_URL = 'https://www.alpha.example.jp/column/spring/';
+const fakeColumns: WebReviewColumns = { published: async () => [{ id: 'col-1', title: '春のコラム', url: COLUMN_URL }] };
+
+test('直すべき所: 6 つの種類を決まった基準で見つけ、コラムには依頼文を作らず、ほかには制作会社への依頼文を下書きする', async () => {
+  assert.equal(rankBand(3.2), 0, '平均の順位は四捨五入して区切る');
+  assert.equal(rankBand(8), 2);
+  const r = await findIssues(new MockWebData(), {
+    propertyId: 'properties/100001', siteUrl: 'sc-domain:alpha.example.jp', origin: 'https://www.alpha.example.jp', companyNames: ['見本の会社'],
+    columns: [{ id: 'col-1', title: '春のコラム', url: COLUMN_URL }],
+  }, 'アルファ', OCT4);
+  const by = (k: string) => r.findings.filter((f) => f.kind === k).map((f) => f.target);
+  assert.deepEqual(by('lowCtr'), ['/service/']);
+  assert.deepEqual(by('nearFirstPage').sort(), ['/column/spring/', '/price/']);
+  assert.deepEqual(by('missingContent'), ['冬 乾燥 対策'], '会社の名前を含む言葉は除く');
+  assert.deepEqual(by('notIndexed'), ['/company/']);
+  assert.deepEqual(by('slowMobile'), ['/price/']);
+  assert.deepEqual(by('fading'), ['/column/winter/']);
+  const spring = r.findings.find((f) => f.target === '/column/spring/')!;
+  assert.equal(spring.columnId, 'col-1');
+  assert.equal(spring.requestDraft, null, 'コラムは書き直しを頼むので依頼文を作らない');
+  const slow = r.findings.find((f) => f.kind === 'slowMobile')!;
+  assert.match(slow.advice, /38 点/);
+  assert.match(slow.requestDraft!.body, /ページ: https:\/\/www\.alpha\.example\.jp\/price\//);
+  assert.match(slow.requestDraft!.body, /スマホでの表示を速くしていただけますでしょうか/);
+  assert.equal(r.findings.find((f) => f.kind === 'missingContent')!.requestDraft, null);
+  assert.deepEqual(r.pageMetrics.map((m) => m.path), ['/column/spring/']);
+  assert.ok(r.pageMetrics[0]!.views! > 0 && r.pageMetrics[0]!.readSeconds! > 0 && r.pageMetrics[0]!.queries.length > 0);
+  assert.deepEqual(r.missing, []);
+  // 推論の案があるときだけ「上の案を参考に」と頼む
+  assert.match(requestDraftFor('lowCtr', { url: 'u', title: 't' }, '理由\n案:\n題名: x', 'ア').body, /上の案を参考に/);
+  assert.doesNotMatch(requestDraftFor('lowCtr', { url: 'u', title: 't' }, '理由', 'ア').body, /上の案/);
+});
+
+test('直すべき所の見回り: 初めては見回り、また見つかっても新しいにしない。見送りはそのまま、済んだは 28 日を過ぎたら新しいに戻す', async () => {
+  const { service, store, notes, audits } = setup({ columns: fakeColumns });
+  await service.connect(boss, { email: 'boss@alpha.example.jp', refreshToken: null });
+  const first = (await service.checkFindings('t1', OCT4))!;
+  assert.equal(first.found, 7);
+  assert.equal(first.fresh, 7);
+  assert.ok(notes.some((n) => n.userId === 'boss' && /直すべき所が 7 件/.test(n.title)), '担当に知らせる');
+  assert.ok(audits.some((a) => a.action === 'web_review.check'));
+  assert.equal((await service.columnMetrics('t1', 'col-1'))?.path, '/column/spring/', 'コラムの数字を置く');
+  const list = await service.findings('t1');
+  const slow = list.find((f) => f.kind === 'slowMobile')!;
+  const fade = list.find((f) => f.kind === 'fading')!;
+  assert.equal(await service.setFindingStatus({ tenantId: 't1', userId: 'u1' }, slow.id, 'dismissed'), null);
+  assert.equal(await service.setFindingStatus({ tenantId: 't1', userId: 'u1' }, fade.id, 'done'), null);
+  assert.equal(await service.setFindingStatus({ tenantId: 't1', userId: 'u1' }, 'nope', 'done'), '直すべき所が見つかりません');
+  const again = (await service.checkFindings('t1', new Date(OCT4.getTime() + 7 * 86_400_000)))!;
+  assert.equal(again.fresh, 0, 'また見つかっても新しいにしない');
+  assert.equal((await store.finding('t1', slow.id))!.status, 'dismissed', '見送りはそのまま');
+  assert.equal((await service.findings('t1')).some((f) => f.id === fade.id), false, '済んだは一覧（新しい・見た）に出さない');
+  // 済んだにして 28 日を過ぎてからまた見つかったら、新しいに戻す
+  const later = (await service.checkFindings('t1', new Date(Date.now() + 40 * 86_400_000)))!;
+  assert.equal(later.fresh, 1);
+  assert.equal((await store.finding('t1', fade.id))!.status, 'new');
+});
+
+test('直すべき所の見回りの番: 頼まれた・初めてならすぐ、ふだんは月曜の 5 時を過ぎて前から 6 日より経ったとき', async () => {
+  const { service, settings } = setup();
+  await service.connect(boss, { email: 'boss@alpha.example.jp', refreshToken: null });
+  assert.equal((await service.tick(new Date('2026-10-04T01:00:00Z'))).checked, 1, '初めては日曜でも見回る');
+  assert.equal((await service.tick(new Date('2026-10-04T02:00:00Z'))).checked, 0);
+  assert.equal(await service.requestCheck(boss), null);
+  assert.ok(settings().webReview.checkRequestedAt);
+  assert.equal((await service.tick(new Date('2026-10-04T03:00:00Z'))).checked, 1, '今すぐチェック');
+  assert.equal(settings().webReview.checkRequestedAt, null);
+  assert.equal((await service.tick(new Date('2026-10-11T19:00:00Z'))).checked, 0, '日本時間の月曜 4 時はまだ');
+  assert.equal((await service.tick(new Date('2026-10-11T21:00:00Z'))).checked, 1, '日本時間の月曜 6 時');
+});
+
+test('ツール: 直すべき所を理由と依頼文つきで返す（送らない）', async () => {
+  const { service } = setup({ columns: fakeColumns });
+  await service.connect(boss, { email: 'boss@alpha.example.jp', refreshToken: null });
+  const ctx = { tenantId: 't1', userId: 'u1', webReview: { service, access: async () => ({ enabled: true, checkedAt: null }) } } as unknown as ToolContext;
+  const tool = WEB_REVIEW_TOOLS.find((t) => t.name === 'web_review.findings')!;
+  assert.equal(tool.risk, 'read');
+  assert.match((await tool.invoke({}, ctx) as { note: string }).note, /まだ見回っていません/);
+  await service.checkFindings('t1', OCT4);
+  const r = await tool.invoke({ kind: 'slowMobile' }, ctx) as { items: { kind: string; requestDraft: { subject: string } | null }[] };
+  assert.equal(r.items.length, 1);
+  assert.equal(r.items[0]!.kind, 'スマホで遅いページ');
+  assert.match(r.items[0]!.requestDraft!.subject, /Web サイトの直しのお願い/);
+});
+
