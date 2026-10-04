@@ -478,8 +478,18 @@ export interface Repository {
    * 動いている実行（待機・実行中・承認待ち）と、指定時刻以降に失敗した実行を返す。
    *
    * @remarks ジョブの入力（`job.input`）は空で返す。ダッシュボードは中身を見る画面ではない。
+   * 管理者が確認した失敗（{@link dismissFailedRuns}）は返さない（仕様書 第6.7.5.1節）
    */
   listLiveRuns(tenantId: string, failedSince: string): Promise<{ run: Run; job: Job }[]>;
+  /**
+   * 失敗した実行を、管理者が確認したものとして印を付ける（仕様書 第6.7.5.1節）。
+   *
+   * ダッシュボードの「今日、失敗した業務」から外すためだけの印で、実行の記録は消さない。
+   *
+   * @param runIds - 外す実行。`null` なら `failedSince` 以降に失敗した、まだ確認していないものすべて
+   * @returns 印を付けた件数（失敗していない実行・確認済みの実行は数えない）
+   */
+  dismissFailedRuns(tenantId: string, runIds: string[] | null, failedSince: string, userId: string): Promise<number>;
   /** 実行を日（日本時間）・時・エージェント・状態で束ねた集計。 */
   runStats(tenantId: string, since: string): Promise<RunStatRow[]>;
   /** 監査ログの操作を種類と対象で数える。 */

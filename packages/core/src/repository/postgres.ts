@@ -1611,13 +1611,24 @@ export class PostgresRepository implements Repository {
          from runs r join jobs j on j.id = r.job_id and j.tenant_id = r.tenant_id
         where r.tenant_id = $1
           and (r.status in ('queued', 'running', 'awaiting_approval')
-               or (r.status = 'failed' and r.started_at >= $2))
+               or (r.status = 'failed' and r.started_at >= $2 and r.failure_dismissed_at is null))
         order by r.started_at desc limit 50`,
       [tenantId, failedSince]);
     return rows.map(({ run, job }) => ({
       run: { ...run, startedAt: iso(run.startedAt)!, endedAt: iso(run.endedAt) },
       job: { ...job, createdAt: iso(job.createdAt)! },
     }));
+  }
+
+  async dismissFailedRuns(tenantId: string, runIds: string[] | null, failedSince: string, userId: string): Promise<number> {
+    if (runIds && !runIds.length) return 0;
+    const rows = await this.q<{ id: string }>(tenantId,
+      `update runs set failure_dismissed_at = now(), failure_dismissed_by = $3
+        where tenant_id = $1 and status = 'failed' and failure_dismissed_at is null and started_at >= $2
+          and ($4::text[] is null or id = any($4::text[]))
+        returning id`,
+      [tenantId, failedSince, userId, runIds]);
+    return rows.length;
   }
 
   async runStats(tenantId: string, since: string): Promise<RunStatRow[]> {

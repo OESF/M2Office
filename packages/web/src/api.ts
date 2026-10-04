@@ -1869,6 +1869,13 @@ export const api = {
     }>('/admin/settings'),
     dashboardLive: () => call<DashboardLive>('/admin/dashboard/live'),
     /**
+     * 今日、失敗した業務を確認したものとして、囲みから外す（仕様書 第6.7.5.1節）。実行の記録は残る。
+     *
+     * @param runIds 外す実行。省くと今日の失敗をすべて外す
+     */
+    dismissFailures: (runIds?: string[]) =>
+      call<{ dismissed: number }>('/admin/dashboard/failures/dismiss', { method: 'POST', body: JSON.stringify(runIds ? { runIds } : {}) }),
+    /**
      * ダッシュボードの状態を受け取り続ける（SSE。仕様書 第6.7.9節）。
      *
      * @param onData 変化が届くたびに呼ぶ

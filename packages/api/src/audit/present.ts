@@ -18,6 +18,7 @@ const ACTION_LABELS: Record<string, string> = {
   'job.create': '業務を依頼した',
   'run.complete': '業務が完了した',
   'run.fail': '業務が失敗した',
+  'run.dismiss_failure': '失敗した業務を確認した',
   'run.cancel': '業務を止めた',
   'run.expire': '承認待ちの業務を期限切れにした',
   'run.await_approval': '業務が承認待ちになった',

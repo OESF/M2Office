@@ -7,6 +7,7 @@
  * @see 仕様書 第6.7節 ダッシュボード
  */
 
+import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import { agentDisplayName, isValidAvatar, type AgentDefinition, type Approval, type AuditEvent, type Job, type Run, type User } from '@m2office/shared';
 import {
@@ -51,6 +52,38 @@ export function dashboardRoute(deps: AppDeps) {
   app.get('/live', async (c) => {
     const { tenant } = c.get('ctx');
     return c.json(await live(tenant.id));
+  });
+
+  /**
+   * 今日、失敗した業務を確認したものとして、囲みから外す（仕様書 第6.7.5.1節）。
+   *
+   * 本文の `runIds` で 1 件ずつ、無ければ今日の（まだ確認していない）失敗をすべて外す。
+   *
+   * @remarks
+   * **外すのは表示だけ。** 実行の記録・集計・監査ログは残す。確認した人と日時を実行に残し、
+   * 操作を監査ログ `run.dismiss_failure` に残す。失敗していない実行は外さない。
+   */
+  app.post('/failures/dismiss', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const body = await c.req.json().catch(() => ({})) as { runIds?: unknown };
+    let runIds: string[] | null = null;
+    if (body.runIds !== undefined) {
+      if (!Array.isArray(body.runIds) || body.runIds.length > 100 || !body.runIds.every((x) => typeof x === 'string' && x.length <= 100)) {
+        return c.json({ error: 'runIds は実行の ID の配列で指定してください' }, 400);
+      }
+      runIds = body.runIds as string[];
+    }
+    const dismissed = await deps.repo.dismissFailedRuns(tenant.id, runIds, jstDayStart(new Date(), 0), user.id);
+    if (dismissed > 0) {
+      await deps.repo.appendAudit({
+        id: randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id, action: 'run.dismiss_failure',
+        // 1 件なら実行を、まとめてなら「今日、失敗した業務」を対象として残す
+        ...(runIds?.length === 1 ? { targetType: 'run', targetId: runIds[0]! } : { targetType: 'dashboard', targetId: '今日、失敗した業務' }),
+        detail: { count: dismissed },
+        occurredAt: new Date().toISOString(),
+      });
+    }
+    return c.json({ dismissed });
   });
 
   /**
@@ -247,9 +280,8 @@ export function dashboardRoute(deps: AppDeps) {
         runs: t.runs + r.runs,
         costJpy: t.costJpy + r.costJpy,
         savedMinutes: t.savedMinutes + r.savedMinutes,
-        failed: t.failed + (r.status === 'failed' ? r.runs : 0),
       }),
-      { runs: 0, costJpy: 0, savedMinutes: 0, failed: 0 },
+      { runs: 0, costJpy: 0, savedMinutes: 0 },
     );
 
     const runAgent = new Map(liveRuns.map(({ run, job }) => [run.id, job.agentId]));
@@ -319,7 +351,8 @@ export function dashboardRoute(deps: AppDeps) {
         activeUsers,
         running: liveRuns.filter(({ run }) => run.status === 'queued' || run.status === 'running').length,
         awaitingApproval: pending.length,
-        failedToday: today.failed,
+        // 管理者が確認した失敗は数えない（第6.7.5.1節）。業務ごとの今日の失敗の数には残る
+        failedToday: failures.length,
         todayRuns: today.runs,
         todayCostJpy: round2(today.costJpy),
         todaySavedMinutes: round1(today.savedMinutes),

@@ -712,6 +712,30 @@ console.log('\n■ 18. ダッシュボード');
   Array.isArray(body.failures) && (body.failures ?? []).every((f) => f.reason && f.at && f.agentName)
     ? ok(`今日の失敗を別に返す（${body.failures.length} 件）`) : ng('失敗の形が不正', JSON.stringify(body.failures ?? null));
 
+  // 失敗を確認したら囲みから外す。記録は残る（第6.7.5.1節。第 0.251.0 版）
+  {
+    const bad = await call('a', '/v1/admin/dashboard/failures/dismiss', { method: 'POST', body: JSON.stringify({ runIds: 'x' }) });
+    bad.status === 400 ? ok('確認の印: 形の違う指定を断る') : ng(`確認の印: 形の違う指定が通った（${bad.status}）`);
+    const byMember = await call('a', '/v1/admin/dashboard/failures/dismiss', { method: 'POST', body: '{}' }, 'member');
+    byMember.status === 403 ? ok('確認の印: 管理者でない人は付けられない') : ng(`確認の印: 管理者でない人が付けられた（${byMember.status}）`);
+    const first = (body.failures ?? [])[0];
+    if (first) {
+      const other = await call('b', '/v1/admin/dashboard/failures/dismiss', { method: 'POST', body: JSON.stringify({ runIds: [first.runId] }) });
+      other.status === 200 && other.body.dismissed === 0 ? ok('確認の印: ほかの会社の失敗には付けられない') : ng('確認の印: ほかの会社の失敗に付いた', JSON.stringify(other.body));
+      const one = await call('a', '/v1/admin/dashboard/failures/dismiss', { method: 'POST', body: JSON.stringify({ runIds: [first.runId] }) });
+      const { body: after } = await call('a', '/v1/admin/dashboard/live');
+      const failedSum = (x) => (x.agents ?? []).reduce((t, a) => t + (a.todayFailed ?? 0), 0);
+      one.body?.dismissed === 1 && !(after.failures ?? []).some((f) => f.runId === first.runId)
+        && after.counts?.failedToday === (after.failures ?? []).length
+        ? ok('確認した失敗は囲みから外れ、上部の数も減る') : ng('確認した失敗が残っている', JSON.stringify({ one: one.body, failedToday: after.counts?.failedToday }));
+      failedSum(after) >= failedSum(body) ? ok('確認しても実行の記録は残る（業務ごとの今日の失敗の数は減らない）') : ng('業務ごとの失敗の数が減った', JSON.stringify([failedSum(body), failedSum(after)]));
+      const { body: events } = await call('a', '/v1/admin/audit-events?category=run');
+      (events.items ?? []).some((e) => e.action === 'run.dismiss_failure' && e.targetId === first.runId) ? ok('確認の操作を監査ログに残す') : ng('確認の操作が監査ログに無い');
+    } else {
+      ok('確認の印: 今日の失敗が無いため、外す確かめは省いた');
+    }
+  }
+
   // 業務エージェントごとの受け持ち（第6.7.4.2節）。使える業務はすべて出る
   const { body: cat } = await call('a', '/v1/agents');
   const states = body.agents ?? [];

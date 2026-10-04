@@ -308,7 +308,7 @@ function Live({ board = false }: { board?: boolean }) {
               )}
             </div>
           ))}
-          <Failures items={data.failures} />
+          <Failures items={data.failures} board={board} />
         </section>
 
         <section className="card">
@@ -459,16 +459,36 @@ function AgentFace({ face, busy }: { face: number; busy: boolean }) {
  * @remarks
  * **業務の流れとは分ける。** 流れはいま動いているものを見る区画であり、
  * 終わったものが混ざると、いま動いているのかどうかが読み取れない。既定は畳む。
+ *
+ * 管理者が「確認した」を押すと囲みから外す（実行の記録は残る）。確かめの画面は出さない。
+ * 掛け通しの画面では押すところを減らすため、ボタンを出さない。
  */
-function Failures({ items }: { items: DashboardLive['failures'] }) {
-  if (items.length === 0) return null;
+function Failures({ items, board }: { items: DashboardLive['failures']; board: boolean }) {
+  // 次の更新が届くまでのあいだも、押したものはすぐ消す
+  const [hidden, setHidden] = useState<Set<string>>(() => new Set());
+  const [error, setError] = useState<string | null>(null);
+  const shown = items.filter((f) => !hidden.has(f.runId));
+  if (shown.length === 0) return null;
+  const dismiss = (ids: string[] | null) => {
+    setError(null);
+    setHidden((h) => new Set([...h, ...(ids ?? shown.map((f) => f.runId))]));
+    api.admin.dismissFailures(ids ?? undefined).catch((e) => {
+      setHidden(new Set());
+      setError(describeError(e));
+    });
+  };
   return (
     <details className="fold">
-      <summary>今日、失敗した業務（{items.length} 件）</summary>
-      {items.map((f) => (
+      <summary>今日、失敗した業務（{shown.length} 件）</summary>
+      {!board && shown.length > 1 && (
+        <p><button className="btn ghost small" onClick={() => dismiss(null)}>すべて確認した</button></p>
+      )}
+      {error && <p className="error">{error}</p>}
+      {shown.map((f) => (
         <div className="failed-note" key={f.runId}>
           <strong>{f.agentName}</strong>{' '}
           <span className="muted small">{f.requester}さん・{time(f.at)}</span>
+          {!board && <> <button className="link small" onClick={() => dismiss([f.runId])}>確認した</button></>}
           <div>{f.reason}</div>
         </div>
       ))}
