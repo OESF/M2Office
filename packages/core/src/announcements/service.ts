@@ -6,6 +6,7 @@
  * LINE の一斉配信は、今月の無料の範囲を超えるなら送らない（Q-177）。出せなかった出し先は理由を残して知らせ、ほかの出し先は止めない。
  */
 
+import { thumbnailPng } from '../signage/thumbnail.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -651,7 +652,8 @@ export function signageForAnnouncements(svc: {
       const path = join(dir, 'card.png');
       try {
         await writeFile(path, png);
-        const r = await svc.addAsset(t, userId, { path, bytes: png.length, sha256: createHash('sha256').update(png).digest('hex'), mime: 'image/png', name, thumbnail: null });
+        // 縮小画像はサーバーで作る（第 0.259.1 版）
+        const r = await svc.addAsset(t, userId, { path, bytes: png.length, sha256: createHash('sha256').update(png).digest('hex'), mime: 'image/png', name, thumbnail: thumbnailPng(png) });
         return 'error' in r ? { error: r.error } : { assetId: r.asset.id };
       } finally {
         await rm(dir, { recursive: true, force: true });

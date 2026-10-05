@@ -16,6 +16,7 @@ import {
 import type { Repository } from '../repository/types.js';
 import { fileReader, type FileStore } from '../files/store.js';
 import type { ScreenRecord, SignageStore } from './store.js';
+import { thumbnailMime, thumbnailPng } from './thumbnail.js';
 import { readMp4 } from './mp4.js';
 import { imageSize } from './image-size.js';
 
@@ -306,7 +307,8 @@ export class SignageService {
   async addAsset(tenantId: string, userId: string, up: AssetUpload): Promise<{ asset: SignageAsset; existing: boolean } | { error: string; status: number }> {
     const drop = async <T>(r: T): Promise<T> => { await rm(up.path, { force: true }); return r; };
     const thumb = up.thumbnail && up.thumbnail.length > 0 ? up.thumbnail : null;
-    if (thumb && (thumb.length > SIGNAGE_LIMITS.thumbnailBytes || !(thumb[0] === 0xff && thumb[1] === 0xd8))) return drop({ error: '縮小画像が違います', status: 400 });
+    // 縮小画像は、画面が作る JPEG か、サーバーが作る PNG（第 0.259.1 版）
+    if (thumb && (thumb.length > SIGNAGE_LIMITS.thumbnailBytes || !thumbnailMime(thumb))) return drop({ error: '縮小画像が違います', status: 400 });
     let kind: SignageAsset['kind'];
     let mime: SignageAsset['mime'];
     let width = 0;
@@ -372,10 +374,27 @@ export class SignageService {
     return { asset: (await this.deps.store.getAsset(tenantId, id))!, existing: false };
   }
 
-  /** 縮小画像を入れる（JPEG・100 KB まで。画面で作って送る。第31.6.1節）。 */
+  /** 縮小画像を入れる（JPEG か PNG・100 KB まで。画面で作って送る。第31.6.1節）。 */
   async setThumbnail(tenantId: string, id: string, bytes: Uint8Array): Promise<{ ok: true } | { error: string }> {
-    if (bytes.length === 0 || bytes.length > SIGNAGE_LIMITS.thumbnailBytes || !(bytes[0] === 0xff && bytes[1] === 0xd8)) return { error: '縮小画像は 100 KB までの JPEG にしてください' };
+    if (bytes.length === 0 || bytes.length > SIGNAGE_LIMITS.thumbnailBytes || !thumbnailMime(bytes)) return { error: '縮小画像は 100 KB までの JPEG か PNG にしてください' };
     return (await this.deps.store.setThumbnail(tenantId, id, bytes)) ? { ok: true } : { error: '素材が見つかりません' };
+  }
+
+  /**
+   * 素材の縮小画像。無い画像の素材は、その場で作って残す（サーバーが足した素材・前に足した素材。第 0.259.1 版）。
+   *
+   * @returns 中身と種類。作れなければ `null`
+   */
+  async thumbnail(tenantId: string, id: string): Promise<{ bytes: Uint8Array; mime: 'image/jpeg' | 'image/png' } | null> {
+    const t = await this.deps.store.getThumbnail(tenantId, id);
+    if (t) return { bytes: t, mime: thumbnailMime(t) ?? 'image/jpeg' };
+    const a = await this.deps.store.getAsset(tenantId, id);
+    if (!a || a.kind !== 'image') return null;
+    const bytes = await this.deps.files.get(tenantId, assetKey(id));
+    const png = bytes ? thumbnailPng(bytes) : null;
+    if (!png) return null;
+    await this.deps.store.setThumbnail(tenantId, id, png);
+    return { bytes: png, mime: 'image/png' };
   }
 
   /**

@@ -29,6 +29,7 @@ import {
 import type { ColumnStore } from './store.js';
 import type { ColumnSignageStore, StoredColumnSignage } from './signage-store.js';
 import { readMp4 } from '../signage/mp4.js';
+import { thumbnailPng } from '../signage/thumbnail.js';
 
 /** 画面の向き。 */
 export type SignageSide = 'landscape' | 'portrait';
@@ -54,7 +55,7 @@ export interface ColumnSignageOutlet {
   /** 画像を素材に足す。 */
   addImage(tenantId: string, userId: string, png: Uint8Array, name: string): Promise<{ assetId: string } | { error: string }>;
   /** 動画を素材に足す。字幕は再生の画面が動画の下に重ねる（段 2）。 */
-  addVideo(tenantId: string, userId: string, mp4: Uint8Array, name: string, caption: string): Promise<{ assetId: string } | { error: string }>;
+  addVideo(tenantId: string, userId: string, mp4: Uint8Array, name: string, caption: string, poster?: Uint8Array | null): Promise<{ assetId: string } | { error: string }>;
   /** 素材を、その順で画面の流れの先頭に置く（`seconds` は画像の秒数。動画は `null`）。置けた画面の名前を返す。 */
   addToFlows(tenantId: string, userId: string, assetIds: string[], screenIds: string[], seconds: number | null): Promise<string[]>;
   /** 素材を外す（流れからも外れる）。 */
@@ -572,7 +573,10 @@ export class ColumnSignageService {
         if (!vo || !targets0.length) continue;
         const bytes = await this.deps.files.get(who.tenantId, vo.fileId);
         if (!bytes) return { error: '動画のファイルが見つかりません。作り直してください' };
-        const r = await outlet.addVideo(who.tenantId, who.userId, bytes, `コラム「${(c?.title || c?.theme || '').slice(0, 30)}」の動画`, videoCaption(c?.title || c?.theme || '', s.scenes));
+        // 縮小画像は、字を組んだ 1 コマ目から作る
+        const posterOut = s.outputs.find((o) => o.orientation === side && o.kind === 'image');
+        const poster = posterOut ? await this.deps.files.get(who.tenantId, posterOut.fileId) : null;
+        const r = await outlet.addVideo(who.tenantId, who.userId, bytes, `コラム「${(c?.title || c?.theme || '').slice(0, 30)}」の動画`, videoCaption(c?.title || c?.theme || '', s.scenes), poster);
         if ('error' in r) return { error: `素材に足せませんでした（${r.error}）` };
         assetIds.push(r.assetId);
         placed.push(...await outlet.addToFlows(who.tenantId, who.userId, [r.assetId], targets0, null));
@@ -680,18 +684,19 @@ export function signageForColumns(svc: {
       const path = join(dir, 'slide.png');
       try {
         await writeFile(path, png);
-        const r = await svc.addAsset(t, userId, { path, bytes: png.length, sha256: createHash('sha256').update(png).digest('hex'), mime: 'image/png', name, thumbnail: null });
+        // 縮小画像はサーバーで作る（画面から足す素材はブラウザーが作るが、ここはサーバーが足すため。第 0.259.1 版）
+        const r = await svc.addAsset(t, userId, { path, bytes: png.length, sha256: createHash('sha256').update(png).digest('hex'), mime: 'image/png', name, thumbnail: thumbnailPng(png) });
         return 'error' in r ? { error: r.error } : { assetId: r.asset.id };
       } finally {
         await rm(dir, { recursive: true, force: true });
       }
     },
-    async addVideo(t, userId, mp4, name, caption) {
+    async addVideo(t, userId, mp4, name, caption, poster) {
       const dir = await mkdtemp(join(tmpdir(), 'm2o-col-'));
       const path = join(dir, 'video.mp4');
       try {
         await writeFile(path, mp4);
-        const r = await svc.addAsset(t, userId, { path, bytes: mp4.length, sha256: createHash('sha256').update(mp4).digest('hex'), mime: 'video/mp4', name, thumbnail: null, caption });
+        const r = await svc.addAsset(t, userId, { path, bytes: mp4.length, sha256: createHash('sha256').update(mp4).digest('hex'), mime: 'video/mp4', name, thumbnail: poster ? thumbnailPng(poster) : null, caption });
         return 'error' in r ? { error: r.error } : { assetId: r.asset.id };
       } finally {
         await rm(dir, { recursive: true, force: true });

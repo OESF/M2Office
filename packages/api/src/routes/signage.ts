@@ -195,10 +195,11 @@ export function signageRoute(deps: AppDeps) {
   /** 縮小画像（JPEG）。 */
   app.get('/assets/:id/thumbnail', async (c) => {
     const { tenant } = c.get('ctx');
-    const t = await deps.signage.service.deps.store.getThumbnail(tenant.id, c.req.param('id'));
+    // 縮小画像の無い画像の素材は、その場で作って残す（第 0.259.1 版）。種類は中身に合わせる
+    const t = await deps.signage.service.thumbnail(tenant.id, c.req.param('id'));
     if (!t) return c.json({ error: '縮小画像がありません' }, 404);
-    return new Response(Buffer.from(t), {
-      headers: { 'content-type': 'image/jpeg', 'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'none'; sandbox", 'cache-control': 'private, max-age=86400' },
+    return new Response(Buffer.from(t.bytes), {
+      headers: { 'content-type': t.mime, 'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'none'; sandbox", 'cache-control': 'private, max-age=86400' },
     });
   });
 

@@ -1621,6 +1621,9 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .signage-flow .row, .signage-assets .row { gap: 8px; align-items: center; }
 .signage-entries { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .signage-entries li { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; cursor: grab; }
+/* 名前の長さで秒数の欄とボタンの位置が動かないよう、名前は残りの幅を使い、秒数の欄は幅を決める（第 0.259.1 版） */
+.signage-entries li > .grow { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.signage-entries li > .num-input, .signage-entries li > .small.muted { flex: none; width: 88px; text-align: right; }
 .signage-thumb { width: 64px; height: 36px; flex: none; background: #000; border-radius: 4px; overflow: hidden; }
 .signage-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .signage-thumb.large { width: 100%; height: auto; aspect-ratio: 16 / 9; }

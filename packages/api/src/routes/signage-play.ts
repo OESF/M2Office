@@ -126,9 +126,9 @@ export function signagePlayRoute(deps: AppDeps, version: string | null) {
   app.get('/assets/:id/thumbnail', async (c) => {
     const tenant = c.get('tenant');
     const a = await service.screenCanRead(tenant.id, c.get('screen').id, c.req.param('id'));
-    const t = a ? await service.deps.store.getThumbnail(tenant.id, a.id) : null;
+    const t = a ? await service.thumbnail(tenant.id, a.id) : null;
     if (!t) return c.json({ error: '縮小画像がありません' }, 404);
-    return new Response(Buffer.from(t), { headers: { 'content-type': 'image/jpeg', 'x-content-type-options': 'nosniff', 'cache-control': 'private, max-age=86400' } });
+    return new Response(Buffer.from(t.bytes), { headers: { 'content-type': t.mime, 'x-content-type-options': 'nosniff', 'cache-control': 'private, max-age=86400' } });
   });
 
   /** 生きている知らせ（第31.5.1節）。答えにサーバーの時刻・流れの版・ページの版。 */

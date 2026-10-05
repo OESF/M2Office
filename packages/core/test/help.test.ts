@@ -204,3 +204,13 @@ test('業務の記事の置き場: 内蔵の拡張の付属の業務はその拡
   // 使えない拡張の付属の業務は、要点の記事と一緒に出さない
   assert.ok(!catalog.list({ ...ctx(['member']), groupOf, extensions: [] }).some((a) => a.id === 'agent-web-columns:draft'));
 });
+
+test('秘書の会話の例を聞くと、秘書にできること（会話の例）を返す（第6.1.3節）', () => {
+  const catalog = officialCatalog();
+  for (const q of ['秘書の会話の例', '会話の例']) {
+    const ids = catalog.search(q, ctx(['member'])).map((h) => h.article.id);
+    assert.equal(ids[0], 'start-secretary-examples', `${q}: ${ids.join(', ')}`);
+  }
+  // 「秘書」だけの問いでは秘書の記事が並ぶ。「秘書の使い方」から会話の例へ案内する
+  assert.match(catalog.get('start-secretary', ctx(['member']))!.body, /秘書にできること（会話の例）/);
+});

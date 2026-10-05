@@ -1220,6 +1220,11 @@ function SecretaryBar({ lookups, avatar, captions, onResult, onVoice }: {
       <input ref={fileInput} type="file" hidden
         accept=".pdf,.xlsx,.csv,.docx,.png,.jpg,.jpeg"
         onChange={(e) => void attach(e.target.files?.[0])} />
+      {/* 秘書にできることの例（ヘルプ。仕様書 第6.1.3節）。頼める言い方が増えたため、入力欄のすぐ横から開けるようにする */}
+      <button className="icon-btn" onClick={() => openHelp('start-secretary-examples')} title="秘書にできること（会話の例）">
+        <Icon name="help" />
+        <span className="sr-only">秘書にできること</span>
+      </button>
       <button className="icon-btn" disabled={busy} onClick={() => fileInput.current?.click()}
         title="書類を渡して、それについて聞けます（PDF・Word・Excel・CSV・画像。10 MB まで）">
         <Icon name="clip" />
