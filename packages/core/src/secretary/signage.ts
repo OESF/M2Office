@@ -101,7 +101,7 @@ const norm = (s: string) => s.normalize('NFKC').toLowerCase().replace(/\s+/g, ''
  *
  * @param admin 本人が管理者か（言い回しを変える・画面を外すのは管理者だけ）
  * @returns 答えの文。サイネージへの依頼でなかったとき（合う割り込みの素材が無いなど）は `null`
- * @remarks 危険度: write-internal（会社の店頭の画面に出す・消す。社外への送信に当たらない。ADR-0051）
+ * @remarks 危険度: write-internal（会社のサイネージの画面に出す・消す。社外への送信に当たらない。ADR-0051）
  */
 export async function answerSignage(deps: SignageSecretaryDeps, tenantId: string, userId: string, admin: boolean, req: SignageRequest): Promise<string | null> {
   const { service, interrupts } = deps;

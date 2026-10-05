@@ -287,8 +287,8 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET` ／ `POST /v1/announcements` | お知らせの作成（仕様書 第35.17節・第35.18節）: 一覧 ／ 1 行の頼み（`text`）から下書きを作る（201）。使えない会社と利用範囲の外の人には、`/v1/announcements` のどの口も 403 |
 | `GET` ／ `PATCH` ／ `DELETE /v1/announcements/:id` | 1 件と出し先ごとの結果・使える出し先 ／ 下書きを直す（題名・本文・期間・予約・出し先・出し先ごとの文・メールの宛先 `mailContactIds`。下書きのときだけ）／ 削除（下書き・取り消し・終わったものだけ） |
 | `GET /v1/announcements/:id/preview` ／ `POST /v1/announcements/:id/submit` | 承認の前の確かめ（出せない理由・LINE の送る数と残り・流す画面・Web の出し方）／ 承認へ進める（付属の業務「お知らせを出す」。管理者か承認者の承認の後に出す） |
-| `POST /v1/announcements/:id/cancel` ／ `GET /v1/announcements/:id/copy` ／ `GET /v1/announcements/:id/screen.png` | 予約を取り消す ／ Web の文を写す（HTML とテキスト）／ 店頭の画面の 1 枚の見本（PNG） |
-| `GET /v1/announcements/:id/recipients` | メールの宛先（名刺管理の連絡先の名前・会社・アドレス） |
+| `POST /v1/announcements/:id/cancel` ／ `GET /v1/announcements/:id/copy` ／ `GET /v1/announcements/:id/screen.png` | 予約を取り消す ／ Web の文を写す（HTML とテキスト）／ サイネージの画面の 1 枚の見本（PNG。`headline`・`period`・`note` を渡すと保存する前の文で組む） |
+| `GET /v1/announcements/:id/recipients` ／ `POST /v1/announcements/:id/recipients/refine` | メールの宛先（名刺管理の連絡先の名前・会社・部署・アドレス・名刺を交換した日・問い合わせのあった日）／ 言葉の頼み（`request`）でいまの宛先（`current`）を絞り直す（第35.19節。保存はしない） |
 | `GET /v1/web-review` ／ `GET /v1/web-review/reports` ／ `GET /v1/web-review/reports/:month` | Webの分析（仕様書 第34.18節）: 状態（始める前の手伝いと依頼文の下書き）・いちばん新しい月の便り・便りの一覧・管理者か・直すべき所（新しい・見たもの）と最後に確かめた日時 ／ 便りの一覧 ／ 月ごとの便り（`YYYY-MM`）。使えない会社と利用範囲の外の人には 403 |
 | `POST /v1/web-review/findings/:id/send` ／ `PUT /v1/admin/extensions/web-review/agency` | 依頼文を制作会社に送る業務を始める（`to` で宛先を変えられる。管理者の承認の後に送る。第34.21節）／ 管理者: 制作会社の宛先（`email`・`name`。null で外す） |
 | `GET /v1/web-review/findings` ／ `PATCH /v1/web-review/findings/:id` ／ `POST /v1/web-review/check` | 直すべき所（第34.19節。`all=1` で済んだ・見送りも）／ 状態を変える（`status`: new・seen・done・dismissed）／ 管理者: 今すぐチェック（ワーカーが次の見回りで探す）。`GET /v1/columns/:id` は、Webの分析を使える人に公開されたコラムの数字（`webMetrics`）を添える |

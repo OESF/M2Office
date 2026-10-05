@@ -1857,14 +1857,30 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .announcements { display: flex; flex-direction: column; gap: calc(12px * var(--space-scale)); }
 .announcements-head label, .announcements-channel label { display: flex; flex-direction: column; gap: 4px; }
 .announcements-head input[type="date"], .announcements-head input[type="datetime-local"] { width: auto; }
+.announcements-head label.check { flex-direction: row; align-items: center; gap: 6px; }
+.announcements-dates { align-items: flex-start; column-gap: calc(24px * var(--space-scale)); }
+.announcements-field { display: flex; flex-direction: column; gap: 4px; }
+.announcements-range { display: flex; align-items: center; gap: calc(8px * var(--space-scale)); }
+.announcements-range input { flex: none; }
 .announcements-channel textarea { width: 100%; }
+.announcements-tabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 2px solid var(--line); }
+.announcements-tabs button { white-space: nowrap; border: 1px solid var(--line); border-bottom: none; background: var(--subtle-bg); color: var(--muted); border-radius: 8px 8px 0 0; padding: calc(6px * var(--space-scale)) calc(16px * var(--space-scale)); cursor: pointer; margin-bottom: -2px; }
+.announcements-tabs button.on { background: var(--panel); color: var(--accent); font-weight: 600; border-color: var(--accent); border-bottom: 2px solid var(--panel); }
+.announcements-colors { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0 12px; }
+.announcements-colors > span:first-child { margin-right: 4px; }
+.announcements-color { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: none; color: var(--ink); border-radius: 999px; padding: 3px 10px 3px 4px; cursor: pointer; font-size: calc(13px * var(--font-scale)); }
+.announcements-color.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.announcements-color-chip { width: 18px; height: 18px; border-radius: 50%; border: 1px solid rgba(255, 255, 255, 0.4); }
 .announcements-web-preview { border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; }
 .announcements-web-preview h3 { margin-top: 0; }
 .announcements-line-bubble { align-self: flex-start; max-width: 360px; background: #e3f5e1; color: #1d2733; border-radius: 16px; padding: 10px 14px; white-space: pre-wrap; }
 .announcements-screen { width: 100%; max-width: 720px; border: 1px solid var(--border); border-radius: 8px; }
 .announcements-recipients { margin: 0; padding-left: 1.2em; max-height: 240px; overflow-y: auto; }
-.announcements-recipients li { margin: 2px 0; }
-.announcements-recipients button { margin-left: 8px; }
+.announcements-recipients { list-style: none; padding-left: 0; }
+.announcements-recipients li { margin: 2px 0; display: flex; align-items: baseline; gap: calc(8px * var(--space-scale)); padding: 2px 0; border-bottom: 1px dashed var(--line); }
+.announcements-recipients li > .grow { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.announcements-recipients li > .small.muted { flex: none; }
+.announcements-mail-filter input[type="search"] { flex: 0 1 280px; min-width: 0; }
 /* Webの分析（仕様書 第34.18節） */
 .web-review { display: grid; gap: 12px; }
 .web-review-summary { white-space: pre-line; font-size: 1.05em; }

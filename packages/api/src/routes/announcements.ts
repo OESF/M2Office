@@ -1,6 +1,6 @@
 /**
  * @file お知らせの作成（内蔵の拡張）の API。一覧・下書き（1 行の欄）・1 件・直す・削除・承認の前の確かめ・承認へ進む・予約の取り消し・
- * 写して使う文・店頭の画面の 1 枚の見本・LINE の友だちの数と残り。
+ * 写して使う文・サイネージの画面の 1 枚の見本・LINE の友だちの数と残り。
  *
  * 会社がお知らせの作成を切っているときと、利用範囲の外の人には、どの口も使わせない。**出すのは承認の後だけ**（付属の業務「お知らせを出す」）。
  *
@@ -8,7 +8,7 @@
  */
 
 import { Hono, type Context } from 'hono';
-import { AI_NOT_CONFIGURED_MESSAGE, aiAvailable, periodText, renderScreenCard, type AnnouncementViewer } from '@m2office/core';
+import { AI_NOT_CONFIGURED_MESSAGE, aiAvailable, renderScreenCard, screenCardOf, type AnnouncementViewer } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 
@@ -107,6 +107,18 @@ export function announcementsRoute(deps: AppDeps) {
     return c.json({ recipients: await service.mailRecipients(who(c), id) });
   });
 
+  /** メールの宛先を言葉で絞り直す（第35.19節）。保存はしない（画面の「保存」で残す）。 */
+  app.post('/:id/recipients/refine', async (c) => {
+    const id = c.req.param('id');
+    if (!ID.test(id)) return c.json({ error: 'お知らせが見つかりません' }, 404);
+    const body = await c.req.json<{ request?: unknown; current?: unknown }>().catch(() => ({} as { request?: unknown; current?: unknown }));
+    const request = typeof body.request === 'string' ? body.request : '';
+    const current = Array.isArray(body.current) ? body.current.map(String).slice(0, 200) : undefined;
+    const r = await service.refineRecipients(who(c), id, request, current);
+    if ('error' in r) return c.json({ error: r.error }, r.error.includes('見つかりません') ? 404 : 400);
+    return c.json(r);
+  });
+
   /** WordPress が無い会社が写して使う文（HTML とテキスト）。 */
   app.get('/:id/copy', async (c) => {
     const id = c.req.param('id');
@@ -114,17 +126,19 @@ export function announcementsRoute(deps: AppDeps) {
     return r ? c.json(r) : c.json({ error: 'お知らせが見つかりません' }, 404);
   });
 
-  /** 店頭の画面の 1 枚の見本（PNG）。 */
+  /**
+   * サイネージの画面の 1 枚の見本（PNG）。`headline`・`period`・`detail`・`note`・`color` を渡すと、保存する前の文で組む
+   * （直している間の見本。保存はしない）。
+   */
   app.get('/:id/screen.png', async (c) => {
     const id = c.req.param('id');
     const d = ID.test(id) ? await service.detail(who(c), id) : null;
     if (!d) return c.json({ error: 'お知らせが見つかりません' }, 404);
     const settings = await deps.repo.getTenantSettings(c.get('ctx').tenant.id);
-    const a = d.announcement;
-    const png = renderScreenCard({
-      headline: a.texts.signage.headline || a.title, period: a.texts.signage.period || periodText(a.startDate, a.endDate), note: a.texts.signage.note,
-      company: settings.company.shortName || settings.company.legalName,
-    });
+    const q = (k: string, max: number) => { const v = c.req.query(k); return v === undefined ? undefined : [...v].slice(0, max).join(''); };
+    const edits = Object.fromEntries(([['headline', 30], ['period', 60], ['detail', 60], ['note', 40], ['color', 20]] as const)
+      .map(([k, max]) => [k, q(k, max)] as const).filter(([, v]) => v !== undefined));
+    const png = renderScreenCard(screenCardOf(d.announcement, settings.signage.color, edits));
     return new Response(Buffer.from(png), { headers: { 'content-type': 'image/png', 'cache-control': 'no-store' } });
   });
 

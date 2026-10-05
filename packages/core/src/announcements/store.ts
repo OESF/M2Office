@@ -61,7 +61,12 @@ export interface AnnouncementStore {
 const iso = (d: Date | string | null) => (d ? new Date(d).toISOString() : null);
 
 /** 段 1 で作ったお知らせ（メールの文が無い）にも、メールの文を足して返す。 */
-const withMail = (t: AnnouncementTexts, title: string, body: string): AnnouncementTexts => (t.mail ? t : { ...t, mail: { subject: title, body } });
+/** 前の版で作ったお知らせの文をそろえる（メールの文・サイネージの説明と帯の色が無いもの）。 */
+const withMail = (t: AnnouncementTexts, title: string, body: string): AnnouncementTexts => ({
+  ...t,
+  mail: t.mail ?? { subject: title, body },
+  signage: { ...t.signage, detail: t.signage?.detail ?? '', color: t.signage?.color ?? '' },
+});
 const day = (d: Date | string | null) => (d ? (typeof d === 'string' ? d.slice(0, 10) : new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 10)) : null);
 
 interface Row {

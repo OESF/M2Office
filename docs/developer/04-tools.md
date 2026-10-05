@@ -88,14 +88,15 @@
 | `sheet.render` | draft | — | 表を Excel・CSV として作り、成果物として保存します |
 | `sheets.create` | draft | `drive.file`（機密でない） | あなたのドライブに Google スプレッドシートを作ります。共有はしません |
 | `slides.create` | draft | `drive.file`（機密でない）・`drive`（制限付き） | 調べた内容をスライドにまとめ、あなたのドライブに作ります。PowerPoint 形式でも取り出せます。共有はしません |
-| `announcements.draft` | write-internal | — | 頼みから、お知らせの題名・本文・期間と、Web サイト・LINE・店頭の画面ごとの文を作ります。出すのは承認の後です |
+| `announcements.draft` | write-internal | — | 頼みから、お知らせの題名・本文・期間と、Web サイト・LINE・サイネージの画面ごとの文を作ります。出すのは承認の後です |
+| `announcements.recipients` | write-internal | — | いちばん新しいお知らせの下書きの、メールの宛先を頼みに合わせて絞り直します（送るのは承認の後） |
 | `announcements.revise` | write-internal | — | いちばん新しいお知らせの下書きを、頼みに合わせて直します（書き方・予約の日時） |
 | `announcements.submit` | write-internal | — | いちばん新しいお知らせの下書きを、承認へ進めます。出すのは承認の後です |
 | `columns.cover` | write-internal | — | コラムのカバー画像を作り直します（型・AI の挿絵・会社の写真）。新しい版になるだけで、Web には出しません |
 | `columns.draft` | write-internal | — | テーマを Web で調べ、出典つきのコラムの下書きを書きます。下書きにするだけで、Web には出しません |
 | `columns.prepare` | write-internal | — | コラムのテーマ案を作ります。本数を言われたら、上から順にテーマ案で書き始めます（予定表があれば空いている回に入れます）。Web には出しません |
 | `columns.rules` | write-internal | — | コラムの赤入れで当てる表現の決まり（医療広告・薬機法・士業）を直します。管理者だけが直せます |
-| `columns.signage_make` | write-internal | — | 承認済みのコラムから、店頭の画面に流す画像（1 枚か紙芝居）を作り始めます。流すのは承認の後です |
+| `columns.signage_make` | write-internal | — | 承認済みのコラムから、サイネージの画面に流す画像（1 枚か紙芝居）を作り始めます。流すのは承認の後です |
 | `competitors.add` | write-internal | — | URL か店の名前で、競合を入れます。Web サイトのトップを読んで確かめてから入れます |
 | `competitors.check` | write-internal | — | 自社と競合のサイトを今すぐ読み、レポートを作る作業を始めます |
 | `competitors.discover` | write-internal | — | 自社の像をまとめ、近くの同業か同じような事業の会社を探して覚え、読んでレポートを作る作業を始めます |
@@ -114,13 +115,13 @@
 | `tasks.complete` | write-internal | `tasks`（機密） | ToDo を完了にします |
 | `tasks.create` | write-internal | `tasks`（機密） | ToDo を登録します |
 | `web_review.select` | write-internal | — | 見るアナリティクスのプロパティと Search Console のサイトを、見られるものの中から選び直します（管理者だけ） |
-| `announcements.publish` | external-send | — | 承認されたお知らせを、Web サイト・LINE・店頭の画面に出します（予約があればその時刻に） |
+| `announcements.publish` | external-send | — | 承認されたお知らせを、Web サイト・LINE・サイネージの画面に出します（予約があればその時刻に） |
 | `calendar.cancel` | external-send | `calendar.events`（機密） | 予定を取り消します。参加者に通知が届くため、必ず承認のあとに行います |
 | `calendar.create` | external-send | `calendar.events`（機密） | 予定を登録し、参加者を招待します。社外の人を招くときは、承認のあとに行います |
 | `calendar.update` | external-send | `calendar.events`（機密） | 予定の日時・題名・参加者を変えます。参加者に通知が届くため、必ず承認のあとに行います |
 | `chat.post` | external-send | `chat.messages.create`（機密）・`chat.spaces.readonly`（機密） | チャットへ投稿します。社外の人が入れるスペースへの投稿は、承認のあとに行います |
 | `columns.place` | external-send | — | 承認されたコラムを、会社の WordPress に下書きとして入れます。公開は WordPress の側で行います |
-| `columns.signage_publish` | external-send | — | コラムから作った画像を、承認の後に店頭の画面の流れに置きます |
+| `columns.signage_publish` | external-send | — | コラムから作った画像を、承認の後にサイネージの画面の流れに置きます |
 | `drive.share` | external-send | `drive.file`（機密でない） | M2Office で作ったファイルを、指定した人と共有します。社外の人との共有は、承認のあとに行います。リンクで誰にでも公開することはしません |
 | `gmail.send` | external-send | `gmail.send`（機密） | メールを送ります。必ず承認のあとに行います |
 | `inquiries.reply_send` | external-send | — | 承認された問い合わせの返事を、会社の窓口のアカウントから送ります |
@@ -196,6 +197,7 @@
 | `sheets.create` | `title`（必須）: 題名、`columns`（必須）: 列名、`rows`: 行の配列（各行は値の配列）、`folderId`: 入れるフォルダの ID（任意） |
 | `slides.create` | `title`（必須）: 表紙の題名、`subtitle`: 副題（任意）、`slides`（必須）: 本文のスライドの配列（layout・title ほか。12 枚まで）、`sources`: 出典（title・url）の配列、`template`: 会社が登録したテンプレートの名前（任意） |
 | `announcements.draft` | `request`（必須）: 依頼者の頼み（そのまま） |
+| `announcements.recipients` | `request`（必須）: 宛先の頼み |
 | `announcements.revise` | `instruction`: 書き方の頼み、`publishAt`: 予約の日時（ISO 8601） |
 | `announcements.submit` | なし |
 | `columns.cover` | `column`: コラムの題名かテーマの言葉、`kind`: 背景の種類（template・ai・photo）、`hint`: 雰囲気の頼み（「もっと明るく」など）、`previous`: 作り直す前の画像に戻す |

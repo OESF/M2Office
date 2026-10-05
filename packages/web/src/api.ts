@@ -21,7 +21,7 @@ import type { CardCorners,
   ColumnWordPress, WebColumn, WebColumnSettings, WebColumnVersion, WebColumnTheme, ColumnPlanSlot, ColumnSignageSet,
   Inquiry, InquiryDetail, InquiryParty, InquiryTask, InquiryReply, InquiryMailSkipped, InquiryMonthStats, InquirySettings, InquiryFaqTopic,
   CompetitorOverview, CompetitorFact, CompetitorReport, CompetitorSettings,
-  Announcement, AnnouncementDetail, AnnouncementPreview, AnnouncementRecipient, AnnouncementSettings, AnnouncementTexts,
+  Announcement, AnnouncementDetail, AnnouncementPreview, AnnouncementRecipient, AnnouncementRecipientsRefined, AnnouncementSettings, AnnouncementTexts,
   WebReviewCandidates, WebReviewReport, WebReviewReportBrief, WebReviewSettings, WebReviewStatus, WebReviewFinding, WebReviewFindingStatus, WebPageMetrics,
 } from '@m2office/shared';
 import { debugMode, recordCall } from './debug.js';
@@ -1307,11 +1307,15 @@ export const api = {
     cancel: (id: string) => call<{ ok: true }>(`/announcements/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: '{}' }),
     /** メールの宛先（名刺管理の連絡先）。 */
     recipients: (id: string) => call<{ recipients: AnnouncementRecipient[] }>(`/announcements/${encodeURIComponent(id)}/recipients`),
+    /** メールの宛先を言葉で絞り直す（保存はしない。第35.19節）。`current` は画面のいまの宛先。 */
+    refineRecipients: (id: string, request: string, current: string[]) =>
+      call<AnnouncementRecipientsRefined>(`/announcements/${encodeURIComponent(id)}/recipients/refine`, { method: 'POST', body: JSON.stringify({ request, current }) }),
     /** WordPress が無い会社が写して使う文。 */
     copy: (id: string) => call<{ html: string; text: string }>(`/announcements/${encodeURIComponent(id)}/copy`),
     lineStatus: () => call<{ line: { followers: number | null; limit: number | null; used: number; remaining: number | null } | null }>('/announcements/line/status'),
-    /** 店頭の画面の 1 枚の見本（直したら変わる）。 */
-    screenUrl: (id: string, v: string) => `/v1/announcements/${encodeURIComponent(id)}/screen.png?v=${encodeURIComponent(v)}`,
+    /** サイネージの画面の 1 枚の見本。`texts` を渡すと、保存する前の文で組む（直している間の見本）。 */
+    screenUrl: (id: string, v: string, texts?: Partial<Record<'headline' | 'period' | 'detail' | 'note' | 'color', string>>) =>
+      `/v1/announcements/${encodeURIComponent(id)}/screen.png?${new URLSearchParams({ v, ...Object.fromEntries(Object.entries(texts ?? {}).filter(([, x]) => typeof x === 'string')) }).toString()}`,
   },
   /** 競合の分析（内蔵の拡張。仕様書 第36章）。 */
   competitors: {

@@ -2,19 +2,19 @@
  * @file お知らせの作成（内蔵の拡張）の型（仕様書 第35章・第35.17節）。
  *
  * 休業・営業時間の変更・新しいサービスなどのお知らせを 1 つ作り、AI が出し先ごとの文（Web サイトの記事・LINE の短い文・
- * 店頭の画面の 1 枚）を作る。**1 回の承認**でまとめて出し、期間が終わったら店頭の画面から外し、Web の記事の題名に「（終了しました）」を付ける。
- * 段 1 の出し先は Web サイト・LINE・店頭の画面。メールは段 2。
+ * サイネージの画面の 1 枚）を作る。**1 回の承認**でまとめて出し、期間が終わったらサイネージの画面から外し、Web の記事の題名に「（終了しました）」を付ける。
+ * 段 1 の出し先は Web サイト・LINE・サイネージの画面。メールは段 2。
  */
 
 /** お知らせの作成の拡張の ID（内蔵の拡張。第12.13節）。 */
 export const ANNOUNCEMENTS_EXTENSION_ID = 'announcements';
 
-/** 出し先（段 1 は Web・LINE・店頭の画面。段 2 でメール）。 */
+/** 出し先（段 1 は Web・LINE・サイネージの画面。段 2 でメール）。 */
 export type AnnouncementChannel = 'web' | 'line' | 'signage' | 'mail';
 
 /** 出し先の並びと呼び方。 */
 export const ANNOUNCEMENT_CHANNELS: AnnouncementChannel[] = ['web', 'line', 'mail', 'signage'];
-export const ANNOUNCEMENT_CHANNEL_LABELS: Record<AnnouncementChannel, string> = { web: 'Web サイト', line: 'LINE', mail: 'メール', signage: '店頭の画面' };
+export const ANNOUNCEMENT_CHANNEL_LABELS: Record<AnnouncementChannel, string> = { web: 'Web サイト', line: 'LINE', mail: 'メール', signage: 'サイネージの画面' };
 
 /** お知らせの状態。 */
 export type AnnouncementStatus = 'draft' | 'awaiting' | 'scheduled' | 'published' | 'ended' | 'cancelled';
@@ -30,10 +30,38 @@ export interface AnnouncementTexts {
   web: { title: string; body: string };
   /** LINE の短い文（200 字まで） */
   line: string;
-  /** 店頭の画面の 1 枚（見出し・期間の書き方・一言） */
-  signage: { headline: string; period: string; note: string };
+  /**
+   * サイネージの画面の 1 枚（見出し・期間の書き方・一言。第 0.261.0 版で説明と帯の色を足した。
+   * 前の版で作ったお知らせには無いので、無ければ空として読む）
+   */
+  signage: { headline: string; period: string; note: string; detail?: string; color?: string };
   /** メール（件名と本文。宛名は名刺管理のまとめてのメールで差し込む。第35.6.3節） */
   mail: { subject: string; body: string };
+}
+
+/** サイネージの画面の一言の既定（画面はほとんど店頭に置くため。第35.6.4節）。 */
+export const ANNOUNCEMENT_SIGNAGE_NOTE = '受付までお申し出ください';
+
+/** サイネージの画面の帯の色の選択肢（選ばなければ店の色。第35.6.4節）。 */
+export const ANNOUNCEMENT_BAND_COLORS: { id: string; label: string; color: string }[] = [
+  { id: 'navy', label: '濃い青', color: '#1f3a5f' },
+  { id: 'blue', label: '青', color: '#1f5f8b' },
+  { id: 'green', label: '緑', color: '#2e6e4f' },
+  { id: 'orange', label: '橙', color: '#b85a1b' },
+  { id: 'red', label: '赤', color: '#a63a3a' },
+  { id: 'purple', label: '紫', color: '#5b4a8a' },
+  { id: 'gray', label: '灰', color: '#4a5560' },
+];
+
+/**
+ * 帯の色を決める。選んだ色（`ANNOUNCEMENT_BAND_COLORS` の id）が無ければ店の色、それも無ければ濃い青。
+ *
+ * @param storeColor 店頭サイネージの設定の店の色（`#RRGGBB`）
+ */
+export function announcementBandColor(colorId: string | undefined, storeColor: string | null | undefined): string {
+  const picked = ANNOUNCEMENT_BAND_COLORS.find((c) => c.id === colorId);
+  if (picked) return picked.color;
+  return storeColor && /^#[0-9a-fA-F]{6}$/.test(storeColor) ? storeColor : ANNOUNCEMENT_BAND_COLORS[0]!.color;
 }
 
 /** お知らせ 1 つ。 */
@@ -64,7 +92,7 @@ export interface Announcement {
 export interface AnnouncementOutput {
   channel: AnnouncementChannel;
   status: 'waiting' | 'done' | 'failed' | 'ended';
-  /** 結果（Web は記事の URL・LINE は送った数・店頭の画面は流した画面） */
+  /** 結果（Web は記事の URL・LINE は送った数・サイネージの画面は流した画面） */
   result: { link?: string; editUrl?: string; postId?: string; sent?: number; assetId?: string; screens?: string[]; draft?: boolean; bulkMailId?: string; queued?: number };
   reason: string;
   doneAt: string | null;
@@ -78,6 +106,8 @@ export interface AnnouncementDetail {
   available: Record<AnnouncementChannel, boolean>;
   /** WordPress につないでいるか（無ければ Web の文を写して使う） */
   wordpress: boolean;
+  /** 店の色（帯の色を選ばないときの色。`#RRGGBB`。第35.6.4節） */
+  storeColor: string;
 }
 
 /** 承認の前に見せるもの。 */
@@ -88,7 +118,7 @@ export interface AnnouncementPreview {
   problems: string[];
   /** LINE の送る数と今月の残り（LINE を出し先にしているときだけ） */
   line: { followers: number | null; limit: number | null; used: number } | null;
-  /** 流す画面の名前（店頭の画面を出し先にしているときだけ） */
+  /** 流す画面の名前（サイネージの画面を出し先にしているときだけ） */
   screens: string[];
   /** Web の出し方（「WordPress（https://…）に公開」「予約公開」「下書き」「文を写して使う」） */
   web: string;
@@ -102,6 +132,22 @@ export interface AnnouncementRecipient {
   name: string;
   company: string;
   email: string;
+  /** 部署（分からなければ空） */
+  department?: string;
+  /** 名刺を交換したいちばん新しい日（`YYYY-MM-DD`。名刺が無ければ `null`） */
+  exchangedOn?: string | null;
+  /** 問い合わせのあったいちばん新しい日（`YYYY-MM-DD`。無ければ `null`） */
+  inquiredOn?: string | null;
+}
+
+/** 宛先を言葉で絞り直した結果（第35.19節）。 */
+export interface AnnouncementRecipientsRefined {
+  /** 作り直した宛先（並びは新しい順） */
+  recipients: AnnouncementRecipient[];
+  /** 何をしたかの一文 */
+  text: string;
+  /** 宛先を変えたか（0 人になったときなどは変えない） */
+  changed: boolean;
 }
 
 /** 会社の設定 `announcements`（第35.4節）。 */
@@ -119,7 +165,7 @@ export interface AnnouncementSettings {
 /** 既定（切り）。 */
 export const DEFAULT_ANNOUNCEMENT_SETTINGS: AnnouncementSettings = { enabled: false, webPublish: 'publish', webCategory: 'お知らせ', screens: null };
 
-/** 期間の無いお知らせを店頭の画面に流す日数（第35.6.4節）。 */
+/** 期間の無いお知らせをサイネージの画面に流す日数（第35.6.4節）。 */
 export const ANNOUNCEMENT_SIGNAGE_DAYS = 14;
 
 /** LINE の文の長さの目安（第35.6.2節）。 */

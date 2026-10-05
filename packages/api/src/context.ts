@@ -373,7 +373,7 @@ export function buildDeps(): AppDeps {
     }),
     access: competitorsAccess(repo),
   };
-  // お知らせの作成（内蔵の拡張。仕様書 第35章）。Web はコラムの作成の WordPress、LINE は問い合わせの記録の接続、店頭の画面は店頭サイネージを使う
+  // お知らせの作成（内蔵の拡張。仕様書 第35章）。Web はコラムの作成の WordPress、LINE は問い合わせの記録の接続、サイネージの画面は店頭サイネージを使う
   const announcements = {
     service: new AnnouncementService({
       store: announcementStore,

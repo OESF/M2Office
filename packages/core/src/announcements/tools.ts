@@ -52,7 +52,7 @@ export const announcementsDraft: Tool = {
   name: 'announcements.draft',
   risk: 'write-internal',
   activityLabel: 'お知らせの下書きを作っています',
-  helpText: '頼みから、お知らせの題名・本文・期間と、Web サイト・LINE・店頭の画面ごとの文を作ります。出すのは承認の後です',
+  helpText: '頼みから、お知らせの題名・本文・期間と、Web サイト・LINE・サイネージの画面ごとの文を作ります。出すのは承認の後です',
   description: 'お知らせの下書きを作る。request には依頼者の頼みをそのまま入れる（「年末年始の休業のお知らせを出して。12/28〜1/5」「夏季休業のお知らせ、LINE だけで」）。外には出さない',
   args: { properties: { request: { type: 'string', description: '依頼者の頼み（そのまま）' } }, required: ['request'] },
   async invoke(args, ctx) {
@@ -87,6 +87,32 @@ export const announcementsRevise: Tool = {
     const r = await service.revise(who(ctx), null, str(args['instruction']), str(args['publishAt']) || null);
     if ('error' in r) return { available: false, reason: r.error };
     return { available: true, ...brief(r.announcement), body: r.announcement.body };
+  },
+};
+
+/**
+ * いちばん新しい下書きのメールの宛先を、言葉で絞り直す（「取引先だけにして」「〇〇社は外して」。第35.19節）。
+ *
+ * @remarks 危険度 `write-internal`。宛先を直すだけで、送るのは承認の後。推論には頼みの言葉だけを渡す
+ */
+export const announcementsRecipients: Tool = {
+  name: 'announcements.recipients',
+  risk: 'write-internal',
+  activityLabel: 'お知らせのメールの宛先を絞っています',
+  helpText: 'いちばん新しいお知らせの下書きの、メールの宛先を頼みに合わせて絞り直します（送るのは承認の後）',
+  description: 'いちばん新しいお知らせの下書きの、メールの宛先を絞り直す。request は宛先の頼み（「名刺を交換した取引先だけにして」「〇〇社は外して」）を要約せずそのまま入れる',
+  args: {
+    properties: {
+      request: { type: 'string', description: '宛先の頼み' },
+    },
+    required: ['request'],
+  },
+  async invoke(args, ctx) {
+    const service = await serviceOf(ctx);
+    if (!service) return UNAVAILABLE;
+    const r = await service.reviseRecipients(who(ctx), str(args['request']));
+    if ('error' in r) return { available: false, reason: r.error };
+    return { available: true, done: r.text, announcementId: r.announcementId };
   },
 };
 
@@ -143,7 +169,7 @@ export const announcementsPublish: Tool = {
   name: 'announcements.publish',
   risk: 'external-send',
   activityLabel: 'お知らせを出しています',
-  helpText: '承認されたお知らせを、Web サイト・LINE・店頭の画面に出します（予約があればその時刻に）',
+  helpText: '承認されたお知らせを、Web サイト・LINE・サイネージの画面に出します（予約があればその時刻に）',
   description: '承認されたお知らせ（announcementId）を出し先ごとに出す。予約があれば予約にする',
   args: { properties: { announcementId: { type: 'string', description: 'お知らせの ID' } }, required: ['announcementId'] },
   planKey: (args) => `announcement:${str(args['announcementId'])}`,
@@ -160,12 +186,12 @@ export const announcementsPublish: Tool = {
     const people = a.channels.includes('mail') ? await service.mailRecipients(who(ctx), id).catch(() => []) : [];
     const lines = [
       `題名: ${a.title}`,
-      a.startDate || a.endDate ? `期間: ${periodText(a.startDate, a.endDate)}（期間が終わったら店頭の画面から外し、Web の記事の題名に「（終了しました）」を付けます）` : '',
+      a.startDate || a.endDate ? `期間: ${periodText(a.startDate, a.endDate)}（期間が終わったらサイネージの画面から外し、Web の記事の題名に「（終了しました）」を付けます）` : '',
       `出す日時: ${a.publishAt ? new Date(a.publishAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }) : '承認したとき'}`,
       a.channels.includes('web') ? `■ Web サイト（${p.web}）\n${a.texts.web.title}\n${a.texts.web.body}` : '',
       a.channels.includes('line') ? `■ LINE（友だち ${p.line?.followers ?? '?'} 人に一斉配信。今月の残り ${p.line?.limit !== null && p.line ? `${Math.max(0, p.line.limit - p.line.used)} 通` : '上限なし'}。送った後は取り消せません）\n${a.texts.line}` : '',
       a.channels.includes('mail') && p.mail ? `■ メール（${p.mail.count} 人に、${p.mail.from}から 1 人に 1 通ずつ。配信を停止した人などは除きます。送った後は取り消せません）\n件名: ${a.texts.mail.subject}\n${a.texts.mail.body}\n宛先:\n${people.map((r) => `- ${r.name}${r.company ? `（${r.company}）` : ''} ${r.email}`).join('\n')}` : '',
-      a.channels.includes('signage') ? `■ 店頭の画面（${p.screens.join('・')}）\n${a.texts.signage.headline}／${a.texts.signage.period}／${a.texts.signage.note}` : '',
+      a.channels.includes('signage') ? `■ サイネージの画面（${p.screens.join('・')}）\n${[a.texts.signage.headline, a.texts.signage.period, a.texts.signage.detail ?? '', a.texts.signage.note].filter(Boolean).join('／')}` : '',
     ].filter(Boolean);
     return { kind: 'ready', args: { announcementId: id, digest: p.digest }, shown: lines.join('\n'), audience: 'external' };
   },
@@ -202,4 +228,4 @@ export const announcementsClosures: Tool = {
 };
 
 /** お知らせの作成のツール。 */
-export const ANNOUNCEMENT_TOOLS: Tool[] = [announcementsDraft, announcementsRevise, announcementsSubmit, announcementsList, announcementsPublish, announcementsClosures];
+export const ANNOUNCEMENT_TOOLS: Tool[] = [announcementsDraft, announcementsRevise, announcementsRecipients, announcementsSubmit, announcementsList, announcementsPublish, announcementsClosures];

@@ -518,7 +518,7 @@ function ColumnEditor({ id, onBack, onApprovals }: { id: string; onBack: () => v
 }
 
 /**
- * 店頭サイネージ用の画像（仕様書 第32.18.6節）。承認済みのコラムから作り、承認の後に店頭の画面に流す。
+ * 店頭サイネージ用の画像（仕様書 第32.18.6節）。承認済みのコラムから作り、承認の後にサイネージの画面に流す。
  *
  * @remarks 店頭サイネージを使っていない会社では出さない。作っているあいだは数秒ごとに読み直す
  */
@@ -593,7 +593,7 @@ function SignageSet({ set, busy, onSubmit, onWithdraw, onApprovals }: {
       {set.note.trim() && set.status !== 'making' && <p className="small muted">{set.note}</p>}
       {video && (
         <div className={`columns-signage-images is-${side}`}>
-          {/* 字幕は店頭の画面が重ねて出す（動画そのものには字が無い） */}
+          {/* 字幕はサイネージの画面が重ねて出す（動画そのものには字が無い） */}
           <video src={api.columns.signageFileUrl(set.id, video.fileId)} poster={images[0] ? api.columns.signageFileUrl(set.id, images[0].fileId) : undefined} controls muted playsInline preload="metadata" />
         </div>
       )}

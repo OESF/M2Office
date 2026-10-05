@@ -115,7 +115,7 @@ export const widthOf = (s: string) => [...s].reduce((n, ch) => n + charWidth(ch)
  * 句読点などは前の言葉に付け、1 行に収まらない長い言葉だけ字で割る。
  */
 /**
- * 文を、1 行の字数（全角 1・半角 0.55 で数える）の目安で、言葉の切れ目で割る。お知らせの店頭の画面の 1 枚でも使う。
+ * 文を、1 行の字数（全角 1・半角 0.55 で数える）の目安で、言葉の切れ目で割る。お知らせのサイネージの画面の 1 枚でも使う。
  */
 export function wrapAt(text: string, perLine: number): string[] {
   const words: string[] = [];
@@ -264,7 +264,7 @@ export function wantsDark(hint: string): boolean {
 }
 
 /**
- * SVG を、同梱の日本語の書体（Noto Sans JP）で PNG にする（お知らせの店頭の画面の 1 枚。第35.6.4節）。字は M2Office が組む。
+ * SVG を、同梱の日本語の書体（Noto Sans JP）で PNG にする（お知らせのサイネージの画面の 1 枚。第35.6.4節）。字は M2Office が組む。
  *
  * @param width 横の画素数
  */

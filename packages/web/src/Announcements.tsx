@@ -2,13 +2,13 @@
  * @file お知らせの作成の画面（仕様書 第35.8節・第35.17節）。一覧と 1 行の欄・1 件（出し先ごとの見え方と直し・承認へ進む・出した後の結果）。
  *
  * 一覧の上の 1 行の欄に「年末年始の休業 12/28〜1/5」と書いて「作る」を押すと、AI が出し先ごとの文を作る。
- * 1 件では、出し先ごとのタブで見え方（Web の記事・LINE の吹き出し・店頭の画面の 1 枚）を出し、その場で直せる。
+ * 1 件では、出し先ごとのタブで見え方（Web の記事・LINE の吹き出し・サイネージの画面の 1 枚）を出し、その場で直せる。
  * 「承認へ進む」で管理者か承認者の承認を待ち、承認されると出す（1 回の承認。ADR-0028）。説明文は常には出さない（原則 u11）。
  */
 
 import { useCallback, useEffect, useState } from 'react';
 import {
-  ANNOUNCEMENT_CHANNELS, ANNOUNCEMENT_CHANNEL_LABELS, ANNOUNCEMENT_LINE_MAX, ANNOUNCEMENT_STATUS_LABELS,
+  ANNOUNCEMENT_BAND_COLORS, ANNOUNCEMENT_CHANNELS, ANNOUNCEMENT_CHANNEL_LABELS, ANNOUNCEMENT_LINE_MAX, ANNOUNCEMENT_STATUS_LABELS,
   type Announcement, type AnnouncementChannel, type AnnouncementDetail, type AnnouncementPreview, type AnnouncementRecipient, type AnnouncementTexts,
 } from '@m2office/shared';
 import { api, describeError } from './api.js';
@@ -102,6 +102,14 @@ function Detail({ id, onBack, onApprovals, changeKey }: { id: string; onBack: ()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
   useEffect(() => { load(); }, [load, changeKey]);
+  // サイネージの画面の見本は、打つのが止まってから保存する前の文で組み直す
+  const signageTexts = edit?.texts.signage;
+  const [screenTexts, setScreenTexts] = useState<AnnouncementTexts['signage'] | null>(null);
+  useEffect(() => {
+    if (!signageTexts) return;
+    const t = window.setTimeout(() => setScreenTexts(signageTexts), 400);
+    return () => window.clearTimeout(t);
+  }, [signageTexts]);
   if (error) return <p className="error">{error}</p>;
   if (!d || !edit) return <p className="muted">読んでいます…</p>;
   const a = d.announcement;
@@ -125,12 +133,22 @@ function Detail({ id, onBack, onApprovals, changeKey }: { id: string; onBack: ()
       </div>
       <div className="card announcements-head">
         <label>題名<input value={edit.title} maxLength={80} disabled={!editable} onChange={(e) => setEdit({ ...edit, title: e.target.value })} /></label>
-        <div className="row wrap">
-          <label>期間<input type="date" value={edit.startDate} disabled={!editable} onChange={(e) => setEdit({ ...edit, startDate: e.target.value })} /></label>
-          <span>〜</span>
-          <input type="date" aria-label="期間の終わり" value={edit.endDate} disabled={!editable} onChange={(e) => setEdit({ ...edit, endDate: e.target.value })} />
-          <label>出す日時<input type="datetime-local" value={edit.publishAt} disabled={!editable} onChange={(e) => setEdit({ ...edit, publishAt: e.target.value })} /></label>
-          {!edit.publishAt && <span className="small muted">承認したとき</span>}
+        <div className="row wrap announcements-dates">
+          <div className="announcements-field">
+            <span id="announcement-period">期間</span>
+            <div className="announcements-range" role="group" aria-labelledby="announcement-period">
+              <input type="date" aria-label="期間の始まり" value={edit.startDate} disabled={!editable} onChange={(e) => setEdit({ ...edit, startDate: e.target.value })} />
+              <span>〜</span>
+              <input type="date" aria-label="期間の終わり" value={edit.endDate} disabled={!editable} onChange={(e) => setEdit({ ...edit, endDate: e.target.value })} />
+            </div>
+          </div>
+          <div className="announcements-field">
+            <span id="announcement-publish-at">出す日時</span>
+            <div className="announcements-range">
+              <input type="datetime-local" aria-labelledby="announcement-publish-at" value={edit.publishAt} disabled={!editable} onChange={(e) => setEdit({ ...edit, publishAt: e.target.value })} />
+              {!edit.publishAt && <span className="small muted">承認したとき</span>}
+            </div>
+          </div>
         </div>
         <div className="row wrap">
           {ANNOUNCEMENT_CHANNELS.map((c) => (
@@ -143,9 +161,9 @@ function Detail({ id, onBack, onApprovals, changeKey }: { id: string; onBack: ()
         </div>
       </div>
 
-      <div className="tabs" role="tablist">
+      <div className="announcements-tabs" role="tablist">
         {ANNOUNCEMENT_CHANNELS.filter((c) => edit.channels.includes(c)).map((c) => (
-          <button key={c} role="tab" aria-selected={tab === c} className={`tab${tab === c ? ' is-active' : ''}`} onClick={() => setTab(c)}>{ANNOUNCEMENT_CHANNEL_LABELS[c]}</button>
+          <button key={c} role="tab" aria-selected={tab === c} className={tab === c ? 'on' : ''} onClick={() => setTab(c)}>{ANNOUNCEMENT_CHANNEL_LABELS[c]}</button>
         ))}
       </div>
       {tab === 'web' && edit.channels.includes('web') && (
@@ -172,15 +190,11 @@ function Detail({ id, onBack, onApprovals, changeKey }: { id: string; onBack: ()
         <div className="card announcements-channel">
           <label>件名<input value={edit.texts.mail.subject} maxLength={200} disabled={!editable} onChange={(e) => setTexts({ mail: { ...edit.texts.mail, subject: e.target.value } })} /></label>
           <label>本文<textarea rows={8} value={edit.texts.mail.body} disabled={!editable} onChange={(e) => setTexts({ mail: { ...edit.texts.mail, body: e.target.value } })} /></label>
-          <h4>宛先（{edit.mailContactIds.length} 人）</h4>
-          <ul className="announcements-recipients">
-            {recipients.filter((r) => edit.mailContactIds.includes(r.contactId)).map((r) => (
-              <li key={r.contactId}>
-                {r.name}{r.company ? `（${r.company}）` : ''} <span className="small muted">{r.email}</span>
-                {editable && <button className="link small" onClick={() => setEdit({ ...edit, mailContactIds: edit.mailContactIds.filter((x) => x !== r.contactId) })}>削除</button>}
-              </li>
-            ))}
-          </ul>
+          <MailRecipients id={id} editable={editable} ids={edit.mailContactIds} people={recipients}
+            onChange={(ids, people) => {
+              if (people) setRecipients((old) => [...new Map([...old, ...people].map((r) => [r.contactId, r])).values()]);
+              setEdit({ ...edit, mailContactIds: ids });
+            }} />
         </div>
       )}
       {tab === 'signage' && edit.channels.includes('signage') && (
@@ -190,7 +204,18 @@ function Detail({ id, onBack, onApprovals, changeKey }: { id: string; onBack: ()
             <label>期間の書き方<input value={edit.texts.signage.period} maxLength={60} disabled={!editable} onChange={(e) => setTexts({ signage: { ...edit.texts.signage, period: e.target.value } })} /></label>
             <label>一言<input value={edit.texts.signage.note} maxLength={40} disabled={!editable} onChange={(e) => setTexts({ signage: { ...edit.texts.signage, note: e.target.value } })} /></label>
           </div>
-          <img className="announcements-screen" src={api.announcements.screenUrl(id, a.updatedAt)} alt="店頭の画面の 1 枚" />
+          <label>説明<input value={edit.texts.signage.detail ?? ''} maxLength={60} disabled={!editable} onChange={(e) => setTexts({ signage: { ...edit.texts.signage, detail: e.target.value } })} /></label>
+          <div className="announcements-colors" role="radiogroup" aria-label="帯の色">
+            <span>帯の色</span>
+            {[{ id: '', label: '店の色', color: d.storeColor }, ...ANNOUNCEMENT_BAND_COLORS].map((c) => (
+              <button key={c.id || 'store'} type="button" role="radio" aria-checked={(edit.texts.signage.color ?? '') === c.id} disabled={!editable}
+                className={`announcements-color${(edit.texts.signage.color ?? '') === c.id ? ' on' : ''}`} title={c.label}
+                onClick={() => setTexts({ signage: { ...edit.texts.signage, color: c.id } })}>
+                <span className="announcements-color-chip" style={{ background: c.color }} />{c.label}
+              </button>
+            ))}
+          </div>
+          <img className="announcements-screen" src={api.announcements.screenUrl(id, a.updatedAt, editable && screenTexts ? screenTexts : undefined)} alt="サイネージの画面の 1 枚" />
         </div>
       )}
 
@@ -244,4 +269,84 @@ export function Announcements({ announcementId, onOpen, onApprovals, changeKey =
   return announcementId
     ? <Detail id={announcementId} onBack={() => onOpen(null)} onApprovals={onApprovals} changeKey={changeKey} />
     : <List onOpen={(id) => onOpen(id)} changeKey={changeKey} />;
+}
+
+/** 宛先の 1 行の、選ばれた理由（名刺を交換した日・問い合わせのあった日）。 */
+function recipientReason(r: AnnouncementRecipient): string {
+  const parts: string[] = [];
+  if (r.exchangedOn) parts.push(`名刺 ${r.exchangedOn}`);
+  if (r.inquiredOn) parts.push(`問い合わせ ${r.inquiredOn}`);
+  return parts.join('・');
+}
+
+/**
+ * メールの宛先（第35.19節）。言葉で頼んで作り直す欄・検索の欄・表示中の人をまとめて外す／だけ残す・1 人ずつ削除。
+ * 直した宛先は、ほかの欄と同じく「保存」か「承認へ進む」で残す。
+ */
+function MailRecipients({ id, editable, ids, people, onChange }: {
+  id: string;
+  editable: boolean;
+  ids: string[];
+  people: AnnouncementRecipient[];
+  onChange: (ids: string[], people?: AnnouncementRecipient[]) => void;
+}) {
+  const [request, setRequest] = useState('');
+  const [q, setQ] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<Note>(null);
+  const byId = new Map(people.map((r) => [r.contactId, r]));
+  const rows = ids.flatMap((x) => (byId.has(x) ? [byId.get(x)!] : []));
+  const words = q.normalize('NFKC').toLowerCase().split(/[\s　]+/).filter(Boolean);
+  const shown = words.length
+    ? rows.filter((r) => { const hay = `${r.name} ${r.company} ${r.department ?? ''} ${r.email}`.normalize('NFKC').toLowerCase(); return words.every((w) => hay.includes(w)); })
+    : rows;
+  const shownIds = new Set(shown.map((r) => r.contactId));
+  const refine = () => {
+    if (!request.trim() || busy) return;
+    setBusy(true);
+    setNote(null);
+    api.announcements.refineRecipients(id, request.trim(), ids)
+      .then((r) => {
+        if (r.changed) onChange(r.recipients.map((x) => x.contactId), r.recipients);
+        setNote({ kind: r.changed ? 'ok' : 'error', text: r.text });
+        if (r.changed) setRequest('');
+      })
+      .catch((e) => setNote({ kind: 'error', text: describeError(e, '作り直せませんでした') }))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <div className="announcements-mail-to">
+      <h4>宛先（{ids.length} 人）</h4>
+      {editable && (
+        <div className="row wrap inquiries-entry">
+          <input value={request} maxLength={300} placeholder="例: 名刺を交換した取引先だけにして、〇〇社は外して" aria-label="宛先の頼み"
+            onChange={(e) => setRequest(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) refine(); }} />
+          <button className="btn ghost" disabled={busy || !request.trim()} onClick={refine}>{busy ? '作り直しています…' : '作り直す'}</button>
+          <NoteText note={note} />
+        </div>
+      )}
+      {rows.length > 0 && (
+        <div className="row wrap announcements-mail-filter">
+          <input type="search" value={q} placeholder="会社・名前・アドレスで探す" aria-label="宛先を探す" onChange={(e) => setQ(e.target.value)} />
+          {editable && words.length > 0 && shown.length > 0 && (
+            <>
+              <span className="small muted">表示中の {shown.length} 人を</span>
+              <button className="btn ghost small" onClick={() => { onChange(ids.filter((x) => !shownIds.has(x))); setQ(''); }}>外す</button>
+              <button className="btn ghost small" onClick={() => { onChange(ids.filter((x) => shownIds.has(x))); setQ(''); }}>だけ残す</button>
+            </>
+          )}
+        </div>
+      )}
+      <ul className="announcements-recipients">
+        {shown.map((r) => (
+          <li key={r.contactId}>
+            <span className="grow">{r.name}{r.company ? `（${r.company}）` : ''} <span className="small muted">{r.email}</span></span>
+            <span className="small muted">{recipientReason(r)}</span>
+            {editable && <button className="link small" onClick={() => onChange(ids.filter((x) => x !== r.contactId))}>削除</button>}
+          </li>
+        ))}
+      </ul>
+      {words.length > 0 && shown.length === 0 && <p className="small muted">当たる人はいません</p>}
+    </div>
+  );
 }

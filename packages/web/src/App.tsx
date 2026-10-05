@@ -393,7 +393,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
     // 問い合わせの記録（仕様書 第33.17節）。会社で入れていて利用範囲の人にだけ出す
     ...(me.inquiries ? [{ id: INQUIRIES_EXTENSION_ID, name: '問い合わせの記録', description: '電話や来店の問い合わせを、話すか書くだけで残し、次にやることを知らせる', icon: 'chat' as IconName, agent: null }] : []),
     // お知らせの作成（仕様書 第35.17節）。会社で入れていて利用範囲の人にだけ出す
-    ...(me.announcements ? [{ id: ANNOUNCEMENTS_EXTENSION_ID, name: 'お知らせの作成', description: '休業などのお知らせを 1 つ作り、Web サイト・LINE・店頭の画面にまとめて出す', icon: 'notifications' as IconName, agent: null }] : []),
+    ...(me.announcements ? [{ id: ANNOUNCEMENTS_EXTENSION_ID, name: 'お知らせの作成', description: '休業などのお知らせを 1 つ作り、Web サイト・LINE・サイネージの画面にまとめて出す', icon: 'notifications' as IconName, agent: null }] : []),
     // Webの分析（仕様書 第34.18節）。会社で入れていて利用範囲の人にだけ出す
     ...(me.webReview ? [{ id: WEB_REVIEW_EXTENSION_ID, name: 'Webの分析', description: '会社の Web サイトの数字を月に 1 回、ふつうの言葉で届ける', icon: 'usage' as IconName, agent: null }] : []),
     // 競合の分析（仕様書 第36.18節）。会社で入れていて利用範囲の人にだけ出す
@@ -677,7 +677,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
           )}
           {view.kind === 'announcements' && (
             <>
-              <h1>お知らせの作成 <HelpTip article="start-announcements">休業などのお知らせを 1 つ作ると、Web サイト・LINE・店頭の画面ごとの文を作り、承認の後にまとめて出します。</HelpTip></h1>
+              <h1>お知らせの作成 <HelpTip article="start-announcements">休業などのお知らせを 1 つ作ると、Web サイト・LINE・サイネージの画面ごとの文を作り、承認の後にまとめて出します。</HelpTip></h1>
               <Announcements announcementId={view.announcementId} onOpen={(announcementId) => setView({ kind: 'announcements', announcementId })}
                 onApprovals={() => { void refresh(); }} changeKey={announcementChangeKey} />
             </>

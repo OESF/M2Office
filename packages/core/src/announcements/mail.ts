@@ -2,6 +2,7 @@
  * @file お知らせの作成のメール（仕様書 第35.6.3節・第35.18節）。名刺管理の「まとめてのメール」の決まりで送る。
  *
  * 宛先の案は、名刺管理の会社で共有の連絡先のうち、最近 1 年に名刺を交換した人と、最近 180 日に問い合わせのあった人（メールアドレスのある人）。
+ * 言葉で絞り直すときは、会社で共有の連絡先の全体と、最近 1 年に問い合わせのあった人を元にする（第35.19節）。
  * 除く人（配信を停止した人・アドレスの無い人・重なり・宣伝なら名刺を交換していない人）・上限（1 回 100 人）・宣伝の表示は、まとめてのメールのまま。
  * 差出人は、窓口のアカウント（第33.6節）があればそのアドレス、無ければ依頼した本人の Gmail（Q-178）。
  */
@@ -18,6 +19,8 @@ export interface AnnouncementMail {
   available(tenantId: string, userId: string): Promise<boolean>;
   /** 宛先の案 */
   suggest(tenantId: string, userId: string): Promise<AnnouncementRecipient[]>;
+  /** 案に入れられる人の全体（言葉で絞り直すときの元。第35.19節） */
+  pool(tenantId: string, userId: string): Promise<AnnouncementRecipient[]>;
   /** 宛先の名前とアドレス（画面と承認に出す） */
   recipients(tenantId: string, userId: string, contactIds: string[]): Promise<AnnouncementRecipient[]>;
   /** 差出人の言い方（「窓口のアカウント（info@…）」「あなたの Gmail」） */
@@ -28,6 +31,12 @@ export interface AnnouncementMail {
 
 /** 宛先の案の上限（まとめてのメールの 1 回の上限）。 */
 const SUGGEST_MAX = 100;
+
+/** 案に入れられる人の全体を読む上限（会社で共有の連絡先）。 */
+const POOL_MAX = 2000;
+
+const DAY = 86_400_000;
+const daysAgo = (n: number) => new Date(Date.now() - n * DAY).toISOString().slice(0, 10);
 
 /**
  * 名刺管理のまとめてのメールで、お知らせのメールの口を作る。
@@ -40,27 +49,48 @@ export function announcementMailFrom(deps: {
   inquiries?(tenantId: string): Promise<InquiryStore | null>;
   mailbox?: MailboxDeps;
 }): AnnouncementMail {
-  const toRecipient = (c: { id: string; name: string; company: string; emails: string[] }): AnnouncementRecipient => ({ contactId: c.id, name: c.name, company: c.company, email: c.emails[0] ?? '' });
+  const toRecipient = (c: { id: string; name: string; company: string; emails: string[]; department?: string }, extra: Partial<Pick<AnnouncementRecipient, 'exchangedOn' | 'inquiredOn'>> = {}): AnnouncementRecipient =>
+    ({ contactId: c.id, name: c.name, company: c.company, email: c.emails[0] ?? '', department: c.department ?? '', exchangedOn: extra.exchangedOn ?? null, inquiredOn: extra.inquiredOn ?? null });
+  /** 会社で共有の連絡先（アドレスのある人）と、最近 1 年に問い合わせのあった人。名刺を交換した日と問い合わせの日を添える */
+  const pool = async (tenantId: string, userId: string): Promise<AnnouncementRecipient[]> => {
+    const who = { tenantId, userId };
+    const contacts = await deps.contacts.listContacts(who, { scope: 'company', status: 'active', limit: POOL_MAX }).catch(() => []);
+    const byId = new Map<string, AnnouncementRecipient>();
+    for (const c of contacts) if (c.emails.length > 0) byId.set(c.id, toRecipient(c, { exchangedOn: c.lastReceivedOn }));
+    const store = deps.inquiries ? await deps.inquiries(tenantId).catch(() => null) : null;
+    if (store) {
+      const recent = await store.list(tenantId, { status: 'all', since: new Date(Date.now() - 365 * DAY).toISOString(), limit: 500 }).catch(() => []);
+      const inquired = new Map<string, string>();
+      for (const i of recent) {
+        if (!i.contactId) continue;
+        const d = (i.lastAt || i.createdAt).slice(0, 10);
+        if ((inquired.get(i.contactId) ?? '') < d) inquired.set(i.contactId, d);
+      }
+      const missing = [...inquired.keys()].filter((id) => !byId.has(id));
+      const extra = missing.length ? await deps.bulk.store.contactsByIds(who, missing) : [];
+      for (const c of extra) if (c.status === 'active' && c.emails.length > 0) byId.set(c.id, toRecipient(c));
+      for (const [id, d] of inquired) { const r = byId.get(id); if (r) r.inquiredOn = d; }
+    }
+    return [...byId.values()];
+  };
   return {
     available: async (tenantId, userId) => !!(await deps.cardsAccess(tenantId, userId).catch(() => null)),
+    pool,
     async suggest(tenantId, userId) {
-      const who = { tenantId, userId };
-      const since = new Date(Date.now() - 365 * 86_400_000).toISOString().slice(0, 10);
-      const exchanged = await deps.contacts.listContacts(who, { scope: 'company', status: 'active', receivedFrom: since, limit: SUGGEST_MAX }).catch(() => []);
-      const ids = new Set(exchanged.filter((c) => c.emails.length > 0).map((c) => c.id));
-      const store = deps.inquiries ? await deps.inquiries(tenantId).catch(() => null) : null;
-      if (store) {
-        const recent = await store.list(tenantId, { status: 'all', since: new Date(Date.now() - 180 * 86_400_000).toISOString(), limit: 300 }).catch(() => []);
-        for (const i of recent) if (i.contactId) ids.add(i.contactId);
-      }
-      const found = await deps.bulk.store.contactsByIds(who, [...ids].slice(0, SUGGEST_MAX * 2));
-      return found.filter((c) => c.status === 'active' && c.emails.length > 0).slice(0, SUGGEST_MAX).map(toRecipient);
+      // 最近 1 年に名刺を交換した人と、最近 180 日に問い合わせのあった人（新しい順に 100 人まで）
+      const exchangedSince = daysAgo(365);
+      const inquiredSince = daysAgo(180);
+      const all = await pool(tenantId, userId);
+      const latest = (r: AnnouncementRecipient) => [r.exchangedOn ?? '', r.inquiredOn ?? ''].sort().at(-1) ?? '';
+      return all.filter((r) => (r.exchangedOn && r.exchangedOn >= exchangedSince) || (r.inquiredOn && r.inquiredOn >= inquiredSince))
+        .sort((a, b) => latest(b).localeCompare(latest(a))).slice(0, SUGGEST_MAX);
     },
     async recipients(tenantId, userId, contactIds) {
       if (!contactIds.length) return [];
-      const found = await deps.bulk.store.contactsByIds({ tenantId, userId }, contactIds);
-      const byId = new Map(found.map((c) => [c.id, toRecipient(c)]));
-      return contactIds.flatMap((id) => (byId.has(id) ? [byId.get(id)!] : []));
+      const known = new Map((await pool(tenantId, userId)).map((r) => [r.contactId, r]));
+      const missing = contactIds.filter((id) => !known.has(id));
+      if (missing.length) for (const c of await deps.bulk.store.contactsByIds({ tenantId, userId }, missing)) known.set(c.id, toRecipient(c));
+      return contactIds.flatMap((id) => (known.has(id) ? [known.get(id)!] : []));
     },
     async sender(tenantId) {
       const mb = deps.mailbox ? await openMailbox(deps.mailbox, tenantId).catch(() => null) : null;

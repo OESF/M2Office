@@ -768,7 +768,7 @@ function CompetitorMapKeyFields({ settings, busy, onChanged }: { settings: Compe
 
 /**
  * お知らせの作成の設定（仕様書 第35.4節）。Web サイト（WordPress）に公開まで行うか下書きまでか、お知らせを入れるカテゴリー。
- * WordPress・LINE・店頭の画面は、ほかの拡張でつないだものを使う（同じ接続を 2 度預けさせない）。
+ * WordPress・LINE・サイネージの画面は、ほかの拡張でつないだものを使う（同じ接続を 2 度預けさせない）。
  */
 function AnnouncementFields({ settings, busy, onChanged }: { settings: AnnouncementSettings; busy: boolean; onChanged: () => void }) {
   const [category, setCategory] = useState(settings.webCategory);

@@ -1,14 +1,14 @@
 /**
  * @file お知らせの作成の段 1・段 2 の単体テスト（仕様書 第35.17節・第35.18節）。期間の読み方・下書き・承認した中身だけを出す・Web（WordPress が無いときは写す）・
- * LINE の一斉配信（無料の範囲を超えたら送らない）・店頭の画面・予約・期間の後・メール（段 2）・休業の期間を答える。
- * 見本の LINE と、記憶だけの店頭の画面・メールの口で確かめる。
+ * LINE の一斉配信（無料の範囲を超えたら送らない）・サイネージの画面・予約・期間の後・メール（段 2）・休業の期間を答える。
+ * 見本の LINE と、記憶だけのサイネージの画面・メールの口で確かめる。
  */
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULT_TENANT_SETTINGS, type TenantSettings } from '@m2office/shared';
 import {
-  AnnouncementService, MemoryAnnouncementStore, MockLineClient, StubLlmProvider, ANNOUNCEMENT_TOOLS, plainDraft, readPeriod, announcementDigest, endedTitle,
+  AnnouncementService, MemoryAnnouncementStore, MockLineClient, StubLlmProvider, ANNOUNCEMENT_TOOLS, plainDraft, readPeriod, announcementDigest, endedTitle, applyCondition, conditionByRule, describeCondition, normalizeWord, screenSvg, screenCardOf,
   type AnnouncementMail, type AnnouncementSignage, type Repository, type TenantCredential, type ToolContext,
 } from '../src/index.js';
 
@@ -76,7 +76,7 @@ test('下書き（推論なし）: 休業の題名と本文、LINE は 200 字�
   assert.deepEqual(plainDraft({ ...base, request: '臨時休業 12/10', available: ['web'] }).channels, ['web']);
 });
 
-test('出す: 承認した中身だけを出し、Web（WordPress が無ければ写す）・LINE の一斉配信・店頭の画面に出す', async () => {
+test('出す: 承認した中身だけを出し、Web（WordPress が無ければ写す）・LINE の一斉配信・サイネージの画面に出す', async () => {
   const { service, store, screens, audits } = setup();
   const r = await service.draft(who, '年末年始の休業のお知らせを出して。12/28〜1/5');
   assert.ok('announcement' in r);
@@ -97,7 +97,7 @@ test('出す: 承認した中身だけを出し、Web（WordPress が無けれ�
   const ok = await service.publish(who, id, announcementDigest(a));
   assert.ok('status' in ok && ok.status === 'published');
   assert.deepEqual(MockLineClient.pushed('t1').map((x) => [x.to, x.count]), [['*', 37]], '友だち全員に 1 回の一斉配信');
-  assert.equal(screens['s1']!.length, 1, '店頭の画面の流れの先頭に足す');
+  assert.equal(screens['s1']!.length, 1, 'サイネージの画面の流れの先頭に足す');
   const outs = await store.outputs('t1', id);
   assert.deepEqual(outs.map((o) => [o.channel, o.status]).sort(), [['line', 'done'], ['signage', 'done'], ['web', 'done']]);
   assert.equal(outs.find((o) => o.channel === 'web')!.result.draft, true, 'WordPress が無ければ写して使う');
@@ -128,7 +128,7 @@ test('LINE: 今月の無料の範囲を超えるなら承認へ進めず、出�
   assert.ok(notes.some((n) => /出せなかった出し先/.test(n.title)));
 });
 
-test('予約と期間の後: 予約の時刻に出し、期間が終わったら店頭の画面から外して終わったにする', async () => {
+test('予約と期間の後: 予約の時刻に出し、期間が終わったらサイネージの画面から外して終わったにする', async () => {
   const { service, store, screens, assets } = setup();
   const r = await service.draft(who, '臨時休業のお知らせ 10/10');
   if (!('announcement' in r)) throw new Error('下書きを作れない');
@@ -146,7 +146,7 @@ test('予約と期間の後: 予約の時刻に出し、期間が終わったら
   assert.equal(screens['s1']!.length, 1);
   // 期間（10/10）の次の日になったら片付ける
   assert.equal((await service.tick(new Date('2026-10-11T00:30:00Z'))).ended, 1);
-  assert.equal(screens['s1']!.length, 0, '店頭の画面から外す');
+  assert.equal(screens['s1']!.length, 0, 'サイネージの画面から外す');
   assert.equal(assets.size, 0);
   assert.equal((await store.get('t1', id))!.status, 'ended');
   assert.equal(endedTitle('臨時休業のお知らせ'), '（終了しました）臨時休業のお知らせ');
@@ -163,7 +163,7 @@ test('ツール: 承認の前に出し先ごとの見え方と送る数を見せ
   assert.equal(prepared.kind, 'ready');
   if (prepared.kind === 'ready') {
     assert.match(prepared.shown ?? '', /■ LINE（友だち 37 人に一斉配信。今月の残り 200 通/);
-    assert.match(prepared.shown ?? '', /■ 店頭の画面（受付・待合）/);
+    assert.match(prepared.shown ?? '', /■ サイネージの画面（受付・待合）/);
     assert.equal(prepared.audience, 'external');
   }
   const off = { ...ctx, announcements: { service, access: async () => null } } as unknown as ToolContext;
@@ -177,6 +177,7 @@ function fakeMail(people: { contactId: string; name: string }[]) {
     available: async () => true,
     suggest: async () => people.map((p) => ({ ...p, company: '株式会社ベータ', email: `${p.contactId}@example.com` })),
     recipients: async (_t, _u, ids) => people.filter((p) => ids.includes(p.contactId)).map((p) => ({ ...p, company: '株式会社ベータ', email: `${p.contactId}@example.com` })),
+    pool: async () => people.map((p) => ({ ...p, company: '株式会社ベータ', email: `${p.contactId}@example.com` })),
     sender: async () => '窓口のアカウント（info@example.com）',
     send: async (_t, userId, m) => { sent.push({ userId, ...m }); return { bulkMailId: 'bulk-1', queued: m.contactIds.length, excluded: 0 }; },
   };
@@ -240,4 +241,68 @@ test('休業の期間: 出した休業のお知らせを覚え、秘書のツー
   const res = await ANNOUNCEMENT_TOOLS.find((t) => t.name === 'announcements.closures')!.invoke({}, ctx) as { available: boolean; closures: { startDate: string }[] };
   assert.equal(res.available, true);
   assert.ok(res.closures.some((c) => c.startDate === r.announcement.startDate));
+});
+
+test('宛先を言葉で絞る: 条件の当てはめは推論を使わず、1 字の言葉は部分に当てない（第35.19節）', () => {
+  const r = (contactId: string, company: string, exchangedOn: string | null, inquiredOn: string | null = null) => ({ contactId, name: `人${contactId}`, company, email: `${contactId}@example.com`, department: '', exchangedOn, inquiredOn });
+  const pool = [r('a', '株式会社アルファ', '2026-09-25'), r('b', 'ベータ工業', '2025-01-10'), r('c', 'A', null, '2026-08-10'), r('d', 'ガンマ商事', '2026-03-01')];
+  const current = pool.slice(0, 3);
+  const base = { base: 'current' as const, sources: [], exchangedFrom: null, exchangedTo: null, inquiredFrom: null, keepWords: [], dropWords: [] };
+  assert.deepEqual(applyCondition(pool, current, { ...base, dropWords: ['アルファ社'] }).map((x) => x.contactId), ['c', 'b'], '「アルファ社」で株式会社アルファを外す（新しい順）');
+  assert.deepEqual(applyCondition(pool, current, { ...base, dropWords: ['A社'] }).map((x) => x.contactId), ['a', 'b'], '「A 社」は会社名が A の人だけ（アドレスの a には当てない）');
+  assert.deepEqual(applyCondition(pool, current, { ...base, sources: ['card'] }).map((x) => x.contactId), ['a', 'b'], '名刺を交換した人だけ');
+  assert.deepEqual(applyCondition(pool, current, { ...base, sources: ['inquiry'] }).map((x) => x.contactId), ['c']);
+  assert.deepEqual(applyCondition(pool, current, { ...base, base: 'all', exchangedFrom: '2026-01-01' }).map((x) => x.contactId), ['a', 'd'], '全体から、今年名刺を交換した人');
+  assert.deepEqual(conditionByRule('ベータ工業とガンマ商事は外して')?.dropWords, ['ベータ工業', 'ガンマ商事']);
+  assert.deepEqual(conditionByRule('アルファの人だけにして')?.keepWords, ['アルファ']);
+  assert.equal(conditionByRule('よろしく'), null);
+  assert.equal(normalizeWord('株式会社 アルファ'), 'アルファ');
+  assert.match(describeCondition({ ...base, sources: ['card'], dropWords: ['ベータ'] }, 42), /名刺を交換した人から「ベータ」を除いて 42 人にしました/);
+});
+
+test('宛先を言葉で絞る: 画面は保存せずに返し、秘書からはいちばん新しい下書きに保存する（第35.19節）', async () => {
+  const { mail } = fakeMail([{ contactId: 'c1', name: '佐藤' }, { contactId: 'c2', name: '鈴木' }, { contactId: 'c3', name: '高橋' }]);
+  const { service, store, audits } = setup({ mail });
+  const r = await service.draft(who, '年末年始の休業のお知らせ 12/28〜1/5');
+  if (!('announcement' in r)) throw new Error('下書きを作れない');
+  const id = r.announcement.id;
+  const refined = await service.refineRecipients(who, id, '鈴木は外して');
+  assert.ok(!('error' in refined) && refined.changed);
+  if ('error' in refined) return;
+  assert.deepEqual(refined.recipients.map((x) => x.contactId).sort(), ['c1', 'c3']);
+  assert.deepEqual((await store.get('t1', id))!.mailContactIds, ['c1', 'c2', 'c3'], '画面からは保存しない');
+  // 画面で先に削除した人（c3）は、いまの宛先として渡せる
+  const fromScreen = await service.refineRecipients(who, id, '鈴木は外して', ['c1', 'c2']);
+  assert.ok(!('error' in fromScreen) && fromScreen.recipients.map((x) => x.contactId).join() === 'c1');
+  // 当たる人がいなければ宛先を変えない
+  const none = await service.refineRecipients(who, id, '存在しない会社だけにして');
+  assert.ok(!('error' in none) && !none.changed && none.recipients.length === 3);
+  assert.ok('error' in await service.refineRecipients(who, id, 'よろしく'), '読めない頼み');
+  const s = await service.reviseRecipients(who, '高橋は外して');
+  assert.ok(!('error' in s) && /2 人にしました/.test(s.text));
+  assert.deepEqual((await store.get('t1', id))!.mailContactIds, ['c1', 'c2'], '秘書からは保存する');
+  assert.ok(audits.includes('announcement.recipients'));
+});
+
+test('サイネージの画面の 1 枚: 説明と帯の色を組み、会社名は出さない。一言の既定は「受付までお申し出ください」（第35.6.4節）', async () => {
+  const { service, store } = setup({ signage: true });
+  const r = await service.draft(who, '年末年始の休業のお知らせ 12/28〜1/5');
+  if (!('announcement' in r)) throw new Error('下書きを作れない');
+  const id = r.announcement.id;
+  assert.equal(r.announcement.texts.signage.note, '受付までお申し出ください');
+  // 帯の色は決まった色の id だけ。ほかの値は店の色（空）にする
+  assert.equal(await service.update(who, id, { texts: { signage: { headline: '休業', period: '12/28〜1/5', note: '受付までお申し出ください', detail: 'ご不便をおかけします', color: 'green' } } }), null);
+  assert.equal((await store.get('t1', id))!.texts.signage.color, 'green');
+  await service.update(who, id, { texts: { signage: { headline: '休業', period: '', note: '', color: '#ff0000' } } });
+  const a = (await store.get('t1', id))!;
+  assert.equal(a.texts.signage.color, '');
+  assert.equal(a.texts.signage.detail, 'ご不便をおかけします', '直さなかった説明は残す');
+  const card = screenCardOf(a, '#123456', { color: 'green' });
+  assert.equal(card.color, '#2e6e4f');
+  assert.equal(screenCardOf(a, '#123456').color, '#123456', '選ばなければ店の色');
+  assert.equal(screenCardOf(a, null).color, '#1f3a5f', '店の色も無ければ濃い青');
+  const svg = screenSvg({ ...card, note: '受付までお申し出ください' });
+  assert.match(svg, /ご不便をおかけします/);
+  assert.match(svg, /#2e6e4f/);
+  assert.doesNotMatch(svg, /見本の会社|text-anchor="end"/, '右下の会社名は出さない');
 });

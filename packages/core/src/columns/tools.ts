@@ -279,13 +279,13 @@ export const columnsPrepare: Tool = {
 /**
  * 承認済みのコラムから、店頭サイネージ用の画像を作り始める（秘書から。第32.18.6節）。ワーカーが後ろで作る。
  *
- * @remarks 危険度 `write-internal`。作るだけで、店頭の画面には流さない（流すのは承認の後の `columns.signage_publish`）
+ * @remarks 危険度 `write-internal`。作るだけで、サイネージの画面には流さない（流すのは承認の後の `columns.signage_publish`）
  */
 export const columnsSignageMake: Tool = {
   name: 'columns.signage_make',
   risk: 'write-internal',
-  activityLabel: 'コラムから店頭の画面用の画像を作り始めています',
-  helpText: '承認済みのコラムから、店頭の画面に流す画像（1 枚か紙芝居）を作り始めます。流すのは承認の後です',
+  activityLabel: 'コラムからサイネージの画面用の画像を作り始めています',
+  helpText: '承認済みのコラムから、サイネージの画面に流す画像（1 枚か紙芝居）を作り始めます。流すのは承認の後です',
   description: '承認済みのコラムから、店頭サイネージ用の画像を作り始める。column はコラムの題名かテーマの言葉（無ければいちばん新しい承認済みのコラム）。kind は slides（画像）か video（動画）。1 つに決まらなければ候補を返す',
   args: {
     properties: {
@@ -312,14 +312,14 @@ export const columnsSignageMake: Tool = {
 /**
  * 作った店頭サイネージ用の画像を流す（付属の業務「コラムをサイネージに流す」が承認の後に呼ぶ。第32.18.6節）。
  *
- * @remarks 危険度 `external-send`（店頭の画面はお客様が見る）。承認の画面に一言・流す画面・期間と画像を出す。承認の後に変わっていたら流さない
+ * @remarks 危険度 `external-send`（サイネージの画面はお客様が見る）。承認の画面に一言・流す画面・期間と画像を出す。承認の後に変わっていたら流さない
  */
 export const columnsSignagePublish: Tool = {
   name: 'columns.signage_publish',
   risk: 'external-send',
-  activityLabel: 'コラムの画像を店頭の画面に流しています',
-  helpText: 'コラムから作った画像を、承認の後に店頭の画面の流れに置きます',
-  description: '店頭サイネージ用の組（setId）を、承認の後に店頭の画面の流れの先頭に置く',
+  activityLabel: 'コラムの画像をサイネージの画面に流しています',
+  helpText: 'コラムから作った画像を、承認の後にサイネージの画面の流れに置きます',
+  description: '店頭サイネージ用の組（setId）を、承認の後にサイネージの画面の流れの先頭に置く',
   args: { properties: { setId: { type: 'string', description: 'サイネージ用の組の ID' } }, required: ['setId'] },
   planKey: (args) => `column-signage:${str(args['setId'])}`,
   async prepare(args, ctx) {

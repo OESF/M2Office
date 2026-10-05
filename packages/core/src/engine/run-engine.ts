@@ -1252,7 +1252,7 @@ export function needsHuman(
   });
 }
 
-/** 送り先に関わらず、いつも人に判断を求めるツール。メールは宛先に関わらず人が見る。Web に載せるもの・問い合わせの返事・店頭の画面に流すものも人が見る（仕様書 第9.4.0節・第32.18.1節・第32.18.6節・第33.18節）。 */
+/** 送り先に関わらず、いつも人に判断を求めるツール。メールは宛先に関わらず人が見る。Web に載せるもの・問い合わせの返事・サイネージの画面に流すものも人が見る（仕様書 第9.4.0節・第32.18.1節・第32.18.6節・第33.18節）。 */
 const ALWAYS_ASK = new Set(['gmail.send', 'mail.bulk_send', 'columns.place', 'inquiries.reply_send', 'announcements.publish', 'web_review.request_send', 'columns.signage_publish']);
 
 /** 承認の前の確かめで、行えないと分かった操作（記録しない。ADR-0024）。 */
