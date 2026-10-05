@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { activeSignageBand, signageBandLabel, signageBandsOverlap, signageDaysLabel, signageMinutes } from '@m2office/shared';
 import {
   readMp4, imageSize, usualSlot, jstSlot, cleanReport, normalizeText, fillTemplate, leadingNumber, phraseTemplate, valueSkeleton, pickPath,
-  soundMime, externalRefs, signageRequest,
+  soundMime, externalRefs, signageRequest, signageFileRequest,
 } from '../src/index.js';
 
 const box = (type: string, ...parts: Uint8Array[]) => {
@@ -159,4 +159,23 @@ test('時間帯の流れ: 時刻と曜日で当たる時間帯を選び、夜中
   assert.equal(signageBandsOverlap(night, { start: '01:00', end: '03:00', days: 64 }), true, '土曜の夜から日曜の朝にまたぐ');
   assert.equal(signageMinutes('7:05'), 425);
   assert.equal(signageMinutes('24:00'), null);
+});
+
+test('秘書の頼み: 流れに足す・時間帯を作る・消す・設定を見分け、ほかの頼みと取り違えない（第31.11.2節）', () => {
+  assert.deepEqual(signageFileRequest('入口の画面の流れに足して'), { kind: 'add-file', screens: ['入口'] });
+  assert.deepEqual(signageFileRequest('この画像を17時からの流れに入れて'), { kind: 'add-file', screens: [], bandStart: '17:00' });
+  assert.equal(signageFileRequest('この表の品目を挙げて'), null, 'サイネージの話でなければ、ほかの業務に回す');
+  assert.deepEqual(signageRequest('入口の画面に17時から22時の時間帯を作って'), { kind: 'band-add', screens: ['入口'], start: '17:00', end: '22:00', days: 127 });
+  assert.deepEqual(signageRequest('平日の11:00〜14:00の時間帯を作って'), { kind: 'band-add', screens: [], start: '11:00', end: '14:00', days: 31 });
+  assert.deepEqual(signageRequest('土日の10時半から12時の時間帯を足して'), { kind: 'band-add', screens: [], start: '10:30', end: '12:00', days: 96 });
+  assert.deepEqual(signageRequest('入口の17時からの時間帯を消して'), { kind: 'band-remove', screens: ['入口'], start: '17:00' });
+  assert.deepEqual(signageRequest('この画像をサイネージの流れに足して'), { kind: 'add-file', screens: [] }, '画像が無ければ、渡すよう答える');
+  assert.deepEqual(signageRequest('サイネージの画像の秒数を8秒にして'), { kind: 'settings', patch: { imageSeconds: 8 } });
+  assert.deepEqual(signageRequest('割り込みは20秒にして'), { kind: 'settings', patch: { interruptSeconds: 20 } });
+  assert.deepEqual(signageRequest('店の色を緑にして'), { kind: 'settings', patch: { color: '#2e6e4f' } });
+  assert.deepEqual(signageRequest('店の色を#AA3300に変えて'), { kind: 'settings', patch: { color: '#aa3300' } });
+  assert.deepEqual(signageRequest('呼び出しの音をベルにして'), { kind: 'settings', patch: { jingle: 'bell', chime: true } });
+  assert.deepEqual(signageRequest('呼び出しの音を止めて'), { kind: 'settings', patch: { chime: false } }, '割り込みを消す頼みと取り違えない');
+  assert.deepEqual(signageRequest('呼び出しを消して'), { kind: 'clear', all: false, screens: [] });
+  assert.equal(signageRequest('明日17時から22時に会議を入れて'), null, '予定の頼みは取らない');
 });

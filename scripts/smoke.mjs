@@ -4699,6 +4699,29 @@ console.log('\n■ 63. 店頭サイネージ（内蔵の拡張。第31章の段 
       ? ok('サイネージの時間帯の流れは画面ごとに 3 つまで・重なりは断り、時間帯ごとに流れを持ち、画面の鍵で読める。ほかの会社は触れない')
       : ng('サイネージの時間帯の流れが合わない', JSON.stringify({ b1: band1.status, clash: clash.status, bad: badTime.status, b2: band2.status, b3: band3.status, b4: band4.body, bput: bput.status, plain: plainFlow, bst: bst.body?.bands, other: otherBand.status, otherDel: otherBandDel.status, del: delBand.status, left: bandsLeft.length }).slice(0, 800));
 
+    // 秘書から: 渡した画像を時間帯の流れに足す・時間帯を作る・消す・設定は管理者だけ（第31.11.2節）
+    const say = (message, who = 'admin', fileId) => call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message, ...(fileId ? { fileId } : {}) }) }, who);
+    const fileForm = new FormData();
+    fileForm.append('file', new Blob([png(1280, 720, 9)]), '夜のメニュー.png');
+    const secFile = await (await fetch(`${API}/v1/files`, { method: 'POST', body: fileForm, headers: { 'x-tenant': 'a', 'x-user': 'admin@alpha.example.jp' } })).json();
+    const noImage = await say('この画像をサイネージの流れに足して');
+    const addedImg = await say('画面 1 の画面の 17時からの流れに足して', 'admin', secFile.id);
+    const nightFlow = (await call('a', `/v1/signage/screens/${sid}/entries?band=${band2.body?.band?.id}`)).body;
+    const secBand = await say('画面 1 の画面に 7時から9時の時間帯を作って');
+    const bandsNow = (await call('a', `/v1/signage/screens/${sid}/entries`)).body.bands ?? [];
+    const secBandDel = await say('画面 1 の画面の 7時からの時間帯を消して');
+    const bandsAfter = (await call('a', `/v1/signage/screens/${sid}/entries`)).body.bands ?? [];
+    const beforeSec = (await call('a', '/v1/signage')).body.settings?.imageSeconds;
+    const memberSet = await say('サイネージの画像の秒数を8秒にして', 'member');
+    const adminSet = await say('サイネージの画像の秒数を8秒にして');
+    const afterSec = (await call('a', '/v1/signage')).body.settings?.imageSeconds;
+    if (beforeSec) await call('a', '/v1/admin/extensions/signage/settings', { method: 'PUT', body: JSON.stringify({ imageSeconds: beforeSec }) });
+    /画像を、秘書の欄のクリップで渡して/.test(noImage.body.text ?? '') && /17:00〜22:00/.test(addedImg.body.text ?? '') && (nightFlow.entries ?? []).length === 1
+      && /時間帯「07:00〜09:00 毎日」を作りました/.test(secBand.body.text ?? '') && bandsNow.length === 3 && /削除しました/.test(secBandDel.body.text ?? '') && bandsAfter.length === 2
+      && /管理者に頼んで/.test(memberSet.body.text ?? '') && /8 秒/.test(adminSet.body.text ?? '') && afterSec === 8
+      ? ok('秘書から、渡した画像を時間帯の流れに足し、時間帯を作って消せる。サイネージの設定を変えられるのは管理者だけ')
+      : ng('秘書からのサイネージの操作が違う', JSON.stringify({ no: noImage.body.text, add: addedImg.body.text, night: nightFlow.entries, band: secBand.body.text, now: bandsNow.length, del: secBandDel.body.text, after: bandsAfter.length, member: memberSet.body.text, admin: adminSet.body.text, sec: afterSec }).slice(0, 900));
+
     // 鍵の境界: 鍵が無い・違う会社では読めない。生きている知らせで状態が管理の画面に出る（第31.5.1節・第31.12.1節）
     await setEnabled('b', true);
     const noKey = await play('/state');

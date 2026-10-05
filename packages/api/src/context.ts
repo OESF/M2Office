@@ -477,8 +477,17 @@ export function buildDeps(): AppDeps {
     attendance, payroll,
     // 人事の担当者の依頼（第30.20.1節）
     hrStaff: { service: hrService, payroll, calendar: laborCalendar, access: hrAccess(repo) },
-    // 店頭サイネージ（第31.11.1節）。本人が話した回にだけ、割り込みを出す・消す
-    signage,
+    // 店頭サイネージ（第31.11.1節・第31.11.2節）。本人が話した回にだけ、割り込みを出す・消す・流れと時間帯と設定を変える
+    signage: {
+      ...signage,
+      // 秘書に渡された画像（本人のファイルだけ）を、流れに足す素材にする
+      file: async (tenantId: string, userId: string, fileId: string) => {
+        const f = await repo.getFile(tenantId, fileId);
+        if (!f || f.ownerUserId !== userId) return null;
+        const bytes = await files.get(tenantId, fileId);
+        return bytes ? { name: f.name, bytes } : null;
+      },
+    },
     // アプリの一覧に入れる公式サイトを、実際に開けるか確かめる（社内のアドレスは開かない。見本の会社では外を読まない。第6.1.1.2節）
     launcherReachable: async (tenantId, url) => {
       if (connector.sourceFor(tenantId) === 'mock') return false;

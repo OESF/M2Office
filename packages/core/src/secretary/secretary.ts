@@ -27,7 +27,7 @@ import { answerAttendance, attendanceRequest, payslipRequest } from './attendanc
 import type { AttendanceService } from '../hr/attendance-service.js';
 import type { PayrollService } from '../hr/payroll-service.js';
 import { answerHrStaff, hrStaffRequest, type HrStaffDeps } from './hr-staff.js';
-import { signageRequest, answerSignage, type SignageSecretaryDeps } from './signage.js';
+import { signageFileRequest, signageRequest, answerSignage, type SignageSecretaryDeps } from './signage.js';
 import { jstDate } from '../hr/attendance.js';
 import { CARD_BULK_MAIL, CARD_UPDATE } from '../cards/agents.js';
 import { answerBriefSettings } from '../brief/settings.js';
@@ -250,6 +250,15 @@ export class Secretary {
     // 大きさで分けない。小さいものだけここで読む、という例外を作らない（第10.11.2節）
     if (fileId) {
       await this.audit(tenantId, userId, 'secretary.file', fileId);
+      // 「この画像をサイネージの流れに足して」は、その場で流れに足す（第31.11.2節。本人が渡した画像だけ）
+      const signFile = this.deps.signage ? signageFileRequest(message) : null;
+      if (signFile && this.deps.signage && await this.deps.signage.access(tenantId, userId)) {
+        const me = await this.deps.repo.findUserById(tenantId, userId);
+        const text = await answerSignage(this.deps.signage, tenantId, userId, !!me?.roles.includes('admin'), signFile, fileId);
+        const name = this.deps.fileName ? await this.deps.fileName(tenantId, userId, fileId) : null;
+        await this.audit(tenantId, userId, 'secretary.signage', signFile.kind);
+        return { reply: { layer: 'direct', text: text ?? '流れに足せませんでした。', evidence: [], ...(name ? { file: { name, note: null } } : {}), tokensUsed: 0 }, keep: true };
+      }
       return this.handOff(tenantId, userId, message, fileId);
     }
 
