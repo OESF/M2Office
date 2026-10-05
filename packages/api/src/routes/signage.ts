@@ -49,19 +49,41 @@ export function signageRoute(deps: AppDeps) {
     return 'error' in r ? c.json(r, r.error === '画面が見つかりません' ? 404 : 400) : c.json(r);
   });
 
-  /** 画面の流れと版。 */
+  /** 画面の流れと版（`band`: 時間帯の ID。無ければいつもの流れ。答えに時間帯の一覧。第31.6.6節）。 */
   app.get('/screens/:id/entries', async (c) => {
     const { tenant } = c.get('ctx');
-    const f = await service.flow(tenant.id, c.req.param('id'));
-    return f ? c.json(f) : c.json({ error: '画面が見つかりません' }, 404);
+    const f = await service.flow(tenant.id, c.req.param('id'), c.req.query('band') || null);
+    return f ? c.json(f) : c.json({ error: '画面か時間帯が見つかりません' }, 404);
   });
 
-  /** 流れを並びごと置き換える（`entries`・読んだ版 `version`。違えば 409）。 */
+  /** 流れを並びごと置き換える（`entries`・読んだ版 `version`。違えば 409。`band`: 時間帯の ID）。 */
   app.put('/screens/:id/entries', async (c) => {
     const { tenant, user } = c.get('ctx');
     const b = await c.req.json<{ entries?: unknown; version?: unknown }>().catch(() => ({} as { entries?: unknown; version?: unknown }));
-    const r = await service.replaceFlow(tenant.id, user.id, c.req.param('id'), b.entries, b.version);
+    const r = await service.replaceFlow(tenant.id, user.id, c.req.param('id'), b.entries, b.version, c.req.query('band') || null);
     return 'error' in r ? c.json({ error: r.error }, r.status as 400) : c.json(r);
+  });
+
+  /** 時間帯を足す（`start`・`end`: HH:MM、`days`: 曜日のビット。画面ごとに 3 つまで。重なれば 409。第31.6.6節）。 */
+  app.post('/screens/:id/bands', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const b = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
+    const r = await service.addBand(tenant.id, user.id, c.req.param('id'), { start: b['start'], end: b['end'], days: b['days'] });
+    return 'error' in r ? c.json({ error: r.error }, r.status as 400) : c.json(r, 201);
+  });
+
+  /** 時間帯の時刻と曜日を直す。 */
+  app.patch('/bands/:bandId', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const b = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
+    const r = await service.updateBand(tenant.id, user.id, c.req.param('bandId'), { start: b['start'], end: b['end'], days: b['days'] });
+    return 'error' in r ? c.json({ error: r.error }, r.status as 400) : c.json(r);
+  });
+
+  /** 時間帯と、その流れを削除する（素材は残る）。 */
+  app.delete('/bands/:bandId', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    return (await service.deleteBand(tenant.id, user.id, c.req.param('bandId'))) ? c.json({ ok: true }) : c.json({ error: '時間帯が見つかりません' }, 404);
   });
 
   /** 素材の一覧（どの画面の流れに入っているかつき）。 */

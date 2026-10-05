@@ -7,7 +7,10 @@
  */
 
 import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
-import { SIGNAGE_JINGLES, SIGNAGE_LIMITS, type SignageEntry, type SignageInterruptView, type SignageScreen, type SignageSound } from '@m2office/shared';
+import {
+  SIGNAGE_JINGLES, SIGNAGE_LIMITS, SIGNAGE_WEEKDAYS, signageBandLabel,
+  type SignageBand, type SignageEntry, type SignageInterruptView, type SignageScreen, type SignageSound,
+} from '@m2office/shared';
 import { api, describeError, type SignageAssetView, type SignageOverview } from './api.js';
 import { inspectPptx } from './pptx.js';
 import { firstImage, inlineHtml } from './html-inline.js';
@@ -164,7 +167,7 @@ export function Signage() {
   }, []);
 
   /** ファイルを素材にする。画面を選んでいれば、その流れの最後に足す。 */
-  const addFiles = async (files: File[], toScreen: string | null) => {
+  const addFiles = async (files: File[], toScreen: string | null, toBand: string | null = null) => {
     setError(null);
     const out: string[] = [];
     const added: string[] = [];
@@ -205,8 +208,9 @@ export function Signage() {
     setUploading(null);
     setNotes(out);
     if (toScreen && added.length) {
-      const flow = await api.signage.flow(toScreen);
-      await api.signage.saveFlow(toScreen, flow.version, [...flow.entries, ...added.map((assetId) => ({ assetId, seconds: null }))]).catch((e) => setError(describeError(e, '流れに足せませんでした')));
+      // いま開いている流れ（いつもの流れか時間帯の流れ）の最後に足す
+      const flow = await api.signage.flow(toScreen, toBand);
+      await api.signage.saveFlow(toScreen, flow.version, [...flow.entries, ...added.map((assetId) => ({ assetId, seconds: null }))], toBand).catch((e) => setError(describeError(e, '流れに足せませんでした')));
     }
     load();
   };
@@ -241,7 +245,7 @@ export function Signage() {
           </div>
         )}
       </div>
-      {screen && <FlowEditor key={screen.id} screen={screen} screens={data.screens} assets={assets} thumbs={thumbs} onFiles={(fs) => void addFiles(fs, screen.id)} onError={setError} onChanged={load} />}
+      {screen && <FlowEditor key={screen.id} screen={screen} screens={data.screens} assets={assets} thumbs={thumbs} onFiles={(fs, band) => void addFiles(fs, screen.id, band)} onError={setError} onChanged={load} />}
       {uploading && <p className="muted small">{uploading} を入れています…</p>}
       {notes.length > 0 && (
         <div className="card signage-notes">
@@ -295,15 +299,25 @@ function ScreenCard({ s, active, admin, thumb, wantThumb, onSelect, onChanged, o
   );
 }
 
-/** 画面の流れ（並べ替え・秒数・外す・素材を足す・ほかの画面からコピー）。直したらすぐ保存する。 */
+/**
+ * 画面の流れ（並べ替え・秒数・外す・素材を足す・ほかの画面からコピー）。直したらすぐ保存する。
+ * 上の切り替えで、いつもの流れと時間帯の流れ（3 つまで。第31.6.6節）を選ぶ。
+ */
 function FlowEditor({ screen, screens, assets, thumbs, onFiles, onError, onChanged }: {
   screen: SignageScreen; screens: SignageScreen[]; assets: SignageAssetView[]; thumbs: ReturnType<typeof useThumbs>;
-  onFiles: (files: File[]) => void; onError: (m: string) => void; onChanged: () => void;
+  onFiles: (files: File[], band: string | null) => void; onError: (m: string) => void; onChanged: () => void;
 }) {
-  const [flow, setFlow] = useState<{ version: number; entries: SignageEntry[] } | null>(null);
+  const [band, setBand] = useState<string | null>(null);
+  const [flow, setFlow] = useState<{ version: number; entries: SignageEntry[]; bands: SignageBand[] } | null>(null);
   const [drag, setDrag] = useState<number | null>(null);
   const file = useRef<HTMLInputElement>(null);
-  const reload = useCallback(() => { api.signage.flow(screen.id).then(setFlow).catch((e) => onError(describeError(e, '流れを読めませんでした'))); }, [screen.id, onError]);
+  const reload = useCallback(() => {
+    api.signage.flow(screen.id, band).then(setFlow).catch((e) => {
+      // 開いていた時間帯がほかの人に削除されていたら、いつもの流れに戻る
+      if (band) setBand(null);
+      else onError(describeError(e, '流れを読めませんでした'));
+    });
+  }, [screen.id, band, onError]);
   useEffect(reload, [reload, screen.flowVersion]);
   const byId = new Map(assets.map((a) => [a.id, a]));
   useEffect(() => { for (const e of flow?.entries ?? []) thumbs.want(e.assetId); }, [flow, thumbs]);
@@ -311,7 +325,7 @@ function FlowEditor({ screen, screens, assets, thumbs, onFiles, onError, onChang
   const save = (entries: SignageEntry[]) => {
     if (!flow) return;
     setFlow({ ...flow, entries });
-    api.signage.saveFlow(screen.id, flow.version, entries).then((r) => { setFlow({ version: r.version, entries }); onChanged(); })
+    api.signage.saveFlow(screen.id, flow.version, entries, band).then((r) => { setFlow({ ...flow, version: r.version, entries }); onChanged(); })
       .catch((e) => { onError(describeError(e, '流れを直せませんでした')); reload(); });
   };
   const move = (from: number, to: number) => {
@@ -324,10 +338,31 @@ function FlowEditor({ screen, screens, assets, thumbs, onFiles, onError, onChang
   const onDrop = (e: DragEvent) => {
     e.preventDefault();
     const files = Array.from(e.dataTransfer.files);
-    if (files.length) onFiles(files);
+    if (files.length) onFiles(files, band);
+  };
+  const addBand = () => {
+    // 空いている時間を探して足す（夕方から。重なれば次の候補）。時刻はあとで直せる
+    const tries: Omit<SignageBand, 'id'>[] = [
+      { start: '17:00', end: '22:00', days: 127 }, { start: '11:00', end: '14:00', days: 127 }, { start: '07:00', end: '10:00', days: 127 },
+    ];
+    void (async () => {
+      for (const t of tries) {
+        try {
+          const r = await api.signage.addBand(screen.id, t);
+          setBand(r.band.id);
+          onChanged();
+          return;
+        } catch { /* 重なれば次の候補 */ }
+      }
+      onError('空いている時間帯が見つかりませんでした。いまの時間帯の時刻を直してから足してください');
+    })();
+  };
+  const changeBand = (b: SignageBand, patch: Partial<Omit<SignageBand, 'id'>>) => {
+    api.signage.updateBand(b.id, patch).then(() => { onChanged(); reload(); }).catch((e) => { onError(describeError(e, '時間帯を直せませんでした')); reload(); });
   };
 
   if (!flow) return null;
+  const current = flow.bands.find((b) => b.id === band) ?? null;
   return (
     <div className="card signage-flow" onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
       <div className="row"><strong className="grow">{screen.name} の流れ</strong>
@@ -339,6 +374,34 @@ function FlowEditor({ screen, screens, assets, thumbs, onFiles, onError, onChang
           {screens.filter((s) => s.id !== screen.id).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
       </div>
+      <div className="signage-bands" role="tablist" aria-label="流れ">
+        <button role="tab" aria-selected={band === null} className={band === null ? 'on' : ''} onClick={() => setBand(null)}>いつもの流れ</button>
+        {flow.bands.map((b) => (
+          <button key={b.id} role="tab" aria-selected={band === b.id} className={band === b.id ? 'on' : ''} onClick={() => setBand(b.id)}>{signageBandLabel(b)}</button>
+        ))}
+        {flow.bands.length < SIGNAGE_LIMITS.bands && <button className="add" onClick={addBand}>＋時間帯</button>}
+      </div>
+      {current && (
+        <div className="row wrap signage-band-edit">
+          <input type="time" defaultValue={current.start} key={`s-${current.id}-${current.start}`} aria-label="始め"
+            onBlur={(e) => { if (e.target.value && e.target.value !== current.start) changeBand(current, { start: e.target.value }); }} />
+          <span>〜</span>
+          <input type="time" defaultValue={current.end} key={`e-${current.id}-${current.end}`} aria-label="終わり"
+            onBlur={(e) => { if (e.target.value && e.target.value !== current.end) changeBand(current, { end: e.target.value }); }} />
+          <span className="signage-days" role="group" aria-label="曜日">
+            {SIGNAGE_WEEKDAYS.map((d) => (
+              <button key={d.bit} className={current.days & d.bit ? 'on' : ''} aria-pressed={!!(current.days & d.bit)}
+                onClick={() => { const days = current.days ^ d.bit; if (days) changeBand(current, { days }); }}>{d.label}</button>
+            ))}
+          </span>
+          <button className="btn ghost small danger" onClick={() => {
+            if (window.confirm(`時間帯「${signageBandLabel(current)}」と、その流れを削除しますか。素材は残ります`)) {
+              api.signage.deleteBand(current.id).then(() => { setBand(null); onChanged(); }).catch((e) => onError(describeError(e, '削除できませんでした')));
+            }
+          }}>削除</button>
+        </div>
+      )}
+      {current && flow.entries.length === 0 && <p className="small muted">この時間帯の流れが空の間は、いつもの流れを流します。</p>}
       <ol className="signage-entries">
         {flow.entries.map((e, i) => {
           const a = byId.get(e.assetId);
@@ -368,7 +431,7 @@ function FlowEditor({ screen, screens, assets, thumbs, onFiles, onError, onChang
         </select>
         <button className="btn ghost small" onClick={() => file.current?.click()}>ファイルを選ぶ</button>
         <input ref={file} type="file" multiple hidden accept="image/jpeg,image/png,video/mp4,.html,.htm,.zip,.css,.js,.svg,.gif,.webp,.woff,.woff2,.ttf,.otf,.pptx,.ppsx,.ppt"
-          onChange={(e) => { const fs = Array.from(e.target.files ?? []); e.target.value = ''; if (fs.length) onFiles(fs); }} />
+          onChange={(e) => { const fs = Array.from(e.target.files ?? []); e.target.value = ''; if (fs.length) onFiles(fs, band); }} />
       </div>
     </div>
   );

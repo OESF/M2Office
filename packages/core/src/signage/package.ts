@@ -8,7 +8,7 @@ import { SIGNAGE_EXTENSION_ID } from '@m2office/shared';
 import type { ExtensionPackage } from '../extensions/loader.js';
 
 /** 店頭サイネージの版（内蔵の拡張の版。段を足すたびに上げる）。 */
-export const SIGNAGE_EXTENSION_VERSION = '0.1.0';
+export const SIGNAGE_EXTENSION_VERSION = '0.2.0';
 
 /** 店頭サイネージ（内蔵の拡張。既定は切り）。 */
 export const SIGNAGE_PACKAGE: ExtensionPackage = {

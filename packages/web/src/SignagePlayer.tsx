@@ -9,6 +9,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { activeSignageBand, type SignageBand } from '@m2office/shared';
 import { APP_VERSION } from './version.js';
 import { JinglePlayer } from './signage-audio.js';
 import { HtmlFrame, InterruptText } from './signage-view.js';
@@ -34,6 +35,8 @@ interface PlayInterrupt {
 interface PlayState {
   screen: { id: string; name: string; orientation: 'landscape' | 'portrait'; rotation: 0 | 90 | 180 | 270; volume: number; flowVersion: number };
   entries: { assetId: string; seconds: number | null }[];
+  /** 時間帯の流れ（第31.6.6節。前の版のサーバーには無い） */
+  bands?: (SignageBand & { entries: { assetId: string; seconds: number | null }[] })[];
   assets: { id: string; kind: 'image' | 'video' | 'html'; mime: string; sha256: string; bytes: number; width: number; height: number; durationMs: number | null; caption?: string | null }[];
   interruptAssets?: string[];
   sounds?: { id: string; mime: string }[];
@@ -221,6 +224,8 @@ function Player({ screenKey, onUnregistered }: { screenKey: string; onUnregister
   const misses = useRef(0);
   const reloadPending = useRef(false);
   const serverOffset = useRef(0);
+  /** いま流している流れ（時間帯の ID。いつもの流れは空）。 */
+  const activeList = useRef('');
   const lastBeatOk = useRef(0);
   const advanceRef = useRef<() => void>(() => undefined);
   const busy = useRef(false);
@@ -345,9 +350,15 @@ function Player({ screenKey, onUnregistered }: { screenKey: string; onUnregister
       }
       if (!state) return;
       const byId = new Map(state.assets.map((a) => [a.id, a]));
-      const list = state.entries;
+      // いま当たっている時間帯の流れ（空ならいつもの流れ）。日本時間はサーバーの時刻に合わせて見る（つながらない間も切り替わる）
+      const band = activeSignageBand(state.bands ?? [], jst);
+      const list = band && band.entries.length ? band.entries : state.entries;
+      const listKey = band && band.entries.length ? band.id : '';
+      // 流れが切り替わったら、新しい流れの最初から
+      const switched = listKey !== activeList.current;
+      activeList.current = listKey;
       let start = 0;
-      if (current.current) {
+      if (current.current && !switched) {
         const same = list[pos.current]?.assetId === current.current ? pos.current : list.findIndex((e) => e.assetId === current.current);
         start = same >= 0 ? same + 1 : 0;
       }

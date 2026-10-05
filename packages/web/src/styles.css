@@ -1622,6 +1622,16 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .signage-entries { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .signage-entries li { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; cursor: grab; }
 /* 名前の長さで秒数の欄とボタンの位置が動かないよう、名前は残りの幅を使い、秒数の欄は幅を決める（第 0.259.1 版） */
+.signage-bands { display: flex; flex-wrap: wrap; gap: 4px; margin: calc(8px * var(--space-scale)) 0; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+.signage-bands button { white-space: nowrap; border: 1px solid var(--line); background: none; color: var(--muted); border-radius: 999px; padding: 3px 12px; cursor: pointer; font-size: calc(13px * var(--font-scale)); }
+.signage-bands button.on { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); font-weight: 600; }
+.signage-bands button.add { border-style: dashed; }
+.signage-band-edit { align-items: center; }
+.signage-band-edit input[type="time"] { flex: none; width: auto; }
+.signage-days { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.signage-days button { background: none; border: none; padding: 3px 8px; color: var(--muted); cursor: pointer; }
+.signage-days button + button { border-left: 1px solid var(--line); }
+.signage-days button.on { background: var(--accent-soft); color: var(--accent); }
 .signage-entries li > .grow { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .signage-entries li > .num-input, .signage-entries li > .small.muted { flex: none; width: 88px; text-align: right; }
 .signage-thumb { width: 64px; height: 36px; flex: none; background: #000; border-radius: 4px; overflow: hidden; }

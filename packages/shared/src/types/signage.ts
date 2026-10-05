@@ -32,6 +32,8 @@ export const SIGNAGE_LIMITS = {
   queue: 20,
   /** 割り込みの素材の数（会社で）。 */
   interruptAssets: 50,
+  /** 画面ごとの時間帯の流れの数（第31.6.6節）。 */
+  bands: 3,
   /** 会社のジングルの音（第31.7.3節。案）。 */
   soundBytes: 300 * 1024,
   soundMs: 5000,
@@ -159,6 +161,84 @@ export interface SignageEntry {
   assetId: string;
   /** 画像の秒数（`null` なら会社の既定。動画は `null`）。 */
   seconds: number | null;
+}
+
+/**
+ * 時間帯の流れの時間帯（第31.6.6節）。名前は持たず、時刻と曜日から呼び方を作る（{@link signageBandLabel}）。
+ * 終わりが始めより前なら夜中をまたぐ。曜日は始めた日で見る。
+ */
+export interface SignageBand {
+  id: string;
+  /** 始め（`HH:MM`。日本時間） */
+  start: string;
+  /** 終わり（`HH:MM`。この時刻になったら外れる） */
+  end: string;
+  /** 曜日（7 ビット。月=1、火=2、水=4、木=8、金=16、土=32、日=64。毎日は 127） */
+  days: number;
+}
+
+/** 曜日のビット（月〜日の順）。 */
+export const SIGNAGE_WEEKDAYS: { bit: number; label: string }[] = [
+  { bit: 1, label: '月' }, { bit: 2, label: '火' }, { bit: 4, label: '水' }, { bit: 8, label: '木' },
+  { bit: 16, label: '金' }, { bit: 32, label: '土' }, { bit: 64, label: '日' },
+];
+
+/** `HH:MM` を 0 時からの分に（読めなければ `null`）。 */
+export function signageMinutes(hhmm: string): number | null {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim());
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  return h < 24 && min < 60 ? h * 60 + min : null;
+}
+
+/** 曜日の呼び方（毎日・平日・土日、ほかは「月・水・金」）。 */
+export function signageDaysLabel(days: number): string {
+  if (days === 127) return '毎日';
+  if (days === 31) return '平日';
+  if (days === 96) return '土日';
+  return SIGNAGE_WEEKDAYS.filter((d) => days & d.bit).map((d) => d.label).join('・');
+}
+
+/** 時間帯の呼び方（「11:00〜14:00 平日」）。 */
+export function signageBandLabel(b: Pick<SignageBand, 'start' | 'end' | 'days'>): string {
+  return `${b.start}〜${b.end} ${signageDaysLabel(b.days)}`;
+}
+
+/** 曜日のビット（日本時間の日付から。月=1 … 日=64）。 */
+const weekdayBit = (jstDay: number) => 1 << ((jstDay + 6) % 7);
+
+/**
+ * いま当たっている時間帯（無ければ `null`。いつもの流れ）。
+ *
+ * @param jst 日本時間に直した時刻（`getUTC*` で日本時間の値が読めるもの）
+ */
+export function activeSignageBand<B extends SignageBand>(bands: B[], jst: Date): B | null {
+  const now = jst.getUTCHours() * 60 + jst.getUTCMinutes();
+  const today = weekdayBit(jst.getUTCDay());
+  const yesterday = weekdayBit((jst.getUTCDay() + 6) % 7);
+  for (const b of bands) {
+    const s = signageMinutes(b.start);
+    const e = signageMinutes(b.end);
+    if (s === null || e === null || s === e) continue;
+    if (s < e) { if (now >= s && now < e && b.days & today) return b; continue; }
+    // 夜中をまたぐ: 始めた日の夜と、次の日の朝
+    if ((now >= s && b.days & today) || (now < e && b.days & yesterday)) return b;
+  }
+  return null;
+}
+
+/** 2 つの時間帯が、同じ曜日の同じ時刻で重なるか（重なりは断る。第31.6.6節）。 */
+export function signageBandsOverlap(a: Pick<SignageBand, 'start' | 'end' | 'days'>, b: Pick<SignageBand, 'start' | 'end' | 'days'>): boolean {
+  // 週の分（月曜 0 時から）の区間にして比べる
+  const spans = (x: Pick<SignageBand, 'start' | 'end' | 'days'>): [number, number][] => {
+    const s = signageMinutes(x.start) ?? 0;
+    const e = signageMinutes(x.end) ?? 0;
+    const len = e > s ? e - s : e + 1440 - s;
+    return SIGNAGE_WEEKDAYS.flatMap((d, i) => (x.days & d.bit ? [[i * 1440 + s, i * 1440 + s + len] as [number, number]] : []))
+      .flatMap(([from, to]) => (to > 7 * 1440 ? [[from, 7 * 1440], [0, to - 7 * 1440]] as [number, number][] : [[from, to]]));
+  };
+  return spans(a).some(([a1, a2]) => spans(b).some(([b1, b2]) => a1 < b2 && b1 < a2));
 }
 
 /** 割り込みの出どころ（第31.15.1節）。 */

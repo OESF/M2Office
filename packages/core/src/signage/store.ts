@@ -4,10 +4,12 @@
  * すべての問い合わせを会社（テナント）を設定したトランザクションで行う（不変則 I-2）。画面の鍵は SHA-256 のハッシュだけを持つ。
  */
 
+import { randomUUID } from 'node:crypto';
 import pg from 'pg';
-import type {
-  SignageAsset, SignageEntry, SignageOrientation, SignageReport, SignageRotation, SignageOrigin, SignageTargetState, SignageInterruptView,
-  SignagePhrase, SignageSource, SignageSourceMapping, SignageSound,
+import {
+  signageMinutes,
+  type SignageAsset, type SignageBand, type SignageEntry, type SignageOrientation, type SignageReport, type SignageRotation, type SignageOrigin,
+  type SignageTargetState, type SignageInterruptView, type SignagePhrase, type SignageSource, type SignageSourceMapping, type SignageSound,
 } from '@m2office/shared';
 
 const iso = (v: unknown): string => (v instanceof Date ? v.toISOString() : String(v ?? ''));
@@ -78,6 +80,10 @@ interface ScreenRow {
   id: string; name: string; orientation: SignageOrientation; rotation: number; volume: number; status: 'active' | 'removed';
   flow_version: number; last_seen_at: unknown; last_report: SignageReport | null; offline_notified_at: unknown; registered_at: unknown; removed_at: unknown;
 }
+interface BandRow { id: string; start_min: number; end_min: number; days: number }
+const hhmm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+const toBand = (r: BandRow): SignageBand => ({ id: r.id, start: hhmm(r.start_min), end: hhmm(r.end_min), days: r.days });
+
 const SCREEN_COLS = 'id, name, orientation, rotation, volume, status, flow_version, last_seen_at, last_report, offline_notified_at, registered_at, removed_at';
 const toScreen = (r: ScreenRow): ScreenRecord => ({
   id: r.id, name: r.name, orientation: r.orientation, rotation: r.rotation as SignageRotation, volume: r.volume, status: r.status,
@@ -154,9 +160,22 @@ export interface SignageStore {
   deleteAsset(tenantId: string, id: string): Promise<{ screens: string[] } | null>;
   totalBytes(tenantId: string): Promise<number>;
 
-  listEntries(tenantId: string, screenId: string): Promise<SignageEntry[]>;
-  /** 流れを並びごと置き換える。版が違えば `null`（第31.6.2節）。 */
-  replaceEntries(tenantId: string, screenId: string, entries: SignageEntry[], expectedVersion: number, by: string): Promise<number | null>;
+  /** 1 つの流れ（`bandId` が `null` ならいつもの流れ。第31.6.6節）。 */
+  listEntries(tenantId: string, screenId: string, bandId?: string | null): Promise<SignageEntry[]>;
+  /** 画面のすべての流れの行（いつもの流れと時間帯の流れ）。 */
+  listAllEntries(tenantId: string, screenId: string): Promise<(SignageEntry & { bandId: string | null })[]>;
+  /** 流れを並びごと置き換える。版が違えば `null`（第31.6.2節）。`bandId` が無ければいつもの流れ。 */
+  replaceEntries(tenantId: string, screenId: string, entries: SignageEntry[], expectedVersion: number, by: string, bandId?: string | null): Promise<number | null>;
+  /** 画面の時間帯（並びの順。第31.6.6節）。 */
+  listBands(tenantId: string, screenId: string): Promise<SignageBand[]>;
+  /** 時間帯を足す（流れの版を上げる）。画面が無ければ `null`。 */
+  addBand(tenantId: string, screenId: string, b: Omit<SignageBand, 'id'>, by: string): Promise<string | null>;
+  /** 時間帯を直す（流れの版を上げる）。その時間帯の画面の ID を返す。 */
+  updateBand(tenantId: string, bandId: string, b: Omit<SignageBand, 'id'>): Promise<string | null>;
+  /** 時間帯と、その流れを削除する（流れの版を上げる）。その時間帯の画面の ID を返す。 */
+  deleteBand(tenantId: string, bandId: string): Promise<string | null>;
+  /** 時間帯 1 つと、その画面の ID。 */
+  getBand(tenantId: string, bandId: string): Promise<(SignageBand & { screenId: string }) | null>;
   /** 素材が入っている画面。 */
   screensUsing(tenantId: string, assetId: string): Promise<string[]>;
 
@@ -393,9 +412,15 @@ export class PostgresSignageStore implements SignageStore {
       const gone = (await c.query(`delete from signage_assets where tenant_id = $1 and id = $2`, [tenantId, id])).rowCount ?? 0;
       if (!gone) return null;
       for (const s of screens) {
-        // 外した行の後ろを詰め、流れの版を上げる（画面が読み直す）
-        const rest = (await c.query<{ id: string }>(`select id from signage_entries where tenant_id = $1 and screen_id = $2 order by position`, [tenantId, s])).rows;
-        for (let i = 0; i < rest.length; i++) await c.query(`update signage_entries set position = $3 where tenant_id = $1 and id = $2`, [tenantId, rest[i]!.id, i]);
+        // 外した行の後ろを流れ（いつもの流れと時間帯の流れ）ごとに詰め、流れの版を上げる（画面が読み直す）
+        const rest = (await c.query<{ id: string; band_id: string | null }>(`select id, band_id from signage_entries where tenant_id = $1 and screen_id = $2 order by band_id nulls first, position`, [tenantId, s])).rows;
+        const next = new Map<string, number>();
+        for (const r of rest) {
+          const k = r.band_id ?? '';
+          const i = next.get(k) ?? 0;
+          next.set(k, i + 1);
+          await c.query(`update signage_entries set position = $3 where tenant_id = $1 and id = $2`, [tenantId, r.id, i]);
+        }
         await c.query(`update signage_screens set flow_version = flow_version + 1 where tenant_id = $1 and id = $2`, [tenantId, s]);
       }
       return { screens };
@@ -407,25 +432,77 @@ export class PostgresSignageStore implements SignageStore {
     return Number(rows[0]?.n ?? 0);
   }
 
-  async listEntries(tenantId: string, screenId: string): Promise<SignageEntry[]> {
+  async listEntries(tenantId: string, screenId: string, bandId: string | null = null): Promise<SignageEntry[]> {
     const rows = await this.q<{ asset_id: string; seconds: number | null }>(tenantId,
-      `select asset_id, seconds from signage_entries where tenant_id = $1 and screen_id = $2 order by position`, [tenantId, screenId]);
+      `select asset_id, seconds from signage_entries where tenant_id = $1 and screen_id = $2 and band_id is not distinct from $3 order by position`, [tenantId, screenId, bandId]);
     return rows.map((r) => ({ assetId: r.asset_id, seconds: r.seconds }));
   }
 
-  async replaceEntries(tenantId: string, screenId: string, entries: SignageEntry[], expectedVersion: number, by: string): Promise<number | null> {
+  async listAllEntries(tenantId: string, screenId: string): Promise<(SignageEntry & { bandId: string | null })[]> {
+    const rows = await this.q<{ asset_id: string; seconds: number | null; band_id: string | null }>(tenantId,
+      `select asset_id, seconds, band_id from signage_entries where tenant_id = $1 and screen_id = $2 order by band_id nulls first, position`, [tenantId, screenId]);
+    return rows.map((r) => ({ assetId: r.asset_id, seconds: r.seconds, bandId: r.band_id }));
+  }
+
+  async replaceEntries(tenantId: string, screenId: string, entries: SignageEntry[], expectedVersion: number, by: string, bandId: string | null = null): Promise<number | null> {
     return this.tx(tenantId, async (c) => {
       // 版を上げることと置き換えを同じトランザクションで行う。読んだ版と違えば、別の人が直していた
       const up = await c.query<{ flow_version: number }>(`update signage_screens set flow_version = flow_version + 1, updated_by = $4, updated_at = now()
         where tenant_id = $1 and id = $2 and status = 'active' and flow_version = $3 returning flow_version`, [tenantId, screenId, expectedVersion, by]);
       if (!up.rows[0]) return null;
-      await c.query(`delete from signage_entries where tenant_id = $1 and screen_id = $2`, [tenantId, screenId]);
+      if (bandId && !(await c.query(`select 1 from signage_bands where tenant_id = $1 and id = $2 and screen_id = $3`, [tenantId, bandId, screenId])).rowCount) {
+        throw new Error('時間帯が見つかりません');
+      }
+      await c.query(`delete from signage_entries where tenant_id = $1 and screen_id = $2 and band_id is not distinct from $3`, [tenantId, screenId, bandId]);
       for (let i = 0; i < entries.length; i++) {
         const e = entries[i]!;
-        await c.query(`insert into signage_entries (id, tenant_id, screen_id, asset_id, position, seconds) values (gen_random_uuid()::text, $1, $2, $3, $4, $5)`,
-          [tenantId, screenId, e.assetId, i, e.seconds]);
+        await c.query(`insert into signage_entries (id, tenant_id, screen_id, asset_id, position, seconds, band_id) values (gen_random_uuid()::text, $1, $2, $3, $4, $5, $6)`,
+          [tenantId, screenId, e.assetId, i, e.seconds, bandId]);
       }
       return up.rows[0].flow_version;
+    });
+  }
+
+  async listBands(tenantId: string, screenId: string): Promise<SignageBand[]> {
+    const rows = await this.q<BandRow>(tenantId,
+      `select id, start_min, end_min, days from signage_bands where tenant_id = $1 and screen_id = $2 order by start_min, position, created_at`, [tenantId, screenId]);
+    return rows.map(toBand);
+  }
+
+  async getBand(tenantId: string, bandId: string): Promise<(SignageBand & { screenId: string }) | null> {
+    const rows = await this.q<BandRow & { screen_id: string }>(tenantId,
+      `select id, screen_id, start_min, end_min, days from signage_bands where tenant_id = $1 and id = $2`, [tenantId, bandId]);
+    return rows[0] ? { ...toBand(rows[0]), screenId: rows[0].screen_id } : null;
+  }
+
+  async addBand(tenantId: string, screenId: string, b: Omit<SignageBand, 'id'>, by: string): Promise<string | null> {
+    return this.tx(tenantId, async (c) => {
+      const up = await c.query(`update signage_screens set flow_version = flow_version + 1, updated_by = $3, updated_at = now()
+        where tenant_id = $1 and id = $2 and status = 'active'`, [tenantId, screenId, by]);
+      if (!up.rowCount) return null;
+      const id = `sgb-${randomUUID()}`;
+      await c.query(`insert into signage_bands (id, tenant_id, screen_id, start_min, end_min, days, created_by) values ($1, $2, $3, $4, $5, $6, $7)`,
+        [id, tenantId, screenId, signageMinutes(b.start), signageMinutes(b.end), b.days, by]);
+      return id;
+    });
+  }
+
+  async updateBand(tenantId: string, bandId: string, b: Omit<SignageBand, 'id'>): Promise<string | null> {
+    return this.tx(tenantId, async (c) => {
+      const rows = (await c.query<{ screen_id: string }>(`update signage_bands set start_min = $3, end_min = $4, days = $5, updated_at = now()
+        where tenant_id = $1 and id = $2 returning screen_id`, [tenantId, bandId, signageMinutes(b.start), signageMinutes(b.end), b.days])).rows;
+      if (!rows[0]) return null;
+      await c.query(`update signage_screens set flow_version = flow_version + 1 where tenant_id = $1 and id = $2`, [tenantId, rows[0].screen_id]);
+      return rows[0].screen_id;
+    });
+  }
+
+  async deleteBand(tenantId: string, bandId: string): Promise<string | null> {
+    return this.tx(tenantId, async (c) => {
+      const rows = (await c.query<{ screen_id: string }>(`delete from signage_bands where tenant_id = $1 and id = $2 returning screen_id`, [tenantId, bandId])).rows;
+      if (!rows[0]) return null;
+      await c.query(`update signage_screens set flow_version = flow_version + 1 where tenant_id = $1 and id = $2`, [tenantId, rows[0].screen_id]);
+      return rows[0].screen_id;
     });
   }
 

@@ -4674,6 +4674,31 @@ console.log('\n■ 63. 店頭サイネージ（内蔵の拡張。第31章の段 
       ? ok('サイネージの流れは版で守って置き換え、画面は鍵で流れと素材（部分の読み出し）を読める。動画に秒数は付かない')
       : ng('サイネージの流れが合わない', JSON.stringify({ put: put.status, stale: stale.status, st: st.body, range: range.status, rangeLen }).slice(0, 600));
 
+    // 時間帯の流れ: 3 つまで・重なりは 409・時間帯ごとの流れ・画面の鍵で読める・ほかの会社は触れない（第31.6.6節）
+    const band1 = await call('a', `/v1/signage/screens/${sid}/bands`, { method: 'POST', body: JSON.stringify({ start: '11:00', end: '14:00', days: 31 }) });
+    const clash = await call('a', `/v1/signage/screens/${sid}/bands`, { method: 'POST', body: JSON.stringify({ start: '13:00', end: '15:00', days: 1 }) });
+    const badTime = await call('a', `/v1/signage/screens/${sid}/bands`, { method: 'POST', body: JSON.stringify({ start: '25:00', end: '26:00' }) });
+    const band2 = await call('a', `/v1/signage/screens/${sid}/bands`, { method: 'POST', body: JSON.stringify({ start: '17:00', end: '22:00' }) });
+    const band3 = await call('a', `/v1/signage/screens/${sid}/bands`, { method: 'POST', body: JSON.stringify({ start: '22:00', end: '02:00' }) });
+    const band4 = await call('a', `/v1/signage/screens/${sid}/bands`, { method: 'POST', body: JSON.stringify({ start: '07:00', end: '09:00' }) });
+    const bid = band1.body?.band?.id;
+    const bflow0 = await call('a', `/v1/signage/screens/${sid}/entries?band=${bid}`);
+    const bput = await call('a', `/v1/signage/screens/${sid}/entries?band=${bid}`, { method: 'PUT', body: JSON.stringify({ version: bflow0.body.version, entries: [{ assetId: video.body.asset.id, seconds: null }] }) });
+    const plainFlow = (await call('a', `/v1/signage/screens/${sid}/entries`)).body;
+    const bst = await play('/state', {}, key);
+    await setEnabled('b', true);
+    const otherBand = await call('b', `/v1/signage/bands/${bid}`, { method: 'PATCH', body: JSON.stringify({ start: '10:00' }) });
+    const otherBandDel = await call('b', `/v1/signage/bands/${bid}`, { method: 'DELETE' });
+    await setEnabled('b', false);
+    const delBand = await call('a', `/v1/signage/bands/${band3.body?.band?.id}`, { method: 'DELETE' });
+    const bandsLeft = (await call('a', `/v1/signage/screens/${sid}/entries`)).body.bands ?? [];
+    band1.status === 201 && clash.status === 409 && badTime.status === 400 && band2.status === 201 && band3.status === 201 && band4.status === 400
+      && bput.status === 200 && plainFlow.entries.length === 2 && plainFlow.bands.length === 3
+      && (bst.body.bands ?? []).find((b) => b.id === bid)?.entries?.length === 1 && bst.body.entries.length === 2
+      && otherBand.status === 404 && otherBandDel.status === 404 && delBand.status === 200 && bandsLeft.length === 2
+      ? ok('サイネージの時間帯の流れは画面ごとに 3 つまで・重なりは断り、時間帯ごとに流れを持ち、画面の鍵で読める。ほかの会社は触れない')
+      : ng('サイネージの時間帯の流れが合わない', JSON.stringify({ b1: band1.status, clash: clash.status, bad: badTime.status, b2: band2.status, b3: band3.status, b4: band4.body, bput: bput.status, plain: plainFlow, bst: bst.body?.bands, other: otherBand.status, otherDel: otherBandDel.status, del: delBand.status, left: bandsLeft.length }).slice(0, 800));
+
     // 鍵の境界: 鍵が無い・違う会社では読めない。生きている知らせで状態が管理の画面に出る（第31.5.1節・第31.12.1節）
     await setEnabled('b', true);
     const noKey = await play('/state');
@@ -4698,7 +4723,7 @@ console.log('\n■ 63. 店頭サイネージ（内蔵の拡張。第31章の段 
     const removed = await call('a', `/v1/admin/extensions/signage/screens/${sid}`, { method: 'DELETE' });
     const gone = await play('/state', {}, key);
     del.status === 200 && (del.body.screens ?? []).includes('画面 1') && after.entries.length === 1 && off.status === 404 && removed.status === 200 && gone.status === 401
-      && ['signage.screen.register', 'signage.asset.add', 'signage.flow.update', 'signage.asset.remove'].every((a) => auditRows.includes(a))
+      && ['signage.screen.register', 'signage.asset.add', 'signage.flow.update', 'signage.asset.remove', 'signage.band.create', 'signage.band.delete'].every((a) => auditRows.includes(a))
       ? ok('サイネージの素材を消すと流れからも外れ、切ると画面は無地、外すと鍵は効かない。登録・素材・流れの直しを監査ログに残す')
       : ng('サイネージの取り外しが合わない', JSON.stringify({ del: del.body, after, off: off.status, removed: removed.status, gone: gone.status, auditRows }).slice(0, 600));
 

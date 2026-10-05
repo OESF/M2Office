@@ -8,6 +8,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { activeSignageBand, signageBandLabel, signageBandsOverlap, signageDaysLabel, signageMinutes } from '@m2office/shared';
 import {
   readMp4, imageSize, usualSlot, jstSlot, cleanReport, normalizeText, fillTemplate, leadingNumber, phraseTemplate, valueSkeleton, pickPath,
   soundMime, externalRefs, signageRequest,
@@ -136,4 +137,26 @@ test('秘書への依頼: 番号の呼び出し・かぎかっこの文・画面
   assert.deepEqual(signageRequest('呼び出しの言い回しを「〇番の方、〇へどうぞ」にして'), { kind: 'template', template: '{番号}番の方、{場所}へどうぞ' });
   assert.equal(signageRequest('サイネージに文字を出す方法は?'), null);
   assert.equal(signageRequest('明日の予定を教えて'), null);
+});
+
+test('時間帯の流れ: 時刻と曜日で当たる時間帯を選び、夜中をまたぐ時間帯は始めた日で見る。重なりを見分ける（第31.6.6節）', () => {
+  // 2026-10-05 は月曜日。日本時間の値を getUTC* で読める形にする
+  const at = (iso: string) => new Date(`${iso}Z`);
+  const lunch = { id: 'l', start: '11:00', end: '14:00', days: 31 };
+  const night = { id: 'n', start: '22:00', end: '02:00', days: 32 };
+  assert.equal(activeSignageBand([lunch, night], at('2026-10-05T11:00:00'))?.id, 'l', '始めの時刻から当たる');
+  assert.equal(activeSignageBand([lunch, night], at('2026-10-05T14:00:00')), null, '終わりの時刻で外れる');
+  assert.equal(activeSignageBand([lunch, night], at('2026-10-10T12:00:00')), null, '土曜は平日の時間帯に当たらない');
+  assert.equal(activeSignageBand([lunch, night], at('2026-10-10T23:30:00'))?.id, 'n', '土曜の夜');
+  assert.equal(activeSignageBand([lunch, night], at('2026-10-11T01:00:00'))?.id, 'n', '日曜の朝 1 時は、土曜に始めた時間帯');
+  assert.equal(activeSignageBand([lunch, night], at('2026-10-12T01:00:00')), null, '月曜の朝 1 時は、日曜に始めていないので外れる');
+  assert.equal(signageBandLabel(lunch), '11:00〜14:00 平日');
+  assert.equal(signageDaysLabel(96), '土日');
+  assert.equal(signageDaysLabel(1 | 4 | 16), '月・水・金');
+  assert.equal(signageBandsOverlap(lunch, { start: '13:00', end: '15:00', days: 1 }), true);
+  assert.equal(signageBandsOverlap(lunch, { start: '13:00', end: '15:00', days: 32 }), false, '曜日が違えば重ならない');
+  assert.equal(signageBandsOverlap(lunch, { start: '14:00', end: '17:00', days: 31 }), false, '終わりと始めが同じなら重ならない');
+  assert.equal(signageBandsOverlap(night, { start: '01:00', end: '03:00', days: 64 }), true, '土曜の夜から日曜の朝にまたぐ');
+  assert.equal(signageMinutes('7:05'), 425);
+  assert.equal(signageMinutes('24:00'), null);
 });

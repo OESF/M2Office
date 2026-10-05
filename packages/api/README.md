@@ -161,7 +161,8 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `PUT /v1/cards/card/:cardId/received` | 受け取った日を直す（`receivedOn`。受け取った本人だけ。今日より後は 400。初めの値は取り込んだ人のタイムゾーンでの取り込んだ日。第27.3節） |
 | `DELETE /v1/cards/card/:cardId` | 読み取れなかった名刺を、待たずに消す（取り込んだ本人だけ） |
 | `GET /v1/signage` ／ `PATCH /v1/signage/screens/:id` | 店頭サイネージ（仕様書 第31章）: 画面の一覧と状態・使っている容量と上限・管理者か ／ 画面の名前・向き・回し方・音の大きさ（`volume` 0〜100）を直す。サイネージを切っている会社と利用範囲の外の人には、`/v1/signage` のどの口も 403 |
-| `GET` ／ `PUT /v1/signage/screens/:id/entries` | 画面の流れと版 ／ 並びごと置き換える（`version` が違えば 409） |
+| `GET` ／ `PUT /v1/signage/screens/:id/entries` | 画面の流れと版（`band` で時間帯の流れ。答えに時間帯の一覧）／ 並びごと置き換える（`version` が違えば 409） |
+| `POST /v1/signage/screens/:id/bands` ／ `PATCH`・`DELETE /v1/signage/bands/:bandId` | 時間帯を足す（`start`・`end`・`days`。画面ごとに 3 つまで、重なれば 409）／ 直す ／ 削除（その流れも。仕様書 第31.6.6節） |
 | `GET` ／ `POST /v1/signage/assets` | 素材の一覧（どの画面の流れに入っているかつき）／ 足す（本文はファイルの中身そのもの。`x-file-name`・`x-width`・`x-height`。形式・縦横・長さをサーバーでも確かめ、H.264 でない動画は 422。HTML は 10 MB・UTF-8 で、外への参照（`http:`・`https:`・`//`）が残れば 422、`<title>` を名前にする。同じ中身は 200 と前の素材） |
 | `PUT /v1/signage/assets/:id/thumbnail` ／ `PATCH` ／ `DELETE /v1/signage/assets/:id` | 縮小画像（JPEG・100 KB まで）／ 名前・割り込みの素材にするか（`isInterrupt`。画像と HTML だけ。50 個まで）・鳴らす音（`jingle`）を直す ／ 消す（流れからも外し、外した画面の名前を返す） |
 | `GET /v1/signage/assets/:id/content` ／ `/thumbnail` | 素材の中身（`Range` に応じる。HTML には外と通信させない `content-security-policy` を付ける）／ 縮小画像 |

@@ -702,8 +702,8 @@ export function signageForAnnouncements(svc: {
   settings(tenantId: string): Promise<{ enabled: boolean }>;
   overview(tenantId: string): Promise<{ screens: { id: string; name: string }[] }>;
   addAsset(tenantId: string, userId: string, up: { path: string; bytes: number; sha256: string; mime: string; name: string; thumbnail: Uint8Array | null }): Promise<{ asset: { id: string } } | { error: string }>;
-  flow(tenantId: string, screenId: string): Promise<{ version: number; entries: { assetId: string; seconds: number | null }[] } | null>;
-  replaceFlow(tenantId: string, userId: string, screenId: string, input: unknown, version: unknown): Promise<{ version: number } | { error: string }>;
+  /** いつもの流れとすべての時間帯の流れの先頭に足す（第31.6.6節） */
+  prependToFlows(tenantId: string, userId: string, screenId: string, head: { assetId: string; seconds: number | null }[]): Promise<boolean>;
   deleteAsset(tenantId: string, userId: string, id: string): Promise<unknown>;
 }): AnnouncementSignage {
   return {
@@ -725,13 +725,7 @@ export function signageForAnnouncements(svc: {
       const screens = (await svc.overview(t)).screens;
       const names: string[] = [];
       for (const id of screenIds) {
-        // ほかの人が同時に直していたら 1 回だけ読み直す
-        for (let i = 0; i < 2; i += 1) {
-          const f = await svc.flow(t, id);
-          if (!f) break;
-          const r = await svc.replaceFlow(t, userId, id, [{ assetId, seconds: null }, ...f.entries.filter((e) => e.assetId !== assetId)], f.version);
-          if (!('error' in r)) { names.push(screens.find((s) => s.id === id)?.name ?? id); break; }
-        }
+        if (await svc.prependToFlows(t, userId, id, [{ assetId, seconds: null }])) names.push(screens.find((s) => s.id === id)?.name ?? id);
       }
       return names;
     },

@@ -17,7 +17,7 @@ import type { CardCorners,
   YeaDeclaration, YeaDeclarationView, YeaResult, SocialDetermination, SocialEvent, InsuranceEligibility, LaborInsuranceData, LaborInsuranceView, ShiftView, HrShiftSettings, HrShift,
   InventoryCount, InventoryCountRow, InventoryCountScope, InventoryCountView, InventorySupplier,
   InventoryBooking, InventoryBookingMapping, InventoryBookingSource, InventoryPublication, InventoryPublicationScope, InventoryPublicSnapshot,
-  SignageAsset, SignageEntry, SignageScreen, SignageSettings, SignageInterruptInput, SignageInterruptView, SignagePhrase, SignageSound, SignageSource,
+  SignageAsset, SignageBand, SignageEntry, SignageScreen, SignageSettings, SignageInterruptInput, SignageInterruptView, SignagePhrase, SignageSound, SignageSource,
   ColumnWordPress, WebColumn, WebColumnSettings, WebColumnVersion, WebColumnTheme, ColumnPlanSlot, ColumnSignageSet,
   Inquiry, InquiryDetail, InquiryParty, InquiryTask, InquiryReply, InquiryMailSkipped, InquiryMonthStats, InquirySettings, InquiryFaqTopic,
   CompetitorOverview, CompetitorFact, CompetitorReport, CompetitorSettings,
@@ -1400,10 +1400,18 @@ export const api = {
     overview: () => call<SignageOverview>('/signage'),
     updateScreen: (id: string, patch: { name?: string; orientation?: 'landscape' | 'portrait'; rotation?: number }) =>
       call<{ screen: SignageScreen }>(`/signage/screens/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
-    flow: (id: string) => call<{ version: number; entries: SignageEntry[] }>(`/signage/screens/${encodeURIComponent(id)}/entries`),
+    /** 画面の流れと版（`band` が無ければいつもの流れ）と、時間帯の一覧（第31.6.6節）。 */
+    flow: (id: string, band: string | null = null) =>
+      call<{ version: number; entries: SignageEntry[]; bands: SignageBand[]; band: string | null }>(`/signage/screens/${encodeURIComponent(id)}/entries${band ? `?band=${encodeURIComponent(band)}` : ''}`),
     /** 流れを並びごと置き換える（読んだ版を送る。ほかの人が先に直していれば 409）。 */
-    saveFlow: (id: string, version: number, entries: SignageEntry[]) =>
-      call<{ version: number }>(`/signage/screens/${encodeURIComponent(id)}/entries`, { method: 'PUT', body: JSON.stringify({ version, entries }) }),
+    saveFlow: (id: string, version: number, entries: SignageEntry[], band: string | null = null) =>
+      call<{ version: number }>(`/signage/screens/${encodeURIComponent(id)}/entries${band ? `?band=${encodeURIComponent(band)}` : ''}`, { method: 'PUT', body: JSON.stringify({ version, entries }) }),
+    /** 時間帯を足す・直す・削除する（画面ごとに 3 つまで。重なれば 409。第31.6.6節）。 */
+    addBand: (screenId: string, band: Omit<SignageBand, 'id'>) =>
+      call<{ band: SignageBand }>(`/signage/screens/${encodeURIComponent(screenId)}/bands`, { method: 'POST', body: JSON.stringify(band) }),
+    updateBand: (bandId: string, patch: Partial<Omit<SignageBand, 'id'>>) =>
+      call<{ band: SignageBand }>(`/signage/bands/${encodeURIComponent(bandId)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    deleteBand: (bandId: string) => call<{ ok: true }>(`/signage/bands/${encodeURIComponent(bandId)}`, { method: 'DELETE' }),
     assets: () => call<{ assets: SignageAssetView[] }>('/signage/assets'),
     /** 素材を足す（画面で縮めた画像か MP4 そのもの）。同じ中身なら前の素材が返る。 */
     upload: (file: Blob, name: string, size?: { width: number; height: number }) =>

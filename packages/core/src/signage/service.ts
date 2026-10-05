@@ -10,7 +10,8 @@ import { EventEmitter } from 'node:events';
 import { rm } from 'node:fs/promises';
 import {
   canUseAgent, SIGNAGE_EXTENSION_ID, SIGNAGE_JINGLES, SIGNAGE_LIMITS, SIGNAGE_MAX_SCREENS, SIGNAGE_STORAGE_LIMIT, SIGNAGE_DEFAULT_COLOR,
-  type AuditEvent, type SignageAsset, type SignageEntry, type SignageOrientation, type SignageReport, type SignageRotation,
+  signageBandLabel, signageBandsOverlap, signageMinutes,
+  type AuditEvent, type SignageAsset, type SignageBand, type SignageEntry, type SignageOrientation, type SignageReport, type SignageRotation,
   type SignageScreen, type SignageSettings,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
@@ -291,7 +292,7 @@ export class SignageService {
   async listAssets(tenantId: string): Promise<(SignageAsset & { screens: string[] })[]> {
     const [assets, screens] = await Promise.all([this.deps.store.listAssets(tenantId), this.deps.store.listScreens(tenantId)]);
     const uses = new Map<string, string[]>();
-    for (const s of screens) for (const e of await this.deps.store.listEntries(tenantId, s.id)) {
+    for (const s of screens) for (const e of await this.deps.store.listAllEntries(tenantId, s.id)) {
       const list = uses.get(e.assetId) ?? [];
       if (!list.includes(s.id)) list.push(s.id);
       uses.set(e.assetId, list);
@@ -454,11 +455,74 @@ export class SignageService {
     return { screens: names };
   }
 
-  /** 画面の流れと版。 */
-  async flow(tenantId: string, screenId: string): Promise<{ version: number; entries: SignageEntry[] } | null> {
+  /**
+   * 画面の流れと版（`bandId` が無ければいつもの流れ。第31.6.6節）。時間帯の一覧も返す。
+   *
+   * @returns 画面か時間帯が見つからなければ `null`
+   */
+  async flow(tenantId: string, screenId: string, bandId: string | null = null): Promise<{ version: number; entries: SignageEntry[]; bands: SignageBand[]; band: string | null } | null> {
     const s = await this.deps.store.getScreen(tenantId, screenId);
     if (!s || s.status !== 'active') return null;
-    return { version: s.flowVersion, entries: await this.deps.store.listEntries(tenantId, screenId) };
+    const bands = await this.deps.store.listBands(tenantId, screenId);
+    if (bandId && !bands.some((b) => b.id === bandId)) return null;
+    return { version: s.flowVersion, entries: await this.deps.store.listEntries(tenantId, screenId, bandId), bands, band: bandId };
+  }
+
+  /** 時間帯の入力を確かめる（時刻・曜日・重なり・数。第31.6.6節）。 */
+  private async checkBand(tenantId: string, screenId: string, input: { start?: unknown; end?: unknown; days?: unknown }, exceptId: string | null): Promise<Omit<SignageBand, 'id'> | { error: string; status: number }> {
+    const start = typeof input.start === 'string' ? input.start.trim() : '';
+    const end = typeof input.end === 'string' ? input.end.trim() : '';
+    const sm = signageMinutes(start);
+    const em = signageMinutes(end);
+    if (sm === null || em === null) return { error: '始めと終わりの時刻を「17:00」の形で入れてください', status: 400 };
+    if (sm === em) return { error: '始めと終わりの時刻が同じです', status: 400 };
+    const days = input.days === undefined ? 127 : Number(input.days);
+    if (!Number.isInteger(days) || days < 1 || days > 127) return { error: '曜日を 1 つ以上選んでください', status: 400 };
+    const pad = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+    const band = { start: pad(sm), end: pad(em), days };
+    const others = (await this.deps.store.listBands(tenantId, screenId)).filter((b) => b.id !== exceptId);
+    if (exceptId === null && others.length >= SIGNAGE_LIMITS.bands) return { error: `時間帯は 1 つの画面に ${SIGNAGE_LIMITS.bands} つまでです`, status: 400 };
+    const clash = others.find((b) => signageBandsOverlap(b, band));
+    if (clash) return { error: `「${signageBandLabel(clash)}」と時間が重なっています`, status: 409 };
+    return band;
+  }
+
+  /**
+   * 時間帯を足す（第31.6.6節。利用範囲の全員）。
+   *
+   * @remarks 危険度: 低（社内の画面に出すものを変える。ADR-0051）
+   */
+  async addBand(tenantId: string, userId: string, screenId: string, input: { start?: unknown; end?: unknown; days?: unknown }): Promise<{ band: SignageBand } | { error: string; status: number }> {
+    const s = await this.deps.store.getScreen(tenantId, screenId);
+    if (!s || s.status !== 'active') return { error: '画面が見つかりません', status: 404 };
+    const b = await this.checkBand(tenantId, screenId, input, null);
+    if ('error' in b) return b;
+    const id = await this.deps.store.addBand(tenantId, screenId, b, userId);
+    if (!id) return { error: '画面が見つかりません', status: 404 };
+    await this.audit(tenantId, userId, 'signage.band.create', screenId, { start: b.start, end: b.end, days: b.days });
+    this.emit(tenantId, screenId, 'flow');
+    return { band: { id, ...b } };
+  }
+
+  /** 時間帯の時刻と曜日を直す。 */
+  async updateBand(tenantId: string, userId: string, bandId: string, input: { start?: unknown; end?: unknown; days?: unknown }): Promise<{ band: SignageBand } | { error: string; status: number }> {
+    const cur = await this.deps.store.getBand(tenantId, bandId);
+    if (!cur) return { error: '時間帯が見つかりません', status: 404 };
+    const b = await this.checkBand(tenantId, cur.screenId, { start: input.start ?? cur.start, end: input.end ?? cur.end, days: input.days ?? cur.days }, bandId);
+    if ('error' in b) return b;
+    await this.deps.store.updateBand(tenantId, bandId, b);
+    await this.audit(tenantId, userId, 'signage.band.update', cur.screenId, { start: b.start, end: b.end, days: b.days });
+    this.emit(tenantId, cur.screenId, 'flow');
+    return { band: { id: bandId, ...b } };
+  }
+
+  /** 時間帯と、その流れを削除する（素材は残る）。 */
+  async deleteBand(tenantId: string, userId: string, bandId: string): Promise<boolean> {
+    const screenId = await this.deps.store.deleteBand(tenantId, bandId);
+    if (!screenId) return false;
+    await this.audit(tenantId, userId, 'signage.band.delete', screenId, {});
+    this.emit(tenantId, screenId, 'flow');
+    return true;
   }
 
   /**
@@ -466,8 +530,12 @@ export class SignageService {
    *
    * @remarks 危険度: 低（社内の画面に出すものを変える。ADR-0051）
    */
-  async replaceFlow(tenantId: string, userId: string, screenId: string, input: unknown, version: unknown): Promise<{ version: number } | { error: string; status: number }> {
+  async replaceFlow(tenantId: string, userId: string, screenId: string, input: unknown, version: unknown, bandId: string | null = null): Promise<{ version: number } | { error: string; status: number }> {
     if (!Array.isArray(input)) return { error: '流れの形が違います', status: 400 };
+    if (bandId) {
+      const b = await this.deps.store.getBand(tenantId, bandId);
+      if (!b || b.screenId !== screenId) return { error: '時間帯が見つかりません', status: 404 };
+    }
     if (input.length > SIGNAGE_LIMITS.entries) return { error: `流れは ${SIGNAGE_LIMITS.entries} 行までです`, status: 400 };
     if (typeof version !== 'number' || !Number.isInteger(version)) return { error: '流れの版がありません', status: 400 };
     const assets = new Map((await this.deps.store.listAssets(tenantId)).map((a) => [a.id, a]));
@@ -483,7 +551,7 @@ export class SignageService {
       }
       entries.push({ assetId: a.id, seconds });
     }
-    const next = await this.deps.store.replaceEntries(tenantId, screenId, entries, version, userId);
+    const next = await this.deps.store.replaceEntries(tenantId, screenId, entries, version, userId, bandId);
     if (next === null) {
       return (await this.deps.store.getScreen(tenantId, screenId))?.status === 'active'
         ? { error: 'ほかの人が先に流れを直しました。読み直してからもう一度直してください', status: 409 }
@@ -500,6 +568,30 @@ export class SignageService {
     return { version: next };
   }
 
+  /**
+   * 素材を、画面のいつもの流れとすべての時間帯の流れの先頭に足す（同じ素材が入っていれば先頭へ動かす）。
+   * お知らせとコラムの画像が使う（時間帯によって出なくならないように。第31.6.6節）。ほかの人が同時に直していたら 1 回だけ読み直す。
+   *
+   * @returns 足せたか（画面が無ければ `false`）
+   */
+  async prependToFlows(tenantId: string, userId: string, screenId: string, head: SignageEntry[]): Promise<boolean> {
+    const first = await this.flow(tenantId, screenId);
+    if (!first) return false;
+    const ids = new Set(head.map((e) => e.assetId));
+    let ok = true;
+    for (const band of [null, ...first.bands.map((b) => b.id)]) {
+      let done = false;
+      for (let i = 0; i < 2 && !done; i += 1) {
+        const f = await this.flow(tenantId, screenId, band);
+        if (!f) break;
+        const r = await this.replaceFlow(tenantId, userId, screenId, [...head, ...f.entries.filter((e) => !ids.has(e.assetId))], f.version, band);
+        done = !('error' in r);
+      }
+      ok = ok && done;
+    }
+    return ok;
+  }
+
   /** 画面の鍵から画面を引く（再生のページ）。外した画面・違う会社の鍵は `null`。 */
   async screenByKey(tenantId: string, key: string | null): Promise<ScreenRecord | null> {
     if (!key || !SECRET_FORMAT.test(key)) return null;
@@ -511,20 +603,25 @@ export class SignageService {
    */
   async playState(tenantId: string, s: ScreenRecord): Promise<{
     screen: { id: string; name: string; orientation: SignageOrientation; rotation: SignageRotation; volume: number; flowVersion: number };
-    entries: SignageEntry[]; assets: PlayAsset[]; interruptAssets: string[]; sounds: { id: string; mime: string }[]; jingle: string;
+    entries: SignageEntry[]; bands: (SignageBand & { entries: SignageEntry[] })[]; assets: PlayAsset[]; interruptAssets: string[]; sounds: { id: string; mime: string }[]; jingle: string;
     imageSeconds: number; color: string; company: string; serverTime: string;
   }> {
-    const [entries, all, tenantSettings, tenant, sounds] = await Promise.all([
-      this.deps.store.listEntries(tenantId, s.id), this.deps.store.listAssets(tenantId), this.deps.repo.getTenantSettings(tenantId), this.deps.repo.findTenantById(tenantId),
-      this.deps.store.listSounds(tenantId),
+    const [rows, bandList, all, tenantSettings, tenant, sounds] = await Promise.all([
+      this.deps.store.listAllEntries(tenantId, s.id), this.deps.store.listBands(tenantId, s.id), this.deps.store.listAssets(tenantId),
+      this.deps.repo.getTenantSettings(tenantId), this.deps.repo.findTenantById(tenantId), this.deps.store.listSounds(tenantId),
     ]);
-    const used = new Set(entries.map((e) => e.assetId));
+    // いつもの流れと、時間帯ごとの流れ（端末が時刻を見て選ぶ。つながらない間も切り替わるよう、すべて渡す。第31.6.6節）
+    const plain = ({ assetId, seconds }: SignageEntry) => ({ assetId, seconds });
+    const entries = rows.filter((e) => e.bandId === null).map(plain);
+    const bands = bandList.map((b) => ({ ...b, entries: rows.filter((e) => e.bandId === b.id).map(plain) }));
+    const used = new Set(rows.map((e) => e.assetId));
     // 割り込みの素材も取り置く（つながらない間にも出せるように。第31.9.1節）
     const interrupts = all.filter((a) => a.isInterrupt && a.kind !== 'video');
     for (const a of interrupts) used.add(a.id);
     return {
       screen: { id: s.id, name: s.name, orientation: s.orientation, rotation: s.rotation, volume: s.volume, flowVersion: s.flowVersion },
       entries,
+      bands,
       assets: all.filter((a) => used.has(a.id)).map(({ id, kind, mime, sha256, bytes, width, height, durationMs, caption }) => ({ id, kind, mime, sha256, bytes, width, height, durationMs, caption })),
       interruptAssets: interrupts.map((a) => a.id),
       sounds: sounds.map((x) => ({ id: x.id, mime: x.mime })),
@@ -541,7 +638,7 @@ export class SignageService {
     const a = await this.deps.store.getAsset(tenantId, assetId);
     if (!a) return null;
     if (a.isInterrupt && a.kind !== 'video') return a;
-    const entries = await this.deps.store.listEntries(tenantId, screenId);
+    const entries = await this.deps.store.listAllEntries(tenantId, screenId);
     return entries.some((e) => e.assetId === assetId) ? a : null;
   }
 
