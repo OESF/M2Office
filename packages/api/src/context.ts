@@ -430,6 +430,8 @@ export function buildDeps(): AppDeps {
       return (await enqueueJob(repo, { tenantId, requestedBy: userId, def, input, origin: 'menu', actor: { type: 'user', id: userId } })).runId;
     },
     runStatus: async (tenantId, runId) => (await repo.getRun(tenantId, runId))?.status ?? null,
+    // 動画のモデル（段 2。既定は Veo 3.1 Lite）
+    ...(process.env['MODEL_VIDEO']?.trim() ? { videoModel: process.env['MODEL_VIDEO'].trim() } : {}),
   });
   columns.planner = new ColumnPlanner({
     service: columns.service, store: columns.service.store, repo, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,

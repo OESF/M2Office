@@ -5,7 +5,7 @@
  */
 
 import type { Logger } from '../log/logger.js';
-import type { LlmExtractRequest, LlmImageGenerateRequest, LlmProvider, LlmRequest, LlmResponse, ModelTier } from './provider.js';
+import type { LlmExtractRequest, LlmImageGenerateRequest, LlmProvider, LlmRequest, LlmResponse, LlmVideoRequest, ModelTier } from './provider.js';
 
 /** 役割ごとのモデル名。設定で差し替えられる（仕様書 第20.2節）。 */
 export interface GeminiModelMap {
@@ -80,6 +80,8 @@ export class OpenAiCompatibleProvider implements LlmProvider {
     name = 'gemini',
     /** 退避したことを残すロガー（仕様書 第20.2.5節）。無ければ残さない。 */
     private readonly log?: Pick<Logger, 'warn'>,
+    /** 動画の作業を見に行く間隔と、待つ上限（ミリ秒。自動テストで短くする）。 */
+    private readonly video: { pollMs: number; timeoutMs: number } = { pollMs: 10_000, timeoutMs: 8 * 60_000 },
   ) {
     this.name = name;
   }
@@ -273,6 +275,57 @@ export class OpenAiCompatibleProvider implements LlmProvider {
     const part = (json.candidates?.[0]?.content?.parts ?? []).find((p) => p.inlineData?.data);
     if (!part?.inlineData?.data) return null;
     return { bytes: new Uint8Array(Buffer.from(part.inlineData.data, 'base64')), mimeType: part.inlineData.mimeType ?? 'image/png' };
+  }
+
+  /**
+   * 動画を作る（Veo。仕様書 第32.18.6節）。720p で 8 秒を作り、延長の指示があれば 7 秒延長する。
+   *
+   * @remarks 作業を頼み（`predictLongRunning`）、できるまで見に行き、鍵を付けて受け取る。延長に失敗したら最初の動画だけを返す。
+   * 始まりの絵があれば人物は大人だけ（`allow_adult`）、無ければ決まりのとおり `allow_all`（指示で人物を描かないよう頼む）
+   */
+  async generateVideo(req: LlmVideoRequest): Promise<{ bytes: Uint8Array; mimeType: 'video/mp4'; extended: boolean } | null> {
+    const base = this.baseUrl.replace(/\/openai\/?$/, '');
+    const b64 = (b: Uint8Array) => Buffer.from(b).toString('base64');
+    const first = await this.runVideo(base, req.model, {
+      prompt: req.prompt,
+      ...(req.image ? { image: { inlineData: { mimeType: req.image.mimeType, data: b64(req.image.bytes) } } } : {}),
+    }, { aspectRatio: req.aspectRatio, resolution: '720p', durationSeconds: 8, personGeneration: req.image ? 'allow_adult' : 'allow_all' });
+    if (!first) return null;
+    if (!req.extendPrompt) return { bytes: first, mimeType: 'video/mp4', extended: false };
+    const longer = await this.runVideo(base, req.model, {
+      prompt: req.extendPrompt, video: { inlineData: { mimeType: 'video/mp4', data: b64(first) } },
+    }, { numberOfVideos: 1, resolution: '720p' }).catch(() => null);
+    return longer ? { bytes: longer, mimeType: 'video/mp4', extended: true } : { bytes: first, mimeType: 'video/mp4', extended: false };
+  }
+
+  /** 動画の作業を 1 つ頼み、できるまで待って受け取る。返らなければ `null`。 */
+  private async runVideo(base: string, model: string, instance: Record<string, unknown>, parameters: Record<string, unknown>): Promise<Uint8Array | null> {
+    const headers = { 'content-type': 'application/json', 'x-goog-api-key': this.apiKey };
+    const res = await fetch(`${base}/models/${encodeURIComponent(model)}:predictLongRunning`, {
+      method: 'POST', headers, body: JSON.stringify({ instances: [instance], parameters }),
+    });
+    if (!res.ok) throw new LlmRequestError(`動画を作れませんでした (${res.status})`, await res.text().catch(() => ''));
+    const op = (await res.json()) as { name?: string };
+    if (!op.name) throw new LlmRequestError('動画を作れませんでした（作業の名前が返りませんでした）', '');
+    const deadline = Date.now() + this.video.timeoutMs;
+    for (;;) {
+      await new Promise((r) => setTimeout(r, this.video.pollMs));
+      const poll = await fetch(`${base}/${op.name}`, { headers: { 'x-goog-api-key': this.apiKey } });
+      if (!poll.ok) throw new LlmRequestError(`動画の作業を確かめられませんでした (${poll.status})`, await poll.text().catch(() => ''));
+      const st = (await poll.json()) as {
+        done?: boolean; error?: { message?: string };
+        response?: { generateVideoResponse?: { generatedSamples?: { video?: { uri?: string } }[] } };
+      };
+      if (st.done) {
+        if (st.error) throw new LlmRequestError('動画を作れませんでした', st.error.message ?? '');
+        const uri = st.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri;
+        if (!uri) return null;
+        const file = await fetch(uri, { headers: { 'x-goog-api-key': this.apiKey } });
+        if (!file.ok) throw new LlmRequestError(`動画を受け取れませんでした (${file.status})`, '');
+        return new Uint8Array(await file.arrayBuffer());
+      }
+      if (Date.now() > deadline) throw new LlmRequestError('動画ができるまでに時間がかかりすぎました', '');
+    }
   }
 }
 

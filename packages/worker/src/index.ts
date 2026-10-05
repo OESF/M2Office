@@ -228,6 +228,8 @@ const columnSignage = new ColumnSignageService({
   columns: columns.store, repo, files, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
   signage: signageForColumns(signage),
   runStatus: async (tenantId, runId) => (await repo.getRun(tenantId, runId))?.status ?? null,
+  // 動画のモデル（段 2。既定は Veo 3.1 Lite）
+  ...(process.env['MODEL_VIDEO']?.trim() ? { videoModel: process.env['MODEL_VIDEO'].trim() } : {}),
 });
 const engine = new RunEngine({
   repo, llm, registry, connector, files, resolveDefinition, isAvailable, logger: log, research, notices,

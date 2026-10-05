@@ -92,10 +92,12 @@ export interface AssetUpload {
   /** 画面で調べた値（動画の縦横。サーバーでも確かめる）。 */
   width?: number;
   height?: number;
+  /** 動画の下に重ねて出す字幕（コラムから作った動画。第32.18.6節）。動画のときだけ使う。 */
+  caption?: string | null;
 }
 
 /** 再生のページに渡す素材（中身の場所は ID で引く）。 */
-export type PlayAsset = Pick<SignageAsset, 'id' | 'kind' | 'mime' | 'sha256' | 'bytes' | 'width' | 'height' | 'durationMs'>;
+export type PlayAsset = Pick<SignageAsset, 'id' | 'kind' | 'mime' | 'sha256' | 'bytes' | 'width' | 'height' | 'durationMs' | 'caption'>;
 
 /**
  * 店頭サイネージの処理。
@@ -363,7 +365,9 @@ export class SignageService {
       try { await files.put(tenantId, assetKey(id), await r.read(0, r.size)); } finally { await r.close(); }
       await rm(up.path, { force: true });
     }
-    await this.deps.store.insertAsset(tenantId, { id, kind, name, mime, bytes: up.bytes, sha256: up.sha256, width, height, durationMs, thumbnail: thumb }, userId);
+    // 字幕は動画だけ（2 行・80 字まで）
+    const caption = kind === 'video' && up.caption ? up.caption.split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 2).join('\n').slice(0, 80) || null : null;
+    await this.deps.store.insertAsset(tenantId, { id, kind, name, mime, bytes: up.bytes, sha256: up.sha256, width, height, durationMs, thumbnail: thumb, caption }, userId);
     await this.audit(tenantId, userId, 'signage.asset.add', id, { name, kind, bytes: up.bytes, sha256: up.sha256 });
     return { asset: (await this.deps.store.getAsset(tenantId, id))!, existing: false };
   }
@@ -502,7 +506,7 @@ export class SignageService {
     return {
       screen: { id: s.id, name: s.name, orientation: s.orientation, rotation: s.rotation, volume: s.volume, flowVersion: s.flowVersion },
       entries,
-      assets: all.filter((a) => used.has(a.id)).map(({ id, kind, mime, sha256, bytes, width, height, durationMs }) => ({ id, kind, mime, sha256, bytes, width, height, durationMs })),
+      assets: all.filter((a) => used.has(a.id)).map(({ id, kind, mime, sha256, bytes, width, height, durationMs, caption }) => ({ id, kind, mime, sha256, bytes, width, height, durationMs, caption })),
       interruptAssets: interrupts.map((a) => a.id),
       sounds: sounds.map((x) => ({ id: x.id, mime: x.mime })),
       jingle: tenantSettings.signage.jingle,

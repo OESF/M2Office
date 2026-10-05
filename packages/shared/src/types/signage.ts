@@ -145,6 +145,12 @@ export interface SignageAsset {
   isInterrupt: boolean;
   /** 割り込みの素材にしたときの音（`null` なら会社の既定）。 */
   jingle: string | null;
+  /**
+   * 動画の下に重ねて出す字幕（コラムから作った動画の題名と一言。第32.18.6節）。無ければ `null`。
+   *
+   * @remarks 生成 AI に字を描かせないため、字は再生の画面が重ねる
+   */
+  caption: string | null;
   createdAt: string;
 }
 

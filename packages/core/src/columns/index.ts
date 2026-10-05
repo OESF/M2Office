@@ -21,6 +21,6 @@ export { WEB_COLUMN_AGENTS, WEB_COLUMN_DRAFT, WEB_COLUMN_PLACE, WEB_COLUMN_COVER
 export { columnMaterialsFrom } from './materials.js';
 export { PostgresColumnSignageStore, MemoryColumnSignageStore, type ColumnSignageStore, type StoredColumnSignage, type ColumnSignagePatch } from './signage-store.js';
 export {
-  ColumnSignageService, signageForColumns, planScenes, scenePrompt, slideSvg, signageDigest, cleanCaption, SIGNAGE_SIZE,
+  ColumnSignageService, signageForColumns, planScenes, scenePrompt, slideSvg, signageDigest, cleanCaption, videoPrompts, checkVideo, videoCaption, SIGNAGE_SIZE,
   type ColumnSignageDeps, type ColumnSignageOutlet, type ColumnSignageViewer, type SlideInput, type SignageSide,
 } from './signage.js';

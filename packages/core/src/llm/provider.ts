@@ -112,6 +112,26 @@ export interface LlmProvider {
    * 作った画像は社外に出る前に、呼び出し側が確かめる
    */
   generateImage?(req: LlmImageGenerateRequest): Promise<{ bytes: Uint8Array; mimeType: string } | null>;
+  /**
+   * 動画を作る（コラムの店頭サイネージ用の動画。仕様書 第32.18.6節）。数分かかる。
+   *
+   * @remarks 持たない提供者（見本・ローカル AI）では未定義にし、呼び出し側は「作れない」と伝える。
+   * 安全の判定で止められたなど、動画が返らなければ `null`。延長できなければ最初の動画だけを返す（`extended: false`）
+   */
+  generateVideo?(req: LlmVideoRequest): Promise<{ bytes: Uint8Array; mimeType: 'video/mp4'; extended: boolean } | null>;
+}
+
+/** 動画を作る依頼（{@link LlmProvider.generateVideo}）。 */
+export interface LlmVideoRequest {
+  /** 使うモデル（例: `veo-3.1-lite-generate-preview`）。 */
+  model: string;
+  /** 最初の 8 秒の指示（英語）。 */
+  prompt: string;
+  /** 始まりの絵。無ければ指示だけから作る。 */
+  image?: { bytes: Uint8Array; mimeType: string };
+  aspectRatio: '16:9' | '9:16';
+  /** 延長（7 秒）の指示（英語）。あれば最初の動画を延長する。 */
+  extendPrompt?: string;
 }
 
 /** 画像を作る依頼（{@link LlmProvider.generateImage}）。 */

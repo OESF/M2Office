@@ -14,6 +14,7 @@ export type ColumnSignagePatch = Partial<{
   scenes: ColumnSignageScene[];
   outputs: ColumnSignageOutput[];
   aiAttempts: number;
+  videoAttempts: number;
   note: string;
   error: string | null;
   runId: string | null;
@@ -28,6 +29,8 @@ export interface StoredColumnSignage extends ColumnSignageSet {
   digest: string | null;
   assetIds: string[];
   aiAttempts: number;
+  /** 動画を作った回数（月の上限に数える）。 */
+  videoAttempts: number;
 }
 
 /**
@@ -45,11 +48,13 @@ export interface ColumnSignageStore {
   update(tenantId: string, id: string, patch: ColumnSignagePatch): Promise<void>;
   /** `making` の組を 1 つだけ受け持つ（同じ組を二重に作らない）。受け持てたら `true`。 */
   claim(tenantId: string, id: string, staleBeforeIso: string): Promise<boolean>;
+  /** `since` 以降に作った動画の回数（会社で月の上限に数える）。 */
+  videoAttemptsSince(tenantId: string, since: string): Promise<number>;
 }
 
 interface Row {
   tenant_id: string; id: string; column_id: string; kind: ColumnSignageKind; status: ColumnSignageStatus;
-  scenes: ColumnSignageScene[]; outputs: ColumnSignageOutput[]; ai_attempts: number; note: string; error: string | null;
+  scenes: ColumnSignageScene[]; outputs: ColumnSignageOutput[]; ai_attempts: number; video_attempts: number; note: string; error: string | null;
   run_id: string | null; digest: string | null; screen_ids: string[]; asset_ids: string[]; publish_until: unknown;
   created_by: string; created_at: unknown; updated_at: unknown;
 }
@@ -60,7 +65,7 @@ function toSet(r: Row): StoredColumnSignage {
   return {
     id: r.id, columnId: r.column_id, kind: r.kind, status: r.status, scenes: r.scenes ?? [], outputs: r.outputs ?? [], note: r.note,
     error: r.error, runId: r.run_id, screenIds: r.screen_ids ?? [], publishUntil: iso(r.publish_until), createdBy: r.created_by,
-    createdAt: iso(r.created_at)!, updatedAt: iso(r.updated_at)!, digest: r.digest, assetIds: r.asset_ids ?? [], aiAttempts: r.ai_attempts,
+    createdAt: iso(r.created_at)!, updatedAt: iso(r.updated_at)!, digest: r.digest, assetIds: r.asset_ids ?? [], aiAttempts: r.ai_attempts, videoAttempts: r.video_attempts ?? 0,
   };
 }
 
@@ -68,7 +73,7 @@ function toSet(r: Row): StoredColumnSignage {
 function patchColumns(patch: ColumnSignagePatch): { sets: string[]; values: unknown[] } {
   const map: Record<keyof ColumnSignagePatch, [string, (v: unknown) => unknown]> = {
     status: ['status', (v) => v], scenes: ['scenes', (v) => JSON.stringify(v)], outputs: ['outputs', (v) => JSON.stringify(v)],
-    aiAttempts: ['ai_attempts', (v) => v], note: ['note', (v) => v], error: ['error', (v) => v], runId: ['run_id', (v) => v],
+    aiAttempts: ['ai_attempts', (v) => v], videoAttempts: ['video_attempts', (v) => v], note: ['note', (v) => v], error: ['error', (v) => v], runId: ['run_id', (v) => v],
     digest: ['digest', (v) => v], screenIds: ['screen_ids', (v) => v], assetIds: ['asset_ids', (v) => v], publishUntil: ['publish_until', (v) => v],
   };
   const sets: string[] = [];
@@ -151,6 +156,12 @@ export class PostgresColumnSignageStore implements ColumnSignageStore {
         where tenant_id = $1 and id = $2 and status = 'making' and (claimed_at is null or claimed_at < $3) returning id`, [tenantId, id, staleBeforeIso]);
     return rows.length > 0;
   }
+
+  async videoAttemptsSince(tenantId: string, since: string): Promise<number> {
+    const rows = await this.q<{ n: string | null }>(tenantId,
+      `select coalesce(sum(video_attempts), 0) as n from column_signage where tenant_id = $1 and created_at >= $2`, [tenantId, since]);
+    return Number(rows[0]?.n ?? 0);
+  }
 }
 
 /** 自動テスト用のメモリの置き場。 */
@@ -162,7 +173,7 @@ export class MemoryColumnSignageStore implements ColumnSignageStore {
     const id = `csg-${randomUUID()}`;
     this.rows.unshift({
       tenantId, id, columnId: s.columnId, kind: s.kind, status: 'making', scenes: [], outputs: [], note: '', error: null, runId: null,
-      screenIds: [], publishUntil: null, createdBy: s.createdBy, createdAt: now, updatedAt: now, digest: null, assetIds: [], aiAttempts: 0, claimed: false,
+      screenIds: [], publishUntil: null, createdBy: s.createdBy, createdAt: now, updatedAt: now, digest: null, assetIds: [], aiAttempts: 0, videoAttempts: 0, claimed: false,
     });
     return id;
   }
@@ -192,5 +203,9 @@ export class MemoryColumnSignageStore implements ColumnSignageStore {
     if (!r || r.claimed) return false;
     r.claimed = true;
     return true;
+  }
+
+  async videoAttemptsSince(tenantId: string, since: string): Promise<number> {
+    return this.rows.filter((x) => x.tenantId === tenantId && x.createdAt >= since).reduce((n, x) => n + x.videoAttempts, 0);
   }
 }

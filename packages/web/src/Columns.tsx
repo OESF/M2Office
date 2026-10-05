@@ -556,7 +556,11 @@ function ColumnSignage({ columnId, onApprovals }: { columnId: string; onApproval
       <div className="row">
         <button className="btn ghost" disabled={busy || making || !data.usable}
           onClick={() => void act(() => api.columns.makeSignage(columnId, 'slides'), '作り始めました。数分でできます')}>
-          {latest ? 'サイネージ用を作り直す' : 'サイネージ用を作る'}
+          {latest ? 'サイネージ用を作り直す（画像）' : 'サイネージ用を作る（画像）'}
+        </button>
+        <button className="btn ghost" disabled={busy || making || !data.usable}
+          onClick={() => void act(() => api.columns.makeSignage(columnId, 'video'), '動画を作り始めました。数分かかります')}>
+          動画を作る（15 秒・約 115 円）
         </button>
         {msg && <span className={`columns-note is-${msg.kind}`} role={msg.kind === 'error' ? 'alert' : 'status'}>{msg.text}</span>}
       </div>
@@ -574,7 +578,8 @@ function SignageSet({ set, busy, onSubmit, onWithdraw, onApprovals }: {
   set: ColumnSignageSet; busy: boolean; onSubmit: () => void; onWithdraw: () => void; onApprovals: () => void;
 }) {
   const side = set.outputs[0]?.orientation;
-  const images = set.outputs.filter((o) => o.orientation === side).sort((a, b) => a.index - b.index);
+  const video = set.outputs.find((o) => o.kind === 'video');
+  const images = set.outputs.filter((o) => o.orientation === side && o.kind === 'image').sort((a, b) => a.index - b.index);
   return (
     <div className="columns-signage-set">
       <div className="row small">
@@ -586,7 +591,13 @@ function SignageSet({ set, busy, onSubmit, onWithdraw, onApprovals }: {
       </div>
       {set.error && <p className="error small">{set.error}</p>}
       {set.note.trim() && set.status !== 'making' && <p className="small muted">{set.note}</p>}
-      {images.length > 0 && (
+      {video && (
+        <div className={`columns-signage-images is-${side}`}>
+          {/* 字幕は店頭の画面が重ねて出す（動画そのものには字が無い） */}
+          <video src={api.columns.signageFileUrl(set.id, video.fileId)} poster={images[0] ? api.columns.signageFileUrl(set.id, images[0].fileId) : undefined} controls muted playsInline preload="metadata" />
+        </div>
+      )}
+      {!video && images.length > 0 && (
         <div className={`columns-signage-images is-${side}`}>
           {images.map((o) => (
             <a key={o.fileId} href={api.columns.signageFileUrl(set.id, o.fileId)} target="_blank" rel="noreferrer">

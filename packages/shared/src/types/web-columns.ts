@@ -322,3 +322,7 @@ export const COLUMN_SIGNAGE_CAPTION_MAX = 30;
 export const COLUMN_SIGNAGE_DAYS = 30;
 /** 紙芝居の 1 枚を出す秒数。 */
 export const COLUMN_SIGNAGE_SECONDS = 8;
+/** 店頭サイネージ用の動画を会社で月に作れる本数（作り直しも数える。仕様書 第32.18.6節 段 2）。 */
+export const COLUMN_SIGNAGE_VIDEO_MONTHLY_LIMIT = 10;
+/** 店頭サイネージ用の動画の既定のモデル（Veo 3.1 Lite。`MODEL_VIDEO` で変えられる）。 */
+export const COLUMN_SIGNAGE_VIDEO_MODEL = 'veo-3.1-lite-generate-preview';

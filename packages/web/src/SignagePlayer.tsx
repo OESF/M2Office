@@ -34,7 +34,7 @@ interface PlayInterrupt {
 interface PlayState {
   screen: { id: string; name: string; orientation: 'landscape' | 'portrait'; rotation: 0 | 90 | 180 | 270; volume: number; flowVersion: number };
   entries: { assetId: string; seconds: number | null }[];
-  assets: { id: string; kind: 'image' | 'video' | 'html'; mime: string; sha256: string; bytes: number; width: number; height: number; durationMs: number | null }[];
+  assets: { id: string; kind: 'image' | 'video' | 'html'; mime: string; sha256: string; bytes: number; width: number; height: number; durationMs: number | null; caption?: string | null }[];
   interruptAssets?: string[];
   sounds?: { id: string; mime: string }[];
   interrupts?: PlayInterrupt[];
@@ -47,7 +47,7 @@ interface PlayState {
 }
 
 /** 表示の 1 枚（前と後ろの 2 枚を重ねて切り替える）。 */
-interface Layer { seq: number; assetId: string; kind: 'image' | 'video' | 'html'; url: string; html: string | null; thumb: string | null; seconds: number; durationMs: number | null }
+interface Layer { seq: number; assetId: string; kind: 'image' | 'video' | 'html'; url: string; html: string | null; thumb: string | null; seconds: number; durationMs: number | null; caption: string | null }
 
 /** 出している割り込み（素材なら中身を開いたもの）。 */
 interface Showing { item: PlayInterrupt; url: string | null; html: string | null; kind: 'text' | 'image' | 'html' }
@@ -364,6 +364,7 @@ function Player({ screenKey, onUnregistered }: { screenKey: string; onUnregister
         const layer: Layer = {
           seq: ++seq.current, assetId: a.id, kind: a.kind, url: a.kind === 'html' ? '' : URL.createObjectURL(blob), html,
           thumb: thumbBlob ? URL.createObjectURL(thumbBlob) : null, seconds: e.seconds ?? state.imageSeconds, durationMs: a.durationMs,
+          caption: a.kind === 'video' ? a.caption ?? null : null,
         };
         pos.current = at;
         current.current = a.id;
@@ -661,6 +662,10 @@ function LayerView({ layer, front, paused, onReady, onEnded, onFail }: {
       {bg && <div className="signage-bg" style={{ backgroundImage: `url(${bg})` }} />}
       {layer.kind === 'image' && <img className="signage-media" src={layer.url} alt="" onLoad={onReady} onError={onFail} />}
       {layer.kind === 'video' && <video ref={video} className="signage-media" src={layer.url} muted playsInline preload="auto" onCanPlay={onReady} onEnded={onEnded} onError={onFail} />}
+      {/* コラムから作った動画の字幕（題名と一言。生成 AI に字を描かせないため、ここで重ねる。第32.18.6節） */}
+      {layer.kind === 'video' && layer.caption && (
+        <div className="signage-caption">{layer.caption.split('\n').map((l, i) => <div key={i} className={i === 0 && layer.caption!.includes('\n') ? 'title' : 'line'}>{l}</div>)}</div>
+      )}
       {layer.kind === 'html' && layer.html !== null && <HtmlFrame html={layer.html} onLoad={onReady} />}
     </div>
   );

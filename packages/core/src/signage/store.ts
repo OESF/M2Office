@@ -87,12 +87,12 @@ const toScreen = (r: ScreenRow): ScreenRecord => ({
 
 interface AssetRow {
   id: string; kind: SignageAsset['kind']; name: string; mime: SignageAsset['mime']; bytes: string | number; sha256: string;
-  width: number; height: number; duration_ms: number | null; has_thumbnail: boolean; is_interrupt: boolean; jingle: string | null; created_at: unknown;
+  width: number; height: number; duration_ms: number | null; has_thumbnail: boolean; is_interrupt: boolean; jingle: string | null; caption: string | null; created_at: unknown;
 }
-const ASSET_COLS = 'id, kind, name, mime, bytes, sha256, width, height, duration_ms, thumbnail is not null as has_thumbnail, is_interrupt, jingle, created_at';
+const ASSET_COLS = 'id, kind, name, mime, bytes, sha256, width, height, duration_ms, thumbnail is not null as has_thumbnail, is_interrupt, jingle, caption, created_at';
 const toAsset = (r: AssetRow): SignageAsset => ({
   id: r.id, kind: r.kind, name: r.name, mime: r.mime, bytes: Number(r.bytes), sha256: r.sha256, width: r.width, height: r.height,
-  durationMs: r.duration_ms, hasThumbnail: r.has_thumbnail, isInterrupt: r.is_interrupt, jingle: r.jingle, createdAt: iso(r.created_at),
+  durationMs: r.duration_ms, hasThumbnail: r.has_thumbnail, isInterrupt: r.is_interrupt, jingle: r.jingle, caption: r.caption ?? null, createdAt: iso(r.created_at),
 });
 
 interface TargetRow {
@@ -366,9 +366,9 @@ export class PostgresSignageStore implements SignageStore {
   }
 
   async insertAsset(tenantId: string, a: AssetInput, by: string): Promise<void> {
-    await this.q(tenantId, `insert into signage_assets (id, tenant_id, kind, name, mime, bytes, sha256, width, height, duration_ms, thumbnail, created_by, updated_by)
-      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12)`,
-    [a.id, tenantId, a.kind, a.name, a.mime, a.bytes, a.sha256, a.width, a.height, a.durationMs, a.thumbnail ? Buffer.from(a.thumbnail) : null, by]);
+    await this.q(tenantId, `insert into signage_assets (id, tenant_id, kind, name, mime, bytes, sha256, width, height, duration_ms, thumbnail, created_by, updated_by, caption)
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12, $13)`,
+    [a.id, tenantId, a.kind, a.name, a.mime, a.bytes, a.sha256, a.width, a.height, a.durationMs, a.thumbnail ? Buffer.from(a.thumbnail) : null, by, a.caption]);
   }
 
   async renameAsset(tenantId: string, id: string, name: string, by: string): Promise<SignageAsset | null> {
