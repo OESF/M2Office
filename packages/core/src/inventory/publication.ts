@@ -9,7 +9,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import {
   INVENTORY_PUBLICATION_MAX, INVENTORY_PUBLIC_STATUS_LABELS, type AuditEvent, type InventoryItemView, type InventoryPublication, type InventoryPublicationScope,
-  type InventoryPublicField, type InventoryPublicRow, type InventoryPublicSnapshot,
+  type InventoryPublicField, type InventoryPublicRow, type InventoryPublicSnapshot, type InventoryPublicStatus,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { InventoryService } from './service.js';
@@ -33,6 +33,31 @@ export interface InventoryPublisherDeps {
   service: InventoryService;
   repo: Repository;
   logger?: { warn: (msg: string, meta?: Record<string, unknown>) => void };
+}
+
+/** 公開した品目の品切れ・入荷（第31.6.7節）。 */
+export interface StockChange {
+  /** 公開の名前 */
+  name: string;
+  /** `out` は品切れになった、`back` は入荷した */
+  kind: 'out' | 'back';
+}
+
+/** 品切れ・入荷を受け取る口。`current` はいま公開している品目の名前。 */
+export type StockChangeListener = (tenantId: string, changes: StockChange[], current: Set<string>) => Promise<void>;
+
+/**
+ * 前と後の状態から、品切れ・入荷を取り出す（純粋な関数）。前に無かった品目（新しく公開した品目）は変化にしない。
+ */
+export function stockChanges(before: Map<string, InventoryPublicStatus>, after: Map<string, InventoryPublicStatus>): StockChange[] {
+  const out: StockChange[] = [];
+  for (const [name, now] of after) {
+    const was = before.get(name);
+    if (!was || was === now) continue;
+    if (now === 'out') out.push({ name, kind: 'out' });
+    else if (was === 'out') out.push({ name, kind: 'back' });
+  }
+  return out;
 }
 
 /** 公開のまとまり 1 つの、画面に出すもの（管理者向け）。 */
@@ -116,6 +141,7 @@ td.n{text-align:right;white-space:nowrap}.s{white-space:nowrap;font-weight:600}.
  */
 export class InventoryPublisher {
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly stockListeners: StockChangeListener[] = [];
 
   constructor(private readonly deps: InventoryPublisherDeps) {}
 
@@ -237,6 +263,14 @@ export class InventoryPublisher {
     return { ok: true };
   }
 
+  /**
+   * 公開した品目の品切れ・入荷を受け取る口を足す（店頭サイネージの案内。第31.6.7節）。
+   * 作り直すたびに、前の中身と比べた変化と、いま公開している品目の名前を渡す。
+   */
+  onStockChange(listener: StockChangeListener): void {
+    this.stockListeners.push(listener);
+  }
+
   /** 公開中のまとまりをすべて作り直す。公開を切った会社では何もしない。作り直した数を返す。 */
   async refresh(tenantId: string, now: Date = new Date()): Promise<number> {
     if (!(await this.enabled(tenantId))) return 0;
@@ -244,8 +278,19 @@ export class InventoryPublisher {
     if (live.length === 0) return 0;
     const today = new Date(now.getTime() + 9 * 3600_000).toISOString().slice(0, 10);
     const views = await this.deps.service.list(tenantId, { today });
+    const before = new Map<string, InventoryPublicStatus>();
+    const after = new Map<string, InventoryPublicStatus>();
     for (const p of live) {
-      await this.deps.store.savePublicationSnapshot(tenantId, p.id, buildPublicSnapshot(views, p.scope!, now.toISOString()), now.toISOString());
+      for (const r of p.snapshot?.items ?? []) before.set(r.name, r.status);
+      const snap = buildPublicSnapshot(views, p.scope!, now.toISOString());
+      for (const r of snap.items) after.set(r.name, r.status);
+      await this.deps.store.savePublicationSnapshot(tenantId, p.id, snap, now.toISOString());
+    }
+    if (this.stockListeners.length) {
+      const changes = stockChanges(before, after);
+      for (const l of this.stockListeners) {
+        await l(tenantId, changes, new Set(after.keys())).catch((err: unknown) => this.deps.logger?.warn('在庫の案内を渡せませんでした', { tenantId, error: String(err) }));
+      }
     }
     return live.length;
   }

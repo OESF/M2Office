@@ -4064,6 +4064,37 @@ console.log('\n■ 60. 在庫管理（内蔵の拡張。第29章、ADR-0045）')
     const pubJson2 = await (await fetch(`${API}/v1/public/inventory/${pubKey}.json`)).json().catch(() => ({}));
     await call('a', '/v1/inventory/moves', { method: 'POST', body: JSON.stringify({ kind: 'out', itemId, qty: 2, reason: '確認の戻し' }) }, 'member');
     pubJson2.items?.[0]?.available === Math.max(0, pubAvail + 2) ? ok('数が変わると、公開の中身を作り直す') : ng('公開の数が変わらない', JSON.stringify(pubJson2));
+    // 店頭サイネージの在庫の入荷と品切れの案内（第31.6.7節）。公開した品目が品切れ・入荷になると案内の素材を足し、入荷で品切れを外す
+    {
+      const { rows: [sigBefore] } = await owner.query(`select signage from tenant_settings where tenant_id = 't-alpha'`);
+      await call('a', '/v1/admin/extensions/signage/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+      await call('a', '/v1/admin/extensions/signage/settings', { method: 'PUT', body: JSON.stringify({ stockNotices: true }) });
+      const avail0 = (await call('a', `/v1/inventory/items/${itemId}`, {}, 'member')).body?.item?.available ?? 0;
+      if (avail0 <= 0) { await call('a', '/v1/inventory/moves', { method: 'POST', body: JSON.stringify({ kind: 'in', itemId, qty: 1 - avail0 }) }, 'member'); await sleep(1800); }
+      const avail1 = Math.max(1, avail0);
+      // 案内の 1 枚を組んで素材にするまで数秒かかるため、できるまで待つ（間に API を呼んで接続を保つ）
+      const noticeOf = async (kind) => {
+        for (let i = 0; i < 30; i++) {
+          await sleep(500);
+          await call('a', '/v1/signage');
+          const { rows } = await owner.query(`select kind, asset_id from signage_stock_notices where tenant_id = 't-alpha'`);
+          if (rows.some((r) => r.kind === kind)) return rows;
+        }
+        return (await owner.query(`select kind, asset_id from signage_stock_notices where tenant_id = 't-alpha'`)).rows;
+      };
+      await call('a', '/v1/inventory/moves', { method: 'POST', body: JSON.stringify({ kind: 'out', itemId, qty: avail1, reason: '確認の品切れ' }) }, 'member');
+      const outRows = await noticeOf('out');
+      await call('a', '/v1/inventory/moves', { method: 'POST', body: JSON.stringify({ kind: 'in', itemId, qty: avail1 }) }, 'member');
+      const backRows = await noticeOf('back');
+      const outGone = outRows[0] ? (await owner.query(`select 1 from signage_assets where id = $1`, [outRows[0].asset_id])).rowCount === 0 : false;
+      // 後片付け（案内の素材と、サイネージの設定を元に戻す）
+      for (const r of backRows) await call('a', `/v1/signage/assets/${r.asset_id}`, { method: 'DELETE' });
+      await call('a', '/v1/admin/extensions/signage/settings', { method: 'PUT', body: JSON.stringify({ stockNotices: false }) });
+      await owner.query(`update tenant_settings set signage = $2 where tenant_id = $1`, ['t-alpha', sigBefore?.signage ? JSON.stringify(sigBefore.signage) : null]);
+      outRows.length === 1 && outRows[0].kind === 'out' && backRows.length === 1 && backRows[0].kind === 'back' && outGone
+        ? ok('在庫の公開の品目が品切れになるとサイネージに品切れの案内を足し、入荷すると入荷の案内に替える')
+        : ng('在庫の入荷と品切れの案内が違う', JSON.stringify({ outRows, backRows, outGone }));
+    }
     // まとまりを分ける（第29.12.2節）。別のまとまりは別の URL で、別の品目を出す。止めてあるものだけ削除できる
     const otherItem = withQty.body?.item?.id;
     const pub2 = await call('a', '/v1/inventory/publications', { method: 'POST', body: '{}' });

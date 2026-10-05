@@ -63,12 +63,14 @@ export interface SignageSettings {
   callTemplate: string;
   /** 番号だけの呼び出しの言い回し。 */
   callTemplateNoPlace: string;
+  /** 在庫の入荷と品切れの案内を流すか（第31.6.7節。既定は切り）。 */
+  stockNotices: boolean;
 }
 
 /** サイネージの既定の設定。 */
 export const DEFAULT_SIGNAGE_SETTINGS: SignageSettings = {
   enabled: false, imageSeconds: 10, color: null, interruptSeconds: 15, chime: true, jingle: 'pinpon',
-  callTemplate: '{番号}番の方、{場所}へお越しください', callTemplateNoPlace: '{番号}番の方、お越しください',
+  callTemplate: '{番号}番の方、{場所}へお越しください', callTemplateNoPlace: '{番号}番の方、お越しください', stockNotices: false,
 };
 
 /** M2Office が持つジングル（画面の側で合成する。第31.7.3節）。 */

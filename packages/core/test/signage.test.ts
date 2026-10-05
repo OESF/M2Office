@@ -11,7 +11,8 @@ import assert from 'node:assert/strict';
 import { activeSignageBand, signageBandLabel, signageBandsOverlap, signageDaysLabel, signageMinutes } from '@m2office/shared';
 import {
   readMp4, imageSize, usualSlot, jstSlot, cleanReport, normalizeText, fillTemplate, leadingNumber, phraseTemplate, valueSkeleton, pickPath,
-  soundMime, externalRefs, signageRequest, signageFileRequest,
+  soundMime, externalRefs, signageRequest, signageFileRequest, stockChanges, stockCardText, applyStockChanges, sweepStockNotices,
+  type SignageService,
 } from '../src/index.js';
 
 const box = (type: string, ...parts: Uint8Array[]) => {
@@ -178,4 +179,45 @@ test('秘書の頼み: 流れに足す・時間帯を作る・消す・設定を
   assert.deepEqual(signageRequest('呼び出しの音を止めて'), { kind: 'settings', patch: { chime: false } }, '割り込みを消す頼みと取り違えない');
   assert.deepEqual(signageRequest('呼び出しを消して'), { kind: 'clear', all: false, screens: [] });
   assert.equal(signageRequest('明日17時から22時に会議を入れて'), null, '予定の頼みは取らない');
+});
+
+test('在庫の案内: 品切れ・入荷を見分け、案内を足して入荷で品切れを外す。入荷は 3 日で外し、切っている会社では何もしない（第31.6.7節）', async () => {
+  const S = (o: Record<string, 'in' | 'low' | 'out'>) => new Map(Object.entries(o));
+  assert.deepEqual(stockChanges(S({ A: 'in', B: 'out', C: 'low' }), S({ A: 'out', B: 'in', C: 'low', D: 'out' })), [{ name: 'A', kind: 'out' }, { name: 'B', kind: 'back' }],
+    '新しく公開した品目（D）は変化にしない');
+  assert.deepEqual(stockChanges(S({ A: 'low' }), S({ A: 'in' })), [], '残りわずかから在庫ありは案内しない');
+  assert.equal(stockCardText('見本の品', 'back').period, '入荷しました');
+  let on = true;
+  const notices = new Map<string, { itemName: string; kind: 'back' | 'out'; assetId: string; expiresAt: string | null }>();
+  const deleted: string[] = [];
+  const prepended: string[] = [];
+  let n = 0;
+  const service = {
+    settings: async () => ({ enabled: true, stockNotices: on, color: null }),
+    overview: async () => ({ screens: [{ id: 's1' }, { id: 's2' }] }),
+    addAsset: async () => ({ asset: { id: `a${++n}` }, existing: false }),
+    deleteAsset: async (_t: string, _u: string, id: string) => { deleted.push(id); return { screens: [] }; },
+    prependToFlows: async (_t: string, _u: string, screen: string, head: { assetId: string }[]) => { prepended.push(`${screen}:${head[0]!.assetId}`); return true; },
+    deps: { store: {
+      listStockNotices: async () => [...notices.values()],
+      saveStockNotice: async (_t: string, x: { itemName: string; kind: 'back' | 'out'; assetId: string; expiresAt: string | null }) => { notices.set(x.itemName, x); },
+      deleteStockNotice: async (_t: string, name: string) => { notices.delete(name); },
+    } },
+  } as unknown as SignageService;
+  const now = new Date('2026-10-05T00:00:00Z');
+  assert.deepEqual(await applyStockChanges(service, 't1', [{ name: '見本の品', kind: 'out' }], new Set(['見本の品']), now), { added: 1, removed: 0 });
+  assert.deepEqual(prepended, ['s1:a1', 's2:a1'], 'すべての画面の流れの先頭に足す');
+  assert.equal(notices.get('見本の品')?.expiresAt, null, '品切れは入荷するまで');
+  await applyStockChanges(service, 't1', [{ name: '見本の品', kind: 'back' }], new Set(['見本の品']), now);
+  assert.deepEqual(deleted, ['a1'], '入荷したら品切れの案内を外す');
+  assert.equal(notices.get('見本の品')?.kind, 'back');
+  assert.equal(await sweepStockNotices(service, 't1', new Date(now.getTime() + 2 * 86_400_000)), 0, '3 日までは残す');
+  assert.equal(await sweepStockNotices(service, 't1', new Date(now.getTime() + 3 * 86_400_000 + 1)), 1, '3 日で外す');
+  await applyStockChanges(service, 't1', Array.from({ length: 8 }, (_, i) => ({ name: `品${i}`, kind: 'out' as const })), new Set(Array.from({ length: 8 }, (_, i) => `品${i}`)), now);
+  assert.equal(notices.size, 5, '1 回に 5 品目まで');
+  await applyStockChanges(service, 't1', [], new Set(['品0']), now);
+  assert.equal(notices.size, 1, '公開から外れた品目の案内は外す');
+  on = false;
+  assert.deepEqual(await applyStockChanges(service, 't1', [{ name: 'x', kind: 'out' }], new Set(['x']), now), { added: 0, removed: 0 }, '切っていれば何もしない');
+  assert.equal(await sweepStockNotices(service, 't1', now), 1, '切ったら流している案内を外す');
 });

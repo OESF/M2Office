@@ -3,7 +3,7 @@
  */
 
 export { SIGNAGE_PACKAGE, SIGNAGE_EXTENSION_VERSION } from './package.js';
-export { PostgresSignageStore, type SignageStore, type ScreenRecord, type PairingRecord } from './store.js';
+export { PostgresSignageStore, type SignageStore, type ScreenRecord, type PairingRecord, type StockNotice } from './store.js';
 export {
   SignageService, signageAccess, hashSecret, assetKey, jstSlot, usualSlot, cleanReport, SECRET_FORMAT,
   type SignageServiceDeps, type AssetUpload, type PlayAsset,
@@ -17,3 +17,4 @@ export {
   type SignageInterruptsDeps, type InterruptError,
 } from './interrupts.js';
 export { type TargetRecord, type InterruptRecord } from './store.js';
+export { applyStockChanges, sweepStockNotices, stockCardText, STOCK_BACK_DAYS, STOCK_NOTICE_MAX } from './stock.js';

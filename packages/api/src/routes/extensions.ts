@@ -190,7 +190,8 @@ export function extensionsRoute(deps: AppDeps) {
    */
   /**
    * 店頭サイネージの会社の設定を変える（送った項目だけ。第31.4節）。すぐ画面に届く。
-   * 画像の秒数 3〜120・店の色 `#RRGGBB` か `null`・割り込みの秒数 5〜60・ジングルの入り切りと既定の音・呼び出しの言い回し（`{番号}` を含む 60 字まで）。
+   * 画像の秒数 3〜120・店の色 `#RRGGBB` か `null`・割り込みの秒数 5〜60・ジングルの入り切りと既定の音・呼び出しの言い回し（`{番号}` を含む 60 字まで）・
+   * 在庫の入荷と品切れの案内の入り切り（`stockNotices`。第31.6.7節）。
    */
   app.put(`/${SIGNAGE_EXTENSION_ID}/settings`, async (c) => {
     const { tenant, user } = c.get('ctx');
@@ -215,6 +216,11 @@ export function extensionsRoute(deps: AppDeps) {
       if (typeof n !== 'number' || !Number.isInteger(n) || n < 5 || n > 60) return c.json({ error: '割り込みを出す秒数は 5〜60 秒にしてください' }, 400);
       next.interruptSeconds = n;
       changed.push('interruptSeconds');
+    }
+    if (body['stockNotices'] !== undefined) {
+      if (typeof body['stockNotices'] !== 'boolean') return c.json({ error: '在庫の案内の入り切りは真偽で送ってください' }, 400);
+      next.stockNotices = body['stockNotices'];
+      changed.push('stockNotices');
     }
     if (body['chime'] !== undefined) {
       if (typeof body['chime'] !== 'boolean') return c.json({ error: 'ジングルの入り切りは真偽で送ってください' }, 400);

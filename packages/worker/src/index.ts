@@ -11,7 +11,7 @@
 
 import {
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
-  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink,
+  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink,
   NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator,
@@ -152,6 +152,8 @@ const laborCalendar = new LaborCalendar({
 const signage = new SignageService({
   store: new PostgresSignageStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), repo, files,
 });
+// 在庫の公開を作り直したときの品切れ・入荷を、店頭サイネージの案内にする（第31.6.7節。会社が入れたときだけ）
+inventoryPublisher.onStockChange(async (tenantId, changes, current) => { await applyStockChanges(signage, tenantId, changes, current); });
 // 割り込みの文を出し終えて 24 時間で消し、行を 90 日で消す（第31.13節）
 const signageInterrupts = new SignageInterrupts({ service: signage, repo });
 // Web のコラム（内蔵の拡張。仕様書 第32章）。秘書から頼まれた下書きと、承認の後に WordPress に入れるのが使う
@@ -569,6 +571,9 @@ while (running) {
         if (r.notified > 0) log.info('つながらないサイネージの画面を知らせました', { tenantId, screens: r.notified });
         const p = await signageInterrupts.sweep(tenantId);
         if (p.texts + p.rows > 0) log.info('サイネージの割り込みの文と古い行を消しました', { tenantId, texts: p.texts, rows: p.rows });
+        // 在庫の入荷の案内は 3 日で外す（第31.6.7節）
+        const stock = await sweepStockNotices(signage, tenantId);
+        if (stock > 0) log.info('サイネージの在庫の案内を外しました', { tenantId, notices: stock });
       } catch (err) {
         log.warn('サイネージの見回りに失敗しました', { tenantId, err });
       }

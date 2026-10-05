@@ -22,5 +22,5 @@ export {
   InventoryBookings, STANDARD_BOOKING_MAPPING, BOOKING_PAYLOAD_MAX_BYTES, hookHash, menuKey, pick, toInstant, toBookingEvent, skeleton,
   type InventoryBookingsDeps, type BookingEvent, type IngestResult,
 } from './bookings.js';
-export { InventoryPublisher, buildPublicSnapshot, renderPublicPage, PUBLICATION_KEY, type InventoryPublisherDeps, type PublicationView } from './publication.js';
+export { InventoryPublisher, buildPublicSnapshot, renderPublicPage, stockChanges, PUBLICATION_KEY, type InventoryPublisherDeps, type PublicationView, type StockChange, type StockChangeListener } from './publication.js';
 export { JanLookupService, JAN_CACHE_MS, type JanLookup, type JanLookupDeps } from './jan.js';

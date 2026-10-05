@@ -14,6 +14,15 @@ import {
 
 const iso = (v: unknown): string => (v instanceof Date ? v.toISOString() : String(v ?? ''));
 
+/** 流している在庫の案内 1 つ（第31.6.7節）。 */
+export interface StockNotice {
+  itemName: string;
+  kind: 'back' | 'out';
+  assetId: string;
+  /** 外す日時（入荷の案内だけ。品切れは入荷するまで `null`） */
+  expiresAt: string | null;
+}
+
 /** 置き場の中の画面（鍵のハッシュと状態を含む）。 */
 export interface ScreenRecord {
   id: string;
@@ -176,6 +185,11 @@ export interface SignageStore {
   deleteBand(tenantId: string, bandId: string): Promise<string | null>;
   /** 時間帯 1 つと、その画面の ID。 */
   getBand(tenantId: string, bandId: string): Promise<(SignageBand & { screenId: string }) | null>;
+  /** 流している在庫の案内（第31.6.7節）。 */
+  listStockNotices(tenantId: string): Promise<StockNotice[]>;
+  /** 在庫の案内を残す（同じ品目の前の案内は置き換える）。 */
+  saveStockNotice(tenantId: string, n: StockNotice): Promise<void>;
+  deleteStockNotice(tenantId: string, itemName: string): Promise<void>;
   /** 素材が入っている画面。 */
   screensUsing(tenantId: string, assetId: string): Promise<string[]>;
 
@@ -495,6 +509,22 @@ export class PostgresSignageStore implements SignageStore {
       await c.query(`update signage_screens set flow_version = flow_version + 1 where tenant_id = $1 and id = $2`, [tenantId, rows[0].screen_id]);
       return rows[0].screen_id;
     });
+  }
+
+  async listStockNotices(tenantId: string): Promise<StockNotice[]> {
+    const rows = await this.q<{ item_name: string; kind: 'back' | 'out'; asset_id: string; expires_at: unknown }>(tenantId,
+      `select item_name, kind, asset_id, expires_at from signage_stock_notices where tenant_id = $1 order by created_at`, [tenantId]);
+    return rows.map((r) => ({ itemName: r.item_name, kind: r.kind, assetId: r.asset_id, expiresAt: r.expires_at ? iso(r.expires_at) : null }));
+  }
+
+  async saveStockNotice(tenantId: string, n: StockNotice): Promise<void> {
+    await this.q(tenantId, `insert into signage_stock_notices (tenant_id, item_name, kind, asset_id, expires_at) values ($1, $2, $3, $4, $5)
+      on conflict (tenant_id, item_name) do update set kind = excluded.kind, asset_id = excluded.asset_id, expires_at = excluded.expires_at, created_at = now()`,
+    [tenantId, n.itemName, n.kind, n.assetId, n.expiresAt]);
+  }
+
+  async deleteStockNotice(tenantId: string, itemName: string): Promise<void> {
+    await this.q(tenantId, `delete from signage_stock_notices where tenant_id = $1 and item_name = $2`, [tenantId, itemName]);
   }
 
   async deleteBand(tenantId: string, bandId: string): Promise<string | null> {

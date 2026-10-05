@@ -498,6 +498,9 @@ function SignageFields({ settings, busy, onChanged }: { settings: SignageSetting
         </select>
       </div>
       <div className="row wrap">
+        <label className="check"><input type="checkbox" checked={!!settings.stockNotices} disabled={busy} onChange={(e) => save({ stockNotices: e.target.checked })} /> 在庫の入荷と品切れを流す（在庫の Web への公開で承認した品目）</label>
+      </div>
+      <div className="row wrap">
         {sounds.map((x) => (
           <span key={x.id} className="ext-chip">{x.name}（{(x.durationMs / 1000).toFixed(1)} 秒）
             <button className="link" onClick={() => void api.admin.deleteSignageSound(x.id).then(() => { reload(); onChanged(); }).catch((e) => fail(e, '削除できませんでした'))} aria-label={`${x.name}を削除`}>×</button>
