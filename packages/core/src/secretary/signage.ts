@@ -63,8 +63,8 @@ export function signageRequest(message: string): SignageRequest | null {
     const template = tpl[1]!.replace(/[〇○◯]+|\{番号\}|\{場所\}/g, (x) => (x.startsWith('{') ? x : ++n === 1 ? '{番号}' : '{場所}'));
     return { kind: 'template', template };
   }
-  // 画面を外す（管理者）
-  const rm = /^(.+?)の画面を外して/.exec(m);
+  // 画面を切断する（管理者）
+  const rm = /^(.+?)の画面を(?:外して|切断して)/.exec(m);
   if (rm) return { kind: 'remove', screen: rm[1]! };
   // 割り込みの素材の音（「焼き上がりの案内はベルにして」）
   const jg = /^(.+?)(?:の案内)?は(.+?)(?:の音)?にして/.exec(m);
@@ -111,7 +111,7 @@ export async function answerSignage(deps: SignageSecretaryDeps, tenantId: string
     const o = await service.overview(tenantId);
     if (!o.screens.length) return '登録した画面はまだありません。';
     const ago = (iso: string | null) => (iso ? `${Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60_000))} 分前` : '通信なし');
-    return o.screens.map((s) => `${s.name}: ${s.online ? 'つながっています' : `つながっていません（最後の通信 ${ago(s.lastSeenAt)}）`}${s.lastReport?.audio === false ? '・音が出せません' : ''}`).join('\n');
+    return o.screens.map((s) => `${s.name}: ${s.online ? '接続中' : `未接続（最後の通信 ${ago(s.lastSeenAt)}）`}${s.lastReport?.audio === false ? '・音が出せません' : ''}`).join('\n');
   }
   if (req.kind === 'clear') {
     const target = req.screens.length ? byName(req.screens) : null;
@@ -140,7 +140,7 @@ export async function answerSignage(deps: SignageSecretaryDeps, tenantId: string
     const s = byName([req.screen])[0];
     if (!s) return `「${req.screen}」という画面がありません（画面: ${screens.map((x) => x.name).join('・') || 'なし'}）。`;
     await service.removeScreen(tenantId, userId, s.id);
-    return `「${s.name}」の画面を外しました。30 日のうちに同じ端末で登録し直せば、名前と流れのまま戻ります。`;
+    return `「${s.name}」の画面を切断しました。30 日のうちに同じ端末で登録し直せば、名前と流れのまま戻ります。`;
   }
   const assets = (await service.deps.store.listAssets(tenantId)).filter((a) => a.isInterrupt);
   const findAsset = (hint: string) => {

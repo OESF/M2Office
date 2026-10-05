@@ -131,6 +131,8 @@ test('秘書への依頼: 番号の呼び出し・かぎかっこの文・画面
   assert.deepEqual(signageRequest('入口と待合に「雨の日セール」を出して'), { kind: 'show', text: '雨の日セール', screens: ['入口', '待合'], seconds: undefined, chime: undefined });
   assert.deepEqual(signageRequest('呼び出しを全部消して'), { kind: 'clear', all: true, screens: [] });
   assert.deepEqual(signageRequest('サイネージはつながってる?'), { kind: 'status' });
+  assert.deepEqual(signageRequest('入口の画面を切断して'), { kind: 'remove', screen: '入口' });
+  assert.deepEqual(signageRequest('入口の画面を外して'), { kind: 'remove', screen: '入口' });
   assert.deepEqual(signageRequest('呼び出しの言い回しを「〇番の方、〇へどうぞ」にして'), { kind: 'template', template: '{番号}番の方、{場所}へどうぞ' });
   assert.equal(signageRequest('サイネージに文字を出す方法は?'), null);
   assert.equal(signageRequest('明日の予定を教えて'), null);

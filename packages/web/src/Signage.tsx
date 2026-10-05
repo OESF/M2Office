@@ -270,7 +270,7 @@ function ScreenCard({ s, active, admin, thumb, wantThumb, onSelect, onChanged, o
         <input className="signage-name" defaultValue={s.name} maxLength={20} aria-label="画面の名前" onClick={(e) => e.stopPropagation()}
           onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== s.name) patch({ name: v }); }} />
         <div className="row small">
-          <span className={`badge ${s.online ? 'ok' : 'warn'}`}>{s.online ? 'つながっている' : 'つながっていない'}</span>
+          <span className={`badge ${s.online ? 'ok' : 'warn'}`}>{s.online ? '接続中' : '未接続'}</span>
           <span className="muted">{ago(s.lastSeenAt)}</span>
           {uncached > 0 && <span className="badge warn">取り置けていない {uncached}</span>}
           {s.online && s.lastReport?.audio === false && <span className="badge warn">音が出せない</span>}
@@ -288,7 +288,7 @@ function ScreenCard({ s, active, admin, thumb, wantThumb, onSelect, onChanged, o
           <select value={s.rotation} onChange={(e) => patch({ rotation: Number(e.target.value) })} aria-label="回し方">
             {[0, 90, 180, 270].map((r) => <option key={r} value={r}>{r} 度</option>)}
           </select>
-          {admin && <button className="btn ghost small" onClick={() => void api.admin.removeSignageScreen(s.id).then(onChanged).catch((e) => onError(describeError(e, '外せませんでした')))}>外す</button>}
+          {admin && <button className="btn ghost small" onClick={() => void api.admin.removeSignageScreen(s.id).then(onChanged).catch((e) => onError(describeError(e, '切断できませんでした')))}>切断</button>}
         </div>
       </div>
     </div>

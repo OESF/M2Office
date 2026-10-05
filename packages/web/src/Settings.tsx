@@ -243,7 +243,7 @@ export function Settings({ me, agents, onChanged, section }: {
         {([['brief', 'ブリーフ（朝・週次）'], ['run', '実行の完了'], ['approval', '承認の依頼'], ['failure', '失敗'],
           ...(me.inventory ? [['inventory', '在庫（残りわずか・無くなる見込み・使用期限）']] as const : []),
           ...(me.hr || me.hrSelf ? [['attendance', '給与・勤怠（給与明細・打刻の直し・有給・時間外の上限・有給の取得義務）']] as const : []),
-          ...(me.signage ? [['signage', 'サイネージ（画面がつながっていない）']] as const : []),
+          ...(me.signage ? [['signage', 'サイネージ（画面が未接続）']] as const : []),
           ...(me.inquiries ? [['inquiry', '問い合わせ（次にやることの期限・対応中のまま）']] as const : []),
           ...(me.competitors ? [['competitor', '競合の分析（探し終えた・見回り終えた）']] as const : []),
           ...(me.announcements ? [['announcement', 'お知らせの作成（出せなかった出し先）']] as const : []),

@@ -251,7 +251,7 @@ export class SignageService {
       return { error: '番号が見つからないか、切れています。画面に出ている番号を確かめてください', status: 404 };
     }
     const active = await this.deps.store.listScreens(tenantId);
-    if (active.length >= SIGNAGE_MAX_SCREENS) return { error: `画面は ${SIGNAGE_MAX_SCREENS} 台までです。使っていない画面を外してから登録してください`, screens: active.map((s) => s.name), status: 409 };
+    if (active.length >= SIGNAGE_MAX_SCREENS) return { error: `画面は ${SIGNAGE_MAX_SCREENS} 台までです。使っていない画面を切断してから登録してください`, screens: active.map((s) => s.name), status: 409 };
     const orientation: SignageOrientation = p.viewport.height > p.viewport.width ? 'portrait' : 'landscape';
     const all = await this.deps.store.listScreens(tenantId, true);
     const recent = all.filter((s) => s.status === 'removed' && s.removedAt && now.getTime() - Date.parse(s.removedAt) <= 30 * 86_400_000)
@@ -576,7 +576,7 @@ export class SignageService {
         const prefs = await this.deps.repo.getUserSettings(tenantId, userId);
         if (!prefs.notifications.kinds.signage) continue;
         await this.deps.repo.createNotification({
-          id: randomUUID(), tenantId, userId, kind: 'signage', title: `サイネージの「${s.name}」がつながっていません`,
+          id: randomUUID(), tenantId, userId, kind: 'signage', title: `サイネージの「${s.name}」が未接続です`,
           body: '画面の端末の電源とネットワークを確かめてください', runId: null, readAt: null, createdAt: now.toISOString(),
         });
       }

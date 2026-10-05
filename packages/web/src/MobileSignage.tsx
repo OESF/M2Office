@@ -151,7 +151,7 @@ export function MobileSignage({ me }: { me: Me }) {
           return (
             <div key={s.id} className="card m-sig-screen">
               <div className="row"><strong className="grow">{s.name}</strong>
-                {!s.online && <span className="badge warn">つながっていない</span>}
+                {!s.online && <span className="badge warn">未接続</span>}
                 {s.lastReport?.audio === false && <span className="badge warn">音なし</span>}
               </div>
               <p className="small">{showingNow ? (showingNow.text ?? assets.find((a) => a.id === showingNow.assetId)?.name ?? '割り込み') : '流れ'}{waiting ? `（待ち ${waiting}）` : ''}</p>
