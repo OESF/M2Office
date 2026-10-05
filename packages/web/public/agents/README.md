@@ -15,34 +15,63 @@ agent01.png ～ agent50.png
 置いた画像は `/agents/agent01.png` として配信されます。
 **置いていない番号は、画面に出ません**（絵の場所ごと詰めて、文字だけになります）。
 
-## 番号の割り当て
+## 番号の割り当て（台帳）
 
-業務エージェントの定義（`packages/core/src/agents/ag-*.ts`）の `face` に番号を書きます。
+**この表が、絵の番号の台帳です。** 番号ごとに、どの業務が使っているかを 1 行で書きます。
+業務エージェントの定義（公式のカタログは `packages/core/src/agents/`、内蔵の拡張は各拡張の `agents.ts`）の `face` に、ここで決めた番号を書きます。
 
-| 番号 | 業務 |
-|---|---|
-| 1 | 社内ナレッジ Q&A（`knowledge-qa`） |
-| 2 | 議事録の作成・共有（`minutes`） |
-| 3 | メールの整理・下書きの作成（`inbox-triage`） |
-| 4 | 日程調整（`scheduling`） |
-| 5 | 週次ブリーフ（`weekly-brief`） |
-| 6 | 秘書の調べもの（`secretary-lookup`） |
-| 7 | 予定の登録（`calendar-register`） |
-| 8 | 朝のブリーフ（`morning-brief`） |
-| 9 | 会議の準備（`meeting-prep`） |
-| 10 | 返信待ちの追跡（`reply-followup`） |
-| 11 | 文書の作成（`document-draft`） |
-| 12 | 表の作成（`sheet-builder`） |
-| 13 | スライドの作成（`slides`） |
-| 14 | 段取りの報告（`secretary-plan-report`） |
-| 15 以降 | 未使用 |
+| 番号 | 業務 | 入っている所 |
+|---|---|---|
+| 1 | 社内ナレッジ Q&A（`knowledge-qa`） | 公式のカタログ |
+| 2 | 議事録の作成・共有（`minutes`） | 公式のカタログ |
+| 3 | メールの整理・下書きの作成（`inbox-triage`） | 公式のカタログ |
+| 4 | 日程調整（`scheduling`） | 公式のカタログ |
+| 5 | 週次ブリーフ（`weekly-brief`） | 公式のカタログ |
+| 6 | 秘書の調べもの（`secretary-lookup`） | 公式のカタログ |
+| 7 | 予定の登録（`calendar-register`） | 公式のカタログ |
+| 8 | 朝のブリーフ（`morning-brief`） | 公式のカタログ |
+| 9 | 会議の準備（`meeting-prep`） | 公式のカタログ |
+| 10 | 返信待ちの追跡（`reply-followup`） | 公式のカタログ |
+| 11 | 文書の作成（`document-draft`） | 公式のカタログ |
+| 12 | 表の作成（`sheet-builder`） | 公式のカタログ |
+| 13 | スライドの作成（`slides`） | 公式のカタログ |
+| 14 | 段取りの報告（`secretary-plan-report`） | 公式のカタログ |
+| 15 | コラムのサイネージ用（`web-columns:signage`） | コラムの作成 |
+| 16 | コラムをサイネージに流す（`web-columns:signage-publish`） | コラムの作成 |
+| 31 | 名刺の取り込み（`business-cards:import`） | 名刺管理 |
+| 32 | 名刺の修正（`business-cards:update`） | 名刺管理 |
+| 33 | 在庫の記録（`inventory:record`） | 在庫管理 |
+| 34 | 納品書から入庫（`inventory:slip`） | 在庫管理 |
+| 35 | 発注の下書き（`inventory:order`） | 在庫管理 |
+| 36 | まとめてのメール（`business-cards:bulk-mail`） | 名刺管理 |
+| 37 | コラムの下書き（`web-columns:draft`） | コラムの作成 |
+| 38 | コラムを WordPress に入れる（`web-columns:place`） | コラムの作成 |
+| 39 | コラムのカバー（`web-columns:cover`） | コラムの作成 |
+| 40 | コラムの表現の決まり（`web-columns:rules`） | コラムの作成 |
+| 41 | 問い合わせを残す（`inquiries:record`） | 問い合わせの記録 |
+| 42 | 問い合わせを調べる（`inquiries:lookup`） | 問い合わせの記録 |
+| 43 | 問い合わせの返事の下書き（`inquiries:reply-draft`） | 問い合わせの記録 |
+| 44 | 問い合わせの返事を送る（`inquiries:reply-send`） | 問い合わせの記録 |
+| 45 | 競合を探す（`competitors:find`） | 競合の分析 |
+| 46 | 競合の分析（`competitors:analyze`） | 競合の分析 |
+| 47 | お知らせの下書き（`announcements:draft`） | お知らせの作成 |
+| 48 | お知らせを出す（`announcements:publish`） | お知らせの作成 |
+| 49 | Web について聞く（`web-review:ask`） | Webの分析 |
+| 50 | Web の依頼文を送る（`web-review:request`） | Webの分析 |
 
-**業務を 1 つ足すたびに、まだ使っていない番号を 1 つ割り当ててください。**
-いまは 50 番まで用意してあります。この表と実際の値が食い違わないよう、
-`packages/core/test/agent-faces.test.ts` が重複と範囲を確かめます。
+**未使用: 17〜30**
 
-`face` を書かない定義（拡張機能で入った業務）は、ID から機械的に決めます
-（`agentFace()`）。絵は必ず出ますが、他の業務と重なることがあります。
+### 業務を足すとき
+
+1. 上の「未使用」から番号を 1 つ選びます（**ほかの業務が使っている番号を使い回さない**）
+2. その番号の行を表に足し、「未使用」から外します
+3. 業務の定義の `face` に、その番号を書きます
+
+`packages/core/test/agent-faces.test.ts` が、**この表と、公式のカタログ・内蔵の拡張の業務の `face` が 1 つずつ合っているか**
+（番号の重なり・表に無い業務・業務の無い行・未使用の書き方の誤り）を確かめます。食い違えば `npm test` が止まります。
+
+`face` を書かない定義（会社が後から入れた拡張機能の業務）は、ID から機械的に決めます（`agentFace()`）。
+ダッシュボードに並べるときは、ここで使っている番号と重ならないように、次の空いている番号にずらします（`assignAgentFaces()`）。
 
 51 個目が要るようになったら、画像を足したうえで
 `packages/shared/src/types/agent.ts` の `AGENT_FACE_COUNT` を増やしてください。

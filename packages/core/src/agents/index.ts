@@ -58,6 +58,35 @@ export function agentFace(def: Pick<AgentDefinition, 'id' | 'face'>): number {
 }
 
 /**
+ * 一覧に並べる業務の絵の番号を、**重ならないように**決める（仕様書 第6.7.4.3節。第 0.269.0 版）。
+ *
+ * @param defs 並べる業務（並びの順に決める）
+ * @returns 業務の ID ごとの絵の番号
+ *
+ * @remarks
+ * 定義に `face` がある業務（M2Office に入っている業務）は、その番号を先に押さえる。
+ * `face` が無い業務（拡張機能で入った業務）は、ID から決めた番号（{@link agentFace}）を使い、
+ * ほかの業務と重なれば、次の空いている番号にずらす。50 枚を使い切ったときだけ重なりを許す。
+ */
+export function assignAgentFaces(defs: Pick<AgentDefinition, 'id' | 'face'>[]): Map<string, number> {
+  const out = new Map<string, number>();
+  const used = new Set<number>();
+  for (const d of defs) {
+    if (d.face === undefined) continue;
+    out.set(d.id, d.face);
+    used.add(d.face);
+  }
+  for (const d of defs) {
+    if (d.face !== undefined) continue;
+    let n = agentFace(d);
+    for (let i = 0; i < AGENT_FACE_COUNT && used.has(n); i++) n = (n % AGENT_FACE_COUNT) + 1;
+    out.set(d.id, n);
+    used.add(n);
+  }
+  return out;
+}
+
+/**
  * エージェント定義を ID と版で解決する。
  *
  * @param agentId エージェントの識別子

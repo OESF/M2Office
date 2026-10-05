@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import { agentDisplayName, isValidAvatar, type AgentDefinition, type Approval, type AuditEvent, type Job, type Run, type User } from '@m2office/shared';
 import {
-  ACTIVE_WINDOW_MIN, HEALTH_WINDOW_MIN, agentFace, buildPresence, healthView, summarizePresence, stepLabel,
+  ACTIVE_WINDOW_MIN, HEALTH_WINDOW_MIN, agentFace, assignAgentFaces, buildPresence, healthView, summarizePresence, stepLabel,
   type HealthView, type TenantExtensions,
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
@@ -395,11 +395,13 @@ export function dashboardRoute(deps: AppDeps) {
       if (r.status === 'failed') t.failed += r.runs;
       todayByAgent.set(r.agentId, t);
     }
+    // 絵の番号は、並べる業務の中で重ならないように決める（第6.7.4.3節）
+    const faces = assignAgentFaces(view.agents);
     const agents = view.agents.map((def) => {
       const busy = byAgent.get(def.id) ?? { running: 0, awaiting: 0, queued: 0 };
       const t = todayByAgent.get(def.id) ?? { runs: 0, failed: 0 };
       return {
-        agentId: def.id, name: def.name, face: agentFace(def), group: agentGroup(view, def),
+        agentId: def.id, name: def.name, face: faces.get(def.id) ?? agentFace(def), group: agentGroup(view, def),
         ...busy, todayRuns: t.runs, todayFailed: t.failed,
       };
     });

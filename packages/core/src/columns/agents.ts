@@ -13,7 +13,7 @@ import { WEB_COLUMNS_EXTENSION_ID, type AgentDefinition } from '@m2office/shared
 import type { ExtensionPackage } from '../extensions/loader.js';
 
 /** 内蔵の拡張の版。付属の業務やツールが変わったら上げる。 */
-export const WEB_COLUMNS_EXTENSION_VERSION = '1.5.0';
+export const WEB_COLUMNS_EXTENSION_VERSION = '1.5.1';
 
 /** 付属の業務「コラムの下書き」（秘書から）。 */
 export const WEB_COLUMN_DRAFT: AgentDefinition = {
@@ -322,7 +322,7 @@ export const WEB_COLUMN_SIGNAGE: AgentDefinition = {
     examples: [{ title: 'サイネージの画面用にする', input: { request: '歯みがきのコラムをサイネージの画面用にして' } }],
     notes: ['コラムの画面の「サイネージ用を作る」からも作れます', '1 枚で伝わらなければ、2〜5 枚の紙芝居にします', '店頭に流すのは承認の後です'],
   },
-  face: 39,
+  face: 15,
 };
 
 /** 付属の業務「コラムをサイネージに流す」（コラムの画面の「承認へ進む」から。第32.18.6節）。 */
@@ -360,7 +360,7 @@ export const WEB_COLUMN_SIGNAGE_PUBLISH: AgentDefinition = {
     examples: [],
     notes: ['コラムの画面の「承認へ進む」（サイネージ用）で始まります', '承認できるのは管理者と承認者です', `承認から 30 日で流れから外れます`],
   },
-  face: 38,
+  face: 16,
 };
 
 /** Web のコラムの付属の業務。 */
