@@ -14,7 +14,7 @@ import { JinglePlayer } from './signage-audio.js';
 import { api, ApiError, describeError, type AccessOptions, type ExtensionView, type HrProposalField, type ScopeValue } from './api.js';
 import {
   INVENTORY_FEATURES, SIGNAGE_DEFAULT_COLOR, SIGNAGE_JINGLES, type HrSettings, type InventoryBookingSource, type InventoryFeature, type InventorySettings,
-  type SignageSettings, type SignageSound, type SignageSource, COLUMN_INDUSTRIES, COLUMN_RULE_SET_LABELS, COLUMN_PLAN_FREQUENCY_LABELS, type ColumnPlanFrequency, type WebColumnSettings, type InquirySettings, COMPETITORS_AUTO_RANGE, COMPETITOR_WATCH_LABELS, competitorAutoMax, competitorWatch, competitorsMax, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type WebReviewCandidates, type WebReviewStatus,
+  type SignageSettings, type SignageSound, type SignageSource, COLUMN_INDUSTRIES, COLUMN_RULE_SET_LABELS, COLUMN_PLAN_FREQUENCY_LABELS, type ColumnPlanFrequency, type WebColumnSettings, type InquirySettings, COMPETITORS_AUTO_RANGE, COMPETITORS_NOTIFY_MAX, COMPETITOR_WATCH_LABELS, competitorAutoMax, competitorWatch, competitorsMax, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type WebReviewCandidates, type WebReviewStatus,
 } from '@m2office/shared';
 import { HelpTip, Markdown } from './help.js';
 import { Icon } from './nav.js';
@@ -753,6 +753,7 @@ function CompetitorMapKeyFields({ settings, busy, onChanged }: { settings: Compe
           </select>
         </label>
       </div>
+      <CompetitorNotifyUsers settings={settings} disabled={busy || working} onChanged={onChanged} onError={setError} />
       <div className="row wrap">
         <span>地図の鍵: {settings.mapKey ? <strong>預けています</strong> : <span className="muted">預けていません</span>}</span>
         {settings.mapKey && <button className="btn ghost small" disabled={busy || working} onClick={remove}>外す</button>}
@@ -762,6 +763,38 @@ function CompetitorMapKeyFields({ settings, busy, onChanged }: { settings: Compe
         <button className="btn small" disabled={busy || working || !key.trim()} onClick={save}>{working ? '確かめています…' : settings.mapKey ? '預け直す' : '預ける'}</button>
       </div>
       {error && <p className="error">{error}</p>}
+    </div>
+  );
+}
+
+/**
+ * 競合の見回りの結果を、管理者のほかに届ける人（仕様書 第36.22節）。管理者は選ばなくても届くので並べない。
+ * 利用範囲の外の人を選んでも届かない（サーバーが確かめる）。
+ */
+function CompetitorNotifyUsers({ settings, disabled, onChanged, onError }: {
+  settings: CompetitorSettings; disabled: boolean; onChanged: () => void; onError: (m: string) => void;
+}) {
+  const [users, setUsers] = useState<{ id: string; name: string }[] | null>(null);
+  useEffect(() => {
+    api.admin.users()
+      .then((r) => setUsers(r.items.filter((u) => u.status === 'active' && !u.roles.includes('admin')).map((u) => ({ id: u.id, name: u.displayName || u.email }))))
+      .catch(() => setUsers([]));
+  }, []);
+  const chosen = settings.notifyUsers ?? [];
+  const toggle = (id: string, on: boolean) => {
+    const next = on ? [...chosen, id] : chosen.filter((x) => x !== id);
+    api.admin.setCompetitorNotifyUsers(next).then(onChanged).catch((e) => onError(describeError(e, '変えられませんでした')));
+  };
+  if (!users) return null;
+  return (
+    <div className="row wrap">
+      <span>見回りの結果を届ける人: 管理者{users.length ? 'と' : ''}</span>
+      {users.map((u) => (
+        <label key={u.id} className="check">
+          <input type="checkbox" checked={chosen.includes(u.id)} disabled={disabled || (!chosen.includes(u.id) && chosen.length >= COMPETITORS_NOTIFY_MAX)}
+            onChange={(e) => toggle(u.id, e.target.checked)} />{u.name}
+        </label>
+      ))}
     </div>
   );
 }

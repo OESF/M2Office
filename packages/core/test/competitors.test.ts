@@ -444,3 +444,19 @@ test('動きの数え方 ②: 推論が本当の変化だけを選び、数・�
   const [plain] = await confirmMoves(null, [subject]);
   assert.equal(plain!.length, 2);
 });
+
+test('届ける人: 定期の見回りの結果を、管理者のほかに選んだ人にも届ける。会社にいない人は選べない（第36.22節）', async () => {
+  const { service, watch, notes, audits } = setup();
+  assert.match(await service.setSettings(who, { notifyUsers: ['nobody'] }) ?? '', /この会社にいない人/);
+  assert.match(await service.setSettings(who, { notifyUsers: 'u1' }) ?? '', /形が違います/);
+  assert.equal(await service.setSettings(who, { notifyUsers: ['u1'] }), null);
+  assert.ok(audits.some((a) => a.action === 'competitor.settings' && a.detail['notifyUsers'] === 1), '監査ログには人数だけ');
+  await service.requestDiscover(who);
+  await watch.tick({ wait: true });
+  const day = 86_400_000;
+  await service.scheduleIfDue('t1', new Date(Date.now() + 35 * day));
+  await watch.tick({ wait: true, now: new Date(Date.now() + 35 * day) });
+  const got = (id: string) => notes.filter((n) => n.userId === id && /競合の動き/.test(n.title)).length;
+  assert.equal(got('boss'), 1, '管理者には届く');
+  assert.equal(got('u1'), 1, '選んだ人にも届く');
+});

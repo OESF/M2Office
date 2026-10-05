@@ -2100,6 +2100,8 @@ export const api = {
     setCompetitorAutoMax: (autoMax: number) => call<{ ok: true }>('/admin/extensions/competitors/settings', { method: 'PUT', body: JSON.stringify({ autoMax }) }),
     /** 競合の分析の定期の見回りの間隔（毎月・毎週・しない）を変える。 */
     setCompetitorWatch: (watch: 'monthly' | 'weekly' | 'off') => call<{ ok: true }>('/admin/extensions/competitors/settings', { method: 'PUT', body: JSON.stringify({ watch }) }),
+    /** 競合の見回りの結果を、管理者のほかに届ける人（第36.22節）。 */
+    setCompetitorNotifyUsers: (notifyUsers: string[]) => call<{ ok: true }>('/admin/extensions/competitors/settings', { method: 'PUT', body: JSON.stringify({ notifyUsers }) }),
     /** コラムの貼るだけのページを入れる・止める（第32.18.4節）。 */
     enableColumnPage: () => call<{ ok: true; urls: { page: string; data: string; rss: string } }>('/admin/extensions/web-columns/page', { method: 'POST', body: '{}' }),
     disableColumnPage: () => call<{ ok: true }>('/admin/extensions/web-columns/page', { method: 'DELETE' }),

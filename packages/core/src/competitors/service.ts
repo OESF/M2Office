@@ -8,7 +8,7 @@
 
 import { randomUUID } from 'node:crypto';
 import {
-  COMPETITORS_AUTO_RANGE, COMPETITORS_EXTENSION_ID, competitorAutoMax, competitorsMax, competitorWatch, canUseAgent,
+  COMPETITORS_AUTO_RANGE, COMPETITORS_EXTENSION_ID, COMPETITORS_NOTIFY_MAX, competitorAutoMax, competitorsMax, competitorWatch, canUseAgent,
   type Competitor, type CompetitorFact, type CompetitorFactKind, type CompetitorWatchInterval, type CompetitorJob, type CompetitorOverview, type CompetitorProfile, type CompetitorReport, type CompetitorSettings,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
@@ -244,8 +244,17 @@ export class CompetitorService {
    *
    * @returns 変えられなければ理由
    */
-  async setSettings(who: CompetitorViewer, patch: { autoMax?: number; watch?: string }): Promise<string | null> {
+  async setSettings(who: CompetitorViewer, patch: { autoMax?: number; watch?: string; notifyUsers?: unknown }): Promise<string | null> {
     const next: Partial<CompetitorSettings> = {};
+    if (patch.notifyUsers !== undefined) {
+      if (!Array.isArray(patch.notifyUsers)) return '届ける人の形が違います';
+      const ids = [...new Set(patch.notifyUsers.map(String))];
+      if (ids.length > COMPETITORS_NOTIFY_MAX) return `届ける人は ${COMPETITORS_NOTIFY_MAX} 人までです`;
+      // この会社の、止めていない人だけ（知らない ID は入れない）
+      const users = new Map((await this.deps.repo.listUsers(who.tenantId)).filter((u) => u.status === 'active').map((u) => [u.id, u]));
+      if (ids.some((id) => !users.has(id))) return '届ける人に、この会社にいない人が入っています';
+      next.notifyUsers = ids;
+    }
     if (patch.autoMax !== undefined) {
       const n = Math.round(patch.autoMax);
       if (!Number.isFinite(n) || n < COMPETITORS_AUTO_RANGE.min || n > COMPETITORS_AUTO_RANGE.max) {
@@ -259,7 +268,7 @@ export class CompetitorService {
     }
     const settings = await this.deps.repo.getTenantSettings(who.tenantId);
     await this.deps.repo.saveTenantSettings(who.tenantId, 'competitors', { ...settings.competitors, ...next }, who.userId);
-    await this.audit(who, 'competitor.settings', 'settings', next);
+    await this.audit(who, 'competitor.settings', 'settings', { ...next, ...(next.notifyUsers ? { notifyUsers: next.notifyUsers.length } : {}) });
     return null;
   }
 
@@ -588,7 +597,7 @@ export class CompetitorService {
   }
 
   /**
-   * 定期の見回りの結果を、利用範囲の中の管理者に届ける（第36.19節。個人設定で切っていれば届けない）。
+   * 定期の見回りの結果を、利用範囲の中の管理者と、管理者が選んだ人に届ける（第36.19節・第36.22節。個人設定で切っていれば届けない）。
    *
    * @param highlights 動きのはじめの 3 件（「競合の名前: 事実」）
    */
@@ -600,7 +609,7 @@ export class CompetitorService {
     const body = changes ? `前の回から ${changes} 件の動きがありました。${highlights.join('／')}` : '前の回から大きな動きはありませんでした';
     let sent = 0;
     for (const u of await repo.listUsers(tenantId)) {
-      if (u.status !== 'active' || !u.roles.includes('admin')) continue;
+      if (u.status !== 'active' || !(u.roles.includes('admin') || (settings.competitors.notifyUsers ?? []).includes(u.id))) continue;
       const groups = await repo.listUserGroupIds(tenantId, u.id);
       if (!canUseAgent(settings.access, COMPETITORS_EXTENSION_ID, u.id, groups)) continue;
       const prefs = await repo.getUserSettings(tenantId, u.id).catch(() => null);

@@ -439,13 +439,15 @@ export function extensionsRoute(deps: AppDeps) {
     return c.json({ ok: true });
   });
 
-  /** 競合の分析の設定（自動で覚える数 `autoMax`・定期の見回りの間隔 `watch`。第 0.239.0 版・第36.19節）。 */
+  /** 競合の分析の設定（自動で覚える数 `autoMax`・定期の見回りの間隔 `watch`・結果を届ける人 `notifyUsers`。第 0.239.0 版・第36.19節・第36.22節）。 */
   app.put(`/${COMPETITORS_EXTENSION_ID}/settings`, async (c) => {
     const { tenant, user } = c.get('ctx');
-    const body = await c.req.json<{ autoMax?: unknown; watch?: unknown }>().catch(() => ({} as { autoMax?: unknown; watch?: unknown }));
+    const body = await c.req.json<{ autoMax?: unknown; watch?: unknown; notifyUsers?: unknown }>().catch(() => ({} as { autoMax?: unknown; watch?: unknown; notifyUsers?: unknown }));
     const problem = await deps.competitors.service.setSettings({ tenantId: tenant.id, userId: user.id }, {
       ...(body.autoMax !== undefined ? { autoMax: Number(body.autoMax) } : {}),
       ...(body.watch !== undefined ? { watch: String(body.watch) } : {}),
+      // 見回りの結果を、管理者のほかに届ける人（第36.22節）
+      ...(body.notifyUsers !== undefined ? { notifyUsers: body.notifyUsers } : {}),
     });
     if (problem) return c.json({ error: problem }, 400);
     return c.json({ ok: true });

@@ -12,7 +12,7 @@ import { COMPETITORS_EXTENSION_ID, type AgentDefinition } from '@m2office/shared
 import type { ExtensionPackage } from '../extensions/loader.js';
 
 /** 内蔵の拡張の版。付属の業務やツールが変わったら上げる。 */
-export const COMPETITORS_EXTENSION_VERSION = '1.2.0';
+export const COMPETITORS_EXTENSION_VERSION = '1.3.0';
 
 /** 付属の業務「競合を探す」（秘書から）。 */
 export const COMPETITOR_FIND: AgentDefinition = {

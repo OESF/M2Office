@@ -173,7 +173,12 @@ export interface CompetitorSettings {
   autoMax: number;
   /** 定期の見回りの間隔（第36.19節。既定は毎月。毎週・しない も選べる） */
   watch: CompetitorWatchInterval;
+  /** 見回りの結果を、管理者のほかに届ける人（利用者の ID。利用範囲の中の人だけに届く。第36.22節） */
+  notifyUsers: string[];
 }
+
+/** 見回りの結果を届ける人の上限（管理者を除く。第36.22節）。 */
+export const COMPETITORS_NOTIFY_MAX = 20;
 
 /** 定期の見回りの間隔。 */
 export type CompetitorWatchInterval = 'monthly' | 'weekly' | 'off';
@@ -182,7 +187,7 @@ export type CompetitorWatchInterval = 'monthly' | 'weekly' | 'off';
 export const COMPETITOR_WATCH_LABELS: Record<CompetitorWatchInterval, string> = { monthly: '毎月', weekly: '毎週', off: 'しない' };
 
 /** 既定（切り）。 */
-export const DEFAULT_COMPETITOR_SETTINGS: CompetitorSettings = { enabled: false, areaOverride: null, mapKey: null, autoMax: COMPETITORS_AUTO_MAX, watch: 'monthly' };
+export const DEFAULT_COMPETITOR_SETTINGS: CompetitorSettings = { enabled: false, areaOverride: null, mapKey: null, autoMax: COMPETITORS_AUTO_MAX, watch: 'monthly', notifyUsers: [] };
 
 /** 会社の設定から、見回りの間隔を読む（古い設定は毎月）。 */
 export function competitorWatch(settings: Pick<CompetitorSettings, 'watch'> | null | undefined): CompetitorWatchInterval {
