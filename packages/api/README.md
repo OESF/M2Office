@@ -272,10 +272,11 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET` ／ `POST /v1/columns/:id/cover` | カバー画像（PNG。`version` で前の版、`download=1` で保存させる）／ 作り直す（`kind`: template・ai・photo、`hint`。新しい版になる） |
 | `POST /v1/columns/:id/photos` | 写真を入れ、そのコラムのカバーにする（本文は写真の中身。JPEG・PNG、10 MB まで。会社の写真の置き場にも入る） |
 | `POST /v1/columns/:id/submit` | 承認へ進める（業務「コラムを WordPress に入れる」を始め、管理者か承認者の承認を待つ。版の指紋を残す。入力にカバーのファイルを含め、承認する人がその画像を見られるようにする。入れられない理由があれば 400） |
-| `GET` ／ `POST /v1/inquiries` | 問い合わせの記録（仕様書 第33.17節）: 一覧（`status`: open・done・dropped・all、`q`、`contactId`）／ 1 行の文から残す（`text`。新しければ 201、前の問い合わせの続きなら 200、どの続きか決まらなければ `ambiguous` と候補）。使えない会社と利用範囲の外の人には、`/v1/inquiries` のどの口も 403 |
+| `GET` ／ `POST /v1/inquiries` | 問い合わせの記録（仕様書 第33.17節）: 一覧（`status`: open・done・dropped・all、`q`、`contactId`、`channel`・`category`・`assignee`（`me` か利用者の ID）。答えに絞り込みの選択肢 `facets`）／ 1 行の文から残す（`text`。新しければ 201、前の問い合わせの続きなら 200、どの続きか決まらなければ `ambiguous` と候補）。使えない会社と利用範囲の外の人には、`/v1/inquiries` のどの口も 403 |
 | `GET` ／ `PATCH` ／ `DELETE /v1/inquiries/:id` | 1 件と会話の履歴と次にやること ／ 項目を直す（`from`・`channel`・`category`・`summary`・`source`・`temperature`・`status`）／ 削除（残した本人と管理者だけ） |
 | `POST /v1/inquiries/:id/events` ／ `/tasks` | その問い合わせに続きを足す（`text`）／ 次にやることを足す（`what`・`due`・`assignee`） |
 | `POST /v1/inquiries/events/:eventId/split` | 会話の履歴 1 つを、別の問い合わせに分ける（その履歴から生まれた次にやることも移す。最初の履歴は 400） |
+| `GET` ／ `DELETE /v1/inquiries/:id/person` | 本人から求められたときにまとめて削除する、同じ人の問い合わせと連絡先の数 ／ まとめて削除（問い合わせと会話の履歴・返事・LINE の相手の記録と、問い合わせから作った連絡先。管理者だけ。仕様書 第33.21節） |
 | `PATCH /v1/inquiries/tasks/:taskId` | 次にやることを直す・済みにする（`what`・`due`・`assignee`・`done`） |
 | `POST /v1/inquiries/mail/check` ／ `GET /v1/inquiries/mail/skipped` | 窓口のアカウントの新しいメールを今すぐ読む（会社ごとに 30 秒に 1 回まで）／ 問い合わせでないと見分けたメール（仕様書 第33.18節） |
 | `POST /v1/inquiries/mail/:messageId/promote` ／ `GET /v1/inquiries/events/:eventId/mail` | 問い合わせでないとしたメールを問い合わせにする ／ 会話の履歴のメールの中身（窓口のアカウントから読む。本文は写していない） |

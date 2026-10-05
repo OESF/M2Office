@@ -5237,14 +5237,36 @@ console.log('\n■ 66. 問い合わせの記録（内蔵の拡張。第33.17節�
       ? ok('秘書から頼むと、付属の業務「問い合わせを残す」が記録に残す（社内への書き込みに確認を求める会社では、本人の確認の後）')
       : ng('秘書からの記録が違う', JSON.stringify({ status: jobRun?.run?.status, reason: jobRun?.run?.failureReason, listed: listed.length }).slice(0, 400));
 
+    // 一覧の絞り込み（経路・分類・担当。第33.21節）
+    const byVisit = (await call('a', `/v1/inquiries?status=all&channel=visit&q=${encodeURIComponent(name)}`, {}, 'member')).body;
+    const byPhone = (await call('a', `/v1/inquiries?status=all&channel=phone&q=${encodeURIComponent(`${name}三`)}`, {}, 'member')).body;
+    const byCategory = listed[0] ? (await call('a', `/v1/inquiries?status=all&category=${encodeURIComponent(listed[0].category)}&q=${encodeURIComponent(`${name}三`)}`, {}, 'member')).body : { items: [] };
+    const mineOnly = (await call('a', `/v1/inquiries?status=all&assignee=me&q=${encodeURIComponent(name)}`, {}, 'member')).body;
+    (byVisit.items ?? []).length >= 1 && byVisit.items.every((i) => i.channel === 'visit') && (byPhone.items ?? []).length === 0
+      && (byCategory.items ?? []).length === 1 && Array.isArray(byVisit.facets?.categories) && Array.isArray(mineOnly.items)
+      ? ok('問い合わせの一覧を、経路・分類・担当で絞り込める（選択肢も返す）')
+      : ng('絞り込みが違う', JSON.stringify({ visit: byVisit.items?.length, phone: byPhone.items?.length, cat: byCategory.items?.length, facets: byVisit.facets }).slice(0, 400));
+
+    // 本人から求められたときのまとめての削除（管理者だけ。ほかの会社からは消せない。監査ログは数だけ。第33.21節）
+    const sensId = sens.body?.inquiry?.id;
+    const asMember = await call('a', `/v1/inquiries/${sensId}/person`, {}, 'member');
+    const fromB = await call('b', `/v1/inquiries/${sensId}/person`, { method: 'DELETE' });
+    const preview = await call('a', `/v1/inquiries/${sensId}/person`);
+    const erased = await call('a', `/v1/inquiries/${sensId}/person`, { method: 'DELETE' });
+    const erasedGone = await call('a', `/v1/inquiries/${sensId}`, {}, 'member');
+    asMember.status === 403 && fromB.status !== 200 && preview.status === 200 && (preview.body.inquiries ?? []).some((i) => i.id === sensId)
+      && erased.status === 200 && erased.body.inquiries >= 1 && erasedGone.status === 404
+      ? ok('本人から求められたら、管理者がその人の問い合わせをまとめて削除できる（管理者でない人とほかの会社はできない）')
+      : ng('まとめての削除が違う', JSON.stringify({ member: asMember.status, b: fromB.status, preview: preview.status, erased: erased.status, body: erased.body, gone: erasedGone.status }).slice(0, 400));
+
     // 削除と監査ログ（お客様の名前は監査ログに残さない）
     const del = await call('a', `/v1/inquiries/${inq?.id}`, { method: 'DELETE' }, 'member');
     const gone = await call('a', `/v1/inquiries/${inq?.id}`, {}, 'member');
     const { body: audits } = await call('a', '/v1/admin/audit-events');
     const mine = (audits.items ?? []).filter((e) => String(e.action).startsWith('inquiry.'));
-    del.status === 200 && gone.status === 404 && ['inquiry.create', 'inquiry.append', 'inquiry.delete'].every((a) => mine.some((e) => e.action === a))
+    del.status === 200 && gone.status === 404 && ['inquiry.create', 'inquiry.append', 'inquiry.delete', 'inquiry.erase_person'].every((a) => mine.some((e) => e.action === a))
       && !JSON.stringify(mine).includes(name)
-      ? ok('削除でき、残す・続き・削除を監査ログに残す（お客様の名前は残さない）')
+      ? ok('削除でき、残す・続き・削除・まとめての削除を監査ログに残す（お客様の名前は残さない）')
       : ng('削除か監査ログが違う', JSON.stringify({ del: del.status, gone: gone.status, actions: mine.map((e) => e.action) }));
   } catch (err) {
     ng('問い合わせの記録の確認が途中で止まった', String(err?.stack ?? err));

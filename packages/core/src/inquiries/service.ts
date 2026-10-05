@@ -277,6 +277,73 @@ export class InquiryService {
     return (await this.deps.store.list(who.tenantId, q)).map((i) => this.named(i, names));
   }
 
+  /** 一覧の絞り込みの選択肢（分類は多い順。担当は名前つき。第33.21節）。 */
+  async facets(who: InquiryViewer): Promise<{ categories: string[]; assignees: { id: string; name: string }[] }> {
+    const [f, names] = await Promise.all([this.deps.store.facets(who.tenantId), this.names(who.tenantId)]);
+    return {
+      categories: f.categories,
+      assignees: f.assignees.filter((x) => x !== who.userId).map((id) => ({ id, name: names.get(id) ?? '' })).filter((x) => x.name)
+        .sort((a, b) => a.name.localeCompare(b.name, 'ja')),
+    };
+  }
+
+  /** 同じ人の問い合わせ（第33.21節）。その問い合わせが見つからなければ `null`。 */
+  private async samePerson(who: InquiryViewer, id: string): Promise<Inquiry[] | null> {
+    const { store } = this.deps;
+    const cur = await store.get(who.tenantId, id);
+    if (!cur) return null;
+    const ids = await store.personInquiries(who.tenantId, {
+      contactId: cur.contactId, email: cur.from.email.trim(), phone: cur.from.phone.replace(/\D/g, ''),
+      lineUserId: await store.lineUserIdOf(who.tenantId, id), name: cur.from.name.trim(), company: cur.from.company.trim(),
+    });
+    const all = new Set([id, ...ids]);
+    const names = await this.names(who.tenantId);
+    const out: Inquiry[] = [];
+    for (const x of all) { const i = await store.get(who.tenantId, x); if (i) out.push(this.named(i, names)); }
+    return out.sort((a, b) => b.lastAt.localeCompare(a.lastAt));
+  }
+
+  /** 管理者か。 */
+  private async isAdmin(who: InquiryViewer): Promise<boolean> {
+    return !!(await this.deps.repo.findUserById(who.tenantId, who.userId))?.roles.includes('admin');
+  }
+
+  /**
+   * 本人から求められたときにまとめて削除する問い合わせと、削除する連絡先の数（第33.21節。管理者だけ）。
+   *
+   * @returns 削除できなければ理由
+   */
+  async personToErase(who: InquiryViewer, id: string): Promise<{ inquiries: Inquiry[]; contacts: number } | { error: string }> {
+    if (!(await this.isAdmin(who))) return { error: 'まとめて削除できるのは管理者だけです' };
+    const list = await this.samePerson(who, id);
+    if (!list) return { error: '問い合わせが見つかりません' };
+    return { inquiries: list, contacts: new Set(list.map((i) => i.contactId).filter(Boolean)).size };
+  }
+
+  /**
+   * 同じ人の問い合わせと、問い合わせから作った連絡先をまとめて削除する（第33.21節。管理者だけ）。
+   * 監査ログには数だけを残す（名前・用件・アドレスは残さない）。
+   *
+   * @returns 削除した数と、名刺から作ったので残した連絡先の数
+   */
+  async erasePerson(who: InquiryViewer, id: string): Promise<{ inquiries: number; contacts: number; keptContacts: number } | { error: string }> {
+    const target = await this.personToErase(who, id);
+    if ('error' in target) return target;
+    const contactIds = [...new Set(target.inquiries.map((i) => i.contactId).filter((x): x is string => !!x))];
+    const n = await this.deps.store.erase(who.tenantId, target.inquiries.map((i) => i.id));
+    let contacts = 0;
+    let keptContacts = 0;
+    for (const c of contactIds) {
+      // 消した人のほかの問い合わせがその連絡先を使っていれば残す（同じ連絡先に別の人がつながっていることは無いはずだが、念のため）
+      if ((await this.deps.store.list(who.tenantId, { contactId: c, limit: 1 })).length) { keptContacts++; continue; }
+      const r = this.deps.contacts ? await this.deps.contacts.forget(who, c).catch(() => 'kept' as const) : 'kept';
+      if (r === 'deleted') contacts++;
+      else if (r === 'kept') keptContacts++;
+    }
+    await this.audit(who, 'inquiry.erase_person', id, { inquiries: n, contacts, keptContacts });
+    return { inquiries: n, contacts, keptContacts };
+  }
+
   /** 1 件と、会話の履歴と、次にやること。見つからなければ `null`。 */
   async detail(who: InquiryViewer, id: string): Promise<InquiryDetail | null> {
     const { store } = this.deps;

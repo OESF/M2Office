@@ -62,7 +62,7 @@ src/columns/     Web のコラム（内蔵の拡張。第32章の段 1・段 2�
                  ツール 7 つ（columns.draft・preview・place・cover・rules・themes・prepare）、付属の業務「コラムの下書き」「コラムを WordPress に入れる」ほか
 src/inquiries/   問い合わせの記録（内蔵の拡張。第33章の段 1〜3）。置き場（問い合わせ・会話の履歴・次にやること。PostgreSQL とメモリ。store.ts）、
                  項目の取り出し（extract.ts。推論の JSON と決まった言葉・期限の読み方・要配慮個人情報を除く）、処理（service.ts。残す・続き・直す・
-                 次にやること・削除）、名刺管理とのつなぎ（contacts.ts）、見張り（watch.ts。期限と手つかずの知らせ・原文を 90 日で消す）、
+                 次にやること・削除・絞り込み・本人から求められたときのまとめての削除）、名刺管理とのつなぎ（contacts.ts）、見張り（watch.ts。期限と手つかずの知らせ・原文を 90 日で消す）、
                  窓口のアカウント（mailbox.ts。Gmail API と見本の箱）、メールの見分け（mail.ts）、月の振り返り（review.ts）、
                  LINE 公式アカウント（line.ts。署名の確かめ・Messaging API と見本の口・メッセージの読み方）、
                  ツール（tools.ts。inquiries.record・list・reply_draft・reply_send・brief・review・faq）、付属の業務（agents.ts。残す・調べる・返事の下書き・返事を送る）、

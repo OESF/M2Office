@@ -11,6 +11,7 @@ import { Hono, type Context } from 'hono';
 import { AI_NOT_CONFIGURED_MESSAGE, INQUIRY_REPLY_SEND, aiAvailable, enqueueJob, monthStats, previousMonth, reviewText, type InquiryViewer, type RecordResult } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
+import { INQUIRY_CHANNEL_LABELS, type InquiryChannel } from '@m2office/shared';
 
 const str = (v: unknown) => (typeof v === 'string' ? v : undefined);
 
@@ -49,15 +50,27 @@ export function inquiriesRoute(deps: AppDeps) {
     }, res.kind === 'created' ? 201 : 200);
   };
 
-  /** 一覧（`status`: open・done・dropped・all。`q`: 検索の言葉。`contactId`: 名刺管理の連絡先の問い合わせ）。 */
+  /**
+   * 一覧（`status`: open・done・dropped・all。`q`: 検索の言葉。`contactId`: 名刺管理の連絡先の問い合わせ。
+   * `channel`: 経路。`category`: 分類。`assignee`: 担当（`me` か利用者の ID。第33.21節）。答えに絞り込みの選択肢を添える）。
+   */
   app.get('/', async (c) => {
     const status = c.req.query('status');
-    const items = await service.list(who(c), {
-      status: status === 'open' || status === 'done' || status === 'dropped' ? status : 'all',
-      ...(c.req.query('q') ? { search: c.req.query('q')! } : {}),
-      ...(c.req.query('contactId') ? { contactId: c.req.query('contactId')! } : {}),
-    });
-    return c.json({ items });
+    const channel = c.req.query('channel');
+    const assignee = c.req.query('assignee');
+    const w = who(c);
+    const [items, facets] = await Promise.all([
+      service.list(w, {
+        status: status === 'open' || status === 'done' || status === 'dropped' ? status : 'all',
+        ...(c.req.query('q') ? { search: c.req.query('q')! } : {}),
+        ...(c.req.query('contactId') ? { contactId: c.req.query('contactId')! } : {}),
+        ...(channel && channel in INQUIRY_CHANNEL_LABELS ? { channel: channel as InquiryChannel } : {}),
+        ...(c.req.query('category') ? { category: c.req.query('category')!.slice(0, 60) } : {}),
+        ...(assignee ? { assignee: assignee === 'me' ? w.userId : assignee.slice(0, 100) } : {}),
+      }),
+      service.facets(w),
+    ]);
+    return c.json({ items, facets });
   });
 
   /**
@@ -226,6 +239,20 @@ export function inquiriesRoute(deps: AppDeps) {
   });
 
   /** 削除する（残した本人と管理者だけ）。 */
+  /** 本人から求められたときにまとめて削除する、同じ人の問い合わせと連絡先の数（管理者だけ。第33.21節）。 */
+  app.get('/:id/person', async (c) => {
+    const r = await service.personToErase(who(c), c.req.param('id'));
+    if ('error' in r) return c.json({ error: r.error }, r.error.includes('見つかりません') ? 404 : 403);
+    return c.json(r);
+  });
+
+  /** 同じ人の問い合わせと、問い合わせから作った連絡先をまとめて削除する（管理者だけ。第33.21節）。 */
+  app.delete('/:id/person', async (c) => {
+    const r = await service.erasePerson(who(c), c.req.param('id'));
+    if ('error' in r) return c.json({ error: r.error }, r.error.includes('見つかりません') ? 404 : 403);
+    return c.json(r);
+  });
+
   app.delete('/:id', async (c) => {
     const err = await service.remove(who(c), c.req.param('id'));
     if (err) return c.json({ error: err }, err.includes('見つかりません') ? 404 : 403);

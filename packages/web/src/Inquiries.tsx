@@ -53,8 +53,10 @@ function recordedText(r: Extract<InquiryRecorded, { kind: string }>): string {
  * @param onOpen 問い合わせを開く・一覧に戻る（`null`）
  * @param onContact 名刺管理の連絡先を開く
  */
-export function Inquiries({ inquiryId, onOpen, onContact, changeKey = '', onColumn }: {
+export function Inquiries({ inquiryId, onOpen, onContact, changeKey = '', onColumn, admin = false }: {
   inquiryId: string | null;
+  /** 会社の管理者か（本人から求められたときのまとめての削除を出す。第33.21節）。 */
+  admin?: boolean;
   onOpen: (inquiryId: string | null) => void;
   onContact: (contactId: string) => void;
   userId: string;
@@ -64,7 +66,7 @@ export function Inquiries({ inquiryId, onOpen, onContact, changeKey = '', onColu
   changeKey?: string;
 }) {
   return inquiryId
-    ? <InquiryView key={inquiryId} id={inquiryId} onBack={() => onOpen(null)} onContact={onContact} onOpen={(id) => onOpen(id)} changeKey={changeKey} />
+    ? <InquiryView key={inquiryId} id={inquiryId} onBack={() => onOpen(null)} onContact={onContact} onOpen={(id) => onOpen(id)} changeKey={changeKey} admin={admin} />
     : <InquiryList onOpen={(id) => onOpen(id)} changeKey={changeKey} {...(onColumn ? { onColumn } : {})} />;
 }
 
@@ -73,6 +75,11 @@ function InquiryList({ onOpen, changeKey, onColumn }: { onOpen: (id: string) => 
   const [items, setItems] = useState<Inquiry[] | null>(null);
   const [status, setStatus] = useState<'open' | 'all'>('open');
   const [q, setQ] = useState('');
+  // 経路・分類・担当の絞り込み（第33.21節。空はすべて）
+  const [channel, setChannel] = useState('');
+  const [category, setCategory] = useState('');
+  const [assignee, setAssignee] = useState('');
+  const [facets, setFacets] = useState<{ categories: string[]; assignees: { id: string; name: string }[] }>({ categories: [], assignees: [] });
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<Note>(null);
@@ -81,9 +88,9 @@ function InquiryList({ onOpen, changeKey, onColumn }: { onOpen: (id: string) => 
   const [panel, setPanel] = useState<'skipped' | 'review' | null>(null);
 
   const load = useCallback(() => {
-    api.inquiries.list({ status, ...(q.trim() ? { q: q.trim() } : {}) })
-      .then((r) => { setItems(r.items); setError(null); }).catch((e) => setError(describeError(e, '読めませんでした')));
-  }, [status, q]);
+    api.inquiries.list({ status, ...(q.trim() ? { q: q.trim() } : {}), ...(channel ? { channel } : {}), ...(category ? { category } : {}), ...(assignee ? { assignee } : {}) })
+      .then((r) => { setItems(r.items); setFacets(r.facets); setError(null); }).catch((e) => setError(describeError(e, '読めませんでした')));
+  }, [status, q, channel, category, assignee]);
   useEffect(() => { const t = setTimeout(load, q ? 250 : 0); return () => clearTimeout(t); }, [load, q]);
   // 秘書が問い合わせを残したら読み直す（はじめの 1 回は上で読む）
   useEffect(() => { if (changeKey) load(); }, [changeKey]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -134,6 +141,19 @@ function InquiryList({ onOpen, changeKey, onColumn }: { onOpen: (id: string) => 
       <div className="row inquiries-filter">
         <button className={status === 'open' ? 'btn small' : 'btn ghost small'} onClick={() => setStatus('open')}>対応中</button>
         <button className={status === 'all' ? 'btn small' : 'btn ghost small'} onClick={() => setStatus('all')}>すべて</button>
+        <select value={channel} aria-label="経路" onChange={(e) => setChannel(e.target.value)}>
+          <option value="">経路: すべて</option>
+          {(Object.keys(INQUIRY_CHANNEL_LABELS) as InquiryChannel[]).map((c) => <option key={c} value={c}>{INQUIRY_CHANNEL_LABELS[c]}</option>)}
+        </select>
+        <select value={category} aria-label="分類" onChange={(e) => setCategory(e.target.value)}>
+          <option value="">分類: すべて</option>
+          {[...new Set([...facets.categories, ...(category ? [category] : [])])].map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select value={assignee} aria-label="担当" onChange={(e) => setAssignee(e.target.value)}>
+          <option value="">担当: すべて</option>
+          <option value="me">自分</option>
+          {facets.assignees.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select>
         <input className="inquiries-search" value={q} placeholder="検索" aria-label="検索" onChange={(e) => setQ(e.target.value)} />
         <button className="btn ghost small" onClick={() => { void api.inquiries.checkMail().catch(() => undefined).finally(load); }}>更新</button>
         <button className={panel === 'skipped' ? 'btn small' : 'btn ghost small'} onClick={() => setPanel(panel === 'skipped' ? null : 'skipped')}>問い合わせでないもの</button>
@@ -142,7 +162,7 @@ function InquiryList({ onOpen, changeKey, onColumn }: { onOpen: (id: string) => 
       {panel === 'skipped' && <SkippedMails onOpen={onOpen} onChanged={load} />}
       {panel === 'review' && <MonthReview {...(onColumn ? { onColumn } : {})} />}
       {error && <p className="error">{error}</p>}
-      {items && items.length === 0 && <p className="muted">{q ? '見つかりません。' : status === 'open' ? '対応中の問い合わせはありません。' : 'まだ問い合わせがありません。'}</p>}
+      {items && items.length === 0 && <p className="muted">{q || channel || category || assignee ? '見つかりません。' : status === 'open' ? '対応中の問い合わせはありません。' : 'まだ問い合わせがありません。'}</p>}
       {items && items.length > 0 && (
         <table className="table inquiries-list">
           <thead><tr><th>次にやること</th><th>誰から</th><th>経路</th><th>用件</th><th>担当</th><th>状態</th><th>最後</th></tr></thead>
@@ -171,8 +191,8 @@ function InquiryList({ onOpen, changeKey, onColumn }: { onOpen: (id: string) => 
 }
 
 /** 1 件の問い合わせ。 */
-function InquiryView({ id, onBack, onContact, onOpen, changeKey }: {
-  id: string; onBack: () => void; onContact: (contactId: string) => void; onOpen: (id: string) => void; changeKey: string;
+function InquiryView({ id, onBack, onContact, onOpen, changeKey, admin }: {
+  id: string; onBack: () => void; onContact: (contactId: string) => void; onOpen: (id: string) => void; changeKey: string; admin: boolean;
 }) {
   const [d, setD] = useState<InquiryDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -316,6 +336,7 @@ function InquiryView({ id, onBack, onContact, onOpen, changeKey }: {
       <div className="row inquiries-danger">
         <button className="btn ghost small danger" disabled={busy}
           onClick={() => { if (window.confirm('この問い合わせを削除しますか。会話の履歴と次にやることも削除します')) void act(() => api.inquiries.remove(i.id).then(onBack), null, '削除できませんでした'); }}>削除</button>
+        {admin && <ErasePerson inquiryId={i.id} onDone={onBack} />}
       </div>
     </div>
   );
@@ -520,3 +541,55 @@ function FaqTopics({ onColumn }: { onColumn?: (theme: string) => Promise<void> }
   );
 }
 
+/**
+ * 本人から求められたときに、その人の問い合わせと、問い合わせから作った連絡先をまとめて削除する（管理者だけ。第33.21節）。
+ * 押すと当たった問い合わせを並べ、「削除」で削除する（取り消せないため、ここだけ確かめを挟む）。
+ */
+function ErasePerson({ inquiryId, onDone }: { inquiryId: string; onDone: () => void }) {
+  const [target, setTarget] = useState<{ inquiries: Inquiry[]; contacts: number } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<Note>(null);
+  const [done, setDone] = useState<string | null>(null);
+  const open = () => {
+    setBusy(true);
+    api.inquiries.person(inquiryId).then(setTarget).catch((e) => setNote({ kind: 'error', text: describeError(e, '読めませんでした') })).finally(() => setBusy(false));
+  };
+  const erase = () => {
+    setBusy(true);
+    api.inquiries.erasePerson(inquiryId)
+      .then((r) => setDone(`問い合わせ ${r.inquiries} 件と、問い合わせから作った連絡先 ${r.contacts} 件を削除しました。${r.keptContacts ? `名刺から作った連絡先 ${r.keptContacts} 件は残しています（名刺管理で削除してください）。` : ''}`))
+      .catch((e) => setNote({ kind: 'error', text: describeError(e, '削除できませんでした') }))
+      .finally(() => setBusy(false));
+  };
+  if (done) {
+    return (
+      <div className="card inquiries-erase">
+        <p role="status">{done}</p>
+        <button className="btn ghost small" onClick={onDone}>‹ 問い合わせの一覧</button>
+      </div>
+    );
+  }
+  if (!target) {
+    return (
+      <>
+        <button className="btn ghost small danger" disabled={busy} onClick={open}>この人の問い合わせをまとめて削除</button>
+        <NoteText note={note} />
+      </>
+    );
+  }
+  return (
+    <div className="card inquiries-erase">
+      <p>次の問い合わせ {target.inquiries.length} 件と、会話の履歴・次にやること・返事を削除します。問い合わせから作った連絡先も削除します（{target.contacts} 件まで）。元に戻せません。</p>
+      <ul>
+        {target.inquiries.map((x) => (
+          <li key={x.id}>{new Date(x.lastAt).toLocaleDateString('ja-JP')}　{whoOf(x)}　{INQUIRY_CHANNEL_LABELS[x.channel]}　<span className="muted">{x.summary}</span></li>
+        ))}
+      </ul>
+      <div className="row">
+        <button className="btn danger small" disabled={busy} onClick={erase}>削除</button>
+        <button className="btn ghost small" disabled={busy} onClick={() => setTarget(null)}>キャンセル</button>
+        <NoteText note={note} />
+      </div>
+    </div>
+  );
+}

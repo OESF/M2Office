@@ -179,6 +179,13 @@ export interface ContactStore {
   /** 同じ範囲の、有効な連絡先のうち、氏名と会社名が同じもの（空白と大文字小文字を無視）。 */
   findByNameCompany(who: CardViewer, scope: ContactScope, name: string, company: string): Promise<Contact[]>;
   insertContact(who: CardViewer, c: Contact): Promise<void>;
+  /**
+   * 名刺の無い連絡先を本当に消す（問い合わせから作った連絡先を、本人から求められて消すとき。第33.21節）。
+   * 名刺のある連絡先は消さない（名刺管理の決まりで消す。第27.7節）。
+   *
+   * @returns 消したか
+   */
+  deleteContactWithoutCards(who: CardViewer, id: string): Promise<boolean>;
   updateContact(who: CardViewer, id: string, patch: ContactPatch, by: string): Promise<void>;
   /** 連絡先の名刺の範囲を連絡先に合わせる。 */
   setCardsScope(who: CardViewer, contactId: string, scope: ContactScope): Promise<void>;
@@ -323,6 +330,14 @@ export class PostgresContactStore implements ContactStore {
     if (sets.length === 0) return;
     await this.q(who, `update contact_cards set ${sets.join(', ')}, updated_at = now() where tenant_id = $1 and id = $2`,
       [who.tenantId, id, ...values]);
+  }
+
+  async deleteContactWithoutCards(who: CardViewer, id: string): Promise<boolean> {
+    const rows = await this.q<{ id: string }>(who,
+      `delete from contacts k where k.tenant_id = $1 and k.id = $2
+          and not exists (select 1 from contact_cards c where c.tenant_id = k.tenant_id and c.contact_id = k.id)
+        returning k.id`, [who.tenantId, id]);
+    return rows.length > 0;
   }
 
   async deleteCard(who: CardViewer, id: string): Promise<void> {

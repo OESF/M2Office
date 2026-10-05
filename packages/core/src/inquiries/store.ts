@@ -41,7 +41,32 @@ export interface InquiryQuery {
   search?: string;
   /** この日時より後に動いたもの。 */
   since?: string;
+  /** 経路（第33.21節）。 */
+  channel?: InquiryChannel;
+  /** 分類（そのまま同じもの）。 */
+  category?: string;
+  /** 担当の利用者の ID（済んでいない次にやることの担当。次にやることが無ければ受けた人）。 */
+  assignee?: string;
   limit?: number;
+}
+
+/** 一覧の絞り込みの選択肢（第33.21節）。 */
+export interface InquiryFacets {
+  /** 分類（多い順）。 */
+  categories: string[];
+  /** 担当になっている利用者の ID。 */
+  assignees: string[];
+}
+
+/** 同じ人を見分ける手がかり（第33.21節）。 */
+export interface InquiryPersonKey {
+  contactId: string | null;
+  email: string;
+  /** 数字だけの電話番号（9 桁以上のときだけ使う）。 */
+  phone: string;
+  lineUserId: string | null;
+  name: string;
+  company: string;
 }
 
 /** 足す会話の履歴。 */
@@ -121,6 +146,16 @@ export interface InquiryStore {
   create(tenantId: string, n: NewInquiry): Promise<string>;
   update(tenantId: string, id: string, patch: InquiryPatch): Promise<void>;
   delete(tenantId: string, id: string): Promise<void>;
+  /** 一覧の絞り込みの選択肢。 */
+  facets(tenantId: string): Promise<InquiryFacets>;
+  /** 同じ人の問い合わせの ID（第33.21節。推論は使わない）。 */
+  personInquiries(tenantId: string, key: InquiryPersonKey): Promise<string[]>;
+  /**
+   * 問い合わせをまとめて削除する（会話の履歴・次にやること・返事・窓口のメールの見分けの記録・LINE の相手の記録も）。
+   *
+   * @returns 削除した数
+   */
+  erase(tenantId: string, ids: string[]): Promise<number>;
   addEvent(tenantId: string, inquiryId: string, e: NewInquiryEvent): Promise<string>;
   events(tenantId: string, inquiryId: string): Promise<InquiryEvent[]>;
   addTask(tenantId: string, inquiryId: string, t: { assignee: string; what: string; due: string | null; createdBy: string; eventId?: string | null }): Promise<string>;
@@ -285,6 +320,15 @@ export class PostgresInquiryStore implements InquiryStore {
     if (q.status && q.status !== 'all') { params.push(q.status); where.push(`i.status = $${params.length}`); }
     if (q.contactId) { params.push(q.contactId); where.push(`i.contact_id = $${params.length}`); }
     if (q.since) { params.push(q.since); where.push(`i.last_at > $${params.length}`); }
+    if (q.channel) { params.push(q.channel); where.push(`i.channel = $${params.length}`); }
+    if (q.category) { params.push(q.category); where.push(`i.category = $${params.length}`); }
+    if (q.assignee) {
+      // 担当: 済んでいない次にやることの担当。次にやることが無ければ受けた人
+      params.push(q.assignee);
+      const p = `$${params.length}`;
+      where.push(`(exists (select 1 from inquiry_tasks x where x.tenant_id = i.tenant_id and x.inquiry_id = i.id and x.done_at is null and x.assignee = ${p})
+               or (not exists (select 1 from inquiry_tasks x where x.tenant_id = i.tenant_id and x.inquiry_id = i.id and x.done_at is null) and i.received_by = ${p}))`);
+    }
     if (q.search?.trim()) {
       // 検索の言葉は値として渡す（SQL に埋め込まない）。% と _ は文字として扱う
       params.push(`%${q.search.trim().replace(/[\\%_]/g, (m) => `\\${m}`)}%`);
@@ -332,6 +376,43 @@ export class PostgresInquiryStore implements InquiryStore {
 
   async delete(tenantId: string, id: string): Promise<void> {
     await this.q(tenantId, `delete from inquiries where tenant_id = $1 and id = $2`, [tenantId, id]);
+  }
+
+  async facets(tenantId: string): Promise<InquiryFacets> {
+    const cats = await this.q<{ category: string }>(tenantId,
+      `select category from inquiries where tenant_id = $1 and category <> '' group by category order by count(*) desc, category limit 50`, [tenantId]);
+    const people = await this.q<{ who: string }>(tenantId,
+      `select distinct x.assignee as who from inquiry_tasks x where x.tenant_id = $1 and x.done_at is null
+        union
+       select distinct i.received_by from inquiries i where i.tenant_id = $1
+          and not exists (select 1 from inquiry_tasks x where x.tenant_id = i.tenant_id and x.inquiry_id = i.id and x.done_at is null)`, [tenantId]);
+    return { categories: cats.map((r) => r.category), assignees: people.map((r) => r.who).filter(Boolean) };
+  }
+
+  async personInquiries(tenantId: string, key: InquiryPersonKey): Promise<string[]> {
+    const or: string[] = [];
+    const params: unknown[] = [tenantId];
+    const add = (sql: (p: string) => string, v: unknown) => { params.push(v); or.push(sql(`$${params.length}`)); };
+    if (key.contactId) add((p) => `contact_id = ${p}`, key.contactId);
+    if (key.email) add((p) => `lower(from_email) = ${p}`, key.email.toLowerCase());
+    if (key.phone.length >= 9) add((p) => `regexp_replace(from_phone, '[^0-9]', '', 'g') = ${p}`, key.phone);
+    if (key.lineUserId) add((p) => `line_user_id = ${p}`, key.lineUserId);
+    if (key.name) { params.push(key.name, key.company); or.push(`(from_name = $${params.length - 1} and from_company = $${params.length})`); }
+    if (!or.length) return [];
+    const rows = await this.q<{ id: string }>(tenantId, `select id from inquiries where tenant_id = $1 and (${or.join(' or ')})`, params);
+    return rows.map((r) => r.id);
+  }
+
+  async erase(tenantId: string, ids: string[]): Promise<number> {
+    if (!ids.length) return 0;
+    // LINE の相手の記録（表示名）と、窓口のメールの見分けの記録も消す。問い合わせを消すと、履歴・次にやること・返事は一緒に消える
+    await this.q(tenantId,
+      `delete from inquiry_line_users u where u.tenant_id = $1
+          and (u.inquiry_id = any($2::text[])
+               or u.line_user_id in (select line_user_id from inquiries where tenant_id = $1 and id = any($2::text[]) and line_user_id is not null))`, [tenantId, ids]);
+    await this.q(tenantId, `delete from inquiry_mail_messages where tenant_id = $1 and inquiry_id = any($2::text[])`, [tenantId, ids]);
+    const rows = await this.q<{ id: string }>(tenantId, `delete from inquiries where tenant_id = $1 and id = any($2::text[]) returning id`, [tenantId, ids]);
+    return rows.length;
   }
 
   async addEvent(tenantId: string, inquiryId: string, e: NewInquiryEvent): Promise<string> {
@@ -609,6 +690,9 @@ export class MemoryInquiryStore implements InquiryStore {
       .filter((r) => !q.status || q.status === 'all' || r.status === q.status)
       .filter((r) => !q.contactId || r.contactId === q.contactId)
       .filter((r) => !q.since || r.lastAt > q.since)
+      .filter((r) => !q.channel || r.channel === q.channel)
+      .filter((r) => !q.category || r.category === q.category)
+      .filter((r) => !q.assignee || this.assigneeOf(r).includes(q.assignee))
       .filter((r) => !words || [r.from.name, r.from.company, r.summary, r.category, r.from.phone, r.from.email].some((x) => x.toLowerCase().includes(words)))
       .map((r) => this.view(r))
       .sort((a, b) => Number(b.status === 'open') - Number(a.status === 'open')
@@ -637,6 +721,48 @@ export class MemoryInquiryStore implements InquiryStore {
     if (!r || r.tenantId !== tenantId) return;
     for (const [k, v] of Object.entries(patch)) if (v !== undefined) (r as Record<string, unknown>)[k] = k === 'from' ? { ...(v as InquiryParty) } : v;
     r.updatedAt = new Date().toISOString();
+  }
+
+  /** 担当（済んでいない次にやることの担当。無ければ受けた人）。 */
+  private assigneeOf(r: { id: string; tenantId: string; receivedBy: string }): string[] {
+    const open = this.allTasks.filter((t) => t.tenantId === r.tenantId && t.inquiryId === r.id && !t.doneAt).map((t) => t.assignee);
+    return open.length ? open : [r.receivedBy];
+  }
+
+  async facets(tenantId: string): Promise<InquiryFacets> {
+    const counts = new Map<string, number>();
+    const people = new Set<string>();
+    for (const r of this.rows.values()) {
+      if (r.tenantId !== tenantId) continue;
+      if (r.category) counts.set(r.category, (counts.get(r.category) ?? 0) + 1);
+      for (const a of this.assigneeOf(r)) people.add(a);
+    }
+    return { categories: [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([c]) => c), assignees: [...people].filter(Boolean) };
+  }
+
+  async personInquiries(tenantId: string, key: InquiryPersonKey): Promise<string[]> {
+    const digitsOf = (x: string) => x.replace(/\D/g, '');
+    return [...this.rows.values()].filter((r) => r.tenantId === tenantId && (
+      (!!key.contactId && r.contactId === key.contactId)
+      || (!!key.email && r.from.email.toLowerCase() === key.email.toLowerCase())
+      || (key.phone.length >= 9 && digitsOf(r.from.phone) === key.phone)
+      || (!!key.lineUserId && r.lineUserId === key.lineUserId)
+      || (!!key.name && r.from.name === key.name && r.from.company === key.company)
+    )).map((r) => r.id);
+  }
+
+  async erase(tenantId: string, ids: string[]): Promise<number> {
+    let n = 0;
+    for (const id of ids) {
+      const r = this.rows.get(id);
+      if (!r || r.tenantId !== tenantId) continue;
+      for (const [k, u] of this.lineUsers) if (k.startsWith(`${tenantId}:`) && (u.inquiryId === id || (r.lineUserId && u.lineUserId === r.lineUserId))) this.lineUsers.delete(k);
+      for (let i = this.mails.length - 1; i >= 0; i--) if (this.mails[i]!.tenantId === tenantId && this.mails[i]!.inquiryId === id) this.mails.splice(i, 1);
+      for (let i = this.allReplies.length - 1; i >= 0; i--) if (this.allReplies[i]!.tenantId === tenantId && this.allReplies[i]!.inquiryId === id) this.allReplies.splice(i, 1);
+      await this.delete(tenantId, id);
+      n++;
+    }
+    return n;
   }
 
   async delete(tenantId: string, id: string): Promise<void> {

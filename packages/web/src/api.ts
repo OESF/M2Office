@@ -1238,13 +1238,21 @@ export const api = {
   /** 在庫管理（内蔵の拡張。仕様書 第29章）。 */
   /** 問い合わせの記録（内蔵の拡張。仕様書 第33章）。 */
   inquiries: {
-    list: (q: { status?: 'open' | 'all'; q?: string; contactId?: string } = {}) => {
+    /** 一覧と、絞り込みの選択肢（分類と担当。第33.21節）。`assignee` は `me` か利用者の ID。 */
+    list: (q: { status?: 'open' | 'all'; q?: string; contactId?: string; channel?: string; category?: string; assignee?: string } = {}) => {
       const p = new URLSearchParams();
       if (q.status) p.set('status', q.status);
       if (q.q) p.set('q', q.q);
       if (q.contactId) p.set('contactId', q.contactId);
-      return call<{ items: Inquiry[] }>(`/inquiries${p.size ? `?${p}` : ''}`);
+      if (q.channel) p.set('channel', q.channel);
+      if (q.category) p.set('category', q.category);
+      if (q.assignee) p.set('assignee', q.assignee);
+      return call<{ items: Inquiry[]; facets: { categories: string[]; assignees: { id: string; name: string }[] } }>(`/inquiries${p.size ? `?${p}` : ''}`);
     },
+    /** 本人から求められたときにまとめて削除する、同じ人の問い合わせと連絡先の数（管理者だけ）。 */
+    person: (id: string) => call<{ inquiries: Inquiry[]; contacts: number }>(`/inquiries/${encodeURIComponent(id)}/person`),
+    /** 同じ人の問い合わせと、問い合わせから作った連絡先をまとめて削除する（管理者だけ）。 */
+    erasePerson: (id: string) => call<{ inquiries: number; contacts: number; keptContacts: number }>(`/inquiries/${encodeURIComponent(id)}/person`, { method: 'DELETE' }),
     /** 1 行の欄に書いた文から残す。続きなら同じ問い合わせに足す。どの続きか決まらなければ候補が返る。 */
     record: (text: string) => call<InquiryRecorded>('/inquiries', { method: 'POST', body: JSON.stringify({ text }) }),
     get: (id: string) => call<InquiryDetail>(`/inquiries/${encodeURIComponent(id)}`),

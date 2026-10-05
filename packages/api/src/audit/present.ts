@@ -235,6 +235,7 @@ const ACTION_LABELS: Record<string, string> = {
   'inquiry.task_update': '問い合わせの次にやることを直した',
   'inquiry.task_done': '問い合わせの次にやることを済みにした',
   'inquiry.delete': '問い合わせを削除した',
+  'inquiry.erase_person': '本人から求められて、その人の問い合わせをまとめて削除した',
   'inquiry.split': '問い合わせの履歴を別の問い合わせに分けた',
   'inquiry.mailbox_connect': '問い合わせの窓口のアカウントをつないだ',
   'inquiry.mailbox_disconnect': '問い合わせの窓口のアカウントを外した',

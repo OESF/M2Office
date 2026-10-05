@@ -18,7 +18,16 @@ export interface InquiryContactBook {
    * @returns つないだ連絡先と、新しく作ったか。つながなければ `null`
    */
   link(who: { tenantId: string; userId: string }, from: InquiryParty): Promise<{ contactId: string; created: boolean } | null>;
+  /**
+   * 問い合わせから作った連絡先を消す（本人から求められたとき。第33.21節）。名刺から作った連絡先は消さない。
+   *
+   * @returns `deleted` は消した、`kept` は名刺から作ったので残した、`missing` は見つからない
+   */
+  forget(who: { tenantId: string; userId: string }, contactId: string): Promise<'deleted' | 'kept' | 'missing'>;
 }
+
+/** 問い合わせから作った連絡先のメモ（作った出どころの印）。 */
+export const INQUIRY_CONTACT_NOTE = '出どころ: 問い合わせの記録';
 
 /** 数字だけにする（電話番号を比べるため）。 */
 const digits = (s: string) => s.replace(/\D/g, '');
@@ -55,11 +64,17 @@ export function contactBookFrom(store: ContactStore, access: (tenantId: string, 
       const contact: Contact = {
         ...EMPTY_CARD_FIELDS, name: from.name, company: from.company,
         phones: phone.length >= 9 ? [{ kind: 'main', number: from.phone }] : [], emails: from.email ? [from.email.toLowerCase()] : [],
-        id: `ct-${randomUUID()}`, tenantId: who.tenantId, scope, ownerUserId: who.userId, note: '出どころ: 問い合わせの記録',
+        id: `ct-${randomUUID()}`, tenantId: who.tenantId, scope, ownerUserId: who.userId, note: INQUIRY_CONTACT_NOTE,
         status: 'active', trashedAt: null, createdBy: who.userId, createdAt: now, updatedBy: who.userId, updatedAt: now,
       };
       await store.insertContact(who, contact);
       return { contactId: contact.id, created: true };
+    },
+    async forget(who, contactId) {
+      const c = await store.getContact(who, contactId);
+      if (!c) return 'missing';
+      if (!c.note.includes(INQUIRY_CONTACT_NOTE)) return 'kept';
+      return (await store.deleteContactWithoutCards(who, contactId)) ? 'deleted' : 'kept';
     },
   };
 }

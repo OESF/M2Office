@@ -259,3 +259,51 @@ test('ツール: 使えない会社では断り、残す・一覧を読む。一
   assert.equal(got.untrusted, true);
   assert.equal(got.items[0]!.from, '田中さん');
 });
+
+test('一覧の絞り込み: 経路・分類・担当（次にやることの担当、無ければ受けた人）で絞り、選択肢を返す（第33.21節）', async () => {
+  const { service, store } = setup();
+  const base = { contactId: null, source: '不明', temperature: 'normal' as const, createdBy: 'u1' };
+  const a = await store.create('t1', { ...base, from: { name: '見本A', company: '', phone: '', email: '' }, channel: 'phone', category: '見積もり', summary: 'a', receivedBy: 'u1' });
+  await store.create('t1', { ...base, from: { name: '見本B', company: '', phone: '', email: '' }, channel: 'mail', category: '予約', summary: 'b', receivedBy: 'u1' });
+  await store.create('t1', { ...base, from: { name: '見本C', company: '', phone: '', email: '' }, channel: 'phone', category: '見積もり', summary: 'c', receivedBy: 'u2' });
+  await store.addTask('t1', a, { assignee: 'u2', what: '送る', due: null, createdBy: 'u1' });
+  const names = async (q: Parameters<InquiryService['list']>[1]) => (await service.list(who, q)).map((i) => i.from.name).sort();
+  assert.deepEqual(await names({ channel: 'phone' }), ['見本A', '見本C']);
+  assert.deepEqual(await names({ category: '予約' }), ['見本B']);
+  assert.deepEqual(await names({ assignee: 'u2' }), ['見本A', '見本C'], '次にやることの担当か、次にやることが無ければ受けた人');
+  assert.deepEqual(await names({ assignee: 'u1' }), ['見本B']);
+  const f = await service.facets(who);
+  assert.deepEqual(f.categories, ['見積もり', '予約'], '多い順');
+  assert.deepEqual(f.assignees.map((x) => x.name), ['営業'], '自分は「自分」で選ぶので並べない');
+});
+
+test('まとめての削除: 同じ人の問い合わせと、問い合わせから作った連絡先を削除する。管理者だけ。監査ログに数だけ（第33.21節）', async () => {
+  const forgotten: string[] = [];
+  const contacts: InquiryContactBook = {
+    link: async () => null,
+    forget: async (_w, id) => { forgotten.push(id); return id === 'ct-card' ? 'kept' : 'deleted'; },
+  };
+  const { service, store, audits } = setup({ contacts });
+  const base = { source: '不明', temperature: 'normal' as const, createdBy: 'u1', receivedBy: 'u1', category: '質問', channel: 'phone' as const };
+  const a = await store.create('t1', { ...base, contactId: 'ct-1', from: { name: '見本 花子', company: '', phone: '03-1234-5678', email: '' }, summary: '1' });
+  const b = await store.create('t1', { ...base, contactId: null, from: { name: '', company: '', phone: '0312345678', email: '' }, summary: '2' });
+  const c = await store.create('t1', { ...base, contactId: 'ct-card', from: { name: '見本 花子', company: '', phone: '', email: 'h@example.jp' }, summary: '3' });
+  const other = await store.create('t1', { ...base, contactId: null, from: { name: '見本 太郎', company: '', phone: '03-9999-0000', email: '' }, summary: '4' });
+  await store.addEvent('t1', b, { direction: 'in', channel: 'phone', summary: 'x', body: null, createdBy: 'u1' });
+  assert.ok('error' in await service.personToErase(who, a), '管理者でなければ断る');
+  const boss = { tenantId: 't1', userId: 'boss' };
+  const p = await service.personToErase(boss, a);
+  assert.ok(!('error' in p));
+  if ('error' in p) return;
+  assert.deepEqual(p.inquiries.map((i) => i.id).sort(), [a, b, c].sort(), '電話番号の数字・氏名で同じ人を見分ける');
+  assert.equal(p.contacts, 2);
+  const r = await service.erasePerson(boss, a);
+  assert.deepEqual(r, { inquiries: 3, contacts: 1, keptContacts: 1 });
+  assert.deepEqual(forgotten.sort(), ['ct-1', 'ct-card']);
+  assert.equal(await store.get('t1', a), null);
+  assert.equal((await store.events('t1', b)).length, 0, '会話の履歴も消す');
+  assert.ok(await store.get('t1', other), 'ほかの人は残す');
+  const log = audits.find((x) => x.action === 'inquiry.erase_person')!;
+  assert.deepEqual(log.detail, { inquiries: 3, contacts: 1, keptContacts: 1 });
+  assert.ok(!JSON.stringify(log.detail).includes('花子'));
+});
