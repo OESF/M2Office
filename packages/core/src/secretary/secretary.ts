@@ -33,6 +33,7 @@ import { CARD_BULK_MAIL, CARD_UPDATE } from '../cards/agents.js';
 import { answerBriefSettings } from '../brief/settings.js';
 import type { NoticeService } from '../notices/service.js';
 import { answerNotice } from './notices.js';
+import { answerLauncher } from './launcher.js';
 import { answerStock, bareStockQuestion, inventoryRequest } from './inventory.js';
 import type { InventoryService } from '../inventory/service.js';
 import { INVENTORY_ORDER, INVENTORY_RECORD } from '../inventory/agents.js';
@@ -108,6 +109,12 @@ export interface SecretaryDeps {
   hrStaff?: HrStaffDeps;
   /** 店頭サイネージ（第31.11.1節）。本人が話した回にだけ、割り込みを出す・消す・画面の状態に答える。 */
   signage?: SignageSecretaryDeps;
+  /**
+   * アプリの一覧に入れる公式サイトを、実際に開けるか確かめる口（第6.1.1.2節）。社内のアドレスは開かない。
+   *
+   * @remarks 無ければ、URL を言われたときだけアプリの一覧に入れる（推論が挙げた URL を確かめずに入れない）
+   */
+  launcherReachable?(tenantId: string, url: string): Promise<boolean>;
   /**
    * 振り分けの経過を知らせる先（デバッグモード。仕様書 第20.4.1節「デバッグモード」）。どの定型の答え・どの業務に回したかと、その理由を受け取る。
    *
@@ -272,6 +279,15 @@ export class Secretary {
       if (brief) {
         await this.audit(tenantId, userId, 'secretary.brief', 'settings');
         return { reply: { layer: 'light', text: brief.text, evidence: brief.evidence, tokensUsed: 0 }, keep: true };
+      }
+      // アプリの一覧（第6.1.1.2節）。本人の設定だけを変える
+      const launcher = await answerLauncher({
+        repo: this.deps.repo, llm,
+        ...(this.deps.launcherReachable ? { reachable: (url: string) => this.deps.launcherReachable!(tenantId, url) } : {}),
+      }, tenantId, userId, message).catch(() => null);
+      if (launcher) {
+        await this.audit(tenantId, userId, 'secretary.launcher', launcher.action);
+        return { reply: { layer: 'light', text: launcher.text, evidence: launcher.evidence, tokensUsed: 0 }, keep: true };
       }
       if (this.deps.notices) {
         const notice = await answerNotice({ notices: this.deps.notices, repo: this.deps.repo, llm }, tenantId, userId, message).catch(() => null);

@@ -478,6 +478,12 @@ export function buildDeps(): AppDeps {
     hrStaff: { service: hrService, payroll, calendar: laborCalendar, access: hrAccess(repo) },
     // 店頭サイネージ（第31.11.1節）。本人が話した回にだけ、割り込みを出す・消す
     signage,
+    // アプリの一覧に入れる公式サイトを、実際に開けるか確かめる（社内のアドレスは開かない。見本の会社では外を読まない。第6.1.1.2節）
+    launcherReachable: async (tenantId, url) => {
+      if (connector.sourceFor(tenantId) === 'mock') return false;
+      const page = await new HttpPageFetcher(crawlerUserAgent(appVersion(), process.env['CRAWLER_CONTACT_URL']), 0).get(url, 'html').catch(() => null);
+      return !!page && page.status < 400;
+    },
     repo, llm, connector, agents: OFFICIAL_AGENTS, help, agentsFor, llmFor: (t) => ai.llmFor(t), notices,
     // デバッグモードでは、振り分けの経過を記録に残す（仕様書 第20.4.1節「デバッグモード」）
     ...(debug ? { onTrace: (tenantId: string, userId: string, action: string, target: string, detail?: Record<string, unknown>) => {

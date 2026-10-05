@@ -5968,6 +5968,12 @@ console.log('\n■ 74. アプリの一覧を人ごとに編集する（Google �
     js.status === 400 && cred.status === 400 && many.status === 400 && long.status === 400
       ? ok('https と http 以外・ID とパスワードを含む URL・21 件目・21 字の名前を断る')
       : ng('断るべき登録が通った', JSON.stringify([js.status, cred.status, many.status, long.status]));
+    // 秘書に頼んで入れる（第 0.258.0 版）。URL を言えば、推論が使えなくても入れる
+    await put({ hidden: [], links: [] });
+    const said = await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message: 'https://order.example.co.jp/ をアプリの一覧に入れて' }) }, 'member');
+    const { body: after } = await call('a', '/v1/me/settings', {}, 'member');
+    said.status === 200 && /アプリの一覧に/.test(said.body.reply?.text ?? said.body.text ?? '') && (after.launcher?.links ?? []).some((l) => l.url === 'https://order.example.co.jp/')
+      ? ok('秘書に「〜をアプリの一覧に入れて」と頼むと、本人のアプリの一覧に入る') : ng('秘書からアプリの一覧に入らない', JSON.stringify({ status: said.status, body: said.body, links: after.launcher?.links }));
   } finally {
     await put(before.launcher ?? { hidden: [], links: [] });
   }
