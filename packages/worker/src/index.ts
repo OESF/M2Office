@@ -220,6 +220,8 @@ const announcements = new AnnouncementService({
 // コラムのテーマ案・予定表と先回り・予約から入れる（第32.18.4節）。材料はほかの拡張から（使っていなければ空）
 const columnPlanner = new ColumnPlanner({
   service: columns, store: columns.store, repo, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
+  // テーマ案のニュースと制度の変更（第32.18.7節）
+  researchFor: (tenantId) => ai.researchFor(tenantId),
   materials: columnMaterialsFrom({ repo, webReview, competitorStore, inquiries }),
 });
 // 店頭サイネージ用の画像を後ろで作り、期間の過ぎた組を外す（第32.18.6節）

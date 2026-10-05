@@ -10,10 +10,10 @@ import { DEFAULT_TENANT_SETTINGS, type Notification, type TenantSettings, type W
 import {
   ColumnService, ColumnPlanner, MemoryColumnStore, MemoryFileStore, StubLlmProvider, MockResearchProvider, COLUMN_TOOLS,
   monthSlots, plainThemes, writeThemes, overlapRatio, similarityReview, slotTime, writeColumn,
-  type ColumnThemeMaterials, type PageFetcher, type Repository, type ToolContext,
+  type ColumnThemeMaterials, type LlmProvider, type PageFetcher, type Repository, type ResearchProvider, type ToolContext,
 } from '../src/index.js';
 
-function setup(opts: { columns?: Partial<WebColumnSettings>; materials?: ColumnThemeMaterials } = {}) {
+function setup(opts: { columns?: Partial<WebColumnSettings>; materials?: ColumnThemeMaterials; llm?: LlmProvider; research?: ResearchProvider } = {}) {
   let settings: TenantSettings = {
     ...DEFAULT_TENANT_SETTINGS,
     company: { ...DEFAULT_TENANT_SETTINGS.company, legalName: '見本株式会社', shortName: '見本' },
@@ -49,7 +49,10 @@ function setup(opts: { columns?: Partial<WebColumnSettings>; materials?: ColumnT
     store, repo, files: new MemoryFileStore(), box: { encrypt: (s: string) => s, decrypt: (s: string) => s } as never,
     llmFor: async () => new StubLlmProvider(), researchFor: async () => new MockResearchProvider(),
   });
-  const planner = new ColumnPlanner({ service, store, repo, llmFor: async () => null, ...(opts.materials ? { materials: opts.materials } : {}) });
+  const planner = new ColumnPlanner({
+    service, store, repo, llmFor: async () => opts.llm ?? null, ...(opts.materials ? { materials: opts.materials } : {}),
+    ...(opts.research ? { researchFor: async () => opts.research! } : {}),
+  });
   return { service, planner, store, notes, audits, settings: () => settings };
 }
 
@@ -216,4 +219,47 @@ test('書き方の傾向: 下書きを書くときの指示に、読まれたコ
   const research = { name: 'fake', research: async () => ({ text: '調べた結果', sources: [{ title: '手引き', url: 'https://example.go.jp/guide' }] }) };
   await writeColumn(llm as never, research as never, { theme: 'テーマ', memo: '', company: '見本', audience: '', topics: [], style: '', tendency: 'じっくり読まれたものは 2,400 字前後・見出し 4 つ前後でした' });
   assert.match(prompt, /これまでの読まれ方（決まりの字数の範囲の中で目安にする）: じっくり読まれたものは 2,400 字前後/);
+});
+
+test('テーマ案のニュース: 調べものを 1 回だけ行い 24 時間使い回す。ニュースの案には渡した出典だけを添える。調べられなくても作る（第32.18.7節）', async () => {
+  let researched = 0;
+  let fail = false;
+  const research: ResearchProvider = {
+    name: 'fake',
+    research: async () => {
+      researched++;
+      if (fail) throw new Error('down');
+      return { source: 'gemini', text: '10 月から歯科の検診の制度が変わる。', sources: [{ title: '制度の改定のお知らせ', url: 'https://example.go.jp/news/1' }], queries: [], tokensUsed: 0 };
+    },
+  };
+  let prompt = '';
+  let round = 0;
+  const llm = {
+    name: 'fake',
+    complete: async (req: { messages: { content: string }[] }) => {
+      prompt = req.messages.map((x) => x.content).join('\n');
+      round++;
+      return { text: JSON.stringify({ themes: [
+        { theme: `検診の制度が変わる前に知っておきたいこと${round}`, why: '10 月から変わるため', source: 'news', ref: 1 },
+        { theme: `出典の番号が合わない案${round}`, why: '-', source: 'news', ref: 9 },
+      ] }), tokensUsed: 0 };
+    },
+  } as unknown as LlmProvider;
+  const { planner } = setup({ llm, research });
+  const r = await planner.generateThemes('t1', 'u1', new Date('2026-10-05T00:00:00Z'), false);
+  assert.ok('added' in r);
+  if (!('added' in r)) return;
+  const news = r.added.find((t) => t.source === 'news')!;
+  assert.equal(news.sourceUrl, 'https://example.go.jp/news/1');
+  assert.equal(news.sourceTitle, '制度の改定のお知らせ');
+  const bad = r.added.find((t) => t.theme.startsWith('出典の番号が合わない案'))!;
+  assert.equal(bad.source, 'topic', '渡していない出典の番号なら、ニュースの案にしない');
+  assert.equal(bad.sourceUrl, '');
+  assert.match(prompt, /制度が変わる/, '調べた結果を材料に渡す');
+  await planner.generateThemes('t1', 'u1', new Date('2026-10-05T10:00:00Z'), false);
+  assert.equal(researched, 1, '24 時間は調べ直さない');
+  fail = true;
+  const later = await planner.generateThemes('t1', 'u1', new Date('2026-10-07T00:00:00Z'), false);
+  assert.equal(researched, 2);
+  assert.ok('added' in later && later.added.length > 0, '調べられなくてもテーマ案は作る');
 });

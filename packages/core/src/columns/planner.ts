@@ -13,6 +13,7 @@ import {
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { LlmProvider } from '../llm/provider.js';
+import type { ResearchProvider } from '../research/provider.js';
 import { silentLogger, type Logger } from '../log/logger.js';
 import type { ColumnService, ColumnViewer } from './service.js';
 import { finalMarkdown } from './service.js';
@@ -38,9 +39,14 @@ export interface ColumnPlannerDeps {
   store: ColumnStore;
   repo: Repository;
   llmFor(tenantId: string): Promise<LlmProvider | null>;
+  /** Web の調べもの（テーマ案のニュースと制度の変更。第32.18.7節）。無ければニュースなしで作る */
+  researchFor?(tenantId: string): Promise<ResearchProvider>;
   materials?: ColumnThemeMaterials;
   logger?: Logger;
 }
+
+/** ニュースの調べものを使い回す時間（同じ会社で何度もテーマ案を出しても調べ直さない）。 */
+const NEWS_REUSE_MS = 24 * 3_600_000;
 
 /** 仕組みが行うとき（ワーカー）の操作する人。 */
 const SYSTEM = 'system';
@@ -66,9 +72,34 @@ const md = (d: string) => `${Number(d.slice(5, 7))} 月 ${Number(d.slice(8, 10))
  */
 export class ColumnPlanner {
   private readonly log: Logger;
+  /** 会社ごとの、いちばん新しいニュースの調べもの（使い回す）。 */
+  private readonly newsCache = new Map<string, { at: number; news: { text: string; sources: { title: string; url: string }[] } }>();
 
   constructor(private readonly deps: ColumnPlannerDeps) {
     this.log = deps.logger ?? silentLogger;
+  }
+
+  /**
+   * 会社の分野と読み手に関わる、この 1 か月ほどのニュースと制度の変更を調べる（第32.18.7節）。
+   * 調べものが使えない会社（「ローカルだけ」）・見本の環境・失敗したときは `null`（テーマ案は止めない）。
+   */
+  private async news(tenantId: string, topics: string[], audience: string, now: Date): Promise<{ text: string; sources: { title: string; url: string }[] } | null> {
+    if (!this.deps.researchFor || !topics.length) return null;
+    const hit = this.newsCache.get(tenantId);
+    if (hit && now.getTime() - hit.at < NEWS_REUSE_MS) return hit.news;
+    try {
+      const research = await this.deps.researchFor(tenantId);
+      if (research.name === 'mock') return null;
+      const r = await research.research(`${topics.join('・')}に関わる、この 1 か月ほどのニュースと制度の変更（${jstToday(now)} 時点）`, {
+        focus: `${audience ? `${audience}に関わるもの。` : ''}公的な機関・業界団体の発表、制度・法令・料金・基準の改定、注意の呼びかけ。日付のあるものを先に。個人の事件や噂は除く`,
+      });
+      const news = { text: r.text.slice(0, 4000), sources: r.sources.slice(0, 8) };
+      this.newsCache.set(tenantId, { at: now.getTime(), news });
+      return news;
+    } catch (err) {
+      this.log.info('コラムのテーマ案のニュースを調べられませんでした（ニュースなしで作ります）', { tenantId, error: err instanceof Error ? err.name : 'unknown' });
+      return null;
+    }
   }
 
   private async audit(tenantId: string, userId: string, action: string, targetId: string, detail: Record<string, unknown>): Promise<void> {
@@ -120,7 +151,8 @@ export class ColumnPlanner {
     ]);
     const existing = [...columns.flatMap((c) => [c.theme, c.title]), ...pending.map((t) => t.theme)].filter(Boolean);
     const llm = await this.deps.llmFor(tenantId).catch(() => null);
-    const ideas = await writeThemes(llm, { topics: w.topics, audience: w.audience, today: jstToday(now), searchWords, competitorThemes, questions, existing }, COLUMN_THEMES_PER_WEEK);
+    const news = llm && llm.name !== 'stub' ? await this.news(tenantId, w.topics, w.audience, now) : null;
+    const ideas = await writeThemes(llm, { topics: w.topics, audience: w.audience, today: jstToday(now), searchWords, competitorThemes, questions, existing, news }, COLUMN_THEMES_PER_WEEK);
     const ids: string[] = [];
     for (const t of ideas) ids.push(await this.deps.store.addTheme(tenantId, { ...t, columnId: null }));
     // 書き直しの案（同じコラムの案がまだあれば足さない）

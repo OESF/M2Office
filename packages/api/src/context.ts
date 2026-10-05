@@ -435,6 +435,7 @@ export function buildDeps(): AppDeps {
   });
   columns.planner = new ColumnPlanner({
     service: columns.service, store: columns.service.store, repo, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
+    researchFor: (tenantId) => ai.researchFor(tenantId),
     materials: columnMaterialsFrom({ repo, webReview: webReview.service, competitorStore: competitors.service.store, inquiries: inquiries.service }),
   });
   const engine = new RunEngine({

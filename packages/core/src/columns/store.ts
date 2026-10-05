@@ -27,7 +27,7 @@ export interface ColumnStore {
   dueScheduled(tenantId: string, nowIso: string): Promise<string[]>;
   /** テーマ案（新しい順）。状態を渡せばその状態だけ */
   themes(tenantId: string, statuses?: ColumnThemeStatus[], limit?: number): Promise<WebColumnTheme[]>;
-  addTheme(tenantId: string, t: { theme: string; why: string; source: ColumnThemeSource; columnId: string | null }): Promise<string>;
+  addTheme(tenantId: string, t: { theme: string; why: string; source: ColumnThemeSource; columnId: string | null; sourceTitle?: string; sourceUrl?: string }): Promise<string>;
   setThemeStatus(tenantId: string, id: string, status: ColumnThemeStatus): Promise<void>;
   /** 貼るだけのページの鍵から会社を引く（ログインの無い人が読む）。無ければ `null` */
   tenantByPageKey(key: string): Promise<string | null>;
@@ -75,9 +75,11 @@ function toColumn(r: ColumnRow): WebColumn {
   };
 }
 
-interface ThemeRow { id: string; theme: string; why: string; source: ColumnThemeSource; column_id: string | null; status: ColumnThemeStatus; created_at: Date | string }
+interface ThemeRow { id: string; theme: string; why: string; source: ColumnThemeSource; column_id: string | null; source_title: string; source_url: string; status: ColumnThemeStatus; created_at: Date | string }
 
-const toTheme = (r: ThemeRow): WebColumnTheme => ({ id: r.id, theme: r.theme, why: r.why, source: r.source, columnId: r.column_id, status: r.status, createdAt: iso(r.created_at) });
+const toTheme = (r: ThemeRow): WebColumnTheme => ({
+  id: r.id, theme: r.theme, why: r.why, source: r.source, columnId: r.column_id, sourceTitle: r.source_title ?? '', sourceUrl: r.source_url ?? '', status: r.status, createdAt: iso(r.created_at),
+});
 
 interface VersionRow {
   version: number; title: string; titles: string[]; body: string; description: string; sns: { short?: string; long?: string };
@@ -161,14 +163,14 @@ export class PostgresColumnStore implements ColumnStore {
   }
 
   async themes(tenantId: string, statuses?: ColumnThemeStatus[], limit = 50): Promise<WebColumnTheme[]> {
-    return (await this.q<ThemeRow>(tenantId, `select id, theme, why, source, column_id, status, created_at from web_column_themes
+    return (await this.q<ThemeRow>(tenantId, `select id, theme, why, source, column_id, source_title, source_url, status, created_at from web_column_themes
       where tenant_id = $1 and ($2::text[] is null or status = any($2)) order by created_at desc limit $3`, [tenantId, statuses ?? null, limit])).map(toTheme);
   }
 
-  async addTheme(tenantId: string, t: { theme: string; why: string; source: ColumnThemeSource; columnId: string | null }): Promise<string> {
+  async addTheme(tenantId: string, t: { theme: string; why: string; source: ColumnThemeSource; columnId: string | null; sourceTitle?: string; sourceUrl?: string }): Promise<string> {
     const id = `cth-${randomUUID()}`;
-    await this.q(tenantId, `insert into web_column_themes (id, tenant_id, theme, why, source, column_id) values ($1, $2, $3, $4, $5, $6)`,
-      [id, tenantId, t.theme, t.why, t.source, t.columnId]);
+    await this.q(tenantId, `insert into web_column_themes (id, tenant_id, theme, why, source, column_id, source_title, source_url) values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [id, tenantId, t.theme, t.why, t.source, t.columnId, t.sourceTitle ?? '', t.sourceUrl ?? '']);
     return id;
   }
 
@@ -310,9 +312,9 @@ export class MemoryColumnStore implements ColumnStore {
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit).map(({ tenantId: _t, ...t }) => ({ ...t }));
   }
 
-  async addTheme(tenantId: string, t: { theme: string; why: string; source: ColumnThemeSource; columnId: string | null }): Promise<string> {
+  async addTheme(tenantId: string, t: { theme: string; why: string; source: ColumnThemeSource; columnId: string | null; sourceTitle?: string; sourceUrl?: string }): Promise<string> {
     const id = `cth-${randomUUID()}`;
-    this.allThemes.push({ ...t, id, tenantId, status: 'new', createdAt: new Date(Date.now() + this.allThemes.length).toISOString() });
+    this.allThemes.push({ ...t, sourceTitle: t.sourceTitle ?? '', sourceUrl: t.sourceUrl ?? '', id, tenantId, status: 'new', createdAt: new Date(Date.now() + this.allThemes.length).toISOString() });
     return id;
   }
 

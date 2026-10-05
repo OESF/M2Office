@@ -122,11 +122,11 @@ export interface ColumnPlanSlot {
 }
 
 /** テーマ案の材料（第32.6節）。 */
-export type ColumnThemeSource = 'topic' | 'season' | 'search' | 'competitor' | 'question' | 'rewrite';
+export type ColumnThemeSource = 'topic' | 'season' | 'search' | 'competitor' | 'question' | 'rewrite' | 'news';
 
 /** 材料の呼び方（画面の印）。 */
 export const COLUMN_THEME_SOURCE_LABELS: Record<ColumnThemeSource, string> = {
-  topic: '分野', season: '季節', search: '検索', competitor: '競合', question: '質問', rewrite: '書き直し',
+  topic: '分野', season: '季節', search: '検索', competitor: '競合', question: '質問', rewrite: '書き直し', news: 'ニュース',
 };
 
 /** テーマ案の状態。 */
@@ -142,6 +142,9 @@ export interface WebColumnTheme {
   source: ColumnThemeSource;
   /** 書き直しの案なら、そのコラム */
   columnId: string | null;
+  /** ニュースの案なら、もとにした出典の題名と URL（無ければ空。第32.18.7節） */
+  sourceTitle: string;
+  sourceUrl: string;
   status: ColumnThemeStatus;
   createdAt: string;
 }

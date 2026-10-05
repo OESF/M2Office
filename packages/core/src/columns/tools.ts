@@ -238,7 +238,7 @@ export const columnsThemes: Tool = {
     const [themes, plan] = await Promise.all([ctx.columns.planner.themes(ctx.tenantId), ctx.columns.planner.plan(ctx.tenantId)]);
     return {
       available: true, path: '/columns',
-      themes: themes.slice(0, 10).map((t) => ({ theme: t.theme, why: t.why, source: COLUMN_THEME_SOURCE_LABELS[t.source], rewrite: !!t.columnId })),
+      themes: themes.slice(0, 10).map((t) => ({ theme: t.theme, why: t.why, source: COLUMN_THEME_SOURCE_LABELS[t.source], rewrite: !!t.columnId, ...(t.sourceUrl ? { reference: { title: t.sourceTitle, url: t.sourceUrl } } : {}) })),
       plan: plan.map((s) => ({ date: s.date, title: s.title || null, status: s.status ? WEB_COLUMN_STATUS_LABELS[s.status] : '空き' })),
       note: themes.length ? null : 'まだテーマ案がありません。「テーマ案を出して」と頼めば作ります',
     };
@@ -264,7 +264,7 @@ export const columnsPrepare: Tool = {
     if (typeof args['count'] !== 'number') {
       const r = await planner.generateThemes(ctx.tenantId, ctx.userId, new Date(), false);
       if ('error' in r) return { available: false, reason: r.error };
-      return { available: true, path: '/columns', themes: r.added.map((t) => ({ theme: t.theme, why: t.why, source: COLUMN_THEME_SOURCE_LABELS[t.source] })) };
+      return { available: true, path: '/columns', themes: r.added.map((t) => ({ theme: t.theme, why: t.why, source: COLUMN_THEME_SOURCE_LABELS[t.source], ...(t.sourceUrl ? { reference: { title: t.sourceTitle, url: t.sourceUrl } } : {}) })) };
     }
     const r = await planner.prepare(viewer(ctx), args['count']);
     if ('error' in r) return { available: false, reason: r.error };

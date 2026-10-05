@@ -13,7 +13,7 @@ import { WEB_COLUMNS_EXTENSION_ID, type AgentDefinition } from '@m2office/shared
 import type { ExtensionPackage } from '../extensions/loader.js';
 
 /** 内蔵の拡張の版。付属の業務やツールが変わったら上げる。 */
-export const WEB_COLUMNS_EXTENSION_VERSION = '1.4.0';
+export const WEB_COLUMNS_EXTENSION_VERSION = '1.5.0';
 
 /** 付属の業務「コラムの下書き」（秘書から）。 */
 export const WEB_COLUMN_DRAFT: AgentDefinition = {

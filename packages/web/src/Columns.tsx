@@ -145,6 +145,7 @@ function ColumnList({ onOpen }: { onOpen: (id: string) => void }) {
               <li key={t.id}>
                 <span className="badge">{COLUMN_THEME_SOURCE_LABELS[t.source]}</span> <strong>{t.theme}</strong>
                 {t.why && <span className="muted small">　{t.why}</span>}
+                {t.sourceUrl && <a className="small" href={t.sourceUrl} target="_blank" rel="noopener noreferrer" title={t.sourceTitle}>　出典</a>}
                 <span className="row">
                   <button className="btn small" disabled={busy} onClick={() => void writeTheme(t)}>{t.columnId ? '書き直しを頼む' : '書く'}</button>
                   <button className="btn ghost small" disabled={busy} onClick={() => dismiss(t)}>見送り</button>
