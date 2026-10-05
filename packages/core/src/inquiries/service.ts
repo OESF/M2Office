@@ -1114,8 +1114,11 @@ export class InquiryService {
         await this.auditSystem(tenantId, 'inquiry.line_append', inquiryId, { sensitiveRemoved: !!reading?.sensitive });
         out.appended += 1;
       } else {
+        const party = reading?.party;
         inquiryId = await store.create(tenantId, {
-          from: { name: displayName, company: '', phone: '', email: '' }, contactId: null, channel: 'line', category: reading?.category ?? '質問',
+          // 書かれた氏名があればそれを、無ければ LINE の表示名を「誰から」にする（第33.22節）
+          from: { name: party?.name || displayName, company: party?.company ?? '', phone: party?.phone ?? '', email: party?.email ?? '' },
+          contactId: null, channel: 'line', category: reading?.category ?? '質問',
           summary, source: INQUIRY_SOURCE_UNKNOWN, temperature: reading?.temperature ?? 'normal', receivedBy: LINE_ACTOR, createdBy: LINE_ACTOR, lineUserId: userId,
         });
         await store.update(tenantId, inquiryId, { lastAt: at });
@@ -1126,8 +1129,35 @@ export class InquiryService {
         out.created += 1;
       }
       await store.saveLineUser(tenantId, { lineUserId: userId, displayName, inquiryId, following: true, lastAt: at });
+      if (reading) await this.lineParty(tenantId, inquiryId, displayName, reading.party, settings.line.connectedBy);
     }
     return out;
+  }
+
+  /**
+   * LINE の会話にお客様が書いた氏名・電話・メールで「誰から」を埋め、名刺管理の連絡先につなぐ（第33.22節）。
+   * 電話・メール・会社名は空の項目だけ埋める（人が直した値を上書きしない）。氏名は表示名のままのときだけ書き換える。
+   * 連絡先を新しく作るのは、書かれた氏名と、電話かメールが分かったときだけ（表示名だけでは作らない）。
+   */
+  private async lineParty(tenantId: string, inquiryId: string, displayName: string, party: InquiryParty, owner: string): Promise<void> {
+    if (!party.name && !party.phone && !party.email && !party.company) return;
+    const { store } = this.deps;
+    const cur = await store.get(tenantId, inquiryId);
+    if (!cur) return;
+    const from: InquiryParty = {
+      name: party.name && (!cur.from.name || cur.from.name === displayName) ? party.name : cur.from.name,
+      company: cur.from.company || party.company,
+      phone: cur.from.phone || party.phone,
+      email: cur.from.email || party.email,
+    };
+    const changed = (Object.keys(from) as (keyof InquiryParty)[]).some((k) => from[k] !== cur.from[k]);
+    if (changed) await store.update(tenantId, inquiryId, { from });
+    if (cur.contactId || !(from.email || from.phone.replace(/\D/g, '').length >= 9)) return;
+    // 表示名だけのときは、名前として渡さない（探すのは電話とメールで。作らない）
+    const named = from.name && from.name !== displayName ? from : { ...from, name: '' };
+    const linked = await this.deps.contacts?.link({ tenantId, userId: owner }, named).catch(() => null) ?? null;
+    if (linked) await store.update(tenantId, inquiryId, { contactId: linked.contactId });
+    await this.auditSystem(tenantId, 'inquiry.line_contact', inquiryId, { linked: !!linked, created: !!linked?.created });
   }
 
   /** LINE の相手への返事の下書き（宛先は相手の LINE、差出人は公式アカウント、件名なし）。 */

@@ -8,11 +8,11 @@ import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { DEFAULT_TENANT_SETTINGS, type TenantSettings } from '@m2office/shared';
 import {
-  InquiryService, MemoryInquiryStore, MockLineClient, StubLlmProvider, INQUIRY_TOOLS, guessLine, verifyLineSignature,
-  type Repository, type TenantCredential, type ToolContext,
+  InquiryService, MemoryInquiryStore, MockLineClient, StubLlmProvider, INQUIRY_TOOLS, guessLine, partyFromText, verifyLineSignature,
+  type InquiryContactBook, type Repository, type TenantCredential, type ToolContext,
 } from '../src/index.js';
 
-function setup() {
+function setup(opts: { contacts?: InquiryContactBook } = {}) {
   MockLineClient.clear();
   let settings: TenantSettings = { ...DEFAULT_TENANT_SETTINGS, inquiries: { enabled: true, mailbox: null, line: null } };
   const creds = new Map<string, TenantCredential>();
@@ -39,7 +39,7 @@ function setup() {
   const box = { encrypt: (s: string) => `enc:${s}`, decrypt: (s: string) => s.slice(4) } as never;
   const service = new InquiryService({
     store, repo, llmFor: async () => new StubLlmProvider(),
-    line: { repo, box, sourceFor: () => 'mock' },
+    line: { repo, box, sourceFor: () => 'mock' }, contacts: opts.contacts ?? null,
   });
   return { service, store, settings: () => settings, creds, audits };
 }
@@ -161,4 +161,38 @@ test('よくある質問: 2 件以上の話題を、誰が聞いたかを入れ�
   const topics = await service.faq(member);
   assert.deepEqual(topics, [{ topic: '見積もり', count: 2 }]);
   assert.ok(!JSON.stringify(topics).match(/田中|佐藤/));
+});
+
+test('連絡先: LINE に書かれた氏名・電話・メールを取り出し、表示名からは推し量らない（第33.22節）', () => {
+  assert.deepEqual(partyFromText('見本と申します。電話は 090-1234-5678 です'), { name: '見本', company: '', phone: '090-1234-5678', email: '' });
+  assert.deepEqual(partyFromText('名前は見本花子です。mihon@example.jp に送ってください'), { name: '見本花子', company: '', phone: '', email: 'mihon@example.jp' });
+  assert.deepEqual(partyFromText('予約は 10/12 の 14 時でお願いします'), { name: '', company: '', phone: '', email: '' }, '日付や時刻を電話にしない');
+  assert.deepEqual(guessLine('私は見本と申します', { date: '2026-10-05' }).party.name, '見本');
+});
+
+test('連絡先: 書かれた氏名で「誰から」を書き換え、電話かメールで名刺管理につなぐ。表示名だけでは作らない（第33.22節）', async () => {
+  const linked: { name: string; phone: string; email: string; userId: string }[] = [];
+  const contacts: InquiryContactBook = {
+    link: async (w, from) => { linked.push({ ...from, userId: w.userId }); return from.name ? { contactId: 'ct-new', created: true } : null; },
+    forget: async () => 'missing',
+  };
+  const { service, store, audits } = setup({ contacts });
+  await service.connectLine(admin, { secret: SECRET, token: '', mock: true });
+  const t0 = Date.parse('2026-10-05T01:00:00Z');
+  // 名前を書かずに電話だけ: 探すが、表示名を名前として渡さない（作らない）
+  await service.processLine('t1', { events: [message('p1', 'Ucccc3333', '折り返しは 090-1111-2222 にお願いします', t0)] }, new Date(t0));
+  const [a] = await service.list(member, { status: 'open' });
+  assert.equal(a?.from.phone, '090-1111-2222');
+  assert.equal(a?.from.name, 'LINE の見本（3333）', '名前が書かれていなければ表示名のまま');
+  assert.equal(linked[0]?.name, '', '表示名を名前として渡さない');
+  assert.equal(a?.contactId, null);
+  // 続けて名前を書いた: 誰からを書き換え、つなぐ（LINE をつないだ管理者として）
+  await service.processLine('t1', { events: [message('p2', 'Ucccc3333', '見本と申します', t0 + 60_000)] }, new Date(t0 + 60_000));
+  const after = await store.get('t1', a!.id);
+  assert.equal(after?.from.name, '見本');
+  assert.equal(after?.contactId, 'ct-new');
+  assert.equal(linked.at(-1)?.userId, 'boss');
+  const log = audits.filter((x) => x.action === 'inquiry.line_contact');
+  assert.ok(log.some((x) => x.detail['linked'] === true && x.detail['created'] === true));
+  assert.ok(!JSON.stringify(log).includes('090-1111-2222') && !JSON.stringify(log).includes('見本'), '監査ログに名前と電話を残さない');
 });
