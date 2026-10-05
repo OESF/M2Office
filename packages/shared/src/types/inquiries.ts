@@ -192,6 +192,8 @@ export interface InquirySettings {
   mailbox: InquiryMailbox | null;
   /** LINE 公式アカウント（第33.6.2節）。つないでいなければ `null`。 */
   line: InquiryLine | null;
+  /** 返事を送る設定が無いと管理者に知らせた宛先（小文字。送信元に足されたら外す。第33.23節）。前の版の設定には無い */
+  aliasNotified?: string[];
 }
 
 /** 既定の設定。既定は切り（第33.2節）。 */

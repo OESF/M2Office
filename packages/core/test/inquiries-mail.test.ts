@@ -232,3 +232,31 @@ test('返事から会社の知識にする: ほかのお客様にも答えられ
   assert.equal(await service.learnFromReply('t1', { inquiryId: id, body: '日程を調整します' }), null, '本人だけの返事は知識にしない');
   assert.equal(saved.length, 1);
 });
+
+test('別名: 返事を送る設定が無い宛先に届いたら、宛先ごとに 1 度だけ管理者に手順を知らせ、設定されたら覚えから外す（第33.23節）', async () => {
+  const original = MockMailbox.prototype.sendAs;
+  // sales@ を送信元に足していない窓口のアカウント
+  MockMailbox.prototype.sendAs = async function sendAs(this: MockMailbox) { return [this.address]; };
+  try {
+    const { service, store, notes, audits, settings } = setup();
+    await service.connectMailbox(admin, { email: 'info@alpha.example.jp', refreshToken: null });
+    await service.ingest('t1');
+    const told = notes.filter((n) => /sales@alpha\.example\.jp から返事を送る設定がありません/.test(n.title));
+    assert.equal(told.length, 1, '管理者に 1 度知らせる');
+    assert.equal(told[0]!.userId, 'boss');
+    assert.match(told[0]!.body, /他のメールアドレスを追加/);
+    assert.deepEqual(settings().inquiries.aliasNotified, ['sales@alpha.example.jp']);
+    assert.ok(audits.some((a) => a.action === 'inquiry.alias_notice'));
+    // 同じ宛先にまた届いても、もう知らせない
+    store.mails.length = 0;
+    await service.ingest('t1');
+    assert.equal(notes.filter((n) => /から返事を送る設定がありません/.test(n.title)).length, 1, '2 度目は知らせない');
+    // 送信元に足されたら、覚えから外す
+    MockMailbox.prototype.sendAs = original;
+    store.mails.length = 0;
+    await service.ingest('t1');
+    assert.deepEqual(settings().inquiries.aliasNotified, []);
+  } finally {
+    MockMailbox.prototype.sendAs = original;
+  }
+});

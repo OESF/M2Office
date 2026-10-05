@@ -546,6 +546,39 @@ export class InquiryService {
     return { refreshToken: cred?.secretEnc && this.deps.mailbox ? this.deps.mailbox.box.decrypt(cred.secretEnc) : null };
   }
 
+  /**
+   * 返事を送る設定（Gmail の送信元）が無い宛先を、宛先ごとに 1 度だけ管理者に知らせる（第33.23節）。
+   * 知らせた宛先は会社の設定に覚え、送信元に足されたら外す（後でまた外されたら、もう一度知らせる）。
+   */
+  private async aliasNotice(tenantId: string, missing: string[], sendAs: string[], now: Date): Promise<void> {
+    const { repo } = this.deps;
+    const tenant = await repo.getTenantSettings(tenantId);
+    const before = tenant.inquiries.aliasNotified ?? [];
+    const kept = before.filter((a) => !sendAs.includes(a));
+    const fresh = missing.filter((a) => !kept.includes(a));
+    if (!fresh.length && kept.length === before.length) return;
+    const address = tenant.inquiries.mailbox?.email ?? '';
+    let notified = 0;
+    for (const alias of fresh) {
+      const title = `${alias} から返事を送る設定がありません`;
+      const body = [
+        `${alias} に届いた問い合わせへの返事は、いまは ${address} から送っています。${alias} から送るには、窓口のアカウントの Gmail で、`,
+        `設定 → アカウント → 「他のメールアドレスを追加」で ${alias} を「エイリアスとして扱う」で足してください。`,
+        'Google グループの宛先なら、確認のメールがグループに届くので、そのリンクを開いてください。',
+      ].join('');
+      for (const u of await repo.listUsers(tenantId)) {
+        if (u.status !== 'active' || !u.roles.includes('admin')) continue;
+        if (!canUseAgent(tenant.access, INQUIRIES_EXTENSION_ID, u.id, await repo.listUserGroupIds(tenantId, u.id))) continue;
+        const prefs = await repo.getUserSettings(tenantId, u.id).catch(() => null);
+        if (prefs?.notifications.kinds.inquiry === false) continue;
+        await repo.createNotification({ id: randomUUID(), tenantId, userId: u.id, kind: 'inquiry', title, body: body.slice(0, 400), runId: null, readAt: null, createdAt: now.toISOString() });
+        notified += 1;
+      }
+    }
+    await repo.saveTenantSettings(tenantId, 'inquiries', { ...tenant.inquiries, aliasNotified: [...kept, ...fresh].slice(-30) }, MAILBOX_ACTOR);
+    if (fresh.length) await this.auditSystem(tenantId, 'inquiry.alias_notice', 'mailbox', { aliases: fresh.length, notified });
+  }
+
   /** 届いた宛先（お客様が送ったアドレス）。送信元に使えるもの（別名）を先に、無ければ会社のドメインの宛先、無ければ窓口のアドレス。 */
   private mailTo(m: MailItem, sendAs: string[], address: string): string {
     const domain = address.split('@')[1] ?? '';
@@ -573,6 +606,8 @@ export class InquiryService {
     const llm = await this.deps.llmFor(tenantId).catch(() => null);
     const today = { date: dateIn('Asia/Tokyo', now) };
     const owner = settings.mailbox.connectedBy;
+    // 返事を送る設定（送信元）が無い宛先（第33.23節）
+    const noSendAs = new Set<string>();
     // 古いものから読む（続きの順を保つ）
     for (const id of [...inbox].reverse()) {
       if (seen.has(id)) continue;
@@ -583,8 +618,10 @@ export class InquiryService {
       const to = this.mailTo(m, sendAs, box.address);
       const reading = await readMail(llm, m, today, box.address);
       const r = await this.takeMail(tenantId, m, reading, to, owner);
+      if (r !== 'skipped' && to !== box.address && !sendAs.includes(to)) noSendAs.add(to);
       out[r] += 1;
     }
+    await this.aliasNotice(tenantId, [...noSendAs], sendAs, now).catch((err: unknown) => this.log.warn('送信元の別名の知らせを出せませんでした', { tenantId, error: String(err) }));
     for (const id of [...sent].reverse()) {
       if (seen.has(id)) continue;
       const m = await box.get(id);
