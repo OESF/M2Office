@@ -18,7 +18,7 @@ import type { CardCorners,
   InventoryCount, InventoryCountRow, InventoryCountScope, InventoryCountView, InventorySupplier,
   InventoryBooking, InventoryBookingMapping, InventoryBookingSource, InventoryPublication, InventoryPublicationScope, InventoryPublicSnapshot,
   SignageAsset, SignageEntry, SignageScreen, SignageSettings, SignageInterruptInput, SignageInterruptView, SignagePhrase, SignageSound, SignageSource,
-  ColumnWordPress, WebColumn, WebColumnSettings, WebColumnVersion, WebColumnTheme, ColumnPlanSlot,
+  ColumnWordPress, WebColumn, WebColumnSettings, WebColumnVersion, WebColumnTheme, ColumnPlanSlot, ColumnSignageSet,
   Inquiry, InquiryDetail, InquiryParty, InquiryTask, InquiryReply, InquiryMailSkipped, InquiryMonthStats, InquirySettings, InquiryFaqTopic,
   CompetitorOverview, CompetitorFact, CompetitorReport, CompetitorSettings,
   Announcement, AnnouncementDetail, AnnouncementPreview, AnnouncementRecipient, AnnouncementSettings, AnnouncementTexts,
@@ -1365,6 +1365,13 @@ export const api = {
     useCover: (id: string, fileId: string) => call<{ ok: true }>(`/columns/${encodeURIComponent(id)}/cover/restore`, { method: 'POST', body: JSON.stringify({ fileId }) }),
     /** 前の版のカバー画像の URL。 */
     coverUrlOf: (id: string, version: number) => `/v1/columns/${encodeURIComponent(id)}/cover?version=${version}`,
+    /** 店頭サイネージ用の組と、作れるか（仕様書 第32.18.6節）。 */
+    signage: (id: string) => call<{ usable: boolean; reason: string | null; sets: ColumnSignageSet[] }>(`/columns/${encodeURIComponent(id)}/signage`),
+    /** 店頭サイネージ用を作り始める（ワーカーが後ろで作る）。 */
+    makeSignage: (id: string, kind: 'slides' | 'video' = 'slides') => call<{ id: string }>(`/columns/${encodeURIComponent(id)}/signage`, { method: 'POST', body: JSON.stringify({ kind }) }),
+    submitSignage: (setId: string) => call<{ runId: string }>(`/columns/signage/${encodeURIComponent(setId)}/submit`, { method: 'POST', body: '{}' }),
+    withdrawSignage: (setId: string) => call<{ ok: true }>(`/columns/signage/${encodeURIComponent(setId)}/withdraw`, { method: 'POST', body: '{}' }),
+    signageFileUrl: (setId: string, fileId: string) => `/v1/columns/signage/${encodeURIComponent(setId)}/files/${encodeURIComponent(fileId)}`,
     /** 写真を入れ、そのコラムのカバーにする（会社の写真の置き場にも入る）。 */
     addPhoto: (id: string, file: File) => call<{ ok: true }>(`/columns/${encodeURIComponent(id)}/photos`, {
       method: 'POST', body: file, headers: { 'content-type': file.type, 'x-file-name': encodeURIComponent(file.name) },

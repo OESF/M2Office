@@ -108,7 +108,7 @@ export function wrapTitle(title: string, width: number): { lines: string[]; font
 const PARTICLE = /^(の|は|が|を|に|と|で|も|へ|や|か|な|から|まで|より|って)$/;
 
 /** 文字の幅の合計。 */
-const widthOf = (s: string) => [...s].reduce((n, ch) => n + charWidth(ch), 0);
+export const widthOf = (s: string) => [...s].reduce((n, ch) => n + charWidth(ch), 0);
 
 /**
  * 言葉の切れ目（`Intl.Segmenter`）で行に分け、行の長さをそろえる（「習慣」を「習／慣」のように割らない）。
@@ -157,8 +157,8 @@ function wrapChars(text: string, perLine: number): string[] {
   return out;
 }
 
-const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-const dataUrl = (img: { bytes: Uint8Array; mimeType: string }) => `data:${img.mimeType};base64,${Buffer.from(img.bytes).toString('base64')}`;
+export const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+export const dataUrl = (img: { bytes: Uint8Array; mimeType: string }) => `data:${img.mimeType};base64,${Buffer.from(img.bytes).toString('base64')}`;
 
 /** `#rrggbb` に白を混ぜる（`white` は白の割合）。型の淡い地に使う。 */
 export function tint(hex: string, white: number): string {
@@ -167,10 +167,13 @@ export function tint(hex: string, white: number): string {
   return `#${[0, 2, 4].map((i) => Math.round(parseInt(m[1]!.slice(i, i + 2), 16) * (1 - white) + 255 * white).toString(16).padStart(2, '0')).join('')}`;
 }
 
-/** 型の模様（会社の色の薄い形を、淡い地に重ねる）。 */
-function patternSvg(p: CoverPattern, color: string): string {
-  const W = COVER_WIDTH;
-  const H = COVER_HEIGHT;
+/**
+ * 型の模様（会社の色の薄い形を、淡い地に重ねる）。カバーと店頭サイネージ用の画像（第32.18.6節）で使う。
+ *
+ * @param W 横の大きさ（既定はカバー）
+ * @param H 縦の大きさ（既定はカバー）
+ */
+export function patternSvg(p: CoverPattern, color: string, W = COVER_WIDTH, H = COVER_HEIGHT): string {
   const c = esc(color);
   switch (p) {
     case 'bands':

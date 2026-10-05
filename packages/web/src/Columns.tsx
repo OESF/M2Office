@@ -10,8 +10,8 @@
 import { copyText } from './clipboard.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  COLUMN_COVER_KIND_LABELS, COLUMN_THEME_SOURCE_LABELS, WEB_COLUMN_STATUS_LABELS,
-  type ColumnPlanSlot, type ColumnReviewItem, type WebColumn, type WebColumnStatus, type WebColumnTheme, type WebColumnVersion,
+  COLUMN_COVER_KIND_LABELS, COLUMN_SIGNAGE_STATUS_LABELS, COLUMN_THEME_SOURCE_LABELS, WEB_COLUMN_STATUS_LABELS,
+  type ColumnPlanSlot, type ColumnSignageSet, type ColumnReviewItem, type WebColumn, type WebColumnStatus, type WebColumnTheme, type WebColumnVersion,
 } from '@m2office/shared';
 import { api, describeError, type ColumnDetail } from './api.js';
 import { Markdown } from './help.js';
@@ -487,6 +487,8 @@ function ColumnEditor({ id, onBack, onApprovals }: { id: string; onBack: () => v
             {note('submit')}
           </div>
 
+          {(['approved', 'scheduled', 'placed'] as WebColumnStatus[]).includes(column.status) && <ColumnSignage columnId={id} onApprovals={onApprovals} />}
+
           <div className="row">
             <button className="link small" onClick={() => setShowVersions(!showVersions)}>{showVersions ? '版を閉じる' : `版（${versions.length}）`}</button>
             {note('versions')}
@@ -511,6 +513,88 @@ function ColumnEditor({ id, onBack, onApprovals }: { id: string; onBack: () => v
         </>
       )}
 
+    </div>
+  );
+}
+
+/**
+ * 店頭サイネージ用の画像（仕様書 第32.18.6節）。承認済みのコラムから作り、承認の後に店頭の画面に流す。
+ *
+ * @remarks 店頭サイネージを使っていない会社では出さない。作っているあいだは数秒ごとに読み直す
+ */
+function ColumnSignage({ columnId, onApprovals }: { columnId: string; onApprovals: () => void }) {
+  const [data, setData] = useState<{ usable: boolean; reason: string | null; sets: ColumnSignageSet[] } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
+  const load = useCallback(() => api.columns.signage(columnId).then(setData).catch(() => setData(null)), [columnId]);
+  useEffect(() => { void load(); }, [load]);
+  const making = !!data?.sets.some((s) => s.status === 'making');
+  useEffect(() => {
+    if (!making) return undefined;
+    const t = setInterval(() => void load(), 4000);
+    return () => clearInterval(t);
+  }, [making, load]);
+  if (!data || (!data.usable && data.sets.length === 0)) return null;
+  const act = async (fn: () => Promise<unknown>, ok: string) => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      await fn();
+      setMsg({ kind: 'ok', text: ok });
+      await load();
+    } catch (e) {
+      setMsg({ kind: 'error', text: describeError(e, 'うまくいきませんでした') });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const latest = data.sets.find((s) => s.status !== 'withdrawn' && s.status !== 'failed') ?? data.sets[0] ?? null;
+  const live = data.sets.find((s) => s.status === 'published' && s.id !== latest?.id);
+  return (
+    <section className="columns-signage">
+      <h3>店頭サイネージ</h3>
+      <div className="row">
+        <button className="btn ghost" disabled={busy || making || !data.usable}
+          onClick={() => void act(() => api.columns.makeSignage(columnId, 'slides'), '作り始めました。数分でできます')}>
+          {latest ? 'サイネージ用を作り直す' : 'サイネージ用を作る'}
+        </button>
+        {msg && <span className={`columns-note is-${msg.kind}`} role={msg.kind === 'error' ? 'alert' : 'status'}>{msg.text}</span>}
+      </div>
+      {latest && <SignageSet set={latest} busy={busy} onApprovals={onApprovals}
+        onSubmit={() => void act(() => api.columns.submitSignage(latest.id), '承認へ進めました')}
+        onWithdraw={() => void act(() => api.columns.withdrawSignage(latest.id), 'サイネージから外しました')} />}
+      {live && <SignageSet set={live} busy={busy} onApprovals={onApprovals} onSubmit={() => undefined}
+        onWithdraw={() => void act(() => api.columns.withdrawSignage(live.id), 'サイネージから外しました')} />}
+    </section>
+  );
+}
+
+/** 店頭サイネージ用の 1 組（状態・画像・操作）。 */
+function SignageSet({ set, busy, onSubmit, onWithdraw, onApprovals }: {
+  set: ColumnSignageSet; busy: boolean; onSubmit: () => void; onWithdraw: () => void; onApprovals: () => void;
+}) {
+  const side = set.outputs[0]?.orientation;
+  const images = set.outputs.filter((o) => o.orientation === side).sort((a, b) => a.index - b.index);
+  return (
+    <div className="columns-signage-set">
+      <div className="row small">
+        <span className={`badge${set.status === 'failed' ? ' warn' : ''}`}>{COLUMN_SIGNAGE_STATUS_LABELS[set.status]}</span>
+        {set.status === 'published' && set.publishUntil && <span className="muted">{when(set.publishUntil)} まで</span>}
+        {set.status === 'ready' && <button className="btn small" disabled={busy} onClick={onSubmit}>承認へ進む（店頭に流す）</button>}
+        {set.status === 'submitted' && <button className="btn ghost small" onClick={onApprovals}>承認トレイを開く</button>}
+        {set.status === 'published' && <button className="link danger small" disabled={busy} onClick={onWithdraw}>サイネージから外す</button>}
+      </div>
+      {set.error && <p className="error small">{set.error}</p>}
+      {set.note.trim() && set.status !== 'making' && <p className="small muted">{set.note}</p>}
+      {images.length > 0 && (
+        <div className={`columns-signage-images is-${side}`}>
+          {images.map((o) => (
+            <a key={o.fileId} href={api.columns.signageFileUrl(set.id, o.fileId)} target="_blank" rel="noreferrer">
+              <img src={api.columns.signageFileUrl(set.id, o.fileId)} alt={set.scenes[o.index]?.caption ?? `${o.index + 1} 枚目`} loading="lazy" />
+            </a>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -15,7 +15,7 @@ import {
   TenantAiResolver, platformAi, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, ConnectionCredentials, type ConnectionAuthProvider,
   CardService, PostgresContactStore, cardsAccess, type ContactStore, BulkMailService, PostgresBulkMailStore, NoticeService, PostgresNoticeStore,
-  InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, JanLookupService, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, InquiryService, PostgresInquiryStore, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, WEB_REVIEW_REQUEST, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, webColumnsAccess, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
+  InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, JanLookupService, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, InquiryService, PostgresInquiryStore, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, WEB_REVIEW_REQUEST, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, webColumnsAccess, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, WEB_COLUMN_SIGNAGE_PUBLISH, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
   type SecretBox, type GeminiModels,
   type FileStore, type TenantExtensions, type HelpArticle, type ManualMeta, type LlmProvider, type Logger, type Repository, type WorkspaceConnector,
 } from '@m2office/core';
@@ -140,6 +140,8 @@ export interface AppDeps {
     access(tenantId: string, userId: string): Promise<WebColumnSettings | null>;
     /** テーマ案・予定表・予約・貼るだけのページ（段 2。第32.18.4節） */
     planner?: ColumnPlanner;
+    /** 店頭サイネージ用の画像（第32.18.6節） */
+    signage?: ColumnSignageService;
   };
   /**
    * 問い合わせの記録（内蔵の拡張。仕様書 第33章）。
@@ -415,6 +417,20 @@ export function buildDeps(): AppDeps {
   };
   webReviewRef.service = webReview.service;
   // コラムのテーマ案・予定表・予約・貼るだけのページ（第32.18.4節）。材料はほかの拡張から（使っていなければ空）
+  // 店頭サイネージ用の画像（第32.18.6節）。作るのはワーカー。画面からは作り始め・承認へ・外すを行う
+  columns.signage = new ColumnSignageService({
+    store: new PostgresColumnSignageStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+    columns: columns.service.store, repo, files, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
+    signage: signageForColumns(signageService),
+    submitter: async (tenantId, userId, setId, images) => {
+      const def = (await tenantView(tenantId)).resolve(WEB_COLUMN_SIGNAGE_PUBLISH.id, WEB_COLUMN_SIGNAGE_PUBLISH.version);
+      if (!def) throw new Error('コラムをサイネージに流す業務が見つかりません');
+      const input: Record<string, unknown> = { setId };
+      images.forEach((id, i) => { input[`image${i + 1}`] = id; });
+      return (await enqueueJob(repo, { tenantId, requestedBy: userId, def, input, origin: 'menu', actor: { type: 'user', id: userId } })).runId;
+    },
+    runStatus: async (tenantId, runId) => (await repo.getRun(tenantId, runId))?.status ?? null,
+  });
   columns.planner = new ColumnPlanner({
     service: columns.service, store: columns.service.store, repo, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
     materials: columnMaterialsFrom({ repo, webReview: webReview.service, competitorStore: competitors.service.store, inquiries: inquiries.service }),

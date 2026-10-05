@@ -1896,3 +1896,11 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .health-item.is-fail .health-line.active::after { color: var(--danger); }
 @keyframes health-flow { to { left: 100%; } }
 @media (prefers-reduced-motion: reduce) { .health-line.active::after { animation: none; left: 30%; } }
+
+/* コラムの店頭サイネージ用の画像（仕様書 第32.18.6節）。紙芝居は順に並べる */
+.columns-signage { margin-top: calc(16px * var(--space-scale)); border-top: 1px solid var(--line); padding-top: calc(12px * var(--space-scale)); }
+.columns-signage-set { margin-top: calc(10px * var(--space-scale)); display: grid; gap: calc(6px * var(--space-scale)); }
+.columns-signage-images { display: grid; gap: calc(8px * var(--space-scale)); }
+.columns-signage-images.is-landscape { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+.columns-signage-images.is-portrait { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+.columns-signage-images img { width: 100%; height: auto; display: block; border-radius: 6px; border: 1px solid var(--line); }

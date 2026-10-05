@@ -17,7 +17,7 @@ import type { LlmProvider } from '../llm/provider.js';
 import { silentLogger, type Logger } from '../log/logger.js';
 import { dateIn } from '../cards/service.js';
 import {
-  checkCandidates, movesOf, suggestThemes, suggestAnnouncements, decideArea, extractFacts, findUrlByName, suggestCompetitors, summarizeProfile, writeReport,
+  checkCandidates, confirmMoves, movesOf, suggestThemes, suggestAnnouncements, decideArea, extractFacts, findUrlByName, suggestCompetitors, summarizeProfile, writeReport,
   type AreaDecision, type Candidate, type ExtractedFact, type ReportSubject,
 } from './analyze.js';
 import { HttpPageFetcher, MockPageFetcher, checkUrl, type PageFetcher } from './fetcher.js';
@@ -526,6 +526,9 @@ export class CompetitorService {
       });
     }
     const llm = await this.deps.llmFor(who.tenantId).catch(() => null);
+    // 動きを確かめる（言い回しの揺れを除き、本当の変化だけ。第36.19節「動きの数え方」）。本文・数・知らせに同じものを使う
+    const confirmed = await confirmMoves(llm, subjects);
+    subjects.forEach((x, i) => { x.moves = confirmed[i] ?? []; });
     const names = subjects.map((x) => x.name);
     const [written, themes, mentions, announcementIdeas] = await Promise.all([
       writeReport(llm, profile, subjects), suggestThemes(llm, profile, subjects, names), this.inquiryMentions(who.tenantId, names, now),

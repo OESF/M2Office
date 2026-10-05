@@ -6009,6 +6009,43 @@ console.log('\n■ 75. 接続先の健全性（AI・Google の各サービス・
   }
 }
 
+console.log('\n■ 76. コラムから店頭サイネージ用の画像を作る（承認済みのコラムだけ・会社の境界。第32.18.6節）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const { rows: saved } = await owner.query(`select tenant_id, web_columns from tenant_settings where tenant_id = 't-alpha'`);
+  try {
+    await call('a', '/v1/admin/extensions/web-columns/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const list = await call('a', '/v1/columns/col-none/signage', {}, 'member');
+    const make = await call('a', '/v1/columns/col-none/signage', { method: 'POST', body: JSON.stringify({ kind: 'slides' }) }, 'member');
+    list.status === 200 && Array.isArray(list.body.sets) && typeof list.body.usable === 'boolean' && make.status === 400 && /見つかりません/.test(make.body.error ?? '')
+      ? ok('コラムの画面からサイネージ用の組を読み、無いコラムからは作らない') : ng('サイネージ用の口が違う', JSON.stringify({ list: list.status, body: list.body, make: make.status, err: make.body }));
+    const wd = await call('a', '/v1/columns/signage/csg-none/withdraw', { method: 'POST', body: '{}' }, 'member');
+    wd.status === 403 ? ok('店頭サイネージから外せるのは管理者と承認者だけ') : ng(`外せる人が違う（${wd.status}）`);
+    const file = await call('a', '/v1/columns/signage/csg-none/files/f-none', {}, 'member');
+    file.status === 404 ? ok('組に入っていないファイルは出さない') : ng(`組の外のファイルが出た（${file.status}）`);
+    // 置き場: 会社の境界（行単位の制限）
+    const app = new pg.Client({ connectionString: process.env.DATABASE_URL ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office' });
+    await app.connect();
+    try {
+      await app.query('begin');
+      await app.query(`select set_config('app.tenant_id', 't-beta', true)`);
+      let refused = false;
+      try {
+        await app.query(`insert into column_signage (tenant_id, id, column_id, kind, created_by) values ('t-alpha', 'csg-smoke', 'c', 'slides', 'u')`);
+      } catch { refused = true; }
+      await app.query('rollback');
+      refused ? ok('サイネージ用の組は、ほかの会社の行を書けない（行単位の制限）') : ng('ほかの会社のサイネージ用の組を書けた');
+    } finally {
+      await app.end();
+    }
+  } finally {
+    for (const r of saved) await owner.query(`update tenant_settings set web_columns = $2 where tenant_id = $1`, [r.tenant_id, r.web_columns ? JSON.stringify(r.web_columns) : null]);
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

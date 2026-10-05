@@ -11,12 +11,15 @@ import { COLUMN_COVER_KIND_LABELS, COLUMN_RULE_SET_LABELS, COLUMN_THEME_SOURCE_L
 import type { Tool, ToolContext } from '../tools/registry.js';
 import type { ColumnPreview, ColumnService } from './service.js';
 import type { ColumnPlanner } from './planner.js';
+import type { ColumnSignageService } from './signage.js';
 
 /** ツールに渡す Web のコラムの文脈。 */
 export interface ColumnToolContext {
   service: ColumnService;
   /** テーマ案と予定表（段 2。第32.18.4節）。無い環境では、テーマ案のツールは「使えない」と返す */
   planner?: ColumnPlanner;
+  /** 店頭サイネージ用の画像（第32.18.6節）。無い環境では「使えない」と返す */
+  signage?: ColumnSignageService;
   /**
    * 依頼者がいま Web のコラムを使えるか。使えるなら会社の設定を返す。
    *
@@ -273,4 +276,66 @@ export const columnsPrepare: Tool = {
   },
 };
 
-export const COLUMN_TOOLS: Tool[] = [columnsDraft, columnsPreview, columnsPlace, columnsCover, columnsRules, columnsThemes, columnsPrepare];
+/**
+ * 承認済みのコラムから、店頭サイネージ用の画像を作り始める（秘書から。第32.18.6節）。ワーカーが後ろで作る。
+ *
+ * @remarks 危険度 `write-internal`。作るだけで、店頭の画面には流さない（流すのは承認の後の `columns.signage_publish`）
+ */
+export const columnsSignageMake: Tool = {
+  name: 'columns.signage_make',
+  risk: 'write-internal',
+  activityLabel: 'コラムから店頭の画面用の画像を作り始めています',
+  helpText: '承認済みのコラムから、店頭の画面に流す画像（1 枚か紙芝居）を作り始めます。流すのは承認の後です',
+  description: '承認済みのコラムから、店頭サイネージ用の画像を作り始める。column はコラムの題名かテーマの言葉（無ければいちばん新しい承認済みのコラム）。kind は slides（画像）か video（動画）。1 つに決まらなければ候補を返す',
+  args: {
+    properties: {
+      column: { type: 'string', description: 'コラムの題名かテーマの言葉' },
+      kind: { type: 'string', description: '画像か動画', enum: ['slides', 'video'] },
+    },
+  },
+  async invoke(args, ctx) {
+    const service = await columnsOf(ctx);
+    const signage = ctx.columns?.signage;
+    if (!service || !signage) return UNAVAILABLE;
+    const words = norm(str(args['column']));
+    const all = (await service.store.list(ctx.tenantId, 100)).filter((c) => ['approved', 'scheduled', 'placed'].includes(c.status));
+    const found = words ? all.filter((c) => norm(`${c.title}${c.theme}`).includes(words)) : all.slice(0, 1);
+    if (found.length === 0) return { available: false, reason: words ? 'その承認済みのコラムが見つかりません' : '承認済みのコラムがありません' };
+    if (found.length > 1) return { available: false, reason: 'コラムが 1 つに決まりません', candidates: found.slice(0, 8).map((c) => c.title || c.theme) };
+    const c = found[0]!;
+    const r = await signage.make(viewer(ctx), c.id, str(args['kind']) === 'video' ? 'video' : 'slides');
+    if ('error' in r) return { available: false, reason: r.error };
+    return { available: true, title: c.title || c.theme, path: columnPath(c.id), making: true };
+  },
+};
+
+/**
+ * 作った店頭サイネージ用の画像を流す（付属の業務「コラムをサイネージに流す」が承認の後に呼ぶ。第32.18.6節）。
+ *
+ * @remarks 危険度 `external-send`（店頭の画面はお客様が見る）。承認の画面に一言・流す画面・期間と画像を出す。承認の後に変わっていたら流さない
+ */
+export const columnsSignagePublish: Tool = {
+  name: 'columns.signage_publish',
+  risk: 'external-send',
+  activityLabel: 'コラムの画像を店頭の画面に流しています',
+  helpText: 'コラムから作った画像を、承認の後に店頭の画面の流れに置きます',
+  description: '店頭サイネージ用の組（setId）を、承認の後に店頭の画面の流れの先頭に置く',
+  args: { properties: { setId: { type: 'string', description: 'サイネージ用の組の ID' } }, required: ['setId'] },
+  planKey: (args) => `column-signage:${str(args['setId'])}`,
+  async prepare(args, ctx) {
+    const signage = (await columnsOf(ctx)) ? ctx.columns?.signage : undefined;
+    if (!signage) return { kind: 'problem', reason: UNAVAILABLE.reason };
+    const p = await signage.preview(ctx.tenantId, str(args['setId']));
+    if ('error' in p) return { kind: 'problem', reason: p.error };
+    return { kind: 'ready', args: { setId: str(args['setId']), digest: p.digest }, audience: 'external', shown: p.shown };
+  },
+  async invoke(args, ctx) {
+    const signage = (await columnsOf(ctx)) ? ctx.columns?.signage : undefined;
+    if (!signage) return UNAVAILABLE;
+    const r = await signage.publish(viewer(ctx), str(args['setId']), str(args['digest']));
+    if ('error' in r) return { available: false, reason: r.error };
+    return { available: true, published: true, screens: r.screens };
+  },
+};
+
+export const COLUMN_TOOLS: Tool[] = [columnsDraft, columnsPreview, columnsPlace, columnsCover, columnsRules, columnsThemes, columnsPrepare, columnsSignageMake, columnsSignagePublish];

@@ -7,6 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULT_TENANT_SETTINGS, REPORT_MAP_SOURCE_LINE, gatherMapSource, type TenantSettings } from '@m2office/shared';
+import { candidateMoves, changedFacts, confirmMoves, movesOf, sameFact } from '../src/competitors/analyze.js';
 import {
   CompetitorService, CompetitorWatch, MemoryCompetitorStore, MockPageFetcher, MOCK_SITES, StubLlmProvider, COMPETITOR_TOOLS,
   checkUrl, crawlerUserAgent, isBlockedAddress, parseRobots, readHtml, robotsAllows,
@@ -411,4 +412,35 @@ test('表の下にすでに出典の行があれば、もう 1 行は足さな�
   assert.equal(gatherMapSource(already).split('Google Maps').length - 1, 1);
   const plain = '| a | b |\n|---|---|\n| 1 | 2 |';
   assert.equal(gatherMapSource(plain), plain);
+});
+
+test('動きの数え方 ①: 言い回しの揺れは同じ事実、数字が違えば別の事実（第36.19節）', () => {
+  const same = (a: string, b: string, kind: 'hours' | 'service' = 'hours') => sameFact({ kind, text: a }, { kind, text: b });
+  assert.equal(same('10時〜19時', '10:00〜19:00'), true);
+  assert.equal(same('営業時間 10:00〜19:00', '10:00～19:00 営業'), true);
+  assert.equal(same('コピー用紙 A4 500 枚 450円', 'A4 コピー用紙（500枚）450 円', 'service'), true);
+  assert.equal(same('10:00〜19:00', '10:00〜20:00'), false, '時刻が変われば動き');
+  assert.equal(same('コピー用紙 A4 500 枚 450円', 'コピー用紙 A4 500 枚 480円', 'service'), false, '値段が変われば動き');
+  assert.equal(sameFact({ kind: 'hours', text: 'a' }, { kind: 'service', text: 'a' }), false, '種類が違えば別');
+  const prev = [{ kind: 'hours' as const, text: '10時〜19時', sourceUrl: 'https://x.example/' }];
+  const now = [{ kind: 'hours' as const, text: '10:00〜19:00', sourceUrl: 'https://x.example/' }, { kind: 'campaign' as const, text: '秋のセール', sourceUrl: 'https://x.example/' }];
+  assert.deepEqual(changedFacts(now, prev).map((f) => f.text), ['秋のセール']);
+});
+
+test('動きの数え方 ②: 推論が本当の変化だけを選び、数・本文・知らせが同じ動きを使う（推論が使えなければ ① のまま）', async () => {
+  const subject = {
+    name: '見本の競合 A', facts: [
+      { kind: 'news' as const, text: '年末年始は 12月29日から1月3日まで休み', sourceUrl: 'https://x.example/news' },
+      { kind: 'campaign' as const, text: '秋のセール 10% 引き', sourceUrl: 'https://x.example/news' },
+    ],
+    previous: [{ kind: 'news' as const, text: '年末年始は 12/29〜1/3 休業', sourceUrl: 'https://x.example/news' }],
+    changedUrls: ['https://x.example/news'],
+  };
+  assert.equal(candidateMoves(subject).length, 2, '① では日付の書き方の違いが残る');
+  const llm = { name: 'gemini', complete: async () => ({ text: '{"changed":[1]}', tokensUsed: 1 }) };
+  const [confirmed] = await confirmMoves(llm, [subject]);
+  assert.deepEqual(confirmed!.map((f) => f.text), ['秋のセール 10% 引き']);
+  assert.deepEqual(movesOf({ ...subject, moves: confirmed! }).map((f) => f.text), ['秋のセール 10% 引き'], '確かめた動きがあれば、それを使う');
+  const [plain] = await confirmMoves(null, [subject]);
+  assert.equal(plain!.length, 2);
 });

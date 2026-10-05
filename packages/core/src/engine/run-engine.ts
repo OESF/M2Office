@@ -42,6 +42,7 @@ import type { InquiryService } from '../inquiries/service.js';
 import type { CompetitorService } from '../competitors/service.js';
 import type { AnnouncementService } from '../announcements/service.js';
 import type { ColumnPlanner } from '../columns/planner.js';
+import type { ColumnSignageService } from '../columns/signage.js';
 import type { WebReviewService } from '../web-review/service.js';
 import type { LaborCalendar } from '../hr/calendar-service.js';
 import { answerOfSteps } from '../memory/work.js';
@@ -152,6 +153,8 @@ export interface RunEngineDeps {
     access(tenantId: string, userId: string): Promise<WebColumnSettings | null>;
     /** テーマ案と予定表（段 2。第32.18.4節） */
     planner?: ColumnPlanner;
+    /** 店頭サイネージ用の画像（第32.18.6節） */
+    signage?: ColumnSignageService;
   };
   /**
    * 問い合わせの記録（内蔵の拡張。仕様書 第33章）。ツールに渡す。無ければ問い合わせのツールは「使えない」と返す。
@@ -972,6 +975,7 @@ export class RunEngine {
         columns: {
           service: this.deps.columns.service, access: () => this.deps.columns!.access(run.tenantId, requestedBy),
           ...(this.deps.columns.planner ? { planner: this.deps.columns.planner } : {}),
+          ...(this.deps.columns.signage ? { signage: this.deps.columns.signage } : {}),
         },
       } : {}),
       // 問い合わせの記録（第33.17節）。使えるかどうかはツールが呼ぶたびに確かめる
@@ -1248,8 +1252,8 @@ export function needsHuman(
   });
 }
 
-/** 送り先に関わらず、いつも人に判断を求めるツール。メールは宛先に関わらず人が見る。Web に載せるもの・問い合わせの返事も人が見る（仕様書 第9.4.0節・第32.18.1節・第33.18節）。 */
-const ALWAYS_ASK = new Set(['gmail.send', 'mail.bulk_send', 'columns.place', 'inquiries.reply_send', 'announcements.publish', 'web_review.request_send']);
+/** 送り先に関わらず、いつも人に判断を求めるツール。メールは宛先に関わらず人が見る。Web に載せるもの・問い合わせの返事・店頭の画面に流すものも人が見る（仕様書 第9.4.0節・第32.18.1節・第32.18.6節・第33.18節）。 */
+const ALWAYS_ASK = new Set(['gmail.send', 'mail.bulk_send', 'columns.place', 'inquiries.reply_send', 'announcements.publish', 'web_review.request_send', 'columns.signage_publish']);
 
 /** 承認の前の確かめで、行えないと分かった操作（記録しない。ADR-0024）。 */
 type UnableCall = {

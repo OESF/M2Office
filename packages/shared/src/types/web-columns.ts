@@ -264,3 +264,61 @@ export interface WebColumn {
   createdAt: string;
   updatedAt: string;
 }
+
+// ---- 店頭サイネージ用の画像と動画（仕様書 第32.18.6節） -----------------------------------------
+
+/** 店頭サイネージ用の組の種類。`slides` は画像（1 枚か紙芝居）、`video` は動画（段 2）。 */
+export type ColumnSignageKind = 'slides' | 'video';
+
+/** 店頭サイネージ用の組の状態。 */
+export type ColumnSignageStatus = 'making' | 'ready' | 'submitted' | 'published' | 'withdrawn' | 'failed';
+
+/** 状態の呼び方。 */
+export const COLUMN_SIGNAGE_STATUS_LABELS: Record<ColumnSignageStatus, string> = {
+  making: '作っています', ready: 'できました', submitted: '承認待ち', published: '流しています', withdrawn: '外しました', failed: '作れませんでした',
+};
+
+/** 紙芝居の 1 場面。`caption` は画面に出す一言、`picture` は絵の内容（画面には出さない）。 */
+export interface ColumnSignageScene {
+  caption: string;
+  picture: string;
+}
+
+/** できた画像か動画 1 つ。 */
+export interface ColumnSignageOutput {
+  orientation: 'landscape' | 'portrait';
+  /** 何枚目か（0 から）。動画は 0。 */
+  index: number;
+  fileId: string;
+  kind: 'image' | 'video';
+}
+
+/** 店頭サイネージ用の 1 組（1 回の「サイネージ用を作る」）。 */
+export interface ColumnSignageSet {
+  id: string;
+  columnId: string;
+  kind: ColumnSignageKind;
+  status: ColumnSignageStatus;
+  scenes: ColumnSignageScene[];
+  outputs: ColumnSignageOutput[];
+  /** 描き直しや型にしたことなど、頼んだ人に伝えること。 */
+  note: string;
+  /** 作れなかった・流せなかった理由。 */
+  error: string | null;
+  runId: string | null;
+  screenIds: string[];
+  /** 流す最後の日時（流しているときだけ）。 */
+  publishUntil: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 紙芝居の枚数の上限。 */
+export const COLUMN_SIGNAGE_SLIDES_MAX = 5;
+/** 画面に出す一言の長さ（字）。 */
+export const COLUMN_SIGNAGE_CAPTION_MAX = 30;
+/** 承認の後に流す日数（案）。 */
+export const COLUMN_SIGNAGE_DAYS = 30;
+/** 紙芝居の 1 枚を出す秒数。 */
+export const COLUMN_SIGNAGE_SECONDS = 8;

@@ -17,5 +17,10 @@ export { ColumnService, webColumnsAccess, finalMarkdown, COLUMN_PHOTO_MAX_BYTES,
 export { COLUMN_TOOLS, type ColumnToolContext } from './tools.js';
 export { monthSlots, slotTime, plainThemes, writeThemes, normalizeTheme, overlapRatio, similarityReview, type ThemeMaterials } from './plan.js';
 export { ColumnPlanner, columnPublicUrl, type ColumnPlannerDeps, type ColumnThemeMaterials, type PastePageColumn } from './planner.js';
-export { WEB_COLUMN_AGENTS, WEB_COLUMN_DRAFT, WEB_COLUMN_PLACE, WEB_COLUMN_COVER, WEB_COLUMN_RULES, WEB_COLUMNS_PACKAGE, WEB_COLUMNS_EXTENSION_VERSION } from './agents.js';
+export { WEB_COLUMN_AGENTS, WEB_COLUMN_DRAFT, WEB_COLUMN_PLACE, WEB_COLUMN_COVER, WEB_COLUMN_RULES, WEB_COLUMN_SIGNAGE, WEB_COLUMN_SIGNAGE_PUBLISH, WEB_COLUMNS_PACKAGE, WEB_COLUMNS_EXTENSION_VERSION } from './agents.js';
 export { columnMaterialsFrom } from './materials.js';
+export { PostgresColumnSignageStore, MemoryColumnSignageStore, type ColumnSignageStore, type StoredColumnSignage, type ColumnSignagePatch } from './signage-store.js';
+export {
+  ColumnSignageService, signageForColumns, planScenes, scenePrompt, slideSvg, signageDigest, cleanCaption, SIGNAGE_SIZE,
+  type ColumnSignageDeps, type ColumnSignageOutlet, type ColumnSignageViewer, type SlideInput, type SignageSide,
+} from './signage.js';

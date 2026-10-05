@@ -267,6 +267,8 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST` ／ `DELETE /v1/admin/extensions/web-columns/page` | 管理者: 貼るだけのページを入れる（鍵の URL を作り、ページ・JSON・RSS の URL を返す）／ 止める。設定の `plan`（`perMonth`: 1・2・4、`weekday`: 0〜6。null で作らない）は `PUT /v1/admin/extensions/web-columns/settings` |
 | `GET /v1/public/columns/:key` ／ `:key.json` ／ `:key.rss` ／ `:key/:id` ／ `:key/:id/cover.png` | 貼るだけのページ（ログインなし。会社の判定より前）: 承認済みで公開の日時を過ぎたコラムの一覧 ／ データ ／ RSS ／ 記事 ／ カバー画像。鍵が違う・止めた会社は 404。ページはスクリプトを持たない |
 | `POST /v1/columns/:id/cover/restore` | 前に作ったカバーに戻す（`fileId`。このコラムの前の版のカバーだけ。本文はいまのまま、新しい版になる） |
+| `GET` ／ `POST /v1/columns/:id/signage` | 店頭サイネージ用の組（新しい順）と作れるか（`usable`・`reason`）／ 作り始める（`kind`: slides。承認済みのコラムだけ。ワーカーが後ろで作る。仕様書 第32.18.6節） |
+| `POST /v1/columns/signage/:setId/submit` ／ `POST /v1/columns/signage/:setId/withdraw` ／ `GET /v1/columns/signage/:setId/files/:fileId` | 承認へ進める（付属の業務「コラムをサイネージに流す」）／ 店頭サイネージから外す（管理者と承認者）／ 組の画像（組に入っているファイルだけ） |
 | `GET` ／ `POST /v1/columns/:id/cover` | カバー画像（PNG。`version` で前の版、`download=1` で保存させる）／ 作り直す（`kind`: template・ai・photo、`hint`。新しい版になる） |
 | `POST /v1/columns/:id/photos` | 写真を入れ、そのコラムのカバーにする（本文は写真の中身。JPEG・PNG、10 MB まで。会社の写真の置き場にも入る） |
 | `POST /v1/columns/:id/submit` | 承認へ進める（業務「コラムを WordPress に入れる」を始め、管理者か承認者の承認を待つ。版の指紋を残す。入力にカバーのファイルを含め、承認する人がその画像を見られるようにする。入れられない理由があれば 400） |

@@ -196,6 +196,56 @@ export function columnsRoute(deps: AppDeps) {
   /**
    * 写真を入れ、そのコラムのカバーにする（会社の写真の置き場にも入る）。本文は写真の中身そのもの（JPEG・PNG、10 MB まで）。
    */
+  /**
+   * 店頭サイネージ用の組（新しい順）と、作れるか（第32.18.6節）。画像は `/v1/files/:id/view` で見る。
+   */
+  app.get('/:id/signage', async (c) => {
+    const { tenant } = c.get('ctx');
+    const s = deps.columns.signage;
+    if (!s) return c.json({ usable: false, reason: '店頭サイネージ用の画像は使えません', sets: [] });
+    const [reason, sets] = await Promise.all([s.usable(tenant.id), s.list(tenant.id, c.req.param('id'))]);
+    return c.json({ usable: !reason, reason, sets });
+  });
+
+  /** 店頭サイネージ用を作り始める（ワーカーが後ろで作る）。`kind` は slides（画像）か video（動画。段 2）。 */
+  app.post('/:id/signage', async (c) => {
+    const s = deps.columns.signage;
+    if (!s) return c.json({ error: '店頭サイネージ用の画像は使えません' }, 409);
+    const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
+    const r = await s.make(who(c), c.req.param('id'), body['kind'] === 'video' ? 'video' : 'slides');
+    return 'error' in r ? c.json({ error: r.error }, 400) : c.json(r, 202);
+  });
+
+  /** 店頭サイネージ用の組を承認へ進める（付属の業務「コラムをサイネージに流す」を始める）。 */
+  app.post('/signage/:setId/submit', async (c) => {
+    const { tenant } = c.get('ctx');
+    const s = deps.columns.signage;
+    if (!s) return c.json({ error: '店頭サイネージ用の画像は使えません' }, 409);
+    if (!aiAvailable(await deps.ai.llmFor(tenant.id))) return c.json({ error: AI_NOT_CONFIGURED_MESSAGE }, 409);
+    const r = await s.submit(who(c), c.req.param('setId'));
+    return 'error' in r ? c.json({ error: r.error }, 400) : c.json(r, 201);
+  });
+
+  /** 店頭サイネージ用の組の画像か動画（コラムを使える人が見る）。組に入っていないファイルは返さない。 */
+  app.get('/signage/:setId/files/:fileId', async (c) => {
+    const { tenant } = c.get('ctx');
+    const f = await deps.columns.signage?.outputBytes(tenant.id, c.req.param('setId'), c.req.param('fileId'));
+    if (!f) return c.json({ error: 'ファイルが見つかりません' }, 404);
+    return new Response(Buffer.from(f.bytes), {
+      headers: { 'content-type': f.mime, 'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'none'; sandbox", 'cache-control': 'private, max-age=3600' },
+    });
+  });
+
+  /** 店頭サイネージから外す（管理者と承認者）。 */
+  app.post('/signage/:setId/withdraw', async (c) => {
+    const { user } = c.get('ctx');
+    if (!user.roles.includes('admin') && !user.roles.includes('approver')) return c.json({ error: 'サイネージから外せるのは管理者と承認者です' }, 403);
+    const s = deps.columns.signage;
+    if (!s) return c.json({ error: '店頭サイネージ用の画像は使えません' }, 409);
+    const r = await s.withdraw(who(c), c.req.param('setId'));
+    return 'error' in r ? c.json({ error: r.error }, 400) : c.json(r);
+  });
+
   app.post('/:id/photos', async (c) => {
     const size = Number(c.req.header('content-length') ?? '0');
     if (size > COLUMN_PHOTO_MAX_BYTES) return c.json({ error: '写真は 10 MB までです' }, 413);

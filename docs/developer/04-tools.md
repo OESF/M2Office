@@ -95,6 +95,7 @@
 | `columns.draft` | write-internal | — | テーマを Web で調べ、出典つきのコラムの下書きを書きます。下書きにするだけで、Web には出しません |
 | `columns.prepare` | write-internal | — | コラムのテーマ案を作ります。本数を言われたら、上から順にテーマ案で書き始めます（予定表があれば空いている回に入れます）。Web には出しません |
 | `columns.rules` | write-internal | — | コラムの赤入れで当てる表現の決まり（医療広告・薬機法・士業）を直します。管理者だけが直せます |
+| `columns.signage_make` | write-internal | — | 承認済みのコラムから、店頭の画面に流す画像（1 枚か紙芝居）を作り始めます。流すのは承認の後です |
 | `competitors.add` | write-internal | — | URL か店の名前で、競合を入れます。Web サイトのトップを読んで確かめてから入れます |
 | `competitors.check` | write-internal | — | 自社と競合のサイトを今すぐ読み、レポートを作る作業を始めます |
 | `competitors.discover` | write-internal | — | 自社の像をまとめ、近くの同業か同じような事業の会社を探して覚え、読んでレポートを作る作業を始めます |
@@ -119,6 +120,7 @@
 | `calendar.update` | external-send | `calendar.events`（機密） | 予定の日時・題名・参加者を変えます。参加者に通知が届くため、必ず承認のあとに行います |
 | `chat.post` | external-send | `chat.messages.create`（機密）・`chat.spaces.readonly`（機密） | チャットへ投稿します。社外の人が入れるスペースへの投稿は、承認のあとに行います |
 | `columns.place` | external-send | — | 承認されたコラムを、会社の WordPress に下書きとして入れます。公開は WordPress の側で行います |
+| `columns.signage_publish` | external-send | — | コラムから作った画像を、承認の後に店頭の画面の流れに置きます |
 | `drive.share` | external-send | `drive.file`（機密でない） | M2Office で作ったファイルを、指定した人と共有します。社外の人との共有は、承認のあとに行います。リンクで誰にでも公開することはしません |
 | `gmail.send` | external-send | `gmail.send`（機密） | メールを送ります。必ず承認のあとに行います |
 | `inquiries.reply_send` | external-send | — | 承認された問い合わせの返事を、会社の窓口のアカウントから送ります |
@@ -200,6 +202,7 @@
 | `columns.draft` | `theme`（必須）: コラムのテーマ（一言。例: 「子どもの歯みがきのコツ」）、`memo`: リクエスト（書く人の希望・経験・考え。カバー画像の希望も書ける。任意） |
 | `columns.prepare` | `count`: 書き始める本数（無ければテーマ案を作るだけ） |
 | `columns.rules` | `add`: 足す決まり、`remove`: 外す決まり、`auto`: AI に任せる形に戻す |
+| `columns.signage_make` | `column`: コラムの題名かテーマの言葉、`kind`: 画像か動画（slides・video） |
 | `competitors.add` | `text`（必須）: URL か店・会社の名前 |
 | `competitors.check` | なし |
 | `competitors.discover` | `radiusKm`: 商圏の半径（キロメートル）、`nationwide`: 全国で探す、`auto`: 商圏を AI に決め直させる |
@@ -225,6 +228,7 @@
 | `calendar.update` | `eventId`（必須）: 予定の ID、`title`: 新しい題名（任意）、`start`: 新しい開始（ISO 形式。任意）、`end`: 新しい終了（任意）、`attendees`: 新しい参加者（任意） |
 | `chat.post` | `space`: スペースの名前（例: 営業部）か、スペースのリンク、`text`（必須）: 本文 |
 | `columns.place` | `columnId`（必須）: コラムの ID |
+| `columns.signage_publish` | `setId`（必須）: サイネージ用の組の ID |
 | `drive.share` | `fileId`（必須）: ファイルの ID、`emails`（必須）: 共有する相手のメールアドレス、`role`: 役割（reader・commenter・writer） |
 | `gmail.send` | `to`（必須）: 宛先のメールアドレス、`cc`: CC（任意）、`subject`（必須）: 件名、`body`（必須）: 本文、`replyTo`: 返信するメールの ID（任意） |
 | `inquiries.reply_send` | `replyId`（必須）: 返事の ID |
