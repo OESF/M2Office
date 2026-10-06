@@ -8,7 +8,7 @@
 
 import { Hono } from 'hono';
 import type { HelpContext, HelpScope } from '@m2office/core';
-import { CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID } from '@m2office/shared';
+import { CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, CONTRACTS_EXTENSION_ID } from '@m2office/shared';
 import type { AppDeps } from '../context.js';
 import { agentGroup } from '../agent-group.js';
 import type { AppEnv } from '../middleware/tenant.js';
@@ -18,10 +18,11 @@ export function helpRoute(deps: AppDeps) {
 
   /** 要求ごとの出し分けの文脈（役割・無効にした業務・自動化ポリシー・使える内蔵の拡張）。 */
   async function contextOf(tenantId: string, userId: string, roles: readonly string[]): Promise<HelpContext> {
-    const [settings, view, agents, cards, inventory, hr, signage, hrSelf, columns, inquiries, competitors, announcements, webReview] = await Promise.all([
+    const [settings, view, agents, cards, inventory, hr, signage, hrSelf, columns, inquiries, competitors, announcements, webReview, contracts] = await Promise.all([
       deps.repo.getTenantSettings(tenantId), deps.tenantView(tenantId), deps.agentsFor(tenantId, userId),
       deps.cards.access(tenantId, userId), deps.inventory.access(tenantId, userId), deps.hr.access(tenantId, userId), deps.signage.access(tenantId, userId),
       deps.hr.attendance.selfEmployee(tenantId, userId), deps.columns.access(tenantId, userId), deps.inquiries.access(tenantId, userId), deps.competitors.access(tenantId, userId), deps.announcements.access(tenantId, userId), deps.webReview.access(tenantId, userId),
+      deps.contracts.access(tenantId, userId),
     ]);
     return {
       roles, disabledAgents: settings.agents.disabled, automation: settings.automation,
@@ -33,7 +34,7 @@ export function helpRoute(deps: AppDeps) {
         const def = agents.find((a) => a.id === agentId);
         return def ? agentGroup(view, def) : { id: `agent:${agentId}`, name: agentId };
       },
-      extensions: [cards ? CARDS_EXTENSION_ID : '', inventory ? INVENTORY_EXTENSION_ID : '', hr ? HR_EXTENSION_ID : '', signage ? SIGNAGE_EXTENSION_ID : '', columns ? WEB_COLUMNS_EXTENSION_ID : '', inquiries ? INQUIRIES_EXTENSION_ID : '', competitors ? COMPETITORS_EXTENSION_ID : '', announcements ? ANNOUNCEMENTS_EXTENSION_ID : '', webReview ? WEB_REVIEW_EXTENSION_ID : '', hrSelf ? 'hr-self' : ''].filter(Boolean),
+      extensions: [cards ? CARDS_EXTENSION_ID : '', inventory ? INVENTORY_EXTENSION_ID : '', hr ? HR_EXTENSION_ID : '', signage ? SIGNAGE_EXTENSION_ID : '', columns ? WEB_COLUMNS_EXTENSION_ID : '', inquiries ? INQUIRIES_EXTENSION_ID : '', competitors ? COMPETITORS_EXTENSION_ID : '', announcements ? ANNOUNCEMENTS_EXTENSION_ID : '', webReview ? WEB_REVIEW_EXTENSION_ID : '', contracts ? CONTRACTS_EXTENSION_ID : '', hrSelf ? 'hr-self' : ''].filter(Boolean),
     };
   }
 

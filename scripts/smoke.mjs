@@ -6153,6 +6153,76 @@ console.log('\n■ 76. コラムから店頭サイネージ用の画像を作る
   }
 }
 
+console.log('\n■ 77. 契約の管理（入り切り・手で入れる・期限の計算・状態・削除の権限・置き場・会社の境界。第38.17節）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const { rows: saved } = await owner.query(`select tenant_id, contracts from tenant_settings where tenant_id in ('t-alpha', 't-beta')`);
+  const PARTY = '株式会社見本保守（smoke）';
+  try {
+    await call('a', '/v1/admin/extensions/contracts/enabled', { method: 'PUT', body: JSON.stringify({ enabled: false }) });
+    const off = await call('a', '/v1/contracts', {}, 'member');
+    off.status === 403 ? ok('契約の管理を切っている会社では台帳を出さない') : ng(`切っているのに台帳が出た（${off.status}）`);
+    const on = await call('a', '/v1/admin/extensions/contracts/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const me = await call('a', '/v1/me', {}, 'member');
+    on.status === 200 && me.body.contracts === true ? ok('入れると、利用範囲の人の左のメニューに「契約」が出る') : ng('入れたのに使えない', JSON.stringify({ on: on.status, me: me.body.contracts }));
+    const memberStorage = await call('a', '/v1/admin/extensions/contracts/storage', { method: 'PUT', body: '{}' }, 'member');
+    memberStorage.status === 403 ? ok('契約書の置き場をつなげるのは管理者だけ') : ng(`置き場をつなげる人が違う（${memberStorage.status}）`);
+
+    const bad = await call('a', '/v1/contracts', { method: 'POST', body: JSON.stringify({ party: PARTY, endOn: '2030/03/31' }) }, 'member');
+    bad.status === 400 ? ok('日付の形が違えば入れない') : ng(`日付の形が違うのに入った（${bad.status}）`);
+    const made = await call('a', '/v1/contracts', {
+      method: 'POST', body: JSON.stringify({ party: PARTY, title: 'サーバー保守契約', startOn: '2030-04-01', endOn: '2031-03-31', autoRenew: true, noticeDays: 90, renewMonths: 12 }),
+    }, 'member');
+    const c = made.body.contract;
+    made.status === 201 && c?.kind === 'maintenance' && c.noticeDeadline === '2030-12-31' && c.status === 'active'
+      ? ok('手で入れると、種類を件名から決め、解約の申し出の期限を計算する（2031-03-31 の 90 日前 = 2030-12-31）') : ng('手で入れた結果が違う', JSON.stringify(made));
+    if (c) {
+      const list = await call('a', '/v1/contracts', {}, 'member');
+      list.status === 200 && list.body.items.some((x) => x.id === c.id) && list.body.storage?.folderName === '契約書（M2Office）'
+        ? ok('一覧に出て、置き場（会社のドライブのフォルダ）がつながっている') : ng('一覧か置き場が違う', JSON.stringify({ status: list.status, storage: list.body.storage }));
+      const fixed = await call('a', `/v1/contracts/${c.id}`, { method: 'PATCH', body: JSON.stringify({ noticeRule: '期間満了の1か月前までに書面で申し出る' }) }, 'member');
+      fixed.status === 200 && fixed.body.contract.noticeDeadline === '2031-03-01'
+        ? ok('申し出の決まりを直すと、日数を読み直して期限を計算し直す') : ng('期限が計算し直されない', JSON.stringify(fixed.body));
+      const cancel = await call('a', `/v1/contracts/${c.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'cancel_requested' }) }, 'member');
+      cancel.status === 200 && cancel.body.contract.status === 'cancel_requested' ? ok('「解約を申し出た」にできる') : ng('状態を直せない', JSON.stringify(cancel.body));
+      const file = await call('a', `/v1/contracts/${c.id}/file`, {}, 'member');
+      file.status === 404 && /置いていません/.test(file.body.error ?? '') ? ok('契約書を置いていない契約は「置いていない」と答える') : ng(`契約書の無い契約の答えが違う（${file.status}）`);
+      const imp = await call('a', '/v1/contracts/import', { method: 'POST', body: JSON.stringify({ fileId: 'f-none' }) }, 'member');
+      imp.status === 400 ? ok('見つからないファイルからは入れない') : ng(`無いファイルから入った（${imp.status}）`);
+
+      await call('b', '/v1/admin/extensions/contracts/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+      const other = await call('b', `/v1/contracts/${c.id}`, {}, 'member');
+      const otherList = await call('b', '/v1/contracts', {}, 'member');
+      other.status === 404 && otherList.status === 200 && !otherList.body.items.some((x) => x.id === c.id)
+        ? ok('ほかの会社の契約は見えない') : ng('ほかの会社の契約が見えた', JSON.stringify({ one: other.status, list: otherList.status }));
+      const otherDel = await call('b', `/v1/contracts/${c.id}`, { method: 'DELETE' });
+      const del = await call('a', `/v1/contracts/${c.id}`, { method: 'DELETE' }, 'member');
+      otherDel.status === 404 && del.status === 200 ? ok('入れた人は削除でき、ほかの会社からは削除できない') : ng(`削除の権限が違う（${otherDel.status}・${del.status}）`);
+    }
+    // 置き場: 会社の境界（行単位の制限）
+    const app = new pg.Client({ connectionString: process.env.DATABASE_URL ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office' });
+    await app.connect();
+    try {
+      await app.query('begin');
+      await app.query(`select set_config('app.tenant_id', 't-beta', true)`);
+      let refused = false;
+      try {
+        await app.query(`insert into contracts (id, tenant_id, party, kind, owner_id, created_by, updated_by) values ('ctr-smoke', 't-alpha', 'x', 'other', 'u', 'u', 'u')`);
+      } catch { refused = true; }
+      await app.query('rollback');
+      refused ? ok('契約は、ほかの会社の行を書けない（行単位の制限）') : ng('ほかの会社の契約を書けた');
+    } finally {
+      await app.end();
+    }
+  } finally {
+    await owner.query(`delete from contracts where party = $1`, [PARTY]);
+    for (const r of saved) await owner.query(`update tenant_settings set contracts = $2 where tenant_id = $1`, [r.tenant_id, r.contracts ? JSON.stringify(r.contracts) : null]);
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

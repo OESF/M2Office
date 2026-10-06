@@ -181,6 +181,15 @@ export interface DriveConnector {
   read(p: ConnectorPrincipal, fileId: string): Promise<{ file: DriveFile; text: string } | null>;
   createFolder(p: ConnectorPrincipal, f: { name: string; parentId: string | null }): Promise<DriveFile>;
   /**
+   * ファイルをそのままの形で置く（契約書の PDF など。仕様書 第38.7節）。`drive.file` の範囲で、M2Office が作ったファイルになる。
+   * 親のフォルダが見えなければ例外。
+   */
+  upload(p: ConnectorPrincipal, f: { name: string; mimeType: string; bytes: Uint8Array; parentId: string | null }): Promise<DriveFile>;
+  /**
+   * 中身をそのままの形で読む（仕様書 第38.7節）。見えない・ごみ箱・フォルダなら `null`、上限（25 MB）を超えれば `tooLarge`。
+   */
+  download(p: ConnectorPrincipal, fileId: string): Promise<{ file: DriveFile; mimeType: string; bytes: Uint8Array } | { tooLarge: true } | null>;
+  /**
    * M2Office が作ったファイルを、指定した人と共有する。リンクによる一般公開はしない（仕様書 第9.4.4節）。
    * M2Office が作ったファイルでなければ `null`。
    */

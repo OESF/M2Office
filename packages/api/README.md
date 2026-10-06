@@ -298,6 +298,10 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/admin/extensions/web-review/candidates` ／ `PUT /v1/admin/extensions/web-review/selection` | 管理者: 担当が見られるプロパティとサイトと状態 ／ プロパティとサイトを選ぶ（`propertyId`・`siteUrl`。見られるものの中からだけ） |
 | `GET /v1/admin/extensions/announcements/screens` | 管理者: お知らせを流す画面の選び先（店頭サイネージの画面）と、いま選んでいる画面（`selected`。`null` ならすべて。第35.17節） |
 | `GET /v1/announcements/line/status` ／ `PUT /v1/admin/extensions/announcements/settings` | LINE の友だちの数と今月の残り ／ 管理者: Web の出し方（`webPublish`: publish・draft）・カテゴリー（`webCategory`）・流す画面（`screens`） |
+| `GET` ／ `POST /v1/contracts` | 契約の管理（仕様書 第38章）: 一覧（期限の近い順。`status`・`kind`・`owner`・`q`。答えに置き場をつないでいるか）／ 手で入れる。使えない会社と利用範囲の外の人には、`/v1/contracts` のどの口も 403 |
+| `POST /v1/contracts/import` | 契約書から入れる（`fileId`: 上げたファイルか、`runId`: 契約書チェックの実行。AI が項目を取り出し、期限を計算し、ドライブの置き場に置く） |
+| `GET` ／ `PATCH` ／ `DELETE /v1/contracts/:id` ／ `GET /v1/contracts/:id/file` | 1 件 ／ 直す（日付や決まりを直すと期限を計算し直す）／ 削除（入れた人と管理者）／ 契約書を開く（置き場をつないだ管理者の許可でドライブから読む） |
+| `PUT /v1/admin/extensions/contracts/storage` | 管理者: 契約書の置き場（Google ドライブのフォルダ）をつなぐ・つなぎ直す |
 | `GET /v1/competitors` | 競合の分析（仕様書 第36.18節）: 全体（自社の像・競合・動いている作業・最後の作業・地図の注意）。地図で見つけた競合の名前と Web サイトはここで引き直す。使えない会社と利用範囲の外の人には、`/v1/competitors` のどの口も 403 |
 | `POST /v1/competitors/discover` ／ `POST /v1/competitors/check` | 競合を探す作業（`radiusKm`・`nationwide`・`auto` で商圏を変える）／ 今すぐ見回る作業を受け付ける（202。ワーカーが行う。動いていれば `already`） |
 | `POST /v1/competitors` ／ `DELETE /v1/competitors/:id` | URL か店の名前で競合を入れる（`text`。トップを読めたときだけ。社内のアドレスは 400）／ 外す（次に探しても入れない） |

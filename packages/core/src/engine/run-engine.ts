@@ -14,7 +14,7 @@ import {
   alwaysRequiresApproval, canDecide, canUseAgent, writeInternalNeedsApproval,
   type AutomationPolicy, type TenantSettings, type WritingStyle,
   type AgentDefinition, type AgentStep, type ApprovalStep, type Approval, type Run,
-  type RunStep, type Step, type ContactScope, type InventorySettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings,
+  type RunStep, type Step, type ContactScope, type InventorySettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type ContractSettings,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { LlmMessage, LlmProvider, LlmResponse } from '../llm/provider.js';
@@ -41,6 +41,7 @@ import type { ColumnService } from '../columns/service.js';
 import type { InquiryService } from '../inquiries/service.js';
 import type { CompetitorService } from '../competitors/service.js';
 import type { AnnouncementService } from '../announcements/service.js';
+import type { ContractService } from '../contracts/service.js';
 import type { ColumnPlanner } from '../columns/planner.js';
 import type { ColumnSignageService } from '../columns/signage.js';
 import type { WebReviewService } from '../web-review/service.js';
@@ -178,6 +179,11 @@ export interface RunEngineDeps {
   announcements?: {
     service: AnnouncementService;
     access(tenantId: string, userId: string): Promise<AnnouncementSettings | null>;
+  };
+  /** 契約の管理（内蔵の拡張。仕様書 第38章）。ツールに渡す。 */
+  contracts?: {
+    service: ContractService;
+    access(tenantId: string, userId: string): Promise<ContractSettings | null>;
   };
   /** その日がお知らせで出した休業の期間に入るか（予定の候補で休業日を避ける。第35.7節）。 */
   closedOn?(tenantId: string, day: string): Promise<boolean>;
@@ -989,6 +995,10 @@ export class RunEngine {
       // お知らせの作成（第35.17節）
       ...(this.deps.announcements ? {
         announcements: { service: this.deps.announcements.service, access: () => this.deps.announcements!.access(run.tenantId, requestedBy) },
+      } : {}),
+      // 契約の管理（第38.8節）
+      ...(this.deps.contracts ? {
+        contracts: { service: this.deps.contracts.service, access: () => this.deps.contracts!.access(run.tenantId, requestedBy) },
       } : {}),
       // Webの分析（第34.18節）
       ...(this.deps.webReview ? {

@@ -22,6 +22,7 @@ import type { CardCorners,
   Inquiry, InquiryDetail, InquiryParty, InquiryTask, InquiryReply, InquiryMailSkipped, InquiryMonthStats, InquirySettings, InquiryFaqTopic,
   CompetitorOverview, CompetitorFact, CompetitorReport, CompetitorSettings,
   Announcement, AnnouncementDetail, AnnouncementPreview, AnnouncementRecipient, AnnouncementRecipientsRefined, AnnouncementSettings, AnnouncementTexts,
+  Contract, ContractSettings,
   WebReviewCandidates, WebReviewReport, WebReviewReportBrief, WebReviewSettings, WebReviewStatus, WebReviewFinding, WebReviewFindingStatus, WebPageMetrics,
 } from '@m2office/shared';
 import { debugMode, recordCall } from './debug.js';
@@ -294,6 +295,8 @@ export interface Me {
   announcements?: boolean;
   /** Webの分析を使えるか（会社の入り切りと利用範囲。仕様書 第34.18節）。 */
   webReview?: boolean;
+  /** 契約の管理を使えるか（会社の入り切りと利用範囲。仕様書 第38章）。 */
+  contracts?: boolean;
   /** 本人の「給与・勤怠」を使えるか（台帳に結び付いているか。仕様書 第30.25節）。 */
   hrSelf?: boolean;
   /** デバッグモードか（`M2O_DEBUG=true`。仕様書 第20.4.1節「デバッグモード」）。 */
@@ -772,6 +775,8 @@ export interface ExtensionView {
   announcements?: AnnouncementSettings;
   /** Webの分析の設定（担当の許可・選んだプロパティとサイト。第34.18節）。Webの分析のときだけある。 */
   webReview?: WebReviewSettings;
+  /** 契約の管理の設定（契約書の置き場。第38.7節）。契約の管理のときだけある。 */
+  contracts?: ContractSettings;
 }
 
 /** 問い合わせを残した結果（仕様書 第33.17節）。どの続きか決まらなければ `ambiguous` と候補。 */
@@ -1301,6 +1306,24 @@ export const api = {
     check: () => call<{ ok: true }>('/web-review/check', { method: 'POST', body: '{}' }),
   },
   /** お知らせの作成（内蔵の拡張。仕様書 第35章）。 */
+  /** 契約の管理（内蔵の拡張。仕様書 第38章）。 */
+  contracts: {
+    /** 一覧（期限の近い順）と、契約書の置き場をつないでいるか。 */
+    list: (q: { status?: string; kind?: string; owner?: string; q?: string } = {}) => {
+      const p = new URLSearchParams(Object.entries(q).filter(([, v]) => !!v) as [string, string][]);
+      return call<{ items: Contract[]; storage: { folderName: string } | null }>(`/contracts${p.size ? `?${p}` : ''}`);
+    },
+    get: (id: string) => call<{ contract: Contract }>(`/contracts/${encodeURIComponent(id)}`),
+    /** 手で入れる。 */
+    create: (input: Record<string, unknown>) => call<{ contract: Contract }>('/contracts', { method: 'POST', body: JSON.stringify(input) }),
+    /** 契約書（上げたファイルか、契約書チェックの実行）から入れる。 */
+    importFrom: (src: { fileId: string } | { runId: string }) =>
+      call<{ contract: Contract; linkedTo: string | null; fileNote: string | null }>('/contracts/import', { method: 'POST', body: JSON.stringify(src) }),
+    update: (id: string, patch: Record<string, unknown>) => call<{ contract: Contract }>(`/contracts/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    remove: (id: string) => call<{ ok: true }>(`/contracts/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    /** 契約書を開く URL（M2Office がドライブから読んで返す）。 */
+    fileUrl: (id: string) => `/v1/contracts/${encodeURIComponent(id)}/file`,
+  },
   announcements: {
     list: () => call<{ items: Announcement[] }>('/announcements'),
     /** 1 行の欄に書いた頼みから下書きを作る。 */
@@ -2092,6 +2115,8 @@ export const api = {
     setCompetitorMapKey: (key: string) => call<{ ok: true }>('/admin/extensions/competitors/map-key', { method: 'PUT', body: JSON.stringify({ key }) }),
     removeCompetitorMapKey: () => call<{ ok: true }>('/admin/extensions/competitors/map-key', { method: 'DELETE' }),
     /** お知らせの作成の設定（Web の出し方・カテゴリー。第35.4節）。 */
+    /** 契約の管理の、契約書の置き場をつなぐ・つなぎ直す（第38.7節）。 */
+    connectContractStorage: () => call<{ ok: true; folderName: string }>('/admin/extensions/contracts/storage', { method: 'PUT', body: '{}' }),
     setAnnouncementSettings: (patch: Partial<{ webPublish: 'publish' | 'draft'; webCategory: string; screens: string[] | null }>) =>
       call<{ ok: true }>('/admin/extensions/announcements/settings', { method: 'PUT', body: JSON.stringify(patch) }),
     /** お知らせを流す画面の選び先（店頭サイネージの画面。`selected` が `null` ならすべて）。 */

@@ -13,6 +13,9 @@ import { markdownToDocHtml } from './doc-html.js';
 /** 読む中身の大きさの上限（バイト）。これを超えるものは読まない。 */
 export const DRIVE_READ_MAX_BYTES = 5 * 1024 * 1024;
 
+/** そのままの形で読むときの上限（契約書の PDF など。第38.7節）。 */
+export const DRIVE_DOWNLOAD_MAX_BYTES = 25 * 1024 * 1024;
+
 /** 探すときに返す件数の上限。 */
 const SEARCH_LIMIT_MAX = 50;
 
@@ -118,6 +121,35 @@ export function googleDrive(ctx: Ctx): DriveConnector {
       })) as DriveMeta | null;
       if (!res) throw new Error('親のフォルダが見つかりません');
       return toFile(res);
+    },
+
+    upload: async (p, input) => {
+      // 本文は JSON の情報とファイルの中身を 1 つの multipart にまとめて送る（そのままの形で置く）
+      const boundary = `m2office-${Math.random().toString(36).slice(2)}`;
+      const metadata = { name: input.name, mimeType: input.mimeType, ...(input.parentId ? { parents: [input.parentId] } : {}) };
+      const head = new TextEncoder().encode([
+        `--${boundary}`, 'Content-Type: application/json; charset=UTF-8', '', JSON.stringify(metadata),
+        `--${boundary}`, `Content-Type: ${input.mimeType}`, '', '',
+      ].join('\r\n'));
+      const tail = new TextEncoder().encode(`\r\n--${boundary}--\r\n`);
+      const data = new Uint8Array(head.length + input.bytes.length + tail.length);
+      data.set(head, 0);
+      data.set(input.bytes, head.length);
+      data.set(tail, head.length + input.bytes.length);
+      const res = (await callGoogle(ctx().tokens, p, 'ドライブ', `${ctx().endpoints.driveUpload}/files?uploadType=multipart&fields=${FIELDS}`, {
+        method: 'POST', raw: { contentType: `multipart/related; boundary=${boundary}`, data },
+      })) as DriveMeta | null;
+      if (!res) throw new Error('入れるフォルダが見つかりません');
+      return toFile(res);
+    },
+
+    download: async (p, fileId) => {
+      const f = await meta(p, fileId);
+      if (!f || f.mimeType === MIME.folder) return null;
+      const got = await downloadGoogle(ctx().tokens, p, 'ドライブ', `${ctx().endpoints.drive}/files/${encodeURIComponent(f.id)}?alt=media`, DRIVE_DOWNLOAD_MAX_BYTES);
+      if (!got) return null;
+      if ('tooLarge' in got) return { tooLarge: true as const };
+      return { file: toFile(f), mimeType: f.mimeType ?? 'application/octet-stream', bytes: got.bytes };
     },
 
     get: async (p, fileId) => {

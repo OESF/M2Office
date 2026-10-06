@@ -32,6 +32,7 @@ import { columnsRoute } from './routes/columns.js';
 import { inquiriesRoute } from './routes/inquiries.js';
 import { competitorsRoute } from './routes/competitors.js';
 import { announcementsRoute } from './routes/announcements.js';
+import { contractsRoute } from './routes/contracts.js';
 import { webReviewRoute } from './routes/web-review.js';
 import { inventoryHooksRoute } from './routes/inventory-hooks.js';
 import { signageRoute } from './routes/signage.js';
@@ -179,6 +180,8 @@ app.get('/v1/me', async (c) => {
     announcements: !!(await deps.announcements.access(ctx.tenant.id, ctx.user.id)),
     // Webの分析を使えるか（会社の入り切りと利用範囲。仕様書 第34.18節）
     webReview: !!(await deps.webReview.access(ctx.tenant.id, ctx.user.id)),
+    // 契約の管理を使えるか（会社の入り切りと利用範囲。仕様書 第38章）
+    contracts: !!(await deps.contracts.access(ctx.tenant.id, ctx.user.id)),
     // 人事・給与の担当者の画面を使えるか（会社の入り切りと人事区画。仕様書 第30.2節）
     hr: !!(await deps.hr.access(ctx.tenant.id, ctx.user.id)),
     // 本人の「給与・勤怠」を使えるか（台帳に結び付いているか。同じメールアドレスなら自動で結び付く。第30.25節）
@@ -206,6 +209,7 @@ app.route('/v1/columns', columnsRoute(deps));
 app.route('/v1/inquiries', inquiriesRoute(deps));
 app.route('/v1/competitors', competitorsRoute(deps));
 app.route('/v1/announcements', announcementsRoute(deps));
+app.route('/v1/contracts', contractsRoute(deps));
 app.route('/v1/web-review', webReviewRoute(deps));
 app.route('/v1/signage', signageRoute(deps));
 app.route('/v1/hr', hrRoute(deps));

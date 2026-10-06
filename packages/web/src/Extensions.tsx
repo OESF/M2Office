@@ -14,7 +14,7 @@ import { JinglePlayer } from './signage-audio.js';
 import { api, ApiError, describeError, type AccessOptions, type ExtensionView, type HrProposalField, type ScopeValue } from './api.js';
 import {
   INVENTORY_FEATURES, SIGNAGE_DEFAULT_COLOR, SIGNAGE_JINGLES, type HrSettings, type InventoryBookingSource, type InventoryFeature, type InventorySettings,
-  type SignageSettings, type SignageSound, type SignageSource, COLUMN_INDUSTRIES, COLUMN_RULE_SET_LABELS, COLUMN_PLAN_FREQUENCY_LABELS, type ColumnPlanFrequency, type WebColumnSettings, type InquirySettings, COMPETITORS_AUTO_RANGE, COMPETITORS_NOTIFY_MAX, COMPETITOR_WATCH_LABELS, competitorAutoMax, competitorWatch, competitorsMax, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type WebReviewCandidates, type WebReviewStatus,
+  type SignageSettings, type SignageSound, type SignageSource, COLUMN_INDUSTRIES, COLUMN_RULE_SET_LABELS, COLUMN_PLAN_FREQUENCY_LABELS, type ColumnPlanFrequency, type WebColumnSettings, type InquirySettings, COMPETITORS_AUTO_RANGE, COMPETITORS_NOTIFY_MAX, COMPETITOR_WATCH_LABELS, competitorAutoMax, competitorWatch, competitorsMax, type CompetitorSettings, type AnnouncementSettings, type ContractSettings, type WebReviewSettings, type WebReviewCandidates, type WebReviewStatus,
 } from '@m2office/shared';
 import { HelpTip, Markdown } from './help.js';
 import { Icon } from './nav.js';
@@ -300,6 +300,7 @@ function InstalledCard({ item: x, busy, focused = false, options, onChanged, onT
       {x.competitors && on && <CompetitorMapKeyFields settings={x.competitors} busy={busy} onChanged={onChanged} />}
       {x.announcements && on && <AnnouncementFields settings={x.announcements} busy={busy} onChanged={onChanged} />}
       {x.webReview && on && <WebReviewFields settings={x.webReview} busy={busy} onChanged={onChanged} />}
+      {x.contracts && on && <ContractStorageFields settings={x.contracts} busy={busy} onChanged={onChanged} />}
       <Details item={x} onChanged={onChanged} />
       {/* 内蔵の拡張は削除しない。スイッチで切る（データは消えない。第12.13節） */}
       {x.origin !== 'builtin' && (
@@ -798,6 +799,29 @@ function CompetitorNotifyUsers({ settings, disabled, onChanged, onError }: {
             onChange={(e) => toggle(u.id, e.target.checked)} />{u.name}
         </label>
       ))}
+    </div>
+  );
+}
+
+/**
+ * 契約の管理の設定（仕様書 第38.7節）。契約書の置き場（会社の Google ドライブのフォルダ）をつなぐ・つなぎ直す。
+ * 入れたときに、入れた管理者のドライブに自動で作る。作れなかったときと、つないだ管理者が止まったときに使う。
+ */
+function ContractStorageFields({ settings, busy, onChanged }: { settings: ContractSettings; busy: boolean; onChanged: () => void }) {
+  const [working, setWorking] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const connect = () => {
+    setWorking(true);
+    api.admin.connectContractStorage().then(() => { setError(null); onChanged(); })
+      .catch((e) => setError(describeError(e, 'つなげませんでした'))).finally(() => setWorking(false));
+  };
+  return (
+    <div className="small ext-inventory">
+      <div className="row wrap">
+        <span>契約書の置き場: {settings.storage ? <strong>{settings.storage.folderName}（Google ドライブ）</strong> : <span className="muted">つないでいません</span>}</span>
+        <button className="btn ghost small" disabled={busy || working} onClick={connect}>{working ? 'つないでいます…' : settings.storage ? 'つなぎ直す' : 'つなぐ'}</button>
+      </div>
+      {error && <p className="error">{error}</p>}
     </div>
   );
 }

@@ -18,6 +18,7 @@ import type { InquiryToolContext } from '../inquiries/tools.js';
 import type { CompetitorToolContext } from '../competitors/tools.js';
 import type { AnnouncementToolContext } from '../announcements/tools.js';
 import type { WebReviewToolContext } from '../web-review/tools.js';
+import type { ContractToolContext } from '../contracts/tools.js';
 
 /** ツール呼び出しの文脈。テナント境界と実行の同一性を持ち回る。 */
 export interface ToolContext {
@@ -97,6 +98,8 @@ export interface ToolContext {
   announcements?: AnnouncementToolContext;
   /** Webの分析（内蔵の拡張。仕様書 第34章）。使えるかどうかは、ツールが呼ぶたびに確かめる。 */
   webReview?: WebReviewToolContext;
+  /** 契約の管理（内蔵の拡張。仕様書 第38章）。使えるかどうかは、ツールが呼ぶたびに確かめる。 */
+  contracts?: ContractToolContext;
 }
 
 /** 引数 1 つの定義（JSON Schema の一部）。 */

@@ -15,11 +15,11 @@ import {
   TenantAiResolver, platformAi, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, ConnectionCredentials, type ConnectionAuthProvider,
   CardService, PostgresContactStore, cardsAccess, type ContactStore, BulkMailService, PostgresBulkMailStore, NoticeService, PostgresNoticeStore,
-  InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, JanLookupService, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, InquiryService, PostgresInquiryStore, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, WEB_REVIEW_REQUEST, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, webColumnsAccess, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, WEB_COLUMN_SIGNAGE_PUBLISH, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, applyStockChanges, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
+  InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, JanLookupService, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, InquiryService, PostgresInquiryStore, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, WEB_REVIEW_REQUEST, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, webColumnsAccess, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, WEB_COLUMN_SIGNAGE_PUBLISH, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, applyStockChanges, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
   type SecretBox, type GeminiModels,
   type FileStore, type TenantExtensions, type HelpArticle, type ManualMeta, type LlmProvider, type Logger, type Repository, type WorkspaceConnector,
 } from '@m2office/core';
-import { canRunAgent, type AgentDefinition, type ContactScope, type HrSettings, type InventorySettings, type SignageSettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings } from '@m2office/shared';
+import { canRunAgent, type AgentDefinition, type ContactScope, type HrSettings, type InventorySettings, type SignageSettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type ContractSettings, fileInputKey } from '@m2office/shared';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -169,6 +169,11 @@ export interface AppDeps {
   announcements: {
     service: AnnouncementService;
     access(tenantId: string, userId: string): Promise<AnnouncementSettings | null>;
+  };
+  /** 契約の管理（内蔵の拡張。仕様書 第38章）。台帳と期限の見張り。契約書は会社の Google ドライブに置く。 */
+  contracts: {
+    service: ContractService;
+    access(tenantId: string, userId: string): Promise<ContractSettings | null>;
   };
   /**
    * Webの分析（内蔵の拡張。仕様書 第34章）。担当の許可で読み、月の便りはワーカーが作る。API は画面と設定の読み書きをする。
@@ -397,6 +402,32 @@ export function buildDeps(): AppDeps {
     }),
     access: announcementsAccess(repo),
   };
+  // 契約の管理（内蔵の拡張。仕様書 第38章）。契約書は置き場をつないだ管理者の Google ドライブ（drive.file）に置く
+  const contracts = {
+    service: new ContractService({
+      store: new PostgresContractStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+      repo, files, drive: connector.drive, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
+      ocrFor: async (tenantId) => {
+        const llm = await ai.llmFor(tenantId).catch(() => null);
+        return llm?.readImage ? async (r) => (await llm.readImage!(r)).text : undefined;
+      },
+      // 契約書チェックの実行の契約書（依頼した本人の実行だけ。第38.5節 ①）
+      reviewFile: async (tenantId, userId, runId) => {
+        const run = await repo.getRun(tenantId, runId);
+        const job = run ? await repo.getJob(tenantId, run.jobId) : null;
+        if (!job || job.requestedBy !== userId || job.agentId !== CONTRACT_REVIEW_AGENT_ID) return null;
+        const def = (await tenantView(tenantId)).resolve(job.agentId, job.agentVersion);
+        const key = def ? fileInputKey(def) : null;
+        const v = key ? job.input[key] : null;
+        return typeof v === 'string' && v ? v : null;
+      },
+      latestReview: async (tenantId, userId) => {
+        const rows = await repo.listRunsWithJobs(tenantId, { limit: 50, requestedBy: userId });
+        return rows.find((r) => r.job.agentId === CONTRACT_REVIEW_AGENT_ID && r.run.status === 'completed')?.run.id ?? null;
+      },
+    }),
+    access: contractsAccess(repo),
+  };
   // Webの分析（内蔵の拡張。仕様書 第34章）。担当の許可（アナリティクスと Search Console の読み取りだけ）で読む
   const webReview = {
     service: new WebReviewService({
@@ -441,7 +472,7 @@ export function buildDeps(): AppDeps {
     materials: columnMaterialsFrom({ repo, webReview: webReview.service, competitorStore: competitors.service.store, inquiries: inquiries.service }),
   });
   const engine = new RunEngine({
-    repo, llm, registry, connector, files, logger: log, research, cards, notices, inventory, columns, inquiries, competitors, announcements, webReview,
+    repo, llm, registry, connector, files, logger: log, research, cards, notices, inventory, columns, inquiries, competitors, announcements, webReview, contracts,
     closedOn: (tenantId, day) => announcementStore.closedOn(tenantId, day),
     hr: { calendar: laborCalendar, access: hrAccess(repo) },
     llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId),
@@ -573,6 +604,7 @@ export function buildDeps(): AppDeps {
     inquiries,
     competitors,
     announcements,
+    contracts,
     webReview,
     // 店頭サイネージ（第31章）
     signage,

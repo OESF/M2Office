@@ -1945,3 +1945,22 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .columns-signage-images.is-landscape { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
 .columns-signage-images.is-portrait { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
 .columns-signage-images img, .columns-signage-images video { width: 100%; height: auto; display: block; border-radius: 6px; border: 1px solid var(--line); }
+
+/* 契約の管理（仕様書 第38.9節） */
+.contracts { display: flex; flex-direction: column; gap: calc(10px * var(--space-scale)); }
+.contracts-entry { align-items: center; }
+.contracts-note { font-size: calc(13px * var(--font-scale)); }
+.contracts-note.is-ok { color: var(--ok); }
+.contracts-note.is-error { color: var(--danger); }
+.contracts-filter { flex-wrap: wrap; }
+.contracts-filter select { max-width: 200px; }
+.contracts-search { margin-left: auto; max-width: 240px; }
+.contracts-table-wrap { overflow-x: auto; }
+.contracts-table .nowrap, .contracts-table .badge { white-space: nowrap; }
+.contracts-table td.contracts-party { min-width: 9em; }
+.contracts-detail label, .contracts-manual label { display: flex; flex-direction: column; gap: 4px; }
+.contracts-detail label.check, .contracts-manual label.check { flex-direction: row; align-items: center; }
+.contracts-detail .row, .contracts-manual .row { align-items: flex-end; flex-wrap: wrap; }
+.contracts-detail .row > label, .contracts-manual .row > label { min-width: 0; }
+.contracts-detail textarea { width: 100%; }
+.contracts-rule { margin: 8px 0; padding: 6px 12px; border-left: 3px solid var(--line); color: var(--muted); font-size: calc(13px * var(--font-scale)); }

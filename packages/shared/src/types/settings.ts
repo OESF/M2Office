@@ -15,6 +15,7 @@ import { DEFAULT_WEB_COLUMN_SETTINGS, type WebColumnSettings } from './web-colum
 import { DEFAULT_INQUIRY_SETTINGS, type InquirySettings } from './inquiries.js';
 import { DEFAULT_COMPETITOR_SETTINGS, type CompetitorSettings } from './competitors.js';
 import { DEFAULT_ANNOUNCEMENT_SETTINGS, type AnnouncementSettings } from './announcements.js';
+import { DEFAULT_CONTRACT_SETTINGS, type ContractSettings } from './contracts.js';
 import { DEFAULT_WEB_REVIEW_SETTINGS, type WebReviewSettings } from './web-review.js';
 
 /** 会社情報（仕様書 第6.6.1節）。帳票とメールの署名に使う。 */
@@ -252,6 +253,8 @@ export interface TenantSettings {
   announcements: AnnouncementSettings;
   /** Webの分析（第34章）。 */
   webReview: WebReviewSettings;
+  /** 契約の管理（内蔵の拡張。第38章） */
+  contracts: ContractSettings;
   /** 会社の AI の方針（第16.3.7.1節、ADR-0059）。 */
   aiPolicy: AiPolicySettings;
 }
@@ -314,6 +317,7 @@ export const DEFAULT_TENANT_SETTINGS: TenantSettings = {
   announcements: DEFAULT_ANNOUNCEMENT_SETTINGS,
   // Webの分析は既定で切り（第34.2節）
   webReview: DEFAULT_WEB_REVIEW_SETTINGS,
+  contracts: DEFAULT_CONTRACT_SETTINGS,
   aiPolicy: { mode: 'cloud' },
 };
 
@@ -394,7 +398,7 @@ export interface UserSettings {
   };
   notifications: {
     /** 受け取る種類（第6.5.5節）。`false` にしたものは届けない。 */
-    kinds: Record<'brief' | 'run' | 'approval' | 'failure' | 'inventory' | 'attendance' | 'signage' | 'inquiry' | 'competitor' | 'announcement' | 'webReview' | 'column', boolean>;
+    kinds: Record<'brief' | 'run' | 'approval' | 'failure' | 'inventory' | 'attendance' | 'signage' | 'inquiry' | 'competitor' | 'announcement' | 'webReview' | 'column' | 'contract', boolean>;
     /** 通知しない時間帯（例: 22:00〜7:00）。`null` は指定なし。 */
     quietHours: { from: string; to: string } | null;
     /**
@@ -575,7 +579,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   profile: { furigana: '', title: '', timezone: 'Asia/Tokyo', home: '', workplace: '' },
   secretary: { name: '', callMe: '', style: 'polite', proactivity: 'normal', speak: true, captions: true, voice: '', voiceStyle: '', avatar: '' },
   notifications: {
-    kinds: { brief: true, run: true, approval: true, failure: true, inventory: true, attendance: true, signage: true, inquiry: true, competitor: true, announcement: true, webReview: true, column: true },
+    kinds: { brief: true, run: true, approval: true, failure: true, inventory: true, attendance: true, signage: true, inquiry: true, competitor: true, announcement: true, webReview: true, column: true, contract: true },
     quietHours: null,
     channels: { chat: false },
   },

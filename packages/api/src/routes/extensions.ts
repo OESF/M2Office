@@ -12,7 +12,7 @@
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import {
-  CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, INVENTORY_FEATURES, SIGNAGE_EXTENSION_ID, SIGNAGE_JINGLES, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, WEB_REVIEW_SCOPES, COLUMN_INDUSTRIES, type WebColumnSettings, type HrSettings, type InventorySettings, type RiskLevel, type SignageSettings,
+  CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, INVENTORY_FEATURES, SIGNAGE_EXTENSION_ID, SIGNAGE_JINGLES, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, CONTRACTS_EXTENSION_ID, WEB_REVIEW_SCOPES, COLUMN_INDUSTRIES, type WebColumnSettings, type HrSettings, type InventorySettings, type RiskLevel, type SignageSettings,
 } from '@m2office/shared';
 import {
   bundledConnection, builtinSection, consentSnapshot, encodeFiles, unpackExtension, EXTENSION_FILE_MAX_BYTES,
@@ -130,6 +130,8 @@ export function extensionsRoute(deps: AppDeps) {
         ...(e.pkg.manifest.id === ANNOUNCEMENTS_EXTENSION_ID ? { announcements: settings.announcements } : {}),
         // Webの分析: 担当の許可・選んだプロパティとサイト（第34.18節。トークンは返さない）
         ...(e.pkg.manifest.id === WEB_REVIEW_EXTENSION_ID ? { webReview: settings.webReview } : {}),
+        // 契約の管理: 契約書の置き場（第38.7節）
+        ...(e.pkg.manifest.id === CONTRACTS_EXTENSION_ID ? { contracts: settings.contracts } : {}),
       })),
     });
   });
@@ -961,6 +963,14 @@ export function extensionsRoute(deps: AppDeps) {
     return c.json({ ok: true, notices });
   });
 
+  /** 契約の管理の、契約書の置き場をつなぐ・つなぎ直す（会社の Google ドライブにフォルダを作る。管理者だけ。第38.7節）。 */
+  app.put(`/${CONTRACTS_EXTENSION_ID}/storage`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const r = await deps.contracts.service.connectStorage({ tenantId: tenant.id, userId: user.id });
+    if ('error' in r) return c.json({ error: r.error }, 400);
+    return c.json({ ok: true, folderName: r.folderName });
+  });
+
   /**
    * 有効・無効を切り替える（スイッチ。第12.10.4節）。すぐに反映し、監査ログに残す。
    *
@@ -984,6 +994,11 @@ export function extensionsRoute(deps: AppDeps) {
       else if (section === 'competitors') await deps.repo.saveTenantSettings(tenant.id, 'competitors', { ...settings.competitors, enabled: body.enabled }, user.id);
       else if (section === 'announcements') await deps.repo.saveTenantSettings(tenant.id, 'announcements', { ...settings.announcements, enabled: body.enabled }, user.id);
       else if (section === 'webReview') await deps.repo.saveTenantSettings(tenant.id, 'webReview', { ...settings.webReview, enabled: body.enabled }, user.id);
+      else if (section === 'contracts') {
+        await deps.repo.saveTenantSettings(tenant.id, 'contracts', { ...settings.contracts, enabled: body.enabled }, user.id);
+        // 入れたら、入れた管理者のドライブに契約書の置き場を作る（まだ無ければ。作れなくても入れる。第38.7節）
+        if (body.enabled && !settings.contracts.storage) await deps.contracts.service.connectStorage({ tenantId: tenant.id, userId: user.id }).catch(() => null);
+      }
       else if (section === 'signage') {
         await deps.repo.saveTenantSettings(tenant.id, 'signage', { ...settings.signage, enabled: body.enabled }, user.id);
         // 切ったら、画面は無地にする（登録・素材・流れは消さない。第31.2節）

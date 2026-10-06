@@ -27,6 +27,8 @@ export function notificationPath(n: { kind: string; runId: string | null }): str
   if (n.kind === 'webReview') return '/web-review';
   // コラムの作成のテーマ案・予定表・予約の知らせは、コラムの作成を開く（第32.18.4節）
   if (n.kind === 'column') return '/columns';
+  // 契約の期限の知らせは、契約の管理を開く（第38.6節）
+  if (n.kind === 'contract') return '/contracts';
   if (n.runId && RUN_ID.test(n.runId)) return `/runs/${encodeURIComponent(n.runId)}`;
   return '/';
 }

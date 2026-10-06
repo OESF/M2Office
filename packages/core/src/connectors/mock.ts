@@ -45,7 +45,7 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
   /** 変更して、作った予定の側に置き換えた見本の予定。 */
   private readonly replacedEvents = new Set<string>();
   /** M2Office が作ったドライブのファイル（文書は本文、表は値を持つ）。 */
-  private readonly driveFiles = new Map<string, { file: DriveFile; owner: string; text?: string; values?: string[][] }>();
+  private readonly driveFiles = new Map<string, { file: DriveFile; owner: string; text?: string; values?: string[][]; bytes?: Uint8Array; mimeType?: string }>();
 
   constructor(private readonly now: () => Date = () => new Date()) {}
 
@@ -197,6 +197,15 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
     },
     createFolder: async (p: ConnectorPrincipal, input: { name: string; parentId: string | null }) =>
       this.addFile(p, input.name, 'folder', {}),
+    upload: async (p: ConnectorPrincipal, input: { name: string; mimeType: string; bytes: Uint8Array; parentId: string | null }) => {
+      if (input.parentId && !this.visibleFiles(p).some((x) => x.file.id === input.parentId)) throw new Error('入れるフォルダが見つかりません');
+      return this.addFile(p, input.name, input.mimeType === 'application/pdf' ? 'pdf' : 'other', { bytes: input.bytes.slice(), mimeType: input.mimeType });
+    },
+    download: async (p: ConnectorPrincipal, fileId: string) => {
+      const f = this.visibleFiles(p).find((x) => x.file.id === fileId) as { file: DriveFile; bytes?: Uint8Array; mimeType?: string; text?: string } | undefined;
+      if (!f || f.file.kind === 'folder') return null;
+      return { file: f.file, mimeType: f.mimeType ?? 'text/plain', bytes: f.bytes ?? new TextEncoder().encode(f.text ?? '') };
+    },
     get: async (p: ConnectorPrincipal, fileId: string) => this.visibleFiles(p).find((x) => x.file.id === fileId)?.file ?? null,
     shareWithDomain: async (p: ConnectorPrincipal, s: { fileId: string; domain: string }) => {
       const f = this.driveFiles.get(s.fileId);
@@ -292,7 +301,7 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
   };
 
   private addFile(
-    p: ConnectorPrincipal, name: string, kind: DriveFile['kind'], content: { text?: string; values?: string[][] },
+    p: ConnectorPrincipal, name: string, kind: DriveFile['kind'], content: { text?: string; values?: string[][]; bytes?: Uint8Array; mimeType?: string },
   ): DriveFile {
     const file: DriveFile = { id: `mock-file-${randomUUID().slice(0, 8)}`, name, kind, modifiedAt: this.now().toISOString(), url: null };
     this.driveFiles.set(file.id, { file, owner: key(p), ...content });

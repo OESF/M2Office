@@ -38,6 +38,9 @@ src/announcements/ お知らせの作成（内蔵の拡張。第35章の段 1・
                  宛先を言葉で絞る（recipients.ts。頼みを条件にし、当てはめは推論を使わない）、
                  処理（service.ts。直す・承認の前の確かめ・Web・LINE の一斉配信・メール・サイネージの画面・予約・期間の後）、
                  ツール（tools.ts。announcements.draft・revise・recipients・submit・list・publish・closures）、付属の業務（agents.ts。下書き・出す）
+src/contracts/   契約の管理（内蔵の拡張。第38章の段 1）。項目の読み取りと期限の計算（extract.ts。推論の JSON と決まった言い方・申し出の日数・更新の期間）、
+                 置き場（store.ts。PostgreSQL とメモリ）、処理（service.ts。契約書・契約書チェックの実行・手で入れる・直す・削除・
+                 ドライブの置き場・契約書を開く・期限の見張りと自動更新の繰り越し）、ツール（tools.ts。contracts.find・register・update）、付属の業務「契約の台帳」（agents.ts）
 src/cards/       名刺管理（内蔵の拡張。第27章）。置き場（自分だけの名刺は持ち主でも行を絞る）、読み取り（read.ts。写っている名刺ごとに項目・向き・四隅。
                  四隅は文字の向きに合わせて並べ直す orderCorners。1 枚の写真に 10 枚まで）、同じ人の見分け（identity.ts）、
                  表（CSV・Excel）の取り込みと書き出し（table.ts。見出しはよくある言い方と推論で読む）、

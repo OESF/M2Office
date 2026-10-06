@@ -147,6 +147,7 @@ export * from './columns/index.js';
 export * from './inquiries/index.js';
 export * from './competitors/index.js';
 export * from './announcements/index.js';
+export * from './contracts/index.js';
 export * from './web-review/index.js';
 export * from './hr/index.js';
 export * from './signage/index.js';

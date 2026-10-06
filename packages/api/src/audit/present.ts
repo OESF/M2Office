@@ -214,6 +214,14 @@ const ACTION_LABELS: Record<string, string> = {
   'announcement.mail': 'お知らせをメールで送り始めた',
   'announcement.closure': '休業の期間を覚えた',
   'inquiry.closure_reply': '休業中の問い合わせに返事の下書きを用意した',
+  // 契約の管理（仕様書 第38章。相手の名前と契約の中身は記録に残さない）
+  'contract.create': '契約を台帳に入れた',
+  'contract.update': '契約の台帳を直した',
+  'contract.status': '契約の状態を変えた',
+  'contract.delete': '契約を台帳から削除した',
+  'contract.open': '契約書を開いた',
+  'contract.storage': '契約書の置き場をつないだ',
+  'contract.renewed': '契約を自動で次の期間に進めた',
   'web_review.connect': 'Webの分析の担当の Google の許可をつないだ',
   'web_review.disconnect': 'Webの分析の担当の Google の許可を外した',
   'web_review.select': 'Webの分析で見るプロパティとサイトを選んだ',
@@ -441,6 +449,8 @@ function targetOf(e: AuditEvent, names: AuditNames): string {
     case 'web_column': return id.startsWith('col-') ? `コラム ${id.slice(4, 12)}` : 'コラムの作成の設定';
     // 問い合わせはお客様の名前を出さない。ID の頭だけ
     case 'announcement': return `お知らせ ${id.slice(4, 12)}`;
+    // 契約は相手の名前を出さない。ID の頭だけ
+    case 'contract': return id === 'storage' ? '契約書の置き場' : `契約 ${id.slice(4, 12)}`;
     case 'web_review': return 'Webの分析';
     case 'competitor': return id === 'settings' ? '競合の分析の設定' : id === 'map-key' ? '競合の分析の地図の鍵' : id === 'discover' ? '競合の分析（探す）' : id === 'all' ? '競合の分析（見回り）' : `競合の分析 ${id.slice(4, 12)}`;
     case 'inquiry': return id === 'mailbox' ? '問い合わせの窓口のアカウント' : id === 'line' ? '問い合わせの LINE 公式アカウント' : `問い合わせ ${id.slice(4, 12)}`;

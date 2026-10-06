@@ -11,12 +11,12 @@
 
 import {
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
-  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink,
+  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink,
   NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator,
 } from '@m2office/core';
-import { canRunAgent } from '@m2office/shared';
+import { canRunAgent, fileInputKey } from '@m2office/shared';
 import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
 
@@ -168,6 +168,28 @@ const columns: ColumnService = new ColumnService({
 // 問い合わせの記録（内蔵の拡張。仕様書 第33章）。秘書から頼まれた記録と、期限の知らせ・原文の片付けが使う
 // お知らせの置き場（休業の期間を、問い合わせの記録と定時実行も読む。第35.7節）
 const announcementStore = new PostgresAnnouncementStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
+// 契約の管理（第38章）。解約の申し出の期限と終わりを見張り、自動更新の契約を次の期間に進める。秘書から台帳に入れる・引く・直す
+const contracts = new ContractService({
+  store: new PostgresContractStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+  repo, files, drive: connector.drive, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
+  ocrFor: async (tenantId) => {
+    const llm = await ai.llmFor(tenantId).catch(() => null);
+    return llm?.readImage ? async (r) => (await llm.readImage!(r)).text : undefined;
+  },
+  latestReview: async (tenantId, userId) => {
+    const rows = await repo.listRunsWithJobs(tenantId, { limit: 50, requestedBy: userId });
+    return rows.find((r) => r.job.agentId === CONTRACT_REVIEW_AGENT_ID && r.run.status === 'completed')?.run.id ?? null;
+  },
+  reviewFile: async (tenantId, userId, runId) => {
+    const run = await repo.getRun(tenantId, runId);
+    const job = run ? await repo.getJob(tenantId, run.jobId) : null;
+    if (!job || job.requestedBy !== userId || job.agentId !== CONTRACT_REVIEW_AGENT_ID) return null;
+    const def = await resolveDefinition(job.agentId, job.agentVersion, tenantId);
+    const key = def ? fileInputKey(def) : null;
+    const v = key ? job.input[key] : null;
+    return typeof v === 'string' && v ? v : null;
+  },
+});
 const inquiryStore = new PostgresInquiryStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
 const inquiries = new InquiryService({
   store: inquiryStore, repo, llmFor: (tenantId) => ai.llmFor(tenantId), contacts: contactBookFrom(contactStore, cardsAccess(repo)), logger: log,
@@ -247,6 +269,7 @@ const engine = new RunEngine({
   competitors: { service: competitors, access: competitorsAccess(repo) },
   announcements: { service: announcements, access: announcementsAccess(repo) },
   webReview: { service: webReview, access: webReviewAccess(repo) },
+  contracts: { service: contracts, access: contractsAccess(repo) },
   llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId),
   // 業務ごとの AI（ローカル・外部）と、社外の接続に送ってよいか（第16.3.7.1節）
   llmForRun: (tenantId, def, registry, previous) => ai.llmForRun(tenantId, def, registry, previous),
@@ -374,6 +397,9 @@ let lastCompetitorCheck = 0;
 /** お知らせの予約と期間の後を見回る間隔（第35.17節）。 */
 const ANNOUNCEMENT_INTERVAL_MS = Number(process.env['ANNOUNCEMENT_INTERVAL_MS'] ?? 60_000);
 let lastAnnouncementCheck = 0;
+/** 契約の期限を見張る間隔（第38.6節。既定は 1 時間。知らせは期限ごとに 1 回だけ）。 */
+const CONTRACT_INTERVAL_MS = Number(process.env['CONTRACT_INTERVAL_MS'] ?? 3_600_000);
+let lastContractCheck = 0;
 // Webの分析（第34.18節・第34.19節）。既定は 1 分ごとに、月の便り（3 日の 8 時を過ぎ、先月の便りがまだ無いか）と、
 // 直すべき所の見回りの番（週に 1 回・今すぐチェック）を見る
 const WEB_REVIEW_INTERVAL_MS = Number(process.env['WEB_REVIEW_INTERVAL_MS'] ?? 60_000);
@@ -622,6 +648,17 @@ while (running) {
       if (r.published + r.ended > 0) log.info('お知らせの予約を出し、期間の後を片付けました', { published: r.published, ended: r.ended });
     } catch (err) {
       log.warn('お知らせの見回りに失敗しました', { err });
+    }
+  }
+
+  // 契約の解約の申し出の期限と終わりの知らせ、自動更新の繰り越し（第38.6節）
+  if (Date.now() - lastContractCheck >= CONTRACT_INTERVAL_MS) {
+    lastContractCheck = Date.now();
+    try {
+      const r = await contracts.tick(new Date());
+      if (r.notified + r.renewed > 0) log.info('契約の期限を知らせ、自動更新を進めました', { notified: r.notified, renewed: r.renewed });
+    } catch (err) {
+      log.warn('契約の期限の見張りに失敗しました', { err });
     }
   }
 
