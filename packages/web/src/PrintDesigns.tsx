@@ -1,6 +1,7 @@
 /**
- * @file 販促物の作成の画面（仕様書 第41.9節）。一覧（掲示の状態で絞る）・作る（頼みの文と写真）／1 つの物の 3 案から選ぶ・会話で直す・
- * 文面をその場で直す・点検の印・書き出し（PDF・入稿用の PDF・PNG）・掲示の期間と置き場所・外した・作り直す・版を戻す・削除。
+ * @file 販促物の作成の画面（仕様書 第41.9節）。一覧（掲示の状態で絞る）・作る（頼みの文と写真。値札を含む）／1 つの物の 3 案から選ぶ・会話で直す・
+ * 文面をその場で直す・点検の印・書き出し（PDF・入稿用の PDF・PNG）・掲示の期間と置き場所・外した・作り直す・版を戻す・削除・
+ * 店頭サイネージに流す・止める・お知らせの下書きにする（第41.18節）。
  *
  * 字は M2Office が組む。画面は API を経由するだけで、画像も API から読む。説明文は常に出さない（原則 u11）。印刷の発注はしない。
  */
@@ -55,14 +56,16 @@ function PhotoButton({ photo, onPhoto, disabled }: { photo: { id: string; name: 
 }
 
 /** 販促物の作成の画面（一覧か 1 つ）。 */
-export function PrintDesigns({ designId, onOpen, changeKey }: {
+export function PrintDesigns({ designId, onOpen, changeKey, onAnnouncement }: {
   designId: string | null;
   onOpen: (designId: string | null) => void;
   /** 秘書が販促物を作る・直すたびに変わる値。変わったら読み直す。 */
   changeKey: string;
+  /** お知らせの下書きを開く（第41.18節） */
+  onAnnouncement: (announcementId: string) => void;
 }) {
   return designId
-    ? <DesignView key={designId} id={designId} onBack={() => onOpen(null)} onOpen={onOpen} changeKey={changeKey} />
+    ? <DesignView key={designId} id={designId} onBack={() => onOpen(null)} onOpen={onOpen} changeKey={changeKey} onAnnouncement={onAnnouncement} />
     : <DesignList onOpen={(id) => onOpen(id)} changeKey={changeKey} />;
 }
 
@@ -101,6 +104,7 @@ function DesignList({ onOpen, changeKey }: { onOpen: (id: string) => void; chang
               <span className="small muted">{PRINT_KIND_LABELS[d.kind]}・{PRINT_SIZES[d.size].label}</span>
               <span className="row wrap small">
                 <span className={STATE_BADGE[d.state]}>{PRINT_STATE_LABELS[d.state]}</span>
+                {d.signage.state !== 'none' && <span className="badge">{d.signage.state === 'on' ? 'サイネージ' : 'サイネージ待ち'}</span>}
                 {periodLabel(d) && <span className="muted">{periodLabel(d)}</span>}
                 {d.place && <span className="muted">{d.place}</span>}
               </span>
@@ -125,7 +129,7 @@ function CreateBox({ onCreated }: { onCreated: (id: string) => void }) {
     setBusy(true);
     setError(null);
     try {
-      const r = await api.printDesigns.create({ request: request.trim(), ...(kind ? { kind } : {}), ...(size ? { size } : {}), ...(photo ? { photoFileId: photo.id } : {}) });
+      const r = await api.printDesigns.create({ request: request.trim(), ...(kind ? { kind } : {}), ...(size ? { size } : {}), ...(photo && kind !== 'tags' ? { photoFileId: photo.id } : {}) });
       onCreated(r.design.id);
     } catch (e) {
       setError(describeError(e, '作れませんでした'));
@@ -147,7 +151,7 @@ function CreateBox({ onCreated }: { onCreated: (id: string) => void }) {
             {sizes.map((s) => <option key={s} value={s}>{PRINT_SIZES[s].label}</option>)}
           </select>
         )}
-        <PhotoButton photo={photo} onPhoto={setPhoto} disabled={busy} />
+        {kind !== 'tags' && <PhotoButton photo={photo} onPhoto={setPhoto} disabled={busy} />}
         <button className="btn small" disabled={busy || !request.trim()} onClick={() => void create()}>{busy ? '案を作っています…' : '案を作る'}</button>
       </div>
       {error && <p className="error">{error}</p>}
@@ -157,10 +161,12 @@ function CreateBox({ onCreated }: { onCreated: (id: string) => void }) {
 
 /** 版の画像（パンフレットは 2 面）。 */
 function Pages({ d, v, large = false }: { d: PrintDesign; v: PrintVersion; large?: boolean }) {
-  const pages = d.kind === 'brochure' ? [0, 1] : [0];
+  // パンフレットは外側と内側、値札は 10 品ごとに 1 枚（第41.18節）
+  const sheets = d.kind === 'tags' ? Math.min(3, Math.max(1, Math.ceil(v.copy.body.split('\n').filter((l) => l.trim()).length / 10))) : 1;
+  const pages = d.kind === 'brochure' ? [0, 1] : Array.from({ length: sheets }, (_, i) => i);
   return (
     <div className={`prd-pages${large ? ' is-large' : ''}`}>
-      {pages.map((p) => <img key={p} src={api.printDesigns.fileUrl(d.id, v.id, 'preview', { page: p })} alt={pages.length > 1 ? (p === 0 ? '外側' : '内側') : ''} />)}
+      {pages.map((p) => <img key={p} src={api.printDesigns.fileUrl(d.id, v.id, 'preview', { page: p })} alt={d.kind === 'brochure' ? (p === 0 ? '外側' : '内側') : ''} />)}
     </div>
   );
 }
@@ -176,7 +182,7 @@ function Checks({ v }: { v: PrintVersion }) {
 }
 
 /** 1 つの物。 */
-function DesignView({ id, onBack, onOpen, changeKey }: { id: string; onBack: () => void; onOpen: (id: string) => void; changeKey: string }) {
+function DesignView({ id, onBack, onOpen, changeKey, onAnnouncement }: { id: string; onBack: () => void; onOpen: (id: string) => void; changeKey: string; onAnnouncement: (id: string) => void }) {
   const [data, setData] = useState<PrintDesignDetailView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -242,13 +248,26 @@ function DesignView({ id, onBack, onOpen, changeKey }: { id: string; onBack: () 
           </div>
           <div className="prd-side">
             <Checks v={current} />
-            <ReviseBox busy={busy} onRevise={(instruction, photoFileId) => act(() => api.printDesigns.revise(d.id, instruction, photoFileId), '直せませんでした')} />
+            <ReviseBox busy={busy} tags={d.kind === 'tags'} onRevise={(instruction, photoFileId) => act(() => api.printDesigns.revise(d.id, instruction, photoFileId), '直せませんでした')} />
             <div className="row wrap prd-downloads">
               <a className="btn small" href={api.printDesigns.fileUrl(d.id, current.id, 'pdf')} download>PDF</a>
               <a className="btn ghost small" href={api.printDesigns.fileUrl(d.id, current.id, 'bleed')} download>入稿用の PDF</a>
               <a className="btn ghost small" href={api.printDesigns.fileUrl(d.id, current.id, 'png', { download: true })} download>画像（PNG）</a>
             </div>
-            <CopyEditor key={current.id} copy={current.copy} disabled={busy}
+            <Links data={data} state={state} busy={busy}
+              onSignage={() => act(() => api.printDesigns.toSignage(d.id), '流せませんでした')}
+              onStopSignage={() => act(() => api.printDesigns.stopSignage(d.id), '外せませんでした')}
+              onAnnounce={async () => {
+                setBusy(true);
+                setNote(null);
+                try {
+                  onAnnouncement((await api.printDesigns.toAnnouncement(d.id)).announcementId);
+                } catch (e) {
+                  setNote({ kind: 'error', text: describeError(e, 'お知らせにできませんでした') });
+                  setBusy(false);
+                }
+              }} />
+            <CopyEditor key={current.id} copy={current.copy} tags={d.kind === 'tags'} disabled={busy}
               onSave={(patch) => act(() => api.printDesigns.editCopy(d.id, patch), '直せませんでした', '文面を直しました')} />
             <PostFields key={`${d.postFrom}-${d.postTo}-${d.place}`} d={d} state={state} disabled={busy}
               onSave={(input) => act(() => api.printDesigns.setPost(d.id, input), '保存できませんでした', '保存しました')}
@@ -280,6 +299,29 @@ function DesignView({ id, onBack, onOpen, changeKey }: { id: string; onBack: () 
   );
 }
 
+/** つなげる先（店頭サイネージ・お知らせの作成。第41.18節）。使えないものは出さない。 */
+function Links({ data, state, busy, onSignage, onStopSignage, onAnnounce }: {
+  data: PrintDesignDetailView; state: PrintState; busy: boolean;
+  onSignage: () => void; onStopSignage: () => void; onAnnounce: () => void;
+}) {
+  const { design: d, links } = data;
+  const sg = d.signage;
+  const canSignage = !!links?.signage && (sg.state !== 'none' || (state !== 'ended' && state !== 'removed'));
+  const canAnnounce = !!links?.announcements && d.kind !== 'tags';
+  if (!canSignage && !canAnnounce) return null;
+  return (
+    <div className="row wrap prd-links">
+      {canSignage && (sg.state === 'none'
+        ? <button className="btn ghost small" disabled={busy} onClick={onSignage}>サイネージに流す</button>
+        : <>
+          <span className="small">{sg.state === 'on' ? `サイネージに流しています${sg.screens.length ? `（${sg.screens.join('・')}）` : ''}` : `掲示の始まり（${d.postFrom?.replace(/-/g, '/')}）から流します`}</span>
+          <button className="link small" disabled={busy} onClick={onStopSignage}>{sg.state === 'on' ? 'サイネージから外す' : 'キャンセル'}</button>
+        </>)}
+      {canAnnounce && <button className="btn ghost small" disabled={busy} onClick={onAnnounce}>お知らせにする</button>}
+    </div>
+  );
+}
+
 /** 題名（押して直す）。 */
 function TitleField({ d, disabled, onSave }: { d: PrintDesign; disabled: boolean; onSave: (title: string) => void }) {
   const [editing, setEditing] = useState(false);
@@ -296,7 +338,7 @@ function TitleField({ d, disabled, onSave }: { d: PrintDesign; disabled: boolean
 }
 
 /** 会話で直す（「見出しをもっと大きく」「落ち着いた色に」「この写真に」）。 */
-function ReviseBox({ busy, onRevise }: { busy: boolean; onRevise: (instruction: string, photoFileId?: string) => Promise<void> }) {
+function ReviseBox({ busy, tags, onRevise }: { busy: boolean; tags: boolean; onRevise: (instruction: string, photoFileId?: string) => Promise<void> }) {
   const [text, setText] = useState('');
   const [photo, setPhoto] = useState<{ id: string; name: string } | null>(null);
   const submit = async () => {
@@ -306,10 +348,10 @@ function ReviseBox({ busy, onRevise }: { busy: boolean; onRevise: (instruction: 
   };
   return (
     <div className="prd-revise">
-      <textarea value={text} rows={2} maxLength={500} disabled={busy} aria-label="直したいこと" placeholder="例: 見出しをもっと大きく"
+      <textarea value={text} rows={2} maxLength={500} disabled={busy} aria-label="直したいこと" placeholder={tags ? '例: 色を変えて' : '例: 見出しをもっと大きく'}
         onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && (text.trim() || photo)) void submit(); }} />
       <div className="row wrap">
-        <PhotoButton photo={photo} onPhoto={setPhoto} disabled={busy} />
+        {!tags && <PhotoButton photo={photo} onPhoto={setPhoto} disabled={busy} />}
         <button className="btn small" disabled={busy || (!text.trim() && !photo)} onClick={() => void submit()}>{busy ? '直しています…' : '直す'}</button>
       </div>
     </div>
@@ -326,14 +368,22 @@ const COPY_FIELDS: { key: keyof PrintCopy; label: string; max: number; rows?: nu
   { key: 'qrUrl', label: 'QR の URL', max: 300 },
 ];
 
+/** 値札の文面（札の上のひとこと・1 行 1 品・札の隅の注意書き。第41.18節）。 */
+const TAG_FIELDS: typeof COPY_FIELDS = [
+  { key: 'sub', label: 'ひとこと（札の上）', max: PRINT_LIMITS.subMax },
+  { key: 'body', label: '品目（1 行 1 品。名前｜値段）', max: PRINT_LIMITS.bodyMax, rows: 8 },
+  { key: 'note', label: '注意書き（札の隅）', max: PRINT_LIMITS.noteMax },
+];
+
 /** 文面をその場で直す。 */
-function CopyEditor({ copy, disabled, onSave }: { copy: PrintCopy; disabled: boolean; onSave: (patch: Record<string, string>) => void }) {
+function CopyEditor({ copy, tags, disabled, onSave }: { copy: PrintCopy; tags: boolean; disabled: boolean; onSave: (patch: Record<string, string>) => void }) {
   const [v, setV] = useState<PrintCopy>(copy);
-  const changed = COPY_FIELDS.filter((f) => v[f.key] !== copy[f.key]);
+  const fields = tags ? TAG_FIELDS : COPY_FIELDS;
+  const changed = fields.filter((f) => v[f.key] !== copy[f.key]);
   return (
     <details className="prd-copy">
       <summary>文面</summary>
-      {COPY_FIELDS.map((f) => (
+      {fields.map((f) => (
         <label key={f.key}>
           <span className="small muted">{f.label}</span>
           {f.rows

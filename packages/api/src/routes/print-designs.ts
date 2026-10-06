@@ -1,7 +1,9 @@
 /**
- * @file 販促物の作成（内蔵の拡張）の API。一覧・作る（3 案）・1 つ・案を選ぶ・会話で直す・文面を直す・掲示の期間と置き場所・外した・作り直す・削除・書き出し。
+ * @file 販促物の作成（内蔵の拡張）の API。一覧・作る（3 案。値札を含む）・1 つ・案を選ぶ・会話で直す・文面を直す・掲示の期間と置き場所・外した・作り直す・削除・書き出し・
+ * 店頭サイネージに流す・止める・お知らせの下書きにする（第41.18節）。
  *
- * 会社が切っているときと、利用範囲の外の人には、どの口も使わせない。社外には何も出さない。印刷の発注はしない（第41.7節）。
+ * 会社が切っているときと、利用範囲の外の人には、どの口も使わせない。社外には何も出さない（お知らせは下書きまで。出すのはお知らせの作成の承認の後）。
+ * 印刷の発注はしない（第41.7節）。
  *
  * @see 仕様書 第41章
  */
@@ -27,7 +29,7 @@ export function printDesignsRoute(deps: AppDeps) {
     return { tenantId: tenant.id, userId: user.id };
   };
   const body = (c: Context<AppEnv>) => c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
-  const status = (e: string) => (e.includes('見つかりません') ? 404 : e.includes('だけ') ? 403 : 400);
+  const status = (e: string) => (e.includes('見つかりません') ? 404 : e.includes('だけ') || e.includes('は使えません') ? 403 : 400);
   const problem = (c: Context<AppEnv>, e: string | null) => (e ? c.json({ error: e }, status(e)) : c.json({ ok: true }));
   const result = (c: Context<AppEnv>, r: { error: string } | object, ok: 200 | 201 = 200) => ('error' in r ? c.json(r, status(String((r as { error: string }).error))) : c.json(r, ok));
 
@@ -50,11 +52,20 @@ export function printDesignsRoute(deps: AppDeps) {
     return result(c, await service.create(who(c), { request: b['request'], kind: b['kind'], size: b['size'], photoFileId: b['photoFileId'] }), 201);
   });
 
-  /** 1 つの物と版。 */
+  /** 1 つの物と版と、つなげる先を使えるか（第41.18節）。 */
   app.get('/:id', async (c) => {
     const d = await service.get(who(c), c.req.param('id'));
-    return d ? c.json(d) : c.json({ error: '販促物が見つかりません' }, 404);
+    return d ? c.json({ ...d, links: await service.links(who(c)) }) : c.json({ error: '販促物が見つかりません' }, 404);
   });
+
+  /** 店頭サイネージに流す（掲示の始まりより前なら、始まりから流す）。 */
+  app.post('/:id/signage', async (c) => result(c, await service.toSignage(who(c), c.req.param('id'))));
+
+  /** 店頭サイネージから外す。 */
+  app.delete('/:id/signage', async (c) => problem(c, await service.stopSignage(who(c), c.req.param('id'))));
+
+  /** お知らせの作成の下書きにする（出すのはお知らせの作成の承認の後）。 */
+  app.post('/:id/announcement', async (c) => result(c, await service.toAnnouncement(who(c), c.req.param('id')), 201));
 
   /** 案を選ぶ・前の版に戻す（`versionId`）。 */
   app.post('/:id/choose', async (c) => {
@@ -96,11 +107,11 @@ export function printDesignsRoute(deps: AppDeps) {
     return new Response(f.bytes as unknown as ArrayBuffer, { headers: { 'content-type': f.mime, 'cache-control': 'private, max-age=300' } });
   });
 
-  /** 書き出す（`preview`・`png`・`pdf`・`bleed`。`page` はパンフレットの面）。 */
+  /** 書き出す（`preview`・`png`・`pdf`・`bleed`。`page` はパンフレットの面と値札のシートの何枚目か）。 */
   app.get('/:id/versions/:vid/:kind', async (c) => {
     const kind = c.req.param('kind') as PrintExport;
     if (!EXPORTS.includes(kind) || !ID.test(c.req.param('vid'))) return c.json({ error: '書き出しの種類が違います' }, 400);
-    const page = Math.max(0, Math.min(1, Number(c.req.query('page') ?? 0) || 0));
+    const page = Math.max(0, Math.min(2, Number(c.req.query('page') ?? 0) || 0));
     const f = await service.export(who(c), c.req.param('id'), c.req.param('vid'), kind, page);
     if (!f) return c.json({ error: '販促物が見つかりません' }, 404);
     const download = kind === 'pdf' || kind === 'bleed' || c.req.query('download') === '1';

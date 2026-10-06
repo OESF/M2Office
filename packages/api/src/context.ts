@@ -507,11 +507,26 @@ export function buildDeps(): AppDeps {
     }),
     access: membersAccess(repo),
   };
-  // 販促物の作成（内蔵の拡張。仕様書 第41章）。画像と書き出しはファイルの置き場（print/…）に置く
+  // 販促物の作成（内蔵の拡張。仕様書 第41章）。画像はファイルの置き場（print-<版>-…）に置く。
+  // 店頭サイネージに流す・お知らせの下書きにする・在庫の品目から値札（第41.18節）
+  const printAnnouncementsAccess = announcementsAccess(repo);
+  const printInventoryAccess = inventoryAccess(repo);
   const printDesigns = {
     service: new PrintDesignService({
       store: new PostgresPrintDesignStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
       repo, files, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
+      signage: signageForAnnouncements(signageService),
+      announcements: {
+        access: async (tenantId, userId) => !!(await printAnnouncementsAccess(tenantId, userId)),
+        draft: async (who, request) => {
+          const r = await announcements.service.draft(who, request);
+          return 'error' in r ? r : { id: r.announcement.id };
+        },
+      },
+      inventory: {
+        access: async (tenantId, userId) => !!(await printInventoryAccess(tenantId, userId)),
+        items: (tenantId) => inventoryService.store.listItems(tenantId),
+      },
     }),
     access: printDesignsAccess(repo),
   };

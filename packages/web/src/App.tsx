@@ -425,7 +425,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
     // 会員とポイント（仕様書 第40章）。会社で入れていて利用範囲の人にだけ出す
     ...(me.members ? [{ id: MEMBERS_EXTENSION_ID, name: '会員', description: 'お客様を会員にし、来店と購入でポイントを貯めて特典と交換する', icon: 'users' as IconName, agent: null }] : []),
     // 販促物の作成（仕様書 第41章）。会社で入れていて利用範囲の人にだけ出す
-    ...(me.printDesigns ? [{ id: PRINT_DESIGNS_EXTENSION_ID, name: '販促物', description: 'ポップ・チラシ・パンフレット・案内・ポスターを、頼むだけで作る', icon: 'slides' as IconName, agent: null }] : []),
+    ...(me.printDesigns ? [{ id: PRINT_DESIGNS_EXTENSION_ID, name: '販促物の作成', description: 'ポップ・チラシ・パンフレット・案内・ポスターを、頼むだけで作る', icon: 'slides' as IconName, agent: null }] : []),
     ...(me.subsidies ? [{ id: SUBSIDIES_EXTENSION_ID, name: '補助金・助成金', description: '会社に合いそうな補助金・助成金を、締め切りと出典と一緒に知らせる', icon: 'research' as IconName, agent: null }] : []),
     ...(me.contracts ? [{ id: CONTRACTS_EXTENSION_ID, name: '契約書の管理', description: '結んだ契約を台帳にし、更新と解約の申し出の期限を知らせる', icon: 'doc' as IconName, agent: null }] : []),
     // Webの分析（仕様書 第34.18節）。会社で入れていて利用範囲の人にだけ出す
@@ -729,8 +729,9 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
           )}
           {view.kind === 'printDesigns' && (
             <>
-              <h1>販促物 <HelpTip article="start-print-designs">ポップ・チラシ・パンフレット・案内・ポスター・ショップカードの案を 3 つ作り、頼みのとおりに直します。印刷用の PDF と画像を書き出します。</HelpTip></h1>
-              <PrintDesigns designId={view.designId} onOpen={(designId) => setView({ kind: 'printDesigns', designId })} changeKey={printChangeKey} />
+              <h1>販促物の作成 <HelpTip article="start-print-designs">ポップ・チラシ・パンフレット・案内・ポスター・ショップカードの案を 3 つ作り、頼みのとおりに直します。印刷用の PDF と画像を書き出します。</HelpTip></h1>
+              <PrintDesigns designId={view.designId} onOpen={(designId) => setView({ kind: 'printDesigns', designId })} changeKey={printChangeKey}
+                onAnnouncement={(announcementId) => setView({ kind: 'announcements', announcementId })} />
             </>
           )}
           {view.kind === 'subsidies' && (
@@ -960,7 +961,7 @@ const VIEW_LABELS: Record<string, string> = {
   reservations: '予約',
   subsidies: '補助金・助成金',
   members: '会員',
-  printDesigns: '販促物',
+  printDesigns: '販促物の作成',
   webReview: 'Webの分析',
   settings: '個人設定',
 };

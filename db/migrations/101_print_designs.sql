@@ -1,6 +1,6 @@
 -- 販促物の作成（内蔵の拡張。仕様書 第41章。第 0.290.0 版）。
 -- ポップ・チラシ・パンフレット・案内・ポスター・ショップカードの物と、その版（3 案も版）を会社ごとに持つ。
--- 画像と書き出した PNG・PDF はファイルの置き場（キー `print/<版の ID>/…`）に置き、表には持たない。
+-- 画像と案の小さな画像はファイルの置き場（キー `print-<版の ID>-image`・`print-<版の ID>-preview`）に置き、表には持たない。
 
 alter table tenant_settings add column if not exists print_designs jsonb;
 

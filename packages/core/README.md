@@ -61,7 +61,8 @@ src/members/     会員とポイント（内蔵の拡張。第40章の段 1・�
 src/print-designs/ 販促物の作成（内蔵の拡張。第41章の段 1）。型 12 種と組み版（templates.ts。mm の SVG・塗り足し・配色 3 通り・字の大きさを枠に合わせる）、
                  書き出し（render.ts。案の小さな画像・印刷の解像度の PNG・実寸と入稿用の PDF）、点検（checks.ts。曜日・連絡先・入りきらない文・推論の誤字と表示の決まり）、
                  置き場（store.ts）、処理（service.ts。3 案・会話で直す・文面を直す・作り直す・書き出し・掲示の期間の見張り）、
-                 ツール（tools.ts。print.create・revise・remake・find）、付属の業務「販促物の作成」（agents.ts）。
+                 ツール（tools.ts。print.create・revise・remake・find・signage・announce）、付属の業務「販促物の作成」（agents.ts）。
+                 段 2 のつなぎ（第41.18節）: 店頭サイネージに流す・外す、お知らせの下書き、在庫の品目から値札のシート（templates.ts の price-sheet）。
 src/cards/       名刺管理（内蔵の拡張。第27章）。置き場（自分だけの名刺は持ち主でも行を絞る）、読み取り（read.ts。写っている名刺ごとに項目・向き・四隅。
                  四隅は文字の向きに合わせて並べ直す orderCorners。1 枚の写真に 10 枚まで）、同じ人の見分け（identity.ts）、
                  表（CSV・Excel）の取り込みと書き出し（table.ts。見出しはよくある言い方と推論で読む）、

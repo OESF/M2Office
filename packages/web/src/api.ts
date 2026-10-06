@@ -1428,6 +1428,11 @@ export const api = {
     markRemoved: (id: string) => call<{ ok: true }>(`/print-designs/${encodeURIComponent(id)}/removed`, { method: 'POST', body: '{}' }),
     remake: (id: string, instruction: string) => call<PrintDesignDetailView>(`/print-designs/${encodeURIComponent(id)}/remake`, { method: 'POST', body: JSON.stringify({ instruction }) }),
     remove: (id: string) => call<{ ok: true }>(`/print-designs/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    /** 店頭サイネージに流す（掲示の始まりより前なら、始まりから流す。第41.18節）。 */
+    toSignage: (id: string) => call<{ state: 'on' | 'waiting'; screens: string[] }>(`/print-designs/${encodeURIComponent(id)}/signage`, { method: 'POST', body: '{}' }),
+    stopSignage: (id: string) => call<{ ok: true }>(`/print-designs/${encodeURIComponent(id)}/signage`, { method: 'DELETE' }),
+    /** お知らせの作成の下書きにする（出すのはお知らせの作成の承認の後）。 */
+    toAnnouncement: (id: string) => call<{ announcementId: string }>(`/print-designs/${encodeURIComponent(id)}/announcement`, { method: 'POST', body: '{}' }),
     /** 一覧の小さな画像の URL（`v` は直した日時。変われば読み直す）。 */
     thumbUrl: (id: string, v: string) => `/v1/print-designs/${encodeURIComponent(id)}/thumb?${new URLSearchParams({ v })}`,
     /** 書き出しの URL（`preview` は小さな画像、`png` は印刷の解像度、`pdf` は実寸、`bleed` は入稿用）。 */

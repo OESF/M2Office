@@ -8,12 +8,12 @@
 /** 販促物の作成の拡張機能の ID。 */
 export const PRINT_DESIGNS_EXTENSION_ID = 'print-designs';
 
-/** 作る物の種類（第41.3節）。 */
-export type PrintKind = 'pop' | 'flyer' | 'brochure' | 'notice' | 'poster' | 'card';
+/** 作る物の種類（第41.3節。値札は第41.18節）。 */
+export type PrintKind = 'pop' | 'flyer' | 'brochure' | 'notice' | 'poster' | 'card' | 'tags';
 
 /** 種類の名前。 */
 export const PRINT_KIND_LABELS: Record<PrintKind, string> = {
-  pop: 'ポップ', flyer: 'チラシ', brochure: 'パンフレット', notice: '案内', poster: 'ポスター', card: 'ショップカード',
+  pop: 'ポップ', flyer: 'チラシ', brochure: 'パンフレット', notice: '案内', poster: 'ポスター', card: 'ショップカード', tags: '値札',
 };
 
 /** 紙の大きさ（第41.3節）。 */
@@ -42,6 +42,8 @@ export const PRINT_KIND_SIZES: Record<PrintKind, PrintSize[]> = {
   notice: ['A4', 'A3'],
   poster: ['A3', 'A2', 'B2'],
   card: ['card'],
+  // 値札は A4 に名刺の大きさの札を 10 枚（第41.18節）
+  tags: ['A4'],
 };
 
 /** 文面（第41.4節）。言われていない値段・期間・条件は空にする。 */
@@ -67,14 +69,14 @@ export const EMPTY_PRINT_COPY: PrintCopy = { headline: '', sub: '', body: '', pe
 
 /** 点検の印（第41.6節）。断定しない。 */
 export interface PrintCheck {
-  kind: 'typo' | 'weekday' | 'contact' | 'law' | 'image' | 'readability' | 'fit';
+  kind: 'typo' | 'weekday' | 'contact' | 'law' | 'image' | 'readability' | 'fit' | 'price';
   /** 確かめてほしいこと（1 文） */
   message: string;
 }
 
 /** 点検の種類の名前。 */
 export const PRINT_CHECK_LABELS: Record<PrintCheck['kind'], string> = {
-  typo: '誤字', weekday: '日付と曜日', contact: '連絡先', law: '表示の決まり', image: '画像', readability: '読みやすさ', fit: '文の長さ',
+  typo: '誤字', weekday: '日付と曜日', contact: '連絡先', law: '表示の決まり', image: '画像', readability: '読みやすさ', fit: '文の長さ', price: '値段',
 };
 
 /** 画像の出どころ（第41.5節）。 */
@@ -129,7 +131,24 @@ export interface PrintDesign {
   createdByName: string;
   createdAt: string;
   updatedAt: string;
+  /** 店頭サイネージに流しているか（第41.18節） */
+  signage: PrintSignage;
 }
+
+/** サイネージの状態（`waiting` は掲示の始まりを待っている）。 */
+export type PrintSignageState = 'none' | 'waiting' | 'on';
+
+/** 店頭サイネージに流している様子（第41.18節）。 */
+export interface PrintSignage {
+  state: PrintSignageState;
+  /** 流している画面の名前 */
+  screens: string[];
+  /** 流した（待ち始めた）日時 */
+  at: string | null;
+}
+
+/** 流していない。 */
+export const NO_PRINT_SIGNAGE: PrintSignage = { state: 'none', screens: [], at: null };
 
 /** 掲示の状態（期間から求める。第41.8節）。 */
 export type PrintState = 'draft' | 'upcoming' | 'posted' | 'ended' | 'removed';
@@ -165,7 +184,7 @@ export const PRINT_LIMITS = {
   /** 文面の長さ */
   headlineMax: 40,
   subMax: 60,
-  bodyMax: 600,
+  bodyMax: 1200,
   periodMax: 60,
   priceMax: 40,
   noteMax: 120,
@@ -175,6 +194,9 @@ export const PRINT_LIMITS = {
   /** 見出しの倍率の幅 */
   headlineScaleMin: 0.7,
   headlineScaleMax: 1.4,
+  /** 値札の 1 枚のシートの札の数と、1 つの物の品目の上限（第41.18節） */
+  tagsPerSheet: 10,
+  tagsMax: 30,
 } as const;
 
 /** API が返す 1 つの物（物と、掲示の状態と、版。3 案も版）。 */
@@ -182,6 +204,8 @@ export interface PrintDesignDetailView {
   design: PrintDesign;
   state: PrintState;
   versions: PrintVersion[];
+  /** つなげる先を、いま使えるか（API が添える。第41.18節） */
+  links?: { signage: boolean; announcements: boolean };
 }
 
 /** 画面の道（1 つの物）。 */

@@ -2113,6 +2113,7 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .prd-pages:has(img + img) img { max-width: calc(50% - 4px); }
 .prd-main { display: grid; grid-template-columns: minmax(0, 3fr) minmax(260px, 2fr); gap: 16px; align-items: start; }
 .prd-side { display: flex; flex-direction: column; gap: 12px; }
+.prd-links { align-items: center; }
 .prd-checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .prd-copy label, .prd-post label { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
 .prd-copy input, .prd-copy textarea { width: 100%; }

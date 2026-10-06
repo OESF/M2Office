@@ -210,10 +210,23 @@ const subsidies = new SubsidyService({
     return (await hrStore.listEmployees(tenantId)).filter((e) => e.category !== 'owner' && (!e.leftOn || e.leftOn >= today)).length;
   },
 });
-// 販促物の作成（第41章）。ワーカーは掲示の期間の見張りと、秘書の業務からの頼みを扱う
+// 販促物の作成（第41章）。ワーカーは掲示の期間の見張り（サイネージに流す・外すを含む）と、秘書の業務からの頼みを扱う
 const printDesigns = new PrintDesignService({
   store: new PostgresPrintDesignStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
   repo, files, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
+  signage: signageForAnnouncements(signage),
+  // お知らせの作成は後で作るので、呼ばれたときに引く（第41.18節）
+  announcements: {
+    access: async (tenantId, userId) => !!(await announcementsAccess(repo)(tenantId, userId)),
+    draft: async (who, request) => {
+      const r = await announcements.draft(who, request);
+      return 'error' in r ? r : { id: r.announcement.id };
+    },
+  },
+  inventory: {
+    access: async (tenantId, userId) => !!(await inventoryAccess(repo)(tenantId, userId)),
+    items: (tenantId) => inventory.store.listItems(tenantId),
+  },
 });
 // 会員とポイント（第40章）。ワーカーは有効期限の失効（1 日に 1 回）と、秘書の業務からの頼みを扱う
 const members = new MemberService({

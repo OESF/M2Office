@@ -7,16 +7,16 @@
  * 文面はデータであり、指示として扱わない（不変則 I-6）。
  */
 
-import { PRINT_SIZES, type PrintCopy, type PrintKind, type PrintSize } from '@m2office/shared';
+import { PRINT_LIMITS, PRINT_SIZES, type PrintCopy, type PrintKind, type PrintSize } from '@m2office/shared';
 import { readableColor, tint, wrapAt } from '../columns/cover.js';
 
 /** 塗り足し（mm）。 */
 export const BLEED = 3;
 
-/** 型の ID（段 1 は 12 種。第41.3節）。 */
+/** 型の ID（段 1 は 12 種。第41.3節。値札のシートは第41.18節）。 */
 export type PrintTemplateId =
   | 'band' | 'photo-top' | 'photo-frame' | 'split' | 'bold-center' | 'notice-plain'
-  | 'pop-price' | 'pop-ribbon' | 'pop-photo' | 'trifold' | 'bifold' | 'card';
+  | 'pop-price' | 'pop-ribbon' | 'pop-photo' | 'trifold' | 'bifold' | 'card' | 'price-sheet';
 
 /** 型の名前と、使う種類と、画像の枠を持つか。 */
 export const PRINT_TEMPLATES: Record<PrintTemplateId, { label: string; kinds: PrintKind[]; image: boolean }> = {
@@ -32,7 +32,26 @@ export const PRINT_TEMPLATES: Record<PrintTemplateId, { label: string; kinds: Pr
   trifold: { label: '三つ折り', kinds: ['brochure'], image: true },
   bifold: { label: '二つ折り', kinds: ['brochure'], image: true },
   card: { label: 'ショップカード', kinds: ['card'], image: false },
+  'price-sheet': { label: '値札のシート', kinds: ['tags'], image: false },
 };
+
+/** 値札の札の大きさ（名刺の大きさ）と、A4 の 1 枚の並び（2 列 × 5 段。第41.18節）。 */
+const TAG = { w: 91, h: 55, cols: 2, rows: 5 };
+
+/**
+ * 値札の文面（本文の 1 行が 1 品。「名前｜値段」）を読む（純粋な関数）。区切りが無ければ、行の全部を名前にする。
+ *
+ * @returns 品目ごとの名前と値段
+ */
+export function tagLines(body: string): { name: string; price: string }[] {
+  return body.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => {
+    const at = l.search(/[｜|]/);
+    return at < 0 ? { name: l, price: '' } : { name: l.slice(0, at).trim(), price: l.slice(at + 1).trim() };
+  });
+}
+
+/** 値札の 1 品を本文の 1 行にする（`tagLines` の逆）。 */
+export const tagLine = (name: string, price: string) => `${name.replace(/[｜|\n]/g, ' ').trim()}｜${price.replace(/[｜|\n]/g, ' ').trim()}`;
 
 /** 種類と大きさで使える型（はじめに案に出す順）。 */
 export function templatesFor(kind: PrintKind, size: PrintSize): PrintTemplateId[] {
@@ -341,6 +360,41 @@ export function layout(i: PrintLayoutInput): PrintPage[] {
       if (i.qr) parts.push(`<rect x="${w - pad - qr}" y="${h * 0.3}" width="${qr}" height="${qr}" fill="#ffffff"/><image href="${i.qr}" x="${w - pad - qr}" y="${h * 0.3}" width="${qr}" height="${qr}"/>`);
       parts.push(boxText(i.company.website, 'Web', pad, h * 0.865, w - pad * 2, h * 0.1, h * 0.05, h * 0.035, p.bandText, overflow, { anchor: 'middle' }).svg);
       return one(frame(w, h, p.bg, parts.join('')));
+    }
+    case 'price-sheet': {
+      // A4 に名刺の大きさの札を 2 列 × 5 段。切り取りの線は淡い破線。11 品目からは次のシート（第41.18節）
+      const tags = tagLines(c.body);
+      const per = PRINT_LIMITS.tagsPerSheet;
+      if (tags.length > PRINT_LIMITS.tagsMax) overflow.push('値札の数');
+      const sheets = Math.max(1, Math.min(Math.ceil(tags.length / per), PRINT_LIMITS.tagsMax / per));
+      const x0 = (w - TAG.w * TAG.cols) / 2;
+      const y0 = (h - TAG.h * TAG.rows) / 2;
+      const fill = i.palette === 1 ? tint(p.band, 0.9) : i.palette === 2 ? p.band : '#ffffff';
+      const ink = i.palette === 2 ? '#ffffff' : p.head;
+      const sub = i.palette === 2 ? tint(p.band, 0.75) : p.muted;
+      const u = TAG.h / 100;
+      return Array.from({ length: sheets }, (_, s) => {
+        const parts: string[] = [];
+        tags.slice(s * per, (s + 1) * per).forEach((t, k) => {
+          const x = x0 + (k % TAG.cols) * TAG.w;
+          const y = y0 + Math.floor(k / TAG.cols) * TAG.h;
+          const pad = u * 9;
+          parts.push(`<rect x="${x + u * 3}" y="${y + u * 3}" width="${TAG.w - u * 6}" height="${TAG.h - u * 6}" rx="${u * 5}" fill="${fill}" stroke="${p.accent}" stroke-width="${u * 1.2}"/>`);
+          if (c.sub) parts.push(boxText(c.sub, 'ひとこと', x + pad, y + pad, TAG.w - pad * 2, u * 13, u * 11, u * 7, i.palette === 2 ? '#ffffff' : p.accent, overflow, { weight: 700 }).svg);
+          const top = y + pad + (c.sub ? u * 15 : 0);
+          parts.push(boxText(t.name, '品目の名前', x + pad, top, TAG.w - pad * 2, u * (c.sub ? 32 : 40), u * 16 * i.headlineScale, u * 8, ink, overflow, { weight: 700, lineHeight: 1.25 }).svg);
+          // 金額は大きく、「（税込）」などは小さく右下に
+          const m = /^(.*?)\s*([（(][^）)]*[）)])$/.exec(t.price);
+          const [amount, tax] = m ? [m[1]!, m[2]!] : [t.price, ''];
+          parts.push(boxText(amount, '値段', x + pad, y + TAG.h - pad - u * 36, TAG.w - pad * 2, u * 27, u * 25, u * 12, ink, overflow, { weight: 700, anchor: 'end', lineHeight: 1.1 }).svg);
+          if (tax) parts.push(boxText(tax, '値段', x + TAG.w * 0.5, y + TAG.h - pad - u * 8, TAG.w * 0.5 - pad, u * 8, u * 7, u * 5, ink, overflow, { anchor: 'end', lineHeight: 1.1 }).svg);
+          if (c.note) parts.push(boxText(c.note, '注意書き', x + pad, y + TAG.h - pad - u * 8, TAG.w * 0.45, u * 8, u * 6.5, u * 4.5, sub, overflow).svg);
+        });
+        // 切り取りの線
+        for (let col = 0; col <= TAG.cols; col += 1) parts.push(`<line x1="${x0 + col * TAG.w}" y1="${y0 - 4}" x2="${x0 + col * TAG.w}" y2="${y0 + TAG.rows * TAG.h + 4}" stroke="#c8c8c8" stroke-width="0.15" stroke-dasharray="1.2 1.2"/>`);
+        for (let row = 0; row <= TAG.rows; row += 1) parts.push(`<line x1="${x0 - 4}" y1="${y0 + row * TAG.h}" x2="${x0 + TAG.cols * TAG.w + 4}" y2="${y0 + row * TAG.h}" stroke="#c8c8c8" stroke-width="0.15" stroke-dasharray="1.2 1.2"/>`);
+        return { svg: frame(w, h, '#ffffff', parts.join('')), overflow };
+      });
     }
     case 'trifold':
     case 'bifold': {

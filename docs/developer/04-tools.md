@@ -123,9 +123,11 @@
 | `members.rank` | write-internal | — | 会員のランクの境（直近 1 年の来店の回数）を見る・決める・自動に戻す（決めるのは管理者） |
 | `members.rewards` | write-internal | — | ポイントと交換できる特典を作る・直す・止める（管理者） |
 | `notification.send` | write-internal | — | 依頼した本人にだけお知らせを届けます。他の人には送りません |
+| `print.announce` | write-internal | — | 作った販促物の文面から、お知らせの作成の下書きを作ります（出すのは承認の後） |
 | `print.create` | write-internal | — | ポップ・チラシ・パンフレット・案内・ポスター・ショップカードの案を 3 つ作ります |
 | `print.remake` | write-internal | — | 前に作った販促物を元に、日付などを直した新しい物を作ります |
 | `print.revise` | write-internal | — | 作った販促物を、頼みのとおりに直します（新しい版にします） |
+| `print.signage` | write-internal | — | 作った販促物を、店頭サイネージのすべての画面に流します（止めることもできます） |
 | `sheets.append` | write-internal | `drive.file`（機密でない） | M2Office で作った表に行を足します |
 | `subsidies.mark` | write-internal | — | 補助金・助成金の候補を「気になる」か「見送り」にします |
 | `tasks.complete` | write-internal | `tasks`（機密） | ToDo を完了にします |
@@ -249,9 +251,11 @@
 | `members.rank` | `action`（必須）: show・set・auto、`silver`: シルバーになる直近 1 年の来店の回数、`gold`: ゴールドになる直近 1 年の来店の回数 |
 | `members.rewards` | `action`（必須）: list・create・update・stop、`name`: 特典の名前、`points`: 必要なポイント、`newName`: 新しい名前、`birthdayOnly`: 誕生月の会員だけが使える特典か、`minRank`: regular（全員）・silver（シルバー以上）・gold（ゴールドだけ） |
 | `notification.send` | `kind`: 種類（brief・run）、`title`（必須）: 題名、`body`（必須）: 本文 |
+| `print.announce` | `query`: 物の題名の言葉 |
 | `print.create` | `request`（必須）: 頼みの文、`kind`: 種類、`size`: 大きさ、`photoFileId`: 写真のファイルの ID |
 | `print.remake` | `query`（必須）: 前の物の題名の言葉、`instruction`: 直したいこと |
 | `print.revise` | `query`: 物の題名の言葉、`instruction`（必須）: 直したいこと、`photoFileId`: 写真のファイルの ID |
+| `print.signage` | `query`: 物の題名の言葉、`action`: start か stop |
 | `sheets.append` | `spreadsheetId`（必須）: スプレッドシートの ID、`rows`（必須）: 足す行の配列（各行は値の配列） |
 | `subsidies.mark` | `query`（必須）: 制度の名前の言葉、`status`（必須）: interested・skipped・new |
 | `tasks.complete` | `taskId`（必須）: ToDo の ID |

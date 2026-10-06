@@ -36,6 +36,7 @@ function brief(r: PrintDesignDetail) {
     path: printDesignPath(r.design.id), title: r.design.title, kind: PRINT_KIND_LABELS[r.design.kind], size: PRINT_SIZES[r.design.size].label,
     state: PRINT_STATE_LABELS[r.state], proposals: current ? 0 : r.versions.filter((v) => v.proposal).length,
     checks: (current ?? r.versions[0])?.checks.map((c) => c.message) ?? [],
+    signage: r.design.signage.state === 'on' ? `流している（${r.design.signage.screens.join('・')}）` : r.design.signage.state === 'waiting' ? '掲示の始まりから流す' : null,
   };
 }
 
@@ -63,7 +64,7 @@ export const printCreate: Tool = {
   risk: 'write-internal',
   activityLabel: '販促物の案を作っています',
   helpText: 'ポップ・チラシ・パンフレット・案内・ポスター・ショップカードの案を 3 つ作ります',
-  description: '販促物を作る。request は頼みの文のまま（用件・期間・値段など）。kind は pop・flyer・brochure・notice・poster・card（言われたときだけ）。size は A6・A5・A4・A3・A2・B5・B2・postcard・card・A4-3fold・A4-2fold（言われたときだけ）。photoFileId は渡された写真のファイルの ID（あれば）',
+  description: '販促物を作る。request は頼みの文のまま（用件・期間・値段など）。kind は pop・flyer・brochure・notice・poster・card・tags（値札。在庫の品目の名前と値段から A4 に 10 枚の札。言われたときだけ）。size は A6・A5・A4・A3・A2・B5・B2・postcard・card・A4-3fold・A4-2fold（言われたときだけ）。photoFileId は渡された写真のファイルの ID（あれば）',
   args: {
     properties: {
       request: { type: 'string', description: '頼みの文' },
@@ -176,5 +177,64 @@ export const printFind: Tool = {
   },
 };
 
+/**
+ * 店頭サイネージに流す・止める（「このチラシをサイネージに流して」「サイネージから外して」）。掲示の始まりより前なら、始まりから流す。
+ *
+ * @remarks 危険度 `write-internal`。会社の中の画面に出すだけで、社外には出さない（承認は挟まない。第41.18節）
+ */
+export const printSignage: Tool = {
+  name: 'print.signage',
+  risk: 'write-internal',
+  activityLabel: '販促物をサイネージに流しています',
+  helpText: '作った販促物を、店頭サイネージのすべての画面に流します（止めることもできます）',
+  description: '販促物を店頭サイネージに流す・止める。query は物の題名の言葉（空なら本人がいちばん新しく直した物）。action は start（流す）か stop（止める）',
+  args: {
+    properties: {
+      query: { type: 'string', description: '物の題名の言葉' },
+      action: { type: 'string', description: 'start か stop' },
+    },
+  },
+  async invoke(args, ctx) {
+    const service = await serviceOf(ctx);
+    if (!service) return UNAVAILABLE;
+    const d = await pick(service, ctx, str(args['query']));
+    if (!d || 'candidates' in d) return { available: false, reason: 'その販促物は見つかりません' };
+    if (str(args['action']) === 'stop') {
+      const e = await service.stopSignage(who(ctx), d.id);
+      return e ? { available: false, reason: e } : { available: true, stopped: d.title, path: printDesignPath(d.id) };
+    }
+    const r = await service.toSignage(who(ctx), d.id);
+    if ('error' in r) return { available: false, reason: r.error };
+    return { available: true, title: d.title, path: printDesignPath(d.id), ...(r.state === 'waiting' ? { waiting: `掲示の始まり（${d.postFrom}）から流します` } : { screens: r.screens }) };
+  },
+};
+
+/**
+ * お知らせの作成の下書きにする（「このチラシを Web のお知らせにも」）。出すのはお知らせの作成の承認の後。
+ *
+ * @remarks 危険度 `write-internal`。下書きを作るだけで、社外には出さない（第41.18節）
+ */
+export const printAnnounce: Tool = {
+  name: 'print.announce',
+  risk: 'write-internal',
+  activityLabel: '販促物からお知らせの下書きを作っています',
+  helpText: '作った販促物の文面から、お知らせの作成の下書きを作ります（出すのは承認の後）',
+  description: '販促物の文面から、お知らせの作成の下書きを作る。query は物の題名の言葉（空なら本人がいちばん新しく直した物）',
+  args: {
+    properties: {
+      query: { type: 'string', description: '物の題名の言葉' },
+    },
+  },
+  async invoke(args, ctx) {
+    const service = await serviceOf(ctx);
+    if (!service) return UNAVAILABLE;
+    const d = await pick(service, ctx, str(args['query']));
+    if (!d || 'candidates' in d) return { available: false, reason: 'その販促物は見つかりません' };
+    const r = await service.toAnnouncement(who(ctx), d.id);
+    if ('error' in r) return { available: false, reason: r.error };
+    return { available: true, from: d.title, path: `/announcements/${encodeURIComponent(r.announcementId)}`, note: '下書きを作りました。出す先と文を確かめてから、お知らせの画面で承認へ進めてください' };
+  },
+};
+
 /** 販促物の作成のツール。 */
-export const PRINT_DESIGN_TOOLS: Tool[] = [printCreate, printRevise, printRemake, printFind];
+export const PRINT_DESIGN_TOOLS: Tool[] = [printCreate, printRevise, printRemake, printFind, printSignage, printAnnounce];

@@ -3,16 +3,17 @@
  * 点検（曜日・連絡先）、書き出し（PNG・実寸と入稿用の PDF）、3 案（推論が使えないときも組む・頼みに無い値段を足さない・掲示の期間）、
  * 生成 AI の画像（人や文字が写れば使わない）、会話で直す（新しい版・言葉で直す）、文面を直す、前の版に戻す、作り直す、
  * 削除は作った人と管理者だけ、期間の見張り（1 回だけ・外した物と止めた人には知らせない）、ツール（使えない人には「使えない」）。
+ * 段 2 のつなぎ（第41.18節）: 値札のシート（在庫の品目から・頼みの行から）、店頭サイネージに流す（始まりを待つ・版が変われば差し替え・期間が終われば外す）、お知らせの下書き。
  */
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { PDFDocument } from 'pdf-lib';
-import { DEFAULT_TENANT_SETTINGS, PRINT_KIND_SIZES, printStateOf, type PrintKind, type TenantSettings } from '@m2office/shared';
+import { DEFAULT_TENANT_SETTINGS, PRINT_KIND_SIZES, printStateOf, type InventoryItem, type PrintKind, type TenantSettings } from '@m2office/shared';
 import {
   MemoryFileStore, MemoryPrintDesignStore, PRINT_DESIGN_TOOLS, PrintDesignService, contactChecks, fitText, layout, pagePng, printDesignsAccess, renderCover,
-  templatesFor, toPdf, weekdayChecks,
-  type LlmProvider, type Repository, type ToolContext,
+  templatesFor, toPdf, weekdayChecks, matchTagItems, parseTagRequest, tagLine, tagLines, tagPrice,
+  type AnnouncementSignage, type LlmProvider, type PrintAnnouncements, type PrintInventory, type Repository, type ToolContext,
 } from '../src/index.js';
 
 /** 2026-10-06（火）9:00（日本時間） */
@@ -43,7 +44,7 @@ function fakeLlm(checks: string[] = []): LlmProvider & { drawn: number } {
   return llm as never;
 }
 
-function setup(opts: { llm?: LlmProvider; settings?: Partial<TenantSettings> } = {}) {
+function setup(opts: { llm?: LlmProvider; settings?: Partial<TenantSettings>; signage?: AnnouncementSignage; announcements?: PrintAnnouncements; inventory?: PrintInventory } = {}) {
   let clock = NOW;
   let settings: TenantSettings = {
     ...DEFAULT_TENANT_SETTINGS,
@@ -74,7 +75,10 @@ function setup(opts: { llm?: LlmProvider; settings?: Partial<TenantSettings> } =
   const files = new MemoryFileStore();
   const store = new MemoryPrintDesignStore();
   const llm = opts.llm ?? stubLlm;
-  const service = new PrintDesignService({ store, repo, files, llmFor: async () => llm, now: () => clock });
+  const service = new PrintDesignService({
+    store, repo, files, llmFor: async () => llm, now: () => clock,
+    ...(opts.signage ? { signage: opts.signage } : {}), ...(opts.announcements ? { announcements: opts.announcements } : {}), ...(opts.inventory ? { inventory: opts.inventory } : {}),
+  });
   /** 本人が上げた写真。 */
   const upload = async (owner: string) => {
     const id = `f-${fileMeta.size + 1}`;
@@ -391,4 +395,204 @@ test('ツール: 使えない会社では「使えない」。作る・直す・
   s.setSettings({ printDesigns: { enabled: false } });
   assert.equal((await tool('print.find').invoke({}, ctx('u1')) as { available: boolean }).available, false);
   assert.equal(await access('t1', 'u1'), null);
+});
+
+/** 素材と流れを覚える店頭サイネージ。 */
+function fakeSignage(screens = [{ id: 's1', name: '入口' }, { id: 's2', name: 'レジ' }], enabled = true) {
+  const assets = new Map<string, { name: string; screens: string[] }>();
+  let seq = 0;
+  const sg: AnnouncementSignage & { assets: typeof assets } = {
+    assets,
+    enabled: async () => enabled,
+    screens: async () => screens,
+    addImage: async (_t, _u, png, name) => {
+      assert.ok(isPng(png));
+      const id = `a${++seq}`;
+      assets.set(id, { name, screens: [] });
+      return { assetId: id };
+    },
+    addToFlows: async (_t, _u, assetId, ids) => { assets.get(assetId)!.screens = ids; return ids.map((id) => screens.find((s) => s.id === id)!.name); },
+    removeAsset: async (_t, _u, assetId) => { assets.delete(assetId); },
+  };
+  return sg;
+}
+
+const item = (over: Partial<InventoryItem>): InventoryItem => ({
+  id: 'i', name: '', publicName: '', sku: '', category: '', unit: '個', packUnit: '', packSize: null, price: null, priceTaxIncluded: true,
+  photoFileId: null, lowThreshold: null, supplierId: null, leadDays: null, note: '', status: 'active', codes: [], updatedAt: '2026-10-01T00:00:00Z', ...over,
+});
+const ITEMS = [
+  item({ id: 'i1', name: 'モンブラン', category: 'ケーキ', price: 480 }),
+  item({ id: 'i2', name: 'チーズケーキ', category: 'ケーキ', price: 450, priceTaxIncluded: false }),
+  item({ id: 'i3', name: 'プリン', category: '冷菓', price: 320 }),
+  item({ id: 'i4', name: '旧ケーキ', category: 'ケーキ', price: 400, status: 'stopped' }),
+  item({ id: 'i5', name: '新作タルト', publicName: '季節のタルト', category: 'ケーキ', price: null }),
+];
+
+test('値札の文面: 1 行 1 品の読み書き、品目の選び方、頼みの行の読み方、値段の字', () => {
+  assert.deepEqual(tagLines('モンブラン｜480円\nプリン|320円\n名前だけ'), [{ name: 'モンブラン', price: '480円' }, { name: 'プリン', price: '320円' }, { name: '名前だけ', price: '' }]);
+  assert.equal(tagLine('A｜B', '1円'), 'A B｜1円');
+  assert.equal(tagPrice({ price: 1280, priceTaxIncluded: true }), '1,280円（税込）');
+  assert.equal(tagPrice({ price: 450, priceTaxIncluded: false }), '450円（税抜）');
+  assert.equal(tagPrice({ price: null, priceTaxIncluded: true }), '');
+  // 名前が頼みに含まれる品目を先に。止めた品目は除く
+  assert.deepEqual(matchTagItems(ITEMS, 'モンブランとプリンの値札').map((i) => i.id), ['i3', 'i1']);
+  // 名前が無ければ、言葉を分類・名前から探す
+  assert.deepEqual(matchTagItems(ITEMS, '在庫のケーキの値札を作って').map((i) => i.id).sort(), ['i1', 'i2', 'i5']);
+  // 「全部」は値段のある品目すべて
+  assert.deepEqual(matchTagItems(ITEMS, '全部の値札').map((i) => i.id).sort(), ['i1', 'i2', 'i3']);
+  assert.deepEqual(parseTagRequest('モンブラン 480 円、プリン：1,200円の値札'), [{ name: 'モンブラン', price: '480円' }, { name: 'プリン', price: '1,200円' }]);
+  // 名前の中の「の」は残し、頭の「値札の」だけを外す
+  assert.deepEqual(parseTagRequest('値札の栗のモンブラン 480 円'), [{ name: '栗のモンブラン', price: '480円' }]);
+  // 10 品ごとに 1 枚のシート
+  const body = Array.from({ length: 12 }, (_, k) => tagLine(`品${k}`, '100円')).join('\n');
+  const pages = layout({ size: 'A4', template: 'price-sheet', color: '#1f8a80', palette: 0, headlineScale: 1, copy: { headline: '', sub: '', body, period: '', price: '', note: '', qrUrl: '' }, image: null, logo: null, qr: null, company: COMPANY });
+  assert.equal(pages.length, 2);
+});
+
+test('値札: 在庫管理を使える人は品目から、使えなければ頼みの行から作る。値段の無い品目に印を付ける', async () => {
+  const inventory: PrintInventory = { access: async (_t, u) => u === 'u1', items: async () => ITEMS };
+  const s = setup({ inventory });
+  const r = await s.service.create(u1, { request: '在庫のケーキの値札を作って' });
+  assert.ok(!('error' in r));
+  assert.equal(r.design.kind, 'tags');
+  assert.equal(r.design.size, 'A4');
+  assert.equal(r.versions.length, 3);
+  assert.deepEqual(r.versions.map((v) => v.palette), [0, 1, 2]);
+  assert.ok(r.versions.every((v) => v.template === 'price-sheet'));
+  assert.match(r.versions[0]!.copy.body, /季節のタルト｜/);
+  assert.match(r.versions[0]!.copy.body, /チーズケーキ｜450円（税抜）/);
+  assert.ok(r.versions[0]!.checks.some((c) => c.kind === 'price' && c.message.includes('季節のタルト')));
+  assert.match(r.design.title, /^値札（/);
+  // 在庫管理を使えない人は、頼みの行から
+  const p = await s.service.create(u2, { request: 'モンブラン 480 円、プリン 320 円の値札' });
+  assert.ok(!('error' in p));
+  assert.equal(p.versions[0]!.copy.body, 'モンブラン｜480円\nプリン｜320円');
+  assert.ok('error' in (await s.service.create(u2, { request: '値札を作って' })));
+  assert.ok('error' in (await s.service.create(u1, { request: '宇宙船の値札', kind: 'tags' })));
+  // 値札はお知らせにしない
+  const ann = setup({ inventory, announcements: { access: async () => true, draft: async () => ({ id: 'ann-1' }) } });
+  const t = await ann.service.create(u1, { request: 'モンブランの値札' });
+  assert.ok(!('error' in t));
+  assert.match((await ann.service.toAnnouncement(u1, t.design.id) as { error: string }).error, /値札/);
+});
+
+test('サイネージ: 案を選んでから、すべての画面に流す。版が変われば差し替え、外した・削除したら外す', async () => {
+  const signage = fakeSignage();
+  const s = setup({ signage });
+  const r = await s.service.create(u1, { request: 'チラシ' });
+  assert.ok(!('error' in r));
+  assert.match((await s.service.toSignage(u1, r.design.id) as { error: string }).error, /案を 1 つ選んで/);
+  await s.service.choose(u1, r.design.id, r.versions[0]!.id);
+  const on = await s.service.toSignage(u1, r.design.id);
+  assert.deepEqual(on, { state: 'on', screens: ['入口', 'レジ'] });
+  assert.equal(signage.assets.size, 1);
+  const first = [...signage.assets.keys()][0]!;
+  assert.deepEqual(signage.assets.get(first)!.screens, ['s1', 's2']);
+  let d = (await s.service.get(u1, r.design.id))!.design;
+  assert.equal(d.signage.state, 'on');
+  assert.ok(!('signageAssetId' in d));
+  // 直すと、流している画像を差し替える
+  await s.service.revise(u1, r.design.id, '見出しをもっと大きく');
+  assert.equal(signage.assets.size, 1);
+  assert.ok(!signage.assets.has(first));
+  // 外したら、サイネージからも外す
+  await s.service.setPost(u1, r.design.id, { postFrom: '2026-10-01', postTo: '2026-10-31' });
+  await s.service.markRemoved(u1, r.design.id);
+  assert.equal(signage.assets.size, 0);
+  d = (await s.service.get(u1, r.design.id))!.design;
+  assert.equal(d.signage.state, 'none');
+  assert.match((await s.service.toSignage(u1, r.design.id) as { error: string }).error, /期間が終わって/);
+  // 止める・削除
+  const b = await s.service.create(u1, { request: 'ポスター', kind: 'poster' });
+  assert.ok(!('error' in b));
+  await s.service.choose(u1, b.design.id, b.versions[0]!.id);
+  await s.service.toSignage(u1, b.design.id);
+  assert.equal(await s.service.stopSignage(u1, b.design.id), null);
+  assert.equal(signage.assets.size, 0);
+  assert.match((await s.service.stopSignage(u1, b.design.id))!, /流していません/);
+  await s.service.toSignage(u1, b.design.id);
+  assert.equal(await s.service.remove(u1, b.design.id), null);
+  assert.equal(signage.assets.size, 0);
+  assert.ok(s.audits.some((a) => a.action === 'print.signage') && s.audits.some((a) => a.action === 'print.signage.stop'));
+  // 画面が無い・サイネージを使っていない会社では流さない
+  for (const sg of [fakeSignage([]), fakeSignage(undefined, false)]) {
+    const t = setup({ signage: sg });
+    const c = await t.service.create(u1, { request: 'チラシ' });
+    assert.ok(!('error' in c));
+    await t.service.choose(u1, c.design.id, c.versions[0]!.id);
+    assert.match((await t.service.toSignage(u1, c.design.id) as { error: string }).error, /画面が登録されていません/);
+    assert.deepEqual(await t.service.links(u1), { signage: false, announcements: false });
+  }
+});
+
+test('サイネージ: 掲示の始まりより前なら待ち、見張りが始まりの日に流し、期間が終われば外して知らせに添える', async () => {
+  const signage = fakeSignage();
+  const s = setup({ signage });
+  const r = await s.service.create(u1, { request: '秋祭りのチラシ' });
+  assert.ok(!('error' in r));
+  await s.service.choose(u1, r.design.id, r.versions[0]!.id);
+  await s.service.setPost(u1, r.design.id, { postFrom: '2026-10-10', postTo: '2026-10-12' });
+  assert.deepEqual(await s.service.toSignage(u1, r.design.id), { state: 'waiting', screens: [] });
+  assert.equal(signage.assets.size, 0);
+  await s.service.tick();
+  assert.equal(signage.assets.size, 0);
+  s.setClock(new Date('2026-10-10T00:00:00Z'));
+  await s.service.tick();
+  assert.equal(signage.assets.size, 1);
+  assert.equal((await s.service.get(u1, r.design.id))!.design.signage.state, 'on');
+  s.setClock(new Date('2026-10-13T00:00:00Z'));
+  assert.equal(await s.service.tick(), 1);
+  assert.equal(signage.assets.size, 0);
+  assert.equal((await s.service.get(u1, r.design.id))!.design.signage.state, 'none');
+  assert.match((s.notifications[0] as unknown as { body: string }).body, /サイネージからも外しました/);
+  // 切った会社でも、流している物は期間が終われば外す
+  const t = setup({ signage });
+  const c = await t.service.create(u1, { request: 'チラシ' });
+  assert.ok(!('error' in c));
+  await t.service.choose(u1, c.design.id, c.versions[0]!.id);
+  await t.service.toSignage(u1, c.design.id);
+  await t.service.setPost(u1, c.design.id, { postTo: '2026-10-05' });
+  t.setSettings({ printDesigns: { enabled: false } });
+  assert.equal(await t.service.tick(), 0);
+  assert.equal((await t.service.get(u1, c.design.id))!.design.signage.state, 'none');
+});
+
+test('お知らせにする: 選んだ版の文面と掲示の期間で下書きを作る（使える人だけ）', async () => {
+  const asked: string[] = [];
+  const announcements: PrintAnnouncements = { access: async (_t, u) => u === 'u1', draft: async (_w, req) => { asked.push(req); return { id: 'ann-1' }; } };
+  const s = setup({ announcements });
+  const r = await s.service.create(u1, { request: '秋のセールのチラシ。全品 10% オフ' });
+  assert.ok(!('error' in r));
+  await s.service.editCopy(u1, r.design.id, { price: '全品 10% オフ', period: '10/10（土）〜10/20（火）' });
+  await s.service.setPost(u1, r.design.id, { postFrom: '2026-10-10', postTo: '2026-10-20' });
+  assert.deepEqual(await s.service.toAnnouncement(u1, r.design.id), { announcementId: 'ann-1' });
+  assert.match(asked[0]!, /チラシ「秋のセール」/);
+  assert.match(asked[0]!, /値段: 全品 10% オフ/);
+  assert.match(asked[0]!, /掲示の期間: 2026-10-10〜2026-10-20/);
+  assert.match(asked[0]!, /足さないで/);
+  assert.match((await s.service.toAnnouncement(u2, r.design.id) as { error: string }).error, /使えません/);
+  assert.ok(s.audits.some((a) => a.action === 'print.announce'));
+  assert.deepEqual(await s.service.links(u1), { signage: false, announcements: true });
+});
+
+test('ツール: サイネージに流す・止める、お知らせの下書きにする', async () => {
+  const signage = fakeSignage();
+  const s = setup({ signage, announcements: { access: async () => true, draft: async () => ({ id: 'ann-9' }) } });
+  const access = printDesignsAccess(s.repo);
+  const ctx = { tenantId: 't1', userId: 'u1', printDesigns: { service: s.service, access: () => access('t1', 'u1') } } as unknown as ToolContext;
+  const tool = (name: string) => PRINT_DESIGN_TOOLS.find((t) => t.name === name)!;
+  const r = await s.service.create(u1, { request: '冬のセールのチラシ' });
+  assert.ok(!('error' in r));
+  assert.equal((await tool('print.signage').invoke({}, ctx) as { available: boolean; reason: string }).available, false);
+  await s.service.choose(u1, r.design.id, r.versions[0]!.id);
+  const on = await tool('print.signage').invoke({ query: '冬' }, ctx) as { available: boolean; screens: string[] };
+  assert.equal(on.available, true);
+  assert.deepEqual(on.screens, ['入口', 'レジ']);
+  const off = await tool('print.signage').invoke({ query: '冬', action: 'stop' }, ctx) as { available: boolean };
+  assert.equal(off.available, true);
+  assert.equal(signage.assets.size, 0);
+  const ann = await tool('print.announce').invoke({ query: '冬' }, ctx) as { available: boolean; path: string };
+  assert.equal(ann.available, true);
+  assert.equal(ann.path, '/announcements/ann-9');
 });
