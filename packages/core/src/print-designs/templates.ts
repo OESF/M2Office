@@ -193,11 +193,16 @@ function frame(w: number, h: number, bg: string, body: string): string {
 }
 
 /**
- * 組み版をする（純粋な関数）。パンフレットは外側と内側の 2 面、ほかは 1 面。
+ * 組み版をする（純粋な関数）。パンフレットは外側と内側の 2 面、値札は 10 品ごとに 1 面、何枚も作る物は 1 枚ごとに 1 面、ほかは 1 面。
  *
  * @returns 面ごとの SVG（`viewBox` は仕上がりの寸法。塗り足しは外へ 3mm）
  */
 export function layout(i: PrintLayoutInput): PrintPage[] {
+  // 同じ型で何枚も: 1 枚ごとに見出し・ひとこと・値段を差し替えて組む（第41.19.1節。パンフレットと値札は対象外）
+  const pieces = i.copy.pieces ?? [];
+  if (pieces.length && i.template !== 'trifold' && i.template !== 'bifold' && i.template !== 'price-sheet') {
+    return pieces.flatMap((p) => layout({ ...i, copy: { ...i.copy, ...p, pieces: [] } }));
+  }
   const { w, h } = PRINT_SIZES[i.size];
   const p = paletteOf(i.color, i.palette);
   const c = i.copy;

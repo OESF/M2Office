@@ -318,6 +318,10 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `PUT /v1/admin/extensions/members/settings` | 管理者: 来店のポイント・購入の率・有効期限・LIFF ID・LINE ログインのチャネル ID |
 | `GET` ／ `POST /v1/print-designs` ／ `GET` ／ `PATCH` ／ `DELETE /v1/print-designs/:id` | 販促物の作成（仕様書 第41章）: 一覧（掲示の状態つき）／ 作る（`request`・`kind`・`size`・`photoFileId`。3 案）／ 1 つと版 ／ 題名・掲示の期間・置き場所 ／ 削除（作った人と管理者） |
 | `POST /v1/print-designs/:id/choose` ／ `revise` ／ `remake` ／ `removed`、`PATCH /v1/print-designs/:id/copy` | 案を選ぶ・前の版に戻す（`versionId`）／ 会話で直す（`instruction`・`photoFileId`）／ 作り直す（新しい物）／ 外した ／ 文面を直す（新しい版） |
+| `GET /v1/print-designs/drive-picker` | 「ドライブから」の選ぶ画面の材料（`drive.file` だけに絞ったトークン・API キー・プロジェクトの番号。見本の会社は見本の写真の一覧。第41.19.2節）。作る・直すは `driveFileId` で選んだ写真を渡す |
+| `POST /v1/print-designs/:id/canva` ／ `POST /v1/print-designs/:id/canva/pull` | Canva で仕上げる（選んだ版の PDF を本人の Canva に取り込み、編集の画面の URL）／ Canva から戻す（新しい版。第41.19.3節） |
+| `GET` ／ `DELETE /v1/me/canva`、`POST /v1/me/canva/connect`、`GET /v1/oauth/canva/callback` | 本人の Canva の接続（状態 ／ 切断 ／ つなぐ（PKCE）／ Canva からの戻り）。運営が設定していなければ `configured: false` |
+| `PUT /v1/admin/connections/google/picker` | 管理者: ドライブの写真を選ぶ画面（Google Picker）の API キー（空なら消す） |
 | `POST` ／ `DELETE /v1/print-designs/:id/signage`、`POST /v1/print-designs/:id/announcement` | 店頭サイネージに流す（掲示の始まりより前なら始まりから）／ 止める ／ お知らせの作成の下書きにする（第41.18節。1 つの物を返すときに `links` でつなげる先を使えるかを添える） |
 | `GET /v1/print-designs/:id/thumb` ／ `GET /v1/print-designs/:id/versions/:vid/preview\|png\|pdf\|bleed` | 一覧の小さな画像 ／ 版の書き出し（案の画像・PNG・実寸の PDF・入稿用の PDF。`page` はパンフレットの面） |
 | `GET /v1/competitors` | 競合の分析（仕様書 第36.18節）: 全体（自社の像・競合・動いている作業・最後の作業・地図の注意）。地図で見つけた競合の名前と Web サイトはここで引き直す。使えない会社と利用範囲の外の人には、`/v1/competitors` のどの口も 403 |

@@ -841,7 +841,7 @@ export interface ConnectionSettings {
     effective: 'tenant' | 'platform' | 'none'; platformKeyAvailable: boolean;
   };
   google: {
-    clientId: string; secretRegistered: boolean; updatedAt: string | null; redirectUri: string;
+    clientId: string; secretRegistered: boolean; pickerKeyRegistered?: boolean; updatedAt: string | null; redirectUri: string;
     requiredScopes: { scope: string; level: string; label: string }[];
     workspaceSource: string;
     users: { userId: string; name: string; email: string; connected: boolean; googleEmail: string | null; connectedAt: string | null; missing: string[] }[];
@@ -1410,18 +1410,20 @@ export const api = {
   /** 販促物の作成（内蔵の拡張。仕様書 第41章）。 */
   printDesigns: {
     /** 一覧（新しく直した順。掲示の状態つき）と、今日と、本人が管理者か。 */
-    list: () => call<{ items: (PrintDesign & { state: PrintState })[]; today: string; admin: boolean }>('/print-designs'),
+    list: () => call<{ items: (PrintDesign & { state: PrintState })[]; today: string; admin: boolean; drive: boolean }>('/print-designs'),
+    /** 「ドライブから」の選ぶ画面の材料（第41.19.2節）。 */
+    drivePicker: () => call<{ kind: 'google'; apiKey: string; appId: string; accessToken: string } | { kind: 'mock'; items: { id: string; name: string }[] }>('/print-designs/drive-picker'),
     get: (id: string) => call<PrintDesignDetailView>(`/print-designs/${encodeURIComponent(id)}`),
     /** 作る（3 案）。写真は先に `uploadFile` で上げた ID。 */
-    create: (input: { request: string; kind?: PrintKind; size?: PrintSize; photoFileId?: string }) =>
+    create: (input: { request: string; kind?: PrintKind; size?: PrintSize; photoFileId?: string; driveFileId?: string }) =>
       call<PrintDesignDetailView>('/print-designs', { method: 'POST', body: JSON.stringify(input) }),
     /** 案を選ぶ・前の版に戻す。 */
     choose: (id: string, versionId: string) => call<{ ok: true }>(`/print-designs/${encodeURIComponent(id)}/choose`, { method: 'POST', body: JSON.stringify({ versionId }) }),
     /** 会話で直す（新しい版にする）。 */
-    revise: (id: string, instruction: string, photoFileId?: string) =>
-      call<PrintDesignDetailView>(`/print-designs/${encodeURIComponent(id)}/revise`, { method: 'POST', body: JSON.stringify({ instruction, ...(photoFileId ? { photoFileId } : {}) }) }),
+    revise: (id: string, instruction: string, photo?: { photoFileId?: string; driveFileId?: string }) =>
+      call<PrintDesignDetailView>(`/print-designs/${encodeURIComponent(id)}/revise`, { method: 'POST', body: JSON.stringify({ instruction, ...(photo ?? {}) }) }),
     /** 文面をその場で直す（新しい版にする）。 */
-    editCopy: (id: string, patch: Record<string, string>) => call<PrintDesignDetailView>(`/print-designs/${encodeURIComponent(id)}/copy`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    editCopy: (id: string, patch: Record<string, unknown>) => call<PrintDesignDetailView>(`/print-designs/${encodeURIComponent(id)}/copy`, { method: 'PATCH', body: JSON.stringify(patch) }),
     /** 題名・掲示の期間・置き場所を直す。 */
     setPost: (id: string, input: { title?: string; postFrom?: string | null; postTo?: string | null; place?: string }) =>
       call<{ ok: true }>(`/print-designs/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(input) }),
@@ -1431,6 +1433,10 @@ export const api = {
     /** 店頭サイネージに流す（掲示の始まりより前なら、始まりから流す。第41.18節）。 */
     toSignage: (id: string) => call<{ state: 'on' | 'waiting'; screens: string[] }>(`/print-designs/${encodeURIComponent(id)}/signage`, { method: 'POST', body: '{}' }),
     stopSignage: (id: string) => call<{ ok: true }>(`/print-designs/${encodeURIComponent(id)}/signage`, { method: 'DELETE' }),
+    /** Canva で仕上げる（編集の画面の URL を返す。第41.19.3節）。 */
+    openInCanva: (id: string) => call<{ editUrl: string }>(`/print-designs/${encodeURIComponent(id)}/canva`, { method: 'POST', body: '{}' }),
+    /** Canva から戻す（新しい版にする）。 */
+    pullFromCanva: (id: string) => call<PrintDesignDetailView>(`/print-designs/${encodeURIComponent(id)}/canva/pull`, { method: 'POST', body: '{}' }),
     /** お知らせの作成の下書きにする（出すのはお知らせの作成の承認の後）。 */
     toAnnouncement: (id: string) => call<{ announcementId: string }>(`/print-designs/${encodeURIComponent(id)}/announcement`, { method: 'POST', body: '{}' }),
     /** 一覧の小さな画像の URL（`v` は直した日時。変われば読み直す）。 */
@@ -2061,6 +2067,8 @@ export const api = {
      *
      * @returns 判定と、保存のボタンの横に出す文
      */
+    /** ドライブの写真を選ぶ画面（Google Picker）の API キー。空なら消す（仕様書 第41.19.2節）。 */
+    saveGooglePickerKey: (apiKey: string) => call<{ ok: true }>('/admin/connections/google/picker', { method: 'PUT', body: JSON.stringify({ apiKey }) }),
     saveGoogleClient: (v: { clientId: string; clientSecret?: string }) =>
       call<{ ok: true; verdict: GoogleClientVerdict; message: string; users: number; stoppedRuns: number }>(
         '/admin/connections/google', { method: 'PUT', body: JSON.stringify(v) },
@@ -2329,6 +2337,10 @@ export const api = {
   agents: () => call<{ agents: AgentSummary[] }>('/agents'),
   /** 個人設定「サービスとの接続」（仕様書 第6.5.9節）。 */
   myConnections: () => call<{ items: MyConnectionView[] }>('/me/connections'),
+  /** 本人の Canva の接続（仕様書 第41.19.3節）。運営が設定していなければ `configured` が偽。 */
+  myCanva: () => call<{ configured: boolean; connected: boolean; connectedAt: string | null }>('/me/canva'),
+  connectCanva: () => call<{ url: string }>('/me/canva/connect', { method: 'POST', body: '{}' }),
+  disconnectCanva: () => call<{ ok: true }>('/me/canva', { method: 'DELETE' }),
   /** 相手のサービスの許可の画面の URL を受け取る（画面を移す）。 */
   connectConnection: (id: string) => call<{ url: string }>(`/me/connections/${encodeURIComponent(id)}/connect`, { method: 'POST' }),
   /** 取り消すと止まるもの。 */

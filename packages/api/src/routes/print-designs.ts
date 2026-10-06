@@ -43,13 +43,23 @@ export function printDesignsRoute(deps: AppDeps) {
   });
   app.use('/:id/*', async (c, next) => (ID.test(c.req.param('id')) ? next() : c.json({ error: '販促物が見つかりません' }, 404)));
 
-  /** 一覧（新しく直した順。掲示の状態つき）と、本人が管理者か。 */
-  app.get('/', async (c) => c.json({ items: await service.list(who(c)), today: service.today(), admin: c.get('ctx').user.roles.includes('admin') }));
+  /** 一覧（新しく直した順。掲示の状態つき）と、本人が管理者か、「ドライブから」を使えるか（第41.19.2節）。 */
+  app.get('/', async (c) => c.json({
+    items: await service.list(who(c)), today: service.today(), admin: c.get('ctx').user.roles.includes('admin'),
+    drive: !!(await service.deps.drive?.available(who(c)).catch(() => false)),
+  }));
 
-  /** 作る（3 案）。`request`（頼みの文）・`kind`・`size`・`photoFileId`（本人が上げた写真）。 */
+  /** 「ドライブから」の選ぶ画面の材料（`drive.file` だけに絞ったトークン。見本の会社は見本の写真の一覧。第41.19.2節）。 */
+  app.get('/drive-picker', async (c) => {
+    if (!service.deps.drive) return c.json({ error: 'ドライブの写真は使えません' }, 404);
+    const r = await service.deps.drive.picker(who(c));
+    return 'error' in r ? c.json(r, 400) : c.json(r, 200, { 'cache-control': 'no-store' });
+  });
+
+  /** 作る（3 案）。`request`（頼みの文）・`kind`・`size`・`photoFileId`（本人が上げた写真）・`driveFileId`（本人がドライブで選んだ写真）。 */
   app.post('/', async (c) => {
     const b = await body(c);
-    return result(c, await service.create(who(c), { request: b['request'], kind: b['kind'], size: b['size'], photoFileId: b['photoFileId'] }), 201);
+    return result(c, await service.create(who(c), { request: b['request'], kind: b['kind'], size: b['size'], photoFileId: b['photoFileId'], driveFileId: b['driveFileId'] }), 201);
   });
 
   /** 1 つの物と版と、つなげる先を使えるか（第41.18節）。 */
@@ -64,6 +74,12 @@ export function printDesignsRoute(deps: AppDeps) {
   /** 店頭サイネージから外す。 */
   app.delete('/:id/signage', async (c) => problem(c, await service.stopSignage(who(c), c.req.param('id'))));
 
+  /** Canva で仕上げる（選んだ版の PDF を本人の Canva に取り込み、編集の画面の URL を返す。第41.19.3節）。 */
+  app.post('/:id/canva', async (c) => result(c, await service.openInCanva(who(c), c.req.param('id'))));
+
+  /** Canva から戻す（Canva のデザインを書き出し、新しい版にする）。 */
+  app.post('/:id/canva/pull', async (c) => result(c, await service.pullFromCanva(who(c), c.req.param('id'))));
+
   /** お知らせの作成の下書きにする（出すのはお知らせの作成の承認の後）。 */
   app.post('/:id/announcement', async (c) => result(c, await service.toAnnouncement(who(c), c.req.param('id')), 201));
 
@@ -73,10 +89,10 @@ export function printDesignsRoute(deps: AppDeps) {
     return problem(c, await service.choose(who(c), c.req.param('id'), typeof b['versionId'] === 'string' ? b['versionId'] : ''));
   });
 
-  /** 会話で直す（`instruction`・`photoFileId`）。新しい版にする。 */
+  /** 会話で直す（`instruction`・`photoFileId`・`driveFileId`）。新しい版にする。 */
   app.post('/:id/revise', async (c) => {
     const b = await body(c);
-    return result(c, await service.revise(who(c), c.req.param('id'), b['instruction'], b['photoFileId']));
+    return result(c, await service.revise(who(c), c.req.param('id'), b['instruction'], b['photoFileId'], b['driveFileId']));
   });
 
   /** 文面をその場で直す（`headline`・`sub`・`body`・`period`・`price`・`note`・`qrUrl`）。新しい版にする。 */
@@ -107,13 +123,14 @@ export function printDesignsRoute(deps: AppDeps) {
     return new Response(f.bytes as unknown as ArrayBuffer, { headers: { 'content-type': f.mime, 'cache-control': 'private, max-age=300' } });
   });
 
-  /** 書き出す（`preview`・`png`・`pdf`・`bleed`。`page` はパンフレットの面と値札のシートの何枚目か）。 */
+  /** 書き出す（`preview`・`png`・`pdf`・`bleed`。`page` はパンフレットの面・値札のシート・何枚も作る物の何枚目か）。 */
   app.get('/:id/versions/:vid/:kind', async (c) => {
     const kind = c.req.param('kind') as PrintExport;
     if (!EXPORTS.includes(kind) || !ID.test(c.req.param('vid'))) return c.json({ error: '書き出しの種類が違います' }, 400);
-    const page = Math.max(0, Math.min(2, Number(c.req.query('page') ?? 0) || 0));
+    const page = Math.max(0, Math.min(9, Number(c.req.query('page') ?? 0) || 0));
     const f = await service.export(who(c), c.req.param('id'), c.req.param('vid'), kind, page);
     if (!f) return c.json({ error: '販促物が見つかりません' }, 404);
+    if ('error' in f) return c.json(f, 400);
     const download = kind === 'pdf' || kind === 'bleed' || c.req.query('download') === '1';
     return new Response(f.bytes as unknown as ArrayBuffer, {
       headers: {

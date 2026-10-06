@@ -6696,6 +6696,24 @@ console.log('\n■ 82. 販促物の作成（入り切り・3 案・選ぶ・会�
       ? ok('頼みの「名前 480 円」の行から、値札のシートを 3 案作る（在庫管理を使っていない会社）') : ng('値札を作れない', JSON.stringify(tags.body));
     const tagPdf = await bytesOf(`/v1/print-designs/${tags.body.design?.id}/versions/${tags.body.versions?.[0]?.id}/pdf`);
     isPdf(tagPdf.bytes) ? ok('値札のシートを PDF に書き出せる') : ng('値札を書き出せない', String(tagPdf.status));
+    // 段 2 の残り（第41.19節）: 何枚も・ドライブの写真（見本）・Canva を設定していない会社
+    const many = await call('a', '/v1/print-designs', { method: 'POST', body: JSON.stringify({ request: 'スモークのポップを 3 枚。モンブラン 480 円、プリン 320 円、タルト 520 円' }) }, 'member');
+    if (many.body.design) made.push(many.body.design.id);
+    const third = many.body.versions ? await bytesOf(`/v1/print-designs/${many.body.design.id}/versions/${many.body.versions[0].id}/preview?page=2`) : { status: 0, bytes: new Uint8Array() };
+    many.status === 201 && many.body.versions?.[0]?.copy.pieces?.length === 3 && third.status === 200 && third.bytes[0] === 0x89
+      ? ok('「3 枚。名前 値段」で、同じ型の 1 枚ずつの面を持つ物を作る（3 枚目の面も出せる）') : ng('何枚も作れない', JSON.stringify({ s: many.status, p: many.body.versions?.[0]?.copy.pieces }));
+    const list2b = await call('a', '/v1/print-designs', {}, 'member');
+    const picker = await call('a', '/v1/print-designs/drive-picker', {}, 'member');
+    const photo = picker.body.items?.[0];
+    const fromDrive = photo ? await call('a', '/v1/print-designs', { method: 'POST', body: JSON.stringify({ request: 'スモークのドライブの写真のポップ', driveFileId: photo.id }) }, 'member') : { status: 0, body: {} };
+    if (fromDrive.body.design) made.push(fromDrive.body.design.id);
+    const badDrive = await call('a', '/v1/print-designs', { method: 'POST', body: JSON.stringify({ request: 'ポップ', driveFileId: 'mock-file-t-alpha-1' }) }, 'member');
+    list2b.body.drive === true && picker.body.kind === 'mock' && fromDrive.status === 201 && fromDrive.body.versions?.every((v) => v.image === 'photo') && badDrive.status === 400
+      ? ok('見本の会社では、見本のドライブの写真を選んで使える（写真でないファイルは断る）') : ng('ドライブの写真が違う', JSON.stringify({ d: list2b.body.drive, p: picker.body, f: fromDrive.status, b: badDrive.status }));
+    const canvaMe = await call('a', '/v1/me/canva', {}, 'member');
+    const canvaOpen = await call('a', `/v1/print-designs/${made[0]}/canva`, { method: 'POST', body: '{}' }, 'member');
+    canvaMe.body.configured === false && canvaOpen.status === 403
+      ? ok('Canva を設定していない配備では、Canva のことを出さず、取り込みも断る') : ng('Canva の扱いが違う', JSON.stringify({ me: canvaMe.body, o: canvaOpen.status }));
     const detail = await call('a', `/v1/print-designs/${made[0]}`, {}, 'member');
     const noScreen = await call('a', `/v1/print-designs/${made[0]}/signage`, { method: 'POST', body: '{}' }, 'member');
     detail.body.links?.signage === false && noScreen.status === 400 && /画面が登録されていません/.test(noScreen.body.error ?? '')

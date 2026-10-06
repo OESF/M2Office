@@ -63,6 +63,8 @@ src/print-designs/ 販促物の作成（内蔵の拡張。第41章の段 1）。
                  置き場（store.ts）、処理（service.ts。3 案・会話で直す・文面を直す・作り直す・書き出し・掲示の期間の見張り）、
                  ツール（tools.ts。print.create・revise・remake・find・signage・announce）、付属の業務「販促物の作成」（agents.ts）。
                  段 2 のつなぎ（第41.18節）: 店頭サイネージに流す・外す、お知らせの下書き、在庫の品目から値札のシート（templates.ts の price-sheet）。
+                 段 2 の残り（第41.19節）: 同じ型で何枚も（文面の pieces）・特典のポップ・ドライブの写真（PrintDrive）、
+                 Canva とのつなぎ（canva.ts。本物の口・見本・本人ごとの接続の置き場・CanvaService）。
 src/cards/       名刺管理（内蔵の拡張。第27章）。置き場（自分だけの名刺は持ち主でも行を絞る）、読み取り（read.ts。写っている名刺ごとに項目・向き・四隅。
                  四隅は文字の向きに合わせて並べ直す orderCorners。1 枚の写真に 10 枚まで）、同じ人の見分け（identity.ts）、
                  表（CSV・Excel）の取り込みと書き出し（table.ts。見出しはよくある言い方と推論で読む）、

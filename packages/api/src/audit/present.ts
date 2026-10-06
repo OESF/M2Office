@@ -55,6 +55,8 @@ const ACTION_LABELS: Record<string, string> = {
   'connection.google.disconnect': 'Google との接続を取り消した',
   'connection.google.lost': 'Google の側で許可が外されたため接続を消した',
   'connection.google.update': 'Google の接続の設定を変えた',
+  'connection.google.picker': 'ドライブの写真を選ぶ画面の API キーを登録した',
+  'connection.google.picker_delete': 'ドライブの写真を選ぶ画面の API キーを消した',
   'connection.google.update_rejected': 'Google の接続の設定が確かめで断られた',
   'connection.google.delete': 'Google の接続の設定を消した',
   'connection.gemini.update': 'Gemini の設定を変えた',
@@ -244,6 +246,13 @@ const ACTION_LABELS: Record<string, string> = {
   'print.revise': '販促物を直した',
   'print.remake': '販促物を作り直した',
   'print.delete': '販促物を削除した',
+  'print.signage': '販促物を店頭サイネージに流した',
+  'print.signage.stop': '販促物を店頭サイネージから外した',
+  'print.announce': '販促物からお知らせの下書きを作った',
+  'print.canva.open': '販促物を Canva に取り込んだ',
+  'print.canva.pull': 'Canva で直した販促物を取り込んだ',
+  'canva.connect': 'Canva と接続した',
+  'canva.disconnect': 'Canva との接続を切断した',
   'print.export': '販促物を書き出した',
   'subsidy.status': '補助金・助成金の候補の状態を変えた',
   'subsidy.settings': '補助金・助成金の会社の関心と業種を直した',
@@ -477,6 +486,7 @@ function targetOf(e: AuditEvent, names: AuditNames): string {
     // 契約は相手の名前を出さない。ID の頭だけ
     case 'contract': return id === 'storage' ? '契約書の置き場' : `契約 ${id.slice(4, 12)}`;
     case 'print-design': return `販促物 ${id.slice(4, 12)}`;
+    case 'canva': return '本人の Canva';
     case 'member': return id === 'settings' ? '会員とポイントの設定' : id.startsWith('mrw-') ? `特典 ${id.slice(4, 12)}` : `会員 ${id.slice(4, 12)}`;
     case 'subsidy': return id === 'search' ? '補助金・助成金の調べもの' : id === 'settings' ? '補助金・助成金の設定' : `補助金・助成金の候補 ${id.slice(4, 12)}`;
     case 'reservation': return id.startsWith('rsi-') ? `予約できるもの ${id.slice(4, 12)}` : `予約 ${id.slice(4, 12)}`;

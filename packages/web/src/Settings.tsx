@@ -688,6 +688,7 @@ function DisplaySettings() {
  */
 function ServicesSettings() {
   const [items, setItems] = useState<MyConnectionView[] | null>(null);
+  const [canvaNone, setCanvaNone] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const load = () => api.myConnections().then((r) => setItems(r.items)).catch((e) => setMsg({ ok: false, text: describeError(e, '読み込めませんでした') }));
@@ -730,7 +731,8 @@ function ServicesSettings() {
   return (
     <>
       {msg && <p className={msg.ok ? 'ok-msg' : 'error'}>{msg.text}</p>}
-      {items.length === 0 && <p className="muted">接続できるサービスはありません</p>}
+      <CanvaCard onNone={() => setCanvaNone(true)} />
+      {items.length === 0 && canvaNone && <p className="muted">接続できるサービスはありません</p>}
       {items.map((c) => (
         <div key={c.id} className="card">
           <h3>{c.name}</h3>
@@ -754,6 +756,52 @@ function ServicesSettings() {
         </div>
       ))}
     </>
+  );
+}
+
+/**
+ * 本人の Canva の接続（仕様書 第41.19.3節）。販促物の作成の「Canva で仕上げる」に使う。運営が設定していなければ出さない。
+ */
+function CanvaCard({ onNone }: { onNone: () => void }) {
+  const [s, setS] = useState<{ configured: boolean; connected: boolean; connectedAt: string | null } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const load = () => api.myCanva().then((r) => { setS(r); if (!r.configured) onNone(); }).catch(() => onNone());
+  useEffect(() => { void load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!s?.configured) return null;
+  const connect = async () => {
+    setBusy(true);
+    try {
+      location.href = (await api.connectCanva()).url;
+    } catch (e) {
+      setMsg({ ok: false, text: describeError(e, '接続を始められませんでした') });
+      setBusy(false);
+    }
+  };
+  const disconnect = async () => {
+    if (!confirm('Canva との接続を切断しますか。Canva にあるデザインは消えません。')) return;
+    setBusy(true);
+    try {
+      await api.disconnectCanva();
+      setMsg({ ok: true, text: '切断しました' });
+      await load();
+    } catch (e) {
+      setMsg({ ok: false, text: describeError(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="card">
+      <h3>Canva</h3>
+      <p>{s.connected ? `接続中${s.connectedAt ? `（${new Date(s.connectedAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}）` : ''}` : '未接続'}</p>
+      <div className="row">
+        {s.connected
+          ? <button className="btn danger" disabled={busy} onClick={() => void disconnect()}>切断</button>
+          : <button className="btn" disabled={busy} onClick={() => void connect()}>接続する</button>}
+      </div>
+      {msg && <p className={msg.ok ? 'ok-msg' : 'error'}>{msg.text}</p>}
+    </div>
   );
 }
 

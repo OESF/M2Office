@@ -240,7 +240,11 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   // 個人設定「サービスとの接続」は、会社に利用者ごとに許可する接続があるときだけ出す（仕様書 第6.5.9節）
   const [hasServices, setHasServices] = useState(false);
   useEffect(() => {
-    api.myConnections().then((r) => setHasServices(r.items.length > 0)).catch(() => setHasServices(false));
+    // 本人の Canva の接続（第41.19.3節）も「サービスとの接続」に出す
+    void Promise.all([
+      api.myConnections().then((r) => r.items.length > 0).catch(() => false),
+      api.myCanva().then((r) => r.configured).catch(() => false),
+    ]).then(([a, b]) => setHasServices(a || b));
   }, []);
   const settingsSections = hasServices || view.kind === 'settings' && view.section === 'services'
     ? SETTINGS_SECTIONS : SETTINGS_SECTIONS.filter((x) => x.id !== 'services');

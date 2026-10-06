@@ -8,6 +8,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { SlidePlan } from '../slides/plan.js';
+import { renderSvgPng } from '../columns/cover.js';
 import type {
   BusySlot, CalendarEvent, ConnectorPrincipal, DriveFile, MailMessage, TaskItem, WorkspaceConnector,
 } from './types.js';
@@ -25,6 +26,19 @@ import type {
  *   API とワーカーは別プロセスのため、互いの書き込みは見えない
  * - テナントと利用者ごとに記憶を分け、境界を越えて見えないようにする（不変則 I-2）
  */
+/** 見本の写真（名前と色）。 */
+const MOCK_PHOTOS = [{ name: '店内の写真（見本）.png', color: '#c9a27e' }, { name: '商品の写真（見本）.png', color: '#7ea8c9' }];
+const mockPhotoCache = new Map<string, Uint8Array>();
+/** 見本の写真の中身（色の地に丸を描いた PNG。一度だけ作る）。 */
+function mockPhoto(color: string): Uint8Array {
+  let png = mockPhotoCache.get(color);
+  if (!png) {
+    png = renderSvgPng(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300"><rect width="400" height="300" fill="${color}"/><circle cx="200" cy="150" r="90" fill="#ffffff" opacity="0.55"/></svg>`, 400);
+    mockPhotoCache.set(color, png);
+  }
+  return png;
+}
+
 export class MockWorkspaceConnector implements WorkspaceConnector {
   /** 見本の接続口は、どの会社でも見本である。 */
   sourceFor(_tenantId: string): 'mock' {
@@ -313,13 +327,18 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
   private visibleFiles(p: ConnectorPrincipal) {
     const today = ymd(this.now());
     const id = (n: number) => `mock-file-${p.tenantId}-${n}`;
-    const samples = [
+    const samples: { file: DriveFile; text?: string; values?: string[][]; mimeType?: string; bytes?: Uint8Array }[] = [
       { file: { id: id(1), name: '営業会議メモ（見本）', kind: 'document' as const, modifiedAt: jst(today, 9), url: null },
         text: '見本の文書です。\n議題: 来月の重点顧客\n決定: 佐藤様への提案を来週までに準備する' },
       { file: { id: id(2), name: '顧客一覧（見本）', kind: 'spreadsheet' as const, modifiedAt: jst(addDays(today, -1), 17), url: null },
         values: [['会社名', '担当', '状況'], ['見本商事', '佐藤', '提案中'], ['見本工業', '田中', '契約済み']] },
       { file: { id: id(3), name: '研修のアンケート（見本）', kind: 'form' as const, modifiedAt: jst(addDays(today, -3), 9), url: null },
         text: '見本のフォームです。質問: 満足度、よかった点、改善してほしい点' },
+      // 見本の写真（販促物の作成の「ドライブから」。第41.19.2節）
+      ...MOCK_PHOTOS.map((m, i) => ({
+        file: { id: id(4 + i), name: m.name, kind: 'other' as const, modifiedAt: jst(addDays(today, -7), 10), url: null } as DriveFile,
+        mimeType: 'image/png', get bytes() { return mockPhoto(m.color); },
+      })),
     ];
     return [...samples, ...[...this.driveFiles.values()].filter((f) => f.owner === key(p))];
   }

@@ -59,6 +59,7 @@ import { extensionsRoute } from './routes/extensions.js';
 import { accessRoute, compartmentsRoute, groupsRoute } from './routes/access.js';
 import { connectionsRoute, myGoogleRoute, oauthCallbackRoute, returnTo } from './routes/connections.js';
 import { myConnectionsRoute } from './routes/connection-auth.js';
+import { myCanvaRoute } from './routes/canva.js';
 import { debugRoute } from './routes/debug.js';
 import { hrRoute } from './routes/hr.js';
 import { hrSelfRoute } from './routes/hr-self.js';
@@ -210,6 +211,7 @@ app.route('/v1/me/google', myGoogleRoute(deps));
 app.route('/v1/me/hr', hrSelfRoute(deps));
 // 認証の要る会社の接続（Slack など）の、本人の接続と取り消し（仕様書 第6.5.9節・第12.11.6.3節）
 app.route('/v1/me/connections', myConnectionsRoute(deps, returnTo));
+app.route('/v1/me/canva', myCanvaRoute(deps, returnTo));
 app.route('/v1/me', meRoute(deps));
 app.route('/v1/agents', agentsRoute(deps));
 app.route('/v1/jobs', jobsRoute(deps));

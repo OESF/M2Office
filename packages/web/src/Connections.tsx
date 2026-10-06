@@ -299,6 +299,34 @@ function RequiredScopes({ scopes }: { scopes: ConnectionSettings['google']['requ
   );
 }
 
+/** ドライブの写真を選ぶ画面（Google Picker）の API キー（仕様書 第41.19.2節）。 */
+function PickerKey({ registered, onSaved }: { registered: boolean; onSaved: () => void }) {
+  const [key, setKey] = useState('');
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const save = async (value: string) => {
+    setMsg(null);
+    try {
+      await api.admin.saveGooglePickerKey(value);
+      setKey('');
+      setMsg({ ok: true, text: value ? '保存しました' : '削除しました' });
+      onSaved();
+    } catch (e) {
+      setMsg({ ok: false, text: describeError(e, '保存できませんでした') });
+    }
+  };
+  return (
+    <div className="field">
+      <label>Picker の API キー（ドライブの写真）</label>
+      <div className="row">
+        <input value={key} autoComplete="off" onChange={(e) => setKey(e.target.value)} placeholder={registered ? '●●●●●●●●（登録済み）' : 'AIza…'} />
+        <button className="btn ghost small" disabled={!key.trim()} onClick={() => void save(key.trim())}>保存</button>
+        {registered && <button className="link danger small" onClick={() => void save('')}>削除</button>}
+      </div>
+      {msg && <p className={msg.ok ? 'ok-msg small' : 'error small'}>{msg.text}</p>}
+    </div>
+  );
+}
+
 function GoogleCard({ data, page, onSaved }: {
   data: ConnectionSettings['google']; page: string; onSaved: () => void;
 }) {
@@ -374,6 +402,7 @@ function GoogleCard({ data, page, onSaved }: {
           )}
         </div>
         {msg && <p className={msg.ok ? 'ok-msg' : 'error'}>{msg.text}</p>}
+        {registered && <PickerKey registered={!!data.pickerKeyRegistered} onSaved={onSaved} />}
         {data.workspaceSource === 'mock' && (
           <p className="warn-msg small">この会社の業務は見本データで動きます</p>
         )}

@@ -79,7 +79,7 @@ test('スプレッドシート: 作って、行を足して、読める。ドラ
   const found = await run('drive.search', { query: '訪問' }, ctx);
   assert.deepEqual(found['items'].map((f: { name: string }) => f.name), ['訪問記録']);
   const samples = await run('drive.search', { query: '（見本）' }, ctx);
-  assert.equal(samples['count'], 3, '見本のファイルは名前に（見本）と付く');
+  assert.equal(samples['count'], 5, '見本のファイルは名前に（見本）と付く（写真 2 枚を含む）');
 });
 
 test('Gmail: 検索は本文を返さず、送信は宛先が無ければ送らない', async () => {

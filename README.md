@@ -196,6 +196,9 @@ docs/            開発規約・リリース規定・設計判断記録
 | `GOOGLE_LOGIN_CLIENT_ID` / `GOOGLE_LOGIN_CLIENT_SECRET` | — | Google ログインに使う**運営の** OAuth クライアント（仕様書 第16.1.1節）。求める権限は openid・email・profile だけ。未設定なら Google ログインは無効 |
 | `GOOGLE_LOGIN_REDIRECT_URI` | `http://localhost:<API_PORT>/v1/oauth/google/login-callback` | Google に登録する戻り先。**運営のホスト 1 本**（第16.1.2節） |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | — | Google 連携（会社ごとの OAuth クライアント。管理者ページで登録する。ここは開発の既定値としてのみ使う） |
+| `CANVA_CLIENT_ID` ／ `CANVA_CLIENT_SECRET` | なし | 販促物の作成の Canva とのつなぎ。運営が Canva に公開のつなぎを登録し、審査を通してから入れる。無ければ Canva のことは出さない（仕様書 第41.19.3節） |
+| `CANVA_OAUTH_REDIRECT_URI` | `GOOGLE_OAUTH_REDIRECT_URI` と同じホストの `/v1/oauth/canva/callback` | Canva から戻る先。Canva のつなぎに登録する |
+| `CANVA_MOCK` | なし | `true` で Canva の代わりに見本を使う（開発と自動テスト。外には何も送らない） |
 | `CONNECTION_OAUTH_REDIRECT_URI` | `GOOGLE_OAUTH_REDIRECT_URI` と同じホストの `/v1/oauth/connection/callback` | 認証の要る会社の接続（Slack など）で相手から戻る先。管理者ページに出し、相手のアプリに登録する。**Slack は https だけを認める**（仕様書 第12.11.6節） |
 | `WEB_HTTPS` | false | 開発で音声を試すときに true。**ブラウザは安全な文脈でしかマイクを使わせない**（`npm run dev:cert` で証明書を作る） |
 | `CONNECTOR_MODE` | mock | `mock`（ダミーデータ）または `google`（Gmail とカレンダーを本物で動かす。ほかのサービスは「準備中」と断る。仕様書 第14.3.4節） |

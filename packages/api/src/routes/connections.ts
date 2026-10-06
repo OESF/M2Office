@@ -22,6 +22,7 @@ import { agentDisplayName, WEB_REVIEW_SCOPES } from '@m2office/shared';
 import type { AppDeps } from '../context.js';
 import { isOperational, requireRole, type AppEnv } from '../middleware/tenant.js';
 import { registerConnectionCallback } from './connection-auth.js';
+import { registerCanvaCallback } from './canva.js';
 
 const MODEL_KEYS: (keyof GeminiModels)[] = ['fast', 'standard', 'advanced', 'research', 'live'];
 
@@ -145,6 +146,8 @@ export function connectionsRoute(deps: AppDeps) {
       google: {
         clientId: typeof google?.meta['clientId'] === 'string' ? google.meta['clientId'] : '',
         secretRegistered: !!google?.secretEnc,
+        // ドライブの写真を選ぶ画面の API キーを登録したか（第41.19.2節）
+        pickerKeyRegistered: typeof google?.meta['pickerApiKey'] === 'string',
         updatedAt: google?.updatedAt ?? null,
         redirectUri: deps.oauth.redirectUri,
         requiredScopes: required.map((r) => ({ ...r, label: googleScopeLabel(r.scope) })),
@@ -277,7 +280,8 @@ export function connectionsRoute(deps: AppDeps) {
     }
 
     await deps.repo.saveTenantCredential({
-      tenantId: tenant.id, kind: 'google_oauth', secretEnc, meta: { clientId }, updatedBy: user.id, updatedAt: new Date().toISOString(),
+      // Picker の API キー（第41.19.2節）は残す
+      tenantId: tenant.id, kind: 'google_oauth', secretEnc, meta: { ...(current?.meta ?? {}), clientId }, updatedBy: user.id, updatedAt: new Date().toISOString(),
     });
     // クライアント ID を替えると、これまでの接続（トークン）は使えない。全員について後始末する。シークレットだけなら影響しない
     const previousId = (current?.meta as { clientId?: string } | undefined)?.clientId;
@@ -286,6 +290,24 @@ export function connectionsRoute(deps: AppDeps) {
       clientId, secretChanged: !!secret, verdict: check.verdict, ...cleanup,
     });
     return c.json({ ok: true, verdict: check.verdict, message: clientVerdictText(check.verdict, check.detail, true), ...cleanup });
+  });
+
+  /**
+   * ドライブの写真を選ぶ画面（Google Picker）の API キーを登録する（仕様書 第41.19.2節）。空なら消す。
+   *
+   * @remarks ブラウザー用の鍵（参照元を M2Office の画面に限ったもの）なので秘密の値ではないが、画面には登録済みかどうかだけを返す
+   */
+  app.put('/google/picker', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const body = await c.req.json<{ apiKey?: unknown }>().catch(() => ({} as { apiKey?: unknown }));
+    const apiKey = typeof body.apiKey === 'string' ? body.apiKey.trim() : '';
+    if (apiKey && !/^AIza[0-9A-Za-z_-]{35}$/.test(apiKey)) return c.json({ error: 'API キーの形式が違います（AIza で始まる 39 字の値です）' }, 400);
+    const current = await deps.repo.getTenantCredential(tenant.id, 'google_oauth');
+    if (!current) return c.json({ error: '先に OAuth クライアントを登録してください' }, 400);
+    const { pickerApiKey: _old, ...rest } = current.meta as Record<string, unknown>;
+    await deps.repo.saveTenantCredential({ ...current, meta: { ...rest, ...(apiKey ? { pickerApiKey: apiKey } : {}) }, updatedBy: user.id, updatedAt: new Date().toISOString() });
+    await audit(deps, tenant.id, user.id, apiKey ? 'connection.google.picker' : 'connection.google.picker_delete', 'google_oauth', {});
+    return c.json({ ok: true });
   });
 
   /**
@@ -439,11 +461,13 @@ export function oauthCallbackRoute(deps: AppDeps) {
   const app = new Hono();
   // 認証の要る会社の接続からの戻り（仕様書 第12.11.6.3節）
   registerConnectionCallback(app, deps);
+  // 本人の Canva の接続からの戻り（仕様書 第41.19.3節）
+  registerCanvaCallback(app, deps);
   app.get('/google/callback', async (c) => {
     const state = c.req.query('state') ?? '';
     const pending = deps.oauth.states.take(state);
     // 会社の接続（第12.11.6節）の要求の state では受けない（取り違えを防ぐ）
-    if (!pending || pending.connectionId) return c.text('この接続の要求は無効か、期限が切れています。M2Office の画面からもう一度「Google と接続する」を押してください。', 400);
+    if (!pending || pending.connectionId || pending.purpose === 'canva') return c.text('この接続の要求は無効か、期限が切れています。M2Office の画面からもう一度「Google と接続する」を押してください。', 400);
     const back = (result: string) => c.redirect(`${pending.returnTo}${pending.returnTo.includes('?') ? '&' : '?'}${pending.purpose === 'inquiry-mailbox' ? 'mailbox' : pending.purpose === 'web-review' ? 'webreview' : 'google'}=${result}`);
     if (c.req.query('error')) return back('cancelled');
     // 問い合わせの窓口のアカウント（仕様書 第33.18節）。本人の接続ではなく、会社の接続として預ける

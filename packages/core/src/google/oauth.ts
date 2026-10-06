@@ -194,12 +194,17 @@ export function isGoogleClientError(err: unknown): boolean {
   return err instanceof GoogleOAuthError && err.detail === 'invalid_client';
 }
 
-/** リフレッシュ トークンからアクセス トークンを取り直す。 */
+/**
+ * リフレッシュ トークンからアクセス トークンを取り直す。
+ *
+ * @param p.scope 許された範囲のうち一部だけに絞るとき（空白で区切った範囲の URL）。画面に渡すトークンを `drive.file` だけにするために使う（第41.19.2節）
+ */
 export async function refreshGoogleAccessToken(p: {
-  clientId: string; clientSecret: string; refreshToken: string;
+  clientId: string; clientSecret: string; refreshToken: string; scope?: string;
 }, endpoints: GoogleOAuthEndpoints = GOOGLE_OAUTH_ENDPOINTS): Promise<{ accessToken: string; expiresIn: number }> {
   const t = await postForm(endpoints.token, {
     client_id: p.clientId, client_secret: p.clientSecret, refresh_token: p.refreshToken, grant_type: 'refresh_token',
+    ...(p.scope ? { scope: p.scope } : {}),
   });
   return { accessToken: String(t['access_token']), expiresIn: Number(t['expires_in'] ?? 3600) };
 }

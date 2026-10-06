@@ -3,17 +3,18 @@
  * 点検（曜日・連絡先）、書き出し（PNG・実寸と入稿用の PDF）、3 案（推論が使えないときも組む・頼みに無い値段を足さない・掲示の期間）、
  * 生成 AI の画像（人や文字が写れば使わない）、会話で直す（新しい版・言葉で直す）、文面を直す、前の版に戻す、作り直す、
  * 削除は作った人と管理者だけ、期間の見張り（1 回だけ・外した物と止めた人には知らせない）、ツール（使えない人には「使えない」）。
+ * 段 2 の残り（第41.19節）: ドライブの写真（中身で形式を確かめる・読めなければ理由）、同じ型で何枚も（1 枚ずつの面・直しは全部の面に・1 枚ごとの文面の直し）、会員の特典のポップ。
  * 段 2 のつなぎ（第41.18節）: 値札のシート（在庫の品目から・頼みの行から）、店頭サイネージに流す（始まりを待つ・版が変われば差し替え・期間が終われば外す）、お知らせの下書き。
  */
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { PDFDocument } from 'pdf-lib';
-import { DEFAULT_TENANT_SETTINGS, PRINT_KIND_SIZES, printStateOf, type InventoryItem, type PrintKind, type TenantSettings } from '@m2office/shared';
+import { DEFAULT_TENANT_SETTINGS, EMPTY_PRINT_COPY, PRINT_KIND_SIZES, printStateOf, type InventoryItem, type MemberReward, type PrintKind, type TenantSettings } from '@m2office/shared';
 import {
   MemoryFileStore, MemoryPrintDesignStore, PRINT_DESIGN_TOOLS, PrintDesignService, contactChecks, fitText, layout, pagePng, printDesignsAccess, renderCover,
   templatesFor, toPdf, weekdayChecks, matchTagItems, parseTagRequest, tagLine, tagLines, tagPrice,
-  type AnnouncementSignage, type LlmProvider, type PrintAnnouncements, type PrintInventory, type Repository, type ToolContext,
+  type AnnouncementSignage, type LlmProvider, type PrintAnnouncements, type PrintDrive, type PrintInventory, type PrintMembers, type Repository, type ToolContext,
 } from '../src/index.js';
 
 /** 2026-10-06（火）9:00（日本時間） */
@@ -44,7 +45,7 @@ function fakeLlm(checks: string[] = []): LlmProvider & { drawn: number } {
   return llm as never;
 }
 
-function setup(opts: { llm?: LlmProvider; settings?: Partial<TenantSettings>; signage?: AnnouncementSignage; announcements?: PrintAnnouncements; inventory?: PrintInventory } = {}) {
+function setup(opts: { llm?: LlmProvider; settings?: Partial<TenantSettings>; signage?: AnnouncementSignage; announcements?: PrintAnnouncements; inventory?: PrintInventory; members?: PrintMembers; drive?: PrintDrive } = {}) {
   let clock = NOW;
   let settings: TenantSettings = {
     ...DEFAULT_TENANT_SETTINGS,
@@ -77,7 +78,7 @@ function setup(opts: { llm?: LlmProvider; settings?: Partial<TenantSettings>; si
   const llm = opts.llm ?? stubLlm;
   const service = new PrintDesignService({
     store, repo, files, llmFor: async () => llm, now: () => clock,
-    ...(opts.signage ? { signage: opts.signage } : {}), ...(opts.announcements ? { announcements: opts.announcements } : {}), ...(opts.inventory ? { inventory: opts.inventory } : {}),
+    ...(opts.signage ? { signage: opts.signage } : {}), ...(opts.announcements ? { announcements: opts.announcements } : {}), ...(opts.inventory ? { inventory: opts.inventory } : {}), ...(opts.members ? { members: opts.members } : {}), ...(opts.drive ? { drive: opts.drive } : {}),
   });
   /** 本人が上げた写真。 */
   const upload = async (owner: string) => {
@@ -522,7 +523,7 @@ test('サイネージ: 案を選んでから、すべての画面に流す。版
     assert.ok(!('error' in c));
     await t.service.choose(u1, c.design.id, c.versions[0]!.id);
     assert.match((await t.service.toSignage(u1, c.design.id) as { error: string }).error, /画面が登録されていません/);
-    assert.deepEqual(await t.service.links(u1), { signage: false, announcements: false });
+    assert.deepEqual(await t.service.links(u1), { signage: false, announcements: false, drive: false, canva: 'none' });
   }
 });
 
@@ -573,7 +574,7 @@ test('お知らせにする: 選んだ版の文面と掲示の期間で下書き
   assert.match(asked[0]!, /足さないで/);
   assert.match((await s.service.toAnnouncement(u2, r.design.id) as { error: string }).error, /使えません/);
   assert.ok(s.audits.some((a) => a.action === 'print.announce'));
-  assert.deepEqual(await s.service.links(u1), { signage: false, announcements: true });
+  assert.deepEqual(await s.service.links(u1), { signage: false, announcements: true, drive: false, canva: 'none' });
 });
 
 test('ツール: サイネージに流す・止める、お知らせの下書きにする', async () => {
@@ -595,4 +596,88 @@ test('ツール: サイネージに流す・止める、お知らせの下書き
   const ann = await tool('print.announce').invoke({ query: '冬' }, ctx) as { available: boolean; path: string };
   assert.equal(ann.available, true);
   assert.equal(ann.path, '/announcements/ann-9');
+});
+
+test('何枚も: 「3 枚。名前 値段」から 1 枚ずつの面を持つ物にし、直しは全部の面にかかる。1 枚ごとの文面を直せる', async () => {
+  const s = setup();
+  const r = await s.service.create(u1, { request: 'レジ横のおすすめのポップを 3 枚。モンブラン 480 円、プリン 320 円、タルト 520 円' });
+  assert.ok(!('error' in r));
+  assert.equal(r.design.kind, 'pop');
+  const v = r.versions[0]!;
+  assert.deepEqual(v.copy.pieces.map((p) => [p.headline, p.price]), [['モンブラン', '480円'], ['プリン', '320円'], ['タルト', '520円']]);
+  // 1 枚ずつの面（案の画像は 1 枚目、ほかの面も書き出せる）
+  const pages = layout({ size: r.design.size, template: v.template as never, color: v.color, palette: v.palette, headlineScale: 1, copy: v.copy, image: null, logo: null, qr: null, company: COMPANY });
+  assert.equal(pages.length, 3);
+  assert.ok(isPng((await s.service.export(u1, r.design.id, v.id, 'preview', 2))!.bytes));
+  const pdf = (await s.service.export(u1, r.design.id, v.id, 'pdf'))!;
+  assert.equal((await PDFDocument.load(pdf.bytes)).getPageCount(), 3);
+  // 直しは全部の面にかかる（1 枚ごとの文面は残る）
+  await s.service.choose(u1, r.design.id, v.id);
+  const big = await s.service.revise(u1, r.design.id, '見出しをもっと大きく');
+  assert.ok(!('error' in big));
+  assert.equal(big.versions.at(-1)!.headlineScale, 1.2);
+  assert.equal(big.versions.at(-1)!.copy.pieces.length, 3);
+  // 1 枚ごとの文面を直す
+  const ed = await s.service.editCopy(u1, r.design.id, { pieces: [{ headline: 'モンブラン', price: '500円', sub: '新作' }, { headline: 'プリン', price: '320円' }] });
+  assert.ok(!('error' in ed));
+  assert.deepEqual(ed.versions.at(-1)!.copy.pieces, [{ headline: 'モンブラン', sub: '新作', price: '500円' }, { headline: 'プリン', sub: '', price: '320円' }]);
+  // 1 枚の頼みは 1 枚のまま。パンフレットは何枚にもしない
+  const one = await s.service.create(u1, { request: 'モンブラン 480 円のポップ' });
+  assert.ok(!('error' in one));
+  assert.equal(one.versions[0]!.copy.pieces.length, 0);
+  const br = await s.service.create(u1, { request: 'パンフレットを 3 枚。A 480 円、B 320 円', kind: 'brochure' });
+  assert.ok(!('error' in br));
+  assert.equal(br.versions[0]!.copy.pieces.length, 0);
+  // 前の版（1 枚ごとの文面が無い）も読める
+  assert.deepEqual({ ...EMPTY_PRINT_COPY, ...{ headline: 'x' } }.pieces, []);
+});
+
+test('特典のポップ: 会員とポイントのいま使える特典を並べる（使える人だけ）', async () => {
+  const reward = (over: Partial<MemberReward>): MemberReward => ({
+    id: 'r', name: '', points: 10, status: 'active', validFrom: null, validTo: null, birthdayOnly: false, minRank: 'regular', ...over,
+  } as MemberReward);
+  const rewards = [
+    reward({ id: 'r1', name: 'ドリンク 1 杯', points: 10 }),
+    reward({ id: 'r2', name: 'ケーキ', points: 1, birthdayOnly: true }),
+    reward({ id: 'r3', name: 'デザート', points: 5, minRank: 'gold' }),
+    reward({ id: 'r4', name: '止めた特典', points: 3, status: 'stopped' as never }),
+    reward({ id: 'r5', name: '終わった特典', points: 3, validTo: '2026-09-30' }),
+  ];
+  const members: PrintMembers = { access: async (_t, u) => u === 'u1', rewards: async () => rewards };
+  const s = setup({ members });
+  const r = await s.service.create(u1, { request: '会員の特典をポップにして' });
+  assert.ok(!('error' in r));
+  assert.equal(r.design.title, '会員の特典のポップ');
+  assert.equal(r.design.size, 'A5');
+  assert.equal(r.versions[0]!.copy.body, 'ケーキ　1 ポイント（誕生月）\nデザート　5 ポイント（ゴールド以上）\nドリンク 1 杯　10 ポイント');
+  // 会員とポイントを使えない人には、ふつうのポップ
+  const p = await s.service.create(u2, { request: '会員の特典をポップにして' });
+  assert.ok(!('error' in p));
+  assert.notEqual(p.design.title, '会員の特典のポップ');
+  const none = setup({ members: { access: async () => true, rewards: async () => [] } });
+  assert.match((await none.service.create(u1, { request: '会員の特典のポップ' }) as { error: string }).error, /特典がありません/);
+});
+
+test('ドライブの写真: 本人がドライブで選んだ写真を使う。形式は中身で確かめ、読めなければ理由を返す', async () => {
+  const files = new Map<string, Uint8Array>([['d-photo', samplePng()], ['d-text', new TextEncoder().encode('ただの文')]]);
+  const drive: PrintDrive = {
+    available: async (w) => w.userId === 'u1',
+    picker: async () => ({ kind: 'mock', items: [{ id: 'd-photo', name: '店内.png' }] }),
+    download: async (_w, id) => { const b = files.get(id); return b ? { bytes: b, mimeType: 'image/png' } : { error: 'ファイルが見つからないか、見られません' }; },
+  };
+  const s = setup({ drive });
+  const r = await s.service.create(u1, { request: '新作のポップ', driveFileId: 'd-photo' });
+  assert.ok(!('error' in r));
+  assert.ok(r.versions.every((v) => v.image === 'photo'));
+  assert.match((await s.service.create(u1, { request: 'ポップ', driveFileId: 'd-text' }) as { error: string }).error, /PNG か JPEG/);
+  assert.match((await s.service.create(u1, { request: 'ポップ', driveFileId: 'd-none' }) as { error: string }).error, /見つからない/);
+  await s.service.choose(u1, r.design.id, r.versions[0]!.id);
+  const rv = await s.service.revise(u1, r.design.id, '', undefined, 'd-photo');
+  assert.ok(!('error' in rv));
+  assert.equal(rv.versions.at(-1)!.instruction, '写真を差し替え');
+  assert.equal((await s.service.links(u1)).drive, true);
+  assert.equal((await s.service.links(u2)).drive, false);
+  // ドライブにつないでいない処理では使えない
+  const t = setup();
+  assert.match((await t.service.create(u1, { request: 'ポップ', driveFileId: 'd-photo' }) as { error: string }).error, /ドライブの写真は使えません/);
 });

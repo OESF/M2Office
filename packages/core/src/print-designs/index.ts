@@ -9,3 +9,4 @@ export * from './store.js';
 export * from './service.js';
 export * from './tools.js';
 export * from './agents.js';
+export * from './canva.js';

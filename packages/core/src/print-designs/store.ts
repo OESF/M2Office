@@ -6,7 +6,7 @@
 
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
-import { NO_PRINT_SIGNAGE, type PrintCheck, type PrintCopy, type PrintDesign, type PrintImageSource, type PrintKind, type PrintSignageState, type PrintSize, type PrintVersion } from '@m2office/shared';
+import { EMPTY_PRINT_COPY, NO_PRINT_SIGNAGE, type PrintCheck, type PrintCopy, type PrintDesign, type PrintImageSource, type PrintKind, type PrintCanvaLink, type PrintSignageState, type PrintSize, type PrintVersion } from '@m2office/shared';
 
 /** 置き場の物（作った人の名前は持たない。画面に出すときに足す）。`signageAssetId` は流している店頭サイネージの素材（第41.18節）。 */
 export type StoredDesign = Omit<PrintDesign, 'createdByName'> & { endedNotified: boolean; signageAssetId: string | null };
@@ -18,7 +18,7 @@ export type NewDesign = Pick<StoredDesign, 'title' | 'kind' | 'size' | 'request'
 export type NewVersion = Omit<PrintVersion, 'id' | 'no' | 'createdAt'>;
 
 /** 直せる項目。 */
-export type DesignPatch = Partial<Pick<StoredDesign, 'title' | 'currentVersionId' | 'postFrom' | 'postTo' | 'place' | 'removedAt' | 'endedNotified' | 'signage' | 'signageAssetId'>>;
+export type DesignPatch = Partial<Pick<StoredDesign, 'title' | 'currentVersionId' | 'postFrom' | 'postTo' | 'place' | 'removedAt' | 'endedNotified' | 'signage' | 'signageAssetId' | 'canva'>>;
 
 /** 販促物の置き場。 */
 export interface PrintDesignStore {
@@ -46,6 +46,7 @@ interface DesignRow {
   id: string; title: string; kind: PrintKind; size: PrintSize; current_version_id: string | null; post_from: unknown; post_to: unknown; place: string;
   removed_at: unknown; ended_notified: boolean; request: string; remade_from: string | null; created_by: string; created_at: unknown; updated_at: unknown;
   signage_state: PrintSignageState | null; signage_asset_id: string | null; signage_screens: string[] | null; signage_at: unknown;
+  canva: PrintCanvaLink | null;
 }
 interface VersionRow {
   id: string; design_id: string; no: number; proposal: boolean; template: string; palette: number; color: string; headline_scale: number;
@@ -57,10 +58,12 @@ const toDesign = (r: DesignRow): StoredDesign => ({
   removedAt: isoOrNull(r.removed_at), endedNotified: r.ended_notified, request: r.request, remadeFrom: r.remade_from, createdBy: r.created_by,
   createdAt: iso(r.created_at), updatedAt: iso(r.updated_at),
   signage: { state: r.signage_state ?? 'none', screens: r.signage_screens ?? [], at: isoOrNull(r.signage_at) }, signageAssetId: r.signage_asset_id,
+  canva: r.canva ?? null,
 });
 const toVersion = (r: VersionRow): PrintVersion => ({
   id: r.id, designId: r.design_id, no: r.no, proposal: r.proposal, template: r.template, palette: r.palette, color: r.color, headlineScale: Number(r.headline_scale),
-  copy: r.copy, image: r.image, aiImage: r.ai_image, checks: r.checks ?? [], instruction: r.instruction, createdBy: r.created_by, createdAt: iso(r.created_at),
+  // 前の版には 1 枚ごとの文面（pieces）が無い（第 0.293.0 版で足した）
+  copy: { ...EMPTY_PRINT_COPY, ...r.copy }, image: r.image, aiImage: r.ai_image, checks: r.checks ?? [], instruction: r.instruction, createdBy: r.created_by, createdAt: iso(r.created_at),
 });
 
 /** PostgreSQL の置き場。会社ごとに `app.tenant_id` を入れて行単位の制限を効かせる。 */
@@ -107,13 +110,16 @@ export class PostgresPrintDesignStore implements PrintDesignStore {
   async update(tenantId: string, id: string, patch: DesignPatch): Promise<void> {
     const cols: Record<string, string> = {
       title: 'title', currentVersionId: 'current_version_id', postFrom: 'post_from', postTo: 'post_to', place: 'place', removedAt: 'removed_at', endedNotified: 'ended_notified',
-      signageAssetId: 'signage_asset_id', signageState: 'signage_state', signageScreens: 'signage_screens', signageAt: 'signage_at',
+      signageAssetId: 'signage_asset_id', signageState: 'signage_state', signageScreens: 'signage_screens', signageAt: 'signage_at', canva: 'canva',
     };
     const sets: string[] = [];
     const params: unknown[] = [tenantId, id];
     // サイネージの様子は 3 つの列に分けて持つ
     const { signage, ...rest } = patch;
-    const flat: Record<string, unknown> = { ...rest, ...(signage ? { signageState: signage.state, signageScreens: JSON.stringify(signage.screens), signageAt: signage.at } : {}) };
+    const flat: Record<string, unknown> = {
+      ...rest, ...(signage ? { signageState: signage.state, signageScreens: JSON.stringify(signage.screens), signageAt: signage.at } : {}),
+      ...(rest.canva !== undefined ? { canva: rest.canva === null ? null : JSON.stringify(rest.canva) } : {}),
+    };
     for (const [k, v] of Object.entries(flat)) {
       if (v === undefined || !cols[k]) continue;
       params.push(v);
@@ -174,7 +180,7 @@ export class MemoryPrintDesignStore implements PrintDesignStore {
     this.designs.set(id, {
       id, tenantId, title: d.title, kind: d.kind, size: d.size, currentVersionId: null, postFrom: d.postFrom ?? null, postTo: d.postTo ?? null, place: d.place ?? '',
       removedAt: null, endedNotified: false, request: d.request, remadeFrom: d.remadeFrom, createdBy: d.createdBy, createdAt: at, updatedAt: at,
-      signage: NO_PRINT_SIGNAGE, signageAssetId: null,
+      signage: NO_PRINT_SIGNAGE, signageAssetId: null, canva: null,
     });
     return id;
   }

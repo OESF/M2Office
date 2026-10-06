@@ -62,10 +62,22 @@ export interface PrintCopy {
   note: string;
   /** QR にする URL（任意。会社の Web サイトなど） */
   qrUrl: string;
+  /**
+   * 同じ型で何枚も作るときの 1 枚ごとの文面（第41.19.1節）。空なら 1 枚。
+   * 1 枚ごとに見出し・ひとこと・値段を差し替え、本文・期間・注意書き・QR は共通にする。
+   */
+  pieces: PrintPiece[];
+}
+
+/** 何枚も作るときの 1 枚分（第41.19.1節）。 */
+export interface PrintPiece {
+  headline: string;
+  sub: string;
+  price: string;
 }
 
 /** 空の文面。 */
-export const EMPTY_PRINT_COPY: PrintCopy = { headline: '', sub: '', body: '', period: '', price: '', note: '', qrUrl: '' };
+export const EMPTY_PRINT_COPY: PrintCopy = { headline: '', sub: '', body: '', period: '', price: '', note: '', qrUrl: '', pieces: [] };
 
 /** 点検の印（第41.6節）。断定しない。 */
 export interface PrintCheck {
@@ -133,7 +145,22 @@ export interface PrintDesign {
   updatedAt: string;
   /** 店頭サイネージに流しているか（第41.18節） */
   signage: PrintSignage;
+  /** Canva で仕上げているデザイン（第41.19.3節）。取り込んでいなければ `null` */
+  canva: PrintCanvaLink | null;
 }
+
+/** Canva に取り込んだデザイン（第41.19.3節）。 */
+export interface PrintCanvaLink {
+  designId: string;
+  /** Canva の編集の画面（30 日で切れる） */
+  editUrl: string;
+  /** 取り込んだ版の番号 */
+  versionNo: number;
+  at: string;
+}
+
+/** Canva で直した版の型の名前（会話の直し・文面の直し・入稿用の PDF を作れない）。 */
+export const CANVA_TEMPLATE = 'canva';
 
 /** サイネージの状態（`waiting` は掲示の始まりを待っている）。 */
 export type PrintSignageState = 'none' | 'waiting' | 'on';
@@ -197,6 +224,8 @@ export const PRINT_LIMITS = {
   /** 値札の 1 枚のシートの札の数と、1 つの物の品目の上限（第41.18節） */
   tagsPerSheet: 10,
   tagsMax: 30,
+  /** 同じ型で何枚も作るときの上限（第41.19.1節） */
+  piecesMax: 10,
 } as const;
 
 /** API が返す 1 つの物（物と、掲示の状態と、版。3 案も版）。 */
@@ -205,7 +234,11 @@ export interface PrintDesignDetailView {
   state: PrintState;
   versions: PrintVersion[];
   /** つなげる先を、いま使えるか（API が添える。第41.18節） */
-  links?: { signage: boolean; announcements: boolean };
+  links?: {
+    signage: boolean; announcements: boolean; drive?: boolean;
+    /** Canva（`none`: 運営が設定していない、`connect`: 本人がつないでいない、`ready`: 使える。第41.19.3節） */
+    canva?: 'none' | 'connect' | 'ready';
+  };
 }
 
 /** 画面の道（1 つの物）。 */

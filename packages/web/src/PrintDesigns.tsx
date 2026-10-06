@@ -8,10 +8,11 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  PRINT_CHECK_LABELS, PRINT_KIND_LABELS, PRINT_KIND_SIZES, PRINT_LIMITS, PRINT_SIZES, PRINT_STATE_LABELS,
-  type PrintCopy, type PrintDesign, type PrintDesignDetailView, type PrintKind, type PrintSize, type PrintState, type PrintVersion,
+  CANVA_TEMPLATE, PRINT_CHECK_LABELS, PRINT_KIND_LABELS, PRINT_KIND_SIZES, PRINT_LIMITS, PRINT_SIZES, PRINT_STATE_LABELS,
+  type PrintCopy, type PrintDesign, type PrintPiece, type PrintDesignDetailView, type PrintKind, type PrintSize, type PrintState, type PrintVersion,
 } from '@m2office/shared';
 import { api, describeError } from './api.js';
+import { pickDriveImage } from './google-picker.js';
 
 type Item = PrintDesign & { state: PrintState };
 type Filter = 'all' | PrintState;
@@ -26,17 +27,24 @@ function NoteText({ note }: { note: Note }) {
   return note ? <span className={`prd-note is-${note.kind}`} role={note.kind === 'error' ? 'alert' : 'status'}>{note.text}</span> : null;
 }
 
-/** 写真を選んで上げるボタン（上げたファイルの ID を返す）。 */
-function PhotoButton({ photo, onPhoto, disabled }: { photo: { id: string; name: string } | null; onPhoto: (p: { id: string; name: string } | null) => void; disabled: boolean }) {
+/** 使う写真（本人が上げたファイルか、本人がドライブで選んだファイル。第41.19.2節）。 */
+type Photo = { id: string; name: string; from: 'upload' | 'drive' };
+/** 写真を API に渡す形。 */
+const photoArg = (p: Photo | null) => (!p ? {} : p.from === 'drive' ? { driveFileId: p.id } : { photoFileId: p.id });
+
+/** 写真を選ぶボタン（上げる・ドライブから）。 */
+function PhotoButton({ photo, onPhoto, disabled, drive }: { photo: Photo | null; onPhoto: (p: Photo | null) => void; disabled: boolean; drive: boolean }) {
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 見本の会社は、見本のドライブの写真から選ぶ
+  const [samples, setSamples] = useState<{ id: string; name: string }[] | null>(null);
   const pick = async (f: File | undefined) => {
     if (!f) return;
     setBusy(true);
     setError(null);
     try {
-      onPhoto(await api.uploadFile(f));
+      onPhoto({ ...(await api.uploadFile(f)), from: 'upload' });
     } catch (e) {
       setError(describeError(e, '写真を上げられませんでした'));
     } finally {
@@ -44,12 +52,32 @@ function PhotoButton({ photo, onPhoto, disabled }: { photo: { id: string; name: 
       if (input.current) input.current.value = '';
     }
   };
+  const fromDrive = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const p = await api.printDesigns.drivePicker();
+      if (p.kind === 'mock') { setSamples(p.items); return; }
+      const got = await pickDriveImage(p);
+      if (got) onPhoto({ ...got, from: 'drive' });
+    } catch (e) {
+      setError(describeError(e, 'ドライブを開けませんでした'));
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (photo) return <span className="prd-photo small">{photo.name} <button className="link small" disabled={disabled} onClick={() => onPhoto(null)}>外す</button></span>;
   return (
     <>
       <input ref={input} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={(e) => void pick(e.target.files?.[0])} />
-      {photo
-        ? <span className="prd-photo small">{photo.name} <button className="link small" disabled={disabled} onClick={() => onPhoto(null)}>外す</button></span>
-        : <button className="btn ghost small" disabled={disabled || busy} onClick={() => input.current?.click()}>{busy ? '上げています…' : '写真を使う'}</button>}
+      <button className="btn ghost small" disabled={disabled || busy} onClick={() => input.current?.click()}>{busy ? '読んでいます…' : '写真を使う'}</button>
+      {drive && <button className="btn ghost small" disabled={disabled || busy} onClick={() => void fromDrive()}>ドライブから</button>}
+      {samples && (
+        <span className="prd-samples small">
+          {samples.length ? samples.map((x) => <button key={x.id} className="link small" onClick={() => { onPhoto({ ...x, from: 'drive' }); setSamples(null); }}>{x.name}</button>) : <span className="muted">写真がありません</span>}
+          <button className="link small" onClick={() => setSamples(null)}>キャンセル</button>
+        </span>
+      )}
       {error && <span className="error small">{error}</span>}
     </>
   );
@@ -72,10 +100,11 @@ export function PrintDesigns({ designId, onOpen, changeKey, onAnnouncement }: {
 /** 一覧と、作る。 */
 function DesignList({ onOpen, changeKey }: { onOpen: (id: string) => void; changeKey: string }) {
   const [items, setItems] = useState<Item[] | null>(null);
+  const [drive, setDrive] = useState(false);
   const [filter, setFilter] = useState<Filter>('all');
   const [error, setError] = useState<string | null>(null);
   const load = useCallback(() => {
-    api.printDesigns.list().then((r) => { setItems(r.items); setError(null); }).catch((e) => setError(describeError(e, '読めませんでした')));
+    api.printDesigns.list().then((r) => { setItems(r.items); setDrive(r.drive); setError(null); }).catch((e) => setError(describeError(e, '読めませんでした')));
   }, []);
   useEffect(load, [load]);
   useEffect(() => { if (changeKey) load(); }, [changeKey]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -86,7 +115,7 @@ function DesignList({ onOpen, changeKey }: { onOpen: (id: string) => void; chang
   const shown = items.filter((d) => filter === 'all' || d.state === filter);
   return (
     <div className="prd">
-      <CreateBox onCreated={onOpen} />
+      <CreateBox onCreated={onOpen} drive={drive} />
       {items.length > 0 && (
         <div className="seg" role="group" aria-label="表示">
           {([['all', 'すべて'], ['posted', '掲示中'], ['upcoming', 'これから'], ['ended', '期間が終わった'], ['draft', '下書き'], ['removed', '外した']] as const).map(([v, label]) => (
@@ -117,11 +146,11 @@ function DesignList({ onOpen, changeKey }: { onOpen: (id: string) => void; chang
 }
 
 /** 作る（頼みの文・種類と大きさ（任意）・写真（任意））。 */
-function CreateBox({ onCreated }: { onCreated: (id: string) => void }) {
+function CreateBox({ onCreated, drive }: { onCreated: (id: string) => void; drive: boolean }) {
   const [request, setRequest] = useState('');
   const [kind, setKind] = useState<PrintKind | ''>('');
   const [size, setSize] = useState<PrintSize | ''>('');
-  const [photo, setPhoto] = useState<{ id: string; name: string } | null>(null);
+  const [photo, setPhoto] = useState<Photo | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const sizes = kind ? PRINT_KIND_SIZES[kind] : [];
@@ -129,7 +158,7 @@ function CreateBox({ onCreated }: { onCreated: (id: string) => void }) {
     setBusy(true);
     setError(null);
     try {
-      const r = await api.printDesigns.create({ request: request.trim(), ...(kind ? { kind } : {}), ...(size ? { size } : {}), ...(photo && kind !== 'tags' ? { photoFileId: photo.id } : {}) });
+      const r = await api.printDesigns.create({ request: request.trim(), ...(kind ? { kind } : {}), ...(size ? { size } : {}), ...(kind !== 'tags' ? photoArg(photo) : {}) });
       onCreated(r.design.id);
     } catch (e) {
       setError(describeError(e, '作れませんでした'));
@@ -151,7 +180,7 @@ function CreateBox({ onCreated }: { onCreated: (id: string) => void }) {
             {sizes.map((s) => <option key={s} value={s}>{PRINT_SIZES[s].label}</option>)}
           </select>
         )}
-        {kind !== 'tags' && <PhotoButton photo={photo} onPhoto={setPhoto} disabled={busy} />}
+        {kind !== 'tags' && <PhotoButton photo={photo} onPhoto={setPhoto} disabled={busy} drive={drive} />}
         <button className="btn small" disabled={busy || !request.trim()} onClick={() => void create()}>{busy ? '案を作っています…' : '案を作る'}</button>
       </div>
       {error && <p className="error">{error}</p>}
@@ -160,12 +189,16 @@ function CreateBox({ onCreated }: { onCreated: (id: string) => void }) {
 }
 
 /** 版の画像（パンフレットは 2 面）。 */
-function Pages({ d, v, large = false }: { d: PrintDesign; v: PrintVersion; large?: boolean }) {
+function Pages({ d, v, large = false, first = false }: { d: PrintDesign; v: PrintVersion; large?: boolean; first?: boolean }) {
   // パンフレットは外側と内側、値札は 10 品ごとに 1 枚（第41.18節）
-  const sheets = d.kind === 'tags' ? Math.min(3, Math.max(1, Math.ceil(v.copy.body.split('\n').filter((l) => l.trim()).length / 10))) : 1;
-  const pages = d.kind === 'brochure' ? [0, 1] : Array.from({ length: sheets }, (_, i) => i);
+  const sheets = d.kind === 'tags' ? Math.min(3, Math.max(1, Math.ceil(v.copy.body.split('\n').filter((l) => l.trim()).length / 10)))
+    : Math.max(1, v.copy.pieces?.length ?? 0);
+  const all = d.kind === 'brochure' ? [0, 1] : Array.from({ length: sheets }, (_, i) => i);
+  // 案を並べるときは 1 面目だけ（何枚もの物は枚数を添える）
+  const pages = first && d.kind !== 'brochure' ? [0] : all;
   return (
     <div className={`prd-pages${large ? ' is-large' : ''}`}>
+      {pages.length < all.length && <span className="badge prd-count">{all.length} 枚</span>}
       {pages.map((p) => <img key={p} src={api.printDesigns.fileUrl(d.id, v.id, 'preview', { page: p })} alt={d.kind === 'brochure' ? (p === 0 ? '外側' : '内側') : ''} />)}
     </div>
   );
@@ -212,6 +245,8 @@ function DesignView({ id, onBack, onOpen, changeKey, onAnnouncement }: { id: str
   if (!data) return <p className="muted">読み込み中…</p>;
   const { design: d, state, versions } = data;
   const current = versions.find((v) => v.id === d.currentVersionId) ?? null;
+  // Canva で直した版は、ここでは直さない（第41.19.3節）
+  const fromCanva = current?.template === CANVA_TEMPLATE;
   const proposals = versions.filter((v) => v.proposal);
 
   return (
@@ -230,7 +265,7 @@ function DesignView({ id, onBack, onOpen, changeKey, onAnnouncement }: { id: str
           <ul className="prd-proposals">
             {proposals.map((v, i) => (
               <li key={v.id} className="card">
-                <Pages d={d} v={v} />
+                <Pages d={d} v={v} first />
                 <div className="row wrap">
                   <strong>案 {i + 1}</strong>
                   {v.aiImage && <span className="small muted">画像は生成 AI</span>}
@@ -248,15 +283,31 @@ function DesignView({ id, onBack, onOpen, changeKey, onAnnouncement }: { id: str
           </div>
           <div className="prd-side">
             <Checks v={current} />
-            <ReviseBox busy={busy} tags={d.kind === 'tags'} onRevise={(instruction, photoFileId) => act(() => api.printDesigns.revise(d.id, instruction, photoFileId), '直せませんでした')} />
+            {fromCanva ? <p className="small muted">Canva で直した版</p> : <ReviseBox busy={busy} tags={d.kind === 'tags'} drive={!!data.links?.drive} onRevise={(instruction, photo) => act(() => api.printDesigns.revise(d.id, instruction, photoArg(photo)), '直せませんでした')} />}
             <div className="row wrap prd-downloads">
               <a className="btn small" href={api.printDesigns.fileUrl(d.id, current.id, 'pdf')} download>PDF</a>
-              <a className="btn ghost small" href={api.printDesigns.fileUrl(d.id, current.id, 'bleed')} download>入稿用の PDF</a>
+              {!fromCanva && <a className="btn ghost small" href={api.printDesigns.fileUrl(d.id, current.id, 'bleed')} download>入稿用の PDF</a>}
               <a className="btn ghost small" href={api.printDesigns.fileUrl(d.id, current.id, 'png', { download: true })} download>画像（PNG）</a>
             </div>
             <Links data={data} state={state} busy={busy}
               onSignage={() => act(() => api.printDesigns.toSignage(d.id), '流せませんでした')}
               onStopSignage={() => act(() => api.printDesigns.stopSignage(d.id), '外せませんでした')}
+              onCanva={() => {
+                // 押した操作の中で窓を開いておく（あとで開くと止められる）
+                const win = window.open('', '_blank');
+                if (win) win.opener = null;
+                void act(async () => {
+                  try {
+                    const r = await api.printDesigns.openInCanva(d.id);
+                    if (win) win.location.href = r.editUrl;
+                    else window.open(r.editUrl, '_blank', 'noopener');
+                  } catch (e) {
+                    win?.close();
+                    throw e;
+                  }
+                }, 'Canva に取り込めませんでした', 'Canva で開きました。直し終えたら「Canva から戻す」を押してください');
+              }}
+              onCanvaPull={() => act(() => api.printDesigns.pullFromCanva(d.id), 'Canva から戻せませんでした', 'Canva で直した版を取り込みました')}
               onAnnounce={async () => {
                 setBusy(true);
                 setNote(null);
@@ -267,8 +318,8 @@ function DesignView({ id, onBack, onOpen, changeKey, onAnnouncement }: { id: str
                   setBusy(false);
                 }
               }} />
-            <CopyEditor key={current.id} copy={current.copy} tags={d.kind === 'tags'} disabled={busy}
-              onSave={(patch) => act(() => api.printDesigns.editCopy(d.id, patch), '直せませんでした', '文面を直しました')} />
+            {!fromCanva && <CopyEditor key={current.id} copy={current.copy} tags={d.kind === 'tags'} disabled={busy}
+              onSave={(patch) => act(() => api.printDesigns.editCopy(d.id, patch), '直せませんでした', '文面を直しました')} />}
             <PostFields key={`${d.postFrom}-${d.postTo}-${d.place}`} d={d} state={state} disabled={busy}
               onSave={(input) => act(() => api.printDesigns.setPost(d.id, input), '保存できませんでした', '保存しました')}
               onRemoved={() => act(() => api.printDesigns.markRemoved(d.id), '変えられませんでした')} />
@@ -300,17 +351,22 @@ function DesignView({ id, onBack, onOpen, changeKey, onAnnouncement }: { id: str
 }
 
 /** つなげる先（店頭サイネージ・お知らせの作成。第41.18節）。使えないものは出さない。 */
-function Links({ data, state, busy, onSignage, onStopSignage, onAnnounce }: {
+function Links({ data, state, busy, onSignage, onStopSignage, onAnnounce, onCanva, onCanvaPull }: {
   data: PrintDesignDetailView; state: PrintState; busy: boolean;
-  onSignage: () => void; onStopSignage: () => void; onAnnounce: () => void;
+  onSignage: () => void; onStopSignage: () => void; onAnnounce: () => void; onCanva: () => void; onCanvaPull: () => void;
 }) {
   const { design: d, links } = data;
   const sg = d.signage;
   const canSignage = !!links?.signage && (sg.state !== 'none' || (state !== 'ended' && state !== 'removed'));
   const canAnnounce = !!links?.announcements && d.kind !== 'tags';
-  if (!canSignage && !canAnnounce) return null;
+  const canva = links?.canva ?? 'none';
+  if (!canSignage && !canAnnounce && canva === 'none') return null;
   return (
     <div className="row wrap prd-links">
+      {/* Canva で仕上げる（第41.19.3節）。つないでいなければ、つなぐ所へ */}
+      {canva === 'ready' && <button className="btn ghost small" disabled={busy} onClick={onCanva}>Canva で仕上げる</button>}
+      {canva === 'ready' && d.canva && <button className="btn ghost small" disabled={busy} onClick={onCanvaPull}>Canva から戻す</button>}
+      {canva === 'connect' && <a className="link small" href="/settings/services">Canva と接続する</a>}
       {canSignage && (sg.state === 'none'
         ? <button className="btn ghost small" disabled={busy} onClick={onSignage}>サイネージに流す</button>
         : <>
@@ -338,11 +394,11 @@ function TitleField({ d, disabled, onSave }: { d: PrintDesign; disabled: boolean
 }
 
 /** 会話で直す（「見出しをもっと大きく」「落ち着いた色に」「この写真に」）。 */
-function ReviseBox({ busy, tags, onRevise }: { busy: boolean; tags: boolean; onRevise: (instruction: string, photoFileId?: string) => Promise<void> }) {
+function ReviseBox({ busy, tags, drive, onRevise }: { busy: boolean; tags: boolean; drive: boolean; onRevise: (instruction: string, photo: Photo | null) => Promise<void> }) {
   const [text, setText] = useState('');
-  const [photo, setPhoto] = useState<{ id: string; name: string } | null>(null);
+  const [photo, setPhoto] = useState<Photo | null>(null);
   const submit = async () => {
-    await onRevise(text.trim(), photo?.id);
+    await onRevise(text.trim(), photo);
     setText('');
     setPhoto(null);
   };
@@ -351,14 +407,14 @@ function ReviseBox({ busy, tags, onRevise }: { busy: boolean; tags: boolean; onR
       <textarea value={text} rows={2} maxLength={500} disabled={busy} aria-label="直したいこと" placeholder={tags ? '例: 色を変えて' : '例: 見出しをもっと大きく'}
         onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && (text.trim() || photo)) void submit(); }} />
       <div className="row wrap">
-        {!tags && <PhotoButton photo={photo} onPhoto={setPhoto} disabled={busy} />}
+        {!tags && <PhotoButton photo={photo} onPhoto={setPhoto} disabled={busy} drive={drive} />}
         <button className="btn small" disabled={busy || (!text.trim() && !photo)} onClick={() => void submit()}>{busy ? '直しています…' : '直す'}</button>
       </div>
     </div>
   );
 }
 
-const COPY_FIELDS: { key: keyof PrintCopy; label: string; max: number; rows?: number }[] = [
+const COPY_FIELDS: { key: Exclude<keyof PrintCopy, 'pieces'>; label: string; max: number; rows?: number }[] = [
   { key: 'headline', label: '見出し', max: PRINT_LIMITS.headlineMax },
   { key: 'sub', label: '小見出し', max: PRINT_LIMITS.subMax },
   { key: 'body', label: '本文', max: PRINT_LIMITS.bodyMax, rows: 4 },
@@ -376,10 +432,20 @@ const TAG_FIELDS: typeof COPY_FIELDS = [
 ];
 
 /** 文面をその場で直す。 */
-function CopyEditor({ copy, tags, disabled, onSave }: { copy: PrintCopy; tags: boolean; disabled: boolean; onSave: (patch: Record<string, string>) => void }) {
+/** 1 枚ごとの文面を 1 行 1 枚（「見出し｜値段｜ひとこと」）にする・読む（第41.19.1節）。 */
+const piecesText = (pieces: PrintPiece[]) => pieces.map((p) => [p.headline, p.price, p.sub].join('｜').replace(/｜+$/, '')).join('\n');
+const readPieces = (text: string): PrintPiece[] => text.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => {
+  const [headline = '', price = '', sub = ''] = l.split(/[｜|]/).map((x) => x.trim());
+  return { headline, price, sub };
+});
+
+function CopyEditor({ copy, tags, disabled, onSave }: { copy: PrintCopy; tags: boolean; disabled: boolean; onSave: (patch: Record<string, unknown>) => void }) {
   const [v, setV] = useState<PrintCopy>(copy);
+  const [pieces, setPieces] = useState(piecesText(copy.pieces ?? []));
   const fields = tags ? TAG_FIELDS : COPY_FIELDS;
+  const piecesChanged = (copy.pieces?.length ?? 0) > 0 && pieces !== piecesText(copy.pieces);
   const changed = fields.filter((f) => v[f.key] !== copy[f.key]);
+  const save = () => onSave({ ...Object.fromEntries(changed.map((f) => [f.key, v[f.key]])), ...(piecesChanged ? { pieces: readPieces(pieces) } : {}) });
   return (
     <details className="prd-copy">
       <summary>文面</summary>
@@ -391,9 +457,15 @@ function CopyEditor({ copy, tags, disabled, onSave }: { copy: PrintCopy; tags: b
             : <input value={v[f.key]} maxLength={f.max} disabled={disabled} onChange={(e) => setV({ ...v, [f.key]: e.target.value })} />}
         </label>
       ))}
+      {(copy.pieces?.length ?? 0) > 0 && (
+        <label>
+          <span className="small muted">1 枚ごと（1 行 1 枚。見出し｜値段｜ひとこと）</span>
+          <textarea value={pieces} rows={Math.min(10, copy.pieces.length + 1)} disabled={disabled} onChange={(e) => setPieces(e.target.value)} />
+        </label>
+      )}
       <div className="row">
-        <button className="btn small" disabled={disabled || !changed.length} onClick={() => onSave(Object.fromEntries(changed.map((f) => [f.key, v[f.key]])))}>保存</button>
-        {changed.length > 0 && <button className="btn ghost small" disabled={disabled} onClick={() => setV(copy)}>キャンセル</button>}
+        <button className="btn small" disabled={disabled || (!changed.length && !piecesChanged)} onClick={save}>保存</button>
+        {(changed.length > 0 || piecesChanged) && <button className="btn ghost small" disabled={disabled} onClick={() => { setV(copy); setPieces(piecesText(copy.pieces ?? [])); }}>キャンセル</button>}
       </div>
     </details>
   );

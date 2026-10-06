@@ -2107,13 +2107,15 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .prd-proposals > li { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
 .prd-proposals .row { align-items: center; }
 .prd-proposals .row > .btn { margin-left: auto; }
-.prd-pages { display: flex; gap: 8px; justify-content: center; }
+.prd-pages { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; position: relative; }
+.prd-count { position: absolute; top: 4px; right: 4px; }
 .prd-pages img { max-width: 100%; max-height: 360px; object-fit: contain; box-shadow: 0 1px 4px rgba(0, 0, 0, .18); background: #fff; }
 .prd-pages.is-large img { max-height: 640px; }
 .prd-pages:has(img + img) img { max-width: calc(50% - 4px); }
 .prd-main { display: grid; grid-template-columns: minmax(0, 3fr) minmax(260px, 2fr); gap: 16px; align-items: start; }
 .prd-side { display: flex; flex-direction: column; gap: 12px; }
 .prd-links { align-items: center; }
+.prd-samples { display: inline-flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .prd-checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .prd-copy label, .prd-post label { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
 .prd-copy input, .prd-copy textarea { width: 100%; }

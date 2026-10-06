@@ -227,6 +227,11 @@ const printDesigns = new PrintDesignService({
     access: async (tenantId, userId) => !!(await inventoryAccess(repo)(tenantId, userId)),
     items: (tenantId) => inventory.store.listItems(tenantId),
   },
+  // 会員の特典のポップ（第41.19.1節。会員とポイントは後で作るので、呼ばれたときに引く）
+  members: {
+    access: async (tenantId, userId) => !!(await membersAccess(repo)(tenantId, userId)),
+    rewards: (tenantId) => members.rewards({ tenantId, userId: 'system' }),
+  },
 });
 // 会員とポイント（第40章）。ワーカーは有効期限の失効（1 日に 1 回）と、秘書の業務からの頼みを扱う
 const members = new MemberService({

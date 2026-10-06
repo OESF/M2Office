@@ -80,7 +80,7 @@ export async function aiChecks(llm: LlmProvider, copy: PrintCopy, kindLabel: str
             'JSON だけを返す: {"items":[{"kind":"typo","message":""}]}',
           ].join('\n'),
         },
-        { role: 'user', content: JSON.stringify({ 見出し: copy.headline, ひとこと: copy.sub, 本文: copy.body, 期間: copy.period, 値段: copy.price, 注意書き: copy.note }) },
+        { role: 'user', content: JSON.stringify({ 見出し: copy.headline, ひとこと: copy.sub, 本文: copy.body, 期間: copy.period, 値段: copy.price, 注意書き: copy.note, '1 枚ごと': copy.pieces }) },
       ],
     });
     const o = JSON.parse(/\{[\s\S]*\}/.exec(res.text)?.[0] ?? 'null') as { items?: unknown } | null;

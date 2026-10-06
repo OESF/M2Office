@@ -16,7 +16,7 @@ import {
   TenantAiResolver, platformAi, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, ConnectionCredentials, type ConnectionAuthProvider,
   CardService, PostgresContactStore, cardsAccess, type ContactStore, BulkMailService, PostgresBulkMailStore, NoticeService, PostgresNoticeStore,
-  InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, JanLookupService, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, InquiryService, PostgresInquiryStore, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, MEMBER_LINE_SEND, LineApiVerifier, MockLineVerifier, JGrantsApi, MockJGrants, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, WEB_REVIEW_REQUEST, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, webColumnsAccess, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, WEB_COLUMN_SIGNAGE_PUBLISH, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, applyStockChanges, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
+  InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, JanLookupService, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, InquiryService, PostgresInquiryStore, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, CanvaService, HttpCanvaApi, MockCanvaApi, PostgresCanvaConnectionStore, MEMBER_LINE_SEND, LineApiVerifier, MockLineVerifier, JGrantsApi, MockJGrants, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, WEB_REVIEW_REQUEST, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, webColumnsAccess, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, WEB_COLUMN_SIGNAGE_PUBLISH, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, applyStockChanges, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
   type SecretBox, type GeminiModels,
   type FileStore, type TenantExtensions, type HelpArticle, type ManualMeta, type LlmProvider, type Logger, type Repository, type WorkspaceConnector,
 } from '@m2office/core';
@@ -29,6 +29,7 @@ import { OAuthStateStore } from './auth/oauth-state.js';
 import { HandoffStore } from './auth/handoff.js';
 import { DebugLog, debugEnabled } from './debug/log.js';
 import { QUIET_TRACES, traceTitle } from './debug/trace.js';
+import { printDriveFor } from './print-drive.js';
 
 /** API プロセス全体で共有する依存。 */
 export interface AppDeps {
@@ -91,6 +92,8 @@ export interface AppDeps {
    * `redirectUri` は Google、`connectionRedirectUri` は認証の要る会社の接続（仕様書 第12.11.6.2節）の戻り先
    */
   oauth: { redirectUri: string; connectionRedirectUri: string; states: OAuthStateStore };
+  /** 本人の Canva の接続（仕様書 第41.19.3節）。運営が設定していなければ `null`。 */
+  canva: CanvaService | null;
   /** 認証の要る会社の接続の認可（仕様書 第12.11.6.4節）。接続の確認とツールの取り直しで使う。 */
   connections: ConnectionCredentials;
   /** ログインの `state`（仕様書 第16.1.2節）。業務の連携のものとは別に持つ。 */
@@ -509,6 +512,16 @@ export function buildDeps(): AppDeps {
   };
   // 販促物の作成（内蔵の拡張。仕様書 第41章）。画像はファイルの置き場（print-<版>-…）に置く。
   // 店頭サイネージに流す・お知らせの下書きにする・在庫の品目から値札（第41.18節）
+  // Canva（第41.19.3節）。運営が公開のつなぎを登録して入れた鍵か、開発の見本（CANVA_MOCK=true）のときだけ
+  const canvaRedirect = process.env['CANVA_OAUTH_REDIRECT_URI']
+    ?? new URL('/v1/oauth/canva/callback', process.env['GOOGLE_OAUTH_REDIRECT_URI'] ?? 'http://localhost:3100/v1/oauth/google/callback').toString();
+  const canvaApi = process.env['CANVA_MOCK'] === 'true' ? new MockCanvaApi()
+    : process.env['CANVA_CLIENT_ID'] && process.env['CANVA_CLIENT_SECRET']
+      ? new HttpCanvaApi({ clientId: process.env['CANVA_CLIENT_ID'], clientSecret: process.env['CANVA_CLIENT_SECRET'] }) : null;
+  const canva = canvaApi ? new CanvaService({
+    api: canvaApi, box, redirectUri: canvaRedirect,
+    store: new PostgresCanvaConnectionStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+  }) : null;
   const printAnnouncementsAccess = announcementsAccess(repo);
   const printInventoryAccess = inventoryAccess(repo);
   const printDesigns = {
@@ -526,6 +539,14 @@ export function buildDeps(): AppDeps {
       inventory: {
         access: async (tenantId, userId) => !!(await printInventoryAccess(tenantId, userId)),
         items: (tenantId) => inventoryService.store.listItems(tenantId),
+      },
+      // ドライブの写真（第41.19.2節）
+      drive: printDriveFor({ repo, box, connector }),
+      ...(canva ? { canva } : {}),
+      // 会員の特典のポップ（第41.19.1節）
+      members: {
+        access: async (tenantId, userId) => !!(await members.access(tenantId, userId)),
+        rewards: (tenantId) => members.service.rewards({ tenantId, userId: 'system' }),
       },
     }),
     access: printDesignsAccess(repo),
@@ -731,6 +752,7 @@ export function buildDeps(): AppDeps {
         ?? new URL('/v1/oauth/connection/callback', googleRedirect).toString(),
       states: new OAuthStateStore(),
     },
+    canva,
     loginStates: new OAuthStateStore(),
     handoffs: new HandoffStore(),
     cards,
