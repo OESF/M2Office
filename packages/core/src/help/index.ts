@@ -9,3 +9,7 @@ export {
   HelpCatalog, parseArticle, parseManual, audiencesFor, helpTerms, helpConcepts, HELP_CATEGORIES,
   type HelpArticle, type HelpAudience, type HelpCategory, type HelpHit, type HelpContext, type HelpScope, type ManualMeta,
 } from './articles.js';
+export {
+  HelpFeedback, PostgresHelpFeedbackStore, MemoryHelpFeedbackStore, HELP_FEEDBACK_LIMITS, missKey, summarizeMisses, summarizeRatings,
+  type HelpFeedbackStore, type HelpMissSummary, type HelpRatingSummary, type HelpRatingSource,
+} from './feedback.js';

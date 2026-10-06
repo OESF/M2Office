@@ -17,7 +17,7 @@ import {
   api, ApiError, describeError,
   type AgentSummary, type ApprovalView, type Lookup, type Me, type RunDetail, type SecretaryReply,
 } from './api.js';
-import { AgentHelpTip, HelpCenter, HelpTip, Markdown, PageTitle, Tour, openHelp, useOpenHelp } from './help.js';
+import { AgentHelpTip, HelpCenter, HelpRating, HelpTip, Markdown, PageTitle, Tour, openHelp, useOpenHelp } from './help.js';
 import { AppLauncher, AppVersionBadge } from './launcher.js';
 import { startVoice, type VoiceCall } from './voice.js';
 import { keyLabel, useHotkey, useNumberHotkeys } from './keys.js';
@@ -1087,6 +1087,8 @@ function CanvasView({ result, onOpenAgent }: {
       {result.helpArticles?.map((a) => (
         <button key={a.id} className="help-item" onClick={() => openHelp(a.id)}>{a.title}</button>
       ))}
+      {/* 使い方の答えが役に立ったか（答えに使ったいちばん上の記事に付ける。第6.10.10節） */}
+      {result.helpArticles?.[0] && <HelpRating key={`${result.id}-${result.helpArticles[0].id}`} articleId={result.helpArticles[0].id} source="secretary" />}
       {/* 会話の画面には答えだけを出し、根拠は畳む（仕様書 第6.2節「会話の画面には答えだけを出す」）。結果が変わったら閉じ直す */}
       {(facts.length > 0 || sources.length > 0) && (
         <details className="fold evidence-fold" key={result.id}>

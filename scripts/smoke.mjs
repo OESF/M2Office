@@ -6548,6 +6548,43 @@ console.log('\n■ 80. 会員とポイント（入り切り・会員証・来店
   }
 }
 
+console.log('\n■ 81. ヘルプを育てる（答えられなかった質問・役に立ったか・管理者だけ・会社の境界。第6.10.10節）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  try {
+    await owner.query(`delete from help_misses where tenant_id in ('t-alpha', 't-beta')`);
+    await owner.query(`delete from help_ratings where tenant_id in ('t-alpha', 't-beta')`);
+    // ヘルプに当たらない使い方の質問は、質問した人を持たずに残る
+    await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message: 'スモークの宇宙船の操縦はどうやってするの？' }) }, 'member');
+    await sleep(300);
+    const { rows: missRows } = await owner.query(`select * from help_misses where tenant_id = 't-alpha'`);
+    missRows.length === 1 && missRows[0].question.includes('宇宙船') && !('user_id' in missRows[0])
+      ? ok('ヘルプに当たらない使い方の質問を、質問した人を持たずに残す') : ng('答えられなかった質問の残し方が違う', JSON.stringify(missRows));
+    const good = await call('a', '/v1/help/feedback', { method: 'POST', body: JSON.stringify({ articleId: 'start-screen', source: 'article', helpful: false }) }, 'member');
+    const again = await call('a', '/v1/help/feedback', { method: 'POST', body: JSON.stringify({ articleId: 'start-screen', source: 'article', helpful: true }) }, 'member');
+    const bad = await call('a', '/v1/help/feedback', { method: 'POST', body: JSON.stringify({ articleId: 'start-screen', source: 'x', helpful: true }) }, 'member');
+    const unknown = await call('a', '/v1/help/feedback', { method: 'POST', body: JSON.stringify({ articleId: 'no-such-article', source: 'article', helpful: true }) }, 'member');
+    good.status === 200 && again.status === 200 && bad.status === 400 && unknown.status === 404
+      ? ok('記事が役に立ったかを付けられ、押し直せる（違う値と知らない記事は断る）') : ng('役に立ったかの扱いが違う', JSON.stringify({ good: good.status, again: again.status, bad: bad.status, unknown: unknown.status }));
+    const memberView = await call('a', '/v1/help/feedback', {}, 'member');
+    const adminView = await call('a', '/v1/help/feedback');
+    const otherView = await call('b', '/v1/help/feedback');
+    const rating = adminView.body.ratings?.find((r) => r.articleId === 'start-screen');
+    memberView.status === 403 && adminView.status === 200 && adminView.body.misses?.some((m) => m.question.includes('宇宙船') && m.count === 1)
+      && rating?.helpful === 1 && rating?.notHelpful === 0 && !JSON.stringify(adminView.body).includes('member@')
+      && otherView.status === 200 && !otherView.body.misses?.some((m) => m.question.includes('宇宙船'))
+      ? ok('ヘルプの見直しは管理者だけが見られ、件数と質問の文だけで名前は出さない。ほかの会社には出ない') : ng('ヘルプの見直しが違う', JSON.stringify({ m: memberView.status, a: adminView.body, b: otherView.body }));
+  } catch (err) {
+    ng('ヘルプを育てる確認が途中で止まった', String(err));
+  } finally {
+    await owner.query(`delete from help_misses where tenant_id in ('t-alpha', 't-beta')`);
+    await owner.query(`delete from help_ratings where tenant_id in ('t-alpha', 't-beta')`);
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

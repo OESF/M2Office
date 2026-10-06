@@ -386,6 +386,7 @@ function ArticleView({ id, items, onOpen, onBack }: {
               {next && <button className="btn ghost small" onClick={() => onOpen(next.id)}>{next.title} ›</button>}
             </div>
           )}
+          <HelpRating key={article.id} articleId={article.id} source="article" />
           {article.related.length > 0 && (
             <div className="related">
               <h3>関連する記事</h3>
@@ -615,4 +616,22 @@ function approvalSummary(approvals: AgentHelpView['approvals']): string {
   const byWho = new Map<string, string[]>();
   for (const a of approvals) byWho.set(a.who, [...(byWho.get(a.who) ?? []), `「${a.step}」`]);
   return [...byWho].map(([who, steps]) => `${steps.join('と')}は${who}が判断します`).join('。');
+}
+
+/**
+ * 「役に立ちましたか」（第6.10.10節）。押すと件数に入り、お礼に変わる。押し直しは件数を置き換える（1 人 1 つ）。
+ * 管理者は件数だけを見る（誰が押したかは見ない）。
+ */
+export function HelpRating({ articleId, source }: { articleId: string; source: 'article' | 'secretary' }) {
+  const [done, setDone] = useState<boolean | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const rate = (helpful: boolean) => api.help.rate(articleId, source, helpful).then(() => { setDone(helpful); setError(null); }).catch((e) => setError(describeError(e, '送れませんでした')));
+  return (
+    <div className="help-rating small">
+      {done === null
+        ? <>役に立ちましたか？ <button className="link small" onClick={() => void rate(true)}>はい</button> <button className="link small" onClick={() => void rate(false)}>いいえ</button></>
+        : <span className="muted">{done ? 'ありがとうございます。' : 'ありがとうございます。記事を見直す材料にします。'}</span>}
+      {error && <span className="error"> {error}</span>}
+    </div>
+  );
 }

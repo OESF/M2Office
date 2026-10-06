@@ -1094,6 +1094,14 @@ export const api = {
     search: (q: string, scope: HelpScope = 'workspace') => call<{ items: { id: string; title: string; category: string; excerpt: string }[] }>(
       `/help/search?q=${encodeURIComponent(q)}&scope=${scope}`),
     agent: (agentId: string) => call<AgentHelpView>(`/help/agents/${encodeURIComponent(agentId)}`),
+    /** 記事が役に立ったか（ヘルプセンターの記事か、秘書の答え。第6.10.10節）。 */
+    rate: (articleId: string, source: 'article' | 'secretary', helpful: boolean) =>
+      call<{ ok: true }>('/help/feedback', { method: 'POST', body: JSON.stringify({ articleId, source, helpful }) }),
+    /** ヘルプの見直し（管理者だけ）。見つからなかった質問と、記事ごとの件数。 */
+    feedback: () => call<{
+      misses: { question: string; count: number; lastAt: string }[]; missDays: number;
+      ratings: { articleId: string; title: string; helpful: number; notHelpful: number }[];
+    }>('/help/feedback'),
   },
   onboarding: {
     tour: () => call<{ completedAt: string | null }>('/onboarding/tour'),

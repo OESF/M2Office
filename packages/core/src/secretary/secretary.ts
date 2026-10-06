@@ -69,6 +69,8 @@ export interface SecretaryDeps {
   agents: AgentDefinition[];
   /** ヘルプの記事。あれば使い方の質問に答える（仕様書 第6.10.6節）。 */
   help?: HelpCatalog;
+  /** ヘルプに見当たらなかった使い方の質問を残す（質問した人は渡さない。仕様書 第6.10.10節） */
+  helpMiss?(tenantId: string, question: string): Promise<void>;
   /** その会社で使える業務エージェント（公式と導入した拡張機能）。省略時は `agents`。 */
   agentsFor?(tenantId: string, userId?: string): Promise<AgentDefinition[]>;
   /** 会社ごとの推論（会社が自社の鍵を登録していればその鍵。仕様書 第14.3.3節）。省略時は `llm`。 */
@@ -874,6 +876,8 @@ export class Secretary {
 
     const parts: string[] = [];
     const top = hits[0];
+    // ヘルプに見当たらなかった質問は、管理者がヘルプを見直す材料に残す（名前は残さない。第6.10.10節）
+    if (!top && this.deps.helpMiss) void this.deps.helpMiss(tenantId, message).catch(() => undefined);
     if (top) parts.push(`M2Office の使い方（「${top.article.title}」より）: ${top.excerpt}`);
     if (rules.length > 0) {
       parts.push(`社内の規程では、${rules.map((r) => `「${r.citation}」`).join('、')}に記載があります。`);

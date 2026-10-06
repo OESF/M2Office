@@ -21,7 +21,7 @@ import { Icon, NavHeading, NavItem, SideNavLayout, ThemeToggle, type IconName } 
 
 type Tab =
   | 'dashboard' | 'usage' | 'runs' | 'schedules' | 'company' | 'agents' | 'extensions' | 'users' | 'knowledge' | 'audit'
-  | 'connectors' | 'setup' | 'help';
+  | 'connectors' | 'setup' | 'help' | 'helpReview';
 
 /**
  * 管理者ページの左ペインの項目。説明はマウスを重ねたときに出す（仕様書 第6.1.1節）。
@@ -94,6 +94,7 @@ const TABS: {
   { id: 'runs', label: '実行の一覧', icon: 'runs', description: '全員の実行の状態と費用（中身は見られません）', group: '記録' },
   { id: 'schedules', label: '定時実行の一覧', icon: 'schedules', description: '全員の定時実行と、動かないものの理由（見るだけ）', group: '記録' },
   { id: 'audit', label: '監査ログ', icon: 'audit', description: '誰が何をしたかの記録', group: '記録' },
+  { id: 'helpReview', label: 'ヘルプの見直し', icon: 'help', description: '秘書が答えられなかった使い方の質問と、記事が役に立ったか', group: '記録' },
   { id: 'help', label: 'ヘルプ', icon: 'help', description: '管理者向けの記事と検索', group: '' },
 ];
 
@@ -264,6 +265,7 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
             {tab === 'users' && <UserSettings meId={me.user.id} page={page} />}
             {tab === 'knowledge' && <KnowledgeSettings page={page} />}
             {tab === 'audit' && <Audit />}
+            {tab === 'helpReview' && <HelpReview />}
             {tab === 'connectors' && (page === 'mcp'
               // 会社の接続の管理（仕様書 第6.6.3.0節、ADR-0037）
               ? <ConnectorList />
@@ -354,6 +356,45 @@ const SCHEDULE_STATE: Record<AdminSchedule['state'], { label: string; className:
  * **見るだけで操作しない**（本人の権限で動くものを他人が変えない。第6.1.7節）。業務の入力は API も返さない（不変則 I-10）。
  * 次の回に動かないものは、起動役と同じ判定の理由を状態の下に出す
  */
+/**
+ * ヘルプの見直し（仕様書 第6.10.10節）。秘書がヘルプに見当たらなかった使い方の質問（同じものをまとめた件数。質問した人は出さない）と、
+ * 記事ごとの役に立った・立たなかったの件数。
+ */
+function HelpReview() {
+  const { data, error } = useLoad(api.help.feedback);
+  return (
+    <>
+      <PageTitle trail={['ヘルプの見直し']} help={{
+        article: 'admin-help-review',
+        text: '秘書がヘルプで答えられなかった使い方の質問と、記事が役に立ったかの件数です。誰が聞いたか・押したかは出しません。',
+      }} />
+      {error && <p className="error">{error}</p>}
+      {data && (
+        <>
+          <h2>答えられなかった質問（直近 {data.missDays} 日）</h2>
+          {data.misses.length === 0
+            ? <p className="muted">ありません</p>
+            : (
+              <table className="table">
+                <thead><tr><th>質問</th><th>件数</th><th>最後</th></tr></thead>
+                <tbody>{data.misses.map((m) => <tr key={`${m.question}-${m.lastAt}`}><td>{m.question}</td><td>{m.count}</td><td>{time(m.lastAt)}</td></tr>)}</tbody>
+              </table>
+            )}
+          <h2>記事が役に立ったか</h2>
+          {data.ratings.length === 0
+            ? <p className="muted">まだありません</p>
+            : (
+              <table className="table">
+                <thead><tr><th>記事</th><th>役に立った</th><th>役に立たなかった</th></tr></thead>
+                <tbody>{data.ratings.map((r) => <tr key={r.articleId}><td>{r.title}</td><td>{r.helpful}</td><td>{r.notHelpful}</td></tr>)}</tbody>
+              </table>
+            )}
+        </>
+      )}
+    </>
+  );
+}
+
 function TenantSchedules() {
   const { data, error } = useLoad(api.admin.schedules);
   return (

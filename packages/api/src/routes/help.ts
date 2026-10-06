@@ -1,5 +1,5 @@
 /**
- * @file ヘルプセンターの API。記事の一覧・本文・検索と、業務の説明を返す。
+ * @file ヘルプセンターの API。記事の一覧・本文・検索と、業務の説明を返す。記事が役に立ったかを受け、管理者に見つからなかった質問と件数を返す（第6.10.10節）。
  *
  * 利用者の役割で見られない記事と、会社で無効にした業務の記事は返さない。
  *
@@ -73,6 +73,33 @@ export function helpRoute(deps: AppDeps) {
     const def = ctx.agents?.find((a) => a.id === c.req.param('agentId'));
     if (!def || ctx.disabledAgents.includes(def.id)) return c.json({ error: '業務が見つかりません' }, 404);
     return c.json(deps.help.agentHelp(def, ctx));
+  });
+
+  /** 記事が役に立ったか（ヘルプセンターの記事か、秘書の答え。押し直せば置き換える。第6.10.10節）。本人が読める記事だけ。 */
+  app.post('/feedback', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const body = await c.req.json<{ articleId?: unknown; source?: unknown; helpful?: unknown }>().catch(() => ({} as { articleId?: unknown; source?: unknown; helpful?: unknown }));
+    const articleId = typeof body.articleId === 'string' ? body.articleId : '';
+    const source = body.source === 'secretary' ? 'secretary' : body.source === 'article' ? 'article' : null;
+    if (!articleId || !source || typeof body.helpful !== 'boolean') return c.json({ error: '記事と、役に立ったかを入れてください' }, 400);
+    if (!deps.help.get(articleId, await contextOf(tenant.id, user.id, user.roles))) return c.json({ error: '記事が見つかりません' }, 404);
+    await deps.helpFeedback.rate(tenant.id, user.id, articleId, source, body.helpful);
+    return c.json({ ok: true });
+  });
+
+  /**
+   * ヘルプの見直し（管理者だけ。第6.10.10節）。秘書がヘルプに見当たらなかった使い方の質問（同じものをまとめた件数。質問した人は出さない）と、
+   * 記事ごとの役に立った・立たなかったの件数。
+   */
+  app.get('/feedback', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    if (!user.roles.includes('admin')) return c.json({ error: 'ヘルプの見直しは管理者だけが見られます' }, 403);
+    const s = await deps.helpFeedback.summary(tenant.id);
+    const ctx = await contextOf(tenant.id, user.id, user.roles);
+    return c.json({
+      misses: s.misses, missDays: s.missDays,
+      ratings: s.ratings.map((r) => ({ ...r, title: deps.help.get(r.articleId, ctx)?.title ?? r.articleId })),
+    });
   });
 
   return app;

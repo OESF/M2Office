@@ -9,6 +9,7 @@
  */
 
 import {
+  HelpFeedback, PostgresHelpFeedbackStore,
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS, GoogleDataRetention, GoogleRevocation, agentUsesGoogle,
   RunEngine, Secretary, OFFICIAL_AGENTS, buildConnector, LocalFileStore,
   createLoggerFromEnv, HelpCatalog, BufferedHealthSink, PostgresHealthStore, installHealthSink, type HealthStore, parseArticle, parseManual, ExtensionHub, HttpMcpClient, loadExtensions,
@@ -49,6 +50,8 @@ export interface AppDeps {
   help: HelpCatalog;
   /** ヘルプで読める業務のマニュアル（名前・木の区分の名前・どの内蔵の拡張のものか。第6.10.7.3節）。 */
   helpManuals: { id: string; title: string; extension: string }[];
+  /** ヘルプを育てる（見つからなかった質問と、役に立ったか。仕様書 第6.10.10節） */
+  helpFeedback: HelpFeedback;
   /** Google から取得したデータの保持（仕様書 第14.3.2節）。連携の解除のときに中身を消す。 */
   retention: GoogleDataRetention;
   /** Google の許可がなくなったとき（取り消し・OAuth クライアントの削除・利用者の停止）の後始末（仕様書 第6.5.2.1節）。 */
@@ -574,6 +577,7 @@ export function buildDeps(): AppDeps {
   });
   const manuals = loadManuals(manualDir(), log);
   const help = new HelpCatalog([...loadHelpArticles(helpDir(), log), ...manuals.articles], OFFICIAL_AGENTS, registry);
+  const helpFeedback = new HelpFeedback(new PostgresHelpFeedbackStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'));
   const secretary = new Secretary({
     // 勤怠と有給・本人の給与明細（第30.20節）
     attendance, payroll,
@@ -599,6 +603,8 @@ export function buildDeps(): AppDeps {
       return !!page && page.status < 400;
     },
     repo, llm, connector, agents: OFFICIAL_AGENTS, help, agentsFor, llmFor: (t) => ai.llmFor(t), notices,
+    // ヘルプに見当たらなかった使い方の質問を残す（名前は残さない。第6.10.10節）
+    helpMiss: (tenantId, question) => helpFeedback.miss(tenantId, question),
     // デバッグモードでは、振り分けの経過を記録に残す（仕様書 第20.4.1節「デバッグモード」）
     ...(debug ? { onTrace: (tenantId: string, userId: string, action: string, target: string, detail?: Record<string, unknown>) => {
       if (!QUIET_TRACES.has(action)) debug.add(tenantId, userId, 'secretary', traceTitle(action, target, detail), { action, target, ...detail });
@@ -673,7 +679,7 @@ export function buildDeps(): AppDeps {
   onGrantLost = (tenantId, userId, enc) => revocation.lostGrant(tenantId, userId, enc, new Date());
   const googleRedirect = process.env['GOOGLE_OAUTH_REDIRECT_URI'] ?? 'http://localhost:3100/v1/oauth/google/callback';
   return {
-    repo, llm, connector, files, registry, engine, secretary, auth: loadAuthConfig(), log, health, debug, help, helpManuals: manuals.list, retention, revocation,
+    repo, llm, connector, files, registry, engine, secretary, auth: loadAuthConfig(), log, health, debug, help, helpManuals: manuals.list, helpFeedback, retention, revocation,
     hub, tenantView, agentsFor, canUse, isAvailable, box, ai, connections,
     onsiteTenant: ai.deployment() === 'onsite' ? (process.env['M2O_ONSITE_TENANT']?.trim() || null) : null,
     oauth: {

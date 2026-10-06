@@ -436,6 +436,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/help/search?q=&scope=` | 記事の検索（出す所の記事の中から） |
 | `GET /v1/debug/events` ／ `DELETE` | デバッグモード（`M2O_DEBUG=true`）の本人の記録（新しい順。`after` でそれより後だけ）／ 消す。デバッグモードでなければ 404（仕様書 第20.4.1節） |
 | `GET /v1/help/agents/:agentId` | 業務の説明（定義から自動で作る） |
+| `POST` ／ `GET /v1/help/feedback` | 記事が役に立ったか（`articleId`・`source`: article か secretary・`helpful`。押し直せば置き換える）／ ヘルプの見直し（管理者だけ。答えられなかった質問と記事ごとの件数。名前は出さない。仕様書 第6.10.10節） |
 | `GET /v1/onboarding/tour` | 本人の初回の案内の状態 |
 | `POST /v1/onboarding/tour` | 案内を見終えた記録。`{ "reset": true }` で見直し |
 | `GET /v1/onboarding/checklist` | 管理者: 初期設定のチェックリスト |
