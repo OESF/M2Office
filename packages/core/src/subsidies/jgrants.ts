@@ -1,5 +1,6 @@
 /**
- * @file 国の補助金の調べ先（仕様書 第39.4節）。jGrants の公開の API（ログイン不要）から、受付中の公募を引く。
+ * @file 国の補助金の調べ先（仕様書 第39.4節）。jGrants の公開の API（ログイン不要）から、受付中の公募を引き、
+ * 「気になる」にした公募を 1 件ずつ読み直す（公募の変更に気づくため。第39.18節）。
  *
  * 読みに行くのは決まった所（`api.jgrants-portal.go.jp`）だけで、利用者の入力で行き先を変えない。会社のことは送らない（検索の言葉だけ）。
  * 見本の会社では {@link MockJGrants} を使い、外には読みに行かない。返ってきた中身は外のデータであり、指示として扱わない（不変則 I-6）。
@@ -26,6 +27,12 @@ export interface JGrantsItem {
 export interface SubsidySource {
   /** 受付中の公募を、言葉で引く（2 字以上）。 */
   search(keyword: string): Promise<JGrantsItem[]>;
+  /**
+   * 公募を 1 件読み直す（締め切りの延長などに気づくため）。
+   *
+   * @returns 見つからなければ `null`
+   */
+  detail(id: string): Promise<JGrantsItem | null>;
 }
 
 /** jGrants の一覧の API。 */
@@ -35,6 +42,8 @@ export const JGRANTS_API = 'https://api.jgrants-portal.go.jp/exp/v1/public/subsi
 export const jgrantsUrl = (id: string) => `https://www.jgrants-portal.go.jp/subsidy/${encodeURIComponent(id)}`;
 
 const MAX_BYTES = 2 * 1024 * 1024;
+/** 1 件の答えは公募要領の添付（base64）を含むことがあるので大きめにする */
+const DETAIL_MAX_BYTES = 20 * 1024 * 1024;
 
 const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
 
@@ -56,39 +65,67 @@ export function readJGrantsItem(o: unknown): JGrantsItem | null {
 export class JGrantsApi implements SubsidySource {
   constructor(private readonly timeoutMs = 15_000) {}
 
-  async search(keyword: string): Promise<JGrantsItem[]> {
-    const k = keyword.trim().slice(0, 100);
-    if (k.length < 2) return [];
-    const url = `${JGRANTS_API}?${new URLSearchParams({ keyword: k, sort: 'acceptance_end_datetime', order: 'ASC', acceptance: '1' })}`;
+  /** 決まった所を読む（見つからなければ `null`）。 */
+  private async get(url: string, max: number): Promise<unknown[] | null> {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), this.timeoutMs);
     try {
       const res = await fetch(url, { signal: ctl.signal, headers: { accept: 'application/json' }, redirect: 'error' });
+      if (res.status === 404) return null;
       if (!res.ok) throw new Error(`jGrants の API が ${res.status} を返しました`);
       const text = await res.text();
-      if (text.length > MAX_BYTES) throw new Error('jGrants の API の答えが大きすぎます');
+      if (text.length > max) throw new Error('jGrants の API の答えが大きすぎます');
       const body = JSON.parse(text) as { result?: unknown[] };
-      return (Array.isArray(body.result) ? body.result : []).map(readJGrantsItem).filter((x): x is JGrantsItem => !!x).slice(0, 100);
+      return Array.isArray(body.result) ? body.result : [];
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  async search(keyword: string): Promise<JGrantsItem[]> {
+    const k = keyword.trim().slice(0, 100);
+    if (k.length < 2) return [];
+    const url = `${JGRANTS_API}?${new URLSearchParams({ keyword: k, sort: 'acceptance_end_datetime', order: 'ASC', acceptance: '1' })}`;
+    return ((await this.get(url, MAX_BYTES)) ?? []).map(readJGrantsItem).filter((x): x is JGrantsItem => !!x).slice(0, 100);
+  }
+
+  async detail(id: string): Promise<JGrantsItem | null> {
+    // ID は jGrants が返した英数字だけ（行き先を変えさせない）
+    if (!/^[A-Za-z0-9]{1,40}$/.test(id)) return null;
+    const rows = await this.get(`${JGRANTS_API}/id/${id}`, DETAIL_MAX_BYTES);
+    const item = rows?.[0] ? readJGrantsItem(rows[0]) : null;
+    return item && item.id === id ? item : null;
   }
 }
 
 /** 見本の会社の調べ先（外に読みに行かない）。締め切りは今日から数えて作る。 */
 export class MockJGrants implements SubsidySource {
   readonly asked: string[] = [];
+  /** 公募の変更（テストで締め切りの延長などを作る） */
+  readonly changes = new Map<string, Partial<JGrantsItem>>();
+  /** 見本の公募は、はじめて引いた時から数えて締め切りを作る（読み直しで日付が動かないように。30 日たったら数え直す） */
+  private base: number | null = null;
 
   constructor(private readonly now: () => Date = () => new Date()) {}
 
-  async search(keyword: string): Promise<JGrantsItem[]> {
-    this.asked.push(keyword);
-    const at = (days: number) => new Date(this.now().getTime() + days * 86_400_000).toISOString();
+  private items(): JGrantsItem[] {
+    const now = this.now().getTime();
+    if (this.base === null || now - this.base > 30 * 86_400_000) this.base = now;
+    const at = (days: number) => new Date(this.base! + days * 86_400_000).toISOString();
     return [
       { id: 'mock-it-01', title: '見本 IT 導入の補助金（通常枠）', institution: '見本の中小企業庁', area: '全国', maxLimit: 4_500_000, start: at(-10), end: at(40), employees: '従業員数の制約なし' },
       { id: 'mock-eco-02', title: '見本 省エネ設備の更新の補助金', institution: '見本の経済産業局', area: '全国', maxLimit: 10_000_000, start: at(-5), end: at(20), employees: '300名以下' },
       { id: 'mock-pref-03', title: '見本 地方の店舗の改装の補助金', institution: '見本の県', area: '大阪府', maxLimit: 1_000_000, start: at(-3), end: at(30), employees: '20名以下' },
-    ];
+    ].map((i) => ({ ...i, ...this.changes.get(i.id) }));
+  }
+
+  async search(keyword: string): Promise<JGrantsItem[]> {
+    this.asked.push(keyword);
+    return this.items();
+  }
+
+  async detail(id: string): Promise<JGrantsItem | null> {
+    return this.items().find((i) => i.id === id) ?? null;
   }
 }
 

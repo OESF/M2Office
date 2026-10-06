@@ -1,5 +1,6 @@
 /**
- * @file 補助金・助成金の案内のツール（仕様書 第39.8節）。候補を引く・調べる・気になる／見送り。秘書と付属の業務が使う。
+ * @file 補助金・助成金の案内のツール（仕様書 第39.8節）。候補を引く・調べる・気になる／見送り、朝のブリーフに載せる締め切りの近い制度（第39.18節）。
+ * 秘書と付属の業務と朝のブリーフが使う。
  *
  * 会社が切っているときと、利用範囲の外の人には「使えない」と返す（呼ぶたびに `ctx.subsidies.access()` で確かめる）。
  * 調べた結果は外のデータとして扱い（`untrusted`）、申請の書類は作らない（第39.6節）。
@@ -21,7 +22,7 @@ export interface SubsidyToolContext {
 }
 
 const UNAVAILABLE = { available: false, reason: '補助金・助成金の案内は使えません（会社で切っているか、利用範囲の外です）' };
-const NOTE = '公募の中身は変わることがあります。申請の前に出典で確かめてください。申請書は作りません（相談先: 商工会・商工会議所・よろず支援拠点・認定支援機関・社会保険労務士・行政書士）';
+const NOTE = '公募の中身は変わることがあります。申請の前に出典で確かめてください。申請書は作りません（相談先は contacts の地域の窓口と、認定支援機関・社会保険労務士・行政書士）';
 const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
 const who = (ctx: ToolContext) => ({ tenantId: ctx.tenantId, userId: ctx.userId });
 
@@ -63,7 +64,10 @@ export const subsidiesFind: Tool = {
     const settings = await ctx.subsidies!.access();
     const today = service.today();
     const list = matching((await service.list(who(ctx))).filter((c) => c.status !== 'skipped' && (!c.deadline || c.deadline >= today)), str(args['query']));
-    return { available: true, untrusted: true, path: '/subsidies', searchedAt: settings?.searchedAt ?? null, count: list.length, items: list.slice(0, 10).map(brief), note: NOTE };
+    return {
+      available: true, untrusted: true, path: '/subsidies', searchedAt: settings?.searchedAt ?? null, count: list.length, items: list.slice(0, 10).map(brief), note: NOTE,
+      contacts: await service.contactsOf(ctx.tenantId),
+    };
   },
 };
 
@@ -121,5 +125,27 @@ export const subsidiesMark: Tool = {
   },
 };
 
+/**
+ * 朝のブリーフに載せる、締め切りの近い「気になる」の制度（第39.18節）。7 日のうちのものだけ。
+ *
+ * @remarks 危険度 `read`
+ */
+export const subsidiesBrief: Tool = {
+  name: 'subsidies.brief',
+  risk: 'read',
+  activityLabel: '補助金・助成金の締め切りを見ています',
+  helpText: '朝のブリーフに載せる、締め切りの近い「気になる」の補助金・助成金を読みます',
+  description: '「気になる」にした補助金・助成金のうち、締め切りが今日から 7 日のうちのものを、締め切りの近い順に返す（daysLeft は締め切りまでの日数。0 は今日）',
+  args: { properties: {} },
+  async invoke(_args, ctx) {
+    const service = await serviceOf(ctx);
+    if (!service) return UNAVAILABLE;
+    const items = (await service.nearDeadlines(who(ctx))).slice(0, 5).map(({ subsidy: c, daysLeft }) => ({
+      name: c.name, kind: SUBSIDY_KIND_LABELS[c.kind], deadline: c.deadline, daysLeft, source: c.sourceUrl,
+    }));
+    return { available: true, untrusted: true, path: '/subsidies', items };
+  },
+};
+
 /** 補助金・助成金の案内のツール。 */
-export const SUBSIDY_TOOLS: Tool[] = [subsidiesFind, subsidiesSearch, subsidiesMark];
+export const SUBSIDY_TOOLS: Tool[] = [subsidiesFind, subsidiesSearch, subsidiesMark, subsidiesBrief];

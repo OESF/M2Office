@@ -22,7 +22,7 @@ import type { CardCorners,
   Inquiry, InquiryDetail, InquiryParty, InquiryTask, InquiryReply, InquiryMailSkipped, InquiryMonthStats, InquirySettings, InquiryFaqTopic,
   CompetitorOverview, CompetitorFact, CompetitorReport, CompetitorSettings,
   Announcement, AnnouncementDetail, AnnouncementPreview, AnnouncementRecipient, AnnouncementRecipientsRefined, AnnouncementSettings, AnnouncementTexts,
-  Contract, ContractSettings, ReservableItem, ReservableKind, Reservation, ReservationRule, ReservationSeries, Subsidy, SubsidyProfile, SubsidyStatus, Member, MemberPoint, MemberReward, MemberSettings, MemberAudience, MemberMessage,
+  Contract, ContractSettings, ReservableItem, ReservableKind, Reservation, ReservationRule, ReservationSeries, Subsidy, SubsidyContact, SubsidyProfile, SubsidyStatus, Member, MemberPoint, MemberReward, MemberSettings, MemberAudience, MemberMessage,
   WebReviewCandidates, WebReviewReport, WebReviewReportBrief, WebReviewSettings, WebReviewStatus, WebReviewFinding, WebReviewFindingStatus, WebPageMetrics,
 } from '@m2office/shared';
 import { debugMode, recordCall } from './debug.js';
@@ -1373,10 +1373,10 @@ export const api = {
   },
   /** 補助金・助成金の案内（内蔵の拡張。仕様書 第39章）。 */
   subsidies: {
-    /** 候補（過ぎたもの・見送りも含む）と、調べるのに使った会社のこと・関心・最後に調べた日時・調べているか。 */
+    /** 候補（過ぎたもの・見送りも含む）と、調べるのに使った会社のこと・関心・最後に調べた日時・調べているか・相談先の地域の窓口。 */
     list: () => call<{
       items: Subsidy[]; today: string; profile: SubsidyProfile | null; interest: string; industry: string;
-      searchedAt: string | null; searching: boolean; admin: boolean;
+      searchedAt: string | null; searching: boolean; contacts: SubsidyContact[]; admin: boolean;
     }>('/subsidies'),
     /** いま調べる（後ろで調べる。1 日 1 回まで）。 */
     search: () => call<{ ok: true }>('/subsidies/search', { method: 'POST', body: '{}' }),

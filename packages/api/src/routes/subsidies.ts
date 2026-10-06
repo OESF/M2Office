@@ -37,7 +37,7 @@ export function subsidiesRoute(deps: AppDeps) {
     await next();
   });
 
-  /** 候補（締め切りの近い順。過ぎたもの・見送りも含む）と、調べるのに使った会社のこと・関心・最後に調べた日時・調べているか。 */
+  /** 候補（締め切りの近い順。過ぎたもの・見送りも含む）と、調べるのに使った会社のこと・関心・最後に調べた日時・調べているか・相談先の地域の窓口（第39.18節）。 */
   app.get('/', async (c) => {
     const w = who(c);
     const settings = (await deps.repo.getTenantSettings(w.tenantId)).subsidies;
@@ -45,6 +45,7 @@ export function subsidiesRoute(deps: AppDeps) {
     return c.json({
       items: await service.list(w), today: service.today(), profile: settings.profile, interest: settings.interest, industry: settings.industry,
       searchedAt: settings.searchedAt, searching, admin: c.get('ctx').user.roles.includes('admin'),
+      contacts: await service.contactsOf(w.tenantId),
     });
   });
 

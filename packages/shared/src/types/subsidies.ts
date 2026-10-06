@@ -69,6 +69,16 @@ export interface SubsidyProfile {
   employees: string;
 }
 
+/** 相談先の地域の窓口（第39.18節）。 */
+export interface SubsidyContact {
+  /** 窓口の名前（「大阪府よろず支援拠点」など） */
+  name: string;
+  /** 何を相談できるか */
+  role: string;
+  /** 出典の URL（Web の調べもので見つけたときだけ。決まった形で作ったものは空） */
+  url: string;
+}
+
 /** 会社の設定。 */
 export interface SubsidySettings {
   enabled: boolean;
@@ -84,11 +94,20 @@ export interface SubsidySettings {
   monthlyMonth: string | null;
   /** 調べている間の印（始めた日時。終われば `null`） */
   searchingSince: string | null;
+  /** 「気になる」にした国の公募を読み直した日（YYYY-MM-DD。日本時間。第39.18節） */
+  refreshedOn: string | null;
+  /** 相談先の地域の窓口（Web の調べもので見つけたもの。空なら決まった形で作る） */
+  contacts: SubsidyContact[];
+  /** 窓口を調べたときの所在地（変わったら調べ直す） */
+  contactsRegion: string;
+  /** 窓口を調べた日時 */
+  contactsAt: string | null;
 }
 
 /** 補助金・助成金の案内は既定で切り（第39.2節）。 */
 export const DEFAULT_SUBSIDY_SETTINGS: SubsidySettings = {
   enabled: false, interest: '', industry: '', profile: null, searchedAt: null, monthlyMonth: null, searchingSince: null,
+  refreshedOn: null, contacts: [], contactsRegion: '', contactsAt: null,
 };
 
 /** 決まり（第39.4節・第39.7節）。 */
@@ -104,4 +123,14 @@ export const SUBSIDY_LIMITS = {
   interestMax: 100,
   /** 業種の長さ */
   industryMax: 60,
+  /** 朝のブリーフに載せる、締め切りまでの日数（「気になる」にした制度。第39.18節） */
+  briefDays: 7,
+  /** 「気になる」にした国の公募を読み直す時刻（日本時間。1 日 1 回） */
+  refreshHour: 8,
+  /** 締め切りが過ぎても読み直す日数（延長に気づくため） */
+  refreshAfterDays: 14,
+  /** 相談先の窓口の数 */
+  contactsMax: 6,
+  /** 相談先の窓口を調べ直す日数（所在地が変わったときはすぐ） */
+  contactsDays: 90,
 } as const;

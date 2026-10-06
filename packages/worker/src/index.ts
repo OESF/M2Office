@@ -708,12 +708,12 @@ while (running) {
     }
   }
 
-  // 補助金・助成金の月の調べものと、「気になる」にした制度の締め切りの知らせ（第39.7節）
+  // 補助金・助成金の月の調べものと、「気になる」にした制度の締め切りの知らせ（第39.7節）と、公募の変更の読み直し（第39.18節）
   if (Date.now() - lastSubsidyCheck >= SUBSIDY_INTERVAL_MS) {
     lastSubsidyCheck = Date.now();
     try {
       const r = await subsidies.tick(new Date());
-      if (r.searched + r.reminded > 0) log.info('補助金・助成金を調べ、締め切りを知らせました', { searched: r.searched, reminded: r.reminded });
+      if (r.searched + r.reminded + r.changed > 0) log.info('補助金・助成金を調べ、締め切りと公募の変更を知らせました', { searched: r.searched, reminded: r.reminded, changed: r.changed });
     } catch (err) {
       log.warn('補助金・助成金の見張りに失敗しました', { err });
     }

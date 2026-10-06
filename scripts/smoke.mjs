@@ -6361,6 +6361,10 @@ console.log('\n■ 79. 補助金・助成金の案内（入り切り・利用範
     start.status === 202 && items.length > 0 && items.every((x) => x.sourceUrl.startsWith('https://www.jgrants-portal.go.jp/subsidy/') && x.deadline && x.reason)
       && list.body.profile?.region && list.body.interest === 'IT の導入'
       ? ok(`いま調べると、見本の公募から合う制度を出典・締め切り・合う理由つきで出す（${items.length} 件。所在地: ${list.body.profile.region}）`) : ng('調べた結果が違う', JSON.stringify({ start: start.status, list: list.body }).slice(0, 600));
+    // 相談先の地域の窓口（第39.18節）。見本の会社は Web で探さず、所在地から決まった形で作る（URL は作らない）
+    const contacts = list.body.contacts ?? [];
+    contacts.length >= 3 && contacts.some((c) => /よろず支援拠点/.test(c.name)) && contacts.some((c) => /労働局/.test(c.name)) && contacts.every((c) => c.url === '')
+      ? ok(`相談先の地域の窓口を返す（${contacts.slice(0, 3).map((c) => c.name).join('・')}）`) : ng('相談先の窓口が違う', JSON.stringify(contacts));
     const again = await call('a', '/v1/subsidies/search', { method: 'POST', body: '{}' });
     again.status === 409 && /1 日 1 回/.test(again.body.error ?? '') ? ok('いま調べるのは 1 日 1 回まで') : ng(`同じ日にもう一度調べられた（${again.status}）`);
     const first = items[0];

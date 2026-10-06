@@ -2025,6 +2025,10 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .sbs-name { font-weight: 600; }
 .sbs-actions { margin-top: calc(8px * var(--space-scale)) !important; }
 .sbs-actions > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sbs-contacts summary { cursor: pointer; font-weight: 600; }
+.sbs-contacts ul { margin: calc(6px * var(--space-scale)) 0 0; padding-left: 1.2em; }
+.sbs-contacts li { margin: calc(3px * var(--space-scale)) 0; }
+.sbs-contacts a, .sbs-contacts a:visited { color: var(--accent); }
 
 /* 会員とポイント（第40.9節） */
 .mbr { display: flex; flex-direction: column; gap: calc(10px * var(--space-scale)); }

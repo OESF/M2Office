@@ -74,6 +74,7 @@
 | `sheets.read` | read | `drive.file`（機密でない） | Google スプレッドシートの表を読みます |
 | `skill.read` | read | — | このスキルに入っている資料を読みます |
 | `slides.template` | read | `drive`（制限付き） | 会社が登録したスライドのテンプレートの、使えるレイアウトを確かめます。どこにも書き込みません |
+| `subsidies.brief` | read | — | 朝のブリーフに載せる、締め切りの近い「気になる」の補助金・助成金を読みます |
 | `subsidies.find` | read | — | 会社に合いそうな補助金・助成金の候補を、締め切りの近い順に引きます |
 | `subsidies.search` | read | — | 国・自治体の補助金と助成金を調べ、会社に合いそうなものを候補にします |
 | `tasks.list` | read | `tasks`（機密） | ToDo の一覧を見ます |
@@ -192,6 +193,7 @@
 | `sheets.read` | `spreadsheetId`（必須）: スプレッドシートの ID、`maxRows`: 読む行数の上限（既定 500） |
 | `skill.read` | `path`（必須）: ファイルの相対パス |
 | `slides.template` | `template`: テンプレートの名前（任意） |
+| `subsidies.brief` | なし |
 | `subsidies.find` | `query`: 制度の名前の言葉 |
 | `subsidies.search` | `interest`: 頼みにあった関心 |
 | `tasks.list` | なし |

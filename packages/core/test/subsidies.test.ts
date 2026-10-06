@@ -2,13 +2,14 @@
  * @file 補助金・助成金の案内の段 1 の単体テスト（仕様書 第39.17節）。所在地は市区町村まで・従業員の数は幅・jGrants の読み方と地域の絞り込み・
  * 推論が使えないときの見立て・推論の見立て（出典の無い制度と締め切りの過ぎた制度を出さない、jGrants の金額と日付は API のまま）・
  * 1 日 1 回・見送りは出し直さない・中身が変われば出し直す・月の調べものと案内・締め切りの 14 日前と 3 日前・関心は管理者だけ・ツール。
+ * 段 2（第39.18節）: 朝のブリーフに載せる締め切りの近い制度・公募の変更の読み直しと知らせ・相談先の地域の窓口。
  */
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULT_TENANT_SETTINGS, type TenantSettings } from '@m2office/shared';
 import {
-  MemorySubsidyStore, MockJGrants, SUBSIDY_TOOLS, SubsidyService, areaMatches, employeesBand, keywordsOf, readJGrantsItem, regionOf,
+  MemorySubsidyStore, MockJGrants, SUBSIDY_TOOLS, SubsidyService, areaMatches, defaultContacts, employeesBand, keywordsOf, readJGrantsItem, regionOf, subsidyChanges,
   type JGrantsItem, type LlmProvider, type Repository, type ResearchProvider, type SubsidySource, type ToolContext,
 } from '../src/index.js';
 
@@ -129,7 +130,7 @@ test('見送りにした制度は出し直さず、締め切りや中身が変�
     { id: 'j1', title: '見本 A の補助金', institution: '見本庁', area: '全国', maxLimit: 1_000_000, start: '', end: '2026-12-01T08:00:00Z', employees: '' },
     { id: 'j2', title: '見本 B の補助金', institution: '見本庁', area: '全国', maxLimit: 2_000_000, start: '', end: '2026-12-10T08:00:00Z', employees: '' },
   ];
-  const s = setup({ source: { search: async () => items.map((x) => ({ ...x })) } });
+  const s = setup({ source: { search: async () => items.map((x) => ({ ...x })), detail: async () => null } });
   await s.service.search(u1);
   const [a, b] = await s.service.list(u1);
   assert.equal(await s.service.mark(u1, a!.id, 'skipped'), null);
@@ -143,6 +144,11 @@ test('見送りにした制度は出し直さず、締め切りや中身が変�
   assert.equal(after.find((x) => x.id === a!.id)!.status, 'skipped');
   assert.equal(after.find((x) => x.id === b!.id)!.deadline, '2026-12-20');
   assert.equal(after.find((x) => x.id === b!.id)!.status, 'interested');
+  // 気になるにした制度が変わったら、気になるにした人に変わったところを知らせる（第39.18節）
+  assert.equal(s.notes.length, 1);
+  assert.equal(s.notes[0]!.userId, 'u1');
+  assert.match(s.notes[0]!.title, /見本 B の補助金: 公募の中身が変わりました/);
+  assert.match(s.notes[0]!.body, /締め切り: 2026-12-10 → 2026-12-20/);
 });
 
 test('推論の見立て: 合わないものは出さず、出典の無い制度と締め切りの過ぎた制度は捨て、jGrants の名前・金額・日付は API のまま', async () => {
@@ -153,7 +159,12 @@ test('推論の見立て: 合わないものは出さず、出典の無い制度
       sources: [{ title: '大阪市 見本の設備の補助金', url: 'https://www.city.example.jp/hojo' }, { title: '見本の労働局', url: 'https://jsite.example.jp/josei' }],
     }),
   };
-  const llm = fakeLlm((p) => (p.includes('業種を短い言葉') ? '卸売業' : JSON.stringify({
+  const llm = fakeLlm((p) => (p.includes('業種を短い言葉') ? '卸売業' : p.includes('相談できる公的な窓口') ? JSON.stringify({
+    items: [
+      { name: '見本の労働局 助成金の窓口', role: '雇用関係の助成金', source: 'S2' },
+      { name: '出典の無い窓口', role: 'x', source: '' },
+    ],
+  }) : JSON.stringify({
     items: [
       { ref: 'J1', name: '書き換えた名前', amount: '上限 1 億円', deadline: '2030-01-01', kind: 'subsidy', fit: 'likely', reason: '中小企業の IT の導入が対象', conditions: '登録の支援事業者と組むこと' },
       { ref: '', name: '大阪市 見本の設備の補助金', provider: '大阪市', kind: 'subsidy', fit: 'check', reason: '市内の中小企業が対象', conditions: '市内に事業所', amount: '上限 100 万円', rate: '2/3', startOn: '', deadline: '2026-11-20', source: 'S1' },
@@ -176,22 +187,27 @@ test('推論の見立て: 合わないものは出さず、出典の無い制度
   const judge = llm.prompts.find((p) => p.includes('会社に合いそうな補助金'))!;
   assert.match(judge, /業種 卸売業／所在地 大阪府大阪市／従業員の数 21〜50 人／関心 人の採用/);
   assert.doesNotMatch(judge, /梅田|一丁目/);
+  // 相談先の窓口: 出典のあるものだけを残し、申請の書類を頼める専門家を後ろに足す（第39.18節）
+  const contacts = await s.service.contactsOf('t1');
+  assert.deepEqual(contacts.map((c) => c.name), ['見本の労働局 助成金の窓口', '社会保険労務士', '行政書士']);
+  assert.equal(contacts[0]!.url, 'https://jsite.example.jp/josei');
+  assert.equal(s.settings().subsidies.contactsRegion, '大阪府大阪市');
 });
 
 test('月の調べもの: 1 日の 8 時を過ぎたら月に 1 回だけ調べ、新しい候補があれば管理者に知らせる', async () => {
   const s = setup();
-  assert.deepEqual(await s.service.tick(new Date('2026-10-20T00:00:00Z')), { searched: 1, reminded: 0 });
+  assert.deepEqual(await s.service.tick(new Date('2026-10-20T00:00:00Z')), { searched: 1, reminded: 0, changed: 0 });
   assert.equal(s.notes.length, 1);
   assert.equal(s.notes[0]!.userId, 'boss');
   assert.equal(s.notes[0]!.kind, 'subsidy');
   assert.match(s.notes[0]!.title, /合いそうな補助金・助成金が 3 件あります/);
   assert.match(s.notes[0]!.body, /出典で確かめてください/);
   // 10 月分は済み。11/1 の 7 時（日本時間）はまだ（11 月分は 8 時から）
-  assert.deepEqual(await s.service.tick(new Date('2026-10-31T22:30:00Z')), { searched: 0, reminded: 0 });
-  assert.deepEqual(await s.service.tick(new Date('2026-11-01T00:00:00Z')), { searched: 1, reminded: 0 });
+  assert.deepEqual(await s.service.tick(new Date('2026-10-31T22:30:00Z')), { searched: 0, reminded: 0, changed: 0 });
+  assert.deepEqual(await s.service.tick(new Date('2026-11-01T00:00:00Z')), { searched: 1, reminded: 0, changed: 0 });
   // 新しい候補が無ければ知らせない
   assert.equal(s.notes.length, 1);
-  assert.deepEqual(await s.service.tick(new Date('2026-11-02T00:00:00Z')), { searched: 0, reminded: 0 });
+  assert.deepEqual(await s.service.tick(new Date('2026-11-02T00:00:00Z')), { searched: 0, reminded: 0, changed: 0 });
 });
 
 test('締め切り: 「気になる」にした制度は 14 日前と 3 日前に、気になるにした人へ 1 回ずつ知らせる', async () => {
@@ -204,13 +220,13 @@ test('締め切り: 「気になる」にした制度は 14 日前と 3 日前�
   const settings = s.settings().subsidies;
   // 月の調べものは済んだことにする
   await (s.service.deps.repo.saveTenantSettings('t1', 'subsidies', { ...settings, monthlyMonth: '2026-10' }, 'x'));
-  assert.deepEqual(await s.service.tick(new Date('2026-10-11T00:00:00Z')), { searched: 0, reminded: 0 });
-  assert.deepEqual(await s.service.tick(new Date('2026-10-12T00:00:00Z')), { searched: 0, reminded: 1 });
-  assert.deepEqual(await s.service.tick(new Date('2026-10-12T05:00:00Z')), { searched: 0, reminded: 0 });
+  assert.deepEqual(await s.service.tick(new Date('2026-10-11T00:00:00Z')), { searched: 0, reminded: 0, changed: 0 });
+  assert.deepEqual(await s.service.tick(new Date('2026-10-12T00:00:00Z')), { searched: 0, reminded: 1, changed: 0 });
+  assert.deepEqual(await s.service.tick(new Date('2026-10-12T05:00:00Z')), { searched: 0, reminded: 0, changed: 0 });
   assert.equal(s.notes.at(-1)!.userId, 'u1');
   assert.match(s.notes.at(-1)!.title, /締め切りまであと 14 日（2026-10-26）/);
-  assert.deepEqual(await s.service.tick(new Date('2026-10-23T00:00:00Z')), { searched: 0, reminded: 1 });
-  assert.deepEqual(await s.service.tick(new Date('2026-10-24T00:00:00Z')), { searched: 0, reminded: 0 });
+  assert.deepEqual(await s.service.tick(new Date('2026-10-23T00:00:00Z')), { searched: 0, reminded: 1, changed: 0 });
+  assert.deepEqual(await s.service.tick(new Date('2026-10-24T00:00:00Z')), { searched: 0, reminded: 0, changed: 0 });
 });
 
 test('関心と業種を直せるのは管理者だけ。直した業種で調べる', async () => {
@@ -240,4 +256,92 @@ test('ツール: 使えない人には使えないと答え、候補を引いて
   assert.equal(left.count, 2);
   const many = await tool('subsidies.mark').invoke({ query: '見本', status: 'interested' }, ctx(true)) as { available: boolean };
   assert.equal(many.available, false);
+});
+
+test('段 2: 朝のブリーフには、締め切りが 7 日のうちの「気になる」の制度だけを載せる', async () => {
+  const s = setup();
+  await s.service.search(u1);
+  const eco = (await s.service.list(u1)).find((x) => x.name.includes('省エネ'))!;
+  const tool = SUBSIDY_TOOLS.find((t) => t.name === 'subsidies.brief')!;
+  const ctx = (on: boolean) => ({ tenantId: 't1', userId: 'u1', subsidies: { service: s.service, access: async () => (on ? s.settings().subsidies : null) } }) as unknown as ToolContext;
+  assert.equal((await tool.invoke({}, ctx(false)) as { available: boolean }).available, false);
+  // 締め切りまで 20 日。まだ載せない
+  await s.service.mark(u1, eco.id, 'interested');
+  assert.deepEqual((await tool.invoke({}, ctx(true)) as { items: unknown[] }).items, []);
+  // 締め切りまで 6 日。気になるにした制度だけ載せる（IT 導入は気になるにしていない）
+  s.setClock(new Date('2026-10-20T00:00:00Z'));
+  const r = await tool.invoke({}, ctx(true)) as { untrusted: boolean; path: string; items: { name: string; deadline: string; daysLeft: number }[] };
+  assert.equal(r.untrusted, true);
+  assert.equal(r.path, '/subsidies');
+  assert.deepEqual(r.items.map((x) => [x.name, x.deadline, x.daysLeft]), [['見本 省エネ設備の更新の補助金', '2026-10-26', 6]]);
+  // 締め切りの日は 0、過ぎたら載せない
+  s.setClock(new Date('2026-10-26T00:00:00Z'));
+  assert.equal((await tool.invoke({}, ctx(true)) as { items: { daysLeft: number }[] }).items[0]!.daysLeft, 0);
+  s.setClock(new Date('2026-10-27T00:00:00Z'));
+  assert.deepEqual((await tool.invoke({}, ctx(true)) as { items: unknown[] }).items, []);
+});
+
+test('段 2: 「気になる」にした国の公募を毎日 8 時から 1 回読み直し、締め切りの延長などを気になるにした人に知らせる', async () => {
+  const s = setup();
+  await s.service.search(u1);
+  const eco = (await s.service.list(u1)).find((x) => x.name.includes('省エネ'))!;
+  await s.service.mark(u1, eco.id, 'interested');
+  const settings = s.settings().subsidies;
+  await s.service.deps.repo.saveTenantSettings('t1', 'subsidies', { ...settings, monthlyMonth: '2026-10' }, 'x');
+  // 変わっていなければ知らせない
+  assert.deepEqual(await s.service.tick(new Date('2026-10-06T23:30:00Z')), { searched: 0, reminded: 0, changed: 0 });
+  assert.equal(s.settings().subsidies.refreshedOn, '2026-10-07');
+  assert.equal(s.notes.length, 0);
+  // 締め切りが延び、上限額が変わった
+  s.mock.changes.set('mock-eco-02', { end: '2026-11-25T08:00:00Z', maxLimit: 12_000_000 });
+  // 同じ日はもう読まない。7 時（日本時間）はまだ
+  assert.deepEqual(await s.service.tick(new Date('2026-10-07T05:00:00Z')), { searched: 0, reminded: 0, changed: 0 });
+  assert.deepEqual(await s.service.tick(new Date('2026-10-07T22:00:00Z')), { searched: 0, reminded: 0, changed: 0 });
+  assert.deepEqual(await s.service.tick(new Date('2026-10-07T23:00:00Z')), { searched: 0, reminded: 0, changed: 1 });
+  assert.equal(s.notes.length, 1);
+  assert.equal(s.notes[0]!.userId, 'u1');
+  assert.match(s.notes[0]!.title, /見本 省エネ設備の更新の補助金: 公募の中身が変わりました/);
+  assert.match(s.notes[0]!.body, /締め切り: 2026-10-26 → 2026-11-25/);
+  assert.match(s.notes[0]!.body, /上限額: 上限 10,000,000 円 → 上限 12,000,000 円/);
+  const after = (await s.service.list(u1)).find((x) => x.id === eco.id)!;
+  assert.equal(after.deadline, '2026-11-25');
+  assert.equal(after.status, 'interested');
+  assert.ok(s.audits.some((a) => a.action === 'subsidy.changed'));
+  // 気になるにしていない公募は読み直さない
+  s.mock.changes.set('mock-it-01', { maxLimit: 1 });
+  assert.deepEqual(await s.service.tick(new Date('2026-10-08T23:00:00Z')), { searched: 0, reminded: 0, changed: 0 });
+});
+
+test('段 2: 公募が見つからなくなっても「終わった」とせず、締め切りが変わらなければ知らせた印はそのまま', async () => {
+  let gone = false;
+  let limit = 1_000_000;
+  const item = (): JGrantsItem => ({ id: 'j1', title: '見本 A の補助金', institution: '見本庁', area: '全国', maxLimit: limit, start: '', end: '2026-10-15T08:00:00Z', employees: '' });
+  const s = setup({ source: { search: async () => [item()], detail: async () => (gone ? null : item()) } });
+  await s.service.search(u1);
+  const [a] = await s.service.list(u1);
+  await s.service.mark(u1, a!.id, 'interested');
+  await s.service.deps.repo.saveTenantSettings('t1', 'subsidies', { ...s.settings().subsidies, monthlyMonth: '2026-10' }, 'x');
+  // 14 日前の知らせ
+  assert.deepEqual(await s.service.tick(new Date('2026-10-06T23:00:00Z')), { searched: 0, reminded: 1, changed: 0 });
+  limit = 2_000_000;
+  assert.deepEqual(await s.service.tick(new Date('2026-10-07T23:00:00Z')), { searched: 0, reminded: 0, changed: 1 });
+  assert.deepEqual(s.store.rows.get(a!.id)!.notified, ['deadline:14']);
+  gone = true;
+  assert.deepEqual(await s.service.tick(new Date('2026-10-08T23:00:00Z')), { searched: 0, reminded: 0, changed: 0 });
+  assert.equal((await s.service.list(u1))[0]!.status, 'interested');
+});
+
+test('段 2: 相談先の窓口は、調べものが使えなければ所在地から決まった形で作る（URL は作らない）', async () => {
+  assert.deepEqual(defaultContacts('大阪府大阪市').slice(0, 3).map((c) => c.name), ['大阪府よろず支援拠点', '大阪市の商工会議所か商工会', '大阪労働局']);
+  assert.equal(defaultContacts('東京都千代田区')[2]!.name, '東京労働局');
+  assert.equal(defaultContacts('北海道札幌市')[2]!.name, '北海道労働局');
+  assert.equal(defaultContacts('')[0]!.name, 'よろず支援拠点（都道府県ごと）');
+  assert.ok(defaultContacts('大阪府大阪市').every((c) => c.url === ''));
+  const s = setup();
+  await s.service.search(u1);
+  assert.equal(s.settings().subsidies.contacts.length, 0);
+  const tool = SUBSIDY_TOOLS.find((t) => t.name === 'subsidies.find')!;
+  const r = await tool.invoke({}, { tenantId: 't1', userId: 'u1', subsidies: { service: s.service, access: async () => s.settings().subsidies } } as unknown as ToolContext) as { contacts: { name: string }[] };
+  assert.equal(r.contacts[0]!.name, '大阪府よろず支援拠点');
+  assert.deepEqual(subsidyChanges({ name: 'a', deadline: null, amount: '', rate: '' }, { name: 'a', deadline: '2026-11-01', amount: '', rate: '1/2' }), ['締め切り: 不明 → 2026-11-01', '補助率: 不明 → 1/2']);
 });

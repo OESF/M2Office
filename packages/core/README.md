@@ -46,10 +46,11 @@ src/reservations/ 会議室・社用車・備品の予約（内蔵の拡張。�
                  重なったときの次に空く時間とほかのもの、予約した人の Google カレンダーの予定、1 年で消す、繰り返しの予約（段 2））、包み（package.js）。
                  日程調整で会議と一緒に会議室を取るのは tools/workspace.ts の calendar.create（room）
                  秘書の頼みの読み方と答えは src/secretary/reservations.ts
-src/subsidies/   補助金・助成金の案内（内蔵の拡張。第39章の段 1）。調べ先（jgrants.ts。jGrants の公開の API と見本・所在地は市区町村まで・
+src/subsidies/   補助金・助成金の案内（内蔵の拡張。第39章の段 1・段 2）。調べ先（jgrants.ts。jGrants の公開の API と見本・所在地は市区町村まで・
                  従業員の数の幅・対象の地域）、置き場（store.ts。PostgreSQL とメモリ）、処理（service.ts。会社のこと・jGrants と Web の調べもの・
                  推論の見立て（出典の無い制度を出さない）・1 日 1 回・見送りは出し直さない・月の調べものと締め切りの知らせ）、
-                 ツール（tools.ts。subsidies.find・search・mark）、付属の業務「補助金・助成金の案内」（agents.ts）
+                 ツール（tools.ts。subsidies.find・search・mark・brief）、付属の業務「補助金・助成金の案内」（agents.ts）。
+                 段 2 で朝のブリーフ（subsidies.brief）・「気になる」にした公募の読み直しと変更の知らせ・相談先の地域の窓口
 src/members/     会員とポイント（内蔵の拡張。第40章の段 1）。置き場（store.ts。会員・追記のみのポイントの記録・特典。数は記録から求める）、
                  処理（service.ts。会員を作る・来店は 1 日 1 回・購入は率で換算して金額を残さない・特典・取り消し・調整・まとめる・削除・
                  有効期限の失効・LINE の ID トークンを確かめる口）、会員証（card.ts。紙のカードの PDF・QR・会員証のページと LINE の入口の HTML）、

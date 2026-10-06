@@ -1,13 +1,14 @@
 /**
  * @file 補助金・助成金の案内の画面（仕様書 第39.9節）。調べるのに使った会社のこと（管理者は直せる）・いま調べる・
- * 候補（締め切りの近い順。見立て・合う理由・確かめたい条件・上限額と補助率・締め切り・出典）・気になる／見送り・過ぎたもの・見送ったもの。
+ * 候補（締め切りの近い順。見立て・合う理由・確かめたい条件・上限額と補助率・締め切り・出典）・気になる／見送り・過ぎたもの・見送ったもの・
+ * 相談先の地域の窓口（第39.18節）。
  *
  * 金額と日付は出典どおりで、無ければ「不明」と出す（推測で埋めない）。申請書は作らない。説明文は常に出さない（原則 u11）。
  */
 
 import { useCallback, useEffect, useState } from 'react';
 import {
-  SUBSIDY_FIT_LABELS, SUBSIDY_KIND_LABELS, type Subsidy, type SubsidyProfile, type SubsidyStatus,
+  SUBSIDY_FIT_LABELS, SUBSIDY_KIND_LABELS, type Subsidy, type SubsidyContact, type SubsidyProfile, type SubsidyStatus,
 } from '@m2office/shared';
 import { api, describeError } from './api.js';
 
@@ -94,7 +95,25 @@ export function Subsidies({ changeKey }: {
       <ul className="sbs-list">
         {shown.map((c) => <SubsidyCard key={c.id} c={c} today={today} onMark={mark} />)}
       </ul>
+      {view === 'active' && data.contacts.length > 0 && <Contacts contacts={data.contacts} />}
     </div>
+  );
+}
+
+/** 相談先の地域の窓口（申請の相談に。出典の URL があればつなぐ。第39.18節）。 */
+function Contacts({ contacts }: { contacts: SubsidyContact[] }) {
+  return (
+    <details className="sbs-contacts">
+      <summary>相談先</summary>
+      <ul>
+        {contacts.map((c) => (
+          <li key={c.name} className="small">
+            {c.url ? <a href={c.url} target="_blank" rel="noopener noreferrer">{c.name}</a> : c.name}
+            <span className="muted">　{c.role}</span>
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }
 
