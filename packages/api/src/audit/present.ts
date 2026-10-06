@@ -227,6 +227,15 @@ const ACTION_LABELS: Record<string, string> = {
   'reservation.item.update': '予約できるものを直した',
   'reservation.item.stop': '予約できるものを止めた',
   'reservation.admin_change': 'ほかの人の予約を管理者が変えた・取り消した',
+  'subsidy.search': '補助金・助成金を調べた',
+  'member.settings': '会員とポイントの設定を直した',
+  'member.undo': '会員のポイントの前の日の記録を取り消した',
+  'member.merge': '会員をまとめた',
+  'member.delete': '会員を削除した',
+  'member.reward.create': '会員の特典を作った',
+  'member.reward.update': '会員の特典を直した',
+  'subsidy.status': '補助金・助成金の候補の状態を変えた',
+  'subsidy.settings': '補助金・助成金の会社の関心と業種を直した',
   'web_review.connect': 'Webの分析の担当の Google の許可をつないだ',
   'web_review.disconnect': 'Webの分析の担当の Google の許可を外した',
   'web_review.select': 'Webの分析で見るプロパティとサイトを選んだ',
@@ -456,6 +465,8 @@ function targetOf(e: AuditEvent, names: AuditNames): string {
     case 'announcement': return `お知らせ ${id.slice(4, 12)}`;
     // 契約は相手の名前を出さない。ID の頭だけ
     case 'contract': return id === 'storage' ? '契約書の置き場' : `契約 ${id.slice(4, 12)}`;
+    case 'member': return id === 'settings' ? '会員とポイントの設定' : id.startsWith('mrw-') ? `特典 ${id.slice(4, 12)}` : `会員 ${id.slice(4, 12)}`;
+    case 'subsidy': return id === 'search' ? '補助金・助成金の調べもの' : id === 'settings' ? '補助金・助成金の設定' : `補助金・助成金の候補 ${id.slice(4, 12)}`;
     case 'reservation': return id.startsWith('rsi-') ? `予約できるもの ${id.slice(4, 12)}` : `予約 ${id.slice(4, 12)}`;
     case 'web_review': return 'Webの分析';
     case 'competitor': return id === 'settings' ? '競合の分析の設定' : id === 'map-key' ? '競合の分析の地図の鍵' : id === 'discover' ? '競合の分析（探す）' : id === 'all' ? '競合の分析（見回り）' : `競合の分析 ${id.slice(4, 12)}`;

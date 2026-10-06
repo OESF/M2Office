@@ -23,6 +23,8 @@ import { INQUIRY_TOOLS } from '../inquiries/tools.js';
 import { COMPETITOR_TOOLS } from '../competitors/tools.js';
 import { ANNOUNCEMENT_TOOLS } from '../announcements/tools.js';
 import { CONTRACT_TOOLS } from '../contracts/tools.js';
+import { SUBSIDY_TOOLS } from '../subsidies/tools.js';
+import { MEMBER_TOOLS } from '../members/tools.js';
 import { WEB_REVIEW_TOOLS } from '../web-review/tools.js';
 import { HR_TOOLS } from '../hr/tools.js';
 import { KNOWLEDGE_CATEGORY_LABEL, KNOWLEDGE_PRIORITY_NOTE, rewriteNote } from '../knowledge/search.js';
@@ -203,7 +205,7 @@ export const BUILTIN_TOOLS: Tool[] = [
   ...COMPETITOR_TOOLS,
   // お知らせの作成（内蔵の拡張。第35.17節）。会社が使っていて、依頼者が利用範囲の中のときだけ働く
   ...ANNOUNCEMENT_TOOLS,
-  ...CONTRACT_TOOLS,
+  ...CONTRACT_TOOLS, ...SUBSIDY_TOOLS, ...MEMBER_TOOLS,
   // Webの分析（内蔵の拡張。第34.18節）。会社が使っていて、依頼者が利用範囲の中のときだけ働く
   ...WEB_REVIEW_TOOLS,
   ...HR_TOOLS,

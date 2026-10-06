@@ -2011,3 +2011,50 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .rsv-mobile section { display: flex; flex-direction: column; gap: calc(8px * var(--space-scale)); }
 .rsv-mobile-item { padding: calc(8px * var(--space-scale)); border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
 .rsv-mobile-item .row { justify-content: space-between; margin-top: 0; margin-bottom: 4px; }
+
+/* 補助金・助成金の案内（第39.9節） */
+.sbs { display: flex; flex-direction: column; gap: calc(10px * var(--space-scale)); }
+.sbs .row.wrap { flex-wrap: wrap; gap: calc(6px * var(--space-scale)); align-items: center; margin-top: 0; }
+.sbs-profile p { margin: 0; }
+.sbs-interest { flex: 1; min-width: 200px; }
+.sbs-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: calc(8px * var(--space-scale)); }
+.sbs-card { margin-bottom: 0; }
+.sbs-card p { margin: calc(4px * var(--space-scale)) 0 0; }
+.sbs-card.is-interested { border-color: var(--accent); }
+.sbs-card a, .sbs-card a:visited { color: var(--accent); }
+.sbs-name { font-weight: 600; }
+.sbs-actions { margin-top: calc(8px * var(--space-scale)) !important; }
+.sbs-actions > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 会員とポイント（第40.9節） */
+.mbr { display: flex; flex-direction: column; gap: calc(10px * var(--space-scale)); }
+.mbr .row.wrap { flex-wrap: wrap; gap: calc(6px * var(--space-scale)); align-items: center; margin-top: 0; }
+.mbr-note { margin: 0; font-size: calc(13px * var(--font-scale)); }
+.mbr-note.is-ok { color: var(--ok); }
+.mbr-note.is-error { color: var(--danger); }
+.mbr-search { margin-left: auto; max-width: 240px; }
+.mbr-table-wrap { overflow-x: auto; }
+.mbr-form, .mbr-rewards { margin-bottom: 0; }
+.mbr-num { width: 90px; }
+.mbr-reward-list { list-style: none; margin: 8px 0 0; padding: 0; }
+.mbr-reward-list li { display: flex; gap: 12px; align-items: center; padding: 4px 0; border-top: 1px solid var(--line); }
+.mbr-reward-list li span:first-child { flex: 1; }
+.mbr-reward-list li.is-stopped { opacity: 0.55; }
+.mbr-head { display: flex; flex-wrap: wrap; gap: 16px; justify-content: space-between; }
+.mbr-head h2 { margin: 0; }
+.mbr-balance { font-size: calc(30px * var(--font-scale)); font-weight: 700; margin: 4px 0; }
+.mbr-balance small { font-size: calc(14px * var(--font-scale)); }
+.mbr-fields label { display: flex; flex-direction: column; gap: 2px; font-size: calc(12px * var(--font-scale)); }
+.mbr-qr { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.mbr-qr img { background: #fff; border-radius: 6px; padding: 4px; }
+.mbr-points tr.is-reversed td { text-decoration: line-through; opacity: 0.6; }
+.mbr-pt { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.m-mbr-card { display: flex; flex-direction: column; gap: 10px; }
+.m-mbr-name { font-size: 18px; font-weight: 700; margin: 0; }
+.m-mbr-points { font-size: 40px; font-weight: 700; margin: 0; text-align: center; }
+.m-mbr-points small { font-size: 16px; }
+.m-mbr-buy { display: flex; gap: 8px; }
+.m-mbr-buy input { flex: 1; font-size: 18px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--ink); }
+.m-mbr-rewards { display: flex; flex-direction: column; gap: 6px; }
+.m-mbr-qr { width: 240px; height: 240px; align-self: center; background: #fff; border-radius: 8px; padding: 8px; }
+.m-mbr .m-search { display: block; width: 100%; box-sizing: border-box; margin-bottom: 10px; }

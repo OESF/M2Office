@@ -10,10 +10,11 @@
  *
  * @param origin 要求の `Origin`
  * @param host 要求の `Host`
- * @returns `https://a.example.jp` の形。開発（`localhost`・`*.lvh.me`）では http
+ * @returns `https://a.example.jp` の形。開発（`localhost`・`*.localhost`・`*.lvh.me`）では http
  */
 export function tenantOrigin(origin: string | undefined, host: string | undefined): string {
   if (origin) return origin;
   const h = host ?? 'localhost';
-  return `${h.startsWith('localhost') || h.includes('.lvh.me') ? 'http' : 'https'}://${h}`;
+  const dev = h.startsWith('localhost') || h.includes('.lvh.me') || /\.localhost(:\d+)?$/.test(h);
+  return `${dev ? 'http' : 'https'}://${h}`;
 }

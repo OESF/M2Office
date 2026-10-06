@@ -53,8 +53,12 @@ function recordedText(r: Extract<InquiryRecorded, { kind: string }>): string {
  * @param onOpen 問い合わせを開く・一覧に戻る（`null`）
  * @param onContact 名刺管理の連絡先を開く
  */
-export function Inquiries({ inquiryId, onOpen, onContact, changeKey = '', onColumn, admin = false }: {
+export function Inquiries({ inquiryId, onOpen, onContact, changeKey = '', onColumn, admin = false, members = false, onMember }: {
   inquiryId: string | null;
+  /** 会員とポイントを使えるか（同じ人の会員とポイントを出す。第40.8節）。 */
+  members?: boolean;
+  /** 会員を開く。 */
+  onMember?: (memberId: string) => void;
   /** 会社の管理者か（本人から求められたときのまとめての削除を出す。第33.21節）。 */
   admin?: boolean;
   onOpen: (inquiryId: string | null) => void;
@@ -66,7 +70,7 @@ export function Inquiries({ inquiryId, onOpen, onContact, changeKey = '', onColu
   changeKey?: string;
 }) {
   return inquiryId
-    ? <InquiryView key={inquiryId} id={inquiryId} onBack={() => onOpen(null)} onContact={onContact} onOpen={(id) => onOpen(id)} changeKey={changeKey} admin={admin} />
+    ? <InquiryView key={inquiryId} id={inquiryId} onBack={() => onOpen(null)} onContact={onContact} onOpen={(id) => onOpen(id)} changeKey={changeKey} admin={admin} members={members} {...(onMember ? { onMember } : {})} />
     : <InquiryList onOpen={(id) => onOpen(id)} changeKey={changeKey} {...(onColumn ? { onColumn } : {})} />;
 }
 
@@ -191,8 +195,9 @@ function InquiryList({ onOpen, changeKey, onColumn }: { onOpen: (id: string) => 
 }
 
 /** 1 件の問い合わせ。 */
-function InquiryView({ id, onBack, onContact, onOpen, changeKey, admin }: {
+function InquiryView({ id, onBack, onContact, onOpen, changeKey, admin, members, onMember }: {
   id: string; onBack: () => void; onContact: (contactId: string) => void; onOpen: (id: string) => void; changeKey: string; admin: boolean;
+  members: boolean; onMember?: (memberId: string) => void;
 }) {
   const [d, setD] = useState<InquiryDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -240,7 +245,7 @@ function InquiryView({ id, onBack, onContact, onOpen, changeKey, admin }: {
         <button className="btn ghost small" onClick={load}>更新</button>
         <NoteText note={note} />
       </div>
-      <h2>{whoOf(i)} <span className={STATUS_BADGE[i.status]}>{INQUIRY_STATUS_LABELS[i.status]}</span></h2>
+      <h2>{whoOf(i)} <span className={STATUS_BADGE[i.status]}>{INQUIRY_STATUS_LABELS[i.status]}</span>{members && <MemberBadge inquiryId={i.id} phone={i.from.phone} {...(onMember ? { onOpen: onMember } : {})} />}</h2>
 
       <div className="inquiries-fields">
         <label>名前<input defaultValue={i.from.name} maxLength={80} onBlur={(e) => { if (e.target.value !== i.from.name) save({ from: { name: e.target.value } }); }} /></label>
@@ -592,4 +597,14 @@ function ErasePerson({ inquiryId, onDone }: { inquiryId: string; onDone: () => v
       </div>
     </div>
   );
+}
+
+/** 同じ人の会員とポイント（LINE のお客様か電話で見分ける。第40.8節）。会員でなければ何も出さない。 */
+function MemberBadge({ inquiryId, phone, onOpen }: { inquiryId: string; phone: string; onOpen?: (memberId: string) => void }) {
+  const [m, setM] = useState<{ id: string; number: number; balance: number } | null>(null);
+  useEffect(() => {
+    api.members.lookup({ inquiryId, phone }).then((r) => setM(r.member)).catch(() => setM(null));
+  }, [inquiryId, phone]);
+  if (!m) return null;
+  return <>{' '}<button className="badge ok" onClick={() => onOpen?.(m.id)}>会員 No. {m.number}・{m.balance} ポイント</button></>;
 }

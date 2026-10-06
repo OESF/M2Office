@@ -31,6 +31,8 @@ export function notificationPath(n: { kind: string; runId: string | null }): str
   if (n.kind === 'contract') return '/contracts';
   // 予約を管理者が変えた・取り消した・予約できるものを止めた知らせは、予約を開く（第37.10節）
   if (n.kind === 'reservation') return '/reservations';
+  // 補助金・助成金の月の案内と締め切りの知らせは、補助金・助成金を開く（第39.7節）
+  if (n.kind === 'subsidy') return '/subsidies';
   if (n.runId && RUN_ID.test(n.runId)) return `/runs/${encodeURIComponent(n.runId)}`;
   return '/';
 }

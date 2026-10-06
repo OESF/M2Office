@@ -22,7 +22,7 @@ import type { CardCorners,
   Inquiry, InquiryDetail, InquiryParty, InquiryTask, InquiryReply, InquiryMailSkipped, InquiryMonthStats, InquirySettings, InquiryFaqTopic,
   CompetitorOverview, CompetitorFact, CompetitorReport, CompetitorSettings,
   Announcement, AnnouncementDetail, AnnouncementPreview, AnnouncementRecipient, AnnouncementRecipientsRefined, AnnouncementSettings, AnnouncementTexts,
-  Contract, ContractSettings, ReservableItem, ReservableKind, Reservation,
+  Contract, ContractSettings, ReservableItem, ReservableKind, Reservation, Subsidy, SubsidyProfile, SubsidyStatus, Member, MemberPoint, MemberReward, MemberSettings,
   WebReviewCandidates, WebReviewReport, WebReviewReportBrief, WebReviewSettings, WebReviewStatus, WebReviewFinding, WebReviewFindingStatus, WebPageMetrics,
 } from '@m2office/shared';
 import { debugMode, recordCall } from './debug.js';
@@ -302,6 +302,10 @@ export interface Me {
   contracts?: boolean;
   /** 予約を使えるか（会社の入り切りと利用範囲。仕様書 第37章）。 */
   reservations?: boolean;
+  /** 補助金・助成金の案内を使えるか（会社の入り切りと利用範囲。仕様書 第39章）。 */
+  subsidies?: boolean;
+  /** 会員とポイントを使えるか（会社の入り切りと利用範囲。仕様書 第40章）。 */
+  members?: boolean;
   /** 本人の「給与・勤怠」を使えるか（台帳に結び付いているか。仕様書 第30.25節）。 */
   hrSelf?: boolean;
   /** デバッグモードか（`M2O_DEBUG=true`。仕様書 第20.4.1節「デバッグモード」）。 */
@@ -782,6 +786,10 @@ export interface ExtensionView {
   webReview?: WebReviewSettings;
   /** 契約の管理の設定（契約書の置き場。第38.7節）。契約の管理のときだけある。 */
   contracts?: ContractSettings;
+  /** 補助金・助成金の案内の設定（会社の関心と業種。第39.3節）。補助金・助成金の案内のときだけある。 */
+  subsidies?: { interest: string; industry: string; profile: SubsidyProfile | null };
+  /** 会員とポイントの設定（第40.4節）。会員とポイントのときだけある。 */
+  members?: MemberSettings;
 }
 
 /** 問い合わせを残した結果（仕様書 第33.17節）。どの続きか決まらなければ `ambiguous` と候補。 */
@@ -1328,6 +1336,46 @@ export const api = {
     remove: (id: string) => call<{ ok: true }>(`/contracts/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     /** 契約書を開く URL（M2Office がドライブから読んで返す）。 */
     fileUrl: (id: string) => `/v1/contracts/${encodeURIComponent(id)}/file`,
+  },
+  /** 会員とポイント（内蔵の拡張。仕様書 第40章）。 */
+  members: {
+    list: (q = '') => call<{ items: Member[]; settings: { visitPoints: number; yenPerPoint: number; expiryDays: number; line: boolean }; admin: boolean }>(`/members${q ? `?${new URLSearchParams({ q })}` : ''}`),
+    get: (id: string) => call<{ member: Member; points: MemberPoint[]; candidates: Member[]; cardUrl: string | null }>(`/members/${encodeURIComponent(id)}`),
+    /** 店頭で会員を作る。 */
+    create: (input: { nickname: string; phone?: string }) => call<{ member: Member; cardUrl: string }>('/members', { method: 'POST', body: JSON.stringify(input) }),
+    update: (id: string, input: { nickname?: string; phone?: string }) => call<{ ok: true }>(`/members/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(input) }),
+    remove: (id: string) => call<{ ok: true }>(`/members/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    /** 店員が読んだ会員証（QR の URL か鍵）から会員と使える特典。 */
+    byCard: (code: string) => call<{ member: Member; rewards: (MemberReward & { enough: boolean })[] }>(`/members/card?${new URLSearchParams({ code })}`),
+    /** 問い合わせの連絡先と同じ人の会員。 */
+    lookup: (q: { phone?: string; inquiryId?: string }) => call<{ member: Member | null }>(`/members/lookup?${new URLSearchParams(Object.entries(q).filter(([, v]) => !!v) as [string, string][])}`),
+    visit: (id: string) => call<{ member: Member; points: number }>(`/members/${encodeURIComponent(id)}/visit`, { method: 'POST', body: '{}' }),
+    purchase: (id: string, amount: number) => call<{ member: Member; points: number }>(`/members/${encodeURIComponent(id)}/purchase`, { method: 'POST', body: JSON.stringify({ amount }) }),
+    useReward: (id: string, rewardId: string) => call<{ member: Member; points: number }>(`/members/${encodeURIComponent(id)}/reward`, { method: 'POST', body: JSON.stringify({ rewardId }) }),
+    adjust: (id: string, points: number, note: string) => call<{ member: Member; points: number }>(`/members/${encodeURIComponent(id)}/adjust`, { method: 'POST', body: JSON.stringify({ points, note }) }),
+    merge: (id: string, into: string) => call<{ ok: true }>(`/members/${encodeURIComponent(id)}/merge`, { method: 'POST', body: JSON.stringify({ into }) }),
+    undo: (pointId: string) => call<{ ok: true }>(`/members/points/${encodeURIComponent(pointId)}/undo`, { method: 'POST', body: '{}' }),
+    rewards: () => call<{ items: MemberReward[] }>('/members/rewards'),
+    createReward: (input: { name: string; points: number }) => call<{ reward: MemberReward }>('/members/rewards', { method: 'POST', body: JSON.stringify(input) }),
+    updateReward: (id: string, patch: Record<string, unknown>) => call<{ ok: true }>(`/members/rewards/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    qrUrl: (id: string) => `/v1/members/${encodeURIComponent(id)}/qr.svg`,
+    cardPdfUrl: (id: string) => `/v1/members/${encodeURIComponent(id)}/card.pdf`,
+    /** 来店のポイント・購入の率・有効期限・LINE の会員証を直す（管理者だけ）。 */
+    saveSettings: (input: Partial<MemberSettings>) => call<{ ok: true }>('/admin/extensions/members/settings', { method: 'PUT', body: JSON.stringify(input) }),
+  },
+  /** 補助金・助成金の案内（内蔵の拡張。仕様書 第39章）。 */
+  subsidies: {
+    /** 候補（過ぎたもの・見送りも含む）と、調べるのに使った会社のこと・関心・最後に調べた日時・調べているか。 */
+    list: () => call<{
+      items: Subsidy[]; today: string; profile: SubsidyProfile | null; interest: string; industry: string;
+      searchedAt: string | null; searching: boolean; admin: boolean;
+    }>('/subsidies'),
+    /** いま調べる（後ろで調べる。1 日 1 回まで）。 */
+    search: () => call<{ ok: true }>('/subsidies/search', { method: 'POST', body: '{}' }),
+    mark: (id: string, status: SubsidyStatus) => call<{ ok: true }>(`/subsidies/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
+    /** 会社の関心と業種を直す（管理者だけ）。 */
+    saveSettings: (input: { interest?: string; industry?: string }) =>
+      call<{ ok: true }>('/admin/extensions/subsidies/settings', { method: 'PUT', body: JSON.stringify(input) }),
   },
   /** 会議室・社用車・備品の予約（内蔵の拡張。仕様書 第37章）。 */
   reservations: {

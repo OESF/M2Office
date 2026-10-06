@@ -12,7 +12,7 @@
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import {
-  CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, INVENTORY_FEATURES, SIGNAGE_EXTENSION_ID, SIGNAGE_JINGLES, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, CONTRACTS_EXTENSION_ID, WEB_REVIEW_SCOPES, COLUMN_INDUSTRIES, type WebColumnSettings, type HrSettings, type InventorySettings, type RiskLevel, type SignageSettings,
+  CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, INVENTORY_FEATURES, SIGNAGE_EXTENSION_ID, SIGNAGE_JINGLES, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, CONTRACTS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, MEMBERS_EXTENSION_ID, WEB_REVIEW_SCOPES, COLUMN_INDUSTRIES, type WebColumnSettings, type HrSettings, type InventorySettings, type RiskLevel, type SignageSettings,
 } from '@m2office/shared';
 import {
   bundledConnection, builtinSection, consentSnapshot, encodeFiles, unpackExtension, EXTENSION_FILE_MAX_BYTES,
@@ -132,6 +132,10 @@ export function extensionsRoute(deps: AppDeps) {
         ...(e.pkg.manifest.id === WEB_REVIEW_EXTENSION_ID ? { webReview: settings.webReview } : {}),
         // 契約の管理: 契約書の置き場（第38.7節）
         ...(e.pkg.manifest.id === CONTRACTS_EXTENSION_ID ? { contracts: settings.contracts } : {}),
+        // 補助金・助成金の案内: 会社の関心と業種（第39.3節）
+        // 会員とポイント: 来店のポイント・購入の率・有効期限・LINE の会員証（第40.4節）
+        ...(e.pkg.manifest.id === MEMBERS_EXTENSION_ID ? { members: settings.members } : {}),
+        ...(e.pkg.manifest.id === SUBSIDIES_EXTENSION_ID ? { subsidies: { interest: settings.subsidies.interest, industry: settings.subsidies.industry, profile: settings.subsidies.profile } } : {}),
       })),
     });
   });
@@ -963,6 +967,22 @@ export function extensionsRoute(deps: AppDeps) {
     return c.json({ ok: true, notices });
   });
 
+  /** 会員とポイントの、来店のポイント・購入の率・有効期限・LINE の会員証を直す（管理者だけ。第40.4節）。 */
+  app.put(`/${MEMBERS_EXTENSION_ID}/settings`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
+    const problem = await deps.members.service.saveSettings({ tenantId: tenant.id, userId: user.id }, body);
+    return problem ? c.json({ error: problem }, problem.includes('管理者だけ') ? 403 : 400) : c.json({ ok: true });
+  });
+
+  /** 補助金・助成金の案内の、会社の関心と業種を直す（管理者だけ。第39.12節）。 */
+  app.put(`/${SUBSIDIES_EXTENSION_ID}/settings`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const body = await c.req.json<{ interest?: unknown; industry?: unknown }>().catch(() => ({} as { interest?: unknown; industry?: unknown }));
+    const problem = await deps.subsidies.service.saveSettings({ tenantId: tenant.id, userId: user.id }, body);
+    return problem ? c.json({ error: problem }, 403) : c.json({ ok: true });
+  });
+
   /** 契約の管理の、契約書の置き場をつなぐ・つなぎ直す（会社の Google ドライブにフォルダを作る。管理者だけ。第38.7節）。 */
   app.put(`/${CONTRACTS_EXTENSION_ID}/storage`, async (c) => {
     const { tenant, user } = c.get('ctx');
@@ -1000,6 +1020,15 @@ export function extensionsRoute(deps: AppDeps) {
         if (body.enabled && !settings.contracts.storage) await deps.contracts.service.connectStorage({ tenantId: tenant.id, userId: user.id }).catch(() => null);
       }
       else if (section === 'reservations') await deps.repo.saveTenantSettings(tenant.id, 'reservations', { ...settings.reservations, enabled: body.enabled }, user.id);
+      else if (section === 'members') await deps.repo.saveTenantSettings(tenant.id, 'members', { ...settings.members, enabled: body.enabled }, user.id);
+      else if (section === 'subsidies') {
+        await deps.repo.saveTenantSettings(tenant.id, 'subsidies', { ...settings.subsidies, enabled: body.enabled }, user.id);
+        // 初めて入れたときは、利用範囲を管理者だけにする（第39.2節。管理者は「利用できる人」で広げられる）
+        if (body.enabled && !settings.access.scopes[SUBSIDIES_EXTENSION_ID]) {
+          const admins = (await deps.repo.listUsers(tenant.id)).filter((u) => u.status === 'active' && u.roles.includes('admin')).map((u) => u.id);
+          await deps.repo.saveTenantSettings(tenant.id, 'access', { ...settings.access, scopes: { ...settings.access.scopes, [SUBSIDIES_EXTENSION_ID]: { users: admins, groups: [] } } }, user.id);
+        }
+      }
       else if (section === 'signage') {
         await deps.repo.saveTenantSettings(tenant.id, 'signage', { ...settings.signage, enabled: body.enabled }, user.id);
         // 切ったら、画面は無地にする（登録・素材・流れは消さない。第31.2節）

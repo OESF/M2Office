@@ -39,6 +39,8 @@ agent01.png ～ agent50.png
 | 15 | コラムのサイネージ用（`web-columns:signage`） | コラムの作成 |
 | 16 | コラムをサイネージに流す（`web-columns:signage-publish`） | コラムの作成 |
 | 17 | 契約の台帳（`contracts:ledger`） | 契約の管理 |
+| 18 | 補助金・助成金の案内（`subsidies:guide`） | 補助金・助成金の案内 |
+| 19 | 会員とポイント（`members:desk`） | 会員とポイント |
 | 31 | 名刺の取り込み（`business-cards:import`） | 名刺管理 |
 | 32 | 名刺の修正（`business-cards:update`） | 名刺管理 |
 | 33 | 在庫の記録（`inventory:record`） | 在庫管理 |
@@ -60,7 +62,7 @@ agent01.png ～ agent50.png
 | 49 | Web について聞く（`web-review:ask`） | Webの分析 |
 | 50 | Web の依頼文を送る（`web-review:request`） | Webの分析 |
 
-**未使用: 18〜30**
+**未使用: 20〜30**
 
 ### 業務を足すとき
 

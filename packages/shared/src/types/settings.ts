@@ -17,6 +17,8 @@ import { DEFAULT_COMPETITOR_SETTINGS, type CompetitorSettings } from './competit
 import { DEFAULT_ANNOUNCEMENT_SETTINGS, type AnnouncementSettings } from './announcements.js';
 import { DEFAULT_CONTRACT_SETTINGS, type ContractSettings } from './contracts.js';
 import { DEFAULT_RESERVATION_SETTINGS, type ReservationSettings } from './reservations.js';
+import { DEFAULT_SUBSIDY_SETTINGS, type SubsidySettings } from './subsidies.js';
+import { DEFAULT_MEMBER_SETTINGS, type MemberSettings } from './members.js';
 import { DEFAULT_WEB_REVIEW_SETTINGS, type WebReviewSettings } from './web-review.js';
 
 /** 会社情報（仕様書 第6.6.1節）。帳票とメールの署名に使う。 */
@@ -258,6 +260,10 @@ export interface TenantSettings {
   contracts: ContractSettings;
   /** 会議室・社用車・備品の予約（内蔵の拡張。第37章） */
   reservations: ReservationSettings;
+  /** 補助金・助成金の案内（内蔵の拡張。第39章） */
+  subsidies: SubsidySettings;
+  /** 会員とポイント（内蔵の拡張。第40章） */
+  members: MemberSettings;
   /** 会社の AI の方針（第16.3.7.1節、ADR-0059）。 */
   aiPolicy: AiPolicySettings;
 }
@@ -323,6 +329,10 @@ export const DEFAULT_TENANT_SETTINGS: TenantSettings = {
   contracts: DEFAULT_CONTRACT_SETTINGS,
   // 予約は既定で切り（第37.2節）
   reservations: DEFAULT_RESERVATION_SETTINGS,
+  // 補助金・助成金の案内は既定で切り（第39.2節）
+  subsidies: DEFAULT_SUBSIDY_SETTINGS,
+  // 会員とポイントは既定で切り（第40.2節）
+  members: DEFAULT_MEMBER_SETTINGS,
   aiPolicy: { mode: 'cloud' },
 };
 
@@ -403,7 +413,7 @@ export interface UserSettings {
   };
   notifications: {
     /** 受け取る種類（第6.5.5節）。`false` にしたものは届けない。 */
-    kinds: Record<'brief' | 'run' | 'approval' | 'failure' | 'inventory' | 'attendance' | 'signage' | 'inquiry' | 'competitor' | 'announcement' | 'webReview' | 'column' | 'contract' | 'reservation', boolean>;
+    kinds: Record<'brief' | 'run' | 'approval' | 'failure' | 'inventory' | 'attendance' | 'signage' | 'inquiry' | 'competitor' | 'announcement' | 'webReview' | 'column' | 'contract' | 'reservation' | 'subsidy', boolean>;
     /** 通知しない時間帯（例: 22:00〜7:00）。`null` は指定なし。 */
     quietHours: { from: string; to: string } | null;
     /**
@@ -584,7 +594,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   profile: { furigana: '', title: '', timezone: 'Asia/Tokyo', home: '', workplace: '' },
   secretary: { name: '', callMe: '', style: 'polite', proactivity: 'normal', speak: true, captions: true, voice: '', voiceStyle: '', avatar: '' },
   notifications: {
-    kinds: { brief: true, run: true, approval: true, failure: true, inventory: true, attendance: true, signage: true, inquiry: true, competitor: true, announcement: true, webReview: true, column: true, contract: true, reservation: true },
+    kinds: { brief: true, run: true, approval: true, failure: true, inventory: true, attendance: true, signage: true, inquiry: true, competitor: true, announcement: true, webReview: true, column: true, contract: true, reservation: true, subsidy: true },
     quietHours: null,
     channels: { chat: false },
   },

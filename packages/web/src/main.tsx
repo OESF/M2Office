@@ -11,6 +11,7 @@ import { Admin } from './Admin.js';
 import { Board } from './Dashboard.js';
 import { Login, takeReturnPath } from './Login.js';
 import { MobileInventory } from './MobileInventory.js';
+import { MobileMembers } from './MobileMembers.js';
 import { SignagePair } from './SignagePair.js';
 import { MobileSignage } from './MobileSignage.js';
 import { api, ApiError, setUnauthorizedHandler, type Me } from './api.js';
@@ -76,6 +77,8 @@ function Root() {
   const withDebug = (page: JSX.Element) => (me.debug ? <>{page}<DebugOverlay /></> : page);
   // スマホ用の在庫のページ（仕様書 第29.11.1節）。ワークスペースの枠（左のメニュー・秘書の欄）を出さない
   if (location.pathname.startsWith('/m/inventory')) return withDebug(<MobileInventory me={me} />);
+  // 店員の会員のページ（会員証の QR を読んでポイントを付ける・特典を使う。仕様書 第40.9節）
+  if (location.pathname.startsWith('/m/members')) return withDebug(<MobileMembers me={me} />);
   // 店頭サイネージの画面の登録（端末の QR を管理者がスマホで読む。仕様書 第31.5.1節）
   if (location.pathname.startsWith('/m/signage/pair')) return withDebug(<SignagePair me={me} />);
   // 店頭サイネージのスタッフのページ（割り込みを出す・消す。仕様書 第31.9.3節）

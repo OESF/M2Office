@@ -14,7 +14,7 @@ import {
   alwaysRequiresApproval, canDecide, canUseAgent, writeInternalNeedsApproval,
   type AutomationPolicy, type TenantSettings, type WritingStyle,
   type AgentDefinition, type AgentStep, type ApprovalStep, type Approval, type Run,
-  type RunStep, type Step, type ContactScope, type InventorySettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type ContractSettings,
+  type RunStep, type Step, type ContactScope, type InventorySettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type ContractSettings, type SubsidySettings, type MemberSettings,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { LlmMessage, LlmProvider, LlmResponse } from '../llm/provider.js';
@@ -42,6 +42,8 @@ import type { InquiryService } from '../inquiries/service.js';
 import type { CompetitorService } from '../competitors/service.js';
 import type { AnnouncementService } from '../announcements/service.js';
 import type { ContractService } from '../contracts/service.js';
+import type { SubsidyService } from '../subsidies/service.js';
+import type { MemberService } from '../members/service.js';
 import type { ColumnPlanner } from '../columns/planner.js';
 import type { ColumnSignageService } from '../columns/signage.js';
 import type { WebReviewService } from '../web-review/service.js';
@@ -184,6 +186,16 @@ export interface RunEngineDeps {
   contracts?: {
     service: ContractService;
     access(tenantId: string, userId: string): Promise<ContractSettings | null>;
+  };
+  /** 補助金・助成金の案内（内蔵の拡張。仕様書 第39章）。ツールに渡す。 */
+  subsidies?: {
+    service: SubsidyService;
+    access(tenantId: string, userId: string): Promise<SubsidySettings | null>;
+  };
+  /** 会員とポイント（内蔵の拡張。仕様書 第40章）。ツールに渡す。 */
+  members?: {
+    service: MemberService;
+    access(tenantId: string, userId: string): Promise<MemberSettings | null>;
   };
   /** その日がお知らせで出した休業の期間に入るか（予定の候補で休業日を避ける。第35.7節）。 */
   closedOn?(tenantId: string, day: string): Promise<boolean>;
@@ -999,6 +1011,14 @@ export class RunEngine {
       // 契約の管理（第38.8節）
       ...(this.deps.contracts ? {
         contracts: { service: this.deps.contracts.service, access: () => this.deps.contracts!.access(run.tenantId, requestedBy) },
+      } : {}),
+      // 補助金・助成金の案内（第39.8節）
+      ...(this.deps.subsidies ? {
+        subsidies: { service: this.deps.subsidies.service, access: () => this.deps.subsidies!.access(run.tenantId, requestedBy) },
+      } : {}),
+      // 会員とポイント（第40.7節）
+      ...(this.deps.members ? {
+        members: { service: this.deps.members.service, access: () => this.deps.members!.access(run.tenantId, requestedBy) },
       } : {}),
       // Webの分析（第34.18節）
       ...(this.deps.webReview ? {

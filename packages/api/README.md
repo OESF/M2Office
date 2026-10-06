@@ -305,6 +305,14 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/reservations?from=&to=` ／ `GET /v1/reservations/mine` | 予約（仕様書 第37章）: 期間（15 日まで）の予約と予約できるもの・本人が管理者か ／ 本人のこれからの予約 |
 | `POST /v1/reservations` ／ `PATCH` ／ `DELETE /v1/reservations/:id` ／ `POST /v1/reservations/:id/finish` | 予約する（同じものの時間が重なれば 409 と `conflict`: 使っている人と時間・次に空く時間・同じ種類で空いているほかのもの）／ 変える（本人と管理者）／ 取り消す ／ 早く終わったので終わりをいまにする。予約した人の Google カレンダーの予定も入れる・直す・消す |
 | `GET` ／ `POST /v1/reservations/items` ／ `PATCH /v1/reservations/items/:id` ／ `PUT /v1/reservations/items/order` | 予約できるもの（止めたものも含む）／ 足す（管理者。種類を言わなければ名前から決める）／ 直す・止める（`status`）／ 並べ替え |
+| `GET /v1/subsidies` ／ `POST /v1/subsidies/search` ／ `PATCH /v1/subsidies/:id` | 補助金・助成金の案内（仕様書 第39章）: 候補（締め切りの近い順。過ぎたもの・見送りも含む）と会社のこと・関心・最後に調べた日時・調べているか ／ いま調べる（後ろで調べる。1 日 1 回まで。202、済んでいれば 409）／ 気になる・見送り・戻す（`status`） |
+| `PUT /v1/admin/extensions/subsidies/settings` | 管理者: 補助金・助成金の会社の関心と業種（`interest`・`industry`） |
+| `GET` ／ `POST /v1/members` ／ `GET` ／ `PATCH` ／ `DELETE /v1/members/:id` | 会員とポイント（仕様書 第40章）: 一覧（`q`）と会社の率 ／ 店頭で作る（会員証の URL を返す）／ 1 人とポイントの記録・まとめる候補 ／ 呼び名と電話 ／ 削除（管理者） |
+| `GET /v1/members/card?code=` ／ `GET /v1/members/lookup` | 店員が読んだ会員証（QR の URL か鍵）から会員と使える特典 ／ 問い合わせの連絡先と同じ人の会員（`phone`・`inquiryId`） |
+| `POST /v1/members/:id/visit` ／ `purchase` ／ `reward` ／ `adjust` ／ `merge`、`POST /v1/members/points/:id/undo` | 来店（1 日 1 回）／ 購入（`amount`。金額は残さない）／ 特典を使う ／ 調整（理由）／ まとめる（管理者）／ 取り消し（前の日は管理者） |
+| `GET /v1/members/:id/qr.svg` ／ `GET /v1/members/:id/card.pdf` ／ `GET` ／ `POST /v1/members/rewards` ／ `PATCH /v1/members/rewards/:id` | 会員証の QR ／ 紙の会員証 ／ 特典（作る・直すは管理者） |
+| `GET /v1/member-card/:key` ／ `GET` ／ `POST /v1/member-card/line` | ログインなし: 会員証のページ（鍵つき）／ LINE の入口（LIFF。ID トークンを LINE で確かめ、初めてなら呼び名を受け取って会員にする） |
+| `PUT /v1/admin/extensions/members/settings` | 管理者: 来店のポイント・購入の率・有効期限・LIFF ID・LINE ログインのチャネル ID |
 | `GET /v1/competitors` | 競合の分析（仕様書 第36.18節）: 全体（自社の像・競合・動いている作業・最後の作業・地図の注意）。地図で見つけた競合の名前と Web サイトはここで引き直す。使えない会社と利用範囲の外の人には、`/v1/competitors` のどの口も 403 |
 | `POST /v1/competitors/discover` ／ `POST /v1/competitors/check` | 競合を探す作業（`radiusKm`・`nationwide`・`auto` で商圏を変える）／ 今すぐ見回る作業を受け付ける（202。ワーカーが行う。動いていれば `already`） |
 | `POST /v1/competitors` ／ `DELETE /v1/competitors/:id` | URL か店の名前で競合を入れる（`text`。トップを読めたときだけ。社内のアドレスは 400）／ 外す（次に探しても入れない） |

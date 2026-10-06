@@ -66,6 +66,7 @@
 | `knowledge.search` | read | — | 社内の知識（規程・議事録など）を調べます。区画の外の人には区画内の文書を見せません |
 | `meet.transcript` | read | `meetings.space.readonly`（機密） | Meet の会議の文字起こしを読みます。あなたが参加した会議だけで、会議の終了から 30 日を過ぎたものは読めません |
 | `meeting.get_transcript` | read | — | 会議の記録（文字起こし）を読みます |
+| `members.find` | read | — | 会員の数・ポイント・来店の回数・最後の来店を引きます |
 | `notices.list` | read | — | あなた宛ての社内のお知らせ（部署などからのお願い）を確かめます。お知らせを書き換えることはしません |
 | `pdf.extract` | read | — | PDF から文字を読み取ります。文字の無いページ（スキャンなど）は読み取りにかけますが、読み取り結果は確かめが要ります |
 | `profile.read` | read | — | あなたの自宅（地域）・いつもの勤務地・今日の日付を確かめます。行程の出発地や天気の地域に使い、どこにも書き込みません |
@@ -73,6 +74,8 @@
 | `sheets.read` | read | `drive.file`（機密でない） | Google スプレッドシートの表を読みます |
 | `skill.read` | read | — | このスキルに入っている資料を読みます |
 | `slides.template` | read | `drive`（制限付き） | 会社が登録したスライドのテンプレートの、使えるレイアウトを確かめます。どこにも書き込みません |
+| `subsidies.find` | read | — | 会社に合いそうな補助金・助成金の候補を、締め切りの近い順に引きます |
+| `subsidies.search` | read | — | 国・自治体の補助金と助成金を調べ、会社に合いそうなものを候補にします |
 | `tasks.list` | read | `tasks`（機密） | ToDo の一覧を見ます |
 | `web_review.ask` | read | — | アナリティクスと Search Console から、決まった指標と切り口で数字を読みます。期間と比べた相手を添えて答えます |
 | `web_review.findings` | read | — | 週に 1 回の見回りで見つけた、Web サイトの直すべき所（理由・直し方・制作会社への依頼文の下書き）を読みます |
@@ -113,8 +116,11 @@
 | `inventory.receive_slip` | write-internal | — | 納品書の写真や PDF を読み取り、在庫の品目に当てはまる行を入庫にします。当てはまらない行は残します。誰にも送りません |
 | `inventory.reserve` | write-internal | — | 予約に合わせて品目を取り置き（使える数だけを減らす）、取り消し・使ったにし、メニューで使う品目を覚えます。誰にも送りません |
 | `knowledge.register` | write-internal | — | 承認された議事録などを、そのまま社内の知識に登録します。すべての承認のあとに行い、承認した人が見た内容だけを登録します |
+| `members.points` | write-internal | — | 会員のポイントを足す・引く（理由を残す） |
+| `members.rewards` | write-internal | — | ポイントと交換できる特典を作る・直す・止める（管理者） |
 | `notification.send` | write-internal | — | 依頼した本人にだけお知らせを届けます。他の人には送りません |
 | `sheets.append` | write-internal | `drive.file`（機密でない） | M2Office で作った表に行を足します |
+| `subsidies.mark` | write-internal | — | 補助金・助成金の候補を「気になる」か「見送り」にします |
 | `tasks.complete` | write-internal | `tasks`（機密） | ToDo を完了にします |
 | `tasks.create` | write-internal | `tasks`（機密） | ToDo を登録します |
 | `web_review.select` | write-internal | — | 見るアナリティクスのプロパティと Search Console のサイトを、見られるものの中から選び直します（管理者だけ） |
@@ -177,6 +183,7 @@
 | `knowledge.search` | `query`（必須）: 調べる言葉 |
 | `meet.transcript` | `query`: 会議の題名に含まれる言葉（空ならいちばん新しい会議） |
 | `meeting.get_transcript` | `transcript`（必須）: 会議の記録（文字起こし） |
+| `members.find` | `query`: 会員番号か呼び名、`order`: points・visits・recent・away、`awayDays`: 何日来ていない会員か |
 | `notices.list` | なし |
 | `pdf.extract` | `fileId`（必須）: ファイルの ID |
 | `profile.read` | なし |
@@ -184,6 +191,8 @@
 | `sheets.read` | `spreadsheetId`（必須）: スプレッドシートの ID、`maxRows`: 読む行数の上限（既定 500） |
 | `skill.read` | `path`（必須）: ファイルの相対パス |
 | `slides.template` | `template`: テンプレートの名前（任意） |
+| `subsidies.find` | `query`: 制度の名前の言葉 |
+| `subsidies.search` | `interest`: 頼みにあった関心 |
 | `tasks.list` | なし |
 | `web_review.ask` | `metric`（必須）: 指標（users・newUsers・sessions・pageViews・engagementRate・keyEvents・searchImpressions・searchClicks・searchCtr・searchPosition）、`breakdown`: 切り口（none・page・source・device・region・searchQuery・searchPage）、`period`: 期間（lastMonth・thisMonth・lastWeek・last7Days・last28Days・custom）、`start`: 期間の始め（custom のとき。YYYY-MM-DD）、`end`: 期間の終わり（custom のとき。YYYY-MM-DD）、`contains`: ページの URL か検索の言葉に含む文字 |
 | `web_review.findings` | `kind`: 種類で絞る（lowCtr・nearFirstPage・missingContent・notIndexed・slowMobile・fading） |
@@ -225,8 +234,11 @@
 | `inventory.receive_slip` | `fileId`（必須）: 納品書の画像か PDF のファイル ID、`place`: 入れる場所（倉庫や棚の名前。省けば品目ごとに今ある場所） |
 | `inventory.reserve` | `action`（必須）: hold・cancel・use・teach（hold・cancel・use・teach）、`item`: 品目（品名・自社のコード・バーコード）、`qty`: 数（使う単位）、`when`: 予約の日時、`booking`: 予約番号、`menu`: 予約のメニュー（コース・施術・プラン）の名前 |
 | `knowledge.register` | `artifactId`（必須）: 登録する成果物の ID（document.create の結果） |
+| `members.points` | `query`（必須）: 会員番号か呼び名、`points`（必須）: 足す数（引くなら負）、`note`（必須）: 理由 |
+| `members.rewards` | `action`（必須）: list・create・update・stop、`name`: 特典の名前、`points`: 必要なポイント、`newName`: 新しい名前 |
 | `notification.send` | `kind`: 種類（brief・run）、`title`（必須）: 題名、`body`（必須）: 本文 |
 | `sheets.append` | `spreadsheetId`（必須）: スプレッドシートの ID、`rows`（必須）: 足す行の配列（各行は値の配列） |
+| `subsidies.mark` | `query`（必須）: 制度の名前の言葉、`status`（必須）: interested・skipped・new |
 | `tasks.complete` | `taskId`（必須）: ToDo の ID |
 | `tasks.create` | `title`（必須）: ToDo の題名、`due`: 期限（YYYY-MM-DD。任意） |
 | `web_review.select` | `property`: プロパティの名前か URL の一部、`site`: サイトの URL の一部 |

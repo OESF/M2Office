@@ -11,7 +11,7 @@
 
 import {
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
-  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink,
+  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, SubsidyService, PostgresSubsidyStore, MockResearchProvider, JGrantsApi, MockJGrants, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink,
   NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator,
@@ -195,6 +195,26 @@ const reservations = new ReservationService({
   store: new PostgresReservationStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
   repo, calendar: connector.calendar, logger: log,
 });
+// 補助金・助成金の案内（第39章）。月の調べもの（毎月 1 日の 8 時を過ぎたら）と、「気になる」にした制度の締め切りの知らせ
+const jgrants = new JGrantsApi();
+const mockJGrants = new MockJGrants();
+const subsidies = new SubsidyService({
+  store: new PostgresSubsidyStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+  repo, logger: log, llmFor: (tenantId) => ai.llmFor(tenantId), 
+  // 見本の会社では Web の調べものも使わない（外に読みに行かない）
+  researchFor: async (tenantId) => (connector.sourceFor(tenantId) === 'mock' ? new MockResearchProvider() : ai.researchFor(tenantId)),
+  sourceFor: (tenantId) => (connector.sourceFor(tenantId) === 'mock' ? mockJGrants : jgrants),
+  employeesOf: async (tenantId) => {
+    if (!(await repo.getTenantSettings(tenantId)).hr.enabled) return null;
+    const today = new Date(Date.now() + 9 * 3_600_000).toISOString().slice(0, 10);
+    return (await hrStore.listEmployees(tenantId)).filter((e) => e.category !== 'owner' && (!e.leftOn || e.leftOn >= today)).length;
+  },
+});
+// 会員とポイント（第40章）。ワーカーは有効期限の失効（1 日に 1 回）と、秘書の業務からの頼みを扱う
+const members = new MemberService({
+  store: new PostgresMemberStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+  repo, logger: log,
+});
 const inquiryStore = new PostgresInquiryStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
 const inquiries = new InquiryService({
   store: inquiryStore, repo, llmFor: (tenantId) => ai.llmFor(tenantId), contacts: contactBookFrom(contactStore, cardsAccess(repo)), logger: log,
@@ -275,6 +295,8 @@ const engine = new RunEngine({
   announcements: { service: announcements, access: announcementsAccess(repo) },
   webReview: { service: webReview, access: webReviewAccess(repo) },
   contracts: { service: contracts, access: contractsAccess(repo) },
+  subsidies: { service: subsidies, access: subsidiesAccess(repo) },
+  members: { service: members, access: membersAccess(repo) },
   llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId),
   // 業務ごとの AI（ローカル・外部）と、社外の接続に送ってよいか（第16.3.7.1節）
   llmForRun: (tenantId, def, registry, previous) => ai.llmForRun(tenantId, def, registry, previous),
@@ -408,6 +430,12 @@ let lastContractCheck = 0;
 /** 終わって 1 年を過ぎた予約を消す間隔（第37.11節。1 日に 1 回で足りる）。 */
 const RESERVATION_PURGE_INTERVAL_MS = 86_400_000;
 let lastReservationPurge = 0;
+/** 補助金・助成金の月の調べものと締め切りの知らせを見る間隔（第39.7節。既定は 1 時間）。 */
+const SUBSIDY_INTERVAL_MS = Number(process.env['SUBSIDY_INTERVAL_MS'] ?? 3_600_000);
+let lastSubsidyCheck = 0;
+/** 会員のポイントの失効を見る間隔（第40.6節。1 日に 1 回で足りる）。 */
+const MEMBER_EXPIRY_INTERVAL_MS = 86_400_000;
+let lastMemberExpiry = 0;
 // Webの分析（第34.18節・第34.19節）。既定は 1 分ごとに、月の便り（3 日の 8 時を過ぎ、先月の便りがまだ無いか）と、
 // 直すべき所の見回りの番（週に 1 回・今すぐチェック）を見る
 const WEB_REVIEW_INTERVAL_MS = Number(process.env['WEB_REVIEW_INTERVAL_MS'] ?? 60_000);
@@ -667,6 +695,28 @@ while (running) {
       if (r.notified + r.renewed > 0) log.info('契約の期限を知らせ、自動更新を進めました', { notified: r.notified, renewed: r.renewed });
     } catch (err) {
       log.warn('契約の期限の見張りに失敗しました', { err });
+    }
+  }
+
+  // 補助金・助成金の月の調べものと、「気になる」にした制度の締め切りの知らせ（第39.7節）
+  if (Date.now() - lastSubsidyCheck >= SUBSIDY_INTERVAL_MS) {
+    lastSubsidyCheck = Date.now();
+    try {
+      const r = await subsidies.tick(new Date());
+      if (r.searched + r.reminded > 0) log.info('補助金・助成金を調べ、締め切りを知らせました', { searched: r.searched, reminded: r.reminded });
+    } catch (err) {
+      log.warn('補助金・助成金の見張りに失敗しました', { err });
+    }
+  }
+
+  // 最後に貯めた日から有効期限の日数がたった会員のポイントを失効させる（第40.6節）
+  if (Date.now() - lastMemberExpiry >= MEMBER_EXPIRY_INTERVAL_MS) {
+    lastMemberExpiry = Date.now();
+    try {
+      const expired = await members.tick(new Date());
+      if (expired > 0) log.info('会員のポイントを失効させました', { members: expired });
+    } catch (err) {
+      log.warn('会員のポイントの失効に失敗しました', { err });
     }
   }
 

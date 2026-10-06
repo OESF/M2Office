@@ -6315,6 +6315,172 @@ console.log('\n■ 78. 予約（入り切り・予約できるもの・重なり
   }
 }
 
+console.log('\n■ 79. 補助金・助成金の案内（入り切り・利用範囲は管理者だけから・いま調べる・1 日 1 回・状態・会社の境界。第39.17節）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const { rows: saved } = await owner.query(`select tenant_id, subsidies, access from tenant_settings where tenant_id in ('t-alpha', 't-beta')`);
+  try {
+    await owner.query(`update tenant_settings set subsidies = null where tenant_id in ('t-alpha', 't-beta')`);
+    const off = await call('a', '/v1/subsidies');
+    off.status === 403 ? ok('補助金・助成金の案内を切っている会社では使わせない') : ng(`切っているのに使えた（${off.status}）`);
+    const on = await call('a', '/v1/admin/extensions/subsidies/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const meAdmin = await call('a', '/v1/me');
+    const meMember = await call('a', '/v1/me', {}, 'member');
+    const memberList = await call('a', '/v1/subsidies', {}, 'member');
+    on.status === 200 && meAdmin.body.subsidies === true && meMember.body.subsidies === false && memberList.status === 403
+      ? ok('初めて入れると、利用範囲は管理者だけ（管理者のメニューにだけ「補助金・助成金」が出る）') : ng('利用範囲が違う', JSON.stringify({ on: on.status, admin: meAdmin.body.subsidies, member: meMember.body.subsidies, list: memberList.status }));
+    const memberSet = await call('a', '/v1/admin/extensions/subsidies/settings', { method: 'PUT', body: JSON.stringify({ interest: 'x' }) }, 'member');
+    const adminSet = await call('a', '/v1/admin/extensions/subsidies/settings', { method: 'PUT', body: JSON.stringify({ interest: 'IT の導入' }) });
+    memberSet.status === 403 && adminSet.status === 200 ? ok('会社の関心を直せるのは管理者だけ') : ng(`関心を直せる人が違う（${memberSet.status}・${adminSet.status}）`);
+
+    const start = await call('a', '/v1/subsidies/search', { method: 'POST', body: '{}' });
+    let list = await call('a', '/v1/subsidies');
+    for (let i = 0; i < 40 && (list.body.searching || !list.body.searchedAt); i++) {
+      await sleep(500);
+      list = await call('a', '/v1/subsidies');
+    }
+    const items = list.body.items ?? [];
+    start.status === 202 && items.length > 0 && items.every((x) => x.sourceUrl.startsWith('https://www.jgrants-portal.go.jp/subsidy/') && x.deadline && x.reason)
+      && list.body.profile?.region && list.body.interest === 'IT の導入'
+      ? ok(`いま調べると、見本の公募から合う制度を出典・締め切り・合う理由つきで出す（${items.length} 件。所在地: ${list.body.profile.region}）`) : ng('調べた結果が違う', JSON.stringify({ start: start.status, list: list.body }).slice(0, 600));
+    const again = await call('a', '/v1/subsidies/search', { method: 'POST', body: '{}' });
+    again.status === 409 && /1 日 1 回/.test(again.body.error ?? '') ? ok('いま調べるのは 1 日 1 回まで') : ng(`同じ日にもう一度調べられた（${again.status}）`);
+    const first = items[0];
+    const bad = first ? await call('a', `/v1/subsidies/${first.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'done' }) }) : { status: 0 };
+    const mark = first ? await call('a', `/v1/subsidies/${first.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'interested' }) }) : { status: 0 };
+    const after = await call('a', '/v1/subsidies');
+    bad.status === 400 && mark.status === 200 && after.body.items.find((x) => x.id === first?.id)?.status === 'interested'
+      ? ok('「気になる」にできる（違う状態は断る）') : ng('状態を変えられない', JSON.stringify({ bad: bad.status, mark: mark.status }));
+
+    await call('b', '/v1/admin/extensions/subsidies/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const other = await call('b', '/v1/subsidies');
+    const otherMark = first ? await call('b', `/v1/subsidies/${first.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'skipped' }) }) : { status: 0 };
+    other.status === 200 && !other.body.items.some((x) => x.id === first?.id) && otherMark.status === 404
+      ? ok('ほかの会社の候補は見えず、状態も変えられない') : ng('ほかの会社の候補に触れた', JSON.stringify({ list: other.status, mark: otherMark.status }));
+
+    const app = new pg.Client({ connectionString: process.env.DATABASE_URL ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office' });
+    await app.connect();
+    try {
+      await app.query('begin');
+      await app.query(`select set_config('app.tenant_id', 't-beta', true)`);
+      let refused = false;
+      try {
+        await app.query(`insert into subsidy_candidates (id, tenant_id, key, name) values ('sbs-smoke', 't-alpha', 'k', 'x')`);
+      } catch { refused = true; }
+      await app.query('rollback');
+      refused ? ok('補助金・助成金の候補は、ほかの会社の行を書けない（行単位の制限）') : ng('ほかの会社の候補を書けた');
+    } finally {
+      await app.end();
+    }
+  } finally {
+    await owner.query(`delete from subsidy_candidates where tenant_id in ('t-alpha', 't-beta')`);
+    for (const r of saved) {
+      await owner.query(`update tenant_settings set subsidies = $2, access = $3 where tenant_id = $1`,
+        [r.tenant_id, r.subsidies ? JSON.stringify(r.subsidies) : null, r.access ? JSON.stringify(r.access) : null]);
+    }
+    await owner.end();
+  }
+}
+
+console.log('\n■ 80. 会員とポイント（入り切り・会員証・来店は 1 日 1 回・購入は金額を残さない・特典・取り消し・LINE の会員証・記録は追記のみ・会社の境界。第40.17節）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const { rows: saved } = await owner.query(`select tenant_id, members from tenant_settings where tenant_id in ('t-alpha', 't-beta')`);
+  /** ログインの印を付けずに開く（会員証のページはお客様が開く） */
+  const open = async (tenant, path, init = {}) => {
+    const res = await fetch(`${API}${path}`, { ...init, headers: { 'content-type': 'application/json', 'x-tenant': tenant, ...(init.headers ?? {}) } });
+    return { status: res.status, csp: res.headers.get('content-security-policy') ?? '', text: await res.text() };
+  };
+  try {
+    await owner.query(`update tenant_settings set members = null where tenant_id in ('t-alpha', 't-beta')`);
+    const off = await call('a', '/v1/members', {}, 'member');
+    off.status === 403 ? ok('会員とポイントを切っている会社では使わせない') : ng(`切っているのに使えた（${off.status}）`);
+    await call('a', '/v1/admin/extensions/members/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const me = await call('a', '/v1/me', {}, 'member');
+    me.body.members === true ? ok('入れると、店員（利用範囲の人）のメニューに「会員」が出る') : ng('入れたのに使えない', JSON.stringify(me.body.members));
+
+    const made = await call('a', '/v1/members', { method: 'POST', body: JSON.stringify({ nickname: 'スモーク', phone: '' }) }, 'member');
+    const cardUrl = made.body.cardUrl ?? '';
+    const id = made.body.member?.id;
+    made.status === 201 && /\/v1\/member-card\/[A-Za-z0-9_-]{32}$/.test(cardUrl) ? ok('店員が会員を作ると、本人だけの会員証の URL（鍵つき）ができる') : ng('会員を作れない', JSON.stringify(made));
+    const byCard = await call('a', `/v1/members/card?code=${encodeURIComponent(cardUrl)}`, {}, 'member');
+    byCard.status === 200 && byCard.body.member?.id === id ? ok('会員証の QR（URL）から会員を引ける') : ng('会員証から会員を引けない', JSON.stringify(byCard));
+
+    const v1 = await call('a', `/v1/members/${id}/visit`, { method: 'POST', body: '{}' }, 'member');
+    const v2 = await call('a', `/v1/members/${id}/visit`, { method: 'POST', body: '{}' }, 'member');
+    v1.status === 200 && v1.body.points === 1 && v2.status === 400 ? ok('来店のポイントは 1 日 1 回まで') : ng('来店のポイントが違う', JSON.stringify({ v1: v1.body, v2: v2.status }));
+    const buy = await call('a', `/v1/members/${id}/purchase`, { method: 'POST', body: JSON.stringify({ amount: 1580 }) }, 'member');
+    const { rows: pts } = await owner.query(`select * from member_points where member_id = $1 and kind = 'purchase'`, [id]);
+    buy.status === 200 && buy.body.points === 15 && buy.body.member.balance === 16 && pts.length === 1 && !JSON.stringify(pts[0]).includes('1580')
+      ? ok('購入は 100 円で 1 ポイントに換算し、金額は残さない') : ng('購入のポイントが違う', JSON.stringify({ buy: buy.body, pts }));
+
+    const memberReward = await call('a', '/v1/members/rewards', { method: 'POST', body: JSON.stringify({ name: 'スモークの特典', points: 20 }) }, 'member');
+    const reward = await call('a', '/v1/members/rewards', { method: 'POST', body: JSON.stringify({ name: 'スモークの特典', points: 20 }) });
+    const short = await call('a', `/v1/members/${id}/reward`, { method: 'POST', body: JSON.stringify({ rewardId: reward.body.reward?.id }) }, 'member');
+    memberReward.status === 403 && reward.status === 201 && short.status === 400 && /足りません/.test(short.body.error ?? '')
+      ? ok('特典を作れるのは管理者だけ。ポイントが足りなければ使えない') : ng('特典の扱いが違う', JSON.stringify({ m: memberReward.status, a: reward.status, short: short.body }));
+    const noNote = await call('a', `/v1/members/${id}/adjust`, { method: 'POST', body: JSON.stringify({ points: 5, note: '' }) }, 'member');
+    noNote.status === 400 ? ok('調整は理由が要る') : ng(`理由の無い調整が通った（${noNote.status}）`);
+    const detail = await call('a', `/v1/members/${id}`, {}, 'member');
+    const buyRec = detail.body.points?.find((p) => p.kind === 'purchase');
+    const undo = buyRec ? await call('a', `/v1/members/points/${buyRec.id}/undo`, { method: 'POST', body: '{}' }, 'member') : { status: 0 };
+    const undo2 = buyRec ? await call('a', `/v1/members/points/${buyRec.id}/undo`, { method: 'POST', body: '{}' }, 'member') : { status: 0 };
+    const after = await call('a', `/v1/members/${id}`, {}, 'member');
+    undo.status === 200 && undo2.status === 400 && after.body.member.balance === 1 ? ok('その日の記録は店員が取り消せ（逆の記録を足す）、2 度は取り消せない') : ng('取り消しが違う', JSON.stringify({ u1: undo.status, u2: undo2.status, bal: after.body.member?.balance }));
+
+    const key = cardUrl.split('/').pop();
+    const page = await open('a', `/v1/member-card/${key}`);
+    const bad = await open('a', '/v1/member-card/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA');
+    page.status === 200 && page.text.includes('スモーク') && page.text.includes('<svg') && page.csp.includes("default-src 'none'") && bad.status === 404
+      ? ok('会員証のページはログインなしで開け（QR とポイント）、外部を読まない。知らない鍵は 404') : ng('会員証のページが違う', JSON.stringify({ s: page.status, csp: page.csp, bad: bad.status }));
+    const lineOff = await open('a', '/v1/member-card/line');
+    await call('a', '/v1/admin/extensions/members/settings', { method: 'PUT', body: JSON.stringify({ liffId: '1234567890-SmokeAbc', lineLoginChannelId: '1234567890' }) });
+    const linePage = await open('a', '/v1/member-card/line');
+    const first = await open('a', '/v1/member-card/line', { method: 'POST', body: JSON.stringify({ idToken: 'mock:smoke80:スモーク LINE' }) });
+    const joined = await open('a', '/v1/member-card/line', { method: 'POST', body: JSON.stringify({ idToken: 'mock:smoke80:スモーク LINE', nickname: 'スモーク LINE' }) });
+    const forged = await open('a', '/v1/member-card/line', { method: 'POST', body: JSON.stringify({ idToken: 'forged' }) });
+    lineOff.status === 404 && linePage.status === 200 && linePage.csp.includes('static.line-scdn.net') && JSON.parse(first.text).needsNickname === true
+      && /\/v1\/member-card\//.test(JSON.parse(joined.text).cardUrl ?? '') && forged.status === 400
+      ? ok('LINE の会員証: 設定してから開き、ID トークンを確かめ、初めてなら呼び名を聞いて会員にする（偽の印は断る）') : ng('LINE の会員証が違う', JSON.stringify({ off: lineOff.status, page: linePage.status, first: first.text, joined: joined.text, forged: forged.status }));
+
+    await call('b', '/v1/admin/extensions/members/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const other = await call('b', `/v1/members/card?code=${encodeURIComponent(cardUrl)}`, {}, 'member');
+    const otherPage = await open('b', `/v1/member-card/${key}`);
+    const otherVisit = await call('b', `/v1/members/${id}/visit`, { method: 'POST', body: '{}' }, 'member');
+    other.status === 404 && otherPage.status === 404 && otherVisit.status === 404
+      ? ok('ほかの会社の会員証は引けず、ポイントも付けられない') : ng('ほかの会社の会員に触れた', JSON.stringify({ card: other.status, page: otherPage.status, visit: otherVisit.status }));
+
+    const app = new pg.Client({ connectionString: process.env.DATABASE_URL ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office' });
+    await app.connect();
+    try {
+      await app.query('begin');
+      await app.query(`select set_config('app.tenant_id', 't-alpha', true)`);
+      let refused = false;
+      try { await app.query(`update member_points set points = 999 where member_id = $1`, [id]); } catch { refused = true; }
+      await app.query('rollback');
+      refused ? ok('ポイントの記録は追記のみ（アプリのロールでは書き換えられない）') : ng('ポイントの記録を書き換えられた');
+      await app.query('begin');
+      await app.query(`select set_config('app.tenant_id', 't-beta', true)`);
+      let rls = false;
+      try { await app.query(`insert into members (id, tenant_id, number, nickname, card_key, created_by) values ('mbr-smoke', 't-alpha', 999, 'x', 'k-smoke', 'u')`); } catch { rls = true; }
+      await app.query('rollback');
+      rls ? ok('会員は、ほかの会社の行を書けない（行単位の制限）') : ng('ほかの会社の会員を書けた');
+    } finally {
+      await app.end();
+    }
+  } finally {
+    await owner.query(`delete from member_points where tenant_id in ('t-alpha', 't-beta')`);
+    await owner.query(`delete from members where tenant_id in ('t-alpha', 't-beta')`);
+    await owner.query(`delete from member_rewards where tenant_id in ('t-alpha', 't-beta')`);
+    for (const r of saved) await owner.query(`update tenant_settings set members = $2 where tenant_id = $1`, [r.tenant_id, r.members ? JSON.stringify(r.members) : null]);
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

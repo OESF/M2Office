@@ -14,7 +14,7 @@ import { JinglePlayer } from './signage-audio.js';
 import { api, ApiError, describeError, type AccessOptions, type ExtensionView, type HrProposalField, type ScopeValue } from './api.js';
 import {
   INVENTORY_FEATURES, SIGNAGE_DEFAULT_COLOR, SIGNAGE_JINGLES, type HrSettings, type InventoryBookingSource, type InventoryFeature, type InventorySettings,
-  type SignageSettings, type SignageSound, type SignageSource, COLUMN_INDUSTRIES, COLUMN_RULE_SET_LABELS, COLUMN_PLAN_FREQUENCY_LABELS, type ColumnPlanFrequency, type WebColumnSettings, type InquirySettings, COMPETITORS_AUTO_RANGE, COMPETITORS_NOTIFY_MAX, COMPETITOR_WATCH_LABELS, competitorAutoMax, competitorWatch, competitorsMax, type CompetitorSettings, type AnnouncementSettings, type ContractSettings, type WebReviewSettings, type WebReviewCandidates, type WebReviewStatus,
+  type SignageSettings, type SignageSound, type SignageSource, COLUMN_INDUSTRIES, COLUMN_RULE_SET_LABELS, COLUMN_PLAN_FREQUENCY_LABELS, type ColumnPlanFrequency, type WebColumnSettings, type InquirySettings, COMPETITORS_AUTO_RANGE, COMPETITORS_NOTIFY_MAX, COMPETITOR_WATCH_LABELS, competitorAutoMax, competitorWatch, competitorsMax, type CompetitorSettings, type AnnouncementSettings, type ContractSettings, type MemberSettings, type WebReviewSettings, type WebReviewCandidates, type WebReviewStatus,
 } from '@m2office/shared';
 import { HelpTip, Markdown } from './help.js';
 import { Icon } from './nav.js';
@@ -301,6 +301,8 @@ function InstalledCard({ item: x, busy, focused = false, options, onChanged, onT
       {x.announcements && on && <AnnouncementFields settings={x.announcements} busy={busy} onChanged={onChanged} />}
       {x.webReview && on && <WebReviewFields settings={x.webReview} busy={busy} onChanged={onChanged} />}
       {x.contracts && on && <ContractStorageFields settings={x.contracts} busy={busy} onChanged={onChanged} />}
+      {x.subsidies && on && <SubsidyFields settings={x.subsidies} busy={busy} onChanged={onChanged} />}
+      {x.members && on && <MemberFields settings={x.members} busy={busy} onChanged={onChanged} />}
       <Details item={x} onChanged={onChanged} />
       {/* 内蔵の拡張は削除しない。スイッチで切る（データは消えない。第12.13節） */}
       {x.origin !== 'builtin' && (
@@ -820,6 +822,52 @@ function ContractStorageFields({ settings, busy, onChanged }: { settings: Contra
       <div className="row wrap">
         <span>契約書の置き場: {settings.storage ? <strong>{settings.storage.folderName}（Google ドライブ）</strong> : <span className="muted">つないでいません</span>}</span>
         <button className="btn ghost small" disabled={busy || working} onClick={connect}>{working ? 'つないでいます…' : settings.storage ? 'つなぎ直す' : 'つなぐ'}</button>
+      </div>
+      {error && <p className="error">{error}</p>}
+    </div>
+  );
+}
+
+/** 会員とポイントの設定（仕様書 第40.4節）。来店のポイント・購入の率・有効期限と、LINE の会員証（LIFF）。 */
+function MemberFields({ settings, busy, onChanged }: { settings: MemberSettings; busy: boolean; onChanged: () => void }) {
+  const [v, setV] = useState({
+    visitPoints: String(settings.visitPoints), yenPerPoint: String(settings.yenPerPoint), expiryDays: String(settings.expiryDays),
+    liffId: settings.liffId, lineLoginChannelId: settings.lineLoginChannelId,
+  });
+  const [error, setError] = useState<string | null>(null);
+  const save = () => api.members.saveSettings({
+    visitPoints: Number(v.visitPoints), yenPerPoint: Number(v.yenPerPoint), expiryDays: Number(v.expiryDays), liffId: v.liffId.trim(), lineLoginChannelId: v.lineLoginChannelId.trim(),
+  }).then(() => { setError(null); onChanged(); }).catch((e) => setError(describeError(e, '保存できませんでした')));
+  return (
+    <div className="small ext-inventory">
+      <div className="row wrap">
+        <label>来店のポイント <input type="number" min={0} max={100} value={v.visitPoints} onChange={(e) => setV({ ...v, visitPoints: e.target.value })} /></label>
+        <label>何円で 1 ポイント <input type="number" min={1} value={v.yenPerPoint} onChange={(e) => setV({ ...v, yenPerPoint: e.target.value })} /></label>
+        <label>有効期限（日） <input type="number" min={30} max={3650} value={v.expiryDays} onChange={(e) => setV({ ...v, expiryDays: e.target.value })} /></label>
+      </div>
+      <div className="row wrap">
+        <label>LINE の LIFF ID <input value={v.liffId} placeholder="1234567890-AbCdEfGh" onChange={(e) => setV({ ...v, liffId: e.target.value })} /></label>
+        <label>LINE ログインのチャネル ID <input value={v.lineLoginChannelId} inputMode="numeric" onChange={(e) => setV({ ...v, lineLoginChannelId: e.target.value })} /></label>
+        <button className="btn ghost small" disabled={busy} onClick={() => void save()}>保存</button>
+      </div>
+      <p className="muted">LIFF のエンドポイント URL: <code>{`${location.origin}/v1/member-card/line`}</code></p>
+      {error && <p className="error">{error}</p>}
+    </div>
+  );
+}
+
+/** 補助金・助成金の案内の設定（仕様書 第39.3節）。会社の関心（一言）と、AI がまとめた業種が違うときの直し。 */
+function SubsidyFields({ settings, busy, onChanged }: { settings: { interest: string; industry: string; profile: { industry: string } | null }; busy: boolean; onChanged: () => void }) {
+  const [interest, setInterest] = useState(settings.interest);
+  const [industry, setIndustry] = useState(settings.industry || settings.profile?.industry || '');
+  const [error, setError] = useState<string | null>(null);
+  const save = () => api.subsidies.saveSettings({ interest, industry }).then(() => { setError(null); onChanged(); }).catch((e) => setError(describeError(e, '保存できませんでした')));
+  return (
+    <div className="small ext-inventory">
+      <div className="row wrap">
+        <label>会社の関心 <input value={interest} maxLength={100} placeholder="IT の導入・人の採用など" onChange={(e) => setInterest(e.target.value)} /></label>
+        <label>業種 <input value={industry} maxLength={60} placeholder="空なら AI がまとめます" onChange={(e) => setIndustry(e.target.value)} /></label>
+        <button className="btn ghost small" disabled={busy} onClick={() => void save()}>保存</button>
       </div>
       {error && <p className="error">{error}</p>}
     </div>

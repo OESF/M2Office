@@ -149,6 +149,8 @@ export * from './competitors/index.js';
 export * from './announcements/index.js';
 export * from './contracts/index.js';
 export * from './reservations/index.js';
+export * from './subsidies/index.js';
+export * from './members/index.js';
 export * from './web-review/index.js';
 export * from './hr/index.js';
 export * from './signage/index.js';

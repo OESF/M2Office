@@ -138,6 +138,15 @@ export class InquiryService {
   constructor(private readonly deps: InquiryServiceDeps) {
     this.log = deps.logger ?? silentLogger;
   }
+  /**
+   * 問い合わせに結び付いた LINE のお客様の ID（会員とポイントで同じ人を見分ける。第40.8節）。画面には出さない。
+   *
+   * @returns 無ければ `null`
+   */
+  async lineUserIdOf(tenantId: string, inquiryId: string): Promise<string | null> {
+    return this.deps.store.lineUserIdOf(tenantId, inquiryId);
+  }
+
 
   /** 置き場（ツールが一覧を読むため）。 */
   get store(): InquiryStore {

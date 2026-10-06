@@ -45,6 +45,14 @@ src/reservations/ 会議室・社用車・備品の予約（内蔵の拡張。�
                  処理（service.ts。予約できるものを足す・直す・止める・並べ替え、予約する・空いているものを選ぶ・変える・取り消す・終わった、
                  重なったときの次に空く時間とほかのもの、予約した人の Google カレンダーの予定、1 年で消す）、包み（package.js）。
                  秘書の頼みの読み方と答えは src/secretary/reservations.ts
+src/subsidies/   補助金・助成金の案内（内蔵の拡張。第39章の段 1）。調べ先（jgrants.ts。jGrants の公開の API と見本・所在地は市区町村まで・
+                 従業員の数の幅・対象の地域）、置き場（store.ts。PostgreSQL とメモリ）、処理（service.ts。会社のこと・jGrants と Web の調べもの・
+                 推論の見立て（出典の無い制度を出さない）・1 日 1 回・見送りは出し直さない・月の調べものと締め切りの知らせ）、
+                 ツール（tools.ts。subsidies.find・search・mark）、付属の業務「補助金・助成金の案内」（agents.ts）
+src/members/     会員とポイント（内蔵の拡張。第40章の段 1）。置き場（store.ts。会員・追記のみのポイントの記録・特典。数は記録から求める）、
+                 処理（service.ts。会員を作る・来店は 1 日 1 回・購入は率で換算して金額を残さない・特典・取り消し・調整・まとめる・削除・
+                 有効期限の失効・LINE の ID トークンを確かめる口）、会員証（card.ts。紙のカードの PDF・QR・会員証のページと LINE の入口の HTML）、
+                 ツール（tools.ts。members.find・points・rewards）、付属の業務「会員とポイント」（agents.ts）
 src/cards/       名刺管理（内蔵の拡張。第27章）。置き場（自分だけの名刺は持ち主でも行を絞る）、読み取り（read.ts。写っている名刺ごとに項目・向き・四隅。
                  四隅は文字の向きに合わせて並べ直す orderCorners。1 枚の写真に 10 枚まで）、同じ人の見分け（identity.ts）、
                  表（CSV・Excel）の取り込みと書き出し（table.ts。見出しはよくある言い方と推論で読む）、
