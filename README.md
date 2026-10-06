@@ -70,6 +70,7 @@ npm run dev:cert
 WEB_HTTPS=true npm run dev
 ```
 
+いつも HTTPS で動かすなら、`.env` に `WEB_HTTPS=true` を書けば `npm run dev` だけで HTTPS になります（画面の開発サーバーも `.env` を読みます）。
 そのあと `https://<サブドメイン>.lvh.me:3100` で開きます。
 `mkcert` が入っていればブラウザが信頼するため警告は出ません。
 入っていなければ自己署名になり、最初の 1 回だけ「詳細設定」→「アクセスする」で通します
