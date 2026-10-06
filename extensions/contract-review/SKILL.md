@@ -1,13 +1,13 @@
 ---
 name: contract-review
-description: 契約書（NDA・売買・業務委託など）を読み、概要・注意したい点・修正の案・相手に確かめること・交渉の進め方の案を平易にまとめる。前の版を渡せば、相手の修正版で変わったところも挙げる。結ぶかどうかの判断はしない
+description: 契約書（NDA・売買・業務委託・建物の賃貸借・ライセンス・利用規約など）を読み、概要・注意したい点・修正の案・相手に確かめること・交渉の進め方の案を平易にまとめる。前の版を渡せば、相手の修正版で変わったところも挙げる。結ぶかどうかの判断はしない
 when_to_use: 契約書のファイルを渡されて「チェックして」「この NDA 大丈夫？」「不利なところはある？」と頼まれたとき。相手から修正版が戻ってきて「前の版と比べて」と頼まれたとき
 argument-hint: 損害賠償が心配。来月から取引を始める新しい取引先
 allowed-tools: file.read_text file.compare pdf.extract knowledge.search docx.render
 effort: xhigh
 metadata:
   author: M2Office
-  version: "1.1.0"
+  version: "1.2.0"
   m2office-id: jp.m2office.legal.contract-review
   m2office-private: "true"
   m2office-inputs: |
@@ -47,7 +47,14 @@ metadata:
    - `knowledge.search`（`query` は「契約の基準」）で、会社の契約の基準（受け入れる範囲・専門家に回す条件・自社のひな形）を探す
    - `skill.read` で [reference/common.md](reference/common.md) を開く
    - **前の版の欄が空でなければ**、あわせて `file.compare`（`before` は前の版の欄の値、`after` は契約書の欄の値）を呼ぶ
-2. 全文を読んで、契約の種類を見分ける。**秘密保持契約なら [reference/nda.md](reference/nda.md)、売買・取引基本契約なら [reference/sales.md](reference/sales.md)、業務委託（請負・準委任）なら [reference/outsourcing.md](reference/outsourcing.md)** を `skill.read` で開く。ほかの種類は common.md だけで読む
+2. 全文を読んで、契約の種類を見分け、種類の観点を `skill.read` で 1 回で開く。ほかの種類は common.md だけで読む
+   - 秘密保持契約: [reference/nda.md](reference/nda.md)
+   - 売買・取引基本契約: [reference/sales.md](reference/sales.md)
+   - 業務委託（請負・準委任）: [reference/outsourcing.md](reference/outsourcing.md)
+   - 建物の賃貸借（事務所・店舗・倉庫を借りる・貸す）: [reference/lease.md](reference/lease.md)
+   - ライセンス（ソフトウェア・技術・コンテンツの利用の許諾）: [reference/license.md](reference/license.md)
+   - 利用規約（クラウド・インターネットのサービスを使う）: [reference/terms.md](reference/terms.md)
+   - 2 つにまたがる契約（開発の委託に成果物のライセンスが付く、など）は、主な方を開き、もう一方の観点は common.md で補う
    - 「秘密保持契約」という題でも、代金・独占・納品などの取引の条件が入っていれば、NDA の点検ではなく契約全体の点検にし、そのことを冒頭に書く
 3. **全文を読んでから**、条項を 1 つずつ点検する。条項は互いに効き合うので、1 つの条だけで決めない（例: 補償の条に上限が無くても、損害賠償の上限の条で抑えられていることがある）
 4. 一般に入る条項の抜けを探す
@@ -75,6 +82,14 @@ metadata:
 - `renumbered`（番号だけ変わった条項）は 1 行でまとめる。中身は変わっていない
 - `note` に「別の文書を比べている見込み」とあれば、比べた結果を書かずに冒頭でそのことを伝え、新しい版だけを点検する
 - 前の版と比べたときも、注意したい点（下の 3 段階）は**新しい版の全体**で点検する。今回の修正で変わった条項には、見出しの後ろに「（今回の修正）」と添える
+
+## 利用規約を読むとき
+
+利用規約（定型約款）は、ふつうは交渉できない。[reference/terms.md](reference/terms.md) の「読み方の違い」に従う。
+
+- 注意したい点の「修正の案」「相手に伝える理由」「代わりの案」は、**「備え方」**（使い方で備えること・確かめること・法人向けの別の契約で変わるか）に置き換えて書く
+- 「交渉の進め方の案」の見出しは「**使うかどうかを決める材料**」に変え、受け入れる・使い方で備える・別の覚書を求める・ほかのサービスにする、の順に整理する（決めるのは会社であり、どれにするかは書かない）
+- 条項が効かないとは断定しない（「合意しなかったものとみなされる可能性がある」まで）
 
 ## 3 段階の分け方
 
