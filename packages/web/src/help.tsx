@@ -360,7 +360,7 @@ function Landing({ tree, onOpen, admin }: { tree: TreeNode[]; onOpen: (id: strin
 function ArticleView({ id, items, onOpen, onBack }: {
   id: string; items: HelpArticleMeta[]; onOpen: (id: string) => void; onBack: () => void;
 }) {
-  const [article, setArticle] = useState<(HelpArticleMeta & { body: string }) | null>(null);
+  const [article, setArticle] = useState<Awaited<ReturnType<typeof api.help.get>> | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     setArticle(null); setError(null);
@@ -380,6 +380,7 @@ function ArticleView({ id, items, onOpen, onBack }: {
         <article className="card article">
           <h1>{article.title}</h1>
           <Markdown text={article.body} />
+          <CompanyNote key={article.id} articleId={article.id} note={article.companyNote?.text ?? null} canEdit={article.canEditNote} />
           {(prev || next) && (
             <div className="help-pager">
               {prev ? <button className="btn ghost small" onClick={() => onOpen(prev.id)}>‹ {prev.title}</button> : <span />}
@@ -521,6 +522,8 @@ export function AgentHelpTip({ agentId, onExample, extension }: {
       <p className="summary">{help.summary}</p>
       {/* 書き手が書いた説明（スキルの HELP.md。仕様書 第12.12.4節）。あれば本文にする */}
       {help.body && <div className="md agent-help-body"><Markdown text={help.body.replace(/^#\s+.*\n+/, '')} lineBreaks /></div>}
+      {/* 会社の補足（第6.10.7節）。管理者がヘルプセンターの業務の記事で書く */}
+      {help.companyNote && <div className="company-note"><h4>当社の補足</h4><p className="small">{help.companyNote}</p></div>}
       {help.does.length > 0 && (
         <div>
           <h4>この業務がすること</h4>
@@ -633,5 +636,44 @@ export function HelpRating({ articleId, source }: { articleId: string; source: '
         : <span className="muted">{done ? 'ありがとうございます。' : 'ありがとうございます。記事を見直す材料にします。'}</span>}
       {error && <span className="error"> {error}</span>}
     </div>
+  );
+}
+
+/**
+ * 会社の補足（仕様書 第6.10.7節）。管理者が書いた社内向けの説明を、記事の本文の下に出す。管理者は書く・直す・消すができる。
+ * 補足は人が読む説明にとどめる（業務の文面には入れない）。
+ */
+function CompanyNote({ articleId, note, canEdit }: { articleId: string; note: string | null; canEdit: boolean }) {
+  const [text, setText] = useState(note);
+  const [draft, setDraft] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const save = (value: string) => api.help.saveNote(articleId, value)
+    .then((r) => { setText(r.companyNote?.text ?? null); setDraft(null); setError(null); })
+    .catch((e) => setError(describeError(e, '保存できませんでした')));
+  if (!text && !canEdit) return null;
+  return (
+    <section className="company-note">
+      {draft !== null ? (
+        <>
+          <h3>当社の補足</h3>
+          <textarea value={draft} maxLength={1000} rows={4} placeholder="例: 当社では、議事録の共有先は必ず部署のスペースにします" aria-label="当社の補足"
+            onChange={(e) => setDraft(e.target.value)} />
+          <div className="row">
+            <button className="btn small" onClick={() => void save(draft)}>保存</button>
+            <button className="btn ghost small" onClick={() => setDraft(null)}>キャンセル</button>
+            {text && <button className="link small danger" onClick={() => void save('')}>削除</button>}
+          </div>
+        </>
+      ) : text ? (
+        <>
+          <h3>当社の補足</h3>
+          <p className="company-note-text">{text}</p>
+          {canEdit && <button className="link small" onClick={() => setDraft(text)}>直す</button>}
+        </>
+      ) : (
+        <button className="link small" onClick={() => setDraft('')}>当社の補足を書く</button>
+      )}
+      {error && <p className="error">{error}</p>}
+    </section>
   );
 }

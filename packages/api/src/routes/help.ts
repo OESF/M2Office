@@ -7,7 +7,7 @@
  */
 
 import { Hono } from 'hono';
-import type { HelpContext, HelpScope } from '@m2office/core';
+import { noteText, type HelpContext, type HelpScope } from '@m2office/core';
 import { CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, CONTRACTS_EXTENSION_ID, RESERVATIONS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, MEMBERS_EXTENSION_ID } from '@m2office/shared';
 import type { AppDeps } from '../context.js';
 import { agentGroup } from '../agent-group.js';
@@ -50,10 +50,30 @@ export function helpRoute(deps: AppDeps) {
     return c.json({ items, manuals });
   });
 
+  /** 記事の本文と、会社の補足（第6.10.7節）。管理者には補足を書けることを返す。 */
   app.get('/articles/:id', async (c) => {
     const { tenant, user } = c.get('ctx');
     const article = deps.help.get(c.req.param('id'), await contextOf(tenant.id, user.id, user.roles));
-    return article ? c.json(article) : c.json({ error: '記事が見つかりません' }, 404);
+    if (!article) return c.json({ error: '記事が見つかりません' }, 404);
+    const note = await deps.helpNotes.get(tenant.id, article.id);
+    return c.json({ ...article, companyNote: note ? { text: note.text, updatedAt: note.updatedAt } : null, canEditNote: user.roles.includes('admin') });
+  });
+
+  /** 会社の補足を書く・直す・消す（管理者だけ。文が空なら消す。第6.10.7節）。本人が見られる記事にだけ。 */
+  app.put('/notes/:id', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    if (!user.roles.includes('admin')) return c.json({ error: '会社の補足を書けるのは管理者だけです' }, 403);
+    const article = deps.help.get(c.req.param('id'), await contextOf(tenant.id, user.id, user.roles));
+    if (!article) return c.json({ error: '記事が見つかりません' }, 404);
+    const body = await c.req.json<{ text?: unknown }>().catch(() => ({} as { text?: unknown }));
+    if (typeof body.text !== 'string') return c.json({ error: '補足の文を入れてください（消すときは空に）' }, 400);
+    const text = noteText(body.text);
+    await deps.helpNotes.set(tenant.id, article.id, text, user.id);
+    await deps.repo.appendAudit({
+      id: crypto.randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id, action: text ? 'help.note.set' : 'help.note.remove',
+      targetType: 'help', targetId: article.id, detail: { chars: text.length }, occurredAt: new Date().toISOString(),
+    });
+    return c.json({ ok: true, companyNote: text ? { text } : null });
   });
 
   /** 記事の検索。問い合わせ文は記録しない（開発規約 第7.5節）。 */
@@ -72,7 +92,9 @@ export function helpRoute(deps: AppDeps) {
     const ctx = await contextOf(tenant.id, user.id, user.roles);
     const def = ctx.agents?.find((a) => a.id === c.req.param('agentId'));
     if (!def || ctx.disabledAgents.includes(def.id)) return c.json({ error: '業務が見つかりません' }, 404);
-    return c.json(deps.help.agentHelp(def, ctx));
+    // 会社の補足（業務の説明の記事 `agent-<業務の ID>` に書いたもの。第6.10.7節）
+    const note = await deps.helpNotes.get(tenant.id, `agent-${def.id}`);
+    return c.json({ ...deps.help.agentHelp(def, ctx), companyNote: note?.text ?? null });
   });
 
   /** 記事が役に立ったか（ヘルプセンターの記事か、秘書の答え。押し直せば置き換える。第6.10.10節）。本人が読める記事だけ。 */

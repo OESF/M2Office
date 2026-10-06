@@ -1156,6 +1156,11 @@ code.uri { background: var(--subtle-bg); border: 1px solid var(--line); border-r
 }
 .secretary .attached .link { padding: 0; line-height: 1; }
 /* いくつも渡したファイルは横に並べ、入りきらなければ折り返す（第10.10.7節） */
+.company-note { margin-top: calc(14px * var(--space-scale)); padding: calc(10px * var(--space-scale)) calc(12px * var(--space-scale)); border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: 6px; }
+.company-note h3, .company-note h4 { margin: 0 0 calc(4px * var(--space-scale)); }
+.company-note-text, .company-note p { white-space: pre-wrap; margin: 0; }
+.company-note textarea { width: 100%; font: inherit; }
+.company-note:has(> button:only-child) { background: none; border-left: 0; padding: 0; }
 .help-rating { margin-top: calc(10px * var(--space-scale)); color: var(--muted); }
 .secretary .attached-list { display: flex; flex-wrap: wrap; gap: calc(4px * var(--space-scale)); }
 

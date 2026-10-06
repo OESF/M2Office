@@ -6548,7 +6548,7 @@ console.log('\n■ 80. 会員とポイント（入り切り・会員証・来店
   }
 }
 
-console.log('\n■ 81. ヘルプを育てる（答えられなかった質問・役に立ったか・管理者だけ・会社の境界。第6.10.10節）');
+console.log('\n■ 81. ヘルプを育てる（答えられなかった質問・役に立ったか・会社の補足・管理者だけ・会社の境界。第6.10.7節・第6.10.10節）');
 {
   const { default: pg } = await import('pg');
   const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
@@ -6576,11 +6576,26 @@ console.log('\n■ 81. ヘルプを育てる（答えられなかった質問・
       && rating?.helpful === 1 && rating?.notHelpful === 0 && !JSON.stringify(adminView.body).includes('member@')
       && otherView.status === 200 && !otherView.body.misses?.some((m) => m.question.includes('宇宙船'))
       ? ok('ヘルプの見直しは管理者だけが見られ、件数と質問の文だけで名前は出さない。ほかの会社には出ない') : ng('ヘルプの見直しが違う', JSON.stringify({ m: memberView.status, a: adminView.body, b: otherView.body }));
+    // 会社の補足（第6.10.7節）: 書くのは管理者だけ。記事・業務の説明・秘書の使い方の答えに添え、ほかの会社には出ない
+    await owner.query(`delete from help_notes where tenant_id in ('t-alpha', 't-beta')`);
+    const noteByMember = await call('a', '/v1/help/notes/start-screen', { method: 'PUT', body: JSON.stringify({ text: 'x' }) }, 'member');
+    const noteSet = await call('a', '/v1/help/notes/start-screen', { method: 'PUT', body: JSON.stringify({ text: 'スモークの当社の補足: 画面は部署ごとに整えます' }) });
+    const noteAgent = await call('a', '/v1/help/notes/agent-minutes', { method: 'PUT', body: JSON.stringify({ text: 'スモークの議事録の補足' }) });
+    const article = await call('a', '/v1/help/articles/start-screen', {}, 'member');
+    const agentHelp = await call('a', '/v1/help/agents/minutes', {}, 'member');
+    const otherArticle = await call('b', '/v1/help/articles/start-screen', {}, 'member');
+    noteByMember.status === 403 && noteSet.status === 200 && noteAgent.status === 200 && article.body.companyNote?.text?.includes('スモークの当社の補足') && article.body.canEditNote === false
+      && agentHelp.body.companyNote === 'スモークの議事録の補足' && otherArticle.body.companyNote === null
+      ? ok('会社の補足は管理者が書き、記事と業務の説明に添える（ほかの会社には出ない）') : ng('会社の補足が違う', JSON.stringify({ m: noteByMember.status, s: noteSet.status, a: article.body.companyNote, g: agentHelp.body.companyNote, o: otherArticle.body.companyNote }));
+    const cleared = await call('a', '/v1/help/notes/start-screen', { method: 'PUT', body: JSON.stringify({ text: '' }) });
+    const afterClear = await call('a', '/v1/help/articles/start-screen', {}, 'member');
+    cleared.status === 200 && afterClear.body.companyNote === null ? ok('会社の補足は空にすると消える') : ng('補足を消せない', JSON.stringify(afterClear.body.companyNote));
   } catch (err) {
     ng('ヘルプを育てる確認が途中で止まった', String(err));
   } finally {
     await owner.query(`delete from help_misses where tenant_id in ('t-alpha', 't-beta')`);
     await owner.query(`delete from help_ratings where tenant_id in ('t-alpha', 't-beta')`);
+    await owner.query(`delete from help_notes where tenant_id in ('t-alpha', 't-beta')`);
     await owner.end();
   }
 }

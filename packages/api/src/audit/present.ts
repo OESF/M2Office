@@ -35,6 +35,8 @@ const ACTION_LABELS: Record<string, string> = {
   'secretary.promise': '秘書が約束した調べものを起こした',
   'secretary.file': '秘書にファイルを渡した',
   'secretary.help': '秘書がヘルプで答えた',
+  'help.note.set': 'ヘルプに会社の補足を書いた',
+  'help.note.remove': 'ヘルプの会社の補足を消した',
   'secretary.todo': '秘書が ToDo を受けた',
   'secretary.correct': '秘書の覚えたことを直した',
   'secretary.schedule': '秘書が定時実行を操作した',

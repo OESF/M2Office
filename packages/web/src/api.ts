@@ -261,6 +261,8 @@ export interface AgentHelpView {
   faq: { q: string; a: string }[];
   /** 書き手が書いた利用者向けの説明（スキルの HELP.md。仕様書 第12.12.4節）。 */
   body?: string;
+  /** 会社の補足（管理者が書いた社内向けの説明。第6.10.7節） */
+  companyNote?: string | null;
 }
 
 /** 管理者の初期設定チェックリストの 1 項目。 */
@@ -1090,7 +1092,9 @@ export const api = {
   },
   help: {
     list: (scope: HelpScope = 'workspace') => call<{ items: HelpArticleMeta[]; manuals: { id: string; title: string }[] }>(`/help/articles?scope=${scope}`),
-    get: (id: string) => call<HelpArticleMeta & { body: string }>(`/help/articles/${encodeURIComponent(id)}`),
+    get: (id: string) => call<HelpArticleMeta & { body: string; companyNote: { text: string; updatedAt: string } | null; canEditNote: boolean }>(`/help/articles/${encodeURIComponent(id)}`),
+    /** 会社の補足を書く・直す（空なら消す。管理者だけ。第6.10.7節）。 */
+    saveNote: (id: string, text: string) => call<{ ok: true; companyNote: { text: string } | null }>(`/help/notes/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify({ text }) }),
     search: (q: string, scope: HelpScope = 'workspace') => call<{ items: { id: string; title: string; category: string; excerpt: string }[] }>(
       `/help/search?q=${encodeURIComponent(q)}&scope=${scope}`),
     agent: (agentId: string) => call<AgentHelpView>(`/help/agents/${encodeURIComponent(agentId)}`),

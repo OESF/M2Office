@@ -13,3 +13,4 @@ export {
   HelpFeedback, PostgresHelpFeedbackStore, MemoryHelpFeedbackStore, HELP_FEEDBACK_LIMITS, missKey, summarizeMisses, summarizeRatings,
   type HelpFeedbackStore, type HelpMissSummary, type HelpRatingSummary, type HelpRatingSource,
 } from './feedback.js';
+export { PostgresHelpNoteStore, MemoryHelpNoteStore, HELP_NOTE_MAX, noteText, type HelpNote, type HelpNoteStore } from './notes.js';
