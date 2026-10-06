@@ -1155,6 +1155,48 @@ function SecretaryBar({ lookups, avatar, captions, onResult, onVoice }: {
       if (fileInput.current) fileInput.current.value = '';
     }
   }
+  /*
+    画面へファイルを落としても渡せる（第10.10.2節）。ほかの受け口（サイネージの素材・拡張機能の取り込みなど）が受け取った
+    ファイルは、そちらに任せる（受け口が既定の動きを止めていれば、秘書は受け取らない）
+  */
+  const [dropping, setDropping] = useState(false);
+  const attachRef = useRef(attach);
+  attachRef.current = attach;
+  const busyRef = useRef(busy);
+  busyRef.current = busy;
+  useEffect(() => {
+    const hasFiles = (e: DragEvent) => !!e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files');
+    // 持っている間は dragover が続けて届く。届かなくなったら（ほかの受け口が受け取った・やめた）印を消す
+    let quiet: ReturnType<typeof setTimeout> | null = null;
+    const over = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      // 落としたファイルをブラウザが開いてしまわないように止める
+      e.preventDefault();
+      setDropping(true);
+      if (quiet) clearTimeout(quiet);
+      quiet = setTimeout(() => setDropping(false), 500);
+    };
+    const leave = (e: DragEvent) => {
+      // 画面の外へ出たときだけ（要素の間を移るたびには消さない）
+      if (!e.relatedTarget) setDropping(false);
+    };
+    const drop = (e: DragEvent) => {
+      setDropping(false);
+      if (!hasFiles(e) || e.defaultPrevented) return;
+      e.preventDefault();
+      if (busyRef.current) return;
+      void attachRef.current(Array.from(e.dataTransfer!.files));
+    };
+    window.addEventListener('dragover', over);
+    window.addEventListener('dragleave', leave);
+    window.addEventListener('drop', drop);
+    return () => {
+      if (quiet) clearTimeout(quiet);
+      window.removeEventListener('dragover', over);
+      window.removeEventListener('dragleave', leave);
+      window.removeEventListener('drop', drop);
+    };
+  }, []);
   // 音声の対話（第10.5.5節）
   const [call, setCall] = useState<VoiceCall | null>(null);
   /*
@@ -1291,7 +1333,7 @@ function SecretaryBar({ lookups, avatar, captions, onResult, onVoice }: {
         </div>
       )}
       <div className="secretary-main">
-      <div className="secretary-input">
+      <div className={`secretary-input${dropping ? ' is-dropping' : ''}`}>
         <textarea
           ref={box}
           value={text}
@@ -1348,7 +1390,7 @@ function SecretaryBar({ lookups, avatar, captions, onResult, onVoice }: {
             {x.since && <Elapsed since={x.since} />}
           </span>
         ))}
-        {hint && <span className="layer">{hint}</span>}
+        {dropping ? <span className="layer">離すと、秘書にファイルを渡します（{SECRETARY_FILES_MAX} つまで）</span> : hint && <span className="layer">{hint}</span>}
       </div>
       </div>
     </div>
