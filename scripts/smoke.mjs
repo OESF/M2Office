@@ -6615,6 +6615,113 @@ console.log('\n■ 81. ヘルプを育てる（答えられなかった質問・
   }
 }
 
+console.log('\n■ 82. 販促物の作成（入り切り・3 案・選ぶ・会話で直す・曜日の点検・書き出し・掲示の期間・削除は作った人と管理者・会社の境界。第41.17節）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const { rows: saved } = await owner.query(`select tenant_id, print_designs from tenant_settings where tenant_id in ('t-alpha', 't-beta')`);
+  /** 書き出しを生のまま受け取る。 */
+  const bytesOf = async (path, who = 'member') => {
+    const res = await fetch(`${API}${path}`, { headers: { 'x-tenant': 'a', 'x-user': `${who}@alpha.example.jp` } });
+    return { status: res.status, type: res.headers.get('content-type') ?? '', disposition: res.headers.get('content-disposition') ?? '', bytes: new Uint8Array(await res.arrayBuffer()) };
+  };
+  const made = [];
+  try {
+    await owner.query(`update tenant_settings set print_designs = null where tenant_id in ('t-alpha', 't-beta')`);
+    const off = await call('a', '/v1/print-designs', {}, 'member');
+    off.status === 403 ? ok('販促物の作成を切っている会社では使わせない') : ng(`切っているのに使えた（${off.status}）`);
+    await call('a', '/v1/admin/extensions/print-designs/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const me = await call('a', '/v1/me', {}, 'member');
+    me.body.printDesigns === true ? ok('入れると、利用範囲の人のメニューに「販促物」が出る') : ng('入れたのに使えない', JSON.stringify(me.body.printDesigns));
+
+    const empty = await call('a', '/v1/print-designs', { method: 'POST', body: JSON.stringify({ request: ' ' }) }, 'member');
+    const created = await call('a', '/v1/print-designs', { method: 'POST', body: JSON.stringify({ request: 'スモークの秋のセールのチラシ。10/10（月）から' }) }, 'member');
+    const d = created.body.design;
+    if (d) made.push(d.id);
+    empty.status === 400 && created.status === 201 && d?.kind === 'flyer' && created.body.versions?.length === 3 && created.body.versions.every((v) => v.proposal) && d.currentVersionId === null
+      ? ok('頼みの文から 3 案を作る（空の頼みは断る。種類は頼みから決める）') : ng('3 案を作れない', JSON.stringify({ e: empty.status, c: created.status, d, n: created.body.versions?.length }));
+    created.body.versions?.[0]?.checks?.some((c) => c.kind === 'weekday')
+      ? ok('日付と曜日の食い違い（10/10 は土曜日）に印を付ける') : ng('曜日の点検が付かない', JSON.stringify(created.body.versions?.[0]?.checks));
+
+    const second = created.body.versions?.[1];
+    const chose = await call('a', `/v1/print-designs/${d?.id}/choose`, { method: 'POST', body: JSON.stringify({ versionId: second?.id }) }, 'member');
+    const revised = await call('a', `/v1/print-designs/${d?.id}/revise`, { method: 'POST', body: JSON.stringify({ instruction: '見出しをもっと大きく' }) }, 'member');
+    const last = revised.body.versions?.at(-1);
+    chose.status === 200 && revised.status === 200 && revised.body.versions.length === 4 && last?.headlineScale === 1.2 && last.template === second?.template && revised.body.design.currentVersionId === last.id
+      ? ok('案を選び、会話で直すと新しい版になる（推論の使えない会社は言葉で直す）') : ng('選ぶ・直すが違う', JSON.stringify({ c: chose.status, r: revised.status, last }));
+    const copy = await call('a', `/v1/print-designs/${d?.id}/copy`, { method: 'PATCH', body: JSON.stringify({ price: '全品 10% オフ' }) }, 'member');
+    copy.status === 200 && copy.body.versions.at(-1)?.copy.price === '全品 10% オフ' ? ok('文面をその場で直すと新しい版になる') : ng('文面を直せない', JSON.stringify(copy));
+
+    const vid = copy.body.versions?.at(-1)?.id;
+    const pdf = await bytesOf(`/v1/print-designs/${d?.id}/versions/${vid}/pdf`);
+    const bleed = await bytesOf(`/v1/print-designs/${d?.id}/versions/${vid}/bleed`);
+    const png = await bytesOf(`/v1/print-designs/${d?.id}/versions/${vid}/png`);
+    const thumb = await bytesOf(`/v1/print-designs/${d?.id}/thumb`);
+    const isPdf = (b) => Buffer.from(b.slice(0, 5)).toString('latin1') === '%PDF-';
+    const isPng = (b) => b[0] === 0x89 && b[1] === 0x50;
+    pdf.status === 200 && pdf.type === 'application/pdf' && /attachment/.test(pdf.disposition) && isPdf(pdf.bytes) && isPdf(bleed.bytes) && /%E5%85%A5%E7%A8%BF/.test(bleed.disposition)
+      && png.type === 'image/png' && isPng(png.bytes) && isPng(thumb.bytes)
+      ? ok('PDF（実寸）・入稿用の PDF・PNG・一覧の小さな画像を書き出せる') : ng('書き出しが違う', JSON.stringify({ pdf: [pdf.status, pdf.type, pdf.disposition], bleed: bleed.disposition, png: png.type }));
+    const badKind = await bytesOf(`/v1/print-designs/${d?.id}/versions/${vid}/svg`);
+    badKind.status === 400 ? ok('知らない書き出しの種類は断る') : ng(`知らない書き出しが通った（${badKind.status}）`);
+
+    const badDate = await call('a', `/v1/print-designs/${d?.id}`, { method: 'PATCH', body: JSON.stringify({ postFrom: '10/1' }) }, 'member');
+    const post = await call('a', `/v1/print-designs/${d?.id}`, { method: 'PATCH', body: JSON.stringify({ postFrom: '2026-01-01', postTo: '2099-12-31', place: '入口' }) }, 'member');
+    const list = await call('a', '/v1/print-designs', {}, 'member');
+    const row = list.body.items?.find((x) => x.id === d?.id);
+    badDate.status === 400 && post.status === 200 && row?.state === 'posted' && row.place === '入口'
+      ? ok('掲示の期間と置き場所を持ち、一覧に「掲示中」と出す') : ng('掲示の期間が違う', JSON.stringify({ b: badDate.status, p: post.status, row }));
+    const removed = await call('a', `/v1/print-designs/${d?.id}/removed`, { method: 'POST', body: '{}' }, 'member');
+    const list2 = await call('a', '/v1/print-designs', {}, 'member');
+    removed.status === 200 && list2.body.items?.find((x) => x.id === d?.id)?.state === 'removed' ? ok('「外した」で掲示を終える') : ng('外せない', JSON.stringify(removed));
+
+    const remade = await call('a', `/v1/print-designs/${d?.id}/remake`, { method: 'POST', body: JSON.stringify({ instruction: '来年の日付で' }) }, 'member');
+    if (remade.body.design) made.push(remade.body.design.id);
+    remade.status === 201 && remade.body.design.remadeFrom === d?.id && remade.body.versions?.length === 1 ? ok('前の物から作り直すと、新しい物になる') : ng('作り直せない', JSON.stringify(remade));
+
+    // 削除は作った人と管理者だけ（管理者が作った物を、利用範囲の人は消せない）
+    const adminMade = await call('a', '/v1/print-designs', { method: 'POST', body: JSON.stringify({ request: 'スモークのポップ', kind: 'pop' }) });
+    if (adminMade.body.design) made.push(adminMade.body.design.id);
+    const delByMember = await call('a', `/v1/print-designs/${adminMade.body.design?.id}`, { method: 'DELETE' }, 'member');
+    const delOwn = await call('a', `/v1/print-designs/${remade.body.design?.id}`, { method: 'DELETE' }, 'member');
+    const delByAdmin = await call('a', `/v1/print-designs/${adminMade.body.design?.id}`, { method: 'DELETE' });
+    delByMember.status === 403 && delOwn.status === 200 && delByAdmin.status === 200 ? ok('削除できるのは作った人と管理者だけ') : ng('削除の権限が違う', JSON.stringify({ m: delByMember.status, o: delOwn.status, a: delByAdmin.status }));
+
+    // 会社の境界: ほかの会社では見えない
+    await owner.query(`update tenant_settings set print_designs = '{"enabled": true}' where tenant_id = 't-beta'`);
+    const other = await call('b', `/v1/print-designs/${d?.id}`, {}, 'member');
+    const otherFile = await fetch(`${API}/v1/print-designs/${d?.id}/versions/${vid}/pdf`, { headers: { 'x-tenant': 'b', 'x-user': 'member@beta.example.jp' } });
+    const otherList = await call('b', '/v1/print-designs', {}, 'member');
+    other.status === 404 && otherFile.status === 404 && !otherList.body.items?.some((x) => x.id === d?.id) ? ok('ほかの会社の販促物は見られず、書き出せない') : ng('ほかの会社の販促物が見えた', JSON.stringify({ o: other.status, f: otherFile.status }));
+    const { rows: audits } = await owner.query(`select action from audit_events where tenant_id = 't-alpha' and target_type = 'print-design' and action like 'print.%'`);
+    const actions = new Set(audits.map((r) => r.action));
+    ['print.create', 'print.choose', 'print.revise', 'print.export', 'print.remake', 'print.delete'].every((x) => actions.has(x))
+      ? ok('作った・選んだ・直した・書き出した・作り直した・削除したを監査ログに残す') : ng('監査ログが足りない', JSON.stringify([...actions]));
+
+    const app = new pg.Client({ connectionString: process.env.DATABASE_URL ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office' });
+    await app.connect();
+    try {
+      await app.query('begin');
+      await app.query(`select set_config('app.tenant_id', 't-beta', true)`);
+      let rls = false;
+      try { await app.query(`insert into print_designs (id, tenant_id, title, kind, size, request, created_by) values ('prd-smoke', 't-alpha', 'x', 'pop', 'A6', '', 'u')`); } catch { rls = true; }
+      await app.query('rollback');
+      rls ? ok('販促物は、ほかの会社の行を書けない（行単位の制限）') : ng('ほかの会社の販促物を書けた');
+    } finally {
+      await app.end();
+    }
+  } catch (err) {
+    ng('販促物の作成の確認が途中で止まった', String(err));
+  } finally {
+    // 置き場の画像も消すため、画面と同じく削除してから行を片付ける
+    for (const id of made) await call('a', `/v1/print-designs/${id}`, { method: 'DELETE' }).catch(() => null);
+    await owner.query(`delete from print_designs where tenant_id in ('t-alpha', 't-beta')`);
+    for (const r of saved) await owner.query(`update tenant_settings set print_designs = $2 where tenant_id = $1`, [r.tenant_id, r.print_designs ? JSON.stringify(r.print_designs) : null]);
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

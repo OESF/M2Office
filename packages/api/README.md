@@ -316,6 +316,9 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET` ／ `POST /v1/members/messages` | 会員への LINE の知らせ（第40.18節）: 一覧と宛先ごとの LINE の会員の数 ／ 用意して承認へ進める（管理者。`audience`: line・away・expiring、`text`。送るのは承認の後） |
 | `GET /v1/member-card/:key` ／ `GET` ／ `POST /v1/member-card/line` | ログインなし: 会員証のページ（鍵つき）／ LINE の入口（LIFF。ID トークンを LINE で確かめ、初めてなら呼び名を受け取って会員にする） |
 | `PUT /v1/admin/extensions/members/settings` | 管理者: 来店のポイント・購入の率・有効期限・LIFF ID・LINE ログインのチャネル ID |
+| `GET` ／ `POST /v1/print-designs` ／ `GET` ／ `PATCH` ／ `DELETE /v1/print-designs/:id` | 販促物の作成（仕様書 第41章）: 一覧（掲示の状態つき）／ 作る（`request`・`kind`・`size`・`photoFileId`。3 案）／ 1 つと版 ／ 題名・掲示の期間・置き場所 ／ 削除（作った人と管理者） |
+| `POST /v1/print-designs/:id/choose` ／ `revise` ／ `remake` ／ `removed`、`PATCH /v1/print-designs/:id/copy` | 案を選ぶ・前の版に戻す（`versionId`）／ 会話で直す（`instruction`・`photoFileId`）／ 作り直す（新しい物）／ 外した ／ 文面を直す（新しい版） |
+| `GET /v1/print-designs/:id/thumb` ／ `GET /v1/print-designs/:id/versions/:vid/preview\|png\|pdf\|bleed` | 一覧の小さな画像 ／ 版の書き出し（案の画像・PNG・実寸の PDF・入稿用の PDF。`page` はパンフレットの面） |
 | `GET /v1/competitors` | 競合の分析（仕様書 第36.18節）: 全体（自社の像・競合・動いている作業・最後の作業・地図の注意）。地図で見つけた競合の名前と Web サイトはここで引き直す。使えない会社と利用範囲の外の人には、`/v1/competitors` のどの口も 403 |
 | `POST /v1/competitors/discover` ／ `POST /v1/competitors/check` | 競合を探す作業（`radiusKm`・`nationwide`・`auto` で商圏を変える）／ 今すぐ見回る作業を受け付ける（202。ワーカーが行う。動いていれば `already`） |
 | `POST /v1/competitors` ／ `DELETE /v1/competitors/:id` | URL か店の名前で競合を入れる（`text`。トップを読めたときだけ。社内のアドレスは 400）／ 外す（次に探しても入れない） |

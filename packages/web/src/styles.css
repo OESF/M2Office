@@ -2080,3 +2080,56 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .mbr-line textarea { width: 100%; box-sizing: border-box; }
 .mbr-line-list { list-style: none; margin: 0; padding: 0; font-size: calc(13px * var(--font-scale)); }
 .mbr-line-list li { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 4px 0; border-top: 1px solid var(--line); }
+
+/* 販促物の作成（仕様書 第41.9節） */
+.prd { display: flex; flex-direction: column; gap: calc(12px * var(--space-scale)); }
+.prd > .link { align-self: flex-start; }
+.prd .row.wrap { flex-wrap: wrap; }
+.prd textarea, .prd input, .prd select { font: inherit; }
+.prd .row { margin-top: 0; }
+.prd-note { font-size: calc(13px * var(--font-scale)); }
+.prd-note.is-ok { color: var(--ok); }
+.prd-note.is-error { color: var(--danger); }
+.prd-create { display: flex; flex-direction: column; gap: 8px; padding: 12px; }
+.prd-create textarea, .prd-revise textarea { width: 100%; }
+.prd-create .row, .prd-revise .row { align-items: center; }
+.prd-create .row > .btn:last-child, .prd-revise .row > .btn:last-child { margin-left: auto; }
+.prd-photo { display: inline-flex; gap: 4px; align-items: center; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prd-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+.prd-tile { width: 100%; display: flex; flex-direction: column; gap: 4px; align-items: flex-start; text-align: left; padding: 8px; cursor: pointer; font: inherit; color: inherit; }
+.prd-tile:hover { border-color: var(--accent); }
+.prd-tile img { width: 100%; aspect-ratio: 1 / 1; object-fit: contain; background: var(--neutral-soft); border-radius: 4px; }
+.prd-tile-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.prd-head { align-items: center; }
+.prd-title { margin: 0; font-size: calc(18px * var(--font-scale)); }
+.prd-title .link { font: inherit; color: inherit; }
+.prd-proposals { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+.prd-proposals > li { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.prd-proposals .row { align-items: center; }
+.prd-proposals .row > .btn { margin-left: auto; }
+.prd-pages { display: flex; gap: 8px; justify-content: center; }
+.prd-pages img { max-width: 100%; max-height: 360px; object-fit: contain; box-shadow: 0 1px 4px rgba(0, 0, 0, .18); background: #fff; }
+.prd-pages.is-large img { max-height: 640px; }
+.prd-pages:has(img + img) img { max-width: calc(50% - 4px); }
+.prd-main { display: grid; grid-template-columns: minmax(0, 3fr) minmax(260px, 2fr); gap: 16px; align-items: start; }
+.prd-side { display: flex; flex-direction: column; gap: 12px; }
+.prd-checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.prd-copy label, .prd-post label { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
+.prd-copy input, .prd-copy textarea { width: 100%; }
+.prd-post .row { align-items: flex-end; }
+.prd-post label { flex: 1 1 100%; min-width: 0; }
+.prd-post label .row { flex-wrap: nowrap; align-items: center; gap: 4px; }
+.prd-post input[type="date"] { flex: 1 1 0; min-width: 0; }
+.prd-post input:not([type]) { width: 100%; }
+.prd-remake .row { margin-top: 6px; }
+.prd-remake input { flex: 1; min-width: 160px; }
+.prd-versions ul { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.prd-versions li { display: flex; gap: 10px; align-items: center; }
+.prd-versions li img { width: 56px; height: 56px; object-fit: contain; background: #fff; border: 1px solid var(--line); border-radius: 3px; }
+.prd-versions li > .small { flex: 1; min-width: 0; }
+.prd-versions li > .btn, .prd-versions li > .badge { flex: none; width: auto; white-space: nowrap; }
+.prd-foot { justify-content: space-between; }
+@media (max-width: 760px) {
+  .prd-main { grid-template-columns: 1fr; }
+  .prd-pages.is-large img { max-height: 480px; }
+}

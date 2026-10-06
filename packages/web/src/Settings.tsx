@@ -257,6 +257,7 @@ export function Settings({ me, agents, onChanged, section }: {
           ['reservation', '予約（管理者が変えた・取り消した、予約できるものを止めた）', !!(me.reservations)],
           ['subsidy', '補助金・助成金（月の案内・「気になる」の締め切り）', !!(me.subsidies)],
           ['member', '会員（週の見立て・LINE の知らせの結果）', !!(me.members)],
+          ['print', '販促物（掲示の期間が終わった）', !!(me.printDesigns)],
           ['contract', '契約（解約の申し出の期限・契約の終わり・自動更新）', !!(me.contracts)],
           ['column', 'コラムの作成（テーマ案・予定表・予約）', !!(me.webColumns)]] as [NotificationKindKey, string, boolean][]).filter(([, , shown]) => shown).map(([k, label]) => (
           <label key={k} className="check">

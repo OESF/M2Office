@@ -100,7 +100,8 @@ export class LocalFileStore implements FileStore {
 /** 記憶上に置く。単体テスト用。 */
 export class MemoryFileStore implements FileStore {
   private readonly data = new Map<string, Uint8Array>();
-  async put(tenantId: string, key: string, bytes: Uint8Array) { this.data.set(`${tenantId}/${key}`, bytes); }
+  // 名前の決まりは置き場と同じにする（テストで、置き場が断る名前に気づけるように）
+  async put(tenantId: string, key: string, bytes: Uint8Array) { this.data.set(`${tenantId}/${safe(key)}`, bytes); }
   async get(tenantId: string, key: string) { return this.data.get(`${tenantId}/${key}`) ?? null; }
   async remove(tenantId: string, key: string) { this.data.delete(`${tenantId}/${key}`); }
 }

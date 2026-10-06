@@ -29,6 +29,7 @@ import { CONTRACTS_PACKAGE } from '../contracts/agents.js';
 import { RESERVATIONS_PACKAGE } from '../reservations/package.js';
 import { SUBSIDIES_PACKAGE } from '../subsidies/agents.js';
 import { MEMBERS_PACKAGE } from '../members/agents.js';
+import { PRINT_DESIGNS_PACKAGE } from '../print-designs/agents.js';
 
 /**
  * 内蔵の拡張（第12.13節）と、入り切りを持つ会社の設定の区分。導入の手順は無く、この区分の `enabled` だけで決まる。
@@ -49,10 +50,11 @@ export const BUILTIN_EXTENSIONS: { pkg: ExtensionPackage; section: BuiltinSectio
   { pkg: RESERVATIONS_PACKAGE, section: 'reservations' },
   { pkg: SUBSIDIES_PACKAGE, section: 'subsidies' },
   { pkg: MEMBERS_PACKAGE, section: 'members' },
+  { pkg: PRINT_DESIGNS_PACKAGE, section: 'printDesigns' },
 ];
 
 /** 内蔵の拡張の入り切りを持つ会社の設定の区分。 */
-export type BuiltinSection = 'cards' | 'inventory' | 'hr' | 'signage' | 'webColumns' | 'inquiries' | 'competitors' | 'announcements' | 'webReview' | 'contracts' | 'reservations' | 'subsidies' | 'members';
+export type BuiltinSection = 'cards' | 'inventory' | 'hr' | 'signage' | 'webColumns' | 'inquiries' | 'competitors' | 'announcements' | 'webReview' | 'contracts' | 'reservations' | 'subsidies' | 'members' | 'printDesigns';
 
 /** 内蔵の拡張なら、入り切りを持つ会社の設定の区分を返す。 */
 export function builtinSection(extensionId: string): BuiltinSection | null {

@@ -70,6 +70,7 @@
 | `members.find` | read | — | 会員の数・ポイント・来店の回数・最後の来店を引きます |
 | `notices.list` | read | — | あなた宛ての社内のお知らせ（部署などからのお願い）を確かめます。お知らせを書き換えることはしません |
 | `pdf.extract` | read | — | PDF から文字を読み取ります。文字の無いページ（スキャンなど）は読み取りにかけますが、読み取り結果は確かめが要ります |
+| `print.find` | read | — | 作った販促物を、掲示の状態や置き場所で探します |
 | `profile.read` | read | — | あなたの自宅（地域）・いつもの勤務地・今日の日付を確かめます。行程の出発地や天気の地域に使い、どこにも書き込みません |
 | `sheet.read` | read | — | Excel・CSV を表として読みます |
 | `sheets.read` | read | `drive.file`（機密でない） | Google スプレッドシートの表を読みます |
@@ -122,6 +123,9 @@
 | `members.rank` | write-internal | — | 会員のランクの境（直近 1 年の来店の回数）を見る・決める・自動に戻す（決めるのは管理者） |
 | `members.rewards` | write-internal | — | ポイントと交換できる特典を作る・直す・止める（管理者） |
 | `notification.send` | write-internal | — | 依頼した本人にだけお知らせを届けます。他の人には送りません |
+| `print.create` | write-internal | — | ポップ・チラシ・パンフレット・案内・ポスター・ショップカードの案を 3 つ作ります |
+| `print.remake` | write-internal | — | 前に作った販促物を元に、日付などを直した新しい物を作ります |
+| `print.revise` | write-internal | — | 作った販促物を、頼みのとおりに直します（新しい版にします） |
 | `sheets.append` | write-internal | `drive.file`（機密でない） | M2Office で作った表に行を足します |
 | `subsidies.mark` | write-internal | — | 補助金・助成金の候補を「気になる」か「見送り」にします |
 | `tasks.complete` | write-internal | `tasks`（機密） | ToDo を完了にします |
@@ -191,6 +195,7 @@
 | `members.find` | `query`: 会員番号か呼び名、`order`: points・visits・recent・away、`awayDays`: 何日来ていない会員か、`rank`: gold・silver（そのランクの会員だけ） |
 | `notices.list` | なし |
 | `pdf.extract` | `fileId`（必須）: ファイルの ID |
+| `print.find` | `query`: 題名・置き場所・種類の言葉、`state`: posted・upcoming・ended・draft |
 | `profile.read` | なし |
 | `sheet.read` | `fileId`（必須）: ファイルの ID、`sheet`: シート名（任意）、`maxRows`: 読む行数の上限（既定 500） |
 | `sheets.read` | `spreadsheetId`（必須）: スプレッドシートの ID、`maxRows`: 読む行数の上限（既定 500） |
@@ -244,6 +249,9 @@
 | `members.rank` | `action`（必須）: show・set・auto、`silver`: シルバーになる直近 1 年の来店の回数、`gold`: ゴールドになる直近 1 年の来店の回数 |
 | `members.rewards` | `action`（必須）: list・create・update・stop、`name`: 特典の名前、`points`: 必要なポイント、`newName`: 新しい名前、`birthdayOnly`: 誕生月の会員だけが使える特典か、`minRank`: regular（全員）・silver（シルバー以上）・gold（ゴールドだけ） |
 | `notification.send` | `kind`: 種類（brief・run）、`title`（必須）: 題名、`body`（必須）: 本文 |
+| `print.create` | `request`（必須）: 頼みの文、`kind`: 種類、`size`: 大きさ、`photoFileId`: 写真のファイルの ID |
+| `print.remake` | `query`（必須）: 前の物の題名の言葉、`instruction`: 直したいこと |
+| `print.revise` | `query`: 物の題名の言葉、`instruction`（必須）: 直したいこと、`photoFileId`: 写真のファイルの ID |
 | `sheets.append` | `spreadsheetId`（必須）: スプレッドシートの ID、`rows`（必須）: 足す行の配列（各行は値の配列） |
 | `subsidies.mark` | `query`（必須）: 制度の名前の言葉、`status`（必須）: interested・skipped・new |
 | `tasks.complete` | `taskId`（必須）: ToDo の ID |

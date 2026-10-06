@@ -35,6 +35,8 @@ export function notificationPath(n: { kind: string; runId: string | null }): str
   if (n.kind === 'subsidy') return '/subsidies';
   // 会員の週の見立てと LINE の知らせの結果は、会員を開く（第40.18節）
   if (n.kind === 'member') return '/members';
+  // 掲示の期間が終わった販促物の知らせは、販促物を開く（第41.8節）
+  if (n.kind === 'print') return '/print-designs';
   if (n.runId && RUN_ID.test(n.runId)) return `/runs/${encodeURIComponent(n.runId)}`;
   return '/';
 }

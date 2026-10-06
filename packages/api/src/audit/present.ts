@@ -239,6 +239,12 @@ const ACTION_LABELS: Record<string, string> = {
   'member.reward.update': '会員の特典を直した',
   'member.line.submit': '会員への LINE の知らせを承認へ進めた',
   'member.line.send': '会員に LINE で知らせた',
+  'print.create': '販促物の案を作った',
+  'print.choose': '販促物の案を選んだ',
+  'print.revise': '販促物を直した',
+  'print.remake': '販促物を作り直した',
+  'print.delete': '販促物を削除した',
+  'print.export': '販促物を書き出した',
   'subsidy.status': '補助金・助成金の候補の状態を変えた',
   'subsidy.settings': '補助金・助成金の会社の関心と業種を直した',
   'web_review.connect': 'Webの分析の担当の Google の許可をつないだ',
@@ -470,6 +476,7 @@ function targetOf(e: AuditEvent, names: AuditNames): string {
     case 'announcement': return `お知らせ ${id.slice(4, 12)}`;
     // 契約は相手の名前を出さない。ID の頭だけ
     case 'contract': return id === 'storage' ? '契約書の置き場' : `契約 ${id.slice(4, 12)}`;
+    case 'print-design': return `販促物 ${id.slice(4, 12)}`;
     case 'member': return id === 'settings' ? '会員とポイントの設定' : id.startsWith('mrw-') ? `特典 ${id.slice(4, 12)}` : `会員 ${id.slice(4, 12)}`;
     case 'subsidy': return id === 'search' ? '補助金・助成金の調べもの' : id === 'settings' ? '補助金・助成金の設定' : `補助金・助成金の候補 ${id.slice(4, 12)}`;
     case 'reservation': return id.startsWith('rsi-') ? `予約できるもの ${id.slice(4, 12)}` : `予約 ${id.slice(4, 12)}`;

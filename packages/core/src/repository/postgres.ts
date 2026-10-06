@@ -888,7 +888,8 @@ export class PostgresRepository implements Repository {
       reservations: Partial<TenantSettings['reservations']> | null;
       subsidies: Partial<TenantSettings['subsidies']> | null;
       members: Partial<TenantSettings['members']> | null;
-    }>(tenantId, `select company, writing_style, automation, agents, effect, onboarding, access, slides, knowledge, privacy, dashboard, invoice, cards, inventory, hr, signage, ai_policy, web_columns, inquiries, competitors, announcements, web_review, contracts, reservations, subsidies, members
+      print_designs: Partial<TenantSettings['printDesigns']> | null;
+    }>(tenantId, `select company, writing_style, automation, agents, effect, onboarding, access, slides, knowledge, privacy, dashboard, invoice, cards, inventory, hr, signage, ai_policy, web_columns, inquiries, competitors, announcements, web_review, contracts, reservations, subsidies, members, print_designs
                     from tenant_settings where tenant_id = $1`,
       [tenantId]);
     const r = rows[0];
@@ -942,6 +943,7 @@ export class PostgresRepository implements Repository {
       reservations: { ...d.reservations, ...(r?.reservations ?? {}) },
       subsidies: { ...d.subsidies, ...(r?.subsidies ?? {}) },
       members: { ...d.members, ...(r?.members ?? {}) },
+      printDesigns: { ...d.printDesigns, ...(r?.print_designs ?? {}) },
     };
   }
 
@@ -952,7 +954,7 @@ export class PostgresRepository implements Repository {
       company: 'company', writingStyle: 'writing_style', automation: 'automation', agents: 'agents',
       effect: 'effect', onboarding: 'onboarding', access: 'access', slides: 'slides', knowledge: 'knowledge', privacy: 'privacy',
       dashboard: 'dashboard', invoice: 'invoice', cards: 'cards', inventory: 'inventory', hr: 'hr', signage: 'signage',
-      aiPolicy: 'ai_policy', webColumns: 'web_columns', inquiries: 'inquiries', competitors: 'competitors', announcements: 'announcements', webReview: 'web_review', contracts: 'contracts', reservations: 'reservations', subsidies: 'subsidies', members: 'members',
+      aiPolicy: 'ai_policy', webColumns: 'web_columns', inquiries: 'inquiries', competitors: 'competitors', announcements: 'announcements', webReview: 'web_review', contracts: 'contracts', reservations: 'reservations', subsidies: 'subsidies', members: 'members', printDesigns: 'print_designs',
     } as const)[section];
     // 列名は上の固定の対応表からのみ取る。利用者の入力を SQL に埋め込まない
     await this.q(tenantId,

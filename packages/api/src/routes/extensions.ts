@@ -1021,6 +1021,7 @@ export function extensionsRoute(deps: AppDeps) {
       }
       else if (section === 'reservations') await deps.repo.saveTenantSettings(tenant.id, 'reservations', { ...settings.reservations, enabled: body.enabled }, user.id);
       else if (section === 'members') await deps.repo.saveTenantSettings(tenant.id, 'members', { ...settings.members, enabled: body.enabled }, user.id);
+      else if (section === 'printDesigns') await deps.repo.saveTenantSettings(tenant.id, 'printDesigns', { ...settings.printDesigns, enabled: body.enabled }, user.id);
       else if (section === 'subsidies') {
         await deps.repo.saveTenantSettings(tenant.id, 'subsidies', { ...settings.subsidies, enabled: body.enabled }, user.id);
         // 初めて入れたときは、利用範囲を管理者だけにする（第39.2節。管理者は「利用できる人」で広げられる）

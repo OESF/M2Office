@@ -7,7 +7,7 @@
  */
 
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent } from 'react';
-import { CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, CONTRACTS_EXTENSION_ID, RESERVATIONS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, MEMBERS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, SECRETARY_FILES_MAX, showsCaptions, type Notification, type UserSettings } from '@m2office/shared';
+import { CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, CONTRACTS_EXTENSION_ID, RESERVATIONS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, MEMBERS_EXTENSION_ID, PRINT_DESIGNS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, SECRETARY_FILES_MAX, showsCaptions, type Notification, type UserSettings } from '@m2office/shared';
 import {
   addCategory, assignCategory, checkCategoryName, groupMenu, removeCategory, togglePinned, type MenuSection,
 } from './menu.js';
@@ -34,6 +34,7 @@ import { Announcements } from './Announcements.js';
 import { CONTRACT_REVIEW_AGENT_ID, ContractFromReview, Contracts } from './Contracts.js';
 import { Reservations } from './Reservations.js';
 import { Subsidies } from './Subsidies.js';
+import { PrintDesigns } from './PrintDesigns.js';
 import { Members } from './Members.js';
 import { WebReview } from './WebReview.js';
 import { Signage } from './Signage.js';
@@ -121,6 +122,7 @@ type View =
   | { kind: 'reservations' }
   | { kind: 'subsidies' }
   | { kind: 'members'; memberId: string | null }
+  | { kind: 'printDesigns'; designId: string | null }
   | { kind: 'webReview'; month: string | null }
   | { kind: 'settings'; section: SettingsSection }
   | { kind: 'help'; articleId: string | null };
@@ -139,6 +141,7 @@ function viewPath(v: View): string {
     case 'announcements': return routePath({ kind: 'announcements', announcementId: v.announcementId });
     case 'contracts': return routePath({ kind: 'contracts', contractId: v.contractId });
     case 'members': return routePath({ kind: 'members', memberId: v.memberId });
+    case 'printDesigns': return routePath({ kind: 'printDesigns', designId: v.designId });
     case 'webReview': return routePath({ kind: 'webReview', month: v.month });
     case 'help': return routePath({ kind: 'help', articleId: v.articleId });
     default: return routePath({ kind: v.kind });
@@ -165,6 +168,7 @@ function viewOf(r: Route): View | null {
     case 'announcements': return { kind: 'announcements', announcementId: r.announcementId };
     case 'contracts': return { kind: 'contracts', contractId: r.contractId };
     case 'members': return { kind: 'members', memberId: r.memberId };
+    case 'printDesigns': return { kind: 'printDesigns', designId: r.designId };
     case 'webReview': return { kind: 'webReview', month: r.month };
     case 'help': return { kind: 'help', articleId: r.articleId };
     default: return { kind: r.kind };
@@ -326,6 +330,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   // 秘書が補助金・助成金を調べ終えた・状態を変えたら、補助金・助成金の画面を読み直す
   const subsidyChangeKey = history.filter((h) => h.job?.agentId?.startsWith('subsidies:') && ['completed', 'failed'].includes(h.run.status)).map((h) => `${h.run.id}:${h.run.status}`).join(',');
   // 秘書が会員のポイントや特典を直したら、会員の画面を読み直す
+  const printChangeKey = history.filter((h) => h.job?.agentId?.startsWith('print-designs:') && ['completed', 'failed'].includes(h.run.status)).map((h) => `${h.run.id}:${h.run.status}`).join(',');
   const memberChangeKey = history.filter((h) => h.job?.agentId?.startsWith('members:') && ['completed', 'failed'].includes(h.run.status)).map((h) => `${h.run.id}:${h.run.status}`).join(',');
   const announcementChangeKey = history.filter((h) => h.job?.agentId?.startsWith('announcements:') && ['completed', 'failed', 'rejected', 'cancelled'].includes(h.run.status)).map((h) => `${h.run.id}:${h.run.status}`).join(',');
 
@@ -419,6 +424,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
     // 補助金・助成金の案内（仕様書 第39章）。会社で入れていて利用範囲の人にだけ出す
     // 会員とポイント（仕様書 第40章）。会社で入れていて利用範囲の人にだけ出す
     ...(me.members ? [{ id: MEMBERS_EXTENSION_ID, name: '会員', description: 'お客様を会員にし、来店と購入でポイントを貯めて特典と交換する', icon: 'users' as IconName, agent: null }] : []),
+    // 販促物の作成（仕様書 第41章）。会社で入れていて利用範囲の人にだけ出す
+    ...(me.printDesigns ? [{ id: PRINT_DESIGNS_EXTENSION_ID, name: '販促物', description: 'ポップ・チラシ・パンフレット・案内・ポスターを、頼むだけで作る', icon: 'slides' as IconName, agent: null }] : []),
     ...(me.subsidies ? [{ id: SUBSIDIES_EXTENSION_ID, name: '補助金・助成金', description: '会社に合いそうな補助金・助成金を、締め切りと出典と一緒に知らせる', icon: 'research' as IconName, agent: null }] : []),
     ...(me.contracts ? [{ id: CONTRACTS_EXTENSION_ID, name: '契約書の管理', description: '結んだ契約を台帳にし、更新と解約の申し出の期限を知らせる', icon: 'doc' as IconName, agent: null }] : []),
     // Webの分析（仕様書 第34.18節）。会社で入れていて利用範囲の人にだけ出す
@@ -443,11 +450,12 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
                   : m.id === RESERVATIONS_EXTENSION_ID ? setView({ kind: 'reservations' })
                   : m.id === SUBSIDIES_EXTENSION_ID ? setView({ kind: 'subsidies' })
                   : m.id === MEMBERS_EXTENSION_ID ? setView({ kind: 'members', memberId: null })
+                  : m.id === PRINT_DESIGNS_EXTENSION_ID ? setView({ kind: 'printDesigns', designId: null })
                   : m.id === WEB_REVIEW_EXTENSION_ID ? setView({ kind: 'webReview', month: null }) : setView({ kind: 'cards', contactId: null }));
   const isOpen = (m: MenuItem) => (m.agent ? view.kind === 'agent' && view.agent.id === m.id
     : m.id === INVENTORY_EXTENSION_ID ? view.kind === 'inventory' : m.id === HR_EXTENSION_ID ? view.kind === 'hr'
       : m.id === SIGNAGE_EXTENSION_ID ? view.kind === 'signage' : m.id === WEB_COLUMNS_EXTENSION_ID ? view.kind === 'columns'
-        : m.id === INQUIRIES_EXTENSION_ID ? view.kind === 'inquiries' : m.id === COMPETITORS_EXTENSION_ID ? view.kind === 'competitors' : m.id === ANNOUNCEMENTS_EXTENSION_ID ? view.kind === 'announcements' : m.id === CONTRACTS_EXTENSION_ID ? view.kind === 'contracts' : m.id === RESERVATIONS_EXTENSION_ID ? view.kind === 'reservations' : m.id === SUBSIDIES_EXTENSION_ID ? view.kind === 'subsidies' : m.id === MEMBERS_EXTENSION_ID ? view.kind === 'members' : m.id === WEB_REVIEW_EXTENSION_ID ? view.kind === 'webReview' : view.kind === 'cards');
+        : m.id === INQUIRIES_EXTENSION_ID ? view.kind === 'inquiries' : m.id === COMPETITORS_EXTENSION_ID ? view.kind === 'competitors' : m.id === ANNOUNCEMENTS_EXTENSION_ID ? view.kind === 'announcements' : m.id === CONTRACTS_EXTENSION_ID ? view.kind === 'contracts' : m.id === RESERVATIONS_EXTENSION_ID ? view.kind === 'reservations' : m.id === SUBSIDIES_EXTENSION_ID ? view.kind === 'subsidies' : m.id === MEMBERS_EXTENSION_ID ? view.kind === 'members' : m.id === PRINT_DESIGNS_EXTENSION_ID ? view.kind === 'printDesigns' : m.id === WEB_REVIEW_EXTENSION_ID ? view.kind === 'webReview' : view.kind === 'cards');
   // ピン止めとカテゴリーは個人設定（メニュー）に保存し、端末をまたいで同じにする。保存に失敗したら読み直す
   const saveMenu = (saved: UserSettings['menu']) => {
     setMenu(saved);
@@ -719,6 +727,12 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
               <Members memberId={view.memberId} onOpen={(memberId) => setView({ kind: 'members', memberId })} changeKey={memberChangeKey} />
             </>
           )}
+          {view.kind === 'printDesigns' && (
+            <>
+              <h1>販促物 <HelpTip article="start-print-designs">ポップ・チラシ・パンフレット・案内・ポスター・ショップカードの案を 3 つ作り、頼みのとおりに直します。印刷用の PDF と画像を書き出します。</HelpTip></h1>
+              <PrintDesigns designId={view.designId} onOpen={(designId) => setView({ kind: 'printDesigns', designId })} changeKey={printChangeKey} />
+            </>
+          )}
           {view.kind === 'subsidies' && (
             <>
               <h1>補助金・助成金 <HelpTip article="start-subsidies">会社に合いそうな補助金・助成金を月に 1 回調べ、合う理由・締め切り・出典と一緒に並べます。申請書は作りません。</HelpTip></h1>
@@ -946,6 +960,7 @@ const VIEW_LABELS: Record<string, string> = {
   reservations: '予約',
   subsidies: '補助金・助成金',
   members: '会員',
+  printDesigns: '販促物',
   webReview: 'Webの分析',
   settings: '個人設定',
 };

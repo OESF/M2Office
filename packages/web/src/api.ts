@@ -7,7 +7,7 @@
  * @see 仕様書 第20.7節 認証の実装方針
  */
 
-import type { CardCorners,
+import type { CardCorners, PrintDesign, PrintDesignDetailView, PrintKind, PrintSize, PrintState,
   Approval, Artifact, Notification, Run, RunStep, Schedule, ScheduleRule, Tenant,
   TenantSettings, User, UserSettings, CardFields, Contact, ContactChange, ContactScope,
   InventoryItem, InventoryItemView, InventoryLocation, InventoryMove, InventoryMoveKind, InventorySettings, InventoryStockRow,
@@ -308,6 +308,8 @@ export interface Me {
   subsidies?: boolean;
   /** 会員とポイントを使えるか（会社の入り切りと利用範囲。仕様書 第40章）。 */
   members?: boolean;
+  /** 販促物の作成を使えるか（会社の入り切りと利用範囲。仕様書 第41章）。 */
+  printDesigns?: boolean;
   /** 本人の「給与・勤怠」を使えるか（台帳に結び付いているか。仕様書 第30.25節）。 */
   hrSelf?: boolean;
   /** デバッグモードか（`M2O_DEBUG=true`。仕様書 第20.4.1節「デバッグモード」）。 */
@@ -1404,6 +1406,33 @@ export const api = {
     /** 会社の関心と業種を直す（管理者だけ）。 */
     saveSettings: (input: { interest?: string; industry?: string }) =>
       call<{ ok: true }>('/admin/extensions/subsidies/settings', { method: 'PUT', body: JSON.stringify(input) }),
+  },
+  /** 販促物の作成（内蔵の拡張。仕様書 第41章）。 */
+  printDesigns: {
+    /** 一覧（新しく直した順。掲示の状態つき）と、今日と、本人が管理者か。 */
+    list: () => call<{ items: (PrintDesign & { state: PrintState })[]; today: string; admin: boolean }>('/print-designs'),
+    get: (id: string) => call<PrintDesignDetailView>(`/print-designs/${encodeURIComponent(id)}`),
+    /** 作る（3 案）。写真は先に `uploadFile` で上げた ID。 */
+    create: (input: { request: string; kind?: PrintKind; size?: PrintSize; photoFileId?: string }) =>
+      call<PrintDesignDetailView>('/print-designs', { method: 'POST', body: JSON.stringify(input) }),
+    /** 案を選ぶ・前の版に戻す。 */
+    choose: (id: string, versionId: string) => call<{ ok: true }>(`/print-designs/${encodeURIComponent(id)}/choose`, { method: 'POST', body: JSON.stringify({ versionId }) }),
+    /** 会話で直す（新しい版にする）。 */
+    revise: (id: string, instruction: string, photoFileId?: string) =>
+      call<PrintDesignDetailView>(`/print-designs/${encodeURIComponent(id)}/revise`, { method: 'POST', body: JSON.stringify({ instruction, ...(photoFileId ? { photoFileId } : {}) }) }),
+    /** 文面をその場で直す（新しい版にする）。 */
+    editCopy: (id: string, patch: Record<string, string>) => call<PrintDesignDetailView>(`/print-designs/${encodeURIComponent(id)}/copy`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    /** 題名・掲示の期間・置き場所を直す。 */
+    setPost: (id: string, input: { title?: string; postFrom?: string | null; postTo?: string | null; place?: string }) =>
+      call<{ ok: true }>(`/print-designs/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(input) }),
+    markRemoved: (id: string) => call<{ ok: true }>(`/print-designs/${encodeURIComponent(id)}/removed`, { method: 'POST', body: '{}' }),
+    remake: (id: string, instruction: string) => call<PrintDesignDetailView>(`/print-designs/${encodeURIComponent(id)}/remake`, { method: 'POST', body: JSON.stringify({ instruction }) }),
+    remove: (id: string) => call<{ ok: true }>(`/print-designs/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    /** 一覧の小さな画像の URL（`v` は直した日時。変われば読み直す）。 */
+    thumbUrl: (id: string, v: string) => `/v1/print-designs/${encodeURIComponent(id)}/thumb?${new URLSearchParams({ v })}`,
+    /** 書き出しの URL（`preview` は小さな画像、`png` は印刷の解像度、`pdf` は実寸、`bleed` は入稿用）。 */
+    fileUrl: (id: string, versionId: string, kind: 'preview' | 'png' | 'pdf' | 'bleed', opts: { page?: number; download?: boolean } = {}) =>
+      `/v1/print-designs/${encodeURIComponent(id)}/versions/${encodeURIComponent(versionId)}/${kind}${opts.page || opts.download ? `?${new URLSearchParams({ ...(opts.page ? { page: String(opts.page) } : {}), ...(opts.download ? { download: '1' } : {}) })}` : ''}`,
   },
   /** 会議室・社用車・備品の予約（内蔵の拡張。仕様書 第37章）。 */
   reservations: {

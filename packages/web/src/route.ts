@@ -41,6 +41,8 @@ export type Route =
   | { kind: 'subsidies' }
   /** 会員とポイント（仕様書 第40章）。`memberId` があれば 1 人。 */
   | { kind: 'members'; memberId: string | null }
+  /** 販促物の作成（仕様書 第41章）。`designId` があれば 1 つ。 */
+  | { kind: 'printDesigns'; designId: string | null }
   /** Webの分析（仕様書 第34.18節）。`month`（YYYY-MM）があればその月の便り。 */
   | { kind: 'webReview'; month: string | null }
   | { kind: 'settings'; section: string | null }
@@ -85,6 +87,7 @@ export function parseRoute(pathname: string): Route {
     case 'reservations': return second === undefined ? { kind: 'reservations' } : { kind: 'unknown' };
     case 'subsidies': return second === undefined ? { kind: 'subsidies' } : { kind: 'unknown' };
     case 'members': return second === undefined ? { kind: 'members', memberId: null } : id(second) ? { kind: 'members', memberId: id(second) } : { kind: 'unknown' };
+    case 'print-designs': return second === undefined ? { kind: 'printDesigns', designId: null } : id(second) ? { kind: 'printDesigns', designId: id(second) } : { kind: 'unknown' };
     case 'web-review': return second === undefined ? { kind: 'webReview', month: null } : /^\d{4}-(0[1-9]|1[0-2])$/.test(second) ? { kind: 'webReview', month: second } : { kind: 'unknown' };
     case 'columns': return second === undefined ? { kind: 'columns', columnId: null } : id(second) ? { kind: 'columns', columnId: id(second) } : { kind: 'unknown' };
     case 'inquiries': return second === undefined ? { kind: 'inquiries', inquiryId: null } : id(second) ? { kind: 'inquiries', inquiryId: id(second) } : { kind: 'unknown' };
@@ -113,6 +116,7 @@ export function routePath(route: Route): string {
     case 'reservations': return '/reservations';
     case 'subsidies': return '/subsidies';
     case 'members': return route.memberId ? `/members/${enc(route.memberId)}` : '/members';
+    case 'printDesigns': return route.designId ? `/print-designs/${enc(route.designId)}` : '/print-designs';
     case 'webReview': return route.month ? `/web-review/${enc(route.month)}` : '/web-review';
     case 'settings': return route.section ? `/settings/${enc(route.section)}` : '/settings';
     case 'help': return route.articleId ? `/help/${enc(route.articleId)}` : '/help';

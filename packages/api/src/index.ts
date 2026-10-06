@@ -37,6 +37,7 @@ import { reservationsRoute } from './routes/reservations.js';
 import { subsidiesRoute } from './routes/subsidies.js';
 import { membersRoute } from './routes/members.js';
 import { memberCardRoute } from './routes/member-card.js';
+import { printDesignsRoute } from './routes/print-designs.js';
 import { webReviewRoute } from './routes/web-review.js';
 import { inventoryHooksRoute } from './routes/inventory-hooks.js';
 import { signageRoute } from './routes/signage.js';
@@ -194,6 +195,8 @@ app.get('/v1/me', async (c) => {
     subsidies: !!(await deps.subsidies.access(ctx.tenant.id, ctx.user.id)),
     // 会員とポイントを使えるか（会社の入り切りと利用範囲。仕様書 第40章）
     members: !!(await deps.members.access(ctx.tenant.id, ctx.user.id)),
+    // 販促物の作成を使えるか（会社の入り切りと利用範囲。仕様書 第41章）
+    printDesigns: !!(await deps.printDesigns.access(ctx.tenant.id, ctx.user.id)),
     // 人事・給与の担当者の画面を使えるか（会社の入り切りと人事区画。仕様書 第30.2節）
     hr: !!(await deps.hr.access(ctx.tenant.id, ctx.user.id)),
     // 本人の「給与・勤怠」を使えるか（台帳に結び付いているか。同じメールアドレスなら自動で結び付く。第30.25節）
@@ -225,6 +228,7 @@ app.route('/v1/contracts', contractsRoute(deps));
 app.route('/v1/reservations', reservationsRoute(deps));
 app.route('/v1/subsidies', subsidiesRoute(deps));
 app.route('/v1/members', membersRoute(deps));
+app.route('/v1/print-designs', printDesignsRoute(deps));
 app.route('/v1/web-review', webReviewRoute(deps));
 app.route('/v1/signage', signageRoute(deps));
 app.route('/v1/hr', hrRoute(deps));

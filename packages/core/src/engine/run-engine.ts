@@ -14,7 +14,7 @@ import {
   alwaysRequiresApproval, canDecide, canUseAgent, writeInternalNeedsApproval,
   type AutomationPolicy, type TenantSettings, type WritingStyle,
   type AgentDefinition, type AgentStep, type ApprovalStep, type Approval, type Run,
-  type RunStep, type Step, type ContactScope, type InventorySettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type ContractSettings, type SubsidySettings, type MemberSettings, type ReservationSettings,
+  type RunStep, type Step, type ContactScope, type InventorySettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type ContractSettings, type SubsidySettings, type MemberSettings, type PrintDesignSettings, type ReservationSettings,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { LlmMessage, LlmProvider, LlmResponse } from '../llm/provider.js';
@@ -44,6 +44,7 @@ import type { AnnouncementService } from '../announcements/service.js';
 import type { ContractService } from '../contracts/service.js';
 import type { SubsidyService } from '../subsidies/service.js';
 import type { MemberService } from '../members/service.js';
+import type { PrintDesignService } from '../print-designs/service.js';
 import type { ReservationService } from '../reservations/service.js';
 import type { ColumnPlanner } from '../columns/planner.js';
 import type { ColumnSignageService } from '../columns/signage.js';
@@ -197,6 +198,11 @@ export interface RunEngineDeps {
   members?: {
     service: MemberService;
     access(tenantId: string, userId: string): Promise<MemberSettings | null>;
+  };
+  /** 販促物の作成（内蔵の拡張。仕様書 第41章）。ツールに渡す。 */
+  printDesigns?: {
+    service: PrintDesignService;
+    access(tenantId: string, userId: string): Promise<PrintDesignSettings | null>;
   };
   /** 予約（内蔵の拡張。仕様書 第37章）。日程調整で会議と一緒に会議室を取る（第37.18節）。 */
   reservations?: {
@@ -1025,6 +1031,10 @@ export class RunEngine {
       // 会員とポイント（第40.7節）
       ...(this.deps.members ? {
         members: { service: this.deps.members.service, access: () => this.deps.members!.access(run.tenantId, requestedBy) },
+      } : {}),
+      // 販促物の作成（第41.10節）
+      ...(this.deps.printDesigns ? {
+        printDesigns: { service: this.deps.printDesigns.service, access: () => this.deps.printDesigns!.access(run.tenantId, requestedBy) },
       } : {}),
       // 予約（第37.18節。会議と一緒に会議室を取る）
       ...(this.deps.reservations ? {
