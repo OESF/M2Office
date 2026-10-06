@@ -627,7 +627,10 @@ export function buildDeps(): AppDeps {
       return null;
     },
     // 時間のかかる依頼を、読むだけの業務として後ろへ回す（仕様書 第10.11.4節）
-    startLookup: async (tenantId, userId, request, fileId, context) => {
+    startLookup: async (tenantId, userId, request, fileIds, context) => {
+      // いくつものファイルは、1 つ目を書類の欄に、残りを「ほかに渡された書類」に入れる（仕様書 第10.10.7節）
+      const files = Array.isArray(fileIds) ? fileIds : fileIds ? [fileIds] : [];
+      const [fileId, ...more] = files;
       const view = await tenantView(tenantId);
       const def = view.resolve(LOOKUP_AGENT_ID, 1);
       if (!def || !view.isAvailable(LOOKUP_AGENT_ID)) return null;
@@ -636,7 +639,7 @@ export function buildDeps(): AppDeps {
       if (same) return { runId: same, already: true };
       const { runId } = await enqueueJob(repo, {
         tenantId, requestedBy: userId, def,
-        input: { request, ...(fileId ? { fileId } : {}), ...(context ? { context } : {}) },
+        input: { request, ...(fileId ? { fileId } : {}), ...(more.length ? { moreFileIds: more.join(',') } : {}), ...(context ? { context } : {}) },
         origin: 'secretary', actor: { type: 'user', id: userId },
       });
       return { runId, already: false };

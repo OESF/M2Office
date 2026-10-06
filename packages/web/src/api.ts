@@ -2313,10 +2313,10 @@ export const api = {
    * 受け取ったら必ず画面に出すこと。
    */
   claimLookups: () => call<{ items: Lookup[] }>('/secretary/lookups/claim', { method: 'POST' }),
-  /** 秘書に聞く。手元のファイルを 1 つ添えられる（仕様書 第10.10節）。 */
-  ask: (message: string, fileId?: string) =>
+  /** 秘書に聞く。手元のファイルを 5 つまで添えられる（仕様書 第10.10節）。 */
+  ask: (message: string, fileIds: string[] = []) =>
     call<SecretaryReply>('/secretary', {
       method: 'POST',
-      body: JSON.stringify({ message, ...(fileId ? { fileId } : {}) }),
+      body: JSON.stringify({ message, ...(fileIds.length ? { fileIds } : {}) }),
     }),
 };

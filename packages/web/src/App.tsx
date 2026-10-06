@@ -7,7 +7,7 @@
  */
 
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
-import { CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, CONTRACTS_EXTENSION_ID, RESERVATIONS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, MEMBERS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, showsCaptions, type Notification, type UserSettings } from '@m2office/shared';
+import { CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, CONTRACTS_EXTENSION_ID, RESERVATIONS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, MEMBERS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, SECRETARY_FILES_MAX, showsCaptions, type Notification, type UserSettings } from '@m2office/shared';
 import {
   addCategory, assignCategory, checkCategoryName, groupMenu, removeCategory, togglePinned, type MenuSection,
 } from './menu.js';
@@ -1130,21 +1130,27 @@ function SecretaryBar({ lookups, avatar, captions, onResult, onVoice }: {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
-  // 渡すファイルは 1 つだけ（第10.10.2節）。選んだ時点で上げ、ID を持っておく
-  const [file, setFile] = useState<{ id: string; name: string } | null>(null);
+  // 渡すファイルは 5 つまで（第10.10.2節）。選んだ時点で上げ、ID を持っておく
+  const [files, setFiles] = useState<{ id: string; name: string }[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
 
-  async function attach(chosen: File | undefined) {
-    if (!chosen) return;
+  async function attach(chosen: File[]) {
+    if (!chosen.length) return;
+    const room = SECRETARY_FILES_MAX - files.length;
+    if (room <= 0) { setHint(`一度に渡せるファイルは ${SECRETARY_FILES_MAX} つまでです`); return; }
     setBusy(true);
-    setHint(`「${chosen.name}」を渡しています…`);
+    const added: { id: string; name: string }[] = [];
     try {
-      const up = await api.uploadFile(chosen);
-      setFile({ id: up.id, name: up.name });
-      setHint(`「${up.name}」を渡しました。この書類について聞いてください`);
+      for (const f of chosen.slice(0, room)) {
+        setHint(`「${f.name}」を渡しています…`);
+        const up = await api.uploadFile(f);
+        added.push({ id: up.id, name: up.name });
+      }
+      setHint(`${added.length > 1 ? `${added.length} つのファイル` : `「${added[0]!.name}」`}を渡しました。${chosen.length > room ? `（${SECRETARY_FILES_MAX} つを超えた分は渡していません）` : ''}この書類について聞いてください`);
     } catch (err) {
       setHint(describeError(err, 'ファイルを渡せませんでした'));
     } finally {
+      if (added.length) setFiles((cur) => [...cur, ...added]);
       setBusy(false);
       if (fileInput.current) fileInput.current.value = '';
     }
@@ -1203,25 +1209,39 @@ function SecretaryBar({ lookups, avatar, captions, onResult, onVoice }: {
     const id = requestAnimationFrame(fitBox);
     return () => cancelAnimationFrame(id);
   }, [fitBox]);
+  // 入力欄の幅が変わったら測り直す。開いた直後の狭い幅で測ると、例の文が折り返した高さ（上限の 180px）に
+  // 張り付き、何も書いていないのに欄が高いままになる（第6.1.3節。空のときは 2 行ぶん）
+  useEffect(() => {
+    const el = box.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    let width = el.clientWidth;
+    const ro = new ResizeObserver(() => {
+      if (el.clientWidth === width) return;
+      width = el.clientWidth;
+      fitBox();
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [fitBox]);
 
   async function send() {
     if (!text.trim() || busy) return;
     setBusy(true);
     const asked = text;
-    const withFile = file;
+    const withFiles = files;
     try {
       setText('');
-      setFile(null);
+      setFiles([]);
       setHint('考えています…');
       // 書いた依頼には、文字で秘書のキャンバスに返す。音声で話している最中でも読み上げない（第6.2.0節）
-      const reply = await api.ask(asked, withFile?.id);
+      const reply = await api.ask(asked, withFiles.map((f) => f.id));
       onResult({
-        request: withFile ? `${asked}（渡した書類: ${withFile.name}）` : asked,
+        request: withFiles.length ? `${asked}（渡した書類: ${withFiles.map((f) => f.name).join('、')}）` : asked,
         text: reply.text,
         // 応答の層・時間・トークンは会話の画面に出さない（仕様書 第6.2節）。ファイルの扱いの知らせだけを添える
         ...(reply.file?.note ? { note: reply.file.note } : {}),
         ...(reply.suggestedAgent
-          ? { suggestedAgent: { id: reply.suggestedAgent.id, name: reply.suggestedAgent.name }, fileId: withFile?.id ?? null }
+          ? { suggestedAgent: { id: reply.suggestedAgent.id, name: reply.suggestedAgent.name }, fileId: withFiles[0]?.id ?? null }
           : {}),
         ...(reply.helpArticles ? { helpArticles: reply.helpArticles } : {}),
         ...(reply.evidence.length > 0 ? { evidence: reply.evidence } : {}),
@@ -1259,6 +1279,17 @@ function SecretaryBar({ lookups, avatar, captions, onResult, onVoice }: {
           <p><span className="muted">秘書</span>{tail(caption.reply) || '…'}</p>
         </div>
       )}
+      {/* 渡すファイルは入力欄の上の段に並べる。入力欄の高さを変えない（第10.10.7節） */}
+      {files.length > 0 && (
+        <div className="attached-list">
+          {files.map((f) => (
+            <span key={f.id} className="attached">
+              {f.name}
+              <button className="link" onClick={() => setFiles((cur) => cur.filter((x) => x.id !== f.id))} title="渡すのをやめる">×</button>
+            </span>
+          ))}
+        </div>
+      )}
       <div className="secretary-main">
       <div className="secretary-input">
         <textarea
@@ -1275,24 +1306,18 @@ function SecretaryBar({ lookups, avatar, captions, onResult, onVoice }: {
           }}
           disabled={busy}
         />
-        {file && (
-          <span className="attached">
-            {file.name}
-            <button className="link" onClick={() => setFile(null)} title="渡すのをやめる">×</button>
-          </span>
-        )}
       </div>
 
-      <input ref={fileInput} type="file" hidden
+      <input ref={fileInput} type="file" hidden multiple
         accept=".pdf,.xlsx,.csv,.docx,.png,.jpg,.jpeg"
-        onChange={(e) => void attach(e.target.files?.[0])} />
+        onChange={(e) => void attach(Array.from(e.target.files ?? []))} />
       {/* 秘書にできることの例（ヘルプ。仕様書 第6.1.3節）。頼める言い方が増えたため、入力欄のすぐ横から開けるようにする */}
       <button className="icon-btn" onClick={() => openHelp('start-secretary-examples')} title="秘書にできること（会話の例）">
         <Icon name="help" />
         <span className="sr-only">秘書にできること</span>
       </button>
       <button className="icon-btn" disabled={busy} onClick={() => fileInput.current?.click()}
-        title="書類を渡して、それについて聞けます（PDF・Word・Excel・CSV・画像。10 MB まで）">
+        title="書類を渡して、それについて聞けます（PDF・Word・Excel・CSV・画像。10 MB まで。5 つまで）">
         <Icon name="clip" />
         <span className="sr-only">書類を渡す</span>
       </button>

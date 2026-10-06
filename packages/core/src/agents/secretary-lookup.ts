@@ -41,13 +41,15 @@ export const SECRETARY_LOOKUP: AgentDefinition = {
       },
       // 秘書に渡されたファイル（仕様書 第10.10節）
       fileId: { type: 'string', title: '渡された書類', format: 'file' },
+      // いくつも渡されたときの 2 つ目から（ファイルの ID を「,」で区切る。5 つまで。仕様書 第10.10.7節）
+      moreFileIds: { type: 'string', title: 'ほかに渡された書類' },
       // 秘書が添える今日の会話（「さっきの件」のような続きの依頼のため。仕様書 第10.9.6節）
       context: { type: 'string', title: 'これまでの会話', format: 'textarea' },
     },
   },
   // 読むだけのツールに限る（第10.11.4節）。送信・登録・作成のツールは持たせない。
   // Web の調べものと本人の予定・ToDo は、出張の行程のような依頼に答えるため（第 0.124.0 版、ADR-0033）
-  tools: ['file.read_text', 'sheet.read', 'pdf.extract', 'knowledge.search', 'web.research', 'calendar.list', 'calendar.freebusy', 'tasks.list', 'profile.read'],
+  tools: ['file.read_text', 'file.compare', 'sheet.read', 'pdf.extract', 'knowledge.search', 'web.research', 'calendar.list', 'calendar.freebusy', 'tasks.list', 'profile.read'],
   knowledge: { collections: ['internal-rules', 'minutes'] },
   steps: [
     {
@@ -57,6 +59,7 @@ export const SECRETARY_LOOKUP: AgentDefinition = {
       instruction: [
         '利用者の依頼に答えるため、必要なものを読む。要るものは同時に呼んでよい。',
         '書類（fileId）が渡されていれば file.read_text で読む。表として扱いたいときは sheet.read を使う。',
+        'ほかに渡された書類（moreFileIds。「,」で区切ったファイルの ID）があれば、それぞれを file.read_text で読む（同時に呼んでよい）。2 つの版を比べる依頼なら file.compare を使ってよい。',
         '社内の規程や議事録が要るときは knowledge.search を使う。',
         '取引先の人の電話番号・メールアドレス・住所・役職や、名刺を交換した人を尋ねられたら、contacts.search で名刺を探す（使えるときだけ）。'
           + '交換した日で尋ねられたら from・to に日付を入れる。見つからなければ、推測せずに「名刺が見つかりませんでした」と答える。'
@@ -82,6 +85,7 @@ export const SECRETARY_LOOKUP: AgentDefinition = {
       instruction: [
         '読んだ内容をもとに、依頼への答えをまとめる。',
         '数値は読み取ったものだけを書く。自分で計算した数値を、読み取った値のように書かない。',
+        'いくつもの書類を読んだときは、どの書類の話かをファイルの名前で示す。比べるときは表にしてよい。',
         '移動の行程は、行き・用件・帰りを時刻の順に Markdown の表で示す（出発・到着の駅や場所、列車名、所要時間）。',
         'Web で調べた時刻・運賃は「目安」と書き、購入の前に予約のサイト（スマート EX・えきねっとなど）で確かめるよう一言添える。',
         'Web で調べたときは、最後に「出典」として、調べた結果の sources の題名とリンクを箇条書きで必ず添える（3 件まで）。',

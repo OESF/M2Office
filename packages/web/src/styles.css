@@ -1152,6 +1152,8 @@ code.uri { background: var(--subtle-bg); border: 1px solid var(--line); border-r
   white-space: nowrap;
 }
 .secretary .attached .link { padding: 0; line-height: 1; }
+/* いくつも渡したファイルは横に並べ、入りきらなければ折り返す（第10.10.7節） */
+.secretary .attached-list { display: flex; flex-wrap: wrap; gap: calc(4px * var(--space-scale)); }
 
 /* 後ろで動いている調べもの（仕様書 第10.11.6節） */
 .secretary .lookup {

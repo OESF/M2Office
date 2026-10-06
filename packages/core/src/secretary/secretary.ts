@@ -6,7 +6,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { fileInputKey, secondFileInputKey, type AgentDefinition } from '@m2office/shared';
+import { SECRETARY_FILES_MAX, fileInputKey, secondFileInputKey, type AgentDefinition } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { LlmProvider } from '../llm/provider.js';
 import type { WorkspaceConnector } from '../connectors/types.js';
@@ -81,7 +81,7 @@ export interface SecretaryDeps {
    * 無ければ後ろへ回さず、秘書がその場で答える（読むだけの業務が使えない会社など）。
    */
   startLookup?(
-    tenantId: string, userId: string, request: string, fileId?: string, context?: string,
+    tenantId: string, userId: string, request: string, fileId?: string | string[], context?: string,
   ): Promise<{ runId: string; already: boolean } | null>;
   /**
    * 業務に頼んで実行する（仕様書 第10.9.6節、ADR-0033）。依頼した本人として起こす。
@@ -157,14 +157,16 @@ export class Secretary {
    * @returns 応答と、用いた層
    */
   async respond(
-    tenantId: string, userId: string, message: string, fileId?: string, options: { record?: boolean } = {},
+    tenantId: string, userId: string, message: string, fileId?: string | string[], options: { record?: boolean } = {},
   ): Promise<SecretaryReply> {
     // 推論が使えない会社では、何を聞かれても設定されていないことだけを伝える（仕様書 第20.2.4節、ADR-0030）
     const llm = this.deps.llmFor ? await this.deps.llmFor(tenantId) : this.deps.llm;
     if (!aiAvailable(llm)) return { layer: 'direct', text: AI_NOT_CONFIGURED_MESSAGE, evidence: [], tokensUsed: 0 };
     // 「あとで〇〇する」は本人の ToDo に入れる（第10.12節）。答えと同時に行い、待たせない
     const todo = this.captureTodo(tenantId, userId, message, llm).catch(() => null);
-    const { reply, keep } = await this.reply(tenantId, userId, message, fileId);
+    // 渡せるファイルは 5 つまで。同じものは 1 つにする（第10.10.2節）
+    const files = [...new Set((Array.isArray(fileId) ? fileId : fileId ? [fileId] : []).map((f) => f.trim()).filter(Boolean))].slice(0, SECRETARY_FILES_MAX);
+    const { reply, keep } = await this.reply(tenantId, userId, message, files);
     const added = await todo;
     if (added) {
       reply.text = `${reply.text}\n\n（ToDo に「${added.title}」を入れました${added.due ? `。期限は ${Number(added.due.slice(5, 7))}/${Number(added.due.slice(8, 10))}` : ''}）`;
@@ -254,10 +256,15 @@ export class Secretary {
    * @returns 応答と、それを会話ログに残すか
    */
   private async reply(
-    tenantId: string, userId: string, message: string, fileId?: string,
+    tenantId: string, userId: string, message: string, files: string[] = [],
   ): Promise<{ reply: SecretaryReply; keep: boolean }> {
     // ファイルが付いていれば、この応答の中では読まない。後ろへ回す（仕様書 第10.11.3節）。
     // 大きさで分けない。小さいものだけここで読む、という例外を作らない（第10.11.2節）
+    if (files.length > 1) {
+      for (const f of files) await this.audit(tenantId, userId, 'secretary.file', f);
+      return this.handOffMany(tenantId, userId, message, files);
+    }
+    const fileId = files[0];
     if (fileId) {
       await this.audit(tenantId, userId, 'secretary.file', fileId);
       // 「この画像をサイネージの流れに足して」は、その場で流れに足す（第31.11.2節。本人が渡した画像だけ）
@@ -651,6 +658,97 @@ export class Secretary {
         file: { name, note: null },
         lookup: { runId: started.runId, request: message },
         tokensUsed: 0,
+      },
+      keep: true,
+    };
+  }
+
+  /**
+   * いくつものファイルを渡されたとき（第10.10.7節）。ファイルを受け取れる業務に取り次げれば頼み（1 つずつ同じことをする・2 つを比べる）、
+   * 取り次げなければ、全部のファイルを読むだけの調べものとして後ろへ回す（まとめる・比べる）。
+   */
+  private async handOffMany(
+    tenantId: string, userId: string, message: string, files: string[],
+  ): Promise<{ reply: SecretaryReply; keep: boolean }> {
+    const names: string[] = [];
+    for (const f of files) {
+      const n = this.deps.fileName ? await this.deps.fileName(tenantId, userId, f) : null;
+      if (!n) return { reply: { layer: 'direct', text: '渡されたファイルのうち、見つからないものがありました。', evidence: [], tokensUsed: 0 }, keep: true };
+      names.push(n);
+    }
+    const label = names.join('、');
+    const { agents } = await this.deps.repo.getTenantSettings(tenantId);
+    const available = this.deps.agentsFor ? await this.deps.agentsFor(tenantId, userId) : this.deps.agents;
+    const takers = available.filter((a) => acceptsFile(a) && a.id !== LOOKUP_AGENT_ID && !agents.disabled.includes(a.id));
+    if (takers.length > 0) {
+      const llm = this.deps.llmFor ? await this.deps.llmFor(tenantId) : this.deps.llm;
+      const routed = await this.route(message, takers, llm, undefined, false, [], true);
+      if (routed.agent) {
+        const done = await this.delegateFiles(tenantId, userId, message, routed.agent, routed.reason, llm, files.map((id, i) => ({ id, name: names[i]! })));
+        if (done) {
+          await this.audit(tenantId, userId, 'secretary.route', routed.agent.id);
+          return { ...done, reply: { ...done.reply, file: { name: label, note: null } } };
+        }
+      }
+    }
+    // 取り次ぐ先が無い・1 つの業務でまとめて扱えない依頼は、全部のファイルを調べものに渡す
+    const started = this.deps.startLookup
+      ? await this.deps.startLookup(tenantId, userId, message, files, await this.todayContext(tenantId, userId))
+      : null;
+    if (!started) {
+      return { reply: { layer: 'direct', text: `${files.length} つのファイルをお預かりしましたが、いまお調べできません。しばらくしてからお試しください。`, evidence: [], file: { name: label, note: null }, tokensUsed: 0 }, keep: true };
+    }
+    await this.audit(tenantId, userId, 'secretary.lookup', started.runId);
+    return {
+      reply: {
+        layer: 'direct',
+        text: started.already ? '同じご依頼をいまお調べしています。終わりましたらお伝えします。' : `${files.length} つのファイル（${label}）をお預かりしました。お調べして、終わりましたらお伝えします。`,
+        evidence: [], file: { name: label, note: null }, lookup: { runId: started.runId, request: message }, tokensUsed: 0,
+      },
+      keep: true,
+    };
+  }
+
+  /**
+   * いくつものファイルを、1 つの業務に頼む（第10.10.7節）。
+   * 業務にファイルの欄が 2 つあり、ファイルが 2 つなら、どちらの欄に入れるかを推論が名前から決めて 1 回頼む（契約書の新しい版と前の版など）。
+   * そうでなく、依頼が 1 つずつに同じことをするもの（「この 3 つの契約書をチェックして」）なら、ファイルごとに頼む。
+   *
+   * @returns 頼めなければ `null`（まとめて扱う依頼。呼び出し側が調べものに回す）
+   */
+  private async delegateFiles(
+    tenantId: string, userId: string, message: string, agent: AgentDefinition, reason: string, llm: LlmProvider, files: { id: string; name: string }[],
+  ): Promise<{ reply: SecretaryReply; keep: boolean } | null> {
+    const fileKey = fileInputKey(agent);
+    if (!fileKey || !this.deps.startAgent) return null;
+    this.trace(tenantId, userId, 'secretary.handoff', agent.id, { agent: agent.name, reason, message, files: files.length });
+    const context = await this.todayContext(tenantId, userId);
+    const filled = await fillInputs(agent, message, context, llm, undefined, files);
+    const suggested = { id: agent.id, version: agent.version, name: agent.name };
+    const two = !!secondFileInputKey(agent) && files.length === 2;
+    if (!two && !filled.each) return null;
+    if (filled.missing.filter((m) => m !== (agent.inputs as { properties?: Record<string, { title?: string }> }).properties?.[fileKey]?.title).length > 0) {
+      return {
+        reply: { layer: 'light', text: `「${agent.name}」に頼むには、${filled.missing.join('、')}が要ります。教えてください。`, evidence: [{ label: '判定', value: reason }], suggestedAgent: suggested, tokensUsed: filled.tokensUsed },
+        keep: true,
+      };
+    }
+    const inputs = two ? [filled.input] : files.map((f) => ({ ...filled.input, [fileKey]: f.id }));
+    const runs: string[] = [];
+    for (const input of inputs) {
+      const started = await this.deps.startAgent(tenantId, userId, agent, input);
+      if (started) runs.push(started.runId);
+    }
+    if (!runs.length) return { reply: { layer: 'direct', text: `いま「${agent.name}」を使えません。`, evidence: [], suggestedAgent: suggested, tokensUsed: filled.tokensUsed }, keep: true };
+    for (const r of runs) await this.audit(tenantId, userId, 'secretary.delegate', r);
+    return {
+      reply: {
+        layer: 'light',
+        text: two ? `担当の業務「${agent.name}」に、2 つのファイルを渡して頼みました。終わりましたらお伝えします。`
+          : `担当の業務「${agent.name}」に、ファイルごとに ${runs.length} 件に分けて頼みました。終わりましたら 1 件ずつお伝えします。`,
+        evidence: [{ label: '判定', value: reason }],
+        lookup: { runId: runs[0]!, request: message },
+        tokensUsed: filled.tokensUsed,
       },
       keep: true,
     };
@@ -1089,26 +1187,35 @@ const LOOKUP_ROUTE_NOTE = '調べもの — 時刻表・乗り換え・道順・
  * 業務の入力を、依頼の文と今日の会話から埋める（仕様書 第10.9.6節）。
  *
  * @param fileId 渡されたファイル。業務がファイルを受け取るなら入れる
- * @returns 埋めた入力と、埋められなかった必須の入力の名前（画面の見出し）と、前に渡したファイルと比べる依頼か（2 つ目のファイルの欄がある業務だけ）
+ * @param files いくつものファイルを渡されたとき、その ID と名前（第10.10.7節）。ファイルの欄が 2 つの業務に 2 つなら、どちらの欄に入れるかを推論が名前から決め、
+ *   そうでなければ、ファイルごとに同じことをする依頼かを推論が読む
+ * @returns 埋めた入力と、埋められなかった必須の入力の名前（画面の見出し）と、前に渡したファイルと比べる依頼か（2 つ目のファイルの欄がある業務だけ）と、
+ *   ファイルごとに同じことをする依頼か
  *
  * @remarks
  * 推論が JSON を返さないとき（自動テストの見本の応答など）は、依頼の文だけを入れる欄（`request`）があればそこに入れる。
  * 読み取れない値を推測で埋めさせない。
  */
 export async function fillInputs(
-  agent: AgentDefinition, message: string, context: string, llm: LlmProvider, fileId?: string,
-): Promise<{ input: Record<string, unknown>; missing: string[]; tokensUsed: number; comparePrevious: boolean }> {
+  agent: AgentDefinition, message: string, context: string, llm: LlmProvider, fileId?: string, files?: { id: string; name: string }[],
+): Promise<{ input: Record<string, unknown>; missing: string[]; tokensUsed: number; comparePrevious: boolean; each: boolean }> {
   const schema = agent.inputs as { required?: string[]; properties?: Record<string, { title?: string; format?: string; examples?: string[] }> };
   const props = schema.properties ?? {};
   const fileKey = fileInputKey(agent);
   // ファイルの欄は推論に埋めさせない（ファイルの ID を推測で作らせない）
   const keys = Object.keys(props).filter((k) => k !== fileKey && props[k]?.format !== 'file');
+  const second = secondFileInputKey(agent);
+  const many = files && files.length > 1 ? files : null;
   // 2 つ目のファイルの欄があれば、前に渡したファイルと比べる依頼かだけを推論に読ませる（第28.13節）
-  const compareKey = secondFileInputKey(agent) ? '__comparePrevious' : null;
+  const compareKey = second && !many ? '__comparePrevious' : null;
+  // いくつものファイル（第10.10.7節）: 欄が 2 つで 2 つなら 1 つ目の欄に入れるファイルの番号、そうでなければファイルごとに同じことをする依頼か
+  const pickKey = many && second && many.length === 2 && fileKey ? '__firstFile' : null;
+  const eachKey = many && !pickKey ? '__each' : null;
   const input: Record<string, unknown> = {};
   let comparePrevious = false;
+  let each = false;
   let tokensUsed = 0;
-  if (keys.length > 0 || compareKey) {
+  if (keys.length > 0 || compareKey || pickKey || eachKey) {
     const res = await llm.complete({
       tier: 'fast',
       maxOutputTokens: 2000,
@@ -1124,6 +1231,9 @@ export async function fillInputs(
             '入力の項目:',
             ...keys.map((k) => `- ${k}: ${props[k]?.title ?? k}${schema.required?.includes(k) ? '（必須）' : ''}${props[k]?.examples?.[0] ? `（例: ${props[k]!.examples![0]}）` : ''}`),
             ...(compareKey ? [`- ${compareKey}: 依頼が、前の版・前に渡したファイルと比べることを求めているなら true（「前の版と比べて」「修正版が戻ってきた」など）。そうでなければ false`] : []),
+            ...(pickKey ? [`- ${pickKey}: 「${props[fileKey!]?.title ?? fileKey}」の欄に入れるファイルの番号（1 か 2）。もう一方は「${props[second!]?.title ?? second}」の欄に入れる。依頼の文とファイルの名前から決める（新しい版・修正版・相手から戻ってきたものを「${props[fileKey!]?.title ?? fileKey}」に）`] : []),
+            ...(eachKey ? [`- ${eachKey}: 依頼が、渡したファイルの 1 つずつに同じことをするものなら true（「この 3 つの契約書をチェックして」）。ファイルを合わせて比べる・まとめる・1 つの答えにする依頼なら false`] : []),
+            ...(many ? ['', '渡したファイル:', ...many.map((f, i) => `${i + 1}. ${f.name}`)] : []),
           ].join('\n'),
         },
         { role: 'user', content: [context ? `これまでの会話:\n${context}\n` : '', `依頼: ${message}`].join('\n') },
@@ -1138,16 +1248,28 @@ export async function fillInputs(
         if (typeof v === 'string' ? v.trim() : v !== undefined && v !== null) input[k] = typeof v === 'string' ? v.trim() : v;
       }
       if (compareKey) comparePrevious = parsed[compareKey] === true || parsed[compareKey] === 'true';
+      if (eachKey) each = parsed[eachKey] === true || parsed[eachKey] === 'true';
+      if (pickKey) {
+        const n = Number(parsed[pickKey]);
+        const first = n === 2 ? 1 : 0;
+        input[fileKey!] = many![first]!.id;
+        input[second!] = many![1 - first]!.id;
+      }
     } catch {
       // 読めなければ埋めない（下で request だけを入れる）
     }
     if (input['request'] === undefined && keys.includes('request')) input['request'] = message;
   }
   if (fileId && fileKey) input[fileKey] = fileId;
+  // 推論が答えなくても、2 つのファイルは渡した順に入れる
+  if (pickKey && input[fileKey!] === undefined) {
+    input[fileKey!] = many![0]!.id;
+    input[second!] = many![1]!.id;
+  }
   const missing = (schema.required ?? [])
     .filter((k) => input[k] === undefined || input[k] === '')
     .map((k) => props[k]?.title ?? k);
-  return { input, missing, tokensUsed, comparePrevious };
+  return { input, missing, tokensUsed, comparePrevious, each };
 }
 
 /**

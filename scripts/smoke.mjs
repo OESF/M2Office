@@ -3715,6 +3715,17 @@ console.log('\n■ 58. 契約書チェック（公式の拡張機能。第28章�
       run.job?.input?.['契約書'] === file.id && run.job?.input?.['前の版'] === undefined
         ? ok('渡した契約書が、業務の「契約書」の欄に入る（比べる依頼でなければ「前の版」は空）') : ng('ファイルが欄に入らない', JSON.stringify(run.job?.input));
     }
+    // いくつものファイル（第10.10.7節）: 5 つを超えれば断り、まとめる依頼は全部を調べものに渡す
+    const form2 = new FormData();
+    form2.append('file', new Blob([Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da6364f8ff0f0000050101005b1c4a1a0000000049454e44ae426082', 'hex')]), 'memo.png');
+    const file2 = await (await fetch(`${API}/v1/files`, { method: 'POST', body: form2, headers: { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' } })).json();
+    const tooMany = await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message: '要点を', fileIds: [file.id, file2.id, 'a', 'b', 'c', 'd'] }) }, 'member');
+    const both = await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message: 'この 2 つの書類の要点を、それぞれの違いが分かるようにまとめて', fileIds: [file.id, file2.id] }) }, 'member');
+    const bothRun = both.body.lookup?.runId ? (await call('a', `/v1/runs/${both.body.lookup.runId}`, {}, 'member')).body : null;
+    const inputs = bothRun?.job?.input ?? {};
+    tooMany.status === 400 && both.status === 200 && both.body.file?.name?.includes('memo.png')
+      && ((inputs.fileId === file.id && inputs.moreFileIds === file2.id) || (inputs['契約書'] && inputs['前の版']) || inputs['契約書'] === file.id || inputs['契約書'] === file2.id)
+      ? ok('いくつものファイルを秘書に渡せる（5 つを超えれば断る。業務か調べものに全部を渡す）') : ng('いくつものファイルの扱いが違う', JSON.stringify({ many: tooMany.status, both: both.body, inputs }));
   } catch (err) {
     ng('契約書チェックの確認が途中で止まった', String(err));
   } finally {

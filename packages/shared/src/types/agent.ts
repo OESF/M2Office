@@ -239,6 +239,9 @@ export function fileInputKey(def: Pick<AgentDefinition, 'inputs'>): string | nul
   return Object.entries(props).find(([, p]) => p?.format === 'file')?.[0] ?? null;
 }
 
+/** 秘書に一度に渡せるファイルの数（仕様書 第10.10.2節・第10.10.7節）。 */
+export const SECRETARY_FILES_MAX = 5;
+
 /**
  * 業務の入力のうち、2 つ目のファイルの欄の名前（契約書チェックの「前の版」など。仕様書 第28.13節）。無ければ `null`。
  *

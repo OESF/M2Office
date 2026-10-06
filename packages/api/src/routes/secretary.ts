@@ -1,13 +1,13 @@
 /**
  * @file 秘書への依頼を受け付ける API。どの層（直接応答・取次・対話）で答えたかも返す。
  *
- * 手元のファイルを 1 つ添えられる（`fileId`。仕様書 第10.10節）。
+ * 手元のファイルを添えられる（`fileId`、いくつもなら `fileIds`。5 つまで。仕様書 第10.10節）。
  *
  * @see 仕様書 第10.9節 応答の経路、第10.10節 秘書にファイルを渡す
  */
 
 import { Hono } from 'hono';
-import type { RequestContext } from '@m2office/shared';
+import { SECRETARY_FILES_MAX, type RequestContext } from '@m2office/shared';
 import { claimUntold, listLookups } from '../secretary/lookups.js';
 import type { AppDeps } from '../context.js';
 
@@ -22,15 +22,18 @@ export function secretaryRoute(deps: AppDeps) {
 
   app.post('/', async (c) => {
     const ctx = c.get('ctx');
-    const { message, fileId } = await c.req.json<{ message: string; fileId?: string }>();
+    const { message, fileId, fileIds } = await c.req.json<{ message: string; fileId?: string; fileIds?: unknown }>();
+    // いくつものファイル（第10.10.7節）。文字の ID だけを受け取り、多すぎれば断る
+    const files = [...(Array.isArray(fileIds) ? fileIds.filter((f): f is string => typeof f === 'string' && !!f.trim()) : []), ...(fileId?.trim() ? [fileId.trim()] : [])];
+    if (files.length > SECRETARY_FILES_MAX) return c.json({ error: `一度に渡せるファイルは ${SECRETARY_FILES_MAX} つまでです` }, 400);
     if (!message?.trim()) {
       return c.json({ error: '依頼の内容を入力してください' }, 400);
     }
     const started = Date.now();
     // デバッグモードでは、依頼と答えを記録に残す（仕様書 第20.4.1節「デバッグモード」）。振り分けの経過はその間に秘書が足す
-    deps.debug?.add(ctx.tenant.id, ctx.user.id, 'secretary', `文字の依頼: ${message}`, { message, fileId: fileId ?? null });
+    deps.debug?.add(ctx.tenant.id, ctx.user.id, 'secretary', `文字の依頼: ${message}`, { message, fileIds: files });
     // ファイルは本人が上げたものだけを読む。他人の ID を書いても読まない（仕様書 第10.10.2節）
-    const reply = await deps.secretary.respond(ctx.tenant.id, ctx.user.id, message, fileId?.trim() || undefined);
+    const reply = await deps.secretary.respond(ctx.tenant.id, ctx.user.id, message, files.length > 1 ? files : files[0]);
     deps.debug?.add(ctx.tenant.id, ctx.user.id, 'secretary', `秘書の答え（${reply.layer}・${Date.now() - started} ms）: ${reply.text}`, reply);
     return c.json({ ...reply, elapsedMs: Date.now() - started });
   });
