@@ -239,6 +239,19 @@ export function fileInputKey(def: Pick<AgentDefinition, 'inputs'>): string | nul
   return Object.entries(props).find(([, p]) => p?.format === 'file')?.[0] ?? null;
 }
 
+/**
+ * 業務の入力のうち、2 つ目のファイルの欄の名前（契約書チェックの「前の版」など。仕様書 第28.13節）。無ければ `null`。
+ *
+ * @remarks
+ * 秘書に渡したファイルは 1 つ目の欄（{@link fileInputKey}）に入る。2 つ目の欄は、本人が「前の版と比べて」と頼んだときに、
+ * 同じ業務に前に渡したファイルで秘書が埋める
+ */
+export function secondFileInputKey(def: Pick<AgentDefinition, 'inputs'>): string | null {
+  const first = fileInputKey(def);
+  const props = ((def.inputs as { properties?: Record<string, { format?: string }> }).properties) ?? {};
+  return Object.entries(props).find(([k, p]) => k !== first && p?.format === 'file')?.[0] ?? null;
+}
+
 
 /**
  * ダッシュボードの「業務の状態」で、公式の業務をまとめる分野の名前（仕様書 第6.7.4.2.1節、ADR-0061）。

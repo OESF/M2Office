@@ -22,6 +22,7 @@ import {
 } from '../files/pdf-render.js';
 import { loadInvoiceStyle } from '../files/invoice-style.js';
 import { fileToText } from '../files/to-text.js';
+import { compareTexts } from '../files/compare.js';
 
 const str = (v: unknown, fallback = '') => (typeof v === 'string' ? v : fallback);
 
@@ -50,6 +51,44 @@ export const fileReadText: Tool = {
     const r = await fileToText(ctx.repo, ctx.files, ctx.tenantId, str(args['fileId']), ctx.userId, ctx.ocr);
     if (!r.ok) return { available: false, reason: r.note ?? 'ファイルを読めませんでした' };
     return { available: true, untrusted: true, file: r.name, text: r.text, note: r.note };
+  },
+};
+
+/**
+ * 2 つの版の文書（契約書など）を、条項ごとに並べて比べる（仕様書 第28.13節）。変わったところはプログラムが見つける。
+ *
+ * @remarks
+ * 危険度 `read`。依頼者本人のファイルだけを読む。条項は「第〇条」「Article 〇」で分け、題名と中身の近さで前の版と結ぶ（番号がずれても追える）。
+ * 結んだ条項の中は文の単位で比べ、足された・消された・変わった条項と、前の版にだけある文・新しい版にだけある文を返す。
+ * 文の重なり（`similarity`）が低ければ、別の文書を比べた見込みがあると `note` で伝える。読めない範囲があれば推測で埋めず `note` で伝える。
+ */
+export const fileCompare: Tool = {
+  name: 'file.compare',
+  risk: 'read',
+  activityLabel: '前の版と比べています',
+  helpText: '前の版と新しい版の文書を条項ごとに比べ、変わったところを挙げます',
+  description: '2 つの版の文書を条項ごとに比べる。before は前の版、after は新しい版のファイルの ID。changes に、足された（added）・消された（removed）・変わった（changed）条項と、前の版にだけある文（removed）・新しい版にだけある文（added）を返す',
+  args: {
+    properties: {
+      before: { type: 'string', description: '前の版のファイルの ID' },
+      after: { type: 'string', description: '新しい版のファイルの ID' },
+    },
+    required: ['before', 'after'],
+  },
+  async invoke(args, ctx) {
+    const [a, b] = await Promise.all([
+      fileToText(ctx.repo, ctx.files, ctx.tenantId, str(args['before']), ctx.userId, ctx.ocr),
+      fileToText(ctx.repo, ctx.files, ctx.tenantId, str(args['after']), ctx.userId, ctx.ocr),
+    ]);
+    if (!a.ok) return { available: false, reason: `前の版を読めませんでした（${a.note ?? '理由は不明'}）` };
+    if (!b.ok) return { available: false, reason: `新しい版を読めませんでした（${b.note ?? '理由は不明'}）` };
+    const r = compareTexts(a.text, b.text);
+    const notes = [
+      a.note ? `前の版: ${a.note}` : '', b.note ? `新しい版: ${b.note}` : '',
+      r.similarity < 0.3 ? '2 つの文書の重なりがわずかです。別の文書を比べている見込みがあります' : '',
+      r.changes.length >= 60 ? '変わったところが多いため、先頭の 60 件だけを返しました' : '',
+    ].filter(Boolean);
+    return { available: true, untrusted: true, before: { file: a.name }, after: { file: b.name }, ...r, note: notes.join('。') || null };
   },
 };
 
@@ -313,4 +352,4 @@ export const imageReadText: Tool = {
   },
 };
 
-export const FILE_TOOLS: Tool[] = [fileReadText, sheetRead, pdfExtract, imageReadText, sheetRender, docxRender, pdfRender];
+export const FILE_TOOLS: Tool[] = [fileReadText, fileCompare, sheetRead, pdfExtract, imageReadText, sheetRender, docxRender, pdfRender];

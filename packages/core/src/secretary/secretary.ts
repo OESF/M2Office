@@ -6,7 +6,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { fileInputKey, type AgentDefinition } from '@m2office/shared';
+import { fileInputKey, secondFileInputKey, type AgentDefinition } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { LlmProvider } from '../llm/provider.js';
 import type { WorkspaceConnector } from '../connectors/types.js';
@@ -94,6 +94,13 @@ export interface SecretaryDeps {
   ): Promise<{ runId: string; already: boolean } | null>;
   /** 渡されたファイルの名前だけを引く。中身は読まない（後ろへ回すため）。 */
   fileName?(tenantId: string, userId: string, fileId: string): Promise<string | null>;
+  /**
+   * 本人が同じ業務に前に渡したファイル（いちばん新しい実行の 1 つ目のファイルの欄。仕様書 第28.13節）。
+   * 「前の版と比べて」と頼まれたとき、業務の 2 つ目のファイルの欄を埋めるのに使う。
+   *
+   * @returns 無ければ `null`
+   */
+  previousFile?(tenantId: string, userId: string, agentId: string): Promise<string | null>;
   /** 社内のお知らせ（仕様書 第10.15節）。無ければお知らせの依頼を扱わない。 */
   notices?: NoticeService;
   /**
@@ -680,6 +687,15 @@ export class Secretary {
       };
     }
     const filled = await fillInputs(agent, message, context, llm, fileId);
+    // 「前の版と比べて」: 2 つ目のファイルの欄を、同じ業務に前に渡したファイルで埋める（第28.13節）
+    const second = secondFileInputKey(agent);
+    if (second && filled.comparePrevious && filled.input[second] === undefined && this.deps.previousFile) {
+      const prev = await this.deps.previousFile(tenantId, userId, agent.id).catch(() => null);
+      if (prev && prev !== fileId) {
+        filled.input[second] = prev;
+        this.trace(tenantId, userId, 'secretary.previous_file', agent.id, { agent: agent.name });
+      }
+    }
     if (filled.missing.length > 0 || !this.deps.startAgent) {
       const what = filled.missing.length > 0 ? filled.missing.join('、') : '入力';
       return {
@@ -1073,7 +1089,7 @@ const LOOKUP_ROUTE_NOTE = '調べもの — 時刻表・乗り換え・道順・
  * 業務の入力を、依頼の文と今日の会話から埋める（仕様書 第10.9.6節）。
  *
  * @param fileId 渡されたファイル。業務がファイルを受け取るなら入れる
- * @returns 埋めた入力と、埋められなかった必須の入力の名前（画面の見出し）
+ * @returns 埋めた入力と、埋められなかった必須の入力の名前（画面の見出し）と、前に渡したファイルと比べる依頼か（2 つ目のファイルの欄がある業務だけ）
  *
  * @remarks
  * 推論が JSON を返さないとき（自動テストの見本の応答など）は、依頼の文だけを入れる欄（`request`）があればそこに入れる。
@@ -1081,14 +1097,18 @@ const LOOKUP_ROUTE_NOTE = '調べもの — 時刻表・乗り換え・道順・
  */
 export async function fillInputs(
   agent: AgentDefinition, message: string, context: string, llm: LlmProvider, fileId?: string,
-): Promise<{ input: Record<string, unknown>; missing: string[]; tokensUsed: number }> {
+): Promise<{ input: Record<string, unknown>; missing: string[]; tokensUsed: number; comparePrevious: boolean }> {
   const schema = agent.inputs as { required?: string[]; properties?: Record<string, { title?: string; format?: string; examples?: string[] }> };
   const props = schema.properties ?? {};
   const fileKey = fileInputKey(agent);
-  const keys = Object.keys(props).filter((k) => k !== fileKey);
+  // ファイルの欄は推論に埋めさせない（ファイルの ID を推測で作らせない）
+  const keys = Object.keys(props).filter((k) => k !== fileKey && props[k]?.format !== 'file');
+  // 2 つ目のファイルの欄があれば、前に渡したファイルと比べる依頼かだけを推論に読ませる（第28.13節）
+  const compareKey = secondFileInputKey(agent) ? '__comparePrevious' : null;
   const input: Record<string, unknown> = {};
+  let comparePrevious = false;
   let tokensUsed = 0;
-  if (keys.length > 0) {
+  if (keys.length > 0 || compareKey) {
     const res = await llm.complete({
       tier: 'fast',
       maxOutputTokens: 2000,
@@ -1103,6 +1123,7 @@ export async function fillInputs(
             '',
             '入力の項目:',
             ...keys.map((k) => `- ${k}: ${props[k]?.title ?? k}${schema.required?.includes(k) ? '（必須）' : ''}${props[k]?.examples?.[0] ? `（例: ${props[k]!.examples![0]}）` : ''}`),
+            ...(compareKey ? [`- ${compareKey}: 依頼が、前の版・前に渡したファイルと比べることを求めているなら true（「前の版と比べて」「修正版が戻ってきた」など）。そうでなければ false`] : []),
           ].join('\n'),
         },
         { role: 'user', content: [context ? `これまでの会話:\n${context}\n` : '', `依頼: ${message}`].join('\n') },
@@ -1116,6 +1137,7 @@ export async function fillInputs(
         const v = parsed[k];
         if (typeof v === 'string' ? v.trim() : v !== undefined && v !== null) input[k] = typeof v === 'string' ? v.trim() : v;
       }
+      if (compareKey) comparePrevious = parsed[compareKey] === true || parsed[compareKey] === 'true';
     } catch {
       // 読めなければ埋めない（下で request だけを入れる）
     }
@@ -1125,7 +1147,7 @@ export async function fillInputs(
   const missing = (schema.required ?? [])
     .filter((k) => input[k] === undefined || input[k] === '')
     .map((k) => props[k]?.title ?? k);
-  return { input, missing, tokensUsed };
+  return { input, missing, tokensUsed, comparePrevious };
 }
 
 /**

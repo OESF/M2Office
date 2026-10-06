@@ -3698,6 +3698,9 @@ console.log('\n■ 58. 契約書チェック（公式の拡張機能。第28章�
     const def = (agents.agents ?? []).find((a) => a.id === AGENT);
     install.status === 200 && def && def.inputs?.properties?.['契約書']?.format === 'file'
       ? ok('導入すると、契約書のファイルの欄を持つ業務として使える') : ng('業務が使えない', JSON.stringify(install.body));
+    // 相手の修正版との差分（第28.13節）: 「前の版」は任意のファイルの欄
+    def?.inputs?.properties?.['前の版']?.format === 'file' && !(def.inputs.required ?? []).includes('前の版')
+      ? ok('「前の版」の任意のファイルの欄があり、修正版と比べられる') : ng('前の版の欄が無い', JSON.stringify(def?.inputs));
 
     // 秘書に契約書を渡して「この NDA 大丈夫？」と聞くと、照会として答えずに契約書チェックへ回す（第28.8節）
     const form = new FormData();
@@ -3709,7 +3712,8 @@ console.log('\n■ 58. 契約書チェック（公式の拡張機能。第28章�
       ? ok('契約書を渡した問いは、秘書が大丈夫かを答えずに契約書チェックへ回す') : ng('契約書チェックに回らない', reply.text);
     if (reply.lookup?.runId) {
       const { body: run } = await call('a', `/v1/runs/${reply.lookup.runId}`, {}, 'member');
-      run.job?.input?.['契約書'] === file.id ? ok('渡した契約書が、業務の「契約書」の欄に入る') : ng('ファイルが欄に入らない', JSON.stringify(run.job?.input));
+      run.job?.input?.['契約書'] === file.id && run.job?.input?.['前の版'] === undefined
+        ? ok('渡した契約書が、業務の「契約書」の欄に入る（比べる依頼でなければ「前の版」は空）') : ng('ファイルが欄に入らない', JSON.stringify(run.job?.input));
     }
   } catch (err) {
     ng('契約書チェックの確認が途中で止まった', String(err));

@@ -609,6 +609,21 @@ export function buildDeps(): AppDeps {
       // 本人のファイルでなければ、存在も示さない（第9.4.1節）
       return f && f.ownerUserId === userId ? f.name : null;
     },
+    // 本人が同じ業務に前に渡したファイル（「前の版と比べて」。仕様書 第28.13節）。本人の実行だけを見る
+    previousFile: async (tenantId, userId, agentId) => {
+      const rows = await repo.listRunsWithJobs(tenantId, { limit: 50, requestedBy: userId });
+      const view = await tenantView(tenantId);
+      for (const r of rows) {
+        if (r.job.agentId !== agentId || r.job.requestedBy !== userId) continue;
+        const def = view.resolve(r.job.agentId, r.job.agentVersion);
+        const key = def ? fileInputKey(def) : null;
+        const v = key ? r.job.input[key] : null;
+        if (typeof v !== 'string' || !v) continue;
+        const f = await repo.getFile(tenantId, v);
+        if (f && f.ownerUserId === userId) return v;
+      }
+      return null;
+    },
     // 時間のかかる依頼を、読むだけの業務として後ろへ回す（仕様書 第10.11.4節）
     startLookup: async (tenantId, userId, request, fileId, context) => {
       const view = await tenantView(tenantId);
