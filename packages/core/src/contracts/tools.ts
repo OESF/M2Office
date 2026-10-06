@@ -21,7 +21,7 @@ export interface ContractToolContext {
   access(): Promise<ContractSettings | null>;
 }
 
-const UNAVAILABLE = { available: false, reason: '契約の管理は使えません（会社で切っているか、利用範囲の外です）' };
+const UNAVAILABLE = { available: false, reason: '契約書の管理は使えません（会社で切っているか、利用範囲の外です）' };
 const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
 
 async function serviceOf(ctx: ToolContext): Promise<ContractService | null> {

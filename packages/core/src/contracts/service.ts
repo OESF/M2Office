@@ -477,7 +477,7 @@ export class ContractService {
             if (due.length) {
               const rule = c.noticeRule ? `\n${c.noticeRule}` : '';
               // 更新の前に見直す提案（契約書がドライブにあれば、契約の画面から契約書チェックを始められる。第38.18節）
-              const review = c.driveFileId ? '\n更新するか迷うときは、契約の画面の「契約書チェックで見直す」で、いまの契約書を見直せます。' : '';
+              const review = c.driveFileId ? '\n更新するか迷うときは、契約書の管理の画面の「契約書チェックで見直す」で、いまの契約書を見直せます。' : '';
               await this.tell(tenantId, c, `${label}: 解約の申し出の期限まであと ${left} 日（${md(c.noticeDeadline)}）`,
                 `更新するなら何もしなくてかまいません。やめるなら ${c.noticeDeadline} までに相手に申し出てください（秘書に「解約の申し出の文を書いて」と頼めます）。${rule}${review}`, now);
               add.push(...due.map((d) => `notice:${d}`));

@@ -420,7 +420,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
     // 会員とポイント（仕様書 第40章）。会社で入れていて利用範囲の人にだけ出す
     ...(me.members ? [{ id: MEMBERS_EXTENSION_ID, name: '会員', description: 'お客様を会員にし、来店と購入でポイントを貯めて特典と交換する', icon: 'users' as IconName, agent: null }] : []),
     ...(me.subsidies ? [{ id: SUBSIDIES_EXTENSION_ID, name: '補助金・助成金', description: '会社に合いそうな補助金・助成金を、締め切りと出典と一緒に知らせる', icon: 'research' as IconName, agent: null }] : []),
-    ...(me.contracts ? [{ id: CONTRACTS_EXTENSION_ID, name: '契約', description: '結んだ契約を台帳にし、更新と解約の申し出の期限を知らせる', icon: 'doc' as IconName, agent: null }] : []),
+    ...(me.contracts ? [{ id: CONTRACTS_EXTENSION_ID, name: '契約書の管理', description: '結んだ契約を台帳にし、更新と解約の申し出の期限を知らせる', icon: 'doc' as IconName, agent: null }] : []),
     // Webの分析（仕様書 第34.18節）。会社で入れていて利用範囲の人にだけ出す
     ...(me.webReview ? [{ id: WEB_REVIEW_EXTENSION_ID, name: 'Webの分析', description: '会社の Web サイトの数字を月に 1 回、ふつうの言葉で届ける', icon: 'usage' as IconName, agent: null }] : []),
     // 競合の分析（仕様書 第36.18節）。会社で入れていて利用範囲の人にだけ出す
@@ -733,7 +733,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
           )}
           {view.kind === 'contracts' && (
             <>
-              <h1>契約 <HelpTip article="start-contracts">結んだ契約を台帳にし、自動更新の解約の申し出の期限と、契約の終わりの前に担当へ知らせます。</HelpTip></h1>
+              <h1>契約書の管理 <HelpTip article="start-contracts">結んだ契約を台帳にし、自動更新の解約の申し出の期限と、契約の終わりの前に担当へ知らせます。</HelpTip></h1>
               <Contracts contractId={view.contractId} onOpen={(contractId) => setView({ kind: 'contracts', contractId })} changeKey={contractChangeKey} userId={me.user.id} />
             </>
           )}
@@ -942,7 +942,7 @@ const VIEW_LABELS: Record<string, string> = {
   inquiries: '問い合わせの記録',
   competitors: '競合の分析',
   announcements: 'お知らせの作成',
-  contracts: '契約',
+  contracts: '契約書の管理',
   reservations: '予約',
   subsidies: '補助金・助成金',
   members: '会員',

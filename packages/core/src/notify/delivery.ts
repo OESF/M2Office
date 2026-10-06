@@ -32,7 +32,7 @@ const KIND_LABELS: Record<string, string> = {
   announcement: 'お知らせの作成',
   webReview: 'Webの分析',
   column: 'コラムの作成',
-  contract: '契約の管理',
+  contract: '契約書の管理',
   reservation: '予約',
   subsidy: '補助金・助成金',
   member: '会員',

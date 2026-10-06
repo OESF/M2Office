@@ -82,7 +82,7 @@ export const CONTRACT_AGENTS: AgentDefinition[] = [CONTRACT_LEDGER];
 export const CONTRACTS_PACKAGE: ExtensionPackage = {
   manifest: {
     id: CONTRACTS_EXTENSION_ID,
-    name: '契約の管理',
+    name: '契約書の管理',
     version: CONTRACTS_EXTENSION_VERSION,
     description: '結んだ契約を台帳にし、自動更新の解約の申し出の期限と、契約の終わりの前に担当へ知らせます。契約書は会社の Google ドライブに置きます。契約書チェックの結果からそのまま台帳に入れられます',
     publisher: { name: 'M2Office', verified: true },

@@ -31,7 +31,7 @@ export function contractsRoute(deps: AppDeps) {
   app.use('*', async (c, next) => {
     const { tenant, user } = c.get('ctx');
     if (!(await deps.contracts.access(tenant.id, user.id))) {
-      return c.json({ error: '契約の管理は使えません（会社で切っているか、利用範囲の外です）' }, 403);
+      return c.json({ error: '契約書の管理は使えません（会社で切っているか、利用範囲の外です）' }, 403);
     }
     await next();
   });
