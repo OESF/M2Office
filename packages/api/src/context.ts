@@ -9,7 +9,7 @@
  */
 
 import {
-  HelpFeedback, PostgresHelpFeedbackStore, PostgresHelpNoteStore, type HelpNoteStore,
+  HelpFeedback, PostgresHelpFeedbackStore, PostgresHelpNoteStore, noteText, type HelpNoteStore,
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS, GoogleDataRetention, GoogleRevocation, agentUsesGoogle,
   RunEngine, Secretary, OFFICIAL_AGENTS, buildConnector, LocalFileStore,
   createLoggerFromEnv, HelpCatalog, BufferedHealthSink, PostgresHealthStore, installHealthSink, type HealthStore, parseArticle, parseManual, ExtensionHub, HttpMcpClient, loadExtensions,
@@ -610,6 +610,14 @@ export function buildDeps(): AppDeps {
     helpMiss: (tenantId, question) => helpFeedback.miss(tenantId, question),
     // 使い方の答えに、会社の補足を添える（第6.10.7節）
     helpNote: async (tenantId, articleId) => (await helpNotes.get(tenantId, articleId))?.text ?? null,
+    // 管理者が秘書に頼んで、会社の補足を書く・消す（秘書の側で管理者かを確かめる。第6.10.7節）
+    helpNoteSet: async (tenantId, userId, articleId, text) => {
+      await helpNotes.set(tenantId, articleId, noteText(text), userId);
+      await repo.appendAudit({
+        id: crypto.randomUUID(), tenantId, actorType: 'user', actorId: userId, action: text ? 'help.note.set' : 'help.note.remove',
+        targetType: 'help', targetId: articleId, detail: { chars: noteText(text).length, via: 'secretary' }, occurredAt: new Date().toISOString(),
+      });
+    },
     // デバッグモードでは、振り分けの経過を記録に残す（仕様書 第20.4.1節「デバッグモード」）
     ...(debug ? { onTrace: (tenantId: string, userId: string, action: string, target: string, detail?: Record<string, unknown>) => {
       if (!QUIET_TRACES.has(action)) debug.add(tenantId, userId, 'secretary', traceTitle(action, target, detail), { action, target, ...detail });

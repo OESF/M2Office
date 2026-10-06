@@ -5,7 +5,7 @@
  */
 
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
-import { api, describeError, type AdminRun, type AdminRunStatus, type AdminSchedule, type AuditFilter, type AuditRowView, type Me } from './api.js';
+import { api, ApiError, describeError, type AdminRun, type AdminRunStatus, type AdminSchedule, type AuditFilter, type AuditRowView, type Me } from './api.js';
 import { statusLabel, SuspendedBanner } from './components.js';
 import {
   AgentSettings, CompanySettings, KnowledgeSettings, UserSettings,
@@ -361,7 +361,14 @@ const SCHEDULE_STATE: Record<AdminSchedule['state'], { label: string; className:
  * 記事ごとの役に立った・立たなかったの件数。
  */
 function HelpReview() {
-  const { data, error } = useLoad(api.help.feedback);
+  // 補足を書いた・外したら読み直す
+  const [key, setKey] = useState(0);
+  const [data, setData] = useState<Awaited<ReturnType<typeof api.help.feedback>> | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    api.help.feedback().then((d) => { setData(d); setError(null); }).catch((e) => setError(describeError(e, '取得できませんでした')));
+  }, [key]);
+  const [open, setOpen] = useState<string | null>(null);
   return (
     <>
       <PageTitle trail={['ヘルプの見直し']} help={{
@@ -376,8 +383,21 @@ function HelpReview() {
             ? <p className="muted">ありません</p>
             : (
               <table className="table">
-                <thead><tr><th>質問</th><th>件数</th><th>最後</th></tr></thead>
-                <tbody>{data.misses.map((m) => <tr key={`${m.question}-${m.lastAt}`}><td>{m.question}</td><td>{m.count}</td><td>{time(m.lastAt)}</td></tr>)}</tbody>
+                <thead><tr><th>質問</th><th>件数</th><th>最後</th><th /></tr></thead>
+                <tbody>{data.misses.map((m) => (
+                  <Fragment key={`${m.question}-${m.lastAt}`}>
+                    <tr>
+                      <td>{m.question}</td><td>{m.count}</td><td>{time(m.lastAt)}</td>
+                      <td className="nowrap">
+                        <button className="link small" onClick={() => setOpen(open === m.question ? null : m.question)}>補足の案</button>{' '}
+                        <button className="link small" onClick={() => void api.help.dismissMiss(m.question).then(() => setKey((k) => k + 1))}>外す</button>
+                      </td>
+                    </tr>
+                    {open === m.question && (
+                      <tr><td colSpan={4}><NoteSuggestion question={m.question} onDone={() => { setOpen(null); setKey((k) => k + 1); }} onCancel={() => setOpen(null)} /></td></tr>
+                    )}
+                  </Fragment>
+                ))}</tbody>
               </table>
             )}
           <h2>記事が役に立ったか</h2>
@@ -392,6 +412,52 @@ function HelpReview() {
         </>
       )}
     </>
+  );
+}
+
+/**
+ * 答えられなかった質問から、会社の補足の案を出して書く（第6.10.10節）。AI が記事を選び文の案を書き、管理者が直して「この記事に書く」を押す。
+ * 書いたら、その質問を「ヘルプの見直し」から外す。会社のやり方は推測で作らず、空けた所（「（当社のやり方を書いてください）」）を管理者が埋める。
+ */
+function NoteSuggestion({ question, onDone, onCancel }: { question: string; onDone: () => void; onCancel: () => void }) {
+  const [articles, setArticles] = useState<{ id: string; title: string }[]>([]);
+  const [articleId, setArticleId] = useState('');
+  const [text, setText] = useState('');
+  const [reason, setReason] = useState<string | null>(null);
+  // 案を出せなかったときの知らせ（推論が使えない会社などで起きる。誤りではないので、問い合わせ番号は出さない）
+  const [notice, setNotice] = useState<string | null>(null);
+  const [state, setState] = useState<'loading' | 'ready'>('loading');
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    api.help.list('workspace').then((r) => setArticles(r.items.filter((a) => a.category !== 'updates').map((a) => ({ id: a.id, title: a.title })))).catch(() => undefined);
+    api.help.suggestNote(question)
+      .then((s) => { setArticleId(s.articleId ?? ''); setText(s.existing ? `${s.existing}\n${s.note}` : s.note); setReason(s.reason); })
+      .catch((e) => (e instanceof ApiError && e.status === 422
+        ? setNotice('補足の案を出せませんでした。記事を選んで、ご自身で書いてください')
+        : setError(describeError(e, '補足の案を出せませんでした'))))
+      .finally(() => setState('ready'));
+  }, [question]);
+  const save = () => api.help.saveNote(articleId, text)
+    .then(() => api.help.dismissMiss(question))
+    .then(onDone)
+    .catch((e) => setError(describeError(e, '書けませんでした')));
+  if (state === 'loading') return <p className="muted small">補足の案を考えています…</p>;
+  return (
+    <div className="note-suggestion">
+      {reason && <p className="small muted">{reason}</p>}
+      {notice && <p className="small muted">{notice}</p>}
+      <select value={articleId} aria-label="補足を書く記事" onChange={(e) => setArticleId(e.target.value)}>
+        <option value="">記事を選ぶ</option>
+        {articles.map((a) => <option key={a.id} value={a.id}>{a.title}</option>)}
+      </select>
+      <textarea value={text} maxLength={1000} rows={4} aria-label="補足の文" onChange={(e) => setText(e.target.value)} />
+      <div className="row">
+        <button className="btn small" disabled={!articleId || !text.trim() || text.includes('（当社のやり方を書いてください）')} onClick={() => void save()}
+          title={text.includes('（当社のやり方を書いてください）') ? '「（当社のやり方を書いてください）」を当社のやり方に書き換えてから書きます' : undefined}>この記事に書く</button>
+        <button className="btn ghost small" onClick={onCancel}>キャンセル</button>
+      </div>
+      {error && <p className="error">{error}</p>}
+    </div>
   );
 }
 

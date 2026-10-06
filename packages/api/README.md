@@ -437,6 +437,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/debug/events` ／ `DELETE` | デバッグモード（`M2O_DEBUG=true`）の本人の記録（新しい順。`after` でそれより後だけ）／ 消す。デバッグモードでなければ 404（仕様書 第20.4.1節） |
 | `GET /v1/help/agents/:agentId` | 業務の説明（定義から自動で作る） |
 | `PUT /v1/help/notes/:id` | 会社の補足を書く・直す（管理者だけ。`text`。空なら消す。記事の本文 `GET /v1/help/articles/:id` は `companyNote` と `canEditNote` を、業務の説明は `companyNote` を返す。仕様書 第6.10.7節） |
+| `POST /v1/help/feedback/suggest` ／ `POST /v1/help/feedback/dismiss` | 管理者だけ: 答えられなかった質問から会社の補足の案（記事と文の案。会社のやり方は推測しない。出せなければ 422）／ 片付いた質問を外す（言い方の小さな違いもまとめて。仕様書 第6.10.7節） |
 | `POST` ／ `GET /v1/help/feedback` | 記事が役に立ったか（`articleId`・`source`: article か secretary・`helpful`。押し直せば置き換える）／ ヘルプの見直し（管理者だけ。答えられなかった質問と記事ごとの件数。名前は出さない。仕様書 第6.10.10節） |
 | `GET /v1/onboarding/tour` | 本人の初回の案内の状態 |
 | `POST /v1/onboarding/tour` | 案内を見終えた記録。`{ "reset": true }` で見直し |

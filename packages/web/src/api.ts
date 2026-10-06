@@ -1101,6 +1101,11 @@ export const api = {
     /** 記事が役に立ったか（ヘルプセンターの記事か、秘書の答え。第6.10.10節）。 */
     rate: (articleId: string, source: 'article' | 'secretary', helpful: boolean) =>
       call<{ ok: true }>('/help/feedback', { method: 'POST', body: JSON.stringify({ articleId, source, helpful }) }),
+    /** 答えられなかった質問から、会社の補足の案（管理者だけ。第6.10.10節）。 */
+    suggestNote: (question: string) => call<{ articleId: string | null; title: string | null; note: string; reason: string; existing: string | null }>(
+      '/help/feedback/suggest', { method: 'POST', body: JSON.stringify({ question }) }),
+    /** 片付いた質問を「ヘルプの見直し」から外す（管理者だけ）。 */
+    dismissMiss: (question: string) => call<{ removed: number }>('/help/feedback/dismiss', { method: 'POST', body: JSON.stringify({ question }) }),
     /** ヘルプの見直し（管理者だけ）。見つからなかった質問と、記事ごとの件数。 */
     feedback: () => call<{
       misses: { question: string; count: number; lastAt: string }[]; missDays: number;

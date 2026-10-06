@@ -1,13 +1,13 @@
 /**
  * @file ヘルプを育てることの単体テスト（仕様書 第6.10.10節）。見つからなかった質問をまとめて件数にし（質問した人を持たない）、90 日で消す・
- * 役に立ったかは 1 人 1 つで押し直せば置き換える・秘書がヘルプに見当たらなかった使い方の質問だけを残す。
+ * 役に立ったかは 1 人 1 つで押し直せば置き換える・秘書がヘルプに見当たらなかった使い方の質問だけを残す・片付いた質問を外す・補足の案（第 0.288.0 版）。
  */
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULT_TENANT_SETTINGS } from '@m2office/shared';
 import {
-  BUILTIN_TOOLS, HelpCatalog, HelpFeedback, MemoryHelpFeedbackStore, Secretary, ToolRegistry, missKey, parseArticle, summarizeMisses, summarizeRatings,
+  BUILTIN_TOOLS, HelpCatalog, HelpFeedback, MemoryHelpFeedbackStore, NOTE_BLANK, Secretary, ToolRegistry, missKey, parseArticle, suggestHelpNote, summarizeMisses, summarizeRatings,
   type LlmProvider, type Repository,
 } from '../src/index.js';
 
@@ -36,7 +36,7 @@ test('残し方: 質問した人を持たず 200 字で切り、90 日で消す�
   await fb.miss('t1', '   ');
   assert.equal(store.missRows.length, 1);
   assert.equal(store.missRows[0]!.question.length, 200);
-  assert.deepEqual(Object.keys(store.missRows[0]!).sort(), ['createdAt', 'question', 'tenantId']);
+  assert.deepEqual(Object.keys(store.missRows[0]!).sort(), ['createdAt', 'id', 'question', 'tenantId'], '質問した人を持たない');
   clock = new Date('2027-01-05T00:00:00Z');
   await fb.miss('t1', '新しい質問');
   const s = await fb.summary('t1');
@@ -73,4 +73,37 @@ test('秘書: 使い方の質問でヘルプに当たる記事が無いときだ
   assert.match(miss.text, /見当たりませんでした/);
   await new Promise((r) => setTimeout(r, 10));
   assert.deepEqual(missed, [{ tenantId: 't1', question: '宇宙船の操縦はどうやってするの？' }]);
+});
+
+test('片付いた質問を外す: 言い方の小さな違いもまとめて外し、ほかの質問は残す', async () => {
+  const store = new MemoryHelpFeedbackStore();
+  const fb = new HelpFeedback(store);
+  await fb.miss('t1', '承認の取り消しはどうやるの？');
+  await fb.miss('t1', '承認の取り消しは どうやるの?');
+  await fb.miss('t1', '請求書の宛名を変えるには');
+  await fb.miss('t2', '承認の取り消しはどうやるの？');
+  assert.equal(await fb.dismiss('t1', '承認の取り消しはどうやるの？'), 2);
+  assert.deepEqual((await fb.summary('t1')).misses.map((m) => m.question), ['請求書の宛名を変えるには']);
+  assert.equal((await fb.summary('t2')).misses.length, 1, 'ほかの会社の質問は外さない');
+});
+
+test('補足の案: 推論が候補から記事を選び文の案を書く。候補に無い記事・空の案・推論が使えないときは出さない', async () => {
+  const candidates = [
+    { id: 'start-approvals', title: '承認のしかた', summary: '承認トレイで承認します' },
+    { id: 'agent-minutes', title: '議事録の作成・共有', summary: '会議の記録から議事録を作ります' },
+  ];
+  const prompts: string[] = [];
+  const llm = (reply: string) => ({
+    name: 'fake',
+    complete: async (req: { messages: { content: string }[] }) => { prompts.push(req.messages.map((m) => m.content).join('\n')); return { text: reply, tokensUsed: 1 }; },
+  }) as unknown as LlmProvider;
+  const s = await suggestHelpNote(llm(JSON.stringify({ article: 'A1', note: `取り消しは${NOTE_BLANK}`, reason: '承認の記事が近い' })), '承認の取り消しは？', candidates, [{ citation: '職務権限規程 › 第5条', body: '承認の取り消しは部長が行う' }]);
+  assert.deepEqual(s, { articleId: 'start-approvals', note: `取り消しは${NOTE_BLANK}`, reason: '承認の記事が近い' });
+  assert.match(prompts[0]!, /A2: 議事録の作成・共有/);
+  assert.match(prompts[0]!, /職務権限規程 › 第5条: 承認の取り消しは部長が行う/);
+  assert.match(prompts[0]!, /会社のやり方を推測で作らない/);
+  const none = await suggestHelpNote(llm(JSON.stringify({ article: 'A9', note: '案', reason: '' })), 'q', candidates, []);
+  assert.equal(none?.articleId, null);
+  assert.equal(await suggestHelpNote(llm(JSON.stringify({ article: 'A1', note: '' })), 'q', candidates, []), null);
+  assert.equal(await suggestHelpNote({ name: 'stub' } as unknown as LlmProvider, 'q', candidates, []), null);
 });

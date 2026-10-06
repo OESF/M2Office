@@ -41,7 +41,9 @@ export interface HelpFeedbackStore {
   addMiss(tenantId: string, question: string): Promise<void>;
   /** 日時より前の見つからなかった質問を消す。 */
   purgeMisses(tenantId: string, before: string): Promise<number>;
-  misses(tenantId: string, since: string): Promise<{ question: string; createdAt: string }[]>;
+  misses(tenantId: string, since: string): Promise<{ id: string; question: string; createdAt: string }[]>;
+  /** 見つからなかった質問を消す（補足を書いて片付いたもの）。 */
+  removeMisses(tenantId: string, ids: string[]): Promise<void>;
   rate(tenantId: string, userId: string, articleId: string, source: HelpRatingSource, helpful: boolean): Promise<void>;
   ratings(tenantId: string): Promise<{ articleId: string; helpful: boolean }[]>;
 }
@@ -103,6 +105,19 @@ export class HelpFeedback {
     await this.store.rate(tenantId, userId, articleId.slice(0, 120), source, helpful);
   }
 
+  /**
+   * 片付いた質問を消す（管理者が補足を書いたとき。言い方の小さな違いもまとめて消す）。
+   *
+   * @returns 消した数
+   */
+  async dismiss(tenantId: string, question: string): Promise<number> {
+    const key = missKey(question);
+    if (!key) return 0;
+    const ids = (await this.store.misses(tenantId, this.cutoff())).filter((r) => missKey(r.question) === key).map((r) => r.id);
+    if (ids.length) await this.store.removeMisses(tenantId, ids);
+    return ids.length;
+  }
+
   /** 管理者に示すもの（見つからなかった質問と、記事ごとの件数）。 */
   async summary(tenantId: string): Promise<{ misses: HelpMissSummary[]; ratings: HelpRatingSummary[]; missDays: number }> {
     await this.store.purgeMisses(tenantId, this.cutoff());
@@ -151,10 +166,14 @@ export class PostgresHelpFeedbackStore implements HelpFeedbackStore {
     return rows.length;
   }
 
-  async misses(tenantId: string, since: string): Promise<{ question: string; createdAt: string }[]> {
-    const rows = await this.q<{ question: string; created_at: unknown }>(tenantId,
-      `select question, created_at from help_misses where tenant_id = $1 and created_at >= $2 order by created_at desc limit 2000`, [tenantId, since]);
-    return rows.map((r) => ({ question: r.question, createdAt: iso(r.created_at) }));
+  async misses(tenantId: string, since: string): Promise<{ id: string; question: string; createdAt: string }[]> {
+    const rows = await this.q<{ id: string; question: string; created_at: unknown }>(tenantId,
+      `select id, question, created_at from help_misses where tenant_id = $1 and created_at >= $2 order by created_at desc limit 2000`, [tenantId, since]);
+    return rows.map((r) => ({ id: r.id, question: r.question, createdAt: iso(r.created_at) }));
+  }
+
+  async removeMisses(tenantId: string, ids: string[]): Promise<void> {
+    await this.q(tenantId, `delete from help_misses where tenant_id = $1 and id = any($2::text[])`, [tenantId, ids]);
   }
 
   async rate(tenantId: string, userId: string, articleId: string, source: HelpRatingSource, helpful: boolean): Promise<void> {
@@ -172,12 +191,12 @@ export class PostgresHelpFeedbackStore implements HelpFeedbackStore {
 
 /** テスト用のメモリの置き場。 */
 export class MemoryHelpFeedbackStore implements HelpFeedbackStore {
-  readonly missRows: { tenantId: string; question: string; createdAt: string }[] = [];
+  readonly missRows: { id: string; tenantId: string; question: string; createdAt: string }[] = [];
   readonly ratingRows = new Map<string, { tenantId: string; articleId: string; helpful: boolean }>();
   now: () => Date = () => new Date();
 
   async addMiss(tenantId: string, question: string): Promise<void> {
-    this.missRows.push({ tenantId, question, createdAt: this.now().toISOString() });
+    this.missRows.push({ id: `hm-${randomUUID()}`, tenantId, question, createdAt: this.now().toISOString() });
   }
 
   async purgeMisses(tenantId: string, before: string): Promise<number> {
@@ -187,8 +206,14 @@ export class MemoryHelpFeedbackStore implements HelpFeedbackStore {
     return n;
   }
 
-  async misses(tenantId: string, since: string): Promise<{ question: string; createdAt: string }[]> {
-    return this.missRows.filter((r) => r.tenantId === tenantId && r.createdAt >= since).map(({ question, createdAt }) => ({ question, createdAt }));
+  async misses(tenantId: string, since: string): Promise<{ id: string; question: string; createdAt: string }[]> {
+    return this.missRows.filter((r) => r.tenantId === tenantId && r.createdAt >= since).map(({ id, question, createdAt }) => ({ id, question, createdAt }));
+  }
+
+  async removeMisses(tenantId: string, ids: string[]): Promise<void> {
+    const drop = new Set(ids);
+    const keep = this.missRows.filter((r) => r.tenantId !== tenantId || !drop.has(r.id));
+    this.missRows.splice(0, this.missRows.length, ...keep);
   }
 
   async rate(tenantId: string, userId: string, articleId: string, source: HelpRatingSource, helpful: boolean): Promise<void> {

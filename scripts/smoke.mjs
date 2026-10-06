@@ -6576,6 +6576,15 @@ console.log('\n■ 81. ヘルプを育てる（答えられなかった質問・
       && rating?.helpful === 1 && rating?.notHelpful === 0 && !JSON.stringify(adminView.body).includes('member@')
       && otherView.status === 200 && !otherView.body.misses?.some((m) => m.question.includes('宇宙船'))
       ? ok('ヘルプの見直しは管理者だけが見られ、件数と質問の文だけで名前は出さない。ほかの会社には出ない') : ng('ヘルプの見直しが違う', JSON.stringify({ m: memberView.status, a: adminView.body, b: otherView.body }));
+    // 補足の案と、片付いた質問を外す（第 0.288.0 版）。見本の会社は推論が使えないので、案は出せないと答える
+    const suggestMember = await call('a', '/v1/help/feedback/suggest', { method: 'POST', body: JSON.stringify({ question: 'スモークの宇宙船の操縦はどうやってするの？' }) }, 'member');
+    const suggestAdmin = await call('a', '/v1/help/feedback/suggest', { method: 'POST', body: JSON.stringify({ question: 'スモークの宇宙船の操縦はどうやってするの？' }) });
+    const dismissMember = await call('a', '/v1/help/feedback/dismiss', { method: 'POST', body: JSON.stringify({ question: 'スモークの宇宙船の操縦はどうやってするの？' }) }, 'member');
+    const dismissed = await call('a', '/v1/help/feedback/dismiss', { method: 'POST', body: JSON.stringify({ question: 'スモークの宇宙船の操縦は どうやってするの?' }) });
+    const afterDismiss = await call('a', '/v1/help/feedback');
+    suggestMember.status === 403 && [200, 422].includes(suggestAdmin.status) && dismissMember.status === 403 && dismissed.body.removed === 1
+      && !afterDismiss.body.misses?.some((m) => m.question.includes('宇宙船'))
+      ? ok('補足の案と、片付いた質問を外すのは管理者だけ（言い方の小さな違いもまとめて外す）') : ng('補足の案・外すが違う', JSON.stringify({ sm: suggestMember.status, sa: suggestAdmin.status, dm: dismissMember.status, d: dismissed.body }));
     // 会社の補足（第6.10.7節）: 書くのは管理者だけ。記事・業務の説明・秘書の使い方の答えに添え、ほかの会社には出ない
     await owner.query(`delete from help_notes where tenant_id in ('t-alpha', 't-beta')`);
     const noteByMember = await call('a', '/v1/help/notes/start-screen', { method: 'PUT', body: JSON.stringify({ text: 'x' }) }, 'member');
@@ -6587,6 +6596,12 @@ console.log('\n■ 81. ヘルプを育てる（答えられなかった質問・
     noteByMember.status === 403 && noteSet.status === 200 && noteAgent.status === 200 && article.body.companyNote?.text?.includes('スモークの当社の補足') && article.body.canEditNote === false
       && agentHelp.body.companyNote === 'スモークの議事録の補足' && otherArticle.body.companyNote === null
       ? ok('会社の補足は管理者が書き、記事と業務の説明に添える（ほかの会社には出ない）') : ng('会社の補足が違う', JSON.stringify({ m: noteByMember.status, s: noteSet.status, a: article.body.companyNote, g: agentHelp.body.companyNote, o: otherArticle.body.companyNote }));
+    // 秘書に頼んで書く（管理者だけ。第 0.287.0 版）
+    const askMember = await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message: '議事録の作成・共有の説明に「スモークの秘書の補足」と補足して' }) }, 'member');
+    const askAdmin = await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message: '議事録の作成・共有の説明に「スモークの秘書の補足」と補足して' }) });
+    const agentHelp2 = await call('a', '/v1/help/agents/minutes', {}, 'member');
+    /管理者だけ/.test(askMember.body.text ?? '') && /当社の補足を書きました/.test(askAdmin.body.text ?? '') && agentHelp2.body.companyNote === 'スモークの秘書の補足'
+      ? ok('管理者は秘書に頼んで会社の補足を書ける（ほかの人は断る）') : ng('秘書に頼んだ補足が違う', JSON.stringify({ m: askMember.body.text, a: askAdmin.body.text, n: agentHelp2.body.companyNote }));
     const cleared = await call('a', '/v1/help/notes/start-screen', { method: 'PUT', body: JSON.stringify({ text: '' }) });
     const afterClear = await call('a', '/v1/help/articles/start-screen', {}, 'member');
     cleared.status === 200 && afterClear.body.companyNote === null ? ok('会社の補足は空にすると消える') : ng('補足を消せない', JSON.stringify(afterClear.body.companyNote));

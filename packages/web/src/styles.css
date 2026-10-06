@@ -1161,6 +1161,8 @@ code.uri { background: var(--subtle-bg); border: 1px solid var(--line); border-r
 .company-note-text, .company-note p { white-space: pre-wrap; margin: 0; }
 .company-note textarea { width: 100%; font: inherit; }
 .company-note:has(> button:only-child) { background: none; border-left: 0; padding: 0; }
+.note-suggestion { display: flex; flex-direction: column; gap: calc(6px * var(--space-scale)); padding: calc(6px * var(--space-scale)) 0; }
+.note-suggestion textarea { width: 100%; font: inherit; }
 .help-rating { margin-top: calc(10px * var(--space-scale)); color: var(--muted); }
 .secretary .attached-list { display: flex; flex-wrap: wrap; gap: calc(4px * var(--space-scale)); }
 

@@ -7,7 +7,7 @@
  */
 
 import { Hono } from 'hono';
-import { noteText, type HelpContext, type HelpScope } from '@m2office/core';
+import { noteText, suggestHelpNote, type HelpContext, type HelpScope } from '@m2office/core';
 import { CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, CONTRACTS_EXTENSION_ID, RESERVATIONS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, MEMBERS_EXTENSION_ID } from '@m2office/shared';
 import type { AppDeps } from '../context.js';
 import { agentGroup } from '../agent-group.js';
@@ -122,6 +122,38 @@ export function helpRoute(deps: AppDeps) {
       misses: s.misses, missDays: s.missDays,
       ratings: s.ratings.map((r) => ({ ...r, title: deps.help.get(r.articleId, ctx)?.title ?? r.articleId })),
     });
+  });
+
+  /**
+   * 答えられなかった質問から、会社の補足の案を出す（管理者だけ。第6.10.10節）。推論が補足を書くとよい記事を選び、文の案を書く。
+   * 材料はヘルプの記事の題名と始めの部分・社内の規程の当たった節だけ。会社のやり方を推測で作らない。書くのは管理者が案を直してから。
+   */
+  app.post('/feedback/suggest', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    if (!user.roles.includes('admin')) return c.json({ error: '補足の案を出せるのは管理者だけです' }, 403);
+    const body = await c.req.json<{ question?: unknown }>().catch(() => ({} as { question?: unknown }));
+    const question = typeof body.question === 'string' ? body.question.trim().slice(0, 200) : '';
+    if (!question) return c.json({ error: '質問を入れてください' }, 400);
+    const ctx = await contextOf(tenant.id, user.id, user.roles);
+    // 業務の説明を含む、ワークスペースで読める記事（管理者向けの記事には社内の人が読まないので書かない）
+    const articles = deps.help.list(ctx, 'workspace').filter((a) => a.category !== 'updates');
+    const candidates = articles.map((a) => ({ id: a.id, title: a.title, summary: a.body.replace(/^#.*$/gm, '').trim().slice(0, 120) }));
+    const found = await deps.repo.searchKnowledge(tenant.id, question, null, [], { categories: ['rule'] }).catch(() => ({ hits: [] as { citation: string; body: string }[] }));
+    const llm = await deps.ai.llmFor(tenant.id);
+    const s = await suggestHelpNote(llm, question, candidates, found.hits.slice(0, 2).map((h) => ({ citation: h.citation, body: h.body })));
+    if (!s) return c.json({ error: '補足の案を出せませんでした（AI が使えないか、案を読めませんでした）。記事を選んで、ご自身で書いてください' }, 422);
+    const article = s.articleId ? articles.find((a) => a.id === s.articleId) ?? null : null;
+    const existing = article ? (await deps.helpNotes.get(tenant.id, article.id))?.text ?? null : null;
+    return c.json({ articleId: article?.id ?? null, title: article?.title ?? null, note: s.note, reason: s.reason, existing });
+  });
+
+  /** 片付いた質問を「ヘルプの見直し」から外す（管理者だけ。補足を書いたとき・補わないと決めたとき）。 */
+  app.post('/feedback/dismiss', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    if (!user.roles.includes('admin')) return c.json({ error: 'ヘルプの見直しは管理者だけが扱えます' }, 403);
+    const body = await c.req.json<{ question?: unknown }>().catch(() => ({} as { question?: unknown }));
+    if (typeof body.question !== 'string' || !body.question.trim()) return c.json({ error: '質問を入れてください' }, 400);
+    return c.json({ removed: await deps.helpFeedback.dismiss(tenant.id, body.question) });
   });
 
   return app;
