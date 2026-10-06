@@ -6,7 +6,7 @@
  * @see 仕様書 第6.1節 ワークスペースの画面構造
  */
 
-import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent } from 'react';
 import { CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, CONTRACTS_EXTENSION_ID, RESERVATIONS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, MEMBERS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, SECRETARY_FILES_MAX, showsCaptions, type Notification, type UserSettings } from '@m2office/shared';
 import {
   addCategory, assignCategory, checkCategoryName, groupMenu, removeCategory, togglePinned, type MenuSection,
@@ -1156,47 +1156,29 @@ function SecretaryBar({ lookups, avatar, captions, onResult, onVoice }: {
     }
   }
   /*
-    画面へファイルを落としても渡せる（第10.10.2節）。ほかの受け口（サイネージの素材・拡張機能の取り込みなど）が受け取った
-    ファイルは、そちらに任せる（受け口が既定の動きを止めていれば、秘書は受け取らない）
+    秘書の帯へファイルを落としても渡せる（第10.10.2節）。受け取るのは秘書の帯の中だけにし、画面のほかの場所には手を出さない
+    （ほかの画面や業務が、自分のファイルの受け口を持てるように）
   */
   const [dropping, setDropping] = useState(false);
-  const attachRef = useRef(attach);
-  attachRef.current = attach;
-  const busyRef = useRef(busy);
-  busyRef.current = busy;
-  useEffect(() => {
-    const hasFiles = (e: DragEvent) => !!e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files');
-    // 持っている間は dragover が続けて届く。届かなくなったら（ほかの受け口が受け取った・やめた）印を消す
-    let quiet: ReturnType<typeof setTimeout> | null = null;
-    const over = (e: DragEvent) => {
+  const hasFiles = (e: ReactDragEvent) => Array.from(e.dataTransfer.types).includes('Files');
+  const dropProps = {
+    onDragOver: (e: ReactDragEvent) => {
       if (!hasFiles(e)) return;
-      // 落としたファイルをブラウザが開いてしまわないように止める
       e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
       setDropping(true);
-      if (quiet) clearTimeout(quiet);
-      quiet = setTimeout(() => setDropping(false), 500);
-    };
-    const leave = (e: DragEvent) => {
-      // 画面の外へ出たときだけ（要素の間を移るたびには消さない）
-      if (!e.relatedTarget) setDropping(false);
-    };
-    const drop = (e: DragEvent) => {
+    },
+    onDragLeave: (e: ReactDragEvent) => {
+      // 帯の中の要素の間を移るたびには消さない。帯の外へ出たときだけ
+      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false);
+    },
+    onDrop: (e: ReactDragEvent) => {
       setDropping(false);
-      if (!hasFiles(e) || e.defaultPrevented) return;
+      if (!hasFiles(e)) return;
       e.preventDefault();
-      if (busyRef.current) return;
-      void attachRef.current(Array.from(e.dataTransfer!.files));
-    };
-    window.addEventListener('dragover', over);
-    window.addEventListener('dragleave', leave);
-    window.addEventListener('drop', drop);
-    return () => {
-      if (quiet) clearTimeout(quiet);
-      window.removeEventListener('dragover', over);
-      window.removeEventListener('dragleave', leave);
-      window.removeEventListener('drop', drop);
-    };
-  }, []);
+      if (!busy) void attach(Array.from(e.dataTransfer.files));
+    },
+  };
   // 音声の対話（第10.5.5節）
   const [call, setCall] = useState<VoiceCall | null>(null);
   /*
@@ -1298,7 +1280,7 @@ function SecretaryBar({ lookups, avatar, captions, onResult, onVoice }: {
   }
 
   return (
-    <div className="secretary">
+    <div className={`secretary${dropping ? ' is-dropping' : ''}`} {...dropProps}>
       {/* アバターが音声の入口（仕様書 第6.1.3節）。帯の高さいっぱいに置く */}
       <button
         className={`secretary-avatar${call ? ' on' : ''}`}

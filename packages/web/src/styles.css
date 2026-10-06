@@ -395,7 +395,8 @@ body.resizing { cursor: col-resize; user-select: none; }
   line-height: calc(1.6 * var(--line-scale)); min-height: 3.2em; max-height: 180px; overflow-y: auto; padding: calc(2px * var(--space-scale)) 0;
 }
 .secretary-input textarea:focus { outline: none; }
-/* ファイルを画面へ持ってきている間（離すと秘書に渡す。第10.10.2節） */
+/* ファイルを秘書の帯へ持ってきている間（離すと秘書に渡す。帯の中だけ。第10.10.2節） */
+.secretary.is-dropping { background: var(--accent-soft); }
 .secretary-input.is-dropping { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft, transparent); }
 
 /* 操作はアイコンにする。言葉は重ねたときに出す */
