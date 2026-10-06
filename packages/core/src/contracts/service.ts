@@ -17,7 +17,7 @@ import type { LlmProvider } from '../llm/provider.js';
 import type { FileStore } from '../files/store.js';
 import type { DriveConnector } from '../connectors/types.js';
 import { fileToText, type OcrFn } from '../files/to-text.js';
-import { loadFile } from '../files/service.js';
+import { loadFile, saveFile } from '../files/service.js';
 import { dateIn } from '../cards/service.js';
 import { silentLogger, type Logger } from '../log/logger.js';
 import { addDays, addMonths, kindOf, noticeDaysOf, noticeDeadline, readContract } from './extract.js';
@@ -43,6 +43,12 @@ export interface ContractServiceDeps {
   reviewFile?(tenantId: string, userId: string, runId: string): Promise<string | null>;
   /** 本人がいちばん新しく行った契約書チェックの実行の ID */
   latestReview?(tenantId: string, userId: string): Promise<string | null>;
+  /**
+   * 契約書チェックを起こす（更新の前に見直す。第38.18節）。本人が契約書チェックを使えなければ `null`。
+   *
+   * @returns 実行の ID
+   */
+  reviewStarter?(tenantId: string, userId: string, fileId: string): Promise<string | null>;
   logger?: Logger;
 }
 
@@ -346,6 +352,45 @@ export class ContractService {
     return { name: c.driveFileName || got.file.name, mimeType: got.mimeType, bytes: got.bytes };
   }
 
+  // ---- 段 2（第38.18節） ---------------------------------------------------------------------
+
+  /**
+   * 名刺管理の会社と同じ相手の契約（名刺の詳細に並べる）。株式会社などの言葉と空白を除いて、どちらかがもう一方を含めば同じとみなす。
+   *
+   * @param company 名刺の会社名（2 字に満たなければ何も返さない）
+   */
+  async byCompany(who: ContractViewer, company: string): Promise<Contract[]> {
+    const norm = (s: string) => s.normalize('NFKC').replace(/株式会社|有限会社|合同会社|合資会社|合名会社|一般社団法人|一般財団法人|医療法人|\(株\)|\(有\)|㈱|㈲|\s/g, '').toLowerCase();
+    const key = norm(company);
+    if (key.length < 2) return [];
+    const names = await this.names(who.tenantId);
+    return (await this.deps.store.list(who.tenantId, { status: 'all' }))
+      .filter((c) => { const p = norm(c.party); return p.length >= 2 && (p.includes(key) || key.includes(p)); })
+      .map((c) => this.view(c, names));
+  }
+
+  /**
+   * 契約書チェックで見直す（更新の前に。第38.18節）。ドライブの契約書を、頼んだ本人のファイルとして M2Office に写し、契約書チェックを起こす。
+   *
+   * @returns 実行の ID か、始められない理由
+   */
+  async startReview(who: ContractViewer, id: string): Promise<{ runId: string } | { error: string }> {
+    if (!this.deps.reviewStarter) return { error: '契約書チェックは使えません' };
+    const f = await this.openFile(who, id);
+    if ('error' in f) return f;
+    const ext = (/\.([a-z0-9]+)$/i.exec(f.name)?.[1] ?? '').toLowerCase();
+    const kind = f.mimeType === 'application/pdf' || ext === 'pdf' ? 'pdf'
+      : ext === 'docx' || f.mimeType.includes('wordprocessingml') ? 'docx'
+        : f.mimeType === 'image/png' || ext === 'png' ? 'png'
+          : f.mimeType === 'image/jpeg' || ext === 'jpg' || ext === 'jpeg' ? 'jpeg' : null;
+    if (!kind) return { error: 'この形式の契約書は、契約書チェックで読めません（PDF・Word・写真）' };
+    const saved = await saveFile(this.deps.repo, this.deps.files, { tenantId: who.tenantId, ownerUserId: who.userId, name: f.name, kind, bytes: f.bytes, origin: 'upload', runId: null });
+    const runId = await this.deps.reviewStarter(who.tenantId, who.userId, saved.id);
+    if (!runId) return { error: '契約書チェックを使えません（拡張機能の「契約書チェック」を入れていないか、利用範囲の外です）' };
+    await this.audit(who, 'contract.review', id, {});
+    return { runId };
+  }
+
   // ---- 期限の見張り ------------------------------------------------------------------------
 
   /**
@@ -431,8 +476,10 @@ export class ContractService {
             const due = CONTRACT_NOTICE_DAYS_BEFORE.filter((d) => left >= 0 && left <= d && !sent.has(`notice:${d}`));
             if (due.length) {
               const rule = c.noticeRule ? `\n${c.noticeRule}` : '';
+              // 更新の前に見直す提案（契約書がドライブにあれば、契約の画面から契約書チェックを始められる。第38.18節）
+              const review = c.driveFileId ? '\n更新するか迷うときは、契約の画面の「契約書チェックで見直す」で、いまの契約書を見直せます。' : '';
               await this.tell(tenantId, c, `${label}: 解約の申し出の期限まであと ${left} 日（${md(c.noticeDeadline)}）`,
-                `更新するなら何もしなくてかまいません。やめるなら ${c.noticeDeadline} までに相手に申し出てください（秘書に「解約の申し出の文を書いて」と頼めます）。${rule}`, now);
+                `更新するなら何もしなくてかまいません。やめるなら ${c.noticeDeadline} までに相手に申し出てください（秘書に「解約の申し出の文を書いて」と頼めます）。${rule}${review}`, now);
               add.push(...due.map((d) => `notice:${d}`));
               notified += 1;
             }

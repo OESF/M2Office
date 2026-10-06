@@ -69,6 +69,9 @@ export function contractsRoute(deps: AppDeps) {
     return 'error' in r ? c.json(r, 400) : c.json(r, 201);
   });
 
+  /** 名刺管理の会社と同じ相手の契約（`name`: 会社名。名刺の詳細に並べる。第38.18節）。 */
+  app.get('/by-company', async (c) => c.json({ items: await service.byCompany(who(c), (c.req.query('name') ?? '').slice(0, 100)) }));
+
   app.get('/:id', async (c) => {
     const id = c.req.param('id');
     const r = ID.test(id) ? await service.get(who(c), id) : null;
@@ -93,6 +96,14 @@ export function contractsRoute(deps: AppDeps) {
   });
 
   /** 契約書を開く（置き場をつないだ管理者の許可で、ドライブから読んで返す。第38.7節）。 */
+  /** 契約書チェックで見直す（ドライブの契約書で契約書チェックを始める。第38.18節）。 */
+  app.post('/:id/review', async (c) => {
+    const id = c.req.param('id');
+    if (!ID.test(id)) return c.json({ error: '契約が見つかりません' }, 404);
+    const r = await service.startReview(who(c), id);
+    return 'error' in r ? c.json(r, r.error.includes('見つかりません') ? 404 : 400) : c.json(r, 201);
+  });
+
   app.get('/:id/file', async (c) => {
     const id = c.req.param('id');
     if (!ID.test(id)) return c.json({ error: '契約が見つかりません' }, 404);

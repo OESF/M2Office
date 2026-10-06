@@ -318,3 +318,53 @@ test('ツール: 使えない人には使えないと答え、台帳を引き・
   const noFile = await tool('contracts.register').invoke({}, ctx(true)) as { available: boolean; reason: string };
   assert.equal(noFile.available, false);
 });
+
+test('段 2: 名刺の会社名で、株式会社などを除いて同じ相手の契約を引く', async () => {
+  const s = setup();
+  await s.service.create(u1, { party: '株式会社ベータ保守', title: 'サーバー保守契約' });
+  await s.service.create(u1, { party: 'ガンマ商事株式会社', title: '秘密保持契約書' });
+  assert.deepEqual((await s.service.byCompany(u1, 'ベータ保守')).map((c) => c.party), ['株式会社ベータ保守']);
+  assert.deepEqual((await s.service.byCompany(u1, '(株)ベータ保守')).map((c) => c.party), ['株式会社ベータ保守']);
+  assert.deepEqual((await s.service.byCompany(u1, 'ガンマ商事')).map((c) => c.party), ['ガンマ商事株式会社']);
+  assert.deepEqual(await s.service.byCompany(u1, '株式会社'), []);
+  assert.deepEqual(await s.service.byCompany({ tenantId: 't2', userId: 'u1' }, 'ベータ保守'), []);
+});
+
+test('段 2: 契約書チェックで見直す（ドライブの契約書を本人のファイルに写して起こす）。期限の知らせに見直しを添える', async () => {
+  const s = setup();
+  await s.service.connectStorage(boss);
+  const started: { userId: string; fileId: string }[] = [];
+  const service = new ContractService({
+    ...s.service.deps,
+    reviewStarter: async (_t, userId, fileId) => { started.push({ userId, fileId }); return 'run-review-1'; },
+  });
+  const nda = SAMPLE.replace('サーバー保守契約書', '秘密保持契約書');
+  const r = await service.importFile(u1, await s.upload('u1', nda, 'NDA.csv'));
+  assert.ok(!('error' in r));
+  // CSV は契約書チェックで読めない形なので断る
+  const csv = await service.startReview(u1, r.contract.id);
+  assert.ok('error' in csv);
+  assert.match(csv.error, /PDF・Word・写真/);
+  // PDF の契約書なら写して起こす
+  const pdf = await service.importFile(u1, await s.upload('u1', nda.replace('2027年3月15日', '2027年3月16日'), '契約書.pdf'));
+  assert.ok(!('error' in pdf));
+  const ok = await service.startReview({ tenantId: 't1', userId: 'u2' }, pdf.contract.id);
+  assert.deepEqual(ok, { runId: 'run-review-1' });
+  assert.equal(started[0]!.userId, 'u2');
+  assert.match(started[0]!.fileId, /^f-/);
+  assert.ok(s.audits.some((a) => a.action === 'contract.review'));
+  // 契約書チェックを使えない人には始めない
+  const none = new ContractService({ ...s.service.deps, reviewStarter: async () => null });
+  assert.ok('error' in (await none.startReview(u1, pdf.contract.id)));
+  // ドライブに契約書の無い契約は見直せない
+  const manual = await service.create(u1, { party: '株式会社イプシロン', title: '業務委託契約', startOn: '2027-01-01', endOn: '2027-12-31', autoRenew: true, noticeDays: 30, renewMonths: 12 });
+  assert.ok(!('error' in manual));
+  assert.ok('error' in (await service.startReview(u1, manual.contract.id)));
+  // ドライブに契約書がある契約の申し出の期限の知らせに、見直しを添える
+  await service.tick(at('2027-11-03'));
+  const notice = s.notes.find((n) => /株式会社ベータ保守の秘密保持/.test(n.title) && /解約の申し出の期限/.test(n.title));
+  assert.ok(notice, '申し出の期限の 60 日前の知らせが届く');
+  assert.match(notice.body, /契約書チェックで見直す/);
+  const plain = s.notes.find((n) => /株式会社イプシロン/.test(n.title));
+  assert.ok(plain && !/契約書チェックで見直す/.test(plain.body));
+});

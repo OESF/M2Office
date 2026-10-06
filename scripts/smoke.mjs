@@ -6192,6 +6192,12 @@ console.log('\n■ 77. 契約の管理（入り切り・手で入れる・期限
       const imp = await call('a', '/v1/contracts/import', { method: 'POST', body: JSON.stringify({ fileId: 'f-none' }) }, 'member');
       imp.status === 400 ? ok('見つからないファイルからは入れない') : ng(`無いファイルから入った（${imp.status}）`);
 
+      // 段 2（第38.18節）: 名刺の会社名で引く・契約書が無ければ見直しを始めない
+      const byCompany = await call('a', `/v1/contracts/by-company?name=${encodeURIComponent('見本保守（smoke）')}`, {}, 'member');
+      const review = await call('a', `/v1/contracts/${c.id}/review`, { method: 'POST', body: '{}' }, 'member');
+      byCompany.status === 200 && byCompany.body.items.some((x) => x.id === c.id) && review.status === 400 && /置いていません/.test(review.body.error ?? '')
+        ? ok('名刺の会社名（株式会社などを除く）で契約を引け、ドライブに契約書の無い契約は見直しを始めない') : ng('段 2 の口が違う', JSON.stringify({ by: byCompany.body, review: review.body }));
+
       await call('b', '/v1/admin/extensions/contracts/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
       const other = await call('b', `/v1/contracts/${c.id}`, {}, 'member');
       const otherList = await call('b', '/v1/contracts', {}, 'member');

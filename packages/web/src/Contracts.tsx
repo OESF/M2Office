@@ -61,6 +61,7 @@ function ContractList({ onOpen, changeKey }: { onOpen: (id: string) => void; cha
   const [note, setNote] = useState<Note>(null);
   const [error, setError] = useState<string | null>(null);
   const [manual, setManual] = useState(false);
+  const [progress, setProgress] = useState<string | null>(null);
   const file = useRef<HTMLInputElement>(null);
 
   const load = useCallback(() => {
@@ -71,29 +72,39 @@ function ContractList({ onOpen, changeKey }: { onOpen: (id: string) => void; cha
   useEffect(() => { const t = setTimeout(load, q ? 250 : 0); return () => clearTimeout(t); }, [load, q]);
   useEffect(() => { if (changeKey) load(); }, [changeKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const importFile = async (f: File) => {
+  /** 契約書を入れる（いくつも選べば、1 つずつ順に読んで入れる。今ある契約書をまとめて台帳にする。第38.18節）。 */
+  const importFiles = async (files: File[]) => {
     setBusy(true);
     setNote(null);
-    try {
-      const up = await api.uploadFile(f);
-      const r = await api.contracts.importFrom({ fileId: up.id });
-      const unknown = r.contract.unknown.map((u) => CONTRACT_UNKNOWN_LABELS[u]);
-      setNote({ kind: 'ok', text: `${r.contract.party || '相手不明'}の${CONTRACT_KIND_LABELS[r.contract.kind]}を入れました。${unknown.length ? `${unknown.join('・')}を読めなかったので確かめてください。` : ''}${r.fileNote ?? ''}` });
+    const done: string[] = [];
+    const failed: string[] = [];
+    let last = '';
+    for (const [i, f] of files.entries()) {
+      if (files.length > 1) setProgress(`${i + 1} / ${files.length} 件目を読んでいます…`);
+      try {
+        const up = await api.uploadFile(f);
+        const r = await api.contracts.importFrom({ fileId: up.id });
+        const unknown = r.contract.unknown.map((u) => CONTRACT_UNKNOWN_LABELS[u]);
+        last = `${r.contract.party || '相手不明'}の${CONTRACT_KIND_LABELS[r.contract.kind]}を入れました。${unknown.length ? `${unknown.join('・')}を読めなかったので確かめてください。` : ''}${r.fileNote ?? ''}`;
+        done.push(f.name);
+      } catch (e) {
+        failed.push(`${f.name}（${describeError(e, '入れられませんでした')}）`);
+      }
       load();
-    } catch (e) {
-      setNote({ kind: 'error', text: describeError(e, '入れられませんでした') });
-    } finally {
-      setBusy(false);
     }
+    setProgress(null);
+    setBusy(false);
+    if (files.length === 1) setNote(failed.length ? { kind: 'error', text: failed[0]! } : { kind: 'ok', text: last });
+    else setNote({ kind: failed.length ? 'error' : 'ok', text: `${done.length} 件を入れました。${failed.length ? `入れられなかったもの: ${failed.join('、')}` : '読めなかった項目は「確かめて」の印で出ます。'}` });
   };
 
   const shown = (items ?? []).filter((c) => (status === 'all' ? true : status === 'live' ? c.status !== 'ended' : c.status === status));
   return (
     <div className="contracts">
       <div className="row wrap contracts-entry">
-        <button className="btn" disabled={busy} onClick={() => file.current?.click()}>{busy ? '読んでいます…' : '契約書を入れる'}</button>
-        <input ref={file} type="file" hidden accept="application/pdf,image/png,image/jpeg,.docx"
-          onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void importFile(f); }} />
+        <button className="btn" disabled={busy} onClick={() => file.current?.click()}>{busy ? progress ?? '読んでいます…' : '契約書を入れる'}</button>
+        <input ref={file} type="file" hidden multiple accept="application/pdf,image/png,image/jpeg,.docx"
+          onChange={(e) => { const fs = Array.from(e.target.files ?? []).slice(0, 30); e.target.value = ''; if (fs.length) void importFiles(fs); }} />
         <button className={manual ? 'btn small' : 'btn ghost small'} onClick={() => setManual(!manual)}>手で入れる</button>
         <NoteText note={note} />
       </div>
@@ -173,6 +184,7 @@ function ManualForm({ onDone }: { onDone: (id: string) => void }) {
 /** 1 件。項目はその場で直す（欄を離れると保存）。 */
 function ContractView({ id, onBack, onOpen, changeKey, userId }: { id: string; onBack: () => void; onOpen: (id: string) => void; changeKey: string; userId: string }) {
   const [c, setC] = useState<Contract | null>(null);
+  const [reviewRun, setReviewRun] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<Note>(null);
   const load = useCallback(() => {
@@ -235,6 +247,12 @@ function ContractView({ id, onBack, onOpen, changeKey, userId }: { id: string; o
           ? <a className="btn ghost small" href={api.contracts.fileUrl(c.id)} target="_blank" rel="noopener noreferrer">契約書を開く</a>
           : <span className="small muted">契約書はドライブに置いていません</span>}
         {c.reviewRunId && <a className="link small" href={`/runs/${encodeURIComponent(c.reviewRunId)}`}>契約書チェックの結果</a>}
+        {/* 更新の前に見直す（ドライブの契約書で契約書チェックを始める。第38.18節） */}
+        {c.driveFileId && c.status !== 'ended' && (
+          reviewRun
+            ? <a className="link small" href={`/runs/${encodeURIComponent(reviewRun)}`}>見直しを始めました（結果を開く）</a>
+            : <button className="btn ghost small" onClick={() => api.contracts.review(c.id).then((r) => setReviewRun(r.runId)).catch((e) => setNote({ kind: 'error', text: describeError(e, '契約書チェックを始められませんでした') }))}>契約書チェックで見直す</button>
+        )}
         {c.previousId && <button className="link small" onClick={() => onOpen(c.previousId!)}>前の版</button>}
         {c.status === 'active' && c.autoRenew && <button className="btn ghost small" onClick={() => save({ status: 'cancel_requested' }, '解約を申し出た、にしました。期限の知らせは止まります')}>解約を申し出た</button>}
         {c.status === 'cancel_requested' && <button className="btn ghost small" onClick={() => save({ status: 'active' }, '有効に戻しました')}>有効に戻す</button>}

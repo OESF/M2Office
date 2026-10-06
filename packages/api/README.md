@@ -302,6 +302,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/contracts/import` | 契約書から入れる（`fileId`: 上げたファイルか、`runId`: 契約書チェックの実行。AI が項目を取り出し、期限を計算し、ドライブの置き場に置く） |
 | `GET` ／ `PATCH` ／ `DELETE /v1/contracts/:id` ／ `GET /v1/contracts/:id/file` | 1 件 ／ 直す（日付や決まりを直すと期限を計算し直す）／ 削除（入れた人と管理者）／ 契約書を開く（置き場をつないだ管理者の許可でドライブから読む） |
 | `PUT /v1/admin/extensions/contracts/storage` | 管理者: 契約書の置き場（Google ドライブのフォルダ）をつなぐ・つなぎ直す |
+| `GET /v1/contracts/by-company?name=` ／ `POST /v1/contracts/:id/review` | 名刺管理の会社と同じ相手の契約（第38.18節）／ 契約書チェックで見直す（ドライブの契約書を本人のファイルに写して契約書チェックを起こす。実行の ID を返す） |
 | `GET /v1/reservations?from=&to=` ／ `GET /v1/reservations/mine` | 予約（仕様書 第37章）: 期間（15 日まで）の予約と予約できるもの・本人が管理者か ／ 本人のこれからの予約 |
 | `POST /v1/reservations` ／ `PATCH` ／ `DELETE /v1/reservations/:id` ／ `POST /v1/reservations/:id/finish` | 予約する（同じものの時間が重なれば 409 と `conflict`: 使っている人と時間・次に空く時間・同じ種類で空いているほかのもの）／ 変える（本人と管理者）／ 取り消す ／ 早く終わったので終わりをいまにする。予約した人の Google カレンダーの予定も入れる・直す・消す |
 | `GET` ／ `POST /v1/reservations/items` ／ `PATCH /v1/reservations/items/:id` ／ `PUT /v1/reservations/items/order` | 予約できるもの（止めたものも含む）／ 足す（管理者。種類を言わなければ名前から決める）／ 直す・止める（`status`）／ 並べ替え |

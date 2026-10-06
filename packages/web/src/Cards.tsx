@@ -9,7 +9,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import type { CardCorners, CardFields, ContactPhone, ContactScope, PhoneKind } from '@m2office/shared';
+import { CONTRACT_KIND_LABELS, CONTRACT_STATUS_LABELS, type CardCorners, type CardFields, type Contract, type ContactPhone, type ContactScope, type PhoneKind } from '@m2office/shared';
 import { ContactInquiries } from './Inquiries.js';
 import { api, describeError, type CardDetail, type CardList, type CardMeetings, type CardSummary } from './api.js';
 import { BulkMailView } from './BulkMail.js';
@@ -42,7 +42,7 @@ const PHONE_LABELS: Record<PhoneKind, string> = { main: '代表', direct: '直�
  * @param onOpen 詳細を開く・一覧に戻る（URL を合わせる）
  * @param mailer メールの開き方（本人のアカウントの Gmail か `mailto:`）
  */
-export function Cards({ contactId, onOpen, mailer, admin = false, onApprovals, onInquiry }: {
+export function Cards({ contactId, onOpen, mailer, admin = false, onApprovals, onInquiry, onContract }: {
   contactId: string | null;
   onOpen: (contactId: string | null) => void;
   mailer: Mailer;
@@ -52,10 +52,12 @@ export function Cards({ contactId, onOpen, mailer, admin = false, onApprovals, o
   onApprovals?: () => void;
   /** 問い合わせを開く（問い合わせの記録を使えるときだけ渡す。第33.6.1節）。 */
   onInquiry?: (inquiryId: string) => void;
+  /** 契約を開く（契約の管理を使える人だけ。会社の詳細に、その会社との契約を並べる。第38.18節）。 */
+  onContract?: (contractId: string) => void;
 }) {
   // まとめてのメールの画面（第27.9.1節）。一覧で選んだ名刺をはじめの宛先にする
   const [bulk, setBulk] = useState<CardSummary[] | null>(null);
-  if (contactId) return <CardDetailView id={contactId} onBack={() => onOpen(null)} onOpen={onOpen} mailer={mailer} {...(onInquiry ? { onInquiry } : {})} />;
+  if (contactId) return <CardDetailView id={contactId} onBack={() => onOpen(null)} onOpen={onOpen} mailer={mailer} {...(onInquiry ? { onInquiry } : {})} {...(onContract ? { onContract } : {})} />;
   if (bulk) return <BulkMailView initial={bulk} onClose={() => setBulk(null)} onSubmitted={() => { setBulk(null); onApprovals?.(); }} />;
   return <CardListView onOpen={onOpen} admin={admin} onBulk={setBulk} />;
 }
@@ -418,8 +420,8 @@ function CardThumb({ cardId, rotation, corners = null, kind }: { cardId: string 
 }
 
 /** 詳細。画像の横に氏名と操作、その下に項目を狭い幅で並べる。項目はその場で直せる（第27.8節）。 */
-function CardDetailView({ id, onBack, onOpen, mailer, onInquiry }: {
-  id: string; onBack: () => void; onOpen: (id: string | null) => void; mailer: Mailer; onInquiry?: (inquiryId: string) => void;
+function CardDetailView({ id, onBack, onOpen, mailer, onInquiry, onContract }: {
+  id: string; onBack: () => void; onOpen: (id: string | null) => void; mailer: Mailer; onInquiry?: (inquiryId: string) => void; onContract?: (contractId: string) => void;
 }) {
   const [d, setD] = useState<CardDetail | null>(null);
   const [meetings, setMeetings] = useState<CardMeetings | null>(null);
@@ -565,6 +567,7 @@ function CardDetailView({ id, onBack, onOpen, mailer, onInquiry }: {
       {meetings && !meetings.available && <p className="small muted">{meetings.reason}</p>}
 
       {onInquiry && <ContactInquiries contactId={id} onOpen={onInquiry} />}
+      {onContract && c.company && <CompanyContracts company={c.company} onOpen={onContract} />}
       {d.bulkMails.length > 0 && (
         <>
           <h3>まとめてのメール</h3>
@@ -744,4 +747,24 @@ function Phones({ phones, onSave }: { phones: ContactPhone[]; onSave: (p: Contac
 function shortDate(v: string): string {
   const d = new Date(v.length === 10 ? `${v}T00:00:00+09:00` : v);
   return d.toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: 'numeric', day: 'numeric' });
+}
+
+/** その会社との契約（契約の管理の台帳から。無ければ何も出さない。第38.18節）。 */
+function CompanyContracts({ company, onOpen }: { company: string; onOpen: (contractId: string) => void }) {
+  const [items, setItems] = useState<Contract[] | null>(null);
+  useEffect(() => { api.contracts.byCompany(company).then((r) => setItems(r.items)).catch(() => setItems(null)); }, [company]);
+  if (!items || items.length === 0) return null;
+  return (
+    <section>
+      <h3>契約</h3>
+      <ul className="card-exchanges">
+        {items.map((k) => (
+          <li key={k.id}>
+            <button className="link" onClick={() => onOpen(k.id)}>{CONTRACT_KIND_LABELS[k.kind]}{k.title ? `（${k.title}）` : ''}</button>
+            <span className="small muted"> {CONTRACT_STATUS_LABELS[k.status]}{k.endOn ? `・終わり ${k.endOn.replace(/-/g, '/')}` : ''}{k.autoRenew && k.noticeDeadline && k.status === 'active' ? `・解約の申し出 ${k.noticeDeadline.replace(/-/g, '/')}` : ''}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
 }

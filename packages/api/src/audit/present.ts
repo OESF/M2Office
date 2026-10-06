@@ -223,6 +223,7 @@ const ACTION_LABELS: Record<string, string> = {
   'contract.open': '契約書を開いた',
   'contract.storage': '契約書の置き場をつないだ',
   'contract.renewed': '契約を自動で次の期間に進めた',
+  'contract.review': '契約書チェックで見直しを始めた',
   'reservation.item.create': '予約できるものを足した',
   'reservation.item.update': '予約できるものを直した',
   'reservation.item.stop': '予約できるものを止めた',

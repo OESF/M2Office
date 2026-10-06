@@ -440,6 +440,13 @@ export function buildDeps(): AppDeps {
         const rows = await repo.listRunsWithJobs(tenantId, { limit: 50, requestedBy: userId });
         return rows.find((r) => r.job.agentId === CONTRACT_REVIEW_AGENT_ID && r.run.status === 'completed')?.run.id ?? null;
       },
+      // 更新の前に契約書チェックで見直す（第38.18節）。本人が使える契約書チェックだけを起こす
+      reviewStarter: async (tenantId, userId, fileId) => {
+        const def = (await agentsFor(tenantId, userId)).find((a) => a.id === CONTRACT_REVIEW_AGENT_ID);
+        const key = def ? fileInputKey(def) : null;
+        if (!def || !key) return null;
+        return (await enqueueJob(repo, { tenantId, requestedBy: userId, def, input: { [key]: fileId }, origin: 'menu', actor: { type: 'user', id: userId } })).runId;
+      },
     }),
     access: contractsAccess(repo),
   };

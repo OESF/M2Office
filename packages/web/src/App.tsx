@@ -688,7 +688,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
               <Cards contactId={view.contactId} onOpen={(contactId) => setView({ kind: 'cards', contactId })}
                 mailer={{ email: me.user.email, google: me.workspaceSource === 'google' }} admin={me.user.roles.includes('admin')}
                 onApprovals={() => { void refresh(); setView({ kind: 'approvals' }); }}
-                {...(me.inquiries ? { onInquiry: (inquiryId: string) => setView({ kind: 'inquiries', inquiryId }) } : {})} />
+                {...(me.inquiries ? { onInquiry: (inquiryId: string) => setView({ kind: 'inquiries', inquiryId }) } : {})}
+                {...(me.contracts ? { onContract: (contractId: string) => setView({ kind: 'contracts', contractId }) } : {})} />
             </>
           )}
           {view.kind === 'inventory' && (

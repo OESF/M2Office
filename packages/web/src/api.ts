@@ -1336,6 +1336,10 @@ export const api = {
     remove: (id: string) => call<{ ok: true }>(`/contracts/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     /** 契約書を開く URL（M2Office がドライブから読んで返す）。 */
     fileUrl: (id: string) => `/v1/contracts/${encodeURIComponent(id)}/file`,
+    /** 名刺管理の会社と同じ相手の契約（第38.18節）。 */
+    byCompany: (name: string) => call<{ items: Contract[] }>(`/contracts/by-company?${new URLSearchParams({ name })}`),
+    /** 契約書チェックで見直す（ドライブの契約書でチェックを始める）。 */
+    review: (id: string) => call<{ runId: string }>(`/contracts/${encodeURIComponent(id)}/review`, { method: 'POST', body: '{}' }),
   },
   /** 会員とポイント（内蔵の拡張。仕様書 第40章）。 */
   members: {
