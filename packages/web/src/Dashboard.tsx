@@ -350,7 +350,7 @@ function Agents({ data, board = false }: { data: DashboardLive; board?: boolean 
         業務の状態{' '}
         {!board && (
           <HelpTip article="admin-dashboard">
-            業務を、拡張機能や分野ごとにまとめて、いま何件を受け持っているかを出します。どれも 0 なら「待機」です。
+            業務を仕事の分野ごとにまとめて、いま何件を受け持っているかを出します。どれも 0 なら「待機」です。
           </HelpTip>
         )}
       </h3>

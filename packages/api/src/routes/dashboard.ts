@@ -15,7 +15,7 @@ import {
   type HealthView, type TenantExtensions,
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
-import { agentGroup } from '../agent-group.js';
+import { agentArea } from '../agent-group.js';
 import { requireRole, type AppEnv } from '../middleware/tenant.js';
 
 /** 秘書と会話中の判定に使う監査ログの種類（第6.7.4.1節）。 */
@@ -401,7 +401,7 @@ export function dashboardRoute(deps: AppDeps) {
       const busy = byAgent.get(def.id) ?? { running: 0, awaiting: 0, queued: 0 };
       const t = todayByAgent.get(def.id) ?? { runs: 0, failed: 0 };
       return {
-        agentId: def.id, name: def.name, face: faces.get(def.id) ?? agentFace(def), group: agentGroup(view, def),
+        agentId: def.id, name: def.name, face: faces.get(def.id) ?? agentFace(def), group: agentArea(view, def),
         ...busy, todayRuns: t.runs, todayFailed: t.failed,
       };
     });

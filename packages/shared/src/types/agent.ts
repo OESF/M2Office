@@ -7,6 +7,21 @@
  * @see 仕様書 第9.2節 エージェント定義のスキーマ
  */
 
+import { ANNOUNCEMENTS_EXTENSION_ID } from './announcements.js';
+import { CARDS_EXTENSION_ID } from './cards.js';
+import { COMPETITORS_EXTENSION_ID } from './competitors.js';
+import { CONTRACTS_EXTENSION_ID } from './contracts.js';
+import { HR_EXTENSION_ID } from './hr.js';
+import { INQUIRIES_EXTENSION_ID } from './inquiries.js';
+import { INVENTORY_EXTENSION_ID } from './inventory.js';
+import { MEMBERS_EXTENSION_ID } from './members.js';
+import { PRINT_DESIGNS_EXTENSION_ID } from './print-designs.js';
+import { RESERVATIONS_EXTENSION_ID } from './reservations.js';
+import { SIGNAGE_EXTENSION_ID } from './signage.js';
+import { SUBSIDIES_EXTENSION_ID } from './subsidies.js';
+import { WEB_COLUMNS_EXTENSION_ID } from './web-columns.js';
+import { WEB_REVIEW_EXTENSION_ID } from './web-review.js';
+
 /** ツールの危険度。承認の要否を決める（仕様書 第9.4節）。 */
 export const RISK_LEVELS = [
   'read',
@@ -271,3 +286,65 @@ export const AGENT_GROUP_LABELS: Readonly<Record<string, string>> = {
   document: '資料',
   knowledge: '知識と調べもの',
 };
+
+/** ダッシュボードの「業務の状態」の 1 つの囲みにまとめる分野（仕様書 第6.7.4.2.1節、ADR-0075）。 */
+export interface AgentArea {
+  id: string;
+  name: string;
+  /** 公式の業務の分野（エージェント定義の `category`） */
+  categories: readonly string[];
+  /** 拡張機能の ID（内蔵の拡張と公式の拡張機能） */
+  extensions: readonly string[];
+}
+
+/**
+ * ダッシュボードで業務をまとめる分野（運営が持つ。第 0.292.0 版）。
+ *
+ * @remarks
+ * オーナーが「いま何が行われているか」を一瞥でつかむための区切り。1 つの囲みに業務を詰め込みすぎない（目安は 6 業務まで）。
+ * ここに無い拡張機能（取り込んだスキルなど）の業務は、名前と説明から「調べもの」「資料の作成」に入れ（{@link agentAreaOf}）、
+ * どちらでもなければ、これまでどおりその拡張機能の囲み（ADR-0061）
+ */
+export const AGENT_AREAS: readonly AgentArea[] = [
+  { id: 'mail', name: 'メール', categories: ['mail'], extensions: [] },
+  { id: 'schedule', name: '予定と会議', categories: ['calendar', 'meeting'], extensions: [] },
+  { id: 'briefing', name: 'ブリーフ', categories: ['briefing'], extensions: [] },
+  { id: 'documents', name: '資料の作成', categories: ['document'], extensions: [] },
+  { id: 'research', name: '調べもの', categories: ['knowledge'], extensions: [] },
+  { id: 'cards', name: '名刺管理', categories: [], extensions: [CARDS_EXTENSION_ID] },
+  { id: 'customers', name: '問い合わせと会員', categories: [], extensions: [INQUIRIES_EXTENSION_ID, MEMBERS_EXTENSION_ID] },
+  { id: 'columns', name: 'コラムの作成', categories: [], extensions: [WEB_COLUMNS_EXTENSION_ID] },
+  { id: 'promotion', name: 'お知らせと販促', categories: [], extensions: [ANNOUNCEMENTS_EXTENSION_ID, PRINT_DESIGNS_EXTENSION_ID, SIGNAGE_EXTENSION_ID] },
+  { id: 'market', name: 'Webと競合の分析', categories: [], extensions: [WEB_REVIEW_EXTENSION_ID, COMPETITORS_EXTENSION_ID] },
+  {
+    id: 'admin', name: '契約と総務', categories: [],
+    // 契約書チェックは公式の拡張機能（jp.m2office.legal.contract-review）
+    extensions: [CONTRACTS_EXTENSION_ID, 'jp.m2office.legal.contract-review', RESERVATIONS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID],
+  },
+  { id: 'inventory', name: '在庫管理', categories: [], extensions: [INVENTORY_EXTENSION_ID] },
+  { id: 'hr', name: '人事・給与', categories: [], extensions: [HR_EXTENSION_ID] },
+];
+
+/** 調べものの業務とみなす言葉（取り込んだスキルの名前と説明から）。 */
+const RESEARCH_WORDS = /調べ|調査|リサーチ|尋ね|質問し|論文|文献|検索/;
+/** 資料の作成の業務とみなす言葉（名前から）。 */
+const DOCUMENT_WORDS = /資料|スライド|文書|表の作成|報告書/;
+
+/**
+ * 業務の分野を返す（純粋な関数）。
+ *
+ * @param extensionId 業務が入っている拡張機能の ID（公式の業務なら `null`）
+ * @param def 業務の名前と説明（分野の決まっていない拡張機能の業務を、言葉から「調べもの」「資料の作成」に入れる）
+ * @returns 分野の ID（`area:<id>`）と名前。どの分野にも入らなければ `null`
+ */
+export function agentAreaOf(category: string, extensionId: string | null, def?: { name: string; description: string }): { id: string; name: string } | null {
+  const view = (id: string) => { const a = AGENT_AREAS.find((x) => x.id === id)!; return { id: `area:${a.id}`, name: a.name }; };
+  const a = AGENT_AREAS.find((x) => (extensionId ? x.extensions.includes(extensionId) : x.categories.includes(category)));
+  if (a) return view(a.id);
+  if (!extensionId || !def) return null;
+  // 名前を先に見る（「スライドの作成」は Web で調べても資料の作成）。名前で決まらなければ説明を見る
+  if (RESEARCH_WORDS.test(def.name)) return view('research');
+  if (DOCUMENT_WORDS.test(def.name)) return view('documents');
+  if (RESEARCH_WORDS.test(def.description)) return view('research');
+  return null;
+}

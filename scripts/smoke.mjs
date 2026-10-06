@@ -748,12 +748,13 @@ console.log('\n■ 18. ダッシュボード');
   faces.every((n) => Number.isInteger(n) && n >= 1 && n <= 50) && new Set(faces).size === faces.length
     ? ok(`業務ごとに絵の番号を返す（${faces.join('・')}）`)
     : ng('絵の番号が不正か重なっている', JSON.stringify(faces));
-  // まとまり（第6.7.4.2.1節）: 拡張機能の業務はその拡張機能、公式の業務は分野で決まる
+  // まとまり（第6.7.4.2.1節）: 仕事の分野でまとめる（第 0.292.0 版、ADR-0075）
   const groupOf = (id) => states.find((a) => a.agentId === id)?.group;
   const cardsGroups = new Set(states.filter((a) => a.agentId.startsWith('business-cards:')).map((a) => a.group?.id));
-  states.every((a) => a.group?.id && a.group?.name) && cardsGroups.size === 1 && [...cardsGroups][0] === 'ext:business-cards'
+  states.every((a) => a.group?.id && a.group?.name) && cardsGroups.size === 1 && [...cardsGroups][0] === 'area:cards'
     && groupOf('inbox-triage')?.name === 'メール' && groupOf('reply-followup')?.id === groupOf('inbox-triage')?.id
-    && groupOf('slides')?.name === '資料'
+    && groupOf('morning-brief')?.name === 'ブリーフ' && groupOf('slides')?.name === '資料の作成'
+    && groupOf('knowledge-qa')?.name === '調べもの'
     ? ok(`業務ごとにまとまりを返す（${[...new Set(states.map((a) => a.group.name))].join('・')}）`)
     : ng('まとまりが違う', JSON.stringify(states.map((a) => [a.agentId, a.group])));
   // 忙しい順に並ぶ
