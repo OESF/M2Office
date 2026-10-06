@@ -182,6 +182,8 @@ export const calendarFreeBusy: Tool = {
  * @remarks
  * 危険度 `external-send`。招待は相手に届くため、承認の段の直後でしか呼べない。
  * 招く人が社内の人だけなら、その承認の段は自動で通る（仕様書 第9.4.0節・第9.5.3節）。
+ * `room` があれば、予定を作ったあとで、その時間に空いている会議室を予約して予定の場所に入れる（予約の段 2。第37.18節）。
+ * 予定を作るのは承認の後なので、承認されなかった会議の会議室は取らない。
  */
 export const calendarCreate: Tool = {
   name: 'calendar.create',
@@ -189,7 +191,7 @@ export const calendarCreate: Tool = {
   activityLabel: '予定を登録しています',
   helpText: '予定を登録し、参加者を招待します。社外の人を招くときは、承認のあとに行います',
   description: '予定を作成し、参加者を招待する',
-  args: { properties: { title: { type: 'string', description: '予定の題名' }, start: { type: 'string', description: '開始（ISO 形式）' }, end: { type: 'string', description: '終了（ISO 形式）' }, attendees: { type: 'array', description: '参加者のメールアドレス', items: { type: 'string', description: '要素' } } }, required: ['title', 'start', 'end'] },
+  args: { properties: { title: { type: 'string', description: '予定の題名' }, start: { type: 'string', description: '開始（ISO 形式）' }, end: { type: 'string', description: '終了（ISO 形式）' }, attendees: { type: 'array', description: '参加者のメールアドレス', items: { type: 'string', description: '要素' } }, room: { type: 'string', description: '会議室も取るときだけ。会議室の名前か「会議室」（どれでもよいとき）' } }, required: ['title', 'start', 'end'] },
   google: { scope: 'calendar.events', level: 'sensitive' },
   /** 招く人が社内の人だけかを確かめる（仕様書 第9.4.0節）。読むだけ。 */
   async prepare(args, ctx): Promise<PreparedCall> {
@@ -197,15 +199,44 @@ export const calendarCreate: Tool = {
     return { kind: 'ready', args, audience: await audienceOf(ctx, attendees) };
   },
   async invoke(args, ctx) {
+    const attendees = Array.isArray(args['attendees']) ? args['attendees'].map(String) : [];
     const res = await ctx.connector.calendar.create(principal(ctx), {
       title: str(args['title'], '打ち合わせ'),
       start: str(args['start']),
       end: str(args['end']),
-      attendees: Array.isArray(args['attendees']) ? args['attendees'].map(String) : [],
+      attendees,
     });
-    return { source: ctx.connector.sourceFor(ctx.tenantId), ...res };
+    const room = str(args['room']).trim();
+    const roomResult = room ? await bookRoom(ctx, res.eventId, { room, title: str(args['title'], '打ち合わせ'), start: str(args['start']), end: str(args['end']), people: attendees.length + 1 }) : null;
+    return { source: ctx.connector.sourceFor(ctx.tenantId), ...res, ...(roomResult ? { room: roomResult } : {}) };
   },
 };
+
+/**
+ * 会議の予定と一緒に会議室を取る（予約の段 2。第37.18節）。名前を言われればそれを、「会議室」なら定員が人数に近い空いている会議室を取り、
+ * 会議の予定の場所に入れる。予約の側ではカレンダーに予定を作らない（会議の予定がそのまま会議室の予定になる）。
+ *
+ * @returns 取れた会議室か、取れなかった理由（会議の予定はそのまま）
+ */
+async function bookRoom(ctx: ToolContext, eventId: string, m: { room: string; title: string; start: string; end: string; people: number }): Promise<{ booked: string } | { note: string }> {
+  const rsv = ctx.reservations;
+  if (!rsv || !(await rsv.access())) return { note: '予約を使っていないため、会議室は取っていません' };
+  const who = principal(ctx);
+  const items = (await rsv.service.items(who)).filter((i) => i.status === 'active');
+  const norm = (s: string) => s.normalize('NFKC').replace(/\s+/g, '').toLowerCase();
+  const named = items.find((i) => norm(i.name) === norm(m.room)) ?? items.find((i) => norm(m.room).includes(norm(i.name)));
+  const r = named
+    ? await rsv.service.book(who, { itemId: named.id, startAt: m.start, endAt: m.end, purpose: m.title }, { calendar: false })
+    : await rsv.service.pickAndBook(who, { kind: 'room', startAt: m.start, endAt: m.end, people: m.people, purpose: m.title }, { calendar: false });
+  if ('reservation' in r) {
+    const location = r.item.location ? `${r.item.name}（${r.item.location}）` : r.item.name;
+    await ctx.connector.calendar.update(who, { eventId, location }).catch(() => null);
+    return { booked: r.item.name };
+  }
+  if ('error' in r) return { note: `会議室は取れませんでした（${r.error}）` };
+  if ('conflict' in r) return { note: `${r.item.name}はその時間に予約があるため、会議室は取れませんでした` };
+  return { note: 'その時間に空いている会議室がないため、会議室は取れませんでした' };
+}
 
 /** 未完了のタスクを一覧する。 @remarks 危険度 `read`。 */
 export const tasksList: Tool = {

@@ -39,6 +39,8 @@ export const AG03_SCHEDULING: AgentDefinition = {
       },
       durationMin: { type: 'string', title: '所要時間（分）', examples: ['60'] },
       period: { type: 'string', title: '希望する期間', examples: ['来週の午後'] },
+      // 会議と一緒に会議室を取る（予約を使っている会社。第37.18節）
+      room: { type: 'string', title: '会議室（任意）', examples: ['会議室も取る', '会議室 A'] },
     },
   },
   tools: ['calendar.freebusy', 'calendar.create'],
@@ -81,7 +83,10 @@ export const AG03_SCHEDULING: AgentDefinition = {
       // この段で使えるツール（仕様書 第9.2.7節）。段の区切りを推論の行儀に頼らない
       tools: ['calendar.create'],
       label: '招待',
-      instruction: '承認された候補の第一案で予定を作成し、参加者を招待する。',
+      instruction: [
+        '承認された候補の第一案で予定を作成し、参加者を招待する。',
+        '会議室（room）が入っていれば、calendar.create の room に会議室の名前を入れる（「会議室も取る」のようにどれでもよいときは「会議室」）。結果の room に取れた会議室か取れなかった理由があれば、報告に添える。',
+      ].join('\n'),
     },
   ],
   constraints: [
@@ -108,6 +113,7 @@ export const AG03_SCHEDULING: AgentDefinition = {
       '招く人が社内の人だけなら、確認を待たずに第一案で招待します。社外の人が入るときだけ、あなたが確認します',
       '全員が空いている時間が無いときは、候補を作らずにお知らせします',
       '会社の営業日でない日（営業しない曜日・休みの祝日・お知らせで出した休業の期間）には、候補を出しません',
+      '予約を使っている会社では、「会議室も取って」と頼むと、決まった時間に空いている会議室を取って予定の場所に入れます',
     ],
     faq: [
       { q: '確認せずに招待が送られることはありますか', a: '社内の人だけなら、確認を待たずに送ります。社外の人を招くときは、必ずあなたの承認のあとに送ります' },

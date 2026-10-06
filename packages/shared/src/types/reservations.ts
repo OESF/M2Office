@@ -51,6 +51,8 @@ export interface Reservation {
   /** 予約した人の Google カレンダーの予定（入れられなかったら `null`） */
   calendarEventId: string | null;
   status: 'booked' | 'cancelled';
+  /** 繰り返しの予約の 1 回なら、その繰り返し（第37.18節） */
+  seriesId: string | null;
   createdBy: string;
   updatedBy: string;
   createdAt: string;
@@ -91,4 +93,46 @@ export interface ReservationConflict {
   nextFree: { startAt: string; endAt: string } | null;
   /** 同じ種類で、その時間に空いているほかのもの */
   others: { id: string; name: string; capacity: number | null }[];
+}
+
+/** 繰り返しの決まり（第37.18節）。毎週・隔週・毎月の第 n 何曜。 */
+export type ReservationRule = 'weekly' | 'biweekly' | 'monthly';
+
+/** 繰り返しの決まりの名前。 */
+export const RESERVATION_RULE_LABELS: Record<ReservationRule, string> = { weekly: '毎週', biweekly: '隔週', monthly: '毎月' };
+
+/** 曜日の名前（日曜が 0）。 */
+export const RESERVATION_WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'] as const;
+
+/** 繰り返しの予約（第37.18節）。 */
+export interface ReservationSeries {
+  id: string;
+  itemId: string;
+  userId: string;
+  purpose: string;
+  rule: ReservationRule;
+  /** 曜日（日曜が 0） */
+  weekday: number;
+  /** 毎月のとき、第何週か（1〜5。5 は最後の週） */
+  nth: number | null;
+  /** 始めと終わりの時刻（日本時間の HH:MM） */
+  startTime: string;
+  endTime: string;
+  /** 繰り返しの始めの日と終わりの日（終わりは任意。YYYY-MM-DD） */
+  startsOn: string;
+  endsOn: string | null;
+  status: 'active' | 'stopped';
+  /** ここまで 1 回ずつの予約を作った日 */
+  materializedUntil: string | null;
+  /** 重なって取れなかった日 */
+  skipped: string[];
+  createdBy: string;
+  createdAt: string;
+}
+
+/** 繰り返しの決まりを文にする（「毎週月曜 10:00〜11:00」「毎月第 2 火曜 …」）。 */
+export function reservationRuleText(s: Pick<ReservationSeries, 'rule' | 'weekday' | 'nth' | 'startTime' | 'endTime'>): string {
+  const day = `${RESERVATION_WEEKDAYS[s.weekday]}曜`;
+  const when = s.rule === 'monthly' ? `毎月${s.nth === 5 ? '最後の' : `第 ${s.nth ?? 1} `}${day}` : `${RESERVATION_RULE_LABELS[s.rule]}${day}`;
+  return `${when} ${s.startTime}〜${s.endTime}`;
 }

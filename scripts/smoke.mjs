@@ -6278,6 +6278,16 @@ console.log('\n■ 78. 予約（入り切り・予約できるもの・重なり
     const byAdmin = await call('a', `/v1/reservations/${first.body.reservation?.id}`, { method: 'DELETE' });
     byAdmin.status === 200 ? ok('管理者はほかの人の予約を取り消せる') : ng(`管理者が取り消せない（${byAdmin.status}）`);
 
+    // 繰り返しの予約（第37.18節）
+    const series = await call('a', '/v1/reservations/series', { method: 'POST', body: JSON.stringify({ itemId: itemB, rule: 'weekly', startsOn: day, startTime: '18:00', endTime: '19:00', endsOn: null, purpose: '定例' }) }, 'member');
+    const seriesInfo = series.body.series ? await call('a', `/v1/reservations/series/${series.body.series.id}`, {}, 'member') : { status: 0, body: {} };
+    series.status === 201 && series.body.booked >= 12 && /毎週.曜 18:00〜19:00/.test(seriesInfo.body.series?.ruleText ?? '')
+      ? ok(`毎週の繰り返しの予約は、90 日先までの回を作る（${series.body.booked} 回）`) : ng('繰り返しの予約が違う', JSON.stringify({ s: series.status, body: series.body, info: seriesInfo.body }).slice(0, 400));
+    const otherStop = series.body.series ? await call('a', `/v1/reservations/series/${series.body.series.id}`, { method: 'DELETE' }, 'member') : { status: 0 };
+    const seriesList = await call('a', `/v1/reservations?from=${encodeURIComponent(at('00:00'))}&to=${encodeURIComponent(new Date(Date.parse(at('00:00')) + 15 * 86_400_000).toISOString())}`, {}, 'member');
+    otherStop.status === 200 && !seriesList.body.reservations.some((r) => r.seriesId === series.body.series?.id)
+      ? ok('繰り返しを止めると、これからの回をまとめて取り消す') : ng('繰り返しを止められない', JSON.stringify({ stop: otherStop.status }));
+
     await call('b', '/v1/admin/extensions/reservations/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
     const otherItems = await call('b', '/v1/reservations/items', {}, 'member');
     const otherBook = await call('b', '/v1/reservations', { method: 'POST', body: JSON.stringify({ itemId: itemB, startAt: at('13:00'), endAt: at('14:00'), purpose: '' }) }, 'member');

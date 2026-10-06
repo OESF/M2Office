@@ -244,7 +244,7 @@
 | `web_review.select` | `property`: プロパティの名前か URL の一部、`site`: サイトの URL の一部 |
 | `announcements.publish` | `announcementId`（必須）: お知らせの ID |
 | `calendar.cancel` | `eventId`（必須）: 予定の ID |
-| `calendar.create` | `title`（必須）: 予定の題名、`start`（必須）: 開始（ISO 形式）、`end`（必須）: 終了（ISO 形式）、`attendees`: 参加者のメールアドレス |
+| `calendar.create` | `title`（必須）: 予定の題名、`start`（必須）: 開始（ISO 形式）、`end`（必須）: 終了（ISO 形式）、`attendees`: 参加者のメールアドレス、`room`: 会議室も取るときだけ。会議室の名前か「会議室」（どれでもよいとき） |
 | `calendar.update` | `eventId`（必須）: 予定の ID、`title`: 新しい題名（任意）、`start`: 新しい開始（ISO 形式。任意）、`end`: 新しい終了（任意）、`attendees`: 新しい参加者（任意） |
 | `chat.post` | `space`: スペースの名前（例: 営業部）か、スペースのリンク、`text`（必須）: 本文 |
 | `columns.place` | `columnId`（必須）: コラムの ID |

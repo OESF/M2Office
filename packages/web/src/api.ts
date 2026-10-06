@@ -22,7 +22,7 @@ import type { CardCorners,
   Inquiry, InquiryDetail, InquiryParty, InquiryTask, InquiryReply, InquiryMailSkipped, InquiryMonthStats, InquirySettings, InquiryFaqTopic,
   CompetitorOverview, CompetitorFact, CompetitorReport, CompetitorSettings,
   Announcement, AnnouncementDetail, AnnouncementPreview, AnnouncementRecipient, AnnouncementRecipientsRefined, AnnouncementSettings, AnnouncementTexts,
-  Contract, ContractSettings, ReservableItem, ReservableKind, Reservation, Subsidy, SubsidyProfile, SubsidyStatus, Member, MemberPoint, MemberReward, MemberSettings,
+  Contract, ContractSettings, ReservableItem, ReservableKind, Reservation, ReservationRule, ReservationSeries, Subsidy, SubsidyProfile, SubsidyStatus, Member, MemberPoint, MemberReward, MemberSettings,
   WebReviewCandidates, WebReviewReport, WebReviewReportBrief, WebReviewSettings, WebReviewStatus, WebReviewFinding, WebReviewFindingStatus, WebPageMetrics,
 } from '@m2office/shared';
 import { debugMode, recordCall } from './debug.js';
@@ -1389,6 +1389,12 @@ export const api = {
     change: (id: string, input: { itemId?: string; startAt?: string; endAt?: string; purpose?: string }) =>
       call<{ reservation: Reservation; calendar: 'added' | 'not-connected' | 'failed' }>(`/reservations/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(input) }),
     cancel: (id: string) => call<{ ok: true }>(`/reservations/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    /** 繰り返しの予約を作る（90 日先までの回。重なった日は飛ばす。第37.18節）。 */
+    createSeries: (input: { itemId: string; rule: ReservationRule; startsOn: string; startTime: string; endTime: string; endsOn: string | null; purpose: string }) =>
+      call<{ series: ReservationSeries; item: ReservableItem; booked: number; skipped: string[] }>('/reservations/series', { method: 'POST', body: JSON.stringify(input) }),
+    series: (id: string) => call<{ series: ReservationSeries & { ruleText: string; itemName: string; userName: string } }>(`/reservations/series/${encodeURIComponent(id)}`),
+    /** 繰り返しを止める（これからの回をまとめて取り消す）。 */
+    stopSeries: (id: string) => call<{ ok: true }>(`/reservations/series/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     finish: (id: string) => call<{ ok: true }>(`/reservations/${encodeURIComponent(id)}/finish`, { method: 'POST', body: '{}' }),
     items: () => call<{ items: ReservableItem[]; admin: boolean }>('/reservations/items'),
     /** 予約できるものを足す（管理者だけ。種類を言わなければ名前から決める）。 */

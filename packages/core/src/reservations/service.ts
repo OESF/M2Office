@@ -9,8 +9,8 @@
 
 import { randomUUID } from 'node:crypto';
 import {
-  RESERVABLE_KIND_LABELS, RESERVATIONS_EXTENSION_ID, RESERVATION_LIMITS, canUseAgent,
-  type ReservableItem, type ReservableKind, type Reservation, type ReservationConflict, type ReservationSettings,
+  RESERVABLE_KIND_LABELS, RESERVATIONS_EXTENSION_ID, RESERVATION_LIMITS, canUseAgent, reservationRuleText,
+  type ReservableItem, type ReservableKind, type Reservation, type ReservationConflict, type ReservationRule, type ReservationSeries, type ReservationSettings,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { LlmProvider } from '../llm/provider.js';
@@ -38,8 +38,8 @@ export interface ReservationServiceDeps {
   now?(): Date;
 }
 
-/** カレンダーに予定を入れた結果。 */
-export type CalendarResult = 'added' | 'not-connected' | 'failed';
+/** カレンダーに予定を入れた結果（`none` は入れなかった。会議の予定と一緒に会議室を取ったときなど）。 */
+export type CalendarResult = 'added' | 'not-connected' | 'failed' | 'none';
 
 /** 予約した結果。 */
 export type BookResult =
@@ -71,6 +71,8 @@ export function reservationsAccess(repo: Repository) {
 }
 
 const MINUTE = 60_000;
+/** 日本時間の日付（YYYY-MM-DD）。 */
+const jstDayOf = (d: Date) => new Date(d.getTime() + 9 * 3_600_000).toISOString().slice(0, 10);
 const DAY = 86_400_000;
 
 /** 日本時間の「10/7 10:00」。 */
@@ -93,6 +95,55 @@ export function kindOfName(name: string): ReservableKind {
   if (/(車|カー|プリウス|ハイエース|アクア|フィット|カローラ|ヤリス|軽トラ|バン|トラック|ワゴン|bike|バイク|自転車)/i.test(n)) return 'car';
   if (/(プロジェクター|カメラ|パソコン|PC|ノート|タブレット|iPad|モニター|ディスプレイ|スピーカー|マイク|ポケット ?wifi|wi-?fi|ルーター|三脚|機材|備品|スクリーン)/i.test(n)) return 'equipment';
   return 'other';
+}
+
+/** 予約の作り方（繰り返しの 1 回か・カレンダーに予定を入れるか）。 */
+export interface BookOptions {
+  /** 予約した人のカレンダーに予定を入れるか（既定は入れる。会議の予定と一緒に取るときは入れない） */
+  calendar?: boolean;
+  /** 繰り返しの 1 回なら、その繰り返し */
+  seriesId?: string;
+}
+
+/** 繰り返しの予約を作った結果。 */
+export interface SeriesResult {
+  series: ReservationSeries;
+  item: ReservableItem;
+  /** 取れた回の数 */
+  booked: number;
+  /** 重なって取れなかった日（YYYY-MM-DD） */
+  skipped: string[];
+}
+
+const DAY_MS = 86_400_000;
+const isoDay = (d: Date) => d.toISOString().slice(0, 10);
+const addDaysTo = (day: string, n: number) => isoDay(new Date(Date.parse(`${day}T00:00:00Z`) + n * DAY_MS));
+const weekdayOf = (day: string) => new Date(`${day}T00:00:00Z`).getUTCDay();
+/** その月の第 n 何曜か（1〜5）。 */
+const nthOf = (day: string): number => Math.ceil(new Date(`${day}T00:00:00Z`).getUTCDate() / 7);
+
+/**
+ * 繰り返しの回の日を数える（`from` から `to` まで。どちらも含む）。
+ *
+ * @param s 繰り返しの決まり。隔週は、始めの日から数えた最初の回から 2 週ごと
+ */
+export function seriesDates(s: Pick<ReservationSeries, 'rule' | 'weekday' | 'nth' | 'startsOn' | 'endsOn'>, from: string, to: string): string[] {
+  const last = s.endsOn && s.endsOn < to ? s.endsOn : to;
+  let first = s.startsOn;
+  while (weekdayOf(first) !== s.weekday) first = addDaysTo(first, 1);
+  const out: string[] = [];
+  for (let d = first; d <= last && out.length < 400; d = addDaysTo(d, 7)) {
+    if (d < from) continue;
+    if (s.rule === 'biweekly' && Math.round((Date.parse(d) - Date.parse(first)) / DAY_MS / 7) % 2 !== 0) continue;
+    if (s.rule === 'monthly') {
+      const nth = s.nth ?? 1;
+      const n = Math.ceil(new Date(`${d}T00:00:00Z`).getUTCDate() / 7);
+      const isLast = new Date(Date.parse(`${d}T00:00:00Z`) + 7 * DAY_MS).getUTCMonth() !== new Date(`${d}T00:00:00Z`).getUTCMonth();
+      if (nth === 5 ? !isLast : n !== nth) continue;
+    }
+    out.push(d);
+  }
+  return out;
 }
 
 /** 予定の題（「会議室 A」「社用車 プリウス」と用件）。 */
@@ -351,7 +402,7 @@ export class ReservationService {
    * 予約する（第37.5節）。同じものの時間が重なれば作らず、次に空いている時間と、同じ種類で空いているほかのものを返す。
    * 予約したら、予約した人の Google カレンダーに予定を入れる（つないでいなければ入れない）。
    */
-  async book(who: ReservationViewer, input: { itemId: string; startAt: string; endAt: string; purpose?: string }): Promise<BookResult> {
+  async book(who: ReservationViewer, input: { itemId: string; startAt: string; endAt: string; purpose?: string }, opts: BookOptions = {}): Promise<BookResult> {
     const item = await this.deps.store.getItem(who.tenantId, input.itemId);
     if (!item) return { error: '予約できるものが見つかりません' };
     if (item.status !== 'active') return { error: `「${item.name}」はいま予約できません（管理者が止めています）` };
@@ -365,13 +416,13 @@ export class ReservationService {
     }
     let id: string;
     try {
-      id = await this.deps.store.create(who.tenantId, { itemId: item.id, startAt, endAt, purpose, userId: who.userId, createdBy: who.userId });
+      id = await this.deps.store.create(who.tenantId, { itemId: item.id, startAt, endAt, purpose, userId: who.userId, createdBy: who.userId, seriesId: opts.seriesId ?? null });
     } catch (err) {
       // 確かめた後に、ほかの人が同時に取った
       if (err instanceof ReservationOverlapError) return { conflict: await this.conflict(who.tenantId, item, startAt, endAt, null), item };
       throw err;
     }
-    const calendar = await this.addEvent(who.tenantId, id, item);
+    const calendar = opts.calendar === false ? 'none' : await this.addEvent(who.tenantId, id, item);
     return { reservation: (await this.get(who, id))!, item, calendar };
   }
 
@@ -381,7 +432,7 @@ export class ReservationService {
    *
    * @param kind 種類（言われなければ全部から選ぶ）
    */
-  async pickAndBook(who: ReservationViewer, input: { kind: ReservableKind | null; startAt: string; endAt: string; people?: number | null; purpose?: string }): Promise<BookResult | NoneFree | { error: string }> {
+  async pickAndBook(who: ReservationViewer, input: { kind: ReservableKind | null; startAt: string; endAt: string; people?: number | null; purpose?: string }, opts: BookOptions = {}): Promise<BookResult | NoneFree | { error: string }> {
     const range = this.checkRange(input.startAt, input.endAt);
     if ('error' in range) return range;
     const startAt = new Date(range.start).toISOString();
@@ -397,7 +448,7 @@ export class ReservationService {
     };
     const free = items.filter((i) => !busy.has(i.id)).sort((a, b) => rank(a) - rank(b) || a.sortOrder - b.sortOrder);
     for (const item of free) {
-      const r = await this.book(who, { itemId: item.id, startAt, endAt, purpose: input.purpose ?? '' });
+      const r = await this.book(who, { itemId: item.id, startAt, endAt, purpose: input.purpose ?? '' }, opts);
       // 同時に取られたら次のものを試す
       if ('conflict' in r) continue;
       return r;
@@ -490,6 +541,112 @@ export class ReservationService {
     return null;
   }
 
+  // ---- 繰り返し（段 2。第37.18節） --------------------------------------------------------------
+
+  /**
+   * 繰り返しの予約を作る（「毎週月曜 10 時から 1 時間、会議室 A」）。90 日先までの回を 1 回ずつの予約として作り、重なった日は飛ばす。
+   * どれかを言われなければ、はじめの回に空いているもの（定員が人数に近いもの）を選び、その後の回も同じものを取る。
+   *
+   * @returns 作った繰り返しと、取れた回の数と、取れなかった日か、作れない理由
+   */
+  async createSeries(who: ReservationViewer, input: {
+    itemId?: string; kind?: ReservableKind | null; people?: number | null; rule: ReservationRule; startsOn: string; startTime: string; endTime: string;
+    endsOn?: string | null; purpose?: string; weekday?: number; nth?: number | null;
+  }): Promise<SeriesResult | { error: string }> {
+    if (!['weekly', 'biweekly', 'monthly'].includes(input.rule)) return { error: '繰り返しの決まりが違います' };
+    const hm = /^([01]\d|2[0-3]):[0-5]\d$/;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.startsOn) || Number.isNaN(Date.parse(input.startsOn))) return { error: '始めの日を YYYY-MM-DD で入れてください' };
+    if (!hm.test(input.startTime) || !(hm.test(input.endTime) || input.endTime === '24:00') || input.endTime <= input.startTime) return { error: '始めと終わりの時刻を入れてください（同じ日の中で）' };
+    const today = jstDayOf(this.now());
+    if (input.startsOn < today) return { error: '過ぎた日からは繰り返せません' };
+    if (input.endsOn && (input.endsOn < input.startsOn || !/^\d{4}-\d{2}-\d{2}$/.test(input.endsOn))) return { error: '終わりの日は始めの日より後にしてください' };
+    const weekday = input.weekday ?? weekdayOf(input.startsOn);
+    if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) return { error: '曜日が違います' };
+    const nth = input.rule === 'monthly' ? input.nth ?? nthOf(input.startsOn) : null;
+    if (nth !== null && (!Number.isInteger(nth) || nth < 1 || nth > 5)) return { error: '第何週かが違います' };
+    const rule = { rule: input.rule, weekday, nth, startsOn: input.startsOn, endsOn: input.endsOn ?? null };
+    const first = seriesDates(rule, input.startsOn, addDaysTo(input.startsOn, 62))[0];
+    if (!first) return { error: '繰り返しの回がありません' };
+    const at = (d: string, t: string) => new Date(t === '24:00' ? `${addDaysTo(d, 1)}T00:00:00+09:00` : `${d}T${t}:00+09:00`).toISOString();
+    // どれを取るか（言われなければ、はじめの回に空いているもの）
+    let item: ReservableItem | null = null;
+    if (input.itemId) {
+      item = await this.deps.store.getItem(who.tenantId, input.itemId);
+      if (!item) return { error: '予約できるものが見つかりません' };
+      if (item.status !== 'active') return { error: `「${item.name}」はいま予約できません（管理者が止めています）` };
+    } else {
+      const items = (await this.deps.store.listItems(who.tenantId)).filter((i) => i.status === 'active' && (!input.kind || i.kind === input.kind));
+      if (!items.length) return { error: input.kind ? `予約できる${RESERVABLE_KIND_LABELS[input.kind]}がありません（管理者が足します）` : '予約できるものがありません（管理者が足します）' };
+      const busy = new Set((await this.deps.store.list(who.tenantId, { from: at(first, input.startTime), to: at(first, input.endTime) })).map((r) => r.itemId));
+      const people = input.people ?? null;
+      const rank = (i: ReservableItem) => (!people ? 0 : i.capacity === null ? 1_000 : i.capacity >= people ? i.capacity - people : 10_000 + (people - i.capacity));
+      item = items.filter((i) => !busy.has(i.id)).sort((a, b) => rank(a) - rank(b) || a.sortOrder - b.sortOrder)[0] ?? items.sort((a, b) => rank(a) - rank(b) || a.sortOrder - b.sortOrder)[0]!;
+    }
+    const purpose = String(input.purpose ?? '').trim().replace(/\s+/g, ' ').slice(0, RESERVATION_LIMITS.purposeMax);
+    const id = await this.deps.store.createSeries(who.tenantId, {
+      itemId: item.id, userId: who.userId, purpose, ...rule, startTime: input.startTime, endTime: input.endTime, createdBy: who.userId,
+    });
+    const series = (await this.deps.store.getSeries(who.tenantId, id))!;
+    const r = await this.materialize(who.tenantId, series, this.now());
+    return { series: (await this.deps.store.getSeries(who.tenantId, id))!, item, booked: r.booked, skipped: r.skipped };
+  }
+
+  /** 繰り返しの回を、90 日先まで 1 回ずつの予約として作る（重なった日・止めたものは飛ばして記録する）。 */
+  private async materialize(tenantId: string, s: ReservationSeries, now: Date): Promise<{ booked: number; skipped: string[] }> {
+    const today = jstDayOf(now);
+    const until = addDaysTo(today, RESERVATION_LIMITS.aheadDays - 1);
+    const from = s.materializedUntil ? addDaysTo(s.materializedUntil, 1) : s.startsOn;
+    if (from > until) return { booked: 0, skipped: [] };
+    const at = (d: string, t: string) => new Date(t === '24:00' ? `${addDaysTo(d, 1)}T00:00:00+09:00` : `${d}T${t}:00+09:00`).toISOString();
+    const who = { tenantId, userId: s.userId };
+    let booked = 0;
+    const skipped: string[] = [];
+    for (const d of seriesDates(s, from, until)) {
+      if (Date.parse(at(d, s.endTime)) <= now.getTime()) continue;
+      const r = await this.book(who, { itemId: s.itemId, startAt: at(d, s.startTime), endAt: at(d, s.endTime), purpose: s.purpose }, { seriesId: s.id });
+      if ('reservation' in r) booked += 1;
+      else skipped.push(d);
+    }
+    const lastDay = s.endsOn && s.endsOn < until ? s.endsOn : until;
+    await this.deps.store.updateSeries(tenantId, s.id, { materializedUntil: lastDay, skipped: [...s.skipped, ...skipped].slice(-100), ...(s.endsOn && s.endsOn <= until ? { status: 'stopped' as const } : {}) });
+    return { booked, skipped };
+  }
+
+  /** 繰り返しと、決まりの文・ものの名前・予約した人の名前。見つからなければ `null`。 */
+  async seriesOf(who: ReservationViewer, id: string): Promise<(ReservationSeries & { ruleText: string; itemName: string; userName: string }) | null> {
+    const s = await this.deps.store.getSeries(who.tenantId, id);
+    if (!s) return null;
+    const item = await this.deps.store.getItem(who.tenantId, s.itemId);
+    const names = await this.names(who.tenantId);
+    return { ...s, ruleText: reservationRuleText(s), itemName: item?.name ?? '', userName: names.get(s.userId) ?? '' };
+  }
+
+  /**
+   * 繰り返しを止める（本人と管理者だけ）。これからの回をまとめて取り消す（カレンダーの予定も消す）。
+   * 管理者がほかの人の繰り返しを止めたら、予約した人に 1 回だけ知らせて監査ログに残す。
+   *
+   * @returns 止められなければ理由
+   */
+  async stopSeries(who: ReservationViewer, id: string): Promise<string | null> {
+    const s = await this.deps.store.getSeries(who.tenantId, id);
+    if (!s) return '繰り返しが見つかりません';
+    const admin = s.userId !== who.userId;
+    if (admin && !(await this.isAdmin(who))) return '繰り返しを止められるのは、予約した本人と管理者だけです';
+    await this.deps.store.updateSeries(who.tenantId, id, { status: 'stopped' });
+    const future = await this.deps.store.list(who.tenantId, { from: this.now().toISOString(), to: new Date(this.now().getTime() + (RESERVATION_LIMITS.aheadDays + 1) * DAY_MS).toISOString() });
+    let n = 0;
+    for (const r of future.filter((x) => x.seriesId === id && Date.parse(x.startAt) > this.now().getTime())) {
+      await this.deps.store.update(who.tenantId, r.id, { status: 'cancelled' }, who.userId);
+      if (r.calendarEventId) await this.deps.calendar.cancel({ tenantId: who.tenantId, userId: r.userId }, { eventId: r.calendarEventId }).catch(() => null);
+      n += 1;
+    }
+    if (admin) {
+      await this.audit(who, 'reservation.admin_change', id, { change: 'stop-series', count: n });
+      await this.notify(who.tenantId, s.userId, '繰り返しの予約を管理者が止めました', `${reservationRuleText(s)} の繰り返しを止め、これからの ${n} 回を取り消しました。`);
+    }
+    return null;
+  }
+
   // ---- Google カレンダー -----------------------------------------------------------------------
 
   /** 予約した人のカレンダーに予定を入れ、予定の ID を覚える。 */
@@ -558,8 +715,17 @@ export class ReservationService {
     for (const tenantId of await this.deps.repo.listTenantIds()) {
       try {
         removed += await this.deps.store.purge(tenantId, before);
+        // 繰り返しの回を 90 日先まで足す（取れなかった日は予約した人に知らせる。第37.18節）
+        if (!(await this.deps.repo.getTenantSettings(tenantId)).reservations.enabled) continue;
+        for (const s of await this.deps.store.activeSeries(tenantId)) {
+          const r = await this.materialize(tenantId, s, now);
+          if (r.skipped.length) {
+            await this.notify(tenantId, s.userId, '繰り返しの予約で取れなかった日があります',
+              `${reservationRuleText(s)} の繰り返しで、ほかの予約と重なって取れなかった日: ${r.skipped.map((d) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`).join('、')}。`);
+          }
+        }
       } catch (err) {
-        this.log.warn('終わった予約を消せませんでした', { tenantId, error: err instanceof Error ? err.message : String(err) });
+        this.log.warn('終わった予約の片付けか、繰り返しの予約に失敗しました', { tenantId, error: err instanceof Error ? err.message : String(err) });
       }
     }
     return removed;

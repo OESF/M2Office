@@ -305,6 +305,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/reservations?from=&to=` ／ `GET /v1/reservations/mine` | 予約（仕様書 第37章）: 期間（15 日まで）の予約と予約できるもの・本人が管理者か ／ 本人のこれからの予約 |
 | `POST /v1/reservations` ／ `PATCH` ／ `DELETE /v1/reservations/:id` ／ `POST /v1/reservations/:id/finish` | 予約する（同じものの時間が重なれば 409 と `conflict`: 使っている人と時間・次に空く時間・同じ種類で空いているほかのもの）／ 変える（本人と管理者）／ 取り消す ／ 早く終わったので終わりをいまにする。予約した人の Google カレンダーの予定も入れる・直す・消す |
 | `GET` ／ `POST /v1/reservations/items` ／ `PATCH /v1/reservations/items/:id` ／ `PUT /v1/reservations/items/order` | 予約できるもの（止めたものも含む）／ 足す（管理者。種類を言わなければ名前から決める）／ 直す・止める（`status`）／ 並べ替え |
+| `POST /v1/reservations/series` ／ `GET` ／ `DELETE /v1/reservations/series/:id` | 繰り返しの予約（第37.18節）: 作る（`itemId`・`rule`（weekly・biweekly・monthly）・`startsOn`・`startTime`・`endTime`・`endsOn`・`purpose`。90 日先までの回を作り、取れた数と取れなかった日を返す）／ 決まりの文・取れなかった日 ／ 止める（これからの回を取り消す。本人と管理者） |
 | `GET /v1/subsidies` ／ `POST /v1/subsidies/search` ／ `PATCH /v1/subsidies/:id` | 補助金・助成金の案内（仕様書 第39章）: 候補（締め切りの近い順。過ぎたもの・見送りも含む）と会社のこと・関心・最後に調べた日時・調べているか ／ いま調べる（後ろで調べる。1 日 1 回まで。202、済んでいれば 409）／ 気になる・見送り・戻す（`status`） |
 | `PUT /v1/admin/extensions/subsidies/settings` | 管理者: 補助金・助成金の会社の関心と業種（`interest`・`industry`） |
 | `GET` ／ `POST /v1/members` ／ `GET` ／ `PATCH` ／ `DELETE /v1/members/:id` | 会員とポイント（仕様書 第40章）: 一覧（`q`）と会社の率 ／ 店頭で作る（会員証の URL を返す）／ 1 人とポイントの記録・まとめる候補 ／ 呼び名と電話 ／ 削除（管理者） |

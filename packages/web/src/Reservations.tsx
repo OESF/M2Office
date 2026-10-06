@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import {
-  RESERVABLE_KIND_LABELS, type ReservableItem, type ReservableKind, type Reservation, type ReservationConflict,
+  RESERVABLE_KIND_LABELS, RESERVATION_RULE_LABELS, type ReservableItem, type ReservableKind, type Reservation, type ReservationConflict, type ReservationRule,
 } from '@m2office/shared';
 import { api, ApiError, describeError } from './api.js';
 
@@ -39,7 +39,7 @@ function NoteText({ note }: { note: Note }) {
 }
 
 /** 予約の欄に入れる下書き。 */
-interface Draft { id: string | null; itemId: string; date: string; start: string; end: string; purpose: string }
+interface Draft { id: string | null; itemId: string; date: string; start: string; end: string; purpose: string; repeat?: ReservationRule | ''; until?: string }
 
 /** 画面の幅が狭いか（スマホ）。 */
 function useNarrow(): boolean {
@@ -303,6 +303,13 @@ function DraftForm({ draft, items, onCancel, onDone }: {
     const v = { ...d, ...over };
     setBusy(true); setError(null); setConflict(null);
     try {
+      // 繰り返し（毎週・隔週・毎月の同じ週の同じ曜日。第37.18節）
+      if (!v.id && v.repeat) {
+        const s = await api.reservations.createSeries({ itemId: v.itemId, rule: v.repeat, startsOn: v.date, startTime: v.start, endTime: v.end, endsOn: v.until || null, purpose: v.purpose });
+        const skipped = s.skipped.map((x) => dayLabel(x)).join('、');
+        onDone(`${s.item.name}を${RESERVATION_RULE_LABELS[v.repeat]}取りました（90 日先までの ${s.booked} 回）。${skipped ? `重なって取れなかった日: ${skipped}。` : ''}`);
+        return;
+      }
       const input = { itemId: v.itemId, startAt: isoOf(v.date, v.start), endAt: isoOf(v.date, v.end), purpose: v.purpose };
       const r = v.id ? await api.reservations.change(v.id, input) : await api.reservations.book(input);
       const name = items.find((i) => i.id === v.itemId)?.name ?? '';
@@ -332,6 +339,13 @@ function DraftForm({ draft, items, onCancel, onDone }: {
           {TIMES.filter((t) => minutesOf(t) > minutesOf(d.start)).map((t) => <option key={t} value={t}>{t}</option>)}
         </select>
         <input className="rsv-purpose" value={d.purpose} maxLength={120} placeholder="用件" aria-label="用件" onChange={(e) => setD({ ...d, purpose: e.target.value })} />
+        {!d.id && (
+          <select value={d.repeat ?? ''} aria-label="繰り返し" onChange={(e) => setD({ ...d, repeat: e.target.value as ReservationRule | '' })}>
+            <option value="">繰り返さない</option>
+            {(Object.keys(RESERVATION_RULE_LABELS) as ReservationRule[]).map((k) => <option key={k} value={k}>{RESERVATION_RULE_LABELS[k]}</option>)}
+          </select>
+        )}
+        {!d.id && d.repeat && <input type="date" value={d.until ?? ''} min={d.date} aria-label="繰り返しの終わり" title="繰り返しの終わり（空なら続ける）" onChange={(e) => setD({ ...d, until: e.target.value })} />}
         <button className="btn" disabled={busy} onClick={() => void save()}>{d.id ? '変える' : '予約する'}</button>
         <button className="btn ghost" onClick={onCancel}>キャンセル</button>
       </div>
@@ -358,7 +372,13 @@ function ReservationView({ r, item, canChange, onClose, onEdit, onDone, onError 
   onClose: () => void; onEdit: () => void; onDone: (text: string) => void; onError: (text: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [rule, setRule] = useState<string | null>(null);
   const ongoing = Date.parse(r.startAt) <= Date.now() && Date.parse(r.endAt) > Date.now();
+  // 繰り返しの 1 回なら、決まりの文を出す
+  useEffect(() => {
+    setRule(null);
+    if (r.seriesId) api.reservations.series(r.seriesId).then((x) => setRule(x.series.status === 'active' ? x.series.ruleText : null)).catch(() => setRule(null));
+  }, [r.seriesId]);
   const act = async (f: () => Promise<unknown>, text: string) => {
     setBusy(true);
     try { await f(); onDone(text); } catch (e) { onError(describeError(e, 'できませんでした')); } finally { setBusy(false); }
@@ -371,11 +391,13 @@ function ReservationView({ r, item, canChange, onClose, onEdit, onDone, onError 
         <span>{r.userName}</span>
         {r.purpose && <span className="muted">{r.purpose}</span>}
         {item?.location && <span className="muted">{item.location}</span>}
+        {rule && <span className="badge">{rule}</span>}
       </div>
       <div className="row wrap">
         {canChange && <button className="btn ghost small" disabled={busy} onClick={onEdit}>変える</button>}
         {canChange && ongoing && <button className="btn ghost small" disabled={busy} onClick={() => void act(() => api.reservations.finish(r.id), '終わりをいまにしました。')}>終わった</button>}
-        {canChange && <button className="btn ghost small danger" disabled={busy} onClick={() => void act(() => api.reservations.cancel(r.id), '予約を取り消しました。')}>取り消す</button>}
+        {canChange && <button className="btn ghost small danger" disabled={busy} onClick={() => void act(() => api.reservations.cancel(r.id), '予約を取り消しました。')}>{rule ? 'この回だけ取り消す' : '取り消す'}</button>}
+        {canChange && rule && r.seriesId && <button className="btn ghost small danger" disabled={busy} onClick={() => void act(() => api.reservations.stopSeries(r.seriesId!), '繰り返しを止め、これからの回を取り消しました。')}>これから全部取り消す</button>}
         <button className="btn ghost small" onClick={onClose}>閉じる</button>
       </div>
     </div>

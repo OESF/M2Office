@@ -8,8 +8,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULT_TENANT_SETTINGS, type TenantSettings } from '@m2office/shared';
 import {
-  ConnectorUnavailableError, MemoryReservationStore, MockWorkspaceConnector, ReservationService, answerReservation, eventTitle, itemIn,
-  kindOfName, parseReservation, timesOf, type CalendarConnector, type Repository,
+  BUILTIN_TOOLS, ConnectorUnavailableError, MemoryReservationStore, MockWorkspaceConnector, ReservationService, answerReservation, eventTitle, itemIn,
+  kindOfName, parseReservation, seriesDates, seriesOf, timesOf, type CalendarConnector, type Repository, type ToolContext,
 } from '../src/index.js';
 
 /** 2026-10-06（火）9:00（日本時間） */
@@ -228,7 +228,7 @@ test('秘書の頼みの読み方: 日時・長さ・人数・種類・名前', 
   assert.equal(itemIn('会議室a、明日10時から', ['会議室 A', '会議室 B']), '会議室 A');
 
   const book = parseReservation('明日 10 時から 1 時間、会議室を取って', today, ['会議室 A']);
-  assert.deepEqual(book, { kind: 'book', item: null, itemKind: 'room', date: '2026-10-07', start: '10:00', end: '11:00', people: null, purpose: '' });
+  assert.deepEqual(book, { kind: 'book', item: null, itemKind: 'room', date: '2026-10-07', start: '10:00', end: '11:00', people: null, purpose: '', series: null });
   const named = parseReservation('会議室 A、明日 10 時から 6 人で予約して', today, ['会議室 A']);
   assert.equal(named?.kind, 'book');
   assert.equal(named?.kind === 'book' && named.item, '会議室 A');
@@ -268,4 +268,101 @@ test('秘書: 空いているものを選んで取り、重なれば空く時間
   assert.match((await say('boss', '会議室 C を予約できるようにして', true))!, /会議室 C（会議室）を予約できるようにしました/);
   assert.match((await say('u1', '会議室を取って'))!, /いつ使うか/);
   assert.equal(await say('u1', '明日の天気は？'), null);
+});
+
+test('繰り返しの回の日: 毎週・隔週・毎月の第 n 何曜・毎月の最後の何曜（終わりの日まで）', () => {
+  const base = { startsOn: '2026-10-06', endsOn: null };
+  assert.deepEqual(seriesDates({ ...base, rule: 'weekly', weekday: 1, nth: null }, '2026-10-06', '2026-10-31'), ['2026-10-12', '2026-10-19', '2026-10-26']);
+  assert.deepEqual(seriesDates({ ...base, rule: 'biweekly', weekday: 2, nth: null }, '2026-10-06', '2026-11-10'), ['2026-10-06', '2026-10-20', '2026-11-03']);
+  assert.deepEqual(seriesDates({ ...base, rule: 'monthly', weekday: 2, nth: 2 }, '2026-10-06', '2026-12-31'), ['2026-10-13', '2026-11-10', '2026-12-08']);
+  assert.deepEqual(seriesDates({ ...base, rule: 'monthly', weekday: 5, nth: 5 }, '2026-10-06', '2026-12-31'), ['2026-10-30', '2026-11-27', '2026-12-25']);
+  assert.deepEqual(seriesDates({ ...base, endsOn: '2026-10-20', rule: 'weekly', weekday: 1, nth: null }, '2026-10-06', '2026-12-31'), ['2026-10-12', '2026-10-19']);
+  // 隔週は、途中から数えても始めの回からの 2 週ごと
+  assert.deepEqual(seriesDates({ ...base, rule: 'biweekly', weekday: 2, nth: null }, '2026-10-14', '2026-11-10'), ['2026-10-20', '2026-11-03']);
+});
+
+test('繰り返しの予約: 90 日先までの回を作り、重なった日は飛ばし、見張りで先を足して取れなかった日を知らせる', async () => {
+  const s = setup();
+  const { a } = await withItems(s);
+  // 10/19 だけ先に取られている
+  await s.service.book(u2, { itemId: a.id, startAt: at('2026-10-19', '10:30'), endAt: at('2026-10-19', '11:30') });
+  const r = await s.service.createSeries(u1, { itemId: a.id, rule: 'weekly', startsOn: '2026-10-06', startTime: '10:00', endTime: '11:00', purpose: '定例' });
+  assert.ok(!('error' in r));
+  assert.equal(r.series.weekday, 2);
+  // 10/6（火）〜 1/3 の火曜は 13 回。そのうち重なりは無い（10/19 は月曜）
+  assert.equal(r.booked, 13);
+  assert.deepEqual(r.skipped, []);
+  assert.equal(r.series.materializedUntil, '2027-01-03');
+  const mon = await s.service.createSeries(u1, { itemId: a.id, rule: 'weekly', startsOn: '2026-10-06', startTime: '10:00', endTime: '11:00', purpose: '朝会', weekday: 1 });
+  assert.ok(!('error' in mon));
+  assert.deepEqual(mon.skipped, ['2026-10-19']);
+  // 10/12〜1/3 の月曜は 12 回。10/19 は重なって飛ぶ
+  assert.equal(mon.booked, 11);
+  const one = (await s.store.list('t1', { from: at('2026-10-12', '00:00'), to: at('2026-10-13', '00:00') }))[0]!;
+  assert.equal(one.seriesId, mon.series.id);
+  assert.match(one.calendarEventId ?? '', /^mock-event-/);
+  // 1 週間後、見張りが先の回を足す。重なる予約を先に入れておく
+  s.setClock(new Date('2026-10-13T00:00:00Z'));
+  await s.service.book(u2, { itemId: a.id, startAt: at('2027-01-04', '10:00'), endAt: at('2027-01-04', '10:30') });
+  await s.service.tick(new Date('2026-10-13T00:00:00Z'));
+  assert.equal((await s.store.getSeries('t1', mon.series.id))!.materializedUntil, '2027-01-10');
+  assert.ok(s.notes.some((n) => n.userId === 'u1' && /取れなかった日があります/.test(n.title) && /1\/4/.test(n.body)));
+  // 終わりの日を過ぎた繰り返しは止まる
+  const short = await s.service.createSeries(u1, { itemId: a.id, rule: 'monthly', startsOn: '2026-10-14', startTime: '15:00', endTime: '16:00', endsOn: '2026-11-30', purpose: '' });
+  assert.ok(!('error' in short));
+  assert.equal(short.series.nth, 2);
+  assert.equal(short.booked, 2);
+  assert.equal(short.series.status, 'stopped');
+  // 決まりの誤りは断る
+  assert.ok('error' in (await s.service.createSeries(u1, { itemId: a.id, rule: 'weekly', startsOn: '2026-10-01', startTime: '10:00', endTime: '11:00' })));
+  assert.ok('error' in (await s.service.createSeries(u1, { itemId: a.id, rule: 'weekly', startsOn: '2026-10-20', startTime: '11:00', endTime: '10:00' })));
+});
+
+test('繰り返しを止める: これからの回を取り消す。本人と管理者だけで、管理者が止めたら 1 回だけ知らせる', async () => {
+  const s = setup();
+  const { a } = await withItems(s);
+  const r = await s.service.createSeries(u1, { itemId: a.id, rule: 'biweekly', startsOn: '2026-10-07', startTime: '09:00', endTime: '10:00', purpose: '' });
+  assert.ok(!('error' in r));
+  assert.match((await s.service.stopSeries(u2, r.series.id)) ?? '', /本人と管理者だけ/);
+  assert.equal(await s.service.stopSeries(boss, r.series.id), null);
+  assert.equal((await s.store.listBySeries('t1', r.series.id, NOW.toISOString())).length, 0);
+  assert.equal(s.notes.filter((n) => n.userId === 'u1').length, 1);
+  assert.equal((await s.service.seriesOf(u1, r.series.id))!.status, 'stopped');
+});
+
+test('秘書: 「毎週月曜 10 時から 1 時間、会議室 A を取って」を繰り返しの予約にする', async () => {
+  assert.deepEqual(seriesOf('毎週月曜 10 時から'), { rule: 'weekly', weekday: 1, nth: null });
+  assert.deepEqual(seriesOf('隔週の水曜に'), { rule: 'biweekly', weekday: 3, nth: null });
+  assert.deepEqual(seriesOf('毎月第 2 火曜'), { rule: 'monthly', weekday: 2, nth: 2 });
+  assert.deepEqual(seriesOf('毎月最後の金曜'), { rule: 'monthly', weekday: 5, nth: 5 });
+  assert.equal(seriesOf('明日 10 時から'), null);
+  const s = setup();
+  await withItems(s);
+  const deps = { service: s.service, access: async () => true };
+  const text = (await answerReservation(deps, 't1', 'u1', false, '毎週月曜 10 時から 1 時間、会議室 A を取って', NOW))!.text;
+  assert.match(text, /会議室 Aを毎週月曜 10:00〜11:00で取りました（90 日先までの 12 回/);
+});
+
+test('日程調整: 予定を作った後で空いている会議室を取り、予定の場所に入れる（予約の側では予定を作らない）', async () => {
+  const calendarCreate = BUILTIN_TOOLS.find((t) => t.name === 'calendar.create')!;
+  const s = setup();
+  const { b } = await withItems(s);
+  const ctx = {
+    tenantId: 't1', userId: 'u1', connector: s.connector,
+    reservations: { service: s.service, access: async () => ({ enabled: true }) },
+  } as unknown as ToolContext;
+  const out = await calendarCreate.invoke({ title: '企画会議', start: at('2026-10-08', '14:00'), end: at('2026-10-08', '15:00'), attendees: ['a@example.jp', 'b@example.jp', 'c@example.jp', 'd@example.jp', 'e@example.jp', 'f@example.jp', 'g@example.jp'], room: '会議室' }, ctx) as { eventId: string; room: { booked: string } };
+  // 8 人なので定員 12 の会議室 B
+  assert.equal(out.room.booked, '会議室 B');
+  const r = (await s.store.list('t1', { from: at('2026-10-08', '00:00'), to: at('2026-10-09', '00:00'), itemId: b.id }))[0]!;
+  assert.equal(r.calendarEventId, null);
+  assert.equal(r.purpose, '企画会議');
+  const ev = (await s.connector.calendar.list({ tenantId: 't1', userId: 'u1' }, { from: at('2026-10-08', '00:00'), to: at('2026-10-09', '00:00') })).find((e) => e.id === out.eventId);
+  assert.equal(ev?.location, '会議室 B');
+  // 同じ時間に名前で頼んで重なれば、会議の予定はそのままで理由を返す
+  const clash = await calendarCreate.invoke({ title: '別の会議', start: at('2026-10-08', '14:30'), end: at('2026-10-08', '15:30'), attendees: [], room: '会議室 B' }, ctx) as { room: { note: string } };
+  assert.match(clash.room.note, /会議室 Bはその時間に予約がある/);
+  // 予約を使っていない会社では取らない
+  const off = await calendarCreate.invoke({ title: 'x', start: at('2026-10-09', '14:00'), end: at('2026-10-09', '15:00'), room: '会議室' }, { ...ctx, reservations: { service: s.service, access: async () => null } } as unknown as ToolContext) as { room: { note: string } };
+  assert.match(off.room.note, /予約を使っていない/);
 });

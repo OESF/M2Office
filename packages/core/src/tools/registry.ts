@@ -21,6 +21,8 @@ import type { WebReviewToolContext } from '../web-review/tools.js';
 import type { ContractToolContext } from '../contracts/tools.js';
 import type { SubsidyToolContext } from '../subsidies/tools.js';
 import type { MemberToolContext } from '../members/tools.js';
+import type { ReservationService } from '../reservations/service.js';
+import type { ReservationSettings } from '@m2office/shared';
 
 /** ツール呼び出しの文脈。テナント境界と実行の同一性を持ち回る。 */
 export interface ToolContext {
@@ -106,6 +108,8 @@ export interface ToolContext {
   subsidies?: SubsidyToolContext;
   /** 会員とポイント（内蔵の拡張。仕様書 第40章）。使えるかどうかは、ツールが呼ぶたびに確かめる。 */
   members?: MemberToolContext;
+  /** 予約（内蔵の拡張。仕様書 第37章）。会議の予定と一緒に会議室を取る（第37.18節）。使えるかどうかは呼ぶたびに確かめる。 */
+  reservations?: { service: ReservationService; access(): Promise<ReservationSettings | null> };
 }
 
 /** 引数 1 つの定義（JSON Schema の一部）。 */

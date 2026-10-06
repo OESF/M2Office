@@ -7,13 +7,19 @@
 
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
-import type { ReservableItem, ReservableKind, Reservation } from '@m2office/shared';
+import type { ReservableItem, ReservableKind, Reservation, ReservationSeries } from '@m2office/shared';
 
 /** 置き場に持つ予約（予約した人の名前は持たない。見せるときに引く）。 */
 export type StoredReservation = Omit<Reservation, 'userName'>;
 
 /** 新しく入れる予約。 */
-export type NewReservation = Pick<StoredReservation, 'itemId' | 'startAt' | 'endAt' | 'purpose' | 'userId' | 'createdBy'>;
+export type NewReservation = Pick<StoredReservation, 'itemId' | 'startAt' | 'endAt' | 'purpose' | 'userId' | 'createdBy'> & { seriesId?: string | null };
+
+/** 新しく作る繰り返し。 */
+export type NewSeries = Pick<ReservationSeries, 'itemId' | 'userId' | 'purpose' | 'rule' | 'weekday' | 'nth' | 'startTime' | 'endTime' | 'startsOn' | 'endsOn' | 'createdBy'>;
+
+/** 直せる繰り返しの項目。 */
+export type SeriesPatch = Partial<Pick<ReservationSeries, 'status' | 'materializedUntil' | 'skipped' | 'endsOn'>>;
 
 /** 直せる予約の項目。 */
 export type ReservationPatch = Partial<Pick<StoredReservation, 'itemId' | 'startAt' | 'endAt' | 'purpose' | 'calendarEventId' | 'status'>>;
@@ -55,6 +61,13 @@ export interface ReservationStore {
   update(tenantId: string, id: string, patch: ReservationPatch, by: string): Promise<void>;
   /** 終わりが `before` より前の予約を消す（第37.11節）。消した数を返す。 */
   purge(tenantId: string, before: string): Promise<number>;
+  /** 繰り返しの、`from` より後に始まる取り消していない予約（始めの順）。 */
+  listBySeries(tenantId: string, seriesId: string, from: string): Promise<StoredReservation[]>;
+  createSeries(tenantId: string, s: NewSeries): Promise<string>;
+  getSeries(tenantId: string, id: string): Promise<ReservationSeries | null>;
+  /** 続いている繰り返し（会社ごと）。 */
+  activeSeries(tenantId: string): Promise<ReservationSeries[]>;
+  updateSeries(tenantId: string, id: string, patch: SeriesPatch): Promise<void>;
 }
 
 const iso = (v: unknown): string => (v instanceof Date ? v.toISOString() : new Date(String(v ?? '')).toISOString());
@@ -65,8 +78,23 @@ interface ItemRow {
 }
 interface Row {
   id: string; item_id: string; start_at: unknown; end_at: unknown; purpose: string; user_id: string; calendar_event_id: string | null;
-  status: 'booked' | 'cancelled'; created_by: string; created_at: unknown; updated_by: string; updated_at: unknown;
+  status: 'booked' | 'cancelled'; series_id: string | null; created_by: string; created_at: unknown; updated_by: string; updated_at: unknown;
 }
+interface SeriesRow {
+  id: string; item_id: string; user_id: string; purpose: string; rule: ReservationSeries['rule']; weekday: number; nth: number | null;
+  start_time: string; end_time: string; starts_on: unknown; ends_on: unknown; status: 'active' | 'stopped'; materialized_until: unknown;
+  skipped: unknown[] | null; created_by: string; created_at: unknown;
+}
+const day = (v: unknown): string | null => {
+  if (!v) return null;
+  if (v instanceof Date) return new Date(v.getTime() - v.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
+  return String(v).slice(0, 10);
+};
+const toSeries = (r: SeriesRow): ReservationSeries => ({
+  id: r.id, itemId: r.item_id, userId: r.user_id, purpose: r.purpose, rule: r.rule, weekday: r.weekday, nth: r.nth, startTime: r.start_time, endTime: r.end_time,
+  startsOn: day(r.starts_on)!, endsOn: day(r.ends_on), status: r.status, materializedUntil: day(r.materialized_until),
+  skipped: (r.skipped ?? []).map((x) => day(x)!).filter(Boolean), createdBy: r.created_by, createdAt: iso(r.created_at),
+});
 
 const toItem = (r: ItemRow): ReservableItem => ({
   id: r.id, name: r.name, kind: r.kind, capacity: r.capacity, location: r.location, sortOrder: r.sort_order, status: r.status,
@@ -74,7 +102,7 @@ const toItem = (r: ItemRow): ReservableItem => ({
 });
 const toReservation = (r: Row): StoredReservation => ({
   id: r.id, itemId: r.item_id, startAt: iso(r.start_at), endAt: iso(r.end_at), purpose: r.purpose, userId: r.user_id,
-  calendarEventId: r.calendar_event_id, status: r.status, createdBy: r.created_by, createdAt: iso(r.created_at),
+  calendarEventId: r.calendar_event_id, status: r.status, seriesId: r.series_id ?? null, createdBy: r.created_by, createdAt: iso(r.created_at),
   updatedBy: r.updated_by, updatedAt: iso(r.updated_at),
 });
 const byItemOrder = (a: ReservableItem, b: ReservableItem) => a.sortOrder - b.sortOrder || a.createdAt.localeCompare(b.createdAt);
@@ -162,8 +190,8 @@ export class PostgresReservationStore implements ReservationStore {
   async create(tenantId: string, r: NewReservation): Promise<string> {
     const id = `rsv-${randomUUID()}`;
     await this.q(tenantId,
-      `insert into reservations (id, tenant_id, item_id, start_at, end_at, purpose, user_id, created_by, updated_by) values ($1, $2, $3, $4, $5, $6, $7, $8, $8)`,
-      [id, tenantId, r.itemId, r.startAt, r.endAt, r.purpose, r.userId, r.createdBy]);
+      `insert into reservations (id, tenant_id, item_id, start_at, end_at, purpose, user_id, series_id, created_by, updated_by) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)`,
+      [id, tenantId, r.itemId, r.startAt, r.endAt, r.purpose, r.userId, r.seriesId ?? null, r.createdBy]);
     return id;
   }
 
@@ -184,12 +212,49 @@ export class PostgresReservationStore implements ReservationStore {
     const rows = await this.q<{ id: string }>(tenantId, `delete from reservations where tenant_id = $1 and end_at < $2 returning id`, [tenantId, before]);
     return rows.length;
   }
+
+  async listBySeries(tenantId: string, seriesId: string, from: string): Promise<StoredReservation[]> {
+    const rows = await this.q<Row>(tenantId,
+      `select * from reservations where tenant_id = $1 and series_id = $2 and status = 'booked' and start_at >= $3 order by start_at limit 500`, [tenantId, seriesId, from]);
+    return rows.map(toReservation);
+  }
+
+  async createSeries(tenantId: string, s: NewSeries): Promise<string> {
+    const id = `rss-${randomUUID()}`;
+    await this.q(tenantId,
+      `insert into reservation_series (id, tenant_id, item_id, user_id, purpose, rule, weekday, nth, start_time, end_time, starts_on, ends_on, created_by)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+      [id, tenantId, s.itemId, s.userId, s.purpose, s.rule, s.weekday, s.nth, s.startTime, s.endTime, s.startsOn, s.endsOn, s.createdBy]);
+    return id;
+  }
+
+  async getSeries(tenantId: string, id: string): Promise<ReservationSeries | null> {
+    const rows = await this.q<SeriesRow>(tenantId, `select * from reservation_series where tenant_id = $1 and id = $2`, [tenantId, id]);
+    return rows[0] ? toSeries(rows[0]) : null;
+  }
+
+  async activeSeries(tenantId: string): Promise<ReservationSeries[]> {
+    return (await this.q<SeriesRow>(tenantId, `select * from reservation_series where tenant_id = $1 and status = 'active' order by created_at`, [tenantId])).map(toSeries);
+  }
+
+  async updateSeries(tenantId: string, id: string, patch: SeriesPatch): Promise<void> {
+    const cols: Record<string, string> = { status: 'status', materializedUntil: 'materialized_until', skipped: 'skipped', endsOn: 'ends_on' };
+    const sets: string[] = [];
+    const params: unknown[] = [tenantId, id];
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === undefined || !cols[k]) continue;
+      params.push(v);
+      sets.push(`${cols[k]} = $${params.length}`);
+    }
+    if (sets.length) await this.q(tenantId, `update reservation_series set ${sets.join(', ')} where tenant_id = $1 and id = $2`, params);
+  }
 }
 
 /** テスト用のメモリの置き場（重なりも PostgreSQL と同じように断る）。 */
 export class MemoryReservationStore implements ReservationStore {
   readonly items = new Map<string, ReservableItem & { tenantId: string }>();
   readonly rows = new Map<string, StoredReservation & { tenantId: string }>();
+  readonly series = new Map<string, ReservationSeries & { tenantId: string }>();
 
   async listItems(tenantId: string): Promise<ReservableItem[]> {
     return [...this.items.values()].filter((i) => i.tenantId === tenantId).map(({ tenantId: _t, ...i }) => ({ ...i })).sort(byItemOrder);
@@ -246,7 +311,7 @@ export class MemoryReservationStore implements ReservationStore {
     const id = `rsv-${randomUUID()}`;
     const at = new Date().toISOString();
     this.rows.set(id, {
-      ...r, startAt, endAt, id, tenantId, calendarEventId: null, status: 'booked', updatedBy: r.createdBy, createdAt: at, updatedAt: at,
+      ...r, startAt, endAt, id, tenantId, calendarEventId: null, status: 'booked', seriesId: r.seriesId ?? null, updatedBy: r.createdBy, createdAt: at, updatedAt: at,
     });
     return id;
   }
@@ -269,5 +334,32 @@ export class MemoryReservationStore implements ReservationStore {
       if (r.tenantId === tenantId && Date.parse(r.endAt) < Date.parse(before)) { this.rows.delete(id); n += 1; }
     }
     return n;
+  }
+
+  async listBySeries(tenantId: string, seriesId: string, from: string): Promise<StoredReservation[]> {
+    return [...this.rows.values()].filter((r) => r.tenantId === tenantId && r.seriesId === seriesId && r.status === 'booked' && Date.parse(r.startAt) >= Date.parse(from))
+      .map(({ tenantId: _t, ...r }) => ({ ...r })).sort((a, b) => a.startAt.localeCompare(b.startAt));
+  }
+
+  async createSeries(tenantId: string, s: NewSeries): Promise<string> {
+    const id = `rss-${randomUUID()}`;
+    this.series.set(id, { ...s, id, tenantId, status: 'active', materializedUntil: null, skipped: [], createdAt: new Date().toISOString() });
+    return id;
+  }
+
+  async getSeries(tenantId: string, id: string): Promise<ReservationSeries | null> {
+    const r = this.series.get(id);
+    if (!r || r.tenantId !== tenantId) return null;
+    const { tenantId: _t, ...rest } = r;
+    return { ...rest, skipped: [...rest.skipped] };
+  }
+
+  async activeSeries(tenantId: string): Promise<ReservationSeries[]> {
+    return [...this.series.values()].filter((x) => x.tenantId === tenantId && x.status === 'active').map(({ tenantId: _t, ...x }) => ({ ...x, skipped: [...x.skipped] }));
+  }
+
+  async updateSeries(tenantId: string, id: string, patch: SeriesPatch): Promise<void> {
+    const r = this.series.get(id);
+    if (r && r.tenantId === tenantId) this.series.set(id, { ...r, ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) });
   }
 }

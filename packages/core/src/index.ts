@@ -158,4 +158,4 @@ export * from './notices/index.js';
 export * from './brief/index.js';
 export { answerNotice, type NoticeAnswer } from './secretary/notices.js';
 export { signageRequest, signageFileRequest, answerSignage, type SignageSecretaryDeps, type SignageRequest } from './secretary/signage.js';
-export { answerReservation, maybeReservation, parseReservation, timesOf, itemIn, type ReservationSecretaryDeps, type ReservationAsk } from './secretary/reservations.js';
+export { answerReservation, maybeReservation, parseReservation, timesOf, itemIn, seriesOf, type ReservationSecretaryDeps, type ReservationAsk, type SeriesAsk } from './secretary/reservations.js';

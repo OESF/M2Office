@@ -97,6 +97,34 @@ export function reservationsRoute(deps: AppDeps) {
     return booked(c, r, 201);
   });
 
+  /** 繰り返しの予約を作る（第37.18節。`itemId`・`rule`・`startsOn`・`startTime`・`endTime`・`endsOn`・`purpose`）。90 日先までの回を作る。 */
+  app.post('/series', async (c) => {
+    const b = await body(c);
+    const r = await service.createSeries(who(c), {
+      itemId: String(b['itemId'] ?? ''), rule: String(b['rule'] ?? '') as 'weekly', startsOn: String(b['startsOn'] ?? ''),
+      startTime: String(b['startTime'] ?? ''), endTime: String(b['endTime'] ?? ''), endsOn: typeof b['endsOn'] === 'string' && b['endsOn'] ? b['endsOn'] : null,
+      purpose: String(b['purpose'] ?? ''),
+    });
+    if ('error' in r) return c.json(r, 400);
+    return c.json(r, 201);
+  });
+
+  /** 繰り返し（決まりの文・ものの名前・予約した人・取れなかった日）。 */
+  app.get('/series/:id', async (c) => {
+    const id = c.req.param('id');
+    const s = ID.test(id) ? await service.seriesOf(who(c), id) : null;
+    return s ? c.json({ series: s }) : c.json({ error: '繰り返しが見つかりません' }, 404);
+  });
+
+  /** 繰り返しを止める（これからの回をまとめて取り消す。本人と管理者だけ）。 */
+  app.delete('/series/:id', async (c) => {
+    const id = c.req.param('id');
+    if (!ID.test(id)) return c.json({ error: '繰り返しが見つかりません' }, 404);
+    const problem = await service.stopSeries(who(c), id);
+    if (problem) return c.json({ error: problem }, problem.includes('見つかりません') ? 404 : 403);
+    return c.json({ ok: true });
+  });
+
   /** 変える（時間・もの・用件。本人と管理者だけ）。 */
   app.patch('/:id', async (c) => {
     const id = c.req.param('id');

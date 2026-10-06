@@ -43,7 +43,8 @@ src/contracts/   契約の管理（内蔵の拡張。第38章の段 1）。項�
                  ドライブの置き場・契約書を開く・期限の見張りと自動更新の繰り越し）、ツール（tools.ts。contracts.find・register・update）、付属の業務「契約の台帳」（agents.ts）
 src/reservations/ 会議室・社用車・備品の予約（内蔵の拡張。第37章の段 1）。置き場（store.ts。PostgreSQL は期間の重なりを断る制約で、メモリも同じように断る）、
                  処理（service.ts。予約できるものを足す・直す・止める・並べ替え、予約する・空いているものを選ぶ・変える・取り消す・終わった、
-                 重なったときの次に空く時間とほかのもの、予約した人の Google カレンダーの予定、1 年で消す）、包み（package.js）。
+                 重なったときの次に空く時間とほかのもの、予約した人の Google カレンダーの予定、1 年で消す、繰り返しの予約（段 2））、包み（package.js）。
+                 日程調整で会議と一緒に会議室を取るのは tools/workspace.ts の calendar.create（room）
                  秘書の頼みの読み方と答えは src/secretary/reservations.ts
 src/subsidies/   補助金・助成金の案内（内蔵の拡張。第39章の段 1）。調べ先（jgrants.ts。jGrants の公開の API と見本・所在地は市区町村まで・
                  従業員の数の幅・対象の地域）、置き場（store.ts。PostgreSQL とメモリ）、処理（service.ts。会社のこと・jGrants と Web の調べもの・

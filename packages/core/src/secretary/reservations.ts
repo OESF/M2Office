@@ -7,7 +7,7 @@
  * どれかを言わなければ空いているものを選んで取り、確かめを求めない（ADR-0028）。
  */
 
-import { RESERVABLE_KIND_LABELS, type ReservableItem, type ReservableKind, type Reservation } from '@m2office/shared';
+import { RESERVABLE_KIND_LABELS, reservationRuleText, type ReservableItem, type ReservableKind, type Reservation, type ReservationRule } from '@m2office/shared';
 import type { LlmProvider } from '../llm/provider.js';
 import { aiAvailable } from '../llm/unconfigured.js';
 import { jstDate, shiftDate } from '../hr/attendance.js';
@@ -23,9 +23,29 @@ export interface ReservationSecretaryDeps {
   llmFor?(tenantId: string): Promise<LlmProvider | null>;
 }
 
+/** 繰り返しの頼み（「毎週月曜」「隔週の水曜」「毎月第 2 火曜」「毎月最後の金曜」。第37.18節）。 */
+export interface SeriesAsk {
+  rule: ReservationRule;
+  /** 曜日（日曜が 0） */
+  weekday: number;
+  /** 毎月のとき第何週か（5 は最後の週） */
+  nth: number | null;
+}
+
+/** 発言から繰り返しの頼みを読む（曜日が無ければ `null`）。 */
+export function seriesOf(message: string): SeriesAsk | null {
+  const m = message.normalize('NFKC').replace(/\s+/g, '');
+  const rep = /(毎週|隔週|毎月(?:第([1-5])|最後の)?)(?:の)?([日月火水木金土])曜/.exec(m);
+  if (!rep) return null;
+  const weekday = '日月火水木金土'.indexOf(rep[3]!);
+  if (rep[1] === '毎週') return { rule: 'weekly', weekday, nth: null };
+  if (rep[1] === '隔週') return { rule: 'biweekly', weekday, nth: null };
+  return { rule: 'monthly', weekday, nth: rep[1]!.includes('最後') ? 5 : rep[2] ? Number(rep[2]) : 1 };
+}
+
 /** 秘書への依頼。日付は `YYYY-MM-DD`、時刻は `HH:MM`（日本時間）。 */
 export type ReservationAsk =
-  | { kind: 'book'; item: string | null; itemKind: ReservableKind | null; date: string; start: string | null; end: string | null; people: number | null; purpose: string }
+  | { kind: 'book'; item: string | null; itemKind: ReservableKind | null; date: string; start: string | null; end: string | null; people: number | null; purpose: string; series: SeriesAsk | null }
   | { kind: 'status'; item: string | null; itemKind: ReservableKind | null; date: string; days: number }
   | { kind: 'mine' }
   | { kind: 'change'; item: string | null; itemKind: ReservableKind | null; date: string | null; extendMinutes: number | null; start: string | null; end: string | null }
@@ -162,7 +182,7 @@ export function parseReservation(message: string, today: string, names: readonly
   const people = /(\d{1,4})(?:人|名)/.exec(m);
   const quoted = /[「『](.+?)[」』]/.exec(message);
   const purpose = quoted ? quoted[1]!.slice(0, 120) : (/(?:用件は|用途は|目的は)(.+?)(?:で|。|$)/.exec(message.normalize('NFKC'))?.[1] ?? '').trim().slice(0, 120);
-  return { kind: 'book', item, itemKind, date: date ?? today, start: t.start, end: t.end, people: people ? Number(people[1]) : null, purpose };
+  return { kind: 'book', item, itemKind, date: date ?? today, start: t.start, end: t.end, people: people ? Number(people[1]) : null, purpose, series: seriesOf(message) };
 }
 
 /** 推論に日時と用件を読ませる（本人の発言と予約できるものの名前だけを渡す）。読めなければ `null`。 */
@@ -308,6 +328,21 @@ export async function answerReservation(
     const end = byLlm?.end ?? ask.end;
     if (!start || !end) return { kind: ask.kind, text: 'いつ使うかを教えてください（例: 明日 10 時から 1 時間）。' };
     const input = { startAt: at(date, start), endAt: at(date, end), purpose: byLlm?.purpose ?? ask.purpose };
+    // 繰り返し（「毎週月曜 10 時から 1 時間、会議室 A」）。90 日先までの回を取り、重なった日は飛ばして知らせる
+    if (ask.series) {
+      const named = ask.item ? items.find((i) => i.name === ask.item) : undefined;
+      const r = await deps.service.createSeries(who, {
+        ...(named ? { itemId: named.id } : { kind: ask.itemKind }), people: byLlm?.people ?? ask.people, ...ask.series,
+        startsOn: ask.date < today ? today : (ask.date === today && !/(今日|本日)/.test(message) ? today : ask.date),
+        startTime: start, endTime: end, purpose: input.purpose,
+      });
+      if ('error' in r) return { kind: ask.kind, text: r.error };
+      const skipped = r.skipped.map((d) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`).join('、');
+      return {
+        kind: ask.kind,
+        text: `${r.item.name}を${reservationRuleText(r.series)}で取りました（90 日先までの ${r.booked} 回。その先は毎日足していきます）。${skipped ? `ほかの予約と重なって取れなかった日: ${skipped}。` : ''}`,
+      };
+    }
     if (ask.item) {
       const item = items.find((i) => i.name === ask.item)!;
       return { kind: ask.kind, text: bookText(await deps.service.book(who, { itemId: item.id, ...input }), RESERVABLE_KIND_LABELS[item.kind]) };
