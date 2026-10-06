@@ -22,7 +22,7 @@ import type { CardCorners,
   Inquiry, InquiryDetail, InquiryParty, InquiryTask, InquiryReply, InquiryMailSkipped, InquiryMonthStats, InquirySettings, InquiryFaqTopic,
   CompetitorOverview, CompetitorFact, CompetitorReport, CompetitorSettings,
   Announcement, AnnouncementDetail, AnnouncementPreview, AnnouncementRecipient, AnnouncementRecipientsRefined, AnnouncementSettings, AnnouncementTexts,
-  Contract, ContractSettings, ReservableItem, ReservableKind, Reservation, ReservationRule, ReservationSeries, Subsidy, SubsidyContact, SubsidyProfile, SubsidyStatus, Member, MemberPoint, MemberReward, MemberSettings, MemberAudience, MemberMessage,
+  Contract, ContractSettings, ReservableItem, ReservableKind, Reservation, ReservationRule, ReservationSeries, Subsidy, SubsidyContact, SubsidyProfile, SubsidyStatus, Member, MemberPoint, MemberRank, MemberReward, MemberSettings, MemberAudience, MemberMessage,
   WebReviewCandidates, WebReviewReport, WebReviewReportBrief, WebReviewSettings, WebReviewStatus, WebReviewFinding, WebReviewFindingStatus, WebPageMetrics,
 } from '@m2office/shared';
 import { debugMode, recordCall } from './debug.js';
@@ -1343,7 +1343,10 @@ export const api = {
   },
   /** 会員とポイント（内蔵の拡張。仕様書 第40章）。 */
   members: {
-    list: (q = '') => call<{ items: Member[]; settings: { visitPoints: number; yenPerPoint: number; expiryDays: number; line: boolean }; admin: boolean }>(`/members${q ? `?${new URLSearchParams({ q })}` : ''}`),
+    list: (q = '') => call<{
+      items: Member[]; settings: { visitPoints: number; yenPerPoint: number; expiryDays: number; line: boolean };
+      rank: { silver: number | null; gold: number | null; auto: boolean; at: string | null }; admin: boolean;
+    }>(`/members${q ? `?${new URLSearchParams({ q })}` : ''}`),
     get: (id: string) => call<{ member: Member; points: MemberPoint[]; candidates: Member[]; cardUrl: string | null }>(`/members/${encodeURIComponent(id)}`),
     /** 店頭で会員を作る。 */
     create: (input: { nickname: string; phone?: string; birthday?: string }) => call<{ member: Member; cardUrl: string }>('/members', { method: 'POST', body: JSON.stringify(input) }),
@@ -1360,7 +1363,7 @@ export const api = {
     merge: (id: string, into: string) => call<{ ok: true }>(`/members/${encodeURIComponent(id)}/merge`, { method: 'POST', body: JSON.stringify({ into }) }),
     undo: (pointId: string) => call<{ ok: true }>(`/members/points/${encodeURIComponent(pointId)}/undo`, { method: 'POST', body: '{}' }),
     rewards: () => call<{ items: MemberReward[] }>('/members/rewards'),
-    createReward: (input: { name: string; points: number; birthdayOnly?: boolean }) => call<{ reward: MemberReward }>('/members/rewards', { method: 'POST', body: JSON.stringify(input) }),
+    createReward: (input: { name: string; points: number; birthdayOnly?: boolean; minRank?: MemberRank }) => call<{ reward: MemberReward }>('/members/rewards', { method: 'POST', body: JSON.stringify(input) }),
     updateReward: (id: string, patch: Record<string, unknown>) => call<{ ok: true }>(`/members/rewards/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
     /** 会員への LINE の知らせと、宛先ごとの LINE でつながっている会員の数（第40.18節）。 */
     messages: () => call<{ items: MemberMessage[]; counts: Record<MemberAudience, number> }>('/members/messages'),

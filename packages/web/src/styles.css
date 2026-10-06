@@ -2046,6 +2046,7 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .mbr-reward-list li.is-stopped { opacity: 0.55; }
 .mbr-head { display: flex; flex-wrap: wrap; gap: 16px; justify-content: space-between; }
 .mbr-head h2 { margin: 0; }
+.mbr-rank.is-gold, .m-mbr-name .mbr-rank { background: var(--warn-soft); color: var(--warn); }
 .mbr-balance { font-size: calc(30px * var(--font-scale)); font-weight: 700; margin: 4px 0; }
 .mbr-balance small { font-size: calc(14px * var(--font-scale)); }
 .mbr-fields label { display: flex; flex-direction: column; gap: 2px; font-size: calc(12px * var(--font-scale)); }

@@ -1,14 +1,15 @@
 /**
  * @file 会員とポイントの画面（仕様書 第40.9節）。会員の一覧（探す・作る）／1 人（ポイントの記録・取り消し・調整・呼び名と電話・会員証の QR と紙のカード・
- * まとめる・削除）／特典（管理者が作る・直す・止める）。店員がポイントを付けるのはスマホのページ（`/m/members`）。
+ * まとめる・削除）／特典（管理者が作る・直す・止める。誕生月だけ・ランクだけ）。店員がポイントを付けるのはスマホのページ（`/m/members`）。
+ * ランク（第40.19節）は直近 1 年の来店の回数で決まり、一覧と 1 人の画面に出す。
  *
  * ポイントはお金ではない。購入の金額は残さない。説明文は常に出さない（原則 u11）。
  */
 
 import { useCallback, useEffect, useState } from 'react';
 import {
-  MEMBER_AUDIENCE_LABELS, MEMBER_EXPIRY_TEXT, MEMBER_MESSAGE_FIELDS, MEMBER_POINT_KIND_LABELS,
-  type Member, type MemberAudience, type MemberMessage, type MemberPoint, type MemberReward,
+  MEMBER_AUDIENCE_LABELS, MEMBER_EXPIRY_TEXT, MEMBER_MESSAGE_FIELDS, MEMBER_POINT_KIND_LABELS, MEMBER_RANK_LABELS, minRankText,
+  type Member, type MemberAudience, type MemberMessage, type MemberPoint, type MemberRank, type MemberReward,
 } from '@m2office/shared';
 import { api, describeError } from './api.js';
 
@@ -18,6 +19,11 @@ const birthdayText = (b: string | null) => (b ? `${Number(b.slice(0, 2))}/${Numb
 const timeLabel = (iso: string) => new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(iso));
 
 type Note = { kind: 'ok' | 'error'; text: string } | null;
+
+/** ランクの印（一般は出さない）。 */
+function RankBadge({ rank }: { rank: MemberRank }) {
+  return rank === 'regular' ? null : <span className={`badge mbr-rank is-${rank}`}>{MEMBER_RANK_LABELS[rank]}</span>;
+}
 function NoteText({ note }: { note: Note }) {
   return note ? <p className={`mbr-note is-${note.kind}`} role={note.kind === 'error' ? 'alert' : 'status'}>{note.text}</p> : null;
 }
@@ -58,7 +64,10 @@ function MemberList({ onOpen, changeKey }: { onOpen: (id: string) => void; chang
         <button className={rewardsOpen ? 'btn small' : 'btn ghost small'} onClick={() => setRewardsOpen(!rewardsOpen)}>特典</button>
         {data.admin && <button className={lineOpen ? 'btn small' : 'btn ghost small'} onClick={() => setLineOpen(!lineOpen)}>LINE で知らせる</button>}
         <a className="btn ghost small" href="/m/members">スマホのページ</a>
-        <span className="small muted">来店 {data.settings.visitPoints} ポイント／{data.settings.yenPerPoint} 円で 1 ポイント／有効期限 {data.settings.expiryDays} 日</span>
+        <span className="small muted">
+          来店 {data.settings.visitPoints} ポイント／{data.settings.yenPerPoint} 円で 1 ポイント／有効期限 {data.settings.expiryDays} 日
+          {data.rank.gold !== null && data.rank.silver !== null && <>／ランク: 直近 1 年の来店 ゴールド {data.rank.gold} 回・シルバー {data.rank.silver} 回{data.rank.auto ? '' : '（固定）'}</>}
+        </span>
         <input className="mbr-search" type="search" value={q} placeholder="呼び名・会員番号・電話で探す" aria-label="探す" onChange={(e) => setQ(e.target.value)} />
       </div>
       {adding && <CreateForm onDone={(id) => { setAdding(false); onOpen(id); }} />}
@@ -74,7 +83,7 @@ function MemberList({ onOpen, changeKey }: { onOpen: (id: string) => void; chang
                 {data.items.map((m) => (
                   <tr key={m.id}>
                     <td>{m.number}</td>
-                    <td><button className="link" onClick={() => onOpen(m.id)}>{m.nickname}</button></td>
+                    <td><button className="link" onClick={() => onOpen(m.id)}>{m.nickname}</button> <RankBadge rank={m.rank} /></td>
                     <td>{m.balance}</td>
                     <td>{m.visits}</td>
                     <td>{dayLabel(m.lastVisitAt)}</td>
@@ -108,7 +117,7 @@ function CreateForm({ onDone }: { onDone: (id: string) => void }) {
 /** 特典（管理者は作る・直す・止める）。 */
 function RewardManager({ admin }: { admin: boolean }) {
   const [items, setItems] = useState<MemberReward[] | null>(null);
-  const [v, setV] = useState({ name: '', points: '', birthdayOnly: false });
+  const [v, setV] = useState({ name: '', points: '', birthdayOnly: false, minRank: 'regular' as MemberRank });
   const [error, setError] = useState<string | null>(null);
   const load = () => api.members.rewards().then((r) => setItems(r.items)).catch((e) => setError(describeError(e, '読めませんでした')));
   useEffect(() => { void load(); }, []);
@@ -120,7 +129,15 @@ function RewardManager({ admin }: { admin: boolean }) {
           <input value={v.name} maxLength={40} placeholder="特典（ドリンク 1 杯など）" aria-label="特典の名前" onChange={(e) => setV({ ...v, name: e.target.value })} />
           <input className="mbr-num" type="number" min={1} value={v.points} placeholder="ポイント" aria-label="必要なポイント" onChange={(e) => setV({ ...v, points: e.target.value })} />
           <label className="check small"><input type="checkbox" checked={v.birthdayOnly} onChange={(e) => setV({ ...v, birthdayOnly: e.target.checked })} />誕生月だけ</label>
-          <button className="btn small" disabled={!v.name.trim() || !v.points} onClick={() => void run(async () => { await api.members.createReward({ name: v.name.trim(), points: Number(v.points), birthdayOnly: v.birthdayOnly }); setV({ name: '', points: '', birthdayOnly: false }); })}>足す</button>
+          <select value={v.minRank} aria-label="使える会員" onChange={(e) => setV({ ...v, minRank: e.target.value as MemberRank })}>
+            <option value="regular">会員全員</option>
+            <option value="silver">シルバー以上</option>
+            <option value="gold">ゴールドだけ</option>
+          </select>
+          <button className="btn small" disabled={!v.name.trim() || !v.points} onClick={() => void run(async () => {
+            await api.members.createReward({ name: v.name.trim(), points: Number(v.points), birthdayOnly: v.birthdayOnly, minRank: v.minRank });
+            setV({ name: '', points: '', birthdayOnly: false, minRank: 'regular' });
+          })}>足す</button>
         </div>
       )}
       {error && <p className="error">{error}</p>}
@@ -129,7 +146,7 @@ function RewardManager({ admin }: { admin: boolean }) {
         <ul className="mbr-reward-list">
           {items.map((r) => (
             <li key={r.id} className={r.status === 'stopped' ? 'is-stopped' : ''}>
-              <span>{r.name}{r.birthdayOnly && <> <span className="badge">誕生月</span></>}</span><span>{r.points} ポイント</span>
+              <span>{r.name}{r.birthdayOnly && <> <span className="badge">誕生月</span></>}{r.minRank !== 'regular' && <> <span className="badge">{minRankText(r.minRank)}</span></>}</span><span>{r.points} ポイント</span>
               {admin && <button className="btn ghost small" onClick={() => void run(() => api.members.updateReward(r.id, { status: r.status === 'active' ? 'stopped' : 'active' }))}>{r.status === 'active' ? '止める' : '使う'}</button>}
             </li>
           ))}
@@ -160,9 +177,9 @@ function MemberView({ id, onBack, onOpen, changeKey }: { id: string; onBack: () 
       <div className="row wrap"><button className="link small" onClick={onBack}>‹ 会員の一覧</button><NoteText note={note} /></div>
       <div className="mbr-head">
         <div>
-          <h2>No. {m.number} {m.nickname} {m.line && <span className="badge">LINE</span>}</h2>
+          <h2>No. {m.number} {m.nickname} <RankBadge rank={m.rank} /> {m.line && <span className="badge">LINE</span>}</h2>
           <p className="mbr-balance">{m.balance} <small>ポイント</small></p>
-          <p className="small muted">来店 {m.visits} 回・最後の来店 {dayLabel(m.lastVisitAt)}・作った日 {dayLabel(m.createdAt)}</p>
+          <p className="small muted">来店 {m.visits} 回（直近 1 年 {m.yearVisits} 回）・最後の来店 {dayLabel(m.lastVisitAt)}・作った日 {dayLabel(m.createdAt)}</p>
           <div className="row wrap mbr-fields">
             <label>呼び名 <input defaultValue={m.nickname} maxLength={30} onBlur={(e) => e.target.value.trim() !== m.nickname && void act(() => api.members.update(m.id, { nickname: e.target.value }), '直しました')} /></label>
             <label>電話 <input defaultValue={m.phone} maxLength={20} onBlur={(e) => e.target.value.trim() !== m.phone && void act(() => api.members.update(m.id, { phone: e.target.value }), '直しました')} /></label>

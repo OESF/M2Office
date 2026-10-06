@@ -7,7 +7,7 @@
 
 import QRCode from 'qrcode';
 import { PDFDocument, rgb } from 'pdf-lib';
-import { memberCardPath } from '@m2office/shared';
+import { MEMBER_RANK_LABELS, memberCardPath } from '@m2office/shared';
 import type { CardView } from './service.js';
 import { embedJapaneseFonts } from '../files/pdf-render.js';
 
@@ -64,6 +64,7 @@ const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&
 const STYLE = `body{margin:0;font-family:system-ui,-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;background:#f4f6f6;color:#1d2a2a}
 main{max-width:420px;margin:0 auto;padding:20px 16px 40px}.card{background:#fff;border-radius:14px;padding:20px;box-shadow:0 1px 4px rgba(0,0,0,.08)}
 h1{font-size:15px;margin:0 0 4px;color:#555}.no{font-size:22px;font-weight:700;margin:2px 0}.name{color:#555;margin:0 0 12px}
+.rank{display:inline-block;margin:0 0 8px;padding:2px 10px;border-radius:999px;background:#f3ead2;color:#7a5a12;font-weight:700;font-size:14px}
 .qr svg{width:220px;height:220px;display:block;margin:8px auto}.pts{font-size:40px;font-weight:700;text-align:center;margin:8px 0 0}.pts small{font-size:15px}
 ul{list-style:none;padding:0;margin:12px 0 0}li{display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid #eee}li.off{color:#999}
 .note{font-size:12px;color:#777;margin-top:14px}input{font:inherit;padding:10px;border:1px solid #ccc;border-radius:8px;width:100%;box-sizing:border-box}
@@ -73,7 +74,7 @@ button{font:inherit;margin-top:10px;width:100%;padding:12px;border:0;border-radi
 export const CARD_PAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
 
 /**
- * 会員証のページ（本人だけが開く鍵つきの URL）。会員番号・呼び名・いまのポイント・使える特典・有効期限・QR。
+ * 会員証のページ（本人だけが開く鍵つきの URL）。会員番号・呼び名・ランク・いまのポイント・使える特典・有効期限・QR。
  *
  * @param expiryDays 最後に貯めた日から失効までの日数
  */
@@ -83,9 +84,11 @@ export function renderCardPage(company: string, v: CardView, qrSvg: string, expi
     ? new Date(Date.parse(m.lastEarnedAt) + expiryDays * 86_400_000 + 9 * 3_600_000).toISOString().slice(0, 10).replace(/-/g, '/')
     : null;
   const rewards = v.rewards.map((r) => `<li class="${r.enough ? '' : 'off'}"><span>${esc(r.name)}</span><span>${r.points} ポイント</span></li>`).join('');
+  // ランク（第40.19節。一般は出さない）
+  const rank = m.rank === 'regular' ? '' : `<p class="rank">${MEMBER_RANK_LABELS[m.rank]}会員</p>`;
   return `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex"><title>会員証</title><style>${STYLE}</style></head><body><main><div class="card">
-<h1>${esc(company || '会員証')}</h1><p class="no">No. ${m.number}</p><p class="name">${esc(m.nickname)} さん</p>
+<h1>${esc(company || '会員証')}</h1><p class="no">No. ${m.number}</p><p class="name">${esc(m.nickname)} さん</p>${rank}
 <div class="qr">${qrSvg}</div><p class="pts">${m.balance} <small>ポイント</small></p>
 ${rewards ? `<ul>${rewards}</ul>` : ''}
 <p class="note">お店でこの画面の QR を見せてください。${until && m.balance > 0 ? `ポイントの有効期限: ${until}（ポイントを貯めると延びます）。` : ''}この画面は、ご本人だけが開けるページです。ほかの人に教えないでください。</p>

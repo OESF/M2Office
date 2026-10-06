@@ -492,6 +492,8 @@ export function buildDeps(): AppDeps {
         return (await enqueueJob(repo, { tenantId, requestedBy: userId, def, input: { messageId }, origin: 'menu', actor: { type: 'user', id: userId } })).runId;
       },
       runStatus: async (tenantId, runId) => (await repo.getRun(tenantId, runId))?.status ?? null,
+      // 店頭サイネージに特典を流す（第40.19節）
+      signage: signageService,
     }),
     access: membersAccess(repo),
   };

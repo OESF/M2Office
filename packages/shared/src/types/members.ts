@@ -8,6 +8,18 @@
 /** 会員とポイントの拡張機能の ID。 */
 export const MEMBERS_EXTENSION_ID = 'members';
 
+/** 会員のランク（第40.19節）。直近 1 年の来店の回数で決まる。 */
+export type MemberRank = 'regular' | 'silver' | 'gold';
+
+/** ランクの名前（regular は会員証などに出さない）。 */
+export const MEMBER_RANK_LABELS: Record<MemberRank, string> = { regular: '一般', silver: 'シルバー', gold: 'ゴールド' };
+
+/** ランクの順（上ほど大きい）。 */
+export const MEMBER_RANK_ORDER: Record<MemberRank, number> = { regular: 0, silver: 1, gold: 2 };
+
+/** 特典を使えるランクの書き方（「シルバー以上」「ゴールドだけ」。全員なら空）。 */
+export const minRankText = (r: MemberRank): string => (r === 'gold' ? 'ゴールドだけ' : r === 'silver' ? 'シルバー以上' : '');
+
 /** 会員（第40.3節）。 */
 export interface Member {
   id: string;
@@ -25,6 +37,10 @@ export interface Member {
   balance: number;
   /** 来店の回数 */
   visits: number;
+  /** 直近 1 年の来店の回数（ランクの元。第40.19節） */
+  yearVisits: number;
+  /** ランク */
+  rank: MemberRank;
   /** 最後に来店した日時 */
   lastVisitAt: string | null;
   /** 最後にポイントを貯めた日時（有効期限の起点） */
@@ -68,6 +84,8 @@ export interface MemberReward {
   points: number;
   /** 誕生月の会員だけが使えるか（第40.18節） */
   birthdayOnly: boolean;
+  /** 使えるいちばん下のランク（regular は全員。第40.19節） */
+  minRank: MemberRank;
   /** 使える期間（任意。YYYY-MM-DD） */
   validFrom: string | null;
   validTo: string | null;
@@ -90,11 +108,27 @@ export interface MemberSettings {
   lineLoginChannelId: string;
   /** 週の見立てを送った日時（第40.18節） */
   digestAt?: string | null;
+  /**
+   * ランクの境の回数（直近 1 年の来店。第40.19節）。自動なら月に 1 回、会社の会員の来店の分布から仕組みが決める。
+   * どちらも `null` ならランクを使わない（来店のある会員がまだ少ない）
+   */
+  rankSilver?: number | null;
+  rankGold?: number | null;
+  /** 境の回数を仕組みが決めるか（偽なら管理者が決めた回数のまま） */
+  rankAuto?: boolean;
+  /** 境の回数を決めた日時 */
+  rankAt?: string | null;
+  /** 店頭サイネージに特典を流すか（第40.19節） */
+  signage?: boolean;
+  /** サイネージに流している特典の 1 枚（素材の ID と中身の印） */
+  signageAssetId?: string | null;
+  signageDigest?: string | null;
 }
 
 /** 会員とポイントは既定で切り（第40.2節）。 */
 export const DEFAULT_MEMBER_SETTINGS: MemberSettings = {
   enabled: false, visitPoints: 1, yenPerPoint: 100, expiryDays: 365, liffId: '', lineLoginChannelId: '',
+  rankSilver: null, rankGold: null, rankAuto: true, rankAt: null, signage: false, signageAssetId: null, signageDigest: null,
 };
 
 /** 決まり。 */
@@ -106,6 +140,18 @@ export const MEMBER_LIMITS = {
   purchaseMax: 10_000_000,
   /** 1 回の調整の上限 */
   adjustMax: 10_000,
+  /** ランクを数える日数（直近 1 年） */
+  rankDays: 365,
+  /** 自動のとき、来店のある会員のうち上からどれだけをゴールド・シルバー（ゴールドを含む）にするか */
+  rankGoldShare: 0.1,
+  rankSilverShare: 0.3,
+  /** 自動のときの境の回数の下限（来店の少ない店で 1 回でシルバーにならないように） */
+  rankSilverMin: 2,
+  rankGoldMin: 3,
+  /** 自動で境を決めるのに要る、来店のある会員の数 */
+  rankMembersMin: 10,
+  /** サイネージに出す特典の数 */
+  signageRewardsMax: 6,
 } as const;
 
 /** 会員証のページの道（鍵つき）。 */

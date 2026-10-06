@@ -43,13 +43,15 @@ export function membersRoute(deps: AppDeps) {
     await next();
   });
 
-  /** 一覧（`q`: 呼び名・会員番号・電話）と、会社の率と、本人が管理者か。 */
+  /** 一覧（`q`: 呼び名・会員番号・電話）と、会社の率と、ランクの境と、本人が管理者か。 */
   app.get('/', async (c) => {
     const w = who(c);
     const s = await service.settings(w.tenantId);
     return c.json({
       items: await service.list(w, (c.req.query('q') ?? '').slice(0, 50)),
       settings: { visitPoints: s.visitPoints, yenPerPoint: s.yenPerPoint, expiryDays: s.expiryDays, line: !!(s.liffId && s.lineLoginChannelId) },
+      // ランクの境の回数（第40.19節。どちらも null ならまだランクを使わない）
+      rank: await service.rankCut(w.tenantId),
       admin: c.get('ctx').user.roles.includes('admin'),
     });
   });

@@ -9,7 +9,7 @@ import { MEMBERS_EXTENSION_ID, type AgentDefinition } from '@m2office/shared';
 import type { ExtensionPackage } from '../extensions/loader.js';
 
 /** 内蔵の拡張の版。付属の業務やツールが変わったら上げる。 */
-export const MEMBERS_EXTENSION_VERSION = '1.1.0';
+export const MEMBERS_EXTENSION_VERSION = '1.2.0';
 
 /** 付属の業務「会員とポイント」（秘書から）。 */
 export const MEMBER_DESK: AgentDefinition = {
@@ -18,7 +18,7 @@ export const MEMBER_DESK: AgentDefinition = {
   version: 1,
   name: '会員とポイント',
   category: 'sample',
-  description: '会員の数・ポイント・来店の回数を答え（「会員は何人？」「しばらく来ていない会員は？」「田中さんのポイントは？」）、ポイントを足し（「田中さんに 5 ポイント足して」）、特典を作ります（「10 ポイントでドリンク 1 杯の特典を作って」）',
+  description: '会員の数・ポイント・来店の回数を答え（「会員は何人？」「しばらく来ていない会員は？」「田中さんのポイントは？」）、ポイントを足し（「田中さんに 5 ポイント足して」）、特典を作り（「10 ポイントでドリンク 1 杯の特典を作って」）、ランクを答えます（「ゴールドの会員は何人？」）',
   locale: 'ja-JP',
   compartment: null,
   menu: false,
@@ -31,19 +31,20 @@ export const MEMBER_DESK: AgentDefinition = {
       context: { type: 'string', title: 'これまでの会話', format: 'textarea' },
     },
   },
-  tools: ['members.find', 'members.points', 'members.rewards'],
+  tools: ['members.find', 'members.points', 'members.rewards', 'members.rank'],
   steps: [
     {
       id: 'act',
       type: 'agent',
-      tools: ['members.find', 'members.points', 'members.rewards'],
+      tools: ['members.find', 'members.points', 'members.rewards', 'members.rank'],
       label: '会員の台帳を扱う',
       instruction: [
         '依頼（request）に合わせて、ツールを 1 回だけ呼ぶ。',
         '「会員は何人？」は members.find（query 無し。total を答える）。「よく来た会員」は order に visits、「ポイントの多い会員」は points、「しばらく来ていない会員」は order に away と awayDays（言われなければ 60）。',
         '「〇〇さんのポイントは？」「会員番号 12 は？」は members.find の query に呼び名か番号を入れる。',
         '「〇〇さんに 5 ポイント足して」「3 ポイント引いて」は members.points（引くなら負の数）。理由（note）が言われなければ「秘書から」と入れる。',
-        '特典の一覧・作る・直す・止めるは members.rewards。',
+        '特典の一覧・作る・直す・止めるは members.rewards（「ゴールドの会員だけの特典」は minRank に gold、「シルバー以上」は silver）。',
+        '「ゴールドの会員は？」は members.find の rank に gold。「ランクの決め方は？」「ゴールドは年 20 回にして」「ランクを自動に戻して」は members.rank（show・set・auto）。',
       ].join('\n'),
       onError: 'stop',
     },
@@ -67,6 +68,7 @@ export const MEMBER_DESK: AgentDefinition = {
       { title: '会員を聞く', input: { request: 'しばらく来ていない会員は？' } },
       { title: 'ポイントを足す', input: { request: '会員番号 12 に 5 ポイント足して' } },
       { title: '特典を作る', input: { request: '10 ポイントでドリンク 1 杯の特典を作って' } },
+      { title: 'ランクを聞く', input: { request: 'ゴールドの会員は何人？' } },
     ],
     notes: ['ポイントを付ける・特典を使うのは、店員がスマホの会員のページで行います', 'ポイントはお金ではありません。値引きの計算はレジで行います'],
   },
@@ -117,10 +119,10 @@ export const MEMBERS_PACKAGE: ExtensionPackage = {
     id: MEMBERS_EXTENSION_ID,
     name: '会員とポイント',
     version: MEMBERS_EXTENSION_VERSION,
-    description: 'お客様を会員にし、来店と購入のたびにポイントを貯めて、特典と交換できます。会員証は LINE とスマホ（紙のカードも印刷できます）。店員はスマホで QR を読むだけです',
+    description: 'お客様を会員にし、来店と購入のたびにポイントを貯めて、特典と交換できます。会員証は LINE とスマホ（紙のカードも印刷できます）。店員はスマホで QR を読むだけです。よく来るお客様はゴールド・シルバーになり、ランクだけの特典も作れます',
     publisher: { name: 'M2Office', verified: true },
     platform_schema: '>=1 <2',
-    permissions: { tools: ['members.find', 'members.points', 'members.rewards', 'members.send_line'], max_risk_level: 'external-send' },
+    permissions: { tools: ['members.find', 'members.points', 'members.rewards', 'members.rank', 'members.send_line'], max_risk_level: 'external-send' },
   },
   agents: MEMBER_AGENTS,
   connectors: [],

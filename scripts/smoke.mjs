@@ -6408,7 +6408,7 @@ console.log('\n■ 79. 補助金・助成金の案内（入り切り・利用範
   }
 }
 
-console.log('\n■ 80. 会員とポイント（入り切り・会員証・来店は 1 日 1 回・購入は金額を残さない・特典・取り消し・LINE の会員証・記録は追記のみ・会社の境界。第40.17節）');
+console.log('\n■ 80. 会員とポイント（入り切り・会員証・来店は 1 日 1 回・購入は金額を残さない・特典・取り消し・LINE の会員証・ランク・記録は追記のみ・会社の境界。第40.17節〜第40.19節）');
 {
   const { default: pg } = await import('pg');
   const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
@@ -6486,6 +6486,20 @@ console.log('\n■ 80. 会員とポイント（入り切り・会員証・来店
     msgMember.status === 403 && msgNoLine.status === 400 && /LINE/.test(msgNoLine.body.error ?? '') && msgList.status === 200 && typeof msgList.body.counts?.line === 'number'
       ? ok('会員への LINE の知らせを用意するのは管理者だけ。LINE をつないでいなければ用意しない') : ng('LINE の知らせの扱いが違う', JSON.stringify({ m: msgMember.status, a: msgNoLine.body, l: msgList.status }));
 
+    // ランクと店頭サイネージ（第40.19節）: 来店のある会員が少なければ境を決めず、ランクだけの特典は一般の会員には出ない
+    const listed = await call('a', '/v1/members', {}, 'member');
+    const goldOnly = await call('a', '/v1/members/rewards', { method: 'POST', body: JSON.stringify({ name: 'スモークのゴールドの特典', points: 1, minRank: 'gold' }) });
+    const badRank = await call('a', '/v1/members/rewards', { method: 'POST', body: JSON.stringify({ name: 'スモークの違うランク', points: 1, minRank: 'platinum' }) });
+    const rankedCard = await call('a', `/v1/members/card?code=${encodeURIComponent(cardUrl)}`, {}, 'member');
+    listed.body.rank && listed.body.rank.gold === null && listed.body.items?.every((m) => m.rank === 'regular' && typeof m.yearVisits === 'number')
+      && goldOnly.status === 201 && goldOnly.body.reward?.minRank === 'gold' && badRank.status === 400 && !rankedCard.body.rewards?.some((r) => r.name === 'スモークのゴールドの特典')
+      ? ok('ランク: 来店のある会員が少ないうちは境を決めず全員が一般。ゴールドだけの特典は一般の会員に出ない') : ng('ランクが違う', JSON.stringify({ rank: listed.body.rank, gold: goldOnly.body, bad: badRank.status, card: rankedCard.body.rewards }));
+    const rankByMember = await call('a', '/v1/admin/extensions/members/settings', { method: 'PUT', body: JSON.stringify({ rankSilver: 2, rankGold: 4 }) }, 'member');
+    const signageOn = await call('a', '/v1/admin/extensions/members/settings', { method: 'PUT', body: JSON.stringify({ signage: true }) });
+    const { rows: [afterSig] } = await owner.query(`select members from tenant_settings where tenant_id = 't-alpha'`);
+    rankByMember.status === 403 && signageOn.status === 200 && afterSig.members?.signage === true
+      ? ok('ランクの境を決めるのは管理者だけ。管理者は店頭サイネージに特典を流すにできる') : ng('ランクの境・サイネージの設定が違う', JSON.stringify({ m: rankByMember.status, s: signageOn.status, v: afterSig.members?.signage }));
+
     await call('b', '/v1/admin/extensions/members/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
     const other = await call('b', `/v1/members/card?code=${encodeURIComponent(cardUrl)}`, {}, 'member');
     const otherPage = await open('b', `/v1/member-card/${key}`);
@@ -6512,6 +6526,8 @@ console.log('\n■ 80. 会員とポイント（入り切り・会員証・来店
       await app.end();
     }
   } finally {
+    // サイネージに流した特典の 1 枚を外してから片付ける（第40.19節）
+    await call('a', '/v1/admin/extensions/members/settings', { method: 'PUT', body: JSON.stringify({ signage: false }) }).catch(() => null);
     await owner.query(`delete from member_points where tenant_id in ('t-alpha', 't-beta')`);
     await owner.query(`delete from members where tenant_id in ('t-alpha', 't-beta')`);
     await owner.query(`delete from member_rewards where tenant_id in ('t-alpha', 't-beta')`);

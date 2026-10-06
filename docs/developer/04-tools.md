@@ -119,6 +119,7 @@
 | `inventory.reserve` | write-internal | — | 予約に合わせて品目を取り置き（使える数だけを減らす）、取り消し・使ったにし、メニューで使う品目を覚えます。誰にも送りません |
 | `knowledge.register` | write-internal | — | 承認された議事録などを、そのまま社内の知識に登録します。すべての承認のあとに行い、承認した人が見た内容だけを登録します |
 | `members.points` | write-internal | — | 会員のポイントを足す・引く（理由を残す） |
+| `members.rank` | write-internal | — | 会員のランクの境（直近 1 年の来店の回数）を見る・決める・自動に戻す（決めるのは管理者） |
 | `members.rewards` | write-internal | — | ポイントと交換できる特典を作る・直す・止める（管理者） |
 | `notification.send` | write-internal | — | 依頼した本人にだけお知らせを届けます。他の人には送りません |
 | `sheets.append` | write-internal | `drive.file`（機密でない） | M2Office で作った表に行を足します |
@@ -187,7 +188,7 @@
 | `knowledge.search` | `query`（必須）: 調べる言葉 |
 | `meet.transcript` | `query`: 会議の題名に含まれる言葉（空ならいちばん新しい会議） |
 | `meeting.get_transcript` | `transcript`（必須）: 会議の記録（文字起こし） |
-| `members.find` | `query`: 会員番号か呼び名、`order`: points・visits・recent・away、`awayDays`: 何日来ていない会員か |
+| `members.find` | `query`: 会員番号か呼び名、`order`: points・visits・recent・away、`awayDays`: 何日来ていない会員か、`rank`: gold・silver（そのランクの会員だけ） |
 | `notices.list` | なし |
 | `pdf.extract` | `fileId`（必須）: ファイルの ID |
 | `profile.read` | なし |
@@ -240,7 +241,8 @@
 | `inventory.reserve` | `action`（必須）: hold・cancel・use・teach（hold・cancel・use・teach）、`item`: 品目（品名・自社のコード・バーコード）、`qty`: 数（使う単位）、`when`: 予約の日時、`booking`: 予約番号、`menu`: 予約のメニュー（コース・施術・プラン）の名前 |
 | `knowledge.register` | `artifactId`（必須）: 登録する成果物の ID（document.create の結果） |
 | `members.points` | `query`（必須）: 会員番号か呼び名、`points`（必須）: 足す数（引くなら負）、`note`（必須）: 理由 |
-| `members.rewards` | `action`（必須）: list・create・update・stop、`name`: 特典の名前、`points`: 必要なポイント、`newName`: 新しい名前、`birthdayOnly`: 誕生月の会員だけが使える特典か |
+| `members.rank` | `action`（必須）: show・set・auto、`silver`: シルバーになる直近 1 年の来店の回数、`gold`: ゴールドになる直近 1 年の来店の回数 |
+| `members.rewards` | `action`（必須）: list・create・update・stop、`name`: 特典の名前、`points`: 必要なポイント、`newName`: 新しい名前、`birthdayOnly`: 誕生月の会員だけが使える特典か、`minRank`: regular（全員）・silver（シルバー以上）・gold（ゴールドだけ） |
 | `notification.send` | `kind`: 種類（brief・run）、`title`（必須）: 題名、`body`（必須）: 本文 |
 | `sheets.append` | `spreadsheetId`（必須）: スプレッドシートの ID、`rows`（必須）: 足す行の配列（各行は値の配列） |
 | `subsidies.mark` | `query`（必須）: 制度の名前の言葉、`status`（必須）: interested・skipped・new |

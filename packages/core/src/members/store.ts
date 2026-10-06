@@ -7,7 +7,7 @@
 
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
-import type { MemberAudience, MemberMessage, MemberMessageStatus, MemberPointKind, MemberReward } from '@m2office/shared';
+import type { MemberAudience, MemberMessage, MemberMessageStatus, MemberPointKind, MemberRank, MemberReward } from '@m2office/shared';
 
 /** 置き場に持つ会員（数は記録から求めたもの）。 */
 export interface StoredMember {
@@ -68,8 +68,8 @@ export interface MemberStore {
   getPoint(tenantId: string, id: string): Promise<StoredPoint | null>;
   rewards(tenantId: string): Promise<MemberReward[]>;
   getReward(tenantId: string, id: string): Promise<MemberReward | null>;
-  createReward(tenantId: string, r: Pick<MemberReward, 'name' | 'points' | 'validFrom' | 'validTo'> & { birthdayOnly?: boolean }): Promise<string>;
-  updateReward(tenantId: string, id: string, patch: Partial<Pick<MemberReward, 'name' | 'points' | 'validFrom' | 'validTo' | 'status' | 'birthdayOnly'>>): Promise<void>;
+  createReward(tenantId: string, r: Pick<MemberReward, 'name' | 'points' | 'validFrom' | 'validTo'> & { birthdayOnly?: boolean; minRank?: MemberRank }): Promise<string>;
+  updateReward(tenantId: string, id: string, patch: Partial<Pick<MemberReward, 'name' | 'points' | 'validFrom' | 'validTo' | 'status' | 'birthdayOnly' | 'minRank'>>): Promise<void>;
   createMessage(tenantId: string, m: { kind: MemberMessage['kind']; audience: MemberAudience; text: string; recipients: string[]; createdBy: string }): Promise<string>;
   getMessage(tenantId: string, id: string): Promise<StoredMessage | null>;
   /** 新しい順。 */
@@ -77,6 +77,8 @@ export interface MemberStore {
   updateMessage(tenantId: string, id: string, patch: MessagePatch): Promise<void>;
   /** 期間の来店の回数（取り消した来店は数えない）。 */
   visitCount(tenantId: string, from: string, to: string): Promise<number>;
+  /** 会員ごとの、その日時からの来店の回数（取り消した来店は数えない。ランクの元。第40.19節）。来店の無い会員は入らない。 */
+  visitsByMember(tenantId: string, since: string): Promise<Map<string, number>>;
 }
 
 const iso = (v: unknown): string => (v instanceof Date ? v.toISOString() : new Date(String(v ?? '')).toISOString());
@@ -98,7 +100,7 @@ interface PointRow {
   id: string; member_id: string; kind: MemberPointKind; points: number; reward_id: string | null; reward_name: string; reversal_of: string | null;
   reversed: boolean | null; note: string; local_day: unknown; created_by: string; created_at: unknown;
 }
-interface RewardRow { id: string; name: string; points: number; birthday_only: boolean | null; valid_from: unknown; valid_to: unknown; status: 'active' | 'stopped'; created_at: unknown }
+interface RewardRow { id: string; name: string; points: number; birthday_only: boolean | null; min_rank: MemberRank | null; valid_from: unknown; valid_to: unknown; status: 'active' | 'stopped'; created_at: unknown }
 interface MessageRow {
   id: string; kind: MemberMessage['kind']; audience: MemberAudience; text: string; recipients: string[] | null; status: MemberMessageStatus; run_id: string | null;
   sent: number; note: string; created_by: string; created_at: unknown; sent_at: unknown;
@@ -114,7 +116,7 @@ const toPoint = (r: PointRow): StoredPoint => ({
   reversed: !!r.reversed, note: r.note, localDay: day(r.local_day)!, createdBy: r.created_by, createdAt: iso(r.created_at),
 });
 const toReward = (r: RewardRow): MemberReward => ({
-  id: r.id, name: r.name, points: r.points, birthdayOnly: !!r.birthday_only, validFrom: day(r.valid_from), validTo: day(r.valid_to), status: r.status, createdAt: iso(r.created_at),
+  id: r.id, name: r.name, points: r.points, birthdayOnly: !!r.birthday_only, minRank: r.min_rank ?? 'regular', validFrom: day(r.valid_from), validTo: day(r.valid_to), status: r.status, createdAt: iso(r.created_at),
 });
 const toMessage = (r: MessageRow): StoredMessage => ({
   id: r.id, kind: r.kind, audience: r.audience, text: r.text, recipients: r.recipients ?? [], count: (r.recipients ?? []).length, status: r.status, runId: r.run_id,
@@ -250,15 +252,15 @@ export class PostgresMemberStore implements MemberStore {
     return rows[0] ? toReward(rows[0]) : null;
   }
 
-  async createReward(tenantId: string, r: Pick<MemberReward, 'name' | 'points' | 'validFrom' | 'validTo'> & { birthdayOnly?: boolean }): Promise<string> {
+  async createReward(tenantId: string, r: Pick<MemberReward, 'name' | 'points' | 'validFrom' | 'validTo'> & { birthdayOnly?: boolean; minRank?: MemberRank }): Promise<string> {
     const id = `mrw-${randomUUID()}`;
-    await this.q(tenantId, `insert into member_rewards (id, tenant_id, name, points, birthday_only, valid_from, valid_to) values ($1, $2, $3, $4, $5, $6, $7)`,
-      [id, tenantId, r.name, r.points, !!r.birthdayOnly, r.validFrom, r.validTo]);
+    await this.q(tenantId, `insert into member_rewards (id, tenant_id, name, points, birthday_only, min_rank, valid_from, valid_to) values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [id, tenantId, r.name, r.points, !!r.birthdayOnly, r.minRank ?? 'regular', r.validFrom, r.validTo]);
     return id;
   }
 
-  async updateReward(tenantId: string, id: string, patch: Partial<Pick<MemberReward, 'name' | 'points' | 'validFrom' | 'validTo' | 'status' | 'birthdayOnly'>>): Promise<void> {
-    const cols: Record<string, string> = { name: 'name', points: 'points', validFrom: 'valid_from', validTo: 'valid_to', status: 'status', birthdayOnly: 'birthday_only' };
+  async updateReward(tenantId: string, id: string, patch: Partial<Pick<MemberReward, 'name' | 'points' | 'validFrom' | 'validTo' | 'status' | 'birthdayOnly' | 'minRank'>>): Promise<void> {
+    const cols: Record<string, string> = { name: 'name', points: 'points', validFrom: 'valid_from', validTo: 'valid_to', status: 'status', birthdayOnly: 'birthday_only', minRank: 'min_rank' };
     const sets: string[] = [];
     const params: unknown[] = [tenantId, id];
     for (const [k, v] of Object.entries(patch)) {
@@ -274,6 +276,13 @@ export class PostgresMemberStore implements MemberStore {
       `select count(*) as n from member_points p where p.tenant_id = $1 and p.kind = 'visit' and p.created_at >= $2 and p.created_at < $3
          and not exists (select 1 from member_points u where u.tenant_id = p.tenant_id and u.reversal_of = p.id)`, [tenantId, from, to]);
     return Number(rows[0]?.n ?? 0);
+  }
+
+  async visitsByMember(tenantId: string, since: string): Promise<Map<string, number>> {
+    const rows = await this.q<{ member_id: string; n: string }>(tenantId,
+      `select p.member_id, count(*) as n from member_points p where p.tenant_id = $1 and p.kind = 'visit' and p.created_at >= $2
+         and not exists (select 1 from member_points u where u.tenant_id = p.tenant_id and u.reversal_of = p.id) group by p.member_id`, [tenantId, since]);
+    return new Map(rows.map((r) => [r.member_id, Number(r.n)]));
   }
 
   async createMessage(tenantId: string, m: { kind: MemberMessage['kind']; audience: MemberAudience; text: string; recipients: string[]; createdBy: string }): Promise<string> {
@@ -400,13 +409,13 @@ export class MemoryMemberStore implements MemberStore {
     return { ...rest };
   }
 
-  async createReward(tenantId: string, r: Pick<MemberReward, 'name' | 'points' | 'validFrom' | 'validTo'> & { birthdayOnly?: boolean }): Promise<string> {
+  async createReward(tenantId: string, r: Pick<MemberReward, 'name' | 'points' | 'validFrom' | 'validTo'> & { birthdayOnly?: boolean; minRank?: MemberRank }): Promise<string> {
     const id = `mrw-${randomUUID()}`;
-    this.rewardRows.set(id, { ...r, birthdayOnly: !!r.birthdayOnly, id, tenantId, status: 'active', createdAt: this.now().toISOString() });
+    this.rewardRows.set(id, { ...r, birthdayOnly: !!r.birthdayOnly, minRank: r.minRank ?? 'regular', id, tenantId, status: 'active', createdAt: this.now().toISOString() });
     return id;
   }
 
-  async updateReward(tenantId: string, id: string, patch: Partial<Pick<MemberReward, 'name' | 'points' | 'validFrom' | 'validTo' | 'status' | 'birthdayOnly'>>): Promise<void> {
+  async updateReward(tenantId: string, id: string, patch: Partial<Pick<MemberReward, 'name' | 'points' | 'validFrom' | 'validTo' | 'status' | 'birthdayOnly' | 'minRank'>>): Promise<void> {
     const r = this.rewardRows.get(id);
     if (r && r.tenantId === tenantId) this.rewardRows.set(id, { ...r, ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) });
   }
@@ -437,5 +446,14 @@ export class MemoryMemberStore implements MemberStore {
   async visitCount(tenantId: string, from: string, to: string): Promise<number> {
     const reversed = new Set(this.records.filter((r) => r.tenantId === tenantId && r.reversalOf).map((r) => r.reversalOf));
     return this.records.filter((r) => r.tenantId === tenantId && r.kind === 'visit' && !reversed.has(r.id) && r.createdAt >= from && r.createdAt < to).length;
+  }
+
+  async visitsByMember(tenantId: string, since: string): Promise<Map<string, number>> {
+    const reversed = new Set(this.records.filter((r) => r.tenantId === tenantId && r.reversalOf).map((r) => r.reversalOf));
+    const out = new Map<string, number>();
+    for (const r of this.records) {
+      if (r.tenantId === tenantId && r.kind === 'visit' && !reversed.has(r.id) && r.createdAt >= since) out.set(r.memberId, (out.get(r.memberId) ?? 0) + 1);
+    }
+    return out;
   }
 }

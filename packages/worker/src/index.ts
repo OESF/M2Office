@@ -222,6 +222,8 @@ const members = new MemberService({
     return (await enqueueJob(repo, { tenantId, requestedBy: userId, def, input: { messageId }, origin: 'menu', actor: { type: 'system', id: 'member-watch' } })).runId;
   },
   runStatus: async (tenantId, runId) => (await repo.getRun(tenantId, runId))?.status ?? null,
+  // 特典の期間が変わったら、店頭サイネージの 1 枚を作り直す（第40.19節）
+  signage,
 });
 const inquiryStore = new PostgresInquiryStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
 const inquiries = new InquiryService({

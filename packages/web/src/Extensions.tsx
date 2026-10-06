@@ -851,6 +851,17 @@ function MemberFields({ settings, busy, onChanged }: { settings: MemberSettings;
         <button className="btn ghost small" disabled={busy} onClick={() => void save()}>保存</button>
       </div>
       <p className="muted">LIFF のエンドポイント URL: <code>{`${location.origin}/v1/member-card/line`}</code></p>
+      <div className="row wrap">
+        {/* 店頭サイネージに特典を流す（第40.19節。サイネージを使っている会社だけ流れる） */}
+        <label className="check"><input type="checkbox" checked={!!settings.signage} disabled={busy}
+          onChange={(e) => void api.members.saveSettings({ signage: e.target.checked }).then(() => { setError(null); onChanged(); }).catch((err) => setError(describeError(err, '保存できませんでした')))} />店頭サイネージに特典を流す</label>
+        <span className="muted">
+          ランク: {settings.rankGold != null && settings.rankSilver != null ? `直近 1 年の来店 ゴールド ${settings.rankGold} 回・シルバー ${settings.rankSilver} 回` : '来店のある会員が 10 人になったら決めます'}
+          {settings.rankAuto === false ? '（固定）' : '（毎月自動）'}
+        </span>
+        {settings.rankAuto === false && <button className="link small" disabled={busy}
+          onClick={() => void api.members.saveSettings({ rankAuto: true }).then(() => { setError(null); onChanged(); }).catch((err) => setError(describeError(err, '保存できませんでした')))}>自動に戻す</button>}
+      </div>
       {error && <p className="error">{error}</p>}
     </div>
   );

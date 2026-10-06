@@ -1,6 +1,7 @@
 /**
  * @file 会員とポイントの処理（仕様書 第40章）。会員を作る（店頭・LINE）・会員証・来店と購入のポイント・特典を使う・取り消し・調整・
  * まとめる・削除・特典を決める・有効期限の失効（ワーカーの {@link MemberService.tick}）。
+ * 段 2 の残り（第40.19節）で、直近 1 年の来店の回数によるランクとランクだけの特典、店頭サイネージに特典を流すこと。
  *
  * **購入の金額は保存しない**（ポイントにしたら捨てる。お金の機能にしない。第40.6節）。ポイントはマイナスにしない。
  * ポイントを付けるのはログインした従業員だけ。会員証や知らせを自動で LINE・メールに送らない（第40.5節）。
@@ -8,13 +9,15 @@
 
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import {
-  MEMBERS_EXTENSION_ID, MEMBER_AUDIENCE_LABELS, MEMBER_EXPIRY_TEXT, MEMBER_LIMITS, MEMBER_MESSAGE_MAX, canUseAgent,
-  type Member, type MemberAudience, type MemberMessage, type MemberPoint, type MemberReward, type MemberSettings,
+  MEMBERS_EXTENSION_ID, MEMBER_AUDIENCE_LABELS, MEMBER_EXPIRY_TEXT, MEMBER_LIMITS, MEMBER_MESSAGE_MAX, MEMBER_RANK_ORDER, canUseAgent,
+  type Member, type MemberAudience, type MemberMessage, type MemberPoint, type MemberRank, type MemberReward, type MemberSettings,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import { silentLogger, type Logger } from '../log/logger.js';
 import { openLine, type LineDeps } from '../inquiries/line.js';
 import type { MemberStore, StoredMember, StoredMessage, StoredPoint } from './store.js';
+import type { SignageService } from '../signage/service.js';
+import { refreshRewardSignage } from './screen.js';
 
 /** 操作する人。 */
 export interface MemberViewer {
@@ -46,6 +49,8 @@ export interface MemberServiceDeps {
   submitter?(tenantId: string, userId: string, messageId: string): Promise<string>;
   /** 実行の状態（承認されなかった知らせを「承認されなかった」にする） */
   runStatus?(tenantId: string, runId: string): Promise<string | null>;
+  /** 店頭サイネージ（特典を流す。第40.19節。無ければ流さない） */
+  signage?: SignageService;
   logger?: Logger;
   now?(): Date;
 }
@@ -145,6 +150,40 @@ export interface CardView {
   rewards: (MemberReward & { enough: boolean })[];
 }
 
+/** ランクの境の回数（どちらも `null` ならランクを使わない）。 */
+export interface RankCut {
+  silver: number | null;
+  gold: number | null;
+}
+
+/** 直近 1 年の来店の回数からランクを決める（純粋な関数）。 */
+export function rankOf(yearVisits: number, cut: RankCut): MemberRank {
+  if (cut.gold !== null && yearVisits >= cut.gold) return 'gold';
+  if (cut.silver !== null && yearVisits >= cut.silver) return 'silver';
+  return 'regular';
+}
+
+/**
+ * 来店のある会員の来店の回数から、ランクの境の回数を決める（純粋な関数。第40.19節）。上からおよそ 1 割をゴールド、3 割までをシルバーにする。
+ * 来店のある会員が少なければ決めない（`null`）。少ない回数でランクが付かないよう、下限を置く。
+ *
+ * @param counts 会員ごとの直近 1 年の来店の回数（来店のある会員だけ）
+ */
+export function rankCutOf(counts: number[]): RankCut {
+  if (counts.length < MEMBER_LIMITS.rankMembersMin) return { silver: null, gold: null };
+  const sorted = [...counts].sort((a, b) => b - a);
+  const at = (share: number) => sorted[Math.max(0, Math.ceil(sorted.length * share) - 1)]!;
+  const silver = Math.max(at(MEMBER_LIMITS.rankSilverShare), MEMBER_LIMITS.rankSilverMin);
+  const gold = Math.max(at(MEMBER_LIMITS.rankGoldShare), MEMBER_LIMITS.rankGoldMin, silver + 1);
+  return { silver, gold };
+}
+
+/** 会員を画面の形にするときに使う、会社のランクの材料。 */
+interface RankContext {
+  visits: Map<string, number>;
+  cut: RankCut;
+}
+
 /**
  * 会員とポイントの操作。
  *
@@ -152,6 +191,8 @@ export interface CardView {
  */
 export class MemberService {
   private readonly log: Logger;
+  /** 会社ごとの、サイネージの 1 枚の作り直しの順番待ち */
+  private readonly signageQueue = new Map<string, Promise<'added' | 'removed' | 'same'>>();
 
   constructor(readonly deps: MemberServiceDeps) {
     this.log = deps.logger ?? silentLogger;
@@ -173,11 +214,46 @@ export class MemberService {
     });
   }
 
-  private view(m: StoredMember): Member {
+  private view(m: StoredMember, rc: RankContext): Member {
+    const yearVisits = rc.visits.get(m.id) ?? 0;
     return {
       id: m.id, number: m.number, nickname: m.nickname, phone: m.phone, birthday: m.birthday, line: !!m.lineUserId, balance: m.balance, visits: m.visits,
-      lastVisitAt: m.lastVisitAt, lastEarnedAt: m.lastEarnedAt, createdAt: m.createdAt,
+      yearVisits, rank: rankOf(yearVisits, rc.cut), lastVisitAt: m.lastVisitAt, lastEarnedAt: m.lastEarnedAt, createdAt: m.createdAt,
     };
+  }
+
+  /** 会社のランクの材料（会員ごとの直近 1 年の来店の回数と、境の回数）。 */
+  private async rankContext(tenantId: string): Promise<RankContext> {
+    const settings = await this.settings(tenantId);
+    const since = new Date(this.now().getTime() - MEMBER_LIMITS.rankDays * DAY).toISOString();
+    return { visits: await this.deps.store.visitsByMember(tenantId, since), cut: { silver: settings.rankSilver ?? null, gold: settings.rankGold ?? null } };
+  }
+
+  /** 1 人の会員を画面の形にする。 */
+  private async viewOne(tenantId: string, m: StoredMember): Promise<Member> {
+    return this.view(m, await this.rankContext(tenantId));
+  }
+
+  /** いまのランクの境の回数（画面に出す）。 */
+  async rankCut(tenantId: string): Promise<RankCut & { auto: boolean; at: string | null }> {
+    const s = await this.settings(tenantId);
+    return { silver: s.rankSilver ?? null, gold: s.rankGold ?? null, auto: s.rankAuto !== false, at: s.rankAt ?? null };
+  }
+
+  /**
+   * ランクの境の回数を、会社の会員の来店の分布から決め直す（自動のときだけ。第40.19節）。
+   *
+   * @returns 決めた境
+   */
+  async recomputeRanks(tenantId: string, now: Date = this.now()): Promise<RankCut> {
+    const settings = await this.settings(tenantId);
+    if (settings.rankAuto === false) return { silver: settings.rankSilver ?? null, gold: settings.rankGold ?? null };
+    const since = new Date(now.getTime() - MEMBER_LIMITS.rankDays * DAY).toISOString();
+    const live = new Set((await this.deps.store.list(tenantId, { limit: 5000 })).map((m) => m.id));
+    const counts = [...(await this.deps.store.visitsByMember(tenantId, since)).entries()].filter(([id]) => live.has(id)).map(([, n]) => n);
+    const cut = rankCutOf(counts);
+    await this.deps.repo.saveTenantSettings(tenantId, 'members', { ...(await this.settings(tenantId)), rankSilver: cut.silver, rankGold: cut.gold, rankAt: now.toISOString() }, SYSTEM);
+    return cut;
   }
 
   /** 今日（日本時間）。 */
@@ -218,8 +294,26 @@ export class MemberService {
       if (v && !/^\d{6,15}$/.test(v)) return 'LINE ログインのチャネル ID は数字で入れてください';
       next.lineLoginChannelId = v;
     }
+    // ランクの境の回数（管理者が決めると、自動で決め直さない。第40.19節）
+    if (input['rankSilver'] !== undefined || input['rankGold'] !== undefined) {
+      const silver = Number(input['rankSilver'] ?? next.rankSilver);
+      const gold = Number(input['rankGold'] ?? next.rankGold);
+      if (!Number.isInteger(silver) || !Number.isInteger(gold) || silver < 1 || gold <= silver || gold > MEMBER_LIMITS.rankDays) {
+        return 'ランクの境は、シルバーは 1 回以上、ゴールドはシルバーより多い回数（年 365 回まで）で入れてください';
+      }
+      next.rankSilver = silver;
+      next.rankGold = gold;
+      next.rankAuto = false;
+      next.rankAt = this.now().toISOString();
+    }
+    const backToAuto = input['rankAuto'] === true && next.rankAuto === false;
+    if (backToAuto) next.rankAuto = true;
+    const signageChanged = input['signage'] !== undefined && (input['signage'] === true) !== !!cur.signage;
+    if (input['signage'] !== undefined) next.signage = input['signage'] === true;
     await this.deps.repo.saveTenantSettings(who.tenantId, 'members', next, who.userId);
     await this.audit(who, 'member.settings', 'settings', { fields: Object.keys(input) });
+    if (backToAuto) await this.recomputeRanks(who.tenantId);
+    if (signageChanged) await this.refreshSignage(who.tenantId).catch((err) => this.log.warn('特典のサイネージを作り直せませんでした', { error: String(err) }));
     return null;
   }
 
@@ -227,7 +321,8 @@ export class MemberService {
 
   /** 一覧（会員番号の新しい順。呼び名・会員番号・電話で探す）。 */
   async list(who: MemberViewer, search = ''): Promise<Member[]> {
-    return (await this.deps.store.list(who.tenantId, { search })).map((m) => this.view(m));
+    const rc = await this.rankContext(who.tenantId);
+    return (await this.deps.store.list(who.tenantId, { search })).map((m) => this.view(m, rc));
   }
 
   /** 1 件と、ポイントの記録と、まとめる候補（同じ電話・同じ呼び名）。見つからなければ `null`。 */
@@ -238,8 +333,9 @@ export class MemberService {
     const points = (await this.deps.store.points(who.tenantId, id)).map((p) => this.pointView(p, names));
     const all = await this.deps.store.list(who.tenantId);
     const phone = digits(m.phone);
-    const candidates = all.filter((x) => x.id !== m.id && ((phone.length >= 9 && digits(x.phone) === phone) || x.nickname === m.nickname)).slice(0, 5).map((x) => this.view(x));
-    return { member: this.view(m), points, candidates };
+    const rc = await this.rankContext(who.tenantId);
+    const candidates = all.filter((x) => x.id !== m.id && ((phone.length >= 9 && digits(x.phone) === phone) || x.nickname === m.nickname)).slice(0, 5).map((x) => this.view(x, rc));
+    return { member: this.view(m, rc), points, candidates };
   }
 
   private pointView(p: StoredPoint, names: Map<string, string>): MemberPoint {
@@ -257,15 +353,17 @@ export class MemberService {
     if (m?.mergedInto) m = await this.deps.store.get(tenantId, m.mergedInto);
     if (!m) return null;
     const today = this.today();
-    const rewards = (await this.usableRewards(tenantId, today, m)).map((r) => ({ ...r, enough: m!.balance >= r.points }));
-    return { member: this.view(m), rewards, cardKey: m.cardKey };
+    const member = await this.viewOne(tenantId, m);
+    const rewards = (await this.usableRewards(tenantId, today, member)).map((r) => ({ ...r, enough: m!.balance >= r.points }));
+    return { member, rewards, cardKey: m.cardKey };
   }
 
-  /** いま使える特典（誕生月だけの特典は、誕生月の会員にだけ。第40.18節）。 */
-  private async usableRewards(tenantId: string, today: string, member: Pick<StoredMember, 'birthday'> | null): Promise<MemberReward[]> {
+  /** いま使える特典（誕生月だけの特典は誕生月の会員にだけ。第40.18節。ランクだけの特典はそのランク以上の会員にだけ。第40.19節）。 */
+  private async usableRewards(tenantId: string, today: string, member: Pick<Member, 'birthday' | 'rank'> | null): Promise<MemberReward[]> {
     const month = today.slice(5, 7);
     return (await this.deps.store.rewards(tenantId)).filter((r) => r.status === 'active' && (!r.validFrom || r.validFrom <= today) && (!r.validTo || r.validTo >= today)
-      && (!r.birthdayOnly || member?.birthday?.slice(0, 2) === month));
+      && (!r.birthdayOnly || member?.birthday?.slice(0, 2) === month)
+      && MEMBER_RANK_ORDER[member?.rank ?? 'regular'] >= MEMBER_RANK_ORDER[r.minRank]);
   }
 
   /** 会員証の鍵（店員が会員を作ったあと、QR と紙のカードに使う）。 */
@@ -288,7 +386,7 @@ export class MemberService {
     if (birthday === false) return { error: '誕生日は「3/14」のように月と日で入れてください（任意です）' };
     const cardKey = newCardKey();
     const id = await this.deps.store.create(who.tenantId, { nickname, phone, birthday, lineUserId: null, cardKey, createdBy: who.userId });
-    return { member: this.view((await this.deps.store.get(who.tenantId, id))!), cardKey };
+    return { member: await this.viewOne(who.tenantId, (await this.deps.store.get(who.tenantId, id))!), cardKey };
   }
 
   /**
@@ -315,12 +413,12 @@ export class MemberService {
   async findForContact(tenantId: string, key: { phone?: string | null; lineUserId?: string | null }): Promise<Member | null> {
     if (key.lineUserId) {
       const m = await this.deps.store.byLineUser(tenantId, key.lineUserId);
-      if (m) return this.view(m);
+      if (m) return this.viewOne(tenantId, m);
     }
     const phone = digits(key.phone ?? '');
     if (phone.length < 9) return null;
     const hit = (await this.deps.store.list(tenantId, { search: phone })).find((m) => digits(m.phone) === phone);
-    return hit ? this.view(hit) : null;
+    return hit ? this.viewOne(tenantId, hit) : null;
   }
 
   // ---- ポイント ------------------------------------------------------------------------------
@@ -334,7 +432,7 @@ export class MemberService {
   /** 記録を足して、足した後の会員を返す。 */
   private async add(who: MemberViewer, m: StoredMember, p: Pick<StoredPoint, 'kind' | 'points' | 'rewardId' | 'rewardName' | 'reversalOf' | 'note'>): Promise<{ member: Member; points: number }> {
     await this.deps.store.addPoint(who.tenantId, { ...p, memberId: m.id, localDay: this.today(), createdBy: who.userId });
-    return { member: this.view((await this.deps.store.get(who.tenantId, m.id))!), points: p.points };
+    return { member: await this.viewOne(who.tenantId, (await this.deps.store.get(who.tenantId, m.id))!), points: p.points };
   }
 
   /** 来店（第40.6節）。同じ会員は 1 日 1 回まで。 */
@@ -366,8 +464,8 @@ export class MemberService {
   async useReward(who: MemberViewer, memberId: string, rewardId: string): Promise<{ member: Member; points: number } | { error: string }> {
     const m = await this.target(who, memberId);
     if ('error' in m) return m;
-    const r = (await this.usableRewards(who.tenantId, this.today(), m)).find((x) => x.id === rewardId);
-    if (!r) return { error: 'その特典はいま使えません（誕生月だけの特典は、誕生月の会員だけが使えます）' };
+    const r = (await this.usableRewards(who.tenantId, this.today(), await this.viewOne(who.tenantId, m))).find((x) => x.id === rewardId);
+    if (!r) return { error: 'その特典はいま使えません（誕生月だけの特典は誕生月の会員だけ、ランクだけの特典はそのランクの会員だけが使えます）' };
     if (m.balance < r.points) return { error: `ポイントが足りません（あと ${r.points - m.balance} ポイント）` };
     return this.add(who, m, { kind: 'reward', points: -r.points, rewardId: r.id, rewardName: r.name, reversalOf: null, note: '' });
   }
@@ -473,9 +571,14 @@ export class MemberService {
     return this.deps.store.rewards(who.tenantId);
   }
 
-  private rewardInput(input: Record<string, unknown>): Partial<Pick<MemberReward, 'name' | 'points' | 'validFrom' | 'validTo' | 'status' | 'birthdayOnly'>> | { error: string } {
-    const out: Partial<Pick<MemberReward, 'name' | 'points' | 'validFrom' | 'validTo' | 'status' | 'birthdayOnly'>> = {};
+  private rewardInput(input: Record<string, unknown>): Partial<Pick<MemberReward, 'name' | 'points' | 'validFrom' | 'validTo' | 'status' | 'birthdayOnly' | 'minRank'>> | { error: string } {
+    const out: Partial<Pick<MemberReward, 'name' | 'points' | 'validFrom' | 'validTo' | 'status' | 'birthdayOnly' | 'minRank'>> = {};
     if (input['birthdayOnly'] !== undefined) out.birthdayOnly = input['birthdayOnly'] === true;
+    if (input['minRank'] !== undefined) {
+      const v = input['minRank'] === null || input['minRank'] === '' ? 'regular' : input['minRank'];
+      if (v !== 'regular' && v !== 'silver' && v !== 'gold') return { error: 'ランクは regular（全員）・silver（シルバー以上）・gold（ゴールドだけ）で入れてください' };
+      out.minRank = v;
+    }
     if (input['name'] !== undefined) {
       const v = text(input['name'], MEMBER_LIMITS.rewardNameMax);
       if (!v) return { error: '特典の名前を入れてください' };
@@ -506,8 +609,11 @@ export class MemberService {
     const v = this.rewardInput(input);
     if ('error' in v) return v;
     if (!v.name || !v.points) return { error: '特典の名前と必要なポイントを入れてください' };
-    const id = await this.deps.store.createReward(who.tenantId, { name: v.name, points: v.points, birthdayOnly: !!v.birthdayOnly, validFrom: v.validFrom ?? null, validTo: v.validTo ?? null });
+    const id = await this.deps.store.createReward(who.tenantId, {
+      name: v.name, points: v.points, birthdayOnly: !!v.birthdayOnly, minRank: v.minRank ?? 'regular', validFrom: v.validFrom ?? null, validTo: v.validTo ?? null,
+    });
     await this.audit(who, 'member.reward.create', id, { points: v.points });
+    void this.refreshSignage(who.tenantId).catch((err) => this.log.warn('特典のサイネージを作り直せませんでした', { error: String(err) }));
     return { reward: (await this.deps.store.getReward(who.tenantId, id))! };
   }
 
@@ -519,7 +625,44 @@ export class MemberService {
     if ('error' in v) return v.error;
     await this.deps.store.updateReward(who.tenantId, id, v);
     await this.audit(who, 'member.reward.update', id, { fields: Object.keys(v) });
+    void this.refreshSignage(who.tenantId).catch((err) => this.log.warn('特典のサイネージを作り直せませんでした', { error: String(err) }));
     return null;
+  }
+
+  // ---- 店頭サイネージ（第40.19節） --------------------------------------------------------------
+
+  /**
+   * 店頭サイネージに流す特典の 1 枚を作り直す。会社が「サイネージに特典を流す」にしていて、サイネージを使っていれば、
+   * いま使える特典（ポイントの少ない順に 6 つまで）を 1 枚にして、すべての画面の流れの先頭に足す。中身が同じなら作り直さない。
+   * 切った・特典が無い・サイネージを使っていなければ、流している 1 枚を外す。
+   *
+   * @returns 足したか・外したか・そのままか
+   * @remarks 危険度: 低（会社の中の画面に出す。社外への送信に当たらない。ADR-0051）
+   */
+  async refreshSignage(tenantId: string): Promise<'added' | 'removed' | 'same'> {
+    // 同じ会社の作り直しは 1 つずつ（特典を足した直後の作り直しと見張りが重なっても、2 枚にしない）
+    const prev = this.signageQueue.get(tenantId) ?? Promise.resolve();
+    const next = prev.catch(() => undefined).then(() => this.refreshSignageNow(tenantId));
+    this.signageQueue.set(tenantId, next);
+    try {
+      return await next;
+    } finally {
+      if (this.signageQueue.get(tenantId) === next) this.signageQueue.delete(tenantId);
+    }
+  }
+
+  private async refreshSignageNow(tenantId: string): Promise<'added' | 'removed' | 'same'> {
+    if (!this.deps.signage) return 'same';
+    const settings = await this.settings(tenantId);
+    const today = this.today();
+    const rewards = settings.enabled && settings.signage
+      ? (await this.deps.store.rewards(tenantId)).filter((r) => r.status === 'active' && (!r.validFrom || r.validFrom <= today) && (!r.validTo || r.validTo >= today))
+      : [];
+    const r = await refreshRewardSignage(this.deps.signage, tenantId, rewards, { assetId: settings.signageAssetId ?? null, digest: settings.signageDigest ?? null });
+    if (r.result !== 'same') {
+      await this.deps.repo.saveTenantSettings(tenantId, 'members', { ...(await this.settings(tenantId)), signageAssetId: r.assetId, signageDigest: r.digest }, SYSTEM);
+    }
+    return r.result;
   }
 
   // ---- 会員への LINE の知らせ（段 2。第40.18節） -------------------------------------------------
@@ -677,8 +820,14 @@ export class MemberService {
       const r = await this.prepareMessage({ tenantId, userId: SYSTEM }, { audience: 'expiring', text: MEMBER_EXPIRY_TEXT }, 'expiry', done, admins[0].id).catch(() => null);
       if (r && 'message' in r) proposed = `失効が近い LINE の会員 ${r.message.count} 人への知らせを用意し、承認待ちにしました（承認トレイで確かめてください）。`;
     }
+    const rc = await this.rankContext(tenantId);
+    const ranked = all.map((m) => this.view(m, rc).rank);
+    const rankLine = rc.cut.gold !== null && rc.cut.silver !== null
+      ? `ゴールド ${ranked.filter((r) => r === 'gold').length} 人・シルバー ${ranked.filter((r) => r === 'silver').length} 人（直近 1 年の来店 ${rc.cut.gold} 回・${rc.cut.silver} 回から）。`
+      : '';
     const body = [
       `会員 ${all.length} 人（今週の新しい会員 ${fresh} 人）。`,
+      rankLine,
       `今週の来店 ${visits} 回（先週 ${lastVisits} 回）。`,
       `しばらく（60 日）来ていない会員 ${away} 人。`,
       `30 日のうちにポイントが失効する会員 ${expiring.length} 人。`,
@@ -703,12 +852,22 @@ export class MemberService {
     for (const tenantId of await this.deps.repo.listTenantIds()) {
       try {
         const settings = await this.settings(tenantId);
-        if (!settings.enabled) continue;
+        if (!settings.enabled) {
+          // 切った会社のサイネージの 1 枚は外す
+          if (settings.signageAssetId) await this.refreshSignage(tenantId).catch(() => undefined);
+          continue;
+        }
         // 週の見立て（月曜の 8 時（日本時間）を過ぎて、前の見立てから 6 日より空いたら）
         const jst = new Date(now.getTime() + 9 * 3_600_000);
+        // ランクの境は月に 1 回決め直す（自動のとき。初めては、すぐ。第40.19節）
+        const month = jst.toISOString().slice(0, 7);
+        const rankMonth = settings.rankAt ? new Date(Date.parse(settings.rankAt) + 9 * 3_600_000).toISOString().slice(0, 7) : null;
+        if (settings.rankAuto !== false && (!rankMonth || (rankMonth !== month && jst.getUTCHours() >= 8))) await this.recomputeRanks(tenantId, now);
         if (jst.getUTCDay() === 1 && jst.getUTCHours() >= 8 && (!settings.digestAt || now.getTime() - Date.parse(settings.digestAt) > 6 * DAY)) {
           await this.weekly(tenantId, now);
         }
+        // 特典の期間が始まった・終わったら、サイネージの 1 枚を作り直す（中身が同じなら何もしない）
+        await this.refreshSignage(tenantId).catch((err) => this.log.warn('特典のサイネージを作り直せませんでした', { tenantId, error: String(err) }));
         const limit = now.getTime() - settings.expiryDays * 86_400_000;
         for (const m of await this.deps.store.list(tenantId, { limit: 5000 })) {
           const since = Date.parse(m.lastEarnedAt ?? m.createdAt);

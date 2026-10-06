@@ -5,7 +5,7 @@
  * 答えには電話を入れない（推論に渡さない。第40.11節）。
  */
 
-import type { Member, MemberSettings } from '@m2office/shared';
+import { MEMBER_RANK_LABELS, minRankText, type Member, type MemberSettings } from '@m2office/shared';
 import type { Tool, ToolContext } from '../tools/registry.js';
 import type { MemberService } from './service.js';
 
@@ -33,7 +33,7 @@ async function serviceOf(ctx: ToolContext): Promise<MemberService | null> {
 /** 秘書に返す 1 人の形（電話は入れない）。 */
 const brief = (m: Member) => ({
   path: `${PATH}/${encodeURIComponent(m.id)}`, number: m.number, nickname: m.nickname, points: m.balance, visits: m.visits,
-  lastVisit: m.lastVisitAt ? m.lastVisitAt.slice(0, 10) : null, line: m.line,
+  yearVisits: m.yearVisits, rank: MEMBER_RANK_LABELS[m.rank], lastVisit: m.lastVisitAt ? m.lastVisitAt.slice(0, 10) : null, line: m.line,
 });
 
 /** 会員番号か呼び名で 1 人を選ぶ。いくつも当たれば候補。 */
@@ -56,12 +56,13 @@ export const membersFind: Tool = {
   risk: 'read',
   activityLabel: '会員の台帳を見ています',
   helpText: '会員の数・ポイント・来店の回数・最後の来店を引きます',
-  description: '会員を引く。query は会員番号か呼び名（空なら全体）。order は points（ポイントの多い順）・visits（来店の多い順）・recent（最近来た順）・away（しばらく来ていない順）。awayDays を入れると、その日数より前から来ていない会員だけ',
+  description: '会員を引く。query は会員番号か呼び名（空なら全体）。order は points（ポイントの多い順）・visits（来店の多い順）・recent（最近来た順）・away（しばらく来ていない順）。awayDays を入れると、その日数より前から来ていない会員だけ。rank に gold・silver を入れると、そのランクの会員だけ（rank はゴールド・シルバー・一般。直近 1 年の来店の回数で決まる）',
   args: {
     properties: {
       query: { type: 'string', description: '会員番号か呼び名' },
       order: { type: 'string', description: 'points・visits・recent・away' },
       awayDays: { type: 'number', description: '何日来ていない会員か' },
+      rank: { type: 'string', description: 'gold・silver（そのランクの会員だけ）' },
     },
   },
   async invoke(args, ctx) {
@@ -81,6 +82,8 @@ export const membersFind: Tool = {
       const limit = Date.now() - days * 86_400_000;
       list = list.filter((m) => !m.lastVisitAt || Date.parse(m.lastVisitAt) < limit);
     }
+    const rank = str(args['rank']);
+    if (rank === 'gold' || rank === 'silver') list = list.filter((m) => m.rank === rank);
     const order = str(args['order']);
     const by: Record<string, (a: Member, b: Member) => number> = {
       points: (a, b) => b.balance - a.balance,
@@ -134,7 +137,7 @@ export const membersRewards: Tool = {
   risk: 'write-internal',
   activityLabel: '特典を直しています',
   helpText: 'ポイントと交換できる特典を作る・直す・止める（管理者）',
-  description: '特典を扱う。action は list（一覧）・create（作る。name と points。誕生月の会員だけなら birthdayOnly を true）・update（直す。name で選び、points か newName）・stop（止める。name で選ぶ）',
+  description: '特典を扱う。action は list（一覧）・create（作る。name と points。誕生月の会員だけなら birthdayOnly を true。ランクの会員だけなら minRank に silver（シルバー以上）か gold（ゴールドだけ））・update（直す。name で選び、points か newName か minRank）・stop（止める。name で選ぶ）',
   args: {
     properties: {
       action: { type: 'string', description: 'list・create・update・stop' },
@@ -142,6 +145,7 @@ export const membersRewards: Tool = {
       points: { type: 'number', description: '必要なポイント' },
       newName: { type: 'string', description: '新しい名前' },
       birthdayOnly: { type: 'boolean', description: '誕生月の会員だけが使える特典か' },
+      minRank: { type: 'string', description: 'regular（全員）・silver（シルバー以上）・gold（ゴールドだけ）' },
     },
     required: ['action'],
   },
@@ -150,9 +154,16 @@ export const membersRewards: Tool = {
     if (!service) return UNAVAILABLE;
     const action = str(args['action']);
     const list = await service.rewards(who(ctx));
-    if (action === 'list') return { available: true, path: PATH, rewards: list.map((r) => ({ name: r.name, points: r.points, status: r.status === 'active' ? '使える' : '止めた' })) };
+    if (action === 'list') {
+      return {
+        available: true, path: PATH,
+        rewards: list.map((r) => ({ name: r.name, points: r.points, who: [r.birthdayOnly ? '誕生月だけ' : '', minRankText(r.minRank)].filter(Boolean).join('・') || '会員全員', status: r.status === 'active' ? '使える' : '止めた' })),
+      };
+    }
     if (action === 'create') {
-      const r = await service.createReward(who(ctx), { name: args['name'], points: args['points'], birthdayOnly: args['birthdayOnly'] === true });
+      const r = await service.createReward(who(ctx), {
+        name: args['name'], points: args['points'], birthdayOnly: args['birthdayOnly'] === true, ...(str(args['minRank']) ? { minRank: str(args['minRank']) } : {}),
+      });
       if ('error' in r) return { available: false, reason: r.error };
       return { available: true, reward: { name: r.reward.name, points: r.reward.points } };
     }
@@ -161,6 +172,7 @@ export const membersRewards: Tool = {
     if (!target) return { available: false, reason: 'その特典は見つかりません' };
     const patch: Record<string, unknown> = action === 'stop' ? { status: 'stopped' } : {
       ...(args['points'] !== undefined ? { points: args['points'] } : {}), ...(str(args['newName']) ? { name: str(args['newName']) } : {}),
+      ...(str(args['minRank']) ? { minRank: str(args['minRank']) } : {}),
     };
     const problem = await service.updateReward(who(ctx), target.id, patch);
     if (problem) return { available: false, reason: problem };
@@ -205,4 +217,45 @@ export const membersSendLine: Tool = {
 };
 
 /** 会員とポイントのツール。 */
-export const MEMBER_TOOLS: Tool[] = [membersFind, membersPoints, membersRewards, membersSendLine];
+/**
+ * ランクの境の回数を見る・決める・自動に戻す（「ゴールドは年 20 回にして」。決めるのは管理者。第40.19節）。
+ *
+ * @remarks 危険度 `write-internal`。会社の中の設定を変えるだけ
+ */
+export const membersRank: Tool = {
+  name: 'members.rank',
+  risk: 'write-internal',
+  activityLabel: '会員のランクを見ています',
+  helpText: '会員のランクの境（直近 1 年の来店の回数）を見る・決める・自動に戻す（決めるのは管理者）',
+  description: 'ランクの境を扱う。action は show（いまの境と、ランクごとの人数）・set（決める。silver と gold は直近 1 年の来店の回数。決めると自動では変わらない）・auto（自動に戻す。毎月、会員の来店の分布から決める）',
+  args: {
+    properties: {
+      action: { type: 'string', description: 'show・set・auto' },
+      silver: { type: 'number', description: 'シルバーになる直近 1 年の来店の回数' },
+      gold: { type: 'number', description: 'ゴールドになる直近 1 年の来店の回数' },
+    },
+    required: ['action'],
+  },
+  async invoke(args, ctx) {
+    const service = await serviceOf(ctx);
+    if (!service) return UNAVAILABLE;
+    const action = str(args['action']);
+    if (action === 'set' || action === 'auto') {
+      const cur = await service.rankCut(ctx.tenantId);
+      const input = action === 'auto' ? { rankAuto: true }
+        : { rankSilver: args['silver'] ?? cur.silver, rankGold: args['gold'] ?? cur.gold };
+      const problem = await service.saveSettings(who(ctx), input);
+      if (problem) return { available: false, reason: problem };
+    }
+    const cut = await service.rankCut(ctx.tenantId);
+    const list = await service.list(who(ctx));
+    return {
+      available: true, path: PATH, done: action === 'set' ? '決めました' : action === 'auto' ? '自動に戻しました' : null,
+      gold: cut.gold, silver: cut.silver, auto: cut.auto,
+      note: cut.gold === null ? '来店のある会員が 10 人に満たないため、まだランクを決めていません' : null,
+      counts: { ゴールド: list.filter((m) => m.rank === 'gold').length, シルバー: list.filter((m) => m.rank === 'silver').length, 一般: list.filter((m) => m.rank === 'regular').length },
+    };
+  },
+};
+
+export const MEMBER_TOOLS: Tool[] = [membersFind, membersPoints, membersRewards, membersRank, membersSendLine];

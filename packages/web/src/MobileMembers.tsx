@@ -6,7 +6,7 @@
  */
 
 import { useState } from 'react';
-import type { Member, MemberReward } from '@m2office/shared';
+import { MEMBER_RANK_LABELS, type Member, type MemberReward } from '@m2office/shared';
 import { api, describeError, type Me } from './api.js';
 import { Scanner } from './Scanner.js';
 
@@ -89,7 +89,7 @@ export function MobileMembers({ me }: { me: Me }) {
 
       {mode === 'home' && card && (
         <div className="m-mbr-card">
-          <p className="m-mbr-name">No. {card.member.number} {card.member.nickname}</p>
+          <p className="m-mbr-name">No. {card.member.number} {card.member.nickname}{card.member.rank !== 'regular' && <> <span className="badge mbr-rank">{MEMBER_RANK_LABELS[card.member.rank]}</span></>}</p>
           <p className="m-mbr-points">{card.member.balance} <small>ポイント</small></p>
           <button className="m-big wide" disabled={busy} onClick={() => void act(() => api.members.visit(card.member.id), '来店')}>来店</button>
           <div className="m-mbr-buy">
