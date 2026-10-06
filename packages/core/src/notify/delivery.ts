@@ -33,6 +33,7 @@ const KIND_LABELS: Record<string, string> = {
   webReview: 'Webの分析',
   column: 'コラムの作成',
   contract: '契約の管理',
+  reservation: '予約',
 };
 
 /** 会社が業務を受け付ける状態か（仕様書 第23.8.6節）。停止中の会社へは控えを送らない。 */

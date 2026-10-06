@@ -29,6 +29,8 @@ export function notificationPath(n: { kind: string; runId: string | null }): str
   if (n.kind === 'column') return '/columns';
   // 契約の期限の知らせは、契約の管理を開く（第38.6節）
   if (n.kind === 'contract') return '/contracts';
+  // 予約を管理者が変えた・取り消した・予約できるものを止めた知らせは、予約を開く（第37.10節）
+  if (n.kind === 'reservation') return '/reservations';
   if (n.runId && RUN_ID.test(n.runId)) return `/runs/${encodeURIComponent(n.runId)}`;
   return '/';
 }

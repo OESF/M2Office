@@ -42,6 +42,7 @@ const ACTION_LABELS: Record<string, string> = {
   'secretary.notice': '秘書が社内のお知らせを扱った',
   'secretary.launcher': '秘書がアプリの一覧を直した',
   'secretary.inventory': '秘書が在庫の問いに答えた',
+  'secretary.reservation': '秘書が予約を扱った',
   'secretary.voice': '秘書と音声で話した',
   'secretary.plan.create': '秘書が段取りを組んだ',
   'secretary.plan.step': '段取りの業務を起こした',
@@ -222,6 +223,10 @@ const ACTION_LABELS: Record<string, string> = {
   'contract.open': '契約書を開いた',
   'contract.storage': '契約書の置き場をつないだ',
   'contract.renewed': '契約を自動で次の期間に進めた',
+  'reservation.item.create': '予約できるものを足した',
+  'reservation.item.update': '予約できるものを直した',
+  'reservation.item.stop': '予約できるものを止めた',
+  'reservation.admin_change': 'ほかの人の予約を管理者が変えた・取り消した',
   'web_review.connect': 'Webの分析の担当の Google の許可をつないだ',
   'web_review.disconnect': 'Webの分析の担当の Google の許可を外した',
   'web_review.select': 'Webの分析で見るプロパティとサイトを選んだ',
@@ -451,6 +456,7 @@ function targetOf(e: AuditEvent, names: AuditNames): string {
     case 'announcement': return `お知らせ ${id.slice(4, 12)}`;
     // 契約は相手の名前を出さない。ID の頭だけ
     case 'contract': return id === 'storage' ? '契約書の置き場' : `契約 ${id.slice(4, 12)}`;
+    case 'reservation': return id.startsWith('rsi-') ? `予約できるもの ${id.slice(4, 12)}` : `予約 ${id.slice(4, 12)}`;
     case 'web_review': return 'Webの分析';
     case 'competitor': return id === 'settings' ? '競合の分析の設定' : id === 'map-key' ? '競合の分析の地図の鍵' : id === 'discover' ? '競合の分析（探す）' : id === 'all' ? '競合の分析（見回り）' : `競合の分析 ${id.slice(4, 12)}`;
     case 'inquiry': return id === 'mailbox' ? '問い合わせの窓口のアカウント' : id === 'line' ? '問い合わせの LINE 公式アカウント' : `問い合わせ ${id.slice(4, 12)}`;

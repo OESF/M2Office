@@ -22,7 +22,7 @@ import type { CardCorners,
   Inquiry, InquiryDetail, InquiryParty, InquiryTask, InquiryReply, InquiryMailSkipped, InquiryMonthStats, InquirySettings, InquiryFaqTopic,
   CompetitorOverview, CompetitorFact, CompetitorReport, CompetitorSettings,
   Announcement, AnnouncementDetail, AnnouncementPreview, AnnouncementRecipient, AnnouncementRecipientsRefined, AnnouncementSettings, AnnouncementTexts,
-  Contract, ContractSettings,
+  Contract, ContractSettings, ReservableItem, ReservableKind, Reservation,
   WebReviewCandidates, WebReviewReport, WebReviewReportBrief, WebReviewSettings, WebReviewStatus, WebReviewFinding, WebReviewFindingStatus, WebPageMetrics,
 } from '@m2office/shared';
 import { debugMode, recordCall } from './debug.js';
@@ -99,6 +99,7 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
       body.error ?? `エラー (${res.status})`, res.status, !!body.login,
       body.requestId ?? res.headers.get('x-request-id'),
       Array.isArray(body.problems) ? body.problems : [],
+      body && typeof body === 'object' ? body : {},
     );
   }
   return res.json() as Promise<T>;
@@ -214,6 +215,8 @@ export class ApiError extends Error {
     readonly requestId: string | null = null,
     /** 検証で見つかった問題の一覧（拡張機能の取り込みなど）。 */
     readonly problems: string[] = [],
+    /** 応答の中身（予約が重なったときの空いている時間など。仕様書 第37.13節）。 */
+    readonly body: Record<string, unknown> = {},
   ) {
     super(message);
     this.name = 'ApiError';
@@ -297,6 +300,8 @@ export interface Me {
   webReview?: boolean;
   /** 契約の管理を使えるか（会社の入り切りと利用範囲。仕様書 第38章）。 */
   contracts?: boolean;
+  /** 予約を使えるか（会社の入り切りと利用範囲。仕様書 第37章）。 */
+  reservations?: boolean;
   /** 本人の「給与・勤怠」を使えるか（台帳に結び付いているか。仕様書 第30.25節）。 */
   hrSelf?: boolean;
   /** デバッグモードか（`M2O_DEBUG=true`。仕様書 第20.4.1節「デバッグモード」）。 */
@@ -1323,6 +1328,27 @@ export const api = {
     remove: (id: string) => call<{ ok: true }>(`/contracts/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     /** 契約書を開く URL（M2Office がドライブから読んで返す）。 */
     fileUrl: (id: string) => `/v1/contracts/${encodeURIComponent(id)}/file`,
+  },
+  /** 会議室・社用車・備品の予約（内蔵の拡張。仕様書 第37章）。 */
+  reservations: {
+    /** 期間の予約と予約できるもの（15 日まで）。 */
+    list: (from: string, to: string) =>
+      call<{ items: ReservableItem[]; reservations: Reservation[]; me: string; admin: boolean }>(`/reservations?${new URLSearchParams({ from, to })}`),
+    mine: () => call<{ reservations: Reservation[] }>('/reservations/mine'),
+    /** 予約する。重なれば 409（`ApiError.body.conflict` に空いている時間とほかのもの）。 */
+    book: (input: { itemId: string; startAt: string; endAt: string; purpose: string }) =>
+      call<{ reservation: Reservation; calendar: 'added' | 'not-connected' | 'failed' }>('/reservations', { method: 'POST', body: JSON.stringify(input) }),
+    change: (id: string, input: { itemId?: string; startAt?: string; endAt?: string; purpose?: string }) =>
+      call<{ reservation: Reservation; calendar: 'added' | 'not-connected' | 'failed' }>(`/reservations/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(input) }),
+    cancel: (id: string) => call<{ ok: true }>(`/reservations/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    finish: (id: string) => call<{ ok: true }>(`/reservations/${encodeURIComponent(id)}/finish`, { method: 'POST', body: '{}' }),
+    items: () => call<{ items: ReservableItem[]; admin: boolean }>('/reservations/items'),
+    /** 予約できるものを足す（管理者だけ。種類を言わなければ名前から決める）。 */
+    addItem: (input: { name: string; kind?: ReservableKind; capacity?: number | null; location?: string }) =>
+      call<{ item: ReservableItem }>('/reservations/items', { method: 'POST', body: JSON.stringify(input) }),
+    updateItem: (id: string, patch: Record<string, unknown>) =>
+      call<{ ok: true }>(`/reservations/items/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    reorder: (ids: string[]) => call<{ ok: true }>('/reservations/items/order', { method: 'PUT', body: JSON.stringify({ ids }) }),
   },
   announcements: {
     list: () => call<{ items: Announcement[] }>('/announcements'),

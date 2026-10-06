@@ -18,6 +18,9 @@ import { KEY_BINDINGS, isTouchOnly, keyLabel } from './keys.js';
 import { SaveButton } from './save.js';
 import { playSample } from './voice.js';
 
+/** 通知の種類（個人設定で切れるもの）。 */
+type NotificationKindKey = keyof UserSettings['notifications']['kinds'];
+
 /**
  * 個人設定（仕様書 第6.5節）。左ペインの最下部の利用者のカードの歯車のボタンから開く。
  *
@@ -240,16 +243,20 @@ export function Settings({ me, agents, onChanged, section }: {
       <div className="card">
         <h3>通知</h3>
         <p className="muted small">切った種類は画面内にも届きません</p>
-        {([['brief', 'ブリーフ（朝・週次）'], ['run', '実行の完了'], ['approval', '承認の依頼'], ['failure', '失敗'],
-          ...(me.inventory ? [['inventory', '在庫（残りわずか・無くなる見込み・使用期限）']] as const : []),
-          ...(me.hr || me.hrSelf ? [['attendance', '給与・勤怠（給与明細・打刻の直し・有給・時間外の上限・有給の取得義務）']] as const : []),
-          ...(me.signage ? [['signage', 'サイネージ（画面が未接続）']] as const : []),
-          ...(me.inquiries ? [['inquiry', '問い合わせ（次にやることの期限・対応中のまま）']] as const : []),
-          ...(me.competitors ? [['competitor', '競合の分析（探し終えた・見回り終えた）']] as const : []),
-          ...(me.announcements ? [['announcement', 'お知らせの作成（出せなかった出し先）']] as const : []),
-          ...(me.webReview ? [['webReview', 'Webの分析（月の便り）']] as const : []),
-          ...(me.contracts ? [['contract', '契約（解約の申し出の期限・契約の終わり・自動更新）']] as const : []),
-          ...(me.webColumns ? [['column', 'コラムの作成（テーマ案・予定表・予約）']] as const : [])] as const).map(([k, label]) => (
+        {([['brief', 'ブリーフ（朝・週次）', true],
+          ['run', '実行の完了', true],
+          ['approval', '承認の依頼', true],
+          ['failure', '失敗', true],
+          ['inventory', '在庫（残りわずか・無くなる見込み・使用期限）', !!(me.inventory)],
+          ['attendance', '給与・勤怠（給与明細・打刻の直し・有給・時間外の上限・有給の取得義務）', !!(me.hr || me.hrSelf)],
+          ['signage', 'サイネージ（画面が未接続）', !!(me.signage)],
+          ['inquiry', '問い合わせ（次にやることの期限・対応中のまま）', !!(me.inquiries)],
+          ['competitor', '競合の分析（探し終えた・見回り終えた）', !!(me.competitors)],
+          ['announcement', 'お知らせの作成（出せなかった出し先）', !!(me.announcements)],
+          ['webReview', 'Webの分析（月の便り）', !!(me.webReview)],
+          ['reservation', '予約（管理者が変えた・取り消した、予約できるものを止めた）', !!(me.reservations)],
+          ['contract', '契約（解約の申し出の期限・契約の終わり・自動更新）', !!(me.contracts)],
+          ['column', 'コラムの作成（テーマ案・予定表・予約）', !!(me.webColumns)]] as [NotificationKindKey, string, boolean][]).filter(([, , shown]) => shown).map(([k, label]) => (
           <label key={k} className="check">
             <input type="checkbox" checked={s.notifications.kinds[k]}
               onChange={(e) => set('notifications', { kinds: { ...s.notifications.kinds, [k]: e.target.checked } })} />

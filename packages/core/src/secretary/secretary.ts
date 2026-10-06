@@ -28,6 +28,7 @@ import type { AttendanceService } from '../hr/attendance-service.js';
 import type { PayrollService } from '../hr/payroll-service.js';
 import { answerHrStaff, hrStaffRequest, type HrStaffDeps } from './hr-staff.js';
 import { signageFileRequest, signageRequest, answerSignage, type SignageSecretaryDeps } from './signage.js';
+import { answerReservation, maybeReservation, type ReservationSecretaryDeps } from './reservations.js';
 import { jstDate } from '../hr/attendance.js';
 import { CARD_BULK_MAIL, CARD_UPDATE } from '../cards/agents.js';
 import { answerBriefSettings } from '../brief/settings.js';
@@ -109,6 +110,8 @@ export interface SecretaryDeps {
   hrStaff?: HrStaffDeps;
   /** 店頭サイネージ（第31.11.1節）。本人が話した回にだけ、割り込みを出す・消す・画面の状態に答える。 */
   signage?: SignageSecretaryDeps;
+  /** 会議室・社用車・備品の予約（第37.7節）。本人が話した回にだけ、予約する・空きに答える・変える・取り消す。 */
+  reservations?: ReservationSecretaryDeps;
   /**
    * アプリの一覧に入れる公式サイトを、実際に開けるか確かめる口（第6.1.1.2節）。社内のアドレスは開かない。
    *
@@ -343,6 +346,15 @@ export class Secretary {
       if (text !== null) {
         await this.audit(tenantId, userId, 'secretary.signage', signReq.kind);
         return { reply: { layer: 'direct', text, evidence: [], tokensUsed: 0 }, keep: true };
+      }
+    }
+    // 会議室・社用車・備品の予約（第37.7節）。本人が秘書の欄で話した回にだけ届く。利用範囲の人だけ
+    if (this.deps.reservations && maybeReservation(message) && await this.deps.reservations.access(tenantId, userId)) {
+      const me = await this.deps.repo.findUserById(tenantId, userId);
+      const r = await answerReservation(this.deps.reservations, tenantId, userId, !!me?.roles.includes('admin'), message);
+      if (r) {
+        await this.audit(tenantId, userId, 'secretary.reservation', r.kind);
+        return { reply: { layer: 'direct', text: r.text, evidence: [], tokensUsed: 0 }, keep: true };
       }
     }
     // 本人の給与明細（「今月の給与明細」「手取りが減ったのはなぜ？」）。本人の分だけ答える

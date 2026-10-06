@@ -1964,3 +1964,50 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .contracts-detail .row > label, .contracts-manual .row > label { min-width: 0; }
 .contracts-detail textarea { width: 100%; }
 .contracts-rule { margin: 8px 0; padding: 6px 12px; border-left: 3px solid var(--line); color: var(--muted); font-size: calc(13px * var(--font-scale)); }
+
+/* 予約（第37.8節）。日の表は縦に時刻、横に予約できるもの。15 分を 12px で描く */
+.rsv { display: flex; flex-direction: column; gap: calc(10px * var(--space-scale)); }
+.rsv .row.wrap { flex-wrap: wrap; gap: calc(6px * var(--space-scale)); align-items: center; }
+.rsv .row input[type="date"] { flex: 0 0 auto; }
+.rsv-bar { align-items: center; }
+.rsv-note { margin: 0; font-size: calc(13px * var(--font-scale)); }
+.rsv-note.is-ok { color: var(--ok); }
+.rsv-note.is-error { color: var(--danger); }
+.rsv-day { --rsv-col-min: 120px; overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+.rsv-day-head, .rsv-day-body { display: grid; grid-template-columns: 52px repeat(var(--rsv-cols), minmax(var(--rsv-col-min), 1fr)); min-width: max-content; }
+.rsv-day-head { position: sticky; top: 0; z-index: 2; background: var(--panel); border-bottom: 1px solid var(--line); }
+.rsv-col-name { padding: calc(6px * var(--space-scale)); font-size: calc(13px * var(--font-scale)); font-weight: 600; border-left: 1px solid var(--line); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rsv-hours { position: relative; }
+.rsv-hours span { position: absolute; right: 6px; transform: translateY(-50%); font-size: calc(11px * var(--font-scale)); color: var(--muted); }
+.rsv-hours span:first-child { transform: none; }
+.rsv-col { position: relative; border-left: 1px solid var(--line); cursor: crosshair; touch-action: none; user-select: none; }
+.rsv-line { position: absolute; left: 0; right: 0; border-top: 1px solid var(--line); opacity: 0.6; pointer-events: none; }
+.rsv-block { position: absolute; left: 3px; right: 3px; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; overflow: hidden;
+  padding: 2px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--neutral-soft); color: var(--ink); text-align: left;
+  font-size: calc(12px * var(--font-scale)); line-height: 1.25; cursor: pointer; z-index: 1; }
+.rsv-block.is-mine { background: var(--accent-soft); border-color: var(--accent); }
+.rsv-block span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rsv-drag { position: absolute; left: 3px; right: 3px; border: 2px dashed var(--accent); border-radius: 4px; background: var(--accent-soft); opacity: 0.7; pointer-events: none; }
+.rsv-week-wrap { overflow-x: auto; }
+.rsv-week th.is-today { color: var(--accent); }
+.rsv-week th[scope="row"] { white-space: nowrap; }
+.rsv-week-cell { min-width: 96px; vertical-align: top; cursor: pointer; }
+.rsv-week-cell:hover { background: var(--subtle-bg); }
+.rsv-chip { display: block; margin: 0 0 3px; padding: 2px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--neutral-soft); color: var(--ink);
+  font-size: calc(12px * var(--font-scale)); text-align: left; white-space: nowrap; cursor: pointer; }
+.rsv-chip.is-mine { background: var(--accent-soft); border-color: var(--accent); }
+.rsv-form, .rsv-detail, .rsv-items { margin-bottom: 0; }
+.rsv-items { overflow-x: auto; }
+.rsv-form .row, .rsv-detail .row, .rsv-items .row { align-items: center; margin-top: 0; }
+.rsv-form .row + *, .rsv-detail .row + .row { margin-top: calc(8px * var(--space-scale)); }
+.rsv-purpose { flex: 1; min-width: 140px; }
+.rsv-conflict { display: flex; flex-wrap: wrap; align-items: center; gap: calc(6px * var(--space-scale)); font-size: calc(13px * var(--font-scale)); }
+.rsv-items-table input { width: 100%; min-width: 80px; }
+.rsv-items-table .rsv-cap { width: 72px; min-width: 0; }
+.rsv-items-table tr.is-stopped td { opacity: 0.55; }
+.rsv-items-table .nowrap { white-space: nowrap; }
+.rsv-mine h2, .rsv-mobile h2 { font-size: calc(15px * var(--font-scale)); margin: calc(8px * var(--space-scale)) 0; }
+.rsv-mine ul { margin: 0; padding-left: 1.2em; }
+.rsv-mobile section { display: flex; flex-direction: column; gap: calc(8px * var(--space-scale)); }
+.rsv-mobile-item { padding: calc(8px * var(--space-scale)); border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+.rsv-mobile-item .row { justify-content: space-between; margin-top: 0; margin-bottom: 4px; }

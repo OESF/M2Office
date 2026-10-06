@@ -15,11 +15,11 @@ import {
   TenantAiResolver, platformAi, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, ConnectionCredentials, type ConnectionAuthProvider,
   CardService, PostgresContactStore, cardsAccess, type ContactStore, BulkMailService, PostgresBulkMailStore, NoticeService, PostgresNoticeStore,
-  InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, JanLookupService, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, InquiryService, PostgresInquiryStore, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, WEB_REVIEW_REQUEST, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, webColumnsAccess, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, WEB_COLUMN_SIGNAGE_PUBLISH, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, applyStockChanges, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
+  InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, JanLookupService, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, InquiryService, PostgresInquiryStore, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, WEB_REVIEW_REQUEST, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, webColumnsAccess, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, WEB_COLUMN_SIGNAGE_PUBLISH, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, applyStockChanges, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
   type SecretBox, type GeminiModels,
   type FileStore, type TenantExtensions, type HelpArticle, type ManualMeta, type LlmProvider, type Logger, type Repository, type WorkspaceConnector,
 } from '@m2office/core';
-import { canRunAgent, type AgentDefinition, type ContactScope, type HrSettings, type InventorySettings, type SignageSettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type ContractSettings, fileInputKey } from '@m2office/shared';
+import { canRunAgent, type AgentDefinition, type ContactScope, type HrSettings, type InventorySettings, type SignageSettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type ContractSettings, type ReservationSettings, fileInputKey } from '@m2office/shared';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -174,6 +174,11 @@ export interface AppDeps {
   contracts: {
     service: ContractService;
     access(tenantId: string, userId: string): Promise<ContractSettings | null>;
+  };
+  /** 会議室・社用車・備品の予約（内蔵の拡張。仕様書 第37章）。予約した人の Google カレンダーにも予定を入れる。 */
+  reservations: {
+    service: ReservationService;
+    access(tenantId: string, userId: string): Promise<ReservationSettings | null>;
   };
   /**
    * Webの分析（内蔵の拡張。仕様書 第34章）。担当の許可で読み、月の便りはワーカーが作る。API は画面と設定の読み書きをする。
@@ -428,6 +433,14 @@ export function buildDeps(): AppDeps {
     }),
     access: contractsAccess(repo),
   };
+  // 会議室・社用車・備品の予約（内蔵の拡張。仕様書 第37章）。予定は予約した人のカレンダーにいまの権限で入れる
+  const reservations = {
+    service: new ReservationService({
+      store: new PostgresReservationStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+      repo, calendar: connector.calendar, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
+    }),
+    access: reservationsAccess(repo),
+  };
   // Webの分析（内蔵の拡張。仕様書 第34章）。担当の許可（アナリティクスと Search Console の読み取りだけ）で読む
   const webReview = {
     service: new WebReviewService({
@@ -510,6 +523,8 @@ export function buildDeps(): AppDeps {
     attendance, payroll,
     // 人事の担当者の依頼（第30.20.1節）
     hrStaff: { service: hrService, payroll, calendar: laborCalendar, access: hrAccess(repo) },
+    // 会議室・社用車・備品の予約（第37.7節）。本人が話した回にだけ、予約する・空きに答える・変える・取り消す
+    reservations: { ...reservations, llmFor: (t: string) => ai.llmFor(t) },
     // 店頭サイネージ（第31.11.1節・第31.11.2節）。本人が話した回にだけ、割り込みを出す・消す・流れと時間帯と設定を変える
     signage: {
       ...signage,
@@ -605,6 +620,7 @@ export function buildDeps(): AppDeps {
     competitors,
     announcements,
     contracts,
+    reservations,
     webReview,
     // 店頭サイネージ（第31章）
     signage,

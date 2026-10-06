@@ -252,19 +252,22 @@ export class GoogleWorkspaceConnector implements WorkspaceConnector {
       }
       return { busy, unknown };
     },
-    create: async (p: ConnectorPrincipal, ev: { title: string; start: string; end: string; attendees: string[] }) => {
+    create: async (p: ConnectorPrincipal, ev: { title: string; start: string; end: string; attendees: string[]; location?: string; description?: string }) => {
       const res = await this.cal(p, '/calendars/primary/events?sendUpdates=all', {
         method: 'POST',
         body: {
           summary: ev.title, start: { dateTime: ev.start, timeZone: 'Asia/Tokyo' }, end: { dateTime: ev.end, timeZone: 'Asia/Tokyo' },
           attendees: ev.attendees.map((email) => ({ email })),
+          ...(ev.location ? { location: ev.location } : {}), ...(ev.description ? { description: ev.description } : {}),
         },
       });
       return { eventId: String(res?.['id'] ?? '') };
     },
-    update: async (p: ConnectorPrincipal, ev: { eventId: string; title?: string; start?: string; end?: string; attendees?: string[] }) => {
+    update: async (p: ConnectorPrincipal, ev: { eventId: string; title?: string; start?: string; end?: string; attendees?: string[]; location?: string; description?: string }) => {
       const body: Record<string, unknown> = {};
       if (ev.title !== undefined) body['summary'] = ev.title;
+      if (ev.location !== undefined) body['location'] = ev.location;
+      if (ev.description !== undefined) body['description'] = ev.description;
       if (ev.start !== undefined) body['start'] = { dateTime: ev.start, timeZone: 'Asia/Tokyo' };
       if (ev.end !== undefined) body['end'] = { dateTime: ev.end, timeZone: 'Asia/Tokyo' };
       if (ev.attendees !== undefined) body['attendees'] = ev.attendees.map((email) => ({ email }));

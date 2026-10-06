@@ -24,6 +24,7 @@ export * from './types/inquiries.js';
 export * from './types/competitors.js';
 export * from './types/announcements.js';
 export * from './types/contracts.js';
+export * from './types/reservations.js';
 export * from './types/web-review.js';
 export * from './text/internal-ids.js';
 export * from './text/paths.js';

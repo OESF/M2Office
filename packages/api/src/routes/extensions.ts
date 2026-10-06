@@ -999,6 +999,7 @@ export function extensionsRoute(deps: AppDeps) {
         // 入れたら、入れた管理者のドライブに契約書の置き場を作る（まだ無ければ。作れなくても入れる。第38.7節）
         if (body.enabled && !settings.contracts.storage) await deps.contracts.service.connectStorage({ tenantId: tenant.id, userId: user.id }).catch(() => null);
       }
+      else if (section === 'reservations') await deps.repo.saveTenantSettings(tenant.id, 'reservations', { ...settings.reservations, enabled: body.enabled }, user.id);
       else if (section === 'signage') {
         await deps.repo.saveTenantSettings(tenant.id, 'signage', { ...settings.signage, enabled: body.enabled }, user.id);
         // 切ったら、画面は無地にする（登録・素材・流れは消さない。第31.2節）

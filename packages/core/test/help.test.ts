@@ -117,6 +117,8 @@ test('使い方の質問には、その記事を最初に返す（公式の記�
     ['規程を登録する方法は？', 'admin-knowledge', ['admin']],
     ['スライドのテンプレートを登録したい', 'admin-slides', ['admin']],
     ['Gemini の鍵はどこで設定する？', 'admin-connectors', ['admin']],
+    ['会議室を予約したい', 'start-reservations', ['member']],
+    ['社用車の予約を取り消すには？', 'start-reservations', ['member']],
   ];
   for (const [q, want, roles] of cases) {
     assert.equal(catalog.search(q, ctx(roles))[0]?.article.id, want, q);

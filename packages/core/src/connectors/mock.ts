@@ -128,17 +128,17 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
     },
     create: async (
       p: ConnectorPrincipal,
-      ev: { title: string; start: string; end: string; attendees: string[] },
+      ev: { title: string; start: string; end: string; attendees: string[]; location?: string; description?: string },
     ) => {
       const id = `mock-event-${randomUUID().slice(0, 8)}`;
       const list = this.createdEvents.get(key(p)) ?? [];
-      list.push({ id, ...ev, location: null });
+      list.push({ id, title: ev.title, start: ev.start, end: ev.end, attendees: ev.attendees, location: ev.location ?? null });
       this.createdEvents.set(key(p), list);
       return { eventId: id };
     },
     update: async (
       p: ConnectorPrincipal,
-      ev: { eventId: string; title?: string; start?: string; end?: string; attendees?: string[] },
+      ev: { eventId: string; title?: string; start?: string; end?: string; attendees?: string[]; location?: string; description?: string },
     ) => {
       const created = this.createdEvents.get(key(p)) ?? [];
       const target = created.find((e) => e.id === ev.eventId) ?? this.events(p).find((e) => e.id === ev.eventId);
@@ -149,6 +149,7 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
         ...(ev.start !== undefined ? { start: ev.start } : {}),
         ...(ev.end !== undefined ? { end: ev.end } : {}),
         ...(ev.attendees !== undefined ? { attendees: ev.attendees } : {}),
+        ...(ev.location !== undefined ? { location: ev.location } : {}),
       };
       this.createdEvents.set(key(p), [...created.filter((e) => e.id !== ev.eventId), next]);
       this.replacedEvents.add(ev.eventId);

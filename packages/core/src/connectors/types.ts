@@ -152,15 +152,19 @@ export interface CalendarConnector {
     p: ConnectorPrincipal,
     q: { emails: string[]; from: string; to: string },
   ): Promise<{ busy: BusySlot[]; unknown: string[] }>;
-  /** 予定を作成し、参加者を招待する。 */
+  /**
+   * 予定を作成し、参加者を招待する。
+   *
+   * `location`・`description` は任意（会議室の予約で、予約したものの名前と場所を入れる。仕様書 第37.6節）。
+   */
   create(
     p: ConnectorPrincipal,
-    ev: { title: string; start: string; end: string; attendees: string[] },
+    ev: { title: string; start: string; end: string; attendees: string[]; location?: string; description?: string },
   ): Promise<{ eventId: string }>;
   /** 予定を変える。参加者に変更の通知が届く。見つからなければ `null`。 */
   update(
     p: ConnectorPrincipal,
-    ev: { eventId: string; title?: string; start?: string; end?: string; attendees?: string[] },
+    ev: { eventId: string; title?: string; start?: string; end?: string; attendees?: string[]; location?: string; description?: string },
   ): Promise<{ eventId: string } | null>;
   /** 予定を取り消す。参加者に取り消しの通知が届く。見つからなければ `null`。 */
   cancel(p: ConnectorPrincipal, ev: { eventId: string }): Promise<{ eventId: string } | null>;

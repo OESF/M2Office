@@ -9,7 +9,7 @@ import { Hono } from 'hono';
 import {
   agentDisplayName,
   BRIEF_SECTIONS, WEEKLY_SECTIONS, VOICE_CHOICES, VOICE_STYLE_MAX, isValidAvatar, type UserSettings, type MenuCategory,
-  CARDS_EXTENSION_ID, HR_EXTENSION_ID, SIGNAGE_EXTENSION_ID, INVENTORY_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, CONTRACTS_EXTENSION_ID, MENU_CATEGORY_MAX, MENU_CATEGORY_NAME_MAX,
+  CARDS_EXTENSION_ID, HR_EXTENSION_ID, SIGNAGE_EXTENSION_ID, INVENTORY_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, CONTRACTS_EXTENSION_ID, RESERVATIONS_EXTENSION_ID, MENU_CATEGORY_MAX, MENU_CATEGORY_NAME_MAX,
   GOOGLE_APP_IDS, LAUNCHER_LABEL_MAX, LAUNCHER_LINK_MAX, checkLauncherUrl, type LauncherLink,
 } from '@m2office/shared';
 import { AUDIO, AiNotConfiguredError, AiPolicyBlockedError, LEARNED_SOURCE, cleanTopics, buildPresence, loadFile, refusalMessage, refuseToRemember } from '@m2office/core';
@@ -471,7 +471,7 @@ function validate(
       const kinds = {
         brief: k['brief'] !== false, run: k['run'] !== false,
         approval: k['approval'] !== false, failure: k['failure'] !== false, inventory: k['inventory'] !== false, attendance: k['attendance'] !== false,
-        signage: k['signage'] !== false, inquiry: k['inquiry'] !== false, competitor: k['competitor'] !== false, announcement: k['announcement'] !== false, webReview: k['webReview'] !== false, column: k['column'] !== false, contract: k['contract'] !== false,
+        signage: k['signage'] !== false, inquiry: k['inquiry'] !== false, competitor: k['competitor'] !== false, announcement: k['announcement'] !== false, webReview: k['webReview'] !== false, column: k['column'] !== false, contract: k['contract'] !== false, reservation: k['reservation'] !== false,
       };
       const q = o['quietHours'] as { from?: string; to?: string } | null | undefined;
       const hhmm = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -501,7 +501,7 @@ function validate(
     }
     case 'menu': {
       // 名刺・在庫など（内蔵の拡張）も業務の 1 つとして並べ・ピン止めできる（仕様書 第6.1.1節）
-      const ids = [...agentIds, CARDS_EXTENSION_ID, INVENTORY_EXTENSION_ID, HR_EXTENSION_ID, SIGNAGE_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, CONTRACTS_EXTENSION_ID];
+      const ids = [...agentIds, CARDS_EXTENSION_ID, INVENTORY_EXTENSION_ID, HR_EXTENSION_ID, SIGNAGE_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, CONTRACTS_EXTENSION_ID, RESERVATIONS_EXTENSION_ID];
       const list = (v: unknown) => (Array.isArray(v) ? v.map(String).filter((x) => ids.includes(x)) : []);
       // ピン止め（仕様書 第6.1.1節）。配列でなければ、まだ変えていない（null）として残す
       const pinned = Array.isArray(o['pinned']) ? [...new Set(list(o['pinned']))] : null;

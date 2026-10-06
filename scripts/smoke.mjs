@@ -6223,6 +6223,98 @@ console.log('\n■ 77. 契約の管理（入り切り・手で入れる・期限
   }
 }
 
+console.log('\n■ 78. 予約（入り切り・予約できるもの・重なりを断る・空く時間・本人と管理者だけ・会社の境界。第37.17節）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const { rows: saved } = await owner.query(`select tenant_id, reservations from tenant_settings where tenant_id in ('t-alpha', 't-beta')`);
+  const ROOM = '会議室 smoke-A';
+  const ROOM2 = '会議室 smoke-B';
+  // 2 日後の日本時間の日付
+  const day = new Date(Date.now() + 2 * 86_400_000 + 9 * 3_600_000).toISOString().slice(0, 10);
+  const at = (hhmm) => `${day}T${hhmm}:00+09:00`;
+  try {
+    await call('a', '/v1/admin/extensions/reservations/enabled', { method: 'PUT', body: JSON.stringify({ enabled: false }) });
+    const off = await call('a', '/v1/reservations/items', {}, 'member');
+    off.status === 403 ? ok('予約を切っている会社では使わせない') : ng(`切っているのに使えた（${off.status}）`);
+    const on = await call('a', '/v1/admin/extensions/reservations/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const me = await call('a', '/v1/me', {}, 'member');
+    on.status === 200 && me.body.reservations === true ? ok('入れると、利用範囲の人の左のメニューに「予約」が出る') : ng('入れたのに使えない', JSON.stringify({ on: on.status, me: me.body.reservations }));
+
+    const byMember = await call('a', '/v1/reservations/items', { method: 'POST', body: JSON.stringify({ name: ROOM }) }, 'member');
+    byMember.status === 403 ? ok('予約できるものを足せるのは管理者だけ') : ng(`管理者でない人が足せた（${byMember.status}）`);
+    const a = await call('a', '/v1/reservations/items', { method: 'POST', body: JSON.stringify({ name: ROOM, capacity: 6 }) });
+    const b = await call('a', '/v1/reservations/items', { method: 'POST', body: JSON.stringify({ name: ROOM2, capacity: 12 }) });
+    const dup = await call('a', '/v1/reservations/items', { method: 'POST', body: JSON.stringify({ name: ROOM }) });
+    a.status === 201 && a.body.item.kind === 'room' && b.status === 201 && dup.status === 400
+      ? ok('管理者が足すと、種類を名前から決める（会議室）。同じ名前は足さない') : ng('予約できるものの足し方が違う', JSON.stringify({ a: a.body, dup: dup.status }));
+    const itemA = a.body.item?.id;
+    const itemB = b.body.item?.id;
+
+    const first = await call('a', '/v1/reservations', { method: 'POST', body: JSON.stringify({ itemId: itemA, startAt: at('10:00'), endAt: at('11:00'), purpose: '定例' }) }, 'member');
+    first.status === 201 && first.body.reservation?.userName && ['added', 'not-connected', 'failed'].includes(first.body.calendar)
+      ? ok(`予約できる（カレンダー: ${first.body.calendar}）`) : ng('予約できない', JSON.stringify(first));
+    const clash = await call('a', '/v1/reservations', { method: 'POST', body: JSON.stringify({ itemId: itemA, startAt: at('10:30'), endAt: at('11:30'), purpose: '' }) });
+    const c = clash.body.conflict;
+    clash.status === 409 && c?.nextFree?.startAt === new Date(at('11:00')).toISOString() && c.others.some((o) => o.id === itemB)
+      ? ok('重なる予約は 409 で断り、次に空く時間（11:00〜）と、同じ時間に空いているほかの会議室を返す') : ng('重なりの断り方が違う', JSON.stringify(clash));
+    const touching = await call('a', '/v1/reservations', { method: 'POST', body: JSON.stringify({ itemId: itemA, startAt: at('11:00'), endAt: at('12:00'), purpose: '' }) });
+    touching.status === 201 ? ok('終わりと始めが同じ時刻なら重ならない') : ng(`続きの時間を取れない（${touching.status}）`);
+    const tooLong = await call('a', '/v1/reservations', { method: 'POST', body: JSON.stringify({ itemId: itemB, startAt: at('09:00'), endAt: new Date(Date.parse(at('09:00')) + 15 * 86_400_000).toISOString(), purpose: '' }) }, 'member');
+    tooLong.status === 400 && /14 日まで/.test(tooLong.body.error ?? '') ? ok('1 件は 14 日まで') : ng(`長すぎる予約が通った（${tooLong.status}）`);
+
+    const list = await call('a', `/v1/reservations?from=${encodeURIComponent(at('00:00'))}&to=${encodeURIComponent(new Date(Date.parse(at('00:00')) + 86_400_000).toISOString())}`, {}, 'member');
+    list.status === 200 && list.body.reservations.filter((r) => r.itemId === itemA).length === 2 && list.body.admin === false
+      ? ok('その日の予約と予約できるものを返す') : ng('一覧が違う', JSON.stringify({ status: list.status, n: list.body.reservations?.length }));
+    const mine = await call('a', '/v1/reservations/mine', {}, 'member');
+    mine.status === 200 && mine.body.reservations.some((r) => r.id === first.body.reservation?.id) ? ok('自分の予約を返す') : ng('自分の予約が出ない');
+
+    const adminRes = touching.body.reservation?.id;
+    const notMine = await call('a', `/v1/reservations/${adminRes}`, { method: 'DELETE' }, 'member');
+    notMine.status === 403 ? ok('ほかの人の予約は取り消せない') : ng(`ほかの人の予約を取り消せた（${notMine.status}）`);
+    const longer = await call('a', `/v1/reservations/${first.body.reservation?.id}`, { method: 'PATCH', body: JSON.stringify({ endAt: at('11:30') }) }, 'member');
+    longer.status === 409 ? ok('変えた結果が重なれば変えない（409）') : ng(`重なる変更が通った（${longer.status}）`);
+    const byAdmin = await call('a', `/v1/reservations/${first.body.reservation?.id}`, { method: 'DELETE' });
+    byAdmin.status === 200 ? ok('管理者はほかの人の予約を取り消せる') : ng(`管理者が取り消せない（${byAdmin.status}）`);
+
+    await call('b', '/v1/admin/extensions/reservations/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const otherItems = await call('b', '/v1/reservations/items', {}, 'member');
+    const otherBook = await call('b', '/v1/reservations', { method: 'POST', body: JSON.stringify({ itemId: itemB, startAt: at('13:00'), endAt: at('14:00'), purpose: '' }) }, 'member');
+    otherItems.status === 200 && !otherItems.body.items.some((i) => i.id === itemA) && otherBook.status === 400
+      ? ok('ほかの会社の予約できるものは見えず、予約もできない') : ng('ほかの会社のものが見えたか予約できた', JSON.stringify({ items: otherItems.status, book: otherBook.status }));
+
+    // 置き場: 同時に取っても重ならない（期間の重なりを断る制約）と、会社の境界（行単位の制限）
+    const app = new pg.Client({ connectionString: process.env.DATABASE_URL ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office' });
+    await app.connect();
+    try {
+      await app.query('begin');
+      await app.query(`select set_config('app.tenant_id', 't-alpha', true)`);
+      let overlap = false;
+      try {
+        await app.query(`insert into reservations (id, tenant_id, item_id, start_at, end_at, user_id, created_by, updated_by) values ('rsv-smoke', 't-alpha', $1, $2, $3, 'u', 'u', 'u')`, [itemA, at('11:15'), at('11:45')]);
+      } catch (e) { overlap = e.code === '23P01'; }
+      await app.query('rollback');
+      overlap ? ok('データベースが、同じものの重なる予約を断る（期間の重なりを断る制約）') : ng('データベースが重なる予約を入れた');
+      await app.query('begin');
+      await app.query(`select set_config('app.tenant_id', 't-beta', true)`);
+      let refused = false;
+      try {
+        await app.query(`insert into reservable_items (id, tenant_id, name, created_by) values ('rsi-smoke', 't-alpha', 'x', 'u')`);
+      } catch { refused = true; }
+      await app.query('rollback');
+      refused ? ok('予約できるものは、ほかの会社の行を書けない（行単位の制限）') : ng('ほかの会社の予約できるものを書けた');
+    } finally {
+      await app.end();
+    }
+  } finally {
+    await owner.query(`delete from reservable_items where tenant_id = 't-alpha' and name in ($1, $2)`, [ROOM, ROOM2]);
+    await owner.query(`delete from notifications where tenant_id = 't-alpha' and kind = 'reservation'`).catch(() => undefined);
+    for (const r of saved) await owner.query(`update tenant_settings set reservations = $2 where tenant_id = $1`, [r.tenant_id, r.reservations ? JSON.stringify(r.reservations) : null]);
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

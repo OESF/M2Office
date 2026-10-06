@@ -7,7 +7,7 @@
  */
 
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
-import { CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, CONTRACTS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, showsCaptions, type Notification, type UserSettings } from '@m2office/shared';
+import { CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, CONTRACTS_EXTENSION_ID, RESERVATIONS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, showsCaptions, type Notification, type UserSettings } from '@m2office/shared';
 import {
   addCategory, assignCategory, checkCategoryName, groupMenu, removeCategory, togglePinned, type MenuSection,
 } from './menu.js';
@@ -32,6 +32,7 @@ import { Inquiries } from './Inquiries.js';
 import { Competitors } from './Competitors.js';
 import { Announcements } from './Announcements.js';
 import { CONTRACT_REVIEW_AGENT_ID, ContractFromReview, Contracts } from './Contracts.js';
+import { Reservations } from './Reservations.js';
 import { WebReview } from './WebReview.js';
 import { Signage } from './Signage.js';
 import { Hr } from './Hr.js';
@@ -115,6 +116,7 @@ type View =
   | { kind: 'competitors' }
   | { kind: 'announcements'; announcementId: string | null }
   | { kind: 'contracts'; contractId: string | null }
+  | { kind: 'reservations' }
   | { kind: 'webReview'; month: string | null }
   | { kind: 'settings'; section: SettingsSection }
   | { kind: 'help'; articleId: string | null };
@@ -313,6 +315,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const competitorChangeKey = history.filter((h) => h.job?.agentId?.startsWith('competitors:') && h.run.status === 'completed').map((h) => h.run.id).join(',');
   // 秘書がお知らせを作り終えた・出し終えたら、お知らせの作成の画面を読み直す
   const contractChangeKey = history.filter((h) => h.job?.agentId?.startsWith('contracts:') && ['completed', 'failed'].includes(h.run.status)).map((h) => `${h.run.id}:${h.run.status}`).join(',');
+  // 秘書が予約を扱ったら、予約の画面を読み直す（秘書が答えるたび）
+  const reservationChangeKey = result?.id ?? '';
   const announcementChangeKey = history.filter((h) => h.job?.agentId?.startsWith('announcements:') && ['completed', 'failed', 'rejected', 'cancelled'].includes(h.run.status)).map((h) => `${h.run.id}:${h.run.status}`).join(',');
 
   // 実行を表示している間は詳細も追う
@@ -400,6 +404,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
     // お知らせの作成（仕様書 第35.17節）。会社で入れていて利用範囲の人にだけ出す
     ...(me.announcements ? [{ id: ANNOUNCEMENTS_EXTENSION_ID, name: 'お知らせの作成', description: '休業などのお知らせを 1 つ作り、Web サイト・LINE・サイネージの画面にまとめて出す', icon: 'notifications' as IconName, agent: null }] : []),
     // 契約の管理（仕様書 第38章）。会社で入れていて利用範囲の人にだけ出す
+    // 会議室・社用車・備品の予約（仕様書 第37章）。会社で入れていて利用範囲の人にだけ出す
+    ...(me.reservations ? [{ id: RESERVATIONS_EXTENSION_ID, name: '予約', description: '会議室・社用車・備品を予約する', icon: 'calendar' as IconName, agent: null }] : []),
     ...(me.contracts ? [{ id: CONTRACTS_EXTENSION_ID, name: '契約', description: '結んだ契約を台帳にし、更新と解約の申し出の期限を知らせる', icon: 'doc' as IconName, agent: null }] : []),
     // Webの分析（仕様書 第34.18節）。会社で入れていて利用範囲の人にだけ出す
     ...(me.webReview ? [{ id: WEB_REVIEW_EXTENSION_ID, name: 'Webの分析', description: '会社の Web サイトの数字を月に 1 回、ふつうの言葉で届ける', icon: 'usage' as IconName, agent: null }] : []),
@@ -420,11 +426,12 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
               : m.id === COMPETITORS_EXTENSION_ID ? setView({ kind: 'competitors' })
                 : m.id === ANNOUNCEMENTS_EXTENSION_ID ? setView({ kind: 'announcements', announcementId: null })
                   : m.id === CONTRACTS_EXTENSION_ID ? setView({ kind: 'contracts', contractId: null })
+                  : m.id === RESERVATIONS_EXTENSION_ID ? setView({ kind: 'reservations' })
                   : m.id === WEB_REVIEW_EXTENSION_ID ? setView({ kind: 'webReview', month: null }) : setView({ kind: 'cards', contactId: null }));
   const isOpen = (m: MenuItem) => (m.agent ? view.kind === 'agent' && view.agent.id === m.id
     : m.id === INVENTORY_EXTENSION_ID ? view.kind === 'inventory' : m.id === HR_EXTENSION_ID ? view.kind === 'hr'
       : m.id === SIGNAGE_EXTENSION_ID ? view.kind === 'signage' : m.id === WEB_COLUMNS_EXTENSION_ID ? view.kind === 'columns'
-        : m.id === INQUIRIES_EXTENSION_ID ? view.kind === 'inquiries' : m.id === COMPETITORS_EXTENSION_ID ? view.kind === 'competitors' : m.id === ANNOUNCEMENTS_EXTENSION_ID ? view.kind === 'announcements' : m.id === CONTRACTS_EXTENSION_ID ? view.kind === 'contracts' : m.id === WEB_REVIEW_EXTENSION_ID ? view.kind === 'webReview' : view.kind === 'cards');
+        : m.id === INQUIRIES_EXTENSION_ID ? view.kind === 'inquiries' : m.id === COMPETITORS_EXTENSION_ID ? view.kind === 'competitors' : m.id === ANNOUNCEMENTS_EXTENSION_ID ? view.kind === 'announcements' : m.id === CONTRACTS_EXTENSION_ID ? view.kind === 'contracts' : m.id === RESERVATIONS_EXTENSION_ID ? view.kind === 'reservations' : m.id === WEB_REVIEW_EXTENSION_ID ? view.kind === 'webReview' : view.kind === 'cards');
   // ピン止めとカテゴリーは個人設定（メニュー）に保存し、端末をまたいで同じにする。保存に失敗したら読み直す
   const saveMenu = (saved: UserSettings['menu']) => {
     setMenu(saved);
@@ -689,6 +696,12 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
                 {...(me.webColumns ? { onColumn: async (theme: string) => { const { id } = await api.columns.create(theme, 'お客様からよく聞かれる質問です'); setView({ kind: 'columns', columnId: id }); } } : {})} />
             </>
           )}
+          {view.kind === 'reservations' && (
+            <>
+              <h1>予約 <HelpTip article="start-reservations">会議室・社用車・備品を予約します。同じものの同じ時間は取れません。秘書に「明日 10 時から 1 時間、会議室を取って」と頼めます。</HelpTip></h1>
+              <Reservations userId={me.user.id} changeKey={reservationChangeKey} />
+            </>
+          )}
           {view.kind === 'contracts' && (
             <>
               <h1>契約 <HelpTip article="start-contracts">結んだ契約を台帳にし、自動更新の解約の申し出の期限と、契約の終わりの前に担当へ知らせます。</HelpTip></h1>
@@ -901,6 +914,7 @@ const VIEW_LABELS: Record<string, string> = {
   competitors: '競合の分析',
   announcements: 'お知らせの作成',
   contracts: '契約',
+  reservations: '予約',
   webReview: 'Webの分析',
   settings: '個人設定',
 };

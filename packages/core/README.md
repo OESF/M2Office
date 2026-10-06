@@ -41,6 +41,10 @@ src/announcements/ お知らせの作成（内蔵の拡張。第35章の段 1・
 src/contracts/   契約の管理（内蔵の拡張。第38章の段 1）。項目の読み取りと期限の計算（extract.ts。推論の JSON と決まった言い方・申し出の日数・更新の期間）、
                  置き場（store.ts。PostgreSQL とメモリ）、処理（service.ts。契約書・契約書チェックの実行・手で入れる・直す・削除・
                  ドライブの置き場・契約書を開く・期限の見張りと自動更新の繰り越し）、ツール（tools.ts。contracts.find・register・update）、付属の業務「契約の台帳」（agents.ts）
+src/reservations/ 会議室・社用車・備品の予約（内蔵の拡張。第37章の段 1）。置き場（store.ts。PostgreSQL は期間の重なりを断る制約で、メモリも同じように断る）、
+                 処理（service.ts。予約できるものを足す・直す・止める・並べ替え、予約する・空いているものを選ぶ・変える・取り消す・終わった、
+                 重なったときの次に空く時間とほかのもの、予約した人の Google カレンダーの予定、1 年で消す）、包み（package.js）。
+                 秘書の頼みの読み方と答えは src/secretary/reservations.ts
 src/cards/       名刺管理（内蔵の拡張。第27章）。置き場（自分だけの名刺は持ち主でも行を絞る）、読み取り（read.ts。写っている名刺ごとに項目・向き・四隅。
                  四隅は文字の向きに合わせて並べ直す orderCorners。1 枚の写真に 10 枚まで）、同じ人の見分け（identity.ts）、
                  表（CSV・Excel）の取り込みと書き出し（table.ts。見出しはよくある言い方と推論で読む）、

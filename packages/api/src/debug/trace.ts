@@ -24,6 +24,7 @@ const ACTIONS: Record<string, string> = {
   'secretary.attendance': '勤怠と有給',
   'secretary.payslip': '本人の給与明細',
   'secretary.hr': '人事の担当者の依頼',
+  'secretary.reservation': '予約',
 };
 
 /**

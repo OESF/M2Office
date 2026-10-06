@@ -11,7 +11,7 @@
 
 import {
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
-  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink,
+  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink,
   NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator,
@@ -189,6 +189,11 @@ const contracts = new ContractService({
     const v = key ? job.input[key] : null;
     return typeof v === 'string' && v ? v : null;
   },
+});
+// 予約（第37章）。ワーカーは終わって 1 年を過ぎた予約を消すだけ
+const reservations = new ReservationService({
+  store: new PostgresReservationStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+  repo, calendar: connector.calendar, logger: log,
 });
 const inquiryStore = new PostgresInquiryStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
 const inquiries = new InquiryService({
@@ -400,6 +405,9 @@ let lastAnnouncementCheck = 0;
 /** 契約の期限を見張る間隔（第38.6節。既定は 1 時間。知らせは期限ごとに 1 回だけ）。 */
 const CONTRACT_INTERVAL_MS = Number(process.env['CONTRACT_INTERVAL_MS'] ?? 3_600_000);
 let lastContractCheck = 0;
+/** 終わって 1 年を過ぎた予約を消す間隔（第37.11節。1 日に 1 回で足りる）。 */
+const RESERVATION_PURGE_INTERVAL_MS = 86_400_000;
+let lastReservationPurge = 0;
 // Webの分析（第34.18節・第34.19節）。既定は 1 分ごとに、月の便り（3 日の 8 時を過ぎ、先月の便りがまだ無いか）と、
 // 直すべき所の見回りの番（週に 1 回・今すぐチェック）を見る
 const WEB_REVIEW_INTERVAL_MS = Number(process.env['WEB_REVIEW_INTERVAL_MS'] ?? 60_000);
@@ -659,6 +667,17 @@ while (running) {
       if (r.notified + r.renewed > 0) log.info('契約の期限を知らせ、自動更新を進めました', { notified: r.notified, renewed: r.renewed });
     } catch (err) {
       log.warn('契約の期限の見張りに失敗しました', { err });
+    }
+  }
+
+  // 終わって 1 年を過ぎた予約を消す（第37.11節）
+  if (Date.now() - lastReservationPurge >= RESERVATION_PURGE_INTERVAL_MS) {
+    lastReservationPurge = Date.now();
+    try {
+      const removed = await reservations.tick(new Date());
+      if (removed > 0) log.info('終わって 1 年を過ぎた予約を消しました', { removed });
+    } catch (err) {
+      log.warn('終わった予約の片付けに失敗しました', { err });
     }
   }
 

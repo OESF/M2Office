@@ -35,6 +35,8 @@ export type Route =
   | { kind: 'announcements'; announcementId: string | null }
   /** 契約の管理（仕様書 第38章）。`contractId` があれば 1 件。 */
   | { kind: 'contracts'; contractId: string | null }
+  /** 会議室・社用車・備品の予約（仕様書 第37章）。 */
+  | { kind: 'reservations' }
   /** Webの分析（仕様書 第34.18節）。`month`（YYYY-MM）があればその月の便り。 */
   | { kind: 'webReview'; month: string | null }
   | { kind: 'settings'; section: string | null }
@@ -76,6 +78,7 @@ export function parseRoute(pathname: string): Route {
     case 'competitors': return second === undefined ? { kind: 'competitors' } : { kind: 'unknown' };
     case 'announcements': return second === undefined ? { kind: 'announcements', announcementId: null } : id(second) ? { kind: 'announcements', announcementId: id(second) } : { kind: 'unknown' };
     case 'contracts': return second === undefined ? { kind: 'contracts', contractId: null } : id(second) ? { kind: 'contracts', contractId: id(second) } : { kind: 'unknown' };
+    case 'reservations': return second === undefined ? { kind: 'reservations' } : { kind: 'unknown' };
     case 'web-review': return second === undefined ? { kind: 'webReview', month: null } : /^\d{4}-(0[1-9]|1[0-2])$/.test(second) ? { kind: 'webReview', month: second } : { kind: 'unknown' };
     case 'columns': return second === undefined ? { kind: 'columns', columnId: null } : id(second) ? { kind: 'columns', columnId: id(second) } : { kind: 'unknown' };
     case 'inquiries': return second === undefined ? { kind: 'inquiries', inquiryId: null } : id(second) ? { kind: 'inquiries', inquiryId: id(second) } : { kind: 'unknown' };
@@ -101,6 +104,7 @@ export function routePath(route: Route): string {
     case 'inquiries': return route.inquiryId ? `/inquiries/${enc(route.inquiryId)}` : '/inquiries';
     case 'announcements': return route.announcementId ? `/announcements/${enc(route.announcementId)}` : '/announcements';
     case 'contracts': return route.contractId ? `/contracts/${enc(route.contractId)}` : '/contracts';
+    case 'reservations': return '/reservations';
     case 'webReview': return route.month ? `/web-review/${enc(route.month)}` : '/web-review';
     case 'settings': return route.section ? `/settings/${enc(route.section)}` : '/settings';
     case 'help': return route.articleId ? `/help/${enc(route.articleId)}` : '/help';
