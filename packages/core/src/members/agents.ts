@@ -9,7 +9,7 @@ import { MEMBERS_EXTENSION_ID, type AgentDefinition } from '@m2office/shared';
 import type { ExtensionPackage } from '../extensions/loader.js';
 
 /** 内蔵の拡張の版。付属の業務やツールが変わったら上げる。 */
-export const MEMBERS_EXTENSION_VERSION = '1.0.0';
+export const MEMBERS_EXTENSION_VERSION = '1.1.0';
 
 /** 付属の業務「会員とポイント」（秘書から）。 */
 export const MEMBER_DESK: AgentDefinition = {
@@ -73,8 +73,43 @@ export const MEMBER_DESK: AgentDefinition = {
   face: 19,
 };
 
+/**
+ * 付属の業務「会員に LINE で知らせる」（第40.18節）。管理者が用意した知らせ（失効の前の知らせは仕組みが用意する）を、
+ * 管理者か承認者の承認の後に、会員に LINE で 1 人ずつ送る。
+ */
+export const MEMBER_LINE_SEND: AgentDefinition = {
+  schemaVersion: 1,
+  id: `${MEMBERS_EXTENSION_ID}:line-send`,
+  version: 1,
+  name: '会員に LINE で知らせる',
+  category: 'sample',
+  description: '用意した会員への知らせ（失効の前の知らせ・しばらく来ていない会員へのご案内など）を、承認の後に LINE で 1 人ずつ送ります',
+  locale: 'ja-JP',
+  compartment: null,
+  menu: false,
+  private: true,
+  inputs: { type: 'object', required: ['messageId'], properties: { messageId: { type: 'string', title: '知らせ' } } },
+  tools: ['members.send_line'],
+  steps: [
+    { id: 'gate', type: 'approval', label: '会員への知らせの承認', approverRole: ['admin', 'approver'], present: '宛先の人数・1 人目に届く文・LINE の今月の残り', onReject: 'stop' },
+    {
+      id: 'send', type: 'agent', tools: ['members.send_line'], required: ['members.send_line'], label: '送る',
+      instruction: '入力の messageId で members.send_line を 1 回だけ呼び、送れた数と送れなかった数を短く伝える。',
+      onError: 'stop',
+    },
+  ],
+  constraints: ['承認の前に送らない', '承認の後に中身が変わったら送らない'],
+  limits: { maxSteps: 4, maxTokens: 10_000, timeoutSec: 600 },
+  help: {
+    summary: '会員への LINE の知らせを、承認の後に 1 人ずつ送ります。',
+    examples: [],
+    notes: ['会員の画面の「LINE で知らせる」から用意します。失効が近い会員への知らせは、週に 1 回、仕組みが用意して承認待ちにします'],
+  },
+  face: 20,
+};
+
 /** 会員とポイントの付属の業務。 */
-export const MEMBER_AGENTS: AgentDefinition[] = [MEMBER_DESK];
+export const MEMBER_AGENTS: AgentDefinition[] = [MEMBER_DESK, MEMBER_LINE_SEND];
 
 /** 会員とポイントを、拡張機能の一覧に並べるための形（第12.13節「公式・内蔵」）。 */
 export const MEMBERS_PACKAGE: ExtensionPackage = {
@@ -85,7 +120,7 @@ export const MEMBERS_PACKAGE: ExtensionPackage = {
     description: 'お客様を会員にし、来店と購入のたびにポイントを貯めて、特典と交換できます。会員証は LINE とスマホ（紙のカードも印刷できます）。店員はスマホで QR を読むだけです',
     publisher: { name: 'M2Office', verified: true },
     platform_schema: '>=1 <2',
-    permissions: { tools: ['members.find', 'members.points', 'members.rewards'], max_risk_level: 'write-internal' },
+    permissions: { tools: ['members.find', 'members.points', 'members.rewards', 'members.send_line'], max_risk_level: 'external-send' },
   },
   agents: MEMBER_AGENTS,
   connectors: [],

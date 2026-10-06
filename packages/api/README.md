@@ -312,6 +312,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/members/card?code=` ／ `GET /v1/members/lookup` | 店員が読んだ会員証（QR の URL か鍵）から会員と使える特典 ／ 問い合わせの連絡先と同じ人の会員（`phone`・`inquiryId`） |
 | `POST /v1/members/:id/visit` ／ `purchase` ／ `reward` ／ `adjust` ／ `merge`、`POST /v1/members/points/:id/undo` | 来店（1 日 1 回）／ 購入（`amount`。金額は残さない）／ 特典を使う ／ 調整（理由）／ まとめる（管理者）／ 取り消し（前の日は管理者） |
 | `GET /v1/members/:id/qr.svg` ／ `GET /v1/members/:id/card.pdf` ／ `GET` ／ `POST /v1/members/rewards` ／ `PATCH /v1/members/rewards/:id` | 会員証の QR ／ 紙の会員証 ／ 特典（作る・直すは管理者） |
+| `GET` ／ `POST /v1/members/messages` | 会員への LINE の知らせ（第40.18節）: 一覧と宛先ごとの LINE の会員の数 ／ 用意して承認へ進める（管理者。`audience`: line・away・expiring、`text`。送るのは承認の後） |
 | `GET /v1/member-card/:key` ／ `GET` ／ `POST /v1/member-card/line` | ログインなし: 会員証のページ（鍵つき）／ LINE の入口（LIFF。ID トークンを LINE で確かめ、初めてなら呼び名を受け取って会員にする） |
 | `PUT /v1/admin/extensions/members/settings` | 管理者: 来店のポイント・購入の率・有効期限・LIFF ID・LINE ログインのチャネル ID |
 | `GET /v1/competitors` | 競合の分析（仕様書 第36.18節）: 全体（自社の像・競合・動いている作業・最後の作業・地図の注意）。地図で見つけた競合の名前と Web サイトはここで引き直す。使えない会社と利用範囲の外の人には、`/v1/competitors` のどの口も 403 |

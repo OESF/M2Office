@@ -134,13 +134,14 @@ export const membersRewards: Tool = {
   risk: 'write-internal',
   activityLabel: '特典を直しています',
   helpText: 'ポイントと交換できる特典を作る・直す・止める（管理者）',
-  description: '特典を扱う。action は list（一覧）・create（作る。name と points）・update（直す。name で選び、points か newName）・stop（止める。name で選ぶ）',
+  description: '特典を扱う。action は list（一覧）・create（作る。name と points。誕生月の会員だけなら birthdayOnly を true）・update（直す。name で選び、points か newName）・stop（止める。name で選ぶ）',
   args: {
     properties: {
       action: { type: 'string', description: 'list・create・update・stop' },
       name: { type: 'string', description: '特典の名前' },
       points: { type: 'number', description: '必要なポイント' },
       newName: { type: 'string', description: '新しい名前' },
+      birthdayOnly: { type: 'boolean', description: '誕生月の会員だけが使える特典か' },
     },
     required: ['action'],
   },
@@ -151,7 +152,7 @@ export const membersRewards: Tool = {
     const list = await service.rewards(who(ctx));
     if (action === 'list') return { available: true, path: PATH, rewards: list.map((r) => ({ name: r.name, points: r.points, status: r.status === 'active' ? '使える' : '止めた' })) };
     if (action === 'create') {
-      const r = await service.createReward(who(ctx), { name: args['name'], points: args['points'] });
+      const r = await service.createReward(who(ctx), { name: args['name'], points: args['points'], birthdayOnly: args['birthdayOnly'] === true });
       if ('error' in r) return { available: false, reason: r.error };
       return { available: true, reward: { name: r.reward.name, points: r.reward.points } };
     }
@@ -167,5 +168,41 @@ export const membersRewards: Tool = {
   },
 };
 
+/**
+ * 承認された会員への LINE の知らせを送る（第40.18節）。宛先の 1 人ずつに呼び名・ポイント・失効日を差し込んで LINE で送る。
+ *
+ * @remarks 危険度 `external-send`。お客様に届くため、承認の段の直後でしか呼べない。承認の後に中身（文と宛先）が変わっていたら送らない
+ */
+export const membersSendLine: Tool = {
+  name: 'members.send_line',
+  risk: 'external-send',
+  activityLabel: '会員に LINE で知らせています',
+  helpText: '承認された会員への知らせを、LINE で 1 人ずつ送ります',
+  description: '承認された会員への LINE の知らせ（messageId）を送る',
+  args: { properties: { messageId: { type: 'string', description: '知らせの ID' } }, required: ['messageId'] },
+  planKey: (args) => `member-message:${str(args['messageId'])}`,
+  async prepare(args, ctx) {
+    const service = await serviceOf(ctx);
+    if (!service) return { kind: 'problem', reason: UNAVAILABLE.reason };
+    const id = str(args['messageId']);
+    const p = await service.previewMessage(ctx.tenantId, id).catch(() => null);
+    if (!p) return { kind: 'problem', reason: '知らせが見つかりません' };
+    if ('error' in p) return { kind: 'problem', reason: p.error };
+    const shown = [
+      `宛先: ${p.audience}（LINE でつながっている ${p.count} 人に 1 人ずつ。送った後は取り消せません）`,
+      `今月の LINE の残り: ${p.remaining === null ? '上限なし' : `${p.remaining} 通`}`,
+      `1 人目に届く文:\n${p.sample}`,
+    ].join('\n');
+    return { kind: 'ready', args: { messageId: id, digest: p.digest }, shown, audience: 'external' };
+  },
+  async invoke(args, ctx) {
+    const service = await serviceOf(ctx);
+    if (!service) return UNAVAILABLE;
+    const r = await service.sendMessage(who(ctx), str(args['messageId']), str(args['digest']));
+    if ('error' in r) return { available: false, reason: r.error };
+    return { available: true, sent: r.sent, failed: r.failed };
+  },
+};
+
 /** 会員とポイントのツール。 */
-export const MEMBER_TOOLS: Tool[] = [membersFind, membersPoints, membersRewards];
+export const MEMBER_TOOLS: Tool[] = [membersFind, membersPoints, membersRewards, membersSendLine];

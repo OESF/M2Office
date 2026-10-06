@@ -33,6 +33,8 @@ export function notificationPath(n: { kind: string; runId: string | null }): str
   if (n.kind === 'reservation') return '/reservations';
   // 補助金・助成金の月の案内と締め切りの知らせは、補助金・助成金を開く（第39.7節）
   if (n.kind === 'subsidy') return '/subsidies';
+  // 会員の週の見立てと LINE の知らせの結果は、会員を開く（第40.18節）
+  if (n.kind === 'member') return '/members';
   if (n.runId && RUN_ID.test(n.runId)) return `/runs/${encodeURIComponent(n.runId)}`;
   return '/';
 }

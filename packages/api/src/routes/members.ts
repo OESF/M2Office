@@ -80,6 +80,18 @@ export function membersRoute(deps: AppDeps) {
     return c.json(rest);
   });
 
+  /** 会員への LINE の知らせ（新しい順）と、宛先ごとの LINE でつながっている会員の数（第40.18節）。 */
+  app.get('/messages', async (c) => {
+    const w = who(c);
+    return c.json({ items: await service.messages(w), counts: await service.audienceCounts(w) });
+  });
+
+  /** 会員への LINE の知らせを用意して、承認へ進める（管理者だけ。送るのは承認の後）。 */
+  app.post('/messages', async (c) => {
+    const r = await service.prepareMessage(who(c), await body(c));
+    return 'error' in r ? c.json(r, status(r.error)) : c.json(r, 201);
+  });
+
   /** 特典（止めたものも含む）。 */
   app.get('/rewards', async (c) => c.json({ items: await service.rewards(who(c)) }));
 

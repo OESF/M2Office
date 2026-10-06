@@ -471,7 +471,7 @@ function validate(
       const kinds = {
         brief: k['brief'] !== false, run: k['run'] !== false,
         approval: k['approval'] !== false, failure: k['failure'] !== false, inventory: k['inventory'] !== false, attendance: k['attendance'] !== false,
-        signage: k['signage'] !== false, inquiry: k['inquiry'] !== false, competitor: k['competitor'] !== false, announcement: k['announcement'] !== false, webReview: k['webReview'] !== false, column: k['column'] !== false, contract: k['contract'] !== false, reservation: k['reservation'] !== false, subsidy: k['subsidy'] !== false,
+        signage: k['signage'] !== false, inquiry: k['inquiry'] !== false, competitor: k['competitor'] !== false, announcement: k['announcement'] !== false, webReview: k['webReview'] !== false, column: k['column'] !== false, contract: k['contract'] !== false, reservation: k['reservation'] !== false, subsidy: k['subsidy'] !== false, member: k['member'] !== false,
       };
       const q = o['quietHours'] as { from?: string; to?: string } | null | undefined;
       const hhmm = /^([01]\d|2[0-3]):[0-5]\d$/;

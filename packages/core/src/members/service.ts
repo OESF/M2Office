@@ -6,14 +6,15 @@
  * ポイントを付けるのはログインした従業員だけ。会員証や知らせを自動で LINE・メールに送らない（第40.5節）。
  */
 
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import {
-  MEMBERS_EXTENSION_ID, MEMBER_LIMITS, canUseAgent,
-  type Member, type MemberPoint, type MemberReward, type MemberSettings,
+  MEMBERS_EXTENSION_ID, MEMBER_AUDIENCE_LABELS, MEMBER_EXPIRY_TEXT, MEMBER_LIMITS, MEMBER_MESSAGE_MAX, canUseAgent,
+  type Member, type MemberAudience, type MemberMessage, type MemberPoint, type MemberReward, type MemberSettings,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import { silentLogger, type Logger } from '../log/logger.js';
-import type { MemberStore, StoredMember, StoredPoint } from './store.js';
+import { openLine, type LineDeps } from '../inquiries/line.js';
+import type { MemberStore, StoredMember, StoredMessage, StoredPoint } from './store.js';
 
 /** 操作する人。 */
 export interface MemberViewer {
@@ -39,6 +40,12 @@ export interface MemberServiceDeps {
   repo: Repository;
   /** LINE の ID トークンを確かめる口（会社ごと。見本の会社では見本） */
   lineFor?(tenantId: string): LineIdTokenVerifier;
+  /** 会社の LINE 公式アカウント（会員への LINE の知らせを送る。問い合わせの記録でつないだもの。第40.18節） */
+  line?: LineDeps;
+  /** 会員への LINE の知らせを、承認の段のある業務として起こす（実行の ID を返す） */
+  submitter?(tenantId: string, userId: string, messageId: string): Promise<string>;
+  /** 実行の状態（承認されなかった知らせを「承認されなかった」にする） */
+  runStatus?(tenantId: string, runId: string): Promise<string | null>;
   logger?: Logger;
   now?(): Date;
 }
@@ -62,6 +69,34 @@ export function membersAccess(repo: Repository) {
 }
 
 const jstDay = (d: Date) => new Date(d.getTime() + 9 * 3_600_000).toISOString().slice(0, 10);
+const DAY = 86_400_000;
+
+/** 誕生日の書き方（「3/14」「03-14」「3月14日」）を MM-DD に。読めなければ `false`、空なら `null`。 */
+export function birthdayOf(v: unknown): string | null | false {
+  if (v === null || v === undefined || v === '') return null;
+  const m = /^(\d{1,2})\s*(?:[-/月.])\s*(\d{1,2})日?$/.exec(String(v).normalize('NFKC').trim());
+  if (!m) return false;
+  const mm = Number(m[1]);
+  const dd = Number(m[2]);
+  const days = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (mm < 1 || mm > 12 || dd < 1 || dd > days[mm - 1]!) return false;
+  return `${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
+}
+
+/** 失効する日（最後に貯めた日か会員になった日から、有効期限の日数のあと。日本時間の YYYY-MM-DD）。 */
+export const expiryDayOf = (m: Pick<StoredMember, 'lastEarnedAt' | 'createdAt'>, expiryDays: number) =>
+  jstDay(new Date(Date.parse(m.lastEarnedAt ?? m.createdAt) + expiryDays * DAY));
+
+/** 知らせの文に、1 人ずつ呼び名・ポイント・失効日を差し込む。 */
+export function renderMemberText(text: string, m: Pick<StoredMember, 'nickname' | 'balance' | 'lastEarnedAt' | 'createdAt'>, expiryDays: number): string {
+  const day = expiryDayOf(m, expiryDays);
+  return text.replace(/\{呼び名\}/g, m.nickname).replace(/\{ポイント\}/g, String(m.balance))
+    .replace(/\{失効日\}/g, `${Number(day.slice(5, 7))}月${Number(day.slice(8, 10))}日`).slice(0, 5000);
+}
+
+/** 承認の後に中身が変わっていないかを見る印（文と宛先）。 */
+export const messageDigest = (m: Pick<StoredMessage, 'text' | 'recipients'>) =>
+  createHash('sha256').update(`${m.text}\n${[...m.recipients].sort().join(',')}`).digest('hex').slice(0, 16);
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const text = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().replace(/\s+/g, ' ').slice(0, max) : '');
 const digits = (v: string) => v.replace(/\D/g, '');
@@ -140,7 +175,7 @@ export class MemberService {
 
   private view(m: StoredMember): Member {
     return {
-      id: m.id, number: m.number, nickname: m.nickname, phone: m.phone, line: !!m.lineUserId, balance: m.balance, visits: m.visits,
+      id: m.id, number: m.number, nickname: m.nickname, phone: m.phone, birthday: m.birthday, line: !!m.lineUserId, balance: m.balance, visits: m.visits,
       lastVisitAt: m.lastVisitAt, lastEarnedAt: m.lastEarnedAt, createdAt: m.createdAt,
     };
   }
@@ -222,12 +257,15 @@ export class MemberService {
     if (m?.mergedInto) m = await this.deps.store.get(tenantId, m.mergedInto);
     if (!m) return null;
     const today = this.today();
-    const rewards = (await this.usableRewards(tenantId, today)).map((r) => ({ ...r, enough: m!.balance >= r.points }));
+    const rewards = (await this.usableRewards(tenantId, today, m)).map((r) => ({ ...r, enough: m!.balance >= r.points }));
     return { member: this.view(m), rewards, cardKey: m.cardKey };
   }
 
-  private async usableRewards(tenantId: string, today: string): Promise<MemberReward[]> {
-    return (await this.deps.store.rewards(tenantId)).filter((r) => r.status === 'active' && (!r.validFrom || r.validFrom <= today) && (!r.validTo || r.validTo >= today));
+  /** いま使える特典（誕生月だけの特典は、誕生月の会員にだけ。第40.18節）。 */
+  private async usableRewards(tenantId: string, today: string, member: Pick<StoredMember, 'birthday'> | null): Promise<MemberReward[]> {
+    const month = today.slice(5, 7);
+    return (await this.deps.store.rewards(tenantId)).filter((r) => r.status === 'active' && (!r.validFrom || r.validFrom <= today) && (!r.validTo || r.validTo >= today)
+      && (!r.birthdayOnly || member?.birthday?.slice(0, 2) === month));
   }
 
   /** 会員証の鍵（店員が会員を作ったあと、QR と紙のカードに使う）。 */
@@ -241,13 +279,15 @@ export class MemberService {
    *
    * @returns 作った会員と会員証の鍵か、作れない理由
    */
-  async create(who: MemberViewer, input: { nickname?: unknown; phone?: unknown }): Promise<{ member: Member; cardKey: string } | { error: string }> {
+  async create(who: MemberViewer, input: { nickname?: unknown; phone?: unknown; birthday?: unknown }): Promise<{ member: Member; cardKey: string } | { error: string }> {
     const nickname = text(input.nickname, MEMBER_LIMITS.nicknameMax);
     if (!nickname) return { error: '呼び名を入れてください（ニックネームでかまいません）' };
     const phone = text(input.phone, 20);
     if (phone && digits(phone).length < 9) return { error: '電話は 9 桁以上の数字で入れてください（任意です）' };
+    const birthday = birthdayOf(input.birthday);
+    if (birthday === false) return { error: '誕生日は「3/14」のように月と日で入れてください（任意です）' };
     const cardKey = newCardKey();
-    const id = await this.deps.store.create(who.tenantId, { nickname, phone, lineUserId: null, cardKey, createdBy: who.userId });
+    const id = await this.deps.store.create(who.tenantId, { nickname, phone, birthday, lineUserId: null, cardKey, createdBy: who.userId });
     return { member: this.view((await this.deps.store.get(who.tenantId, id))!), cardKey };
   }
 
@@ -326,8 +366,8 @@ export class MemberService {
   async useReward(who: MemberViewer, memberId: string, rewardId: string): Promise<{ member: Member; points: number } | { error: string }> {
     const m = await this.target(who, memberId);
     if ('error' in m) return m;
-    const r = (await this.usableRewards(who.tenantId, this.today())).find((x) => x.id === rewardId);
-    if (!r) return { error: 'その特典はいま使えません' };
+    const r = (await this.usableRewards(who.tenantId, this.today(), m)).find((x) => x.id === rewardId);
+    if (!r) return { error: 'その特典はいま使えません（誕生月だけの特典は、誕生月の会員だけが使えます）' };
     if (m.balance < r.points) return { error: `ポイントが足りません（あと ${r.points - m.balance} ポイント）` };
     return this.add(who, m, { kind: 'reward', points: -r.points, rewardId: r.id, rewardName: r.name, reversalOf: null, note: '' });
   }
@@ -393,10 +433,15 @@ export class MemberService {
   }
 
   /** 呼び名と電話を直す（利用範囲の人）。 */
-  async update(who: MemberViewer, id: string, input: { nickname?: unknown; phone?: unknown }): Promise<string | null> {
+  async update(who: MemberViewer, id: string, input: { nickname?: unknown; phone?: unknown; birthday?: unknown }): Promise<string | null> {
     const m = await this.target(who, id);
     if ('error' in m) return m.error;
-    const patch: { nickname?: string; phone?: string } = {};
+    const patch: { nickname?: string; phone?: string; birthday?: string | null } = {};
+    if (input.birthday !== undefined) {
+      const b = birthdayOf(input.birthday);
+      if (b === false) return '誕生日は「3/14」のように月と日で入れてください';
+      patch.birthday = b;
+    }
     if (input.nickname !== undefined) {
       const v = text(input.nickname, MEMBER_LIMITS.nicknameMax);
       if (!v) return '呼び名を入れてください';
@@ -428,8 +473,9 @@ export class MemberService {
     return this.deps.store.rewards(who.tenantId);
   }
 
-  private rewardInput(input: Record<string, unknown>): Partial<Pick<MemberReward, 'name' | 'points' | 'validFrom' | 'validTo' | 'status'>> | { error: string } {
-    const out: Partial<Pick<MemberReward, 'name' | 'points' | 'validFrom' | 'validTo' | 'status'>> = {};
+  private rewardInput(input: Record<string, unknown>): Partial<Pick<MemberReward, 'name' | 'points' | 'validFrom' | 'validTo' | 'status' | 'birthdayOnly'>> | { error: string } {
+    const out: Partial<Pick<MemberReward, 'name' | 'points' | 'validFrom' | 'validTo' | 'status' | 'birthdayOnly'>> = {};
+    if (input['birthdayOnly'] !== undefined) out.birthdayOnly = input['birthdayOnly'] === true;
     if (input['name'] !== undefined) {
       const v = text(input['name'], MEMBER_LIMITS.rewardNameMax);
       if (!v) return { error: '特典の名前を入れてください' };
@@ -460,7 +506,7 @@ export class MemberService {
     const v = this.rewardInput(input);
     if ('error' in v) return v;
     if (!v.name || !v.points) return { error: '特典の名前と必要なポイントを入れてください' };
-    const id = await this.deps.store.createReward(who.tenantId, { name: v.name, points: v.points, validFrom: v.validFrom ?? null, validTo: v.validTo ?? null });
+    const id = await this.deps.store.createReward(who.tenantId, { name: v.name, points: v.points, birthdayOnly: !!v.birthdayOnly, validFrom: v.validFrom ?? null, validTo: v.validTo ?? null });
     await this.audit(who, 'member.reward.create', id, { points: v.points });
     return { reward: (await this.deps.store.getReward(who.tenantId, id))! };
   }
@@ -476,6 +522,175 @@ export class MemberService {
     return null;
   }
 
+  // ---- 会員への LINE の知らせ（段 2。第40.18節） -------------------------------------------------
+
+  /** 宛先の会員（LINE でつながっている、まとめていない会員のうち、宛先に当たる人）。 */
+  private async audienceOf(tenantId: string, audience: MemberAudience, now: Date): Promise<StoredMember[]> {
+    const { expiryDays } = await this.settings(tenantId);
+    const today = jstDay(now);
+    const in30 = jstDay(new Date(now.getTime() + 30 * DAY));
+    const before60 = now.getTime() - 60 * DAY;
+    return (await this.deps.store.list(tenantId, { limit: 5000 })).filter((m) => !!m.lineUserId).filter((m) => {
+      if (audience === 'away') return Date.parse(m.lastVisitAt ?? m.createdAt) < before60;
+      if (audience === 'expiring') { const d = expiryDayOf(m, expiryDays); return m.balance > 0 && d >= today && d <= in30; }
+      return true;
+    });
+  }
+
+  /** 宛先ごとの、LINE でつながっている会員の数（知らせを用意する前に見せる）。 */
+  async audienceCounts(who: MemberViewer): Promise<Record<MemberAudience, number>> {
+    const now = this.now();
+    const out = {} as Record<MemberAudience, number>;
+    for (const a of Object.keys(MEMBER_AUDIENCE_LABELS) as MemberAudience[]) out[a] = (await this.audienceOf(who.tenantId, a, now)).length;
+    return out;
+  }
+
+  /** 知らせの一覧（新しい順）。承認されなかった・失敗した実行は、知らせの状態に写す。 */
+  async messages(who: MemberViewer): Promise<MemberMessage[]> {
+    const list = await this.deps.store.listMessages(who.tenantId);
+    for (const m of list) {
+      if (m.status !== 'awaiting' || !m.runId || !this.deps.runStatus) continue;
+      const st = await this.deps.runStatus(who.tenantId, m.runId).catch(() => null);
+      if (st === 'rejected' || st === 'cancelled' || st === 'expired') { m.status = 'rejected'; await this.deps.store.updateMessage(who.tenantId, m.id, { status: 'rejected' }); }
+      else if (st === 'failed') { m.status = 'failed'; await this.deps.store.updateMessage(who.tenantId, m.id, { status: 'failed' }); }
+    }
+    return list.map(({ recipients: _r, ...m }) => m);
+  }
+
+  /**
+   * 会員への LINE の知らせを用意して、承認へ進める（管理者だけ）。送るのは承認の後（社外への送信。第9.4.0節）。
+   *
+   * @param kind 失効の前の知らせ（自動）か、管理者が書いたものか
+   * @returns 用意した知らせか、用意できない理由
+   */
+  async prepareMessage(
+    who: MemberViewer, input: { audience?: unknown; text?: unknown }, kind: MemberMessage['kind'] = 'custom', exclude: ReadonlySet<string> = new Set(), requester?: string,
+  ): Promise<{ message: MemberMessage } | { error: string }> {
+    if (who.userId !== SYSTEM && !(await this.isAdmin(who))) return { error: '会員に LINE で知らせるのは管理者だけです' };
+    const audience = String(input.audience ?? '') as MemberAudience;
+    if (!(audience in MEMBER_AUDIENCE_LABELS)) return { error: '宛先が違います' };
+    const body = typeof input.text === 'string' ? input.text.trim().slice(0, MEMBER_MESSAGE_MAX) : '';
+    if (!body) return { error: '知らせる文を入れてください' };
+    if (!this.deps.line || !this.deps.submitter) return { error: 'LINE の知らせは使えません' };
+    const line = await openLine(this.deps.line, who.tenantId).catch(() => null);
+    if (!line) return { error: '会社の LINE 公式アカウントをつないでいません（問い合わせの記録の設定でつなぎます）' };
+    const recipients = (await this.audienceOf(who.tenantId, audience, this.now())).filter((m) => !exclude.has(m.id)).map((m) => m.id);
+    if (!recipients.length) return { error: `${MEMBER_AUDIENCE_LABELS[audience]}で LINE でつながっている会員がいません` };
+    const id = await this.deps.store.createMessage(who.tenantId, { kind, audience, text: body, recipients, createdBy: who.userId });
+    // 仕組みが用意したときは、業務を管理者の名前で起こす（承認は管理者が行う）
+    const runId = await this.deps.submitter(who.tenantId, requester ?? who.userId, id);
+    await this.deps.store.updateMessage(who.tenantId, id, { status: 'awaiting', runId });
+    await this.audit(who, 'member.line.submit', id, { kind, audience, count: recipients.length });
+    const { recipients: _r, ...m } = (await this.deps.store.getMessage(who.tenantId, id))!;
+    return { message: m };
+  }
+
+  /** 承認の画面に出すもの（宛先の数・1 人目に差し込んだ文・LINE の残り）。送れないなら理由。 */
+  async previewMessage(tenantId: string, id: string): Promise<{ count: number; sample: string; audience: string; remaining: number | null; digest: string } | { error: string }> {
+    const m = await this.deps.store.getMessage(tenantId, id);
+    if (!m) return { error: '知らせが見つかりません' };
+    if (m.status !== 'awaiting' && m.status !== 'draft') return { error: 'この知らせはもう送ったか、取りやめました' };
+    const { expiryDays } = await this.settings(tenantId);
+    const first = m.recipients.length ? await this.deps.store.get(tenantId, m.recipients[0]!) : null;
+    const line = this.deps.line ? await openLine(this.deps.line, tenantId).catch(() => null) : null;
+    if (!line) return { error: '会社の LINE 公式アカウントをつないでいません' };
+    const quota = await line.client.quota().catch(() => null);
+    const remaining = quota && quota.limit !== null ? quota.limit - quota.used : null;
+    if (remaining !== null && remaining < m.recipients.length) return { error: `LINE の今月の残り（${remaining} 通）より宛先（${m.recipients.length} 人）が多いため送れません` };
+    return {
+      count: m.recipients.length, audience: MEMBER_AUDIENCE_LABELS[m.audience], remaining, digest: messageDigest(m),
+      sample: first ? renderMemberText(m.text, first, expiryDays) : m.text,
+    };
+  }
+
+  /**
+   * 承認された知らせを送る（社外への送信。承認の後にだけ呼ばれる）。1 人ずつ文を差し込んで LINE で送り、結果を作った人に知らせる。
+   *
+   * @param digest 承認したときの中身の印（変わっていたら送らない）
+   * @returns 送れた数か、送れない理由
+   */
+  async sendMessage(who: MemberViewer, id: string, digest: string): Promise<{ sent: number; failed: number } | { error: string }> {
+    const m = await this.deps.store.getMessage(who.tenantId, id);
+    if (!m) return { error: '知らせが見つかりません' };
+    if (m.status !== 'awaiting') return { error: 'この知らせはもう送ったか、取りやめました' };
+    if (messageDigest(m) !== digest) return { error: '承認の後に中身が変わったため、送りません' };
+    const line = this.deps.line ? await openLine(this.deps.line, who.tenantId).catch(() => null) : null;
+    if (!line) {
+      await this.deps.store.updateMessage(who.tenantId, id, { status: 'failed', note: 'LINE 公式アカウントをつないでいません' });
+      return { error: '会社の LINE 公式アカウントをつないでいません' };
+    }
+    const { expiryDays } = await this.settings(who.tenantId);
+    let sent = 0;
+    let failed = 0;
+    for (const memberId of m.recipients) {
+      const member = await this.deps.store.get(who.tenantId, memberId);
+      // 退会・まとめた・LINE を外した会員には送らない
+      if (!member || member.mergedInto || !member.lineUserId) { failed += 1; continue; }
+      try {
+        await line.client.push(member.lineUserId, renderMemberText(m.text, member, expiryDays));
+        sent += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    const status = sent > 0 ? 'sent' : 'failed';
+    await this.deps.store.updateMessage(who.tenantId, id, { status, sent, sentAt: this.now().toISOString(), note: failed ? `送れなかった ${failed} 人` : '' });
+    await this.audit(who, 'member.line.send', id, { kind: m.kind, sent, failed });
+    await this.notifyUser(who.tenantId, m.createdBy === SYSTEM ? who.userId : m.createdBy, `会員への LINE の知らせを送りました（${sent} 人）`,
+      `${MEMBER_AUDIENCE_LABELS[m.audience]}に送りました。${failed ? `送れなかった人: ${failed} 人（退会・LINE を外したなど）。` : ''}`);
+    return { sent, failed };
+  }
+
+  /** 1 人に知らせる（会員の知らせを切った人には送らない）。 */
+  private async notifyUser(tenantId: string, userId: string, title: string, body: string): Promise<void> {
+    const { repo } = this.deps;
+    const user = await repo.findUserById(tenantId, userId);
+    if (!user || user.status !== 'active') return;
+    const prefs = await repo.getUserSettings(tenantId, userId).catch(() => null);
+    if (prefs?.notifications.kinds.member === false) return;
+    await repo.createNotification({ id: randomUUID(), tenantId, userId, kind: 'member', title, body: body.slice(0, 400), runId: null, readAt: null, createdAt: this.now().toISOString() });
+  }
+
+  /**
+   * 週の見立て（第40.18節）。新しい会員・来店の回数（先週と比べる）・しばらく来ていない会員・失効が近い会員を数える（プログラムが数える）。
+   * 失効が近い LINE の会員がいれば、失効の前の知らせを用意して承認へ進める（60 日のうちに知らせた人には送らない）。
+   */
+  private async weekly(tenantId: string, now: Date): Promise<void> {
+    const settings = await this.settings(tenantId);
+    const all = await this.deps.store.list(tenantId, { limit: 5000 });
+    const weekAgo = now.getTime() - 7 * DAY;
+    const twoWeeksAgo = now.getTime() - 14 * DAY;
+    const fresh = all.filter((m) => Date.parse(m.createdAt) >= weekAgo).length;
+    const visits = await this.deps.store.visitCount(tenantId, new Date(weekAgo).toISOString(), now.toISOString());
+    const lastVisits = await this.deps.store.visitCount(tenantId, new Date(twoWeeksAgo).toISOString(), new Date(weekAgo).toISOString());
+    const away = all.filter((m) => m.visits > 0 && Date.parse(m.lastVisitAt ?? m.createdAt) < now.getTime() - 60 * DAY).length;
+    const today = jstDay(now);
+    const in30 = jstDay(new Date(now.getTime() + 30 * DAY));
+    const expiring = all.filter((m) => { const d = expiryDayOf(m, settings.expiryDays); return m.balance > 0 && d >= today && d <= in30; });
+    const admins = (await this.deps.repo.listUsers(tenantId)).filter((u) => u.status === 'active' && u.roles.includes('admin'));
+    let proposed = '';
+    // 失効の前の知らせ（自動で用意し、管理者の承認を待つ）。60 日のうちに用意・送った人は外す
+    if (expiring.some((m) => m.lineUserId) && admins[0] && this.deps.line && this.deps.submitter) {
+      const since = now.getTime() - 60 * DAY;
+      const done = new Set((await this.deps.store.listMessages(tenantId, 100))
+        .filter((x) => x.kind === 'expiry' && ['awaiting', 'sent'].includes(x.status) && Date.parse(x.createdAt) >= since).flatMap((x) => x.recipients));
+      const r = await this.prepareMessage({ tenantId, userId: SYSTEM }, { audience: 'expiring', text: MEMBER_EXPIRY_TEXT }, 'expiry', done, admins[0].id).catch(() => null);
+      if (r && 'message' in r) proposed = `失効が近い LINE の会員 ${r.message.count} 人への知らせを用意し、承認待ちにしました（承認トレイで確かめてください）。`;
+    }
+    const body = [
+      `会員 ${all.length} 人（今週の新しい会員 ${fresh} 人）。`,
+      `今週の来店 ${visits} 回（先週 ${lastVisits} 回）。`,
+      `しばらく（60 日）来ていない会員 ${away} 人。`,
+      `30 日のうちにポイントが失効する会員 ${expiring.length} 人。`,
+      proposed,
+    ].join('');
+    for (const u of admins) {
+      if (!canUseAgent((await this.deps.repo.getTenantSettings(tenantId)).access, MEMBERS_EXTENSION_ID, u.id, await this.deps.repo.listUserGroupIds(tenantId, u.id))) continue;
+      await this.notifyUser(tenantId, u.id, '会員の週の見立て', body);
+    }
+    await this.deps.repo.saveTenantSettings(tenantId, 'members', { ...(await this.settings(tenantId)), digestAt: now.toISOString() }, SYSTEM);
+  }
+
   // ---- 有効期限 ------------------------------------------------------------------------------
 
   /**
@@ -489,6 +704,11 @@ export class MemberService {
       try {
         const settings = await this.settings(tenantId);
         if (!settings.enabled) continue;
+        // 週の見立て（月曜の 8 時（日本時間）を過ぎて、前の見立てから 6 日より空いたら）
+        const jst = new Date(now.getTime() + 9 * 3_600_000);
+        if (jst.getUTCDay() === 1 && jst.getUTCHours() >= 8 && (!settings.digestAt || now.getTime() - Date.parse(settings.digestAt) > 6 * DAY)) {
+          await this.weekly(tenantId, now);
+        }
         const limit = now.getTime() - settings.expiryDays * 86_400_000;
         for (const m of await this.deps.store.list(tenantId, { limit: 5000 })) {
           const since = Date.parse(m.lastEarnedAt ?? m.createdAt);

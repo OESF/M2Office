@@ -17,6 +17,8 @@ export interface Member {
   nickname: string;
   /** 電話（任意） */
   phone: string;
+  /** 誕生日（月と日だけ。MM-DD。任意。第40.18節） */
+  birthday: string | null;
   /** LINE で会員になったか（LINE のお客様の ID そのものは画面に出さない） */
   line: boolean;
   /** いまのポイント */
@@ -64,6 +66,8 @@ export interface MemberReward {
   name: string;
   /** 必要なポイント */
   points: number;
+  /** 誕生月の会員だけが使えるか（第40.18節） */
+  birthdayOnly: boolean;
   /** 使える期間（任意。YYYY-MM-DD） */
   validFrom: string | null;
   validTo: string | null;
@@ -84,6 +88,8 @@ export interface MemberSettings {
   liffId: string;
   /** LINE ログインのチャネルの ID（LIFF の ID トークンを確かめる） */
   lineLoginChannelId: string;
+  /** 週の見立てを送った日時（第40.18節） */
+  digestAt?: string | null;
 }
 
 /** 会員とポイントは既定で切り（第40.2節）。 */
@@ -110,3 +116,43 @@ export function memberCardKeyOf(raw: string): string {
   const m = /\/member-card\/([A-Za-z0-9_-]{20,64})/.exec(raw.trim());
   return m ? m[1]! : raw.trim();
 }
+
+/** 会員への LINE の知らせの宛先（第40.18節）。 */
+export type MemberAudience = 'line' | 'away' | 'expiring';
+
+/** 宛先の名前。 */
+export const MEMBER_AUDIENCE_LABELS: Record<MemberAudience, string> = {
+  line: 'LINE の会員全員', away: 'しばらく来ていない会員（60 日）', expiring: 'ポイントの失効が近い会員（30 日）',
+};
+
+/** 会員への LINE の知らせの状態。 */
+export type MemberMessageStatus = 'draft' | 'awaiting' | 'sent' | 'failed' | 'rejected';
+
+/** 会員への LINE の知らせ（社外への送信。承認の後に送る。第40.18節）。 */
+export interface MemberMessage {
+  id: string;
+  /** 失効の前の知らせ（自動で用意したもの）か、管理者が書いたものか */
+  kind: 'expiry' | 'custom';
+  audience: MemberAudience;
+  /** 文（{呼び名}・{ポイント}・{失効日} を 1 人ずつ差し込む） */
+  text: string;
+  /** 宛先の会員の数（用意したとき） */
+  count: number;
+  status: MemberMessageStatus;
+  runId: string | null;
+  /** 送れた数 */
+  sent: number;
+  note: string;
+  createdBy: string;
+  createdAt: string;
+  sentAt: string | null;
+}
+
+/** 失効の前の知らせの文（自動で用意するときの既定）。 */
+export const MEMBER_EXPIRY_TEXT = '{呼び名} さん、いつもありがとうございます。お持ちの {ポイント} ポイントは {失効日} に失効します。それまでにご来店のうえお使いください。';
+
+/** 文に差し込める言葉。 */
+export const MEMBER_MESSAGE_FIELDS = ['{呼び名}', '{ポイント}', '{失効日}'] as const;
+
+/** 会員への知らせの文の長さ。 */
+export const MEMBER_MESSAGE_MAX = 500;

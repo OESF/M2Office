@@ -6,10 +6,15 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { MEMBER_POINT_KIND_LABELS, type Member, type MemberPoint, type MemberReward } from '@m2office/shared';
+import {
+  MEMBER_AUDIENCE_LABELS, MEMBER_EXPIRY_TEXT, MEMBER_MESSAGE_FIELDS, MEMBER_POINT_KIND_LABELS,
+  type Member, type MemberAudience, type MemberMessage, type MemberPoint, type MemberReward,
+} from '@m2office/shared';
 import { api, describeError } from './api.js';
 
 const dayLabel = (iso: string | null) => (iso ? new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: 'numeric', day: 'numeric' }).format(new Date(iso)) : '—');
+/** 誕生日（MM-DD）を「3/14」に。 */
+const birthdayText = (b: string | null) => (b ? `${Number(b.slice(0, 2))}/${Number(b.slice(3, 5))}` : '');
 const timeLabel = (iso: string) => new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(iso));
 
 type Note = { kind: 'ok' | 'error'; text: string } | null;
@@ -36,6 +41,7 @@ function MemberList({ onOpen, changeKey }: { onOpen: (id: string) => void; chang
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [rewardsOpen, setRewardsOpen] = useState(false);
+  const [lineOpen, setLineOpen] = useState(false);
 
   const load = useCallback(() => {
     api.members.list(q.trim()).then((r) => { setData(r); setError(null); }).catch((e) => setError(describeError(e, '読めませんでした')));
@@ -50,12 +56,14 @@ function MemberList({ onOpen, changeKey }: { onOpen: (id: string) => void; chang
       <div className="row wrap">
         <button className={adding ? 'btn small' : 'btn ghost small'} onClick={() => setAdding(!adding)}>会員を作る</button>
         <button className={rewardsOpen ? 'btn small' : 'btn ghost small'} onClick={() => setRewardsOpen(!rewardsOpen)}>特典</button>
+        {data.admin && <button className={lineOpen ? 'btn small' : 'btn ghost small'} onClick={() => setLineOpen(!lineOpen)}>LINE で知らせる</button>}
         <a className="btn ghost small" href="/m/members">スマホのページ</a>
         <span className="small muted">来店 {data.settings.visitPoints} ポイント／{data.settings.yenPerPoint} 円で 1 ポイント／有効期限 {data.settings.expiryDays} 日</span>
         <input className="mbr-search" type="search" value={q} placeholder="呼び名・会員番号・電話で探す" aria-label="探す" onChange={(e) => setQ(e.target.value)} />
       </div>
       {adding && <CreateForm onDone={(id) => { setAdding(false); onOpen(id); }} />}
       {rewardsOpen && <RewardManager admin={data.admin} />}
+      {lineOpen && data.admin && <LineMessages />}
       {data.items.length === 0
         ? <p className="muted">{q ? '当たる会員はいません。' : 'まだ会員がいません。'}</p>
         : (
@@ -83,13 +91,14 @@ function MemberList({ onOpen, changeKey }: { onOpen: (id: string) => void; chang
 
 /** 店頭で会員を作る欄。 */
 function CreateForm({ onDone }: { onDone: (id: string) => void }) {
-  const [v, setV] = useState({ nickname: '', phone: '' });
+  const [v, setV] = useState({ nickname: '', phone: '', birthday: '' });
   const [error, setError] = useState<string | null>(null);
   const save = () => api.members.create(v).then((r) => onDone(r.member.id)).catch((e) => setError(describeError(e, '作れませんでした')));
   return (
     <div className="row wrap card mbr-form">
       <input value={v.nickname} maxLength={30} placeholder="呼び名（ニックネームでよい）" aria-label="呼び名" onChange={(e) => setV({ ...v, nickname: e.target.value })} />
       <input value={v.phone} maxLength={20} placeholder="電話（任意）" aria-label="電話" onChange={(e) => setV({ ...v, phone: e.target.value })} />
+      <input className="mbr-num" value={v.birthday} maxLength={6} placeholder="誕生日 3/14" aria-label="誕生日（任意）" onChange={(e) => setV({ ...v, birthday: e.target.value })} />
       <button className="btn small" disabled={!v.nickname.trim()} onClick={() => void save()}>作る</button>
       {error && <span className="error">{error}</span>}
     </div>
@@ -99,7 +108,7 @@ function CreateForm({ onDone }: { onDone: (id: string) => void }) {
 /** 特典（管理者は作る・直す・止める）。 */
 function RewardManager({ admin }: { admin: boolean }) {
   const [items, setItems] = useState<MemberReward[] | null>(null);
-  const [v, setV] = useState({ name: '', points: '' });
+  const [v, setV] = useState({ name: '', points: '', birthdayOnly: false });
   const [error, setError] = useState<string | null>(null);
   const load = () => api.members.rewards().then((r) => setItems(r.items)).catch((e) => setError(describeError(e, '読めませんでした')));
   useEffect(() => { void load(); }, []);
@@ -110,7 +119,8 @@ function RewardManager({ admin }: { admin: boolean }) {
         <div className="row wrap">
           <input value={v.name} maxLength={40} placeholder="特典（ドリンク 1 杯など）" aria-label="特典の名前" onChange={(e) => setV({ ...v, name: e.target.value })} />
           <input className="mbr-num" type="number" min={1} value={v.points} placeholder="ポイント" aria-label="必要なポイント" onChange={(e) => setV({ ...v, points: e.target.value })} />
-          <button className="btn small" disabled={!v.name.trim() || !v.points} onClick={() => void run(async () => { await api.members.createReward({ name: v.name.trim(), points: Number(v.points) }); setV({ name: '', points: '' }); })}>足す</button>
+          <label className="check small"><input type="checkbox" checked={v.birthdayOnly} onChange={(e) => setV({ ...v, birthdayOnly: e.target.checked })} />誕生月だけ</label>
+          <button className="btn small" disabled={!v.name.trim() || !v.points} onClick={() => void run(async () => { await api.members.createReward({ name: v.name.trim(), points: Number(v.points), birthdayOnly: v.birthdayOnly }); setV({ name: '', points: '', birthdayOnly: false }); })}>足す</button>
         </div>
       )}
       {error && <p className="error">{error}</p>}
@@ -119,7 +129,7 @@ function RewardManager({ admin }: { admin: boolean }) {
         <ul className="mbr-reward-list">
           {items.map((r) => (
             <li key={r.id} className={r.status === 'stopped' ? 'is-stopped' : ''}>
-              <span>{r.name}</span><span>{r.points} ポイント</span>
+              <span>{r.name}{r.birthdayOnly && <> <span className="badge">誕生月</span></>}</span><span>{r.points} ポイント</span>
               {admin && <button className="btn ghost small" onClick={() => void run(() => api.members.updateReward(r.id, { status: r.status === 'active' ? 'stopped' : 'active' }))}>{r.status === 'active' ? '止める' : '使う'}</button>}
             </li>
           ))}
@@ -156,6 +166,7 @@ function MemberView({ id, onBack, onOpen, changeKey }: { id: string; onBack: () 
           <div className="row wrap mbr-fields">
             <label>呼び名 <input defaultValue={m.nickname} maxLength={30} onBlur={(e) => e.target.value.trim() !== m.nickname && void act(() => api.members.update(m.id, { nickname: e.target.value }), '直しました')} /></label>
             <label>電話 <input defaultValue={m.phone} maxLength={20} onBlur={(e) => e.target.value.trim() !== m.phone && void act(() => api.members.update(m.id, { phone: e.target.value }), '直しました')} /></label>
+            <label>誕生日 <input className="mbr-num" defaultValue={birthdayText(m.birthday)} maxLength={6} placeholder="3/14" onBlur={(e) => e.target.value.trim() !== birthdayText(m.birthday) && void act(() => api.members.update(m.id, { birthday: e.target.value.trim() }), '直しました')} /></label>
           </div>
         </div>
         <div className="mbr-qr">
@@ -198,5 +209,57 @@ function MemberView({ id, onBack, onOpen, changeKey }: { id: string; onBack: () 
       )}
       <div className="row wrap"><button className="btn ghost small danger" onClick={() => void act(async () => { await api.members.remove(m.id); onBack(); }, '削除しました')}>削除（退会）</button></div>
     </div>
+  );
+}
+
+const MESSAGE_STATUS: Record<MemberMessage['status'], string> = { draft: '用意', awaiting: '承認待ち', sent: '送った', failed: '送れなかった', rejected: '承認されなかった' };
+
+/** 会員への LINE の知らせ（管理者だけ。第40.18節）。宛先と文を選んで承認へ進める。送るのは承認の後。 */
+function LineMessages() {
+  const [data, setData] = useState<Awaited<ReturnType<typeof api.members.messages>> | null>(null);
+  const [audience, setAudience] = useState<MemberAudience>('expiring');
+  const [text, setText] = useState(MEMBER_EXPIRY_TEXT);
+  const [note, setNote] = useState<Note>(null);
+  const [busy, setBusy] = useState(false);
+  const load = () => api.members.messages().then(setData).catch((e) => setNote({ kind: 'error', text: describeError(e, '読めませんでした') }));
+  useEffect(() => { void load(); }, []);
+  const submit = async () => {
+    setBusy(true);
+    try {
+      const r = await api.members.prepareMessage({ audience, text });
+      setNote({ kind: 'ok', text: `${r.message.count} 人への知らせを承認待ちにしました。承認トレイで確かめてください。` });
+      void load();
+    } catch (e) {
+      setNote({ kind: 'error', text: describeError(e, '用意できませんでした') });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="card mbr-line">
+      <div className="row wrap">
+        <select value={audience} aria-label="宛先" onChange={(e) => setAudience(e.target.value as MemberAudience)}>
+          {(Object.keys(MEMBER_AUDIENCE_LABELS) as MemberAudience[]).map((a) => <option key={a} value={a}>{MEMBER_AUDIENCE_LABELS[a]}（{data?.counts[a] ?? '…'} 人）</option>)}
+        </select>
+        <span className="small muted">差し込める言葉: {MEMBER_MESSAGE_FIELDS.join('・')}</span>
+      </div>
+      <textarea value={text} maxLength={500} rows={3} aria-label="知らせる文" onChange={(e) => setText(e.target.value)} />
+      <div className="row wrap">
+        <button className="btn small" disabled={busy || !text.trim() || !data?.counts[audience]} onClick={() => void submit()}>承認へ進める</button>
+        <NoteText note={note} />
+      </div>
+      {data && data.items.length > 0 && (
+        <ul className="mbr-line-list">
+          {data.items.slice(0, 10).map((m) => (
+            <li key={m.id}>
+              <span>{timeLabel(m.createdAt)}</span>
+              <span>{MEMBER_AUDIENCE_LABELS[m.audience]}{m.kind === 'expiry' && '（自動）'}</span>
+              <span>{m.count} 人</span>
+              <span className={m.status === 'sent' ? 'badge ok' : m.status === 'awaiting' ? 'badge warn' : 'badge'}>{MESSAGE_STATUS[m.status]}{m.status === 'sent' ? ` ${m.sent} 人` : ''}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }

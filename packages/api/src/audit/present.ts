@@ -234,6 +234,8 @@ const ACTION_LABELS: Record<string, string> = {
   'member.delete': '会員を削除した',
   'member.reward.create': '会員の特典を作った',
   'member.reward.update': '会員の特典を直した',
+  'member.line.submit': '会員への LINE の知らせを承認へ進めた',
+  'member.line.send': '会員に LINE で知らせた',
   'subsidy.status': '補助金・助成金の候補の状態を変えた',
   'subsidy.settings': '補助金・助成金の会社の関心と業種を直した',
   'web_review.connect': 'Webの分析の担当の Google の許可をつないだ',

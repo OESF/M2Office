@@ -22,7 +22,7 @@ import type { CardCorners,
   Inquiry, InquiryDetail, InquiryParty, InquiryTask, InquiryReply, InquiryMailSkipped, InquiryMonthStats, InquirySettings, InquiryFaqTopic,
   CompetitorOverview, CompetitorFact, CompetitorReport, CompetitorSettings,
   Announcement, AnnouncementDetail, AnnouncementPreview, AnnouncementRecipient, AnnouncementRecipientsRefined, AnnouncementSettings, AnnouncementTexts,
-  Contract, ContractSettings, ReservableItem, ReservableKind, Reservation, ReservationRule, ReservationSeries, Subsidy, SubsidyProfile, SubsidyStatus, Member, MemberPoint, MemberReward, MemberSettings,
+  Contract, ContractSettings, ReservableItem, ReservableKind, Reservation, ReservationRule, ReservationSeries, Subsidy, SubsidyProfile, SubsidyStatus, Member, MemberPoint, MemberReward, MemberSettings, MemberAudience, MemberMessage,
   WebReviewCandidates, WebReviewReport, WebReviewReportBrief, WebReviewSettings, WebReviewStatus, WebReviewFinding, WebReviewFindingStatus, WebPageMetrics,
 } from '@m2office/shared';
 import { debugMode, recordCall } from './debug.js';
@@ -1342,8 +1342,8 @@ export const api = {
     list: (q = '') => call<{ items: Member[]; settings: { visitPoints: number; yenPerPoint: number; expiryDays: number; line: boolean }; admin: boolean }>(`/members${q ? `?${new URLSearchParams({ q })}` : ''}`),
     get: (id: string) => call<{ member: Member; points: MemberPoint[]; candidates: Member[]; cardUrl: string | null }>(`/members/${encodeURIComponent(id)}`),
     /** 店頭で会員を作る。 */
-    create: (input: { nickname: string; phone?: string }) => call<{ member: Member; cardUrl: string }>('/members', { method: 'POST', body: JSON.stringify(input) }),
-    update: (id: string, input: { nickname?: string; phone?: string }) => call<{ ok: true }>(`/members/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(input) }),
+    create: (input: { nickname: string; phone?: string; birthday?: string }) => call<{ member: Member; cardUrl: string }>('/members', { method: 'POST', body: JSON.stringify(input) }),
+    update: (id: string, input: { nickname?: string; phone?: string; birthday?: string }) => call<{ ok: true }>(`/members/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(input) }),
     remove: (id: string) => call<{ ok: true }>(`/members/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     /** 店員が読んだ会員証（QR の URL か鍵）から会員と使える特典。 */
     byCard: (code: string) => call<{ member: Member; rewards: (MemberReward & { enough: boolean })[] }>(`/members/card?${new URLSearchParams({ code })}`),
@@ -1356,8 +1356,12 @@ export const api = {
     merge: (id: string, into: string) => call<{ ok: true }>(`/members/${encodeURIComponent(id)}/merge`, { method: 'POST', body: JSON.stringify({ into }) }),
     undo: (pointId: string) => call<{ ok: true }>(`/members/points/${encodeURIComponent(pointId)}/undo`, { method: 'POST', body: '{}' }),
     rewards: () => call<{ items: MemberReward[] }>('/members/rewards'),
-    createReward: (input: { name: string; points: number }) => call<{ reward: MemberReward }>('/members/rewards', { method: 'POST', body: JSON.stringify(input) }),
+    createReward: (input: { name: string; points: number; birthdayOnly?: boolean }) => call<{ reward: MemberReward }>('/members/rewards', { method: 'POST', body: JSON.stringify(input) }),
     updateReward: (id: string, patch: Record<string, unknown>) => call<{ ok: true }>(`/members/rewards/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    /** 会員への LINE の知らせと、宛先ごとの LINE でつながっている会員の数（第40.18節）。 */
+    messages: () => call<{ items: MemberMessage[]; counts: Record<MemberAudience, number> }>('/members/messages'),
+    /** 知らせを用意して承認へ進める（管理者だけ。送るのは承認の後）。 */
+    prepareMessage: (input: { audience: MemberAudience; text: string }) => call<{ message: MemberMessage }>('/members/messages', { method: 'POST', body: JSON.stringify(input) }),
     qrUrl: (id: string) => `/v1/members/${encodeURIComponent(id)}/qr.svg`,
     cardPdfUrl: (id: string) => `/v1/members/${encodeURIComponent(id)}/card.pdf`,
     /** 来店のポイント・購入の率・有効期限・LINE の会員証を直す（管理者だけ）。 */

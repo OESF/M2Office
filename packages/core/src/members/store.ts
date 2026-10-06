@@ -7,7 +7,7 @@
 
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
-import type { MemberPointKind, MemberReward } from '@m2office/shared';
+import type { MemberAudience, MemberMessage, MemberMessageStatus, MemberPointKind, MemberReward } from '@m2office/shared';
 
 /** 置き場に持つ会員（数は記録から求めたもの）。 */
 export interface StoredMember {
@@ -15,6 +15,8 @@ export interface StoredMember {
   number: number;
   nickname: string;
   phone: string;
+  /** 誕生日（MM-DD。任意） */
+  birthday: string | null;
   lineUserId: string | null;
   cardKey: string;
   mergedInto: string | null;
@@ -43,6 +45,12 @@ export interface StoredPoint {
   createdAt: string;
 }
 
+/** 置き場に持つ会員への LINE の知らせ（宛先の会員の ID つき）。 */
+export type StoredMessage = MemberMessage & { recipients: string[] };
+
+/** 直せる知らせの項目。 */
+export type MessagePatch = Partial<Pick<StoredMessage, 'status' | 'runId' | 'sent' | 'note' | 'sentAt'>>;
+
 /** 新しく足す記録。 */
 export type NewPoint = Pick<StoredPoint, 'memberId' | 'kind' | 'points' | 'rewardId' | 'rewardName' | 'reversalOf' | 'note' | 'localDay' | 'createdBy'>;
 
@@ -52,16 +60,23 @@ export interface MemberStore {
   get(tenantId: string, id: string): Promise<StoredMember | null>;
   byCardKey(tenantId: string, key: string): Promise<StoredMember | null>;
   byLineUser(tenantId: string, lineUserId: string): Promise<StoredMember | null>;
-  create(tenantId: string, m: { nickname: string; phone: string; lineUserId: string | null; cardKey: string; createdBy: string }): Promise<string>;
-  update(tenantId: string, id: string, patch: Partial<Pick<StoredMember, 'nickname' | 'phone' | 'lineUserId' | 'mergedInto'>>): Promise<void>;
+  create(tenantId: string, m: { nickname: string; phone: string; birthday?: string | null; lineUserId: string | null; cardKey: string; createdBy: string }): Promise<string>;
+  update(tenantId: string, id: string, patch: Partial<Pick<StoredMember, 'nickname' | 'phone' | 'birthday' | 'lineUserId' | 'mergedInto'>>): Promise<void>;
   delete(tenantId: string, id: string): Promise<void>;
   addPoint(tenantId: string, p: NewPoint): Promise<string>;
   points(tenantId: string, memberId: string, limit?: number): Promise<StoredPoint[]>;
   getPoint(tenantId: string, id: string): Promise<StoredPoint | null>;
   rewards(tenantId: string): Promise<MemberReward[]>;
   getReward(tenantId: string, id: string): Promise<MemberReward | null>;
-  createReward(tenantId: string, r: Pick<MemberReward, 'name' | 'points' | 'validFrom' | 'validTo'>): Promise<string>;
-  updateReward(tenantId: string, id: string, patch: Partial<Pick<MemberReward, 'name' | 'points' | 'validFrom' | 'validTo' | 'status'>>): Promise<void>;
+  createReward(tenantId: string, r: Pick<MemberReward, 'name' | 'points' | 'validFrom' | 'validTo'> & { birthdayOnly?: boolean }): Promise<string>;
+  updateReward(tenantId: string, id: string, patch: Partial<Pick<MemberReward, 'name' | 'points' | 'validFrom' | 'validTo' | 'status' | 'birthdayOnly'>>): Promise<void>;
+  createMessage(tenantId: string, m: { kind: MemberMessage['kind']; audience: MemberAudience; text: string; recipients: string[]; createdBy: string }): Promise<string>;
+  getMessage(tenantId: string, id: string): Promise<StoredMessage | null>;
+  /** 新しい順。 */
+  listMessages(tenantId: string, limit?: number): Promise<StoredMessage[]>;
+  updateMessage(tenantId: string, id: string, patch: MessagePatch): Promise<void>;
+  /** 期間の来店の回数（取り消した来店は数えない）。 */
+  visitCount(tenantId: string, from: string, to: string): Promise<number>;
 }
 
 const iso = (v: unknown): string => (v instanceof Date ? v.toISOString() : new Date(String(v ?? '')).toISOString());
@@ -76,17 +91,21 @@ const day = (v: unknown): string | null => {
 const EARNING: MemberPointKind[] = ['visit', 'purchase', 'adjust'];
 
 interface MemberRow {
-  id: string; number: number; nickname: string; phone: string; line_user_id: string | null; card_key: string; merged_into: string | null;
+  id: string; number: number; nickname: string; phone: string; birthday: string | null; line_user_id: string | null; card_key: string; merged_into: string | null;
   created_by: string; created_at: unknown; balance: string | number | null; visits: string | number | null; last_visit: unknown; last_earned: unknown;
 }
 interface PointRow {
   id: string; member_id: string; kind: MemberPointKind; points: number; reward_id: string | null; reward_name: string; reversal_of: string | null;
   reversed: boolean | null; note: string; local_day: unknown; created_by: string; created_at: unknown;
 }
-interface RewardRow { id: string; name: string; points: number; valid_from: unknown; valid_to: unknown; status: 'active' | 'stopped'; created_at: unknown }
+interface RewardRow { id: string; name: string; points: number; birthday_only: boolean | null; valid_from: unknown; valid_to: unknown; status: 'active' | 'stopped'; created_at: unknown }
+interface MessageRow {
+  id: string; kind: MemberMessage['kind']; audience: MemberAudience; text: string; recipients: string[] | null; status: MemberMessageStatus; run_id: string | null;
+  sent: number; note: string; created_by: string; created_at: unknown; sent_at: unknown;
+}
 
 const toMember = (r: MemberRow): StoredMember => ({
-  id: r.id, number: r.number, nickname: r.nickname, phone: r.phone, lineUserId: r.line_user_id, cardKey: r.card_key, mergedInto: r.merged_into,
+  id: r.id, number: r.number, nickname: r.nickname, phone: r.phone, birthday: r.birthday ?? null, lineUserId: r.line_user_id, cardKey: r.card_key, mergedInto: r.merged_into,
   balance: Number(r.balance ?? 0), visits: Number(r.visits ?? 0), lastVisitAt: isoOrNull(r.last_visit), lastEarnedAt: isoOrNull(r.last_earned),
   createdBy: r.created_by, createdAt: iso(r.created_at),
 });
@@ -95,7 +114,11 @@ const toPoint = (r: PointRow): StoredPoint => ({
   reversed: !!r.reversed, note: r.note, localDay: day(r.local_day)!, createdBy: r.created_by, createdAt: iso(r.created_at),
 });
 const toReward = (r: RewardRow): MemberReward => ({
-  id: r.id, name: r.name, points: r.points, validFrom: day(r.valid_from), validTo: day(r.valid_to), status: r.status, createdAt: iso(r.created_at),
+  id: r.id, name: r.name, points: r.points, birthdayOnly: !!r.birthday_only, validFrom: day(r.valid_from), validTo: day(r.valid_to), status: r.status, createdAt: iso(r.created_at),
+});
+const toMessage = (r: MessageRow): StoredMessage => ({
+  id: r.id, kind: r.kind, audience: r.audience, text: r.text, recipients: r.recipients ?? [], count: (r.recipients ?? []).length, status: r.status, runId: r.run_id,
+  sent: r.sent, note: r.note, createdBy: r.created_by, createdAt: iso(r.created_at), sentAt: isoOrNull(r.sent_at),
 });
 
 /** 会員の行と、記録から求めた数。 */
@@ -163,15 +186,15 @@ export class PostgresMemberStore implements MemberStore {
     return rows[0] ? toMember(rows[0]) : null;
   }
 
-  async create(tenantId: string, m: { nickname: string; phone: string; lineUserId: string | null; cardKey: string; createdBy: string }): Promise<string> {
+  async create(tenantId: string, m: { nickname: string; phone: string; birthday?: string | null; lineUserId: string | null; cardKey: string; createdBy: string }): Promise<string> {
     const id = `mbr-${randomUUID()}`;
     // 会員番号は会社の中の連番。同時に作って重なったら、もう一度だけ番号を取り直す
     for (let i = 0; ; i++) {
       try {
         await this.q(tenantId,
-          `insert into members (id, tenant_id, number, nickname, phone, line_user_id, card_key, created_by)
-           select $1, $2, coalesce(max(number), 0) + 1, $3, $4, $5, $6, $7 from members where tenant_id = $2`,
-          [id, tenantId, m.nickname, m.phone, m.lineUserId, m.cardKey, m.createdBy]);
+          `insert into members (id, tenant_id, number, nickname, phone, birthday, line_user_id, card_key, created_by)
+           select $1, $2, coalesce(max(number), 0) + 1, $3, $4, $5, $6, $7, $8 from members where tenant_id = $2`,
+          [id, tenantId, m.nickname, m.phone, m.birthday ?? null, m.lineUserId, m.cardKey, m.createdBy]);
         return id;
       } catch (err) {
         if ((err as { code?: string }).code !== '23505' || i >= 2) throw err;
@@ -179,8 +202,8 @@ export class PostgresMemberStore implements MemberStore {
     }
   }
 
-  async update(tenantId: string, id: string, patch: Partial<Pick<StoredMember, 'nickname' | 'phone' | 'lineUserId' | 'mergedInto'>>): Promise<void> {
-    const cols: Record<string, string> = { nickname: 'nickname', phone: 'phone', lineUserId: 'line_user_id', mergedInto: 'merged_into' };
+  async update(tenantId: string, id: string, patch: Partial<Pick<StoredMember, 'nickname' | 'phone' | 'birthday' | 'lineUserId' | 'mergedInto'>>): Promise<void> {
+    const cols: Record<string, string> = { nickname: 'nickname', phone: 'phone', birthday: 'birthday', lineUserId: 'line_user_id', mergedInto: 'merged_into' };
     const sets: string[] = [];
     const params: unknown[] = [tenantId, id];
     for (const [k, v] of Object.entries(patch)) {
@@ -227,15 +250,15 @@ export class PostgresMemberStore implements MemberStore {
     return rows[0] ? toReward(rows[0]) : null;
   }
 
-  async createReward(tenantId: string, r: Pick<MemberReward, 'name' | 'points' | 'validFrom' | 'validTo'>): Promise<string> {
+  async createReward(tenantId: string, r: Pick<MemberReward, 'name' | 'points' | 'validFrom' | 'validTo'> & { birthdayOnly?: boolean }): Promise<string> {
     const id = `mrw-${randomUUID()}`;
-    await this.q(tenantId, `insert into member_rewards (id, tenant_id, name, points, valid_from, valid_to) values ($1, $2, $3, $4, $5, $6)`,
-      [id, tenantId, r.name, r.points, r.validFrom, r.validTo]);
+    await this.q(tenantId, `insert into member_rewards (id, tenant_id, name, points, birthday_only, valid_from, valid_to) values ($1, $2, $3, $4, $5, $6, $7)`,
+      [id, tenantId, r.name, r.points, !!r.birthdayOnly, r.validFrom, r.validTo]);
     return id;
   }
 
-  async updateReward(tenantId: string, id: string, patch: Partial<Pick<MemberReward, 'name' | 'points' | 'validFrom' | 'validTo' | 'status'>>): Promise<void> {
-    const cols: Record<string, string> = { name: 'name', points: 'points', validFrom: 'valid_from', validTo: 'valid_to', status: 'status' };
+  async updateReward(tenantId: string, id: string, patch: Partial<Pick<MemberReward, 'name' | 'points' | 'validFrom' | 'validTo' | 'status' | 'birthdayOnly'>>): Promise<void> {
+    const cols: Record<string, string> = { name: 'name', points: 'points', validFrom: 'valid_from', validTo: 'valid_to', status: 'status', birthdayOnly: 'birthday_only' };
     const sets: string[] = [];
     const params: unknown[] = [tenantId, id];
     for (const [k, v] of Object.entries(patch)) {
@@ -245,6 +268,41 @@ export class PostgresMemberStore implements MemberStore {
     }
     if (sets.length) await this.q(tenantId, `update member_rewards set ${sets.join(', ')} where tenant_id = $1 and id = $2`, params);
   }
+
+  async visitCount(tenantId: string, from: string, to: string): Promise<number> {
+    const rows = await this.q<{ n: string }>(tenantId,
+      `select count(*) as n from member_points p where p.tenant_id = $1 and p.kind = 'visit' and p.created_at >= $2 and p.created_at < $3
+         and not exists (select 1 from member_points u where u.tenant_id = p.tenant_id and u.reversal_of = p.id)`, [tenantId, from, to]);
+    return Number(rows[0]?.n ?? 0);
+  }
+
+  async createMessage(tenantId: string, m: { kind: MemberMessage['kind']; audience: MemberAudience; text: string; recipients: string[]; createdBy: string }): Promise<string> {
+    const id = `mms-${randomUUID()}`;
+    await this.q(tenantId, `insert into member_messages (id, tenant_id, kind, audience, text, recipients, created_by) values ($1, $2, $3, $4, $5, $6, $7)`,
+      [id, tenantId, m.kind, m.audience, m.text, m.recipients, m.createdBy]);
+    return id;
+  }
+
+  async getMessage(tenantId: string, id: string): Promise<StoredMessage | null> {
+    const rows = await this.q<MessageRow>(tenantId, `select * from member_messages where tenant_id = $1 and id = $2`, [tenantId, id]);
+    return rows[0] ? toMessage(rows[0]) : null;
+  }
+
+  async listMessages(tenantId: string, limit = 30): Promise<StoredMessage[]> {
+    return (await this.q<MessageRow>(tenantId, `select * from member_messages where tenant_id = $1 order by created_at desc limit $2`, [tenantId, limit])).map(toMessage);
+  }
+
+  async updateMessage(tenantId: string, id: string, patch: MessagePatch): Promise<void> {
+    const cols: Record<string, string> = { status: 'status', runId: 'run_id', sent: 'sent', note: 'note', sentAt: 'sent_at' };
+    const sets: string[] = [];
+    const params: unknown[] = [tenantId, id];
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === undefined || !cols[k]) continue;
+      params.push(v);
+      sets.push(`${cols[k]} = $${params.length}`);
+    }
+    if (sets.length) await this.q(tenantId, `update member_messages set ${sets.join(', ')} where tenant_id = $1 and id = $2`, params);
+  }
 }
 
 /** テスト用のメモリの置き場（記録は追記のみ）。 */
@@ -252,6 +310,7 @@ export class MemoryMemberStore implements MemberStore {
   readonly members = new Map<string, Omit<StoredMember, 'balance' | 'visits' | 'lastVisitAt' | 'lastEarnedAt'> & { tenantId: string }>();
   readonly records: (Omit<StoredPoint, 'reversed'> & { tenantId: string })[] = [];
   readonly rewardRows = new Map<string, MemberReward & { tenantId: string }>();
+  readonly messages = new Map<string, StoredMessage & { tenantId: string }>();
   private clock = 0;
 
   private withStats(m: Omit<StoredMember, 'balance' | 'visits' | 'lastVisitAt' | 'lastEarnedAt'> & { tenantId: string }): StoredMember {
@@ -291,14 +350,14 @@ export class MemoryMemberStore implements MemberStore {
     return m ? this.withStats(m) : null;
   }
 
-  async create(tenantId: string, m: { nickname: string; phone: string; lineUserId: string | null; cardKey: string; createdBy: string }): Promise<string> {
+  async create(tenantId: string, m: { nickname: string; phone: string; birthday?: string | null; lineUserId: string | null; cardKey: string; createdBy: string }): Promise<string> {
     const id = `mbr-${randomUUID()}`;
     const number = Math.max(0, ...[...this.members.values()].filter((x) => x.tenantId === tenantId).map((x) => x.number)) + 1;
-    this.members.set(id, { ...m, id, tenantId, number, mergedInto: null, createdAt: this.now().toISOString() });
+    this.members.set(id, { ...m, birthday: m.birthday ?? null, id, tenantId, number, mergedInto: null, createdAt: this.now().toISOString() });
     return id;
   }
 
-  async update(tenantId: string, id: string, patch: Partial<Pick<StoredMember, 'nickname' | 'phone' | 'lineUserId' | 'mergedInto'>>): Promise<void> {
+  async update(tenantId: string, id: string, patch: Partial<Pick<StoredMember, 'nickname' | 'phone' | 'birthday' | 'lineUserId' | 'mergedInto'>>): Promise<void> {
     const m = this.members.get(id);
     if (m && m.tenantId === tenantId) this.members.set(id, { ...m, ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) });
   }
@@ -341,14 +400,42 @@ export class MemoryMemberStore implements MemberStore {
     return { ...rest };
   }
 
-  async createReward(tenantId: string, r: Pick<MemberReward, 'name' | 'points' | 'validFrom' | 'validTo'>): Promise<string> {
+  async createReward(tenantId: string, r: Pick<MemberReward, 'name' | 'points' | 'validFrom' | 'validTo'> & { birthdayOnly?: boolean }): Promise<string> {
     const id = `mrw-${randomUUID()}`;
-    this.rewardRows.set(id, { ...r, id, tenantId, status: 'active', createdAt: this.now().toISOString() });
+    this.rewardRows.set(id, { ...r, birthdayOnly: !!r.birthdayOnly, id, tenantId, status: 'active', createdAt: this.now().toISOString() });
     return id;
   }
 
-  async updateReward(tenantId: string, id: string, patch: Partial<Pick<MemberReward, 'name' | 'points' | 'validFrom' | 'validTo' | 'status'>>): Promise<void> {
+  async updateReward(tenantId: string, id: string, patch: Partial<Pick<MemberReward, 'name' | 'points' | 'validFrom' | 'validTo' | 'status' | 'birthdayOnly'>>): Promise<void> {
     const r = this.rewardRows.get(id);
     if (r && r.tenantId === tenantId) this.rewardRows.set(id, { ...r, ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) });
+  }
+
+  async createMessage(tenantId: string, m: { kind: MemberMessage['kind']; audience: MemberAudience; text: string; recipients: string[]; createdBy: string }): Promise<string> {
+    const id = `mms-${randomUUID()}`;
+    this.messages.set(id, { ...m, id, tenantId, count: m.recipients.length, status: 'draft', runId: null, sent: 0, note: '', createdAt: this.now().toISOString(), sentAt: null });
+    return id;
+  }
+
+  async getMessage(tenantId: string, id: string): Promise<StoredMessage | null> {
+    const m = this.messages.get(id);
+    if (!m || m.tenantId !== tenantId) return null;
+    const { tenantId: _t, ...rest } = m;
+    return { ...rest, recipients: [...rest.recipients] };
+  }
+
+  async listMessages(tenantId: string, limit = 30): Promise<StoredMessage[]> {
+    return [...this.messages.values()].filter((m) => m.tenantId === tenantId).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit)
+      .map(({ tenantId: _t, ...m }) => ({ ...m, recipients: [...m.recipients] }));
+  }
+
+  async updateMessage(tenantId: string, id: string, patch: MessagePatch): Promise<void> {
+    const m = this.messages.get(id);
+    if (m && m.tenantId === tenantId) this.messages.set(id, { ...m, ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) });
+  }
+
+  async visitCount(tenantId: string, from: string, to: string): Promise<number> {
+    const reversed = new Set(this.records.filter((r) => r.tenantId === tenantId && r.reversalOf).map((r) => r.reversalOf));
+    return this.records.filter((r) => r.tenantId === tenantId && r.kind === 'visit' && !reversed.has(r.id) && r.createdAt >= from && r.createdAt < to).length;
   }
 }

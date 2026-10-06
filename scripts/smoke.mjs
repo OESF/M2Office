@@ -6457,6 +6457,21 @@ console.log('\n■ 80. 会員とポイント（入り切り・会員証・来店
       && /\/v1\/member-card\//.test(JSON.parse(joined.text).cardUrl ?? '') && forged.status === 400
       ? ok('LINE の会員証: 設定してから開き、ID トークンを確かめ、初めてなら呼び名を聞いて会員にする（偽の印は断る）') : ng('LINE の会員証が違う', JSON.stringify({ off: lineOff.status, page: linePage.status, first: first.text, joined: joined.text, forged: forged.status }));
 
+    // 段 2（第40.18節）: 誕生月の特典と、会員への LINE の知らせ（管理者だけ。LINE をつないでいなければ用意しない）
+    const birthMonth = String(new Date(Date.now() + 9 * 3_600_000).getUTCMonth() + 1);
+    const bday = await call('a', '/v1/members', { method: 'POST', body: JSON.stringify({ nickname: 'スモーク誕生月', birthday: `${birthMonth}/1` }) }, 'member');
+    const cake = await call('a', '/v1/members/rewards', { method: 'POST', body: JSON.stringify({ name: 'スモークの誕生月の特典', points: 1, birthdayOnly: true }) });
+    const bdayCard = await call('a', `/v1/members/card?code=${encodeURIComponent(bday.body.cardUrl ?? '')}`, {}, 'member');
+    const plainCard = await call('a', `/v1/members/card?code=${encodeURIComponent(cardUrl)}`, {}, 'member');
+    bday.status === 201 && bday.body.member?.birthday && cake.status === 201
+      && bdayCard.body.rewards?.some((r) => r.name === 'スモークの誕生月の特典') && !plainCard.body.rewards?.some((r) => r.name === 'スモークの誕生月の特典')
+      ? ok('誕生月だけの特典は、誕生月の会員にだけ出る') : ng('誕生月の特典が違う', JSON.stringify({ bday: bday.status, cake: cake.status, b: bdayCard.body.rewards, p: plainCard.body.rewards }));
+    const msgMember = await call('a', '/v1/members/messages', { method: 'POST', body: JSON.stringify({ audience: 'line', text: 'こんにちは' }) }, 'member');
+    const msgNoLine = await call('a', '/v1/members/messages', { method: 'POST', body: JSON.stringify({ audience: 'line', text: 'こんにちは' }) });
+    const msgList = await call('a', '/v1/members/messages', {}, 'member');
+    msgMember.status === 403 && msgNoLine.status === 400 && /LINE/.test(msgNoLine.body.error ?? '') && msgList.status === 200 && typeof msgList.body.counts?.line === 'number'
+      ? ok('会員への LINE の知らせを用意するのは管理者だけ。LINE をつないでいなければ用意しない') : ng('LINE の知らせの扱いが違う', JSON.stringify({ m: msgMember.status, a: msgNoLine.body, l: msgList.status }));
+
     await call('b', '/v1/admin/extensions/members/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
     const other = await call('b', `/v1/members/card?code=${encodeURIComponent(cardUrl)}`, {}, 'member');
     const otherPage = await open('b', `/v1/member-card/${key}`);
@@ -6486,6 +6501,7 @@ console.log('\n■ 80. 会員とポイント（入り切り・会員証・来店
     await owner.query(`delete from member_points where tenant_id in ('t-alpha', 't-beta')`);
     await owner.query(`delete from members where tenant_id in ('t-alpha', 't-beta')`);
     await owner.query(`delete from member_rewards where tenant_id in ('t-alpha', 't-beta')`);
+    await owner.query(`delete from member_messages where tenant_id in ('t-alpha', 't-beta')`);
     for (const r of saved) await owner.query(`update tenant_settings set members = $2 where tenant_id = $1`, [r.tenant_id, r.members ? JSON.stringify(r.members) : null]);
     await owner.end();
   }
