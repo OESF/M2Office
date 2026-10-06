@@ -17,13 +17,32 @@ import type { AppEnv } from './tenant.js';
 const REQUEST_ID = /^[A-Za-z0-9-]{8,64}$/;
 
 /**
+ * 画面が数秒ごとに読み直す口（お知らせ・承認・実行・業務の一覧・秘書の調べもの）。画面の記録（デバッグモード）と同じ扱いにする。
+ * 成功して速く返ったものは 1 件ごとには書かない（記録が読み直しで埋まり、ほかの出来事が見えなくなるため）。
+ */
+const POLLED = /^\/v1\/(notifications|approvals|jobs|agents|secretary\/lookups)$|^\/v1\/secretary\/lookups\/claim$/;
+
+/** これより遅い読み直しは書く（遅さに気づけるように）。 */
+const SLOW_MS = 1_000;
+
+/**
+ * 読み直しの要求を書かないか。
+ *
+ * @param logPolls 環境変数 `LOG_POLLS=true` のときは、読み直しも書く（調べるとき）
+ */
+export function quietPoll(method: string, path: string, status: number, ms: number, logPolls: boolean): boolean {
+  return !logPolls && method === 'GET' && status < 400 && ms < SLOW_MS && POLLED.test(path);
+}
+
+/**
  * 要求ごとに 1 行のログを書くミドルウェア。
  *
  * @remarks
  * レベルは状態コードで決める。500 以上は `error`、それ以外は `info`。
  * 生存確認（`/health`）は量が多く調査に要らないため `debug` とする。
+ * 画面が数秒ごとに読み直す要求は、成功して 1 秒より速く返ったものを書かない（{@link quietPoll}。`LOG_POLLS=true` で書く）。
  */
-export function requestLogger(log: Logger) {
+export function requestLogger(log: Logger, logPolls = process.env['LOG_POLLS'] === 'true') {
   return async (c: Context<AppEnv>, next: Next) => {
     const given = c.req.header('x-request-id');
     const requestId = given && REQUEST_ID.test(given) ? given : randomUUID();
@@ -45,6 +64,7 @@ export function requestLogger(log: Logger) {
       tenantId: ctx?.tenant.id ?? c.get('tenant')?.id,
       userId: ctx?.user.id,
     };
+    if (quietPoll(c.req.method, c.req.path, status, fields.ms, logPolls)) return;
     if (c.req.path === '/health') log.debug('要求', fields);
     else if (status >= 500) log.error('要求', fields);
     else log.info('要求', fields);
