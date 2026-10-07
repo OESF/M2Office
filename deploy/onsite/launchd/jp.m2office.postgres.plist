@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- M2Office のデータベース（PostgreSQL。仕様書 第8.6.1節）。データは選んだディスク（RAID など）に置き、社内の機械の中からだけ受ける（127.0.0.1） -->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>jp.m2office.postgres</string>
+	<key>UserName</key>
+	<string>_m2office</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>{{APP_ROOT}}/runtime/postgres/bin/postgres</string>
+		<string>-D</string>
+		<string>{{DATA_DIR}}/postgres</string>
+		<string>-c</string>
+		<string>listen_addresses=127.0.0.1</string>
+		<string>-p</string>
+		<string>{{DB_PORT}}</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>StandardOutPath</key>
+	<string>{{DATA_DIR}}/logs/postgres.log</string>
+	<key>StandardErrorPath</key>
+	<string>{{DATA_DIR}}/logs/postgres.log</string>
+</dict>
+</plist>

@@ -36,6 +36,7 @@
     "icons": "node scripts/build-icons.mjs",
     "tenant:create": "node --env-file-if-exists=.env scripts/create-tenant.mjs",
     "dev:cert": "node scripts/dev-cert.mjs",
+    "build:release": "node scripts/build-release.mjs",
     "publish:check": "node scripts/check-publish.mjs",
     "publish:export": "node scripts/export-public.mjs"
   },

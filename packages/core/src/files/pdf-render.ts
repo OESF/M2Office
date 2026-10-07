@@ -10,13 +10,15 @@
  * @see 仕様書 第9.4.1節、Q-59、ADR-0017
  */
 
+import { pathToFileURL } from 'node:url';
+import { appPath } from '../app-root.js';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { PDFDocument, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 
 /** 同梱した書体の置き場（リポジトリの `assets/fonts`。Q-59 で同梱と決めた）。 */
-const FONT_DIR = new URL('../../../../assets/fonts/', import.meta.url);
+const FONT_DIR = pathToFileURL(`${appPath('assets', 'fonts')}/`);
 
 /** A4（ポイント）。 */
 const PAGE = { width: 595.28, height: 841.89 };

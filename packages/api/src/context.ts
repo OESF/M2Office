@@ -18,7 +18,7 @@ import {
   CardService, PostgresContactStore, cardsAccess, type ContactStore, BulkMailService, PostgresBulkMailStore, NoticeService, PostgresNoticeStore,
   InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, JanLookupService, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, InquiryService, PostgresInquiryStore, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, CanvaService, HttpCanvaApi, MockCanvaApi, PostgresCanvaConnectionStore, MEMBER_LINE_SEND, LineApiVerifier, MockLineVerifier, JGrantsApi, MockJGrants, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, WEB_REVIEW_REQUEST, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, webColumnsAccess, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, WEB_COLUMN_SIGNAGE_PUBLISH, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, applyStockChanges, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
   type SecretBox, type GeminiModels,
-  type FileStore, type TenantExtensions, type HelpArticle, type ManualMeta, type LlmProvider, type Logger, type Repository, type WorkspaceConnector, aiUsageMeterFromEnv, setEnqueueAiGuard
+  type FileStore, type TenantExtensions, type HelpArticle, type ManualMeta, type LlmProvider, type Logger, type Repository, type WorkspaceConnector, aiUsageMeterFromEnv, setEnqueueAiGuard, appPath
 } from '@m2office/core';
 import { canRunAgent, type AgentDefinition, type ContactScope, type HrSettings, type InventorySettings, type SignageSettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type ContractSettings, type ReservationSettings, type SubsidySettings, type MemberSettings, type PrintDesignSettings, fileInputKey } from '@m2office/shared';
 import { readdirSync, readFileSync } from 'node:fs';
@@ -799,7 +799,7 @@ export function buildDeps(): AppDeps {
  * 会社がファイルから取り込んだ拡張機能は、要求のたびにデータベースから読む（再起動は要らない）。
  */
 export function buildHub(repo: Repository, registry: ToolRegistry, log: Logger, connectionAuth?: ConnectionAuthProvider): ExtensionHub {
-  const dir = process.env['EXTENSIONS_DIR'] ?? fileURLToPath(new URL('../../../extensions', import.meta.url));
+  const dir = process.env['EXTENSIONS_DIR'] ?? appPath('extensions');
   const { packages, errors } = loadExtensions(dir, registry, OFFICIAL_AGENTS.map((a) => a.id));
   for (const e of errors) log.warn('拡張機能を読み込めませんでした', { dir: e.dir, problems: e.problems });
   for (const p of packages) {
@@ -816,7 +816,7 @@ export function buildHub(repo: Repository, registry: ToolRegistry, log: Logger, 
 
 /** 公式のヘルプの記事の置き場。既定はリポジトリ直下の `docs/help`。 */
 function helpDir(): string {
-  return process.env['HELP_DIR'] ?? fileURLToPath(new URL('../../../docs/help', import.meta.url));
+  return process.env['HELP_DIR'] ?? appPath('docs', 'help');
 }
 
 /**
@@ -847,7 +847,7 @@ export function loadHelpArticles(dir: string, log: Logger): HelpArticle[] {
 }
 
 function manualDir(): string {
-  return process.env['MANUAL_DIR'] ?? fileURLToPath(new URL('../../../docs/manual', import.meta.url));
+  return process.env['MANUAL_DIR'] ?? appPath('docs', 'manual');
 }
 
 /**
@@ -887,7 +887,7 @@ export function loadManuals(dir: string, log: Logger): { list: { id: string; tit
  * @remarks 既定はリポジトリ直下の `.data/files`。本番はオブジェクトストレージに差し替える。
  */
 export function fileStorageDir(): string {
-  return process.env['FILE_STORAGE_DIR'] ?? fileURLToPath(new URL('../../../.data/files', import.meta.url));
+  return process.env['FILE_STORAGE_DIR'] ?? appPath('.data', 'files');
 }
 
 /**
@@ -930,7 +930,7 @@ export async function companyView(
 /** サービス本体の版（ルートの package.json。競合の分析が読むときの名乗りに入れる）。 */
 function appVersion(): string {
   try {
-    return (JSON.parse(readFileSync(fileURLToPath(new URL('../../../package.json', import.meta.url)), 'utf8')) as { version?: string }).version ?? '0';
+    return (JSON.parse(readFileSync(appPath('package.json'), 'utf8')) as { version?: string }).version ?? '0';
   } catch {
     return '0';
   }

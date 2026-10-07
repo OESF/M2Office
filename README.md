@@ -84,6 +84,15 @@ WEB_HTTPS=true npm run dev
 npm run tenant:create -- --subdomain example --name "会社名" --domain example.co.jp --admin admin@example.co.jp
 ```
 
+### 本番の組み立て
+
+```bash
+npm run build:release -- --install
+```
+
+`dist-release/` に、API とワーカーを 1 つずつのファイルにまとめたもの・画面・実行中に読むファイルを組み立てます（仕様書 第20.4.5節）。
+クラウドのコンテナと、ローカルの形の Mac のパッケージ（`deploy/onsite/`。仕様書 第8.6.1節）の両方の元になります。
+
 ## 動作確認
 
 ```bash
@@ -228,6 +237,7 @@ docs/            開発規約・リリース規定・設計判断記録
 | `M2O_DEPLOYMENT` | cloud | 配備の形。`cloud`（多数の会社・サブドメイン）か `onsite`（社内の 1 台に 1 社だけ。ローカルの形）（仕様書 第8.6節） |
 | `M2O_ONSITE_TENANT` | （なし） | ローカルの形で入っている 1 社のサブドメイン。アドレスにかかわらずこの会社に決める |
 | `AI_MONTHLY_LIMIT_JPY` | （なし） | 運営が AI の費用をまとめて払う会社の、AI の利用の月の上限（円）の既定と、管理者が上げられる上限。無ければ上限なし。自社の鍵の会社には効かない（仕様書 第6.6.2節） |
+| `M2O_APP_ROOT` | （リポジトリの根） | 実行中に読むファイル（ヘルプ・マニュアル・フォント・拡張機能・版の番号）の置き場所の根。本番の組み立て（`npm run build:release`）では組み立てたものの根を渡す（仕様書 第20.4.5節） |
 | `LOCAL_LLM_URL` | （なし） | ローカル AI の OpenAI 互換の口（例: `http://127.0.0.1:11434/v1`）。ローカルの方針の会社が使う（仕様書 第16.3.7.1節） |
 | `LOCAL_LLM_MODEL` | （なし） | ローカル AI のモデル。`LOCAL_LLM_MODEL_FAST`・`_STANDARD`・`_ADVANCED` で役割ごとに変えられる |
 | `LOCAL_LLM_KEY`・`LOCAL_LLM_TIMEOUT_MS` | （なし）・300000 | ローカル AI の口が鍵を求めるときの鍵と、1 回の問い合わせを待つ時間 |

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- M2Office のapi（仕様書 第8.6.1節）。起動時に動かし、止まったら動かし直す。専用の利用者で動かす。導入の道具が {{…}} を埋める -->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>jp.m2office.api</string>
+	<key>UserName</key>
+	<string>_m2office</string>
+	<key>WorkingDirectory</key>
+	<string>{{APP_ROOT}}</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>{{APP_ROOT}}/runtime/node/bin/node</string>
+		<string>--env-file={{APP_ROOT}}/m2office.env</string>
+		<string>{{APP_ROOT}}/server/api.js</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>ThrottleInterval</key>
+	<integer>10</integer>
+	<key>StandardOutPath</key>
+	<string>{{DATA_DIR}}/logs/api.log</string>
+	<key>StandardErrorPath</key>
+	<string>{{DATA_DIR}}/logs/api.log</string>
+</dict>
+</plist>

@@ -168,3 +168,4 @@ export {
 } from './usage/ai-usage.js';
 export { voiceWords, voiceWordsLine, correctHeard, mishearOf, addMishear, toKatakana, VOICE_WORDS_MAX, MISHEARS_MAX, type VoiceWord, type Mishear, type VoiceWordsDeps } from './secretary/voice-words.js';
 export { AutoMinutes, autoMinutesRequest, meetingTitleKey, minutesStopped, MINUTES_AGENT_ID, type AutoMinutesDeps } from './meetings/auto-minutes.js';
+export { appRoot, appPath } from './app-root.js';

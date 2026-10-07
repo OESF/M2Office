@@ -3,6 +3,8 @@ node_modules/
 
 # ビルド成果物
 dist/
+# 本番の組み立て（npm run build:release）
+dist-release/
 *.tsbuildinfo
 
 # 設定（秘密情報を含む。.env.example を雛形とする）

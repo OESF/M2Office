@@ -13,7 +13,7 @@ import { readFileSync } from 'node:fs';
 import type { Server as HttpServer } from 'node:http';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { defaultGeminiModels, seedBriefTopics, warnHotSwapModels, withAiUsage } from '@m2office/core';
+import { defaultGeminiModels, seedBriefTopics, warnHotSwapModels, withAiUsage, appPath } from '@m2office/core';
 import { buildDeps, companyView } from './context.js';
 import { authenticate, resolveTenant, type AppEnv } from './middleware/tenant.js';
 import { attachVoiceRelay } from './voice/relay.js';
@@ -82,7 +82,7 @@ const deps = buildDeps();
  */
 const SERVER_VERSION: string | null = (() => {
   try {
-    return (JSON.parse(readFileSync(new URL('../../../package.json', import.meta.url), 'utf-8')) as { version: string }).version;
+    return (JSON.parse(readFileSync(appPath('package.json'), 'utf-8')) as { version: string }).version;
   } catch {
     return null;
   }

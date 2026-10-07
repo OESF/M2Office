@@ -9,6 +9,8 @@
  * 題名・説明文・写真の説明はデータとして渡し、中の指示に従わせない（不変則 I-6）。
  */
 
+import { pathToFileURL } from 'node:url';
+import { appPath } from '../app-root.js';
 import { fileURLToPath } from 'node:url';
 import { Resvg } from '@resvg/resvg-js';
 import type { ColumnPhoto, ColumnRuleSet } from '@m2office/shared';
@@ -37,7 +39,7 @@ const INK = '#1d2733';
 /** ロゴが読めないときに使う M2Office の色（テーマから決める）。どれも淡い地の上で見える濃さ。 */
 const PALETTE = ['#1f5f8b', '#2e6b4f', '#7a4470', '#9a5a1c', '#34508f', '#5b4a3f', '#2d6a73'];
 
-const FONT_DIR = new URL('../../../../assets/fonts/', import.meta.url);
+const FONT_DIR = pathToFileURL(`${appPath('assets', 'fonts')}/`);
 const FONT_FILES = [fileURLToPath(new URL('NotoSansJP-Bold.ttf', FONT_DIR)), fileURLToPath(new URL('NotoSansJP-Regular.ttf', FONT_DIR))];
 
 /** 直前の模様と同じにならず、最近あまり使っていない模様を選ぶ。 */
