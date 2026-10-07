@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { Resvg } from '@resvg/resvg-js';
 import type { ColumnPhoto, ColumnRuleSet } from '@m2office/shared';
 import type { LlmProvider } from '../llm/provider.js';
+import { toBundledFontChars } from '../files/font-chars.js';
 
 /** カバーの幅（SNS で共有したときの見え方と同じ形）。 */
 export const COVER_WIDTH = 1200;
@@ -269,7 +270,8 @@ export function wantsDark(hint: string): boolean {
  * @param width 横の画素数
  */
 export function renderSvgPng(svg: string, width: number): Uint8Array {
-  return new Uint8Array(new Resvg(svg, {
+  // 書体に無い字（住所のマイナス記号など）は、同じ形の字にして描く
+  return new Uint8Array(new Resvg(toBundledFontChars(svg), {
     fitTo: { mode: 'width', value: width },
     font: { fontFiles: FONT_FILES, loadSystemFonts: false, defaultFontFamily: 'Noto Sans JP' },
   }).render().asPng());
@@ -277,7 +279,7 @@ export function renderSvgPng(svg: string, width: number): Uint8Array {
 
 /** カバーを PNG にする。 */
 export function renderCover(c: CoverInput): Uint8Array {
-  const png = new Resvg(coverSvg(c), {
+  const png = new Resvg(toBundledFontChars(coverSvg(c)), {
     fitTo: { mode: 'width', value: COVER_WIDTH },
     font: { fontFiles: FONT_FILES, loadSystemFonts: false, defaultFontFamily: 'Noto Sans JP' },
   }).render().asPng();

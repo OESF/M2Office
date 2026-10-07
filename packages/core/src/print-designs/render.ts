@@ -130,6 +130,13 @@ function colorOf(hex: string) {
 }
 
 /**
+ * Canva の書体に字形の無い字を、見た目のほぼ同じ字に置き換える（第41.19.3節）。
+ *
+ * @remarks 波ダッシュ「〜」（U+301C）は、Canva の Noto Sans JP で四角になる（2026-10-07 に本物の Canva で確かめた）。全角のチルダ「～」（U+FF5E）にする
+ */
+export const forCanva = (text: string): string => text.replace(/\u301c/g, '\uff5e');
+
+/**
  * Canva に送る PDF（実寸。第41.19.3節）。地・模様・写真だけを 1 枚の画像にし、その上に字を字のまま書く。
  *
  * @remarks 書体は同梱の Noto Sans JP（標準と太字）を埋め込む。書体に無い字は〓にする（画像にしたときと同じ書体の範囲）
@@ -139,8 +146,10 @@ export async function toCanvaPdf(pages: PrintPage[], size: PrintSize): Promise<U
   const doc = await PDFDocument.create();
   doc.setCreator('M2Office');
   doc.setProducer('M2Office');
-  const regular = await embedJapaneseFonts(doc, 'regular');
-  const bold = await embedJapaneseFonts(doc, 'bold');
+  // 書体の名前は素の形にする。末尾に番号が付くと、Canva が同じ書体と見分けられず、別の書体に置き換える
+  // （太字が細くなる・「〜」が四角になる。2026-10-07 に本物の Canva で確かめた）
+  const regular = await embedJapaneseFonts(doc, 'regular', { plainName: true });
+  const bold = await embedJapaneseFonts(doc, 'bold', { plainName: true });
   for (const page of pages) {
     const { lines, base } = splitSvgText(page.svg);
     const png = await doc.embedPng(renderSvgPng(base, pxOf(w)));
@@ -148,7 +157,7 @@ export async function toCanvaPdf(pages: PrintPage[], size: PrintSize): Promise<U
     p.drawImage(png, { x: 0, y: 0, width: w * MM, height: h * MM });
     for (const l of lines) {
       const f = l.weight >= 600 ? bold : regular;
-      const text = f.fit(l.text);
+      const text = f.fit(forCanva(l.text));
       const sizePt = l.size * MM;
       const width = f.font.widthOfTextAtSize(text, sizePt);
       const x = l.x * MM - (l.anchor === 'middle' ? width / 2 : l.anchor === 'end' ? width : 0);

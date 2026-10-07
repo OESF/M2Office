@@ -189,6 +189,15 @@ test('Canva 用の PDF: 地と写真は画像、字は字のまま（同じ位�
   const text = (await extractPdfText(canva)).pages.map((p) => p.text).join('');
   assert.match(text.replace(/\s/g, ''), /秋の感謝祭/);
   assert.match(text.replace(/\s/g, ''), /ご来店をお待ちしています/);
+  // 書体の名前は素の形（Canva が同じ書体と見分けるため）
+  // 波ダッシュは、Canva の書体にある全角のチルダにする
+  const { forCanva } = await import('../src/index.js');
+  assert.equal(forCanva('午後2時〜5時'), '午後2時～5時');
+  const { PDFDict, PDFName } = await import('pdf-lib');
+  const loaded = await PDFDocument.load(canva);
+  const names = new Set(loaded.context.enumerateIndirectObjects()
+    .map(([, o]) => (o instanceof PDFDict ? o.get(PDFName.of('BaseFont')) : undefined)).filter(Boolean).map((n) => String(n)));
+  assert.ok(names.has('/NotoSansJP-Bold') && names.has('/NotoSansJP-Regular'), [...names].join(','));
   const print = await toPdf(pages, 'A4', 'trim');
   assert.doesNotMatch((await extractPdfText(print)).pages.map((p) => p.text).join(''), /感謝祭/);
 });

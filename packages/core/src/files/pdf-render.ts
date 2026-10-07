@@ -16,6 +16,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { PDFDocument, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
+import { toBundledFontChars } from './font-chars.js';
 
 /** 同梱した書体の置き場（リポジトリの `assets/fonts`。Q-59 で同梱と決めた）。 */
 const FONT_DIR = pathToFileURL(`${appPath('assets', 'fonts')}/`);
@@ -157,7 +158,7 @@ export async function missingCharacters(texts: string[]): Promise<string[]> {
   await loadFonts();
   const missing = new Set<string>();
   for (const text of texts) {
-    for (const ch of text) {
+    for (const ch of toBundledFontChars(text)) {
       const code = ch.codePointAt(0);
       if (ch === '\n' || code === undefined) continue;
       if (!coverage?.has(code)) missing.add(ch);
@@ -176,19 +177,26 @@ const EMBED = { subset: false } as const;
  * PDF に同梱の日本語の書体を埋め込む。帳票以外の PDF（棚のラベルなど）が使う。
  *
  * @param which 埋め込む書体。使わない書体は埋め込まない（1 つで約 1.5 MB あるため）
+ * @param opts.plainName 書体の名前を、末尾に番号を付けない素の形（`NotoSansJP-Regular`・`NotoSansJP-Bold`）にする。
+ *   取り込む側（Canva）が名前で同じ書体を見分けるため（第41.19.3節）。同じ文書に同じ書体を 2 回埋め込まないときだけ使う
  * @returns 書体と、書体に無い字を置き換える関数
  */
-export async function embedJapaneseFonts(pdf: PDFDocument, which: 'regular' | 'bold' = 'regular'): Promise<{ font: PDFFont; fit(text: string): string }> {
+export async function embedJapaneseFonts(
+  pdf: PDFDocument, which: 'regular' | 'bold' = 'regular', opts: { plainName?: boolean } = {},
+): Promise<{ font: PDFFont; fit(text: string): string }> {
   const fonts = await loadFonts();
   pdf.registerFontkit(fontkit);
-  const font = await pdf.embedFont(which === 'bold' ? fonts.bold : fonts.regular, EMBED);
+  const font = await pdf.embedFont(which === 'bold' ? fonts.bold : fonts.regular, {
+    ...EMBED, ...(opts.plainName ? { customName: which === 'bold' ? 'NotoSansJP-Bold' : 'NotoSansJP-Regular' } : {}),
+  });
   return { font, fit };
 }
 
 /** 書体に無い字を置き換える。 */
 function fit(text: string): string {
   let out = '';
-  for (const ch of text) {
+  // 書体に無い字のうち、同じ形の字があるもの（マイナス記号など）は、その字にする
+  for (const ch of toBundledFontChars(text)) {
     const code = ch.codePointAt(0);
     out += code !== undefined && coverage?.has(code) ? ch : REPLACEMENT;
   }
