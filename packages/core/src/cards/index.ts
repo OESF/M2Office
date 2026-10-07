@@ -12,6 +12,7 @@ export type {
 export { CardService, CARD_FILE_MAX_BYTES, CARD_TABLE_MAX_ROWS, MULTIPLE_NOTE, canManage, cardsAccess, dateIn } from './service.js';
 export type { CardServiceDeps, CardUpload, AcceptResult, ContactDetail, TableImportResult } from './service.js';
 export { mapCardHeaders, mapCardHeadersByWords, cardFromRow, tableDate, exportRow, CARD_EXPORT_COLUMNS, type CardTableField, type CardTableRow, type TableCell } from './table.js';
+export { backMatches, backPatch, pairByContentThenPosition, cornersCenter, ORPHAN_BACK_REASON } from './back.js';
 export { CARD_PROMPT, CARD_MAX_PER_IMAGE, readCard, parseCardReading, orderCorners, flowRotation, parseLocations, LOCATE_PROMPT, type CardReading, type CardSide, type CardLocation } from './read.js';
 export { resolveContact, judgeSamePerson, mergeFields, type IdentityMatch } from './identity.js';
 export { detectCardKind, splitCardPdf, CARD_BATCH_MAX, CARD_MIME, type CardFileKind, type CardPage } from './formats.js';

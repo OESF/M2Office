@@ -160,6 +160,9 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/cards/card/:cardId/front` ／ `back` | 名刺の画像（見られる名刺のものだけ。ページだけの PDF は囲いの中で開かせる） |
 | `PUT /v1/cards/card/:cardId/received` | 受け取った日を直す（`receivedOn`。受け取った本人だけ。今日より後は 400。初めの値は取り込んだ人のタイムゾーンでの取り込んだ日。第27.3節） |
 | `DELETE /v1/cards/card/:cardId` | 読み取れなかった名刺を、待たずに消す（取り込んだ本人だけ） |
+| `POST /v1/cards/card/:cardId/attach` | 表の見つからなかった裏の名刺を、選んだ連絡先（`contactId`）の名刺の裏にする（仕様書 第27.5.1節） |
+| `POST /v1/cards/card/:cardId/detach-back` | 名刺の裏を外す（組を間違えたとき） |
+| `POST /v1/cards/:id/back` | 後から裏を足す（multipart の `file`。連絡先の最新の名刺の裏にして読み取り、英語の表記と裏の文を足す） |
 | `GET /v1/signage` ／ `PATCH /v1/signage/screens/:id` | 店頭サイネージ（仕様書 第31章）: 画面の一覧と状態・使っている容量と上限・管理者か ／ 画面の名前・向き・回し方・音の大きさ（`volume` 0〜100）を直す。サイネージを切っている会社と利用範囲の外の人には、`/v1/signage` のどの口も 403 |
 | `GET` ／ `PUT /v1/signage/screens/:id/entries` | 画面の流れと版（`band` で時間帯の流れ。答えに時間帯の一覧）／ 並びごと置き換える（`version` が違えば 409） |
 | `POST /v1/signage/screens/:id/bands` ／ `PATCH`・`DELETE /v1/signage/bands/:bandId` | 時間帯を足す（`start`・`end`・`days`。画面ごとに 3 つまで、重なれば 409）／ 直す ／ 削除（その流れも。仕様書 第31.6.6節） |

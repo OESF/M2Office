@@ -85,10 +85,10 @@ export interface ContactQuery {
 /** 名刺の更新。 */
 export type CardPatch = Partial<Pick<ContactCard,
   'contactId' | 'scope' | 'status' | 'failureReason' | 'extracted' | 'corrected' | 'frontRotation' | 'backRotation' | 'backFileId' | 'paired'
-  | 'receivedOn' | 'frontCorners' | 'backCorners'>>;
+  | 'receivedOn' | 'frontCorners' | 'backCorners' | 'backInfo'>> & { backReadAt?: string | null };
 
 /** 連絡先の更新。 */
-export type ContactPatch = Partial<CardFields & Pick<Contact, 'note' | 'scope' | 'status' | 'trashedAt'>>;
+export type ContactPatch = Partial<CardFields & Pick<Contact, 'note' | 'scope' | 'status' | 'trashedAt' | 'english' | 'backText' | 'related' | 'products'>>;
 
 /** 期限を過ぎた名刺（消す対象）。 */
 export interface ExpiredCard {
@@ -166,6 +166,10 @@ export interface ContactStore {
   deleteCard(who: CardViewer, id: string): Promise<void>;
   /** まとまりの中で、ひとつ前の名刺。 */
   previousCardInBatch(who: CardViewer, batchId: string, seq: number): Promise<ContactCard | null>;
+  /** 同じまとまりの名刺（順に。表の見つからない裏と組にする表を探す。第27.5.1節）。 */
+  cardsInBatch(who: CardViewer, batchId: string): Promise<ContactCard[]>;
+  /** これまでの名刺のうち、裏の画像があってまだ裏を読んでいないものを 1 枚取る（会社をまたぐ。第27.5.1節、Q-216）。 */
+  claimCardBack(): Promise<{ id: string; tenantId: string; ownerUserId: string } | null>;
   batchProgress(who: CardViewer, batchId: string): Promise<BatchProgress>;
   /** 本人が取り込んで、まだ読み取りが終わっていない名刺のまとまり。 */
   activeBatches(who: CardViewer): Promise<BatchProgress[]>;
@@ -220,13 +224,14 @@ const CONTACT_COLUMNS = `
   id, tenant_id as "tenantId", scope, owner_user_id as "ownerUserId", name, name_kana as "nameKana",
   kana_estimated as "kanaEstimated", company, department, title, postal_code as "postalCode", address,
   phones, emails, website, extra, note, status, trashed_at as "trashedAt", created_by as "createdBy",
+  coalesce(english, '{}'::jsonb) as english, back_text as "backText", related, products,
   created_at as "createdAt", updated_by as "updatedBy", updated_at as "updatedAt"`;
 
 const CARD_COLUMNS = `
   id, tenant_id as "tenantId", contact_id as "contactId", scope, owner_user_id as "ownerUserId",
   batch_id as "batchId", seq, front_file_id as "frontFileId", back_file_id as "backFileId",
   front_rotation as "frontRotation", back_rotation as "backRotation", front_corners as "frontCorners", back_corners as "backCorners", paired, status,
-  failure_reason as "failureReason", extracted, corrected, to_char(received_on, 'YYYY-MM-DD') as "receivedOn",
+  failure_reason as "failureReason", extracted, corrected, to_char(received_on, 'YYYY-MM-DD') as "receivedOn", back_info as "backInfo",
   created_at as "createdAt"`;
 
 /** 連絡先の項目と列の対応。更新で利用者の入力を列名に使わないため、この表からだけ引く。 */
@@ -234,16 +239,17 @@ const CONTACT_FIELD_COLUMNS: Record<keyof ContactPatch, string> = {
   name: 'name', nameKana: 'name_kana', kanaEstimated: 'kana_estimated', company: 'company', department: 'department',
   title: 'title', postalCode: 'postal_code', address: 'address', phones: 'phones', emails: 'emails', website: 'website',
   extra: 'extra', note: 'note', scope: 'scope', status: 'status', trashedAt: 'trashed_at',
+  english: 'english', backText: 'back_text', related: 'related', products: 'products',
 };
 
 const CARD_FIELD_COLUMNS: Record<keyof CardPatch, string> = {
   contactId: 'contact_id', scope: 'scope', status: 'status', failureReason: 'failure_reason', extracted: 'extracted',
   corrected: 'corrected', frontRotation: 'front_rotation', backRotation: 'back_rotation', backFileId: 'back_file_id', paired: 'paired',
-  receivedOn: 'received_on', frontCorners: 'front_corners', backCorners: 'back_corners',
+  receivedOn: 'received_on', frontCorners: 'front_corners', backCorners: 'back_corners', backInfo: 'back_info', backReadAt: 'back_read_at',
 };
 
 /** JSON で持つ列（書くときに文字列にする）。 */
-const JSON_COLUMNS = new Set(['phones', 'extracted', 'corrected', 'front_corners', 'back_corners']);
+const JSON_COLUMNS = new Set(['phones', 'extracted', 'corrected', 'front_corners', 'back_corners', 'english', 'back_info']);
 
 /**
  * PostgreSQL の名刺の置き場。
@@ -344,6 +350,17 @@ export class PostgresContactStore implements ContactStore {
     await this.q(who, 'delete from contact_cards where tenant_id = $1 and id = $2', [who.tenantId, id]);
   }
 
+  async cardsInBatch(who: CardViewer, batchId: string): Promise<ContactCard[]> {
+    return this.q<ContactCard>(who,
+      `select ${CARD_COLUMNS} from contact_cards where tenant_id = $1 and batch_id = $2 order by seq, created_at`, [who.tenantId, batchId]);
+  }
+
+  async claimCardBack(): Promise<{ id: string; tenantId: string; ownerUserId: string } | null> {
+    const res = await this.pool.query<{ id: string; tenant_id: string; owner_user_id: string }>('select id, tenant_id, owner_user_id from m2o_claim_card_back()');
+    const r = res.rows[0];
+    return r ? { id: r.id, tenantId: r.tenant_id, ownerUserId: r.owner_user_id } : null;
+  }
+
   async previousCardInBatch(who: CardViewer, batchId: string, seq: number): Promise<ContactCard | null> {
     const rows = await this.q<ContactCard>(who,
       `select ${CARD_COLUMNS} from contact_cards where tenant_id = $1 and batch_id = $2 and seq < $3 order by seq desc limit 1`,
@@ -412,7 +429,9 @@ export class PostgresContactStore implements ContactStore {
                             or regexp_replace(coalesce(k.company, ''), '[[:space:]　]', '', 'g') ilike t
                             or regexp_replace(coalesce(k.address, ''), '[[:space:]　]', '', 'g') ilike t
                             or k.department ilike t or k.title ilike t
-                            or array_to_string(k.emails, ' ') ilike t or k.note ilike t))
+                            or array_to_string(k.emails, ' ') ilike t or k.note ilike t
+                            or coalesce(k.english::text, '') ilike t or k.back_text ilike t
+                            or array_to_string(k.related, ' ') ilike t or array_to_string(k.products, ' ') ilike t))
                or ($5::text <> '' and regexp_replace(k.phones::text, '[^0-9]', '', 'g') like '%' || $5 || '%'))
           and ($6::date is null or exists (select 1 from contact_cards c where c.contact_id = k.id and c.received_on >= $6))
           and ($7::date is null or exists (select 1 from contact_cards c where c.contact_id = k.id and c.received_on <= $7))

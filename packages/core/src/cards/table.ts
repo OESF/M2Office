@@ -36,6 +36,8 @@ const FIELD_LABELS: Record<Exclude<CardTableField, 'ignore'>, string> = {
  */
 const HEADER_WORDS: [CardTableField, RegExp][] = [
   ['ignore', /^(取り込んだ人|登録者|所有者|作成者|更新者|更新日時?|作成日時?|id|no\.?|番号)$/i],
+  // 書き出した英語の表記の列（第27.5.1節）は、取り込みでは読まない（日本語の欄と取り違えないため）
+  ['ignore', /\((英語|english)\)$/i],
   ['lastKana', /^(姓(\(?(カナ|かな|フリガナ|ふりがな|よみ|読み)\)?)|セイ|せい)$/],
   ['firstKana', /^(名(\(?(カナ|かな|フリガナ|ふりがな|よみ|読み)\)?)|メイ|めい)$/],
   ['kana', /^(ふりがな|フリガナ|よみがな|ヨミガナ|読み仮名|カナ|かな|氏名\(?(カナ|かな|フリガナ|ふりがな|よみ|読み)\)?|(カナ|かな)氏名|名前\(?(カナ|かな|フリガナ)\)?)$/],
@@ -195,6 +197,7 @@ export function cardFromRow(row: TableCell[], mapping: (CardTableField | null)[]
 /** 書き出しの列の見出し（そのまま取り込み直せる言い方）。 */
 export const CARD_EXPORT_COLUMNS = [
   '氏名', 'ふりがな', '会社名', '部署', '役職', '郵便番号', '住所', '電話（代表）', '直通', '携帯', 'FAX', 'メールアドレス', 'Web', 'そのほか', 'メモ',
+  '氏名（英語）', '会社名（英語）', '部署（英語）', '役職（英語）', '住所（英語）',
   '最後に交換した日', '取り込んだ人',
 ];
 
@@ -209,6 +212,8 @@ export function exportRow(c: Contact, lastReceivedOn: string | null, ownerName: 
   return [
     c.name, c.nameKana, c.company, c.department, c.title, c.postalCode, c.address,
     phone('main'), phone('direct'), phone('mobile'), phone('fax'), c.emails.join('; '), c.website, c.extra, c.note,
+    // 英語の表記（第27.5.1節）。裏の文は書き出さない（宣伝の文が多いため）
+    c.english?.name ?? '', c.english?.company ?? '', c.english?.department ?? '', c.english?.title ?? '', c.english?.address ?? '',
     lastReceivedOn ?? '', ownerName,
   ];
 }

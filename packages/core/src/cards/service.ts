@@ -10,7 +10,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   CARDS_EXTENSION_ID, EMPTY_CARD_FIELDS, canUseAgent, type AuditEvent, type CardFields, type Contact, type ContactCard, type ContactChange,
-  type ContactScope, type User,
+  type ContactScope, type User, type CardBackInfo, type CardEnglish, EMPTY_CARD_ENGLISH,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { FileStore } from '../files/store.js';
@@ -18,7 +18,8 @@ import type { LlmProvider } from '../llm/provider.js';
 import { saveFile } from '../files/service.js';
 import { silentLogger, type Logger } from '../log/logger.js';
 import { CARD_BATCH_MAX, CARD_MIME, detectCardKind, splitCardPdf, type CardFileKind } from './formats.js';
-import { CARD_MAX_PER_IMAGE, readCard, type CardReading } from './read.js';
+import { CARD_MAX_PER_IMAGE, readCard, type CardReading, type CardSide } from './read.js';
+import { backMatches, backPatch, ORPHAN_BACK_REASON, pairByContentThenPosition } from './back.js';
 import { mergeFields, resolveContact } from './identity.js';
 import { revertPatch } from './signature.js';
 import { CARD_EXPORT_COLUMNS, cardFromRow, exportRow, mapCardHeaders, type CardTableField, type TableCell } from './table.js';
@@ -193,7 +194,7 @@ export class CardService {
     return true;
   }
 
-  /** 名刺 1 枚を読み取って登録する。 */
+  /** 名刺 1 枚を読み取って登録する。裏の面なら表と組にする（第27.5.1節）。 */
   async process(who: CardViewer, cardId: string): Promise<void> {
     const { store } = this.deps;
     const card = await store.getCard(who, cardId);
@@ -208,18 +209,26 @@ export class CardService {
       await this.finishBatch(who, card.batchId);
       return;
     }
+    // 裏の面だけの画像（撮るときに組にした裏ではないもの）は、表と組にする（第27.5.1節）
+    if (!card.backFileId && reading.cards.every((c) => c.side === 'back')) {
+      await this.pairBacks(who, card, reading.cards);
+      await this.finishBatch(who, card.batchId);
+      return;
+    }
     const [front, ...others] = reading.cards as [typeof reading.cards[number], ...typeof reading.cards];
     const single = others.length === 0;
     let fields = front.fields;
     let backRotation = 0;
     let backCorners = null as typeof front.corners;
+    let backSide: CardSide | null = null;
     if (card.backFileId && single) {
-      // 組にした裏は、表に無い項目を埋めるのに使う（英語の面のメールアドレスなど）
+      // 組にした裏は、表に無い項目を埋め、英語の表記・裏の文を足すのに使う（第27.5.1節）
       const back = await this.readFile(llm, who.tenantId, card.backFileId);
       if (back?.kind === 'card') {
-        fields = fillBlanks(fields, back.cards[0]!.fields);
-        backRotation = back.cards[0]!.rotation;
-        backCorners = back.cards[0]!.corners;
+        backSide = back.cards[0]!;
+        fields = fillBlanks(fields, backSide.fields);
+        backRotation = backSide.rotation;
+        backCorners = backSide.corners;
       }
     }
 
@@ -229,8 +238,10 @@ export class CardService {
       if (prev && prev.status === 'done' && prev.contactId && !prev.backFileId && !prev.paired) {
         const prevContact = await store.getContact(who, prev.contactId);
         if (prevContact && samePersonOnCard(prevContact, fields)) {
-          await store.updateCard(who, prev.id, { backFileId: card.frontFileId, backRotation: front.rotation, backCorners: front.corners, paired: true });
-          const patch = mergeFields(prevContact, fields, false);
+          await store.updateCard(who, prev.id, {
+            backFileId: card.frontFileId, backRotation: front.rotation, backCorners: front.corners, paired: true, backInfo: front.back, backReadAt: new Date().toISOString(),
+          });
+          const patch = { ...mergeFields(prevContact, fields, false), ...backPatch(prevContact, front.back, true) };
           if (Object.keys(patch).length > 0) await store.updateContact(who, prevContact.id, patch, who.userId);
           await store.deleteCard(who, card.id);
           await this.finishBatch(who, card.batchId);
@@ -248,14 +259,201 @@ export class CardService {
         id, scope: card.scope, batchId: card.batchId, seq: card.seq, frontFileId: card.frontFileId!, backFileId: null, paired: true,
         receivedOn: card.receivedOn, contactId: otherContact, extracted: other.fields, frontRotation: other.rotation, frontCorners: other.corners,
       });
+      await this.applyBack(who, otherContact, other.back, false);
     }
     const contactId = await this.register(who, card, fields, 'system');
     await store.updateCard(who, card.id, {
       status: 'done', contactId, extracted: fields, frontRotation: front.rotation, frontCorners: front.corners, backRotation, backCorners,
       ...(single ? {} : { paired: true }),
+      ...(backSide ? { backInfo: backSide.back, backReadAt: new Date().toISOString() } : {}),
       failureReason: reading.truncated ? MULTIPLE_NOTE : null,
     });
+    // 表の面の英語の表記と、組にした裏から読んだもの
+    await this.applyBack(who, contactId, front.back, false);
+    if (backSide) await this.applyBack(who, contactId, backSide.back, true);
+    // 先に渡されて表の見つからなかった裏が、この表のものなら組にする（「最初が裏」のとき）
+    if (single && !card.backFileId) await this.adoptOrphanBack(who, { ...card, contactId }, fields, front.back);
     await this.finishBatch(who, card.batchId);
+  }
+
+  /** 裏から読んだものを連絡先に足す（第27.5.1節）。 */
+  private async applyBack(who: CardViewer, contactId: string, info: CardBackInfo, asBack: boolean): Promise<void> {
+    const contact = await this.deps.store.getContact(who, contactId);
+    if (!contact) return;
+    const patch = backPatch(contact, info, asBack);
+    if (Object.keys(patch).length > 0) await this.deps.store.updateContact(who, contactId, patch, 'system');
+  }
+
+  /**
+   * 裏の面だけの画像を、表と組にする（第27.5.1節）。
+   *
+   * @remarks 1 枚なら、渡した順で直前の表（無ければ同じ回の表のうち中身の合うもの）。何枚も並べた写真なら、直前の写真の表と中身で組にし、
+   * 決まらなければ位置で組にする。表が見つからない 1 枚は「表が見つかりません」として残す（後から来た表か、人が組にする）
+   */
+  private async pairBacks(who: CardViewer, card: ContactCard, backs: CardSide[]): Promise<void> {
+    const { store } = this.deps;
+    const now = new Date().toISOString();
+    const batch = (await store.cardsInBatch(who, card.batchId)).filter((c) => c.id !== card.id);
+    const open = batch.filter((c) => c.status === 'done' && c.contactId && !c.backFileId);
+    const contacts = new Map<string, Contact>();
+    for (const c of open) {
+      const k = await store.getContact(who, c.contactId!);
+      if (k) contacts.set(c.id, k);
+    }
+    const attach = async (front: ContactCard, back: CardSide) => {
+      await store.updateCard(who, front.id, {
+        backFileId: card.frontFileId, backRotation: back.rotation, backCorners: back.corners, paired: true, backInfo: back.back, backReadAt: now,
+      });
+      const contact = contacts.get(front.id);
+      if (contact) {
+        const patch = { ...mergeFields(contact, fillBlanks(contact, back.fields), false), ...backPatch(contact, back.back, true) };
+        if (Object.keys(patch).length > 0) await store.updateContact(who, contact.id, patch, 'system');
+      }
+    };
+    if (backs.length === 1) {
+      const back = backs[0]!;
+      const prev = [...batch].reverse().find((c) => c.seq < card.seq);
+      // 直前が 1 枚だけの表で、まだ裏が無ければ、渡した順で組にする
+      const byOrder = prev && open.includes(prev) && !prev.paired ? prev : undefined;
+      const byContent = byOrder ? undefined : open.filter((c) => {
+        const k = contacts.get(c.id);
+        return k ? backMatches(k, { fields: back.fields, info: back.back }) : false;
+      });
+      const front = byOrder ?? (byContent?.length === 1 ? byContent[0] : undefined);
+      if (front) {
+        await attach(front, back);
+        await store.deleteCard(who, card.id);
+        return;
+      }
+      await store.updateCard(who, card.id, {
+        status: 'failed', failureReason: ORPHAN_BACK_REASON, extracted: back.fields, backInfo: back.back, frontRotation: back.rotation, frontCorners: back.corners,
+      });
+      return;
+    }
+    // 何枚も並べた写真: 直前の写真の表と組にする
+    const prevSeq = Math.max(-1, ...batch.filter((c) => c.seq < card.seq).map((c) => c.seq));
+    const fronts = open.filter((c) => c.seq === prevSeq);
+    const pairs = pairByContentThenPosition(fronts, backs,
+      (f, b) => { const k = contacts.get(f.id); return k ? backMatches(k, { fields: b.fields, info: b.back }) : false; },
+      (f) => f.frontCorners, (b) => b.corners);
+    for (const [bi, fi] of pairs) await attach(fronts[fi]!, backs[bi]!);
+    if (pairs.size > 0) {
+      await store.deleteCard(who, card.id);
+      return;
+    }
+    await store.updateCard(who, card.id, { status: 'failed', failureReason: ORPHAN_BACK_REASON, paired: true });
+  }
+
+  /** 同じ回に先に渡されて表の見つからなかった裏が、この表のものなら組にする（第27.5.1節）。 */
+  private async adoptOrphanBack(who: CardViewer, front: ContactCard, fields: CardFields, frontInfo: CardBackInfo): Promise<void> {
+    const { store } = this.deps;
+    const orphans = (await store.cardsInBatch(who, front.batchId))
+      .filter((c) => c.status === 'failed' && c.failureReason === ORPHAN_BACK_REASON && !c.paired && c.backInfo && c.extracted);
+    const hits = orphans.filter((o) => backMatches({ ...fields, english: frontInfo.english }, { fields: o.extracted!, info: o.backInfo! }));
+    if (hits.length !== 1) return;
+    await this.attachOrphan(who, hits[0]!, front);
+  }
+
+  /** 表の見つからなかった裏の名刺を、表の名刺の裏にする。 */
+  private async attachOrphan(who: CardViewer, orphan: ContactCard, front: ContactCard): Promise<void> {
+    const { store } = this.deps;
+    await store.updateCard(who, front.id, {
+      backFileId: orphan.frontFileId, backRotation: orphan.frontRotation, backCorners: orphan.frontCorners, paired: true,
+      backInfo: orphan.backInfo ?? null, backReadAt: new Date().toISOString(),
+    });
+    if (front.contactId && orphan.backInfo) {
+      const contact = await store.getContact(who, front.contactId);
+      if (contact) {
+        const patch = { ...mergeFields(contact, fillBlanks(contact, orphan.extracted ?? contact), false), ...backPatch(contact, orphan.backInfo, true) };
+        if (Object.keys(patch).length > 0) await store.updateContact(who, contact.id, patch, who.userId);
+      }
+    }
+    await store.deleteCard(who, orphan.id);
+  }
+
+  /**
+   * 表の見つからなかった裏の名刺を、人が選んだ連絡先の名刺の裏にする（詳細の画面の「この名刺の裏にする」。第27.5.1節）。
+   *
+   * @remarks 危険度: 社内の書き込み（本人の名刺）。連絡先の最新の名刺の裏が空いていなければ断る
+   * @returns 断る理由。できたら `null`
+   */
+  async attachBack(who: CardViewer, orphanCardId: string, contactId: string): Promise<string | null> {
+    const { store } = this.deps;
+    const orphan = await store.getCard(who, orphanCardId);
+    if (!orphan || orphan.failureReason !== ORPHAN_BACK_REASON) return '裏の名刺が見つかりません';
+    const cards = await store.listCardsOfContact(who, contactId);
+    const front = cards.find((c) => !c.backFileId && c.frontFileId);
+    if (!front) return 'この連絡先の名刺には、裏を付けられる名刺がありません（裏がもうあるか、画像の無い名刺です）';
+    await this.attachOrphan(who, orphan, front);
+    return null;
+  }
+
+  /**
+   * 名刺の裏を外す（組を間違えたとき。第27.5.1節）。外した画像は消す。連絡先に足した英語の表記などはそのまま（詳細の画面で直せる）。
+   *
+   * @returns 断る理由。できたら `null`
+   */
+  async detachBack(who: CardViewer, cardId: string): Promise<string | null> {
+    const card = await this.deps.store.getCard(who, cardId);
+    if (!card || !card.backFileId) return '裏のある名刺が見つかりません';
+    const fileId = card.backFileId;
+    await this.deps.store.updateCard(who, card.id, { backFileId: null, backRotation: 0, backCorners: null, backInfo: null });
+    const others = card.frontFileId === fileId ? [] : [fileId];
+    if (others.length) await this.removeFiles(who.tenantId, others, []).catch(() => undefined);
+    return null;
+  }
+
+  /**
+   * 後から裏を足す（詳細の画面の「裏を足す」。第27.5.1節）。渡したファイルを読み、連絡先の最新の名刺の裏にする。
+   *
+   * @returns 断る理由。できたら `null`
+   */
+  async addBack(who: CardViewer, contactId: string, upload: CardUpload): Promise<string | null> {
+    const { store } = this.deps;
+    const cards = await store.listCardsOfContact(who, contactId);
+    const front = cards.find((c) => !c.backFileId && c.frontFileId);
+    if (!front) return 'この連絡先の名刺には、裏を付けられる名刺がありません（裏がもうあるか、画像の無い名刺です）';
+    const kind = detectCardKind(upload.name, upload.bytes);
+    if (!kind) return '受け付けない形式です（PNG・JPEG・HEIC・WebP・PDF）';
+    const saved = await this.saveImage(who, upload.name, kind, upload.bytes);
+    const llm = await this.deps.llmFor(who.tenantId);
+    const reading = await this.readFile(llm, who.tenantId, saved.id);
+    const back = reading?.kind === 'card' ? reading.cards[0]! : null;
+    await store.updateCard(who, front.id, {
+      backFileId: saved.id, backRotation: back?.rotation ?? 0, backCorners: back?.corners ?? null, backInfo: back?.back ?? null, backReadAt: new Date().toISOString(),
+    });
+    if (back && front.contactId) {
+      const contact = await store.getContact(who, front.contactId);
+      if (contact) {
+        const patch = { ...mergeFields(contact, fillBlanks(contact, back.fields), false), ...backPatch(contact, back.back, true) };
+        if (Object.keys(patch).length > 0) await store.updateContact(who, contact.id, patch, who.userId);
+      }
+    }
+    return null;
+  }
+
+  /**
+   * これまでの名刺の裏を 1 枚読み直し、英語の表記と裏の文を足す（第27.5.1節、Q-216）。ワーカーが呼ぶ。
+   *
+   * @returns 読んだか（読むものが無ければ `false`）
+   */
+  async readOldBack(): Promise<boolean> {
+    const claimed = await this.deps.store.claimCardBack();
+    if (!claimed) return false;
+    const who = { tenantId: claimed.tenantId, userId: claimed.ownerUserId };
+    try {
+      const card = await this.deps.store.getCard(who, claimed.id);
+      if (!card?.backFileId || !card.contactId) return true;
+      const llm = await this.deps.llmFor(who.tenantId);
+      const reading = await this.readFile(llm, who.tenantId, card.backFileId);
+      if (reading?.kind !== 'card') return true;
+      const back = reading.cards[0]!;
+      await this.deps.store.updateCard(who, card.id, { backInfo: back.back });
+      await this.applyBack(who, card.contactId, back.back, true);
+    } catch (err) {
+      this.log.warn('名刺の裏を読み直せませんでした', { tenantId: who.tenantId, cardId: claimed.id, error: String(err) });
+    }
+    return true;
   }
 
   /** ファイルを読み、名刺として読み取る。 */
@@ -659,8 +857,17 @@ function samePersonOnCard(a: CardFields, b: CardFields): boolean {
 }
 
 /** 直す項目を整える（知らない項目は捨て、長さを切る）。 */
-function cleanPatch(p: Partial<CardFields> & { note?: string }): ContactPatch {
+function cleanPatch(p: Partial<CardFields> & { note?: string; english?: Partial<CardEnglish> }): ContactPatch {
   const out: ContactPatch = {};
+  // 英語の表記（第27.5.1節）。渡された欄だけを直し、ほかの欄はそのまま（呼ぶ側が今の値と合わせる）
+  if (p.english && typeof p.english === 'object') {
+    const en: CardEnglish = { ...EMPTY_CARD_ENGLISH };
+    for (const k of Object.keys(EMPTY_CARD_ENGLISH) as (keyof CardEnglish)[]) {
+      const v = (p.english as Record<string, unknown>)[k];
+      en[k] = typeof v === 'string' ? v.trim().slice(0, k === 'address' ? 300 : 200) : '';
+    }
+    out.english = en;
+  }
   const text = { name: 100, nameKana: 100, company: 200, department: 200, title: 200, postalCode: 10, address: 300, website: 300, extra: 500, note: 2000 } as const;
   for (const [k, max] of Object.entries(text) as [keyof typeof text, number][]) {
     if (typeof p[k] === 'string') out[k] = (p[k] as string).trim().slice(0, max);

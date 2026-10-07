@@ -7,7 +7,7 @@
  * @see 仕様書 第20.7節 認証の実装方針
  */
 
-import type { CardCorners, PrintDesign, PrintDesignDetailView, PrintKind, PrintSize, PrintState,
+import type { CardCorners, CardEnglish, PrintDesign, PrintDesignDetailView, PrintKind, PrintSize, PrintState,
   Approval, Artifact, Notification, Run, RunStep, Schedule, ScheduleRule, Tenant,
   TenantSettings, User, UserSettings, CardFields, Contact, ContactChange, ContactScope,
   InventoryItem, InventoryItemView, InventoryLocation, InventoryMove, InventoryMoveKind, InventorySettings, InventoryStockRow,
@@ -513,6 +513,8 @@ export interface CardDetail {
     id: string; receivedOn: string; receivedBy: string | null; mine: boolean; hasFront: boolean; hasBack: boolean;
     frontRotation: number; backRotation: number; note: string | null;
     frontCorners: CardCorners | null; backCorners: CardCorners | null;
+    /** 裏から読んだ文（第27.5.1節）。 */
+    backText?: string;
   }[];
   history: { receivedOn: string; company: string; department: string; title: string }[];
   /** メールの署名から新しくした記録（仕様書 第27.6.1節）。 */
@@ -1247,7 +1249,17 @@ export const api = {
     },
     get: (id: string) => call<CardDetail>(`/cards/${encodeURIComponent(id)}`),
     /** 項目とメモをその場で直す。 */
-    update: (id: string, patch: Partial<CardFields> & { note?: string }) =>
+    /** 後から裏を足す（連絡先の最新の名刺の裏にして読み取る。第27.5.1節）。 */
+    addBack: (id: string, file: File) => {
+      const form = new FormData();
+      form.append('file', file);
+      return postForm<{ ok: true }>(`/cards/${encodeURIComponent(id)}/back`, form);
+    },
+    /** 名刺の裏を外す（組を間違えたとき）。 */
+    detachBack: (cardId: string) => call<{ ok: true }>(`/cards/card/${encodeURIComponent(cardId)}/detach-back`, { method: 'POST', body: '{}' }),
+    /** 表の見つからなかった裏の名刺を、選んだ連絡先の名刺の裏にする。 */
+    attachBack: (cardId: string, contactId: string) => call<{ ok: true }>(`/cards/card/${encodeURIComponent(cardId)}/attach`, { method: 'POST', body: JSON.stringify({ contactId }) }),
+    update: (id: string, patch: Partial<CardFields> & { note?: string; english?: Partial<CardEnglish> }) =>
       call<{ ok: true }>(`/cards/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
     setScope: (id: string, scope: ContactScope) =>
       call<{ ok: true }>(`/cards/${encodeURIComponent(id)}/scope`, { method: 'PUT', body: JSON.stringify({ scope }) }),

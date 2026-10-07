@@ -9,7 +9,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { CONTRACT_KIND_LABELS, CONTRACT_STATUS_LABELS, type CardCorners, type CardFields, type Contract, type ContactPhone, type ContactScope, type PhoneKind } from '@m2office/shared';
+import { CONTRACT_KIND_LABELS, CONTRACT_STATUS_LABELS, EMPTY_CARD_ENGLISH, type CardCorners, type CardEnglish, type CardFields, type Contract, type ContactPhone, type ContactScope, type PhoneKind } from '@m2office/shared';
 import { ContactInquiries } from './Inquiries.js';
 import { api, describeError, type CardDetail, type CardList, type CardMeetings, type CardSummary } from './api.js';
 import { BulkMailView } from './BulkMail.js';
@@ -224,8 +224,9 @@ function CardListView({ onOpen, admin, onBulk }: { onOpen: (id: string) => void;
         <div key={u.id} className={`card-row unresolved${u.status === 'failed' ? ' failed' : ''}`}>
           <CardThumb cardId={u.id} rotation={0} kind={null} />
           <div className="card-row-main">
-            <strong>{u.status === 'failed' ? '読み取れませんでした' : '読み取っています'}</strong>
+            <strong>{u.status === 'failed' ? (u.failureReason === ORPHAN_BACK ? '名刺の裏' : '読み取れませんでした') : '読み取っています'}</strong>
             {u.failureReason && <span className="small muted">{u.failureReason}</span>}
+            {u.failureReason === ORPHAN_BACK && <OrphanAttach cardId={u.id} onDone={load} onError={setMessage} />}
           </div>
           {u.status === 'failed' && (
             <button className="btn ghost small" onClick={() => void api.cards.dismiss(u.id).then(load).catch((e) => setMessage(describeError(e)))}>削除</button>
@@ -434,7 +435,7 @@ function CardDetailView({ id, onBack, onOpen, mailer, onInquiry, onContract }: {
   // 会った場面は開くたびにカレンダーから引く。保存しない（第27.8節、Q-78）
   useEffect(() => { void api.cards.meetings(id).then(setMeetings).catch(() => setMeetings({ available: false, reason: '予定を取得できませんでした' })); }, [id]);
 
-  const save = async (patch: Partial<CardFields> & { note?: string }) => {
+  const save = async (patch: Partial<CardFields> & { note?: string; english?: Partial<CardEnglish> }) => {
     setMessage(null);
     try {
       await api.cards.update(id, patch);
@@ -488,6 +489,14 @@ function CardDetailView({ id, onBack, onOpen, mailer, onInquiry, onContract }: {
         <div className="card-images">
           {latest?.hasFront && <CardImage cardId={latest.id} side="front" rotation={latest.frontRotation} corners={latest.frontCorners} kind={null} large />}
           {latest?.hasBack && <CardImage cardId={latest.id} side="back" rotation={latest.backRotation} corners={latest.backCorners} kind={null} large />}
+          {/* 裏の組の直しと、後から裏を足す（第27.5.1節） */}
+          {latest?.hasBack && <button className="link small" onClick={() => act(() => api.cards.detachBack(latest.id))}>裏を外す</button>}
+          {latest?.hasFront && !latest.hasBack && (
+            <label className="link small card-add-back">裏を足す
+              <input type="file" hidden accept={isMobile() ? ACCEPT_MOBILE : ACCEPT_DESKTOP}
+                onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) act(() => api.cards.addBack(c.id, f)); }} />
+            </label>
+          )}
         </div>
         <div className="card-summary">
           <h2>{c.name || '（氏名なし）'}</h2>
@@ -543,7 +552,19 @@ function CardDetailView({ id, onBack, onOpen, mailer, onInquiry, onContract }: {
         </Field>
         <Field label="そのほか"><Editable value={c.extra} onSave={(v) => save({ extra: v })} /></Field>
         <Field label="メモ"><Editable value={c.note} multiline onSave={(v) => save({ note: v })} /></Field>
+        {/* 英語の表記（名刺の裏から。第27.5.1節）。空なら出さない */}
+        {ENGLISH_FIELDS.filter(([k]) => c.english?.[k]).map(([k, label]) => (
+          <Field key={k} label={label}><Editable value={c.english?.[k] ?? ''} onSave={(v) => save({ english: { ...EMPTY_CARD_ENGLISH, ...c.english, [k]: v } })} /></Field>
+        ))}
+        {(c.related?.length ?? 0) > 0 && <Field label="関連会社"><span className="card-tags">{c.related!.map((x) => <span key={x} className="badge">{x}</span>)}</span></Field>}
+        {(c.products?.length ?? 0) > 0 && <Field label="商品・サービス"><span className="card-tags">{c.products!.map((x) => <span key={x} className="badge">{x}</span>)}</span></Field>}
       </dl>
+      {c.backText && (
+        <details className="card-back-text">
+          <summary>名刺の裏の文</summary>
+          <p className="small">{c.backText}</p>
+        </details>
+      )}
 
       <h3>交換の記録</h3>
       <ul className="card-exchanges">
@@ -768,3 +789,33 @@ function CompanyContracts({ company, onOpen }: { company: string; onOpen: (contr
     </section>
   );
 }
+
+/** 表の見つからなかった裏の名刺に付く理由（サーバーと同じ文。第27.5.1節）。 */
+const ORPHAN_BACK = '表が見つかりません（裏の面だけです）';
+
+/** 英語の表記の欄と名前。 */
+const ENGLISH_FIELDS: [keyof CardEnglish, string][] = [
+  ['name', '氏名（英語）'], ['company', '会社名（英語）'], ['department', '部署（英語）'], ['title', '役職（英語）'], ['address', '住所（英語）'],
+];
+
+/** 表の見つからなかった裏の名刺を、探した連絡先の名刺の裏にする（第27.5.1節）。 */
+function OrphanAttach({ cardId, onDone, onError }: { cardId: string; onDone: () => void; onError: (m: string) => void }) {
+  const [q, setQ] = useState('');
+  const [hits, setHits] = useState<CardSummary[]>([]);
+  useEffect(() => {
+    if (!q.trim()) { setHits([]); return; }
+    const t = setTimeout(() => { void api.cards.list({ q }).then((r) => setHits(r.items.slice(0, 5))).catch(() => setHits([])); }, 300);
+    return () => clearTimeout(t);
+  }, [q]);
+  return (
+    <span className="card-orphan">
+      <input className="small" value={q} placeholder="この裏の表の名刺を探す" onChange={(e) => setQ(e.target.value)} aria-label="表の名刺を探す" />
+      {hits.map((h) => (
+        <button key={h.id} className="link small" onClick={() => void api.cards.attachBack(cardId, h.id).then(onDone).catch((e) => onError(describeError(e)))}>
+          {h.name || h.company}{h.company && h.name ? `（${h.company}）` : ''}の裏にする
+        </button>
+      ))}
+    </span>
+  );
+}
+

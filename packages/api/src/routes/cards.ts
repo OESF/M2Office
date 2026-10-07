@@ -171,6 +171,19 @@ export function cardsRoute(deps: AppDeps) {
     return err ? c.json({ error: err }, err.includes('見つかりません') ? 404 : 400) : c.json({ ok: true });
   });
 
+  /** 表の見つからなかった裏の名刺を、選んだ連絡先の名刺の裏にする（本文: `contactId`。第27.5.1節）。 */
+  app.post('/card/:cardId/attach', async (c) => {
+    const body = await c.req.json<{ contactId?: unknown }>().catch(() => ({ contactId: undefined }));
+    const err = await service.attachBack(who(c), c.req.param('cardId'), String(body.contactId ?? ''));
+    return err ? c.json({ error: err }, err.includes('見つかりません') ? 404 : 400) : c.json({ ok: true });
+  });
+
+  /** 名刺の裏を外す（組を間違えたとき。第27.5.1節）。 */
+  app.post('/card/:cardId/detach-back', async (c) => {
+    const err = await service.detachBack(who(c), c.req.param('cardId'));
+    return err ? c.json({ error: err }, 404) : c.json({ ok: true });
+  });
+
   /** 読み取れなかった名刺を、待たずに消す（取り込んだ本人だけ）。 */
   app.delete('/card/:cardId', async (c) => {
     const ok = await service.dismissFailed(who(c), c.req.param('cardId'));
@@ -266,6 +279,8 @@ export function cardsRoute(deps: AppDeps) {
         hasFront: !!x.frontFileId, hasBack: !!x.backFileId, frontRotation: x.frontRotation, backRotation: x.backRotation,
         frontCorners: x.frontCorners, backCorners: x.backCorners,
         note: x.failureReason,
+        // 裏から読んだ文（会社の紹介・関連会社・宣伝など。第27.5.1節）。データとして出す
+        backText: x.backInfo?.text ?? '',
       })),
       history: d.history,
       // メールの署名から新しくした記録。誰のメールからかは出さない（第27.6.1節）
@@ -281,6 +296,15 @@ export function cardsRoute(deps: AppDeps) {
     const body = await c.req.json<Partial<CardFields> & { note?: string }>().catch(() => ({}));
     const ok = await service.updateFields(who(c), c.req.param('id'), body);
     return ok ? c.json({ ok: true }) : c.json({ error: '名刺が見つかりません' }, 404);
+  });
+
+  /** 後から裏を足す（multipart の `file` 1 つ。連絡先の最新の名刺の裏にして読み取る。第27.5.1節）。 */
+  app.post('/:id/back', async (c) => {
+    const form = await c.req.parseBody();
+    const f = form['file'];
+    if (!(f instanceof File)) return c.json({ error: 'file を指定してください' }, 400);
+    const err = await service.addBack(who(c), c.req.param('id'), { name: f.name || 'back.jpg', bytes: new Uint8Array(await f.arrayBuffer()), backOf: null });
+    return err ? c.json({ error: err }, 400) : c.json({ ok: true });
   });
 
   /** 範囲を変える（第27.7節）。 */

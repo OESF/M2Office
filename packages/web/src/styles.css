@@ -2146,3 +2146,10 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 /* 秘書の欄の「ドライブから」の見本の一覧（見本の会社だけ。第10.10.8節） */
 .secretary-main { position: relative; }
 .secretary-drive-samples { position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 30; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; max-width: 420px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel, var(--bg)); box-shadow: 0 4px 16px rgba(0, 0, 0, .18); }
+
+/* 名刺の裏面（英語の表記・関連会社・裏の文・表の見つからない裏。第27.5.1節） */
+.card-tags { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.card-back-text { margin: calc(8px * var(--space-scale)) 0; }
+.card-back-text p { white-space: pre-wrap; }
+.card-orphan { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 4px; }
+.card-add-back { cursor: pointer; }

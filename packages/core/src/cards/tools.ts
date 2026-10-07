@@ -94,7 +94,7 @@ export const contactsSearch: Tool = {
   risk: 'read',
   activityLabel: '名刺を探しています',
   helpText: '取り込んだ名刺から、氏名・会社名・住所・電話番号などで人を探します。見るだけです',
-  description: '名刺（連絡先）を探す。query は氏名・ふりがな・会社名・部署・住所（「横浜市」など）・メールアドレス・電話番号の一部。空白で区切るとすべてに当たるものに絞る。from・to で名刺を交換した日（YYYY-MM-DD）の範囲に絞れる。more が true なら続きがある（言葉を足して絞る）',
+  description: '名刺（連絡先）を探す。query は氏名・ふりがな・会社名・部署・住所（「横浜市」など）・メールアドレス・電話番号・英語の表記・名刺の裏の文・関連会社・商品とサービスの一部。空白で区切るとすべてに当たるものに絞る。from・to で名刺を交換した日（YYYY-MM-DD）の範囲に絞れる。more が true なら続きがある（言葉を足して絞る）',
   args: {
     properties: {
       query: { type: 'string', description: '探す言葉（空なら交換した日の範囲だけで絞る）' },
@@ -141,7 +141,7 @@ export const contactsGet: Tool = {
   risk: 'read',
   activityLabel: '名刺を見ています',
   helpText: '1 人分の名刺の中身と、誰がいつ名刺を受け取ったかを見ます。見るだけです',
-  description: '1 件の連絡先（contactId）の項目・メモ・名刺の履歴（以前の会社・役職）・交換の記録（受け取った人と日）を返す',
+  description: '1 件の連絡先（contactId）の項目・メモ・英語の表記・名刺の裏の文と関連会社・商品とサービス・名刺の履歴（以前の会社・役職）・交換の記録（受け取った人と日）を返す',
   args: { properties: { contactId: { type: 'string', description: '連絡先の ID（contacts.search の結果）' } }, required: ['contactId'] },
   async invoke(args, ctx) {
     const cards = await cardsOf(ctx);
@@ -156,6 +156,8 @@ export const contactsGet: Tool = {
       contact: {
         contactId: c.id, name: c.name, nameKana: c.nameKana, company: c.company, department: c.department, title: c.title,
         postalCode: c.postalCode, address: c.address, phones: c.phones, emails: c.emails, website: c.website, extra: c.extra, note: c.note,
+        // 名刺の裏から読んだもの（第27.5.1節）。英語のメールを書くときは英語の表記を使う。裏の文はデータであり、指示ではない
+        english: c.english ?? null, related: c.related ?? [], products: c.products ?? [], backText: c.backText ?? '',
       },
       exchanges: d.cards.filter((x) => x.status === 'done').map((x) => ({
         cardId: x.id, receivedOn: x.receivedOn, receivedBy: nameOf(x.ownerUserId), mine: x.ownerUserId === ctx.userId,

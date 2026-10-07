@@ -15,7 +15,7 @@ const PHONE_TYPE: Record<PhoneKind, string> = { main: 'WORK,VOICE', direct: 'WOR
  * @returns CRLF 区切りの vCard 3.0
  * @remarks 区切りの文字（`,`・`;`・改行）は vCard の決まりどおりに逃がす。空の項目は書かない
  */
-export function toVCard(c: Pick<Contact, 'name' | 'nameKana' | 'company' | 'department' | 'title' | 'postalCode' | 'address' | 'phones' | 'emails' | 'website' | 'note'>): string {
+export function toVCard(c: Pick<Contact, 'name' | 'nameKana' | 'company' | 'department' | 'title' | 'postalCode' | 'address' | 'phones' | 'emails' | 'website' | 'note' | 'english'>): string {
   const esc = (s: string) => s.replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/([,;])/g, '\\$1');
   const lines = ['BEGIN:VCARD', 'VERSION:3.0', `FN:${esc(c.name || c.company)}`];
   // 日本語の氏名は姓と名を分けられないことが多い。分けずに姓の欄へ入れる
@@ -28,6 +28,12 @@ export function toVCard(c: Pick<Contact, 'name' | 'nameKana' | 'company' | 'depa
   if (c.address || c.postalCode) lines.push(`ADR;TYPE=WORK:;;${esc(c.address)};;;${esc(c.postalCode)};JP`);
   if (c.website) lines.push(`URL:${esc(c.website)}`);
   if (c.note) lines.push(`NOTE:${esc(c.note)}`);
+  // 英語の表記（第27.5.1節）は、言語の印を付けて同じ項目をもう 1 つ書く
+  const en = c.english;
+  if (en?.name) lines.push(`FN;LANGUAGE=en:${esc(en.name)}`);
+  if (en?.company || en?.department) lines.push(`ORG;LANGUAGE=en:${esc(en.company ?? '')}${en.department ? `;${esc(en.department)}` : ''}`);
+  if (en?.title) lines.push(`TITLE;LANGUAGE=en:${esc(en.title)}`);
+  if (en?.address) lines.push(`ADR;TYPE=WORK;LANGUAGE=en:;;${esc(en.address)};;;;`);
   lines.push('END:VCARD');
   return `${lines.join('\r\n')}\r\n`;
 }

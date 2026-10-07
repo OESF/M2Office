@@ -6820,8 +6820,6 @@ console.log('\n■ 83. グループの名前で共有（合う Chat のスペー
   }
 }
 
-console.log('');
-console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 
 console.log('\n■ 84. AI の利用の記録と上限（会社の月の上限・1 人の上限・止めたときの答え・会話で割合を変える。第6.6.2節、ADR-0079）');
 {
@@ -6888,4 +6886,86 @@ console.log('\n■ 85. 社内のお知らせのブリーフ以外の届け方（
   }
 }
 
+console.log('\n■ 86. 名刺の裏面（裏の見分けと組み方・英語の表記・裏の文・関連会社・表の見つからない裏・裏を外す。第27.5.1節、ADR-0082）');
+{
+  // 自動テストの推論（スタブ）は、画像に埋め込んだ見本の読み取り結果を返す（llm/stub.ts の extractFromImage）
+  const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da6364f8ff0f0000050101005b1c4a1a0000000049454e44ae426082', 'hex');
+  const tag = Date.now().toString(36);
+  const img = (card) => Buffer.concat([PNG, Buffer.from(`\nM2O-CARD:${JSON.stringify({ isCard: true, cardCount: 1, cards: [{ lineFlow: 'left-to-right', ...card }] })}\n`, 'utf8')]);
+  const upload = async (files) => {
+    const form = new FormData();
+    for (const [name, bytes] of files) form.append('file', new Blob([bytes]), name);
+    const res = await fetch(`${API}/v1/cards`, { method: 'POST', body: form, headers: { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' } });
+    return { status: res.status, body: await res.json() };
+  };
+  const list = async (q = '') => (await call('a', `/v1/cards?q=${encodeURIComponent(q)}`, {}, 'member')).body;
+  const settle = async () => {
+    for (let i = 0; i < 60; i++) {
+      const l = await list();
+      if (!l.progress && !(l.unresolved ?? []).some((u) => u.status !== 'failed')) return l;
+      await sleep(500);
+    }
+    return list();
+  };
+  const created = new Set();
+  const find = async (q) => { const hit = (await list(q)).items?.[0]; if (hit) created.add(hit.id); return hit; };
+  try {
+    // 1. 表→裏の順。宣伝だけの裏（氏名も連絡先も無い）も、渡した順で直前の表と組にし、英語の表記・裏の文・関連会社・商品とサービスを足す
+    await upload([
+      ['a-front.png', img({ side: 'front', name: `裏面 太郎 ${tag}`, company: '株式会社ウラメン', website: `https://ura-${tag}.example`, emails: [`taro-${tag}@ura-${tag}.example`] })],
+      ['a-back.png', img({ side: 'back', text: `株式会社ウラメンはウラメンホールディングスのグループ会社です。主な商品: ウラ商品${tag}`,
+        english: { name: `Taro Uramen ${tag}`, company: 'Uramen Co., Ltd.' }, related: ['ウラメンホールディングス'], products: [`ウラ商品${tag}`] })],
+    ]);
+    await settle();
+    const a = await find(`裏面 太郎 ${tag}`);
+    const ad = a ? (await call('a', `/v1/cards/${a.id}`, {}, 'member')).body : null;
+    ad?.cards?.[0]?.hasBack && ad.contact.english?.name === `Taro Uramen ${tag}` && /グループ会社/.test(ad.contact.backText ?? '')
+      && ad.contact.related?.includes('ウラメンホールディングス') && ad.contact.products?.includes(`ウラ商品${tag}`) && ad.cards.length === 1
+      ? ok('まとめて渡した宣伝だけの裏を、渡した順で直前の表と組にし、英語の表記・裏の文・関連会社・商品とサービスを足す')
+      : ng('表と裏の組み方か、裏から足すものが違う', JSON.stringify({ cards: ad?.cards, english: ad?.contact?.english, backText: ad?.contact?.backText, related: ad?.contact?.related }).slice(0, 600));
+    // 検索は英語の表記・関連会社・商品とサービスでも当たる
+    const byEn = await list(`Taro Uramen ${tag}`);
+    const byProduct = await list(`ウラ商品${tag}`);
+    byEn.items?.some((x) => x.id === a?.id) && byProduct.items?.some((x) => x.id === a?.id)
+      ? ok('名刺の検索は、英語の表記・商品とサービスでも当たる') : ng('英語の表記か商品とサービスで見つからない', JSON.stringify({ en: byEn.items?.length, p: byProduct.items?.length }));
+
+    // 2. 裏→表の順（最初が裏）。表が来たら、中身（ドメイン）で組にする
+    await upload([
+      ['b-back.png', img({ side: 'back', text: 'Omote Trading — since 1990', english: { company: 'Omote Trading' }, website: `https://omote-${tag}.example` })],
+      ['b-front.png', img({ side: 'front', name: `表 花子 ${tag}`, company: '表商事株式会社', emails: [`hanako@omote-${tag}.example`] })],
+    ]);
+    await settle();
+    const b = await find(`表 花子 ${tag}`);
+    const bd = b ? (await call('a', `/v1/cards/${b.id}`, {}, 'member')).body : null;
+    bd?.cards?.[0]?.hasBack && bd.contact.english?.company === 'Omote Trading'
+      ? ok('先に渡した裏は、後から来た表と中身（メールと Web のドメイン）で組にする') : ng('最初が裏のときに組にならない', JSON.stringify({ cards: bd?.cards, english: bd?.contact?.english }).slice(0, 400));
+
+    // 3. 合う表が無い裏は「表が見つかりません」として残し、人が選んだ名刺の裏にできる
+    await upload([['c-front.png', img({ side: 'front', name: `単独 次郎 ${tag}`, company: '単独工業' })]]);
+    await settle();
+    await upload([['c-back.png', img({ side: 'back', text: `どこの会社かわからない宣伝 ${tag}`, website: `https://nowhere-${tag}.example` })]]);
+    const l3 = await settle();
+    const orphan = (l3.unresolved ?? []).find((u) => /表が見つかりません/.test(u.failureReason ?? ''));
+    const c = await find(`単独 次郎 ${tag}`);
+    const attached = orphan && c ? await call('a', `/v1/cards/card/${orphan.id}/attach`, { method: 'POST', body: JSON.stringify({ contactId: c.id }) }, 'member') : null;
+    const cd = c ? (await call('a', `/v1/cards/${c.id}`, {}, 'member')).body : null;
+    orphan && attached?.status === 200 && cd?.cards?.[0]?.hasBack && new RegExp(`宣伝 ${tag}`).test(cd.contact.backText ?? '')
+      ? ok('合う表が無い裏は「表が見つかりません」として残し、選んだ名刺の裏にできる') : ng('表の見つからない裏の扱いが違う', JSON.stringify({ orphan: orphan?.failureReason, attached: attached?.status, cards: cd?.cards }).slice(0, 400));
+
+    // 4. 組を間違えたら裏を外せる
+    const detached = cd ? await call('a', `/v1/cards/card/${cd.cards[0].id}/detach-back`, { method: 'POST', body: '{}' }, 'member') : null;
+    const cd2 = c ? (await call('a', `/v1/cards/${c.id}`, {}, 'member')).body : null;
+    detached?.status === 200 && cd2?.cards?.[0]?.hasBack === false ? ok('名刺の裏を外せる') : ng('裏を外せない', JSON.stringify({ s: detached?.status, cards: cd2?.cards }));
+  } catch (err) {
+    ng('名刺の裏面の確認が途中で止まった', String(err));
+  } finally {
+    for (const id of created) {
+      await call('a', `/v1/cards/${id}`, { method: 'DELETE' }, 'member');
+      await call('a', `/v1/cards/${id}/purge`, { method: 'DELETE' }, 'member');
+    }
+    for (const u of (await list()).unresolved ?? []) await call('a', `/v1/cards/card/${u.id}`, { method: 'DELETE' }, 'member');
+  }
+}
+
 console.log('');
+console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');

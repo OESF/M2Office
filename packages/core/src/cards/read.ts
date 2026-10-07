@@ -7,7 +7,10 @@
  * @see 仕様書 第27.5節 読み取り
  */
 
-import { EMPTY_CARD_FIELDS, type CardCorners, type CardFields, type ContactPhone, type PhoneKind } from '@m2office/shared';
+import { EMPTY_CARD_FIELDS, type CardBackInfo, type CardCorners, type CardFields, type ContactPhone, type PhoneKind } from '@m2office/shared';
+
+/** 裏の文の上限（字。第27.5.1節）。 */
+export const BACK_TEXT_MAX = 2000;
 import type { LlmProvider, LlmResponse } from '../llm/provider.js';
 
 /** 1 枚の写真から読む名刺の数の上限（第27.4節）。 */
@@ -29,14 +32,17 @@ export const CARD_PROMPT = [
   '  "cardCount": 写っている名刺の枚数,',
   `  "cards": [ 写っている名刺ごとに 1 つ（${CARD_MAX_PER_IMAGE} 枚まで。大きく写っているものから）{`,
   '    "lineFlow": メールアドレス・電話番号・Web のアドレスのような英数字の 1 行を、先頭の文字から読んでいくとき、文字が画像の中で進む向き（"left-to-right"＝左から右・"top-to-bottom"＝上から下・"right-to-left"＝右から左・"bottom-to-top"＝下から上。正しい向きに写っていれば "left-to-right"）,',
-  '    "side": "front"（氏名がある面）か "back"（裏面。英語の面や会社の案内だけの面）,',
+  '    "side": "front"（氏名と連絡先が主な面。日本語と英語の両面の名刺なら日本語の面）か "back"（裏面。英語の面・会社の紹介や宣伝・ロゴだけの面）,',
   '    "language": 主な言語（"ja"・"en" など）,',
   '    "name": 氏名, "nameKana": ふりがな（ひらがな）, "kanaEstimated": ふりがなを名刺から読んだのでなく推定したら true,',
   '    "company": 会社名, "department": 部署, "title": 役職,',
   '    "postalCode": 郵便番号（123-4567 の形）, "address": 住所,',
   '    "phones": [{ "kind": "main"（代表）・"direct"（直通）・"mobile"（携帯）・"fax", "number": 番号 }],',
   '    "emails": [メールアドレス], "website": Web のアドレス,',
-  '    "extra": 資格・SNS など、ほかの項目（1 つの文にまとめる）',
+  '    "extra": 資格・SNS など、ほかの項目（1 つの文にまとめる）,',
+  '    "english": { "name": 氏名, "company": 会社名, "department": 部署, "title": 役職, "address": 住所 }（その面に英語・ローマ字で書かれた表記。無ければ空）,',
+  '    "text": 裏面のとき、面に書かれた文をそのまま（会社の紹介・関連会社・事業所・商品やサービスの宣伝など。表のときは空）,',
+  '    "related": [その面に書かれた関連会社・グループ会社の名前], "products": [その面に書かれた商品・サービスの名前]',
   '  } ]',
   '}',
   '縦型・横型の名刺のどちらもあります。横倒しや逆さに写っていても、向きを見分けて読んでください。',
@@ -48,6 +54,8 @@ export const CARD_PROMPT = [
 /** 写真の中の 1 枚の名刺の読み取り。 */
 export interface CardSide {
   fields: CardFields;
+  /** 英語の表記・裏の文・関連会社・商品とサービス（第27.5.1節）。 */
+  back: CardBackInfo;
   /** 正しい向きに回す角度（0・90・180・270）。 */
   rotation: number;
   side: 'front' | 'back';
@@ -227,9 +235,20 @@ function parseSide(raw: Record<string, unknown>): CardSide | null {
   };
   // ふりがなが無いのに推定の印だけがあるものは、印を落とす
   if (!fields.nameKana) fields.kanaEstimated = false;
-  if (!fields.name && !fields.company) return null;
+  const side: 'front' | 'back' = raw['side'] === 'back' ? 'back' : 'front';
+  const en = (raw['english'] ?? {}) as Record<string, unknown>;
+  const e = (k: string, max = 200) => (typeof en[k] === 'string' ? (en[k] as string).trim().slice(0, max) : '');
+  const list = (v: unknown) => (Array.isArray(v) ? [...new Set(v.filter((x): x is string => typeof x === 'string').map((x) => x.trim().slice(0, 100)).filter(Boolean))].slice(0, 30) : []);
+  const back: CardBackInfo = {
+    english: { name: e('name', 100), company: e('company'), department: e('department'), title: e('title'), address: e('address', 300) },
+    text: side === 'back' ? s('text', BACK_TEXT_MAX) : '',
+    related: list(raw['related']), products: list(raw['products']),
+  };
+  // 宣伝やロゴだけの裏は、氏名も会社名も無いことがある。読めたものがあれば裏として残す（第27.5.1節）
+  const backHasSomething = !!(back.text || back.english.company || back.english.name || back.related.length || back.products.length || fields.website);
+  if (!fields.name && !fields.company && !(side === 'back' && backHasSomething)) return null;
   const rotation = rotationOf(raw);
-  return { fields, rotation, side: raw['side'] === 'back' ? 'back' : 'front', corners: orderCorners(raw['corners'], rotation) };
+  return { fields, back, rotation, side, corners: orderCorners(raw['corners'], rotation) };
 }
 
 /**

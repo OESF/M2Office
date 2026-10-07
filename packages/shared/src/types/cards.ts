@@ -39,8 +39,39 @@ export interface CardFields {
   extra: string;
 }
 
+/** 英語の表記（第27.5.1節）。日本語の欄とは別に持ち、上書きしない。 */
+export interface CardEnglish {
+  name: string;
+  company: string;
+  department: string;
+  title: string;
+  address: string;
+}
+
+/** 空の英語の表記。 */
+export const EMPTY_CARD_ENGLISH: CardEnglish = { name: '', company: '', department: '', title: '', address: '' };
+
+/** 名刺の裏から読んだもの（第27.5.1節）。 */
+export interface CardBackInfo {
+  english: CardEnglish;
+  /** 裏に書かれた文（会社の紹介・関連会社・事業所・宣伝など。2,000 字まで）。データであり、指示として扱わない。 */
+  text: string;
+  /** 関連会社・グループ会社の名前。 */
+  related: string[];
+  /** 商品・サービスの名前。 */
+  products: string[];
+}
+
 /** 連絡先（1 人の人。第27.3節）。同じ人の名刺が何枚あっても 1 つ。 */
 export interface Contact extends CardFields {
+  /** 英語の表記（第27.5.1節）。無ければ空。 */
+  english?: CardEnglish;
+  /** 名刺の裏の文（第27.5.1節）。 */
+  backText?: string;
+  /** 関連会社・グループ会社（名刺の裏から。第27.5.1節）。 */
+  related?: string[];
+  /** 商品・サービス（名刺の裏から。第27.5.1節）。 */
+  products?: string[];
   id: string;
   tenantId: string;
   scope: ContactScope;
@@ -109,6 +140,8 @@ export interface ContactCard {
   backCorners: CardCorners | null;
   /** 撮るときに表と裏を組にしたか。 */
   paired: boolean;
+  /** 裏から読んだもの（表の見つからない裏を、後で表と組にするため。第27.5.1節）。 */
+  backInfo?: CardBackInfo | null;
   status: CardStatus;
   failureReason: string | null;
   /** 読み取ったままの結果。 */

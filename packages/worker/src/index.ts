@@ -647,7 +647,9 @@ while (running) {
   }
   // 名刺を 1 枚読み取る（第27.4節）。業務の実行と同じ間隔で見る
   try {
-    if (await cards.processNext()) handled = true;
+    if (await withAiUsage({ purpose: 'worker:cards' }, () => cards.processNext())) handled = true;
+    // 読み取る名刺が無いときだけ、これまでの名刺の裏を 1 枚読み直す（英語の表記と裏の文を足す。第27.5.1節、Q-216）
+    else if (await withAiUsage({ purpose: 'worker:cards' }, () => cards.readOldBack())) handled = true;
   } catch (err) {
     log.error('名刺の読み取りで例外が発生しました', { err });
   }
