@@ -64,8 +64,8 @@ export class GeminiResearchProvider implements ResearchProvider {
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: RESEARCH_INSTRUCTION }] },
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        // 温度などの抜き出しの指定は送らない（Gemini 3.6 Flash から効かず、これからのモデルではエラーになる。2026-10 の Google の知らせ）
         tools: [{ googleSearch: {} }],
-        generationConfig: { temperature: 0.3 },
       }),
       signal: AbortSignal.timeout(this.timeoutMs),
     });
