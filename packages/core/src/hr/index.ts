@@ -15,7 +15,7 @@ export {
 } from './procedures.js';
 export { PostgresAttendanceStore, type AttendanceStore } from './attendance-store.js';
 export {
-  AttendanceService, termsOn, groupShifts, type AttState, type DayFix, type AttSummaryRow, type AttendanceServiceDeps,
+  AttendanceService, termsOn, byShifts, groupShifts, type AttState, type DayFix, type AttSummaryRow, type AttendanceServiceDeps,
 } from './attendance-service.js';
 export {
   summarizeDay, weeklyOvertime, periodTotals, variableTotals, variableCapMinutes, periodOf, periodContaining, agreementAlerts, dayType, scheduledMinutes, jstDate, jstTime, shiftDate,
@@ -57,3 +57,11 @@ export { mapTrialHeaders, trialTotals, trialNumber, compareTrialRow, TRIAL_ITEMS
 export { calcSlip, adjustmentLines, round50, itemRule, carryMonth, reachMonth, insuredIn, shiftMonth as shiftPayMonth, type SlipInput, type SlipResult as PaySlipResult } from './payroll.js';
 export { LAW_BOOK, Law, type LawHit } from './law/index.js';
 export type { LawBook, LawMeta, LawReview, GradeRow, GradeTable, ChangeLimit, InsuranceRules, WorkersCompRates, WorkersCompRow, HealthRates, RateTable, EmploymentRates, WithholdingMonthly, WithholdingRow, WithholdingAbove, MinimumWage } from './law/types.js';
+export {
+  annualPeriodOf, annualTotals, annualCapMinutes, checkAnnual, inBusy, flexMonthsOf, flexTotals, flexMonthCount, coreTimeIssue,
+  type AnnualIssue, type FlexMonth,
+} from './work-systems.js';
+export {
+  TerminalService, PostgresTerminalStore, hashPin, pinMatches, TERMINAL_QR_MS, PIN_MAX_FAILURES, PIN_LOCK_MS, TERMINAL_MAX, PUNCH_LABELS,
+  type HrTerminal, type TerminalStore, type TerminalServiceDeps,
+} from './terminal.js';

@@ -57,6 +57,7 @@ export function MyAttendance() {
       {error && <p className="error">{error}</p>}
 
       <MyShifts />
+      {v.pinAllowed && <PunchPin />}
       <MyPayslips />
       <MyYearEnd />
 
@@ -98,6 +99,15 @@ export function MyAttendance() {
         <span>深夜 {hm(t.nightMinutes) || '0:00'}</span><span>休日 {hm(t.holidayMinutes) || '0:00'}</span>
         <span>出勤 {t.workDays} 日</span><span>有給 {t.leaveDays} 日</span>
       </div>
+      {/* フレックスタイム制の清算期間のいまの時間と、あと何時間か（仕様書 第30.6.3節） */}
+      {t.flex && (
+        <div className="myhr-totals small">
+          <span>清算期間 {md(t.flex.periodStart)}〜{md(t.flex.periodEnd)}</span>
+          <span>働いた {hm(t.flex.workedMinutes) || '0:00'} / {hm(t.flex.requiredMinutes)}</span>
+          <span>{t.flex.workedMinutes >= t.flex.requiredMinutes ? '足りています' : `あと ${hm(t.flex.requiredMinutes - t.flex.workedMinutes)}`}</span>
+          {t.flex.carriedMinutes > 0 && <span>前の期間から {hm(t.flex.carriedMinutes)}</span>}
+        </div>
+      )}
       <table className="table myhr-days">
         <thead><tr><th>日付</th><th>出勤</th><th>退勤</th><th>休憩</th><th>労働</th><th>法定外</th><th /></tr></thead>
         <tbody>
@@ -288,6 +298,23 @@ function MyYearEnd() {
           )}
         </fieldset>
       )}
+    </div>
+  );
+}
+
+/**
+ * 共有の端末で、名前と番号で打刻するときの 4 桁の番号（仕様書 第30.6.3節）。会社が許したときだけ出す。
+ */
+function PunchPin() {
+  const [pin, setPin] = useState('');
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  return (
+    <div className="card row wrap small">
+      <span className="grow">打刻の端末の番号</span>
+      <input type="password" inputMode="numeric" maxLength={4} autoComplete="new-password" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))} aria-label="4 桁の番号" />
+      <button className="btn small" disabled={pin.length !== 4} onClick={() => void api.myHr.setPin(pin)
+        .then(() => { setPin(''); setMsg({ ok: true, text: '番号を決めました' }); }).catch((e) => setMsg({ ok: false, text: describeError(e, '決められませんでした') }))}>決める</button>
+      {msg && <span className={msg.ok ? 'ok-msg' : 'error'}>{msg.text}</span>}
     </div>
   );
 }

@@ -144,6 +144,9 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/cards/import` | 表（CSV・Excel。multipart の `file` と `scope`。5 MB・1,000 行まで）から名刺を取り込む。列の見出しはよくある言い方と推論で読み、1 行を 1 枚の名刺（画像なし）として登録し、同じ人はまとめる。登録した数・まとめた数・取り込めなかった行・列の読み方を返す（仕様書 第27.4節） |
 | `GET /v1/cards/export` | 管理者: 会社で共有の名刺を CSV（`format=csv`。BOM 付きの UTF-8）か Excel（`format=xlsx`）で書き出す。自分だけの名刺は入れない。監査ログ `contact.export`（第27.10節） |
 | `POST /v1/cards` | 名刺のファイルを受け付ける（multipart。`file` を 50 まで・`backOf`（裏を組にする表の番号の JSON）・`scope`）。読み取りを待たずに 202。受け付けなかったものは `rejected`（第27.4節） |
+| `GET /v1/cards/google` ／ `PUT /v1/cards/google` | 本人の Google の連絡先へのつなぎの状態（接続・`contacts` の許可・自動）／ 自分が取り込んだ名刺を自動で入れるか（`auto`。仕様書 第27.15節） |
+| `POST /v1/cards/google/push` | 名刺を本人の Google の連絡先（「M2Office の名刺」のラベル）に入れる（`contactIds`。200 件まで。入れたものは新しくする）。許可が無ければ 409 と `needsConsent` |
+| `DELETE /v1/cards/:id/google` | 本人の Google の連絡先から外す（M2Office の名刺は消さない） |
 | `GET /v1/cards/:id` | 名刺の詳細（連絡先・名刺ごとの受け取った人と日・向き・四隅（`frontCorners`・`backCorners`。画面が切り出しに使う。第27.5節）・名刺の履歴・範囲を変えられるか）。一覧の各行にも `frontCorners` を返す。1 枚の写真に何枚も写っていれば、名刺ごとに同じ画像を指す（写真は、指す名刺が残っている間は消さない） |
 | `PATCH /v1/cards/:id` | 項目とメモをその場で直す（見られる人の全員。直した値は名刺の「人が直した項目」にも残す） |
 | `PUT /v1/cards/:id/scope` | 範囲を変える（`company`・`personal`。自分だけにできるのは本人で、ほかの人の名刺がまとまっていないとき） |
@@ -237,10 +240,15 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/hr/social` | 社会保険（Phase 2 段 3。第30.12.1節）: 定時決定（`year`）・随時改定の候補・前後 60 日の資格の取得と喪失と 70 歳到達・加入の判定・特定適用事業所の見込み |
 | `POST /v1/hr/social/regular/report` ／ `POST .../social/change/report` ／ `POST .../social/events/:kind/report` | 算定基礎届（`year`）／ 月額変更届（`ids`）／ 資格取得届・資格喪失届・70 歳到達届（`kind`: acquire・lose・age70、`ids`）の表計算の下書き（`format`: xlsx・csv）。作った額を適用の月からの標準報酬月額として入れ、人数を `X-Applied` に返す。載せる人がいなければ 400 |
 | `GET /v1/hr/shifts` ／ `PUT .../shifts/settings` ／ `POST .../shifts/generate` ／ `PUT .../shifts/cell` ／ `POST .../shifts/publish` | シフト（Phase 2 段 5。第30.6.2節）: 期間のシフト・休みの希望・点検（`month`: 締め日の月。省略すれば次の期間）／ 勤務の型・要る人数・変形労働時間制（`patterns`・`needs`・`variable`・`special44`）／ 案を作る（`month`。公開した期間は 400）／ 1 人 1 日を直す（`month`・`employeeId`・`date`・`patternId`。null は休み）／ 公開する（止まっている点検があれば 400。シフトの人に知らせる） |
+| `GET /v1/hr/work-systems` ／ `PUT /v1/hr/work-systems` | 人事区画: 1 年単位の変形労働時間制・フレックスタイム制・名前と番号での打刻の会社の決まりと、登録した端末 ／ 決まりを直す（仕様書 第30.6.3節） |
+| `POST /v1/hr/terminals` ／ `DELETE /v1/hr/terminals/:id` | 人事区画: 端末に出た番号（`code`）と名前で共有の端末を登録する ／ 外す（鍵はその場で効かなくなる） |
+| `POST /v1/hr-terminal/pairings` ／ `POST /v1/hr-terminal/pairings/poll` | 共有の端末（ログインなし）: 登録の番号を作る ／ 登録されたか（登録されていれば端末の鍵を 1 度だけ返す） |
+| `GET /v1/hr-terminal/state` ／ `GET /v1/hr-terminal/qr.svg` ／ `POST /v1/hr-terminal/pin-punch` | 共有の端末（端末の鍵で名乗る）: 端末の名前・QR の URL と期限・名前と番号で打てる人 ／ 30 秒ごとに変わる打刻の QR ／ 名前と番号で打刻する（5 回間違えたら 15 分止める） |
 | `GET /v1/hr/labor-insurance` ／ `PUT ...` ／ `POST .../report` | 労働保険の年度更新（Phase 2 段 4。第30.13.1節）: 前年度の月ごとの集計と計算（`year`: 申告する年。足りない月があれば `result` は `null` で `error` に理由）／ 足りない月の合計・申告済の概算保険料・見込みの賃金を残す（`year`・`supplements`・`declaredEstimate`・`estimateWages`）／ 算定基礎賃金集計表と申告書に書く額の下書き（`format`。結果を残す） |
 | `GET /v1/hr/users` | 台帳に結び付けられる利用者（名前とメールアドレス） |
 | `GET /v1/me/hr` | 本人の「給与・勤怠」（第30.25節）: 打刻の状態・期間の勤怠・有給の残りと取得義務。台帳に結び付いていなければ 404（同じメールアドレスなら自動で結び付く） |
-| `POST /v1/me/hr/punch` ／ `PUT /v1/me/hr/days/:date` | 本人が打刻する（`kind`: in・out・break_start・break_end。できない打刻は 409）／ 1 日を直す（人事区画の人に知らせる。締めた期間は 400） |
+| `POST /v1/me/hr/punch` ／ `PUT /v1/me/hr/days/:date` | 本人が打刻する（`kind`: in・out・break_start・break_end。できない打刻は 409。共有の端末の QR を読んだときは `terminal` に QR の印。期限切れは 410）／ 1 日を直す（人事区画の人に知らせる。締めた期間は 400） |
+| `GET /v1/me/hr/terminal` ／ `PUT /v1/me/hr/pin` | 本人: 読んだ QR（`t`）の端末の名前と打刻の状態 ／ 共有の端末で名前と番号で打つときの 4 桁の番号を決める（仕様書 第30.6.3節） |
 | `POST /v1/me/hr/leave` ／ `DELETE /v1/me/hr/leave/:id` | 本人が有給を取る（`date`・`days`: 1 か 0.5。承認の段は挟まず、人事区画の人に知らせる）／ 取り消す |
 | `GET /v1/me/hr/payslips` ／ `GET .../payslips/:id` ／ `GET .../payslips/:id/pdf` | 本人の確定した給与明細（**同意が無ければ出さない**）／ 1 つと前の回からの差の説明 ／ PDF |
 | `PUT /v1/me/hr/payslip-consent` | 明細を画面で受け取る同意（`consent`: true・false。いつでも取り消せる） |
@@ -369,7 +377,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/admin/connections/google/impact` | 管理者: OAuth クライアントを消す（クライアント ID を替える）と影響する人数と業務の件数 |
 | `DELETE /v1/admin/connections/google` | 管理者: OAuth クライアントの登録を消す。接続している全員の接続を消し、Google を使う動いている途中の業務を止める（仕様書 第6.5.2.1節）。クライアント ID を替える `PUT` も同じ |
 | `GET /v1/me/google` | 本人: Google 連携の状況（業務の言葉の許可の一覧。トークンは返さない） |
-| `POST /v1/me/google/connect` | 本人: 接続を始める（Google の同意の画面の URL を返す。state と PKCE つき） |
+| `POST /v1/me/google/connect` | 本人: 接続を始める（Google の同意の画面の URL を返す。state と PKCE つき）。`extra` に使う人だけに求める権限（`contacts`）、`back` に戻る画面（`/cards`・`/cards/<ID>`）を渡せる（仕様書 第27.15節） |
 | `POST /v1/me/google/check` | 本人: 許可の状況を Google に問い合わせ直す。その許可で受け取れれば、プロフィール写真も取り込み直す |
 | `GET /v1/me/google/impact` | 本人: 取り消すと止まる業務と、飛ばす定時実行の数 |
 | `DELETE /v1/me/google` | 本人: 接続を取り消す（Google 側の許可も取り消し、トークンを消す）。Google を使う動いている途中の業務を止め、終わった実行の中身を消す（仕様書 第6.5.2.1節・第14.3.2節） |

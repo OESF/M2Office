@@ -7,7 +7,7 @@
  */
 
 import { Hono } from 'hono';
-import { noteText, suggestHelpNote, type HelpContext, type HelpScope } from '@m2office/core';
+import { noteText, queryEmbedder, suggestHelpNote, type HelpContext, type HelpScope } from '@m2office/core';
 import { CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, CONTRACTS_EXTENSION_ID, RESERVATIONS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, MEMBERS_EXTENSION_ID, PRINT_DESIGNS_EXTENSION_ID } from '@m2office/shared';
 import type { AppDeps } from '../context.js';
 import { agentGroup } from '../agent-group.js';
@@ -138,8 +138,11 @@ export function helpRoute(deps: AppDeps) {
     // 業務の説明を含む、ワークスペースで読める記事（管理者向けの記事には社内の人が読まないので書かない）
     const articles = deps.help.list(ctx, 'workspace').filter((a) => a.category !== 'updates');
     const candidates = articles.map((a) => ({ id: a.id, title: a.title, summary: a.body.replace(/^#.*$/gm, '').trim().slice(0, 120) }));
-    const found = await deps.repo.searchKnowledge(tenant.id, question, null, [], { categories: ['rule'] }).catch(() => ({ hits: [] as { citation: string; body: string }[] }));
     const llm = await deps.ai.llmFor(tenant.id);
+    // 意味でも探す（第11.7.6節）。埋め込めなければ言葉だけで探す
+    const embed = queryEmbedder(llm, deps.log);
+    const found = await deps.repo.searchKnowledge(tenant.id, question, null, [], { categories: ['rule'], ...(embed ? { embed } : {}) })
+      .catch(() => ({ hits: [] as { citation: string; body: string }[] }));
     const s = await suggestHelpNote(llm, question, candidates, found.hits.slice(0, 2).map((h) => ({ citation: h.citation, body: h.body })));
     if (!s) return c.json({ error: '補足の案を出せませんでした（AI が使えないか、案を読めませんでした）。記事を選んで、ご自身で書いてください' }, 422);
     const article = s.articleId ? articles.find((a) => a.id === s.articleId) ?? null : null;

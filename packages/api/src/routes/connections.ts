@@ -15,7 +15,7 @@ import {
   buildGoogleAuthUrl, checkGeminiLive, checkGeminiText, checkGoogleClient, createPkce, exchangeGoogleCode, exchangeGoogleLoginCode,
   fetchGooglePhoto, googleGrantedScopes, googleScopeLabel, googleUserInfo, isGoogleClientError, refreshGoogleAccessToken,
   revokeGoogleToken, toolGoogleScopes,
-  GoogleOAuthError, MAILBOX_SCOPES,
+  GoogleOAuthError, MAILBOX_SCOPES, GOOGLE_CONTACTS_SCOPE,
   type GeminiModels, type GeminiSettingsMeta, type GoogleClientVerdict,
 } from '@m2office/core';
 import { agentDisplayName, WEB_REVIEW_SCOPES } from '@m2office/shared';
@@ -32,6 +32,12 @@ async function audit(deps: AppDeps, tenantId: string, userId: string, action: st
     detail, occurredAt: new Date().toISOString(),
   });
 }
+
+/**
+ * 使う人だけに、使うときに求める Google の権限（短い名前）。業務の権限の一覧（{@link requiredGoogleScopes}）には入れない。
+ * いまは Google の連絡先（`contacts`。仕様書 第27.15節、ADR-0084）だけ。
+ */
+export const ON_DEMAND_GOOGLE_SCOPES: readonly string[] = [GOOGLE_CONTACTS_SCOPE];
 
 /**
  * その会社で使える業務が求める Google の権限（短い名前）。無効にした業務は除く（仕様書 第14.3.2節 規定 2）。
@@ -381,7 +387,11 @@ export function myGoogleRoute(deps: AppDeps) {
       googleEmail: conn?.googleEmail ?? null,
       connectedAt: conn?.connectedAt ?? null,
       checkedAt: conn?.checkedAt ?? null,
-      scopes: required.map((r) => ({ scope: r.scope, label: googleScopeLabel(r.scope), granted: !!conn?.scopes.includes(r.scope) })),
+      scopes: [
+        ...required.map((r) => ({ scope: r.scope, label: googleScopeLabel(r.scope), granted: !!conn?.scopes.includes(r.scope) })),
+        // 使う人だけに求めた権限は、許可したときだけ並べる（第27.15節）
+        ...ON_DEMAND_GOOGLE_SCOPES.filter((s) => conn?.scopes.includes(s)).map((s) => ({ scope: s, label: googleScopeLabel(s), granted: true })),
+      ],
       needsReconnect: !!conn && required.some((r) => !conn.scopes.includes(r.scope)),
     });
   });
@@ -399,18 +409,28 @@ export function myGoogleRoute(deps: AppDeps) {
     });
   });
 
-  /** 接続を始める。Google の同意の画面の URL を返す（画面はそこへ移る）。 */
+  /**
+   * 接続を始める。Google の同意の画面の URL を返す（画面はそこへ移る）。
+   *
+   * @remarks
+   * `extra` に、使う人だけに使うときに求める権限（{@link ON_DEMAND_GOOGLE_SCOPES}。Google の連絡先の `contacts`。仕様書 第27.15節）を足せる。
+   * すでに許可した権限は `include_granted_scopes` で残るため、足した権限だけを求め直すことになる（ほかの人の再同意は要らない）。
+   * `back` は戻る画面（名刺の画面だけ）
+   */
   app.post('/connect', async (c) => {
     const { tenant, user } = c.get('ctx');
+    const body = await c.req.json<{ extra?: unknown; back?: unknown }>().catch(() => ({} as { extra?: unknown; back?: unknown }));
+    const extra = (Array.isArray(body.extra) ? body.extra : []).filter((x): x is string => typeof x === 'string' && ON_DEMAND_GOOGLE_SCOPES.includes(x));
+    const back = typeof body.back === 'string' && /^\/cards(\/[A-Za-z0-9_-]+)?$/.test(body.back) ? body.back : '';
     const client = await googleClient(deps, tenant.id);
     if (!client) return c.json({ error: '会社の管理者が、まだ Google との接続を設定していません' }, 409);
     const required = await requiredGoogleScopes(deps, tenant.id);
     const { verifier, challenge } = createPkce();
     const state = deps.oauth.states.issue({
-      tenantId: tenant.id, userId: user.id, codeVerifier: verifier, returnTo: returnTo(c),
+      tenantId: tenant.id, userId: user.id, codeVerifier: verifier, returnTo: returnTo(c, back),
     });
     const url = buildGoogleAuthUrl({
-      clientId: client.clientId, redirectUri: deps.oauth.redirectUri, scopes: required.map((r) => r.scope),
+      clientId: client.clientId, redirectUri: deps.oauth.redirectUri, scopes: [...new Set([...required.map((r) => r.scope), ...extra])],
       state, codeChallenge: challenge, loginHint: user.email,
     });
     return c.json({ url });
@@ -607,7 +627,7 @@ export function oauthCallbackRoute(deps: AppDeps) {
 }
 
 /** 接続のあとに戻す画面。要求を送った画面のオリジン（テナントのサブドメイン）と、個人設定を開く印。 */
-export function returnTo(c: Context<AppEnv>): string {
+export function returnTo(c: Context<AppEnv>, path = ''): string {
   const origin = c.req.header('origin') ?? (() => {
     const ref = c.req.header('referer');
     try { return ref ? new URL(ref).origin : ''; } catch { return ''; }
@@ -615,5 +635,5 @@ export function returnTo(c: Context<AppEnv>): string {
   const baseDomain = (process.env['BASE_DOMAIN'] ?? 'lvh.me').replace(/\./g, '\\.');
   const ok = new RegExp(`^https?://([a-z0-9-]+\\.(${baseDomain}|localhost)|localhost)(:\\d+)?$`).test(origin);
   const tenantQuery = c.req.header('x-tenant') ? `?tenant=${encodeURIComponent(c.req.header('x-tenant')!)}` : '';
-  return ok ? `${origin}/${tenantQuery}` : `/${tenantQuery}`;
+  return ok ? `${origin}${path || '/'}${tenantQuery}` : `${path || '/'}${tenantQuery}`;
 }

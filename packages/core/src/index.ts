@@ -13,14 +13,14 @@ export {
 } from './log/logger.js';
 
 export * from './llm/provider.js';
-export { StubLlmProvider } from './llm/stub.js';
+export { StubLlmProvider, stubEmbedding, STUB_EMBEDDING_CONCEPTS } from './llm/stub.js';
 export { AI_NOT_CONFIGURED_MESSAGE, AiNotConfiguredError, UnconfiguredLlmProvider, UnconfiguredResearchProvider, aiAvailable } from './llm/unconfigured.js';
 export { LocalLlmProvider, localLlmFromEnv, type LocalLlmConfig } from './llm/local.js';
 export {
   deploymentFromEnv, effectiveAiPolicy, isLocalPolicy, externalAiAllowed, PolicyBlockedLlmProvider, PolicyBlockedResearchProvider,
   AiPolicyBlockedError, LOCAL_AI_NOT_CONFIGURED, type Deployment, type AiKind,
 } from './llm/policy.js';
-export { OpenAiCompatibleProvider, LlmRequestError } from './llm/gemini.js';
+export { OpenAiCompatibleProvider, LlmRequestError, DEFAULT_EMBEDDING_MODEL } from './llm/gemini.js';
 export type { GeminiModelMap } from './llm/gemini.js';
 
 export type {
@@ -64,7 +64,10 @@ export {
 export type {
   WorkspaceConnector, ConnectorPrincipal, DataSource, MailSummary, MailMessage,
   CalendarEvent, TaskItem, BusySlot, DriveFile, DirectoryPerson, MeetTranscript, FormResponses, ConnectorUnavailableKind,
+  ContactsConnector, PeoplePerson, PeopleField,
 } from './connectors/types.js';
+export { PEOPLE_FIELDS } from './connectors/types.js';
+export { fromGooglePerson } from './connectors/google/people.js';
 
 export * from './files/index.js';
 export { SecretBox, secretBoxFromEnv } from './secrets/box.js';
@@ -175,3 +178,4 @@ export {
   machineStatus, writeWorkerBeat, machineDir, backupConfigFromEnv, machineConfigFromEnv,
   type BackupConfig, type BackupRecord, type BackupStatus, type MachineConfig, type MachineStatus,
 } from './machine/index.js';
+export { scoreEval, CONTRACT_REVIEW_AVOID, CONTRACT_REVIEW_MUST, type EvalScore } from './evals/score.js';

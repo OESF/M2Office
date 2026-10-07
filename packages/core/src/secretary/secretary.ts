@@ -22,6 +22,7 @@ import { answerSchedule } from './schedules.js';
 import { cancelPlan, createPlan, planStatusText } from './plan.js';
 import { AI_NOT_CONFIGURED_MESSAGE, aiAvailable } from '../llm/unconfigured.js';
 import { expandQuery } from '../knowledge/expand.js';
+import { queryEmbedder } from '../knowledge/embed.js';
 import { jstDay } from '../memory/learn.js';
 import { bulkMailRequest, contactRequest } from './contacts.js';
 import { MAIL_TRIAGE_RULE, mailCheckRequest, mailCheckText, parseMailVerdicts } from './mail.js';
@@ -649,7 +650,8 @@ export class Secretary {
       const [compartments, synonyms] = await Promise.all([
         this.deps.repo.listUserCompartments(tenantId, userId), expandQuery(llm, message),
       ]);
-      const { hits } = await this.deps.repo.searchKnowledge(tenantId, message, compartments[0] ?? null, synonyms);
+      const embed = queryEmbedder(llm);
+      const { hits } = await this.deps.repo.searchKnowledge(tenantId, message, compartments[0] ?? null, synonyms, embed ? { embed } : {});
       if (hits.length === 0) return { text: '', evidence: [] };
       const top = hits.slice(0, KNOWLEDGE_HITS);
       return {
@@ -661,7 +663,10 @@ export class Secretary {
           ...top.map((h) => `【${KNOWLEDGE_CATEGORY_LABEL[h.category]}｜${h.citation}】\n${h.body}`),
         ].join('\n'),
         // 出典の印を付ける。画面は題名と抜き出しの 2 段で出し、答えで引用したものを先に並べる（仕様書 第6.2節）
-        evidence: top.map((h) => ({ label: h.citation, value: h.body.slice(0, 240), kind: 'source' as const })),
+        // 言葉が合わず意味だけで見つけた節は、出典の横に「言い換えで見つけました」と示す（第11.7.6.3節）。利用者が確かめる手がかりにする
+        evidence: top.map((h) => ({
+          label: h.matchedBy === 'meaning' ? `${h.citation}（言い換えで見つけました）` : h.citation, value: h.body.slice(0, 240), kind: 'source' as const,
+        })),
       };
     } catch (err) {
       // 探せなくても会話は続ける。ただし、根拠が無いことは指示で伝わる
@@ -947,7 +952,8 @@ export class Secretary {
     const hits = help.search(message, ctx, 3);
     // 区画の外として検索する。区画内の文書を使い方の答えに混ぜない。「社内の規程では」と示すため、社内規程だけを探す（第11.11.1節）
     const llm = this.deps.llmFor ? await this.deps.llmFor(tenantId) : this.deps.llm;
-    const found = await this.deps.repo.searchKnowledge(tenantId, message, null, await expandQuery(llm, message), { categories: ['rule'] });
+    const embed = queryEmbedder(llm);
+    const found = await this.deps.repo.searchKnowledge(tenantId, message, null, await expandQuery(llm, message), { categories: ['rule'], ...(embed ? { embed } : {}) });
     const rules = found.hits.slice(0, 2);
 
     const parts: string[] = [];

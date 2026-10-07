@@ -12,7 +12,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
-  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, JGrantsApi, MockJGrants, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, MEMBER_LINE_SEND, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger,
+  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, GoogleContactsService, KnowledgeEmbedder, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, JGrantsApi, MockJGrants, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, MEMBER_LINE_SEND, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger,
   NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator, aiUsageMeterFromEnv, enterAiUsage, withAiUsage, setEnqueueAiGuard, AutoMinutes, MINUTES_AGENT_ID, appPath, backupConfigFromEnv, machineDir, readBackupStatus, restoreTest, runBackup, takeBackupRequest, writeWorkerBeat
@@ -124,6 +124,10 @@ const signatures = new SignatureWatcher({
   repo, store: contactStore, connector, llmFor: (tenantId) => ai.llmFor(tenantId), access: cardsAccess(repo), logger: log,
   optOutFromReplies: (who, mails) => bulkMail.optOutFromReplies(who, mails),
 });
+// 知識の節の埋め込みを後から作る（意味での検索。仕様書 第11.7.6.1節）
+const knowledgeEmbedder = new KnowledgeEmbedder({ repo, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log });
+// 名刺を本人の Google の連絡先に入れる（仕様書 第27.15節、ADR-0084）。直された名刺を写し、自動で入れる名刺を入れる
+const googleContacts = new GoogleContactsService({ store: contactStore, connector, repo, logger: log });
 // 社内のお知らせ（仕様書 第10.15節）。朝のブリーフが本人宛てのものを読む
 const notices = new NoticeService({
   store: new PostgresNoticeStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
@@ -329,7 +333,7 @@ const engine = new RunEngine({
   repo, llm, registry, connector, files, resolveDefinition, isAvailable, logger: log, research, notices,
   // お知らせで出した休業の期間（予定の候補で休業日を避ける。第35.7節）
   closedOn: (tenantId, day) => announcementStore.closedOn(tenantId, day),
-  cards: { store: contactStore, service: cards, access: cardsAccess(repo), bulk: bulkMail },
+  cards: { store: contactStore, service: cards, access: cardsAccess(repo), bulk: bulkMail, google: googleContacts },
   inventory: { service: inventory, bookings: inventoryBookings, access: inventoryAccess(repo) },
   hr: { calendar: laborCalendar, access: hrAccess(repo) },
   columns: { service: columns, access: webColumnsAccess(repo), planner: columnPlanner, signage: columnSignage },
@@ -431,6 +435,12 @@ const AGENT_EVENT_KEEP_DAYS = 7;
 /** メールの署名を見る見回りの間隔（第27.6.1節。1 時間ごと）。 */
 const SIGNATURE_INTERVAL_MS = Number(process.env['SIGNATURE_INTERVAL_MS'] ?? 3_600_000);
 let lastSignatureCheck = 0;
+// 直された名刺を Google の連絡先に写す見回りの間隔（第27.15節）。既定は 10 分
+const GOOGLE_CONTACTS_INTERVAL_MS = Number(process.env['GOOGLE_CONTACTS_INTERVAL_MS'] ?? 600_000);
+let lastGoogleContactsSync = 0;
+// 知識の節の埋め込みを作る見回りの間隔（第11.7.6.1節）。既定は 30 秒（1 回に 32 節まで）
+const KNOWLEDGE_EMBED_INTERVAL_MS = Number(process.env['KNOWLEDGE_EMBED_INTERVAL_MS'] ?? 30_000);
+let lastKnowledgeEmbed = 0;
 /** 期限を過ぎた名刺（ごみ箱に 30 日・読み取れなかったもの 4 週）を消す見回りの間隔。 */
 const CARD_PURGE_INTERVAL_MS = Number(process.env['CARD_PURGE_INTERVAL_MS'] ?? 3_600_000);
 let lastCardPurge = 0;
@@ -709,6 +719,24 @@ while (running) {
       if (n > 0) log.info('期限を過ぎた名刺を消しました', { cards: n });
     } catch (err) {
       log.error('名刺の消去の見回りで例外が発生しました', { err });
+    }
+  }
+  if (Date.now() - lastKnowledgeEmbed >= KNOWLEDGE_EMBED_INTERVAL_MS) {
+    lastKnowledgeEmbed = Date.now();
+    try {
+      const r = await knowledgeEmbedder.tick();
+      if (r.embedded + r.failed > 0) log.info('知識の節を埋め込みました', r);
+    } catch (err) {
+      log.error('知識の埋め込みの見回りで例外が発生しました', { err });
+    }
+  }
+  if (Date.now() - lastGoogleContactsSync >= GOOGLE_CONTACTS_INTERVAL_MS) {
+    lastGoogleContactsSync = Date.now();
+    try {
+      const r = await googleContacts.tick(cardsAccess(repo));
+      if (r.updated + r.added > 0) log.info('名刺を Google の連絡先に写しました', r);
+    } catch (err) {
+      log.error('Google の連絡先の見回りで例外が発生しました', { err });
     }
   }
   if (Date.now() - lastSignatureCheck >= SIGNATURE_INTERVAL_MS) {

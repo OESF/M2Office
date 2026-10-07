@@ -18,6 +18,8 @@ const SENDS = /送って|送信|送る|転送|返信|招待|共有して|予定�
 const NOUN_ASK = /(電話番号|電話|携帯|メールアドレス|メアド|連絡先|住所|FAX|ファックス|役職|部署|情報)\s*([（(][^）)]*[）)])?\s*[。．]?$/;
 /** 直す・書き足す言い回し。 */
 const FIXES = /直して|修正して|訂正して|に変えて|に変更して|メモして|メモを(残|書|足)|書き足して|追記して/;
+/** 本人の Google の連絡先に入れる・外す言い回し（「山本さんを連絡先に入れて」。第27.15節）。 */
+const GOOGLE_CONTACTS = /(連絡先|電話帳|アドレス帳)(に|へ)(入れて|登録して|追加して|入れといて|入れておいて)|(連絡先|電話帳|アドレス帳)から(外して|消して|削除して)/;
 /** 名刺を受け取った日を告げる言い回し（「9 月 25 日の展示会でもらった」）。 */
 const RECEIVED = /(もらった|受け取った|いただいた|交換した)/;
 /** 日付を表す言葉。 */
@@ -54,6 +56,8 @@ export function contactRequest(message: string): 'ask' | 'fix' | null {
   const m = message.trim();
   const aboutCard = /名刺/.test(m);
   if (FIXES.test(m) && (aboutCard || (PERSON.test(m) && (CONTACT_ITEM.test(m) || /メモ/.test(m))))) return 'fix';
+  // 「ミライ工業の山本さんを連絡先に入れて」は、名刺を本人の Google の連絡先に入れる依頼（名刺の修正が受ける）
+  if (GOOGLE_CONTACTS.test(m) && (aboutCard || PERSON.test(m))) return 'fix';
   // 「佐々木さんの名刺は 9 月 25 日の展示会でもらった」は、受け取った日を直す依頼（第27.9節）
   if (aboutCard && PERSON.test(m) && RECEIVED.test(m) && A_DATE.test(m) && !ASKS_WHO.test(m)) return 'fix';
   if (EXCHANGED.test(m)) return 'ask';

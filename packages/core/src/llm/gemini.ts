@@ -5,7 +5,7 @@
  */
 
 import type { Logger } from '../log/logger.js';
-import type { LlmExtractRequest, LlmImageGenerateRequest, LlmProvider, LlmRequest, LlmResponse, LlmVideoRequest, ModelTier } from './provider.js';
+import { EMBEDDING_DIMENSIONS, type LlmEmbedRequest, type LlmEmbedResponse, type LlmExtractRequest, type LlmImageGenerateRequest, type LlmProvider, type LlmRequest, type LlmResponse, type LlmVideoRequest, type ModelTier } from './provider.js';
 
 /** 役割ごとのモデル名。設定で差し替えられる（仕様書 第20.2節）。 */
 export interface GeminiModelMap {
@@ -15,6 +15,9 @@ export interface GeminiModelMap {
   /** 失敗したときに最初に試す退避先（仕様書 第20.2.5節）。空なら、ほかの役割のモデルだけに退避する。 */
   fallback?: string;
 }
+
+/** 埋め込みの既定のモデル（仕様書 第11.7.6.1節、Q-81）。 */
+export const DEFAULT_EMBEDDING_MODEL = 'gemini-embedding-2';
 
 /** 1 回の依頼で呼ぶ回数の上限（最初を含む。仕様書 第20.2.5節）。 */
 export const LLM_ATTEMPTS_MAX = 3;
@@ -82,6 +85,8 @@ export class OpenAiCompatibleProvider implements LlmProvider {
     private readonly log?: Pick<Logger, 'warn'>,
     /** 動画の作業を見に行く間隔と、待つ上限（ミリ秒。自動テストで短くする）。 */
     private readonly video: { pollMs: number; timeoutMs: number } = { pollMs: 10_000, timeoutMs: 8 * 60_000 },
+    /** 埋め込みのモデル（仕様書 第11.7.6.1節）。 */
+    private readonly embeddingModel: string = DEFAULT_EMBEDDING_MODEL,
   ) {
     this.name = name;
   }
@@ -211,6 +216,37 @@ export class OpenAiCompatibleProvider implements LlmProvider {
     };
     const text = (json.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('');
     return { text, tokensUsed: json.usageMetadata?.totalTokenCount ?? 0 };
+  }
+
+  /**
+   * 文を埋め込む（知識の意味の検索。仕様書 第11.7.6.1節、Q-81）。
+   *
+   * @remarks
+   * Gemini の `batchEmbedContents` を使い、{@link EMBEDDING_DIMENSIONS} 次元にする。
+   * 節は「title: 見出しの経路 | text: 本文」、質問は「task: search result | query: 質問」と書く（Gemini が検索に勧める書き方）。
+   * 応答にトークン数が無いため、文字数を入力のトークン数として多めに数える。別のモデルへは退避しない（違うモデルの埋め込みは比べられない）
+   */
+  async embed(req: LlmEmbedRequest): Promise<LlmEmbedResponse> {
+    const model = this.embeddingModel;
+    const base = this.baseUrl.replace(/\/openai\/?$/, '');
+    const texts = req.items.map((x) => (req.kind === 'query'
+      ? `task: search result | query: ${x.text}`
+      : `title: ${x.title?.trim() || 'none'} | text: ${x.text}`));
+    const res = await fetch(`${base}/models/${encodeURIComponent(model)}:batchEmbedContents`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-goog-api-key': this.apiKey },
+      body: JSON.stringify({
+        requests: texts.map((text) => ({ model: `models/${model}`, content: { parts: [{ text }] }, outputDimensionality: EMBEDDING_DIMENSIONS })),
+      }),
+      signal: AbortSignal.timeout(60_000),
+    }).catch((err) => { throw new LlmRequestError('埋め込みに失敗しました（届きませんでした）', err instanceof Error ? err.message : String(err)); });
+    if (!res.ok) throw new LlmRequestError(`埋め込みに失敗しました (${res.status})`, await res.text().catch(() => ''));
+    const json = (await res.json()) as { embeddings?: { values?: number[] }[] };
+    const vectors = (json.embeddings ?? []).map((e) => e.values ?? []);
+    if (vectors.length !== texts.length || vectors.some((v) => v.length !== EMBEDDING_DIMENSIONS)) {
+      throw new LlmRequestError('埋め込みの形が違います', `${vectors.length} 件`);
+    }
+    return { vectors, model: `${this.name}:${model}`, inputTokens: texts.reduce((n, t) => n + t.length, 0) };
   }
 
   /**

@@ -2153,3 +2153,14 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .card-back-text p { white-space: pre-wrap; }
 .card-orphan { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 4px; }
 .card-add-back { cursor: pointer; }
+
+/* 共有の端末の打刻の画面と、QR を読んだあとの打刻（仕様書 第30.6.3節） */
+.hr-terminal { min-height: 100vh; box-sizing: border-box; padding: 16px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3vmin; background: var(--bg); color: var(--ink); }
+.hr-terminal-clock { font-size: 10vmin; font-weight: 700; font-variant-numeric: tabular-nums; }
+.hr-terminal-qr { width: min(50vmin, 360px); height: min(50vmin, 360px); background: #fff; border-radius: 12px; padding: 10px; }
+.hr-terminal-code { font-size: 12vmin; font-weight: 700; letter-spacing: .12em; font-variant-numeric: tabular-nums; }
+.hr-terminal-pin { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.hr-terminal-pin select, .hr-terminal-pin input { font-size: 20px; padding: 8px 12px; }
+.m-punch { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; }
+.m-punch-buttons { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+.m-punch-buttons .btn { font-size: 20px; padding: 16px 28px; }

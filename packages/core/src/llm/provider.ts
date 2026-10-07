@@ -88,6 +88,29 @@ export interface LlmExtractRequest {
   tier?: ModelTier;
 }
 
+/** 埋め込みの次元（仕様書 第11.7.6.1節、Q-81）。保存の列（`vector(768)`）と同じにする。 */
+export const EMBEDDING_DIMENSIONS = 768;
+
+/** 埋め込みの依頼（{@link LlmProvider.embed}。仕様書 第11.7.6.1節）。 */
+export interface LlmEmbedRequest {
+  /**
+   * 埋め込む文。`document` は知識の節（`title` に見出しの経路）、`query` は質問。
+   * 節と質問で書き方を変える（非対称の検索）。書き方は提供者が決める
+   */
+  items: { title?: string; text: string }[];
+  kind: 'document' | 'query';
+}
+
+/** 埋め込みの結果。 */
+export interface LlmEmbedResponse {
+  /** 依頼の順の、{@link EMBEDDING_DIMENSIONS} 次元の並び。 */
+  vectors: number[][];
+  /** 作ったモデル（`gemini:gemini-embedding-2` のように提供者を前に付ける。違うモデルの埋め込みどうしを比べないため）。 */
+  model: string;
+  /** 入力のトークン数（分からなければ文字数で多めに見積もる）。費用に数える。 */
+  inputTokens: number;
+}
+
 export interface LlmProvider {
   readonly name: string;
   complete(req: LlmRequest): Promise<LlmResponse>;
@@ -119,6 +142,12 @@ export interface LlmProvider {
    * 安全の判定で止められたなど、動画が返らなければ `null`。延長できなければ最初の動画だけを返す（`extended: false`）
    */
   generateVideo?(req: LlmVideoRequest): Promise<{ bytes: Uint8Array; mimeType: 'video/mp4'; extended: boolean } | null>;
+  /**
+   * 文を埋め込む（知識の意味の検索。仕様書 第11.7.6.1節）。
+   *
+   * @remarks 持たない提供者では未定義にし、呼び出し側は言葉の検索（段階 2）だけで答える
+   */
+  embed?(req: LlmEmbedRequest): Promise<LlmEmbedResponse>;
 }
 
 /** 動画を作る依頼（{@link LlmProvider.generateVideo}）。 */

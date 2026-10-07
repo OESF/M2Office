@@ -9,7 +9,7 @@
 
 import { Hono, type Context } from 'hono';
 import {
-  AI_NOT_CONFIGURED_MESSAGE, CARD_BATCH_MAX, CARD_BULK_MAIL, CARD_TABLE_MAX_ROWS, aiAvailable, canManage, draftThanksMail, enqueueJob, readSheet, renderSheet, toVCard,
+  AI_NOT_CONFIGURED_MESSAGE, CARD_BATCH_MAX, CARD_BULK_MAIL, CARD_TABLE_MAX_ROWS, ConnectorUnavailableError, GOOGLE_PUSH_MAX, aiAvailable, canManage, draftThanksMail, enqueueJob, readSheet, renderSheet, toVCard,
   type CardUpload, type CardViewer,
 } from '@m2office/core';
 import type { CardFields, ContactScope } from '@m2office/shared';
@@ -48,6 +48,35 @@ export function cardsRoute(deps: AppDeps) {
     if (!access) return c.json({ error: '名刺管理は使えません（会社で切っているか、利用範囲の外です）' }, 403);
     c.set('cardsDefaultScope', access.defaultScope);
     await next();
+  });
+
+  /** 本人の Google の連絡先へのつなぎの状態（第27.15節）。 */
+  app.get('/google', async (c) => c.json(await deps.cards.google.status(who(c))));
+
+  /** 自分が取り込んだ名刺を自動で Google の連絡先に入れるか（個人設定。既定は切り）。 */
+  app.put('/google', async (c) => {
+    const body = await c.req.json<{ auto?: unknown }>().catch(() => ({} as { auto?: unknown }));
+    if (typeof body.auto !== 'boolean') return c.json({ error: 'auto を指定してください' }, 400);
+    await deps.cards.google.setAuto(who(c), body.auto);
+    return c.json({ ok: true });
+  });
+
+  /**
+   * 名刺を本人の Google の連絡先に入れる（第27.15節）。許可が無ければ 409 と `needsConsent`（画面は同意を求める）。
+   */
+  app.post('/google/push', async (c) => {
+    const body = await c.req.json<{ contactIds?: unknown }>().catch(() => ({} as { contactIds?: unknown }));
+    const ids = (Array.isArray(body.contactIds) ? body.contactIds : []).filter((x): x is string => typeof x === 'string' && !!x);
+    if (ids.length === 0) return c.json({ error: '入れる名刺を選んでください' }, 400);
+    if (ids.length > GOOGLE_PUSH_MAX) return c.json({ error: `1 回に入れられるのは ${GOOGLE_PUSH_MAX} 件までです` }, 400);
+    try {
+      return c.json(await deps.cards.google.push(who(c), ids));
+    } catch (err) {
+      if (err instanceof ConnectorUnavailableError) {
+        return c.json({ error: err.message, needsConsent: err.kind === 'insufficient-scope', needsConnect: err.kind === 'not-connected' || err.kind === 'revoked' }, 409);
+      }
+      throw err;
+    }
   });
 
   /** 一覧と検索（第27.8節）。本人の読み取り中・読み取れなかった名刺と、進み具合も返す。 */
@@ -288,6 +317,8 @@ export function cardsRoute(deps: AppDeps) {
       // 自分がこの人に送ったまとめてのメール（第27.9.1節）
       bulkMails: await deps.cards.bulk.store.sentForContact(v, d.contact.id),
       canManage: canManage(d.contact, user),
+      // 本人の Google の連絡先に入れたか（第27.15節）。ほかの人が入れたかは出さない
+      google: await deps.cards.google.links(v, [d.contact.id]).then(([l]) => (l ? { pushedAt: l.pushedAt, gone: !!l.goneAt } : null)),
     });
   });
 
@@ -328,6 +359,17 @@ export function cardsRoute(deps: AppDeps) {
   app.post('/:id/changes/:changeId/revert', async (c) => {
     const err = await service.revertChange(who(c), c.req.param('id'), c.req.param('changeId'));
     return err ? c.json({ error: err }, 404) : c.json({ ok: true });
+  });
+
+  /** 本人の Google の連絡先から外す（M2Office の名刺は消さない。第27.15節）。 */
+  app.delete('/:id/google', async (c) => {
+    try {
+      const ok = await deps.cards.google.remove(who(c), c.req.param('id'));
+      return ok ? c.json({ ok: true }) : c.json({ error: 'Google の連絡先に入れていません' }, 404);
+    } catch (err) {
+      if (err instanceof ConnectorUnavailableError) return c.json({ error: err.message }, 409);
+      throw err;
+    }
   });
 
   /** ごみ箱へ移す（30 日で本当に消す）。 */

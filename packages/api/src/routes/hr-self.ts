@@ -44,16 +44,41 @@ export function hrSelfRoute(deps: AppDeps) {
       state, period, days, totals, today: jstDate(new Date()),
       leave: { remaining: leave.remaining, grants: leave.grants, obligation: leave.obligation, takes: leave.takes.filter((t) => t.status === 'taken').slice(-30) },
       halfDay: settings.leave.halfDay, closed: !!closed,
+      // 共有の端末で、名前と番号で打刻できる会社か（第30.6.3節）
+      pinAllowed: settings.terminal.pinAllowed,
     });
   });
 
   /** 打刻する（出勤・休憩・休憩終わり・退勤）。 */
   app.post('/punch', async (c) => {
     const { tenant, user } = c.get('ctx');
-    const b = await c.req.json<{ kind?: string; source?: string }>().catch(() => ({} as { kind?: string; source?: string }));
+    const b = await c.req.json<{ kind?: string; source?: string; terminal?: unknown }>().catch(() => ({} as { kind?: string; source?: string; terminal?: unknown }));
     if (!KINDS.includes(b.kind as AttPunchKind)) return c.json({ error: '打刻の種類が違います' }, 400);
+    // 共有の端末の QR を読んで打つとき（第30.6.3節）。QR は 30 秒ごとに変わる
+    if (b.terminal !== undefined) {
+      const terminal = await deps.hr.terminals.verifyToken(tenant.id, b.terminal);
+      if (!terminal) return c.json({ error: 'QR の期限が切れました。端末の QR を読み直してください' }, 410);
+      const r = await att.punch(tenant.id, user.id, c.get('employee'), b.kind as AttPunchKind, 'terminal', terminal.id);
+      return 'error' in r ? c.json(r, 409) : c.json({ ...r, terminal: { name: terminal.name } }, 201);
+    }
     const r = await att.punch(tenant.id, user.id, c.get('employee'), b.kind as AttPunchKind, b.source === 'mobile' ? 'mobile' : 'screen');
     return 'error' in r ? c.json(r, 409) : c.json(r, 201);
+  });
+
+  /** 共有の端末の QR を読んだとき、端末の名前と今の打刻の状態（第30.6.3節）。 */
+  app.get('/terminal', async (c) => {
+    const { tenant } = c.get('ctx');
+    const terminal = await deps.hr.terminals.verifyToken(tenant.id, c.req.query('t'));
+    if (!terminal) return c.json({ error: 'QR の期限が切れました。端末の QR を読み直してください' }, 410);
+    return c.json({ terminal: { name: terminal.name }, state: await att.state(tenant.id, c.get('employee').id) });
+  });
+
+  /** 共有の端末で、名前と番号で打刻するときの番号を決める（4 桁。会社が許したときだけ使える）。 */
+  app.put('/pin', async (c) => {
+    const { tenant } = c.get('ctx');
+    const b = await c.req.json<{ pin?: unknown }>().catch(() => ({} as { pin?: unknown }));
+    const r = await deps.hr.terminals.setPin(tenant.id, c.get('employee').id, b.pin);
+    return 'error' in r ? c.json(r, 400) : c.json(r);
   });
 
   /** 1 日の打刻を直す（締めた期間は直せない）。 */

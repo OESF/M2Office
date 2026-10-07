@@ -77,6 +77,42 @@ export interface HrSettings {
   labor: HrLaborSettings;
   /** シフトと 1 か月単位の変形労働時間制（第30.6.2節）。 */
   shift: HrShiftSettings;
+  /** 1 年単位の変形労働時間制（第30.6.3節）。 */
+  annual: HrAnnualSettings;
+  /** フレックスタイム制（第30.6.3節）。 */
+  flex: HrFlexSettings;
+  /** 共有の端末での打刻（第30.6.3節）。 */
+  terminal: HrTerminalSettings;
+}
+
+/** 1 年単位の変形労働時間制の会社の決まり（労使協定を結び、労働基準監督署に届け出ていること。届出は会社が行う）。 */
+export interface HrAnnualSettings {
+  enabled: boolean;
+  /** 対象期間の起算日（YYYY-MM-DD）。毎年同じ月日から始まる。 */
+  start: string;
+  /** 対象期間の長さ（月。2〜12。1 か月を超え 1 年以内）。 */
+  months: number;
+  /** 特定期間（忙しい時期。連続して 12 日まで働ける）。月日（MM-DD）の範囲。 */
+  busy: { from: string; to: string }[];
+}
+
+/** フレックスタイム制の会社の決まり（就業規則と労使協定。清算期間が 1 か月を超えるときは届出が要る）。 */
+export interface HrFlexSettings {
+  enabled: boolean;
+  /** 清算期間（月。1〜3）。締めの期間を単位にする。 */
+  months: number;
+  /** 清算期間の起算の月（締め日の月 YYYY-MM）。2 か月・3 か月のときに区切りを決める。 */
+  startMonth: string;
+  /** コアタイム（決めなければ `null`）。遅れは遅刻・早退として数えず、記録はする。 */
+  core: { start: string; end: string } | null;
+  /** 総枠に足りない時間の扱い（`carry` 次の清算期間に繰り越す・`deduct` 給与から差し引く）。 */
+  shortfall: 'carry' | 'deduct';
+}
+
+/** 共有の端末での打刻の会社の決まり。 */
+export interface HrTerminalSettings {
+  /** スマホを持たない人のために、名前を選んで 4 桁の番号で打刻することを許すか。 */
+  pinAllowed: boolean;
 }
 
 /** 勤務の型（早番・遅番など）。 */
@@ -223,6 +259,9 @@ export const DEFAULT_HR_SETTINGS: HrSettings = {
   insurance: { officeSymbol: '', officeNumber: '', specificOffice: 'auto', fullTimeWeeklyHours: 40 },
   labor: { business: 'general', industry: '94', number: '' },
   shift: { variable: false, special44: false, patterns: [], needs: [] },
+  annual: { enabled: false, start: '', months: 12, busy: [] },
+  flex: { enabled: false, months: 1, startMonth: '', core: null, shortfall: 'carry' },
+  terminal: { pinAllowed: false },
 };
 
 /** 従業員（人事の台帳。第30.5節）。 */
@@ -285,10 +324,20 @@ export interface HrTerms {
   workScope: string;
   socialInsurance: boolean;
   employmentInsurance: boolean;
-  /** 働き方（固定の始業・終業か、シフトか。既定は固定。第30.6.2節）。 */
-  schedule?: 'fixed' | 'shift';
+  /**
+   * 働き方（既定は固定。第30.6.2節・第30.6.3節）。`fixed` 固定の始業・終業・`shift` シフト・
+   * `annual` 1 年単位の変形労働時間制（所定はシフトで決める）・`flex` フレックスタイム制
+   */
+  schedule?: 'fixed' | 'shift' | 'annual' | 'flex';
   createdAt: string;
 }
+
+/** 働き方の並び（第30.6.2節・第30.6.3節）。 */
+export const HR_SCHEDULES = ['fixed', 'shift', 'annual', 'flex'] as const;
+/** 働き方。 */
+export type HrSchedule = (typeof HR_SCHEDULES)[number];
+/** 働き方の値か。 */
+export const isHrSchedule = (v: unknown): v is HrSchedule => (HR_SCHEDULES as readonly unknown[]).includes(v);
 
 /** 入退社の手続き（第30.5.2節）。 */
 export interface HrTask {
@@ -319,7 +368,9 @@ export interface AttPunch {
   employeeId: string;
   kind: AttPunchKind;
   at: string;
-  source: 'screen' | 'mobile' | 'secretary' | 'fix' | 'import';
+  source: 'screen' | 'mobile' | 'secretary' | 'fix' | 'import' | 'terminal';
+  /** 共有の端末で打ったとき、その端末（第30.6.3節）。 */
+  terminalId?: string | null;
 }
 
 /** 日の区分。 */
@@ -370,6 +421,28 @@ export interface AttTotals {
   missingDays: number;
   /** 1 か月単位の変形労働時間制で、期間の総枠を超えた法定外のうち所定の時間の中の分（所定の賃金は払い済みで、割増だけを払う。第30.6.2節）。 */
   overtimeWithinMinutes?: number;
+  /** フレックスタイム制の清算期間のいまの状況（第30.6.3節）。 */
+  flex?: AttFlexStatus;
+  /** フレックスタイム制で、総枠に足りず給与から差し引く時間（会社の決まりが「差し引く」のとき）。 */
+  flexShortMinutes?: number;
+  /** フレックスタイム制の清算期間の最後の期間で、次の清算期間に繰り越す足りない時間（分。総枠の中だけ）。 */
+  flexCarryNext?: number;
+  /** 1 年単位の変形労働時間制で、対象期間（または途中で入った人・辞めた人の働いた期間）を清算した期間か。 */
+  annualSettled?: boolean;
+}
+
+/** フレックスタイム制の清算期間の状況。 */
+export interface AttFlexStatus {
+  periodStart: string;
+  periodEnd: string;
+  /** 清算期間のいままでの労働時間（分。法定休日の労働を除く）。 */
+  workedMinutes: number;
+  /** 清算期間に働く時間（分。総枠に、前の清算期間から繰り越した分を足したもの）。 */
+  requiredMinutes: number;
+  /** 法定の総枠（分。40 時間 × 暦日数 ÷ 7）。 */
+  capMinutes: number;
+  /** 前の清算期間から繰り越した、足りなかった時間（分）。 */
+  carriedMinutes: number;
 }
 
 /** 締めの期間。 */

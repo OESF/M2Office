@@ -18,6 +18,8 @@ import { CARD_MAX_PER_IMAGE, parseCardReading, readCard } from './read.js';
 import type { CardService } from './service.js';
 import type { ContactStore } from './store.js';
 import type { BulkMailService, BulkPreview } from './bulk.js';
+import { ConnectorUnavailableError } from '../connectors/types.js';
+import { GOOGLE_PUSH_MAX, type GoogleContactsService } from './google-contacts.js';
 
 /** ツールに渡す名刺管理の文脈。 */
 export interface CardToolContext {
@@ -33,6 +35,8 @@ export interface CardToolContext {
   access(): Promise<{ defaultScope: ContactScope } | null>;
   /** まとめてのメール（第27.9.1節）。無ければまとめてのメールのツールは「使えない」と返す。 */
   bulk?: BulkMailService;
+  /** 本人の Google の連絡先へのつなぎ（第27.15節）。無ければ連絡先のツールは「使えない」と返す。 */
+  google?: GoogleContactsService;
 }
 
 /** 名刺管理を使えるなら文脈と既定の範囲を返す。使えなければ `null`。 */
@@ -236,6 +240,53 @@ export const contactsSave: Tool = {
   },
 };
 
+/**
+ * 名刺を本人の Google の連絡先に入れる・外す（第27.15節、ADR-0084）。
+ *
+ * @remarks
+ * 危険度 `write-internal`。本人の Google の連絡先（本人のもの）に書くだけで、社外には何も送らない。
+ * 権限 `contacts` はツールに持たせない（使う人だけに、使うときに画面で同意を求める。会社の全員に再同意を求めないため）。
+ * 許可が無ければ、名刺の画面から許可するよう伝える
+ */
+export const contactsGooglePush: Tool = {
+  name: 'contacts.google_push',
+  risk: 'write-internal',
+  activityLabel: 'Google の連絡先に入れています',
+  helpText: '名刺を、あなたの Google の連絡先（「M2Office の名刺」のラベル）に入れるか、外します。あなたの電話帳に入るだけで、誰にも送りません',
+  description: '名刺（contacts.search の contactId）を、呼んだ人の Google の連絡先の「M2Office の名刺」のラベルに入れる。入れたものは新しくする。'
+    + `remove が true なら Google の連絡先から外す（M2Office の名刺は消さない）。1 回に ${GOOGLE_PUSH_MAX} 件まで`,
+  args: {
+    properties: {
+      contactIds: { type: 'array', items: { type: 'string', description: '連絡先の ID' }, description: '入れる（外す）連絡先の ID（contacts.search の結果の contactId）' },
+      remove: { type: 'boolean', description: 'Google の連絡先から外すときだけ true' },
+    },
+    required: ['contactIds'],
+  },
+  async invoke(args, ctx) {
+    const cards = await cardsOf(ctx);
+    if (!cards) return UNAVAILABLE;
+    if (!cards.google) return { available: false, reason: 'Google の連絡先へのつなぎは、ここでは使えません' };
+    const ids = (Array.isArray(args['contactIds']) ? args['contactIds'] : []).map(str).filter(Boolean);
+    if (ids.length === 0) return { done: false, reason: 'contactIds を指定してください' };
+    const who = viewer(ctx);
+    try {
+      if (args['remove'] === true) {
+        let removed = 0;
+        for (const id of ids.slice(0, GOOGLE_PUSH_MAX)) if (await cards.google.remove(who, id)) removed++;
+        return { done: true, removed, ...(removed < ids.length ? { note: 'Google の連絡先に入れていない名刺は、そのままです' } : {}) };
+      }
+      const r = await cards.google.push(who, ids);
+      return { done: true, added: r.added, updated: r.updated, failed: r.failed, label: 'M2Office の名刺' };
+    } catch (err) {
+      if (err instanceof ConnectorUnavailableError && err.kind === 'insufficient-scope') {
+        return { done: false, reason: 'Google の連絡先を使う許可がまだありません。名刺の画面で「Google の連絡先に入れる」を押し、Google で許可してください' };
+      }
+      if (err instanceof ConnectorUnavailableError) return { done: false, reason: err.message };
+      throw err;
+    }
+  },
+};
+
 /** 名刺管理のツール（内蔵の拡張。第27.9節）。 */
 /** 変更の記録に出す項目の名前。 */
 const CHANGE_LABELS: Record<string, string> = {
@@ -406,4 +457,4 @@ export const mailBulkSend: Tool = {
   },
 };
 
-export const CARD_TOOLS: Tool[] = [cardRead, contactsSearch, contactsGet, contactsSave, contactsChanges, contactsBulkDraft, contactsBulkPreview, mailBulkSend];
+export const CARD_TOOLS: Tool[] = [cardRead, contactsSearch, contactsGet, contactsSave, contactsChanges, contactsBulkDraft, contactsBulkPreview, mailBulkSend, contactsGooglePush];

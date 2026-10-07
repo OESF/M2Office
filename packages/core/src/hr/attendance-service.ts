@@ -7,6 +7,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { annualPeriodOf, annualTotals, coreTimeIssue, flexMonthsOf, flexTotals, type FlexMonth } from './work-systems.js';
 import {
   ATT_PUNCH_LABELS, HR_COMPARTMENT,
   type AttClose, type AttDay, type AttPeriod, type AttPunch, type AttPunchKind, type AttTotals, type AuditEvent,
@@ -17,7 +18,7 @@ import type { ShiftStore } from './shift-store.js';
 import type { HrStore } from './store.js';
 import type { AttendanceStore } from './attendance-store.js';
 import {
-  agreementAlerts, dayType, jstDate, jstTime, periodContaining, periodOf, periodTotals, scheduledMinutes, shiftDate, summarizeDay, variableCapMinutes, variableTotals, weekday,
+  DAILY_LIMIT, agreementAlerts, dayType, jstDate, jstTime, periodContaining, periodOf, periodTotals, scheduledMinutes, shiftDate, summarizeDay, variableCapMinutes, variableTotals, weekday,
 } from './attendance.js';
 import { addMonths, dueGrantDates, grantDays, leaveBalance } from './leave.js';
 
@@ -118,7 +119,11 @@ export class AttendanceService {
    *
    * @returns 打刻と、そのあとの状態。退勤のあとは 36 協定を見直す
    */
-  async punch(tenantId: string, actorUserId: string, employee: HrEmployee, kind: AttPunchKind, source: AttPunch['source']): Promise<{ punch: AttPunch; state: AttState } | { error: string }> {
+  async punch(
+    tenantId: string, actorUserId: string, employee: HrEmployee, kind: AttPunchKind, source: AttPunch['source'],
+    /** 共有の端末で打ったとき、その端末（第30.6.3節）。 */
+    terminalId: string | null = null,
+  ): Promise<{ punch: AttPunch; state: AttState } | { error: string }> {
     const st = await this.state(tenantId, employee.id);
     const bad = kind === 'in' ? (st.state !== 'off' ? 'もう出勤しています' : null)
       : kind === 'out' ? (st.state === 'off' ? 'まだ出勤していません' : st.state === 'break' ? '休憩中です。休憩を終えてから退勤してください' : null)
@@ -127,7 +132,7 @@ export class AttendanceService {
     if (bad) return { error: bad };
     const at = this.now().toISOString();
     if (await this.isClosed(tenantId, jstDate(at))) return { error: 'この日は締めた期間です。担当者に伝えてください' };
-    const punch: AttPunch = { id: randomUUID(), employeeId: employee.id, kind, at, source };
+    const punch: AttPunch = { id: randomUUID(), employeeId: employee.id, kind, at, source, ...(terminalId ? { terminalId } : {}) };
     await this.deps.store.addPunch(tenantId, { ...punch, createdBy: actorUserId });
     if (kind === 'out') await this.checkAgreement(tenantId, employee).catch(() => undefined);
     return { punch, state: await this.state(tenantId, employee.id) };
@@ -178,7 +183,11 @@ export class AttendanceService {
   /**
    * 1 人の期間の日ごとの集計と合計。週の法定外を数えるため、期間の前の同じ週の日も集計に使う。
    */
-  async days(tenantId: string, employee: HrEmployee, period: AttPeriod, preloaded?: { punches: AttPunch[]; takes: LeaveTake[]; terms: HrTerms[]; firstPunch: Map<string, string> }): Promise<{ days: AttDay[]; totals: AttTotals }> {
+  async days(
+    tenantId: string, employee: HrEmployee, period: AttPeriod, preloaded?: { punches: AttPunch[]; takes: LeaveTake[]; terms: HrTerms[]; firstPunch: Map<string, string> },
+    /** 日の集計だけを返す（1 年単位・フレックスの清算で、ほかの期間の日を読むとき）。週の起算日からの日を含む。 */
+    raw = false,
+  ): Promise<{ days: AttDay[]; totals: AttTotals }> {
     const settings = await this.settings(tenantId);
     const back = (weekday(period.start) - settings.work.weekStart + 7) % 7;
     const from = shiftDate(period.start, -back);
@@ -191,7 +200,8 @@ export class AttendanceService {
     const first = (preloaded ? preloaded.firstPunch : await this.deps.store.firstPunchDates(tenantId)).get(employee.id) ?? null;
     const today = first ? this.today() : '0000-00-00';
     // シフトの人は、公開したシフトをその日の所定にする（シフトの無い日は休み。第30.6.2節）
-    const shiftTerms = termsOn(terms, period.end)?.schedule === 'shift' || terms.some((t) => t.schedule === 'shift');
+    // 1 年単位の変形労働時間制の人も、所定はシフトで決める（第30.6.3節）
+    const shiftTerms = byShifts(termsOn(terms, period.end)) || terms.some((t) => byShifts(t));
     const plans = shiftTerms && this.deps.shiftStore ? await this.deps.shiftStore.listPublished(tenantId, from, period.end) : [];
     const planned = new Map((plans.length && this.deps.shiftStore ? await this.deps.shiftStore.listShifts(tenantId, from, period.end, employee.id) : []).map((s) => [s.date, s]));
     const inPlan = (d: string) => plans.some((p) => p.periodStart <= d && d <= p.periodEnd);
@@ -202,13 +212,17 @@ export class AttendanceService {
       if ((employee.hiredOn && d < employee.hiredOn) || (employee.leftOn && d > employee.leftOn)) continue;
       const t = termsOn(terms, d);
       const leave = takes.filter((x) => x.status === 'taken' && x.date === d).reduce((s, x) => s + x.days, 0);
-      const byShift = t?.schedule === 'shift' && inPlan(d);
+      const byShift = byShifts(t) && inPlan(d);
+      // フレックスタイム制の人は、始業・終業を本人が決める（遅刻・早退を数えない。第30.6.3節）
+      const flexDay = t?.schedule === 'flex' && settings.flex.enabled;
       const s = byShift ? planned.get(d) : undefined;
       const work = byShift && s?.patternId;
       const sched = byShift ? (work ? { start: s!.start, end: s!.end, breakMinutes: s!.breakMinutes } : { start: null, end: null, breakMinutes: null })
-        : { start: t?.startTime || null, end: t?.endTime || null, breakMinutes: t?.breakMinutes ?? null };
+        : flexDay ? { start: null, end: null, breakMinutes: t?.breakMinutes ?? null }
+          : { start: t?.startTime || null, end: t?.endTime || null, breakMinutes: t?.breakMinutes ?? null };
       const day = summarizeDay(d, shifts.get(d) ?? [], byShift ? (work ? 'workday' : 'dayoff') : dayType(d, settings.work), sched, leave, first && d >= first ? today : '0000-00-00');
       if (byShift) { day.scheduledMinutes = work ? scheduledMinutes(sched) ?? 0 : 0; if (work) day.shiftName = names.get(s!.patternId!) ?? ''; }
+      if (flexDay) { const core = coreTimeIssue(day, settings.flex); if (core) day.issues.push(core); }
       out.push(day);
     }
     // シフトの人が暦週の 7 日とも働いたら、その週の最後の日を法定休日の労働にする（週に 1 日の休日が取れなかったため）
@@ -224,6 +238,26 @@ export class AttendanceService {
         }
       }
     }
+    if (raw) return { days: out, totals: periodTotals([], period, settings.work.weekStart) };
+    const now = termsOn(terms, period.end);
+    // 1 年単位の変形労働時間制（第30.6.3節）。対象期間（途中で入った人・辞めた人は働いた範囲）が終わる期間で清算する
+    if (now?.schedule === 'annual' && settings.annual.enabled) {
+      const range = annualPeriodOf(period.end, settings.annual);
+      if (range) {
+        const settle: { days: AttDay[]; range: { start: string; end: string } }[] = [];
+        for (const r of new Set([annualPeriodOf(period.start, settings.annual), range].filter((x) => !!x).map((x) => JSON.stringify(x)))) {
+          const full = JSON.parse(r) as { start: string; end: string };
+          const eff = { start: employee.hiredOn && employee.hiredOn > full.start ? employee.hiredOn : full.start, end: employee.leftOn && employee.leftOn < full.end ? employee.leftOn : full.end };
+          if (eff.end < period.start || eff.end > period.end || eff.start > eff.end) continue;
+          settle.push({ range: eff, days: (await this.days(tenantId, employee, { start: eff.start, end: eff.end, label: '' }, undefined, true)).days });
+        }
+        return { days: out.filter((d) => d.date >= period.start), totals: annualTotals(out, period, range, settings.work.weekStart, settle) };
+      }
+    }
+    // フレックスタイム制（第30.6.3節）。清算期間でまとめて見る
+    if (now?.schedule === 'flex' && settings.flex.enabled) {
+      return { days: out.filter((d) => d.date >= period.start), totals: await this.flexTotalsFor(tenantId, employee, period, out, terms, settings) };
+    }
     // 1 か月単位の変形労働時間制（変形期間は締めの期間。期間のすべての日に公開したシフトがあるとき）
     const variable = settings.shift.variable && termsOn(terms, period.end)?.schedule === 'shift' && plans.some((p) => p.periodStart <= period.start && period.end <= p.periodEnd);
     if (variable) {
@@ -231,6 +265,53 @@ export class AttendanceService {
       return { days: out.filter((d) => d.date >= period.start), totals: variableTotals(out, period, settings.work.weekStart, variableCapMinutes(n, settings.shift.special44)) };
     }
     return { days: out.filter((d) => d.date >= period.start), totals: periodTotals(out, period, settings.work.weekStart) };
+  }
+
+  /**
+   * フレックスタイム制の、締めの期間の集計（第30.6.3節）。清算期間の前の月の日を読み、最後の月なら清算する。
+   * 足りない時間を繰り越す会社では、前の清算期間の足りない時間を足す（前の清算期間の繰り越しは足さない。1 期間だけ繰り越す）。
+   */
+  private async flexTotalsFor(tenantId: string, employee: HrEmployee, period: AttPeriod, out: AttDay[], terms: HrTerms[], settings: HrSettings, carried?: number): Promise<AttTotals> {
+    const month = period.end.slice(0, 7);
+    const m = flexMonthsOf(month, settings.flex);
+    const first = periodOf(m.first, settings.pay.closingDay);
+    const lastP = periodOf(m.last, settings.pay.closingDay);
+    const settlement = {
+      start: employee.hiredOn && employee.hiredOn > first.start ? employee.hiredOn : first.start,
+      end: employee.leftOn && employee.leftOn < lastP.end ? employee.leftOn : lastP.end,
+    };
+    const months: FlexMonth[] = [];
+    for (let i = 0; i < m.index; i++) {
+      const p = periodOf(addMonths(`${m.first}-01`, i).slice(0, 7), settings.pay.closingDay);
+      if (employee.hiredOn && p.end < employee.hiredOn) continue;
+      months.push({ period: p, days: (await this.days(tenantId, employee, p, undefined, true)).days });
+    }
+    months.push({ period, days: out });
+    // 所定: 清算期間の会社の労働日 × 1 日の標準の時間（雇用条件の始業・終業・休憩。無ければ 8 時間）
+    let base = 0;
+    for (let d = settlement.start; d <= settlement.end; d = shiftDate(d, 1)) {
+      if (dayType(d, settings.work) !== 'workday') continue;
+      const t = termsOn(terms, d);
+      base += (t ? scheduledMinutes({ start: t.startTime || null, end: t.endTime || null, breakMinutes: t.breakMinutes }) : null) ?? DAILY_LIMIT;
+    }
+    const last = month === m.last || (!!employee.leftOn && employee.leftOn <= period.end);
+    if (carried === undefined && settings.flex.shortfall === 'carry' && m.index === 0) {
+      // 前の清算期間の、足りなかった時間（1 期間だけ）
+      const prevMonth = addMonths(`${m.first}-01`, -1).slice(0, 7);
+      const prev = periodOf(prevMonth, settings.pay.closingDay);
+      if (!employee.hiredOn || employee.hiredOn <= prev.start) {
+        const prevDays = (await this.days(tenantId, employee, prev, undefined, true)).days;
+        const pt = await this.flexTotalsFor(tenantId, employee, prev, prevDays, terms, settings, 0);
+        carried = pt.flexCarryNext ?? 0;
+      }
+    }
+    // 前の清算期間の繰り越しは、清算期間のすべての月の要る時間に含める（最初の月で読み、以後の月にも同じ値を使う）
+    if (carried === undefined && settings.flex.shortfall === 'carry' && m.index > 0) {
+      const firstDays = months[0]?.days ?? out;
+      carried = (await this.flexTotalsFor(tenantId, employee, months[0] ? { ...months[0].period, label: '' } : period, firstDays, terms, settings)).flex?.carriedMinutes ?? 0;
+    }
+    const r = flexTotals(months, settlement, settings.flex, base, carried ?? 0, last, settings.shift.special44);
+    return { ...r.totals, ...(last ? { flexCarryNext: r.carryNext } : {}) };
   }
 
   /** 締めの期間（締め日の月 YYYY-MM から。省略すれば今日を含む期間）。 */
@@ -499,6 +580,11 @@ export class AttendanceService {
   }
 
   /** 人事区画の人に知らせる（操作した本人は除く）。 */
+  /** 担当者（人事区画の人）に知らせる（共有の端末の番号の間違いなど。第30.6.3節）。 */
+  alertStaff(tenantId: string, title: string, body: string): Promise<number> {
+    return this.notifyStaff(tenantId, title, body, '');
+  }
+
   private async notifyStaff(tenantId: string, title: string, body: string, exceptUserId: string): Promise<number> {
     let n = 0;
     for (const u of await this.deps.repo.listUsers(tenantId)) {
@@ -521,6 +607,9 @@ export class AttendanceService {
 }
 
 /** その日に効いている雇用条件（適用日がその日以前で最も新しいもの）。 */
+/** 所定をシフトで決める働き方か（シフトと、1 年単位の変形労働時間制。第30.6.2節・第30.6.3節）。 */
+export const byShifts = (t: Pick<HrTerms, 'schedule'> | null | undefined): boolean => t?.schedule === 'shift' || t?.schedule === 'annual';
+
 export function termsOn(terms: HrTerms[], date: string): HrTerms | null {
   return [...terms].filter((t) => t.effectiveOn <= date).sort((a, b) => b.effectiveOn.localeCompare(a.effectiveOn) || b.createdAt.localeCompare(a.createdAt))[0]
     ?? [...terms].sort((a, b) => a.effectiveOn.localeCompare(b.effectiveOn))[0] ?? null;

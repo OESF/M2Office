@@ -8,7 +8,7 @@
  * @see 仕様書 第8.6節 配備の形
  */
 
-import type { LlmExtractRequest, LlmImageRequest, LlmProvider, LlmRequest, LlmResponse, ModelTier } from './provider.js';
+import { EMBEDDING_DIMENSIONS, type LlmEmbedRequest, type LlmEmbedResponse, type LlmExtractRequest, type LlmImageRequest, type LlmProvider, type LlmRequest, type LlmResponse, type ModelTier } from './provider.js';
 import { LlmRequestError } from './gemini.js';
 
 /** ローカル AI の設定。 */
@@ -21,6 +21,11 @@ export interface LocalLlmConfig {
   apiKey?: string;
   /** 1 回の問い合わせを待つ時間（ミリ秒）。社内の機械は応答が遅いことがある。 */
   timeoutMs?: number;
+  /**
+   * 埋め込みのモデル（例: EmbeddingGemma。768 次元のもの。仕様書 第11.7.6節）。
+   * 無ければ埋め込みを作らず、知識は言葉の検索だけで探す（外部の AI に節を渡さないため、クラウドで代えない）
+   */
+  embedModel?: string;
 }
 
 /** ローカル AI の設定を環境変数から読む。口が無ければ `null`。 */
@@ -34,6 +39,7 @@ export function localLlmFromEnv(env: Record<string, string | undefined>): LocalL
     models: { fast: pick('fast'), standard: pick('standard'), advanced: pick('advanced') },
     ...(env['LOCAL_LLM_KEY'] ? { apiKey: env['LOCAL_LLM_KEY'] } : {}),
     timeoutMs: Number(env['LOCAL_LLM_TIMEOUT_MS'] ?? 300_000),
+    ...(env['LOCAL_LLM_EMBED_MODEL']?.trim() ? { embedModel: env['LOCAL_LLM_EMBED_MODEL'].trim() } : {}),
   };
 }
 
@@ -44,8 +50,41 @@ export function localLlmFromEnv(env: Record<string, string | undefined>): LocalL
  */
 export class LocalLlmProvider implements LlmProvider {
   readonly name = 'local';
+  /** 埋め込み（設定に埋め込みのモデルがあるときだけ）。 */
+  readonly embed?: (req: LlmEmbedRequest) => Promise<LlmEmbedResponse>;
 
-  constructor(private readonly config: LocalLlmConfig) {}
+  constructor(private readonly config: LocalLlmConfig) {
+    const model = config.embedModel;
+    if (model) this.embed = (req) => this.embedWith(model, req);
+  }
+
+  /**
+   * OpenAI 互換の `/embeddings` で埋め込む（仕様書 第11.7.6節）。書き方は EmbeddingGemma の検索の書き方にそろえる。
+   *
+   * @throws {LlmRequestError} 届かない・次元が {@link EMBEDDING_DIMENSIONS} でない
+   */
+  private async embedWith(model: string, req: LlmEmbedRequest): Promise<LlmEmbedResponse> {
+    const input = req.items.map((x) => (req.kind === 'query'
+      ? `task: search result | query: ${x.text}`
+      : `title: ${x.title?.trim() || 'none'} | text: ${x.text}`));
+    let res: Response;
+    try {
+      res = await fetch(`${this.config.baseUrl}/embeddings`, {
+        method: 'POST', headers: this.headers(), body: JSON.stringify({ model, input }),
+        signal: AbortSignal.timeout(this.config.timeoutMs ?? 300_000),
+      });
+    } catch (err) {
+      throw new LlmRequestError('ローカル AI に届きませんでした', err instanceof Error ? err.message : String(err));
+    }
+    if (!res.ok) throw new LlmRequestError(`ローカル AI の埋め込みに失敗しました (${res.status})`, await res.text().catch(() => ''));
+    const json = await res.json() as { data?: { embedding?: number[]; index?: number }[]; usage?: { prompt_tokens?: number } };
+    const data = [...(json.data ?? [])].sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+    const vectors = data.map((d) => d.embedding ?? []);
+    if (vectors.length !== input.length || vectors.some((v) => v.length !== EMBEDDING_DIMENSIONS)) {
+      throw new LlmRequestError(`ローカル AI の埋め込みは ${EMBEDDING_DIMENSIONS} 次元のモデルにしてください`, `${vectors[0]?.length ?? 0} 次元`);
+    }
+    return { vectors, model: `local:${model}`, inputTokens: json.usage?.prompt_tokens ?? input.reduce((n, t) => n + t.length, 0) };
+  }
 
   async complete(req: LlmRequest): Promise<LlmResponse> {
     const model = this.config.models[req.tier];

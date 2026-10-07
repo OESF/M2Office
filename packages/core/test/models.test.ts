@@ -52,7 +52,8 @@ test('値段の分からないモデルは、最も高い単価で見積もる�
   assert.ok(UNKNOWN_MODEL_PRICE.inputUsd + UNKNOWN_MODEL_PRICE.outputUsd >= highest);
   for (const [name, p] of Object.entries(MODEL_PRICES)) {
     assert.ok(unknown >= costJpy(name, 1_000_000, 1_000_000), `${name} より安く見積もっている`);
-    assert.ok(p.outputUsd > p.inputUsd, `${name} の出力が入力より安い（表の写し間違い）`);
+    // 埋め込みのモデルは出力が無い（入力だけに値段が付く）
+    if (!/embedding/.test(name)) assert.ok(p.outputUsd > p.inputUsd, `${name} の出力が入力より安い（表の写し間違い）`);
   }
 });
 

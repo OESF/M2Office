@@ -1,0 +1,370 @@
+{
+  "description": "知識の意味の検索の評価の問題（仕様書 第11.7.6.5節）。見本の規程（このフォルダの *.md）に対する質問と、正解の節。規程の言葉のまま・言い換え・答えが無い質問を 20 問ずつ。答えが無い質問は、何も返さないのが正解。",
+  "rules": [
+    "work-rules.md",
+    "expense-rules.md",
+    "travel-rules.md"
+  ],
+  "cases": [
+    {
+      "kind": "literal",
+      "question": "始業の時刻は何時ですか",
+      "title": "就業規則（見本）",
+      "heading": "第10条（始業と終業の時刻）"
+    },
+    {
+      "kind": "literal",
+      "question": "時間外労働の上限は",
+      "title": "就業規則（見本）",
+      "heading": "第11条（時間外労働）"
+    },
+    {
+      "kind": "literal",
+      "question": "在宅勤務の日の報告は",
+      "title": "就業規則（見本）",
+      "heading": "第12条（在宅勤務）"
+    },
+    {
+      "kind": "literal",
+      "question": "休日はいつですか",
+      "title": "就業規則（見本）",
+      "heading": "第20条（休日）"
+    },
+    {
+      "kind": "literal",
+      "question": "年次有給休暇は何日付与されますか",
+      "title": "就業規則（見本）",
+      "heading": "第21条（年次有給休暇）"
+    },
+    {
+      "kind": "literal",
+      "question": "夏季休暇は何日",
+      "title": "就業規則（見本）",
+      "heading": "第22条（夏季休暇）"
+    },
+    {
+      "kind": "literal",
+      "question": "慶弔休暇の日数",
+      "title": "就業規則（見本）",
+      "heading": "第23条（慶弔休暇）"
+    },
+    {
+      "kind": "literal",
+      "question": "育児休業はいつまで取得できますか",
+      "title": "就業規則（見本）",
+      "heading": "第24条（育児休業）"
+    },
+    {
+      "kind": "literal",
+      "question": "介護休業は何日まで",
+      "title": "就業規則（見本）",
+      "heading": "第25条（介護休業）"
+    },
+    {
+      "kind": "literal",
+      "question": "副業の許可は必要ですか",
+      "title": "就業規則（見本）",
+      "heading": "第30条（副業）"
+    },
+    {
+      "kind": "literal",
+      "question": "退職届はいつまでに出す",
+      "title": "就業規則（見本）",
+      "heading": "第32条（退職の届出）"
+    },
+    {
+      "kind": "literal",
+      "question": "経費の精算の期限は",
+      "title": "経費規程（見本）",
+      "heading": "第2条（精算の期限）"
+    },
+    {
+      "kind": "literal",
+      "question": "領収書をなくしたとき",
+      "title": "経費規程（見本）",
+      "heading": "第3条（領収書）"
+    },
+    {
+      "kind": "literal",
+      "question": "交際費の上限は",
+      "title": "経費規程（見本）",
+      "heading": "第4条（交際費）"
+    },
+    {
+      "kind": "literal",
+      "question": "消耗品の購入の承認",
+      "title": "経費規程（見本）",
+      "heading": "第5条（消耗品）"
+    },
+    {
+      "kind": "literal",
+      "question": "通信費の支給額",
+      "title": "経費規程（見本）",
+      "heading": "第7条（通信費）"
+    },
+    {
+      "kind": "literal",
+      "question": "出張の日当はいくら",
+      "title": "出張旅費規程（見本）",
+      "heading": "第4条（日当）"
+    },
+    {
+      "kind": "literal",
+      "question": "宿泊費の上限",
+      "title": "出張旅費規程（見本）",
+      "heading": "第5条（宿泊費）"
+    },
+    {
+      "kind": "literal",
+      "question": "海外出張の承認は誰がする",
+      "title": "出張旅費規程（見本）",
+      "heading": "第6条（海外出張）"
+    },
+    {
+      "kind": "literal",
+      "question": "タクシーの利用の条件",
+      "title": "出張旅費規程（見本）",
+      "heading": "第8条（タクシーの利用）"
+    },
+    {
+      "kind": "paraphrase",
+      "question": "朝は何時に出社すればいい？",
+      "title": "就業規則（見本）",
+      "heading": "第10条（始業と終業の時刻）"
+    },
+    {
+      "kind": "paraphrase",
+      "question": "残業は月に何時間までできる？",
+      "title": "就業規則（見本）",
+      "heading": "第11条（時間外労働）"
+    },
+    {
+      "kind": "paraphrase",
+      "question": "テレワークの日は何を連絡する？",
+      "title": "就業規則（見本）",
+      "heading": "第12条（在宅勤務）"
+    },
+    {
+      "kind": "paraphrase",
+      "question": "お正月の休みはいつからいつまで？",
+      "title": "就業規則（見本）",
+      "heading": "第20条（休日）"
+    },
+    {
+      "kind": "paraphrase",
+      "question": "有休は入社してどれくらいでもらえる？",
+      "title": "就業規則（見本）",
+      "heading": "第21条（年次有給休暇）"
+    },
+    {
+      "kind": "paraphrase",
+      "question": "お盆の休みはある？",
+      "title": "就業規則（見本）",
+      "heading": "第22条（夏季休暇）"
+    },
+    {
+      "kind": "paraphrase",
+      "question": "結婚したら何日休める？",
+      "title": "就業規則（見本）",
+      "heading": "第23条（慶弔休暇）"
+    },
+    {
+      "kind": "paraphrase",
+      "question": "子育てのための休みは何歳まで？",
+      "title": "就業規則（見本）",
+      "heading": "第24条（育児休業）"
+    },
+    {
+      "kind": "paraphrase",
+      "question": "親の世話のために長く休みたい",
+      "title": "就業規則（見本）",
+      "heading": "第25条（介護休業）"
+    },
+    {
+      "kind": "paraphrase",
+      "question": "会社の外で別の仕事をしてもいい？",
+      "title": "就業規則（見本）",
+      "heading": "第30条（副業）"
+    },
+    {
+      "kind": "paraphrase",
+      "question": "仕事を辞めるときは何日前に言えばいい？",
+      "title": "就業規則（見本）",
+      "heading": "第32条（退職の届出）"
+    },
+    {
+      "kind": "paraphrase",
+      "question": "立て替えたお金はいつまでに請求する？",
+      "title": "経費規程（見本）",
+      "heading": "第2条（精算の期限）"
+    },
+    {
+      "kind": "paraphrase",
+      "question": "お客さんとの飲み会の費用はいくらまで？",
+      "title": "経費規程（見本）",
+      "heading": "第4条（交際費）"
+    },
+    {
+      "kind": "paraphrase",
+      "question": "ボールペンやノートを買ってもいい？",
+      "title": "経費規程（見本）",
+      "heading": "第5条（消耗品）"
+    },
+    {
+      "kind": "paraphrase",
+      "question": "仕事の本を買ったら会社が払ってくれる？",
+      "title": "経費規程（見本）",
+      "heading": "第6条（書籍と研修）"
+    },
+    {
+      "kind": "paraphrase",
+      "question": "家のネット代は出る？",
+      "title": "経費規程（見本）",
+      "heading": "第7条（通信費）"
+    },
+    {
+      "kind": "paraphrase",
+      "question": "ホテル代はいくらまで？",
+      "title": "出張旅費規程（見本）",
+      "heading": "第5条（宿泊費）"
+    },
+    {
+      "kind": "paraphrase",
+      "question": "新幹線のグリーン車に乗っていい？",
+      "title": "出張旅費規程（見本）",
+      "heading": "第3条（交通費）"
+    },
+    {
+      "kind": "paraphrase",
+      "question": "出張から帰ったら何をする？",
+      "title": "出張旅費規程（見本）",
+      "heading": "第7条（出張の報告）"
+    },
+    {
+      "kind": "paraphrase",
+      "question": "出張の手当はいくら？",
+      "title": "出張旅費規程（見本）",
+      "heading": "第4条（日当）"
+    },
+    {
+      "kind": "none",
+      "question": "社員食堂は何時まで開いている？",
+      "title": null,
+      "heading": null
+    },
+    {
+      "kind": "none",
+      "question": "駐車場の申し込み方法は？",
+      "title": null,
+      "heading": null
+    },
+    {
+      "kind": "none",
+      "question": "健康診断はいつ受ける？",
+      "title": null,
+      "heading": null
+    },
+    {
+      "kind": "none",
+      "question": "制服の貸し出しはある？",
+      "title": null,
+      "heading": null
+    },
+    {
+      "kind": "none",
+      "question": "社員旅行の行き先は？",
+      "title": null,
+      "heading": null
+    },
+    {
+      "kind": "none",
+      "question": "退職金はいくらもらえる？",
+      "title": null,
+      "heading": null
+    },
+    {
+      "kind": "none",
+      "question": "住宅手当の金額は？",
+      "title": null,
+      "heading": null
+    },
+    {
+      "kind": "none",
+      "question": "昇給は年に何回？",
+      "title": null,
+      "heading": null
+    },
+    {
+      "kind": "none",
+      "question": "名刺の作り方は？",
+      "title": null,
+      "heading": null
+    },
+    {
+      "kind": "none",
+      "question": "パソコンの貸し出しの手続きは？",
+      "title": null,
+      "heading": null
+    },
+    {
+      "kind": "none",
+      "question": "会議室の予約の仕方",
+      "title": null,
+      "heading": null
+    },
+    {
+      "kind": "none",
+      "question": "社内の Wi-Fi のパスワード",
+      "title": null,
+      "heading": null
+    },
+    {
+      "kind": "none",
+      "question": "インフルエンザの予防接種の補助",
+      "title": null,
+      "heading": null
+    },
+    {
+      "kind": "none",
+      "question": "資格を取ったときのお祝い金",
+      "title": null,
+      "heading": null
+    },
+    {
+      "kind": "none",
+      "question": "転勤の決まり",
+      "title": null,
+      "heading": null
+    },
+    {
+      "kind": "none",
+      "question": "持株会に入るには",
+      "title": null,
+      "heading": null
+    },
+    {
+      "kind": "none",
+      "question": "永年勤続の表彰",
+      "title": null,
+      "heading": null
+    },
+    {
+      "kind": "none",
+      "question": "ペットの持ち込み",
+      "title": null,
+      "heading": null
+    },
+    {
+      "kind": "none",
+      "question": "喫煙所の場所",
+      "title": null,
+      "heading": null
+    },
+    {
+      "kind": "none",
+      "question": "ボーナスの支給日",
+      "title": null,
+      "heading": null
+    }
+  ]
+}

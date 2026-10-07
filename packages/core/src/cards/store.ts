@@ -13,6 +13,7 @@
 import pg from 'pg';
 import { createPool } from '../repository/pool.js';
 import type { CardCorners, CardFields, Contact, ContactCard, ContactChange, ContactScope } from '@m2office/shared';
+import type { GoogleContactLink, GoogleContactPrefs, GoogleContactStore } from './google-contacts.js';
 
 /** 誰として見るか。自分だけの名刺は `userId` の人のものだけが見える。 */
 export interface CardViewer {
@@ -151,7 +152,7 @@ export interface BatchProgress {
 }
 
 /** 名刺と連絡先の置き場。 */
-export interface ContactStore {
+export interface ContactStore extends GoogleContactStore {
   createCards(who: CardViewer, cards: NewCard[]): Promise<void>;
   /** 読み取り済みの名刺を作る（1 枚の写真の 2 枚目から・表からの取り込み。第27.4節）。 */
   createReadCard(who: CardViewer, card: ReadCard): Promise<void>;
@@ -583,6 +584,68 @@ export class PostgresContactStore implements ContactStore {
     if (ids.length === 0) return 0;
     const res = await this.pool.query<{ n: number }>('select m2o_purge_contact_cards($1) as n', [ids]);
     return res.rows[0]?.n ?? 0;
+  }
+
+  // ─── Google の連絡先へのつなぎ（第27.15節）。行は本人だけが見る（移行 108） ─────────
+
+  async getGooglePrefs(who: CardViewer): Promise<GoogleContactPrefs> {
+    const rows = await this.q<{ auto: boolean; since: string | null; group_name: string | null }>(who,
+      `select auto, to_json(auto_since) #>> '{}' as since, group_name from google_contact_prefs where tenant_id = $1 and user_id = $2`,
+      [who.tenantId, who.userId]);
+    const r = rows[0];
+    return { auto: r?.auto ?? false, autoSince: r?.since ? new Date(r.since).toISOString() : null, group: r?.group_name ?? null };
+  }
+
+  async saveGooglePrefs(who: CardViewer, prefs: GoogleContactPrefs): Promise<void> {
+    await this.q(who,
+      `insert into google_contact_prefs (tenant_id, user_id, auto, auto_since, group_name) values ($1, $2, $3, $4, $5)
+       on conflict (tenant_id, user_id) do update set auto = excluded.auto, auto_since = excluded.auto_since,
+         group_name = excluded.group_name, updated_at = now()`,
+      [who.tenantId, who.userId, prefs.auto, prefs.autoSince, prefs.group]);
+  }
+
+  async listGoogleLinks(who: CardViewer, contactIds: string[]): Promise<GoogleContactLink[]> {
+    if (contactIds.length === 0) return [];
+    return this.q<GoogleContactLink>(who,
+      `select contact_id as "contactId", resource_name as "resourceName", pushed, to_json(pushed_at) #>> '{}' as "pushedAt",
+              to_json(synced_at) #>> '{}' as "syncedAt", to_json(gone_at) #>> '{}' as "goneAt"
+         from google_contact_links where tenant_id = $1 and user_id = $2 and contact_id = any($3)`,
+      [who.tenantId, who.userId, contactIds]);
+  }
+
+  async saveGoogleLink(who: CardViewer, l: GoogleContactLink): Promise<void> {
+    await this.q(who,
+      `insert into google_contact_links (tenant_id, user_id, contact_id, resource_name, pushed, pushed_at, synced_at, gone_at)
+       values ($1, $2, $3, $4, $5, $6, $7, $8)
+       on conflict (tenant_id, user_id, contact_id) do update set resource_name = excluded.resource_name, pushed = excluded.pushed,
+         pushed_at = excluded.pushed_at, synced_at = excluded.synced_at, gone_at = excluded.gone_at`,
+      [who.tenantId, who.userId, l.contactId, l.resourceName, JSON.stringify(l.pushed), l.pushedAt, l.syncedAt, l.goneAt]);
+  }
+
+  async deleteGoogleLink(who: CardViewer, contactId: string): Promise<void> {
+    await this.q(who, `delete from google_contact_links where tenant_id = $1 and user_id = $2 and contact_id = $3`,
+      [who.tenantId, who.userId, contactId]);
+  }
+
+  async googleLinksDue(who: CardViewer, limit: number): Promise<string[]> {
+    // 見られなくなった名刺（範囲が自分だけに変わった他人の名刺）は、連絡先の行単位の制限で外れる
+    const rows = await this.q<{ id: string }>(who,
+      `select l.contact_id as id from google_contact_links l join contacts c on c.tenant_id = l.tenant_id and c.id = l.contact_id
+        where l.tenant_id = $1 and l.user_id = $2 and l.gone_at is null and c.status = 'active' and c.updated_at > l.synced_at
+        order by c.updated_at limit $3`,
+      [who.tenantId, who.userId, limit]);
+    return rows.map((r) => r.id);
+  }
+
+  async googleAutoCandidates(who: CardViewer, since: string, limit: number): Promise<string[]> {
+    // 本人が取り込んで読み取れた名刺の連絡先（同じ人にまとめた先が、ほかの人の取り込んだ連絡先でもよい）
+    const rows = await this.q<{ id: string }>(who,
+      `select c.id from contact_cards k join contacts c on c.tenant_id = k.tenant_id and c.id = k.contact_id
+        where k.tenant_id = $1 and k.owner_user_id = $2 and k.status = 'done' and k.created_at >= $3 and c.status = 'active'
+          and not exists (select 1 from google_contact_links l where l.tenant_id = c.tenant_id and l.user_id = $2 and l.contact_id = c.id)
+        group by c.id order by min(k.created_at) limit $4`,
+      [who.tenantId, who.userId, since, limit]);
+    return rows.map((r) => r.id);
   }
 }
 

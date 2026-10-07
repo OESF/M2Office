@@ -55,6 +55,7 @@ export const AG04_KNOWLEDGE_QA: AgentDefinition = {
       instruction: [
         '検索結果をもとに回答をまとめる。',
         '必ず参照した文書名を添えること。出典のない断定をしない。',
+        '検索結果に foundBy（「言い換えで見つけました」）や note（読み替え）があれば、その出典の横にそのまま添える。',
       ].join('\n'),
     },
   ],

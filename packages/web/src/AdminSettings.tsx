@@ -677,7 +677,8 @@ export function KnowledgeSettings({ page }: { page: string }) {
   const [open, setOpen] = useState<{ id: string; sections?: KnowledgeSectionView[]; versions?: KnowledgeVersionView[] } | null>(null);
   const [body, setBody] = useState<{ key: string; text: string } | null>(null);
   const saver = useSaver();
-  const load = () => api.admin.knowledge().then((r) => { setItems(r.items); setCompartments(r.compartments); setConsolidated(r.consolidated); });
+  const [semantic, setSemantic] = useState<{ ready: number; total: number } | null>(null);
+  const load = () => api.admin.knowledge().then((r) => { setItems(r.items); setCompartments(r.compartments); setConsolidated(r.consolidated); setSemantic(r.semantic); });
   useEffect(() => { void load(); }, []);
   useEffect(() => { setDraft(empty); setOpen(null); }, [category]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -708,6 +709,8 @@ export function KnowledgeSettings({ page }: { page: string }) {
     <>
       <PageTitle trail={['知識', KNOWLEDGE_TITLES[page] ?? KNOWLEDGE_TITLES['rules']!]} help={KNOWLEDGE_HELP[page] ?? KNOWLEDGE_HELP['rules']} />
       {isRule && active.length === 0 && <p className="lead"><strong>空のままだと秘書は答えられません。</strong></p>}
+      {/* 意味での検索の準備（第11.7.6.1節）。作り終えるまでの節も、言葉では見つかる */}
+      {isRule && semantic && semantic.total > 0 && <p className="muted small">意味での検索の準備: {semantic.ready} / {semantic.total} 節</p>}
       {category === 'learned' && consolidated && (
         <p className="muted small">
           最後に整理した日: {day(consolidated.at)}

@@ -43,6 +43,7 @@ import { webReviewRoute } from './routes/web-review.js';
 import { inventoryHooksRoute } from './routes/inventory-hooks.js';
 import { signageRoute } from './routes/signage.js';
 import { signagePlayRoute } from './routes/signage-play.js';
+import { hrTerminalRoute } from './routes/hr-terminal.js';
 import { signageHooksRoute } from './routes/signage-hooks.js';
 import { lineHooksRoute } from './routes/line-hooks.js';
 import { unsubscribeRoute } from './routes/unsubscribe.js';
@@ -129,10 +130,13 @@ app.use('/v1/*', resolveTenant(deps));
 app.route('/v1/auth', authRoute(deps));
 // 店頭サイネージの再生のページ（第31.9.1節）。ログインを使わず、画面の鍵で名乗る。会社はアドレスで決まるため、会社の判定の後・ログインの確かめより前に置く
 app.route('/v1/signage-play', signagePlayRoute(deps, SERVER_VERSION));
+// 共有の端末の打刻の画面（第30.6.3節）。ログインを使わず、端末の鍵で名乗る（サイネージの再生と同じ）
+app.route('/v1/hr-terminal', hrTerminalRoute(deps));
 // 会員証のページと LINE の入口（第40.5節）。お客様がログインなしに開く。会社はアドレスで決まり、会員は鍵つきの URL で決まる
 app.route('/v1/member-card', memberCardRoute(deps));
 app.use('/v1/*', async (c, next) =>
-  c.req.path.startsWith('/v1/auth/') || c.req.path.startsWith('/v1/signage-play/') || c.req.path.startsWith('/v1/member-card/') ? next() : authenticate(deps)(c, next));
+  c.req.path.startsWith('/v1/auth/') || c.req.path.startsWith('/v1/signage-play/') || c.req.path.startsWith('/v1/member-card/') || c.req.path.startsWith('/v1/hr-terminal/')
+    ? next() : authenticate(deps)(c, next));
 // AI の利用の持ち主と用途（仕様書 第6.6.2節）。この要求の中で呼ぶ AI を、本人と口の名前で記録し、本人の上限で確かめる
 app.use('/v1/*', async (c, next) => {
   const user = c.get('ctx')?.user;

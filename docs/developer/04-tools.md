@@ -88,6 +88,7 @@
 | `docs.append` | draft | `drive.file`（機密でない） | M2Office で作った文書の末尾に書き足します |
 | `docs.create` | draft | `drive.file`（機密でない） | あなたのドライブに Google ドキュメントを作ります。共有はしません |
 | `document.create` | draft | — | 文書を作り、成果物として保存します。社外へは出しません |
+| `docx.redline` | draft | — | 修正の案を、元の文書に Word の変更履歴として入れた Word を作ります。社外へは送りません |
 | `docx.render` | draft | — | Word 形式の文書を作り、成果物として保存します |
 | `drive.create_folder` | draft | `drive.file`（機密でない） | あなたのドライブにフォルダを作ります。共有はしません |
 | `gmail.create_draft` | draft | `gmail.compose`（制限付き） | 返信の下書きを作ります。送信はしません |
@@ -109,6 +110,7 @@
 | `competitors.discover` | write-internal | — | 自社の像をまとめ、近くの同業か同じような事業の会社を探して覚え、読んでレポートを作る作業を始めます |
 | `competitors.remove` | write-internal | — | 覚えている競合を外します。次に自動で探しても入れません |
 | `contacts.bulk_draft` | write-internal | — | 名刺の相手へのまとめてのメールの下書きを作ります。送りません |
+| `contacts.google_push` | write-internal | — | 名刺を、あなたの Google の連絡先（「M2Office の名刺」のラベル）に入れるか、外します。あなたの電話帳に入るだけで、誰にも送りません |
 | `contacts.save` | write-internal | — | 名刺を連絡先として登録するか、電話番号やメモなどを直します。社内の名刺の置き場に書くだけで、誰にも送りません |
 | `contracts.register` | write-internal | — | 結んだ契約書から相手・期間・自動更新と解約の申し出の期限を取り出し、契約の台帳に入れます |
 | `contracts.update` | write-internal | — | 契約の状態（解約を申し出た など）・担当・期間を直します |
@@ -175,7 +177,7 @@
 | `drive.read` | `fileId`（必須）: ファイルの ID |
 | `drive.search` | `query`: 名前に含まれる言葉（空ならすべて）、`limit`: 件数（既定 20） |
 | `file.compare` | `before`（必須）: 前の版のファイルの ID、`after`（必須）: 新しい版のファイルの ID |
-| `file.read_text` | `fileId`（必須）: ファイルの ID |
+| `file.read_text` | `fileId`（必須）: ファイルの ID、`part`: 読む部分の番号（1 から。省略すると 1） |
 | `forms.responses` | `formId`（必須）: フォームの ID、`since`: この時刻以降の回答だけ（ISO 形式。任意）、`limit`: 件数（既定 100） |
 | `gmail.get` | `id`（必須）: メールの ID |
 | `gmail.list` | `since`: この時刻以降（ISO 形式。任意）、`limit`: 件数（既定 20） |
@@ -215,6 +217,7 @@
 | `docs.append` | `documentId`（必須）: 文書の ID、`text`（必須）: 追記する文 |
 | `docs.create` | `title`: 題名（artifactId のときは省略できる。成果物の題名に日付を添える）、`body`: 本文（Markdown。artifactId のときは渡さない）、`artifactId`: 保存する成果物の ID（document.create の結果）。本文はそこから取る、`folderId`: 入れるフォルダの ID（任意）、`folderName`: 入れるフォルダの名前（任意。M2Office が作ったその名前のフォルダに入れ、無ければ作る） |
 | `document.create` | `kind`: 種類（例: minutes・reply）、`title`（必須）: 題名、`body`（必須）: 本文 |
+| `docx.redline` | `fileId`（必須）: 元の文書のファイルの ID、`title`: 題名（例: 業務委託契約書（修正の案））、`edits`（必須）: { before, after, reason } の配列 |
 | `docx.render` | `title`（必須）: 題名、`blocks`（必須）: { heading } か { text } の配列 |
 | `drive.create_folder` | `name`（必須）: フォルダの名前、`parentId`: 親のフォルダの ID（任意） |
 | `gmail.create_draft` | `replyTo`: 返信するメールの ID（任意）、`to`: 宛先（返信のときは省略可。元のメールの差出人になる）、`subject`（必須）: 件名、`body`（必須）: 本文 |
@@ -237,6 +240,7 @@
 | `competitors.remove` | `q`（必須）: 競合の名前か URL の言葉 |
 | `contacts.bulk_draft` | `contactIds`（必須）: 宛先の連絡先の ID（contacts.search の結果の contactId）。100 人まで、`subject`（必須）: 件名（{会社名}・{氏名} を使える）、`body`（必須）: 本文。宛名は「{会社名}
 {氏名} 様」のように差し込む。末尾の会社の表示と配信の停止の URL は入れない（自動で入る） |
+| `contacts.google_push` | `contactIds`（必須）: 入れる（外す）連絡先の ID（contacts.search の結果の contactId）、`remove`: Google の連絡先から外すときだけ true |
 | `contacts.save` | `contactId`: 直す連絡先の ID。新しく登録するときは書かない、`fields`: 直す項目（name・nameKana・company・department・title・postalCode・address・phones・emails・website・extra）、`note`: メモ（「展示会で会った」など）。書くと置き換える、`card`: 登録する名刺。card.read の結果の fileId・fields・rotation、`receivedOn`: 名刺を受け取った日（YYYY-MM-DD）。直すときだけ書く、`cardId`: 受け取った日を直す名刺（contacts.get の exchanges の cardId）。省くと呼んだ人のいちばん新しい名刺 |
 | `contracts.register` | `fileId`: 契約書のファイルの ID、`fromReview`: いちばん新しい契約書チェックの契約書を使うか |
 | `contracts.update` | `query`（必須）: 相手・件名・種類の言葉、`status`: active・cancel_requested・ended、`startOn`: 始め（YYYY-MM-DD）、`endOn`: 終わり（YYYY-MM-DD）、`note`: メモ |

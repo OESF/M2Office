@@ -46,6 +46,7 @@ export class TenantRoutingConnector implements WorkspaceConnector {
   directory = this.route('directory');
   meet = this.route('meet');
   forms = this.route('forms');
+  contacts = this.route('contacts');
 
   private route<K extends Exclude<keyof WorkspaceConnector, 'sourceFor'>>(service: K): WorkspaceConnector[K] {
     return new Proxy({}, {

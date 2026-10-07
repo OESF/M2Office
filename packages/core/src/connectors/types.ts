@@ -224,6 +224,47 @@ export interface DirectoryConnector {
   search(p: ConnectorPrincipal, q: { query: string; limit?: number }): Promise<DirectoryPerson[]>;
 }
 
+/**
+ * Google の連絡先の 1 人（People API の Person のうち、M2Office が入れる項目だけ。仕様書 第27.15節）。
+ *
+ * @remarks 項目のまとまり（`names` など）ごとに、入れたときの値と Google の今の値を比べる（人が Google で直した項目を上書きしないため）
+ */
+export interface PeoplePerson {
+  names: { unstructuredName: string; phoneticFullName: string }[];
+  /** 英語の氏名（第27.5.1節）。 */
+  nicknames: { value: string }[];
+  /** 会社。英語の表記があれば 2 つ目に `type: 'English'` で入れる。 */
+  organizations: { name: string; department: string; title: string; type: string }[];
+  phoneNumbers: { value: string; type: string }[];
+  emailAddresses: { value: string; type: string }[];
+  addresses: { streetAddress: string; postalCode: string; type: string }[];
+  urls: { value: string; type: string }[];
+}
+
+/** {@link PeoplePerson} の項目のまとまりの名前。 */
+export type PeopleField = keyof PeoplePerson;
+
+/** 入れる項目のまとまりの並び（People API の `personFields`）。 */
+export const PEOPLE_FIELDS: readonly PeopleField[] = ['names', 'nicknames', 'organizations', 'phoneNumbers', 'emailAddresses', 'addresses', 'urls'];
+
+/**
+ * 本人の Google の連絡先（仕様書 第27.15節）。権限は `contacts`（使う人だけに、使うときに求める）。
+ *
+ * @remarks M2Office が入れた連絡先と、M2Office のラベルだけを扱う。ほかの連絡先は読まない・直さない・消さない
+ */
+export interface ContactsConnector {
+  /** その名前のラベル（連絡先のグループ）を探し、無ければ作る。ラベルの番号（`contactGroups/…`）を返す。 */
+  ensureGroup(p: ConnectorPrincipal, name: string): Promise<string>;
+  /** 連絡先を作り、ラベルに入れる。 */
+  create(p: ConnectorPrincipal, person: PeoplePerson, group: string): Promise<{ resourceName: string }>;
+  /** 入れた連絡先の今の値。Google の側で消されていれば `null`。 */
+  get(p: ConnectorPrincipal, resourceName: string): Promise<{ person: PeoplePerson; etag: string } | null>;
+  /** 項目のまとまりのうち、渡したものだけを新しくする。 */
+  update(p: ConnectorPrincipal, resourceName: string, etag: string, patch: Partial<PeoplePerson>): Promise<void>;
+  /** 連絡先を消す。もう無ければ `false`。 */
+  remove(p: ConnectorPrincipal, resourceName: string): Promise<boolean>;
+}
+
 /** Meet の会議の文字起こし。 */
 export interface MeetTranscript {
   conference: { id: string; title: string; startedAt: string; endedAt: string };
@@ -386,4 +427,6 @@ export interface WorkspaceConnector {
   directory: DirectoryConnector;
   meet: MeetConnector;
   forms: FormsConnector;
+  /** 本人の Google の連絡先（第27.15節）。 */
+  contacts: ContactsConnector;
 }

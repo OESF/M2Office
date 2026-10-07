@@ -8,3 +8,4 @@ export * from './sections.js';
 export * from './search.js';
 export * from './expand.js';
 export * from './consolidate.js';
+export * from './embed.js';
