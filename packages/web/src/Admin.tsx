@@ -460,6 +460,7 @@ function Machine() {
             )}
           </div>
           <MachineUpdate data={data.update} onChanged={load} onError={setError} />
+          <MachineMaintenance data={data.maintenance} heartbeat={data.heartbeat} onChanged={load} onError={setError} />
         </>
       )}
     </>
@@ -491,6 +492,52 @@ function MachineUpdate({ data, onChanged, onError }: { data: MachineView['update
       {s?.auto && (data.heldUntil
         ? <button className="btn ghost small" onClick={() => hold(null)}>止めるのをやめる</button>
         : <button className="btn ghost small" onClick={() => hold(7)}>7 日延ばす</button>)}
+    </div>
+  );
+}
+
+/**
+ * 「機械」の遠隔の保守と、運営への稼働の知らせ（仕様書 第8.6.4節・第8.6.8節）。
+ *
+ * @remarks 遠隔の保守は、ふだん閉じておき、会社の管理者が時間を限って開ける（運営は自分で開けられない）。開けた回と、つないだ相手を出す
+ */
+function MachineMaintenance({ data, heartbeat, onChanged, onError }: {
+  data: MachineView['maintenance']; heartbeat: MachineView['heartbeat']; onChanged: () => void; onError: (m: string) => void;
+}) {
+  const [hours, setHours] = useState(4);
+  const run = (p: Promise<unknown>) => void p.then(onChanged).catch((e) => onError(describeError(e, '変えられませんでした')));
+  if (!data.configured && !heartbeat.configured) return null;
+  return (
+    <div className="card">
+      <h3>遠隔の保守と稼働の知らせ</h3>
+      <dl className="kv">
+        {data.configured && (
+          <>
+            <dt>遠隔の保守</dt>
+            <dd>{data.until ? <span className="badge warn">{whenText(data.until)} まで開けています{data.open ? '' : '（開けている途中）'}</span> : <span className="muted">閉じています</span>}</dd>
+            {data.sessions.length > 0 && <><dt>これまで</dt><dd><ul className="plain small">{data.sessions.slice(0, 5).map((s) => (
+              <li key={s.openedAt}>{whenText(s.openedAt)}〜{s.closedAt ? whenText(s.closedAt) : ''} {s.peers.length ? `つないだ相手: ${s.peers.join('、')}` : 'つないだ相手なし'}</li>
+            ))}</ul></dd></>}
+          </>
+        )}
+        {heartbeat.configured && (
+          <>
+            <dt>運営への稼働の知らせ</dt>
+            <dd>{heartbeat.off ? <span className="muted">切っています</span> : <>送っています {heartbeat.lastAt && <span className="small muted">最後 {whenText(heartbeat.lastAt)} {heartbeat.lastOk ? '' : `届きませんでした${heartbeat.lastError ? `（${heartbeat.lastError}）` : ''}`}</span>}</>}</dd>
+          </>
+        )}
+      </dl>
+      <div className="row wrap">
+        {data.configured && (data.until
+          ? <button className="btn ghost small" onClick={() => run(api.admin.machineMaintenance(null))}>閉じる</button>
+          : <>
+            <select value={hours} onChange={(e) => setHours(Number(e.target.value))} aria-label="開けておく時間">
+              {[1, 2, 4, 8, 24].map((h) => <option key={h} value={h}>{h} 時間</option>)}
+            </select>
+            <button className="btn small" onClick={() => run(api.admin.machineMaintenance(hours))}>遠隔の保守を開ける</button>
+          </>)}
+        {heartbeat.configured && <button className="btn ghost small" onClick={() => run(api.admin.machineHeartbeat(heartbeat.off))}>{heartbeat.off ? '稼働の知らせを送る' : '稼働の知らせを切る'}</button>}
+      </div>
     </div>
   );
 }

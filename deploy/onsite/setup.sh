@@ -172,19 +172,38 @@ if [ -n "$ALLOWED_SIGNERS_SOURCE" ]; then
 fi
 ask UPDATE_HOUR '自動の更新の時刻（時。0〜23）' "${UPDATE_HOUR:-3}"
 
+say '7. 遠隔の保守と稼働の知らせ（保守の契約に合わせて決める。仕様書 第8.6.4節・第8.6.8節）'
+info '遠隔の保守: 運営の Tailscale にこの機械を登録し、ふだんは閉じておく。会社の管理者が「機械」で時間を限って開ける'
+MAINTENANCE=no
+if yes_no '遠隔の保守を入れますか' "$( [ "${MAINTENANCE_SAVED:-no}" = yes ] && echo y || echo n)"; then
+  MAINTENANCE=yes
+  ask TAILSCALE_AUTHKEY '運営からもらった Tailscale の鍵（登録済みなら空）' '' secret
+fi
+MAINTENANCE_SAVED=$MAINTENANCE
+info '稼働の知らせ: 1 時間に 1 回、件数と状態だけを運営の受け口へ送る（人の名前や業務の中身は送らない）'
+ask HEARTBEAT_URL '運営の受け口（https。送らないなら空）' "$(env_value M2O_HEARTBEAT_URL)"
+if [ -n "$HEARTBEAT_URL" ]; then
+  ask HEARTBEAT_TOKEN '運営からもらった鍵' "$(env_value M2O_HEARTBEAT_TOKEN)" secret
+  ask MACHINE_ID '機械の番号（運営が付けた呼び名。会社の名前は入れない）' "$(env_value M2O_MACHINE_ID)"
+else
+  HEARTBEAT_TOKEN=''; MACHINE_ID=''
+fi
+
 say '答えの確かめ'
 info "会社: $COMPANY_NAME（$SUBDOMAIN）／ ドメイン: $GW_DOMAIN ／ 管理者: $ADMIN_EMAIL"
 info "名前: https://$HOST ／ 証明書: $TLS_MODE ${DNS_PROVIDER:+（$DNS_PROVIDER）}"
 info "データ: $DATA_DIR ／ 控え: ${BACKUP_DIR:-（取らない）}"
 info "ローカル AI: ${LOCAL_LLM_URL:-（使わない）} ${LOCAL_LLM_MODEL} ／ Gemini の鍵: $( [ -n "$GEMINI_API_KEY" ] && echo 入れる || echo 入れない)"
-info "自動の更新: $AUTO_UPDATE（${UPDATE_HOUR} 時）"
+info "自動の更新: $AUTO_UPDATE（${UPDATE_HOUR} 時）／ 遠隔の保守: $MAINTENANCE ／ 稼働の知らせ: $( [ -n "$HEARTBEAT_URL" ] && echo 送る || echo 送らない)"
 yes_no 'この答えで入れますか' y || exit 1
 
 # ---- 2. 前提のソフト（Homebrew） ----
 say '前提のソフトを確かめます'
 command -v brew >/dev/null || die 'Homebrew がありません。https://brew.sh の手順で入れてから走らせ直してください'
 missing=''
-for f in "$NODE_FORMULA" "$PG_FORMULA" pgvector caddy; do
+formulas="$NODE_FORMULA $PG_FORMULA pgvector caddy"
+[ "$MAINTENANCE" = yes ] && formulas="$formulas tailscale"
+for f in $formulas; do
   brew list --versions "$f" >/dev/null 2>&1 || missing="$missing $f"
 done
 if [ -n "$missing" ]; then
@@ -197,6 +216,8 @@ NODE_BIN="$(brew --prefix "$NODE_FORMULA")/bin/node"
 NPM_DIR="$(brew --prefix "$NODE_FORMULA")/bin"
 PG_BIN="$(brew --prefix "$PG_FORMULA")/bin"
 CADDY_BIN="$(brew --prefix caddy)/bin/caddy"
+TAILSCALE_BIN=''
+[ "$MAINTENANCE" = yes ] && TAILSCALE_BIN="$(brew --prefix tailscale)/bin/tailscale"
 info "Node.js $("$NODE_BIN" --version) ／ PostgreSQL $("$PG_BIN/postgres" --version | awk '{print $3}') ／ Caddy $("$CADDY_BIN" version | awk '{print $1}')"
 if [ "$TLS_MODE" = name ] && ! "$CADDY_BIN" list-modules 2>/dev/null | grep -q "^dns.providers.$DNS_PROVIDER\$"; then
   info "Caddy に DNS の事業者（$DNS_PROVIDER）のつなぎを足します"
@@ -251,7 +272,7 @@ answers="$work/answers"
 {
   for k in INSTALL_DIR REPO_DIR RELEASE_DIR ENV_FILE CADDYFILE DATA_DIR BACKUP_DIR API_PORT DB_PORT HOST SUBDOMAIN ACME_EMAIL \
     NODE_BIN PG_BIN CADDY_BIN LOCAL_LLM_URL LOCAL_LLM_MODEL LOCAL_LLM_EMBED_MODEL GEMINI_API_KEY GOOGLE_LOGIN_CLIENT_ID \
-    GOOGLE_LOGIN_CLIENT_SECRET SECRET_KEY DB_APP_PASSWORD DB_OWNER_PASSWORD UPDATE_HOUR; do
+    GOOGLE_LOGIN_CLIENT_SECRET SECRET_KEY DB_APP_PASSWORD DB_OWNER_PASSWORD UPDATE_HOUR HEARTBEAT_URL HEARTBEAT_TOKEN MACHINE_ID; do
     printf '%s=%s\n' "$k" "${!k}"
   done
   printf 'TLS_BLOCK=%s\n' "$(tls_block)"
@@ -271,7 +292,7 @@ conf="$work/setup.conf"
   printf '# M2Office ローカルの形の答え（setup.sh が書く。秘密の値は m2office.env にだけ置く）\n'
   for k in COMPANY_NAME SUBDOMAIN GW_DOMAIN ADMIN_EMAIL HOST TLS_MODE DNS_PROVIDER ACME_EMAIL DATA_DIR BACKUP_DIR API_PORT DB_PORT \
     LOCAL_LLM_URL LOCAL_LLM_MODEL LOCAL_LLM_EMBED_MODEL ALLOWED_SIGNERS_SOURCE ALLOWED_SIGNERS AUTO_UPDATE UPDATE_HOUR \
-    INSTALL_DIR REPO_DIR RELEASE_DIR ENV_FILE NODE_BIN NPM_DIR PG_BIN CADDY_BIN SERVICE_USER; do
+    INSTALL_DIR REPO_DIR RELEASE_DIR ENV_FILE NODE_BIN NPM_DIR PG_BIN CADDY_BIN SERVICE_USER MAINTENANCE MAINTENANCE_SAVED TAILSCALE_BIN; do
     printf "%s='%s'\n" "$k" "$(printf '%s' "${!k}" | sed "s/'/'\\\\''/g")"
   done
 } > "$conf"
@@ -279,6 +300,8 @@ sudo install -m 644 -o root -g wheel "$conf" "$CONF"
 printf '{"auto":%s,"signed":%s,"hour":%s}\n' "$( [ "$AUTO_UPDATE" = yes ] && echo true || echo false)" \
   "$( [ -n "$ALLOWED_SIGNERS" ] && echo true || echo false)" "$UPDATE_HOUR" > "$work/update-settings.json"
 sudo install -m 644 -o "$SERVICE_USER" -g "$SERVICE_USER" "$work/update-settings.json" "$DATA_DIR/machine/update-settings.json"
+printf '{"configured":%s}\n' "$( [ "$MAINTENANCE" = yes ] && echo true || echo false)" > "$work/maintenance-settings.json"
+sudo install -m 644 -o "$SERVICE_USER" -g "$SERVICE_USER" "$work/maintenance-settings.json" "$DATA_DIR/machine/maintenance-settings.json"
 
 # launchd の設定を入れて（入れ直して）動かす
 load_daemon() {
@@ -326,6 +349,23 @@ if [ "$AUTO_UPDATE" = yes ]; then
 else
   sudo launchctl bootout system/jp.m2office.update >/dev/null 2>&1 || true
   sudo rm -f "$DAEMONS/jp.m2office.update.plist"
+fi
+if [ "$MAINTENANCE" = yes ]; then
+  # Tailscale の常駐を入れ、運営の Tailscale に 1 度だけ登録して、閉じておく（開けるのは会社の管理者）
+  if ! sudo launchctl print system/com.tailscale.tailscaled >/dev/null 2>&1; then
+    sudo "$(brew --prefix tailscale)/bin/tailscaled" install-system-daemon
+    sleep 3
+  fi
+  if sudo "$TAILSCALE_BIN" status 2>&1 | grep -qi 'logged out\|NeedsLogin'; then
+    [ -n "${TAILSCALE_AUTHKEY:-}" ] || die '遠隔の保守の登録には、運営からもらった Tailscale の鍵が要ります'
+    sudo "$TAILSCALE_BIN" up --authkey "$TAILSCALE_AUTHKEY" --hostname "m2o-$SUBDOMAIN" --ssh --accept-dns=false
+  fi
+  sudo "$TAILSCALE_BIN" down || true
+  load_daemon jp.m2office.maintenance
+  info '遠隔の保守: 登録して閉じました（会社の管理者が「機械」で開けます）'
+else
+  sudo launchctl bootout system/jp.m2office.maintenance >/dev/null 2>&1 || true
+  sudo rm -f "$DAEMONS/jp.m2office.maintenance.plist"
 fi
 
 # ---- 9. 動きを確かめる ----

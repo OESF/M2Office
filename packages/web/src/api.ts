@@ -2136,6 +2136,10 @@ export const api = {
     /** 今すぐ控えを取る（ワーカーが次の見回りで取る）。 */
     machineBackup: () => call<{ ok: true }>('/admin/machine/backup', { method: 'POST', body: '{}' }),
     /** 夜の自動の更新を止める（延ばす。`days`）か、止めるのをやめる（`null`）。 */
+    /** 遠隔の保守を開ける（`hours` 時間）か、閉じる（`null`）。 */
+    machineMaintenance: (hours: number | null) => call<{ until: string | null }>('/admin/machine/maintenance', { method: 'PUT', body: JSON.stringify({ hours }) }),
+    /** 運営への稼働の知らせを入れる・切る。 */
+    machineHeartbeat: (on: boolean) => call<{ on: boolean }>('/admin/machine/heartbeat', { method: 'PUT', body: JSON.stringify({ on }) }),
     machineUpdateHold: (days: number | null) => call<{ heldUntil: string | null }>('/admin/machine/update-hold', { method: 'PUT', body: JSON.stringify({ days }) }),
     /** 今月の AI の利用と上限（仕様書 第6.6.2節）。用途ごと・人ごと。費用は概算。 */
     aiUsage: () => call<AiUsageView>('/admin/ai-usage'),
@@ -2529,5 +2533,14 @@ export interface MachineView {
     last: { at: string; from: string; to: string; result: 'updated' | 'rolled-back' | 'failed' | 'none'; error?: string } | null;
     heldUntil: string | null;
   };
+  /** 遠隔の保守（仕様書 第8.6.4節）。会社の管理者が時間を限って開ける。 */
+  maintenance: {
+    configured: boolean;
+    open: boolean;
+    until: string | null;
+    sessions: { openedAt: string; by: string; until: string; closedAt: string | null; peers: string[] }[];
+  };
+  /** 運営への稼働の知らせ（仕様書 第8.6.8節）。 */
+  heartbeat: { configured: boolean; off: boolean; lastAt: string | null; lastOk: boolean | null; lastError: string | null };
 }
 

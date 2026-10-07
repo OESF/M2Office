@@ -82,3 +82,61 @@ test('更新の様子: update.sh の結果を読み、止める・延ばす印�
   assert.equal(first?.to, 'v0.19.0');
   assert.equal(await takeUnnotifiedUpdateFailure(dir), null);
 });
+
+test('遠隔の保守の印と、閉じた回を 1 度だけ監査ログに写す（第8.6.4節）', async () => {
+  const { mkdtemp, writeFile } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { readMaintenanceStatus, requestMaintenance, takeClosedMaintenanceSessions } = await import('../src/index.js');
+  const dir = await mkdtemp(join(tmpdir(), 'm2o-maint-'));
+  assert.equal((await readMaintenanceStatus(dir)).configured, false);
+  await writeFile(join(dir, 'maintenance-settings.json'), JSON.stringify({ configured: true }));
+  const now = new Date('2026-10-08T01:00:00Z');
+  const until = await requestMaintenance(dir, 4, 'u1', now);
+  assert.equal(until, '2026-10-08T05:00:00.000Z');
+  assert.equal(await requestMaintenance(dir, 99, 'u1', now), '2026-10-09T01:00:00.000Z');
+  assert.equal((await readMaintenanceStatus(dir, now)).until, '2026-10-09T01:00:00.000Z');
+  assert.equal(await requestMaintenance(dir, null, 'u1', now), null);
+  await writeFile(join(dir, 'maintenance.json'), JSON.stringify({ open: false, sessions: [
+    { openedAt: '2026-10-08T01:00:00Z', by: 'u1', until: '2026-10-08T05:00:00Z', closedAt: '2026-10-08T02:00:00Z', peers: ['ops'] },
+    { openedAt: '2026-10-08T03:00:00Z', by: 'u1', until: '2026-10-08T05:00:00Z', closedAt: null, peers: [] },
+  ] }));
+  assert.deepEqual((await takeClosedMaintenanceSessions(dir)).map((s) => s.peers), [['ops']]);
+  assert.deepEqual(await takeClosedMaintenanceSessions(dir), []);
+});
+
+test('稼働の知らせ: 件数と状態だけを送り、名前や業務の中身は送らない。切っていれば送らない（第8.6.8節）', async () => {
+  const { mkdtemp } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { heartbeatConfigFromEnv, heartbeatPayload, sendHeartbeat, setHeartbeatOff, readHeartbeatStatus } = await import('../src/index.js');
+  assert.equal(heartbeatConfigFromEnv({ M2O_HEARTBEAT_URL: 'http://plain', M2O_HEARTBEAT_TOKEN: 't' }), null);
+  const cfg = heartbeatConfigFromEnv({ M2O_HEARTBEAT_URL: 'https://ops.example/hb', M2O_HEARTBEAT_TOKEN: 'tok', M2O_MACHINE_ID: 'm-001' })!;
+  const status = {
+    version: '0.18.0', checkedAt: '2026-10-08T01:00:00Z',
+    database: { ok: true, ms: 3, error: null }, worker: { ok: true, lastSeen: null, version: '0.18.0' },
+    entrance: { host: 'office.secret-company.example', certExpires: '2026-12-01T00:00:00Z', certDaysLeft: 54, error: null },
+    localAi: { configured: true, ok: false, models: ['secret-model'], error: 'connect ECONNREFUSED' },
+    disk: { data: { free: 100, total: 200 }, backup: null },
+    backup: { configured: true, status: { last: { name: 'x', at: '2026-10-08T00:00:00Z', ok: true, dbBytes: 1, error: null }, lastOk: null, restoreTest: null } },
+    update: { settings: null, last: null, history: [], heldUntil: null },
+    maintenance: { configured: false, open: false, until: null, sessions: [] },
+    heartbeat: { configured: true, off: false, lastAt: null, lastOk: null, lastError: null },
+  } as never;
+  const body = JSON.stringify(heartbeatPayload(status, cfg.machineId));
+  assert.doesNotMatch(body, /secret-company|secret-model|ECONNREFUSED/);
+  assert.match(body, /"machineId":"m-001"/);
+  const dir = await mkdtemp(join(tmpdir(), 'm2o-hb-'));
+  const sent: { auth: string | null }[] = [];
+  const fake = (async (_url: string, init: RequestInit) => { sent.push({ auth: new Headers(init.headers).get('authorization') }); return new Response('{}', { status: 200 }); }) as typeof fetch;
+  assert.equal(await sendHeartbeat(dir, cfg, async () => status, fake), true);
+  assert.equal(sent[0]?.auth, 'Bearer tok');
+  assert.equal((await readHeartbeatStatus(dir, cfg)).lastOk, true);
+  await setHeartbeatOff(dir, true, 'u1');
+  assert.equal(await sendHeartbeat(dir, cfg, async () => status, fake), false);
+  assert.equal(sent.length, 1);
+  const down = (async () => { throw new Error('届きません'); }) as typeof fetch;
+  await setHeartbeatOff(dir, false, 'u1');
+  assert.equal(await sendHeartbeat(dir, cfg, async () => status, down), false);
+  assert.equal((await readHeartbeatStatus(dir, cfg)).lastError, '届きません');
+});

@@ -24,6 +24,7 @@ const ANSWERS = {
   NODE_BIN: '/opt/homebrew/opt/node@22/bin/node', PG_BIN: '/opt/homebrew/opt/postgresql@17/bin', CADDY_BIN: '/opt/homebrew/opt/caddy/bin/caddy',
   LOCAL_LLM_URL: 'http://127.0.0.1:11434/v1', LOCAL_LLM_MODEL: 'gemma3', LOCAL_LLM_EMBED_MODEL: 'embeddinggemma', GEMINI_API_KEY: '',
   GOOGLE_LOGIN_CLIENT_ID: '', GOOGLE_LOGIN_CLIENT_SECRET: '', SECRET_KEY: 'k'.repeat(64), DB_APP_PASSWORD: 'app-pass', DB_OWNER_PASSWORD: 'owner-pass', UPDATE_HOUR: '3',
+  HEARTBEAT_URL: 'https://ops.example/heartbeat', HEARTBEAT_TOKEN: 'hb-token', MACHINE_ID: 'm-001',
 };
 
 function render(extra: Record<string, string>) {
@@ -35,7 +36,7 @@ function render(extra: Record<string, string>) {
 }
 
 test('スクリプトの文法', () => {
-  for (const f of ['setup.sh', 'update.sh']) execFileSync('/bin/bash', ['-n', join(onsite, f)]);
+  for (const f of ['setup.sh', 'update.sh', 'maintenance.sh']) execFileSync('/bin/bash', ['-n', join(onsite, f)]);
 });
 
 test('雛形がすべて埋まり、launchd の設定は正しい形', () => {
@@ -51,7 +52,8 @@ test('雛形がすべて埋まり、launchd の設定は正しい形', () => {
   assert.match(caddy, /root \* \/Library\/M2Office\/app\/dist-release\/web/);
   assert.match(caddy, /import \/Library\/M2Office\/front\.d\/\*\.caddy/);
   const plists = readdirSync(join(out, 'launchd'));
-  assert.deepEqual(plists.sort(), ['jp.m2office.api.plist', 'jp.m2office.caddy.plist', 'jp.m2office.postgres.plist', 'jp.m2office.update.plist', 'jp.m2office.worker.plist']);
+  assert.deepEqual(plists.sort(), ['jp.m2office.api.plist', 'jp.m2office.caddy.plist', 'jp.m2office.maintenance.plist', 'jp.m2office.postgres.plist', 'jp.m2office.update.plist', 'jp.m2office.worker.plist']);
+  assert.match(env, /^M2O_HEARTBEAT_URL=https:\/\/ops\.example\/heartbeat$/m);
   for (const p of plists) {
     const xml = readFileSync(join(out, 'launchd', p), 'utf8');
     assert.doesNotMatch(xml, /\{\{/, p);
@@ -71,4 +73,25 @@ test('IP の形は、機械の認証局で証明書を出す。埋められな�
   const answers = join(dir, 'answers');
   writeFileSync(answers, 'HOST=x');
   assert.throws(() => execFileSync('/bin/bash', [join(onsite, 'setup.sh'), '--render-only', join(dir, 'out'), '--answers', answers], { env: { ...process.env, NODE_BIN: process.execPath }, stdio: 'pipe' }));
+});
+
+test('遠隔の保守: 会社の管理者の印の期限まで開け、切れたら閉じ、話した相手を回ごとに残す', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'm2o-maint-'));
+  const status = join(dir, 'ts.json');
+  const run = (running: 0 | 1, nowMs: number) => execFileSync(process.execPath, [join(onsite, 'maintenance-state.mjs'), dir, String(running), status], { env: { ...process.env, M2O_NOW_MS: String(nowMs) } }).toString();
+  const t0 = Date.parse('2026-10-08T01:00:00Z');
+  writeFileSync(status, '{}');
+  assert.equal(run(0, t0), 'none');
+  writeFileSync(join(dir, 'maintenance-request.json'), JSON.stringify({ until: '2026-10-08T05:00:00Z', by: 'u-admin' }));
+  assert.equal(run(0, t0), 'up');
+  writeFileSync(status, JSON.stringify({ BackendState: 'Running', Peer: { a: { HostName: 'ops-laptop', Active: true }, b: { HostName: 'idle', Active: false } } }));
+  assert.equal(run(1, t0 + 60_000), 'none');
+  assert.equal(run(1, Date.parse('2026-10-08T05:00:01Z')), 'down');
+  const st = JSON.parse(readFileSync(join(dir, 'maintenance.json'), 'utf8'));
+  assert.equal(st.open, false);
+  assert.equal(st.sessions.length, 1);
+  assert.equal(st.sessions[0].by, 'u-admin');
+  assert.deepEqual(st.sessions[0].peers, ['ops-laptop']);
+  assert.ok(st.sessions[0].closedAt);
+  assert.equal(run(0, Date.parse('2026-10-08T06:00:00Z')), 'none');
 });

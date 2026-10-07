@@ -12,6 +12,8 @@ import { join } from 'node:path';
 import pg from 'pg';
 import { diskSpace, readBackupStatus, type BackupStatus } from './backup.js';
 import { readUpdateStatus, type UpdateStatus } from './update.js';
+import { readMaintenanceStatus, type MaintenanceStatus } from './maintenance.js';
+import { readHeartbeatStatus, type HeartbeatConfig, type HeartbeatStatus } from './heartbeat.js';
 
 /** ワーカーの知らせが、これより古ければ止まっているとみなす（ミリ秒）。 */
 const WORKER_STALE_MS = 3 * 60_000;
@@ -30,6 +32,8 @@ export interface MachineConfig {
   host: string | null;
   /** ローカル AI の口とモデル。無ければ `null`。 */
   localLlm: { url: string; model: string | null } | null;
+  /** 運営への稼働の知らせの受け口（第8.6.8節）。無ければ `null`。 */
+  heartbeat?: HeartbeatConfig | null;
 }
 
 /** 「機械」の様子。 */
@@ -44,6 +48,10 @@ export interface MachineStatus {
   backup: { configured: boolean; status: BackupStatus | null };
   /** 更新（第8.6.4節）。update.sh が書いた結果と、止めている期限。 */
   update: UpdateStatus;
+  /** 遠隔の保守（第8.6.4節）。 */
+  maintenance: MaintenanceStatus;
+  /** 運営への稼働の知らせ（第8.6.8節）。 */
+  heartbeat: HeartbeatStatus;
 }
 
 /** ワーカーが動いていることを書く（見回りのたび。30 秒より短い間隔では書かない）。 */
@@ -127,5 +135,7 @@ export async function machineStatus(cfg: MachineConfig, now: Date = new Date()):
     disk: { data: await diskSpace(cfg.filesDir), backup: cfg.backupDir ? await diskSpace(cfg.backupDir) : null },
     backup: { configured: !!cfg.backupDir, status: cfg.backupDir ? await readBackupStatus(cfg.backupDir) : null },
     update: await readUpdateStatus(cfg.dir, now),
+    maintenance: await readMaintenanceStatus(cfg.dir, now),
+    heartbeat: await readHeartbeatStatus(cfg.dir, cfg.heartbeat ?? null),
   };
 }

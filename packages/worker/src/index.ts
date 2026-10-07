@@ -15,7 +15,7 @@ import {
   RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, GoogleContactsService, KnowledgeEmbedder, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, JGrantsApi, MockJGrants, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, MEMBER_LINE_SEND, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger,
   NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
-  defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator, aiUsageMeterFromEnv, enterAiUsage, withAiUsage, setEnqueueAiGuard, AutoMinutes, MINUTES_AGENT_ID, appPath, backupConfigFromEnv, machineDir, readBackupStatus, takeUnnotifiedUpdateFailure, restoreTest, runBackup, takeBackupRequest, writeWorkerBeat
+  defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator, aiUsageMeterFromEnv, enterAiUsage, withAiUsage, setEnqueueAiGuard, AutoMinutes, MINUTES_AGENT_ID, appPath, backupConfigFromEnv, machineDir, readBackupStatus, takeUnnotifiedUpdateFailure, takeClosedMaintenanceSessions, heartbeatConfigFromEnv, sendHeartbeat, HEARTBEAT_INTERVAL_MS, machineStatus, machineConfigFromEnv, restoreTest, runBackup, takeBackupRequest, writeWorkerBeat
 } from '@m2office/core';
 import { canRunAgent, fileInputKey } from '@m2office/shared';
 import { fileURLToPath } from 'node:url';
@@ -535,6 +535,9 @@ let lastNoticeRemind = 0;
 const onsite = deploymentFromEnv(process.env) === 'onsite';
 const backupCfg = onsite ? backupConfigFromEnv(process.env) : null;
 let lastUpdateCheck = 0;
+// 運営への稼働の知らせ（第8.6.8節）。受け口と鍵を入れた機械だけ
+const heartbeatCfg = onsite ? heartbeatConfigFromEnv(process.env) : null;
+let lastHeartbeat = 0;
 let lastBackupCheck = 0;
 
 /** 機械の知らせを、会社の管理者に届ける（ローカルの形は 1 社。第8.6.7節）。 */
@@ -622,6 +625,27 @@ while (running) {
     } catch (err) {
       log.warn('控えの見回りで例外が発生しました', { err });
     }
+  }
+  // 遠隔の保守の閉じた回を、会社の監査ログに残す（開けた時刻・つないだ相手・閉じた時刻。第8.6.4節）
+  if (onsite && Date.now() - lastUpdateCheck >= 60_000) {
+    try {
+      for (const s of await takeClosedMaintenanceSessions(machineDir(process.env))) {
+        for (const tenantId of await repo.listTenantIds()) {
+          await repo.appendAudit({
+            id: randomUUID(), tenantId, actorType: 'system', actorId: 'machine', action: 'machine.maintenance_session', targetType: 'machine', targetId: 'maintenance',
+            detail: { openedAt: s.openedAt, openedBy: s.by, closedAt: s.closedAt, peers: s.peers }, occurredAt: s.closedAt ?? new Date().toISOString(),
+          });
+        }
+      }
+    } catch (err) {
+      log.warn('遠隔の保守の記録で例外が発生しました', { err });
+    }
+  }
+  // 運営への稼働の知らせ（1 時間に 1 回。件数と状態だけ。第8.6.8節）
+  if (heartbeatCfg && Date.now() - lastHeartbeat >= HEARTBEAT_INTERVAL_MS) {
+    lastHeartbeat = Date.now();
+    const sent = await sendHeartbeat(machineDir(process.env), heartbeatCfg, () => machineStatus(machineConfigFromEnv(process.env, appVersion()))).catch(() => false);
+    if (!sent) log.debug('稼働の知らせを送れませんでした（切っているか、受け口に届きません）');
   }
   // 更新（機械の上の update.sh が行う）に失敗していたら、会社の管理者に 1 度だけ知らせる（第8.6.4節）
   if (onsite && Date.now() - lastUpdateCheck >= 60_000) {

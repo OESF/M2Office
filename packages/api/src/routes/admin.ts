@@ -14,7 +14,7 @@ import {
   isValidInvoiceNumber, parsePresentationId, type AutomationPolicy, type CompanyInfo, type Role, type SlideTemplate, type TenantSettings,
   type AuditEvent, type User, type WritingStyle, DEFAULT_AI_PER_USER_SHARE
 } from '@m2office/shared';
-import { holdUpdates, machineDir, semanticSearchEnabled,
+import { readMaintenanceStatus, requestMaintenance, setHeartbeatOff, MAINTENANCE_DEFAULT_HOURS, MAINTENANCE_MAX_HOURS, holdUpdates, machineDir, semanticSearchEnabled,
   DEFAULT_STANDARD_MINUTES, GOOGLE_DATA_RETENTION_DAYS, KNOWLEDGE_MAX_CHARS,
   describeRule, scheduleBlocker, scheduleChecks, stepLabel, toolGoogleScopes, type AuditQuery, jstMonth, appPath, backupConfigFromEnv, machineConfigFromEnv, machineStatus, requestBackup
 } from '@m2office/core';
@@ -202,6 +202,35 @@ export function adminRoute(deps: AppDeps) {
     const until = await holdUpdates(machineDir(process.env), days, user.id);
     await audit(deps, tenant.id, user.id, until ? 'machine.update_hold' : 'machine.update_resume', 'machine', 'update', { until });
     return c.json({ heldUntil: until });
+  });
+
+  /**
+   * 遠隔の保守を開ける（本文 `hours`。1〜24 時間）か、閉じる（`null`）（第8.6.4節）。会社の管理者だけ。運営は自分で開けられない。
+   *
+   * @remarks トンネルの開け閉めは機械の上の maintenance.sh が行う。ここは印を書くだけ
+   */
+  app.put('/machine/maintenance', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    if (deps.ai.deployment() !== 'onsite') return c.json({ error: 'ローカルの形だけで使えます' }, 404);
+    const dir = machineDir(process.env);
+    if (!(await readMaintenanceStatus(dir)).configured) return c.json({ error: '遠隔の保守は入れていません（導入のときに入れます）' }, 400);
+    const b = await c.req.json<{ hours?: unknown }>().catch(() => ({} as { hours?: unknown }));
+    const hours = b.hours === null ? null : Number(b.hours ?? MAINTENANCE_DEFAULT_HOURS);
+    if (hours !== null && !(hours >= 1 && hours <= MAINTENANCE_MAX_HOURS)) return c.json({ error: `開けておく時間は 1〜${MAINTENANCE_MAX_HOURS} 時間にしてください` }, 400);
+    const until = await requestMaintenance(dir, hours, user.id);
+    await audit(deps, tenant.id, user.id, until ? 'machine.maintenance_open' : 'machine.maintenance_close', 'machine', 'maintenance', { until });
+    return c.json({ until });
+  });
+
+  /** 運営への稼働の知らせを切る（本文 `on: false`）か、入れる（`on: true`）（第8.6.8節）。 */
+  app.put('/machine/heartbeat', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    if (deps.ai.deployment() !== 'onsite') return c.json({ error: 'ローカルの形だけで使えます' }, 404);
+    const b = await c.req.json<{ on?: unknown }>().catch(() => ({} as { on?: unknown }));
+    if (typeof b.on !== 'boolean') return c.json({ error: 'on を指定してください' }, 400);
+    await setHeartbeatOff(machineDir(process.env), !b.on, user.id);
+    await audit(deps, tenant.id, user.id, b.on ? 'machine.heartbeat_on' : 'machine.heartbeat_off', 'machine', 'heartbeat', {});
+    return c.json({ on: b.on });
   });
 
   /** 今すぐ控えを取る（ワーカーが次の見回りで取る。第8.6.5節）。控えの置き場が無ければ 400。 */

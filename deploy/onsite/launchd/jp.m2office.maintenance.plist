@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- M2Office の遠隔の保守（仕様書 第8.6.4節）。会社の管理者が「機械」で開けた印を 30 秒ごとに見て、Tailscale を開け閉めする。
+     トンネルに触れるため管理者の権限で動かす。遠隔の保守を入れた機械だけ。setup.sh が雛形の名前を埋める -->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>jp.m2office.maintenance</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/bash</string>
+		<string>{{REPO_DIR}}/deploy/onsite/maintenance.sh</string>
+		<string>--config</string>
+		<string>{{INSTALL_DIR}}/setup.conf</string>
+	</array>
+	<key>StartInterval</key>
+	<integer>30</integer>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardOutPath</key>
+	<string>{{DATA_DIR}}/logs/maintenance.log</string>
+	<key>StandardErrorPath</key>
+	<string>{{DATA_DIR}}/logs/maintenance.log</string>
+</dict>
+</plist>
