@@ -6,6 +6,7 @@
  */
 
 import pg from 'pg';
+import { createPool } from '../repository/pool.js';
 import type { HrEmployee, HrTask, HrTerms } from '@m2office/shared';
 
 /** 従業員を保存するときの値（ID と更新の日時は置き場が持つ）。 */
@@ -105,7 +106,7 @@ export class PostgresHrStore implements HrStore {
   private readonly pool: pg.Pool;
 
   constructor(connectionString: string) {
-    this.pool = new pg.Pool({ connectionString, max: 4 });
+    this.pool = createPool(connectionString, { max: 4, name: 'hr' });
   }
 
   async close(): Promise<void> {

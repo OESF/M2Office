@@ -6,6 +6,7 @@
  */
 
 import pg from 'pg';
+import { createPool } from '../repository/pool.js';
 import type { Notice } from '@m2office/shared';
 
 /** 受け取った人ごとの状態。 */
@@ -88,7 +89,7 @@ export class PostgresNoticeStore implements NoticeStore {
   private readonly pool: pg.Pool;
 
   constructor(connectionString: string) {
-    this.pool = new pg.Pool({ connectionString, max: 2 });
+    this.pool = createPool(connectionString, { max: 2, name: 'notices' });
   }
 
   async close(): Promise<void> {

@@ -6,6 +6,7 @@
 
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
+import { createPool } from '../repository/pool.js';
 import type { AnnouncementChannel, AnnouncementOutput, AnnouncementStatus, AnnouncementTexts } from '@m2office/shared';
 
 /** 置き場のお知らせ（承認した指紋を含む）。 */
@@ -88,7 +89,7 @@ export class PostgresAnnouncementStore implements AnnouncementStore {
   private readonly pool: pg.Pool;
 
   constructor(connectionString: string) {
-    this.pool = new pg.Pool({ connectionString, max: 4 });
+    this.pool = createPool(connectionString, { max: 4, name: 'announcements' });
   }
 
   async close(): Promise<void> {

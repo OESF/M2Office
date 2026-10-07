@@ -12,6 +12,7 @@
 
 import { createHash, randomUUID } from 'node:crypto';
 import pg from 'pg';
+import { createPool } from '../repository/pool.js';
 import type { LlmProvider } from '../llm/provider.js';
 import { aiAvailable } from '../llm/unconfigured.js';
 import type { Repository } from '../repository/types.js';
@@ -567,7 +568,7 @@ export class PostgresBulkMailStore implements BulkMailStore {
   private readonly pool: pg.Pool;
 
   constructor(connectionString: string) {
-    this.pool = new pg.Pool({ connectionString, max: 2 });
+    this.pool = createPool(connectionString, { max: 2, name: 'cards/bulk' });
   }
 
   async close(): Promise<void> {

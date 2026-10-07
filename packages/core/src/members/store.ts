@@ -7,6 +7,7 @@
 
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
+import { createPool } from '../repository/pool.js';
 import type { MemberAudience, MemberMessage, MemberMessageStatus, MemberPointKind, MemberRank, MemberReward } from '@m2office/shared';
 
 /** 置き場に持つ会員（数は記録から求めたもの）。 */
@@ -140,7 +141,7 @@ export class PostgresMemberStore implements MemberStore {
   private readonly pool: pg.Pool;
 
   constructor(connectionString: string) {
-    this.pool = new pg.Pool({ connectionString, max: 4 });
+    this.pool = createPool(connectionString, { max: 4, name: 'members' });
   }
 
   private async q<T extends pg.QueryResultRow>(tenantId: string, text: string, params: unknown[] = []): Promise<T[]> {

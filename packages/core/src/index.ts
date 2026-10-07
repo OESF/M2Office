@@ -28,6 +28,7 @@ export type {
   CredentialKind, TenantCredential, GoogleConnection, UserPhoto, AuditQuery, DecidedApproval, ConnectionSecret, UserConnection,
 } from './repository/types.js';
 export { PostgresRepository } from './repository/postgres.js';
+export { createPool, watchPool, installPoolLogger, describePoolError, type PoolOptions } from './repository/pool.js';
 export { canViewRun, type RunViewer } from './engine/run-access.js';
 export * from './conversations/rotation.js';
 export * from './voice/provider.js';

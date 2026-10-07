@@ -6,6 +6,7 @@
 
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
+import { createPool } from '../repository/pool.js';
 import {
   signageMinutes,
   type SignageAsset, type SignageBand, type SignageEntry, type SignageOrientation, type SignageReport, type SignageRotation, type SignageOrigin,
@@ -243,7 +244,7 @@ export class PostgresSignageStore implements SignageStore {
   private readonly pool: pg.Pool;
 
   constructor(connectionString: string) {
-    this.pool = new pg.Pool({ connectionString, max: 4 });
+    this.pool = createPool(connectionString, { max: 4, name: 'signage' });
   }
 
   async close(): Promise<void> {

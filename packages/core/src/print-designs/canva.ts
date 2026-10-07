@@ -8,6 +8,7 @@
  */
 
 import pg from 'pg';
+import { createPool } from '../repository/pool.js';
 import type { SecretBox } from '../secrets/box.js';
 import { renderSvgPng } from '../columns/cover.js';
 
@@ -224,7 +225,7 @@ export interface CanvaConnectionStore {
 export class PostgresCanvaConnectionStore implements CanvaConnectionStore {
   private readonly pool: pg.Pool;
   constructor(connectionString: string) {
-    this.pool = new pg.Pool({ connectionString, max: 2 });
+    this.pool = createPool(connectionString, { max: 2, name: 'print-designs/canva' });
   }
 
   private async q<T extends pg.QueryResultRow>(tenantId: string, text: string, params: unknown[]): Promise<T[]> {

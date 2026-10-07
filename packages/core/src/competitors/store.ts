@@ -7,6 +7,7 @@
 
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
+import { createPool } from '../repository/pool.js';
 import type { CompetitorFactKind, CompetitorJob, CompetitorOrigin, CompetitorProfile, CompetitorReport } from '@m2office/shared';
 
 /** 置き場の競合 1 社（place ID・位置を含む。画面には出さない形）。 */
@@ -143,7 +144,7 @@ export class PostgresCompetitorStore implements CompetitorStore {
   private readonly pool: pg.Pool;
 
   constructor(connectionString: string) {
-    this.pool = new pg.Pool({ connectionString, max: 4 });
+    this.pool = createPool(connectionString, { max: 4, name: 'competitors' });
   }
 
   async close(): Promise<void> {

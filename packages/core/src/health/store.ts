@@ -5,6 +5,7 @@
  */
 
 import pg from 'pg';
+import { createPool } from '../repository/pool.js';
 
 /** 1 分ぶんの記録。 */
 export interface HealthBucket {
@@ -57,7 +58,7 @@ export class PostgresHealthStore implements HealthStore {
   private readonly pool: pg.Pool;
 
   constructor(connectionString: string) {
-    this.pool = new pg.Pool({ connectionString, max: 2 });
+    this.pool = createPool(connectionString, { max: 2, name: 'health' });
   }
 
   async close(): Promise<void> {

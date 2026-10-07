@@ -6,6 +6,7 @@
  */
 
 import pg from 'pg';
+import { createPool } from '../repository/pool.js';
 import type { AttClose, AttPunch, AttPunchKind, AttTotals, LeaveGrant, LeaveTake } from '@m2office/shared';
 
 const iso = (v: unknown): string => (v instanceof Date ? v.toISOString() : String(v ?? ''));
@@ -50,7 +51,7 @@ export class PostgresAttendanceStore implements AttendanceStore {
   private readonly pool: pg.Pool;
 
   constructor(connectionString: string) {
-    this.pool = new pg.Pool({ connectionString, max: 4 });
+    this.pool = createPool(connectionString, { max: 4, name: 'hr/attendance' });
   }
 
   async close(): Promise<void> {

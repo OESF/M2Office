@@ -8,6 +8,7 @@
  */
 
 import pg from 'pg';
+import { createPool } from './pool.js';
 import type {
   Approval, Artifact, AuditEvent, Job, Notification, Run, RunStep, Schedule, Session,
   StoredFile, Tenant, TenantSettings, User, UserGroup, GroupChatSpace, UserSettings,
@@ -71,7 +72,7 @@ export class PostgresRepository implements Repository {
   private readonly pool: pg.Pool;
 
   constructor(connectionString: string) {
-    this.pool = new pg.Pool({ connectionString, max: 10 });
+    this.pool = createPool(connectionString, { max: 10, name: 'repository' });
   }
 
   /** 接続を閉じる。プロセス終了時に呼ぶ。 */

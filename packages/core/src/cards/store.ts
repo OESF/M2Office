@@ -11,6 +11,7 @@
  */
 
 import pg from 'pg';
+import { createPool } from '../repository/pool.js';
 import type { CardCorners, CardFields, Contact, ContactCard, ContactChange, ContactScope } from '@m2office/shared';
 
 /** 誰として見るか。自分だけの名刺は `userId` の人のものだけが見える。 */
@@ -263,7 +264,7 @@ export class PostgresContactStore implements ContactStore {
   private readonly pool: pg.Pool;
 
   constructor(connectionString: string) {
-    this.pool = new pg.Pool({ connectionString, max: 4 });
+    this.pool = createPool(connectionString, { max: 4, name: 'cards' });
   }
 
   async close(): Promise<void> {

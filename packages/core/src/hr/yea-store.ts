@@ -5,6 +5,7 @@
  */
 
 import pg from 'pg';
+import { createPool } from '../repository/pool.js';
 import type { YeaDeclaration, YeaDeclarationView } from '@m2office/shared';
 
 const iso = (v: unknown): string | null => (v ? (v instanceof Date ? v.toISOString() : String(v)) : null);
@@ -27,7 +28,7 @@ export class PostgresYeaStore implements YeaStore {
   private readonly pool: pg.Pool;
 
   constructor(connectionString: string) {
-    this.pool = new pg.Pool({ connectionString, max: 2 });
+    this.pool = createPool(connectionString, { max: 2, name: 'hr/yea' });
   }
 
   async close(): Promise<void> {

@@ -6,6 +6,7 @@
  */
 
 import pg from 'pg';
+import { createPool } from '../repository/pool.js';
 
 /** 1 つの補足。 */
 export interface HelpNote {
@@ -36,7 +37,7 @@ export class PostgresHelpNoteStore implements HelpNoteStore {
   private readonly pool: pg.Pool;
 
   constructor(connectionString: string) {
-    this.pool = new pg.Pool({ connectionString, max: 2 });
+    this.pool = createPool(connectionString, { max: 2, name: 'help/notes' });
   }
 
   private async q<T extends pg.QueryResultRow>(tenantId: string, text: string, params: unknown[] = []): Promise<T[]> {

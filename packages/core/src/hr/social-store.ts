@@ -5,6 +5,7 @@
  */
 
 import pg from 'pg';
+import { createPool } from '../repository/pool.js';
 import type { HrFilingKind } from '@m2office/shared';
 
 const iso = (v: unknown): string => (v instanceof Date ? v.toISOString() : String(v ?? ''));
@@ -34,7 +35,7 @@ export class PostgresSocialStore implements SocialStore {
   private readonly pool: pg.Pool;
 
   constructor(connectionString: string) {
-    this.pool = new pg.Pool({ connectionString, max: 2 });
+    this.pool = createPool(connectionString, { max: 2, name: 'hr/social' });
   }
 
   async close(): Promise<void> {

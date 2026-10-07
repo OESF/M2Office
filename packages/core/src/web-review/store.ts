@@ -6,6 +6,7 @@
 
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
+import { createPool } from '../repository/pool.js';
 import type {
   WebPageMetrics, WebReviewFigures, WebReviewFinding, WebReviewFindingKind, WebReviewFindingStatus, WebReviewReport, WebReviewReportBrief,
 } from '@m2office/shared';
@@ -100,7 +101,7 @@ export class PostgresWebReviewStore implements WebReviewStore {
   private readonly pool: pg.Pool;
 
   constructor(connectionString: string) {
-    this.pool = new pg.Pool({ connectionString, max: 2 });
+    this.pool = createPool(connectionString, { max: 2, name: 'web-review' });
   }
 
   async close(): Promise<void> {

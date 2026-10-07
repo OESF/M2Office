@@ -7,6 +7,7 @@
  */
 
 import pg from 'pg';
+import { createPool } from '../repository/pool.js';
 import type { BonusPlan, HrFamilyMember, HrPayrollProfile, HrStandardPay, PayAdjustment, PayRun, PaySlip } from '@m2office/shared';
 
 /** 明細と、その回の要点（本人の画面・賃金台帳に使う）。 */
@@ -122,7 +123,7 @@ export class PostgresPayrollStore implements PayrollStore {
   private readonly pool: pg.Pool;
 
   constructor(connectionString: string) {
-    this.pool = new pg.Pool({ connectionString, max: 4 });
+    this.pool = createPool(connectionString, { max: 4, name: 'hr/payroll' });
   }
 
   async close(): Promise<void> {

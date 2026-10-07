@@ -6,6 +6,7 @@
 
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
+import { createPool } from '../repository/pool.js';
 import type { Contract, ContractKind, ContractStatus, ContractUnknownField } from '@m2office/shared';
 
 /** 置き場に持つ 1 件（担当の名前は持たない。見せるときに引く）。 */
@@ -88,7 +89,7 @@ export class PostgresContractStore implements ContractStore {
   private readonly pool: pg.Pool;
 
   constructor(connectionString: string) {
-    this.pool = new pg.Pool({ connectionString, max: 4 });
+    this.pool = createPool(connectionString, { max: 4, name: 'contracts' });
   }
 
   private async q<T extends pg.QueryResultRow>(tenantId: string, text: string, params: unknown[] = []): Promise<T[]> {

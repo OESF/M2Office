@@ -6,6 +6,7 @@
 
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
+import { createPool } from '../repository/pool.js';
 import type { ColumnSignageKind, ColumnSignageOutput, ColumnSignageScene, ColumnSignageSet, ColumnSignageStatus } from '@m2office/shared';
 
 /** 組を書き換えるときの値。 */
@@ -96,7 +97,7 @@ export class PostgresColumnSignageStore implements ColumnSignageStore {
   private readonly pool: pg.Pool;
 
   constructor(connectionString: string) {
-    this.pool = new pg.Pool({ connectionString, max: 2 });
+    this.pool = createPool(connectionString, { max: 2, name: 'columns/signage' });
   }
 
   async close(): Promise<void> {

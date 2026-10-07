@@ -7,6 +7,7 @@
 
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
+import { createPool } from '../repository/pool.js';
 import type {
   Inquiry, InquiryChannel, InquiryEvent, InquiryMailSkipped, InquiryMonthStats, InquiryParty, InquiryReply, InquiryReplyStatus, InquiryStatus, InquiryTask, InquiryTemperature,
 } from '@m2office/shared';
@@ -287,7 +288,7 @@ export class PostgresInquiryStore implements InquiryStore {
   private readonly pool: pg.Pool;
 
   constructor(connectionString: string) {
-    this.pool = new pg.Pool({ connectionString, max: 4 });
+    this.pool = createPool(connectionString, { max: 4, name: 'inquiries' });
   }
 
   async close(): Promise<void> {

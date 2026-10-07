@@ -6,6 +6,7 @@
 
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
+import { createPool } from '../repository/pool.js';
 import type {
   ColumnPhoto, ColumnReviewItem, ColumnSource, ColumnThemeSource, ColumnThemeStatus, WebColumn, WebColumnCover, WebColumnStatus, WebColumnTheme, WebColumnVersion,
 } from '@m2office/shared';
@@ -99,7 +100,7 @@ export class PostgresColumnStore implements ColumnStore {
   private readonly pool: pg.Pool;
 
   constructor(connectionString: string) {
-    this.pool = new pg.Pool({ connectionString, max: 4 });
+    this.pool = createPool(connectionString, { max: 4, name: 'columns' });
   }
 
   async close(): Promise<void> {

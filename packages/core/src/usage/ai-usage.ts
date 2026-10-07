@@ -13,6 +13,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
+import { createPool } from '../repository/pool.js';
 import { DEFAULT_AI_PER_USER_SHARE, type AiLimitSettings, type Notification } from '@m2office/shared';
 import type { LlmProvider, LlmResponse } from '../llm/provider.js';
 import type { ResearchProvider } from '../research/provider.js';
@@ -98,7 +99,7 @@ export class PostgresAiUsageStore implements AiUsageStore {
   private readonly pool: pg.Pool;
 
   constructor(connectionString: string) {
-    this.pool = new pg.Pool({ connectionString, max: 3 });
+    this.pool = createPool(connectionString, { max: 3, name: 'usage/ai-usage' });
   }
 
   async close(): Promise<void> {
