@@ -348,6 +348,8 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/schedules/:id/trigger` | 次の回を今にする（動作確認用） |
 | `DELETE /v1/schedules/:id` | 本人の定時実行を消す。動いている実行は止めない |
 | `GET /v1/admin/usage` | 管理者: エージェント別の利用量 |
+| `GET /v1/admin/machine` | 管理者: ローカルの形の「機械」の様子（版・各部の動き・ディスク・証明書・ローカル AI・控え。仕様書 第8.6.7節）。クラウドの形では 404 |
+| `POST /v1/admin/machine/backup` | 管理者: 今すぐ控えを取る（ワーカーが次の見回りで取る。202。控えの置き場が無ければ 400） |
 | `GET /v1/admin/ai-usage` | 管理者: 今月の AI の利用と上限（会社の月の上限・1 人の上限・用途ごと・人ごと。仕様書 第6.6.2節）。上限は `PUT /v1/admin/settings/aiLimits`（`monthlyJpy`・`perUserShare`）。AI の利用の上限に当たった要求は 429 |
 | `GET /v1/admin/runs` | 管理者: 全利用者の実行の状態（中身は返さない） |
 | `GET /v1/admin/schedules` | 管理者: 会社の全員の定時実行（人・業務・繰り返し・次回・前回・状態）。次の回に動かないものは、起動役と同じ判定（`scheduleBlocker`）の理由を添える。**業務の入力は返さない**。操作の口は無い（仕様書 第6.6.8.2節） |

@@ -6,6 +6,7 @@
  * @see 仕様書 第6.6節 管理者ページ
  */
 
+import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { Hono, type Context } from 'hono';
 import {
@@ -15,7 +16,7 @@ import {
 } from '@m2office/shared';
 import {
   DEFAULT_STANDARD_MINUTES, GOOGLE_DATA_RETENTION_DAYS, KNOWLEDGE_MAX_CHARS,
-  describeRule, scheduleBlocker, scheduleChecks, stepLabel, toolGoogleScopes, type AuditQuery, jstMonth
+  describeRule, scheduleBlocker, scheduleChecks, stepLabel, toolGoogleScopes, type AuditQuery, jstMonth, appPath, backupConfigFromEnv, machineConfigFromEnv, machineStatus, requestBackup
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { requireRole, type AppEnv } from '../middleware/tenant.js';
@@ -174,6 +175,28 @@ export function adminRoute(deps: AppDeps) {
         over: userLimit !== null && !!u.userId && u.costJpy >= userLimit,
       })),
     });
+  });
+
+  /**
+   * ローカルの形の「機械」の様子（仕様書 第8.6.7節）。版・各部の動き・ディスク・証明書・ローカル AI・控え。クラウドの形では 404。
+   *
+   * @remarks 業務のデータは返さない
+   */
+  app.get('/machine', async (c) => {
+    if (deps.ai.deployment() !== 'onsite') return c.json({ error: 'ローカルの形だけで使えます' }, 404);
+    const version = (() => { try { return (JSON.parse(readFileSync(appPath('package.json'), 'utf8')) as { version?: string }).version ?? '0'; } catch { return '0'; } })();
+    return c.json(await machineStatus(machineConfigFromEnv(process.env, version)));
+  });
+
+  /** 今すぐ控えを取る（ワーカーが次の見回りで取る。第8.6.5節）。控えの置き場が無ければ 400。 */
+  app.post('/machine/backup', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    if (deps.ai.deployment() !== 'onsite') return c.json({ error: 'ローカルの形だけで使えます' }, 404);
+    const cfg = backupConfigFromEnv(process.env);
+    if (!cfg) return c.json({ error: '控えの置き場が設定されていません（M2O_BACKUP_DIR）' }, 400);
+    await requestBackup(cfg.dir, user.id);
+    await audit(deps, tenant.id, user.id, 'machine.backup_request', 'machine', 'backup', {});
+    return c.json({ ok: true }, 202);
   });
 
   /** 監査ログ（第16.6節）。 */

@@ -6967,5 +6967,16 @@ console.log('\n■ 86. 名刺の裏面（裏の見分けと組み方・英語の
   }
 }
 
+console.log('\n■ 87. ローカルの形の「機械」（管理者だけ・クラウドの形では使わない。第8.6.7節）');
+{
+  const byMember = await call('a', '/v1/admin/machine', {}, 'member');
+  const byAdmin = await call('a', '/v1/admin/machine');
+  const backup = await call('a', '/v1/admin/machine/backup', { method: 'POST', body: '{}' });
+  const me = (await call('a', '/v1/me')).body;
+  byMember.status === 403 && byAdmin.status === 404 && backup.status === 404 && me?.deployment === 'cloud'
+    ? ok('「機械」は管理者だけが開け、クラウドの形では使わない（画面にも出さない）')
+    : ng('「機械」の口が違う', JSON.stringify({ m: byMember.status, a: byAdmin.status, b: backup.status, d: me?.deployment }));
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');

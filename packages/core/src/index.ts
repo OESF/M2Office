@@ -169,3 +169,8 @@ export {
 export { voiceWords, voiceWordsLine, correctHeard, mishearOf, addMishear, toKatakana, VOICE_WORDS_MAX, MISHEARS_MAX, type VoiceWord, type Mishear, type VoiceWordsDeps } from './secretary/voice-words.js';
 export { AutoMinutes, autoMinutesRequest, meetingTitleKey, minutesStopped, MINUTES_AGENT_ID, type AutoMinutesDeps } from './meetings/auto-minutes.js';
 export { appRoot, appPath } from './app-root.js';
+export {
+  runBackup, restoreTest, readBackupStatus, requestBackup, takeBackupRequest, backupsToKeep, backupName, diskSpace,
+  machineStatus, writeWorkerBeat, machineDir, backupConfigFromEnv, machineConfigFromEnv,
+  type BackupConfig, type BackupRecord, type BackupStatus, type MachineConfig, type MachineStatus,
+} from './machine/index.js';

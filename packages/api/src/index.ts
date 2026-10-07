@@ -176,6 +176,8 @@ app.get('/v1/me', async (c) => {
       : hrPhoto ? `/v1/hr-photos/${encodeURIComponent(hrPhoto.employeeId)}?v=${encodeURIComponent(hrPhoto.photoAt)}` : null,
     // サーバーの版。画面の版と違えば、画面が再読み込みを促す（第6.1.1.1節）
     serverVersion: SERVER_VERSION,
+    // 配備の形（ローカルの形なら、管理者ページに「機械」を出す。第8.6.7節）
+    deployment: deps.ai.deployment(),
     auth: { method: auth.method },
     csrfToken: auth.method === 'session' ? auth.csrfToken : null,
     // 値の出どころは会社ごと（ADR-0022）

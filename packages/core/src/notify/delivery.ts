@@ -40,6 +40,7 @@ const KIND_LABELS: Record<string, string> = {
   usage: 'AI の利用',
   usageSelf: 'AI の利用',
   notice: '社内のお知らせ',
+  machine: '機械',
 };
 
 /** 会社が業務を受け付ける状態か（仕様書 第23.8.6節）。停止中の会社へは控えを送らない。 */

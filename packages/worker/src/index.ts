@@ -9,12 +9,13 @@
  * @see 仕様書 第24.3.2節 通すべき一本の流れ（段階 5 と 7）
  */
 
+import { randomUUID } from 'node:crypto';
 import {
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
   RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, JGrantsApi, MockJGrants, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, MEMBER_LINE_SEND, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink,
   NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
-  defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator, aiUsageMeterFromEnv, enterAiUsage, withAiUsage, setEnqueueAiGuard, AutoMinutes, MINUTES_AGENT_ID, appPath
+  defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator, aiUsageMeterFromEnv, enterAiUsage, withAiUsage, setEnqueueAiGuard, AutoMinutes, MINUTES_AGENT_ID, appPath, backupConfigFromEnv, machineDir, readBackupStatus, restoreTest, runBackup, takeBackupRequest, writeWorkerBeat
 } from '@m2office/core';
 import { canRunAgent, fileInputKey } from '@m2office/shared';
 import { fileURLToPath } from 'node:url';
@@ -518,6 +519,19 @@ let lastAiUsageCheck = 0;
 /** お知らせの締切の前の知らせを見る間隔（15 分）。 */
 const NOTICE_REMIND_INTERVAL_MS = 15 * 60_000;
 let lastNoticeRemind = 0;
+/** 控えの設定（ローカルの形で M2O_BACKUP_DIR があるときだけ。第8.6.5節）。 */
+const backupCfg = deploymentFromEnv(process.env) === 'onsite' ? backupConfigFromEnv(process.env) : null;
+let lastBackupCheck = 0;
+
+/** 機械の知らせを、会社の管理者に届ける（ローカルの形は 1 社。第8.6.7節）。 */
+async function notifyMachine(title: string, body: string): Promise<void> {
+  for (const tenantId of await repo.listTenantIds()) {
+    for (const u of (await repo.listUsers(tenantId)).filter((x) => x.status === 'active' && x.roles.includes('admin'))) {
+      await repo.createNotification({ id: randomUUID(), tenantId, userId: u.id, kind: 'machine', title, body, runId: null, readAt: null, createdAt: new Date().toISOString() });
+    }
+  }
+}
+
 /** 会議の後の議事録を見回る間隔（10 分）。 */
 const AUTO_MINUTES_INTERVAL_MS = 10 * 60_000;
 let lastAutoMinutes = 0;
@@ -566,6 +580,33 @@ while (running) {
       for (const tenantId of await repo.listTenantIds()) await repo.purgeAgentEvents(tenantId, before);
     } catch (err) {
       log.error('会話ログの入れ替えで例外が発生しました', { err });
+    }
+  }
+
+  // ローカルの形の機械: ワーカーが動いていることを書き、毎晩 2 時（日本時間）か頼まれたときに控えを取り、毎月 1 回戻せるかを確かめる（第8.6.5節・第8.6.7節）
+  await writeWorkerBeat(machineDir(process.env), appVersion()).catch(() => undefined);
+  if (backupCfg && Date.now() - lastBackupCheck >= 60_000) {
+    lastBackupCheck = Date.now();
+    try {
+      const now = new Date();
+      const jst = new Date(now.getTime() + 9 * 3_600_000);
+      const today = jst.toISOString().slice(0, 10).replace(/-/g, '');
+      const status = await readBackupStatus(backupCfg.dir);
+      const requested = await takeBackupRequest(backupCfg.dir);
+      const due = jst.getUTCHours() >= 2 && !status.last?.name.startsWith(today);
+      if (requested || due) {
+        const rec = await runBackup(backupCfg, now);
+        log.info(rec.ok ? '控えを取りました' : '控えを取れませんでした', { name: rec.name, bytes: rec.dbBytes, error: rec.error });
+        if (!rec.ok) await notifyMachine('控えを取れませんでした', `${rec.error ?? ''}。管理者ページの「機械」で確かめてください。`);
+        const lastTest = status.restoreTest?.at ? new Date(Date.parse(status.restoreTest.at) + 9 * 3_600_000).toISOString().slice(0, 7) : null;
+        if (rec.ok && lastTest !== jst.toISOString().slice(0, 7)) {
+          const t = await restoreTest(backupCfg, now);
+          log.info(t?.ok ? '控えを戻せることを確かめました' : '控えを戻せませんでした', { tables: t?.tables, error: t?.error });
+          if (t && !t.ok) await notifyMachine('控えを戻せませんでした', `${t.error ?? ''}。管理者ページの「機械」で確かめてください。`);
+        }
+      }
+    } catch (err) {
+      log.warn('控えの見回りで例外が発生しました', { err });
     }
   }
 

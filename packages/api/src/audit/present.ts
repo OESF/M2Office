@@ -174,6 +174,7 @@ const ACTION_LABELS: Record<string, string> = {
   'signage.asset.add': 'サイネージの素材を足した',
   'signage.asset.remove': 'サイネージの素材を消した',
   'signage.interrupt_asset.set': 'サイネージの割り込みの素材を変えた',
+  'machine.backup_request': '機械の控えを今すぐ取るよう頼んだ',
   'signage.asset.ai_name': 'サイネージの割り込みの素材に AI が名前を付けた',
   'signage.source.create': 'サイネージの呼び出しの受け口を作った',
   'signage.source.stop': 'サイネージの呼び出しの受け口を止めた',

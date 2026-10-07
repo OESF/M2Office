@@ -142,6 +142,7 @@ src/secretary/   秘書。3 層の応答振り分け、定時実行の確認・�
 src/brief/       朝のブリーフの人ごとの中身（第9.5.5.1.1節）。秘書が最初の関心の分野を選ぶ・会話で直す（settings.ts）、ツール brief.settings
 src/notices/     社内のお知らせ（第10.15節）。置き場（PostgreSQL とメモリ）、宛先・期間・初めて載せたか・済んだ・取り下げ（service.ts）、ツール notices.list。
                  第10.15.1節の届け方（合う Chat のスペースへの投稿・締切の前の知らせ・済んだ人の数・もう知らせない）
+src/machine/     ローカルの形の「機械」（status.ts。各部の動き・ディスク・証明書・ローカル AI）と控え（backup.ts。pg_dump と rsync・残す数・戻せるかの確かめ。第8.6.5節・第8.6.7節）
 src/app-root.ts  実行中に読むファイルの置き場所の根（M2O_APP_ROOT。本番の組み立てで使う。第20.4.5節）
 src/usage/       AI の利用の記録と上限（ai-usage.ts。呼び出しの包み・会社と 1 人の月の上限・8 割と 10 割の知らせ・暴走の見張り。第6.6.2節、ADR-0079）
 src/meetings/    会議が終わったら主催した人の議事録を作り始める見回り（auto-minutes.ts。第9.5.2.1節、ADR-0081）

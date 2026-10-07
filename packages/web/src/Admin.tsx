@@ -5,7 +5,7 @@
  */
 
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
-import { api, ApiError, describeError, type AdminRun, type AdminRunStatus, type AdminSchedule, type AiUsageView, type AuditFilter, type AuditRowView, type Me } from './api.js';
+import { api, ApiError, describeError, type AdminRun, type AdminRunStatus, type AdminSchedule, type AiUsageView, type AuditFilter, type AuditRowView, type MachineView, type Me } from './api.js';
 import { statusLabel, SuspendedBanner } from './components.js';
 import {
   AgentSettings, CompanySettings, KnowledgeSettings, UserSettings,
@@ -21,7 +21,7 @@ import { Icon, NavHeading, NavItem, SideNavLayout, ThemeToggle, type IconName } 
 
 type Tab =
   | 'dashboard' | 'usage' | 'runs' | 'schedules' | 'company' | 'agents' | 'extensions' | 'users' | 'knowledge' | 'audit'
-  | 'connectors' | 'setup' | 'help' | 'helpReview';
+  | 'connectors' | 'setup' | 'help' | 'helpReview' | 'machine';
 
 /**
  * 管理者ページの左ペインの項目。説明はマウスを重ねたときに出す（仕様書 第6.1.1節）。
@@ -90,6 +90,7 @@ const TABS: {
     ],
   },
   { id: 'setup', label: 'はじめに行う設定', icon: 'help', description: '導入の流れと、残っている設定', group: '設定' },
+  { id: 'machine', label: '機械', icon: 'usage', description: '社内に置いた機械の様子と控え（ローカルの形だけ）', group: '記録' },
   { id: 'usage', label: '利用状況', icon: 'usage', description: '業務ごとの実行の件数と費用', group: '記録' },
   { id: 'runs', label: '実行の一覧', icon: 'runs', description: '全員の実行の状態と費用（中身は見られません）', group: '記録' },
   { id: 'schedules', label: '定時実行の一覧', icon: 'schedules', description: '全員の定時実行と、動かないものの理由（見るだけ）', group: '記録' },
@@ -213,7 +214,7 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
         <SideNavLayout extraClass="no-talk" nav={(
           <>
             {/* すべて済んだ会社では「はじめに行う設定」を出さない（仕様書 第6.10.3.1節） */}
-            {TABS.filter((t) => t.id !== 'setup' || setup).map((t, i, shown) => (
+            {TABS.filter((t) => (t.id !== 'setup' || setup) && (t.id !== 'machine' || me.deployment === 'onsite')).map((t, i, shown) => (
               <Fragment key={t.id}>
                 {/* まとまりの変わり目に見出しを出す（仕様書 第6.6節の並び） */}
                 {t.group && t.group !== shown[i - 1]?.group && <NavHeading>{t.group}</NavHeading>}
@@ -257,6 +258,7 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
               />
             )}
             {tab === 'usage' && <Usage />}
+            {tab === 'machine' && <Machine />}
             {tab === 'runs' && <Runs />}
             {tab === 'schedules' && <TenantSchedules />}
             {tab === 'company' && <CompanySettings page={page} />}
@@ -400,6 +402,66 @@ function AiUsage() {
         </div>
       )}
     </div>
+  );
+}
+
+/** バイトを GB・MB で表す。 */
+const bytesText = (b: number) => (b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : `${Math.round(b / 1e6)} MB`);
+/** 日時を「10/7 2:03」の形で表す。 */
+const whenText = (iso: string) => { const d = new Date(iso); return `${d.getMonth() + 1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`; };
+
+/**
+ * ローカルの形の「機械」（仕様書 第8.6.7節）。版・各部の動き・ディスク・証明書・ローカル AI・控え。今すぐ控えを取れる。
+ */
+function Machine() {
+  const [data, setData] = useState<MachineView | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const load = useCallback(() => { api.admin.machine().then(setData).catch((e) => setError(describeError(e, '読み込めませんでした'))); }, []);
+  useEffect(() => { load(); const t = window.setInterval(load, 30_000); return () => clearInterval(t); }, [load]);
+  const backup = () => {
+    setNote(null);
+    api.admin.machineBackup().then(() => setNote('控えを取り始めました。1 分ほどで結果が出ます')).catch((e) => setError(describeError(e, '頼めませんでした')));
+  };
+  const state = (ok: boolean, okText: string, ngText: string) => <span className={`badge ${ok ? 'ok' : 'warn'}`}>{ok ? okText : ngText}</span>;
+  const space = (d: { free: number; total: number } | null) => (d ? `空き ${bytesText(d.free)} / ${bytesText(d.total)}` : '分かりません');
+  const st = data?.backup.status;
+  return (
+    <>
+      <PageTitle trail={['機械']} help={{ article: 'admin-machine', text: '社内に置いた機械の様子と控えです。業務の中身は出ません。' }} />
+      {error && <p className="error">{error}</p>}
+      {data && (
+        <>
+          <div className="card">
+            <h3>各部の動き</h3>
+            <dl className="kv">
+              <dt>版</dt><dd>{data.version}</dd>
+              <dt>データベース</dt><dd>{state(data.database.ok, '動いています', '止まっています')} {data.database.ms !== null && <span className="small muted">{data.database.ms} ms</span>} {data.database.error && <span className="small muted">{data.database.error}</span>}</dd>
+              <dt>ワーカー</dt><dd>{state(data.worker.ok, '動いています', '止まっています')} {data.worker.lastSeen && <span className="small muted">最後の知らせ {whenText(data.worker.lastSeen)}</span>}</dd>
+              <dt>入口と証明書</dt><dd>{data.entrance.host ? <>{data.entrance.host} {data.entrance.certExpires
+                ? state((data.entrance.certDaysLeft ?? 0) > 14, `期限 ${whenText(data.entrance.certExpires)}（あと ${data.entrance.certDaysLeft} 日）`, `期限 ${whenText(data.entrance.certExpires)}（あと ${data.entrance.certDaysLeft} 日）`)
+                : <span className="badge warn">確かめられません</span>} {data.entrance.error && <span className="small muted">{data.entrance.error}</span>}</> : <span className="muted">—</span>}</dd>
+              <dt>ローカル AI</dt><dd>{data.localAi.configured ? <>{state(data.localAi.ok, '動いています', '答えません')} <span className="small muted">{data.localAi.models.join('、') || data.localAi.error}</span></> : <span className="muted">設定していません</span>}</dd>
+              <dt>データのディスク</dt><dd>{space(data.disk.data)}</dd>
+            </dl>
+          </div>
+          <div className="card">
+            <h3>控え</h3>
+            {!data.backup.configured ? <p className="muted">控えの置き場が設定されていません</p> : (
+              <>
+                <dl className="kv">
+                  <dt>最後の控え</dt><dd>{st?.last ? <>{state(st.last.ok, whenText(st.last.at), `${whenText(st.last.at)} 失敗`)} {st.last.ok ? <span className="small muted">データベース {bytesText(st.last.dbBytes)}</span> : <span className="small muted">{st.last.error}</span>}</> : <span className="muted">まだありません</span>}</dd>
+                  <dt>戻せるかの確かめ</dt><dd>{st?.restoreTest ? <>{state(st.restoreTest.ok, `${whenText(st.restoreTest.at)} 戻せました`, `${whenText(st.restoreTest.at)} 戻せませんでした`)} {st.restoreTest.error && <span className="small muted">{st.restoreTest.error}</span>}</> : <span className="muted">まだありません</span>}</dd>
+                  <dt>控えのディスク</dt><dd>{space(data.disk.backup)}</dd>
+                </dl>
+                <button className="btn small" onClick={backup}>今すぐ控えを取る</button>
+                {note && <p className="ok-msg small">{note}</p>}
+              </>
+            )}
+          </div>
+        </>
+      )}
+    </>
   );
 }
 

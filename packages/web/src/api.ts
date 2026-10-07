@@ -282,6 +282,8 @@ export interface Me {
   photo: string | null;
   /** サーバーの版（仕様書 第6.1.1.1節）。読めなければ `null`。 */
   serverVersion: string | null;
+  /** 配備の形（ローカルの形なら管理者ページに「機械」を出す。仕様書 第8.6.7節）。 */
+  deployment?: 'cloud' | 'onsite';
   /** 名刺管理を使えるか（会社の入り切りと利用範囲。仕様書 第27.2節）。 */
   cards?: boolean;
   /** 在庫管理を使えるか（会社の入り切りと利用範囲。仕様書 第29.2節）。 */
@@ -2078,6 +2080,10 @@ export const api = {
       items: { agentId: string; name: string; runs: number; costJpy: number; tokens: number }[];
       total: { runs: number; costJpy: number }; note: string | null;
     }>('/admin/usage'),
+    /** ローカルの形の「機械」の様子（仕様書 第8.6.7節）。 */
+    machine: () => call<MachineView>('/admin/machine'),
+    /** 今すぐ控えを取る（ワーカーが次の見回りで取る）。 */
+    machineBackup: () => call<{ ok: true }>('/admin/machine/backup', { method: 'POST', body: '{}' }),
     /** 今月の AI の利用と上限（仕様書 第6.6.2節）。用途ごと・人ごと。費用は概算。 */
     aiUsage: () => call<AiUsageView>('/admin/ai-usage'),
     runs: () => call<{ items: AdminRun[] }>('/admin/runs'),
@@ -2444,3 +2450,23 @@ export interface AiUsageView {
   byPurpose: { purpose: string; label: string; costJpy: number; calls: number }[];
   byUser: { userId: string | null; name: string; costJpy: number; calls: number; over: boolean }[];
 }
+
+/** ローカルの形の「機械」の様子（仕様書 第8.6.7節）。 */
+export interface MachineView {
+  version: string;
+  checkedAt: string;
+  database: { ok: boolean; ms: number | null; error: string | null };
+  worker: { ok: boolean; lastSeen: string | null; version: string | null };
+  entrance: { host: string | null; certExpires: string | null; certDaysLeft: number | null; error: string | null };
+  localAi: { configured: boolean; ok: boolean; models: string[]; error: string | null };
+  disk: { data: { free: number; total: number } | null; backup: { free: number; total: number } | null };
+  backup: {
+    configured: boolean;
+    status: {
+      last: { name: string; at: string; ok: boolean; dbBytes: number; error: string | null } | null;
+      lastOk: string | null;
+      restoreTest: { at: string; ok: boolean; name: string; tables: number; error: string | null } | null;
+    } | null;
+  };
+}
+
