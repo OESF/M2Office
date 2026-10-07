@@ -8,7 +8,7 @@ import { api, describeError } from './api.js';
 import { openHelp } from './help.js';
 import { googleLinks } from './google-links.js';
 import { Icon } from './nav.js';
-import { APP_VERSION, versionMismatch } from './version.js';
+import { APP_VERSION, staleNotice, versionMismatch } from './version.js';
 
 /**
  * 開いている間だけ、外を押す・`Esc` で閉じる（仕様書 第6.11.1節 k3）。
@@ -38,7 +38,7 @@ function useDismiss(open: boolean, close: () => void, box: RefObject<HTMLElement
  *
  * @remarks
  * 画面の版とサーバーの版が違えば、開いたままのタブが古い画面のままになっている。
- * 版の横に印を付け、メニューの中で再読み込みを促す。
+ * 版の横に印を付け、メニューの中で再読み込みを促す。開発サーバーでは、起動し直すよう知らせる（再読み込みでは直らないため）。
  */
 export function AppVersionBadge({ serverVersion }: { serverVersion: string | null }) {
   const [open, setOpen] = useState(false);
@@ -46,6 +46,8 @@ export function AppVersionBadge({ serverVersion }: { serverVersion: string | nul
   const close = useRef(() => setOpen(false)).current;
   useDismiss(open, close, box);
   const stale = versionMismatch(APP_VERSION, serverVersion);
+  // 開発サーバーでは再読み込みで直らないため、起動し直すよう知らせる
+  const notice = staleNotice(import.meta.env.DEV);
   const shown = APP_VERSION ? `v${APP_VERSION}` : '版不明';
 
   return (
@@ -66,8 +68,8 @@ export function AppVersionBadge({ serverVersion }: { serverVersion: string | nul
           </dl>
           {stale && (
             <div className="about-stale">
-              <p>新しい版があります。再読み込みしてください。</p>
-              <button className="btn small" onClick={() => location.reload()}>再読み込み</button>
+              <p>{notice.text}</p>
+              {notice.reload && <button className="btn small" onClick={() => location.reload()}>再読み込み</button>}
             </div>
           )}
           <button className="link-btn" onClick={() => { setOpen(false); openHelp(); }}>更新情報を見る（ヘルプ）</button>

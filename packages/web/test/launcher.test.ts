@@ -9,7 +9,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { GOOGLE_APP_IDS, LAUNCHER_URL_MAX, checkLauncherUrl } from '@m2office/shared';
 import { googleLinks } from '../src/google-links.js';
-import { APP_VERSION, versionMismatch } from '../src/version.js';
+import { APP_VERSION, staleNotice, versionMismatch } from '../src/version.js';
 
 test('版が違うときだけ「新しい版があります」と判定する', () => {
   assert.equal(versionMismatch('0.5.0', '0.6.0'), true);
@@ -73,4 +73,11 @@ test('ID とパスワードを含む URL は断る（パスワードを残さな
 
 test('長すぎる URL は断る', () => {
   assert.ok('error' in checkLauncherUrl(`https://example.com/${'a'.repeat(LAUNCHER_URL_MAX)}`));
+});
+
+test('版の食い違いの知らせ: 本番は再読み込みを促し、開発サーバーでは起動し直すよう知らせて、効かないボタンを出さない', () => {
+  assert.deepEqual(staleNotice(false), { text: '新しい版があります。再読み込みしてください。', reload: true });
+  const dev = staleNotice(true);
+  assert.equal(dev.reload, false);
+  assert.match(dev.text, /開発サーバーを起動し直して/);
 });
