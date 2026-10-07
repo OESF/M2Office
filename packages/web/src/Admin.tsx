@@ -426,6 +426,7 @@ function Machine() {
   const state = (ok: boolean, okText: string, ngText: string) => <span className={`badge ${ok ? 'ok' : 'warn'}`}>{ok ? okText : ngText}</span>;
   const space = (d: { free: number; total: number } | null) => (d ? `空き ${bytesText(d.free)} / ${bytesText(d.total)}` : '分かりません');
   const st = data?.backup.status;
+  const off = data?.backup.offsite.status;
   return (
     <>
       <PageTitle trail={['機械']} help={{ article: 'admin-machine', text: '社内に置いた機械の様子と控えです。業務の中身は出ません。' }} />
@@ -453,6 +454,10 @@ function Machine() {
                   <dt>最後の控え</dt><dd>{st?.last ? <>{state(st.last.ok, whenText(st.last.at), `${whenText(st.last.at)} 失敗`)} {st.last.ok ? <span className="small muted">データベース {bytesText(st.last.dbBytes)}</span> : <span className="small muted">{st.last.error}</span>}</> : <span className="muted">まだありません</span>}</dd>
                   <dt>戻せるかの確かめ</dt><dd>{st?.restoreTest ? <>{state(st.restoreTest.ok, `${whenText(st.restoreTest.at)} 戻せました`, `${whenText(st.restoreTest.at)} 戻せませんでした`)} {st.restoreTest.error && <span className="small muted">{st.restoreTest.error}</span>}</> : <span className="muted">まだありません</span>}</dd>
                   <dt>控えのディスク</dt><dd>{space(data.disk.backup)}</dd>
+                  <dt>社外の控え</dt><dd>{!data.backup.offsite.configured ? <span className="muted">設定していません</span> : off?.last
+                    ? <>{state(off.last.ok, `${whenText(off.last.at)} 送りました`, `${whenText(off.last.at)} 送れませんでした`)} {off.last.ok ? <span className="small muted">新しく送った量 {bytesText(off.last.bytesAdded)}</span> : <span className="small muted">{off.last.error}</span>}</>
+                    : <span className="muted">まだありません</span>}</dd>
+                  {data.backup.offsite.configured && <><dt>社外の控えの確かめ</dt><dd>{off?.check ? <>{state(off.check.ok, `${whenText(off.check.at)} 壊れていません`, `${whenText(off.check.at)} 確かめに失敗`)} {off.check.error && <span className="small muted">{off.check.error}</span>}</> : <span className="muted">まだありません</span>}</dd></>}
                 </dl>
                 <button className="btn small" onClick={backup}>今すぐ控えを取る</button>
                 {note && <p className="ok-msg small">{note}</p>}

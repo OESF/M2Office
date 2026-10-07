@@ -1,16 +1,21 @@
 /**
- * @file ローカルの形の「機械」（仕様書 第8.6.5節・第8.6.7節）の公開窓口。控えと、機械の様子。
+ * @file ローカルの形の「機械」（仕様書 第8.6.5節・第8.6.7節）の公開窓口。控え（社内と社外）と、機械の様子。
  */
 
 import { appPath } from '../app-root.js';
 import type { BackupConfig } from './backup.js';
 import type { MachineConfig } from './status.js';
 import { heartbeatConfigFromEnv } from './heartbeat.js';
+import { offsiteConfigFromEnv } from './offsite.js';
 
 export {
   runBackup, restoreTest, readBackupStatus, requestBackup, takeBackupRequest, backupsToKeep, backupName, diskSpace,
   type BackupConfig, type BackupRecord, type BackupStatus,
 } from './backup.js';
+export {
+  runOffsite, checkOffsite, readOffsiteStatus, offsiteConfigFromEnv, parseBackupSummary, OFFSITE_KEEP,
+  type OffsiteConfig, type OffsiteRecord, type OffsiteStatus,
+} from './offsite.js';
 export { machineStatus, writeWorkerBeat, type MachineConfig, type MachineStatus } from './status.js';
 export { readUpdateStatus, holdUpdates, takeUnnotifiedUpdateFailure, type UpdateRecord, type UpdateSettings, type UpdateStatus } from './update.js';
 export {
@@ -57,5 +62,6 @@ export function machineConfigFromEnv(env: Record<string, string | undefined>, ve
     host,
     localLlm: env['LOCAL_LLM_URL'] ? { url: env['LOCAL_LLM_URL'], model: env['LOCAL_LLM_MODEL'] || null } : null,
     heartbeat: heartbeatConfigFromEnv(env),
+    offsite: !!env['M2O_BACKUP_DIR'] && offsiteConfigFromEnv(env, machineDir(env)) !== null,
   };
 }

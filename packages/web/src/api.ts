@@ -2526,6 +2526,15 @@ export interface MachineView {
       lastOk: string | null;
       restoreTest: { at: string; ok: boolean; name: string; tables: number; error: string | null } | null;
     } | null;
+    /** 社外の控え（仕様書 第8.6.5節）。会社が選んだときだけ。 */
+    offsite: {
+      configured: boolean;
+      status: {
+        last: { name: string; at: string; ok: boolean; snapshot: string | null; bytesAdded: number; error: string | null } | null;
+        lastOkSnapshot: string | null;
+        check: { at: string; ok: boolean; error: string | null } | null;
+      } | null;
+    };
   };
   /** 更新（仕様書 第8.6.4節）。機械の上の update.sh が書いた結果と、止めている期限。 */
   update: {

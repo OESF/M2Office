@@ -25,6 +25,8 @@ const ANSWERS = {
   LOCAL_LLM_URL: 'http://127.0.0.1:11434/v1', LOCAL_LLM_MODEL: 'gemma3', LOCAL_LLM_EMBED_MODEL: 'embeddinggemma', GEMINI_API_KEY: '',
   GOOGLE_LOGIN_CLIENT_ID: '', GOOGLE_LOGIN_CLIENT_SECRET: '', SECRET_KEY: 'k'.repeat(64), DB_APP_PASSWORD: 'app-pass', DB_OWNER_PASSWORD: 'owner-pass', UPDATE_HOUR: '3',
   HEARTBEAT_URL: 'https://ops.example/heartbeat', HEARTBEAT_TOKEN: 'hb-token', MACHINE_ID: 'm-001',
+  OFFSITE_REPOSITORY: 's3:https://s3.example/bucket/m2office', OFFSITE_PASSWORD: 'offsite-pass', OFFSITE_ACCESS_KEY_ID: 'AKID', OFFSITE_SECRET_ACCESS_KEY: 'SKEY',
+  OFFSITE_REGION: '', RESTIC_BIN: '/opt/homebrew/opt/restic/bin/restic',
 };
 
 function render(extra: Record<string, string>) {
@@ -54,6 +56,8 @@ test('雛形がすべて埋まり、launchd の設定は正しい形', () => {
   const plists = readdirSync(join(out, 'launchd'));
   assert.deepEqual(plists.sort(), ['jp.m2office.api.plist', 'jp.m2office.caddy.plist', 'jp.m2office.maintenance.plist', 'jp.m2office.postgres.plist', 'jp.m2office.update.plist', 'jp.m2office.worker.plist']);
   assert.match(env, /^M2O_HEARTBEAT_URL=https:\/\/ops\.example\/heartbeat$/m);
+  assert.match(env, /^M2O_OFFSITE_REPOSITORY=s3:https:\/\/s3\.example\/bucket\/m2office$/m);
+  assert.match(env, /^M2O_OFFSITE_PASSWORD=offsite-pass$/m);
   for (const p of plists) {
     const xml = readFileSync(join(out, 'launchd', p), 'utf8');
     assert.doesNotMatch(xml, /\{\{/, p);

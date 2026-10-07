@@ -141,6 +141,22 @@ say '3. データと控えの置き場'
 info 'データは RAID などのディスクに。控えは RAID とは別のディスク（外付けか社内の別の機械）に置きます（第8.6.5節）'
 ask DATA_DIR 'データの置き場' "${DATA_DIR:-$INSTALL_DIR/data}"
 ask BACKUP_DIR '控えの置き場（空なら控えを取りません）' "${BACKUP_DIR:-}"
+OFFSITE=no
+if [ -n "$BACKUP_DIR" ]; then
+  info '社外の控え: 毎晩の控えを、会社が契約した S3 互換の置き場（Amazon S3・Cloudflare R2・Wasabi・Backblaze B2 など）へ送る。'
+  info '送る前に restic で暗号化する。合言葉はこの機械で作り、紙の「戻すための控え」に書いて会社に渡す（運営は持たない）'
+  if yes_no '社外の控えを送りますか（会社が選んだときだけ）' "$( [ "${OFFSITE_SAVED:-no}" = yes ] && echo y || echo n)"; then
+    OFFSITE=yes
+    ask OFFSITE_REPOSITORY '置き場（s3:https://<口>/<バケット>/<道>。例 s3:https://s3.ap-northeast-1.amazonaws.com/<バケット>/m2office）' "$(env_value M2O_OFFSITE_REPOSITORY)"
+    case "$OFFSITE_REPOSITORY" in s3:https://*) ;; *) die '置き場は s3:https:// で始めてください' ;; esac
+    ask OFFSITE_REGION '地域（要る置き場だけ。例 ap-northeast-1。要らなければ空）' "$(env_value M2O_OFFSITE_REGION)"
+    ask OFFSITE_ACCESS_KEY_ID '置き場のアクセスキー ID' "$(env_value M2O_OFFSITE_ACCESS_KEY_ID)"
+    ask OFFSITE_SECRET_ACCESS_KEY '置き場のシークレットアクセスキー' "$(env_value M2O_OFFSITE_SECRET_ACCESS_KEY)" secret
+    [ -n "$OFFSITE_ACCESS_KEY_ID" ] && [ -n "$OFFSITE_SECRET_ACCESS_KEY" ] || die '置き場の鍵が要ります'
+  fi
+fi
+[ "$OFFSITE" = yes ] || { OFFSITE_REPOSITORY=''; OFFSITE_REGION=''; OFFSITE_ACCESS_KEY_ID=''; OFFSITE_SECRET_ACCESS_KEY=''; }
+OFFSITE_SAVED=$OFFSITE
 ask API_PORT 'API のポート（機械の中だけで使う）' "${API_PORT:-3101}"
 ask DB_PORT 'データベースのポート（機械の中だけで使う）' "${DB_PORT:-5433}"
 
@@ -192,7 +208,7 @@ fi
 say '答えの確かめ'
 info "会社: $COMPANY_NAME（$SUBDOMAIN）／ ドメイン: $GW_DOMAIN ／ 管理者: $ADMIN_EMAIL"
 info "名前: https://$HOST ／ 証明書: $TLS_MODE ${DNS_PROVIDER:+（$DNS_PROVIDER）}"
-info "データ: $DATA_DIR ／ 控え: ${BACKUP_DIR:-（取らない）}"
+info "データ: $DATA_DIR ／ 控え: ${BACKUP_DIR:-（取らない）} ／ 社外の控え: $( [ "$OFFSITE" = yes ] && echo "$OFFSITE_REPOSITORY" || echo 送らない)"
 info "ローカル AI: ${LOCAL_LLM_URL:-（使わない）} ${LOCAL_LLM_MODEL} ／ Gemini の鍵: $( [ -n "$GEMINI_API_KEY" ] && echo 入れる || echo 入れない)"
 info "自動の更新: $AUTO_UPDATE（${UPDATE_HOUR} 時）／ 遠隔の保守: $MAINTENANCE ／ 稼働の知らせ: $( [ -n "$HEARTBEAT_URL" ] && echo 送る || echo 送らない)"
 yes_no 'この答えで入れますか' y || exit 1
@@ -203,6 +219,7 @@ command -v brew >/dev/null || die 'Homebrew がありません。https://brew.sh
 missing=''
 formulas="$NODE_FORMULA $PG_FORMULA pgvector caddy"
 [ "$MAINTENANCE" = yes ] && formulas="$formulas tailscale"
+[ "$OFFSITE" = yes ] && formulas="$formulas restic"
 for f in $formulas; do
   brew list --versions "$f" >/dev/null 2>&1 || missing="$missing $f"
 done
@@ -218,6 +235,8 @@ PG_BIN="$(brew --prefix "$PG_FORMULA")/bin"
 CADDY_BIN="$(brew --prefix caddy)/bin/caddy"
 TAILSCALE_BIN=''
 [ "$MAINTENANCE" = yes ] && TAILSCALE_BIN="$(brew --prefix tailscale)/bin/tailscale"
+RESTIC_BIN=''
+[ "$OFFSITE" = yes ] && RESTIC_BIN="$(brew --prefix restic)/bin/restic"
 info "Node.js $("$NODE_BIN" --version) ／ PostgreSQL $("$PG_BIN/postgres" --version | awk '{print $3}') ／ Caddy $("$CADDY_BIN" version | awk '{print $1}')"
 if [ "$TLS_MODE" = name ] && ! "$CADDY_BIN" list-modules 2>/dev/null | grep -q "^dns.providers.$DNS_PROVIDER\$"; then
   info "Caddy に DNS の事業者（$DNS_PROVIDER）のつなぎを足します"
@@ -231,6 +250,10 @@ DB_APP_PASSWORD=$(env_value DB_APP_PASSWORD_SAVED)
 [ -n "$SECRET_KEY" ] || SECRET_KEY=$(rand_hex 32)
 [ -n "$DB_OWNER_PASSWORD" ] || DB_OWNER_PASSWORD=$(rand_hex 24)
 [ -n "$DB_APP_PASSWORD" ] || DB_APP_PASSWORD=$(rand_hex 24)
+# 社外の控えの暗号化の合言葉（一度作ったら変えない。変えると置き場の控えを開けなくなる）
+OFFSITE_PASSWORD=$(env_value M2O_OFFSITE_PASSWORD)
+[ "$OFFSITE" = yes ] && [ -z "$OFFSITE_PASSWORD" ] && OFFSITE_PASSWORD=$(rand_hex 24)
+[ "$OFFSITE" = yes ] || OFFSITE_PASSWORD=''
 
 # ---- 4. 専用の利用者と置き場 ----
 say '専用の利用者と置き場を用意します'
@@ -272,7 +295,8 @@ answers="$work/answers"
 {
   for k in INSTALL_DIR REPO_DIR RELEASE_DIR ENV_FILE CADDYFILE DATA_DIR BACKUP_DIR API_PORT DB_PORT HOST SUBDOMAIN ACME_EMAIL \
     NODE_BIN PG_BIN CADDY_BIN LOCAL_LLM_URL LOCAL_LLM_MODEL LOCAL_LLM_EMBED_MODEL GEMINI_API_KEY GOOGLE_LOGIN_CLIENT_ID \
-    GOOGLE_LOGIN_CLIENT_SECRET SECRET_KEY DB_APP_PASSWORD DB_OWNER_PASSWORD UPDATE_HOUR HEARTBEAT_URL HEARTBEAT_TOKEN MACHINE_ID; do
+    GOOGLE_LOGIN_CLIENT_SECRET SECRET_KEY DB_APP_PASSWORD DB_OWNER_PASSWORD UPDATE_HOUR HEARTBEAT_URL HEARTBEAT_TOKEN MACHINE_ID \
+    OFFSITE_REPOSITORY OFFSITE_PASSWORD OFFSITE_ACCESS_KEY_ID OFFSITE_SECRET_ACCESS_KEY OFFSITE_REGION RESTIC_BIN; do
     printf '%s=%s\n' "$k" "${!k}"
   done
   printf 'TLS_BLOCK=%s\n' "$(tls_block)"
@@ -292,7 +316,8 @@ conf="$work/setup.conf"
   printf '# M2Office ローカルの形の答え（setup.sh が書く。秘密の値は m2office.env にだけ置く）\n'
   for k in COMPANY_NAME SUBDOMAIN GW_DOMAIN ADMIN_EMAIL HOST TLS_MODE DNS_PROVIDER ACME_EMAIL DATA_DIR BACKUP_DIR API_PORT DB_PORT \
     LOCAL_LLM_URL LOCAL_LLM_MODEL LOCAL_LLM_EMBED_MODEL ALLOWED_SIGNERS_SOURCE ALLOWED_SIGNERS AUTO_UPDATE UPDATE_HOUR \
-    INSTALL_DIR REPO_DIR RELEASE_DIR ENV_FILE NODE_BIN NPM_DIR PG_BIN CADDY_BIN SERVICE_USER MAINTENANCE MAINTENANCE_SAVED TAILSCALE_BIN; do
+    INSTALL_DIR REPO_DIR RELEASE_DIR ENV_FILE NODE_BIN NPM_DIR PG_BIN CADDY_BIN SERVICE_USER MAINTENANCE MAINTENANCE_SAVED TAILSCALE_BIN \
+    OFFSITE OFFSITE_SAVED RESTIC_BIN; do
     printf "%s='%s'\n" "$k" "$(printf '%s' "${!k}" | sed "s/'/'\\\\''/g")"
   done
 } > "$conf"
@@ -368,6 +393,25 @@ else
   sudo rm -f "$DAEMONS/jp.m2office.maintenance.plist"
 fi
 
+# ---- 社外の控えの置き場を用意する（初めてのときだけ暗号化した置き場を作る） ----
+if [ "$OFFSITE" = yes ]; then
+  say '社外の控えの置き場を確かめます'
+  # 合言葉と鍵は環境変数で渡す（引数に出すと、ほかの利用者から見える）
+  if (
+    export RESTIC_REPOSITORY="$OFFSITE_REPOSITORY" RESTIC_PASSWORD="$OFFSITE_PASSWORD" AWS_ACCESS_KEY_ID="$OFFSITE_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$OFFSITE_SECRET_ACCESS_KEY"
+    [ -n "$OFFSITE_REGION" ] && export AWS_DEFAULT_REGION="$OFFSITE_REGION"
+    if "$RESTIC_BIN" --no-cache cat config >/dev/null 2>&1; then
+      info '置き場はできています（合言葉で開けました）'
+    else
+      "$RESTIC_BIN" --no-cache init >/dev/null && info '暗号化した置き場を作りました'
+    fi
+  ); then
+    info '社外の控え: 毎晩の控えの後に送ります。結果は管理者ページの「機械」に出ます'
+  else
+    warn '社外の置き場を開けられませんでした。置き場・鍵・バケットの権限を確かめて、setup.sh を走らせ直してください'
+  fi
+fi
+
 # ---- 9. 動きを確かめる ----
 say '動きを確かめます'
 ok=0
@@ -399,5 +443,9 @@ info '  - ルーター: DHCP の予約で、この機械にいつも同じ IP �
 if yes_no '紙の「戻すための控え」に書き写す秘密の値を、いま画面に出しますか' n; then
   info "M2OFFICE_SECRET_KEY: $SECRET_KEY"
   info "データベースの所有者の合言葉: $DB_OWNER_PASSWORD"
+  if [ "$OFFSITE" = yes ]; then
+    info "社外の控えの置き場: $OFFSITE_REPOSITORY"
+    info "社外の控えの暗号化の合言葉: $OFFSITE_PASSWORD（これが無いと社外の控えは誰にも開けません）"
+  fi
   info '書き写したら画面を消してください。運営はこれを持ちません'
 fi

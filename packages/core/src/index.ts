@@ -180,5 +180,6 @@ export {
   readUpdateStatus, holdUpdates, takeUnnotifiedUpdateFailure, type UpdateRecord, type UpdateSettings, type UpdateStatus,
   readMaintenanceStatus, requestMaintenance, takeClosedMaintenanceSessions, MAINTENANCE_DEFAULT_HOURS, MAINTENANCE_MAX_HOURS, type MaintenanceSession, type MaintenanceStatus,
   heartbeatConfigFromEnv, heartbeatPayload, readHeartbeatStatus, setHeartbeatOff, sendHeartbeat, HEARTBEAT_INTERVAL_MS, type HeartbeatConfig, type HeartbeatPayload, type HeartbeatStatus,
+  runOffsite, checkOffsite, readOffsiteStatus, offsiteConfigFromEnv, parseBackupSummary, OFFSITE_KEEP, type OffsiteConfig, type OffsiteRecord, type OffsiteStatus,
 } from './machine/index.js';
 export { scoreEval, CONTRACT_REVIEW_AVOID, CONTRACT_REVIEW_MUST, type EvalScore } from './evals/score.js';

@@ -11,6 +11,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import pg from 'pg';
 import { diskSpace, readBackupStatus, type BackupStatus } from './backup.js';
+import { readOffsiteStatus, type OffsiteStatus } from './offsite.js';
 import { readUpdateStatus, type UpdateStatus } from './update.js';
 import { readMaintenanceStatus, type MaintenanceStatus } from './maintenance.js';
 import { readHeartbeatStatus, type HeartbeatConfig, type HeartbeatStatus } from './heartbeat.js';
@@ -34,6 +35,8 @@ export interface MachineConfig {
   localLlm: { url: string; model: string | null } | null;
   /** 運営への稼働の知らせの受け口（第8.6.8節）。無ければ `null`。 */
   heartbeat?: HeartbeatConfig | null;
+  /** 社外の控えを設定しているか（第8.6.5節）。 */
+  offsite?: boolean;
 }
 
 /** 「機械」の様子。 */
@@ -45,7 +48,7 @@ export interface MachineStatus {
   entrance: { host: string | null; certExpires: string | null; certDaysLeft: number | null; error: string | null };
   localAi: { configured: boolean; ok: boolean; models: string[]; error: string | null };
   disk: { data: { free: number; total: number } | null; backup: { free: number; total: number } | null };
-  backup: { configured: boolean; status: BackupStatus | null };
+  backup: { configured: boolean; status: BackupStatus | null; offsite: { configured: boolean; status: OffsiteStatus | null } };
   /** 更新（第8.6.4節）。update.sh が書いた結果と、止めている期限。 */
   update: UpdateStatus;
   /** 遠隔の保守（第8.6.4節）。 */
@@ -133,7 +136,11 @@ export async function machineStatus(cfg: MachineConfig, now: Date = new Date()):
     checkedAt: now.toISOString(),
     database, worker, entrance, localAi,
     disk: { data: await diskSpace(cfg.filesDir), backup: cfg.backupDir ? await diskSpace(cfg.backupDir) : null },
-    backup: { configured: !!cfg.backupDir, status: cfg.backupDir ? await readBackupStatus(cfg.backupDir) : null },
+    backup: {
+      configured: !!cfg.backupDir,
+      status: cfg.backupDir ? await readBackupStatus(cfg.backupDir) : null,
+      offsite: { configured: !!(cfg.offsite && cfg.backupDir), status: cfg.offsite && cfg.backupDir ? await readOffsiteStatus(cfg.backupDir) : null },
+    },
     update: await readUpdateStatus(cfg.dir, now),
     maintenance: await readMaintenanceStatus(cfg.dir, now),
     heartbeat: await readHeartbeatStatus(cfg.dir, cfg.heartbeat ?? null),

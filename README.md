@@ -241,6 +241,7 @@ docs/            開発規約・リリース規定・設計判断記録
 | `M2O_ONSITE_TENANT` | （なし） | ローカルの形で入っている 1 社のサブドメイン。アドレスにかかわらずこの会社に決める |
 | `AI_MONTHLY_LIMIT_JPY` | （なし） | 運営が AI の費用をまとめて払う会社の、AI の利用の月の上限（円）の既定と、管理者が上げられる上限。無ければ上限なし。自社の鍵の会社には効かない（仕様書 第6.6.2節） |
 | `M2O_BACKUP_DIR` | （なし） | ローカルの形の控えの置き場（RAID とは別のディスク）。あれば毎晩控えを取り、毎月戻せるかを確かめる（仕様書 第8.6.5節） |
+| `M2O_OFFSITE_REPOSITORY`・`M2O_OFFSITE_PASSWORD`・`M2O_OFFSITE_ACCESS_KEY_ID`・`M2O_OFFSITE_SECRET_ACCESS_KEY`・`M2O_OFFSITE_REGION`・`M2O_RESTIC_BIN` | （なし） | ローカルの形の社外の控え。会社が契約した S3 互換の置き場（`s3:https://…`）・暗号化の合言葉（機械の上で作り、紙の控えに書く）・置き場の鍵・地域・restic の道。そろったときだけ、毎晩の控えの後に restic で暗号化して送る（仕様書 第8.6.5節） |
 | `M2O_HEARTBEAT_URL`・`M2O_HEARTBEAT_TOKEN`・`M2O_MACHINE_ID` | （なし） | ローカルの形の、運営への稼働の知らせの受け口（https）・鍵・機械の番号。入れた機械だけ 1 時間に 1 回、件数と状態だけを送る（仕様書 第8.6.8節） |
 | `M2O_PG_BIN` ／ `M2O_PG_DOCKER` | （なし） | 控えに使う PostgreSQL の道具のある場所（同梱した実行環境）。開発ではデータベースのコンテナの名前（`m2office-db`）を `M2O_PG_DOCKER` に渡すと、その中の道具を使う |
 | `M2O_MACHINE_DIR` | `.data/machine` | ローカルの形の「機械」の様子の知らせ（ワーカーの知らせ）を置く場所（仕様書 第8.6.7節） |

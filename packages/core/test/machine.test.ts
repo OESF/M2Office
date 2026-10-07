@@ -118,13 +118,17 @@ test('稼働の知らせ: 件数と状態だけを送り、名前や業務の中
     entrance: { host: 'office.secret-company.example', certExpires: '2026-12-01T00:00:00Z', certDaysLeft: 54, error: null },
     localAi: { configured: true, ok: false, models: ['secret-model'], error: 'connect ECONNREFUSED' },
     disk: { data: { free: 100, total: 200 }, backup: null },
-    backup: { configured: true, status: { last: { name: 'x', at: '2026-10-08T00:00:00Z', ok: true, dbBytes: 1, error: null }, lastOk: null, restoreTest: null } },
+    backup: {
+      configured: true, status: { last: { name: 'x', at: '2026-10-08T00:00:00Z', ok: true, dbBytes: 1, error: null }, lastOk: null, restoreTest: null },
+      offsite: { configured: true, status: { last: { name: 'x', at: '2026-10-08T00:10:00Z', ok: false, snapshot: null, bytesAdded: 0, error: 'secret-bucket に届きません' }, lastOkSnapshot: null, check: null } },
+    },
     update: { settings: null, last: null, history: [], heldUntil: null },
     maintenance: { configured: false, open: false, until: null, sessions: [] },
     heartbeat: { configured: true, off: false, lastAt: null, lastOk: null, lastError: null },
   } as never;
   const body = JSON.stringify(heartbeatPayload(status, cfg.machineId));
-  assert.doesNotMatch(body, /secret-company|secret-model|ECONNREFUSED/);
+  assert.doesNotMatch(body, /secret-company|secret-model|ECONNREFUSED|secret-bucket/);
+  assert.match(body, /"offsite":\{"configured":true,"lastAt":"2026-10-08T00:10:00Z","lastOk":false,"checkOk":null\}/);
   assert.match(body, /"machineId":"m-001"/);
   const dir = await mkdtemp(join(tmpdir(), 'm2o-hb-'));
   const sent: { auth: string | null }[] = [];

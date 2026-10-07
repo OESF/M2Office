@@ -15,7 +15,7 @@ import {
   RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, GoogleContactsService, KnowledgeEmbedder, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, JGrantsApi, MockJGrants, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, MEMBER_LINE_SEND, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger,
   NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
-  defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator, aiUsageMeterFromEnv, enterAiUsage, withAiUsage, setEnqueueAiGuard, AutoMinutes, MINUTES_AGENT_ID, appPath, backupConfigFromEnv, machineDir, readBackupStatus, takeUnnotifiedUpdateFailure, takeClosedMaintenanceSessions, heartbeatConfigFromEnv, sendHeartbeat, HEARTBEAT_INTERVAL_MS, machineStatus, machineConfigFromEnv, restoreTest, runBackup, takeBackupRequest, writeWorkerBeat
+  defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator, aiUsageMeterFromEnv, enterAiUsage, withAiUsage, setEnqueueAiGuard, AutoMinutes, MINUTES_AGENT_ID, appPath, backupConfigFromEnv, machineDir, readBackupStatus, takeUnnotifiedUpdateFailure, takeClosedMaintenanceSessions, heartbeatConfigFromEnv, sendHeartbeat, HEARTBEAT_INTERVAL_MS, machineStatus, machineConfigFromEnv, restoreTest, runBackup, takeBackupRequest, writeWorkerBeat, offsiteConfigFromEnv, readOffsiteStatus, runOffsite, checkOffsite
 } from '@m2office/core';
 import { canRunAgent, fileInputKey } from '@m2office/shared';
 import { fileURLToPath } from 'node:url';
@@ -534,6 +534,33 @@ let lastNoticeRemind = 0;
 /** 控えの設定（ローカルの形で M2O_BACKUP_DIR があるときだけ。第8.6.5節）。 */
 const onsite = deploymentFromEnv(process.env) === 'onsite';
 const backupCfg = onsite ? backupConfigFromEnv(process.env) : null;
+// 社外の控え（会社が選んだときだけ。restic で暗号化して S3 互換の置き場へ。第8.6.5節）。送るのに時間がかかるため、見回りを止めずに裏で行う
+const offsiteCfg = backupCfg ? offsiteConfigFromEnv(process.env, machineDir(process.env)) : null;
+let offsiteRunning = false;
+
+/** 社内の控えの 1 回分を社外へ送り、月が変わって初めての回の後に置き場が壊れていないかを確かめる（裏で行う）。 */
+function startOffsite(backupDir: string, name: string): void {
+  if (!offsiteCfg || offsiteRunning) return;
+  offsiteRunning = true;
+  void (async () => {
+    try {
+      const before = await readOffsiteStatus(backupDir);
+      const rec = await runOffsite(backupDir, name, offsiteCfg);
+      log.info(rec.ok ? '社外の控えを送りました' : '社外の控えを送れませんでした', { name, snapshot: rec.snapshot, bytesAdded: rec.bytesAdded, error: rec.error });
+      if (!rec.ok) await notifyMachine('社外の控えを送れませんでした', `${rec.error ?? ''}。管理者ページの「機械」で確かめてください。`);
+      const month = (iso: string) => new Date(Date.parse(iso) + 9 * 3_600_000).toISOString().slice(0, 7);
+      if (rec.ok && (!before.check || month(before.check.at) !== month(rec.at))) {
+        const c = await checkOffsite(backupDir, offsiteCfg);
+        log.info(c.ok ? '社外の控えが壊れていないことを確かめました' : '社外の控えの確かめに失敗しました', { error: c.error });
+        if (!c.ok) await notifyMachine('社外の控えの確かめに失敗しました', `${c.error ?? ''}。管理者ページの「機械」で確かめ、導入した技術者に伝えてください。`);
+      }
+    } catch (err) {
+      log.warn('社外の控えで例外が発生しました', { err });
+    } finally {
+      offsiteRunning = false;
+    }
+  })();
+}
 let lastUpdateCheck = 0;
 // 運営への稼働の知らせ（第8.6.8節）。受け口と鍵を入れた機械だけ
 const heartbeatCfg = onsite ? heartbeatConfigFromEnv(process.env) : null;
@@ -615,6 +642,7 @@ while (running) {
         const rec = await runBackup(backupCfg, now);
         log.info(rec.ok ? '控えを取りました' : '控えを取れませんでした', { name: rec.name, bytes: rec.dbBytes, error: rec.error });
         if (!rec.ok) await notifyMachine('控えを取れませんでした', `${rec.error ?? ''}。管理者ページの「機械」で確かめてください。`);
+        if (rec.ok) startOffsite(backupCfg.dir, rec.name);
         const lastTest = status.restoreTest?.at ? new Date(Date.parse(status.restoreTest.at) + 9 * 3_600_000).toISOString().slice(0, 7) : null;
         if (rec.ok && lastTest !== jst.toISOString().slice(0, 7)) {
           const t = await restoreTest(backupCfg, now);

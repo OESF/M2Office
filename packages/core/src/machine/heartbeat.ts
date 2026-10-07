@@ -27,7 +27,11 @@ export interface HeartbeatPayload {
   version: string;
   at: string;
   parts: { database: boolean; worker: boolean; entrance: boolean; localAi: boolean | null };
-  backup: { configured: boolean; lastAt: string | null; lastOk: boolean | null; restoreOk: boolean | null };
+  backup: {
+    configured: boolean; lastAt: string | null; lastOk: boolean | null; restoreOk: boolean | null;
+    /** 社外の控え（第8.6.5節）。 */
+    offsite: { configured: boolean; lastAt: string | null; lastOk: boolean | null; checkOk: boolean | null };
+  };
   disk: { dataFree: number | null; dataTotal: number | null; backupFree: number | null };
   cert: { daysLeft: number | null };
   update: { lastAt: string | null; lastResult: string | null; version: string | null };
@@ -59,6 +63,7 @@ export function heartbeatConfigFromEnv(env: Record<string, string | undefined>):
  */
 export function heartbeatPayload(s: MachineStatus, machineId: string): HeartbeatPayload {
   const b = s.backup.status;
+  const o = s.backup.offsite.status;
   return {
     machineId,
     version: s.version,
@@ -68,7 +73,10 @@ export function heartbeatPayload(s: MachineStatus, machineId: string): Heartbeat
       entrance: s.entrance.host ? s.entrance.certExpires !== null : false,
       localAi: s.localAi.configured ? s.localAi.ok : null,
     },
-    backup: { configured: s.backup.configured, lastAt: b?.last?.at ?? null, lastOk: b?.last ? b.last.ok : null, restoreOk: b?.restoreTest ? b.restoreTest.ok : null },
+    backup: {
+      configured: s.backup.configured, lastAt: b?.last?.at ?? null, lastOk: b?.last ? b.last.ok : null, restoreOk: b?.restoreTest ? b.restoreTest.ok : null,
+      offsite: { configured: s.backup.offsite.configured, lastAt: o?.last?.at ?? null, lastOk: o?.last ? o.last.ok : null, checkOk: o?.check ? o.check.ok : null },
+    },
     disk: { dataFree: s.disk.data?.free ?? null, dataTotal: s.disk.data?.total ?? null, backupFree: s.disk.backup?.free ?? null },
     cert: { daysLeft: s.entrance.certDaysLeft },
     update: { lastAt: s.update.last?.at ?? null, lastResult: s.update.last?.result ?? null, version: s.update.last?.to ?? null },
