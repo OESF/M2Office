@@ -26,7 +26,7 @@ import { layout, tagLine, tagLines, templatesFor, PRINT_TEMPLATES, type PrintCom
 import type { AnnouncementSignage } from '../announcements/service.js';
 import type { CanvaService } from './canva.js';
 import { renderSvgPng } from '../columns/cover.js';
-import { pagePng, previewPng, toPdf } from './render.js';
+import { pagePng, previewPng, toCanvaPdf, toPdf } from './render.js';
 import type { PrintDesignStore, StoredDesign } from './store.js';
 import { imageModel } from '../llm/models.js';
 
@@ -560,7 +560,8 @@ export class PrintDesignService {
   }
 
   /**
-   * Canva で仕上げる（第41.19.3節）。選んだ版の PDF（実寸）を本人の Canva に取り込み、編集の画面の URL を返す。
+   * Canva で仕上げる（第41.19.3節）。選んだ版を、字を字のまま書いた Canva 用の PDF（実寸）にして本人の Canva に取り込み、編集の画面の URL を返す。
+   * Canva で直した版は、Canva から書き出した PDF を送る。
    * 本人が押したときだけ呼ぶ（秘書のツールは作らない）。
    *
    * @returns 編集の画面の URL か、できない理由
@@ -571,9 +572,18 @@ export class PrintDesignService {
     if (!d) return { error: '販促物が見つかりません' };
     if (!d.currentVersionId) return { error: '先に案を 1 つ選んでください' };
     const v = await this.deps.store.getVersion(who.tenantId, d.currentVersionId);
-    const pdf = v ? await this.export(who, designId, v.id, 'pdf') : null;
-    if (!v || !pdf || 'error' in pdf) return { error: 'PDF を作れませんでした' };
-    const r = await this.deps.canva.importPdf(who, d.title, pdf.bytes);
+    if (!v) return { error: 'PDF を作れませんでした' };
+    let bytes: Uint8Array;
+    if (v.template === CANVA_TEMPLATE) {
+      const pdf = await this.export(who, designId, v.id, 'pdf');
+      if (!pdf || 'error' in pdf) return { error: 'PDF を作れませんでした' };
+      bytes = pdf.bytes;
+    } else {
+      // Canva で字を直せるよう、字を字のまま書く（印刷用の PDF は全体を画像にしたまま）
+      const co = await this.company(who.tenantId);
+      bytes = await toCanvaPdf(await this.pagesOf(d.size, v.template as PrintTemplateId, v.palette, v.color, v.headlineScale, v.copy, await this.imageOf(who.tenantId, v), co), d.size);
+    }
+    const r = await this.deps.canva.importPdf(who, d.title, bytes);
     if ('error' in r) return r;
     await this.deps.store.update(who.tenantId, designId, { canva: { designId: r.designId, editUrl: r.editUrl, versionNo: v.no, at: this.now().toISOString() } });
     await this.audit(who, 'print.canva.open', designId, { no: v.no });

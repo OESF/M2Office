@@ -3,9 +3,11 @@
  *
  * 入稿用は、塗り足し 3mm まで描いた同じ SVG を、裁つ位置の印（トンボ）を付けた一回り大きな紙に置く。色は RGB（CMYK への変換は段 3）。
  * 字は同梱の Noto Sans JP で画像にしてから PDF に入れる（書体を埋め込む手間と崩れを避ける）。解像度はおよそ 200dpi（大きな紙は上限で抑える）。
+ * Canva に送る PDF（toCanvaPdf）だけは、字を字のまま書く（Canva で字を直せるように。第41.19.3節）。
  */
 
 import { PDFDocument, rgb } from 'pdf-lib';
+import { embedJapaneseFonts } from '../files/pdf-render.js';
 import { PRINT_SIZES, type PrintSize } from '@m2office/shared';
 import { renderSvgPng } from '../columns/cover.js';
 import { BLEED, type PrintPage } from './templates.js';
@@ -82,4 +84,76 @@ export async function toPdf(pages: PrintPage[], size: PrintSize, kind: 'trim' | 
     }
   }
   return new Uint8Array(await doc.save());
+}
+
+/** 組み版の 1 行の字（`<text>`）。座標と大きさは mm、`y` は字の並ぶ線。 */
+export interface SvgTextLine {
+  x: number;
+  y: number;
+  size: number;
+  weight: number;
+  fill: string;
+  anchor: 'start' | 'middle' | 'end';
+  text: string;
+}
+
+const attr = (tag: string, name: string) => new RegExp(`\\s${name}="([^"]*)"`).exec(tag)?.[1];
+const unesc = (s: string) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
+
+/**
+ * 組み版の SVG から、字の行を取り出す（Canva 用の PDF に字のまま書くため）。
+ *
+ * @returns 字の行と、字を除いた SVG（地・模様・写真だけ）
+ * @remarks 組み版は字を変形のかからない `<text>` に 1 行ずつ書く（templates.ts の textBlock）。その形だけを読む
+ */
+export function splitSvgText(svg: string): { lines: SvgTextLine[]; base: string } {
+  const lines: SvgTextLine[] = [];
+  const base = svg.replace(/<text\b([^>]*)>([^<]*)<\/text>/g, (_m, tag: string, body: string) => {
+    const anchor = attr(tag, 'text-anchor');
+    lines.push({
+      x: Number(attr(tag, 'x') ?? 0), y: Number(attr(tag, 'y') ?? 0), size: Number(attr(tag, 'font-size') ?? 4),
+      weight: Number(attr(tag, 'font-weight') ?? 400), fill: attr(tag, 'fill') ?? '#000000',
+      anchor: anchor === 'middle' || anchor === 'end' ? anchor : 'start', text: unesc(body),
+    });
+    return '';
+  });
+  return { lines, base };
+}
+
+/** `#rrggbb`（か `#rgb`）を pdf-lib の色にする。読めなければ黒。 */
+function colorOf(hex: string) {
+  const h = hex.trim().replace(/^#/, '');
+  const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h;
+  const n = Number.parseInt(full, 16);
+  if (!/^[0-9a-f]{6}$/i.test(full) || Number.isNaN(n)) return rgb(0, 0, 0);
+  return rgb(((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255);
+}
+
+/**
+ * Canva に送る PDF（実寸。第41.19.3節）。地・模様・写真だけを 1 枚の画像にし、その上に字を字のまま書く。
+ *
+ * @remarks 書体は同梱の Noto Sans JP（標準と太字）を埋め込む。書体に無い字は〓にする（画像にしたときと同じ書体の範囲）
+ */
+export async function toCanvaPdf(pages: PrintPage[], size: PrintSize): Promise<Uint8Array> {
+  const { w, h } = PRINT_SIZES[size];
+  const doc = await PDFDocument.create();
+  doc.setCreator('M2Office');
+  doc.setProducer('M2Office');
+  const regular = await embedJapaneseFonts(doc, 'regular');
+  const bold = await embedJapaneseFonts(doc, 'bold');
+  for (const page of pages) {
+    const { lines, base } = splitSvgText(page.svg);
+    const png = await doc.embedPng(renderSvgPng(base, pxOf(w)));
+    const p = doc.addPage([w * MM, h * MM]);
+    p.drawImage(png, { x: 0, y: 0, width: w * MM, height: h * MM });
+    for (const l of lines) {
+      const f = l.weight >= 600 ? bold : regular;
+      const text = f.fit(l.text);
+      const sizePt = l.size * MM;
+      const width = f.font.widthOfTextAtSize(text, sizePt);
+      const x = l.x * MM - (l.anchor === 'middle' ? width / 2 : l.anchor === 'end' ? width : 0);
+      p.drawText(text, { x, y: (h - l.y) * MM, size: sizePt, font: f.font, color: colorOf(l.fill) });
+    }
+  }
+  return doc.save();
 }

@@ -172,3 +172,23 @@ test('販促物: Canva で仕上げて戻すと新しい版になり、その版
   const small = samplePng();
   assert.equal(shrinkPng(small, 5000), small);
 });
+
+test('Canva 用の PDF: 地と写真は画像、字は字のまま（同じ位置・太さ）で書く。印刷用の PDF は字を持たない（第41.19.3節）', async () => {
+  const { layout, toCanvaPdf, toPdf, splitSvgText } = await import('../src/index.js');
+  const { extractPdfText } = await import('../src/files/pdf.js');
+  const company = { name: '見本商店', address: '東京都千代田区1-1', phone: '03-1234-5678', website: 'https://www.example.jp' };
+  const pages = layout({
+    size: 'A4', template: 'band', color: '#1f8a80', palette: 0, headlineScale: 1,
+    copy: { headline: '秋の感謝祭', sub: '全品 1 割引', body: '10 月 1 日から 10 日まで\n皆さまのご来店をお待ちしています', period: '', price: '', note: '', qrUrl: '' },
+    image: null, logo: null, qr: null, company,
+  });
+  const { lines, base } = splitSvgText(pages[0]!.svg);
+  assert.ok(lines.some((l) => l.text === '秋の感謝祭' && l.weight === 700));
+  assert.doesNotMatch(base, /<text/);
+  const canva = await toCanvaPdf(pages, 'A4');
+  const text = (await extractPdfText(canva)).pages.map((p) => p.text).join('');
+  assert.match(text.replace(/\s/g, ''), /秋の感謝祭/);
+  assert.match(text.replace(/\s/g, ''), /ご来店をお待ちしています/);
+  const print = await toPdf(pages, 'A4', 'trim');
+  assert.doesNotMatch((await extractPdfText(print)).pages.map((p) => p.text).join(''), /感謝祭/);
+});
