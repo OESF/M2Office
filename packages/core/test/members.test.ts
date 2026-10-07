@@ -83,7 +83,8 @@ test('来店は 1 日 1 回まで。購入は率で換算し（端数は切り�
   assert.ok('error' in (await s.service.purchase(u1, m.id, 12.5)));
   // 記録に金額は無い
   const rec = s.store.records.find((r) => r.kind === 'purchase')!;
-  assert.doesNotMatch(JSON.stringify(rec), /1580/);
+  // 金額は数として探す（文字列にして探すと、ID の乱数に「1580」が出たときに当たってしまう）
+  assert.ok(!Object.values(rec).some((v) => v === 1580 || v === '1580') && !('amount' in rec));
   // 次の日はまた来店のポイントを付けられる
   s.setClock(new Date('2026-10-07T01:00:00Z'));
   assert.ok(!('error' in (await s.service.visit(u1, m.id))));

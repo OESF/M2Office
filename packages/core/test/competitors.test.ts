@@ -51,6 +51,14 @@ function setup(over: Partial<TenantSettings['company']> = {}) {
 
 const who = { tenantId: 't1', userId: 'u1' };
 
+/** 値の中の数をすべて集める（入れ子の中も。文字列は見ない）。 */
+function numbersIn(v: unknown): number[] {
+  if (typeof v === 'number') return [v];
+  if (Array.isArray(v)) return v.flatMap(numbersIn);
+  if (v && typeof v === 'object') return Object.values(v).flatMap(numbersIn);
+  return [];
+}
+
 test('robots.txt: いちばん長く当てはまる規則が勝ち、同じ長さなら Allow。自分の名前のまとまりを先に使う', () => {
   const rules = parseRobots('User-agent: *\nDisallow: /private/\nAllow: /private/open\n\nUser-agent: OtherBot\nDisallow: /');
   assert.equal(robotsAllows(rules, '/'), true);
@@ -107,7 +115,11 @@ test('探す: 地図で半径の中の同業を近い順に覚え、自社と遠
   assert.equal('selfPlaceId' in (o.profile ?? {}), false, '自社の place ID は画面に出さない');
   const stored = await store.list('t1');
   assert.ok(stored.every((c) => c.name === '' && c.url === '' && c.placeId), '地図の名前と URL は残さない');
-  assert.ok(!JSON.stringify(stored).includes('4.3') && !JSON.stringify(await store.profile('t1')).includes('4.2'), '評価は残さない');
+  // 評価と件数の値が、残したもののどこにも数として無いこと（文字列にして探すと、日時の「14.3…」などに当たってしまう）
+  const storedNumbers = numbersIn(stored);
+  const profileNumbers = numbersIn(await store.profile('t1'));
+  assert.ok([4.3, 3.9, 52, 40].every((n) => !storedNumbers.includes(n)) && [4.2, 39].every((n) => !profileNumbers.includes(n)), '評価は残さない');
+  assert.ok(stored.every((c) => !('rating' in c) && !('ratingCount' in c)), '評価の欄を持たない');
   // robots.txt で断られたページは読まない
   assert.ok(fetcher.requested.includes('https://shop-b.example.jp/service'));
   assert.ok(!fetcher.requested.includes('https://shop-b.example.jp/private/price'));

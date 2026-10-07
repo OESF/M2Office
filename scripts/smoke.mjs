@@ -6451,7 +6451,7 @@ console.log('\n■ 80. 会員とポイント（入り切り・会員証・来店
     v1.status === 200 && v1.body.points === 1 && v2.status === 400 ? ok('来店のポイントは 1 日 1 回まで') : ng('来店のポイントが違う', JSON.stringify({ v1: v1.body, v2: v2.status }));
     const buy = await call('a', `/v1/members/${id}/purchase`, { method: 'POST', body: JSON.stringify({ amount: 1580 }) }, 'member');
     const { rows: pts } = await owner.query(`select * from member_points where member_id = $1 and kind = 'purchase'`, [id]);
-    buy.status === 200 && buy.body.points === 15 && buy.body.member.balance === 16 && pts.length === 1 && !JSON.stringify(pts[0]).includes('1580')
+    buy.status === 200 && buy.body.points === 15 && buy.body.member.balance === 16 && pts.length === 1 && !Object.values(pts[0]).some((v) => Number(v) === 1580) && !('amount' in pts[0])
       ? ok('購入は 100 円で 1 ポイントに換算し、金額は残さない') : ng('購入のポイントが違う', JSON.stringify({ buy: buy.body, pts }));
 
     const memberReward = await call('a', '/v1/members/rewards', { method: 'POST', body: JSON.stringify({ name: 'スモークの特典', points: 20 }) }, 'member');
