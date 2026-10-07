@@ -9,11 +9,12 @@
  * @see 仕様書 第9.4節 ツールと承認の対応
  */
 
+import { withAiUsage } from '../usage/ai-usage.js';
 import { randomUUID } from 'node:crypto';
 import {
   alwaysRequiresApproval, canDecide, canUseAgent, writeInternalNeedsApproval,
   type AutomationPolicy, type TenantSettings, type WritingStyle,
-  type AgentDefinition, type AgentStep, type ApprovalStep, type Approval, type Run,
+  type AgentDefinition, type AgentStep, type ApprovalStep, type Approval, type Job, type Run,
   type RunStep, type Step, type ContactScope, type InventorySettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type ContractSettings, type SubsidySettings, type MemberSettings, type PrintDesignSettings, type ReservationSettings,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
@@ -65,6 +66,12 @@ export type AdvanceResult =
 
 export interface RunEngineDeps {
   repo: Repository;
+  /**
+   * AI の利用の上限の確かめ（第6.6.2節、ADR-0079）。まだ始まっていない実行の前に呼ぶ。
+   *
+   * @returns 始めないなら理由（利用者に見せる文）。始めてよければ `null`
+   */
+  aiGuard?(tenantId: string, userId: string): Promise<string | null>;
   llm: LlmProvider;
   registry: ToolRegistry;
   /** メール・予定などへの接続口。ツールに渡す。 */
@@ -248,9 +255,20 @@ export class RunEngine {
    * 次のワーカーが同じ位置から続けられる（不変則 I-5）。
    */
   async advance(run: Run): Promise<AdvanceResult> {
-    const { repo } = this.deps;
-    const job = await repo.getJob(run.tenantId, run.jobId);
+    const job = await this.deps.repo.getJob(run.tenantId, run.jobId);
     if (!job) return this.fail(run, 'ジョブが見つかりません');
+    // まだ始まっていない実行は、AI の利用の上限に当たっていれば始めない。始まった実行は止めない（第6.6.2節・第21.2.3節）
+    if (this.deps.aiGuard && (await this.deps.repo.listRunSteps(run.tenantId, run.id)).length === 0) {
+      const reason = await this.deps.aiGuard(run.tenantId, job.requestedBy);
+      if (reason) return this.fail(run, reason);
+    }
+    // この実行の中の AI の呼び出しを、依頼した人・業務・実行の ID で記録する
+    return withAiUsage({ userId: job.requestedBy, purpose: `agent:${job.agentId}`, runId: run.id }, () => this.advanceWith(run, job));
+  }
+
+  /** {@link advance} の中身（ジョブを引いた後）。 */
+  private async advanceWith(run: Run, job: Job): Promise<AdvanceResult> {
+    const { repo } = this.deps;
 
     const def = await this.deps.resolveDefinition(job.agentId, job.agentVersion, run.tenantId);
     if (!def) return this.fail(run, `エージェント定義が見つかりません: ${job.agentId}`);

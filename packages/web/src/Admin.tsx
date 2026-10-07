@@ -5,7 +5,7 @@
  */
 
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
-import { api, ApiError, describeError, type AdminRun, type AdminRunStatus, type AdminSchedule, type AuditFilter, type AuditRowView, type Me } from './api.js';
+import { api, ApiError, describeError, type AdminRun, type AdminRunStatus, type AdminSchedule, type AiUsageView, type AuditFilter, type AuditRowView, type Me } from './api.js';
 import { statusLabel, SuspendedBanner } from './components.js';
 import {
   AgentSettings, CompanySettings, KnowledgeSettings, UserSettings,
@@ -296,11 +296,13 @@ function Usage() {
     <>
       <PageTitle trail={['利用状況']} help={{
         article: 'admin-usage',
-        text: '業務ごとの、これまでの実行件数と推論の費用です。費用は概算で、請求額ではありません。',
+        text: '今月の AI の利用と上限、業務ごとのこれまでの実行件数と推論の費用です。費用は概算で、請求額ではありません。',
       }} />
+      <AiUsage />
       {error && <p className="error">{error}</p>}
       {data && (
         <>
+          <h3>業務ごと（これまで）</h3>
           <div className="stats">
             <div className="stat"><span>実行件数</span><strong>{data.total.runs.toLocaleString()}</strong></div>
             <div className="stat"><span>推論の費用</span><strong>{data.total.costJpy.toLocaleString()} 円</strong></div>
@@ -321,6 +323,83 @@ function Usage() {
         </>
       )}
     </>
+  );
+}
+
+/** 円の表し方。 */
+const yen = (v: number) => `${Math.round(v).toLocaleString('ja-JP')} 円`;
+
+/**
+ * 今月の AI の利用と上限（仕様書 第6.6.2節、ADR-0079）。会社の月の上限と 1 人の割合を決め、用途ごと・人ごとの内訳を見る。
+ */
+function AiUsage() {
+  const [data, setData] = useState<AiUsageView | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
+  const [limit, setLimit] = useState('');
+  const [share, setShare] = useState(4);
+  const load = useCallback(() => {
+    api.admin.aiUsage().then((d) => {
+      setData(d);
+      setLimit(d.settings.monthlyJpy === null ? '' : String(d.settings.monthlyJpy));
+      setShare(Math.round(d.settings.perUserShare * 10));
+    }).catch((e) => setError(describeError(e, '読み込めませんでした')));
+  }, []);
+  useEffect(load, [load]);
+  const save = () => {
+    setError(null);
+    setSaved(null);
+    api.admin.saveSettings('aiLimits', { monthlyJpy: limit.trim() === '' ? null : Number(limit), perUserShare: share / 10 })
+      .then(() => { setSaved('保存しました'); load(); })
+      .catch((e) => setError(describeError(e, '保存できませんでした')));
+  };
+  if (!data) return error ? <p className="error">{error}</p> : null;
+  const ratio = data.monthlyJpy ? Math.min(1, data.usedJpy / data.monthlyJpy) : 0;
+  return (
+    <div className="card">
+      <h3>今月の AI の利用（{Number(data.month.slice(5))} 月）</h3>
+      <div className="stats">
+        <div className="stat"><span>使った額</span><strong>{yen(data.usedJpy)}</strong></div>
+        <div className="stat"><span>会社の上限</span><strong>{data.monthlyJpy === null ? '上限なし' : yen(data.monthlyJpy)}</strong></div>
+        <div className="stat"><span>1 人の上限</span><strong>{data.userLimitJpy === null ? '—' : yen(data.userLimitJpy)}</strong></div>
+      </div>
+      {data.monthlyJpy !== null && (
+        <div className={`meter${ratio >= 1 ? ' over' : ratio >= 0.8 ? ' warn' : ''}`} role="progressbar" aria-valuenow={Math.round(ratio * 100)} aria-valuemin={0} aria-valuemax={100}>
+          <span style={{ width: `${ratio * 100}%` }} />
+        </div>
+      )}
+      {data.monthlyJpy !== null && data.usedJpy >= data.monthlyJpy && <p className="warn-msg small">上限に達したため、新しい業務と AI を使う秘書への依頼を止めています</p>}
+      <div className="row">
+        <label className="field">月の上限（円）
+          <input inputMode="numeric" value={limit} placeholder={data.platformCap !== null ? `${data.platformCap.toLocaleString('ja-JP')} まで` : '上限なし'}
+            onChange={(e) => setLimit(e.target.value.replace(/[^0-9]/g, ''))} />
+        </label>
+        <label className="field">1 人の上限
+          <select value={share} onChange={(e) => setShare(Number(e.target.value))}>
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => <option key={n} value={n}>会社の上限の {n} 割</option>)}
+          </select>
+        </label>
+        <button className="btn" onClick={save}>保存</button>
+      </div>
+      {saved && <p className="ok-msg small">{saved}</p>}
+      {error && <p className="error">{error}</p>}
+      {data.byPurpose.length > 0 && (
+        <div className="grid2">
+          <table className="table">
+            <thead><tr><th>用途</th><th className="num">回数</th><th className="num">額</th></tr></thead>
+            <tbody>{data.byPurpose.map((p) => <tr key={p.purpose}><td>{p.label}</td><td className="num">{p.calls}</td><td className="num">{yen(p.costJpy)}</td></tr>)}</tbody>
+          </table>
+          <table className="table">
+            <thead><tr><th>人</th><th className="num">回数</th><th className="num">額</th></tr></thead>
+            <tbody>{data.byUser.map((u) => (
+              <tr key={u.userId ?? 'system'}>
+                <td>{u.name} {u.over && <span className="badge warn">上限</span>}</td><td className="num">{u.calls}</td><td className="num">{yen(u.costJpy)}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
+    </div>
   );
 }
 

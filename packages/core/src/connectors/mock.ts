@@ -10,7 +10,7 @@ import { randomUUID } from 'node:crypto';
 import type { SlidePlan } from '../slides/plan.js';
 import { renderSvgPng } from '../columns/cover.js';
 import type {
-  BusySlot, CalendarEvent, ConnectorPrincipal, DriveFile, MailMessage, TaskItem, WorkspaceConnector,
+  BusySlot, CalendarEvent, ConnectorPrincipal, DriveFile, MailMessage, TaskItem, WorkspaceConnector, EndedMeeting
 } from './types.js';
 
 /**
@@ -276,8 +276,13 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
     },
   };
 
-  /** Meet の文字起こし。見本の会議を 1 つ持つ（題名に（見本））。 */
+  /** 見本の終わった会議（自動テストと通しの確認が足す。第9.5.2.1節）。 */
+  readonly endedMeetings: (EndedMeeting & { owner: string })[] = [];
+
+  /** Meet の文字起こし。見本の会議を 1 つ持つ（題名に（見本））。終わった会議は {@link endedMeetings} から返す。 */
   meet = {
+    ended: async (p: ConnectorPrincipal, since: string): Promise<EndedMeeting[]> =>
+      this.endedMeetings.filter((m) => m.owner === key(p) && m.endedAt > since).map(({ owner: _owner, ...m }) => m),
     transcript: async (_p: ConnectorPrincipal, q: { query: string }) => {
       const today = ymd(this.now());
       const conference = {

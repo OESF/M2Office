@@ -37,6 +37,9 @@ export function notificationPath(n: { kind: string; runId: string | null }): str
   if (n.kind === 'member') return '/members';
   // 掲示の期間が終わった販促物の知らせは、販促物を開く（第41.8節）
   if (n.kind === 'print') return '/print-designs';
+  // AI の利用の上限の知らせ（第6.6.2節）。会社の分は管理者ページの利用状況、本人の分は個人設定
+  if (n.kind === 'usage') return '/admin/usage';
+  if (n.kind === 'usageSelf') return '/settings';
   if (n.runId && RUN_ID.test(n.runId)) return `/runs/${encodeURIComponent(n.runId)}`;
   return '/';
 }

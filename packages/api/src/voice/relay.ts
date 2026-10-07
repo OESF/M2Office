@@ -15,7 +15,7 @@ import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket as NodeWebSocket } from 'ws';
 import { canDecide } from '@m2office/shared';
-import { AiNotConfiguredError, AiPolicyBlockedError, needsCanvas, type Logger, type SecretaryReply, type VoiceEvent, type VoiceSession, type VoiceTool } from '@m2office/core';
+import { AiNotConfiguredError, AiPolicyBlockedError, needsCanvas, type Logger, type SecretaryReply, type VoiceEvent, type VoiceSession, type VoiceTool, AiLimitError, withAiUsage, addMishear, correctHeard, mishearOf, voiceWords, voiceWordsLine, type VoiceWord } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { SESSION_COOKIE, sessionIdOf } from '../auth/session.js';
 import { extractSubdomain } from '../middleware/tenant.js';
@@ -294,13 +294,22 @@ async function start(
   // 推論が使えない会社では、音声を始めない（仕様書 第20.2.4節、ADR-0030）
   let provider: Awaited<ReturnType<typeof deps.ai.voiceFor>>;
   try {
-    provider = await deps.ai.voiceFor(tenantId);
+    provider = await withAiUsage({ userId, purpose: 'voice' }, () => deps.ai.voiceFor(tenantId));
   } catch (err) {
     // ローカルの方針で音声を使わない会社には、その理由を伝える（第8.6節、Q-157）
-    send({ type: 'error', message: err instanceof AiNotConfiguredError || err instanceof AiPolicyBlockedError ? err.message : '音声の対話を始められませんでした。しばらくしてからお試しください' });
+    send({ type: 'error', message: err instanceof AiNotConfiguredError || err instanceof AiPolicyBlockedError || err instanceof AiLimitError ? err.message : '音声の対話を始められませんでした。しばらくしてからお試しください' });
     ws.close();
     return;
   }
+
+  // 聞き取りの手がかり（社内の人・名刺の相手・会社の名前・本人が直した言葉。第10.5.9節）
+  const words = await voiceWords({
+    repo: deps.repo,
+    contacts: async (t, u) => ((await deps.cards.access(t, u).catch(() => null))
+      ? (await deps.cards.store.listContacts({ tenantId: t, userId: u }, { limit: 60 })).map((c) => ({ name: c.name, nameKana: c.nameKana, company: c.company }))
+      : []),
+  }, tenantId, userId).catch(() => [] as VoiceWord[]);
+  let mishears = prefs.secretary.mishears ?? [];
 
   try {
     session = await provider.open({
@@ -323,6 +332,8 @@ async function start(
         '業務を頼まれたら handle_request に渡します。あなたが担当の業務に頼んで進め、終わったらお伝えします。そのときは「担当の業務に頼みました」のように言います。足りないことを聞かれたら本人に尋ね、社外に出るものとお金の確定は画面の承認トレイで本人が承認します。',
         // 本人が書いた話し方の指示（例: 関西弁で話して）。音声のときだけ使う
         voiceStyleLine(persona),
+        // 固有名詞の聞き違えを減らす手がかり（第10.5.9節）
+        voiceWordsLine(words),
       ].filter(Boolean).join(''),
       tools: [secretaryTool(), canvasTool()],
       onEvent: (event: VoiceEvent) => {
@@ -445,8 +456,23 @@ async function start(
         const request = (args['request'] ?? '').trim();
         dbg(`ツール handle_request に渡した文: ${request || '（空）'}`, args);
         if (!request) return { error: '依頼の言葉がありません' };
+        // 「〇〇じゃなくて△△」は聞き違えの直し。覚えて、次から使う（第10.5.9節）
+        const mis = mishearOf(request);
+        if (mis) {
+          mishears = addMishear(mishears, mis);
+          const cur = await deps.repo.getUserSettings(tenantId, userId);
+          await deps.repo.saveUserSettings(tenantId, userId, 'secretary', { ...cur.secretary, mishears });
+          dbg(`聞き違えを覚えた: ${mis.heard} → ${mis.meant}`, mis);
+          return { answer: `失礼しました。「${mis.meant}」ですね。次から「${mis.heard}」と聞こえたら「${mis.meant}」と受け取ります。直前の依頼を、正しい言葉でもう一度お願いします。` };
+        }
+        // 手がかりの読みと同じかな・前に直された聞き違えを、正しい書き方に直して渡す（聞き返さない。ADR-0028）
+        const fixed = correctHeard(request, words, mishears);
+        if (fixed.corrected.length) dbg(`聞き取りを直した: ${fixed.corrected.map((c) => `${c.from} → ${c.to}`).join('、')}`, fixed);
         try {
-          const reply = canvasReply(await deps.secretary.respond(tenantId, userId, request, undefined, { record: false }));
+          const raw = canvasReply(await withAiUsage({ userId, purpose: 'voice' }, () => deps.secretary.respond(tenantId, userId, fixed.text, undefined, { record: false })));
+          const reply = fixed.corrected.length
+            ? { ...raw, text: `${raw.text}\n（${[...new Set(fixed.corrected.map((c) => c.to))].join('・')}のことと受け取りました）` }
+            : raw;
           last = { request, reply };
           const why = needsCanvas(reply);
           if (why) showOnCanvas(request, reply);
@@ -491,7 +517,7 @@ async function start(
           return { shown_on_screen: true };
         }
         try {
-          const reply = canvasReply(await deps.secretary.respond(tenantId, userId, request, undefined, { record: false }));
+          const reply = canvasReply(await withAiUsage({ userId, purpose: 'voice' }, () => deps.secretary.respond(tenantId, userId, request, undefined, { record: false })));
           last = { request, reply };
           showOnCanvas(request, reply);
           dbg(`ツール show_on_canvas の答え（${reply.layer ?? ''}・画面に出した）: ${reply.text}`, reply);

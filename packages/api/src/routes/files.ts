@@ -9,6 +9,7 @@
 import { Hono } from 'hono';
 import { detectKind, loadFile, MAX_FILE_BYTES, saveFile } from '@m2office/core';
 import type { AppDeps } from '../context.js';
+import { driveFilesFor } from '../drive-files.js';
 import type { AppEnv } from '../middleware/tenant.js';
 
 /**
@@ -40,6 +41,23 @@ export function filesRoute(deps: AppDeps) {
       detail: { kind, size: meta.size, sha256: meta.sha256 }, occurredAt: new Date().toISOString(),
     });
     return c.json(meta, 201);
+  });
+
+  const drive = driveFilesFor(deps);
+
+  /** 秘書に渡すドライブのファイルを選ぶ画面の材料（`drive.file` だけに絞ったトークン。見本の会社は見本のドライブの一覧。第10.10.8節）。 */
+  app.get('/drive-picker', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const r = await drive.picker({ tenantId: tenant.id, userId: user.id });
+    return 'error' in r ? c.json(r, 400) : c.json(r);
+  });
+
+  /** 本人がドライブで選んだファイルを受け取る（本文: `fileId`）。手元から渡したファイルと同じ置き場に入れる（第10.10.8節）。 */
+  app.post('/from-drive', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const b = await c.req.json<{ fileId?: unknown }>().catch(() => ({} as { fileId?: unknown }));
+    const r = await drive.receive({ tenantId: tenant.id, userId: user.id }, String(b.fileId ?? ''));
+    return 'error' in r ? c.json({ error: r.error }, r.status) : c.json(r.file, 201);
   });
 
   app.get('/:id', async (c) => {

@@ -10,7 +10,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { Context, Next } from 'hono';
-import type { Logger } from '@m2office/core';
+import { AiLimitError, type Logger } from '@m2office/core';
 import type { AppEnv } from './tenant.js';
 
 /** 要求の ID として受け付ける形。外から渡された値をそのまま信じず、形を確かめる。 */
@@ -94,6 +94,8 @@ export function onUnexpectedError(log: Logger) {
     if (err instanceof SyntaxError) {
       return c.json({ error: '要求の形式が正しくありません（JSON として読めません）', requestId }, 400);
     }
+    // AI の利用の上限に当たった（仕様書 第6.6.2節・第21.2.3節）。想定外のエラーではない
+    if (err instanceof AiLimitError) return c.json({ error: err.message, requestId }, 429);
     (c.get('log') ?? log).error('想定外のエラー', { requestId, method: c.req.method, path: logPath(c.req.path), err });
     return c.json({ error: '内部エラーが発生しました。時間をおいて、もう一度お試しください。', requestId }, 500);
   };

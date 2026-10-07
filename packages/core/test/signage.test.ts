@@ -12,6 +12,7 @@ import { activeSignageBand, signageBandLabel, signageBandsOverlap, signageDaysLa
 import {
   readMp4, imageSize, usualSlot, jstSlot, cleanReport, normalizeText, fillTemplate, leadingNumber, phraseTemplate, valueSkeleton, pickPath,
   soundMime, externalRefs, signageRequest, signageFileRequest, stockChanges, stockCardText, applyStockChanges, sweepStockNotices,
+  isPlaceholderAssetName, cleanAiAssetName, signageConfirmText, SIGNAGE_YES, SIGNAGE_NO,
   type SignageService,
 } from '../src/index.js';
 
@@ -81,7 +82,7 @@ test('ふだん動いている時間帯: 記録が 3 日未満は 7〜22 時、�
 
 test('生きている知らせ: 知らない項目と形の違う値を捨てる（割り込みの文を受けない）', () => {
   const r = cleanReport({ current: 'a-1', flowVersion: 3, cached: 2, uncached: ['x', 'bad id!'], failed: [], pageVersion: '0.11.0', viewport: { width: 1920, height: 1080 }, storageFree: 1e9, text: '12番の方' });
-  assert.deepEqual(r, { current: 'a-1', flowVersion: 3, cached: 2, uncached: ['x'], failed: [], pageVersion: '0.11.0', viewport: { width: 1920, height: 1080 }, storageFree: 1e9, audio: null, interrupting: false });
+  assert.deepEqual(r, { current: 'a-1', flowVersion: 3, cached: 2, uncached: ['x'], failed: [], skipped: [], pageVersion: '0.11.0', viewport: { width: 1920, height: 1080 }, storageFree: 1e9, audio: null, interrupting: false });
   assert.equal(cleanReport('x'), null);
 });
 
@@ -220,4 +221,67 @@ test('在庫の案内: 品切れ・入荷を見分け、案内を足して入荷
   on = false;
   assert.deepEqual(await applyStockChanges(service, 't1', [{ name: 'x', kind: 'out' }], new Set(['x']), now), { added: 0, removed: 0 }, '切っていれば何もしない');
   assert.equal(await sweepStockNotices(service, 't1', now), 1, '切ったら流している案内を外す');
+});
+
+test('止まる HTML: 生きている知らせで、飛ばしている素材の ID だけを受ける', () => {
+  const r = cleanReport({ current: null, flowVersion: 1, cached: 0, uncached: [], failed: ['h-1'], skipped: ['h-1', '<script>'], pageVersion: '', viewport: {}, storageFree: null });
+  assert.deepEqual(r?.skipped, ['h-1']);
+});
+
+test('割り込みの素材の名前: カメラやスクリーンショットの名前・番号だけなら AI が付け直す。中身の分かる名前は残す', () => {
+  for (const n of ['IMG_1234.jpg', 'DSC01234.JPG', 'スクリーンショット 2026-10-07 12.00.00.png', 'image.png', '名称未設定.html', '20261007', 'a1b2c3d4-e5f6', '素材', 'index.html', '']) {
+    assert.equal(isPlaceholderAssetName(n), true, n);
+  }
+  for (const n of ['メロンパン焼き上がり.png', 'レントゲン室のご案内', 'imagine_sale.png', '本日のおすすめ']) assert.equal(isPlaceholderAssetName(n), false, n);
+  assert.equal(cleanAiAssetName('{"name": "メロンパン焼き上がり"}'), 'メロンパン焼き上がり');
+  assert.equal(cleanAiAssetName('```json\n{"name":"「本日のおすすめ」"}\n```'), '本日のおすすめ');
+  assert.equal(cleanAiAssetName('{"name": "https://evil.example"}'), null);
+  assert.equal(cleanAiAssetName('{"name": "あいうえおかきくけこさしすせそたちつてとなにぬ"}'), null);
+});
+
+test('秘書の割り込みの確かめ: 出す・消すだけ確かめ、はい・いいえを見分ける', () => {
+  assert.equal(signageConfirmText({ kind: 'show', number: '12', place: '診察室', screens: ['待合'] }), '待合の画面に12番の呼び出し（診察室）を出します。よろしいですか？（はい／いいえ）');
+  assert.equal(signageConfirmText({ kind: 'show', text: '焼き上がりました', screens: [] }), 'すべての画面に「焼き上がりました」を出します。よろしいですか？（はい／いいえ）');
+  assert.equal(signageConfirmText({ kind: 'clear', all: false, screens: [] }), 'いま出している割り込みを消します。よろしいですか？（はい／いいえ）');
+  assert.equal(signageConfirmText({ kind: 'status' }), null);
+  for (const y of ['はい', 'お願いします', '出して', 'OK。']) assert.ok(SIGNAGE_YES.test(y), y);
+  for (const n of ['いいえ', 'やめて', 'キャンセル']) assert.ok(SIGNAGE_NO.test(n), n);
+  assert.equal(SIGNAGE_YES.test('はい、でも別の画面に'), false);
+});
+
+
+test('割り込みの素材にすると、中身の分からない名前の画像と HTML に AI が名前を付ける。名前のあるもの・AI が無いときは付けない', async () => {
+  const { SignageService } = await import('../src/index.js');
+  const assets = new Map<string, Record<string, unknown>>([
+    ['i1', { id: 'i1', kind: 'image', name: 'IMG_1234.jpg', mime: 'image/png', isInterrupt: false }],
+    ['h1', { id: 'h1', kind: 'html', name: 'index', mime: 'text/html', isInterrupt: false }],
+    ['n1', { id: 'n1', kind: 'image', name: 'メロンパン', mime: 'image/png', isInterrupt: false }],
+  ]);
+  const audits: string[] = [];
+  const seen: string[] = [];
+  const make = (withAi: boolean) => new SignageService({
+    store: {
+      getAsset: async (_t: string, id: string) => assets.get(id) ?? null,
+      listAssets: async () => [...assets.values()],
+      setAssetInterrupt: async (_t: string, id: string, p: { isInterrupt?: boolean }) => Object.assign(assets.get(id)!, p),
+      renameAsset: async (_t: string, id: string, name: string) => Object.assign(assets.get(id)!, { name }),
+      listSounds: async () => [],
+    } as never,
+    repo: { appendAudit: async (e: { action: string }) => { audits.push(e.action); } } as never,
+    files: { get: async (_t: string, key: string) => (key.endsWith('h1') ? new TextEncoder().encode('<html><body><script>x</script><h1>本日のおすすめ</h1></body></html>') : new Uint8Array([1])) } as never,
+    ...(withAi ? { llmFor: async () => ({
+      name: 'fake',
+      complete: async (req: { messages: { content: string }[] }) => { seen.push(req.messages[1]!.content); return { text: '{"name":"本日のおすすめ"}', tokensUsed: 1 }; },
+      extractFromImage: async () => ({ text: '{"name":"メロンパン焼き上がり"}', tokensUsed: 1 }),
+    }) } : {}),
+  } as never);
+  const svc = make(true);
+  assert.equal(((await svc.setInterruptAsset('t1', 'u1', 'i1', { isInterrupt: true })) as { asset: { name: string } }).asset.name, 'メロンパン焼き上がり');
+  assert.equal(((await svc.setInterruptAsset('t1', 'u1', 'h1', { isInterrupt: true })) as { asset: { name: string } }).asset.name, '本日のおすすめ');
+  assert.deepEqual(seen, ['本日のおすすめ'], 'HTML は見える文だけを渡す（スクリプトは渡さない）');
+  assert.equal(((await svc.setInterruptAsset('t1', 'u1', 'n1', { isInterrupt: true })) as { asset: { name: string } }).asset.name, 'メロンパン');
+  assert.equal(audits.filter((a) => a === 'signage.asset.ai_name').length, 2);
+  assets.get('i1')!.name = 'IMG_9.jpg';
+  assets.get('i1')!.isInterrupt = false;
+  assert.equal(((await make(false).setInterruptAsset('t1', 'u1', 'i1', { isInterrupt: true })) as { asset: { name: string } }).asset.name, 'IMG_9.jpg');
 });

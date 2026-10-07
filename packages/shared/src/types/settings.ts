@@ -269,7 +269,24 @@ export interface TenantSettings {
   printDesigns: PrintDesignSettings;
   /** 会社の AI の方針（第16.3.7.1節、ADR-0059）。 */
   aiPolicy: AiPolicySettings;
+  /** AI の利用の上限（第6.6.2節、ADR-0079）。 */
+  aiLimits: AiLimitSettings;
 }
+
+/**
+ * AI の利用の上限（仕様書 第6.6.2節「AI の利用の記録と上限」、ADR-0079）。
+ *
+ * @remarks 1 人の上限は人に表を作らせず、会社の上限に対する割合で決める（ADR-0028）
+ */
+export interface AiLimitSettings {
+  /** 会社の月の上限（円）。`null` は管理者が決めていない（運営一括の会社は配備の既定、自社の鍵の会社は上限なし）。 */
+  monthlyJpy: number | null;
+  /** 1 人が使える割合（会社の月の上限に対する。0.1〜1。既定 0.4）。 */
+  perUserShare: number;
+}
+
+/** 1 人の上限の既定（会社の月の上限の 4 割）。 */
+export const DEFAULT_AI_PER_USER_SHARE = 0.4;
 
 /**
  * 会社の AI の方針（仕様書 第16.3.7.1節、ADR-0059）。
@@ -338,6 +355,7 @@ export const DEFAULT_TENANT_SETTINGS: TenantSettings = {
   members: DEFAULT_MEMBER_SETTINGS,
   printDesigns: DEFAULT_PRINT_DESIGN_SETTINGS,
   aiPolicy: { mode: 'cloud' },
+  aiLimits: { monthlyJpy: null, perUserShare: DEFAULT_AI_PER_USER_SHARE },
 };
 
 /**
@@ -414,6 +432,12 @@ export interface UserSettings {
      * 空なら人の形のアイコンを出す。
      */
     avatar: string;
+    /** 音声で聞き違えて、本人が直した言葉（「〇〇じゃなくて△△」。50 組まで。第10.5.9節）。 */
+    mishears?: { heard: string; meant: string }[];
+    /** 会議が終わったら議事録を自動で作り始めるか（既定は作る。第9.5.2.1節）。 */
+    autoMinutes?: boolean;
+    /** 議事録を自動で作らない会議の題名の言葉（「定例」など。第9.5.2.1節）。 */
+    noMinutes?: string[];
   };
   notifications: {
     /** 受け取る種類（第6.5.5節）。`false` にしたものは届けない。 */

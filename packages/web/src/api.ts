@@ -310,6 +310,8 @@ export interface Me {
   members?: boolean;
   /** 販促物の作成を使えるか（会社の入り切りと利用範囲。仕様書 第41章）。 */
   printDesigns?: boolean;
+  /** 秘書に Google ドライブのファイルを渡せるか（第10.10.8節）。 */
+  driveFiles?: boolean;
   /** 本人の「給与・勤怠」を使えるか（台帳に結び付いているか。仕様書 第30.25節）。 */
   hrSelf?: boolean;
   /** デバッグモードか（`M2O_DEBUG=true`。仕様書 第20.4.1節「デバッグモード」）。 */
@@ -1168,6 +1170,10 @@ export const api = {
    */
   /** ファイルの名前などを引く（本人が上げたもの・判断のために見られるものだけ）。 */
   fileMeta: (id: string) => call<{ id: string; name: string; kind: string; size: number }>(`/files/${encodeURIComponent(id)}`),
+  /** 秘書に渡すドライブのファイルを選ぶ画面の材料（第10.10.8節）。見本の会社は見本のドライブの一覧。 */
+  driveFilePicker: () => call<{ kind: 'google'; apiKey: string; appId: string; accessToken: string } | { kind: 'mock'; items: { id: string; name: string }[] }>('/files/drive-picker'),
+  /** 本人がドライブで選んだファイルを受け取る（手元から渡したファイルと同じ置き場に入る）。 */
+  fileFromDrive: (fileId: string) => call<{ id: string; name: string }>('/files/from-drive', { method: 'POST', body: JSON.stringify({ fileId }) }),
   uploadFile: async (file: File): Promise<{ id: string; name: string }> => {
     const form = new FormData();
     form.append('file', file);
@@ -1446,6 +1452,22 @@ export const api = {
     /** 書き出しの URL（`preview` は小さな画像、`png` は印刷の解像度、`pdf` は実寸、`bleed` は入稿用）。 */
     fileUrl: (id: string, versionId: string, kind: 'preview' | 'png' | 'pdf' | 'bleed', opts: { page?: number; download?: boolean } = {}) =>
       `/v1/print-designs/${encodeURIComponent(id)}/versions/${encodeURIComponent(versionId)}/${kind}${opts.page || opts.download ? `?${new URLSearchParams({ ...(opts.page ? { page: String(opts.page) } : {}), ...(opts.download ? { download: '1' } : {}) })}` : ''}`,
+    /**
+     * 書き出して保存する（PDF・入稿用の PDF・PNG。仕様書 第41.6節）。
+     *
+     * @remarks 素のリンクでのダウンロードは、開発の自己署名の証明書や会社を見分ける見出しが要る環境で、ブラウザのダウンロードが
+     * 「ネットワークエラー」で落ちる。ほかの書き出しと同じく、画面の中で読んでから名前を付けて保存させる
+     */
+    download: async (id: string, versionId: string, kind: 'png' | 'pdf' | 'bleed') => {
+      const path = `/print-designs/${encodeURIComponent(id)}/versions/${encodeURIComponent(versionId)}/${kind}${kind === 'png' ? '?download=1' : ''}`;
+      const res = await fetch(`/v1${path}`, { credentials: 'same-origin', headers: devTenant ? { 'x-tenant': devTenant } : {} });
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({} as { error?: string }));
+        throw new ApiError(b.error ?? `書き出せませんでした（${res.status}）`, res.status);
+      }
+      const named = /filename\*=UTF-8''([^;]+)/i.exec(res.headers.get('content-disposition') ?? '')?.[1];
+      saveBlob(await res.blob(), named ? decodeURIComponent(named) : `print-design.${kind === 'png' ? 'png' : 'pdf'}`);
+    },
   },
   /** 会議室・社用車・備品の予約（内蔵の拡張。仕様書 第37章）。 */
   reservations: {
@@ -2024,6 +2046,8 @@ export const api = {
   googleImpact: () => call<{ runs: { runId: string; agentName: string; status: string }[]; schedules: number }>('/me/google/impact'),
   myUsage: () => call<{
     seat: string; thisMonth: { runs: number; costJpy: number }; availableAgents: number;
+    /** 今月の本人の AI の利用（円・概算）と 1 人の上限（第6.6.2節）。 */
+    ai?: { usedJpy: number; limitJpy: number | null } | null;
     compartments: string[]; groups: string[]; plan: null;
   }>('/me/usage'),
   readNotification: (id: string) => call(`/notifications/${id}/read`, { method: 'POST' }),
@@ -2042,6 +2066,8 @@ export const api = {
       items: { agentId: string; name: string; runs: number; costJpy: number; tokens: number }[];
       total: { runs: number; costJpy: number }; note: string | null;
     }>('/admin/usage'),
+    /** 今月の AI の利用と上限（仕様書 第6.6.2節）。用途ごと・人ごと。費用は概算。 */
+    aiUsage: () => call<AiUsageView>('/admin/ai-usage'),
     runs: () => call<{ items: AdminRun[] }>('/admin/runs'),
     /** 会社の全員の定時実行（仕様書 第6.6.8.2節）。見るだけ。 */
     schedules: () => call<{ items: AdminSchedule[] }>('/admin/schedules'),
@@ -2387,3 +2413,22 @@ export const api = {
       body: JSON.stringify({ message, ...(fileIds.length ? { fileIds } : {}) }),
     }),
 };
+
+/** 今月の AI の利用と上限（管理者ページの利用状況。仕様書 第6.6.2節）。 */
+export interface AiUsageView {
+  month: string;
+  /** 記録の仕組みが動いているか。 */
+  recorded: boolean;
+  settings: { monthlyJpy: number | null; perUserShare: number };
+  /** 推論の鍵の出どころ（`tenant` は自社の鍵）。 */
+  source: 'tenant' | 'platform' | 'none';
+  /** 運営が決めた上限（運営一括の会社が上げられる上限）。 */
+  platformCap: number | null;
+  /** 実際に効く会社の月の上限。上限なしは `null`。 */
+  monthlyJpy: number | null;
+  userLimitJpy: number | null;
+  usedJpy: number;
+  calls: number;
+  byPurpose: { purpose: string; label: string; costJpy: number; calls: number }[];
+  byUser: { userId: string | null; name: string; costJpy: number; calls: number; over: boolean }[];
+}

@@ -195,6 +195,24 @@ export function signageRequest(message: string): SignageRequest | null {
 const norm = (s: string) => s.normalize('NFKC').toLowerCase().replace(/\s+/g, '');
 
 /**
+ * 割り込みを出す・消す前に、本人に確かめる文（会社の自動化ポリシーで社内への書き込みを確かめる会社。第31.11.1節・第31.17節 #8）。
+ *
+ * @returns 確かめる依頼でなければ `null`（出す・消す以外は確かめない）
+ */
+export function signageConfirmText(req: SignageRequest): string | null {
+  if (req.kind !== 'show' && req.kind !== 'clear') return null;
+  const where = req.screens.length ? `${req.screens.join('と')}の画面` : 'すべての画面';
+  if (req.kind === 'clear') return `${req.all || req.screens.length ? `${where}の割り込み` : 'いま出している割り込み'}を消します。よろしいですか？（はい／いいえ）`;
+  const what = req.assetHint ? `「${req.assetHint}」` : req.number ? `${req.number}番の呼び出し${req.place ? `（${req.place}）` : ''}` : `「${req.text ?? ''}」`;
+  return `${where}に${what}を出します。よろしいですか？（はい／いいえ）`;
+}
+
+/** 確かめに「はい」と答えたか。 */
+export const SIGNAGE_YES = /^(はい|うん|ええ|お願い(します)?|出して(ください)?|消して(ください)?|ok|オーケー|大丈夫|それで(お願いします)?)[。！!、\s]*$/i;
+/** 確かめに「いいえ」と答えたか。 */
+export const SIGNAGE_NO = /^(いいえ|いや|やめて|やめる|やめます|キャンセル|取りやめ|やっぱりやめ)/;
+
+/**
  * サイネージへの依頼に答える（その場で行う）。
  *
  * @param admin 本人が管理者か（言い回しを変える・画面を外すのは管理者だけ）

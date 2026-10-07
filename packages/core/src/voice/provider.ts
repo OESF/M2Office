@@ -91,6 +91,12 @@ export interface VoiceSessionOptions {
   tools?: VoiceTool[];
   /** 出来事を受け取る。 */
   onEvent(event: VoiceEvent): void;
+  /**
+   * 使った量の知らせを受け取る（AI の利用の記録。第6.6.2節）。提供者が知らせるたびに、その分の量を渡す。
+   *
+   * @remarks 知らせない提供者（見本など）では呼ばれない
+   */
+  onUsage?(usage: { model: string; inputTokens: number; outputTokens: number }): void;
 }
 
 /**

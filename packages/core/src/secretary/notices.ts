@@ -19,6 +19,10 @@ const CREATE = /(全員|みんな|皆さん|皆様|全社|社員|グループ|�
 const WITHDRAW = /お知らせ[\s\S]{0,60}(取り下げ|取り消|消して|下げて)/;
 /** 一覧。 */
 const LIST = /お知らせ(は|って|を)?(ある|何|なに|教えて|見せて|確認|[？?])|お知らせの一覧/;
+/** 済んだ人の数（出した人と管理者。第10.15.1節）。 */
+const PROGRESS = /お知らせ[\s\S]{0,60}(何人|どれだけ|どのくらい|誰が|だれが|済んでいない|まだの人)|(済んでいない|まだ出していない|出していない)人/;
+/** 締切の前の知らせを止める（第10.15.1節）。 */
+const MUTE = /(もう|これ以上)(知らせ|通知し|言わ)(ないで|なくていい|なくて大丈夫)/;
 /** 済んだ。本人宛てのお知らせがあるときだけ見る。 */
 const DONE = /出した|提出した|出しました|済んだ|済ませた|済みました|申し込んだ|申し込みました|終わった|終わりました|完了した/;
 
@@ -27,7 +31,7 @@ export interface NoticeAnswer {
   text: string;
   evidence: EvidenceItem[];
   /** 行った操作。監査ログに使う。 */
-  action: 'create' | 'withdraw' | 'list' | 'done' | 'ask';
+  action: 'create' | 'withdraw' | 'list' | 'done' | 'progress' | 'mute' | 'ask';
 }
 
 type Deps = {
@@ -70,6 +74,8 @@ export async function answerNotice(
   const { llm } = deps;
   if (!aiAvailable(llm) || llm.name === 'stub') return null;
   if (WITHDRAW.test(message)) return withdraw(deps, tenantId, userId, message, now);
+  if (PROGRESS.test(message)) return progress(deps, tenantId, userId, message, now);
+  if (MUTE.test(message)) return mute(deps, tenantId, userId, message, now);
   if (CREATE.test(message)) return create(deps, tenantId, userId, message, now);
   if (LIST.test(message)) return list(deps, tenantId, userId, now);
   if (DONE.test(message)) return done(deps, tenantId, userId, message, now);
@@ -179,6 +185,30 @@ async function withdraw(deps: Deps, tenantId: string, userId: string, message: s
   const result = await deps.notices.withdraw(tenantId, userId, id, now);
   if ('error' in result) return { action: 'ask', text: result.error, evidence: [] };
   return { action: 'withdraw', text: `「${result.notice.title}」のお知らせを取り下げました。これからは朝のブリーフに載せません。`, evidence: [] };
+}
+
+/** 済んだ人の数。済んでいない人の名前は締切を過ぎてから（第10.15.1節）。 */
+async function progress(deps: Deps, tenantId: string, userId: string, message: string, now: Date): Promise<NoticeAnswer | null> {
+  const candidates = await withdrawable(deps, tenantId, userId, now);
+  if (candidates.length === 0) return null;
+  const id = await pick(deps.llm, message, candidates.map((n) => ({ id: n.id, title: n.title })), '済んだ人を尋ねている');
+  if (!id) return { action: 'ask', text: `どのお知らせのことですか。\n${candidates.map((n) => `- ${n.title}`).join('\n')}`, evidence: [] };
+  const r = await deps.notices.progress(tenantId, userId, id, now);
+  if ('error' in r) return { action: 'ask', text: r.error, evidence: [] };
+  const head = `「${r.notice.title}」は、宛先 ${r.total} 人のうち、済んだ人が ${r.done} 人です。`;
+  const tail = r.notDone ? (r.notDone.length ? `\n締切を過ぎて、済んでいない人: ${r.notDone.join('、')}` : '') : r.done < r.total ? '\n済んでいない人の名前は、締切を過ぎてからお伝えします。' : '';
+  return { action: 'progress', text: head + tail, evidence: [] };
+}
+
+/** 本人への締切の前の知らせを止める（済んだとは数えない）。 */
+async function mute(deps: Deps, tenantId: string, userId: string, message: string, now: Date): Promise<NoticeAnswer | null> {
+  const mine = await deps.notices.forUser(tenantId, userId, now);
+  if (mine.length === 0) return null;
+  const id = mine.length === 1 ? mine[0]!.id : await pick(deps.llm, message, mine.map((n) => ({ id: n.id, title: n.title })), 'もう知らせないでと言っている');
+  if (!id) return { action: 'ask', text: `どのお知らせのことですか。\n${mine.map((n) => `- ${n.title}`).join('\n')}`, evidence: [] };
+  const r = await deps.notices.mute(tenantId, userId, id, now);
+  if ('error' in r) return null;
+  return { action: 'mute', text: `「${r.notice.title}」の締切の前の知らせを止めました。朝のブリーフには、済むまで載ります。`, evidence: [] };
 }
 
 async function list(deps: Deps, tenantId: string, userId: string, now: Date): Promise<NoticeAnswer> {

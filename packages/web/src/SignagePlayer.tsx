@@ -20,6 +20,10 @@ const KEY_STORE = 'm2o-signage-key';
 const PLAYER_CSP = "frame-src 'self'; child-src 'self'; object-src 'none'; base-uri 'self'";
 const STATE_STORE = 'm2o-signage-state';
 const RELOAD_STORE = 'm2o-signage-reloaded';
+/** 同じ HTML で続けて止まった回数（素材の ID → 回数）。読み直しをまたいで数える（第31.6.3節）。 */
+const STALL_STORE = 'm2o-signage-stalls';
+/** この回数続けて止まった HTML は飛ばす。 */
+const STALL_SKIP = 3;
 /** 素材を取り置く場所の名前。 */
 const CACHE_NAME = 'm2o-signage-assets';
 /** 開発のときだけ、会社を URL の `tenant` で決める（ワークスペースと同じ）。 */
@@ -60,6 +64,15 @@ const EXPIRE_MS = 2 * 60_000;
 
 const read = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
 const write = (k: string, v: string | null) => { try { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch { /* 保存できない端末 */ } };
+/** 止まった回数を読む（読めなければ空）。 */
+const readStalls = (): Record<string, number> => {
+  try {
+    const v = JSON.parse(read(STALL_STORE) ?? '{}') as unknown;
+    return v && typeof v === 'object' ? Object.fromEntries(Object.entries(v as Record<string, unknown>).filter((e): e is [string, number] => typeof e[1] === 'number')) : {};
+  } catch {
+    return {};
+  }
+};
 
 /** 再生のページの API を呼ぶ（画面の鍵を見出しに付ける。URL に載せない）。 */
 async function playFetch(path: string, init: RequestInit = {}, key: string | null = null): Promise<Response> {
@@ -215,6 +228,7 @@ function Player({ screenKey, onUnregistered }: { screenKey: string; onUnregister
   const psRef = useRef<PlayState | null>(ps);
   const ready = useRef(new Set<string>());
   const failed = useRef(new Set<string>());
+  const stalls = useRef<Record<string, number>>(readStalls());
   const uncached = useRef(new Set<string>());
   const pos = useRef(-1);
   const current = useRef<string | null>(null);
@@ -305,7 +319,13 @@ function Player({ screenKey, onUnregistered }: { screenKey: string; onUnregister
     t.seq = layerSeq;
     t.until = performance.now() + ms;
     t.remaining = 0;
-    t.id = window.setTimeout(() => { t.id = null; if (seq.current === layerSeq && !pausedRef.current) advanceRef.current(); }, ms);
+    t.id = window.setTimeout(() => {
+      t.id = null;
+      // 決めた時間を流し切れた HTML は、止まった回数を数え直す
+      const done = layersRef.current.find((l) => l?.seq === layerSeq);
+      if (done && stalls.current[done.assetId]) { delete stalls.current[done.assetId]; write(STALL_STORE, JSON.stringify(stalls.current)); }
+      if (seq.current === layerSeq && !pausedRef.current) advanceRef.current();
+    }, ms);
     deadline.current = Date.now() + ms + 10_000;
   }, []);
 
@@ -368,6 +388,8 @@ function Player({ screenKey, onUnregistered }: { screenKey: string; onUnregister
         const a = byId.get(e.assetId);
         // 取り置く前の素材は飛ばす（読み込み中の画面を出さない）
         if (!a || !ready.current.has(a.id)) continue;
+        // 同じ HTML で続けて止まったものは飛ばす（第31.6.3節）
+        if (a.kind === 'html' && (stalls.current[a.id] ?? 0) >= STALL_SKIP) continue;
         const blob = await cached(cacheUrl(a.sha256));
         if (!blob) continue;
         const thumbBlob = a.kind === 'video' ? await cached(cacheUrl(a.sha256, true)) : null;
@@ -414,6 +436,10 @@ function Player({ screenKey, onUnregistered }: { screenKey: string; onUnregister
   /** 流せなかった素材（動画が開けないなど）。3 回続けばページを読み直す。 */
   const onFail = useCallback((layer: Layer) => {
     failed.current.add(layer.assetId);
+    if (layer.kind === 'html') {
+      stalls.current[layer.assetId] = (stalls.current[layer.assetId] ?? 0) + 1;
+      write(STALL_STORE, JSON.stringify(stalls.current));
+    }
     misses.current++;
     if (misses.current >= 3) { location.reload(); return; }
     advanceRef.current();
@@ -520,11 +546,18 @@ function Player({ screenKey, onUnregistered }: { screenKey: string; onUnregister
         if (est?.quota !== undefined && est.usage !== undefined) storageFree = est.quota - est.usage;
       } catch { /* 分からない */ }
       const state = psRef.current;
+      // 消された素材の止まった回数は忘れる
+      if (state) {
+        const ids = new Set(state.assets.map((x) => x.id));
+        const gone = Object.keys(stalls.current).filter((id) => !ids.has(id));
+        if (gone.length) { for (const id of gone) delete stalls.current[id]; write(STALL_STORE, JSON.stringify(stalls.current)); }
+      }
+      const skipped = Object.entries(stalls.current).filter(([, n]) => n >= STALL_SKIP).map(([id]) => id);
       try {
         const r = await playFetch('/heartbeat', {
           method: 'POST',
           body: JSON.stringify({
-            current: current.current, flowVersion: state?.screen.flowVersion ?? 0, cached: ready.current.size, uncached: [...uncached.current], failed: [...failed.current],
+            current: current.current, flowVersion: state?.screen.flowVersion ?? 0, cached: ready.current.size, uncached: [...uncached.current], failed: [...failed.current], skipped,
             pageVersion: APP_VERSION ?? '', viewport: { width: innerWidth, height: innerHeight }, storageFree,
             audio: jingle.current?.ok ?? null, interrupting: !!showingRef.current,
           }),

@@ -20,6 +20,13 @@ export const DRIVE_DOWNLOAD_MAX_BYTES = 25 * 1024 * 1024;
 const SEARCH_LIMIT_MAX = 50;
 
 /** ファイルの情報のうち、使うもの。 */
+/** Google の形式を書き出す形（そのままでは取り出せないため。第10.10.8節）。 */
+const EXPORT_FILE: Record<string, string> = {
+  'application/vnd.google-apps.document': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.google-apps.spreadsheet': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.google-apps.presentation': 'application/pdf',
+};
+
 export const FIELDS = 'id,name,mimeType,modifiedTime,webViewLink,trashed';
 
 export const MIME = {
@@ -146,10 +153,15 @@ export function googleDrive(ctx: Ctx): DriveConnector {
     download: async (p, fileId) => {
       const f = await meta(p, fileId);
       if (!f || f.mimeType === MIME.folder) return null;
-      const got = await downloadGoogle(ctx().tokens, p, 'ドライブ', `${ctx().endpoints.drive}/files/${encodeURIComponent(f.id)}?alt=media`, DRIVE_DOWNLOAD_MAX_BYTES);
+      // Google の形式は、そのままでは取り出せないため書き出す（ドキュメントは Word・スプレッドシートは Excel・スライドは PDF。第10.10.8節）
+      const as = f.mimeType ? EXPORT_FILE[f.mimeType] : undefined;
+      const url = as
+        ? `${ctx().endpoints.drive}/files/${encodeURIComponent(f.id)}/export?mimeType=${encodeURIComponent(as)}`
+        : `${ctx().endpoints.drive}/files/${encodeURIComponent(f.id)}?alt=media`;
+      const got = await downloadGoogle(ctx().tokens, p, 'ドライブ', url, DRIVE_DOWNLOAD_MAX_BYTES);
       if (!got) return null;
       if ('tooLarge' in got) return { tooLarge: true as const };
-      return { file: toFile(f), mimeType: f.mimeType ?? 'application/octet-stream', bytes: got.bytes };
+      return { file: toFile(f), mimeType: as ?? f.mimeType ?? 'application/octet-stream', bytes: got.bytes };
     },
 
     get: async (p, fileId) => {

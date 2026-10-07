@@ -234,7 +234,7 @@ export function Signage() {
       {error && <p className="error">{error}</p>}
       <div className="signage-screens">
         {data.screens.map((s) => (
-          <ScreenCard key={s.id} s={s} active={s.id === selected} admin={data.admin} thumb={s.lastReport?.current ? thumbs.urls[s.lastReport.current] : undefined}
+          <ScreenCard key={s.id} s={s} assets={assets} active={s.id === selected} admin={data.admin} thumb={s.lastReport?.current ? thumbs.urls[s.lastReport.current] : undefined}
             wantThumb={thumbs.want} onSelect={() => setSelected(s.id)} onChanged={load} onError={setError} />
         ))}
         {data.admin && data.screens.length < data.maxScreens && (
@@ -260,13 +260,14 @@ export function Signage() {
 }
 
 /** 画面 1 台（名前・向き・回し方・つながっているか・いま出しているもの）。 */
-function ScreenCard({ s, active, admin, thumb, wantThumb, onSelect, onChanged, onError }: {
-  s: SignageScreen; active: boolean; admin: boolean; thumb?: string; wantThumb: (id: string) => void; onSelect: () => void; onChanged: () => void; onError: (m: string) => void;
+function ScreenCard({ s, active, admin, thumb, assets, wantThumb, onSelect, onChanged, onError }: {
+  s: SignageScreen; active: boolean; admin: boolean; thumb?: string; assets: SignageAssetView[]; wantThumb: (id: string) => void; onSelect: () => void; onChanged: () => void; onError: (m: string) => void;
 }) {
   useEffect(() => { if (s.lastReport?.current) wantThumb(s.lastReport.current); }, [s.lastReport?.current, wantThumb]);
   const patch = (p: { name?: string; orientation?: 'landscape' | 'portrait'; rotation?: number; volume?: number }) =>
     void api.signage.updateScreen(s.id, p).then(onChanged).catch((e) => onError(describeError(e, '直せませんでした')));
   const uncached = s.lastReport?.uncached.length ?? 0;
+  const skipped = (s.lastReport?.skipped ?? []).map((id) => assets.find((x) => x.id === id)?.name ?? '消した素材');
   return (
     <div className={`card signage-screen${active ? ' active' : ''}`} onClick={onSelect}>
       <div className={`signage-preview ${s.orientation}`}>{thumb ? <img src={thumb} alt="" /> : null}</div>
@@ -277,6 +278,7 @@ function ScreenCard({ s, active, admin, thumb, wantThumb, onSelect, onChanged, o
           <span className={`badge ${s.online ? 'ok' : 'warn'}`}>{s.online ? '接続中' : '未接続'}</span>
           <span className="muted">{ago(s.lastSeenAt)}</span>
           {uncached > 0 && <span className="badge warn">取り置けていない {uncached}</span>}
+          {skipped.length > 0 && <span className="badge warn" title={skipped.join('、')}>止まるので飛ばしている {skipped.length}</span>}
           {s.online && s.lastReport?.audio === false && <span className="badge warn">音が出せない</span>}
           {s.online && s.lastReport?.interrupting && <span className="badge">割り込み中</span>}
         </div>

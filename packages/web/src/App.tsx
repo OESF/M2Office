@@ -38,6 +38,7 @@ import { PrintDesigns } from './PrintDesigns.js';
 import { Members } from './Members.js';
 import { WebReview } from './WebReview.js';
 import { Signage } from './Signage.js';
+import { driveFileIdOf, pickDriveFile } from './google-picker.js';
 import { Hr } from './Hr.js';
 import { MyAttendance } from './MyAttendance.js';
 import { isAttended, useAttention } from './attention.js';
@@ -637,6 +638,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
         )}
         footer={(
           <SecretaryBar
+            drive={!!me.driveFiles}
             lookups={lookups}
             avatar={avatar}
             captions={captions}
@@ -1134,7 +1136,9 @@ function CanvasView({ result, onOpenAgent }: {
  * 常駐の秘書バー。どの画面からでも呼び出せる（仕様書 第10.4節）。
  * 音声でも話しかけられ（第10.5節）、手元のファイルを 1 つ渡せる（第10.10節）。
  */
-function SecretaryBar({ lookups, avatar, captions, onResult, onVoice }: {
+function SecretaryBar({ drive, lookups, avatar, captions, onResult, onVoice }: {
+  /** 秘書に Google ドライブのファイルを渡せるか（第10.10.8節）。 */
+  drive: boolean;
   /** 後ろで動いている調べもの。処理中であることを常に見せる（仕様書 第10.11.6節） */
   lookups: Lookup[];
   /** 秘書のアバター（個人設定。仕様書 第6.1.3節） */
@@ -1177,6 +1181,39 @@ function SecretaryBar({ lookups, avatar, captions, onResult, onVoice }: {
       if (fileInput.current) fileInput.current.value = '';
     }
   }
+  // ドライブのファイルを渡す（第10.10.8節）。見本の会社は見本のドライブの一覧から選ぶ
+  const [samples, setSamples] = useState<{ id: string; name: string }[] | null>(null);
+  async function receiveDrive(id: string) {
+    if (files.length >= SECRETARY_FILES_MAX) { setHint(`一度に渡せるファイルは ${SECRETARY_FILES_MAX} つまでです`); return; }
+    setBusy(true);
+    try {
+      setHint('ドライブのファイルを渡しています…');
+      const up = await api.fileFromDrive(id);
+      setFiles((cur) => [...cur, { id: up.id, name: up.name }]);
+      setHint(`「${up.name}」を渡しました。この書類について聞いてください`);
+    } catch (err) {
+      setHint(describeError(err, 'ドライブのファイルを渡せませんでした'));
+    } finally {
+      setBusy(false);
+    }
+  }
+  /** ドライブのファイル選びを開く。貼られたリンクのファイルがあれば、それを選んだ状態で開く。 */
+  async function fromDrive(fileId?: string) {
+    setSamples(null);
+    try {
+      const p = await api.driveFilePicker();
+      if (p.kind === 'mock') {
+        const hit = fileId ? p.items.find((x) => x.id === fileId) : undefined;
+        if (hit) await receiveDrive(hit.id); else setSamples(p.items);
+        return;
+      }
+      const got = await pickDriveFile({ ...p, ...(fileId ? { fileId } : {}) });
+      if (got) await receiveDrive(got.id);
+    } catch (err) {
+      setHint(describeError(err, 'ドライブを開けませんでした'));
+    }
+  }
+
   /*
     秘書の帯へファイルを落としても渡せる（第10.10.2節）。受け取るのは秘書の帯の中だけにし、画面のほかの場所には手を出さない
     （ほかの画面や業務が、自分のファイルの受け口を持てるように）
@@ -1344,6 +1381,11 @@ function SecretaryBar({ lookups, avatar, captions, onResult, onVoice }: {
           rows={1}
           placeholder="例: 今日の予定は？"
           onChange={(e) => setText(e.target.value)}
+          onPaste={(e) => {
+            // ドライブのリンクを貼ったら、そのファイルを選んだ状態でファイル選びを開く（第10.10.8節）。貼った文はそのまま残す
+            const id = drive ? driveFileIdOf(e.clipboardData.getData('text')) : null;
+            if (id) void fromDrive(id);
+          }}
           onKeyDown={(e) => {
             // Enter で送り、Shift+Enter で改行する。変換確定の Enter では送らない（第6.1.3節）
             if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return;
@@ -1367,6 +1409,18 @@ function SecretaryBar({ lookups, avatar, captions, onResult, onVoice }: {
         <Icon name="clip" />
         <span className="sr-only">書類を渡す</span>
       </button>
+      {drive && (
+        <button className="icon-btn" disabled={busy} onClick={() => void fromDrive()} title="Google ドライブのファイルを渡して、それについて聞けます">
+          <Icon name="drive" />
+          <span className="sr-only">ドライブから渡す</span>
+        </button>
+      )}
+      {samples && (
+        <span className="secretary-drive-samples small">
+          {samples.length ? samples.map((x) => <button key={x.id} className="link small" onClick={() => { setSamples(null); void receiveDrive(x.id); }}>{x.name}</button>) : <span className="muted">ファイルがありません</span>}
+          <button className="link small" onClick={() => setSamples(null)}>キャンセル</button>
+        </span>
+      )}
       <button className={`icon-btn${call ? ' on' : ''}`} onClick={() => void toggleVoice()}
         title={call ? '音声を終わります' : '音声で話しかけます。声で答え、大きい答えは右の秘書のキャンバスに出します'}>
         <Icon name={call ? 'mic-off' : 'mic'} />

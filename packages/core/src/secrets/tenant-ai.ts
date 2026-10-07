@@ -29,6 +29,7 @@ import {
   isLocalPolicy, type AiKind, type Deployment,
 } from '../llm/policy.js';
 import type { ToolRegistry } from '../tools/registry.js';
+import { currentAiUsage, meterLlm, meterResearch, voiceUsageEntry, type AiUsageMeter } from '../usage/ai-usage.js';
 
 /** 役割ごとのモデル名。 */
 export interface GeminiModels {
@@ -76,6 +77,8 @@ export interface TenantAiResolverDeps {
   localLlm?: LlmProvider;
   /** 別のモデルへ退避したことを残すロガー（仕様書 第20.2.5節）。 */
   logger?: Pick<Logger, 'warn'>;
+  /** AI の利用の記録と上限（第6.6.2節、ADR-0079）。無ければ記録も確かめもしない（自動テストなど）。 */
+  meter?: AiUsageMeter;
 }
 
 /**
@@ -154,9 +157,19 @@ export class TenantAiResolver {
    * クラウドの方針の会社では、会社の鍵があればその鍵、無ければ既定。
    */
   async llmFor(tenantId: string): Promise<LlmProvider> {
-    // 接続先の健全性に、成否と時間だけを残す（仕様書 第6.7.6節）
-    if (isLocalPolicy(await this.policyFor(tenantId))) return observeLlm(tenantId, this.localLlm());
-    return observeLlm(tenantId, await this.cloudLlm(tenantId));
+    // 接続先の健全性に、成否と時間だけを残す（仕様書 第6.7.6節）。AI の利用を記録し、上限で止める（第6.6.2節）
+    if (isLocalPolicy(await this.policyFor(tenantId))) return this.metered(tenantId, observeLlm(tenantId, this.localLlm()), true);
+    return this.metered(tenantId, observeLlm(tenantId, await this.cloudLlm(tenantId)), false);
+  }
+
+  /** AI の利用の記録と上限の包み（記録の仕組みが無ければそのまま）。 */
+  private metered(tenantId: string, llm: LlmProvider, local: boolean): LlmProvider {
+    return this.deps.meter ? meterLlm(tenantId, llm, this.deps.meter, local) : llm;
+  }
+
+  /** AI の利用の記録と上限（無ければ `undefined`）。 */
+  meter(): AiUsageMeter | undefined {
+    return this.deps.meter;
   }
 
   /**
@@ -170,7 +183,7 @@ export class TenantAiResolver {
   ): Promise<{ llm: LlmProvider; kind: AiKind; note?: string }> {
     // 接続先の健全性に、成否と時間だけを残す（仕様書 第6.7.6節）
     const r = await this.chooseForRun(tenantId, def, registry, previous);
-    return { ...r, llm: observeLlm(tenantId, r.llm) };
+    return { ...r, llm: this.metered(tenantId, observeLlm(tenantId, r.llm), r.kind === 'local') };
   }
 
   /** 業務の 1 回の実行に使う推論を選ぶ（{@link llmForRun} の中身）。 */
@@ -226,7 +239,19 @@ export class TenantAiResolver {
       if (this.deps.testMode) return new MockVoiceProvider();
       throw new AiNotConfiguredError();
     }
-    return new GeminiLiveProvider({ apiKey: g.apiKey, model: g.models.live });
+    const live = new GeminiLiveProvider({ apiKey: g.apiKey, model: g.models.live });
+    const meter = this.deps.meter;
+    if (!meter) return live;
+    // 上限に当たっていれば始めない。使った量は Gemini Live の知らせのたびに残す（第6.6.2節）
+    const scope = currentAiUsage() ?? { purpose: 'voice' };
+    await meter.assert(tenantId, scope.userId ?? null);
+    return {
+      name: live.name,
+      open: (options) => live.open({
+        ...options,
+        onUsage: (u) => { void meter.record(tenantId, voiceUsageEntry(scope, u.model, u.inputTokens, u.outputTokens)); options.onUsage?.(u); },
+      }),
+    };
   }
 
   /**
@@ -236,7 +261,8 @@ export class TenantAiResolver {
     if ((await this.policyFor(tenantId)) === 'local-only') {
       return new PolicyBlockedResearchProvider('ローカルだけの方針のため、Web の調べものは使えません');
     }
-    return (await this.entry(tenantId))?.research ?? this.deps.fallbackResearch;
+    const research = (await this.entry(tenantId))?.research ?? this.deps.fallbackResearch;
+    return this.deps.meter ? meterResearch(tenantId, research, this.deps.meter, (await this.geminiFor(tenantId)).models.research) : research;
   }
 
   /** 会社の鍵のときだけ、会社用の提供者を作る（設定の更新日時が変わるまで使い回す）。 */

@@ -7,12 +7,13 @@
  * @see 仕様書 第13.1節 公開の方針（A-1・A-2）
  */
 
+import { driveFilesFor } from './drive-files.js';
 import { serve } from '@hono/node-server';
 import { readFileSync } from 'node:fs';
 import type { Server as HttpServer } from 'node:http';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { defaultGeminiModels, seedBriefTopics, warnHotSwapModels } from '@m2office/core';
+import { defaultGeminiModels, seedBriefTopics, warnHotSwapModels, withAiUsage } from '@m2office/core';
 import { buildDeps, companyView } from './context.js';
 import { authenticate, resolveTenant, type AppEnv } from './middleware/tenant.js';
 import { attachVoiceRelay } from './voice/relay.js';
@@ -132,6 +133,13 @@ app.route('/v1/signage-play', signagePlayRoute(deps, SERVER_VERSION));
 app.route('/v1/member-card', memberCardRoute(deps));
 app.use('/v1/*', async (c, next) =>
   c.req.path.startsWith('/v1/auth/') || c.req.path.startsWith('/v1/signage-play/') || c.req.path.startsWith('/v1/member-card/') ? next() : authenticate(deps)(c, next));
+// AI の利用の持ち主と用途（仕様書 第6.6.2節）。この要求の中で呼ぶ AI を、本人と口の名前で記録し、本人の上限で確かめる
+app.use('/v1/*', async (c, next) => {
+  const user = c.get('ctx')?.user;
+  if (!user) return next();
+  const seg = c.req.path.split('/')[2] || 'other';
+  return withAiUsage({ userId: user.id, purpose: seg === 'secretary' ? 'secretary' : `api:${seg}` }, () => next());
+});
 // デバッグモード（仕様書 第20.4.1節「デバッグモード」）: 本人の呼び出しが失敗したら、パス・番号・理由を記録に残す
 if (deps.debug) {
   app.use('/v1/*', async (c, next) => {
@@ -198,6 +206,8 @@ app.get('/v1/me', async (c) => {
     members: !!(await deps.members.access(ctx.tenant.id, ctx.user.id)),
     // 販促物の作成を使えるか（会社の入り切りと利用範囲。仕様書 第41章）
     printDesigns: !!(await deps.printDesigns.access(ctx.tenant.id, ctx.user.id)),
+    // 秘書に Google ドライブのファイルを渡せるか（会社のファイル選びの API キーと本人の Google の接続。第10.10.8節）
+    driveFiles: await driveFilesFor(deps).available({ tenantId: ctx.tenant.id, userId: ctx.user.id }).catch(() => false),
     // 人事・給与の担当者の画面を使えるか（会社の入り切りと人事区画。仕様書 第30.2節）
     hr: !!(await deps.hr.access(ctx.tenant.id, ctx.user.id)),
     // 本人の「給与・勤怠」を使えるか（台帳に結び付いているか。同じメールアドレスなら自動で結び付く。第30.25節）

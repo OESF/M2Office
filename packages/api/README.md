@@ -338,11 +338,14 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/notices` | 社内のお知らせを出す（`title`・`body`・`link`（https だけ）・`all` か `groupIds`・`dueOn`・`until`）。会社の全員が出せる。承認は挟まない。201 |
 | `POST /v1/notices/:id/withdraw` | 取り下げる（出した人と管理者だけ。ほかの人は 403、ほかの会社のものは 404） |
 | `POST /v1/notices/:id/done` | 本人が済んだとする（本人の朝のブリーフに載せなくなる） |
+| `GET /v1/notices/:id/progress` | 済んだ人の数（出した人と管理者だけ。ほかの人は 403）。済んでいない人の名前は締切を過ぎてから（`notDone`。それまでは `null`。仕様書 第10.15.1節） |
+| `POST /v1/notices/:id/mute` | 本人への締切の前の知らせを止める（済んだとは数えない） |
 | `POST /v1/schedules` | 定時実行を作る（毎日／毎平日／毎週、業務の入力）。ファイルを受け取る業務と秘書の調べものは 400、必須の入力が空なら 400（仕様書 第6.1.7節） |
 | `PATCH /v1/schedules/:id` | 停止・再開、繰り返し・時刻・入力の変更。再開すると次回を今から求め直す（止めていた間の回は起動しない） |
 | `POST /v1/schedules/:id/trigger` | 次の回を今にする（動作確認用） |
 | `DELETE /v1/schedules/:id` | 本人の定時実行を消す。動いている実行は止めない |
 | `GET /v1/admin/usage` | 管理者: エージェント別の利用量 |
+| `GET /v1/admin/ai-usage` | 管理者: 今月の AI の利用と上限（会社の月の上限・1 人の上限・用途ごと・人ごと。仕様書 第6.6.2節）。上限は `PUT /v1/admin/settings/aiLimits`（`monthlyJpy`・`perUserShare`）。AI の利用の上限に当たった要求は 429 |
 | `GET /v1/admin/runs` | 管理者: 全利用者の実行の状態（中身は返さない） |
 | `GET /v1/admin/schedules` | 管理者: 会社の全員の定時実行（人・業務・繰り返し・次回・前回・状態）。次の回に動かないものは、起動役と同じ判定（`scheduleBlocker`）の理由を添える。**業務の入力は返さない**。操作の口は無い（仕様書 第6.6.8.2節） |
 | `GET /v1/admin/runs/:id` | 管理者: 実行 1 件の**状態だけ**。段の表示名と状態・失敗の理由・費用・削減時間まで。**入力・段の入出力・成果物は返さない**（仕様書 第6.6.8節、不変則 I-10） |
@@ -453,6 +456,8 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/onboarding/checklist` | 管理者: 初期設定のチェックリスト |
 | `POST /v1/onboarding/checklist/notified` | 管理者: 従業員へ知らせたことの記録 |
 | `POST /v1/files` | ファイルの受け取り（multipart の `file`。10 MB まで） |
+| `GET /v1/files/drive-picker` | 秘書に渡すドライブのファイルを選ぶ画面の材料（`drive.file` だけに絞ったトークン。見本の会社は見本の一覧。仕様書 第10.10.8節） |
+| `POST /v1/files/from-drive` | 本人がドライブで選んだファイル（`fileId`）を受け取る。Google のドキュメント・スプレッドシート・スライドは Word・Excel・PDF に書き出す。201 |
 | `GET /v1/files/:id` | メタデータ。所有者と承認者のみ |
 | `GET /v1/files/:id/content` | 中身。必ず保存させる（`attachment`） |
 | `GET /v1/files/:id/view` | 画像（PNG・JPEG）だけを画面に出す（承認の画面のカバー画像など）。読める人は中身と同じ。ほかの形は 404 |

@@ -18,7 +18,7 @@ import {
   CardService, PostgresContactStore, cardsAccess, type ContactStore, BulkMailService, PostgresBulkMailStore, NoticeService, PostgresNoticeStore,
   InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, JanLookupService, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, InquiryService, PostgresInquiryStore, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, CanvaService, HttpCanvaApi, MockCanvaApi, PostgresCanvaConnectionStore, MEMBER_LINE_SEND, LineApiVerifier, MockLineVerifier, JGrantsApi, MockJGrants, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, WEB_REVIEW_REQUEST, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, webColumnsAccess, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, WEB_COLUMN_SIGNAGE_PUBLISH, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, applyStockChanges, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
   type SecretBox, type GeminiModels,
-  type FileStore, type TenantExtensions, type HelpArticle, type ManualMeta, type LlmProvider, type Logger, type Repository, type WorkspaceConnector,
+  type FileStore, type TenantExtensions, type HelpArticle, type ManualMeta, type LlmProvider, type Logger, type Repository, type WorkspaceConnector, aiUsageMeterFromEnv, setEnqueueAiGuard
 } from '@m2office/core';
 import { canRunAgent, type AgentDefinition, type ContactScope, type HrSettings, type InventorySettings, type SignageSettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type ContractSettings, type ReservationSettings, type SubsidySettings, type MemberSettings, type PrintDesignSettings, fileInputKey } from '@m2office/shared';
 import { readdirSync, readFileSync } from 'node:fs';
@@ -297,8 +297,14 @@ export function buildDeps(): AppDeps {
   const retentionRef = new GoogleDataRetention({ repo, isGoogleTool: (name) => !!registry.get(name)?.google, logger: log });
   const research = platform.research;
   if (devKey) log.warn('M2OFFICE_SECRET_KEY が未設定のため、開発用の固定の鍵で秘密の値を暗号化しています（本番では起動しません）');
+  // AI の利用の記録と上限（仕様書 第6.6.2節、ADR-0079）
+  const aiMeter = aiUsageMeterFromEnv({
+    repo, connectionString: process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office', env: process.env,
+    onError: (err) => log.warn('AI の利用を記録できませんでした', { err }),
+  });
+  setEnqueueAiGuard((tenantId, userId) => aiMeter.assert(tenantId, userId));
   const ai = new TenantAiResolver({
-    repo, box, fallbackLlm: llm, fallbackResearch: research,
+    repo, box, fallbackLlm: llm, fallbackResearch: research, meter: aiMeter,
     platformKey: platform.platformKey, testMode: platform.testMode,
     defaults: defaultGeminiModels(),
     baseUrl: platform.baseUrl,
@@ -325,6 +331,8 @@ export function buildDeps(): AppDeps {
   const notices = new NoticeService({
     store: new PostgresNoticeStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
     repo,
+    // グループ宛てのお知らせを合う Chat のスペースにも投稿する（第10.15.1節、ADR-0080）
+    chat: { connector, repo },
   });
   // 在庫管理（内蔵の拡張。仕様書 第29章）。在庫は会社で共有する
   // 数が変わったら見張りが見直す（第29.14節）。見張りは処理を使うため、後から結び付ける
@@ -347,7 +355,7 @@ export function buildDeps(): AppDeps {
   const inventoryJan = new JanLookupService({ research: (tenantId) => ai.researchFor(tenantId), llm: (tenantId) => ai.llmFor(tenantId), logger: log });
   const inventory = { service: inventoryService, bookings: inventoryBookings, publisher: inventoryPublisher, jan: inventoryJan, access: inventoryAccess(repo) };
   // 店頭サイネージ（第31章）。秘書が割り込みを出すため、秘書より先に作る。画面と素材は会社で共有する
-  const signageService = new SignageService({ store: new PostgresSignageStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), repo, files });
+  const signageService = new SignageService({ store: new PostgresSignageStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), repo, files, llmFor: (tenantId) => ai.llmFor(tenantId) });
   const signage = { service: signageService, interrupts: new SignageInterrupts({ service: signageService, repo, llm: (tenantId) => ai.llmFor(tenantId) }), access: signageAccess(repo) };
   // 在庫の公開を作り直したときの品切れ・入荷を、店頭サイネージの案内にする（第31.6.7節。会社が入れたときだけ）
   inventoryPublisher.onStockChange(async (tenantId, changes, current) => { await applyStockChanges(signageService, tenantId, changes, current); });
@@ -631,6 +639,7 @@ export function buildDeps(): AppDeps {
   const helpFeedback = new HelpFeedback(new PostgresHelpFeedbackStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'));
   const helpNotes = new PostgresHelpNoteStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
   const secretary = new Secretary({
+    aiShareChanged: (tenantId) => aiMeter.forget(tenantId),
     // 勤怠と有給・本人の給与明細（第30.20節）
     attendance, payroll,
     // 人事の担当者の依頼（第30.20.1節）

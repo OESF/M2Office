@@ -101,6 +101,8 @@ export interface SignageReport {
   uncached: string[];
   /** 流せなかった素材の ID。 */
   failed: string[];
+  /** 同じ HTML で 3 回続けて止まったため、飛ばしている素材の ID（第31.6.3節）。古い再生のページは送らない。 */
+  skipped?: string[];
   /** ページの版。 */
   pageVersion: string;
   /** 端末の画面の縦横（回す前）。 */

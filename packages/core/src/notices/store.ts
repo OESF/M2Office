@@ -34,6 +34,20 @@ export interface NoticeStore {
   /** 初めて載せた日時を記録する（すでにあれば変えない）。 */
   markShown(tenantId: string, userId: string, noticeIds: string[], at: string): Promise<void>;
   markDone(tenantId: string, userId: string, noticeId: string, at: string): Promise<void>;
+  /** お知らせ 1 つの、受け取った人ごとの状態（済んだ人を数える・締切の前の知らせ。第10.15.1節）。 */
+  states(tenantId: string, noticeId: string): Promise<NoticeState[]>;
+  /** 本人が「もう知らせないで」と言った（締切の前の知らせを止める。済んだとは数えない）。 */
+  markMuted(tenantId: string, userId: string, noticeId: string, at: string): Promise<void>;
+  /** 締切の前の知らせを送った印を付ける。初めてなら `true`（同じ知らせを 2 度送らない）。 */
+  markReminded(tenantId: string, userId: string, noticeId: string, stage: 'before' | 'due', at: string): Promise<boolean>;
+  /** Chat に投稿した印を付ける。初めてなら `true`（投稿は 1 回だけ）。 */
+  markChatPosted(tenantId: string, noticeId: string, space: string): Promise<boolean>;
+}
+
+/** 受け取った人 1 人の状態（第10.15.1節）。 */
+export interface NoticeState extends NoticeReceipt {
+  userId: string;
+  mutedAt: string | null;
 }
 
 /** 日付の列を `YYYY-MM-DD` にする（pg は date を Date で返すことがある）。 */
@@ -147,6 +161,36 @@ export class PostgresNoticeStore implements NoticeStore {
        on conflict (tenant_id, notice_id, user_id) do update set done_at = excluded.done_at`,
       [tenantId, noticeId, userId, at]);
   }
+
+  async states(tenantId: string, noticeId: string): Promise<NoticeState[]> {
+    const rows = await this.q<{ user_id: string; first_shown_at: unknown; done_at: unknown; muted_at: unknown }>(tenantId,
+      `select user_id, first_shown_at, done_at, muted_at from notice_receipts where tenant_id = $1 and notice_id = $2`, [tenantId, noticeId]);
+    return rows.map((r) => ({ noticeId, userId: r.user_id, firstShownAt: time(r.first_shown_at), doneAt: time(r.done_at), mutedAt: time(r.muted_at) }));
+  }
+
+  async markMuted(tenantId: string, userId: string, noticeId: string, at: string): Promise<void> {
+    await this.q(tenantId,
+      `insert into notice_receipts (tenant_id, notice_id, user_id, muted_at) values ($1, $2, $3, $4)
+       on conflict (tenant_id, notice_id, user_id) do update set muted_at = coalesce(notice_receipts.muted_at, excluded.muted_at)`,
+      [tenantId, noticeId, userId, at]);
+  }
+
+  async markReminded(tenantId: string, userId: string, noticeId: string, stage: 'before' | 'due', at: string): Promise<boolean> {
+    const col = stage === 'before' ? 'reminded_before_at' : 'reminded_due_at';
+    const rows = await this.q<{ n: number }>(tenantId,
+      `with prev as (select ${col} as v from notice_receipts where tenant_id = $1 and notice_id = $2 and user_id = $3)
+       insert into notice_receipts (tenant_id, notice_id, user_id, ${col}) values ($1, $2, $3, $4)
+       on conflict (tenant_id, notice_id, user_id) do update set ${col} = coalesce(notice_receipts.${col}, excluded.${col})
+       returning (select count(*) from prev where v is not null)::int as n`,
+      [tenantId, noticeId, userId, at]);
+    return (rows[0]?.n ?? 0) === 0;
+  }
+
+  async markChatPosted(tenantId: string, noticeId: string, space: string): Promise<boolean> {
+    const rows = await this.q<{ id: string }>(tenantId,
+      `update notices set chat_space = $3 where tenant_id = $1 and id = $2 and chat_space is null returning id`, [tenantId, noticeId, space]);
+    return rows.length > 0;
+  }
 }
 
 /**
@@ -156,7 +200,9 @@ export class PostgresNoticeStore implements NoticeStore {
  */
 export class MemoryNoticeStore implements NoticeStore {
   readonly notices: Notice[] = [];
-  private readonly rows = new Map<string, NoticeReceipt & { tenantId: string; userId: string }>();
+  private readonly rows = new Map<string, NoticeReceipt & { tenantId: string; userId: string; mutedAt?: string | null; before?: string | null; due?: string | null }>();
+  /** Chat に投稿したスペース（お知らせの ID → 名前）。 */
+  readonly posted = new Map<string, string>();
 
   constructor(private readonly names: Record<string, string> = {}) {}
 
@@ -207,5 +253,32 @@ export class MemoryNoticeStore implements NoticeStore {
     const r = this.rows.get(k) ?? { tenantId, userId, noticeId, firstShownAt: null, doneAt: null };
     r.doneAt = at;
     this.rows.set(k, r);
+  }
+
+  async states(tenantId: string, noticeId: string): Promise<NoticeState[]> {
+    return [...this.rows.values()].filter((r) => r.tenantId === tenantId && r.noticeId === noticeId)
+      .map((r) => ({ noticeId, userId: r.userId, firstShownAt: r.firstShownAt, doneAt: r.doneAt, mutedAt: r.mutedAt ?? null }));
+  }
+
+  async markMuted(tenantId: string, userId: string, noticeId: string, at: string): Promise<void> {
+    const k = this.key(tenantId, userId, noticeId);
+    const r = this.rows.get(k) ?? { tenantId, userId, noticeId, firstShownAt: null, doneAt: null };
+    r.mutedAt ??= at;
+    this.rows.set(k, r);
+  }
+
+  async markReminded(tenantId: string, userId: string, noticeId: string, stage: 'before' | 'due', at: string): Promise<boolean> {
+    const k = this.key(tenantId, userId, noticeId);
+    const r = this.rows.get(k) ?? { tenantId, userId, noticeId, firstShownAt: null, doneAt: null };
+    this.rows.set(k, r);
+    if (r[stage]) return false;
+    r[stage] = at;
+    return true;
+  }
+
+  async markChatPosted(_tenantId: string, noticeId: string, space: string): Promise<boolean> {
+    if (this.posted.has(noticeId)) return false;
+    this.posted.set(noticeId, space);
+    return true;
   }
 }

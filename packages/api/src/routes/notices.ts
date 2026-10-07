@@ -56,5 +56,21 @@ export function noticesRoute(deps: AppDeps) {
     return c.json({ ok: true });
   });
 
+  /** 済んだ人の数（出した人と管理者）。済んでいない人の名前は締切を過ぎてから（仕様書 第10.15.1節）。 */
+  app.get('/:id/progress', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const r = await deps.notices.progress(tenant.id, user.id, c.req.param('id'));
+    if ('error' in r) return c.json({ error: r.error }, /見つかりません/.test(r.error) ? 404 : 403);
+    return c.json({ total: r.total, done: r.done, overdue: r.overdue, notDone: r.notDone });
+  });
+
+  /** 本人への締切の前の知らせを止める（済んだとは数えない。仕様書 第10.15.1節）。 */
+  app.post('/:id/mute', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const r = await deps.notices.mute(tenant.id, user.id, c.req.param('id'));
+    if ('error' in r) return c.json({ error: r.error }, 404);
+    return c.json({ ok: true });
+  });
+
   return app;
 }

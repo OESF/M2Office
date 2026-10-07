@@ -12,7 +12,7 @@ import {
   CARDS_EXTENSION_ID, HR_EXTENSION_ID, SIGNAGE_EXTENSION_ID, INVENTORY_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, CONTRACTS_EXTENSION_ID, RESERVATIONS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, MEMBERS_EXTENSION_ID, PRINT_DESIGNS_EXTENSION_ID, MENU_CATEGORY_MAX, MENU_CATEGORY_NAME_MAX,
   GOOGLE_APP_IDS, LAUNCHER_LABEL_MAX, LAUNCHER_LINK_MAX, checkLauncherUrl, type LauncherLink,
 } from '@m2office/shared';
-import { AUDIO, AiNotConfiguredError, AiPolicyBlockedError, LEARNED_SOURCE, cleanTopics, buildPresence, loadFile, refusalMessage, refuseToRemember } from '@m2office/core';
+import { AUDIO, AiNotConfiguredError, AiPolicyBlockedError, LEARNED_SOURCE, cleanTopics, buildPresence, loadFile, refusalMessage, refuseToRemember, jstMonth } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 import { speakSample } from '../voice/sample.js';
@@ -421,10 +421,21 @@ export function meRoute(deps: AppDeps) {
       groups: groups.filter((g) => groupIds.includes(g.id)).map((g) => g.name),
       // プランと標準利用量は課金の実装とあわせて出す（第21章）
       plan: null,
+      // 今月の本人の AI の利用（円・概算）と、1 人の上限（会社に上限が無ければ null。第6.6.2節）
+      ai: await myAiUsage(deps, tenant.id, user.id),
     });
   });
 
   return app;
+}
+
+/** 今月の本人の AI の利用と 1 人の上限（記録の仕組みが無ければ `null`）。 */
+async function myAiUsage(deps: AppDeps, tenantId: string, userId: string): Promise<{ usedJpy: number; limitJpy: number | null } | null> {
+  const meter = deps.ai.meter();
+  if (!meter) return null;
+  const [t, limit] = await Promise.all([meter.totals(tenantId, jstMonth(new Date()).start), meter.userLimit(tenantId)]);
+  const mine = t.byUser.find((u) => u.userId === userId)?.costJpy ?? 0;
+  return { usedJpy: Math.round(mine * 100) / 100, limitJpy: limit === null ? null : Math.round(limit) };
 }
 
 type Section = keyof UserSettings;
@@ -463,6 +474,15 @@ function validate(
           voiceStyle: str(o['voiceStyle'], VOICE_STYLE_MAX),
           // 見本か、本人が上げた画像だけ。ほかの文字列は捨てる（任意の URL を出させない）
           avatar: isValidAvatar(str(o['avatar'], 80)) ? str(o['avatar'], 80) : '',
+          // 音声の聞き違えを直した組（第10.5.9節）。画面から保存したときも消さない
+          mishears: (Array.isArray(o['mishears']) ? o['mishears'] : []).slice(-50).flatMap((m) => {
+            const heard = str((m as { heard?: unknown })?.heard, 20);
+            const meant = str((m as { meant?: unknown })?.meant, 20);
+            return heard && meant ? [{ heard, meant }] : [];
+          }),
+          // 会議の後の議事録の入り切りと、作らない会議の題名（第9.5.2.1節）
+          autoMinutes: o['autoMinutes'] !== false,
+          noMinutes: (Array.isArray(o['noMinutes']) ? o['noMinutes'] : []).map((x) => str(x, 30)).filter(Boolean).slice(0, 30),
         },
       };
     }

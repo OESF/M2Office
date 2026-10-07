@@ -7,6 +7,8 @@
 import { randomUUID } from 'node:crypto';
 import { NOTICE_DEFAULT_DAYS, type Notice, type NoticeForUser } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
+import type { WorkspaceConnector } from '../connectors/types.js';
+import { groupEmails, reachNotes, resolveGroupSpace } from '../chat/group-share.js';
 import type { NoticeStore } from './store.js';
 
 /** 出すときの入力。 */
@@ -28,8 +30,25 @@ export const NOTICE_LIMITS = { title: 60, body: 1000, link: 500 } as const;
 
 type Deps = {
   store: NoticeStore;
-  repo: Pick<Repository, 'listGroups' | 'listUserGroupIds' | 'findUserById' | 'getUserSettings' | 'appendAudit'>;
+  repo: Pick<Repository, 'listGroups' | 'listUserGroupIds' | 'findUserById' | 'getUserSettings' | 'appendAudit'>
+    & Partial<Pick<Repository, 'listUsers' | 'createNotification'>>;
+  /**
+   * Chat への投稿（第10.15.1節、ADR-0080）。出した人の Google で、宛先に合うスペースへ 1 回投稿する。
+   * 無ければ投稿しない（ブリーフと通知で届く）。
+   */
+  chat?: { connector: WorkspaceConnector; repo: Repository };
 };
+
+/** 済んだ人の数と、済んでいない人（締切を過ぎてから出した人と管理者にだけ。第10.15.1節）。 */
+export interface NoticeProgress {
+  notice: Notice;
+  total: number;
+  done: number;
+  /** 済んでいない人の名前。見せられないときは `null`（締切の前・出した人でも管理者でもない）。 */
+  notDone: string[] | null;
+  /** 締切を過ぎたか。 */
+  overdue: boolean;
+}
 
 /** `YYYY-MM-DD` として正しい日付か。 */
 function isDay(v: string): boolean {
@@ -147,6 +166,8 @@ export class NoticeService {
       targetType: 'notice', targetId: notice.id,
       detail: { title, all: notice.audience.all, groups: notice.audience.groupIds.length, dueOn, until }, occurredAt: notice.createdAt,
     });
+    // 宛先に合う Chat のスペースにも 1 回投稿する（第10.15.1節）。待たせない。投稿できなくてもブリーフと通知で届く
+    if (this.deps.chat) void this.postToChat(tenantId, notice).catch(() => undefined);
     return { notice };
   }
 
@@ -171,6 +192,140 @@ export class NoticeService {
       targetType: 'notice', targetId: id, detail: { title: notice.title }, occurredAt: at,
     });
     return { notice };
+  }
+
+  /**
+   * お知らせの宛先の人（利用中の人だけ）。
+   *
+   * @remarks 全員宛てなら会社の利用中の人、グループ宛てならそのどれかのグループに入っている人
+   */
+  async recipients(tenantId: string, notice: Notice): Promise<{ id: string; name: string }[]> {
+    if (!this.deps.repo.listUsers) return [];
+    const users = (await this.deps.repo.listUsers(tenantId)).filter((u) => u.status === 'active');
+    if (notice.audience.all) return users.map((u) => ({ id: u.id, name: u.displayName }));
+    const members = new Set((await this.deps.repo.listGroups(tenantId)).filter((g) => notice.audience.groupIds.includes(g.id)).flatMap((g) => g.memberIds));
+    return users.filter((u) => members.has(u.id)).map((u) => ({ id: u.id, name: u.displayName }));
+  }
+
+  /**
+   * 済んだ人の数（出した人と管理者）。済んでいない人の名前は、締切を過ぎてから見せる（第10.15.1節）。
+   *
+   * @returns 見つからない・見せられない理由
+   */
+  async progress(tenantId: string, userId: string, id: string, now: Date = new Date()): Promise<NoticeProgress | { error: string }> {
+    const notice = await this.deps.store.get(tenantId, id);
+    if (!notice || notice.withdrawnAt) return { error: 'お知らせが見つかりません' };
+    const user = await this.deps.repo.findUserById(tenantId, userId);
+    const admin = !!user?.roles.includes('admin');
+    if (notice.authorId !== userId && !admin) return { error: '済んだ人の数は、出した人と管理者が見られます' };
+    const [people, states] = await Promise.all([this.recipients(tenantId, notice), this.deps.store.states(tenantId, id)]);
+    const done = new Set(states.filter((s) => s.doneAt).map((s) => s.userId));
+    const today = await this.today(tenantId, userId, now);
+    const overdue = !!notice.dueOn && today > notice.dueOn;
+    return {
+      notice, total: people.length, done: people.filter((p) => done.has(p.id)).length, overdue,
+      notDone: overdue ? people.filter((p) => !done.has(p.id)).map((p) => p.name) : null,
+    };
+  }
+
+  /** 本人が「このお知らせはもう知らせないで」と言った。締切の前の知らせを止める（済んだとは数えない）。 */
+  async mute(tenantId: string, userId: string, id: string, now: Date = new Date()): Promise<{ notice: Notice } | { error: string }> {
+    const mine = await this.forUser(tenantId, userId, now);
+    const notice = mine.find((n) => n.id === id);
+    if (!notice) return { error: 'お知らせが見つかりません' };
+    await this.deps.store.markMuted(tenantId, userId, id, now.toISOString());
+    return { notice };
+  }
+
+  /**
+   * 締切の前の知らせ（3 日前と当日の朝 8 時から。第10.15.1節）。まだ済んでいない・止めていない宛先の人へ、画面の通知を 1 回ずつ届ける。
+   * ワーカーが 1 時間ごとに呼ぶ。
+   *
+   * @returns 届けた数
+   */
+  async remind(tenantId: string, now: Date = new Date()): Promise<number> {
+    if (!this.deps.repo.createNotification || !this.deps.repo.listUsers) return 0;
+    const jst = new Date(now.getTime() + 9 * 3_600_000);
+    if (jst.getUTCHours() < 8) return 0;
+    const today = jst.toISOString().slice(0, 10);
+    let sent = 0;
+    for (const notice of await this.deps.store.listActive(tenantId, today)) {
+      if (!notice.dueOn) continue;
+      const left = daysBetween(today, notice.dueOn);
+      const stage = left === 3 ? 'before' : left === 0 ? 'due' : null;
+      if (!stage) continue;
+      const states = new Map((await this.deps.store.states(tenantId, notice.id)).map((s) => [s.userId, s]));
+      for (const p of await this.recipients(tenantId, notice)) {
+        const s = states.get(p.id);
+        if (s?.doneAt || s?.mutedAt) continue;
+        if (!(await this.deps.store.markReminded(tenantId, p.id, notice.id, stage, now.toISOString()))) continue;
+        await this.deps.repo.createNotification({
+          id: randomUUID(), tenantId, userId: p.id, kind: 'notice',
+          title: stage === 'before' ? `「${notice.title}」の締切まで 3 日です` : `「${notice.title}」の締切は今日です`,
+          body: `${notice.authorName ? `${notice.authorName}さんからのお知らせです。` : ''}済んだら秘書に「済んだ」と伝えてください。`,
+          runId: null, readAt: null, createdAt: now.toISOString(),
+        });
+        sent++;
+      }
+    }
+    return sent;
+  }
+
+  /**
+   * 宛先に合う Chat のスペースへ、出した人として題名・締切・リンクを 1 回投稿する（第10.15.1節、ADR-0080）。
+   *
+   * @remarks 危険度: 社内への送信。**メンバーを確かめ、会社の外の人と Google のグループがいないと分かったときだけ投稿する**
+   * （確かめられなければ投稿しない。承認を求めずに、ブリーフと通知で届ける。第9.4.0節）。合うスペースが 1 つに決まらなければ投稿しない
+   * @returns 投稿したスペースの名前。しなければ理由
+   */
+  async postToChat(tenantId: string, notice: Notice): Promise<{ space: string } | { skipped: string }> {
+    const chat = this.deps.chat;
+    if (!chat) return { skipped: 'Chat につないでいません' };
+    const p = { tenantId, userId: notice.authorId };
+    const deps = { repo: chat.repo, connector: chat.connector };
+    try {
+      let target: { space: string; name: string; external: boolean; group: { group: import('@m2office/shared').UserGroup; by: 'name' | 'members' | 'told'; emails: string[] } | null } | null = null;
+      if (notice.audience.all) {
+        // 会社の全員が入っているスペースが 1 つに決まればそこ
+        const users = (await chat.repo.listUsers(tenantId)).filter((u) => u.status === 'active');
+        const emails: string[] = [];
+        for (const u of users) emails.push(((await chat.repo.getGoogleConnection(tenantId, u.id).catch(() => null))?.googleEmail ?? u.email).toLowerCase());
+        const hits: { space: string; displayName: string; external: boolean }[] = [];
+        for (const s of (await chat.connector.chat.listSpaces(p)).slice(0, 15)) {
+          const m = await chat.connector.chat.members(p, s.space, emails).catch(() => null);
+          if (m && m.present.length === emails.length) hits.push(s);
+        }
+        if (hits.length !== 1) return { skipped: hits.length ? '会社の全員が入っているスペースが 1 つに決まりません' : '会社の全員が入っているスペースがありません' };
+        target = { space: hits[0]!.space, name: hits[0]!.displayName, external: hits[0]!.external, group: null };
+      } else {
+        if (notice.audience.groupIds.length !== 1) return { skipped: '宛先のグループが 2 つ以上あります' };
+        const group = (await chat.repo.listGroups(tenantId)).find((g) => g.id === notice.audience.groupIds[0]);
+        if (!group) return { skipped: '宛先のグループが見つかりません' };
+        const r = await resolveGroupSpace(deps, p, group.name);
+        if (r.kind === 'problem') return { skipped: r.reason };
+        if (r.kind === 'found') target = { space: r.space, name: r.name, external: r.external, group: { group: r.group, by: r.by, emails: r.emails } };
+        else {
+          // グループと同じ名前のスペースがある
+          const f = await chat.connector.chat.findSpace(p, group.name);
+          if ('reason' in f) return { skipped: f.reason };
+          target = { space: f.space, name: f.displayName ?? group.name, external: f.external !== false, group: { group, by: 'name', emails: await groupEmails(chat.repo, tenantId, group) } };
+        }
+      }
+      if (!target) return { skipped: '合うスペースがありません' };
+      const reach = await reachNotes(deps, p, target.space, target.group);
+      if (target.external || !reach.internalOnly) return { skipped: '社内の人だけのスペースだと確かめられませんでした' };
+      if (!(await this.deps.store.markChatPosted(tenantId, notice.id, target.name))) return { skipped: 'すでに投稿しています' };
+      const due = notice.dueOn ? `（締切 ${Number(notice.dueOn.slice(5, 7))}/${Number(notice.dueOn.slice(8, 10))}）` : '';
+      const text = [`【お知らせ】${notice.title}${due}`, notice.link, notice.authorName ? `${notice.authorName} より` : ''].filter(Boolean).join('\n');
+      await chat.connector.chat.post(p, { space: target.space, text });
+      await this.deps.repo.appendAudit({
+        id: randomUUID(), tenantId, actorType: 'user', actorId: notice.authorId, action: 'notice.chat_post',
+        targetType: 'notice', targetId: notice.id, detail: { space: target.name }, occurredAt: new Date().toISOString(),
+      });
+      return { space: target.name };
+    } catch (err) {
+      return { skipped: err instanceof Error ? err.message : 'Chat に投稿できませんでした' };
+    }
   }
 
   /** 本人が済んだとする。本人宛てでなければ「見つからない」。 */

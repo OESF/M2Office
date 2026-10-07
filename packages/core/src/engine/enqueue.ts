@@ -8,6 +8,18 @@ import { randomUUID } from 'node:crypto';
 import type { AgentDefinition, Job, Run } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 
+/** AI の利用の上限の確かめ（第6.6.2節）。止めるなら {@link AiLimitError} を投げる。起動のときに API とワーカーが決める。 */
+let aiGuard: ((tenantId: string, userId: string) => Promise<void>) | null = null;
+
+/**
+ * 新しい業務の依頼の前に、AI の利用の上限を確かめるようにする（仕様書 第6.6.2節・第21.2.3節、ADR-0079）。
+ *
+ * @remarks 定時実行の依頼は確かめない（見回り全体を止めないため）。始める前の確かめ（実行のエンジン）で失敗にする
+ */
+export function setEnqueueAiGuard(fn: ((tenantId: string, userId: string) => Promise<void>) | null): void {
+  aiGuard = fn;
+}
+
 /**
  * ジョブを作り、実行を待ち行列へ入れる。
  *
@@ -34,6 +46,8 @@ export async function enqueueJob(
     planStepId?: string;
   },
 ): Promise<{ jobId: string; runId: string }> {
+  // AI の利用の上限に当たっていれば、新しい依頼を受け付けない（定時実行は始める前に失敗にする）
+  if (aiGuard && p.origin !== 'schedule') await aiGuard(p.tenantId, p.requestedBy);
   const now = new Date().toISOString();
   const job: Job = {
     id: randomUUID(), tenantId: p.tenantId, agentId: p.def.id, agentVersion: p.def.version,

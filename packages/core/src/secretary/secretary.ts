@@ -5,6 +5,8 @@
  * @see 仕様書 第10.9節 応答の経路
  */
 
+import { autoMinutesRequest } from '../meetings/auto-minutes.js';
+import { AiLimitError } from '../usage/ai-usage.js';
 import { randomUUID } from 'node:crypto';
 import { SECRETARY_FILES_MAX, fileInputKey, secondFileInputKey, type AgentDefinition } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
@@ -27,7 +29,7 @@ import { answerAttendance, attendanceRequest, payslipRequest } from './attendanc
 import type { AttendanceService } from '../hr/attendance-service.js';
 import type { PayrollService } from '../hr/payroll-service.js';
 import { answerHrStaff, hrStaffRequest, type HrStaffDeps } from './hr-staff.js';
-import { signageFileRequest, signageRequest, answerSignage, type SignageSecretaryDeps } from './signage.js';
+import { signageFileRequest, signageRequest, answerSignage, signageConfirmText, SIGNAGE_NO, SIGNAGE_YES, type SignageRequest, type SignageSecretaryDeps } from './signage.js';
 import { answerReservation, maybeReservation, type ReservationSecretaryDeps } from './reservations.js';
 import { jstDate } from '../hr/attendance.js';
 import { CARD_BULK_MAIL, CARD_UPDATE } from '../cards/agents.js';
@@ -65,6 +67,8 @@ export interface SecretaryReply {
 
 export interface SecretaryDeps {
   repo: Repository;
+  /** 1 人の AI の上限を変えたことを伝える（覚えている合計を捨てる。第6.6.2節） */
+  aiShareChanged?(tenantId: string): void;
   llm: LlmProvider;
   connector: WorkspaceConnector;
   agents: AgentDefinition[];
@@ -151,6 +155,9 @@ export interface SecretaryDeps {
  * 権限区画のデータは、本人参照のみ層 1 の対象とする（第16.3.4節）。
  */
 export class Secretary {
+  /** 確かめに答えるのを待っている、サイネージの割り込み（会社と人ごと。5 分で忘れる。第31.11.1節） */
+  private readonly signagePending = new Map<string, { req: SignageRequest; until: number }>();
+
   constructor(private readonly deps: SecretaryDeps) {}
 
   /**
@@ -173,7 +180,15 @@ export class Secretary {
     const todo = this.captureTodo(tenantId, userId, message, llm).catch(() => null);
     // 渡せるファイルは 5 つまで。同じものは 1 つにする（第10.10.2節）
     const files = [...new Set((Array.isArray(fileId) ? fileId : fileId ? [fileId] : []).map((f) => f.trim()).filter(Boolean))].slice(0, SECRETARY_FILES_MAX);
-    const { reply, keep } = await this.reply(tenantId, userId, message, files);
+    let answered: { reply: SecretaryReply; keep: boolean };
+    try {
+      answered = await this.reply(tenantId, userId, message, files);
+    } catch (err) {
+      // AI の利用の上限に当たった（第6.6.2節・第21.2.3節）。AI を使わない照会はここまでに答えている
+      if (!(err instanceof AiLimitError)) throw err;
+      answered = { reply: { layer: 'direct', text: err.message, evidence: [], tokensUsed: 0 }, keep: true };
+    }
+    const { reply, keep } = answered;
     const added = await todo;
     if (added) {
       reply.text = `${reply.text}\n\n（ToDo に「${added.title}」を入れました${added.due ? `。期限は ${Number(added.due.slice(5, 7))}/${Number(added.due.slice(8, 10))}` : ''}）`;
@@ -286,6 +301,29 @@ export class Secretary {
       return this.handOff(tenantId, userId, message, fileId);
     }
 
+    // 1 人の AI の上限の割合を変える（管理者だけ。第6.6.2節）。人に表を作らせず、会社の上限に対する割合だけを会話で変える
+    const share = AI_SHARE_SET.exec(message.normalize('NFKC'));
+    if (share) {
+      const text = await this.setAiShare(tenantId, userId, share[1] ? Number(share[1]) / 10 : Number(share[2]) / 100);
+      return { reply: { layer: 'direct', text, evidence: [], tokensUsed: 0 }, keep: true };
+    }
+
+    // 会議の後の議事録の入り切り・作らない会議（第9.5.2.1節）。本人の設定だけを変える
+    const minutesReq = autoMinutesRequest(message);
+    if (minutesReq) {
+      const cur = await this.deps.repo.getUserSettings(tenantId, userId);
+      const sec = cur.secretary;
+      const next = minutesReq.kind === 'skip'
+        ? { ...sec, noMinutes: [...new Set([...(sec.noMinutes ?? []), minutesReq.title])].slice(-30) }
+        : { ...sec, autoMinutes: minutesReq.kind === 'on' };
+      await this.deps.repo.saveUserSettings(tenantId, userId, 'secretary', next);
+      await this.audit(tenantId, userId, 'secretary.auto_minutes', minutesReq.kind);
+      const text = minutesReq.kind === 'skip' ? `「${minutesReq.title}」の会議は、終わっても議事録を自動で作りません。`
+        : minutesReq.kind === 'off' ? '会議が終わっても、議事録を自動で作らないようにしました。作るときは「〇〇の議事録を作って」と頼んでください。'
+        : '会議が終わったら、主催した会議の議事録を自動で作り始めます。';
+      return { reply: { layer: 'direct', text, evidence: [], tokensUsed: 0 }, keep: true };
+    }
+
     // 「技術部の共有は〇〇のスペースにして」は、グループに合う Chat のスペースを覚え直す（第16.7.12.1節、ADR-0076）
     const told = GROUP_SPACE_SET.exec(message) ?? GROUP_SPACE_FORGET.exec(message);
     if (told) {
@@ -373,8 +411,28 @@ export class Secretary {
       return { reply: { layer: 'direct', text, evidence: [], tokensUsed: 0 }, keep: true };
     }
     // 店頭サイネージ（第31.11.1節）。本人が秘書の欄で話した回にだけ届く（業務の実行・定時実行・ブリーフからは呼ばれない）。利用範囲の人だけ
-    const signReq = this.deps.signage ? signageRequest(message) : null;
+    // 確かめを待っている割り込みへの答え（「はい」で出す・「いいえ」でやめる。ほかの話なら忘れる）
+    const pendKey = `${tenantId}:${userId}`;
+    const pend = this.signagePending.get(pendKey);
+    let confirmed: SignageRequest | null = null;
+    if (pend) {
+      this.signagePending.delete(pendKey);
+      const said = message.normalize('NFKC').trim();
+      if (pend.until > Date.now() && SIGNAGE_YES.test(said)) confirmed = pend.req;
+      else if (pend.until > Date.now() && SIGNAGE_NO.test(said)) {
+        await this.audit(tenantId, userId, 'secretary.signage', 'declined');
+        return { reply: { layer: 'direct', text: pend.req.kind === 'clear' ? '消すのをやめました。' : '出すのをやめました。', evidence: [], tokensUsed: 0 }, keep: true };
+      }
+    }
+    const signReq = confirmed ?? (this.deps.signage ? signageRequest(message) : null);
     if (signReq && this.deps.signage && await this.deps.signage.access(tenantId, userId)) {
+      // 会社の自動化ポリシーで社内への書き込みを確かめる会社では、出す・消す前に本人に確かめる（第31.17節 #8）
+      const ask = confirmed ? null : signageConfirmText(signReq);
+      if (ask && (await this.deps.repo.getTenantSettings(tenantId)).automation.writeInternal === 'require') {
+        this.signagePending.set(pendKey, { req: signReq, until: Date.now() + 5 * 60_000 });
+        await this.audit(tenantId, userId, 'secretary.signage', 'confirm');
+        return { reply: { layer: 'direct', text: ask, evidence: [], tokensUsed: 0 }, keep: true };
+      }
       const me = await this.deps.repo.findUserById(tenantId, userId);
       const text = await answerSignage(this.deps.signage, tenantId, userId, !!me?.roles.includes('admin'), signReq);
       if (text !== null) {
@@ -926,6 +984,27 @@ export class Secretary {
   }
 
   /**
+   * 1 人の AI の上限の割合を変える（管理者だけ。仕様書 第6.6.2節、ADR-0079）。
+   *
+   * @remarks 危険度: 社内の設定の書き込み（会社の AI の費用の配り方）。監査ログ `settings.update` に残す
+   */
+  private async setAiShare(tenantId: string, userId: string, share: number): Promise<string> {
+    const me = await this.deps.repo.findUserById(tenantId, userId);
+    if (!me?.roles.includes('admin')) return '1 人の上限は管理者が変えられます。管理者に頼んでください。';
+    if (!Number.isFinite(share) || share < 0.1 || share > 1) return '1 人の上限は、会社の上限の 1〜10 割で決めてください。';
+    const settings = await this.deps.repo.getTenantSettings(tenantId);
+    const value = Math.round(share * 100) / 100;
+    await this.deps.repo.saveTenantSettings(tenantId, 'aiLimits', { ...settings.aiLimits, perUserShare: value }, userId);
+    await this.deps.repo.appendAudit({
+      id: randomUUID(), tenantId, actorType: 'user', actorId: userId, action: 'settings.update', targetType: 'tenant_settings', targetId: 'aiLimits',
+      detail: { section: 'aiLimits', perUserShare: value, via: 'secretary' }, occurredAt: new Date().toISOString(),
+    });
+    this.deps.aiShareChanged?.(tenantId);
+    const limit = settings.aiLimits.monthlyJpy;
+    return `1 人の上限を、会社の上限の ${Math.round(value * 100)}%${limit !== null ? `（${Math.round(limit * value).toLocaleString('ja-JP')} 円）` : ''}にしました。`;
+  }
+
+  /**
    * グループに合う Chat のスペースを、会話で覚え直す・忘れる（仕様書 第16.7.12.1節、ADR-0076。Q-204）。
    * 「技術部の共有は技術チームのスペースにして」「技術部の共有先を忘れて」。直せるのは、そのグループの人と管理者。
    * スペースは本人が入っているものから名前で探す（見つからなければ覚えない）。
@@ -1440,6 +1519,9 @@ const NOTE_REQUEST = /(説明|ヘルプ|記事)(に|へ|の).{0,200}補足(し�
 /** 補足を消す頼み */
 const NOTE_REMOVE = /補足(を|は)?.{0,6}(消して|削除|外して|いらない|不要)/;
 /** 「技術部の共有は技術チームのスペースにして」（グループに合う Chat のスペースを覚え直す。第16.7.12.1節）。 */
+/** 「1 人の上限を 5 割にして」「1 人の AI の上限を 30% にして」（第6.6.2節）。 */
+const AI_SHARE_SET = /^\s*(?:1|一)\s*人(?:あたり)?の(?:AI\s*の(?:利用の)?)?上限を\s*(?:会社の(?:上限の)?)?\s*(?:(\d{1,2})\s*割|(\d{1,3})\s*%)\s*に(?:して|する|変えて)/;
+
 const GROUP_SPACE_SET = /^\s*(.{1,30}?)(?:グループ)?(?:の|への)共有(?:先)?(?:は|を)[「『]?(.{1,60}?)[」』]?(?:という|の)?(?:チャットの)?スペース(?:に|へ)(?:して|する|変えて|決めて|しておいて)/;
 /** 「技術部の共有先を忘れて」。 */
 const GROUP_SPACE_FORGET = /^\s*(.{1,30}?)(?:グループ)?(?:の|への)共有(?:先)?(?:の(?:スペース|組み合わせ))?を(?:忘れて|消して|やめて)/;

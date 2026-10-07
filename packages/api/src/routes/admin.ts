@@ -11,11 +11,11 @@ import { Hono, type Context } from 'hono';
 import {
   agentDisplayName,
   isValidInvoiceNumber, parsePresentationId, type AutomationPolicy, type CompanyInfo, type Role, type SlideTemplate, type TenantSettings,
-  type AuditEvent, type User, type WritingStyle,
+  type AuditEvent, type User, type WritingStyle, DEFAULT_AI_PER_USER_SHARE
 } from '@m2office/shared';
 import {
   DEFAULT_STANDARD_MINUTES, GOOGLE_DATA_RETENTION_DAYS, KNOWLEDGE_MAX_CHARS,
-  describeRule, scheduleBlocker, scheduleChecks, stepLabel, toolGoogleScopes, type AuditQuery,
+  describeRule, scheduleBlocker, scheduleChecks, stepLabel, toolGoogleScopes, type AuditQuery, jstMonth
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { requireRole, type AppEnv } from '../middleware/tenant.js';
@@ -149,6 +149,33 @@ export function adminRoute(deps: AppDeps) {
     });
   });
 
+  /**
+   * 今月の AI の利用と上限（仕様書 第6.6.2節、ADR-0079）。用途ごと・人ごとの内訳。費用は概算。
+   *
+   * @remarks 業務の中身は返さない（用途の名前と数だけ）
+   */
+  app.get('/ai-usage', async (c) => {
+    const { tenant } = c.get('ctx');
+    const meter = deps.ai.meter();
+    const settings = (await deps.repo.getTenantSettings(tenant.id)).aiLimits;
+    const source = (await deps.ai.geminiFor(tenant.id)).source;
+    const { month, start } = jstMonth(new Date());
+    if (!meter) return c.json({ month, recorded: false, settings, source, platformCap: null, monthlyJpy: null, userLimitJpy: null, usedJpy: 0, calls: 0, byPurpose: [], byUser: [] });
+    const [t, limit, userLimit, users, view] = await Promise.all([
+      meter.totals(tenant.id, start), meter.monthlyLimit(tenant.id), meter.userLimit(tenant.id), deps.repo.listUsers(tenant.id), deps.tenantView(tenant.id),
+    ]);
+    const yen = (v: number) => Math.round(v * 100) / 100;
+    return c.json({
+      month, recorded: true, settings, source, platformCap: source === 'tenant' ? null : meter.platformCap(),
+      monthlyJpy: limit, userLimitJpy: userLimit === null ? null : Math.round(userLimit), usedJpy: yen(t.costJpy), calls: t.calls,
+      byPurpose: t.byPurpose.map((p) => ({ purpose: p.purpose, label: purposeLabel(p.purpose, view.allAgents), costJpy: yen(p.costJpy), calls: p.calls })),
+      byUser: t.byUser.map((u) => ({
+        userId: u.userId, name: u.userId ? users.find((x) => x.id === u.userId)?.displayName ?? '（利用者）' : '自動の処理', costJpy: yen(u.costJpy), calls: u.calls,
+        over: userLimit !== null && !!u.userId && u.costJpy >= userLimit,
+      })),
+    });
+  });
+
   /** 監査ログ（第16.6節）。 */
   /**
    * 監査ログ（仕様書 第6.6.8.1節）。期間・人・操作の種類で絞り、誰が（人の名前）・何をしたか（業務の言葉）・何に対して（名前）で返す。
@@ -213,6 +240,17 @@ export function adminRoute(deps: AppDeps) {
     const body = await c.req.json<unknown>();
     const checked = validateSection(section, body, (await deps.tenantView(tenant.id)).allAgents.map((a) => a.id));
     if ('error' in checked) return c.json({ error: checked.error }, 400);
+    if (checked.section === 'aiLimits') {
+      // 運営一括の会社は、運営が決めた上限を超えて上げられない（第6.6.2節）
+      const meter = deps.ai.meter();
+      const cap = meter?.platformCap() ?? null;
+      const v = checked.value as TenantSettings['aiLimits'];
+      const source = (await deps.ai.geminiFor(tenant.id)).source;
+      if (cap !== null && source !== 'tenant' && v.monthlyJpy !== null && v.monthlyJpy > cap) {
+        return c.json({ error: `運営が決めた上限（${cap.toLocaleString('ja-JP')} 円）を超えて上げられません` }, 400);
+      }
+      meter?.forget(tenant.id);
+    }
 
     await deps.repo.saveTenantSettings(tenant.id, checked.section, checked.value as never, user.id);
     if (checked.section === 'agents' || checked.section === 'automation') {
@@ -529,6 +567,27 @@ function normalizeRoles(input: string[]): { value: Role[] } | { error: string } 
 
 type Section = keyof TenantSettings;
 
+/** 口の名前（`api:<口>`・`worker:<処理>`）を、利用状況に出す業務の言葉にする。 */
+const PURPOSE_LABELS: Record<string, string> = {
+  secretary: '秘書', voice: '音声の秘書', other: 'そのほか', worker: '自動の処理',
+  'api:columns': 'コラムの作成', 'api:print-designs': '販促物の作成', 'api:competitors': '競合の分析', 'api:cards': '名刺管理',
+  'api:inventory': '在庫管理', 'api:signage': '店頭サイネージ', 'api:announcements': 'お知らせの作成', 'api:inquiries': '問い合わせの記録',
+  'api:web-review': 'Webの分析', 'api:contracts': '契約書の管理', 'api:subsidies': '補助金・助成金', 'api:members': '会員とポイント',
+  'api:hr': '人事・給与', 'api:reservations': '予約', 'api:knowledge': '知識', 'api:files': 'ファイル', 'api:me': '個人設定', 'api:admin': '管理者ページ',
+  'worker:competitors': '競合の分析（見回り）', 'worker:columns': 'コラムの作成（予定とテーマ案）', 'worker:web-review': 'Webの分析（月の便り）',
+  'worker:subsidies': '補助金・助成金（月の調べもの）', 'worker:knowledge': '秘書が学んだことの整理', 'worker:proactive': '秘書の先回り',
+  'worker:memory': '会話から覚えること', 'worker:inquiries': '問い合わせの見張り', 'worker:announcements': 'お知らせの作成（予約）',
+};
+
+/** 用途の名前（業務は業務の名前）。 */
+function purposeLabel(purpose: string, agents: { id: string; name: string }[]): string {
+  if (purpose.startsWith('agent:')) {
+    const id = purpose.slice(6);
+    return agentDisplayName(agents.find((a) => a.id === id)?.name, id);
+  }
+  return PURPOSE_LABELS[purpose] ?? (purpose.startsWith('api:') ? `画面の操作（${purpose.slice(4)}）` : purpose.startsWith('worker:') ? `自動の処理（${purpose.slice(7)}）` : purpose);
+}
+
 /** 設定の区分ごとに値を検証し、保存できる形に整える。 */
 function validateSection(
   section: string,
@@ -663,6 +722,15 @@ function validateSection(
           sealBox: o['sealBox'] === true,
         },
       };
+    }
+    case 'aiLimits': {
+      // AI の利用の上限（第6.6.2節、ADR-0079）。上限なしは null。1 人の割合は 1〜10 割
+      const raw = o['monthlyJpy'];
+      const monthly = raw === null || raw === '' || raw === undefined ? null : Number(raw);
+      if (monthly !== null && (!Number.isFinite(monthly) || monthly < 0 || monthly > 100_000_000)) return { error: '月の上限は 0〜1 億円で入れてください（上限なしは空）' };
+      const share = o['perUserShare'] === undefined ? DEFAULT_AI_PER_USER_SHARE : Number(o['perUserShare']);
+      if (!Number.isFinite(share) || share < 0.1 || share > 1) return { error: '1 人の上限は会社の上限の 1〜10 割です' };
+      return { section: 'aiLimits', value: { monthlyJpy: monthly === null ? null : Math.round(monthly), perUserShare: Math.round(share * 100) / 100 } };
     }
     case 'knowledge':
       // 言い換えは秘書が探すたびに考える。新しく登録することはしない（仕様書 第11.7.7.0節、ADR-0028）。登録済みの組はそのまま効く

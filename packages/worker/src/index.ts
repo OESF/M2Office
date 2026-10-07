@@ -14,7 +14,7 @@ import {
   RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, JGrantsApi, MockJGrants, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, MEMBER_LINE_SEND, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink,
   NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
-  defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator,
+  defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator, aiUsageMeterFromEnv, enterAiUsage, withAiUsage, setEnqueueAiGuard, AutoMinutes, MINUTES_AGENT_ID
 } from '@m2office/core';
 import { canRunAgent, fileInputKey } from '@m2office/shared';
 import { fileURLToPath } from 'node:url';
@@ -74,8 +74,15 @@ const research = platform.research;
 // 役割ごとのモデル。既定は安いほうから選ぶ（仕様書 第20.2.2節）。API と同じ
 const models = defaultGeminiModels();
 warnHotSwapModels(models, log);
+// AI の利用の記録と上限（仕様書 第6.6.2節、ADR-0079）。ワーカーの処理は利用者なし・用途「worker」で残す（名前のある処理は内側で決める）
+const aiMeter = aiUsageMeterFromEnv({
+  repo, connectionString: process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office', env: process.env,
+  onError: (err) => log.warn('AI の利用を記録できませんでした', { err }),
+});
+setEnqueueAiGuard((tenantId, userId) => aiMeter.assert(tenantId, userId));
+enterAiUsage({ purpose: 'worker' });
 const ai = new TenantAiResolver({
-  repo, box, fallbackLlm: llm, fallbackResearch: research,
+  repo, box, fallbackLlm: llm, fallbackResearch: research, meter: aiMeter,
   platformKey: platform.platformKey, testMode: platform.testMode,
   defaults: models,
   baseUrl: platform.baseUrl,
@@ -336,6 +343,8 @@ const engine = new RunEngine({
   llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId),
   // 業務ごとの AI（ローカル・外部）と、社外の接続に送ってよいか（第16.3.7.1節）
   llmForRun: (tenantId, def, registry, previous) => ai.llmForRun(tenantId, def, registry, previous),
+  // まだ始まっていない実行は、AI の利用の上限に当たっていれば始めない（第6.6.2節）
+  aiGuard: async (tenantId, userId) => (await aiMeter.check(tenantId, userId)).blocked?.message ?? null,
   connectionBlocked: (tenantId, connectionId) => ai.connectionBlocked(tenantId, connectionId),
   registryFor: async (tenantId) => (await hub.forTenant(tenantId)).registry,
   // 止めた実行に後から書き込まれた中身も消す（仕様書 第6.5.2.1節）
@@ -391,6 +400,11 @@ const planAgentsFor = async (tenantId: string, userId: string) => {
   // 本人が使える業務だけ（利用範囲・無効にした業務・権限区画。不変則 I-9）
   return view.agents.filter((def) => !settings.agents.disabled.includes(def.id) && canRunAgent(settings.access, def, userId, groups, compartments));
 };
+// 会議が終わったら、主催した人の議事録を作り始める（仕様書 第9.5.2.1節、ADR-0081）。本人が使える議事録の業務があるときだけ
+const autoMinutes = new AutoMinutes({
+  repo, connector,
+  agentFor: async (tenantId, userId) => (await planAgentsFor(tenantId, userId)).find((d) => d.id === MINUTES_AGENT_ID) ?? null,
+});
 const plans = new PlanRunner({
   repo, logger: log, llmFor: (tenantId) => ai.llmFor(tenantId), agentsFor: planAgentsFor,
   enqueue: async (tenantId, userId, def, input, planStepId) => {
@@ -496,6 +510,18 @@ log.info('待ち行列の監視を開始しました', {
   scheduleIntervalMs: SCHEDULE_INTERVAL_MS,
 });
 
+/** AI の利用の見張りの間隔（1 時間。知らせは 1 日 1 回だけ）。 */
+const AI_USAGE_INTERVAL_MS = 3_600_000;
+/** AI の利用の記録を残す日数（13 か月）。 */
+const AI_USAGE_KEEP_DAYS = 400;
+let lastAiUsageCheck = 0;
+/** お知らせの締切の前の知らせを見る間隔（15 分）。 */
+const NOTICE_REMIND_INTERVAL_MS = 15 * 60_000;
+let lastNoticeRemind = 0;
+/** 会議の後の議事録を見回る間隔（10 分）。 */
+const AUTO_MINUTES_INTERVAL_MS = 10 * 60_000;
+let lastAutoMinutes = 0;
+
 while (running) {
   let handled = false;
 
@@ -522,7 +548,7 @@ while (running) {
   if (Date.now() - lastProactiveCheck >= PROACTIVE_INTERVAL_MS) {
     lastProactiveCheck = Date.now();
     try {
-      const started = await proactive.tick(new Date());
+      const started = await withAiUsage({ purpose: 'worker:proactive' }, () => proactive.tick(new Date()));
       if (started.length > 0) log.info('秘書が先回りして業務を起こしました', { count: started.length });
     } catch (err) {
       log.error('先回りの見回りで例外が発生しました', { err });
@@ -532,7 +558,7 @@ while (running) {
   if (Date.now() - lastConversationCheck >= CONVERSATION_INTERVAL_MS) {
     lastConversationCheck = Date.now();
     try {
-      await conversations.sweep(new Date());
+      await withAiUsage({ purpose: 'worker:memory' }, () => conversations.sweep(new Date()));
       // 学習はイベントのたびに行う（第10.13節）。ここでは以前の形の候補の移し替えと、処理済みのイベントの片付けだけ
       const adopted = await learning.adoptLegacyCandidates(new Date());
       if (adopted > 0) log.info('以前の記憶の候補を覚えたことに移しました', { adopted });
@@ -540,6 +566,43 @@ while (running) {
       for (const tenantId of await repo.listTenantIds()) await repo.purgeAgentEvents(tenantId, before);
     } catch (err) {
       log.error('会話ログの入れ替えで例外が発生しました', { err });
+    }
+  }
+
+  // 会議が終わったら議事録を作り始める（10 分ごと。第9.5.2.1節）
+  if (Date.now() - lastAutoMinutes >= AUTO_MINUTES_INTERVAL_MS) {
+    lastAutoMinutes = Date.now();
+    try {
+      const n = await withAiUsage({ purpose: 'worker:minutes' }, () => autoMinutes.tick(new Date()));
+      if (n > 0) log.info('会議の後の議事録を始めました', { count: n });
+    } catch (err) {
+      log.warn('会議の後の議事録の見回りで例外が発生しました', { err });
+    }
+  }
+
+  // 社内のお知らせの締切の前の知らせ（3 日前と当日の朝 8 時から。第10.15.1節）。会社ごとの失敗はほかの会社を止めない
+  if (Date.now() - lastNoticeRemind >= NOTICE_REMIND_INTERVAL_MS) {
+    lastNoticeRemind = Date.now();
+    for (const tenantId of await repo.listTenantIds().catch(() => [] as string[])) {
+      try {
+        const n = await notices.remind(tenantId, new Date());
+        if (n > 0) log.info('お知らせの締切の前の知らせを届けました', { tenantId, count: n });
+      } catch (err) {
+        log.warn('お知らせの締切の前の知らせで例外が発生しました', { tenantId, err });
+      }
+    }
+  }
+
+  // AI の利用の暴走の見張り（前の 14 日の平均の 3 倍を超えた日を、止めずに管理者に知らせる）と、13 か月を過ぎた記録の片付け（第6.6.2節）
+  if (Date.now() - lastAiUsageCheck >= AI_USAGE_INTERVAL_MS) {
+    lastAiUsageCheck = Date.now();
+    for (const tenantId of await repo.listTenantIds().catch(() => [] as string[])) {
+      try {
+        if (await aiMeter.watchSpike(tenantId)) log.info('AI の利用がふだんより多い日を知らせました', { tenantId });
+        await aiMeter.prune(tenantId, new Date(Date.now() - AI_USAGE_KEEP_DAYS * 86_400_000));
+      } catch (err) {
+        log.warn('AI の利用の見張りで例外が発生しました', { tenantId, err });
+      }
     }
   }
 
@@ -683,7 +746,7 @@ while (running) {
   if (Date.now() - lastInquiryCheck >= INQUIRY_INTERVAL_MS) {
     lastInquiryCheck = Date.now();
     try {
-      const r = await inquiryWatch.tick(new Date());
+      const r = await withAiUsage({ purpose: 'worker:inquiries' }, () => inquiryWatch.tick(new Date()));
       if (r.notified + r.forgotten > 0) log.info('問い合わせの期限を知らせ、古い原文を消しました', { notified: r.notified, forgotten: r.forgotten });
     } catch (err) {
       log.warn('問い合わせの見張りに失敗しました', { err });
@@ -707,7 +770,7 @@ while (running) {
   if (Date.now() - lastCompetitorCheck >= COMPETITOR_INTERVAL_MS) {
     lastCompetitorCheck = Date.now();
     try {
-      await competitorWatch.tick();
+      await withAiUsage({ purpose: 'worker:competitors' }, () => competitorWatch.tick());
     } catch (err) {
       log.warn('競合の分析の作業を始められませんでした', { err });
     }
@@ -717,7 +780,7 @@ while (running) {
   if (Date.now() - lastAnnouncementCheck >= ANNOUNCEMENT_INTERVAL_MS) {
     lastAnnouncementCheck = Date.now();
     try {
-      const r = await announcements.tick(new Date());
+      const r = await withAiUsage({ purpose: 'worker:announcements' }, () => announcements.tick(new Date()));
       if (r.published + r.ended > 0) log.info('お知らせの予約を出し、期間の後を片付けました', { published: r.published, ended: r.ended });
     } catch (err) {
       log.warn('お知らせの見回りに失敗しました', { err });
@@ -739,7 +802,7 @@ while (running) {
   if (Date.now() - lastSubsidyCheck >= SUBSIDY_INTERVAL_MS) {
     lastSubsidyCheck = Date.now();
     try {
-      const r = await subsidies.tick(new Date());
+      const r = await withAiUsage({ purpose: 'worker:subsidies' }, () => subsidies.tick(new Date()));
       if (r.searched + r.reminded + r.changed > 0) log.info('補助金・助成金を調べ、締め切りと公募の変更を知らせました', { searched: r.searched, reminded: r.reminded, changed: r.changed });
     } catch (err) {
       log.warn('補助金・助成金の見張りに失敗しました', { err });
@@ -783,7 +846,7 @@ while (running) {
   if (Date.now() - lastColumnSignageCheck >= COLUMN_SIGNAGE_INTERVAL_MS) {
     lastColumnSignageCheck = Date.now();
     try {
-      const n = await columnSignage.tick(new Date());
+      const n = await withAiUsage({ purpose: 'worker:columns' }, () => columnSignage.tick(new Date()));
       if (n > 0) log.info('コラムの店頭サイネージ用の画像を作りました', { sets: n });
     } catch (err) {
       log.warn('コラムの店頭サイネージ用の画像の見回りに失敗しました', { err });
@@ -794,7 +857,7 @@ while (running) {
   if (Date.now() - lastColumnPlanCheck >= COLUMN_PLAN_INTERVAL_MS) {
     lastColumnPlanCheck = Date.now();
     try {
-      const r = await columnPlanner.tick(new Date());
+      const r = await withAiUsage({ purpose: 'worker:columns' }, () => columnPlanner.tick(new Date()));
       if (r.themes + r.prepared + r.skipped + r.placed > 0) log.info('コラムの予約・予定表・テーマ案を見回りました', r);
     } catch (err) {
       log.warn('コラムの作成の見回りに失敗しました', { err });
@@ -805,7 +868,7 @@ while (running) {
   if (Date.now() - lastWebReviewCheck >= WEB_REVIEW_INTERVAL_MS) {
     lastWebReviewCheck = Date.now();
     try {
-      const r = await webReview.tick(new Date());
+      const r = await withAiUsage({ purpose: 'worker:web-review' }, () => webReview.tick(new Date()));
       if (r.created + r.checked > 0) log.info('Web の月の便りを作り、直すべき所を探しました', { created: r.created, checked: r.checked });
     } catch (err) {
       log.warn('Webの分析の見回りに失敗しました', { err });
@@ -819,7 +882,7 @@ while (running) {
       try {
         const now = new Date();
         if (!(await consolidator.due(tenantId, now))) continue;
-        const r = await consolidator.run(tenantId, now);
+        const r = await withAiUsage({ purpose: 'worker:knowledge' }, () => consolidator.run(tenantId, now));
         log.info('秘書が学んだことを整理しました', { tenantId, knowledge: r.knowledge, memories: r.memories, purged: r.purged });
       } catch (err) {
         log.warn('秘書が学んだことの整理に失敗しました', { tenantId, err });

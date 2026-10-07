@@ -251,6 +251,24 @@ export interface MeetConnector {
    * 見つからなければ `null`（Google は会議の終了から 30 日で文字起こしを消す）。
    */
   transcript(p: ConnectorPrincipal, q: { query: string }): Promise<MeetTranscript | null>;
+  /**
+   * `since` より後に終わった、本人が主催者か参加者だった会議（会議が終わったら議事録を作り始める。仕様書 第9.5.2.1節）。
+   *
+   * @remarks 持たない接続口では未定義にし、呼び出し側は見回らない
+   */
+  ended?(p: ConnectorPrincipal, since: string): Promise<EndedMeeting[]>;
+}
+
+/** 終わった会議（第9.5.2.1節）。 */
+export interface EndedMeeting {
+  id: string;
+  title: string;
+  startedAt: string;
+  endedAt: string;
+  /** 本人が主催した会議か（参加者ごとに何本も作らないため、主催者の分だけ作る）。 */
+  organizerSelf: boolean;
+  /** 文字起こしができているか。 */
+  hasTranscript: boolean;
 }
 
 /** Google ドキュメント。 */

@@ -4948,6 +4948,9 @@ console.log('\n■ 63. 店頭サイネージ（内蔵の拡張。第31章の段 
 
     // 秘書: 番号の呼び出しとかぎかっこの文はその場で出す。言い回しを変えるのは管理者だけ
     const ask = async (message, who = 'admin') => (await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message }) }, who)).body;
+    // 確かめを挟まない会社として見る（確かめる会社は下で見る）
+    const autoBefore = (await call('a', '/v1/admin/settings')).body?.automation ?? { writeInternal: 'allow', perAgent: {} };
+    await call('a', '/v1/admin/settings/automation', { method: 'PUT', body: JSON.stringify({ ...autoBefore, writeInternal: 'allow' }) });
     const a1 = await ask('41番の方を呼んで', 'member');
     const a2 = await ask('「本日は18時まで」を出して');
     const a3 = await ask('言い回しを『〇番の方、〇へ』にして', 'member');
@@ -4958,6 +4961,24 @@ console.log('\n■ 63. 店頭サイネージ（内蔵の拡張。第31章の段 
       && recent2.filter((x) => x.origin === 'secretary').every((x) => x.targets.every((t) => t.state === 'cleared'))
       ? ok('秘書はサイネージへの番号の呼び出しとかぎかっこの文をその場で出し、消せる。言い回しを変えるのは管理者だけ')
       : ng('秘書のサイネージの扱いが合わない', JSON.stringify({ a1, a2, a3, a4, recent2 }).slice(0, 700));
+
+    // 自動化ポリシーで社内への書き込みを確かめる会社では、秘書から出す・消す前に確かめる（第31.17節 #8）
+    await call('a', '/v1/admin/settings/automation', { method: 'PUT', body: JSON.stringify({ ...autoBefore, writeInternal: 'require' }) });
+    try {
+      const c1 = await ask('「確かめの案内」を出して');
+      const mid = (await call('a', '/v1/signage/interrupts')).body?.interrupts ?? [];
+      const c2 = await ask('はい');
+      const c3 = await ask('「やめる案内」を出して');
+      const c4 = await ask('いいえ');
+      const fin = (await call('a', '/v1/signage/interrupts')).body?.interrupts ?? [];
+      /よろしいですか/.test(c1?.text ?? '') && !mid.some((x) => x.text === '確かめの案内') && /出しました/.test(c2?.text ?? '')
+        && fin.some((x) => x.text === '確かめの案内' && x.origin === 'secretary') && /よろしいですか/.test(c3?.text ?? '') && /やめました/.test(c4?.text ?? '') && !fin.some((x) => x.text === 'やめる案内')
+        ? ok('社内への書き込みを確かめる会社では、秘書は割り込みを出す前に確かめ、「はい」で出し「いいえ」でやめる')
+        : ng('秘書の割り込みの確かめが合わない', JSON.stringify({ c1, c2, c3, c4, fin: fin.map((x) => x.text) }).slice(0, 700));
+    } finally {
+      await call('a', '/v1/admin/settings/automation', { method: 'PUT', body: JSON.stringify(autoBefore) });
+      await call('a', '/v1/signage/clear', { method: 'POST', body: '{}' });
+    }
   } catch (err) {
     ng('サイネージの確認が途中で止まった', String(err));
   } finally {
@@ -6801,4 +6822,70 @@ console.log('\n■ 83. グループの名前で共有（合う Chat のスペー
 
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
+
+console.log('\n■ 84. AI の利用の記録と上限（会社の月の上限・1 人の上限・止めたときの答え・会話で割合を変える。第6.6.2節、ADR-0079）');
+{
+  const before = (await call('a', '/v1/admin/settings')).body?.aiLimits ?? { monthlyJpy: null, perUserShare: 0.4 };
+  try {
+    const u0 = (await call('a', '/v1/admin/ai-usage')).body;
+    await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message: 'スモークの確認です。調子はどうですか？' }) });
+    await sleep(300);
+    const u1 = (await call('a', '/v1/admin/ai-usage')).body;
+    const sec = (x) => x?.byPurpose?.find((p) => p.purpose === 'secretary')?.calls ?? 0;
+    u1?.recorded === true && sec(u1) > sec(u0) && u1.byUser?.some((u) => u.userId === 'u-a-admin')
+      ? ok('秘書の AI の呼び出しを、用途と人ごとに記録する') : ng('AI の利用を記録していない', JSON.stringify({ u0: u0?.byPurpose, u1: u1?.byPurpose }));
+    const byMember = await call('a', '/v1/admin/ai-usage', {}, 'member');
+    const bad = await call('a', '/v1/admin/settings/aiLimits', { method: 'PUT', body: JSON.stringify({ monthlyJpy: 1000, perUserShare: 2 }) });
+    byMember.status === 403 && bad.status === 400 ? ok('AI の利用と上限は管理者だけが見て決める。1 人の割合は 1〜10 割') : ng('上限の権限か確かめが違う', JSON.stringify({ m: byMember.status, bad: bad.status }));
+    // 上限 0 円にすると、AI を使う秘書への依頼と新しい業務を止める
+    await call('a', '/v1/admin/settings/aiLimits', { method: 'PUT', body: JSON.stringify({ monthlyJpy: 0, perUserShare: 0.4 }) });
+    const stopped = (await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message: 'スモークの確認です。今週の天気の傾向は？' }) }, 'member')).body;
+    const job = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: 'knowledge-qa', input: { question: 'スモークの確認' } }) }, 'member');
+    const u2 = (await call('a', '/v1/admin/ai-usage')).body;
+    /AI の利用の上限に達しました/.test(stopped?.text ?? '') && job.status === 429 && /上限/.test(job.body?.error ?? '') && u2?.monthlyJpy === 0
+      ? ok('会社の上限に当たると、AI を使う秘書への依頼と新しい業務を止め、上限に達したと答える') : ng('上限で止まらない', JSON.stringify({ t: stopped?.text, job: job.status, e: job.body?.error, lim: u2?.monthlyJpy }));
+    // 1 人の割合は管理者が会話で変えられる
+    const m1 = (await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message: '1 人の上限を 5 割にして' }) }, 'member')).body;
+    const a1 = (await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message: '1 人の上限を 5 割にして' }) })).body;
+    const after = (await call('a', '/v1/admin/settings')).body?.aiLimits;
+    /管理者/.test(m1?.text ?? '') && /50%/.test(a1?.text ?? '') && after?.perUserShare === 0.5
+      ? ok('1 人の上限の割合は、管理者が秘書への会話で変えられる') : ng('会話で割合を変えられない', JSON.stringify({ m1: m1?.text, a1: a1?.text, after }));
+  } catch (err) {
+    ng('AI の利用の確認が途中で止まった', String(err));
+  } finally {
+    await call('a', '/v1/admin/settings/aiLimits', { method: 'PUT', body: JSON.stringify(before) }).catch(() => null);
+  }
+}
+
+
+console.log('\n■ 85. 社内のお知らせのブリーフ以外の届け方（Chat への投稿・済んだ人の数・もう知らせない。第10.15.1節、ADR-0080）');
+{
+  let groupId = null;
+  let noticeId = null;
+  try {
+    const made = await call('a', '/v1/admin/groups', { method: 'POST', body: JSON.stringify({ name: 'スモーク技術部' }) });
+    groupId = made.body.id;
+    await call('a', `/v1/admin/groups/${groupId}/members`, { method: 'PUT', body: JSON.stringify({ userIds: ['u-a-admin', 'u-a-member'] }) });
+    const due = new Date(Date.now() + 9 * 3_600_000 + 5 * 86_400_000).toISOString().slice(0, 10);
+    const created = await call('a', '/v1/notices', { method: 'POST', body: JSON.stringify({ title: 'スモークの健康診断', all: false, groupIds: [groupId], dueOn: due }) });
+    noticeId = created.body?.notice?.id ?? created.body?.id;
+    await sleep(1500);
+    const audits = (await call('a', '/v1/admin/audit-events')).body?.items ?? [];
+    audits.some((e) => e.action === 'notice.chat_post')
+      ? ok('グループ宛てのお知らせを、グループに合う Chat のスペースに 1 回投稿する（社内の人だけと確かめたとき）') : ng('Chat に投稿していない', JSON.stringify({ created: created.status, actions: audits.slice(0, 5).map((e) => e.action) }));
+    const prog = await call('a', `/v1/notices/${noticeId}/progress`);
+    const progMember = await call('a', `/v1/notices/${noticeId}/progress`, {}, 'member');
+    prog.body?.total === 2 && prog.body?.done === 0 && prog.body?.notDone === null && progMember.status === 403
+      ? ok('出した人は済んだ人の数を見られる。締切の前は済んでいない人の名前を出さない。ほかの人は見られない') : ng('済んだ人の数が違う', JSON.stringify({ p: prog.body, m: progMember.status }));
+    const muted = await call('a', `/v1/notices/${noticeId}/mute`, { method: 'POST', body: '{}' }, 'member');
+    const other = await call('b', `/v1/notices/${noticeId}/mute`, { method: 'POST', body: '{}' });
+    muted.status === 200 && other.status === 404 ? ok('宛先の人は締切の前の知らせを止められる。ほかの会社からは見えない') : ng('もう知らせないが違う', JSON.stringify({ m: muted.status, o: other.status }));
+  } catch (err) {
+    ng('お知らせの届け方の確認が途中で止まった', String(err));
+  } finally {
+    if (noticeId) await call('a', `/v1/notices/${noticeId}/withdraw`, { method: 'POST', body: '{}' }).catch(() => null);
+    if (groupId) await call('a', `/v1/admin/groups/${groupId}`, { method: 'DELETE' }).catch(() => null);
+  }
+}
+
 console.log('');

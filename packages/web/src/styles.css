@@ -2136,3 +2136,13 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
   .prd-main { grid-template-columns: 1fr; }
   .prd-pages.is-large img { max-height: 480px; }
 }
+
+/* AI の利用の上限に対する使った割合（管理者ページの利用状況。仕様書 第6.6.2節） */
+.meter { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; margin: calc(8px * var(--space-scale)) 0 calc(12px * var(--space-scale)); }
+.meter > span { display: block; height: 100%; background: var(--accent); }
+.meter.warn > span { background: var(--warn, #c88a12); }
+.meter.over > span { background: var(--danger); }
+
+/* 秘書の欄の「ドライブから」の見本の一覧（見本の会社だけ。第10.10.8節） */
+.secretary-main { position: relative; }
+.secretary-drive-samples { position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 30; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; max-width: 420px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel, var(--bg)); box-shadow: 0 4px 16px rgba(0, 0, 0, .18); }

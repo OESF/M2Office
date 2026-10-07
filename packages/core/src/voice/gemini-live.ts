@@ -29,6 +29,8 @@ interface LiveMessage {
   toolCall?: { functionCalls?: { id?: string; name?: string; args?: Record<string, unknown> }[] };
   /** 音声の相手が取りやめた呼び出し（本人が話をさえぎったときなど）。 */
   toolCallCancellation?: { ids?: string[] };
+  /** 使った量（AI の利用の記録に使う。第6.6.2節）。 */
+  usageMetadata?: { promptTokenCount?: number; responseTokenCount?: number; totalTokenCount?: number };
 }
 
 /** ツールを Gemini の関数の宣言にする。型の名前は大文字で書く（Gemini の決まり）。 */
@@ -136,6 +138,12 @@ export class GeminiLiveProvider implements VoiceProvider {
     const cancelled = new Set<string>();
     ws.addEventListener('message', async (ev) => {
       const message = await parseMessage(ev.data);
+      const used = message?.usageMetadata;
+      if (used && session.onUsage) {
+        const input = used.promptTokenCount ?? 0;
+        const output = used.responseTokenCount ?? Math.max(0, (used.totalTokenCount ?? 0) - input);
+        if (input || output) session.onUsage({ model: this.options.model, inputTokens: input, outputTokens: output });
+      }
       for (const id of message?.toolCallCancellation?.ids ?? []) cancelled.add(id);
       if (message?.toolCall?.functionCalls?.length) {
         await answerToolCalls(message.toolCall.functionCalls);

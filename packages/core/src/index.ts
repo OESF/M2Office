@@ -107,7 +107,7 @@ export { validateDefinition } from './engine/validate.js';
 export { todayJst } from './engine/run-engine.js';
 export { describeCall, jpDate, type DescribedCall, type DescribeContext } from './engine/describe-call.js';
 export { composeApprovalPresent, describeContext, executedCalls, hideInternalIds, repeatsArtifact, type ExecutedCall } from './engine/approval-present.js';
-export { enqueueJob } from './engine/enqueue.js';
+export { enqueueJob, setEnqueueAiGuard } from './engine/enqueue.js';
 export { cancelRun, createdDriveLinks, CANCELLABLE } from './engine/cancel.js';
 export type { CancelActor, CancelOutcome } from './engine/cancel.js';
 export { Scheduler, SCHEDULE_SKIP_TITLE, SCHEDULE_TOOL_DISABLED_TITLE } from './scheduler/scheduler.js';
@@ -158,6 +158,13 @@ export * from './signage/index.js';
 export * from './notices/index.js';
 export * from './brief/index.js';
 export { answerNotice, type NoticeAnswer } from './secretary/notices.js';
-export { signageRequest, signageFileRequest, answerSignage, type SignageSecretaryDeps, type SignageRequest } from './secretary/signage.js';
+export { signageRequest, signageFileRequest, answerSignage, signageConfirmText, SIGNAGE_YES, SIGNAGE_NO, type SignageSecretaryDeps, type SignageRequest } from './secretary/signage.js';
 export { answerReservation, maybeReservation, parseReservation, timesOf, itemIn, seriesOf, type ReservationSecretaryDeps, type ReservationAsk, type SeriesAsk } from './secretary/reservations.js';
 export * from './chat/group-share.js';
+export {
+  AiUsageMeter, AiLimitError, PostgresAiUsageStore, aiUsageMeterFromEnv, withAiUsage, enterAiUsage, currentAiUsage, meterLlm, meterResearch,
+  effectiveMonthlyLimit, jstMonth, purposeGroup, AI_LIMIT_COMPANY_MESSAGE, AI_LIMIT_USER_MESSAGE,
+  type AiUsageScope, type AiUsageEntry, type AiUsageTotals, type AiUsageStore, type AiLimitSource, type AiUsageMeterDeps,
+} from './usage/ai-usage.js';
+export { voiceWords, voiceWordsLine, correctHeard, mishearOf, addMishear, toKatakana, VOICE_WORDS_MAX, MISHEARS_MAX, type VoiceWord, type Mishear, type VoiceWordsDeps } from './secretary/voice-words.js';
+export { AutoMinutes, autoMinutesRequest, meetingTitleKey, minutesStopped, MINUTES_AGENT_ID, type AutoMinutesDeps } from './meetings/auto-minutes.js';

@@ -5,7 +5,7 @@
 export { SIGNAGE_PACKAGE, SIGNAGE_EXTENSION_VERSION } from './package.js';
 export { PostgresSignageStore, type SignageStore, type ScreenRecord, type PairingRecord, type StockNotice } from './store.js';
 export {
-  SignageService, signageAccess, hashSecret, assetKey, jstSlot, usualSlot, cleanReport, SECRET_FORMAT,
+  SignageService, signageAccess, hashSecret, assetKey, jstSlot, usualSlot, cleanReport, SECRET_FORMAT, isPlaceholderAssetName, cleanAiAssetName,
   type SignageServiceDeps, type AssetUpload, type PlayAsset,
 } from './service.js';
 export { readMp4, type Mp4Info, type ReadAt } from './mp4.js';
