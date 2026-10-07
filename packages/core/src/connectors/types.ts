@@ -283,6 +283,34 @@ export interface ChatConnector {
    * @throws {ConnectorUnavailableError} 接続・許可・会社の準備の問題、Google に届かないとき
    */
   findSpace(p: ConnectorPrincipal, input: string): Promise<{ space: string; displayName: string | null; external: boolean | null } | { reason: string }>;
+  /**
+   * 本人が入っている、名前のあるスペース（グループの名前で共有するときの候補。仕様書 第16.7.12.1節）。**読むだけ。**
+   *
+   * @throws {ConnectorUnavailableError} 接続・許可・会社の準備の問題、Google に届かないとき
+   */
+  listSpaces(p: ConnectorPrincipal): Promise<{ space: string; displayName: string; external: boolean }[]>;
+  /**
+   * スペースのメンバーを数え、指定した人が入っているかを確かめる（承認の画面に出す。仕様書 第16.7.12.1節）。**読むだけ。**
+   *
+   * @param emails 確かめる人の Google アカウント（50 人まで）
+   * @returns 数と、入っている人・入っていない人・確かめられなかった人。本人が見られないスペースなら `null`
+   * @remarks 権限 `chat.memberships.readonly`。会社の外の人は、本人と Workspace の番号（domainId）が違う人として数える
+   */
+  members(p: ConnectorPrincipal, space: string, emails: string[]): Promise<ChatSpaceMembers | null>;
+}
+
+/** スペースのメンバーの数と、確かめた人（仕様書 第16.7.12.1節）。 */
+export interface ChatSpaceMembers {
+  /** 人のメンバーの数（招待中・アプリを除く） */
+  humans: number;
+  /** メンバーに入っている Google のグループの数（中の人は数えられない） */
+  googleGroups: number;
+  /** 会社の外の人の数（本人と Workspace の番号が違う人）。本人の番号が分からなければ `null` */
+  external: number | null;
+  /** 確かめた人のうち、入っている人・入っていない人・確かめられなかった人 */
+  present: string[];
+  absent: string[];
+  unknown: string[];
 }
 
 /** Google スライドへの接続口（仕様書 第9.4.2節）。 */

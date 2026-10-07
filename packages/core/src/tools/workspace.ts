@@ -16,6 +16,7 @@ import { canDecide } from '@m2office/shared';
 import { addDays, jst, ymd } from '../connectors/mock.js';
 import { ConnectorUnavailableError } from '../connectors/types.js';
 import { audienceOf } from './google.js';
+import { reachNotes, resolveGroupSpace } from '../chat/group-share.js';
 
 const principal = (ctx: ToolContext) => ({ tenantId: ctx.tenantId, userId: ctx.userId });
 const str = (v: unknown, fallback = '') => (typeof v === 'string' ? v : fallback);
@@ -285,7 +286,7 @@ export const chatPost: Tool = {
   args: { properties: { space: { type: 'string', description: 'スペースの名前（例: 営業部）か、スペースのリンク' }, text: { type: 'string', description: '本文' } }, required: ['text'] },
   google: { scope: 'chat.messages.create', level: 'sensitive' },
   // 投稿先を名前で探すため、本人が入っているスペースの一覧を見る（仕様書 第14.3.4節「Chat」）
-  googleAlso: [{ scope: 'chat.spaces.readonly', level: 'sensitive' }],
+  googleAlso: [{ scope: 'chat.spaces.readonly', level: 'sensitive' }, { scope: 'chat.memberships.readonly', level: 'sensitive' }],
   /**
    * 投稿先を承認の前に探す（仕様書 第14.3.4節「Chat」、ADR-0024）。見つかれば `spaces/…` で記録し、
    * 承認のあとは探し直さない。見つからない・複数ある・許可が無いときは、投稿を記録させない。
@@ -295,12 +296,25 @@ export const chatPost: Tool = {
   async prepare(args, ctx): Promise<PreparedCall> {
     const wanted = str(args['space'], 'general');
     try {
-      const found = await ctx.connector.chat.findSpace(principal(ctx), wanted);
+      // M2Office のグループの名前なら、合うスペースを探す（仕様書 第16.7.12.1節、ADR-0076）
+      const deps = { repo: ctx.repo, connector: ctx.connector };
+      // グループの探し方で思わぬ失敗があっても、スペースの名前で探す道は止めない（接続と許可の問題は下と同じに扱う）
+      const g = await resolveGroupSpace(deps, principal(ctx), wanted).catch((err: unknown) => {
+        if (err instanceof ConnectorUnavailableError) throw err;
+        return { kind: 'not-group' } as const;
+      });
+      if (g.kind === 'problem') return { kind: 'problem', reason: g.reason };
+      const found = g.kind === 'found' ? { space: g.space, displayName: g.name, external: g.external } : await ctx.connector.chat.findSpace(principal(ctx), wanted);
       if ('reason' in found) return { kind: 'problem', reason: found.reason };
+      // 届く先のメンバーを数え、グループとの違いを承認の画面に出す（違いがあっても止めない）
+      const reach = await reachNotes(deps, principal(ctx), found.space, g.kind === 'found' ? { group: g.group, by: g.by, emails: g.emails } : null);
       return {
-        kind: 'ready', args: { ...args, space: found.space }, shown: found.displayName ?? wanted,
-        // 社外の人が入れないと分かったスペースだけを社内とする。分からなければ社外（仕様書 第9.4.0節）
-        audience: found.external === false ? 'internal' : 'external',
+        kind: 'ready', args: { ...args, space: found.space },
+        shown: g.kind === 'found' ? `${g.name}（グループ「${g.group.name}」）` : found.displayName ?? wanted,
+        notes: reach.notes,
+        // 社外の人が入れないと分かり、メンバーにも会社の外の人と Google のグループがいないスペースだけを社内とする。
+        // 分からなければ社外（仕様書 第9.4.0節・第16.7.12.1節）
+        audience: found.external === false && reach.internalOnly ? 'internal' : 'external',
       };
     } catch (err) {
       // 届かないだけなら、承認のあとで改めて探す。接続・許可・会社の準備の問題は、承認しても投稿できない

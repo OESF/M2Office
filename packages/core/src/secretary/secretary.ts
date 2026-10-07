@@ -38,6 +38,7 @@ import { answerLauncher } from './launcher.js';
 import { answerStock, bareStockQuestion, inventoryRequest } from './inventory.js';
 import type { InventoryService } from '../inventory/service.js';
 import { INVENTORY_ORDER, INVENTORY_RECORD } from '../inventory/agents.js';
+import { normalizeGroupName } from '../chat/group-share.js';
 
 /** 秘書がどの層で応答したか。計測と表示に使う（仕様書 第10.9.1節）。 */
 export type ResponseLayer = 'direct' | 'light' | 'full';
@@ -283,6 +284,13 @@ export class Secretary {
         return { reply: { layer: 'direct', text: text ?? '流れに足せませんでした。', evidence: [], ...(name ? { file: { name, note: null } } : {}), tokensUsed: 0 }, keep: true };
       }
       return this.handOff(tenantId, userId, message, fileId);
+    }
+
+    // 「技術部の共有は〇〇のスペースにして」は、グループに合う Chat のスペースを覚え直す（第16.7.12.1節、ADR-0076）
+    const told = GROUP_SPACE_SET.exec(message) ?? GROUP_SPACE_FORGET.exec(message);
+    if (told) {
+      const done = await this.setGroupSpace(tenantId, userId, told[1]!.trim(), GROUP_SPACE_SET.test(message) ? told[2]!.trim() : null);
+      if (done) return { reply: done, keep: true };
     }
 
     // 「議事録の説明に〇〇と補足して」は、ヘルプの会社の補足を書く（管理者だけ。第6.10.7節）。使い方の質問より先に見る
@@ -918,6 +926,43 @@ export class Secretary {
   }
 
   /**
+   * グループに合う Chat のスペースを、会話で覚え直す・忘れる（仕様書 第16.7.12.1節、ADR-0076。Q-204）。
+   * 「技術部の共有は技術チームのスペースにして」「技術部の共有先を忘れて」。直せるのは、そのグループの人と管理者。
+   * スペースは本人が入っているものから名前で探す（見つからなければ覚えない）。
+   *
+   * @returns 答え。グループに当たらなければ `null`（ほかの経路に進む）
+   */
+  private async setGroupSpace(tenantId: string, userId: string, groupName: string, spaceName: string | null): Promise<SecretaryReply | null> {
+    const direct = (text: string): SecretaryReply => ({ layer: 'direct', text, evidence: [], tokensUsed: 0 });
+    const want = normalizeGroupName(groupName);
+    const group = (await this.deps.repo.listGroups(tenantId)).find((g) => normalizeGroupName(g.name) === want);
+    if (!group) return null;
+    const user = await this.deps.repo.findUserById(tenantId, userId);
+    if (!user?.roles.includes('admin') && !group.memberIds.includes(userId)) {
+      return direct(`グループ「${group.name}」の共有先を直せるのは、そのグループの人と管理者です。`);
+    }
+    const audit = async (detail: Record<string, unknown>) => this.deps.repo.appendAudit({
+      id: randomUUID(), tenantId, actorType: 'user', actorId: userId, action: 'group.chat_space', targetType: 'group', targetId: group.id, detail, occurredAt: new Date().toISOString(),
+    });
+    if (spaceName === null) {
+      await this.deps.repo.setGroupChatSpace(tenantId, group.id, null);
+      await audit({ cleared: true });
+      return direct(`グループ「${group.name}」の共有先を忘れました。次に「${group.name}に共有して」と頼まれたら、合う Chat のスペースを探し直します。`);
+    }
+    let found: Awaited<ReturnType<WorkspaceConnector['chat']['findSpace']>>;
+    try {
+      found = await this.deps.connector.chat.findSpace({ tenantId, userId }, spaceName.replace(/(のスペース|スペース)$/, ''));
+    } catch (err) {
+      return direct(err instanceof Error ? err.message : 'Chat のスペースを確かめられませんでした。');
+    }
+    if ('reason' in found) return direct(found.reason);
+    const name = found.displayName ?? spaceName;
+    await this.deps.repo.setGroupChatSpace(tenantId, group.id, { space: found.space, name, by: 'told', at: new Date().toISOString() });
+    await audit({ space: found.space });
+    return direct(`グループ「${group.name}」の共有は、Chat のスペース「${name}」に届けます。次から「${group.name}に共有して」で使います。`);
+  }
+
+  /**
    * ヘルプの会社の補足を、秘書への頼みで書く・消す（仕様書 第6.10.7節。第 0.287.0 版）。
    * 「議事録の説明に『共有先は部署のスペース』と補足して」「承認のしかたの補足を消して」。書くのは管理者だけ。
    * どの記事か（業務の名前か記事の題名）と補足の文は、まず言い回しから読み、読めなければ高速の推論に読ませる。記事は本人が見られるものから選ぶ。
@@ -1394,6 +1439,10 @@ export type { DirectAnswer };
 const NOTE_REQUEST = /(説明|ヘルプ|記事)(に|へ|の).{0,200}補足(して|しておいて|を(書|入れ|足|追加)|に(書|入れ))|の補足を.{0,6}(消|削除|外)|当社の補足を(書|入れ|足|消|削除)/;
 /** 補足を消す頼み */
 const NOTE_REMOVE = /補足(を|は)?.{0,6}(消して|削除|外して|いらない|不要)/;
+/** 「技術部の共有は技術チームのスペースにして」（グループに合う Chat のスペースを覚え直す。第16.7.12.1節）。 */
+const GROUP_SPACE_SET = /^\s*(.{1,30}?)(?:グループ)?(?:の|への)共有(?:先)?(?:は|を)[「『]?(.{1,60}?)[」』]?(?:という|の)?(?:チャットの)?スペース(?:に|へ)(?:して|する|変えて|決めて|しておいて)/;
+/** 「技術部の共有先を忘れて」。 */
+const GROUP_SPACE_FORGET = /^\s*(.{1,30}?)(?:グループ)?(?:の|への)共有(?:先)?(?:の(?:スペース|組み合わせ))?を(?:忘れて|消して|やめて)/;
 
 /**
  * 補足の頼みを言い回しから読む（純粋な関数）。補足の文は「」か『』の中、無ければ「〇〇に、…と補足して」の「…」。

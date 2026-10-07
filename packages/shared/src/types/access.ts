@@ -15,6 +15,19 @@ export interface UserGroup {
   description: string;
   /** 所属する利用者の ID。 */
   memberIds: string[];
+  /** 合う Google Chat のスペース（秘書が見つけて覚えたもの。会話で直せる。仕様書 第16.7.12.1節）。無ければ `null` */
+  chatSpace?: GroupChatSpace | null;
+}
+
+/** グループに合う Chat のスペース（仕様書 第16.7.12.1節、ADR-0076）。 */
+export interface GroupChatSpace {
+  /** `spaces/…` */
+  space: string;
+  /** スペースの表示名 */
+  name: string;
+  /** 見つけ方（名前が合った・メンバーが重なった・本人が言った） */
+  by: 'name' | 'members' | 'told';
+  at: string;
 }
 
 /**

@@ -6766,6 +6766,39 @@ console.log('\n■ 82. 販促物の作成（入り切り・3 案・選ぶ・会�
   }
 }
 
+console.log('\n■ 83. グループの名前で共有（合う Chat のスペース・メンバーの違い・秘書で覚え直す。第16.7.12.1節）');
+{
+  let groupId = null;
+  try {
+    const made = await call('a', '/v1/admin/groups', { method: 'POST', body: JSON.stringify({ name: 'スモーク技術部' }) });
+    groupId = made.body.id;
+    await call('a', `/v1/admin/groups/${groupId}/members`, { method: 'PUT', body: JSON.stringify({ userIds: ['u-a-admin', 'u-a-member'] }) });
+    const byMember = await call('a', `/v1/admin/groups/${groupId}/chat-space`, {}, 'member');
+    byMember.status === 403 ? ok('グループの Chat のスペースを確かめるのは管理者だけ') : ng(`管理者でなくても確かめられた（${byMember.status}）`);
+    // 見本のスペース「技術チーム（見本）」は、言い添え（チーム・括弧の中）を除くと「技術」で、グループの名前に含まれるので名前で選ぶ
+    const checked = await call('a', `/v1/admin/groups/${groupId}/chat-space`);
+    checked.body.found === true && checked.body.space === '技術チーム（見本）' && checked.body.notes?.some((n) => /名前が合いました/.test(n))
+      && checked.body.notes?.some((n) => /メンバー 3 人/.test(n)) && checked.body.notes?.some((n) => /グループにいない人（届きます）: 1 人/.test(n))
+      ? ok('グループに合う Chat のスペースを名前で見つけ、メンバーの数とグループとの違いを出す') : ng('合うスペースが違う', JSON.stringify(checked.body));
+    const listed = await call('a', '/v1/admin/groups');
+    const g1 = listed.body.items?.find((g) => g.id === groupId);
+    g1?.chatSpace?.space === 'spaces/mock-tech-team' && g1.chatSpace.by === 'name' ? ok('見つけた組み合わせを覚える') : ng('組み合わせを覚えていない', JSON.stringify(g1?.chatSpace));
+    const told = await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message: 'スモーク技術部の共有は全社（見本）のスペースにして' }) }, 'member');
+    const listed2 = await call('a', '/v1/admin/groups');
+    const g2 = listed2.body.items?.find((g) => g.id === groupId);
+    /全社（見本）」に届けます/.test(told.body.text ?? '') && g2?.chatSpace?.by === 'told'
+      ? ok('秘書に言えば、グループの共有先を覚え直す（グループの人）') : ng('覚え直せない', JSON.stringify({ t: told.body.text, c: g2?.chatSpace }));
+    const forgot = await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message: 'スモーク技術部の共有先を忘れて' }) });
+    const listed3 = await call('a', '/v1/admin/groups');
+    /忘れました/.test(forgot.body.text ?? '') && !listed3.body.items?.find((g) => g.id === groupId)?.chatSpace
+      ? ok('「共有先を忘れて」で忘れる') : ng('忘れない', JSON.stringify(forgot.body.text));
+  } catch (err) {
+    ng('グループの名前で共有の確認が途中で止まった', String(err));
+  } finally {
+    if (groupId) await call('a', `/v1/admin/groups/${groupId}`, { method: 'DELETE' }).catch(() => null);
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
 console.log('');

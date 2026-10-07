@@ -777,7 +777,7 @@ test('承認の前に投稿先を探し、見つかったスペースへ承認�
     lookups += 1;
     return input === '技術部' ? { space: 'spaces/TECH', displayName: '技術部' } : { reason: '見つかりません' };
   });
-  assert.match(present, /チャットのスペース「技術部」に投稿します\*\*:\n\s*> 議事録を共有します/, '確かめた名前で出す');
+  assert.match(present, /チャットのスペース「技術部」に投稿します\*\*:\n(?:- .*\n)*\s*> 議事録を共有します/, '確かめた名前で出す（届く先の説明の行を挟む。第16.7.12.1節）');
   assert.doesNotMatch(present, /spaces\/TECH/, '内部の ID は出さない');
   assert.doesNotMatch(present, /行えません/);
   assert.equal(ctx.connector.outbox.filter((o) => o.kind === 'chat').length, 0, '確かめるだけで投稿しない');
@@ -1202,6 +1202,8 @@ test('社外の人が入れないスペースへの投稿は、承認の段を�
   const { repo, connector, engine, run } = setup(SHARE_DEF, { name: 'chat.post', args: { space: '営業部', text: '共有します' } });
   repo.settings.automation = { writeInternal: 'allow', perAgent: {} };
   connector.chat.findSpace = async () => ({ space: 'spaces/SALES', displayName: '営業部', external: false });
+  // メンバーを確かめ、会社の外の人も Google のグループもいないと分かったときだけ社内（第16.7.12.1節）
+  connector.chat.members = async () => ({ humans: 4, googleGroups: 0, external: 0, present: [], absent: [], unknown: [] });
   const res = await engine.advance(run);
   assert.equal(res.outcome, 'completed');
   assert.equal(repo.approvals.length, 0, '承認トレイには出さない');
@@ -1251,6 +1253,8 @@ function scriptedShare(def: AgentDefinition, replies: Parameters<typeof scripted
   connector.chat.findSpace = async (_p, input) => (input === '無い部'
     ? { reason: '「無い部」という名前のチャットのスペースが見つかりません' }
     : { space: 'spaces/SALES', displayName: '営業部', external: false });
+  // メンバーを確かめ、会社の外の人も Google のグループもいないと分かったときだけ社内（第16.7.12.1節）
+  connector.chat.members = async () => ({ humans: 4, googleGroups: 0, external: 0, present: [], absent: [], unknown: [] });
   const registry = new ToolRegistry();
   for (const t of BUILTIN_TOOLS) registry.register(t);
   const llm = scriptedLlm(replies);

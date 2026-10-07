@@ -758,7 +758,7 @@ Google 以外のサービスは、これまでどおりコネクタ（第12.11�
 | カレンダー | `calendar.update`・`calendar.cancel`（参加者に通知が届く） | external-send | `calendar.events` | 機密 | 済み（第 1 弾） |
 | ToDo | `tasks.list`・`tasks.create` | read・write-internal | `tasks` | 機密 | 済み |
 | ToDo | `tasks.complete` | write-internal | `tasks` | 機密 | 済み（第 1 弾） |
-| Chat | `chat.post`（スペースを名前で探すため、スペースの一覧も見る。第14.3.4節「Chat」） | external-send | `chat.messages.create`・`chat.spaces.readonly` | 機密 | 済み |
+| Chat | `chat.post`（スペースを名前で探すため、スペースの一覧も見る。届く人を確かめるため、メンバーも見る。第14.3.4節「Chat」・第16.7.12.1節） | external-send | `chat.messages.create`・`chat.spaces.readonly`・`chat.memberships.readonly`（第 0.295.0 版） | 機密 | 済み |
 | ドライブ | `drive.search`（M2Office が作った・利用者が選んだファイルの中） | read | `drive.file` | 機密でない | 済み（第 1 弾） |
 | ドライブ | `drive.read`（ドキュメント・スプレッドシート・スライド・PDF を文字で読む） | read | `drive.file` | 機密でない | 済み（第 1 弾） |
 | ドライブ | `drive.create_folder` | draft | `drive.file` | 機密でない | 済み（第 1 弾） |

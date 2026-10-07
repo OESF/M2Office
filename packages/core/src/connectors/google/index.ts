@@ -118,7 +118,7 @@ export class GoogleWorkspaceConnector implements WorkspaceConnector {
   private readonly tokens: GoogleTokenSource;
 
   constructor(
-    repo: Repository, box: SecretBox,
+    private readonly repo: Repository, box: SecretBox,
     private readonly endpoints: GoogleApiEndpoints = GOOGLE_API_ENDPOINTS,
     now: () => number = () => Date.now(),
     /** Google の側で許可が外されたと分かったときの後始末（仕様書 第6.5.2.1節 経路 2・3）。 */
@@ -369,6 +369,53 @@ export class GoogleWorkspaceConnector implements WorkspaceConnector {
         if (/HTTP 400/.test(msg)) return { reason: 'リンクのチャットのスペースが見つかりません。リンクを確かめてください' };
         throw err;
       }
+    },
+    listSpaces: async (p: ConnectorPrincipal) =>
+      (await this.namedSpaces(p)).filter((s) => s.displayName).map((s) => ({ space: s.name, displayName: s.displayName!, external: externalOf(s) })),
+    members: async (p: ConnectorPrincipal, space: string, emails: string[]) => {
+      // 人と Google のグループのメンバーを数える（招待中は数えない）
+      const humans: { domainId: string | null }[] = [];
+      let groups = 0;
+      let pageToken = '';
+      for (let page = 0; page < CHAT_SPACE_PAGES; page++) {
+        const q = new URLSearchParams({ pageSize: '1000', showGroups: 'true', ...(pageToken ? { pageToken } : {}) });
+        let res: Record<string, unknown> | null;
+        try {
+          res = await this.chatApi(p, `/${space}/members?${q}`);
+        } catch (err) {
+          if (err instanceof ConnectorUnavailableError) throw err;
+          return null;
+        }
+        if (!res) return null;
+        for (const m of (res['memberships'] ?? []) as { member?: { type?: string; domainId?: string }; groupMember?: unknown }[]) {
+          if (m.groupMember) groups += 1;
+          else if (m.member?.type === 'HUMAN') humans.push({ domainId: m.member.domainId ?? null });
+        }
+        pageToken = String(res['nextPageToken'] ?? '');
+        if (!pageToken) break;
+      }
+      // 1 人ずつ、メールアドレスで確かめる（spaces/…/members/<メール>。2026-10-07 に API の説明で確認）
+      const present: string[] = [];
+      const absent: string[] = [];
+      const unknown: string[] = [];
+      for (const email of [...new Set(emails.map((e) => e.trim().toLowerCase()).filter(Boolean))].slice(0, 50)) {
+        try {
+          const r = await this.chatApi(p, `/${space}/members/${encodeURIComponent(email)}`);
+          (r ? present : absent).push(email);
+        } catch (err) {
+          if (err instanceof ConnectorUnavailableError) throw err;
+          if (/HTTP 404/.test(err instanceof Error ? err.message : '')) absent.push(email);
+          else unknown.push(email);
+        }
+      }
+      // 会社の外の人: 本人の Workspace の番号と違う人
+      const conn = await this.repo.getGoogleConnection(p.tenantId, p.userId).catch(() => null);
+      let mine: string | null = null;
+      if (conn?.googleEmail) {
+        const me = await this.chatApi(p, `/${space}/members/${encodeURIComponent(conn.googleEmail)}`).catch(() => null);
+        mine = (me?.['member'] as { domainId?: string } | undefined)?.domainId ?? null;
+      }
+      return { humans: humans.length, googleGroups: groups, external: mine ? humans.filter((h) => h.domainId && h.domainId !== mine).length : null, present, absent, unknown };
     },
     post: async (p: ConnectorPrincipal, msg: { space: string; text: string }) => {
       const space = await this.resolveSpace(p, msg.space);

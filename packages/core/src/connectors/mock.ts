@@ -26,6 +26,13 @@ import type {
  *   API とワーカーは別プロセスのため、互いの書き込みは見えない
  * - テナントと利用者ごとに記憶を分け、境界を越えて見えないようにする（不変則 I-2）
  */
+/** 見本の Chat のスペース（仕様書 第16.7.12.1節）。名前で探すときは、これまでどおりどの名前でも見つかる。 */
+const MOCK_SPACES = [
+  { space: 'spaces/mock-sales', displayName: '営業部（見本）', external: false },
+  { space: 'spaces/mock-tech-team', displayName: '技術チーム（見本）', external: false },
+  { space: 'spaces/mock-all', displayName: '全社（見本）', external: false },
+];
+
 /** 見本の写真（名前と色）。 */
 const MOCK_PHOTOS = [{ name: '店内の写真（見本）.png', color: '#c9a27e' }, { name: '商品の写真（見本）.png', color: '#7ea8c9' }];
 const mockPhotoCache = new Map<string, Uint8Array>();
@@ -353,6 +360,18 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
       if (!name) return { reason: '投稿先のチャットのスペースが指定されていません' };
       // 見本のスペースは、社外の人が入れるか分からない。分からないものは社外とみなす（仕様書 第9.4.0節）
       return { space: name, displayName: /^spaces\//.test(name) ? null : name, external: null };
+    },
+    /** 見本のスペース（グループの名前で共有するときの候補。仕様書 第16.7.12.1節）。 */
+    listSpaces: async (_p: ConnectorPrincipal) => MOCK_SPACES.map((s) => ({ ...s })),
+    /**
+     * 見本のメンバー。「技術チーム」には確かめた人が全員と、もう 1 人入っている。ほかのスペースには誰も入っていない。
+     * 会社の外の人と Google のグループは入っていない。
+     */
+    members: async (_p: ConnectorPrincipal, space: string, emails: string[]) => {
+      const list = [...new Set(emails.map((e) => e.trim().toLowerCase()).filter(Boolean))].slice(0, 50);
+      if (!MOCK_SPACES.some((s) => s.space === space)) return null;
+      const all = space === 'spaces/mock-tech-team';
+      return { humans: all ? list.length + 1 : 3, googleGroups: 0, external: 0, present: all ? list : [], absent: all ? [] : list, unknown: [] };
     },
     post: async (p: ConnectorPrincipal, msg: { space: string; text: string }) => {
       this.outbox.push({ kind: 'chat', principal: p, body: msg });

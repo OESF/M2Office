@@ -222,6 +222,8 @@ export interface Tool {
 export type PreparedCall =
   | {
     kind: 'ready'; args: Record<string, unknown>; shown?: string;
+    /** 承認の画面に添える説明（届く先のメンバーの数・グループとの違いなど。仕様書 第16.7.12.1節） */
+    notes?: string[];
     /**
      * 送り先が社内だけと確かめられたか（仕様書 第9.4.0節、ADR-0028）。`internal` なら、送るツールでも承認の段を自動で通してよい。
      * 返さなければ、送るツール（`external-send`）は社外とみなす

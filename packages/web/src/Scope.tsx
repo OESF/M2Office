@@ -166,6 +166,7 @@ export function GroupSettings({ users, onChanged }: {
               <td>
                 <strong>{g.name}</strong> <span className="muted small">{g.memberIds.length} 人</span>
                 <div className="small muted">{g.memberIds.map(nameOf).join('・') || '所属する人はいません'}</div>
+                <GroupChatSpace group={g} />
                 {g.usedBy && (g.usedBy.compartments.length > 0 || g.usedBy.agents.length > 0) && (
                   <div className="small">
                     割り当て先:{' '}
@@ -316,6 +317,34 @@ export function CompartmentSettings({ onChanged }: { onChanged?: () => void }) {
         }, '区画を作りました')}>区画を作る</button>
       </div>
       {msg && <p className={msg.ok ? 'ok-msg' : 'error'}>{msg.text}</p>}
+    </div>
+  );
+}
+
+/**
+ * グループに合う Chat のスペース（仕様書 第16.7.12.1節）。覚えたスペースを出し、押すとメンバーの違いを確かめる（見るだけ）。
+ * 直すのは Chat の側か、秘書への会話（「技術部の共有は〇〇のスペースにして」）。
+ */
+function GroupChatSpace({ group }: { group: GroupView }) {
+  const [res, setRes] = useState<{ found: true; space: string; notes: string[] } | { found: false; reason: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const check = async () => {
+    setBusy(true);
+    try {
+      setRes(await api.admin.groupChatSpace(group.id));
+    } catch (e) {
+      setRes({ found: false, reason: describeError(e, '確かめられませんでした') });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="small">
+      Chat のスペース: {res?.found ? `「${res.space}」` : group.chatSpace ? `「${group.chatSpace.name}」` : <span className="muted">なし</span>}{' '}
+      <button className="link small" disabled={busy} onClick={() => void check()}>{busy ? '確かめています…' : '確かめる'}</button>
+      {res && (res.found
+        ? <ul className="muted small">{res.notes.map((n) => <li key={n}>{n}</li>)}</ul>
+        : <p className="muted small">{res.reason}</p>)}
     </div>
   );
 }

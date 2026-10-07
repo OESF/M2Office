@@ -137,7 +137,7 @@
 | `calendar.cancel` | external-send | `calendar.events`（機密） | 予定を取り消します。参加者に通知が届くため、必ず承認のあとに行います |
 | `calendar.create` | external-send | `calendar.events`（機密） | 予定を登録し、参加者を招待します。社外の人を招くときは、承認のあとに行います |
 | `calendar.update` | external-send | `calendar.events`（機密） | 予定の日時・題名・参加者を変えます。参加者に通知が届くため、必ず承認のあとに行います |
-| `chat.post` | external-send | `chat.messages.create`（機密）・`chat.spaces.readonly`（機密） | チャットへ投稿します。社外の人が入れるスペースへの投稿は、承認のあとに行います |
+| `chat.post` | external-send | `chat.messages.create`（機密）・`chat.spaces.readonly`（機密）・`chat.memberships.readonly`（機密） | チャットへ投稿します。社外の人が入れるスペースへの投稿は、承認のあとに行います |
 | `columns.place` | external-send | — | 承認されたコラムを、会社の WordPress に下書きとして入れます。公開は WordPress の側で行います |
 | `columns.signage_publish` | external-send | — | コラムから作った画像を、承認の後にサイネージの画面の流れに置きます |
 | `drive.share` | external-send | `drive.file`（機密でない） | M2Office で作ったファイルを、指定した人と共有します。社外の人との共有は、承認のあとに行います。リンクで誰にでも公開することはしません |

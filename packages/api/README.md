@@ -401,6 +401,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/admin/groups` | 管理者: グループの一覧（所属する人と、割り当て先の区画・業務を含む。第16.7節） |
 | `POST /v1/admin/groups` | 管理者: グループを作る（名前は会社の中で重ならない） |
 | `PATCH /v1/admin/groups/:id` | 管理者: グループの名前・説明を変える |
+| `GET /v1/admin/groups/:id/chat-space` | 管理者: グループに合う Chat のスペースと、メンバーの違いを確かめる（見るだけ。見つかれば覚える。仕様書 第16.7.12.1節） |
 | `PUT /v1/admin/groups/:id/members` | 管理者: 所属を丸ごと置き換える（本文に `userIds`） |
 | `DELETE /v1/admin/groups/:id` | 管理者: グループを消す。範囲に誰も残らなくなった業務を `emptied` で返す |
 | `GET /v1/admin/compartments` | 管理者: 権限区画と、その割当（グループと個人） |

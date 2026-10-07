@@ -16,6 +16,7 @@ import { Hono } from 'hono';
 import type { AccessScope, TenantSettings } from '@m2office/shared';
 import type { AppDeps } from '../context.js';
 import { requireRole, type AppEnv } from '../middleware/tenant.js';
+import { groupEmails, reachNotes, resolveGroupSpace } from '@m2office/core';
 
 /** 利用範囲を設定できる対象（公式の業務エージェントと拡張機能）。 */
 async function targetsOf(deps: AppDeps, tenantId: string) {
@@ -158,6 +159,33 @@ export function groupsRoute(deps: AppDeps) {
     await deps.repo.saveGroup(group);
     await audit(deps, tenant.id, user.id, 'group.create', group.id, { name });
     return c.json({ ...group, memberIds: [] }, 201);
+  });
+
+  /**
+   * グループに合う Chat のスペースと、メンバーの違いを確かめる（仕様書 第16.7.12.1節。見るだけ）。管理者の Google の接続で探す。
+   * 見つかれば覚える（共有を頼んだときと同じ）。
+   */
+  app.get('/:id/chat-space', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const g = (await deps.repo.listGroups(tenant.id)).find((x) => x.id === c.req.param('id'));
+    if (!g) return c.json({ error: 'グループが見つかりません' }, 404);
+    const p = { tenantId: tenant.id, userId: user.id };
+    try {
+      const r = await resolveGroupSpace(deps, p, g.name);
+      if (r.kind === 'problem') return c.json({ found: false, reason: r.reason });
+      let target: { space: string; name: string; by: 'name' | 'members' | 'told'; emails: string[] };
+      if (r.kind === 'found') target = { space: r.space, name: r.name, by: r.by, emails: r.emails };
+      else {
+        // グループと同じ名前のスペースがある
+        const f = await deps.connector.chat.findSpace(p, g.name);
+        if ('reason' in f) return c.json({ found: false, reason: f.reason });
+        target = { space: f.space, name: f.displayName ?? g.name, by: 'name', emails: await groupEmails(deps.repo, tenant.id, g) };
+      }
+      const reach = await reachNotes(deps, p, target.space, { group: g, by: target.by, emails: target.emails });
+      return c.json({ found: true, space: target.name, notes: reach.notes });
+    } catch (err) {
+      return c.json({ found: false, reason: err instanceof Error ? err.message : 'Chat のスペースを確かめられませんでした' });
+    }
   });
 
   /** 名前と説明を変える。 */

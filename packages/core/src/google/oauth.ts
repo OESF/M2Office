@@ -51,6 +51,7 @@ export function googleScopeLabel(name: string): string {
     tasks: 'ToDo を見る・登録する',
     'chat.messages.create': 'チャットに投稿する（承認のあとだけ）',
     'chat.spaces.readonly': '入っているチャットのスペースを見る（投稿先を名前で探すため）',
+    'chat.memberships.readonly': 'チャットのスペースのメンバーを見る（共有の前に、届く人を確かめるため）',
     'drive.file': 'M2Office で作った・あなたが選んだファイルを扱う',
     drive: 'ドライブのファイルを扱う（会社のスライドのテンプレートを複製するため）',
     'directory.readonly': '社内の人を探す',

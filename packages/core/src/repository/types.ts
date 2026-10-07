@@ -6,7 +6,7 @@
 
 import type {
   Approval, Artifact, AuditEvent, Job, Notification, Run, RunStep, Schedule, Session,
-  StoredFile, Tenant, TenantSettings, User, UserGroup, UserSettings,
+  StoredFile, Tenant, TenantSettings, User, UserGroup, GroupChatSpace, UserSettings,
 } from '@m2office/shared';
 import type { ConnectorDeclaration } from '../extensions/connectors.js';
 
@@ -408,6 +408,8 @@ export interface Repository {
   saveGroup(group: Omit<UserGroup, 'memberIds'>): Promise<void>;
   /** グループを消す。所属も消える。無ければ `false`。 */
   deleteGroup(tenantId: string, groupId: string): Promise<boolean>;
+  /** グループに合う Chat のスペースを覚える・忘れる（`null`。仕様書 第16.7.12.1節）。 */
+  setGroupChatSpace(tenantId: string, groupId: string, link: GroupChatSpace | null): Promise<void>;
   /** グループの所属を丸ごと置き換える。その会社の利用者だけを入れる。 */
   setGroupMembers(tenantId: string, groupId: string, userIds: string[]): Promise<void>;
   /** 利用者が所属するグループの ID。利用範囲の判定に使う。 */

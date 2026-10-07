@@ -89,6 +89,7 @@ const ACTION_LABELS: Record<string, string> = {
   'user.update': '利用者の役割・状態を変えた',
   'group.create': 'グループを作った',
   'group.update': 'グループを変えた',
+  'group.chat_space': 'グループに合う Chat のスペースを覚え直した',
   'group.delete': 'グループを消した',
   'group.members': 'グループの所属を変えた',
   'compartment.create': '権限区画を作った',

@@ -868,6 +868,8 @@ export interface AccessOptions {
 /** グループ（仕様書 第16.7.2節）。 */
 export interface GroupView {
   id: string; name: string; description: string; memberIds: string[];
+  /** 合う Chat のスペース（秘書が見つけて覚えたもの。第16.7.12.1節） */
+  chatSpace?: { space: string; name: string; by: 'name' | 'members' | 'told'; at: string } | null;
   /** 割り当てられている権限区画と業務（第16.7.5節）。所属を変える前に影響を示す。 */
   usedBy?: { compartments: string[]; agents: string[] };
 }
@@ -2169,6 +2171,8 @@ export const api = {
     extensions: () => call<{ items: ExtensionView[] }>('/admin/extensions'),
     installExtension: (id: string, scope: ScopeValue = 'all') =>
       call(`/admin/extensions/${encodeURIComponent(id)}/install`, { method: 'POST', body: JSON.stringify({ consent: true, scope }) }),
+    /** グループに合う Chat のスペースと、メンバーの違いを確かめる（第16.7.12.1節）。 */
+    groupChatSpace: (id: string) => call<{ found: true; space: string; notes: string[] } | { found: false; reason: string }>(`/admin/groups/${encodeURIComponent(id)}/chat-space`),
     groups: () => call<{ items: GroupView[] }>('/admin/groups'),
     createGroup: (name: string, description = '') =>
       call<GroupView>('/admin/groups', { method: 'POST', body: JSON.stringify({ name, description }) }),

@@ -10,7 +10,7 @@
 import pg from 'pg';
 import type {
   Approval, Artifact, AuditEvent, Job, Notification, Run, RunStep, Schedule, Session,
-  StoredFile, Tenant, TenantSettings, User, UserGroup, UserSettings,
+  StoredFile, Tenant, TenantSettings, User, UserGroup, GroupChatSpace, UserSettings,
 } from '@m2office/shared';
 import { DEFAULT_TENANT_SETTINGS, DEFAULT_USER_SETTINGS, STANDARD_SYNONYMS } from '@m2office/shared';
 import type { AgentEvent, Plan, PlanStep, DecidedApproval, AuditQuery, CompartmentAssignment, Conversation, ConversationDigest, MemoryCandidate, Promotion, CredentialKind, GoogleConnection, UserPhoto, TenantCredential, TenantConnection, ConnectionSecret, UserConnection, DisabledConnectorTool, InstalledExtension, PrivateExtension, KnowledgeItem, KnowledgeSearchOptions, KnowledgeSearchResult, KnowledgeSectionView, KnowledgeStatus, KnowledgeVersion, Memory, Repository, RunStatRow } from './types.js';
@@ -2023,7 +2023,7 @@ export class PostgresRepository implements Repository {
 
   async listGroups(tenantId: string): Promise<UserGroup[]> {
     const rows = await this.q<Omit<UserGroup, 'memberIds'> & { memberIds: string[] | null }>(tenantId,
-      `select g.id, g.tenant_id as "tenantId", g.name, g.description,
+      `select g.id, g.tenant_id as "tenantId", g.name, g.description, g.chat_space as "chatSpace",
               array_remove(array_agg(m.user_id order by m.user_id), null) as "memberIds"
          from user_groups g left join user_group_members m on m.group_id = g.id and m.tenant_id = g.tenant_id
         where g.tenant_id = $1
@@ -2038,6 +2038,10 @@ export class PostgresRepository implements Repository {
        on conflict (id) do update set name = excluded.name, description = excluded.description
        where user_groups.tenant_id = excluded.tenant_id`,
       [g.id, g.tenantId, g.name, g.description]);
+  }
+
+  async setGroupChatSpace(tenantId: string, groupId: string, link: GroupChatSpace | null): Promise<void> {
+    await this.q(tenantId, `update user_groups set chat_space = $3 where tenant_id = $1 and id = $2`, [tenantId, groupId, link ? JSON.stringify(link) : null]);
   }
 
   async deleteGroup(tenantId: string, groupId: string): Promise<boolean> {

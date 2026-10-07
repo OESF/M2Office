@@ -818,7 +818,7 @@ export class RunEngine {
             }
             const recorded: ToolCall = check?.kind === 'ready'
               ? {
-                name: call.name, args: check.args, ...(check.shown ? { shown: check.shown } : {}),
+                name: call.name, args: check.args, ...(check.shown ? { shown: check.shown } : {}), ...(check.notes?.length ? { notes: check.notes } : {}),
                 ...(check.audience === 'internal' ? { internal: true } : {}),
               }
               : check?.kind === 'unchecked' ? { ...call, caution: check.reason } : call;
@@ -1271,6 +1271,8 @@ type ToolCall = {
   args: Record<string, unknown>;
   /** 承認の前に確かめた名前（例: スペースの名前）。 */
   shown?: string;
+  /** 承認の画面に添える説明（届く先のメンバーの数など）。 */
+  notes?: string[];
   /** 承認の前に確かめられなかった理由。 */
   caution?: string;
   /** 送り先が社内だけと確かめられた（仕様書 第9.4.0節）。送るツールでも、人の判断を要しない。 */
