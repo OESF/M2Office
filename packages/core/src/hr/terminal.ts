@@ -10,6 +10,7 @@
 
 import { createHash, createHmac, randomBytes, randomInt, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import pg from 'pg';
+import { createPool } from '../repository/pool.js';
 import type { AttPunchKind, AuditEvent, HrEmployee } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 
@@ -58,7 +59,7 @@ export class PostgresTerminalStore implements TerminalStore {
   private readonly pool: pg.Pool;
 
   constructor(connectionString: string) {
-    this.pool = new pg.Pool({ connectionString, max: 2 });
+    this.pool = createPool(connectionString, { max: 2, name: 'hr/terminal' });
   }
 
   async close(): Promise<void> {
