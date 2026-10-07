@@ -1,6 +1,7 @@
 services:
   db:
-    image: postgres:17-alpine
+    # 知識の意味の検索（仕様書 第11.7.6節）のため、pgvector を含む PostgreSQL 17 を使う
+    image: pgvector/pgvector:pg17
     container_name: m2office-db
     environment:
       POSTGRES_USER: m2office

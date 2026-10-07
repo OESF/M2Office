@@ -5,9 +5,10 @@
  * 割り当ては、その期間に入った日の割合が少ない人から（同じなら、その型に入った回数が少ない人から）。足りない枠は点検で示す。
  */
 
-import type { HrShift, HrShiftPattern, HrShiftSettings, ShiftIssue } from '@m2office/shared';
+import type { HrAnnualSettings, HrShift, HrShiftPattern, HrShiftSettings, ShiftIssue } from '@m2office/shared';
 import { isJapaneseHoliday } from './holidays.js';
 import { scheduledMinutes, shiftDate, variableCapMinutes, weekday } from './attendance.js';
+import { annualCapMinutes, checkAnnual, inBusy } from './work-systems.js';
 
 /** 案づくりと点検の、シフトに入る人。 */
 export interface PlanMember {
@@ -17,6 +18,8 @@ export interface PlanMember {
   weeklyHours: number | null;
   hiredOn: string | null;
   leftOn: string | null;
+  /** 1 年単位の変形労働時間制の人（第30.6.3節）。1 日 10 時間・週 52 時間まで、期間の上限は 40 時間 × 暦日数 ÷ 7。 */
+  annual?: boolean;
 }
 
 /** 案づくりと点検の入力。 */
@@ -28,6 +31,8 @@ export interface PlanInput {
   requests: Set<string>;
   /** 週の起算日（0=日曜）。 */
   weekStart: number;
+  /** 1 年単位の変形労働時間制の点検（対象期間と、これまでに決めたほかの期間のシフト）。 */
+  annual?: { settings: HrAnnualSettings; range: { start: string; end: string }; prior: HrShift[] };
 }
 
 /** 連続して働ける日数（週に 1 日の休みを守るため 6 日まで）。 */
@@ -58,7 +63,8 @@ const employed = (m: PlanMember, d: string) => (!m.hiredOn || m.hiredOn <= d) &&
 /** 1 人の期間の上限（分）: 変形なら総枠、無ければ無し。週の所定労働時間があれば、それを期間にならした分まで。 */
 function periodLimit(m: PlanMember, input: PlanInput): number {
   const n = input.days.length;
-  const cap = input.settings.variable ? variableCap(n, input.settings.special44) : Infinity;
+  // 1 年単位の人は、期間を 40 時間 × 暦日数 ÷ 7 までにならす（対象期間の総枠を守るため）
+  const cap = m.annual ? annualCapMinutes(n) : input.settings.variable ? variableCap(n, input.settings.special44) : Infinity;
   return m.weeklyHours ? Math.min(cap, (m.weeklyHours * 60 * n) / 7) : cap;
 }
 
@@ -91,9 +97,10 @@ export function generatePlan(input: PlanInput): HrShift[] {
       const ok = input.members.filter((m) => {
         const s = state.get(m.employeeId)!;
         if (!employed(m, d) || taken.has(m.employeeId) || input.requests.has(`${m.employeeId}|${d}`)) return false;
-        if (s.streak >= MAX_STREAK || s.weekDays >= (m.weeklyDays ?? 5)) return false;
+        if (s.streak >= (m.annual && input.annual && inBusy(d, input.annual.settings.busy) ? 12 : MAX_STREAK) || s.weekDays >= (m.weeklyDays ?? 5)) return false;
         if (s.minutes + pm > s.limit + 0.001) return false;
-        if (!settings.variable && (pm > 480 || s.weekMinutes + pm > Math.min(2400, m.weeklyHours ? m.weeklyHours * 60 : 2400))) return false;
+        if (m.annual) { if (pm > 600 || s.weekMinutes + pm > 3120) return false; }
+        else if (!settings.variable && (pm > 480 || s.weekMinutes + pm > Math.min(2400, m.weeklyHours ? m.weeklyHours * 60 : 2400))) return false;
         return true;
       }).sort((a, b) => {
         const sa = state.get(a.employeeId)!;
@@ -135,6 +142,14 @@ export function checkPlan(input: PlanInput, shifts: HrShift[]): ShiftIssue[] {
     const mine = input.days.map((d) => by.get(`${m.employeeId}|${d}`) ?? null);
     for (const [i, s] of mine.entries()) {
       if (s && input.requests.has(`${m.employeeId}|${input.days[i]}`)) issues.push({ level: 'check', code: 'request', date: input.days[i], text: `${m.name}さんの休みの希望の日（${md(input.days[i]!)}）に勤務を入れています`, ...who });
+    }
+    if (m.annual && input.annual) {
+      // 1 年単位の変形労働時間制（第30.6.3節）: 1 日 10 時間・週 52 時間・連続 6 日（特定期間 12 日）・総枠・280 日・48 時間の週。これまでに決めた期間と合わせて見る
+      const prior = input.annual.prior.filter((x) => x.employeeId === m.employeeId && x.patternId && !input.days.includes(x.date));
+      for (const x of checkAnnual([...prior, ...mine.filter((s): s is HrShift => !!s)], input.annual.range, input.annual.settings, input.weekStart)) {
+        issues.push({ level: 'stop', code: `annual-${x.code}`, ...(x.date ? { date: x.date } : {}), text: `${m.name}さん: ${x.text}（1 年単位の変形労働時間制）`, ...who });
+      }
+      continue;
     }
     // 7 日続けて働く日がある（週に 1 日の休みが取れない）
     let streak = 0;

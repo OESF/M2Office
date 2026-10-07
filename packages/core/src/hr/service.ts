@@ -7,7 +7,7 @@
 
 import { randomUUID } from 'node:crypto';
 import {
-  HR_COMPARTMENT, HR_EMPLOYMENTS, HR_CATEGORIES, HR_WAGE_TYPES, HR_EXTENSION_ID,
+  HR_COMPARTMENT, HR_EMPLOYMENTS, HR_CATEGORIES, HR_WAGE_TYPES, HR_EXTENSION_ID, isHrSchedule,
   type AuditEvent, type HrAllowance, type HrCategory, type HrEmployee, type HrEmployeeView, type HrEmployment,
   type HrNoticeSettings, type HrSettings, type HrTask, type HrTerms, type HrWageType,
 } from '@m2office/shared';
@@ -398,7 +398,7 @@ export class HrService {
     }
     if (input.socialInsurance !== undefined) out.socialInsurance = !!input.socialInsurance;
     if (input.employmentInsurance !== undefined) out.employmentInsurance = !!input.employmentInsurance;
-    if (input.schedule !== undefined) out.schedule = input.schedule === 'shift' ? 'shift' : 'fixed';
+    if (input.schedule !== undefined) out.schedule = isHrSchedule(input.schedule) ? input.schedule : 'fixed';
     return out;
   }
 

@@ -457,6 +457,15 @@ export function meterLlm(tenantId: string, inner: LlmProvider, meter: AiUsageMet
       return out;
     };
   }
+  // 埋め込み（知識の意味の検索。第11.7.6.1節）。上限は確かめない（質問の埋め込みは答えを止めないため。ワーカーの埋め込みも同じ）
+  if (inner.embed) {
+    wrapped.embed = async (req) => {
+      const out = await inner.embed!(req);
+      const model = out.model.replace(/^[a-z]+:/, '');
+      log({ model, inputTokens: out.inputTokens, outputTokens: 0, units: 0, costJpy: local ? 0 : costJpy(model, out.inputTokens, 0) });
+      return out;
+    };
+  }
   return wrapped;
 }
 

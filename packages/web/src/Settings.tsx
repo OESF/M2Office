@@ -9,7 +9,7 @@ import { AVATAR_PRESETS, BRIEF_SECTIONS, WEEKLY_SECTIONS, VOICE_CHOICES, VOICE_S
 import {
   api, describeError, type MyConnectionView,
   type AgentSummary, type ConversationView, type Me, type MemoryView,
-  type MyGoogle, type PromotionView,
+  type MyGoogle, type PromotionView, type CardsGoogle,
 } from './api.js';
 import { useTheme, type ThemeChoice } from './theme.js';
 import { statusLabel } from './components.js';
@@ -147,6 +147,7 @@ export function Settings({ me, agents, onChanged, section }: {
       </>}
 
       {on('google') && <GoogleSettings />}
+      {on('google') && <CardsGoogleAuto />}
 
       {on('services') && <ServicesSettings />}
 
@@ -883,6 +884,37 @@ function GoogleSettings() {
         </>
       )}
       {msg && <p className={msg.ok ? 'ok-msg' : 'error'}>{msg.text}</p>}
+    </div>
+  );
+}
+
+/**
+ * 自分が受け取った名刺を、自動で Google の連絡先に入れるか（仕様書 第27.15節。既定は切り）。
+ *
+ * @remarks 名刺管理を使えない人には出さない。入れたときに Google の連絡先の許可が無ければ、そのまま Google の同意の画面へ移る
+ */
+function CardsGoogleAuto() {
+  const [g, setG] = useState<CardsGoogle | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  useEffect(() => { void api.cards.google().then(setG).catch(() => setG(null)); }, []);
+  if (!g) return null;
+  const change = async (auto: boolean) => {
+    setMsg(null);
+    try {
+      await api.cards.setGoogleAuto(auto);
+      setG({ ...g, auto });
+      if (auto && !g.granted) location.href = (await api.connectGoogle({ extra: ['contacts'] })).url;
+    } catch (e) {
+      setMsg(describeError(e, '保存できませんでした'));
+    }
+  };
+  return (
+    <div className="card">
+      <h3>名刺と Google の連絡先</h3>
+      <label className="check">
+        <input type="checkbox" checked={g.auto} onChange={(e) => void change(e.target.checked)} /> 自分が受け取った名刺を Google の連絡先に入れる
+      </label>
+      {msg && <p className="error">{msg}</p>}
     </div>
   );
 }

@@ -12,6 +12,8 @@ import { Board } from './Dashboard.js';
 import { Login, takeReturnPath } from './Login.js';
 import { MobileInventory } from './MobileInventory.js';
 import { MobileMembers } from './MobileMembers.js';
+import { MobilePunch } from './MobilePunch.js';
+import { HrTerminal } from './HrTerminal.js';
 import { SignagePair } from './SignagePair.js';
 import { MobileSignage } from './MobileSignage.js';
 import { api, ApiError, setUnauthorizedHandler, type Me } from './api.js';
@@ -79,6 +81,8 @@ function Root() {
   if (location.pathname.startsWith('/m/inventory')) return withDebug(<MobileInventory me={me} />);
   // 店員の会員のページ（会員証の QR を読んでポイントを付ける・特典を使う。仕様書 第40.9節）
   if (location.pathname.startsWith('/m/members')) return withDebug(<MobileMembers me={me} />);
+  // 共有の端末の QR を本人のスマホで読んだあとの打刻（仕様書 第30.6.3節）
+  if (location.pathname.startsWith('/m/punch')) return withDebug(<MobilePunch />);
   // 店頭サイネージの画面の登録（端末の QR を管理者がスマホで読む。仕様書 第31.5.1節）
   if (location.pathname.startsWith('/m/signage/pair')) return withDebug(<SignagePair me={me} />);
   // 店頭サイネージのスタッフのページ（割り込みを出す・消す。仕様書 第31.9.3節）
@@ -100,6 +104,8 @@ if (!root) throw new Error('#root が見つかりません');
 // 再生のページはログインの確かめ（/v1/me）を通さない。端末で何か月も開いたままにするため、開発の二重の実行もしない
 createRoot(root).render(location.pathname.startsWith('/signage/play')
   ? <Suspense fallback={null}><SignagePlayer /></Suspense>
+  // 共有の端末の打刻の画面（仕様書 第30.6.3節）。端末で開いたままにするため、ログインを通さない
+  : location.pathname.startsWith('/hr/terminal') ? <HrTerminal />
   : (
     <StrictMode>
       <Root />

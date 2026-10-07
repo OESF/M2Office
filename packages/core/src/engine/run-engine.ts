@@ -31,9 +31,11 @@ import { describeCall } from './describe-call.js';
 import { composeApprovalPresent, describeContext } from './approval-present.js';
 import { validateDefinition } from './validate.js';
 import { expandQuery } from '../knowledge/expand.js';
+import { queryEmbedder } from '../knowledge/embed.js';
 import type { CardService } from '../cards/service.js';
 import type { ContactStore } from '../cards/store.js';
 import type { BulkMailService } from '../cards/bulk.js';
+import type { GoogleContactsService } from '../cards/google-contacts.js';
 import type { AiKind } from '../llm/policy.js';
 import type { NoticeService } from '../notices/service.js';
 import type { InventoryService } from '../inventory/service.js';
@@ -132,6 +134,8 @@ export interface RunEngineDeps {
     access(tenantId: string, userId: string): Promise<{ defaultScope: ContactScope } | null>;
     /** まとめてのメール（第27.9.1節）。 */
     bulk?: BulkMailService;
+    /** 本人の Google の連絡先へのつなぎ（第27.15節）。 */
+    google?: GoogleContactsService;
   };
   /** 社内のお知らせ（仕様書 第10.15節）。ツール `notices.list` に渡す。無ければ「読めなかった」と返す。 */
   notices?: NoticeService;
@@ -999,6 +1003,7 @@ export class RunEngine {
       // 画像から文字を読む手段。推論が持っていなければ渡さない（第9.4.1節、Q-56）
       ...(llm?.readImage ? { ocr: async (r) => (await llm.readImage!(r)).text } : {}),
       ...(llm ? { expandQuery: (q: string) => expandQuery(llm, q) } : {}),
+      ...(llm && queryEmbedder(llm, this.log) ? { embedQuery: queryEmbedder(llm, this.log)! } : {}),
       // スキルの補助のファイル。skill.read で開く（仕様書 第12.12.2節）
       ...(def.skill?.files.length ? { skillFiles: def.skill.files } : {}),
       // 名刺管理（第27.9節）。使えるかどうかはツールが呼ぶたびに確かめる
@@ -1007,6 +1012,7 @@ export class RunEngine {
           service: this.deps.cards.service, store: this.deps.cards.store, llm,
           access: () => this.deps.cards!.access(run.tenantId, requestedBy),
           ...(this.deps.cards.bulk ? { bulk: this.deps.cards.bulk } : {}),
+          ...(this.deps.cards.google ? { google: this.deps.cards.google } : {}),
         },
       } : {}),
       // 在庫管理（第29.15節）。使えるかどうかはツールが呼ぶたびに確かめる

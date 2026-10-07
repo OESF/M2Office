@@ -8,7 +8,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
 import {
   HR_CATEGORIES, HR_EMPLOYMENTS, HR_WAGE_TYPES,
-  type HrDeadline, type HrEmployee, type HrEmployeeView, type HrNoticeSettings, type HrPayrollProfile, type HrSettings, type HrTask, type HrTerms, type PayCheck, type PaySlip, type PayTrialCompare,
+  type HrDeadline, type HrEmployee, type HrEmployeeView, type HrNoticeSettings, type HrPayrollProfile, type HrSchedule, type HrSettings, type HrTask, type HrTerms, type PayCheck, type PaySlip, type PayTrialCompare,
 } from '@m2office/shared';
 import { api, describeError, type HrImportResult } from './api.js';
 import { hrPhotoUrl, shrinkPhoto } from './photo.js';
@@ -821,8 +821,9 @@ function TermsFields({ t, set }: { t: Partial<HrTerms>; set: (p: Partial<HrTerms
       <input className="short" placeholder="就業場所" value={t.workplace ?? ''} onChange={(e) => set({ workplace: e.target.value })} aria-label="就業場所" />
       <label className="check"><input type="checkbox" checked={!!t.socialInsurance} onChange={(e) => set({ socialInsurance: e.target.checked })} /> 社会保険</label>
       <label className="check"><input type="checkbox" checked={!!t.employmentInsurance} onChange={(e) => set({ employmentInsurance: e.target.checked })} /> 雇用保険</label>
-      <select value={t.schedule ?? 'fixed'} onChange={(e) => set({ schedule: e.target.value as 'fixed' | 'shift' })} aria-label="働き方">
+      <select value={t.schedule ?? 'fixed'} onChange={(e) => set({ schedule: e.target.value as HrSchedule })} aria-label="働き方">
         <option value="fixed">始業・終業が決まっている</option><option value="shift">シフト</option>
+        <option value="annual">1 年単位の変形労働時間制</option><option value="flex">フレックスタイム制</option>
       </select>
       </div>
       <div className="row wrap">

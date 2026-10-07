@@ -14,7 +14,7 @@ import type { CardCorners, CardEnglish, PrintDesign, PrintDesignDetailView, Prin
   HrEmployee, HrEmployeeView, HrSettings, HrTask, HrTerms,
   AttClose, AttDay, AttPeriod, AttPunchKind, AttTotals, LeaveBalance, LeaveGrant, LeaveTake,
   HrFamilyMember, HrPayrollProfile, HrStandardPay, PayRun, PaySlip, PayCheck, HrNoticeSettings, HrDeadline, PayAdjustment, BonusPlan,
-  YeaDeclaration, YeaDeclarationView, YeaResult, SocialDetermination, SocialEvent, InsuranceEligibility, LaborInsuranceData, LaborInsuranceView, ShiftView, HrShiftSettings, HrShift,
+  YeaDeclaration, YeaDeclarationView, YeaResult, SocialDetermination, SocialEvent, InsuranceEligibility, LaborInsuranceData, LaborInsuranceView, ShiftView, HrShiftSettings, HrShift, HrAnnualSettings, HrFlexSettings, HrTerminalSettings,
   InventoryCount, InventoryCountRow, InventoryCountScope, InventoryCountView, InventorySupplier,
   InventoryBooking, InventoryBookingMapping, InventoryBookingSource, InventoryPublication, InventoryPublicationScope, InventoryPublicSnapshot,
   SignageAsset, SignageBand, SignageEntry, SignageScreen, SignageSettings, SignageInterruptInput, SignageInterruptView, SignagePhrase, SignageSound, SignageSource,
@@ -347,6 +347,16 @@ export interface MyHrView {
   leave: Omit<LeaveBalance, 'grants'> & { grants: LeaveBalance['grants']; takes: LeaveTake[] };
   halfDay: boolean;
   closed: boolean;
+  /** 共有の端末で、名前と番号で打刻できる会社か（仕様書 第30.6.3節）。 */
+  pinAllowed?: boolean;
+}
+
+/** 1 年単位の変形労働時間制・フレックスタイム制・共有の端末の会社の決まりと、登録した端末（仕様書 第30.6.3節）。 */
+export interface WorkSystemsView {
+  annual: HrAnnualSettings;
+  flex: HrFlexSettings;
+  terminal: HrTerminalSettings;
+  terminals: { id: string; name: string; lastSeenAt: string | null; registeredAt: string }[];
 }
 
 /** 従業員の取り込みの結果（仕様書 第30.5節）。 */
@@ -524,6 +534,22 @@ export interface CardDetail {
   /** 自分がこの人に送ったまとめてのメール（仕様書 第27.9.1節）。 */
   bulkMails: { bulkMailId: string; subject: string; sentAt: string }[];
   canManage: boolean;
+  /** 本人の Google の連絡先に入れたか（仕様書 第27.15節）。`gone` は Google の側で消されていたもの。 */
+  google: { pushedAt: string; gone: boolean } | null;
+}
+
+/** 本人の Google の連絡先へのつなぎの状態（仕様書 第27.15節）。 */
+export interface CardsGoogle {
+  connected: boolean;
+  granted: boolean;
+  auto: boolean;
+}
+
+/** Google の連絡先に入れた結果。 */
+export interface CardsGooglePush {
+  added: number;
+  updated: number;
+  failed: { contactId: string; reason: string }[];
 }
 
 /** 会った日の本人の予定。 */
@@ -1287,6 +1313,14 @@ export const api = {
      * @returns 画像。見られなければ `null`
      */
     image: (cardId: string, side: 'front' | 'back') => fetchBlob(`/cards/card/${encodeURIComponent(cardId)}/${side}`),
+    /** 本人の Google の連絡先へのつなぎの状態（第27.15節）。名刺管理を使えなければ 403。 */
+    google: () => call<CardsGoogle>('/cards/google'),
+    /** 自分が取り込んだ名刺を自動で Google の連絡先に入れるか。 */
+    setGoogleAuto: (auto: boolean) => call<{ ok: true }>('/cards/google', { method: 'PUT', body: JSON.stringify({ auto }) }),
+    /** 名刺を Google の連絡先に入れる。許可が無ければ 409（`body.needsConsent`）。 */
+    pushGoogle: (contactIds: string[]) => call<CardsGooglePush>('/cards/google/push', { method: 'POST', body: JSON.stringify({ contactIds }) }),
+    /** Google の連絡先から外す（M2Office の名刺は消さない）。 */
+    removeGoogle: (id: string) => call<{ ok: true }>(`/cards/${encodeURIComponent(id)}/google`, { method: 'DELETE' }),
     /** vCard を保存する（1 件）。 */
     downloadVCard: async (id: string, name: string) => {
       const blob = await fetchBlob(`/cards/${encodeURIComponent(id)}/vcard`);
@@ -1939,6 +1973,12 @@ export const api = {
       shiftCell: (month: string, employeeId: string, date: string, patternId: string | null) =>
         call<ShiftView>('/hr/shifts/cell', { method: 'PUT', body: JSON.stringify({ month, employeeId, date, patternId }) }),
       shiftPublish: (month: string) => call<ShiftView>('/hr/shifts/publish', { method: 'POST', body: JSON.stringify({ month }) }),
+      /** 1 年単位の変形労働時間制・フレックスタイム制・共有の端末（仕様書 第30.6.3節）。 */
+      workSystems: () => call<WorkSystemsView>('/hr/work-systems'),
+      saveWorkSystems: (patch: { annual?: Partial<HrAnnualSettings>; flex?: Partial<HrFlexSettings>; terminal?: Partial<HrTerminalSettings> }) =>
+        call<Pick<WorkSystemsView, 'annual' | 'flex' | 'terminal'>>('/hr/work-systems', { method: 'PUT', body: JSON.stringify(patch) }),
+      claimTerminal: (code: string, name: string) => call<{ terminal: WorkSystemsView['terminals'][number] }>('/hr/terminals', { method: 'POST', body: JSON.stringify({ code, name }) }),
+      removeTerminal: (id: string) => call<{ ok: true }>(`/hr/terminals/${encodeURIComponent(id)}`, { method: 'DELETE' }),
       /** 労働保険の年度更新（仕様書 第30.13.1節）。 */
       labor: (year: number) => call<LaborInsuranceView>(`/hr/labor-insurance?year=${year}`),
       laborSave: (year: number, patch: Partial<LaborInsuranceData>) => call<LaborInsuranceView>('/hr/labor-insurance', { method: 'PUT', body: JSON.stringify({ year, ...patch }) }),
@@ -1997,6 +2037,12 @@ export const api = {
   myHr: {
     get: (month?: string) => call<MyHrView>(`/me/hr${month ? `?month=${month}` : ''}`),
     punch: (kind: AttPunchKind, source: 'screen' | 'mobile' = 'screen') => call<{ punch: { at: string } }>('/me/hr/punch', { method: 'POST', body: JSON.stringify({ kind, source }) }),
+    /** 共有の端末の QR を読んで打刻する（仕様書 第30.6.3節）。QR の期限が切れていれば 410。 */
+    terminalPunch: (kind: AttPunchKind, terminal: string) => call<{ punch: { at: string }; terminal: { name: string } }>('/me/hr/punch', { method: 'POST', body: JSON.stringify({ kind, terminal }) }),
+    /** 読んだ QR の端末の名前と、今の打刻の状態。 */
+    terminal: (t: string) => call<{ terminal: { name: string }; state: MyHrView['state'] }>(`/me/hr/terminal?t=${encodeURIComponent(t)}`),
+    /** 共有の端末で、名前と番号で打刻するときの番号を決める（4 桁）。 */
+    setPin: (pin: string) => call<{ ok: true }>('/me/hr/pin', { method: 'PUT', body: JSON.stringify({ pin }) }),
     fixDay: (date: string, fix: DayFixInput) => call<{ day: AttDay }>(`/me/hr/days/${date}`, { method: 'PUT', body: JSON.stringify(fix) }),
     leave: (date: string, days: number) => call<{ remaining: number }>('/me/hr/leave', { method: 'POST', body: JSON.stringify({ date, days }) }),
     cancelLeave: (id: string) => call<{ ok: true }>(`/me/hr/leave/${encodeURIComponent(id)}`, { method: 'DELETE' }),
@@ -2053,7 +2099,12 @@ export const api = {
   }[] }>('/me/sessions'),
   revokeSession: (id: string) => call(`/me/sessions/${id}`, { method: 'DELETE' }),
   myGoogle: () => call<MyGoogle>('/me/google'),
-  connectGoogle: () => call<{ url: string }>('/me/google/connect', { method: 'POST' }),
+  /**
+   * Google と接続する（同意の画面の URL を返す）。`extra` は使う人だけに求める権限（`contacts`。仕様書 第27.15節）、
+   * `back` は戻る画面（`/cards` か `/cards/<ID>`）。
+   */
+  connectGoogle: (opts: { extra?: string[]; back?: string } = {}) =>
+    call<{ url: string }>('/me/google/connect', { method: 'POST', body: JSON.stringify(opts) }),
   checkGoogle: () => call<{ ok: boolean; error?: string }>('/me/google/check', { method: 'POST' }),
   disconnectGoogle: () => call<{ ok: true; revokedAtGoogle: boolean; stoppedRuns: number; purgedRuns: number }>('/me/google', { method: 'DELETE' }),
   /** 取り消すと止まる業務と、飛ばす定時実行の数（仕様書 第6.5.2.1節）。 */
@@ -2198,6 +2249,8 @@ export const api = {
     knowledge: () => call<{
       items: KnowledgeItemView[]; compartments: { id: string; name: string; description: string | null }[];
       consolidated: ConsolidationView | null;
+      /** 意味での検索の準備（埋め込みを作り終えた節の数。仕様書 第11.7.6.1節）。使えないデータベースでは `null`。 */
+      semantic: { ready: number; total: number } | null;
     }>('/admin/knowledge'),
     /** 登録・直す。社内規程は版を残し、施行日（`effectiveFrom`）が先なら施行日まで前の版で答える（仕様書 第11.11.2節）。 */
     saveKnowledge: (id: string | 'new', item: { title: string; body: string; source: string; compartment: string | null; effectiveFrom?: string | null }) =>

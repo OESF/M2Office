@@ -6,7 +6,7 @@
  */
 
 import pg from 'pg';
-import type { HrEmployee, HrTask, HrTerms } from '@m2office/shared';
+import { isHrSchedule, type HrEmployee, type HrTask, type HrTerms } from '@m2office/shared';
 
 /** 従業員を保存するときの値（ID と更新の日時は置き場が持つ）。 */
 export type EmployeeRecord = Omit<HrEmployee, 'updatedAt'>;
@@ -87,7 +87,7 @@ const toTerms = (r: TermsRow): HrTerms => ({
   weeklyDays: num(r.weekly_days), startTime: r.start_time, endTime: r.end_time, breakMinutes: num(r.break_minutes),
   wageType: r.wage_type, wageAmount: num(r.wage_amount), allowances: Array.isArray(r.allowances) ? r.allowances : [],
   workplace: r.workplace, work: r.work, workplaceScope: r.workplace_scope, workScope: r.work_scope,
-  socialInsurance: r.social_insurance, employmentInsurance: r.employment_insurance, schedule: r.schedule === 'shift' ? 'shift' : 'fixed', createdAt: iso(r.created_at),
+  socialInsurance: r.social_insurance, employmentInsurance: r.employment_insurance, schedule: isHrSchedule(r.schedule) ? r.schedule : 'fixed', createdAt: iso(r.created_at),
 });
 
 interface TaskRow {
@@ -173,7 +173,7 @@ export class PostgresHrStore implements HrStore {
       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb,$17,$18,$19,$20,$21,$22,$23,$24,$25)`,
     [t.id, tenantId, t.employeeId, t.effectiveOn, t.contractStart, t.contractEnd, t.renewal, t.probationUntil, t.weeklyHours,
       t.weeklyDays, t.startTime, t.endTime, t.breakMinutes, t.wageType, t.wageAmount, JSON.stringify(t.allowances), t.workplace,
-      t.work, t.workplaceScope, t.workScope, t.socialInsurance, t.employmentInsurance, t.createdBy, t.renewalLimit ?? '', t.schedule === 'shift' ? 'shift' : 'fixed']);
+      t.work, t.workplaceScope, t.workScope, t.socialInsurance, t.employmentInsurance, t.createdBy, t.renewalLimit ?? '', isHrSchedule(t.schedule) ? t.schedule : 'fixed']);
   }
 
   async listTerms(tenantId: string, employeeId: string): Promise<HrTerms[]> {

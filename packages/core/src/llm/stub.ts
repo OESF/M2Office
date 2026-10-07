@@ -5,7 +5,7 @@
  */
 
 import type { EvalCase } from '@m2office/shared';
-import type { LlmExtractRequest, LlmProvider, LlmRequest, LlmResponse } from './provider.js';
+import { EMBEDDING_DIMENSIONS, type LlmEmbedRequest, type LlmEmbedResponse, type LlmExtractRequest, type LlmProvider, type LlmRequest, type LlmResponse } from './provider.js';
 
 /**
  * 自動テストのためのスタブ実装。
@@ -19,6 +19,19 @@ import type { LlmExtractRequest, LlmProvider, LlmRequest, LlmResponse } from './
  */
 export class StubLlmProvider implements LlmProvider {
   readonly name = 'stub';
+
+  /**
+   * 見本の埋め込み（知識の意味の検索の自動テスト。仕様書 第11.7.6.6節）。
+   *
+   * @remarks 推論は行わない。{@link STUB_EMBEDDING_CONCEPTS} の言い換えだけを近いとみなし、ほかは文字の組から作る弱い値にする
+   */
+  async embed(req: LlmEmbedRequest): Promise<LlmEmbedResponse> {
+    return {
+      vectors: req.items.map((x) => stubEmbedding(`${x.title ?? ''} ${x.text}`)),
+      model: 'stub:concepts-1',
+      inputTokens: req.items.reduce((n, x) => n + x.text.length, 0),
+    };
+  }
 
   /**
    * @param evalsFor 業務エージェントの評価のケース（自動テストの見本の応答を含む）を引く（仕様書 第12.9.4節）
@@ -463,4 +476,31 @@ function stubPlanning(system: string, user: string): string | null {
     return JSON.stringify({ steps, cannot: '' });
   }
   return null;
+}
+
+/**
+ * 見本の埋め込みが近いとみなす言い換えの組（自動テスト用）。言葉の検索では見つからない組を選んでいる。
+ */
+export const STUB_EMBEDDING_CONCEPTS: readonly (readonly string[])[] = [
+  ['育児のための休み', '子育ての休み', '育児休業'],
+  ['残業', '時間外労働'],
+  ['宿代', 'ホテル代', '宿泊費'],
+  ['休みは何日', '有休', '年次有給休暇'],
+  ['テレワーク', 'リモートワーク', '在宅勤務'],
+];
+
+/** 見本の埋め込み。言い換えの組ごとに 1 つの次元を持ち、文字の組を弱く散らす。長さ 1 にそろえる。 */
+export function stubEmbedding(text: string): number[] {
+  const v = new Array<number>(EMBEDDING_DIMENSIONS).fill(0);
+  const t = text.normalize('NFKC');
+  STUB_EMBEDDING_CONCEPTS.forEach((group, i) => { if (group.some((w) => t.includes(w))) v[i] = 1; });
+  const chars = [...t.replace(/\s+/g, '')];
+  for (let i = 0; i + 1 < chars.length; i++) {
+    let h = 0;
+    for (const c of chars[i]! + chars[i + 1]!) h = (h * 31 + c.codePointAt(0)!) >>> 0;
+    const at = STUB_EMBEDDING_CONCEPTS.length + (h % (EMBEDDING_DIMENSIONS - STUB_EMBEDDING_CONCEPTS.length));
+    v[at] = v[at]! + 0.05;
+  }
+  const norm = Math.hypot(...v) || 1;
+  return v.map((x) => x / norm);
 }

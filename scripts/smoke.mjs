@@ -4592,6 +4592,75 @@ console.log('\n■ 61. 人事・給与（内蔵の拡張。第30章、段 1: 台
     noticeForm.append('file', new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0])], { type: 'image/png' }), 'notice.png');
     const notice = await raw('/v1/hr/payroll/resident-tax/read', { method: 'POST', body: noticeForm });
     notice.status === 422 ? ok('住民税の決定通知書として読めないものは、給与の情報に入れない') : ng(`通知書でないものを受け付けた（${notice.status}）`);
+    // 1 年単位の変形労働時間制・フレックスタイム制・共有の端末（第30.6.3節、ADR-0085）
+    {
+      const ws = await call('a', '/v1/hr/work-systems', { method: 'PUT', body: JSON.stringify({ annual: { enabled: true, start: '2026-04-01', months: 12 }, flex: { enabled: true, months: 3 }, terminal: { pinAllowed: true } }) });
+      const ws2 = await call('a', '/v1/hr/work-systems', { method: 'PUT', body: JSON.stringify({ annual: { enabled: true, start: '2026-04-01', months: 12 }, flex: { enabled: true, months: 3, startMonth: '2026-04', core: { start: '10:00', end: '15:00' } }, terminal: { pinAllowed: true } }) });
+      const wsByMember = await call('a', '/v1/hr/work-systems', {}, 'member');
+      ws.status === 400 && ws2.status === 200 && ws2.body.annual?.enabled === true && ws2.body.flex?.core?.start === '10:00' && wsByMember.status === 403
+        ? ok('1 年単位・フレックスの決まりを人事区画の人が決める（清算期間が 1 か月を超えるときは起算の月が要る）')
+        : ng('働き方の決まりの保存が違う', JSON.stringify({ ws: ws.body, ws2: ws2.body, m: wsByMember.status }).slice(0, 400));
+      const flexTerms = await call('a', `/v1/hr/employees/${staffId}/terms`, { method: 'POST', body: JSON.stringify({ effectiveOn: new Date(Date.now() + 9 * 3_600_000).toISOString().slice(0, 10), wageAmount: 250000, wageType: 'monthly', schedule: 'flex', startTime: '09:00', endTime: '18:00', breakMinutes: 60 }) });
+      const { body: myFlex } = await call('a', '/v1/me/hr', {}, 'member');
+      flexTerms.status < 300 && myFlex.totals?.flex?.capMinutes > 0 && myFlex.totals.flex.periodStart <= myFlex.period.start && myFlex.totals.lateMinutes === 0
+        ? ok('フレックスタイム制の人は、清算期間のいまの時間と総枠を出し、遅刻・早退を数えない')
+        : ng('フレックスの集計が違う', JSON.stringify({ s: flexTerms.status, flex: myFlex.totals?.flex, period: myFlex.period }).slice(0, 400));
+
+      // 端末を登録する（番号は端末に出る。鍵は 1 度だけ渡す）
+      const tsecret = `t${tag}`.padEnd(40, 'x').replace(/[^A-Za-z0-9_-]/g, 'x');
+      const tfetch = (path, init = {}, tenant = 'a', key = null) => fetch(`${API}/v1/hr-terminal${path}`, {
+        ...init, headers: { 'content-type': 'application/json', 'x-tenant': tenant, ...(key ? { authorization: `Bearer ${key}` } : {}) },
+      });
+      const pair = await (await tfetch('/pairings', { method: 'POST', body: JSON.stringify({ secret: tsecret }) })).json();
+      const claimed = await call('a', '/v1/hr/terminals', { method: 'POST', body: JSON.stringify({ code: pair.code, name: `受付 ${tag}`.slice(0, 20) }) });
+      const claimByMember = await call('a', '/v1/hr/terminals', { method: 'POST', body: JSON.stringify({ code: pair.code }) }, 'member');
+      const polled = await (await tfetch('/pairings/poll', { method: 'POST', body: JSON.stringify({ secret: tsecret }) })).json();
+      const again = await (await tfetch('/pairings/poll', { method: 'POST', body: JSON.stringify({ secret: tsecret }) })).json();
+      const tkey = polled.key;
+      const tstate = await tfetch('/state', {}, 'a', tkey);
+      const tbody = await tstate.json();
+      const qrSvg = await tfetch('/qr.svg', {}, 'a', tkey);
+      const crossKey = await tfetch('/state', {}, 'b', tkey);
+      const noKey = await tfetch('/state');
+      claimed.status === 201 && claimByMember.status === 403 && polled.status === 'registered' && again.status === 'expired' && tstate.status === 200
+        && /\/m\/punch\?t=/.test(tbody.qrUrl ?? '') && (await qrSvg.text()).includes('<svg') && [401, 404].includes(crossKey.status) && noKey.status === 401
+        ? ok('共有の端末を番号で登録し、鍵は 1 度だけ渡す。鍵でその会社の打刻の QR だけを出す（ほかの会社では効かない）')
+        : ng('端末の登録が違う', JSON.stringify({ c: claimed.status, m: claimByMember.status, polled, again, s: tstate.status, cross: crossKey.status, nk: noKey.status }).slice(0, 400));
+
+      // 本人のスマホで QR を読んで打刻する（30 秒ごとに変わる印。どの端末で打ったかが残る）
+      const t = new URL(tbody.qrUrl).searchParams.get('t');
+      const info = await call('a', `/v1/me/hr/terminal?t=${encodeURIComponent(t)}`, {}, 'member');
+      const before = info.body.state?.state;
+      const kind = before === 'off' ? 'in' : before === 'break' ? 'break_end' : 'out';
+      const viaQr = await call('a', '/v1/me/hr/punch', { method: 'POST', body: JSON.stringify({ kind, terminal: t }) }, 'member');
+      const forged = await call('a', '/v1/me/hr/punch', { method: 'POST', body: JSON.stringify({ kind: 'in', terminal: `${t.slice(0, -2)}xx` }) }, 'member');
+      const rows = (await owner.query(`select source, terminal_id from att_punches where tenant_id = 't-alpha' and employee_id = $1 order by created_at desc limit 1`, [staffId])).rows;
+      info.status === 200 && viaQr.status === 201 && viaQr.body.terminal?.name?.startsWith('受付') && forged.status === 410 && rows[0]?.source === 'terminal' && rows[0]?.terminal_id === claimed.body.terminal?.id
+        ? ok('端末の QR を本人のスマホで読んで、本人のログインで打刻し、どの端末で打ったかを残す（印を変えたものは断る）')
+        : ng('QR での打刻が違う', JSON.stringify({ i: info.status, q: viaQr.body, f: forged.status, rows }).slice(0, 400));
+
+      // 名前と番号（会社が許したとき）。5 回間違えたら止め、担当者に知らせる
+      const setPin = await call('a', '/v1/me/hr/pin', { method: 'PUT', body: JSON.stringify({ pin: '1111' }) }, 'member');
+      const setPin2 = await call('a', '/v1/me/hr/pin', { method: 'PUT', body: JSON.stringify({ pin: '4826' }) }, 'member');
+      const people = (await (await tfetch('/state', {}, 'a', tkey)).json()).people ?? [];
+      const st = (await call('a', '/v1/me/hr', {}, 'member')).body.state?.state;
+      const pinKind = st === 'off' ? 'in' : st === 'break' ? 'break_end' : 'out';
+      const right = await tfetch('/pin-punch', { method: 'POST', body: JSON.stringify({ employeeId: staffId, pin: '4826', kind: pinKind }) }, 'a', tkey);
+      const wrongs = [];
+      for (let i = 0; i < 5; i++) wrongs.push((await tfetch('/pin-punch', { method: 'POST', body: JSON.stringify({ employeeId: staffId, pin: '0000', kind: 'in' }) }, 'a', tkey)).status);
+      const locked = await tfetch('/pin-punch', { method: 'POST', body: JSON.stringify({ employeeId: staffId, pin: '4826', kind: 'in' }) }, 'a', tkey);
+      const lockNote = (await owner.query(`select count(*)::int as n from notifications where tenant_id = 't-alpha' and kind = 'attendance' and title like '%打刻の番号%' and created_at >= $1`, [hrStartedAt])).rows[0].n;
+      setPin.status === 400 && setPin2.status === 200 && people.some((p) => p.employeeId === staffId) && right.status === 201
+        && wrongs.slice(0, 4).every((x) => x === 401) && wrongs[4] === 429 && locked.status === 429 && lockNote > 0
+        ? ok('名前と 4 桁の番号でも打てる（簡単な番号は断る）。5 回間違えたら 15 分止め、担当者に知らせる')
+        : ng('名前と番号の打刻が違う', JSON.stringify({ s1: setPin.status, s2: setPin2.status, people: people.length, r: right.status, wrongs, l: locked.status, lockNote }).slice(0, 400));
+
+      const removed = await call('a', `/v1/hr/terminals/${claimed.body.terminal?.id}`, { method: 'DELETE' });
+      const afterRemove = await tfetch('/state', {}, 'a', tkey);
+      const audits = (await owner.query(`select action from audit_events where tenant_id = 't-alpha' and action like 'hr.terminal.%' and occurred_at >= $1`, [hrStartedAt])).rows.map((r) => r.action);
+      removed.status === 200 && afterRemove.status === 401 && audits.includes('hr.terminal.register') && audits.includes('hr.terminal.remove')
+        ? ok('端末を外すと鍵はその場で効かなくなり、登録と外したことを監査ログに残す') : ng('端末を外せない', JSON.stringify({ r: removed.status, a: afterRemove.status, audits }));
+    }
   } catch (err) {
     ng('人事・給与の確認が途中で止まった', String(err));
   } finally {
@@ -4606,6 +4675,8 @@ console.log('\n■ 61. 人事・給与（内蔵の拡張。第30章、段 1: 台
     await owner.query(`delete from notifications where tenant_id = 't-alpha' and title like '給与%' and created_at >= $1`, [hrStartedAt]);
     await owner.query(`delete from notifications where tenant_id = 't-alpha' and title like '賞与の明細%' and created_at >= $1`, [hrStartedAt]);
     await owner.query(`delete from hr_employees where name like '${tag}%'`);
+    await owner.query(`delete from hr_terminals where tenant_id = 't-alpha' and registered_at >= $1`, [hrStartedAt]);
+    await owner.query(`delete from notifications where tenant_id = 't-alpha' and title like '%打刻の番号%' and created_at >= $1`, [hrStartedAt]);
     for (const r of saved) await owner.query(`update tenant_settings set hr = $2 where tenant_id = $1`, [r.tenant_id, r.hr ? JSON.stringify(r.hr) : null]);
     if (hrComp) {
       await call('a', `/v1/admin/compartments/${hrComp.id}/assignment`, { method: 'PUT', body: JSON.stringify({ groups: hrComp.groups, users: hrComp.users }) });
@@ -6976,6 +7047,108 @@ console.log('\n■ 87. ローカルの形の「機械」（管理者だけ・ク
   byMember.status === 403 && byAdmin.status === 404 && backup.status === 404 && me?.deployment === 'cloud'
     ? ok('「機械」は管理者だけが開け、クラウドの形では使わない（画面にも出さない）')
     : ng('「機械」の口が違う', JSON.stringify({ m: byMember.status, a: byAdmin.status, b: backup.status, d: me?.deployment }));
+}
+
+console.log('\n■ 88. 名刺を Google の連絡先に入れる（本人だけ・入れる・新しくする・外す・自動の入り切り・同意は使う人だけ。第27.15節、ADR-0084）');
+{
+  const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da6364f8ff0f0000050101005b1c4a1a0000000049454e44ae426082', 'hex');
+  const tag = Date.now().toString(36);
+  const img = (card) => Buffer.concat([PNG, Buffer.from(`\nM2O-CARD:${JSON.stringify({ isCard: true, cardCount: 1, cards: [{ lineFlow: 'left-to-right', ...card }] })}\n`, 'utf8')]);
+  let contactId = null;
+  try {
+    const form = new FormData();
+    form.append('file', new Blob([img({ side: 'front', name: `連絡 花子 ${tag}`, company: '株式会社レンラク', emails: [`hanako-${tag}@renraku.example`] })]), 'g.png');
+    await fetch(`${API}/v1/cards`, { method: 'POST', body: form, headers: { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' } });
+    for (let i = 0; i < 60 && !contactId; i++) {
+      contactId = (await call('a', `/v1/cards?q=${encodeURIComponent(`連絡 花子 ${tag}`)}`, {}, 'member')).body.items?.[0]?.id ?? null;
+      if (!contactId) await sleep(500);
+    }
+    if (!contactId) throw new Error('名刺を取り込めませんでした');
+    const status = (await call('a', '/v1/cards/google', {}, 'member')).body;
+    const pushed = await call('a', '/v1/cards/google/push', { method: 'POST', body: JSON.stringify({ contactIds: [contactId] }) }, 'member');
+    const again = await call('a', '/v1/cards/google/push', { method: 'POST', body: JSON.stringify({ contactIds: [contactId] }) }, 'member');
+    const mine = (await call('a', `/v1/cards/${contactId}`, {}, 'member')).body;
+    const byAdmin = (await call('a', `/v1/cards/${contactId}`)).body;
+    const removeByAdmin = await call('a', `/v1/cards/${contactId}/google`, { method: 'DELETE' });
+    status.granted === true && pushed.status === 200 && pushed.body.added === 1 && again.body.updated === 1 && mine.google && mine.google.gone === false
+      && byAdmin.google === null && removeByAdmin.status === 404
+      ? ok('名刺を本人の Google の連絡先に入れ、入れたものは新しくする（ほかの人には入れたかを見せず、外せない）')
+      : ng('Google の連絡先に入れられない', JSON.stringify({ status, pushed: pushed.body, again: again.body, mine: mine.google, admin: byAdmin.google, rm: removeByAdmin.status }).slice(0, 400));
+
+    const other = await call('b', '/v1/cards/google/push', { method: 'POST', body: JSON.stringify({ contactIds: [contactId] }) }, 'member');
+    const empty = await call('a', '/v1/cards/google/push', { method: 'POST', body: JSON.stringify({ contactIds: [] }) }, 'member');
+    other.body.added === 0 && other.body.failed?.[0]?.reason === '名刺が見つかりません' && empty.status === 400
+      ? ok('ほかの会社の名刺は入れられない（見つからない）') : ng('ほかの会社の名刺が入る', JSON.stringify({ other: other.body, empty: empty.status }));
+
+    const removed = await call('a', `/v1/cards/${contactId}/google`, { method: 'DELETE' }, 'member');
+    const after = (await call('a', `/v1/cards/${contactId}`, {}, 'member')).body;
+    removed.status === 200 && after.google === null && after.contact?.id === contactId
+      ? ok('「Google の連絡先から外す」で外せる（M2Office の名刺は残る）') : ng('外せない', JSON.stringify({ s: removed.status, g: after.google }));
+
+    const on = await call('a', '/v1/cards/google', { method: 'PUT', body: JSON.stringify({ auto: true }) }, 'member');
+    const onState = (await call('a', '/v1/cards/google', {}, 'member')).body;
+    const adminState = (await call('a', '/v1/cards/google')).body;
+    await call('a', '/v1/cards/google', { method: 'PUT', body: JSON.stringify({ auto: false }) }, 'member');
+    const offState = (await call('a', '/v1/cards/google', {}, 'member')).body;
+    on.status === 200 && onState.auto === true && adminState.auto === false && offState.auto === false
+      ? ok('「自分が受け取った名刺を Google の連絡先に入れる」は本人だけの設定（既定は切り）') : ng('自動の入り切りが違う', JSON.stringify({ onState, adminState, offState }));
+
+    // 同意は、使う人が使うときだけ求める（業務の権限の一覧には入れない。ほかの人の再同意は要らない）
+    const myGoogle = (await call('a', '/v1/me/google', {}, 'member')).body;
+    const connect = await call('a', '/v1/me/google/connect', { method: 'POST', body: JSON.stringify({ extra: ['contacts', 'drive'], back: '/cards' }) }, 'member');
+    const scopeOf = (url) => decodeURIComponent(new URL(url).searchParams.get('scope') ?? '');
+    const connectOk = connect.status === 409 || (connect.status === 200 && /auth\/contacts\b/.test(scopeOf(connect.body.url)) && !/auth\/drive\b/.test(scopeOf(connect.body.url)));
+    !(myGoogle.scopes ?? []).some((x) => x.scope === 'contacts') && myGoogle.needsReconnect !== true && connectOk
+      ? ok(`Google の連絡先の権限は、業務の権限に入れず、使う人が使うときだけ求める${connect.status === 409 ? '（この会社は Google の接続が未設定のため、同意の URL は確かめていない）' : ''}`)
+      : ng('連絡先の権限の求め方が違う', JSON.stringify({ scopes: myGoogle.scopes, connect: connect.status, url: connect.body?.url }).slice(0, 400));
+  } catch (err) {
+    ng('Google の連絡先の確認が途中で止まった', String(err));
+  } finally {
+    if (contactId) {
+      await call('a', `/v1/cards/${contactId}`, { method: 'DELETE' }, 'member');
+      await call('a', `/v1/cards/${contactId}/purge`, { method: 'DELETE' }, 'member');
+    }
+  }
+}
+
+console.log('\n■ 89. 知識の意味の検索（後から埋め込む・言い換えで見つける・見つけ方を示す・ほかの会社に出さない。第11.7.6節）');
+{
+  const tag = Date.now().toString(36);
+  const body = ['第1条（育児休業）', `従業員は、子が 2 歳になるまで育児休業を取得できる（${tag}）。`, '第2条（服装）', '社員は清潔な服装で勤務する。'].join('\n');
+  const { body: saved } = await call('a', '/v1/admin/knowledge/new', { method: 'PUT', body: JSON.stringify({ title: `見本の旅費規程 ${tag}`, body, source: '見本' }) });
+  try {
+    // ワーカーが後から埋め込む（保存を待たせない）。作り終えるまでは言葉の検索だけで見つかる
+    let semantic = null;
+    for (let i = 0; i < 60; i++) {
+      semantic = (await call('a', '/v1/admin/knowledge')).body.semantic;
+      if (semantic && semantic.ready === semantic.total) break;
+      await sleep(2000);
+    }
+    semantic && semantic.total > 0 && semantic.ready === semantic.total
+      ? ok(`知識を保存すると、ワーカーが後から節を埋め込み、準備の数を管理者ページに出す（${semantic.ready} / ${semantic.total} 節）`)
+      : ng('節が埋め込まれない', JSON.stringify(semantic));
+    const ask = async (question, tenant = 'a') => {
+      const { body: job } = await call(tenant, '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: 'knowledge-qa', input: { question } }) });
+      const run = await waitFor(tenant, job.runId, ['completed', 'failed']);
+      return run.steps.find((x) => x.stepId === 'search')?.output?.tools?.[0]?.result ?? {};
+    };
+    // 「子育ての休み」は「育児休業」と 2 文字の組が 1 つも重ならず、標準の言い換えにも無い（言葉の検索では見つからない）
+    const r = await ask('子育ての休みはいつまで？');
+    const hit = (r.hits ?? []).find((h) => h.body.includes(tag));
+    hit && hit.heading === '第1条（育児休業）' && hit.foundBy === '言い換えで見つけました' && !(r.hits ?? []).some((h) => h.heading === '第2条（服装）' && h.title.includes(tag))
+      ? ok('言葉の合わない言い換え（「子育ての休み」→「育児休業」）でも、意味で条を見つけ、「言い換えで見つけました」と示す')
+      : ng('意味で見つからない', JSON.stringify(r).slice(0, 400));
+    const rb = await ask('子育ての休みはいつまで？', 'b');
+    !(rb.hits ?? []).some((h) => h.body.includes(tag)) ? ok('意味での検索も、ほかの会社の知識を返さない') : ng('ほかの会社の知識が出る');
+  } catch (err) {
+    ng('意味の検索の確認が途中で止まった', String(err));
+  } finally {
+    const { default: pgc } = await import('pg');
+    const db = new pgc.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+    await db.connect();
+    if (saved?.id) await db.query(`delete from knowledge_items where id = $1`, [saved.id]);
+    await db.end();
+  }
 }
 
 console.log('');

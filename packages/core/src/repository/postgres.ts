@@ -13,9 +13,10 @@ import type {
   StoredFile, Tenant, TenantSettings, User, UserGroup, GroupChatSpace, UserSettings,
 } from '@m2office/shared';
 import { DEFAULT_TENANT_SETTINGS, DEFAULT_USER_SETTINGS, STANDARD_SYNONYMS } from '@m2office/shared';
-import type { AgentEvent, Plan, PlanStep, DecidedApproval, AuditQuery, CompartmentAssignment, Conversation, ConversationDigest, MemoryCandidate, Promotion, CredentialKind, GoogleConnection, UserPhoto, TenantCredential, TenantConnection, ConnectionSecret, UserConnection, DisabledConnectorTool, InstalledExtension, PrivateExtension, KnowledgeItem, KnowledgeSearchOptions, KnowledgeSearchResult, KnowledgeSectionView, KnowledgeStatus, KnowledgeVersion, Memory, Repository, RunStatRow } from './types.js';
+import type { AgentEvent, Plan, PlanStep, DecidedApproval, AuditQuery, CompartmentAssignment, Conversation, ConversationDigest, MemoryCandidate, Promotion, CredentialKind, GoogleConnection, UserPhoto, TenantCredential, TenantConnection, ConnectionSecret, UserConnection, DisabledConnectorTool, InstalledExtension, PrivateExtension, KnowledgeEmbedItem, KnowledgeEmbedStatus, KnowledgeItem, KnowledgeSearchOptions, KnowledgeSearchResult, KnowledgeSectionView, KnowledgeStatus, KnowledgeVersion, Memory, Repository, RunStatRow } from './types.js';
 import { SPLIT_VERSION, citationOf, splitKnowledge } from '../knowledge/sections.js';
-import { SEARCH_CANDIDATES, asksOldVersion, bigrams, expandTerms, extractTerms, normalizeForSearch, rankSections, rewritesOf } from '../knowledge/search.js';
+import { FUSION_DEPTH, SEARCH_CANDIDATES, SEMANTIC_THRESHOLD, asksOldVersion, bigrams, expandTerms, extractTerms, fuseRankings, limitSections, normalizeForSearch, orderSections, rankSections, rewritesOf } from '../knowledge/search.js';
+import { createHash } from 'node:crypto';
 
 /** 日本時間の今日（`YYYY-MM-DD`）。社内規程の施行日で版を切り替えるのに使う（第11.11.2節）。 */
 const jstToday = (now = new Date()) => new Date(now.getTime() + 9 * 3_600_000).toISOString().slice(0, 10);
@@ -543,10 +544,10 @@ export class PostgresRepository implements Repository {
     ]);
     const patterns = [...new Set(concepts.flatMap((c) => c.alternatives.flatMap(bigrams)))].map((g) => `%${escapeLike(g)}%`);
     const rows = await this.q<{
-      id: string; title: string; heading: string; path: string[]; body: string; source: string;
+      id: string; ordinal: number; title: string; heading: string; path: string[]; body: string; source: string;
       compartment: string | null; updatedAt: string; category: 'rule' | 'minutes' | 'learned';
     }>(tenantId,
-      `select s.item_id as id, k.title, s.heading, s.path, s.body, k.source, s.compartment,
+      `select s.item_id as id, s.ordinal, k.title, s.heading, s.path, s.body, k.source, s.compartment,
               k.updated_at as "updatedAt", k.category
          from knowledge_sections s
          join knowledge_items k on k.id = s.item_id and k.tenant_id = s.tenant_id
@@ -560,10 +561,16 @@ export class PostgresRepository implements Repository {
         limit $4`,
       [tenantId, patterns, compartment, SEARCH_CANDIDATES, opts.categories ?? null],
     );
-    const ranked = rankSections(concepts, rows);
+    const ordered = orderSections(concepts, rows);
+    // 意味での検索（第11.7.6節）。埋め込んだ節があり、質問を埋め込めたときだけ、言葉の検索と順位の融合で合わせる
+    const meaning = opts.embed ? await this.searchByMeaning(tenantId, query, compartment, opts) : null;
+    const ranked = meaning
+      ? limitSections(fuseRankings(ordered.slice(0, FUSION_DEPTH), meaning, (x) => `${x.id}#${x.ordinal}`))
+      : limitSections(ordered).map((r) => ({ ...r, matchedBy: undefined }));
     const hits: KnowledgeSearchResult['hits'] = ranked.map((r) => ({
       id: r.id, title: r.title, heading: r.heading, path: r.path, citation: citationOf(r.title, r),
       body: r.body, source: r.source, compartment: r.compartment, score: Math.round(r.score * 100) / 100, category: r.category,
+      ...(r.matchedBy ? { matchedBy: r.matchedBy } : {}),
     }));
     // 改定前の規程を尋ねられたら、古い版からも探し、版と施行日を添える（第11.11.2節）
     if (asksOldVersion(query) && (!opts.categories || opts.categories.includes('rule'))) {
@@ -572,7 +579,102 @@ export class PostgresRepository implements Repository {
     if (opts.touch !== false && hits.length > 0) {
       await this.touchKnowledge(tenantId, [...new Set(hits.filter((h) => !h.oldVersion).map((h) => h.id))], new Date().toISOString()).catch(() => undefined);
     }
-    return { hits, rewrites: rewritesOf(concepts, ranked) };
+    return { hits, rewrites: rewritesOf(concepts, ranked.filter((r) => r.matchedBy !== 'meaning')) };
+  }
+
+  /** データベースに埋め込みの列があるか（pgvector があるときだけ作る。移行 109）。一度だけ確かめる。 */
+  private vectorReady: Promise<boolean> | null = null;
+  private hasVectors(): Promise<boolean> {
+    this.vectorReady ??= this.pool.query<{ ok: boolean }>(
+      `select exists (select 1 from information_schema.columns where table_name = 'knowledge_sections' and column_name = 'embedding') as ok`,
+    ).then((r) => !!r.rows[0]?.ok).catch(() => { this.vectorReady = null; return false; });
+    return this.vectorReady;
+  }
+
+  /**
+   * 意味での検索（第11.7.6.2節）。会社と区画で絞ってから、その会社の節をすべて比べる（近似の索引は使わない）。
+   *
+   * @returns 類似度がしきい値以上の上位 20 節（類似度の高い順）。使えないとき（列が無い・埋め込んだ節が無い・質問を埋め込めない）は `null`
+   */
+  private async searchByMeaning(
+    tenantId: string, query: string, compartment: string | null, opts: KnowledgeSearchOptions,
+  ) {
+    if (!opts.embed || !(await this.hasVectors())) return null;
+    const any = await this.q<{ n: number }>(tenantId,
+      `select count(*)::int as n from knowledge_sections where tenant_id = $1 and embedding is not null`, [tenantId]);
+    if (!any[0]?.n) return null;
+    const q = await opts.embed(query).catch(() => null);
+    if (!q) return null;
+    const rows = await this.q<{
+      id: string; ordinal: number; title: string; heading: string; path: string[]; body: string; source: string;
+      compartment: string | null; updatedAt: string; category: 'rule' | 'minutes' | 'learned'; similarity: number;
+    }>(tenantId,
+      `select s.item_id as id, s.ordinal, k.title, s.heading, s.path, s.body, k.source, s.compartment,
+              k.updated_at as "updatedAt", k.category, 1 - (s.embedding <=> $2::vector) as similarity
+         from knowledge_sections s
+         join knowledge_items k on k.id = s.item_id and k.tenant_id = s.tenant_id
+        where s.tenant_id = $1
+          and k.status = 'active'
+          and ($5::text[] is null or k.category = any($5::text[]))
+          and (s.compartment is null or s.compartment = $3)
+          and s.embedding is not null and s.embedding_model = $4
+        order by s.embedding <=> $2::vector
+        limit $6`,
+      [tenantId, `[${q.vector.join(',')}]`, compartment, q.model, opts.categories ?? null, FUSION_DEPTH]);
+    return rows.filter((r) => r.similarity >= SEMANTIC_THRESHOLD).map((r) => ({ ...r, score: Math.round(r.similarity * 100) / 100 }));
+  }
+
+  async knowledgeEmbedPending(tenantId: string, limit: number): Promise<KnowledgeEmbedItem[]> {
+    if (!(await this.hasVectors())) return [];
+    const rows = await this.q<{ itemId: string; ordinal: number; title: string; path: string[]; heading: string; body: string }>(tenantId,
+      `select s.item_id as "itemId", s.ordinal, k.title, s.path, s.heading, s.body
+         from knowledge_sections s join knowledge_items k on k.id = s.item_id and k.tenant_id = s.tenant_id
+        where s.tenant_id = $1 and k.status = 'active' and s.embedded_at is null and s.embed_attempts < 5
+          and (s.embed_after is null or s.embed_after <= now())
+        order by k.updated_at desc, s.ordinal limit $2`,
+      [tenantId, limit]);
+    return rows.map((r) => ({ itemId: r.itemId, ordinal: r.ordinal, title: citationOf(r.title, r), body: r.body }));
+  }
+
+  async saveKnowledgeEmbeddings(tenantId: string, rows: { itemId: string; ordinal: number; vector: number[] }[], model: string): Promise<void> {
+    if (rows.length === 0 || !(await this.hasVectors())) return;
+    await this.q(tenantId,
+      `update knowledge_sections s set embedding = t.v::vector, embedding_model = $2, embedded_at = now(), embed_after = null
+         from jsonb_to_recordset($3::jsonb) as t(item_id text, ordinal int, v text)
+        where s.tenant_id = $1 and s.item_id = t.item_id and s.ordinal = t.ordinal`,
+      [tenantId, model, JSON.stringify(rows.map((r) => ({ item_id: r.itemId, ordinal: r.ordinal, v: `[${r.vector.join(',')}]` })))]);
+  }
+
+  async failKnowledgeEmbeddings(tenantId: string, keys: { itemId: string; ordinal: number }[], retryAt: string): Promise<void> {
+    if (keys.length === 0) return;
+    await this.q(tenantId,
+      `update knowledge_sections s set embed_attempts = s.embed_attempts + 1, embed_after = $2
+         from jsonb_to_recordset($3::jsonb) as t(item_id text, ordinal int)
+        where s.tenant_id = $1 and s.item_id = t.item_id and s.ordinal = t.ordinal`,
+      [tenantId, retryAt, JSON.stringify(keys.map((k) => ({ item_id: k.itemId, ordinal: k.ordinal })))]);
+  }
+
+  async resetKnowledgeEmbeddings(tenantId: string, model: string, limit: number): Promise<number> {
+    if (!(await this.hasVectors())) return 0;
+    const rows = await this.q<{ n: number }>(tenantId,
+      `with x as (
+         update knowledge_sections set embedding = null, embedding_model = null, embedded_at = null, embed_attempts = 0, embed_after = null
+          where tenant_id = $1 and (item_id, ordinal) in (
+            select item_id, ordinal from knowledge_sections
+             where tenant_id = $1 and embedded_at is not null and embedding_model is distinct from $2 limit $3)
+         returning 1)
+       select count(*)::int as n from x`,
+      [tenantId, model, limit]);
+    return rows[0]?.n ?? 0;
+  }
+
+  async knowledgeEmbedStatus(tenantId: string): Promise<KnowledgeEmbedStatus> {
+    const available = await this.hasVectors();
+    const rows = await this.q<{ total: number; ready: number }>(tenantId,
+      `select count(*)::int as total, count(s.embedded_at)::int as ready
+         from knowledge_sections s join knowledge_items k on k.id = s.item_id and k.tenant_id = s.tenant_id
+        where s.tenant_id = $1 and k.status = 'active'`, [tenantId]);
+    return { available, total: rows[0]?.total ?? 0, ready: available ? rows[0]?.ready ?? 0 : 0 };
   }
 
   /** 社内規程の古い版の節から探す（改定前を尋ねられたとき）。古い版は節に分けて持たないため、ここで分ける。 */
@@ -643,18 +745,31 @@ export class PostgresRepository implements Repository {
     k: { id: string; title: string; body: string; compartment: string | null },
   ): Promise<void> {
     const sections = splitKnowledge(k.body);
+    // 本文（題名と見出しの経路を含む）が変わらない節は、前の埋め込みを使い回す（第11.7.6.1節「作り直しを減らす」）
+    const vectors = await this.hasVectors();
+    const kept = vectors ? (await client.query<{ h: string; e: string; m: string; at: string }>(
+      `select body_hash as h, embedding::text as e, embedding_model as m, embedded_at as at from knowledge_sections
+        where tenant_id = $1 and item_id = $2 and embedding is not null and body_hash is not null`, [tenantId, k.id])).rows : [];
     await client.query(`delete from knowledge_sections where tenant_id = $1 and item_id = $2`, [tenantId, k.id]);
     if (sections.length > 0) {
       await client.query(
-        `insert into knowledge_sections (tenant_id, item_id, ordinal, heading, path, body, search_text, compartment)
+        `insert into knowledge_sections (tenant_id, item_id, ordinal, heading, path, body, search_text, compartment, body_hash)
          select $1, $2, t.ordinal, t.heading, array(select jsonb_array_elements_text(t.path)),
-                t.body, t.search_text, $3
+                t.body, t.search_text, $3, t.body_hash
            from jsonb_to_recordset($4::jsonb)
-             as t(ordinal int, heading text, path jsonb, body text, search_text text)`,
+             as t(ordinal int, heading text, path jsonb, body text, search_text text, body_hash text)`,
         [tenantId, k.id, k.compartment, JSON.stringify(sections.map((x) => ({
           ...x, search_text: normalizeForSearch([...x.path, x.heading, x.body].join('\n')),
+          body_hash: createHash('sha256').update(`${citationOf(k.title, x)}\n${x.body}`).digest('hex'),
         })))],
       );
+      if (kept.length > 0) {
+        await client.query(
+          `update knowledge_sections s set embedding = t.e::vector, embedding_model = t.m, embedded_at = t.at
+             from jsonb_to_recordset($3::jsonb) as t(h text, e text, m text, at timestamptz)
+            where s.tenant_id = $1 and s.item_id = $2 and s.body_hash = t.h`,
+          [tenantId, k.id, JSON.stringify(kept)]);
+      }
     }
     await client.query(`update knowledge_items set split_version = $3 where tenant_id = $1 and id = $2`,
       [tenantId, k.id, SPLIT_VERSION]);
@@ -932,6 +1047,9 @@ export class PostgresRepository implements Repository {
         insurance: { ...d.hr.insurance, ...(r?.hr?.insurance ?? {}) },
         labor: { ...d.hr.labor, ...(r?.hr?.labor ?? {}) },
         shift: { ...d.hr.shift, ...(r?.hr?.shift ?? {}) },
+        annual: { ...d.hr.annual, ...(r?.hr?.annual ?? {}) },
+        flex: { ...d.hr.flex, ...(r?.hr?.flex ?? {}) },
+        terminal: { ...d.hr.terminal, ...(r?.hr?.terminal ?? {}) },
       },
       signage: { ...d.signage, ...(r?.signage ?? {}) },
       aiPolicy: { ...d.aiPolicy, ...(r?.ai_policy ?? {}) },

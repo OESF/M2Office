@@ -205,6 +205,11 @@ export function calcSlip(input: SlipInput): SlipResult {
     pay('late', '遅刻早退控除', -round(unit * lateEarly / 60), { 単価: unitText, 遅刻と早退: hours(lateEarly) });
   }
 
+  // フレックスタイム制で総枠に足りない時間を差し引く（会社の決まりが「差し引く」か、総枠の中で繰り越せない分。第30.6.3節）。時給の人は実労働で払うので引かない
+  if (!hourly && (totals.flexShortMinutes ?? 0) > 0) {
+    pay('flex-short', '不足時間の控除', -round(unit * totals.flexShortMinutes! / 60), { 単価: unitText, 足りない時間: hours(totals.flexShortMinutes!) });
+  }
+
   // 調整の行（一回だけの支給と控除。社会保険の報酬には入れない）
   const adj = adjustmentLines(input.adjustments ?? []);
   lines.push(...adj.pays);

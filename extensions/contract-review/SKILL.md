@@ -3,11 +3,11 @@ name: contract-review
 description: 契約書（NDA・売買・業務委託・建物の賃貸借・ライセンス・利用規約など）を読み、概要・注意したい点・修正の案・相手に確かめること・交渉の進め方の案を平易にまとめる。前の版を渡せば、相手の修正版で変わったところも挙げる。結ぶかどうかの判断はしない
 when_to_use: 契約書のファイルを渡されて「チェックして」「この NDA 大丈夫？」「不利なところはある？」と頼まれたとき。相手から修正版が戻ってきて「前の版と比べて」と頼まれたとき
 argument-hint: 損害賠償が心配。来月から取引を始める新しい取引先
-allowed-tools: file.read_text file.compare pdf.extract knowledge.search docx.render
+allowed-tools: file.read_text file.compare pdf.extract knowledge.search docx.render docx.redline
 effort: xhigh
 metadata:
   author: M2Office
-  version: "1.2.0"
+  version: "1.3.0"
   m2office-id: jp.m2office.legal.contract-review
   m2office-private: "true"
   m2office-inputs: |
@@ -56,10 +56,12 @@ metadata:
    - 利用規約（クラウド・インターネットのサービスを使う）: [reference/terms.md](reference/terms.md)
    - 2 つにまたがる契約（開発の委託に成果物のライセンスが付く、など）は、主な方を開き、もう一方の観点は common.md で補う
    - 「秘密保持契約」という題でも、代金・独占・納品などの取引の条件が入っていれば、NDA の点検ではなく契約全体の点検にし、そのことを冒頭に書く
+   - **長い契約書**: `file.read_text` が `parts`（2 以上）と `outline`（条の見出しとその部分の番号）を返したら、2 段で読む。1 段目に、`outline` から損害賠償・責任の上限・解除・知的財産・支払い・秘密保持・競業・準拠法と裁判所・自動更新の条のある部分を `part` を変えて読む。2 段目に、まだ読んでいない部分を番号の順に読む。読めなかった部分（時間や量の上限で）は、冒頭の「読めた範囲」に条の番号で書く
 3. **全文を読んでから**、条項を 1 つずつ点検する。条項は互いに効き合うので、1 つの条だけで決めない（例: 補償の条に上限が無くても、損害賠償の上限の条で抑えられていることがある）
 4. 一般に入る条項の抜けを探す
 5. `docx.render` を 1 回呼び、下の「結果の形」と同じ中身を Word にする（`title` は「契約書チェック：〈契約の題名〉」。`blocks` は見出しを `{ "heading": "…", "level": 1 }`・`{ "heading": "…", "level": 2 }`、本文を `{ "text": "…" }` で並べる）
-6. 最後に、下の「結果の形」のとおりの Markdown を答えとして書く。**ツールを呼んだだけで終えない**
+6. 修正の案が 1 つ以上あれば、`docx.redline` を 1 回呼び、修正の案を元の契約書に変更履歴として入れた Word を作る（`fileId` は契約書の欄の値。`edits` は修正の案ごとに `{ "before": 元の文, "after": 直した文, "reason": 修正の理由 }`。`before` は**元の契約書の文をそのまま書き写す**（言い換えない。1 つの段落の中の範囲にする））。ツールが「変更履歴にできなかった修正の案」の数を返したら、結果の「次にすること」に、その分は手で直す必要があると書く
+7. 最後に、下の「結果の形」のとおりの Markdown を答えとして書く。**ツールを呼んだだけで終えない**
 
 ## 自社の立場の見分け方
 

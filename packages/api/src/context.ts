@@ -8,6 +8,7 @@
  * @see ADR-0003 外部接続の手前に接続口を設ける
  */
 
+import { createHash } from 'node:crypto';
 import {
   HelpFeedback, PostgresHelpFeedbackStore, PostgresHelpNoteStore, noteText, type HelpNoteStore,
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS, GoogleDataRetention, GoogleRevocation, agentUsesGoogle,
@@ -15,7 +16,7 @@ import {
   createLoggerFromEnv, HelpCatalog, BufferedHealthSink, PostgresHealthStore, installHealthSink, type HealthStore, parseArticle, parseManual, ExtensionHub, HttpMcpClient, loadExtensions,
   TenantAiResolver, platformAi, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, ConnectionCredentials, type ConnectionAuthProvider,
-  CardService, PostgresContactStore, cardsAccess, type ContactStore, BulkMailService, PostgresBulkMailStore, NoticeService, PostgresNoticeStore,
+  CardService, PostgresContactStore, cardsAccess, type ContactStore, GoogleContactsService, TerminalService, PostgresTerminalStore, BulkMailService, PostgresBulkMailStore, NoticeService, PostgresNoticeStore,
   InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, JanLookupService, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, InquiryService, PostgresInquiryStore, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, CanvaService, HttpCanvaApi, MockCanvaApi, PostgresCanvaConnectionStore, MEMBER_LINE_SEND, LineApiVerifier, MockLineVerifier, JGrantsApi, MockJGrants, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, WEB_REVIEW_REQUEST, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, webColumnsAccess, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, WEB_COLUMN_SIGNAGE_PUBLISH, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, applyStockChanges, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
   type SecretBox, type GeminiModels,
   type FileStore, type TenantExtensions, type HelpArticle, type ManualMeta, type LlmProvider, type Logger, type Repository, type WorkspaceConnector, aiUsageMeterFromEnv, setEnqueueAiGuard, appPath
@@ -109,6 +110,8 @@ export interface AppDeps {
     service: CardService; store: ContactStore; access(tenantId: string, userId: string): Promise<{ defaultScope: ContactScope } | null>;
     /** まとめてのメール（第27.9.1節）。 */
     bulk: BulkMailService;
+    /** 本人の Google の連絡先へのつなぎ（第27.15節）。 */
+    google: GoogleContactsService;
   };
   /** 社内のお知らせ（仕様書 第10.15節）。画面の API・秘書・朝のブリーフが同じものを使う。 */
   notices: NoticeService;
@@ -229,6 +232,8 @@ export interface AppDeps {
     labor: LaborInsuranceService;
     /** シフト（第30.6.2節）。 */
     shifts: ShiftService;
+    /** 共有の端末での打刻（第30.6.3節）。 */
+    terminals: TerminalService;
     /** 帳簿をまとめて書き出す（解約のときに渡す。第30.17節・ADR-0054）。 */
     books: HrBooksExport;
     access(tenantId: string, userId: string): Promise<HrSettings | null>;
@@ -326,6 +331,8 @@ export function buildDeps(): AppDeps {
       // お知らせの作成のメールは窓口のアカウントから送る（第35.6.3節）
       mailbox: { repo, box, sourceFor: (tenantId) => connector.sourceFor(tenantId) },
     }),
+    // 本人の Google の連絡先へのつなぎ（第27.15節）
+    google: new GoogleContactsService({ store: contactStore, connector, repo, logger: log }),
   };
   // 社内のお知らせ（仕様書 第10.15節）
   const notices = new NoticeService({
@@ -785,6 +792,12 @@ export function buildDeps(): AppDeps {
       payroll, calendar: laborCalendar,
       social,
       shifts: new ShiftService({ store: shiftStore, hrStore: hrService.deps.store, repo }),
+      // QR の署名の鍵は、秘密の値の鍵から目的ごとに分けて作る（開発では固定の鍵）
+      terminals: new TerminalService({
+        store: new PostgresTerminalStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), repo,
+        secret: createHash('sha256').update(`hr-terminal-qr|${process.env['M2OFFICE_SECRET_KEY'] ?? 'development-only'}`).digest('hex'),
+        alertStaff: (tenantId, title, body) => attendance.alertStaff(tenantId, title, body),
+      }),
       labor, yea,
       books: new HrBooksExport({ service: hrService, attendance, payroll, yea, social: social.deps.store, labor, repo }),
     },

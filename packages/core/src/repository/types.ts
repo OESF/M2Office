@@ -100,6 +100,17 @@ export interface Repository {
     opts?: KnowledgeSearchOptions,
   ): Promise<KnowledgeSearchResult>;
 
+  /** 埋め込みを待つ節（まだ作っていない・やり直しの時刻を過ぎたもの。古い順。第11.7.6.1節）。pgvector が無ければ空。 */
+  knowledgeEmbedPending(tenantId: string, limit: number): Promise<KnowledgeEmbedItem[]>;
+  /** 作った埋め込みを保存する。 */
+  saveKnowledgeEmbeddings(tenantId: string, rows: { itemId: string; ordinal: number; vector: number[] }[], model: string): Promise<void>;
+  /** 埋め込みに失敗した節に、やり直しの時刻を付ける（5 回で諦め、言葉の検索だけで見つかる）。 */
+  failKnowledgeEmbeddings(tenantId: string, keys: { itemId: string; ordinal: number }[], retryAt: string): Promise<void>;
+  /** ほかのモデルで作った埋め込みを、作り直しの待ちに戻す（モデルを替えたとき）。戻した数を返す。 */
+  resetKnowledgeEmbeddings(tenantId: string, model: string, limit: number): Promise<number>;
+  /** 意味での検索の準備の状況。 */
+  knowledgeEmbedStatus(tenantId: string): Promise<KnowledgeEmbedStatus>;
+
   /** 本人宛の通知を保存する。宛先の決定はツール側で行う。 */
   createNotification(n: Notification): Promise<void>;
   /** 本人の通知を新しい順に返す。他人の通知は返さない。 */
@@ -545,6 +556,8 @@ export interface KnowledgeHit {
   category: KnowledgeCategory;
   /** 改定前の規程の版から見つけたとき、その版と施行日（第11.11.2節）。 */
   oldVersion?: { version: number; effectiveFrom: string };
+  /** 言葉で見つけたか、意味で見つけたか、両方か（第11.7.6.3節）。意味での検索を使わなかったときは無い。 */
+  matchedBy?: 'words' | 'meaning' | 'both';
 }
 
 /** 知識の種類（第11.11.1節）。`rule`: 社内規程、`minutes`: 議事録、`learned`: 秘書が学んだこと。 */
@@ -558,6 +571,30 @@ export interface KnowledgeSearchOptions {
   categories?: KnowledgeCategory[];
   /** 見つけた知識の「使った日」を記録するか。既定は記録する（整理の確かめのための検索では記録しない）。 */
   touch?: boolean;
+  /**
+   * 質問を埋め込む（意味での検索。仕様書 第11.7.6節）。無い・`null` を返す・失敗したときは、言葉の検索（段階 2）だけで答える。
+   * 埋め込んだ節が 1 つも無い会社では呼ばない
+   */
+  embed?: (query: string) => Promise<{ vector: number[]; model: string } | null>;
+}
+
+/** 埋め込みを待つ節（仕様書 第11.7.6.1節）。 */
+export interface KnowledgeEmbedItem {
+  itemId: string;
+  ordinal: number;
+  /** 文書の題名と見出しの経路（埋め込む文の `title`）。 */
+  title: string;
+  body: string;
+}
+
+/** 意味での検索の準備の状況（管理者ページの知識。第11.7.6.1節）。 */
+export interface KnowledgeEmbedStatus {
+  /** データベースに pgvector があり、埋め込みの列があるか。 */
+  available: boolean;
+  /** 検索の対象の節の数。 */
+  total: number;
+  /** 埋め込みを作り終えた節の数。 */
+  ready: number;
 }
 
 /** 社内規程の 1 つの版（第11.11.2節）。 */

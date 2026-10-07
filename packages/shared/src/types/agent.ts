@@ -151,6 +151,12 @@ export interface EvalCase {
    * 本物の LLM は使わない。定義の一部ではなく、開発と試験のためのもの。
    */
   stub?: Record<string, { name: string; args: Record<string, unknown> }[]>;
+  /**
+   * 決まった規則での採点（本物の推論に通したときに使う。仕様書 第28.15節「評価を自動で回す」）。
+   *
+   * @remarks `mention` は「どれか 1 つが答えに出ること」の組の並び。`avoid` は答えに出てはならない言い回し
+   */
+  checks?: { mention?: string[][]; avoid?: string[] };
 }
 
 /**

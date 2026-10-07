@@ -678,6 +678,35 @@ export function hrRoute(deps: AppDeps) {
     return m ? shiftResult(c, await shifts.publish(tenant.id, user.id, m)) : c.json({ error: '月を YYYY-MM で入れてください' }, 400);
   });
 
+  // ---- 1 年単位の変形労働時間制・フレックスタイム制・共有の端末（第30.6.3節） ----
+
+  /** 会社の決まりと、登録した端末。 */
+  app.get('/work-systems', async (c) => {
+    const { tenant } = c.get('ctx');
+    const s = (await deps.repo.getTenantSettings(tenant.id)).hr;
+    return c.json({ annual: s.annual, flex: s.flex, terminal: s.terminal, terminals: await deps.hr.terminals.list(tenant.id) });
+  });
+
+  /** 1 年単位の変形労働時間制・フレックスタイム制・名前と番号での打刻を許すかを直す。 */
+  app.put('/work-systems', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    return shiftResult(c, await shifts.saveWorkSystems(tenant.id, user.id, await c.req.json().catch(() => ({}))));
+  });
+
+  /** 端末に出た番号で、共有の端末を登録する。 */
+  app.post('/terminals', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const b = await c.req.json<{ code?: unknown; name?: unknown }>().catch(() => ({} as { code?: unknown; name?: unknown }));
+    const r = await deps.hr.terminals.claim(tenant.id, user.id, b.code, b.name);
+    return 'error' in r ? c.json({ error: r.error }, r.status as 404) : c.json(r, 201);
+  });
+
+  /** 共有の端末を外す（鍵はその場で効かなくなる）。 */
+  app.delete('/terminals/:id', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    return (await deps.hr.terminals.remove(tenant.id, user.id, c.req.param('id'))) ? c.json({ ok: true }) : c.json({ error: '端末が見つかりません' }, 404);
+  });
+
   // ---- 労働保険の年度更新（Phase 2 段 4。第30.13.1節） ----
 
   const labor = deps.hr.labor;

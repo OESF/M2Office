@@ -37,6 +37,8 @@
     "tenant:create": "node --env-file-if-exists=.env scripts/create-tenant.mjs",
     "dev:cert": "node scripts/dev-cert.mjs",
     "build:release": "node scripts/build-release.mjs",
+    "eval:contract-review": "node --env-file-if-exists=.env scripts/eval-contract-review.mjs",
+    "eval:knowledge-search": "node --env-file-if-exists=.env scripts/eval-knowledge-search.mjs",
     "publish:check": "node scripts/check-publish.mjs",
     "publish:export": "node scripts/export-public.mjs"
   },

@@ -47,11 +47,16 @@ export const knowledgeSearch: Tool = {
     const query = String(args['query'] ?? '');
     // 言い換えは秘書が考える（第11.7.7.0節）
     const synonyms = ctx.expandQuery ? await ctx.expandQuery(query) : [];
-    const { hits, rewrites } = await ctx.repo.searchKnowledge(ctx.tenantId, query, ctx.compartment, synonyms);
+    // 意味でも探す（第11.7.6節）。埋め込めなければ言葉だけで探す
+    const { hits, rewrites } = await ctx.repo.searchKnowledge(ctx.tenantId, query, ctx.compartment, synonyms, ctx.embedQuery ? { embed: ctx.embedQuery } : {});
     return {
       query,
       // 種類（社内規程・議事録・秘書が学んだこと）を添え、食い違えば社内規程に従わせる（第11.7.3節・第11.11.1節）
-      hits: hits.map((h) => ({ kind: KNOWLEDGE_CATEGORY_LABEL[h.category], citation: h.citation, title: h.title, heading: h.heading, source: h.source, body: h.body })),
+      hits: hits.map((h) => ({
+        kind: KNOWLEDGE_CATEGORY_LABEL[h.category], citation: h.citation, title: h.title, heading: h.heading, source: h.source, body: h.body,
+        // 言葉が合わず、意味だけで見つけた節。答えの出典の横に「言い換えで見つけました」と示す（第11.7.6.3節）
+        ...(h.matchedBy === 'meaning' ? { foundBy: '言い換えで見つけました' } : {}),
+      })),
       found: hits.length,
       ...(hits.length > 0 ? { priority: KNOWLEDGE_PRIORITY_NOTE } : {}),
       // 言い換えで読み替えた言葉。答えに「〜と読み替えて探しました」と示す（第11.7.7節）

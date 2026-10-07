@@ -82,8 +82,9 @@ export class PostgresAttendanceStore implements AttendanceStore {
   }
 
   async addPunch(tenantId: string, p: AttPunch & { createdBy: string }): Promise<void> {
-    await this.q(tenantId, `insert into att_punches (id, tenant_id, employee_id, kind, at, source, created_by) values ($1,$2,$3,$4,$5,$6,$7)`,
-      [p.id, tenantId, p.employeeId, p.kind, p.at, p.source, p.createdBy]);
+    // 共有の端末で打ったときは、その端末を残す（第30.6.3節）
+    await this.q(tenantId, `insert into att_punches (id, tenant_id, employee_id, kind, at, source, created_by, terminal_id) values ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [p.id, tenantId, p.employeeId, p.kind, p.at, p.source, p.createdBy, p.terminalId ?? null]);
   }
 
   async replacePunches(tenantId: string, employeeId: string, ids: string[], by: string): Promise<number> {

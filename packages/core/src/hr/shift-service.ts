@@ -6,11 +6,12 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { AuditEvent, HrEmployee, HrShift, HrShiftSettings, HrTerms, ShiftView } from '@m2office/shared';
+import type { AuditEvent, HrAnnualSettings, HrEmployee, HrFlexSettings, HrSettings, HrShift, HrShiftSettings, HrTerminalSettings, HrTerms, ShiftView } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { HrStore } from './store.js';
 import type { ShiftStore } from './shift-store.js';
-import { termsOn } from './attendance-service.js';
+import { byShifts, termsOn } from './attendance-service.js';
+import { annualPeriodOf } from './work-systems.js';
 import { periodContaining, periodOf, scheduledMinutes, shiftDate, jstDate } from './attendance.js';
 import { checkPlan, generatePlan, variableCap, type PlanInput, type PlanMember } from './shift-plan.js';
 
@@ -44,12 +45,17 @@ export class ShiftService {
 
   /** シフトに入る人（期間に在籍し、雇用条件の働き方がシフトの人）。 */
   private async members(tenantId: string, period: { start: string; end: string }): Promise<{ member: PlanMember; terms: HrTerms | null; employee: HrEmployee }[]> {
+    const annualOn = (await this.deps.repo.getTenantSettings(tenantId)).hr.annual.enabled;
     const out: { member: PlanMember; terms: HrTerms | null; employee: HrEmployee }[] = [];
     for (const e of await this.deps.hrStore.listEmployees(tenantId)) {
       if (e.category === 'owner' || (e.hiredOn && e.hiredOn > period.end) || (e.leftOn && e.leftOn < period.start)) continue;
       const t = termsOn(await this.deps.hrStore.listTerms(tenantId, e.id), period.end);
-      if (t?.schedule !== 'shift') continue;
-      out.push({ employee: e, terms: t, member: { employeeId: e.id, name: e.name, weeklyDays: t.weeklyDays, weeklyHours: t.weeklyHours, hiredOn: e.hiredOn, leftOn: e.leftOn } });
+      // シフトの人と、1 年単位の変形労働時間制の人（所定をシフトで決める。第30.6.3節）
+      if (!byShifts(t) || !t) continue;
+      out.push({ employee: e, terms: t, member: {
+        employeeId: e.id, name: e.name, weeklyDays: t.weeklyDays, weeklyHours: t.weeklyHours, hiredOn: e.hiredOn, leftOn: e.leftOn,
+        ...(t.schedule === 'annual' && annualOn ? { annual: true } : {}),
+      } });
     }
     return out.sort((a, b) => a.member.name.localeCompare(b.member.name, 'ja'));
   }
@@ -64,8 +70,14 @@ export class ShiftService {
     const s = (await this.deps.repo.getTenantSettings(tenantId)).hr;
     const members = await this.members(tenantId, period);
     const requests = await this.deps.store.listRequests(tenantId, period.start, period.end);
+    // 1 年単位の変形労働時間制の人がいれば、対象期間のほかの期間のシフトと合わせて点検する
+    const range = members.some((m) => m.member.annual) ? annualPeriodOf(period.end, s.annual) : null;
+    const prior = range ? await this.deps.store.listShifts(tenantId, range.start, range.end) : [];
     return {
-      input: { days: this.days(period), members: members.map((m) => m.member), settings: s.shift, requests: new Set(requests.map((r) => `${r.employeeId}|${r.date}`)), weekStart: s.work.weekStart },
+      input: {
+        days: this.days(period), members: members.map((m) => m.member), settings: s.shift, requests: new Set(requests.map((r) => `${r.employeeId}|${r.date}`)), weekStart: s.work.weekStart,
+        ...(range ? { annual: { settings: s.annual, range, prior } } : {}),
+      },
       members, settings: s.shift,
     };
   }
@@ -138,6 +150,62 @@ export class ShiftService {
     return next;
   }
 
+  /**
+   * 1 年単位の変形労働時間制・フレックスタイム制・共有の端末の会社の決まりを直す（人事区画の人。第30.6.3節）。
+   *
+   * @remarks 労使協定と届出は会社が行う。ここは決まりを M2Office に写すだけ
+   */
+  async saveWorkSystems(tenantId: string, userId: string, input: { annual?: Partial<HrAnnualSettings>; flex?: Partial<HrFlexSettings>; terminal?: Partial<HrTerminalSettings> }): Promise<Pick<HrSettings, 'annual' | 'flex' | 'terminal'> | { error: string }> {
+    const all = await this.deps.repo.getTenantSettings(tenantId);
+    const annual = { ...all.hr.annual };
+    const flex = { ...all.hr.flex };
+    const terminal = { ...all.hr.terminal };
+    if (input.annual) {
+      const a = input.annual;
+      if (a.enabled !== undefined) annual.enabled = !!a.enabled;
+      if (a.start !== undefined) {
+        if (a.start && !/^\d{4}-\d{2}-\d{2}$/.test(String(a.start))) return { error: '対象期間の起算日を YYYY-MM-DD で入れてください' };
+        annual.start = String(a.start);
+      }
+      if (a.months !== undefined) {
+        const m = Math.round(Number(a.months));
+        if (!(m >= 2 && m <= 12)) return { error: '対象期間は 1 か月を超え 1 年以内（2〜12 か月）にしてください' };
+        annual.months = m;
+      }
+      if (a.busy !== undefined) {
+        if (!Array.isArray(a.busy) || a.busy.length > 6) return { error: '特定期間は 6 つまでです' };
+        const MD = /^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+        if (a.busy.some((b) => !MD.test(String(b?.from)) || !MD.test(String(b?.to)))) return { error: '特定期間を月日（MM-DD）で入れてください' };
+        annual.busy = a.busy.map((b) => ({ from: String(b.from), to: String(b.to) }));
+      }
+      if (annual.enabled && !annual.start) return { error: '1 年単位の変形労働時間制を使うときは、対象期間の起算日を入れてください' };
+    }
+    if (input.flex) {
+      const f = input.flex;
+      if (f.enabled !== undefined) flex.enabled = !!f.enabled;
+      if (f.months !== undefined) {
+        const m = Math.round(Number(f.months));
+        if (!(m >= 1 && m <= 3)) return { error: '清算期間は 1〜3 か月にしてください' };
+        flex.months = m;
+      }
+      if (f.startMonth !== undefined) {
+        if (f.startMonth && !/^\d{4}-(0[1-9]|1[0-2])$/.test(String(f.startMonth))) return { error: '清算期間の起算の月を YYYY-MM で入れてください' };
+        flex.startMonth = String(f.startMonth);
+      }
+      if (f.core !== undefined) {
+        if (f.core === null) flex.core = null;
+        else if (!HM.test(String(f.core?.start)) || !HM.test(String(f.core?.end)) || String(f.core.start).padStart(5, '0') >= String(f.core.end).padStart(5, '0')) return { error: 'コアタイムの始めと終わりを HH:MM で入れてください' };
+        else flex.core = { start: String(f.core.start).padStart(5, '0'), end: String(f.core.end).padStart(5, '0') };
+      }
+      if (f.shortfall !== undefined) flex.shortfall = f.shortfall === 'deduct' ? 'deduct' : 'carry';
+      if (flex.enabled && flex.months > 1 && !flex.startMonth) return { error: '清算期間が 1 か月を超えるときは、起算の月を入れてください' };
+    }
+    if (input.terminal?.pinAllowed !== undefined) terminal.pinAllowed = !!input.terminal.pinAllowed;
+    await this.deps.repo.saveTenantSettings(tenantId, 'hr', { ...all.hr, annual, flex, terminal }, userId);
+    await this.audit(tenantId, userId, 'hr.work_systems.settings', 'work-systems', { annual: annual.enabled, flex: flex.enabled, pinAllowed: terminal.pinAllowed });
+    return { annual, flex, terminal };
+  }
+
   /** 案を作る（期間のシフトを置き換えて下書きにする）。公開した期間は作り直せない。 */
   async generate(tenantId: string, userId: string, month: string): Promise<ShiftView | { error: string }> {
     const period = await this.period(tenantId, month);
@@ -197,7 +265,7 @@ export class ShiftService {
   async selfView(tenantId: string, employee: HrEmployee): Promise<{ periods: { period: { start: string; end: string; label: string }; published: boolean; shifts: HrShift[]; requests: string[]; canRequest: boolean }[]; patterns: HrShiftSettings['patterns'] }> {
     const s = (await this.deps.repo.getTenantSettings(tenantId)).hr;
     // シフトの人でなければ出さない
-    if (termsOn(await this.deps.hrStore.listTerms(tenantId, employee.id), this.today())?.schedule !== 'shift') return { periods: [], patterns: s.shift.patterns };
+    if (!byShifts(termsOn(await this.deps.hrStore.listTerms(tenantId, employee.id), this.today()))) return { periods: [], patterns: s.shift.patterns };
     const cur = await this.period(tenantId);
     const next = await this.nextPeriod(tenantId);
     const out = [];

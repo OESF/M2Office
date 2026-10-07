@@ -19,6 +19,10 @@ export { detectCardKind, splitCardPdf, CARD_BATCH_MAX, CARD_MIME, type CardFileK
 export { toVCard } from './vcard.js';
 export { draftThanksMail, templateThanks, type ThanksMail, type ThanksMailInput } from './mail.js';
 export { CARD_TOOLS, type CardToolContext } from './tools.js';
+export {
+  GoogleContactsService, GOOGLE_CONTACTS_LABEL, GOOGLE_CONTACTS_SCOPE, GOOGLE_PUSH_MAX, toPeoplePerson, planGoogleUpdate,
+  type GoogleContactLink, type GoogleContactPrefs, type GoogleContactStore, type GoogleContactsStatus, type GooglePushResult, type GoogleContactsDeps,
+} from './google-contacts.js';
 export { CARD_AGENTS, CARD_IMPORT, CARD_UPDATE, CARD_BULK_MAIL, CARDS_PACKAGE, CARDS_EXTENSION_VERSION } from './agents.js';
 export {
   SignatureWatcher, SIGNATURE_PROMPT, SIGNATURE_RECHECK_MS, SIGNATURE_DAILY_LIMIT, SIGNATURE_BACKFILL_DAYS, SIGNATURE_MAIL_BATCH,

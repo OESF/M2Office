@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { HrShiftPattern, HrShiftSettings, ShiftView } from '@m2office/shared';
-import { api, describeError } from './api.js';
+import { api, describeError, type WorkSystemsView } from './api.js';
 
 const WEEK = ['日', '月', '火', '水', '木', '金', '土', '祝'];
 const wd = (d: string) => new Date(`${d}T00:00:00Z`).getUTCDay();
@@ -64,6 +64,75 @@ function ShiftSettingsForm({ settings, onSaved }: { settings: HrShiftSettings; o
 }
 
 /**
+ * 1 年単位の変形労働時間制・フレックスタイム制・共有の端末（仕様書 第30.6.3節）。労使協定と届出は会社が行い、ここには決まりを写すだけ。
+ */
+function WorkSystemsForm() {
+  const [v, setV] = useState<WorkSystemsView | null>(null);
+  const [code, setCode] = useState('');
+  const [name, setName] = useState('');
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const load = useCallback(() => { api.hr.payroll.workSystems().then(setV).catch((e) => setMsg({ ok: false, text: describeError(e, '読み込めませんでした') })); }, []);
+  useEffect(load, [load]);
+  if (!v) return null;
+  const save = () => void api.hr.payroll.saveWorkSystems({ annual: v.annual, flex: v.flex, terminal: v.terminal })
+    .then(() => { setMsg({ ok: true, text: '保存しました' }); load(); }).catch((e) => setMsg({ ok: false, text: describeError(e, '保存できませんでした') }));
+  const a = v.annual;
+  const f = v.flex;
+  return (
+    <details className="card hr-panel">
+      <summary>1 年単位の変形労働時間制・フレックスタイム制・打刻の端末</summary>
+      <div className="row wrap small">
+        <label className="check"><input type="checkbox" checked={a.enabled} onChange={(e) => setV({ ...v, annual: { ...a, enabled: e.target.checked } })} /> 1 年単位の変形労働時間制</label>
+        {a.enabled && (
+          <>
+            <label>起算日 <input type="date" value={a.start} onChange={(e) => setV({ ...v, annual: { ...a, start: e.target.value } })} /></label>
+            <label>対象期間 <input className="num-input" type="number" min={2} max={12} value={a.months} onChange={(e) => setV({ ...v, annual: { ...a, months: Number(e.target.value) } })} /> か月</label>
+            <label>特定期間 <input className="short" placeholder="12-01〜12-31" value={a.busy.map((b) => `${b.from}〜${b.to}`).join(', ')}
+              onChange={(e) => setV({ ...v, annual: { ...a, busy: e.target.value.split(/[,、]/).map((x) => x.trim()).filter(Boolean).map((x) => { const [from = '', to = ''] = x.split(/[〜~-]{1}(?=\d{2}-\d{2}$)/); return { from, to }; }) } })} /></label>
+          </>
+        )}
+      </div>
+      <div className="row wrap small">
+        <label className="check"><input type="checkbox" checked={f.enabled} onChange={(e) => setV({ ...v, flex: { ...f, enabled: e.target.checked } })} /> フレックスタイム制</label>
+        {f.enabled && (
+          <>
+            <label>清算期間 <select value={f.months} onChange={(e) => setV({ ...v, flex: { ...f, months: Number(e.target.value) } })}>{[1, 2, 3].map((n) => <option key={n} value={n}>{n} か月</option>)}</select></label>
+            {f.months > 1 && <label>起算の月 <input type="month" value={f.startMonth} onChange={(e) => setV({ ...v, flex: { ...f, startMonth: e.target.value } })} /></label>}
+            <label className="check"><input type="checkbox" checked={!!f.core} onChange={(e) => setV({ ...v, flex: { ...f, core: e.target.checked ? { start: '10:00', end: '15:00' } : null } })} /> コアタイム</label>
+            {f.core && (
+              <>
+                <input type="time" value={f.core.start} onChange={(e) => setV({ ...v, flex: { ...f, core: { ...f.core!, start: e.target.value } } })} aria-label="コアタイムの始め" />
+                <input type="time" value={f.core.end} onChange={(e) => setV({ ...v, flex: { ...f, core: { ...f.core!, end: e.target.value } } })} aria-label="コアタイムの終わり" />
+              </>
+            )}
+            <label>足りない時間 <select value={f.shortfall} onChange={(e) => setV({ ...v, flex: { ...f, shortfall: e.target.value as 'carry' | 'deduct' } })}>
+              <option value="carry">次の清算期間に繰り越す</option><option value="deduct">給与から差し引く</option>
+            </select></label>
+          </>
+        )}
+      </div>
+      <div className="row wrap small">
+        <label className="check"><input type="checkbox" checked={v.terminal.pinAllowed} onChange={(e) => setV({ ...v, terminal: { pinAllowed: e.target.checked } })} /> 打刻の端末で、名前と番号でも打てる</label>
+        <button className="btn small" onClick={save}>保存する</button>
+      </div>
+      <ul className="small">
+        {v.terminals.map((t) => (
+          <li key={t.id}>{t.name} <span className="muted">{t.lastSeenAt ? `最後に見えた ${new Date(t.lastSeenAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}` : ''}</span>
+            {' '}<button className="link small" onClick={() => void api.hr.payroll.removeTerminal(t.id).then(load).catch((e) => setMsg({ ok: false, text: describeError(e) }))}>外す</button></li>
+        ))}
+      </ul>
+      <div className="row wrap small">
+        <input className="short" inputMode="numeric" placeholder="端末の番号" value={code} onChange={(e) => setCode(e.target.value)} aria-label="端末に出ている番号" />
+        <input className="short" placeholder="名前（受付など）" value={name} onChange={(e) => setName(e.target.value)} aria-label="端末の名前" />
+        <button className="btn ghost small" disabled={!code.trim()} onClick={() => void api.hr.payroll.claimTerminal(code, name)
+          .then(() => { setCode(''); setName(''); setMsg({ ok: true, text: '端末を登録しました' }); load(); }).catch((e) => setMsg({ ok: false, text: describeError(e, '登録できませんでした') }))}>端末を登録</button>
+      </div>
+      {msg && <p className={msg.ok ? 'ok-msg small' : 'error small'}>{msg.text}</p>}
+    </details>
+  );
+}
+
+/**
  * シフトの担当者の画面。
  */
 export function ShiftTab() {
@@ -101,6 +170,7 @@ export function ShiftTab() {
         )}
       </div>
       <ShiftSettingsForm settings={data.settings} onSaved={load} />
+      <WorkSystemsForm />
       {error && <p className="error">{error}</p>}
       {data.issues.length > 0 && (
         <ul className="small shift-issues">

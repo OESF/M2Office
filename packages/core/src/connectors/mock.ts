@@ -10,7 +10,7 @@ import { randomUUID } from 'node:crypto';
 import type { SlidePlan } from '../slides/plan.js';
 import { renderSvgPng } from '../columns/cover.js';
 import type {
-  BusySlot, CalendarEvent, ConnectorPrincipal, DriveFile, MailMessage, TaskItem, WorkspaceConnector, EndedMeeting
+  BusySlot, CalendarEvent, ConnectorPrincipal, DriveFile, MailMessage, TaskItem, WorkspaceConnector, EndedMeeting, PeoplePerson
 } from './types.js';
 
 /**
@@ -274,6 +274,45 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
         responses: all.filter((r) => Date.parse(r.submittedAt) >= since).slice(0, q.limit),
       };
     },
+  };
+
+  /**
+   * 見本の Google の連絡先（第27.15節）。利用者ごとにラベルと連絡先を持つ。
+   * 自動のテストは、ここを書き換えて「人が Google で直した」ことにできる。
+   */
+  readonly people = new Map<string, { groups: Map<string, string>; people: Map<string, { person: PeoplePerson; etag: string; groups: string[] }> }>();
+
+  /** 本人の見本の連絡先の帳面。 */
+  private book(p: ConnectorPrincipal) {
+    let b = this.people.get(key(p));
+    if (!b) this.people.set(key(p), b = { groups: new Map(), people: new Map() });
+    return b;
+  }
+
+  contacts = {
+    ensureGroup: async (p: ConnectorPrincipal, name: string) => {
+      const b = this.book(p);
+      let g = b.groups.get(name);
+      if (!g) b.groups.set(name, g = `contactGroups/mock-${randomUUID().slice(0, 8)}`);
+      return g;
+    },
+    create: async (p: ConnectorPrincipal, person: PeoplePerson, group: string) => {
+      const resourceName = `people/mock-${randomUUID().slice(0, 12)}`;
+      this.book(p).people.set(resourceName, { person: structuredClone(person), etag: randomUUID(), groups: [group] });
+      return { resourceName };
+    },
+    get: async (p: ConnectorPrincipal, resourceName: string) => {
+      const x = this.book(p).people.get(resourceName);
+      return x ? { person: structuredClone(x.person), etag: x.etag } : null;
+    },
+    update: async (p: ConnectorPrincipal, resourceName: string, etag: string, patch: Partial<PeoplePerson>) => {
+      const x = this.book(p).people.get(resourceName);
+      if (!x) throw new Error('連絡先が見つかりません');
+      if (x.etag !== etag) throw new Error('連絡先がほかで直されました');
+      x.person = { ...x.person, ...structuredClone(patch) };
+      x.etag = randomUUID();
+    },
+    remove: async (p: ConnectorPrincipal, resourceName: string) => this.book(p).people.delete(resourceName),
   };
 
   /** 見本の終わった会議（自動テストと通しの確認が足す。第9.5.2.1節）。 */

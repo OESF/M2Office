@@ -11,7 +11,7 @@
 | 道 | 中身 |
 |---|---|
 | `/Library/M2Office/app/` | 本番の組み立て（`dist-release/` の中身）。`server/api.js`・`server/worker.js`・`web/`・`docs/`・`db/migrations/` |
-| `/Library/M2Office/app/runtime/` | 同梱する実行環境（`node/`・`postgres/`・`caddy/`。次の段） |
+| `/Library/M2Office/app/runtime/` | 同梱する実行環境（`node/`・`postgres/`（**pgvector を入れる**。知識の意味の検索。仕様書 第11.7.6節）・`caddy/`。次の段） |
 | `/Library/M2Office/app/m2office.env` | 環境変数（`m2office.env.template` から作る。専用の利用者と管理者だけが読める） |
 | `/Library/M2Office/app/Caddyfile` | 入口の設定（`Caddyfile.template` から作る） |
 | `/Library/M2Office/front.d/` | 同じ機械の M2Medical などの入口の設定（名前で分ける。第8.6.9節） |
@@ -29,7 +29,7 @@
 | `API_PORT`・`DB_PORT` | 社内の機械の中だけで使うポート（例 3101・5432） |
 | `ACME_EMAIL`・`DNS_PROVIDER`・`DNS_TOKEN` | 公的な証明書を DNS で取るための連絡先と、DNS の事業者のつなぎ |
 | `SECRET_KEY`・`DB_APP_PASSWORD`・`DB_OWNER_PASSWORD` | 機械の上で作る秘密の値（運営は知らない） |
-| `GEMINI_API_KEY`・`GOOGLE_LOGIN_CLIENT_ID`・`GOOGLE_LOGIN_CLIENT_SECRET`・`LOCAL_LLM_MODEL` | 会社の鍵と、ローカル AI のモデル |
+| `GEMINI_API_KEY`・`GOOGLE_LOGIN_CLIENT_ID`・`GOOGLE_LOGIN_CLIENT_SECRET`・`LOCAL_LLM_MODEL`・`LOCAL_LLM_EMBED_MODEL` | 会社の鍵と、ローカル AI のモデル（埋め込みのモデルは 768 次元。例: EmbeddingGemma） |
 
 ## 組み立てと確かめ（開発の機械で）
 

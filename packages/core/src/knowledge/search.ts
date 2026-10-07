@@ -234,21 +234,69 @@ export function matchConcepts(
 export function rankSections<T extends ScoredCandidate>(
   terms: SearchConcept[] | string[], candidates: T[],
 ): (T & { score: number })[] {
+  return limitSections(orderSections(terms, candidates));
+}
+
+/**
+ * 点の足りた節を、返す順に並べる（数の上限をかけない）。意味での検索と合わせるときに、言葉の検索の上位の並びとして使う（第11.7.6.3節）。
+ */
+export function orderSections<T extends ScoredCandidate>(
+  terms: SearchConcept[] | string[], candidates: T[],
+): (T & { score: number })[] {
   const all = candidates
     .map((c) => ({ ...c, score: scoreSection(terms, c) }))
     .filter((c) => c.score >= 1);
   const top = Math.max(0, ...all.map((c) => c.score));
-  const scored = all
+  return all
     .filter((c) => c.score >= top * 0.3)
     .sort((a, b) => CATEGORY_ORDER[a.category ?? 'rule'] - CATEGORY_ORDER[b.category ?? 'rule']
       || b.score - a.score || b.updatedAt.localeCompare(a.updatedAt));
-  const out: (T & { score: number })[] = [];
+}
+
+/** 返す節を上から選ぶ（最大 5 節、本文の合計 8,000 字まで。第11.7.4節）。 */
+export function limitSections<T extends { body: string }>(ordered: T[]): T[] {
+  const out: T[] = [];
   let chars = 0;
-  for (const c of scored) {
+  for (const c of ordered) {
     if (out.length >= SEARCH_MAX_SECTIONS) break;
     if (out.length > 0 && chars + c.body.length > SEARCH_MAX_CHARS) break;
     out.push(c);
     chars += c.body.length;
   }
   return out;
+}
+
+/** 意味での検索で、候補にする類似度の下限（第11.7.6.3節。初期値。評価で決め直す）。 */
+export const SEMANTIC_THRESHOLD = 0.6;
+/** 言葉の検索と意味での検索から、それぞれ合わせる上位の数（第11.7.6.3節）。 */
+export const FUSION_DEPTH = 20;
+/** 順位の融合の定数（第11.7.6.3節）。 */
+const RRF_K = 60;
+
+/** どちらの検索で見つけたか（第11.7.6.3節「見つけ方の表示」）。 */
+export type MatchedBy = 'words' | 'meaning' | 'both';
+
+/**
+ * 言葉の検索と意味での検索の並びを、順位の融合（Reciprocal Rank Fusion）で 1 つにする（第11.7.6.3節）。
+ *
+ * @param words 言葉の検索の並び（上位から）
+ * @param meaning 意味での検索の並び（類似度の高い順。しきい値に満たないものは除いてあること）
+ * @param keyOf 同じ節を見分ける鍵
+ * @returns 合わせた並び。社内規程 → 議事録 → 秘書が学んだことの順を保ち、同じ種類の中を融合の点の高い順にする
+ * @remarks 点数そのものは足さない（尺度が違うため）。順位 r ごとに 1 ÷ (60 + r) を足す
+ */
+export function fuseRankings<T extends { category?: ScoredCandidate['category'] }>(
+  words: T[], meaning: T[], keyOf: (x: T) => string,
+): (T & { matchedBy: MatchedBy; fused: number })[] {
+  const by = new Map<string, { item: T; fused: number; w: boolean; m: boolean }>();
+  words.slice(0, FUSION_DEPTH).forEach((x, i) => {
+    by.set(keyOf(x), { item: x, fused: 1 / (RRF_K + i + 1), w: true, m: false });
+  });
+  meaning.slice(0, FUSION_DEPTH).forEach((x, i) => {
+    const hit = by.get(keyOf(x));
+    if (hit) { hit.fused += 1 / (RRF_K + i + 1); hit.m = true; } else by.set(keyOf(x), { item: x, fused: 1 / (RRF_K + i + 1), w: false, m: true });
+  });
+  return [...by.values()]
+    .sort((a, b) => CATEGORY_ORDER[a.item.category ?? 'rule'] - CATEGORY_ORDER[b.item.category ?? 'rule'] || b.fused - a.fused)
+    .map((x) => ({ ...x.item, fused: x.fused, matchedBy: x.w && x.m ? 'both' : x.w ? 'words' : 'meaning' }));
 }

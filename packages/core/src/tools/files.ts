@@ -21,8 +21,12 @@ import {
   type InvoiceDoc, type InvoiceRow, type InvoiceStyleInput,
 } from '../files/pdf-render.js';
 import { loadInvoiceStyle } from '../files/invoice-style.js';
-import { fileToText } from '../files/to-text.js';
+import { fileToText, outlineOf, splitParts } from '../files/to-text.js';
+
+/** 部分に分けて読むときに、文書から取り出す文字の上限（50 ページを十分に超える量。第28.15節）。 */
+const FULL_TEXT_LIMIT = 300_000;
 import { compareTexts } from '../files/compare.js';
+import { redlineDocx, type RedlineEdit } from '../files/redline.js';
 
 const str = (v: unknown, fallback = '') => (typeof v === 'string' ? v : fallback);
 
@@ -44,13 +48,19 @@ export const fileReadText: Tool = {
   risk: 'read',
   activityLabel: '書類を読んでいます',
   helpText: '渡されたファイル（PDF・Word・Excel・CSV・画像）から文字を読み取ります',
-  description: '渡されたファイルを、形式によらず文字として読む',
-  args: { properties: { fileId: { type: 'string', description: 'ファイルの ID' } }, required: ['fileId'] },
+  description: '渡されたファイルを、形式によらず文字として読む。長い文書は部分（part）に分けて返す。parts が 2 以上なら、outline（条の見出しとその部分の番号）を見て、part を変えて続きを読む',
+  args: { properties: { fileId: { type: 'string', description: 'ファイルの ID' }, part: { type: 'number', description: '読む部分の番号（1 から。省略すると 1）' } }, required: ['fileId'] },
   async invoke(args, ctx) {
-    // 読めるのは依頼者本人のファイルだけ（仕様書 第9.4.1節）
-    const r = await fileToText(ctx.repo, ctx.files, ctx.tenantId, str(args['fileId']), ctx.userId, ctx.ocr);
+    // 読めるのは依頼者本人のファイルだけ（仕様書 第9.4.1節）。長い文書は部分に分けて返す（第28.15節）
+    const r = await fileToText(ctx.repo, ctx.files, ctx.tenantId, str(args['fileId']), ctx.userId, ctx.ocr, { limit: FULL_TEXT_LIMIT });
     if (!r.ok) return { available: false, reason: r.note ?? 'ファイルを読めませんでした' };
-    return { available: true, untrusted: true, file: r.name, text: r.text, note: r.note };
+    const parts = splitParts(r.text);
+    if (parts.length === 1) return { available: true, untrusted: true, file: r.name, text: r.text, note: r.note };
+    const part = Math.min(parts.length, Math.max(1, Math.round(typeof args['part'] === 'number' ? args['part'] : 1)));
+    return {
+      available: true, untrusted: true, file: r.name, text: parts[part - 1], part, parts: parts.length, outline: outlineOf(parts),
+      note: [r.note, `長いため ${parts.length} の部分に分けました。いまは ${part} 番目です`].filter(Boolean).join('。'),
+    };
   },
 };
 
@@ -240,6 +250,52 @@ export const docxRender: Tool = {
 };
 
 /**
+ * 修正の案を、元の文書に Word の変更履歴（削除と挿入）とコメントとして入れた Word を作る（仕様書 第28.15節、ADR-0083、Q-98）。
+ *
+ * @remarks 危険度 `draft`。元のファイルは依頼者本人のものだけ。元が Word ならその Word に、PDF・画像などなら読み取った本文から Word を作って入れる。
+ * 元の文が見つからない修正の案は、文書の最後に並べる（黙って落とさない）。社外には送らない
+ */
+export const docxRedline: Tool = {
+  name: 'docx.redline',
+  risk: 'draft',
+  activityLabel: '修正の案を契約書に入れています',
+  helpText: '修正の案を、元の文書に Word の変更履歴として入れた Word を作ります。社外へは送りません',
+  description: '元の文書（fileId）に、修正の案（edits: { before: 元の文, after: 直した文, reason: 理由 } の配列）を Word の変更履歴とコメントとして入れた Word を作る。before は元の文をそのまま書き写す',
+  args: {
+    properties: {
+      fileId: { type: 'string', description: '元の文書のファイルの ID' },
+      title: { type: 'string', description: '題名（例: 業務委託契約書（修正の案））' },
+      edits: { type: 'array', description: '{ before, after, reason } の配列' },
+    },
+    required: ['fileId', 'edits'],
+  },
+  async invoke(args, ctx) {
+    const fileId = str(args['fileId']);
+    const f = await open(ctx, fileId);
+    if (!f) return { available: false, reason: 'ファイルが見つかりません' };
+    const edits: RedlineEdit[] = (Array.isArray(args['edits']) ? args['edits'] : []).slice(0, 200)
+      .map((e) => (e ?? {}) as Record<string, unknown>)
+      .filter((e) => typeof e['before'] === 'string' && (e['before'] as string).trim())
+      .map((e) => ({ before: String(e['before']).slice(0, 2000), after: str(e['after']).slice(0, 2000), ...(typeof e['reason'] === 'string' ? { reason: String(e['reason']).slice(0, 1000) } : {}) }));
+    if (!edits.length) return { available: false, reason: '修正の案がありません' };
+    const base = f.meta.name.replace(/\.[^.]+$/, '');
+    const title = str(args['title'], `${base}（修正の案）`);
+    let source: Uint8Array;
+    let fromText = false;
+    if (f.meta.kind === 'docx') source = f.bytes;
+    else {
+      const t = await fileToText(ctx.repo, ctx.files, ctx.tenantId, fileId, ctx.userId, ctx.ocr);
+      if (!t.ok) return { available: false, reason: t.note ?? '元の文書を読めませんでした' };
+      fromText = true;
+      source = await renderDocx(base, [{ text: '（PDF・画像から読み取った本文で作った Word です。書式は元の文書と違います）' }, ...t.text.split(/\n{2,}|\n/).filter((l) => l.trim()).map((l) => ({ text: l }))]);
+    }
+    const r = await redlineDocx(source, edits, 'M2Office（修正の案）');
+    const out = await publish(ctx, `${title}.docx`, 'docx', r.bytes, title);
+    return { created: true, ...out, applied: r.applied, unapplied: r.unapplied.length, fromText };
+  },
+};
+
+/**
  * 帳票を PDF として出力する。
  *
  * @remarks
@@ -352,4 +408,4 @@ export const imageReadText: Tool = {
   },
 };
 
-export const FILE_TOOLS: Tool[] = [fileReadText, fileCompare, sheetRead, pdfExtract, imageReadText, sheetRender, docxRender, pdfRender];
+export const FILE_TOOLS: Tool[] = [fileReadText, fileCompare, sheetRead, pdfExtract, imageReadText, sheetRender, docxRender, docxRedline, pdfRender];

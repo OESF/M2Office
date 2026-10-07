@@ -14,7 +14,7 @@ import {
   isValidInvoiceNumber, parsePresentationId, type AutomationPolicy, type CompanyInfo, type Role, type SlideTemplate, type TenantSettings,
   type AuditEvent, type User, type WritingStyle, DEFAULT_AI_PER_USER_SHARE
 } from '@m2office/shared';
-import {
+import { semanticSearchEnabled,
   DEFAULT_STANDARD_MINUTES, GOOGLE_DATA_RETENTION_DAYS, KNOWLEDGE_MAX_CHARS,
   describeRule, scheduleBlocker, scheduleChecks, stepLabel, toolGoogleScopes, type AuditQuery, jstMonth, appPath, backupConfigFromEnv, machineConfigFromEnv, machineStatus, requestBackup
 } from '@m2office/core';
@@ -391,12 +391,14 @@ export function adminRoute(deps: AppDeps) {
    */
   app.get('/knowledge', async (c) => {
     const { tenant } = c.get('ctx');
-    const [items, compartments, last] = await Promise.all([
+    const [items, compartments, last, embed] = await Promise.all([
       deps.repo.listKnowledge(tenant.id, { all: true }), deps.repo.listCompartments(tenant.id),
       deps.repo.listAuditSince(tenant.id, ['knowledge.consolidate'], 1),
+      deps.repo.knowledgeEmbedStatus(tenant.id).catch(() => null),
     ]);
     const consolidated = last[0] ? { at: last[0].occurredAt, detail: last[0].detail } : null;
-    return c.json({ items, compartments, consolidated });
+    // 意味での検索の準備（第11.7.6.1節）。データベースに pgvector が無い・意味での検索を切っているときは出さない
+    return c.json({ items, compartments, consolidated, semantic: embed?.available && semanticSearchEnabled() ? { ready: embed.ready, total: embed.total } : null });
   });
 
   /** 日本時間の今日。 */
@@ -598,7 +600,7 @@ const PURPOSE_LABELS: Record<string, string> = {
   'api:web-review': 'Webの分析', 'api:contracts': '契約書の管理', 'api:subsidies': '補助金・助成金', 'api:members': '会員とポイント',
   'api:hr': '人事・給与', 'api:reservations': '予約', 'api:knowledge': '知識', 'api:files': 'ファイル', 'api:me': '個人設定', 'api:admin': '管理者ページ',
   'worker:competitors': '競合の分析（見回り）', 'worker:columns': 'コラムの作成（予定とテーマ案）', 'worker:web-review': 'Webの分析（月の便り）',
-  'worker:subsidies': '補助金・助成金（月の調べもの）', 'worker:knowledge': '秘書が学んだことの整理', 'worker:proactive': '秘書の先回り',
+  'worker:subsidies': '補助金・助成金（月の調べもの）', 'worker:knowledge': '秘書が学んだことの整理', 'worker:knowledge-embed': '知識の意味の検索の準備', 'worker:proactive': '秘書の先回り',
   'worker:memory': '会話から覚えること', 'worker:inquiries': '問い合わせの見張り', 'worker:announcements': 'お知らせの作成（予約）',
 };
 

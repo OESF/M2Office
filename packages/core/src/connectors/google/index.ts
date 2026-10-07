@@ -18,6 +18,7 @@ import { externalOf, pickSpace, spaceIdOf, toChatText } from './chat.js';
 import { googleDocs, googleDrive } from './drive.js';
 import { googleSheets } from './sheets.js';
 import { googleSlides } from './slides.js';
+import { googleContacts } from './people.js';
 
 /** スペースの一覧を読む上限（ページの数）。1 ページ 1,000 件。 */
 const CHAT_SPACE_PAGES = 5;
@@ -433,6 +434,8 @@ export class GoogleWorkspaceConnector implements WorkspaceConnector {
   sheets = googleSheets(() => ({ tokens: this.tokens, endpoints: this.endpoints }));
   // スライド（仕様書 第9.4.2節「標準の見た目」）。テンプレートのファイルを使わずに組み立てる
   slides = googleSlides(() => ({ tokens: this.tokens, endpoints: this.endpoints }));
+  // 本人の Google の連絡先（仕様書 第27.15節）。M2Office が入れたものだけを扱う
+  contacts = googleContacts(() => ({ tokens: this.tokens, endpoints: this.endpoints }));
 
   // ─── 準備中（ADR-0022） ──────────────────────────────────────────────
 

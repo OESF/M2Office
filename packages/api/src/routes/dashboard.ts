@@ -40,6 +40,7 @@ const EVENT_ACTIONS = [
 const GOOGLE_HEALTH_TARGETS: { target: string; name: string }[] = [
   { target: 'google:gmail', name: 'Gmail' }, { target: 'google:calendar', name: 'カレンダー' },
   { target: 'google:tasks', name: 'ToDo' }, { target: 'google:chat', name: 'Chat' }, { target: 'google:drive', name: 'ドライブ' },
+  { target: 'google:contacts', name: '連絡先' },
 ];
 
 /** 接続先の状態を組み立て直す間隔（ミリ秒）。SSE の周期より長くし、データベースを読みすぎない。 */

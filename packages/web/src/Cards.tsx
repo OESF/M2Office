@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { CONTRACT_KIND_LABELS, CONTRACT_STATUS_LABELS, EMPTY_CARD_ENGLISH, type CardCorners, type CardEnglish, type CardFields, type Contract, type ContactPhone, type ContactScope, type PhoneKind } from '@m2office/shared';
 import { ContactInquiries } from './Inquiries.js';
-import { api, describeError, type CardDetail, type CardList, type CardMeetings, type CardSummary } from './api.js';
+import { ApiError, api, describeError, type CardDetail, type CardList, type CardMeetings, type CardSummary, type CardsGooglePush } from './api.js';
 import { BulkMailView } from './BulkMail.js';
 import { cropCard, prepareCardPhoto } from './card-image.js';
 
@@ -26,6 +26,51 @@ const ACCEPT_MOBILE = 'image/png,image/jpeg,image/webp,application/pdf,.webp,.pd
 const ACCEPT_DESKTOP = 'image/png,image/jpeg,image/heic,image/heif,image/webp,application/pdf,.heic,.heif,.webp,.pdf,.csv,.xlsx,text/csv';
 /** 表（CSV・Excel）のファイルか。表は画像の読み取りでなく、表からの取り込みに回す（第27.4節）。 */
 const isTable = (f: File) => /\.(csv|xlsx)$/i.test(f.name) || f.type === 'text/csv';
+
+/** Google の同意の画面へ移る前に覚えておく、入れる途中の名刺（戻ったら続きを入れる。第27.15節）。 */
+const GOOGLE_PENDING_KEY = 'm2o.cards.googlePending';
+
+/** Google の連絡先に入れた結果の知らせ。 */
+function googlePushText(r: CardsGooglePush): string {
+  const done = [r.added ? `${r.added} 件を入れました` : '', r.updated ? `${r.updated} 件を新しくしました` : ''].filter(Boolean).join('、');
+  return `Google の連絡先（M2Office の名刺）: ${done || '入れたものはありません'}${r.failed.length ? `（入れられなかった名刺 ${r.failed.length} 件: ${r.failed[0]!.reason}）` : ''}`;
+}
+
+/**
+ * 名刺を Google の連絡先に入れる（第27.15節）。許可が無ければ、選んだ名刺を覚えて Google の同意の画面へ移る。
+ *
+ * @param back 同意のあとに戻る画面
+ * @param consent 許可が無いときに同意の画面へ移るか（戻ったあとの続きでは移らない。取りやめたときに繰り返さないため）
+ * @returns 知らせの文。同意の画面へ移るときは `null`
+ */
+async function pushToGoogle(ids: string[], back: string, consent = true): Promise<string | null> {
+  try {
+    return googlePushText(await api.cards.pushGoogle(ids));
+  } catch (e) {
+    if (consent && e instanceof ApiError && (e.body['needsConsent'] || e.body['needsConnect'])) {
+      try { sessionStorage.setItem(GOOGLE_PENDING_KEY, JSON.stringify(ids)); } catch { /* 覚えられなくても同意は求める */ }
+      const { url } = await api.connectGoogle({ extra: ['contacts'], back });
+      location.href = url;
+      return null;
+    }
+    throw e;
+  }
+}
+
+/** Google の同意から戻ったら、入れる途中だった名刺を入れる（1 度だけ）。 */
+function useGoogleResume(onDone: (text: string) => void, onError: (text: string) => void): void {
+  useEffect(() => {
+    let ids: string[] = [];
+    try {
+      ids = JSON.parse(sessionStorage.getItem(GOOGLE_PENDING_KEY) ?? '[]') as string[];
+      sessionStorage.removeItem(GOOGLE_PENDING_KEY);
+    } catch { return; }
+    if (!Array.isArray(ids) || ids.length === 0) return;
+    void pushToGoogle(ids, '', false).then((t) => t && onDone(t)).catch((e) => onError(describeError(e, 'Google の連絡先に入れられませんでした')));
+  // 開いたときに 1 度だけ
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+}
 
 /** スマホ（iPhone・iPad・Android）か。iPad は Mac と名乗るため、触れる点の数でも見る。 */
 function isMobile(): boolean {
@@ -92,6 +137,8 @@ function CardListView({ onOpen, admin, onBulk }: { onOpen: (id: string) => void;
       setPersonal((p) => (p === null ? r.defaultScope === 'personal' : p));
     }).catch((e) => setMessage(describeError(e, '読み込めませんでした')));
   }, [q, scope, trash]);
+  // Google の同意から戻ったら、入れる途中だった名刺を入れる（第27.15節）
+  useGoogleResume((t) => { setNotice(t); load(); }, setMessage);
   // 探す言葉は打ち終わりを待って読み直す
   useEffect(() => {
     const t = setTimeout(load, q ? 250 : 0);
@@ -210,6 +257,13 @@ function CardListView({ onOpen, admin, onBulk }: { onOpen: (id: string) => void;
           </label>
           <span className="small">{picked.size} 件を選択中</span>
           {picked.size > 0 && <button className="btn small" onClick={() => onBulk([...picked.values()])}>選んだ {picked.size} 件にまとめてメール</button>}
+          {picked.size > 0 && (
+            <button className="btn ghost small" disabled={busy} onClick={() => {
+              setBusy(true); setMessage(null); setNotice(null);
+              void pushToGoogle([...picked.keys()], '/cards').then((t) => { if (t) { setNotice(t); setPicked(new Map()); setSelecting(false); } })
+                .catch((e) => setMessage(describeError(e, 'Google の連絡先に入れられませんでした'))).finally(() => setBusy(false));
+            }}>Google の連絡先に入れる</button>
+          )}
         </div>
       )}
       {message && <p className="error">{message}</p>}
@@ -432,6 +486,8 @@ function CardDetailView({ id, onBack, onOpen, mailer, onInquiry, onContract }: {
     api.cards.get(id).then(setD).catch((e) => setMessage(describeError(e, '名刺が見つかりません')));
   }, [id]);
   useEffect(load, [load]);
+  const [notice, setNotice] = useState<string | null>(null);
+  useGoogleResume((t) => { setNotice(t); load(); }, setMessage);
   // 会った場面は開くたびにカレンダーから引く。保存しない（第27.8節、Q-78）
   useEffect(() => { void api.cards.meetings(id).then(setMeetings).catch(() => setMeetings({ available: false, reason: '予定を取得できませんでした' })); }, [id]);
 
@@ -485,6 +541,7 @@ function CardDetailView({ id, onBack, onOpen, mailer, onInquiry, onContract }: {
     <div className="cards card-detail">
       <button className="link" onClick={onBack}>← 名刺管理</button>
       {message && <p className="error">{message}</p>}
+      {notice && <p className="ok-msg">{notice}</p>}
       <div className="card-head">
         <div className="card-images">
           {latest?.hasFront && <CardImage cardId={latest.id} side="front" rotation={latest.frontRotation} corners={latest.frontCorners} kind={null} large />}
@@ -517,6 +574,14 @@ function CardDetailView({ id, onBack, onOpen, mailer, onInquiry, onContract }: {
           <div className="card-actions">
             {c.emails[0] && <button className="btn small" disabled={writing} onClick={() => void writeMail()}>{writing ? '用意しています…' : 'メールを書く'}</button>}
             <button className="btn ghost small" onClick={() => act(() => api.cards.downloadVCard(c.id, c.name))}>vCard</button>
+            {/* 本人の Google の連絡先（第27.15節）。入れたものは「外す」。Google で消されたものは入れ直せる */}
+            {d.google && !d.google.gone
+              ? <button className="btn ghost small" onClick={() => act(() => api.cards.removeGoogle(c.id))}>Google の連絡先から外す</button>
+              : <button className="btn ghost small" onClick={() => {
+                setMessage(null); setNotice(null);
+                void pushToGoogle([c.id], `/cards/${c.id}`).then((t) => { if (t) { setNotice(t); load(); } })
+                  .catch((e) => setMessage(describeError(e, 'Google の連絡先に入れられませんでした')));
+              }}>Google の連絡先に入れる</button>}
             {d.canManage && (
               <button className="btn ghost small danger" onClick={() => act(() => api.cards.trash(c.id), () => onOpen(null))}>削除</button>
             )}

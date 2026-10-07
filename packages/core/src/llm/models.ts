@@ -46,6 +46,8 @@ export const MODEL_PRICES: Record<string, ModelPrice> = {
   // 重いモデル
   'gemini-2.5-pro': { inputUsd: 1.25, outputUsd: 10.00 },
   'gemini-3.1-pro-preview': { inputUsd: 2.00, outputUsd: 12.00 },
+  // 埋め込み（知識の意味の検索。第11.7.6.1節）。2026-10-07 に料金の一覧（第三者のもの）で確認。Google の料金表で確かめ直す
+  'gemini-embedding-2': { inputUsd: 0.20, outputUsd: 0 },
 };
 
 /**

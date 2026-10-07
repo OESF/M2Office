@@ -59,19 +59,20 @@ export type OcrFn = (req: { bytes: Uint8Array; mimeType: string }) => Promise<st
  * 他人のファイルの ID を渡されても読まない。存在も示さない。
  */
 export async function fileToText(
-  repo: Repository, store: FileStore, tenantId: string, fileId: string, userId: string, ocr?: OcrFn,
+  repo: Repository, store: FileStore, tenantId: string, fileId: string, userId: string, ocr?: OcrFn, opts: { limit?: number } = {},
 ): Promise<FileText> {
+  const limit = opts.limit ?? TEXT_LIMIT;
   const f = await loadFile(repo, store, tenantId, fileId, { id: userId, roles: [] });
   if (!f) return { ok: false, name: '', text: '', note: 'ファイルが見つかりません' };
   const name = f.meta.name;
 
   switch (f.meta.kind) {
     case 'pdf':
-      return cut(name, await pdfToText(f.bytes, ocr));
+      return cut(name, await pdfToText(f.bytes, ocr), limit);
     case 'docx': {
       const text = await extractDocxText(f.bytes);
       return text
-        ? cut(name, { text, note: null })
+        ? cut(name, { text, note: null }, limit)
         : { ok: false, name, text: '', note: 'この Word から文字を取り出せませんでした' };
     }
     case 'xlsx':
@@ -81,7 +82,7 @@ export async function fileToText(
       const more = data.totalRows > data.rows.length
         ? `全 ${data.totalRows} 行のうち、先頭の ${data.rows.length} 行です`
         : null;
-      return cut(name, { text: rows, note: more });
+      return cut(name, { text: rows, note: more }, limit);
     }
     case 'png':
     case 'jpeg': {
@@ -89,7 +90,7 @@ export async function fileToText(
         return { ok: false, name, text: '', note: '画像から文字を読み取る準備ができていません（推論の接続が未設定です）' };
       }
       const text = await ocr({ bytes: f.bytes, mimeType: f.meta.mime });
-      return cut(name, { text, note: '画像を読み取った結果です。原本で確かめてください' });
+      return cut(name, { text, note: '画像を読み取った結果です。原本で確かめてください' }, limit);
     }
     // 名刺の画像にだけある形式（仕様書 第27.4節）。名刺の中身は名刺のツールで読む
     case 'heic':
@@ -126,12 +127,39 @@ async function pdfToText(bytes: Uint8Array, ocr?: OcrFn): Promise<{ text: string
 }
 
 /** 上限を超えた分を切り、切ったことを断る。 */
-function cut(name: string, r: { text: string; note: string | null }): FileText {
+function cut(name: string, r: { text: string; note: string | null }, limit = TEXT_LIMIT): FileText {
   const text = r.text.trim();
   if (!text) {
     return { ok: false, name, text: '', note: r.note ?? 'このファイルから文字を取り出せませんでした' };
   }
-  if (text.length <= TEXT_LIMIT) return { ok: true, name, text, note: r.note };
-  const cutNote = `長いため、先頭の ${TEXT_LIMIT.toLocaleString('ja-JP')} 字だけを読みました（全 ${text.length.toLocaleString('ja-JP')} 字）`;
-  return { ok: true, name, text: text.slice(0, TEXT_LIMIT), note: [r.note, cutNote].filter(Boolean).join('。') };
+  if (text.length <= limit) return { ok: true, name, text, note: r.note };
+  const cutNote = `長いため、先頭の ${limit.toLocaleString('ja-JP')} 字だけを読みました（全 ${text.length.toLocaleString('ja-JP')} 字）`;
+  return { ok: true, name, text: text.slice(0, limit), note: [r.note, cutNote].filter(Boolean).join('。') };
+}
+
+/** 長い文書を、読む量ずつの部分に分ける（段落の切れ目で。第28.15節「長い契約書の 2 段の読み方」）。 */
+export function splitParts(text: string, size = TEXT_LIMIT): string[] {
+  if (text.length <= size) return [text];
+  const parts: string[] = [];
+  let rest = text;
+  while (rest.length > size) {
+    const cutAt = rest.lastIndexOf('\n', size);
+    const at = cutAt > size * 0.5 ? cutAt : size;
+    parts.push(rest.slice(0, at));
+    rest = rest.slice(at).replace(/^\n+/, '');
+  }
+  if (rest) parts.push(rest);
+  return parts;
+}
+
+/** 条の見出しの一覧（「第 5 条（損害賠償）」「Article 5」）と、その条のある部分の番号（1 から）。 */
+export function outlineOf(parts: string[]): { heading: string; part: number }[] {
+  const out: { heading: string; part: number }[] = [];
+  parts.forEach((p, i) => {
+    for (const m of p.matchAll(/^[ \t　]*((?:第\s*[0-9０-９一二三四五六七八九十百]+\s*条(?:\s*[（(][^）)\n]{1,40}[）)])?)|(?:Article\s+\d+[^\n]{0,40}))/gm)) {
+      out.push({ heading: m[1]!.trim().slice(0, 60), part: i + 1 });
+      if (out.length >= 300) return;
+    }
+  });
+  return out;
 }

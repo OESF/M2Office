@@ -17,6 +17,7 @@ import { recordHealth } from '../../health/recorder.js';
 const HEALTH_TARGET: Record<GoogleApiName, string> = {
   Gmail: 'google:gmail', カレンダー: 'google:calendar', ToDo: 'google:tasks', Chat: 'google:chat',
   ドライブ: 'google:drive', ドキュメント: 'google:drive', スプレッドシート: 'google:drive', スライド: 'google:drive',
+  連絡先: 'google:contacts',
 };
 
 /**
@@ -49,6 +50,8 @@ export interface GoogleApiEndpoints {
   sheets: string;
   /** Slides API（プレゼンテーションの作成と組み立て）。 */
   slides: string;
+  /** People API（本人の Google の連絡先。仕様書 第27.15節）。省略時は本物の口。 */
+  people?: string;
   oauth: GoogleOAuthEndpoints;
 }
 
@@ -62,6 +65,7 @@ export const GOOGLE_API_ENDPOINTS: GoogleApiEndpoints = {
   docs: 'https://docs.googleapis.com/v1',
   sheets: 'https://sheets.googleapis.com/v4',
   slides: 'https://slides.googleapis.com/v1',
+  people: 'https://people.googleapis.com/v1',
   oauth: GOOGLE_OAUTH_ENDPOINTS,
 };
 
@@ -72,7 +76,7 @@ const REFRESH_MARGIN_MS = 60_000;
 const TIMEOUT_MS = 20_000;
 
 /** 呼び先の API の、利用者に見せる名前。 */
-export type GoogleApiName = 'Gmail' | 'カレンダー' | 'ToDo' | 'Chat' | 'ドライブ' | 'ドキュメント' | 'スプレッドシート' | 'スライド';
+export type GoogleApiName = 'Gmail' | 'カレンダー' | 'ToDo' | 'Chat' | 'ドライブ' | 'ドキュメント' | 'スプレッドシート' | 'スライド' | '連絡先';
 
 /**
  * 利用者ごとのアクセス トークンを配る（仕様書 第14.3.4節「誰の権限で呼ぶか」）。
