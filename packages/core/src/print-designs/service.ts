@@ -28,6 +28,7 @@ import type { CanvaService } from './canva.js';
 import { renderSvgPng } from '../columns/cover.js';
 import { pagePng, previewPng, toPdf } from './render.js';
 import type { PrintDesignStore, StoredDesign } from './store.js';
+import { imageModel } from '../llm/models.js';
 
 /** 操作する人。 */
 export interface PrintViewer {
@@ -159,8 +160,6 @@ export type PrintExport = 'preview' | 'png' | 'pdf' | 'bleed';
 
 /** 仕組みが行うとき（ワーカー）。 */
 const SYSTEM = 'system';
-/** 画像の生成のモデル（コラムのカバーと同じ）。 */
-const IMAGE_MODEL = 'gemini-3.1-flash-image';
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const jstDay = (d: Date) => new Date(d.getTime() + 9 * 3_600_000).toISOString().slice(0, 10);
 const s = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
@@ -370,7 +369,7 @@ export class PrintDesignService {
       '決まり（必ず守る）: 人物を描かない（顔・体・手・人影も）。文字・数字・記号・ロゴ・商品のパッケージ・キャラクター・実在の建物を描かない。',
     ].join('\n');
     for (let i = 0; i < 2; i++) {
-      const img = await llm.generateImage({ model: IMAGE_MODEL, aspectRatio: '4:3', prompt }).catch(() => null);
+      const img = await llm.generateImage({ model: imageModel(), aspectRatio: '4:3', prompt }).catch(() => null);
       if (!img) return null;
       const ok = await checkIllustration(llm, img, []);
       if (ok.ok) return img;

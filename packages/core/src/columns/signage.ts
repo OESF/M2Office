@@ -23,13 +23,14 @@ import type { FileStore } from '../files/store.js';
 import { saveFile } from '../files/service.js';
 import type { Logger } from '../log/logger.js';
 import {
-  COVER_AI_MODEL, COVER_AI_MONTHLY_LIMIT, COVER_AI_TRIES, COVER_MIN_BRIGHTNESS, brightness, checkIllustration, dataUrl, esc,
+  COVER_AI_MONTHLY_LIMIT, COVER_AI_TRIES, COVER_MIN_BRIGHTNESS, brightness, checkIllustration, dataUrl, esc,
   fallbackColor, patternSvg, pickPattern, renderSvgPng, tint, widthOf, wrapAt,
 } from './cover.js';
 import type { ColumnStore } from './store.js';
 import type { ColumnSignageStore, StoredColumnSignage } from './signage-store.js';
 import { readMp4 } from '../signage/mp4.js';
 import { thumbnailPng } from '../signage/thumbnail.js';
+import { imageModel } from '../llm/models.js';
 
 /** 画面の向き。 */
 export type SignageSide = 'landscape' | 'portrait';
@@ -413,7 +414,7 @@ export class ColumnSignageService {
             break;
           }
           attempts += 1;
-          const img = await llm.generateImage!({ model: COVER_AI_MODEL, aspectRatio: aspect, prompt: scenePrompt({ title: v.title || c.title, picture: scene.picture, rules, side: shape }) }).catch(() => null);
+          const img = await llm.generateImage!({ model: imageModel(), aspectRatio: aspect, prompt: scenePrompt({ title: v.title || c.title, picture: scene.picture, rules, side: shape }) }).catch(() => null);
           if (!img) continue;
           if ((brightness(img) ?? 1) < COVER_MIN_BRIGHTNESS) { notes.push(`${i + 1} 枚目は暗い絵だったため描き直しました`); continue; }
           const check = await checkIllustration(llm, img, rules);
@@ -460,7 +461,7 @@ export class ColumnSignageService {
       for (let t = 0; t < COVER_AI_TRIES && !image; t++) {
         if (await this.deps.columns.aiAttemptsSince(tenantId, monthStartIso()) + attempts >= COVER_AI_MONTHLY_LIMIT) break;
         attempts += 1;
-        const img = await llm.generateImage({ model: COVER_AI_MODEL, aspectRatio: side === 'landscape' ? '16:9' : '9:16', prompt: scenePrompt({ title: a.title, picture: a.scenes[0]?.picture ?? a.title, rules: a.rules, side }) }).catch(() => null);
+        const img = await llm.generateImage({ model: imageModel(), aspectRatio: side === 'landscape' ? '16:9' : '9:16', prompt: scenePrompt({ title: a.title, picture: a.scenes[0]?.picture ?? a.title, rules: a.rules, side }) }).catch(() => null);
         if (!img || (brightness(img) ?? 1) < COVER_MIN_BRIGHTNESS) continue;
         if ((await checkIllustration(llm, img, a.rules)).ok) image = img;
       }

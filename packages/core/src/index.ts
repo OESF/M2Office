@@ -98,7 +98,7 @@ export { BUILTIN_TOOLS } from './tools/builtin.js';
 
 export { AUTO_PASS_REASON, RunEngine, costOf, needsHuman } from './engine/run-engine.js';
 export {
-  DEFAULT_MODELS, DEFAULT_LIVE_MODEL, MODEL_PRICES, UNKNOWN_MODEL_PRICE,
+  DEFAULT_MODELS, DEFAULT_LIVE_MODEL, DEFAULT_IMAGE_MODEL, imageModel, MODEL_PRICES, UNKNOWN_MODEL_PRICE,
   costJpy, defaultGeminiModels, isHotSwapAlias, usdJpy, warnHotSwapModels,
   type ModelPrice,
 } from './llm/models.js';

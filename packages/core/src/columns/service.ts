@@ -27,8 +27,9 @@ import { ColumnWriteError, rewriteColumn, writeColumn } from './writer.js';
 import { checkWordPress, columnHtml, createWordPressDraft, normalizeSiteUrl, setWordPressStatus, uploadWordPressMedia, type WordPressAuth } from './wordpress.js';
 import { similarityReview } from './plan.js';
 import type { PageFetcher } from '../competitors/fetcher.js';
+import { imageModel } from '../llm/models.js';
 import {
-  COVER_AI_MODEL, COVER_AI_MONTHLY_LIMIT, COVER_AI_TRIES, COVER_MIN_BRIGHTNESS, COVER_MIN_PHOTO_BRIGHTNESS, brandColor, brightness, checkIllustration, choosePhoto, describePhoto, fallbackColor,
+  COVER_AI_MONTHLY_LIMIT, COVER_AI_TRIES, COVER_MIN_BRIGHTNESS, COVER_MIN_PHOTO_BRIGHTNESS, brandColor, brightness, checkIllustration, choosePhoto, describePhoto, fallbackColor,
   illustrationPrompt, imageWish, pickPattern, renderCover, wantsDark, type CoverInput,
 } from './cover.js';
 
@@ -614,7 +615,7 @@ export class ColumnService {
         for (let i = 0; i < tries; i++) {
           aiAttempts += 1;
           const img = await llm.generateImage!({
-            model: COVER_AI_MODEL, aspectRatio: '16:9',
+            model: imageModel(), aspectRatio: '16:9',
             prompt: illustrationPrompt({ title: a.title, description: a.description, rules: settings.webColumns.rules, hint }),
           }).catch(() => null);
           if (!img) { notes.push('挿絵を描けませんでした'); continue; }

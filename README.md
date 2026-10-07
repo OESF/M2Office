@@ -189,6 +189,7 @@ docs/            開発規約・リリース規定・設計判断記録
 | `MODEL_STANDARD` | `gemini-3.5-flash-lite` | 業務のステップ・秘書の対話・文字の読み取り |
 | `MODEL_ADVANCED` | `gemini-3.8-flash` | 難しい計画・長文の分析（いまは使っていない） |
 | `MODEL_RESEARCH` | `MODEL_STANDARD` と同じ | Web の調査（`web.research`） |
+| `MODEL_IMAGE` | `gemini-nano-banana-2.1` | 画像を作るモデル（コラムのカバーとサイネージの挿絵・販促物の画像。Nano Banana 2.1。それまでの `gemini-3.1-flash-image` は 2026-10-29 に終了） |
 | `MODEL_VIDEO` | `veo-3.1-lite-generate-preview` | コラムの店頭サイネージ用の 15 秒の動画（720p。仕様書 第32.18.6節） |
 | `MODEL_FALLBACK` | — | 推論が混雑・障害などで失敗したときに最初に試す退避先。未設定なら、ほかの役割のモデルに退避する（同じ鍵の中だけ。仕様書 第20.2.5節） |
 | `MODEL_LIVE` | `gemini-3.1-flash-live-preview` | 音声の対話（Gemini Live） |

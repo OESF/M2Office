@@ -141,6 +141,20 @@ export function defaultGeminiModels(): GeminiModels {
   };
 }
 
+/**
+ * 画像を作る既定のモデル（Nano Banana 2.1。コラムのカバーとサイネージの挿絵・販促物の画像。仕様書 第32.18.2節・第41.17節）。
+ *
+ * @remarks
+ * 2026-10-06 に一般提供になった。それまでの `gemini-3.1-flash-image`（Nano Banana 2）は 2026-10-29 に終了する
+ * （https://ai.google.dev/gemini-api/docs/changelog）。次に替わるときは `MODEL_IMAGE` で切り替えられる
+ */
+export const DEFAULT_IMAGE_MODEL = 'gemini-nano-banana-2.1';
+
+/** 画像を作るモデル（`MODEL_IMAGE` があればそれ、無ければ既定）。 */
+export function imageModel(): string {
+  return process.env['MODEL_IMAGE']?.trim() || DEFAULT_IMAGE_MODEL;
+}
+
 /** 音声の既定のモデル。B-3 で接続を確かめたもの（仕様書 第24.4.2節）。 */
 export const DEFAULT_LIVE_MODEL = 'gemini-3.1-flash-live-preview';
 

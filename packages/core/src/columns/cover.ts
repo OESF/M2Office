@@ -18,8 +18,6 @@ import type { LlmProvider } from '../llm/provider.js';
 export const COVER_WIDTH = 1200;
 /** カバーの高さ。 */
 export const COVER_HEIGHT = 630;
-/** AI の挿絵を描くモデル（Q-169）。 */
-export const COVER_AI_MODEL = 'gemini-3.1-flash-image';
 /** 1 回のカバー作りで描く挿絵の上限（確かめを通らなければ描き直す。Q-169）。 */
 export const COVER_AI_TRIES = 3;
 /** 会社で月に描ける挿絵の上限（確かめを通らなかった分も数える。Q-169）。 */

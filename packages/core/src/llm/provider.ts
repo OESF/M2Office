@@ -140,6 +140,6 @@ export interface LlmImageGenerateRequest {
   prompt: string;
   /** 縦横の比（例: `16:9`）。 */
   aspectRatio: string;
-  /** 使うモデル（例: `gemini-3.1-flash-image`）。 */
+  /** 使うモデル（例: `gemini-nano-banana-2.1`。既定は `imageModel()`）。 */
   model: string;
 }

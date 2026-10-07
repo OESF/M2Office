@@ -8,6 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   DEFAULT_MODELS, MODEL_PRICES, UNKNOWN_MODEL_PRICE, costJpy, isHotSwapAlias, usdJpy,
+  DEFAULT_IMAGE_MODEL, imageModel,
 } from '../src/index.js';
 
 test('既定のモデルは、値段の分かっているものだけを使う', () => {
@@ -60,4 +61,20 @@ test('為替は環境変数で変えられ、おかしな値は既定に戻す',
   assert.equal(usdJpy({ USD_JPY: '0' }), 155);
   assert.equal(usdJpy({ USD_JPY: 'いくら' }), 155);
   assert.equal(usdJpy({}), 155);
+});
+
+test('画像のモデル: 既定は Nano Banana 2.1（終了する gemini-3.1-flash-image を使わない）。MODEL_IMAGE で変えられる', () => {
+  const saved = process.env['MODEL_IMAGE'];
+  try {
+    delete process.env['MODEL_IMAGE'];
+    assert.equal(imageModel(), 'gemini-nano-banana-2.1');
+    assert.equal(DEFAULT_IMAGE_MODEL, 'gemini-nano-banana-2.1');
+    process.env['MODEL_IMAGE'] = '  gemini-next-image  ';
+    assert.equal(imageModel(), 'gemini-next-image');
+    process.env['MODEL_IMAGE'] = ' ';
+    assert.equal(imageModel(), 'gemini-nano-banana-2.1');
+  } finally {
+    if (saved === undefined) delete process.env['MODEL_IMAGE'];
+    else process.env['MODEL_IMAGE'] = saved;
+  }
 });
