@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- M2Office の夜の自動の更新（仕様書 第8.6.4節）。署名つきのリリースのタグがあれば入れ、失敗したら前の版に戻す。
+     プログラムを入れ替えるため管理者の権限で動かす。会社の管理者が「機械」で止めていれば飛ばす。setup.sh が 雛形の名前 を埋める -->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>jp.m2office.update</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/bash</string>
+		<string>{{REPO_DIR}}/deploy/onsite/update.sh</string>
+		<string>--auto</string>
+		<string>--config</string>
+		<string>{{INSTALL_DIR}}/setup.conf</string>
+	</array>
+	<key>StartCalendarInterval</key>
+	<dict>
+		<key>Hour</key>
+		<integer>{{UPDATE_HOUR}}</integer>
+		<key>Minute</key>
+		<integer>30</integer>
+	</dict>
+	<key>StandardOutPath</key>
+	<string>{{DATA_DIR}}/logs/update.log</string>
+	<key>StandardErrorPath</key>
+	<string>{{DATA_DIR}}/logs/update.log</string>
+</dict>
+</plist>

@@ -11,6 +11,7 @@ export {
   type BackupConfig, type BackupRecord, type BackupStatus,
 } from './backup.js';
 export { machineStatus, writeWorkerBeat, type MachineConfig, type MachineStatus } from './status.js';
+export { readUpdateStatus, holdUpdates, takeUnnotifiedUpdateFailure, type UpdateRecord, type UpdateSettings, type UpdateStatus } from './update.js';
 
 /** 機械の様子の知らせを置く場所（`M2O_MACHINE_DIR`。無ければ `.data/machine`）。 */
 export function machineDir(env: Record<string, string | undefined>): string {

@@ -15,7 +15,7 @@ import {
   RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, GoogleContactsService, KnowledgeEmbedder, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, JGrantsApi, MockJGrants, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, MEMBER_LINE_SEND, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger,
   NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
-  defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator, aiUsageMeterFromEnv, enterAiUsage, withAiUsage, setEnqueueAiGuard, AutoMinutes, MINUTES_AGENT_ID, appPath, backupConfigFromEnv, machineDir, readBackupStatus, restoreTest, runBackup, takeBackupRequest, writeWorkerBeat
+  defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator, aiUsageMeterFromEnv, enterAiUsage, withAiUsage, setEnqueueAiGuard, AutoMinutes, MINUTES_AGENT_ID, appPath, backupConfigFromEnv, machineDir, readBackupStatus, takeUnnotifiedUpdateFailure, restoreTest, runBackup, takeBackupRequest, writeWorkerBeat
 } from '@m2office/core';
 import { canRunAgent, fileInputKey } from '@m2office/shared';
 import { fileURLToPath } from 'node:url';
@@ -532,7 +532,9 @@ let lastAiUsageCheck = 0;
 const NOTICE_REMIND_INTERVAL_MS = 15 * 60_000;
 let lastNoticeRemind = 0;
 /** 控えの設定（ローカルの形で M2O_BACKUP_DIR があるときだけ。第8.6.5節）。 */
-const backupCfg = deploymentFromEnv(process.env) === 'onsite' ? backupConfigFromEnv(process.env) : null;
+const onsite = deploymentFromEnv(process.env) === 'onsite';
+const backupCfg = onsite ? backupConfigFromEnv(process.env) : null;
+let lastUpdateCheck = 0;
 let lastBackupCheck = 0;
 
 /** 機械の知らせを、会社の管理者に届ける（ローカルの形は 1 社。第8.6.7節）。 */
@@ -619,6 +621,19 @@ while (running) {
       }
     } catch (err) {
       log.warn('控えの見回りで例外が発生しました', { err });
+    }
+  }
+  // 更新（機械の上の update.sh が行う）に失敗していたら、会社の管理者に 1 度だけ知らせる（第8.6.4節）
+  if (onsite && Date.now() - lastUpdateCheck >= 60_000) {
+    lastUpdateCheck = Date.now();
+    try {
+      const failed = await takeUnnotifiedUpdateFailure(machineDir(process.env));
+      if (failed) {
+        await notifyMachine(failed.result === 'rolled-back' ? `新しい版（${failed.to}）を入れられず、前の版に戻しました` : `新しい版（${failed.to}）を入れられませんでした`,
+          `${failed.error ?? ''}。管理者ページの「機械」で確かめ、導入した技術者に伝えてください。`);
+      }
+    } catch (err) {
+      log.warn('更新の結果の見回りで例外が発生しました', { err });
     }
   }
 

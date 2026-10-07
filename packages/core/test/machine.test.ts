@@ -55,3 +55,30 @@ test('設定: 控えは置き場があるときだけ。入口の名前は APP_B
   assert.equal(machineConfigFromEnv({ APP_BASE_URL: 'https://{tenant}.m2office.online' }, '1.0.0').host, null);
   assert.deepEqual(machineConfigFromEnv({ LOCAL_LLM_URL: 'http://127.0.0.1:11434/v1', LOCAL_LLM_MODEL: 'gemma3' }, '1').localLlm, { url: 'http://127.0.0.1:11434/v1', model: 'gemma3' });
 });
+
+test('更新の様子: update.sh の結果を読み、止める・延ばす印を書き、失敗は 1 度だけ知らせる（第8.6.4節）', async () => {
+  const { mkdtemp, writeFile } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { readUpdateStatus, holdUpdates, takeUnnotifiedUpdateFailure } = await import('../src/index.js');
+  const dir = await mkdtemp(join(tmpdir(), 'm2o-update-'));
+  assert.deepEqual(await readUpdateStatus(dir), { settings: null, last: null, history: [], heldUntil: null });
+  await writeFile(join(dir, 'update-settings.json'), JSON.stringify({ auto: true, signed: true, hour: 3 }));
+  await writeFile(join(dir, 'update.json'), JSON.stringify({ history: [
+    { at: '2026-10-06T18:30:00Z', from: 'v0.17.0', to: 'v0.18.0', result: 'updated' },
+    { at: '2026-10-07T18:30:00Z', from: 'v0.18.0', to: 'v0.19.0', result: 'rolled-back', error: '新しい版が動きませんでした' },
+  ] }));
+  const s = await readUpdateStatus(dir);
+  assert.equal(s.settings?.auto, true);
+  assert.equal(s.last?.result, 'rolled-back');
+  const now = new Date('2026-10-08T00:00:00Z');
+  const until = await holdUpdates(dir, 7, 'u1', now);
+  assert.equal(until, '2026-10-15T00:00:00.000Z');
+  assert.equal((await readUpdateStatus(dir, now)).heldUntil, until);
+  assert.equal((await readUpdateStatus(dir, new Date('2026-10-16T00:00:00Z'))).heldUntil, null);
+  assert.equal(await holdUpdates(dir, null, 'u1', now), null);
+  assert.equal((await readUpdateStatus(dir, now)).heldUntil, null);
+  const first = await takeUnnotifiedUpdateFailure(dir);
+  assert.equal(first?.to, 'v0.19.0');
+  assert.equal(await takeUnnotifiedUpdateFailure(dir), null);
+});

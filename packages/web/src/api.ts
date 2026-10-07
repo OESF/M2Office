@@ -2135,6 +2135,8 @@ export const api = {
     machine: () => call<MachineView>('/admin/machine'),
     /** 今すぐ控えを取る（ワーカーが次の見回りで取る）。 */
     machineBackup: () => call<{ ok: true }>('/admin/machine/backup', { method: 'POST', body: '{}' }),
+    /** 夜の自動の更新を止める（延ばす。`days`）か、止めるのをやめる（`null`）。 */
+    machineUpdateHold: (days: number | null) => call<{ heldUntil: string | null }>('/admin/machine/update-hold', { method: 'PUT', body: JSON.stringify({ days }) }),
     /** 今月の AI の利用と上限（仕様書 第6.6.2節）。用途ごと・人ごと。費用は概算。 */
     aiUsage: () => call<AiUsageView>('/admin/ai-usage'),
     runs: () => call<{ items: AdminRun[] }>('/admin/runs'),
@@ -2520,6 +2522,12 @@ export interface MachineView {
       lastOk: string | null;
       restoreTest: { at: string; ok: boolean; name: string; tables: number; error: string | null } | null;
     } | null;
+  };
+  /** 更新（仕様書 第8.6.4節）。機械の上の update.sh が書いた結果と、止めている期限。 */
+  update: {
+    settings: { auto: boolean; signed: boolean; hour: number } | null;
+    last: { at: string; from: string; to: string; result: 'updated' | 'rolled-back' | 'failed' | 'none'; error?: string } | null;
+    heldUntil: string | null;
   };
 }
 

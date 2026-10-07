@@ -11,6 +11,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import pg from 'pg';
 import { diskSpace, readBackupStatus, type BackupStatus } from './backup.js';
+import { readUpdateStatus, type UpdateStatus } from './update.js';
 
 /** ワーカーの知らせが、これより古ければ止まっているとみなす（ミリ秒）。 */
 const WORKER_STALE_MS = 3 * 60_000;
@@ -41,6 +42,8 @@ export interface MachineStatus {
   localAi: { configured: boolean; ok: boolean; models: string[]; error: string | null };
   disk: { data: { free: number; total: number } | null; backup: { free: number; total: number } | null };
   backup: { configured: boolean; status: BackupStatus | null };
+  /** 更新（第8.6.4節）。update.sh が書いた結果と、止めている期限。 */
+  update: UpdateStatus;
 }
 
 /** ワーカーが動いていることを書く（見回りのたび。30 秒より短い間隔では書かない）。 */
@@ -123,5 +126,6 @@ export async function machineStatus(cfg: MachineConfig, now: Date = new Date()):
     database, worker, entrance, localAi,
     disk: { data: await diskSpace(cfg.filesDir), backup: cfg.backupDir ? await diskSpace(cfg.backupDir) : null },
     backup: { configured: !!cfg.backupDir, status: cfg.backupDir ? await readBackupStatus(cfg.backupDir) : null },
+    update: await readUpdateStatus(cfg.dir, now),
   };
 }

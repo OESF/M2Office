@@ -14,7 +14,7 @@ import {
   isValidInvoiceNumber, parsePresentationId, type AutomationPolicy, type CompanyInfo, type Role, type SlideTemplate, type TenantSettings,
   type AuditEvent, type User, type WritingStyle, DEFAULT_AI_PER_USER_SHARE
 } from '@m2office/shared';
-import { semanticSearchEnabled,
+import { holdUpdates, machineDir, semanticSearchEnabled,
   DEFAULT_STANDARD_MINUTES, GOOGLE_DATA_RETENTION_DAYS, KNOWLEDGE_MAX_CHARS,
   describeRule, scheduleBlocker, scheduleChecks, stepLabel, toolGoogleScopes, type AuditQuery, jstMonth, appPath, backupConfigFromEnv, machineConfigFromEnv, machineStatus, requestBackup
 } from '@m2office/core';
@@ -186,6 +186,22 @@ export function adminRoute(deps: AppDeps) {
     if (deps.ai.deployment() !== 'onsite') return c.json({ error: 'ローカルの形だけで使えます' }, 404);
     const version = (() => { try { return (JSON.parse(readFileSync(appPath('package.json'), 'utf8')) as { version?: string }).version ?? '0'; } catch { return '0'; } })();
     return c.json(await machineStatus(machineConfigFromEnv(process.env, version)));
+  });
+
+  /**
+   * 夜の自動の更新を止める（延ばす）か、止めるのをやめる（第8.6.4節）。本文 `days`（1〜30）、`null` で止めるのをやめる。
+   *
+   * @remarks 更新そのものは機械の上の update.sh が行い、この印を見て飛ばす。M2Office のプロセスから更新は始めない
+   */
+  app.put('/machine/update-hold', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    if (deps.ai.deployment() !== 'onsite') return c.json({ error: 'ローカルの形だけで使えます' }, 404);
+    const b = await c.req.json<{ days?: unknown }>().catch(() => ({} as { days?: unknown }));
+    const days = b.days === null ? null : Number(b.days);
+    if (days !== null && !(days >= 1 && days <= 30)) return c.json({ error: '延ばす日数は 1〜30 日にしてください' }, 400);
+    const until = await holdUpdates(machineDir(process.env), days, user.id);
+    await audit(deps, tenant.id, user.id, until ? 'machine.update_hold' : 'machine.update_resume', 'machine', 'update', { until });
+    return c.json({ heldUntil: until });
   });
 
   /** 今すぐ控えを取る（ワーカーが次の見回りで取る。第8.6.5節）。控えの置き場が無ければ 400。 */

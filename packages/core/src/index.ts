@@ -177,5 +177,6 @@ export {
   runBackup, restoreTest, readBackupStatus, requestBackup, takeBackupRequest, backupsToKeep, backupName, diskSpace,
   machineStatus, writeWorkerBeat, machineDir, backupConfigFromEnv, machineConfigFromEnv,
   type BackupConfig, type BackupRecord, type BackupStatus, type MachineConfig, type MachineStatus,
+  readUpdateStatus, holdUpdates, takeUnnotifiedUpdateFailure, type UpdateRecord, type UpdateSettings, type UpdateStatus,
 } from './machine/index.js';
 export { scoreEval, CONTRACT_REVIEW_AVOID, CONTRACT_REVIEW_MUST, type EvalScore } from './evals/score.js';

@@ -7,10 +7,10 @@
 	<string>jp.m2office.caddy</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>{{APP_ROOT}}/runtime/caddy/caddy</string>
+		<string>{{CADDY_BIN}}</string>
 		<string>run</string>
 		<string>--config</string>
-		<string>{{APP_ROOT}}/Caddyfile</string>
+		<string>{{CADDYFILE}}</string>
 	</array>
 	<key>EnvironmentVariables</key>
 	<dict>

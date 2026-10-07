@@ -210,9 +210,14 @@ MSG
 
 ### 8. 注釈付きタグを作る
 
+署名の鍵（`git config user.signingkey`）が設定されていれば、署名つきのタグにする。ローカルの形の機械は、署名を確かめられたタグだけを自動で入れる（仕様書 第8.6.4節）。
+
 ```bash
-git tag -a vX.Y.Z -m "Version X.Y.Z — <CHANGELOG と同じ日本語の概要>"
+git config --get user.signingkey >/dev/null && git tag -s vX.Y.Z -m "Version X.Y.Z — <CHANGELOG と同じ日本語の概要>" \
+  || git tag -a vX.Y.Z -m "Version X.Y.Z — <CHANGELOG と同じ日本語の概要>"
 ```
+
+署名の鍵が無いときは、署名なしのタグになったこと（ローカルの形の自動の更新では入らないこと）を報告に書く。
 
 ### 9. 生成物を作り直す
 

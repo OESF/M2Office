@@ -459,9 +459,39 @@ function Machine() {
               </>
             )}
           </div>
+          <MachineUpdate data={data.update} onChanged={load} onError={setError} />
         </>
       )}
     </>
+  );
+}
+
+/** 更新の結果の呼び名。 */
+const UPDATE_RESULT: Record<string, string> = { updated: '入れました', 'rolled-back': '入れられず、前の版に戻しました', failed: '入れられませんでした', none: '新しい版はありませんでした' };
+
+/**
+ * 「機械」の更新（仕様書 第8.6.4節）。直近の結果と、夜の自動の更新を止める・延ばす。
+ *
+ * @remarks 更新そのものは機械の上で動く（導入した技術者が設定する）。ここからは止める・延ばすことだけができる
+ */
+function MachineUpdate({ data, onChanged, onError }: { data: MachineView['update']; onChanged: () => void; onError: (m: string) => void }) {
+  const hold = (days: number | null) => void api.admin.machineUpdateHold(days).then(onChanged).catch((e) => onError(describeError(e, '変えられませんでした')));
+  const s = data.settings;
+  return (
+    <div className="card">
+      <h3>更新</h3>
+      <dl className="kv">
+        <dt>自動の更新</dt><dd>{!s ? <span className="muted">設定されていません</span> : s.auto ? `毎晩 ${s.hour} 時ごろ` : <span className="muted">切っています{s.signed ? '' : '（署名の鍵が入っていません）'}</span>}</dd>
+        <dt>直近の更新</dt><dd>{data.last ? <>
+          <span className={`badge ${data.last.result === 'updated' || data.last.result === 'none' ? 'ok' : 'warn'}`}>{whenText(data.last.at)} {UPDATE_RESULT[data.last.result] ?? data.last.result}</span>
+          {' '}<span className="small muted">{data.last.result === 'none' ? data.last.from : `${data.last.from} → ${data.last.to}`}{data.last.error ? `（${data.last.error}）` : ''}</span>
+        </> : <span className="muted">まだありません</span>}</dd>
+        {data.heldUntil && <><dt>止めている</dt><dd>{whenText(data.heldUntil)} まで</dd></>}
+      </dl>
+      {s?.auto && (data.heldUntil
+        ? <button className="btn ghost small" onClick={() => hold(null)}>止めるのをやめる</button>
+        : <button className="btn ghost small" onClick={() => hold(7)}>7 日延ばす</button>)}
+    </div>
   );
 }
 

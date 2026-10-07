@@ -1,26 +1,24 @@
 # M2Office ローカルの形の入口（仕様書 第8.6.2節・第8.6.9節、ADR-0077）。
-# 導入の道具が {{…}} を埋める。画面の静的なファイルを出し、/v1 を API に渡し、TLS を受け持つ。
-# 証明書は名前の形（公的な証明書を DNS で所有を確かめて取る。DNS-01）。DNS の事業者のつなぎを入れた Caddy が要る（xcaddy で組み立てる）。
-# IP の形（Google を使わない会社だけ）は、tls の行を「tls internal」にする（機械が自分の認証局で証明書を出す）。
+# セットアップのスクリプト（setup.sh）が 雛形の名前 を埋める。画面の静的なファイルを出し、/v1 を API に渡し、TLS を受け持つ。
+# 証明書は名前の形（公的な証明書を DNS で所有を確かめて取る。DNS-01）。DNS の事業者のつなぎを足した Caddy が要る（setup.sh が caddy add-package で足す）。
+# IP の形（Google を使わない会社だけ）は、機械が自分の認証局で証明書を出す（tls internal）。DNS の鍵を含むため、管理者だけが読めるようにする。
 {
 	email {{ACME_EMAIL}}
 	# 同じ機械の M2Medical などの名前は、ここに置いた設定を読み込む（第8.6.9節。ポートで分けず名前で分ける）
-	import /Library/M2Office/front.d/*.caddy
+	import {{INSTALL_DIR}}/front.d/*.caddy
 }
 
 {{HOST}} {
 	encode zstd gzip
 	header Strict-Transport-Security "max-age=31536000"
-	tls {
-		dns {{DNS_PROVIDER}} {{DNS_TOKEN}}
-	}
+{{TLS_BLOCK}}
 	# API と音声の秘書（WebSocket）
 	handle /v1/* {
 		reverse_proxy 127.0.0.1:{{API_PORT}}
 	}
 	# 画面。知らない道は画面の入口に回す（画面の中で道を見分ける）
 	handle {
-		root * {{APP_ROOT}}/web
+		root * {{RELEASE_DIR}}/web
 		try_files {path} /index.html
 		file_server
 	}
