@@ -40,6 +40,23 @@ export class OpsAppSide {
     return Number(rows[0]?.n ?? 0);
   }
 
+  /**
+   * 期限の来た通常の停止を行う（ワーカーが 1 分ごとに呼ぶ。第23.8.6節）。
+   *
+   * @returns 止めた会社の数
+   */
+  async applyDueSuspensions(): Promise<number> {
+    const { rows } = await this.pool.query('select m2o_ops_apply_due() as n');
+    return Number(rows[0]?.n ?? 0);
+  }
+
+  /** 会社の停止の予告（止める予定の日時。無ければ `null`）。会社の画面の上の帯に出す。 */
+  async suspendAt(tenantId: string): Promise<string | null> {
+    const { rows } = await this.pool.query('select m2o_tenant_suspend_at($1) as at', [tenantId]);
+    const at = rows[0]?.at;
+    return at instanceof Date ? at.toISOString() : at ? String(at) : null;
+  }
+
   /** 運営主体の設定（法人名が入っていなければ `null`）。5 分覚えておく。 */
   async operatorProfile(now = Date.now()): Promise<OperatorProfile | null> {
     if (this.profile && now - this.profile.at < PROFILE_TTL_MS) return this.profile.value;

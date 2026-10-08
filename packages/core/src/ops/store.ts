@@ -94,6 +94,26 @@ export interface ServerStatus {
   ai: { today: number; month: number; lastMonthSamePeriod: number };
 }
 
+/** 停止・緊急停止・再開の申請（第23.8.6節）。 */
+export interface StatusRequest {
+  id: string;
+  tenantId: string;
+  tenantName: string | null;
+  kind: 'suspend' | 'lock' | 'resume';
+  reasonCode: string;
+  reason: string;
+  state: 'pending' | 'scheduled' | 'done' | 'rejected' | 'withdrawn';
+  fromStatus: string | null;
+  requestedBy: string;
+  requestedAt: string;
+  decidedBy: string | null;
+  decidedAt: string | null;
+  effectiveAt: string | null;
+  doneAt: string | null;
+  confirmedBy: string | null;
+  confirmedAt: string | null;
+}
+
 /** 運営の操作の記録。 */
 export interface OpsAuditEntry {
   id: string;
@@ -126,7 +146,7 @@ export class OpsRuleError extends Error {
 /** データベースの関数の失敗を、決めた理由に直す（決めた理由でなければそのまま投げる）。 */
 function rethrow(err: unknown): never {
   const msg = err instanceof Error ? err.message : '';
-  if (/^(subdomain_invalid|subdomain_taken|domain_taken|admin_domain|status_invalid|status_locked|not_found)$/.test(msg)) throw new OpsRuleError(msg);
+  if (/^(subdomain_invalid|subdomain_taken|domain_taken|admin_domain|status_invalid|status_locked|not_found|reason_required|already_requested|not_stopped|not_pending|same_operator|kind_invalid)$/.test(msg)) throw new OpsRuleError(msg);
   throw err;
 }
 
@@ -267,6 +287,56 @@ export class OpsStore {
          contact = excluded.contact, updated_by = excluded.updated_by, updated_at = now()`,
       [p.nameJa, p.nameEn, p.address, p.web, p.contact, by],
     );
+  }
+
+  /**
+   * 停止・緊急停止・再開の申請の一覧（新しい順）。
+   *
+   * @param tenantId 会社を絞る。無ければ、扱いの残っているもの（承認待ち・予告中・確認待ちの緊急停止）と直近 30 日のもの
+   */
+  async listStatusRequests(tenantId?: string): Promise<StatusRequest[]> {
+    const { rows } = await this.pool.query(
+      `select r.*, (select o.name from ops.tenant_names() o where o.id = r.tenant_id) as tenant_name from ops.status_requests r
+        where ($1::text is null and (r.state in ('pending', 'scheduled') or (r.kind = 'lock' and r.confirmed_at is null) or r.requested_at > now() - interval '30 days'))
+           or r.tenant_id = $1
+        order by r.requested_at desc limit 200`,
+      [tenantId ?? null],
+    );
+    return rows.map((r) => ({
+      id: r.id, tenantId: r.tenant_id, tenantName: r.tenant_name ?? null, kind: r.kind, reasonCode: r.reason_code, reason: r.reason, state: r.state,
+      fromStatus: r.from_status, requestedBy: r.requested_by, requestedAt: iso(r.requested_at)!, decidedBy: r.decided_by, decidedAt: iso(r.decided_at),
+      effectiveAt: iso(r.effective_at), doneAt: iso(r.done_at), confirmedBy: r.confirmed_by, confirmedAt: iso(r.confirmed_at),
+    }));
+  }
+
+  /**
+   * 停止・緊急停止・再開を申請する（緊急停止はすぐに止める）。
+   *
+   * @throws {OpsRuleError} 理由が無い・状態が合わない・同じ申請があるなど
+   */
+  async requestStatus(tenantId: string, kind: StatusRequest['kind'], reasonCode: string, reason: string, operatorId: string): Promise<string> {
+    try {
+      const { rows } = await this.pool.query('select ops.request_status($1,$2,$3,$4,$5) as id', [tenantId, kind, reasonCode, reason, operatorId]);
+      return rows[0].id as string;
+    } catch (err) { rethrow(err); }
+  }
+
+  /** 申請を承認するか、しない（申請した人は承認できない）。 */
+  async decideStatus(requestId: string, approve: boolean, operatorId: string): Promise<string> {
+    try {
+      const { rows } = await this.pool.query('select ops.decide_status($1,$2,$3) as s', [requestId, approve, operatorId]);
+      return rows[0].s as string;
+    } catch (err) { rethrow(err); }
+  }
+
+  /** 承認待ちか予告中の申請を取り下げる。 */
+  async withdrawStatus(requestId: string, operatorId: string): Promise<void> {
+    try { await this.pool.query('select ops.withdraw_status($1,$2)', [requestId, operatorId]); } catch (err) { rethrow(err); }
+  }
+
+  /** 緊急停止を、事後に別の運営者が確かめる。 */
+  async confirmLock(requestId: string, operatorId: string): Promise<void> {
+    try { await this.pool.query('select ops.confirm_lock($1,$2)', [requestId, operatorId]); } catch (err) { rethrow(err); }
   }
 
   /** 会社ごとの数（その場で数える）。 */

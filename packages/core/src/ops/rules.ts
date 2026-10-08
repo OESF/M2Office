@@ -15,18 +15,24 @@ export type OperatorRole = 'admin' | 'support' | 'monitor';
 export const OPERATOR_ROLES: readonly OperatorRole[] = ['admin', 'support', 'monitor'];
 
 /** 運営者の操作。 */
-export type OpsAction = 'view' | 'tenant.create' | 'tenant.status' | 'machine.manage' | 'operator.manage' | 'settings.manage';
+export type OpsAction = 'view' | 'tenant.create' | 'tenant.status' | 'tenant.suspend' | 'tenant.lock' | 'machine.manage' | 'operator.manage' | 'settings.manage';
 
 /**
  * 運営者のロールで、その操作ができるか。
  *
- * @remarks 運営管理者はすべて（運営主体の設定を含む）、サポートは見ることと会社を作る・切り替えるまで、監視は見ることだけ
+ * @remarks 運営管理者はすべて（運営主体の設定を含む）。サポートは見ることと、会社を作る・切り替える・停止と再開の申請と承認まで。
+ * 監視は見ることと、緊急停止の発動だけ（緊急停止は運営者なら誰でも発動できる。Q-63）
  */
 export function operatorCan(role: OperatorRole, action: OpsAction): boolean {
   if (role === 'admin') return true;
-  if (role === 'support') return action === 'view' || action === 'tenant.create' || action === 'tenant.status';
-  return action === 'view';
+  if (action === 'view' || action === 'tenant.lock') return true;
+  return role === 'support' && (action === 'tenant.create' || action === 'tenant.status' || action === 'tenant.suspend');
 }
+
+/** 停止の理由の種類（第23.8.6節）。 */
+export const SUSPEND_REASONS = { unpaid: '未入金', violation: '規約違反', other: 'そのほか' } as const;
+/** 緊急停止の理由の種類（第23.8.6節）。 */
+export const LOCK_REASONS = { abuse: '不正利用', takeover: 'アカウントの乗っ取り', leak: '情報漏洩の疑い', other: 'そのほか' } as const;
 
 /** 会社を作る入力。 */
 export interface NewTenantInput {
@@ -68,7 +74,13 @@ export function tenantErrorText(code: string): string {
     case 'admin_domain': return '最初の管理者のメールアドレスは、会社のドメインのものにしてください';
     case 'status_invalid': return '状態は試用か稼働中にしてください';
     case 'status_locked': return '停止中・解約済みの会社は、ここでは切り替えられません';
-    case 'not_found': return '会社が見つかりません';
+    case 'not_found': return '見つかりません';
+    case 'reason_required': return '理由を書いてください';
+    case 'already_requested': return 'この会社には、すでに同じ申請があります';
+    case 'not_stopped': return 'この会社は止まっていません';
+    case 'not_pending': return 'この申請は、もう扱えません（承認・取り下げ済みなど）';
+    case 'same_operator': return '申請した人とは別の運営者が行ってください';
+    case 'kind_invalid': return '操作の種類が違います';
     default: return '処理できませんでした';
   }
 }
@@ -188,4 +200,22 @@ export function tenantsCsv(rows: {
   const lines = rows.map((r) => [r.name, r.subdomain, r.workspaceDomain, r.status, r.createdAt, r.usersActive, r.usersInvited, r.users30d, r.lastUsedAt,
     r.runsToday, r.runs30d, r.runsFailed30d, r.conversations30d, Math.round(r.aiCostMonth), r.filesBytes, r.extensions, r.googleConnections].map(csvCell).join(','));
   return `\ufeff${[head.join(','), ...lines].join('\r\n')}\r\n`;
+}
+
+/**
+ * 停止・緊急停止・再開のあとに、運営者が会社の管理者へ自分で渡す案内の文（運営の画面からは送らない）。
+ *
+ * @param kind 何を伝えるか
+ */
+export function statusNoticeText(kind: 'suspend_scheduled' | 'lock' | 'resume', p: { name: string; effectiveAt?: string | null; reasonLabel: string }): string {
+  const date = p.effectiveAt ? new Date(p.effectiveAt).toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo', month: 'long', day: 'numeric' }) : '';
+  if (kind === 'suspend_scheduled') {
+    return [`${p.name} ご担当者様`, '', `M2Office のご利用を、${date}に停止いたします（理由: ${p.reasonLabel}）。`, '停止のあとも、これまでのデータの閲覧はできます。',
+      '解除をご希望の場合は、このメールにご返信ください。'].join('\n');
+  }
+  if (kind === 'lock') {
+    return [`${p.name} ご担当者様`, '', `M2Office のご利用を、安全のため一時的に停止いたしました（理由: ${p.reasonLabel}）。`, '停止の間はログインできません。データは保たれています。',
+      '詳しくはあらためてご連絡いたします。'].join('\n');
+  }
+  return [`${p.name} ご担当者様`, '', 'M2Office のご利用を再開いたしました。これまでどおりお使いいただけます。'].join('\n');
 }

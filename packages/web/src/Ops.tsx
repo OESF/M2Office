@@ -10,7 +10,7 @@ import { copyText } from './clipboard.js';
 import { NavItem, SideNavLayout, ThemeToggle, type IconName } from './nav.js';
 import {
   opsApi, OpsApiError, TENANTS_CSV_URL, type MachineRow, type OperatorProfileView, type OperatorRole, type OperatorView, type OpsAuditRow, type OpsMe,
-  type ServerStatusView, type TenantDetailView, type TenantRow,
+  type ServerStatusView, type StatusRequestRow, type TenantDetailView, type TenantRow,
 } from './ops-api.js';
 
 const STATUS_LABEL: Record<TenantRow['status'], string> = { trial: '試用', active: '稼働中', suspended: '停止', locked: '緊急停止', cancelled: '解約済み' };
@@ -23,6 +23,17 @@ const ACTION_LABEL: Record<string, string> = {
   'ops.login': 'ログイン', 'ops.logout': 'ログアウト', 'tenant.create': '会社を作った', 'tenant.status': '状態を変えた',
   'machine.add': '機械を登録した', 'machine.remove': '機械を削除した', 'operator.add': '運営者を足した', 'operator.update': '運営者を変えた',
   'tenant.view': '会社の詳細を開いた', 'tenants.export': '会社一覧を書き出した', 'settings.operator': '運営主体の設定を変えた',
+  'tenant.suspend_request': '停止を申請した', 'tenant.lock_request': '緊急停止した', 'tenant.resume_request': '再開を申請した',
+  'tenant.status_approve': '申請を承認した', 'tenant.status_reject': '申請を承認しなかった', 'tenant.status_withdraw': '申請を取り下げた', 'tenant.lock_confirm': '緊急停止を確認した',
+  'tenant.suspend_requested': '停止の申請', 'tenant.suspend_scheduled': '停止の予告', 'tenant.suspend': '停止した', 'tenant.lock': '緊急停止した',
+  'tenant.lock_confirmed': '緊急停止の確認', 'tenant.resume_requested': '再開の申請', 'tenant.resume': '再開した',
+};
+const KIND_LABEL: Record<StatusRequestRow['kind'], string> = { suspend: '通常の停止', lock: '緊急停止', resume: '再開' };
+const STATE_LABEL: Record<StatusRequestRow['state'], string> = { pending: '承認待ち', scheduled: '予告中', done: '行った', rejected: '承認しなかった', withdrawn: '取り下げた' };
+const REASONS: Record<StatusRequestRow['kind'], Record<string, string>> = {
+  suspend: { unpaid: '未入金', violation: '規約違反', other: 'そのほか' },
+  lock: { abuse: '不正利用', takeover: 'アカウントの乗っ取り', leak: '情報漏洩の疑い', other: 'そのほか' },
+  resume: { resolved: '解消した' },
 };
 
 const when = (iso: string | null) => {
@@ -106,9 +117,10 @@ function OpsLogin({ onLoggedIn }: { onLoggedIn: () => void }) {
   );
 }
 
-type OpsPage = 'tenants' | 'server' | 'machines' | 'operators' | 'audit' | 'settings';
+type OpsPage = 'tenants' | 'requests' | 'server' | 'machines' | 'operators' | 'audit' | 'settings';
 const PAGES: { id: OpsPage; label: string; icon: IconName }[] = [
   { id: 'tenants', label: '会社一覧', icon: 'company' },
+  { id: 'requests', label: '停止と再開', icon: 'approvals' },
   { id: 'server', label: '稼働状況', icon: 'usage' },
   { id: 'machines', label: 'ローカルの形の機械', icon: 'dashboard' },
   { id: 'operators', label: '運営者', icon: 'users' },
@@ -132,6 +144,12 @@ function useFlaggedMachines(): number | null {
 function OpsConsole({ me, onLogout }: { me: OpsMe; onLogout: () => void }) {
   const [page, setPage] = useState<OpsPage>('tenants');
   const flagged = useFlaggedMachines();
+  const [requests, setRequests] = useState<StatusRequestRow[]>([]);
+  const loadRequests = useCallback(() => { opsApi.statusRequests().then((r) => setRequests(r.requests)).catch(() => undefined); }, []);
+  useEffect(() => { loadRequests(); const t = window.setInterval(loadRequests, 60_000); return () => clearInterval(t); }, [loadRequests]);
+  // 扱いの残っているもの（承認待ちと、確認待ちの緊急停止）。確認待ちの緊急停止は運営者全員に、どの画面の上にも出す
+  const unconfirmed = requests.filter((r) => r.kind === 'lock' && r.state === 'done' && !r.confirmedAt);
+  const todo = requests.filter((r) => r.state === 'pending').length + unconfirmed.length;
   return (
     <div className="app">
       <header className="topbar">
@@ -141,9 +159,16 @@ function OpsConsole({ me, onLogout }: { me: OpsMe; onLogout: () => void }) {
         <span className="badge">{me.operator.displayName}（{ROLE_LABEL[me.operator.role]}）</span>
         <button className="btn ghost small" onClick={onLogout}>ログアウト</button>
       </header>
-      <SideNavLayout extraClass="no-talk" nav={<>{PAGES.map((p) => <NavItem key={p.id} icon={p.icon} label={p.label} hint={p.id === 'machines' && flagged ? `印 ${flagged}` : ''} active={page === p.id} onClick={() => setPage(p.id)} />)}</>}>
+      <SideNavLayout extraClass="no-talk" nav={<>{PAGES.map((p) => <NavItem key={p.id} icon={p.icon} label={p.label} hint={p.id === 'machines' && flagged ? `印 ${flagged}` : p.id === 'requests' && todo ? `要対応 ${todo}` : ''} active={page === p.id} onClick={() => setPage(p.id)} />)}</>}>
         <main className="canvas">
-          {page === 'tenants' && <Tenants me={me} flagged={flagged} onMachines={() => setPage('machines')} />}
+          {unconfirmed.length > 0 && (
+            <div className="suspended-banner" role="alert">
+              <strong>確認待ちの緊急停止: {unconfirmed.map((r) => `${r.tenantName ?? r.tenantId}（${when(r.requestedAt)}）`).join('、')}</strong>
+              {' '}<button className="link-btn" onClick={() => setPage('requests')}>確かめる</button>
+            </div>
+          )}
+          {page === 'tenants' && <Tenants me={me} flagged={flagged} onMachines={() => setPage('machines')} onChanged={loadRequests} />}
+          {page === 'requests' && <Requests me={me} rows={requests} onChanged={loadRequests} />}
           {page === 'server' && <Server />}
           {page === 'settings' && <Settings me={me} />}
           {page === 'machines' && <Machines me={me} />}
@@ -158,7 +183,7 @@ function OpsConsole({ me, onLogout }: { me: OpsMe; onLogout: () => void }) {
 type SortKey = 'name' | 'subdomain' | 'status' | 'createdAt' | 'lastUsedAt' | 'runs30d' | 'aiCostMonth' | 'filesBytes';
 
 /** 会社一覧（要約・検索・状態の絞り込み・並べ替え）と、会社を作る。 */
-function Tenants({ me, flagged, onMachines }: { me: OpsMe; flagged: number | null; onMachines: () => void }) {
+function Tenants({ me, flagged, onMachines, onChanged }: { me: OpsMe; flagged: number | null; onMachines: () => void; onChanged: () => void }) {
   const [openId, setOpenId] = useState<string | null>(null);
   const [rows, setRows] = useState<TenantRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -200,7 +225,7 @@ function Tenants({ me, flagged, onMachines }: { me: OpsMe; flagged: number | nul
     opsApi.setTenantStatus(t.id, to).then(load).catch((e) => setError(errText(e, '変えられませんでした')));
   };
 
-  if (openId) return <TenantDetail id={openId} onBack={() => { setOpenId(null); load(); }} />;
+  if (openId) return <TenantDetail id={openId} me={me} onBack={() => { setOpenId(null); load(); }} onChanged={onChanged} />;
   return (
     <>
       <h2>会社一覧</h2>
@@ -451,10 +476,11 @@ function Audit() {
 }
 
 /** 会社の詳細（概要・利用状況・稼働・シート・履歴）。業務の中身は出さない。 */
-function TenantDetail({ id, onBack }: { id: string; onBack: () => void }) {
+function TenantDetail({ id, me, onBack, onChanged }: { id: string; me: OpsMe; onBack: () => void; onChanged: () => void }) {
   const [data, setData] = useState<{ detail: TenantDetailView; opsHistory: OpsAuditRow[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => { opsApi.tenantDetail(id).then(setData).catch((e) => setError(errText(e, '読み込めませんでした'))); }, [id]);
+  const [n, setN] = useState(0);
+  useEffect(() => { opsApi.tenantDetail(id).then(setData).catch((e) => setError(errText(e, '読み込めませんでした'))); }, [id, n]);
   const d = data?.detail;
   const rate = (f: number, n: number) => (n ? `${Math.round((f / n) * 1000) / 10}%` : '—');
   return (
@@ -474,6 +500,7 @@ function TenantDetail({ id, onBack }: { id: string; onBack: () => void }) {
               <dt>先方の管理者</dt><dd>{d.seats.filter((s) => s.email).map((s) => `${s.displayName}（${s.email}）`).join('、') || '—'}</dd>
             </dl>
           </div>
+          <StatusControl tenant={d.tenant} me={me} onChanged={() => { setN((x) => x + 1); onChanged(); }} />
           <div className="card">
             <h3>利用状況</h3>
             <table className="table">
@@ -522,7 +549,8 @@ function TenantDetail({ id, onBack }: { id: string; onBack: () => void }) {
                 {[...d.history.map((h) => ({ at: h.occurredAt, what: ACTION_LABEL[h.action] ?? h.action, detail: h.detail })),
                   ...(data?.opsHistory ?? []).filter((a) => a.action !== 'tenant.view').map((a) => ({ at: a.occurredAt, what: `${ACTION_LABEL[a.action] ?? a.action}（${a.operatorEmail ?? a.operatorId}）`, detail: a.detail }))]
                   .sort((a, b) => (a.at < b.at ? 1 : -1))
-                  .map((h, i) => <tr key={i}><td>{when(h.at)}</td><td>{h.what}</td><td className="small muted">{Object.entries(h.detail).map(([k, v]) => `${k}: ${String(v)}`).join('、')}</td></tr>)}
+                  // 申請の番号は内部の印なので出さない
+                  .map((h, i) => <tr key={i}><td>{when(h.at)}</td><td>{h.what}</td><td className="small muted">{Object.entries(h.detail).filter(([k]) => k !== 'request').map(([k, v]) => `${k}: ${String(v)}`).join('、')}</td></tr>)}
               </tbody>
             </table>
           </div>
@@ -601,6 +629,125 @@ function Settings({ me }: { me: OpsMe }) {
           {saved && <p className="ok-msg small">保存しました</p>}
         </div>
       )}
+    </>
+  );
+}
+
+/** 運営者が会社へ自分で渡す案内の文と、写すボタン。 */
+function NoticeToSend({ text, onClose }: { text: string; onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="card">
+      <h3>会社の管理者へ渡す案内</h3>
+      <div className="field"><textarea readOnly value={text} rows={6} /></div>
+      <button className="btn small" onClick={() => void copyText(text).then(setCopied)}>{copied ? '写しました' : '案内を写す'}</button>{' '}
+      <button className="btn ghost small" onClick={onClose}>閉じる</button>
+    </div>
+  );
+}
+
+/** 会社の詳細の「利用の停止と再開」。申請・緊急停止と、その会社の申請の記録。 */
+function StatusControl({ tenant, me, onChanged }: { tenant: TenantDetailView['tenant']; me: OpsMe; onChanged: () => void }) {
+  const [rows, setRows] = useState<StatusRequestRow[] | null>(null);
+  const [form, setForm] = useState<StatusRequestRow['kind'] | null>(null);
+  const [code, setCode] = useState('');
+  const [reason, setReason] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const load = useCallback(() => { opsApi.statusRequests(tenant.id).then((r) => setRows(r.requests)).catch((e) => setError(errText(e, '読み込めませんでした'))); }, [tenant.id]);
+  useEffect(() => { load(); }, [load]);
+  const open = (k: StatusRequestRow['kind']) => { setForm(k); setCode(Object.keys(REASONS[k])[0]!); setReason(''); setError(null); };
+  const submit = () => {
+    if (!form) return;
+    if (form === 'lock' && !confirm(`${tenant.name} を緊急停止しますか？すぐにログインを含めてすべて止まります。`)) return;
+    opsApi.requestStatus(tenant.id, { kind: form, reasonCode: code, reason }).then((r) => {
+      setForm(null); if (r.notice) setNotice(r.notice); load(); onChanged();
+    }).catch((e) => setError(errText(e, '申請できませんでした')));
+  };
+  const running = tenant.status === 'trial' || tenant.status === 'active';
+  const stopped = tenant.status === 'suspended' || tenant.status === 'locked';
+  const scheduled = rows?.find((r) => r.kind === 'suspend' && r.state === 'scheduled');
+  // 同じ申請が残っている間は、重ねて申請させない
+  const openSuspend = rows?.some((r) => r.kind === 'suspend' && (r.state === 'pending' || r.state === 'scheduled'));
+  const openResume = rows?.some((r) => r.kind === 'resume' && r.state === 'pending');
+  return (
+    <div className="card">
+      <h3>利用の停止と再開</h3>
+      {scheduled && <p><span className="badge warn">停止の予告中</span> {when(scheduled.effectiveAt)} に止めます</p>}
+      {error && <p className="error">{error}</p>}
+      {!form && (
+        <p>
+          {running && !openSuspend && me.can['tenant.suspend'] && <button className="btn ghost small" onClick={() => open('suspend')}>停止を申請する</button>}{' '}
+          {tenant.status !== 'locked' && tenant.status !== 'cancelled' && me.can['tenant.lock'] && <button className="btn ghost small" onClick={() => open('lock')}>緊急停止する</button>}{' '}
+          {stopped && !openResume && me.can['tenant.suspend'] && <button className="btn ghost small" onClick={() => open('resume')}>再開を申請する</button>}
+        </p>
+      )}
+      {form && (
+        <>
+          <div className="field"><label>{KIND_LABEL[form]}の理由</label>
+            <select value={code} onChange={(e) => setCode(e.target.value)}>
+              {Object.entries(REASONS[form]).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+          </div>
+          <div className="field"><label>{form === 'resume' ? '解消したこと' : '理由の説明'}</label><textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} /></div>
+          <button className="btn small" disabled={!reason.trim()} onClick={submit}>{form === 'lock' ? '緊急停止する' : '申請する'}</button>{' '}
+          <button className="btn ghost small" onClick={() => setForm(null)}>キャンセル</button>
+        </>
+      )}
+      {notice && <NoticeToSend text={notice} onClose={() => setNotice(null)} />}
+      {rows && rows.length > 0 && <RequestTable me={me} rows={rows} onChanged={() => { load(); onChanged(); }} onNotice={setNotice} />}
+    </div>
+  );
+}
+
+/** 申請の表。承認・承認しない・取り下げ・確認のボタン（申請した人は自分の申請を承認・確認できない）。 */
+function RequestTable({ me, rows, onChanged, onNotice, showTenant = false }: {
+  me: OpsMe; rows: StatusRequestRow[]; onChanged: () => void; onNotice: (t: string) => void; showTenant?: boolean;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const act = (p: Promise<{ notice?: string | null } | unknown>, fallback: string) => {
+    setError(null);
+    p.then((r) => { const t = (r as { notice?: string | null })?.notice; if (t) onNotice(t); onChanged(); }).catch((e) => setError(errText(e, fallback)));
+  };
+  const mine = (r: StatusRequestRow) => r.requestedBy === me.operator.id;
+  return (
+    <>
+      {error && <p className="error">{error}</p>}
+      <table className="table">
+        <thead><tr><th>申請した日時</th>{showTenant && <th>会社</th>}<th>操作</th><th>理由</th><th>状態</th><th /></tr></thead>
+        <tbody>{rows.map((r) => (
+          <tr key={r.id}>
+            <td>{when(r.requestedAt)}</td>
+            {showTenant && <td>{r.tenantName ?? r.tenantId}</td>}
+            <td>{KIND_LABEL[r.kind]}</td>
+            <td>{REASONS[r.kind][r.reasonCode] ?? r.reasonCode}<div className="small muted">{r.reason}</div></td>
+            <td>{STATE_LABEL[r.state]}{r.state === 'scheduled' && r.effectiveAt ? `（${when(r.effectiveAt)} に止める）` : ''}
+              {r.kind === 'lock' && r.state === 'done' && <div className="small">{r.confirmedAt ? `確認済み ${when(r.confirmedAt)}` : <span className="badge warn">確認待ち</span>}</div>}</td>
+            <td>
+              {r.state === 'pending' && me.can['tenant.suspend'] && !mine(r) && <>
+                <button className="btn small" onClick={() => act(opsApi.decideStatus(r.id, true), '承認できませんでした')}>承認する</button>{' '}
+                <button className="btn ghost small" onClick={() => act(opsApi.decideStatus(r.id, false), '扱えませんでした')}>承認しない</button>{' '}
+              </>}
+              {(r.state === 'pending' || r.state === 'scheduled') && me.can['tenant.suspend'] &&
+                <button className="btn ghost small" onClick={() => confirm('この申請を取り下げますか？') && act(opsApi.withdrawStatus(r.id), '取り下げられませんでした')}>取り下げる</button>}
+              {r.kind === 'lock' && r.state === 'done' && !r.confirmedAt && me.can['tenant.suspend'] && !mine(r) &&
+                <button className="btn small" onClick={() => act(opsApi.confirmLock(r.id), '確認できませんでした')}>確認した</button>}
+            </td>
+          </tr>
+        ))}</tbody>
+      </table>
+    </>
+  );
+}
+
+/** 停止と再開の申請（承認待ち・予告中・確認待ちの緊急停止と、直近 30 日の記録）。 */
+function Requests({ me, rows, onChanged }: { me: OpsMe; rows: StatusRequestRow[]; onChanged: () => void }) {
+  const [notice, setNotice] = useState<string | null>(null);
+  return (
+    <>
+      <h2>停止と再開</h2>
+      {notice && <NoticeToSend text={notice} onClose={() => setNotice(null)} />}
+      {rows.length === 0 ? <p className="muted">申請はありません</p> : <RequestTable me={me} rows={rows} onChanged={onChanged} onNotice={setNotice} showTenant />}
     </>
   );
 }

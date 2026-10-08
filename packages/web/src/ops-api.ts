@@ -41,7 +41,7 @@ export interface OperatorView {
 export interface OpsMe {
   operator: OperatorView;
   csrfToken: string;
-  can: Record<'tenant.create' | 'tenant.status' | 'machine.manage' | 'operator.manage' | 'settings.manage', boolean>;
+  can: Record<'tenant.create' | 'tenant.status' | 'tenant.suspend' | 'tenant.lock' | 'machine.manage' | 'operator.manage' | 'settings.manage', boolean>;
 }
 
 export interface TenantRow {
@@ -118,6 +118,26 @@ export interface ServerStatusView {
 
 export interface OperatorProfileView { nameJa: string; nameEn: string; address: string; web: string; contact: string }
 
+/** 停止・緊急停止・再開の申請（第23.8.6節）。 */
+export interface StatusRequestRow {
+  id: string;
+  tenantId: string;
+  tenantName: string | null;
+  kind: 'suspend' | 'lock' | 'resume';
+  reasonCode: string;
+  reason: string;
+  state: 'pending' | 'scheduled' | 'done' | 'rejected' | 'withdrawn';
+  fromStatus: string | null;
+  requestedBy: string;
+  requestedAt: string;
+  decidedBy: string | null;
+  decidedAt: string | null;
+  effectiveAt: string | null;
+  doneAt: string | null;
+  confirmedBy: string | null;
+  confirmedAt: string | null;
+}
+
 /** 会社一覧の CSV の書き出しの URL（ログイン状態の Cookie で開く）。 */
 export const TENANTS_CSV_URL = '/v1/ops/tenants.csv';
 
@@ -136,6 +156,12 @@ export const opsApi = {
   server: () => call<{ status: ServerStatusView }>('/server'),
   operatorProfile: () => call<{ profile: OperatorProfileView }>('/settings/operator'),
   setOperatorProfile: (p: OperatorProfileView) => call<{ profile: OperatorProfileView }>('/settings/operator', send('PUT', p)),
+  statusRequests: (tenantId?: string) => call<{ requests: StatusRequestRow[] }>(`/status-requests${tenantId ? `?tenant=${encodeURIComponent(tenantId)}` : ''}`),
+  requestStatus: (tenantId: string, b: { kind: StatusRequestRow['kind']; reasonCode: string; reason: string }) =>
+    call<{ id: string; notice: string | null }>(`/tenants/${encodeURIComponent(tenantId)}/requests`, send('POST', b)),
+  decideStatus: (id: string, approve: boolean) => call<{ state: string; notice: string | null }>(`/status-requests/${encodeURIComponent(id)}/decide`, send('POST', { approve })),
+  withdrawStatus: (id: string) => call<{ ok: true }>(`/status-requests/${encodeURIComponent(id)}/withdraw`, send('POST')),
+  confirmLock: (id: string) => call<{ ok: true }>(`/status-requests/${encodeURIComponent(id)}/confirm`, send('POST')),
   machines: () => call<{ machines: MachineRow[] }>('/machines'),
   addMachine: (name: string) => call<{ machine: MachineRow; token: string }>('/machines', send('POST', { name })),
   removeMachine: (id: string) => call<{ ok: true }>(`/machines/${encodeURIComponent(id)}`, { method: 'DELETE' }),

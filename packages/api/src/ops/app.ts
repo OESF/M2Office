@@ -10,7 +10,7 @@ import { Hono, type Context, type Next } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import {
   buildGoogleLoginUrl, createPkce, exchangeGoogleLoginCode, googleUserInfo, checkNewTenant, machineFlags, operatorCan, OPERATOR_ROLES,
-  parseMachineReport, tenantErrorText, welcomeText, tenantsCsv, MACHINE_REPORT_MAX_BYTES, OpsRuleError,
+  parseMachineReport, tenantErrorText, welcomeText, tenantsCsv, statusNoticeText, SUSPEND_REASONS, LOCK_REASONS, MACHINE_REPORT_MAX_BYTES, OpsRuleError,
   type Logger, type Operator, type OperatorRole, type OpsAction, type OpsSession, type OpsStore,
 } from '@m2office/core';
 import { HandoffStore } from '../auth/handoff.js';
@@ -209,7 +209,7 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
     const op = c.get('operator');
     return c.json({
       operator: op, csrfToken: c.get('session').csrfToken,
-      can: Object.fromEntries((['tenant.create', 'tenant.status', 'machine.manage', 'operator.manage', 'settings.manage'] as OpsAction[]).map((a) => [a, operatorCan(op.role, a)])),
+      can: Object.fromEntries((['tenant.create', 'tenant.status', 'tenant.suspend', 'tenant.lock', 'machine.manage', 'operator.manage', 'settings.manage'] as OpsAction[]).map((a) => [a, operatorCan(op.role, a)])),
     });
   });
 
@@ -231,6 +231,78 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
     if (!detail) return c.json({ error: '会社が見つかりません' }, 404);
     await store.audit(c.get('operator').id, 'tenant.view', 'tenant', detail.tenant.id);
     return c.json({ detail, opsHistory: await store.listAuditFor(detail.tenant.id) });
+  });
+
+  // ---- 利用の停止と再開（第23.8.6節。段 2） ----
+  /** 決めた理由の種類の表示名。 */
+  const reasonLabel = (kind: string, code: string) =>
+    (kind === 'lock' ? (LOCK_REASONS as Record<string, string>)[code] : (SUSPEND_REASONS as Record<string, string>)[code]) ?? 'そのほか';
+  /** 状態の操作の失敗を返す。 */
+  const ruleError = (c: Context<OpsEnv>, err: unknown) => {
+    if (err instanceof OpsRuleError) return c.json({ error: tenantErrorText(err.code) }, err.code === 'not_found' ? 404 : 409);
+    throw err;
+  };
+
+  app.get('/v1/ops/status-requests', async (c) => c.json({ requests: await store.listStatusRequests(c.req.query('tenant') || undefined) }));
+
+  // 申請する。緊急停止はすぐに止め、運営者が会社へ渡す案内の文を返す
+  app.post('/v1/ops/tenants/:id/requests', async (c) => {
+    const b = await c.req.json<{ kind?: string; reasonCode?: string; reason?: string }>().catch(() => ({} as Record<string, string | undefined>));
+    const kind = b.kind;
+    if (kind !== 'suspend' && kind !== 'lock' && kind !== 'resume') return c.json({ error: tenantErrorText('kind_invalid') }, 400);
+    if (!can(c, kind === 'lock' ? 'tenant.lock' : 'tenant.suspend')) return denied(c);
+    const codes = kind === 'lock' ? LOCK_REASONS : kind === 'suspend' ? SUSPEND_REASONS : { resolved: '解消した' };
+    const reasonCode = b.reasonCode && b.reasonCode in codes ? b.reasonCode : null;
+    if (!reasonCode) return c.json({ error: '理由の種類を選んでください' }, 400);
+    const reason = (b.reason ?? '').trim().slice(0, 1000);
+    const op = c.get('operator');
+    try {
+      const id = await store.requestStatus(c.req.param('id'), kind, reasonCode, reason, op.id);
+      await store.audit(op.id, `tenant.${kind}_request`, 'tenant', c.req.param('id'), { request: id, reasonCode });
+      const req = (await store.listStatusRequests(c.req.param('id'))).find((r) => r.id === id);
+      return c.json({
+        id,
+        notice: kind === 'lock' ? statusNoticeText('lock', { name: req?.tenantName ?? '', reasonLabel: reasonLabel(kind, reasonCode) }) : null,
+      }, 201);
+    } catch (err) { return ruleError(c, err); }
+  });
+
+  // 承認するか、しない。通常の停止の承認と再開のあとに、運営者が会社へ渡す案内の文を返す
+  app.post('/v1/ops/status-requests/:id/decide', async (c) => {
+    if (!can(c, 'tenant.suspend')) return denied(c);
+    const { approve } = await c.req.json<{ approve?: boolean }>().catch(() => ({ approve: undefined }));
+    if (typeof approve !== 'boolean') return c.json({ error: '承認するかどうかを選んでください' }, 400);
+    const op = c.get('operator');
+    try {
+      const state = await store.decideStatus(c.req.param('id'), approve, op.id);
+      const req = (await store.listStatusRequests()).find((r) => r.id === c.req.param('id'));
+      await store.audit(op.id, approve ? 'tenant.status_approve' : 'tenant.status_reject', 'tenant', req?.tenantId ?? '', { request: c.req.param('id'), state });
+      const notice = !req || !approve ? null
+        : req.kind === 'suspend' ? statusNoticeText('suspend_scheduled', { name: req.tenantName ?? '', effectiveAt: req.effectiveAt, reasonLabel: reasonLabel(req.kind, req.reasonCode) })
+          : req.kind === 'resume' ? statusNoticeText('resume', { name: req.tenantName ?? '', reasonLabel: '' }) : null;
+      return c.json({ state, notice });
+    } catch (err) { return ruleError(c, err); }
+  });
+
+  app.post('/v1/ops/status-requests/:id/withdraw', async (c) => {
+    if (!can(c, 'tenant.suspend')) return denied(c);
+    const op = c.get('operator');
+    try {
+      await store.withdrawStatus(c.req.param('id'), op.id);
+      await store.audit(op.id, 'tenant.status_withdraw', 'status-request', c.req.param('id'));
+      return c.json({ ok: true });
+    } catch (err) { return ruleError(c, err); }
+  });
+
+  // 緊急停止の事後の確認（申請した人とは別の運営管理者かサポート）
+  app.post('/v1/ops/status-requests/:id/confirm', async (c) => {
+    if (!can(c, 'tenant.suspend')) return denied(c);
+    const op = c.get('operator');
+    try {
+      await store.confirmLock(c.req.param('id'), op.id);
+      await store.audit(op.id, 'tenant.lock_confirm', 'status-request', c.req.param('id'));
+      return c.json({ ok: true });
+    } catch (err) { return ruleError(c, err); }
   });
 
   // サーバー全体の稼働状況（第23.8.7節のうち段 1 の分）

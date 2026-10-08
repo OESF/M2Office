@@ -206,7 +206,7 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
         <span className="badge">{me.user.displayName}</span>
         <button className="btn ghost small" onClick={onLogout}>ログアウト</button>
       </header>
-      <SuspendedBanner status={me.tenant.status} />
+      <SuspendedBanner status={me.tenant.status} suspendAt={me.tenant.suspendAt} />
       {!isAdmin ? (
         <main className="canvas"><p className="error">管理者ページは管理者のみが開けます。</p></main>
       ) : (

@@ -41,6 +41,9 @@ test('ロール: 運営管理者はすべて、サポートは会社まで、監
   assert.equal(operatorCan('monitor', 'tenant.status'), false);
   assert.equal(operatorCan('support', 'settings.manage'), false);
   assert.equal(operatorCan('admin', 'settings.manage'), true);
+  assert.equal(operatorCan('monitor', 'tenant.lock'), true);
+  assert.equal(operatorCan('monitor', 'tenant.suspend'), false);
+  assert.equal(operatorCan('support', 'tenant.suspend'), true);
 });
 
 const report = (over: Partial<MachineReport> = {}): MachineReport => ({
@@ -138,6 +141,56 @@ test('運営のロール: 顧客の表と関数に届かず、決めた関数で
   } finally {
     await owner.query('delete from tenants where id = $1', [`t-${sub}`]);
     await owner.end();
+    await pool.end();
+  }
+});
+
+test('停止と再開: 2 人の承認・7 日の予告・期限で止める・緊急停止はすぐ止めて別の人が確かめる', { skip: dbReady ? false : '開発のデータベース（移行 113 まで）が動いていません' }, async () => {
+  const pool = new pg.Pool({ connectionString: OPS, max: 2 });
+  const appPool = new pg.Pool({ connectionString: APP, max: 1 });
+  const owner = new pg.Client({ connectionString: OWNER });
+  await owner.connect();
+  const sub = `zz-stop-${Date.now().toString(36)}`;
+  const store = new OpsStore(pool);
+  const side = new OpsAppSide(appPool);
+  const status = async () => (await owner.query('select status from tenants where id = $1', [`t-${sub}`])).rows[0]?.status;
+  try {
+    const id = await store.createTenant({ subdomain: sub, name: '停止の確かめ', domain: `${sub}.example`, admin: `boss@${sub}.example`, status: 'active' }, 'op-a');
+    await assert.rejects(store.requestStatus(id, 'suspend', 'unpaid', ' ', 'op-a'), (e: unknown) => e instanceof OpsRuleError && e.code === 'reason_required');
+    const req = await store.requestStatus(id, 'suspend', 'unpaid', '3 か月の未入金', 'op-a');
+    await assert.rejects(store.requestStatus(id, 'suspend', 'unpaid', '重ねて', 'op-b'), (e: unknown) => e instanceof OpsRuleError && e.code === 'already_requested');
+    await assert.rejects(store.decideStatus(req, true, 'op-a'), (e: unknown) => e instanceof OpsRuleError && e.code === 'same_operator');
+    assert.equal(await store.decideStatus(req, true, 'op-b'), 'scheduled');
+    const at = await side.suspendAt(id);
+    assert.ok(at && Date.parse(at) - Date.now() > 6.9 * 86_400_000);
+    // 期限の前は止めない。期限が来たら止める
+    await side.applyDueSuspensions();
+    assert.equal(await status(), 'active');
+    await owner.query(`update ops.status_requests set effective_at = now() - interval '1 minute' where id = $1`, [req]);
+    assert.ok((await side.applyDueSuspensions()) >= 1);
+    assert.equal(await status(), 'suspended');
+    assert.equal(await side.suspendAt(id), null);
+    // 再開も 2 人の承認。止める前の状態に戻す
+    const resume = await store.requestStatus(id, 'resume', 'resolved', '入金を確かめた', 'op-b');
+    assert.equal(await store.decideStatus(resume, true, 'op-a'), 'done');
+    assert.equal(await status(), 'active');
+    // 緊急停止はすぐに止め、申請した人とは別の人が確かめる
+    const lock = await store.requestStatus(id, 'lock', 'takeover', '管理者のアカウントの乗っ取りの疑い', 'op-c');
+    assert.equal(await status(), 'locked');
+    await assert.rejects(store.confirmLock(lock, 'op-c'), (e: unknown) => e instanceof OpsRuleError && e.code === 'same_operator');
+    await store.confirmLock(lock, 'op-a');
+    const list = await store.listStatusRequests(id);
+    assert.equal(list.find((r) => r.id === lock)?.confirmedBy, 'op-a');
+    assert.equal(list[0]?.tenantName, '停止の確かめ');
+    const notes = await owner.query(`select title from notifications where tenant_id = $1 and kind = 'service' order by created_at`, [id]);
+    assert.deepEqual(notes.rows.map((r) => r.title), ['ご利用の停止の予告', 'ご利用を停止しました', 'ご利用を再開しました']);
+    const audit = await owner.query(`select action from audit_events where tenant_id = $1 and action like 'tenant.%' order by occurred_at`, [id]);
+    assert.ok(['tenant.suspend_scheduled', 'tenant.suspend', 'tenant.resume', 'tenant.lock', 'tenant.lock_confirmed'].every((a) => audit.rows.some((r) => r.action === a)));
+  } finally {
+    await owner.query('delete from ops.status_requests where tenant_id = $1', [`t-${sub}`]);
+    await owner.query('delete from tenants where id = $1', [`t-${sub}`]);
+    await owner.end();
+    await appPool.end();
     await pool.end();
   }
 });

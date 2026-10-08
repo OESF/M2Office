@@ -514,6 +514,9 @@ src/ops/              マスター管理画面の API（別のプロセス。仕
 | GET | `/v1/ops/tenants.csv` | 会社一覧の CSV（書き出したことを記録に残す） | すべて |
 | GET | `/v1/ops/server` | サーバー全体の稼働状況 | すべて |
 | GET・PUT | `/v1/ops/settings/operator` | 運営主体の設定（第23.8.14節） | 見る: すべて・変える: 運営管理者 |
+| GET | `/v1/ops/status-requests` | 停止・緊急停止・再開の申請（扱いの残っているものと直近 30 日。`?tenant=` で会社を絞る） | すべて |
+| POST | `/v1/ops/tenants/:id/requests` | 停止・再開の申請、緊急停止（すぐ止める。会社へ渡す案内の文を返す） | 停止と再開: 運営管理者とサポート・緊急停止: すべて |
+| POST | `/v1/ops/status-requests/:id/decide`・`withdraw`・`confirm` | 承認するか・取り下げ・緊急停止の事後の確認（申請した人は承認と確認ができない） | 運営管理者とサポート |
 | GET・POST・DELETE | `/v1/ops/machines` | ローカルの形の機械（印つき）・登録（鍵を 1 度だけ返す）・削除 | 見る: すべて・登録と削除: 運営管理者 |
 | POST | `/v1/ops/heartbeat` | 稼働の知らせの受け口（機械の鍵で名乗る。決めた項目だけを残す） | 機械 |
 | GET・POST・PUT | `/v1/ops/operators` | 運営者の一覧・追加・ロールと状態の変更（最後の運営管理者は外せない） | 見る: すべて・変える: 運営管理者 |

@@ -272,7 +272,7 @@ export interface ChecklistItem {
 
 export interface Me {
   /** 会社。`name` は正式な会社名、`shortName` は略称、`logo` は会社のロゴの URL（仕様書 第6.6.1節）。 */
-  tenant: Tenant & { shortName?: string; logo?: string | null };
+  tenant: Tenant & { shortName?: string; logo?: string | null; suspendAt?: string | null };
   user: User;
   auth: { method: 'session' | 'dev-header' };
   csrfToken: string | null;

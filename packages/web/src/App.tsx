@@ -546,7 +546,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
         <span className="badge">{me.user.displayName}</span>
         <button className="btn ghost small" onClick={onLogout}>ログアウト</button>
       </header>
-      <SuspendedBanner status={me.tenant.status} />
+      <SuspendedBanner status={me.tenant.status} suspendAt={me.tenant.suspendAt} />
 
       <SideNavLayout
         extraClass={talkOpen ? 'talk-open' : ''}

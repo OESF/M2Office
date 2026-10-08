@@ -664,6 +664,9 @@ while (running) {
   if (opsSide && Date.now() - lastOpsBeat >= 60_000) {
     lastOpsBeat = Date.now();
     await opsSide.beat(workerBeatId, appVersion()).catch((err) => log.debug('ワーカーの知らせを書けませんでした', { err }));
+    // 予告の期限が来た通常の停止を行う（第23.8.6節）
+    const stopped = await opsSide.applyDueSuspensions().catch((err) => { log.warn('予告の期限が来た停止を行えませんでした', { err }); return 0; });
+    if (stopped > 0) log.info('予告の期限が来た会社のご利用を停止しました', { tenants: stopped });
     const jst = new Date(Date.now() + 9 * 3_600_000);
     const yesterday = new Date(jst.getTime() - 86_400_000).toISOString().slice(0, 10);
     if (jst.getUTCHours() * 60 + jst.getUTCMinutes() >= 30 && lastDailyRecorded !== yesterday) {

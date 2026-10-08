@@ -14,11 +14,20 @@ import { Icon } from './nav.js';
 import { keyLabel, useHotkey } from './keys.js';
 
 /**
- * 通常の停止の間、画面の上部に出す案内（仕様書 第23.8.6節）。停止していなければ何も出さない。
+ * 通常の停止の間と、停止の予告の間に、画面の上部に出す案内（仕様書 第23.8.6節）。どちらでもなければ何も出さない。
  *
  * @remarks 閲覧のみできることと、解除の方法をヘルプの記事で示す。停止の理由は運営が管理者へ別に知らせる
  */
-export function SuspendedBanner({ status }: { status: string }) {
+export function SuspendedBanner({ status, suspendAt }: { status: string; suspendAt?: string | null }) {
+  if (status !== 'suspended' && suspendAt) {
+    const day = new Date(suspendAt).toLocaleDateString('ja-JP', { month: 'long', day: 'numeric' });
+    return (
+      <div className="suspended-banner" role="status">
+        <strong>{day}にご利用を停止する予定です。停止のあとは閲覧のみできます。</strong>
+        {' '}<button className="link-btn" onClick={() => openHelp('faq-suspended')}>解除の方法</button>
+      </div>
+    );
+  }
   if (status !== 'suspended') return null;
   return (
     <div className="suspended-banner" role="status">

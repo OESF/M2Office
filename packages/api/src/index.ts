@@ -174,7 +174,11 @@ app.get('/v1/me', async (c) => {
     .catch((err) => deps.log.warn('朝のブリーフの関心の分野を選べませんでした', { err }));
   return c.json({
     // 画面に出す会社名は、会社情報の正式な会社名（仕様書 第6.6.1節）。入っていなければ申し込みのときの名前
-    tenant: { ...ctx.tenant, ...(await companyView(deps, ctx.tenant)) },
+    tenant: {
+      ...ctx.tenant, ...(await companyView(deps, ctx.tenant)),
+      // 停止の予告（止める予定の日時。画面の上の帯に出す。第23.8.6節）
+      suspendAt: await deps.opsSide.suspendAt(ctx.tenant.id).catch(() => null),
+    },
     user: ctx.user,
     photo: photo ? `/v1/me/photo?v=${encodeURIComponent(photo.fetchedAt)}`
       : hrPhoto ? `/v1/hr-photos/${encodeURIComponent(hrPhoto.employeeId)}?v=${encodeURIComponent(hrPhoto.photoAt)}` : null,
