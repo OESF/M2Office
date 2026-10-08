@@ -205,6 +205,13 @@ button.launcher-item { background: none; border: 0; cursor: pointer; font: inher
 .left { grid-row: 1 / -1; grid-column: 1; background: var(--panel); border-right: 1px solid var(--line); padding: calc(12px * var(--space-scale)) 0 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 .left .nav-scroll { flex: 1; min-height: 0; overflow-y: auto; }
 .left .nav-footer { flex: none; border-top: 1px solid var(--line); padding: calc(8px * var(--space-scale)); }
+/* 左ペインの上下（仕様書 第6.1節）。上は業務、下は自分の状況で、それぞれスクロールする。下の段の高さは境目で変える */
+.left .nav-split { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.left .nav-split .nav-top { flex: 1; min-height: 0; }
+.left .nav-split .nav-bottom { flex: none; height: var(--nav-bottom-px, 280px); max-height: calc(100% - 78px); }
+.left .nav-sash { flex: none; height: 6px; margin-top: -1px; border-top: 1px solid var(--line); cursor: row-resize; touch-action: none; }
+.left .nav-sash:hover, .left .nav-sash:focus-visible { background: var(--accent-soft); box-shadow: inset 0 2px 0 var(--accent); outline: none; }
+body.resizing-rows { cursor: row-resize; user-select: none; }
 .canvas, .talk { grid-row: 1; }
 .pane-footer { grid-row: 2; grid-column: 2 / -1; min-width: 0; }
 .left h2 { font-size: calc(11px * var(--font-scale)); color: var(--muted); margin: calc(12px * var(--space-scale)) calc(16px * var(--space-scale)) calc(6px * var(--space-scale)); letter-spacing: .08em; }
@@ -491,6 +498,10 @@ pre.body { white-space: pre-wrap; background: var(--subtle-bg); border: 1px soli
     border-right: none; border-bottom: 1px solid var(--line);
   }
   .left .nav-scroll { display: flex; gap: calc(6px * var(--space-scale)); flex: none; overflow: visible; }
+  /* 狭い画面ではメニューが横に並ぶため、上下に分けない */
+  .left .nav-split { display: contents; }
+  .left .nav-sash { display: none; }
+  .left .nav-split .nav-bottom { height: auto; max-height: none; }
   .left .nav-footer { border-top: none; padding: 0; }
   .pane-footer { grid-column: 1; grid-row: 4; }
   .left h2 { display: none; }

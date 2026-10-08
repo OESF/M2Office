@@ -606,6 +606,11 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
                 </Fragment>
               );
             })}
+          </>
+        )}
+        // 自分の状況は下の段に分け、業務が多くても常に見えるようにする（仕様書 第6.1節「左ペインの上下」）
+        navBottom={(
+          <>
             <NavHeading>自分の状況</NavHeading>
             <NavItem icon="approvals" label="承認トレイ" description="あなたが判断する承認と、操作の確認" count={approvals.length}
               active={view.kind === 'approvals'} onClick={() => setView({ kind: 'approvals' })} />

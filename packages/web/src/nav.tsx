@@ -138,13 +138,14 @@ function useCollapsed(): [boolean, (v: boolean) => void] {
  * 折りたためる左ペインと、その右の領域。`panes` の格子の列の幅を、折りたたみに合わせて変える。
  * 左ペインは画面の下端まで伸ばし、`footer`（秘書バー）は左ペインの右側に置く（仕様書 第6.1節）。
  *
+ * @param navBottom 左ペインの下の段（自分の状況）。あれば上の段（業務）と分け、それぞれスクロールし、間の境目で高さを変えられる
  * @param navFooter 左ペインの最下部に固定するもの（利用者のカード）
  * @param footer 右側の下端に置くもの（秘書バー）
  * @param extraClass `panes` に足すクラス（会話ペインを開くときの `talk-open` など）
  * @param style `panes` に渡す値（秘書のキャンバスの幅 `--talk-px` など）
  */
-export function SideNavLayout({ nav, navFooter, footer, children, extraClass = '', style }: {
-  nav: ReactNode; navFooter?: ReactNode; footer?: ReactNode; children: ReactNode; extraClass?: string; style?: CSSProperties;
+export function SideNavLayout({ nav, navBottom, navFooter, footer, children, extraClass = '', style }: {
+  nav: ReactNode; navBottom?: ReactNode; navFooter?: ReactNode; footer?: ReactNode; children: ReactNode; extraClass?: string; style?: CSSProperties;
 }) {
   const [collapsed, setCollapsed] = useCollapsed();
   // メニューの開閉（仕様書 第6.11.3節）
@@ -161,12 +162,69 @@ export function SideNavLayout({ nav, navFooter, footer, children, extraClass = '
           <Icon name={collapsed ? 'nav-expand' : 'nav-collapse'} />
         </button>
         <Collapsed.Provider value={collapsed}>
-          <div className="nav-scroll">{nav}</div>
+          {navBottom ? <NavSplit top={nav} bottom={navBottom} /> : <div className="nav-scroll">{nav}</div>}
           {navFooter && <div className="nav-footer">{navFooter}</div>}
         </Collapsed.Provider>
       </nav>
       {children}
       {footer && <div className="pane-footer">{footer}</div>}
+    </div>
+  );
+}
+
+/** 左ペインの下の段の既定の高さ（px）と、上下の段それぞれに残す最小の高さ。 */
+const NAV_BOTTOM_DEFAULT = 280;
+const NAV_PART_MIN = 72;
+/** 境目をキーで動かすときの幅（px）。 */
+const NAV_SASH_STEP = 24;
+
+/**
+ * 左ペインを上下に分ける（仕様書 第6.1節「左ペインの上下」）。上は業務、下は自分の状況で、それぞれスクロールする。
+ *
+ * @remarks 間の境目をつかむと下の段の高さが変わり、端末ごとに覚える。ダブルクリックで元の高さに戻す。矢印キーでも動かせる
+ */
+function NavSplit({ top, bottom }: { top: ReactNode; bottom: ReactNode }) {
+  const [height, setHeight] = useRememberedNumber('m2o.nav-bottom-px', NAV_BOTTOM_DEFAULT);
+  const box = useRef<HTMLDivElement>(null);
+  const dragging = useRef(false);
+  /** 高さを、上下の段それぞれに最小の高さを残す範囲に収める。 */
+  const apply = (px: number) => {
+    const total = box.current?.getBoundingClientRect().height ?? 0;
+    const max = total > 0 ? total - NAV_PART_MIN : px;
+    setHeight(Math.round(Math.max(NAV_PART_MIN, Math.min(px, max))));
+  };
+  return (
+    <div className="nav-split" ref={box} style={{ '--nav-bottom-px': `${height}px` } as CSSProperties}>
+      <div className="nav-scroll nav-top">{top}</div>
+      <div
+        className="nav-sash" role="separator" aria-orientation="horizontal" tabIndex={0}
+        aria-label="業務と自分の状況の境目" title="ドラッグで高さを変える（ダブルクリックで元の高さ）"
+        aria-valuenow={height}
+        onPointerDown={(e) => {
+          e.preventDefault();
+          e.currentTarget.setPointerCapture(e.pointerId);
+          dragging.current = true;
+          document.body.classList.add('resizing-rows');
+        }}
+        onPointerMove={(e) => {
+          if (!dragging.current || !box.current) return;
+          apply(box.current.getBoundingClientRect().bottom - e.clientY);
+        }}
+        onPointerUp={(e) => {
+          dragging.current = false;
+          e.currentTarget.releasePointerCapture(e.pointerId);
+          document.body.classList.remove('resizing-rows');
+        }}
+        onDoubleClick={() => setHeight(NAV_BOTTOM_DEFAULT)}
+        onKeyDown={(e) => {
+          // 境目を上へ動かすと下の段が高くなる
+          if (e.key === 'ArrowUp') apply(height + NAV_SASH_STEP);
+          else if (e.key === 'ArrowDown') apply(height - NAV_SASH_STEP);
+          else return;
+          e.preventDefault();
+        }}
+      />
+      <div className="nav-scroll nav-bottom">{bottom}</div>
     </div>
   );
 }
