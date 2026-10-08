@@ -41,7 +41,7 @@ export interface OperatorView {
 export interface OpsMe {
   operator: OperatorView;
   csrfToken: string;
-  can: Record<'tenant.create' | 'tenant.status' | 'machine.manage' | 'operator.manage', boolean>;
+  can: Record<'tenant.create' | 'tenant.status' | 'machine.manage' | 'operator.manage' | 'settings.manage', boolean>;
 }
 
 export interface TenantRow {
@@ -92,6 +92,35 @@ export interface OpsAuditRow {
   occurredAt: string;
 }
 
+export interface TenantDetailView {
+  tenant: { id: string; subdomain: string; name: string; workspaceDomain: string | null; status: TenantRow['status']; createdAt: string };
+  seats: { displayName: string; roles: string[]; status: string; email: string | null; lastUsedAt: string | null }[];
+  months: { month: string; runs: number; failed: number; conversations: number; aiCost: number; usersMax: number }[];
+  currentMonth: { month: string; runs: number; failed: number; conversations: number; aiCost: number };
+  health: {
+    runs30d: number; failed30d: number; approvalsPending: number; approvalsOldest: string | null; googleConnections: number;
+    targets: { target: string; ok: number; fail: number; avgMs: number | null; lastError: string | null }[];
+    failedAgents: { agentId: string; count: number }[];
+  };
+  history: { action: string; actorId: string; detail: Record<string, unknown>; occurredAt: string }[];
+}
+
+export interface ServerStatusView {
+  queue: { queued: number; oldestQueuedAt: string | null; running: number; awaitingApproval: number };
+  runs: { hour: number; hourFailed: number; today: number; todayFailed: number };
+  workers: { id: string; at: string; version: string | null }[];
+  schedulesLate: number;
+  targets: { group: string; ok: number; fail: number; avgMs: number | null }[];
+  database: { bytes: number; connections: number };
+  filesBytes: number;
+  ai: { today: number; month: number; lastMonthSamePeriod: number };
+}
+
+export interface OperatorProfileView { nameJa: string; nameEn: string; address: string; web: string; contact: string }
+
+/** 会社一覧の CSV の書き出しの URL（ログイン状態の Cookie で開く）。 */
+export const TENANTS_CSV_URL = '/v1/ops/tenants.csv';
+
 export const opsApi = {
   providers: () => call<{ google: { enabled: boolean }; dev: { enabled: boolean; operators: { email: string; displayName: string; role: OperatorRole }[] } }>('/auth/providers'),
   googleLoginUrl: () => call<{ url: string }>('/auth/google/start'),
@@ -103,6 +132,10 @@ export const opsApi = {
   createTenant: (b: { subdomain: string; name: string; domain: string; admin: string; status: 'trial' | 'active' }) =>
     call<{ id: string; loginUrl: string; welcome: string }>('/tenants', send('POST', b)),
   setTenantStatus: (id: string, status: 'trial' | 'active') => call<{ ok: true }>(`/tenants/${encodeURIComponent(id)}/status`, send('PUT', { status })),
+  tenantDetail: (id: string) => call<{ detail: TenantDetailView; opsHistory: OpsAuditRow[] }>(`/tenants/${encodeURIComponent(id)}`),
+  server: () => call<{ status: ServerStatusView }>('/server'),
+  operatorProfile: () => call<{ profile: OperatorProfileView }>('/settings/operator'),
+  setOperatorProfile: (p: OperatorProfileView) => call<{ profile: OperatorProfileView }>('/settings/operator', send('PUT', p)),
   machines: () => call<{ machines: MachineRow[] }>('/machines'),
   addMachine: (name: string) => call<{ machine: MachineRow; token: string }>('/machines', send('POST', { name })),
   removeMachine: (id: string) => call<{ ok: true }>(`/machines/${encodeURIComponent(id)}`, { method: 'DELETE' }),

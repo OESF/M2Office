@@ -15,12 +15,12 @@ export type OperatorRole = 'admin' | 'support' | 'monitor';
 export const OPERATOR_ROLES: readonly OperatorRole[] = ['admin', 'support', 'monitor'];
 
 /** 運営者の操作。 */
-export type OpsAction = 'view' | 'tenant.create' | 'tenant.status' | 'machine.manage' | 'operator.manage';
+export type OpsAction = 'view' | 'tenant.create' | 'tenant.status' | 'machine.manage' | 'operator.manage' | 'settings.manage';
 
 /**
  * 運営者のロールで、その操作ができるか。
  *
- * @remarks 運営管理者はすべて、サポートは見ることと会社を作る・切り替えるまで、監視は見ることだけ
+ * @remarks 運営管理者はすべて（運営主体の設定を含む）、サポートは見ることと会社を作る・切り替えるまで、監視は見ることだけ
  */
 export function operatorCan(role: OperatorRole, action: OpsAction): boolean {
   if (role === 'admin') return true;
@@ -164,4 +164,28 @@ export function machineFlags(lastAt: string | null, r: MachineReport | null, now
   if (r.cert.daysLeft !== null && r.cert.daysLeft < 14) flags.push('cert-soon');
   if (r.update.lastResult === 'failed' || r.update.lastResult === 'rolled-back') flags.push('update-failed');
   return flags;
+}
+
+/** CSV の 1 つの値（カンマ・改行・引用符を含めば引用符で囲む。表計算で式として読まれないよう、= + - @ で始まる文字は先頭に ' を付ける）。 */
+function csvCell(v: unknown): string {
+  let s = v === null || v === undefined ? '' : String(v);
+  if (typeof v === 'string' && /^[=+\-@]/.test(s)) s = `'${s}`;
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+/**
+ * 会社一覧の数を CSV にする（第23.8.15節。表計算で開けるよう、先頭に BOM を付ける）。
+ *
+ * @param rows 会社ごとの数（`OpsStore.tenantOverview`）
+ */
+export function tenantsCsv(rows: {
+  name: string; subdomain: string; workspaceDomain: string | null; status: string; createdAt: string; usersActive: number; usersInvited: number;
+  users30d: number; lastUsedAt: string | null; runsToday: number; runs30d: number; runsFailed30d: number; conversations30d: number;
+  aiCostMonth: number; filesBytes: number; extensions: number; googleConnections: number;
+}[]): string {
+  const head = ['会社名', 'サブドメイン', 'Workspace のドメイン', '状態', '作った日時', '利用中の利用者', '未ログインの利用者', '30 日に使った人', '最後に使った日時',
+    '今日の実行', '30 日の実行', '30 日の失敗', '30 日の会話', '今月の AI の費用（円）', '保存の量（バイト）', '拡張機能', 'Google の接続'];
+  const lines = rows.map((r) => [r.name, r.subdomain, r.workspaceDomain, r.status, r.createdAt, r.usersActive, r.usersInvited, r.users30d, r.lastUsedAt,
+    r.runsToday, r.runs30d, r.runsFailed30d, r.conversations30d, Math.round(r.aiCostMonth), r.filesBytes, r.extensions, r.googleConnections].map(csvCell).join(','));
+  return `\ufeff${[head.join(','), ...lines].join('\r\n')}\r\n`;
 }

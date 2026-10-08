@@ -9,7 +9,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import pg from 'pg';
-import { checkNewTenant, machineFlags, operatorCan, OpsRuleError, OpsStore, parseMachineReport, welcomeText, type MachineReport } from '../src/index.js';
+import { checkNewTenant, machineFlags, operatorCan, OpsAppSide, OpsRuleError, OpsStore, parseMachineReport, tenantsCsv, welcomeText, type MachineReport } from '../src/index.js';
 
 test('会社を作る入力: 整え、規則・予約語・ドメインを確かめる', () => {
   const ok = checkNewTenant({ subdomain: ' Acme ', name: 'アクメ', domain: '@ACME.example', admin: 'Boss@acme.example' });
@@ -22,12 +22,25 @@ test('会社を作る入力: 整え、規則・予約語・ドメインを確か
   assert.match(welcomeText({ name: 'アクメ', loginUrl: 'https://acme.example/', admin: 'boss@acme.example', domain: 'acme.example' }), /https:\/\/acme\.example\//);
 });
 
+test('CSV: 引用符と改行を囲み、式として読まれる値には印を付ける。表計算のために BOM を付ける', () => {
+  const row = { name: '=HYPERLINK("x")', subdomain: 'acme', workspaceDomain: null, status: 'trial', createdAt: '2026-10-08T00:00:00Z', usersActive: 1, usersInvited: 1,
+    users30d: 0, lastUsedAt: null, runsToday: 0, runs30d: 0, runsFailed30d: 0, conversations30d: 0, aiCostMonth: 12.6, filesBytes: 0, extensions: 0, googleConnections: 0 };
+  const csv = tenantsCsv([row, { ...row, name: 'A, "B"\nC' }]);
+  assert.ok(csv.startsWith('\ufeff会社名,'));
+  const lines = csv.split('\r\n');
+  assert.match(lines[1]!, /^"'=HYPERLINK\(""x""\)",acme,,trial,/);
+  assert.match(lines[1]!, /,13,0,0,0\s*$/);
+  assert.match(csv, /"A, ""B""\nC"/);
+});
+
 test('ロール: 運営管理者はすべて、サポートは会社まで、監視は見るだけ', () => {
   assert.equal(operatorCan('admin', 'operator.manage'), true);
   assert.equal(operatorCan('support', 'tenant.create'), true);
   assert.equal(operatorCan('support', 'machine.manage'), false);
   assert.equal(operatorCan('monitor', 'view'), true);
   assert.equal(operatorCan('monitor', 'tenant.status'), false);
+  assert.equal(operatorCan('support', 'settings.manage'), false);
+  assert.equal(operatorCan('admin', 'settings.manage'), true);
 });
 
 const report = (over: Partial<MachineReport> = {}): MachineReport => ({
@@ -63,6 +76,7 @@ test('機械の印: 3 時間来ない・止まった部分・控えの失敗・�
 
 const OWNER = process.env['MIGRATION_DATABASE_URL'] ?? 'postgres://m2office:m2office@localhost:3105/m2office';
 const OPS = 'postgres://m2office_ops:m2office_ops@localhost:3105/m2office';
+const APP = process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office';
 const dbReady = await (async () => {
   const c = new pg.Client({ connectionString: OPS, connectionTimeoutMillis: 1500 });
   try { await c.connect(); await c.query('select 1 from ops.operators limit 1'); return true; } catch { return false; } finally { await c.end().catch(() => undefined); }
@@ -96,6 +110,31 @@ test('運営のロール: 顧客の表と関数に届かず、決めた関数で
     assert.equal(await store.receiveReport(token, report()), machine.id);
     assert.equal((await store.listMachines()).find((m) => m.id === machine.id)?.report?.version, '0.18.0');
     assert.equal(await store.removeMachine(machine.id), true);
+    // 会社の詳細: 数と状態と、シートの氏名とロール。先方の管理者だけ連絡先を出す
+    const detail = await store.tenantDetail(id);
+    assert.equal(detail?.tenant.subdomain, sub);
+    assert.equal(detail?.seats.length, 1);
+    assert.equal(detail?.seats[0]?.email, `boss@${sub}.example`);
+    assert.deepEqual(detail?.history.map((h) => h.action).sort(), ['tenant.create', 'tenant.status']);
+    assert.equal(await store.tenantDetail('t-none'), null);
+    const server = await store.serverStatus();
+    assert.equal(typeof server.queue.queued, 'number');
+    // アプリのロールの側: 毎晩の数を運営の表へ書き、ワーカーの知らせを書く。顧客の側は運営主体を読むだけ
+    const appPool = new pg.Pool({ connectionString: APP, max: 1 });
+    try {
+      const side = new OpsAppSide(appPool);
+      assert.ok((await side.recordDaily('2026-10-01')) >= 1);
+      const daily = await owner.query('select users_active from ops.tenant_daily where tenant_id = $1 and day = $2', [id, '2026-10-01']);
+      assert.equal(daily.rows[0]?.users_active, 1);
+      await side.beat(`test-${sub}`, '0.0.0');
+      assert.ok((await store.serverStatus()).workers.some((w) => w.id === `test-${sub}`));
+      await assert.rejects(appPool.query('select * from ops.operator_profile'), /permission denied/);
+      await assert.rejects(appPool.query('select * from ops.tenant_daily'), /permission denied/);
+    } finally {
+      await owner.query('delete from worker_beats where id = $1', [`test-${sub}`]);
+      await owner.query('delete from ops.tenant_daily where tenant_id = $1', [id]);
+      await appPool.end();
+    }
   } finally {
     await owner.query('delete from tenants where id = $1', [`t-${sub}`]);
     await owner.end();

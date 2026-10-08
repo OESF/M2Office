@@ -13,7 +13,7 @@ import {
   HelpFeedback, PostgresHelpFeedbackStore, PostgresHelpNoteStore, noteText, type HelpNoteStore,
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS, GoogleDataRetention, GoogleRevocation, agentUsesGoogle,
   RunEngine, Secretary, OFFICIAL_AGENTS, buildConnector, LocalFileStore,
-  createLoggerFromEnv, HelpCatalog, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger, type HealthStore, parseArticle, parseManual, ExtensionHub, HttpMcpClient, loadExtensions,
+  createLoggerFromEnv, HelpCatalog, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger, createPool, OpsAppSide, type HealthStore, parseArticle, parseManual, ExtensionHub, HttpMcpClient, loadExtensions,
   TenantAiResolver, platformAi, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, ConnectionCredentials, type ConnectionAuthProvider,
   CardService, PostgresContactStore, cardsAccess, type ContactStore, GoogleContactsService, TerminalService, PostgresTerminalStore, BulkMailService, PostgresBulkMailStore, NoticeService, PostgresNoticeStore,
@@ -35,6 +35,8 @@ import { printDriveFor } from './print-drive.js';
 /** API プロセス全体で共有する依存。 */
 export interface AppDeps {
   repo: Repository;
+  /** 運営主体の設定を読む口（第23.8.14節。内蔵の拡張の提供者の表記）。 */
+  opsSide: OpsAppSide;
   llm: LlmProvider;
   connector: WorkspaceConnector;
   files: FileStore;
@@ -759,6 +761,7 @@ export function buildDeps(): AppDeps {
   onGrantLost = (tenantId, userId, enc) => revocation.lostGrant(tenantId, userId, enc, new Date());
   const googleRedirect = process.env['GOOGLE_OAUTH_REDIRECT_URI'] ?? 'http://localhost:3100/v1/oauth/google/callback';
   return {
+    opsSide: new OpsAppSide(createPool(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office', { max: 1, name: 'ops' })),
     repo, llm, connector, files, registry, engine, secretary, auth: loadAuthConfig(), log, health, debug, help, helpManuals: manuals.list, helpFeedback, helpNotes, retention, revocation,
     hub, tenantView, agentsFor, canUse, isAvailable, box, ai, connections,
     onsiteTenant: ai.deployment() === 'onsite' ? (process.env['M2O_ONSITE_TENANT']?.trim() || null) : null,

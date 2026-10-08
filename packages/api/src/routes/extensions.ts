@@ -45,7 +45,10 @@ export function extensionsRoute(deps: AppDeps) {
   app.use('*', requireRole('admin'));
 
   /** 拡張機能の中身と、必要な権限を構成要素ごとに説明する（第12.10.5節）。 */
-  function describe(pkg: ExtensionPackage, view: TenantExtensions | null) {
+  /**
+   * @param operatorName 運営主体の法人名（第23.8.14節）。入れてあれば、内蔵の拡張（提供が製品名「M2Office」のもの）の提供の表記にする
+   */
+  function describe(pkg: ExtensionPackage, view: TenantExtensions | null, operatorName: string | null = null) {
     const { tools, max_risk_level } = pkg.manifest.permissions;
     const connectorTools = pkg.connectors.flatMap((c) => c.tools.map((t) => ({ connector: c, tool: t })));
     return {
@@ -53,7 +56,7 @@ export function extensionsRoute(deps: AppDeps) {
       name: pkg.manifest.name,
       version: pkg.manifest.version,
       description: pkg.manifest.description ?? '',
-      publisher: pkg.manifest.publisher,
+      publisher: operatorName && pkg.manifest.publisher.name === 'M2Office' ? { ...pkg.manifest.publisher, name: operatorName } : pkg.manifest.publisher,
       icon: pkg.icon,
       readme: pkg.readme,
       counts: { agents: pkg.agents.length, connectors: pkg.connectors.length, tools: connectorTools.length },
@@ -103,9 +106,10 @@ export function extensionsRoute(deps: AppDeps) {
       deps.tenantView(tenant.id), deps.repo.getTenantSettings(tenant.id), deps.cards.bulk.store.countOptOuts(tenant.id),
       deps.columns.service.aiUsage(tenant.id),
     ]);
+    const operatorName = (await deps.opsSide.operatorProfile().catch(() => null))?.nameJa ?? null;
     return c.json({
       items: view.entries.map((e) => ({
-        ...describe(e.pkg, view), ...stateOf(e),
+        ...describe(e.pkg, view, operatorName), ...stateOf(e),
         // 利用できる人（第16.7節）。設定が無ければ全員
         scope: settings.access.scopes[e.pkg.manifest.id] ?? 'all',
         // 内蔵の拡張の会社の設定（名刺管理: 取り込んだ名刺の既定の範囲。第27.7節）
@@ -922,7 +926,8 @@ export function extensionsRoute(deps: AppDeps) {
     });
     const view = await deps.tenantView(tenant.id);
     const entry = find(view, pkg.manifest.id);
-    return c.json({ ok: true, notices, item: entry ? { ...describe(entry.pkg, view), ...stateOf(entry) } : null });
+    const operatorName = (await deps.opsSide.operatorProfile().catch(() => null))?.nameJa ?? null;
+    return c.json({ ok: true, notices, item: entry ? { ...describe(entry.pkg, view, operatorName), ...stateOf(entry) } : null });
   });
 
   /**

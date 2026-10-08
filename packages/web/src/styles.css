@@ -2164,3 +2164,6 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .m-punch { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; }
 .m-punch-buttons { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
 .m-punch-buttons .btn { font-size: 20px; padding: 16px 28px; }
+
+/* マスター管理画面の表（仕様書 第23.8.15節）。列が多いため折り返さず、枠の中で横に送る */
+.ops-table th, .ops-table td { white-space: nowrap; }

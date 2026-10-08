@@ -10,7 +10,7 @@ import { Hono, type Context, type Next } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import {
   buildGoogleLoginUrl, createPkce, exchangeGoogleLoginCode, googleUserInfo, checkNewTenant, machineFlags, operatorCan, OPERATOR_ROLES,
-  parseMachineReport, tenantErrorText, welcomeText, MACHINE_REPORT_MAX_BYTES, OpsRuleError,
+  parseMachineReport, tenantErrorText, welcomeText, tenantsCsv, MACHINE_REPORT_MAX_BYTES, OpsRuleError,
   type Logger, type Operator, type OperatorRole, type OpsAction, type OpsSession, type OpsStore,
 } from '@m2office/core';
 import { HandoffStore } from '../auth/handoff.js';
@@ -209,12 +209,45 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
     const op = c.get('operator');
     return c.json({
       operator: op, csrfToken: c.get('session').csrfToken,
-      can: Object.fromEntries((['tenant.create', 'tenant.status', 'machine.manage', 'operator.manage'] as OpsAction[]).map((a) => [a, operatorCan(op.role, a)])),
+      can: Object.fromEntries((['tenant.create', 'tenant.status', 'machine.manage', 'operator.manage', 'settings.manage'] as OpsAction[]).map((a) => [a, operatorCan(op.role, a)])),
     });
   });
 
   // ---- 会社 ----
   app.get('/v1/ops/tenants', async (c) => c.json({ tenants: await store.tenantOverview() }));
+
+  // CSV の書き出し（運営の操作の記録に残す）
+  app.get('/v1/ops/tenants.csv', async (c) => {
+    const rows = await store.tenantOverview();
+    await store.audit(c.get('operator').id, 'tenants.export', 'tenant', '*', { count: rows.length });
+    c.header('content-type', 'text/csv; charset=utf-8');
+    c.header('content-disposition', `attachment; filename="m2office-tenants-${new Date().toISOString().slice(0, 10)}.csv"`);
+    return c.body(tenantsCsv(rows));
+  });
+
+  // 会社の詳細（開いたことを運営の操作の記録に残す。利用者の名前を出すのはここだけ）
+  app.get('/v1/ops/tenants/:id', async (c) => {
+    const detail = await store.tenantDetail(c.req.param('id'));
+    if (!detail) return c.json({ error: '会社が見つかりません' }, 404);
+    await store.audit(c.get('operator').id, 'tenant.view', 'tenant', detail.tenant.id);
+    return c.json({ detail, opsHistory: await store.listAuditFor(detail.tenant.id) });
+  });
+
+  // サーバー全体の稼働状況（第23.8.7節のうち段 1 の分）
+  app.get('/v1/ops/server', async (c) => c.json({ status: await store.serverStatus() }));
+
+  // 運営主体の設定（第23.8.14節）
+  app.get('/v1/ops/settings/operator', async (c) => c.json({ profile: await store.operatorProfile() }));
+  app.put('/v1/ops/settings/operator', async (c) => {
+    if (!can(c, 'settings.manage')) return denied(c);
+    const b = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
+    const s = (k: string, max: number) => (typeof b[k] === 'string' ? (b[k] as string).trim().slice(0, max) : '');
+    const profile = { nameJa: s('nameJa', 200), nameEn: s('nameEn', 200), address: s('address', 300), web: s('web', 300), contact: s('contact', 300) };
+    if (profile.web && !/^https:\/\//.test(profile.web)) return c.json({ error: 'Web は https:// で始めてください' }, 400);
+    await store.setOperatorProfile(profile, c.get('operator').id);
+    await store.audit(c.get('operator').id, 'settings.operator', 'settings', 'operator', profile);
+    return c.json({ profile });
+  });
 
   app.post('/v1/ops/tenants', async (c) => {
     if (!can(c, 'tenant.create')) return denied(c);

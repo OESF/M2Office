@@ -1,14 +1,17 @@
 /**
  * @file マスター管理画面（仕様書 第23.8.15節、ADR-0078）。名前が `ops.` で始まるときだけ出す運営の画面。
  *
- * 会社一覧・会社を作る・試用と稼働の切り替え・ローカルの形の機械・運営者・操作履歴（段 1 の 1 回目）。
+ * 会社一覧（CSV）・会社を作る・試用と稼働の切り替え・会社の詳細・サーバー全体の稼働状況・ローカルの形の機械・運営主体の設定・運営者・操作履歴（段 1）。
  * 業務の中身は出さない（件数・金額・状態だけ。第23.8.4節）。権限の判定は運営の API が行い、画面の出し分けは利便のため。
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { copyText } from './clipboard.js';
 import { NavItem, SideNavLayout, ThemeToggle, type IconName } from './nav.js';
-import { opsApi, OpsApiError, type MachineRow, type OperatorRole, type OperatorView, type OpsAuditRow, type OpsMe, type TenantRow } from './ops-api.js';
+import {
+  opsApi, OpsApiError, TENANTS_CSV_URL, type MachineRow, type OperatorProfileView, type OperatorRole, type OperatorView, type OpsAuditRow, type OpsMe,
+  type ServerStatusView, type TenantDetailView, type TenantRow,
+} from './ops-api.js';
 
 const STATUS_LABEL: Record<TenantRow['status'], string> = { trial: '試用', active: '稼働中', suspended: '停止', locked: '緊急停止', cancelled: '解約済み' };
 const ROLE_LABEL: Record<OperatorRole, string> = { admin: '運営管理者', support: 'サポート', monitor: '監視' };
@@ -19,6 +22,7 @@ const FLAG_LABEL: Record<string, string> = {
 const ACTION_LABEL: Record<string, string> = {
   'ops.login': 'ログイン', 'ops.logout': 'ログアウト', 'tenant.create': '会社を作った', 'tenant.status': '状態を変えた',
   'machine.add': '機械を登録した', 'machine.remove': '機械を削除した', 'operator.add': '運営者を足した', 'operator.update': '運営者を変えた',
+  'tenant.view': '会社の詳細を開いた', 'tenants.export': '会社一覧を書き出した', 'settings.operator': '運営主体の設定を変えた',
 };
 
 const when = (iso: string | null) => {
@@ -102,17 +106,32 @@ function OpsLogin({ onLoggedIn }: { onLoggedIn: () => void }) {
   );
 }
 
-type OpsPage = 'tenants' | 'machines' | 'operators' | 'audit';
+type OpsPage = 'tenants' | 'server' | 'machines' | 'operators' | 'audit' | 'settings';
 const PAGES: { id: OpsPage; label: string; icon: IconName }[] = [
   { id: 'tenants', label: '会社一覧', icon: 'company' },
+  { id: 'server', label: '稼働状況', icon: 'usage' },
   { id: 'machines', label: 'ローカルの形の機械', icon: 'dashboard' },
   { id: 'operators', label: '運営者', icon: 'users' },
   { id: 'audit', label: '操作履歴', icon: 'audit' },
+  { id: 'settings', label: '設定', icon: 'settings' },
 ];
+
+/** 印のある機械の数（左のメニューと会社一覧の要約で知らせる。運営の画面からは社外に送らない）。5 分ごとに読み直す。 */
+function useFlaggedMachines(): number | null {
+  const [n, setN] = useState<number | null>(null);
+  useEffect(() => {
+    const load = () => { opsApi.machines().then((r) => setN(r.machines.filter((m) => m.flags.length > 0).length)).catch(() => setN(null)); };
+    load();
+    const t = window.setInterval(load, 300_000);
+    return () => clearInterval(t);
+  }, []);
+  return n;
+}
 
 /** 運営の画面の枠。 */
 function OpsConsole({ me, onLogout }: { me: OpsMe; onLogout: () => void }) {
   const [page, setPage] = useState<OpsPage>('tenants');
+  const flagged = useFlaggedMachines();
   return (
     <div className="app">
       <header className="topbar">
@@ -122,9 +141,11 @@ function OpsConsole({ me, onLogout }: { me: OpsMe; onLogout: () => void }) {
         <span className="badge">{me.operator.displayName}（{ROLE_LABEL[me.operator.role]}）</span>
         <button className="btn ghost small" onClick={onLogout}>ログアウト</button>
       </header>
-      <SideNavLayout extraClass="no-talk" nav={<>{PAGES.map((p) => <NavItem key={p.id} icon={p.icon} label={p.label} active={page === p.id} onClick={() => setPage(p.id)} />)}</>}>
+      <SideNavLayout extraClass="no-talk" nav={<>{PAGES.map((p) => <NavItem key={p.id} icon={p.icon} label={p.label} hint={p.id === 'machines' && flagged ? `印 ${flagged}` : ''} active={page === p.id} onClick={() => setPage(p.id)} />)}</>}>
         <main className="canvas">
-          {page === 'tenants' && <Tenants me={me} />}
+          {page === 'tenants' && <Tenants me={me} flagged={flagged} onMachines={() => setPage('machines')} />}
+          {page === 'server' && <Server />}
+          {page === 'settings' && <Settings me={me} />}
           {page === 'machines' && <Machines me={me} />}
           {page === 'operators' && <Operators me={me} />}
           {page === 'audit' && <Audit />}
@@ -137,7 +158,8 @@ function OpsConsole({ me, onLogout }: { me: OpsMe; onLogout: () => void }) {
 type SortKey = 'name' | 'subdomain' | 'status' | 'createdAt' | 'lastUsedAt' | 'runs30d' | 'aiCostMonth' | 'filesBytes';
 
 /** 会社一覧（要約・検索・状態の絞り込み・並べ替え）と、会社を作る。 */
-function Tenants({ me }: { me: OpsMe }) {
+function Tenants({ me, flagged, onMachines }: { me: OpsMe; flagged: number | null; onMachines: () => void }) {
+  const [openId, setOpenId] = useState<string | null>(null);
   const [rows, setRows] = useState<TenantRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState('');
@@ -178,6 +200,7 @@ function Tenants({ me }: { me: OpsMe }) {
     opsApi.setTenantStatus(t.id, to).then(load).catch((e) => setError(errText(e, '変えられませんでした')));
   };
 
+  if (openId) return <TenantDetail id={openId} onBack={() => { setOpenId(null); load(); }} />;
   return (
     <>
       <h2>会社一覧</h2>
@@ -187,6 +210,7 @@ function Tenants({ me }: { me: OpsMe }) {
         <div className="stat"><span>業務の実行（今日 ／ 30 日）</span><strong>{totals.runsToday.toLocaleString()} ／ {totals.runs30.toLocaleString()}</strong><span>失敗 {totals.failRate}%</span></div>
         <div className="stat"><span>今月の AI の費用</span><strong>{yen(totals.ai)}</strong><span>概算</span></div>
         <div className="stat"><span>注意</span><strong>{totals.attention}</strong></div>
+        {!!flagged && <div className="stat" style={{ cursor: 'pointer' }} onClick={onMachines}><span>印のある機械</span><strong>{flagged}</strong></div>}
       </div>
       <div className="field" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         <input placeholder="会社名・サブドメイン・ドメインで探す" value={q} onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 320 }} />
@@ -196,11 +220,12 @@ function Tenants({ me }: { me: OpsMe }) {
           <option value="attention">注意のある会社</option>
         </select>
         {me.can['tenant.create'] && !creating && <button className="btn small" onClick={() => setCreating(true)}>会社を作る</button>}
+        <a className="btn ghost small" href={TENANTS_CSV_URL} download>CSV で書き出す</a>
       </div>
       {creating && <CreateTenant onClose={() => setCreating(false)} onCreated={load} />}
       {rows && (
         <div style={{ overflowX: 'auto' }}>
-          <table className="table">
+          <table className="table ops-table">
             <thead>
               <tr>
                 {head('name', '会社名')}{head('subdomain', 'サブドメイン')}{head('status', '状態')}
@@ -213,7 +238,7 @@ function Tenants({ me }: { me: OpsMe }) {
             <tbody>
               {shown.map((t) => (
                 <tr key={t.id}>
-                  <td>{t.name}</td>
+                  <td><a className="link" href="#" onClick={(e) => { e.preventDefault(); setOpenId(t.id); }}>{t.name}</a></td>
                   <td><a className="link" href={`${location.protocol}//${location.host.replace(/^ops\./, `${t.subdomain}.`)}/`} target="_blank" rel="noreferrer">{t.subdomain}</a></td>
                   <td><span className={`badge ${t.status === 'active' ? 'ok' : t.status === 'trial' ? '' : 'warn'}`}>{STATUS_LABEL[t.status]}</span></td>
                   <td className="num">{t.usersActive} ／ {t.usersInvited}</td>
@@ -320,7 +345,7 @@ function Machines({ me }: { me: OpsMe }) {
       )}
       {rows && (
         <div style={{ overflowX: 'auto' }}>
-          <table className="table">
+          <table className="table ops-table">
             <thead><tr><th>呼び名</th><th>版</th><th>最後の知らせ</th><th>データベース ／ ワーカー ／ 入口 ／ ローカル AI</th><th>控え ／ 戻せるか ／ 社外</th><th className="num">データの空き</th><th className="num">証明書</th><th>印</th><th /></tr></thead>
             <tbody>
               {rows.map((m) => {
@@ -420,6 +445,161 @@ function Audit() {
             ))}
           </tbody>
         </table>
+      )}
+    </>
+  );
+}
+
+/** 会社の詳細（概要・利用状況・稼働・シート・履歴）。業務の中身は出さない。 */
+function TenantDetail({ id, onBack }: { id: string; onBack: () => void }) {
+  const [data, setData] = useState<{ detail: TenantDetailView; opsHistory: OpsAuditRow[] } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => { opsApi.tenantDetail(id).then(setData).catch((e) => setError(errText(e, '読み込めませんでした'))); }, [id]);
+  const d = data?.detail;
+  const rate = (f: number, n: number) => (n ? `${Math.round((f / n) * 1000) / 10}%` : '—');
+  return (
+    <>
+      <p><a className="link" href="#" onClick={(e) => { e.preventDefault(); onBack(); }}>← 会社一覧</a></p>
+      {error && <p className="error">{error}</p>}
+      {d && (
+        <>
+          <h2>{d.tenant.name}</h2>
+          <div className="card">
+            <h3>概要</h3>
+            <dl className="kv">
+              <dt>サブドメイン</dt><dd>{d.tenant.subdomain}</dd>
+              <dt>Workspace のドメイン</dt><dd>{d.tenant.workspaceDomain ?? '—'}</dd>
+              <dt>状態</dt><dd>{STATUS_LABEL[d.tenant.status]}</dd>
+              <dt>作った日時</dt><dd>{when(d.tenant.createdAt)}</dd>
+              <dt>先方の管理者</dt><dd>{d.seats.filter((s) => s.email).map((s) => `${s.displayName}（${s.email}）`).join('、') || '—'}</dd>
+            </dl>
+          </div>
+          <div className="card">
+            <h3>利用状況</h3>
+            <table className="table">
+              <thead><tr><th>月</th><th className="num">実行</th><th className="num">失敗</th><th className="num">会話</th><th className="num">AI の費用</th><th className="num">1 日に使った人の最多</th></tr></thead>
+              <tbody>
+                <tr><td>{d.currentMonth.month}（今月）</td><td className="num">{d.currentMonth.runs}</td><td className="num">{rate(d.currentMonth.failed, d.currentMonth.runs)}</td>
+                  <td className="num">{d.currentMonth.conversations}</td><td className="num">{yen(Number(d.currentMonth.aiCost))}</td><td className="num">—</td></tr>
+                {[...d.months].reverse().map((m) => (
+                  <tr key={m.month}><td>{m.month}</td><td className="num">{m.runs}</td><td className="num">{rate(m.failed, m.runs)}</td>
+                    <td className="num">{m.conversations}</td><td className="num">{yen(Number(m.aiCost))}</td><td className="num">{m.usersMax}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="card">
+            <h3>稼働</h3>
+            <dl className="kv">
+              <dt>失敗（30 日）</dt><dd>{d.health.failed30d} 件 ／ {d.health.runs30d} 件（{rate(d.health.failed30d, d.health.runs30d)}）</dd>
+              <dt>承認の滞留</dt><dd>{d.health.approvalsPending} 件{d.health.approvalsOldest ? `（最も古い ${when(d.health.approvalsOldest)}）` : ''}</dd>
+              <dt>Google の接続</dt><dd>{d.health.googleConnections}</dd>
+              <dt>失敗した業務（30 日）</dt><dd>{d.health.failedAgents.map((f) => `${f.agentId} ${f.count} 件`).join('、') || 'ありません'}</dd>
+            </dl>
+            {d.health.targets.length > 0 && (
+              <table className="table">
+                <thead><tr><th>接続先（24 時間）</th><th className="num">成功</th><th className="num">失敗</th><th className="num">平均の速さ</th><th>最後の失敗</th></tr></thead>
+                <tbody>{d.health.targets.map((t) => (
+                  <tr key={t.target}><td>{t.target}</td><td className="num">{t.ok}</td><td className="num">{t.fail}</td><td className="num">{t.avgMs === null ? '—' : `${t.avgMs} ms`}</td><td>{t.lastError ?? '—'}</td></tr>
+                ))}</tbody>
+              </table>
+            )}
+          </div>
+          <div className="card">
+            <h3>シート（{d.seats.filter((s) => s.status === 'active').length} 人）</h3>
+            <table className="table">
+              <thead><tr><th>氏名</th><th>ロール</th><th>状態</th><th>最後に使った</th></tr></thead>
+              <tbody>{d.seats.map((s, i) => (
+                <tr key={i}><td>{s.displayName}</td><td>{s.roles.join('・')}</td><td>{s.status === 'active' ? '利用中' : '停止'}</td><td>{when(s.lastUsedAt)}</td></tr>
+              ))}</tbody>
+            </table>
+          </div>
+          <div className="card">
+            <h3>履歴</h3>
+            <table className="table">
+              <thead><tr><th>日時</th><th>操作</th><th>内容</th></tr></thead>
+              <tbody>
+                {[...d.history.map((h) => ({ at: h.occurredAt, what: ACTION_LABEL[h.action] ?? h.action, detail: h.detail })),
+                  ...(data?.opsHistory ?? []).filter((a) => a.action !== 'tenant.view').map((a) => ({ at: a.occurredAt, what: `${ACTION_LABEL[a.action] ?? a.action}（${a.operatorEmail ?? a.operatorId}）`, detail: a.detail }))]
+                  .sort((a, b) => (a.at < b.at ? 1 : -1))
+                  .map((h, i) => <tr key={i}><td>{when(h.at)}</td><td>{h.what}</td><td className="small muted">{Object.entries(h.detail).map(([k, v]) => `${k}: ${String(v)}`).join('、')}</td></tr>)}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+/** サーバー全体の稼働状況。1 分ごとに読み直す。 */
+function Server() {
+  const [s, setS] = useState<ServerStatusView | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(() => { opsApi.server().then((r) => setS(r.status)).catch((e) => setError(errText(e, '読み込めませんでした'))); }, []);
+  useEffect(() => { load(); const t = window.setInterval(load, 60_000); return () => clearInterval(t); }, [load]);
+  const rate = (f: number, n: number) => (n ? `${Math.round((f / n) * 1000) / 10}%` : '—');
+  const lastWorker = s?.workers[0]?.at ?? null;
+  const workerOk = !!lastWorker && Date.now() - Date.parse(lastWorker) < 3 * 60_000;
+  const group: Record<string, string> = { ai: 'AI', google: 'Google', mcp: '会社の接続（MCP）' };
+  return (
+    <>
+      <h2>稼働状況</h2>
+      {error && <p className="error">{error}</p>}
+      {s && (
+        <>
+          <div className="stats">
+            <div className="stat"><span>待ち行列</span><strong>{s.queue.queued}</strong><span>{s.queue.oldestQueuedAt ? `最も古い ${when(s.queue.oldestQueuedAt)}` : '待ちなし'}・動いている {s.queue.running}・承認待ち {s.queue.awaitingApproval}</span></div>
+            <div className="stat"><span>実行（1 時間 ／ 今日）</span><strong>{s.runs.hour} ／ {s.runs.today}</strong><span>失敗 {rate(s.runs.hourFailed, s.runs.hour)} ／ {rate(s.runs.todayFailed, s.runs.today)}</span></div>
+            <div className="stat"><span>ワーカー</span><strong><span className={`badge ${workerOk ? 'ok' : 'warn'}`}>{workerOk ? '動いています' : '応答がありません'}</span></strong><span>最後の応答 {when(lastWorker)}</span></div>
+            <div className="stat"><span>遅れている定時実行</span><strong>{s.schedulesLate}</strong></div>
+            <div className="stat"><span>AI の費用（今日 ／ 今月）</span><strong>{yen(Number(s.ai.today))} ／ {yen(Number(s.ai.month))}</strong><span>前の月の同じ時期 {yen(Number(s.ai.lastMonthSamePeriod))}</span></div>
+            <div className="stat"><span>データベース</span><strong>{bytes(Number(s.database.bytes))}</strong><span>接続 {s.database.connections}</span></div>
+            <div className="stat"><span>ファイルの置き場</span><strong>{bytes(Number(s.filesBytes))}</strong></div>
+          </div>
+          <table className="table">
+            <thead><tr><th>外部の接続（24 時間）</th><th className="num">成功</th><th className="num">失敗</th><th className="num">失敗の割合</th><th className="num">平均の速さ</th></tr></thead>
+            <tbody>{s.targets.map((t) => (
+              <tr key={t.group}><td>{group[t.group] ?? t.group}</td><td className="num">{t.ok}</td><td className="num">{t.fail}</td><td className="num">{rate(t.fail, t.ok + t.fail)}</td><td className="num">{t.avgMs === null ? '—' : `${t.avgMs} ms`}</td></tr>
+            ))}</tbody>
+          </table>
+          {s.workers.length > 1 && <p className="muted small">ワーカー: {s.workers.map((w) => `${w.id}（${when(w.at)}）`).join('、')}</p>}
+        </>
+      )}
+    </>
+  );
+}
+
+/** 運営主体の設定（法人名・所在地・Web・問い合わせの窓口）。運営管理者だけが変えられる。 */
+function Settings({ me }: { me: OpsMe }) {
+  const [p, setP] = useState<OperatorProfileView | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const edit = me.can['settings.manage'];
+  useEffect(() => { opsApi.operatorProfile().then((r) => setP(r.profile)).catch((e) => setError(errText(e, '読み込めませんでした'))); }, []);
+  const save = () => {
+    if (!p) return;
+    setError(null); setSaved(false);
+    opsApi.setOperatorProfile(p).then((r) => { setP(r.profile); setSaved(true); }).catch((e) => setError(errText(e, '保存できませんでした')));
+  };
+  const field = (k: keyof OperatorProfileView, label: string) => (
+    <div className="field"><label>{label}</label><input value={p?.[k] ?? ''} disabled={!edit} onChange={(e) => p && setP({ ...p, [k]: e.target.value })} /></div>
+  );
+  return (
+    <>
+      <h2>設定</h2>
+      {error && <p className="error">{error}</p>}
+      {p && (
+        <div className="card">
+          <h3>運営主体</h3>
+          {field('nameJa', '法人名')}
+          {field('nameEn', '法人名（英語）')}
+          {field('address', '所在地')}
+          {field('web', 'Web')}
+          {field('contact', '問い合わせの窓口')}
+          {edit && <button className="btn small" onClick={save}>保存する</button>}
+          {saved && <p className="ok-msg small">保存しました</p>}
+        </div>
       )}
     </>
   );

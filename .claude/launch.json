@@ -37,6 +37,15 @@
       ],
       "port": 3104,
       "url": "http://a.localhost:3104"
+    },
+    {
+      "name": "ops",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev:ops"
+      ],
+      "port": 3102
     }
   ]
 }

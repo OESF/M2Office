@@ -59,6 +59,41 @@ export interface OpsMachine {
   report: MachineReport | null;
 }
 
+/** 運営主体の設定（第23.8.14節）。 */
+export interface OperatorProfile {
+  nameJa: string;
+  nameEn: string;
+  address: string;
+  web: string;
+  contact: string;
+}
+
+/** 会社の詳細（第23.8.15節）。数と状態と、シートの氏名とロールだけ。 */
+export interface TenantDetail {
+  tenant: { id: string; subdomain: string; name: string; workspaceDomain: string | null; status: TenantOverview['status']; createdAt: string };
+  seats: { displayName: string; roles: string[]; status: string; email: string | null; lastUsedAt: string | null }[];
+  months: { month: string; runs: number; failed: number; conversations: number; aiCost: number; usersMax: number }[];
+  currentMonth: { month: string; runs: number; failed: number; conversations: number; aiCost: number };
+  health: {
+    runs30d: number; failed30d: number; approvalsPending: number; approvalsOldest: string | null; googleConnections: number;
+    targets: { target: string; ok: number; fail: number; avgMs: number | null; lastError: string | null }[];
+    failedAgents: { agentId: string; count: number }[];
+  };
+  history: { action: string; actorId: string; detail: Record<string, unknown>; occurredAt: string }[];
+}
+
+/** サーバー全体の稼働状況（第23.8.7節のうち段 1 の分）。 */
+export interface ServerStatus {
+  queue: { queued: number; oldestQueuedAt: string | null; running: number; awaitingApproval: number };
+  runs: { hour: number; hourFailed: number; today: number; todayFailed: number };
+  workers: { id: string; at: string; version: string | null }[];
+  schedulesLate: number;
+  targets: { group: string; ok: number; fail: number; avgMs: number | null }[];
+  database: { bytes: number; connections: number };
+  filesBytes: number;
+  ai: { today: number; month: number; lastMonthSamePeriod: number };
+}
+
 /** 運営の操作の記録。 */
 export interface OpsAuditEntry {
   id: string;
@@ -192,6 +227,46 @@ export class OpsStore {
       id: r.id, operatorId: r.operator_id, operatorEmail: r.email ?? null, action: r.action, targetType: r.target_type,
       targetId: r.target_id, detail: r.detail ?? {}, occurredAt: iso(r.occurred_at)!,
     }));
+  }
+
+  /** その対象への運営の操作の記録（会社の詳細の履歴）。 */
+  async listAuditFor(targetId: string, limit = 50): Promise<OpsAuditEntry[]> {
+    const { rows } = await this.pool.query(
+      `select a.*, o.email from ops.audit a left join ops.operators o on o.id = a.operator_id where a.target_id = $1 order by a.occurred_at desc limit $2`,
+      [targetId, limit],
+    );
+    return rows.map((r) => ({
+      id: r.id, operatorId: r.operator_id, operatorEmail: r.email ?? null, action: r.action, targetType: r.target_type,
+      targetId: r.target_id, detail: r.detail ?? {}, occurredAt: iso(r.occurred_at)!,
+    }));
+  }
+
+  /** 会社の詳細。無ければ `null`。 */
+  async tenantDetail(tenantId: string): Promise<TenantDetail | null> {
+    const { rows } = await this.pool.query('select ops.tenant_detail($1) as d', [tenantId]);
+    return (rows[0]?.d as TenantDetail | null) ?? null;
+  }
+
+  /** サーバー全体の稼働状況。 */
+  async serverStatus(): Promise<ServerStatus> {
+    const { rows } = await this.pool.query('select ops.server_status() as s');
+    return rows[0].s as ServerStatus;
+  }
+
+  /** 運営主体の設定（入れていなければ空の値）。 */
+  async operatorProfile(): Promise<OperatorProfile> {
+    const { rows } = await this.pool.query('select * from ops.operator_profile where id = 1');
+    const r = rows[0];
+    return { nameJa: r?.name_ja ?? '', nameEn: r?.name_en ?? '', address: r?.address ?? '', web: r?.web ?? '', contact: r?.contact ?? '' };
+  }
+
+  async setOperatorProfile(p: OperatorProfile, by: string): Promise<void> {
+    await this.pool.query(
+      `insert into ops.operator_profile (id, name_ja, name_en, address, web, contact, updated_by, updated_at) values (1,$1,$2,$3,$4,$5,$6,now())
+       on conflict (id) do update set name_ja = excluded.name_ja, name_en = excluded.name_en, address = excluded.address, web = excluded.web,
+         contact = excluded.contact, updated_by = excluded.updated_by, updated_at = now()`,
+      [p.nameJa, p.nameEn, p.address, p.web, p.contact, by],
+    );
   }
 
   /** 会社ごとの数（その場で数える）。 */

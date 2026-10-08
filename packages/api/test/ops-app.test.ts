@@ -33,8 +33,12 @@ function fakeStore() {
     },
     revokeSession: async () => undefined,
     audit: async (_op: string, action: string) => { audits.push(action); },
-    tenantOverview: async () => [],
     createTenant: async (input: NewTenantInput) => { created.push(input); return `t-${input.subdomain}`; },
+    tenantDetail: async (id: string) => (id === 't-acme' ? { tenant: { id, subdomain: 'acme' } } : null),
+    listAuditFor: async () => [],
+    tenantOverview: async () => [{ name: '=cmd', subdomain: 'acme', workspaceDomain: null, status: 'trial', createdAt: '', usersActive: 0, usersInvited: 0, users30d: 0, lastUsedAt: null,
+      runsToday: 0, runs30d: 0, runsFailed30d: 0, conversations30d: 0, aiCostMonth: 0, filesBytes: 0, extensions: 0, googleConnections: 0 }],
+    setOperatorProfile: async () => undefined,
     receiveReport: async (token: string, r: MachineReport) => { if (token !== 'machine-key') return null; reports.push(r); return 'm-1'; },
   } as unknown as OpsStore;
   return { store, created, audits, reports };
@@ -108,4 +112,23 @@ test('稼働の知らせ: 機械の鍵で受け、形の違うもの・違う鍵
   assert.equal((await send('machine-key', JSON.stringify(report))).status, 200);
   assert.equal(reports.length, 1);
   assert.equal('injected' in reports[0]!, false);
+});
+
+test('会社の詳細と CSV は開いたことを残す。運営主体の設定は運営管理者だけ', async () => {
+  const { store, audits } = fakeStore();
+  const app = opsApp({ store, config, log });
+  const admin = await login(app, 'admin@ops.example');
+  assert.equal((await app.request('/v1/ops/tenants/t-none', { headers: { ...OPS, cookie: admin.cookie } })).status, 404);
+  assert.equal((await app.request('/v1/ops/tenants/t-acme', { headers: { ...OPS, cookie: admin.cookie } })).status, 200);
+  const csv = await app.request('/v1/ops/tenants.csv', { headers: { ...OPS, cookie: admin.cookie } });
+  assert.match(csv.headers.get('content-type') ?? '', /text\/csv/);
+  assert.match(await csv.text(), /'=cmd/);
+  assert.ok(audits.includes('tenant.view') && audits.includes('tenants.export'));
+  const put = (who: { cookie: string; csrfToken: string }, body: unknown) => app.request('/v1/ops/settings/operator', {
+    method: 'PUT', headers: { ...OPS, cookie: who.cookie, 'x-csrf-token': who.csrfToken, 'content-type': 'application/json' }, body: JSON.stringify(body),
+  });
+  assert.equal((await put(admin, { nameJa: '運営', web: 'http://x' })).status, 400);
+  assert.equal((await put(admin, { nameJa: '運営', web: 'https://ops.example' })).status, 200);
+  const mon = await login(app, 'mon@ops.example');
+  assert.equal((await put(mon, { nameJa: 'x' })).status, 403);
 });

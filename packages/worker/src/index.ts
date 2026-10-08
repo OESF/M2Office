@@ -10,12 +10,13 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { hostname } from 'node:os';
 import {
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
   RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, GoogleContactsService, KnowledgeEmbedder, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, JGrantsApi, MockJGrants, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, MEMBER_LINE_SEND, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger,
   NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
-  defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator, aiUsageMeterFromEnv, enterAiUsage, withAiUsage, setEnqueueAiGuard, AutoMinutes, MINUTES_AGENT_ID, appPath, backupConfigFromEnv, machineDir, readBackupStatus, takeUnnotifiedUpdateFailure, takeClosedMaintenanceSessions, heartbeatConfigFromEnv, sendHeartbeat, HEARTBEAT_INTERVAL_MS, machineStatus, machineConfigFromEnv, restoreTest, runBackup, takeBackupRequest, writeWorkerBeat, offsiteConfigFromEnv, readOffsiteStatus, runOffsite, checkOffsite
+  defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator, aiUsageMeterFromEnv, enterAiUsage, withAiUsage, setEnqueueAiGuard, AutoMinutes, MINUTES_AGENT_ID, appPath, backupConfigFromEnv, machineDir, readBackupStatus, takeUnnotifiedUpdateFailure, takeClosedMaintenanceSessions, heartbeatConfigFromEnv, sendHeartbeat, HEARTBEAT_INTERVAL_MS, machineStatus, machineConfigFromEnv, restoreTest, runBackup, takeBackupRequest, writeWorkerBeat, OpsAppSide, createPool, offsiteConfigFromEnv, readOffsiteStatus, runOffsite, checkOffsite
 } from '@m2office/core';
 import { canRunAgent, fileInputKey } from '@m2office/shared';
 import { fileURLToPath } from 'node:url';
@@ -566,6 +567,11 @@ let lastUpdateCheck = 0;
 const heartbeatCfg = onsite ? heartbeatConfigFromEnv(process.env) : null;
 let lastHeartbeat = 0;
 let lastBackupCheck = 0;
+// マスター管理画面のための、ワーカーの知らせと毎晩の数の記録（クラウドの形だけ。仕様書 第23.8.15節）
+const opsSide = onsite ? null : new OpsAppSide(createPool(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office', { max: 1, name: 'ops' }));
+const workerBeatId = `${hostname()}-${process.pid}`;
+let lastOpsBeat = 0;
+let lastDailyRecorded = '';
 
 /** 機械の知らせを、会社の管理者に届ける（ローカルの形は 1 社。第8.6.7節）。 */
 async function notifyMachine(title: string, body: string): Promise<void> {
@@ -652,6 +658,22 @@ while (running) {
       }
     } catch (err) {
       log.warn('控えの見回りで例外が発生しました', { err });
+    }
+  }
+  // クラウドの形: ワーカーが動いていることを 1 分ごとに書き、毎晩 0 時 30 分（日本時間）すぎに前の日の数を残す（第23.8.15節）
+  if (opsSide && Date.now() - lastOpsBeat >= 60_000) {
+    lastOpsBeat = Date.now();
+    await opsSide.beat(workerBeatId, appVersion()).catch((err) => log.debug('ワーカーの知らせを書けませんでした', { err }));
+    const jst = new Date(Date.now() + 9 * 3_600_000);
+    const yesterday = new Date(jst.getTime() - 86_400_000).toISOString().slice(0, 10);
+    if (jst.getUTCHours() * 60 + jst.getUTCMinutes() >= 30 && lastDailyRecorded !== yesterday) {
+      try {
+        const n = await opsSide.recordDaily(yesterday);
+        lastDailyRecorded = yesterday;
+        log.info('会社ごとの毎日の数を残しました', { day: yesterday, tenants: n });
+      } catch (err) {
+        log.warn('会社ごとの毎日の数を残せませんでした', { err });
+      }
     }
   }
   // 遠隔の保守の閉じた回を、会社の監査ログに残す（開けた時刻・つないだ相手・閉じた時刻。第8.6.4節）

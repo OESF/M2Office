@@ -184,9 +184,10 @@ export {
 } from './machine/index.js';
 export {
   RESERVED_SUBDOMAINS, OPERATOR_ROLES, MACHINE_REPORT_MAX_BYTES, MACHINE_SILENT_MS,
-  operatorCan, checkNewTenant, tenantErrorText, welcomeText, parseMachineReport, machineFlags,
+  operatorCan, checkNewTenant, tenantErrorText, welcomeText, parseMachineReport, machineFlags, tenantsCsv,
   type OperatorRole, type OpsAction, type NewTenantInput, type MachineReport, type MachineFlag,
   OpsStore, OpsRuleError, sha256 as opsSha256,
   type Operator, type OpsSession, type TenantOverview, type OpsMachine, type OpsAuditEntry,
+  type OperatorProfile, type TenantDetail, type ServerStatus, OpsAppSide,
 } from './ops/index.js';
 export { scoreEval, CONTRACT_REVIEW_AVOID, CONTRACT_REVIEW_MUST, type EvalScore } from './evals/score.js';
