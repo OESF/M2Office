@@ -5,8 +5,8 @@
  */
 
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
-import { api, ApiError, describeError, type AdminRun, type AdminRunStatus, type AdminSchedule, type AiUsageView, type AuditFilter, type AuditRowView, type MachineView, type Me } from './api.js';
-import { statusLabel, SuspendedBanner } from './components.js';
+import { api, ApiError, describeError, type AdminRun, type AdminRunStatus, type AdminSchedule, type AiUsageView, type AuditFilter, type AuditRowView, type MachineView, type Me, type SupportGrant, type RunDetail } from './api.js';
+import { RunView, statusLabel, SuspendedBanner } from './components.js';
 import {
   AgentSettings, CompanySettings, KnowledgeSettings, UserSettings,
 } from './AdminSettings.js';
@@ -21,7 +21,7 @@ import { Icon, NavHeading, NavItem, SideNavLayout, ThemeToggle, type IconName } 
 
 type Tab =
   | 'dashboard' | 'usage' | 'runs' | 'schedules' | 'company' | 'agents' | 'extensions' | 'users' | 'knowledge' | 'audit'
-  | 'connectors' | 'setup' | 'help' | 'helpReview' | 'machine';
+  | 'connectors' | 'setup' | 'help' | 'helpReview' | 'machine' | 'support';
 
 /**
  * 管理者ページの左ペインの項目。説明はマウスを重ねたときに出す（仕様書 第6.1.1節）。
@@ -95,6 +95,7 @@ const TABS: {
   { id: 'runs', label: '実行の一覧', icon: 'runs', description: '全員の実行の状態と費用（中身は見られません）', group: '記録' },
   { id: 'schedules', label: '定時実行の一覧', icon: 'schedules', description: '全員の定時実行と、動かないものの理由（見るだけ）', group: '記録' },
   { id: 'audit', label: '監査ログ', icon: 'audit', description: '誰が何をしたかの記録', group: '記録' },
+  { id: 'support', label: 'サポートの閲覧', icon: 'users', description: '運営のサポートが会社の画面を見ることを許す・断る・切る', group: '記録' },
   { id: 'helpReview', label: 'ヘルプの見直し', icon: 'help', description: '秘書が答えられなかった使い方の質問と、記事が役に立ったか', group: '記録' },
   { id: 'help', label: 'ヘルプ', icon: 'help', description: '管理者向けの記事と検索', group: '' },
 ];
@@ -207,6 +208,13 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
         <button className="btn ghost small" onClick={onLogout}>ログアウト</button>
       </header>
       <SuspendedBanner status={me.tenant.status} suspendAt={me.tenant.suspendAt} />
+      {/* 運営のサポートの代理アクセス（見るだけ。仕様書 第23.6.1節） */}
+      {me.proxy && (
+        <div className="suspended-banner" role="status">
+          <strong>{me.user.displayName}が閲覧しています（見るだけ・{new Date(me.proxy.expiresAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })} まで）</strong>
+          {' '}<button className="link-btn" onClick={onLogout}>閲覧を終える</button>
+        </div>
+      )}
       {!isAdmin ? (
         <main className="canvas"><p className="error">管理者ページは管理者のみが開けます。</p></main>
       ) : (
@@ -214,7 +222,7 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
         <SideNavLayout extraClass="no-talk" nav={(
           <>
             {/* すべて済んだ会社では「はじめに行う設定」を出さない（仕様書 第6.10.3.1節） */}
-            {TABS.filter((t) => (t.id !== 'setup' || setup) && (t.id !== 'machine' || me.deployment === 'onsite')).map((t, i, shown) => (
+            {TABS.filter((t) => (t.id !== 'setup' || setup) && (t.id !== 'machine' || me.deployment === 'onsite') && (t.id !== 'support' || !me.proxy)).map((t, i, shown) => (
               <Fragment key={t.id}>
                 {/* まとまりの変わり目に見出しを出す（仕様書 第6.6節の並び） */}
                 {t.group && t.group !== shown[i - 1]?.group && <NavHeading>{t.group}</NavHeading>}
@@ -259,7 +267,8 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
             )}
             {tab === 'usage' && <Usage />}
             {tab === 'machine' && <Machine />}
-            {tab === 'runs' && <Runs />}
+            {tab === 'runs' && <Runs viewer={me.proxy?.scope === 'runs' ? me.user.id : null} />}
+            {tab === 'support' && !me.proxy && <SupportAccess />}
             {tab === 'schedules' && <TenantSchedules />}
             {tab === 'company' && <CompanySettings page={page} />}
             {tab === 'agents' && <AgentSettings page={page} />}
@@ -547,7 +556,10 @@ function MachineMaintenance({ data, heartbeat, onChanged, onError }: {
   );
 }
 
-function Runs() {
+/**
+ * @param viewer 代理アクセスで業務の結果まで許されたとき、許した管理者の ID（その人が依頼した実行だけ中身を開ける。第23.6.1節）
+ */
+function Runs({ viewer }: { viewer: string | null }) {
   const { data, error } = useLoad(api.admin.runs);
   const { data: users } = useLoad(api.admin.users);
   const nameOf = (id: string | null) => users?.items.find((u) => u.id === id)?.displayName ?? id ?? '—';
@@ -559,7 +571,7 @@ function Runs() {
       }} />
       {error && <p className="error">{error}</p>}
       {data?.items.map((r: AdminRun) => (
-        <RunRow key={r.id} run={r} requester={nameOf(r.requestedBy)} />
+        <RunRow key={r.id} run={r} requester={nameOf(r.requestedBy)} contentFor={viewer && r.requestedBy === viewer ? viewer : null} />
       ))}
     </>
   );
@@ -723,8 +735,10 @@ function TenantSchedules() {
  * 業務の入力・段の入出力・成果物は返らない。管理者が見られるのは状態・費用・
  * 起動経路までである（第6.6.8節、不変則 I-10）。
  */
-function RunRow({ run, requester }: { run: AdminRun; requester: string }) {
+function RunRow({ run, requester, contentFor }: { run: AdminRun; requester: string; contentFor?: string | null }) {
   const [open, setOpen] = useState(false);
+  // 代理アクセスの業務の結果（許した管理者が依頼した実行の中身。第23.6.1節）
+  const [content, setContent] = useState<RunDetail | null>(null);
   const [detail, setDetail] = useState<AdminRunStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -745,6 +759,8 @@ function RunRow({ run, requester }: { run: AdminRun; requester: string }) {
         <div className="fold-body">
           {error && <p className="error">{error}</p>}
           {!error && !detail && <p className="muted">読み込み中…</p>}
+          {contentFor && !content && <button className="btn ghost small" onClick={() => void api.run(run.id).then(setContent).catch((e) => setError(describeError(e, '読み込めませんでした')))}>中身を見る</button>}
+          {content && <RunView detail={content} viewerId="" onCancelled={() => undefined} />}
           {detail && (
             <>
               {detail.failureReason && <p className="error">{detail.failureReason}</p>}
@@ -888,4 +904,52 @@ function originLabel(origin: string | null): string {
 
 function roleLabel(role: string): string {
   return ({ admin: '管理者', approver: '承認者', member: '一般', external: '外部協力者', developer: '開発者' } as Record<string, string>)[role] ?? role;
+}
+
+/** 申請の状態の呼び名。 */
+const SUPPORT_STATE: Record<SupportGrant['state'], string> = {
+  requested: '許すか待ち', approved: '閲覧できる', denied: '断った', revoked: '切った', withdrawn: '取り下げられた', expired: '期限で終わった',
+};
+
+/**
+ * サポートの閲覧（仕様書 第23.6.1節）。運営のサポートからの代理アクセスの申請を、許す（期限を選ぶ）・断る・切る。
+ *
+ * @remarks 見るだけで、書き換え・依頼・承認はできない。見た画面は監査ログに残る
+ */
+function SupportAccess() {
+  const [items, setItems] = useState<SupportGrant[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [hours, setHours] = useState<Record<string, number>>({});
+  const load = useCallback(() => { api.admin.supportAccess().then((r) => setItems(r.items)).catch((e) => setError(describeError(e, '読み込めませんでした'))); }, []);
+  useEffect(() => { load(); }, [load]);
+  const act = (p: Promise<unknown>) => { setError(null); p.then(load).catch((e) => setError(describeError(e, '扱えませんでした'))); };
+  const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—');
+  return (
+    <>
+      <PageTitle trail={['サポートの閲覧']} help={{
+        article: 'admin-support-access',
+        text: '運営のサポートが、問い合わせの調べのために会社の画面を見ることを、許すか断ります。見るだけで、見た画面は監査ログに残ります。',
+      }} />
+      {error && <p className="error">{error}</p>}
+      {items && items.length === 0 && <p className="muted">申請はありません</p>}
+      {items?.map((g) => (
+        <div key={g.id} className="card">
+          <p><strong>{g.operatorLabel}</strong> <span className="muted small">{when(g.requestedAt)}</span> <span className="badge">{SUPPORT_STATE[g.state]}</span></p>
+          <p>{g.scope === 'runs' ? '管理者ページと、許した方が依頼した業務の結果' : '管理者ページ'}を見る。理由: {g.reason}</p>
+          {g.state === 'approved' && <p className="small">{when(g.expiresAt)} まで閲覧できます（閲覧 {g.views} 回）</p>}
+          {g.state !== 'requested' && g.state !== 'approved' && g.views > 0 && <p className="small muted">閲覧 {g.views} 回</p>}
+          {g.state === 'requested' && (
+            <p>
+              <select value={hours[g.id] ?? 24} onChange={(e) => setHours({ ...hours, [g.id]: Number(e.target.value) })}>
+                <option value={1}>1 時間</option><option value={4}>4 時間</option><option value={24}>1 日</option><option value={72}>3 日</option>
+              </select>{' '}
+              <button className="btn small" onClick={() => act(api.admin.approveSupport(g.id, hours[g.id] ?? 24))}>許す</button>{' '}
+              <button className="btn ghost small" onClick={() => act(api.admin.denySupport(g.id))}>断る</button>
+            </p>
+          )}
+          {g.state === 'approved' && <button className="btn ghost small" onClick={() => act(api.admin.revokeSupport(g.id))}>切る</button>}
+        </div>
+      ))}
+    </>
+  );
 }

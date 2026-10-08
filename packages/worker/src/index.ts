@@ -667,6 +667,9 @@ while (running) {
     // 予告の期限が来た通常の停止を行う（第23.8.6節）
     const stopped = await opsSide.applyDueSuspensions().catch((err) => { log.warn('予告の期限が来た停止を行えませんでした', { err }); return 0; });
     if (stopped > 0) log.info('予告の期限が来た会社のご利用を停止しました', { tenants: stopped });
+    // 期限が来たか切られた代理アクセスの、終わったあとの知らせ（第23.6.1節）
+    const ended = await opsSide.sweepProxy().catch((err) => { log.warn('代理アクセスの終わりを知らせられませんでした', { err }); return 0; });
+    if (ended > 0) log.info('代理アクセスの終わりを会社の管理者に知らせました', { grants: ended });
     const jst = new Date(Date.now() + 9 * 3_600_000);
     const yesterday = new Date(jst.getTime() - 86_400_000).toISOString().slice(0, 10);
     if (jst.getUTCHours() * 60 + jst.getUTCMinutes() >= 30 && lastDailyRecorded !== yesterday) {

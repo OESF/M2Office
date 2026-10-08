@@ -354,6 +354,28 @@ const ACTION_LABELS: Record<string, string> = {
   'hr.payroll.trial': '試しの計算をした',
   'hr.payroll.self': '自分の給与明細を見た',
   'hr.payroll.consent': '給与明細を画面で受け取る同意を変えた',
+  // 運営の操作（マスター管理画面。仕様書 第23.8.6節・第23.6.1節）
+  'tenant.create': '会社を作った',
+  'tenant.status': '試用と稼働を切り替えた',
+  'tenant.suspend_requested': 'ご利用の停止が申請された',
+  'tenant.suspend_scheduled': 'ご利用の停止を予告した',
+  'tenant.suspend': 'ご利用を停止した',
+  'tenant.lock': 'ご利用を緊急停止した',
+  'tenant.lock_confirmed': '緊急停止が確認された',
+  'tenant.resume_requested': 'ご利用の再開が申請された',
+  'tenant.resume': 'ご利用を再開した',
+  'tenant.suspend_withdrawn': 'ご利用の停止の申請を取り下げた',
+  'tenant.suspend_rejected': 'ご利用の停止が承認されなかった',
+  'tenant.resume_withdrawn': 'ご利用の再開の申請を取り下げた',
+  'tenant.resume_rejected': 'ご利用の再開が承認されなかった',
+  'proxy.request': 'サポートが閲覧を申請した',
+  'proxy.approve': 'サポートの閲覧を許した',
+  'proxy.deny': 'サポートの閲覧を断った',
+  'proxy.revoke': 'サポートの閲覧を切った',
+  'proxy.enter': 'サポートが閲覧を始めた',
+  'proxy.view': 'サポートが画面を見た',
+  'proxy.end': 'サポートの閲覧を運営が終えた',
+  'proxy.ended': 'サポートの閲覧が終わった',
 };
 
 /** 操作の種類（絞り込みの単位）。`prefixes` のどれかで始まる操作が当たる。 */
@@ -443,6 +465,8 @@ export function presentAudit(e: AuditEvent, names: AuditNames): AuditRow {
     : e.actorType === 'secretary' ? `秘書（${person(e.actorId)}さんの依頼）`
     : e.actorType === 'agent' ? `業務「${names.agent(e.actorId) ?? run?.agentName ?? agentDisplayName(null, e.actorId)}」${run ? `（${person(run.requestedBy)}さんの依頼）` : ''}`
     : e.actorType === 'api_client' ? `外部アプリ（${e.actorId}）`
+    // 運営の操作（`ops:<運営者>`）。運営者のメールアドレスが記録にあれば添える
+    : e.actorId.startsWith('ops:') ? `運営${typeof e.detail?.['operator'] === 'string' ? `（${e.detail['operator']}）` : ''}`
     : `システム（${SYSTEM_LABELS[e.actorId] ?? e.actorId}）`;
   return {
     id: e.id, occurredAt: e.occurredAt, who, what: whatOf(e), target: targetOf(e, names), category: categoryOf(e.action),

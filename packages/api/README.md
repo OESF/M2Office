@@ -517,12 +517,16 @@ src/ops/              マスター管理画面の API（別のプロセス。仕
 | GET | `/v1/ops/status-requests` | 停止・緊急停止・再開の申請（扱いの残っているものと直近 30 日。`?tenant=` で会社を絞る） | すべて |
 | POST | `/v1/ops/tenants/:id/requests` | 停止・再開の申請、緊急停止（すぐ止める。会社へ渡す案内の文を返す） | 停止と再開: 運営管理者とサポート・緊急停止: すべて |
 | POST | `/v1/ops/status-requests/:id/decide`・`withdraw`・`confirm` | 承認するか・取り下げ・緊急停止の事後の確認（申請した人は承認と確認ができない） | 運営管理者とサポート |
+| GET・POST | `/v1/ops/proxy`・`/v1/ops/tenants/:id/proxy` | 代理アクセスの申請の一覧・申請（範囲と理由。第23.6.1節） | 運営管理者とサポート（見るのはすべて） |
+| POST | `/v1/ops/proxy/:id/open`・`end` | 許された閲覧の会社の画面を開く URL（1 回だけの 2 分の引換券。申請した運営者だけ）・取り下げと終わり | 運営管理者とサポート |
 | GET・POST・DELETE | `/v1/ops/machines` | ローカルの形の機械（印つき）・登録（鍵を 1 度だけ返す）・削除 | 見る: すべて・登録と削除: 運営管理者 |
 | POST | `/v1/ops/heartbeat` | 稼働の知らせの受け口（機械の鍵で名乗る。決めた項目だけを残す） | 機械 |
 | GET・POST・PUT | `/v1/ops/operators` | 運営者の一覧・追加・ロールと状態の変更（最後の運営管理者は外せない） | 見る: すべて・変える: 運営管理者 |
 | GET | `/v1/ops/audit` | 運営の操作の記録 | すべて |
 
 顧客向けの API は、運営主体の設定を決めた関数（`m2o_operator_profile`）で読むだけ（内蔵の拡張機能の「提供」の表記）。
+
+**代理アクセス（第23.6.1節）**: 顧客向けの API の `POST /v1/auth/proxy-exchange` が引換券を閲覧だけのログイン状態（Cookie `m2o_proxy`）に換える。利用者の確認（`authenticate`）は、このログイン状態の要求を範囲ごとの見るだけの道（`proxyAllowed`）に限り、閲覧のたびに会社の監査ログに `proxy.view` を残す。業務の結果まで許されたときは許した管理者として見て、`GET /v1/runs/:id` はその人が依頼した実行だけを返す。会社の管理者は `GET /v1/admin/support`・`POST /v1/admin/support/:id/approve`（期限 1・4・24・72 時間）・`deny`・`revoke` で扱う。
 
 ## 関連文書
 

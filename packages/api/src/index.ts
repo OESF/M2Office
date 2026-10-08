@@ -63,6 +63,7 @@ import { connectionsRoute, myGoogleRoute, oauthCallbackRoute, returnTo } from '.
 import { myConnectionsRoute } from './routes/connection-auth.js';
 import { myCanvaRoute } from './routes/canva.js';
 import { debugRoute } from './routes/debug.js';
+import { supportAccessRoute } from './routes/support-access.js';
 import { hrRoute } from './routes/hr.js';
 import { hrSelfRoute } from './routes/hr-self.js';
 import { hrPhotosRoute } from './routes/hr-photos.js';
@@ -158,6 +159,16 @@ if (deps.debug) {
 app.get('/v1/me', async (c) => {
   const ctx = c.get('ctx');
   const auth = c.get('auth');
+  // 運営のサポートの代理アクセス（第23.6.1節）。管理者ページだけを出し、本人のための準備（ブリーフの用意など）は行わない
+  if (auth.method === 'proxy') {
+    return c.json({
+      tenant: { ...ctx.tenant, ...(await companyView(deps, ctx.tenant)) },
+      user: { ...ctx.user, displayName: `運営のサポート（${auth.operatorLabel}）` },
+      photo: null, serverVersion: SERVER_VERSION, deployment: deps.ai.deployment(), auth: { method: 'proxy' }, csrfToken: auth.csrfToken,
+      workspaceSource: deps.connector.sourceFor(ctx.tenant.id), debug: false,
+      proxy: { scope: auth.scope, expiresAt: auth.expiresAt, operator: auth.operatorLabel },
+    });
+  }
   // 本人のアバター（第6.5.1.1節）。取り込み直すと URL が変わり、画面が新しい写真を読む
   const photo = await deps.repo.getUserPhoto(ctx.tenant.id, ctx.user.id);
   // Google の写真が無ければ、人事の台帳の顔写真を使う（第30.5.4節）
@@ -264,6 +275,7 @@ app.route('/v1/admin/access', accessRoute(deps));
 app.route('/v1/admin/compartments', compartmentsRoute(deps));
 app.route('/v1/admin/connections/mcp', mcpConnectionsRoute(deps));
 app.route('/v1/admin/connections', connectionsRoute(deps));
+app.route('/v1/admin/support', supportAccessRoute(deps));
 app.route('/v1/admin', adminRoute(deps));
 app.route('/v1/files', filesRoute(deps));
 app.route('/v1/help', helpRoute(deps));

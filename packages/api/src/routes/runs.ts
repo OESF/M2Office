@@ -36,6 +36,8 @@ export function runsRoute(deps: AppDeps) {
     if (!run) return c.json({ error: '実行が見つかりません' }, 404);
 
     const job = await deps.repo.getJob(ctx.tenant.id, run.jobId);
+    // 代理アクセスの業務の結果は、許した管理者が自分で依頼した実行だけ（承認者として見られる実行も含めない。第23.6.1節）
+    if (c.get('auth').method === 'proxy' && job?.requestedBy !== ctx.user.id) return c.json({ error: '実行が見つかりません' }, 404);
     if (!job || !(await canViewRun(deps.repo, ctx.tenant.id, job, run.id, ctx.user))) {
       return c.json({ error: '実行が見つかりません' }, 404);
     }

@@ -50,6 +50,16 @@ export class OpsAppSide {
     return Number(rows[0]?.n ?? 0);
   }
 
+  /**
+   * 期限が来たか切られた代理アクセスの、終わったあとの知らせを会社の管理者へ届ける（ワーカーが 1 分ごとに呼ぶ。第23.6.1節）。
+   *
+   * @returns 知らせた申請の数
+   */
+  async sweepProxy(): Promise<number> {
+    const { rows } = await this.pool.query('select m2o_proxy_sweep() as n');
+    return Number(rows[0]?.n ?? 0);
+  }
+
   /** 会社の停止の予告（止める予定の日時。無ければ `null`）。会社の画面の上の帯に出す。 */
   async suspendAt(tenantId: string): Promise<string | null> {
     const { rows } = await this.pool.query('select m2o_tenant_suspend_at($1) as at', [tenantId]);

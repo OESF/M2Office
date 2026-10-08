@@ -10,7 +10,7 @@ import { copyText } from './clipboard.js';
 import { NavItem, SideNavLayout, ThemeToggle, type IconName } from './nav.js';
 import {
   opsApi, OpsApiError, TENANTS_CSV_URL, type MachineRow, type OperatorProfileView, type OperatorRole, type OperatorView, type OpsAuditRow, type OpsMe,
-  type ServerStatusView, type StatusRequestRow, type TenantDetailView, type TenantRow,
+  type ProxyGrantRow, type ServerStatusView, type StatusRequestRow, type TenantDetailView, type TenantRow,
 } from './ops-api.js';
 
 const STATUS_LABEL: Record<TenantRow['status'], string> = { trial: '試用', active: '稼働中', suspended: '停止', locked: '緊急停止', cancelled: '解約済み' };
@@ -27,6 +27,7 @@ const ACTION_LABEL: Record<string, string> = {
   'tenant.status_approve': '申請を承認した', 'tenant.status_reject': '申請を承認しなかった', 'tenant.status_withdraw': '申請を取り下げた', 'tenant.lock_confirm': '緊急停止を確認した',
   'tenant.suspend_requested': '停止の申請', 'tenant.suspend_scheduled': '停止の予告', 'tenant.suspend': '停止した', 'tenant.lock': '緊急停止した',
   'tenant.lock_confirmed': '緊急停止の確認', 'tenant.resume_requested': '再開の申請', 'tenant.resume': '再開した',
+  'proxy.request': '代理アクセスを申請した', 'proxy.open': '代理アクセスで開いた', 'proxy.end': '代理アクセスを終えた',
 };
 const KIND_LABEL: Record<StatusRequestRow['kind'], string> = { suspend: '通常の停止', lock: '緊急停止', resume: '再開' };
 const STATE_LABEL: Record<StatusRequestRow['state'], string> = { pending: '承認待ち', scheduled: '予告中', done: '行った', rejected: '承認しなかった', withdrawn: '取り下げた' };
@@ -501,6 +502,7 @@ function TenantDetail({ id, me, onBack, onChanged }: { id: string; me: OpsMe; on
             </dl>
           </div>
           <StatusControl tenant={d.tenant} me={me} onChanged={() => { setN((x) => x + 1); onChanged(); }} />
+          <ProxyControl tenant={d.tenant} me={me} />
           <div className="card">
             <h3>利用状況</h3>
             <table className="table">
@@ -749,5 +751,62 @@ function Requests({ me, rows, onChanged }: { me: OpsMe; rows: StatusRequestRow[]
       {notice && <NoticeToSend text={notice} onClose={() => setNotice(null)} />}
       {rows.length === 0 ? <p className="muted">申請はありません</p> : <RequestTable me={me} rows={rows} onChanged={onChanged} onNotice={setNotice} showTenant />}
     </>
+  );
+}
+
+const PROXY_STATE: Record<ProxyGrantRow['state'], string> = {
+  requested: '会社の許し待ち', approved: '閲覧できる', denied: '断られた', revoked: '切られた', withdrawn: '取り下げた', expired: '期限で終わった',
+};
+
+/** 会社の詳細の「代理アクセス」（第23.6.1節）。申請と、許されたら会社の画面を開く（申請した運営者だけ）。 */
+function ProxyControl({ tenant, me }: { tenant: TenantDetailView['tenant']; me: OpsMe }) {
+  const [rows, setRows] = useState<ProxyGrantRow[] | null>(null);
+  const [form, setForm] = useState(false);
+  const [scope, setScope] = useState<'admin' | 'runs'>('admin');
+  const [reason, setReason] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(() => { opsApi.proxyGrants(tenant.id).then((r) => setRows(r.grants)).catch((e) => setError(errText(e, '読み込めませんでした'))); }, [tenant.id]);
+  useEffect(() => { load(); }, [load]);
+  const act = (p: Promise<unknown>) => { setError(null); p.then(load).catch((e) => setError(errText(e, '扱えませんでした'))); };
+  const open = (g: ProxyGrantRow) => {
+    opsApi.openProxy(g.id).then((r) => { window.open(r.url, '_blank', 'noopener'); load(); }).catch((e) => setError(errText(e, '開けませんでした')));
+  };
+  if (!me.can['tenant.suspend']) return null;
+  return (
+    <div className="card">
+      <h3>代理アクセス</h3>
+      {error && <p className="error">{error}</p>}
+      {!form && tenant.status !== 'locked' && tenant.status !== 'cancelled' && <button className="btn ghost small" onClick={() => { setForm(true); setReason(''); }}>閲覧を申請する</button>}
+      {form && (
+        <>
+          <div className="field"><label>見る範囲</label>
+            <select value={scope} onChange={(e) => setScope(e.target.value as 'admin' | 'runs')}>
+              <option value="admin">管理者ページ</option>
+              <option value="runs">管理者ページと、許した管理者が依頼した業務の結果</option>
+            </select>
+          </div>
+          <div className="field"><label>理由（会社の管理者に届きます）</label><textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} /></div>
+          <button className="btn small" disabled={!reason.trim()} onClick={() => { act(opsApi.requestProxy(tenant.id, scope, reason)); setForm(false); }}>申請する</button>{' '}
+          <button className="btn ghost small" onClick={() => setForm(false)}>キャンセル</button>
+        </>
+      )}
+      {rows && rows.length > 0 && (
+        <table className="table">
+          <thead><tr><th>申請した日時</th><th>運営者</th><th>範囲</th><th>状態</th><th className="num">閲覧</th><th /></tr></thead>
+          <tbody>{rows.map((g) => (
+            <tr key={g.id}>
+              <td>{when(g.requestedAt)}</td><td>{g.operatorLabel}</td><td>{g.scope === 'runs' ? '業務の結果まで' : '管理者ページ'}</td>
+              <td>{PROXY_STATE[g.state]}{g.state === 'approved' && g.expiresAt ? `（${when(g.expiresAt)} まで）` : ''}</td>
+              <td className="num">{g.views}</td>
+              <td>
+                {g.state === 'approved' && g.operatorId === me.operator.id && <><button className="btn small" onClick={() => open(g)}>会社の画面を開く</button>{' '}</>}
+                {g.state === 'requested' && <button className="btn ghost small" onClick={() => act(opsApi.endProxy(g.id))}>取り下げる</button>}
+                {g.state === 'approved' && <button className="btn ghost small" onClick={() => act(opsApi.endProxy(g.id))}>終える</button>}
+              </td>
+            </tr>
+          ))}</tbody>
+        </table>
+      )}
+    </div>
   );
 }

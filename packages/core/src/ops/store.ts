@@ -114,6 +114,24 @@ export interface StatusRequest {
   confirmedAt: string | null;
 }
 
+/** 代理アクセスの申請（運営の画面が見る形。第23.6.1節）。 */
+export interface OpsProxyGrant {
+  id: string;
+  tenantId: string;
+  tenantName: string;
+  operatorId: string;
+  operatorLabel: string;
+  scope: 'admin' | 'runs';
+  reason: string;
+  state: 'requested' | 'approved' | 'denied' | 'revoked' | 'withdrawn' | 'expired';
+  requestedAt: string;
+  decidedAt: string | null;
+  hours: number | null;
+  expiresAt: string | null;
+  endedAt: string | null;
+  views: number;
+}
+
 /** 運営の操作の記録。 */
 export interface OpsAuditEntry {
   id: string;
@@ -337,6 +355,42 @@ export class OpsStore {
   /** 緊急停止を、事後に別の運営者が確かめる。 */
   async confirmLock(requestId: string, operatorId: string): Promise<void> {
     try { await this.pool.query('select ops.confirm_lock($1,$2)', [requestId, operatorId]); } catch (err) { rethrow(err); }
+  }
+
+  /** 代理アクセスを申請する（会社の管理者全員に知らせる）。 */
+  async requestProxy(tenantId: string, scope: 'admin' | 'runs', reason: string, operatorId: string, operatorLabel: string): Promise<string> {
+    try {
+      const { rows } = await this.pool.query('select ops.request_proxy($1,$2,$3,$4,$5) as id', [tenantId, scope, reason, operatorId, operatorLabel]);
+      return rows[0].id as string;
+    } catch (err) { rethrow(err); }
+  }
+
+  /**
+   * 許された代理アクセスに入るための、1 回だけの引換券（2 分で切れる）を出す。申請した運営者だけ。
+   *
+   * @returns 引換券と会社のサブドメイン。券そのものはデータベースに残さず、SHA-256 だけを渡す
+   */
+  async proxyTicket(grantId: string, operatorId: string): Promise<{ ticket: string; subdomain: string }> {
+    const ticket = randomBytes(32).toString('base64url');
+    try {
+      const { rows } = await this.pool.query('select ops.proxy_ticket($1,$2,$3) as sub', [grantId, operatorId, sha256(ticket)]);
+      return { ticket, subdomain: rows[0].sub as string };
+    } catch (err) { rethrow(err); }
+  }
+
+  /** 申請を取り下げるか、許された閲覧を運営者の側から終える。 */
+  async endProxy(grantId: string, operatorId: string): Promise<void> {
+    try { await this.pool.query('select ops.end_proxy($1,$2)', [grantId, operatorId]); } catch (err) { rethrow(err); }
+  }
+
+  /** 代理アクセスの申請の一覧（会社を絞るか、すべて）。 */
+  async listProxy(tenantId?: string): Promise<OpsProxyGrant[]> {
+    const { rows } = await this.pool.query('select * from ops.list_proxy($1)', [tenantId ?? null]);
+    return rows.map((r) => ({
+      id: r.id, tenantId: r.tenant_id, tenantName: r.tenant_name, operatorId: r.operator_id, operatorLabel: r.operator_label, scope: r.scope,
+      reason: r.reason, state: r.state, requestedAt: iso(r.requested_at)!, decidedAt: iso(r.decided_at), hours: r.hours,
+      expiresAt: iso(r.expires_at), endedAt: iso(r.ended_at), views: Number(r.views),
+    }));
   }
 
   /** 会社ごとの数（その場で数える）。 */

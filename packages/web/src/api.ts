@@ -274,7 +274,9 @@ export interface Me {
   /** 会社。`name` は正式な会社名、`shortName` は略称、`logo` は会社のロゴの URL（仕様書 第6.6.1節）。 */
   tenant: Tenant & { shortName?: string; logo?: string | null; suspendAt?: string | null };
   user: User;
-  auth: { method: 'session' | 'dev-header' };
+  auth: { method: 'session' | 'dev-header' | 'proxy' };
+  /** 運営のサポートの代理アクセスで見ているとき（見るだけ。仕様書 第23.6.1節）。範囲・期限・運営者。 */
+  proxy?: { scope: 'admin' | 'runs'; expiresAt: string; operator: string };
   csrfToken: string | null;
   /** 予定やメールの出どころ。`mock` の間は画面にダミーであることを示す。 */
   workspaceSource: 'mock' | 'google';
@@ -725,6 +727,13 @@ export interface MemoryView {
   archivedAt?: string | null; archiveReason?: string | null;
 }
 
+/** 運営のサポートからの閲覧の申請（仕様書 第23.6.1節）。 */
+export interface SupportGrant {
+  id: string; operatorLabel: string; scope: 'admin' | 'runs'; reason: string;
+  state: 'requested' | 'approved' | 'denied' | 'revoked' | 'withdrawn' | 'expired';
+  requestedAt: string; decidedAt: string | null; hours: number | null; expiresAt: string | null; endedAt: string | null; views: number;
+}
+
 export interface AdminRun {
   id: string; status: string; startedAt: string; endedAt: string | null;
   tokensUsed: number; costJpy: number; agentId: string; agentName: string; origin: string;
@@ -1170,6 +1179,11 @@ export const api = {
    */
   exchangeTicket: async (ticket: string) => {
     await call('/auth/exchange', { method: 'POST', body: JSON.stringify({ ticket }) });
+  },
+  /** 運営の画面が出した引換券で、代理アクセス（閲覧だけ）に入る（仕様書 第23.6.1節）。 */
+  proxyExchange: async (ticket: string) => {
+    const res = await call<{ csrfToken: string }>('/auth/proxy-exchange', { method: 'POST', body: JSON.stringify({ ticket }) });
+    csrfToken = res.csrfToken;
   },
   devLogin: async (email: string) => {
     const res = await call<{ csrfToken: string }>('/auth/dev-login', {
@@ -2134,6 +2148,11 @@ export const api = {
     /** ローカルの形の「機械」の様子（仕様書 第8.6.7節）。 */
     machine: () => call<MachineView>('/admin/machine'),
     /** 今すぐ控えを取る（ワーカーが次の見回りで取る）。 */
+    /** サポートの閲覧の申請（仕様書 第23.6.1節）。 */
+    supportAccess: () => call<{ items: SupportGrant[] }>('/admin/support'),
+    approveSupport: (id: string, hours: number) => call<{ item: SupportGrant }>(`/admin/support/${encodeURIComponent(id)}/approve`, { method: 'POST', body: JSON.stringify({ hours }) }),
+    denySupport: (id: string) => call<{ item: SupportGrant }>(`/admin/support/${encodeURIComponent(id)}/deny`, { method: 'POST', body: '{}' }),
+    revokeSupport: (id: string) => call<{ item: SupportGrant }>(`/admin/support/${encodeURIComponent(id)}/revoke`, { method: 'POST', body: '{}' }),
     machineBackup: () => call<{ ok: true }>('/admin/machine/backup', { method: 'POST', body: '{}' }),
     /** 夜の自動の更新を止める（延ばす。`days`）か、止めるのをやめる（`null`）。 */
     /** 遠隔の保守を開ける（`hours` 時間）か、閉じる（`null`）。 */

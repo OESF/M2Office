@@ -45,6 +45,12 @@ function Root() {
 
   const load = useCallback(async () => {
     try {
+      // 運営の画面から代理アクセスで開いたとき（仕様書 第23.6.1節）。引換券を閲覧だけのログイン状態に換え、管理者ページを開く
+      const proxyTicket = new URLSearchParams(location.search).get('proxy');
+      if (proxyTicket) {
+        history.replaceState(null, '', '/admin');
+        await api.proxyExchange(proxyTicket).catch(() => undefined);
+      }
       const got = await api.me();
       // デバッグモード（仕様書 第20.4.1節「デバッグモード」）。画面から呼んだ API を記録し始める
       setDebugMode(!!got.debug);
@@ -96,6 +102,8 @@ function Root() {
     }
     return withDebug(<Board tenantName={me.tenant.name} />);
   }
+  // 代理アクセスは管理者ページだけを見る（仕様書 第23.6.1節）
+  if (me.proxy) return <Admin me={me} onLogout={logout} />;
   return withDebug(location.pathname.startsWith('/admin')
     ? <Admin me={me} onLogout={logout} />
     : <App me={me} onLogout={logout} />);

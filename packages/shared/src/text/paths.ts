@@ -42,6 +42,8 @@ export function notificationPath(n: { kind: string; runId: string | null }): str
   if (n.kind === 'usageSelf') return '/settings';
   // ローカルの形の機械の知らせ（控えの失敗など。第8.6.7節）
   if (n.kind === 'machine') return '/admin/machine';
+  // 運営のサポートの閲覧の申請と、終わったあとの知らせ（第23.6.1節）
+  if (n.kind === 'support') return '/admin/support';
   if (n.runId && RUN_ID.test(n.runId)) return `/runs/${encodeURIComponent(n.runId)}`;
   return '/';
 }

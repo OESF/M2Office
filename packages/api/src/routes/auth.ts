@@ -12,7 +12,9 @@ import { Hono } from 'hono';
 import { companyName, type AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 import { buildGoogleLoginUrl, createPkce } from '@m2office/core';
+import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { clearSessionCookie, issueSession, readSession } from '../auth/session.js';
+import { PROXY_COOKIE } from '../middleware/tenant.js';
 import { tenantOrigin } from '../tenant-origin.js';
 
 /**
@@ -147,8 +149,38 @@ export function authRoute(deps: AppDeps) {
     return c.json({ ok: true, csrfToken: session.csrfToken });
   });
 
+  /**
+   * 運営のサポートの代理アクセスに入る（仕様書 第23.6.1節）。運営の画面が出した 1 回だけの引換券を、閲覧だけのログイン状態に換える。
+   *
+   * @remarks 券は 2 分で切れ、1 回しか使えない。会社の管理者が許していて、期限の中のときだけ通す
+   */
+  app.post('/proxy-exchange', async (c) => {
+    const tenant = c.get('tenant');
+    const { ticket } = await c.req.json<{ ticket?: string }>().catch(() => ({ ticket: undefined }));
+    const hit = ticket ? await deps.proxy.exchange(tenant.id, ticket) : null;
+    if (!hit) return c.json({ error: '代理アクセスに入れませんでした。運営の画面からもう一度開いてください' }, 401);
+    const maxAge = Math.max(60, Math.floor((Date.parse(hit.grant.expiresAt ?? '') - Date.now()) / 1000));
+    setCookie(c, PROXY_COOKIE, hit.token, { httpOnly: true, sameSite: 'Lax', secure: deps.auth.cookieSecure, path: '/', maxAge });
+    await deps.repo.appendAudit({
+      id: randomUUID(), tenantId: tenant.id, actorType: 'system', actorId: `ops:${hit.grant.operatorId}`, action: 'proxy.enter',
+      targetType: 'proxy', targetId: hit.grant.id, detail: { scope: hit.grant.scope, operator: hit.grant.operatorLabel }, occurredAt: new Date().toISOString(),
+    });
+    return c.json({ ok: true, csrfToken: hit.csrfToken });
+  });
+
   /** ログアウト。ログイン状態を失効させ、Cookie を消す。 */
   app.post('/logout', async (c) => {
+    // 代理アクセスの閲覧を終える（第23.6.1節）
+    const proxyToken = getCookie(c, PROXY_COOKIE);
+    const proxy = proxyToken ? await deps.proxy.findSession(c.get('tenant').id, proxyToken) : null;
+    if (proxyToken) {
+      if (proxy) {
+        if (c.req.header('x-csrf-token') !== proxy.csrfToken) return c.json({ error: '画面を再読み込みしてから、もう一度お試しください' }, 403);
+        await deps.proxy.endSession(c.get('tenant').id, proxy.sessionId);
+      }
+      deleteCookie(c, PROXY_COOKIE, { path: '/' });
+      return c.json({ ok: true });
+    }
     const session = await readSession(c, deps.repo, c.get('tenant').id);
     if (session) {
       if (c.req.header('x-csrf-token') !== session.csrfToken) {

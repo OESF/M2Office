@@ -305,6 +305,42 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
     } catch (err) { return ruleError(c, err); }
   });
 
+  // ---- 代理アクセス（第23.6.1節）。申請は運営管理者とサポート。入れるのは申請した運営者だけ ----
+  app.get('/v1/ops/proxy', async (c) => c.json({ grants: await store.listProxy(c.req.query('tenant') || undefined) }));
+
+  app.post('/v1/ops/tenants/:id/proxy', async (c) => {
+    if (!can(c, 'tenant.suspend')) return denied(c);
+    const b = await c.req.json<{ scope?: string; reason?: string }>().catch(() => ({} as Record<string, string | undefined>));
+    if (b.scope !== 'admin' && b.scope !== 'runs') return c.json({ error: '範囲を選んでください' }, 400);
+    const op = c.get('operator');
+    try {
+      const id = await store.requestProxy(c.req.param('id'), b.scope, (b.reason ?? '').trim().slice(0, 1000), op.id, op.email);
+      await store.audit(op.id, 'proxy.request', 'tenant', c.req.param('id'), { grant: id, scope: b.scope });
+      return c.json({ id }, 201);
+    } catch (err) { return ruleError(c, err); }
+  });
+
+  // 会社の画面を開く URL（1 回だけの 2 分の引換券つき）
+  app.post('/v1/ops/proxy/:id/open', async (c) => {
+    if (!can(c, 'tenant.suspend')) return denied(c);
+    const op = c.get('operator');
+    try {
+      const { ticket, subdomain } = await store.proxyTicket(c.req.param('id'), op.id);
+      await store.audit(op.id, 'proxy.open', 'proxy', c.req.param('id'));
+      return c.json({ url: `${tenantLoginUrl(originOf(c), subdomain)}?proxy=${encodeURIComponent(ticket)}` });
+    } catch (err) { return ruleError(c, err); }
+  });
+
+  app.post('/v1/ops/proxy/:id/end', async (c) => {
+    if (!can(c, 'tenant.suspend')) return denied(c);
+    const op = c.get('operator');
+    try {
+      await store.endProxy(c.req.param('id'), op.id);
+      await store.audit(op.id, 'proxy.end', 'proxy', c.req.param('id'));
+      return c.json({ ok: true });
+    } catch (err) { return ruleError(c, err); }
+  });
+
   // サーバー全体の稼働状況（第23.8.7節のうち段 1 の分）
   app.get('/v1/ops/server', async (c) => c.json({ status: await store.serverStatus() }));
 

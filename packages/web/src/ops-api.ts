@@ -138,6 +138,13 @@ export interface StatusRequestRow {
   confirmedAt: string | null;
 }
 
+/** 代理アクセスの申請（第23.6.1節）。 */
+export interface ProxyGrantRow {
+  id: string; tenantId: string; tenantName: string; operatorId: string; operatorLabel: string; scope: 'admin' | 'runs'; reason: string;
+  state: 'requested' | 'approved' | 'denied' | 'revoked' | 'withdrawn' | 'expired';
+  requestedAt: string; decidedAt: string | null; hours: number | null; expiresAt: string | null; endedAt: string | null; views: number;
+}
+
 /** 会社一覧の CSV の書き出しの URL（ログイン状態の Cookie で開く）。 */
 export const TENANTS_CSV_URL = '/v1/ops/tenants.csv';
 
@@ -162,6 +169,10 @@ export const opsApi = {
   decideStatus: (id: string, approve: boolean) => call<{ state: string; notice: string | null }>(`/status-requests/${encodeURIComponent(id)}/decide`, send('POST', { approve })),
   withdrawStatus: (id: string) => call<{ ok: true }>(`/status-requests/${encodeURIComponent(id)}/withdraw`, send('POST')),
   confirmLock: (id: string) => call<{ ok: true }>(`/status-requests/${encodeURIComponent(id)}/confirm`, send('POST')),
+  proxyGrants: (tenantId?: string) => call<{ grants: ProxyGrantRow[] }>(`/proxy${tenantId ? `?tenant=${encodeURIComponent(tenantId)}` : ''}`),
+  requestProxy: (tenantId: string, scope: 'admin' | 'runs', reason: string) => call<{ id: string }>(`/tenants/${encodeURIComponent(tenantId)}/proxy`, send('POST', { scope, reason })),
+  openProxy: (id: string) => call<{ url: string }>(`/proxy/${encodeURIComponent(id)}/open`, send('POST')),
+  endProxy: (id: string) => call<{ ok: true }>(`/proxy/${encodeURIComponent(id)}/end`, send('POST')),
   machines: () => call<{ machines: MachineRow[] }>('/machines'),
   addMachine: (name: string) => call<{ machine: MachineRow; token: string }>('/machines', send('POST', { name })),
   removeMachine: (id: string) => call<{ ok: true }>(`/machines/${encodeURIComponent(id)}`, { method: 'DELETE' }),

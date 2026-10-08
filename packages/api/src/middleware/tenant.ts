@@ -8,16 +8,23 @@
  * @see 仕様書 第20.7節 認証の実装方針
  */
 
+import { randomUUID } from 'node:crypto';
 import type { Context, Next } from 'hono';
-import type { RequestContext, Tenant } from '@m2office/shared';
-import type { Logger } from '@m2office/core';
+import { getCookie } from 'hono/cookie';
+import type { RequestContext, Tenant, User } from '@m2office/shared';
+import { proxyAllowed, type Logger, type ProxyScope } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { readSession } from '../auth/session.js';
 
 /** 認証の結果。どの手段で本人を確認したか。 */
 export type AuthInfo =
   | { method: 'session'; sessionId: string; csrfToken: string }
-  | { method: 'dev-header' };
+  | { method: 'dev-header' }
+  /** 運営のサポートの代理アクセス（閲覧だけ。仕様書 第23.6.1節）。 */
+  | { method: 'proxy'; sessionId: string; csrfToken: string; grantId: string; scope: ProxyScope; expiresAt: string; operatorId: string; operatorLabel: string };
+
+/** 代理アクセスの閲覧のログイン状態の Cookie（顧客の `m2o_session` と分ける）。 */
+export const PROXY_COOKIE = 'm2o_proxy';
 
 /** API 全体で共有する要求ごとの変数。 */
 export interface AppEnv {
@@ -143,6 +150,38 @@ const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 export function authenticate(deps: AppDeps) {
   return async (c: Context<AppEnv>, next: Next) => {
     const tenant = c.get('tenant');
+
+    // 運営のサポートの代理アクセス（閲覧だけ。第23.6.1節）。決めた見るだけの道だけを通し、閲覧のたびに会社の監査ログに残す
+    const proxyToken = getCookie(c, PROXY_COOKIE);
+    const proxy = proxyToken ? await deps.proxy.findSession(tenant.id, proxyToken) : null;
+    if (proxy) {
+      const g = proxy.grant;
+      // 業務の結果まで許されたときは、許した管理者として見る（その人が依頼した実行の中身だけが見える）。管理者ページだけなら仮の利用者
+      const approver = g.scope === 'runs' && g.decidedBy ? await deps.repo.findUserById(tenant.id, g.decidedBy) : null;
+      if (g.scope === 'runs' && (!approver || approver.status !== 'active')) {
+        return c.json({ error: '代理アクセスを許した管理者が見つかりません', login: true }, 401);
+      }
+      const user: User = approver ?? { id: `proxy:${g.id}`, tenantId: tenant.id, email: '', displayName: '運営のサポート', roles: ['admin'], status: 'active' };
+      if (!proxyAllowed(g.scope, c.req.method, c.req.path)) {
+        return c.json({ error: '代理アクセスでは、ここは見られません（見るだけです）', proxy: true }, 403);
+      }
+      if (!SAFE_METHODS.has(c.req.method) && c.req.header('x-csrf-token') !== proxy.csrfToken) {
+        return c.json({ error: '画面を再読み込みしてから、もう一度お試しください' }, 403);
+      }
+      c.set('ctx', { tenant, user });
+      c.set('auth', {
+        method: 'proxy', sessionId: proxy.sessionId, csrfToken: proxy.csrfToken, grantId: g.id, scope: g.scope,
+        expiresAt: g.expiresAt ?? '', operatorId: g.operatorId, operatorLabel: g.operatorLabel,
+      });
+      if (SAFE_METHODS.has(c.req.method)) {
+        await deps.repo.appendAudit({
+          id: randomUUID(), tenantId: tenant.id, actorType: 'system', actorId: `ops:${g.operatorId}`, action: 'proxy.view',
+          targetType: 'path', targetId: c.req.path.slice(0, 200), detail: { grant: g.id, scope: g.scope, operator: g.operatorLabel },
+          occurredAt: new Date().toISOString(),
+        }).catch(() => undefined);
+      }
+      return next();
+    }
 
     const session = await readSession(c, deps.repo, tenant.id);
     if (session) {
