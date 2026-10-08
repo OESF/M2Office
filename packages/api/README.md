@@ -493,7 +493,27 @@ src/secretary/        秘書の調べものと秘書が頼んだ業務の状態�
 src/voice/            音声の中継（Gemini Live）、秘書の名乗りの指示、声を試す
 src/audit/            監査ログの見せ方（人の名前・業務の言葉・CSV。仕様書 第6.6.8.1節）
 src/debug/            デバッグモードの記録（メモリーだけ・本人の分だけ）と、秘書の振り分けの 1 行（仕様書 第20.4.1節）
+src/ops/              マスター管理画面の API（別のプロセス。仕様書 第23.8.15節）。下の「マスター管理画面の API」
 ```
+
+## マスター管理画面の API
+
+顧客向けの API とは別のプロセス（`npm run dev:ops`。開発は 3102 番。本番は `server/ops.js`）で動く。名前が `ops.` で始まる要求だけを受け、
+データベースには運営の専用のロール `m2office_ops`（`OPS_DATABASE_URL`）で接続する。このロールは顧客の表に届かず、会社の数・会社を作る・状態を変えるは決めた関数（`ops.*`）だけで行う（移行 111）。
+運営者のログインは Google だけ（Cookie `m2o_ops_session`。`ops.` のホストだけ）。最初の運営管理者は `npm run ops:operator -- --email … --role admin` で作る。
+
+| メソッド | パス | 内容 | ロール |
+|---|---|---|---|
+| GET | `/v1/ops/auth/providers` | ログインの手段（開発では運営者の一覧） | ― |
+| GET | `/v1/ops/auth/google/start`・`/v1/ops/auth/callback` | Google のログイン。戻りで引換券を出す | ― |
+| POST | `/v1/ops/auth/exchange`・`/v1/ops/auth/dev-login`・`/v1/ops/auth/logout` | ログイン状態を張る・外す | ― |
+| GET | `/v1/ops/me` | 本人とできること | すべて |
+| GET・POST | `/v1/ops/tenants` | 会社ごとの数（件数・金額・状態だけ）・会社を作る（ログインの URL と案内の文を返す） | 見る: すべて・作る: 運営管理者とサポート |
+| PUT | `/v1/ops/tenants/:id/status` | 試用と稼働の切り替え | 運営管理者とサポート |
+| GET・POST・DELETE | `/v1/ops/machines` | ローカルの形の機械（印つき）・登録（鍵を 1 度だけ返す）・削除 | 見る: すべて・登録と削除: 運営管理者 |
+| POST | `/v1/ops/heartbeat` | 稼働の知らせの受け口（機械の鍵で名乗る。決めた項目だけを残す） | 機械 |
+| GET・POST・PUT | `/v1/ops/operators` | 運営者の一覧・追加・ロールと状態の変更（最後の運営管理者は外せない） | 見る: すべて・変える: 運営管理者 |
+| GET | `/v1/ops/audit` | 運営の操作の記録 | すべて |
 
 ## 関連文書
 

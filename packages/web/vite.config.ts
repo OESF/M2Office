@@ -44,8 +44,16 @@ function devHttps(): { key: Buffer; cert: Buffer } | undefined {
  */
 const appVersion = (JSON.parse(readFileSync(fileURLToPath(new URL('../../package.json', import.meta.url)), 'utf-8')) as { version: string }).version;
 
-/** API への転送。**WebSocket も通す**（音声の中継。仕様書 第10.5.5節）。 */
+/**
+ * API への転送。**WebSocket も通す**（音声の中継。仕様書 第10.5.5節）。
+ * `/v1/ops` はマスター管理画面の API（別のプロセス。仕様書 第23.8.15節）へ送る。より長い道を先に書く。
+ */
 const apiProxy = {
+  '/v1/ops': {
+    target: `http://127.0.0.1:${env('OPS_PORT') ?? 3102}`,
+    // 運営の API は名前が ops. で始まる要求だけを受けるため、元のホスト名を保つ
+    changeOrigin: false,
+  },
   '/v1': {
     target: `http://127.0.0.1:${env('API_PORT') ?? 3101}`,
     // テナント解決のため、元のホスト名を保つ

@@ -27,6 +27,8 @@ applyTheme();
 
 /** 店頭サイネージの再生のページ（仕様書 第31.9.1節）。ログインを使わないため、ワークスペースとは別に、必要なときだけ読み込む。 */
 const SignagePlayer = lazy(() => import('./SignagePlayer.js').then((m) => ({ default: m.SignagePlayer })));
+/** マスター管理画面（仕様書 第23.8.15節）。名前が ops. のときだけ、必要なときに読み込む（顧客の画面には入れない）。 */
+const OpsRoot = lazy(() => import('./Ops.js').then((m) => ({ default: m.OpsRoot })));
 
 /**
  * 画面の入口。ログインの状態を確かめ、ワークスペースか管理者ページを出す。
@@ -102,7 +104,9 @@ function Root() {
 const root = document.getElementById('root');
 if (!root) throw new Error('#root が見つかりません');
 // 再生のページはログインの確かめ（/v1/me）を通さない。端末で何か月も開いたままにするため、開発の二重の実行もしない
-createRoot(root).render(location.pathname.startsWith('/signage/play')
+createRoot(root).render(location.hostname.startsWith('ops.')
+  ? <StrictMode><Suspense fallback={null}><OpsRoot /></Suspense></StrictMode>
+  : location.pathname.startsWith('/signage/play')
   ? <Suspense fallback={null}><SignagePlayer /></Suspense>
   // 共有の端末の打刻の画面（仕様書 第30.6.3節）。端末で開いたままにするため、ログインを通さない
   : location.pathname.startsWith('/hr/terminal') ? <HrTerminal />

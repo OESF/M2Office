@@ -39,5 +39,16 @@ for (const file of readdirSync(dir).filter((f) => f.endsWith('.sql')).sort()) {
   await client.query(readFileSync(join(dir, file), 'utf8'));
   console.log('完了');
 }
+// 運営の画面のロール（仕様書 第23.8.15節、移行 111）。移行は NOLOGIN で作る。OPS_DATABASE_URL があればその合言葉でログインできるようにする。
+// 開発では既定の合言葉を使う。本番で OPS_DATABASE_URL が無ければログインできないまま（ローカルの形には運営の画面を入れない）
+const opsUrl = process.env.OPS_DATABASE_URL ?? (process.env.NODE_ENV === 'production' ? null : 'postgres://m2office_ops:m2office_ops@localhost:3105/m2office');
+if (opsUrl) {
+  const ops = new URL(opsUrl);
+  if (decodeURIComponent(ops.username) !== 'm2office_ops') {
+    console.error(`OPS_DATABASE_URL の利用者は m2office_ops にしてください（現在: ${ops.username}）。`);
+    process.exit(1);
+  }
+  await client.query(`alter role m2office_ops login password '${decodeURIComponent(ops.password).replace(/'/g, "''")}'`);
+}
 await client.end();
 console.log('マイグレーションが完了しました。');

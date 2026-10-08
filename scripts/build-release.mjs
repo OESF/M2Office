@@ -1,7 +1,7 @@
 /**
  * @file 本番の組み立て（仕様書 第20.4.5節、ADR-0077）。クラウドのコンテナとローカルの形の Mac のパッケージの両方の元になる。
  *
- * API とワーカーを、それぞれ 1 つの JavaScript にまとめ（社内のパッケージ `@m2office/*` は中に入れ、外のパッケージは入れない）、
+ * API とワーカーと運営の API（マスター管理画面。クラウドだけで動かす）を、それぞれ 1 つの JavaScript にまとめ（社内のパッケージ `@m2office/*` は中に入れ、外のパッケージは入れない）、
  * 画面を静的なファイルにし、実行中に読むファイル（ヘルプの記事・マニュアル・フォント・拡張機能・データベースの移行）を写す。
  * 開発用の道具（tsx・Vite の開発サーバー）は本番で動かさない。
  *
@@ -12,6 +12,7 @@
  * 動かし方（組み立てたものの根で）:
  *   M2O_APP_ROOT=$PWD node --env-file-if-exists=m2office.env server/api.js
  *   M2O_APP_ROOT=$PWD node --env-file-if-exists=m2office.env server/worker.js
+ *   M2O_APP_ROOT=$PWD node --env-file-if-exists=m2office.env server/ops.js     # クラウドだけ（仕様書 第23.8.15節）
  */
 
 import { build } from 'esbuild';
@@ -39,8 +40,8 @@ for (const pkg of packages) {
 rmSync(out, { recursive: true, force: true });
 mkdirSync(join(out, 'server'), { recursive: true });
 
-// 1. API とワーカーをまとめる
-for (const [name, entry] of [['api', 'packages/api/src/index.ts'], ['worker', 'packages/worker/src/index.ts']]) {
+// 1. API とワーカーと運営の API をまとめる
+for (const [name, entry] of [['api', 'packages/api/src/index.ts'], ['worker', 'packages/worker/src/index.ts'], ['ops', 'packages/api/src/ops/index.ts']]) {
   await build({
     entryPoints: [join(root, entry)],
     outfile: join(out, 'server', `${name}.js`),
@@ -67,7 +68,7 @@ copy('docs/help', (p) => !p.endsWith('.pdf'));
 copy('docs/manual', (p) => !p.endsWith('.pdf'));
 copy('extensions');
 copy('db/migrations');
-for (const s of ['migrate.mjs', 'create-tenant.mjs', 'wait-for-db.mjs']) copy(`scripts/${s}`);
+for (const s of ['migrate.mjs', 'create-tenant.mjs', 'create-operator.mjs', 'wait-for-db.mjs']) copy(`scripts/${s}`);
 
 // 4. 実行の場所の package.json（外のパッケージと版。移行と会社の作成はここから動かす）
 writeFileSync(join(out, 'package.json'), `${JSON.stringify({
@@ -80,8 +81,10 @@ writeFileSync(join(out, 'package.json'), `${JSON.stringify({
   scripts: {
     'start:api': 'node --env-file-if-exists=m2office.env server/api.js',
     'start:worker': 'node --env-file-if-exists=m2office.env server/worker.js',
+    'start:ops': 'node --env-file-if-exists=m2office.env server/ops.js',
     'db:migrate': 'node --env-file-if-exists=m2office.env scripts/migrate.mjs',
     'tenant:create': 'node --env-file-if-exists=m2office.env scripts/create-tenant.mjs',
+    'ops:operator': 'node --env-file-if-exists=m2office.env scripts/create-operator.mjs',
   },
   dependencies: Object.fromEntries([...external.entries()].sort()),
 }, null, 2)}\n`);
