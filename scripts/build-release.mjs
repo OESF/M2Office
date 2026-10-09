@@ -66,6 +66,7 @@ const copy = (from, filter) => { if (existsSync(join(root, from))) cpSync(join(r
 copy('assets/fonts');
 copy('docs/help', (p) => !p.endsWith('.pdf'));
 copy('docs/manual', (p) => !p.endsWith('.pdf'));
+copy('docs/api', (p) => !p.endsWith('.html') && !p.endsWith('.md'));
 copy('extensions');
 copy('db/migrations');
 for (const s of ['migrate.mjs', 'create-tenant.mjs', 'create-operator.mjs', 'wait-for-db.mjs']) copy(`scripts/${s}`);

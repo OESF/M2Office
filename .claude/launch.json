@@ -46,6 +46,15 @@
         "dev:ops"
       ],
       "port": 3102
+    },
+    {
+      "name": "api-docs",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "docs:api"
+      ],
+      "port": 3106
     }
   ]
 }

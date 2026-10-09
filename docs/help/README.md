@@ -26,8 +26,9 @@ related: [start-secretary, start-agents]
 | `category` | `start`・`faq`・`admin`・`glossary`・`updates`・`contact` |
 | `related` | 関係する記事の ID |
 | `business` | （任意）業務の要点の記事なら、その業務の名前（`docs/manual/` のマニュアルの名前と同じ。例: `inventory`・`hr-payroll`）。ヘルプの木の「業務」の、その業務の下に入る |
-| `group` | （任意）管理者向けの記事の木の中の小分け（`はじめに`・`設定`・`記録`） |
+| `group` | （任意）管理者向けの記事の木の中の小分け（`はじめに`・`設定`・`記録`・`開発者`） |
 | `order` | （任意）木の中の並びの順（数） |
+| `api` | （任意）開発者向けの記事の下に出す API の定義の名前（`docs/api/<名前>.openapi.yaml`）。Swagger UI で出す（仕様書 第6.10.7.4節） |
 | `extension` | （任意）その内蔵の拡張を使える人にだけ出す（`business-cards`・`inventory`・`hr`・`signage`。本人の「給与・勤怠」は `hr-self`）。会社で入れていない業務の記事は出さない |
 
 ワークスペースのヘルプは管理者向け（`audience: admin`）の記事を出さず、管理者ページのヘルプは管理者向けの記事（`category: admin` と管理者向けの更新情報）だけを出します。用語と問い合わせは両方に出します（仕様書 第6.10.7節）。

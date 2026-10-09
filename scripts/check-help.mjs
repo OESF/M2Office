@@ -6,13 +6,14 @@
  * 3. 画面の `<HelpTip article="…">` と `openHelp('…')`、題名の説明（`article: '…'`）が実在する記事を指す
  * 4. 「？」を段落の中に置いていない（仕様書 第6.10.4.4節）。見出しの無い「？」と、文の途中の「？」を見つける
  * 5. 業務のマニュアル（`docs/manual/<名前>/`）が `manual.json`（title・extension）を持ち、章が `#` の見出しで始まる。記事の `business` がマニュアルの名前か、要点の記事だけの業務を指す（仕様書 第6.10.7.3節）
+ * 6. 開発者向けの記事の `api` が、`docs/api/<名前>.openapi.yaml` を指す（仕様書 第6.10.7.4節）
  *
  * 業務の記事（`agent-<ID>`）は定義から自動で作るため、公式エージェントの ID と照合する。
  *
  * @see 仕様書 第6.10.9節 ヘルプの内容の管理
  */
 
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const root = join(import.meta.dirname, '..');
@@ -33,6 +34,10 @@ for (const f of readdirSync(helpDir).filter((f) => f.endsWith('.md') && f !== 'R
   if (attrs.audience && !['all', 'approver', 'admin'].includes(attrs.audience)) problems.push(`${f}: audience が不正です`);
   if (articles.has(attrs.id)) problems.push(`${f}: ID ${attrs.id} が重複しています`);
   const related = (attrs.related ?? '').replace(/^\[|\]$/g, '').split(',').map((s) => s.trim()).filter(Boolean);
+  // 開発者向けの記事の API の定義（第6.10.7.4節）
+  if (attrs.api && (!/^[a-z0-9-]+$/.test(attrs.api) || !existsSync(join(root, 'docs/api', `${attrs.api}.openapi.yaml`)))) {
+    problems.push(`${f}: api の定義 docs/api/${attrs.api}.openapi.yaml が見つかりません`);
+  }
   articles.set(attrs.id, { file: f, related });
 }
 

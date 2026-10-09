@@ -10,6 +10,7 @@ import { Hono } from 'hono';
 import { noteText, queryEmbedder, suggestHelpNote, type HelpContext, type HelpScope } from '@m2office/core';
 import { CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, CONTRACTS_EXTENSION_ID, RESERVATIONS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, MEMBERS_EXTENSION_ID, PRINT_DESIGNS_EXTENSION_ID } from '@m2office/shared';
 import type { AppDeps } from '../context.js';
+import { API_DOCS_CSP, apiDocsPage } from '../api-docs-page.js';
 import { agentGroup } from '../agent-group.js';
 import type { AppEnv } from '../middleware/tenant.js';
 
@@ -48,6 +49,23 @@ export function helpRoute(deps: AppDeps) {
     const items = deps.help.list(ctx, scopeOf(c.req.query('scope'))).map(({ body: _body, ...meta }) => meta);
     const manuals = deps.helpManuals.filter((m) => items.some((i) => i.business === m.id && i.category === 'manual')).map(({ id, title }) => ({ id, title }));
     return c.json({ items, manuals });
+  });
+
+  /**
+   * 開発者向けの記事の API の定義を、Swagger UI のページで返す（第6.10.7.4節）。管理者だけ。
+   *
+   * @remarks 画面は切り離した枠（sandbox）で出す。応答の CSP でも sandbox を掛け、中のスクリプトをログインと API から切り離す
+   */
+  app.get('/api/:name', async (c) => {
+    const { user } = c.get('ctx');
+    if (!user.roles.includes('admin')) return c.json({ error: '開発者向けの情報は管理者だけが見られます' }, 403);
+    const doc = deps.apiDocs.get(c.req.param('name'));
+    if (!doc) return c.json({ error: 'API の定義が見つかりません' }, 404);
+    c.header('Content-Security-Policy', API_DOCS_CSP);
+    c.header('X-Content-Type-Options', 'nosniff');
+    c.header('Referrer-Policy', 'no-referrer');
+    c.header('Cache-Control', 'private, no-store');
+    return c.html(apiDocsPage(doc.title, doc.text));
   });
 
   /** 記事の本文と、会社の補足（第6.10.7節）。管理者には補足を書けることを返す。 */

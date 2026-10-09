@@ -141,7 +141,7 @@ const byOrder = (a: HelpArticleMeta, b: HelpArticleMeta) => (a.order ?? 99) - (b
 /** 管理者ページの木では「（管理者）」を省く（管理者向けの記事だけを出すため）。 */
 const shortTitle = (t: string) => t.replace(/（管理者）$/, '');
 /** 管理者向けの記事の小分けの順。無い小分けは後ろへ。 */
-const ADMIN_GROUPS = ['はじめに', '設定', '記録'];
+const ADMIN_GROUPS = ['はじめに', '設定', '記録', '開発者'];
 
 /**
  * ヘルプの木を組み立てる（仕様書 第6.10.7節）。
@@ -149,7 +149,7 @@ const ADMIN_GROUPS = ['はじめに', '設定', '記録'];
  * ワークスペース: はじめに・業務・よくある質問・更新情報。「業務」の下は、ダッシュボードの業務のまとまりと同じ形にする:
  * 公式の業務は分野（メール・予定など）の区分、内蔵の拡張はその区分（要点の記事・付属の業務・マニュアルの章）、
  * ほかの拡張機能は拡張機能の名前の区分。まとまりを持たない業務だけ「業務」の直下に置く。
- * 管理者ページ: 管理者向けの記事を小分け（はじめに・設定・記録）ごとに・管理者向けの更新情報。
+ * 管理者ページ: 管理者向けの記事を小分け（はじめに・設定・記録・開発者）ごとに・管理者向けの更新情報。
  * 用語と問い合わせは木に入れず、木の下の小さな入口にする。
  */
 function buildTree(items: HelpArticleMeta[], manuals: { id: string; title: string }[], scope: HelpScope): TreeNode[] {
@@ -357,6 +357,25 @@ function Landing({ tree, onOpen, admin }: { tree: TreeNode[]; onOpen: (id: strin
   );
 }
 
+/**
+ * 開発者向けの記事の下に、API の定義（Swagger UI）を出す（仕様書 第6.10.7.4節）。
+ *
+ * @remarks 枠の中のページは、応答の CSP の `sandbox allow-scripts` で切り離す（出どころが空になり、ログインの Cookie にも API にも届かない）。
+ * 枠に `sandbox` の属性は付けない（属性付きの枠を読み込まないブラウザーがあるため。切り離しは CSP だけで効く）。別のタブで開いても同じ
+ */
+function ApiSpecFrame({ name }: { name: string }) {
+  const src = `/v1/help/api/${encodeURIComponent(name)}`;
+  return (
+    <section className="api-spec">
+      <div className="row">
+        <h2>API の定義</h2>
+        <a className="btn ghost small" href={src} target="_blank" rel="noopener noreferrer">別のタブで開く</a>
+      </div>
+      <iframe className="api-spec-frame" src={src} title="API の定義" referrerPolicy="no-referrer" />
+    </section>
+  );
+}
+
 function ArticleView({ id, items, onOpen, onBack }: {
   id: string; items: HelpArticleMeta[]; onOpen: (id: string) => void; onBack: () => void;
 }) {
@@ -380,14 +399,15 @@ function ArticleView({ id, items, onOpen, onBack }: {
         <article className="card article">
           <h1>{article.title}</h1>
           <Markdown text={article.body} />
-          <CompanyNote key={article.id} articleId={article.id} note={article.companyNote?.text ?? null} canEdit={article.canEditNote} />
+          {article.api && <ApiSpecFrame name={article.api} />}
+          <CompanyNote key={`note:${article.id}`} articleId={article.id} note={article.companyNote?.text ?? null} canEdit={article.canEditNote} />
           {(prev || next) && (
             <div className="help-pager">
               {prev ? <button className="btn ghost small" onClick={() => onOpen(prev.id)}>‹ {prev.title}</button> : <span />}
               {next && <button className="btn ghost small" onClick={() => onOpen(next.id)}>{next.title} ›</button>}
             </div>
           )}
-          <HelpRating key={article.id} articleId={article.id} source="article" />
+          <HelpRating key={`rating:${article.id}`} articleId={article.id} source="article" />
           {article.related.length > 0 && (
             <div className="related">
               <h3>関連する記事</h3>

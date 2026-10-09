@@ -42,6 +42,11 @@ export interface HelpArticle {
   extension?: string;
   /** 木の中の並びの順（記事の `order`。マニュアルの章は 0 がはじめに）。 */
   order?: number;
+  /**
+   * 記事の下に出す API の定義の名前（`docs/api/<名前>.openapi.yaml`。開発者向けの記事。第6.10.7.4節）。
+   * 画面は、切り離した枠で `GET /v1/help/api/<名前>` の Swagger UI を出す。
+   */
+  api?: string;
 }
 
 /** ヘルプを出す所。ワークスペースは管理者向けの記事を出さず、管理者ページは管理者向けの記事だけを出す（第6.10.7節）。 */
@@ -78,6 +83,7 @@ export function parseArticle(text: string): HelpArticle {
     ...(attrs['group'] ? { group: attrs['group'] } : {}),
     ...(attrs['extension'] ? { extension: attrs['extension'] } : {}),
     ...(/^\d+$/.test(attrs['order'] ?? '') ? { order: Number(attrs['order']) } : {}),
+    ...(/^[a-z0-9-]+$/.test(attrs['api'] ?? '') ? { api: attrs['api'] } : {}),
   };
 }
 

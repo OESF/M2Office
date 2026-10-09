@@ -244,6 +244,8 @@ export interface HelpArticleMeta {
   group?: string;
   /** マニュアルの中の順（0 がはじめに）。 */
   order?: number;
+  /** 記事の下に出す API の定義の名前（開発者向けの記事。仕様書 第6.10.7.4節）。 */
+  api?: string;
 }
 
 /** ヘルプを出す所（仕様書 第6.10.7節）。 */

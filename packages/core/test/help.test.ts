@@ -216,3 +216,11 @@ test('秘書の会話の例を聞くと、秘書にできること（会話の�
   // 「秘書」だけの問いでは秘書の記事が並ぶ。「秘書の使い方」から会話の例へ案内する
   assert.match(catalog.get('start-secretary', ctx(['member']))!.body, /秘書にできること（会話の例）/);
 });
+
+test('開発者向けの記事は、API の定義の名前（api）を持てる。形に合わない名前は読まない（第6.10.7.4節）', () => {
+  const ok = parseArticle('---\nid: admin-developer-x\ntitle: つなぎ\naudience: admin\ncategory: admin\ngroup: 開発者\napi: inventory-sales\n---\n本文');
+  assert.equal(ok.api, 'inventory-sales');
+  assert.equal(ok.group, '開発者');
+  const bad = parseArticle('---\nid: admin-developer-y\ntitle: つなぎ\naudience: admin\ncategory: admin\napi: ../secret\n---\n本文');
+  assert.equal(bad.api, undefined);
+});

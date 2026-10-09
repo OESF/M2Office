@@ -458,6 +458,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/me/promotions` | 本人の記憶から、秘書が会社の知識にしたものの履歴（本人のものだけ。第6.5.4節）。本人が出す・管理者が承認する API は第 0.115.0 版でなくした |
 | `GET /v1/help/articles?scope=` | ヘルプの記事の一覧（役割と有効な業務で出し分け）と、読めるマニュアルの名前（`manuals`）。`scope=admin` は管理者ページ（管理者向けの記事だけ）、それ以外はワークスペース（管理者向けを除く）。業務のマニュアルの章（`docs/manual/`）は、その業務を使える人にだけ出す（第6.10.7節・第6.10.7.3節） |
 | `GET /v1/help/articles/:id` | 記事の本文。見られない記事は 404 |
+| `GET /v1/help/api/:name` | 開発者向けの記事の API の定義（`docs/api/<名前>.openapi.yaml`）を、Swagger UI のページ（HTML）で返す。管理者だけ。応答の CSP の `sandbox` で切り離し、外へ送らない（仕様書 第6.10.7.4節） |
 | `GET /v1/help/search?q=&scope=` | 記事の検索（出す所の記事の中から） |
 | `GET /v1/debug/events` ／ `DELETE` | デバッグモード（`M2O_DEBUG=true`）の本人の記録（新しい順。`after` でそれより後だけ）／ 消す。デバッグモードでなければ 404（仕様書 第20.4.1節） |
 | `GET /v1/help/agents/:agentId` | 業務の説明（定義から自動で作る） |

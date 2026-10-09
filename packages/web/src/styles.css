@@ -873,6 +873,10 @@ tr.muted td { color: var(--muted); }
 .help-item .sub { display: block; color: var(--muted); font-size: calc(12px * var(--font-scale)); }
 .article { line-height: calc(1.8 * var(--line-scale)); }
 .article h1 { margin-bottom: calc(12px * var(--space-scale)); }
+/* 開発者向けの記事の API の定義（Swagger UI は明るい色だけなので、枠の中は白にする。仕様書 第6.10.7.4節） */
+.api-spec { margin-top: calc(20px * var(--space-scale)); }
+.api-spec .row { justify-content: space-between; align-items: center; }
+.api-spec-frame { display: block; width: 100%; height: 75vh; min-height: 480px; margin-top: calc(8px * var(--space-scale)); border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 .article h2 { font-size: calc(16px * var(--font-scale)); margin: calc(20px * var(--space-scale)) 0 calc(6px * var(--space-scale)); }
 .article p { color: var(--ink); }
 .article ul, .article ol { padding-left: 1.4em; }

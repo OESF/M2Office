@@ -25,6 +25,7 @@ import { canRunAgent, type AgentDefinition, type ContactScope, type HrSettings, 
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { loadApiDocs } from './api-docs-page.js';
 import { loadAuthConfig, type AuthConfig } from './auth/config.js';
 import { OAuthStateStore } from './auth/oauth-state.js';
 import { HandoffStore } from './auth/handoff.js';
@@ -56,6 +57,8 @@ export interface AppDeps {
   help: HelpCatalog;
   /** ヘルプで読める業務のマニュアル（名前・木の区分の名前・どの内蔵の拡張のものか。第6.10.7.3節）。 */
   helpManuals: { id: string; title: string; extension: string }[];
+  /** 開発者向けのヘルプで見せる API の定義（`docs/api/<名前>.openapi.yaml`。名前 → 題と中身。第6.10.7.4節）。 */
+  apiDocs: Map<string, { title: string; text: string }>;
   /** ヘルプを育てる（見つからなかった質問と、役に立ったか。仕様書 第6.10.10節） */
   helpFeedback: HelpFeedback;
   /** ヘルプの会社の補足（仕様書 第6.10.7節） */
@@ -648,6 +651,7 @@ export function buildDeps(): AppDeps {
     socialHints: (tenantId) => social.hints(tenantId),
   });
   const manuals = loadManuals(manualDir(), log);
+  const apiDocs = loadApiDocs(apiDocsDir(), log);
   const help = new HelpCatalog([...loadHelpArticles(helpDir(), log), ...manuals.articles], OFFICIAL_AGENTS, registry);
   const helpFeedback = new HelpFeedback(new PostgresHelpFeedbackStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'));
   const helpNotes = new PostgresHelpNoteStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
@@ -765,7 +769,7 @@ export function buildDeps(): AppDeps {
   return {
     proxy: new ProxyAccessStore(createPool(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office', { max: 2, name: 'proxy' })),
     opsSide: new OpsAppSide(createPool(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office', { max: 1, name: 'ops' })),
-    repo, llm, connector, files, registry, engine, secretary, auth: loadAuthConfig(), log, health, debug, help, helpManuals: manuals.list, helpFeedback, helpNotes, retention, revocation,
+    repo, llm, connector, files, registry, engine, secretary, auth: loadAuthConfig(), log, health, debug, help, helpManuals: manuals.list, apiDocs, helpFeedback, helpNotes, retention, revocation,
     hub, tenantView, agentsFor, canUse, isAvailable, box, ai, connections,
     onsiteTenant: ai.deployment() === 'onsite' ? (process.env['M2O_ONSITE_TENANT']?.trim() || null) : null,
     oauth: {
@@ -865,6 +869,11 @@ export function loadHelpArticles(dir: string, log: Logger): HelpArticle[] {
   }
   log.info('ヘルプの記事を読み込みました', { count: articles.length });
   return articles;
+}
+
+/** API の定義の置き場。既定はリポジトリ直下の `docs/api`。 */
+function apiDocsDir(): string {
+  return process.env['API_DOCS_DIR'] ?? appPath('docs', 'api');
 }
 
 function manualDir(): string {

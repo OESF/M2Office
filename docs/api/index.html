@@ -1,0 +1,32 @@
+<!doctype html>
+<!-- M2Office の API の定義を Swagger UI で見るページ（docs/api/README.md）。npm run docs:api で、この置き場を http://localhost:3106/ に出す -->
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>M2Office API の定義</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14/swagger-ui.css">
+  <style>body { margin: 0; background: #fff; }</style>
+</head>
+<body>
+  <div id="swagger"></div>
+  <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14/swagger-ui-bundle.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14/swagger-ui-standalone-preset.js"></script>
+  <script>
+    // 定義を足したら、ここに 1 行足す（上の選択の欄に並ぶ）
+    const specs = [
+      { name: '在庫管理 — 販売管理とのつなぎ（案）', url: 'inventory-sales.openapi.yaml' },
+    ];
+    window.ui = SwaggerUIBundle({
+      urls: specs,
+      dom_id: '#swagger',
+      presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
+      layout: 'StandaloneLayout',
+      // まだ作っていない口なので、画面から送らない
+      supportedSubmitMethods: [],
+      defaultModelsExpandDepth: 1,
+      docExpansion: 'list',
+    });
+  </script>
+</body>
+</html>

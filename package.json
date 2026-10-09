@@ -35,6 +35,7 @@
     "docs:hr-review-pdf": "python3 tools/pdf/build_manual.py hr-review",
     "docs:ops-manual-pdf": "python3 tools/pdf/build_manual.py ops",
     "docs:tools": "node --import tsx scripts/gen-tool-docs.mjs",
+    "docs:api": "python3 -m http.server 3106 --bind 127.0.0.1 --directory docs/api",
     "icons": "node scripts/build-icons.mjs",
     "tenant:create": "node --env-file-if-exists=.env scripts/create-tenant.mjs",
     "ops:operator": "node --env-file-if-exists=.env scripts/create-operator.mjs",
