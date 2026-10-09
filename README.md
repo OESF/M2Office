@@ -78,7 +78,7 @@ WEB_HTTPS=true npm run dev
 
 ### 会社（テナント）を作る
 
-マスター管理画面（`ops.` の名前で開く運営の画面。仕様書 第23.8.15節）の「会社一覧」の「会社を作る」で作れます。手元のツールでも作れます（仕様書 第16.1.3節）。最初の運営者は `npm run ops:operator -- --email … --role admin` で作ります。
+マスター管理画面（`ops.` の名前で開く運営の画面。仕様書 第23.8.15節）の「会社一覧」の「会社を作る」で作れます。手元のツールでも作れます（仕様書 第16.1.3節）。最初の運営者は `npm run ops:operator -- --email … --role admin` で作ります。そのとき出るパスキーの登録の合言葉を本人に渡します（ログインは Google とパスキー）。
 
 ```bash
 npm run tenant:create -- --subdomain example --name "会社名" --domain example.co.jp --admin admin@example.co.jp
@@ -361,6 +361,7 @@ API とワーカーは起動時にリポジトリ直下の `.env` を読みま�
 | [docs/developer/](docs/developer/README.md) | 開発者マニュアル（拡張機能・業務エージェント・コネクタの作り方） |
 | [docs/manual/hr-payroll/](docs/manual/hr-payroll/README.md) | 人事・給与のユーザーマニュアル（担当者の手引きと研修の教材。`npm run docs:hr-manual-pdf` で PDF） |
 | [docs/manual/inventory/](docs/manual/inventory/README.md) | 在庫管理のユーザーマニュアル（担当者の手引きと研修の教材。`npm run docs:inventory-manual-pdf` で PDF） |
+| [docs/ops-manual/](docs/ops-manual/README.md) | マスター管理画面の運営者マニュアル（運営者向け。会社の利用者のヘルプには入れない。`npm run docs:ops-manual-pdf` で PDF） |
 | docs/manual/*/manual.json | 業務のマニュアルをヘルプで章ごとに読むための名前と、どの内蔵の拡張のものか（仕様書 第6.10.7.3節。書き方は docs/help/README.md） |
 | [LICENSE](LICENSE) | ライセンス（Apache License 2.0） |
 | [NOTICE](NOTICE) | 著作権の表示（Apache License 2.0 の第4節） |

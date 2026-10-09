@@ -16,7 +16,9 @@ function fakeStore() {
     { id: 'op-admin', email: 'admin@ops.example', displayName: '管理', role: 'admin', status: 'active', createdAt: '', lastLoginAt: null },
     { id: 'op-mon', email: 'mon@ops.example', displayName: '監視', role: 'monitor', status: 'active', createdAt: '', lastLoginAt: null },
   ];
-  const sessions = new Map<string, string>();
+  const sessions = new Map<string, { operatorId: string; verified: boolean }>();
+  const passkeys: { id: string; operatorId: string; publicKey: string; counter: number; transports: string[]; name: string }[] = [];
+  const codes = new Map<string, string>([['op-mon', 'GOOD-CODE-0001']]);
   const created: NewTenantInput[] = [];
   const audits: string[] = [];
   const reports: MachineReport[] = [];
@@ -25,12 +27,20 @@ function fakeStore() {
     listOperators: async () => ops,
     findOperatorByEmail: async (e: string) => ops.find((o) => o.email === e) ?? null,
     findOperator: async (id: string) => ops.find((o) => o.id === id) ?? null,
-    createSession: async (operatorId: string) => { const token = `tok-${++n}`; sessions.set(token, operatorId); return { token, session: { id: `s-${n}`, operatorId, csrfToken: `csrf-${n}`, expiresAt: '' } }; },
-    findSession: async (token: string) => {
-      const id = sessions.get(token);
-      const op = ops.find((o) => o.id === id);
-      return op ? { session: { id: token, operatorId: op.id, csrfToken: `csrf-${token.slice(4)}`, expiresAt: '' }, operator: op } : null;
+    createSession: async (operatorId: string, _p: string, _ua: string | null, _ttl: number, verified = false) => {
+      const token = `tok-${++n}`; sessions.set(token, { operatorId, verified });
+      return { token, session: { id: token, operatorId, csrfToken: `csrf-${n}`, expiresAt: '', verified } };
     },
+    findSession: async (token: string) => {
+      const s = sessions.get(token);
+      const op = ops.find((o) => o.id === s?.operatorId);
+      return op && s ? { session: { id: token, operatorId: op.id, csrfToken: `csrf-${token.slice(4)}`, expiresAt: '', verified: s.verified }, operator: { ...op, passkeyCount: passkeys.filter((k) => k.operatorId === op.id).length } } : null;
+    },
+    markSessionVerified: async (id: string) => { const s = sessions.get(id); if (s) s.verified = true; },
+    listPasskeys: async (operatorId: string) => passkeys.filter((k) => k.operatorId === operatorId).map((k) => ({ ...k, createdAt: '', lastUsedAt: null })),
+    addPasskey: async (operatorId: string, p: { id: string; publicKey: string; counter: number; transports: string[]; name: string }) => { passkeys.push({ ...p, operatorId }); },
+    touchPasskey: async () => undefined,
+    checkEnrollCode: async (operatorId: string, code: string, consume: boolean) => { const ok = codes.get(operatorId) === code; if (ok && consume) codes.delete(operatorId); return ok; },
     revokeSession: async () => undefined,
     audit: async (_op: string, action: string) => { audits.push(action); },
     createTenant: async (input: NewTenantInput) => { created.push(input); return `t-${input.subdomain}`; },
@@ -43,7 +53,7 @@ function fakeStore() {
     listStatusRequests: async () => [{ id: 'req-1', tenantId: 't-acme', tenantName: 'アクメ', kind: 'lock', reasonCode: 'abuse', reason: 'x', state: 'done', effectiveAt: null }],
     receiveReport: async (token: string, r: MachineReport) => { if (token !== 'machine-key') return null; reports.push(r); return 'm-1'; },
   } as unknown as OpsStore;
-  return { store, created, audits, reports };
+  return { store, created, audits, reports, sessions, passkeys, codes };
 }
 
 const config = { login: null, googleDomain: null, devLogin: true, cookieSecure: false, sessionTtlHours: 12 };
@@ -148,4 +158,44 @@ test('停止と再開: 監視は緊急停止だけ。理由の種類を確かめ
   assert.equal(res.status, 201);
   assert.match((await res.json() as { notice: string }).notice, /アクメ ご担当者様[\s\S]*不正利用/);
   assert.ok(audits.includes('store:lock') && audits.includes('tenant.lock_request'));
+});
+
+/** パスキーの手続きの代わり（本物の端末を使わずに、登録と確かめの流れを見る）。 */
+const fakeWebAuthn = {
+  registrationOptions: async () => ({ challenge: 'reg-challenge' }),
+  verifyRegistration: async (o: { expectedChallenge: string; expectedRPID?: string }) => {
+    assert.equal(o.expectedChallenge, 'reg-challenge');
+    assert.equal(o.expectedRPID, 'ops.lvh.me');
+    return { verified: true, registrationInfo: { credential: { id: 'cred-1', publicKey: new Uint8Array([1, 2, 3]), counter: 0, transports: ['internal'] } } };
+  },
+  authenticationOptions: async () => ({ challenge: 'auth-challenge' }),
+  verifyAuthentication: async (o: { expectedChallenge: string }) => ({ verified: o.expectedChallenge === 'auth-challenge', authenticationInfo: { newCounter: 1 } }),
+} as never;
+
+test('パスキー: 確かめるまでは何もできず、登録の合言葉で登録し、次からはパスキーで確かめる', async () => {
+  const f = fakeStore();
+  const app = opsApp({ store: f.store, config, log, webauthn: fakeWebAuthn });
+  // Google のあとの（確かめていない）ログイン状態を作る
+  const { token } = await f.store.createSession('op-mon', 'google', null, 12, false);
+  const h = { ...OPS, origin: 'https://ops.lvh.me:3100', cookie: `${OPS_COOKIE}=${token}`, 'x-csrf-token': `csrf-${token.slice(4)}`, 'content-type': 'application/json' };
+  assert.equal((await app.request('/v1/ops/tenants', { headers: h })).status, 401);
+  const me = await (await app.request('/v1/ops/me', { headers: h })).json() as { verified: boolean; passkeyCount: number };
+  assert.deepEqual([me.verified, me.passkeyCount], [false, 0]);
+  // 合言葉が違えば登録の問いかけを出さない
+  assert.equal((await app.request('/v1/ops/passkey/register-options', { method: 'POST', headers: h, body: JSON.stringify({ code: 'BAD' }) })).status, 403);
+  assert.equal((await app.request('/v1/ops/passkey/register-options', { method: 'POST', headers: h, body: JSON.stringify({ code: 'GOOD-CODE-0001' }) })).status, 200);
+  const reg = await app.request('/v1/ops/passkey/register', { method: 'POST', headers: h, body: JSON.stringify({ response: { id: 'cred-1' }, name: '会社の端末', code: 'GOOD-CODE-0001' }) });
+  assert.equal(reg.status, 200);
+  assert.equal(f.passkeys.length, 1);
+  assert.equal(f.codes.has('op-mon'), false);
+  assert.equal((await app.request('/v1/ops/tenants', { headers: h })).status, 200);
+  // 次のログインでは、パスキーで確かめる（合言葉では登録し直せない）
+  const next = await f.store.createSession('op-mon', 'google', null, 12, false);
+  const h2 = { ...h, cookie: `${OPS_COOKIE}=${next.token}`, 'x-csrf-token': `csrf-${next.token.slice(4)}` };
+  assert.equal((await app.request('/v1/ops/passkey/register-options', { method: 'POST', headers: h2, body: JSON.stringify({ code: 'GOOD-CODE-0001' }) })).status, 409);
+  assert.equal((await app.request('/v1/ops/passkey/verify', { method: 'POST', headers: h2, body: JSON.stringify({ response: { id: 'cred-1' } }) })).status, 400);
+  assert.equal((await app.request('/v1/ops/passkey/options', { method: 'POST', headers: h2, body: '{}' })).status, 200);
+  assert.equal((await app.request('/v1/ops/passkey/verify', { method: 'POST', headers: h2, body: JSON.stringify({ response: { id: 'cred-1' } }) })).status, 200);
+  assert.equal((await app.request('/v1/ops/tenants', { headers: h2 })).status, 200);
+  assert.ok(f.audits.includes('passkey.add') && f.audits.includes('passkey.verify'));
 });

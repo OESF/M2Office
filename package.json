@@ -33,6 +33,7 @@
     "docs:hr-manual-pdf": "python3 tools/pdf/build_manual.py hr-payroll",
     "docs:inventory-manual-pdf": "python3 tools/pdf/build_manual.py inventory",
     "docs:hr-review-pdf": "python3 tools/pdf/build_manual.py hr-review",
+    "docs:ops-manual-pdf": "python3 tools/pdf/build_manual.py ops",
     "docs:tools": "node --import tsx scripts/gen-tool-docs.mjs",
     "icons": "node scripts/build-icons.mjs",
     "tenant:create": "node --env-file-if-exists=.env scripts/create-tenant.mjs",

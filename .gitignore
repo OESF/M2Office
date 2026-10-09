@@ -23,6 +23,8 @@ docs/manual/hr-payroll/hr-payroll-manual.pdf
 docs/manual/inventory/inventory-manual.pdf
 # 人事・給与の監修のお願いの PDF は docs/review/hr-payroll/*.md から作る（npm run docs:hr-review-pdf）
 docs/review/hr-payroll/hr-payroll-review.pdf
+# マスター管理画面の運営者マニュアルの PDF は docs/ops-manual/*.md から作る（npm run docs:ops-manual-pdf）
+docs/ops-manual/ops-manual.pdf
 *.log
 
 # エディタと OS

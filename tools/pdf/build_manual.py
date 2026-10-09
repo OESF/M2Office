@@ -4,7 +4,7 @@
 Markdown は章ごとに分けたまま保守し、配布と通読のときだけ 1 本にまとめる。
 
 使い方: python3 tools/pdf/build_manual.py [マニュアルの名前] [出力の PDF] [--owner=作成の法人 --company=会社名 --contact=担当者 --to=宛先]
-  マニュアルの名前: developer（既定。docs/developer/）・hr-payroll（docs/manual/hr-payroll/）・inventory（docs/manual/inventory/）・
+  マニュアルの名前: developer（既定。docs/developer/）・hr-payroll（docs/manual/hr-payroll/）・inventory（docs/manual/inventory/）・ops（運営者。docs/ops-manual/）・
     hr-review（人事・給与の監修のお願い。docs/review/hr-payroll/）
   既定の出力先は各マニュアルのディレクトリの PDF（版管理の対象外）
   前との互換のため、最初の引数が .pdf で終われば開発者マニュアルの出力先とみなす
@@ -28,6 +28,11 @@ MANUALS = {
     'inventory': {
         'dir': os.path.join(ROOT, 'docs', 'manual', 'inventory'), 'pdf': 'inventory-manual.pdf',
         'title': 'M2Office 在庫管理 ユーザーマニュアル', 'subtitle': '担当者の手引きと研修の教材',
+    },
+    # 運営者向け。会社の利用者のヘルプ（docs/manual/）には入れない
+    'ops': {
+        'dir': os.path.join(ROOT, 'docs', 'ops-manual'), 'pdf': 'ops-manual.pdf',
+        'title': 'M2Office マスター管理画面 運営者マニュアル', 'subtitle': '会社の作成・見守り・停止と再開・代理アクセス',
     },
     'hr-payroll': {
         'dir': os.path.join(ROOT, 'docs', 'manual', 'hr-payroll'), 'pdf': 'hr-payroll-manual.pdf',

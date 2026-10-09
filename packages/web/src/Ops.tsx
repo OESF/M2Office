@@ -6,6 +6,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
 import { copyText } from './clipboard.js';
 import { NavItem, SideNavLayout, ThemeToggle, type IconName } from './nav.js';
 import {
@@ -22,6 +23,8 @@ const FLAG_LABEL: Record<string, string> = {
 const ACTION_LABEL: Record<string, string> = {
   'ops.login': 'ログイン', 'ops.logout': 'ログアウト', 'tenant.create': '会社を作った', 'tenant.status': '状態を変えた',
   'machine.add': '機械を登録した', 'machine.remove': '機械を削除した', 'operator.add': '運営者を足した', 'operator.update': '運営者を変えた',
+  'passkey.add': 'パスキーを登録した', 'passkey.verify': 'パスキーで確かめた', 'passkey.delete': 'パスキーを削除した',
+  'operator.enroll_code': '登録の合言葉を出した', 'operator.reset_passkeys': 'パスキーを削除してやり直させた',
   'tenant.view': '会社の詳細を開いた', 'tenants.export': '会社一覧を書き出した', 'settings.operator': '運営主体の設定を変えた',
   'tenant.suspend_request': '停止を申請した', 'tenant.lock_request': '緊急停止した', 'tenant.resume_request': '再開を申請した',
   'tenant.status_approve': '申請を承認した', 'tenant.status_reject': '申請を承認しなかった', 'tenant.status_withdraw': '申請を取り下げた', 'tenant.lock_confirm': '緊急停止を確認した',
@@ -65,6 +68,8 @@ export function OpsRoot() {
   useEffect(() => { document.title = 'M2Office マスター管理'; load(); }, [load]);
   if (state === 'loading') return <p className="muted center">読み込み中…</p>;
   if (state === 'login' || !me) return <OpsLogin onLoggedIn={load} />;
+  // Google のあと、ログインのたびにパスキーで確かめる（第23.8.15節）
+  if (!me.verified) return <PasskeyGate me={me} onDone={load} onLogout={() => { void opsApi.logout().catch(() => undefined).then(() => { setMe(null); setState('login'); }); }} />;
   return <OpsConsole me={me} onLogout={() => { void opsApi.logout().catch(() => undefined).then(() => { setMe(null); setState('login'); }); }} />;
 }
 
@@ -404,7 +409,14 @@ function Operators({ me }: { me: OpsMe }) {
   const [rows, setRows] = useState<OperatorView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [f, setF] = useState({ email: '', displayName: '', role: 'support' as OperatorRole });
+  const [issued, setIssued] = useState<{ name: string; code: string; expiresAt: string } | null>(null);
   const manage = me.can['operator.manage'];
+  const issue = (o: OperatorView) => { setError(null); opsApi.issueEnrollCode(o.id).then((r) => setIssued({ name: o.displayName, ...r })).catch((e) => setError(errText(e, '出せませんでした'))); };
+  const reset = (o: OperatorView) => {
+    if (!confirm(`${o.displayName} さんのパスキーをすべて削除し、新しい登録の合言葉を出しますか？（その人のログイン状態も切ります）`)) return;
+    setError(null);
+    opsApi.resetPasskeys(o.id).then(() => opsApi.issueEnrollCode(o.id)).then((r) => { setIssued({ name: o.displayName, ...r }); load(); }).catch((e) => setError(errText(e, '扱えませんでした')));
+  };
   const load = useCallback(() => { opsApi.operators().then((r) => setRows(r.operators)).catch((e) => setError(errText(e, '読み込めませんでした'))); }, []);
   useEffect(() => { load(); }, [load]);
   const run = (p: Promise<unknown>, fallback: string) => { setError(null); p.then(load).catch((e) => setError(errText(e, fallback))); };
@@ -412,6 +424,15 @@ function Operators({ me }: { me: OpsMe }) {
     <>
       <h2>運営者</h2>
       {error && <p className="error">{error}</p>}
+      <MyPasskeys />
+      {issued && (
+        <div className="card">
+          <h3>{issued.name} さんの登録の合言葉（いまだけ出します）</h3>
+          <p><code style={{ fontSize: '1.4em' }}>{issued.code}</code> <span className="muted small">{when(issued.expiresAt)} まで・1 回だけ</span></p>
+          <p className="small">本人に別の手段で渡してください。Google でログインしたあと、この合言葉でパスキーを登録します。</p>
+          <button className="btn ghost small" onClick={() => setIssued(null)}>閉じる</button>
+        </div>
+      )}
       {manage && (
         <div className="field" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <input placeholder="メールアドレス" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} style={{ maxWidth: 260 }} />
@@ -423,8 +444,9 @@ function Operators({ me }: { me: OpsMe }) {
         </div>
       )}
       {rows && (
-        <table className="table">
-          <thead><tr><th>名前</th><th>メールアドレス</th><th>ロール</th><th>状態</th><th>最後のログイン</th><th /></tr></thead>
+        <div style={{ overflowX: 'auto' }}>
+        <table className="table ops-table">
+          <thead><tr><th>名前</th><th>メールアドレス</th><th>ロール</th><th>状態</th><th className="num">パスキー</th><th>最後のログイン</th><th /></tr></thead>
           <tbody>
             {rows.map((o) => (
               <tr key={o.id}>
@@ -435,16 +457,21 @@ function Operators({ me }: { me: OpsMe }) {
                   </select>
                   : ROLE_LABEL[o.role]}</td>
                 <td><span className={`badge ${o.status === 'active' ? 'ok' : 'warn'}`}>{o.status === 'active' ? '有効' : '無効'}</span></td>
+                <td className="num">{o.passkeyCount ?? 0}</td>
                 <td>{when(o.lastLoginAt)}</td>
-                <td>{manage && o.id !== me.operator.id && (
+                <td>{manage && o.id !== me.operator.id && (<>
                   <button className="btn ghost small" onClick={() => run(opsApi.updateOperator(o.id, { status: o.status === 'active' ? 'disabled' : 'active' }), '変えられませんでした')}>
                     {o.status === 'active' ? '無効にする' : '有効にする'}
-                  </button>
-                )}</td>
+                  </button>{' '}
+                  {(o.passkeyCount ?? 0) === 0
+                    ? <button className="btn ghost small" onClick={() => issue(o)}>登録の合言葉を出す</button>
+                    : <button className="btn ghost small" onClick={() => reset(o)}>パスキーをやり直させる</button>}
+                </>)}</td>
               </tr>
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </>
   );
@@ -807,6 +834,100 @@ function ProxyControl({ tenant, me }: { tenant: TenantDetailView['tenant']; me: 
           ))}</tbody>
         </table>
       )}
+    </div>
+  );
+}
+
+/** パスキーの操作の失敗を、分かる言葉にする（取りやめたときは何も言わない）。 */
+function passkeyError(e: unknown, fallback: string): string | null {
+  const name = (e as { name?: string })?.name;
+  if (name === 'NotAllowedError' || name === 'AbortError') return null;
+  return e instanceof Error ? e.message : fallback;
+}
+
+/**
+ * パスキーで確かめる画面（第23.8.15節）。登録済みなら確かめ、まだなら登録の合言葉で登録する。
+ *
+ * @remarks 確かめるまでは、運営の画面のほかの操作はできない（API が断る）
+ */
+function PasskeyGate({ me, onDone, onLogout }: { me: OpsMe; onDone: () => void; onLogout: () => void }) {
+  const [code, setCode] = useState('');
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const enroll = me.passkeyCount === 0;
+  const verify = async () => {
+    setBusy(true); setError(null);
+    try {
+      const { options } = await opsApi.passkeyOptions();
+      await opsApi.passkeyVerify(await startAuthentication({ optionsJSON: options as never }));
+      onDone();
+    } catch (e) { setError(passkeyError(e, 'パスキーで確かめられませんでした')); } finally { setBusy(false); }
+  };
+  const register = async () => {
+    setBusy(true); setError(null);
+    try {
+      const { options } = await opsApi.passkeyRegisterOptions(code);
+      await opsApi.passkeyRegister(await startRegistration({ optionsJSON: options as never }), name, code);
+      onDone();
+    } catch (e) { setError(passkeyError(e, 'パスキーを登録できませんでした')); } finally { setBusy(false); }
+  };
+  return (
+    <div className="login">
+      <div className="card login-card">
+        <h1>M2Office</h1>
+        <p className="lead">マスター管理</p>
+        <p>{me.operator.displayName}（{me.operator.email}）</p>
+        {enroll ? (
+          <>
+            <div className="field"><label>登録の合言葉（運営管理者から受け取ったもの）</label>
+              <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="XXXX-XXXX-XXXX" autoComplete="off" /></div>
+            <div className="field"><label>このパスキーの呼び名</label>
+              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="例: 会社の MacBook" /></div>
+            <button className="btn" disabled={busy || !code.trim()} onClick={() => void register()}>{busy ? '…' : 'パスキーを登録する'}</button>
+          </>
+        ) : (
+          <button className="btn" disabled={busy} onClick={() => void verify()}>{busy ? '…' : 'パスキーで確かめる'}</button>
+        )}
+        {error && <p className="error">{error}</p>}
+        <p><button className="link-btn" onClick={onLogout}>別のアカウントでログインする</button></p>
+      </div>
+    </div>
+  );
+}
+
+/** 自分のパスキー（予備を足す・削除する。最後の 1 つは削除できない）。 */
+function MyPasskeys() {
+  const [rows, setRows] = useState<{ id: string; name: string; createdAt: string; lastUsedAt: string | null }[] | null>(null);
+  const [name, setName] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(() => { opsApi.myPasskeys().then((r) => setRows(r.passkeys)).catch((e) => setError(errText(e, '読み込めませんでした'))); }, []);
+  useEffect(() => { load(); }, [load]);
+  const add = async () => {
+    setError(null);
+    try {
+      const { options } = await opsApi.passkeyRegisterOptions();
+      await opsApi.passkeyRegister(await startRegistration({ optionsJSON: options as never }), name);
+      setName(''); load();
+    } catch (e) { setError(passkeyError(e, 'パスキーを登録できませんでした')); }
+  };
+  return (
+    <div className="card">
+      <h3>自分のパスキー</h3>
+      {error && <p className="error">{error}</p>}
+      {rows && (
+        <table className="table">
+          <thead><tr><th>呼び名</th><th>登録した日時</th><th>最後に使った</th><th /></tr></thead>
+          <tbody>{rows.map((k) => (
+            <tr key={k.id}><td>{k.name}</td><td>{when(k.createdAt)}</td><td>{when(k.lastUsedAt)}</td>
+              <td>{rows.length > 1 && <button className="btn danger small" onClick={() => { if (confirm(`パスキー「${k.name}」を削除しますか？`)) void opsApi.deleteMyPasskey(k.id).then(load).catch((e) => setError(errText(e, '削除できませんでした'))); }}>削除</button>}</td></tr>
+          ))}</tbody>
+        </table>
+      )}
+      <div className="field" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <input placeholder="予備の呼び名（例: セキュリティキー）" value={name} onChange={(e) => setName(e.target.value)} style={{ maxWidth: 280 }} />
+        <button className="btn ghost small" onClick={() => void add()}>予備のパスキーを足す</button>
+      </div>
     </div>
   );
 }

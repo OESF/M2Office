@@ -10,7 +10,7 @@ export {
 export {
   OpsStore, OpsRuleError, sha256,
   type Operator, type OpsSession, type TenantOverview, type OpsMachine, type OpsAuditEntry,
-  type OperatorProfile, type TenantDetail, type ServerStatus, type StatusRequest, type OpsProxyGrant,
+  type OperatorProfile, type TenantDetail, type ServerStatus, type StatusRequest, type OpsProxyGrant, type OpsPasskey, OPS_PASSKEY_MAX, OPS_ENROLL_CODE_HOURS,
 } from './store.js';
 export { OpsAppSide } from './app-side.js';
 export { proxyAllowed, ProxyAccessStore, PROXY_HOURS, PROXY_DEFAULT_HOURS, type ProxyScope, type ProxyGrant, type ProxySessionInfo } from './proxy.js';

@@ -260,3 +260,36 @@ test('代理アクセス: 申請・許す・1 回だけの券で入る・切る�
     await pool.end();
   }
 });
+
+test('運営者のパスキーの口: 登録の合言葉は 1 回だけ・パスキーの足し引き・やり直しでログイン状態も切る', { skip: dbReady ? false : '開発のデータベース（移行 116 まで）が動いていません' }, async () => {
+  const pool = new pg.Pool({ connectionString: OPS, max: 2 });
+  const store = new OpsStore(pool);
+  const email = `zz-pk-${Date.now().toString(36)}@ops.example`;
+  try {
+    const op = (await store.addOperator({ email, displayName: '確かめ', role: 'support', by: 'test' }))!;
+    const { code } = await store.issueEnrollCode(op.id, 'test');
+    assert.match(code, /^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/);
+    assert.equal(await store.checkEnrollCode(op.id, 'XXXX-XXXX-XXXX', false), false);
+    assert.equal(await store.checkEnrollCode(op.id, code.toLowerCase(), false), true);
+    assert.equal(await store.checkEnrollCode(op.id, code, true), true);
+    assert.equal(await store.checkEnrollCode(op.id, code, true), false);
+    const { token, session } = await store.createSession(op.id, 'google', null, 1);
+    assert.equal(session.verified, false);
+    assert.equal((await store.findSession(token))?.session.verified, false);
+    await store.addPasskey(op.id, { id: `cred-${email}`, publicKey: 'AQID', counter: 0, transports: ['internal'], name: '端末' });
+    await store.markSessionVerified(session.id);
+    assert.equal((await store.findSession(token))?.session.verified, true);
+    assert.equal((await store.findOperator(op.id))?.passkeyCount, 1);
+    await store.touchPasskey(`cred-${email}`, 5);
+    assert.equal((await store.listPasskeys(op.id))[0]?.counter, 5);
+    await store.resetPasskeys(op.id);
+    assert.equal((await store.listPasskeys(op.id)).length, 0);
+    assert.equal(await store.findSession(token), null);
+  } finally {
+    const owner = new pg.Client({ connectionString: OWNER });
+    await owner.connect();
+    await owner.query('delete from ops.operators where email = $1', [email]);
+    await owner.end();
+    await pool.end();
+  }
+});

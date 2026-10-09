@@ -18,6 +18,8 @@ export interface Operator {
   status: 'active' | 'disabled';
   createdAt: string;
   lastLoginAt: string | null;
+  /** 登録したパスキーの数（第23.8.15節「運営者のパスキー」）。 */
+  passkeyCount?: number;
 }
 
 /** 運営のログイン状態。 */
@@ -26,7 +28,25 @@ export interface OpsSession {
   operatorId: string;
   csrfToken: string;
   expiresAt: string;
+  /** パスキーで確かめたか（確かめるまでは本人とパスキーの操作しかできない）。 */
+  verified: boolean;
 }
+
+/** 運営者のパスキー（公開鍵は秘密の値ではない）。 */
+export interface OpsPasskey {
+  id: string;
+  publicKey: string;
+  counter: number;
+  transports: string[];
+  name: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+}
+
+/** 1 人が登録できるパスキーの数。 */
+export const OPS_PASSKEY_MAX = 5;
+/** 登録の合言葉の有効な時間（24 時間）。 */
+export const OPS_ENROLL_CODE_HOURS = 24;
 
 /** 会社ごとの数（件数・金額・状態だけ）。 */
 export interface TenantOverview {
@@ -153,7 +173,16 @@ function toOperator(r: Record<string, unknown>): Operator {
   return {
     id: String(r['id']), email: String(r['email']), displayName: String(r['display_name']), role: r['role'] as OperatorRole,
     status: r['status'] as Operator['status'], createdAt: iso(r['created_at'])!, lastLoginAt: iso(r['last_login_at']),
+    ...(r['passkey_count'] !== undefined ? { passkeyCount: Number(r['passkey_count']) } : {}),
   };
+}
+
+/** 登録の合言葉（読み違えにくい字だけで 4 字ずつ 3 組。例 `K7QM-2XPA-9DRT`）。 */
+function enrollCode(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const bytes = randomBytes(12);
+  const s = [...bytes].map((b) => chars[b % chars.length]).join('');
+  return `${s.slice(0, 4)}-${s.slice(4, 8)}-${s.slice(8, 12)}`;
 }
 
 /** データベースの関数が出した理由（`raise exception '…'`）。 */
@@ -178,7 +207,7 @@ export class OpsStore {
 
   /** 運営者の一覧。 */
   async listOperators(): Promise<Operator[]> {
-    const { rows } = await this.pool.query('select * from ops.operators order by created_at');
+    const { rows } = await this.pool.query('select o.*, (select count(*) from ops.passkeys p where p.operator_id = o.id) as passkey_count from ops.operators o order by o.created_at');
     return rows.map(toOperator);
   }
 
@@ -188,7 +217,7 @@ export class OpsStore {
   }
 
   async findOperator(id: string): Promise<Operator | null> {
-    const { rows } = await this.pool.query('select * from ops.operators where id = $1', [id]);
+    const { rows } = await this.pool.query('select o.*, (select count(*) from ops.passkeys p where p.operator_id = o.id) as passkey_count from ops.operators o where o.id = $1', [id]);
     return rows[0] ? toOperator(rows[0]) : null;
   }
 
@@ -219,28 +248,96 @@ export class OpsStore {
   }
 
   /** ログイン状態を作る。Cookie に入れる値を返す（データベースには SHA-256 だけを持つ）。 */
-  async createSession(operatorId: string, provider: string, userAgent: string | null, ttlHours: number): Promise<{ token: string; session: OpsSession }> {
+  /**
+   * ログイン状態を作る。Cookie に入れる値を返す（データベースには SHA-256 だけを持つ）。
+   *
+   * @param verified パスキーで確かめたことにするか（開発用ログインだけ。本番では Google のあとにパスキーで確かめる）
+   */
+  async createSession(operatorId: string, provider: string, userAgent: string | null, ttlHours: number, verified = false): Promise<{ token: string; session: OpsSession }> {
     const token = randomBytes(32).toString('base64url');
     const csrf = randomBytes(24).toString('base64url');
     const expires = new Date(Date.now() + ttlHours * 3_600_000).toISOString();
     await this.pool.query(
-      'insert into ops.sessions (id, operator_id, csrf_token, provider, user_agent, expires_at) values ($1,$2,$3,$4,$5,$6)',
-      [sha256(token), operatorId, csrf, provider, userAgent?.slice(0, 300) ?? null, expires],
+      'insert into ops.sessions (id, operator_id, csrf_token, provider, user_agent, expires_at, verified) values ($1,$2,$3,$4,$5,$6,$7)',
+      [sha256(token), operatorId, csrf, provider, userAgent?.slice(0, 300) ?? null, expires, verified],
     );
     await this.pool.query('update ops.operators set last_login_at = now() where id = $1', [operatorId]);
-    return { token, session: { id: sha256(token), operatorId, csrfToken: csrf, expiresAt: expires } };
+    return { token, session: { id: sha256(token), operatorId, csrfToken: csrf, expiresAt: expires, verified } };
+  }
+
+  /** ログイン状態を、パスキーで確かめたものにする。 */
+  async markSessionVerified(sessionId: string): Promise<void> {
+    await this.pool.query('update ops.sessions set verified = true where id = $1', [sessionId]);
+  }
+
+  /** 運営者のパスキーの一覧。 */
+  async listPasskeys(operatorId: string): Promise<OpsPasskey[]> {
+    const { rows } = await this.pool.query('select * from ops.passkeys where operator_id = $1 order by created_at', [operatorId]);
+    return rows.map((r) => ({
+      id: r.id, publicKey: r.public_key, counter: Number(r.counter), transports: r.transports ?? [], name: r.name,
+      createdAt: iso(r.created_at)!, lastUsedAt: iso(r.last_used_at),
+    }));
+  }
+
+  async addPasskey(operatorId: string, p: { id: string; publicKey: string; counter: number; transports: string[]; name: string }): Promise<void> {
+    await this.pool.query(
+      'insert into ops.passkeys (id, operator_id, public_key, counter, transports, name) values ($1,$2,$3,$4,$5,$6)',
+      [p.id, operatorId, p.publicKey, p.counter, p.transports, p.name.slice(0, 60)],
+    );
+  }
+
+  /** 確かめに使ったパスキーの回数を進める（使い回しの見破りに使う）。 */
+  async touchPasskey(id: string, counter: number): Promise<void> {
+    await this.pool.query('update ops.passkeys set counter = $2, last_used_at = now() where id = $1', [id, counter]);
+  }
+
+  async deletePasskey(operatorId: string, id: string): Promise<boolean> {
+    const { rowCount } = await this.pool.query('delete from ops.passkeys where operator_id = $1 and id = $2', [operatorId, id]);
+    return (rowCount ?? 0) > 0;
+  }
+
+  /** その人のパスキーをすべて削除し、ログイン状態も切る（なくしたとき。別の運営管理者が行う）。 */
+  async resetPasskeys(operatorId: string): Promise<void> {
+    await this.pool.query('delete from ops.passkeys where operator_id = $1', [operatorId]);
+    await this.pool.query('update ops.sessions set revoked_at = now() where operator_id = $1 and revoked_at is null', [operatorId]);
+  }
+
+  /** 登録の合言葉を出す（前のものは使えなくなる）。合言葉そのものは返すだけで、SHA-256 だけを持つ。 */
+  async issueEnrollCode(operatorId: string, by: string): Promise<{ code: string; expiresAt: string }> {
+    const code = enrollCode();
+    const expiresAt = new Date(Date.now() + OPS_ENROLL_CODE_HOURS * 3_600_000).toISOString();
+    await this.pool.query(
+      `insert into ops.enroll_codes (operator_id, code_hash, expires_at, created_by) values ($1,$2,$3,$4)
+       on conflict (operator_id) do update set code_hash = excluded.code_hash, expires_at = excluded.expires_at, created_by = excluded.created_by, created_at = now()`,
+      [operatorId, sha256(code), expiresAt, by],
+    );
+    return { code, expiresAt };
+  }
+
+  /**
+   * 登録の合言葉を確かめる。
+   *
+   * @param consume 合っていれば使い切る（登録が済んだとき）
+   */
+  async checkEnrollCode(operatorId: string, code: string, consume: boolean): Promise<boolean> {
+    const normalized = code.trim().toUpperCase().replace(/\s+/g, '');
+    const { rows } = await this.pool.query(
+      `${consume ? 'delete' : 'select 1'} from ops.enroll_codes where operator_id = $1 and code_hash = $2 and expires_at > now()${consume ? ' returning 1' : ''}`,
+      [operatorId, sha256(normalized)],
+    );
+    return rows.length > 0;
   }
 
   /** 有効なログイン状態と運営者（無効にした運営者は通さない）。 */
   async findSession(token: string): Promise<{ session: OpsSession; operator: Operator } | null> {
     const { rows } = await this.pool.query(
-      `select s.id as sid, s.csrf_token, s.expires_at as s_expires, o.* from ops.sessions s join ops.operators o on o.id = s.operator_id
+      `select s.id as sid, s.csrf_token, s.expires_at as s_expires, s.verified, o.* from ops.sessions s join ops.operators o on o.id = s.operator_id
         where s.id = $1 and s.revoked_at is null and s.expires_at > now() and o.status = 'active'`,
       [sha256(token)],
     );
     const r = rows[0];
     if (!r) return null;
-    return { session: { id: r.sid, operatorId: r.id, csrfToken: r.csrf_token, expiresAt: iso(r.s_expires)! }, operator: toOperator(r) };
+    return { session: { id: r.sid, operatorId: r.id, csrfToken: r.csrf_token, expiresAt: iso(r.s_expires)!, verified: !!r.verified }, operator: toOperator(r) };
   }
 
   async revokeSession(id: string): Promise<void> {

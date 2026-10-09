@@ -500,14 +500,18 @@ src/ops/              マスター管理画面の API（別のプロセス。仕
 
 顧客向けの API とは別のプロセス（`npm run dev:ops`。開発は 3102 番。本番は `server/ops.js`）で動く。名前が `ops.` で始まる要求だけを受け、
 データベースには運営の専用のロール `m2office_ops`（`OPS_DATABASE_URL`）で接続する。このロールは顧客の表に届かず、会社の数・会社を作る・状態を変えるは決めた関数（`ops.*`）だけで行う（移行 111）。
-運営者のログインは Google だけ（Cookie `m2o_ops_session`。`ops.` のホストだけ）。最初の運営管理者は `npm run ops:operator -- --email … --role admin` で作る。
+運営者のログインは Google と、ログインのたびのパスキー（@simplewebauthn/server。Cookie `m2o_ops_session`。`ops.` のホストだけ）。パスキーで確かめるまでのログイン状態は、本人とパスキーの操作しかできない。最初の運営管理者は `npm run ops:operator -- --email … --role admin` で作り、そのとき出る登録の合言葉でパスキーを登録する（開発用ログインではパスキーを求めない）。
 
 | メソッド | パス | 内容 | ロール |
 |---|---|---|---|
 | GET | `/v1/ops/auth/providers` | ログインの手段（開発では運営者の一覧） | ― |
 | GET | `/v1/ops/auth/google/start`・`/v1/ops/auth/callback` | Google のログイン。戻りで引換券を出す | ― |
 | POST | `/v1/ops/auth/exchange`・`/v1/ops/auth/dev-login`・`/v1/ops/auth/logout` | ログイン状態を張る・外す | ― |
-| GET | `/v1/ops/me` | 本人とできること | すべて |
+| GET | `/v1/ops/me` | 本人とできること・パスキーで確かめたか | すべて |
+| POST | `/v1/ops/passkey/register-options`・`register` | パスキーの登録（確かめる前は登録の合言葉が要る。1 人 5 つまで） | すべて |
+| POST | `/v1/ops/passkey/options`・`verify` | パスキーで確かめる（ログインのたび） | すべて |
+| GET・DELETE | `/v1/ops/me/passkeys` | 自分のパスキー（最後の 1 つは削除できない） | すべて |
+| POST・DELETE | `/v1/ops/operators/:id/enroll-code`・`/v1/ops/operators/:id/passkeys` | 登録の合言葉を出す・ほかの人のパスキーを削除してやり直させる | 運営管理者 |
 | GET・POST | `/v1/ops/tenants` | 会社ごとの数（件数・金額・状態だけ）・会社を作る（ログインの URL と案内の文を返す） | 見る: すべて・作る: 運営管理者とサポート |
 | PUT | `/v1/ops/tenants/:id/status` | 試用と稼働の切り替え | 運営管理者とサポート |
 | GET | `/v1/ops/tenants/:id` | 会社の詳細（概要・利用状況の 12 か月・稼働・シートの氏名とロール・履歴）。開いたことを記録に残す | すべて |

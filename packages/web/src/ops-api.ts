@@ -36,11 +36,15 @@ export interface OperatorView {
   status: 'active' | 'disabled';
   createdAt: string;
   lastLoginAt: string | null;
+  passkeyCount?: number;
 }
 
 export interface OpsMe {
   operator: OperatorView;
   csrfToken: string;
+  /** パスキーで確かめたか（第23.8.15節）。確かめるまでは、ほかの操作ができない。 */
+  verified: boolean;
+  passkeyCount: number;
   can: Record<'tenant.create' | 'tenant.status' | 'tenant.suspend' | 'tenant.lock' | 'machine.manage' | 'operator.manage' | 'settings.manage', boolean>;
 }
 
@@ -154,6 +158,15 @@ export const opsApi = {
   devLogin: async (email: string) => { csrf = (await call<{ csrfToken: string }>('/auth/dev-login', send('POST', { email }))).csrfToken; },
   exchange: async (ticket: string) => { csrf = (await call<{ csrfToken: string }>('/auth/exchange', send('POST', { ticket }))).csrfToken; },
   me: async () => { const me = await call<OpsMe>('/me'); csrf = me.csrfToken; return me; },
+  // 運営者のパスキー（第23.8.15節）。options は @simplewebauthn/browser にそのまま渡す
+  passkeyRegisterOptions: (code?: string) => call<{ options: unknown }>('/passkey/register-options', send('POST', { code })),
+  passkeyRegister: (response: unknown, name: string, code?: string) => call<{ ok: true }>('/passkey/register', send('POST', { response, name, code })),
+  passkeyOptions: () => call<{ options: unknown }>('/passkey/options', send('POST')),
+  passkeyVerify: (response: unknown) => call<{ ok: true }>('/passkey/verify', send('POST', { response })),
+  myPasskeys: () => call<{ passkeys: { id: string; name: string; createdAt: string; lastUsedAt: string | null }[] }>('/me/passkeys'),
+  deleteMyPasskey: (id: string) => call<{ ok: true }>(`/me/passkeys/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  issueEnrollCode: (operatorId: string) => call<{ code: string; expiresAt: string }>(`/operators/${encodeURIComponent(operatorId)}/enroll-code`, send('POST')),
+  resetPasskeys: (operatorId: string) => call<{ ok: true }>(`/operators/${encodeURIComponent(operatorId)}/passkeys`, { method: 'DELETE' }),
   logout: () => call<{ ok: true }>('/auth/logout', send('POST')),
   tenants: () => call<{ tenants: TenantRow[] }>('/tenants'),
   createTenant: (b: { subdomain: string; name: string; domain: string; admin: string; status: 'trial' | 'active' }) =>

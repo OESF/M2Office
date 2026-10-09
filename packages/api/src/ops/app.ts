@@ -11,8 +11,10 @@ import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import {
   buildGoogleLoginUrl, createPkce, exchangeGoogleLoginCode, googleUserInfo, checkNewTenant, machineFlags, operatorCan, OPERATOR_ROLES,
   parseMachineReport, tenantErrorText, welcomeText, tenantsCsv, statusNoticeText, SUSPEND_REASONS, LOCK_REASONS, MACHINE_REPORT_MAX_BYTES, OpsRuleError,
+  OPS_PASSKEY_MAX,
   type Logger, type Operator, type OperatorRole, type OpsAction, type OpsSession, type OpsStore,
 } from '@m2office/core';
+import { ChallengeStore, fromB64, realWebAuthn, toB64, type WebAuthnFns } from './passkey.js';
 import { HandoffStore } from '../auth/handoff.js';
 import { OAuthStateStore } from '../auth/oauth-state.js';
 
@@ -36,6 +38,8 @@ export interface OpsDeps {
   store: OpsStore;
   config: OpsConfig;
   log: Logger;
+  /** パスキーの手続き（省略すると本物。テストで差し替える）。 */
+  webauthn?: WebAuthnFns;
 }
 
 type OpsEnv = { Variables: { operator: Operator; session: OpsSession } };
@@ -122,7 +126,8 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
 
   /** ログイン状態を作り、Cookie を張る。 */
   const signIn = async (c: Context<OpsEnv>, op: Operator, provider: string) => {
-    const { token, session } = await store.createSession(op.id, provider, c.req.header('user-agent') ?? null, config.sessionTtlHours);
+    // 開発用ログイン（本番では起動を拒否する）だけはパスキーを求めない。Google のあとは、ログインのたびにパスキーで確かめる
+    const { token, session } = await store.createSession(op.id, provider, c.req.header('user-agent') ?? null, config.sessionTtlHours, provider === 'dev');
     setCookie(c, OPS_COOKIE, token, { httpOnly: true, sameSite: 'Lax', secure: config.cookieSecure, path: '/', maxAge: config.sessionTtlHours * 3600 });
     await store.audit(op.id, 'ops.login', 'operator', op.id, { provider });
     return c.json({ ok: true, csrfToken: session.csrfToken });
@@ -191,6 +196,10 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
     }
     c.set('operator', hit.operator);
     c.set('session', hit.session);
+    // パスキーで確かめるまでは、本人とパスキーの操作とログアウトしかできない（第23.8.15節）
+    if (!hit.session.verified && c.req.path !== '/v1/ops/me' && c.req.path !== '/v1/ops/auth/logout' && !c.req.path.startsWith('/v1/ops/passkey/')) {
+      return c.json({ error: 'パスキーで確かめてください', needsPasskey: true }, 401);
+    }
     return next();
   });
 
@@ -209,8 +218,118 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
     const op = c.get('operator');
     return c.json({
       operator: op, csrfToken: c.get('session').csrfToken,
+      // パスキーで確かめたか。確かめていなければ、登録済みなら確かめ、まだなら登録の合言葉で登録する
+      verified: c.get('session').verified, passkeyCount: op.passkeyCount ?? 0,
       can: Object.fromEntries((['tenant.create', 'tenant.status', 'tenant.suspend', 'tenant.lock', 'machine.manage', 'operator.manage', 'settings.manage'] as OpsAction[]).map((a) => [a, operatorCan(op.role, a)])),
     });
+  });
+
+  // ---- 運営者のパスキー（第23.8.15節）。確かめる前でも使える道 ----
+  const webauthn = deps.webauthn ?? realWebAuthn;
+  const challenges = new ChallengeStore();
+  /** パスキーの相手の名前（ops. のホスト名）と、画面の元。 */
+  const rp = (c: Context<OpsEnv>) => ({ rpID: (c.req.header('host') ?? '').split(':')[0]!, origin: originOf(c) });
+
+  /** 登録の問いかけ。確かめる前は、まだパスキーが無く、登録の合言葉が合うときだけ。確かめたあとは予備を足す。 */
+  app.post('/v1/ops/passkey/register-options', async (c) => {
+    const op = c.get('operator');
+    const session = c.get('session');
+    const { code } = await c.req.json<{ code?: string }>().catch(() => ({ code: undefined }));
+    const keys = await store.listPasskeys(op.id);
+    if (!session.verified) {
+      if (keys.length > 0) return c.json({ error: '登録済みのパスキーで確かめてください' }, 409);
+      if (!code || !(await store.checkEnrollCode(op.id, code, false))) return c.json({ error: '登録の合言葉が違うか、期限が切れています。運営管理者に出し直してもらってください' }, 403);
+    }
+    if (keys.length >= OPS_PASSKEY_MAX) return c.json({ error: `パスキーは ${OPS_PASSKEY_MAX} つまでです` }, 409);
+    const { rpID } = rp(c);
+    const options = await webauthn.registrationOptions({
+      rpName: 'M2Office マスター管理', rpID, userName: op.email, userDisplayName: op.displayName,
+      userID: new TextEncoder().encode(op.id), attestationType: 'none',
+      excludeCredentials: keys.map((k) => ({ id: k.id, transports: k.transports as never })),
+      authenticatorSelection: { residentKey: 'preferred', userVerification: 'required' },
+    });
+    challenges.put(session.id, 'register', options.challenge);
+    return c.json({ options });
+  });
+
+  app.post('/v1/ops/passkey/register', async (c) => {
+    const op = c.get('operator');
+    const session = c.get('session');
+    const b = await c.req.json<{ response?: unknown; name?: string; code?: string }>().catch(() => ({} as Record<string, unknown>));
+    const challenge = challenges.take(session.id, 'register');
+    if (!challenge || !b.response) return c.json({ error: '登録をやり直してください' }, 400);
+    const { rpID, origin } = rp(c);
+    let result;
+    try {
+      result = await webauthn.verifyRegistration({ response: b.response as never, expectedChallenge: challenge, expectedOrigin: origin, expectedRPID: rpID, requireUserVerification: true });
+    } catch (err) {
+      log.warn('運営者のパスキーの登録を確かめられませんでした', { err: err instanceof Error ? err.message : String(err) });
+      return c.json({ error: 'パスキーを登録できませんでした' }, 400);
+    }
+    if (!result.verified) return c.json({ error: 'パスキーを登録できませんでした' }, 400);
+    // 確かめる前の登録は、ここで登録の合言葉を使い切る（合わなければ登録しない）
+    if (!session.verified && !(typeof b.code === 'string' && (await store.checkEnrollCode(op.id, b.code, true)))) {
+      return c.json({ error: '登録の合言葉が違うか、期限が切れています' }, 403);
+    }
+    const cred = result.registrationInfo.credential;
+    await store.addPasskey(op.id, {
+      id: cred.id, publicKey: toB64(cred.publicKey), counter: cred.counter, transports: (cred.transports ?? []) as string[],
+      name: typeof b.name === 'string' && b.name.trim() ? b.name.trim() : 'パスキー',
+    });
+    await store.markSessionVerified(session.id);
+    await store.audit(op.id, 'passkey.add', 'operator', op.id, { name: b.name ?? '' });
+    return c.json({ ok: true });
+  });
+
+  /** 確かめの問いかけ（ログインのたび）。 */
+  app.post('/v1/ops/passkey/options', async (c) => {
+    const op = c.get('operator');
+    const keys = await store.listPasskeys(op.id);
+    if (keys.length === 0) return c.json({ error: 'パスキーが登録されていません' }, 409);
+    const options = await webauthn.authenticationOptions({
+      rpID: rp(c).rpID, userVerification: 'required',
+      allowCredentials: keys.map((k) => ({ id: k.id, transports: k.transports as never })),
+    });
+    challenges.put(c.get('session').id, 'verify', options.challenge);
+    return c.json({ options });
+  });
+
+  app.post('/v1/ops/passkey/verify', async (c) => {
+    const op = c.get('operator');
+    const session = c.get('session');
+    const { response } = await c.req.json<{ response?: { id?: string } }>().catch(() => ({ response: undefined }));
+    const challenge = challenges.take(session.id, 'verify');
+    const key = response?.id ? (await store.listPasskeys(op.id)).find((k) => k.id === response.id) : undefined;
+    if (!challenge || !key) return c.json({ error: '確かめをやり直してください' }, 400);
+    const { rpID, origin } = rp(c);
+    let result;
+    try {
+      result = await webauthn.verifyAuthentication({
+        response: response as never, expectedChallenge: challenge, expectedOrigin: origin, expectedRPID: rpID, requireUserVerification: true,
+        credential: { id: key.id, publicKey: fromB64(key.publicKey), counter: key.counter, transports: key.transports as never },
+      });
+    } catch (err) {
+      log.warn('運営者のパスキーを確かめられませんでした', { err: err instanceof Error ? err.message : String(err) });
+      return c.json({ error: 'パスキーで確かめられませんでした' }, 401);
+    }
+    if (!result.verified) return c.json({ error: 'パスキーで確かめられませんでした' }, 401);
+    await store.touchPasskey(key.id, result.authenticationInfo.newCounter);
+    await store.markSessionVerified(session.id);
+    await store.audit(op.id, 'passkey.verify', 'operator', op.id, { name: key.name });
+    return c.json({ ok: true });
+  });
+
+  /** 自分のパスキー（確かめたあと）。 */
+  app.get('/v1/ops/me/passkeys', async (c) => c.json({
+    passkeys: (await store.listPasskeys(c.get('operator').id)).map((k) => ({ id: k.id, name: k.name, createdAt: k.createdAt, lastUsedAt: k.lastUsedAt })),
+  }));
+
+  app.delete('/v1/ops/me/passkeys/:id', async (c) => {
+    const op = c.get('operator');
+    if ((await store.listPasskeys(op.id)).length <= 1) return c.json({ error: '最後のパスキーは削除できません（先に予備を足してください）' }, 409);
+    if (!(await store.deletePasskey(op.id, c.req.param('id')))) return c.json({ error: '見つかりません' }, 404);
+    await store.audit(op.id, 'passkey.delete', 'operator', op.id);
+    return c.json({ ok: true });
   });
 
   // ---- 会社 ----
@@ -446,6 +565,26 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
     const updated = await store.updateOperator(target.id, { ...(role ? { role } : {}), ...(status ? { status } : {}) });
     await store.audit(c.get('operator').id, 'operator.update', 'operator', target.id, { ...(role ? { role } : {}), ...(status ? { status } : {}) });
     return c.json({ operator: updated });
+  });
+
+  // なくしたときの戻し方（第23.8.15節）: 別の運営管理者が、その人のパスキーを削除し、新しい登録の合言葉を出す
+  app.post('/v1/ops/operators/:id/enroll-code', async (c) => {
+    if (!can(c, 'operator.manage')) return denied(c);
+    const target = await store.findOperator(c.req.param('id'));
+    if (!target) return c.json({ error: '見つかりません' }, 404);
+    const issued = await store.issueEnrollCode(target.id, c.get('operator').id);
+    await store.audit(c.get('operator').id, 'operator.enroll_code', 'operator', target.id);
+    return c.json(issued);
+  });
+
+  app.delete('/v1/ops/operators/:id/passkeys', async (c) => {
+    if (!can(c, 'operator.manage')) return denied(c);
+    if (c.req.param('id') === c.get('operator').id) return c.json({ error: '自分のパスキーは、別の運営管理者に削除してもらってください' }, 409);
+    const target = await store.findOperator(c.req.param('id'));
+    if (!target) return c.json({ error: '見つかりません' }, 404);
+    await store.resetPasskeys(target.id);
+    await store.audit(c.get('operator').id, 'operator.reset_passkeys', 'operator', target.id);
+    return c.json({ ok: true });
   });
 
   app.get('/v1/ops/audit', async (c) => c.json({ entries: await store.listAudit(Number(c.req.query('limit') ?? 200)) }));
