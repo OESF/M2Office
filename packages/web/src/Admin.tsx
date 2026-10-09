@@ -517,18 +517,21 @@ function MachineUpdate({ data, onChanged, onError }: { data: MachineView['update
 /**
  * 「機械」の遠隔の保守と、運営への稼働の知らせ（仕様書 第8.6.4節・第8.6.8節）。
  *
- * @remarks 遠隔の保守は、ふだん閉じておき、会社の管理者が時間を限って開ける（運営は自分で開けられない）。開けた回と、つないだ相手を出す
+ * @remarks 遠隔の保守は、ふだん閉じておき、会社の管理者が時間を限って開ける（運営は自分で開けられない）。開けた回と、つないだ相手を出す。
+ * 同じ機械の M2Medical が持つときは、開けるボタンを出さず、どちらが開けるかだけを出す（第8.6.9節）
  */
 function MachineMaintenance({ data, heartbeat, onChanged, onError }: {
   data: MachineView['maintenance']; heartbeat: MachineView['heartbeat']; onChanged: () => void; onError: (m: string) => void;
 }) {
   const [hours, setHours] = useState(4);
   const run = (p: Promise<unknown>) => void p.then(onChanged).catch((e) => onError(describeError(e, '変えられませんでした')));
-  if (!data.configured && !heartbeat.configured) return null;
+  const managed = data.managedBy ?? null;
+  if (!data.configured && !heartbeat.configured && !managed) return null;
   return (
     <div className="card">
       <h3>遠隔の保守と稼働の知らせ</h3>
       <dl className="kv">
+        {managed && <><dt>遠隔の保守</dt><dd className="muted">{managed} の管理者が開けます</dd></>}
         {data.configured && (
           <>
             <dt>遠隔の保守</dt>

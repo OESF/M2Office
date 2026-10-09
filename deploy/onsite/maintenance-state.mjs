@@ -6,6 +6,7 @@
  *
  * 会社の管理者が「機械」で開けた印（maintenance-request.json の期限）が切れていなければ開け、切れたら閉じる。
  * 開いている間に話した相手（Tailscale の機械の名前）を回ごとに残す。運営は自分で開けられない（印は会社の管理者だけが書く）。
+ * 同じ機械の M2Medical が遠隔の保守を持つとき（`M2O_MAINT_FOREIGN=1`）は、開けも閉じもしない（第8.6.9節）。
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -20,7 +21,9 @@ const read = (f, def) => { try { return JSON.parse(readFileSync(f, 'utf8')); } c
 const now = new Date(Number(process.env.M2O_NOW_MS || Date.now()));
 const running = runningArg === '1';
 const req = read(join(dir, 'maintenance-request.json'), {});
-const wanted = !!req.until && Date.parse(req.until) > now.getTime();
+// ほかの製品が遠隔の保守を持つとき（M2O_MAINT_FOREIGN=1）は、開けてほしい印を見ない。開いていた M2Office の回は閉じたものとして残す
+const foreign = process.env.M2O_MAINT_FOREIGN === '1';
+const wanted = !foreign && !!req.until && Date.parse(req.until) > now.getTime();
 const state = read(join(dir, 'maintenance.json'), { open: false, sessions: [] });
 const sessions = Array.isArray(state.sessions) ? state.sessions : [];
 const last = sessions[sessions.length - 1];
@@ -39,7 +42,7 @@ if (wanted) {
     sessions.push({ openedAt: now.toISOString(), by: String(req.by ?? ''), until: req.until, closedAt: null, peers });
   }
 } else {
-  if (running) action = 'down';
+  if (running && !foreign) action = 'down';
   if (openSession) {
     openSession.peers = [...new Set([...(openSession.peers ?? []), ...peers])];
     openSession.closedAt = now.toISOString();

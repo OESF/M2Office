@@ -91,7 +91,7 @@ npm run build:release -- --install
 ```
 
 `dist-release/` に、API とワーカーを 1 つずつのファイルにまとめたもの・画面・実行中に読むファイルを組み立てます（仕様書 第20.4.5節）。
-クラウドのコンテナと、ローカルの形（社内の Mac。仕様書 第8.6.1節）の両方の元になります。ローカルの形は、技術者が GitHub のリリースのタグを取ってきて、対話式の `deploy/onsite/setup.sh` で入れます（手順は [deploy/onsite/README.md](deploy/onsite/README.md)）。
+クラウドのコンテナと、ローカルの形（社内の Mac。仕様書 第8.6.1節）の両方の元になります。ローカルの形は、技術者が GitHub のリリースのタグを取ってきて、対話式の `deploy/onsite/setup.sh` で入れます（手順は [deploy/onsite/README.md](deploy/onsite/README.md)）。M2Medical と同じ機械に入れるときの入口の取り決めは [deploy/front/README.md](deploy/front/README.md)。
 
 ## 動作確認
 

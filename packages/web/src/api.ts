@@ -2567,6 +2567,8 @@ export interface MachineView {
     open: boolean;
     until: string | null;
     sessions: { openedAt: string; by: string; until: string; closedAt: string | null; peers: string[] }[];
+    /** 同じ機械のほかの製品（M2Medical）が遠隔の保守を持つとき、その名前。M2Office からは開けられない（第8.6.9節）。 */
+    managedBy: string | null;
   };
   /** 運営への稼働の知らせ（仕様書 第8.6.8節）。 */
   heartbeat: { configured: boolean; off: boolean; lastAt: string | null; lastOk: boolean | null; lastError: string | null };

@@ -105,6 +105,28 @@ test('遠隔の保守の印と、閉じた回を 1 度だけ監査ログに写�
   assert.deepEqual(await takeClosedMaintenanceSessions(dir), []);
 });
 
+test('同じ機械の M2Medical が遠隔の保守を持つときは、M2Office からは開けない（第8.6.9節）', async () => {
+  const { mkdtemp, writeFile } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { readMaintenanceStatus, requestMaintenance, frontDir } = await import('../src/index.js');
+  const dir = await mkdtemp(join(tmpdir(), 'm2o-maint-'));
+  const front = await mkdtemp(join(tmpdir(), 'm2-front-'));
+  assert.equal(frontDir({}), null);
+  assert.equal(frontDir({ M2O_FRONT_DIR: front }), front);
+  await writeFile(join(dir, 'maintenance-settings.json'), JSON.stringify({ configured: true }));
+  const now = new Date('2026-10-09T01:00:00Z');
+  await requestMaintenance(dir, 4, 'u1', now);
+  assert.equal((await readMaintenanceStatus(dir, now, front)).managedBy, null);
+  await writeFile(join(front, 'maintenance-owner'), 'M2Office\n');
+  assert.equal((await readMaintenanceStatus(dir, now, front)).managedBy, null);
+  await writeFile(join(front, 'maintenance-owner'), 'M2Medical\n');
+  const st = await readMaintenanceStatus(dir, now, front);
+  assert.equal(st.managedBy, 'M2Medical');
+  assert.equal(st.configured, false);
+  assert.equal(st.until, null);
+});
+
 test('稼働の知らせ: 件数と状態だけを送り、名前や業務の中身は送らない。切っていれば送らない（第8.6.8節）', async () => {
   const { mkdtemp } = await import('node:fs/promises');
   const { tmpdir } = await import('node:os');

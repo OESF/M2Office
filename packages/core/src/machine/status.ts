@@ -37,6 +37,8 @@ export interface MachineConfig {
   heartbeat?: HeartbeatConfig | null;
   /** 社外の控えを設定しているか（第8.6.5節）。 */
   offsite?: boolean;
+  /** 共通の入口の置き場（第8.6.9節）。ほかの製品が遠隔の保守を持つかを見る。 */
+  frontDir?: string | null;
 }
 
 /** 「機械」の様子。 */
@@ -142,7 +144,7 @@ export async function machineStatus(cfg: MachineConfig, now: Date = new Date()):
       offsite: { configured: !!(cfg.offsite && cfg.backupDir), status: cfg.offsite && cfg.backupDir ? await readOffsiteStatus(cfg.backupDir) : null },
     },
     update: await readUpdateStatus(cfg.dir, now),
-    maintenance: await readMaintenanceStatus(cfg.dir, now),
+    maintenance: await readMaintenanceStatus(cfg.dir, now, cfg.frontDir ?? null),
     heartbeat: await readHeartbeatStatus(cfg.dir, cfg.heartbeat ?? null),
   };
 }

@@ -178,7 +178,7 @@ export {
   machineStatus, writeWorkerBeat, machineDir, backupConfigFromEnv, machineConfigFromEnv,
   type BackupConfig, type BackupRecord, type BackupStatus, type MachineConfig, type MachineStatus,
   readUpdateStatus, holdUpdates, takeUnnotifiedUpdateFailure, type UpdateRecord, type UpdateSettings, type UpdateStatus,
-  readMaintenanceStatus, requestMaintenance, takeClosedMaintenanceSessions, MAINTENANCE_DEFAULT_HOURS, MAINTENANCE_MAX_HOURS, type MaintenanceSession, type MaintenanceStatus,
+  readMaintenanceStatus, requestMaintenance, frontDir, takeClosedMaintenanceSessions, MAINTENANCE_DEFAULT_HOURS, MAINTENANCE_MAX_HOURS, type MaintenanceSession, type MaintenanceStatus,
   heartbeatConfigFromEnv, heartbeatPayload, readHeartbeatStatus, setHeartbeatOff, sendHeartbeat, HEARTBEAT_INTERVAL_MS, type HeartbeatConfig, type HeartbeatPayload, type HeartbeatStatus,
   runOffsite, checkOffsite, readOffsiteStatus, offsiteConfigFromEnv, parseBackupSummary, OFFSITE_KEEP, type OffsiteConfig, type OffsiteRecord, type OffsiteStatus,
 } from './machine/index.js';

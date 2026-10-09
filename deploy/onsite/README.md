@@ -43,7 +43,7 @@ git clone --branch v0.18.0 https://github.com/OESF/M2Office.git /Library/M2Offic
 
 スクリプトが行うこと: 前提のソフトを入れる → 秘密の値を機械の上で作る（運営は知らない）→ 専用の利用者 `_m2office` を作る →
 設定のファイルを雛形から作る → データベースを作り pgvector を有効にする → 本番の組み立て → データベースの移行 → 会社と最初の管理者を作る →
-launchd で動かす → 動きを確かめる（API・ワーカー・入口と証明書・ローカル AI）→ 残りの作業と、紙の「戻すための控え」に書く秘密の値を出す。
+launchd で動かし、共通の入口（`/Library/M2Front`。無ければ作る）に M2Office の名前の設定を置く → 動きを確かめる（API・ワーカー・入口と証明書・ローカル AI）→ 残りの作業と、紙の「戻すための控え」に書く秘密の値を出す。
 
 **何度走らせてもよい。** 答えは `setup.conf` に残り、次に走らせたときの既定になる。秘密の値・データベース・会社は作り直さない。
 答えを変えたいとき（控えの置き場を足す・Google のクライアントを入れるなど）は、走らせ直して変えたところだけを答える。
@@ -54,13 +54,23 @@ launchd で動かす → 動きを確かめる（API・ワーカー・入口と�
 |---|---|
 | `/Library/M2Office/app/` | GitHub から取ってきたプログラム（技術者の利用者のもの）。`dist-release/` に本番の組み立て |
 | `/Library/M2Office/m2office.env` | 環境変数と秘密の値（root と `_m2office` だけが読める） |
-| `/Library/M2Office/Caddyfile` | 入口の設定（DNS の鍵を含むため root だけが読める） |
 | `/Library/M2Office/setup.conf` | 答えの控え（秘密の値は入れない。`update.sh` も読む） |
 | `/Library/M2Office/allowed_signers` | 更新のタグの署名を確かめる鍵（入れたときのものに固定する） |
-| `/Library/M2Office/front.d/` | 同じ機械の M2Medical などの入口の設定（名前で分ける。第8.6.9節） |
+| `/Library/M2Front/` | 機械に 1 つの共通の入口（Caddy）。M2Office の名前の設定は `sites/m2office.caddy`（DNS の鍵を含むため root だけが読める）。起動のログは `logs/caddy-run.log`。M2Medical と分け合う（`deploy/front/README.md`） |
 | `<データの置き場>/` | `postgres/`・`files/`・`logs/`・`caddy/`・`machine/`（`_m2office` のもの） |
 | `<控えの置き場>/` | 毎晩の控え（`YYYYMMDD-HHMMSS/`）・`status.json`（社内の控えの結果）・`offsite.json`（社外の控えの結果） |
-| `/Library/LaunchDaemons/jp.m2office.*.plist` | 起動の設定（`launchd/` の雛形から作る。api・worker・postgres・caddy と、自動の更新の update・遠隔の保守の maintenance） |
+| `/Library/LaunchDaemons/jp.m2office.*.plist` | 起動の設定（`launchd/` の雛形から作る。api・worker・postgres と、自動の更新の update・遠隔の保守の maintenance） |
+| `/Library/LaunchDaemons/jp.m2front.caddy.plist` | 共通の入口の起動の設定（`deploy/front/front.sh` が書く） |
+
+## M2Medical と同じ機械に入れる
+
+取り決めは [deploy/front/README.md](../front/README.md)（仕様書 第8.6.9節）。要点:
+
+- 入口（Caddy）は機械に 1 つ。どちらを先に入れても、先に入れた方が共通の入口（`/Library/M2Front`）を作り、後の方は自分の名前の設定を置くだけ。片方を外しても、もう片方は動き続ける。
+- 同じ社内の IP に 2 つの名前（例 `office.<会社のドメイン>` と `medical.<会社のドメイン>`）を向ける。両方とも名前の形にする（`ip` の形は 1 つの製品だけの機械で使う。`setup.sh` が止める）。
+- データベース・置き場・OS の利用者・控えと鍵・更新は別々。ローカル AI は 1 つを両方で使う。夜の自動の更新の時刻はずらす。
+- **遠隔の保守は M2Medical の管理者だけが開ける。** M2Medical が `/Library/M2Front/maintenance-owner` に名前を書くと、`setup.sh` は遠隔の保守を尋ねず、M2Office の見回りはトンネルに触れず、「機械」には開けるボタンが出ない。
+- 第 0.318.0 版までの `setup.sh` で入れた機械は、走らせ直すと、M2Office の中にあった入口（`jp.m2office.caddy`）を外して共通の入口に移る（証明書は取り直す）。
 
 ## 更新
 
@@ -73,7 +83,7 @@ sudo /Library/M2Office/app/deploy/onsite/update.sh --tag v0.19.0
 - タグの**署名を確かめてから**入れる（運営の SSH の署名。`git verify-tag`）。鍵が入っていない機械では、手で `--allow-unsigned` を付けたときだけ入れる。自動の更新は鍵が要る。
 - 流れ: 控えを取る → 止める → タグに切り替えて組み立て直す → データベースの移行 → 動かす → 確かめる。失敗したら前のタグと更新の前の控えに戻す。
 - 結果は管理者ページの「機械」の「更新」に出る。失敗したら会社の管理者に知らせが届く。会社の管理者は「機械」で自動の更新を延ばせる。
-- `brew upgrade caddy` をすると、Caddy に足した DNS の事業者のつなぎが外れる。そのときは `setup.sh` を走らせ直す（足し直す）。
+- `update.sh` は入口（Caddy）に触れない。`brew upgrade caddy` をすると、Caddy に足した DNS の事業者のつなぎが外れる。そのときは `setup.sh` を走らせ直す（足し直して入口を動かし直す。M2Medical と同じ機械なら、M2Medical のつなぎも足し直す）。
 
 ## 社外の控え
 

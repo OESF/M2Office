@@ -14,7 +14,7 @@ import {
   isValidInvoiceNumber, parsePresentationId, type AutomationPolicy, type CompanyInfo, type Role, type SlideTemplate, type TenantSettings,
   type AuditEvent, type User, type WritingStyle, DEFAULT_AI_PER_USER_SHARE
 } from '@m2office/shared';
-import { readMaintenanceStatus, requestMaintenance, setHeartbeatOff, MAINTENANCE_DEFAULT_HOURS, MAINTENANCE_MAX_HOURS, holdUpdates, machineDir, semanticSearchEnabled,
+import { readMaintenanceStatus, requestMaintenance, frontDir, setHeartbeatOff, MAINTENANCE_DEFAULT_HOURS, MAINTENANCE_MAX_HOURS, holdUpdates, machineDir, semanticSearchEnabled,
   DEFAULT_STANDARD_MINUTES, GOOGLE_DATA_RETENTION_DAYS, KNOWLEDGE_MAX_CHARS,
   describeRule, scheduleBlocker, scheduleChecks, stepLabel, toolGoogleScopes, type AuditQuery, jstMonth, appPath, backupConfigFromEnv, machineConfigFromEnv, machineStatus, requestBackup
 } from '@m2office/core';
@@ -206,6 +206,7 @@ export function adminRoute(deps: AppDeps) {
 
   /**
    * 遠隔の保守を開ける（本文 `hours`。1〜24 時間）か、閉じる（`null`）（第8.6.4節）。会社の管理者だけ。運営は自分で開けられない。
+   * 同じ機械の M2Medical が遠隔の保守を持つときは 409（第8.6.9節）。
    *
    * @remarks トンネルの開け閉めは機械の上の maintenance.sh が行う。ここは印を書くだけ
    */
@@ -213,7 +214,10 @@ export function adminRoute(deps: AppDeps) {
     const { tenant, user } = c.get('ctx');
     if (deps.ai.deployment() !== 'onsite') return c.json({ error: 'ローカルの形だけで使えます' }, 404);
     const dir = machineDir(process.env);
-    if (!(await readMaintenanceStatus(dir)).configured) return c.json({ error: '遠隔の保守は入れていません（導入のときに入れます）' }, 400);
+    const st = await readMaintenanceStatus(dir, new Date(), frontDir(process.env));
+    // 同じ機械の M2Medical が持つときは、その管理者だけが開ける（第8.6.9節）
+    if (st.managedBy) return c.json({ error: `この機械の遠隔の保守は ${st.managedBy} の管理者が開けます` }, 409);
+    if (!st.configured) return c.json({ error: '遠隔の保守は入れていません（導入のときに入れます）' }, 400);
     const b = await c.req.json<{ hours?: unknown }>().catch(() => ({} as { hours?: unknown }));
     const hours = b.hours === null ? null : Number(b.hours ?? MAINTENANCE_DEFAULT_HOURS);
     if (hours !== null && !(hours >= 1 && hours <= MAINTENANCE_MAX_HOURS)) return c.json({ error: `開けておく時間は 1〜${MAINTENANCE_MAX_HOURS} 時間にしてください` }, 400);

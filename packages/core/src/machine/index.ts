@@ -7,6 +7,7 @@ import type { BackupConfig } from './backup.js';
 import type { MachineConfig } from './status.js';
 import { heartbeatConfigFromEnv } from './heartbeat.js';
 import { offsiteConfigFromEnv } from './offsite.js';
+import { frontDir } from './maintenance.js';
 
 export {
   runBackup, restoreTest, readBackupStatus, requestBackup, takeBackupRequest, backupsToKeep, backupName, diskSpace,
@@ -19,7 +20,7 @@ export {
 export { machineStatus, writeWorkerBeat, type MachineConfig, type MachineStatus } from './status.js';
 export { readUpdateStatus, holdUpdates, takeUnnotifiedUpdateFailure, type UpdateRecord, type UpdateSettings, type UpdateStatus } from './update.js';
 export {
-  readMaintenanceStatus, requestMaintenance, takeClosedMaintenanceSessions, MAINTENANCE_DEFAULT_HOURS, MAINTENANCE_MAX_HOURS,
+  readMaintenanceStatus, requestMaintenance, frontDir, takeClosedMaintenanceSessions, MAINTENANCE_DEFAULT_HOURS, MAINTENANCE_MAX_HOURS,
   type MaintenanceSession, type MaintenanceStatus,
 } from './maintenance.js';
 export {
@@ -63,5 +64,6 @@ export function machineConfigFromEnv(env: Record<string, string | undefined>, ve
     localLlm: env['LOCAL_LLM_URL'] ? { url: env['LOCAL_LLM_URL'], model: env['LOCAL_LLM_MODEL'] || null } : null,
     heartbeat: heartbeatConfigFromEnv(env),
     offsite: !!env['M2O_BACKUP_DIR'] && offsiteConfigFromEnv(env, machineDir(env)) !== null,
+    frontDir: frontDir(env),
   };
 }

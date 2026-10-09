@@ -1,12 +1,9 @@
-# M2Office ローカルの形の入口（仕様書 第8.6.2節・第8.6.9節、ADR-0077）。
-# セットアップのスクリプト（setup.sh）が 雛形の名前 を埋める。画面の静的なファイルを出し、/v1 を API に渡し、TLS を受け持つ。
+# M2Office の名前の設定（仕様書 第8.6.2節・第8.6.9節、ADR-0077・ADR-0086）。機械に 1 つの共通の入口が読み込む（/Library/M2Front/sites/m2office.caddy）。
+# セットアップのスクリプト（setup.sh）が 雛形の名前 を埋め、deploy/front/front.sh で置く。画面の静的なファイルを出し、/v1 を API に渡し、TLS を受け持つ。
+# 全体の設定の段（{ … }）は書かない（M2Medical と分け合う入口のため）。証明書の連絡先は tls の段に書く。
 # 証明書は名前の形（公的な証明書を DNS で所有を確かめて取る。DNS-01）。DNS の事業者のつなぎを足した Caddy が要る（setup.sh が caddy add-package で足す）。
-# IP の形（Google を使わない会社だけ）は、機械が自分の認証局で証明書を出す（tls internal）。DNS の鍵を含むため、管理者だけが読めるようにする。
-{
-	email {{ACME_EMAIL}}
-	# 同じ機械の M2Medical などの名前は、ここに置いた設定を読み込む（第8.6.9節。ポートで分けず名前で分ける）
-	import {{INSTALL_DIR}}/front.d/*.caddy
-}
+# IP の形（Google を使わない会社だけ。M2Medical と一緒には入れられない）は、機械が自分の認証局で証明書を出す（tls internal）。
+# DNS の鍵を含むため、管理者だけが読めるようにする。
 
 {{HOST}} {
 	encode zstd gzip

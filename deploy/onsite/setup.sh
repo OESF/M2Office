@@ -8,6 +8,7 @@
 #
 # 何度走らせてもよい。すでにあるもの（秘密の値・データベース・会社）は作り直さず、答えを変えたところだけを直す。
 # 管理者の権限（sudo）は、専用の利用者・置き場・launchd の設定を入れるときだけ使う。M2Office は専用の利用者（_m2office）で動く。
+# 入口（Caddy）は機械に 1 つの共通の置き場（/Library/M2Front）に置き、M2Medical と分け合う（第8.6.9節、deploy/front/README.md）。
 #
 # 試すとき（機械を変えずに、雛形を埋めた結果だけを作る）:
 #   setup.sh --render-only <出力先> --answers <KEY=値 のファイル>
@@ -19,7 +20,8 @@ REPO_DIR=$(cd "$SCRIPT_DIR/../.." && pwd)
 INSTALL_DIR=${M2O_INSTALL_DIR:-$(dirname "$REPO_DIR")}
 CONF="$INSTALL_DIR/setup.conf"
 ENV_FILE="$INSTALL_DIR/m2office.env"
-CADDYFILE="$INSTALL_DIR/Caddyfile"
+FRONT_DIR=${M2_FRONT_DIR:-/Library/M2Front}
+FRONT_SH="$SCRIPT_DIR/../front/front.sh"
 SERVICE_USER=_m2office
 DAEMONS=/Library/LaunchDaemons
 NODE_FORMULA=node@22
@@ -67,7 +69,7 @@ render_all() {
   local answers=$1 out=$2 node=$3
   mkdir -p "$out/launchd"
   "$node" "$SCRIPT_DIR/render.mjs" "$answers" "$SCRIPT_DIR/m2office.env.template" "$out/m2office.env"
-  "$node" "$SCRIPT_DIR/render.mjs" "$answers" "$SCRIPT_DIR/Caddyfile.template" "$out/Caddyfile"
+  "$node" "$SCRIPT_DIR/render.mjs" "$answers" "$SCRIPT_DIR/Caddyfile.template" "$out/m2office.caddy"
   local f
   for f in "$SCRIPT_DIR"/launchd/*.plist; do
     "$node" "$SCRIPT_DIR/render.mjs" "$answers" "$f" "$out/launchd/$(basename "$f")"
@@ -75,11 +77,12 @@ render_all() {
 }
 
 # 入口の TLS の段（名前の形は DNS で公的な証明書、IP の形は機械の認証局）。
+# 証明書の連絡先は、共通の入口の全体の段ではなく、ここに書く（M2Medical と入口を分け合うため。第8.6.9節）
 tls_block() {
   if [ "$TLS_MODE" = ip ]; then
     printf '\\ttls internal'
   else
-    printf '\\ttls {\\n\\t\\tdns %s %s\\n\\t}' "$DNS_PROVIDER" "$DNS_TOKEN"
+    printf '\\ttls %s {\\n\\t\\tdns %s %s\\n\\t}' "$ACME_EMAIL" "$DNS_PROVIDER" "$DNS_TOKEN"
   fi
 }
 
@@ -109,6 +112,12 @@ else
 fi
 sudo -v
 
+# 同じ機械のほかの製品（M2Medical など）。共通の入口に置かれた名前の設定と、遠隔の保守を持つ製品を見る（第8.6.9節）
+OTHER_SITES=$(find "$FRONT_DIR/sites" -name '*.caddy' ! -name 'm2office.caddy' -exec basename {} .caddy \; 2>/dev/null | tr '\n' ' ' || true)
+MAINT_OWNER=$("$FRONT_SH" owner 2>/dev/null || true)
+[ "$MAINT_OWNER" = M2Office ] && MAINT_OWNER=''
+[ -n "$OTHER_SITES" ] && info "同じ機械のほかの製品: $OTHER_SITES（入口を分け合います）"
+
 # これまでの答え（2 回目から既定にする）
 if [ -f "$CONF" ]; then
   # shellcheck disable=SC1090
@@ -128,6 +137,7 @@ say '2. 証明書（社内でも HTTPS にします。仕様書 第8.6.2節）'
 info 'name: 公的な証明書を DNS で取る（標準。Google のログインが使える）'
 info 'ip  : 機械が自分で証明書を出す（Google を使わない会社だけ。端末ごとにルートの証明書を入れる）'
 ask TLS_MODE '形（name か ip）' "${TLS_MODE:-name}"
+[ "$TLS_MODE" = ip ] && [ -n "$OTHER_SITES" ] && die "同じ機械にほかの製品（$OTHER_SITES）があるときは、ip の形は使えません。name の形にしてください"
 if [ "$TLS_MODE" = name ]; then
   ask DNS_PROVIDER 'DNS の事業者（caddy-dns の名前。例 cloudflare・route53・gandi）' "${DNS_PROVIDER:-cloudflare}"
   ask DNS_TOKEN 'DNS の事業者の API の鍵' "$(env_value DNS_TOKEN_SAVED)" secret
@@ -191,7 +201,10 @@ ask UPDATE_HOUR '自動の更新の時刻（時。0〜23）' "${UPDATE_HOUR:-3}"
 say '7. 遠隔の保守と稼働の知らせ（保守の契約に合わせて決める。仕様書 第8.6.4節・第8.6.8節）'
 info '遠隔の保守: 運営の Tailscale にこの機械を登録し、ふだんは閉じておく。会社の管理者が「機械」で時間を限って開ける'
 MAINTENANCE=no
-if yes_no '遠隔の保守を入れますか' "$( [ "${MAINTENANCE_SAVED:-no}" = yes ] && echo y || echo n)"; then
+if [ -n "$MAINT_OWNER" ]; then
+  # 開けると技術者は機械全体に入れるため、守りの厳しい側（患者の情報を持つ製品）の管理者だけが開ける
+  info "この機械の遠隔の保守は $MAINT_OWNER が持ちます（$MAINT_OWNER の管理者が開けます）。M2Office では入れません"
+elif yes_no '遠隔の保守を入れますか' "$( [ "${MAINTENANCE_SAVED:-no}" = yes ] && echo y || echo n)"; then
   MAINTENANCE=yes
   ask TAILSCALE_AUTHKEY '運営からもらった Tailscale の鍵（登録済みなら空）' '' secret
 fi
@@ -210,7 +223,7 @@ info "会社: $COMPANY_NAME（$SUBDOMAIN）／ ドメイン: $GW_DOMAIN ／ 管�
 info "名前: https://$HOST ／ 証明書: $TLS_MODE ${DNS_PROVIDER:+（$DNS_PROVIDER）}"
 info "データ: $DATA_DIR ／ 控え: ${BACKUP_DIR:-（取らない）} ／ 社外の控え: $( [ "$OFFSITE" = yes ] && echo "$OFFSITE_REPOSITORY" || echo 送らない)"
 info "ローカル AI: ${LOCAL_LLM_URL:-（使わない）} ${LOCAL_LLM_MODEL} ／ Gemini の鍵: $( [ -n "$GEMINI_API_KEY" ] && echo 入れる || echo 入れない)"
-info "自動の更新: $AUTO_UPDATE（${UPDATE_HOUR} 時）／ 遠隔の保守: $MAINTENANCE ／ 稼働の知らせ: $( [ -n "$HEARTBEAT_URL" ] && echo 送る || echo 送らない)"
+info "自動の更新: $AUTO_UPDATE（${UPDATE_HOUR} 時）／ 遠隔の保守: $MAINTENANCE${MAINT_OWNER:+（$MAINT_OWNER が持つ）} ／ 稼働の知らせ: $( [ -n "$HEARTBEAT_URL" ] && echo 送る || echo 送らない)"
 yes_no 'この答えで入れますか' y || exit 1
 
 # ---- 2. 前提のソフト（Homebrew） ----
@@ -238,9 +251,12 @@ TAILSCALE_BIN=''
 RESTIC_BIN=''
 [ "$OFFSITE" = yes ] && RESTIC_BIN="$(brew --prefix restic)/bin/restic"
 info "Node.js $("$NODE_BIN" --version) ／ PostgreSQL $("$PG_BIN/postgres" --version | awk '{print $3}') ／ Caddy $("$CADDY_BIN" version | awk '{print $1}')"
+CADDY_RESTART=''
 if [ "$TLS_MODE" = name ] && ! "$CADDY_BIN" list-modules 2>/dev/null | grep -q "^dns.providers.$DNS_PROVIDER\$"; then
   info "Caddy に DNS の事業者（$DNS_PROVIDER）のつなぎを足します"
   "$CADDY_BIN" add-package "github.com/caddy-dns/$DNS_PROVIDER"
+  # 動いている入口は古い本体のままなので、置いたあとに動かし直す
+  CADDY_RESTART=--restart
 fi
 
 # ---- 3. 秘密の値（機械の上で作る。運営は知らない） ----
@@ -278,7 +294,13 @@ for d in postgres files logs caddy machine; do sudo mkdir -p "$DATA_DIR/$d"; don
 sudo chown -R "$SERVICE_USER:$SERVICE_USER" "$DATA_DIR"
 sudo chmod 700 "$DATA_DIR/postgres"
 if [ -n "$BACKUP_DIR" ]; then sudo mkdir -p "$BACKUP_DIR" && sudo chown "$SERVICE_USER:$SERVICE_USER" "$BACKUP_DIR"; fi
-sudo mkdir -p "$INSTALL_DIR/front.d"
+# 入口を M2Office の中に持っていたころ（第 0.318.0 版まで）の設定を外す（入口は共通の置き場に移した）
+if [ -f "$DAEMONS/jp.m2office.caddy.plist" ]; then
+  sudo launchctl bootout system/jp.m2office.caddy >/dev/null 2>&1 || true
+  sudo rm -f "$DAEMONS/jp.m2office.caddy.plist" "$INSTALL_DIR/Caddyfile"
+  sudo rm -rf "$INSTALL_DIR/front.d"
+  info '入口を共通の置き場に移します'
+fi
 ALLOWED_SIGNERS=''
 if [ -n "$ALLOWED_SIGNERS_SOURCE" ]; then
   ALLOWED_SIGNERS="$INSTALL_DIR/allowed_signers"
@@ -293,7 +315,7 @@ work=$(mktemp -d); chmod 700 "$work"
 trap 'rm -rf "$work"' EXIT
 answers="$work/answers"
 {
-  for k in INSTALL_DIR REPO_DIR RELEASE_DIR ENV_FILE CADDYFILE DATA_DIR BACKUP_DIR API_PORT DB_PORT HOST SUBDOMAIN ACME_EMAIL \
+  for k in INSTALL_DIR REPO_DIR RELEASE_DIR ENV_FILE FRONT_DIR DATA_DIR BACKUP_DIR API_PORT DB_PORT HOST SUBDOMAIN ACME_EMAIL \
     NODE_BIN PG_BIN CADDY_BIN LOCAL_LLM_URL LOCAL_LLM_MODEL LOCAL_LLM_EMBED_MODEL GEMINI_API_KEY GOOGLE_LOGIN_CLIENT_ID \
     GOOGLE_LOGIN_CLIENT_SECRET SECRET_KEY DB_APP_PASSWORD DB_OWNER_PASSWORD UPDATE_HOUR HEARTBEAT_URL HEARTBEAT_TOKEN MACHINE_ID \
     OFFSITE_REPOSITORY OFFSITE_PASSWORD OFFSITE_ACCESS_KEY_ID OFFSITE_SECRET_ACCESS_KEY OFFSITE_REGION RESTIC_BIN; do
@@ -309,14 +331,13 @@ render_all "$answers" "$work/out" "$NODE_BIN"
   [ -n "$DNS_TOKEN" ] && printf 'DNS_TOKEN_SAVED=%s\n' "$DNS_TOKEN"
 } >> "$work/out/m2office.env"
 sudo install -m 640 -o root -g "$SERVICE_USER" "$work/out/m2office.env" "$ENV_FILE"
-sudo install -m 600 -o root -g wheel "$work/out/Caddyfile" "$CADDYFILE"
 # 答えの控え（秘密の値は入れない。update.sh も読む）
 conf="$work/setup.conf"
 {
   printf '# M2Office ローカルの形の答え（setup.sh が書く。秘密の値は m2office.env にだけ置く）\n'
   for k in COMPANY_NAME SUBDOMAIN GW_DOMAIN ADMIN_EMAIL HOST TLS_MODE DNS_PROVIDER ACME_EMAIL DATA_DIR BACKUP_DIR API_PORT DB_PORT \
     LOCAL_LLM_URL LOCAL_LLM_MODEL LOCAL_LLM_EMBED_MODEL ALLOWED_SIGNERS_SOURCE ALLOWED_SIGNERS AUTO_UPDATE UPDATE_HOUR \
-    INSTALL_DIR REPO_DIR RELEASE_DIR ENV_FILE NODE_BIN NPM_DIR PG_BIN CADDY_BIN SERVICE_USER MAINTENANCE MAINTENANCE_SAVED TAILSCALE_BIN \
+    INSTALL_DIR REPO_DIR RELEASE_DIR ENV_FILE FRONT_DIR NODE_BIN NPM_DIR PG_BIN CADDY_BIN SERVICE_USER MAINTENANCE MAINTENANCE_SAVED TAILSCALE_BIN \
     OFFSITE OFFSITE_SAVED RESTIC_BIN; do
     printf "%s='%s'\n" "$k" "$(printf '%s' "${!k}" | sed "s/'/'\\\\''/g")"
   done
@@ -368,7 +389,10 @@ as_service "$REPO_DIR/scripts/create-tenant.mjs" --subdomain "$SUBDOMAIN" --name
 
 # ---- 8. 動かす ----
 say 'M2Office を動かします'
-for label in jp.m2office.api jp.m2office.worker jp.m2office.caddy; do load_daemon "$label"; done
+for label in jp.m2office.api jp.m2office.worker; do load_daemon "$label"; done
+# 入口: 共通の入口に M2Office の名前の設定を置く（無ければ入口を作る。確かめに失敗したら前の設定に戻す）
+# shellcheck disable=SC2086
+sudo "$FRONT_SH" put-site m2office "$work/out/m2office.caddy" --caddy "$CADDY_BIN" $CADDY_RESTART
 if [ "$AUTO_UPDATE" = yes ]; then
   load_daemon jp.m2office.update
 else
@@ -426,7 +450,7 @@ for _ in $(seq 1 24); do
   curl -fsS --max-time 5 --resolve "$HOST:443:127.0.0.1" $insecure "https://$HOST/health" >/dev/null 2>&1 && { ok=1; break; }
   sleep 5
 done
-[ "$ok" = 1 ] && info "入口と証明書: https://$HOST で開けます" || warn "入口がまだ答えません。証明書を取るのに時間がかかることがあります（$DATA_DIR/logs/caddy-run.log を見てください）"
+[ "$ok" = 1 ] && info "入口と証明書: https://$HOST で開けます" || warn "入口がまだ答えません。証明書を取るのに時間がかかることがあります（$FRONT_DIR/logs/caddy-run.log を見てください）"
 if [ -n "$LOCAL_LLM_URL" ]; then
   curl -fsS --max-time 5 "$LOCAL_LLM_URL/models" >/dev/null 2>&1 && info 'ローカル AI: 答えます' || warn "ローカル AI が答えません（$LOCAL_LLM_URL）"
 fi
