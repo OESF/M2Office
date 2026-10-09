@@ -39,6 +39,7 @@ paths:
         承認した品目と項目だけを返します。読みに来るたびに、前回の答えの `asOf` を `updatedSince` に渡すと、変わった品目だけが返ります。
 
         範囲から外した品目・止めた品目は、`updatedSince` の答えに `active: false` として 1 度だけ入ります（販売管理の側で売るのを止めるため）。
+        **販売品の一覧を作るときは、`categories` で分類を絞ります**（例 `?categories=販売品`）。絞ったときは、`updatedSince` 以降に分類が変わって絞った分類から外れた品目も `active: false` として返ります（販売管理は、知らない `id` を読み捨ててください）。
         売る直前に数を確かめるときは、`ids`・`codes`・`barcodes` で絞ります。
       parameters:
         - name: updatedSince
@@ -46,6 +47,13 @@ paths:
           description: この時刻より後に変わった品目だけを返す（前回の答えの `asOf`）
           schema: { type: string, format: date-time }
           example: '2026-10-09T15:00:00+09:00'
+        - name: categories
+          in: query
+          description: 分類の名前（カンマ区切り。20 まで）。名前が同じ分類の品目だけを返す。無い分類を指定しても誤りにはならず、当たる品目が無いだけ
+          style: form
+          explode: false
+          schema: { type: array, maxItems: 20, items: { type: string, maxLength: 100 } }
+          example: [販売品]
         - name: ids
           in: query
           description: M2Office の品目の ID（カンマ区切り。100 件まで）
@@ -108,6 +116,26 @@ paths:
                         updatedAt: '2026-10-09T13:20:00+09:00'
                     nextCursor: null
                     asOf: '2026-10-09T15:00:00+09:00'
+                販売品だけ:
+                  summary: ?categories=販売品&updatedSince=…（分類を変えた品目は active false で返る）
+                  value:
+                    items:
+                      - id: itm_7Kq2
+                        name: ハンドクリーム
+                        publicName: 〇〇 ハンドクリーム 50g
+                        code: HC-050
+                        barcodes: ['4901234567894']
+                        category: 販売品
+                        unit: 個
+                        status: in_stock
+                        available: 24
+                        price: { amount: 1980, taxIncluded: true }
+                        active: true
+                        updatedAt: '2026-10-10T09:12:00+09:00'
+                      - id: itm_5Rt1
+                        active: false
+                    nextCursor: null
+                    asOf: '2026-10-10T09:15:00+09:00'
                 変わったものだけ:
                   value:
                     items:
