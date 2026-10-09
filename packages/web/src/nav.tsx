@@ -139,13 +139,14 @@ function useCollapsed(): [boolean, (v: boolean) => void] {
  * 左ペインは画面の下端まで伸ばし、`footer`（秘書バー）は左ペインの右側に置く（仕様書 第6.1節）。
  *
  * @param navBottom 左ペインの下の段（自分の状況）。あれば上の段（業務）と分け、それぞれスクロールし、間の境目で高さを変えられる
+ * @param splitKey 下の段の高さを覚えておく鍵（画面ごとに分ける。既定はワークスペースのもの）
  * @param navFooter 左ペインの最下部に固定するもの（利用者のカード）
  * @param footer 右側の下端に置くもの（秘書バー）
  * @param extraClass `panes` に足すクラス（会話ペインを開くときの `talk-open` など）
  * @param style `panes` に渡す値（秘書のキャンバスの幅 `--talk-px` など）
  */
-export function SideNavLayout({ nav, navBottom, navFooter, footer, children, extraClass = '', style }: {
-  nav: ReactNode; navBottom?: ReactNode; navFooter?: ReactNode; footer?: ReactNode; children: ReactNode; extraClass?: string; style?: CSSProperties;
+export function SideNavLayout({ nav, navBottom, splitKey, navFooter, footer, children, extraClass = '', style }: {
+  nav: ReactNode; navBottom?: ReactNode; splitKey?: string; navFooter?: ReactNode; footer?: ReactNode; children: ReactNode; extraClass?: string; style?: CSSProperties;
 }) {
   const [collapsed, setCollapsed] = useCollapsed();
   // メニューの開閉（仕様書 第6.11.3節）
@@ -162,7 +163,7 @@ export function SideNavLayout({ nav, navBottom, navFooter, footer, children, ext
           <Icon name={collapsed ? 'nav-expand' : 'nav-collapse'} />
         </button>
         <Collapsed.Provider value={collapsed}>
-          {navBottom ? <NavSplit top={nav} bottom={navBottom} /> : <div className="nav-scroll">{nav}</div>}
+          {navBottom ? <NavSplit top={nav} bottom={navBottom} storageKey={splitKey} /> : <div className="nav-scroll">{nav}</div>}
           {navFooter && <div className="nav-footer">{navFooter}</div>}
         </Collapsed.Provider>
       </nav>
@@ -179,12 +180,12 @@ const NAV_PART_MIN = 72;
 const NAV_SASH_STEP = 24;
 
 /**
- * 左ペインを上下に分ける（仕様書 第6.1節「左ペインの上下」）。上は業務、下は自分の状況で、それぞれスクロールする。
+ * 左ペインを上下に分ける（仕様書 第6.1節「左ペインの上下」）。ワークスペースは上が業務・下が自分の状況、管理者ページは上が設定・下が記録で、それぞれスクロールする。
  *
  * @remarks 間の境目をつかむと下の段の高さが変わり、端末ごとに覚える。ダブルクリックで元の高さに戻す。矢印キーでも動かせる
  */
-function NavSplit({ top, bottom }: { top: ReactNode; bottom: ReactNode }) {
-  const [height, setHeight] = useRememberedNumber('m2o.nav-bottom-px', NAV_BOTTOM_DEFAULT);
+function NavSplit({ top, bottom, storageKey = 'm2o.nav-bottom-px' }: { top: ReactNode; bottom: ReactNode; storageKey?: string }) {
+  const [height, setHeight] = useRememberedNumber(storageKey, NAV_BOTTOM_DEFAULT);
   const box = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
   /** 高さを、上下の段それぞれに最小の高さを残す範囲に収める。 */

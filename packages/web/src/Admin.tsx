@@ -192,6 +192,31 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
   // ブラウザのタブの名前は、会社の略称とプロダクトの名前（仕様書 第6.6.1節）
   useEffect(() => { document.title = `${me.tenant.shortName || me.tenant.name} | M2Office 管理`; }, [me.tenant.shortName, me.tenant.name]);
   const isAdmin = me.user.roles.includes('admin');
+  // 左のメニュー。上の段は設定まで、下の段は記録から（ワークスペースと同じく上下に分け、それぞれスクロールする。仕様書 第6.1節）
+  // すべて済んだ会社では「はじめに行う設定」を出さない（仕様書 第6.10.3.1節）
+  const navTabs = TABS.filter((t) => (t.id !== 'setup' || setup) && (t.id !== 'machine' || me.deployment === 'onsite') && (t.id !== 'support' || !me.proxy));
+  const recordsAt = Math.max(0, navTabs.findIndex((t) => t.group === '記録'));
+  const navList = (list: typeof navTabs) => (
+    <>
+      {list.map((t, i) => (
+        <Fragment key={t.id}>
+          {/* まとまりの変わり目に見出しを出す（仕様書 第6.6節の並び） */}
+          {t.group && t.group !== list[i - 1]?.group && <NavHeading>{t.group}</NavHeading>}
+          <NavItem icon={t.icon} label={t.label} description={t.description}
+            hint={t.id === 'setup' && setup ? `${setup.done} / ${setup.total}` : ''}
+            expanded={t.pages ? tab === t.id : undefined}
+            active={tab === t.id} onClick={() => setTab(t.id)} />
+          {/* 開いている区分の小分けだけを出す。1 つが 1 画面（第6.6.0節） */}
+          {t.pages && tab === t.id && t.pages.map((x) => (
+            <NavItem
+              key={x.id} className="item nav-sub" icon={t.icon} label={x.label}
+              active={page === x.id} onClick={() => setPage(x.id)}
+            />
+          ))}
+        </Fragment>
+      ))}
+    </>
+  );
 
   return (
     <div className="app">
@@ -219,28 +244,7 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
         <main className="canvas"><p className="error">管理者ページは管理者のみが開けます。</p></main>
       ) : (
         // 管理者ページには秘書との会話の列が無い。右端の列を取らない
-        <SideNavLayout extraClass="no-talk" nav={(
-          <>
-            {/* すべて済んだ会社では「はじめに行う設定」を出さない（仕様書 第6.10.3.1節） */}
-            {TABS.filter((t) => (t.id !== 'setup' || setup) && (t.id !== 'machine' || me.deployment === 'onsite') && (t.id !== 'support' || !me.proxy)).map((t, i, shown) => (
-              <Fragment key={t.id}>
-                {/* まとまりの変わり目に見出しを出す（仕様書 第6.6節の並び） */}
-                {t.group && t.group !== shown[i - 1]?.group && <NavHeading>{t.group}</NavHeading>}
-                <NavItem icon={t.icon} label={t.label} description={t.description}
-                  hint={t.id === 'setup' && setup ? `${setup.done} / ${setup.total}` : ''}
-                  expanded={t.pages ? tab === t.id : undefined}
-                  active={tab === t.id} onClick={() => setTab(t.id)} />
-                {/* 開いている区分の小分けだけを出す。1 つが 1 画面（第6.6.0節） */}
-                {t.pages && tab === t.id && t.pages.map((x) => (
-                  <NavItem
-                    key={x.id} className="item nav-sub" icon={t.icon} label={x.label}
-                    active={page === x.id} onClick={() => setPage(x.id)}
-                  />
-                ))}
-              </Fragment>
-            ))}
-          </>
-        )}>
+        <SideNavLayout extraClass="no-talk" splitKey="m2o.admin-nav-bottom-px" nav={navList(navTabs.slice(0, recordsAt))} navBottom={navList(navTabs.slice(recordsAt))}>
           <main className="canvas">
             {tab === 'dashboard' && <Dashboard />}
             {tab === 'setup' && (
