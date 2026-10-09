@@ -143,7 +143,7 @@ export interface OpsProxyGrant {
   operatorLabel: string;
   scope: 'admin' | 'runs';
   reason: string;
-  state: 'requested' | 'approved' | 'denied' | 'revoked' | 'withdrawn' | 'expired';
+  state: 'requested' | 'approved' | 'denied' | 'revoked' | 'ended' | 'withdrawn' | 'expired';
   requestedAt: string;
   decidedAt: string | null;
   hours: number | null;

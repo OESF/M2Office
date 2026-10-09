@@ -43,8 +43,8 @@ export interface ProxyGrant {
   operatorLabel: string;
   scope: ProxyScope;
   reason: string;
-  /** いまの状態（許した期限を過ぎていれば `expired`）。 */
-  state: 'requested' | 'approved' | 'denied' | 'revoked' | 'withdrawn' | 'expired';
+  /** いまの状態（許した期限を過ぎていれば `expired`）。`revoked` は会社の管理者が切った、`ended` は運営者が終えた。 */
+  state: 'requested' | 'approved' | 'denied' | 'revoked' | 'ended' | 'withdrawn' | 'expired';
   requestedAt: string;
   decidedBy: string | null;
   decidedAt: string | null;

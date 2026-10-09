@@ -253,6 +253,19 @@ test('代理アクセス: 申請・許す・1 回だけの券で入る・切る�
     assert.deepEqual(notes.rows.map((r) => r.title), ['サポートからの閲覧の申請', 'サポートの閲覧が終わりました']);
     const ops = await store.listProxy(id);
     assert.equal(ops[0]?.state, 'revoked');
+    // 運営者が自分で終えたときは、会社が切ったこととは別の状態にする（第 0.320.0 版）
+    const g2 = await store.requestProxy(id, 'admin', '続きの調べ', 'op-a', 'a@ops.example');
+    await proxy.decide(id, g2, true, 1, admin);
+    const t2 = await store.proxyTicket(g2, 'op-a');
+    const entered2 = await proxy.exchange(id, t2.ticket);
+    assert.ok(entered2);
+    await store.endProxy(g2, 'op-a');
+    assert.equal(await proxy.findSession(id, entered2.token), null);
+    assert.equal((await store.listProxy(id)).find((x) => x.id === g2)?.state, 'ended');
+    assert.equal((await proxy.list(id)).find((x) => x.id === g2)?.state, 'ended');
+    assert.ok((await side.sweepProxy()) >= 1);
+    const ended = await owner.query(`select count(*)::int as n from notifications where tenant_id = $1 and kind = 'support' and title = 'サポートの閲覧が終わりました'`, [id]);
+    assert.equal(ended.rows[0].n, 2);
   } finally {
     await owner.query('delete from tenants where id = $1', [`t-${sub}`]);
     await owner.end();

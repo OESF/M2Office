@@ -730,7 +730,7 @@ export interface MemoryView {
 /** 運営のサポートからの閲覧の申請（仕様書 第23.6.1節）。 */
 export interface SupportGrant {
   id: string; operatorLabel: string; scope: 'admin' | 'runs'; reason: string;
-  state: 'requested' | 'approved' | 'denied' | 'revoked' | 'withdrawn' | 'expired';
+  state: 'requested' | 'approved' | 'denied' | 'revoked' | 'ended' | 'withdrawn' | 'expired';
   requestedAt: string; decidedAt: string | null; hours: number | null; expiresAt: string | null; endedAt: string | null; views: number;
 }
 

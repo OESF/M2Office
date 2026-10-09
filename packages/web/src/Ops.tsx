@@ -782,7 +782,7 @@ function Requests({ me, rows, onChanged }: { me: OpsMe; rows: StatusRequestRow[]
 }
 
 const PROXY_STATE: Record<ProxyGrantRow['state'], string> = {
-  requested: '会社の許し待ち', approved: '閲覧できる', denied: '断られた', revoked: '切られた', withdrawn: '取り下げた', expired: '期限で終わった',
+  requested: '会社の許し待ち', approved: '閲覧できる', denied: '断られた', revoked: '会社が切った', ended: '終えた', withdrawn: '取り下げた', expired: '期限で終わった',
 };
 
 /** 会社の詳細の「代理アクセス」（第23.6.1節）。申請と、許されたら会社の画面を開く（申請した運営者だけ）。 */

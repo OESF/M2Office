@@ -915,7 +915,7 @@ function roleLabel(role: string): string {
 
 /** 申請の状態の呼び名。 */
 const SUPPORT_STATE: Record<SupportGrant['state'], string> = {
-  requested: '許すか待ち', approved: '閲覧できる', denied: '断った', revoked: '切った', withdrawn: '取り下げられた', expired: '期限で終わった',
+  requested: '許すか待ち', approved: '閲覧できる', denied: '断った', revoked: '切った', ended: '運営が終えた', withdrawn: '取り下げられた', expired: '期限で終わった',
 };
 
 /**
