@@ -41,6 +41,8 @@ export interface ItemInput {
   packSize?: number | null;
   price?: number | null;
   priceTaxIncluded?: boolean;
+  /** 社員価格（第29.6節）。公開には出さない。 */
+  employeePrice?: number | null;
   lowThreshold?: number | null;
   supplierId?: string | null;
   leadDays?: number | null;
@@ -111,12 +113,12 @@ export interface ImportResult {
 
 /** 取り込みで読む項目。 */
 export type ImportField =
-  | 'name' | 'publicName' | 'sku' | 'category' | 'unit' | 'packUnit' | 'packSize' | 'price' | 'code'
+  | 'name' | 'publicName' | 'sku' | 'category' | 'unit' | 'packUnit' | 'packSize' | 'price' | 'employeePrice' | 'code'
   | 'lowThreshold' | 'leadDays' | 'note' | 'qty' | 'warehouse' | 'shelf' | 'lot' | 'expiresOn';
 
 const IMPORT_FIELDS: Record<ImportField, string> = {
   name: '品名', publicName: '公開する名前', sku: '自社のコード（品番）', category: '分類', unit: '単位', packUnit: '仕入れの単位',
-  packSize: '入り数', price: '販売価格', code: 'バーコード（JAN）', lowThreshold: '残りわずかの目安', leadDays: '仕入れにかかる日数',
+  packSize: '入り数', price: '販売価格', employeePrice: '社員価格', code: 'バーコード（JAN）', lowThreshold: '残りわずかの目安', leadDays: '仕入れにかかる日数',
   note: 'メモ', qty: '在庫の数', warehouse: '倉庫', shelf: '棚', lot: 'ロット', expiresOn: '使用期限',
 };
 
@@ -130,6 +132,8 @@ const HEADER_WORDS: [ImportField, RegExp][] = [
   ['packSize', /入数|入り数|入数量/],
   ['packUnit', /仕入(れ)?単位|梱包単位|荷姿/],
   ['unit', /^(単位|unit)$/i],
+  // 社員価格は「価格」を含むため、販売価格より先に見る
+  ['employeePrice', /社員価格|社販|社員販売|従業員価格|employee.?price/i],
   ['price', /売価|販売価格|価格|定価|price/i],
   ['lowThreshold', /発注点|最低在庫|安全在庫|残りわずか/],
   ['leadDays', /リードタイム|納期|仕入れにかかる/],
@@ -333,6 +337,7 @@ export class InventoryService {
       packSize: num(input.packSize, prev?.packSize ?? null),
       price: num(input.price, prev?.price ?? null),
       priceTaxIncluded: input.priceTaxIncluded ?? prev?.priceTaxIncluded ?? true,
+      employeePrice: num(input.employeePrice, prev?.employeePrice ?? null),
       photoFileId: prev?.photoFileId ?? null,
       lowThreshold: num(input.lowThreshold, prev?.lowThreshold ?? null),
       supplierId: input.supplierId !== undefined ? input.supplierId : prev?.supplierId ?? null,
@@ -1016,6 +1021,7 @@ export class InventoryService {
         ...(text('packUnit') !== undefined ? { packUnit: text('packUnit') } : {}),
         ...(numOf('packSize') !== undefined ? { packSize: numOf('packSize') } : {}),
         ...(numOf('price') !== undefined ? { price: numOf('price') } : {}),
+        ...(numOf('employeePrice') !== undefined ? { employeePrice: numOf('employeePrice') } : {}),
         ...(numOf('lowThreshold') !== undefined ? { lowThreshold: numOf('lowThreshold') } : {}),
         ...(numOf('leadDays') !== undefined ? { leadDays: numOf('leadDays') } : {}),
         ...(text('note') !== undefined ? { note: text('note') } : {}),
@@ -1110,12 +1116,12 @@ export class InventoryService {
     const items = await this.list(tenantId, { includeStopped: true });
     const locs = new Map((await this.deps.store.listLocations(tenantId)).map((l) => [l.id, l]));
     const stock = await this.deps.store.listStock(tenantId);
-    const columns = ['品名', '公開する名前', '自社のコード', 'バーコード', '分類', '単位', '仕入れの単位', '入り数', '販売価格',
+    const columns = ['品名', '公開する名前', '自社のコード', 'バーコード', '分類', '単位', '仕入れの単位', '入り数', '販売価格', '社員価格',
       '倉庫', '棚', 'ロット', '使用期限', '在庫の数', '使える数', '残りわずかの目安', '状態'];
     const rows: (string | number | null)[][] = [];
     for (const i of items) {
       const mine = stock.filter((s) => s.itemId === i.id);
-      const head = [i.name, i.publicName, i.sku, i.codes.join(' '), i.category, i.unit, i.packUnit, i.packSize, i.price];
+      const head = [i.name, i.publicName, i.sku, i.codes.join(' '), i.category, i.unit, i.packUnit, i.packSize, i.price, i.employeePrice];
       const tail = [i.available, i.lowThreshold, i.status === 'active' ? '使う' : '止めた'];
       if (mine.length === 0) rows.push([...head, '', '', '', '', 0, ...tail]);
       for (const s of mine) {

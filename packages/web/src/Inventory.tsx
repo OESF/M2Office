@@ -580,7 +580,7 @@ function ItemFields({ item, unitsOn, suppliers, onSaved }: {
     try {
       await api.inventory.update(item.id, {
         name: draft.name, publicName: draft.publicName, sku: draft.sku, category: draft.category, unit: draft.unit, note: draft.note,
-        packUnit: draft.packUnit, packSize: numOrNull(draft.packSize), price: numOrNull(draft.price), lowThreshold: numOrNull(draft.lowThreshold),
+        packUnit: draft.packUnit, packSize: numOrNull(draft.packSize), price: numOrNull(draft.price), employeePrice: numOrNull(draft.employeePrice), lowThreshold: numOrNull(draft.lowThreshold),
         supplierId: draft.supplierId || null, leadDays: numOrNull(draft.leadDays),
         ...(extraCode ? { codes: [extraCode] } : {}),
       });
@@ -613,6 +613,7 @@ function ItemFields({ item, unitsOn, suppliers, onSaved }: {
         {unitsOn && field('packUnit', '仕入れの単位')}
         {unitsOn && field('packSize', '入り数', 'number')}
         {field('price', '販売価格', 'number')}
+        {field('employeePrice', '社員価格', 'number')}
         {field('lowThreshold', '残りわずかの目安', 'number')}
         <dt>仕入先</dt>
         <dd>
@@ -648,7 +649,7 @@ function toDraft(i: InventoryItem) {
   const s = (n: number | null) => (n === null ? '' : String(n));
   return {
     name: i.name, publicName: i.publicName, sku: i.sku, category: i.category, unit: i.unit, packUnit: i.packUnit,
-    packSize: s(i.packSize), price: s(i.price), lowThreshold: s(i.lowThreshold), note: i.note,
+    packSize: s(i.packSize), price: s(i.price), employeePrice: s(i.employeePrice), lowThreshold: s(i.lowThreshold), note: i.note,
     supplierId: i.supplierId ?? '', leadDays: s(i.leadDays),
   };
 }

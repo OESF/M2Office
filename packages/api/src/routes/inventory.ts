@@ -37,7 +37,7 @@ function itemInput(body: Record<string, unknown>): ItemInput {
     const v = str(body[k]);
     if (v !== undefined) out[k] = v;
   }
-  for (const k of ['packSize', 'price', 'lowThreshold', 'leadDays'] as const) {
+  for (const k of ['packSize', 'price', 'employeePrice', 'lowThreshold', 'leadDays'] as const) {
     const v = numOrNull(body[k]);
     if (v !== undefined) out[k] = v;
   }

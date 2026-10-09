@@ -181,6 +181,30 @@ test('取り込み: よくある見出しを読み、新しい品目だけに在
   assert.equal(audits.filter((e) => e.action === 'inventory.import').length, 2);
 });
 
+test('社員価格: 見出しの「社員価格」は販売価格と取り違えずに読み、画面から直せ、書き出しに出る（第29.6節）', async () => {
+  const { service } = setup();
+  await service.importRows('t1', 'u1', [
+    ['品番', '商品名', '販売価格', '社員価格'],
+    ['B-1', 'ハンドクリーム', '1,980', '1,500'],
+  ]);
+  const item = (await service.list('t1', { q: 'B-1' }))[0]!;
+  assert.equal(item.price, 1980);
+  assert.equal(item.employeePrice, 1500);
+  // 社員価格の列だけでも、販売価格と取り違えない
+  await service.importRows('t1', 'u1', [['品番', '商品名', '社販'], ['B-2', 'ボディソープ', '800']]);
+  const soap = (await service.list('t1', { q: 'B-2' }))[0]!;
+  assert.equal(soap.employeePrice, 800);
+  assert.equal(soap.price, null);
+  const saved = await service.saveItem('t1', 'u1', { id: item.id, name: item.name, employeePrice: null });
+  assert.ok(!('error' in saved));
+  assert.equal((await service.list('t1', { q: 'B-1' }))[0]!.employeePrice, null);
+  assert.equal((await service.list('t1', { q: 'B-1' }))[0]!.price, 1980, '社員価格を消しても販売価格は残る');
+  const out = await service.exportRows('t1', 'u1');
+  const col = out.columns.indexOf('社員価格');
+  assert.ok(col > out.columns.indexOf('販売価格'));
+  assert.equal(out.rows.find((r) => r[0] === 'ボディソープ')?.[col], 800);
+});
+
 test('値の読み方: 数は全角や単位つきも読み、日付は読めなければ null（推測しない）', () => {
   assert.equal(toNumber('１２個'), 12);
   assert.equal(toNumber('¥1,500'), 1500);

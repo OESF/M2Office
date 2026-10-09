@@ -76,7 +76,13 @@ export interface InventoryItem {
   packSize: number | null;
   /** 公開の表に出す販売価格（在庫の評価ではない）。 */
   price: number | null;
+  /** 販売価格と社員価格が税込か（税抜なら false）。 */
   priceTaxIncluded: boolean;
+  /**
+   * 社員価格（社員に売るときの値段。第29.6節）。**Web への公開には出さない**。販売管理とのつなぎには、渡すと承認したときだけ渡す。
+   * 在庫の評価ではない。税込か税抜かは販売価格と同じ（`priceTaxIncluded`）。
+   */
+  employeePrice: number | null;
   photoFileId: string | null;
   /** 残りわずかの目安。`null` なら会社の既定。 */
   lowThreshold: number | null;
