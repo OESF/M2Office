@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { DEFAULT_PINNED } from '@m2office/shared';
 import {
   addCategory, assignCategory, checkCategoryName, groupMenu, pinnedIds, removeCategory, splitMenu, togglePinned,
+  swapCategories,
 } from '../src/menu.js';
 
 const agents = ['knowledge-qa', 'minutes', 'inbox-triage', 'scheduling', 'weekly-brief', 'morning-brief', 'slides', 'document-draft'].map((id) => ({ id }));
@@ -60,4 +61,12 @@ test('カテゴリー: 作る・入れる・入れない・名前を変える・
   assert.ok(!('error' in checkCategoryName(made.categories, '経理', made.category.id)), '自分の名前のままなら変えられる');
   const removed = removeCategory({ categories: made.categories, categoryOf: of }, made.category.id);
   assert.deepEqual(removed, { categories: [], categoryOf: {} }, '消すと、中の業務は「カテゴリーに入れない」に戻る');
+});
+
+test('カテゴリーの並び: 隣に出ているカテゴリーと入れ替える。無い ID なら元のまま', () => {
+  const cats = [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }, { id: 'c', name: 'C' }];
+  assert.deepEqual(swapCategories(cats, 'c', 'a').map((c) => c.id), ['c', 'b', 'a']);
+  assert.deepEqual(swapCategories(cats, 'b', 'c').map((c) => c.id), ['a', 'c', 'b']);
+  assert.deepEqual(swapCategories(cats, 'x', 'a').map((c) => c.id), ['a', 'b', 'c']);
+  assert.deepEqual(cats.map((c) => c.id), ['a', 'b', 'c']);
 });

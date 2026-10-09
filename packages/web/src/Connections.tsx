@@ -214,54 +214,64 @@ function GeminiCard({ data, onSaved }: { data: ConnectionSettings['gemini']; onS
       setTests((t) => ({ ...t, [kind]: `つながりませんでした: ${describeError(e)}` }));
     }
   };
-  const effective = { tenant: '自社の鍵を使っています', platform: '運営の鍵を使っています', none: '使える鍵がありません。秘書も業務も動きません' }[data.effective];
+  // いま動いている鍵（状態の欄の印と文）。鍵が無ければ、秘書も業務も動かないことをはっきり出す
+  const effective = {
+    tenant: { cls: 'badge ok', text: '自社の鍵で動いています' },
+    platform: { cls: 'badge ok', text: '運営の鍵で動いています' },
+    none: { cls: 'badge warn', text: '使える鍵がありません。秘書も業務も動きません' },
+  }[data.effective];
 
   return (
-    <div className="card">
-      <p className="small">いまの状態: <strong>{effective}</strong></p>
-      <div className="field">
-        <label>契約の形態</label>
-        <label className="check"><input type="radio" checked={mode === 'platform'} onChange={() => setMode('platform')} /> 運営一括（M2Office の鍵を使う）</label>
-        <label className="check"><input type="radio" checked={mode === 'byok'} onChange={() => setMode('byok')} /> 自社の鍵を使う（費用は自社の Google Cloud に直接かかります）</label>
+    <>
+      <div className="card">
+        <h3>いまの状態</h3>
+        <dl className="kv">
+          <dt>使っている鍵</dt><dd><span className={effective.cls}>{effective.text}</span></dd>
+          <dt>確かめる</dt>
+          <dd>
+            <button className="btn ghost small" onClick={() => void test('text')}>文章を試す</button>{' '}
+            <button className="btn ghost small" onClick={() => void test('live')}>音声（Gemini Live）を試す</button>
+            {tests['text'] && <div className="small">文章: {tests['text']}</div>}
+            {tests['live'] && <div className="small">音声: {tests['live']}</div>}
+          </dd>
+        </dl>
       </div>
-      {mode === 'byok' && (
+      <div className="card">
+        <h3>設定</h3>
         <div className="field">
-          <label>Gemini API キー</label>
-          <input type="password" autoComplete="off" value={apiKey} onChange={(e) => setApiKey(e.target.value)}
-            placeholder={data.keyRegistered ? `●●●●●●●●（登録済み・${fmt(data.updatedAt)}）` : 'AIzaSy…'} />
-          <span className="small muted">登録後は表示しません</span>
+          <label>契約の形態</label>
+          <label className="check"><input type="radio" checked={mode === 'platform'} onChange={() => setMode('platform')} /> 運営一括（M2Office の鍵を使う）</label>
+          <label className="check"><input type="radio" checked={mode === 'byok'} onChange={() => setMode('byok')} /> 自社の鍵を使う（費用は自社の Google Cloud に直接かかります）</label>
         </div>
-      )}
-      <details className="field">
-        <summary className="small">モデルを指定する（空欄なら既定）</summary>
-        <div className="grid2">
-          {MODEL_LABELS.map(([k, label]) => (
-            <div className="field" key={k}>
-              <label>{label}</label>
-              <input value={models[k] ?? ''} placeholder={data.defaults[k]} onChange={(e) => setModels({ ...models, [k]: e.target.value })} />
-            </div>
-          ))}
-        </div>
-      </details>
-      <div className="row">
-        <button className="btn" disabled={busy} onClick={() => void run(() => api.admin.saveGemini({ mode, apiKey: apiKey || undefined, models }), '保存しました')}>保存</button>
-        {data.keyRegistered && (
-          <button className="btn danger" disabled={busy} onClick={() => {
-            if (confirm('自社の鍵を削除しますか。削除すると運営一括に戻ります。')) void run(() => api.admin.deleteGeminiKey(), '鍵を削除しました');
-          }}>鍵を削除</button>
+        {mode === 'byok' && (
+          <div className="field">
+            <label>Gemini API キー{data.keyRegistered && <span className="muted small">（登録済み・{fmt(data.updatedAt)}。登録後は表示しません）</span>}</label>
+            <input type="password" autoComplete="off" value={apiKey} onChange={(e) => setApiKey(e.target.value)}
+              placeholder={data.keyRegistered ? '●●●●●●●●（替えるときだけ入れる）' : 'AIzaSy…'} />
+          </div>
         )}
+        <div className="field">
+          <label>使うモデル（空欄なら薄く出ている既定のモデル）</label>
+          <div className="grid2">
+            {MODEL_LABELS.map(([k, label]) => (
+              <div className="field" key={k}>
+                <label>{label}</label>
+                <input value={models[k] ?? ''} placeholder={data.defaults[k]} onChange={(e) => setModels({ ...models, [k]: e.target.value })} />
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="row">
+          <button className="btn" disabled={busy} onClick={() => void run(() => api.admin.saveGemini({ mode, apiKey: apiKey || undefined, models }), '保存しました')}>保存</button>
+          {data.keyRegistered && (
+            <button className="btn danger" disabled={busy} onClick={() => {
+              if (confirm('自社の鍵を削除しますか。削除すると運営一括に戻ります。')) void run(() => api.admin.deleteGeminiKey(), '鍵を削除しました');
+            }}>鍵を削除</button>
+          )}
+          {msg && <span className={msg.ok ? 'ok-msg small' : 'error-inline small'}>{msg.text}</span>}
+        </div>
       </div>
-      {msg && <p className={msg.ok ? 'ok-msg' : 'error'}>{msg.text}</p>}
-      <h4>接続の確認</h4>
-      <div className="row">
-        <button className="btn ghost small" onClick={() => void test('text')}>文章を試す</button>
-        <span className="small">{tests['text']}</span>
-      </div>
-      <div className="row">
-        <button className="btn ghost small" onClick={() => void test('live')}>音声（Gemini Live）を試す</button>
-        <span className="small">{tests['live']}</span>
-      </div>
-    </div>
+    </>
   );
 }
 

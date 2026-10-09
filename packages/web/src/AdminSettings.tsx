@@ -215,18 +215,22 @@ export function CompanySettings({ page }: { page: string }) {
 
       {page === 'writing' && (
       <div className="card">
-        <Text label="自社の呼び方" value={style.selfReference} onChange={w('selfReference')} hint="例: 当社／当院／弊社" />
-        <Text label="社外宛ての書き出し" value={style.greeting} onChange={w('greeting')} multiline />
-        <Text label="社外宛ての結び" value={style.closing} onChange={w('closing')} multiline />
-        <Text label="署名" value={style.signature} onChange={w('signature')} multiline />
+        {/* 例は入力欄の中に薄く置く（下に説明を常に出さない。仕様書 第6.10.4.1節） */}
+        <Text label="自社の呼び方" value={style.selfReference} onChange={w('selfReference')} placeholder="例: 当社・弊社" />
+        <Text label="社外宛ての書き出し" value={style.greeting} onChange={w('greeting')} multiline
+          placeholder={'例: いつも大変お世話になっております。\n株式会社〇〇の△△でございます。'} />
+        <Text label="社外宛ての結び" value={style.closing} onChange={w('closing')} multiline
+          placeholder={'例: ご不明な点がございましたら、お気軽にお問い合わせください。\n引き続きどうぞよろしくお願いいたします。'} />
+        <Text label="署名" value={style.signature} onChange={w('signature')} multiline
+          placeholder={'例: 株式会社〇〇　営業部\n△△ △△\nTEL 03-0000-0000\nsales@example.co.jp'} />
         <div className="field">
           <label>用語の言い換え</label>
           {style.terms.map((t, i) => (
             <div className="row" key={i}>
-              <input placeholder="使わない言葉" value={t.avoid}
+              <input placeholder="使わない言葉（例: お客さん）" value={t.avoid}
                 onChange={(e) => setStyle({ ...style, terms: style.terms.map((x, j) => j === i ? { ...x, avoid: e.target.value } : x) })} />
               <span className="muted">→</span>
-              <input placeholder="使う言葉" value={t.use}
+              <input placeholder="使う言葉（例: お客様）" value={t.use}
                 onChange={(e) => setStyle({ ...style, terms: style.terms.map((x, j) => j === i ? { ...x, use: e.target.value } : x) })} />
               <button className="btn ghost small"
                 onClick={() => setStyle({ ...style, terms: style.terms.filter((_, j) => j !== i) })}>削除</button>
@@ -236,7 +240,8 @@ export function CompanySettings({ page }: { page: string }) {
             言い換えを追加
           </button>
         </div>
-        <Text label="その他の注意" value={style.notes} onChange={w('notes')} multiline />
+        <Text label="その他の注意" value={style.notes} onChange={w('notes')} multiline
+          placeholder={'例: 敬語は丁寧すぎない言い方にする。\n数字と英字は半角で書く。\n日付は「10月9日（木）」の形で書く。'} />
         <SaveButton run={() => api.admin.saveSettings('writingStyle', style)} />
       </div>
       )}
@@ -300,12 +305,13 @@ function InvoiceStyleSettings({ initial, onSaved }: {
           </div>
         )}
       </div>
+      {/* 例は入力欄の中に薄く置く（下に説明を常に出さない。仕様書 第6.10.4.1節） */}
       <Text label="振込先" value={style.bankAccount} onChange={(v) => set({ bankAccount: v })}
-        hint="例: ○○銀行 △△支店 普通 1234567 カ）マルマルショウジ" />
+        placeholder="例: 〇〇銀行 △△支店 普通 1234567 カ）マルマルショウジ" />
       <Text label="支払期限の既定" value={style.paymentDue} onChange={(v) => set({ paymentDue: v })}
-        hint="例: 翌月末" />
+        placeholder="例: 翌月末" />
       <Text label="備考の定型文" value={style.notes} onChange={(v) => set({ notes: v })} multiline
-        hint="例: 振込手数料は貴社にてご負担ください" />
+        placeholder={'例: 振込手数料は貴社にてご負担ください。\nお支払い期限までにお振り込みをお願いいたします。'} />
       <label className="check">
         <input type="checkbox" checked={style.sealBox} onChange={(e) => set({ sealBox: e.target.checked })} />
         印の欄を出す
@@ -461,11 +467,13 @@ export function AgentSettings({ page }: { page: string }) {
             {data.catalog.map((a) => (
               <tr key={a.id}>
                 <td><strong>{a.name}</strong><br /><span className="muted small">{a.description}</span></td>
-                <td className="num">
-                  <button className={`btn small ${disabled.has(a.id) ? '' : 'ghost'}`} disabled={saver.busy}
-                    onClick={() => toggle(a.id)}>
-                    {disabled.has(a.id) ? '有効にする' : '無効にする'}
-                  </button>
+                <td className="num nowrap">
+                  {/* 拡張機能と同じスライドのスイッチ（押すとすぐ保存する） */}
+                  <label className="switch-label">
+                    <span className="small">{disabled.has(a.id) ? '無効' : '有効'}</span>
+                    <button type="button" role="switch" aria-checked={!disabled.has(a.id)} aria-label={`${a.name}を${disabled.has(a.id) ? '有効' : '無効'}にする`}
+                      className={disabled.has(a.id) ? 'switch' : 'switch on'} disabled={saver.busy} onClick={() => toggle(a.id)}><span /></button>
+                  </label>
                 </td>
               </tr>
             ))}
@@ -514,7 +522,10 @@ export function AgentSettings({ page }: { page: string }) {
         <p className="muted small">過去の推計は変わりません</p>
         <SaveButton
           run={() => api.admin.saveSettings('effect', {
-            minutesPerRun: Object.fromEntries(Object.entries(minutes).map(([k, v]) => [k, Number(v)])),
+            // 公式の既定値と同じものは残さない（公式の既定値が変わったら、その値に付いていけるように）
+            minutesPerRun: Object.fromEntries(Object.entries(minutes)
+              .filter(([k, v]) => v !== '' && Number(v) !== data.catalog.find((a) => a.id === k)?.defaultMinutes)
+              .map(([k, v]) => [k, Number(v)])),
           })} />
       </div>
       )}
@@ -719,7 +730,7 @@ export function KnowledgeSettings({ page }: { page: string }) {
       )}
       {(category !== 'learned' || draft.id !== 'new') && (category !== 'minutes' || draft.id !== 'new') && (
         <div className="card">
-          <h3>{draft.id === 'new' ? '新しく登録する' : isRule ? '改定する' : '直す'}</h3>
+          <h3>{draft.id === 'new' ? '新しく登録する' : isRule ? '改定する' : '修正する'}</h3>
           <Text label="題名" value={draft.title} onChange={(v) => setDraft({ ...draft, title: v })} />
           <Text label="出典（条番号など）" value={draft.source} onChange={(v) => setDraft({ ...draft, source: v })}
             placeholder="就業規則（2024 年 4 月改定）" />
@@ -777,7 +788,8 @@ export function KnowledgeSettings({ page }: { page: string }) {
                     {k.pending && <>{' '}<span className="badge">次の版 {k.pending.effectiveFrom}</span></>}
                   </td>
                 ) : category === 'learned' ? <td className="nowrap">{day(k.lastUsedAt)}</td> : (
-                  <td>
+                  // 出典は折り返さない（題名の列に幅を取られて、1 字ずつ折り返していた）
+                  <td className="nowrap">
                     {k.source}
                     {k.originRunId && <>{' '}<span className="badge muted-badge">業務から登録</span></>}
                     {k.googleDerived && <>{' '}<span className="badge muted-badge">Google 由来</span></>}
@@ -791,14 +803,15 @@ export function KnowledgeSettings({ page }: { page: string }) {
                 )}
                 <td className="num nowrap">
                   <button className="btn ghost small" onClick={() => setDraft({ id: k.id, title: k.title, body: k.body, source: k.source, compartment: k.compartment, effectiveFrom: jstToday() })}>
-                    {isRule ? '改定' : '直す'}
+                    {isRule ? '改定' : '修正'}
                   </button>{' '}
                   {isRule && <><button className="btn ghost small" onClick={() => toggleVersions(k.id)}>版</button>{' '}</>}
                   {category === 'learned' ? (
                     <button className="btn danger small" disabled={saver.busy}
                       onClick={() => { if (confirm('この知識を削除しますか')) act(() => api.admin.deleteKnowledge(k.id), '削除しました'); }}>削除</button>
                   ) : (
-                    <button className="btn ghost small" disabled={saver.busy} onClick={() => act(() => api.admin.retireKnowledge(k.id), '廃止しました。1 年は戻せます')}>廃止</button>
+                    // 社内規程は「廃止」、議事録は「削除」（どちらも 1 年は戻せる）
+                    <button className={`btn small ${isRule ? 'ghost' : 'danger'}`} disabled={saver.busy} onClick={() => act(() => api.admin.retireKnowledge(k.id), `${isRule ? '廃止' : '削除'}しました。1 年は戻せます`)}>{isRule ? '廃止' : '削除'}</button>
                   )}
                 </td>
               </tr>
@@ -842,7 +855,7 @@ export function KnowledgeSettings({ page }: { page: string }) {
       </table>
       {inactive.length > 0 && (
         <>
-          <h4>{category === 'learned' ? 'しまったもの' : '廃止したもの'}</h4>
+          <h4>{category === 'learned' ? 'しまったもの' : isRule ? '廃止したもの' : '削除したもの'}</h4>
           <table className="table knowledge-table">
             <tbody>
               {inactive.map((k) => (
@@ -881,7 +894,7 @@ const KNOWLEDGE_TITLES: Record<string, string> = {
 const KNOWLEDGE_HELP: Record<string, PageHelp> = {
   rules: { article: 'admin-knowledge', text: 'ここに登録した規程から、秘書と「社内ナレッジ Q&A」が出典つきで答えます。改定すると前の版を残し、廃止しても 1 年は戻せます。' },
   items: { article: 'admin-knowledge', text: 'ここに登録した規程から、秘書と「社内ナレッジ Q&A」が出典つきで答えます。改定すると前の版を残し、廃止しても 1 年は戻せます。' },
-  minutes: { article: 'admin-knowledge', text: '「議事録の作成・共有」が、共有のあとに登録した議事録です。廃止しても 1 年は戻せます。' },
+  minutes: { article: 'admin-knowledge', text: '「議事録の作成・共有」が、共有のあとに登録した議事録です。削除しても 1 年は戻せます。' },
   learned: { article: 'admin-knowledge', text: '秘書が会話から学び、ほかの人にも役立つと判断したことです。週 1 回、秘書がまとめ、古いものや使われないものをしまいます。' },
 };
 

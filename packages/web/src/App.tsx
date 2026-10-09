@@ -9,7 +9,7 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent } from 'react';
 import { CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, CONTRACTS_EXTENSION_ID, RESERVATIONS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, MEMBERS_EXTENSION_ID, PRINT_DESIGNS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, SECRETARY_FILES_MAX, showsCaptions, type Notification, type UserSettings } from '@m2office/shared';
 import {
-  addCategory, assignCategory, checkCategoryName, groupMenu, removeCategory, togglePinned, type MenuSection,
+  addCategory, assignCategory, checkCategoryName, groupMenu, removeCategory, swapCategories, togglePinned, type MenuSection,
 } from './menu.js';
 import { CategoryMenuActions, ItemMenuActions } from './MenuActions.js';
 import { openDebugPanel } from './debug.js';
@@ -483,6 +483,10 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
     saveMenu({ ...menu, categories: (menu.categories ?? []).map((c) => (c.id === categoryId ? { ...c, name: checked.name } : c)) });
     return null;
   };
+  /** カテゴリーを、左ペインで隣に出ているカテゴリーと入れ替える（仕様書 第6.1.1節）。 */
+  const swapCategory = (categoryId: string, otherId: string) => {
+    saveMenu({ ...menu, categories: swapCategories(menu.categories, categoryId, otherId) });
+  };
   const deleteCategory = (categoryId: string) => {
     saveMenu({ ...menu, ...removeCategory(menu, categoryId) });
     setCategoryOpen(categoryId, false);
@@ -566,6 +570,9 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
             ))}
             {/* カテゴリーごと（作った順）と、最後に「ほかの業務」。1 つずつたためる（仕様書 第6.1.1節） */}
             {sections.map((sec) => {
+              // 左ペインに出ているカテゴリーの隣（中身の無いカテゴリーは出ないため、設定の配列の隣とは限らない）
+              const shownCats = sections.filter((x) => x.category).map((x) => x.category!.id);
+              const ci = sec.category ? shownCats.indexOf(sec.category.id) : -1;
               const open = sectionOpen(sec);
               const key = sec.category?.id ?? 'others';
               const header = {
@@ -573,6 +580,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
                 label: `${sec.category?.name ?? 'ほかの業務'}（${sec.items.length}）`,
                 expanded: open,
                 onClick: () => toggleSection(sec, !open),
+                // 見出しは業務と見分けられるよう、小さめの灰色の字にする（仕様書 第6.1.1節「カテゴリーの見出し」）
+                className: 'item nav-group',
               };
               return (
                 <Fragment key={key}>
@@ -584,6 +593,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
                           <CategoryMenuActions
                             category={sec.category!} close={close}
                             onRename={(name) => renameCategory(sec.category!.id, name)}
+                            onMoveUp={ci > 0 ? () => swapCategory(sec.category!.id, shownCats[ci - 1]!) : undefined}
+                            onMoveDown={ci >= 0 && ci < shownCats.length - 1 ? () => swapCategory(sec.category!.id, shownCats[ci + 1]!) : undefined}
                             onRemove={() => deleteCategory(sec.category!.id)}
                           />
                         )}

@@ -8,7 +8,7 @@
  * @see 仕様書 第16.3節 権限区画
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, describeError, type AccessOptions, type CompartmentView, type GroupView, type ScopeValue } from './api.js';
 
 /** 利用範囲の画面の選択肢（グループ・利用者・現在の範囲）を読む。 */
@@ -87,43 +87,77 @@ export function ScopeEditor({ value, onChange, options, allowAll = true }: {
   );
 }
 
-/** 1 つの対象の範囲を示し、「変更」で編集して保存する。 */
+/**
+ * 1 つの対象の範囲を示し、押すと開く一覧で、その場で選んで保存する（仕様書 第16.7.7節）。
+ *
+ * @remarks
+ * 選ぶたびにすぐ保存する（保存・キャンセルのボタンは無い）。「全員」の状態でグループか人を選ぶと、その人たちだけになる。
+ * 「全員」を押すと全員に戻る。誰も使えない状態にはしない（最後の 1 つは外せない。全員に戻すには「全員」を押す）
+ */
 export function ScopeField({ target, options, onSaved }: {
   target: string; options: AccessOptions; onSaved: () => void;
 }) {
-  const current: ScopeValue = options.scopes[target] ?? 'all';
-  const [editing, setEditing] = useState<ScopeValue | null>(null);
+  const saved: ScopeValue = options.scopes[target] ?? 'all';
+  // 保存を待たずに画面を変える（保存に失敗したら元に戻す）
+  const [value, setValue] = useState<ScopeValue>(saved);
+  const [open, setOpen] = useState(false);
+  // 下に場所が無ければ上に開く（ページの下の方の業務でも一覧が切れないように）
+  const [up, setUp] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  if (!editing) {
-    return (
-      <span>
-        {scopeSummary(current, options)}{' '}
-        <button className="link small" onClick={() => { setEditing(current); setError(null); }}>変更</button>
-      </span>
-    );
-  }
-  const save = async () => {
-    setBusy(true);
-    try {
-      await api.admin.setScope(target, editing);
-      setEditing(null);
-      onSaved();
-    } catch (e) {
-      setError(describeError(e, '保存できませんでした'));
-    } finally {
-      setBusy(false);
-    }
+  const box = useRef<HTMLSpanElement>(null);
+  useEffect(() => { setValue(saved); }, [saved]);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => { if (box.current && !box.current.contains(e.target as Node)) setOpen(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', esc); };
+  }, [open]);
+
+  const save = (next: ScopeValue) => {
+    const before = value;
+    setValue(next);
+    setError(null);
+    api.admin.setScope(target, next).then(onSaved).catch((e) => { setValue(before); setError(describeError(e, '保存できませんでした')); });
   };
+  const picked = value === 'all' ? { groups: [] as string[], users: [] as string[] } : value;
+  const count = picked.groups.length + picked.users.length;
+  const toggle = (kind: 'groups' | 'users', id: string) => {
+    const on = picked[kind].includes(id);
+    if (on && count <= 1) return; // 最後の 1 つは外さない（全員に戻すには「全員」を押す）
+    save({ ...picked, [kind]: on ? picked[kind].filter((x) => x !== id) : [...picked[kind], id] });
+  };
+
   return (
-    <div>
-      <ScopeEditor value={editing} onChange={setEditing} options={options} />
-      <div className="row">
-        <button className="btn small" disabled={busy} onClick={() => void save()}>保存</button>
-        <button className="btn small ghost" onClick={() => setEditing(null)}>キャンセル</button>
-      </div>
-      {error && <p className="error small">{error}</p>}
-    </div>
+    <span className="scope-field" ref={box}>
+      <button type="button" className="btn ghost small scope-button" aria-haspopup="true" aria-expanded={open} onClick={(e) => {
+        setUp(window.innerHeight - e.currentTarget.getBoundingClientRect().bottom < 330);
+        setOpen(!open);
+      }}>
+        {scopeSummary(value, options)} <span aria-hidden>▾</span>
+      </button>
+      {error && <span className="error-inline small"> {error}</span>}
+      {open && (
+        <div className={`scope-pop${up ? ' up' : ''}`} role="menu">
+          <label className="check"><input type="radio" checked={value === 'all'} onChange={() => save('all')} /> 全員</label>
+          {options.groups.length > 0 && <div className="small muted scope-pop-head">グループ</div>}
+          {options.groups.map((g) => (
+            <label key={g.id} className="check" title={picked.groups.includes(g.id) && count <= 1 ? '全員に戻すには「全員」を押します' : undefined}>
+              <input type="checkbox" checked={picked.groups.includes(g.id)} onChange={() => toggle('groups', g.id)} />
+              {g.name}<span className="muted small">（{g.memberCount} 人）</span>
+            </label>
+          ))}
+          <div className="small muted scope-pop-head">人</div>
+          {options.users.map((u) => (
+            <label key={u.id} className="check" title={picked.users.includes(u.id) && count <= 1 ? '全員に戻すには「全員」を押します' : undefined}>
+              <input type="checkbox" checked={picked.users.includes(u.id)} onChange={() => toggle('users', u.id)} />
+              {u.displayName}
+            </label>
+          ))}
+        </div>
+      )}
+    </span>
   );
 }
 

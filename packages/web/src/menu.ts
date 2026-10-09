@@ -97,6 +97,22 @@ export function addCategory(categories: MenuCategory[] | undefined, name: string
   return { categories: [...list, category], category };
 }
 
+/**
+ * 2 つのカテゴリーの並びを入れ替える（見出しの「上に移動」「下に移動」。仕様書 第6.1.1節）。
+ *
+ * @param a 動かすカテゴリー
+ * @param b 入れ替える相手（左ペインで隣に出ているカテゴリー。中身の無いカテゴリーは出ないため、配列の隣とは限らない）
+ * @returns 入れ替えた一覧。どちらかが無ければ元のまま
+ */
+export function swapCategories(categories: MenuCategory[] | undefined, a: string, b: string): MenuCategory[] {
+  const list = [...(categories ?? [])];
+  const i = list.findIndex((c) => c.id === a);
+  const j = list.findIndex((c) => c.id === b);
+  if (i < 0 || j < 0 || i === j) return list;
+  [list[i], list[j]] = [list[j]!, list[i]!];
+  return list;
+}
+
 /** カテゴリーを消した後の一覧と対応。中の業務は「カテゴリーに入れない」に戻す（業務は消えない）。 */
 export function removeCategory(layout: MenuLayout, categoryId: string): { categories: MenuCategory[]; categoryOf: Record<string, string> } {
   return {

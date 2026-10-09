@@ -9,6 +9,7 @@ import { copyText } from './clipboard.js';
 import { useCallback, useEffect, useState } from 'react';
 import { api, describeError, type ConnectionPresetView, type ConnectorCheck, type McpConnectionView } from './api.js';
 import { PageTitle } from './help.js';
+import { Icon, useRememberedSet } from './nav.js';
 
 /** 会社の接続の一覧と追加。 */
 export function ConnectorList() {
@@ -23,6 +24,9 @@ export function ConnectorList() {
   const [name, setName] = useState('');
   const [authType, setAuthType] = useState<'none' | 'oauth' | 'api_key'>('none');
   const [presets, setPresets] = useState<ConnectionPresetView[]>([]);
+  // 開いているコネクタ（アコーディオン。パソコンごとに覚える）と、追加の欄を開いているか
+  const [openIds, setOpen] = useRememberedSet('m2office.mcp-open');
+  const [adding, setAdding] = useState(false);
   const load = useCallback(() => {
     api.admin.mcpConnections()
       .then((r) => { setItems(r.items); setRisks(r.risks); setPresets(r.presets ?? []); setLocalPolicy(!!r.localPolicy); })
@@ -48,6 +52,7 @@ export function ConnectorList() {
     await api.admin.addMcpConnection({ url: url.trim(), auth: authType, ...(name.trim() ? { name: name.trim() } : {}) });
     setUrl('');
     setName('');
+    setAdding(false);
   }, '登録できませんでした');
 
   /** よく使うサービスの型から登録する（第12.11.6.7節）。 */
@@ -93,8 +98,14 @@ export function ConnectorList() {
         text: '外部のサービス（MCP サーバ）への接続です。秘書・業務・拡張機能のどれからでも使えます。',
       }} />
       {error && <p className="error">{error}</p>}
+      {/* 追加の欄。コネクタがあるときは畳んでおき、「＋ コネクタを追加」で開く（1 件も無ければはじめから開く） */}
+      {!adding && items && items.length > 0 && (
+        <p><button className="btn ghost small" onClick={() => setAdding(true)}>＋ コネクタを追加</button></p>
+      )}
+      {(adding || (items && items.length === 0)) && (
       <div className="card">
-        {presets.length > 0 && (
+        <h3>コネクタを追加</h3>
+        {presets.filter((p) => !items?.some((c) => c.id === p.id)).length > 0 && (
           <div className="row small preset-row">
             {presets.filter((p) => !items?.some((c) => c.id === p.id)).map((p) => (
               <button key={p.id} className="btn small ghost" title={p.description} disabled={busy === `preset/${p.id}`}
@@ -102,34 +113,43 @@ export function ConnectorList() {
             ))}
           </div>
         )}
-        <div className="form-grid">
-          <div className="field span-3"><label>接続先の URL</label>
-            <input value={url} placeholder="https://mcp.example.com/mcp" onChange={(e) => setUrl(e.target.value)} /></div>
-          <div className="field span-2"><label>名前</label>
+        <div className="field"><label>接続先の URL</label>
+          <input value={url} placeholder="https://mcp.example.com/mcp" onChange={(e) => setUrl(e.target.value)} /></div>
+        <div className="grid2">
+          <div className="field"><label>名前</label>
             <input value={name} placeholder="空なら URL から" onChange={(e) => setName(e.target.value)} /></div>
-          <div className="field span-2"><label>認証</label>
+          <div className="field"><label>認証</label>
             <select value={authType} onChange={(e) => setAuthType(e.target.value as typeof authType)}>
               <option value="none">認証なし</option>
               <option value="oauth">利用者ごとに許可（OAuth）</option>
               <option value="api_key">会社の鍵</option>
             </select></div>
         </div>
-        <button className="btn small" disabled={!url.trim() || busy === 'add'} onClick={() => void add()}>
-          {busy === 'add' ? '問い合わせています…' : '追加'}
-        </button>
+        <div className="row">
+          <button className="btn small" disabled={!url.trim() || busy === 'add'} onClick={() => void add()}>
+            {busy === 'add' ? '問い合わせています…' : '追加'}
+          </button>
+          {items && items.length > 0 && <button className="btn ghost small" onClick={() => setAdding(false)}>キャンセル</button>}
+        </div>
       </div>
+      )}
       {!items && !error && <p className="muted">読み込み中…</p>}
       {items && items.length === 0 && <p className="muted">コネクタはまだありません</p>}
       {items?.map((c) => {
         const st = checks[c.id];
         return (
-          <div key={c.id} className="card ext-card">
-            <div className="ext-row">
-              <div>
-                <strong>{c.name}</strong> <span className="muted small">{c.id}</span>
-                <div className="muted small">{c.originText}・{c.authState.text}・<code>{c.url}</code></div>
-              </div>
-            </div>
+          <div key={c.id} className={`card fold-row${openIds.has(c.id) ? ' open' : ''}`}>
+            {/* 閉じているときは名前・認証の状態・ツールの数・出どころを 1 行で出す（コネクタが増えても見渡せるように） */}
+            <button className="fold-head" onClick={() => setOpen(c.id, !openIds.has(c.id))} aria-expanded={openIds.has(c.id)}>
+              <Icon name={openIds.has(c.id) ? 'caret-down' : 'caret-right'} className="nav-caret" />
+              <strong>{c.name}</strong>
+              <span className="muted small">{c.authState.text}・ツール {c.tools.length} 件</span>
+              {st && st !== 'busy' && <span className={`badge ${st.ok ? 'ok' : 'warn'}`}>{st.ok ? '接続できました' : '接続できませんでした'}</span>}
+              <span className="muted small tail">{c.originText}</span>
+            </button>
+            {openIds.has(c.id) && (
+            <div className="fold-body">
+            <p className="muted small"><code>{c.url}</code>（{c.id}）</p>
             {c.description && <p className="small">{c.description}</p>}
             {localPolicy && (
               // ローカルの方針の会社では、送ってよいと決めた接続にだけ送る。既定は送らない（仕様書 第16.3.7.1節）
@@ -192,6 +212,8 @@ export function ConnectorList() {
                 ? <span className="ok-inline">接続できました（提供のあるツール {st.tools.filter((t) => t.provided).length} ／ {st.tools.length}）</span>
                 : <span className="error">接続できませんでした: {st.error}</span>)}
             </div>
+            </div>
+            )}
           </div>
         );
       })}

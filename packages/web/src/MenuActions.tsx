@@ -58,9 +58,12 @@ export function ItemMenuActions({ pinned, categories, categoryId, onPin, onAssig
  * @param onRename 名前を変える。だめなら理由を返す
  * @param onRemove 消す（中の業務は「カテゴリーに入れない」に戻る）
  */
-export function CategoryMenuActions({ category, onRename, onRemove, close }: {
+export function CategoryMenuActions({ category, onRename, onMoveUp, onMoveDown, onRemove, close }: {
   category: MenuCategory;
   onRename: (name: string) => string | null;
+  /** 上・下に移動する（いちばん上・下では渡さず、項目を出さない）。 */
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
   onRemove: () => void;
   close: () => void;
 }) {
@@ -81,6 +84,8 @@ export function CategoryMenuActions({ category, onRename, onRemove, close }: {
   return (
     <>
       <RowMenuItem onSelect={() => setRenaming(true)}>名前を変える</RowMenuItem>
+      {onMoveUp && <RowMenuItem onSelect={() => { onMoveUp(); close(); }}>上に移動</RowMenuItem>}
+      {onMoveDown && <RowMenuItem onSelect={() => { onMoveDown(); close(); }}>下に移動</RowMenuItem>}
       <RowMenuItem onSelect={() => { onRemove(); close(); }}>カテゴリーを削除</RowMenuItem>
     </>
   );
