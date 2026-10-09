@@ -61,7 +61,7 @@ ensure_front() {
   MODE=700 root_only "$FRONT/data" "$FRONT/config"
   local have=0
   [ -f "$FRONT/CONTRACT" ] && have=$(tr -dc '0-9' < "$FRONT/CONTRACT")
-  [ "${have:-0}" -gt "$CONTRACT" ] && { info "より新しい取り決め（版 $have）で作られています。共通の設定はそのまま使います"; return 0; }
+  [ "${have:-0}" -gt "$CONTRACT" ] && { info "より新しい取り決め（版 ${have}）で作られています。共通の設定はそのまま使います"; return 0; }
   [ "${have:-0}" -eq "$CONTRACT" ] && [ -f "$FRONT/Caddyfile" ] && [ -f "$PLIST" ] && return 0
   cat > "$FRONT/Caddyfile" <<'CADDY'
 # 機械に 1 つの入口（M2Office と M2Medical の共通の部品。仕様書 第8.6.9節）。front.sh が書く。手で書き換えない。
@@ -108,7 +108,7 @@ PLIST
   MODE=644 root_only "$FRONT/CONTRACT"
   # 取り決めが変わったら、動いている入口を新しい設定で動かし直す
   if loaded; then "$LAUNCHCTL" bootout "system/$LABEL" >/dev/null 2>&1 || true; fi
-  info "共通の入口を用意しました（$FRONT）"
+  info "共通の入口を用意しました（${FRONT}）"
 }
 
 # 動かす（動いていなければ起動、動いていれば読み直す）

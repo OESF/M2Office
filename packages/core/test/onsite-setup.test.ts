@@ -5,6 +5,9 @@
  * 雛形の名前がすべて埋まること、launchd の設定が正しい形であること、入口の TLS の段（名前の形と IP の形）、
  * 秘密の値が答えのファイル（setup.conf）ではなく環境変数のファイルに入ることを確かめる。
  * M2Medical と分け合う共通の入口（deploy/front/front.sh。第8.6.9節）は、偽の caddy と launchctl で動きを確かめる。
+ *
+ * スクリプトは日本語の言語の設定（`LANG=ja_JP.UTF-8`）でも流す。macOS の bash 3.2 は、その設定で `$VAR（` のように
+ * 変数のすぐ後ろに全角の文字が続くと、全角の文字の一部まで変数の名前として読み、`set -u` で止まるため（M2Medical からの連絡）。
  */
 
 import { test } from 'node:test';
@@ -18,6 +21,9 @@ import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('../../..', import.meta.url));
 const onsite = join(root, 'deploy/onsite');
 const frontSh = join(root, 'deploy/front/front.sh');
+/** スクリプトを流す言語の設定。日本語の設定でだけ起きる読み違いがあるため、両方で流す。 */
+const LOCALES = ['C', 'ja_JP.UTF-8'] as const;
+const localeEnv = (locale: string) => ({ LANG: locale, LC_ALL: locale });
 
 const ANSWERS = {
   INSTALL_DIR: '/Library/M2Office', REPO_DIR: '/Library/M2Office/app', RELEASE_DIR: '/Library/M2Office/app/dist-release',
@@ -31,13 +37,33 @@ const ANSWERS = {
   OFFSITE_REGION: '', RESTIC_BIN: '/opt/homebrew/opt/restic/bin/restic',
 };
 
-function render(extra: Record<string, string>) {
+function render(extra: Record<string, string>, locale = 'C') {
   const dir = mkdtempSync(join(tmpdir(), 'm2o-onsite-'));
   const answers = join(dir, 'answers');
   writeFileSync(answers, Object.entries({ ...ANSWERS, ...extra }).map(([k, v]) => `${k}=${v}`).join('\n'));
-  execFileSync('/bin/bash', [join(onsite, 'setup.sh'), '--render-only', join(dir, 'out'), '--answers', answers], { env: { ...process.env, NODE_BIN: process.execPath } });
+  execFileSync('/bin/bash', [join(onsite, 'setup.sh'), '--render-only', join(dir, 'out'), '--answers', answers], { env: { ...process.env, ...localeEnv(locale), NODE_BIN: process.execPath } });
   return join(dir, 'out');
 }
+
+test('変数のすぐ後ろに全角の文字を続けない（日本語の言語の設定の bash 3.2 で、全角の文字まで変数の名前として読まれる）', () => {
+  const files: string[] = [];
+  const walk = (d: string) => { for (const e of readdirSync(d, { withFileTypes: true })) { const f = join(d, e.name); if (e.isDirectory()) walk(f); else if (e.name.endsWith('.sh')) files.push(f); } };
+  walk(join(root, 'deploy'));
+  assert.ok(files.length >= 4);
+  const found: string[] = [];
+  for (const f of files) {
+    readFileSync(f, 'utf8').split('\n').forEach((line, i) => {
+      // `$名前` の直後に ASCII でない文字。`${名前}` と囲めば読み違えない
+      if (/\$[A-Za-z_][A-Za-z0-9_]*[^\x00-\x7F]/.test(line)) found.push(`${f.slice(root.length)}:${i + 1}`);
+    });
+  }
+  assert.deepEqual(found, [], `\${…} で囲んでください: ${found.join(', ')}`);
+});
+
+test('日本語の言語の設定でも、雛形を埋められる', () => {
+  const out = render({ TLS_BLOCK: '\\ttls internal' }, 'ja_JP.UTF-8');
+  assert.match(readFileSync(join(out, 'm2office.caddy'), 'utf8'), /\n\ttls internal\n/);
+});
 
 test('スクリプトの文法', () => {
   for (const f of ['setup.sh', 'update.sh', 'maintenance.sh']) execFileSync('/bin/bash', ['-n', join(onsite, f)]);
@@ -122,7 +148,7 @@ test('遠隔の保守: 同じ機械の M2Medical が持つときは、印があ�
 });
 
 /** 共通の入口を、偽の caddy と launchctl で動かす。 */
-function frontRig() {
+function frontRig(locale = 'C') {
   const dir = mkdtempSync(join(tmpdir(), 'm2-front-'));
   const log = join(dir, 'calls.log');
   const caddy = join(dir, 'caddy');
@@ -133,15 +159,15 @@ function frontRig() {
   writeFileSync(launchctl, `#!/bin/bash\necho "launchctl $*" >> ${log}\ncase "$1" in print) [ -f ${dir}/loaded ] ;; bootstrap) touch ${dir}/loaded ;; bootout) rm -f ${dir}/loaded ;; esac\n`);
   chmodSync(caddy, 0o755); chmodSync(launchctl, 0o755);
   const front = join(dir, 'front');
-  const env = { ...process.env, M2_FRONT_DIR: front, M2_FRONT_PLIST_DIR: join(dir, 'plist'), M2_FRONT_LAUNCHCTL: launchctl };
+  const env = { ...process.env, ...localeEnv(locale), M2_FRONT_DIR: front, M2_FRONT_PLIST_DIR: join(dir, 'plist'), M2_FRONT_LAUNCHCTL: launchctl };
   const site = (name: string, body: string) => { const f = join(dir, `${name}.in`); writeFileSync(f, body); return f; };
   const run = (...args: string[]) => execFileSync('/bin/bash', [frontSh, ...args, ...(args[0] === 'owner' ? [] : ['--caddy', caddy])], { env, stdio: 'pipe' }).toString();
   const calls = () => (existsSync(log) ? readFileSync(log, 'utf8') : '');
   return { dir, front, site, run, calls, plist: join(dir, 'plist', 'jp.m2front.caddy.plist') };
 }
 
-test('共通の入口: 先に入れた製品が作り、後の製品は名前の設定を置いて読み直すだけ。片方を外してももう片方は残る（第8.6.9節）', () => {
-  const r = frontRig();
+for (const locale of LOCALES) test(`共通の入口: 先に入れた製品が作り、後の製品は名前の設定を置いて読み直すだけ。片方を外してももう片方は残る（第8.6.9節。${locale}）`, () => {
+  const r = frontRig(locale);
   r.run('put-site', 'm2office', r.site('o', 'office.example.jp {\n\trespond "o"\n}\n'));
   assert.equal(readFileSync(join(r.front, 'Caddyfile'), 'utf8').match(/^import sites\/\*\.caddy$/m)?.[0], 'import sites/*.caddy');
   assert.equal(readFileSync(join(r.front, 'CONTRACT'), 'utf8').trim(), '1');
@@ -168,8 +194,8 @@ test('共通の入口: 先に入れた製品が作り、後の製品は名前の
   assert.ok(!existsSync(join(r.dir, 'loaded')));
 });
 
-test('共通の入口: より新しい取り決めで作られた共通の設定は置き換えない。遠隔の保守を持つ製品の名前を読む', () => {
-  const r = frontRig();
+for (const locale of LOCALES) test(`共通の入口: より新しい取り決めで作られた共通の設定は置き換えない。遠隔の保守を持つ製品の名前を読む（${locale}）`, () => {
+  const r = frontRig(locale);
   r.run('put-site', 'm2office', r.site('o', 'office.example.jp {\n}\n'));
   writeFileSync(join(r.front, 'CONTRACT'), '9\n');
   writeFileSync(join(r.front, 'Caddyfile'), '# 新しい写しが書いた\nimport sites/*.caddy\n');

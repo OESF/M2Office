@@ -116,7 +116,7 @@ sudo -v
 OTHER_SITES=$(find "$FRONT_DIR/sites" -name '*.caddy' ! -name 'm2office.caddy' -exec basename {} .caddy \; 2>/dev/null | tr '\n' ' ' || true)
 MAINT_OWNER=$("$FRONT_SH" owner 2>/dev/null || true)
 [ "$MAINT_OWNER" = M2Office ] && MAINT_OWNER=''
-[ -n "$OTHER_SITES" ] && info "同じ機械のほかの製品: $OTHER_SITES（入口を分け合います）"
+[ -n "$OTHER_SITES" ] && info "同じ機械のほかの製品: ${OTHER_SITES}（入口を分け合います）"
 
 # これまでの答え（2 回目から既定にする）
 if [ -f "$CONF" ]; then
@@ -137,7 +137,7 @@ say '2. 証明書（社内でも HTTPS にします。仕様書 第8.6.2節）'
 info 'name: 公的な証明書を DNS で取る（標準。Google のログインが使える）'
 info 'ip  : 機械が自分で証明書を出す（Google を使わない会社だけ。端末ごとにルートの証明書を入れる）'
 ask TLS_MODE '形（name か ip）' "${TLS_MODE:-name}"
-[ "$TLS_MODE" = ip ] && [ -n "$OTHER_SITES" ] && die "同じ機械にほかの製品（$OTHER_SITES）があるときは、ip の形は使えません。name の形にしてください"
+[ "$TLS_MODE" = ip ] && [ -n "$OTHER_SITES" ] && die "同じ機械にほかの製品（${OTHER_SITES}）があるときは、ip の形は使えません。name の形にしてください"
 if [ "$TLS_MODE" = name ]; then
   ask DNS_PROVIDER 'DNS の事業者（caddy-dns の名前。例 cloudflare・route53・gandi）' "${DNS_PROVIDER:-cloudflare}"
   ask DNS_TOKEN 'DNS の事業者の API の鍵' "$(env_value DNS_TOKEN_SAVED)" secret
@@ -219,11 +219,11 @@ else
 fi
 
 say '答えの確かめ'
-info "会社: $COMPANY_NAME（$SUBDOMAIN）／ ドメイン: $GW_DOMAIN ／ 管理者: $ADMIN_EMAIL"
-info "名前: https://$HOST ／ 証明書: $TLS_MODE ${DNS_PROVIDER:+（$DNS_PROVIDER）}"
+info "会社: ${COMPANY_NAME}（${SUBDOMAIN}）／ ドメイン: $GW_DOMAIN ／ 管理者: $ADMIN_EMAIL"
+info "名前: https://$HOST ／ 証明書: $TLS_MODE ${DNS_PROVIDER:+（${DNS_PROVIDER}）}"
 info "データ: $DATA_DIR ／ 控え: ${BACKUP_DIR:-（取らない）} ／ 社外の控え: $( [ "$OFFSITE" = yes ] && echo "$OFFSITE_REPOSITORY" || echo 送らない)"
 info "ローカル AI: ${LOCAL_LLM_URL:-（使わない）} ${LOCAL_LLM_MODEL} ／ Gemini の鍵: $( [ -n "$GEMINI_API_KEY" ] && echo 入れる || echo 入れない)"
-info "自動の更新: $AUTO_UPDATE（${UPDATE_HOUR} 時）／ 遠隔の保守: $MAINTENANCE${MAINT_OWNER:+（$MAINT_OWNER が持つ）} ／ 稼働の知らせ: $( [ -n "$HEARTBEAT_URL" ] && echo 送る || echo 送らない)"
+info "自動の更新: ${AUTO_UPDATE}（${UPDATE_HOUR} 時）／ 遠隔の保守: $MAINTENANCE${MAINT_OWNER:+（$MAINT_OWNER が持つ）} ／ 稼働の知らせ: $( [ -n "$HEARTBEAT_URL" ] && echo 送る || echo 送らない)"
 yes_no 'この答えで入れますか' y || exit 1
 
 # ---- 2. 前提のソフト（Homebrew） ----
@@ -253,7 +253,7 @@ RESTIC_BIN=''
 info "Node.js $("$NODE_BIN" --version) ／ PostgreSQL $("$PG_BIN/postgres" --version | awk '{print $3}') ／ Caddy $("$CADDY_BIN" version | awk '{print $1}')"
 CADDY_RESTART=''
 if [ "$TLS_MODE" = name ] && ! "$CADDY_BIN" list-modules 2>/dev/null | grep -q "^dns.providers.$DNS_PROVIDER\$"; then
-  info "Caddy に DNS の事業者（$DNS_PROVIDER）のつなぎを足します"
+  info "Caddy に DNS の事業者（${DNS_PROVIDER}）のつなぎを足します"
   "$CADDY_BIN" add-package "github.com/caddy-dns/$DNS_PROVIDER"
   # 動いている入口は古い本体のままなので、置いたあとに動かし直す
   CADDY_RESTART=--restart
@@ -452,12 +452,12 @@ for _ in $(seq 1 24); do
 done
 [ "$ok" = 1 ] && info "入口と証明書: https://$HOST で開けます" || warn "入口がまだ答えません。証明書を取るのに時間がかかることがあります（$FRONT_DIR/logs/caddy-run.log を見てください）"
 if [ -n "$LOCAL_LLM_URL" ]; then
-  curl -fsS --max-time 5 "$LOCAL_LLM_URL/models" >/dev/null 2>&1 && info 'ローカル AI: 答えます' || warn "ローカル AI が答えません（$LOCAL_LLM_URL）"
+  curl -fsS --max-time 5 "$LOCAL_LLM_URL/models" >/dev/null 2>&1 && info 'ローカル AI: 答えます' || warn "ローカル AI が答えません（${LOCAL_LLM_URL}）"
 fi
 
 say '入れ終わりました'
 info "開く: https://$HOST （最初の管理者 $ADMIN_EMAIL で Google のログイン）"
-info "設定: $ENV_FILE（管理者だけが読める）／ 答え: $CONF ／ ログ: $DATA_DIR/logs"
+info "設定: ${ENV_FILE}（管理者だけが読める）／ 答え: $CONF ／ ログ: $DATA_DIR/logs"
 info '残りの作業:'
 info "  - DNS: $HOST を、この機械の社内の IP に向ける（公開の DNS に A レコード。ルーターの DNS リバインディングの対策も確かめる）"
 info '  - ルーター: DHCP の予約で、この機械にいつも同じ IP を割り当てる'
@@ -469,7 +469,7 @@ if yes_no '紙の「戻すための控え」に書き写す秘密の値を、い
   info "データベースの所有者の合言葉: $DB_OWNER_PASSWORD"
   if [ "$OFFSITE" = yes ]; then
     info "社外の控えの置き場: $OFFSITE_REPOSITORY"
-    info "社外の控えの暗号化の合言葉: $OFFSITE_PASSWORD（これが無いと社外の控えは誰にも開けません）"
+    info "社外の控えの暗号化の合言葉: ${OFFSITE_PASSWORD}（これが無いと社外の控えは誰にも開けません）"
   fi
   info '書き写したら画面を消してください。運営はこれを持ちません'
 fi

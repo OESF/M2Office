@@ -33,7 +33,7 @@ while [ $# -gt 0 ]; do
 done
 [ "$(id -u)" -eq 0 ] || { echo '管理者の権限（sudo）で走らせてください' >&2; exit 1; }
 CONF=${CONF:-/Library/M2Office/setup.conf}
-[ -f "$CONF" ] || { echo "答えのファイルがありません: $CONF（先に setup.sh を走らせてください）" >&2; exit 1; }
+[ -f "$CONF" ] || { echo "答えのファイルがありません: ${CONF}（先に setup.sh を走らせてください）" >&2; exit 1; }
 # shellcheck disable=SC1090
 . "$CONF"
 
@@ -70,7 +70,7 @@ git_ fetch --tags --force --quiet origin || { record failed "$FROM" '' 'リリ�
 TO=${WANT:-$(git_ tag -l 'v[0-9]*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)}
 [ -n "$TO" ] || { log 'リリースのタグがありません'; exit 0; }
 if [ "$TO" = "$FROM" ]; then
-  log "新しい版はありません（$FROM）"
+  log "新しい版はありません（${FROM}）"
   [ "$AUTO" = 1 ] && record none "$FROM" "$TO"
   exit 0
 fi
@@ -113,13 +113,13 @@ healthy() {
 }
 rollback() {
   local why=$1
-  log "失敗しました（$why）。前の版 $FROM に戻します"
+  log "失敗しました（${why}）。前の版 $FROM に戻します"
   stop_app
   build "$FROM" || log '前の版の組み立てにも失敗しました。技術者が手で戻してください'
   "$PG_BIN/pg_restore" --clean --if-exists --no-owner -d "$OWNER_URL" "$DUMP" >/dev/null 2>&1 || log '控えの戻しで警告がありました'
   start_app
   if healthy; then record rolled-back "$FROM" "$TO" "$why"; log "前の版 $FROM に戻しました"
-  else record failed "$FROM" "$TO" "$why。前の版に戻しても動きません"; log '前の版に戻しても動きません。技術者が手で確かめてください'; fi
+  else record failed "$FROM" "$TO" "${why}。前の版に戻しても動きません"; log '前の版に戻しても動きません。技術者が手で確かめてください'; fi
   exit 1
 }
 
