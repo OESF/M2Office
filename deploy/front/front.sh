@@ -137,6 +137,10 @@ apply() {
 case "$cmd" in
   put-site)
     [ -f "$site" ] || die "設定のファイルがありません: $site"
+    # 先に自分の設定だけを確かめる（読み込みは全部をつないで読むため、括弧の閉じ忘れが、もう片方の製品のファイルの誤りとして出てしまう）
+    if ! out=$("$CADDY" validate --config "$site" --adapter caddyfile 2>&1); then
+      die "設定を確かめられませんでした（置いていません）: $(printf '%s' "$out" | grep -v '"level":"info"' | tail -2)"
+    fi
     ensure_front
     target="$FRONT/sites/$name.caddy"
     prev=''
