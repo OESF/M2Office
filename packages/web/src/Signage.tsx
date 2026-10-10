@@ -12,6 +12,7 @@ import {
   type SignageBand, type SignageEntry, type SignageInterruptView, type SignageScreen, type SignageSound,
 } from '@m2office/shared';
 import { api, describeError, type SignageAssetView, type SignageOverview } from './api.js';
+import { SortableList } from './Sortable.js';
 import { inspectPptx } from './pptx.js';
 import { firstImage, inlineHtml } from './html-inline.js';
 
@@ -311,7 +312,6 @@ function FlowEditor({ screen, screens, assets, thumbs, onFiles, onError, onChang
 }) {
   const [band, setBand] = useState<string | null>(null);
   const [flow, setFlow] = useState<{ version: number; entries: SignageEntry[]; bands: SignageBand[] } | null>(null);
-  const [drag, setDrag] = useState<number | null>(null);
   const file = useRef<HTMLInputElement>(null);
   const reload = useCallback(() => {
     api.signage.flow(screen.id, band).then(setFlow).catch((e) => {
@@ -329,13 +329,6 @@ function FlowEditor({ screen, screens, assets, thumbs, onFiles, onError, onChang
     setFlow({ ...flow, entries });
     api.signage.saveFlow(screen.id, flow.version, entries, band).then((r) => { setFlow({ ...flow, version: r.version, entries }); onChanged(); })
       .catch((e) => { onError(describeError(e, '流れを直せませんでした')); reload(); });
-  };
-  const move = (from: number, to: number) => {
-    if (!flow || from === to) return;
-    const list = [...flow.entries];
-    const [x] = list.splice(from, 1);
-    list.splice(to, 0, x!);
-    save(list);
   };
   const onDrop = (e: DragEvent) => {
     e.preventDefault();
@@ -404,14 +397,17 @@ function FlowEditor({ screen, screens, assets, thumbs, onFiles, onError, onChang
         </div>
       )}
       {current && flow.entries.length === 0 && <p className="small muted">この時間帯の流れが空の間は、いつもの流れを流します。</p>}
-      <ol className="signage-entries">
-        {flow.entries.map((e, i) => {
+      {/* 左のつまみをつかんで動かす（個人設定のメニューの並びと同じ。第31.6節）。同じ素材を何度も並べられるため、行は位置で見分ける */}
+      <SortableList className="signage-entries" items={flow.entries.map((e, i) => ({ e, i }))} keyOf={(x) => `${x.e.assetId}-${x.i}`}
+        nameOf={(x) => byId.get(x.e.assetId)?.name ?? '素材'} onMove={(next) => save(next.map((x) => x.e))}
+        render={({ e, i }) => {
           const a = byId.get(e.assetId);
           return (
-            <li key={`${e.assetId}-${i}`} draggable onDragStart={() => setDrag(i)} onDragOver={(ev) => ev.preventDefault()}
-              onDrop={(ev) => { ev.preventDefault(); ev.stopPropagation(); if (drag !== null) move(drag, i); setDrag(null); }}>
-              <span className="signage-thumb">{thumbs.urls[e.assetId] ? <img src={thumbs.urls[e.assetId]} alt="" /> : null}</span>
-              <span className="grow">{a?.name ?? ''}</span>
+            <>
+              <span className={`signage-thumb${e.paused ? ' paused' : ''}`}>{thumbs.urls[e.assetId] ? <img src={thumbs.urls[e.assetId]} alt="" /> : null}</span>
+              <span className={`grow${e.paused ? ' paused' : ''}`}>{a?.name ?? ''}</span>
+              {/* 秒数・止める・削除はひとまとまり（幅が足りなければ次の行へ回る） */}
+              <span className="signage-row-controls">
               {a?.kind === 'video'
                 ? <span className="small muted">{a.durationMs ? fmtDuration(a.durationMs) : ''}</span>
                 : <input className="num-input" type="number" min={SIGNAGE_LIMITS.minSeconds} max={SIGNAGE_LIMITS.maxSeconds} placeholder="秒" aria-label="出す秒数"
@@ -419,13 +415,15 @@ function FlowEditor({ screen, screens, assets, thumbs, onFiles, onError, onChang
                     const v = ev.target.value === '' ? null : Number(ev.target.value);
                     if (v !== e.seconds) save(flow.entries.map((x, j) => (j === i ? { ...x, seconds: v } : x)));
                   }} />}
-              <button className="btn ghost small" disabled={i === 0} onClick={() => move(i, i - 1)} aria-label="上へ">↑</button>
-              <button className="btn ghost small" disabled={i === flow.entries.length - 1} onClick={() => move(i, i + 1)} aria-label="下へ">↓</button>
-              <button className="btn ghost small" onClick={() => save(flow.entries.filter((_, j) => j !== i))} aria-label="流れから外す">×</button>
-            </li>
+              {/* 止める・再開する（行は流れに残す。拡張機能と同じスライドのスイッチ。押すとすぐ保存する） */}
+              <button type="button" role="switch" aria-checked={!e.paused} aria-label={`${a?.name ?? '素材'}を${e.paused ? '再開する' : '止める'}`}
+                title={e.paused ? '停止' : '再開'} className={e.paused ? 'switch' : 'switch on'}
+                onClick={() => save(flow.entries.map((x, j) => (j === i ? { assetId: x.assetId, seconds: x.seconds, ...(x.paused ? {} : { paused: true }) } : x)))}><span /></button>
+              <button className="btn ghost small danger" onClick={() => save(flow.entries.filter((_, j) => j !== i))} aria-label="流れから削除する">削除</button>
+              </span>
+            </>
           );
-        })}
-      </ol>
+        }} />
       <div className="row wrap">
         <select value="" onChange={(e) => { if (e.target.value) save([...flow.entries, { assetId: e.target.value, seconds: null }]); }} aria-label="素材を足す">
           <option value="">素材を追加</option>
@@ -474,7 +472,7 @@ function AssetList({ assets, screens, usage, sounds, thumbs, onFiles, onChanged,
                 {sounds.map((x) => <option key={x.id} value={x.id}>音: {x.name}</option>)}
               </select>
             )}
-            <button className="btn ghost small" onClick={() => void api.signage.deleteAsset(a.id).then(onChanged).catch((e) => onError(describeError(e, '削除できませんでした')))}>削除</button>
+            <button className="btn ghost small danger" onClick={() => void api.signage.deleteAsset(a.id).then(onChanged).catch((e) => onError(describeError(e, '削除できませんでした')))}>削除</button>
           </div>
         ))}
       </div>

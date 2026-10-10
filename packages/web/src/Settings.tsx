@@ -16,6 +16,7 @@ import { statusLabel } from './components.js';
 import { SecretaryAvatar } from './nav.js';
 import { KEY_BINDINGS, isTouchOnly, keyLabel } from './keys.js';
 import { SaveButton } from './save.js';
+import { SortableList } from './Sortable.js';
 import { playSample } from './voice.js';
 
 /** 通知の種類（個人設定で切れるもの）。 */
@@ -87,14 +88,6 @@ export function Settings({ me, agents, onChanged, section }: {
     setS({ ...s, [k]: { ...s[k], ...v } });
 
   const ordered = orderAgents(agents, s.menu.order);
-  const move = (id: string, d: -1 | 1) => {
-    const ids = ordered.map((a) => a.id);
-    const i = ids.indexOf(id);
-    const j = i + d;
-    if (j < 0 || j >= ids.length) return;
-    [ids[i], ids[j]] = [ids[j]!, ids[i]!];
-    set('menu', { order: ids });
-  };
 
   // 1 度に 1 区分だけを出す（仕様書 第6.5.0節）
   const on = (id: SettingsSection) => section === id;
@@ -312,27 +305,18 @@ export function Settings({ me, agents, onChanged, section }: {
       <DisplaySettings />
       <div className="card">
         <h3>メニューの並び</h3>
-        <table className="table">
-          <tbody>
-            {ordered.map((a, i) => (
-              <tr key={a.id}>
-                <td>
-                  <label className="check">
-                    <input type="checkbox" checked={!s.menu.hidden.includes(a.id)}
-                      onChange={(e) => set('menu', {
-                        hidden: e.target.checked ? s.menu.hidden.filter((x) => x !== a.id) : [...s.menu.hidden, a.id],
-                      })} />
-                    {a.name}
-                  </label>
-                </td>
-                <td className="num">
-                  <button className="btn ghost small" disabled={i === 0} onClick={() => move(a.id, -1)}>↑</button>{' '}
-                  <button className="btn ghost small" disabled={i === ordered.length - 1} onClick={() => move(a.id, 1)}>↓</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        {/* 左のつまみをつかんで動かす（第6.5.6節）。キーボードでは、つまみを選んで ↑・↓ キー */}
+        <SortableList items={ordered} keyOf={(a) => a.id} nameOf={(a) => a.name}
+          onMove={(next) => set('menu', { order: next.map((a) => a.id) })}
+          render={(a) => (
+            <label className="check">
+              <input type="checkbox" checked={!s.menu.hidden.includes(a.id)}
+                onChange={(e) => set('menu', {
+                  hidden: e.target.checked ? s.menu.hidden.filter((x) => x !== a.id) : [...s.menu.hidden, a.id],
+                })} />
+              {a.name}
+            </label>
+          )} />
         <div style={{ marginTop: 'calc(12px * var(--space-scale))' }}>
           <SaveButton run={() => api.saveMySettings('menu', { ...s.menu, order: ordered.map((a) => a.id) }).then(onChanged)} />
         </div>

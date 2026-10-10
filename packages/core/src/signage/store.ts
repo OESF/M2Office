@@ -448,15 +448,15 @@ export class PostgresSignageStore implements SignageStore {
   }
 
   async listEntries(tenantId: string, screenId: string, bandId: string | null = null): Promise<SignageEntry[]> {
-    const rows = await this.q<{ asset_id: string; seconds: number | null }>(tenantId,
-      `select asset_id, seconds from signage_entries where tenant_id = $1 and screen_id = $2 and band_id is not distinct from $3 order by position`, [tenantId, screenId, bandId]);
-    return rows.map((r) => ({ assetId: r.asset_id, seconds: r.seconds }));
+    const rows = await this.q<{ asset_id: string; seconds: number | null; paused: boolean }>(tenantId,
+      `select asset_id, seconds, paused from signage_entries where tenant_id = $1 and screen_id = $2 and band_id is not distinct from $3 order by position`, [tenantId, screenId, bandId]);
+    return rows.map((r) => ({ assetId: r.asset_id, seconds: r.seconds, ...(r.paused ? { paused: true } : {}) }));
   }
 
   async listAllEntries(tenantId: string, screenId: string): Promise<(SignageEntry & { bandId: string | null })[]> {
-    const rows = await this.q<{ asset_id: string; seconds: number | null; band_id: string | null }>(tenantId,
-      `select asset_id, seconds, band_id from signage_entries where tenant_id = $1 and screen_id = $2 order by band_id nulls first, position`, [tenantId, screenId]);
-    return rows.map((r) => ({ assetId: r.asset_id, seconds: r.seconds, bandId: r.band_id }));
+    const rows = await this.q<{ asset_id: string; seconds: number | null; band_id: string | null; paused: boolean }>(tenantId,
+      `select asset_id, seconds, band_id, paused from signage_entries where tenant_id = $1 and screen_id = $2 order by band_id nulls first, position`, [tenantId, screenId]);
+    return rows.map((r) => ({ assetId: r.asset_id, seconds: r.seconds, bandId: r.band_id, ...(r.paused ? { paused: true } : {}) }));
   }
 
   async replaceEntries(tenantId: string, screenId: string, entries: SignageEntry[], expectedVersion: number, by: string, bandId: string | null = null): Promise<number | null> {
@@ -471,8 +471,8 @@ export class PostgresSignageStore implements SignageStore {
       await c.query(`delete from signage_entries where tenant_id = $1 and screen_id = $2 and band_id is not distinct from $3`, [tenantId, screenId, bandId]);
       for (let i = 0; i < entries.length; i++) {
         const e = entries[i]!;
-        await c.query(`insert into signage_entries (id, tenant_id, screen_id, asset_id, position, seconds, band_id) values (gen_random_uuid()::text, $1, $2, $3, $4, $5, $6)`,
-          [tenantId, screenId, e.assetId, i, e.seconds, bandId]);
+        await c.query(`insert into signage_entries (id, tenant_id, screen_id, asset_id, position, seconds, band_id, paused) values (gen_random_uuid()::text, $1, $2, $3, $4, $5, $6, $7)`,
+          [tenantId, screenId, e.assetId, i, e.seconds, bandId, !!e.paused]);
       }
       return up.rows[0].flow_version;
     });

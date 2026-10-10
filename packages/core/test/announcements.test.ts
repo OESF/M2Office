@@ -134,8 +134,12 @@ test('予約と期間の後: 予約の時刻に出し、期間が終わったら
   if (!('announcement' in r)) throw new Error('下書きを作れない');
   const id = r.announcement.id;
   const at = new Date(Date.now() + 2 * 3_600_000).toISOString();
-  assert.equal(await service.update(who, id, { publishAt: at, startDate: '2026-10-10', endDate: '2026-10-10' }), null);
-  assert.equal(await service.update(who, id, { endDate: '2026-10-01' }), '期間の終わりが始めより前です');
+  // 期間は、出す時刻（いまから 3 時間後）の日本の日付の 1 日（試験を走らせる時刻に左右されないように）
+  const jstDay = (ms: number) => new Date(ms + 9 * 3_600_000).toISOString().slice(0, 10);
+  const day = jstDay(Date.now() + 3 * 3_600_000);
+  const nextDay = new Date(Date.parse(`${day}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+  assert.equal(await service.update(who, id, { publishAt: at, startDate: day, endDate: day }), null);
+  assert.equal(await service.update(who, id, { endDate: '2000-01-01' }), '期間の終わりが始めより前です');
   const a = (await store.get('t1', id))!;
   const s = await service.publish(who, id, announcementDigest(a));
   assert.ok('status' in s && s.status === 'scheduled');
@@ -144,8 +148,8 @@ test('予約と期間の後: 予約の時刻に出し、期間が終わったら
   assert.equal((await service.tick(new Date(Date.now() + 3 * 3_600_000))).published, 1);
   assert.equal(MockLineClient.pushed('t1').length, 1);
   assert.equal(screens['s1']!.length, 1);
-  // 期間（10/10）の次の日になったら片付ける
-  assert.equal((await service.tick(new Date('2026-10-11T00:30:00Z'))).ended, 1);
+  // 期間の次の日になったら片付ける
+  assert.equal((await service.tick(new Date(`${nextDay}T00:30:00Z`))).ended, 1);
   assert.equal(screens['s1']!.length, 0, 'サイネージの画面から外す');
   assert.equal(assets.size, 0);
   assert.equal((await store.get('t1', id))!.status, 'ended');

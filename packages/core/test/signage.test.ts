@@ -285,3 +285,31 @@ test('割り込みの素材にすると、中身の分からない名前の画�
   assets.get('i1')!.isInterrupt = false;
   assert.equal(((await make(false).setInterruptAsset('t1', 'u1', 'i1', { isInterrupt: true })) as { asset: { name: string } }).asset.name, 'IMG_9.jpg');
 });
+
+test('流れの止めた行: 流れには残し、画面の再生には渡さない。時間帯の流れが全部止まっていれば空にする（第31.9.4節）', async () => {
+  const assets = [
+    { id: 'a1', kind: 'image', mime: 'image/png', sha256: 'x', bytes: 1, width: 1, height: 1, durationMs: null, caption: null, isInterrupt: false },
+    { id: 'a2', kind: 'image', mime: 'image/png', sha256: 'y', bytes: 1, width: 1, height: 1, durationMs: null, caption: null, isInterrupt: false },
+  ];
+  const { SignageService: Service } = await import('../src/index.js');
+  const svc = new Service({
+    store: {
+      listAllEntries: async () => [
+        { assetId: 'a1', seconds: null, bandId: null }, { assetId: 'a2', seconds: 5, bandId: null, paused: true },
+        { assetId: 'a1', seconds: null, bandId: 'b1', paused: true },
+      ],
+      listBands: async () => [{ id: 'b1', start: 540, end: 600, days: [1, 2, 3, 4, 5] }],
+      listAssets: async () => assets,
+      listSounds: async () => [],
+    } as never,
+    repo: {
+      getTenantSettings: async () => ({ signage: { jingle: 'chime', imageSeconds: 10, color: null }, company: { legalName: '会社' } }),
+      findTenantById: async () => ({ name: '会社' }),
+    } as never,
+    files: {} as never,
+  } as never);
+  const s = await svc.playState('t1', { id: 's1', name: '受付', orientation: 'landscape', rotation: 0, volume: 70, flowVersion: 3 } as never);
+  assert.deepEqual(s.entries, [{ assetId: 'a1', seconds: null }], '止めた行は渡さない');
+  assert.deepEqual(s.bands[0]!.entries, [], '時間帯の流れが全部止まっていれば空（端末はいつもの流れを流す）');
+  assert.deepEqual(s.assets.map((a) => a.id), ['a1'], '止めた行だけの素材は取り置かせない');
+});

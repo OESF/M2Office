@@ -614,7 +614,7 @@ export class SignageService {
     if (typeof version !== 'number' || !Number.isInteger(version)) return { error: '流れの版がありません', status: 400 };
     const assets = new Map((await this.deps.store.listAssets(tenantId)).map((a) => [a.id, a]));
     const entries: SignageEntry[] = [];
-    for (const raw of input as { assetId?: unknown; seconds?: unknown }[]) {
+    for (const raw of input as { assetId?: unknown; seconds?: unknown; paused?: unknown }[]) {
       const a = assets.get(String(raw?.assetId ?? ''));
       if (!a) return { error: '流れに無い素材が入っています', status: 400 };
       let seconds: number | null = null;
@@ -623,7 +623,8 @@ export class SignageService {
         if (!Number.isInteger(n) || n < SIGNAGE_LIMITS.minSeconds || n > SIGNAGE_LIMITS.maxSeconds) return { error: `秒数は ${SIGNAGE_LIMITS.minSeconds}〜${SIGNAGE_LIMITS.maxSeconds} 秒にしてください`, status: 400 };
         seconds = n;
       }
-      entries.push({ assetId: a.id, seconds });
+      // 止めている行は残したまま流さない（行のスライドスイッチ。第31.9.4節）
+      entries.push({ assetId: a.id, seconds, ...(raw.paused === true ? { paused: true } : {}) });
     }
     const next = await this.deps.store.replaceEntries(tenantId, screenId, entries, version, userId, bandId);
     if (next === null) {
@@ -685,10 +686,12 @@ export class SignageService {
       this.deps.repo.getTenantSettings(tenantId), this.deps.repo.findTenantById(tenantId), this.deps.store.listSounds(tenantId),
     ]);
     // いつもの流れと、時間帯ごとの流れ（端末が時刻を見て選ぶ。つながらない間も切り替わるよう、すべて渡す。第31.6.6節）
+    // 止めている行は渡さない（時間帯の流れがすべて止まっていれば空になり、端末はいつもの流れを流す。第31.9.4節）
+    const live = rows.filter((e) => !e.paused);
     const plain = ({ assetId, seconds }: SignageEntry) => ({ assetId, seconds });
-    const entries = rows.filter((e) => e.bandId === null).map(plain);
-    const bands = bandList.map((b) => ({ ...b, entries: rows.filter((e) => e.bandId === b.id).map(plain) }));
-    const used = new Set(rows.map((e) => e.assetId));
+    const entries = live.filter((e) => e.bandId === null).map(plain);
+    const bands = bandList.map((b) => ({ ...b, entries: live.filter((e) => e.bandId === b.id).map(plain) }));
+    const used = new Set(live.map((e) => e.assetId));
     // 割り込みの素材も取り置く（つながらない間にも出せるように。第31.9.1節）
     const interrupts = all.filter((a) => a.isInterrupt && a.kind !== 'video');
     for (const a of interrupts) used.add(a.id);

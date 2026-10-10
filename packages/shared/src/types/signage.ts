@@ -165,6 +165,8 @@ export interface SignageEntry {
   assetId: string;
   /** 画像の秒数（`null` なら会社の既定。動画は `null`）。 */
   seconds: number | null;
+  /** 止めている（流れに残したまま、画面には流さない。行のスライドスイッチで止める・再開する。第31.9.4節）。省けば流す。 */
+  paused?: boolean;
 }
 
 /**

@@ -1656,7 +1656,7 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .signage-flow, .signage-assets { padding: calc(12px * var(--space-scale)); display: flex; flex-direction: column; gap: 8px; }
 .signage-flow .row, .signage-assets .row { gap: 8px; align-items: center; }
 .signage-entries { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-.signage-entries li { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; cursor: grab; }
+.signage-entries li { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; }
 /* 名前の長さで秒数の欄とボタンの位置が動かないよう、名前は残りの幅を使い、秒数の欄は幅を決める（第 0.259.1 版） */
 .signage-bands { display: flex; flex-wrap: wrap; gap: 4px; margin: calc(8px * var(--space-scale)) 0; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
 .signage-bands button { white-space: nowrap; border: 1px solid var(--line); background: none; color: var(--muted); border-radius: 999px; padding: 3px 12px; cursor: pointer; font-size: calc(13px * var(--font-scale)); }
@@ -1668,8 +1668,16 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .signage-days button { background: none; border: none; padding: 3px 8px; color: var(--muted); cursor: pointer; }
 .signage-days button + button { border-left: 1px solid var(--line); }
 .signage-days button.on { background: var(--accent-soft); color: var(--accent); }
-.signage-entries li > .grow { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
-.signage-entries li > .num-input, .signage-entries li > .small.muted { flex: none; width: 88px; text-align: right; }
+.signage-entries li .grow { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.signage-entries li .num-input, .signage-entries li .small.muted { flex: none; width: 88px; text-align: right; }
+/* 流れの行は、つまみの右に縮小図・名前・秒数・外すを横に並べる（つかんで動かす一覧。第31.6節） */
+.signage-entries.sortable li, .signage-entries.sortable li:last-child { border-bottom: 1px solid var(--line); }
+.signage-entries .sortable-body { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.signage-entries .sortable-body > .grow { min-width: 7em; }
+.signage-row-controls { display: flex; align-items: center; gap: 8px; margin-left: auto; flex: none; }
+.signage-row-controls > .btn { white-space: nowrap; }
+.signage-entries .signage-row-controls > .num-input { width: 64px; }
+.signage-entries .paused { opacity: 0.45; }
 .signage-thumb { width: 64px; height: 36px; flex: none; background: #000; border-radius: 4px; overflow: hidden; }
 .signage-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .signage-thumb.large { width: 100%; height: auto; aspect-ratio: 16 / 9; }
@@ -2214,3 +2222,16 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .sales-unmatched-list li { padding: calc(8px * var(--space-scale)) 0; border-bottom: 1px solid var(--line); display: grid; gap: 4px; }
 .sales-unmatched-list li:last-child { border-bottom: 0; }
 .sales-unmatched-list select { max-width: 100%; }
+
+/* つかんで動かして並べ替える一覧（個人設定のメニューの並び。仕様書 第6.5.6節） */
+.sortable { list-style: none; margin: 0; padding: 0; }
+.sortable li { display: flex; align-items: center; gap: calc(6px * var(--space-scale)); padding: calc(4px * var(--space-scale)) 0; border-bottom: 1px solid var(--line); background: var(--panel); }
+.sortable li:last-child { border-bottom: 0; }
+.sortable li.dragging { position: relative; z-index: 2; background: var(--accent-soft); border-radius: 6px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3); }
+.sortable.sorting li:not(.dragging) { transition: transform 150ms ease; }
+.sortable.sorting { user-select: none; }
+.sortable-handle { flex: none; width: 32px; min-height: 32px; border: 0; background: transparent; color: var(--muted); cursor: grab; touch-action: none; font-size: 18px; line-height: 1; border-radius: 6px; }
+.sortable-handle:hover, .sortable-handle:focus-visible { color: var(--ink); background: var(--line); }
+.sortable.sorting .sortable-handle { cursor: grabbing; }
+.sortable-body { flex: 1; min-width: 0; }
+
