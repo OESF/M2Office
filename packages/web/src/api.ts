@@ -17,7 +17,7 @@ import type { CardCorners, CardEnglish, PrintDesign, PrintDesignDetailView, Prin
   YeaDeclaration, YeaDeclarationView, YeaResult, SocialDetermination, SocialEvent, InsuranceEligibility, LaborInsuranceData, LaborInsuranceView, ShiftView, HrShiftSettings, HrShift, HrAnnualSettings, HrFlexSettings, HrTerminalSettings,
   InventoryCount, InventoryCountRow, InventoryCountScope, InventoryCountView, InventorySupplier,
   InventoryBooking, InventoryBookingMapping, InventoryBookingSource, InventoryPublication, InventoryPublicationScope, InventoryPublicSnapshot,
-  InventorySalesLink, InventorySalesScope, InventorySaleUnmatched,
+  InventoryCatalogScope, InventorySaleUnmatched, ExternalApp, AppFunctionId, AppFunctionInfo, AppSettings,
   SignageAsset, SignageBand, SignageEntry, SignageScreen, SignageSettings, SignageInterruptInput, SignageInterruptView, SignagePhrase, SignageSound, SignageSource,
   ColumnWordPress, WebColumn, WebColumnSettings, WebColumnVersion, WebColumnTheme, ColumnPlanSlot, ColumnSignageSet,
   Inquiry, InquiryDetail, InquiryParty, InquiryTask, InquiryReply, InquiryMailSkipped, InquiryMonthStats, InquirySettings, InquiryFaqTopic,
@@ -439,7 +439,7 @@ export interface InventoryForecastRow {
 }
 
 /** 在庫の Web への公開のまとまり 1 つ（管理者向け。仕様書 第29.12.1節・第29.12.2節）。 */
-/** 販売管理に渡る商品の一覧の 1 品目（見本。仕様書 第29.20.1節）。 */
+/** 外部のアプリに渡る商品の一覧の 1 品目（見本。仕様書 第29.20.1節）。 */
 export interface InventorySalesItemView {
   id: string; name: string; publicName: string | null; code: string | null; barcodes: string[]; category: string | null; unit: string;
   status: 'in_stock' | 'low' | 'out';
@@ -1803,26 +1803,6 @@ export const api = {
     stopPublication: (id: string) => call<InventoryPublicationView>(`/inventory/publications/${encodeURIComponent(id)}/stop`, { method: 'POST' }),
     /** まとまりを削除する（止めてあるものだけ）。 */
     deletePublication: (id: string) => call<{ ok: true }>(`/inventory/publications/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-    /** 販売管理とのつなぎの一覧（管理者。仕様書 第29.20.1節）。鍵は返らない。 */
-    salesLinks: () => call<{ items: InventorySalesLink[]; max: number }>('/inventory/sales-links'),
-    /** つなぎを作る。鍵はこの答えでだけ返る。 */
-    createSalesLink: (name: string) => call<{ link: InventorySalesLink; key: string }>('/inventory/sales-links', { method: 'POST', body: JSON.stringify({ name }) }),
-    /** つなぎの名前を変える（承認し直さない）。 */
-    renameSalesLink: (id: string, name: string) =>
-      call<InventorySalesLink>(`/inventory/sales-links/${encodeURIComponent(id)}/name`, { method: 'PUT', body: JSON.stringify({ name }) }),
-    /** 承認する前の見本（販売管理に渡るとおりの一覧）。 */
-    previewSalesLink: (scope: InventorySalesScope) =>
-      call<{ items: InventorySalesItemView[] }>('/inventory/sales-links/preview', { method: 'POST', body: JSON.stringify(scope) }),
-    /** この内容で渡す（押した管理者が承認者）。 */
-    approveSalesLink: (id: string, scope: InventorySalesScope) =>
-      call<InventorySalesLink>(`/inventory/sales-links/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(scope) }),
-    /** 鍵を出し直す（前の鍵はすぐ使えなくなる）。 */
-    rekeySalesLink: (id: string) => call<{ link: InventorySalesLink; key: string }>(`/inventory/sales-links/${encodeURIComponent(id)}/rekey`, { method: 'POST' }),
-    /** つなぎを止める・動かす。 */
-    setSalesLinkStatus: (id: string, on: boolean) =>
-      call<InventorySalesLink>(`/inventory/sales-links/${encodeURIComponent(id)}/${on ? 'resume' : 'stop'}`, { method: 'POST' }),
-    /** つなぎを削除する（止めてあるものだけ）。 */
-    deleteSalesLink: (id: string) => call<{ ok: true }>(`/inventory/sales-links/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     /** 照らせなかった販売の行。 */
     salesUnmatched: () => call<{ items: InventorySaleUnmatched[] }>('/inventory/sales-unmatched'),
     /** 照らせなかった行に品目を選び、記録する。 */
@@ -2211,6 +2191,24 @@ export const api = {
     }>(`/admin/audit-events?${auditParams(q)}`),
     downloadAudit: downloadAuditCsv,
     connections: () => call<ConnectionSettings>('/admin/connections'),
+    /** 外部のアプリの一覧と、この会社で選べる機能（仕様書 第13.4.1節）。鍵は返らない。 */
+    apps: () => call<{ items: ExternalApp[]; max: number; functions: AppFunctionInfo[] }>('/admin/apps'),
+    /** 外部のアプリを登録する。鍵はこの答えでだけ返る。 */
+    createApp: (name: string) => call<{ app: ExternalApp; key: string }>('/admin/apps', { method: 'POST', body: JSON.stringify({ name }) }),
+    /** 外部のアプリの名前を変える（承認し直さない）。 */
+    renameApp: (id: string, name: string) => call<ExternalApp>(`/admin/apps/${encodeURIComponent(id)}/name`, { method: 'PUT', body: JSON.stringify({ name }) }),
+    /** この内容で許す（機能と機能ごとの設定を承認する）。 */
+    approveApp: (id: string, functions: AppFunctionId[], settings: AppSettings) =>
+      call<ExternalApp>(`/admin/apps/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify({ functions, settings }) }),
+    /** 鍵を出し直す（前の鍵はすぐ使えなくなる）。 */
+    rekeyApp: (id: string) => call<{ app: ExternalApp; key: string }>(`/admin/apps/${encodeURIComponent(id)}/rekey`, { method: 'POST' }),
+    /** 外部のアプリを止める・動かす。 */
+    setAppStatus: (id: string, on: boolean) => call<ExternalApp>(`/admin/apps/${encodeURIComponent(id)}/${on ? 'resume' : 'stop'}`, { method: 'POST' }),
+    /** 外部のアプリを削除する（止めてあるものだけ）。 */
+    deleteApp: (id: string) => call<{ ok: true }>(`/admin/apps/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    /** 機能「商品の一覧を読む」の見本（アプリに渡るとおりの一覧）。 */
+    previewCatalog: (scope: InventoryCatalogScope) =>
+      call<{ items: InventorySalesItemView[] }>('/admin/apps/preview/inventory-catalog', { method: 'POST', body: JSON.stringify(scope) }),
     saveGemini: (v: { mode: 'platform' | 'byok'; apiKey?: string; models?: Record<string, string> }) =>
       call('/admin/connections/gemini', { method: 'PUT', body: JSON.stringify(v) }),
     deleteGeminiKey: () => call('/admin/connections/gemini/key', { method: 'DELETE' }),

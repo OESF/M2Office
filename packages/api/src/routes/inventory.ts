@@ -13,9 +13,8 @@ import QRCode from 'qrcode';
 import {
   readSheet, renderSheet, renderShelfLabels, saveFile, detectKind, enqueueJob, toInstant, IMPORT_MAX_ROWS, INVENTORY_ORDER, MAX_FILE_BYTES, MIME,
   MOBILE_INVENTORY_PATH, type ItemInput, type MoveInput, type PublicationView,
-  salesScopeOf,
 } from '@m2office/core';
-import { INVENTORY_PUBLICATION_MAX, INVENTORY_SALES_LINK_MAX, type InventoryMoveKind, type InventoryPublicationScope, type InventoryPublicField } from '@m2office/shared';
+import { INVENTORY_PUBLICATION_MAX, type InventoryMoveKind, type InventoryPublicationScope, type InventoryPublicField } from '@m2office/shared';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 import { tenantOrigin } from '../tenant-origin.js';
@@ -556,81 +555,8 @@ export function inventoryRoute(deps: AppDeps) {
     return 'error' in res ? c.json(res, 409) : c.json(res);
   });
 
-  // ---- 販売管理とのつなぎ（第29.20.1節）。つなぎの扱いは管理者だけ ----
+  // ---- 外部のアプリの在庫の機能（第29.20.1節）の、照らせなかった販売 ----
   const sales = deps.inventory.sales;
-  const salesAdmin = (c: Parameters<typeof isAdmin>[0]) => (isAdmin(c) ? null : '販売管理とのつなぎを扱えるのは管理者です');
-
-  /** つなぎの一覧（作った順。承認した範囲・承認した人・様子）。鍵は返さない。 */
-  app.get('/sales-links', async (c) => {
-    const denied = salesAdmin(c);
-    if (denied) return c.json({ error: denied }, 403);
-    return c.json({ items: await sales.list(c.get('ctx').tenant.id), max: INVENTORY_SALES_LINK_MAX });
-  });
-
-  /** つなぎを作る。鍵はこの答えでだけ返す。 */
-  app.post('/sales-links', async (c) => {
-    const denied = salesAdmin(c);
-    if (denied) return c.json({ error: denied }, 403);
-    const { tenant, user } = c.get('ctx');
-    const body = await c.req.json<{ name?: unknown }>().catch(() => ({} as { name?: unknown }));
-    const res = await sales.create(tenant.id, user.id, typeof body.name === 'string' ? body.name : '');
-    return 'error' in res ? c.json(res, 400) : c.json(res, 201);
-  });
-
-  /** 承認する前の見本（販売管理に渡るとおりの一覧）。 */
-  app.post('/sales-links/preview', async (c) => {
-    const denied = salesAdmin(c);
-    if (denied) return c.json({ error: denied }, 403);
-    return c.json({ items: await sales.preview(c.get('ctx').tenant.id, salesScopeOf(await c.req.json().catch(() => ({})))) });
-  });
-
-  /** 名前を変える（承認し直さない）。 */
-  app.put('/sales-links/:id/name', async (c) => {
-    const denied = salesAdmin(c);
-    if (denied) return c.json({ error: denied }, 403);
-    const { tenant, user } = c.get('ctx');
-    const body = await c.req.json<{ name?: unknown }>().catch(() => ({} as { name?: unknown }));
-    const res = await sales.rename(tenant.id, user.id, c.req.param('id'), typeof body.name === 'string' ? body.name : '');
-    return 'error' in res ? c.json(res, 400) : c.json(res);
-  });
-
-  /** この内容で渡す（押した管理者が承認者。社外への送信を、渡す範囲で一度承認する。第9.4.0節）。 */
-  app.put('/sales-links/:id', async (c) => {
-    const denied = salesAdmin(c);
-    if (denied) return c.json({ error: denied }, 403);
-    const { tenant, user } = c.get('ctx');
-    const res = await sales.approve(tenant.id, user.id, c.req.param('id'), salesScopeOf(await c.req.json().catch(() => ({}))));
-    return 'error' in res ? c.json(res, 400) : c.json(res);
-  });
-
-  /** 鍵を出し直す（前の鍵はすぐ使えなくなる）。新しい鍵はこの答えでだけ返す。 */
-  app.post('/sales-links/:id/rekey', async (c) => {
-    const denied = salesAdmin(c);
-    if (denied) return c.json({ error: denied }, 403);
-    const { tenant, user } = c.get('ctx');
-    const res = await sales.rekey(tenant.id, user.id, c.req.param('id'));
-    return 'error' in res ? c.json(res, 404) : c.json(res);
-  });
-
-  /** 止める・動かす。 */
-  for (const [path, status] of [['stop', 'stopped'], ['resume', 'active']] as const) {
-    app.post(`/sales-links/:id/${path}`, async (c) => {
-      const denied = salesAdmin(c);
-      if (denied) return c.json({ error: denied }, 403);
-      const { tenant, user } = c.get('ctx');
-      const res = await sales.setStatus(tenant.id, user.id, c.req.param('id'), status);
-      return 'error' in res ? c.json(res, 404) : c.json(res);
-    });
-  }
-
-  /** 削除する（止めてあるつなぎだけ）。 */
-  app.delete('/sales-links/:id', async (c) => {
-    const denied = salesAdmin(c);
-    if (denied) return c.json({ error: denied }, 403);
-    const { tenant, user } = c.get('ctx');
-    const res = await sales.remove(tenant.id, user.id, c.req.param('id'));
-    return 'error' in res ? c.json(res, 409) : c.json(res);
-  });
 
   /** 照らせなかった販売の行（在庫管理の利用範囲の人が見て、品目を選べる）。 */
   app.get('/sales-unmatched', async (c) => c.json({ items: await sales.unmatched(c.get('ctx').tenant.id) }));

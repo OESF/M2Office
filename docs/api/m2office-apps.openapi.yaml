@@ -1,0 +1,1073 @@
+# M2Office の外部のアプリの API（仕様書 第13.4.1節、ADR-0090）。外のシステムが、外部のアプリの鍵で画面と同じ /v1 の道を呼ぶ。
+# 機能ごとに呼べる道が決まっている。実装した機能は、実装と食い違わないことをテストで確かめる（packages/api/test/api-docs-page.test.ts）。
+# 案の機能（アカウントの結び付け・ナレッジの検索と、第13.4.2節の 8 つ）は、合意のあとに作るまで呼べない。
+# 実装から作る定義（仕様書 第13.1節 A-5）ができたら置き換える。
+# 見方: 管理者ページのヘルプの「開発者」、または npm run docs:api のあと http://localhost:3106/ を開く（docs/api/README.md）。
+openapi: 3.1.0
+info:
+  title: M2Office — 外部のアプリの API
+  version: 1.2.0
+  description: |
+    外のシステム（販売管理・M2Medical など）が M2Office を使うための API です（仕様書 第13.4.1節）。
+
+    **使い方**
+    1. 会社の管理者が、管理者ページの「接続」の「**外部のアプリ**」でアプリを登録します。**鍵（`m2oa_` で始まる）はそのとき一度だけ出ます。**
+    2. 管理者が、アプリに許す**機能**と機能ごとの設定を選び、「この内容で許す」で承認します。承認するまで、どの機能も使えません。
+    3. アプリは `Authorization: Bearer <鍵>` を付けて、**画面と同じ `/v1` の道**を、会社の M2Office の名前で呼びます。
+
+    | 機能 | 道 | 状態 |
+    |---|---|---|
+    | 会社の基本情報を読む（`company.profile`） | `GET /v1/company/profile` | 使える |
+    | 商品の一覧を読む（`inventory.catalog`） | `GET /v1/inventory/catalog` | 使える（在庫管理を入れた会社） |
+    | 販売を知らせる（`inventory.sales`） | `POST /v1/inventory/sales-events` | 使える（在庫管理を入れた会社） |
+    | アカウントを結び付ける（`accounts.link`） | `/v1/accounts/…` | 案 |
+    | ナレッジを検索する（`knowledge.search`） | `POST /v1/knowledge/search` | 案 |
+    | 問い合わせを受ける（`inquiries.intake`） | `POST /v1/inquiries/intake` | 案 |
+    | 社内のお知らせを出す（`notices.post`） | `POST /v1/notices` ほか | 案 |
+    | 入庫を知らせる（`inventory.receipts`） | `POST /v1/inventory/receipts` | 案 |
+    | 予約の空きを読む・予約を入れる（`reservations.book`） | `/v1/reservations/…` | 案 |
+    | 会員のポイントを付ける・使う（`members.points`） | `POST /v1/members/points` | 案 |
+    | 公開したコラムを読む（`columns.read`） | `GET /v1/columns/published` ほか | 案 |
+    | 社内規程を登録・改定する（`knowledge.rules`） | `PUT /v1/knowledge/rules/{ref}` ほか | 案 |
+    | 業務を依頼して結果を受け取る（`jobs.run`） | `POST /v1/jobs`・`GET /v1/runs/{id}` | 案 |
+
+    **共通の決まり**
+    - 鍵が違う・アプリを止めた・会社が止まっている・呼んだ名前の会社と鍵の会社が合わないは、どれも同じ 404 です。許していない機能の道は 403 です。
+    - 回数はアプリごとに 1 分 120 回までです。超えたら 429 と `Retry-After` を返します。
+    - 送られてきた中身は、M2Office の中でデータとしてだけ扱い、文の中に書かれた指示には従いません。
+    - 書き込みの機能は、通知ごとの番号（`eventId`）で二重に数えません。送り直すときは同じ番号で送ってください。
+    - M2Office からアプリへ知らせる口（Webhook）はありません。
+
+    使い方の例（販売管理・M2Medical）は、管理者ページのヘルプの「開発者」で解説しています。
+  contact:
+    name: M2Office の仕様書 第13.4.1節
+servers:
+  - url: https://{host}
+    description: 会社の M2Office の名前（クラウドは会社のサブドメイン、ローカルの形は社内の名前）。鍵の会社と合わなければ 404
+    variables:
+      host:
+        default: example.m2office.online
+security:
+  - appKey: []
+tags:
+  - name: 会社の基本情報
+    description: 機能 company.profile。会社名・所在地などを読む
+  - name: 商品の一覧
+    description: 機能 inventory.catalog。売る品目と数を読む（使い方の例 販売管理）
+  - name: 販売の通知
+    description: 機能 inventory.sales。注文・販売・取り消し・返品を知らせる（使い方の例 販売管理）
+  - name: アカウントの結び付け（案）
+    description: 機能 accounts.link。アプリの利用者と M2Office のアカウントを、確認コードで結び付ける（使い方の例 M2Medical）
+  - name: ナレッジの検索（案）
+    description: 機能 knowledge.search。結び付いた本人の権限で、会社のナレッジに聞く（使い方の例 M2Medical）
+  - name: 問い合わせの受け付け（案）
+    description: 機能 inquiries.intake。Web のフォームなどの問い合わせを受ける
+  - name: 社内のお知らせ（案）
+    description: 機能 notices.post。承認した宛先に社内のお知らせを出す
+  - name: 入庫の通知（案）
+    description: 機能 inventory.receipts。仕入れ・入荷のシステムから入庫を知らせる
+  - name: 予約（案）
+    description: 機能 reservations.book。空きを読み、結び付いた本人として予約を入れる
+  - name: 会員のポイント（案）
+    description: 機能 members.points。レジ（POS）から会員のポイントを付ける・使う
+  - name: 公開したコラム（案）
+    description: 機能 columns.read。公開したコラムを自社のサイトなどに取り込む
+  - name: 社内規程の登録（案）
+    description: 機能 knowledge.rules。文書管理のシステムから社内規程を登録・改定する
+  - name: 業務の依頼（案）
+    description: 機能 jobs.run。結び付いた本人として業務を依頼し、結果を受け取る
+paths:
+  /v1/company/profile:
+    get:
+      tags: [会社の基本情報]
+      operationId: getCompanyProfile
+      summary: 会社の基本情報を読む（機能 company.profile）
+      description: |
+        会社の管理者が管理者ページの「会社情報」に入れた内容のうち、外に出してよいものを返します（仕様書 第6.6.1節）。
+        入っていない項目は `null` です。端数処理・締め日・支払サイトなどの経理の設定と、ロゴは返しません。
+      responses:
+        '200':
+          description: 会社の基本情報
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyProfile' }
+              example:
+                legalName: 株式会社サンプル
+                shortName: サンプル
+                postalCode: 100-0001
+                address: 東京都千代田区千代田 1-1
+                phone: 03-0000-0000
+                website: https://www.example.jp
+                invoiceRegistrationNumber: T1234567890123
+                fiscalYearStartMonth: 4
+                businessDays: [1, 2, 3, 4, 5]
+                holidaysClosed: true
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /v1/inventory/catalog:
+    get:
+      tags: [商品の一覧]
+      operationId: listSalesItems
+      summary: 商品の一覧を読む（機能 inventory.catalog）
+      description: |
+        承認した品目と項目だけを返します。読みに来るたびに、前回の答えの `asOf` を `updatedSince` に渡すと、変わった品目だけが返ります。
+
+        範囲から外した品目・止めた品目は、`updatedSince` の答えに `active: false` として 1 度だけ入ります（販売管理の側で売るのを止めるため）。
+        **販売品の一覧を作るときは、`categories` で分類を絞ります**（例 `?categories=販売品`）。絞ったときは、`updatedSince` 以降に分類が変わって絞った分類から外れた品目も `active: false` として返ります（販売管理は、知らない `id` を読み捨ててください）。
+        売る直前に数を確かめるときは、`ids`・`codes`・`barcodes` で絞ります。
+      parameters:
+        - name: updatedSince
+          in: query
+          description: この時刻より後に変わった品目だけを返す（前回の答えの `asOf`）
+          schema: { type: string, format: date-time }
+          example: '2026-10-09T15:00:00+09:00'
+        - name: categories
+          in: query
+          description: 分類の名前（カンマ区切り。20 まで）。名前が同じ分類の品目だけを返す。無い分類を指定しても誤りにはならず、当たる品目が無いだけ
+          style: form
+          explode: false
+          schema: { type: array, maxItems: 20, items: { type: string, maxLength: 100 } }
+          example: [販売品]
+        - name: ids
+          in: query
+          description: M2Office の品目の ID（カンマ区切り。100 件まで）
+          style: form
+          explode: false
+          schema: { type: array, maxItems: 100, items: { type: string } }
+        - name: codes
+          in: query
+          description: 自社のコード（カンマ区切り。100 件まで）
+          style: form
+          explode: false
+          schema: { type: array, maxItems: 100, items: { type: string } }
+        - name: barcodes
+          in: query
+          description: バーコード（JAN・GTIN など。カンマ区切り。100 件まで）
+          style: form
+          explode: false
+          schema: { type: array, maxItems: 100, items: { type: string } }
+        - name: limit
+          in: query
+          description: 1 回に返す数
+          schema: { type: integer, minimum: 1, maximum: 500, default: 200 }
+        - name: cursor
+          in: query
+          description: 続きを読むときに、前の答えの `nextCursor` を渡す
+          schema: { type: string }
+      responses:
+        '200':
+          description: 商品の一覧
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SalesItemList' }
+              examples:
+                最初の読み込み:
+                  value:
+                    items:
+                      - id: itm_7Kq2
+                        name: ハンドクリーム
+                        publicName: 〇〇 ハンドクリーム 50g
+                        code: HC-050
+                        barcodes: ['4901234567894']
+                        category: 販売品
+                        unit: 個
+                        status: in_stock
+                        available: 24
+                        price: { amount: 1980, taxIncluded: true }
+                        active: true
+                        updatedAt: '2026-10-09T14:58:12+09:00'
+                      - id: itm_9Lm4
+                        name: 詰め替え用ボトル
+                        publicName: null
+                        code: null
+                        barcodes: []
+                        category: 販売品
+                        unit: 本
+                        status: low
+                        available: 3
+                        price: null
+                        active: true
+                        updatedAt: '2026-10-09T13:20:00+09:00'
+                    nextCursor: null
+                    asOf: '2026-10-09T15:00:00+09:00'
+                販売品だけ:
+                  summary: ?categories=販売品&updatedSince=…（分類を変えた品目は active false で返る）
+                  value:
+                    items:
+                      - id: itm_7Kq2
+                        name: ハンドクリーム
+                        publicName: 〇〇 ハンドクリーム 50g
+                        code: HC-050
+                        barcodes: ['4901234567894']
+                        category: 販売品
+                        unit: 個
+                        status: in_stock
+                        available: 24
+                        price: { amount: 1980, taxIncluded: true }
+                        active: true
+                        updatedAt: '2026-10-10T09:12:00+09:00'
+                      - id: itm_5Rt1
+                        active: false
+                    nextCursor: null
+                    asOf: '2026-10-10T09:15:00+09:00'
+                変わったものだけ:
+                  value:
+                    items:
+                      - id: itm_7Kq2
+                        name: ハンドクリーム
+                        publicName: 〇〇 ハンドクリーム 50g
+                        code: HC-050
+                        barcodes: ['4901234567894']
+                        category: 販売品
+                        unit: 個
+                        status: low
+                        available: 4
+                        price: { amount: 1980, taxIncluded: true }
+                        active: true
+                        updatedAt: '2026-10-09T15:03:40+09:00'
+                      - id: itm_2Pz8
+                        active: false
+                    nextCursor: null
+                    asOf: '2026-10-09T15:05:00+09:00'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /v1/inventory/sales-events:
+    post:
+      tags: [販売の通知]
+      operationId: postSaleEvent
+      summary: 販売を知らせる（機能 inventory.sales）
+      description: |
+        「アプリ＋販売番号（`saleId`）」で 1 件の販売にまとめ、状態ごとに在庫を動かします。
+
+        | `status` | 在庫で行うこと |
+        |---|---|
+        | `ordered` | 行の品目と数を取り置く（使える数だけを減らす）。同じ販売番号で行が変われば取り置きを直す |
+        | `sold` | 取り置きがあれば使用に変え、無ければそのまま使用を記録する（理由「販売」）。店頭の販売はいきなり `sold` でよい |
+        | `cancelled` | 販売番号の全体を取り消す（行は要らない）。取り置きを消し、販売のあとなら使用の記録を戻す |
+        | `returned` | 行の品目と数を入庫する（理由「返品」）。一部の返品は行で分け、`eventId` を変えて何度でも送れる |
+
+        - `cancelled` の答えの `lines` は空です（販売番号の全体を取り消すため）。
+        - 状態は `ordered` → `sold` → `cancelled` の順にだけ進みます。遅れて届いた前の状態は記録だけし、在庫は動かしません（行の `result` が `ignored`）。
+        - **同じ `eventId` がもう一度届いたら、前と同じ答えを返し、在庫は動かしません。** 届いたかが分からないときは、同じ `eventId` で送り直してください。
+        - 行の品目は `itemId` → `code` → `barcode` の順に照らします。照らせない行があっても通知は受け付け、その行は `unmatched` になります（会社の人が在庫の画面で品目を選びます）。
+        - 在庫が足りなくても受け付けます（マイナスの在庫として会社に知らせます）。
+        - ロットと場所は M2Office が決まりで選びます（使用期限の近いロットから）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SaleEvent' }
+            examples:
+              店頭で売れた:
+                value:
+                  eventId: evt-20261009-0001
+                  saleId: POS-0042-1009-0017
+                  status: sold
+                  occurredAt: '2026-10-09T15:04:05+09:00'
+                  lines:
+                    - barcode: '4901234567894'
+                      quantity: 2
+              ネットで注文を受けた:
+                value:
+                  eventId: evt-20261009-0002
+                  saleId: ORD-1001
+                  status: ordered
+                  occurredAt: '2026-10-09T15:10:00+09:00'
+                  lines:
+                    - itemId: itm_7Kq2
+                      quantity: 1
+                    - code: HC-REFILL
+                      quantity: 2
+              注文を出荷した:
+                value:
+                  eventId: evt-20261010-0101
+                  saleId: ORD-1001
+                  status: sold
+                  occurredAt: '2026-10-10T10:00:00+09:00'
+                  lines:
+                    - itemId: itm_7Kq2
+                      quantity: 1
+                    - code: HC-REFILL
+                      quantity: 2
+              注文の取り消し:
+                value:
+                  eventId: evt-20261009-0003
+                  saleId: ORD-1001
+                  status: cancelled
+                  occurredAt: '2026-10-09T16:00:00+09:00'
+              返品:
+                value:
+                  eventId: evt-20261012-0007
+                  saleId: ORD-1001
+                  status: returned
+                  occurredAt: '2026-10-12T11:30:00+09:00'
+                  lines:
+                    - code: HC-REFILL
+                      quantity: 1
+      responses:
+        '200':
+          description: 受け付けた（照らせなかった行があっても 200）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SaleEventResult' }
+              examples:
+                受け付けた:
+                  value:
+                    eventId: evt-20261009-0002
+                    saleId: ORD-1001
+                    applied: true
+                    lines:
+                      - index: 0
+                        itemId: itm_7Kq2
+                        result: held
+                        available: 3
+                      - index: 1
+                        itemId: null
+                        result: unmatched
+                        available: null
+                        reason: 当たる品目が見つかりません（止めた品目には照らしません）
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: 同じ `eventId` で前と違う中身が届いた。または、同じ `eventId` が処理の途中（`Retry-After` の秒数のあと、同じ中身で送り直す）
+          headers:
+            Retry-After:
+              description: 処理の途中のときだけ。送り直してよいまでの秒数
+              schema: { type: integer }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: 'この eventId は別の中身で受け付け済みです' }
+        '413':
+          description: 本文が 64 KB を超えた
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '415':
+          description: JSON（UTF-8）ではない
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /v1/accounts/link-requests:
+    post:
+      tags: [アカウントの結び付け（案）]
+      operationId: requestLink
+      summary: 結び付けの依頼（機能 accounts.link。案）
+      description: |
+        そのメールアドレスの利用者が会社にいて使える状態なら、本人の M2Office の「お知らせ」に**確認コード（数字 6 桁）**を届けます。
+
+        - **答えはアカウントの有無・状態にかかわらず同じ**です（アカウントがあるかを探られないため）。
+        - コードは 10 分で切れます。同じ人へ依頼し直すと、前のコードは使えなくなります。
+        - 同じメールアドレスへの依頼は 1 時間に 5 回までです。超えても答えは同じで、お知らせは送りません。
+        - メールアドレスは M2Office に残しません。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LinkRequest' }
+            example: { email: staff@example.jp }
+      responses:
+        '202':
+          description: 受け付けた（アカウントの有無にかかわらず同じ答え）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Accepted' }
+              example: { accepted: true, expiresInSeconds: 600 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /v1/accounts/links:
+    post:
+      tags: [アカウントの結び付け（案）]
+      operationId: confirmLink
+      summary: 結び付けの確定（機能 accounts.link。案）
+      description: |
+        合えば、**結び付きの ID**（推測されにくい 32 字）と表示名を返します。M2Office は結び付きの ID のハッシュだけを持ちます。
+
+        - 試せるのは、1 つのコードにつき 5 回までです。
+        - 合わない・切れた・回数を超えた・アカウントが無いは、どれも同じ誤り（`invalid_code`）です。
+        - 結び付いたら、本人の M2Office のお知らせに「M2Medical と結び付きました」と届きます。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LinkConfirm' }
+            example: { email: staff@example.jp, code: '482915' }
+      responses:
+        '200':
+          description: 結び付いた
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Binding' }
+              example: { bindingId: 'Xq7rT2mN9pL4vB8kD1sF6hJ3wC5yZ0aE', displayName: 山田 花子 }
+        '400':
+          description: 形が違う、またはコードが合わない（理由は分けない）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                コードが合わない: { value: { error: invalid_code } }
+                形が違う: { value: { error: 'code は数字 6 桁にしてください', field: code } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /v1/accounts/links/{bindingId}:
+    delete:
+      tags: [アカウントの結び付け（案）]
+      operationId: deleteLink
+      summary: 結び付きの削除（機能 accounts.link。案）
+      description: |
+        結び付きを消します。知らない ID でも 204 を返します（アプリが後片付けで呼べるように）。
+        本人は M2Office の個人設定の「サービスとの接続」からも消せます。消したあとの検索は 410 になります。
+      parameters:
+        - name: bindingId
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[A-Za-z0-9_-]{32}$' }
+      responses:
+        '204': { description: 消した（知らない ID でも同じ） }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /v1/knowledge/search:
+    post:
+      tags: [ナレッジの検索（案）]
+      operationId: searchKnowledge
+      summary: ナレッジを検索する（機能 knowledge.search。案）
+      description: |
+        結び付いた本人が M2Office で見られる**会社の知識**（社内規程・議事録・秘書が学んだこと。権限区画は本人が入っている区画だけ）だけで答えます。
+        本人の記憶・会話・メール・ファイルは使いません。答えは見つかった節だけから作り、推測しません。
+
+        - 質問の文はデータとして扱い、指示として読みません。
+        - **質問の文と答えの文は残しません。**
+        - 結び付きが削除された・本人のアカウントが止まっている・削除されたときは、**410（`binding_invalid`）**を返します。結び付けし直してください。
+        - 結び付きごとの検索は 1 分 10 回までです。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SearchRequest' }
+            example: { bindingId: 'Xq7rT2mN9pL4vB8kD1sF6hJ3wC5yZ0aE', question: 年次有給休暇は入社して何か月目から使えますか }
+      responses:
+        '200':
+          description: 答え（答えられなかったときも 200。`answered` と `reason` で分かる）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SearchResult' }
+              examples:
+                答えられた:
+                  value:
+                    answered: true
+                    answer: 入社して 6 か月たち、その間の出勤が 8 割以上なら、10 日の年次有給休暇が付きます（就業規則 第23条）。
+                    sources:
+                      - title: 就業規則
+                        heading: 第5章 休暇 › 第23条（年次有給休暇）
+                        version: 4
+                        updatedAt: '2026-04-01T00:00:00+09:00'
+                        category: rule
+                    reason: null
+                資料に無い:
+                  value: { answered: false, answer: null, sources: [], reason: not_found }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '410':
+          description: 結び付きが無効（結び付きが削除された・アカウントが止まった・削除された）。結び付けし直す
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: binding_invalid }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /v1/inquiries/intake:
+    post:
+      tags: [問い合わせの受け付け（案）]
+      operationId: intakeInquiry
+      summary: 問い合わせを受ける（機能 inquiries.intake。案）
+      description: |
+        Web のフォームなどで受けた問い合わせを、項目に分けて送ります。経路「Web のフォーム」の問い合わせとして残り、同じお客様の続きは続きに足します。
+        - 要配慮個人情報・カードの番号・口座・パスワードは残しません。返事は、会社の人が画面で書き、承認のあとに送ります（この道では送りません）。
+        - 問い合わせの記録を入れた会社でだけ使えます。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [eventId, from, body]
+              properties:
+                eventId: { type: string, maxLength: 128, description: 送り直しても二重にしないための番号 }
+                from:
+                  type: object
+                  properties:
+                    name: { type: string, maxLength: 100 }
+                    company: { type: string, maxLength: 100 }
+                    phone: { type: string, maxLength: 40 }
+                    email: { type: string, format: email }
+                subject: { type: string, maxLength: 200 }
+                body: { type: string, maxLength: 20000 }
+                receivedAt: { type: string, format: date-time }
+            example: { eventId: form-20261010-0012, from: { name: 山田 花子, company: 山田商店, email: hanako@example.com }, subject: 見積のお願い, body: 来月の納品について見積をお願いします。, receivedAt: '2026-10-10T10:12:00+09:00' }
+      responses:
+        '202': { description: 受け付けた（同じ eventId なら前と同じ答え） }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /v1/notices:
+    post:
+      tags: [社内のお知らせ（案）]
+      operationId: postNotice
+      summary: 社内のお知らせを出す（機能 notices.post。案）
+      description: |
+        画面と同じ形のお知らせを、アプリとして出します（出した人は「外部のアプリ（名前）」）。宛先は、管理者が承認した範囲（全員か、決めたグループ）だけです。範囲の外は 403。
+        Chat には投稿しません（お知らせだけ）。リンクは https だけです。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [eventId, title, body]
+              properties:
+                eventId: { type: string, maxLength: 128 }
+                title: { type: string, maxLength: 100 }
+                body: { type: string, maxLength: 4000 }
+                link: { type: string, format: uri, pattern: '^https://' }
+                all: { type: boolean, description: 全員に出す }
+                groupIds: { type: array, items: { type: string } }
+                dueOn: { type: string, format: date, description: 締切 }
+                until: { type: string, format: date, description: 出す期限 }
+      responses:
+        '201': { description: 出した（お知らせの ID を返す） }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /v1/notices/{id}/withdraw:
+    post:
+      tags: [社内のお知らせ（案）]
+      operationId: withdrawNotice
+      summary: お知らせを取り下げる（機能 notices.post。案）
+      description: そのアプリが出したお知らせだけを取り下げられます。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: 取り下げた }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /v1/inventory/receipts:
+    post:
+      tags: [入庫の通知（案）]
+      operationId: postReceipt
+      summary: 入庫を知らせる（機能 inventory.receipts。案）
+      description: |
+        仕入れ・入荷のシステムから、入荷した品目を知らせます。品目の照らし方・照らせない行の扱いは、販売の通知と同じです。`cancelled` は入庫を逆の記録で戻します。金額は受け取りません。
+        在庫管理を入れた会社でだけ使えます。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [eventId, receiptId, status, lines]
+              properties:
+                eventId: { type: string, maxLength: 128 }
+                receiptId: { type: string, maxLength: 128, description: 入荷の番号 }
+                status: { type: string, enum: [received, cancelled] }
+                lines:
+                  type: array
+                  maxItems: 200
+                  items:
+                    type: object
+                    required: [qty]
+                    properties:
+                      itemId: { type: string }
+                      code: { type: string }
+                      barcode: { type: string }
+                      qty: { type: number, exclusiveMinimum: 0 }
+                      unit: { type: string, enum: [use, purchase], description: 使う単位か仕入れの単位 }
+                      lot: { type: string, maxLength: 64 }
+                      expiresOn: { type: string, format: date }
+      responses:
+        '200': { description: 受け付けた（行ごとの結果を返す） }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /v1/reservations/availability:
+    get:
+      tags: [予約（案）]
+      operationId: getAvailability
+      summary: 予約の空きを読む（機能 reservations.book。案）
+      description: 承認した予約できるもの（会議室・車・備品など）と、埋まっている時間だけを返します。予約した人の名前と用件は返しません。予約の管理を入れた会社でだけ使えます。
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+        - name: itemIds
+          in: query
+          schema: { type: string, description: カンマ区切り }
+      responses:
+        '200': { description: 予約できるものと、埋まっている時間 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /v1/reservations:
+    post:
+      tags: [予約（案）]
+      operationId: createReservation
+      summary: 予約を入れる（機能 reservations.book。案）
+      description: |
+        結び付いた本人（機能 accounts.link）として予約を入れ、本人の Google カレンダーに予定を入れます。1 件 14 日まで・90 日先まで。重なれば 409 と次の空きを返します。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [eventId, bindingId, itemId, startAt, endAt]
+              properties:
+                eventId: { type: string, maxLength: 128 }
+                bindingId: { type: string, pattern: '^[A-Za-z0-9_-]{32}$' }
+                itemId: { type: string }
+                startAt: { type: string, format: date-time }
+                endAt: { type: string, format: date-time }
+                purpose: { type: string, maxLength: 200 }
+      responses:
+        '201': { description: 予約した }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 重なった（次の空きを返す） }
+        '410': { description: 結び付きが無効（binding_invalid） }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /v1/reservations/{id}:
+    delete:
+      tags: [予約（案）]
+      operationId: cancelReservation
+      summary: 予約を取り消す（機能 reservations.book。案）
+      description: そのアプリで入れた、結び付いた本人の予約だけを取り消せます。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: bindingId
+          in: query
+          required: true
+          schema: { type: string, pattern: '^[A-Za-z0-9_-]{32}$' }
+      responses:
+        '204': { description: 取り消した }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '410': { description: 結び付きが無効（binding_invalid） }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /v1/members/points:
+    post:
+      tags: [会員のポイント（案）]
+      operationId: postMemberPoints
+      summary: 会員のポイントを付ける・使う（機能 members.points。案）
+      description: |
+        レジ（POS）で読んだ会員証の QR（会員証の鍵）で会員を決め、来店（1 日 1 回）・購入（金額をポイントに換算し、金額は残さない）・特典を使う・取り消しを送ります。
+        答えはポイントの残りとランクだけです。呼び名・電話・誕生日は返しません。ポイントはマイナスにしません。会員の管理を入れた会社でだけ使えます。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [eventId, card, action]
+              properties:
+                eventId: { type: string, maxLength: 128 }
+                card: { type: string, description: 会員証の QR の鍵 }
+                action: { type: string, enum: [visit, purchase, reward, undo] }
+                amount: { type: integer, minimum: 1, description: purchase のときの金額（ポイントに換算するだけで残さない） }
+                rewardId: { type: string, description: reward のときの特典 }
+                undoEventId: { type: string, description: undo のときの、取り消す通知の番号 }
+      responses:
+        '200': { description: ポイントの残りとランク }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: ポイントが足りない・来店は今日もう付けた }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /v1/columns/published:
+    get:
+      tags: [公開したコラム（案）]
+      operationId: listPublishedColumns
+      summary: 公開したコラムを読む（機能 columns.read。案）
+      description: 承認済みで公開の日時を過ぎたコラムだけを返します（題名・説明・本文（Markdown と HTML）・出典・公開の日時）。下書き・承認待ちは返しません。コラムの作成を入れた会社でだけ使えます。
+      parameters:
+        - name: updatedSince
+          in: query
+          schema: { type: string, format: date-time }
+        - name: cursor
+          in: query
+          schema: { type: string }
+      responses:
+        '200': { description: 公開したコラムの一覧 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /v1/columns/published/{id}/cover.png:
+    get:
+      tags: [公開したコラム（案）]
+      operationId: getPublishedColumnCover
+      summary: 公開したコラムのカバー画像（機能 columns.read。案）
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: カバー画像
+          content:
+            image/png: {}
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/knowledge/rules/{ref}:
+    put:
+      tags: [社内規程の登録（案）]
+      operationId: putRule
+      summary: 社内規程を登録・改定する（機能 knowledge.rules。案）
+      description: |
+        文書管理のシステムで改定した規程を、社内規程として登録します。`ref` は文書管理のシステムの文書の番号で、同じ番号を送れば新しい版になります（前の版は残ります）。
+        施行日が先の版は、施行日まで前の版で答えます。書けるのは、承認した権限区画だけです。
+      parameters:
+        - name: ref
+          in: path
+          required: true
+          schema: { type: string, maxLength: 128 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [eventId, title, body]
+              properties:
+                eventId: { type: string, maxLength: 128 }
+                title: { type: string, maxLength: 200 }
+                body: { type: string, description: 規程の本文（Markdown） }
+                source: { type: string, maxLength: 500, description: 出典（文書管理のシステムの URL など） }
+                effectiveFrom: { type: string, format: date, description: 施行日（省くと登録した日） }
+                compartment: { type: string, description: 権限区画（省くと区画なし） }
+      responses:
+        '200': { description: 登録した（版と施行日を返す） }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /v1/knowledge/rules/{ref}/retire:
+    post:
+      tags: [社内規程の登録（案）]
+      operationId: retireRule
+      summary: 社内規程を廃止する（機能 knowledge.rules。案）
+      parameters:
+        - name: ref
+          in: path
+          required: true
+          schema: { type: string, maxLength: 128 }
+      responses:
+        '204': { description: 廃止した }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /v1/jobs:
+    post:
+      tags: [業務の依頼（案）]
+      operationId: createJob
+      summary: 業務を依頼する（機能 jobs.run。案）
+      description: |
+        結び付いた本人（機能 accounts.link）として、承認した業務だけを依頼します。本人の利用範囲の外の業務・無効にした業務は断ります。
+        承認の段に来たら止まります。承認は本人の画面だけで行い、この API からは承認できません。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [eventId, bindingId, agentId]
+              properties:
+                eventId: { type: string, maxLength: 128 }
+                bindingId: { type: string, pattern: '^[A-Za-z0-9_-]{32}$' }
+                agentId: { type: string }
+                input: { type: object, additionalProperties: true }
+      responses:
+        '202': { description: 受け付けた（実行の ID を返す） }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '410': { description: 結び付きが無効（binding_invalid） }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /v1/runs/{id}:
+    get:
+      tags: [業務の依頼（案）]
+      operationId: getRun
+      summary: 依頼した業務の結果を受け取る（機能 jobs.run。案）
+      description: そのアプリで依頼した実行だけを読めます。状態（実行中・承認待ち・終わった・失敗）と結果を返します。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: 実行の状態と結果 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+components:
+  securitySchemes:
+    appKey:
+      type: http
+      scheme: bearer
+      description: |
+        外部のアプリを登録したときに一度だけ出る鍵（`m2oa_` で始まる 37 字）。`Authorization: Bearer <鍵>` で送ります。
+        M2Office は鍵のハッシュだけを持ちます。なくしたら、会社の管理者が「鍵を出し直す」で新しい鍵を出します（前の鍵はすぐ使えなくなります）。
+  responses:
+    Forbidden:
+      description: このアプリには、この機能を許していない（管理者が「外部のアプリ」で機能を選んで承認する）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: 'このアプリには許していない機能です' }
+    BadRequest:
+      description: 形が違う（どの項目かを返す）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: 'quantity は 1 以上の整数にしてください', field: 'lines[0].quantity' }
+    NotFound:
+      description: 鍵が違う・アプリを止めた・会社が止まっている（停止・緊急停止・解約）・呼んだ名前の会社と鍵の会社が合わない・（在庫の機能で）在庫管理を切った。どれも同じ答え（理由を分けない）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: 'not found' }
+    TooManyRequests:
+      description: アプリごとに 1 分 120 回を超えた（機能ごとに、さらに絞ることがある）
+      headers:
+        Retry-After:
+          description: 次に送ってよいまでの秒数
+          schema: { type: integer }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+  schemas:
+    CompanyProfile:
+      type: object
+      required: [legalName, shortName, postalCode, address, phone, website, invoiceRegistrationNumber, fiscalYearStartMonth, businessDays, holidaysClosed]
+      properties:
+        legalName: { type: string, description: 正式な会社名（入っていなければ M2Office に登録した会社名） }
+        shortName: { type: [string, 'null'], description: 略称 }
+        postalCode: { type: [string, 'null'], description: 郵便番号（例 123-4567） }
+        address: { type: [string, 'null'], description: 所在地 }
+        phone: { type: [string, 'null'], description: 電話 }
+        website: { type: [string, 'null'], description: 自社の Web サイト }
+        invoiceRegistrationNumber: { type: [string, 'null'], description: 適格請求書発行事業者の登録番号（T＋13 桁） }
+        fiscalYearStartMonth: { type: integer, minimum: 1, maximum: 12, description: 会計年度の開始月 }
+        businessDays: { type: array, items: { type: integer, minimum: 0, maximum: 6 }, description: 営業する曜日（0=日曜〜6=土曜） }
+        holidaysClosed: { type: boolean, description: 祝日を休みにするか }
+    SalesItemList:
+      type: object
+      required: [items, nextCursor, asOf]
+      properties:
+        items:
+          type: array
+          items:
+            oneOf:
+              - $ref: '#/components/schemas/SalesItem'
+              - $ref: '#/components/schemas/RemovedItem'
+        nextCursor:
+          type: [string, 'null']
+          description: 続きがあるとき、次の `cursor` に渡す値
+        asOf:
+          type: string
+          format: date-time
+          description: この答えを作った時刻。次に読みに来るとき `updatedSince` に渡す
+    SalesItem:
+      type: object
+      description: 渡す範囲にある品目
+      required: [id, name, publicName, code, barcodes, category, unit, status, active, updatedAt]
+      properties:
+        id: { type: string, description: M2Office の品目の ID }
+        name: { type: string, description: 品目の名前 }
+        publicName: { type: [string, 'null'], description: 公開する名前（商品名）。無ければ null }
+        code: { type: [string, 'null'], description: 自社のコード }
+        barcodes: { type: array, items: { type: string }, description: バーコード（いくつでも） }
+        category: { type: [string, 'null'], description: 分類 }
+        unit: { type: string, description: 使う単位。販売の通知の数はこの単位で送る }
+        status:
+          type: string
+          enum: [in_stock, low, out]
+          description: in_stock は在庫あり、low は残りわずか（会社の目安以下）、out は終了（使える数が 0 以下）
+        available:
+          type: [integer, 'null']
+          description: 使える数（在庫から取り置きと期限切れを引いた数）。**数を渡すと承認したときだけ**入り、状態だけのアプリでは項目が無い
+        price:
+          oneOf:
+            - $ref: '#/components/schemas/Price'
+            - type: 'null'
+          description: 販売価格。**価格を渡すと承認したときだけ**入る。品目に価格が無ければ null
+        employeePrice:
+          type: [integer, 'null']
+          description: 社員価格（円）。**社員価格を渡すと承認したときだけ**入り、承認していないアプリでは項目が無い。税込か税抜かは `price` の `taxIncluded` と同じ。品目に社員価格が無ければ null
+        active: { type: boolean, const: true }
+        updatedAt: { type: string, format: date-time }
+    RemovedItem:
+      type: object
+      description: 範囲から外した・止めた品目（`updatedSince` の答えに 1 度だけ入る）
+      required: [id, active]
+      properties:
+        id: { type: string }
+        active: { type: boolean, const: false }
+    Price:
+      type: object
+      required: [amount, taxIncluded]
+      properties:
+        amount: { type: integer, description: 円 }
+        taxIncluded: { type: boolean, description: true なら税込 }
+    SaleEvent:
+      type: object
+      required: [eventId, saleId, status, occurredAt]
+      description: ここに無い項目（金額・お客様の情報など）は読まずに捨てる
+      properties:
+        eventId:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: 通知ごとに一意の値。送り直すときは同じ値にする
+        saleId:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: 販売管理の販売番号（注文番号・伝票番号）。同じ販売の通知は同じ値にする
+        status:
+          type: string
+          enum: [ordered, sold, cancelled, returned]
+        occurredAt:
+          type: string
+          format: date-time
+          description: 販売管理の側でそのことが起きた時刻
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 200
+          description: '`ordered`・`sold`・`returned` では要る。`cancelled` では要らない（販売番号の全体を取り消す）'
+          items: { $ref: '#/components/schemas/SaleLine' }
+    SaleLine:
+      type: object
+      required: [quantity]
+      description: '`itemId`・`code`・`barcode` のどれか 1 つ以上が要る。この順に照らす'
+      anyOf:
+        - required: [itemId]
+        - required: [code]
+        - required: [barcode]
+      properties:
+        itemId: { type: string, description: 一覧の `id` }
+        code: { type: string, description: 自社のコード }
+        barcode: { type: string, description: バーコード（JAN・GTIN など） }
+        quantity: { type: integer, minimum: 1, description: 一覧の `unit` での数 }
+    SaleEventResult:
+      type: object
+      required: [eventId, saleId, applied, lines]
+      properties:
+        eventId: { type: string }
+        saleId: { type: string }
+        applied:
+          type: boolean
+          description: true なら受け付けた。同じ `eventId` の送り直しでも、前の答えをそのまま返す
+        lines:
+          type: array
+          items: { $ref: '#/components/schemas/LineResult' }
+    LineResult:
+      type: object
+      required: [index, itemId, result, available]
+      properties:
+        index: { type: integer, description: 送った行の位置（0 から） }
+        itemId: { type: [string, 'null'], description: 照らした品目。照らせなければ null }
+        result:
+          type: string
+          enum: [held, used, released, returned, unmatched, ignored]
+          description: held は取り置いた、used は使用にした、released は取り置きを戻した・使用を取り消した、returned は入庫した、unmatched は品目を照らせなかった、ignored は遅れて届いた前の状態なので在庫を動かさなかった
+        available:
+          type: [integer, 'null']
+          description: 動かしたあとの使える数（数を渡すと承認した品目だけ。ほかは null）
+        reason: { type: string, description: unmatched のときの理由 }
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+        field: { type: string, description: 形が違った項目 }
+    LinkRequest:
+      type: object
+      required: [email]
+      properties:
+        email: { type: string, format: email, maxLength: 254, description: M2Office のログインのメールアドレス }
+    Accepted:
+      type: object
+      required: [accepted, expiresInSeconds]
+      properties:
+        accepted: { type: boolean, const: true }
+        expiresInSeconds: { type: integer, description: コードの期限（秒） }
+    LinkConfirm:
+      type: object
+      required: [email, code]
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+        code: { type: string, pattern: '^[0-9]{6}$', description: 本人のお知らせに届いた確認コード }
+    Binding:
+      type: object
+      required: [bindingId, displayName]
+      properties:
+        bindingId: { type: string, pattern: '^[A-Za-z0-9_-]{32}$', description: 結び付きの ID。M2Medical の側で暗号化して置く }
+        displayName: { type: string, description: M2Office の表示名 }
+    SearchRequest:
+      type: object
+      required: [bindingId, question]
+      properties:
+        bindingId: { type: string, pattern: '^[A-Za-z0-9_-]{32}$' }
+        question: { type: string, minLength: 1, maxLength: 200, description: 質問の文。M2Office に残さない }
+    SearchResult:
+      type: object
+      required: [answered, answer, sources, reason]
+      properties:
+        answered: { type: boolean, description: 答えられたか }
+        answer: { type: [string, 'null'], maxLength: 1500, description: 答えの文。答えられなかったときは null }
+        sources:
+          type: array
+          maxItems: 5
+          items: { $ref: '#/components/schemas/Source' }
+        reason:
+          type: [string, 'null']
+          enum: [not_found, unavailable, null]
+          description: 答えられなかったときの理由。not_found は本人が見られる資料に無い、unavailable はいま答えを作れない（AI が使えない・利用の上限など）
+    Source:
+      type: object
+      required: [title, heading, version, updatedAt, category]
+      properties:
+        title: { type: string, description: 資料の名前 }
+        heading: { type: string, description: 節の見出しの経路。見出しの無い短い資料では空 }
+        version: { type: integer, description: 資料の版 }
+        updatedAt: { type: string, format: date-time, description: 資料の更新日時（社内規程は施行している版の施行日） }
+        category:
+          type: string
+          enum: [rule, minutes, learned]
+          description: rule は社内規程、minutes は議事録、learned は秘書が学んだこと

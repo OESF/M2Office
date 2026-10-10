@@ -511,12 +511,12 @@ export class PostgresInventoryStore implements InventoryStore {
     });
   }
 
-  // 販売管理からの記録（記録した人が `sales:<つなぎ>`）は「販売管理（つなぎの名前）」と出す（第29.20.1節）
+  // 外部のアプリからの記録（記録した人が `app:<アプリ>`）は「外部のアプリ（アプリの名前）」と出す（第13.4.1節・第29.20.1節）
   private readonly MOVE_SELECT = `select m.*, i.name as item_name, l.lot,
-      coalesce(u.display_name, '販売管理（' || sl.name || '）', case when m.created_by like 'sales:%' then '販売管理' end) as created_by_name
+      coalesce(u.display_name, '外部のアプリ（' || xa.name || '）', case when m.created_by like 'app:%' then '外部のアプリ' end) as created_by_name
     from inventory_moves m
     join inventory_items i on i.id = m.item_id left join inventory_lots l on l.id = m.lot_id left join users u on u.id = m.created_by
-    left join inventory_sales_links sl on sl.tenant_id = m.tenant_id and 'sales:' || sl.id = m.created_by`;
+    left join ext_apps xa on xa.tenant_id = m.tenant_id and 'app:' || xa.id = m.created_by`;
 
   async getMove(tenantId: string, id: string): Promise<InventoryMove | null> {
     const rows = await this.q<MoveRow>(tenantId, `${this.MOVE_SELECT} where m.tenant_id = $1 and m.id = $2`, [tenantId, id]);

@@ -147,6 +147,7 @@ export {
 } from './secretary/memory.js';
 export * from './cards/index.js';
 export * from './inventory/index.js';
+export * from './apps/index.js';
 export * from './columns/index.js';
 export * from './inquiries/index.js';
 export * from './competitors/index.js';

@@ -79,7 +79,7 @@ export interface InventoryItem {
   /** 販売価格と社員価格が税込か（税抜なら false）。 */
   priceTaxIncluded: boolean;
   /**
-   * 社員価格（社員に売るときの値段。第29.6節）。**Web への公開には出さない**。販売管理とのつなぎには、渡すと承認したときだけ渡す。
+   * 社員価格（社員に売るときの値段。第29.6節）。**Web への公開には出さない**。外部のアプリ（販売管理など）には、渡すと承認したときだけ渡す。
    * 在庫の評価ではない。税込か税抜かは販売価格と同じ（`priceTaxIncluded`）。
    */
   employeePrice: number | null;
@@ -122,7 +122,7 @@ export interface InventoryMove {
   /** 増減の量（使う単位）。移動は動かした量（正）。 */
   delta: number;
   reason: string;
-  /** `sales` は販売管理とのつなぎからの販売・返品・取り消し（第29.20.1節）。 */
+  /** `sales` は外部のアプリの販売の通知からの販売・返品・取り消し（第29.20.1節）。 */
   source: 'manual' | 'slip' | 'count' | 'reservation' | 'secretary' | 'import' | 'undo' | 'sales';
   reversalOf: string | null;
   createdBy: string;
@@ -318,11 +318,8 @@ export interface InventoryPublication {
   snapshotAt: string | null;
 }
 
-/** 1 社で持てる販売管理とのつなぎの数（第29.20.1節）。 */
-export const INVENTORY_SALES_LINK_MAX = 8;
-
-/** 販売管理に渡す範囲（管理者が承認する。第29.20.1節）。 */
-export interface InventorySalesScope {
+/** 外部のアプリの機能「商品の一覧を読む」で渡す範囲（管理者が承認する。第29.20.1節・第13.4.1節）。 */
+export interface InventoryCatalogScope {
   itemIds: string[];
   /** 使える数を渡すか（渡さなければ状態だけ）。 */
   showCount: boolean;
@@ -332,30 +329,12 @@ export interface InventorySalesScope {
   employeePrice: boolean;
 }
 
-/** 販売管理とのつなぎ 1 つ（管理者に見せる。鍵は持たない）。 */
-export interface InventorySalesLink {
-  id: string;
-  name: string;
-  status: 'active' | 'stopped';
-  /** 承認した範囲。承認するまでは `null` で、一覧に何も渡さない。 */
-  scope: InventorySalesScope | null;
-  approvedBy: string | null;
-  approvedByName?: string;
-  approvedAt: string | null;
-  createdAt: string;
-  lastReadAt: string | null;
-  lastEventAt: string | null;
-  /** この 7 日に届いた通知の数。 */
-  eventsLast7Days: number;
-  /** 品目を選ぶのを待っている、照らせなかった行の数。 */
-  unmatchedOpen: number;
-}
-
 /** 照らせなかった販売の行（品目を選べば、その時点で記録する。第29.20.1節）。金額とお客様の情報は持たない。 */
 export interface InventorySaleUnmatched {
   id: string;
-  linkId: string;
-  linkName: string;
+  appId: string;
+  /** 外部のアプリの名前。 */
+  appName: string;
   /** 販売管理の販売番号。 */
   saleRef: string;
   /** 行で行うはずだったこと（取り置き・使用・入庫）。 */

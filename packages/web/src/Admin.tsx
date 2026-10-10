@@ -15,6 +15,7 @@ import { ConnectorList } from './ConnectorList.js';
 import { adminPath, parseAdminRoute, syncUrl } from './route.js';
 import { ExtensionSettings } from './Extensions.js';
 import { Connections } from './Connections.js';
+import { ExternalApps } from './ExternalApps.js';
 import { HelpCenter, PageTitle, useOpenHelp } from './help.js';
 import { AppVersionBadge } from './launcher.js';
 import { Icon, NavHeading, NavItem, SideNavLayout, ThemeToggle, type IconName } from './nav.js';
@@ -52,7 +53,7 @@ const TABS: {
     ],
   },
   {
-    id: 'connectors', label: '接続', icon: 'connectors', description: 'Gemini・Google Workspace・コネクタ（MCP）への接続', group: '設定',
+    id: 'connectors', label: '接続', icon: 'connectors', description: 'Gemini・Google Workspace・コネクタ（MCP）・外部のアプリ', group: '設定',
     pages: [
       { id: 'gemini', label: 'Gemini' },
       { id: 'google', label: 'Google Workspace' },
@@ -60,6 +61,7 @@ const TABS: {
       { id: 'permissions', label: '求める許可' },
       { id: 'people', label: '従業員の接続状況' },
       { id: 'mcp', label: 'コネクタ（MCP）' },
+      { id: 'apps', label: '外部のアプリ' },
     ],
   },
   {
@@ -284,6 +286,8 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
             {tab === 'connectors' && (page === 'mcp'
               // 会社の接続の管理（仕様書 第6.6.3.0節、ADR-0037）
               ? <ConnectorList />
+              // 外部のアプリ（仕様書 第13.4.1節、ADR-0090）
+              : page === 'apps' ? <ExternalApps />
               : <Connections page={page} />)}
           </main>
         </SideNavLayout>

@@ -17,6 +17,7 @@ export * from './types/access.js';
 export * from './types/cards.js';
 export * from './types/notice.js';
 export * from './types/inventory.js';
+export * from './types/apps.js';
 export * from './types/hr.js';
 export * from './types/signage.js';
 export * from './types/web-columns.js';

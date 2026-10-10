@@ -1,23 +1,22 @@
 /**
- * @file 在庫管理と販売管理のつなぎ（仕様書 第29.20.1節、ADR-0087）。販売管理（レジ・POS・EC）が鍵で商品の一覧を読み、販売を知らせる。
+ * @file 外部のアプリの在庫の機能（仕様書 第29.20.1節・第13.4.1節、ADR-0087・ADR-0090）。販売管理（レジ・POS・EC）などが、
+ * 機能「商品の一覧を読む」（`GET /v1/inventory/catalog`）と「販売を知らせる」（`POST /v1/inventory/sales-events`）で呼ぶ。
  *
- * - つなぎごとに鍵（一度だけ見せ、ハッシュだけを持つ）と、管理者が承認した渡す範囲（品目・数か状態か・販売価格・社員価格）を持つ
- * - 一覧は承認した範囲だけを返す。`updatedSince` で変わった品目だけ、`categories` で分類を絞れる。外れた品目は `active: false`
- * - 販売の通知は、注文で取り置き・販売で使用・取り消しで戻し・返品で入庫する。`eventId` で二重に数えない
+ * - 一覧は、アプリに承認した範囲だけを返す。`updatedSince` で変わった品目だけ、`categories` で分類を絞れる。外れた品目は `active: false`
+ * - 販売の通知は、注文で取り置き・販売で使用・取り消しで戻し・返品で入庫する。`eventId` で二重に数えない（外部のアプリの仕組み）
  * - 品目は ID → 自社のコード → バーコードの順に決まった規則で照らす。照らせない行は残し、人が品目を選べばその時点で記録する
  *
- * 金額・支払い・お客様の情報は受け取らず、持たない（第29.17節・第29.18節）。通知の本文は持たず、中身のハッシュだけを持つ。
+ * 鍵・承認・止める・回数の上限は外部のアプリ（`../apps/`）が受け持つ。金額・支払い・お客様の情報は受け取らず、持たない（第29.17節・第29.18節）。
  * 通知の中身はデータとして扱い、指示として読まない（不変則 I-6）。
  */
 
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type pg from 'pg';
-import {
-  INVENTORY_SALES_LINK_MAX, type AuditEvent, type InventoryItemView, type InventorySaleUnmatched, type InventorySalesLink, type InventorySalesScope,
-} from '@m2office/shared';
+import type { InventoryCatalogScope, InventoryItemView, InventorySaleUnmatched } from '@m2office/shared';
 import { createPool } from '../repository/pool.js';
 import type { Repository } from '../repository/types.js';
 import { dateIn } from '../cards/service.js';
+import { ExternalApps } from '../apps/service.js';
 import { parseCode } from './gs1.js';
 import type { InventoryService } from './service.js';
 import type { MemoryInventoryStore } from './store.js';
@@ -26,45 +25,20 @@ import type { MemoryInventoryStore } from './store.js';
 export const SALES_PAYLOAD_MAX_BYTES = 64 * 1024;
 /** 通知 1 つの行の上限。 */
 export const SALES_LINES_MAX = 200;
-/** つなぎごとの、1 分あたりの呼び出しの上限。 */
-export const SALES_RATE_PER_MINUTE = 120;
 /** 一覧の 1 回の数の既定と上限。 */
 const LIST_DEFAULT = 200;
 const LIST_MAX = 500;
 /** 絞り込みの数の上限。 */
 const FILTER_MAX = { categories: 20, ids: 100, codes: 100, barcodes: 100 } as const;
-/** 処理の途中の通知を、やり直してよいとみなすまでの時間（ミリ秒）。 */
-const STALE_EVENT_MS = 5 * 60_000;
-/** 範囲から外した品目を覚えておく数。 */
-const REMOVED_KEEP = 500;
-
-/** 鍵のハッシュ（SHA-256）。 */
-export function salesKeyHash(key: string): string {
-  return createHash('sha256').update(key).digest('hex');
-}
+/** 販売の通知の、二重に数えないための番号の種類（外部のアプリの通知の番号を、機能ごとに分ける）。 */
+const SALES_EVENT_KIND = 'inventory.sales';
 
 // ---- 置き場 ----
-
-/** つなぎの記録（鍵のハッシュを含む）。 */
-export interface SalesLinkRecord {
-  id: string;
-  name: string;
-  keyHash: string;
-  status: 'active' | 'stopped';
-  scope: InventorySalesScope | null;
-  approvedBy: string | null;
-  approvedAt: string | null;
-  removed: { itemId: string; at: string }[];
-  createdBy: string;
-  createdAt: string;
-  lastReadAt: string | null;
-  lastEventAt: string | null;
-}
 
 /** 販売の記録。 */
 export interface SaleRecord {
   id: string;
-  linkId: string;
+  appId: string;
   saleRef: string;
   status: 'ordered' | 'sold' | 'cancelled';
   holdIds: string[];
@@ -77,7 +51,7 @@ export interface SaleRecord {
 /** 照らせなかった行の記録。 */
 export interface UnmatchedRecord {
   id: string;
-  linkId: string;
+  appId: string;
   saleId: string;
   action: 'hold' | 'use' | 'return';
   itemRef: string;
@@ -89,73 +63,41 @@ export interface UnmatchedRecord {
   createdAt: string;
 }
 
-/** 届いた通知の記録。 */
-export interface SaleEventRecord {
-  bodyHash: string;
-  response: SaleEventResult | null;
-  createdAt: string;
-}
-
-/** つなぎの置き場。 */
+/** 販売の置き場。 */
 export interface SalesStore {
-  listLinks(tenantId: string): Promise<SalesLinkRecord[]>;
-  getLink(tenantId: string, id: string): Promise<SalesLinkRecord | null>;
-  createLink(tenantId: string, link: SalesLinkRecord): Promise<void>;
-  updateLink(tenantId: string, id: string, patch: Partial<Omit<SalesLinkRecord, 'id' | 'createdBy' | 'createdAt'>>): Promise<void>;
-  deleteLink(tenantId: string, id: string): Promise<void>;
-  /** 会社の判定より前に、鍵のハッシュから会社とつなぎを 1 行だけ引く。 */
-  findLinkByHash(keyHash: string): Promise<{ id: string; tenantId: string; status: 'active' | 'stopped' } | null>;
-  getSale(tenantId: string, linkId: string, saleRef: string): Promise<SaleRecord | null>;
+  getSale(tenantId: string, appId: string, saleRef: string): Promise<SaleRecord | null>;
   getSaleById(tenantId: string, id: string): Promise<SaleRecord | null>;
   saveSale(tenantId: string, sale: SaleRecord): Promise<void>;
   addUnmatched(tenantId: string, rows: UnmatchedRecord[]): Promise<void>;
-  listUnmatched(tenantId: string, opts: { status?: UnmatchedRecord['status']; linkId?: string; limit?: number }): Promise<(UnmatchedRecord & { saleRef: string })[]>;
+  listUnmatched(tenantId: string, opts: { status?: UnmatchedRecord['status']; appId?: string; limit?: number }): Promise<(UnmatchedRecord & { saleRef: string })[]>;
   getUnmatched(tenantId: string, id: string): Promise<UnmatchedRecord | null>;
   setUnmatched(tenantId: string, id: string, status: 'resolved' | 'dropped', userId: string | null, at: string): Promise<void>;
   /** 販売の、選ぶのを待っている行を「要らなくなった」にする（取り消し・送り直しのとき）。`action` を渡せばその種類だけ。 */
   dropUnmatched(tenantId: string, saleId: string, at: string, action?: UnmatchedRecord['action']): Promise<void>;
   countOpenUnmatched(tenantId: string): Promise<Map<string, number>>;
-  getEvent(tenantId: string, linkId: string, eventRef: string): Promise<SaleEventRecord | null>;
-  /** 通知を記録し始める。すでにあれば `false`。 */
-  claimEvent(tenantId: string, linkId: string, eventRef: string, bodyHash: string, at: string): Promise<boolean>;
-  /** 処理の途中のまま古くなった通知を、やり直すために取り直す。取り直せたら `true`。 */
-  reclaimEvent(tenantId: string, linkId: string, eventRef: string, staleBefore: string, at: string): Promise<boolean>;
-  finishEvent(tenantId: string, linkId: string, eventRef: string, response: SaleEventResult): Promise<void>;
-  countEvents(tenantId: string, since: string): Promise<Map<string, number>>;
-  /**
-   * 品目ごとの、使える数や中身が最後に変わった時刻（品目の変更・入出庫の記録・取り置きの出し入れのうち最も新しいもの）。
-   */
+  /** 品目ごとの、使える数や中身が最後に変わった時刻（品目の変更・入出庫の記録・取り置きの出し入れのうち最も新しいもの）。 */
   changedAt(tenantId: string, itemIds: string[]): Promise<Map<string, string>>;
 }
 
-interface LinkRow {
-  id: string; name: string; key_hash: string; status: 'active' | 'stopped'; scope: InventorySalesScope | null; approved_by: string | null;
-  approved_at: unknown; removed: { itemId: string; at: string }[] | null; created_by: string; created_at: unknown; last_read_at: unknown; last_event_at: unknown;
-}
-interface SaleRow { id: string; link_id: string; sale_ref: string; status: SaleRecord['status']; hold_ids: string[]; sold_batches: string[]; created_at: unknown; updated_at: unknown }
+interface SaleRow { id: string; app_id: string; sale_ref: string; status: SaleRecord['status']; hold_ids: string[]; sold_moves: string[]; created_at: unknown; updated_at: unknown }
 interface UnmatchedRow {
-  id: string; link_id: string; sale_id: string; action: UnmatchedRecord['action']; item_ref: string; code: string; barcode: string; qty: unknown;
+  id: string; app_id: string; sale_id: string; action: UnmatchedRecord['action']; item_ref: string; code: string; barcode: string; qty: unknown;
   reason: string; status: UnmatchedRecord['status']; created_at: unknown; sale_ref?: string;
 }
 
 const iso = (v: unknown): string => (v instanceof Date ? v.toISOString() : String(v));
-const isoOrNull = (v: unknown): string | null => (v === null || v === undefined ? null : iso(v));
 
-const toLink = (r: LinkRow): SalesLinkRecord => ({
-  id: r.id, name: r.name, keyHash: r.key_hash, status: r.status, scope: r.scope, approvedBy: r.approved_by, approvedAt: isoOrNull(r.approved_at),
-  removed: r.removed ?? [], createdBy: r.created_by, createdAt: iso(r.created_at), lastReadAt: isoOrNull(r.last_read_at), lastEventAt: isoOrNull(r.last_event_at),
-});
 const toSale = (r: SaleRow): SaleRecord => ({
-  id: r.id, linkId: r.link_id, saleRef: r.sale_ref, status: r.status, holdIds: r.hold_ids ?? [], soldMoves: r.sold_batches ?? [],
+  id: r.id, appId: r.app_id, saleRef: r.sale_ref, status: r.status, holdIds: r.hold_ids ?? [], soldMoves: r.sold_moves ?? [],
   createdAt: iso(r.created_at), updatedAt: iso(r.updated_at),
 });
 const toUnmatched = (r: UnmatchedRow): UnmatchedRecord & { saleRef: string } => ({
-  id: r.id, linkId: r.link_id, saleId: r.sale_id, action: r.action, itemRef: r.item_ref, code: r.code, barcode: r.barcode, qty: Number(r.qty),
+  id: r.id, appId: r.app_id, saleId: r.sale_id, action: r.action, itemRef: r.item_ref, code: r.code, barcode: r.barcode, qty: Number(r.qty),
   reason: r.reason, status: r.status, createdAt: iso(r.created_at), saleRef: r.sale_ref ?? '',
 });
 
 /**
- * PostgreSQL のつなぎの置き場。
+ * PostgreSQL の販売の置き場。
  *
  * @remarks 問い合わせごとにトランザクションを張り、`app.tenant_id` を設定する（行単位の制限。移行 119）
  */
@@ -186,57 +128,8 @@ export class PostgresSalesStore implements SalesStore {
     }
   }
 
-  async listLinks(tenantId: string): Promise<SalesLinkRecord[]> {
-    return (await this.q<LinkRow>(tenantId, 'select * from inventory_sales_links where tenant_id = $1 order by created_at', [tenantId])).map(toLink);
-  }
-
-  async getLink(tenantId: string, id: string): Promise<SalesLinkRecord | null> {
-    const [r] = await this.q<LinkRow>(tenantId, 'select * from inventory_sales_links where tenant_id = $1 and id = $2', [tenantId, id]);
-    return r ? toLink(r) : null;
-  }
-
-  async createLink(tenantId: string, l: SalesLinkRecord): Promise<void> {
-    await this.q(tenantId,
-      `insert into inventory_sales_links (id, tenant_id, name, key_hash, status, scope, approved_by, approved_at, removed, created_by, created_at)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-      [l.id, tenantId, l.name, l.keyHash, l.status, l.scope ? JSON.stringify(l.scope) : null, l.approvedBy, l.approvedAt, JSON.stringify(l.removed), l.createdBy, l.createdAt]);
-  }
-
-  async updateLink(tenantId: string, id: string, patch: Partial<Omit<SalesLinkRecord, 'id' | 'createdBy' | 'createdAt'>>): Promise<void> {
-    const cols: Record<string, string> = {
-      name: 'name', keyHash: 'key_hash', status: 'status', scope: 'scope', approvedBy: 'approved_by', approvedAt: 'approved_at',
-      removed: 'removed', lastReadAt: 'last_read_at', lastEventAt: 'last_event_at',
-    };
-    const sets: string[] = [];
-    const params: unknown[] = [tenantId, id];
-    for (const [k, v] of Object.entries(patch)) {
-      const col = cols[k];
-      if (!col || v === undefined) continue;
-      params.push(k === 'scope' || k === 'removed' ? (v === null ? null : JSON.stringify(v)) : v);
-      sets.push(`${col} = $${params.length}`);
-    }
-    if (sets.length === 0) return;
-    await this.q(tenantId, `update inventory_sales_links set ${sets.join(', ')} where tenant_id = $1 and id = $2`, params);
-  }
-
-  async deleteLink(tenantId: string, id: string): Promise<void> {
-    await this.q(tenantId, 'delete from inventory_sales_links where tenant_id = $1 and id = $2', [tenantId, id]);
-  }
-
-  async findLinkByHash(keyHash: string): Promise<{ id: string; tenantId: string; status: 'active' | 'stopped' } | null> {
-    // 会社の判定より前に呼ぶ。鍵のハッシュで 1 行だけ返す関数を使う（移行 119）
-    const client = await this.pool.connect();
-    try {
-      const { rows } = await client.query<{ id: string; tenant_id: string; status: 'active' | 'stopped' }>('select id, tenant_id, status from m2o_inventory_sales_link($1)', [keyHash]);
-      const r = rows[0];
-      return r ? { id: r.id, tenantId: r.tenant_id, status: r.status } : null;
-    } finally {
-      client.release();
-    }
-  }
-
-  async getSale(tenantId: string, linkId: string, saleRef: string): Promise<SaleRecord | null> {
-    const [r] = await this.q<SaleRow>(tenantId, 'select * from inventory_sales where tenant_id = $1 and link_id = $2 and sale_ref = $3', [tenantId, linkId, saleRef]);
+  async getSale(tenantId: string, appId: string, saleRef: string): Promise<SaleRecord | null> {
+    const [r] = await this.q<SaleRow>(tenantId, 'select * from inventory_sales where tenant_id = $1 and app_id = $2 and sale_ref = $3', [tenantId, appId, saleRef]);
     return r ? toSale(r) : null;
   }
 
@@ -247,27 +140,27 @@ export class PostgresSalesStore implements SalesStore {
 
   async saveSale(tenantId: string, s: SaleRecord): Promise<void> {
     await this.q(tenantId,
-      `insert into inventory_sales (id, tenant_id, link_id, sale_ref, status, hold_ids, sold_batches, created_at, updated_at)
+      `insert into inventory_sales (id, tenant_id, app_id, sale_ref, status, hold_ids, sold_moves, created_at, updated_at)
        values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-       on conflict (id) do update set status = excluded.status, hold_ids = excluded.hold_ids, sold_batches = excluded.sold_batches, updated_at = excluded.updated_at
+       on conflict (id) do update set status = excluded.status, hold_ids = excluded.hold_ids, sold_moves = excluded.sold_moves, updated_at = excluded.updated_at
        where inventory_sales.tenant_id = excluded.tenant_id`,
-      [s.id, tenantId, s.linkId, s.saleRef, s.status, JSON.stringify(s.holdIds), JSON.stringify(s.soldMoves), s.createdAt, s.updatedAt]);
+      [s.id, tenantId, s.appId, s.saleRef, s.status, JSON.stringify(s.holdIds), JSON.stringify(s.soldMoves), s.createdAt, s.updatedAt]);
   }
 
   async addUnmatched(tenantId: string, rows: UnmatchedRecord[]): Promise<void> {
     for (const u of rows) {
       await this.q(tenantId,
-        `insert into inventory_sale_unmatched (id, tenant_id, link_id, sale_id, action, item_ref, code, barcode, qty, reason, status, created_at)
+        `insert into inventory_sale_unmatched (id, tenant_id, app_id, sale_id, action, item_ref, code, barcode, qty, reason, status, created_at)
          values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-        [u.id, tenantId, u.linkId, u.saleId, u.action, u.itemRef, u.code, u.barcode, u.qty, u.reason, u.status, u.createdAt]);
+        [u.id, tenantId, u.appId, u.saleId, u.action, u.itemRef, u.code, u.barcode, u.qty, u.reason, u.status, u.createdAt]);
     }
   }
 
-  async listUnmatched(tenantId: string, opts: { status?: UnmatchedRecord['status']; linkId?: string; limit?: number }): Promise<(UnmatchedRecord & { saleRef: string })[]> {
+  async listUnmatched(tenantId: string, opts: { status?: UnmatchedRecord['status']; appId?: string; limit?: number }): Promise<(UnmatchedRecord & { saleRef: string })[]> {
     const params: unknown[] = [tenantId];
     let where = 'u.tenant_id = $1';
     if (opts.status) { params.push(opts.status); where += ` and u.status = $${params.length}`; }
-    if (opts.linkId) { params.push(opts.linkId); where += ` and u.link_id = $${params.length}`; }
+    if (opts.appId) { params.push(opts.appId); where += ` and u.app_id = $${params.length}`; }
     params.push(Math.min(500, opts.limit ?? 200));
     return (await this.q<UnmatchedRow>(tenantId,
       `select u.*, s.sale_ref from inventory_sale_unmatched u join inventory_sales s on s.tenant_id = u.tenant_id and s.id = u.sale_id
@@ -291,40 +184,9 @@ export class PostgresSalesStore implements SalesStore {
   }
 
   async countOpenUnmatched(tenantId: string): Promise<Map<string, number>> {
-    const rows = await this.q<{ link_id: string; n: string }>(tenantId,
-      `select link_id, count(*) as n from inventory_sale_unmatched where tenant_id = $1 and status = 'open' group by link_id`, [tenantId]);
-    return new Map(rows.map((r) => [r.link_id, Number(r.n)]));
-  }
-
-  async getEvent(tenantId: string, linkId: string, eventRef: string): Promise<SaleEventRecord | null> {
-    const [r] = await this.q<{ body_hash: string; response: SaleEventResult | null; created_at: unknown }>(tenantId,
-      'select body_hash, response, created_at from inventory_sale_events where tenant_id = $1 and link_id = $2 and event_ref = $3', [tenantId, linkId, eventRef]);
-    return r ? { bodyHash: r.body_hash, response: r.response, createdAt: iso(r.created_at) } : null;
-  }
-
-  async claimEvent(tenantId: string, linkId: string, eventRef: string, bodyHash: string, at: string): Promise<boolean> {
-    const rows = await this.q(tenantId,
-      `insert into inventory_sale_events (tenant_id, link_id, event_ref, body_hash, created_at) values ($1,$2,$3,$4,$5)
-       on conflict do nothing returning event_ref`, [tenantId, linkId, eventRef, bodyHash, at]);
-    return rows.length === 1;
-  }
-
-  async reclaimEvent(tenantId: string, linkId: string, eventRef: string, staleBefore: string, at: string): Promise<boolean> {
-    const rows = await this.q(tenantId,
-      `update inventory_sale_events set created_at = $5 where tenant_id = $1 and link_id = $2 and event_ref = $3 and response is null and created_at < $4
-       returning event_ref`, [tenantId, linkId, eventRef, staleBefore, at]);
-    return rows.length === 1;
-  }
-
-  async finishEvent(tenantId: string, linkId: string, eventRef: string, response: SaleEventResult): Promise<void> {
-    await this.q(tenantId, 'update inventory_sale_events set response = $4 where tenant_id = $1 and link_id = $2 and event_ref = $3',
-      [tenantId, linkId, eventRef, JSON.stringify(response)]);
-  }
-
-  async countEvents(tenantId: string, since: string): Promise<Map<string, number>> {
-    const rows = await this.q<{ link_id: string; n: string }>(tenantId,
-      'select link_id, count(*) as n from inventory_sale_events where tenant_id = $1 and created_at >= $2 group by link_id', [tenantId, since]);
-    return new Map(rows.map((r) => [r.link_id, Number(r.n)]));
+    const rows = await this.q<{ app_id: string; n: string }>(tenantId,
+      `select app_id, count(*) as n from inventory_sale_unmatched where tenant_id = $1 and status = 'open' group by app_id`, [tenantId]);
+    return new Map(rows.map((r) => [r.app_id, Number(r.n)]));
   }
 
   async changedAt(tenantId: string, itemIds: string[]): Promise<Map<string, string>> {
@@ -338,47 +200,15 @@ export class PostgresSalesStore implements SalesStore {
   }
 }
 
-/** メモリの置き場（試験用）。在庫のメモリの置き場を渡すと、`changedAt` をそこから求める。 */
+/** メモリの販売の置き場（試験用）。在庫のメモリの置き場を渡すと、`changedAt` をそこから求める。 */
 export class MemorySalesStore implements SalesStore {
-  readonly links = new Map<string, SalesLinkRecord & { tenantId: string }>();
   readonly sales = new Map<string, SaleRecord & { tenantId: string }>();
   readonly unmatched = new Map<string, UnmatchedRecord & { tenantId: string }>();
-  readonly events = new Map<string, SaleEventRecord & { tenantId: string; linkId: string }>();
 
   constructor(private readonly inventory?: MemoryInventoryStore) {}
 
-  async listLinks(tenantId: string): Promise<SalesLinkRecord[]> {
-    return [...this.links.values()].filter((l) => l.tenantId === tenantId).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map(({ tenantId: _t, ...l }) => ({ ...l }));
-  }
-
-  async getLink(tenantId: string, id: string): Promise<SalesLinkRecord | null> {
-    const l = this.links.get(id);
-    if (!l || l.tenantId !== tenantId) return null;
-    const { tenantId: _t, ...rest } = l;
-    return { ...rest, removed: [...rest.removed] };
-  }
-
-  async createLink(tenantId: string, link: SalesLinkRecord): Promise<void> {
-    this.links.set(link.id, { ...link, tenantId });
-  }
-
-  async updateLink(tenantId: string, id: string, patch: Partial<Omit<SalesLinkRecord, 'id' | 'createdBy' | 'createdAt'>>): Promise<void> {
-    const l = this.links.get(id);
-    if (!l || l.tenantId !== tenantId) return;
-    for (const [k, v] of Object.entries(patch)) if (v !== undefined) (l as unknown as Record<string, unknown>)[k] = v;
-  }
-
-  async deleteLink(tenantId: string, id: string): Promise<void> {
-    if (this.links.get(id)?.tenantId === tenantId) this.links.delete(id);
-  }
-
-  async findLinkByHash(keyHash: string): Promise<{ id: string; tenantId: string; status: 'active' | 'stopped' } | null> {
-    const l = [...this.links.values()].find((x) => x.keyHash === keyHash);
-    return l ? { id: l.id, tenantId: l.tenantId, status: l.status } : null;
-  }
-
-  async getSale(tenantId: string, linkId: string, saleRef: string): Promise<SaleRecord | null> {
-    const s = [...this.sales.values()].find((x) => x.tenantId === tenantId && x.linkId === linkId && x.saleRef === saleRef);
+  async getSale(tenantId: string, appId: string, saleRef: string): Promise<SaleRecord | null> {
+    const s = [...this.sales.values()].find((x) => x.tenantId === tenantId && x.appId === appId && x.saleRef === saleRef);
     return s ? { ...s, holdIds: [...s.holdIds], soldMoves: [...s.soldMoves] } : null;
   }
 
@@ -395,9 +225,9 @@ export class MemorySalesStore implements SalesStore {
     for (const r of rows) this.unmatched.set(r.id, { ...r, tenantId });
   }
 
-  async listUnmatched(tenantId: string, opts: { status?: UnmatchedRecord['status']; linkId?: string; limit?: number }): Promise<(UnmatchedRecord & { saleRef: string })[]> {
+  async listUnmatched(tenantId: string, opts: { status?: UnmatchedRecord['status']; appId?: string; limit?: number }): Promise<(UnmatchedRecord & { saleRef: string })[]> {
     return [...this.unmatched.values()]
-      .filter((u) => u.tenantId === tenantId && (!opts.status || u.status === opts.status) && (!opts.linkId || u.linkId === opts.linkId))
+      .filter((u) => u.tenantId === tenantId && (!opts.status || u.status === opts.status) && (!opts.appId || u.appId === opts.appId))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, opts.limit ?? 200)
       .map(({ tenantId: _t, ...u }) => ({ ...u, saleRef: this.sales.get(u.saleId)?.saleRef ?? '' }));
   }
@@ -420,39 +250,7 @@ export class MemorySalesStore implements SalesStore {
 
   async countOpenUnmatched(tenantId: string): Promise<Map<string, number>> {
     const out = new Map<string, number>();
-    for (const u of this.unmatched.values()) if (u.tenantId === tenantId && u.status === 'open') out.set(u.linkId, (out.get(u.linkId) ?? 0) + 1);
-    return out;
-  }
-
-  private eventKey = (tenantId: string, linkId: string, ref: string) => `${tenantId}\u0000${linkId}\u0000${ref}`;
-
-  async getEvent(tenantId: string, linkId: string, eventRef: string): Promise<SaleEventRecord | null> {
-    const e = this.events.get(this.eventKey(tenantId, linkId, eventRef));
-    return e ? { bodyHash: e.bodyHash, response: e.response, createdAt: e.createdAt } : null;
-  }
-
-  async claimEvent(tenantId: string, linkId: string, eventRef: string, bodyHash: string, at: string): Promise<boolean> {
-    const k = this.eventKey(tenantId, linkId, eventRef);
-    if (this.events.has(k)) return false;
-    this.events.set(k, { tenantId, linkId, bodyHash, response: null, createdAt: at });
-    return true;
-  }
-
-  async reclaimEvent(tenantId: string, linkId: string, eventRef: string, staleBefore: string, at: string): Promise<boolean> {
-    const e = this.events.get(this.eventKey(tenantId, linkId, eventRef));
-    if (!e || e.response || e.createdAt >= staleBefore) return false;
-    e.createdAt = at;
-    return true;
-  }
-
-  async finishEvent(tenantId: string, linkId: string, eventRef: string, response: SaleEventResult): Promise<void> {
-    const e = this.events.get(this.eventKey(tenantId, linkId, eventRef));
-    if (e) e.response = response;
-  }
-
-  async countEvents(tenantId: string, since: string): Promise<Map<string, number>> {
-    const out = new Map<string, number>();
-    for (const e of this.events.values()) if (e.tenantId === tenantId && e.createdAt >= since) out.set(e.linkId, (out.get(e.linkId) ?? 0) + 1);
+    for (const u of this.unmatched.values()) if (u.tenantId === tenantId && u.status === 'open') out.set(u.appId, (out.get(u.appId) ?? 0) + 1);
     return out;
   }
 
@@ -587,8 +385,8 @@ function eventHash(e: SaleEventInput): string {
   return createHash('sha256').update(JSON.stringify([e.saleId, e.status, e.occurredAt, e.lines.map((l) => [l.itemId ?? '', l.code ?? '', l.barcode ?? '', l.quantity])])).digest('hex');
 }
 
-/** 渡す範囲を整える（知らない項目は捨てる）。 */
-export function salesScopeOf(body: unknown): InventorySalesScope {
+/** 「商品の一覧を読む」で渡す範囲を整える（知らない項目は捨てる）。 */
+export function catalogScopeOf(body: unknown): InventoryCatalogScope {
   const b = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
   const ids = Array.isArray(b['itemIds']) ? b['itemIds'].filter((x): x is string => typeof x === 'string').slice(0, 5000) : [];
   return { itemIds: [...new Set(ids)], showCount: b['showCount'] === true, price: b['price'] === true, employeePrice: b['employeePrice'] === true };
@@ -596,139 +394,40 @@ export function salesScopeOf(body: unknown): InventorySalesScope {
 
 // ---- 処理 ----
 
-/** つなぎの処理に要るもの。 */
+/** 在庫の機能に要るもの。 */
 export interface InventorySalesDeps {
   store: SalesStore;
   service: InventoryService;
   repo: Repository;
+  /** 外部のアプリ（承認した範囲・二重に数えない番号）。 */
+  apps: ExternalApps;
 }
 
 /** 照らした結果。 */
 type Match = { item: InventoryItemView } | { reason: string };
 
 /**
- * 販売管理とのつなぎ。管理者のつなぎの扱い（作成・承認・鍵の出し直し・停止・削除）と、販売管理が呼ぶ口（一覧・販売の通知）を受け持つ。
+ * 外部のアプリの在庫の機能（商品の一覧・販売の通知）と、照らせなかった行。
  *
- * @remarks つなぎの扱いは管理者だけが呼べる（呼ぶ側の API で確かめる）。どれも監査ログに残す。
- * 販売管理が呼ぶ口は、会社の状態と在庫管理の入り切りを呼ぶ側で確かめてから呼ぶ
+ * @remarks 呼ぶ側の API が、鍵・機能・会社の状態・在庫管理の入り切りを確かめてから呼ぶ
  */
 export class InventorySales {
-  private readonly hits = new Map<string, number[]>();
-
   constructor(private readonly deps: InventorySalesDeps) {}
 
-  /** 販売管理が記録した人として残す名前（入出庫の記録の「記録した人」）。 */
-  static actorOf(linkId: string): string {
-    return `sales:${linkId}`;
-  }
-
-  // ---- 管理者 ----
-
-  /** すべてのつなぎ（作った順）。承認した人の名前・この 7 日の通知の数・照らせなかった行の数を添える。 */
-  async list(tenantId: string, now: Date = new Date()): Promise<InventorySalesLink[]> {
-    const [rows, users, events, open] = await Promise.all([
-      this.deps.store.listLinks(tenantId), this.deps.repo.listUsers(tenantId),
-      this.deps.store.countEvents(tenantId, new Date(now.getTime() - 7 * 86_400_000).toISOString()), this.deps.store.countOpenUnmatched(tenantId),
-    ]);
-    return rows.map((l) => this.toView(l, users, events, open));
-  }
-
-  private toView(l: SalesLinkRecord, users: { id: string; displayName: string }[], events: Map<string, number>, open: Map<string, number>): InventorySalesLink {
-    const approver = l.approvedBy ? users.find((u) => u.id === l.approvedBy)?.displayName : undefined;
+  /** 品目 1 つを、渡す範囲の項目だけの形にする。 */
+  private toItem(v: InventoryItemView, scope: InventoryCatalogScope, updatedAt: string): SalesItem {
     return {
-      id: l.id, name: l.name, status: l.status, scope: l.scope, approvedBy: l.approvedBy, ...(approver ? { approvedByName: approver } : {}),
-      approvedAt: l.approvedAt, createdAt: l.createdAt, lastReadAt: l.lastReadAt, lastEventAt: l.lastEventAt,
-      eventsLast7Days: events.get(l.id) ?? 0, unmatchedOpen: open.get(l.id) ?? 0,
+      id: v.id, name: v.name, publicName: v.publicName.trim() || null, code: v.sku.trim() || null, barcodes: [...v.codes], category: v.category.trim() || null,
+      unit: v.unit, status: v.available <= 0 ? 'out' : v.low ? 'low' : 'in_stock',
+      ...(scope.showCount ? { available: Math.max(0, v.available) } : {}),
+      ...(scope.price ? { price: v.price === null ? null : { amount: Math.round(v.price), taxIncluded: v.priceTaxIncluded } } : {}),
+      ...(scope.employeePrice ? { employeePrice: v.employeePrice === null ? null : Math.round(v.employeePrice) } : {}),
+      active: true, updatedAt,
     };
-  }
-
-  /** つなぎ 1 つ（管理者に見せる形）。 */
-  async view(tenantId: string, id: string): Promise<InventorySalesLink | null> {
-    return (await this.list(tenantId)).find((l) => l.id === id) ?? null;
-  }
-
-  /**
-   * つなぎを作る。鍵はこの答えでだけ見せる（M2Office はハッシュだけを持つ）。承認するまでは一覧に何も渡さない。
-   */
-  async create(tenantId: string, userId: string, name: string): Promise<{ link: InventorySalesLink; key: string } | { error: string }> {
-    const n = name.replace(/[\r\n]+/g, ' ').trim().slice(0, 40);
-    if (!n) return { error: 'つなぎの名前（レジ・ネットショップなど）を入れてください' };
-    if ((await this.deps.store.listLinks(tenantId)).length >= INVENTORY_SALES_LINK_MAX) return { error: `つなぎは ${INVENTORY_SALES_LINK_MAX} つまでです` };
-    const key = randomBytes(24).toString('base64url');
-    const at = new Date().toISOString();
-    const rec: SalesLinkRecord = {
-      id: randomUUID(), name: n, keyHash: salesKeyHash(key), status: 'active', scope: null, approvedBy: null, approvedAt: null, removed: [],
-      createdBy: userId, createdAt: at, lastReadAt: null, lastEventAt: null,
-    };
-    await this.deps.store.createLink(tenantId, rec);
-    await this.audit(tenantId, userId, 'inventory.sales_link.create', rec.id, { name: n });
-    return { link: (await this.view(tenantId, rec.id))!, key };
-  }
-
-  /** 名前を変える（承認し直さない）。 */
-  async rename(tenantId: string, userId: string, id: string, name: string): Promise<InventorySalesLink | { error: string }> {
-    const n = name.replace(/[\r\n]+/g, ' ').trim().slice(0, 40);
-    if (!n) return { error: '名前を入れてください' };
-    if (!(await this.deps.store.getLink(tenantId, id))) return { error: 'つなぎが見つかりません' };
-    await this.deps.store.updateLink(tenantId, id, { name: n });
-    await this.audit(tenantId, userId, 'inventory.sales_link.rename', id, { name: n });
-    return (await this.view(tenantId, id))!;
-  }
-
-  /**
-   * この内容で渡す（押した管理者が承認者。第9.4.0節の社外への送信を、渡す範囲で一度承認する）。
-   *
-   * @remarks 範囲から外した品目は覚えておき、`updatedSince` の答えに `active: false` として 1 度入れる
-   */
-  async approve(tenantId: string, userId: string, id: string, scope: InventorySalesScope): Promise<InventorySalesLink | { error: string }> {
-    const link = await this.deps.store.getLink(tenantId, id);
-    if (!link) return { error: 'つなぎが見つかりません' };
-    const active = new Set((await this.deps.service.store.listItems(tenantId)).map((i) => i.id));
-    const itemIds = scope.itemIds.filter((x) => active.has(x));
-    const at = new Date().toISOString();
-    const before = new Set(link.scope?.itemIds ?? []);
-    const after = new Set(itemIds);
-    const removed = [
-      ...link.removed.filter((r) => !after.has(r.itemId)),
-      ...[...before].filter((x) => !after.has(x)).map((itemId) => ({ itemId, at })),
-    ].slice(-REMOVED_KEEP);
-    const next: InventorySalesScope = { itemIds, showCount: scope.showCount, price: scope.price, employeePrice: scope.employeePrice };
-    await this.deps.store.updateLink(tenantId, id, { scope: next, approvedBy: userId, approvedAt: at, removed });
-    await this.audit(tenantId, userId, 'inventory.sales_link.approve', id, {
-      items: itemIds.length, showCount: next.showCount, price: next.price, employeePrice: next.employeePrice,
-    });
-    return (await this.view(tenantId, id))!;
-  }
-
-  /** 鍵を出し直す。前の鍵はすぐ使えなくなる。新しい鍵はこの答えでだけ見せる。 */
-  async rekey(tenantId: string, userId: string, id: string): Promise<{ link: InventorySalesLink; key: string } | { error: string }> {
-    if (!(await this.deps.store.getLink(tenantId, id))) return { error: 'つなぎが見つかりません' };
-    const key = randomBytes(24).toString('base64url');
-    await this.deps.store.updateLink(tenantId, id, { keyHash: salesKeyHash(key) });
-    await this.audit(tenantId, userId, 'inventory.sales_link.rekey', id, {});
-    return { link: (await this.view(tenantId, id))!, key };
-  }
-
-  /** 止める・動かす。止めたつなぎの鍵では、どの口も 404 になる。 */
-  async setStatus(tenantId: string, userId: string, id: string, status: 'active' | 'stopped'): Promise<InventorySalesLink | { error: string }> {
-    if (!(await this.deps.store.getLink(tenantId, id))) return { error: 'つなぎが見つかりません' };
-    await this.deps.store.updateLink(tenantId, id, { status });
-    await this.audit(tenantId, userId, status === 'stopped' ? 'inventory.sales_link.stop' : 'inventory.sales_link.resume', id, {});
-    return (await this.view(tenantId, id))!;
-  }
-
-  /** 削除する（止めてあるつなぎだけ）。販売の記録と照らせなかった行も消える。入出庫の記録は残る。 */
-  async remove(tenantId: string, userId: string, id: string): Promise<{ ok: true } | { error: string }> {
-    const link = await this.deps.store.getLink(tenantId, id);
-    if (!link) return { error: 'つなぎが見つかりません' };
-    if (link.status !== 'stopped') return { error: '削除できるのは止めてあるつなぎだけです。先に止めてください' };
-    await this.deps.store.deleteLink(tenantId, id);
-    await this.audit(tenantId, userId, 'inventory.sales_link.delete', id, { name: link.name });
-    return { ok: true };
   }
 
   /** 承認する前の見本。販売管理に渡るとおりの一覧を返す。 */
-  async preview(tenantId: string, scope: InventorySalesScope): Promise<SalesItem[]> {
+  async preview(tenantId: string, scope: InventoryCatalogScope): Promise<SalesItem[]> {
     const views = await this.deps.service.list(tenantId, { includeStopped: false });
     const ids = new Set(scope.itemIds);
     const changed = await this.deps.store.changedAt(tenantId, [...ids]);
@@ -737,10 +436,10 @@ export class InventorySales {
 
   /** 照らせなかった行（選ぶのを待っているもの。新しい順）。 */
   async unmatched(tenantId: string): Promise<InventorySaleUnmatched[]> {
-    const [rows, links] = await Promise.all([this.deps.store.listUnmatched(tenantId, { status: 'open' }), this.deps.store.listLinks(tenantId)]);
-    const names = new Map(links.map((l) => [l.id, l.name]));
+    const [rows, apps] = await Promise.all([this.deps.store.listUnmatched(tenantId, { status: 'open' }), this.deps.apps.store.listApps(tenantId)]);
+    const names = new Map(apps.map((a) => [a.id, a.name]));
     return rows.map((u) => ({
-      id: u.id, linkId: u.linkId, linkName: names.get(u.linkId) ?? '', saleRef: u.saleRef, action: u.action, itemRef: u.itemRef, code: u.code,
+      id: u.id, appId: u.appId, appName: names.get(u.appId) ?? '', saleRef: u.saleRef, action: u.action, itemRef: u.itemRef, code: u.code,
       barcode: u.barcode, qty: u.qty, reason: u.reason, createdAt: u.createdAt,
     }));
   }
@@ -757,11 +456,10 @@ export class InventorySales {
     if (!sale) return { error: '販売が見つかりません' };
     const item = await this.deps.service.store.getItem(tenantId, itemId);
     if (!item || item.status !== 'active') return { error: '使っている品目を選んでください' };
-    const link = await this.deps.store.getLink(tenantId, u.linkId);
     const at = new Date().toISOString();
     if (u.action === 'hold') {
       if (sale.status !== 'ordered') return { error: 'この注文は、もう販売か取り消しになっています' };
-      const holdId = await this.hold(tenantId, sale, item.id, u.qty, sale.updatedAt, link?.id ?? u.linkId);
+      const holdId = await this.hold(tenantId, sale, item.id, u.qty, sale.updatedAt, u.appId);
       sale.holdIds.push(holdId);
     } else {
       const res = await this.deps.service.recordMove(tenantId, userId, {
@@ -776,50 +474,12 @@ export class InventorySales {
     return { ok: true };
   }
 
-  // ---- 販売管理が呼ぶ口 ----
-
-  /**
-   * 鍵から会社とつなぎを引く。知らない鍵・止めたつなぎは `null`（呼ぶ側はどちらも同じ 404 にする）。
-   */
-  async authenticate(key: string): Promise<{ tenantId: string; linkId: string } | null> {
-    if (!/^[A-Za-z0-9_-]{32}$/.test(key)) return null;
-    const hit = await this.deps.store.findLinkByHash(salesKeyHash(key));
-    if (!hit || hit.status !== 'active') return null;
-    return { tenantId: hit.tenantId, linkId: hit.id };
-  }
-
-  /** つなぎごとの呼び出しの上限（1 分に {@link SALES_RATE_PER_MINUTE} 回）。超えたら `false`。 */
-  allowHit(linkId: string, now: number = Date.now()): boolean {
-    const recent = (this.hits.get(linkId) ?? []).filter((t) => now - t < 60_000);
-    if (recent.length >= SALES_RATE_PER_MINUTE) {
-      this.hits.set(linkId, recent);
-      return false;
-    }
-    recent.push(now);
-    this.hits.set(linkId, recent);
-    return true;
-  }
-
-  /** 品目 1 つを、渡す範囲の項目だけの形にする。 */
-  private toItem(v: InventoryItemView, scope: InventorySalesScope, updatedAt: string): SalesItem {
-    return {
-      id: v.id, name: v.name, publicName: v.publicName.trim() || null, code: v.sku.trim() || null, barcodes: [...v.codes], category: v.category.trim() || null,
-      unit: v.unit, status: v.available <= 0 ? 'out' : v.low ? 'low' : 'in_stock',
-      ...(scope.showCount ? { available: Math.max(0, v.available) } : {}),
-      ...(scope.price ? { price: v.price === null ? null : { amount: Math.round(v.price), taxIncluded: v.priceTaxIncluded } } : {}),
-      ...(scope.employeePrice ? { employeePrice: v.employeePrice === null ? null : Math.round(v.employeePrice) } : {}),
-      active: true, updatedAt,
-    };
-  }
-
   /**
    * 商品の一覧（承認した範囲だけ）。
    *
    * @returns 答えか、絞り込みの誤り
    */
-  async listItems(tenantId: string, linkId: string, q: SalesItemQuery, now: Date = new Date()): Promise<HookResponse<SalesItemList>> {
-    const link = await this.deps.store.getLink(tenantId, linkId);
-    if (!link) return { status: 404, body: { error: 'not found' } };
+  async listItems(tenantId: string, appId: string, q: SalesItemQuery, now: Date = new Date()): Promise<HookResponse<SalesItemList>> {
     for (const k of Object.keys(FILTER_MAX) as (keyof typeof FILTER_MAX)[]) {
       if ((q[k]?.length ?? 0) > FILTER_MAX[k]) return { status: 400, body: { error: `${k} は ${FILTER_MAX[k]} 件までです`, field: k } };
     }
@@ -830,9 +490,9 @@ export class InventorySales {
     if (!Number.isInteger(offset) || offset < 0) return { status: 400, body: { error: 'cursor が違います', field: 'cursor' } };
     // 読み始めた時刻を asOf にする（作っている間に変わったものを、次の読み込みで取りこぼさないため）
     const asOf = now.toISOString();
-    await this.deps.store.updateLink(tenantId, linkId, { lastReadAt: asOf });
-    const scope = link.scope;
-    if (!scope) return { status: 200, body: { items: [], nextCursor: null, asOf } };
+    const granted = await this.deps.apps.catalogScope(tenantId, appId);
+    if (!granted) return { status: 200, body: { items: [], nextCursor: null, asOf } };
+    const { scope, removed } = granted;
 
     const inScope = new Set(scope.itemIds);
     const views = (await this.deps.service.list(tenantId, { includeStopped: true })).filter((v) => inScope.has(v.id));
@@ -870,7 +530,7 @@ export class InventorySales {
       }
     }
     if (since) {
-      for (const r of link.removed) if (r.at > since && !inScope.has(r.itemId) && (!ids || ids.has(r.itemId))) out.push({ id: r.itemId, active: false });
+      for (const r of removed) if (r.at > since && !inScope.has(r.itemId) && (!ids || ids.has(r.itemId))) out.push({ id: r.itemId, active: false });
     }
     const page = out.slice(offset, offset + limit);
     const nextCursor = offset + limit < out.length ? Buffer.from(String(offset + limit), 'utf8').toString('base64url') : null;
@@ -880,26 +540,15 @@ export class InventorySales {
   /**
    * 販売の通知を受け取る。同じ `eventId` は 1 度だけ処理し、送り直しには前と同じ答えを返す。
    */
-  async postEvent(tenantId: string, linkId: string, body: unknown, now: Date = new Date()): Promise<HookResponse<SaleEventResult>> {
-    const link = await this.deps.store.getLink(tenantId, linkId);
-    if (!link) return { status: 404, body: { error: 'not found' } };
+  async postEvent(tenantId: string, appId: string, body: unknown, now: Date = new Date()): Promise<HookResponse<SaleEventResult>> {
     const parsed = parseSaleEvent(body);
     if ('error' in parsed) return { status: 400, body: parsed };
-    const hash = eventHash(parsed);
-    const at = now.toISOString();
-    if (!(await this.deps.store.claimEvent(tenantId, linkId, parsed.eventId, hash, at))) {
-      const prev = await this.deps.store.getEvent(tenantId, linkId, parsed.eventId);
-      if (prev && prev.bodyHash !== hash) return { status: 409, body: { error: 'この eventId は別の中身で受け付け済みです' } };
-      if (prev?.response) return { status: 200, body: prev.response };
-      // 処理の途中のまま古くなったもの（途中で止まった）だけをやり直す
-      const stale = new Date(now.getTime() - STALE_EVENT_MS).toISOString();
-      if (!(await this.deps.store.reclaimEvent(tenantId, linkId, parsed.eventId, stale, at))) {
-        return { status: 409, body: { error: 'この eventId は処理の途中です。少し待って同じ中身で送り直してください' }, retryAfter: 10 };
-      }
-    }
-    const result = await this.apply(tenantId, link, parsed, now);
-    await this.deps.store.finishEvent(tenantId, linkId, parsed.eventId, result);
-    await this.deps.store.updateLink(tenantId, linkId, { lastEventAt: at });
+    const claim = await this.deps.apps.claimEvent(tenantId, appId, SALES_EVENT_KIND, parsed.eventId, eventHash(parsed), now);
+    if (claim.kind === 'conflict') return { status: 409, body: { error: 'この eventId は別の中身で受け付け済みです' } };
+    if (claim.kind === 'replay') return { status: 200, body: claim.response as SaleEventResult };
+    if (claim.kind === 'busy') return { status: 409, body: { error: 'この eventId は処理の途中です。少し待って同じ中身で送り直してください' }, retryAfter: 10 };
+    const result = await this.apply(tenantId, appId, parsed, now);
+    await this.deps.apps.finishEvent(tenantId, appId, SALES_EVENT_KIND, parsed.eventId, result);
     return { status: 200, body: result };
   }
 
@@ -924,11 +573,11 @@ export class InventorySales {
   }
 
   /** 取り置く（使える数だけを減らす）。 */
-  private async hold(tenantId: string, sale: SaleRecord, itemId: string, qty: number, occurredAt: string, linkId: string): Promise<string> {
+  private async hold(tenantId: string, sale: SaleRecord, itemId: string, qty: number, occurredAt: string, appId: string): Promise<string> {
     const id = randomUUID();
     await this.deps.service.store.addReservation(tenantId, {
       id, bookingId: null, itemId, qty, bookingRef: `販売 ${sale.saleRef}`.slice(0, 120), bookedAt: occurredAt, source: 'sales',
-      createdBy: InventorySales.actorOf(linkId), at: new Date().toISOString(),
+      createdBy: ExternalApps.actorOf(appId), at: new Date().toISOString(),
     });
     this.deps.service.touch(tenantId);
     return id;
@@ -942,20 +591,21 @@ export class InventorySales {
   }
 
   /** 状態ごとに在庫を動かす。 */
-  private async apply(tenantId: string, link: SalesLinkRecord, e: SaleEventInput, now: Date): Promise<SaleEventResult> {
+  private async apply(tenantId: string, appId: string, e: SaleEventInput, now: Date): Promise<SaleEventResult> {
     const at = now.toISOString();
-    const actor = InventorySales.actorOf(link.id);
+    const actor = ExternalApps.actorOf(appId);
+    const granted = await this.deps.apps.catalogScope(tenantId, appId);
     const views = await this.deps.service.list(tenantId, { includeStopped: true });
-    let sale = await this.deps.store.getSale(tenantId, link.id, e.saleId);
+    let sale = await this.deps.store.getSale(tenantId, appId, e.saleId);
     const fresh = !sale;
-    if (!sale) sale = { id: randomUUID(), linkId: link.id, saleRef: e.saleId, status: e.status === 'cancelled' ? 'cancelled' : 'ordered', holdIds: [], soldMoves: [], createdAt: at, updatedAt: at };
+    if (!sale) sale = { id: randomUUID(), appId: appId, saleRef: e.saleId, status: e.status === 'cancelled' ? 'cancelled' : 'ordered', holdIds: [], soldMoves: [], createdAt: at, updatedAt: at };
     const lines: SaleLineResult[] = [];
     const unmatched: UnmatchedRecord[] = [];
     const touched = new Set<string>();
     const miss = (i: number, line: SaleLineInput, action: UnmatchedRecord['action'], reason: string) => {
       lines.push({ index: i, itemId: null, result: 'unmatched', available: null, reason });
       unmatched.push({
-        id: randomUUID(), linkId: link.id, saleId: sale!.id, action, itemRef: line.itemId ?? '', code: line.code ?? '', barcode: line.barcode ?? '',
+        id: randomUUID(), appId: appId, saleId: sale!.id, action, itemRef: line.itemId ?? '', code: line.code ?? '', barcode: line.barcode ?? '',
         qty: line.quantity, reason, status: 'open', createdAt: at,
       });
     };
@@ -982,7 +632,7 @@ export class InventorySales {
       for (const [i, line] of e.lines.entries()) {
         const m = this.match(line, views);
         if ('reason' in m) { miss(i, line, 'hold', m.reason); continue; }
-        sale.holdIds.push(await this.hold(tenantId, sale, m.item.id, line.quantity, e.occurredAt, link.id));
+        sale.holdIds.push(await this.hold(tenantId, sale, m.item.id, line.quantity, e.occurredAt, appId));
         lines.push({ index: i, itemId: m.item.id, result: 'held', available: null });
         touched.add(m.item.id);
       }
@@ -1015,8 +665,8 @@ export class InventorySales {
     await this.deps.store.saveSale(tenantId, sale);
     if (unmatched.length) await this.deps.store.addUnmatched(tenantId, unmatched);
     // 数を渡すと承認した品目だけ、動かしたあとの使える数を添える
-    if (link.scope?.showCount && touched.size) {
-      const inScope = new Set(link.scope.itemIds);
+    if (granted?.scope.showCount && touched.size) {
+      const inScope = new Set(granted.scope.itemIds);
       const after = new Map((await this.deps.service.list(tenantId, { includeStopped: true })).map((v) => [v.id, v]));
       for (const l of lines) if (l.itemId && inScope.has(l.itemId)) l.available = Math.max(0, after.get(l.itemId)?.available ?? 0);
     }
@@ -1032,12 +682,5 @@ export class InventorySales {
       count: rows.length,
       samples: rows.slice(0, 10).map((u) => `${label[u.action]} ${u.saleRef}: ${[u.itemRef, u.code, u.barcode].filter(Boolean).join(' / ')} ${u.qty}`),
     };
-  }
-
-  private async audit(tenantId: string, userId: string, action: string, targetId: string, detail: Record<string, unknown>): Promise<void> {
-    const ev: AuditEvent = {
-      id: randomUUID(), tenantId, actorType: 'user', actorId: userId, action, targetType: 'inventory_sales_link', targetId, detail, occurredAt: new Date().toISOString(),
-    };
-    await this.deps.repo.appendAudit(ev);
   }
 }

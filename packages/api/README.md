@@ -268,12 +268,6 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/inventory/publications/preview` | 管理者: 承認する前の見本（`itemIds`・`fields`（`category`・`price`）・`showCount`）。公開されるとおりの中身を返す |
 | `PUT /v1/inventory/publications/:id` | 管理者: そのまとまりをこの内容で公開する（押した管理者が承認者。中身の変更・再開も同じ）。鍵は最初の承認で作り変えない。監査ログ `inventory.publication.approve` |
 | `PUT /v1/inventory/publications/:id/name` | 管理者: まとまりの名前を変える（承認し直さない） |
-| `GET /v1/inventory/sales-links` | 管理者: 販売管理とのつなぎの一覧（作った順。承認した範囲・承認した人・最後に読みに来た時刻・最後の通知・この 7 日の通知の数・照らせなかった行の数。鍵は返さない。`max` は 8。第29.20.1節） |
-| `POST /v1/inventory/sales-links` | 管理者: つなぎを作る（`name`）。鍵（32 字）はこの答えでだけ返し、ハッシュだけを持つ。8 つを超えると 400。監査ログ `inventory.sales_link.create` |
-| `POST /v1/inventory/sales-links/preview` | 管理者: 承認する前の見本（`itemIds`・`showCount`・`price`・`employeePrice`）。販売管理に渡るとおりの一覧 |
-| `PUT /v1/inventory/sales-links/:id` | 管理者: この内容で渡す（押した管理者が承認者）。範囲から外した品目は覚えておき、`updatedSince` の答えに `active: false` で入れる。監査ログ `inventory.sales_link.approve` |
-| `PUT /v1/inventory/sales-links/:id/name` ／ `POST /v1/inventory/sales-links/:id/rekey` | 管理者: 名前を変える（承認し直さない）／ 鍵を出し直す（前の鍵はすぐ無効。新しい鍵はこの答えでだけ返す） |
-| `POST /v1/inventory/sales-links/:id/stop` ／ `resume` ／ `DELETE /v1/inventory/sales-links/:id` | 管理者: 止める・動かす ／ 止めてあるつなぎを削除する（動いていれば 409。入出庫の記録は残る） |
 | `GET /v1/inventory/sales-unmatched` ／ `POST /v1/inventory/sales-unmatched/:id/resolve` | 照らせなかった販売の行 ／ 品目（`itemId`）を選んで、その時点で取り置き・使用・入庫として記録する（在庫管理の利用範囲の人） |
 | `POST /v1/inventory/publications/:id/stop` ／ `DELETE /v1/inventory/publications/:id` | 管理者: 公開を止める（監査ログ `inventory.publication.stop`）／ 止めてあるまとまりを削除する（公開中は 409。監査ログ `inventory.publication.delete`） |
 | `GET` ／ `POST /v1/columns` | Web のコラム（仕様書 第32.18.1節）: 一覧と入れ先の WordPress ／ 書き始める（`theme`・`memo`。書き上げは裏で進め、すぐ 201 と `id`）。Web のコラムを切っている会社と利用範囲の外の人には、`/v1/columns` のどの口も 403。推論が使えなければ 409 |
@@ -351,8 +345,9 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `PUT` ／ `DELETE /v1/admin/extensions/inquiries/line` | 管理者: LINE 公式アカウントをつなぐ（`secret`・`token`。鍵を確かめて預け、受け口の URL `webhookUrl` を 1 度だけ返す。見本の会社では鍵を確かめない。ローカルの形では 409）／ 外す（受け口も止める） |
 | `POST /v1/admin/extensions/inquiries/mailbox/connect` ／ `DELETE /v1/admin/extensions/inquiries/mailbox` | 管理者: 窓口のアカウントをつなぐ（Google の認可の URL。アカウントを選ばせる。見本の会社ではすぐつながる）／ 外す（Google の許可も取り消す）。戻りは `/v1/oauth/google/callback` |
 | `GET /v1/public/inventory/:key` ／ `:key.json` | **認証なし**。在庫の公開のページ（他のサイトの iframe に入れてよい。`frame-ancestors *`・スクリプトなし）とデータ（`Access-Control-Allow-Origin: *`）。作り直して置いた中身だけを返す。知らない鍵・止めた公開・公開を切った会社はどれも 404 |
-| `GET /v1/hooks/inventory/sales/items` | **販売管理とのつなぎの鍵**（`Authorization: Bearer`）。承認した範囲の商品の一覧（`updatedSince`・`categories`・`ids`・`codes`・`barcodes`・`limit`・`cursor`）。外れた品目は `active: false`。鍵が違う・止めた・会社が止まっている・在庫管理を切ったはどれも 404、つなぎごとに 1 分 120 回を超えると 429。定義は `docs/api/inventory-sales.openapi.yaml`（第29.20.1節） |
-| `POST /v1/hooks/inventory/sales/events` | 同じ鍵。販売の通知（`ordered`・`sold`・`cancelled`・`returned`）。つなぎ＋販売番号で 1 件にまとめ、`eventId` で二重に数えない（中身が違えば 409、処理の途中は 409 と `Retry-After`）。照らせない行は受け付けて残す。64 KB を超えれば 413、JSON でなければ 415。金額・お客様の情報は読まず、本文は残さない |
+| `GET /v1/company/profile` | **外部のアプリの鍵**（`Authorization: Bearer m2oa_…`）。機能 `company.profile`。会社の基本情報（会社名・略称・郵便番号・所在地・電話・Web・登録番号・会計年度の開始月・営業する曜日）。経理の設定とロゴは返さない（第13.4.1節） |
+| `GET /v1/inventory/catalog` | 外部のアプリの鍵。機能 `inventory.catalog`。承認した範囲の商品の一覧（`updatedSince`・`categories`・`ids`・`codes`・`barcodes`・`limit`・`cursor`）。外れた品目は `active: false`。在庫管理を切った会社は 404（第29.20.1節） |
+| `POST /v1/inventory/sales-events` | 外部のアプリの鍵。機能 `inventory.sales`。販売の通知（`ordered`・`sold`・`cancelled`・`returned`）。アプリ＋販売番号で 1 件にまとめ、`eventId` で二重に数えない（中身が違えば 409、処理の途中は 409 と `Retry-After`）。照らせない行は受け付けて残す。64 KB を超えれば 413、JSON でなければ 415。金額・お客様の情報は読まず、本文は残さない |
 | `POST /v1/hooks/inventory/:key` | **認証なしの受け口**。予約のシステムの Webhook を受ける（第29.13.1節）。会社は鍵（32 文字）のハッシュから引き、ホスト名は見ない。64 KB を超えれば 413。知らない鍵・止めた受け口・引き当てを切った会社はどれも 404、予約として読めなければ 422。項目の対応は最初の予約から推論して受け口に覚える。予約した人の名前・連絡先は残さない |
 | `GET /v1/notices` | 本人宛ての有効な社内のお知らせ（取り下げ・期間切れ・本人が済んだものを除く。`isNew`・`daysLeft` つき。仕様書 第10.15節） |
 | `POST /v1/notices` | 社内のお知らせを出す（`title`・`body`・`link`（https だけ）・`all` か `groupIds`・`dueOn`・`until`）。会社の全員が出せる。承認は挟まない。201 |
@@ -467,6 +462,10 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/me/promotions` | 本人の記憶から、秘書が会社の知識にしたものの履歴（本人のものだけ。第6.5.4節）。本人が出す・管理者が承認する API は第 0.115.0 版でなくした |
 | `GET /v1/help/articles?scope=` | ヘルプの記事の一覧（役割と有効な業務で出し分け）と、読めるマニュアルの名前（`manuals`）。`scope=admin` は管理者ページ（管理者向けの記事だけ）、それ以外はワークスペース（管理者向けを除く）。業務のマニュアルの章（`docs/manual/`）は、その業務を使える人にだけ出す（第6.10.7節・第6.10.7.3節） |
 | `GET /v1/help/articles/:id` | 記事の本文。見られない記事は 404 |
+| `GET /v1/admin/apps` ／ `POST /v1/admin/apps` | 管理者: 外部のアプリの一覧（この 7 日の呼び出し・最後に呼ばれた時刻。鍵は返さない）と、この会社で選べる機能 ／ アプリを登録する（`name`。鍵（`m2oa_`）はこの答えでだけ返す。20 まで）。監査ログ `app.create`（第13.4.1節） |
+| `PUT /v1/admin/apps/:id` | 管理者: この内容で許す（`functions`・`settings.catalog`）。押した管理者が承認者。選べない機能は 400。監査ログ `app.approve` |
+| `PUT /v1/admin/apps/:id/name` ／ `POST /v1/admin/apps/:id/rekey` ／ `POST /v1/admin/apps/:id/stop` ・ `resume` ／ `DELETE /v1/admin/apps/:id` | 管理者: 名前を変える ／ 鍵を出し直す（前の鍵はすぐ無効）／ 止める・動かす ／ 止めてあるアプリを削除する（動いていれば 409） |
+| `POST /v1/admin/apps/preview/inventory-catalog` | 管理者: 機能「商品の一覧を読む」の見本（`itemIds`・`showCount`・`price`・`employeePrice`） |
 | `GET /v1/help/api/:name` | 開発者向けの記事の API の定義（`docs/api/<名前>.openapi.yaml`）を、Swagger UI のページ（HTML）で返す。管理者だけ。応答の CSP の `sandbox` で切り離し、外へ送らない（仕様書 第6.10.7.4節） |
 | `GET /v1/help/search?q=&scope=` | 記事の検索（出す所の記事の中から） |
 | `GET /v1/debug/events` ／ `DELETE` | デバッグモード（`M2O_DEBUG=true`）の本人の記録（新しい順。`after` でそれより後だけ）／ 消す。デバッグモードでなければ 404（仕様書 第20.4.1節） |

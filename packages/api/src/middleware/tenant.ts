@@ -12,7 +12,8 @@ import { randomUUID } from 'node:crypto';
 import type { Context, Next } from 'hono';
 import { getCookie } from 'hono/cookie';
 import type { RequestContext, Tenant, User } from '@m2office/shared';
-import { proxyAllowed, type Logger, type ProxyScope } from '@m2office/core';
+import { appFunctionFor, proxyAllowed, type Logger, type ProxyScope } from '@m2office/core';
+import type { AppFunctionId } from '@m2office/shared';
 import type { AppDeps } from '../context.js';
 import { readSession } from '../auth/session.js';
 
@@ -21,7 +22,18 @@ export type AuthInfo =
   | { method: 'session'; sessionId: string; csrfToken: string }
   | { method: 'dev-header' }
   /** 運営のサポートの代理アクセス（閲覧だけ。仕様書 第23.6.1節）。 */
-  | { method: 'proxy'; sessionId: string; csrfToken: string; grantId: string; scope: ProxyScope; expiresAt: string; operatorId: string; operatorLabel: string };
+  | { method: 'proxy'; sessionId: string; csrfToken: string; grantId: string; scope: ProxyScope; expiresAt: string; operatorId: string; operatorLabel: string }
+  /** 外部のアプリの鍵（仕様書 第13.4.1節）。`fn` はこの要求の機能。 */
+  | { method: 'app'; appId: string; appName: string; fn: AppFunctionId };
+
+/** 外部のアプリの鍵（`Authorization: Bearer m2oa_…`）を取り出す。無ければ `null`。 */
+export function appKeyOf(c: Context): string | null {
+  const m = /^Bearer\s+(m2oa_\S+)$/i.exec(c.req.header('authorization') ?? '');
+  return m ? m[1]! : null;
+}
+
+/** 外部のアプリに返す、理由を分けない答え（鍵が違う・止めた・会社が止まっている・会社が合わない）。 */
+const APP_NOT_FOUND = { error: 'not found' };
 
 /** 代理アクセスの閲覧のログイン状態の Cookie（顧客の `m2o_session` と分ける）。 */
 export const PROXY_COOKIE = 'm2o_proxy';
@@ -65,6 +77,8 @@ export function resolveTenant(deps: AppDeps) {
       return c.json({ error: 'テナントを特定できません。サブドメインを指定してください。' }, 400);
     }
     const tenant = await deps.repo.findTenantBySubdomain(subdomain);
+    // 外部のアプリには、会社が無い・止まっている（停止・緊急停止・解約）を、鍵が違うときと同じ 404 で返す（第13.4.1節）
+    if (appKeyOf(c) && (!tenant || !isOperational(tenant))) return c.json(APP_NOT_FOUND, 404);
     if (!tenant) {
       return c.json({ error: `テナントが見つかりません: ${subdomain}` }, 404);
     }
@@ -150,6 +164,22 @@ const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 export function authenticate(deps: AppDeps) {
   return async (c: Context<AppEnv>, next: Next) => {
     const tenant = c.get('tenant');
+
+    // 外部のアプリ（第13.4.1節）。鍵の会社と呼んだ名前の会社が合い、この要求が承認した機能の道のときだけ通す
+    const appKey = appKeyOf(c);
+    if (appKey) {
+      const hit = await deps.apps.authenticate(appKey);
+      if (!hit || hit.tenantId !== tenant.id) return c.json(APP_NOT_FOUND, 404);
+      const fn = appFunctionFor(c.req.method, c.req.path);
+      if (!fn || !hit.functions.includes(fn)) return c.json({ error: 'このアプリには許していない機能です' }, 403);
+      if (!deps.apps.allowHit(hit.appId)) return c.json({ error: 'too many requests' }, 429, { 'Retry-After': '60' });
+      void deps.apps.recordCall(tenant.id, hit.appId);
+      // 管理者のロールは持たせない。記録した人は `app:<アプリ>`（第13.4.1節「実行主体」）
+      c.set('ctx', { tenant, user: { id: `app:${hit.appId}`, tenantId: tenant.id, email: '', displayName: hit.name, roles: [], status: 'active' } });
+      c.set('auth', { method: 'app', appId: hit.appId, appName: hit.name, fn });
+      c.header('Cache-Control', 'no-store');
+      return next();
+    }
 
     // 運営のサポートの代理アクセス（閲覧だけ。第23.6.1節）。決めた見るだけの道だけを通し、閲覧のたびに会社の監査ログに残す
     const proxyToken = getCookie(c, PROXY_COOKIE);
