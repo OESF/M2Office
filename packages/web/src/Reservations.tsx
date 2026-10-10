@@ -10,6 +10,7 @@ import {
   RESERVABLE_KIND_LABELS, RESERVATION_RULE_LABELS, type ReservableItem, type ReservableKind, type Reservation, type ReservationConflict, type ReservationRule,
 } from '@m2office/shared';
 import { api, ApiError, describeError } from './api.js';
+import { SortableList } from './Sortable.js';
 
 const JST = 9 * 3_600_000;
 const SLOT = 15;
@@ -412,12 +413,12 @@ function ItemManager({ items, onChanged }: { items: ReservableItem[]; onChanged:
     setError(null);
     try { await f(); onChanged(); } catch (e) { setError(describeError(e, '直せませんでした')); }
   };
-  const move = (i: number, by: number) => {
-    const ids = items.map((x) => x.id);
-    const j = i + by;
-    if (j < 0 || j >= ids.length) return;
-    [ids[i], ids[j]] = [ids[j]!, ids[i]!];
-    void run(() => api.reservations.reorder(ids));
+  // 置いた並びをすぐ画面に出す（読み直しを待つ間に前の並びへ戻って見えないように）
+  const [list, setList] = useState(items);
+  useEffect(() => setList(items), [items]);
+  const reorder = (next: ReservableItem[]) => {
+    setList(next);
+    void run(() => api.reservations.reorder(next.map((x) => x.id)));
   };
   return (
     <section className="rsv-items card">
@@ -427,29 +428,25 @@ function ItemManager({ items, onChanged }: { items: ReservableItem[]; onChanged:
         <button className="btn small" disabled={!name.trim()} onClick={() => void run(async () => { await api.reservations.addItem({ name: name.trim() }); setName(''); })}>足す</button>
       </div>
       {error && <p className="error">{error}</p>}
-      {items.length > 0 && (
-        <table className="table rsv-items-table">
-          <thead><tr><th>名前</th><th>種類</th><th>定員</th><th>場所</th><th /></tr></thead>
-          <tbody>
-            {items.map((i, n) => (
-              <tr key={i.id} className={i.status === 'stopped' ? 'is-stopped' : ''}>
-                <td><input defaultValue={i.name} maxLength={40} aria-label="名前" onBlur={(e) => e.target.value.trim() !== i.name && void run(() => api.reservations.updateItem(i.id, { name: e.target.value }))} /></td>
-                <td>
-                  <select value={i.kind} aria-label="種類" onChange={(e) => void run(() => api.reservations.updateItem(i.id, { kind: e.target.value }))}>
-                    {(Object.keys(RESERVABLE_KIND_LABELS) as ReservableKind[]).map((k) => <option key={k} value={k}>{RESERVABLE_KIND_LABELS[k]}</option>)}
-                  </select>
-                </td>
-                <td><input className="rsv-cap" type="number" min={1} max={1000} defaultValue={i.capacity ?? ''} aria-label="定員" onBlur={(e) => String(i.capacity ?? '') !== e.target.value && void run(() => api.reservations.updateItem(i.id, { capacity: e.target.value === '' ? null : Number(e.target.value) }))} /></td>
-                <td><input defaultValue={i.location} maxLength={60} aria-label="場所" onBlur={(e) => e.target.value !== i.location && void run(() => api.reservations.updateItem(i.id, { location: e.target.value }))} /></td>
-                <td className="nowrap">
-                  <button className="btn ghost small" aria-label="上へ" disabled={n === 0} onClick={() => move(n, -1)}>↑</button>
-                  <button className="btn ghost small" aria-label="下へ" disabled={n === items.length - 1} onClick={() => move(n, 1)}>↓</button>
-                  <button className="btn ghost small" onClick={() => void run(() => api.reservations.updateItem(i.id, { status: i.status === 'active' ? 'stopped' : 'active' }))}>{i.status === 'active' ? '止める' : '使う'}</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {list.length > 0 && (
+        /* 左のつまみをつかんで動かす（個人設定のメニューの並び・サイネージの流れと同じ。第37.8節）。止める・使うはスライドのスイッチ */
+        <SortableList className="rsv-items-list" items={list} keyOf={(i) => i.id} nameOf={(i) => i.name} onMove={reorder}
+          render={(i) => (
+            <>
+              <input className={`rsv-item-name${i.status === 'stopped' ? ' is-stopped' : ''}`} defaultValue={i.name} maxLength={40} aria-label="名前"
+                onBlur={(e) => e.target.value.trim() !== i.name && void run(() => api.reservations.updateItem(i.id, { name: e.target.value }))} />
+              <select value={i.kind} aria-label="種類" className={i.status === 'stopped' ? 'is-stopped' : ''} onChange={(e) => void run(() => api.reservations.updateItem(i.id, { kind: e.target.value }))}>
+                {(Object.keys(RESERVABLE_KIND_LABELS) as ReservableKind[]).map((k) => <option key={k} value={k}>{RESERVABLE_KIND_LABELS[k]}</option>)}
+              </select>
+              <input className={`rsv-cap${i.status === 'stopped' ? ' is-stopped' : ''}`} type="number" min={1} max={1000} defaultValue={i.capacity ?? ''} placeholder="定員" aria-label="定員"
+                onBlur={(e) => String(i.capacity ?? '') !== e.target.value && void run(() => api.reservations.updateItem(i.id, { capacity: e.target.value === '' ? null : Number(e.target.value) }))} />
+              <input className={`rsv-item-place${i.status === 'stopped' ? ' is-stopped' : ''}`} defaultValue={i.location} maxLength={60} placeholder="場所" aria-label="場所"
+                onBlur={(e) => e.target.value !== i.location && void run(() => api.reservations.updateItem(i.id, { location: e.target.value }))} />
+              <button type="button" role="switch" aria-checked={i.status === 'active'} aria-label={`${i.name}を${i.status === 'active' ? '止める' : '使う'}`}
+                title={i.status === 'active' ? '使う' : '止める'} className={i.status === 'active' ? 'switch on' : 'switch'}
+                onClick={() => void run(() => api.reservations.updateItem(i.id, { status: i.status === 'active' ? 'stopped' : 'active' }))}><span /></button>
+            </>
+          )} />
       )}
     </section>
   );

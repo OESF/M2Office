@@ -2046,10 +2046,13 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .rsv-form .row + *, .rsv-detail .row + .row { margin-top: calc(8px * var(--space-scale)); }
 .rsv-purpose { flex: 1; min-width: 140px; }
 .rsv-conflict { display: flex; flex-wrap: wrap; align-items: center; gap: calc(6px * var(--space-scale)); font-size: calc(13px * var(--font-scale)); }
-.rsv-items-table input { width: 100%; min-width: 80px; }
-.rsv-items-table .rsv-cap { width: 72px; min-width: 0; }
-.rsv-items-table tr.is-stopped td { opacity: 0.55; }
-.rsv-items-table .nowrap { white-space: nowrap; }
+/* 予約できるものの行（つかんで動かす一覧。幅が足りなければ折り返す） */
+.rsv-items-list .sortable-body { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.rsv-items-list .rsv-item-name { flex: 1 1 10em; min-width: 8em; }
+.rsv-items-list .rsv-item-place { flex: 1 1 8em; min-width: 6em; }
+.rsv-items-list .rsv-cap { width: 72px; min-width: 0; }
+.rsv-items-list .switch { flex: none; margin-left: auto; }
+.rsv-items-list .is-stopped { opacity: 0.55; }
 .rsv-mine h2, .rsv-mobile h2 { font-size: calc(15px * var(--font-scale)); margin: calc(8px * var(--space-scale)) 0; }
 .rsv-mine ul { margin: 0; padding-left: 1.2em; }
 .rsv-mobile section { display: flex; flex-direction: column; gap: calc(8px * var(--space-scale)); }
