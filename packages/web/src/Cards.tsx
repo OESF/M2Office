@@ -283,7 +283,7 @@ function CardListView({ onOpen, admin, onBulk }: { onOpen: (id: string) => void;
             {u.failureReason === ORPHAN_BACK && <OrphanAttach cardId={u.id} onDone={load} onError={setMessage} />}
           </div>
           {u.status === 'failed' && (
-            <button className="btn ghost small" onClick={() => void api.cards.dismiss(u.id).then(load).catch((e) => setMessage(describeError(e)))}>削除</button>
+            <button className="btn ghost small danger" onClick={() => void api.cards.dismiss(u.id).then(load).catch((e) => setMessage(describeError(e)))}>削除</button>
           )}
         </div>
       ))}

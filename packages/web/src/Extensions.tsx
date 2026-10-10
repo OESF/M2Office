@@ -519,17 +519,33 @@ function SignageFields({ settings, busy, onChanged }: { settings: SignageSetting
           onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== settings.callTemplateNoPlace) save({ callTemplateNoPlace: v }); }} /></label>
       </div>
       <div className="ext-signage-sources">
-        {sources.map((x) => (
-          <div key={x.id} className="row wrap">
-            <strong>{x.name}</strong>
-            <span className={`badge ${x.status === 'active' ? 'ok' : ''}`}>{x.status === 'active' ? '動いている' : '止めている'}</span>
-            <span className="muted">{x.lastReceivedAt ? `最後 ${new Date(x.lastReceivedAt).toLocaleString('ja-JP')}` : 'まだ受け取っていない'}
-              {x.stats.day ? `・今日 ${x.stats.accepted} 件${Object.values(x.stats.rejected).reduce((a, n) => a + n, 0) ? `（断った ${Object.values(x.stats.rejected).reduce((a, n) => a + n, 0)} 件）` : ''}` : ''}</span>
-            {(x.stats.rejected['unreadable'] ?? 0) > 0 && <span className="badge warn">読めない呼び出しが届いています</span>}
-            <button className="link" onClick={() => void api.admin.setSignageSourceStatus(x.id, x.status === 'active' ? 'stopped' : 'active').then(reload).catch((e) => fail(e, '変えられませんでした'))}>{x.status === 'active' ? '止める' : '動かす'}</button>
-            <button className="link" onClick={() => void api.admin.resetSignageSourceMapping(x.id).then(reload).catch((e) => fail(e, '変えられませんでした'))}>推測し直す</button>
-          </div>
-        ))}
+        {sources.length > 0 && (
+          /* 呼び出しの受け口の表（名前・受け取った様子・操作）。止める・動かすはスライドのスイッチ */
+          <table className="table ext-sources-table">
+            <thead><tr><th>受け口</th><th>受け取った様子</th><th className="ext-sources-actions" aria-label="操作" /></tr></thead>
+            <tbody>
+              {sources.map((x) => {
+                const rejected = Object.values(x.stats.rejected).reduce((a, n) => a + n, 0);
+                return (
+                  <tr key={x.id} className={x.status === 'active' ? '' : 'is-stopped'}>
+                    <td><strong>{x.name}</strong></td>
+                    <td className="small">
+                      <div>{x.lastReceivedAt ? `最後 ${new Date(x.lastReceivedAt).toLocaleString('ja-JP')}` : 'まだ受け取っていない'}</div>
+                      {x.stats.day ? <div className="muted">今日 {x.stats.accepted} 件{rejected ? `（断った ${rejected} 件）` : ''}</div> : null}
+                      {(x.stats.rejected['unreadable'] ?? 0) > 0 && <div><span className="badge warn">読めない呼び出しが届いています</span></div>}
+                    </td>
+                    <td className="ext-sources-actions">
+                      <button type="button" role="switch" aria-checked={x.status === 'active'} aria-label={`${x.name}を${x.status === 'active' ? '止める' : '動かす'}`}
+                        title={x.status === 'active' ? '動いている' : '止めている'} className={x.status === 'active' ? 'switch on' : 'switch'}
+                        onClick={() => void api.admin.setSignageSourceStatus(x.id, x.status === 'active' ? 'stopped' : 'active').then(reload).catch((e) => fail(e, '変えられませんでした'))}><span /></button>
+                      <button className="link" onClick={() => void api.admin.resetSignageSourceMapping(x.id).then(reload).catch((e) => fail(e, '変えられませんでした'))}>推測し直す</button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
         <div className="row wrap">
           <input placeholder="受付のシステムの名前" value={sourceName} maxLength={40} onChange={(e) => setSourceName(e.target.value)} aria-label="呼び出しの受け口の名前" />
           <button className="btn ghost small" disabled={!sourceName.trim()} onClick={() => void api.admin.createSignageSource(sourceName.trim()).then((r) => { setCreated(r.url); setSourceName(''); reload(); }).catch((e) => fail(e, '作れませんでした'))}>受け口を作る</button>
@@ -1297,9 +1313,10 @@ function BookingSources() {
         <div key={s.id} className="row wrap">
           <span className="grow">{s.name}<span className="muted">（{s.status === 'stopped' ? '止めています' : receivedAt(s.lastReceivedAt)}{s.mapping ? '' : '・型はまだ'}）</span></span>
           {s.mapping && <button className="btn ghost small" onClick={() => act(() => api.admin.setBookingSourceMapping(s.id, null))}>型をやり直す</button>}
-          <button className="btn ghost small" onClick={() => act(() => api.admin.setBookingSourceStatus(s.id, s.status === 'stopped' ? 'active' : 'stopped'))}>
-            {s.status === 'stopped' ? '再開' : '止める'}
-          </button>
+          {/* 止める・再開する（サイネージの流れ・予約できるものと同じスライドのスイッチ） */}
+          <button type="button" role="switch" aria-checked={s.status !== 'stopped'} aria-label={`${s.name}を${s.status === 'stopped' ? '再開する' : '止める'}`}
+            title={s.status === 'stopped' ? '止めています' : '受け付けています'} className={s.status === 'stopped' ? 'switch' : 'switch on'}
+            onClick={() => act(() => api.admin.setBookingSourceStatus(s.id, s.status === 'stopped' ? 'active' : 'stopped'))}><span /></button>
         </div>
       ))}
       {created && (

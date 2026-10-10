@@ -232,7 +232,7 @@ export function CompanySettings({ page }: { page: string }) {
               <span className="muted">→</span>
               <input placeholder="使う言葉（例: お客様）" value={t.use}
                 onChange={(e) => setStyle({ ...style, terms: style.terms.map((x, j) => j === i ? { ...x, use: e.target.value } : x) })} />
-              <button className="btn ghost small"
+              <button className="btn ghost small danger"
                 onClick={() => setStyle({ ...style, terms: style.terms.filter((_, j) => j !== i) })}>削除</button>
             </div>
           ))}

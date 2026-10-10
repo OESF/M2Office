@@ -246,7 +246,7 @@ function Detail({ id, onBack, onApprovals, changeKey }: { id: string; onBack: ()
         {editable && <button className="btn" disabled={busy || edit.channels.length === 0} onClick={() => run(async () => { await save(); await api.announcements.submit(id); onApprovals(); }, '承認へ進めました')}>承認へ進む</button>}
         {a.status === 'scheduled' && <button className="btn ghost" disabled={busy} onClick={() => { if (window.confirm('予約を取り消しますか。Web の予約公開の記事は、WordPress の側で消してください')) run(() => api.announcements.cancel(id), '取り消しました'); }}>予約を取り消す</button>}
         {(a.status === 'draft' || a.status === 'cancelled' || a.status === 'ended') && (
-          <button className="btn ghost" disabled={busy} onClick={() => { if (window.confirm('このお知らせを削除しますか')) run(async () => { await api.announcements.remove(id); onBack(); }, '削除しました'); }}>削除</button>
+          <button className="btn ghost danger" disabled={busy} onClick={() => { if (window.confirm('このお知らせを削除しますか')) run(async () => { await api.announcements.remove(id); onBack(); }, '削除しました'); }}>削除</button>
         )}
         <NoteText note={note} />
       </div>
@@ -342,7 +342,7 @@ function MailRecipients({ id, editable, ids, people, onChange }: {
           <li key={r.contactId}>
             <span className="grow">{r.name}{r.company ? `（${r.company}）` : ''} <span className="small muted">{r.email}</span></span>
             <span className="small muted">{recipientReason(r)}</span>
-            {editable && <button className="link small" onClick={() => onChange(ids.filter((x) => x !== r.contactId))}>削除</button>}
+            {editable && <button className="link small danger" onClick={() => onChange(ids.filter((x) => x !== r.contactId))}>削除</button>}
           </li>
         ))}
       </ul>

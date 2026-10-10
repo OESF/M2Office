@@ -391,7 +391,7 @@ function Machines({ me }: { me: OpsMe }) {
                     <td className="num">{r && r.disk.dataFree !== null ? `${bytes(r.disk.dataFree)}${r.disk.dataTotal ? `（${Math.round((r.disk.dataFree / r.disk.dataTotal) * 100)}%）` : ''}` : '—'}</td>
                     <td className="num">{r?.cert.daysLeft !== null && r?.cert.daysLeft !== undefined ? `あと ${r.cert.daysLeft} 日` : '—'}</td>
                     <td>{m.flags.map((f) => <span key={f} className="badge warn">{FLAG_LABEL[f] ?? f}</span>)}</td>
-                    <td>{me.can['machine.manage'] && <button className="btn ghost small" onClick={() => remove(m)}>削除</button>}</td>
+                    <td>{me.can['machine.manage'] && <button className="btn ghost small danger" onClick={() => remove(m)}>削除</button>}</td>
                   </tr>
                 );
               })}

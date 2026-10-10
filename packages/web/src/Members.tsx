@@ -147,7 +147,10 @@ function RewardManager({ admin }: { admin: boolean }) {
           {items.map((r) => (
             <li key={r.id} className={r.status === 'stopped' ? 'is-stopped' : ''}>
               <span>{r.name}{r.birthdayOnly && <> <span className="badge">誕生月</span></>}{r.minRank !== 'regular' && <> <span className="badge">{minRankText(r.minRank)}</span></>}</span><span>{r.points} ポイント</span>
-              {admin && <button className="btn ghost small" onClick={() => void run(() => api.members.updateReward(r.id, { status: r.status === 'active' ? 'stopped' : 'active' }))}>{r.status === 'active' ? '止める' : '使う'}</button>}
+              {/* 止める・使う（サイネージの流れ・予約できるものと同じスライドのスイッチ） */}
+              {admin && <button type="button" role="switch" aria-checked={r.status === 'active'} aria-label={`${r.name}を${r.status === 'active' ? '止める' : '使う'}`}
+                title={r.status === 'active' ? '使える' : '止めている'} className={r.status === 'active' ? 'switch on' : 'switch'}
+                onClick={() => void run(() => api.members.updateReward(r.id, { status: r.status === 'active' ? 'stopped' : 'active' }))}><span /></button>}
             </li>
           ))}
         </ul>

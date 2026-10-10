@@ -121,7 +121,7 @@ function Row({ c, open, onToggle, onRemove, busy }: { c: Competitor; open: boole
             ? <button className="link" onClick={onToggle} aria-expanded={open} title="取り出した事実を見る">{c.factCount}</button>
             : c.factCount}
         </td>
-        <td><button className="btn ghost small" disabled={busy} onClick={onRemove}>削除</button></td>
+        <td><button className="btn ghost small danger" disabled={busy} onClick={onRemove}>削除</button></td>
       </tr>
       {open && (
         <tr className="competitors-open">

@@ -822,6 +822,7 @@ tr.muted td { color: var(--muted); }
   font-size: calc(13px * var(--font-scale)); line-height: calc(1.6 * var(--line-scale)); color: var(--ink); }
 .link-btn { background: none; border: none; color: var(--accent); padding: calc(4px * var(--space-scale)) 0; font-size: calc(13px * var(--font-scale)); display: block; }
 .link-btn:hover { text-decoration: underline; }
+.link-btn.danger { color: var(--danger); }
 /* ヘルプを開く前の画面へ戻す道（仕様書 第6.10.7.2節） */
 .back-link {
   display: inline-flex; align-items: center; gap: calc(6px * var(--space-scale));
@@ -1456,8 +1457,21 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .slip-result .row.wrap { margin-top: 6px; }
 /* 取り置き（第29.13節）。日を過ぎた取り置きは赤く */
 .bookings-panel ul.plain { margin: 0 0 12px; }
-.bookings-panel li.booking { padding: 4px 0; border-bottom: 1px solid var(--line); }
-.bookings-panel li.booking.danger strong { color: var(--danger); }
+/* 予約の表（日時・予約・取り置き・操作） */
+.bookings-table { width: 100%; margin-bottom: 12px; }
+.bookings-table td { vertical-align: top; }
+.bookings-table .bookings-when { white-space: nowrap; }
+.bookings-table tr.danger td:first-child strong { color: var(--danger); }
+.bookings-table .bookings-actions { width: 1%; white-space: nowrap; text-align: right; }
+.bookings-table .bookings-actions .btn + .btn { margin-left: 6px; }
+.bookings-table .bookings-compact { display: none; white-space: normal; }
+.bookings-panel { container-type: inline-size; }
+@container (max-width: 480px) {
+  .bookings-table .bookings-wide { display: none; }
+  .bookings-table .bookings-compact { display: block; margin-top: 4px; }
+  .bookings-table .bookings-actions .btn { display: block; width: 100%; }
+  .bookings-table .bookings-actions .btn + .btn { margin: 6px 0 0; }
+}
 .bookings-panel .row.wrap { flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
 .m-link { display: block; margin: 16px auto 0; background: none; border: none; color: var(--muted); font-size: 14px; }
 .m-link.danger { color: var(--danger); }
@@ -1725,6 +1739,13 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .ext-chip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; }
 .ext-signage-sources { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
 .ext-signage-sources code { word-break: break-all; }
+/* 呼び出しの受け口の表（受け口・受け取った様子・操作） */
+.ext-sources-table { width: 100%; }
+.ext-sources-table td { vertical-align: top; }
+.ext-sources-table tr.is-stopped td:not(.ext-sources-actions) { opacity: 0.55; }
+.ext-sources-table .ext-sources-actions { width: 1%; white-space: nowrap; text-align: right; }
+.ext-sources-table .ext-sources-actions > * { vertical-align: middle; }
+.ext-sources-table .ext-sources-actions .link { margin-left: 10px; }
 .ext-signage-template { display: flex; flex-direction: column; gap: 4px; flex: 1 1 280px; }
 .ext-signage-template input { width: 100%; }
 

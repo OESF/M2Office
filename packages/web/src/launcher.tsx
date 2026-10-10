@@ -207,7 +207,7 @@ export function AppLauncher({ email, admin, google }: { email: string; admin: bo
                         <strong>{l.label}</strong>
                         <span className="muted small">{l.url}</span>
                       </span>
-                      <button className="link-btn" onClick={() => void remove(l.id)}>削除</button>
+                      <button className="link-btn danger" onClick={() => void remove(l.id)}>削除</button>
                     </li>
                   ))}
                 </ul>

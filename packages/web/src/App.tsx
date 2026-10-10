@@ -1544,7 +1544,7 @@ function NoticeRow({ notice, onRead, selected, onSelect, onDelete }: {
             {new Date(notice.createdAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}
           </span>
         </button>
-        <button className="btn ghost small notice-delete" onClick={onDelete} aria-label={`「${notice.title}」を削除`}>削除</button>
+        <button className="btn ghost small danger notice-delete" onClick={onDelete} aria-label={`「${notice.title}」を削除`}>削除</button>
       </div>
       {open && (
         <div className="fold-body">

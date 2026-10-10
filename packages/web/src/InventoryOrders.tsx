@@ -259,25 +259,41 @@ export function BookingsPanel({ items, onChanged }: { items: InventoryItemView[]
   const menus = [...new Set(data.unmapped.map((b) => b.menu))];
   // 済んだ予約（使った・取り消し）は出さない
   const upcoming = data.bookings.filter((b) => b.status === 'booked');
+  /** 予約の表の 1 行（日時・予約・取り置き・操作）。 */
   const row = (b: InventoryBooking, past = false) => {
     const held = b.lines.filter((l) => l.status === 'held');
+    const booking = <><div>{b.externalId}{b.menu ? `・${b.menu}` : ''}</div>{b.sourceName && <div className="muted">{b.sourceName}</div>}</>;
+    const lines = held.length
+      ? held.map((l, i) => <div key={i}>{l.itemName ?? ''} {l.qty} {l.unit ?? ''}</div>)
+      : <span className="muted">{b.mapped ? '在庫を使わない' : '品目が分かりません'}</span>;
     return (
-      <li key={b.id} className={`row booking ${past ? 'danger' : ''}`}>
-        <span className="grow small">
-          <strong>{when(b.startsAt)}</strong> 予約 {b.externalId}{b.menu ? `・${b.menu}` : ''}{b.sourceName ? <span className="muted">（{b.sourceName}）</span> : null}
-          <span className="muted"> {held.length ? held.map((l) => `${l.itemName ?? ''} ${l.qty} ${l.unit ?? ''}`).join('・') : b.mapped ? '在庫を使わない' : '品目が分かりません'}</span>
-        </span>
-        {held.length > 0 && <button className="btn small" onClick={() => void act(() => api.inventory.useBooking(b.id), '記録できませんでした')}>使った</button>}
-        {held.length > 0 && <button className="btn ghost small" onClick={() => void act(() => api.inventory.cancelBooking(b.id), '取り消せませんでした')}>取り消し</button>}
-      </li>
+      <tr key={b.id} className={past ? 'danger' : ''}>
+        <td className="bookings-when">
+          <strong>{when(b.startsAt)}</strong>
+          {/* 欄が狭いときは、予約と取り置きを日時の下にまとめる */}
+          <div className="bookings-compact small">{booking}{lines}</div>
+        </td>
+        <td className="small bookings-wide">{booking}</td>
+        <td className="small bookings-wide">{lines}</td>
+        <td className="bookings-actions">
+          {held.length > 0 && <button className="btn small" onClick={() => void act(() => api.inventory.useBooking(b.id), '記録できませんでした')}>使った</button>}
+          {held.length > 0 && <button className="btn ghost small" onClick={() => void act(() => api.inventory.cancelBooking(b.id), '取り消せませんでした')}>取り消し</button>}
+        </td>
+      </tr>
     );
   };
+  const table = (rows: InventoryBooking[], past = false) => (
+    <table className="table bookings-table">
+      <thead><tr><th>日時</th><th className="bookings-wide">予約</th><th className="bookings-wide">取り置き</th><th className="bookings-actions" aria-label="操作" /></tr></thead>
+      <tbody>{rows.map((b) => row(b, past))}</tbody>
+    </table>
+  );
   return (
     <div className="card inventory-new bookings-panel">
       {data.overdue.length > 0 && (
         <>
           <div className="order-head"><strong>予約の日を過ぎた取り置き</strong></div>
-          <ul className="plain">{data.overdue.map((b) => row(b, true))}</ul>
+          {table(data.overdue, true)}
         </>
       )}
       {menus.length > 0 && (
@@ -300,7 +316,7 @@ export function BookingsPanel({ items, onChanged }: { items: InventoryItemView[]
         </>
       )}
       <div className="order-head"><strong>これからの予約</strong></div>
-      {upcoming.length === 0 ? <p className="muted small">取り置きはありません</p> : <ul className="plain">{upcoming.map((b) => row(b))}</ul>}
+      {upcoming.length === 0 ? <p className="muted small">取り置きはありません</p> : table(upcoming)}
       <div className="row wrap">
         <input type="datetime-local" value={draft.startsAt} onChange={(e) => setDraft({ ...draft, startsAt: e.target.value })} aria-label="予約の日時" />
         <select value={draft.itemId} onChange={(e) => setDraft({ ...draft, itemId: e.target.value })} aria-label="取り置く品目">
