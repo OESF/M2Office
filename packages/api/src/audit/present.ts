@@ -166,6 +166,9 @@ const ACTION_LABELS: Record<string, string> = {
   'app.stop': '外部のアプリを止めた',
   'app.resume': '外部のアプリを動かした',
   'app.delete': '外部のアプリを削除した',
+  'app.binding.create': 'アカウントを外部のアプリと結び付けた',
+  'app.binding.delete': '外部のアプリとの結び付きを削除した',
+  'app.knowledge_search': '外部のアプリからナレッジを検索した',
   'inventory.booking_source.stop': '予約の受け口を止めた',
   'inventory.booking_source.resume': '予約の受け口を動かした',
   'inventory.booking_source.mapping': '予約の受け口の型を直した',
@@ -297,6 +300,8 @@ const ACTION_LABELS: Record<string, string> = {
   'inquiry.mail_create': '窓口のメールから問い合わせを残した',
   'inquiry.mail_append': '窓口のメールを問い合わせに足した',
   'inquiry.mail_promote': '問い合わせでないとしたメールを問い合わせにした',
+  'inquiry.app_create': '外部のアプリから問い合わせを受けた',
+  'inquiry.app_append': '外部のアプリから問い合わせの続きを受けた',
   'inquiry.reply_draft': '問い合わせの返事の下書きを書いた',
   'inquiry.reply_submit': '問い合わせの返事を承認へ進めた',
   'inquiry.reply_send': '問い合わせの返事を送った',
@@ -471,7 +476,7 @@ export function presentAudit(e: AuditEvent, names: AuditNames): AuditRow {
   const who = e.actorType === 'user' ? person(e.actorId)
     : e.actorType === 'secretary' ? `秘書（${person(e.actorId)}さんの依頼）`
     : e.actorType === 'agent' ? `業務「${names.agent(e.actorId) ?? run?.agentName ?? agentDisplayName(null, e.actorId)}」${run ? `（${person(run.requestedBy)}さんの依頼）` : ''}`
-    : e.actorType === 'api_client' ? `外部アプリ（${e.actorId}）`
+    : e.actorType === 'api_client' ? (e.actorId.startsWith('app:') ? person(e.actorId) : `外部アプリ（${e.actorId}）`)
     // 運営の操作（`ops:<運営者>`）。運営者のメールアドレスが記録にあれば添える
     : e.actorId.startsWith('ops:') ? `運営${typeof e.detail?.['operator'] === 'string' ? `（${e.detail['operator']}）` : ''}`
     : `システム（${SYSTEM_LABELS[e.actorId] ?? e.actorId}）`;

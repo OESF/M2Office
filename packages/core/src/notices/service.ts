@@ -23,6 +23,8 @@ export interface NoticeInput {
   dueOn?: string | null;
   /** 載せる最後の日（`YYYY-MM-DD`）。省けば締切の日、締切も無ければ出した日から 14 日。 */
   until?: string | null;
+  /** 外部のアプリが出すときの、出した人の名前（「外部のアプリ（名前）」）。利用者が出すときは使わない。 */
+  authorName?: string;
 }
 
 /** 題名・本文・リンクの長さの上限。 */
@@ -129,7 +131,8 @@ export class NoticeService {
    * お知らせを出す。
    *
    * @returns 出したもの。入力が正しくなければ理由
-   * @remarks 出せるのは会社の全員（第10.15節）。宛先のグループはその会社のものに限る
+   * @remarks 出せるのは会社の全員（第10.15節）。宛先のグループはその会社のものに限る。
+   * 外部のアプリ（`app:<アプリ>`）が出すときは、Chat には投稿しない（Chat への投稿は出した人の Google で行うため。第13.4.2節）
    */
   async create(
     tenantId: string, authorId: string, input: NoticeInput, now: Date = new Date(),
@@ -154,20 +157,21 @@ export class NoticeService {
     const until = input.until?.trim() || dueOn || addDays(today, NOTICE_DEFAULT_DAYS);
     if (!isDay(until)) return { error: '載せる期間の日付が正しくありません' };
     if (until < today) return { error: '載せる期間が過ぎています' };
-    const author = await this.deps.repo.findUserById(tenantId, authorId);
+    const byApp = authorId.startsWith('app:');
+    const author = byApp ? null : await this.deps.repo.findUserById(tenantId, authorId);
     const notice: Notice = {
-      id: randomUUID(), tenantId, authorId, authorName: author?.displayName ?? '', title, body, link,
+      id: randomUUID(), tenantId, authorId, authorName: author?.displayName ?? (byApp ? (input.authorName ?? '外部のアプリ') : ''), title, body, link,
       audience: { all: !!input.all, groupIds: input.all ? [] : groupIds },
       dueOn, until, createdAt: now.toISOString(), withdrawnAt: null, withdrawnBy: null,
     };
     await this.deps.store.create(notice);
     await this.deps.repo.appendAudit({
-      id: randomUUID(), tenantId, actorType: 'user', actorId: authorId, action: 'notice.create',
+      id: randomUUID(), tenantId, actorType: byApp ? 'api_client' : 'user', actorId: authorId, action: 'notice.create',
       targetType: 'notice', targetId: notice.id,
       detail: { title, all: notice.audience.all, groups: notice.audience.groupIds.length, dueOn, until }, occurredAt: notice.createdAt,
     });
     // 宛先に合う Chat のスペースにも 1 回投稿する（第10.15.1節）。待たせない。投稿できなくてもブリーフと通知で届く
-    if (this.deps.chat) void this.postToChat(tenantId, notice).catch(() => undefined);
+    if (this.deps.chat && !byApp) void this.postToChat(tenantId, notice).catch(() => undefined);
     return { notice };
   }
 
@@ -188,7 +192,7 @@ export class NoticeService {
     const at = now.toISOString();
     await this.deps.store.withdraw(tenantId, id, userId, at);
     await this.deps.repo.appendAudit({
-      id: randomUUID(), tenantId, actorType: 'user', actorId: userId, action: 'notice.withdraw',
+      id: randomUUID(), tenantId, actorType: userId.startsWith('app:') ? 'api_client' : 'user', actorId: userId, action: 'notice.withdraw',
       targetType: 'notice', targetId: id, detail: { title: notice.title }, occurredAt: at,
     });
     return { notice };

@@ -347,6 +347,16 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/public/inventory/:key` ／ `:key.json` | **認証なし**。在庫の公開のページ（他のサイトの iframe に入れてよい。`frame-ancestors *`・スクリプトなし）とデータ（`Access-Control-Allow-Origin: *`）。作り直して置いた中身だけを返す。知らない鍵・止めた公開・公開を切った会社はどれも 404 |
 | `GET /v1/company/profile` | **外部のアプリの鍵**（`Authorization: Bearer m2oa_…`）。機能 `company.profile`。会社の基本情報（会社名・略称・郵便番号・所在地・電話・Web・登録番号・会計年度の開始月・営業する曜日）。経理の設定とロゴは返さない（第13.4.1節） |
 | `GET /v1/inventory/catalog` | 外部のアプリの鍵。機能 `inventory.catalog`。承認した範囲の商品の一覧（`updatedSince`・`categories`・`ids`・`codes`・`barcodes`・`limit`・`cursor`）。外れた品目は `active: false`。在庫管理を切った会社は 404（第29.20.1節） |
+| `POST /v1/inventory/receipts` | 外部のアプリの鍵。機能 `inventory.receipts`。入庫の通知（`received`・`cancelled`）。照らし方と照らせない行は販売の通知と同じ（第13.4.2節） |
+| `POST /v1/accounts/link-requests` ／ `POST /v1/accounts/links` ／ `DELETE /v1/accounts/links/:bindingId` | 外部のアプリの鍵。機能 `accounts.link`。結び付けの依頼（本人のお知らせに確認コード。答えはアカウントの有無で変えない）／ 確定（結び付きの ID と表示名。誤りは `invalid_code`）／ 削除（第11.12節） |
+| `POST /v1/knowledge/search` | 外部のアプリの鍵。機能 `knowledge.search`。結び付いた本人が見られる会社の知識だけで答える。質問と答えの文は残さない。結び付きごとに 1 分 10 回。無効な結び付きは 410 |
+| `PUT /v1/knowledge/rules/:ref` ／ `POST /v1/knowledge/rules/:ref/retire` | 外部のアプリの鍵。機能 `knowledge.rules`。社内規程を文書の番号で登録・改定・廃止（版と施行日。承認した区画だけ） |
+| `POST /v1/inquiries/intake` | 外部のアプリの鍵。機能 `inquiries.intake`。項目に分けた問い合わせを経路「Web のフォーム」で残す |
+| `POST /v1/notices` ／ `POST /v1/notices/:id/withdraw` | 画面と同じ道を外部のアプリの鍵でも呼ぶ（機能 `notices.post`）。承認した宛先だけ。出した人は「外部のアプリ（名前）」。Chat には投稿しない |
+| `GET /v1/reservations/availability` ／ `POST /v1/reservations` ／ `DELETE /v1/reservations/:id` | 外部のアプリの鍵（機能 `reservations.book`）。空き（名前と用件は返さない）／ 結び付いた本人として予約 ／ そのアプリで入れた予約の取り消し |
+| `POST /v1/members/points` | 外部のアプリの鍵。機能 `members.points`。会員証の QR で来店・購入・特典・取り消し。答えはポイントの残り・ランク・増減だけ |
+| `GET /v1/columns/published` ／ `GET /v1/columns/published/:id/cover.png` | 外部のアプリの鍵。機能 `columns.read`。承認済みで公開の日時を過ぎたコラム |
+| `POST /v1/jobs` ／ `GET /v1/runs/:id` | 画面と同じ道を外部のアプリの鍵でも呼ぶ（機能 `jobs.run`）。結び付いた本人として承認した業務を依頼 ／ そのアプリで依頼した実行の状態と結果 |
 | `POST /v1/inventory/sales-events` | 外部のアプリの鍵。機能 `inventory.sales`。販売の通知（`ordered`・`sold`・`cancelled`・`returned`）。アプリ＋販売番号で 1 件にまとめ、`eventId` で二重に数えない（中身が違えば 409、処理の途中は 409 と `Retry-After`）。照らせない行は受け付けて残す。64 KB を超えれば 413、JSON でなければ 415。金額・お客様の情報は読まず、本文は残さない |
 | `POST /v1/hooks/inventory/:key` | **認証なしの受け口**。予約のシステムの Webhook を受ける（第29.13.1節）。会社は鍵（32 文字）のハッシュから引き、ホスト名は見ない。64 KB を超えれば 413。知らない鍵・止めた受け口・引き当てを切った会社はどれも 404、予約として読めなければ 422。項目の対応は最初の予約から推論して受け口に覚える。予約した人の名前・連絡先は残さない |
 | `GET /v1/notices` | 本人宛ての有効な社内のお知らせ（取り下げ・期間切れ・本人が済んだものを除く。`isNew`・`daysLeft` つき。仕様書 第10.15節） |
@@ -385,6 +395,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/me/google/check` | 本人: 許可の状況を Google に問い合わせ直す。その許可で受け取れれば、プロフィール写真も取り込み直す |
 | `GET /v1/me/google/impact` | 本人: 取り消すと止まる業務と、飛ばす定時実行の数 |
 | `DELETE /v1/me/google` | 本人: 接続を取り消す（Google 側の許可も取り消し、トークンを消す）。Google を使う動いている途中の業務を止め、終わった実行の中身を消す（仕様書 第6.5.2.1節・第14.3.2節） |
+| `GET /v1/me/app-links` ／ `DELETE /v1/me/app-links/:id` | 本人: 結び付いている外部のアプリ ／ 結び付きの削除（仕様書 第6.5.9節・第11.12節） |
 | `GET /v1/me/connections` | 本人: 利用者ごとに許可する会社の接続（Slack など）と、接続しているか・許可したアカウント・接続し直しが要るか・使う業務（仕様書 第6.5.9節） |
 | `POST /v1/me/connections/:id/connect` | 本人: 接続を始める（相手の許可の画面の URL を返す。state と PKCE つき。会社のアプリが無く、相手が自動登録に対応していれば、ここで 1 度だけアプリを登録する。どちらも無ければ 409） |
 | `GET /v1/me/connections/:id/impact` | 本人: 取り消すと止まる業務・使えなくなる業務・飛ばす定時実行 |
@@ -463,7 +474,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/help/articles?scope=` | ヘルプの記事の一覧（役割と有効な業務で出し分け）と、読めるマニュアルの名前（`manuals`）。`scope=admin` は管理者ページ（管理者向けの記事だけ）、それ以外はワークスペース（管理者向けを除く）。業務のマニュアルの章（`docs/manual/`）は、その業務を使える人にだけ出す（第6.10.7節・第6.10.7.3節） |
 | `GET /v1/help/articles/:id` | 記事の本文。見られない記事は 404 |
 | `GET /v1/admin/apps` ／ `POST /v1/admin/apps` | 管理者: 外部のアプリの一覧（この 7 日の呼び出し・最後に呼ばれた時刻。鍵は返さない）と、この会社で選べる機能 ／ アプリを登録する（`name`。鍵（`m2oa_`）はこの答えでだけ返す。20 まで）。監査ログ `app.create`（第13.4.1節） |
-| `PUT /v1/admin/apps/:id` | 管理者: この内容で許す（`functions`・`settings.catalog`）。押した管理者が承認者。選べない機能は 400。監査ログ `app.approve` |
+| `PUT /v1/admin/apps/:id` | 管理者: この内容で許す（`functions`・`settings`（`catalog`・`notices`・`reservations`・`knowledgeRules`・`jobs`））。押した管理者が承認者。選べない機能・結び付けの無い本人の機能・知らないグループや業務は 400。監査ログ `app.approve`。一覧の答えに設定の候補（`options`）を添える |
 | `PUT /v1/admin/apps/:id/name` ／ `POST /v1/admin/apps/:id/rekey` ／ `POST /v1/admin/apps/:id/stop` ・ `resume` ／ `DELETE /v1/admin/apps/:id` | 管理者: 名前を変える ／ 鍵を出し直す（前の鍵はすぐ無効）／ 止める・動かす ／ 止めてあるアプリを削除する（動いていれば 409） |
 | `POST /v1/admin/apps/preview/inventory-catalog` | 管理者: 機能「商品の一覧を読む」の見本（`itemIds`・`showCount`・`price`・`employeePrice`） |
 | `GET /v1/help/api/:name` | 開発者向けの記事の API の定義（`docs/api/<名前>.openapi.yaml`）を、Swagger UI のページ（HTML）で返す。管理者だけ。応答の CSP の `sandbox` で切り離し、外へ送らない（仕様書 第6.10.7.4節） |

@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { AVATAR_PRESETS, BRIEF_SECTIONS, WEEKLY_SECTIONS, VOICE_CHOICES, VOICE_STYLE_MAX, showsCaptions, type BriefSettings, type UserSettings } from '@m2office/shared';
+import { AVATAR_PRESETS, BRIEF_SECTIONS, WEEKLY_SECTIONS, VOICE_CHOICES, VOICE_STYLE_MAX, showsCaptions, type AppBindingView, type BriefSettings, type UserSettings } from '@m2office/shared';
 import {
   api, describeError, type MyConnectionView,
   type AgentSummary, type ConversationView, type Me, type MemoryView,
@@ -688,6 +688,39 @@ function DisplaySettings() {
  * @remarks
  * 「鍵」「トークン」と言わない（原則 u1）。取り消す前に、使えなくなる業務と止まる定時実行を示す（第12.11.6.5節）。
  */
+/**
+ * 結び付いている外部のアプリ（M2Medical など。仕様書 第11.12節）。本人が「削除」で結び付きを消せる。
+ * 消すと、そのアプリから本人の権限で行うこと（ナレッジの検索・予約・業務の依頼）はできなくなる。
+ */
+function AppLinkCards() {
+  const [items, setItems] = useState<AppBindingView[]>([]);
+  const [msg, setMsg] = useState<string | null>(null);
+  const load = () => api.myAppLinks().then((r) => setItems(r.items)).catch(() => setItems([]));
+  useEffect(() => { void load(); }, []);
+  const remove = async (b: AppBindingView) => {
+    try {
+      await api.deleteMyAppLink(b.id);
+      setMsg(`${b.appName}との結び付きを削除しました`);
+      await load();
+    } catch (e) {
+      setMsg(describeError(e, '削除できませんでした'));
+    }
+  };
+  const at = (iso: string) => new Date(iso).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+  return (
+    <>
+      {msg && <p className="ok-msg" role="status">{msg}</p>}
+      {items.map((b) => (
+        <div key={b.id} className="card">
+          <h3>{b.appName}</h3>
+          <p>結び付いています（{at(b.createdAt)}）{b.lastUsedAt && <span className="muted small">・最後に使われた {at(b.lastUsedAt)}</span>}</p>
+          <div className="row"><button className="btn ghost danger" onClick={() => void remove(b)}>削除</button></div>
+        </div>
+      ))}
+    </>
+  );
+}
+
 function ServicesSettings() {
   const [items, setItems] = useState<MyConnectionView[] | null>(null);
   const [canvaNone, setCanvaNone] = useState(false);
@@ -734,6 +767,7 @@ function ServicesSettings() {
     <>
       {msg && <p className={msg.ok ? 'ok-msg' : 'error'}>{msg.text}</p>}
       <CanvaCard onNone={() => setCanvaNone(true)} />
+      <AppLinkCards />
       {items.length === 0 && canvaNone && <p className="muted">接続できるサービスはありません</p>}
       {items.map((c) => (
         <div key={c.id} className="card">

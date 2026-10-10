@@ -5,7 +5,7 @@
 
 import { Hono } from 'hono';
 import { catalogScopeOf } from '@m2office/core';
-import { APP_FUNCTIONS, EXTERNAL_APP_MAX, type AppFunctionId, type AppSettings } from '@m2office/shared';
+import { APP_FUNCTIONS, EXTERNAL_APP_MAX, type AppFunctionId, type AppSettings, type RiskLevel } from '@m2office/shared';
 import type { AppDeps } from '../context.js';
 import { requireRole, type AppEnv } from '../middleware/tenant.js';
 
@@ -15,7 +15,19 @@ function approvalOf(body: unknown): { functions: AppFunctionId[]; settings: AppS
   const known = new Set(APP_FUNCTIONS.map((f) => f.id));
   const functions = Array.isArray(b['functions']) ? b['functions'].filter((x): x is AppFunctionId => typeof x === 'string' && known.has(x as AppFunctionId)) : [];
   const s = (b['settings'] && typeof b['settings'] === 'object' ? b['settings'] : {}) as Record<string, unknown>;
-  return { functions, settings: s['catalog'] ? { catalog: catalogScopeOf(s['catalog']) } : {} };
+  const obj = (v: unknown) => (v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null);
+  const strs = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string').slice(0, 500) : []);
+  const settings: AppSettings = {};
+  if (s['catalog']) settings.catalog = catalogScopeOf(s['catalog']);
+  const n = obj(s['notices']);
+  if (n) settings.notices = { all: n['all'] === true, groupIds: strs(n['groupIds']) };
+  const r = obj(s['reservations']);
+  if (r) settings.reservations = { all: r['all'] === true, itemIds: strs(r['itemIds']) };
+  const k = obj(s['knowledgeRules']);
+  if (k) settings.knowledgeRules = { compartments: strs(k['compartments']) };
+  const j = obj(s['jobs']);
+  if (j) settings.jobs = { agentIds: strs(j['agentIds']), maxRisk: (typeof j['maxRisk'] === 'string' ? j['maxRisk'] : 'read') as RiskLevel };
+  return { functions, settings };
 }
 
 /**
@@ -32,7 +44,11 @@ export function adminAppsRoute(deps: AppDeps) {
   app.get('/', async (c) => {
     const { tenant } = c.get('ctx');
     const available = new Set(await apps.available(tenant.id));
-    return c.json({ items: await apps.list(tenant.id), max: EXTERNAL_APP_MAX, functions: APP_FUNCTIONS.filter((f) => available.has(f.id)) });
+    return c.json({
+      items: await apps.list(tenant.id), max: EXTERNAL_APP_MAX, functions: APP_FUNCTIONS.filter((f) => available.has(f.id)),
+      // 機能ごとの設定の候補（お知らせの宛先・予約できるもの・規程の区画・業務。第13.4.2節）
+      options: await apps.settingOptions(tenant.id),
+    });
   });
 
   /** アプリを登録する。鍵はこの答えでだけ返す。 */

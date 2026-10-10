@@ -2,12 +2,13 @@
  * @file 管理者ページ「接続」の「外部のアプリ」（仕様書 第13.4.1節、ADR-0090）。
  *
  * 外のシステム（販売管理・M2Medical など）をアプリとして登録すると、鍵が一度だけ出る（M2Office はハッシュだけを持つ）。
- * アプリごとに使える機能を選び、機能ごとの設定（「商品の一覧を読む」で渡す品目など）を見本で確かめて「この内容で許す」を押す。
+ * アプリごとに使える機能を選び、機能ごとの設定（「商品の一覧を読む」で渡す品目・お知らせの宛先・予約できるもの・規程の区画・依頼してよい業務）を
+ * 確かめて「この内容で許す」を押す（第13.4.2節）。
  * 押すことが承認である（社外への送信・社外からの書き込みを、範囲で一度承認する。第9.4.0節）。説明文を常に出さない（原則 u11）。
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { AppFunctionId, AppFunctionInfo, AppSettings, ExternalApp, InventoryCatalogScope, InventoryItemView } from '@m2office/shared';
+import { APP_JOB_RISKS, type AppFunctionId, type AppFunctionInfo, type AppSettingOptions, type AppSettings, type ExternalApp, type InventoryCatalogScope, type InventoryItemView, type RiskLevel } from '@m2office/shared';
 import { api, describeError, type InventorySalesItemView } from './api.js';
 import { copyText } from './clipboard.js';
 import { PageTitle } from './help.js';
@@ -22,13 +23,31 @@ function initialCatalog(items: InventoryItemView[]): InventoryCatalogScope {
   return { itemIds: items.filter((i) => i.status === 'active' && /販売/.test(i.category)).map((i) => i.id), showCount: true, price: true, employeePrice: false };
 }
 
-/** 2 つの承認の中身が同じか。 */
+/** 危険度の言い方。 */
+const RISK_LABEL: Record<RiskLevel, string> = { read: '読むだけ', draft: '下書きまで', 'write-internal': '社内に書き込む', 'external-send': '社外に送る（承認は本人の画面）', financial: 'お金' };
+
+/** 機能ごとの設定のはじめの値。 */
+const EMPTY_EXTRA: Required<Omit<AppSettings, 'catalog'>> = {
+  notices: { all: false, groupIds: [] }, reservations: { all: true, itemIds: [] }, knowledgeRules: { compartments: [] }, jobs: { agentIds: [], maxRisk: 'read' },
+};
+
+/** 選んだ機能の設定だけを残す（承認に送る形）。 */
+function settingsFor(functions: AppFunctionId[], catalog: InventoryCatalogScope, extra: typeof EMPTY_EXTRA): AppSettings {
+  return {
+    ...(functions.includes('inventory.catalog') ? { catalog } : {}),
+    ...(functions.includes('notices.post') ? { notices: extra.notices } : {}),
+    ...(functions.includes('reservations.book') ? { reservations: extra.reservations } : {}),
+    ...(functions.includes('knowledge.rules') ? { knowledgeRules: extra.knowledgeRules } : {}),
+    ...(functions.includes('jobs.run') ? { jobs: extra.jobs } : {}),
+  };
+}
+
+/** 2 つの承認の中身が同じか（並びの違いは同じとみなす）。 */
 function sameApproval(a: { functions: AppFunctionId[]; settings: AppSettings }, b: { functions: AppFunctionId[]; settings: AppSettings }): boolean {
-  const set = (x: string[]) => [...x].sort().join('\u0000');
-  const ca = a.functions.includes('inventory.catalog') ? a.settings.catalog : undefined;
-  const cb = b.functions.includes('inventory.catalog') ? b.settings.catalog : undefined;
-  const sameCatalog = (!ca && !cb) || (!!ca && !!cb && set(ca.itemIds) === set(cb.itemIds) && ca.showCount === cb.showCount && ca.price === cb.price && ca.employeePrice === cb.employeePrice);
-  return set(a.functions) === set(b.functions) && sameCatalog;
+  const norm = (v: unknown): unknown => (Array.isArray(v) ? [...v].map(norm).sort() : v && typeof v === 'object'
+    ? Object.fromEntries(Object.entries(v as Record<string, unknown>).sort(([x], [y]) => x.localeCompare(y)).map(([k, x]) => [k, norm(x)])) : v);
+  const pick = (x: { functions: AppFunctionId[]; settings: AppSettings }) => JSON.stringify(norm({ f: x.functions, s: settingsFor(x.functions, x.settings.catalog ?? { itemIds: [], showCount: false, price: false, employeePrice: false }, { ...EMPTY_EXTRA, ...x.settings } as typeof EMPTY_EXTRA) }));
+  return pick(a) === pick(b);
 }
 
 /** 外部のアプリの画面（管理者ページ「接続」の「外部のアプリ」）。 */
@@ -41,12 +60,14 @@ export function ExternalApps() {
   const [naming, setNaming] = useState<string | null>(null);
   const [shownKey, setShownKey] = useState<{ appId: string; key: string } | null>(null);
   const [items, setItems] = useState<InventoryItemView[]>([]);
+  const [options, setOptions] = useState<AppSettingOptions>({ groups: [], reservableItems: [], compartments: [], agents: [] });
 
   const load = useCallback(async (select?: string | null) => {
     try {
       const r = await api.admin.apps();
       setMax(r.max);
       setFunctions(r.functions);
+      setOptions(r.options);
       setList(r.items);
       setCurrent((cur) => {
         const want = select !== undefined ? select : cur;
@@ -101,7 +122,7 @@ export function ExternalApps() {
             {shownKey && shownKey.appId === app?.id && <KeyBanner value={shownKey.key} onClose={() => setShownKey(null)} />}
             {message && <p className="small muted" role="status">{message}</p>}
             {app
-              ? <AppEditor key={app.id} app={app} functions={functions} items={items} onKey={(key) => setShownKey({ appId: app.id, key })} onChanged={(select) => void load(select)} />
+              ? <AppEditor key={app.id} app={app} functions={functions} items={items} options={options} onKey={(key) => setShownKey({ appId: app.id, key })} onChanged={(select) => void load(select)} />
               : naming === null && <p className="muted small">外部のアプリはまだありません</p>}
           </>
         )}
@@ -126,20 +147,30 @@ function KeyBanner({ value, onClose }: { value: string; onClose: () => void }) {
 }
 
 /** アプリ 1 つの欄（名前・様子・機能・機能ごとの設定・承認・鍵・止める・削除）。 */
-function AppEditor({ app: initial, functions, items, onKey, onChanged }: {
-  app: ExternalApp; functions: AppFunctionInfo[]; items: InventoryItemView[]; onKey: (key: string) => void; onChanged: (select?: string | null) => void;
+function AppEditor({ app: initial, functions, items, options, onKey, onChanged }: {
+  app: ExternalApp; functions: AppFunctionInfo[]; items: InventoryItemView[]; options: AppSettingOptions; onKey: (key: string) => void; onChanged: (select?: string | null) => void;
 }) {
   const [app, setApp] = useState(initial);
   const [name, setName] = useState(initial.name);
   const [chosen, setChosen] = useState<AppFunctionId[]>(initial.functions);
   const [catalog, setCatalog] = useState<InventoryCatalogScope>(initial.settings.catalog ?? initialCatalog(items));
+  const [extra, setExtra] = useState<typeof EMPTY_EXTRA>({ ...EMPTY_EXTRA, ...initial.settings } as typeof EMPTY_EXTRA);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => { if (!initial.settings.catalog && items.length) setCatalog(initialCatalog(items)); }, [items, initial.settings.catalog]);
 
-  const draft = { functions: chosen, settings: chosen.includes('inventory.catalog') ? { catalog } : {} };
+  const draft = { functions: chosen, settings: settingsFor(chosen, catalog, extra) };
   const unchanged = app.functions.length > 0 && sameApproval({ functions: app.functions, settings: app.settings }, draft);
-  const toggle = (id: AppFunctionId, on: boolean) => setChosen(on ? [...new Set([...chosen, id])] : chosen.filter((x) => x !== id));
+  // 本人として行う機能は、アカウントの結び付けも一緒に選ぶ（外すと、それを要る機能も外す）
+  const toggle = (id: AppFunctionId, on: boolean) => {
+    const needs = functions.find((f) => f.id === id)?.needs;
+    if (on) setChosen([...new Set([...chosen, id, ...(needs ? [needs] : [])])]);
+    else setChosen(chosen.filter((x) => x !== id && functions.find((f) => f.id === x)?.needs !== id));
+  };
+  const incomplete = (chosen.includes('inventory.catalog') && catalog.itemIds.length === 0)
+    || (chosen.includes('notices.post') && !extra.notices.all && extra.notices.groupIds.length === 0)
+    || (chosen.includes('reservations.book') && !extra.reservations.all && extra.reservations.itemIds.length === 0)
+    || (chosen.includes('jobs.run') && extra.jobs.agentIds.length === 0);
   const base = location.origin;
 
   const act = async (fn: () => Promise<ExternalApp>, failed: string) => {
@@ -150,6 +181,7 @@ function AppEditor({ app: initial, functions, items, onKey, onChanged }: {
       setApp(v);
       setChosen(v.functions);
       if (v.settings.catalog) setCatalog(v.settings.catalog);
+      setExtra({ ...EMPTY_EXTRA, ...v.settings } as typeof EMPTY_EXTRA);
       onChanged(v.id);
     } catch (e) {
       setMessage(describeError(e, failed));
@@ -209,9 +241,37 @@ function AppEditor({ app: initial, functions, items, onKey, onChanged }: {
         ))}
       </ul>
       {chosen.includes('inventory.catalog') && <CatalogEditor scope={catalog} items={items} onChange={setCatalog} />}
+      {chosen.includes('notices.post') && (
+        <PickList title="お知らせを出してよい宛先" allLabel="全員" all={extra.notices.all} chosen={extra.notices.groupIds} choices={options.groups}
+          onChange={(all, ids) => setExtra({ ...extra, notices: { all, groupIds: ids } })} />
+      )}
+      {chosen.includes('reservations.book') && (
+        <PickList title="見せてよい予約できるもの" allLabel="すべて" all={extra.reservations.all} chosen={extra.reservations.itemIds} choices={options.reservableItems}
+          onChange={(all, ids) => setExtra({ ...extra, reservations: { all, itemIds: ids } })} />
+      )}
+      {chosen.includes('knowledge.rules') && (
+        <PickList title="規程を書いてよい権限区画（区画なしはいつも書けます）" chosen={extra.knowledgeRules.compartments} choices={options.compartments.map((c) => ({ id: c, name: c }))}
+          onChange={(_all, ids) => setExtra({ ...extra, knowledgeRules: { compartments: ids } })} />
+      )}
+      {chosen.includes('jobs.run') && (
+        <div className="app-setting">
+          <PickList title="依頼してよい業務" chosen={extra.jobs.agentIds}
+            choices={options.agents.filter((a) => RISK_ORDER_UI[a.risk] <= RISK_ORDER_UI[extra.jobs.maxRisk]).map((a) => ({ id: a.id, name: `${a.name}（${RISK_LABEL[a.risk]}）` }))}
+            onChange={(_all, ids) => setExtra({ ...extra, jobs: { ...extra.jobs, agentIds: ids } })} />
+          <label className="small">危険度の上限
+            <select value={extra.jobs.maxRisk} onChange={(e) => {
+              const maxRisk = e.target.value as RiskLevel;
+              const fits = new Set(options.agents.filter((a) => RISK_ORDER_UI[a.risk] <= RISK_ORDER_UI[maxRisk]).map((a) => a.id));
+              setExtra({ ...extra, jobs: { maxRisk, agentIds: extra.jobs.agentIds.filter((x) => fits.has(x)) } });
+            }}>
+              {APP_JOB_RISKS.map((r) => <option key={r} value={r}>{RISK_LABEL[r]}</option>)}
+            </select>
+          </label>
+        </div>
+      )}
 
       <div className="publish-actions">
-        <button className="btn" disabled={busy || unchanged || chosen.length === 0 || (chosen.includes('inventory.catalog') && catalog.itemIds.length === 0)}
+        <button className="btn" disabled={busy || unchanged || chosen.length === 0 || incomplete}
           onClick={() => void act(() => api.admin.approveApp(app.id, draft.functions, draft.settings), '承認できませんでした')}>
           {unchanged ? '許しています' : 'この内容で許す'}
         </button>
@@ -231,6 +291,35 @@ function AppEditor({ app: initial, functions, items, onKey, onChanged }: {
       </div>
       {message && <p className="small muted" role="status">{message}</p>}
     </>
+  );
+}
+
+/** 危険度の強さ（画面で上限に合う業務を絞る）。 */
+const RISK_ORDER_UI: Record<RiskLevel, number> = { read: 0, draft: 1, 'write-internal': 2, 'external-send': 3, financial: 4 };
+
+/** 機能ごとの設定の、選ぶ一覧（「全員」「すべて」を選べるものと、選んだものだけのもの）。 */
+function PickList({ title, allLabel, all = false, chosen, choices, onChange }: {
+  title: string; allLabel?: string; all?: boolean; chosen: string[]; choices: { id: string; name: string }[]; onChange: (all: boolean, ids: string[]) => void;
+}) {
+  const set = new Set(chosen);
+  return (
+    <div className="app-setting">
+      <h4 className="app-section-title">{title}</h4>
+      <ul className="plain app-functions">
+        {allLabel && (
+          <li><label className="check"><input type="checkbox" checked={all} onChange={(e) => onChange(e.target.checked, chosen)} /><span>{allLabel}</span></label></li>
+        )}
+        {!all && choices.map((x) => (
+          <li key={x.id}>
+            <label className="check">
+              <input type="checkbox" checked={set.has(x.id)} onChange={(e) => onChange(false, e.target.checked ? [...chosen, x.id] : chosen.filter((y) => y !== x.id))} />
+              <span>{x.name}</span>
+            </label>
+          </li>
+        ))}
+        {!all && choices.length === 0 && <li className="muted small">選べるものがありません</li>}
+      </ul>
+    </div>
   );
 }
 

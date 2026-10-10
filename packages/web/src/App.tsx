@@ -246,7 +246,9 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
     void Promise.all([
       api.myConnections().then((r) => r.items.length > 0).catch(() => false),
       api.myCanva().then((r) => r.configured).catch(() => false),
-    ]).then(([a, b]) => setHasServices(a || b));
+      // 外部のアプリとの結び付き（第11.12節）も「サービスとの接続」に出す
+      api.myAppLinks().then((r) => r.items.length > 0).catch(() => false),
+    ]).then(([a, b, c]) => setHasServices(a || b || c));
   }, []);
   const settingsSections = hasServices || view.kind === 'settings' && view.section === 'services'
     ? SETTINGS_SECTIONS : SETTINGS_SECTIONS.filter((x) => x.id !== 'services');

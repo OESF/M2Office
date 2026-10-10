@@ -17,7 +17,7 @@ import type { CardCorners, CardEnglish, PrintDesign, PrintDesignDetailView, Prin
   YeaDeclaration, YeaDeclarationView, YeaResult, SocialDetermination, SocialEvent, InsuranceEligibility, LaborInsuranceData, LaborInsuranceView, ShiftView, HrShiftSettings, HrShift, HrAnnualSettings, HrFlexSettings, HrTerminalSettings,
   InventoryCount, InventoryCountRow, InventoryCountScope, InventoryCountView, InventorySupplier,
   InventoryBooking, InventoryBookingMapping, InventoryBookingSource, InventoryPublication, InventoryPublicationScope, InventoryPublicSnapshot,
-  InventoryCatalogScope, InventorySaleUnmatched, ExternalApp, AppFunctionId, AppFunctionInfo, AppSettings,
+  InventoryCatalogScope, InventorySaleUnmatched, ExternalApp, AppFunctionId, AppFunctionInfo, AppSettings, AppSettingOptions, AppBindingView,
   SignageAsset, SignageBand, SignageEntry, SignageScreen, SignageSettings, SignageInterruptInput, SignageInterruptView, SignagePhrase, SignageSound, SignageSource,
   ColumnWordPress, WebColumn, WebColumnSettings, WebColumnVersion, WebColumnTheme, ColumnPlanSlot, ColumnSignageSet,
   Inquiry, InquiryDetail, InquiryParty, InquiryTask, InquiryReply, InquiryMailSkipped, InquiryMonthStats, InquirySettings, InquiryFaqTopic,
@@ -2192,7 +2192,7 @@ export const api = {
     downloadAudit: downloadAuditCsv,
     connections: () => call<ConnectionSettings>('/admin/connections'),
     /** 外部のアプリの一覧と、この会社で選べる機能（仕様書 第13.4.1節）。鍵は返らない。 */
-    apps: () => call<{ items: ExternalApp[]; max: number; functions: AppFunctionInfo[] }>('/admin/apps'),
+    apps: () => call<{ items: ExternalApp[]; max: number; functions: AppFunctionInfo[]; options: AppSettingOptions }>('/admin/apps'),
     /** 外部のアプリを登録する。鍵はこの答えでだけ返る。 */
     createApp: (name: string) => call<{ app: ExternalApp; key: string }>('/admin/apps', { method: 'POST', body: JSON.stringify({ name }) }),
     /** 外部のアプリの名前を変える（承認し直さない）。 */
@@ -2498,6 +2498,10 @@ export const api = {
   agents: () => call<{ agents: AgentSummary[] }>('/agents'),
   /** 個人設定「サービスとの接続」（仕様書 第6.5.9節）。 */
   myConnections: () => call<{ items: MyConnectionView[] }>('/me/connections'),
+  /** 結び付いている外部のアプリ（個人設定の「サービスとの接続」。仕様書 第11.12節）。 */
+  myAppLinks: () => call<{ items: AppBindingView[] }>('/me/app-links'),
+  /** 外部のアプリとの結び付きを削除する。 */
+  deleteMyAppLink: (id: string) => call<{ ok: true }>(`/me/app-links/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   /** 本人の Canva の接続（仕様書 第41.19.3節）。運営が設定していなければ `configured` が偽。 */
   myCanva: () => call<{ configured: boolean; connected: boolean; connectedAt: string | null }>('/me/canva'),
   connectCanva: () => call<{ url: string }>('/me/canva/connect', { method: 'POST', body: '{}' }),

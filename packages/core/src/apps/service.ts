@@ -7,7 +7,8 @@
 
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import {
-  APP_FUNCTIONS, EXTERNAL_APP_MAX, type AppFunctionId, type AppSettings, type AuditEvent, type ExternalApp, type InventoryCatalogScope,
+  APP_FUNCTIONS, APP_JOB_RISKS, EXTERNAL_APP_MAX, type AppFunctionId, type AppFunctionRequirement, type AppSettingOptions, type AppSettings, type AuditEvent,
+  type ExternalApp, type InventoryCatalogScope, type RiskLevel, type TenantSettings,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import { dateIn } from '../cards/service.js';
@@ -29,7 +30,33 @@ const FUNCTION_ROUTES: { fn: AppFunctionId; method: string; path: RegExp }[] = [
   { fn: 'company.profile', method: 'GET', path: /^\/v1\/company\/profile$/ },
   { fn: 'inventory.catalog', method: 'GET', path: /^\/v1\/inventory\/catalog$/ },
   { fn: 'inventory.sales', method: 'POST', path: /^\/v1\/inventory\/sales-events$/ },
+  { fn: 'inventory.receipts', method: 'POST', path: /^\/v1\/inventory\/receipts$/ },
+  { fn: 'accounts.link', method: 'POST', path: /^\/v1\/accounts\/(?:link-requests|links)$/ },
+  { fn: 'accounts.link', method: 'DELETE', path: /^\/v1\/accounts\/links\/[^/]+$/ },
+  { fn: 'knowledge.search', method: 'POST', path: /^\/v1\/knowledge\/search$/ },
+  { fn: 'knowledge.rules', method: 'PUT', path: /^\/v1\/knowledge\/rules\/[^/]+$/ },
+  { fn: 'knowledge.rules', method: 'POST', path: /^\/v1\/knowledge\/rules\/[^/]+\/retire$/ },
+  { fn: 'inquiries.intake', method: 'POST', path: /^\/v1\/inquiries\/intake$/ },
+  { fn: 'notices.post', method: 'POST', path: /^\/v1\/notices(?:\/[^/]+\/withdraw)?$/ },
+  { fn: 'reservations.book', method: 'GET', path: /^\/v1\/reservations\/availability$/ },
+  { fn: 'reservations.book', method: 'POST', path: /^\/v1\/reservations$/ },
+  { fn: 'reservations.book', method: 'DELETE', path: /^\/v1\/reservations\/[^/]+$/ },
+  { fn: 'members.points', method: 'POST', path: /^\/v1\/members\/points$/ },
+  { fn: 'columns.read', method: 'GET', path: /^\/v1\/columns\/published(?:\/[^/]+\/cover\.png)?$/ },
+  { fn: 'jobs.run', method: 'POST', path: /^\/v1\/jobs$/ },
+  { fn: 'jobs.run', method: 'GET', path: /^\/v1\/runs\/[^/]+$/ },
 ];
+
+/** 内蔵の拡張を入れているか（機能を選べる条件）。 */
+function extensionOn(settings: TenantSettings, r: AppFunctionRequirement): boolean {
+  switch (r) {
+    case 'inventory': return settings.inventory.enabled;
+    case 'inquiries': return settings.inquiries.enabled;
+    case 'reservations': return settings.reservations.enabled;
+    case 'members': return settings.members.enabled;
+    case 'web-columns': return settings.webColumns.enabled;
+  }
+}
 
 /** 鍵のハッシュ（SHA-256）。 */
 export function appKeyHash(key: string): string {
@@ -59,6 +86,10 @@ export interface ExternalAppsDeps {
   repo: Repository;
   /** 使っている品目の ID（「商品の一覧を読む」の範囲を承認するとき、止めた品目を外すため）。 */
   activeItemIds?: (tenantId: string) => Promise<string[]>;
+  /** 予約できるもの（「予約の空きを読む・予約を入れる」で見せるものを選ぶため）。 */
+  reservableItems?: (tenantId: string) => Promise<{ id: string; name: string }[]>;
+  /** 会社で使える業務と、その危険度（使うツールのいちばん強い危険度。「業務を依頼して結果を受け取る」で選ぶため）。 */
+  agents?: (tenantId: string) => Promise<{ id: string; name: string; risk: RiskLevel }[]>;
 }
 
 /**
@@ -81,10 +112,27 @@ export class ExternalApps {
     return `app:${appId}`;
   }
 
-  /** この会社で選べる機能（在庫管理を切っている会社では在庫の機能を選べない）。 */
+  /** この会社で選べる機能（その拡張を切っている会社では、拡張の機能を選べない）。 */
   async available(tenantId: string): Promise<AppFunctionId[]> {
     const settings = await this.deps.repo.getTenantSettings(tenantId);
-    return APP_FUNCTIONS.filter((f) => !f.requires || (f.requires === 'inventory' && settings.inventory.enabled)).map((f) => f.id);
+    return APP_FUNCTIONS.filter((f) => !f.requires || extensionOn(settings, f.requires)).map((f) => f.id);
+  }
+
+  /** 内蔵の拡張を入れているか（機能の道が、切った会社では 404 を返すため）。 */
+  async extensionOn(tenantId: string, r: AppFunctionRequirement): Promise<boolean> {
+    return extensionOn(await this.deps.repo.getTenantSettings(tenantId), r);
+  }
+
+  /** 機能ごとの設定を選ぶための候補（宛先のグループ・予約できるもの・権限区画・業務）。 */
+  async settingOptions(tenantId: string): Promise<AppSettingOptions> {
+    const [groups, compartments, items, agents] = await Promise.all([
+      this.deps.repo.listGroups(tenantId), this.deps.repo.listCompartments(tenantId),
+      this.deps.reservableItems ? this.deps.reservableItems(tenantId) : Promise.resolve([]), this.deps.agents ? this.deps.agents(tenantId) : Promise.resolve([]),
+    ]);
+    return {
+      groups: groups.map((g) => ({ id: g.id, name: g.name })), reservableItems: items, compartments: compartments.map((c) => c.name),
+      agents: agents.filter((a) => APP_JOB_RISKS.includes(a.risk)),
+    };
   }
 
   /** すべてのアプリ（登録した順）。承認した人の名前とこの 7 日の呼び出しの数を添える。 */
@@ -159,13 +207,22 @@ export class ExternalApps {
       const itemIds = [...new Set(c.itemIds)].filter((x) => active.has(x));
       settings.catalog = { itemIds, showCount: !!c.showCount, price: !!c.price, employeePrice: !!c.employeePrice };
     }
+    const needs = functions.map((f) => APP_FUNCTIONS.find((x) => x.id === f)?.needs).find((n) => n && !functions.includes(n));
+    if (needs) return { error: `「${APP_FUNCTIONS.find((x) => x.id === needs)!.label}」も選んでください（本人の権限で行う機能のため）` };
+    const more = await this.functionSettings(tenantId, functions, input.settings);
+    if ('error' in more) return more;
+    Object.assign(settings, more);
     const at = new Date().toISOString();
     const before = new Set(app.functions.includes('inventory.catalog') ? app.settings.catalog?.itemIds ?? [] : []);
     const after = new Set(settings.catalog?.itemIds ?? []);
     removed = [...removed.filter((r) => !after.has(r.itemId)), ...[...before].filter((x) => !after.has(x)).map((itemId) => ({ itemId, at }))].slice(-REMOVED_KEEP);
     await this.deps.store.updateApp(tenantId, id, { functions, settings, catalogRemoved: removed, approvedBy: userId, approvedAt: at });
     await this.audit(tenantId, userId, 'app.approve', id, {
-      name: app.name, functions, ...(settings.catalog ? { catalogItems: settings.catalog.itemIds.length, showCount: settings.catalog.showCount, price: settings.catalog.price, employeePrice: settings.catalog.employeePrice } : {}),
+      name: app.name, functions,
+      ...(settings.notices ? { noticeAll: settings.notices.all, noticeGroups: settings.notices.groupIds.length } : {}),
+      ...(settings.reservations ? { reservationAll: settings.reservations.all, reservationItems: settings.reservations.itemIds.length } : {}),
+      ...(settings.knowledgeRules ? { ruleCompartments: settings.knowledgeRules.compartments } : {}),
+      ...(settings.jobs ? { jobAgents: settings.jobs.agentIds, jobMaxRisk: settings.jobs.maxRisk } : {}), ...(settings.catalog ? { catalogItems: settings.catalog.itemIds.length, showCount: settings.catalog.showCount, price: settings.catalog.price, employeePrice: settings.catalog.employeePrice } : {}),
     });
     return (await this.view(tenantId, id))!;
   }
@@ -247,6 +304,53 @@ export class ExternalApps {
   /** 書き込みの通知の答えを残す（送り直しにそのまま返す）。 */
   async finishEvent(tenantId: string, appId: string, kind: string, eventRef: string, response: unknown): Promise<void> {
     await this.deps.store.finishEvent(tenantId, appId, kind, eventRef, response);
+  }
+
+  /**
+   * 機能ごとの設定（お知らせの宛先・予約できるもの・規程の区画・業務）を確かめる。知らないグループ・もの・区画・業務は断る。
+   */
+  private async functionSettings(tenantId: string, functions: AppFunctionId[], input: AppSettings): Promise<Omit<AppSettings, 'catalog'> | { error: string }> {
+    const out: Omit<AppSettings, 'catalog'> = {};
+    // 候補は、設定の要る機能を選んだときだけ読む
+    const needsOptions = functions.some((f) => f === 'notices.post' || f === 'reservations.book' || f === 'knowledge.rules' || f === 'jobs.run');
+    const options = needsOptions ? await this.settingOptions(tenantId) : { groups: [], reservableItems: [], compartments: [], agents: [] };
+    if (functions.includes('notices.post')) {
+      const n = input.notices ?? { all: false, groupIds: [] };
+      const known = new Set(options.groups.map((g) => g.id));
+      const groupIds = [...new Set(n.groupIds ?? [])];
+      if (!n.all && groupIds.length === 0) return { error: '「社内のお知らせを出す」で出してよい宛先（全員かグループ）を選んでください' };
+      if (groupIds.some((g) => !known.has(g))) return { error: '宛先のグループが見つかりません' };
+      out.notices = { all: !!n.all, groupIds: n.all ? [] : groupIds };
+    }
+    if (functions.includes('reservations.book')) {
+      const r = input.reservations ?? { all: true, itemIds: [] };
+      const known = new Set(options.reservableItems.map((i) => i.id));
+      const itemIds = [...new Set(r.itemIds ?? [])].filter((x) => known.has(x));
+      if (!r.all && itemIds.length === 0) return { error: '「予約の空きを読む・予約を入れる」で見せてよい予約できるものを選んでください' };
+      out.reservations = { all: !!r.all, itemIds: r.all ? [] : itemIds };
+    }
+    if (functions.includes('knowledge.rules')) {
+      const known = new Set(options.compartments);
+      const compartments = [...new Set(input.knowledgeRules?.compartments ?? [])];
+      if (compartments.some((c) => !known.has(c))) return { error: '権限区画が見つかりません' };
+      out.knowledgeRules = { compartments };
+    }
+    if (functions.includes('jobs.run')) {
+      const j = input.jobs ?? { agentIds: [], maxRisk: 'read' as RiskLevel };
+      if (!APP_JOB_RISKS.includes(j.maxRisk)) return { error: '危険度の上限を選んでください' };
+      const known = new Map(options.agents.map((a) => [a.id, a]));
+      const agentIds = [...new Set(j.agentIds ?? [])];
+      if (agentIds.length === 0) return { error: '「業務を依頼して結果を受け取る」で依頼してよい業務を選んでください' };
+      if (agentIds.some((a) => !known.has(a))) return { error: '業務が見つかりません（使えない業務か、お金の確定を行う業務です）' };
+      out.jobs = { agentIds, maxRisk: j.maxRisk };
+    }
+    return out;
+  }
+
+  /** 承認した機能ごとの設定（機能の業務が読む）。承認していなければ `null`。 */
+  async settingsOf(tenantId: string, appId: string): Promise<AppSettings | null> {
+    const app = await this.deps.store.getApp(tenantId, appId);
+    return app ? app.settings : null;
   }
 
   /** 「商品の一覧を読む」で承認した範囲と、範囲から外した品目。承認していなければ `null`。 */

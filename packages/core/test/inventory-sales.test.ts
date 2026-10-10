@@ -85,7 +85,8 @@ test('外部のアプリ: 機能ごとに呼べる道が決まり、管理者と
   assert.equal(appFunctionFor('GET', '/v1/me'), null);
   assert.equal(appFunctionFor('GET', '/v1/inventory'), null);
   const { apps } = setup(false);
-  assert.deepEqual(await apps.available('t1'), ['company.profile']);
+  const avail = await apps.available('t1');
+  assert.ok(avail.includes('company.profile') && !avail.some((f) => f.startsWith('inventory.')), '在庫を切った会社では在庫の機能を選べない');
   const made = await apps.create('t1', 'u-admin', 'レジ');
   assert.ok('key' in made);
   const res = await apps.approve('t1', 'u-admin', made.app.id, { functions: ['inventory.sales'], settings: {} });

@@ -5,6 +5,8 @@
  * - 一覧は、アプリに承認した範囲だけを返す。`updatedSince` で変わった品目だけ、`categories` で分類を絞れる。外れた品目は `active: false`
  * - 販売の通知は、注文で取り置き・販売で使用・取り消しで戻し・返品で入庫する。`eventId` で二重に数えない（外部のアプリの仕組み）
  * - 品目は ID → 自社のコード → バーコードの順に決まった規則で照らす。照らせない行は残し、人が品目を選べばその時点で記録する
+ * - 入庫の通知（`inventory.receipts`。`POST /v1/inventory/receipts`。第13.4.2節）は、仕入れ・入荷のシステムから入荷を受け、同じ照らし方で入庫する。
+ *   取り消しは入庫を逆の記録で戻す
  *
  * 鍵・承認・止める・回数の上限は外部のアプリ（`../apps/`）が受け持つ。金額・支払い・お客様の情報は受け取らず、持たない（第29.17節・第29.18節）。
  * 通知の中身はデータとして扱い、指示として読まない（不変則 I-6）。
@@ -32,6 +34,8 @@ const LIST_MAX = 500;
 const FILTER_MAX = { categories: 20, ids: 100, codes: 100, barcodes: 100 } as const;
 /** 販売の通知の、二重に数えないための番号の種類（外部のアプリの通知の番号を、機能ごとに分ける）。 */
 const SALES_EVENT_KIND = 'inventory.sales';
+/** 入庫の通知の、二重に数えないための番号の種類。 */
+const RECEIPT_EVENT_KIND = 'inventory.receipts';
 
 // ---- 置き場 ----
 
@@ -48,12 +52,25 @@ export interface SaleRecord {
   updatedAt: string;
 }
 
-/** 照らせなかった行の記録。 */
+/** 入庫の通知の記録（アプリ＋入荷の番号で 1 件）。 */
+export interface ReceiptRecord {
+  id: string;
+  appId: string;
+  receiptRef: string;
+  status: 'received' | 'cancelled';
+  /** 入庫の記録の組ごとに、その中の記録 1 つの ID（取り消しで組ごと戻す）。 */
+  moves: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 照らせなかった行の記録。販売の行なら `saleId`、入庫の行なら `receiptId` を持つ。 */
 export interface UnmatchedRecord {
   id: string;
   appId: string;
-  saleId: string;
-  action: 'hold' | 'use' | 'return';
+  saleId: string | null;
+  receiptId?: string | null;
+  action: 'hold' | 'use' | 'return' | 'receive';
   itemRef: string;
   code: string;
   barcode: string;
@@ -75,13 +92,19 @@ export interface SalesStore {
   /** 販売の、選ぶのを待っている行を「要らなくなった」にする（取り消し・送り直しのとき）。`action` を渡せばその種類だけ。 */
   dropUnmatched(tenantId: string, saleId: string, at: string, action?: UnmatchedRecord['action']): Promise<void>;
   countOpenUnmatched(tenantId: string): Promise<Map<string, number>>;
+  getReceipt(tenantId: string, appId: string, receiptRef: string): Promise<ReceiptRecord | null>;
+  getReceiptById(tenantId: string, id: string): Promise<ReceiptRecord | null>;
+  saveReceipt(tenantId: string, r: ReceiptRecord): Promise<void>;
+  /** 入庫の通知の、選ぶのを待っている行を「要らなくなった」にする（取り消しのとき）。 */
+  dropReceiptUnmatched(tenantId: string, receiptId: string, at: string): Promise<void>;
   /** 品目ごとの、使える数や中身が最後に変わった時刻（品目の変更・入出庫の記録・取り置きの出し入れのうち最も新しいもの）。 */
   changedAt(tenantId: string, itemIds: string[]): Promise<Map<string, string>>;
 }
 
 interface SaleRow { id: string; app_id: string; sale_ref: string; status: SaleRecord['status']; hold_ids: string[]; sold_moves: string[]; created_at: unknown; updated_at: unknown }
+interface ReceiptRow { id: string; app_id: string; receipt_ref: string; status: ReceiptRecord['status']; moves: string[]; created_at: unknown; updated_at: unknown }
 interface UnmatchedRow {
-  id: string; app_id: string; sale_id: string; action: UnmatchedRecord['action']; item_ref: string; code: string; barcode: string; qty: unknown;
+  id: string; app_id: string; sale_id: string | null; receipt_id?: string | null; action: UnmatchedRecord['action']; item_ref: string; code: string; barcode: string; qty: unknown;
   reason: string; status: UnmatchedRecord['status']; created_at: unknown; sale_ref?: string;
 }
 
@@ -91,8 +114,11 @@ const toSale = (r: SaleRow): SaleRecord => ({
   id: r.id, appId: r.app_id, saleRef: r.sale_ref, status: r.status, holdIds: r.hold_ids ?? [], soldMoves: r.sold_moves ?? [],
   createdAt: iso(r.created_at), updatedAt: iso(r.updated_at),
 });
+const toReceipt = (r: ReceiptRow): ReceiptRecord => ({
+  id: r.id, appId: r.app_id, receiptRef: r.receipt_ref, status: r.status, moves: r.moves ?? [], createdAt: iso(r.created_at), updatedAt: iso(r.updated_at),
+});
 const toUnmatched = (r: UnmatchedRow): UnmatchedRecord & { saleRef: string } => ({
-  id: r.id, appId: r.app_id, saleId: r.sale_id, action: r.action, itemRef: r.item_ref, code: r.code, barcode: r.barcode, qty: Number(r.qty),
+  id: r.id, appId: r.app_id, saleId: r.sale_id, receiptId: r.receipt_id ?? null, action: r.action, itemRef: r.item_ref, code: r.code, barcode: r.barcode, qty: Number(r.qty),
   reason: r.reason, status: r.status, createdAt: iso(r.created_at), saleRef: r.sale_ref ?? '',
 });
 
@@ -150,9 +176,9 @@ export class PostgresSalesStore implements SalesStore {
   async addUnmatched(tenantId: string, rows: UnmatchedRecord[]): Promise<void> {
     for (const u of rows) {
       await this.q(tenantId,
-        `insert into inventory_sale_unmatched (id, tenant_id, app_id, sale_id, action, item_ref, code, barcode, qty, reason, status, created_at)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-        [u.id, tenantId, u.appId, u.saleId, u.action, u.itemRef, u.code, u.barcode, u.qty, u.reason, u.status, u.createdAt]);
+        `insert into inventory_sale_unmatched (id, tenant_id, app_id, sale_id, receipt_id, action, item_ref, code, barcode, qty, reason, status, created_at)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+        [u.id, tenantId, u.appId, u.saleId, u.receiptId ?? null, u.action, u.itemRef, u.code, u.barcode, u.qty, u.reason, u.status, u.createdAt]);
     }
   }
 
@@ -163,7 +189,9 @@ export class PostgresSalesStore implements SalesStore {
     if (opts.appId) { params.push(opts.appId); where += ` and u.app_id = $${params.length}`; }
     params.push(Math.min(500, opts.limit ?? 200));
     return (await this.q<UnmatchedRow>(tenantId,
-      `select u.*, s.sale_ref from inventory_sale_unmatched u join inventory_sales s on s.tenant_id = u.tenant_id and s.id = u.sale_id
+      `select u.*, coalesce(s.sale_ref, r.receipt_ref, '') as sale_ref from inventory_sale_unmatched u
+         left join inventory_sales s on s.tenant_id = u.tenant_id and s.id = u.sale_id
+         left join inventory_app_receipts r on r.tenant_id = u.tenant_id and r.id = u.receipt_id
         where ${where} order by u.created_at desc limit $${params.length}`, params)).map(toUnmatched);
   }
 
@@ -189,6 +217,29 @@ export class PostgresSalesStore implements SalesStore {
     return new Map(rows.map((r) => [r.app_id, Number(r.n)]));
   }
 
+  async getReceipt(tenantId: string, appId: string, receiptRef: string): Promise<ReceiptRecord | null> {
+    const [r] = await this.q<ReceiptRow>(tenantId, 'select * from inventory_app_receipts where tenant_id = $1 and app_id = $2 and receipt_ref = $3', [tenantId, appId, receiptRef]);
+    return r ? toReceipt(r) : null;
+  }
+
+  async getReceiptById(tenantId: string, id: string): Promise<ReceiptRecord | null> {
+    const [r] = await this.q<ReceiptRow>(tenantId, 'select * from inventory_app_receipts where tenant_id = $1 and id = $2', [tenantId, id]);
+    return r ? toReceipt(r) : null;
+  }
+
+  async saveReceipt(tenantId: string, r: ReceiptRecord): Promise<void> {
+    await this.q(tenantId,
+      `insert into inventory_app_receipts (id, tenant_id, app_id, receipt_ref, status, moves, created_at, updated_at) values ($1,$2,$3,$4,$5,$6,$7,$8)
+       on conflict (id) do update set status = excluded.status, moves = excluded.moves, updated_at = excluded.updated_at
+       where inventory_app_receipts.tenant_id = excluded.tenant_id`,
+      [r.id, tenantId, r.appId, r.receiptRef, r.status, JSON.stringify(r.moves), r.createdAt, r.updatedAt]);
+  }
+
+  async dropReceiptUnmatched(tenantId: string, receiptId: string, at: string): Promise<void> {
+    await this.q(tenantId, `update inventory_sale_unmatched set status = 'dropped', resolved_at = $3 where tenant_id = $1 and receipt_id = $2 and status = 'open'`,
+      [tenantId, receiptId, at]);
+  }
+
   async changedAt(tenantId: string, itemIds: string[]): Promise<Map<string, string>> {
     if (itemIds.length === 0) return new Map();
     const rows = await this.q<{ id: string; at: unknown }>(tenantId,
@@ -204,6 +255,7 @@ export class PostgresSalesStore implements SalesStore {
 export class MemorySalesStore implements SalesStore {
   readonly sales = new Map<string, SaleRecord & { tenantId: string }>();
   readonly unmatched = new Map<string, UnmatchedRecord & { tenantId: string }>();
+  readonly receipts = new Map<string, ReceiptRecord & { tenantId: string }>();
 
   constructor(private readonly inventory?: MemoryInventoryStore) {}
 
@@ -229,7 +281,7 @@ export class MemorySalesStore implements SalesStore {
     return [...this.unmatched.values()]
       .filter((u) => u.tenantId === tenantId && (!opts.status || u.status === opts.status) && (!opts.appId || u.appId === opts.appId))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, opts.limit ?? 200)
-      .map(({ tenantId: _t, ...u }) => ({ ...u, saleRef: this.sales.get(u.saleId)?.saleRef ?? '' }));
+      .map(({ tenantId: _t, ...u }) => ({ ...u, saleRef: (u.saleId ? this.sales.get(u.saleId)?.saleRef : this.receipts.get(u.receiptId ?? '')?.receiptRef) ?? '' }));
   }
 
   async getUnmatched(tenantId: string, id: string): Promise<UnmatchedRecord | null> {
@@ -252,6 +304,24 @@ export class MemorySalesStore implements SalesStore {
     const out = new Map<string, number>();
     for (const u of this.unmatched.values()) if (u.tenantId === tenantId && u.status === 'open') out.set(u.appId, (out.get(u.appId) ?? 0) + 1);
     return out;
+  }
+
+  async getReceipt(tenantId: string, appId: string, receiptRef: string): Promise<ReceiptRecord | null> {
+    const r = [...this.receipts.values()].find((x) => x.tenantId === tenantId && x.appId === appId && x.receiptRef === receiptRef);
+    return r ? { ...r, moves: [...r.moves] } : null;
+  }
+
+  async getReceiptById(tenantId: string, id: string): Promise<ReceiptRecord | null> {
+    const r = this.receipts.get(id);
+    return r && r.tenantId === tenantId ? { ...r, moves: [...r.moves] } : null;
+  }
+
+  async saveReceipt(tenantId: string, r: ReceiptRecord): Promise<void> {
+    this.receipts.set(r.id, { ...r, moves: [...r.moves], tenantId });
+  }
+
+  async dropReceiptUnmatched(tenantId: string, receiptId: string): Promise<void> {
+    for (const u of this.unmatched.values()) if (u.tenantId === tenantId && u.receiptId === receiptId && u.status === 'open') u.status = 'dropped';
   }
 
   async changedAt(tenantId: string, itemIds: string[]): Promise<Map<string, string>> {
@@ -340,6 +410,42 @@ export interface SaleEventResult {
   lines: SaleLineResult[];
 }
 
+/** 入庫の通知の 1 行。 */
+export interface ReceiptLineInput {
+  itemId?: string;
+  code?: string;
+  barcode?: string;
+  quantity: number;
+  /** 数の単位。`purchase` なら仕入れの単位（入り数で使う単位に直す）。 */
+  unit: 'use' | 'purchase';
+  lot?: string;
+  expiresOn?: string;
+}
+
+/** 入庫の通知（形を確かめたもの）。 */
+export interface ReceiptEventInput {
+  eventId: string;
+  receiptId: string;
+  status: 'received' | 'cancelled';
+  lines: ReceiptLineInput[];
+}
+
+/** 入庫の通知の行ごとの結果。 */
+export interface ReceiptLineResult {
+  index: number;
+  itemId: string | null;
+  result: 'received' | 'unmatched' | 'ignored';
+  reason?: string;
+}
+
+/** 入庫の通知の答え。 */
+export interface ReceiptEventResult {
+  eventId: string;
+  receiptId: string;
+  applied: true;
+  lines: ReceiptLineResult[];
+}
+
 /** 口の答え（状態の番号と本文）。 */
 export type HookResponse<T> = { status: 200; body: T } | { status: 400 | 404 | 409 | 429; body: { error: string; field?: string }; retryAfter?: number };
 
@@ -378,6 +484,57 @@ export function parseSaleEvent(body: unknown): SaleEventInput | { error: string;
     lines.push({ ...(itemId ? { itemId } : {}), ...(code ? { code } : {}), ...(barcode ? { barcode } : {}), quantity: q });
   }
   return { eventId, saleId, status, occurredAt, lines };
+}
+
+/**
+ * 入庫の通知の形を確かめる。ここに無い項目（金額・仕入れ先の情報など）は読まずに捨てる。
+ *
+ * @returns 確かめた通知か、どの項目が違うか
+ */
+export function parseReceiptEvent(body: unknown): ReceiptEventInput | { error: string; field: string } {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return { error: '本文は JSON のオブジェクトにしてください', field: '' };
+  const b = body as Record<string, unknown>;
+  const eventId = str(b['eventId'], 100);
+  if (!eventId) return { error: 'eventId は 1〜100 字の文字にしてください', field: 'eventId' };
+  const receiptId = str(b['receiptId'], 100);
+  if (!receiptId) return { error: 'receiptId は 1〜100 字の文字にしてください', field: 'receiptId' };
+  const status = b['status'];
+  if (status !== 'received' && status !== 'cancelled') return { error: 'status は received・cancelled のどちらかにしてください', field: 'status' };
+  const raw = b['lines'];
+  if (status === 'cancelled' && raw === undefined) return { eventId, receiptId, status, lines: [] };
+  if (!Array.isArray(raw) || raw.length === 0) return { error: 'lines に 1 行以上を入れてください', field: 'lines' };
+  if (raw.length > SALES_LINES_MAX) return { error: `lines は ${SALES_LINES_MAX} 行までです`, field: 'lines' };
+  const lines: ReceiptLineInput[] = [];
+  for (let i = 0; i < raw.length; i++) {
+    const l = raw[i] as Record<string, unknown> | null;
+    if (!l || typeof l !== 'object') return { error: '行はオブジェクトにしてください', field: `lines[${i}]` };
+    const q = l['quantity'];
+    if (typeof q !== 'number' || !Number.isFinite(q) || q <= 0 || q > 1_000_000 || Math.round(q * 1000) !== q * 1000) {
+      return { error: 'quantity は 0 より大きい数（小数は 3 桁まで）にしてください', field: `lines[${i}].quantity` };
+    }
+    const itemId = str(l['itemId'], 100) ?? undefined;
+    const code = str(l['code'], 100) ?? undefined;
+    const barcode = str(l['barcode'], 100) ?? undefined;
+    if (!itemId && !code && !barcode) return { error: 'itemId・code・barcode のどれかを入れてください', field: `lines[${i}]` };
+    const unit = l['unit'] === undefined ? 'use' : l['unit'];
+    if (unit !== 'use' && unit !== 'purchase') return { error: 'unit は use・purchase のどちらかにしてください', field: `lines[${i}].unit` };
+    const lot = l['lot'] === undefined ? undefined : str(l['lot'], 64);
+    if (lot === null) return { error: 'lot は 1〜64 字の文字にしてください', field: `lines[${i}].lot` };
+    const exp = l['expiresOn'];
+    if (exp !== undefined && (typeof exp !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(exp) || Number.isNaN(Date.parse(exp)))) {
+      return { error: 'expiresOn は日付（YYYY-MM-DD）にしてください', field: `lines[${i}].expiresOn` };
+    }
+    lines.push({
+      ...(itemId ? { itemId } : {}), ...(code ? { code } : {}), ...(barcode ? { barcode } : {}), quantity: q, unit,
+      ...(lot ? { lot } : {}), ...(typeof exp === 'string' ? { expiresOn: exp } : {}),
+    });
+  }
+  return { eventId, receiptId, status, lines };
+}
+
+/** 入庫の通知の中身のハッシュ。 */
+function receiptHash(e: ReceiptEventInput): string {
+  return createHash('sha256').update(JSON.stringify([e.receiptId, e.status, e.lines.map((l) => [l.itemId ?? '', l.code ?? '', l.barcode ?? '', l.quantity, l.unit, l.lot ?? '', l.expiresOn ?? ''])])).digest('hex');
 }
 
 /** 中身のハッシュ（形を確かめたあとの中身から。空白や項目の順の違いを同じとみなす）。 */
@@ -452,11 +609,23 @@ export class InventorySales {
   async resolve(tenantId: string, userId: string, unmatchedId: string, itemId: string): Promise<{ ok: true } | { error: string }> {
     const u = await this.deps.store.getUnmatched(tenantId, unmatchedId);
     if (!u || u.status !== 'open') return { error: '照らせなかった行が見つかりません（もう記録したか、要らなくなりました）' };
-    const sale = await this.deps.store.getSaleById(tenantId, u.saleId);
-    if (!sale) return { error: '販売が見つかりません' };
     const item = await this.deps.service.store.getItem(tenantId, itemId);
     if (!item || item.status !== 'active') return { error: '使っている品目を選んでください' };
     const at = new Date().toISOString();
+    if (u.action === 'receive') {
+      const receipt = u.receiptId ? await this.deps.store.getReceiptById(tenantId, u.receiptId) : null;
+      if (!receipt) return { error: '入荷が見つかりません' };
+      if (receipt.status !== 'received') return { error: 'この入荷は取り消されています' };
+      const res = await this.deps.service.recordMove(tenantId, userId, { kind: 'in', itemId: item.id, qty: u.qty, reason: '入荷', source: 'app', sourceId: receipt.id });
+      if (!res.ok) return { error: res.error };
+      receipt.moves.push(res.moves[0]!.id);
+      receipt.updatedAt = at;
+      await this.deps.store.saveReceipt(tenantId, receipt);
+      await this.deps.store.setUnmatched(tenantId, u.id, 'resolved', userId, at);
+      return { ok: true };
+    }
+    const sale = u.saleId ? await this.deps.store.getSaleById(tenantId, u.saleId) : null;
+    if (!sale) return { error: '販売が見つかりません' };
     if (u.action === 'hold') {
       if (sale.status !== 'ordered') return { error: 'この注文は、もう販売か取り消しになっています' };
       const holdId = await this.hold(tenantId, sale, item.id, u.qty, sale.updatedAt, u.appId);
@@ -552,8 +721,78 @@ export class InventorySales {
     return { status: 200, body: result };
   }
 
+  /**
+   * 入庫の通知を受け取る（第13.4.2節）。同じ `eventId` は 1 度だけ処理し、送り直しには前と同じ答えを返す。
+   *
+   * @remarks 同じ入荷の番号の 2 回目の `received` は受けない（入庫を重ねない）。`cancelled` は入庫を逆の記録で戻す
+   */
+  async postReceipt(tenantId: string, appId: string, body: unknown, now: Date = new Date()): Promise<HookResponse<ReceiptEventResult>> {
+    const parsed = parseReceiptEvent(body);
+    if ('error' in parsed) return { status: 400, body: parsed };
+    const claim = await this.deps.apps.claimEvent(tenantId, appId, RECEIPT_EVENT_KIND, parsed.eventId, receiptHash(parsed), now);
+    if (claim.kind === 'conflict') return { status: 409, body: { error: 'この eventId は別の中身で受け付け済みです' } };
+    if (claim.kind === 'replay') return { status: 200, body: claim.response as ReceiptEventResult };
+    if (claim.kind === 'busy') return { status: 409, body: { error: 'この eventId は処理の途中です。少し待って同じ中身で送り直してください' }, retryAfter: 10 };
+    const result = await this.applyReceipt(tenantId, appId, parsed, now);
+    await this.deps.apps.finishEvent(tenantId, appId, RECEIPT_EVENT_KIND, parsed.eventId, result);
+    return { status: 200, body: result };
+  }
+
+  /** 入荷を入庫する・取り消す。 */
+  private async applyReceipt(tenantId: string, appId: string, e: ReceiptEventInput, now: Date): Promise<ReceiptEventResult> {
+    const at = now.toISOString();
+    const actor = ExternalApps.actorOf(appId);
+    let receipt = await this.deps.store.getReceipt(tenantId, appId, e.receiptId);
+    const lines: ReceiptLineResult[] = [];
+    const ignoreAll = () => e.lines.forEach((_l, i) => lines.push({ index: i, itemId: null, result: 'ignored' }));
+    if (e.status === 'cancelled') {
+      if (receipt && receipt.status === 'received') {
+        for (const moveId of receipt.moves) await this.deps.service.reverse(tenantId, actor, moveId, { reason: '入荷の取り消し', source: 'app', sourceId: receipt.id });
+        await this.deps.store.dropReceiptUnmatched(tenantId, receipt.id, at);
+        receipt.status = 'cancelled';
+        receipt.updatedAt = at;
+        await this.deps.store.saveReceipt(tenantId, receipt);
+      } else if (!receipt) {
+        // 入荷より先に取り消しが届いた。あとで届いた入荷は受けない
+        await this.deps.store.saveReceipt(tenantId, { id: randomUUID(), appId, receiptRef: e.receiptId, status: 'cancelled', moves: [], createdAt: at, updatedAt: at });
+      }
+      return { eventId: e.eventId, receiptId: e.receiptId, applied: true, lines: [] };
+    }
+    if (receipt) {
+      ignoreAll();
+      return { eventId: e.eventId, receiptId: e.receiptId, applied: true, lines };
+    }
+    receipt = { id: randomUUID(), appId, receiptRef: e.receiptId, status: 'received', moves: [], createdAt: at, updatedAt: at };
+    // 入庫の記録より先に入荷を残す（照らせなかった行が入荷を指すため）
+    await this.deps.store.saveReceipt(tenantId, receipt);
+    const views = await this.deps.service.list(tenantId, { includeStopped: true });
+    const unmatched: UnmatchedRecord[] = [];
+    const miss = (i: number, line: ReceiptLineInput, reason: string) => {
+      lines.push({ index: i, itemId: null, result: 'unmatched', reason });
+      unmatched.push({
+        id: randomUUID(), appId, saleId: null, receiptId: receipt!.id, action: 'receive', itemRef: line.itemId ?? '', code: line.code ?? '', barcode: line.barcode ?? '',
+        qty: line.quantity, reason, status: 'open', createdAt: at,
+      });
+    };
+    for (const [i, line] of e.lines.entries()) {
+      const m = this.match(line, views);
+      if ('reason' in m) { miss(i, line, m.reason); continue; }
+      const res = await this.deps.service.recordMove(tenantId, actor, {
+        kind: 'in', itemId: m.item.id, qty: line.quantity, unit: line.unit === 'purchase' ? 'pack' : 'unit', reason: '入荷', source: 'app', sourceId: receipt.id,
+        ...(line.lot ? { lot: line.lot } : {}), ...(line.expiresOn ? { expiresOn: line.expiresOn } : {}),
+      });
+      if (!res.ok) { miss(i, line, res.error); continue; }
+      receipt.moves.push(res.moves[0]!.id);
+      lines.push({ index: i, itemId: m.item.id, result: 'received' });
+    }
+    receipt.updatedAt = at;
+    await this.deps.store.saveReceipt(tenantId, receipt);
+    if (unmatched.length) await this.deps.store.addUnmatched(tenantId, unmatched);
+    return { eventId: e.eventId, receiptId: e.receiptId, applied: true, lines };
+  }
+
   /** 行の品目を照らす（ID → 自社のコード → バーコード。推論を使わない）。照らすのは止めていない品目すべて。 */
-  private match(line: SaleLineInput, views: InventoryItemView[]): Match {
+  private match(line: Pick<SaleLineInput, 'itemId' | 'code' | 'barcode'>, views: InventoryItemView[]): Match {
     const live = views.filter((v) => v.status === 'active');
     if (line.itemId) {
       const v = live.find((x) => x.id === line.itemId);
@@ -677,7 +916,7 @@ export class InventorySales {
   /** 毎朝の見張りに出す、照らせなかった行の数と例（第29.14節）。 */
   async attention(tenantId: string): Promise<{ count: number; samples: string[] }> {
     const rows = await this.deps.store.listUnmatched(tenantId, { status: 'open', limit: 50 });
-    const label = { hold: '注文', use: '販売', return: '返品' } as const;
+    const label = { hold: '注文', use: '販売', return: '返品', receive: '入荷' } as const;
     return {
       count: rows.length,
       samples: rows.slice(0, 10).map((u) => `${label[u.action]} ${u.saleRef}: ${[u.itemRef, u.code, u.barcode].filter(Boolean).join(' / ')} ${u.qty}`),

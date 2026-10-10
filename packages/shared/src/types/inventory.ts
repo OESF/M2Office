@@ -123,7 +123,7 @@ export interface InventoryMove {
   delta: number;
   reason: string;
   /** `sales` は外部のアプリの販売の通知からの販売・返品・取り消し（第29.20.1節）。 */
-  source: 'manual' | 'slip' | 'count' | 'reservation' | 'secretary' | 'import' | 'undo' | 'sales';
+  source: 'manual' | 'slip' | 'count' | 'reservation' | 'secretary' | 'import' | 'undo' | 'sales' | 'app';
   reversalOf: string | null;
   createdBy: string;
   createdByName?: string;
@@ -335,10 +335,10 @@ export interface InventorySaleUnmatched {
   appId: string;
   /** 外部のアプリの名前。 */
   appName: string;
-  /** 販売管理の販売番号。 */
+  /** 販売管理の販売番号（入庫の通知なら入荷の番号）。 */
   saleRef: string;
-  /** 行で行うはずだったこと（取り置き・使用・入庫）。 */
-  action: 'hold' | 'use' | 'return';
+  /** 行で行うはずだったこと（取り置き・使用・返品の入庫・入荷の入庫）。 */
+  action: 'hold' | 'use' | 'return' | 'receive';
   /** 販売管理が送った品目の手がかり（M2Office の品目の ID・自社のコード・バーコード）。 */
   itemRef: string;
   code: string;

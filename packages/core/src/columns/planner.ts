@@ -61,6 +61,20 @@ export interface PastePageColumn {
   hasCover: boolean;
 }
 
+/** 公開したコラムの 1 本（外部のアプリに渡す）。 */
+export interface PublishedColumn {
+  id: string;
+  title: string;
+  description: string;
+  /** 本文（出典・監修・AI の断り書きを足したもの）。 */
+  markdown: string;
+  html: string;
+  sources: { title: string; url: string }[];
+  publishedAt: string;
+  updatedAt: string;
+  hasCover: boolean;
+}
+
 const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 const jstToday = (now: Date) => new Date(now.getTime() + 9 * 3_600_000).toISOString().slice(0, 10);
 const md = (d: string) => `${Number(d.slice(5, 7))} 月 ${Number(d.slice(8, 10))} 日`;
@@ -345,6 +359,41 @@ export class ColumnPlanner {
     }
     columns.sort((a, b) => b.date.localeCompare(a.date));
     return { tenantId, company: settings.company.shortName || settings.company.legalName, columns };
+  }
+
+  /**
+   * 公開したコラム（外部のアプリの機能「公開したコラムを読む」。第13.4.2節）。承認済みで公開の日時を過ぎたものだけ（貼るだけのページと同じ）。
+   *
+   * @param updatedSince この時刻より後に変わったものだけ
+   * @remarks 貼るだけのページの鍵は使わない（アプリの鍵と承認で決まる）。下書き・承認待ち・取り下げたものは返さない
+   */
+  async published(tenantId: string, opts: { updatedSince?: string } = {}, now: Date = new Date()): Promise<PublishedColumn[]> {
+    const settings = await this.deps.repo.getTenantSettings(tenantId);
+    if (!settings.webColumns.enabled) return [];
+    const since = opts.updatedSince ? Date.parse(opts.updatedSince) : null;
+    const shown = (await this.deps.store.list(tenantId))
+      .filter((c) => c.status === 'approved' && (!c.publishAt || Date.parse(c.publishAt) <= now.getTime()))
+      .filter((c) => since === null || Date.parse(c.updatedAt) > since || (!!c.publishAt && Date.parse(c.publishAt) > since));
+    const out: PublishedColumn[] = [];
+    for (const c of shown.slice(0, 100)) {
+      const v = (await this.deps.store.versions(tenantId, c.id)).find((x) => x.version === (c.submittedVersion ?? c.currentVersion));
+      if (!v) continue;
+      const markdown = finalMarkdown(v, settings.webColumns);
+      out.push({
+        id: c.id, title: v.title, description: v.description, markdown, html: columnHtml(markdown), sources: v.sources.map((x) => ({ title: x.title, url: x.url })),
+        publishedAt: c.publishAt ?? c.updatedAt, updatedAt: c.updatedAt, hasCover: !!v.cover,
+      });
+    }
+    return out.sort((a, b) => b.publishedAt.localeCompare(a.publishedAt));
+  }
+
+  /** 公開したコラムのカバー画像（公開しているコラムだけ）。 */
+  async publishedCover(tenantId: string, columnId: string, now: Date = new Date()): Promise<Uint8Array | null> {
+    const c = (await this.published(tenantId, {}, now)).find((x) => x.id === columnId && x.hasCover);
+    if (!c) return null;
+    const rec = await this.deps.store.get(tenantId, columnId);
+    if (!rec) return null;
+    return this.deps.service.coverBytes({ tenantId, userId: SYSTEM }, columnId, rec.submittedVersion ?? undefined);
   }
 
   /** 貼るだけのページのカバー画像（出しているコラムだけ）。 */

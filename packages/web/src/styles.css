@@ -2210,6 +2210,7 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .app-section-title { margin: calc(4px * var(--space-scale)) 0 0; }
 .app-functions { list-style: none; margin: 0; padding: 0; display: grid; gap: calc(6px * var(--space-scale)); }
 .app-functions .check { white-space: normal; flex-wrap: wrap; gap: calc(6px * var(--space-scale)); }
+.app-setting > label.small { display: flex; align-items: center; gap: calc(8px * var(--space-scale)); margin-top: calc(6px * var(--space-scale)); }
 .sales-unmatched-list li { padding: calc(8px * var(--space-scale)) 0; border-bottom: 1px solid var(--line); display: grid; gap: 4px; }
 .sales-unmatched-list li:last-child { border-bottom: 0; }
 .sales-unmatched-list select { max-width: 100%; }

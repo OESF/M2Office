@@ -10,7 +10,7 @@ import { api, describeError } from './api.js';
 /** 日本時間の日時。 */
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString('ja-JP', { dateStyle: 'medium', timeStyle: 'short' }) : '—');
 
-const ACTION_LABEL = { hold: '注文', use: '販売', return: '返品' } as const;
+const ACTION_LABEL = { hold: '注文', use: '販売', return: '返品', receive: '入荷' } as const;
 
 /**
  * 照らせなかった販売。在庫管理を使う人が、行ごとに品目を選んで記録する。

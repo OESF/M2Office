@@ -430,13 +430,13 @@ export class MemberService {
   }
 
   /** 記録を足して、足した後の会員を返す。 */
-  private async add(who: MemberViewer, m: StoredMember, p: Pick<StoredPoint, 'kind' | 'points' | 'rewardId' | 'rewardName' | 'reversalOf' | 'note'>): Promise<{ member: Member; points: number }> {
-    await this.deps.store.addPoint(who.tenantId, { ...p, memberId: m.id, localDay: this.today(), createdBy: who.userId });
-    return { member: await this.viewOne(who.tenantId, (await this.deps.store.get(who.tenantId, m.id))!), points: p.points };
+  private async add(who: MemberViewer, m: StoredMember, p: Pick<StoredPoint, 'kind' | 'points' | 'rewardId' | 'rewardName' | 'reversalOf' | 'note'>): Promise<{ member: Member; points: number; pointId: string }> {
+    const pointId = await this.deps.store.addPoint(who.tenantId, { ...p, memberId: m.id, localDay: this.today(), createdBy: who.userId });
+    return { member: await this.viewOne(who.tenantId, (await this.deps.store.get(who.tenantId, m.id))!), points: p.points, pointId };
   }
 
   /** 来店（第40.6節）。同じ会員は 1 日 1 回まで。 */
-  async visit(who: MemberViewer, memberId: string): Promise<{ member: Member; points: number } | { error: string }> {
+  async visit(who: MemberViewer, memberId: string): Promise<{ member: Member; points: number; pointId: string } | { error: string }> {
     const m = await this.target(who, memberId);
     if ('error' in m) return m;
     const { visitPoints } = await this.settings(who.tenantId);
@@ -449,7 +449,7 @@ export class MemberService {
   }
 
   /** 購入（第40.6節）。金額を会社の率でポイントにし（端数は切り捨て）、**金額は保存しない**。 */
-  async purchase(who: MemberViewer, memberId: string, amount: unknown): Promise<{ member: Member; points: number } | { error: string }> {
+  async purchase(who: MemberViewer, memberId: string, amount: unknown): Promise<{ member: Member; points: number; pointId: string } | { error: string }> {
     const m = await this.target(who, memberId);
     if ('error' in m) return m;
     const yen = Number(amount);
@@ -461,7 +461,7 @@ export class MemberService {
   }
 
   /** 特典を使う（第40.6節）。ポイントが足りなければ使えない。値引きの計算はレジで行う。 */
-  async useReward(who: MemberViewer, memberId: string, rewardId: string): Promise<{ member: Member; points: number } | { error: string }> {
+  async useReward(who: MemberViewer, memberId: string, rewardId: string): Promise<{ member: Member; points: number; pointId: string } | { error: string }> {
     const m = await this.target(who, memberId);
     if ('error' in m) return m;
     const r = (await this.usableRewards(who.tenantId, this.today(), await this.viewOne(who.tenantId, m))).find((x) => x.id === rewardId);

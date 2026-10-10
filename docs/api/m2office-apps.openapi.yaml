@@ -1,12 +1,11 @@
-# M2Office の外部のアプリの API（仕様書 第13.4.1節、ADR-0090）。外のシステムが、外部のアプリの鍵で画面と同じ /v1 の道を呼ぶ。
+# M2Office の外部のアプリの API（仕様書 第13.4.1節・第13.4.2節・第11.12節、ADR-0089・ADR-0090）。外のシステムが、外部のアプリの鍵で画面と同じ /v1 の道を呼ぶ。
 # 機能ごとに呼べる道が決まっている。実装した機能は、実装と食い違わないことをテストで確かめる（packages/api/test/api-docs-page.test.ts）。
-# 案の機能（アカウントの結び付け・ナレッジの検索と、第13.4.2節の 8 つ）は、合意のあとに作るまで呼べない。
 # 実装から作る定義（仕様書 第13.1節 A-5）ができたら置き換える。
 # 見方: 管理者ページのヘルプの「開発者」、または npm run docs:api のあと http://localhost:3106/ を開く（docs/api/README.md）。
 openapi: 3.1.0
 info:
   title: M2Office — 外部のアプリの API
-  version: 1.2.0
+  version: 1.3.0
   description: |
     外のシステム（販売管理・M2Medical など）が M2Office を使うための API です（仕様書 第13.4.1節）。
 
@@ -20,22 +19,23 @@ info:
     | 会社の基本情報を読む（`company.profile`） | `GET /v1/company/profile` | 使える |
     | 商品の一覧を読む（`inventory.catalog`） | `GET /v1/inventory/catalog` | 使える（在庫管理を入れた会社） |
     | 販売を知らせる（`inventory.sales`） | `POST /v1/inventory/sales-events` | 使える（在庫管理を入れた会社） |
-    | アカウントを結び付ける（`accounts.link`） | `/v1/accounts/…` | 案 |
-    | ナレッジを検索する（`knowledge.search`） | `POST /v1/knowledge/search` | 案 |
-    | 問い合わせを受ける（`inquiries.intake`） | `POST /v1/inquiries/intake` | 案 |
-    | 社内のお知らせを出す（`notices.post`） | `POST /v1/notices` ほか | 案 |
-    | 入庫を知らせる（`inventory.receipts`） | `POST /v1/inventory/receipts` | 案 |
-    | 予約の空きを読む・予約を入れる（`reservations.book`） | `/v1/reservations/…` | 案 |
-    | 会員のポイントを付ける・使う（`members.points`） | `POST /v1/members/points` | 案 |
-    | 公開したコラムを読む（`columns.read`） | `GET /v1/columns/published` ほか | 案 |
-    | 社内規程を登録・改定する（`knowledge.rules`） | `PUT /v1/knowledge/rules/{ref}` ほか | 案 |
-    | 業務を依頼して結果を受け取る（`jobs.run`） | `POST /v1/jobs`・`GET /v1/runs/{id}` | 案 |
+    | アカウントを結び付ける（`accounts.link`） | `/v1/accounts/…` | 使える |
+    | ナレッジを検索する（`knowledge.search`） | `POST /v1/knowledge/search` | 使える |
+    | 問い合わせを受ける（`inquiries.intake`） | `POST /v1/inquiries/intake` | 使える（問い合わせの記録を入れた会社） |
+    | 社内のお知らせを出す（`notices.post`） | `POST /v1/notices` ほか | 使える |
+    | 入庫を知らせる（`inventory.receipts`） | `POST /v1/inventory/receipts` | 使える（在庫管理を入れた会社） |
+    | 予約の空きを読む・予約を入れる（`reservations.book`） | `/v1/reservations/…` | 使える（予約の管理を入れた会社） |
+    | 会員のポイントを付ける・使う（`members.points`） | `POST /v1/members/points` | 使える（会員の管理を入れた会社） |
+    | 公開したコラムを読む（`columns.read`） | `GET /v1/columns/published` ほか | 使える（コラムの作成を入れた会社） |
+    | 社内規程を登録・改定する（`knowledge.rules`） | `PUT /v1/knowledge/rules/{ref}` ほか | 使える |
+    | 業務を依頼して結果を受け取る（`jobs.run`） | `POST /v1/jobs`・`GET /v1/runs/{id}` | 使える |
 
     **共通の決まり**
     - 鍵が違う・アプリを止めた・会社が止まっている・呼んだ名前の会社と鍵の会社が合わないは、どれも同じ 404 です。許していない機能の道は 403 です。
     - 回数はアプリごとに 1 分 120 回までです。超えたら 429 と `Retry-After` を返します。
     - 送られてきた中身は、M2Office の中でデータとしてだけ扱い、文の中に書かれた指示には従いません。
-    - 書き込みの機能は、通知ごとの番号（`eventId`）で二重に数えません。送り直すときは同じ番号で送ってください。
+    - 書き込みの機能は、通知ごとの番号（`eventId`）で二重に数えません。送り直すときは同じ番号で送ってください（社内規程の登録は、同じ文書の番号への PUT なので要りません）。
+    - 本人として行う機能（ナレッジの検索・予約を入れる・業務の依頼）は、アカウントの結び付けで受け取った結び付きの ID（`bindingId`）を送ります。結び付きが無効なら 410（`binding_invalid`）です。
     - M2Office からアプリへ知らせる口（Webhook）はありません。
 
     使い方の例（販売管理・M2Medical）は、管理者ページのヘルプの「開発者」で解説しています。
@@ -56,25 +56,25 @@ tags:
     description: 機能 inventory.catalog。売る品目と数を読む（使い方の例 販売管理）
   - name: 販売の通知
     description: 機能 inventory.sales。注文・販売・取り消し・返品を知らせる（使い方の例 販売管理）
-  - name: アカウントの結び付け（案）
+  - name: アカウントの結び付け
     description: 機能 accounts.link。アプリの利用者と M2Office のアカウントを、確認コードで結び付ける（使い方の例 M2Medical）
-  - name: ナレッジの検索（案）
+  - name: ナレッジの検索
     description: 機能 knowledge.search。結び付いた本人の権限で、会社のナレッジに聞く（使い方の例 M2Medical）
-  - name: 問い合わせの受け付け（案）
+  - name: 問い合わせの受け付け
     description: 機能 inquiries.intake。Web のフォームなどの問い合わせを受ける
-  - name: 社内のお知らせ（案）
+  - name: 社内のお知らせ
     description: 機能 notices.post。承認した宛先に社内のお知らせを出す
-  - name: 入庫の通知（案）
+  - name: 入庫の通知
     description: 機能 inventory.receipts。仕入れ・入荷のシステムから入庫を知らせる
-  - name: 予約（案）
+  - name: 予約
     description: 機能 reservations.book。空きを読み、結び付いた本人として予約を入れる
-  - name: 会員のポイント（案）
+  - name: 会員のポイント
     description: 機能 members.points。レジ（POS）から会員のポイントを付ける・使う
-  - name: 公開したコラム（案）
+  - name: 公開したコラム
     description: 機能 columns.read。公開したコラムを自社のサイトなどに取り込む
-  - name: 社内規程の登録（案）
+  - name: 社内規程の登録
     description: 機能 knowledge.rules。文書管理のシステムから社内規程を登録・改定する
-  - name: 業務の依頼（案）
+  - name: 業務の依頼
     description: 機能 jobs.run。結び付いた本人として業務を依頼し、結果を受け取る
 paths:
   /v1/company/profile:
@@ -355,9 +355,9 @@ paths:
         '429': { $ref: '#/components/responses/TooManyRequests' }
   /v1/accounts/link-requests:
     post:
-      tags: [アカウントの結び付け（案）]
+      tags: [アカウントの結び付け]
       operationId: requestLink
-      summary: 結び付けの依頼（機能 accounts.link。案）
+      summary: 結び付けの依頼（機能 accounts.link）
       description: |
         そのメールアドレスの利用者が会社にいて使える状態なら、本人の M2Office の「お知らせ」に**確認コード（数字 6 桁）**を届けます。
 
@@ -384,9 +384,9 @@ paths:
         '429': { $ref: '#/components/responses/TooManyRequests' }
   /v1/accounts/links:
     post:
-      tags: [アカウントの結び付け（案）]
+      tags: [アカウントの結び付け]
       operationId: confirmLink
-      summary: 結び付けの確定（機能 accounts.link。案）
+      summary: 結び付けの確定（機能 accounts.link）
       description: |
         合えば、**結び付きの ID**（推測されにくい 32 字）と表示名を返します。M2Office は結び付きの ID のハッシュだけを持ちます。
 
@@ -419,9 +419,9 @@ paths:
         '429': { $ref: '#/components/responses/TooManyRequests' }
   /v1/accounts/links/{bindingId}:
     delete:
-      tags: [アカウントの結び付け（案）]
+      tags: [アカウントの結び付け]
       operationId: deleteLink
-      summary: 結び付きの削除（機能 accounts.link。案）
+      summary: 結び付きの削除（機能 accounts.link）
       description: |
         結び付きを消します。知らない ID でも 204 を返します（アプリが後片付けで呼べるように）。
         本人は M2Office の個人設定の「サービスとの接続」からも消せます。消したあとの検索は 410 になります。
@@ -437,9 +437,9 @@ paths:
         '429': { $ref: '#/components/responses/TooManyRequests' }
   /v1/knowledge/search:
     post:
-      tags: [ナレッジの検索（案）]
+      tags: [ナレッジの検索]
       operationId: searchKnowledge
-      summary: ナレッジを検索する（機能 knowledge.search。案）
+      summary: ナレッジを検索する（機能 knowledge.search）
       description: |
         結び付いた本人が M2Office で見られる**会社の知識**（社内規程・議事録・秘書が学んだこと。権限区画は本人が入っている区画だけ）だけで答えます。
         本人の記憶・会話・メール・ファイルは使いません。答えは見つかった節だけから作り、推測しません。
@@ -486,75 +486,87 @@ paths:
         '429': { $ref: '#/components/responses/TooManyRequests' }
   /v1/inquiries/intake:
     post:
-      tags: [問い合わせの受け付け（案）]
+      tags: [問い合わせの受け付け]
       operationId: intakeInquiry
-      summary: 問い合わせを受ける（機能 inquiries.intake。案）
+      summary: 問い合わせを受ける（機能 inquiries.intake）
       description: |
-        Web のフォームなどで受けた問い合わせを、項目に分けて送ります。経路「Web のフォーム」の問い合わせとして残り、同じお客様の続きは続きに足します。
-        - 要配慮個人情報・カードの番号・口座・パスワードは残しません。返事は、会社の人が画面で書き、承認のあとに送ります（この道では送りません）。
-        - 問い合わせの記録を入れた会社でだけ使えます。
+        Web のフォームなどで受けた問い合わせを、項目に分けて送ります。経路「Web のフォーム」の問い合わせとして残り、同じお客様（同じメールアドレス。無ければ 9 桁以上の同じ電話）の対応中の問い合わせがあれば続きに足します。名前だけでは続きにしません。
+        - 要配慮個人情報（病気・信条など）を含む本文は残さず、カードの番号・口座・パスワードは除いて残します。
+        - 返事はこの道では送りません。会社の人が画面で書き、承認のあとに送ります。
+        - 問い合わせの記録を入れた会社でだけ使えます（入れていなければ 404）。
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [eventId, from, body]
+              required: [eventId, body]
               properties:
-                eventId: { type: string, maxLength: 128, description: 送り直しても二重にしないための番号 }
+                eventId: { type: string, minLength: 1, maxLength: 100, description: 送り直しても二重にしないための番号 }
                 from:
                   type: object
                   properties:
                     name: { type: string, maxLength: 100 }
                     company: { type: string, maxLength: 100 }
                     phone: { type: string, maxLength: 40 }
-                    email: { type: string, format: email }
+                    email: { type: string, format: email, maxLength: 254 }
                 subject: { type: string, maxLength: 200 }
-                body: { type: string, maxLength: 20000 }
-                receivedAt: { type: string, format: date-time }
+                body: { type: string, minLength: 1, maxLength: 20000 }
+                receivedAt: { type: string, format: date-time, description: 受けた日時（省くと届いた時刻） }
             example: { eventId: form-20261010-0012, from: { name: 山田 花子, company: 山田商店, email: hanako@example.com }, subject: 見積のお願い, body: 来月の納品について見積をお願いします。, receivedAt: '2026-10-10T10:12:00+09:00' }
       responses:
-        '202': { description: 受け付けた（同じ eventId なら前と同じ答え） }
+        '202':
+          description: 受け付けた（同じ eventId なら前と同じ答え）。continued は対応中の問い合わせの続きに足したか
+          content:
+            application/json:
+              example: { accepted: true, continued: false }
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 同じ eventId を別の中身で受け付け済み、または処理の途中 }
         '429': { $ref: '#/components/responses/TooManyRequests' }
   /v1/notices:
     post:
-      tags: [社内のお知らせ（案）]
+      tags: [社内のお知らせ]
       operationId: postNotice
-      summary: 社内のお知らせを出す（機能 notices.post。案）
+      summary: 社内のお知らせを出す（機能 notices.post）
       description: |
-        画面と同じ形のお知らせを、アプリとして出します（出した人は「外部のアプリ（名前）」）。宛先は、管理者が承認した範囲（全員か、決めたグループ）だけです。範囲の外は 403。
-        Chat には投稿しません（お知らせだけ）。リンクは https だけです。
+        画面と同じ形のお知らせを、アプリとして出します（出した人は「外部のアプリ（名前）」）。宛先は、管理者が承認した範囲（全員か、決めたグループ）だけで、範囲の外は 403 です。
+        Chat には投稿しません（お知らせだけ）。リンクは https だけです。題名は 60 字、本文は 1000 字までです。
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [eventId, title, body]
+              required: [eventId, title]
               properties:
-                eventId: { type: string, maxLength: 128 }
-                title: { type: string, maxLength: 100 }
-                body: { type: string, maxLength: 4000 }
+                eventId: { type: string, minLength: 1, maxLength: 100 }
+                title: { type: string, maxLength: 60 }
+                body: { type: string, maxLength: 1000 }
                 link: { type: string, format: uri, pattern: '^https://' }
-                all: { type: boolean, description: 全員に出す }
+                all: { type: boolean, description: 全員に出す（承認で全員を許したときだけ） }
                 groupIds: { type: array, items: { type: string } }
                 dueOn: { type: string, format: date, description: 締切 }
-                until: { type: string, format: date, description: 出す期限 }
+                until: { type: string, format: date, description: 載せる最後の日（省けば締切の日、締切も無ければ 14 日） }
+            example: { eventId: notice-2026-1010-1, title: 年末調整の書類を出してください, body: 11 月 15 日までに総務へ。, all: true, dueOn: '2026-11-15' }
       responses:
-        '201': { description: 出した（お知らせの ID を返す） }
+        '201':
+          description: 出した（同じ eventId なら前と同じ答え）
+          content:
+            application/json:
+              example: { id: 6b1d2f3e-1c2a-4f5b-9e8d-7a6b5c4d3e2f, until: '2026-11-15' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 同じ eventId を別の中身で受け付け済み、または処理の途中 }
         '429': { $ref: '#/components/responses/TooManyRequests' }
   /v1/notices/{id}/withdraw:
     post:
-      tags: [社内のお知らせ（案）]
+      tags: [社内のお知らせ]
       operationId: withdrawNotice
-      summary: お知らせを取り下げる（機能 notices.post。案）
-      description: そのアプリが出したお知らせだけを取り下げられます。
+      summary: お知らせを取り下げる（機能 notices.post）
+      description: そのアプリが出したお知らせだけを取り下げられます。取り下げ済みでも 204 です。
       parameters:
         - name: id
           in: path
@@ -567,49 +579,59 @@ paths:
         '429': { $ref: '#/components/responses/TooManyRequests' }
   /v1/inventory/receipts:
     post:
-      tags: [入庫の通知（案）]
+      tags: [入庫の通知]
       operationId: postReceipt
-      summary: 入庫を知らせる（機能 inventory.receipts。案）
+      summary: 入庫を知らせる（機能 inventory.receipts）
       description: |
-        仕入れ・入荷のシステムから、入荷した品目を知らせます。品目の照らし方・照らせない行の扱いは、販売の通知と同じです。`cancelled` は入庫を逆の記録で戻します。金額は受け取りません。
-        在庫管理を入れた会社でだけ使えます。
+        仕入れ・入荷のシステムから、入荷した品目を知らせます。品目の照らし方（ID → 自社のコード → バーコード）と照らせない行の扱いは、販売の通知と同じです。照らせない行は在庫管理の「照らせなかった販売」に残り、人が品目を選ぶとその時点で入庫します。
+        - 同じ入荷の番号（receiptId）の 2 回目の `received` は入庫しません（行は `ignored`）。
+        - `cancelled` は入庫を逆の記録で戻します（選んで入庫した分も戻します）。入荷より先に届いた取り消しのあとは、その入荷を受けません。
+        - 金額・仕入れ先の情報は受け取りません。在庫管理を入れた会社でだけ使えます。
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [eventId, receiptId, status, lines]
+              required: [eventId, receiptId, status]
               properties:
-                eventId: { type: string, maxLength: 128 }
-                receiptId: { type: string, maxLength: 128, description: 入荷の番号 }
+                eventId: { type: string, minLength: 1, maxLength: 100 }
+                receiptId: { type: string, minLength: 1, maxLength: 100, description: 入荷の番号 }
                 status: { type: string, enum: [received, cancelled] }
                 lines:
                   type: array
+                  minItems: 1
                   maxItems: 200
+                  description: received では必須
                   items:
                     type: object
-                    required: [qty]
+                    required: [quantity]
                     properties:
                       itemId: { type: string }
-                      code: { type: string }
+                      code: { type: string, description: 自社のコード }
                       barcode: { type: string }
-                      qty: { type: number, exclusiveMinimum: 0 }
-                      unit: { type: string, enum: [use, purchase], description: 使う単位か仕入れの単位 }
+                      quantity: { type: number, exclusiveMinimum: 0, description: 小数は 3 桁まで }
+                      unit: { type: string, enum: [use, purchase], default: use, description: 使う単位か、仕入れの単位（入り数で使う単位に直す） }
                       lot: { type: string, maxLength: 64 }
                       expiresOn: { type: string, format: date }
+            example: { eventId: rcv-20261010-001, receiptId: IN-2026-0451, status: received, lines: [{ code: HC-050, quantity: 2, unit: purchase, lot: L2410, expiresOn: '2028-09-30' }] }
       responses:
-        '200': { description: 受け付けた（行ごとの結果を返す） }
+        '200':
+          description: 受け付けた（行ごとの結果。同じ eventId なら前と同じ答え）
+          content:
+            application/json:
+              example: { eventId: rcv-20261010-001, receiptId: IN-2026-0451, applied: true, lines: [{ index: 0, itemId: 3f9a…, result: received }] }
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 同じ eventId を別の中身で受け付け済み、または処理の途中 }
         '429': { $ref: '#/components/responses/TooManyRequests' }
   /v1/reservations/availability:
     get:
-      tags: [予約（案）]
+      tags: [予約]
       operationId: getAvailability
-      summary: 予約の空きを読む（機能 reservations.book。案）
-      description: 承認した予約できるもの（会議室・車・備品など）と、埋まっている時間だけを返します。予約した人の名前と用件は返しません。予約の管理を入れた会社でだけ使えます。
+      summary: 予約の空きを読む（機能 reservations.book）
+      description: 承認した予約できるもの（会議室・車・備品など）と、埋まっている時間だけを返します。予約した人の名前と用件は返しません。一度に読めるのは 15 日までです。予約の管理を入れた会社でだけ使えます。
       parameters:
         - name: from
           in: query
@@ -623,18 +645,23 @@ paths:
           in: query
           schema: { type: string, description: カンマ区切り }
       responses:
-        '200': { description: 予約できるものと、埋まっている時間 }
+        '200':
+          description: 予約できるものと、埋まっている時間
+          content:
+            application/json:
+              example: { from: '2026-10-12T00:00:00.000Z', to: '2026-10-13T00:00:00.000Z', items: [{ id: rsi-1, name: 会議室 A, kind: room, capacity: 8, busy: [{ startAt: '2026-10-12T01:00:00.000Z', endAt: '2026-10-12T02:00:00.000Z' }] }] }
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
   /v1/reservations:
     post:
-      tags: [予約（案）]
+      tags: [予約]
       operationId: createReservation
-      summary: 予約を入れる（機能 reservations.book。案）
+      summary: 予約を入れる（機能 reservations.book）
       description: |
-        結び付いた本人（機能 accounts.link）として予約を入れ、本人の Google カレンダーに予定を入れます。1 件 14 日まで・90 日先まで。重なれば 409 と次の空きを返します。
+        結び付いた本人（機能 accounts.link）として予約を入れ、本人の Google カレンダーに予定を入れます（`calendar` が結果）。1 件 14 日まで・90 日先までです。重なれば 409 と次の空きを返します。
+        本人が予約を使えない（利用範囲の外）ときは 403、承認していない予約できるものは 404 です。
       requestBody:
         required: true
         content:
@@ -643,26 +670,34 @@ paths:
               type: object
               required: [eventId, bindingId, itemId, startAt, endAt]
               properties:
-                eventId: { type: string, maxLength: 128 }
+                eventId: { type: string, minLength: 1, maxLength: 100 }
                 bindingId: { type: string, pattern: '^[A-Za-z0-9_-]{32}$' }
                 itemId: { type: string }
                 startAt: { type: string, format: date-time }
                 endAt: { type: string, format: date-time }
-                purpose: { type: string, maxLength: 200 }
+                purpose: { type: string, maxLength: 100 }
       responses:
-        '201': { description: 予約した }
+        '201':
+          description: 予約した（同じ eventId なら前と同じ答え）
+          content:
+            application/json:
+              example: { id: rsv-1, itemId: rsi-1, startAt: '2026-10-12T01:00:00.000Z', endAt: '2026-10-12T02:00:00.000Z', calendar: added }
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
-        '409': { description: 重なった（次の空きを返す） }
+        '409':
+          description: その時間は埋まっている（次の空きを返す）。または同じ eventId を別の中身で受け付け済み
+          content:
+            application/json:
+              example: { error: その時間はもう埋まっています, nextFree: { startAt: '2026-10-12T02:00:00.000Z', endAt: '2026-10-12T03:00:00.000Z' } }
         '410': { description: 結び付きが無効（binding_invalid） }
         '429': { $ref: '#/components/responses/TooManyRequests' }
   /v1/reservations/{id}:
     delete:
-      tags: [予約（案）]
+      tags: [予約]
       operationId: cancelReservation
-      summary: 予約を取り消す（機能 reservations.book。案）
-      description: そのアプリで入れた、結び付いた本人の予約だけを取り消せます。
+      summary: 予約を取り消す（機能 reservations.book）
+      description: そのアプリで入れた、結び付いた本人の予約だけを取り消せます。カレンダーの予定も消します。取り消し済みでも 204 です。
       parameters:
         - name: id
           in: path
@@ -680,12 +715,14 @@ paths:
         '429': { $ref: '#/components/responses/TooManyRequests' }
   /v1/members/points:
     post:
-      tags: [会員のポイント（案）]
+      tags: [会員のポイント]
       operationId: postMemberPoints
-      summary: 会員のポイントを付ける・使う（機能 members.points。案）
+      summary: 会員のポイントを付ける・使う（機能 members.points）
       description: |
-        レジ（POS）で読んだ会員証の QR（会員証の鍵）で会員を決め、来店（1 日 1 回）・購入（金額をポイントに換算し、金額は残さない）・特典を使う・取り消しを送ります。
-        答えはポイントの残りとランクだけです。呼び名・電話・誕生日は返しません。ポイントはマイナスにしません。会員の管理を入れた会社でだけ使えます。
+        レジ（POS）で読んだ会員証の QR（会員証の URL か鍵）で会員を決め、来店（同じ会員は 1 日 1 回）・購入（金額を会社の率でポイントに換算し、**金額は残さない**）・特典を使う・取り消しを送ります。
+        - 答えはポイントの残り・ランク・今回の増減だけです。呼び名・電話・誕生日は返しません。ポイントはマイナスにしません。
+        - 取り消しは、取り消す通知の eventId を `undoEventId` に入れます（その日の記録だけ）。
+        - 会員の管理を入れた会社でだけ使えます。
       requestBody:
         required: true
         content:
@@ -694,42 +731,50 @@ paths:
               type: object
               required: [eventId, card, action]
               properties:
-                eventId: { type: string, maxLength: 128 }
-                card: { type: string, description: 会員証の QR の鍵 }
+                eventId: { type: string, minLength: 1, maxLength: 100 }
+                card: { type: string, description: 会員証の QR の中身（URL か鍵） }
                 action: { type: string, enum: [visit, purchase, reward, undo] }
                 amount: { type: integer, minimum: 1, description: purchase のときの金額（ポイントに換算するだけで残さない） }
                 rewardId: { type: string, description: reward のときの特典 }
-                undoEventId: { type: string, description: undo のときの、取り消す通知の番号 }
+                undoEventId: { type: string, description: undo のときの、取り消す通知の eventId }
+            example: { eventId: pos-20261010-0031, card: 'https://example.m2office.online/v1/member-card/Ab3dEf…', action: purchase, amount: 3300 }
       responses:
-        '200': { description: ポイントの残りとランク }
+        '200':
+          description: ポイントの残りとランクと今回の増減（同じ eventId なら前と同じ答え）
+          content:
+            application/json:
+              example: { balance: 128, rank: silver, points: 33 }
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
-        '409': { description: ポイントが足りない・来店は今日もう付けた }
+        '409': { description: ポイントが足りない・来店は今日もう付けた・特典がいま使えないなど（理由を error に入れる） }
         '429': { $ref: '#/components/responses/TooManyRequests' }
   /v1/columns/published:
     get:
-      tags: [公開したコラム（案）]
+      tags: [公開したコラム]
       operationId: listPublishedColumns
-      summary: 公開したコラムを読む（機能 columns.read。案）
-      description: 承認済みで公開の日時を過ぎたコラムだけを返します（題名・説明・本文（Markdown と HTML）・出典・公開の日時）。下書き・承認待ちは返しません。コラムの作成を入れた会社でだけ使えます。
+      summary: 公開したコラムを読む（機能 columns.read）
+      description: 承認済みで公開の日時を過ぎたコラムだけを返します（新しい順に 100 本まで）。下書き・承認待ち・取り下げたものは返しません。コラムの作成を入れた会社でだけ使えます。
       parameters:
         - name: updatedSince
           in: query
           schema: { type: string, format: date-time }
-        - name: cursor
-          in: query
-          schema: { type: string }
+          description: この時刻より後に変わった・公開になったものだけ
       responses:
-        '200': { description: 公開したコラムの一覧 }
+        '200':
+          description: 公開したコラムの一覧
+          content:
+            application/json:
+              example: { items: [{ id: col-1, title: 冬の乾燥対策, description: 手荒れを防ぐ 3 つのこと, markdown: '# 冬の乾燥対策…', html: '<h1>冬の乾燥対策</h1>…', sources: [{ title: 出典の名前, url: 'https://example.com/' }], publishedAt: '2026-10-10T00:00:00.000Z', updatedAt: '2026-10-09T08:00:00.000Z', coverUrl: /v1/columns/published/col-1/cover.png }], asOf: '2026-10-10T09:00:00.000Z' }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
   /v1/columns/published/{id}/cover.png:
     get:
-      tags: [公開したコラム（案）]
+      tags: [公開したコラム]
       operationId: getPublishedColumnCover
-      summary: 公開したコラムのカバー画像（機能 columns.read。案）
+      summary: 公開したコラムのカバー画像（機能 columns.read）
       parameters:
         - name: id
           in: path
@@ -742,49 +787,59 @@ paths:
             image/png: {}
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
   /v1/knowledge/rules/{ref}:
     put:
-      tags: [社内規程の登録（案）]
+      tags: [社内規程の登録]
       operationId: putRule
-      summary: 社内規程を登録・改定する（機能 knowledge.rules。案）
+      summary: 社内規程を登録・改定する（機能 knowledge.rules）
       description: |
-        文書管理のシステムで改定した規程を、社内規程として登録します。`ref` は文書管理のシステムの文書の番号で、同じ番号を送れば新しい版になります（前の版は残ります）。
-        施行日が先の版は、施行日まで前の版で答えます。書けるのは、承認した権限区画だけです。
+        文書管理のシステムで改定した規程を、社内規程として登録します。`ref` は文書管理のシステムの文書の番号で、同じ番号を送れば新しい版になります（前の版は残ります）。中身が今の版と同じなら版を足さず `unchanged: true` を返します。
+        - 施行日（effectiveFrom）が先の版は、施行日まで前の版で答えます。
+        - 書けるのは、区画なしと、管理者が承認した権限区画だけです（ほかは 403）。廃止した規程は、管理者が戻すまで改定できません（409）。
+        - 人事・給与の設定と食い違う項目は、管理者ページに示します（管理者が登録したときと同じ）。
       parameters:
         - name: ref
           in: path
           required: true
-          schema: { type: string, maxLength: 128 }
+          schema: { type: string, pattern: '^[A-Za-z0-9._-]{1,64}$' }
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [eventId, title, body]
+              required: [title, body]
               properties:
-                eventId: { type: string, maxLength: 128 }
                 title: { type: string, maxLength: 200 }
-                body: { type: string, description: 規程の本文（Markdown） }
-                source: { type: string, maxLength: 500, description: 出典（文書管理のシステムの URL など） }
+                body: { type: string, maxLength: 500000, description: 規程の本文（Markdown） }
+                source: { type: string, maxLength: 500, description: 出典（文書管理のシステムの URL など。省くと題名） }
                 effectiveFrom: { type: string, format: date, description: 施行日（省くと登録した日） }
                 compartment: { type: string, description: 権限区画（省くと区画なし） }
+            example: { title: 就業規則, body: '第1章 総則…', source: 'https://docs.example.com/rules/42', effectiveFrom: '2027-04-01' }
       responses:
-        '200': { description: 登録した（版と施行日を返す） }
+        '200':
+          description: 改定した（または中身が同じで版を足さなかった）
+          content:
+            application/json:
+              example: { ref: rules-42, version: 5, applied: false, effectiveFrom: '2027-04-01', unchanged: false }
+        '201': { description: 新しく登録した }
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 廃止した規程 }
         '429': { $ref: '#/components/responses/TooManyRequests' }
   /v1/knowledge/rules/{ref}/retire:
     post:
-      tags: [社内規程の登録（案）]
+      tags: [社内規程の登録]
       operationId: retireRule
-      summary: 社内規程を廃止する（機能 knowledge.rules。案）
+      summary: 社内規程を廃止する（機能 knowledge.rules）
+      description: そのアプリが登録した規程だけを廃止できます。廃止は 1 年のあいだ管理者が戻せます。廃止済みでも 204 です。
       parameters:
         - name: ref
           in: path
           required: true
-          schema: { type: string, maxLength: 128 }
+          schema: { type: string, pattern: '^[A-Za-z0-9._-]{1,64}$' }
       responses:
         '204': { description: 廃止した }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -792,12 +847,12 @@ paths:
         '429': { $ref: '#/components/responses/TooManyRequests' }
   /v1/jobs:
     post:
-      tags: [業務の依頼（案）]
+      tags: [業務の依頼]
       operationId: createJob
-      summary: 業務を依頼する（機能 jobs.run。案）
+      summary: 業務を依頼する（機能 jobs.run）
       description: |
-        結び付いた本人（機能 accounts.link）として、承認した業務だけを依頼します。本人の利用範囲の外の業務・無効にした業務は断ります。
-        承認の段に来たら止まります。承認は本人の画面だけで行い、この API からは承認できません。
+        結び付いた本人（機能 accounts.link）として、承認した業務だけを依頼します。承認した危険度の上限を超える業務・本人の利用範囲の外の業務・無効にした業務は 403 です。
+        承認の段に来たら止まります（状態 `awaiting_approval`）。承認は本人の画面だけで行い、この API からは承認できません。
       requestBody:
         required: true
         content:
@@ -806,30 +861,39 @@ paths:
               type: object
               required: [eventId, bindingId, agentId]
               properties:
-                eventId: { type: string, maxLength: 128 }
+                eventId: { type: string, minLength: 1, maxLength: 100 }
                 bindingId: { type: string, pattern: '^[A-Za-z0-9_-]{32}$' }
                 agentId: { type: string }
-                input: { type: object, additionalProperties: true }
+                input: { type: object, additionalProperties: true, description: 業務の入力（業務ごとの形） }
       responses:
-        '202': { description: 受け付けた（実行の ID を返す） }
+        '202':
+          description: 受け付けた（同じ eventId なら前と同じ答え）
+          content:
+            application/json:
+              example: { runId: 8c1e…, status: queued }
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 会社で AI が使えない、または同じ eventId を別の中身で受け付け済み }
         '410': { description: 結び付きが無効（binding_invalid） }
         '429': { $ref: '#/components/responses/TooManyRequests' }
   /v1/runs/{id}:
     get:
-      tags: [業務の依頼（案）]
+      tags: [業務の依頼]
       operationId: getRun
-      summary: 依頼した業務の結果を受け取る（機能 jobs.run。案）
-      description: そのアプリで依頼した実行だけを読めます。状態（実行中・承認待ち・終わった・失敗）と結果を返します。
+      summary: 依頼した業務の結果を受け取る（機能 jobs.run）
+      description: そのアプリで依頼した実行だけを読めます。状態は queued・running・awaiting_approval・completed・failed・cancelled・expired のどれかで、結果（results）は completed のときだけ返します。
       parameters:
         - name: id
           in: path
           required: true
           schema: { type: string }
       responses:
-        '200': { description: 実行の状態と結果 }
+        '200':
+          description: 実行の状態と結果
+          content:
+            application/json:
+              example: { id: 8c1e…, agentId: daily-report, status: completed, startedAt: '2026-10-10T09:00:00.000Z', endedAt: '2026-10-10T09:00:40.000Z', failureReason: null, results: [{ kind: text, title: 日報, body: '…' }] }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
@@ -1065,8 +1129,8 @@ components:
       properties:
         title: { type: string, description: 資料の名前 }
         heading: { type: string, description: 節の見出しの経路。見出しの無い短い資料では空 }
-        version: { type: integer, description: 資料の版 }
-        updatedAt: { type: string, format: date-time, description: 資料の更新日時（社内規程は施行している版の施行日） }
+        version: { type: [integer, 'null'], description: 資料の版（分からなければ null） }
+        updatedAt: { type: [string, 'null'], format: date-time, description: 資料の更新日時（分からなければ null） }
         category:
           type: string
           enum: [rule, minutes, learned]

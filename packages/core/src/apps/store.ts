@@ -2,7 +2,8 @@
  * @file 外部のアプリ（仕様書 第13.4.1節、ADR-0090）の置き場。アプリ・呼び出しの数・書き込みの通知の番号を持つ。
  *
  * 鍵はハッシュだけを持つ。通知の本文は持たず、二重に数えないための番号と中身のハッシュと返した答えだけを持つ。
- * PostgreSQL の置き場は、問い合わせごとに `app.tenant_id` を設定する（行単位の制限。移行 119）。
+ * アカウントの結び付けの確認コードと結び付きの ID もハッシュだけを持つ（第11.12節）。アプリが入れた記録の控え（予約・お知らせ・業務の実行）を持つ。
+ * PostgreSQL の置き場は、問い合わせごとに `app.tenant_id` を設定する（行単位の制限。移行 119・120）。
  */
 
 import type pg from 'pg';
@@ -33,6 +34,28 @@ export interface AppEventRecord {
   createdAt: string;
 }
 
+/** 結び付けの依頼（アプリと本人ごとに 1 つ）。 */
+export interface LinkRequestRecord {
+  userId: string;
+  codeHash: string;
+  attempts: number;
+  expiresAt: string;
+  createdAt: string;
+}
+
+/** 結び付き（アプリの利用者と M2Office の利用者）。 */
+export interface BindingRecord {
+  id: string;
+  appId: string;
+  userId: string;
+  bindingHash: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+}
+
+/** アプリが入れた記録の控えの種類。 */
+export type AppRefKind = 'reservation' | 'notice' | 'run';
+
 /** アプリの置き場。 */
 export interface AppStore {
   listApps(tenantId: string): Promise<AppRecord[]>;
@@ -52,6 +75,24 @@ export interface AppStore {
   /** 処理の途中のまま古くなった通知を、やり直すために取り直す。取り直せたら `true`。 */
   reclaimEvent(tenantId: string, appId: string, kind: string, eventRef: string, staleBefore: string, at: string): Promise<boolean>;
   finishEvent(tenantId: string, appId: string, kind: string, eventRef: string, response: unknown): Promise<void>;
+  /** 結び付けの依頼を置く（同じ本人の前の依頼は置き換える）。 */
+  putLinkRequest(tenantId: string, appId: string, r: LinkRequestRecord): Promise<void>;
+  getLinkRequest(tenantId: string, appId: string, userId: string): Promise<LinkRequestRecord | null>;
+  /** 確定で試した回数を 1 つ増やし、増やした後の回数を返す。 */
+  bumpLinkAttempt(tenantId: string, appId: string, userId: string): Promise<number>;
+  deleteLinkRequest(tenantId: string, appId: string, userId: string): Promise<void>;
+  createBinding(tenantId: string, b: BindingRecord): Promise<void>;
+  /** 結び付きの ID のハッシュから、そのアプリの結び付きを引く。 */
+  findBinding(tenantId: string, appId: string, bindingHash: string): Promise<BindingRecord | null>;
+  touchBinding(tenantId: string, id: string, at: string): Promise<void>;
+  /** 結び付きを消す。消したら `true`。 */
+  deleteBinding(tenantId: string, id: string): Promise<boolean>;
+  /** 本人の結び付き（新しい順）。 */
+  listBindingsOfUser(tenantId: string, userId: string): Promise<BindingRecord[]>;
+  /** アプリが入れた記録の控えを足す。 */
+  addRef(tenantId: string, appId: string, kind: AppRefKind, ref: string, at: string): Promise<void>;
+  /** アプリが入れた記録か。 */
+  hasRef(tenantId: string, appId: string, kind: AppRefKind, ref: string): Promise<boolean>;
 }
 
 interface AppRow {
@@ -61,6 +102,12 @@ interface AppRow {
 
 const iso = (v: unknown): string => (v instanceof Date ? v.toISOString() : String(v));
 const isoOrNull = (v: unknown): string | null => (v === null || v === undefined ? null : iso(v));
+
+interface BindingRow { id: string; app_id: string; user_id: string; binding_hash: string; created_at: unknown; last_used_at: unknown }
+
+const toBinding = (r: BindingRow): BindingRecord => ({
+  id: r.id, appId: r.app_id, userId: r.user_id, bindingHash: r.binding_hash, createdAt: iso(r.created_at), lastUsedAt: isoOrNull(r.last_used_at),
+});
 
 const toApp = (r: AppRow): AppRecord => ({
   id: r.id, name: r.name, keyHash: r.key_hash, status: r.status, functions: r.functions ?? [], settings: r.settings ?? {}, catalogRemoved: r.catalog_removed ?? [],
@@ -182,6 +229,60 @@ export class PostgresAppStore implements AppStore {
     await this.q(tenantId, 'update ext_app_events set response = $5 where tenant_id = $1 and app_id = $2 and kind = $3 and event_ref = $4',
       [tenantId, appId, kind, eventRef, JSON.stringify(response)]);
   }
+
+  async putLinkRequest(tenantId: string, appId: string, r: LinkRequestRecord): Promise<void> {
+    await this.q(tenantId,
+      `insert into ext_app_link_requests (tenant_id, app_id, user_id, code_hash, attempts, expires_at, created_at) values ($1,$2,$3,$4,$5,$6,$7)
+       on conflict (tenant_id, app_id, user_id) do update set code_hash = excluded.code_hash, attempts = excluded.attempts, expires_at = excluded.expires_at, created_at = excluded.created_at`,
+      [tenantId, appId, r.userId, r.codeHash, r.attempts, r.expiresAt, r.createdAt]);
+  }
+
+  async getLinkRequest(tenantId: string, appId: string, userId: string): Promise<LinkRequestRecord | null> {
+    const [r] = await this.q<{ user_id: string; code_hash: string; attempts: number; expires_at: unknown; created_at: unknown }>(tenantId,
+      'select * from ext_app_link_requests where tenant_id = $1 and app_id = $2 and user_id = $3', [tenantId, appId, userId]);
+    return r ? { userId: r.user_id, codeHash: r.code_hash, attempts: r.attempts, expiresAt: iso(r.expires_at), createdAt: iso(r.created_at) } : null;
+  }
+
+  async bumpLinkAttempt(tenantId: string, appId: string, userId: string): Promise<number> {
+    const [r] = await this.q<{ attempts: number }>(tenantId,
+      'update ext_app_link_requests set attempts = attempts + 1 where tenant_id = $1 and app_id = $2 and user_id = $3 returning attempts', [tenantId, appId, userId]);
+    return r?.attempts ?? Number.MAX_SAFE_INTEGER;
+  }
+
+  async deleteLinkRequest(tenantId: string, appId: string, userId: string): Promise<void> {
+    await this.q(tenantId, 'delete from ext_app_link_requests where tenant_id = $1 and app_id = $2 and user_id = $3', [tenantId, appId, userId]);
+  }
+
+  async createBinding(tenantId: string, b: BindingRecord): Promise<void> {
+    await this.q(tenantId,
+      'insert into ext_app_bindings (id, tenant_id, app_id, user_id, binding_hash, created_at, last_used_at) values ($1,$2,$3,$4,$5,$6,$7)',
+      [b.id, tenantId, b.appId, b.userId, b.bindingHash, b.createdAt, b.lastUsedAt]);
+  }
+
+  async findBinding(tenantId: string, appId: string, bindingHash: string): Promise<BindingRecord | null> {
+    const [r] = await this.q<BindingRow>(tenantId, 'select * from ext_app_bindings where tenant_id = $1 and app_id = $2 and binding_hash = $3', [tenantId, appId, bindingHash]);
+    return r ? toBinding(r) : null;
+  }
+
+  async touchBinding(tenantId: string, id: string, at: string): Promise<void> {
+    await this.q(tenantId, 'update ext_app_bindings set last_used_at = $3 where tenant_id = $1 and id = $2', [tenantId, id, at]);
+  }
+
+  async deleteBinding(tenantId: string, id: string): Promise<boolean> {
+    return (await this.q(tenantId, 'delete from ext_app_bindings where tenant_id = $1 and id = $2 returning id', [tenantId, id])).length === 1;
+  }
+
+  async listBindingsOfUser(tenantId: string, userId: string): Promise<BindingRecord[]> {
+    return (await this.q<BindingRow>(tenantId, 'select * from ext_app_bindings where tenant_id = $1 and user_id = $2 order by created_at desc', [tenantId, userId])).map(toBinding);
+  }
+
+  async addRef(tenantId: string, appId: string, kind: AppRefKind, ref: string, at: string): Promise<void> {
+    await this.q(tenantId, 'insert into ext_app_refs (tenant_id, app_id, kind, ref, created_at) values ($1,$2,$3,$4,$5) on conflict do nothing', [tenantId, appId, kind, ref, at]);
+  }
+
+  async hasRef(tenantId: string, appId: string, kind: AppRefKind, ref: string): Promise<boolean> {
+    return (await this.q(tenantId, 'select 1 from ext_app_refs where tenant_id = $1 and app_id = $2 and kind = $3 and ref = $4', [tenantId, appId, kind, ref])).length === 1;
+  }
 }
 
 /** メモリのアプリの置き場（試験用）。 */
@@ -260,5 +361,62 @@ export class MemoryAppStore implements AppStore {
   async finishEvent(tenantId: string, appId: string, kind: string, eventRef: string, response: unknown): Promise<void> {
     const e = this.events.get(this.key(tenantId, appId, kind, eventRef));
     if (e) e.response = structuredClone(response);
+  }
+  readonly linkRequests = new Map<string, LinkRequestRecord>();
+  readonly bindings = new Map<string, BindingRecord & { tenantId: string }>();
+  readonly refs = new Set<string>();
+
+  async putLinkRequest(tenantId: string, appId: string, r: LinkRequestRecord): Promise<void> {
+    this.linkRequests.set([tenantId, appId, r.userId].join('\u0000'), { ...r });
+  }
+
+  async getLinkRequest(tenantId: string, appId: string, userId: string): Promise<LinkRequestRecord | null> {
+    const r = this.linkRequests.get([tenantId, appId, userId].join('\u0000'));
+    return r ? { ...r } : null;
+  }
+
+  async bumpLinkAttempt(tenantId: string, appId: string, userId: string): Promise<number> {
+    const r = this.linkRequests.get([tenantId, appId, userId].join('\u0000'));
+    if (!r) return Number.MAX_SAFE_INTEGER;
+    r.attempts += 1;
+    return r.attempts;
+  }
+
+  async deleteLinkRequest(tenantId: string, appId: string, userId: string): Promise<void> {
+    this.linkRequests.delete([tenantId, appId, userId].join('\u0000'));
+  }
+
+  async createBinding(tenantId: string, b: BindingRecord): Promise<void> {
+    this.bindings.set(b.id, { ...b, tenantId });
+  }
+
+  async findBinding(tenantId: string, appId: string, bindingHash: string): Promise<BindingRecord | null> {
+    const b = [...this.bindings.values()].find((x) => x.tenantId === tenantId && x.appId === appId && x.bindingHash === bindingHash && this.apps.has(x.appId));
+    if (!b) return null;
+    const { tenantId: _t, ...rest } = b;
+    return { ...rest };
+  }
+
+  async touchBinding(tenantId: string, id: string, at: string): Promise<void> {
+    const b = this.bindings.get(id);
+    if (b && b.tenantId === tenantId) b.lastUsedAt = at;
+  }
+
+  async deleteBinding(tenantId: string, id: string): Promise<boolean> {
+    if (this.bindings.get(id)?.tenantId !== tenantId) return false;
+    return this.bindings.delete(id);
+  }
+
+  async listBindingsOfUser(tenantId: string, userId: string): Promise<BindingRecord[]> {
+    return [...this.bindings.values()].filter((b) => b.tenantId === tenantId && b.userId === userId && this.apps.has(b.appId))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(({ tenantId: _t, ...b }) => ({ ...b }));
+  }
+
+  async addRef(tenantId: string, appId: string, kind: AppRefKind, ref: string): Promise<void> {
+    this.refs.add([tenantId, appId, kind, ref].join('\u0000'));
+  }
+
+  async hasRef(tenantId: string, appId: string, kind: AppRefKind, ref: string): Promise<boolean> {
+    return this.refs.has([tenantId, appId, kind, ref].join('\u0000'));
   }
 }

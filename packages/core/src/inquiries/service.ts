@@ -716,6 +716,73 @@ export class InquiryService {
   }
 
   /**
+   * 外部のアプリ（Web のフォームなど）から、項目に分けた問い合わせを受ける（機能 `inquiries.intake`。第13.4.2節）。経路は「Web のフォーム」。
+   *
+   * @param actor 受けた人として残す名前（`app:<アプリ>`）
+   * @param owner 次にやることを割り当てる人（窓口のアカウントを預けた人。いなければアプリを承認した管理者）
+   * @returns 新しく作ったか、同じお客様の対応中の問い合わせに足したか
+   * @remarks メールの取り込みと同じ読み方で、用件の要約と次にやることを作る（要配慮個人情報とカードの番号・口座・パスワードは残さない）。
+   * 同じメールアドレス（なければ 9 桁以上の同じ電話）の対応中の問い合わせがあれば続きにする。名前だけでは続きにしない。返事は送らない
+   */
+  async intakeFromApp(
+    tenantId: string, actor: string, owner: string,
+    input: { from: InquiryParty; subject: string; body: string; receivedAt: string },
+  ): Promise<{ kind: 'created' | 'appended'; inquiryId: string }> {
+    const { store } = this.deps;
+    const pseudo: MailItem = {
+      id: `app-${randomUUID()}`, threadId: '', from: input.from.email ? `${input.from.name} <${input.from.email}>` : input.from.name, fromName: input.from.name,
+      fromAddress: input.from.email, replyAddress: input.from.email, to: [], subject: input.subject, date: input.receivedAt, messageIdHeader: '', references: '',
+      body: [input.from.company && `会社: ${input.from.company}`, input.from.phone && `電話: ${input.from.phone}`, input.body].filter(Boolean).join('\n'), bulk: false,
+    };
+    const llm = await this.deps.llmFor(tenantId).catch(() => null);
+    const reading = await readMail(llm, pseudo, { date: dateIn('Asia/Tokyo', new Date(input.receivedAt)) }, '', true);
+    // 送られてきた項目を先に使い、無いものだけ読んだものから補う
+    const from: InquiryParty = {
+      name: input.from.name || reading.from.name, company: input.from.company || reading.from.company,
+      phone: input.from.phone || reading.from.phone, email: input.from.email || reading.from.email,
+    };
+    const sensitive = reading.sensitive || hasSensitive(input.body) || hasSensitive(input.subject);
+    const raw = [input.subject, input.body].filter(Boolean).join('\n');
+    const body = sensitive ? null : stripSensitive(raw).text || null;
+    const digits = (v: string) => v.replace(/\D/g, '');
+    const open = await store.list(tenantId, { status: 'open', limit: 100 });
+    const target = open.find((o) => (from.email && o.from.email && o.from.email.toLowerCase() === from.email.toLowerCase())
+      || (!from.email && digits(from.phone).length >= 9 && digits(o.from.phone) === digits(from.phone)));
+    if (target) {
+      await store.addEvent(tenantId, target.id, { direction: 'in', channel: 'form', summary: reading.summary, body, createdBy: actor, at: input.receivedAt });
+      if (!target.nextTask) {
+        await store.addTask(tenantId, target.id, { assignee: owner, what: reading.task?.what ?? '返事をする', due: reading.task?.due ?? null, createdBy: actor });
+      }
+      const merged: InquiryParty = {
+        name: target.from.name || from.name, company: target.from.company || from.company, phone: target.from.phone || from.phone, email: target.from.email || from.email,
+      };
+      await store.update(tenantId, target.id, { from: merged, lastAt: input.receivedAt, status: 'open', idleNotifiedAt: null });
+      await this.auditApp(tenantId, actor, 'inquiry.app_append', target.id, { channel: 'form', sensitiveRemoved: sensitive });
+      return { kind: 'appended', inquiryId: target.id };
+    }
+    const linked = from.name || from.email || from.phone
+      ? await this.deps.contacts?.link({ tenantId, userId: owner }, from).catch(() => null) ?? null
+      : null;
+    const id = await store.create(tenantId, {
+      from, contactId: linked?.contactId ?? null, channel: 'form', category: reading.category, summary: reading.summary,
+      source: reading.source || INQUIRY_SOURCE_UNKNOWN, temperature: reading.temperature, receivedBy: actor, createdBy: actor,
+    });
+    await store.update(tenantId, id, { lastAt: input.receivedAt });
+    const eventId = await store.addEvent(tenantId, id, { direction: 'in', channel: 'form', summary: reading.summary, body, createdBy: actor, at: input.receivedAt });
+    await store.addTask(tenantId, id, { assignee: owner, what: reading.task?.what ?? '返事をする', due: reading.task?.due ?? null, createdBy: actor, eventId });
+    await this.auditApp(tenantId, actor, 'inquiry.app_create', id, { channel: 'form', sensitiveRemoved: sensitive, contactCreated: !!linked?.created });
+    await this.closureReply(tenantId, id, owner, input.receivedAt);
+    return { kind: 'created', inquiryId: id };
+  }
+
+  /** 外部のアプリが行ったことを監査ログに残す（お客様の名前と用件は入れない）。 */
+  private async auditApp(tenantId: string, actor: string, action: string, id: string, detail: Record<string, unknown>): Promise<void> {
+    await this.deps.repo.appendAudit({
+      id: randomUUID(), tenantId, actorType: 'api_client', actorId: actor, action, targetType: 'inquiry', targetId: id, detail, occurredAt: new Date().toISOString(),
+    });
+  }
+
+  /**
    * 会話の履歴のメールの中身を、窓口のアカウントから読む（本文は M2Office に写していない）。
    *
    * @returns 読めなければ理由

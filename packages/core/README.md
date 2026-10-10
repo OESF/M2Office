@@ -114,8 +114,9 @@ src/web-review/  Webの分析（内蔵の拡張。第34章の段 1・段 2）。
                  月の便りと知らせ・直すべき所の見回り・ワーカーの tick）、直すべき所（findings.ts。6 つの種類の基準・依頼文の下書き・案の推論）、
                  コラムとのつなぎ（columns.ts。公開されたコラムの URL を WordPress から読む）、
                  ツール（tools.ts。web_review.report・ask・status・select・findings・request_send）、付属の業務（agents.ts。Web について聞く・Web の依頼文を送る）
-src/apps/        外部のアプリ（第13.4.1節）。アプリの置き場（PostgreSQL とメモリ）、登録・承認・鍵（m2oa_。ハッシュだけを持つ）・停止・削除、
-                 機能ごとの道（appFunctionFor）・回数の上限・呼び出しの数・書き込みの通知を二重に数えない番号（service.ts）
+src/apps/        外部のアプリ（第13.4.1節・第13.4.2節）。アプリの置き場（PostgreSQL とメモリ）、登録・承認（機能ごとの設定の確かめ）・鍵（m2oa_。
+                 ハッシュだけを持つ）・停止・削除、機能ごとの道（appFunctionFor）・回数の上限・呼び出しの数・書き込みの通知を二重に数えない番号
+                 （service.ts）、アカウントの結び付け（確認コード・結び付きの ID。links.ts）、ナレッジの検索（本人の区画だけ。knowledge.ts）
 src/inventory/   在庫管理（内蔵の拡張。第29章）。置き場（入出庫の記録と同じトランザクションでいまの数を直す。PostgreSQL とメモリ）、
                  バーコードの読み方（gs1.ts。GS1・JAN・UPC）、品目・場所・入出庫・使用期限の近いロットから減らす・取り消し・
                  棚卸し（会社で 1 つ・数えた時点の帳簿と比べる・確定で差を調整に）・取り込みと書き出し（service.ts）、

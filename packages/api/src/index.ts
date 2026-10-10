@@ -246,6 +246,9 @@ app.route('/v1/me/hr', hrSelfRoute(deps));
 app.route('/v1/me/connections', myConnectionsRoute(deps, returnTo));
 app.route('/v1/me/canva', myCanvaRoute(deps, returnTo));
 app.route('/v1/me', meRoute(deps));
+// 外部のアプリの機能の道（第13.4.1節・第13.4.2節）。画面の道より先に置く（業務の依頼・お知らせ・予約・在庫などは、同じ道をアプリの鍵でも呼ぶ。
+// アプリの鍵でなければ画面の道へ回す）
+app.route('/v1', appFunctionsRoute(deps));
 app.route('/v1/agents', agentsRoute(deps));
 app.route('/v1/jobs', jobsRoute(deps));
 app.route('/v1/runs', runsRoute(deps));
@@ -254,8 +257,6 @@ app.route('/v1/secretary', secretaryRoute(deps));
 app.route('/v1/notifications', notificationsRoute(deps));
 app.route('/v1/schedules', schedulesRoute(deps));
 app.route('/v1/cards', cardsRoute(deps));
-// 外部のアプリの機能の道（第13.4.1節）。在庫管理の道より先に置く（同じ /v1/inventory の下に、アプリの鍵で呼ぶ道がある）
-app.route('/v1', appFunctionsRoute(deps));
 app.route('/v1/inventory', inventoryRoute(deps));
 app.route('/v1/columns', columnsRoute(deps));
 app.route('/v1/inquiries', inquiriesRoute(deps));

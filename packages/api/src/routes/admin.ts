@@ -860,9 +860,10 @@ function auditQuery(p: Record<string, string>): AuditQuery {
  * @remarks 実行は、対象か根拠の `runId` に出てくるものだけを引く。引けないものは `undefined`（記録の値のまま出す）
  */
 async function auditNames(deps: AppDeps, tenantId: string, events: AuditEvent[]): Promise<AuditNames> {
-  const [users, view, groups, compartments] = await Promise.all([
+  const [users, view, groups, compartments, apps] = await Promise.all([
     deps.repo.listUsers(tenantId), deps.tenantView(tenantId),
     deps.repo.listGroups(tenantId).catch(() => []), deps.repo.listCompartmentAssignments(tenantId).catch(() => []),
+    deps.apps.store.listApps(tenantId).catch(() => []),
   ]);
   const runIds = new Set<string>();
   for (const e of events) {
@@ -877,7 +878,8 @@ async function auditNames(deps: AppDeps, tenantId: string, events: AuditEvent[])
     if (job) runs.set(id, { agentName: agentDisplayName(view.allAgents.find((a) => a.id === job.agentId)?.name, job.agentId, job.agentName), requestedBy: job.requestedBy });
   }
   return {
-    user: (id) => users.find((u) => u.id === id)?.displayName,
+    // 外部のアプリ（`app:<アプリ>`）は「外部のアプリ（名前）」と出す（第13.4.1節）
+    user: (id) => (id.startsWith('app:') ? (() => { const a = apps.find((x) => `app:${x.id}` === id); return a ? `外部のアプリ（${a.name}）` : '外部のアプリ'; })() : users.find((u) => u.id === id)?.displayName),
     agent: (id) => view.allAgents.find((a) => a.id === id)?.name,
     connection: (id) => view.connections.find((x) => x.id === id)?.name,
     group: (id) => groups.find((g) => g.id === id)?.name,

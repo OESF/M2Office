@@ -426,6 +426,19 @@ export function meRoute(deps: AppDeps) {
     });
   });
 
+  /** 結び付いている外部のアプリ（個人設定の「サービスとの接続」。第6.5.9節・第11.12節）。 */
+  app.get('/app-links', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    return c.json({ items: await deps.appLinks.listForUser(tenant.id, user.id) });
+  });
+
+  /** 外部のアプリとの結び付きを本人が削除する。そのアプリの、本人として行う機能は 410 になる。 */
+  app.delete('/app-links/:id', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    if (!(await deps.appLinks.removeForUser(tenant.id, user.id, c.req.param('id')))) return c.json({ error: '結び付きが見つかりません' }, 404);
+    return c.json({ ok: true });
+  });
+
   return app;
 }
 

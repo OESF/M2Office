@@ -25,7 +25,7 @@ export {
 export { InventoryPublisher, buildPublicSnapshot, renderPublicPage, stockChanges, PUBLICATION_KEY, type InventoryPublisherDeps, type PublicationView, type StockChange, type StockChangeListener } from './publication.js';
 export { JanLookupService, JAN_CACHE_MS, type JanLookup, type JanLookupDeps } from './jan.js';
 export {
-  InventorySales, PostgresSalesStore, MemorySalesStore, parseSaleEvent, catalogScopeOf, SALES_PAYLOAD_MAX_BYTES, SALES_LINES_MAX,
-  type SalesStore, type SaleRecord, type UnmatchedRecord, type SalesItem, type SalesItemList, type SalesItemQuery, type SaleEventInput,
+  InventorySales, PostgresSalesStore, MemorySalesStore, parseSaleEvent, parseReceiptEvent, catalogScopeOf, SALES_PAYLOAD_MAX_BYTES, SALES_LINES_MAX,
+  type SalesStore, type SaleRecord, type ReceiptRecord, type UnmatchedRecord, type ReceiptEventInput, type ReceiptEventResult, type ReceiptLineResult, type SalesItem, type SalesItemList, type SalesItemQuery, type SaleEventInput,
   type SaleEventResult, type SaleLineResult, type HookResponse, type InventorySalesDeps,
 } from './sales.js';

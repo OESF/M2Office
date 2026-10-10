@@ -78,7 +78,9 @@ function toNotice(r: NoticeRow): Notice {
   };
 }
 
-const SELECT = `select n.*, u.display_name as author_name from notices n left join users u on u.id = n.author_id`;
+// 外部のアプリが出したお知らせは、出した人を「外部のアプリ（名前）」と出す（第13.4.2節）
+const SELECT = `select n.*, coalesce(u.display_name, case when n.author_id like 'app:%' then '外部のアプリ' || coalesce('（' || a.name || '）', '') end) as author_name
+  from notices n left join users u on u.id = n.author_id left join ext_apps a on n.author_id = 'app:' || a.id`;
 
 /**
  * PostgreSQL のお知らせの置き場。
