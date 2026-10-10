@@ -91,7 +91,7 @@ function AttendanceTab() {
       </div>
       {data.close && <p className="small muted">締めました（{data.close.closedAt.slice(0, 10)}）</p>}
       {error && <p className="error">{error}</p>}
-      <table className="table hr-table">
+      <div className="table-scroll"><table className="table hr-table">
         <thead><tr><th>氏名</th><th>出勤</th><th>労働</th><th>法定外</th><th>60 時間超</th><th>深夜</th><th>休日</th><th>有給</th><th>点検</th></tr></thead>
         <tbody>
           {data.rows.map((r) => (
@@ -111,7 +111,7 @@ function AttendanceTab() {
           ))}
           {data.rows.length === 0 && <tr><td colSpan={9} className="muted">この期間に在籍した人はいません</td></tr>}
         </tbody>
-      </table>
+      </table></div>
     </div>
   );
 }
@@ -132,7 +132,7 @@ function EmployeeAttendance({ employeeId, month, closed, onChanged }: { employee
   return (
     <div className="hr-days">
       {error && <p className="error small">{error}</p>}
-      <table className="table small">
+      <div className="table-scroll"><table className="table small">
         <thead><tr><th>日付</th><th>出勤</th><th>退勤</th><th>休憩</th><th>労働</th><th>法定外</th><th>深夜</th><th>点検</th><th /></tr></thead>
         <tbody>
           {data.days.map((d) => (
@@ -157,7 +157,7 @@ function EmployeeAttendance({ employeeId, month, closed, onChanged }: { employee
             )
           ))}
         </tbody>
-      </table>
+      </table></div>
     </div>
   );
 }
@@ -355,7 +355,7 @@ function RunPanel({ data, busy, act, setNote, onOpen, month, recalc, at, onChang
         </div>
       )}
       <div className="pay-table">
-        <table className="table hr-table">
+        <div className="table-scroll"><table className="table hr-table">
           <thead><tr><th>氏名</th><th>総支給</th><th>社会保険</th><th>雇用保険</th><th>所得税</th>{r.kind !== 'bonus' && <th>住民税</th>}<th>差引支給</th><th /></tr></thead>
           <tbody>
             {data.slips.map((s) => {
@@ -417,7 +417,7 @@ function RunPanel({ data, busy, act, setNote, onOpen, month, recalc, at, onChang
             })}
             {data.slips.length === 0 && <tr><td colSpan={8} className="muted">この回に計算する人はいません</td></tr>}
           </tbody>
-        </table>
+        </table></div>
       </div>
     </>
   );
@@ -517,7 +517,7 @@ function PayrollProfile({ employeeId }: { employeeId: string }) {
         <button className="btn small" onClick={() => act(() => api.hr.payroll.saveProfile(employeeId, {
           taxColumn: p.taxColumn, dependents: p.dependents, residentTax: rt.municipality || rt.june || rt.monthly ? [rt, ...p.residentTax.slice(1)] : p.residentTax.slice(1), commute: p.commute, bank: p.bank,
           insurance: p.insurance ?? {},
-        }), '保存できませんでした', '保存しました')}>保存する</button>
+        }), '保存できませんでした', '保存しました')}>保存</button>
         {note && <span className="small muted">{note}</span>}
       </div>
       {error && <p className="error small">{error}</p>}
@@ -568,7 +568,7 @@ function LeaveTab() {
         <button className="btn ghost small" onClick={() => void api.hr.leaveRegister().catch((e) => setError(describeError(e, '書き出せませんでした')))}>管理簿</button>
       </div>
       {error && <p className="error">{error}</p>}
-      <table className="table hr-table">
+      <div className="table-scroll"><table className="table hr-table">
         <thead><tr><th>氏名</th><th>残り</th><th>付与</th><th>取得義務</th><th /></tr></thead>
         <tbody>
           {rows.map((r) => (
@@ -622,7 +622,7 @@ function LeaveTab() {
           ))}
           {rows.length === 0 && <tr><td colSpan={5} className="muted">在籍している人はいません</td></tr>}
         </tbody>
-      </table>
+      </table></div>
     </div>
   );
 }
@@ -734,7 +734,7 @@ function EmployeeList({ onOpen }: { onOpen: (id: string) => void }) {
           <TaskList tasks={data.tasks.slice(0, 12)} onChanged={load} withName />
         </div>
       )}
-      <table className="table hr-table">
+      <div className="table-scroll"><table className="table hr-table">
         <thead><tr><th>氏名</th><th>雇用形態</th><th>所属</th><th>入社日</th><th>賃金</th><th /></tr></thead>
         <tbody>
           {shown.map((e) => (
@@ -756,7 +756,7 @@ function EmployeeList({ onOpen }: { onOpen: (id: string) => void }) {
           ))}
           {shown.length === 0 && <tr><td colSpan={6} className="muted">従業員はまだいません</td></tr>}
         </tbody>
-      </table>
+      </table></div>
       <label className="check small"><input type="checkbox" checked={showLeft} onChange={(e) => setShowLeft(e.target.checked)} /> 退職した人も出す</label>
     </div>
   );
@@ -886,7 +886,7 @@ function NewEmployee({ onSaved }: { onSaved: (id: string) => void }) {
       </div>
       <TermsFields t={t} set={(p) => setT({ ...t, ...p })} />
       <div className="row">
-        <button className="btn" disabled={!e.name?.trim()} onClick={save}>登録する</button>
+        <button className="btn" disabled={!e.name?.trim()} onClick={save}>登録</button>
       </div>
       {error && <p className="error small">{error}</p>}
     </div>
@@ -953,7 +953,7 @@ function EmployeeDetail({ id, onBack }: { id: string; onBack: () => void }) {
             name: draft.name, kana: draft.kana, code: draft.code, birthDate: draft.birthDate, gender: draft.gender, hiredOn: draft.hiredOn,
             employment: draft.employment, category: draft.category, department: draft.department, title: draft.title,
             address: draft.address, phone: draft.phone, email: draft.email, note: draft.note, userId: draft.userId ?? null,
-          }), '保存できませんでした', () => setSaved(true))}>保存する</button>
+          }), '保存できませんでした', () => setSaved(true))}>保存</button>
           {saved && <span className="small muted">保存しました</span>}
         </div>
       </div>
@@ -978,7 +978,7 @@ function EmployeeDetail({ id, onBack }: { id: string; onBack: () => void }) {
             </div>
           </>
         )}
-        <table className="table">
+        <div className="table-scroll"><table className="table">
           <thead><tr><th>適用日</th><th>賃金</th><th>手当</th><th>週</th><th>業務・場所</th><th>保険</th></tr></thead>
           <tbody>
             {d.terms.map((t) => (
@@ -992,7 +992,7 @@ function EmployeeDetail({ id, onBack }: { id: string; onBack: () => void }) {
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       </div>
 
       <TermsNotice employeeId={id} name={d.employee.name} />

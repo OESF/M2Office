@@ -56,7 +56,7 @@ function ShiftSettingsForm({ settings, onSaved }: { settings: HrShiftSettings; o
       <div className="row wrap small">
         <label className="check"><input type="checkbox" checked={s.variable} onChange={(e) => setS({ ...s, variable: e.target.checked })} /> 1 か月単位の変形労働時間制</label>
         {s.variable && <label className="check"><input type="checkbox" checked={s.special44} onChange={(e) => setS({ ...s, special44: e.target.checked })} /> 週 44 時間の特例</label>}
-        <button className="btn small" onClick={() => void api.hr.payroll.shiftSettings(s).then(() => { setError(null); onSaved(); }).catch((e) => setError(describeError(e, '保存できませんでした')))}>保存する</button>
+        <button className="btn small" onClick={() => void api.hr.payroll.shiftSettings(s).then(() => { setError(null); onSaved(); }).catch((e) => setError(describeError(e, '保存できませんでした')))}>保存</button>
       </div>
       {error && <p className="error small">{error}</p>}
     </details>
@@ -113,7 +113,7 @@ function WorkSystemsForm() {
       </div>
       <div className="row wrap small">
         <label className="check"><input type="checkbox" checked={v.terminal.pinAllowed} onChange={(e) => setV({ ...v, terminal: { pinAllowed: e.target.checked } })} /> 打刻の端末で、名前と番号でも打てる</label>
-        <button className="btn small" onClick={save}>保存する</button>
+        <button className="btn small" onClick={save}>保存</button>
       </div>
       <ul className="small">
         {v.terminals.map((t) => (

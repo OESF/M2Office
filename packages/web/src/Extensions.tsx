@@ -329,11 +329,10 @@ function Details({ item: x }: { item: ExtensionView; onChanged: () => void }) {
       )}
       {x.connectors.length > 0 && (
         <>
-          <h4>同梱の接続</h4>
+          <h4>同梱の接続 <HelpTip article="admin-extensions">導入すると会社の接続として登録されます。ツールの危険度と入り切りは「接続 › コネクタ（MCP）」で決めます。</HelpTip></h4>
           <ul className="small">
             {x.connectors.map((c) => <li key={c.id}>{c.name}（<code>{c.id}</code>）: <code>{c.url}</code></li>)}
           </ul>
-          <p className="muted small">導入すると会社の接続として登録されます。ツールの危険度と入り切りは「接続 › コネクタ（MCP）」で決めます。</p>
         </>
       )}
       {x.readme && (
@@ -1359,7 +1358,7 @@ function ProposalTable({ fields, onApply, onCancel, cancelLabel = 'キャンセ�
   const [chosen, setChosen] = useState<Set<string>>(() => new Set(fields.filter((x) => !x.problem && x.current !== x.proposed).map((x) => x.key)));
   return (
     <>
-      <table className="table small">
+      <div className="table-scroll"><table className="table small">
         <thead><tr><th /><th>項目</th><th>今</th><th>案</th><th>規程の文</th></tr></thead>
         <tbody>
           {fields.map((f) => (
@@ -1373,7 +1372,7 @@ function ProposalTable({ fields, onApply, onCancel, cancelLabel = 'キャンセ�
             </tr>
           ))}
         </tbody>
-      </table>
+      </table></div>
       <div className="row">
         <button className="btn small" disabled={chosen.size === 0} onClick={() => onApply(fields.filter((f) => chosen.has(f.key)))}>選んだ {chosen.size} 項目を入れる</button>
         <button className="btn ghost small" onClick={onCancel}>{cancelLabel}</button>

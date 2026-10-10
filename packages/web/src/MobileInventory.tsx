@@ -330,7 +330,7 @@ function CountFlow({ list, shelf, onShelf, userId }: {
         {canClose && view.uncounted > 0 && <p className="m-sub m-center">数えていない {view.uncounted} 件はそのままにします</p>}
         {canClose && <button className="m-primary" onClick={() => void close()}>確定する</button>}
         <button className="m-secondary" onClick={() => setShowDiff(false)}>数える画面へ</button>
-        {canClose && <button className="m-link danger" onClick={() => void cancel()}>やめる</button>}
+        {canClose && <button className="m-link danger" onClick={() => void cancel()}>キャンセル</button>}
         {note && <p className="m-note">{note}</p>}
       </div>
     );

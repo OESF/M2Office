@@ -61,7 +61,7 @@ export function LaborTab() {
       {data.tables.some((t) => !t.reviewed) && <p className="small muted">{data.tables.map((t) => t.version).join('・')}（監修前）</p>}
 
       <div className="pay-table">
-        <table className="table hr-table social-table">
+        <div className="table-scroll"><table className="table hr-table social-table">
           <thead><tr><th>月</th><th>労災 人数</th><th>労災 賃金</th><th>雇用 人数</th><th>雇用 賃金</th><th /></tr></thead>
           <tbody>
             {data.months.map((m) => (
@@ -81,11 +81,11 @@ export function LaborTab() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       </div>
       <div className="row wrap hr-toolbar">
         <label className="small">前の年に申告した概算保険料 <input className="num-input" type="number" min={0} value={declared} onChange={(e) => setDeclared(e.target.value)} /> 円</label>
-        {(manualKeys.length > 0 || String(data.data.declaredEstimate ?? '') !== declared) && <button className="btn small" disabled={busy} onClick={save}>保存する</button>}
+        {(manualKeys.length > 0 || String(data.data.declaredEstimate ?? '') !== declared) && <button className="btn small" disabled={busy} onClick={save}>保存</button>}
       </div>
 
       {r && (

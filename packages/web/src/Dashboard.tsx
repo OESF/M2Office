@@ -574,7 +574,7 @@ function Stats() {
 
           <section className="card">
             <h3>業務ごとの状況</h3>
-            <table className="table">
+            <div className="table-scroll"><table className="table">
               <thead>
                 <tr>
                   <th>業務</th><th className="num">実行</th><th className="num">成功率</th>
@@ -599,7 +599,7 @@ function Stats() {
                   );
                 })}
               </tbody>
-            </table>
+            </table></div>
           </section>
 
           <div className="dash-grid three">

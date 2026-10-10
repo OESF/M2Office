@@ -136,7 +136,7 @@ function InquiryList({ onOpen, changeKey, onColumn }: { onOpen: (id: string) => 
           {candidates.map((c) => (
             <div key={c.id} className="row">
               <span>{whoOf(c)}・{c.summary.slice(0, 40)}</span>
-              <button className="btn ghost small" disabled={busy} onClick={() => void appendTo(c.id)}>この問い合わせに足す</button>
+              <button className="btn ghost small" disabled={busy} onClick={() => void appendTo(c.id)}>この問い合わせに追加</button>
             </div>
           ))}
           <button className="btn ghost small" onClick={() => setCandidates(null)}>キャンセル</button>
@@ -168,7 +168,7 @@ function InquiryList({ onOpen, changeKey, onColumn }: { onOpen: (id: string) => 
       {error && <p className="error">{error}</p>}
       {items && items.length === 0 && <p className="muted">{q || channel || category || assignee ? '見つかりません。' : status === 'open' ? '対応中の問い合わせはありません。' : 'まだ問い合わせがありません。'}</p>}
       {items && items.length > 0 && (
-        <table className="table inquiries-list">
+        <div className="table-scroll"><table className="table inquiries-list">
           <thead><tr><th>次にやること</th><th>誰から</th><th>経路</th><th>用件</th><th>担当</th><th>状態</th><th>最後</th></tr></thead>
           <tbody>
             {items.map((i) => {
@@ -188,7 +188,7 @@ function InquiryList({ onOpen, changeKey, onColumn }: { onOpen: (id: string) => 
               );
             })}
           </tbody>
-        </table>
+        </table></div>
       )}
     </div>
   );
@@ -296,7 +296,7 @@ function InquiryView({ id, onBack, onContact, onOpen, changeKey, admin, members,
         <input value={taskWhat} maxLength={120} placeholder="見積もりを送る" aria-label="次にやること" onChange={(e) => setTaskWhat(e.target.value)} />
         <input type="date" value={taskDue} aria-label="期限" onChange={(e) => setTaskDue(e.target.value)} />
         <button className="btn ghost small" disabled={busy || !taskWhat.trim()}
-          onClick={() => void act(() => api.inquiries.addTask(i.id, { what: taskWhat.trim(), due: taskDue || null }).then(() => { setTaskWhat(''); setTaskDue(''); }), '足しました', '足せませんでした')}>足す</button>
+          onClick={() => void act(() => api.inquiries.addTask(i.id, { what: taskWhat.trim(), due: taskDue || null }).then(() => { setTaskWhat(''); setTaskDue(''); }), '足しました', '足せませんでした')}>追加</button>
       </div>
 
       <h3>会話の履歴</h3>
@@ -333,7 +333,7 @@ function InquiryView({ id, onBack, onContact, onOpen, changeKey, admin, members,
             void act(async () => { const r = await api.inquiries.append(i.id, more.trim()); setMore(''); return r; }, '足しました', '足せませんでした');
           } }} />
         <button className="btn ghost" disabled={busy || !more.trim()}
-          onClick={() => void act(async () => { const r = await api.inquiries.append(i.id, more.trim()); setMore(''); return r; }, '足しました', '足せませんでした')}>続きを足す</button>
+          onClick={() => void act(async () => { const r = await api.inquiries.append(i.id, more.trim()); setMore(''); return r; }, '足しました', '足せませんでした')}>続きを追加</button>
       </div>
 
       <Replies inquiryId={i.id} replies={d.replies} onChanged={load} />
@@ -478,7 +478,7 @@ function SkippedMails({ onOpen, onChanged }: { onOpen: (id: string) => void; onC
       <NoteText note={note} />
       {items && items.length === 0 && <p className="muted small">ありません。</p>}
       {items && items.length > 0 && (
-        <table className="table small">
+        <div className="table-scroll"><table className="table small">
           <thead><tr><th>届いた</th><th>差出人</th><th>件名</th><th>見分けた理由</th><th /></tr></thead>
           <tbody>
             {items.map((m) => (
@@ -488,7 +488,7 @@ function SkippedMails({ onOpen, onChanged }: { onOpen: (id: string) => void; onC
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       )}
     </div>
   );

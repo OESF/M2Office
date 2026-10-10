@@ -108,7 +108,7 @@ export function MyAttendance() {
           {t.flex.carriedMinutes > 0 && <span>前の期間から {hm(t.flex.carriedMinutes)}</span>}
         </div>
       )}
-      <table className="table myhr-days">
+      <div className="table-scroll"><table className="table myhr-days">
         <thead><tr><th>日付</th><th>出勤</th><th>退勤</th><th>休憩</th><th>労働</th><th>法定外</th><th /></tr></thead>
         <tbody>
           {v.days.filter((d) => d.date <= v.today).reverse().map((d) => (
@@ -140,7 +140,7 @@ export function MyAttendance() {
             )
           ))}
         </tbody>
-      </table>
+      </table></div>
     </div>
   );
 }
@@ -292,7 +292,7 @@ function MyYearEnd() {
           <input ref={cert} type="file" accept="image/*,application/pdf" capture="environment" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) read(f); }} />
           {v.canEdit && (
             <div className="row">
-              <button className="btn ghost small" onClick={() => save(false)}>保存する</button>
+              <button className="btn ghost small" onClick={() => save(false)}>保存</button>
               <button className="btn small" onClick={() => save(true)}>出す</button>
             </div>
           )}

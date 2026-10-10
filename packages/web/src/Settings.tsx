@@ -17,6 +17,7 @@ import { SecretaryAvatar } from './nav.js';
 import { KEY_BINDINGS, isTouchOnly, keyLabel } from './keys.js';
 import { SaveButton } from './save.js';
 import { SortableList } from './Sortable.js';
+import { HelpTip } from './help.js';
 import { playSample } from './voice.js';
 
 /** 通知の種類（個人設定で切れるもの）。 */
@@ -276,8 +277,7 @@ export function Settings({ me, agents, onChanged, section }: {
           <button className="btn ghost small" onClick={() => set('notifications', { quietHours: null })}>指定しない</button>
         </div>
 
-        <h4>受け取り方</h4>
-        <p className="muted small">Chat には題名とリンクのみ（本文なし）。Chat への送信は準備中で、まだ届きません</p>
+        <h4>受け取り方 <HelpTip article="start-settings">Chat には題名とリンクのみ（本文なし）。Chat への送信は準備中で、まだ届きません</HelpTip></h4>
         <label className="check">
           <input type="checkbox" checked={s.notifications.channels.chat}
             onChange={(e) => set('notifications', { channels: { chat: e.target.checked } })} />
@@ -725,7 +725,7 @@ function ServicesSettings() {
 
   const disconnect = async (c: MyConnectionView) => {
     const impact = await api.connectionImpact(c.id).catch(() => null);
-    const lines = [`${c.name}との接続を取り消しますか。`];
+    const lines = [`${c.name}を切断しますか。`];
     if (impact === null) lines.push('', '止まる業務を確かめられませんでした。');
     else {
       if (impact.agents.length > 0) lines.push('', '次の業務が使えなくなります:', ...impact.agents.map((a) => `・${a.name}`));
@@ -737,7 +737,7 @@ function ServicesSettings() {
     setMsg(null);
     try {
       const r = await api.disconnectConnection(c.id);
-      setMsg({ ok: true, text: r.stopped > 0 ? `接続を取り消し、業務 ${r.stopped} 件を止めました` : '接続を取り消しました' });
+      setMsg({ ok: true, text: r.stopped > 0 ? `切断し、業務 ${r.stopped} 件を止めました` : '切断しました' });
       await load();
     } catch (e) {
       setMsg({ ok: false, text: describeError(e) });
@@ -769,7 +769,7 @@ function ServicesSettings() {
                 <button className="btn" disabled={busy === c.id} onClick={() => void connect(c)}>
                   {c.connected ? '接続し直す' : `${c.name}と接続する`}
                 </button>
-                {c.connected && <button className="btn danger" disabled={busy === c.id} onClick={() => void disconnect(c)}>接続を取り消す</button>}
+                {c.connected && <button className="btn danger" disabled={busy === c.id} onClick={() => void disconnect(c)}>切断</button>}
               </div>
             </>
           )}
@@ -885,7 +885,7 @@ function GoogleSettings() {
                 <button className="btn danger" disabled={busy} onClick={() => void (async () => {
                   // 取り消す前に、止まる業務と飛ばす定時実行を示して確かめる（仕様書 第6.5.2.1節）
                   const impact = await api.googleImpact().catch(() => null);
-                  const lines = ['Google との接続を取り消しますか。許可はまとめて取り消されます。メールや予定を扱う業務が使えなくなります。'];
+                  const lines = ['Google を切断しますか。許可はまとめて取り消されます。メールや予定を扱う業務が使えなくなります。'];
                   if (impact === null) lines.push('', '止まる業務を確かめられませんでした。');
                   else {
                     if (impact.runs.length > 0) lines.push('', `次の ${impact.runs.length} 件の業務が止まります:`, ...impact.runs.map((r) => `・${r.agentName}（${statusLabel(r.status)}）`));
@@ -894,8 +894,8 @@ function GoogleSettings() {
                   lines.push('', '業務が読んだメールや文書の中身も、すぐに消します。一部の許可だけを外したいときは、取り消してから、必要な許可だけで接続し直してください。');
                   if (!confirm(lines.join('\n'))) return;
                   await act(() => api.disconnectGoogle(),
-                    (r) => (r.stoppedRuns > 0 ? `接続を取り消し、業務 ${r.stoppedRuns} 件を止めました` : '接続を取り消しました'));
-                })()}>接続を取り消す</button>
+                    (r) => (r.stoppedRuns > 0 ? `切断し、業務 ${r.stoppedRuns} 件を止めました` : '切断しました'));
+                })()}>切断</button>
               </>
             )}
           </div>

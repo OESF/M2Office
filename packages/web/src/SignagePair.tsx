@@ -42,7 +42,7 @@ export function SignagePair({ me }: { me: Me }) {
       {admin && !screen && (
         <div className="signage-pair-body">
           <p className="signage-pair-code">{code.replace(/^(\d{3})(\d{3})$/, '$1 $2')}</p>
-          <button className="btn m-big" disabled={busy || !/^\d{6}$/.test(code)} onClick={claim}>登録する</button>
+          <button className="btn m-big" disabled={busy || !/^\d{6}$/.test(code)} onClick={claim}>登録</button>
         </div>
       )}
       {screen && (

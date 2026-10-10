@@ -164,7 +164,7 @@ export function SuppliersPanel() {
         <input className="grow" placeholder={placeholder} value={draft.contact ?? ''} onChange={(e) => setDraft({ ...draft, contact: e.target.value })} aria-label="連絡先" />
         <input className="num-input" type="number" min={0} placeholder="日数" value={draft.leadDays ?? ''} aria-label="仕入れにかかる日数"
           onChange={(e) => setDraft({ ...draft, leadDays: e.target.value === '' ? null : Number(e.target.value) })} />
-        <button className="btn small" disabled={!draft.name?.trim()} onClick={() => void save()}>{draft.id ? '保存' : '足す'}</button>
+        <button className="btn small" disabled={!draft.name?.trim()} onClick={() => void save()}>{draft.id ? '保存' : '追加'}</button>
         {draft.id && <button className="btn ghost small" onClick={() => setDraft({ method: 'mail' })}>キャンセル</button>}
       </div>
       {error && <p className="error small">{error}</p>}

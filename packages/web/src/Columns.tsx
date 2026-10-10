@@ -203,7 +203,7 @@ function ColumnList({ onOpen }: { onOpen: (id: string) => void }) {
       {error && <p className="error">{error}</p>}
       {columns && columns.length === 0 && !writing && <p className="muted">まだコラムがありません。</p>}
       {columns && columns.length > 0 && !writing && (
-        <table className="table columns-list">
+        <div className="table-scroll"><table className="table columns-list">
           <thead><tr><th>題名</th><th>状態</th><th>指摘</th><th>書いた人</th><th>更新</th></tr></thead>
           <tbody>
             {columns.map((c) => (
@@ -216,7 +216,7 @@ function ColumnList({ onOpen }: { onOpen: (id: string) => void }) {
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       )}
     </div>
   );

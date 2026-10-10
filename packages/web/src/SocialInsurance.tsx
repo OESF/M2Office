@@ -70,7 +70,7 @@ export function SocialTab() {
         {changesToFile.length > 0 && <button className="btn small" disabled={busy} onClick={() => report('change', '月額変更届')}>月額変更届の下書き（{changesToFile.length} 人）</button>}
       </div>
       {data.changes.length === 0 ? <p className="muted small">候補はありません</p> : (
-        <div className="pay-table"><table className="table hr-table social-table">
+        <div className="pay-table"><div className="table-scroll"><table className="table hr-table social-table">
           <thead><tr><th>氏名</th><th>改定</th><th>3 か月</th><th>修正平均</th><th>標準報酬月額（等級）</th><th /></tr></thead>
           <tbody>
             {data.changes.map((d) => (
@@ -84,7 +84,7 @@ export function SocialTab() {
               </tr>
             ))}
           </tbody>
-        </table></div>
+        </table></div></div>
       )}
 
       <div className="row wrap hr-toolbar">
@@ -92,7 +92,7 @@ export function SocialTab() {
         {eventKinds.map((k) => <button key={k} className="btn small" disabled={busy} onClick={() => report(k, HR_FILING_LABELS[k])}>{HR_FILING_LABELS[k]}の下書き</button>)}
       </div>
       {data.events.length === 0 ? <p className="muted small">前後 60 日の届出はありません</p> : (
-        <div className="pay-table"><table className="table hr-table social-table">
+        <div className="pay-table"><div className="table-scroll"><table className="table hr-table social-table">
           <thead><tr><th>氏名</th><th>届出</th><th>日</th><th>期限</th><th>標準報酬月額</th><th /></tr></thead>
           <tbody>
             {data.events.map((x: SocialEvent) => (
@@ -109,7 +109,7 @@ export function SocialTab() {
               </tr>
             ))}
           </tbody>
-        </table></div>
+        </table></div></div>
       )}
 
       <div className="row wrap hr-toolbar">
@@ -121,7 +121,7 @@ export function SocialTab() {
         {data.regular.some((d) => !d.excluded && d.after) && <button className="btn small" disabled={busy} onClick={() => report('regular', `算定基礎届 ${year}`)}>算定基礎届の下書き</button>}
       </div>
       {data.regular.length === 0 ? <p className="muted small">対象の人はいません</p> : (
-        <div className="pay-table"><table className="table hr-table social-table">
+        <div className="pay-table"><div className="table-scroll"><table className="table hr-table social-table">
           <thead><tr><th>氏名</th><th>4〜6 月</th><th>修正平均</th><th>9 月からの標準報酬月額（等級）</th><th /></tr></thead>
           <tbody>
             {data.regular.map((d) => (
@@ -134,7 +134,7 @@ export function SocialTab() {
               </tr>
             ))}
           </tbody>
-        </table></div>
+        </table></div></div>
       )}
 
       <div className="row wrap hr-toolbar">

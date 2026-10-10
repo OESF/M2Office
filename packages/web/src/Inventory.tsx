@@ -218,7 +218,7 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
       )}
       {!working && list && list.items.length === 0 && <p className="muted">{q ? '見つかりませんでした' : '品目はまだありません'}</p>}
       {!working && list && list.items.length > 0 && (
-        <table className="table inventory-table">
+        <div className="table-scroll"><table className="table inventory-table">
           <thead>
             <tr><th>品名</th><th className="num">使える数</th><th className="num onhand">在庫</th><th>期限</th><th /></tr>
           </thead>
@@ -236,7 +236,7 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       )}
       {!working && (
         <div className="row small inventory-foot">

@@ -66,7 +66,7 @@ export function YearEndTab({ RunView }: { RunView: ComponentType<{ runId: string
       </div>
       {error && <p className="error">{error}</p>}
       {note && <p className="ok-msg small">{note}</p>}
-      <table className="table hr-table">
+      <div className="table-scroll"><table className="table hr-table">
         <thead><tr><th>氏名</th><th>対象</th><th>申告</th><th>不備</th><th /></tr></thead>
         <tbody>
           {data.rows.map((r) => (
@@ -97,7 +97,7 @@ export function YearEndTab({ RunView }: { RunView: ComponentType<{ runId: string
             </Fragment>
           ))}
         </tbody>
-      </table>
+      </table></div>
       {run && <><h3 className="pay-sub">年末調整の回</h3><RunView runId={run.id} onChanged={load} /></>}
     </div>
   );

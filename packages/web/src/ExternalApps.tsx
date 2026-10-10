@@ -115,7 +115,7 @@ export function ExternalApps() {
               <div className="row">
                 <input value={naming} autoFocus maxLength={40} placeholder="レジ・M2Medical など" aria-label="アプリの名前"
                   onChange={(e) => setNaming(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void create(); }} />
-                <button className="btn small" disabled={!naming.trim()} onClick={() => void create()}>登録する</button>
+                <button className="btn small" disabled={!naming.trim()} onClick={() => void create()}>登録</button>
                 <button className="btn ghost small" onClick={() => setNaming(null)}>キャンセル</button>
               </div>
             )}

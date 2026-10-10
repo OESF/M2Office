@@ -425,7 +425,7 @@ function ItemManager({ items, onChanged }: { items: ReservableItem[]; onChanged:
       <div className="row wrap">
         <input value={name} maxLength={40} placeholder="会議室 A・プリウス・プロジェクター" aria-label="足すものの名前" onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && name.trim()) void run(async () => { await api.reservations.addItem({ name: name.trim() }); setName(''); }); }} />
-        <button className="btn small" disabled={!name.trim()} onClick={() => void run(async () => { await api.reservations.addItem({ name: name.trim() }); setName(''); })}>足す</button>
+        <button className="btn small" disabled={!name.trim()} onClick={() => void run(async () => { await api.reservations.addItem({ name: name.trim() }); setName(''); })}>追加</button>
       </div>
       {error && <p className="error">{error}</p>}
       {list.length > 0 && (

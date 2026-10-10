@@ -220,7 +220,7 @@ export function Competitors({ changeKey = '', onColumn, onAnnouncement }: {
       </div>
 
       {o.competitors.length > 0 ? (
-        <table className="table competitors-table">
+        <div className="table-scroll"><table className="table competitors-table">
           <thead><tr><th>競合</th><th>距離</th><th><span translate="no">Google</span> の評価</th><th>取得日</th><th>データ数</th><th /></tr></thead>
           <tbody>
             {o.competitors.map((c) => (
@@ -228,7 +228,7 @@ export function Competitors({ changeKey = '', onColumn, onAnnouncement }: {
                 onRemove={() => { if (window.confirm(`${c.name || 'この競合'}を削除しますか。次に自動で探しても入れません`)) run(() => api.competitors.remove(c.id), '削除しました', setNote); }} />
             ))}
           </tbody>
-        </table>
+        </table></div>
       ) : p && !o.job && <p className="muted">覚えている競合はありません</p>}
       {/*
         地図（Places API）の情報の出典は、表の下に 1 度だけ出す（第36.11節。第 0.252.1 版）。

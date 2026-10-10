@@ -126,7 +126,7 @@ function ContractList({ onOpen, changeKey }: { onOpen: (id: string) => void; cha
       {items && shown.length === 0 && <p className="muted">{items.length === 0 ? 'まだ契約がありません。' : '当たる契約はありません。'}</p>}
       {shown.length > 0 && (
         <div className="contracts-table-wrap">
-        <table className="table contracts-table">
+        <div className="table-scroll"><table className="table contracts-table">
           <thead><tr><th>相手</th><th>契約</th><th>期間</th><th>次の期限</th><th>状態</th><th>担当</th></tr></thead>
           <tbody>
             {shown.map((c) => {
@@ -143,7 +143,7 @@ function ContractList({ onOpen, changeKey }: { onOpen: (id: string) => void; cha
               );
             })}
           </tbody>
-        </table>
+        </table></div>
         </div>
       )}
     </div>

@@ -2276,3 +2276,7 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .sortable.sorting .sortable-handle { cursor: grabbing; }
 .sortable-body { flex: 1; min-width: 0; }
 
+/* 列の多い表（5 列以上）は横に送れる囲いに入れ、見出しを折らない（狭い欄で「会員番／号」のように折れないように） */
+.table-scroll { overflow-x: auto; max-width: 100%; }
+.table-scroll > .table th { white-space: nowrap; }
+

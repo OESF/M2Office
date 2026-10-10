@@ -60,7 +60,7 @@ function List({ onOpen, changeKey }: { onOpen: (id: string) => void; changeKey: 
       {line && <p className="small muted">LINE の友だち {line.followers ?? '—'} 人・今月の残り {line.remaining ?? '上限なし'}{line.remaining !== null ? ' 通' : ''}</p>}
       {items && items.length === 0 && <p className="muted">まだありません</p>}
       {items && items.length > 0 && (
-        <table className="table">
+        <div className="table-scroll"><table className="table">
           <thead><tr><th>題名</th><th>期間</th><th>出し先</th><th>状態</th><th>出す日時</th></tr></thead>
           <tbody>
             {items.map((a) => (
@@ -73,7 +73,7 @@ function List({ onOpen, changeKey }: { onOpen: (id: string) => void; changeKey: 
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       )}
     </div>
   );

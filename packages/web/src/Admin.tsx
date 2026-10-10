@@ -718,7 +718,7 @@ function TenantSchedules() {
       {error && <p className="error">{error}</p>}
       {data && data.items.length === 0 && <p className="muted">定時実行はありません</p>}
       {data && data.items.length > 0 && (
-        <table className="table schedule-table">
+        <div className="table-scroll"><table className="table schedule-table">
           <thead><tr><th>人</th><th>業務</th><th>繰り返し</th><th>次回</th><th>前回</th><th>状態</th></tr></thead>
           <tbody>
             {data.items.map((s) => (
@@ -732,7 +732,7 @@ function TenantSchedules() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       )}
     </>
   );

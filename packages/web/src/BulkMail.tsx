@@ -140,7 +140,7 @@ export function BulkMailView({ initial, onClose, onSubmitted }: {
         <input type="date" value={to} onChange={(e) => setTo(e.target.value)} aria-label="交換した日の終わり" />
         <input type="search" className="cards-search" placeholder="会社名・氏名などで探す" value={q} onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') void search(); }} />
-        <button className="btn small" disabled={busy} onClick={() => void search()}>探して加える</button>
+        <button className="btn small" disabled={busy} onClick={() => void search()}>探して追加</button>
       </div>
       {candidates.length > 0 && (
         <>
@@ -150,7 +150,7 @@ export function BulkMailView({ initial, onClose, onSubmitted }: {
             </label>
             <span className="small">送る {sendCount} 人{preview && preview.excluded.length > 0 ? `／除く ${preview.excluded.length} 人` : ''}</span>
           </div>
-          <table className="table bulk-recipients">
+          <div className="table-scroll"><table className="table bulk-recipients">
             <thead><tr><th aria-label="送る" /><th>氏名</th><th>会社名</th><th>メールアドレス</th><th>交換した日</th><th /></tr></thead>
             <tbody>
               {candidates.map((c) => {
@@ -171,7 +171,7 @@ export function BulkMailView({ initial, onClose, onSubmitted }: {
                 );
               })}
             </tbody>
-          </table>
+          </table></div>
         </>
       )}
 

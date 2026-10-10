@@ -250,7 +250,7 @@ function Counting({ view, locations, items, userId, admin, onChanged, onDone }: 
       {tab === 'diff' && (
         <div className="stocktake-diff">
           {explain && <div className="card stocktake-explain small"><Lines text={explain} /></div>}
-          <table className="table">
+          <div className="table-scroll"><table className="table">
             <thead><tr><th>品名</th><th>場所</th><th className="num">帳簿</th><th className="num">数えた</th><th className="num">差</th></tr></thead>
             <tbody>
               {view.rows.map((r) => (
@@ -263,12 +263,12 @@ function Counting({ view, locations, items, userId, admin, onChanged, onDone }: 
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
           <div className="row wrap">
             {canClose && <button className="btn" onClick={() => void close()}>確定する</button>}
             {canClose && view.uncounted > 0 && <span className="small muted">数えていない {view.uncounted} 件はそのままにします</span>}
             <button className="btn ghost" onClick={() => void api.inventory.counts.exportFile(count.id).catch((e) => setNote(describeError(e, '書き出せませんでした')))}>書き出し</button>
-            {canClose && <button className="link danger small" onClick={() => void cancel()}>やめる</button>}
+            {canClose && <button className="link danger small" onClick={() => void cancel()}>キャンセル</button>}
           </div>
           {note && <p className="small muted" role="status">{note}</p>}
         </div>

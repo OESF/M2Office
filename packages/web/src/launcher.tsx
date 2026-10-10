@@ -175,7 +175,7 @@ export function AppLauncher({ email, admin, google }: { email: string; admin: bo
               {settings && shown.length === 0 && current.links.length === 0 && (
                 <button className="launcher-item" onClick={() => setEditing(true)}>
                   <Icon name="apps" />
-                  <span>リンクを足す</span>
+                  <span>リンクを追加</span>
                 </button>
               )}
             </div>
@@ -216,7 +216,7 @@ export function AppLauncher({ email, admin, google }: { email: string; admin: bo
                 <form className="launcher-add" onSubmit={(e) => { e.preventDefault(); add(); }}>
                   <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="名前" maxLength={LAUNCHER_LABEL_MAX} aria-label="リンクの名前" />
                   <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://" inputMode="url" aria-label="リンクの URL" />
-                  <button className="btn small" type="submit" disabled={!url.trim()}>足す</button>
+                  <button className="btn small" type="submit" disabled={!url.trim()}>追加</button>
                 </form>
               )}
             </div>

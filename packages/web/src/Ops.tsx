@@ -256,7 +256,7 @@ function Tenants({ me, flagged, onMachines, onChanged }: { me: OpsMe; flagged: n
       {creating && <CreateTenant onClose={() => setCreating(false)} onCreated={load} />}
       {rows && (
         <div style={{ overflowX: 'auto' }}>
-          <table className="table ops-table">
+          <div className="table-scroll"><table className="table ops-table">
             <thead>
               <tr>
                 {head('name', '会社名')}{head('subdomain', 'サブドメイン')}{head('status', '状態')}
@@ -289,7 +289,7 @@ function Tenants({ me, flagged, onMachines, onChanged }: { me: OpsMe; flagged: n
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
           {shown.length === 0 && <p className="muted">当てはまる会社はありません</p>}
         </div>
       )}
@@ -360,7 +360,7 @@ function Machines({ me }: { me: OpsMe }) {
       {me.can['machine.manage'] && (
         <div className="field" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <input placeholder="呼び名" value={name} onChange={(e) => setName(e.target.value)} style={{ maxWidth: 280 }} />
-          <button className="btn small" disabled={!name.trim()} onClick={add}>登録する</button>
+          <button className="btn small" disabled={!name.trim()} onClick={add}>登録</button>
         </div>
       )}
       {issued && (
@@ -376,7 +376,7 @@ function Machines({ me }: { me: OpsMe }) {
       )}
       {rows && (
         <div style={{ overflowX: 'auto' }}>
-          <table className="table ops-table">
+          <div className="table-scroll"><table className="table ops-table">
             <thead><tr><th>呼び名</th><th>版</th><th>最後の知らせ</th><th>データベース ／ ワーカー ／ 入口 ／ ローカル AI</th><th>控え ／ 戻せるか ／ 社外</th><th className="num">データの空き</th><th className="num">証明書</th><th>印</th><th /></tr></thead>
             <tbody>
               {rows.map((m) => {
@@ -396,7 +396,7 @@ function Machines({ me }: { me: OpsMe }) {
                 );
               })}
             </tbody>
-          </table>
+          </table></div>
           {rows.length === 0 && <p className="muted">登録した機械はありません</p>}
         </div>
       )}
@@ -440,12 +440,12 @@ function Operators({ me }: { me: OpsMe }) {
           <select value={f.role} onChange={(e) => setF({ ...f, role: e.target.value as OperatorRole })} style={{ width: 'auto' }}>
             {(Object.keys(ROLE_LABEL) as OperatorRole[]).map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
           </select>
-          <button className="btn small" disabled={!f.email.trim()} onClick={() => { run(opsApi.addOperator(f), '足せませんでした'); setF({ email: '', displayName: '', role: 'support' }); }}>足す</button>
+          <button className="btn small" disabled={!f.email.trim()} onClick={() => { run(opsApi.addOperator(f), '足せませんでした'); setF({ email: '', displayName: '', role: 'support' }); }}>追加</button>
         </div>
       )}
       {rows && (
         <div style={{ overflowX: 'auto' }}>
-        <table className="table ops-table">
+        <div className="table-scroll"><table className="table ops-table">
           <thead><tr><th>名前</th><th>メールアドレス</th><th>ロール</th><th>状態</th><th className="num">パスキー</th><th>最後のログイン</th><th /></tr></thead>
           <tbody>
             {rows.map((o) => (
@@ -470,7 +470,7 @@ function Operators({ me }: { me: OpsMe }) {
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
         </div>
       )}
     </>
@@ -487,7 +487,7 @@ function Audit() {
       <h2>操作履歴</h2>
       {error && <p className="error">{error}</p>}
       {rows && (
-        <table className="table">
+        <div className="table-scroll"><table className="table">
           <thead><tr><th>日時</th><th>運営者</th><th>操作</th><th>対象</th><th>内容</th></tr></thead>
           <tbody>
             {rows.map((a) => (
@@ -497,7 +497,7 @@ function Audit() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       )}
     </>
   );
@@ -532,7 +532,7 @@ function TenantDetail({ id, me, onBack, onChanged }: { id: string; me: OpsMe; on
           <ProxyControl tenant={d.tenant} me={me} />
           <div className="card">
             <h3>利用状況</h3>
-            <table className="table">
+            <div className="table-scroll"><table className="table">
               <thead><tr><th>月</th><th className="num">実行</th><th className="num">失敗</th><th className="num">会話</th><th className="num">AI の費用</th><th className="num">1 日に使った人の最多</th></tr></thead>
               <tbody>
                 <tr><td>{d.currentMonth.month}（今月）</td><td className="num">{d.currentMonth.runs}</td><td className="num">{rate(d.currentMonth.failed, d.currentMonth.runs)}</td>
@@ -542,7 +542,7 @@ function TenantDetail({ id, me, onBack, onChanged }: { id: string; me: OpsMe; on
                     <td className="num">{m.conversations}</td><td className="num">{yen(Number(m.aiCost))}</td><td className="num">{m.usersMax}</td></tr>
                 ))}
               </tbody>
-            </table>
+            </table></div>
           </div>
           <div className="card">
             <h3>稼働</h3>
@@ -553,12 +553,12 @@ function TenantDetail({ id, me, onBack, onChanged }: { id: string; me: OpsMe; on
               <dt>失敗した業務（30 日）</dt><dd>{d.health.failedAgents.map((f) => `${f.agentId} ${f.count} 件`).join('、') || 'ありません'}</dd>
             </dl>
             {d.health.targets.length > 0 && (
-              <table className="table">
+              <div className="table-scroll"><table className="table">
                 <thead><tr><th>接続先（24 時間）</th><th className="num">成功</th><th className="num">失敗</th><th className="num">平均の速さ</th><th>最後の失敗</th></tr></thead>
                 <tbody>{d.health.targets.map((t) => (
                   <tr key={t.target}><td>{t.target}</td><td className="num">{t.ok}</td><td className="num">{t.fail}</td><td className="num">{t.avgMs === null ? '—' : `${t.avgMs} ms`}</td><td>{t.lastError ?? '—'}</td></tr>
                 ))}</tbody>
-              </table>
+              </table></div>
             )}
           </div>
           <div className="card">
@@ -614,12 +614,12 @@ function Server() {
             <div className="stat"><span>データベース</span><strong>{bytes(Number(s.database.bytes))}</strong><span>接続 {s.database.connections}</span></div>
             <div className="stat"><span>ファイルの置き場</span><strong>{bytes(Number(s.filesBytes))}</strong></div>
           </div>
-          <table className="table">
+          <div className="table-scroll"><table className="table">
             <thead><tr><th>外部の接続（24 時間）</th><th className="num">成功</th><th className="num">失敗</th><th className="num">失敗の割合</th><th className="num">平均の速さ</th></tr></thead>
             <tbody>{s.targets.map((t) => (
               <tr key={t.group}><td>{group[t.group] ?? t.group}</td><td className="num">{t.ok}</td><td className="num">{t.fail}</td><td className="num">{rate(t.fail, t.ok + t.fail)}</td><td className="num">{t.avgMs === null ? '—' : `${t.avgMs} ms`}</td></tr>
             ))}</tbody>
-          </table>
+          </table></div>
           {s.workers.length > 1 && <p className="muted small">ワーカー: {s.workers.map((w) => `${w.id}（${when(w.at)}）`).join('、')}</p>}
         </>
       )}
@@ -654,7 +654,7 @@ function Settings({ me }: { me: OpsMe }) {
           {field('address', '所在地')}
           {field('web', 'Web')}
           {field('contact', '問い合わせの窓口')}
-          {edit && <button className="btn small" onClick={save}>保存する</button>}
+          {edit && <button className="btn small" onClick={save}>保存</button>}
           {saved && <p className="ok-msg small">保存しました</p>}
         </div>
       )}
@@ -742,7 +742,7 @@ function RequestTable({ me, rows, onChanged, onNotice, showTenant = false }: {
   return (
     <>
       {error && <p className="error">{error}</p>}
-      <table className="table">
+      <div className="table-scroll"><table className="table">
         <thead><tr><th>申請した日時</th>{showTenant && <th>会社</th>}<th>操作</th><th>理由</th><th>状態</th><th /></tr></thead>
         <tbody>{rows.map((r) => (
           <tr key={r.id}>
@@ -764,7 +764,7 @@ function RequestTable({ me, rows, onChanged, onNotice, showTenant = false }: {
             </td>
           </tr>
         ))}</tbody>
-      </table>
+      </table></div>
     </>
   );
 }
@@ -818,7 +818,7 @@ function ProxyControl({ tenant, me }: { tenant: TenantDetailView['tenant']; me: 
         </>
       )}
       {rows && rows.length > 0 && (
-        <table className="table">
+        <div className="table-scroll"><table className="table">
           <thead><tr><th>申請した日時</th><th>運営者</th><th>範囲</th><th>状態</th><th className="num">閲覧</th><th /></tr></thead>
           <tbody>{rows.map((g) => (
             <tr key={g.id}>
@@ -832,7 +832,7 @@ function ProxyControl({ tenant, me }: { tenant: TenantDetailView['tenant']; me: 
               </td>
             </tr>
           ))}</tbody>
-        </table>
+        </table></div>
       )}
     </div>
   );
@@ -926,7 +926,7 @@ function MyPasskeys() {
       )}
       <div className="field" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
         <input placeholder="予備の呼び名（例: セキュリティキー）" value={name} onChange={(e) => setName(e.target.value)} style={{ maxWidth: 280 }} />
-        <button className="btn ghost small" onClick={() => void add()}>予備のパスキーを足す</button>
+        <button className="btn ghost small" onClick={() => void add()}>予備のパスキーを追加</button>
       </div>
     </div>
   );

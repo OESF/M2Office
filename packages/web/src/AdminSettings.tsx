@@ -770,7 +770,7 @@ export function KnowledgeSettings({ page }: { page: string }) {
         </div>
       )}
       {saver.view}
-      <table className="table knowledge-table">
+      <div className="table-scroll"><table className="table knowledge-table">
         <thead><tr>
           <th>{category === 'learned' ? '学んだこと' : '題名'}</th>
           {isRule ? <th>施行</th> : <th className="nowrap">{category === 'learned' ? '最後に使った日' : '出典'}</th>}
@@ -852,7 +852,7 @@ export function KnowledgeSettings({ page }: { page: string }) {
             </Fragment>
           ))}
         </tbody>
-      </table>
+      </table></div>
       {inactive.length > 0 && (
         <>
           <h4>{category === 'learned' ? 'しまったもの' : isRule ? '廃止したもの' : '削除したもの'}</h4>

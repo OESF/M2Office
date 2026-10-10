@@ -77,7 +77,7 @@ function MemberList({ onOpen, changeKey }: { onOpen: (id: string) => void; chang
         ? <p className="muted">{q ? '当たる会員はいません。' : 'まだ会員がいません。'}</p>
         : (
           <div className="mbr-table-wrap">
-            <table className="table">
+            <div className="table-scroll"><table className="table">
               <thead><tr><th>会員番号</th><th>呼び名</th><th>ポイント</th><th>来店</th><th>最後の来店</th><th /></tr></thead>
               <tbody>
                 {data.items.map((m) => (
@@ -91,7 +91,7 @@ function MemberList({ onOpen, changeKey }: { onOpen: (id: string) => void; chang
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table></div>
           </div>
         )}
     </div>
@@ -137,7 +137,7 @@ function RewardManager({ admin }: { admin: boolean }) {
           <button className="btn small" disabled={!v.name.trim() || !v.points} onClick={() => void run(async () => {
             await api.members.createReward({ name: v.name.trim(), points: Number(v.points), birthdayOnly: v.birthdayOnly, minRank: v.minRank });
             setV({ name: '', points: '', birthdayOnly: false, minRank: 'regular' });
-          })}>足す</button>
+          })}>追加</button>
         </div>
       )}
       {error && <p className="error">{error}</p>}
