@@ -17,7 +17,7 @@ import {
   TenantAiResolver, platformAi, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, ConnectionCredentials, type ConnectionAuthProvider,
   CardService, PostgresContactStore, cardsAccess, type ContactStore, GoogleContactsService, TerminalService, PostgresTerminalStore, BulkMailService, PostgresBulkMailStore, NoticeService, PostgresNoticeStore,
-  InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, JanLookupService, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, InquiryService, PostgresInquiryStore, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, CanvaService, HttpCanvaApi, MockCanvaApi, PostgresCanvaConnectionStore, MEMBER_LINE_SEND, LineApiVerifier, MockLineVerifier, JGrantsApi, MockJGrants, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, WEB_REVIEW_REQUEST, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, webColumnsAccess, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, WEB_COLUMN_SIGNAGE_PUBLISH, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, applyStockChanges, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
+  InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, JanLookupService, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, InquiryService, PostgresInquiryStore, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, CanvaService, HttpCanvaApi, MockCanvaApi, PostgresCanvaConnectionStore, MEMBER_LINE_SEND, LineApiVerifier, MockLineVerifier, JGrantsApi, MockJGrants, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, WEB_REVIEW_REQUEST, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, webColumnsAccess, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, WEB_COLUMN_SIGNAGE_PUBLISH, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, applyStockChanges, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
   type SecretBox, type GeminiModels,
   type FileStore, type TenantExtensions, type HelpArticle, type ManualMeta, type LlmProvider, type Logger, type Repository, type WorkspaceConnector, aiUsageMeterFromEnv, setEnqueueAiGuard, appPath
 } from '@m2office/core';
@@ -133,6 +133,8 @@ export interface AppDeps {
     bookings: InventoryBookings;
     /** Web への公開（第29.12節）。 */
     publisher: InventoryPublisher;
+    /** 販売管理とのつなぎ（第29.20.1節）。 */
+    sales: InventorySales;
     /** JAN から商品名を引く（第29.6節、Q-111）。 */
     jan: JanLookupService;
     access(tenantId: string, userId: string): Promise<InventorySettings | null>;
@@ -366,10 +368,14 @@ export function buildDeps(): AppDeps {
   const inventoryBookings = new InventoryBookings({
     store: inventoryService.store, service: inventoryService, repo, llm: (tenantId) => ai.llmFor(tenantId),
   });
-  inventoryWatch = new InventoryWatch({ repo, service: inventoryService, bookings: inventoryBookings, logger: log });
+  // 販売管理とのつなぎ（第29.20.1節）
+  const inventorySales = new InventorySales({
+    store: new PostgresSalesStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), service: inventoryService, repo,
+  });
+  inventoryWatch = new InventoryWatch({ repo, service: inventoryService, bookings: inventoryBookings, sales: inventorySales, logger: log });
   // JAN から商品名を Gemini の Google 検索で引く（第29.6節）。「ローカルだけ」の会社では調べものが断られ、空のまま作る
   const inventoryJan = new JanLookupService({ research: (tenantId) => ai.researchFor(tenantId), llm: (tenantId) => ai.llmFor(tenantId), logger: log });
-  const inventory = { service: inventoryService, bookings: inventoryBookings, publisher: inventoryPublisher, jan: inventoryJan, access: inventoryAccess(repo) };
+  const inventory = { service: inventoryService, bookings: inventoryBookings, publisher: inventoryPublisher, sales: inventorySales, jan: inventoryJan, access: inventoryAccess(repo) };
   // 店頭サイネージ（第31章）。秘書が割り込みを出すため、秘書より先に作る。画面と素材は会社で共有する
   const signageService = new SignageService({ store: new PostgresSignageStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), repo, files, llmFor: (tenantId) => ai.llmFor(tenantId) });
   const signage = { service: signageService, interrupts: new SignageInterrupts({ service: signageService, repo, llm: (tenantId) => ai.llmFor(tenantId) }), access: signageAccess(repo) };

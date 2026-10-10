@@ -17,6 +17,7 @@ import type { CardCorners, CardEnglish, PrintDesign, PrintDesignDetailView, Prin
   YeaDeclaration, YeaDeclarationView, YeaResult, SocialDetermination, SocialEvent, InsuranceEligibility, LaborInsuranceData, LaborInsuranceView, ShiftView, HrShiftSettings, HrShift, HrAnnualSettings, HrFlexSettings, HrTerminalSettings,
   InventoryCount, InventoryCountRow, InventoryCountScope, InventoryCountView, InventorySupplier,
   InventoryBooking, InventoryBookingMapping, InventoryBookingSource, InventoryPublication, InventoryPublicationScope, InventoryPublicSnapshot,
+  InventorySalesLink, InventorySalesScope, InventorySaleUnmatched,
   SignageAsset, SignageBand, SignageEntry, SignageScreen, SignageSettings, SignageInterruptInput, SignageInterruptView, SignagePhrase, SignageSound, SignageSource,
   ColumnWordPress, WebColumn, WebColumnSettings, WebColumnVersion, WebColumnTheme, ColumnPlanSlot, ColumnSignageSet,
   Inquiry, InquiryDetail, InquiryParty, InquiryTask, InquiryReply, InquiryMailSkipped, InquiryMonthStats, InquirySettings, InquiryFaqTopic,
@@ -438,6 +439,15 @@ export interface InventoryForecastRow {
 }
 
 /** 在庫の Web への公開のまとまり 1 つ（管理者向け。仕様書 第29.12.1節・第29.12.2節）。 */
+/** 販売管理に渡る商品の一覧の 1 品目（見本。仕様書 第29.20.1節）。 */
+export interface InventorySalesItemView {
+  id: string; name: string; publicName: string | null; code: string | null; barcodes: string[]; category: string | null; unit: string;
+  status: 'in_stock' | 'low' | 'out';
+  available?: number;
+  price?: { amount: number; taxIncluded: boolean } | null;
+  employeePrice?: number | null;
+}
+
 export interface InventoryPublicationView {
   publication: InventoryPublication;
   /** 承認した品目のうち、いま止めている品目の数（出ていない）。 */
@@ -1793,6 +1803,31 @@ export const api = {
     stopPublication: (id: string) => call<InventoryPublicationView>(`/inventory/publications/${encodeURIComponent(id)}/stop`, { method: 'POST' }),
     /** まとまりを削除する（止めてあるものだけ）。 */
     deletePublication: (id: string) => call<{ ok: true }>(`/inventory/publications/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    /** 販売管理とのつなぎの一覧（管理者。仕様書 第29.20.1節）。鍵は返らない。 */
+    salesLinks: () => call<{ items: InventorySalesLink[]; max: number }>('/inventory/sales-links'),
+    /** つなぎを作る。鍵はこの答えでだけ返る。 */
+    createSalesLink: (name: string) => call<{ link: InventorySalesLink; key: string }>('/inventory/sales-links', { method: 'POST', body: JSON.stringify({ name }) }),
+    /** つなぎの名前を変える（承認し直さない）。 */
+    renameSalesLink: (id: string, name: string) =>
+      call<InventorySalesLink>(`/inventory/sales-links/${encodeURIComponent(id)}/name`, { method: 'PUT', body: JSON.stringify({ name }) }),
+    /** 承認する前の見本（販売管理に渡るとおりの一覧）。 */
+    previewSalesLink: (scope: InventorySalesScope) =>
+      call<{ items: InventorySalesItemView[] }>('/inventory/sales-links/preview', { method: 'POST', body: JSON.stringify(scope) }),
+    /** この内容で渡す（押した管理者が承認者）。 */
+    approveSalesLink: (id: string, scope: InventorySalesScope) =>
+      call<InventorySalesLink>(`/inventory/sales-links/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(scope) }),
+    /** 鍵を出し直す（前の鍵はすぐ使えなくなる）。 */
+    rekeySalesLink: (id: string) => call<{ link: InventorySalesLink; key: string }>(`/inventory/sales-links/${encodeURIComponent(id)}/rekey`, { method: 'POST' }),
+    /** つなぎを止める・動かす。 */
+    setSalesLinkStatus: (id: string, on: boolean) =>
+      call<InventorySalesLink>(`/inventory/sales-links/${encodeURIComponent(id)}/${on ? 'resume' : 'stop'}`, { method: 'POST' }),
+    /** つなぎを削除する（止めてあるものだけ）。 */
+    deleteSalesLink: (id: string) => call<{ ok: true }>(`/inventory/sales-links/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    /** 照らせなかった販売の行。 */
+    salesUnmatched: () => call<{ items: InventorySaleUnmatched[] }>('/inventory/sales-unmatched'),
+    /** 照らせなかった行に品目を選び、記録する。 */
+    resolveSalesUnmatched: (id: string, itemId: string) =>
+      call<{ ok: true }>(`/inventory/sales-unmatched/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify({ itemId }) }),
     /** JAN から商品名を引く（Gemini の Google 検索。仕様書 第29.6節）。見つからなければ `found: false`。 */
     jan: (code: string) => call<{ found: boolean; name?: string; maker?: string; category?: string }>(`/inventory/jan/${encodeURIComponent(code)}`),
     /** 仕入先（仕様書 第29.4.1節）。 */

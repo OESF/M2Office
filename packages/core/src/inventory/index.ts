@@ -24,3 +24,8 @@ export {
 } from './bookings.js';
 export { InventoryPublisher, buildPublicSnapshot, renderPublicPage, stockChanges, PUBLICATION_KEY, type InventoryPublisherDeps, type PublicationView, type StockChange, type StockChangeListener } from './publication.js';
 export { JanLookupService, JAN_CACHE_MS, type JanLookup, type JanLookupDeps } from './jan.js';
+export {
+  InventorySales, PostgresSalesStore, MemorySalesStore, parseSaleEvent, salesScopeOf, salesKeyHash, SALES_PAYLOAD_MAX_BYTES, SALES_LINES_MAX, SALES_RATE_PER_MINUTE,
+  type SalesStore, type SalesLinkRecord, type SaleRecord, type UnmatchedRecord, type SalesItem, type SalesItemList, type SalesItemQuery, type SaleEventInput,
+  type SaleEventResult, type SaleLineResult, type HookResponse, type InventorySalesDeps,
+} from './sales.js';

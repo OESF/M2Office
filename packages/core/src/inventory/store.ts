@@ -99,12 +99,14 @@ export interface BookingRecord {
 /** 引き当てを足すときの値。 */
 export interface ReservationRecord {
   id: string;
-  bookingId: string;
+  /** 予約の ID。販売管理の注文の取り置きは `null`（第29.20.1節）。 */
+  bookingId: string | null;
   itemId: string;
   qty: number;
   bookingRef: string;
   bookedAt: string | null;
-  source: 'screen' | 'secretary' | 'service';
+  /** `sales` は販売管理の注文の取り置き。 */
+  source: 'screen' | 'secretary' | 'service' | 'sales';
   createdBy: string;
   at: string;
 }
@@ -181,7 +183,8 @@ export interface InventoryStore {
   /** 品目ごとのいまの数（ロットと場所ごと）。`itemIds` を省けば全品目。 */
   listStock(tenantId: string, itemIds?: string[]): Promise<StockRecord[]>;
   /** 品目ごとの引き当て（取り置き中）の合計。 */
-  heldByItem(tenantId: string): Promise<Map<string, number>>;
+  /** 品目ごとの取り置いた数。`source` を渡せば、その出どころの取り置きだけ（販売管理の注文は `sales`）。 */
+  heldByItem(tenantId: string, source?: ReservationRecord['source']): Promise<Map<string, number>>;
 
   /** 入出庫の記録を足し、同じトランザクションでいまの数を直す。 */
   applyMoves(tenantId: string, moves: NewMove[]): Promise<void>;
@@ -473,9 +476,10 @@ export class PostgresInventoryStore implements InventoryStore {
     return rows.map((r) => ({ itemId: r.item_id, locationId: r.location_id, lotId: r.lot_id, lot: r.lot, expiresOn: day(r.expires_on), qty: num(r.qty) }));
   }
 
-  async heldByItem(tenantId: string): Promise<Map<string, number>> {
+  async heldByItem(tenantId: string, source?: ReservationRecord['source']): Promise<Map<string, number>> {
     const rows = await this.q<{ item_id: string; qty: unknown }>(tenantId,
-      `select item_id, sum(qty) as qty from inventory_reservations where tenant_id = $1 and status = 'held' group by item_id`, [tenantId]);
+      `select item_id, sum(qty) as qty from inventory_reservations where tenant_id = $1 and status = 'held'${source ? ' and source = $2' : ''} group by item_id`,
+      source ? [tenantId, source] : [tenantId]);
     return new Map(rows.map((r) => [r.item_id, num(r.qty)]));
   }
 
@@ -507,8 +511,12 @@ export class PostgresInventoryStore implements InventoryStore {
     });
   }
 
-  private readonly MOVE_SELECT = `select m.*, i.name as item_name, l.lot, u.display_name as created_by_name from inventory_moves m
-    join inventory_items i on i.id = m.item_id left join inventory_lots l on l.id = m.lot_id left join users u on u.id = m.created_by`;
+  // 販売管理からの記録（記録した人が `sales:<つなぎ>`）は「販売管理（つなぎの名前）」と出す（第29.20.1節）
+  private readonly MOVE_SELECT = `select m.*, i.name as item_name, l.lot,
+      coalesce(u.display_name, '販売管理（' || sl.name || '）', case when m.created_by like 'sales:%' then '販売管理' end) as created_by_name
+    from inventory_moves m
+    join inventory_items i on i.id = m.item_id left join inventory_lots l on l.id = m.lot_id left join users u on u.id = m.created_by
+    left join inventory_sales_links sl on sl.tenant_id = m.tenant_id and 'sales:' || sl.id = m.created_by`;
 
   async getMove(tenantId: string, id: string): Promise<InventoryMove | null> {
     const rows = await this.q<MoveRow>(tenantId, `${this.MOVE_SELECT} where m.tenant_id = $1 and m.id = $2`, [tenantId, id]);
@@ -865,9 +873,9 @@ export class MemoryInventoryStore implements InventoryStore {
       .sort((a, b) => (a.expiresOn ?? '9999').localeCompare(b.expiresOn ?? '9999'));
   }
 
-  async heldByItem(tenantId: string): Promise<Map<string, number>> {
-    const out = new Map([...this.held].filter(([k]) => k.startsWith(`${tenantId}\u0000`)).map(([k, v]) => [k.split('\u0000')[1]!, v]));
-    for (const r of this.reservations.values()) if (r.tenantId === tenantId && r.status === 'held') out.set(r.itemId, (out.get(r.itemId) ?? 0) + r.qty);
+  async heldByItem(tenantId: string, source?: ReservationRecord['source']): Promise<Map<string, number>> {
+    const out = source ? new Map<string, number>() : new Map([...this.held].filter(([k]) => k.startsWith(`${tenantId}\u0000`)).map(([k, v]) => [k.split('\u0000')[1]!, v]));
+    for (const r of this.reservations.values()) if (r.tenantId === tenantId && r.status === 'held' && (!source || r.source === source)) out.set(r.itemId, (out.get(r.itemId) ?? 0) + r.qty);
     return out;
   }
 

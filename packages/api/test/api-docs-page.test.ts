@@ -50,3 +50,30 @@ test('定義の中の文字で、スクリプトの外へ抜け出せない', ()
   assert.equal((script.match(/<\/script>/g) ?? []).length, 1);
   assert.match(script, /\\u003c\/script>\\u003cscript>alert\(1\)\\u003c\/script>/);
 });
+
+test('販売管理とのつなぎの定義が、実装の口・状態・結果・上限と食い違わない（第29.20.1節）', async () => {
+  const { readFileSync } = await import('node:fs');
+  const core = await import('@m2office/core');
+  const yaml = readFileSync(fileURLToPath(new URL('../../../docs/api/inventory-sales.openapi.yaml', import.meta.url)), 'utf8');
+  const route = readFileSync(fileURLToPath(new URL('../src/routes/inventory-sales-hooks.ts', import.meta.url)), 'utf8');
+  // 口の道
+  assert.match(yaml, /^ {2}\/v1\/hooks\/inventory\/sales\/items:$/m);
+  assert.match(yaml, /^ {2}\/v1\/hooks\/inventory\/sales\/events:$/m);
+  assert.match(route, /app\.get\('\/items'/);
+  assert.match(route, /app\.post\('\/events'/);
+  // 一覧の絞り込みの名前（定義にあるものを、口が読む）
+  for (const p of ['updatedSince', 'categories', 'ids', 'codes', 'barcodes', 'limit', 'cursor']) {
+    assert.match(yaml, new RegExp(`- name: ${p}\\n`), `定義に ${p}`);
+    assert.match(route, new RegExp(`'${p}'`), `口が ${p} を読む`);
+  }
+  // 状態と行の結果
+  assert.match(yaml, /enum: \[ordered, sold, cancelled, returned\]/);
+  assert.match(yaml, /enum: \[held, used, released, returned, unmatched, ignored\]/);
+  const ok = core.parseSaleEvent({ eventId: 'e', saleId: 's', status: 'returned', occurredAt: '2026-10-10T10:00:00Z', lines: [{ itemId: 'i', quantity: 1 }] });
+  assert.ok(!('error' in ok));
+  // 上限
+  assert.match(yaml, new RegExp(`maxItems: ${core.SALES_LINES_MAX}\\b`));
+  assert.match(yaml, new RegExp(`1 分 ${core.SALES_RATE_PER_MINUTE} 回`));
+  assert.match(yaml, /64 KB/);
+  assert.equal(core.SALES_PAYLOAD_MAX_BYTES, 64 * 1024);
+});

@@ -24,6 +24,8 @@ export interface InventoryWatchDeps {
   service: InventoryService;
   /** 予約との引き当て（第29.13節）。あれば、日を過ぎた取り置きと品目の分からないメニューも毎朝知らせる。 */
   bookings?: InventoryBookings;
+  /** 販売管理とのつなぎ（第29.20.1節）。あれば、品目を照らせなかった販売も毎朝知らせる。 */
+  sales?: { attention(tenantId: string): Promise<{ count: number; samples: string[] }> };
   logger?: Logger;
 }
 
@@ -136,10 +138,12 @@ export class InventoryWatch {
       overdue = att.overdue.slice(0, 20).map((b) => `予約 ${b.externalId}（${b.startsAt ? new Date(b.startsAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '日時なし'}）: ${b.lines.filter((l) => l.status === 'held').map((l) => `${l.itemName ?? ''} ${l.qty}`).join('・')}`);
       unknownMenus = [...new Set(att.unmapped.map((b) => b.menu))].slice(0, 10);
     }
+    // 販売管理とのつなぎ（第29.20.1節）: 品目を照らせなかった販売
+    const unmatched = this.deps.sales ? await this.deps.sales.attention(tenantId).catch(() => ({ count: 0, samples: [] as string[] })) : { count: 0, samples: [] as string[] };
     const expiring = rows.flatMap((r) => r.expiring
       .filter((e) => (EXPIRY_NOTICE_DAYS as readonly number[]).includes(e.days) || e.days === 0)
       .map((e) => `${r.name}${e.lot ? `（ロット ${e.lot}）` : ''}: ${qty(r, e.qty)}が${e.days === 0 ? '今日' : ` ${e.days} 日後`}に期限`));
-    if (short.length === 0 && expiring.length === 0 && overdue.length === 0 && unknownMenus.length === 0) return 0;
+    if (short.length === 0 && expiring.length === 0 && overdue.length === 0 && unknownMenus.length === 0 && unmatched.count === 0) return 0;
     const day = dateIn('Asia/Tokyo', now);
     const title = `在庫の見張り（${day.slice(5).replace('-', '/')}）`;
     const body = [
@@ -147,6 +151,7 @@ export class InventoryWatch {
       ...(expiring.length ? ['■ 使用期限', ...expiring.slice(0, 20)] : []),
       ...(overdue.length ? ['■ 予約の日を過ぎた取り置き（使った・取り消しを在庫管理の「取り置き」で）', ...overdue] : []),
       ...(unknownMenus.length ? ['■ 使う品目の分からない予約のメニュー（秘書に「〇〇では△△を 1 つ使う」と伝えてください）', ...unknownMenus] : []),
+      ...(unmatched.count ? [`■ 品目を照らせなかった販売 ${unmatched.count} 件（在庫管理の「照らせなかった販売」で品目を選ぶと記録します）`, ...unmatched.samples] : []),
     ].join('\n');
     let sent = 0;
     for (const u of await this.recipients(tenantId)) if (await this.notify(tenantId, u, title, body, now)) sent++;

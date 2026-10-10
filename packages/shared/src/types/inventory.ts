@@ -122,7 +122,8 @@ export interface InventoryMove {
   /** 増減の量（使う単位）。移動は動かした量（正）。 */
   delta: number;
   reason: string;
-  source: 'manual' | 'slip' | 'count' | 'reservation' | 'secretary' | 'import' | 'undo';
+  /** `sales` は販売管理とのつなぎからの販売・返品・取り消し（第29.20.1節）。 */
+  source: 'manual' | 'slip' | 'count' | 'reservation' | 'secretary' | 'import' | 'undo' | 'sales';
   reversalOf: string | null;
   createdBy: string;
   createdByName?: string;
@@ -315,4 +316,55 @@ export interface InventoryPublication {
   /** 公開の URL の鍵。最初の承認のときに作る。 */
   key: string | null;
   snapshotAt: string | null;
+}
+
+/** 1 社で持てる販売管理とのつなぎの数（第29.20.1節）。 */
+export const INVENTORY_SALES_LINK_MAX = 8;
+
+/** 販売管理に渡す範囲（管理者が承認する。第29.20.1節）。 */
+export interface InventorySalesScope {
+  itemIds: string[];
+  /** 使える数を渡すか（渡さなければ状態だけ）。 */
+  showCount: boolean;
+  /** 販売価格を渡すか。 */
+  price: boolean;
+  /** 社員価格を渡すか（既定は渡さない）。 */
+  employeePrice: boolean;
+}
+
+/** 販売管理とのつなぎ 1 つ（管理者に見せる。鍵は持たない）。 */
+export interface InventorySalesLink {
+  id: string;
+  name: string;
+  status: 'active' | 'stopped';
+  /** 承認した範囲。承認するまでは `null` で、一覧に何も渡さない。 */
+  scope: InventorySalesScope | null;
+  approvedBy: string | null;
+  approvedByName?: string;
+  approvedAt: string | null;
+  createdAt: string;
+  lastReadAt: string | null;
+  lastEventAt: string | null;
+  /** この 7 日に届いた通知の数。 */
+  eventsLast7Days: number;
+  /** 品目を選ぶのを待っている、照らせなかった行の数。 */
+  unmatchedOpen: number;
+}
+
+/** 照らせなかった販売の行（品目を選べば、その時点で記録する。第29.20.1節）。金額とお客様の情報は持たない。 */
+export interface InventorySaleUnmatched {
+  id: string;
+  linkId: string;
+  linkName: string;
+  /** 販売管理の販売番号。 */
+  saleRef: string;
+  /** 行で行うはずだったこと（取り置き・使用・入庫）。 */
+  action: 'hold' | 'use' | 'return';
+  /** 販売管理が送った品目の手がかり（M2Office の品目の ID・自社のコード・バーコード）。 */
+  itemRef: string;
+  code: string;
+  barcode: string;
+  qty: number;
+  reason: string;
+  createdAt: string;
 }

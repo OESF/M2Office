@@ -41,6 +41,7 @@ import { memberCardRoute } from './routes/member-card.js';
 import { printDesignsRoute } from './routes/print-designs.js';
 import { webReviewRoute } from './routes/web-review.js';
 import { inventoryHooksRoute } from './routes/inventory-hooks.js';
+import { inventorySalesHooksRoute } from './routes/inventory-sales-hooks.js';
 import { signageRoute } from './routes/signage.js';
 import { signagePlayRoute } from './routes/signage-play.js';
 import { hrTerminalRoute } from './routes/hr-terminal.js';
@@ -116,6 +117,8 @@ app.get('/health', (c) => c.json({ ok: true, service: 'api' }));
 // Google からの戻りは、テナントの判定とログインより前に受ける（state で照合する。仕様書 第14.3.3節）
 app.route('/v1/oauth', oauthCallbackRoute(deps));
 // 予約の受け口（第29.13.1節）。予約のシステムがログインの無いまま呼ぶ。URL の鍵から会社を引くため、会社の判定より前に置く
+// 販売管理とのつなぎ（第29.20.1節）。販売管理が鍵で呼ぶ。鍵から会社を引くため、会社の判定より前に置く（予約の受け口より先に）
+app.route('/v1/hooks/inventory/sales', inventorySalesHooksRoute(deps));
 app.route('/v1/hooks/inventory', inventoryHooksRoute(deps));
 // 在庫の Web への公開（第29.12.1節）。会社の Web サイトに貼られ、ログインの無い人が読む。URL の鍵から会社を引くため、会社の判定より前に置く
 app.route('/v1/public/inventory', inventoryPublicRoute(deps));

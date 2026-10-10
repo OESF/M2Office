@@ -4,7 +4,7 @@
 
 | ファイル | 内容 | 状態 |
 |---|---|---|
-| [inventory-sales.openapi.yaml](inventory-sales.openapi.yaml) | 在庫管理と販売管理のつなぎ（商品の一覧・販売の通知。仕様書 第29.20.1節、ADR-0087） | 案（まだ作っていない） |
+| [inventory-sales.openapi.yaml](inventory-sales.openapi.yaml) | 在庫管理と販売管理のつなぎ（商品の一覧・販売の通知。仕様書 第29.20.1節、ADR-0087） | 実装済み（第 0.325.0 版）。手で書いた定義で、実装との食い違いはテストで確かめる |
 
 ## 見る
 
@@ -20,7 +20,7 @@ http://localhost:3106/ を開くと Swagger UI が出ます。上の欄で定義
 Claude のアプリでは、`.claude/launch.json` の `api-docs` でも開けます。
 
 - Swagger UI は CDN（jsDelivr。版を固定）から読みます。インターネットにつながっている必要があります。
-- まだ作っていない口なので、画面から要求を送る「Try it out」は切っています。
+- 画面から要求を送る「Try it out」は切っています（鍵を画面に入れさせないため）。
 
 ## 決まり
 

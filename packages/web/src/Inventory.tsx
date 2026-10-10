@@ -15,6 +15,7 @@ import { api, describeError, type InventoryDetail, type InventoryList } from './
 import { Stocktake } from './Stocktake.js';
 import { BookingsPanel, OrderPanel, SlipResultPanel, SuppliersPanel } from './InventoryOrders.js';
 import { PublishPanel } from './InventoryPublish.js';
+import { SalesLinksPanel, SalesUnmatchedPanel } from './InventorySales.js';
 import type { InventorySlipResult } from './api.js';
 
 const KIND_LABELS: Record<InventoryMoveKind, string> = { in: '入庫', out: '使用', transfer: '移動', adjust: '調整' };
@@ -69,7 +70,9 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
   const [message, setMessage] = useState<string | null>(null);
   const [adding, setAdding] = useState<{ name: string; code: string } | null>(null);
   // 一覧の上に開く欄。一度に 1 つだけ開き、開いているあいだは品目の一覧を出さない（第29.11節「作業の欄」）
-  const [panel, setPanel] = useState<'places' | 'orders' | 'suppliers' | 'bookings' | 'publish' | null>(null);
+  const [panel, setPanel] = useState<'places' | 'orders' | 'suppliers' | 'bookings' | 'publish' | 'sales' | 'unmatched' | null>(null);
+  // 照らせなかった販売の数（販売管理とのつなぎ。第29.20.1節）。あるときだけボタンを出す
+  const [unmatched, setUnmatched] = useState(0);
   const [slip, setSlip] = useState<InventorySlipResult | null>(null);
   const slipPicker = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
@@ -86,7 +89,7 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
     setMobileQr(null);
   };
   /** 欄を開く（ほかの欄は閉じる）。開いている欄のボタンをもう一度押すと閉じる。 */
-  const toggle = (p: 'places' | 'orders' | 'suppliers' | 'bookings' | 'publish') => {
+  const toggle = (p: 'places' | 'orders' | 'suppliers' | 'bookings' | 'publish' | 'sales' | 'unmatched') => {
     if (panel === p) { setPanel(null); return; }
     closeWork();
     setPanel(p);
@@ -96,6 +99,7 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
 
   const load = useCallback(() => {
     api.inventory.list({ q, stopped }).then(setList).catch((e) => setMessage(describeError(e, '読み込めませんでした')));
+    api.inventory.salesUnmatched().then((r) => setUnmatched(r.items.length)).catch(() => undefined);
   }, [q, stopped]);
   useEffect(() => {
     const t = setTimeout(load, q ? 250 : 0);
@@ -182,6 +186,8 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
         <button className={panel === 'suppliers' ? 'btn' : 'btn ghost'} onClick={() => toggle('suppliers')}>仕入先</button>
         {list?.settings.features.reserve && <button className={panel === 'bookings' ? 'btn' : 'btn ghost'} onClick={() => toggle('bookings')}>取り置き</button>}
         {list?.admin && list.settings.features.publish && <button className={panel === 'publish' ? 'btn' : 'btn ghost'} onClick={() => toggle('publish')}>Web へ公開</button>}
+        {list?.admin && <button className={panel === 'sales' ? 'btn' : 'btn ghost'} onClick={() => toggle('sales')}>販売管理とのつなぎ</button>}
+        {unmatched > 0 && <button className={panel === 'unmatched' ? 'btn' : 'btn ghost warn'} onClick={() => toggle('unmatched')}>照らせなかった販売（{unmatched}）</button>}
         <button className="btn ghost" disabled={busy} onClick={() => slipPicker.current?.click()}>納品書から入庫</button>
         <input ref={slipPicker} type="file" hidden accept="image/png,image/jpeg,image/webp,application/pdf"
           onChange={(e) => void readSlipFile(e.target.files?.[0])} />
@@ -195,6 +201,8 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
       {panel === 'suppliers' && <SuppliersPanel />}
       {panel === 'bookings' && list && <BookingsPanel items={list.items} onChanged={load} />}
       {panel === 'publish' && list && <PublishPanel items={list.items} />}
+      {panel === 'sales' && list && <SalesLinksPanel items={list.items} />}
+      {panel === 'unmatched' && list && <SalesUnmatchedPanel items={list.items} onChanged={load} />}
       {slip && list && <SlipResultPanel result={slip} items={list.items} onRecorded={load} onClose={() => setSlip(null)} />}
       {mobileQr && (
         <div className="card inventory-new mobile-qr">

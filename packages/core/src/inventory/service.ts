@@ -286,14 +286,18 @@ export class InventoryService {
   private async views(tenantId: string, items: InventoryItem[], settings: InventorySettings, today?: string): Promise<InventoryItemView[]> {
     if (items.length === 0) return [];
     const day = today ?? dateIn('Asia/Tokyo');
-    const [stock, held] = await Promise.all([this.deps.store.listStock(tenantId, items.map((i) => i.id)), this.deps.store.heldByItem(tenantId)]);
+    // 予約との引き当てを入れていない会社でも、販売管理の注文の取り置き（第29.20.1節）は使える数から引く
+    const [stock, held] = await Promise.all([
+      this.deps.store.listStock(tenantId, items.map((i) => i.id)),
+      this.deps.store.heldByItem(tenantId, settings.features.reserve ? undefined : 'sales'),
+    ]);
     const byItem = new Map<string, StockRecord[]>();
     for (const s of stock) byItem.set(s.itemId, [...(byItem.get(s.itemId) ?? []), s]);
     return items.map((i) => {
       const rows = byItem.get(i.id) ?? [];
       const onHand = round3(rows.reduce((a, s) => a + s.qty, 0));
       const expired = round3(rows.filter((s) => s.qty > 0 && s.expiresOn && s.expiresOn < day).reduce((a, s) => a + s.qty, 0));
-      const reserved = settings.features.reserve ? round3(held.get(i.id) ?? 0) : 0;
+      const reserved = round3(held.get(i.id) ?? 0);
       const available = round3(onHand - reserved - expired);
       const expiries = rows.filter((s) => s.qty > 0 && s.expiresOn).map((s) => s.expiresOn!).sort();
       return {
@@ -628,6 +632,18 @@ export class InventoryService {
     if (move.createdBy !== userId) return { ok: false, error: '取り消せるのは自分の記録だけです。ほかは調整で直してください' };
     if (move.reversalOf) return { ok: false, error: '取り消しの記録は取り消せません' };
     if (dateIn(timeZone, new Date(move.createdAt)) !== dateIn(timeZone)) return { ok: false, error: '取り消せるのはその日のうちだけです。調整で直してください' };
+    return this.reverse(tenantId, userId, moveId, { reason: '取り消し', source: 'undo' });
+  }
+
+  /**
+   * 記録の組を、逆の記録を足して戻す（記録した人と日を問わない）。販売管理の販売の取り消し（第29.20.1節）が使う。
+   *
+   * @remarks 人の「取り消す」は {@link undo}（自分の記録・その日のうちだけ）。一緒に足した記録はまとめて戻す
+   */
+  async reverse(tenantId: string, actor: string, moveId: string, opts: { reason: string; source: InventoryMove['source']; sourceId?: string }): Promise<MoveResult> {
+    const move = await this.deps.store.getMove(tenantId, moveId);
+    if (!move) return { ok: false, error: '記録が見つかりません' };
+    if (move.reversalOf) return { ok: false, error: '取り消しの記録は取り消せません' };
     const group = await this.deps.store.siblings(tenantId, moveId);
     for (const m of group) if (await this.deps.store.isReversed(tenantId, m.id)) return { ok: false, error: 'すでに取り消しています' };
     const at = now();
@@ -637,7 +653,7 @@ export class InventoryService {
       fromLocationId: m.kind === 'transfer' ? m.toLocationId : m.fromLocationId,
       toLocationId: m.kind === 'transfer' ? m.fromLocationId : m.toLocationId,
       delta: m.kind === 'transfer' ? m.delta : -m.delta,
-      reason: '取り消し', source: 'undo', sourceId: null, reversalOf: m.id, batchId, createdBy: userId, createdAt: at,
+      reason: opts.reason, source: opts.source, sourceId: opts.sourceId ?? null, reversalOf: m.id, batchId, createdBy: actor, createdAt: at,
     }));
     await this.deps.store.applyMoves(tenantId, moves);
     const item = (await this.deps.store.getItem(tenantId, move.itemId))!;
