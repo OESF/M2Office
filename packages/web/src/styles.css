@@ -2203,10 +2203,13 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .scope-pop-head { margin-top: calc(8px * var(--space-scale)); }
 .scope-pop.up { top: auto; bottom: calc(100% + 4px); }
 
-/* 販売管理とのつなぎの鍵（一度だけ出す。仕様書 第29.20.1節） */
+/* 外部のアプリの鍵（一度だけ出す）と機能の一覧（仕様書 第13.4.1節） */
 .key-banner { margin: calc(8px * var(--space-scale)) 0; padding: calc(10px * var(--space-scale)); border: 1px solid var(--warn-line); border-radius: 8px; background: var(--warn-soft); }
 .key-banner .copy-row { display: flex; gap: 6px; margin-top: 6px; }
 .key-banner input { flex: 1; font-family: var(--mono, monospace); }
+.app-section-title { margin: calc(4px * var(--space-scale)) 0 0; }
+.app-functions { list-style: none; margin: 0; padding: 0; display: grid; gap: calc(6px * var(--space-scale)); }
+.app-functions .check { white-space: normal; flex-wrap: wrap; gap: calc(6px * var(--space-scale)); }
 .sales-unmatched-list li { padding: calc(8px * var(--space-scale)) 0; border-bottom: 1px solid var(--line); display: grid; gap: 4px; }
 .sales-unmatched-list li:last-child { border-bottom: 0; }
 .sales-unmatched-list select { max-width: 100%; }

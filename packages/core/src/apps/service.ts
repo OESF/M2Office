@@ -165,25 +165,27 @@ export class ExternalApps {
     removed = [...removed.filter((r) => !after.has(r.itemId)), ...[...before].filter((x) => !after.has(x)).map((itemId) => ({ itemId, at }))].slice(-REMOVED_KEEP);
     await this.deps.store.updateApp(tenantId, id, { functions, settings, catalogRemoved: removed, approvedBy: userId, approvedAt: at });
     await this.audit(tenantId, userId, 'app.approve', id, {
-      functions, ...(settings.catalog ? { catalogItems: settings.catalog.itemIds.length, showCount: settings.catalog.showCount, price: settings.catalog.price, employeePrice: settings.catalog.employeePrice } : {}),
+      name: app.name, functions, ...(settings.catalog ? { catalogItems: settings.catalog.itemIds.length, showCount: settings.catalog.showCount, price: settings.catalog.price, employeePrice: settings.catalog.employeePrice } : {}),
     });
     return (await this.view(tenantId, id))!;
   }
 
   /** 鍵を出し直す。前の鍵はすぐ使えなくなる。新しい鍵はこの答えでだけ見せる。 */
   async rekey(tenantId: string, userId: string, id: string): Promise<{ app: ExternalApp; key: string } | { error: string }> {
-    if (!(await this.deps.store.getApp(tenantId, id))) return { error: 'アプリが見つかりません' };
+    const app = await this.deps.store.getApp(tenantId, id);
+    if (!app) return { error: 'アプリが見つかりません' };
     const key = APP_KEY_PREFIX + randomBytes(24).toString('base64url');
     await this.deps.store.updateApp(tenantId, id, { keyHash: appKeyHash(key) });
-    await this.audit(tenantId, userId, 'app.rekey', id, {});
+    await this.audit(tenantId, userId, 'app.rekey', id, { name: app.name });
     return { app: (await this.view(tenantId, id))!, key };
   }
 
   /** 止める・動かす。止めたアプリの鍵では、どの道も 404 になる。 */
   async setStatus(tenantId: string, userId: string, id: string, status: 'active' | 'stopped'): Promise<ExternalApp | { error: string }> {
-    if (!(await this.deps.store.getApp(tenantId, id))) return { error: 'アプリが見つかりません' };
+    const app = await this.deps.store.getApp(tenantId, id);
+    if (!app) return { error: 'アプリが見つかりません' };
     await this.deps.store.updateApp(tenantId, id, { status });
-    await this.audit(tenantId, userId, status === 'stopped' ? 'app.stop' : 'app.resume', id, {});
+    await this.audit(tenantId, userId, status === 'stopped' ? 'app.stop' : 'app.resume', id, { name: app.name });
     return (await this.view(tenantId, id))!;
   }
 

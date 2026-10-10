@@ -196,7 +196,7 @@ function AppEditor({ app: initial, functions, items, onKey, onChanged }: {
         <dt>最後に呼ばれた</dt><dd>{when(app.lastUsedAt)}（この 7 日で {app.callsLast7Days} 回）</dd>
       </dl>
 
-      <h4>機能</h4>
+      <h4 className="app-section-title">機能</h4>
       <ul className="plain app-functions">
         {functions.map((f) => (
           <li key={f.id}>
@@ -252,7 +252,7 @@ function CatalogEditor({ scope, items, onChange }: { scope: InventoryCatalogScop
   const selectCategory = (cat: string) => onChange({ ...scope, itemIds: [...new Set([...scope.itemIds, ...active.filter((i) => i.category === cat).map((i) => i.id)])] });
   return (
     <div className="app-setting">
-      <h4>商品の一覧で渡すもの</h4>
+      <h4 className="app-section-title">商品の一覧で渡すもの</h4>
       <div className="publish-options">
         <div className="segmented" role="radiogroup" aria-label="渡し方">
           <button role="radio" aria-checked={!scope.showCount} className={!scope.showCount ? 'on' : ''} onClick={() => onChange({ ...scope, showCount: false })}>状態だけ</button>

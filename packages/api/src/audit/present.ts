@@ -509,6 +509,8 @@ function targetOf(e: AuditEvent, names: AuditNames): string {
       return r ? `業務「${r.agentName}」の承認` : `承認 ${id.slice(0, 8)}`;
     }
     case 'connection': return names.connection(id) ? `接続「${names.connection(id)}」` : id;
+    // 外部のアプリは、記録に添えた名前（会社が付けた名前）で出す
+    case 'external_app': return typeof e.detail?.['name'] === 'string' ? `外部のアプリ「${e.detail['name']}」` : `外部のアプリ ${id.slice(0, 8)}`;
     case 'group': return names.group(id) ? `グループ「${names.group(id)}」` : id;
     case 'compartment': return names.compartment(id) ? `区画「${names.compartment(id)}」` : id;
     // 従業員の名前は監査ログの画面に出さない（人事区画の外の管理者も見るため）。台帳の ID の頭だけ
