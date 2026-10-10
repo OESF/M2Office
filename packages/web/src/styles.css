@@ -1811,6 +1811,23 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .columns { display: flex; flex-direction: column; gap: calc(8px * var(--space-scale)); }
 .columns .badge.ok { background: var(--ok-soft, var(--accent-soft)); color: var(--ok); }
 .columns .badge.danger { background: var(--danger-soft, var(--warn-soft)); color: var(--danger); }
+/* テーマ案の表（材料・テーマ・なぜ今か・操作）。欄が狭いときは材料となぜ今かをテーマの下にまとめる（第32.18.4節） */
+.columns-themes { container-type: inline-size; }
+.columns-themes-table { width: 100%; }
+.columns-themes-table th, .columns-themes-table td { vertical-align: top; }
+.columns-themes-table .ct-source { width: 1%; white-space: nowrap; }
+.columns-themes-table .ct-theme { min-width: 12em; }
+.columns-themes-table .ct-theme strong { display: block; line-height: 1.5; }
+.columns-themes-table .ct-why { width: 36%; line-height: 1.5; }
+.columns-themes-table .ct-actions { width: 1%; white-space: nowrap; text-align: right; }
+.columns-themes-table .ct-actions .btn + .btn { margin-left: 6px; }
+.columns-themes-table .ct-compact { display: none; }
+@container (max-width: 560px) {
+  .columns-themes-table .ct-source, .columns-themes-table .ct-why { display: none; }
+  .columns-themes-table .ct-compact { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px; line-height: 1.5; }
+  .columns-themes-table .ct-actions .btn { display: block; width: 100%; }
+  .columns-themes-table .ct-actions .btn + .btn { margin: 6px 0 0; }
+}
 .columns-list tr.clickable { cursor: pointer; }
 .columns-list tr.clickable:hover td { background: var(--accent-soft); }
 .columns-new { display: flex; flex-direction: column; gap: calc(6px * var(--space-scale)); max-width: 44em; }

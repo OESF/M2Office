@@ -140,19 +140,33 @@ function ColumnList({ onOpen }: { onOpen: (id: string) => void }) {
       {!writing && themes.length > 0 && (
         <div className="card columns-themes">
           <h3>テーマ案</h3>
-          <ul>
-            {themes.map((t) => (
-              <li key={t.id}>
-                <span className="badge">{COLUMN_THEME_SOURCE_LABELS[t.source]}</span> <strong>{t.theme}</strong>
-                {t.why && <span className="muted small">　{t.why}</span>}
-                {t.sourceUrl && <a className="small" href={t.sourceUrl} target="_blank" rel="noopener noreferrer" title={t.sourceTitle}>　出典</a>}
-                <span className="row">
-                  <button className="btn small" disabled={busy} onClick={() => void writeTheme(t)}>{t.columnId ? '書き直しを頼む' : '書く'}</button>
-                  <button className="btn ghost small" disabled={busy} onClick={() => dismiss(t)}>見送り</button>
-                </span>
-              </li>
-            ))}
-          </ul>
+          {/* 材料・テーマ・なぜ今か・操作の表。欄が狭いときは、材料となぜ今かをテーマの下にまとめる（CSS のコンテナ クエリ） */}
+          <table className="table columns-themes-table">
+            <thead><tr><th className="ct-source">材料</th><th>テーマ</th><th className="ct-why">なぜ今か</th><th className="ct-actions" aria-label="操作" /></tr></thead>
+            <tbody>
+              {themes.map((t) => {
+                const source = t.sourceUrl
+                  ? <a className="small" href={t.sourceUrl} target="_blank" rel="noopener noreferrer" title={t.sourceTitle}>出典</a>
+                  : null;
+                return (
+                  <tr key={t.id}>
+                    <td className="ct-source"><span className="badge">{COLUMN_THEME_SOURCE_LABELS[t.source]}</span></td>
+                    <td className="ct-theme">
+                      <strong>{t.theme}</strong>
+                      <span className="ct-compact muted small">
+                        <span className="badge">{COLUMN_THEME_SOURCE_LABELS[t.source]}</span>{t.why && <span>{t.why}</span>}{source}
+                      </span>
+                    </td>
+                    <td className="ct-why muted small">{t.why}{t.why && source ? ' ' : ''}{source}</td>
+                    <td className="ct-actions">
+                      <button className="btn small" disabled={busy} onClick={() => void writeTheme(t)}>{t.columnId ? '書き直しを頼む' : '書く'}</button>
+                      <button className="btn ghost small" disabled={busy} onClick={() => dismiss(t)}>見送り</button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
       {!writing && plan.length > 0 && (
