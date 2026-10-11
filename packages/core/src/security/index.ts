@@ -3,9 +3,9 @@
  */
 
 export {
-  PostgresSecurityStore, MemorySecurityStore, type SecurityStore, type SecuritySignal, type SecuritySignalType, type LiveSession,
+  PostgresSecurityStore, MemorySecurityStore, type SecurityStore, type SecuritySignal, type SecuritySignalType, type SecurityViewKind, type LiveSession,
 } from './store.js';
 export {
   SecurityWatch, messageOf, SECURITY_SIGNAL_LABELS, SECURITY_EXPORT_ROWS, SECURITY_EXPORT_BURST, SECURITY_LOGIN_BURST, SECURITY_LOGIN_FLOOD,
-  SECURITY_PERMISSION_BURST, SECURITY_LOCK_MS, SECURITY_SUPPRESS_MS, SECURITY_STALE_MS, type SecurityWatchDeps, type SecurityWatchStatus, type SecurityScanResult, type SecuritySignalView,
+  SECURITY_PERMISSION_BURST, SECURITY_LOCK_MS, SECURITY_SUPPRESS_MS, SECURITY_STALE_MS, SECURITY_VIEW_ROWS, SECURITY_VIEW_FACTOR, SECURITY_VIEW_KEEP_MS, type SecurityWatchDeps, type SecurityWatchStatus, type SecurityScanResult, type SecuritySignalView,
 } from './watch.js';

@@ -175,3 +175,19 @@ test('ダッシュボードの様子: 見回るたびに時刻を残し、15 分
   assert.ok(!JSON.stringify(s).includes('u-staff'), '誰かは返さない');
   assert.equal((await watch.status('t1', new Date(NOON.getTime() + 16 * 60_000))).state, 'stale');
 });
+
+test('段 2 の大量に開く: 1 時間に 200 件以上で、会社のふだんの 5 倍以上のときだけ知らせる。数だけを持ち、7 日で消す', async () => {
+  const { watch, store, notes } = setup();
+  // ふだん: 人と 1 時間あたり 60 件ほど（5 倍は 300 件）
+  for (let d = 1; d <= 3; d++) for (let i = 0; i < 60; i++) await watch.recordView('t1', 'u-admin', 'contact', new Date(NOON.getTime() - d * 86_400_000));
+  for (let i = 0; i < 250; i++) await watch.recordView('t1', 'u-staff', 'contact', new Date(NOON.getTime() - 10 * 60_000));
+  assert.equal((await watch.scan('t1', NOON)).found.length, 0, '200 件を超えても、ふだんの 5 倍に届かなければ知らせない');
+  for (let i = 0; i < 100; i++) await watch.recordView('t1', 'u-staff', 'inquiry', new Date(NOON.getTime() - 5 * 60_000));
+  const r = await watch.scan('t1', new Date(NOON.getTime() + 60_000));
+  assert.deepEqual(r.found.map((s) => [s.type, s.userId, s.detail['count']]), [['mass_view', 'u-staff', 350]]);
+  assert.match(notes.at(-1)!.body, /350 件の記録/);
+  await watch.recordView('t1', 'app:x', 'contact', NOON);
+  assert.ok(![...store.views.keys()].some((k) => k.includes('app:x')), '外部のアプリは数えない');
+  await watch.scan('t1', new Date(NOON.getTime() + 8 * 86_400_000));
+  assert.equal(store.views.size, 0, '7 日を過ぎた数は消す');
+});

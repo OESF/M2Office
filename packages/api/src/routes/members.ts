@@ -125,6 +125,8 @@ export function membersRoute(deps: AppDeps) {
     const w = who(c);
     const r = ID.test(id) ? await service.get(w, id) : null;
     if (!r) return c.json({ error: '会員が見つかりません' }, 404);
+    // 開いた数を数える（不正の兆しの見張りの段 2。人と 1 時間ごとの件数だけ。第16.8.4節）
+    void deps.security.recordView(w.tenantId, w.userId, 'member');
     const key = await service.cardKeyOf(w, id);
     return c.json({ ...r, cardUrl: key ? memberCardUrl(origin(c), key) : null });
   });

@@ -55,6 +55,8 @@ function attention(t: TenantRow, now = Date.now()): string[] {
   if (t.runs30d >= 5 && t.runsFailed30d / t.runs30d >= 0.2) out.push('失敗が多い');
   if ((t.status === 'trial' || t.status === 'active') && (!t.lastUsedAt || now - Date.parse(t.lastUsedAt) > 30 * 86_400_000)) out.push('30 日使われていない');
   if (t.usersActive > 0 && t.usersInvited === t.usersActive) out.push('まだ誰もログインしていない');
+  // 不正の兆し（第16.8節・第23.8.3節の異常検知の件数）。重いものがあれば、その数も添える
+  if ((t.securitySignals24h ?? 0) > 0) out.push(`不正の兆し ${t.securitySignals24h} 件${(t.securityHigh24h ?? 0) > 0 ? `（重い ${t.securityHigh24h}）` : ''}`);
   return out;
 }
 

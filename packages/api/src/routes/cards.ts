@@ -296,6 +296,8 @@ export function cardsRoute(deps: AppDeps) {
     const { user } = c.get('ctx');
     const d = await service.detail(v, c.req.param('id'));
     if (!d) return c.json({ error: '名刺が見つかりません' }, 404);
+    // 開いた数を数える（不正の兆しの見張りの段 2。人と 1 時間ごとの件数だけ。第16.8.4節）
+    void deps.security.recordView(v.tenantId, v.userId, 'contact');
     const users = await deps.repo.listUsers(v.tenantId);
     // メールの署名から新しくしたもの（system）は人の名前を出さない（第27.6.1節）
     const nameOf = (id: string | null) => (id && id !== 'system' ? users.find((u) => u.id === id)?.displayName ?? '（取得できませんでした）' : null);

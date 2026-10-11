@@ -68,6 +68,9 @@ export interface TenantOverview {
   filesBytes: number;
   extensions: number;
   googleConnections: number;
+  /** この 24 時間の不正の兆しの数と、そのうち重いもの（第16.8節・第23.8.3節。中身と人は返さない）。 */
+  securitySignals24h: number;
+  securityHigh24h: number;
 }
 
 /** ローカルの形の機械。 */
@@ -492,12 +495,18 @@ export class OpsStore {
 
   /** 会社ごとの数（その場で数える）。 */
   async tenantOverview(): Promise<TenantOverview[]> {
-    const { rows } = await this.pool.query('select * from ops.tenant_overview()');
+    const [{ rows }, sec] = await Promise.all([
+      this.pool.query('select * from ops.tenant_overview()'),
+      // 不正の兆しの数（移行 124 より前のデータベースでは読めないので、0 として扱う）
+      this.pool.query('select * from ops.tenant_security()').then((x) => x.rows as { tenant_id: string; signals_24h: number; high_24h: number }[]).catch(() => []),
+    ]);
+    const signals = new Map(sec.map((s) => [s.tenant_id, s]));
     return rows.map((r) => ({
       id: r.id, subdomain: r.subdomain, name: r.name, workspaceDomain: r.workspace_domain, status: r.status, createdAt: iso(r.created_at)!,
       usersActive: r.users_active, usersInvited: r.users_invited, users30d: r.users_30d, lastUsedAt: iso(r.last_used_at),
       runsToday: r.runs_today, runs30d: r.runs_30d, runsFailed30d: r.runs_failed_30d, conversations30d: r.conversations_30d,
       aiCostMonth: Number(r.ai_cost_month), filesBytes: Number(r.files_bytes), extensions: r.extensions, googleConnections: r.google_connections,
+      securitySignals24h: signals.get(r.id)?.signals_24h ?? 0, securityHigh24h: signals.get(r.id)?.high_24h ?? 0,
     }));
   }
 

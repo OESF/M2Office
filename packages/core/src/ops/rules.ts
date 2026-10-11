@@ -193,12 +193,12 @@ function csvCell(v: unknown): string {
 export function tenantsCsv(rows: {
   name: string; subdomain: string; workspaceDomain: string | null; status: string; createdAt: string; usersActive: number; usersInvited: number;
   users30d: number; lastUsedAt: string | null; runsToday: number; runs30d: number; runsFailed30d: number; conversations30d: number;
-  aiCostMonth: number; filesBytes: number; extensions: number; googleConnections: number;
+  aiCostMonth: number; filesBytes: number; extensions: number; googleConnections: number; securitySignals24h?: number;
 }[]): string {
   const head = ['会社名', 'サブドメイン', 'Workspace のドメイン', '状態', '作った日時', '利用中の利用者', '未ログインの利用者', '30 日に使った人', '最後に使った日時',
-    '今日の実行', '30 日の実行', '30 日の失敗', '30 日の会話', '今月の AI の費用（円）', '保存の量（バイト）', '拡張機能', 'Google の接続'];
+    '今日の実行', '30 日の実行', '30 日の失敗', '30 日の会話', '今月の AI の費用（円）', '保存の量（バイト）', '拡張機能', 'Google の接続', '24 時間の不正の兆し'];
   const lines = rows.map((r) => [r.name, r.subdomain, r.workspaceDomain, r.status, r.createdAt, r.usersActive, r.usersInvited, r.users30d, r.lastUsedAt,
-    r.runsToday, r.runs30d, r.runsFailed30d, r.conversations30d, Math.round(r.aiCostMonth), r.filesBytes, r.extensions, r.googleConnections].map(csvCell).join(','));
+    r.runsToday, r.runs30d, r.runsFailed30d, r.conversations30d, Math.round(r.aiCostMonth), r.filesBytes, r.extensions, r.googleConnections, r.securitySignals24h ?? 0].map(csvCell).join(','));
   return `\ufeff${[head.join(','), ...lines].join('\r\n')}\r\n`;
 }
 

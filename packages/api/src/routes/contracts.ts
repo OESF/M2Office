@@ -107,8 +107,11 @@ export function contractsRoute(deps: AppDeps) {
   app.get('/:id/file', async (c) => {
     const id = c.req.param('id');
     if (!ID.test(id)) return c.json({ error: '契約が見つかりません' }, 404);
-    const r = await service.openFile(who(c), id);
+    const w = who(c);
+    const r = await service.openFile(w, id);
     if ('error' in r) return c.json({ error: r.error }, 404);
+    // 開いた数を数える（不正の兆しの見張りの段 2。人と 1 時間ごとの件数だけ。第16.8.4節）
+    void deps.security.recordView(w.tenantId, w.userId, 'contract');
     return new Response(Buffer.from(r.bytes), {
       headers: {
         'content-type': r.mimeType, 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff',

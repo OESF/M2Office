@@ -43,7 +43,10 @@ export function hrRoute(deps: AppDeps) {
   app.get('/employees/:id', async (c) => {
     const { tenant, user } = c.get('ctx');
     const d = await service.detail(tenant.id, user.id, c.req.param('id'));
-    return d ? c.json(d) : c.json({ error: '従業員が見つかりません' }, 404);
+    if (!d) return c.json({ error: '従業員が見つかりません' }, 404);
+    // 開いた数を数える（不正の兆しの見張りの段 2。人と 1 時間ごとの件数だけ。第16.8.4節）
+    void deps.security.recordView(tenant.id, user.id, 'hr_employee');
+    return c.json(d);
   });
 
   /** 従業員を作る（入社。最初の雇用条件と、入社の手続きを作る）。 */

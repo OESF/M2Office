@@ -174,8 +174,12 @@ export function inquiriesRoute(deps: AppDeps) {
 
   /** 1 件と、会話の履歴と、次にやること。 */
   app.get('/:id', async (c) => {
-    const detail = await service.detail(who(c), c.req.param('id'));
-    return detail ? c.json(detail) : c.json({ error: '問い合わせが見つかりません' }, 404);
+    const w = who(c);
+    const detail = await service.detail(w, c.req.param('id'));
+    if (!detail) return c.json({ error: '問い合わせが見つかりません' }, 404);
+    // 開いた数を数える（不正の兆しの見張りの段 2。人と 1 時間ごとの件数だけ。第16.8.4節）
+    void deps.security.recordView(w.tenantId, w.userId, 'inquiry');
+    return c.json(detail);
   });
 
   /** 1 件の画面から続きを足す（その問い合わせに足す）。 */

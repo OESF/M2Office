@@ -67,6 +67,9 @@ export interface TenantRow {
   filesBytes: number;
   extensions: number;
   googleConnections: number;
+  /** この 24 時間の不正の兆しの数と、そのうち重いもの（中身と人は返さない）。古い API では無い。 */
+  securitySignals24h?: number;
+  securityHigh24h?: number;
 }
 
 export interface MachineRow {

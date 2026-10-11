@@ -9,9 +9,12 @@
 import type pg from 'pg';
 import { createPool } from '../repository/pool.js';
 
+/** 開いた数を数える記録の種類（段 2。第16.8.4節）。 */
+export type SecurityViewKind = 'contact' | 'inquiry' | 'member' | 'contract' | 'hr_employee';
+
 /** 兆しの型。 */
 export type SecuritySignalType =
-  | 'export' | 'export_burst' | 'bulk_mail' | 'login_disabled' | 'session_disabled' | 'login_burst' | 'login_flood'
+  | 'export' | 'export_burst' | 'bulk_mail' | 'mass_view' | 'login_disabled' | 'session_disabled' | 'login_burst' | 'login_flood'
   | 'admin_added' | 'permission_burst' | 'new_device' | 'auto_signout';
 
 /** 見つけた兆し。 */
@@ -55,6 +58,12 @@ export interface SecurityStore {
   markScan(tenantId: string, at: string): Promise<void>;
   /** 最後に見回った時刻（まだなら `null`）。 */
   lastScan(tenantId: string): Promise<string | null>;
+  /** 開いた数を 1 つ数える（人と 1 時間ごとの件数だけ。どの記録かは持たない）。 */
+  countView(tenantId: string, userId: string, kind: SecurityViewKind, hour: string): Promise<void>;
+  /** この時刻から後の、人と 1 時間ごとの開いた数（種類はまとめる）。 */
+  viewCounts(tenantId: string, since: string): Promise<{ userId: string; hour: string; n: number }[]>;
+  /** この時刻より前の開いた数を消す（7 日で消す）。 */
+  pruneViews(tenantId: string, before: string): Promise<void>;
 }
 
 interface SignalRow { id: string; type: SecuritySignalType; severity: 'high' | 'medium'; user_id: string | null; key: string; detail: Record<string, unknown> | null; created_at: unknown }
@@ -139,6 +148,22 @@ export class PostgresSecurityStore implements SecurityStore {
     const [r] = await this.q<{ last_scan_at: unknown }>(tenantId, 'select last_scan_at from security_watch_state where tenant_id = $1', [tenantId]);
     return r ? iso(r.last_scan_at) : null;
   }
+
+  async countView(tenantId: string, userId: string, kind: SecurityViewKind, hour: string): Promise<void> {
+    await this.q(tenantId,
+      `insert into security_view_counts (tenant_id, user_id, hour, kind, n) values ($1,$2,$3,$4,1)
+       on conflict (tenant_id, user_id, hour, kind) do update set n = security_view_counts.n + 1`, [tenantId, userId, hour, kind]);
+  }
+
+  async viewCounts(tenantId: string, since: string): Promise<{ userId: string; hour: string; n: number }[]> {
+    const rows = await this.q<{ user_id: string; hour: unknown; n: number }>(tenantId,
+      'select user_id, hour, sum(n)::int as n from security_view_counts where tenant_id = $1 and hour >= $2 group by user_id, hour', [tenantId, since]);
+    return rows.map((r) => ({ userId: r.user_id, hour: iso(r.hour), n: r.n }));
+  }
+
+  async pruneViews(tenantId: string, before: string): Promise<void> {
+    await this.q(tenantId, 'delete from security_view_counts where tenant_id = $1 and hour < $2', [tenantId, before]);
+  }
 }
 
 /** メモリの見張りの置き場（試験用）。端末と監査ログの数は、渡したものを読む。 */
@@ -184,5 +209,30 @@ export class MemorySecurityStore implements SecurityStore {
 
   async lastScan(tenantId: string): Promise<string | null> {
     return this.scans.get(tenantId) ?? null;
+  }
+
+  readonly views = new Map<string, number>();
+
+  async countView(tenantId: string, userId: string, kind: SecurityViewKind, hour: string): Promise<void> {
+    const k = [tenantId, userId, hour, kind].join('\u0000');
+    this.views.set(k, (this.views.get(k) ?? 0) + 1);
+  }
+
+  async viewCounts(tenantId: string, since: string): Promise<{ userId: string; hour: string; n: number }[]> {
+    const out = new Map<string, { userId: string; hour: string; n: number }>();
+    for (const [k, n] of this.views) {
+      const [t, userId, hour] = k.split('\u0000') as [string, string, string];
+      if (t !== tenantId || hour < since) continue;
+      const key = `${userId}\u0000${hour}`;
+      out.set(key, { userId, hour, n: (out.get(key)?.n ?? 0) + n });
+    }
+    return [...out.values()];
+  }
+
+  async pruneViews(tenantId: string, before: string): Promise<void> {
+    for (const k of [...this.views.keys()]) {
+      const [t, , hour] = k.split('\u0000') as [string, string, string];
+      if (t === tenantId && hour < before) this.views.delete(k);
+    }
   }
 }

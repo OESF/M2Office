@@ -2,7 +2,7 @@
  * @file 不正の兆しの見張り（仕様書 第16.8節、ADR-0091）。ワーカーが 5 分ごとに監査ログとログイン中の端末を読み、
  * 決まった規則で兆しを見つけて、管理者に「セキュリティ」のお知らせで知らせる。
  *
- * - 兆し: 大量の持ち出し（書き出し・一斉メール）・ログインの攻撃（拒否が続く・止めたアカウント・止めた人の端末）・
+ * - 兆し: 大量の持ち出し（書き出し・一斉メール・短い時間に多くの記録を開く）・ログインの攻撃（拒否が続く・止めたアカウント・止めた人の端末）・
  *   権限の変化（管理者が増えた・権限の変更が続く）・ありえない並び（同じ種類の端末 2 つが同時に使われる。まず本人に知らせる）
  * - ふだんと違う時間（深夜・休業日）は、単独では知らせず、重さを 1 段上げるだけに使う（深夜に働く人を見張らないため）
  * - 同じ人に 1 時間のうちに、まとまりの違う重さ高が 2 つ重なったら（持ち出しと権限の変化など）、その人の端末を自動ですべてログアウトする
@@ -17,7 +17,7 @@ import type { AuditEvent, User } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import { closedReason } from '../scheduler/business-days.js';
 import { deviceOf } from '../dashboard/presence.js';
-import type { SecuritySignal, SecuritySignalType, SecurityStore } from './store.js';
+import type { SecuritySignal, SecuritySignalType, SecurityStore, SecurityViewKind } from './store.js';
 
 /** 1 回で大量とみなす書き出し・一斉メールの件数。 */
 export const SECURITY_EXPORT_ROWS = 500;
@@ -29,6 +29,12 @@ export const SECURITY_LOGIN_BURST = 5;
 export const SECURITY_LOGIN_FLOOD = 20;
 /** 同じ人の 10 分の権限の変更の回数。 */
 export const SECURITY_PERMISSION_BURST = 5;
+/** 1 時間に開いた数で、大量とみなす下限（段 2。会社のふだんの 5 倍以上のときだけ）。 */
+export const SECURITY_VIEW_ROWS = 200;
+/** 会社のふだんの開いた数（人と 1 時間あたり）の何倍で大量とみなすか。 */
+export const SECURITY_VIEW_FACTOR = 5;
+/** 開いた数を持つ期間（ミリ秒）。 */
+export const SECURITY_VIEW_KEEP_MS = 7 * 86_400_000;
 /** ログインの締め出しの長さ（ミリ秒）。 */
 export const SECURITY_LOCK_MS = 30 * 60_000;
 /** 「これは大丈夫」で知らせない長さ（ミリ秒）。 */
@@ -91,7 +97,7 @@ const countOf = (e: AuditEvent): number => {
 };
 /** 兆しのまとまり（自動でログアウトするのは、まとまりの違う重さ高が 2 つ重なったときだけ。1 つの行動を二重に数えない）。 */
 const FAMILY: Record<SecuritySignalType, string> = {
-  export: 'exfiltration', export_burst: 'exfiltration', bulk_mail: 'exfiltration',
+  export: 'exfiltration', export_burst: 'exfiltration', bulk_mail: 'exfiltration', mass_view: 'exfiltration',
   login_disabled: 'login', session_disabled: 'login', login_burst: 'login', login_flood: 'login',
   admin_added: 'permission', permission_burst: 'permission', new_device: 'device', auto_signout: 'response',
 };
@@ -99,7 +105,7 @@ const isUser = (e: AuditEvent) => e.actorType === 'user' && !e.actorId.startsWit
 
 /** 兆しの型の言い方（知らせと秘書）。 */
 export const SECURITY_SIGNAL_LABELS: Record<SecuritySignalType, string> = {
-  export: '大きな書き出し', export_burst: '書き出しが続いた', bulk_mail: '大量の一斉メール',
+  export: '大きな書き出し', export_burst: '書き出しが続いた', bulk_mail: '大量の一斉メール', mass_view: '短い時間に多くの記録を開いた',
   login_disabled: '止めたアカウントでのログインの試み', session_disabled: '止めた人の端末からの呼び出し',
   login_burst: 'ログインの拒否が続いた', login_flood: 'ログインの拒否が多い',
   admin_added: '管理者が増えた', permission_burst: '権限の変更が続いた', new_device: '新しい端末でのログイン',
@@ -153,6 +159,18 @@ export class SecurityWatch {
         drafts.push({ type: 'export_burst', severity: 'high', userId: actor, key: first.id, at: list.at(-1)!.occurredAt, detail: { times: list.length } });
       }
     }
+
+    // 1. 大量の持ち出し（段 2）: 1 時間に開いた数が 200 件以上で、会社のふだん（人と 1 時間あたり）の 5 倍以上
+    const windowStart = new Date(Math.floor((now.getTime() - HOUR) / HOUR) * HOUR).toISOString();
+    const views = await this.deps.store.viewCounts(tenantId, new Date(now.getTime() - SECURITY_VIEW_KEEP_MS).toISOString());
+    const past = views.filter((v) => v.hour < windowStart);
+    const usual = past.length ? past.reduce((a, v) => a + v.n, 0) / past.length : 0;
+    const limit = Math.max(SECURITY_VIEW_ROWS, Math.ceil(usual * SECURITY_VIEW_FACTOR));
+    for (const [userId, list] of groupBy(views.filter((v) => v.hour >= windowStart), (v) => v.userId)) {
+      const n = list.reduce((a, v) => a + v.n, 0);
+      if (n >= limit) drafts.push({ type: 'mass_view', severity: 'high', userId, key: `${userId}:${hourBucket(now)}`, at: now.toISOString(), detail: { count: n } });
+    }
+    await this.deps.store.pruneViews(tenantId, new Date(now.getTime() - SECURITY_VIEW_KEEP_MS).toISOString()).catch(() => undefined);
 
     // 3. ログインの攻撃
     const denials = events.filter((e) => e.action === 'auth.login.denied');
@@ -216,7 +234,7 @@ export class SecurityWatch {
       if (d.self && d.userId) {
         await this.notifySelf(tenantId, d.userId, s, now);
         const overlap = found.concat(await this.deps.store.recentSignals(tenantId, new Date(now.getTime() - HOUR).toISOString()))
-          .some((x) => x.userId === d.userId && ['export', 'export_burst', 'bulk_mail', 'admin_added', 'permission_burst'].includes(x.type));
+          .some((x) => x.userId === d.userId && ['export', 'export_burst', 'bulk_mail', 'mass_view', 'admin_added', 'permission_burst'].includes(x.type));
         if (overlap || severity === 'high') await this.notifyAdmins(tenantId, users, s, now);
       } else {
         await this.notifyAdmins(tenantId, users, s, now);
@@ -257,6 +275,17 @@ export class SecurityWatch {
       state, lastScanAt, signals24h: list.length, high24h: list.filter((s) => s.severity === 'high').length,
       last: newest ? { label: SECURITY_SIGNAL_LABELS[newest.type], at: newest.createdAt, severity: newest.severity } : null,
     };
+  }
+
+  /**
+   * 記録を開いたことを数える（段 2。名刺・問い合わせ・会員・契約・従業員の詳しい中身を開いたとき）。
+   *
+   * @remarks 人と 1 時間ごとの件数だけを持ち、どの記録を開いたかは持たない（第16.8.4節）。失敗しても開くことは止めない
+   */
+  async recordView(tenantId: string, userId: string, kind: SecurityViewKind, now: Date = new Date()): Promise<void> {
+    if (userId.startsWith('app:') || userId.startsWith('proxy:') || userId === 'system') return;
+    const hour = new Date(Math.floor(now.getTime() / HOUR) * HOUR).toISOString();
+    await this.deps.store.countView(tenantId, userId, kind, hour).catch(() => undefined);
   }
 
   /**
@@ -403,6 +432,8 @@ export function messageOf(s: SecuritySignal, nameOf: (id: string) => string): { 
       return { title: `${label}: ${who}`, body: `${who}が ${n.toLocaleString('ja-JP')} 件を書き出しました${off}（${when}）。内部の人による持ち出しや、乗っ取られたアカウントのことがあります。${action}` };
     case 'export_burst':
       return { title: `${label}: ${who}`, body: `${who}が 1 時間に ${n} 回書き出しました${off}（${when}）。持ち出しや乗っ取りのことがあります。${action}` };
+    case 'mass_view':
+      return { title: `${label}: ${who}`, body: `${who}がこの 1 時間に ${n.toLocaleString('ja-JP')} 件の記録（名刺・問い合わせ・会員・契約・従業員）を開きました${off}（${when}）。会社のふだんよりずっと多く、内部の人による持ち出しや、乗っ取られたアカウントのことがあります。${action}` };
     case 'bulk_mail':
       return { title: `${label}: ${who}`, body: `${who}が ${n.toLocaleString('ja-JP')} 件の一斉メールを始めました${off}（${when}）。乗っ取られたアカウントでの送信のことがあります。${action}` };
     case 'login_disabled':

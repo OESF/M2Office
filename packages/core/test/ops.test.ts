@@ -29,7 +29,7 @@ test('CSV: 引用符と改行を囲み、式として読まれる値には印を
   assert.ok(csv.startsWith('\ufeff会社名,'));
   const lines = csv.split('\r\n');
   assert.match(lines[1]!, /^"'=HYPERLINK\(""x""\)",acme,,trial,/);
-  assert.match(lines[1]!, /,13,0,0,0\s*$/);
+  assert.match(lines[1]!, /,13,0,0,0,0\s*$/, '最後の列は 24 時間の不正の兆し（無ければ 0）');
   assert.match(csv, /"A, ""B""\nC"/);
 });
 
