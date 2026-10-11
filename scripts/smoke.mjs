@@ -6804,8 +6804,14 @@ console.log('\n■ 82. 販促物の作成（入り切り・3 案・選ぶ・会�
       ? ok('見本の会社では、見本のドライブの写真を選んで使える（写真でないファイルは断る）') : ng('ドライブの写真が違う', JSON.stringify({ d: list2b.body.drive, p: picker.body, f: fromDrive.status, b: badDrive.status }));
     const canvaMe = await call('a', '/v1/me/canva', {}, 'member');
     const canvaOpen = await call('a', `/v1/print-designs/${made[0]}/canva`, { method: 'POST', body: '{}' }, 'member');
-    canvaMe.body.configured === false && canvaOpen.status === 403
-      ? ok('Canva を設定していない配備では、Canva のことを出さず、取り込みも断る') : ng('Canva の扱いが違う', JSON.stringify({ me: canvaMe.body, o: canvaOpen.status }));
+    // 手元の .env に Canva の設定があれば、設定した配備として確かめる（つないでいない人には、取り込みを断る）
+    if (canvaMe.body.configured === true) {
+      canvaMe.body.connected === false && canvaOpen.status === 400
+        ? ok('Canva を設定した配備でも、Canva につないでいない人の取り込みは断る') : ng('Canva の扱いが違う', JSON.stringify({ me: canvaMe.body, o: canvaOpen.status }));
+    } else {
+      canvaMe.body.configured === false && canvaOpen.status === 403
+        ? ok('Canva を設定していない配備では、Canva のことを出さず、取り込みも断る') : ng('Canva の扱いが違う', JSON.stringify({ me: canvaMe.body, o: canvaOpen.status }));
+    }
     const detail = await call('a', `/v1/print-designs/${made[0]}`, {}, 'member');
     const noScreen = await call('a', `/v1/print-designs/${made[0]}/signage`, { method: 'POST', body: '{}' }, 'member');
     detail.body.links?.signage === false && noScreen.status === 400 && /画面が登録されていません/.test(noScreen.body.error ?? '')
