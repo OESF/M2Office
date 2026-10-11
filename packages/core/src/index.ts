@@ -148,6 +148,7 @@ export {
 export * from './cards/index.js';
 export * from './inventory/index.js';
 export * from './apps/index.js';
+export * from './security/index.js';
 export * from './columns/index.js';
 export * from './inquiries/index.js';
 export * from './competitors/index.js';
@@ -164,6 +165,7 @@ export * from './notices/index.js';
 export * from './brief/index.js';
 export { answerNotice, type NoticeAnswer } from './secretary/notices.js';
 export { signageRequest, signageFileRequest, answerSignage, signageConfirmText, SIGNAGE_YES, SIGNAGE_NO, type SignageSecretaryDeps, type SignageRequest } from './secretary/signage.js';
+export { securityRequest, answerSecurity, type SecurityRequest, type SecuritySecretaryDeps } from './secretary/security.js';
 export { answerReservation, maybeReservation, parseReservation, timesOf, itemIn, seriesOf, type ReservationSecretaryDeps, type ReservationAsk, type SeriesAsk } from './secretary/reservations.js';
 export * from './chat/group-share.js';
 export {

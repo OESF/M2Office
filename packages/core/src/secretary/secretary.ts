@@ -30,6 +30,7 @@ import { answerAttendance, attendanceRequest, payslipRequest } from './attendanc
 import type { AttendanceService } from '../hr/attendance-service.js';
 import type { PayrollService } from '../hr/payroll-service.js';
 import { answerHrStaff, hrStaffRequest, type HrStaffDeps } from './hr-staff.js';
+import { answerSecurity, securityRequest, type SecuritySecretaryDeps } from './security.js';
 import { signageFileRequest, signageRequest, answerSignage, signageConfirmText, SIGNAGE_NO, SIGNAGE_YES, type SignageRequest, type SignageSecretaryDeps } from './signage.js';
 import { answerReservation, maybeReservation, type ReservationSecretaryDeps } from './reservations.js';
 import { jstDate } from '../hr/attendance.js';
@@ -129,6 +130,8 @@ export interface SecretaryDeps {
   hrStaff?: HrStaffDeps;
   /** 店頭サイネージ（第31.11.1節）。本人が話した回にだけ、割り込みを出す・消す・画面の状態に答える。 */
   signage?: SignageSecretaryDeps;
+  /** 不正の兆しの見張り（第16.8.3節）。管理者の「セキュリティの知らせは？」「〇〇さんの端末をすべてログアウトして」「これは大丈夫」に答える。 */
+  security?: SecuritySecretaryDeps;
   /** 会議室・社用車・備品の予約（第37.7節）。本人が話した回にだけ、予約する・空きに答える・変える・取り消す。 */
   reservations?: ReservationSecretaryDeps;
   /**
@@ -403,6 +406,15 @@ export class Secretary {
       const text = await answerAttendance(this.deps.attendance, tenantId, userId, employee, att, message);
       await this.audit(tenantId, userId, 'secretary.attendance', att.kind);
       return { reply: { layer: 'direct', text, evidence: [], tokensUsed: 0 }, keep: true };
+    }
+    // 不正の兆しの見張り（第16.8.3節）。管理者の依頼だけを扱う（名前の人がいない「止めて」などは、ふつうの会話に回す）
+    const secReq = this.deps.security ? securityRequest(message) : null;
+    if (secReq && this.deps.security) {
+      const text = await answerSecurity(this.deps.security, tenantId, userId, secReq);
+      if (text !== null) {
+        await this.audit(tenantId, userId, 'secretary.security', secReq.kind);
+        return { reply: { layer: 'direct', text, evidence: [], tokensUsed: 0 }, keep: true };
+      }
     }
     // 人事の担当者の依頼（第30.20.1節）。人事区画の人のときだけ。区画の外の人の依頼はふつうの会話に回す
     const staffReq = this.deps.hrStaff ? hrStaffRequest(message, jstDate(new Date())) : null;

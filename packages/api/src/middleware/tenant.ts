@@ -147,6 +147,18 @@ export function isOperational(tenant: Pick<Tenant, 'status'>): boolean {
 /** 状態を変えない HTTP メソッド。CSRF の確認を要しない。 */
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
+/** 止めた人の端末の呼び出しを残した時刻（同じ端末は 1 時間に 1 回だけ残す）。 */
+const sessionDenied = new Map<string, number>();
+
+/** この端末の呼び出しを、いま残してよいか（1 時間に 1 回）。 */
+function sessionDeniedOnce(sessionId: string, now = Date.now()): boolean {
+  const last = sessionDenied.get(sessionId);
+  if (last !== undefined && now - last < 3_600_000) return false;
+  if (sessionDenied.size > 5000) sessionDenied.clear();
+  sessionDenied.set(sessionId, now);
+  return true;
+}
+
 /**
  * 利用者を確認する。確認できなければ 401 を返す。
  *
@@ -220,6 +232,13 @@ export function authenticate(deps: AppDeps) {
       }
       const user = await deps.repo.findUserById(tenant.id, session.userId);
       if (!user || user.status !== 'active') {
+        // 止めた人の端末に残っていたログインでの呼び出しを残す（不正の兆しの見張り。第16.8.4節）。同じ端末は 1 時間に 1 回まで
+        if (user && sessionDeniedOnce(session.id)) {
+          void deps.repo.appendAudit({
+            id: randomUUID(), tenantId: tenant.id, actorType: 'system', actorId: 'session-check', action: 'auth.session.denied',
+            targetType: 'user', targetId: user.id, detail: {}, occurredAt: new Date().toISOString(),
+          }).catch(() => undefined);
+        }
         return c.json({ error: 'この利用者は現在ご利用いただけません', login: true }, 401);
       }
       if (!SAFE_METHODS.has(c.req.method) && c.req.header('x-csrf-token') !== session.csrfToken) {

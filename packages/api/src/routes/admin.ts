@@ -417,8 +417,9 @@ export function adminRoute(deps: AppDeps) {
       await deps.retention.purgeUser(tenant.id, next.id, now);
       personalCards = await deps.cards.store.countPersonalContacts(tenant.id, next.id);
     }
+    // 変える前のロールも残す（管理者が増えたことを、不正の兆しの見張りが見分けるため。第16.8.4節）
     await audit(deps, tenant.id, user.id, 'user.update', 'user', next.id,
-      { roles: next.roles, status: next.status, ...(stoppedRuns > 0 ? { stoppedRuns } : {}), ...(personalCards > 0 ? { personalCards } : {}) });
+      { roles: next.roles, rolesBefore: target.roles, status: next.status, ...(stoppedRuns > 0 ? { stoppedRuns } : {}), ...(personalCards > 0 ? { personalCards } : {}) });
     return c.json({ ...next, stoppedRuns, personalCards });
   });
 

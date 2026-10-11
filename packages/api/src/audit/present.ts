@@ -11,6 +11,12 @@ import { agentDisplayName, type AuditEvent } from '@m2office/shared';
 const ACTION_LABELS: Record<string, string> = {
   'auth.login': 'ログインした',
   'auth.login.denied': 'ログインを断られた',
+  'auth.login.locked': 'ログインの拒否が続いたため、そのアドレスを 30 分締め出した',
+  'auth.session.denied': '止めた人の端末からの呼び出しを断った',
+  'security.signal': '不正の兆しを見つけて知らせた',
+  'security.auto_signout': '不正の兆しが重なったため、その人の端末をすべてログアウトさせた',
+  'security.dismiss': '不正の兆しを「大丈夫」として 30 日知らせないことにした',
+  'security.signout': 'その人の端末をすべてログアウトさせた',
   'auth.logout': 'ログアウトした',
   'auth.revoke': 'ログイン中の端末を切った',
   'approval.decide': '承認・却下した',
@@ -393,6 +399,7 @@ const ACTION_LABELS: Record<string, string> = {
 /** 操作の種類（絞り込みの単位）。`prefixes` のどれかで始まる操作が当たる。 */
 export const AUDIT_CATEGORIES: { id: string; label: string; prefixes: string[] }[] = [
   { id: 'login', label: 'ログイン', prefixes: ['auth.'] },
+  { id: 'security', label: 'セキュリティ', prefixes: ['security.'] },
   { id: 'approval', label: '承認', prefixes: ['approval.'] },
   { id: 'run', label: '業務の実行', prefixes: ['job.', 'run.', 'tool.'] },
   { id: 'secretary', label: '秘書', prefixes: ['secretary.'] },
@@ -411,6 +418,8 @@ export const AUDIT_CATEGORIES: { id: string; label: string; prefixes: string[] }
 
 /** 仕組みの名前（主体が `system` のとき）。 */
 const SYSTEM_LABELS: Record<string, string> = {
+  'security-watch': '不正の兆しの見張り',
+  'session-check': 'ログインの確かめ',
   scheduler: '定時実行',
   engine: '業務の実行',
   learning: '秘書の学習',

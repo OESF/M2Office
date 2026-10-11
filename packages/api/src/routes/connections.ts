@@ -600,16 +600,25 @@ export function oauthCallbackRoute(deps: AppDeps) {
       });
       const { email, picture } = await googleUserInfo(accessToken);
       if (!email) return back('failed');
+      const address = email.toLowerCase();
 
+      // 同じアドレスの拒否が続いて締め出している間は、ログインを受けない（第16.8.3節、Q-219）。締め出しの間の試みも拒否として数える
+      if (await deps.security.loginLocked(tenant.id, address)) {
+        await audit(deps, tenant.id, 'system', 'auth.login.denied', address, { reason: '締め出している間', kind: 'locked' });
+        return back('denied');
+      }
       // ドメインが会社のものであり、かつその会社の利用者として登録されていること（第16.1.2節）
       const domain = email.split('@')[1];
       const user = tenant.workspaceDomain && domain === tenant.workspaceDomain
         ? await deps.repo.findUserByEmail(tenant.id, email)
         : null;
       if (!user || user.status !== 'active') {
-        await audit(deps, tenant.id, 'system', 'auth.login.denied', email, {
-          reason: domain === tenant.workspaceDomain ? '登録されていない利用者' : 'ドメインが違う',
+        // 理由を分けて残す（止めたアカウントの試みを見つけるため。第16.8.4節）。画面への答えは分けない
+        const kind = domain !== tenant.workspaceDomain ? 'domain' : user ? 'disabled' : 'unregistered';
+        await audit(deps, tenant.id, 'system', 'auth.login.denied', address, {
+          reason: kind === 'domain' ? 'ドメインが違う' : kind === 'disabled' ? '止めたアカウント' : '登録されていない利用者', kind,
         });
+        await deps.security.afterDenial(tenant.id, address).catch(() => false);
         return back('denied');
       }
       const ticket = deps.handoffs.issue({ tenantId: tenant.id, userId: user.id });

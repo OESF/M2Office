@@ -16,7 +16,8 @@ import {
   RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, GoogleContactsService, KnowledgeEmbedder, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, JGrantsApi, MockJGrants, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, MEMBER_LINE_SEND, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger,
   NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
-  defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator, aiUsageMeterFromEnv, enterAiUsage, withAiUsage, setEnqueueAiGuard, AutoMinutes, MINUTES_AGENT_ID, appPath, backupConfigFromEnv, machineDir, readBackupStatus, takeUnnotifiedUpdateFailure, takeClosedMaintenanceSessions, heartbeatConfigFromEnv, sendHeartbeat, HEARTBEAT_INTERVAL_MS, machineStatus, machineConfigFromEnv, restoreTest, runBackup, takeBackupRequest, writeWorkerBeat, OpsAppSide, createPool, offsiteConfigFromEnv, readOffsiteStatus, runOffsite, checkOffsite
+  defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator, aiUsageMeterFromEnv, enterAiUsage, withAiUsage, setEnqueueAiGuard, AutoMinutes, MINUTES_AGENT_ID, appPath, backupConfigFromEnv, machineDir, readBackupStatus, takeUnnotifiedUpdateFailure, takeClosedMaintenanceSessions, heartbeatConfigFromEnv, sendHeartbeat, HEARTBEAT_INTERVAL_MS, machineStatus, machineConfigFromEnv, restoreTest, runBackup, takeBackupRequest, writeWorkerBeat, OpsAppSide, createPool, offsiteConfigFromEnv, readOffsiteStatus, runOffsite, checkOffsite,
+  SecurityWatch, PostgresSecurityStore,
 } from '@m2office/core';
 import { canRunAgent, fileInputKey } from '@m2office/shared';
 import { fileURLToPath } from 'node:url';
@@ -188,6 +189,11 @@ const columns: ColumnService = new ColumnService({
 // 問い合わせの記録（内蔵の拡張。仕様書 第33章）。秘書から頼まれた記録と、期限の知らせ・原文の片付けが使う
 // お知らせの置き場（休業の期間を、問い合わせの記録と定時実行も読む。第35.7節）
 const announcementStore = new PostgresAnnouncementStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
+// 不正の兆しの見張り（第16.8節）。監査ログとログイン中の端末を読み、管理者に知らせる
+const security = new SecurityWatch({
+  repo, store: new PostgresSecurityStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+  closedOn: (tenantId, day) => announcementStore.closedOn(tenantId, day),
+});
 // 契約の管理（第38章）。解約の申し出の期限と終わりを見張り、自動更新の契約を次の期間に進める。秘書から台帳に入れる・引く・直す
 const contracts = new ContractService({
   store: new PostgresContractStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
@@ -450,6 +456,11 @@ let lastKnowledgeEmbed = 0;
 /** 期限を過ぎた名刺（ごみ箱に 30 日・読み取れなかったもの 4 週）を消す見回りの間隔。 */
 const CARD_PURGE_INTERVAL_MS = Number(process.env['CARD_PURGE_INTERVAL_MS'] ?? 3_600_000);
 let lastCardPurge = 0;
+/** 不正の兆しの見回りの間隔（第16.8.3節。重さ高は見つけたらすぐ知らせるため 5 分ごと）。 */
+const SECURITY_INTERVAL_MS = Number(process.env['SECURITY_INTERVAL_MS'] ?? 5 * 60_000);
+let lastSecurityCheck = 0;
+/** 不正の兆しの、前の日の数のまとめを送った日（日本時間）。 */
+let securityDigestOn = '';
 /** 在庫の毎朝の見直しを始める時刻（日本時間の時。仕様書 第29.14節）。朝のブリーフ（7:30）より前に知らせる。 */
 const INVENTORY_WATCH_HOUR = Number(process.env['INVENTORY_WATCH_HOUR'] ?? 7);
 /** 在庫の毎朝の見直しを済ませた日（日本時間）。1 日 1 回にする。 */
@@ -742,6 +753,24 @@ while (running) {
         if (n > 0) log.info('お知らせの締切の前の知らせを届けました', { tenantId, count: n });
       } catch (err) {
         log.warn('お知らせの締切の前の知らせで例外が発生しました', { tenantId, err });
+      }
+    }
+  }
+
+  // 不正の兆しの見張り（第16.8節）。5 分ごとに見回り、朝 7 時を過ぎたら前の日の数を 1 通にまとめる。会社ごとの失敗はほかの会社を止めない
+  if (Date.now() - lastSecurityCheck >= SECURITY_INTERVAL_MS) {
+    lastSecurityCheck = Date.now();
+    const jstNow = new Date(Date.now() + 9 * 3_600_000);
+    const today = jstNow.toISOString().slice(0, 10);
+    const digest = securityDigestOn !== today && jstNow.getUTCHours() >= INVENTORY_WATCH_HOUR;
+    if (digest) securityDigestOn = today;
+    for (const tenantId of await repo.listTenantIds().catch(() => [] as string[])) {
+      try {
+        const r = await security.scan(tenantId);
+        if (r.found.length) log.info('不正の兆しを知らせました', { tenantId, signals: r.found.map((s) => s.type), signedOut: r.signedOut.length });
+        if (digest) await security.dailyDigest(tenantId);
+      } catch (err) {
+        log.warn('不正の兆しの見張りで例外が発生しました', { tenantId, err });
       }
     }
   }
