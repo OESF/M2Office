@@ -51,6 +51,10 @@ export interface SecurityStore {
   liveSessions(tenantId: string, now: string): Promise<LiveSession[]>;
   /** 監査ログの、この操作・この対象の、この時刻より後の数。 */
   countAudit(tenantId: string, action: string, targetId: string, since: string): Promise<number>;
+  /** 見回った時刻を残す（ダッシュボードの「見張り中」。移行 123）。 */
+  markScan(tenantId: string, at: string): Promise<void>;
+  /** 最後に見回った時刻（まだなら `null`）。 */
+  lastScan(tenantId: string): Promise<string | null>;
 }
 
 interface SignalRow { id: string; type: SecuritySignalType; severity: 'high' | 'medium'; user_id: string | null; key: string; detail: Record<string, unknown> | null; created_at: unknown }
@@ -124,6 +128,17 @@ export class PostgresSecurityStore implements SecurityStore {
       'select count(*)::int as n from audit_events where tenant_id = $1 and action = $2 and target_id = $3 and occurred_at > $4', [tenantId, action, targetId, since]);
     return r?.n ?? 0;
   }
+
+  async markScan(tenantId: string, at: string): Promise<void> {
+    await this.q(tenantId,
+      `insert into security_watch_state (tenant_id, last_scan_at) values ($1, $2)
+       on conflict (tenant_id) do update set last_scan_at = excluded.last_scan_at`, [tenantId, at]);
+  }
+
+  async lastScan(tenantId: string): Promise<string | null> {
+    const [r] = await this.q<{ last_scan_at: unknown }>(tenantId, 'select last_scan_at from security_watch_state where tenant_id = $1', [tenantId]);
+    return r ? iso(r.last_scan_at) : null;
+  }
 }
 
 /** メモリの見張りの置き場（試験用）。端末と監査ログの数は、渡したものを読む。 */
@@ -159,5 +174,15 @@ export class MemorySecurityStore implements SecurityStore {
 
   async countAudit(tenantId: string, action: string, targetId: string, since: string): Promise<number> {
     return this.audits.filter((a) => a.tenantId === tenantId && a.action === action && a.targetId === targetId && a.occurredAt > since).length;
+  }
+
+  readonly scans = new Map<string, string>();
+
+  async markScan(tenantId: string, at: string): Promise<void> {
+    this.scans.set(tenantId, at);
+  }
+
+  async lastScan(tenantId: string): Promise<string | null> {
+    return this.scans.get(tenantId) ?? null;
   }
 }

@@ -431,6 +431,8 @@ export function dashboardRoute(deps: AppDeps) {
       backlog,
       // 接続先（第6.7.6節）
       connections: await connections(tenantId),
+      // 不正の兆しの見張りの様子（第6.7.4.2.2節）。数と時刻だけ（中身は秘書と監査ログで見る）
+      security: await deps.security.status(tenantId).catch(() => null),
       events: events.map((e) => eventView(e, nameOf, runAgent, agentName)).filter((e) => e !== null),
     };
   }

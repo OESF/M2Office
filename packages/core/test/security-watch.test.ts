@@ -160,3 +160,18 @@ test('秘書の依頼の見分け方: 決まった言い方だけを受ける', 
   assert.equal(securityRequest('大丈夫？'), null);
   assert.equal(securityRequest('明日の会議は大丈夫かな'), null);
 });
+
+test('ダッシュボードの様子: 見回るたびに時刻を残し、15 分を過ぎたら止まっているとする。数と種類だけを返す', async () => {
+  const { watch, ev, ago } = setup();
+  assert.equal((await watch.status('t1', NOON)).state, 'never');
+  ev('contact.export', ago(NOON, 3), { detail: { count: 700 } });
+  await watch.scan('t1', NOON);
+  const s = await watch.status('t1', new Date(NOON.getTime() + 60_000));
+  assert.equal(s.state, 'watching');
+  assert.equal(s.lastScanAt, NOON.toISOString());
+  assert.equal(s.signals24h, 1);
+  assert.equal(s.high24h, 1);
+  assert.deepEqual(s.last, { label: '大きな書き出し', at: NOON.toISOString(), severity: 'high' });
+  assert.ok(!JSON.stringify(s).includes('u-staff'), '誰かは返さない');
+  assert.equal((await watch.status('t1', new Date(NOON.getTime() + 16 * 60_000))).state, 'stale');
+});

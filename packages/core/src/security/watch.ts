@@ -58,6 +58,21 @@ export interface SecurityScanResult {
   signedOut: string[];
 }
 
+/** 見回りが止まっているとみなすまでの時間（ミリ秒）。見回りは 5 分ごと。 */
+export const SECURITY_STALE_MS = 15 * 60_000;
+
+/** ダッシュボードに出す見張りの様子（第6.7.4.2.2節）。中身は入れず、数と時刻だけ。 */
+export interface SecurityWatchStatus {
+  /** 見張り中・止まっている（最後の見回りから 15 分を過ぎた）・まだ見回っていない。 */
+  state: 'watching' | 'stale' | 'never';
+  lastScanAt: string | null;
+  /** この 24 時間の兆しの数と、そのうち重いもの。 */
+  signals24h: number;
+  high24h: number;
+  /** いちばん新しい兆し（型の言い方と時刻だけ）。 */
+  last: { label: string; at: string; severity: 'high' | 'medium' } | null;
+}
+
 /** 秘書に見せる兆し（人の名前を添える）。 */
 export interface SecuritySignalView extends SecuritySignal {
   userName: string | null;
@@ -225,7 +240,23 @@ export class SecurityWatch {
       await this.audit(tenantId, 'security.auto_signout', s);
       await this.notifyAdmins(tenantId, users, s, now);
     }
+    await this.deps.store.markScan(tenantId, now.toISOString());
     return { found, signedOut };
+  }
+
+  /**
+   * ダッシュボードに出す見張りの様子（見張り中か・最後の見回り・この 24 時間の兆しの数）。
+   */
+  async status(tenantId: string, now: Date = new Date()): Promise<SecurityWatchStatus> {
+    const [lastScanAt, list] = await Promise.all([
+      this.deps.store.lastScan(tenantId), this.deps.store.recentSignals(tenantId, new Date(now.getTime() - 24 * HOUR).toISOString(), 500),
+    ]);
+    const state = !lastScanAt ? 'never' : now.getTime() - Date.parse(lastScanAt) > SECURITY_STALE_MS ? 'stale' : 'watching';
+    const newest = list[0];
+    return {
+      state, lastScanAt, signals24h: list.length, high24h: list.filter((s) => s.severity === 'high').length,
+      last: newest ? { label: SECURITY_SIGNAL_LABELS[newest.type], at: newest.createdAt, severity: newest.severity } : null,
+    };
   }
 
   /**

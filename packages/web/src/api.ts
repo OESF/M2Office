@@ -643,6 +643,17 @@ export interface DashboardLive {
   events: { at: string; kind: 'start' | 'done' | 'fail' | 'wait'; text: string }[];
   /** 接続先（仕様書 第6.7.6節）。古い API では無い。 */
   connections?: ConnectionHealth[];
+  /** 不正の兆しの見張りの様子（仕様書 第6.7.4.2.2節）。古い API と読めなかったときは無い。 */
+  security?: SecurityWatchStatus | null;
+}
+
+/** 不正の兆しの見張りの様子（仕様書 第16.8節）。数と時刻だけ。 */
+export interface SecurityWatchStatus {
+  state: 'watching' | 'stale' | 'never';
+  lastScanAt: string | null;
+  signals24h: number;
+  high24h: number;
+  last: { label: string; at: string; severity: 'high' | 'medium' } | null;
 }
 
 /** 接続先 1 つの状態（仕様書 第6.7.6節）。直近 15 分の呼び出しの成否と時間から決める。 */

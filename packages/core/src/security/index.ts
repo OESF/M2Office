@@ -7,5 +7,5 @@ export {
 } from './store.js';
 export {
   SecurityWatch, messageOf, SECURITY_SIGNAL_LABELS, SECURITY_EXPORT_ROWS, SECURITY_EXPORT_BURST, SECURITY_LOGIN_BURST, SECURITY_LOGIN_FLOOD,
-  SECURITY_PERMISSION_BURST, SECURITY_LOCK_MS, SECURITY_SUPPRESS_MS, type SecurityWatchDeps, type SecurityScanResult, type SecuritySignalView,
+  SECURITY_PERMISSION_BURST, SECURITY_LOCK_MS, SECURITY_SUPPRESS_MS, SECURITY_STALE_MS, type SecurityWatchDeps, type SecurityWatchStatus, type SecurityScanResult, type SecuritySignalView,
 } from './watch.js';

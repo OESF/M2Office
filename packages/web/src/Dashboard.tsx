@@ -8,7 +8,7 @@
  */
 
 import { useEffect, useState, type ReactNode } from 'react';
-import { api, describeError, type ChecklistItem, type DashboardLive, type DashboardStats } from './api.js';
+import { api, describeError, type ChecklistItem, type DashboardLive, type DashboardStats, type SecurityWatchStatus } from './api.js';
 import { HealthList } from './health.js';
 import { HelpTip, openHelp } from './help.js';
 import { Icon } from './nav.js';
@@ -343,7 +343,7 @@ function Live({ board = false }: { board?: boolean }) {
  * 動いている業務と今日失敗した業務だけを囲みの中に出す。中の業務が 1 つだけなら、業務 1 つの囲みで出す。
  */
 function Agents({ data, board = false }: { data: DashboardLive; board?: boolean }) {
-  if (data.agents.length === 0) return null;
+  if (data.agents.length === 0 && !data.security) return null;
   return (
     <section className="card">
       <h3>
@@ -355,11 +355,45 @@ function Agents({ data, board = false }: { data: DashboardLive; board?: boolean 
         )}
       </h3>
       <div className="agent-grid">
+        {data.security && <SecurityWatchCard status={data.security} board={board} />}
         {groupAgents(data.agents).map((g) => (g.items.length === 1
           ? <AgentState key={g.id} name={g.items[0]!.name} load={g.items[0]!} face={g.face} />
           : <AgentGroup key={g.id} group={g} board={board} />))}
       </div>
     </section>
+  );
+}
+
+/**
+ * 不正の兆しの見張りの囲み（仕様書 第6.7.4.2.2節・第16.8節）。見張りが動いていることと、最後の見回り・この 24 時間の兆しの数を出す。
+ *
+ * @remarks 中身（誰が何をしたか）は出さない。眺める画面（受付などの画面）では、兆しの数も出さず「見張り中」だけにする。
+ * 見回りが 15 分以上止まっていたら目立たせる（古い値を黙って映し続けない。第6.7.2.1節）
+ */
+function SecurityWatchCard({ status, board }: { status: SecurityWatchStatus; board: boolean }) {
+  const watching = status.state === 'watching';
+  return (
+    <div className={`agent-state security-watch${watching ? ' busy' : status.state === 'stale' ? ' stale' : ''}`}>
+      <span className={`agent-face security-face${watching ? ' busy' : ''}`} aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="36" height="36"><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3Z" fill="currentColor" opacity=".18" /><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3Zm-1.2 13.6-3.5-3.5 1.4-1.4 2.1 2.1 4.6-4.6 1.4 1.4-6 6Z" fill="currentColor" /></svg>
+      </span>
+      <div className="agent-body">
+        <div className="agent-name">不正の兆しの見張り</div>
+        <div className="agent-now">
+          {watching ? <span className="chip current">見張り中</span>
+            : status.state === 'stale' ? <span className="chip waiting">止まっています</span>
+              : <span className="muted">まだ見回っていません</span>}
+        </div>
+        {status.lastScanAt && <div className="muted small">最後の見回り {ago(status.lastScanAt)}前</div>}
+        {!board && (
+          <div className="small">
+            この 24 時間の兆し {status.signals24h} 件
+            {status.high24h > 0 && <span className="warn-text">（重い {status.high24h}）</span>}
+            {status.last && <div className="muted small">新しいもの: {status.last.label}（{ago(status.last.at)}前）</div>}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
