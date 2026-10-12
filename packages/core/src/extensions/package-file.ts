@@ -75,14 +75,37 @@ export async function unpackExtension(data: Uint8Array): Promise<{ files: Extens
   const prefix = commonFolder(entries.map((e) => e.name));
   let total = 0;
   for (const e of entries) {
-    const bytes = await e.async('uint8array');
+    // 展開しながら数え、上限を超えたらそこで止める（全部展開してから比べると、小さな ZIP が数 GB に膨らむ。2026-10-12 の点検）
+    const bytes = await readCapped(e, EXPANDED_MAX_BYTES - total);
+    if (!bytes) return { files: new Map(), problems: ['展開したあとの大きさが大きすぎます'] };
     total += bytes.length;
-    if (total > EXPANDED_MAX_BYTES) return { files: new Map(), problems: ['展開したあとの大きさが大きすぎます'] };
     files.set(e.name.slice(prefix.length), bytes);
   }
   // スキルの name を省いたときは、フォルダの名前を使う（スキルと同じ。仕様書 第12.12.2節）
   if (prefix && files.has('SKILL.md')) files.set(SKILL_FOLDER_ENTRY, new TextEncoder().encode(prefix.replace(/\/$/, '')));
   return { files, problems: [] };
+}
+
+/**
+ * ZIP の 1 つのファイルを、展開しながら読む。上限を超えたら展開を止めて `null`。
+ *
+ * @param budget 読んでよい残りの大きさ（バイト）
+ */
+function readCapped(e: JSZip.JSZipObject, budget: number): Promise<Uint8Array | null> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let stopped = false;
+    const stream = e.nodeStream('nodebuffer') as NodeJS.ReadableStream & { destroy?: () => void };
+    stream.on('data', (d: Buffer) => {
+      if (stopped) return;
+      size += d.length;
+      if (size > budget) { stopped = true; stream.pause(); stream.destroy?.(); resolve(null); return; }
+      chunks.push(d);
+    });
+    stream.on('error', (err: Error) => { if (!stopped) reject(err); });
+    stream.on('end', () => { if (!stopped) resolve(new Uint8Array(Buffer.concat(chunks))); });
+  });
 }
 
 /** 文字のファイルで、先頭がフロントマター（---）なら SKILL.md とみなす。ZIP は先頭が PK で始まる。 */

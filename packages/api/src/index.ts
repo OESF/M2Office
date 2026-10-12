@@ -112,6 +112,16 @@ app.use('*', cors({
   exposeHeaders: ['x-request-id'],
 }));
 
+// 画面全体の安全のための見出し（2026-10-12 の点検）。種類を推測させない・参照元を外へ渡しすぎない・ほかのサイトの枠の中で開かせない
+// （承認のボタンを透明な枠で押させる攻撃を防ぐ）。会社の Web サイトに埋め込む公開のページ（在庫・コラム）は、枠の中で開けるよう除く。
+// 道ごとに付けた見出し（ファイルの CSP など）は上書きしない
+app.use('*', async (c, next) => {
+  await next();
+  if (!c.res.headers.has('x-content-type-options')) c.header('X-Content-Type-Options', 'nosniff');
+  if (!c.res.headers.has('referrer-policy')) c.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+  if (!c.req.path.startsWith('/v1/public/') && !c.res.headers.has('x-frame-options')) c.header('X-Frame-Options', 'SAMEORIGIN');
+});
+
 app.get('/health', (c) => c.json({ ok: true, service: 'api' }));
 
 // テナントの解決はすべてに、利用者の確認はログイン以外のすべてに掛ける

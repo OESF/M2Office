@@ -242,7 +242,8 @@ export function Signage() {
           void api.signage.mobileQr().then((b) => { if (b) setQr(URL.createObjectURL(b)); });
         }}>スマホで開く</button>
       </div>
-      {qr && <img className="signage-mobile-qr" src={qr} alt="" />}
+      {/* スマホで開く QR は、画面の中ほどにポップアップで出す（一覧の並びを崩さない。外を押すか Esc・「閉じる」で閉じる） */}
+      {qr && <QrPopup src={qr} onClose={() => { URL.revokeObjectURL(qr); setQr(null); }} />}
       {error && <p className="error">{error}</p>}
       <div className="signage-screens">
         {data.screens.map((s) => (
@@ -267,6 +268,26 @@ export function Signage() {
       )}
       <RecentInterrupts recent={recent} screens={data.screens} assets={assets} onChanged={load} onError={setError} />
       <AssetList assets={assets} screens={data.screens} usage={data.usage} sounds={sounds} thumbs={thumbs} onFiles={(fs) => void addFiles(fs, null)} onChanged={load} onError={setError} />
+    </div>
+  );
+}
+
+/** スマホで開く QR のポップアップ（スタッフのページ。第31.9節）。 */
+function QrPopup({ src, onClose }: { src: string; onClose: () => void }) {
+  const close = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    close.current?.focus();
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return (
+    <div className="tour-backdrop" role="dialog" aria-modal="true" aria-label="スマホで開く" onClick={onClose}>
+      <div className="tour signage-qr-popup" onClick={(e) => e.stopPropagation()}>
+        <h2>スマホで開く</h2>
+        <img className="signage-mobile-qr" src={src} alt="スタッフのページの QR コード" />
+        <div className="row"><span className="spacer" /><button ref={close} className="btn ghost small" onClick={onClose}>閉じる</button></div>
+      </div>
     </div>
   );
 }
@@ -296,28 +317,36 @@ function ScreenCard({ s, active, admin, thumb, assets, wantThumb, onSelect, onCh
           {s.online && s.lastReport?.audio === false && <span className="badge warn">音が出せない</span>}
           {s.online && s.lastReport?.interrupting && <span className="badge">割り込み中</span>}
         </div>
-        <label className="row small signage-volume" onClick={(e) => e.stopPropagation()}>音
+        {/* 設定は「見出し | 操作」の 2 列にそろえる（音・レイアウト・回転・切り替え・画像の動き）。切断は離して最後に置く */}
+        <div className="signage-settings small" onClick={(e) => e.stopPropagation()}>
+          <span className="signage-settings-label">音</span>
           <input type="range" min={0} max={100} step={5} defaultValue={s.volume} aria-label="音の大きさ"
             onPointerUp={(e) => { const v = Number((e.target as HTMLInputElement).value); if (v !== s.volume) patch({ volume: v }); }}
             onKeyUp={(e) => { const v = Number((e.target as HTMLInputElement).value); if (v !== s.volume) patch({ volume: v }); }} />
-        </label>
-        <div className="row small" onClick={(e) => e.stopPropagation()}>
-          <select value={s.orientation} onChange={(e) => patch({ orientation: e.target.value as 'landscape' | 'portrait' })} aria-label="向き">
+          <span className="signage-settings-label">レイアウト</span>
+          <select value={s.orientation} onChange={(e) => patch({ orientation: e.target.value as 'landscape' | 'portrait' })} aria-label="レイアウト">
             <option value="landscape">横</option><option value="portrait">縦</option>
           </select>
-          <select value={s.rotation} onChange={(e) => patch({ rotation: Number(e.target.value) })} aria-label="回し方">
-            {[0, 90, 180, 270].map((r) => <option key={r} value={r}>{r} 度</option>)}
+          <span className="signage-settings-label">回転</span>
+          <select value={s.rotation} onChange={(e) => patch({ rotation: Number(e.target.value) })} aria-label="回転">
+            {[0, 90, 180, 270].map((r) => <option key={r} value={r}>{r}度</option>)}
           </select>
           {/* 切り替え方と画像の動き（画面ごと。第31.6.2節） */}
+          <span className="signage-settings-label">切り替え</span>
           <select value={s.transition} onChange={(e) => patch({ transition: e.target.value as SignageTransition })} aria-label="切り替え方">
-            {SIGNAGE_TRANSITIONS.map((t) => <option key={t.id} value={t.id}>切り替え: {t.label}</option>)}
+            {SIGNAGE_TRANSITIONS.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
           </select>
-          <span className="row small">画像の動き
+          <span className="signage-settings-label">画像の動き</span>
+          <span>
             <button type="button" role="switch" aria-checked={s.kenBurns} aria-label="画像の動き" className={s.kenBurns ? 'switch on' : 'switch'}
               onClick={() => patch({ kenBurns: !s.kenBurns })}><span /></button>
           </span>
-          {admin && <button className="btn ghost small" onClick={() => void api.admin.removeSignageScreen(s.id).then(onChanged).catch((e) => onError(describeError(e, '切断できませんでした')))}>切断</button>}
         </div>
+        {admin && (
+          <div className="signage-settings-foot" onClick={(e) => e.stopPropagation()}>
+            <button className="btn ghost small" onClick={() => void api.admin.removeSignageScreen(s.id).then(onChanged).catch((e) => onError(describeError(e, '切断できませんでした')))}>切断</button>
+          </div>
+        )}
       </div>
     </div>
   );

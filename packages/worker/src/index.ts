@@ -12,6 +12,7 @@
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 import {
+  assertDatabaseConfigured,
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
   RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, GoogleContactsService, KnowledgeEmbedder, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, JGrantsApi, MockJGrants, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, MEMBER_LINE_SEND, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger,
   NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
@@ -23,6 +24,8 @@ import { canRunAgent, fileInputKey } from '@m2office/shared';
 import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
 
+// 本番でデータベースの接続先が無ければ、開発の既定につながず起動を止める
+assertDatabaseConfigured();
 const log = createLoggerFromEnv('worker');
 // データベースの接続が切れたときの警告の書き先。置き場を作る前に置く
 installPoolLogger(log.child({ component: 'db' }));

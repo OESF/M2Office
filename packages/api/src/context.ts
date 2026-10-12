@@ -10,6 +10,7 @@
 
 import { createHash } from 'node:crypto';
 import {
+  assertDatabaseConfigured,
   HelpFeedback, PostgresHelpFeedbackStore, PostgresHelpNoteStore, noteText, type HelpNoteStore,
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS, GoogleDataRetention, GoogleRevocation, agentUsesGoogle,
   RunEngine, Secretary, OFFICIAL_AGENTS, buildConnector, LocalFileStore,
@@ -266,6 +267,8 @@ export interface AppDeps {
  * 既定ではスタブとダミー接続を使う。
  */
 export function buildDeps(): AppDeps {
+  // 本番でデータベースの接続先が無ければ、開発の既定につながず起動を止める
+  assertDatabaseConfigured();
   const log = createLoggerFromEnv('api');
   // データベースの接続が切れたときの警告の書き先。置き場を作る前に置く
   installPoolLogger(log.child({ component: 'db' }));

@@ -671,7 +671,8 @@ export class Secretary {
         this.deps.repo.listUserCompartments(tenantId, userId), expandQuery(llm, message),
       ]);
       const embed = queryEmbedder(llm);
-      const { hits } = await this.deps.repo.searchKnowledge(tenantId, message, compartments[0] ?? null, synonyms, embed ? { embed } : {});
+      // 本人が入っている区画のすべてから探す（1 つ目だけでなく）
+      const { hits } = await this.deps.repo.searchKnowledge(tenantId, message, compartments, synonyms, embed ? { embed } : {});
       if (hits.length === 0) return { text: '', evidence: [] };
       const top = hits.slice(0, KNOWLEDGE_HITS);
       return {

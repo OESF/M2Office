@@ -8,6 +8,13 @@
 {{HOST}} {
 	encode zstd gzip
 	header Strict-Transport-Security "max-age=31536000"
+	# 画面の安全のための見出し（2026-10-12 の点検）。API は API の側で付ける（公開のページの枠の扱いを分けるため）
+	@web not path /v1/*
+	header @web {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		X-Frame-Options SAMEORIGIN
+	}
 {{TLS_BLOCK}}
 	# API と音声の秘書（WebSocket）
 	handle /v1/* {

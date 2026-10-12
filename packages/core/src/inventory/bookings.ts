@@ -210,6 +210,9 @@ export class InventoryBookings {
     if (!src) return { ok: false, reason: 'unknown' };
     if (src.status !== 'active') return { ok: false, reason: 'stopped' };
     const tenantId = src.tenantId;
+    // 会社の判定より前に受けるため、会社の状態（停止・緊急停止・解約）をここで確かめる（止めた会社では推論も取り込みも動かさない。第23.8.6節）
+    const tenant = await this.deps.repo.findTenantById(tenantId);
+    if (!tenant || (tenant.status !== 'trial' && tenant.status !== 'active')) return { ok: false, reason: 'disabled' };
     const settings = (await this.deps.repo.getTenantSettings(tenantId)).inventory;
     if (!settings.enabled) return { ok: false, reason: 'disabled' };
     const source = (await this.deps.store.listBookingSources(tenantId)).find((s) => s.id === src.id);

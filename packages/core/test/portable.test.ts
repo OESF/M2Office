@@ -356,3 +356,16 @@ test('実行できるか: 利用範囲の中で、かつ区画に属する業務
   assert.equal(canRunAgent(access, def, 'u-b', ['g-sales'], ['hr']), false, '区画に入れても範囲の外なら不可');
   assert.equal(canRunAgent(access, { id: 'minutes', compartment: null }, 'u-b', [], []), true);
 });
+
+test('拡張機能の ZIP: 展開しながら大きさを数え、上限を超えたら展開を止める（小さな ZIP が膨らむのを防ぐ）', async () => {
+  const JSZip = (await import('jszip')).default;
+  const zip = new JSZip();
+  zip.file('SKILL.md', '---\nname: big\ndescription: x\n---\n');
+  // 0 ばかりの 30 MB は、圧縮すると数十 KB になる
+  zip.file('big.bin', new Uint8Array(30 * 1024 * 1024));
+  const data = await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
+  assert.ok(data.length < 1024 * 1024, '圧縮した大きさは小さい');
+  const { files, problems } = await unpackExtension(data);
+  assert.equal(files.size, 0);
+  assert.match(problems.join(''), /展開したあとの大きさが大きすぎます/);
+});

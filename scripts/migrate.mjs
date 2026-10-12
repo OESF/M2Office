@@ -12,6 +12,11 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import pg from 'pg';
 
+// 本番では、開発の既定の接続先（パスワードが公知）につながず、パスワードが公知のロールも作らない（2026-10-12 の点検）
+if (process.env.NODE_ENV === 'production' && (!process.env.MIGRATION_DATABASE_URL || !process.env.DATABASE_URL)) {
+  console.error('本番環境では MIGRATION_DATABASE_URL と DATABASE_URL を設定してください。移行を中止します。');
+  process.exit(1);
+}
 const OWNER_URL = process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office';
 const APP_URL = process.env.DATABASE_URL ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office';
 const APP_ROLE = 'm2office_app';

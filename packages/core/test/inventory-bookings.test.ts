@@ -21,6 +21,7 @@ function setup(llmAnswers: string[] = []) {
   };
   const repo = {
     getTenantSettings: async () => ({ ...DEFAULT_TENANT_SETTINGS, inventory: settings }),
+    findTenantById: async (id: string) => ({ id, status: 'active' }),
     appendAudit: async () => undefined,
   } as unknown as Repository;
   const prompts: string[] = [];

@@ -234,13 +234,17 @@ export class OpsStore {
     return rows[0] ? toOperator(rows[0]) : null;
   }
 
-  /** ロールと状態を変える。無効にしたらログイン状態も失効させる。 */
+  /** ロールと状態を変える。無効にしたらログイン状態を失効させ、その運営者の代理アクセスも終える。 */
   async updateOperator(id: string, p: { role?: OperatorRole; status?: Operator['status'] }): Promise<Operator | null> {
     const { rows } = await this.pool.query(
       'update ops.operators set role = coalesce($2, role), status = coalesce($3, status) where id = $1 returning *',
       [id, p.role ?? null, p.status ?? null],
     );
-    if (p.status === 'disabled') await this.pool.query('update ops.sessions set revoked_at = now() where operator_id = $1 and revoked_at is null', [id]);
+    if (p.status === 'disabled') {
+      await this.pool.query('update ops.sessions set revoked_at = now() where operator_id = $1 and revoked_at is null', [id]);
+      // 会社の側の代理アクセス（申請中・閲覧中）も終える（許した期限まで閲覧が残らないように。第23.6.1節）
+      await this.pool.query('select ops.end_operator_proxies($1)', [id]);
+    }
     return rows[0] ? toOperator(rows[0]) : null;
   }
 

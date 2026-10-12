@@ -98,7 +98,10 @@ umask 077
 chmod 700 "$DATA_DIR" "$DATA_DIR/files" "$DATA_DIR/logs" "$DATA_DIR/machine" ${BACKUP_DIR:+"$BACKUP_DIR"} 2>/dev/null || true
 mkdir -p "${BACKUP_DIR:-$DATA_DIR}/pre-update"
 DUMP="${BACKUP_DIR:-$DATA_DIR}/pre-update/$(date +%Y%m%d-%H%M%S)-$FROM.dump"
-"$PG_BIN/pg_dump" -Fc -f "$DUMP" "$OWNER_URL" || { record failed "$FROM" "$TO" '更新の前の控えを取れませんでした'; log '控えを取れません。入れません'; exit 1; }
+# パスワードはコマンドの引数に出さず（ps で見えるため）、環境の変数で渡す
+OWNER_PASS=$("$NODE_BIN" -e 'process.stdout.write(decodeURIComponent(new URL(process.argv[1]).password))' "$OWNER_URL")
+OWNER_NOPASS=$("$NODE_BIN" -e 'const u = new URL(process.argv[1]); u.password = ""; process.stdout.write(u.toString())' "$OWNER_URL")
+PGPASSWORD="${OWNER_PASS}" "$PG_BIN/pg_dump" -Fc -f "$DUMP" "${OWNER_NOPASS}" || { record failed "$FROM" "$TO" '更新の前の控えを取れませんでした'; log '控えを取れません。入れません'; exit 1; }
 ls -1t "$(dirname "$DUMP")"/*.dump 2>/dev/null | tail -n +4 | xargs rm -f
 log "控えを取りました: $DUMP"
 

@@ -13,6 +13,7 @@ import type { AttPunchKind } from '@m2office/shared';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 import { tenantOrigin } from '../tenant-origin.js';
+import { clientAddress } from '../client-address.js';
 
 /** 登録の番号を作れる回数（同じ接続元から 1 時間に）。 */
 const PAIRING_PER_HOUR = 20;
@@ -44,7 +45,7 @@ export function hrTerminalRoute(deps: AppDeps) {
   /** 登録の番号を作る（本文: 登録の合言葉 `secret`）。 */
   app.post('/pairings', async (c) => {
     const tenant = c.get('tenant');
-    const who = (c.req.header('x-forwarded-for') ?? '').split(',')[0]!.trim() || 'local';
+    const who = clientAddress(c);
     const now = Date.now();
     const hits = (pairingHits.get(who) ?? []).filter((t) => now - t < 3_600_000);
     if (hits.length >= PAIRING_PER_HOUR) return c.json({ error: '登録の番号を作りすぎました。しばらく待ってからお試しください' }, 429);

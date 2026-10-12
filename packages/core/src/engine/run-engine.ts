@@ -466,9 +466,10 @@ export class RunEngine {
     }
 
     const now = new Date().toISOString();
-    await repo.updateApproval({
-      ...approval, decision, decidedBy, comment, decidedAt: now,
-    });
+    // ほかの人が先に判断していれば、ここでは何もしない（後の判断で上書きしない）
+    if ((await repo.updateApproval({ ...approval, decision, decidedBy, comment, decidedAt: now })) === false) {
+      throw new RunNotResumableError(approvalId, '判断済み');
+    }
     await repo.updateRunStep(tenantId, {
       ...stepRow,
       status: decision === 'approved' ? 'succeeded' : 'rejected',
@@ -515,7 +516,9 @@ export class RunEngine {
     if (!settingIsOn(settings, step.adminAlsoWhen)) return false;
 
     const now = new Date().toISOString();
-    await repo.updateApproval({ ...approval, decision: 'approved', decidedBy: decider.id, comment, decidedAt: now });
+    if ((await repo.updateApproval({ ...approval, decision: 'approved', decidedBy: decider.id, comment, decidedAt: now })) === false) {
+      throw new RunNotResumableError(approval.id, '判断済み');
+    }
     await repo.appendAudit({
       id: randomUUID(), tenantId: run.tenantId, actorType: 'user', actorId: decider.id,
       action: 'approval.decide', targetType: 'approval', targetId: approval.id,

@@ -416,7 +416,8 @@ export class GoogleWorkspaceConnector implements WorkspaceConnector {
         const me = await this.chatApi(p, `/${space}/members/${encodeURIComponent(conn.googleEmail)}`).catch(() => null);
         mine = (me?.['member'] as { domainId?: string } | undefined)?.domainId ?? null;
       }
-      return { humans: humans.length, googleGroups: groups, external: mine ? humans.filter((h) => h.domainId && h.domainId !== mine).length : null, present, absent, unknown };
+      // 会社の番号が分からない人は、会社の外の人として数える（確かめられなければ社外。第9.4.0節）
+      return { humans: humans.length, googleGroups: groups, external: mine ? humans.filter((h) => !h.domainId || h.domainId !== mine).length : null, present, absent, unknown };
     },
     post: async (p: ConnectorPrincipal, msg: { space: string; text: string }) => {
       const space = await this.resolveSpace(p, msg.space);

@@ -73,6 +73,14 @@ export function loadAuthConfig(env: NodeJS.ProcessEnv = process.env): AuthConfig
       '本番環境で AUTH_DEV_LOGIN または AUTH_DEV_HEADERS が有効です。起動を中止します。',
     );
   }
+  // NODE_ENV を書き忘れても、本物の名前で動く配備（ローカルの形・開発でない BASE_DOMAIN）では開発用の入口を許さない
+  // （開発用の入口が開くと、見出しだけで誰にでもなれる。2026-10-12 の点検）
+  const base = (env['BASE_DOMAIN'] ?? 'lvh.me').toLowerCase();
+  // 開発の名前（lvh.me・localhost・.test と、スマホから開くための LAN のアドレスを名前にする sslip.io・nip.io）
+  const devBase = base === 'lvh.me' || base === 'localhost' || base.endsWith('.localhost') || base.endsWith('.test') || base.endsWith('.sslip.io') || base.endsWith('.nip.io');
+  if ((config.devLogin || config.devHeaders) && (env['M2O_DEPLOYMENT'] === 'onsite' || !devBase)) {
+    throw new Error('開発でない配備（ローカルの形、または開発でない BASE_DOMAIN）で AUTH_DEV_LOGIN または AUTH_DEV_HEADERS が有効です。起動を中止します。');
+  }
   // 本番では、リダイレクト URI に HTTPS を要求する。Google の規則でもあり、
   // 引換券を平文で運ばせないためでもある（第16.1.2節）
   if (env['NODE_ENV'] === 'production' && config.login && !config.login.redirectUri.startsWith('https://')) {

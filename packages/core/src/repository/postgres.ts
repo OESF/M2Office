@@ -493,12 +493,14 @@ export class PostgresRepository implements Repository {
     });
   }
 
-  async updateApproval(a: Approval): Promise<void> {
-    await this.q(a.tenantId, 
+  async updateApproval(a: Approval): Promise<boolean> {
+    // 判断を書くときは、まだ判断していない行だけを書き換える（承認と却下を同時に押したとき、後の判断で上書きしない）
+    const rows = await this.q<{ id: string }>(a.tenantId,
       `update approvals set decision=$3, decided_by=$4, comment=$5, decided_at=$6
-         where tenant_id=$1 and id=$2`,
+         where tenant_id=$1 and id=$2 and ($3::text is null or decision is null) returning id`,
       [a.tenantId, a.id, a.decision, a.decidedBy, a.comment, a.decidedAt],
     );
+    return rows.length > 0;
   }
 
   async createArtifact(a: Artifact): Promise<void> {
@@ -531,10 +533,12 @@ export class PostgresRepository implements Repository {
   async searchKnowledge(
     tenantId: string,
     query: string,
-    compartment: string | null,
+    compartmentOrList: string | readonly string[] | null,
     extraSynonyms: readonly (readonly string[])[] = [],
     opts: KnowledgeSearchOptions = {},
   ): Promise<KnowledgeSearchResult> {
+    // 入っている区画がいくつあっても、そのすべてと区画の無い知識から探す（2 つ目以降の区画が探されていなかった。2026-10-12 の点検）
+    const compartment: string[] = compartmentOrList === null ? [] : typeof compartmentOrList === 'string' ? [compartmentOrList] : [...compartmentOrList];
     const terms = extractTerms(query);
     if (terms.length === 0) return { hits: [], rewrites: [] };
     // 施行日を迎えた規程の版に切り替えてから探す（夜中の処理を待たない。第11.11.2節）
@@ -557,7 +561,7 @@ export class PostgresRepository implements Repository {
         where s.tenant_id = $1
           and k.status = 'active'
           and ($5::text[] is null or k.category = any($5::text[]))
-          and (s.compartment is null or s.compartment = $3)
+          and (s.compartment is null or s.compartment = any($3::text[]))
           and s.search_text like any($2)
         order by (select count(*) from unnest($2::text[]) p where s.search_text like p) desc,
                  k.updated_at desc
@@ -600,7 +604,7 @@ export class PostgresRepository implements Repository {
    * @returns 類似度がしきい値以上の上位 20 節（類似度の高い順）。使えないとき（列が無い・埋め込んだ節が無い・質問を埋め込めない）は `null`
    */
   private async searchByMeaning(
-    tenantId: string, query: string, compartment: string | null, opts: KnowledgeSearchOptions,
+    tenantId: string, query: string, compartment: string[], opts: KnowledgeSearchOptions,
   ) {
     if (!opts.embed || !(await this.hasVectors())) return null;
     const any = await this.q<{ n: number }>(tenantId,
@@ -619,7 +623,7 @@ export class PostgresRepository implements Repository {
         where s.tenant_id = $1
           and k.status = 'active'
           and ($5::text[] is null or k.category = any($5::text[]))
-          and (s.compartment is null or s.compartment = $3)
+          and (s.compartment is null or s.compartment = any($3::text[]))
           and s.embedding is not null and s.embedding_model = $4
         order by s.embedding <=> $2::vector
         limit $6`,
@@ -682,7 +686,7 @@ export class PostgresRepository implements Repository {
 
   /** 社内規程の古い版の節から探す（改定前を尋ねられたとき）。古い版は節に分けて持たないため、ここで分ける。 */
   private async searchOldVersions(
-    tenantId: string, concepts: ReturnType<typeof expandTerms>, patterns: string[], compartment: string | null,
+    tenantId: string, concepts: ReturnType<typeof expandTerms>, patterns: string[], compartment: string[],
   ): Promise<KnowledgeSearchResult['hits']> {
     const versions = await this.q<{
       id: string; version: number; effectiveFrom: string; title: string; body: string; source: string; compartment: string | null; savedAt: string;
@@ -692,7 +696,7 @@ export class PostgresRepository implements Repository {
          from knowledge_item_versions v
          join knowledge_items k on k.id = v.item_id and k.tenant_id = v.tenant_id
         where v.tenant_id = $1 and k.status = 'active' and k.category = 'rule' and v.version < k.version
-          and (v.compartment is null or v.compartment = $2)
+          and (v.compartment is null or v.compartment = any($2::text[]))
           and v.body like any($3)
         order by v.saved_at desc limit $4`,
       [tenantId, compartment, patterns, OLD_VERSION_SCAN]);

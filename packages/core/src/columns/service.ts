@@ -682,7 +682,8 @@ export class ColumnService {
     await this.syncAwaiting(who, id);
     const c = await this.deps.store.get(who.tenantId, id);
     if (!c) return 'コラムが見つかりません';
-    if (c.status === 'awaiting' || c.status === 'approved' || c.status === 'placed') return '承認へ進めたコラムは削除できません';
+    // 予約した（承認を経た）コラムも、承認へ進めたものと同じく削除させない（取り消しは管理者と承認者の「取り下げ」で行う）
+    if (c.status === 'awaiting' || c.status === 'approved' || c.status === 'scheduled' || c.status === 'placed') return '承認へ進めたコラムは削除できません';
     if (c.status === 'writing') return '書いている途中は削除できません';
     await this.deps.store.delete(who.tenantId, id);
     await this.audit(who, 'column.delete', id, { theme: c.theme });

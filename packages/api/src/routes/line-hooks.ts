@@ -10,6 +10,7 @@
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import type { AppDeps } from '../context.js';
+import { isOperational } from '../middleware/tenant.js';
 
 /** 鍵の形（base64url の 32 字）。形の違う鍵は引かずに断る。 */
 const KEY = /^[A-Za-z0-9_-]{32}$/;
@@ -37,6 +38,9 @@ export function lineHooksRoute(deps: AppDeps) {
     });
     if (!verdict) return c.json({ ok: false }, 500);
     if ('reason' in verdict) return c.json({ ok: false }, verdict.reason === 'signature' ? 401 : 404);
+    // 会社の判定より前に受けるため、会社の状態（停止・緊急停止・解約）をここで確かめる（止めた会社では取り込まない。第23.8.6節）
+    const tenant = await deps.repo.findTenantById(verdict.tenantId);
+    if (!tenant || !isOperational(tenant)) return c.json({ ok: false }, 404);
     let payload: unknown;
     try {
       payload = JSON.parse(raw);

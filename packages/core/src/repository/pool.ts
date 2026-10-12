@@ -101,3 +101,15 @@ export function describePoolError(err: unknown): { code?: string; reason: string
   const reason = raw.replace(/postgres(?:ql)?:\/\/\S+/gi, '[接続文字列]').slice(0, 200);
   return code ? { code, reason } : { reason };
 }
+
+/**
+ * 本番で、データベースの接続先が設定されているかを確かめる（無ければ起動を止める）。
+ *
+ * @remarks 接続先が無いと、各所が開発の既定（パスワードが公知のロール）につなぎに行く。本番でそれを許さない（2026-10-12 の点検）
+ * @throws {Error} 本番（`NODE_ENV=production`）で `DATABASE_URL` が無いとき
+ */
+export function assertDatabaseConfigured(env: NodeJS.ProcessEnv = process.env): void {
+  if (env['NODE_ENV'] === 'production' && !env['DATABASE_URL']) {
+    throw new Error('本番環境で DATABASE_URL がありません。開発の既定の接続先にはつながず、起動を中止します。');
+  }
+}

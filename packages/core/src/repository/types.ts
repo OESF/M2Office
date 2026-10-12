@@ -81,7 +81,12 @@ export interface Repository {
    * 承認の表示（`present`）と、その実行の通知の本文も消す。`null` なら、消すものが無かったとして記録だけする。
    */
   markRunRetention(tenantId: string, runId: string, steps: RunStep[] | null, redactedPresent: string, at: string): Promise<void>;
-  updateApproval(approval: Approval): Promise<void>;
+  /**
+   * 承認を書き換える。判断（`decision`）を書くときは、**まだ判断していない承認だけ**を書き換える（2 人が同時に押したとき、後の判断で上書きしない）。
+   *
+   * @returns 書き換えたか（判断済みで書き換えなかったら `false`。返さない置き場は書き換えたとみなす）
+   */
+  updateApproval(approval: Approval): Promise<boolean | void>;
 
   createArtifact(artifact: Artifact): Promise<void>;
   listArtifacts(tenantId: string, runId: string): Promise<Artifact[]>;
@@ -94,7 +99,8 @@ export interface Repository {
   searchKnowledge(
     tenantId: string,
     query: string,
-    compartment: string | null,
+    /** 探してよい区画（1 つか、いくつか。`null` なら区画の無い知識だけ）。区画の無い知識はいつも探す。 */
+    compartment: string | readonly string[] | null,
     /** 秘書が考えた言い換え（第11.7.7.0節）。登録した言い換えと同じように効かせる。 */
     extraSynonyms?: readonly (readonly string[])[],
     opts?: KnowledgeSearchOptions,
