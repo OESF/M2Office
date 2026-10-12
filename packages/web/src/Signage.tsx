@@ -222,7 +222,7 @@ export function Signage() {
     if (toScreen && added.length) {
       // いま開いている流れ（いつもの流れか時間帯の流れ）の最後に足す
       const flow = await api.signage.flow(toScreen, toBand);
-      await api.signage.saveFlow(toScreen, flow.version, [...flow.entries, ...added.map((assetId) => ({ assetId, seconds: null }))], toBand).catch((e) => setError(describeError(e, '流れに足せませんでした')));
+      await api.signage.saveFlow(toScreen, flow.version, [...flow.entries, ...added.map((assetId) => ({ assetId, seconds: null }))], toBand).catch((e) => setError(describeError(e, 'スケジュールに追加できませんでした')));
     }
     load();
   };
@@ -367,7 +367,7 @@ function FlowEditor({ screen, screens, assets, thumbs, onFiles, onError, onChang
     api.signage.flow(screen.id, band).then(setFlow).catch((e) => {
       // 開いていた時間帯がほかの人に削除されていたら、いつもの流れに戻る
       if (band) setBand(null);
-      else onError(describeError(e, '流れを読めませんでした'));
+      else onError(describeError(e, 'スケジュールを読めませんでした'));
     });
   }, [screen.id, band, onError]);
   useEffect(reload, [reload, screen.flowVersion]);
@@ -378,7 +378,7 @@ function FlowEditor({ screen, screens, assets, thumbs, onFiles, onError, onChang
     if (!flow) return;
     setFlow({ ...flow, entries });
     api.signage.saveFlow(screen.id, flow.version, entries, band).then((r) => { setFlow({ ...flow, version: r.version, entries }); onChanged(); })
-      .catch((e) => { onError(describeError(e, '流れを直せませんでした')); reload(); });
+      .catch((e) => { onError(describeError(e, 'スケジュールを直せませんでした')); reload(); });
   };
   const onDrop = (e: DragEvent) => {
     e.preventDefault();
@@ -410,17 +410,17 @@ function FlowEditor({ screen, screens, assets, thumbs, onFiles, onError, onChang
   const current = flow.bands.find((b) => b.id === band) ?? null;
   return (
     <div className="card signage-flow" onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
-      <div className="row"><strong className="grow">{screen.name} の流れ</strong>
+      <div className="row"><strong className="grow">{screen.name} のスケジュール</strong>
         <select value="" onChange={(e) => {
           const from = e.target.value;
           if (from) void api.signage.flow(from).then((f) => save(f.entries));
-        }} aria-label="ほかの画面の流れをコピー">
+        }} aria-label="ほかの画面のスケジュールをコピー">
           <option value="">ほかの画面からコピー</option>
           {screens.filter((s) => s.id !== screen.id).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
       </div>
-      <div className="signage-bands" role="tablist" aria-label="流れ">
-        <button role="tab" aria-selected={band === null} className={band === null ? 'on' : ''} onClick={() => setBand(null)}>いつもの流れ</button>
+      <div className="signage-bands" role="tablist" aria-label="スケジュール">
+        <button role="tab" aria-selected={band === null} className={band === null ? 'on' : ''} onClick={() => setBand(null)}>いつものスケジュール</button>
         {flow.bands.map((b) => (
           <button key={b.id} role="tab" aria-selected={band === b.id} className={band === b.id ? 'on' : ''} onClick={() => setBand(b.id)}>{signageBandLabel(b)}</button>
         ))}
@@ -440,13 +440,13 @@ function FlowEditor({ screen, screens, assets, thumbs, onFiles, onError, onChang
             ))}
           </span>
           <button className="btn ghost small danger" onClick={() => {
-            if (window.confirm(`時間帯「${signageBandLabel(current)}」と、その流れを削除しますか。素材は残ります`)) {
+            if (window.confirm(`時間帯「${signageBandLabel(current)}」と、そのスケジュールを削除しますか。素材は残ります`)) {
               api.signage.deleteBand(current.id).then(() => { setBand(null); onChanged(); }).catch((e) => onError(describeError(e, '削除できませんでした')));
             }
           }}>削除</button>
         </div>
       )}
-      {current && flow.entries.length === 0 && <p className="small muted">この時間帯の流れが空の間は、いつもの流れを流します。</p>}
+      {current && flow.entries.length === 0 && <p className="small muted">この時間帯のスケジュールが空の間は、いつものスケジュールを表示します。</p>}
       {/* 左のつまみをつかんで動かす（個人設定のメニューの並びと同じ。第31.6節）。同じ素材を何度も並べられるため、行は位置で見分ける */}
       <SortableList className="signage-entries" items={flow.entries.map((e, i) => ({ e, i }))} keyOf={(x) => `${x.e.assetId}-${x.i}`}
         nameOf={(x) => byId.get(x.e.assetId)?.name ?? '素材'} onMove={(next) => save(next.map((x) => x.e))}
@@ -471,7 +471,7 @@ function FlowEditor({ screen, screens, assets, thumbs, onFiles, onError, onChang
                 ? <input className="num-input" type="text" readOnly tabIndex={-1} aria-label="動画の長さ（秒。変えられません）"
                   title={a.durationMs ? `動画の長さ ${fmtDuration(a.durationMs)}（変えられません）` : '動画の長さ（変えられません）'}
                   value={a.durationMs ? Math.round(a.durationMs / 1000) : ''} />
-                : <input className="num-input" type="number" min={SIGNAGE_LIMITS.minSeconds} max={SIGNAGE_LIMITS.maxSeconds} placeholder="秒" aria-label="出す秒数"
+                : <input className="num-input" type="number" min={SIGNAGE_LIMITS.minSeconds} max={SIGNAGE_LIMITS.maxSeconds} placeholder="秒" aria-label="表示する秒数"
                   defaultValue={e.seconds ?? ''} onBlur={(ev) => {
                     const v = ev.target.value === '' ? null : Number(ev.target.value);
                     if (v !== e.seconds) save(flow.entries.map((x, j) => (j === i ? { ...x, seconds: v } : x)));
@@ -480,7 +480,7 @@ function FlowEditor({ screen, screens, assets, thumbs, onFiles, onError, onChang
               <button type="button" role="switch" aria-checked={!e.paused} aria-label={`${a?.name ?? '素材'}を${e.paused ? '再開する' : '止める'}`}
                 title={e.paused ? '停止' : '再開'} className={e.paused ? 'switch' : 'switch on'}
                 onClick={() => save(flow.entries.map((x, j) => (j === i ? { assetId: x.assetId, seconds: x.seconds, ...(x.paused ? {} : { paused: true }), ...(x.sound ? { sound: true } : {}) } : x)))}><span /></button>
-              <button className="btn ghost small danger" onClick={() => save(flow.entries.filter((_, j) => j !== i))} aria-label="流れから削除する">削除</button>
+              <button className="btn ghost small danger" onClick={() => save(flow.entries.filter((_, j) => j !== i))} aria-label="スケジュールから削除する">削除</button>
               </span>
             </>
           );
@@ -547,7 +547,7 @@ function RecentInterrupts({ recent, screens, assets, onChanged, onError }: {
 }) {
   if (!recent.length) return null;
   const name = (id: string) => screens.find((s) => s.id === id)?.name ?? '';
-  const STATE: Record<string, string> = { waiting: '待ち', showing: '出している', done: '済み', cleared: '消した', expired: '出せなかった' };
+  const STATE: Record<string, string> = { waiting: '待ち', showing: '表示中', done: '済み', cleared: '消した', expired: '表示できなかった' };
   const ORIGIN: Record<string, string> = { staff: 'スタッフ', secretary: '秘書', hook: '受け口', app: '外部のアプリ' };
   const active = recent.some((i) => i.targets.some((t) => t.state === 'waiting' || t.state === 'showing'));
   return (

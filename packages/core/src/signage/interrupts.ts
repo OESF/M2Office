@@ -141,7 +141,7 @@ export class SignageInterrupts {
     await this.settle(tenantId);
     const all = await this.store.listScreens(tenantId);
     const targets = input.screens ? all.filter((s) => input.screens!.includes(s.id)) : all;
-    if (!targets.length) return { error: all.length ? '出す先の画面が見つかりません' : '登録した画面がありません', status: 422 };
+    if (!targets.length) return { error: all.length ? '表示する画面が見つかりません' : '登録した画面がありません', status: 422 };
 
     let kind: 'text' | 'asset' = 'text';
     let text: string | null = null;
@@ -161,8 +161,8 @@ export class SignageInterrupts {
         ? String(input.text)
         : num ? fillTemplate(place ? settings.callTemplate : settings.callTemplateNoPlace, num, place) : '';
       text = normalizeText(raw);
-      if (!text) return { error: '出す文がありません', status: 422 };
-      if ([...text].length > SIGNAGE_LIMITS.textChars) return { error: `文は ${SIGNAGE_LIMITS.textChars} 字までにしてください`, status: 422 };
+      if (!text) return { error: '表示するメッセージがありません', status: 422 };
+      if ([...text].length > SIGNAGE_LIMITS.textChars) return { error: `メッセージは ${SIGNAGE_LIMITS.textChars} 字までにしてください`, status: 422 };
       number = num || leadingNumber(text);
     }
     const base = Math.round(Math.min(SIGNAGE_LIMITS.maxInterruptSeconds, Math.max(SIGNAGE_LIMITS.minInterruptSeconds, Number(input.seconds) || settings.interruptSeconds)));
@@ -403,7 +403,7 @@ export class SignageInterrupts {
       const asset = (await this.store.listAssets(tenantId)).find((a) => a.isInterrupt && same(a.name) === same(image));
       if (!asset) return { error: '割り込みの素材が見つかりません', status: 422 };
       input.assetId = asset.id;
-    } else return { error: '出す文（text）か、番号（number）か、割り込みの素材の名前（image）を送ってください', status: 422 };
+    } else return { error: '表示するメッセージ（text）か、番号（number）か、割り込みの素材の名前（image）を送ってください', status: 422 };
     const all = await this.store.listScreens(tenantId);
     const permitted = allowed ? all.filter((s) => allowed.includes(s.id)) : all;
     const raw = payload['screens'];

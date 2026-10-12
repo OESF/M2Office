@@ -29,7 +29,7 @@ info:
     | 公開したコラムを読む（`columns.read`） | `GET /v1/columns/published` ほか | 使える（コラムの作成を入れた会社） |
     | 社内規程を登録・改定する（`knowledge.rules`） | `PUT /v1/knowledge/rules/{ref}` ほか | 使える |
     | 業務を依頼して結果を受け取る（`jobs.run`） | `POST /v1/jobs`・`GET /v1/runs/{id}` | 使える |
-    | サイネージに呼び出しを出す（`signage.interrupt`） | `POST /v1/signage/interrupts` ほか | 使える（店頭サイネージを入れた会社） |
+    | サイネージにメッセージを表示する（`signage.interrupt`） | `POST /v1/signage/interrupts` ほか | 使える（店頭サイネージを入れた会社） |
     | サイネージの画面の状態を読む（`signage.status`） | `GET /v1/signage/screens` | 使える（店頭サイネージを入れた会社） |
 
     **共通の決まり**
@@ -905,7 +905,7 @@ paths:
     post:
       tags: [サイネージ]
       operationId: postSignageInterrupt
-      summary: サイネージに呼び出しを出す（機能 signage.interrupt）
+      summary: サイネージにメッセージを表示する（機能 signage.interrupt）
       description: |
         店頭の画面に、文字の案内か、登録した割り込みの素材を割り込ませます。出す先は、管理者が承認した画面だけです。
         - 文（`text`）か、番号（`number`。場所 `place` があれば会社の呼び出しの言い回しで文にします）か、割り込みの素材の名前（`image`）のどれかを送ります。文は 80 字までです。

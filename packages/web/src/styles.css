@@ -1761,6 +1761,22 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .m-sig-screen { padding: 10px; }
 .m-sig-screen .row { gap: 6px; align-items: center; }
 .signage-top { margin-bottom: -4px; }
+/* スタッフのページの 2 つの区切り（メッセージ・画面とスケジュール）と、知らせの色（失敗は未接続と同じオレンジ系） */
+.m-sig-section { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 10px; }
+.m-sig-section:first-of-type { border-top: none; margin-top: 0; padding-top: 0; }
+.m-sig-heading { font-size: 15px; font-weight: 700; margin: 0 0 8px; }
+.m-sig-message { margin: 4px 0; }
+.m-sig-message.warn { color: var(--warn); background: var(--warn-soft); border-radius: 6px; padding: 4px 8px; }
+.m-sig-now { color: var(--accent); font-weight: 600; margin: 4px 0; }
+.m-sig-schedule-head { display: flex; align-items: center; gap: 6px; margin-top: 8px; color: var(--muted); }
+/* スタッフのページ: 表示時間とジングル・各画面のスケジュール（第31.9.3節） */
+.m-sig-options { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 4px 0 8px; }
+.m-sig-options label { display: flex; align-items: center; gap: 6px; }
+.m-sig-schedule { display: flex; gap: 8px; overflow-x: auto; padding: 4px 0; margin-top: 6px; }
+.m-sig-schedule-item { flex: none; width: 88px; display: flex; flex-direction: column; gap: 2px; font-size: 11px; }
+.m-sig-schedule-item img, .m-sig-schedule-blank { width: 88px; height: 56px; object-fit: cover; border-radius: 4px; background: var(--line); display: block; }
+.m-sig-schedule-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-sig-schedule-item.paused { opacity: .4; }
 /* 画面の設定（見出し | 操作 の 2 列。第31.5.1節） */
 .signage-settings { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; gap: calc(8px * var(--space-scale)) calc(12px * var(--space-scale)); margin-top: calc(8px * var(--space-scale)); }
 .signage-settings-label { color: var(--muted); white-space: nowrap; }

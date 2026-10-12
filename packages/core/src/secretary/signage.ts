@@ -67,7 +67,7 @@ function daysOf(m: string): number {
 /** 「入口の画面」「入口に」から画面の名前を取り出す（流れ・時間帯の頼み）。 */
 function flowScreens(raw: string): string[] {
   const m = raw.normalize('NFKC').replace(/\s+/g, '');
-  const hit = /^(?:サイネージの)?([^「『、。のに]+?)の画面/.exec(m) ?? /^([^「『、。のに\d]+?)(?:の流れ|[にの]\d)/.exec(m);
+  const hit = /^(?:サイネージの)?([^「『、。のに]+?)の画面/.exec(m) ?? /^([^「『、。のに\d]+?)(?:の流れ|のスケジュール|[にの]\d)/.exec(m);
   if (!hit) return [];
   return hit[1]!.split(/[と・]/).map((x) => x.trim()).filter((x) => x && !/^(この画像|この写真|画像|写真|サイネージ|画面|全部|すべて|平日|土日|週末|毎日|今日|明日|[月火水木金土日](?:曜日?)?)$/.test(x));
 }
@@ -87,8 +87,8 @@ function colorOf(word: string): string | null {
  */
 export function signageFileRequest(message: string): Extract<SignageRequest, { kind: 'add-file' }> | null {
   const m = message.normalize('NFKC').replace(/\s+/g, '');
-  if (!/(サイネージ|流れ|画面)/.test(m) || !/(足して|入れて|追加|流して|加えて)/.test(m)) return null;
-  const band = new RegExp(`${TIME}(?:から|〜|~)(?:の)?(?:時間帯|流れ)`).exec(m);
+  if (!/(サイネージ|流れ|スケジュール|画面)/.test(m) || !/(足して|入れて|追加|流して|加えて)/.test(m)) return null;
+  const band = new RegExp(`${TIME}(?:から|〜|~)(?:の)?(?:時間帯|流れ|スケジュール)`).exec(m);
   const start = band ? timeOf(band[1]!) : null;
   return { kind: 'add-file', screens: flowScreens(message), ...(start ? { bandStart: start } : {}) };
 }
@@ -133,7 +133,7 @@ export function signageRequest(message: string): SignageRequest | null {
     }
   }
   // 画像なしで「流れに足して」は、画像を渡すよう答える
-  if (/(画像|写真).*(流れ|サイネージ)|(流れ|サイネージ).*(画像|写真)/.test(m) && /(足して|入れて|追加|加えて)/.test(m)) return { kind: 'add-file', screens: flowScreens(raw) };
+  if (/(画像|写真).*(流れ|スケジュール|サイネージ)|(流れ|スケジュール|サイネージ).*(画像|写真)/.test(m) && /(足して|入れて|追加|加えて)/.test(m)) return { kind: 'add-file', screens: flowScreens(raw) };
   // 会社の設定（管理者。第31.11.2節）
   const imgSec = /(?:サイネージの)?(?:画像|素材)の?(?:表示の?)?秒数を(\d{1,3})秒/.exec(m);
   if (imgSec) return { kind: 'settings', patch: { imageSeconds: Number(imgSec[1]) } };
@@ -214,9 +214,9 @@ const norm = (s: string) => s.normalize('NFKC').toLowerCase().replace(/\s+/g, ''
 export function signageConfirmText(req: SignageRequest): string | null {
   if (req.kind !== 'show' && req.kind !== 'clear') return null;
   const where = req.screens.length ? `${req.screens.join('と')}の画面` : 'すべての画面';
-  if (req.kind === 'clear') return `${req.all || req.screens.length ? `${where}の割り込み` : 'いま出している割り込み'}を消します。よろしいですか？（はい／いいえ）`;
+  if (req.kind === 'clear') return `${req.all || req.screens.length ? `${where}の割り込み` : 'いま表示しているメッセージ'}を消します。よろしいですか？（はい／いいえ）`;
   const what = req.assetHint ? `「${req.assetHint}」` : req.number ? `${req.number}番の呼び出し${req.place ? `（${req.place}）` : ''}` : `「${req.text ?? ''}」`;
-  return `${where}に${what}を出します。よろしいですか？（はい／いいえ）`;
+  return `${where}に${what}を表示します。よろしいですか？（はい／いいえ）`;
 }
 
 /** 確かめに「はい」と答えたか。 */
@@ -243,15 +243,15 @@ export async function answerSignage(deps: SignageSecretaryDeps, tenantId: string
       return hit.length === 1 ? hit[0]! : `「${wanted.join('・')}」という画面がありません（画面: ${allNames()}）。`;
     }
     if (screens.length === 1) return screens[0]!;
-    return screens.length ? `どの画面かを教えてください（画面: ${allNames()}）。「入口の画面の流れに足して」のように言えます。` : '登録した画面はまだありません。';
+    return screens.length ? `どの画面かを教えてください（画面: ${allNames()}）。「入口の画面のスケジュールに追加して」のように言えます。` : '登録した画面はまだありません。';
   };
   if (req.kind === 'add-file') {
-    if (!fileId) return 'サイネージの流れに足す画像を、秘書の欄のクリップで渡してください（JPEG か PNG）。';
+    if (!fileId) return 'サイネージのスケジュールに追加する画像を、秘書の欄のクリップで渡してください（JPEG か PNG）。';
     const target = oneScreen(req.screens);
     if (typeof target === 'string') return target;
     const f = deps.file ? await deps.file(tenantId, userId, fileId).catch(() => null) : null;
     if (!f) return '渡されたファイルが見つかりませんでした。';
-    if (!thumbnailMime(f.bytes)) return 'サイネージの流れに足せるのは、JPEG か PNG の画像です。動画や PowerPoint は、サイネージの画面から足してください。';
+    if (!thumbnailMime(f.bytes)) return 'サイネージのスケジュールに追加できるのは、JPEG か PNG の画像です。動画や PowerPoint は、サイネージの画面から追加してください。';
     if (f.bytes.length > SIGNAGE_LIMITS.imageBytes) return '画像が大きすぎます（5 MB まで）。サイネージの画面から足すと、縮めてから入れます。';
     const flow = await service.flow(tenantId, target.id);
     if (!flow) return `「${target.name}」の画面が見つかりません。`;
@@ -270,9 +270,9 @@ export async function answerSignage(deps: SignageSecretaryDeps, tenantId: string
         const cur = await service.flow(tenantId, target.id, band?.id ?? null);
         if (!cur) break;
         const r = await service.replaceFlow(tenantId, userId, target.id, [...cur.entries, { assetId: added.asset.id, seconds: null }], cur.version, band?.id ?? null);
-        if (!('error' in r)) return `「${target.name}」の${band ? `時間帯（${signageBandLabel(band)}）の` : 'いつもの'}流れの最後に「${added.asset.name}」を足しました。`;
+        if (!('error' in r)) return `「${target.name}」の${band ? `時間帯（${signageBandLabel(band)}）の` : 'いつもの'}スケジュールの最後に「${added.asset.name}」を追加しました。`;
       }
-      return `素材には入れましたが、流れに足せませんでした。サイネージの画面から足してください。`;
+      return `素材には入れましたが、スケジュールに追加できませんでした。サイネージの画面から追加してください。`;
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -282,7 +282,7 @@ export async function answerSignage(deps: SignageSecretaryDeps, tenantId: string
     if (typeof target === 'string') return target;
     const r = await service.addBand(tenantId, userId, target.id, { start: req.start, end: req.end, days: req.days });
     if ('error' in r) return `時間帯を作れませんでした（${r.error}）。`;
-    return `「${target.name}」に時間帯「${signageBandLabel(r.band)}」を作りました。サイネージの画面でその時間帯の流れに素材を並べるか、画像を渡して「${r.band.start} からの流れに足して」と頼んでください（空の間はいつもの流れを流します）。`;
+    return `「${target.name}」に時間帯「${signageBandLabel(r.band)}」を作りました。サイネージの画面でその時間帯のスケジュールに素材を並べるか、画像を渡して「${r.band.start} からの流れに足して」と頼んでください（空の間はいつもの流れを流します）。`;
   }
   if (req.kind === 'band-remove') {
     const target = oneScreen(req.screens);
@@ -291,7 +291,7 @@ export async function answerSignage(deps: SignageSecretaryDeps, tenantId: string
     const band = flow?.bands.find((b) => b.start === req.start);
     if (!band) return `「${target.name}」に ${req.start} から始まる時間帯がありません（${flow?.bands.map(signageBandLabel).join('・') || '時間帯なし'}）。`;
     await service.deleteBand(tenantId, userId, band.id);
-    return `「${target.name}」の時間帯「${signageBandLabel(band)}」と、その流れを削除しました（素材は残っています）。`;
+    return `「${target.name}」の時間帯「${signageBandLabel(band)}」と、そのスケジュールを削除しました（素材は残っています）。`;
   }
   if (req.kind === 'look') {
     const target = req.screens.length ? byName(req.screens) : screens;
@@ -307,8 +307,8 @@ export async function answerSignage(deps: SignageSecretaryDeps, tenantId: string
   if (req.kind === 'settings') {
     if (!admin) return 'サイネージの設定は管理者が変えられます。管理者に頼んでください。';
     const p = req.patch;
-    if (p.imageSeconds !== undefined && (p.imageSeconds < SIGNAGE_LIMITS.minSeconds || p.imageSeconds > SIGNAGE_LIMITS.maxSeconds)) return `画像を出す秒数は ${SIGNAGE_LIMITS.minSeconds}〜${SIGNAGE_LIMITS.maxSeconds} 秒にしてください。`;
-    if (p.interruptSeconds !== undefined && (p.interruptSeconds < SIGNAGE_LIMITS.minInterruptSeconds || p.interruptSeconds > SIGNAGE_LIMITS.maxInterruptSeconds)) return `割り込みを出す秒数は ${SIGNAGE_LIMITS.minInterruptSeconds}〜${SIGNAGE_LIMITS.maxInterruptSeconds} 秒にしてください。`;
+    if (p.imageSeconds !== undefined && (p.imageSeconds < SIGNAGE_LIMITS.minSeconds || p.imageSeconds > SIGNAGE_LIMITS.maxSeconds)) return `画像を表示する秒数は ${SIGNAGE_LIMITS.minSeconds}〜${SIGNAGE_LIMITS.maxSeconds} 秒にしてください。`;
+    if (p.interruptSeconds !== undefined && (p.interruptSeconds < SIGNAGE_LIMITS.minInterruptSeconds || p.interruptSeconds > SIGNAGE_LIMITS.maxInterruptSeconds)) return `メッセージを表示する秒数は ${SIGNAGE_LIMITS.minInterruptSeconds}〜${SIGNAGE_LIMITS.maxInterruptSeconds} 秒にしてください。`;
     const settings = await service.settings(tenantId);
     await service.deps.repo.saveTenantSettings(tenantId, 'signage', { ...settings, ...p }, userId);
     service.settingsChanged(tenantId);
@@ -336,7 +336,7 @@ export async function answerSignage(deps: SignageSecretaryDeps, tenantId: string
     }
     // いま出しているもの（最新）を消す
     const latest = (await interrupts.recent(tenantId)).find((i) => i.targets.some((t) => t.state === 'showing' || t.state === 'waiting'));
-    if (!latest) return '出している割り込みはありません。';
+    if (!latest) return '表示しているメッセージはありません。';
     await interrupts.clear(tenantId, userId, latest.id);
     return '割り込みを消しました。';
   }
@@ -354,7 +354,7 @@ export async function answerSignage(deps: SignageSecretaryDeps, tenantId: string
     const s = byName([req.screen])[0];
     if (!s) return `「${req.screen}」という画面がありません（画面: ${screens.map((x) => x.name).join('・') || 'なし'}）。`;
     await service.removeScreen(tenantId, userId, s.id);
-    return `「${s.name}」の画面を切断しました。30 日のうちに同じ端末で登録し直せば、名前と流れのまま戻ります。`;
+    return `「${s.name}」の画面を切断しました。30 日のうちに同じ端末で登録し直せば、名前とスケジュールのまま戻ります。`;
   }
   const assets = (await service.deps.store.listAssets(tenantId)).filter((a) => a.isInterrupt);
   const findAsset = (hint: string) => {
@@ -371,7 +371,7 @@ export async function answerSignage(deps: SignageSecretaryDeps, tenantId: string
   const target = req.screens.length ? byName(req.screens) : null;
   if (req.screens.length && !target?.length) {
     // 名前の合う画面が無ければ出さない（違う画面に出さないため）
-    return `「${req.screens.join('・')}」という画面がありません（画面: ${screens.map((s) => s.name).join('・') || 'なし'}）。出していません。`;
+    return `「${req.screens.join('・')}」という画面がありません（画面: ${screens.map((s) => s.name).join('・') || 'なし'}）。表示していません。`;
   }
   let assetId: string | undefined;
   let label = '';
@@ -385,9 +385,9 @@ export async function answerSignage(deps: SignageSecretaryDeps, tenantId: string
     ...(assetId ? { assetId } : {}), ...(req.text ? { text: req.text } : {}), ...(req.number ? { number: req.number } : {}), ...(req.place ? { place: req.place } : {}),
     ...(target ? { screens: target.map((s) => s.id) } : {}), ...(req.seconds ? { seconds: req.seconds } : {}), ...(req.chime !== undefined ? { chime: req.chime } : {}),
   }, 'secretary');
-  if ('error' in r) return `出せませんでした（${r.error}）。`;
+  if ('error' in r) return `表示できませんでした（${r.error}）。`;
   const names = (ids: string[]) => ids.map((id) => screens.find((s) => s.id === id)?.name).filter(Boolean).join('と');
-  if (!r.screens.length) return `同じ案内を${names(r.merged)}に出しています。`;
+  if (!r.screens.length) return `同じメッセージを${names(r.merged)}に表示しています。`;
   const shown = assetId ? `「${label}」` : `『${(await interrupts.recent(tenantId)).find((i) => i.id === r.id)?.text ?? ''}』`;
-  return `${names(r.screens)}に${shown}を出しました。`;
+  return `${names(r.screens)}に${shown}を表示しました。`;
 }

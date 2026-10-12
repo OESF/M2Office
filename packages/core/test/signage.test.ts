@@ -249,9 +249,9 @@ test('割り込みの素材の名前: カメラやスクリーンショットの
 });
 
 test('秘書の割り込みの確かめ: 出す・消すだけ確かめ、はい・いいえを見分ける', () => {
-  assert.equal(signageConfirmText({ kind: 'show', number: '12', place: '診察室', screens: ['待合'] }), '待合の画面に12番の呼び出し（診察室）を出します。よろしいですか？（はい／いいえ）');
-  assert.equal(signageConfirmText({ kind: 'show', text: '焼き上がりました', screens: [] }), 'すべての画面に「焼き上がりました」を出します。よろしいですか？（はい／いいえ）');
-  assert.equal(signageConfirmText({ kind: 'clear', all: false, screens: [] }), 'いま出している割り込みを消します。よろしいですか？（はい／いいえ）');
+  assert.equal(signageConfirmText({ kind: 'show', number: '12', place: '診察室', screens: ['待合'] }), '待合の画面に12番の呼び出し（診察室）を表示します。よろしいですか？（はい／いいえ）');
+  assert.equal(signageConfirmText({ kind: 'show', text: '焼き上がりました', screens: [] }), 'すべての画面に「焼き上がりました」を表示します。よろしいですか？（はい／いいえ）');
+  assert.equal(signageConfirmText({ kind: 'clear', all: false, screens: [] }), 'いま表示しているメッセージを消します。よろしいですか？（はい／いいえ）');
   assert.equal(signageConfirmText({ kind: 'status' }), null);
   for (const y of ['はい', 'お願いします', '出して', 'OK。']) assert.ok(SIGNAGE_YES.test(y), y);
   for (const n of ['いいえ', 'やめて', 'キャンセル']) assert.ok(SIGNAGE_NO.test(n), n);

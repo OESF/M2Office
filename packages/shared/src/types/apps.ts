@@ -56,7 +56,7 @@ export const APP_FUNCTIONS: readonly AppFunctionInfo[] = [
   { id: 'columns.read', label: '公開したコラムを読む', routes: ['GET /v1/columns/published', 'GET /v1/columns/published/{id}/cover.png'], requires: 'web-columns' },
   { id: 'jobs.run', label: '業務を依頼して結果を受け取る', routes: ['POST /v1/jobs', 'GET /v1/runs/{id}'], needs: 'accounts.link' },
   {
-    id: 'signage.interrupt', label: 'サイネージに呼び出しを出す',
+    id: 'signage.interrupt', label: 'サイネージにメッセージを表示する',
     routes: ['POST /v1/signage/interrupts', 'POST /v1/signage/interrupts/{id}/clear'], requires: 'signage',
   },
   { id: 'signage.status', label: 'サイネージの画面の状態を読む', routes: ['GET /v1/signage/screens'], requires: 'signage' },

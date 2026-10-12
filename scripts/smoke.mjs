@@ -5088,7 +5088,7 @@ console.log('\n■ 63. 店頭サイネージ（内蔵の拡張。第31章の段 
       const c3 = await ask('「やめる案内」を出して');
       const c4 = await ask('いいえ');
       const fin = (await call('a', '/v1/signage/interrupts')).body?.interrupts ?? [];
-      /よろしいですか/.test(c1?.text ?? '') && !mid.some((x) => x.text === '確かめの案内') && /出しました/.test(c2?.text ?? '')
+      /よろしいですか/.test(c1?.text ?? '') && !mid.some((x) => x.text === '確かめの案内') && /表示しました/.test(c2?.text ?? '')
         && fin.some((x) => x.text === '確かめの案内' && x.origin === 'secretary') && /よろしいですか/.test(c3?.text ?? '') && /やめました/.test(c4?.text ?? '') && !fin.some((x) => x.text === 'やめる案内')
         ? ok('社内への書き込みを確かめる会社では、秘書は割り込みを出す前に確かめ、「はい」で出し「いいえ」でやめる')
         : ng('秘書の割り込みの確かめが合わない', JSON.stringify({ c1, c2, c3, c4, fin: fin.map((x) => x.text) }).slice(0, 700));
