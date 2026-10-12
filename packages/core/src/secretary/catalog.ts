@@ -7,6 +7,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { canDecide } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { WorkspaceConnector } from '../connectors/types.js';
 import { addDays, jst, ymd } from '../connectors/mock.js';
@@ -316,7 +317,9 @@ const pendingApprovals: DirectQuery = {
   patterns: [/承認/, /確認すること/],
   compartment: null,
   async answer(ctx) {
-    const list = await ctx.repo.listPendingApprovals(ctx.tenantId);
+    // 本人が判断できる承認だけ（承認トレイと同じ規則。ほかの人の業務の承認の中身を見せない。仕様書 第6.2.1節）
+    const user = await ctx.repo.findUserById(ctx.tenantId, ctx.userId);
+    const list = (await ctx.repo.listPendingApprovals(ctx.tenantId)).filter((a) => canDecide(a, { id: ctx.userId, roles: user?.roles ?? [] }));
     if (list.length === 0) {
       return { text: '承認待ちはありません。', evidence: [] };
     }
@@ -335,7 +338,8 @@ const recentRuns: DirectQuery = {
   patterns: [/実行/, /状況/, /進捗/],
   compartment: null,
   async answer(ctx) {
-    const runs = await ctx.repo.listRuns(ctx.tenantId, 5);
+    // 本人が依頼した実行だけ（実行履歴の画面と同じ。ほかの人の実行は数えない）
+    const runs = (await ctx.repo.listRunsWithJobs(ctx.tenantId, { limit: 5, requestedBy: ctx.userId })).map((r) => r.run);
     if (runs.length === 0) {
       return { text: 'まだ実行の履歴はありません。', evidence: [] };
     }

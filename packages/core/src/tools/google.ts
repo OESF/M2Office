@@ -382,10 +382,11 @@ const CONSUMER_DOMAINS = new Set(['gmail.com', 'googlemail.com']);
  * @returns ドメインか、共有できない理由
  */
 async function companyDomain(ctx: ToolContext): Promise<{ domain: string } | { reason: string }> {
-  // 接続が読めなければ（見本の会社など）、M2Office の利用者のメールで決める
-  const conn = await Promise.resolve().then(() => ctx.repo.getGoogleConnection(ctx.tenantId, ctx.userId)).catch(() => null);
-  const email = conn?.googleEmail || (await ctx.repo.findUserById(ctx.tenantId, ctx.userId))?.email || '';
-  const domain = email.split('@')[1]?.trim().toLowerCase() ?? '';
+  // 会社に設定した Google Workspace のドメイン（ログインを許すドメインと同じ。第16.1.2節）で決める。
+  // 本人がつないだ Google アカウントのドメインでは決めない（会社と関係の無いドメインのアカウントをつなぐと、
+  // そのドメインの人がみな社内とみなされ、承認なしで共有・招待が届いていた。2026-10-12 の点検で見つけた）
+  const tenant = await Promise.resolve().then(() => ctx.repo.findTenantById(ctx.tenantId)).catch(() => null);
+  const domain = tenant?.workspaceDomain?.trim().toLowerCase() ?? '';
   if (!domain) return { reason: '会社のドメインが分かりません' };
   if (CONSUMER_DOMAINS.has(domain)) return { reason: '個人向けの Google アカウントでは、会社の全員への共有はできません' };
   return { domain };

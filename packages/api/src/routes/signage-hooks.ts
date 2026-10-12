@@ -7,6 +7,7 @@
  */
 
 import { Hono, type Context } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { hashSecret } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { isOperational } from '../middleware/tenant.js';
@@ -25,6 +26,8 @@ const NOT_FOUND = { error: 'not found' };
  */
 export function signageHooksRoute(deps: AppDeps) {
   const app = new Hono();
+  // 本文を読み込む前に大きさで断る（宣言の長さと、chunked で送られた分の両方。巨大な本文で止めさせない。2026-10-12 の点検）
+  app.use('*', bodyLimit({ maxSize: MAX_BODY, onError: (c) => c.json({ error: 'payload too large' }, 413) }));
   const { interrupts } = deps.signage;
 
   const receive = async (c: Context, key: string | null) => {

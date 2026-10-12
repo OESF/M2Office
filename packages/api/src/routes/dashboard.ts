@@ -136,7 +136,9 @@ export function dashboardRoute(deps: AppDeps) {
     if (!avatar.startsWith('file:')) return c.json({ error: 'アバターは登録されていません' }, 404);
     const id = avatar.slice('file:'.length);
     const meta = await deps.repo.getFile(tenant.id, id);
-    const bytes = meta && (meta.kind === 'png' || meta.kind === 'jpeg') ? await deps.files.get(tenant.id, id) : null;
+    // 本人が上げた画像だけ（アバターの値に他人のファイルの ID を書いて、他人の画像を出させない。2026-10-12 の点検）
+    const own = !!target && meta?.ownerUserId === target.id;
+    const bytes = own && meta && (meta.kind === 'png' || meta.kind === 'jpeg') ? await deps.files.get(tenant.id, id) : null;
     if (!meta || !bytes) return c.json({ error: 'アバターは登録されていません' }, 404);
     return imageResponse(bytes, meta.mime, 60);
   });

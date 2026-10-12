@@ -19,7 +19,15 @@
 		try_files {path} /index.html
 		file_server
 	}
+	# アクセスのログには、道の中の鍵（受け口・会員証・配信の停止・公開のページ）と URL の問い合わせの部分（端末のトークン・認可の値・引換券）を残さない
+	# （アプリのログと同じ。2026-10-12 の点検）。Cookie と Authorization の見出しは Caddy が既定で伏せる
 	log {
 		output file {{DATA_DIR}}/logs/caddy.log
+		format filter {
+			request>uri multi_regexp {
+				regexp ^(/v1/(?:hooks/[a-z-]+|member-card|unsubscribe|public/inventory|public/columns))/[^/?]+ ${1}/***
+				regexp \?.*$ ?***
+			}
+		}
 	}
 }

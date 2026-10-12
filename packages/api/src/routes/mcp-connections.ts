@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import { RISK_LEVELS, type RiskLevel } from '@m2office/shared';
 import {
-  CONNECTION_PRESETS, checkConnector, discoverOAuthEndpoints, isLocalPolicy, presetById, presetRisk,
+  CONNECTION_PRESETS, checkConnector, checkOutboundUrl, discoverOAuthEndpoints, isLocalPolicy, presetById, presetRisk,
   type ConnectorAuth, type ConnectionPreset, type TenantConnection,
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
@@ -137,6 +137,12 @@ export function mcpConnectionsRoute(deps: AppDeps) {
     const type = preset?.auth.type ?? (body.auth === 'oauth' || body.auth === 'api_key' ? body.auth : 'none');
     let auth: ConnectorAuth = preset ? { ...preset.auth } : { type };
     let tools: TenantConnection['tools'] = [];
+    // URL の形と宛先を、接続を試す前に確かめる（社内のアドレスへ送らせない。2026-10-12 の点検）
+    const urlProblems = checkConnector({ id, name: id, transport: 'http', url, auth, tools: [] } as unknown as Parameters<typeof checkConnector>[0], deps.hub.builtinPrefixes())
+      .filter((p) => p.startsWith('url '));
+    if (urlProblems.length > 0) return c.json({ error: '登録できません', problems: urlProblems }, 400);
+    const blocked = await checkOutboundUrl(url);
+    if (blocked) return c.json({ error: '登録できません', problems: [blocked] }, 400);
     if (type === 'none') {
       const listed = await deps.hub.listMcpTools(url);
       if (!listed.ok) return c.json({ error: `MCP サーバに接続できませんでした: ${listed.error}` }, 400);

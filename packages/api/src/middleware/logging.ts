@@ -72,12 +72,14 @@ export function requestLogger(log: Logger, logPolls = process.env['LOG_POLLS'] =
 }
 
 /**
- * 記録に残す要求のパス。受け口（予約・サイネージ）の URL の鍵は伏せる（仕様書 第31.8.2節・第29.13.1節）。
+ * 記録に残す要求のパス。道の中の鍵は伏せる（受け口（予約・サイネージ・LINE）、会員証、配信の停止、公開のページ。
+ * 仕様書 第31.8.2節・第29.13.1節。会員証などの鍵が記録から漏れると、本人だけが開くページを他人が開ける。2026-10-12 の点検）。
  *
  * @example logPath('/v1/hooks/signage/abc…') // → '/v1/hooks/signage/***'
+ * @example logPath('/v1/member-card/abc…/qr.svg') // → '/v1/member-card/***' + '/qr.svg'
  */
 export function logPath(path: string): string {
-  return path.replace(/^(\/v1\/hooks\/[a-z-]+)\/[^/]+/, '$1/***');
+  return path.replace(/^(\/v1\/(?:hooks\/[a-z-]+|member-card|unsubscribe|public\/inventory|public\/columns))\/[^/]+/, '$1/***');
 }
 
 /**

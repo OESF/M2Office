@@ -26,6 +26,7 @@ export const MCP_CALL_TIMEOUT_MS = 180_000;
 export const MCP_RESULT_LIMIT = 20_000;
 
 import type { ArgSpec, ToolArgsSchema } from '../tools/registry.js';
+import { outboundFetch } from '../net/outbound.js';
 
 /** MCP サーバが提供するツールの概要。 */
 export interface McpToolInfo {
@@ -138,7 +139,8 @@ export class HttpMcpClient implements McpClient {
     url: string, payload: Record<string, unknown>, session: string | null, expectBody = true, auth?: Record<string, string>,
     timeoutMs = this.timeoutMs,
   ): Promise<{ headers: Headers; body: RpcResponse | null }> {
-    const res = await fetch(url, {
+    // 登録した URL は会社の管理者が書けるため、宛先を確かめてから送る（社内のアドレスへ送らせない）
+    const res = await outboundFetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

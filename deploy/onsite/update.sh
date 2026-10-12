@@ -93,6 +93,9 @@ fi
 
 # 控え（データベース）。直近の 3 回を残す
 OWNER_URL=$(grep -E '^MIGRATION_DATABASE_URL=' "$ENV_FILE" | cut -d= -f2-)
+# 控えは会社の全データなので、作る人だけが読める権限で作る。前に入れた機械の置き場の権限もここでそろえる
+umask 077
+chmod 700 "$DATA_DIR" "$DATA_DIR/files" "$DATA_DIR/logs" "$DATA_DIR/machine" ${BACKUP_DIR:+"$BACKUP_DIR"} 2>/dev/null || true
 mkdir -p "${BACKUP_DIR:-$DATA_DIR}/pre-update"
 DUMP="${BACKUP_DIR:-$DATA_DIR}/pre-update/$(date +%Y%m%d-%H%M%S)-$FROM.dump"
 "$PG_BIN/pg_dump" -Fc -f "$DUMP" "$OWNER_URL" || { record failed "$FROM" "$TO" '更新の前の控えを取れませんでした'; log '控えを取れません。入れません'; exit 1; }

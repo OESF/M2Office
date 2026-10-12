@@ -64,7 +64,10 @@ export function tenantLoginUrl(opsOrigin: string, subdomain: string): string {
 /** 要求の元（画面のオリジン）。 */
 function originOf(c: Context): string {
   const o = c.req.header('origin');
-  if (o && isOpsHost(new URL(o).host)) return o;
+  // Origin は、要求の Host と同じ運営のホストのときだけ使う（ops.evil.example のような外のホストを戻り先にさせない）
+  try {
+    if (o && new URL(o).host === c.req.header('host') && isOpsHost(new URL(o).host)) return new URL(o).origin;
+  } catch { /* 読めない Origin は使わない */ }
   const host = c.req.header('host') ?? '';
   const proto = c.req.header('x-forwarded-proto') ?? 'https';
   return `${proto}://${host}`;
@@ -162,8 +165,8 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
     if (c.req.query('error') || !code || !config.login) return back('failed');
     try {
       const { accessToken } = await exchangeGoogleLoginCode({ ...config.login, code, codeVerifier: pending.codeVerifier });
-      const { email } = await googleUserInfo(accessToken);
-      const op = email && (!config.googleDomain || email.split('@')[1] === config.googleDomain) ? await store.findOperatorByEmail(email) : null;
+      const { email, emailVerified } = await googleUserInfo(accessToken);
+      const op = email && emailVerified !== false && (!config.googleDomain || email.split('@')[1] === config.googleDomain) ? await store.findOperatorByEmail(email) : null;
       if (!op || op.status !== 'active') {
         log.warn('運営の画面へのログインを断りました', { reason: op ? '無効にした運営者' : '登録されていない' });
         return back('denied');

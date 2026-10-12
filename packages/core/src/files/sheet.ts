@@ -116,8 +116,20 @@ export function parseCsv(text: string): string[][] {
 }
 
 function csvEscape(v: string | number | boolean | null): string {
-  const s = v === null ? '' : String(v);
+  const s = v === null ? '' : typeof v === 'string' ? csvSafeText(v) : String(v);
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+/**
+ * 表計算で式として動かないようにした文字（CSV の数式の注入を防ぐ。2026-10-12 の点検）。
+ *
+ * `=` `+` `-` `@`（とタブ・改行）で始まり、数字・記号だけでない値（`=HYPERLINK(…)` など）の先頭に `'` を付ける。
+ * 電話番号（`+81-3-…`）やマイナスの数（`-5`）のような、数字と記号だけの値は変えない（見た目を崩さない）。
+ *
+ * @param v 文字の値（数は渡さない）
+ */
+export function csvSafeText(v: string): string {
+  return /^[=+\-@\t\r]/.test(v) && /[^0-9+\-().,/:\s]/.test(v) ? `'${v}` : v;
 }
 
 /** CSV の値。空は null、数値として読めるものも文字列のまま返す（先頭の 0 を落とさないため）。 */

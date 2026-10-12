@@ -7,7 +7,7 @@
  * @see 仕様書 第16.1節 認証
  */
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import { companyName, type AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
@@ -16,6 +16,11 @@ import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { clearSessionCookie, issueSession, readSession } from '../auth/session.js';
 import { PROXY_COOKIE } from '../middleware/tenant.js';
 import { tenantOrigin } from '../tenant-origin.js';
+
+/** ログインを始めたブラウザの印の Cookie（第16.1.2節）。 */
+const LOGIN_BROWSER_COOKIE = 'm2o_login_browser';
+/** 印のハッシュ（記憶には印そのものを置かない）。 */
+const browserHash = (v: string) => createHash('sha256').update(v).digest('base64url');
 
 /**
  * ログインとログアウト。
@@ -100,13 +105,18 @@ export function authRoute(deps: AppDeps) {
       );
     }
     const { verifier, challenge } = createPkce();
+    // ログインを始めたブラウザに印を置く。引換券は、この印を持つブラウザでしか使えない
+    // （ほかの人が作ったログインの URL を開かされても、券を盗ませない。第16.1.2節）
+    const browser = randomBytes(24).toString('base64url');
+    setCookie(c, LOGIN_BROWSER_COOKIE, browser, { httpOnly: true, sameSite: 'Lax', secure: deps.auth.cookieSecure, path: '/v1/auth', maxAge: 15 * 60 });
     const state = deps.loginStates.issue({
       tenantId: tenant.id,
       // ログインの時点では、まだ誰かが分からない
       userId: '',
       codeVerifier: verifier,
-      // 戻す先は、始めた会社のホストである
+      // 戻す先は、始めた会社のホストである（Origin はホストが同じときだけ使う）
       returnTo: tenantOrigin(c.req.header('origin'), c.req.header('host')),
+      browser: browserHash(browser),
     });
     return c.json({
       url: buildGoogleLoginUrl({
@@ -132,6 +142,12 @@ export function authRoute(deps: AppDeps) {
     const hit = ticket ? deps.handoffs.take(ticket) : null;
     // 券が違う会社のものなら、使わせない（券は消費済みである）
     if (!hit || hit.tenantId !== tenant.id) {
+      return c.json({ error: 'ログインをやり直してください' }, 401);
+    }
+    // ログインを始めたブラウザでなければ使わせない（盗んだ券を別のブラウザで使わせない）
+    const mark = getCookie(c, LOGIN_BROWSER_COOKIE);
+    deleteCookie(c, LOGIN_BROWSER_COOKIE, { path: '/v1/auth' });
+    if (hit.browser && (!mark || browserHash(mark) !== hit.browser)) {
       return c.json({ error: 'ログインをやり直してください' }, 401);
     }
     const user = await deps.repo.findUserById(tenant.id, hit.userId);

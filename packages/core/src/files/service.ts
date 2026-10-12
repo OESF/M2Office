@@ -42,7 +42,7 @@ export async function saveFile(
  *
  * @remarks
  * 上げた本人（または業務を依頼した本人）は開ける。業務が作ったファイルは、その実行を見られる人が開ける。
- * 利用者が上げたファイルは、それを入力にした実行の承認を判断できる人も開ける。
+ * 利用者が上げたファイルは、**上げた本人が**それを入力にして依頼した実行の承認を判断できる人も開ける（他人のファイルの ID を入力に書いた依頼では開けない）。
  * 承認者の役割を持つだけでは開けない。
  */
 async function canOpenFile(
@@ -55,7 +55,8 @@ async function canOpenFile(
     if (!run || !job) return false;
     return canViewRun(repo, tenantId, job, run.id, who);
   }
-  const approvals = await repo.listApprovalsForFileInput(tenantId, meta.id);
+  if (!meta.ownerUserId) return false;
+  const approvals = await repo.listApprovalsForFileInput(tenantId, meta.id, meta.ownerUserId);
   return approvals.some((a) => canDecide(a, who));
 }
 

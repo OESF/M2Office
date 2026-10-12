@@ -225,17 +225,19 @@ export async function googleGrantedScopes(accessToken: string, endpoints: Google
 /**
  * 接続した Google アカウントの利用者情報（メールアドレスとプロフィール写真の URL）。
  *
- * @returns 取れなかった項目は `null`。写真は `profile` の許可があるときだけ返る（仕様書 第6.5.1.1節）
+ * @returns 取れなかった項目は `null`。写真は `profile` の許可があるときだけ返る（仕様書 第6.5.1.1節）。
+ *   `emailVerified` は Google がメールアドレスを確かめたか（`false` のアドレスではログインさせない。第16.1.2節）
  */
 export async function googleUserInfo(
   accessToken: string, endpoints: GoogleOAuthEndpoints = GOOGLE_OAUTH_ENDPOINTS,
-): Promise<{ email: string | null; picture: string | null }> {
+): Promise<{ email: string | null; picture: string | null; emailVerified: boolean | null }> {
   const res = await fetch(endpoints.userinfo, { headers: { authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(20_000) });
-  if (!res.ok) return { email: null, picture: null };
+  if (!res.ok) return { email: null, picture: null, emailVerified: null };
   const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   return {
     email: typeof json['email'] === 'string' ? json['email'] : null,
     picture: typeof json['picture'] === 'string' ? json['picture'] : null,
+    emailVerified: typeof json['email_verified'] === 'boolean' ? json['email_verified'] : null,
   };
 }
 

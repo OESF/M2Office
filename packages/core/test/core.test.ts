@@ -56,6 +56,8 @@ class MemoryRepo {
   async appendAudit(e: AuditEvent) { this.audits.push(e); }
   async createNotification(n: Notification) { this.notifications.push(n); }
   async findUserById(t: string, id: string) { return this.users.find((u) => u.tenantId === t && u.id === id) ?? null; }
+  /** 会社のドメイン（社内かどうかの判定に使う）。見本では依頼者のメールのドメインと同じにする（個人向けのアカウントの会社を試すため）。 */
+  async findTenantById(t: string) { const m = this.users.find((u) => u.tenantId === t && u.id === 'u-member'); return { id: t, workspaceDomain: m?.email.split('@')[1] ?? null } as never; }
   async listUsers(t: string) { return this.users.filter((u) => u.tenantId === t); }
   async listNotifications(t: string, userId: string) {
     return this.notifications.filter((n) => n.tenantId === t && n.userId === userId);

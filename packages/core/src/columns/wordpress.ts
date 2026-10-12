@@ -7,6 +7,7 @@
  */
 
 import { markdownToDocHtml } from '../connectors/google/doc-html.js';
+import { outboundFetch } from '../net/outbound.js';
 
 /** WordPress につなぐ値。 */
 export interface WordPressAuth {
@@ -38,7 +39,7 @@ function headers(a: WordPressAuth): Record<string, string> {
 /** つながるか（利用者名とパスワードが通り、記事を書ける権限があるか）を確かめる。 */
 export async function checkWordPress(a: WordPressAuth): Promise<{ ok: true; name: string } | { ok: false; error: string }> {
   try {
-    const res = await fetch(`${a.siteUrl}/wp-json/wp/v2/users/me?context=edit`, { headers: headers(a), signal: AbortSignal.timeout(TIMEOUT_MS) });
+    const res = await outboundFetch(`${a.siteUrl}/wp-json/wp/v2/users/me?context=edit`, { headers: headers(a), signal: AbortSignal.timeout(TIMEOUT_MS) });
     if (res.status === 401 || res.status === 403) return { ok: false, error: '利用者名かアプリケーションパスワードが違うか、記事を書く権限がありません' };
     if (res.status === 404) return { ok: false, error: 'WordPress の REST API が見つかりません。サイトの URL を確かめてください' };
     if (!res.ok) return { ok: false, error: `WordPress が応答しませんでした（${res.status}）` };
@@ -62,7 +63,7 @@ export function columnHtml(markdown: string): string {
  */
 export async function createWordPressDraft(a: WordPressAuth, post: { title: string; html: string; excerpt: string; featuredMedia?: string | null }): Promise<{ id: string; editUrl: string } | { error: string }> {
   try {
-    const res = await fetch(`${a.siteUrl}/wp-json/wp/v2/posts`, {
+    const res = await outboundFetch(`${a.siteUrl}/wp-json/wp/v2/posts`, {
       method: 'POST', headers: headers(a), signal: AbortSignal.timeout(TIMEOUT_MS),
       body: JSON.stringify({
         title: post.title, content: post.html, excerpt: post.excerpt, status: 'draft',
@@ -87,7 +88,7 @@ export async function createWordPressDraft(a: WordPressAuth, post: { title: stri
 export async function uploadWordPressMedia(a: WordPressAuth, img: { bytes: Uint8Array; fileName: string; mimeType: string; alt: string }): Promise<{ id: string } | { error: string }> {
   try {
     const h = headers(a);
-    const res = await fetch(`${a.siteUrl}/wp-json/wp/v2/media`, {
+    const res = await outboundFetch(`${a.siteUrl}/wp-json/wp/v2/media`, {
       method: 'POST', signal: AbortSignal.timeout(TIMEOUT_MS),
       headers: { authorization: h['authorization']!, accept: 'application/json', 'content-type': img.mimeType, 'content-disposition': `attachment; filename="${img.fileName.replace(/[^\w.-]/g, '_')}"` },
       body: Buffer.from(img.bytes),
@@ -97,7 +98,7 @@ export async function uploadWordPressMedia(a: WordPressAuth, img: { bytes: Uint8
     const id = String(body.id ?? '');
     if (!id) return { error: 'WordPress の応答にメディアの ID がありません' };
     // 代わりの文は入れた後に付ける（入れるときの口では受け取らないため）。付けられなくても記事は作る
-    await fetch(`${a.siteUrl}/wp-json/wp/v2/media/${encodeURIComponent(id)}`, {
+    await outboundFetch(`${a.siteUrl}/wp-json/wp/v2/media/${encodeURIComponent(id)}`, {
       method: 'POST', headers: h, signal: AbortSignal.timeout(TIMEOUT_MS), body: JSON.stringify({ alt_text: img.alt }),
     }).catch(() => undefined);
     return { id };
@@ -117,7 +118,7 @@ export async function createWordPressPost(a: WordPressAuth, post: {
   title: string; html: string; status: 'publish' | 'future' | 'draft'; date?: string; categories?: number[];
 }): Promise<{ id: string; link: string; editUrl: string } | { error: string }> {
   try {
-    const res = await fetch(`${a.siteUrl}/wp-json/wp/v2/posts`, {
+    const res = await outboundFetch(`${a.siteUrl}/wp-json/wp/v2/posts`, {
       method: 'POST', headers: headers(a), signal: AbortSignal.timeout(TIMEOUT_MS),
       body: JSON.stringify({
         title: post.title, content: post.html, status: post.status,
@@ -142,13 +143,13 @@ export async function createWordPressPost(a: WordPressAuth, post: {
  */
 export async function ensureWordPressCategory(a: WordPressAuth, name: string): Promise<number | null> {
   try {
-    const found = await fetch(`${a.siteUrl}/wp-json/wp/v2/categories?search=${encodeURIComponent(name)}&per_page=20`, { headers: headers(a), signal: AbortSignal.timeout(TIMEOUT_MS) });
+    const found = await outboundFetch(`${a.siteUrl}/wp-json/wp/v2/categories?search=${encodeURIComponent(name)}&per_page=20`, { headers: headers(a), signal: AbortSignal.timeout(TIMEOUT_MS) });
     if (found.ok) {
       const list = await found.json() as { id?: number; name?: string }[];
       const hit = list.find((c) => c.name === name);
       if (hit?.id) return hit.id;
     }
-    const made = await fetch(`${a.siteUrl}/wp-json/wp/v2/categories`, {
+    const made = await outboundFetch(`${a.siteUrl}/wp-json/wp/v2/categories`, {
       method: 'POST', headers: headers(a), signal: AbortSignal.timeout(TIMEOUT_MS), body: JSON.stringify({ name }),
     });
     if (!made.ok) return null;
@@ -166,7 +167,7 @@ export async function ensureWordPressCategory(a: WordPressAuth, name: string): P
  */
 export async function getWordPressPost(a: WordPressAuth, id: string): Promise<{ status: string; link: string } | null> {
   try {
-    const res = await fetch(`${a.siteUrl}/wp-json/wp/v2/posts/${encodeURIComponent(id)}?context=edit&_fields=status,link`, { headers: headers(a), signal: AbortSignal.timeout(TIMEOUT_MS) });
+    const res = await outboundFetch(`${a.siteUrl}/wp-json/wp/v2/posts/${encodeURIComponent(id)}?context=edit&_fields=status,link`, { headers: headers(a), signal: AbortSignal.timeout(TIMEOUT_MS) });
     if (!res.ok) return null;
     const v = await res.json() as { status?: string; link?: string };
     return { status: v.status ?? '', link: v.link ?? '' };
@@ -182,7 +183,7 @@ export async function getWordPressPost(a: WordPressAuth, id: string): Promise<{ 
  */
 export async function setWordPressStatus(a: WordPressAuth, id: string, status: 'draft' | 'publish'): Promise<string | null> {
   try {
-    const res = await fetch(`${a.siteUrl}/wp-json/wp/v2/posts/${encodeURIComponent(id)}`, {
+    const res = await outboundFetch(`${a.siteUrl}/wp-json/wp/v2/posts/${encodeURIComponent(id)}`, {
       method: 'POST', headers: headers(a), signal: AbortSignal.timeout(TIMEOUT_MS), body: JSON.stringify({ status }),
     });
     return res.ok ? null : `WordPress の記事を下書きに戻せませんでした（${res.status}）`;
@@ -194,7 +195,7 @@ export async function setWordPressStatus(a: WordPressAuth, id: string, status: '
 /** 記事の題名を変える（お知らせの期間の後に「（終了しました）」を付ける。第35.6.1節）。 */
 export async function updateWordPressTitle(a: WordPressAuth, id: string, title: string): Promise<string | null> {
   try {
-    const res = await fetch(`${a.siteUrl}/wp-json/wp/v2/posts/${encodeURIComponent(id)}`, {
+    const res = await outboundFetch(`${a.siteUrl}/wp-json/wp/v2/posts/${encodeURIComponent(id)}`, {
       method: 'POST', headers: headers(a), signal: AbortSignal.timeout(TIMEOUT_MS), body: JSON.stringify({ title }),
     });
     return res.ok ? null : `WordPress の記事を直せませんでした（${res.status}）`;

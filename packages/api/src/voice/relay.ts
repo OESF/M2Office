@@ -152,7 +152,8 @@ function cookieValue(header: string | undefined, name: string): string | null {
 async function authenticate(deps: AppDeps, req: IncomingMessage) {
   const host = req.headers.host ?? '';
   const devTenant = deps.auth.devHeaders ? (req.headers['x-tenant'] as string | undefined) : undefined;
-  const subdomain = devTenant ?? extractSubdomain(host);
+  // ローカルの形では、アドレスにかかわらず入っている 1 社に決める（画面の API と同じ。第8.6節）
+  const subdomain = deps.onsiteTenant ?? devTenant ?? extractSubdomain(host);
   if (!subdomain) return null;
   const tenant = await deps.repo.findTenantBySubdomain(subdomain);
   // 停止中・緊急停止・解約済みの会社では開かない（第23.8.6節）

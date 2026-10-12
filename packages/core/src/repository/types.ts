@@ -65,8 +65,8 @@ export interface Repository {
    * @returns 承認と、その実行と依頼の要点（業務・依頼した人）
    */
   listDecidedApprovals(tenantId: string, userId: string, limit: number): Promise<DecidedApproval[]>;
-  /** 入力にそのファイルの ID を含む依頼の実行の承認（判断済みを含む）。利用者が上げたファイルを開ける人の判定に使う。 */
-  listApprovalsForFileInput(tenantId: string, fileId: string): Promise<Approval[]>;
+  /** ファイルを上げた本人が依頼し、入力にそのファイルの ID を含む実行の承認（判断済みを含む）。利用者が上げたファイルを開ける人の判定に使う。 */
+  listApprovalsForFileInput(tenantId: string, fileId: string, ownerUserId: string): Promise<Approval[]>;
   /** 指定した時刻より前から承認待ちの承認（期限切れの見回り。仕様書 第14.3.2節）。 */
   listStaleApprovals(tenantId: string, createdBefore: string): Promise<Approval[]>;
 

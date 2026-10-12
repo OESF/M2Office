@@ -280,14 +280,21 @@ export function requireRole(...roles: string[]) {
   };
 }
 
-/** `a.lvh.me` や `a.m2office.online` から先頭のラベルを取り出す。 */
-export function extractSubdomain(host: string): string | null {
-  const name = host.split(':')[0] ?? '';
-  const labels = name.split('.');
-  if (labels.length < 2) return null;
-  const first = labels[0];
-  if (!first || RESERVED.has(first)) return null;
-  return first;
+/**
+ * `a.lvh.me` や `a.m2office.online` から会社のサブドメインを取り出す。
+ *
+ * @param baseDomain 会社のサブドメインの親（`BASE_DOMAIN`。既定は開発の `lvh.me`）。開発の `a.localhost` も受ける
+ * @returns **`<サブドメイン>.<親>` の形のときだけ**サブドメイン。`a.attacker.example` のような外のホストは `null`
+ *   （先頭のラベルだけで決めると、外のホストからも会社を名乗れる。2026-10-12 の点検で見つけた）
+ */
+export function extractSubdomain(host: string, baseDomain: string = process.env['BASE_DOMAIN'] ?? 'lvh.me'): string | null {
+  const name = (host.split(':')[0] ?? '').toLowerCase();
+  const base = baseDomain.toLowerCase().replace(/^\.+|\.+$/g, '');
+  const parent = [base, 'localhost'].find((p) => p && name.endsWith(`.${p}`));
+  if (!parent) return null;
+  const sub = name.slice(0, -(parent.length + 1));
+  if (!sub || sub.includes('.') || RESERVED.has(sub)) return null;
+  return sub;
 }
 
 /**

@@ -26,6 +26,8 @@ const TTL_MS = 2 * 60 * 1000;
 export interface Handoff {
   tenantId: string;
   userId: string;
+  /** ログインを始めたブラウザの印のハッシュ。あれば、引き換えるブラウザが同じ印を持つときだけ通す。 */
+  browser?: string;
   expiresAt: number;
 }
 
@@ -44,7 +46,7 @@ export class HandoffStore {
    *
    * @returns 券。URL に載せて会社のホストへ渡す
    */
-  issue(p: { tenantId: string; userId: string }, now = Date.now()): string {
+  issue(p: { tenantId: string; userId: string; browser?: string }, now = Date.now()): string {
     this.sweep(now);
     const ticket = randomBytes(32).toString('base64url');
     this.tickets.set(ticket, { ...p, expiresAt: now + TTL_MS });

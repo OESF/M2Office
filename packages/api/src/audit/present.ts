@@ -6,6 +6,7 @@
  */
 
 import { agentDisplayName, type AuditEvent } from '@m2office/shared';
+import { csvSafeText } from '@m2office/core';
 
 /** 操作の名前を業務の言葉にする。無い名前は記録の名前のまま出す。 */
 const ACTION_LABELS: Record<string, string> = {
@@ -571,7 +572,9 @@ function targetOf(e: AuditEvent, names: AuditNames): string {
 
 /** CSV の 1 項目。区切り・引用・改行を含む値を囲む。 */
 function cell(v: string): string {
-  return /[",\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+  // 表計算で式として動かないようにする（記録の名前や詳細に、利用者が書いた文字が入るため）
+  const s = csvSafeText(v);
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
 /**

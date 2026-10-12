@@ -12,6 +12,7 @@ import type { Tool, ToolArgsSchema } from '../tools/registry.js';
 import type { McpClient } from '../connectors/mcp.js';
 import { presetById, resolveArgNames } from '../connectors/presets.js';
 import { recordHealth } from '../health/recorder.js';
+import { outboundPolicy } from '../net/outbound.js';
 
 /**
  * コネクタの認証の方式（仕様書 第12.11.6.1節）。
@@ -136,7 +137,8 @@ function isAllowedUrl(url: unknown): boolean {
   try {
     const u = new URL(url);
     if (u.protocol === 'https:') return true;
-    return u.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname);
+    // 暗号化しない http は、同じ機械の上の MCP サーバだけ。クラウドの本番では同じ機械の宛先も断る（ローカルの形と開発では通す）
+    return u.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname) && outboundPolicy() !== 'strict';
   } catch {
     return false;
   }

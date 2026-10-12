@@ -7,6 +7,7 @@
  */
 
 import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { BOOKING_PAYLOAD_MAX_BYTES } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 
@@ -20,6 +21,8 @@ const KEY = /^[A-Za-z0-9_-]{32}$/;
  */
 export function inventoryHooksRoute(deps: AppDeps) {
   const app = new Hono();
+  // 本文を読み込む前に大きさで断る（宣言の長さと、chunked で送られた分の両方。巨大な本文で止めさせない。2026-10-12 の点検）
+  app.use('*', bodyLimit({ maxSize: BOOKING_PAYLOAD_MAX_BYTES, onError: (c) => c.json({ ok: false, error: 'too large' }, 413) }));
 
   app.post('/:key', async (c) => {
     const key = c.req.param('key');

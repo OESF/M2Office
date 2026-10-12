@@ -137,8 +137,9 @@ function pgTool(cfg: BackupConfig, tool: string, args: string[], dbUrl: string, 
     const p = spawn(cmd, full, { env: { ...process.env, PGPASSWORD: c.password }, stdio: ['pipe', io.output ? 'pipe' : 'ignore', 'pipe'] });
     let err = '';
     p.stderr!.on('data', (d) => { err += String(d); });
-    // 書き出しが終わるのを待ってから終える（道具が先に終わっても、ファイルの最後が書き切れていないことがある）
-    const written = io.output ? new Promise<void>((ok, ng) => { const w = createWriteStream(io.output!); p.stdout!.pipe(w); w.on('finish', () => ok()); w.on('error', ng); }) : Promise.resolve();
+    // 書き出しが終わるのを待ってから終える（道具が先に終わっても、ファイルの最後が書き切れていないことがある）。
+    // 控えは会社の全データなので、専用の利用者だけが読める権限で作る（同じ機械のほかの利用者に読ませない。2026-10-12 の点検）
+    const written = io.output ? new Promise<void>((ok, ng) => { const w = createWriteStream(io.output!, { mode: 0o600 }); p.stdout!.pipe(w); w.on('finish', () => ok()); w.on('error', ng); }) : Promise.resolve();
     if (io.input) createReadStream(io.input).pipe(p.stdin!); else p.stdin!.end();
     p.on('error', reject);
     p.on('close', (code) => {

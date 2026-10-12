@@ -9,6 +9,8 @@
  * @see 仕様書 第12.11.6.2節・第12.11.6.3節・第12.11.6.4節
  */
 
+import { outboundFetch } from '../net/outbound.js';
+
 /** 1 回の問い合わせの時間の上限（ミリ秒）。 */
 const TIMEOUT_MS = 20_000;
 
@@ -58,7 +60,7 @@ type FetchLike = typeof fetch;
  *
  * @returns 見つからなければ `null`（型に書いた口か、管理者が入れた口を使う）
  */
-export async function discoverOAuthEndpoints(mcpUrl: string, fetchImpl: FetchLike = fetch): Promise<OAuthEndpoints | null> {
+export async function discoverOAuthEndpoints(mcpUrl: string, fetchImpl: FetchLike = outboundFetch): Promise<OAuthEndpoints | null> {
   try {
     const origin = new URL(mcpUrl).origin;
     const resource = await getJson(`${origin}/.well-known/oauth-protected-resource`, fetchImpl);
@@ -95,7 +97,7 @@ export async function discoverOAuthEndpoints(mcpUrl: string, fetchImpl: FetchLik
  */
 export async function registerOAuthClient(p: {
   registrationUrl: string; redirectUri: string; scopes: string[]; authMethods: string[];
-}, fetchImpl: FetchLike = fetch): Promise<RegisteredClient> {
+}, fetchImpl: FetchLike = outboundFetch): Promise<RegisteredClient> {
   const method = p.authMethods.includes('client_secret_post') ? 'client_secret_post' : p.authMethods.includes('none') ? 'none' : 'client_secret_post';
   let res: Response;
   try {
@@ -148,7 +150,7 @@ export function buildConnectionAuthUrl(p: {
  */
 export async function exchangeConnectionCode(p: {
   tokenUrl: string; clientId: string; clientSecret: string | null; code: string; redirectUri: string; codeVerifier?: string;
-}, fetchImpl: FetchLike = fetch, now = new Date()): Promise<OAuthTokens> {
+}, fetchImpl: FetchLike = outboundFetch, now = new Date()): Promise<OAuthTokens> {
   return tokensOf(await postForm(p.tokenUrl, {
     grant_type: 'authorization_code', code: p.code, redirect_uri: p.redirectUri,
     // シークレットを持たないアプリ（自動登録の公開クライアント）は送らない
@@ -164,7 +166,7 @@ export async function exchangeConnectionCode(p: {
  */
 export async function refreshConnectionToken(p: {
   tokenUrl: string; clientId: string; clientSecret: string | null; refreshToken: string;
-}, fetchImpl: FetchLike = fetch, now = new Date()): Promise<OAuthTokens> {
+}, fetchImpl: FetchLike = outboundFetch, now = new Date()): Promise<OAuthTokens> {
   const t = tokensOf(await postForm(p.tokenUrl, {
     grant_type: 'refresh_token', refresh_token: p.refreshToken, client_id: p.clientId, ...(p.clientSecret ? { client_secret: p.clientSecret } : {}),
   }, fetchImpl), now);
@@ -177,7 +179,7 @@ export async function refreshConnectionToken(p: {
  *
  * @returns 分からなければ空の文字。**推測で埋めない**
  */
-export async function fetchAccountLabel(accountUrl: string, accessToken: string, fetchImpl: FetchLike = fetch): Promise<string> {
+export async function fetchAccountLabel(accountUrl: string, accessToken: string, fetchImpl: FetchLike = outboundFetch): Promise<string> {
   try {
     const res = await fetchImpl(accountUrl, {
       method: 'POST', headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(TIMEOUT_MS),
@@ -192,7 +194,7 @@ export async function fetchAccountLabel(accountUrl: string, accessToken: string,
 }
 
 /** 相手の側でも認可を取り消す。できたら `true`。失敗しても例外にしない（手元の認可は呼び出し側が消す）。 */
-export async function revokeConnectionToken(revokeUrl: string, accessToken: string, fetchImpl: FetchLike = fetch): Promise<boolean> {
+export async function revokeConnectionToken(revokeUrl: string, accessToken: string, fetchImpl: FetchLike = outboundFetch): Promise<boolean> {
   try {
     const res = await fetchImpl(revokeUrl, {
       method: 'POST',

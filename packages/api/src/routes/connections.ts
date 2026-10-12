@@ -598,8 +598,10 @@ export function oauthCallbackRoute(deps: AppDeps) {
         clientId: login.clientId, clientSecret: login.clientSecret,
         code, redirectUri: login.redirectUri, codeVerifier: pending.codeVerifier,
       });
-      const { email, picture } = await googleUserInfo(accessToken);
+      const { email, picture, emailVerified } = await googleUserInfo(accessToken);
       if (!email) return back('failed');
+      // Google が確かめていないメールアドレスでは入れない（そのドメインのアドレスで作っただけのアカウントで、利用者を名乗らせない）
+      if (emailVerified === false) return back('denied');
       const address = email.toLowerCase();
 
       // 同じアドレスの拒否が続いて締め出している間は、ログインを受けない（第16.8.3節、Q-219）。締め出しの間の試みも拒否として数える
@@ -621,7 +623,7 @@ export function oauthCallbackRoute(deps: AppDeps) {
         await deps.security.afterDenial(tenant.id, address).catch(() => false);
         return back('denied');
       }
-      const ticket = deps.handoffs.issue({ tenantId: tenant.id, userId: user.id });
+      const ticket = deps.handoffs.issue({ tenantId: tenant.id, userId: user.id, ...(pending.browser ? { browser: pending.browser } : {}) });
       // ログインのたびに、Google のプロフィール写真を取り込み直す（第6.5.1.1節。待たない）
       importGooglePhoto(deps, tenant.id, user, email, picture);
       return c.redirect(`${pending.returnTo}?ticket=${encodeURIComponent(ticket)}`);

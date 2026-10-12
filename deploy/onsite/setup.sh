@@ -292,8 +292,9 @@ if ! dscl . -read "/Users/$SERVICE_USER" >/dev/null 2>&1; then
 fi
 for d in postgres files logs caddy machine; do sudo mkdir -p "$DATA_DIR/$d"; done
 sudo chown -R "$SERVICE_USER:$SERVICE_USER" "$DATA_DIR"
-sudo chmod 700 "$DATA_DIR/postgres"
-if [ -n "$BACKUP_DIR" ]; then sudo mkdir -p "$BACKUP_DIR" && sudo chown "$SERVICE_USER:$SERVICE_USER" "$BACKUP_DIR"; fi
+# データ・ファイル・ログ・控えは、専用の利用者（と管理者）だけが読めるようにする（同じ機械のほかの利用者に読ませない）
+sudo chmod 700 "$DATA_DIR" "$DATA_DIR/postgres" "$DATA_DIR/files" "$DATA_DIR/logs" "$DATA_DIR/machine"
+if [ -n "$BACKUP_DIR" ]; then sudo mkdir -p "$BACKUP_DIR" && sudo chown "$SERVICE_USER:$SERVICE_USER" "$BACKUP_DIR" && sudo chmod 700 "$BACKUP_DIR"; fi
 # 入口を M2Office の中に持っていたころ（第 0.318.0 版まで）の設定を外す（入口は共通の置き場に移した）
 if [ -f "$DAEMONS/jp.m2office.caddy.plist" ]; then
   sudo launchctl bootout system/jp.m2office.caddy >/dev/null 2>&1 || true

@@ -8,6 +8,7 @@
  */
 
 import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import type { AppDeps } from '../context.js';
 
 /** 鍵の形（base64url の 32 字）。形の違う鍵は引かずに断る。 */
@@ -22,6 +23,8 @@ const MAX_BYTES = 1024 * 1024;
  */
 export function lineHooksRoute(deps: AppDeps) {
   const app = new Hono();
+  // 本文を読み込む前に大きさで断る（宣言の長さと、chunked で送られた分の両方。巨大な本文で止めさせない。2026-10-12 の点検）
+  app.use('*', bodyLimit({ maxSize: MAX_BYTES, onError: (c) => c.json({ ok: false }, 413) }));
 
   app.post('/:key', async (c) => {
     const key = c.req.param('key');

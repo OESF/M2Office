@@ -413,8 +413,9 @@ export class PostgresRepository implements Repository {
       [tenantId, runId]);
   }
 
-  async listApprovalsForFileInput(tenantId: string, fileId: string): Promise<Approval[]> {
-    // 依頼の入力（JSON）の値にファイルの ID がそのまま入っているものを探す。ID は利用者の入力ではなく M2Office が付けたもの
+  async listApprovalsForFileInput(tenantId: string, fileId: string, ownerUserId: string): Promise<Approval[]> {
+    // 依頼の入力（JSON）の値にファイルの ID がそのまま入っているものを探す。**ファイルを上げた本人が依頼したものだけ**
+    // （入力は依頼する人が書けるため、他人のファイルの ID を書いた依頼で、そのファイルを開けないようにする。2026-10-12 の点検）
     return this.q<Approval>(tenantId,
       `select a.id, a.run_step_id as "runStepId", a.tenant_id as "tenantId",
               a.approver_role as "approverRole", a.approver_user_id as "approverUserId", a.present,
@@ -425,8 +426,9 @@ export class PostgresRepository implements Repository {
          join runs r on r.id = s.run_id and r.tenant_id = a.tenant_id
          join jobs j on j.id = r.job_id and j.tenant_id = a.tenant_id
         where a.tenant_id = $1
+          and j.requested_by = $3
           and exists (select 1 from jsonb_each_text(j.input) e where e.value = $2)`,
-      [tenantId, fileId]);
+      [tenantId, fileId, ownerUserId]);
   }
 
   async listStaleApprovals(tenantId: string, createdBefore: string): Promise<Approval[]> {

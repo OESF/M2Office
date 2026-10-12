@@ -23,6 +23,8 @@ export interface OAuthPending {
    * Webの分析の担当の許可（第34.18節）。`canva` は本人の Canva の接続（第41.19.3節）。
    */
   purpose?: 'inquiry-mailbox' | 'web-review' | 'canva';
+  /** ログインを始めたブラウザの印のハッシュ（ログインのときだけ。引換券を、そのブラウザでしか使えないようにする。第16.1.2節）。 */
+  browser?: string;
   expiresAt: number;
 }
 
