@@ -29,6 +29,7 @@ const RISK_LABEL: Record<RiskLevel, string> = { read: '読むだけ', draft: '�
 /** 機能ごとの設定のはじめの値。 */
 const EMPTY_EXTRA: Required<Omit<AppSettings, 'catalog'>> = {
   notices: { all: false, groupIds: [] }, reservations: { all: true, itemIds: [] }, knowledgeRules: { compartments: [] }, jobs: { agentIds: [], maxRisk: 'read' },
+  signage: { all: true, screenIds: [] },
 };
 
 /** 選んだ機能の設定だけを残す（承認に送る形）。 */
@@ -39,6 +40,8 @@ function settingsFor(functions: AppFunctionId[], catalog: InventoryCatalogScope,
     ...(functions.includes('reservations.book') ? { reservations: extra.reservations } : {}),
     ...(functions.includes('knowledge.rules') ? { knowledgeRules: extra.knowledgeRules } : {}),
     ...(functions.includes('jobs.run') ? { jobs: extra.jobs } : {}),
+    // サイネージの 2 つの機能は、使ってよい画面を一緒に決める（第13.4.3節）
+    ...(functions.some((f) => f.startsWith('signage.')) ? { signage: extra.signage } : {}),
   };
 }
 
@@ -60,7 +63,7 @@ export function ExternalApps() {
   const [naming, setNaming] = useState<string | null>(null);
   const [shownKey, setShownKey] = useState<{ appId: string; key: string } | null>(null);
   const [items, setItems] = useState<InventoryItemView[]>([]);
-  const [options, setOptions] = useState<AppSettingOptions>({ groups: [], reservableItems: [], compartments: [], agents: [] });
+  const [options, setOptions] = useState<AppSettingOptions>({ groups: [], reservableItems: [], compartments: [], agents: [], signageScreens: [] });
 
   const load = useCallback(async (select?: string | null) => {
     try {
@@ -170,7 +173,8 @@ function AppEditor({ app: initial, functions, items, options, onKey, onChanged }
   const incomplete = (chosen.includes('inventory.catalog') && catalog.itemIds.length === 0)
     || (chosen.includes('notices.post') && !extra.notices.all && extra.notices.groupIds.length === 0)
     || (chosen.includes('reservations.book') && !extra.reservations.all && extra.reservations.itemIds.length === 0)
-    || (chosen.includes('jobs.run') && extra.jobs.agentIds.length === 0);
+    || (chosen.includes('jobs.run') && extra.jobs.agentIds.length === 0)
+    || (chosen.some((f) => f.startsWith('signage.')) && !extra.signage.all && extra.signage.screenIds.length === 0);
   const base = location.origin;
 
   const act = async (fn: () => Promise<ExternalApp>, failed: string) => {
@@ -248,6 +252,10 @@ function AppEditor({ app: initial, functions, items, options, onKey, onChanged }
       {chosen.includes('reservations.book') && (
         <PickList title="見せてよい予約できるもの" allLabel="すべて" all={extra.reservations.all} chosen={extra.reservations.itemIds} choices={options.reservableItems}
           onChange={(all, ids) => setExtra({ ...extra, reservations: { all, itemIds: ids } })} />
+      )}
+      {chosen.some((f) => f.startsWith('signage.')) && (
+        <PickList title="使ってよいサイネージの画面" allLabel="すべて" all={extra.signage.all} chosen={extra.signage.screenIds} choices={options.signageScreens}
+          onChange={(all, ids) => setExtra({ ...extra, signage: { all, screenIds: ids } })} />
       )}
       {chosen.includes('knowledge.rules') && (
         <PickList title="規程を書いてよい権限区画（区画なしはいつも書けます）" chosen={extra.knowledgeRules.compartments} choices={options.compartments.map((c) => ({ id: c, name: c }))}

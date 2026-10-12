@@ -612,6 +612,14 @@ export class Secretary {
       ],
     });
     await this.audit(tenantId, userId, 'secretary.chat', 'full');
+    // 推論はサイネージを動かせない。出していないのに「画面に表示しました」と答えさせない（第31.11.1節。2026-10-12）
+    if (this.deps.signage && CLAIMS_SIGNAGE.test(res.text)) {
+      await this.audit(tenantId, userId, 'secretary.false_claim', 'signage');
+      return {
+        reply: { layer: 'full', text: 'サイネージにはまだ出していません。「『出したい文』を出して」のように、かぎかっこで囲んで頼んでいただければ、そのまま出します。', evidence: [], tokensUsed: res.tokensUsed },
+        keep: true,
+      };
+    }
     // 「お調べします」「少々お待ちください」と約束したのに、何も起こさないまま返さない（第10.11.5.1節）。
     // 約束したら実際に調べものを起こす。起こせない会社では、約束の文を返さない
     if (PROMISES_LATER.test(res.text)) {
@@ -1356,6 +1364,9 @@ const MEMORY_FOR_LOOKUP = 20;
  * @remarks 「お調べします」は層 3 の指示で決めた言い方。そのほかは推論がよく使う約束の形
  */
 const PROMISES_LATER = /お調べします|調べて(から)?お(伝え|知らせ)|(少々|しばらく)お待ち(ください|いただけ)|(分かり|わかり|取得でき|確認でき|調べ終わり)(まし)?たら.{0,12}(お伝え|お知らせ|ご連絡|ご報告)/;
+
+/** サイネージに出したと言う言い回し（層 3 の推論はサイネージを動かせないため、当たれば答えを返さない。第31.11.1節）。 */
+const CLAIMS_SIGNAGE = /(サイネージ|画面)[^\n]{0,80}?(表示|出|流|映)し(ました|ておきました)/;
 
 /** 探す・読む・教えての言い回し（会社の接続のデータを求める依頼。第10.11.5.1節）。 */
 const READS_DATA = /探して|検索|調べて|読んで|教えて|見せて|見て|確認して|一覧|知りたい|ある[？?]|あります[か？?]/;

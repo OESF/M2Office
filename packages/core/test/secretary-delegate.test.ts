@@ -220,3 +220,21 @@ test('層 3 が「あとで伝える」と約束したら、実際に調べも�
   assert.equal(plain.lookups.length, 0, '約束の無い答えはそのまま返す');
   assert.equal(r3.text, '経費の締めは毎月 25 日です。');
 });
+
+test('推論が、出していないのに「画面に表示しました」と答えたら、その答えを返さず、出していないと伝える（第31.11.1節）', async () => {
+  const d = deps();
+  const base = llmWith({});
+  const llm = {
+    ...base,
+    async complete(req: { messages: { role: string; content: string }[] }) {
+      const r = await base.complete(req as never);
+      return r.text === 'わかりました' ? { text: '画面 2に『本日は午後休診です』を表示しました。', tokensUsed: 1 } : r;
+    },
+  } as unknown as LlmProvider;
+  const s = new Secretary({
+    repo: d.repo, llm, connector: {} as never, agents: [agent('minutes')], startAgent: d.startAgent, startLookup: d.startLookup, signage: {} as never,
+  });
+  const reply = await s.respond('t', 'u1', '午後は休診だと待合の皆さんに伝えておいて');
+  assert.doesNotMatch(reply.text, /表示しました/);
+  assert.match(reply.text, /サイネージにはまだ出していません/);
+});

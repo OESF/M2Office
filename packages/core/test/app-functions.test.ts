@@ -177,6 +177,8 @@ test('機能の道: 新しい機能の道を決まった機能にだけ当て、
     ['GET', '/v1/reservations/availability', 'reservations.book'], ['POST', '/v1/reservations', 'reservations.book'], ['DELETE', '/v1/reservations/r1', 'reservations.book'],
     ['POST', '/v1/members/points', 'members.points'], ['GET', '/v1/columns/published', 'columns.read'], ['GET', '/v1/columns/published/c1/cover.png', 'columns.read'],
     ['POST', '/v1/jobs', 'jobs.run'], ['GET', '/v1/runs/r1', 'jobs.run'], ['POST', '/v1/inventory/receipts', 'inventory.receipts'],
+    ['POST', '/v1/signage/interrupts', 'signage.interrupt'], ['POST', '/v1/signage/interrupts/i1/clear', 'signage.interrupt'], ['GET', '/v1/signage/screens', 'signage.status'],
+    ['GET', '/v1/signage/interrupts', null], ['POST', '/v1/signage/interrupts/clear-all', null], ['PATCH', '/v1/signage/screens/s1', null], ['GET', '/v1/signage/assets', null],
     ['GET', '/v1/notices', null], ['POST', '/v1/runs/r1/cancel', null], ['GET', '/v1/reservations', null], ['POST', '/v1/admin/knowledge', null], ['GET', '/v1/me/app-links', null],
     ['POST', '/v1/members/m1/visit', null], ['GET', '/v1/columns', null],
   ];
@@ -236,3 +238,24 @@ test('入庫の通知: 形を確かめ、照らした行を入庫し、二重に
   await sales.postReceipt('t1', 'app-1', { eventId: 'ev-3', receiptId: 'IN-001', status: 'cancelled' });
   assert.equal(await onHand(), 5, '取り消しで、選んで入庫した分も含めて戻す');
 });
+
+test('承認: サイネージの機能は店頭サイネージを入れた会社だけ選べ、使ってよい画面は知っている画面だけ（第13.4.3節）', async () => {
+  const off = fakeRepo({}, DEFAULT_TENANT_SETTINGS);
+  const appsOff = new ExternalApps({ store: new MemoryAppStore(), repo: off.repo });
+  assert.ok(!(await appsOff.available('t1')).includes('signage.interrupt'), 'サイネージを切った会社では選べない');
+  const settings: TenantSettings = { ...DEFAULT_TENANT_SETTINGS, signage: { ...DEFAULT_TENANT_SETTINGS.signage, enabled: true } };
+  const { repo } = fakeRepo({}, settings);
+  const apps = new ExternalApps({ store: new MemoryAppStore(), repo, signageScreens: async () => [{ id: 's-1', name: '待合' }, { id: 's-2', name: '入口' }] });
+  const avail = await apps.available('t1');
+  assert.ok(avail.includes('signage.interrupt') && avail.includes('signage.status'));
+  assert.deepEqual((await apps.settingOptions('t1')).signageScreens, [{ id: 's-1', name: '待合' }, { id: 's-2', name: '入口' }]);
+  const made = await apps.create('t1', 'u-admin', '受付');
+  assert.ok('key' in made);
+  const id = made.app.id;
+  assert.ok('error' in await apps.approve('t1', 'u-admin', id, { functions: ['signage.interrupt'], settings: { signage: { all: false, screenIds: [] } } }), '画面を選ばなければ断る');
+  assert.ok('error' in await apps.approve('t1', 'u-admin', id, { functions: ['signage.interrupt'], settings: { signage: { all: false, screenIds: ['s-x'] } } }), '知らない画面は断る');
+  const ok = await apps.approve('t1', 'u-admin', id, { functions: ['signage.interrupt', 'signage.status'], settings: { signage: { all: false, screenIds: ['s-1'] } } });
+  assert.ok(!('error' in ok), JSON.stringify(ok));
+  assert.deepEqual((await apps.settingsOf('t1', id))?.signage, { all: false, screenIds: ['s-1'] });
+});
+

@@ -45,6 +45,8 @@ const FUNCTION_ROUTES: { fn: AppFunctionId; method: string; path: RegExp }[] = [
   { fn: 'columns.read', method: 'GET', path: /^\/v1\/columns\/published(?:\/[^/]+\/cover\.png)?$/ },
   { fn: 'jobs.run', method: 'POST', path: /^\/v1\/jobs$/ },
   { fn: 'jobs.run', method: 'GET', path: /^\/v1\/runs\/[^/]+$/ },
+  { fn: 'signage.interrupt', method: 'POST', path: /^\/v1\/signage\/interrupts(?:\/[^/]+\/clear)?$/ },
+  { fn: 'signage.status', method: 'GET', path: /^\/v1\/signage\/screens$/ },
 ];
 
 /** 内蔵の拡張を入れているか（機能を選べる条件）。 */
@@ -55,6 +57,7 @@ function extensionOn(settings: TenantSettings, r: AppFunctionRequirement): boole
     case 'reservations': return settings.reservations.enabled;
     case 'members': return settings.members.enabled;
     case 'web-columns': return settings.webColumns.enabled;
+    case 'signage': return settings.signage.enabled;
   }
 }
 
@@ -90,6 +93,8 @@ export interface ExternalAppsDeps {
   reservableItems?: (tenantId: string) => Promise<{ id: string; name: string }[]>;
   /** 会社で使える業務と、その危険度（使うツールのいちばん強い危険度。「業務を依頼して結果を受け取る」で選ぶため）。 */
   agents?: (tenantId: string) => Promise<{ id: string; name: string; risk: RiskLevel }[]>;
+  /** 店頭サイネージの画面（サイネージの機能で使ってよい画面を選ぶため。第13.4.3節）。 */
+  signageScreens?: (tenantId: string) => Promise<{ id: string; name: string }[]>;
 }
 
 /**
@@ -125,13 +130,14 @@ export class ExternalApps {
 
   /** 機能ごとの設定を選ぶための候補（宛先のグループ・予約できるもの・権限区画・業務）。 */
   async settingOptions(tenantId: string): Promise<AppSettingOptions> {
-    const [groups, compartments, items, agents] = await Promise.all([
+    const [groups, compartments, items, agents, screens] = await Promise.all([
       this.deps.repo.listGroups(tenantId), this.deps.repo.listCompartments(tenantId),
       this.deps.reservableItems ? this.deps.reservableItems(tenantId) : Promise.resolve([]), this.deps.agents ? this.deps.agents(tenantId) : Promise.resolve([]),
+      this.deps.signageScreens ? this.deps.signageScreens(tenantId) : Promise.resolve([]),
     ]);
     return {
       groups: groups.map((g) => ({ id: g.id, name: g.name })), reservableItems: items, compartments: compartments.map((c) => c.name),
-      agents: agents.filter((a) => APP_JOB_RISKS.includes(a.risk)),
+      agents: agents.filter((a) => APP_JOB_RISKS.includes(a.risk)), signageScreens: screens,
     };
   }
 
@@ -301,6 +307,11 @@ export class ExternalApps {
     return (await this.deps.store.reclaimEvent(tenantId, appId, kind, eventRef, stale, at)) ? { kind: 'new' } : { kind: 'busy' };
   }
 
+  /** 処理の途中の通知の印を消す（いっぱいで受けられなかったときに、同じ番号で送り直せるように）。 */
+  async dropEvent(tenantId: string, appId: string, kind: string, eventRef: string): Promise<void> {
+    await this.deps.store.dropEvent(tenantId, appId, kind, eventRef);
+  }
+
   /** 書き込みの通知の答えを残す（送り直しにそのまま返す）。 */
   async finishEvent(tenantId: string, appId: string, kind: string, eventRef: string, response: unknown): Promise<void> {
     await this.deps.store.finishEvent(tenantId, appId, kind, eventRef, response);
@@ -312,8 +323,8 @@ export class ExternalApps {
   private async functionSettings(tenantId: string, functions: AppFunctionId[], input: AppSettings): Promise<Omit<AppSettings, 'catalog'> | { error: string }> {
     const out: Omit<AppSettings, 'catalog'> = {};
     // 候補は、設定の要る機能を選んだときだけ読む
-    const needsOptions = functions.some((f) => f === 'notices.post' || f === 'reservations.book' || f === 'knowledge.rules' || f === 'jobs.run');
-    const options = needsOptions ? await this.settingOptions(tenantId) : { groups: [], reservableItems: [], compartments: [], agents: [] };
+    const needsOptions = functions.some((f) => f === 'notices.post' || f === 'reservations.book' || f === 'knowledge.rules' || f === 'jobs.run' || f.startsWith('signage.'));
+    const options = needsOptions ? await this.settingOptions(tenantId) : { groups: [], reservableItems: [], compartments: [], agents: [], signageScreens: [] };
     if (functions.includes('notices.post')) {
       const n = input.notices ?? { all: false, groupIds: [] };
       const known = new Set(options.groups.map((g) => g.id));
@@ -343,6 +354,15 @@ export class ExternalApps {
       if (agentIds.length === 0) return { error: '「業務を依頼して結果を受け取る」で依頼してよい業務を選んでください' };
       if (agentIds.some((a) => !known.has(a))) return { error: '業務が見つかりません（使えない業務か、お金の確定を行う業務です）' };
       out.jobs = { agentIds, maxRisk: j.maxRisk };
+    }
+    // サイネージの 2 つの機能は、使ってよい画面を一緒に決める（第13.4.3節）
+    if (functions.includes('signage.interrupt') || functions.includes('signage.status')) {
+      const g = input.signage ?? { all: true, screenIds: [] };
+      const known = new Set(options.signageScreens.map((x) => x.id));
+      const screenIds = [...new Set(g.screenIds ?? [])];
+      if (!g.all && screenIds.length === 0) return { error: 'サイネージの機能で使ってよい画面を選んでください' };
+      if (screenIds.some((x) => !known.has(x))) return { error: 'サイネージの画面が見つかりません' };
+      out.signage = { all: !!g.all, screenIds: g.all ? [] : screenIds };
     }
     return out;
   }

@@ -26,7 +26,7 @@ export interface SignageInterruptsDeps {
 }
 
 /** 作れなかったときの理由（受け口の答えの番号と対応する）。 */
-export interface InterruptError { error: string; status: 400 | 404 | 422 | 429 | 503 }
+export interface InterruptError { error: string; status: 400 | 403 | 404 | 422 | 429 | 503 }
 
 const FULLWIDTH_ALNUM = /[Ａ-Ｚａ-ｚ０-９]/g;
 /** 作ってから出し始めるまでに許す時間（第31.7.2節）。 */
@@ -375,6 +375,58 @@ export class SignageInterrupts {
     if ('error' in r) { await record(r.status === 429 ? 'full' : 'unreadable'); return r; }
     await record('accepted');
     return { ok: true };
+  }
+
+  /**
+   * 外部のアプリから呼び出しを出す（機能 `signage.interrupt`。第13.4.3節）。項目は受け口の標準の形と同じ（推測はしない）。
+   * 中身はデータとして扱い、指示として読まない（不変則 I-6）。
+   *
+   * @param appId 出したアプリ（出どころと、消せるものの確かめに使う）
+   * @param payload 本文（`text`・`number`・`place`・`image`・`screens`・`seconds`・`chime`）
+   * @param allowed 承認した画面（`null` ならすべての画面）
+   * @returns 出した割り込みの ID と、出した画面・同じ案内を出していた画面の名前。断るときは理由と番号
+   * @remarks 危険度: 社内に書き込む（店頭の画面に、文字か登録した割り込みの素材を出す。画像・HTML・URL は受け取らない）
+   */
+  async fromApp(tenantId: string, appId: string, payload: Record<string, unknown>, allowed: string[] | null): Promise<{ id: string; screens: string[]; merged: string[] } | InterruptError> {
+    // 回数は受け口と同じ 1 分 30 回（アプリの上限 1 分 120 回とは別。画面の待ちを埋めないため）
+    if (!this.allowHit(`app:${appId}`)) return { error: '呼び出しは 1 分に 30 回までです', status: 429 };
+    const str = (v: unknown, max: number) => (typeof v === 'string' || typeof v === 'number' ? String(v).trim().slice(0, max) : '');
+    const input: SignageInterruptInput = {};
+    const text = str(payload['text'], 400);
+    const number = str(payload['number'], 8);
+    const place = str(payload['place'], 30);
+    const image = str(payload['image'] ?? payload['asset'], 60);
+    if (text) input.text = text;
+    else if (number) { input.number = number; if (place) input.place = place; }
+    else if (image) {
+      // 割り込みの素材は名前で選ぶだけ（URL や画像を受け取らない。第31.8.1節）
+      const asset = (await this.store.listAssets(tenantId)).find((a) => a.isInterrupt && same(a.name) === same(image));
+      if (!asset) return { error: '割り込みの素材が見つかりません', status: 422 };
+      input.assetId = asset.id;
+    } else return { error: '出す文（text）か、番号（number）か、割り込みの素材の名前（image）を送ってください', status: 422 };
+    const all = await this.store.listScreens(tenantId);
+    const permitted = allowed ? all.filter((s) => allowed.includes(s.id)) : all;
+    const raw = payload['screens'];
+    if (raw !== undefined && raw !== null && raw !== '') {
+      const names = (Array.isArray(raw) ? raw.map(String) : String(raw).split(/[,、，]/)).map((x) => x.trim()).filter(Boolean);
+      const known = all.filter((s) => names.some((n) => same(n) === same(s.name)));
+      // 知らない名前だけなら出さない（勝手にすべての画面にしない）。承認した画面の外だけなら断る
+      if (!known.length) return { error: '画面が見つかりません', status: 422 };
+      const inside = known.filter((s) => permitted.some((p) => p.id === s.id));
+      if (!inside.length) return { error: '承認した画面の外です', status: 403 };
+      input.screens = inside.map((s) => s.id);
+    } else {
+      if (!permitted.length) return { error: '出せる画面がありません', status: 422 };
+      input.screens = permitted.map((s) => s.id);
+    }
+    const seconds = Number(payload['seconds']);
+    if (Number.isFinite(seconds) && seconds > 0) input.seconds = seconds;
+    const chime = payload['chime'];
+    if (chime !== undefined && chime !== null && chime !== '') input.chime = !['0', 'false', 'off', 'no'].includes(String(chime).toLowerCase());
+    const r = await this.create(tenantId, `app:${appId}`, input, 'app');
+    if ('error' in r) return r;
+    const nameOf = (id: string) => all.find((s) => s.id === id)?.name ?? '';
+    return { id: r.id, screens: r.screens.map(nameOf), merged: r.merged.map(nameOf) };
   }
 
   /** 標準の形で読めなければ、骨組みから項目の道を推測する。推測した道で文か番号か素材が読めたときだけ使う。 */

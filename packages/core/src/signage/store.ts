@@ -34,6 +34,8 @@ export interface ScreenRecord {
   status: 'active' | 'removed';
   flowVersion: number;
   lastSeenAt: string | null;
+  /** つながった時刻（未接続のあとで最初に生きている知らせが来た時刻）。 */
+  onlineSince: string | null;
   lastReport: SignageReport | null;
   offlineNotifiedAt: string | null;
   registeredAt: string;
@@ -88,16 +90,16 @@ export interface InterruptRecord {
 
 interface ScreenRow {
   id: string; name: string; orientation: SignageOrientation; rotation: number; volume: number; status: 'active' | 'removed';
-  flow_version: number; last_seen_at: unknown; last_report: SignageReport | null; offline_notified_at: unknown; registered_at: unknown; removed_at: unknown;
+  flow_version: number; last_seen_at: unknown; online_since: unknown; last_report: SignageReport | null; offline_notified_at: unknown; registered_at: unknown; removed_at: unknown;
 }
 interface BandRow { id: string; start_min: number; end_min: number; days: number }
 const hhmm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 const toBand = (r: BandRow): SignageBand => ({ id: r.id, start: hhmm(r.start_min), end: hhmm(r.end_min), days: r.days });
 
-const SCREEN_COLS = 'id, name, orientation, rotation, volume, status, flow_version, last_seen_at, last_report, offline_notified_at, registered_at, removed_at';
+const SCREEN_COLS = 'id, name, orientation, rotation, volume, status, flow_version, last_seen_at, online_since, last_report, offline_notified_at, registered_at, removed_at';
 const toScreen = (r: ScreenRow): ScreenRecord => ({
   id: r.id, name: r.name, orientation: r.orientation, rotation: r.rotation as SignageRotation, volume: r.volume, status: r.status,
-  flowVersion: r.flow_version, lastSeenAt: r.last_seen_at ? iso(r.last_seen_at) : null, lastReport: r.last_report,
+  flowVersion: r.flow_version, lastSeenAt: r.last_seen_at ? iso(r.last_seen_at) : null, onlineSince: r.online_since ? iso(r.online_since) : null, lastReport: r.last_report,
   offlineNotifiedAt: r.offline_notified_at ? iso(r.offline_notified_at) : null, registeredAt: iso(r.registered_at), removedAt: r.removed_at ? iso(r.removed_at) : null,
 });
 
@@ -141,7 +143,7 @@ export interface SignageStore {
   setScreenKey(tenantId: string, id: string, keyHash: string): Promise<void>;
   removeScreen(tenantId: string, id: string, by: string): Promise<ScreenRecord | null>;
   /** 生きている知らせを残す（つながったら、つながらない知らせの印を外す）。 */
-  touchScreen(tenantId: string, id: string, report: SignageReport | null): Promise<void>;
+  touchScreen(tenantId: string, id: string, report: SignageReport | null, onlineMs: number): Promise<void>;
   setOfflineNotified(tenantId: string, id: string): Promise<void>;
   /** その日の時間帯（0〜47）に知らせがあったことを残す。 */
   markPresence(tenantId: string, screenId: string, day: string, slot: number): Promise<void>;
@@ -293,7 +295,7 @@ export class PostgresSignageStore implements SignageStore {
 
   async restoreScreen(tenantId: string, id: string, orientation: SignageOrientation, by: string): Promise<void> {
     await this.q(tenantId, `update signage_screens set status = 'active', removed_at = null, orientation = $3, registered_by = $4, registered_at = now(),
-      updated_by = $4, updated_at = now(), last_seen_at = null, last_report = null, offline_notified_at = null, flow_version = flow_version + 1
+      updated_by = $4, updated_at = now(), last_seen_at = null, online_since = null, last_report = null, offline_notified_at = null, flow_version = flow_version + 1
       where tenant_id = $1 and id = $2`, [tenantId, id, orientation, by]);
   }
 
@@ -315,9 +317,13 @@ export class PostgresSignageStore implements SignageStore {
     return rows[0] ? toScreen(rows[0]) : null;
   }
 
-  async touchScreen(tenantId: string, id: string, report: SignageReport | null): Promise<void> {
-    await this.q(tenantId, `update signage_screens set last_seen_at = now(), last_report = coalesce($3::jsonb, last_report), offline_notified_at = null
-      where tenant_id = $1 and id = $2`, [tenantId, id, report ? JSON.stringify(report) : null]);
+  async touchScreen(tenantId: string, id: string, report: SignageReport | null, onlineMs: number): Promise<void> {
+    // 未接続だった（最後の知らせが onlineMs より前・まだ知らせが無い）なら、いまをつながった時刻にする
+    await this.q(tenantId, `update signage_screens set
+        online_since = case when last_seen_at is null or last_seen_at < now() - make_interval(secs => $4::double precision / 1000) or online_since is null
+          then now() else online_since end,
+        last_seen_at = now(), last_report = coalesce($3::jsonb, last_report), offline_notified_at = null
+      where tenant_id = $1 and id = $2`, [tenantId, id, report ? JSON.stringify(report) : null, onlineMs]);
   }
 
   async setOfflineNotified(tenantId: string, id: string): Promise<void> {
@@ -448,15 +454,15 @@ export class PostgresSignageStore implements SignageStore {
   }
 
   async listEntries(tenantId: string, screenId: string, bandId: string | null = null): Promise<SignageEntry[]> {
-    const rows = await this.q<{ asset_id: string; seconds: number | null; paused: boolean }>(tenantId,
-      `select asset_id, seconds, paused from signage_entries where tenant_id = $1 and screen_id = $2 and band_id is not distinct from $3 order by position`, [tenantId, screenId, bandId]);
-    return rows.map((r) => ({ assetId: r.asset_id, seconds: r.seconds, ...(r.paused ? { paused: true } : {}) }));
+    const rows = await this.q<{ asset_id: string; seconds: number | null; paused: boolean; sound: boolean }>(tenantId,
+      `select asset_id, seconds, paused, sound from signage_entries where tenant_id = $1 and screen_id = $2 and band_id is not distinct from $3 order by position`, [tenantId, screenId, bandId]);
+    return rows.map((r) => ({ assetId: r.asset_id, seconds: r.seconds, ...(r.paused ? { paused: true } : {}), ...(r.sound ? { sound: true } : {}) }));
   }
 
   async listAllEntries(tenantId: string, screenId: string): Promise<(SignageEntry & { bandId: string | null })[]> {
-    const rows = await this.q<{ asset_id: string; seconds: number | null; band_id: string | null; paused: boolean }>(tenantId,
-      `select asset_id, seconds, band_id, paused from signage_entries where tenant_id = $1 and screen_id = $2 order by band_id nulls first, position`, [tenantId, screenId]);
-    return rows.map((r) => ({ assetId: r.asset_id, seconds: r.seconds, bandId: r.band_id, ...(r.paused ? { paused: true } : {}) }));
+    const rows = await this.q<{ asset_id: string; seconds: number | null; band_id: string | null; paused: boolean; sound: boolean }>(tenantId,
+      `select asset_id, seconds, band_id, paused, sound from signage_entries where tenant_id = $1 and screen_id = $2 order by band_id nulls first, position`, [tenantId, screenId]);
+    return rows.map((r) => ({ assetId: r.asset_id, seconds: r.seconds, bandId: r.band_id, ...(r.paused ? { paused: true } : {}), ...(r.sound ? { sound: true } : {}) }));
   }
 
   async replaceEntries(tenantId: string, screenId: string, entries: SignageEntry[], expectedVersion: number, by: string, bandId: string | null = null): Promise<number | null> {
@@ -471,8 +477,8 @@ export class PostgresSignageStore implements SignageStore {
       await c.query(`delete from signage_entries where tenant_id = $1 and screen_id = $2 and band_id is not distinct from $3`, [tenantId, screenId, bandId]);
       for (let i = 0; i < entries.length; i++) {
         const e = entries[i]!;
-        await c.query(`insert into signage_entries (id, tenant_id, screen_id, asset_id, position, seconds, band_id, paused) values (gen_random_uuid()::text, $1, $2, $3, $4, $5, $6, $7)`,
-          [tenantId, screenId, e.assetId, i, e.seconds, bandId, !!e.paused]);
+        await c.query(`insert into signage_entries (id, tenant_id, screen_id, asset_id, position, seconds, band_id, paused, sound) values (gen_random_uuid()::text, $1, $2, $3, $4, $5, $6, $7, $8)`,
+          [tenantId, screenId, e.assetId, i, e.seconds, bandId, !!e.paused, !!e.sound]);
       }
       return up.rows[0].flow_version;
     });
@@ -601,13 +607,18 @@ export class PostgresSignageStore implements SignageStore {
   }
 
   async listInterrupts(tenantId: string, since: Date): Promise<SignageInterruptView[]> {
-    const rows = await this.q<{ id: string; kind: 'text' | 'asset'; text: string | null; asset_id: string | null; origin: SignageOrigin; seconds: number; created_at: unknown; targets: { screenId: string; state: SignageTargetState; startedAt: string | null; endedAt: string | null }[] }>(tenantId,
-      `select i.id, i.kind, i.text, i.asset_id, i.origin, i.seconds, i.created_at,
+    const rows = await this.q<{ id: string; kind: 'text' | 'asset'; text: string | null; asset_id: string | null; origin: SignageOrigin; created_by: string | null; seconds: number; created_at: unknown; targets: { screenId: string; state: SignageTargetState; startedAt: string | null; endedAt: string | null }[] }>(tenantId,
+      `select i.id, i.kind, i.text, i.asset_id, i.origin, i.created_by, i.seconds, i.created_at,
         coalesce(json_agg(json_build_object('screenId', t.screen_id, 'state', t.state, 'startedAt', t.started_at, 'endedAt', t.ended_at) order by t.screen_id)
           filter (where t.screen_id is not null), '[]') as targets
        from signage_interrupts i left join signage_interrupt_targets t on t.interrupt_id = i.id
        where i.tenant_id = $1 and i.created_at >= $2 group by i.id order by i.created_at desc limit 200`, [tenantId, since]);
-    return rows.map((r) => ({ id: r.id, kind: r.kind, text: r.text, assetId: r.asset_id, origin: r.origin, seconds: r.seconds, createdAt: iso(r.created_at), targets: r.targets }));
+    return rows.map((r) => ({
+      id: r.id, kind: r.kind, text: r.text, assetId: r.asset_id, origin: r.origin,
+      // 外部のアプリが出したものは、アプリの ID を添える（名前は画面の道で添える。第13.4.3節）
+      ...(r.origin === 'app' && r.created_by?.startsWith('app:') ? { appId: r.created_by.slice(4) } : {}),
+      seconds: r.seconds, createdAt: iso(r.created_at), targets: r.targets,
+    }));
   }
 
   async hasRequest(tenantId: string, sourceId: string, requestId: string, since: Date): Promise<boolean> {

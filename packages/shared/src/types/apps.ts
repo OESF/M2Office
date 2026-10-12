@@ -15,10 +15,11 @@ export const EXTERNAL_APP_MAX = 20;
 export type AppFunctionId =
   | 'company.profile' | 'inventory.catalog' | 'inventory.sales' | 'inventory.receipts'
   | 'accounts.link' | 'knowledge.search' | 'knowledge.rules'
-  | 'inquiries.intake' | 'notices.post' | 'reservations.book' | 'members.points' | 'columns.read' | 'jobs.run';
+  | 'inquiries.intake' | 'notices.post' | 'reservations.book' | 'members.points' | 'columns.read' | 'jobs.run'
+  | 'signage.interrupt' | 'signage.status';
 
 /** 機能を選べる条件になる内蔵の拡張（その拡張を入れた会社だけ選べる）。 */
-export type AppFunctionRequirement = 'inventory' | 'inquiries' | 'reservations' | 'members' | 'web-columns';
+export type AppFunctionRequirement = 'inventory' | 'inquiries' | 'reservations' | 'members' | 'web-columns' | 'signage';
 
 /** 機能の説明（画面と、選べるかの判定に使う）。 */
 export interface AppFunctionInfo {
@@ -33,7 +34,7 @@ export interface AppFunctionInfo {
   needs?: AppFunctionId;
 }
 
-/** 機能の一覧（第13.4.1節・第13.4.2節の表）。画面はこの順に並べる。 */
+/** 機能の一覧（第13.4.1節〜第13.4.3節の表）。画面はこの順に並べる。 */
 export const APP_FUNCTIONS: readonly AppFunctionInfo[] = [
   { id: 'company.profile', label: '会社の基本情報を読む', routes: ['GET /v1/company/profile'] },
   { id: 'inventory.catalog', label: '商品の一覧を読む', routes: ['GET /v1/inventory/catalog'], requires: 'inventory' },
@@ -54,6 +55,11 @@ export const APP_FUNCTIONS: readonly AppFunctionInfo[] = [
   { id: 'members.points', label: '会員のポイントを付ける・使う', routes: ['POST /v1/members/points'], requires: 'members' },
   { id: 'columns.read', label: '公開したコラムを読む', routes: ['GET /v1/columns/published', 'GET /v1/columns/published/{id}/cover.png'], requires: 'web-columns' },
   { id: 'jobs.run', label: '業務を依頼して結果を受け取る', routes: ['POST /v1/jobs', 'GET /v1/runs/{id}'], needs: 'accounts.link' },
+  {
+    id: 'signage.interrupt', label: 'サイネージに呼び出しを出す',
+    routes: ['POST /v1/signage/interrupts', 'POST /v1/signage/interrupts/{id}/clear'], requires: 'signage',
+  },
+  { id: 'signage.status', label: 'サイネージの画面の状態を読む', routes: ['GET /v1/signage/screens'], requires: 'signage' },
 ];
 
 /** 機能「業務を依頼して結果を受け取る」で選べる危険度の上限（お金の確定は外から依頼させない）。 */
@@ -71,6 +77,8 @@ export interface AppSettings {
   knowledgeRules?: { compartments: string[] };
   /** 機能「業務を依頼して結果を受け取る」で依頼してよい業務と、危険度の上限。 */
   jobs?: { agentIds: string[]; maxRisk: RiskLevel };
+  /** サイネージの機能（呼び出しを出す・画面の状態を読む）で使ってよい画面（すべてか、決めた画面。第13.4.3節）。 */
+  signage?: { all: boolean; screenIds: string[] };
 }
 
 /** 機能ごとの設定を選ぶための候補（管理者の画面）。 */
@@ -79,6 +87,8 @@ export interface AppSettingOptions {
   reservableItems: { id: string; name: string }[];
   compartments: string[];
   agents: { id: string; name: string; risk: RiskLevel }[];
+  /** 店頭サイネージの画面（サイネージの機能で選ぶ）。 */
+  signageScreens: { id: string; name: string }[];
 }
 
 /** 本人に見せる、結び付いているアプリ（個人設定の「サービスとの接続」）。 */

@@ -54,7 +54,7 @@ export interface BindingRecord {
 }
 
 /** アプリが入れた記録の控えの種類。 */
-export type AppRefKind = 'reservation' | 'notice' | 'run';
+export type AppRefKind = 'reservation' | 'notice' | 'run' | 'signage_interrupt';
 
 /** アプリの置き場。 */
 export interface AppStore {
@@ -75,6 +75,8 @@ export interface AppStore {
   /** 処理の途中のまま古くなった通知を、やり直すために取り直す。取り直せたら `true`。 */
   reclaimEvent(tenantId: string, appId: string, kind: string, eventRef: string, staleBefore: string, at: string): Promise<boolean>;
   finishEvent(tenantId: string, appId: string, kind: string, eventRef: string, response: unknown): Promise<void>;
+  /** 処理の途中の通知の印を消す（いっぱいで受けられなかったときなど、同じ番号で送り直せるように）。答えを残したものは消さない。 */
+  dropEvent(tenantId: string, appId: string, kind: string, eventRef: string): Promise<void>;
   /** 結び付けの依頼を置く（同じ本人の前の依頼は置き換える）。 */
   putLinkRequest(tenantId: string, appId: string, r: LinkRequestRecord): Promise<void>;
   getLinkRequest(tenantId: string, appId: string, userId: string): Promise<LinkRequestRecord | null>;
@@ -230,6 +232,11 @@ export class PostgresAppStore implements AppStore {
       [tenantId, appId, kind, eventRef, JSON.stringify(response)]);
   }
 
+  async dropEvent(tenantId: string, appId: string, kind: string, eventRef: string): Promise<void> {
+    await this.q(tenantId, 'delete from ext_app_events where tenant_id = $1 and app_id = $2 and kind = $3 and event_ref = $4 and response is null',
+      [tenantId, appId, kind, eventRef]);
+  }
+
   async putLinkRequest(tenantId: string, appId: string, r: LinkRequestRecord): Promise<void> {
     await this.q(tenantId,
       `insert into ext_app_link_requests (tenant_id, app_id, user_id, code_hash, attempts, expires_at, created_at) values ($1,$2,$3,$4,$5,$6,$7)
@@ -361,6 +368,12 @@ export class MemoryAppStore implements AppStore {
   async finishEvent(tenantId: string, appId: string, kind: string, eventRef: string, response: unknown): Promise<void> {
     const e = this.events.get(this.key(tenantId, appId, kind, eventRef));
     if (e) e.response = structuredClone(response);
+  }
+
+  async dropEvent(tenantId: string, appId: string, kind: string, eventRef: string): Promise<void> {
+    const k = this.key(tenantId, appId, kind, eventRef);
+    const e = this.events.get(k);
+    if (e && (e.response === null || e.response === undefined)) this.events.delete(k);
   }
   readonly linkRequests = new Map<string, LinkRequestRecord>();
   readonly bindings = new Map<string, BindingRecord & { tenantId: string }>();

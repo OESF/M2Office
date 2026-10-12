@@ -169,10 +169,12 @@ export function signageRoute(deps: AppDeps) {
     return 'error' in r ? c.json({ error: r.error }, r.status) : c.json(r, 201);
   });
 
-  /** 最近 24 時間の割り込みと、画面ごとのいま（出しているもの・待っている数）。 */
+  /** 最近 24 時間の割り込みと、画面ごとのいま（出しているもの・待っている数）。外部のアプリが出したものには、アプリの名前を添える（第13.4.3節）。 */
   app.get('/interrupts', async (c) => {
     const { tenant } = c.get('ctx');
-    return c.json({ interrupts: await interrupts.recent(tenant.id) });
+    const list = await interrupts.recent(tenant.id);
+    const names = list.some((i) => i.appId) ? new Map((await deps.apps.list(tenant.id)).map((a) => [a.id, a.name])) : new Map<string, string>();
+    return c.json({ interrupts: list.map((i) => (i.appId && names.has(i.appId) ? { ...i, appName: names.get(i.appId)! } : i)) });
   });
 
   /** その割り込みを消す（出しているすべての画面から。待っているものも外す）。 */

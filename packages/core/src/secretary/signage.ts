@@ -93,6 +93,8 @@ export function signageFileRequest(message: string): Extract<SignageRequest, { k
 }
 
 const QUOTED = /[「『"](.+?)[」』"]/;
+/** 呼び出しの文そのもの（「〇番の方・患者様・お客様」で始まり「ください」「どうぞ」で終わる。空白を除いた形で見る）。 */
+const CALL_SENTENCE = /^\d{1,4}番(?:の)?(?:方|患者様|患者さん|お客様|お客さま|さん)[、,]?.+(?:ください|くださいませ|どうぞ)[。.!！]*$/;
 
 /** 「待合だけに」「入口と待合に」「入口の画面に」から画面の名前を取り出す（かぎかっこの中は見ない）。 */
 export function screensIn(message: string): string[] {
@@ -171,6 +173,10 @@ export function signageRequest(message: string): SignageRequest | null {
     if (j) return { kind: 'asset-jingle', assetHint: jg[1]!, jingle: j.id };
   }
   const screens = screensIn(raw);
+  // 呼び出しの文そのもの（「12番の方、第2診療室へお入りください。」）は、その文をそのまま出す（すべての画面。第31.11.1節）
+  if (!QUOTED.test(raw) && CALL_SENTENCE.test(m)) {
+    return { kind: 'show', text: raw.replace(/[。.!！]+$/, ''), screens: [], seconds, chime };
+  }
   // 番号で呼ぶ（「12番の方を呼んで」「12番、レントゲン室」）
   const short = /^(\d{1,4})番[、,](.+?)(?:へ|に)?(?:呼んで|呼び出して)?$/.exec(m);
   if (short && !QUOTED.test(raw)) return { kind: 'show', number: short[1]!, place: short[2]!, screens: [], seconds, chime };

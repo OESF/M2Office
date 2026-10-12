@@ -23,6 +23,17 @@ const ago = (iso: string | null) => {
   const m = Math.round((Date.now() - Date.parse(iso)) / 60_000);
   return m < 1 ? 'たった今' : m < 60 ? `${m} 分前` : m < 1440 ? `${Math.round(m / 60)} 時間前` : `${Math.round(m / 1440)} 日前`;
 };
+/** つながってからの時間（「3 時間 12 分」。第31.5.1節）。 */
+const connectedFor = (iso: string | null) => {
+  if (!iso) return '';
+  const m = Math.max(0, Math.floor((Date.now() - Date.parse(iso)) / 60_000));
+  if (m < 1) return '1 分未満';
+  if (m < 60) return `${m} 分`;
+  if (m < 1440) return `${Math.floor(m / 60)} 時間${m % 60 ? ` ${m % 60} 分` : ''}`;
+  const h = Math.floor((m % 1440) / 60);
+  return `${Math.floor(m / 1440)} 日${h ? ` ${h} 時間` : ''}`;
+};
+const at = (iso: string) => new Date(iso).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
 /** 縮小画像（長い辺 320 の JPEG。100 KB まで）を作る。 */
 async function thumbnailOf(source: CanvasImageSource, w: number, h: number): Promise<Blob> {
@@ -277,7 +288,9 @@ function ScreenCard({ s, active, admin, thumb, assets, wantThumb, onSelect, onCh
           onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== s.name) patch({ name: v }); }} />
         <div className="row small">
           <span className={`badge ${s.online ? 'ok' : 'warn'}`}>{s.online ? '接続中' : '未接続'}</span>
-          <span className="muted">{ago(s.lastSeenAt)}</span>
+          {s.online
+            ? s.onlineSince && <span className="muted" title={`${at(s.onlineSince)} から`}>{connectedFor(s.onlineSince)}</span>
+            : <span className="muted" title={s.lastSeenAt ? `最後の通信 ${at(s.lastSeenAt)}` : undefined}>{s.lastSeenAt ? `${ago(s.lastSeenAt)}から` : '通信なし'}</span>}
           {uncached > 0 && <span className="badge warn">取り置けていない {uncached}</span>}
           {skipped.length > 0 && <span className="badge warn" title={skipped.join('、')}>止まるので飛ばしている {skipped.length}</span>}
           {s.online && s.lastReport?.audio === false && <span className="badge warn">音が出せない</span>}
@@ -408,8 +421,19 @@ function FlowEditor({ screen, screens, assets, thumbs, onFiles, onError, onChang
               <span className={`grow${e.paused ? ' paused' : ''}`}>{a?.name ?? ''}</span>
               {/* 秒数・止める・削除はひとまとまり（幅が足りなければ次の行へ回る） */}
               <span className="signage-row-controls">
+              {/* 動画の音（既定は音なし。押すとすぐ保存する。大きさは画面の「音」に合わせる。第31.9.1節） */}
+              {a?.kind === 'video' && (
+                <button type="button" className="btn ghost small" aria-pressed={!!e.sound}
+                  aria-label={`${a.name}の音を${e.sound ? '消す' : '出す'}`}
+                  onClick={() => save(flow.entries.map((x, j) => (j === i ? { assetId: x.assetId, seconds: x.seconds, ...(x.paused ? { paused: true } : {}), ...(x.sound ? {} : { sound: true }) } : x)))}>
+                  {e.sound ? '音あり' : '音なし'}
+                </button>
+              )}
               {a?.kind === 'video'
-                ? <span className="small muted">{a.durationMs ? fmtDuration(a.durationMs) : ''}</span>
+                // 動画の長さは変えられないが、画像の秒数と同じ枠と単位（秒）で見せる（読むだけ）
+                ? <input className="num-input" type="text" readOnly tabIndex={-1} aria-label="動画の長さ（秒。変えられません）"
+                  title={a.durationMs ? `動画の長さ ${fmtDuration(a.durationMs)}（変えられません）` : '動画の長さ（変えられません）'}
+                  value={a.durationMs ? Math.round(a.durationMs / 1000) : ''} />
                 : <input className="num-input" type="number" min={SIGNAGE_LIMITS.minSeconds} max={SIGNAGE_LIMITS.maxSeconds} placeholder="秒" aria-label="出す秒数"
                   defaultValue={e.seconds ?? ''} onBlur={(ev) => {
                     const v = ev.target.value === '' ? null : Number(ev.target.value);
@@ -418,7 +442,7 @@ function FlowEditor({ screen, screens, assets, thumbs, onFiles, onError, onChang
               {/* 止める・再開する（行は流れに残す。拡張機能と同じスライドのスイッチ。押すとすぐ保存する） */}
               <button type="button" role="switch" aria-checked={!e.paused} aria-label={`${a?.name ?? '素材'}を${e.paused ? '再開する' : '止める'}`}
                 title={e.paused ? '停止' : '再開'} className={e.paused ? 'switch' : 'switch on'}
-                onClick={() => save(flow.entries.map((x, j) => (j === i ? { assetId: x.assetId, seconds: x.seconds, ...(x.paused ? {} : { paused: true }) } : x)))}><span /></button>
+                onClick={() => save(flow.entries.map((x, j) => (j === i ? { assetId: x.assetId, seconds: x.seconds, ...(x.paused ? {} : { paused: true }), ...(x.sound ? { sound: true } : {}) } : x)))}><span /></button>
               <button className="btn ghost small danger" onClick={() => save(flow.entries.filter((_, j) => j !== i))} aria-label="流れから削除する">削除</button>
               </span>
             </>
@@ -487,7 +511,7 @@ function RecentInterrupts({ recent, screens, assets, onChanged, onError }: {
   if (!recent.length) return null;
   const name = (id: string) => screens.find((s) => s.id === id)?.name ?? '';
   const STATE: Record<string, string> = { waiting: '待ち', showing: '出している', done: '済み', cleared: '消した', expired: '出せなかった' };
-  const ORIGIN: Record<string, string> = { staff: 'スタッフ', secretary: '秘書', hook: '受け口' };
+  const ORIGIN: Record<string, string> = { staff: 'スタッフ', secretary: '秘書', hook: '受け口', app: '外部のアプリ' };
   const active = recent.some((i) => i.targets.some((t) => t.state === 'waiting' || t.state === 'showing'));
   return (
     <div className="card signage-recent">
@@ -500,7 +524,7 @@ function RecentInterrupts({ recent, screens, assets, onChanged, onError }: {
             <tr key={i.id}>
               <td className="nowrap">{new Date(i.createdAt).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}</td>
               <td>{i.text ?? (i.assetId ? assets.find((a) => a.id === i.assetId)?.name ?? '' : '')}</td>
-              <td className="nowrap">{ORIGIN[i.origin] ?? ''}</td>
+              <td className="nowrap">{i.origin === 'app' && i.appName ? `外部のアプリ（${i.appName}）` : ORIGIN[i.origin] ?? ''}</td>
               <td>{i.targets.map((t) => `${name(t.screenId)} ${STATE[t.state] ?? ''}`).join('・')}</td>
               <td>{i.targets.some((t) => t.state === 'waiting' || t.state === 'showing')
                 && <button className="btn ghost small" onClick={() => void api.signage.clearInterrupt(i.id).then(onChanged).catch((e) => onError(describeError(e, '消せませんでした')))}>消す</button>}</td>

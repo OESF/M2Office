@@ -27,6 +27,8 @@ function approvalOf(body: unknown): { functions: AppFunctionId[]; settings: AppS
   if (k) settings.knowledgeRules = { compartments: strs(k['compartments']) };
   const j = obj(s['jobs']);
   if (j) settings.jobs = { agentIds: strs(j['agentIds']), maxRisk: (typeof j['maxRisk'] === 'string' ? j['maxRisk'] : 'read') as RiskLevel };
+  const g = obj(s['signage']);
+  if (g) settings.signage = { all: g['all'] === true, screenIds: strs(g['screenIds']) };
   return { functions, settings };
 }
 

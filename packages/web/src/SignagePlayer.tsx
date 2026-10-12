@@ -38,9 +38,9 @@ interface PlayInterrupt {
 /** 再生に要る状態（`GET /v1/signage-play/state`）。 */
 interface PlayState {
   screen: { id: string; name: string; orientation: 'landscape' | 'portrait'; rotation: 0 | 90 | 180 | 270; volume: number; flowVersion: number };
-  entries: { assetId: string; seconds: number | null }[];
+  entries: { assetId: string; seconds: number | null; sound?: boolean }[];
   /** 時間帯の流れ（第31.6.6節。前の版のサーバーには無い） */
-  bands?: (SignageBand & { entries: { assetId: string; seconds: number | null }[] })[];
+  bands?: (SignageBand & { entries: { assetId: string; seconds: number | null; sound?: boolean }[] })[];
   assets: { id: string; kind: 'image' | 'video' | 'html'; mime: string; sha256: string; bytes: number; width: number; height: number; durationMs: number | null; caption?: string | null }[];
   interruptAssets?: string[];
   sounds?: { id: string; mime: string }[];
@@ -54,7 +54,7 @@ interface PlayState {
 }
 
 /** 表示の 1 枚（前と後ろの 2 枚を重ねて切り替える）。 */
-interface Layer { seq: number; assetId: string; kind: 'image' | 'video' | 'html'; url: string; html: string | null; thumb: string | null; seconds: number; durationMs: number | null; caption: string | null }
+interface Layer { seq: number; assetId: string; kind: 'image' | 'video' | 'html'; url: string; html: string | null; thumb: string | null; seconds: number; durationMs: number | null; caption: string | null; sound: boolean }
 
 /** 出している割り込み（素材なら中身を開いたもの）。 */
 interface Showing { item: PlayInterrupt; url: string | null; html: string | null; kind: 'text' | 'image' | 'html' }
@@ -397,7 +397,7 @@ function Player({ screenKey, onUnregistered }: { screenKey: string; onUnregister
         const layer: Layer = {
           seq: ++seq.current, assetId: a.id, kind: a.kind, url: a.kind === 'html' ? '' : URL.createObjectURL(blob), html,
           thumb: thumbBlob ? URL.createObjectURL(thumbBlob) : null, seconds: e.seconds ?? state.imageSeconds, durationMs: a.durationMs,
-          caption: a.kind === 'video' ? a.caption ?? null : null,
+          caption: a.kind === 'video' ? a.caption ?? null : null, sound: a.kind === 'video' && e.sound === true,
         };
         pos.current = at;
         current.current = a.id;
@@ -663,7 +663,7 @@ function Player({ screenKey, onUnregistered }: { screenKey: string; onUnregister
           ? <div className="signage-empty">{ps?.company ?? ''}</div>
           : ([0, 1] as const).map((i) => {
             const l = layers[i];
-            return l ? <LayerView key={l.seq} layer={l} front={front === i} paused={paused} onReady={() => onReady(i, l)} onEnded={() => advanceRef.current()} onFail={() => onFail(l)} /> : null;
+            return l ? <LayerView key={l.seq} layer={l} front={front === i} paused={paused} volume={ps?.screen.volume ?? 70} onReady={() => onReady(i, l)} onEnded={() => advanceRef.current()} onFail={() => onFail(l)} /> : null;
           })}
         {showing && (
           <div className="signage-int" key={showing.item.id}>
@@ -685,15 +685,32 @@ function Player({ screenKey, onUnregistered }: { screenKey: string; onUnregister
 }
 
 /** 表示の 1 枚。向きの合わない素材は切らずに収め、余白にぼかして暗くしたものを敷く（第31.6.2節）。 */
-function LayerView({ layer, front, paused, onReady, onEnded, onFail }: {
-  layer: Layer; front: boolean; paused: boolean; onReady: () => void; onEnded: () => void; onFail: () => void;
+function LayerView({ layer, front, paused, volume, onReady, onEnded, onFail }: {
+  layer: Layer; front: boolean; paused: boolean; volume: number; onReady: () => void; onEnded: () => void; onFail: () => void;
 }) {
   const video = useRef<HTMLVideoElement>(null);
+  // 呼び出し元は描き直しのたびに新しい関数を渡すため、最新のものを持っておき、頭から流す処理の条件には入れない
+  // （条件に入れると、1 分ごとの生きている知らせなどで描き直すたびに頭に戻り、長い動画が繰り返し流れていた）
+  const failRef = useRef(onFail);
+  failRef.current = onFail;
   useEffect(() => {
     const v = video.current;
     if (!v) return;
-    if (front) { v.currentTime = 0; void v.play().catch(() => onFail()); } else v.pause();
-  }, [front, onFail]);
+    if (front) {
+      v.currentTime = 0;
+      // 「音あり」の行だけ音を出す。音つきの自動再生を許さない端末では、音を消して流し続ける（第31.9.1節）
+      v.muted = !layer.sound;
+      void v.play().catch(() => {
+        if (v.muted) { failRef.current(); return; }
+        v.muted = true;
+        void v.play().catch(() => failRef.current());
+      });
+    } else v.pause();
+  }, [front, layer.sound]);
+  // 音の大きさは画面の「音」に合わせる（ジングルと同じつまみ）
+  useEffect(() => {
+    if (video.current) video.current.volume = Math.min(1, Math.max(0, volume / 100));
+  }, [volume]);
   // 割り込みの間は止め、終わったら止めた所から続ける
   useEffect(() => {
     const v = video.current;
@@ -705,7 +722,7 @@ function LayerView({ layer, front, paused, onReady, onEnded, onFail }: {
     <div className={`signage-layer${front ? ' front' : ''}`}>
       {bg && <div className="signage-bg" style={{ backgroundImage: `url(${bg})` }} />}
       {layer.kind === 'image' && <img className="signage-media" src={layer.url} alt="" onLoad={onReady} onError={onFail} />}
-      {layer.kind === 'video' && <video ref={video} className="signage-media" src={layer.url} muted playsInline preload="auto" onCanPlay={onReady} onEnded={onEnded} onError={onFail} />}
+      {layer.kind === 'video' && <video ref={video} className="signage-media" src={layer.url} muted={!layer.sound} playsInline preload="auto" onCanPlay={onReady} onEnded={onEnded} onError={onFail} />}
       {/* コラムから作った動画の字幕（題名と一言。生成 AI に字を描かせないため、ここで重ねる。第32.18.6節） */}
       {layer.kind === 'video' && layer.caption && (
         <div className="signage-caption">{layer.caption.split('\n').map((l, i) => <div key={i} className={i === 0 && layer.caption!.includes('\n') ? 'title' : 'line'}>{l}</div>)}</div>

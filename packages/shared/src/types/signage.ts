@@ -125,6 +125,8 @@ export interface SignageScreen {
   volume: number;
   flowVersion: number;
   lastSeenAt: string | null;
+  /** つながってからの時刻（接続中のときだけ。管理の画面の「接続中 3 時間 12 分」。第31.5.1節）。 */
+  onlineSince: string | null;
   lastReport: SignageReport | null;
   /** 最後の知らせから 3 分以内か。 */
   online: boolean;
@@ -167,6 +169,8 @@ export interface SignageEntry {
   seconds: number | null;
   /** 止めている（流れに残したまま、画面には流さない。行のスライドスイッチで止める・再開する。第31.9.4節）。省けば流す。 */
   paused?: boolean;
+  /** 動画の音を出す（動画の行だけ。省けば音なし。大きさは画面の音に合わせる。第31.9.1節）。 */
+  sound?: boolean;
 }
 
 /**
@@ -248,7 +252,7 @@ export function signageBandsOverlap(a: Pick<SignageBand, 'start' | 'end' | 'days
 }
 
 /** 割り込みの出どころ（第31.15.1節）。 */
-export type SignageOrigin = 'staff' | 'secretary' | 'hook';
+export type SignageOrigin = 'staff' | 'secretary' | 'hook' | 'app';
 
 /** 割り込みの画面ごとの状態（第31.7.2節）。 */
 export type SignageTargetState = 'waiting' | 'showing' | 'done' | 'cleared' | 'expired';
@@ -294,6 +298,10 @@ export interface SignageInterruptView {
   text: string | null;
   assetId: string | null;
   origin: SignageOrigin;
+  /** 外部のアプリが出したとき、そのアプリの ID（名前は画面の道で添える。第13.4.3節）。 */
+  appId?: string;
+  /** 外部のアプリが出したとき、そのアプリの名前（画面の道で添える。アプリを削除していれば無い）。 */
+  appName?: string;
   seconds: number;
   createdAt: string;
   targets: { screenId: string; state: SignageTargetState; startedAt: string | null; endedAt: string | null }[];

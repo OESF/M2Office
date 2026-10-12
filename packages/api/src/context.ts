@@ -390,6 +390,8 @@ export function buildDeps(): AppDeps {
         risk: view.registry.allowed(d.tools).reduce<RiskLevel>((max, t) => (RISK_ORDER[t.risk] > RISK_ORDER[max] ? t.risk : max), 'read'),
       }));
     },
+    // サイネージの機能で使ってよい画面の候補（第13.4.3節。サイネージは下で作る。呼ばれるのは作った後）
+    signageScreens: async (tenantId) => (await signageService.deps.store.listScreens(tenantId)).map((s) => ({ id: s.id, name: s.name })),
   });
   const appLinks = new AppLinks({ store: apps.store, repo });
   const appKnowledge = new AppKnowledgeSearch({ repo, llmFor: (tenantId) => ai.llmFor(tenantId) });

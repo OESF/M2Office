@@ -129,6 +129,10 @@ test('HTML: 外への参照（画像・スクリプト・CSS・移動）を拾�
 test('秘書への依頼: 番号の呼び出し・かぎかっこの文・画面の指定・消す・状態を見分け、やり方の質問は会話に回す', () => {
   assert.deepEqual(signageRequest('14番の方を呼んで'), { kind: 'show', number: '14', screens: [], seconds: undefined, chime: undefined });
   assert.deepEqual(signageRequest('12番、レントゲン室'), { kind: 'show', number: '12', place: 'レントゲン室', screens: [], seconds: undefined, chime: undefined });
+  // 呼び出しの文そのものは、その文をそのまま出す（第31.11.1節。全角の数字も読む）
+  assert.deepEqual(signageRequest('12番の方、第２診療室へお入りください。'), { kind: 'show', text: '12番の方、第2診療室へお入りください', screens: [], seconds: undefined, chime: undefined });
+  assert.deepEqual(signageRequest('３番の患者様 受付までお越しください'), { kind: 'show', text: '3番の患者様 受付までお越しください', screens: [], seconds: undefined, chime: undefined });
+  assert.equal(signageRequest('12番の資料を送ってください'), null, '呼び出しの文でなければ出さない');
   const q = signageRequest('待合だけに「本日は17時まで」を出して、30秒、音なしで');
   assert.deepEqual(q, { kind: 'show', text: '本日は17時まで', screens: ['待合'], seconds: 30, chime: false });
   assert.deepEqual(signageRequest('入口と待合に「雨の日セール」を出して'), { kind: 'show', text: '雨の日セール', screens: ['入口', '待合'], seconds: undefined, chime: undefined });

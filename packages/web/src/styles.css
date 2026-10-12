@@ -1689,6 +1689,8 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .signage-days button.on { background: var(--accent-soft); color: var(--accent); }
 .signage-entries li .grow { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .signage-entries li .num-input, .signage-entries li .small.muted { flex: none; width: 88px; text-align: right; }
+/* 動画の音の入り切り（「音あり」のときは、止めるのスイッチと同じ色で示す） */
+.signage-entries li .btn[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
 /* 流れの行は、つまみの右に縮小図・名前・秒数・外すを横に並べる（つかんで動かす一覧。第31.6節） */
 .signage-entries.sortable li, .signage-entries.sortable li:last-child { border-bottom: 1px solid var(--line); }
 .signage-entries .sortable-body { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }

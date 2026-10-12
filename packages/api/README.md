@@ -357,6 +357,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/members/points` | 外部のアプリの鍵。機能 `members.points`。会員証の QR で来店・購入・特典・取り消し。答えはポイントの残り・ランク・増減だけ |
 | `GET /v1/columns/published` ／ `GET /v1/columns/published/:id/cover.png` | 外部のアプリの鍵。機能 `columns.read`。承認済みで公開の日時を過ぎたコラム |
 | `POST /v1/jobs` ／ `GET /v1/runs/:id` | 画面と同じ道を外部のアプリの鍵でも呼ぶ（機能 `jobs.run`）。結び付いた本人として承認した業務を依頼 ／ そのアプリで依頼した実行の状態と結果 |
+| `POST /v1/signage/interrupts` ／ `POST /v1/signage/interrupts/:id/clear` ／ `GET /v1/signage/screens` | 画面と同じ道を外部のアプリの鍵でも呼ぶ（機能 `signage.interrupt`・`signage.status`。第13.4.3節）。承認した画面だけに、文字か登録した割り込みの素材を出す（1 分 30 回まで。いっぱいなら 429 で同じ `eventId` で送り直せる）／ そのアプリが出したものだけ消す ／ 画面の名前・接続中か・音が出せるか・待っている数だけを返す |
 | `POST /v1/inventory/sales-events` | 外部のアプリの鍵。機能 `inventory.sales`。販売の通知（`ordered`・`sold`・`cancelled`・`returned`）。アプリ＋販売番号で 1 件にまとめ、`eventId` で二重に数えない（中身が違えば 409、処理の途中は 409 と `Retry-After`）。照らせない行は受け付けて残す。64 KB を超えれば 413、JSON でなければ 415。金額・お客様の情報は読まず、本文は残さない |
 | `POST /v1/hooks/inventory/:key` | **認証なしの受け口**。予約のシステムの Webhook を受ける（第29.13.1節）。会社は鍵（32 文字）のハッシュから引き、ホスト名は見ない。64 KB を超えれば 413。知らない鍵・止めた受け口・引き当てを切った会社はどれも 404、予約として読めなければ 422。項目の対応は最初の予約から推論して受け口に覚える。予約した人の名前・連絡先は残さない |
 | `GET /v1/notices` | 本人宛ての有効な社内のお知らせ（取り下げ・期間切れ・本人が済んだものを除く。`isNew`・`daysLeft` つき。仕様書 第10.15節） |

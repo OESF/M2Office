@@ -4782,15 +4782,49 @@ console.log('\n■ 63. 店頭サイネージ（内蔵の拡張。第31章の段 
 
     // 流れ: 並びごと置き換え、読んだ版と違えば 409。画面の鍵では、その画面の流れと素材だけを読める（第31.6.2節）
     const flow0 = await call('a', `/v1/signage/screens/${sid}/entries`);
-    const put = await call('a', `/v1/signage/screens/${sid}/entries`, { method: 'PUT', body: JSON.stringify({ version: flow0.body.version, entries: [{ assetId: img.body.asset.id, seconds: 7 }, { assetId: video.body.asset.id, seconds: 30 }] }) });
+    const put = await call('a', `/v1/signage/screens/${sid}/entries`, { method: 'PUT', body: JSON.stringify({ version: flow0.body.version, entries: [{ assetId: img.body.asset.id, seconds: 7, sound: true }, { assetId: video.body.asset.id, seconds: 30, sound: true }] }) });
     const stale = await call('a', `/v1/signage/screens/${sid}/entries`, { method: 'PUT', body: JSON.stringify({ version: flow0.body.version, entries: [] }) });
     const st = await play('/state', {}, key);
     const range = await fetch(`${API}/v1/signage-play/assets/${video.body.asset.id}`, { headers: { 'x-tenant': 'a', authorization: `Bearer ${key}`, range: 'bytes=0-9' } });
     const rangeLen = (await range.arrayBuffer()).byteLength;
-    put.status === 200 && stale.status === 409 && st.status === 200 && st.body.entries.length === 2 && st.body.entries[1].seconds === null && st.body.assets.length === 2
+    put.status === 200 && stale.status === 409 && st.status === 200 && st.body.entries.length === 2 && st.body.entries[1].seconds === null && st.body.entries[1].sound === true && st.body.entries[0].sound === undefined && st.body.assets.length === 2
       && range.status === 206 && rangeLen === 10 && range.headers.get('x-content-type-options') === 'nosniff'
-      ? ok('サイネージの流れは版で守って置き換え、画面は鍵で流れと素材（部分の読み出し）を読める。動画に秒数は付かない')
+      ? ok('サイネージの流れは版で守って置き換え、画面は鍵で流れと素材（部分の読み出し）を読める。動画に秒数は付かず、「音あり」は動画の行にだけ残る')
       : ng('サイネージの流れが合わない', JSON.stringify({ put: put.status, stale: stale.status, st: st.body, range: range.status, rangeLen }).slice(0, 600));
+
+    // 外部のアプリの機能（第13.4.3節）: アプリの鍵で呼び出しを出す・送り直し・出どころ・画面の状態・そのアプリのものだけ消す
+    {
+      const made = await call('a', '/v1/admin/apps', { method: 'POST', body: JSON.stringify({ name: 'スモークの受付' }) });
+      const appKey = made.body?.key;
+      const appId = made.body?.app?.id;
+      const approved = await call('a', `/v1/admin/apps/${appId}`, { method: 'PUT', body: JSON.stringify({ functions: ['signage.interrupt', 'signage.status'], settings: { signage: { all: true, screenIds: [] } } }) });
+      const viaApp = async (method, path, body) => {
+        const res = await fetch(`${API}${path}`, { method, headers: { 'x-tenant': 'a', authorization: `Bearer ${appKey}`, 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
+        const text = await res.text();
+        let json; try { json = JSON.parse(text); } catch { json = text; }
+        return { status: res.status, body: json };
+      };
+      const sent = await viaApp('POST', '/v1/signage/interrupts', { eventId: 'smoke-app-call-1', number: '12', place: '第2診療室' });
+      const again = await viaApp('POST', '/v1/signage/interrupts', { eventId: 'smoke-app-call-1', number: '12', place: '第2診療室' });
+      const noEvent = await viaApp('POST', '/v1/signage/interrupts', { text: 'x' });
+      const badScreen = await viaApp('POST', '/v1/signage/interrupts', { eventId: 'smoke-app-call-2', text: 'スモーク', screens: ['無い画面'] });
+      const listed = (await call('a', '/v1/signage/interrupts')).body.interrupts?.find((i) => i.id === sent.body?.id);
+      const status = await viaApp('GET', '/v1/signage/screens');
+      const keys = Object.keys(status.body?.screens?.[0] ?? {}).sort().join(',');
+      const otherClear = await viaApp('POST', '/v1/signage/interrupts/not-mine/clear');
+      const cleared = await viaApp('POST', `/v1/signage/interrupts/${sent.body?.id}/clear`);
+      const afterClear = (await call('a', '/v1/signage/interrupts')).body.interrupts?.find((i) => i.id === sent.body?.id);
+      const wrongFn = await viaApp('GET', '/v1/signage/assets');
+      await call('a', `/v1/admin/apps/${appId}/stop`, { method: 'POST', body: '{}' });
+      await call('a', `/v1/admin/apps/${appId}`, { method: 'DELETE' });
+      typeof appKey === 'string' && approved.status === 200 && sent.status === 201 && typeof sent.body.id === 'string' && sent.body.screens.length >= 1
+        && again.status === 201 && again.body.id === sent.body.id && noEvent.status === 400 && badScreen.status === 400
+        && listed?.origin === 'app' && listed?.appName === 'スモークの受付' && typeof listed?.text === 'string'
+        && status.status === 200 && keys === 'audio,name,online,waiting' && otherClear.status === 404 && cleared.status === 204
+        && afterClear?.targets.every((t) => t.state !== 'waiting' && t.state !== 'showing') && wrongFn.status === 403
+        ? ok('外部のアプリの鍵でサイネージに呼び出しを出せ、送り直しは同じ答え・出どころはアプリの名前・状態は名前と接続と音と待ちの数だけ・消せるのはそのアプリのものだけ')
+        : ng('外部のアプリのサイネージの機能が合わない', JSON.stringify({ approved: approved.status, sent, again, noEvent: noEvent.status, badScreen: badScreen.status, listed, status, otherClear: otherClear.status, cleared: cleared.status, afterClear: afterClear?.targets, wrongFn: wrongFn.status }).slice(0, 900));
+    }
 
     // 時間帯の流れ: 3 つまで・重なりは 409・時間帯ごとの流れ・画面の鍵で読める・ほかの会社は触れない（第31.6.6節）
     const band1 = await call('a', `/v1/signage/screens/${sid}/bands`, { method: 'POST', body: JSON.stringify({ start: '11:00', end: '14:00', days: 31 }) });

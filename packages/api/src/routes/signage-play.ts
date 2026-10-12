@@ -10,7 +10,7 @@
 
 import { Hono, type Context } from 'hono';
 import QRCode from 'qrcode';
-import { assetKey, type ScreenRecord } from '@m2office/core';
+import { SIGNAGE_ONLINE_MS, assetKey, type ScreenRecord } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 import { tenantOrigin } from '../tenant-origin.js';
@@ -180,7 +180,7 @@ export function signagePlayRoute(deps: AppDeps, version: string | null) {
         };
         c.req.raw.signal.addEventListener('abort', () => stop());
         send('hello');
-        void service.deps.store.touchScreen(tenant.id, first.id, null).catch(() => undefined);
+        void service.deps.store.touchScreen(tenant.id, first.id, null, SIGNAGE_ONLINE_MS).catch(() => undefined);
       },
       cancel() { stop(); },
     });

@@ -10,9 +10,10 @@
  * - `/v1/notices` 社内のお知らせを出す（`notices.post`）・`/v1/reservations/…` 予約の空きを読む・予約を入れる（`reservations.book`）
  * - `POST /v1/members/points` 会員のポイント（`members.points`）・`/v1/columns/published` 公開したコラム（`columns.read`）
  * - `POST /v1/jobs`・`GET /v1/runs/{id}` 業務を依頼して結果を受け取る（`jobs.run`）
+ * - `/v1/signage/interrupts` サイネージに呼び出しを出す（`signage.interrupt`）・`GET /v1/signage/screens` 画面の状態を読む（`signage.status`。第13.4.3節）
  *
  * 鍵・会社・機能・回数の上限は認証の段（`authenticate`）で確かめ済み。ここは機能の業務だけを行う。
- * アプリの道だけのものは、画面のログインで呼ばれたら 404。画面と同じ道（お知らせ・予約・業務の依頼）は、画面のログインなら画面の道へ回す。
+ * アプリの道だけのものは、画面のログインで呼ばれたら 404。画面と同じ道（お知らせ・予約・業務の依頼・サイネージ）は、画面のログインなら画面の道へ回す。
  * 送られてきた中身はデータとして扱い、指示として読まない（不変則 I-6）。
  */
 
@@ -175,7 +176,7 @@ export function appFunctionsRoute(deps: AppDeps) {
    */
   const once = async (
     c: Context<AppEnv>, appId: string, kind: string, eventId: string, hashOf: unknown,
-    run: () => Promise<{ status: 200 | 201 | 202 | 400 | 403 | 404 | 409 | 410; body: object; keep?: Record<string, unknown> }>,
+    run: () => Promise<{ status: 200 | 201 | 202 | 400 | 403 | 404 | 409 | 410 | 429; body: object; keep?: Record<string, unknown> }>,
   ) => {
     const { tenant } = c.get('ctx');
     const hash = createHash('sha256').update(JSON.stringify(hashOf)).digest('hex');
@@ -187,6 +188,11 @@ export function appFunctionsRoute(deps: AppDeps) {
       return c.json(prev.body, prev.status);
     }
     const out = await run();
+    // いっぱいで受けられなかった（429）ものは答えを残さず、同じ番号で送り直せるようにする
+    if (out.status === 429) {
+      await deps.apps.dropEvent(tenant.id, appId, kind, eventId);
+      return c.json(out.body, 429, { 'Retry-After': '10' });
+    }
     await deps.apps.finishEvent(tenant.id, appId, kind, eventId, { status: out.status, body: out.body, ...(out.keep ?? {}) });
     return c.json(out.body, out.status);
   };
@@ -563,6 +569,61 @@ export function appFunctionsRoute(deps: AppDeps) {
       id: run.id, agentId: job?.agentId ?? null, status: run.status, startedAt: run.startedAt, endedAt: run.endedAt,
       failureReason: run.status === 'failed' ? run.failureReason : null, results,
     });
+  });
+
+  // ---- 第13.4.3節のサイネージの機能（画面と同じ道。画面のログインなら画面の道へ回す） ----
+
+  /** 承認した画面（`null` ならすべての画面）。承認の設定が無ければ、どの画面も使えない。 */
+  const signageScreensOf = async (tenantId: string, appId: string): Promise<string[] | null> => {
+    const g = (await deps.apps.settingsOf(tenantId, appId))?.signage;
+    if (!g) return [];
+    return g.all ? null : g.screenIds;
+  };
+
+  /**
+   * サイネージに呼び出しを出す（`signage.interrupt`）。文字か、登録した割り込みの素材だけ。出す先は承認した画面だけ。
+   *
+   * @remarks 文は監査ログにも動作のログにも残さない（割り込みの決まり。第31.13節）
+   */
+  app.post('/signage/interrupts', async (c, next) => {
+    const a = appOf(c);
+    if (!a) return next();
+    const { tenant } = c.get('ctx');
+    if (!(await deps.apps.extensionOn(tenant.id, 'signage'))) return c.json(NOT_FOUND, 404);
+    const b = await jsonOf(c, SMALL_BODY);
+    if (b instanceof Response) return b;
+    const eventId = evId(b);
+    if (!eventId) return c.json(NEED_EVENT, 400);
+    const allowed = await signageScreensOf(tenant.id, a.appId);
+    const pick = ['text', 'number', 'place', 'image', 'screens', 'seconds', 'chime'] as const;
+    const input = Object.fromEntries(pick.filter((k) => b[k] !== undefined).map((k) => [k, b[k]]));
+    return once(c, a.appId, 'signage.interrupt', eventId, input, async () => {
+      const r = await deps.signage.interrupts.fromApp(tenant.id, a.appId, input, allowed);
+      if ('error' in r) return { status: r.status === 429 ? 429 : r.status === 403 ? 403 : 400, body: { error: r.error } };
+      if (r.screens.length) await deps.apps.store.addRef(tenant.id, a.appId, 'signage_interrupt', r.id, new Date().toISOString());
+      return { status: 201, body: { id: r.screens.length ? r.id : null, screens: r.screens, merged: r.merged } };
+    });
+  });
+
+  /** 呼び出しを消す（`signage.interrupt`）。そのアプリが出したものだけ（Q-228）。出し終えていても 204。 */
+  app.post('/signage/interrupts/:id/clear', async (c, next) => {
+    const a = appOf(c);
+    if (!a) return next();
+    const { tenant } = c.get('ctx');
+    if (!(await deps.apps.extensionOn(tenant.id, 'signage'))) return c.json(NOT_FOUND, 404);
+    const id = c.req.param('id');
+    if (!(await deps.apps.store.hasRef(tenant.id, a.appId, 'signage_interrupt', id))) return c.json(NOT_FOUND, 404);
+    await deps.signage.interrupts.clear(tenant.id, ExternalApps.actorOf(a.appId), id);
+    return c.body(null, 204);
+  });
+
+  /** サイネージの画面の状態（`signage.status`）。承認した画面の、名前・接続中か・音が出せるか・待っている数だけ。 */
+  app.get('/signage/screens', async (c, next) => {
+    const a = appOf(c);
+    if (!a) return next();
+    const { tenant } = c.get('ctx');
+    if (!(await deps.apps.extensionOn(tenant.id, 'signage'))) return c.json(NOT_FOUND, 404);
+    return c.json({ screens: await deps.signage.service.appStatus(tenant.id, await signageScreensOf(tenant.id, a.appId)) });
   });
 
   return app;

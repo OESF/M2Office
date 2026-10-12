@@ -74,7 +74,8 @@ export const SECRET_FORMAT = /^[A-Za-z0-9_-]{32,64}$/;
 export const assetKey = (id: string) => `signage-${id}`;
 
 /** つながっているとみなす、最後の知らせからの時間（第31.5.1節）。 */
-const ONLINE_MS = 3 * 60_000;
+export const SIGNAGE_ONLINE_MS = 3 * 60_000;
+const ONLINE_MS = SIGNAGE_ONLINE_MS;
 /** つながらない知らせを出すまでの時間。 */
 const OFFLINE_NOTIFY_MS = 5 * 60_000;
 const JST_MS = 9 * 3_600_000;
@@ -167,6 +168,21 @@ export class SignageService {
     this.changes.emit(`${tenantId}:${screenId}`, kind);
   }
 
+  /**
+   * 外部のアプリに見せる画面の状態（機能 `signage.status`。第13.4.3節）。名前・接続中か・音が出せるか・待っている割り込みの数だけ。
+   * いま出している素材の見本・流れ・最後の通信の中身は返さない。
+   *
+   * @param allowed 承認した画面（`null` ならすべての画面）
+   */
+  async appStatus(tenantId: string, allowed: string[] | null): Promise<{ name: string; online: boolean; audio: boolean | null; waiting: number }[]> {
+    const screens = (await this.deps.store.listScreens(tenantId)).filter((s) => !allowed || allowed.includes(s.id));
+    return Promise.all(screens.map(async (s) => {
+      const v = this.view(s);
+      const waiting = (await this.deps.store.activeTargets(tenantId, s.id)).filter((t) => t.state === 'waiting').length;
+      return { name: s.name, online: v.online, audio: v.online ? s.lastReport?.audio ?? null : null, waiting };
+    }));
+  }
+
   /** 設定が変わったことを画面に知らせる（管理者の設定の変更から呼ぶ）。 */
   settingsChanged(tenantId: string): void {
     this.emit(tenantId, '*', 'settings');
@@ -174,9 +190,10 @@ export class SignageService {
 
   private view(s: ScreenRecord): SignageScreen {
     const now = this.now().getTime();
+    const online = !!s.lastSeenAt && now - Date.parse(s.lastSeenAt) <= ONLINE_MS;
     return {
       id: s.id, name: s.name, orientation: s.orientation, rotation: s.rotation, volume: s.volume, flowVersion: s.flowVersion,
-      lastSeenAt: s.lastSeenAt, lastReport: s.lastReport, online: !!s.lastSeenAt && now - Date.parse(s.lastSeenAt) <= ONLINE_MS, registeredAt: s.registeredAt,
+      lastSeenAt: s.lastSeenAt, onlineSince: online ? s.onlineSince : null, lastReport: s.lastReport, online, registeredAt: s.registeredAt,
     };
   }
 
@@ -614,7 +631,7 @@ export class SignageService {
     if (typeof version !== 'number' || !Number.isInteger(version)) return { error: '流れの版がありません', status: 400 };
     const assets = new Map((await this.deps.store.listAssets(tenantId)).map((a) => [a.id, a]));
     const entries: SignageEntry[] = [];
-    for (const raw of input as { assetId?: unknown; seconds?: unknown; paused?: unknown }[]) {
+    for (const raw of input as { assetId?: unknown; seconds?: unknown; paused?: unknown; sound?: unknown }[]) {
       const a = assets.get(String(raw?.assetId ?? ''));
       if (!a) return { error: '流れに無い素材が入っています', status: 400 };
       let seconds: number | null = null;
@@ -624,7 +641,8 @@ export class SignageService {
         seconds = n;
       }
       // 止めている行は残したまま流さない（行のスライドスイッチ。第31.9.4節）
-      entries.push({ assetId: a.id, seconds, ...(raw.paused === true ? { paused: true } : {}) });
+      // 動画の音は、動画の行で「音あり」にしたときだけ（既定は音なし。第31.9.1節）
+      entries.push({ assetId: a.id, seconds, ...(raw.paused === true ? { paused: true } : {}), ...(raw.sound === true && a.kind === 'video' ? { sound: true } : {}) });
     }
     const next = await this.deps.store.replaceEntries(tenantId, screenId, entries, version, userId, bandId);
     if (next === null) {
@@ -688,7 +706,7 @@ export class SignageService {
     // いつもの流れと、時間帯ごとの流れ（端末が時刻を見て選ぶ。つながらない間も切り替わるよう、すべて渡す。第31.6.6節）
     // 止めている行は渡さない（時間帯の流れがすべて止まっていれば空になり、端末はいつもの流れを流す。第31.9.4節）
     const live = rows.filter((e) => !e.paused);
-    const plain = ({ assetId, seconds }: SignageEntry) => ({ assetId, seconds });
+    const plain = ({ assetId, seconds, sound }: SignageEntry) => ({ assetId, seconds, ...(sound ? { sound: true } : {}) });
     const entries = live.filter((e) => e.bandId === null).map(plain);
     const bands = bandList.map((b) => ({ ...b, entries: live.filter((e) => e.bandId === b.id).map(plain) }));
     const used = new Set(live.map((e) => e.assetId));
@@ -722,7 +740,7 @@ export class SignageService {
   /** 生きている知らせを受ける（第31.5.1節）。答えにサーバーの時刻と流れの版。 */
   async heartbeat(tenantId: string, s: ScreenRecord, report: unknown): Promise<{ serverTime: string; flowVersion: number }> {
     const now = this.now();
-    await this.deps.store.touchScreen(tenantId, s.id, cleanReport(report));
+    await this.deps.store.touchScreen(tenantId, s.id, cleanReport(report), ONLINE_MS);
     const { day, slot } = jstSlot(now);
     await this.deps.store.markPresence(tenantId, s.id, day, slot);
     return { serverTime: now.toISOString(), flowVersion: s.flowVersion };
