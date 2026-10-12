@@ -71,7 +71,7 @@ export class InquiryWatch {
     const to = [...new Set([...admins, ...(mailboxOwner ? [mailboxOwner] : [])])];
     let n = 0;
     for (const userId of to) {
-      if (await this.notify(tenantId, userId, `${Number(stats.month.slice(5))} 月の問い合わせの振り返り`, reviewText(stats), now)) n += 1;
+      if (await this.notify(tenantId, userId, `${Number(stats.month.slice(5))} 月の問い合わせの振り返り`, reviewNotice(reviewText(stats)), now)) n += 1;
     }
     return n;
   }
@@ -138,4 +138,10 @@ export class InquiryWatch {
     }
     return { notified, forgotten };
   }
+}
+
+/** 振り返りの文を、お知らせの形にする（はじめの文を 1 段落目に置き、内訳を 1 行に 1 つの箇条書きにする）。 */
+function reviewNotice(text: string): string {
+  const [first = '', ...rest] = text.split('\n');
+  return rest.length ? `${first}\n\n${rest.map((l) => `- ${l}`).join('\n')}` : first;
 }

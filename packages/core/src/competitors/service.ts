@@ -15,6 +15,7 @@ import type { Repository } from '../repository/types.js';
 import type { SecretBox } from '../secrets/box.js';
 import type { LlmProvider } from '../llm/provider.js';
 import { silentLogger, type Logger } from '../log/logger.js';
+import { NOTICE_BODY_LIMIT, noticeList } from '../notify/list.js';
 import { dateIn } from '../cards/service.js';
 import {
   checkCandidates, confirmMoves, movesOf, suggestThemes, suggestAnnouncements, decideArea, extractFacts, findUrlByName, suggestCompetitors, summarizeProfile, writeReport,
@@ -555,7 +556,7 @@ export class CompetitorService {
     const report = { period: competitorPeriodOf(now), text, changes: moves.length, themes, announcementIdeas, changeKinds, createdBy: who.userId };
     const id = await store.addReport(who.tenantId, report);
     await this.audit(who, 'competitor.report', id, { competitors: subjects.length, changes: moves.length });
-    return { report: { ...report, id, createdAt: new Date().toISOString() }, highlights: moves.slice(0, 3) };
+    return { report: { ...report, id, createdAt: new Date().toISOString() }, highlights: moves };
   }
 
   /**
@@ -599,14 +600,15 @@ export class CompetitorService {
   /**
    * 定期の見回りの結果を、利用範囲の中の管理者と、管理者が選んだ人に届ける（第36.19節・第36.22節。個人設定で切っていれば届けない）。
    *
-   * @param highlights 動きのはじめの 3 件（「競合の名前: 事実」）
+   * @param highlights 動きのすべて（「競合の名前: 事実」）。本文に入るだけ 1 行に 1 つ並べ、入らない数は「ほか N 件」にする
    */
   private async deliver(tenantId: string, changes: number, highlights: string[], now: Date): Promise<number> {
     const { repo } = this.deps;
     const settings = await repo.getTenantSettings(tenantId);
     const day = dateIn('Asia/Tokyo', now);
     const title = `競合の動き（${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))} の見回り）`;
-    const body = changes ? `前の回から ${changes} 件の動きがありました。${highlights.join('／')}` : '前の回から大きな動きはありませんでした';
+    const head = `前の回から ${changes} 件の動きがありました。`;
+    const body = changes ? `${head}\n\n${noticeList(highlights, '件', NOTICE_BODY_LIMIT - head.length - 2)}` : '前の回から大きな動きはありませんでした';
     let sent = 0;
     for (const u of await repo.listUsers(tenantId)) {
       if (u.status !== 'active' || !(u.roles.includes('admin') || (settings.competitors.notifyUsers ?? []).includes(u.id))) continue;
@@ -838,7 +840,7 @@ export class CompetitorService {
     await this.audit(who, 'competitor.check', 'all', { competitors: watching.length, pages: read, failed, scheduled: !!opts.scheduled });
     const message = `${watching.length} 社を見回り、${read} ページを読みました${failed ? `（${failed} ページは読めませんでした）` : ''}。レポートを作りました`;
     if (opts.scheduled) await this.deliver(who.tenantId, report.changes, highlights, new Date());
-    else if (!opts.quietIfNone) await this.notify(who, '競合を見回りました', `${message}${report.changes ? `。前の回から ${report.changes} 件変わっていました` : ''}`);
+    else if (!opts.quietIfNone) await this.notify(who, '競合を見回りました', `${message}${report.changes ? `。\n前の回から ${report.changes} 件変わっていました` : ''}`);
     return { ok: true, message };
   }
 

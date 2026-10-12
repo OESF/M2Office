@@ -344,7 +344,7 @@ test('変わったかの見分け: 印が同じページは前の回の事実を
   const [r2] = await service.reports(who);
   assert.ok(r2!.changes >= 1, '変わったページの新しい事実を動きとして数える');
   const last = notes.filter((n) => n.userId === 'boss' && /競合の動き/.test(n.title)).at(-1);
-  assert.match(last!.body, /件の動き.*見本の競合 A/);
+  assert.match(last!.body, /件の動きがありました。\n\n- 見本の競合 A: /);
   // コラムの話題（第36.20節）: 動きから作り、競合の名前は入れない
   assert.ok(r2!.themes.length >= 1, '動きがあればコラムの話題を添える');
   assert.ok(r2!.themes.every((t) => !t.includes('見本の競合')), '話題に競合の名前を入れない');

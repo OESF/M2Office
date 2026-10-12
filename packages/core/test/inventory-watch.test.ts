@@ -80,8 +80,8 @@ test('見張り: 毎朝の見直しは、足りなくなりそうなものと使
   const sent = await watch.daily('t1', now);
   assert.equal(sent, 1);
   const body = notifications[0]!.body;
-  assert.match(body, /■ 足りなくなりそうなもの\n紙: 使える数 1 冊・残りわずか/);
-  assert.match(body, /■ 使用期限\nクリーム（ロット L7）: 10 個が 7 日後に期限/);
+  assert.match(body, /\*\*足りなくなりそうなもの\*\*\n- 紙: 使える数 1 冊・残りわずか/);
+  assert.match(body, /\n\n\*\*使用期限\*\*\n- クリーム（ロット L7）: 10 個が 7 日後に期限/);
   assert.equal(await watch.daily('t1', now), 0, '同じ日に二度まとめない');
 });
 

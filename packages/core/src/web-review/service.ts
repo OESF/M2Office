@@ -16,6 +16,7 @@ import {
 import type { Repository } from '../repository/types.js';
 import type { LlmProvider } from '../llm/provider.js';
 import { silentLogger, type Logger } from '../log/logger.js';
+import { noticeList } from '../notify/list.js';
 import { WEB_REVIEW_KIND, WebDataError, openWebData, type WebData, type WebDataDeps } from './data.js';
 import { answerAsk, changeRate, hostOf, lastMonthOf, monthFigures, pickSite, type WebAnswer, type WebAsk } from './figures.js';
 import type { WebReviewStore } from './store.js';
@@ -393,7 +394,7 @@ export class WebReviewService {
     const figures = await monthFigures(data, month, { propertyId: w.property?.id ?? null, siteUrl: w.siteUrl });
     // 両方とも読めなかった（許可が取り消されたなど）月は作らず、担当に知らせる
     if (!figures.analytics && !figures.search) {
-      await this.notify(tenantId, [w.connection.connectedBy], 'Web の便りを作れませんでした', figures.missing.join('／'));
+      await this.notify(tenantId, [w.connection.connectedBy], 'Web の便りを作れませんでした', noticeList(figures.missing, '件'));
       return null;
     }
     // 競合の動きの数（公開のページの事実から数えたもの。名前は入れない）は推論にも渡す
@@ -497,6 +498,7 @@ export class WebReviewService {
       ? await this.deps.competitors.topicCounts(tenantId, r.findings.filter((f) => f.kind === 'missingContent').map((f) => f.target)).catch(() => new Map<string, number>())
       : new Map<string, number>();
     let fresh = 0;
+    const freshTitles: string[] = [];
     for (const f of r.findings) {
       const idea = ideas.get(`${f.kind}:${f.target}`);
       const rivals = topics.get(f.target) ?? 0;
@@ -504,12 +506,15 @@ export class WebReviewService {
       if (rivals) f.figures = { ...f.figures, competitors: rivals };
       const advice = idea ? `${base}\n案:\n${idea}` : base;
       const requestDraft = f.requestDraft ? requestDraftFor(f.kind, { url: origin ? `${origin}${f.target}` : f.target, title: f.title }, advice, company) : null;
-      if ((await this.deps.store.putFinding(tenantId, { kind: f.kind, target: f.target, title: f.title, figures: f.figures, advice, requestDraft, columnId: f.columnId }, now)) === 'new') fresh += 1;
+      if ((await this.deps.store.putFinding(tenantId, { kind: f.kind, target: f.target, title: f.title, figures: f.figures, advice, requestDraft, columnId: f.columnId }, now)) === 'new') {
+        fresh += 1;
+        freshTitles.push(f.title);
+      }
     }
     for (const m of r.pageMetrics) await this.deps.store.putPageMetrics(tenantId, m);
     await this.save(tenantId, SYSTEM, { checkedAt: now.toISOString(), checkRequestedAt: null });
     await this.audit(tenantId, SYSTEM, 'web_review.check', { found: r.findings.length, fresh, missing: r.missing.length });
-    if (fresh > 0) await this.notify(tenantId, [w.connection.connectedBy], `Web の直すべき所が ${fresh} 件見つかりました`, r.findings.slice(0, 3).map((f) => f.title).join('・'));
+    if (fresh > 0) await this.notify(tenantId, [w.connection.connectedBy], `Web の直すべき所が ${fresh} 件見つかりました`, noticeList(freshTitles, '件'));
     return { found: r.findings.length, fresh, missing: r.missing };
   }
 

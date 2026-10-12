@@ -18,6 +18,7 @@ import type { LlmProvider } from '../llm/provider.js';
 import type { ResearchProvider } from '../research/provider.js';
 import { aiAvailable } from '../llm/unconfigured.js';
 import { silentLogger, type Logger } from '../log/logger.js';
+import { noticeList } from '../notify/list.js';
 import { areaMatches, employeesBand, jgrantsUrl, prefectureOf, regionOf, type JGrantsItem, type SubsidySource } from './jgrants.js';
 import type { StoredSubsidy, SubsidyDraft, SubsidyStore } from './store.js';
 
@@ -538,7 +539,7 @@ export class SubsidyService {
     if (!changes.length) return false;
     await this.audit({ tenantId, userId: SYSTEM }, 'subsidy.changed', cur.id, { fields: changes.map((c) => c.split(':')[0]) });
     const title = `${d.name}: 公募の中身が変わりました`;
-    const body = `「気になる」にした${d.kind === 'grant' ? '助成金' : '補助金'}の公募が変わりました。\n${changes.join('\n')}\n申請の前に出典で確かめてください。${d.sourceUrl}`;
+    const body = `「気になる」にした${d.kind === 'grant' ? '助成金' : '補助金'}の公募が変わりました。\n${changes.join('\n')}\n\n申請の前に出典で確かめてください。\n${d.sourceUrl}`;
     return (!!cur.statusBy && await this.notify(tenantId, cur.statusBy, title, body)) || (await this.tellAdmins(tenantId, title, body)) > 0;
   }
 
@@ -606,8 +607,9 @@ export class SubsidyService {
           const r = await this.search({ tenantId, userId: SYSTEM });
           searched += 1;
           if ('added' in r && r.added.length) {
-            const top = r.added.slice(0, 3).map((x) => `${x.name}（締め切り: ${x.deadline ?? '不明'}）`).join('\n');
-            await this.tellAdmins(tenantId, `合いそうな補助金・助成金が ${r.added.length} 件あります`, `${top}\n公募の中身は変わることがあります。申請の前に出典で確かめてください。`);
+            const tail = '公募の中身は変わることがあります。申請の前に出典で確かめてください。';
+            const top = noticeList(r.added.map((x) => `${x.name}（締め切り: ${x.deadline ?? '不明'}）`), '件', 400 - tail.length - 2);
+            await this.tellAdmins(tenantId, `合いそうな補助金・助成金が ${r.added.length} 件あります`, `${top}\n\n${tail}`);
           }
         }
         for (const c of await this.deps.store.list(tenantId)) {
@@ -616,7 +618,7 @@ export class SubsidyService {
           const due = SUBSIDY_LIMITS.deadlineDaysBefore.filter((d) => left >= 0 && left <= d && !c.notified.includes(`deadline:${d}`));
           if (!due.length) continue;
           const title = `${c.name}: 締め切りまであと ${left} 日（${c.deadline}）`;
-          const body = `「気になる」にした${c.kind === 'grant' ? '助成金' : '補助金'}の締め切りが近づいています。申請の前に出典で中身を確かめてください。${c.sourceUrl}`;
+          const body = `「気になる」にした${c.kind === 'grant' ? '助成金' : '補助金'}の締め切りが近づいています。\n\n申請の前に出典で中身を確かめてください。\n${c.sourceUrl}`;
           const sent = (c.statusBy && await this.notify(tenantId, c.statusBy, title, body)) || (await this.tellAdmins(tenantId, title, body)) > 0;
           await this.deps.store.setNotified(tenantId, c.id, [...c.notified, ...due.map((d) => `deadline:${d}`)]);
           if (sent) reminded += 1;

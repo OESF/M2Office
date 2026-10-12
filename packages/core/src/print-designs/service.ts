@@ -1070,7 +1070,7 @@ export class PrintDesignService {
           if (prefs?.notifications.kinds.print === false) continue;
           await this.deps.repo.createNotification({
             id: randomUUID(), tenantId, userId: d.createdBy, kind: 'print', title: `${d.title}: 掲示の期間が終わりました`,
-            body: `${d.place ? `${d.place}の` : ''}「${d.title}」は ${d.postTo.slice(5).replace('-', '/')} で期間が終わりました。${dropped ? '店頭サイネージからも外しました。' : ''}外しましたか。外したら販促物の作成の画面の「外した」を押してください。`,
+            body: `${d.place ? `${d.place}の` : ''}「${d.title}」は ${d.postTo.slice(5).replace('-', '/')} で期間が終わりました。${dropped ? '\n店頭サイネージからも外しました。' : ''}\n\n外しましたか。外したら販促物の作成の画面の「外した」を押してください。`,
             runId: null, readAt: null, createdAt: now.toISOString(),
           });
           told += 1;

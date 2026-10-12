@@ -19,6 +19,7 @@ import type { Repository } from '../repository/types.js';
 import type { LlmProvider } from '../llm/provider.js';
 import type { SecretBox } from '../secrets/box.js';
 import { silentLogger, type Logger } from '../log/logger.js';
+import { noticeList } from '../notify/list.js';
 import { dateIn } from '../cards/service.js';
 import { columnHtml, createWordPressPost, ensureWordPressCategory, updateWordPressTitle, type WordPressAuth } from '../columns/wordpress.js';
 import { openLine, LineUnavailableError, type LineDeps } from '../inquiries/line.js';
@@ -440,7 +441,7 @@ export class AnnouncementService {
       await this.audit(who, 'announcement.closure', a.id, { startDate: a.startDate, endDate: a.endDate });
     }
     await this.audit(who, 'announcement.publish', a.id, { channels: a.channels, failed: failed.length });
-    if (failed.length) await this.notify(who.tenantId, a.createdBy, `お知らせを出せなかった出し先があります（${a.title.slice(0, 30)}）`, failed.join('／'));
+    if (failed.length) await this.notify(who.tenantId, a.createdBy, `お知らせを出せなかった出し先があります（${a.title.slice(0, 30)}）`, noticeList(failed, 'か所'));
   }
 
   /**

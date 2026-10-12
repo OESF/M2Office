@@ -823,16 +823,19 @@ export class MemberService {
     const rc = await this.rankContext(tenantId);
     const ranked = all.map((m) => this.view(m, rc).rank);
     const rankLine = rc.cut.gold !== null && rc.cut.silver !== null
-      ? `ゴールド ${ranked.filter((r) => r === 'gold').length} 人・シルバー ${ranked.filter((r) => r === 'silver').length} 人（直近 1 年の来店 ${rc.cut.gold} 回・${rc.cut.silver} 回から）。`
+      ? `ゴールド ${ranked.filter((r) => r === 'gold').length} 人・シルバー ${ranked.filter((r) => r === 'silver').length} 人（直近 1 年の来店 ${rc.cut.gold} 回・${rc.cut.silver} 回から）`
       : '';
+    // 1 行に 1 つの数にする（お知らせの画面は改行と箇条書きを出す）
     const body = [
-      `会員 ${all.length} 人（今週の新しい会員 ${fresh} 人）。`,
-      rankLine,
-      `今週の来店 ${visits} 回（先週 ${lastVisits} 回）。`,
-      `しばらく（60 日）来ていない会員 ${away} 人。`,
-      `30 日のうちにポイントが失効する会員 ${expiring.length} 人。`,
+      [
+        `会員 ${all.length} 人（今週の新しい会員 ${fresh} 人）`,
+        rankLine,
+        `今週の来店 ${visits} 回（先週 ${lastVisits} 回）`,
+        `しばらく（60 日）来ていない会員 ${away} 人`,
+        `30 日のうちにポイントが失効する会員 ${expiring.length} 人`,
+      ].filter(Boolean).map((l) => `- ${l}`).join('\n'),
       proposed,
-    ].join('');
+    ].filter(Boolean).join('\n\n');
     for (const u of admins) {
       if (!canUseAgent((await this.deps.repo.getTenantSettings(tenantId)).access, MEMBERS_EXTENSION_ID, u.id, await this.deps.repo.listUserGroupIds(tenantId, u.id))) continue;
       await this.notifyUser(tenantId, u.id, '会員の週の見立て', body);

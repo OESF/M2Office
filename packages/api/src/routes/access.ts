@@ -110,11 +110,12 @@ async function reportCompartmentChanges(
         });
       }
     }
-    if (entered.length > 0) lines.push(`「${cur.name}」に入った人: ${entered.map(nameOf).join('、')}`);
-    if (left.length > 0) lines.push(`「${cur.name}」から出た人: ${left.map(nameOf).join('、')}`);
+    // 区画ごとに見出しを置き、人は 1 行に 1 人（お知らせの画面は改行と箇条書きを出す）
+    if (entered.length > 0) lines.push(`**「${cur.name}」に入った人**`, ...entered.map((u) => `- ${nameOf(u)}`), '');
+    if (left.length > 0) lines.push(`**「${cur.name}」から出た人**`, ...left.map((u) => `- ${nameOf(u)}`), '');
   }
   if (lines.length === 0) return;
-  const body = [`${nameOf(actorId)}さんの操作（${change}）により、権限区画に入れる人が変わりました。`, '', ...lines].join('\n');
+  const body = [`${nameOf(actorId)}さんの操作（${change}）により、権限区画に入れる人が変わりました。`, '', ...lines].join('\n').trim();
   for (const admin of users.filter((u) => u.status === 'active' && u.roles.includes('admin'))) {
     await deps.repo.createNotification({
       id: randomUUID(), tenantId, userId: admin.id, kind: 'security', title: '権限区画に入れる人が変わりました',

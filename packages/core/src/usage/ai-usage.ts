@@ -322,7 +322,7 @@ export class AiUsageMeter {
     ] as const) {
       if (m.total < limit * ratio) continue;
       if (!(await this.deps.store.markAlert(tenantId, m.month, level, ''))) break;
-      const body = `今月 ${yen(m.total)} / 上限 ${yen(limit)}。${level === '100' ? '新しい業務と、AI を使う秘書への依頼を止めています。上限を上げればすぐに使えます。' : '上限に達すると、新しい AI の利用を止めます。'}`;
+      const body = `今月 ${yen(m.total)} / 上限 ${yen(limit)}\n\n${level === '100' ? '新しい業務と、AI を使う秘書への依頼を止めています。\n上限を上げればすぐに使えます。' : '上限に達すると、新しい AI の利用を止めます。'}`;
       for (const admin of await this.deps.admins(tenantId)) await this.deps.notify(this.notice(tenantId, admin, 'usage', title, body));
       break;
     }
@@ -331,7 +331,7 @@ export class AiUsageMeter {
       const cap = limit * (await this.share(tenantId));
       if (mine >= cap && (await this.deps.store.markAlert(tenantId, m.month, 'user', userId))) {
         await this.deps.notify(this.notice(tenantId, userId, 'usageSelf', 'あなたの今月の AI の利用が、1 人の上限に達しました',
-          `今月 ${yen(mine)} / 1 人の上限 ${yen(cap)}。新しい AI の利用を止めています。必要なら管理者に相談してください。`));
+          `今月 ${yen(mine)} / 1 人の上限 ${yen(cap)}\n\n新しい AI の利用を止めています。\n必要なら管理者に相談してください。`));
       }
     }
   }
@@ -357,7 +357,7 @@ export class AiUsageMeter {
     const yen = (v: number) => `${Math.round(v).toLocaleString('ja-JP')} 円`;
     for (const admin of await this.deps.admins(tenantId)) {
       await this.deps.notify(this.notice(tenantId, admin, 'usage', `${last.day} の AI の利用がふだんより多くなっています`,
-        `その日 ${yen(last.costJpy)}（前の 14 日の平均 ${yen(avg)}）。止めてはいません。利用状況で用途と人を確かめてください。`));
+        `その日 ${yen(last.costJpy)}（前の 14 日の平均 ${yen(avg)}）\n\n止めてはいません。\n利用状況で用途と人を確かめてください。`));
     }
     return true;
   }

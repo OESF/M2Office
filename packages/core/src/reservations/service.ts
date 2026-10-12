@@ -17,6 +17,7 @@ import type { LlmProvider } from '../llm/provider.js';
 import { aiAvailable } from '../llm/unconfigured.js';
 import { ConnectorUnavailableError, type CalendarConnector } from '../connectors/types.js';
 import { silentLogger, type Logger } from '../log/logger.js';
+import { noticeList } from '../notify/list.js';
 import { ItemNameTakenError, ReservationOverlapError, type ItemPatch, type ReservationStore, type StoredReservation } from './store.js';
 
 /** 操作する人。 */
@@ -302,7 +303,7 @@ export class ReservationService {
       for (const userId of new Set(future.map((r) => r.userId))) {
         const mine = future.filter((r) => r.userId === userId);
         await this.notify(who.tenantId, userId, `${cur.name}の予約を止めました`,
-          `管理者が「${cur.name}」を新しく予約できないようにしました。あなたのこれからの予約（${mine.map((r) => jstRange(r.startAt, r.endAt)).slice(0, 5).join('、')}）は残っています。`);
+          `管理者が「${cur.name}」を新しく予約できないようにしました。あなたのこれからの予約は残っています。\n\n${noticeList(mine.map((r) => jstRange(r.startAt, r.endAt)), '件', 220)}`);
       }
     }
     return null;
@@ -721,7 +722,7 @@ export class ReservationService {
           const r = await this.materialize(tenantId, s, now);
           if (r.skipped.length) {
             await this.notify(tenantId, s.userId, '繰り返しの予約で取れなかった日があります',
-              `${reservationRuleText(s)} の繰り返しで、ほかの予約と重なって取れなかった日: ${r.skipped.map((d) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`).join('、')}。`);
+              `${reservationRuleText(s)} の繰り返しで、ほかの予約と重なって取れなかった日があります。\n\n${noticeList(r.skipped.map((d) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`), '日', 200)}`);
           }
         }
       } catch (err) {

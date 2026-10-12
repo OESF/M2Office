@@ -133,3 +133,19 @@ test('送れなかった通知は、あきらめる時刻まで送り直す', as
   await failing.sweep(new Date('2026-09-24T02:00:00.000Z'));
   assert.ok(repo.notifications[0]!.deliveredAt, 'あきらめて見回りの対象から外す');
 });
+
+test('お知らせの本文の箇条書き: 1 行に 1 つ並べ、上限に入らない数は「ほか N つ」にまとめる', async () => {
+  const { noticeList, NOTICE_BODY_LIMIT } = await import('../src/notify/list.js');
+  assert.equal(noticeList(['秋の熱中症', ' 汗の\nあとの保湿 ', ''], 'つ'), '- 秋の熱中症\n- 汗の あとの保湿');
+  assert.equal(noticeList([], '件'), '');
+  const many = Array.from({ length: 23 }, (_, i) => `競合 ${i + 1}: 土曜の受付の時間を変えた（${'あ'.repeat(20)}）`);
+  const body = noticeList(many, '件');
+  assert.ok(body.length <= NOTICE_BODY_LIMIT);
+  const lines = body.split('\n');
+  const shown = lines.filter((l) => l.startsWith('- 競合')).length;
+  assert.ok(shown >= 3);
+  assert.equal(lines.at(-1), `- ほか ${23 - shown} 件`);
+  // 上限を狭めれば、並べる数が減っても、並べた数と「ほか」の数の合計は変わらない
+  const narrow = noticeList(many, '件', 120).split('\n');
+  assert.equal(narrow.filter((l) => l.startsWith('- 競合')).length + Number(narrow.at(-1)!.match(/ほか (\d+)/)![1]), 23);
+});

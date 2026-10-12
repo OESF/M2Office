@@ -82,12 +82,12 @@ export class Scheduler {
         if (block?.kind === 'google') await this.notifySkipOnce(due.tenantId, due.userId, def?.name ?? due.agentId, now);
         if (block?.kind === 'connection') {
           await this.notifyOnce(due.tenantId, due.userId, SCHEDULE_CONNECTION_TITLE,
-            `「${def?.name ?? due.agentId}」の定時実行は、「${block.connection}」との接続が要るため動かせません。`
+            `「${def?.name ?? due.agentId}」の定時実行は、「${block.connection}」との接続が要るため動かせません。\n`
             + '個人設定の「サービスとの接続」から接続すると、次の回から自動で動きます。', now);
         }
         if (block?.kind === 'tool-disabled') {
           await this.notifyOnce(due.tenantId, due.userId, SCHEDULE_TOOL_DISABLED_TITLE,
-            `「${def?.name ?? due.agentId}」の定時実行は、管理者が止めたツール（${block.tool}）を使うため動かせません。`
+            `「${def?.name ?? due.agentId}」の定時実行は、管理者が止めたツール（${block.tool}）を使うため動かせません。\n`
             + '管理者がツールを戻すと、次の回から自動で動きます。', now);
         }
         continue;

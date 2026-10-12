@@ -570,11 +570,16 @@ export class InquiryService {
     let notified = 0;
     for (const alias of fresh) {
       const title = `${alias} から返事を送る設定がありません`;
+      // 手順は 1 行に 1 つ（お知らせの画面は改行と番号の箇条書きを出す）
       const body = [
-        `${alias} に届いた問い合わせへの返事は、いまは ${address} から送っています。${alias} から送るには、窓口のアカウントの Gmail で、`,
-        `設定 → アカウント → 「他のメールアドレスを追加」で ${alias} を「エイリアスとして扱う」で足してください。`,
+        `${alias} に届いた問い合わせへの返事は、いまは ${address} から送っています。`,
+        '',
+        `${alias} から送るには、窓口のアカウントの Gmail で次のように足してください。`,
+        '1. 設定 → アカウント →「他のメールアドレスを追加」を開く',
+        `2. ${alias} を「エイリアスとして扱う」で足す`,
+        '',
         'Google グループの宛先なら、確認のメールがグループに届くので、そのリンクを開いてください。',
-      ].join('');
+      ].join('\n');
       for (const u of await repo.listUsers(tenantId)) {
         if (u.status !== 'active' || !u.roles.includes('admin')) continue;
         if (!canUseAgent(tenant.access, INQUIRIES_EXTENSION_ID, u.id, await repo.listUserGroupIds(tenantId, u.id))) continue;

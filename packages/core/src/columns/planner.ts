@@ -15,6 +15,7 @@ import type { Repository } from '../repository/types.js';
 import type { LlmProvider } from '../llm/provider.js';
 import type { ResearchProvider } from '../research/provider.js';
 import { silentLogger, type Logger } from '../log/logger.js';
+import { noticeList } from '../notify/list.js';
 import type { ColumnService, ColumnViewer } from './service.js';
 import { finalMarkdown } from './service.js';
 import type { ColumnStore } from './store.js';
@@ -177,7 +178,7 @@ export class ColumnPlanner {
     await this.deps.repo.saveTenantSettings(tenantId, 'webColumns', { ...w, themesAt: now.toISOString() }, userId);
     await this.audit(tenantId, userId, 'column.themes', 'themes', { count: ids.length });
     const added = (await this.deps.store.themes(tenantId, ['new'], 100)).filter((t) => ids.includes(t.id));
-    if (notify && added.length) await this.notify(tenantId, await this.recipients(tenantId), `コラムのテーマ案が ${added.length} つあります`, added.slice(0, 3).map((t) => t.theme).join('・'));
+    if (notify && added.length) await this.notify(tenantId, await this.recipients(tenantId), `コラムのテーマ案が ${added.length} つあります`, noticeList(added.map((t) => t.theme), 'つ'));
     return { added };
   }
 

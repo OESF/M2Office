@@ -79,7 +79,7 @@ export class AppLinks {
       expiresAt: new Date(now.getTime() + LINK_CODE_TTL_MS).toISOString(), createdAt: now.toISOString(),
     });
     await this.notify(tenantId, user.id, `${app.name}からアカウントの結び付けの依頼がありました`,
-      `確認コード: ${code}（10 分で切れます）。${app.name}の画面に入れると、あなたの M2Office のアカウントと結び付きます。心当たりが無ければ、このお知らせは無視してください。`, now, true);
+      `確認コード: **${code}**（10 分で切れます）\n\n${app.name}の画面に入れると、あなたの M2Office のアカウントと結び付きます。\n心当たりが無ければ、このお知らせは無視してください。`, now, true);
     return { ok: true };
   }
 
@@ -111,7 +111,7 @@ export class AppLinks {
     const at = now.toISOString();
     await this.deps.store.createBinding(tenantId, { id, appId: app.id, userId: user.id, bindingHash: sha(bindingId), createdAt: at, lastUsedAt: null });
     await this.notify(tenantId, user.id, `${app.name}と結び付きました`,
-      `${app.name}から、あなたの権限で M2Office を使えるようになりました。やめるときは、個人設定の「サービスとの接続」で削除できます。`, now, false);
+      `${app.name}から、あなたの権限で M2Office を使えるようになりました。\nやめるときは、個人設定の「サービスとの接続」で削除できます。`, now, false);
     await this.audit(tenantId, `app:${app.id}`, 'api_client', 'app.binding.create', app, { userId: user.id }, at);
     return { bindingId, displayName: user.displayName };
   }

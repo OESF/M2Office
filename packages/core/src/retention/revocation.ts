@@ -130,7 +130,7 @@ export class GoogleRevocation {
     await repo.createNotification({
       id: randomUUID(), tenantId, userId, kind: 'failure',
       title: 'Google との接続が切れました',
-      body: `Google の側で M2Office への許可が外されたか、期限が切れました。個人設定の「Google 連携」から接続し直してください。${stopped.length ? `Google を使う業務を ${stopped.length} 件止めました。` : ''}定時実行は、接続し直すと次から動きます。`,
+      body: `Google の側で M2Office への許可が外されたか、期限が切れました。\n\n個人設定の「Google 連携」から接続し直してください。${stopped.length ? `\nGoogle を使う業務を ${stopped.length} 件止めました。` : ''}\n定時実行は、接続し直すと次から動きます。`,
       runId: null, readAt: null, createdAt: at,
     });
     await repo.appendAudit({

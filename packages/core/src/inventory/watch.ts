@@ -146,13 +146,17 @@ export class InventoryWatch {
     if (short.length === 0 && expiring.length === 0 && overdue.length === 0 && unknownMenus.length === 0 && unmatched.count === 0) return 0;
     const day = dateIn('Asia/Tokyo', now);
     const title = `在庫の見張り（${day.slice(5).replace('-', '/')}）`;
+    // 見出しごとに段落を分け、1 行に 1 つの箇条書きにする（お知らせの画面は Markdown の箇条書きを出す）。20 件を超えた分は数だけを書く
+    const section = (head: string, items: string[], total = items.length) =>
+      [`**${head}**`, ...items.map((l) => `- ${l}`), ...(total > items.length ? [`- ほか ${total - items.length} 件`] : [])].join('\n');
     const body = [
-      ...(short.length ? ['■ 足りなくなりそうなもの', ...short.slice(0, 20).flatMap((r) => [statusLine(r), ...(proposalLine(r) ? [`  ${proposalLine(r)}`] : [])])] : []),
-      ...(expiring.length ? ['■ 使用期限', ...expiring.slice(0, 20)] : []),
-      ...(overdue.length ? ['■ 予約の日を過ぎた取り置き（使った・取り消しを在庫管理の「取り置き」で）', ...overdue] : []),
-      ...(unknownMenus.length ? ['■ 使う品目の分からない予約のメニュー（秘書に「〇〇では△△を 1 つ使う」と伝えてください）', ...unknownMenus] : []),
-      ...(unmatched.count ? [`■ 品目を照らせなかった販売 ${unmatched.count} 件（在庫管理の「照らせなかった販売」で品目を選ぶと記録します）`, ...unmatched.samples] : []),
-    ].join('\n');
+      ...(short.length ? [[`**足りなくなりそうなもの**`, ...short.slice(0, 20).flatMap((r) => [`- ${statusLine(r)}`, ...(proposalLine(r) ? [`  - ${proposalLine(r)}`] : [])]),
+        ...(short.length > 20 ? [`- ほか ${short.length - 20} 件`] : [])].join('\n')] : []),
+      ...(expiring.length ? [section('使用期限', expiring.slice(0, 20), expiring.length)] : []),
+      ...(overdue.length ? [section('予約の日を過ぎた取り置き（使った・取り消しを在庫管理の「取り置き」で）', overdue)] : []),
+      ...(unknownMenus.length ? [section('使う品目の分からない予約のメニュー（秘書に「〇〇では△△を 1 つ使う」と伝えてください）', unknownMenus)] : []),
+      ...(unmatched.count ? [section(`品目を照らせなかった販売 ${unmatched.count} 件（在庫管理の「照らせなかった販売」で品目を選ぶと記録します）`, unmatched.samples)] : []),
+    ].join('\n\n');
     let sent = 0;
     for (const u of await this.recipients(tenantId)) if (await this.notify(tenantId, u, title, body, now)) sent++;
     return sent;

@@ -363,12 +363,12 @@ export class SecurityWatch {
     const start = new Date(Date.parse(`${today}T00:00:00+09:00`) - 86_400_000).toISOString();
     const list = (await this.deps.store.recentSignals(tenantId, start, 500)).filter((s) => s.createdAt < new Date(Date.parse(`${today}T00:00:00+09:00`)).toISOString());
     if (list.length === 0) return 0;
-    const byType = [...groupBy(list, (s) => s.type)].map(([t, xs]) => `${SECURITY_SIGNAL_LABELS[t as SecuritySignalType]} ${xs.length} 件`).join('・');
+    const byType = [...groupBy(list, (s) => s.type)].map(([t, xs]) => `- ${SECURITY_SIGNAL_LABELS[t as SecuritySignalType]} ${xs.length} 件`).join('\n');
     const admins = (await this.deps.repo.listUsers(tenantId)).filter(isAdmin);
     for (const a of admins) {
       await this.deps.repo.createNotification({
         id: randomUUID(), tenantId, userId: a.id, kind: 'security', title: `昨日のセキュリティの兆し ${list.length} 件`,
-        body: `${byType}。秘書に「セキュリティの知らせは？」と聞くと、1 件ずつ説明します。`, runId: null, readAt: null, createdAt: now.toISOString(),
+        body: `${byType}\n\n秘書に「セキュリティの知らせは？」と聞くと、1 件ずつ説明します。`, runId: null, readAt: null, createdAt: now.toISOString(),
       });
     }
     return list.length;
@@ -419,8 +419,36 @@ function jstText(at: string): string {
   return new Date(at).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
-/** 管理者への知らせの題と本文（何が・いつ・誰に・考えられること・勧める対応）。中身と場所は入れない。 */
+/**
+ * 管理者への知らせの題と本文（何が・いつ・誰に・考えられること・勧める対応）。中身と場所は入れない。
+ *
+ * 本文は、起きたこと（はじめの文）を 1 段落目に置き、考えられることと対応を 1 文ずつ次の行に並べる（お知らせの画面は改行を出す）。
+ */
 export function messageOf(s: SecuritySignal, nameOf: (id: string) => string): { title: string; body: string } {
+  const m = sentencesOf(s, nameOf);
+  const [first = '', ...rest] = splitSentences(m.body);
+  return { title: m.title, body: rest.length ? `${first}\n\n${rest.join('\n')}` : first };
+}
+
+/** 文を「。」で分ける（かぎかっこの中の「。」では分けない）。 */
+function splitSentences(text: string): string[] {
+  const out: string[] = [];
+  let cur = '';
+  let depth = 0;
+  for (const ch of text) {
+    cur += ch;
+    if (ch === '「') depth++;
+    else if (ch === '」') depth = Math.max(0, depth - 1);
+    else if (ch === '。' && depth === 0) {
+      out.push(cur.trim());
+      cur = '';
+    }
+  }
+  if (cur.trim()) out.push(cur.trim());
+  return out;
+}
+
+function sentencesOf(s: SecuritySignal, nameOf: (id: string) => string): { title: string; body: string } {
   const who = s.userId ? `${nameOf(s.userId)}さん` : '誰か';
   const when = jstText(s.createdAt);
   const off = s.detail['offHours'] ? '（深夜か休業日）' : '';

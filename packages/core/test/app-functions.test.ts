@@ -36,7 +36,7 @@ function fakeRepo(over: Partial<Record<string, unknown>> = {}, settings: TenantS
   return { repo, notes, delivered, audits };
 }
 
-const codeOf = (body: string) => /確認コード: (\d{6})/.exec(body)?.[1] ?? '';
+const codeOf = (body: string) => /確認コード: \*{0,2}(\d{6})/.exec(body)?.[1] ?? '';
 const APP = { id: 'app-1', name: 'M2Medical' };
 
 /** 結び付けの試験の組み立て（アプリを置き場に入れておく）。 */
