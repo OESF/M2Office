@@ -133,6 +133,11 @@ test('秘書への依頼: 番号の呼び出し・かぎかっこの文・画面
   assert.deepEqual(signageRequest('12番の方、第２診療室へお入りください。'), { kind: 'show', text: '12番の方、第2診療室へお入りください', screens: [], seconds: undefined, chime: undefined });
   assert.deepEqual(signageRequest('３番の患者様 受付までお越しください'), { kind: 'show', text: '3番の患者様 受付までお越しください', screens: [], seconds: undefined, chime: undefined });
   assert.equal(signageRequest('12番の資料を送ってください'), null, '呼び出しの文でなければ出さない');
+  // 切り替え方と画像の動き（第31.6.2節）
+  assert.deepEqual(signageRequest('入口の画面の切り替えをスライドにして'), { kind: 'look', screens: ['入口'], transition: 'slide' });
+  assert.deepEqual(signageRequest('切り替えをワイプに変えて'), { kind: 'look', screens: [], transition: 'wipe' });
+  assert.deepEqual(signageRequest('画像をゆっくり動かして'), { kind: 'look', screens: [], kenBurns: true });
+  assert.deepEqual(signageRequest('画像の動きを止めて'), { kind: 'look', screens: [], kenBurns: false });
   const q = signageRequest('待合だけに「本日は17時まで」を出して、30秒、音なしで');
   assert.deepEqual(q, { kind: 'show', text: '本日は17時まで', screens: ['待合'], seconds: 30, chime: false });
   assert.deepEqual(signageRequest('入口と待合に「雨の日セール」を出して'), { kind: 'show', text: '雨の日セール', screens: ['入口', '待合'], seconds: undefined, chime: undefined });

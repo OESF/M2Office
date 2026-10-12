@@ -15,6 +15,14 @@ export const SIGNAGE_MAX_SCREENS = 3;
 export const SIGNAGE_STORAGE_LIMIT = 2 * 1024 * 1024 * 1024;
 
 /** 素材の大きさの上限（第31.6.1節）。画像は縮めた後、動画はそのまま。 */
+/** 素材と素材の切り替え方（画面ごとに 1 つ。第31.6.2節）。 */
+export type SignageTransition = 'fade' | 'slide' | 'wipe' | 'zoom' | 'none';
+
+/** 切り替え方の一覧（画面に出す名前。既定はフェード）。 */
+export const SIGNAGE_TRANSITIONS: readonly { id: SignageTransition; label: string }[] = [
+  { id: 'fade', label: 'フェード' }, { id: 'slide', label: 'スライド' }, { id: 'wipe', label: 'ワイプ' }, { id: 'zoom', label: 'ズーム' }, { id: 'none', label: 'なし' },
+];
+
 export const SIGNAGE_LIMITS = {
   imageBytes: 5 * 1024 * 1024,
   videoBytes: 200 * 1024 * 1024,
@@ -123,6 +131,10 @@ export interface SignageScreen {
   rotation: SignageRotation;
   /** 音の大きさ（0〜100）。 */
   volume: number;
+  /** 素材と素材の切り替え方（第31.6.2節）。 */
+  transition: SignageTransition;
+  /** 静止画をゆっくり拡大して動きを出すか（第31.6.2節）。 */
+  kenBurns: boolean;
   flowVersion: number;
   lastSeenAt: string | null;
   /** つながってからの時刻（接続中のときだけ。管理の画面の「接続中 3 時間 12 分」。第31.5.1節）。 */

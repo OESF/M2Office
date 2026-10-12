@@ -37,7 +37,11 @@ interface PlayInterrupt {
 
 /** 再生に要る状態（`GET /v1/signage-play/state`）。 */
 interface PlayState {
-  screen: { id: string; name: string; orientation: 'landscape' | 'portrait'; rotation: 0 | 90 | 180 | 270; volume: number; flowVersion: number };
+  screen: {
+    id: string; name: string; orientation: 'landscape' | 'portrait'; rotation: 0 | 90 | 180 | 270; volume: number; flowVersion: number;
+    /** 切り替え方と画像の動き（第31.6.2節。前の版のサーバーには無い） */
+    transition?: 'fade' | 'slide' | 'wipe' | 'zoom' | 'none'; kenBurns?: boolean;
+  };
   entries: { assetId: string; seconds: number | null; sound?: boolean }[];
   /** 時間帯の流れ（第31.6.6節。前の版のサーバーには無い） */
   bands?: (SignageBand & { entries: { assetId: string; seconds: number | null; sound?: boolean }[] })[];
@@ -658,12 +662,12 @@ function Player({ screenKey, onUnregistered }: { screenKey: string; onUnregister
   };
   return (
     <div className="signage-root" style={{ background: ps?.color ?? '#000' }}>
-      <div className="signage-frame" style={frame}>
+      <div className="signage-frame" style={frame} data-transition={ps?.screen.transition ?? 'fade'}>
         {empty || !ps
           ? <div className="signage-empty">{ps?.company ?? ''}</div>
           : ([0, 1] as const).map((i) => {
             const l = layers[i];
-            return l ? <LayerView key={l.seq} layer={l} front={front === i} paused={paused} volume={ps?.screen.volume ?? 70} onReady={() => onReady(i, l)} onEnded={() => advanceRef.current()} onFail={() => onFail(l)} /> : null;
+            return l ? <LayerView key={l.seq} layer={l} front={front === i} paused={paused} volume={ps?.screen.volume ?? 70} kenBurns={ps?.screen.kenBurns === true} onReady={() => onReady(i, l)} onEnded={() => advanceRef.current()} onFail={() => onFail(l)} /> : null;
           })}
         {showing && (
           <div className="signage-int" key={showing.item.id}>
@@ -685,9 +689,13 @@ function Player({ screenKey, onUnregistered }: { screenKey: string; onUnregister
 }
 
 /** 表示の 1 枚。向きの合わない素材は切らずに収め、余白にぼかして暗くしたものを敷く（第31.6.2節）。 */
-function LayerView({ layer, front, paused, volume, onReady, onEnded, onFail }: {
-  layer: Layer; front: boolean; paused: boolean; volume: number; onReady: () => void; onEnded: () => void; onFail: () => void;
+function LayerView({ layer, front, paused, volume, kenBurns, onReady, onEnded, onFail }: {
+  layer: Layer; front: boolean; paused: boolean; volume: number; kenBurns: boolean; onReady: () => void; onEnded: () => void; onFail: () => void;
 }) {
+  // 一度前に出た 1 枚は、次の素材に替わると「出ていく 1 枚」になる（スライドで左へ抜けるなど、入る 1 枚と向きを分ける。第31.6.2節）
+  const wasFront = useRef(false);
+  if (front) wasFront.current = true;
+  const past = !front && wasFront.current;
   const video = useRef<HTMLVideoElement>(null);
   // 呼び出し元は描き直しのたびに新しい関数を渡すため、最新のものを持っておき、頭から流す処理の条件には入れない
   // （条件に入れると、1 分ごとの生きている知らせなどで描き直すたびに頭に戻り、長い動画が繰り返し流れていた）
@@ -718,16 +726,24 @@ function LayerView({ layer, front, paused, volume, onReady, onEnded, onFail }: {
     if (paused) v.pause(); else if (v.paused && !v.ended) void v.play().catch(() => undefined);
   }, [paused, front]);
   const bg = layer.kind === 'image' ? layer.url : layer.thumb;
+  // 画像の動き: 静止画を出す秒数の間に、ゆっくり拡大する（向きは 1 枚ずつ変える。割り込みの間は止める。第31.6.2節）
+  const kb: CSSProperties | undefined = kenBurns && layer.kind === 'image' && (front || past) ? {
+    animation: `signage-kb ${Math.max(3, layer.seconds)}s linear forwards`, animationPlayState: paused ? 'paused' : 'running',
+    transformOrigin: ['30% 30%', '70% 30%', '30% 70%', '70% 70%'][layer.seq % 4],
+  } : undefined;
   return (
-    <div className={`signage-layer${front ? ' front' : ''}`}>
+    <div className={`signage-layer${front ? ' front' : ''}${past ? ' past' : ''}`}>
+      {/* 中の囲み（ワイプで、外の囲みと逆に動かして中身を止めて見せる） */}
+      <div className="signage-layer-inner">
       {bg && <div className="signage-bg" style={{ backgroundImage: `url(${bg})` }} />}
-      {layer.kind === 'image' && <img className="signage-media" src={layer.url} alt="" onLoad={onReady} onError={onFail} />}
+      {layer.kind === 'image' && <img className="signage-media" src={layer.url} alt="" style={kb} onLoad={onReady} onError={onFail} />}
       {layer.kind === 'video' && <video ref={video} className="signage-media" src={layer.url} muted={!layer.sound} playsInline preload="auto" onCanPlay={onReady} onEnded={onEnded} onError={onFail} />}
       {/* コラムから作った動画の字幕（題名と一言。生成 AI に字を描かせないため、ここで重ねる。第32.18.6節） */}
       {layer.kind === 'video' && layer.caption && (
         <div className="signage-caption">{layer.caption.split('\n').map((l, i) => <div key={i} className={i === 0 && layer.caption!.includes('\n') ? 'title' : 'line'}>{l}</div>)}</div>
       )}
       {layer.kind === 'html' && layer.html !== null && <HtmlFrame html={layer.html} onLoad={onReady} />}
+      </div>
     </div>
   );
 }

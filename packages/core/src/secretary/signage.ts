@@ -12,7 +12,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  ANNOUNCEMENT_BAND_COLORS, SIGNAGE_JINGLES, SIGNAGE_LIMITS, SIGNAGE_WEEKDAYS, signageBandLabel, type SignageSettings,
+  ANNOUNCEMENT_BAND_COLORS, SIGNAGE_JINGLES, SIGNAGE_LIMITS, SIGNAGE_TRANSITIONS, SIGNAGE_WEEKDAYS, signageBandLabel, type SignageSettings, type SignageTransition,
 } from '@m2office/shared';
 import type { SignageService } from '../signage/service.js';
 import type { SignageInterrupts } from '../signage/interrupts.js';
@@ -39,7 +39,8 @@ export type SignageRequest =
   | { kind: 'add-file'; screens: string[]; bandStart?: string }
   | { kind: 'band-add'; screens: string[]; start: string; end: string; days: number }
   | { kind: 'band-remove'; screens: string[]; start: string }
-  | { kind: 'settings'; patch: Partial<Pick<SignageSettings, 'imageSeconds' | 'interruptSeconds' | 'color' | 'jingle' | 'chime'>> };
+  | { kind: 'settings'; patch: Partial<Pick<SignageSettings, 'imageSeconds' | 'interruptSeconds' | 'color' | 'jingle' | 'chime'>> }
+  | { kind: 'look'; screens: string[]; transition?: SignageTransition; kenBurns?: boolean };
 
 /** 「17時」「17:30」「5時半」を `HH:MM` に（読めなければ `null`）。 */
 function timeOf(t: string): string | null {
@@ -150,6 +151,11 @@ export function signageRequest(message: string): SignageRequest | null {
   }
   if (/(?:サイネージ|呼び出し|割り込み)の(?:音|ジングル)を?(?:鳴らさないで|止めて|消して|なしにして|切って)/.test(m)) return { kind: 'settings', patch: { chime: false } };
   if (/(?:サイネージ|呼び出し|割り込み)の(?:音|ジングル)を?(?:鳴らして|戻して|入れて)/.test(m)) return { kind: 'settings', patch: { chime: true } };
+  // 画面の切り替え方と画像の動き（第31.6.2節。画面の名前が無ければすべての画面）
+  const tr = /切り替え(?:方)?を(フェード|スライド|ワイプ|ズーム|なし)に(?:して|変えて)/.exec(m);
+  if (tr) return { kind: 'look', screens: flowScreens(raw), transition: SIGNAGE_TRANSITIONS.find((t) => t.label === tr[1])!.id };
+  if (/(?:画像|写真)の動きを?(?:止めて|なくして|やめて|切って)/.test(m)) return { kind: 'look', screens: flowScreens(raw), kenBurns: false };
+  if (/(?:画像|写真)を?(?:ゆっくり)?(?:動かして|動きをつけて)|(?:画像|写真)の動きを?(?:つけて|入れて)/.test(m)) return { kind: 'look', screens: flowScreens(raw), kenBurns: true };
   const seconds = Number(/(\d{1,2})秒/.exec(m)?.[1]) || undefined;
   const chime = /音(なし|無し|を?鳴らさず|を?出さず)/.test(m) ? false : undefined;
   // 割り込みを消す（「呼び出しを消して」「全部消して」）
@@ -286,6 +292,17 @@ export async function answerSignage(deps: SignageSecretaryDeps, tenantId: string
     if (!band) return `「${target.name}」に ${req.start} から始まる時間帯がありません（${flow?.bands.map(signageBandLabel).join('・') || '時間帯なし'}）。`;
     await service.deleteBand(tenantId, userId, band.id);
     return `「${target.name}」の時間帯「${signageBandLabel(band)}」と、その流れを削除しました（素材は残っています）。`;
+  }
+  if (req.kind === 'look') {
+    const target = req.screens.length ? byName(req.screens) : screens;
+    if (!target.length) return req.screens.length ? `「${req.screens.join('・')}」という画面がありません（画面: ${allNames()}）。` : '登録した画面がありません。';
+    for (const s of target) {
+      const r = await service.updateScreen(tenantId, userId, s.id, { ...(req.transition ? { transition: req.transition } : {}), ...(req.kenBurns !== undefined ? { kenBurns: req.kenBurns } : {}) });
+      if ('error' in r) return `${s.name}を直せませんでした（${r.error}）。`;
+    }
+    const names = target.map((s) => s.name).join('と');
+    if (req.transition) return `${names}の切り替えを${SIGNAGE_TRANSITIONS.find((t) => t.id === req.transition)?.label ?? req.transition}にしました。`;
+    return req.kenBurns ? `${names}で、画像をゆっくり動かすようにしました。` : `${names}の画像の動きを止めました。`;
   }
   if (req.kind === 'settings') {
     if (!admin) return 'サイネージの設定は管理者が変えられます。管理者に頼んでください。';

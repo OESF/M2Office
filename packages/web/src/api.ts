@@ -18,7 +18,7 @@ import type { CardCorners, CardEnglish, PrintDesign, PrintDesignDetailView, Prin
   InventoryCount, InventoryCountRow, InventoryCountScope, InventoryCountView, InventorySupplier,
   InventoryBooking, InventoryBookingMapping, InventoryBookingSource, InventoryPublication, InventoryPublicationScope, InventoryPublicSnapshot,
   InventoryCatalogScope, InventorySaleUnmatched, ExternalApp, AppFunctionId, AppFunctionInfo, AppSettings, AppSettingOptions, AppBindingView,
-  SignageAsset, SignageBand, SignageEntry, SignageScreen, SignageSettings, SignageInterruptInput, SignageInterruptView, SignagePhrase, SignageSound, SignageSource,
+  SignageAsset, SignageBand, SignageEntry, SignageScreen, SignageSettings, SignageTransition, SignageInterruptInput, SignageInterruptView, SignagePhrase, SignageSound, SignageSource,
   ColumnWordPress, WebColumn, WebColumnSettings, WebColumnVersion, WebColumnTheme, ColumnPlanSlot, ColumnSignageSet,
   Inquiry, InquiryDetail, InquiryParty, InquiryTask, InquiryReply, InquiryMailSkipped, InquiryMonthStats, InquirySettings, InquiryFaqTopic,
   CompetitorOverview, CompetitorFact, CompetitorReport, CompetitorSettings,
@@ -1678,7 +1678,7 @@ export const api = {
   /** 店頭サイネージ（仕様書 第31章）。 */
   signage: {
     overview: () => call<SignageOverview>('/signage'),
-    updateScreen: (id: string, patch: { name?: string; orientation?: 'landscape' | 'portrait'; rotation?: number }) =>
+    updateScreen: (id: string, patch: { name?: string; orientation?: 'landscape' | 'portrait'; rotation?: number; volume?: number; transition?: SignageTransition; kenBurns?: boolean }) =>
       call<{ screen: SignageScreen }>(`/signage/screens/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
     /** 画面の流れと版（`band` が無ければいつもの流れ）と、時間帯の一覧（第31.6.6節）。 */
     flow: (id: string, band: string | null = null) =>

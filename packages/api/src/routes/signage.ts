@@ -41,11 +41,13 @@ export function signageRoute(deps: AppDeps) {
     return c.json({ ...(await service.overview(tenant.id)), admin: user.roles.includes('admin') });
   });
 
-  /** 画面の名前・向き・回し方を直す（利用範囲の全員）。 */
+  /** 画面の名前・向き・回し方・音の大きさ・切り替え方・画像の動きを直す（利用範囲の全員）。 */
   app.patch('/screens/:id', async (c) => {
     const { tenant, user } = c.get('ctx');
     const b = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
-    const r = await service.updateScreen(tenant.id, user.id, c.req.param('id'), { name: b['name'], orientation: b['orientation'], rotation: b['rotation'], volume: b['volume'] });
+    const r = await service.updateScreen(tenant.id, user.id, c.req.param('id'), {
+      name: b['name'], orientation: b['orientation'], rotation: b['rotation'], volume: b['volume'], transition: b['transition'], kenBurns: b['kenBurns'],
+    });
     return 'error' in r ? c.json(r, r.error === '画面が見つかりません' ? 404 : 400) : c.json(r);
   });
 

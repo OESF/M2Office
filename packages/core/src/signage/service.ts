@@ -10,9 +10,9 @@ import { EventEmitter } from 'node:events';
 import { rm } from 'node:fs/promises';
 import {
   canUseAgent, SIGNAGE_EXTENSION_ID, SIGNAGE_JINGLES, SIGNAGE_LIMITS, SIGNAGE_MAX_SCREENS, SIGNAGE_STORAGE_LIMIT, SIGNAGE_DEFAULT_COLOR,
-  signageBandLabel, signageBandsOverlap, signageMinutes,
+  signageBandLabel, signageBandsOverlap, signageMinutes, SIGNAGE_TRANSITIONS,
   type AuditEvent, type SignageAsset, type SignageBand, type SignageEntry, type SignageOrientation, type SignageReport, type SignageRotation,
-  type SignageScreen, type SignageSettings,
+  type SignageScreen, type SignageSettings, type SignageTransition,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { LlmProvider } from '../llm/provider.js';
@@ -192,7 +192,7 @@ export class SignageService {
     const now = this.now().getTime();
     const online = !!s.lastSeenAt && now - Date.parse(s.lastSeenAt) <= ONLINE_MS;
     return {
-      id: s.id, name: s.name, orientation: s.orientation, rotation: s.rotation, volume: s.volume, flowVersion: s.flowVersion,
+      id: s.id, name: s.name, orientation: s.orientation, rotation: s.rotation, volume: s.volume, transition: s.transition, kenBurns: s.kenBurns, flowVersion: s.flowVersion,
       lastSeenAt: s.lastSeenAt, onlineSince: online ? s.onlineSince : null, lastReport: s.lastReport, online, registeredAt: s.registeredAt,
     };
   }
@@ -213,8 +213,17 @@ export class SignageService {
    *
    * @remarks 危険度: 低（社内の画面の設定を変える）
    */
-  async updateScreen(tenantId: string, userId: string, id: string, input: { name?: unknown; orientation?: unknown; rotation?: unknown; volume?: unknown }): Promise<{ screen: SignageScreen } | { error: string }> {
-    const patch: { name?: string; orientation?: SignageOrientation; rotation?: SignageRotation; volume?: number } = {};
+  async updateScreen(tenantId: string, userId: string, id: string, input: { name?: unknown; orientation?: unknown; rotation?: unknown; volume?: unknown; transition?: unknown; kenBurns?: unknown }): Promise<{ screen: SignageScreen } | { error: string }> {
+    const patch: { name?: string; orientation?: SignageOrientation; rotation?: SignageRotation; volume?: number; transition?: SignageTransition; kenBurns?: boolean } = {};
+    // 切り替え方と画像の動き（第31.6.2節）
+    if (input.transition !== undefined) {
+      if (!SIGNAGE_TRANSITIONS.some((t) => t.id === input.transition)) return { error: '切り替え方が違います' };
+      patch.transition = input.transition as SignageTransition;
+    }
+    if (input.kenBurns !== undefined) {
+      if (typeof input.kenBurns !== 'boolean') return { error: '画像の動きは入りか切りにしてください' };
+      patch.kenBurns = input.kenBurns;
+    }
     if (input.volume !== undefined) {
       const v = Number(input.volume);
       if (!Number.isInteger(v) || v < 0 || v > 100) return { error: '音の大きさは 0〜100 にしてください' };
@@ -695,7 +704,7 @@ export class SignageService {
    * 再生のページに渡す状態（設定・流れと版・素材・店の色・会社の名前・サーバーの時刻。第31.15.2節）。
    */
   async playState(tenantId: string, s: ScreenRecord): Promise<{
-    screen: { id: string; name: string; orientation: SignageOrientation; rotation: SignageRotation; volume: number; flowVersion: number };
+    screen: { id: string; name: string; orientation: SignageOrientation; rotation: SignageRotation; volume: number; transition: SignageTransition; kenBurns: boolean; flowVersion: number };
     entries: SignageEntry[]; bands: (SignageBand & { entries: SignageEntry[] })[]; assets: PlayAsset[]; interruptAssets: string[]; sounds: { id: string; mime: string }[]; jingle: string;
     imageSeconds: number; color: string; company: string; serverTime: string;
   }> {
@@ -714,7 +723,7 @@ export class SignageService {
     const interrupts = all.filter((a) => a.isInterrupt && a.kind !== 'video');
     for (const a of interrupts) used.add(a.id);
     return {
-      screen: { id: s.id, name: s.name, orientation: s.orientation, rotation: s.rotation, volume: s.volume, flowVersion: s.flowVersion },
+      screen: { id: s.id, name: s.name, orientation: s.orientation, rotation: s.rotation, volume: s.volume, transition: s.transition, kenBurns: s.kenBurns, flowVersion: s.flowVersion },
       entries,
       bands,
       assets: all.filter((a) => used.has(a.id)).map(({ id, kind, mime, sha256, bytes, width, height, durationMs, caption }) => ({ id, kind, mime, sha256, bytes, width, height, durationMs, caption })),

@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
 import {
-  SIGNAGE_JINGLES, SIGNAGE_LIMITS, SIGNAGE_WEEKDAYS, signageBandLabel,
+  SIGNAGE_JINGLES, SIGNAGE_LIMITS, SIGNAGE_TRANSITIONS, SIGNAGE_WEEKDAYS, signageBandLabel, type SignageTransition,
   type SignageBand, type SignageEntry, type SignageInterruptView, type SignageScreen, type SignageSound,
 } from '@m2office/shared';
 import { api, describeError, type SignageAssetView, type SignageOverview } from './api.js';
@@ -276,7 +276,7 @@ function ScreenCard({ s, active, admin, thumb, assets, wantThumb, onSelect, onCh
   s: SignageScreen; active: boolean; admin: boolean; thumb?: string; assets: SignageAssetView[]; wantThumb: (id: string) => void; onSelect: () => void; onChanged: () => void; onError: (m: string) => void;
 }) {
   useEffect(() => { if (s.lastReport?.current) wantThumb(s.lastReport.current); }, [s.lastReport?.current, wantThumb]);
-  const patch = (p: { name?: string; orientation?: 'landscape' | 'portrait'; rotation?: number; volume?: number }) =>
+  const patch = (p: { name?: string; orientation?: 'landscape' | 'portrait'; rotation?: number; volume?: number; transition?: SignageTransition; kenBurns?: boolean }) =>
     void api.signage.updateScreen(s.id, p).then(onChanged).catch((e) => onError(describeError(e, '直せませんでした')));
   const uncached = s.lastReport?.uncached.length ?? 0;
   const skipped = (s.lastReport?.skipped ?? []).map((id) => assets.find((x) => x.id === id)?.name ?? '消した素材');
@@ -308,6 +308,14 @@ function ScreenCard({ s, active, admin, thumb, assets, wantThumb, onSelect, onCh
           <select value={s.rotation} onChange={(e) => patch({ rotation: Number(e.target.value) })} aria-label="回し方">
             {[0, 90, 180, 270].map((r) => <option key={r} value={r}>{r} 度</option>)}
           </select>
+          {/* 切り替え方と画像の動き（画面ごと。第31.6.2節） */}
+          <select value={s.transition} onChange={(e) => patch({ transition: e.target.value as SignageTransition })} aria-label="切り替え方">
+            {SIGNAGE_TRANSITIONS.map((t) => <option key={t.id} value={t.id}>切り替え: {t.label}</option>)}
+          </select>
+          <span className="row small">画像の動き
+            <button type="button" role="switch" aria-checked={s.kenBurns} aria-label="画像の動き" className={s.kenBurns ? 'switch on' : 'switch'}
+              onClick={() => patch({ kenBurns: !s.kenBurns })}><span /></button>
+          </span>
           {admin && <button className="btn ghost small" onClick={() => void api.admin.removeSignageScreen(s.id).then(onChanged).catch((e) => onError(describeError(e, '切断できませんでした')))}>切断</button>}
         </div>
       </div>

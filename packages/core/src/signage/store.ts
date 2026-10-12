@@ -9,7 +9,7 @@ import pg from 'pg';
 import { createPool } from '../repository/pool.js';
 import {
   signageMinutes,
-  type SignageAsset, type SignageBand, type SignageEntry, type SignageOrientation, type SignageReport, type SignageRotation, type SignageOrigin,
+  type SignageAsset, type SignageBand, type SignageEntry, type SignageOrientation, type SignageReport, type SignageRotation, type SignageOrigin, type SignageTransition,
   type SignageTargetState, type SignageInterruptView, type SignagePhrase, type SignageSource, type SignageSourceMapping, type SignageSound,
 } from '@m2office/shared';
 
@@ -24,6 +24,9 @@ export interface StockNotice {
   expiresAt: string | null;
 }
 
+/** 画面の直せる項目（第31.5.1節・第31.6.2節）。 */
+export interface ScreenPatch { name?: string; orientation?: SignageOrientation; rotation?: SignageRotation; volume?: number; transition?: SignageTransition; kenBurns?: boolean }
+
 /** 置き場の中の画面（鍵のハッシュと状態を含む）。 */
 export interface ScreenRecord {
   id: string;
@@ -31,6 +34,8 @@ export interface ScreenRecord {
   orientation: SignageOrientation;
   rotation: SignageRotation;
   volume: number;
+  transition: SignageTransition;
+  kenBurns: boolean;
   status: 'active' | 'removed';
   flowVersion: number;
   lastSeenAt: string | null;
@@ -89,16 +94,16 @@ export interface InterruptRecord {
 }
 
 interface ScreenRow {
-  id: string; name: string; orientation: SignageOrientation; rotation: number; volume: number; status: 'active' | 'removed';
+  id: string; name: string; orientation: SignageOrientation; rotation: number; volume: number; transition: SignageTransition; ken_burns: boolean; status: 'active' | 'removed';
   flow_version: number; last_seen_at: unknown; online_since: unknown; last_report: SignageReport | null; offline_notified_at: unknown; registered_at: unknown; removed_at: unknown;
 }
 interface BandRow { id: string; start_min: number; end_min: number; days: number }
 const hhmm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 const toBand = (r: BandRow): SignageBand => ({ id: r.id, start: hhmm(r.start_min), end: hhmm(r.end_min), days: r.days });
 
-const SCREEN_COLS = 'id, name, orientation, rotation, volume, status, flow_version, last_seen_at, online_since, last_report, offline_notified_at, registered_at, removed_at';
+const SCREEN_COLS = 'id, name, orientation, rotation, volume, transition, ken_burns, status, flow_version, last_seen_at, online_since, last_report, offline_notified_at, registered_at, removed_at';
 const toScreen = (r: ScreenRow): ScreenRecord => ({
-  id: r.id, name: r.name, orientation: r.orientation, rotation: r.rotation as SignageRotation, volume: r.volume, status: r.status,
+  id: r.id, name: r.name, orientation: r.orientation, rotation: r.rotation as SignageRotation, volume: r.volume, transition: r.transition, kenBurns: r.ken_burns, status: r.status,
   flowVersion: r.flow_version, lastSeenAt: r.last_seen_at ? iso(r.last_seen_at) : null, onlineSince: r.online_since ? iso(r.online_since) : null, lastReport: r.last_report,
   offlineNotifiedAt: r.offline_notified_at ? iso(r.offline_notified_at) : null, registeredAt: iso(r.registered_at), removedAt: r.removed_at ? iso(r.removed_at) : null,
 });
@@ -139,7 +144,7 @@ export interface SignageStore {
   createScreen(tenantId: string, s: { id: string; name: string; orientation: SignageOrientation }, by: string): Promise<void>;
   /** 外した画面を登録し直す（名前と流れを引き継ぐ。第31.5.1節）。 */
   restoreScreen(tenantId: string, id: string, orientation: SignageOrientation, by: string): Promise<void>;
-  updateScreen(tenantId: string, id: string, patch: { name?: string; orientation?: SignageOrientation; rotation?: SignageRotation; volume?: number }, by: string): Promise<ScreenRecord | null>;
+  updateScreen(tenantId: string, id: string, patch: ScreenPatch, by: string): Promise<ScreenRecord | null>;
   setScreenKey(tenantId: string, id: string, keyHash: string): Promise<void>;
   removeScreen(tenantId: string, id: string, by: string): Promise<ScreenRecord | null>;
   /** 生きている知らせを残す（つながったら、つながらない知らせの印を外す）。 */
@@ -299,11 +304,12 @@ export class PostgresSignageStore implements SignageStore {
       where tenant_id = $1 and id = $2`, [tenantId, id, orientation, by]);
   }
 
-  async updateScreen(tenantId: string, id: string, patch: { name?: string; orientation?: SignageOrientation; rotation?: SignageRotation; volume?: number }, by: string): Promise<ScreenRecord | null> {
+  async updateScreen(tenantId: string, id: string, patch: ScreenPatch, by: string): Promise<ScreenRecord | null> {
     const rows = await this.q<ScreenRow>(tenantId, `update signage_screens set name = coalesce($3, name), orientation = coalesce($4, orientation),
-      rotation = coalesce($5, rotation), volume = coalesce($6, volume), updated_by = $7, updated_at = now()
+      rotation = coalesce($5, rotation), volume = coalesce($6, volume), transition = coalesce($8, transition), ken_burns = coalesce($9, ken_burns),
+      updated_by = $7, updated_at = now()
       where tenant_id = $1 and id = $2 and status = 'active' returning ${SCREEN_COLS}`,
-    [tenantId, id, patch.name ?? null, patch.orientation ?? null, patch.rotation ?? null, patch.volume ?? null, by]);
+    [tenantId, id, patch.name ?? null, patch.orientation ?? null, patch.rotation ?? null, patch.volume ?? null, by, patch.transition ?? null, patch.kenBurns ?? null]);
     return rows[0] ? toScreen(rows[0]) : null;
   }
 

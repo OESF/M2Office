@@ -4826,6 +4826,18 @@ console.log('\n■ 63. 店頭サイネージ（内蔵の拡張。第31章の段 
         : ng('外部のアプリのサイネージの機能が合わない', JSON.stringify({ approved: approved.status, sent, again, noEvent: noEvent.status, badScreen: badScreen.status, listed, status, otherClear: otherClear.status, cleared: cleared.status, afterClear: afterClear?.targets, wrongFn: wrongFn.status }).slice(0, 900));
     }
 
+    // 切り替え方と画像の動き（画面ごと。第31.6.2節）: 直すと画面の鍵の読み出しに出る。知らない切り替え方は断る
+    {
+      const look = await call('a', `/v1/signage/screens/${sid}`, { method: 'PATCH', body: JSON.stringify({ transition: 'slide', kenBurns: true }) });
+      const badLook = await call('a', `/v1/signage/screens/${sid}`, { method: 'PATCH', body: JSON.stringify({ transition: 'spin' }) });
+      const seen = (await play('/state', {}, key)).body?.screen;
+      await call('a', `/v1/signage/screens/${sid}`, { method: 'PATCH', body: JSON.stringify({ transition: 'fade', kenBurns: false }) });
+      look.status === 200 && look.body.screen?.transition === 'slide' && look.body.screen?.kenBurns === true && badLook.status === 400
+        && seen?.transition === 'slide' && seen?.kenBurns === true
+        ? ok('サイネージの切り替え方と画像の動きを画面ごとに直せ、画面の鍵の読み出しに出る（知らない切り替え方は断る）')
+        : ng('サイネージの切り替え方が合わない', JSON.stringify({ look: look.body, bad: badLook.status, seen }).slice(0, 500));
+    }
+
     // 時間帯の流れ: 3 つまで・重なりは 409・時間帯ごとの流れ・画面の鍵で読める・ほかの会社は触れない（第31.6.6節）
     const band1 = await call('a', `/v1/signage/screens/${sid}/bands`, { method: 'POST', body: JSON.stringify({ start: '11:00', end: '14:00', days: 31 }) });
     const clash = await call('a', `/v1/signage/screens/${sid}/bands`, { method: 'POST', body: JSON.stringify({ start: '13:00', end: '15:00', days: 1 }) });

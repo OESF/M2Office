@@ -1643,6 +1643,27 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .signage-frame { position: absolute; inset: 0; overflow: hidden; }
 .signage-layer { position: absolute; inset: 0; opacity: 0; transition: opacity .5s ease; overflow: hidden; }
 .signage-layer.front { opacity: 1; z-index: 1; }
+.signage-layer-inner { position: absolute; inset: 0; }
+/* 切り替え方（画面ごと。第31.6.2節）。描き直しの要らない transform と opacity だけで動かす。
+   前の 1 枚（.front）・出ていく 1 枚（.past）・まだ出ていない 1 枚（どちらでもない）の 3 つの形を持つ */
+.signage-frame[data-transition="none"] .signage-layer { transition: none; }
+.signage-frame[data-transition="slide"] .signage-layer { opacity: 1; transform: translateX(100%); transition: transform .7s ease-in-out; }
+.signage-frame[data-transition="slide"] .signage-layer.front { transform: none; }
+.signage-frame[data-transition="slide"] .signage-layer.past { transform: translateX(-100%); }
+/* ワイプ: 外の囲みを左から入れ、中の囲みを逆に動かして、中身は止めたまま左から右へ塗り替える */
+.signage-frame[data-transition="wipe"] .signage-layer { opacity: 1; transform: translateX(-100%); transition: transform .7s ease-in-out; }
+.signage-frame[data-transition="wipe"] .signage-layer .signage-layer-inner { transform: translateX(100%); transition: transform .7s ease-in-out; }
+.signage-frame[data-transition="wipe"] .signage-layer.front,
+.signage-frame[data-transition="wipe"] .signage-layer.front .signage-layer-inner,
+.signage-frame[data-transition="wipe"] .signage-layer.past,
+.signage-frame[data-transition="wipe"] .signage-layer.past .signage-layer-inner { transform: none; }
+.signage-frame[data-transition="wipe"] .signage-layer.past { transition: none; }
+.signage-frame[data-transition="wipe"] .signage-layer.past .signage-layer-inner { transition: none; }
+.signage-frame[data-transition="zoom"] .signage-layer { transform: scale(1.06); transition: opacity .6s ease, transform .6s ease; }
+.signage-frame[data-transition="zoom"] .signage-layer.front,
+.signage-frame[data-transition="zoom"] .signage-layer.past { transform: none; }
+/* 画像の動き（ケン・バーンズ。第31.6.2節） */
+@keyframes signage-kb { from { transform: scale(1); } to { transform: scale(1.08); } }
 /* 向きの合わない素材は切らずに収め、余白にはぼかして暗くしたものを敷く（第31.6.2節） */
 .signage-bg { position: absolute; inset: -6%; background-size: cover; background-position: center; filter: blur(40px) brightness(.55); }
 .signage-media { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
