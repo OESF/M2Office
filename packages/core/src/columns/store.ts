@@ -227,7 +227,7 @@ export class PostgresColumnStore implements ColumnStore {
 
   async aiAttemptsSince(tenantId: string, sinceIso: string): Promise<number> {
     const rows = await this.q<{ n: string | null }>(tenantId,
-      // カバーと店頭サイネージ用の絵（第32.18.6節）は同じ月の上限に数える
+      // カバーとサイネージ用の絵（第32.18.6節）は同じ月の上限に数える
       `select (select coalesce(sum(coalesce((cover->>'aiAttempts')::int, 0)), 0) from web_column_versions where tenant_id = $1 and created_at >= $2 and cover is not null)
             + (select coalesce(sum(ai_attempts), 0) from column_signage where tenant_id = $1 and created_at >= $2) as n`, [tenantId, sinceIso]);
     return Number(rows[0]?.n ?? 0);

@@ -52,6 +52,7 @@ export function observeLlm(tenantId: string, inner: LlmProvider): LlmProvider {
   if (inner.extractFromImage) wrapped.extractFromImage = (req) => timed(() => inner.extractFromImage!(req));
   if (inner.generateImage) wrapped.generateImage = (req) => inner.generateImage!(req);
   if (inner.generateVideo) wrapped.generateVideo = (req) => inner.generateVideo!(req);
+  if (inner.generateSpeech) wrapped.generateSpeech = (req) => inner.generateSpeech!(req);
   if (inner.embed) wrapped.embed = (req) => timed(() => inner.embed!(req));
   return wrapped;
 }

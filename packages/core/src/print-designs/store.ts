@@ -9,7 +9,7 @@ import pg from 'pg';
 import { createPool } from '../repository/pool.js';
 import { EMPTY_PRINT_COPY, NO_PRINT_SIGNAGE, type PrintCheck, type PrintCopy, type PrintDesign, type PrintImageSource, type PrintKind, type PrintCanvaLink, type PrintSignageState, type PrintSize, type PrintVersion } from '@m2office/shared';
 
-/** 置き場の物（作った人の名前は持たない。画面に出すときに足す）。`signageAssetId` は流している店頭サイネージの素材（第41.18節）。 */
+/** 置き場の物（作った人の名前は持たない。画面に出すときに足す）。`signageAssetId` は流しているサイネージの素材（第41.18節）。 */
 export type StoredDesign = Omit<PrintDesign, 'createdByName'> & { endedNotified: boolean; signageAssetId: string | null };
 
 /** 新しい物。 */

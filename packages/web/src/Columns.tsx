@@ -1,8 +1,8 @@
 /**
- * @file Web のコラムの画面（仕様書 第32.18.1節・第32.18.2節）。一覧・書く・カバー画像・直す・赤入れ・書き直しを頼む・版・承認へ進む・写す。
+ * @file Web のコラムの画面（仕様書 第32.18.1節・第32.18.2節）。一覧・書く・カバー画像・直す・校正・書き直しを頼む・版・承認へ進む・写す。
  *
  * 「コラムを書く」でテーマとリクエスト（記事と画像の希望）を入れると、裏で書き上げる（書いている間は読み直して待つ）。
- * 直して保存するたびに新しい版になり、赤入れをやり直す。承認へ進めたら承認トレイで責任者が承認し、
+ * 直して保存するたびに新しい版になり、校正をやり直す。承認へ進めたら承認トレイで責任者が承認し、
  * WordPress に下書きとして入る（WordPress につないでいなければ承認済みになり、本文をコピーして使う）。
  * 説明文は常には出さない（原則 u11）。分からなければ秘書に聞けばよい。
  */
@@ -10,7 +10,7 @@
 import { copyText } from './clipboard.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  COLUMN_COVER_KIND_LABELS, COLUMN_SIGNAGE_STATUS_LABELS, COLUMN_THEME_SOURCE_LABELS, WEB_COLUMN_STATUS_LABELS,
+  COLUMN_COVER_KIND_LABELS, COLUMN_SIGNAGE_STATUS_LABELS, COLUMN_SIGNAGE_VIDEO_LENGTHS, COLUMN_IMAGE_STYLES, COLUMN_IMAGE_STYLE_DEFAULT, COLUMN_NARRATION_VOICES, COLUMN_NARRATION_VOICE_DEFAULT, COLUMN_BGM_DEFAULT, type ColumnImageStyle, type ColumnNarrationVoice, type ColumnSignageVideoSeconds, COLUMN_THEME_SOURCE_LABELS, WEB_COLUMN_STATUS_LABELS,
   type ColumnPlanSlot, type ColumnSignageSet, type ColumnReviewItem, type WebColumn, type WebColumnStatus, type WebColumnTheme, type WebColumnVersion,
 } from '@m2office/shared';
 import { api, describeError, type ColumnDetail } from './api.js';
@@ -222,7 +222,7 @@ function ColumnList({ onOpen }: { onOpen: (id: string) => void }) {
   );
 }
 
-/** 1 つのコラム。直す・赤入れ・書き直しを頼む・版・承認へ進む・コピー。結果の知らせは押したボタンの横に出す。 */
+/** 1 つのコラム。直す・校正・書き直しを頼む・版・承認へ進む・コピー。結果の知らせは押したボタンの横に出す。 */
 function ColumnEditor({ id, onBack, onApprovals }: { id: string; onBack: () => void; onApprovals: () => void }) {
   const [detail, setDetail] = useState<ColumnDetail | null>(null);
   const [draft, setDraft] = useState<{ title: string; body: string; description: string; short: string; long: string } | null>(null);
@@ -240,6 +240,8 @@ function ColumnEditor({ id, onBack, onApprovals }: { id: string; onBack: () => v
     ? <span className={`columns-note is-${message.kind}`} role={message.kind === 'error' ? 'alert' : 'status'}>{message.text}</span> : null);
   const [showVersions, setShowVersions] = useState(false);
   const [covering, setCovering] = useState(false);
+  // カバーの AI の画像の作風（既定はリアル。第32.7.1節）
+  const [coverStyle, setCoverStyle] = useState<ColumnImageStyle>(COLUMN_IMAGE_STYLE_DEFAULT);
   const [showPast, setShowPast] = useState(false);
   const photoInput = useRef<HTMLInputElement>(null);
 
@@ -383,7 +385,8 @@ function ColumnEditor({ id, onBack, onApprovals }: { id: string; onBack: () => v
             <div className="columns-cover-side">
               {current.cover && <span className="badge">{COLUMN_COVER_KIND_LABELS[current.cover.kind]}</span>}
               {current.cover?.note && <span className="small muted">{current.cover.note}</span>}
-              <button className="btn ghost small" disabled={busy || locked || dirty} onClick={() => void cover(() => api.columns.recover(id))}>
+              <StyleSelect value={coverStyle} onChange={setCoverStyle} disabled={busy || locked || dirty} />
+              <button className="btn ghost small" disabled={busy || locked || dirty} onClick={() => void cover(() => api.columns.recover(id, { style: coverStyle }))}>
                 {covering ? '作っています…' : current.cover ? '画像を再作成' : '画像を作成'}
               </button>
               <button className="btn ghost small" disabled={busy || locked || dirty} onClick={() => photoInput.current?.click()}>ファイルから選択</button>
@@ -467,7 +470,7 @@ function ColumnEditor({ id, onBack, onApprovals }: { id: string; onBack: () => v
             </article>
           )}
 
-          <h3>赤入れ {current.review.length > 0 && <span className="badge warn">{current.review.length}</span>} {note('review')}</h3>
+          <h3>校正 {current.review.length > 0 && <span className="badge warn">{current.review.length}</span>} {note('review')}</h3>
           {current.review.length === 0 ? <p className="small muted">指摘はありません。</p> : (
             <ul className="columns-review">
               {current.review.map((r, i) => (
@@ -502,7 +505,7 @@ function ColumnEditor({ id, onBack, onApprovals }: { id: string; onBack: () => v
             {note('submit')}
           </div>
 
-          {(['approved', 'scheduled', 'placed'] as WebColumnStatus[]).includes(column.status) && <ColumnSignage columnId={id} onApprovals={onApprovals} />}
+          {(['approved', 'scheduled', 'placed'] as WebColumnStatus[]).includes(column.status) && <ColumnSignage columnId={id} />}
 
           <div className="row">
             <button className="link small" onClick={() => setShowVersions(!showVersions)}>{showVersions ? '版を閉じる' : `版（${versions.length}）`}</button>
@@ -533,14 +536,21 @@ function ColumnEditor({ id, onBack, onApprovals }: { id: string; onBack: () => v
 }
 
 /**
- * 店頭サイネージ用の画像（仕様書 第32.18.6節）。承認済みのコラムから作り、承認の後にサイネージの画面に流す。
+ * サイネージ用の画像（仕様書 第32.18.6節）。承認済みのコラムから作り、承認の後にサイネージの画面に流す。
  *
- * @remarks 店頭サイネージを使っていない会社では出さない。作っているあいだは数秒ごとに読み直す
+ * @remarks サイネージを使っていない会社では出さない。作っているあいだは数秒ごとに読み直す
  */
-function ColumnSignage({ columnId, onApprovals }: { columnId: string; onApprovals: () => void }) {
-  const [data, setData] = useState<{ usable: boolean; reason: string | null; sets: ColumnSignageSet[] } | null>(null);
+function ColumnSignage({ columnId }: { columnId: string }) {
+  const [data, setData] = useState<Awaited<ReturnType<typeof api.columns.signage>> | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
+  // 動画の長さ（既定 8 秒。長さと費用は頼む人が選ぶ。第32.18.6節）
+  const [videoSeconds, setVideoSeconds] = useState<ColumnSignageVideoSeconds>(8);
+  // 画像と動画の作風（既定はリアル）
+  const [style, setStyle] = useState<ColumnImageStyle>(COLUMN_IMAGE_STYLE_DEFAULT);
+  // ナレーション付きスライドの声と BGM（段 3。既定は落ち着いた声と組み込みの「穏やか」）
+  const [voice, setVoice] = useState<ColumnNarrationVoice>(COLUMN_NARRATION_VOICE_DEFAULT);
+  const [bgm, setBgm] = useState<string>(COLUMN_BGM_DEFAULT);
   const load = useCallback(() => api.columns.signage(columnId).then(setData).catch(() => setData(null)), [columnId]);
   useEffect(() => { void load(); }, [load]);
   const making = !!data?.sets.some((s) => s.status === 'making');
@@ -563,54 +573,114 @@ function ColumnSignage({ columnId, onApprovals }: { columnId: string; onApproval
       setBusy(false);
     }
   };
-  const latest = data.sets.find((s) => s.status !== 'withdrawn' && s.status !== 'failed') ?? data.sets[0] ?? null;
-  const live = data.sets.find((s) => s.status === 'published' && s.id !== latest?.id);
+  // 作った組はすべて新しい順に並べ、どれを素材に登録するか・どれを削除するかは人が決める（第 0.355.0 版）
+  const sets = data.sets.filter((x) => x.status !== 'withdrawn');
   return (
     <section className="columns-signage">
-      <h3>店頭サイネージ</h3>
-      <div className="row">
-        <button className="btn ghost" disabled={busy || making || !data.usable}
-          onClick={() => void act(() => api.columns.makeSignage(columnId, 'slides'), '作り始めました。数分でできます')}>
-          {latest ? 'サイネージ用を作り直す（画像）' : 'サイネージ用を作る（画像）'}
-        </button>
-        <button className="btn ghost" disabled={busy || making || !data.usable}
-          onClick={() => void act(() => api.columns.makeSignage(columnId, 'video'), '動画を作り始めました。数分かかります')}>
-          動画を作る（15 秒・約 115 円）
-        </button>
+      <h3>サイネージ</h3>
+      {/* 作るもの（画像・動画・ナレーション付きスライド）ごとに枠を分け、選ぶ欄とボタンをまとめる。作風は 3 つで共通 */}
+      <div className="columns-make-style">
+        <label className="columns-make-field">作風 <StyleSelect value={style} onChange={setStyle} disabled={busy || making || !data.usable} /></label>
         {msg && <span className={`columns-note is-${msg.kind}`} role={msg.kind === 'error' ? 'alert' : 'status'}>{msg.text}</span>}
       </div>
-      {latest && <SignageSet set={latest} busy={busy} onApprovals={onApprovals}
-        onSubmit={() => void act(() => api.columns.submitSignage(latest.id), '承認へ進めました')}
-        onWithdraw={() => void act(() => api.columns.withdrawSignage(latest.id), 'サイネージから外しました')} />}
-      {live && <SignageSet set={live} busy={busy} onApprovals={onApprovals} onSubmit={() => undefined}
-        onWithdraw={() => void act(() => api.columns.withdrawSignage(live.id), 'サイネージから外しました')} />}
+      <div className="columns-make">
+        <div className="columns-make-card">
+          <h4>画像</h4>
+          <div className="columns-make-fields" />
+          <button className="btn ghost small" disabled={busy || making || !data.usable}
+            onClick={() => void act(() => api.columns.makeSignage(columnId, 'slides', { style }), '作り始めました。数分でできます')}>
+            作成
+          </button>
+        </div>
+        <div className="columns-make-card">
+          <h4>動画</h4>
+          <div className="columns-make-fields">
+            <label className="columns-make-field">長さ
+              <select value={videoSeconds} disabled={busy || making || !data.usable} aria-label="動画の長さと費用の目安"
+                onChange={(e) => setVideoSeconds(Number(e.target.value) === 15 ? 15 : 8)}>
+                {COLUMN_SIGNAGE_VIDEO_LENGTHS.map((l) => <option key={l.seconds} value={l.seconds}>{l.label}</option>)}
+              </select>
+            </label>
+          </div>
+          <button className="btn ghost small" disabled={busy || making || !data.usable}
+            onClick={() => void act(() => api.columns.makeSignage(columnId, 'video', { seconds: videoSeconds, style }), `${videoSeconds} 秒の動画を作り始めました。数分かかります`)}>
+            作成
+          </button>
+        </div>
+        {/* ナレーション付きスライド（スライド＋読み上げ＋BGM の MP4。段 3）。作れない機械・AI では押せず、理由を吹き出しに出す */}
+        <div className="columns-make-card" title={data.narrated.usable ? undefined : data.narrated.reason ?? undefined}>
+          <h4>ナレーション付きスライド</h4>
+          <div className="columns-make-fields">
+            <label className="columns-make-field">声
+              <select value={voice} disabled={busy || making || !data.usable || !data.narrated.usable} aria-label="ナレーションの声"
+                onChange={(e) => setVoice(e.target.value as ColumnNarrationVoice)}>
+                {COLUMN_NARRATION_VOICES.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
+              </select>
+            </label>
+            <label className="columns-make-field">BGM
+              <select value={bgm} disabled={busy || making || !data.usable || !data.narrated.usable} aria-label="BGM"
+                onChange={(e) => setBgm(e.target.value)}>
+                {data.narrated.bgm.map((b) => <option key={b.id} value={b.id}>{b.label}</option>)}
+              </select>
+            </label>
+          </div>
+          <button className="btn ghost small" disabled={busy || making || !data.usable || !data.narrated.usable}
+            onClick={() => void act(() => api.columns.makeSignage(columnId, 'narrated', { style, voice, bgm }), 'ナレーション付きスライドを作り始めました。数分かかります')}>
+            作成
+          </button>
+        </div>
+      </div>
+      <div className="columns-signage-sets">
+        {sets.map((x) => (
+          <SignageSet key={x.id} set={x} busy={busy}
+            onRegister={() => void act(() => api.columns.registerSignage(x.id), 'サイネージの素材に登録しました')}
+            onRemove={() => { if (confirm('この組を削除しますか？（素材に登録したものは、サイネージの素材に残ります）')) void act(() => api.columns.removeSignage(x.id), '削除しました'); }} />
+        ))}
+      </div>
     </section>
   );
 }
 
-/** 店頭サイネージ用の 1 組（状態・画像・操作）。 */
-function SignageSet({ set, busy, onSubmit, onWithdraw, onApprovals }: {
-  set: ColumnSignageSet; busy: boolean; onSubmit: () => void; onWithdraw: () => void; onApprovals: () => void;
+/** 画像と動画の作風を選ぶ欄（リアル・イラスト・アニメ風・ファンタジー。第32.18.6節）。 */
+function StyleSelect({ value, onChange, disabled }: { value: ColumnImageStyle; onChange: (v: ColumnImageStyle) => void; disabled: boolean }) {
+  return (
+    <select value={value} disabled={disabled} aria-label="作風" onChange={(e) => onChange(e.target.value as ColumnImageStyle)}>
+      {COLUMN_IMAGE_STYLES.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
+    </select>
+  );
+}
+
+/** サイネージ用の 1 組（状態・画像・操作）。 */
+function SignageSet({ set, busy, onRegister, onRemove }: {
+  set: ColumnSignageSet; busy: boolean; onRegister: () => void; onRemove: () => void;
 }) {
   const side = set.outputs[0]?.orientation;
   const video = set.outputs.find((o) => o.kind === 'video');
   const images = set.outputs.filter((o) => o.orientation === side && o.kind === 'image').sort((a, b) => a.index - b.index);
   return (
     <div className="columns-signage-set">
-      <div className="row small">
-        <span className={`badge${set.status === 'failed' ? ' warn' : ''}`}>{COLUMN_SIGNAGE_STATUS_LABELS[set.status]}</span>
-        {set.status === 'published' && set.publishUntil && <span className="muted">{when(set.publishUntil)} まで</span>}
-        {set.status === 'ready' && <button className="btn small" disabled={busy} onClick={onSubmit}>承認へ進む（店頭に流す）</button>}
-        {set.status === 'submitted' && <button className="btn ghost small" onClick={onApprovals}>承認トレイを開く</button>}
-        {set.status === 'published' && <button className="link danger small" disabled={busy} onClick={onWithdraw}>サイネージから外す</button>}
+      <div className="row small columns-signage-set-head">
+        {/* 何を・いつ作ったか。どの組を素材に登録するか、要らない組を削除するかは人が決める（第 0.355.0 版） */}
+        <strong>{set.kind === 'video' ? '動画' : set.kind === 'narrated' ? 'ナレーション付きスライド' : '画像'}</strong>
+        <span className="muted">{when(set.createdAt)}</span>
+        {/* 「できました」は見れば分かるので出さない。素材に登録する前の組（承認待ちの古い組を含む）は「素材に登録」を押せる（承認は挟まない） */}
+        {set.status !== 'ready' && set.status !== 'submitted' && <span className={`badge${set.status === 'failed' ? ' warn' : ''}`}>{COLUMN_SIGNAGE_STATUS_LABELS[set.status]}</span>}
+        {(set.status === 'ready' || set.status === 'submitted') && <button className="btn small" disabled={busy} onClick={onRegister}>素材に登録</button>}
+        {/* 削除するのはコラムの組だけ。素材に登録したものは、サイネージの素材に残る */}
+        {set.status !== 'making' && <button className="link danger small columns-signage-remove" disabled={busy} onClick={onRemove}>削除</button>}
       </div>
       {set.error && <p className="error small">{set.error}</p>}
       {set.note.trim() && set.status !== 'making' && <p className="small muted">{set.note}</p>}
       {video && (
         <div className={`columns-signage-images is-${side}`}>
-          {/* 字幕はサイネージの画面が重ねて出す（動画そのものには字が無い） */}
-          <video src={api.columns.signageFileUrl(set.id, video.fileId)} poster={images[0] ? api.columns.signageFileUrl(set.id, images[0].fileId) : undefined} controls muted playsInline preload="metadata" />
+          {/* 字幕はサイネージの画面が重ねて出す（動画そのものには字が無い）。ナレーション付きスライドは音を聞いて確かめる */}
+          <video src={api.columns.signageFileUrl(set.id, video.fileId)} poster={images[0] ? api.columns.signageFileUrl(set.id, images[0].fileId) : undefined} controls muted={set.kind !== 'narrated'} playsInline preload="metadata" />
         </div>
+      )}
+      {set.kind === 'narrated' && set.scenes.some((sc) => sc.narration) && (
+        <ol className="columns-narration small">
+          {set.scenes.map((sc, i) => <li key={i}><strong>{sc.caption}</strong>{sc.narration ? <span className="muted"> — {sc.narration}</span> : null}</li>)}
+        </ol>
       )}
       {!video && images.length > 0 && (
         <div className={`columns-signage-images is-${side}`}>

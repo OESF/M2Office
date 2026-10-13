@@ -10,6 +10,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { bodyLimit } from 'hono/body-limit';
 import { Hono } from 'hono';
 import {
   CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, INVENTORY_FEATURES, SIGNAGE_EXTENSION_ID, SIGNAGE_JINGLES, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, CONTRACTS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, MEMBERS_EXTENSION_ID, WEB_REVIEW_SCOPES, COLUMN_INDUSTRIES, type WebColumnSettings, type HrSettings, type InventorySettings, type RiskLevel, type SignageSettings,
@@ -122,7 +123,7 @@ export function extensionsRoute(deps: AppDeps) {
         ...(e.pkg.manifest.id === INVENTORY_EXTENSION_ID ? { inventory: settings.inventory } : {}),
         // 人事・給与: 事業所・保険・締めと支払・手続きを行う人（第30.8.1節）
         ...(e.pkg.manifest.id === HR_EXTENSION_ID ? { hr: settings.hr } : {}),
-        // 店頭サイネージ: 画像の秒数・店の色（第31.4節）
+        // サイネージ: 画像の秒数・背景色（第31.4節）
         ...(e.pkg.manifest.id === SIGNAGE_EXTENSION_ID ? { signage: settings.signage } : {}),
         // Web のコラム: 分野・読み手・業種・監修者・AI の表示・WordPress の入れ先（第32.18.1節）。パスワードは返さない
         ...(e.pkg.manifest.id === WEB_COLUMNS_EXTENSION_ID ? { webColumns: settings.webColumns, columnAiUsage } : {}),
@@ -199,8 +200,8 @@ export function extensionsRoute(deps: AppDeps) {
    * @remarks 送られた項目だけを変える。切った機能の記録は消さない
    */
   /**
-   * 店頭サイネージの会社の設定を変える（送った項目だけ。第31.4節）。すぐ画面に届く。
-   * 画像の秒数 3〜120・店の色 `#RRGGBB` か `null`・割り込みの秒数 5〜60・ジングルの入り切りと既定の音・呼び出しの言い回し（`{番号}` を含む 60 字まで）・
+   * サイネージの会社の設定を変える（送った項目だけ。第31.4節）。すぐ画面に届く。
+   * 画像の秒数 3〜120・背景色 `#RRGGBB` か `null`・割り込みの秒数 5〜60・ジングルの入り切りと既定の音・呼び出しの言い回し（`{番号}` を含む 60 字まで）・
    * 在庫の入荷と品切れの案内の入り切り（`stockNotices`。第31.6.7節）。
    */
   app.put(`/${SIGNAGE_EXTENSION_ID}/settings`, async (c) => {
@@ -211,19 +212,19 @@ export function extensionsRoute(deps: AppDeps) {
     const changed: string[] = [];
     if (body['imageSeconds'] !== undefined) {
       const n = body['imageSeconds'];
-      if (typeof n !== 'number' || !Number.isInteger(n) || n < 3 || n > 120) return c.json({ error: '画像を出す秒数は 3〜120 秒にしてください' }, 400);
+      if (typeof n !== 'number' || !Number.isInteger(n) || n < 3 || n > 120) return c.json({ error: '画像表示時間は 3〜120 秒にしてください' }, 400);
       next.imageSeconds = n;
       changed.push('imageSeconds');
     }
     if (body['color'] !== undefined) {
       const v = body['color'];
-      if (v !== null && (typeof v !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(v))) return c.json({ error: '店の色は #RRGGBB の形にしてください' }, 400);
+      if (v !== null && (typeof v !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(v))) return c.json({ error: '背景色は #RRGGBB の形にしてください' }, 400);
       next.color = v === null ? null : (v as string).toLowerCase();
       changed.push('color');
     }
     if (body['interruptSeconds'] !== undefined) {
       const n = body['interruptSeconds'];
-      if (typeof n !== 'number' || !Number.isInteger(n) || n < 5 || n > 60) return c.json({ error: '割り込みを出す秒数は 5〜60 秒にしてください' }, 400);
+      if (typeof n !== 'number' || !Number.isInteger(n) || n < 5 || n > 60) return c.json({ error: '割り込み表示時間は 5〜60 秒にしてください' }, 400);
       next.interruptSeconds = n;
       changed.push('interruptSeconds');
     }
@@ -261,48 +262,27 @@ export function extensionsRoute(deps: AppDeps) {
     return c.json({ ok: true, signage: next });
   });
 
-  /** 番号で店頭サイネージの画面を登録する（管理者だけ。第31.5.1節）。名前と向きは尋ねずに決める。 */
+  /** 番号でサイネージの画面を登録する（管理者だけ。第31.5.1節）。名前と向きは尋ねずに決める。 */
   app.post(`/${SIGNAGE_EXTENSION_ID}/pairings/claim`, async (c) => {
     const { tenant, user } = c.get('ctx');
-    if (!(await deps.repo.getTenantSettings(tenant.id)).signage.enabled) return c.json({ error: '店頭サイネージを入れていません' }, 404);
+    if (!(await deps.repo.getTenantSettings(tenant.id)).signage.enabled) return c.json({ error: 'サイネージを入れていません' }, 404);
     const b = await c.req.json<{ code?: unknown }>().catch(() => ({} as { code?: unknown }));
     const r = await deps.signage.service.claim(tenant.id, user.id, b.code);
     return 'error' in r ? c.json({ error: r.error, ...(r.screens ? { screens: r.screens } : {}) }, r.status as 404) : c.json(r, 201);
-  });
-
-  /** 店頭サイネージの呼び出しの受け口の一覧（今日の受け付けた数と断った数つき。第31.8.2節）。 */
-  app.get(`/${SIGNAGE_EXTENSION_ID}/sources`, async (c) => {
-    const { tenant } = c.get('ctx');
-    return c.json({ sources: await deps.signage.service.deps.store.listSources(tenant.id) });
-  });
-
-  /** 呼び出しの受け口を作る（`name`）。URL は作ったときに 1 度だけ返す。 */
-  app.post(`/${SIGNAGE_EXTENSION_ID}/sources`, async (c) => {
-    const { tenant, user } = c.get('ctx');
-    const b = await c.req.json<{ name?: unknown }>().catch(() => ({} as { name?: unknown }));
-    const r = await deps.signage.interrupts.createSource(tenant.id, user.id, b.name);
-    if ('error' in r) return c.json(r, 400);
-    return c.json({ source: r.source, url: `${tenantOrigin(c.req.header('origin'), c.req.header('host'))}/v1/hooks/signage/${r.key}`, key: r.key }, 201);
-  });
-
-  /** 受け口を止める・動かす（`status`: active・stopped）。 */
-  app.put(`/${SIGNAGE_EXTENSION_ID}/sources/:id/status`, async (c) => {
-    const { tenant, user } = c.get('ctx');
-    const b = await c.req.json<{ status?: unknown }>().catch(() => ({} as { status?: unknown }));
-    if (b.status !== 'active' && b.status !== 'stopped') return c.json({ error: 'status は active か stopped です' }, 400);
-    return (await deps.signage.interrupts.setSourceStatus(tenant.id, user.id, c.req.param('id'), b.status)) ? c.json({ ok: true }) : c.json({ error: '受け口が見つかりません' }, 404);
-  });
-
-  /** 受け口の項目の対応を忘れ、次の呼び出しから推測し直す。 */
-  app.post(`/${SIGNAGE_EXTENSION_ID}/sources/:id/reset-mapping`, async (c) => {
-    const { tenant, user } = c.get('ctx');
-    return (await deps.signage.interrupts.resetMapping(tenant.id, user.id, c.req.param('id'))) ? c.json({ ok: true }) : c.json({ error: '受け口が見つかりません' }, 404);
   });
 
   /** 会社のジングルの音の一覧。 */
   app.get(`/${SIGNAGE_EXTENSION_ID}/sounds`, async (c) => {
     const { tenant } = c.get('ctx');
     return c.json({ sounds: await deps.signage.service.deps.store.listSounds(tenant.id) });
+  });
+
+  /** 会社のジングルの音の中身（設定の欄の再生のボタンで、入れた音を確かめるため）。 */
+  app.get(`/${SIGNAGE_EXTENSION_ID}/sounds/:id`, async (c) => {
+    const { tenant } = c.get('ctx');
+    const s = await deps.signage.service.deps.store.getSound(tenant.id, c.req.param('id'));
+    if (!s) return c.json({ error: '音が見つかりません' }, 404);
+    return new Response(Buffer.from(s.data), { headers: { 'content-type': s.mime, 'x-content-type-options': 'nosniff', 'cache-control': 'private, max-age=86400' } });
   });
 
   /** 会社のジングルの音を入れる（本文は MP3・WAV そのもの。名前は `x-sound-name`、画面で調べた長さは `x-duration-ms`）。 */
@@ -327,7 +307,7 @@ export function extensionsRoute(deps: AppDeps) {
     return c.json({ ok: true, ...r });
   });
 
-  /** 店頭サイネージの画面を外す（管理者だけ。確認を挟まない。第31.5.1節）。鍵はその場で効かなくなる。 */
+  /** サイネージの画面を外す（管理者だけ。確認を挟まない。第31.5.1節）。鍵はその場で効かなくなる。 */
   app.delete(`/${SIGNAGE_EXTENSION_ID}/screens/:id`, async (c) => {
     const { tenant, user } = c.get('ctx');
     return (await deps.signage.service.removeScreen(tenant.id, user.id, c.req.param('id'))) ? c.json({ ok: true }) : c.json({ error: '画面が見つかりません' }, 404);
@@ -392,6 +372,31 @@ export function extensionsRoute(deps: AppDeps) {
    *
    * @returns 預けた入れ先（パスワードは返さない）。つながらなければ 400
    */
+  /** 会社の曲（ナレーション付きスライドの BGM。第32.18.6節 段 3）の一覧。 */
+  app.get(`/${WEB_COLUMNS_EXTENSION_ID}/bgm`, async (c) => {
+    const { tenant } = c.get('ctx');
+    const s = deps.columns.signage;
+    return c.json({ tracks: s ? await s.listBgm(tenant.id) : [] });
+  });
+
+  /** 会社の曲を入れる（本文は MP3・WAV そのもの。名前は `x-track-name`、画面で調べた長さは `x-duration-ms`。5 MB・5 分・10 曲まで）。 */
+  app.post(`/${WEB_COLUMNS_EXTENSION_ID}/bgm`, bodyLimit({ maxSize: 6 * 1024 * 1024, onError: (c) => c.json({ error: '曲が大きすぎます（5 MB まで）' }, 413) }), async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const s = deps.columns.signage;
+    if (!s) return c.json({ error: 'サイネージ用の動画は使えません' }, 409);
+    let name = '';
+    try { name = decodeURIComponent(c.req.header('x-track-name') ?? ''); } catch { name = ''; }
+    const r = await s.addBgm({ tenantId: tenant.id, userId: user.id }, name, new Uint8Array(await c.req.arrayBuffer()), c.req.header('x-duration-ms'));
+    return 'error' in r ? c.json(r, 400) : c.json(r, 201);
+  });
+
+  /** 会社の曲を消す。 */
+  app.delete(`/${WEB_COLUMNS_EXTENSION_ID}/bgm/:id`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const s = deps.columns.signage;
+    return s && (await s.deleteBgm({ tenantId: tenant.id, userId: user.id }, c.req.param('id'))) ? c.json({ ok: true }) : c.json({ error: '曲が見つかりません' }, 404);
+  });
+
   app.put(`/${WEB_COLUMNS_EXTENSION_ID}/wordpress`, async (c) => {
     const { tenant, user } = c.get('ctx');
     const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
@@ -469,7 +474,7 @@ export function extensionsRoute(deps: AppDeps) {
     return c.json({ ok: true });
   });
 
-  /** お知らせの作成: 流す画面の選び先（店頭サイネージの画面）と、いま選んでいる画面（`null` ならすべて）。 */
+  /** お知らせの作成: 流す画面の選び先（サイネージの画面）と、いま選んでいる画面（`null` ならすべて）。 */
   app.get(`/${ANNOUNCEMENTS_EXTENSION_ID}/screens`, async (c) => c.json(await deps.announcements.service.screenChoices(c.get('ctx').tenant.id)));
 
   /** お知らせの作成の設定（第35.4節）: Web を公開まで行うか（`webPublish`）・WordPress のカテゴリー（`webCategory`）・流す画面（`screens`。`null` ならすべて）。 */

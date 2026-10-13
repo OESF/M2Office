@@ -46,7 +46,6 @@ import { inventoryHooksRoute } from './routes/inventory-hooks.js';
 import { signageRoute } from './routes/signage.js';
 import { signagePlayRoute } from './routes/signage-play.js';
 import { hrTerminalRoute } from './routes/hr-terminal.js';
-import { signageHooksRoute } from './routes/signage-hooks.js';
 import { lineHooksRoute } from './routes/line-hooks.js';
 import { unsubscribeRoute } from './routes/unsubscribe.js';
 import { columnsPublicRoute } from './routes/columns-public.js';
@@ -133,15 +132,13 @@ app.route('/v1/hooks/inventory', inventoryHooksRoute(deps));
 app.route('/v1/public/inventory', inventoryPublicRoute(deps));
 // コラムの貼るだけのページ（第32.18.4節）。在庫の公開と同じく、会社の判定とログインより前に置く
 app.route('/v1/public/columns', columnsPublicRoute(deps));
-// 店頭サイネージの呼び出しの受け口（第31.8.2節）。受付のシステムがログインの無いまま呼ぶ。鍵から会社を引くため、会社の判定より前に置く
-app.route('/v1/hooks/signage', signageHooksRoute(deps));
 // LINE 公式アカウントの受け口（仕様書 第33.19節）。会社の判定とログインより前に置く
 app.route('/v1/hooks/line', lineHooksRoute(deps));
 // まとめてのメールの配信の停止（第27.9.1節）。受け取った人がログインなしに開く。URL の鍵から会社を決めるため、会社の判定より前に置く
 app.route('/v1/unsubscribe', unsubscribeRoute(deps));
 app.use('/v1/*', resolveTenant(deps));
 app.route('/v1/auth', authRoute(deps));
-// 店頭サイネージの再生のページ（第31.9.1節）。ログインを使わず、画面の鍵で名乗る。会社はアドレスで決まるため、会社の判定の後・ログインの確かめより前に置く
+// サイネージの再生のページ（第31.9.1節）。ログインを使わず、画面の鍵で名乗る。会社はアドレスで決まるため、会社の判定の後・ログインの確かめより前に置く
 app.route('/v1/signage-play', signagePlayRoute(deps, SERVER_VERSION));
 // 共有の端末の打刻の画面（第30.6.3節）。ログインを使わず、端末の鍵で名乗る（サイネージの再生と同じ）
 app.route('/v1/hr-terminal', hrTerminalRoute(deps));
@@ -217,7 +214,7 @@ app.get('/v1/me', async (c) => {
     cards: !!(await deps.cards.access(ctx.tenant.id, ctx.user.id)),
     // 在庫管理を使えるか（会社の入り切りと利用範囲。仕様書 第29.2節）。使えなければ左ペインに「在庫管理」を出さない
     inventory: !!(await deps.inventory.access(ctx.tenant.id, ctx.user.id)),
-    // 店頭サイネージを使えるか（会社の入り切りと利用範囲。仕様書 第31.2節）。使えなければ左ペインに「サイネージ」を出さない
+    // サイネージを使えるか（会社の入り切りと利用範囲。仕様書 第31.2節）。使えなければ左ペインに「サイネージ」を出さない
     signage: !!(await deps.signage.access(ctx.tenant.id, ctx.user.id)),
     // Web のコラムを使えるか（会社の入り切りと利用範囲。仕様書 第32.18.1節）。使えなければ左ペインに「コラムの作成」を出さない
     webColumns: !!(await deps.columns.access(ctx.tenant.id, ctx.user.id)),

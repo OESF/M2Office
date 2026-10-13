@@ -143,7 +143,7 @@ export interface PrintDesign {
   createdByName: string;
   createdAt: string;
   updatedAt: string;
-  /** 店頭サイネージに流しているか（第41.18節） */
+  /** サイネージに流しているか（第41.18節） */
   signage: PrintSignage;
   /** Canva で仕上げているデザイン（第41.19.3節）。取り込んでいなければ `null` */
   canva: PrintCanvaLink | null;
@@ -165,7 +165,7 @@ export const CANVA_TEMPLATE = 'canva';
 /** サイネージの状態（`waiting` は掲示の始まりを待っている）。 */
 export type PrintSignageState = 'none' | 'waiting' | 'on';
 
-/** 店頭サイネージに流している様子（第41.18節）。 */
+/** サイネージに流している様子（第41.18節）。 */
 export interface PrintSignage {
   state: PrintSignageState;
   /** 流している画面の名前 */

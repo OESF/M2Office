@@ -419,7 +419,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ...(me.inventory ? [{ id: INVENTORY_EXTENSION_ID, name: '在庫管理', description: '品目・場所・入出庫を記録し、使える数を出す', icon: 'inventory' as IconName, agent: null }] : []),
     // 人事・給与は人事区画の人にだけ出す（仕様書 第30.2節）
     ...(me.hr ? [{ id: HR_EXTENSION_ID, name: '人事・給与', description: '従業員の台帳・雇用条件・入社と退職の手続き', icon: 'users' as IconName, agent: null }] : []),
-    // 店頭サイネージ（仕様書 第31.2節）。会社で入れていて利用範囲の人にだけ出す
+    // サイネージ（仕様書 第31.2節）。会社で入れていて利用範囲の人にだけ出す
     ...(me.signage ? [{ id: SIGNAGE_EXTENSION_ID, name: 'サイネージ', description: '店頭や待合の画面に、画像と動画を流す', icon: 'signage' as IconName, agent: null }] : []),
     // Web のコラム（仕様書 第32.18.1節）。会社で入れていて利用範囲の人にだけ出す
     // 問い合わせの記録（仕様書 第33.17節）。会社で入れていて利用範囲の人にだけ出す
@@ -733,7 +733,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
           )}
           {view.kind === 'columns' && (
             <>
-              <h1>コラムの作成 <HelpTip article="start-web-columns">テーマを入れると、AI が調べて出典つきのコラムを書き、表現の決まりに照らして赤入れします。</HelpTip></h1>
+              <h1>コラムの作成 <HelpTip article="start-web-columns">テーマを入れると、AI が調べて出典つきのコラムを書き、表現の決まりに照らして校正します。</HelpTip></h1>
               <Columns columnId={view.columnId} onOpen={(columnId) => setView({ kind: 'columns', columnId })}
                 onApprovals={() => { void refresh(); setView({ kind: 'approvals' }); }} />
             </>

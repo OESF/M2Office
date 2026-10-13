@@ -128,7 +128,7 @@ export interface SecretaryDeps {
   payroll?: PayrollService;
   /** 人事の担当者の依頼（第30.20.1節）。人事区画の人の「給与を計算して」「労働条件通知書」「労務の期限」にその場で答える。 */
   hrStaff?: HrStaffDeps;
-  /** 店頭サイネージ（第31.11.1節）。本人が話した回にだけ、割り込みを出す・消す・画面の状態に答える。 */
+  /** サイネージ（第31.11.1節）。本人が話した回にだけ、割り込みを出す・消す・画面の状態に答える。 */
   signage?: SignageSecretaryDeps;
   /** 不正の兆しの見張り（第16.8.3節）。管理者の「セキュリティの知らせは？」「〇〇さんの端末をすべてログアウトして」「これは大丈夫」に答える。 */
   security?: SecuritySecretaryDeps;
@@ -423,7 +423,7 @@ export class Secretary {
       await this.audit(tenantId, userId, 'secretary.hr', staffReq.kind);
       return { reply: { layer: 'direct', text, evidence: [], tokensUsed: 0 }, keep: true };
     }
-    // 店頭サイネージ（第31.11.1節）。本人が秘書の欄で話した回にだけ届く（業務の実行・定時実行・ブリーフからは呼ばれない）。利用範囲の人だけ
+    // サイネージ（第31.11.1節）。本人が秘書の欄で話した回にだけ届く（業務の実行・定時実行・ブリーフからは呼ばれない）。利用範囲の人だけ
     // 確かめを待っている割り込みへの答え（「はい」で出す・「いいえ」でやめる。ほかの話なら忘れる）
     const pendKey = `${tenantId}:${userId}`;
     const pend = this.signagePending.get(pendKey);

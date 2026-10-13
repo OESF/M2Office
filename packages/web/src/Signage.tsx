@@ -1,5 +1,5 @@
 /**
- * @file 店頭サイネージの管理の画面（パソコン。仕様書 第31.9.4節）。画面の一覧と状態・音の大きさ・画面の登録と取り外し・流れ・素材、
+ * @file サイネージの管理の画面（パソコン。仕様書 第31.9.4節）。画面の一覧と状態・音の大きさ・画面の登録と取り外し・流れ・素材、
  * 割り込みの素材とその音・最近の割り込みと消す・スタッフのページの QR。
  *
  * 素材はブラウザで確かめ、画像は長い辺 1,920 に縮めて位置などの情報を捨て、縮小画像を作ってから送る（第31.6.1節）。
@@ -144,7 +144,7 @@ function useThumbs() {
 }
 
 /**
- * 店頭サイネージの管理の画面。
+ * サイネージの管理の画面。
  */
 export function Signage() {
   const [data, setData] = useState<SignageOverview | null>(null);
@@ -486,7 +486,8 @@ function FlowEditor({ screen, screens, assets, thumbs, onFiles, onError, onChang
           );
         }} />
       <div className="row wrap">
-        <select value="" onChange={(e) => { if (e.target.value) save([...flow.entries, { assetId: e.target.value, seconds: null }]); }} aria-label="素材を足す">
+        {/* ナレーション付きの素材は、はじめから音ありで足す（第32.18.6節 段 3、Q-233） */}
+        <select value="" onChange={(e) => { const id = e.target.value; if (id) save([...flow.entries, { assetId: id, seconds: null, ...(byId.get(id)?.narration ? { sound: true } : {}) }]); }} aria-label="素材を足す">
           <option value="">素材を追加</option>
           {assets.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
         </select>
@@ -517,7 +518,12 @@ function AssetList({ assets, screens, usage, sounds, thumbs, onFiles, onChanged,
       <div className="signage-asset-grid">
         {assets.map((a) => (
           <div key={a.id} className="signage-asset">
-            <span className="signage-thumb large">{thumbs.urls[a.id] ? <img src={thumbs.urls[a.id]} alt="" /> : null}</span>
+            {/* 動画は一覧のまま再生して確かめる（押すまで読み込まない。縮小画像を表紙にする） */}
+            <span className="signage-thumb large">
+              {a.kind === 'video'
+                ? <video src={api.signage.contentUrl(a.id)} poster={thumbs.urls[a.id]} controls preload="none" playsInline aria-label={`${a.name}を再生`} />
+                : thumbs.urls[a.id] ? <img src={thumbs.urls[a.id]} alt="" /> : null}
+            </span>
             <input className="signage-asset-name" defaultValue={a.name} maxLength={60} aria-label="素材の名前"
               onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== a.name) void api.signage.renameAsset(a.id, v).then(onChanged).catch((er) => onError(describeError(er, '直せませんでした'))); }} />
             <span className="small muted">{a.kind === 'video' ? `動画 ${a.durationMs ? fmtDuration(a.durationMs) : ''}` : a.kind === 'html' ? 'HTML' : '画像'}・{fmtBytes(a.bytes)}{a.screens.length ? `・${names(a.screens)}` : ''}</span>

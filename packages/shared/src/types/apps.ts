@@ -87,7 +87,7 @@ export interface AppSettingOptions {
   reservableItems: { id: string; name: string }[];
   compartments: string[];
   agents: { id: string; name: string; risk: RiskLevel }[];
-  /** 店頭サイネージの画面（サイネージの機能で選ぶ）。 */
+  /** サイネージの画面（サイネージの機能で選ぶ）。 */
   signageScreens: { id: string; name: string }[];
 }
 

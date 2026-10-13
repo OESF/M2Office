@@ -13,6 +13,7 @@ import { AI_NOT_CONFIGURED_MESSAGE, COLUMN_PHOTO_MAX_BYTES, WEB_COLUMN_PLACE, ai
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 import { tenantOrigin } from '../tenant-origin.js';
+import { COLUMN_BGM_NONE, COLUMN_BUILTIN_BGM, columnImageStyle, columnNarrationVoice } from '@m2office/shared';
 
 const str = (v: unknown) => (typeof v === 'string' ? v : undefined);
 
@@ -146,7 +147,7 @@ export function columnsRoute(deps: AppDeps) {
     return err ? c.json({ error: err }, 409) : c.json({ ok: true });
   });
 
-  /** 赤入れの直し案に置き換える（今の版の `index` 番目）。 */
+  /** 校正の直し案に置き換える（今の版の `index` 番目）。 */
   app.post('/:id/suggestions/:index', async (c) => {
     const index = Number(c.req.param('index'));
     if (!Number.isInteger(index) || index < 0) return c.json({ error: '指摘が見つかりません' }, 400);
@@ -185,11 +186,11 @@ export function columnsRoute(deps: AppDeps) {
     return err ? c.json({ error: err }, 409) : c.json({ ok: true });
   });
 
-  /** カバーを作り直す（`kind`・`hint`。新しい版になる）。 */
+  /** カバーを作り直す（`kind`・`hint`・`style`（作風）。新しい版になる）。 */
   app.post('/:id/cover', async (c) => {
     const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
     const kind = ['template', 'ai', 'photo'].includes(String(body['kind'])) ? (body['kind'] as 'template' | 'ai' | 'photo') : undefined;
-    const err = await service.recover(who(c), c.req.param('id'), { ...(kind ? { kind } : {}), ...(str(body['hint']) ? { hint: str(body['hint'])! } : {}) });
+    const err = await service.recover(who(c), c.req.param('id'), { ...(kind ? { kind } : {}), ...(str(body['hint']) ? { hint: str(body['hint'])! } : {}), ...(body['style'] ? { style: columnImageStyle(body['style']) } : {}) });
     return err ? c.json({ error: err }, 409) : c.json({ ok: true });
   });
 
@@ -197,36 +198,53 @@ export function columnsRoute(deps: AppDeps) {
    * 写真を入れ、そのコラムのカバーにする（会社の写真の置き場にも入る）。本文は写真の中身そのもの（JPEG・PNG、10 MB まで）。
    */
   /**
-   * 店頭サイネージ用の組（新しい順）と、作れるか（第32.18.6節）。画像は `/v1/files/:id/view` で見る。
+   * サイネージ用の組（新しい順）と、作れるか（第32.18.6節）。画像は `/v1/files/:id/view` で見る。
+   * `narrated` はナレーション付きスライドを作れるかと、選べる BGM（組み込み・会社の曲・なし。段 3）。
    */
   app.get('/:id/signage', async (c) => {
     const { tenant } = c.get('ctx');
     const s = deps.columns.signage;
-    if (!s) return c.json({ usable: false, reason: '店頭サイネージ用の画像は使えません', sets: [] });
-    const [reason, sets] = await Promise.all([s.usable(tenant.id), s.list(tenant.id, c.req.param('id'))]);
-    return c.json({ usable: !reason, reason, sets });
+    if (!s) return c.json({ usable: false, reason: 'サイネージ用の画像は使えません', sets: [], narrated: { usable: false, reason: null, bgm: [] } });
+    const [reason, sets, narratedWhy, tracks] = await Promise.all([s.usable(tenant.id), s.list(tenant.id, c.req.param('id')), s.narratedUnusable(tenant.id), s.listBgm(tenant.id)]);
+    const bgm = [...COLUMN_BUILTIN_BGM, ...tracks.map((t) => ({ id: t.id, label: t.name })), { id: COLUMN_BGM_NONE, label: 'BGM なし' }];
+    return c.json({ usable: !reason, reason, sets, narrated: { usable: !narratedWhy, reason: narratedWhy, bgm } });
   });
 
-  /** 店頭サイネージ用を作り始める（ワーカーが後ろで作る）。`kind` は slides（画像）か video（動画。段 2）。 */
+  /** サイネージ用を作り始める（ワーカーが後ろで作る）。`kind` は slides（画像）か video（動画。段 2）。動画は `seconds` で 8（既定）か 15 を選ぶ。`style` は作風（既定はリアル）。 */
   app.post('/:id/signage', async (c) => {
     const s = deps.columns.signage;
-    if (!s) return c.json({ error: '店頭サイネージ用の画像は使えません' }, 409);
+    if (!s) return c.json({ error: 'サイネージ用の画像は使えません' }, 409);
     const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
-    const r = await s.make(who(c), c.req.param('id'), body['kind'] === 'video' ? 'video' : 'slides');
+    const kind = body['kind'] === 'video' ? 'video' : body['kind'] === 'narrated' ? 'narrated' : 'slides';
+    const r = await s.make(who(c), c.req.param('id'), kind, {
+      seconds: Number(body['seconds']) === 15 ? 15 : 8, style: columnImageStyle(body['style']),
+      ...(body['voice'] ? { voice: columnNarrationVoice(body['voice']) } : {}), ...(typeof body['bgm'] === 'string' ? { bgm: body['bgm'] } : {}),
+    });
     return 'error' in r ? c.json({ error: r.error }, 400) : c.json(r, 202);
   });
 
-  /** 店頭サイネージ用の組を承認へ進める（付属の業務「コラムをサイネージに流す」を始める）。 */
-  app.post('/signage/:setId/submit', async (c) => {
-    const { tenant } = c.get('ctx');
+  /**
+   * サイネージ用の組を素材に登録する（承認は挟まない。スケジュールには入れない。第 0.355.0 版）。
+   * サイネージを使える人（利用範囲の中）だけ。
+   */
+  app.post('/signage/:setId/register', async (c) => {
+    const { tenant, user } = c.get('ctx');
     const s = deps.columns.signage;
-    if (!s) return c.json({ error: '店頭サイネージ用の画像は使えません' }, 409);
-    if (!aiAvailable(await deps.ai.llmFor(tenant.id))) return c.json({ error: AI_NOT_CONFIGURED_MESSAGE }, 409);
-    const r = await s.submit(who(c), c.req.param('setId'));
+    if (!s) return c.json({ error: 'サイネージ用の画像は使えません' }, 409);
+    if (!(await deps.signage.access(tenant.id, user.id))) return c.json({ error: 'サイネージを使えないため、素材に登録できません' }, 403);
+    const r = await s.register(who(c), c.req.param('setId'));
     return 'error' in r ? c.json({ error: r.error }, 400) : c.json(r, 201);
   });
 
-  /** 店頭サイネージ用の組の画像か動画（コラムを使える人が見る）。組に入っていないファイルは返さない。 */
+  /** サイネージ用の組を削除する（素材に登録したものは、サイネージの素材に残る。第 0.355.0 版）。 */
+  app.delete('/signage/:setId', async (c) => {
+    const s = deps.columns.signage;
+    if (!s) return c.json({ error: 'サイネージ用の画像は使えません' }, 409);
+    const r = await s.remove(who(c), c.req.param('setId'));
+    return 'error' in r ? c.json({ error: r.error }, 400) : c.json(r);
+  });
+
+  /** サイネージ用の組の画像か動画（コラムを使える人が見る）。組に入っていないファイルは返さない。 */
   app.get('/signage/:setId/files/:fileId', async (c) => {
     const { tenant } = c.get('ctx');
     const f = await deps.columns.signage?.outputBytes(tenant.id, c.req.param('setId'), c.req.param('fileId'));
@@ -234,16 +252,6 @@ export function columnsRoute(deps: AppDeps) {
     return new Response(Buffer.from(f.bytes), {
       headers: { 'content-type': f.mime, 'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'none'; sandbox", 'cache-control': 'private, max-age=3600' },
     });
-  });
-
-  /** 店頭サイネージから外す（管理者と承認者）。 */
-  app.post('/signage/:setId/withdraw', async (c) => {
-    const { user } = c.get('ctx');
-    if (!user.roles.includes('admin') && !user.roles.includes('approver')) return c.json({ error: 'サイネージから外せるのは管理者と承認者です' }, 403);
-    const s = deps.columns.signage;
-    if (!s) return c.json({ error: '店頭サイネージ用の画像は使えません' }, 409);
-    const r = await s.withdraw(who(c), c.req.param('setId'));
-    return 'error' in r ? c.json({ error: r.error }, 400) : c.json(r);
   });
 
   app.post('/:id/photos', async (c) => {

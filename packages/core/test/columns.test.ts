@@ -1,7 +1,7 @@
 /**
  * @file Web のコラムの単体テスト（仕様書 第32.18.1節）。
  *
- * 赤入れの決まり（業種ごとの言葉・個人の情報・出典の無さ）、推論の答えの読み取り、推論の赤入れが本文に無い箇所を捨てること、
+ * 校正の決まり（業種ごとの言葉・個人の情報・出典の無さ）、推論の答えの読み取り、推論の校正が本文に無い箇所を捨てること、
  * 書き上げ（見本の下書き・調べもの・「ローカルだけ」の会社で書かないこと）、版（直す・直し案・戻す）、承認待ちの間は直せないこと、
  * 承認した版の指紋と違えば入れないこと、WordPress が無ければ承認済みにすること、WordPress に下書きとして入れること、
  * 削除できるのは下書きだけ、使えない人にはツールが「使えない」と返すことを確かめる。
@@ -68,7 +68,7 @@ function setup(opts: { columns?: Partial<WebColumnSettings>; llm?: LlmProvider; 
 
 const who = { tenantId: 't1', userId: 'u1' };
 
-test('赤入れ: 業種ごとの言葉・個人の情報・出典の無さを挙げ、言い切りには直し案を付ける', () => {
+test('校正: 業種ごとの言葉・個人の情報・出典の無さを挙げ、言い切りには直し案を付ける', () => {
   const body = '当院の治療で必ず良くなります。\n患者様の声も届いています。\nお問い合わせは 03-1234-5678 まで。';
   const general = ruleReview(body, [], 1);
   assert.ok(general.some((r) => r.reason.includes('言い切る') && r.suggestion.includes('多くの場合')), '「必ず」に直し案');
@@ -82,7 +82,7 @@ test('赤入れ: 業種ごとの言葉・個人の情報・出典の無さを挙
   assert.deepEqual(none.map((r) => r.kind), ['source'], '出典が無ければ出典の指摘だけ');
 });
 
-test('推論の赤入れ: 本文にそのまま無い箇所は捨てる。見本の推論では行わない', async () => {
+test('推論の校正: 本文にそのまま無い箇所は捨てる。見本の推論では行わない', async () => {
   const body = '歯みがきは大切です。毎日続けましょう。';
   const llm = fakeLlm(() => JSON.stringify([
     { quote: '歯みがきは大切です', reason: '出典が無い', suggestion: '', kind: 'source' },
@@ -111,7 +111,7 @@ test('書き上げ: 調べた出典を使う。「ローカルだけ」の会社
   await assert.rejects(writeColumn(llm, new PolicyBlockedResearchProvider('ローカルだけ'), brief), /外部の AI を使わない/);
 });
 
-test('書く → 直す → 直し案 → 戻す: 直すたびに版を足し、赤入れをやり直す', async () => {
+test('書く → 直す → 直し案 → 戻す: 直すたびに版を足し、校正をやり直す', async () => {
   const { service, store, audits } = setup();
   const created = await service.create(who, { theme: '子どもの歯みがき', memo: '仕上げみがきを勧めている' }, true);
   assert.ok('id' in created);
@@ -124,7 +124,7 @@ test('書く → 直す → 直し案 → 戻す: 直すたびに版を足し、
   d = await service.detail(who, id);
   assert.equal(d!.column.currentVersion, 2);
   const idx = d!.versions[0]!.review.findIndex((r) => r.suggestion);
-  assert.ok(idx >= 0, '直した本文で赤入れをやり直す');
+  assert.ok(idx >= 0, '直した本文で校正をやり直す');
   assert.equal(await service.applySuggestion(who, id, idx), null);
   d = await service.detail(who, id);
   assert.equal(d!.versions[0]!.body, 'この方法で多くの場合虫歯になりません。');
@@ -244,7 +244,7 @@ function coverLlm(checks: string[], images: (() => Uint8Array)[] = []): LlmProvi
       if (p.includes('写真を、下の一覧から')) return { text: '{"index": -1}', tokensUsed: 1 };
       return { text: '[]', tokensUsed: 1 };
     },
-    extractFromImage: async () => ({ text: checks.shift() ?? '{"people": false, "text": false, "logo": false, "body": false}', tokensUsed: 1 }),
+    extractFromImage: async () => ({ text: checks.shift() ?? '{"beforeAfter": false}', tokensUsed: 1 }),
     generateImage: async (req: { prompt: string }) => { llm.drawn += 1; llm.prompts.push(req.prompt); return { bytes: (images.shift() ?? samplePng)(), mimeType: 'image/png' }; },
   };
   return llm as never;
@@ -270,59 +270,59 @@ test('カバー: 書き上げると型のカバーを作り、作り直すと新
   assert.equal(d.versions[0]!.cover!.fileId, d.versions[1]!.cover!.fileId);
 });
 
-test('カバー: AI の挿絵は描いた後に確かめ、通らなければ描き直す。3 枚とも通らなければ型にする。設定が切りなら描かない', async () => {
+test('カバー: AI の画像は選んだ作風（既定はリアル）で描き、人物や文字の禁止は設けない。医療・健康の会社だけ前と後の比較を確かめる。設定が切りなら描かない', async () => {
   const off = coverLlm([]);
   const a = setup({ llm: off, research: fakeResearch });
   const c0 = await a.service.create(who, { theme: '歯みがき' }, true);
   assert.ok('id' in c0);
   assert.equal(off.drawn, 0, '既定は切り');
 
-  const llm = coverLlm(['{"people": true, "text": false, "logo": false, "body": false}', '{"people": false, "text": false, "logo": false, "body": false}']);
+  // 医療の会社: 前と後の比較が写った 1 枚目を捨てて描き直す
+  const llm = coverLlm(['{"beforeAfter": true}', '{"beforeAfter": false}']);
   const { service } = setup({ llm, research: fakeResearch, columns: { aiIllustration: true, industry: '9050', rules: ['medical'] } });
   const c1 = await service.create(who, { theme: '歯みがき' }, true);
   assert.ok('id' in c1);
   const v = (await service.detail(who, c1.id))!.versions[0]!;
   assert.equal(v.cover!.kind, 'ai');
-  assert.equal(v.cover!.aiAttempts, 2, '人物が写った 1 枚目を捨てて描き直した');
-  assert.ok(llm.prompts[0]!.includes('人物を描かない') && llm.prompts[0]!.includes('体の部位'), '医療の業種では体の部位も描かない');
+  assert.equal(v.cover!.aiAttempts, 2, '前と後の比較が写った 1 枚目を捨てて描き直した');
+  assert.ok(llm.prompts[0]!.includes('写真のようにリアル'), '既定の作風はリアル');
+  assert.ok(llm.prompts[0]!.includes('前と後の比較') && !llm.prompts[0]!.includes('人物を描かない'), '禁止は前と後の比較だけ');
   const md = (await service.exported(who, c1.id))!.markdown;
   assert.ok(md.includes('カバー画像は AI で作成しました'));
+  // 作風を選んで作り直す
+  assert.equal(await service.recover(who, c1.id, { kind: 'ai', style: 'anime' }), null);
+  assert.match(llm.prompts.at(-1)!, /アニメ/);
 
-  const bad = coverLlm(Array(5).fill('{"people": false, "text": true, "logo": false, "body": false}'));
-  const b = setup({ llm: bad, research: fakeResearch, columns: { aiIllustration: true } });
+  // 医療でない会社は確かめない（人物や文字が写っていても使う）
+  const plain = coverLlm(['{"people": true, "text": true}']);
+  const p = setup({ llm: plain, research: fakeResearch, columns: { aiIllustration: true } });
+  const c3 = await p.service.create(who, { theme: '歯みがき' }, true);
+  assert.ok('id' in c3);
+  assert.deepEqual([(await p.service.detail(who, c3.id))!.versions[0]!.cover!.kind, plain.drawn], ['ai', 1]);
+  assert.ok(!plain.prompts[0]!.includes('前と後の比較'));
+
+  const bad = coverLlm(Array(5).fill('{"beforeAfter": true}'));
+  const b = setup({ llm: bad, research: fakeResearch, columns: { aiIllustration: true, rules: ['medical'] } });
   const c2 = await b.service.create(who, { theme: '歯みがき' }, true);
   assert.ok('id' in c2);
   const v2 = (await b.service.detail(who, c2.id))!.versions[0]!;
   assert.equal(bad.drawn, COVER_AI_TRIES);
   assert.deepEqual([v2.cover!.kind, v2.cover!.aiAttempts], ['template', 3]);
-  assert.match(v2.cover!.note, /文字が写っていました/);
+  assert.match(v2.cover!.note, /前と後の比較/);
 });
 
-test('カバー: 明るくする。型は淡い地、画像は暗くせず白い帯に題名を置き、暗い挿絵は描き直す', async () => {
+test('カバー: 型は淡い地、画像は暗くせず白い帯に題名を置く。AI の画像は暗くても描き直さない（作風を選んだため）', async () => {
   assert.ok(brightness({ bytes: samplePng(), mimeType: 'image/png' })! > 0.8, '型は淡い地');
   assert.ok(brightness({ bytes: darkPng(), mimeType: 'image/png' })! < 0.3);
   const svg = coverSvg({ title: '題名', background: { kind: 'image', image: { bytes: samplePng(), mimeType: 'image/png' } } });
   assert.ok(!svg.includes('stop-color="#000"') && svg.includes('fill="#fff" fill-opacity="0.9"'), '黒い影を重ねず、白い帯に置く');
-
-  const plain = illustrationPrompt({ title: 't', description: '', rules: [], hint: '' });
-  assert.ok(plain.includes('明るく軽やかな色合い') && !plain.includes('落ち着いた色合い'));
-  assert.ok(!illustrationPrompt({ title: 't', description: '', rules: [], hint: '夜の静かな感じ' }).includes('明るく軽やかな色合い'), '暗い雰囲気を頼まれたら従う');
 
   const llm = coverLlm([], [darkPng]);
   const { service } = setup({ llm, research: fakeResearch, columns: { aiIllustration: true } });
   const c = await service.create(who, { theme: '歯みがき' }, true);
   assert.ok('id' in c);
   const v = (await service.detail(who, c.id))!.versions[0]!;
-  assert.deepEqual([v.cover!.kind, v.cover!.aiAttempts], ['ai', 2], '暗い 1 枚目を捨てて描き直した');
-  assert.match(v.cover!.note, /暗い画像/);
-
-  // 暗い雰囲気を頼まれたときは描き直さない
-  const night = coverLlm([], [samplePng, darkPng]);
-  const n = setup({ llm: night, research: fakeResearch, columns: { aiIllustration: true } });
-  const c2 = await n.service.create(who, { theme: '星空' }, true);
-  assert.ok('id' in c2);
-  assert.equal(await n.service.recover(who, c2.id, { kind: 'ai', hint: '夜の雰囲気で' }), null);
-  assert.equal((await n.service.detail(who, c2.id))!.versions[0]!.cover!.aiAttempts, 1);
+  assert.deepEqual([v.cover!.kind, v.cover!.aiAttempts], ['ai', 1], '暗い画像もそのまま使う');
 });
 
 test('カバー: 「リクエスト」に書いた画像の希望を、AI 作成の画像に渡す（お客様のことは渡さない）', async () => {

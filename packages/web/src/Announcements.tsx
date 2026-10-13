@@ -207,7 +207,7 @@ function Detail({ id, onBack, onApprovals, changeKey }: { id: string; onBack: ()
           <label>説明<input value={edit.texts.signage.detail ?? ''} maxLength={60} disabled={!editable} onChange={(e) => setTexts({ signage: { ...edit.texts.signage, detail: e.target.value } })} /></label>
           <div className="announcements-colors" role="radiogroup" aria-label="帯の色">
             <span>帯の色</span>
-            {[{ id: '', label: '店の色', color: d.storeColor }, ...ANNOUNCEMENT_BAND_COLORS].map((c) => (
+            {[{ id: '', label: 'サイネージの背景色', color: d.storeColor }, ...ANNOUNCEMENT_BAND_COLORS].map((c) => (
               <button key={c.id || 'store'} type="button" role="radio" aria-checked={(edit.texts.signage.color ?? '') === c.id} disabled={!editable}
                 className={`announcements-color${(edit.texts.signage.color ?? '') === c.id ? ' on' : ''}`} title={c.label}
                 onClick={() => setTexts({ signage: { ...edit.texts.signage, color: c.id } })}>

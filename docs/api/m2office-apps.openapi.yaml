@@ -29,8 +29,8 @@ info:
     | 公開したコラムを読む（`columns.read`） | `GET /v1/columns/published` ほか | 使える（コラムの作成を入れた会社） |
     | 社内規程を登録・改定する（`knowledge.rules`） | `PUT /v1/knowledge/rules/{ref}` ほか | 使える |
     | 業務を依頼して結果を受け取る（`jobs.run`） | `POST /v1/jobs`・`GET /v1/runs/{id}` | 使える |
-    | サイネージにメッセージを表示する（`signage.interrupt`） | `POST /v1/signage/interrupts` ほか | 使える（店頭サイネージを入れた会社） |
-    | サイネージの画面の状態を読む（`signage.status`） | `GET /v1/signage/screens` | 使える（店頭サイネージを入れた会社） |
+    | サイネージにメッセージを表示する（`signage.interrupt`） | `POST /v1/signage/interrupts` ほか | 使える（サイネージを入れた会社） |
+    | サイネージの画面の状態を読む（`signage.status`） | `GET /v1/signage/screens` | 使える（サイネージを入れた会社） |
 
     **共通の決まり**
     - 鍵が違う・アプリを止めた・会社が止まっている・呼んだ名前の会社と鍵の会社が合わないは、どれも同じ 404 です。許していない機能の道は 403 です。
@@ -914,7 +914,7 @@ paths:
         - 作ってから 2 分のうちに画面が出し始められなければ出しません。文は出し終えてから 24 時間で消えます。
         - 呼び出しは 1 分 30 回までです。画面の待ちがいっぱいのときも 429 で、同じ eventId で送り直せます。
         - 同じ案内をすでに出しているか待っている画面には足しません（`merged` に入り、`id` は null のことがあります）。
-        - 店頭サイネージを入れた会社でだけ使えます。決まった形で送れないシステムは、拡張機能の設定で作る呼び出しの受け口（`/v1/hooks/signage/{鍵}`）を使ってください。
+        - サイネージを入れた会社でだけ使えます。
       requestBody:
         required: true
         content:

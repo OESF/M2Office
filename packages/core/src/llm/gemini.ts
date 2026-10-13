@@ -5,7 +5,8 @@
  */
 
 import type { Logger } from '../log/logger.js';
-import { EMBEDDING_DIMENSIONS, type LlmEmbedRequest, type LlmEmbedResponse, type LlmExtractRequest, type LlmImageGenerateRequest, type LlmProvider, type LlmRequest, type LlmResponse, type LlmVideoRequest, type ModelTier } from './provider.js';
+import { EMBEDDING_DIMENSIONS, type LlmEmbedRequest, type LlmEmbedResponse, type LlmExtractRequest, type LlmImageGenerateRequest, type LlmProvider, type LlmRequest, type LlmResponse, type LlmSpeechRequest, type LlmVideoRequest, type ModelTier } from './provider.js';
+import { pcmToWav, wavDurationMs } from '../media/wav.js';
 
 /** 役割ごとのモデル名。設定で差し替えられる（仕様書 第20.2節）。 */
 export interface GeminiModelMap {
@@ -314,22 +315,54 @@ export class OpenAiCompatibleProvider implements LlmProvider {
   }
 
   /**
+   * 文を読み上げる（Gemini の TTS。仕様書 第32.18.6節 段 3）。
+   *
+   * @remarks `generateContent` に音だけを返させる（`responseModalities: ['AUDIO']`・`speechConfig` で声を選ぶ）。
+   * 返る音は 24 kHz・モノラル・16 ビットの PCM（`audio/L16`）か WAV。PCM なら WAV に包んで返す。音が返らなければ `null`
+   */
+  async generateSpeech(req: LlmSpeechRequest): Promise<{ wav: Uint8Array; durationMs: number } | null> {
+    const base = this.baseUrl.replace(/\/openai\/?$/, '');
+    const res = await fetch(`${base}/models/${encodeURIComponent(req.model)}:generateContent`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-goog-api-key': this.apiKey },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: req.text }] }],
+        generationConfig: { responseModalities: ['AUDIO'], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: req.voice } } } },
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new LlmRequestError(`読み上げを作れませんでした (${res.status}${googleReason(body)})`, body);
+    }
+    const json = (await res.json()) as { candidates?: { content?: { parts?: { inlineData?: { mimeType?: string; data?: string } }[] } }[] };
+    const part = (json.candidates?.[0]?.content?.parts ?? []).find((p) => p.inlineData?.data);
+    if (!part?.inlineData?.data) return null;
+    const bytes = new Uint8Array(Buffer.from(part.inlineData.data, 'base64'));
+    const mime = (part.inlineData.mimeType ?? '').toLowerCase();
+    const rate = Number(/rate=(\d+)/.exec(mime)?.[1] ?? 24_000);
+    const wav = mime.includes('wav') ? bytes : pcmToWav(bytes, rate, 1);
+    return { wav, durationMs: wavDurationMs(wav) };
+  }
+
+  /**
    * 動画を作る（Veo。仕様書 第32.18.6節）。720p で 8 秒を作り、延長の指示があれば 7 秒延長する。
    *
    * @remarks 作業を頼み（`predictLongRunning`）、できるまで見に行き、鍵を付けて受け取る。延長に失敗したら最初の動画だけを返す。
-   * 始まりの絵があれば人物は大人だけ（`allow_adult`）、無ければ決まりのとおり `allow_all`（指示で人物を描かないよう頼む）
+   * 始まりの絵があれば人物は大人だけ（`allow_adult`）、無ければ決まりのとおり `allow_all`（指示で人物を描かないよう頼む）。
+   * 長さ（`durationSeconds`）は数で送る（資料には文字列とあるが、文字列だと「needs to be a number」で断られる）
    */
   async generateVideo(req: LlmVideoRequest): Promise<{ bytes: Uint8Array; mimeType: 'video/mp4'; extended: boolean } | null> {
     const base = this.baseUrl.replace(/\/openai\/?$/, '');
     const b64 = (b: Uint8Array) => Buffer.from(b).toString('base64');
     const first = await this.runVideo(base, req.model, {
       prompt: req.prompt,
-      ...(req.image ? { image: { inlineData: { mimeType: req.image.mimeType, data: b64(req.image.bytes) } } } : {}),
+      // 絵と動画は Google の SDK（google-genai）と同じ形で送る。資料の例の `inlineData` は Veo では断られる（「`inlineData` isn't supported by this model」）
+      ...(req.image ? { image: { bytesBase64Encoded: b64(req.image.bytes), mimeType: req.image.mimeType } } : {}),
     }, { aspectRatio: req.aspectRatio, resolution: '720p', durationSeconds: 8, personGeneration: req.image ? 'allow_adult' : 'allow_all' });
     if (!first) return null;
     if (!req.extendPrompt) return { bytes: first, mimeType: 'video/mp4', extended: false };
     const longer = await this.runVideo(base, req.model, {
-      prompt: req.extendPrompt, video: { inlineData: { mimeType: 'video/mp4', data: b64(first) } },
+      prompt: req.extendPrompt, video: { encodedVideo: b64(first), encoding: 'video/mp4' },
     }, { numberOfVideos: 1, resolution: '720p' }).catch(() => null);
     return longer ? { bytes: longer, mimeType: 'video/mp4', extended: true } : { bytes: first, mimeType: 'video/mp4', extended: false };
   }
@@ -340,7 +373,10 @@ export class OpenAiCompatibleProvider implements LlmProvider {
     const res = await fetch(`${base}/models/${encodeURIComponent(model)}:predictLongRunning`, {
       method: 'POST', headers, body: JSON.stringify({ instances: [instance], parameters }),
     });
-    if (!res.ok) throw new LlmRequestError(`動画を作れませんでした (${res.status})`, await res.text().catch(() => ''));
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new LlmRequestError(`動画を作れませんでした (${res.status}${googleReason(body)})`, body);
+    }
     const op = (await res.json()) as { name?: string };
     if (!op.name) throw new LlmRequestError('動画を作れませんでした（作業の名前が返りませんでした）', '');
     const deadline = Date.now() + this.video.timeoutMs;
@@ -362,6 +398,20 @@ export class OpenAiCompatibleProvider implements LlmProvider {
       }
       if (Date.now() > deadline) throw new LlmRequestError('動画ができるまでに時間がかかりすぎました', '');
     }
+  }
+}
+
+/**
+ * Google の誤りの本文から、断った理由（`error.message`）を短く取り出す（利用者への知らせに添えるため。鍵は含まれない）。
+ *
+ * @returns `: 理由` の形。読めなければ空の文字列
+ */
+function googleReason(body: string): string {
+  try {
+    const m = (JSON.parse(body) as { error?: { message?: unknown } }).error?.message;
+    return typeof m === 'string' && m.trim() ? `: ${m.trim().replace(/\s+/g, ' ').slice(0, 200)}` : '';
+  } catch {
+    return '';
   }
 }
 

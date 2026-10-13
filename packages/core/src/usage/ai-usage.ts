@@ -395,10 +395,15 @@ export class AiUsageMeter {
 
 /** 画像 1 枚の費用の目安（米ドル。2026-10 の料金表。第32.7.1節）。 */
 const IMAGE_USD = 0.067;
-/** 動画 1 秒の費用の目安（米ドル。Veo 3.1 Lite の 720p。2026-10 の料金表）。 */
-const VIDEO_USD_PER_SECOND = 0.05;
-/** 延長つきの動画の長さ（秒。8 秒＋延長 7 秒。第32.18.6節）。 */
+/**
+ * 動画 1 秒の費用の目安（米ドル。720p。2026-10 の料金表）。Lite 0.05・Fast 0.10・それ以外（Veo 3.1）0.40。
+ * 費用は動画ができたときだけかかる（断られた依頼・できなかった依頼は 0）。
+ */
+const videoUsdPerSecond = (model: string) => (/lite/i.test(model) ? 0.05 : /fast/i.test(model) ? 0.10 : 0.40);
+/** 動画の長さ（秒。8 秒、延長したときは＋7 秒。コラムの動画は延長しない。第32.18.6節）。 */
 const VIDEO_SECONDS = { base: 8, extended: 15 };
+/** 読み上げ 1 秒の費用の目安（米ドル。`gemini-3.8-flash-tts` の音の出力。1 秒 25 トークン × 100 万トークン 9 ドル。2026 年中の料金）。 */
+const SPEECH_USD_PER_SECOND = 25 * 9 / 1_000_000;
 /** Web の調べもの 1 回の検索の費用の目安（米ドル。Google 検索のグラウンディング）。 */
 const GROUNDING_USD = 0.014;
 
@@ -454,7 +459,16 @@ export function meterLlm(tenantId: string, inner: LlmProvider, meter: AiUsageMet
       await guard();
       const out = await inner.generateVideo!(req);
       const seconds = !out ? 0 : out.extended ? VIDEO_SECONDS.extended : VIDEO_SECONDS.base;
-      log({ model: req.model, inputTokens: 0, outputTokens: 0, units: seconds, costJpy: local ? 0 : yenOf(seconds * VIDEO_USD_PER_SECOND) });
+      log({ model: req.model, inputTokens: 0, outputTokens: 0, units: seconds, costJpy: local ? 0 : yenOf(seconds * videoUsdPerSecond(req.model)) });
+      return out;
+    };
+  }
+  if (inner.generateSpeech) {
+    wrapped.generateSpeech = async (req) => {
+      await guard();
+      const out = await inner.generateSpeech!(req);
+      const seconds = out ? out.durationMs / 1000 : 0;
+      log({ model: req.model, inputTokens: 0, outputTokens: Math.round(seconds * 25), units: Math.round(seconds), costJpy: local ? 0 : yenOf(seconds * SPEECH_USD_PER_SECOND) });
       return out;
     };
   }

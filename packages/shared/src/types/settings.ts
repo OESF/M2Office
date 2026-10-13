@@ -245,7 +245,7 @@ export interface TenantSettings {
   inventory: InventorySettings;
   /** 人事・給与（第30章）。 */
   hr: HrSettings;
-  /** 店頭サイネージ（第31章）。 */
+  /** サイネージ（第31章）。 */
   signage: SignageSettings;
   /** Web のコラム（第32章）。 */
   webColumns: WebColumnSettings;
@@ -335,7 +335,7 @@ export const DEFAULT_TENANT_SETTINGS: TenantSettings = {
   inventory: DEFAULT_INVENTORY_SETTINGS,
   // 人事・給与は既定で切り。給与 SaaS を使っている会社は入れなくてよい（第30.2節）
   hr: DEFAULT_HR_SETTINGS,
-  // 店頭サイネージは既定で切り。料金は取らない標準の機能で、使う会社が入れる（第31.2節）
+  // サイネージは既定で切り。料金は取らない標準の機能で、使う会社が入れる（第31.2節）
   signage: DEFAULT_SIGNAGE_SETTINGS,
   webColumns: DEFAULT_WEB_COLUMN_SETTINGS,
   // 問い合わせの記録は既定で切り（第33.2節）

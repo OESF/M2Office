@@ -1,5 +1,5 @@
 /**
- * @file 店頭サイネージの置き場（仕様書 第31.15.1節）。画面・ふだん動いている時間帯・登録を待つ番号・素材・流れ。
+ * @file サイネージの置き場（仕様書 第31.15.1節）。画面・ふだん動いている時間帯・登録を待つ番号・素材・流れ。
  *
  * すべての問い合わせを会社（テナント）を設定したトランザクションで行う（不変則 I-2）。画面の鍵は SHA-256 のハッシュだけを持つ。
  */
@@ -10,7 +10,7 @@ import { createPool } from '../repository/pool.js';
 import {
   signageMinutes,
   type SignageAsset, type SignageBand, type SignageEntry, type SignageOrientation, type SignageReport, type SignageRotation, type SignageOrigin, type SignageTransition,
-  type SignageTargetState, type SignageInterruptView, type SignagePhrase, type SignageSource, type SignageSourceMapping, type SignageSound,
+  type SignageTargetState, type SignageInterruptView, type SignagePhrase, type SignageSound,
 } from '@m2office/shared';
 
 const iso = (v: unknown): string => (v instanceof Date ? v.toISOString() : String(v ?? ''));
@@ -59,7 +59,7 @@ export interface PairingRecord {
 }
 
 /** 素材を足すときの値。 */
-export type AssetInput = Omit<SignageAsset, 'hasThumbnail' | 'createdAt' | 'isInterrupt' | 'jingle'> & { thumbnail: Uint8Array | null };
+export type AssetInput = Omit<SignageAsset, 'hasThumbnail' | 'createdAt' | 'isInterrupt' | 'jingle' | 'narration'> & { thumbnail: Uint8Array | null; narration?: boolean };
 
 /** 置き場の中の割り込み（画面ごとの出す先の 1 行と、割り込みの中身）。 */
 export interface TargetRecord {
@@ -89,6 +89,7 @@ export interface InterruptRecord {
   jingle: string | null;
   origin: SignageOrigin;
   createdBy: string | null;
+  /** 呼び出しの受け口の名残（第 0.346.0 版で受け口を外した。いまは常に `null`） */
   sourceId: string | null;
   requestId: string | null;
 }
@@ -110,12 +111,12 @@ const toScreen = (r: ScreenRow): ScreenRecord => ({
 
 interface AssetRow {
   id: string; kind: SignageAsset['kind']; name: string; mime: SignageAsset['mime']; bytes: string | number; sha256: string;
-  width: number; height: number; duration_ms: number | null; has_thumbnail: boolean; is_interrupt: boolean; jingle: string | null; caption: string | null; created_at: unknown;
+  width: number; height: number; duration_ms: number | null; has_thumbnail: boolean; is_interrupt: boolean; jingle: string | null; caption: string | null; narration: boolean | null; created_at: unknown;
 }
-const ASSET_COLS = 'id, kind, name, mime, bytes, sha256, width, height, duration_ms, thumbnail is not null as has_thumbnail, is_interrupt, jingle, caption, created_at';
+const ASSET_COLS = 'id, kind, name, mime, bytes, sha256, width, height, duration_ms, thumbnail is not null as has_thumbnail, is_interrupt, jingle, caption, narration, created_at';
 const toAsset = (r: AssetRow): SignageAsset => ({
   id: r.id, kind: r.kind, name: r.name, mime: r.mime, bytes: Number(r.bytes), sha256: r.sha256, width: r.width, height: r.height,
-  durationMs: r.duration_ms, hasThumbnail: r.has_thumbnail, isInterrupt: r.is_interrupt, jingle: r.jingle, caption: r.caption ?? null, createdAt: iso(r.created_at),
+  durationMs: r.duration_ms, hasThumbnail: r.has_thumbnail, isInterrupt: r.is_interrupt, jingle: r.jingle, caption: r.caption ?? null, narration: r.narration === true, createdAt: iso(r.created_at),
 });
 
 interface TargetRow {
@@ -129,14 +130,7 @@ const toTarget = (r: TargetRow): TargetRecord => ({
   kind: r.kind, text: r.text, number: r.number, assetId: r.asset_id, chime: r.chime, jingle: r.jingle, createdAt: iso(r.created_at),
 });
 
-interface SourceRow { id: string; name: string; status: 'active' | 'stopped'; mapping: SignageSourceMapping | null; last_received_at: unknown; stats: SignageSource['stats'] | Record<string, never>; created_at: unknown }
-const SOURCE_COLS = 'id, name, status, mapping, last_received_at, stats, created_at';
-const toSource = (r: SourceRow): SignageSource => ({
-  id: r.id, name: r.name, status: r.status, mapping: r.mapping, lastReceivedAt: r.last_received_at ? iso(r.last_received_at) : null,
-  stats: 'day' in r.stats ? r.stats as SignageSource['stats'] : { day: '', accepted: 0, rejected: {} }, createdAt: iso(r.created_at),
-});
-
-/** 店頭サイネージの置き場。 */
+/** サイネージの置き場。 */
 export interface SignageStore {
   listScreens(tenantId: string, includeRemoved?: boolean): Promise<ScreenRecord[]>;
   getScreen(tenantId: string, id: string): Promise<ScreenRecord | null>;
@@ -217,8 +211,6 @@ export interface SignageStore {
   settleTargets(tenantId: string, now: Date): Promise<string[]>;
   /** 最近の割り込み（出す先つき）。 */
   listInterrupts(tenantId: string, since: Date): Promise<SignageInterruptView[]>;
-  /** 同じ受け口の同じ `requestId` が、`since` より後にあるか。 */
-  hasRequest(tenantId: string, sourceId: string, requestId: string, since: Date): Promise<boolean>;
   /** 文を消す（出し終えて 24 時間）・行を消す（90 日）。 */
   purgeInterrupts(tenantId: string, now: Date): Promise<{ texts: number; rows: number }>;
   /** 最近 14 日の、割り込みの素材ごとの回数。 */
@@ -230,23 +222,13 @@ export interface SignageStore {
   hidePhrase(tenantId: string, id: string): Promise<boolean>;
   purgePhrases(tenantId: string, now: Date): Promise<number>;
 
-  listSources(tenantId: string): Promise<SignageSource[]>;
-  getSource(tenantId: string, id: string): Promise<SignageSource | null>;
-  createSource(tenantId: string, s: { id: string; name: string; hookHash: string }, by: string): Promise<void>;
-  setSourceStatus(tenantId: string, id: string, status: 'active' | 'stopped'): Promise<boolean>;
-  setSourceMapping(tenantId: string, id: string, mapping: SignageSourceMapping | null): Promise<boolean>;
-  /** 受け口の今日の数を足す（受け付けた・断った理由）。 */
-  recordSource(tenantId: string, id: string, day: string, outcome: string): Promise<void>;
-  /** 鍵のハッシュから受け口を引く（会社をまたいで引くため、会社を決める前に呼ぶ）。 */
-  findSourceByHash(hash: string): Promise<{ id: string; tenantId: string; status: 'active' | 'stopped' } | null>;
-
   listSounds(tenantId: string): Promise<SignageSound[]>;
   getSound(tenantId: string, id: string): Promise<(SignageSound & { data: Uint8Array }) | null>;
   addSound(tenantId: string, s: { id: string; name: string; mime: SignageSound['mime']; data: Uint8Array; sha256: string; durationMs: number }, by: string): Promise<void>;
   deleteSound(tenantId: string, id: string): Promise<SignageSound | null>;
 }
 
-/** PostgreSQL の店頭サイネージの置き場。 */
+/** PostgreSQL のサイネージの置き場。 */
 export class PostgresSignageStore implements SignageStore {
   private readonly pool: pg.Pool;
 
@@ -412,9 +394,9 @@ export class PostgresSignageStore implements SignageStore {
   }
 
   async insertAsset(tenantId: string, a: AssetInput, by: string): Promise<void> {
-    await this.q(tenantId, `insert into signage_assets (id, tenant_id, kind, name, mime, bytes, sha256, width, height, duration_ms, thumbnail, created_by, updated_by, caption)
-      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12, $13)`,
-    [a.id, tenantId, a.kind, a.name, a.mime, a.bytes, a.sha256, a.width, a.height, a.durationMs, a.thumbnail ? Buffer.from(a.thumbnail) : null, by, a.caption]);
+    await this.q(tenantId, `insert into signage_assets (id, tenant_id, kind, name, mime, bytes, sha256, width, height, duration_ms, thumbnail, created_by, updated_by, caption, narration)
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12, $13, $14)`,
+    [a.id, tenantId, a.kind, a.name, a.mime, a.bytes, a.sha256, a.width, a.height, a.durationMs, a.thumbnail ? Buffer.from(a.thumbnail) : null, by, a.caption, a.narration === true]);
   }
 
   async renameAsset(tenantId: string, id: string, name: string, by: string): Promise<SignageAsset | null> {
@@ -627,12 +609,6 @@ export class PostgresSignageStore implements SignageStore {
     }));
   }
 
-  async hasRequest(tenantId: string, sourceId: string, requestId: string, since: Date): Promise<boolean> {
-    const rows = await this.q<{ id: string }>(tenantId, `select id from signage_interrupts where tenant_id = $1 and source_id = $2 and request_id = $3 and created_at >= $4 limit 1`,
-      [tenantId, sourceId, requestId, since]);
-    return rows.length > 0;
-  }
-
   async purgeInterrupts(tenantId: string, now: Date): Promise<{ texts: number; rows: number }> {
     return this.tx(tenantId, async (c) => {
       // 文と番号は、どの画面でも出し終えて（済み・消した・出せなかった）から 24 時間で消す（第31.13節）
@@ -685,42 +661,6 @@ export class PostgresSignageStore implements SignageStore {
 
   async purgePhrases(tenantId: string, now: Date): Promise<number> {
     return (await this.tx(tenantId, (c) => c.query(`delete from signage_phrases where tenant_id = $1 and last_used_at < $2::timestamptz - interval '90 days'`, [tenantId, now]))).rowCount ?? 0;
-  }
-
-  async listSources(tenantId: string): Promise<SignageSource[]> {
-    return (await this.q<SourceRow>(tenantId, `select ${SOURCE_COLS} from signage_sources where tenant_id = $1 order by created_at`, [tenantId])).map(toSource);
-  }
-
-  async getSource(tenantId: string, id: string): Promise<SignageSource | null> {
-    const rows = await this.q<SourceRow>(tenantId, `select ${SOURCE_COLS} from signage_sources where tenant_id = $1 and id = $2`, [tenantId, id]);
-    return rows[0] ? toSource(rows[0]) : null;
-  }
-
-  async createSource(tenantId: string, s: { id: string; name: string; hookHash: string }, by: string): Promise<void> {
-    await this.q(tenantId, `insert into signage_sources (id, tenant_id, name, hook_hash, created_by) values ($1, $2, $3, $4, $5)`, [s.id, tenantId, s.name, s.hookHash, by]);
-  }
-
-  async setSourceStatus(tenantId: string, id: string, status: 'active' | 'stopped'): Promise<boolean> {
-    return (await this.q<{ id: string }>(tenantId, `update signage_sources set status = $3 where tenant_id = $1 and id = $2 returning id`, [tenantId, id, status])).length > 0;
-  }
-
-  async setSourceMapping(tenantId: string, id: string, mapping: SignageSourceMapping | null): Promise<boolean> {
-    return (await this.q<{ id: string }>(tenantId, `update signage_sources set mapping = $3 where tenant_id = $1 and id = $2 returning id`, [tenantId, id, mapping ? JSON.stringify(mapping) : null])).length > 0;
-  }
-
-  async recordSource(tenantId: string, id: string, day: string, outcome: string): Promise<void> {
-    await this.tx(tenantId, async (c) => {
-      const cur = (await c.query<{ stats: SignageSource['stats'] | Record<string, never> }>(`select stats from signage_sources where tenant_id = $1 and id = $2 for update`, [tenantId, id])).rows[0];
-      if (!cur) return;
-      const prev = 'day' in cur.stats && cur.stats.day === day ? cur.stats as SignageSource['stats'] : { day, accepted: 0, rejected: {} };
-      const next = outcome === 'accepted' ? { ...prev, accepted: prev.accepted + 1 } : { ...prev, rejected: { ...prev.rejected, [outcome]: (prev.rejected[outcome] ?? 0) + 1 } };
-      await c.query(`update signage_sources set stats = $3, last_received_at = now() where tenant_id = $1 and id = $2`, [tenantId, id, JSON.stringify(next)]);
-    });
-  }
-
-  async findSourceByHash(hash: string): Promise<{ id: string; tenantId: string; status: 'active' | 'stopped' } | null> {
-    const r = await this.pool.query<{ id: string; tenant_id: string; status: 'active' | 'stopped' }>('select * from m2o_signage_source($1)', [hash]);
-    return r.rows[0] ? { id: r.rows[0].id, tenantId: r.rows[0].tenant_id, status: r.rows[0].status } : null;
   }
 
   async listSounds(tenantId: string): Promise<SignageSound[]> {

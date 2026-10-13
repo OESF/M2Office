@@ -18,7 +18,7 @@ import {
   TenantAiResolver, platformAi, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, ConnectionCredentials, type ConnectionAuthProvider,
   CardService, PostgresContactStore, cardsAccess, type ContactStore, GoogleContactsService, TerminalService, PostgresTerminalStore, BulkMailService, PostgresBulkMailStore, NoticeService, PostgresNoticeStore,
-  InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, AppLinks, AppKnowledgeSearch, SecurityWatch, PostgresSecurityStore, JanLookupService, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, InquiryService, PostgresInquiryStore, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, CanvaService, HttpCanvaApi, MockCanvaApi, PostgresCanvaConnectionStore, MEMBER_LINE_SEND, LineApiVerifier, MockLineVerifier, JGrantsApi, MockJGrants, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, WEB_REVIEW_REQUEST, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, webColumnsAccess, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, WEB_COLUMN_SIGNAGE_PUBLISH, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, applyStockChanges, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
+  InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, AppLinks, AppKnowledgeSearch, SecurityWatch, PostgresSecurityStore, JanLookupService, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, InquiryService, PostgresInquiryStore, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, CanvaService, HttpCanvaApi, MockCanvaApi, PostgresCanvaConnectionStore, MEMBER_LINE_SEND, LineApiVerifier, MockLineVerifier, JGrantsApi, MockJGrants, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, WEB_REVIEW_REQUEST, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, webColumnsAccess, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, applyStockChanges, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
   type SecretBox, type GeminiModels,
   type FileStore, type TenantExtensions, type HelpArticle, type ManualMeta, type LlmProvider, type Logger, type Repository, type WorkspaceConnector, aiUsageMeterFromEnv, setEnqueueAiGuard, appPath
 } from '@m2office/core';
@@ -149,7 +149,7 @@ export interface AppDeps {
     access(tenantId: string, userId: string): Promise<InventorySettings | null>;
   };
   /**
-   * 店頭サイネージ（内蔵の拡張。仕様書 第31章）。
+   * サイネージ（内蔵の拡張。仕様書 第31章）。
    *
    * @remarks `access` は、会社がサイネージを使っていて利用者が利用範囲の中なら、会社のサイネージの設定を返す（使えなければ `null`）
    */
@@ -169,7 +169,7 @@ export interface AppDeps {
     access(tenantId: string, userId: string): Promise<WebColumnSettings | null>;
     /** テーマ案・予定表・予約・貼るだけのページ（段 2。第32.18.4節） */
     planner?: ColumnPlanner;
-    /** 店頭サイネージ用の画像（第32.18.6節） */
+    /** サイネージ用の画像（第32.18.6節） */
     signage?: ColumnSignageService;
   };
   /**
@@ -410,10 +410,10 @@ export function buildDeps(): AppDeps {
   // JAN から商品名を Gemini の Google 検索で引く（第29.6節）。「ローカルだけ」の会社では調べものが断られ、空のまま作る
   const inventoryJan = new JanLookupService({ research: (tenantId) => ai.researchFor(tenantId), llm: (tenantId) => ai.llmFor(tenantId), logger: log });
   const inventory = { service: inventoryService, bookings: inventoryBookings, publisher: inventoryPublisher, sales: inventorySales, jan: inventoryJan, access: inventoryAccess(repo) };
-  // 店頭サイネージ（第31章）。秘書が割り込みを出すため、秘書より先に作る。画面と素材は会社で共有する
+  // サイネージ（第31章）。秘書が割り込みを出すため、秘書より先に作る。画面と素材は会社で共有する
   const signageService = new SignageService({ store: new PostgresSignageStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), repo, files, llmFor: (tenantId) => ai.llmFor(tenantId) });
-  const signage = { service: signageService, interrupts: new SignageInterrupts({ service: signageService, repo, llm: (tenantId) => ai.llmFor(tenantId) }), access: signageAccess(repo) };
-  // 在庫の公開を作り直したときの品切れ・入荷を、店頭サイネージの案内にする（第31.6.7節。会社が入れたときだけ）
+  const signage = { service: signageService, interrupts: new SignageInterrupts({ service: signageService, repo }), access: signageAccess(repo) };
+  // 在庫の公開を作り直したときの品切れ・入荷を、サイネージの案内にする（第31.6.7節。会社が入れたときだけ）
   inventoryPublisher.onStockChange(async (tenantId, changes, current) => { await applyStockChanges(signageService, tenantId, changes, current); });
   // 人事・給与（第30章）。秘書が本人の打刻と有給に答え、朝のブリーフが労務の期限を読むため、業務と秘書より先に作る
   const hrService = new HrService({
@@ -472,7 +472,7 @@ export function buildDeps(): AppDeps {
     }),
     access: competitorsAccess(repo),
   };
-  // お知らせの作成（内蔵の拡張。仕様書 第35章）。Web はコラムの作成の WordPress、LINE は問い合わせの記録の接続、サイネージの画面は店頭サイネージを使う
+  // お知らせの作成（内蔵の拡張。仕様書 第35章）。Web はコラムの作成の WordPress、LINE は問い合わせの記録の接続、サイネージの画面はサイネージを使う
   const announcements = {
     service: new AnnouncementService({
       store: announcementStore,
@@ -569,13 +569,13 @@ export function buildDeps(): AppDeps {
         return (await enqueueJob(repo, { tenantId, requestedBy: userId, def, input: { messageId }, origin: 'menu', actor: { type: 'user', id: userId } })).runId;
       },
       runStatus: async (tenantId, runId) => (await repo.getRun(tenantId, runId))?.status ?? null,
-      // 店頭サイネージに特典を流す（第40.19節）
+      // サイネージに特典を流す（第40.19節）
       signage: signageService,
     }),
     access: membersAccess(repo),
   };
   // 販促物の作成（内蔵の拡張。仕様書 第41章）。画像はファイルの置き場（print-<版>-…）に置く。
-  // 店頭サイネージに流す・お知らせの下書きにする・在庫の品目から値札（第41.18節）
+  // サイネージに流す・お知らせの下書きにする・在庫の品目から値札（第41.18節）
   // Canva（第41.19.3節）。運営が公開のつなぎを登録して入れた鍵か、開発の見本（CANVA_MOCK=true）のときだけ
   const canvaRedirect = process.env['CANVA_OAUTH_REDIRECT_URI']
     ?? new URL('/v1/oauth/canva/callback', process.env['GOOGLE_OAUTH_REDIRECT_URI'] ?? 'http://localhost:3100/v1/oauth/google/callback').toString();
@@ -637,21 +637,15 @@ export function buildDeps(): AppDeps {
   };
   webReviewRef.service = webReview.service;
   // コラムのテーマ案・予定表・予約・貼るだけのページ（第32.18.4節）。材料はほかの拡張から（使っていなければ空）
-  // 店頭サイネージ用の画像（第32.18.6節）。作るのはワーカー。画面からは作り始め・承認へ・外すを行う
+  // サイネージ用の画像・動画（第32.18.6節）。作るのはワーカー。画面からは作り始めと、素材への登録を行う（承認は挟まない）
   columns.signage = new ColumnSignageService({
     store: new PostgresColumnSignageStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
     columns: columns.service.store, repo, files, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
     signage: signageForColumns(signageService),
-    submitter: async (tenantId, userId, setId, images) => {
-      const def = (await tenantView(tenantId)).resolve(WEB_COLUMN_SIGNAGE_PUBLISH.id, WEB_COLUMN_SIGNAGE_PUBLISH.version);
-      if (!def) throw new Error('コラムをサイネージに流す業務が見つかりません');
-      const input: Record<string, unknown> = { setId };
-      images.forEach((id, i) => { input[`image${i + 1}`] = id; });
-      return (await enqueueJob(repo, { tenantId, requestedBy: userId, def, input, origin: 'menu', actor: { type: 'user', id: userId } })).runId;
-    },
-    runStatus: async (tenantId, runId) => (await repo.getRun(tenantId, runId))?.status ?? null,
     // 動画のモデル（段 2。既定は Veo 3.1 Lite）
     ...(process.env['MODEL_VIDEO']?.trim() ? { videoModel: process.env['MODEL_VIDEO'].trim() } : {}),
+    ...(process.env['MODEL_VIDEO_LONG']?.trim() ? { videoLongModel: process.env['MODEL_VIDEO_LONG'].trim() } : {}),
+    ...(process.env['MODEL_TTS']?.trim() ? { ttsModel: process.env['MODEL_TTS'].trim() } : {}),
   });
   columns.planner = new ColumnPlanner({
     service: columns.service, store: columns.service.store, repo, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
@@ -705,7 +699,7 @@ export function buildDeps(): AppDeps {
     hrStaff: { service: hrService, payroll, calendar: laborCalendar, access: hrAccess(repo) },
     // 会議室・社用車・備品の予約（第37.7節）。本人が話した回にだけ、予約する・空きに答える・変える・取り消す
     reservations: { ...reservations, llmFor: (t: string) => ai.llmFor(t) },
-    // 店頭サイネージ（第31.11.1節・第31.11.2節）。本人が話した回にだけ、割り込みを出す・消す・流れと時間帯と設定を変える
+    // サイネージ（第31.11.1節・第31.11.2節）。本人が話した回にだけ、割り込みを出す・消す・流れと時間帯と設定を変える
     signage: {
       ...signage,
       // 秘書に渡された画像（本人のファイルだけ）を、流れに足す素材にする
@@ -838,7 +832,7 @@ export function buildDeps(): AppDeps {
     members,
     printDesigns,
     webReview,
-    // 店頭サイネージ（第31章）
+    // サイネージ（第31章）
     signage,
     // 人事・給与（第30章）。台帳は人事区画の人だけが扱い、勤怠と有給は本人も扱う
     hr: {

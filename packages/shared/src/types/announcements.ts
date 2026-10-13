@@ -42,7 +42,7 @@ export interface AnnouncementTexts {
 /** サイネージの画面の一言の既定（画面はほとんど店頭に置くため。第35.6.4節）。 */
 export const ANNOUNCEMENT_SIGNAGE_NOTE = '受付までお申し出ください';
 
-/** サイネージの画面の帯の色の選択肢（選ばなければ店の色。第35.6.4節）。 */
+/** サイネージの画面の帯の色の選択肢（選ばなければサイネージの背景色。第35.6.4節）。 */
 export const ANNOUNCEMENT_BAND_COLORS: { id: string; label: string; color: string }[] = [
   { id: 'navy', label: '濃い青', color: '#1f3a5f' },
   { id: 'blue', label: '青', color: '#1f5f8b' },
@@ -54,9 +54,9 @@ export const ANNOUNCEMENT_BAND_COLORS: { id: string; label: string; color: strin
 ];
 
 /**
- * 帯の色を決める。選んだ色（`ANNOUNCEMENT_BAND_COLORS` の id）が無ければ店の色、それも無ければ濃い青。
+ * 帯の色を決める。選んだ色（`ANNOUNCEMENT_BAND_COLORS` の id）が無ければサイネージの背景色、それも無ければ濃い青。
  *
- * @param storeColor 店頭サイネージの設定の店の色（`#RRGGBB`）
+ * @param storeColor サイネージの設定の背景色（`#RRGGBB`）
  */
 export function announcementBandColor(colorId: string | undefined, storeColor: string | null | undefined): string {
   const picked = ANNOUNCEMENT_BAND_COLORS.find((c) => c.id === colorId);
@@ -106,7 +106,7 @@ export interface AnnouncementDetail {
   available: Record<AnnouncementChannel, boolean>;
   /** WordPress につないでいるか（無ければ Web の文を写して使う） */
   wordpress: boolean;
-  /** 店の色（帯の色を選ばないときの色。`#RRGGBB`。第35.6.4節） */
+  /** サイネージの背景色（帯の色を選ばないときの色。`#RRGGBB`。第35.6.4節） */
   storeColor: string;
 }
 

@@ -294,7 +294,7 @@ test('サイネージの画面の 1 枚: 説明と帯の色を組み、会社名
   if (!('announcement' in r)) throw new Error('下書きを作れない');
   const id = r.announcement.id;
   assert.equal(r.announcement.texts.signage.note, '受付までお申し出ください');
-  // 帯の色は決まった色の id だけ。ほかの値は店の色（空）にする
+  // 帯の色は決まった色の id だけ。ほかの値はサイネージの背景色（空）にする
   assert.equal(await service.update(who, id, { texts: { signage: { headline: '休業', period: '12/28〜1/5', note: '受付までお申し出ください', detail: 'ご不便をおかけします', color: 'green' } } }), null);
   assert.equal((await store.get('t1', id))!.texts.signage.color, 'green');
   await service.update(who, id, { texts: { signage: { headline: '休業', period: '', note: '', color: '#ff0000' } } });
@@ -303,8 +303,8 @@ test('サイネージの画面の 1 枚: 説明と帯の色を組み、会社名
   assert.equal(a.texts.signage.detail, 'ご不便をおかけします', '直さなかった説明は残す');
   const card = screenCardOf(a, '#123456', { color: 'green' });
   assert.equal(card.color, '#2e6e4f');
-  assert.equal(screenCardOf(a, '#123456').color, '#123456', '選ばなければ店の色');
-  assert.equal(screenCardOf(a, null).color, '#1f3a5f', '店の色も無ければ濃い青');
+  assert.equal(screenCardOf(a, '#123456').color, '#123456', '選ばなければサイネージの背景色');
+  assert.equal(screenCardOf(a, null).color, '#1f3a5f', 'サイネージの背景色も無ければ濃い青');
   const svg = screenSvg({ ...card, note: '受付までお申し出ください' });
   assert.match(svg, /ご不便をおかけします/);
   assert.match(svg, /#2e6e4f/);

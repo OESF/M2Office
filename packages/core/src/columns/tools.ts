@@ -7,7 +7,7 @@
  * @see 仕様書 第32.18.1節 段 1 の実装の決まり
  */
 
-import { COLUMN_COVER_KIND_LABELS, COLUMN_RULE_SET_LABELS, COLUMN_THEME_SOURCE_LABELS, WEB_COLUMN_STATUS_LABELS, type ColumnCoverKind, type ColumnRuleSet, type WebColumnSettings } from '@m2office/shared';
+import { COLUMN_COVER_KIND_LABELS, COLUMN_RULE_SET_LABELS, COLUMN_THEME_SOURCE_LABELS, WEB_COLUMN_STATUS_LABELS, columnImageStyle, columnNarrationVoice, type ColumnCoverKind, type ColumnRuleSet, type WebColumnSettings } from '@m2office/shared';
 import type { Tool, ToolContext } from '../tools/registry.js';
 import type { ColumnPreview, ColumnService } from './service.js';
 import type { ColumnPlanner } from './planner.js';
@@ -18,7 +18,7 @@ export interface ColumnToolContext {
   service: ColumnService;
   /** テーマ案と予定表（段 2。第32.18.4節）。無い環境では、テーマ案のツールは「使えない」と返す */
   planner?: ColumnPlanner;
-  /** 店頭サイネージ用の画像（第32.18.6節）。無い環境では「使えない」と返す */
+  /** サイネージ用の画像（第32.18.6節）。無い環境では「使えない」と返す */
   signage?: ColumnSignageService;
   /**
    * 依頼者がいま Web のコラムを使えるか。使えるなら会社の設定を返す。
@@ -56,7 +56,7 @@ function describePreview(p: ColumnPreview): string {
 }
 
 /**
- * テーマからコラムの下書きを書く（第32.7節）。Web で調べ、出典つきの下書きと赤入れまで行う。
+ * テーマからコラムの下書きを書く（第32.7節）。Web で調べ、出典つきの下書きと校正まで行う。
  *
  * @remarks 危険度 `write-internal`。社内のコラムの置き場に書くだけで、WordPress には入れない（入れるのは承認の後の `columns.place`）
  */
@@ -65,7 +65,7 @@ export const columnsDraft: Tool = {
   risk: 'write-internal',
   activityLabel: 'コラムを書いています',
   helpText: 'テーマを Web で調べ、出典つきのコラムの下書きを書きます。下書きにするだけで、Web には出しません',
-  description: 'テーマ（theme）とリクエスト（memo。任意。画像の希望も書ける）から、Web で調べて出典つきのコラムの下書きを書く。題名・字数・赤入れの数・画面の場所（path）を返す',
+  description: 'テーマ（theme）とリクエスト（memo。任意。画像の希望も書ける）から、Web で調べて出典つきのコラムの下書きを書く。題名・字数・校正の数・画面の場所（path）を返す',
   args: {
     properties: {
       theme: { type: 'string', description: 'コラムのテーマ（一言。例: 「子どもの歯みがきのコツ」）' },
@@ -94,7 +94,7 @@ export const columnsPreview: Tool = {
   risk: 'read',
   activityLabel: 'コラムを確かめています',
   helpText: 'コラムの題名・字数・残った指摘・入れ先を確かめます。見るだけです',
-  description: 'コラム（columnId）の今の版の題名・字数・残った赤入れの数・入れ先・入れられない理由（problems）を返す',
+  description: 'コラム（columnId）の今の版の題名・字数・残った校正の数・入れ先・入れられない理由（problems）を返す',
   args: { properties: { columnId: { type: 'string', description: 'コラムの ID' } }, required: ['columnId'] },
   async invoke(args, ctx) {
     const service = await columnsOf(ctx);
@@ -152,12 +152,13 @@ export const columnsCover: Tool = {
   risk: 'write-internal',
   activityLabel: 'コラムのカバーを作り直しています',
   helpText: 'コラムのカバー画像を作り直します（型・AI の挿絵・会社の写真）。新しい版になるだけで、Web には出しません',
-  description: 'コラムのカバー画像を作り直す。column はコラムの題名かテーマの言葉（無ければいちばん新しいコラム）。kind は template（型）・ai（AI 作成の画像）・photo（会社の写真）、hint は雰囲気（「もっと明るく」など）。previous を true にすると、作り直す前の画像に戻す。1 つに決まらなければ候補を返す',
+  description: 'コラムのカバー画像を作り直す。column はコラムの題名かテーマの言葉（無ければいちばん新しいコラム）。kind は template（型）・ai（AI 作成の画像）・photo（会社の写真）、hint は雰囲気（「もっと明るく」など）、style は作風（real リアル・illustration イラスト・anime アニメ風・fantasy ファンタジー。言われなければ省く）。previous を true にすると、作り直す前の画像に戻す。1 つに決まらなければ候補を返す',
   args: {
     properties: {
       column: { type: 'string', description: 'コラムの題名かテーマの言葉' },
       kind: { type: 'string', description: '背景の種類', enum: ['template', 'ai', 'photo'] },
       hint: { type: 'string', description: '雰囲気の頼み（「もっと明るく」など）' },
+      style: { type: 'string', description: '作風', enum: ['real', 'illustration', 'anime', 'fantasy'] },
       previous: { type: 'boolean', description: '作り直す前の画像に戻す' },
     },
   },
@@ -174,7 +175,7 @@ export const columnsCover: Tool = {
     const who = { tenantId: ctx.tenantId, userId: ctx.userId };
     const err = args['previous'] === true
       ? await service.useCover(who, c.id, 'previous')
-      : await service.recover(who, c.id, { ...(kind ? { kind } : {}), hint: str(args['hint']) });
+      : await service.recover(who, c.id, { ...(kind ? { kind } : {}), hint: str(args['hint']), ...(args['style'] ? { style: columnImageStyle(args['style']) } : {}) });
     if (err) return { available: false, reason: err };
     const v = (await service.store.versions(ctx.tenantId, c.id))[0];
     return {
@@ -188,7 +189,7 @@ const RULE_SETS: ColumnRuleSet[] = ['medical', 'health-products', 'legal'];
 const ruleList = (v: unknown): ColumnRuleSet[] => (Array.isArray(v) ? v.filter((x): x is ColumnRuleSet => RULE_SETS.includes(x as ColumnRuleSet)) : []);
 
 /**
- * コラムの赤入れで当てる表現の決まりを直す（第32.18.3節）。足す・外す・AI に任せる。管理者だけ。
+ * コラムの校正で当てる表現の決まりを直す（第32.18.3節）。足す・外す・AI に任せる。管理者だけ。
  *
  * @remarks 危険度 `write-internal`。会社の設定を直すだけで、社外には何も送らない
  */
@@ -196,8 +197,8 @@ export const columnsRules: Tool = {
   name: 'columns.rules',
   risk: 'write-internal',
   activityLabel: 'コラムの表現の決まりを直しています',
-  helpText: 'コラムの赤入れで当てる表現の決まり（医療広告・薬機法・士業）を直します。管理者だけが直せます',
-  description: 'コラムの赤入れで当てる表現の決まりを直す。add と remove に medical（医療広告ガイドライン）・health-products（薬機法・健康増進法）・legal（士業の広告の規程）を入れる。auto を true にすると AI に任せる形に戻す。今の決まりを返す',
+  helpText: 'コラムの校正で当てる表現の決まり（医療広告・薬機法・士業）を直します。管理者だけが直せます',
+  description: 'コラムの校正で当てる表現の決まりを直す。add と remove に medical（医療広告ガイドライン）・health-products（薬機法・健康増進法）・legal（士業の広告の規程）を入れる。auto を true にすると AI に任せる形に戻す。今の決まりを返す',
   args: {
     properties: {
       add: { type: 'array', description: '足す決まり', items: { type: 'string', description: '決まり', enum: RULE_SETS } },
@@ -277,20 +278,23 @@ export const columnsPrepare: Tool = {
 };
 
 /**
- * 承認済みのコラムから、店頭サイネージ用の画像を作り始める（秘書から。第32.18.6節）。ワーカーが後ろで作る。
+ * 承認済みのコラムから、サイネージ用の画像を作り始める（秘書から。第32.18.6節）。ワーカーが後ろで作る。
  *
- * @remarks 危険度 `write-internal`。作るだけで、サイネージの画面には流さない（流すのは承認の後の `columns.signage_publish`）
+ * @remarks 危険度 `write-internal`。作るだけで、サイネージの画面には流さない（素材にするのはコラムの画面の「素材に登録」）
  */
 export const columnsSignageMake: Tool = {
   name: 'columns.signage_make',
   risk: 'write-internal',
-  activityLabel: 'コラムからサイネージの画面用の画像を作り始めています',
-  helpText: '承認済みのコラムから、サイネージの画面に流す画像（1 枚か紙芝居）を作り始めます。流すのは承認の後です',
-  description: '承認済みのコラムから、店頭サイネージ用の画像を作り始める。column はコラムの題名かテーマの言葉（無ければいちばん新しい承認済みのコラム）。kind は slides（画像）か video（動画）。1 つに決まらなければ候補を返す',
+  activityLabel: 'コラムからサイネージの画面用の画像・動画を作り始めています',
+  helpText: '承認済みのコラムから、サイネージの画面に流す画像（1 枚か紙芝居）・動画・ナレーション付きスライドを作り始めます。できたら、コラムの画面の「素材に登録」でサイネージの素材にします',
+  description: '承認済みのコラムから、サイネージ用の画像を作り始める。column はコラムの題名かテーマの言葉（無ければいちばん新しい承認済みのコラム）。kind は slides（画像）か video（動画）。動画の seconds は 8（既定・約 60 円）か 15（約 230 円）で、頼んだ人が言ったときだけ 15 にする。1 つに決まらなければ候補を返す',
   args: {
     properties: {
       column: { type: 'string', description: 'コラムの題名かテーマの言葉' },
-      kind: { type: 'string', description: '画像か動画', enum: ['slides', 'video'] },
+      kind: { type: 'string', description: '画像（slides）・動画（video）・ナレーション付きスライド（narrated）', enum: ['slides', 'video', 'narrated'] },
+      seconds: { type: 'number', description: '動画の長さ（秒）。8（既定）か 15' },
+      style: { type: 'string', description: '作風（言われなければ省く。既定はリアル）', enum: ['real', 'illustration', 'anime', 'fantasy'] },
+      voice: { type: 'string', description: 'ナレーションの声（言われなければ省く）', enum: ['calm', 'bright', 'soft', 'strong'] },
     },
   },
   async invoke(args, ctx) {
@@ -303,39 +307,14 @@ export const columnsSignageMake: Tool = {
     if (found.length === 0) return { available: false, reason: words ? 'その承認済みのコラムが見つかりません' : '承認済みのコラムがありません' };
     if (found.length > 1) return { available: false, reason: 'コラムが 1 つに決まりません', candidates: found.slice(0, 8).map((c) => c.title || c.theme) };
     const c = found[0]!;
-    const r = await signage.make(viewer(ctx), c.id, str(args['kind']) === 'video' ? 'video' : 'slides');
+    const kind = str(args['kind']) === 'video' ? 'video' : str(args['kind']) === 'narrated' ? 'narrated' : 'slides';
+    const r = await signage.make(viewer(ctx), c.id, kind, {
+      seconds: Number(args['seconds']) === 15 ? 15 : 8, style: columnImageStyle(args['style']),
+      ...(args['voice'] ? { voice: columnNarrationVoice(args['voice']) } : {}),
+    });
     if ('error' in r) return { available: false, reason: r.error };
     return { available: true, title: c.title || c.theme, path: columnPath(c.id), making: true };
   },
 };
 
-/**
- * 作った店頭サイネージ用の画像を流す（付属の業務「コラムをサイネージに流す」が承認の後に呼ぶ。第32.18.6節）。
- *
- * @remarks 危険度 `external-send`（サイネージの画面はお客様が見る）。承認の画面に一言・流す画面・期間と画像を出す。承認の後に変わっていたら流さない
- */
-export const columnsSignagePublish: Tool = {
-  name: 'columns.signage_publish',
-  risk: 'external-send',
-  activityLabel: 'コラムの画像をサイネージの画面に流しています',
-  helpText: 'コラムから作った画像を、承認の後にサイネージの画面の流れに置きます',
-  description: '店頭サイネージ用の組（setId）を、承認の後にサイネージの画面の流れの先頭に置く',
-  args: { properties: { setId: { type: 'string', description: 'サイネージ用の組の ID' } }, required: ['setId'] },
-  planKey: (args) => `column-signage:${str(args['setId'])}`,
-  async prepare(args, ctx) {
-    const signage = (await columnsOf(ctx)) ? ctx.columns?.signage : undefined;
-    if (!signage) return { kind: 'problem', reason: UNAVAILABLE.reason };
-    const p = await signage.preview(ctx.tenantId, str(args['setId']));
-    if ('error' in p) return { kind: 'problem', reason: p.error };
-    return { kind: 'ready', args: { setId: str(args['setId']), digest: p.digest }, audience: 'external', shown: p.shown };
-  },
-  async invoke(args, ctx) {
-    const signage = (await columnsOf(ctx)) ? ctx.columns?.signage : undefined;
-    if (!signage) return UNAVAILABLE;
-    const r = await signage.publish(viewer(ctx), str(args['setId']), str(args['digest']));
-    if ('error' in r) return { available: false, reason: r.error };
-    return { available: true, published: true, screens: r.screens };
-  },
-};
-
-export const COLUMN_TOOLS: Tool[] = [columnsDraft, columnsPreview, columnsPlace, columnsCover, columnsRules, columnsThemes, columnsPrepare, columnsSignageMake, columnsSignagePublish];
+export const COLUMN_TOOLS: Tool[] = [columnsDraft, columnsPreview, columnsPlace, columnsCover, columnsRules, columnsThemes, columnsPrepare, columnsSignageMake];

@@ -1638,7 +1638,7 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .hr-allowances { width: auto; margin: 6px 0; }
 .hr-allowances th, .hr-allowances td { padding: 3px 10px; }
 
-/* 店頭サイネージの再生のページ（仕様書 第31.9.1節）。全画面・マウスの矢印を隠す・選択させない。説明の文は出さない */
+/* サイネージの再生のページ（仕様書 第31.9.1節）。全画面・マウスの矢印を隠す・選択させない。説明の文は出さない */
 .signage-root { position: fixed; inset: 0; overflow: hidden; background: #000; color: #fff; cursor: none; user-select: none; -webkit-user-select: none; }
 .signage-frame { position: absolute; inset: 0; overflow: hidden; }
 .signage-layer { position: absolute; inset: 0; opacity: 0; transition: opacity .5s ease; overflow: hidden; }
@@ -1680,7 +1680,7 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .signage-qr { width: 38vmin; height: 38vmin; background: #fff; border-radius: 2vmin; padding: 1.5vmin; }
 .signage-code { font-size: 13vmin; font-weight: 700; letter-spacing: .12em; font-variant-numeric: tabular-nums; }
 
-/* 店頭サイネージの管理の画面（仕様書 第31.9.4節） */
+/* サイネージの管理の画面（仕様書 第31.9.4節） */
 .signage { display: flex; flex-direction: column; gap: calc(12px * var(--space-scale)); }
 .signage-screens { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: calc(10px * var(--space-scale)); }
 .signage-screen { cursor: pointer; padding: calc(10px * var(--space-scale)); display: flex; flex-direction: column; gap: 6px; }
@@ -1724,6 +1724,7 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .signage-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .signage-thumb.large { width: 100%; height: auto; aspect-ratio: 16 / 9; }
 .signage-thumb.large img { object-fit: contain; }
+.signage-thumb.large video { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; }
 .signage-asset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
 .signage-asset { display: flex; flex-direction: column; gap: 4px; }
 .signage-asset-name { width: 100%; }
@@ -1732,7 +1733,7 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .signage-pair-body { display: flex; flex-direction: column; gap: 12px; padding: 16px; }
 .signage-pair-code { font-size: 32px; font-weight: 700; letter-spacing: .1em; text-align: center; }
 
-/* 店頭サイネージの割り込み（仕様書 第31.7.1節）。0.3 秒で重ねて出す。点滅させない */
+/* サイネージの割り込み（仕様書 第31.7.1節）。0.3 秒で重ねて出す。点滅させない */
 .signage-int { position: absolute; inset: 0; z-index: 5; overflow: hidden; background: #000; animation: signage-in .3s ease both; }
 @keyframes signage-in { from { opacity: 0; } to { opacity: 1; } }
 .signage-int-text { position: absolute; inset: 0; display: grid; place-items: center; }
@@ -1744,7 +1745,7 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .signage-mute { position: fixed; right: 1.2vmin; bottom: 1.2vmin; z-index: 20; background: rgba(0, 0, 0, .45); color: #fff; border: 0; border-radius: 50%;
   width: 5vmin; height: 5vmin; font-size: 2.6vmin; cursor: pointer; opacity: .6; }
 
-/* 店頭サイネージのスタッフのページ（仕様書 第31.9.3節） */
+/* サイネージのスタッフのページ（仕様書 第31.9.3節） */
 .m-sig-targets { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
 .m-chip { border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 999px; padding: 6px 14px; font-size: 14px; cursor: pointer; }
 .m-chip.on { background: var(--accent); color: #fff; border-color: var(--accent); }
@@ -1789,17 +1790,14 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .signage-volume input { flex: 1; }
 .signage-recent { padding: calc(12px * var(--space-scale)); }
 .ext-chip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; }
-.ext-signage-sources { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
-.ext-signage-sources code { word-break: break-all; }
-/* 呼び出しの受け口の表（受け口・受け取った様子・操作） */
-.ext-sources-table { width: 100%; }
-.ext-sources-table td { vertical-align: top; }
-.ext-sources-table tr.is-stopped td:not(.ext-sources-actions) { opacity: 0.55; }
-.ext-sources-table .ext-sources-actions { width: 1%; white-space: nowrap; text-align: right; }
-.ext-sources-table .ext-sources-actions > * { vertical-align: middle; }
-.ext-sources-table .ext-sources-actions .link { margin-left: 10px; }
-.ext-signage-template { display: flex; flex-direction: column; gap: 4px; flex: 1 1 280px; }
-.ext-signage-template input { width: 100%; }
+/* サイネージの会社の設定（スケジュール・割り込み・呼び出しの言い回しの 3 つのまとまり。項目の名前と操作の 2 列） */
+.ext-signage { display: flex; flex-direction: column; gap: calc(12px * var(--space-scale)); margin-top: calc(8px * var(--space-scale)); }
+.ext-signage-group h4 { margin: 0; font-size: 13px; padding-bottom: calc(4px * var(--space-scale)); border-bottom: 1px solid var(--line); }
+.ext-signage-group .signage-settings { margin-top: calc(6px * var(--space-scale)); grid-template-columns: 9.5em minmax(0, 1fr); }
+.ext-signage-group .signage-settings-label { white-space: normal; }
+.ext-signage-control { display: flex; flex-wrap: wrap; align-items: center; gap: calc(6px * var(--space-scale)) calc(10px * var(--space-scale)); }
+.ext-signage input.num { width: 5em; }
+.ext-signage .signage-settings > input { width: 100%; max-width: 420px; }
 
 /* 知識の版の本文と、規程の改定による人事・給与の設定の食い違い（仕様書 第11.11.2節） */
 .knowledge-body { white-space: pre-wrap; max-height: 320px; overflow: auto; font-size: 12px; background: var(--panel-2, rgba(127,127,127,0.08)); padding: 8px; border-radius: 6px; }
@@ -2072,8 +2070,26 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 @keyframes health-flow { to { left: 100%; } }
 @media (prefers-reduced-motion: reduce) { .health-line.active::after { animation: none; left: 30%; } }
 
-/* コラムの店頭サイネージ用の画像（仕様書 第32.18.6節）。紙芝居は順に並べる */
+/* コラムのサイネージ用の画像（仕様書 第32.18.6節）。紙芝居は順に並べる */
 .columns-signage { margin-top: calc(16px * var(--space-scale)); border-top: 1px solid var(--line); padding-top: calc(12px * var(--space-scale)); }
+.columns-make-style { display: flex; flex-wrap: wrap; align-items: center; gap: calc(8px * var(--space-scale)) calc(16px * var(--space-scale)); margin-bottom: calc(10px * var(--space-scale)); }
+/* 作るものごとの枠（画像・動画・ナレーション付きスライド）。狭ければ縦に並ぶ */
+.columns-signage { container-type: inline-size; }
+.columns-make { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: calc(10px * var(--space-scale)); margin-bottom: calc(12px * var(--space-scale)); }
+/* 3 つが横に並ぶ幅が無ければ 1 列にする（2 つと 1 つに崩さない） */
+@container (max-width: 720px) { .columns-make { grid-template-columns: minmax(0, 1fr); } }
+.columns-make-card { display: flex; flex-direction: column; gap: calc(8px * var(--space-scale)); padding: calc(10px * var(--space-scale)) calc(12px * var(--space-scale)); border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.columns-make-card h4 { margin: 0; font-size: 13px; }
+.columns-make-fields { display: flex; flex-direction: column; gap: calc(6px * var(--space-scale)); flex: 1; }
+.columns-make-field { display: grid; grid-template-columns: 3.2em minmax(0, 1fr); align-items: center; gap: calc(6px * var(--space-scale)); font-size: 12px; color: var(--muted); }
+.columns-make-field select { width: 100%; min-width: 0; }
+.columns-make-style .columns-make-field { grid-template-columns: auto auto; }
+.columns-make-card .btn { align-self: flex-start; white-space: nowrap; }
+.columns-narration { margin: 0; padding-left: 1.4em; display: grid; gap: 2px; }
+.columns-signage-sets { display: flex; flex-direction: column; gap: calc(14px * var(--space-scale)); }
+.columns-signage-sets > .columns-signage-set { padding-top: calc(10px * var(--space-scale)); border-top: 1px solid var(--line); }
+.columns-signage-set-head { align-items: center; gap: calc(8px * var(--space-scale)); }
+.columns-signage-remove { margin-left: auto; }
 .columns-signage-set { margin-top: calc(10px * var(--space-scale)); display: grid; gap: calc(6px * var(--space-scale)); }
 .columns-signage-images { display: grid; gap: calc(8px * var(--space-scale)); }
 .columns-signage-images.is-landscape { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }

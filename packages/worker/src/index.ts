@@ -172,11 +172,11 @@ const laborCalendar = new LaborCalendar({
   payrollStore: new PostgresPayrollStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
   laborStore: new PostgresLaborStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
 });
-// 店頭サイネージ（第31章）。つながらない画面を知らせ、切れた登録の番号などを消す
+// サイネージ（第31章）。つながらない画面を知らせ、切れた登録の番号などを消す
 const signage = new SignageService({
   store: new PostgresSignageStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), repo, files,
 });
-// 在庫の公開を作り直したときの品切れ・入荷を、店頭サイネージの案内にする（第31.6.7節。会社が入れたときだけ）
+// 在庫の公開を作り直したときの品切れ・入荷を、サイネージの案内にする（第31.6.7節。会社が入れたときだけ）
 inventoryPublisher.onStockChange(async (tenantId, changes, current) => { await applyStockChanges(signage, tenantId, changes, current); });
 // 割り込みの文を出し終えて 24 時間で消し、行を 90 日で消す（第31.13節）
 const signageInterrupts = new SignageInterrupts({ service: signage, repo });
@@ -273,8 +273,7 @@ const members = new MemberService({
     if (!def) throw new Error('会員に LINE で知らせる業務が見つかりません');
     return (await enqueueJob(repo, { tenantId, requestedBy: userId, def, input: { messageId }, origin: 'menu', actor: { type: 'system', id: 'member-watch' } })).runId;
   },
-  runStatus: async (tenantId, runId) => (await repo.getRun(tenantId, runId))?.status ?? null,
-  // 特典の期間が変わったら、店頭サイネージの 1 枚を作り直す（第40.19節）
+  // 特典の期間が変わったら、サイネージの 1 枚を作り直す（第40.19節）
   signage,
 });
 const inquiryStore = new PostgresInquiryStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
@@ -326,7 +325,6 @@ const announcements = new AnnouncementService({
     if (!def) throw new Error('お知らせを出す業務が見つかりません');
     return (await enqueueJob(repo, { tenantId, requestedBy: userId, def, input: { announcementId }, origin: 'menu', actor: { type: 'user', id: userId } })).runId;
   },
-  runStatus: async (tenantId, runId) => (await repo.getRun(tenantId, runId))?.status ?? null,
 });
 // コラムのテーマ案・予定表と先回り・予約から入れる（第32.18.4節）。材料はほかの拡張から（使っていなければ空）
 const columnPlanner = new ColumnPlanner({
@@ -335,14 +333,15 @@ const columnPlanner = new ColumnPlanner({
   researchFor: (tenantId) => ai.researchFor(tenantId),
   materials: columnMaterialsFrom({ repo, webReview, competitorStore, inquiries }),
 });
-// 店頭サイネージ用の画像を後ろで作り、期間の過ぎた組を外す（第32.18.6節）
+// サイネージ用の画像を後ろで作り、期間の過ぎた組を外す（第32.18.6節）
 const columnSignage = new ColumnSignageService({
   store: new PostgresColumnSignageStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
   columns: columns.store, repo, files, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
   signage: signageForColumns(signage),
-  runStatus: async (tenantId, runId) => (await repo.getRun(tenantId, runId))?.status ?? null,
   // 動画のモデル（段 2。既定は Veo 3.1 Lite）
   ...(process.env['MODEL_VIDEO']?.trim() ? { videoModel: process.env['MODEL_VIDEO'].trim() } : {}),
+  ...(process.env['MODEL_VIDEO_LONG']?.trim() ? { videoLongModel: process.env['MODEL_VIDEO_LONG'].trim() } : {}),
+  ...(process.env['MODEL_TTS']?.trim() ? { ttsModel: process.env['MODEL_TTS'].trim() } : {}),
 });
 const engine = new RunEngine({
   repo, llm, registry, connector, files, resolveDefinition, isAvailable, logger: log, research, notices,
@@ -492,7 +491,7 @@ let lastRetentionCheck = 0;
 let lastNotifyCheck = 0;
 let lastConversationCheck = 0;
 let lastProactiveCheck = 0;
-/** 店頭サイネージの見回りの間隔（つながらない画面の知らせ。第31.5.1節）。 */
+/** サイネージの見回りの間隔（つながらない画面の知らせ。第31.5.1節）。 */
 const SIGNAGE_INTERVAL_MS = Number(process.env['SIGNAGE_INTERVAL_MS'] ?? 60_000);
 let lastSignageCheck = 0;
 /** 問い合わせの見張りの間隔（期限の知らせ・手つかずの知らせ・原文の片付け。第33.7節）。 */
@@ -527,7 +526,7 @@ let lastWebReviewCheck = 0;
 // コラムの作成（第32.18.4節）。既定は 1 分ごとに、予約の日時・飛ばす回・週に 1 回のテーマ案・7 日前の先回りを見る
 const COLUMN_PLAN_INTERVAL_MS = Number(process.env['COLUMN_PLAN_INTERVAL_MS'] ?? 60_000);
 let lastColumnPlanCheck = 0;
-/** コラムの店頭サイネージ用の画像を見る間隔（ミリ秒。頼まれたものを早く作るため短くする）。 */
+/** コラムのサイネージ用の画像を見る間隔（ミリ秒。頼まれたものを早く作るため短くする）。 */
 const COLUMN_SIGNAGE_INTERVAL_MS = Number(process.env['COLUMN_SIGNAGE_INTERVAL_MS'] ?? 10_000);
 let lastColumnSignageCheck = 0;
 // 秘書が学んだことの週 1 回の整理と、残す期間の片付け（仕様書 第11.11.4節）。1 時間ごとに「日曜の深夜で、前の整理から 6 日より経ったか」を見る
@@ -929,7 +928,7 @@ while (running) {
     }
   }
 
-  // 店頭サイネージの見回り（第31.5.1節）。ふだん動いている時間帯に 5 分つながらない画面を知らせる。会社ごとの失敗はほかの会社を止めない
+  // サイネージの見回り（第31.5.1節）。ふだん動いている時間帯に 5 分つながらない画面を知らせる。会社ごとの失敗はほかの会社を止めない
   if (Date.now() - lastSignageCheck >= SIGNAGE_INTERVAL_MS) {
     lastSignageCheck = Date.now();
     for (const tenantId of await repo.listTenantIds()) {
@@ -1047,14 +1046,14 @@ while (running) {
     }
   }
 
-  // コラムの店頭サイネージ用の画像を作り、期間の過ぎた組を外す（第32.18.6節）
+  // コラムのサイネージ用の画像を作り、期間の過ぎた組を外す（第32.18.6節）
   if (Date.now() - lastColumnSignageCheck >= COLUMN_SIGNAGE_INTERVAL_MS) {
     lastColumnSignageCheck = Date.now();
     try {
       const n = await withAiUsage({ purpose: 'worker:columns' }, () => columnSignage.tick(new Date()));
-      if (n > 0) log.info('コラムの店頭サイネージ用の画像を作りました', { sets: n });
+      if (n > 0) log.info('コラムのサイネージ用の画像を作りました', { sets: n });
     } catch (err) {
-      log.warn('コラムの店頭サイネージ用の画像の見回りに失敗しました', { err });
+      log.warn('コラムのサイネージ用の画像の見回りに失敗しました', { err });
     }
   }
 

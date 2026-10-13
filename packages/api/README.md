@@ -166,7 +166,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/cards/card/:cardId/attach` | 表の見つからなかった裏の名刺を、選んだ連絡先（`contactId`）の名刺の裏にする（仕様書 第27.5.1節） |
 | `POST /v1/cards/card/:cardId/detach-back` | 名刺の裏を外す（組を間違えたとき） |
 | `POST /v1/cards/:id/back` | 後から裏を足す（multipart の `file`。連絡先の最新の名刺の裏にして読み取り、英語の表記と裏の文を足す） |
-| `GET /v1/signage` ／ `PATCH /v1/signage/screens/:id` | 店頭サイネージ（仕様書 第31章）: 画面の一覧と状態・使っている容量と上限・管理者か ／ 画面の名前・向き・回し方・音の大きさ（`volume` 0〜100）を直す。サイネージを切っている会社と利用範囲の外の人には、`/v1/signage` のどの口も 403 |
+| `GET /v1/signage` ／ `PATCH /v1/signage/screens/:id` | サイネージ（仕様書 第31章）: 画面の一覧と状態・使っている容量と上限・管理者か ／ 画面の名前・向き・回し方・音の大きさ（`volume` 0〜100）を直す。サイネージを切っている会社と利用範囲の外の人には、`/v1/signage` のどの口も 403 |
 | `GET` ／ `PUT /v1/signage/screens/:id/entries` | 画面の流れと版（`band` で時間帯の流れ。答えに時間帯の一覧）／ 並びごと置き換える（`version` が違えば 409） |
 | `POST /v1/signage/screens/:id/bands` ／ `PATCH`・`DELETE /v1/signage/bands/:bandId` | 時間帯を足す（`start`・`end`・`days`。画面ごとに 3 つまで、重なれば 409）／ 直す ／ 削除（その流れも。仕様書 第31.6.6節） |
 | `GET` ／ `POST /v1/signage/assets` | 素材の一覧（どの画面の流れに入っているかつき）／ 足す（本文はファイルの中身そのもの。`x-file-name`・`x-width`・`x-height`。形式・縦横・長さをサーバーでも確かめ、H.264 でない動画は 422。HTML は 10 MB・UTF-8 で、外への参照（`http:`・`https:`・`//`）が残れば 422、`<title>` を名前にする。同じ中身は 200 と前の素材） |
@@ -176,9 +176,8 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/signage/interrupts/:id/clear` ／ `POST /v1/signage/clear` | その割り込みを消す ／ すべて消す（`screens` で画面を選べる） |
 | `GET /v1/signage/phrases` ／ `POST /v1/signage/phrases/:id/hide` | よく出す案内（14 日に 3 回以上出した形）と割り込みの素材の使った回数 ／ 案内を外す |
 | `GET /v1/signage/sounds` ／ `GET /v1/signage/mobile-qr.svg` | 会社のジングルの音の一覧 ／ スタッフのページ（`/m/signage`）の QR |
-| `POST /v1/admin/extensions/signage/pairings/claim` ／ `DELETE /v1/admin/extensions/signage/screens/:id` ／ `PUT /v1/admin/extensions/signage/settings` | 管理者: 番号で画面を登録（1 社 3 台まで。外して 30 日以内の画面は引き継ぐ）／ 画面を外す（鍵はその場で効かない）／ 画像の秒数・店の色・割り込みの秒数（5〜60）・ジングルの有無と既定の音・呼び出しの言い回し（`{番号}` と `{場所}`） |
-| `GET` ／ `POST /v1/admin/extensions/signage/sources` ／ `PUT …/sources/:id/status` ／ `POST …/sources/:id/reset-mapping` | 管理者: 呼び出しの受け口の一覧（今日の受け付けた数・断った数）／ 作る（URL と鍵は作ったときだけ返す）／ 止める・動かす ／ 項目の対応を忘れて推測し直す |
-| `GET` ／ `POST /v1/admin/extensions/signage/sounds` ／ `DELETE …/sounds/:id` | 管理者: 会社のジングルの音（本文は MP3・WAV そのもの。`x-sound-name`・`x-duration-ms`。5 秒・300 KB・10 個まで）／ 消す（既定の音なら「ピンポーン」に戻す） |
+| `POST /v1/admin/extensions/signage/pairings/claim` ／ `DELETE /v1/admin/extensions/signage/screens/:id` ／ `PUT /v1/admin/extensions/signage/settings` | 管理者: 番号で画面を登録（1 社 3 台まで。外して 30 日以内の画面は引き継ぐ）／ 画面を外す（鍵はその場で効かない）／ 画像の秒数・背景色・割り込みの秒数（5〜60）・ジングルの有無と既定の音・呼び出しの言い回し（`{番号}` と `{場所}`） |
+| `GET` ／ `POST /v1/admin/extensions/signage/sounds` ／ `GET …/sounds/:id` ／ `DELETE …/sounds/:id` | 管理者: 会社のジングルの音（本文は MP3・WAV そのもの。`x-sound-name`・`x-duration-ms`。5 秒・300 KB・10 個まで）／ 中身（設定の欄の再生のボタン）／ 消す（既定の音なら「ピンポーン」に戻す） |
 | `/v1/signage-play/...` | 再生のページ（端末）。**ログインを使わず、画面の鍵（`Authorization: Bearer`）で名乗る**。`POST /pairings`（登録の番号。1 時間に 20 回まで）・`GET /pairings/qr.svg`・`POST /pairings/poll`（登録されたら鍵を 1 度だけ返す）・`GET /state`・`GET /assets/:id`（`Range`）・`GET /assets/:id/thumbnail`・`GET /events`（SSE。流れ・設定・外された・割り込み・消す・音の大きさ）・`POST /heartbeat`（停止中も受ける）・`GET /interrupts`（待っているものと出しているもの。経過はサーバーが数える）・`POST /interrupts/:id/started`・`/ended`（`ended` は停止中も受ける）・`GET /sounds/:id`。鍵が無い・違う会社は 401、切った会社は 404 |
 | `GET /v1/inventory` | 在庫の品目の一覧（`q`・`stopped=1`）と使える数・場所・会社の機能の入り切り。在庫管理を切っている会社と利用範囲の外の人には、`/v1/inventory` のどの口も 403（仕様書 第29章） |
 | `GET /v1/inventory/items/:id` | 品目の詳細（場所とロットごとの数・最近の記録） |
@@ -262,7 +261,6 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/inventory/bookings/:id/use` ／ `cancel` | 予約の人が来た（取り置きを使用の記録にする）／ 取り消す（使える数に戻す） |
 | `POST /v1/inventory/menus` | メニューで使う品目を覚える（`menu`・`items`: itemId と qty。空なら在庫を使わない）。品目の分からない予約を取り置き直す |
 | `POST /v1/hooks/line/:key` | **認証なしの受け口**。LINE 公式アカウントの Webhook（仕様書 第33.19節）。会社は鍵（32 文字）のハッシュから引き、その会社のチャネルのシークレットで `X-Line-Signature` を確かめる。知らない鍵・問い合わせの記録か LINE を切った会社は 404、署名が違えば 401、1 MB を超えれば 413。確かめたらすぐ 200 を返し、取り込みは後ろで行う（出来事の ID で 2 度残さない） |
-| `POST /v1/hooks/signage/:key` ／ `POST /v1/hooks/signage`（`Authorization: Bearer`） | **認証なしの受け口**。受付などのシステムから店頭サイネージに割り込みを出す（第31.8.2節）。会社は鍵（32 文字）のハッシュから引く。JSON かフォーム（UTF-8）だけ（ほかは 415）、4 KB を超えれば 413、1 分 30 回を超えれば 429（`retry-after`）。知らない鍵・止めた受け口・切った会社はどれも 404、POST 以外は 405、読めない・知らない画面は 422。標準の形でない本文は、値を消した骨組みだけを推論に渡して対応を推測する（推論が使えなければ 503）。`requestId` を 10 分覚えて二度出さない。記録では URL の鍵を伏せる |
 | `GET /v1/inventory/publications` | 管理者: Web への公開のまとまりの一覧（作った順。`max` は 1 社の上限 8）。1 つも無ければ「公開 1」を作って返す。「Web への公開」を切った会社と管理者でない人は 403（第29.12.1節・第29.12.2節） |
 | `POST /v1/inventory/publications` | 管理者: まとまりを足す（承認する前の形。`name` を省けば「公開 N」）。8 つを超えると 400 |
 | `POST /v1/inventory/publications/preview` | 管理者: 承認する前の見本（`itemIds`・`fields`（`category`・`price`）・`showCount`）。公開されるとおりの中身を返す |
@@ -273,15 +271,15 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET` ／ `POST /v1/columns` | Web のコラム（仕様書 第32.18.1節）: 一覧と入れ先の WordPress ／ 書き始める（`theme`・`memo`。書き上げは裏で進め、すぐ 201 と `id`）。Web のコラムを切っている会社と利用範囲の外の人には、`/v1/columns` のどの口も 403。推論が使えなければ 409 |
 | `GET` ／ `PUT` ／ `DELETE /v1/columns/:id` | コラムと版（新しい順）／ 直して保存する（`title`・`body`・`description`・`sns`。新しい版になる。承認待ちと書いている途中は 409）／ 削除する（承認へ進めていないものだけ） |
 | `POST /v1/columns/:id/rewrite` ／ `/retry` | 指示（`instruction`）で書き直してもらう ／ 書けなかったコラムをもう一度書く |
-| `POST /v1/columns/:id/suggestions/:index` ／ `/versions/:version/restore` | 赤入れの直し案に置き換える ／ 前の版に戻す（どちらも新しい版になる） |
+| `POST /v1/columns/:id/suggestions/:index` ／ `/versions/:version/restore` | 校正の直し案に置き換える ／ 前の版に戻す（どちらも新しい版になる） |
 | `GET /v1/columns/:id/export` | 記事に入れる形（Markdown と HTML。末尾に出典・監修者・AI の表示） |
 | `POST /v1/columns/themes` ／ `POST /v1/columns/themes/:id/write` ／ `/dismiss` | コラムの段 2（第32.18.4節）: テーマ案を作る ／ 案から書き始める（書き直しの案なら書き直す）／ 見送り。`GET /v1/columns` はテーマ案（`themes`）・予定表（`plan`）・貼るだけのページの URL（`pageUrl`）も返す |
 | `PUT /v1/columns/:id/publish-at` ／ `POST /v1/columns/:id/withdraw` | 公開の日時（予約。`publishAt`: ISO か null。下書きのときだけ）／ 取り下げる（管理者と承認者だけ）。`GET /v1/columns/:id` は公開の URL（`publicUrl`）も返す |
 | `POST` ／ `DELETE /v1/admin/extensions/web-columns/page` | 管理者: 貼るだけのページを入れる（鍵の URL を作り、ページ・JSON・RSS の URL を返す）／ 止める。設定の `plan`（`perMonth`: 1・2・4、`weekday`: 0〜6。null で作らない）は `PUT /v1/admin/extensions/web-columns/settings` |
 | `GET /v1/public/columns/:key` ／ `:key.json` ／ `:key.rss` ／ `:key/:id` ／ `:key/:id/cover.png` | 貼るだけのページ（ログインなし。会社の判定より前）: 承認済みで公開の日時を過ぎたコラムの一覧 ／ データ ／ RSS ／ 記事 ／ カバー画像。鍵が違う・止めた会社は 404。ページはスクリプトを持たない |
 | `POST /v1/columns/:id/cover/restore` | 前に作ったカバーに戻す（`fileId`。このコラムの前の版のカバーだけ。本文はいまのまま、新しい版になる） |
-| `GET` ／ `POST /v1/columns/:id/signage` | 店頭サイネージ用の組（新しい順）と作れるか（`usable`・`reason`）／ 作り始める（`kind`: slides（画像）か video（15 秒の動画。会社で月 10 本））。承認済みのコラムだけ。ワーカーが後ろで作る。仕様書 第32.18.6節） |
-| `POST /v1/columns/signage/:setId/submit` ／ `POST /v1/columns/signage/:setId/withdraw` ／ `GET /v1/columns/signage/:setId/files/:fileId` | 承認へ進める（付属の業務「コラムをサイネージに流す」）／ 店頭サイネージから外す（管理者と承認者）／ 組の画像（組に入っているファイルだけ） |
+| `GET` ／ `POST /v1/columns/:id/signage` | サイネージ用の組（新しい順）と作れるか（`usable`・`reason`）（`narrated`: ナレーション付きスライドを作れるかと選べる BGM）／ 作り始める（`kind`: slides（画像）・video（動画。`seconds` で 8（既定）か 15。会社で月 10 本）・narrated（ナレーション付きスライド。`voice`・`bgm`）。`style` は作風）。承認済みのコラムだけ。ワーカーが後ろで作る。仕様書 第32.18.6節） |
+| `POST /v1/columns/signage/:setId/register` ／ `GET /v1/columns/signage/:setId/files/:fileId` | 素材に登録する（承認は挟まない。サイネージを使える人だけ。第 0.355.0 版）／ 組の画像・動画（組に入っているファイルだけ）。素材に登録した後の管理はサイネージの画面で行い、コラムからは消さない（第 0.354.0 版） |
 | `GET` ／ `POST /v1/columns/:id/cover` | カバー画像（PNG。`version` で前の版、`download=1` で保存させる）／ 作り直す（`kind`: template・ai・photo、`hint`。新しい版になる） |
 | `POST /v1/columns/:id/photos` | 写真を入れ、そのコラムのカバーにする（本文は写真の中身。JPEG・PNG、10 MB まで。会社の写真の置き場にも入る） |
 | `POST /v1/columns/:id/submit` | 承認へ進める（業務「コラムを WordPress に入れる」を始め、管理者か承認者の承認を待つ。版の指紋を残す。入力にカバーのファイルを含め、承認する人がその画像を見られるようにする。入れられない理由があれば 400） |
@@ -308,7 +306,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/web-review/findings` ／ `PATCH /v1/web-review/findings/:id` ／ `POST /v1/web-review/check` | 直すべき所（第34.19節。`all=1` で済んだ・見送りも）／ 状態を変える（`status`: new・seen・done・dismissed）／ 管理者: 今すぐチェック（ワーカーが次の見回りで探す）。`GET /v1/columns/:id` は、Webの分析を使える人に公開されたコラムの数字（`webMetrics`）を添える |
 | `POST /v1/admin/extensions/web-review/connect` ／ `DELETE /v1/admin/extensions/web-review/connection` | 管理者: 担当の許可をつなぐ（Google の認可の URL。アナリティクスと Search Console の読み取りだけを求め、前に許した権限を引き継がない。見本の会社ではすぐつながる）／ 外す（Google の許可も取り消す。便りは消さない） |
 | `GET /v1/admin/extensions/web-review/candidates` ／ `PUT /v1/admin/extensions/web-review/selection` | 管理者: 担当が見られるプロパティとサイトと状態 ／ プロパティとサイトを選ぶ（`propertyId`・`siteUrl`。見られるものの中からだけ） |
-| `GET /v1/admin/extensions/announcements/screens` | 管理者: お知らせを流す画面の選び先（店頭サイネージの画面）と、いま選んでいる画面（`selected`。`null` ならすべて。第35.17節） |
+| `GET /v1/admin/extensions/announcements/screens` | 管理者: お知らせを流す画面の選び先（サイネージの画面）と、いま選んでいる画面（`selected`。`null` ならすべて。第35.17節） |
 | `GET /v1/announcements/line/status` ／ `PUT /v1/admin/extensions/announcements/settings` | LINE の友だちの数と今月の残り ／ 管理者: Web の出し方（`webPublish`: publish・draft）・カテゴリー（`webCategory`）・流す画面（`screens`） |
 | `GET` ／ `POST /v1/contracts` | 契約の管理（仕様書 第38章）: 一覧（期限の近い順。`status`・`kind`・`owner`・`q`。答えに置き場をつないでいるか）／ 手で入れる。使えない会社と利用範囲の外の人には、`/v1/contracts` のどの口も 403 |
 | `POST /v1/contracts/import` | 契約書から入れる（`fileId`: 上げたファイルか、`runId`: 契約書チェックの実行。AI が項目を取り出し、期限を計算し、ドライブの置き場に置く） |
@@ -334,7 +332,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/print-designs/:id/canva` ／ `POST /v1/print-designs/:id/canva/pull` | Canva で仕上げる（選んだ版の PDF を本人の Canva に取り込み、編集の画面の URL）／ Canva から戻す（新しい版。第41.19.3節） |
 | `GET` ／ `DELETE /v1/me/canva`、`POST /v1/me/canva/connect`、`GET /v1/oauth/canva/callback` | 本人の Canva の接続（状態 ／ 切断 ／ つなぐ（PKCE）／ Canva からの戻り）。運営が設定していなければ `configured: false` |
 | `PUT /v1/admin/connections/google/picker` | 管理者: ドライブの写真を選ぶ画面（Google Picker）の API キー（空なら消す） |
-| `POST` ／ `DELETE /v1/print-designs/:id/signage`、`POST /v1/print-designs/:id/announcement` | 店頭サイネージに流す（掲示の始まりより前なら始まりから）／ 止める ／ お知らせの作成の下書きにする（第41.18節。1 つの物を返すときに `links` でつなげる先を使えるかを添える） |
+| `POST` ／ `DELETE /v1/print-designs/:id/signage`、`POST /v1/print-designs/:id/announcement` | サイネージに流す（掲示の始まりより前なら始まりから）／ 止める ／ お知らせの作成の下書きにする（第41.18節。1 つの物を返すときに `links` でつなげる先を使えるかを添える） |
 | `GET /v1/print-designs/:id/thumb` ／ `GET /v1/print-designs/:id/versions/:vid/preview\|png\|pdf\|bleed` | 一覧の小さな画像 ／ 版の書き出し（案の画像・PNG・実寸の PDF・入稿用の PDF。`page` はパンフレットの面） |
 | `GET /v1/competitors` | 競合の分析（仕様書 第36.18節）: 全体（自社の像・競合・動いている作業・最後の作業・地図の注意）。地図で見つけた競合の名前と Web サイトはここで引き直す。使えない会社と利用範囲の外の人には、`/v1/competitors` のどの口も 403 |
 | `POST /v1/competitors/discover` ／ `POST /v1/competitors/check` | 競合を探す作業（`radiusKm`・`nationwide`・`auto` で商圏を変える）／ 今すぐ見回る作業を受け付ける（202。ワーカーが行う。動いていれば `already`） |
@@ -417,6 +415,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/admin/extensions/hr/rule-checks` ／ `POST …/rule-checks/:itemId/:version/dismiss` | 管理者: 社内規程の登録・改定で見つかった今の設定との食い違い（残した答えを、いまの設定と並べ直す。第11.11.2節）／ 見終えた |
 | `PUT /v1/admin/extensions/hr/settings` | 管理者: 人事・給与の会社の設定（`office`・`health`・`socialApply`・`pay`・`procedures`・`work`・`agreement`・`leave`・`payroll`・`transfer`（振込元。番号の桁を確かめる）・`duties`（納期の特例・定期健康診断の月）・`notice`（労働条件通知書の会社の定め）・`insurance`（事業所整理記号・事業所番号・特定適用事業所 auto・yes・no・通常の労働者の週の所定労働時間 10〜60）・`labor`（雇用保険の事業の種類・労災保険の事業の種類の番号・労働保険番号）。第30.8.1節）。`GET /v1/admin/extensions/hr/labor-industries` で労災保険率表の事業の種類、`GET /v1/admin/extensions/hr/allowances` で手当の扱い（雇用条件の手当の名前と、割増の基礎・所得税の対象・設定したか）。送った項目だけを変える。人事・給与を `PUT /v1/admin/extensions/hr/enabled` で入れると、区画 `hr` が無ければ作り、入れた管理者を入れる |
 | `PUT /v1/admin/extensions/inventory/settings` | 管理者: 在庫管理の機能の入り切り（`features`）・残りわずかの既定の目安（`lowDefault`）・仕入れの日数（`leadDaysDefault`）・棚卸しの頻度（`countEveryDays`）。送った項目だけを変える（第29.4.1節） |
+| `GET` ／ `POST` ／ `DELETE /v1/admin/extensions/web-columns/bgm` | 管理者: 会社の曲（ナレーション付きスライドの BGM）の一覧 ／ 入れる（本文は MP3・WAV そのもの。`x-track-name`・`x-duration-ms`。5 MB・5 分・10 曲まで）／ 消す（`/:id`） |
 | `PUT /v1/admin/extensions/web-columns/settings` | 管理者: Web のコラムの分野（`topics`）・読み手（`audience`）・業種（`industry`。東証の 33 業種のコード。業種・分野・読み手・監修者が変われば、当てる表現の決まり `rules` を AI が選び直して返す）・監修者（`supervisor`）・AI の表示（`aiNotice`）・AI で挿絵を描くか（`aiIllustration`）。送った項目だけを変える（第32.18.1節） |
 | `PUT` ／ `DELETE /v1/admin/extensions/web-columns/wordpress` | 管理者: WordPress の入れ先（`siteUrl`・`username`）とアプリケーションパスワード（`password`）を、つながるかを確かめてから暗号化して預ける（つながらなければ 400。パスワードは返さない）／ 外す |
 | `GET /v1/admin/connections/mcp` | 管理者: 会社の接続（MCP）の一覧。ツールごとの危険度・有効かどうか・使っている業務、認証の状態（`authState`。秘密の値は返さない）、よく使うサービスの型（`presets`）（仕様書 第12.11節、ADR-0037・ADR-0044） |

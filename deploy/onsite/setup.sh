@@ -230,7 +230,8 @@ yes_no 'この答えで入れますか' y || exit 1
 say '前提のソフトを確かめます'
 command -v brew >/dev/null || die 'Homebrew がありません。https://brew.sh の手順で入れてから走らせ直してください'
 missing=''
-formulas="$NODE_FORMULA $PG_FORMULA pgvector caddy"
+# ffmpeg はナレーション付きスライドを MP4 にまとめるのに使う（M2Office には同梱しない。第32.18.6節 段 3、ADR-0094）
+formulas="$NODE_FORMULA $PG_FORMULA pgvector caddy ffmpeg"
 [ "$MAINTENANCE" = yes ] && formulas="$formulas tailscale"
 [ "$OFFSITE" = yes ] && formulas="$formulas restic"
 for f in $formulas; do
@@ -246,6 +247,7 @@ NODE_BIN="$(brew --prefix "$NODE_FORMULA")/bin/node"
 NPM_DIR="$(brew --prefix "$NODE_FORMULA")/bin"
 PG_BIN="$(brew --prefix "$PG_FORMULA")/bin"
 CADDY_BIN="$(brew --prefix caddy)/bin/caddy"
+FFMPEG_BIN="$(brew --prefix ffmpeg)/bin/ffmpeg"
 TAILSCALE_BIN=''
 [ "$MAINTENANCE" = yes ] && TAILSCALE_BIN="$(brew --prefix tailscale)/bin/tailscale"
 RESTIC_BIN=''
@@ -319,7 +321,7 @@ answers="$work/answers"
   for k in INSTALL_DIR REPO_DIR RELEASE_DIR ENV_FILE FRONT_DIR DATA_DIR BACKUP_DIR API_PORT DB_PORT HOST SUBDOMAIN ACME_EMAIL \
     NODE_BIN PG_BIN CADDY_BIN LOCAL_LLM_URL LOCAL_LLM_MODEL LOCAL_LLM_EMBED_MODEL GEMINI_API_KEY GOOGLE_LOGIN_CLIENT_ID \
     GOOGLE_LOGIN_CLIENT_SECRET SECRET_KEY DB_APP_PASSWORD DB_OWNER_PASSWORD UPDATE_HOUR HEARTBEAT_URL HEARTBEAT_TOKEN MACHINE_ID \
-    OFFSITE_REPOSITORY OFFSITE_PASSWORD OFFSITE_ACCESS_KEY_ID OFFSITE_SECRET_ACCESS_KEY OFFSITE_REGION RESTIC_BIN; do
+    OFFSITE_REPOSITORY OFFSITE_PASSWORD OFFSITE_ACCESS_KEY_ID OFFSITE_SECRET_ACCESS_KEY OFFSITE_REGION RESTIC_BIN FFMPEG_BIN; do
     printf '%s=%s\n' "$k" "${!k}"
   done
   printf 'TLS_BLOCK=%s\n' "$(tls_block)"
@@ -339,7 +341,7 @@ conf="$work/setup.conf"
   for k in COMPANY_NAME SUBDOMAIN GW_DOMAIN ADMIN_EMAIL HOST TLS_MODE DNS_PROVIDER ACME_EMAIL DATA_DIR BACKUP_DIR API_PORT DB_PORT \
     LOCAL_LLM_URL LOCAL_LLM_MODEL LOCAL_LLM_EMBED_MODEL ALLOWED_SIGNERS_SOURCE ALLOWED_SIGNERS AUTO_UPDATE UPDATE_HOUR \
     INSTALL_DIR REPO_DIR RELEASE_DIR ENV_FILE FRONT_DIR NODE_BIN NPM_DIR PG_BIN CADDY_BIN SERVICE_USER MAINTENANCE MAINTENANCE_SAVED TAILSCALE_BIN \
-    OFFSITE OFFSITE_SAVED RESTIC_BIN; do
+    OFFSITE OFFSITE_SAVED RESTIC_BIN FFMPEG_BIN; do
     printf "%s='%s'\n" "$k" "$(printf '%s' "${!k}" | sed "s/'/'\\\\''/g")"
   done
 } > "$conf"

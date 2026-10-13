@@ -18,8 +18,8 @@ import type { CardCorners, CardEnglish, PrintDesign, PrintDesignDetailView, Prin
   InventoryCount, InventoryCountRow, InventoryCountScope, InventoryCountView, InventorySupplier,
   InventoryBooking, InventoryBookingMapping, InventoryBookingSource, InventoryPublication, InventoryPublicationScope, InventoryPublicSnapshot,
   InventoryCatalogScope, InventorySaleUnmatched, ExternalApp, AppFunctionId, AppFunctionInfo, AppSettings, AppSettingOptions, AppBindingView,
-  SignageAsset, SignageBand, SignageEntry, SignageScreen, SignageSettings, SignageTransition, SignageInterruptInput, SignageInterruptView, SignagePhrase, SignageSound, SignageSource,
-  ColumnWordPress, WebColumn, WebColumnSettings, WebColumnVersion, WebColumnTheme, ColumnPlanSlot, ColumnSignageSet,
+  SignageAsset, SignageBand, SignageEntry, SignageScreen, SignageSettings, SignageTransition, SignageInterruptInput, SignageInterruptView, SignagePhrase, SignageSound,
+  ColumnWordPress, WebColumn, WebColumnSettings, WebColumnVersion, WebColumnTheme, ColumnPlanSlot, ColumnSignageSet, ColumnImageStyle, ColumnNarrationVoice, ColumnBgmTrack,
   Inquiry, InquiryDetail, InquiryParty, InquiryTask, InquiryReply, InquiryMailSkipped, InquiryMonthStats, InquirySettings, InquiryFaqTopic,
   CompetitorOverview, CompetitorFact, CompetitorReport, CompetitorSettings,
   Announcement, AnnouncementDetail, AnnouncementPreview, AnnouncementRecipient, AnnouncementRecipientsRefined, AnnouncementSettings, AnnouncementTexts,
@@ -171,7 +171,7 @@ async function postForm<T>(path: string, form: FormData, method: 'POST' | 'PUT' 
   return body as T;
 }
 
-/** ファイルの中身そのものを本文にして送る（店頭サイネージの素材。仕様書 第31.6.1節）。失敗なら ApiError。 */
+/** ファイルの中身そのものを本文にして送る（サイネージの素材。仕様書 第31.6.1節）。失敗なら ApiError。 */
 async function sendRaw<T>(method: 'POST' | 'PUT', path: string, body: Blob, headers: Record<string, string> = {}): Promise<T> {
   const res = await fetch(`/v1${path}`, {
     method, credentials: 'same-origin', body,
@@ -295,7 +295,7 @@ export interface Me {
   inventory?: boolean;
   /** 人事・給与の担当者の画面を使えるか（会社の入り切りと人事区画。仕様書 第30.2節）。 */
   hr?: boolean;
-  /** 店頭サイネージを使えるか（会社の入り切りと利用範囲。仕様書 第31.2節）。 */
+  /** サイネージを使えるか（会社の入り切りと利用範囲。仕様書 第31.2節）。 */
   signage?: boolean;
   /** Web のコラムを使えるか（会社の入り切りと利用範囲。仕様書 第32.18.1節）。 */
   webColumns?: boolean;
@@ -838,7 +838,7 @@ export interface ExtensionView {
   inventory?: InventorySettings;
   /** 人事・給与の会社の設定（仕様書 第30.8.1節）。人事・給与のときだけある。 */
   hr?: HrSettings;
-  /** 店頭サイネージの会社の設定（仕様書 第31.4節）。店頭サイネージのときだけある。 */
+  /** サイネージの会社の設定（仕様書 第31.4節）。サイネージのときだけある。 */
   signage?: SignageSettings;
   /** Web のコラムの会社の設定（仕様書 第32.18.1節）。Web のコラムのときだけある。パスワードは含まない。 */
   webColumns?: WebColumnSettings;
@@ -877,7 +877,7 @@ export interface ColumnDetail {
   publicUrl?: string | null;
 }
 
-/** 店頭サイネージの管理の画面の中身（仕様書 第31.9.4節）。 */
+/** サイネージの管理の画面の中身（仕様書 第31.9.4節）。 */
 export interface SignageOverview {
   screens: SignageScreen[];
   usage: { bytes: number; limit: number };
@@ -886,7 +886,7 @@ export interface SignageOverview {
   admin: boolean;
 }
 
-/** 店頭サイネージの素材（どの画面の流れに入っているかつき）。 */
+/** サイネージの素材（どの画面の流れに入っているかつき）。 */
 export type SignageAssetView = SignageAsset & { screens: string[] };
 
 /** 管理者ページ「接続」の設定（仕様書 第14.3.3節）。秘密の値は含まない。 */
@@ -1523,7 +1523,7 @@ export const api = {
     markRemoved: (id: string) => call<{ ok: true }>(`/print-designs/${encodeURIComponent(id)}/removed`, { method: 'POST', body: '{}' }),
     remake: (id: string, instruction: string) => call<PrintDesignDetailView>(`/print-designs/${encodeURIComponent(id)}/remake`, { method: 'POST', body: JSON.stringify({ instruction }) }),
     remove: (id: string) => call<{ ok: true }>(`/print-designs/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-    /** 店頭サイネージに流す（掲示の始まりより前なら、始まりから流す。第41.18節）。 */
+    /** サイネージに流す（掲示の始まりより前なら、始まりから流す。第41.18節）。 */
     toSignage: (id: string) => call<{ state: 'on' | 'waiting'; screens: string[] }>(`/print-designs/${encodeURIComponent(id)}/signage`, { method: 'POST', body: '{}' }),
     stopSignage: (id: string) => call<{ ok: true }>(`/print-designs/${encodeURIComponent(id)}/signage`, { method: 'DELETE' }),
     /** Canva で仕上げる（編集の画面の URL を返す。第41.19.3節）。 */
@@ -1651,18 +1651,22 @@ export const api = {
     /** カバー画像の URL（`<img>` に使う。版を変えると URL が変わる）。 */
     coverUrl: (id: string, fileId: string) => `/v1/columns/${encodeURIComponent(id)}/cover?v=${encodeURIComponent(fileId)}`,
     /** カバーを作り直す（新しい版になる）。 */
-    recover: (id: string, req: { kind?: 'template' | 'ai' | 'photo'; hint?: string } = {}) =>
+    recover: (id: string, req: { kind?: 'template' | 'ai' | 'photo'; hint?: string; style?: ColumnImageStyle } = {}) =>
       call<{ ok: true }>(`/columns/${encodeURIComponent(id)}/cover`, { method: 'POST', body: JSON.stringify(req) }),
     /** 前に作ったカバーに戻す（新しい版になる。本文はいまのまま）。 */
     useCover: (id: string, fileId: string) => call<{ ok: true }>(`/columns/${encodeURIComponent(id)}/cover/restore`, { method: 'POST', body: JSON.stringify({ fileId }) }),
     /** 前の版のカバー画像の URL。 */
     coverUrlOf: (id: string, version: number) => `/v1/columns/${encodeURIComponent(id)}/cover?version=${version}`,
-    /** 店頭サイネージ用の組と、作れるか（仕様書 第32.18.6節）。 */
-    signage: (id: string) => call<{ usable: boolean; reason: string | null; sets: ColumnSignageSet[] }>(`/columns/${encodeURIComponent(id)}/signage`),
-    /** 店頭サイネージ用を作り始める（ワーカーが後ろで作る）。 */
-    makeSignage: (id: string, kind: 'slides' | 'video' = 'slides') => call<{ id: string }>(`/columns/${encodeURIComponent(id)}/signage`, { method: 'POST', body: JSON.stringify({ kind }) }),
-    submitSignage: (setId: string) => call<{ runId: string }>(`/columns/signage/${encodeURIComponent(setId)}/submit`, { method: 'POST', body: '{}' }),
-    withdrawSignage: (setId: string) => call<{ ok: true }>(`/columns/signage/${encodeURIComponent(setId)}/withdraw`, { method: 'POST', body: '{}' }),
+    /** サイネージ用の組と、作れるか（仕様書 第32.18.6節）。 */
+    signage: (id: string) => call<{ usable: boolean; reason: string | null; sets: ColumnSignageSet[]; narrated: { usable: boolean; reason: string | null; bgm: { id: string; label: string }[] } }>(`/columns/${encodeURIComponent(id)}/signage`),
+    /** サイネージ用を作り始める（ワーカーが後ろで作る）。 */
+    /** サイネージ用を作り始める（`narrated` はナレーション付きスライド。声と BGM を選ぶ。第32.18.6節 段 3）。 */
+    makeSignage: (id: string, kind: 'slides' | 'video' | 'narrated' = 'slides', opts: { seconds?: 8 | 15; style?: ColumnImageStyle; voice?: ColumnNarrationVoice; bgm?: string } = {}) =>
+      call<{ id: string }>(`/columns/${encodeURIComponent(id)}/signage`, { method: 'POST', body: JSON.stringify({ kind, ...opts }) }),
+    /** サイネージ用の組を素材に登録する（承認は挟まない）。 */
+    /** サイネージ用の組を削除する（素材に登録したものはサイネージに残る）。 */
+    removeSignage: (setId: string) => call<{ ok: true }>(`/columns/signage/${encodeURIComponent(setId)}`, { method: 'DELETE' }),
+    registerSignage: (setId: string) => call<{ assets: number }>(`/columns/signage/${encodeURIComponent(setId)}/register`, { method: 'POST', body: '{}' }),
     signageFileUrl: (setId: string, fileId: string) => `/v1/columns/signage/${encodeURIComponent(setId)}/files/${encodeURIComponent(fileId)}`,
     /** 写真を入れ、そのコラムのカバーにする（会社の写真の置き場にも入る）。 */
     addPhoto: (id: string, file: File) => call<{ ok: true }>(`/columns/${encodeURIComponent(id)}/photos`, {
@@ -1675,7 +1679,7 @@ export const api = {
       saveBlob(blob, `${title.slice(0, 40) || 'column-cover'}.png`);
     },
   },
-  /** 店頭サイネージ（仕様書 第31章）。 */
+  /** サイネージ（仕様書 第31章）。 */
   signage: {
     overview: () => call<SignageOverview>('/signage'),
     updateScreen: (id: string, patch: { name?: string; orientation?: 'landscape' | 'portrait'; rotation?: number; volume?: number; transition?: SignageTransition; kenBurns?: boolean }) =>
@@ -1706,6 +1710,8 @@ export const api = {
     thumbnail: (id: string) => fetchBlob(`/signage/assets/${encodeURIComponent(id)}/thumbnail`),
     /** 素材の中身（HTML の見本に使う。無ければ `null`）。 */
     content: (id: string) => fetchBlob(`/signage/assets/${encodeURIComponent(id)}/content`),
+    /** 素材の中身の URL（動画を一覧で再生して確かめる。`Range` に応じるので、全部を読み込まずに再生できる）。 */
+    contentUrl: (id: string) => `/v1/signage/assets/${encodeURIComponent(id)}/content`,
     /** 割り込みの素材にする・外す、その音（`null` なら会社の既定）。 */
     setAssetInterrupt: (id: string, patch: { isInterrupt?: boolean; jingle?: string | null }) =>
       call<{ asset: SignageAsset }>(`/signage/assets/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
@@ -2441,7 +2447,7 @@ export const api = {
     connectContractStorage: () => call<{ ok: true; folderName: string }>('/admin/extensions/contracts/storage', { method: 'PUT', body: '{}' }),
     setAnnouncementSettings: (patch: Partial<{ webPublish: 'publish' | 'draft'; webCategory: string; screens: string[] | null }>) =>
       call<{ ok: true }>('/admin/extensions/announcements/settings', { method: 'PUT', body: JSON.stringify(patch) }),
-    /** お知らせを流す画面の選び先（店頭サイネージの画面。`selected` が `null` ならすべて）。 */
+    /** お知らせを流す画面の選び先（サイネージの画面。`selected` が `null` ならすべて）。 */
     announcementScreens: () => call<{ screens: { id: string; name: string }[]; selected: string[] | null }>('/admin/extensions/announcements/screens'),
     /** 競合の分析で自動で覚える数（1〜20）を変える。 */
     setCompetitorAutoMax: (autoMax: number) => call<{ ok: true }>('/admin/extensions/competitors/settings', { method: 'PUT', body: JSON.stringify({ autoMax }) }),
@@ -2458,24 +2464,25 @@ export const api = {
     saveWordPress: (input: { siteUrl: string; username: string; password: string }) =>
       call<{ ok: true; wordpress: ColumnWordPress }>('/admin/extensions/web-columns/wordpress', { method: 'PUT', body: JSON.stringify(input) }),
     removeWordPress: () => call<{ ok: true }>('/admin/extensions/web-columns/wordpress', { method: 'DELETE' }),
-    /** 店頭サイネージの会社の設定（画像の秒数・店の色。仕様書 第31.4節）。送った項目だけを変える。 */
+    /** サイネージの会社の設定（画像の秒数・背景色。仕様書 第31.4節）。送った項目だけを変える。 */
     setSignageSettings: (patch: Partial<Omit<SignageSettings, 'enabled'>>) =>
       call<{ ok: true; signage: SignageSettings }>('/admin/extensions/signage/settings', { method: 'PUT', body: JSON.stringify(patch) }),
-    /** 番号で店頭サイネージの画面を登録する（管理者だけ。仕様書 第31.5.1節）。 */
+    /** 番号でサイネージの画面を登録する（管理者だけ。仕様書 第31.5.1節）。 */
     claimSignageScreen: (code: string) =>
       call<{ screen: SignageScreen; restored: boolean }>('/admin/extensions/signage/pairings/claim', { method: 'POST', body: JSON.stringify({ code }) }),
-    /** 店頭サイネージの呼び出しの受け口（仕様書 第31.8.2節）。 */
-    signageSources: () => call<{ sources: SignageSource[] }>('/admin/extensions/signage/sources'),
-    /** 受け口を作る。URL は作ったときだけ返る。 */
-    createSignageSource: (name: string) => call<{ source: SignageSource; url: string; key: string }>('/admin/extensions/signage/sources', { method: 'POST', body: JSON.stringify({ name }) }),
-    setSignageSourceStatus: (id: string, status: 'active' | 'stopped') =>
-      call<{ ok: true }>(`/admin/extensions/signage/sources/${encodeURIComponent(id)}/status`, { method: 'PUT', body: JSON.stringify({ status }) }),
-    resetSignageSourceMapping: (id: string) => call<{ ok: true }>(`/admin/extensions/signage/sources/${encodeURIComponent(id)}/reset-mapping`, { method: 'POST', body: '{}' }),
     /** 会社のジングルの音を入れる（MP3・WAV。画面で調べた長さ）。 */
     addSignageSound: (file: Blob, name: string, durationMs: number) =>
       sendRaw<{ sound: SignageSound }>('POST', '/admin/extensions/signage/sounds', file, { 'x-sound-name': encodeURIComponent(name), 'x-duration-ms': String(Math.round(durationMs)) }),
+    /** 会社のジングルの音の中身（再生のボタンで確かめる）。 */
+    signageSoundFile: (id: string) => fetchBlob(`/admin/extensions/signage/sounds/${encodeURIComponent(id)}`),
     deleteSignageSound: (id: string) => call<{ ok: true; resetDefault: boolean }>(`/admin/extensions/signage/sounds/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-    /** 店頭サイネージの画面を外す（管理者だけ。確認を挟まない）。 */
+    /** 会社の曲（ナレーション付きスライドの BGM。第32.18.6節 段 3）。 */
+    columnBgm: () => call<{ tracks: ColumnBgmTrack[] }>('/admin/extensions/web-columns/bgm'),
+    /** 会社の曲を入れる（MP3・WAV。画面で調べた長さ）。 */
+    addColumnBgm: (file: Blob, name: string, durationMs: number) =>
+      sendRaw<{ track: ColumnBgmTrack }>('POST', '/admin/extensions/web-columns/bgm', file, { 'x-track-name': encodeURIComponent(name), 'x-duration-ms': String(Math.round(durationMs)) }),
+    deleteColumnBgm: (id: string) => call<{ ok: true }>(`/admin/extensions/web-columns/bgm/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    /** サイネージの画面を外す（管理者だけ。確認を挟まない）。 */
     removeSignageScreen: (id: string) => call<{ ok: true }>(`/admin/extensions/signage/screens/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     setExtensionEnabled: (id: string, enabled: boolean) =>
       call(`/admin/extensions/${encodeURIComponent(id)}/enabled`, { method: 'PUT', body: JSON.stringify({ enabled }) }),

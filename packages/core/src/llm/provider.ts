@@ -136,18 +136,35 @@ export interface LlmProvider {
    */
   generateImage?(req: LlmImageGenerateRequest): Promise<{ bytes: Uint8Array; mimeType: string } | null>;
   /**
-   * 動画を作る（コラムの店頭サイネージ用の動画。仕様書 第32.18.6節）。数分かかる。
+   * 動画を作る（コラムのサイネージ用の動画。仕様書 第32.18.6節）。数分かかる。
    *
    * @remarks 持たない提供者（見本・ローカル AI）では未定義にし、呼び出し側は「作れない」と伝える。
    * 安全の判定で止められたなど、動画が返らなければ `null`。延長できなければ最初の動画だけを返す（`extended: false`）
    */
   generateVideo?(req: LlmVideoRequest): Promise<{ bytes: Uint8Array; mimeType: 'video/mp4'; extended: boolean } | null>;
   /**
+   * 文を読み上げる（TTS。コラムのナレーション付きスライド。仕様書 第32.18.6節 段 3）。
+   *
+   * @remarks 持たない提供者（見本・ローカル AI）では未定義にし、呼び出し側は「作れない」と伝える。音が返らなければ `null`
+   * @returns 24 kHz・モノラル・16 ビットの WAV と長さ
+   */
+  generateSpeech?(req: LlmSpeechRequest): Promise<{ wav: Uint8Array; durationMs: number } | null>;
+  /**
    * 文を埋め込む（知識の意味の検索。仕様書 第11.7.6.1節）。
    *
    * @remarks 持たない提供者では未定義にし、呼び出し側は言葉の検索（段階 2）だけで答える
    */
   embed?(req: LlmEmbedRequest): Promise<LlmEmbedResponse>;
+}
+
+/** 読み上げの依頼（{@link LlmProvider.generateSpeech}）。 */
+export interface LlmSpeechRequest {
+  /** 使うモデル（例: `gemini-3.8-flash-tts`）。 */
+  model: string;
+  /** 読み上げる文（そのまま読む）。 */
+  text: string;
+  /** 声の名前（例: `Charon`）。 */
+  voice: string;
 }
 
 /** 動画を作る依頼（{@link LlmProvider.generateVideo}）。 */

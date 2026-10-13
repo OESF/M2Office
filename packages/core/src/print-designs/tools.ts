@@ -2,7 +2,7 @@
  * @file 販促物の作成のツール（仕様書 第41.10節）。作る（3 案）・直す・作り直す・探す。秘書と付属の業務が使う。
  *
  * 会社が切っているときと、利用範囲の外の人には「使えない」と返す（呼ぶたびに `ctx.printDesigns.access()` で確かめる）。
- * どれも社外には何も出さない（店頭サイネージ・Web への掲載は、それぞれの業務の決まりで行う）。
+ * どれも社外には何も出さない（サイネージ・Web への掲載は、それぞれの業務の決まりで行う）。
  */
 
 import { PRINT_KIND_LABELS, PRINT_SIZES, PRINT_STATE_LABELS, printDesignPath, type PrintDesign, type PrintDesignSettings, type PrintState } from '@m2office/shared';
@@ -178,7 +178,7 @@ export const printFind: Tool = {
 };
 
 /**
- * 店頭サイネージに流す・止める（「このチラシをサイネージに流して」「サイネージから外して」）。掲示の始まりより前なら、始まりから流す。
+ * サイネージに流す・止める（「このチラシをサイネージに流して」「サイネージから外して」）。掲示の始まりより前なら、始まりから流す。
  *
  * @remarks 危険度 `write-internal`。会社の中の画面に出すだけで、社外には出さない（承認は挟まない。第41.18節）
  */
@@ -186,8 +186,8 @@ export const printSignage: Tool = {
   name: 'print.signage',
   risk: 'write-internal',
   activityLabel: '販促物をサイネージに流しています',
-  helpText: '作った販促物を、店頭サイネージのすべての画面に流します（止めることもできます）',
-  description: '販促物を店頭サイネージに流す・止める。query は物の題名の言葉（空なら本人がいちばん新しく直した物）。action は start（流す）か stop（止める）',
+  helpText: '作った販促物を、サイネージのすべての画面に流します（止めることもできます）',
+  description: '販促物をサイネージに流す・止める。query は物の題名の言葉（空なら本人がいちばん新しく直した物）。action は start（流す）か stop（止める）',
   args: {
     properties: {
       query: { type: 'string', description: '物の題名の言葉' },

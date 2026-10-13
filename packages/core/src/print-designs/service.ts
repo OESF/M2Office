@@ -44,7 +44,7 @@ export interface PrintDesignServiceDeps {
   llmFor(tenantId: string): Promise<LlmProvider>;
   logger?: Logger;
   now?(): Date;
-  /** 店頭サイネージ（お知らせの作成と同じ口。第41.18節） */
+  /** サイネージ（お知らせの作成と同じ口。第41.18節） */
   signage?: AnnouncementSignage;
   /** お知らせの作成（下書きを作るだけ。出すのはお知らせの作成の承認の後。第41.18節） */
   announcements?: PrintAnnouncements;
@@ -273,7 +273,7 @@ export class PrintDesignService {
     return {
       company: { name: c.shortName || c.legalName, address: c.address, phone: c.phone, website: c.website },
       logo,
-      // 主の色: 店頭サイネージの帯の色 → ロゴの色（推論が読む）→ 題名から決める色
+      // 主の色: サイネージの帯の色 → ロゴの色（推論が読む）→ 題名から決める色
       color: async (llm, title) => {
         if (settings.signage.color) return settings.signage.color;
         if (logo && c.logoFileId) {
@@ -489,14 +489,14 @@ export class PrintDesignService {
   }
 
   /**
-   * 店頭サイネージに流す（第41.18節）。掲示の始まりより前なら、始まりから流すとして待つ。承認は挟まない（会社の中の画面）。
+   * サイネージに流す（第41.18節）。掲示の始まりより前なら、始まりから流すとして待つ。承認は挟まない（会社の中の画面）。
    *
    * @returns 流した（待つ）様子か、流せない理由
    */
   async toSignage(who: PrintViewer, designId: string): Promise<{ state: 'on' | 'waiting'; screens: string[] } | { error: string }> {
     const d = await this.deps.store.get(who.tenantId, designId);
     if (!d) return { error: '販促物が見つかりません' };
-    if (!(await this.links(who)).signage) return { error: '店頭サイネージを使っていないか、画面が登録されていません' };
+    if (!(await this.links(who)).signage) return { error: 'サイネージを使っていないか、画面が登録されていません' };
     if (!d.currentVersionId) return { error: '先に案を 1 つ選んでください' };
     const state = printStateOf(d, this.today());
     if (state === 'ended' || state === 'removed') return { error: '掲示の期間が終わっているため、流しません。期間を直してから流してください' };
@@ -525,12 +525,12 @@ export class PrintDesignService {
   private async pushSignage(tenantId: string, userId: string, d: StoredDesign): Promise<{ screens: string[] } | { error: string }> {
     const sg = this.deps.signage;
     const v = d.currentVersionId ? await this.deps.store.getVersion(tenantId, d.currentVersionId) : null;
-    if (!sg || !v) return { error: '店頭サイネージに流せませんでした' };
+    if (!sg || !v) return { error: 'サイネージに流せませんでした' };
     let png: Uint8Array;
     if (v.template === CANVA_TEMPLATE) {
       // Canva で直した版は、Canva から書き出した PNG を流す
       const got = await this.deps.files.get(tenantId, `print-${v.id}-canvapng`);
-      if (!got) return { error: '店頭サイネージに流せませんでした' };
+      if (!got) return { error: 'サイネージに流せませんでした' };
       png = got;
     } else {
       const co = await this.company(tenantId);
@@ -539,7 +539,7 @@ export class PrintDesignService {
       png = pagePng(pages[0]!, d.size, w >= h ? SIGNAGE_PX : Math.round(SIGNAGE_PX * w / h));
     }
     const added = await sg.addImage(tenantId, userId, png, `販促物: ${d.title}`.slice(0, 60));
-    if ('error' in added) return { error: `店頭サイネージに足せませんでした（${added.error}）` };
+    if ('error' in added) return { error: `サイネージに足せませんでした（${added.error}）` };
     const screens = await sg.addToFlows(tenantId, userId, added.assetId, (await sg.screens(tenantId)).map((s) => s.id));
     if (d.signageAssetId) await sg.removeAsset(tenantId, userId, d.signageAssetId).catch(() => undefined);
     await this.deps.store.update(tenantId, d.id, { signage: { state: 'on', screens, at: this.now().toISOString() }, signageAssetId: added.assetId });
@@ -1070,7 +1070,7 @@ export class PrintDesignService {
           if (prefs?.notifications.kinds.print === false) continue;
           await this.deps.repo.createNotification({
             id: randomUUID(), tenantId, userId: d.createdBy, kind: 'print', title: `${d.title}: 掲示の期間が終わりました`,
-            body: `${d.place ? `${d.place}の` : ''}「${d.title}」は ${d.postTo.slice(5).replace('-', '/')} で期間が終わりました。${dropped ? '\n店頭サイネージからも外しました。' : ''}\n\n外しましたか。外したら販促物の作成の画面の「外した」を押してください。`,
+            body: `${d.place ? `${d.place}の` : ''}「${d.title}」は ${d.postTo.slice(5).replace('-', '/')} で期間が終わりました。${dropped ? '\nサイネージからも外しました。' : ''}\n\n外しましたか。外したら販促物の作成の画面の「外した」を押してください。`,
             runId: null, readAt: null, createdAt: now.toISOString(),
           });
           told += 1;

@@ -1,5 +1,5 @@
 /**
- * @file 店頭サイネージの再生のページ（`/signage/play`。仕様書 第31.9.1節）。端末のブラウザで全画面に開き、何か月も開いたまま動かす。
+ * @file サイネージの再生のページ（`/signage/play`。仕様書 第31.9.1節）。端末のブラウザで全画面に開き、何か月も開いたまま動かす。
  *
  * **ログインを使わない。** 鍵が無ければ登録の番号と QR を出し、管理者が登録すると画面の鍵を受け取る（第31.5.1節）。
  * 鍵があれば流れを読み、素材を端末に取り置いてから、画像・動画・HTML を順に流す。通信が切れても、取り置いた流れを流し続ける。
@@ -20,6 +20,8 @@ const KEY_STORE = 'm2o-signage-key';
 const PLAYER_CSP = "frame-src 'self'; child-src 'self'; object-src 'none'; base-uri 'self'";
 const STATE_STORE = 'm2o-signage-state';
 const RELOAD_STORE = 'm2o-signage-reloaded';
+/** 版の違いで読み直したときの、サーバーの版（同じ版のために読み直しを繰り返さない） */
+const VERSION_RELOAD_STORE = 'm2o-signage-version-reloaded';
 /** 同じ HTML で続けて止まった回数（素材の ID → 回数）。読み直しをまたいで数える（第31.6.3節）。 */
 const STALL_STORE = 'm2o-signage-stalls';
 /** この回数続けて止まった HTML は飛ばす。 */
@@ -241,6 +243,8 @@ function Player({ screenKey, onUnregistered }: { screenKey: string; onUnregister
   const deadline = useRef(0);
   const misses = useRef(0);
   const reloadPending = useRef(false);
+  /** 読み直しを求めたサーバーの版 */
+  const serverVersion = useRef<string | null>(null);
   const serverOffset = useRef(0);
   /** いま流している流れ（時間帯の ID。いつもの流れは空）。 */
   const activeList = useRef('');
@@ -369,6 +373,7 @@ function Player({ screenKey, onUnregistered }: { screenKey: string; onUnregister
       const online = Date.now() - lastBeatOk.current < 2 * 60_000;
       if (online && (reloadPending.current || (jst.getUTCHours() === 3 && read(RELOAD_STORE) !== day))) {
         write(RELOAD_STORE, day);
+        if (reloadPending.current && serverVersion.current) write(VERSION_RELOAD_STORE, serverVersion.current);
         location.reload();
         return;
       }
@@ -573,7 +578,12 @@ function Player({ screenKey, onUnregistered }: { screenKey: string; onUnregister
         lastBeatOk.current = Date.now();
         serverOffset.current = Date.parse(b.serverTime) - Date.now();
         failed.current.clear();
-        if (b.pageVersion && APP_VERSION && b.pageVersion !== APP_VERSION) reloadPending.current = true;
+        // ページが古ければ、次の切り替えで 1 度だけ読み直す。読み直しても同じ古いページが届く（開発の Web サーバーを起動し直していない・
+        // 入口の取り置き）ときに、切り替えのたびに読み直して先頭の素材から進まなくならないよう、同じサーバーの版では 2 度読み直さない
+        if (b.pageVersion && APP_VERSION && b.pageVersion !== APP_VERSION && read(VERSION_RELOAD_STORE) !== b.pageVersion) {
+          reloadPending.current = true;
+          serverVersion.current = b.pageVersion;
+        }
         if (state && b.flowVersion !== state.screen.flowVersion) void load();
       } catch { /* つながらない間は流し続ける */ }
     };

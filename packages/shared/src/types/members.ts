@@ -118,7 +118,7 @@ export interface MemberSettings {
   rankAuto?: boolean;
   /** 境の回数を決めた日時 */
   rankAt?: string | null;
-  /** 店頭サイネージに特典を流すか（第40.19節） */
+  /** サイネージに特典を流すか（第40.19節） */
   signage?: boolean;
   /** サイネージに流している特典の 1 枚（素材の ID と中身の印） */
   signageAssetId?: string | null;

@@ -1,5 +1,5 @@
 /**
- * @file 店頭サイネージの単体テスト（仕様書 第31.6.1節・第31.5.1節）。
+ * @file サイネージの単体テスト（仕様書 第31.6.1節・第31.5.1節）。
  *
  * MP4 の入れ物の記録の読み方（H.264 か・長さ・縦横。moov が後ろにある動画も）、画像の種類と縦横、
  * ふだん動いている時間帯の決め方、生きている知らせの整え方を確かめる。
@@ -10,7 +10,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { activeSignageBand, signageBandLabel, signageBandsOverlap, signageDaysLabel, signageMinutes } from '@m2office/shared';
 import {
-  readMp4, imageSize, usualSlot, jstSlot, cleanReport, normalizeText, fillTemplate, leadingNumber, phraseTemplate, valueSkeleton, pickPath,
+  readMp4, imageSize, usualSlot, jstSlot, cleanReport, normalizeText, fillTemplate, leadingNumber, phraseTemplate,
   soundMime, externalRefs, signageRequest, signageFileRequest, stockChanges, stockCardText, applyStockChanges, sweepStockNotices,
   isPlaceholderAssetName, cleanAiAssetName, signageConfirmText, SIGNAGE_YES, SIGNAGE_NO,
   type SignageService,
@@ -100,16 +100,6 @@ test('よく出す案内: 先頭の番号だけを空けた形で数える', () 
   assert.deepEqual(phraseTemplate('焼き上がりました'), { template: '焼き上がりました', hasNumber: false });
 });
 
-test('受け口の骨組み: 項目の名前と値の種類だけにし、値を残さない（推論に渡すもの）', () => {
-  const payload = { ticket: { no: '0012', counter: 'レントゲン室', vip: true }, at: 1700000000, items: [{ a: 'x' }, { a: 'y' }, { a: 'z' }] };
-  const sk = valueSkeleton(payload);
-  assert.deepEqual(sk, { ticket: { no: '<数字の文字>', counter: '<文字>', vip: '<真偽>' }, at: '<数>', items: [{ a: '<文字>' }, { a: '<文字>' }] });
-  assert.ok(!JSON.stringify(sk).includes('レントゲン'), '値が入らない');
-  assert.equal(pickPath(payload, 'ticket.no'), '0012');
-  assert.equal(pickPath(payload, 'items.1.a'), 'y');
-  assert.equal(pickPath(payload, 'ticket.none.x'), undefined);
-});
-
 test('会社の音: 中身の先頭で MP3・WAV を見分け、ほかは断る', () => {
   assert.equal(soundMime(new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x41, 0x56, 0x45])), 'audio/wav');
   assert.equal(soundMime(new Uint8Array([0x49, 0x44, 0x33, 4])), 'audio/mpeg');
@@ -185,7 +175,12 @@ test('秘書の頼み: 流れに足す・時間帯を作る・消す・設定を
   assert.deepEqual(signageRequest('割り込みは20秒にして'), { kind: 'settings', patch: { interruptSeconds: 20 } });
   assert.deepEqual(signageRequest('店の色を緑にして'), { kind: 'settings', patch: { color: '#2e6e4f' } });
   assert.deepEqual(signageRequest('店の色を#AA3300に変えて'), { kind: 'settings', patch: { color: '#aa3300' } });
+  assert.deepEqual(signageRequest('背景色を緑にして'), { kind: 'settings', patch: { color: '#2e6e4f' } }, '画面の言葉（背景色）でも頼める');
+  assert.deepEqual(signageRequest('画像表示時間を12秒にして'), { kind: 'settings', patch: { imageSeconds: 12 } });
+  assert.deepEqual(signageRequest('割り込み表示時間を30秒にして'), { kind: 'settings', patch: { interruptSeconds: 30 } });
   assert.deepEqual(signageRequest('呼び出しの音をベルにして'), { kind: 'settings', patch: { jingle: 'bell', chime: true } });
+  assert.deepEqual(signageRequest('ジングルをベルにして'), { kind: 'settings', patch: { jingle: 'bell', chime: true } }, '画面の言葉（ジングル）でも頼める');
+  assert.deepEqual(signageRequest('ジングルを鳴らさないで'), { kind: 'settings', patch: { chime: false } });
   assert.deepEqual(signageRequest('呼び出しの音を止めて'), { kind: 'settings', patch: { chime: false } }, '割り込みを消す頼みと取り違えない');
   assert.deepEqual(signageRequest('呼び出しを消して'), { kind: 'clear', all: false, screens: [] });
   assert.equal(signageRequest('明日17時から22時に会議を入れて'), null, '予定の頼みは取らない');

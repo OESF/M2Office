@@ -1,11 +1,11 @@
 /**
- * @file 店頭サイネージ（内蔵の拡張）の使う人の API。画面の一覧と状態・画面の名前と向きと回し方と音の大きさ・流れ・素材（段 1）、
+ * @file サイネージ（内蔵の拡張）の使う人の API。画面の一覧と状態・画面の名前と向きと回し方と音の大きさ・流れ・素材（段 1）、
  * 割り込み・よく出す案内・割り込みの素材・スタッフのページの QR（段 2）。
  *
  * 会社がサイネージを切っているときと、利用範囲の外の人には、どの口も使わせない。
  * 画面と素材は会社で共有する。画面の登録と取り外しは管理者の API（`/v1/admin/extensions/signage`）で行う。
  *
- * @see 仕様書 第31章 店頭サイネージ・第31.15.2節
+ * @see 仕様書 第31章 サイネージ・第31.15.2節
  */
 
 import { Hono } from 'hono';
@@ -18,7 +18,7 @@ import { receiveToTemp, serveAsset } from '../signage-files.js';
 import { tenantOrigin } from '../tenant-origin.js';
 
 /**
- * 店頭サイネージの使う人の API（`/v1/signage`）。
+ * サイネージの使う人の API（`/v1/signage`）。
  *
  * @remarks テナント境界: 処理と置き場が会社ごとに絞る（不変則 I-2）。流れの 1 回ずつの直しは 10 分の間 1 件にまとめて監査ログに残す
  */
@@ -30,7 +30,7 @@ export function signageRoute(deps: AppDeps) {
   app.use('*', async (c, next) => {
     const { tenant, user } = c.get('ctx');
     if (!(await deps.signage.access(tenant.id, user.id))) {
-      return c.json({ error: '店頭サイネージは使えません（会社で切っているか、利用範囲の外です）' }, 403);
+      return c.json({ error: 'サイネージは使えません（会社で切っているか、利用範囲の外です）' }, 403);
     }
     await next();
   });

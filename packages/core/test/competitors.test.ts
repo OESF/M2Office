@@ -365,7 +365,7 @@ test('問い合わせとのつなぎ: 「どこで知ったか」に競合の名
   assert.doesNotMatch(r!.text, /見本の競合 B: /, '名前が出ていない競合は書かない');
 });
 
-test('コラムの赤入れ: 他社と比べる表現（景品表示法の比較広告）を指摘する', async () => {
+test('コラムの校正: 他社と比べる表現（景品表示法の比較広告）を指摘する', async () => {
   const { ruleReview } = await import('../src/columns/review.js');
   const items = ruleReview('当店は他店より安く、地域最安です。', [], 1);
   assert.ok(items.some((i) => /比較広告/.test(i.reason)));

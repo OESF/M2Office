@@ -23,7 +23,7 @@ export type Route =
   | { kind: 'hr'; employeeId: string | null }
   /** 本人の「給与・勤怠」（仕様書 第30.25節）。 */
   | { kind: 'attendance' }
-  /** 店頭サイネージの管理の画面（仕様書 第31.9.4節）。 */
+  /** サイネージの管理の画面（仕様書 第31.9.4節）。 */
   | { kind: 'signage' }
   /** Web のコラム（仕様書 第32.18.1節）。`columnId` があれば 1 つのコラム。 */
   | { kind: 'columns'; columnId: string | null }

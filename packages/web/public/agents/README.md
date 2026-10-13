@@ -37,7 +37,6 @@ agent01.png ～ agent50.png
 | 13 | スライドの作成（`slides`） | 公式のカタログ |
 | 14 | 段取りの報告（`secretary-plan-report`） | 公式のカタログ |
 | 15 | コラムのサイネージ用（`web-columns:signage`） | コラムの作成 |
-| 16 | コラムをサイネージに流す（`web-columns:signage-publish`） | コラムの作成 |
 | 17 | 契約の台帳（`contracts:ledger`） | 契約の管理 |
 | 18 | 補助金・助成金の案内（`subsidies:guide`） | 補助金・助成金の案内 |
 | 19 | 会員とポイント（`members:desk`） | 会員とポイント |
@@ -64,7 +63,7 @@ agent01.png ～ agent50.png
 | 49 | Web について聞く（`web-review:ask`） | Webの分析 |
 | 50 | Web の依頼文を送る（`web-review:request`） | Webの分析 |
 
-**未使用: 22〜30**
+**未使用: 16・22〜30**
 
 ### 業務を足すとき
 

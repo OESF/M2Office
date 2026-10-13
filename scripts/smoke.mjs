@@ -4080,7 +4080,7 @@ console.log('\n■ 60. 在庫管理（内蔵の拡張。第29章、ADR-0045）')
     const pubJson2 = await (await fetch(`${API}/v1/public/inventory/${pubKey}.json`)).json().catch(() => ({}));
     await call('a', '/v1/inventory/moves', { method: 'POST', body: JSON.stringify({ kind: 'out', itemId, qty: 2, reason: '確認の戻し' }) }, 'member');
     pubJson2.items?.[0]?.available === Math.max(0, pubAvail + 2) ? ok('数が変わると、公開の中身を作り直す') : ng('公開の数が変わらない', JSON.stringify(pubJson2));
-    // 店頭サイネージの在庫の入荷と品切れの案内（第31.6.7節）。公開した品目が品切れ・入荷になると案内の素材を足し、入荷で品切れを外す
+    // サイネージの在庫の入荷と品切れの案内（第31.6.7節）。公開した品目が品切れ・入荷になると案内の素材を足し、入荷で品切れを外す
     {
       const { rows: [sigBefore] } = await owner.query(`select signage from tenant_settings where tenant_id = 't-alpha'`);
       await call('a', '/v1/admin/extensions/signage/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
@@ -4716,7 +4716,7 @@ console.log('\n■ 62. お知らせを消す（第6.5.5節）');
   }
 }
 
-console.log('\n■ 63. 店頭サイネージ（内蔵の拡張。第31章の段 1・段 2、ADR-0051）');
+console.log('\n■ 63. サイネージ（内蔵の拡張。第31章の段 1・段 2、ADR-0051）');
 {
   const { default: pg } = await import('pg');
   const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
@@ -4986,47 +4986,12 @@ console.log('\n■ 63. 店頭サイネージ（内蔵の拡張。第31章の段 
       : ng('サイネージの割り込みの素材・HTML が合わない', JSON.stringify({ setInt: setInt.status, vidInt: vidInt.status, html: html.body, bad: htmlBad.body, csp, i5: i5.body, i6: i6.status, st5: st5.body?.interrupts }).slice(0, 700));
     await call('a', '/v1/signage/clear', { method: 'POST', body: '{}' });
 
-    // 呼び出しの受け口: 管理者だけが作り、URL は 1 度だけ返す。鍵は URL でも見出しでも受け、同じ requestId は 1 度だけ出す
-    const srcMember = await call('a', '/v1/admin/extensions/signage/sources', { method: 'POST', body: JSON.stringify({ name: '受付' }) }, 'member');
-    const src = await call('a', '/v1/admin/extensions/signage/sources', { method: 'POST', body: JSON.stringify({ name: '受付' }) });
-    const hk = src.body?.key;
-    const hook = async (body, type = 'application/json', k = hk, method = 'POST') => {
-      const r = await fetch(`${API}/v1/hooks/signage/${k}`, { method, ...(method === 'POST' ? { body } : {}), headers: { 'content-type': type } });
-      return r.status;
-    };
-    const h1 = await hook(JSON.stringify({ number: '21', place: '2番窓口', requestId: 'r1', screens: [back.body.screen.name] }));
-    const h1dup = await hook(JSON.stringify({ number: '21', place: '2番窓口', requestId: 'r1' }));
-    const h2 = await hook(`text=${encodeURIComponent('お知らせ')}&screens=${encodeURIComponent(back.body.screen.name)}`, 'application/x-www-form-urlencoded');
-    const h3 = await fetch(`${API}/v1/hooks/signage`, { method: 'POST', body: JSON.stringify({ image: '焼き上がり', screens: [back.body.screen.name] }), headers: { 'content-type': 'application/json', authorization: `Bearer ${hk}` } }).then((r) => r.status);
-    const hUnknown = await hook(JSON.stringify({ text: 'x', screens: ['無い画面'] }));
-    const hBadKey = await hook('{}', 'application/json', 'A'.repeat(32));
-    const hGet = await hook('', 'application/json', hk, 'GET');
-    const hType = await hook('x', 'text/plain');
-    const hBig = await hook(JSON.stringify({ text: 'x'.repeat(5000) }));
-    const hOdd = await hook(JSON.stringify({ ticket: { no: 55 } }));
-    const hookPend = await pendingOf(k3);
-    const srcs = (await call('a', '/v1/admin/extensions/signage/sources')).body?.sources ?? [];
-    const logged = (await owner.query(`select count(*)::int as n from signage_interrupts where tenant_id = 't-alpha' and origin = 'hook' and request_id = 'r1'`)).rows[0].n;
-    srcMember.status === 403 && src.status === 201 && /\/v1\/hooks\/signage\/[A-Za-z0-9_-]{32}$/.test(src.body.url ?? '') && !('key' in (srcs[0] ?? {})) && !('keyHash' in (srcs[0] ?? {}))
-      && h1 === 200 && h1dup === 200 && logged === 1 && h2 === 200 && h3 === 200 && hUnknown === 422 && hBadKey === 404 && hGet === 405 && hType === 415 && hBig === 413 && hOdd === 422
-      && hookPend.some((x) => x.text === '21番の方、2番窓口へお越しください') && hookPend.some((x) => x.text === 'お知らせ') && hookPend.some((x) => x.kind === 'asset')
-      ? ok('サイネージの呼び出しの受け口は管理者だけが作り、鍵を URL か見出しで受け、同じ requestId を 1 度だけ出し、形・大きさ・知らない画面を断る')
-      : ng('サイネージの受け口が合わない', JSON.stringify({ srcMember: srcMember.status, src: src.body, h1, h1dup, logged, h2, h3, hUnknown, hBadKey, hGet, hType, hBig, hOdd, hookPend, srcs }).slice(0, 800));
-
-    // 止めた受け口・切った会社では 404。1 分 30 回を超えると 429
-    await call('a', `/v1/admin/extensions/signage/sources/${src.body.source.id}/status`, { method: 'PUT', body: JSON.stringify({ status: 'stopped' }) });
-    const hStopped = await hook(JSON.stringify({ text: 'x' }));
-    await call('a', `/v1/admin/extensions/signage/sources/${src.body.source.id}/status`, { method: 'PUT', body: JSON.stringify({ status: 'active' }) });
-    await setEnabled('a', false);
-    const hOff = await hook(JSON.stringify({ text: 'x' }));
-    await setEnabled('a', true);
-    const burst = [];
-    for (let i = 0; i < 32; i++) burst.push(await hook(JSON.stringify({ text: '連打', requestId: `burst-${i}` })));
-    const srcAudit = (await owner.query(`select action from audit_events where tenant_id = 't-alpha' and action like 'signage.source.%' and occurred_at > now() - interval '5 minutes'`)).rows.map((r) => r.action);
-    hStopped === 404 && hOff === 404 && burst.includes(429) && ['signage.source.create', 'signage.source.stop', 'signage.source.resume'].every((a) => srcAudit.includes(a))
-      ? ok('サイネージの受け口は止めると・会社で切ると 404 になり、1 分 30 回を超えると 429 で断る。作る・止める・動かすは監査ログに残す')
-      : ng('サイネージの受け口の止め方が合わない', JSON.stringify({ hStopped, hOff, burst, srcAudit }).slice(0, 500));
-    await call('a', '/v1/signage/clear', { method: 'POST', body: '{}' });
+    // 呼び出しの受け口は第 0.346.0 版で外した（外のシステムからは外部のアプリの機能で出す）。道も管理の操作も残っていない
+    const goneHook = await fetch(`${API}/v1/hooks/signage/${'A'.repeat(32)}`, { method: 'POST', body: JSON.stringify({ text: 'x' }), headers: { 'content-type': 'application/json' } }).then((r) => r.status);
+    const goneSources = await call('a', '/v1/admin/extensions/signage/sources');
+    goneHook !== 200 && goneHook !== 422 && goneSources.status === 404
+      ? ok('サイネージの呼び出しの受け口は外してあり、道も管理の操作も受けない')
+      : ng('サイネージの受け口が残っている', JSON.stringify({ goneHook, goneSources: goneSources.status }));
 
     // 会社の音と設定: 管理者だけが入れ、MP3・WAV で 5 秒まで。既定に選んだ音を消すと「ピンポーン」に戻る。言い回しは {番号} と {場所} が要る
     const wav = Buffer.alloc(44); wav.write('RIFF', 0, 'latin1'); wav.write('WAVE', 8, 'latin1');
@@ -5041,14 +5006,17 @@ console.log('\n■ 63. 店頭サイネージ（内蔵の拡張。第31章の段 
     const soundId = sOk.body?.sound?.id;
     const setJ = await call('a', '/v1/admin/extensions/signage/settings', { method: 'PUT', body: JSON.stringify({ jingle: soundId }) });
     const soundGet = await fetch(`${API}/v1/signage-play/sounds/${soundId}`, { headers: { 'x-tenant': 'a', authorization: `Bearer ${k3}` } });
+    // 設定の欄の再生のボタン: 管理者は会社の音の中身を読める（利用者は読めない）
+    const adminSound = await fetch(`${API}/v1/admin/extensions/signage/sounds/${soundId}`, { headers: { 'x-tenant': 'a', 'x-user': 'admin@alpha.example.jp' } });
+    const memberSound = await fetch(`${API}/v1/admin/extensions/signage/sounds/${soundId}`, { headers: { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' } });
     const badTpl = await call('a', '/v1/admin/extensions/signage/settings', { method: 'PUT', body: JSON.stringify({ callTemplate: 'お越しください' }) });
     const badSec = await call('a', '/v1/admin/extensions/signage/settings', { method: 'PUT', body: JSON.stringify({ interruptSeconds: 100 }) });
     const delSound = await call('a', `/v1/admin/extensions/signage/sounds/${soundId}`, { method: 'DELETE' });
     const jAfter = (await call('a', '/v1/admin/extensions/signage/settings')).body?.signage?.jingle ?? (await call('a', '/v1/admin/settings')).body?.signage?.jingle;
     sMember.status === 403 && sLong.status === 400 && sOgg.status === 400 && sOk.status === 201 && setJ.status === 200 && soundGet.status === 200
-      && soundGet.headers.get('content-type') === 'audio/wav' && badTpl.status === 400 && badSec.status === 400 && delSound.body?.resetDefault === true
-      ? ok('サイネージの会社の音は管理者だけが MP3・WAV（5 秒まで）で入れ、画面は鍵で読める。既定の音を消すと「ピンポーン」に戻り、言い回しと秒数は形を確かめる')
-      : ng('サイネージの会社の音・設定が合わない', JSON.stringify({ sMember: sMember.status, sLong: sLong.body, sOgg: sOgg.body, sOk: sOk.body, setJ: setJ.body, soundGet: soundGet.status, badTpl: badTpl.status, badSec: badSec.status, delSound: delSound.body, jAfter }).slice(0, 700));
+      && soundGet.headers.get('content-type') === 'audio/wav' && adminSound.status === 200 && adminSound.headers.get('content-type') === 'audio/wav' && memberSound.status === 403 && badTpl.status === 400 && badSec.status === 400 && delSound.body?.resetDefault === true
+      ? ok('サイネージの会社の音は管理者だけが MP3・WAV（5 秒まで）で入れ、画面は鍵で・管理者は設定の欄で読める。既定の音を消すと「ピンポーン」に戻り、言い回しと秒数は形を確かめる')
+      : ng('サイネージの会社の音・設定が合わない', JSON.stringify({ sMember: sMember.status, sLong: sLong.body, sOgg: sOgg.body, sOk: sOk.body, setJ: setJ.body, soundGet: soundGet.status, adminSound: adminSound.status, memberSound: memberSound.status, badTpl: badTpl.status, badSec: badSec.status, delSound: delSound.body, jAfter }).slice(0, 700));
 
     // よく出す案内: 同じ形（番号を空けたもの）を 3 回出すとボタンに並び、外すと並ばない
     for (const n of ['31', '32', '33']) await call('a', '/v1/signage/interrupts', { method: 'POST', body: JSON.stringify({ text: `${n}番の方、会計へ`, screens: [sid3] }) }, 'member');
@@ -5309,12 +5277,12 @@ console.log('\n■ 65. Web のコラム（内蔵の拡張。第32.18.1節）');
     const otherTenant = await call('b', `/v1/columns/${id}`);
     otherTenant.status === 403 || otherTenant.status === 404 ? ok('ほかの会社のコラムは見られない') : ng(`ほかの会社から見える（${otherTenant.status}）`);
 
-    // 直す: 新しい版になり、赤入れをやり直す
+    // 直す: 新しい版になり、校正をやり直す
     const edit = await call('a', `/v1/columns/${id}`, { method: 'PUT', body: JSON.stringify({ body: '## はじめに\n\nこの治療で必ず治ります。' }) }, 'member');
     col = (await call('a', `/v1/columns/${id}`, {}, 'member')).body;
     const rv = col.versions?.[0]?.review ?? [];
     edit.status === 200 && col.column.currentVersion === 2 && rv.some((r) => /医療広告/.test(r.reason))
-      ? ok('直して保存すると新しい版になり、業種（医療）の表現の決まりで赤入れをやり直す')
+      ? ok('直して保存すると新しい版になり、業種（医療）の表現の決まりで校正をやり直す')
       : ng('直したときが違う', JSON.stringify({ edit: edit.status, v: col.column?.currentVersion, rv }).slice(0, 400));
 
     // カバー画像（第32.18.2節）: 書き上げで型のカバーを作り、作り直しと写真で新しい版になる
@@ -6270,7 +6238,7 @@ console.log('\n■ 75. 接続先の健全性（AI・Google の各サービス・
   }
 }
 
-console.log('\n■ 76. コラムから店頭サイネージ用の画像を作る（承認済みのコラムだけ・会社の境界。第32.18.6節）');
+console.log('\n■ 76. コラムからサイネージ用の画像を作る（承認済みのコラムだけ・会社の境界。第32.18.6節）');
 {
   const { default: pg } = await import('pg');
   const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
@@ -6282,10 +6250,32 @@ console.log('\n■ 76. コラムから店頭サイネージ用の画像を作る
     const make = await call('a', '/v1/columns/col-none/signage', { method: 'POST', body: JSON.stringify({ kind: 'slides' }) }, 'member');
     list.status === 200 && Array.isArray(list.body.sets) && typeof list.body.usable === 'boolean' && make.status === 400 && /見つかりません/.test(make.body.error ?? '')
       ? ok('コラムの画面からサイネージ用の組を読み、無いコラムからは作らない') : ng('サイネージ用の口が違う', JSON.stringify({ list: list.status, body: list.body, make: make.status, err: make.body }));
-    const wd = await call('a', '/v1/columns/signage/csg-none/withdraw', { method: 'POST', body: '{}' }, 'member');
-    wd.status === 403 ? ok('店頭サイネージから外せるのは管理者と承認者だけ') : ng(`外せる人が違う（${wd.status}）`);
+    const wd = await call('a', '/v1/columns/signage/csg-none/withdraw', { method: 'POST', body: '{}' });
+    wd.status === 404 ? ok('素材に登録した後は、コラムから素材を消す口が無い（管理はサイネージの画面）') : ng(`コラムから素材を消す口が残っている（${wd.status}）`);
+    // 素材への登録は承認を挟まない（承認へ進める口は無い）。サイネージを使えない人は登録できない
+    const reg = await call('a', '/v1/columns/signage/csg-none/register', { method: 'POST', body: '{}' }, 'member');
+    const oldSubmit = await call('a', '/v1/columns/signage/csg-none/submit', { method: 'POST', body: '{}' }, 'member');
+    reg.status === 403 && oldSubmit.status === 404
+      ? ok('コラムのサイネージ用の組は承認を挟まず素材に登録する口だけを持ち、サイネージを使えない人は登録できない')
+      : ng('素材への登録の口が違う', JSON.stringify({ reg: reg.status, body: reg.body, oldSubmit: oldSubmit.status }));
     const file = await call('a', '/v1/columns/signage/csg-none/files/f-none', {}, 'member');
     file.status === 404 ? ok('組に入っていないファイルは出さない') : ng(`組の外のファイルが出た（${file.status}）`);
+    // ナレーション付きスライド（段 3）: 作れるかと BGM の候補を返す。会社の曲は管理者だけが入れ、形を確かめる
+    const bgmWav = Buffer.alloc(44); bgmWav.write('RIFF', 0, 'latin1'); bgmWav.write('WAVE', 8, 'latin1');
+    const addTrack = async (bytes, who = 'admin') => {
+      const r = await fetch(`${API}/v1/admin/extensions/web-columns/bgm`, { method: 'POST', body: bytes, headers: { 'x-tenant': 'a', 'x-user': `${who}@alpha.example.jp`, 'content-type': 'application/octet-stream', 'x-track-name': encodeURIComponent('店の曲（smoke）'), 'x-duration-ms': '30000' } });
+      return { status: r.status, body: await r.json() };
+    };
+    const tMember = await addTrack(bgmWav, 'member');
+    const tBad = await addTrack(Buffer.from('OggS0000'));
+    const tOk = await addTrack(bgmWav);
+    const withBgm = await call('a', '/v1/columns/col-none/signage', {}, 'member');
+    const bgmIds = (withBgm.body?.narrated?.bgm ?? []).map((b) => b.id);
+    const tDel = tOk.body?.track ? await call('a', `/v1/admin/extensions/web-columns/bgm/${tOk.body.track.id}`, { method: 'DELETE' }) : { status: 0 };
+    tMember.status === 403 && tBad.status === 400 && tOk.status === 201 && typeof withBgm.body?.narrated?.usable === 'boolean'
+      && bgmIds.includes('builtin:gentle') && bgmIds.includes(tOk.body.track.id) && bgmIds.includes('none') && tDel.status === 200
+      ? ok('ナレーション付きスライド: 作れるかと BGM（組み込み・会社の曲・なし）を返し、会社の曲は管理者だけが MP3・WAV で入れる')
+      : ng('ナレーション付きスライドの口が違う', JSON.stringify({ tMember: tMember.status, tBad: tBad.body, tOk: tOk.body, narrated: withBgm.body?.narrated, tDel: tDel.status }).slice(0, 600));
     // 置き場: 会社の境界（行単位の制限）
     const app = new pg.Client({ connectionString: process.env.DATABASE_URL ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office' });
     await app.connect();
@@ -6636,7 +6626,7 @@ console.log('\n■ 80. 会員とポイント（入り切り・会員証・来店
     msgMember.status === 403 && msgNoLine.status === 400 && /LINE/.test(msgNoLine.body.error ?? '') && msgList.status === 200 && typeof msgList.body.counts?.line === 'number'
       ? ok('会員への LINE の知らせを用意するのは管理者だけ。LINE をつないでいなければ用意しない') : ng('LINE の知らせの扱いが違う', JSON.stringify({ m: msgMember.status, a: msgNoLine.body, l: msgList.status }));
 
-    // ランクと店頭サイネージ（第40.19節）: 来店のある会員が少なければ境を決めず、ランクだけの特典は一般の会員には出ない
+    // ランクとサイネージ（第40.19節）: 来店のある会員が少なければ境を決めず、ランクだけの特典は一般の会員には出ない
     const listed = await call('a', '/v1/members', {}, 'member');
     const goldOnly = await call('a', '/v1/members/rewards', { method: 'POST', body: JSON.stringify({ name: 'スモークのゴールドの特典', points: 1, minRank: 'gold' }) });
     const badRank = await call('a', '/v1/members/rewards', { method: 'POST', body: JSON.stringify({ name: 'スモークの違うランク', points: 1, minRank: 'platinum' }) });
@@ -6648,7 +6638,7 @@ console.log('\n■ 80. 会員とポイント（入り切り・会員証・来店
     const signageOn = await call('a', '/v1/admin/extensions/members/settings', { method: 'PUT', body: JSON.stringify({ signage: true }) });
     const { rows: [afterSig] } = await owner.query(`select members from tenant_settings where tenant_id = 't-alpha'`);
     rankByMember.status === 403 && signageOn.status === 200 && afterSig.members?.signage === true
-      ? ok('ランクの境を決めるのは管理者だけ。管理者は店頭サイネージに特典を流すにできる') : ng('ランクの境・サイネージの設定が違う', JSON.stringify({ m: rankByMember.status, s: signageOn.status, v: afterSig.members?.signage }));
+      ? ok('ランクの境を決めるのは管理者だけ。管理者はサイネージに特典を流すにできる') : ng('ランクの境・サイネージの設定が違う', JSON.stringify({ m: rankByMember.status, s: signageOn.status, v: afterSig.members?.signage }));
 
     await call('b', '/v1/admin/extensions/members/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
     const other = await call('b', `/v1/members/card?code=${encodeURIComponent(cardUrl)}`, {}, 'member');
@@ -6861,7 +6851,7 @@ console.log('\n■ 82. 販促物の作成（入り切り・3 案・選ぶ・会�
     const detail = await call('a', `/v1/print-designs/${made[0]}`, {}, 'member');
     const noScreen = await call('a', `/v1/print-designs/${made[0]}/signage`, { method: 'POST', body: '{}' }, 'member');
     detail.body.links?.signage === false && noScreen.status === 400 && /画面が登録されていません/.test(noScreen.body.error ?? '')
-      ? ok('店頭サイネージを使っていない会社では、サイネージに流さない（つなげる先を使えないと返す）') : ng('サイネージの扱いが違う', JSON.stringify({ links: detail.body.links, s: noScreen.body }));
+      ? ok('サイネージを使っていない会社では、サイネージに流さない（つなげる先を使えないと返す）') : ng('サイネージの扱いが違う', JSON.stringify({ links: detail.body.links, s: noScreen.body }));
     const { rows: annSaved } = await owner.query(`select tenant_id, announcements from tenant_settings where tenant_id = 't-alpha'`);
     try {
       const annOff = await call('a', `/v1/print-designs/${made[0]}/announcement`, { method: 'POST', body: '{}' }, 'member');

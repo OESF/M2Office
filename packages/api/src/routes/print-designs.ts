@@ -1,6 +1,6 @@
 /**
  * @file 販促物の作成（内蔵の拡張）の API。一覧・作る（3 案。値札を含む）・1 つ・案を選ぶ・会話で直す・文面を直す・掲示の期間と置き場所・外した・作り直す・削除・書き出し・
- * 店頭サイネージに流す・止める・お知らせの下書きにする（第41.18節）。
+ * サイネージに流す・止める・お知らせの下書きにする（第41.18節）。
  *
  * 会社が切っているときと、利用範囲の外の人には、どの口も使わせない。社外には何も出さない（お知らせは下書きまで。出すのはお知らせの作成の承認の後）。
  * 印刷の発注はしない（第41.7節）。
@@ -68,10 +68,10 @@ export function printDesignsRoute(deps: AppDeps) {
     return d ? c.json({ ...d, links: await service.links(who(c)) }) : c.json({ error: '販促物が見つかりません' }, 404);
   });
 
-  /** 店頭サイネージに流す（掲示の始まりより前なら、始まりから流す）。 */
+  /** サイネージに流す（掲示の始まりより前なら、始まりから流す）。 */
   app.post('/:id/signage', async (c) => result(c, await service.toSignage(who(c), c.req.param('id'))));
 
-  /** 店頭サイネージから外す。 */
+  /** サイネージから外す。 */
   app.delete('/:id/signage', async (c) => problem(c, await service.stopSignage(who(c), c.req.param('id'))));
 
   /** Canva で仕上げる（選んだ版の PDF を本人の Canva に取り込み、編集の画面の URL を返す。第41.19.3節）。 */

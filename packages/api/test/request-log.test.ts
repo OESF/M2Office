@@ -21,7 +21,7 @@ test('画面の読み直しは、成功して 1 秒より速いものだけを�
 });
 
 test('受け口の鍵は記録に残さない', () => {
-  assert.equal(logPath('/v1/hooks/signage/abcdef'), '/v1/hooks/signage/***');
+  assert.equal(logPath('/v1/hooks/inventory/abcdef'), '/v1/hooks/inventory/***');
   assert.equal(logPath('/v1/jobs'), '/v1/jobs');
   assert.equal(logPath('/v1/member-card/KEY123/qr.svg'), '/v1/member-card/***/qr.svg');
   assert.equal(logPath('/v1/unsubscribe/TOKEN'), '/v1/unsubscribe/***');

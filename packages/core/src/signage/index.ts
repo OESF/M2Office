@@ -1,5 +1,5 @@
 /**
- * @file 店頭サイネージ（内蔵の拡張）の公開窓口（仕様書 第31章）。
+ * @file サイネージ（内蔵の拡張）の公開窓口（仕様書 第31章）。
  */
 
 export { SIGNAGE_PACKAGE, SIGNAGE_EXTENSION_VERSION } from './package.js';
@@ -13,7 +13,7 @@ export { imageSize } from './image-size.js';
 export { thumbnailMime, thumbnailPng } from './thumbnail.js';
 export { externalRefs } from './service.js';
 export {
-  SignageInterrupts, normalizeText, fillTemplate, leadingNumber, phraseTemplate, valueSkeleton, pickPath, soundMime,
+  SignageInterrupts, normalizeText, fillTemplate, leadingNumber, phraseTemplate, soundMime,
   type SignageInterruptsDeps, type InterruptError,
 } from './interrupts.js';
 export { type TargetRecord, type InterruptRecord } from './store.js';

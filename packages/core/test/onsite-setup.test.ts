@@ -34,7 +34,7 @@ const ANSWERS = {
   GOOGLE_LOGIN_CLIENT_ID: '', GOOGLE_LOGIN_CLIENT_SECRET: '', SECRET_KEY: 'k'.repeat(64), DB_APP_PASSWORD: 'app-pass', DB_OWNER_PASSWORD: 'owner-pass', UPDATE_HOUR: '3',
   HEARTBEAT_URL: 'https://ops.example/heartbeat', HEARTBEAT_TOKEN: 'hb-token', MACHINE_ID: 'm-001',
   OFFSITE_REPOSITORY: 's3:https://s3.example/bucket/m2office', OFFSITE_PASSWORD: 'offsite-pass', OFFSITE_ACCESS_KEY_ID: 'AKID', OFFSITE_SECRET_ACCESS_KEY: 'SKEY',
-  OFFSITE_REGION: '', RESTIC_BIN: '/opt/homebrew/opt/restic/bin/restic',
+  OFFSITE_REGION: '', RESTIC_BIN: '/opt/homebrew/opt/restic/bin/restic', FFMPEG_BIN: '/opt/homebrew/opt/ffmpeg/bin/ffmpeg',
 };
 
 function render(extra: Record<string, string>, locale = 'C') {

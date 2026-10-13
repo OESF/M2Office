@@ -93,7 +93,7 @@ export interface ExternalAppsDeps {
   reservableItems?: (tenantId: string) => Promise<{ id: string; name: string }[]>;
   /** 会社で使える業務と、その危険度（使うツールのいちばん強い危険度。「業務を依頼して結果を受け取る」で選ぶため）。 */
   agents?: (tenantId: string) => Promise<{ id: string; name: string; risk: RiskLevel }[]>;
-  /** 店頭サイネージの画面（サイネージの機能で使ってよい画面を選ぶため。第13.4.3節）。 */
+  /** サイネージの画面（サイネージの機能で使ってよい画面を選ぶため。第13.4.3節）。 */
   signageScreens?: (tenantId: string) => Promise<{ id: string; name: string }[]>;
 }
 

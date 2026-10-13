@@ -239,7 +239,7 @@ test('入庫の通知: 形を確かめ、照らした行を入庫し、二重に
   assert.equal(await onHand(), 5, '取り消しで、選んで入庫した分も含めて戻す');
 });
 
-test('承認: サイネージの機能は店頭サイネージを入れた会社だけ選べ、使ってよい画面は知っている画面だけ（第13.4.3節）', async () => {
+test('承認: サイネージの機能はサイネージを入れた会社だけ選べ、使ってよい画面は知っている画面だけ（第13.4.3節）', async () => {
   const off = fakeRepo({}, DEFAULT_TENANT_SETTINGS);
   const appsOff = new ExternalApps({ store: new MemoryAppStore(), repo: off.repo });
   assert.ok(!(await appsOff.available('t1')).includes('signage.interrupt'), 'サイネージを切った会社では選べない');

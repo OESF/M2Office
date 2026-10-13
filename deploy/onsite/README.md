@@ -9,7 +9,7 @@
 | もの | 内容 |
 |---|---|
 | Mac | macOS。管理者の利用者でログインできること。ローカル AI を使うなら、メモリーの多い Mac Studio など（Q-159） |
-| Homebrew | https://brew.sh の手順で入れておく。Node.js 22・PostgreSQL 17 と pgvector・Caddy は、セットアップのスクリプトが尋ねてから入れる |
+| Homebrew | https://brew.sh の手順で入れておく。Node.js 22・PostgreSQL 17 と pgvector・Caddy・ffmpeg（ナレーション付きスライドを MP4 にまとめる。M2Office には同梱しない）は、セットアップのスクリプトが尋ねてから入れる。前に入れた機械は、`setup.sh` を走らせ直すと ffmpeg が入り、`FFMPEG_PATH` が設定のファイルに入る |
 | ディスク | データの置き場（RAID など）と、**RAID とは別の**控えの置き場（外付けのディスクか社内の別の機械。第8.6.5節） |
 | 社外の控え | 会社が選んだときだけ。**会社が自分で契約した** S3 互換の置き場（Amazon S3・Cloudflare R2・Wasabi・Backblaze B2 など）のバケットと、そのバケットだけを読み書きできるアクセスキー。置き場の側で版の保持（消されても前の版に戻せる設定）を入れておくことを勧める |
 | 名前 | 会社のドメインの名前（例 `office.<会社のドメイン>`）。公開の DNS に、機械の社内の IP を返す A レコードを書く（第8.6.2節） |

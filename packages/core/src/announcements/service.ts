@@ -2,7 +2,7 @@
  * @file お知らせの作成の処理（仕様書 第35章・第35.17節）。下書き・直す・承認の前の確かめ・出す（Web・LINE・サイネージの画面）・予約・期間の後。
  *
  * **社外に出すのは承認の後だけ**（第9.4.0節）。承認した中身の指紋と違えば出さない。出し先ごとに承認を求めない（1 回の承認。ADR-0028）。
- * 出し先のつなぎは、ほかの拡張でつないだものを使う（WordPress はコラムの作成、LINE は問い合わせの記録、サイネージの画面は店頭サイネージ）。
+ * 出し先のつなぎは、ほかの拡張でつないだものを使う（WordPress はコラムの作成、LINE は問い合わせの記録、サイネージの画面はサイネージ）。
  * LINE の一斉配信は、今月の無料の範囲を超えるなら送らない（Q-177）。出せなかった出し先は理由を残して知らせ、ほかの出し先は止めない。
  */
 
@@ -29,9 +29,9 @@ import type { AnnouncementPatch, AnnouncementStore, StoredAnnouncement } from '.
 import type { AnnouncementMail } from './mail.js';
 import { applyCondition, describeCondition, readCondition } from './recipients.js';
 
-/** サイネージの画面（店頭サイネージ）とのつなぎ。 */
+/** サイネージの画面（サイネージ）とのつなぎ。 */
 export interface AnnouncementSignage {
-  /** 店頭サイネージを使っているか */
+  /** サイネージを使っているか */
   enabled(tenantId: string): Promise<boolean>;
   /** 登録した画面 */
   screens(tenantId: string): Promise<{ id: string; name: string }[]>;
@@ -71,7 +71,7 @@ export interface AnnouncementViewer {
 /**
  * お知らせのサイネージの画面の 1 枚の中身（第35.6.4節）。見出しが空なら題名、期間の書き方が空なら期間の日付を使う。
  *
- * @param storeColor 店頭サイネージの設定の店の色（帯の色を選んでいないときに使う）
+ * @param storeColor サイネージの設定の背景色（帯の色を選んでいないときに使う）
  * @param edits 保存する前の文（画面の見本）
  */
 export function screenCardOf(a: Pick<StoredAnnouncement, 'title' | 'startDate' | 'endDate' | 'texts'>, storeColor: string | null, edits: Partial<AnnouncementTexts['signage']> = {}): ScreenCard {
@@ -266,7 +266,7 @@ export class AnnouncementService {
           period: String(t.signage?.period ?? a.texts.signage.period).slice(0, 60),
           detail: String(t.signage?.detail ?? a.texts.signage.detail ?? '').slice(0, 60),
           note: String(t.signage?.note ?? a.texts.signage.note).slice(0, 40),
-          // 帯の色は決まった色の id だけ（空なら店の色）
+          // 帯の色は決まった色の id だけ（空ならサイネージの背景色）
           color: ((c) => (ANNOUNCEMENT_BAND_COLORS.some((x) => x.id === c) ? c : ''))(String(t.signage?.color ?? a.texts.signage.color ?? '')),
         },
         mail: { subject: String(t.mail?.subject ?? a.texts.mail.subject).slice(0, 200), body: String(t.mail?.body ?? a.texts.mail.body).slice(0, 20_000) },
@@ -566,7 +566,7 @@ export class AnnouncementService {
   }
 
   /**
-   * 流す画面の選び先（拡張機能の設定の欄。第35.17節。第 0.247.0 版）。店頭サイネージを使っていなければ空。
+   * 流す画面の選び先（拡張機能の設定の欄。第35.17節。第 0.247.0 版）。サイネージを使っていなければ空。
    */
   async screenChoices(tenantId: string): Promise<{ screens: { id: string; name: string }[]; selected: string[] | null }> {
     const settings = (await this.deps.repo.getTenantSettings(tenantId)).announcements;
@@ -697,7 +697,7 @@ export class AnnouncementService {
 }
 
 /**
- * 店頭サイネージの処理を、お知らせの作成のつなぎにする（画像を一時のファイルに書いて素材に足す）。
+ * サイネージの処理を、お知らせの作成のつなぎにする（画像を一時のファイルに書いて素材に足す）。
  */
 export function signageForAnnouncements(svc: {
   settings(tenantId: string): Promise<{ enabled: boolean }>;

@@ -1,7 +1,7 @@
 /**
  * @file 販促物の作成の画面（仕様書 第41.9節）。一覧（掲示の状態で絞る）・作る（頼みの文と写真。値札を含む）／1 つの物の 3 案から選ぶ・会話で直す・
  * 文面をその場で直す・点検の印・書き出し（PDF・入稿用の PDF・PNG）・掲示の期間と置き場所・外した・作り直す・版を戻す・削除・
- * 店頭サイネージに流す・止める・お知らせの下書きにする（第41.18節）。
+ * サイネージに流す・止める・お知らせの下書きにする（第41.18節）。
  *
  * 字は M2Office が組む。画面は API を経由するだけで、画像も API から読む。説明文は常に出さない（原則 u11）。印刷の発注はしない。
  */
@@ -350,7 +350,7 @@ function DesignView({ id, onBack, onOpen, changeKey, onAnnouncement }: { id: str
   );
 }
 
-/** つなげる先（店頭サイネージ・お知らせの作成。第41.18節）。使えないものは出さない。 */
+/** つなげる先（サイネージ・お知らせの作成。第41.18節）。使えないものは出さない。 */
 function Links({ data, state, busy, onSignage, onStopSignage, onAnnounce, onCanva, onCanvaPull }: {
   data: PrintDesignDetailView; state: PrintState; busy: boolean;
   onSignage: () => void; onStopSignage: () => void; onAnnounce: () => void; onCanva: () => void; onCanvaPull: () => void;

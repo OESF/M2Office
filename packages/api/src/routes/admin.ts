@@ -646,7 +646,7 @@ type Section = keyof TenantSettings;
 const PURPOSE_LABELS: Record<string, string> = {
   secretary: '秘書', voice: '音声の秘書', other: 'そのほか', worker: '自動の処理',
   'api:columns': 'コラムの作成', 'api:print-designs': '販促物の作成', 'api:competitors': '競合の分析', 'api:cards': '名刺管理',
-  'api:inventory': '在庫管理', 'api:signage': '店頭サイネージ', 'api:announcements': 'お知らせの作成', 'api:inquiries': '問い合わせの記録',
+  'api:inventory': '在庫管理', 'api:signage': 'サイネージ', 'api:announcements': 'お知らせの作成', 'api:inquiries': '問い合わせの記録',
   'api:web-review': 'Webの分析', 'api:contracts': '契約書の管理', 'api:subsidies': '補助金・助成金', 'api:members': '会員とポイント',
   'api:hr': '人事・給与', 'api:reservations': '予約', 'api:knowledge': '知識', 'api:files': 'ファイル', 'api:me': '個人設定', 'api:admin': '管理者ページ',
   'worker:competitors': '競合の分析（見回り）', 'worker:columns': 'コラムの作成（予定とテーマ案）', 'worker:web-review': 'Webの分析（月の便り）',

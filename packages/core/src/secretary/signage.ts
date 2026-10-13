@@ -1,6 +1,6 @@
 /**
- * @file 秘書から店頭サイネージを使う（仕様書 第31.11.1節・第31.11.2節）。割り込みを出す・消す、画面の状態、割り込みの素材の音、呼び出しの言い回し、画面を切断する、
- * 渡された画像を流れに足す、時間帯を作る・消す、画像と割り込みの秒数・店の色・ジングルを変える。
+ * @file 秘書からサイネージを使う（仕様書 第31.11.1節・第31.11.2節）。割り込みを出す・消す、画面の状態、割り込みの素材の音、呼び出しの言い回し、画面を切断する、
+ * 渡された画像を流れに足す、時間帯を作る・消す、画像表示時間・割り込み表示時間・背景色・ジングルを変える。
  *
  * **秘書の欄で本人が話した回（音声を含む）にだけ使う。** 決まった言い方で見分けてその場で行い、業務の実行・定時実行・ブリーフ・
  * 会話から学ぶ処理・メールや文書を読んだ結果からは呼ばれない（秘書の返事の処理だけが呼ぶ。第31.14節）。推論に選ばせない。
@@ -135,22 +135,22 @@ export function signageRequest(message: string): SignageRequest | null {
   // 画像なしで「流れに足して」は、画像を渡すよう答える
   if (/(画像|写真).*(流れ|スケジュール|サイネージ)|(流れ|スケジュール|サイネージ).*(画像|写真)/.test(m) && /(足して|入れて|追加|加えて)/.test(m)) return { kind: 'add-file', screens: flowScreens(raw) };
   // 会社の設定（管理者。第31.11.2節）
-  const imgSec = /(?:サイネージの)?(?:画像|素材)の?(?:表示の?)?秒数を(\d{1,3})秒/.exec(m);
+  const imgSec = /(?:サイネージの)?(?:画像|素材)の?(?:表示の?)?(?:秒数|時間)を(\d{1,3})秒/.exec(m);
   if (imgSec) return { kind: 'settings', patch: { imageSeconds: Number(imgSec[1]) } };
-  const intSec = /割り込み(?:の秒数)?(?:は|を)(\d{1,2})秒に/.exec(m);
+  const intSec = /割り込み(?:の秒数|の?表示時間)?(?:は|を)(\d{1,2})秒に/.exec(m);
   if (intSec) return { kind: 'settings', patch: { interruptSeconds: Number(intSec[1]) } };
-  const color = /店の色を(.+?)に(?:して|変えて)/.exec(m);
+  const color = /(?:背景色|背景の色|店の色)を(.+?)に(?:して|変えて)/.exec(m);
   if (color) {
     const c = colorOf(color[1]!);
     if (c) return { kind: 'settings', patch: { color: c } };
   }
-  const sound = /(?:サイネージ|呼び出し|割り込み)の(?:音|ジングル)を(.+?)に(?:して|変えて)/.exec(m);
+  const sound = /(?:(?:サイネージ|呼び出し|割り込み)の(?:音|ジングル)|ジングル)を(.+?)に(?:して|変えて)/.exec(m);
   if (sound) {
     const j = SIGNAGE_JINGLES.find((x) => x.label === sound[1] || x.id === sound[1]);
     if (j) return { kind: 'settings', patch: { jingle: j.id, chime: true } };
   }
-  if (/(?:サイネージ|呼び出し|割り込み)の(?:音|ジングル)を?(?:鳴らさないで|止めて|消して|なしにして|切って)/.test(m)) return { kind: 'settings', patch: { chime: false } };
-  if (/(?:サイネージ|呼び出し|割り込み)の(?:音|ジングル)を?(?:鳴らして|戻して|入れて)/.test(m)) return { kind: 'settings', patch: { chime: true } };
+  if (/(?:(?:サイネージ|呼び出し|割り込み)の(?:音|ジングル)|ジングル)を?(?:鳴らさないで|止めて|消して|なしにして|切って)/.test(m)) return { kind: 'settings', patch: { chime: false } };
+  if (/(?:(?:サイネージ|呼び出し|割り込み)の(?:音|ジングル)|ジングル)を?(?:鳴らして|戻して|入れて)/.test(m)) return { kind: 'settings', patch: { chime: true } };
   // 画面の切り替え方と画像の動き（第31.6.2節。画面の名前が無ければすべての画面）
   const tr = /切り替え(?:方)?を(フェード|スライド|ワイプ|ズーム|なし)に(?:して|変えて)/.exec(m);
   if (tr) return { kind: 'look', screens: flowScreens(raw), transition: SIGNAGE_TRANSITIONS.find((t) => t.label === tr[1])!.id };
@@ -307,17 +307,17 @@ export async function answerSignage(deps: SignageSecretaryDeps, tenantId: string
   if (req.kind === 'settings') {
     if (!admin) return 'サイネージの設定は管理者が変えられます。管理者に頼んでください。';
     const p = req.patch;
-    if (p.imageSeconds !== undefined && (p.imageSeconds < SIGNAGE_LIMITS.minSeconds || p.imageSeconds > SIGNAGE_LIMITS.maxSeconds)) return `画像を表示する秒数は ${SIGNAGE_LIMITS.minSeconds}〜${SIGNAGE_LIMITS.maxSeconds} 秒にしてください。`;
-    if (p.interruptSeconds !== undefined && (p.interruptSeconds < SIGNAGE_LIMITS.minInterruptSeconds || p.interruptSeconds > SIGNAGE_LIMITS.maxInterruptSeconds)) return `メッセージを表示する秒数は ${SIGNAGE_LIMITS.minInterruptSeconds}〜${SIGNAGE_LIMITS.maxInterruptSeconds} 秒にしてください。`;
+    if (p.imageSeconds !== undefined && (p.imageSeconds < SIGNAGE_LIMITS.minSeconds || p.imageSeconds > SIGNAGE_LIMITS.maxSeconds)) return `画像表示時間は ${SIGNAGE_LIMITS.minSeconds}〜${SIGNAGE_LIMITS.maxSeconds} 秒にしてください。`;
+    if (p.interruptSeconds !== undefined && (p.interruptSeconds < SIGNAGE_LIMITS.minInterruptSeconds || p.interruptSeconds > SIGNAGE_LIMITS.maxInterruptSeconds)) return `割り込み表示時間は ${SIGNAGE_LIMITS.minInterruptSeconds}〜${SIGNAGE_LIMITS.maxInterruptSeconds} 秒にしてください。`;
     const settings = await service.settings(tenantId);
     await service.deps.repo.saveTenantSettings(tenantId, 'signage', { ...settings, ...p }, userId);
     service.settingsChanged(tenantId);
     const said = [
-      p.imageSeconds !== undefined ? `画像を出す秒数を ${p.imageSeconds} 秒` : '',
-      p.interruptSeconds !== undefined ? `割り込みを出す秒数を ${p.interruptSeconds} 秒` : '',
-      p.color ? `店の色を${ANNOUNCEMENT_BAND_COLORS.find((c) => c.color === p.color)?.label ?? p.color}` : '',
-      p.jingle ? `呼び出しの音を${SIGNAGE_JINGLES.find((j) => j.id === p.jingle)?.label ?? p.jingle}` : '',
-      p.chime === false ? '呼び出しの音を鳴らさないよう' : p.chime === true && !p.jingle ? '呼び出しの音を鳴らすよう' : '',
+      p.imageSeconds !== undefined ? `画像表示時間を ${p.imageSeconds} 秒` : '',
+      p.interruptSeconds !== undefined ? `割り込み表示時間を ${p.interruptSeconds} 秒` : '',
+      p.color ? `背景色を${ANNOUNCEMENT_BAND_COLORS.find((c) => c.color === p.color)?.label ?? p.color}` : '',
+      p.jingle ? `ジングルを${SIGNAGE_JINGLES.find((j) => j.id === p.jingle)?.label ?? p.jingle}` : '',
+      p.chime === false ? 'ジングルを鳴らさないよう' : p.chime === true && !p.jingle ? 'ジングルを鳴らすよう' : '',
     ].filter(Boolean);
     return `${said.join('、')}にしました。すぐ画面に届きます。`;
   }

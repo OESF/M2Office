@@ -14,7 +14,7 @@ import { JinglePlayer } from './signage-audio.js';
 import { api, ApiError, describeError, type AccessOptions, type ExtensionView, type HrProposalField, type ScopeValue } from './api.js';
 import {
   INVENTORY_FEATURES, SIGNAGE_DEFAULT_COLOR, SIGNAGE_JINGLES, type HrSettings, type InventoryBookingSource, type InventoryFeature, type InventorySettings,
-  type SignageSettings, type SignageSound, type SignageSource, COLUMN_INDUSTRIES, COLUMN_RULE_SET_LABELS, COLUMN_PLAN_FREQUENCY_LABELS, type ColumnPlanFrequency, type WebColumnSettings, type InquirySettings, COMPETITORS_AUTO_RANGE, COMPETITORS_NOTIFY_MAX, COMPETITOR_WATCH_LABELS, competitorAutoMax, competitorWatch, competitorsMax, type CompetitorSettings, type AnnouncementSettings, type ContractSettings, type MemberSettings, type WebReviewSettings, type WebReviewCandidates, type WebReviewStatus,
+  type SignageSettings, type SignageSound, COLUMN_INDUSTRIES, COLUMN_RULE_SET_LABELS, COLUMN_PLAN_FREQUENCY_LABELS, type ColumnPlanFrequency, type ColumnBgmTrack, type WebColumnSettings, type InquirySettings, COMPETITORS_AUTO_RANGE, COMPETITORS_NOTIFY_MAX, COMPETITOR_WATCH_LABELS, competitorAutoMax, competitorWatch, competitorsMax, type CompetitorSettings, type AnnouncementSettings, type ContractSettings, type MemberSettings, type WebReviewSettings, type WebReviewCandidates, type WebReviewStatus,
 } from '@m2office/shared';
 import { HelpTip, Markdown } from './help.js';
 import { Icon } from './nav.js';
@@ -451,29 +451,30 @@ function OptOuts({ count, onChanged }: { count: number; onChanged: () => void })
   );
 }
 
-/** 店頭サイネージの会社の設定（画像を出す秒数・店の色。仕様書 第31.4節）。画面の数と容量の上限は全社共通の決まり。 */
+/**
+ * サイネージの会社の設定（仕様書 第31.4節）。「スケジュール」「割り込み」「呼び出しの言い回し」に分けて並べる。
+ * 画面の数と容量の上限は全社共通の決まり。外のシステムからの呼び出しは、外部のアプリの機能で受ける（第13.4.3節）。
+ */
 function SignageFields({ settings, busy, onChanged }: { settings: SignageSettings; busy: boolean; onChanged: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [sounds, setSounds] = useState<SignageSound[]>([]);
-  const [sources, setSources] = useState<SignageSource[]>([]);
-  const [created, setCreated] = useState<string | null>(null);
-  const [sourceName, setSourceName] = useState('');
   const soundFile = useRef<HTMLInputElement>(null);
   const player = useRef<JinglePlayer | null>(null);
   const reload = () => {
-    api.admin.signageSources().then((r) => setSources(r.sources)).catch(() => undefined);
     api.signage.sounds().then((r) => setSounds(r.sounds)).catch(() => undefined);
   };
   useEffect(reload, []);
   const fail = (e: unknown, text: string) => setError(describeError(e, text));
   const save = (patch: Partial<Omit<SignageSettings, 'enabled'>>) =>
     void api.admin.setSignageSettings(patch).then(() => { setError(null); onChanged(); }).catch((e) => fail(e, '保存できませんでした'));
-  /** 選んだ M2Office の音を手元で鳴らす（選ぶと鳴る。試す専用のボタンを置かない）。 */
-  const preview = async (id: string) => {
-    if (!SIGNAGE_JINGLES.some((j) => j.id === id)) return;
+  /** 選んでいるジングルを手元で鳴らす（M2Office の音は合成し、会社の音はファイルを読んで鳴らす）。 */
+  const play = async () => {
     if (!player.current) player.current = new JinglePlayer();
-    await player.current.unlock();
-    void player.current.play(id, 70);
+    if (!(await player.current.unlock())) { setError('このブラウザでは音を出せませんでした'); return; }
+    const id = settings.jingle;
+    const file = SIGNAGE_JINGLES.some((j) => j.id === id) ? null : await api.admin.signageSoundFile(id).catch(() => null);
+    setError(null);
+    void player.current.play(id, 70, file);
   };
   const addSound = async (f: File) => {
     // 長さは手元で確かめる（5 秒まで）
@@ -482,75 +483,70 @@ function SignageFields({ settings, busy, onChanged }: { settings: SignageSetting
     URL.revokeObjectURL(url);
     api.admin.addSignageSound(f, f.name.replace(/\.[a-z0-9]+$/i, '').slice(0, 20), ms).then(() => { setError(null); reload(); }).catch((e) => fail(e, '入れられませんでした'));
   };
+  const seconds = (key: 'imageSeconds' | 'interruptSeconds', min: number, max: number, label: string) => (
+    <span className="ext-signage-control">
+      <input key={settings[key]} type="number" min={min} max={max} className="num" defaultValue={settings[key]} disabled={busy} aria-label={label}
+        onBlur={(e) => { const n = Number(e.target.value); if (Number.isInteger(n) && n !== settings[key]) save({ [key]: n }); }} /> 秒
+    </span>
+  );
   return (
-    <div className="small ext-inventory">
-      <div className="row wrap">
-        <label>画像を出す秒数 <input key={settings.imageSeconds} type="number" min={3} max={120} className="num" defaultValue={settings.imageSeconds} disabled={busy}
-          onBlur={(e) => { const n = Number(e.target.value); if (Number.isInteger(n) && n !== settings.imageSeconds) save({ imageSeconds: n }); }} /> 秒</label>
-        <label>店の色 <input type="color" value={settings.color ?? SIGNAGE_DEFAULT_COLOR} disabled={busy} onChange={(e) => save({ color: e.target.value })} aria-label="店の色" /></label>
-        {settings.color && <button className="link" disabled={busy} onClick={() => save({ color: null })}>元の色に戻す</button>}
-      </div>
-      <div className="row wrap">
-        <label>割り込みを出す秒数 <input key={settings.interruptSeconds} type="number" min={5} max={60} className="num" defaultValue={settings.interruptSeconds} disabled={busy}
-          onBlur={(e) => { const n = Number(e.target.value); if (Number.isInteger(n) && n !== settings.interruptSeconds) save({ interruptSeconds: n }); }} /> 秒</label>
-        <label className="check"><input type="checkbox" checked={settings.chime} disabled={busy} onChange={(e) => save({ chime: e.target.checked })} /> ジングル</label>
-        <select value={settings.jingle} disabled={busy} aria-label="既定のジングル" onChange={(e) => { save({ jingle: e.target.value }); void preview(e.target.value); }}>
-          {SIGNAGE_JINGLES.map((j) => <option key={j.id} value={j.id}>{j.label}</option>)}
-          {sounds.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
-        </select>
-      </div>
-      <div className="row wrap">
-        <label className="check"><input type="checkbox" checked={!!settings.stockNotices} disabled={busy} onChange={(e) => save({ stockNotices: e.target.checked })} /> 在庫の入荷と品切れを流す（在庫の Web への公開で承認した品目）</label>
-      </div>
-      <div className="row wrap">
-        {sounds.map((x) => (
-          <span key={x.id} className="ext-chip">{x.name}（{(x.durationMs / 1000).toFixed(1)} 秒）
-            <button className="link" onClick={() => void api.admin.deleteSignageSound(x.id).then(() => { reload(); onChanged(); }).catch((e) => fail(e, '削除できませんでした'))} aria-label={`${x.name}を削除`}>×</button>
-          </span>
-        ))}
-        <button className="btn ghost small" onClick={() => soundFile.current?.click()}>会社の音を入れる</button>
-        <input ref={soundFile} type="file" accept="audio/mpeg,audio/wav,.mp3,.wav" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void addSound(f); }} />
-      </div>
-      <div className="row wrap">
-        <label className="ext-signage-template">番号と場所の呼び出し <input key={settings.callTemplate} defaultValue={settings.callTemplate} disabled={busy} aria-label="番号と場所の呼び出しの言い回し"
-          onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== settings.callTemplate) save({ callTemplate: v }); }} /></label>
-        <label className="ext-signage-template">番号だけの呼び出し <input key={settings.callTemplateNoPlace} defaultValue={settings.callTemplateNoPlace} disabled={busy} aria-label="番号だけの呼び出しの言い回し"
-          onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== settings.callTemplateNoPlace) save({ callTemplateNoPlace: v }); }} /></label>
-      </div>
-      <div className="ext-signage-sources">
-        {sources.length > 0 && (
-          /* 呼び出しの受け口の表（名前・受け取った様子・操作）。止める・動かすはスライドのスイッチ */
-          <table className="table ext-sources-table">
-            <thead><tr><th>受け口</th><th>受け取った様子</th><th className="ext-sources-actions" aria-label="操作" /></tr></thead>
-            <tbody>
-              {sources.map((x) => {
-                const rejected = Object.values(x.stats.rejected).reduce((a, n) => a + n, 0);
-                return (
-                  <tr key={x.id} className={x.status === 'active' ? '' : 'is-stopped'}>
-                    <td><strong>{x.name}</strong></td>
-                    <td className="small">
-                      <div>{x.lastReceivedAt ? `最後 ${new Date(x.lastReceivedAt).toLocaleString('ja-JP')}` : 'まだ受け取っていない'}</div>
-                      {x.stats.day ? <div className="muted">今日 {x.stats.accepted} 件{rejected ? `（断った ${rejected} 件）` : ''}</div> : null}
-                      {(x.stats.rejected['unreadable'] ?? 0) > 0 && <div><span className="badge warn">読めない呼び出しが届いています</span></div>}
-                    </td>
-                    <td className="ext-sources-actions">
-                      <button type="button" role="switch" aria-checked={x.status === 'active'} aria-label={`${x.name}を${x.status === 'active' ? '止める' : '動かす'}`}
-                        title={x.status === 'active' ? '動いている' : '止めている'} className={x.status === 'active' ? 'switch on' : 'switch'}
-                        onClick={() => void api.admin.setSignageSourceStatus(x.id, x.status === 'active' ? 'stopped' : 'active').then(reload).catch((e) => fail(e, '変えられませんでした'))}><span /></button>
-                      <button className="link" onClick={() => void api.admin.resetSignageSourceMapping(x.id).then(reload).catch((e) => fail(e, '変えられませんでした'))}>推測し直す</button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
-        <div className="row wrap">
-          <input placeholder="受付のシステムの名前" value={sourceName} maxLength={40} onChange={(e) => setSourceName(e.target.value)} aria-label="呼び出しの受け口の名前" />
-          <button className="btn ghost small" disabled={!sourceName.trim()} onClick={() => void api.admin.createSignageSource(sourceName.trim()).then((r) => { setCreated(r.url); setSourceName(''); reload(); }).catch((e) => fail(e, '作れませんでした'))}>受け口を作る</button>
+    <div className="small ext-signage">
+      <section className="ext-signage-group">
+        <h4>スケジュール</h4>
+        <div className="signage-settings">
+          <span className="signage-settings-label">画像表示時間</span>
+          {seconds('imageSeconds', 3, 120, '画像表示時間')}
+          <span className="signage-settings-label">在庫の入荷と品切れ</span>
+          <label className="switch-label">
+            <button type="button" role="switch" aria-checked={!!settings.stockNotices} aria-label="在庫の入荷と品切れを流す" disabled={busy}
+              className={settings.stockNotices ? 'switch on' : 'switch'} onClick={() => save({ stockNotices: !settings.stockNotices })}><span /></button>
+            <span className="muted">在庫の Web への公開で承認した品目を流す</span>
+          </label>
         </div>
-        {created && <p className="ok-msg"><code>{created}</code></p>}
-      </div>
+      </section>
+      <section className="ext-signage-group">
+        <h4>割り込み</h4>
+        <div className="signage-settings">
+          <span className="signage-settings-label">割り込み表示時間</span>
+          {seconds('interruptSeconds', 5, 60, '割り込み表示時間')}
+          <span className="signage-settings-label">背景色</span>
+          <span className="ext-signage-control">
+            <input type="color" value={settings.color ?? SIGNAGE_DEFAULT_COLOR} disabled={busy} onChange={(e) => save({ color: e.target.value })} aria-label="背景色" />
+            {settings.color && <button className="link" disabled={busy} onClick={() => save({ color: null })}>元の色に戻す</button>}
+          </span>
+          <span className="signage-settings-label">ジングル</span>
+          <span className="ext-signage-control">
+            <button type="button" role="switch" aria-checked={settings.chime} aria-label="ジングル" disabled={busy}
+              className={settings.chime ? 'switch on' : 'switch'} onClick={() => save({ chime: !settings.chime })}><span /></button>
+            <select value={settings.jingle} disabled={busy} aria-label="既定のジングル" onChange={(e) => save({ jingle: e.target.value })}>
+              {SIGNAGE_JINGLES.map((j) => <option key={j.id} value={j.id}>{j.label}</option>)}
+              {sounds.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+            </select>
+            <button type="button" className="btn ghost small" onClick={() => void play()} aria-label="選んでいるジングルを再生">▶ 再生</button>
+          </span>
+          <span className="signage-settings-label">会社の音</span>
+          <span className="ext-signage-control">
+            {sounds.map((x) => (
+              <span key={x.id} className="ext-chip">{x.name}（{(x.durationMs / 1000).toFixed(1)} 秒）
+                <button className="link danger small" onClick={() => void api.admin.deleteSignageSound(x.id).then(() => { reload(); onChanged(); }).catch((e) => fail(e, '削除できませんでした'))} aria-label={`${x.name}を削除`}>削除</button>
+              </span>
+            ))}
+            <button className="btn ghost small" onClick={() => soundFile.current?.click()}>追加</button>
+            <input ref={soundFile} type="file" accept="audio/mpeg,audio/wav,.mp3,.wav" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void addSound(f); }} />
+          </span>
+        </div>
+      </section>
+      <section className="ext-signage-group">
+        <h4>呼び出しの言い回し</h4>
+        <div className="signage-settings">
+          <span className="signage-settings-label">番号と場所</span>
+          <input key={settings.callTemplate} defaultValue={settings.callTemplate} disabled={busy} aria-label="番号と場所の呼び出しの言い回し"
+            onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== settings.callTemplate) save({ callTemplate: v }); }} />
+          <span className="signage-settings-label">番号だけ</span>
+          <input key={settings.callTemplateNoPlace} defaultValue={settings.callTemplateNoPlace} disabled={busy} aria-label="番号だけの呼び出しの言い回し"
+            onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== settings.callTemplateNoPlace) save({ callTemplateNoPlace: v }); }} />
+        </div>
+      </section>
       {error && <p className="error">{error}</p>}
     </div>
   );
@@ -867,9 +863,9 @@ function MemberFields({ settings, busy, onChanged }: { settings: MemberSettings;
       </div>
       <p className="muted">LIFF のエンドポイント URL: <code>{`${location.origin}/v1/member-card/line`}</code></p>
       <div className="row wrap">
-        {/* 店頭サイネージに特典を流す（第40.19節。サイネージを使っている会社だけ流れる） */}
+        {/* サイネージに特典を流す（第40.19節。サイネージを使っている会社だけ流れる） */}
         <label className="check"><input type="checkbox" checked={!!settings.signage} disabled={busy}
-          onChange={(e) => void api.members.saveSettings({ signage: e.target.checked }).then(() => { setError(null); onChanged(); }).catch((err) => setError(describeError(err, '保存できませんでした')))} />店頭サイネージに特典を流す</label>
+          onChange={(e) => void api.members.saveSettings({ signage: e.target.checked }).then(() => { setError(null); onChanged(); }).catch((err) => setError(describeError(err, '保存できませんでした')))} />サイネージに特典を流す</label>
         <span className="muted">
           ランク: {settings.rankGold != null && settings.rankSilver != null ? `直近 1 年の来店 ゴールド ${settings.rankGold} 回・シルバー ${settings.rankSilver} 回` : '来店のある会員が 10 人になったら決めます'}
           {settings.rankAuto === false ? '（固定）' : '（毎月自動）'}
@@ -908,7 +904,7 @@ function AnnouncementFields({ settings, busy, onChanged }: { settings: Announcem
   const [category, setCategory] = useState(settings.webCategory);
   const [error, setError] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
-  // 流す画面（店頭サイネージの画面。既定はすべて。第35.17節）
+  // 流す画面（サイネージの画面。既定はすべて。第35.17節）
   const [screens, setScreens] = useState<{ id: string; name: string }[]>([]);
   useEffect(() => { api.admin.announcementScreens().then((r) => setScreens(r.screens)).catch(() => setScreens([])); }, []);
   const chosen = settings.screens ?? screens.map((s) => s.id);
@@ -1045,7 +1041,37 @@ function WebColumnsFields({ settings, usage, busy, onChanged }: { settings: WebC
             <button className="btn ghost small" disabled={connecting || !wp.siteUrl.trim() || !wp.username.trim() || !wp.password.trim()} onClick={connect}>{connecting ? 'つないでいます…' : 'つなぐ'}</button>
           </>}
       </div>
+      <ColumnBgmFields onError={(m) => setError(m)} />
       {error && <p className="error">{error}</p>}
+    </div>
+  );
+}
+
+/**
+ * 会社の曲（ナレーション付きスライドの BGM。仕様書 第32.18.6節 段 3）。会社が使う権利を持つ MP3・WAV（1 曲 5 MB・5 分まで、10 曲まで）。
+ * 長さはブラウザで調べてから送る。
+ */
+function ColumnBgmFields({ onError }: { onError: (m: string) => void }) {
+  const [tracks, setTracks] = useState<ColumnBgmTrack[]>([]);
+  const file = useRef<HTMLInputElement>(null);
+  const reload = () => { api.admin.columnBgm().then((r) => setTracks(r.tracks)).catch(() => undefined); };
+  useEffect(reload, []);
+  const add = async (f: File) => {
+    const url = URL.createObjectURL(f);
+    const ms = await new Promise<number>((res) => { const a = new Audio(); a.preload = 'metadata'; a.onloadedmetadata = () => res(a.duration * 1000); a.onerror = () => res(0); a.src = url; });
+    URL.revokeObjectURL(url);
+    api.admin.addColumnBgm(f, f.name.replace(/\.[a-z0-9]+$/i, '').slice(0, 40), ms).then(reload).catch((e) => onError(describeError(e, '入れられませんでした')));
+  };
+  return (
+    <div className="row wrap">
+      <span>ナレーションの BGM（会社の曲）</span>
+      {tracks.map((t) => (
+        <span key={t.id} className="ext-chip">{t.name}（{Math.round(t.durationMs / 1000)} 秒）
+          <button className="link danger small" onClick={() => void api.admin.deleteColumnBgm(t.id).then(reload).catch((e) => onError(describeError(e, '削除できませんでした')))} aria-label={`${t.name}を削除`}>削除</button>
+        </span>
+      ))}
+      <button className="btn ghost small" title="会社が使う権利を持つ曲だけを入れてください（MP3・WAV、5 MB・5 分まで）" onClick={() => file.current?.click()}>曲を追加</button>
+      <input ref={file} type="file" accept="audio/mpeg,audio/wav,.mp3,.wav" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void add(f); }} />
     </div>
   );
 }

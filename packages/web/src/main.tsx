@@ -25,7 +25,7 @@ import { setDebugMode } from './debug.js';
 // 読み込みの途中で明るさが変わらないよう、描画の前に反映する（仕様書 第6.1.2節）
 applyTheme();
 
-/** 店頭サイネージの再生のページ（仕様書 第31.9.1節）。ログインを使わないため、ワークスペースとは別に、必要なときだけ読み込む。 */
+/** サイネージの再生のページ（仕様書 第31.9.1節）。ログインを使わないため、ワークスペースとは別に、必要なときだけ読み込む。 */
 const SignagePlayer = lazy(() => import('./SignagePlayer.js').then((m) => ({ default: m.SignagePlayer })));
 /** マスター管理画面（仕様書 第23.8.15節）。名前が ops. のときだけ、必要なときに読み込む（顧客の画面には入れない）。 */
 const OpsRoot = lazy(() => import('./Ops.js').then((m) => ({ default: m.OpsRoot })));
@@ -91,9 +91,9 @@ function Root() {
   if (location.pathname.startsWith('/m/members')) return withDebug(<MobileMembers me={me} />);
   // 共有の端末の QR を本人のスマホで読んだあとの打刻（仕様書 第30.6.3節）
   if (location.pathname.startsWith('/m/punch')) return withDebug(<MobilePunch />);
-  // 店頭サイネージの画面の登録（端末の QR を管理者がスマホで読む。仕様書 第31.5.1節）
+  // サイネージの画面の登録（端末の QR を管理者がスマホで読む。仕様書 第31.5.1節）
   if (location.pathname.startsWith('/m/signage/pair')) return withDebug(<SignagePair me={me} />);
-  // 店頭サイネージのスタッフのページ（割り込みを出す・消す。仕様書 第31.9.3節）
+  // サイネージのスタッフのページ（割り込みを出す・消す。仕様書 第31.9.3節）
   if (location.pathname.startsWith('/m/signage')) return withDebug(<MobileSignage me={me} />);
   if (location.pathname.startsWith('/board')) {
     // 権限の判定は API が行う。ここは案内だけ（仕様書 第6.7.2.1節）

@@ -1,7 +1,7 @@
 /**
  * @file Web のコラム（内蔵の拡張）の型（仕様書 第32章・第32.18.1節）。
  *
- * 分野やテーマから AI が出典つきの下書きを書き、表現と事実を確かめ（赤入れ）、責任者が承認したものを WordPress に下書きとして入れる。
+ * 分野やテーマから AI が出典つきの下書きを書き、表現と事実を確かめ（校正）、責任者が承認したものを WordPress に下書きとして入れる。
  */
 
 /** Web のコラムの拡張の ID（内蔵の拡張。第12.13節）。 */
@@ -10,7 +10,7 @@ export const WEB_COLUMNS_EXTENSION_ID = 'web-columns';
 /**
  * 業種（東証の 33 業種と「その他」。第32.18.3節、ADR-0066）。コードで持ち、画面には名称を出す。
  *
- * @remarks 赤入れで照らす表現の決まりは、業種だけでは決まらない（クリニックも法律事務所もサービス業）ため、AI が別に選ぶ（{@link ColumnRuleSet}）
+ * @remarks 校正で照らす表現の決まりは、業種だけでは決まらない（クリニックも法律事務所もサービス業）ため、AI が別に選ぶ（{@link ColumnRuleSet}）
  */
 export const COLUMN_INDUSTRIES: readonly { code: string; name: string }[] = [
   { code: '0050', name: '水産・農林業' },
@@ -168,7 +168,7 @@ export const WEB_COLUMN_STATUS_LABELS: Record<WebColumnStatus, string> = {
   writing: '書いています', draft: '下書き', awaiting: '承認待ち', approved: '承認済み', scheduled: '予約', placed: 'WordPress に入れた', withdrawn: '取り下げ', failed: '書けませんでした',
 };
 
-/** 赤入れの指摘 1 つ（第32.8節）。 */
+/** 校正の指摘 1 つ（第32.8節）。 */
 export interface ColumnReviewItem {
   /** 本文の該当の箇所（そのまま抜き出した文字）。本文全体への指摘なら空。 */
   quote: string;
@@ -252,7 +252,7 @@ export interface WebColumn {
   currentVersion: number;
   /** 今の版の題名（書いている間は空）。 */
   title: string;
-  /** 今の版の赤入れの数。 */
+  /** 今の版の校正の数。 */
   reviewCount: number;
   submittedVersion: number | null;
   runId: string | null;
@@ -268,23 +268,25 @@ export interface WebColumn {
   updatedAt: string;
 }
 
-// ---- 店頭サイネージ用の画像と動画（仕様書 第32.18.6節） -----------------------------------------
+// ---- サイネージ用の画像と動画（仕様書 第32.18.6節） -----------------------------------------
 
-/** 店頭サイネージ用の組の種類。`slides` は画像（1 枚か紙芝居）、`video` は動画（段 2）。 */
-export type ColumnSignageKind = 'slides' | 'video';
+/** サイネージ用の組の種類。`slides` は画像（1 枚か紙芝居）、`video` は動画（段 2）。 */
+export type ColumnSignageKind = 'slides' | 'video' | 'narrated';
 
-/** 店頭サイネージ用の組の状態。 */
+/** サイネージ用の組の状態。 */
 export type ColumnSignageStatus = 'making' | 'ready' | 'submitted' | 'published' | 'withdrawn' | 'failed';
 
 /** 状態の呼び方。 */
 export const COLUMN_SIGNAGE_STATUS_LABELS: Record<ColumnSignageStatus, string> = {
-  making: '作っています', ready: 'できました', submitted: '承認待ち', published: '流しています', withdrawn: '外しました', failed: '作れませんでした',
+  making: '作っています', ready: 'できました', submitted: '承認待ち', published: '素材に登録しました', withdrawn: '外しました', failed: '作れませんでした',
 };
 
 /** 紙芝居の 1 場面。`caption` は画面に出す一言、`picture` は絵の内容（画面には出さない）。 */
 export interface ColumnSignageScene {
   caption: string;
   picture: string;
+  /** 読み上げ文（ナレーション付きスライドだけ。第32.18.6節 段 3）。 */
+  narration?: string;
 }
 
 /** できた画像か動画 1 つ。 */
@@ -296,7 +298,7 @@ export interface ColumnSignageOutput {
   kind: 'image' | 'video';
 }
 
-/** 店頭サイネージ用の 1 組（1 回の「サイネージ用を作る」）。 */
+/** サイネージ用の 1 組（1 回の「サイネージ用を作る」）。 */
 export interface ColumnSignageSet {
   id: string;
   columnId: string;
@@ -315,6 +317,14 @@ export interface ColumnSignageSet {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+  /** 動画の長さ（秒。8 か 15）。画像の組と、長さを選べるようになる前の動画は `null`（8 秒）。 */
+  videoSeconds: ColumnSignageVideoSeconds | null;
+  /** 作風（作風を選べるようになる前の組は `null`）。 */
+  imageStyle: ColumnImageStyle | null;
+  /** 読み上げの声（ナレーション付きスライドだけ）。 */
+  voice: ColumnNarrationVoice | null;
+  /** BGM（組み込みの曲の ID・会社の曲の ID・`none`。ナレーション付きスライドだけ）。 */
+  bgm: string | null;
 }
 
 /** 紙芝居の枚数の上限。 */
@@ -325,7 +335,98 @@ export const COLUMN_SIGNAGE_CAPTION_MAX = 30;
 export const COLUMN_SIGNAGE_DAYS = 30;
 /** 紙芝居の 1 枚を出す秒数。 */
 export const COLUMN_SIGNAGE_SECONDS = 8;
-/** 店頭サイネージ用の動画を会社で月に作れる本数（作り直しも数える。仕様書 第32.18.6節 段 2）。 */
+/** サイネージ用の動画を会社で月に作れる本数（作り直しも数える。仕様書 第32.18.6節 段 2）。 */
 export const COLUMN_SIGNAGE_VIDEO_MONTHLY_LIMIT = 10;
-/** 店頭サイネージ用の動画の既定のモデル（Veo 3.1 Lite。`MODEL_VIDEO` で変えられる）。 */
+/** サイネージ用の 8 秒の動画のモデル（Veo 3.1 Lite。延長はできない。`MODEL_VIDEO` で変えられる）。 */
 export const COLUMN_SIGNAGE_VIDEO_MODEL = 'veo-3.1-lite-generate-preview';
+/** サイネージ用の 15 秒の動画のモデル（Veo 3.1 Fast。8 秒を作り 7 秒延長する。`MODEL_VIDEO_LONG` で変えられる）。 */
+export const COLUMN_SIGNAGE_VIDEO_LONG_MODEL = 'veo-3.1-fast-generate-preview';
+
+/** コラムの画像と動画の作風（仕様書 第32.7.1節・第32.18.6節。第 0.351.0 版）。作るときに選ぶ。 */
+export type ColumnImageStyle = 'real' | 'illustration' | 'anime' | 'fantasy';
+
+/** 作風の選択肢（選ぶ欄の並び順）。 */
+export const COLUMN_IMAGE_STYLES: readonly { id: ColumnImageStyle; label: string }[] = [
+  { id: 'real', label: 'リアル' },
+  { id: 'illustration', label: 'イラスト' },
+  { id: 'anime', label: 'アニメ風' },
+  { id: 'fantasy', label: 'ファンタジー' },
+];
+
+/** はじめに選ばれている作風（写真のようなリアル。2026-10-13 に三浦さんが決めた）。 */
+export const COLUMN_IMAGE_STYLE_DEFAULT: ColumnImageStyle = 'real';
+
+/** 値を作風に直す（知らない値は既定）。 */
+export function columnImageStyle(v: unknown): ColumnImageStyle {
+  return COLUMN_IMAGE_STYLES.some((s) => s.id === v) ? v as ColumnImageStyle : COLUMN_IMAGE_STYLE_DEFAULT;
+}
+
+/** サイネージ用の動画の長さ（秒）。 */
+export type ColumnSignageVideoSeconds = 8 | 15;
+
+/**
+ * 選べる動画の長さと費用の目安（仕様書 第32.18.6節。第 0.349.0 版）。費用は 1 ドル 155 円で、8 秒は Lite（1 秒 0.05 ドル）、
+ * 15 秒は Fast（1 秒 0.10 ドル）。費用は動画ができたときだけかかる。選ぶのは頼む人。
+ */
+export const COLUMN_SIGNAGE_VIDEO_LENGTHS: readonly { seconds: ColumnSignageVideoSeconds; label: string }[] = [
+  { seconds: 8, label: '8 秒・約 60 円' },
+  { seconds: 15, label: '15 秒・約 230 円' },
+];
+
+/** ナレーション付きスライドの読み上げのモデル（Gemini の TTS。日本語に対応。`MODEL_TTS` で変えられる）。 */
+export const COLUMN_NARRATION_TTS_MODEL = 'gemini-3.8-flash-tts';
+
+/** ナレーション付きスライドの読み上げの声（Q-232 決定。Gemini の声から M2Office が選んだ 4 つ）。 */
+export type ColumnNarrationVoice = 'calm' | 'bright' | 'soft' | 'strong';
+
+/** 声の選択肢（選ぶ欄の並び順。`voice` は Gemini の声の名前）。 */
+export const COLUMN_NARRATION_VOICES: readonly { id: ColumnNarrationVoice; label: string; voice: string }[] = [
+  { id: 'calm', label: '落ち着いた声', voice: 'Charon' },
+  { id: 'bright', label: '明るい声', voice: 'Zephyr' },
+  { id: 'soft', label: 'やわらかい声', voice: 'Sulafat' },
+  { id: 'strong', label: '力強い声', voice: 'Kore' },
+];
+
+/** はじめに選ばれている声（落ち着いた声。Q-232）。 */
+export const COLUMN_NARRATION_VOICE_DEFAULT: ColumnNarrationVoice = 'calm';
+
+/** 値を声に直す（知らない値は既定）。 */
+export function columnNarrationVoice(v: unknown): ColumnNarrationVoice {
+  return COLUMN_NARRATION_VOICES.some((x) => x.id === v) ? v as ColumnNarrationVoice : COLUMN_NARRATION_VOICE_DEFAULT;
+}
+
+/** M2Office がプログラムで合成する BGM（Q-234 決定。権利の心配が無い）。 */
+export const COLUMN_BUILTIN_BGM: readonly { id: string; label: string }[] = [
+  { id: 'builtin:gentle', label: '穏やか（組み込み）' },
+  { id: 'builtin:bright', label: '明るい（組み込み）' },
+  { id: 'builtin:calm', label: '落ち着いた（組み込み）' },
+];
+
+/** BGM を付けないときの値。 */
+export const COLUMN_BGM_NONE = 'none';
+
+/** はじめに選ばれている BGM。 */
+export const COLUMN_BGM_DEFAULT = 'builtin:gentle';
+
+/** 会社の曲（BGM。会社が使う権利を持つもの。第32.18.6節 段 3）。 */
+export interface ColumnBgmTrack {
+  id: string;
+  name: string;
+  mime: 'audio/mpeg' | 'audio/wav';
+  bytes: number;
+  durationMs: number;
+  createdAt: string;
+}
+
+/** ナレーション付きスライドの決まり（Q-231 決定ほか）。 */
+export const COLUMN_NARRATED_LIMITS = {
+  /** 全体の長さの目安（秒）。テレビの CM の 15 秒と 30 秒に合わせる */
+  minSeconds: 15,
+  maxSeconds: 30,
+  /** これを超えたら作らない（秒） */
+  hardMaxSeconds: 60,
+  /** 会社の曲の上限 */
+  bgmBytes: 5 * 1024 * 1024,
+  bgmMs: 5 * 60_000,
+  bgmTracks: 10,
+} as const;

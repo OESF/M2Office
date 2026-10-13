@@ -1,11 +1,11 @@
 /**
- * @file 店頭サイネージ（内蔵の拡張）の型（仕様書 第31章、ADR-0051）。
+ * @file サイネージ（内蔵の拡張）の型（仕様書 第31章、ADR-0051）。
  *
  * 画面（端末 1 台に 1 画面・1 社 3 台まで）・素材（画像・動画・HTML）・流れ（画面ごとの素材の並び）・割り込み・ジングル・呼び出しの受け口を持つ。
  * 料金は取らない標準の機能で、会社ごとに入り切りする（既定は切り。第31.2節）。
  */
 
-/** 店頭サイネージの拡張の ID（内蔵の拡張。第12.13節）。 */
+/** サイネージの拡張の ID（内蔵の拡張。第12.13節）。 */
 export const SIGNAGE_EXTENSION_ID = 'signage';
 
 /** 1 社で登録できる画面の数（全社共通の決まり。第31.4節）。 */
@@ -33,7 +33,7 @@ export const SIGNAGE_LIMITS = {
   htmlBytes: 10 * 1024 * 1024,
   /** 割り込みの文の長さ（整えた後。第31.7.1節）。 */
   textChars: 80,
-  /** 割り込みを出す秒数の範囲。 */
+  /** 割り込み表示時間の範囲。 */
   minInterruptSeconds: 5,
   maxInterruptSeconds: 60,
   /** 画面ごとの割り込みの待ちの上限（第31.7.2節）。 */
@@ -48,7 +48,7 @@ export const SIGNAGE_LIMITS = {
   sounds: 10,
   /** 画面ごとの流れの行の数。 */
   entries: 100,
-  /** 画像を出す秒数の範囲。 */
+  /** 画像表示時間の範囲。 */
   minSeconds: 3,
   maxSeconds: 120,
 } as const;
@@ -59,9 +59,9 @@ export interface SignageSettings {
   enabled: boolean;
   /** 画像と HTML を出す秒数の既定（3〜120）。 */
   imageSeconds: number;
-  /** 店の色（`#RRGGBB`）。`null` なら濃い青。 */
+  /** 背景色（`#RRGGBB`）。`null` なら濃い青。 */
   color: string | null;
-  /** 割り込みを出す秒数の既定（5〜60）。 */
+  /** 割り込み表示時間の既定（5〜60）。 */
   interruptSeconds: number;
   /** 割り込みでジングルを鳴らすか（既定は入り）。 */
   chime: boolean;
@@ -89,7 +89,7 @@ export const SIGNAGE_JINGLES: { id: string; label: string }[] = [
   { id: 'bell', label: 'ベル' },
 ];
 
-/** 店の色が無いときの色（濃い青。第31.4節）。 */
+/** 背景色が無いときの色（濃い青。第31.4節）。 */
 export const SIGNAGE_DEFAULT_COLOR = '#1f3a5f';
 
 /** 画面の向き。 */
@@ -171,6 +171,8 @@ export interface SignageAsset {
    * @remarks 生成 AI に字を描かせないため、字は再生の画面が重ねる
    */
   caption: string | null;
+  /** ナレーション付きの動画か（コラムのナレーション付きスライド。スケジュールに足すとはじめから音あり。第32.18.6節 段 3、Q-233）。 */
+  narration: boolean;
   createdAt: string;
 }
 
@@ -326,32 +328,6 @@ export interface SignagePhrase {
   template: string;
   hasNumber: boolean;
   count: number;
-}
-
-/** 呼び出しの受け口（第31.8.2節）。鍵は作ったときだけ返す。 */
-export interface SignageSource {
-  id: string;
-  name: string;
-  status: 'active' | 'stopped';
-  /** 項目の対応（まだ推測していなければ `null`）。 */
-  mapping: SignageSourceMapping | null;
-  lastReceivedAt: string | null;
-  /** 今日の受け付けた数と断った数。 */
-  stats: { day: string; accepted: number; rejected: Record<string, number> };
-  createdAt: string;
-}
-
-/** 受け口の項目の対応（ドットでつないだ道）。 */
-export interface SignageSourceMapping {
-  text?: string;
-  number?: string;
-  place?: string;
-  image?: string;
-  screens?: string;
-  seconds?: string;
-  chime?: string;
-  jingle?: string;
-  requestId?: string;
 }
 
 /** 会社のジングルの音（第31.7.3節）。 */

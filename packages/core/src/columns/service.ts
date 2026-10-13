@@ -10,7 +10,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
   canUseAgent, WEB_COLUMNS_EXTENSION_ID,
-  type ColumnCoverKind, type ColumnReviewItem, type ColumnRuleSet, type ColumnWordPress, type WebColumn, type WebColumnCover,
+  type ColumnCoverKind, type ColumnImageStyle, type ColumnReviewItem, type ColumnRuleSet, type ColumnWordPress, type WebColumn, type WebColumnCover,
   type WebColumnSettings, type WebColumnVersion,
 } from '@m2office/shared';
 import type { LlmProvider } from '../llm/provider.js';
@@ -29,8 +29,8 @@ import { similarityReview } from './plan.js';
 import type { PageFetcher } from '../competitors/fetcher.js';
 import { imageModel } from '../llm/models.js';
 import {
-  COVER_AI_MONTHLY_LIMIT, COVER_AI_TRIES, COVER_MIN_BRIGHTNESS, COVER_MIN_PHOTO_BRIGHTNESS, brandColor, brightness, checkIllustration, choosePhoto, describePhoto, fallbackColor,
-  illustrationPrompt, imageWish, pickPattern, renderCover, wantsDark, type CoverInput,
+  COVER_AI_MONTHLY_LIMIT, COVER_AI_TRIES, COVER_MIN_PHOTO_BRIGHTNESS, brandColor, brightness, checkBeforeAfter, choosePhoto, describePhoto, fallbackColor,
+  illustrationPrompt, imageWish, pickPattern, renderCover, type CoverInput,
 } from './cover.js';
 
 /** コラムを扱う人。 */
@@ -63,6 +63,8 @@ export interface CoverRequest {
   hint?: string;
   /** 使う会社の写真（写真を入れたとき）。 */
   photoId?: string;
+  /** AI の画像の作風（無ければリアル。第 0.351.0 版）。 */
+  style?: ColumnImageStyle;
 }
 
 /** 写真として受け取れる形。 */
@@ -225,7 +227,7 @@ export class ColumnService {
     return null;
   }
 
-  /** 書き上げる（調べもの → 下書き → 赤入れ）。例外は外に出さず、「書けませんでした」と理由を残す。 */
+  /** 書き上げる（調べもの → 下書き → 校正）。例外は外に出さず、「書けませんでした」と理由を残す。 */
   private async write(who: ColumnViewer, id: string): Promise<void> {
     const { store, repo } = this.deps;
     try {
@@ -265,7 +267,7 @@ export class ColumnService {
   }
 
   /**
-   * 直して保存する（新しい版になる）。決まったプログラムの赤入れをやり直す。
+   * 直して保存する（新しい版になる）。決まったプログラムの校正をやり直す。
    *
    * @returns 直せなければ理由
    */
@@ -289,7 +291,7 @@ export class ColumnService {
   }
 
   /**
-   * 指示で書き直してもらう（「もっと短く」など）。新しい版になり、赤入れをやり直す。
+   * 指示で書き直してもらう（「もっと短く」など）。新しい版になり、校正をやり直す。
    *
    * @returns 書き直せなければ理由
    */
@@ -312,7 +314,7 @@ export class ColumnService {
   }
 
   /**
-   * 赤入れの直し案に置き換える（今の版の `index` 番目の指摘）。新しい版になる。
+   * 校正の直し案に置き換える（今の版の `index` 番目の指摘）。新しい版になる。
    *
    * @returns 置き換えられなければ理由
    */
@@ -603,7 +605,7 @@ export class ColumnService {
     // ① AI の挿絵（会社が入れていて、描けて確かめられ、今月の上限の内のとき）
     const wantAi = req.kind === 'ai' || (!req.kind && settings.webColumns.aiIllustration);
     if (wantAi) {
-      const can = settings.webColumns.aiIllustration && llm.generateImage && llm.extractFromImage;
+      const can = settings.webColumns.aiIllustration && llm.generateImage;
       const usage = can ? await this.aiUsage(who.tenantId) : null;
       if (!settings.webColumns.aiIllustration) notes.push('AI で挿絵を描く設定が切りのため、型にしました');
       else if (!can) notes.push('この会社の AI では挿絵を描けないため、型にしました');
@@ -616,12 +618,11 @@ export class ColumnService {
           aiAttempts += 1;
           const img = await llm.generateImage!({
             model: imageModel(), aspectRatio: '16:9',
-            prompt: illustrationPrompt({ title: a.title, description: a.description, rules: settings.webColumns.rules, hint }),
+            prompt: illustrationPrompt({ title: a.title, description: a.description, rules: settings.webColumns.rules, hint, style: req.style }),
           }).catch(() => null);
           if (!img) { notes.push('挿絵を描けませんでした'); continue; }
-          // 暗い挿絵は Web のページを暗く見せるため描き直す（暗い雰囲気を頼まれたときは除く）
-          if (!wantsDark(hint) && (brightness(img) ?? 1) < COVER_MIN_BRIGHTNESS) { notes.push('暗い画像だったため描き直しました'); continue; }
-          const check = await checkIllustration(llm, img, settings.webColumns.rules);
+          // 人物・文字・暗さなどの禁止は設けない（第 0.351.0 版）。医療・健康の会社の前と後の比較だけを確かめる
+          const check = await checkBeforeAfter(llm, img, settings.webColumns.rules);
           if (!check.ok) { notes.push(check.reason); continue; }
           return this.saveCover(who, { ...base, background: { kind: 'image', image: img } }, { kind: 'ai', pattern: null, photoId: null, aiAttempts, note: notes.join('／'), alt: altText(a.title, 'ai') });
         }

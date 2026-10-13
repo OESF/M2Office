@@ -169,7 +169,7 @@ export interface RunEngineDeps {
     access(tenantId: string, userId: string): Promise<WebColumnSettings | null>;
     /** テーマ案と予定表（段 2。第32.18.4節） */
     planner?: ColumnPlanner;
-    /** 店頭サイネージ用の画像（第32.18.6節） */
+    /** サイネージ用の画像（第32.18.6節） */
     signage?: ColumnSignageService;
   };
   /**

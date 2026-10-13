@@ -1,5 +1,5 @@
 /**
- * @file 店頭サイネージの処理（仕様書 第31章の段 1）。画面の登録・素材・流れ・再生のページへの答え・生きている知らせ・つながらない知らせ。
+ * @file サイネージの処理（仕様書 第31章の段 1）。画面の登録・素材・流れ・再生のページへの答え・生きている知らせ・つながらない知らせ。
  *
  * 画面は 1 社 3 台まで。画面の鍵は SHA-256 のハッシュだけを持つ（第31.5.1節）。素材の形式はサーバーでも確かめ直し、作り直さない（第31.6.1節）。
  * 会社が登録した画面に出すことは社外への送信に当たらない（ADR-0051）。
@@ -133,13 +133,15 @@ export interface AssetUpload {
   height?: number;
   /** 動画の下に重ねて出す字幕（コラムから作った動画。第32.18.6節）。動画のときだけ使う。 */
   caption?: string | null;
+  /** ナレーション付きの動画か（スケジュールに足すとはじめから音あり。第32.18.6節 段 3）。 */
+  narration?: boolean;
 }
 
 /** 再生のページに渡す素材（中身の場所は ID で引く）。 */
 export type PlayAsset = Pick<SignageAsset, 'id' | 'kind' | 'mime' | 'sha256' | 'bytes' | 'width' | 'height' | 'durationMs' | 'caption'>;
 
 /**
- * 店頭サイネージの処理。
+ * サイネージの処理。
  *
  * @remarks テナント境界: 置き場が会社ごとに絞る（不変則 I-2）。使えるか（入り切りと利用範囲）の確かめは呼ぶ側（API）が {@link signageAccess} で行う
  */
@@ -432,7 +434,7 @@ export class SignageService {
     }
     // 字幕は動画だけ（2 行・80 字まで）
     const caption = kind === 'video' && up.caption ? up.caption.split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 2).join('\n').slice(0, 80) || null : null;
-    await this.deps.store.insertAsset(tenantId, { id, kind, name, mime, bytes: up.bytes, sha256: up.sha256, width, height, durationMs, thumbnail: thumb, caption }, userId);
+    await this.deps.store.insertAsset(tenantId, { id, kind, name, mime, bytes: up.bytes, sha256: up.sha256, width, height, durationMs, thumbnail: thumb, caption, narration: kind === 'video' && up.narration === true }, userId);
     await this.audit(tenantId, userId, 'signage.asset.add', id, { name, kind, bytes: up.bytes, sha256: up.sha256 });
     return { asset: (await this.deps.store.getAsset(tenantId, id))!, existing: false };
   }
@@ -701,7 +703,7 @@ export class SignageService {
   }
 
   /**
-   * 再生のページに渡す状態（設定・流れと版・素材・店の色・会社の名前・サーバーの時刻。第31.15.2節）。
+   * 再生のページに渡す状態（設定・流れと版・素材・背景色・会社の名前・サーバーの時刻。第31.15.2節）。
    */
   async playState(tenantId: string, s: ScreenRecord): Promise<{
     screen: { id: string; name: string; orientation: SignageOrientation; rotation: SignageRotation; volume: number; transition: SignageTransition; kenBurns: boolean; flowVersion: number };

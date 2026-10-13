@@ -137,7 +137,6 @@ export const DEFAULT_STANDARD_MINUTES: Record<string, number> = {
   'web-columns:cover': 20,
   'web-columns:rules': 5,
   'web-columns:signage': 30,
-  'web-columns:signage-publish': 5,
   'inquiries:record': 5,
   'inquiries:lookup': 10,
   'inquiries:reply-draft': 15,

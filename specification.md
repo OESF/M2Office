@@ -1,6 +1,6 @@
 ---
 title: M2Office 仕様書
-version: 0.345.1
+version: 0.356.0
 status: draft
 created: 2026-09-20
 updated: 2026-10-01
@@ -34,7 +34,7 @@ tags: [M2Office, specification, ai-agent, sme, saas, platform, google-workspace,
 | VII 実装 | 19〜20 | 何をどう作るか | [19](spec/19-data-model.md)・[20](spec/20-tech-stack.md) |
 | VIII 事業と運用 | 21〜23 | どう売り、どう運ぶか | [21](spec/21-business-model.md)・[22](spec/22-operations.md)・[23](spec/23-backyard.md) |
 | IX 計画 | 24〜26 | これからどう進めるか | [24](spec/24-roadmap.md)・[25](spec/25-risks.md)・[26](spec/26-open-questions.md) |
-| X 業務の拡張 | 27〜 | 中小企業が共通して使う業務を、拡張として 1 つずつ定める（第 0.139.0 版） | [27 名刺管理](spec/27-business-cards.md)・[28 契約書チェック](spec/28-contract-review.md)・[29 在庫管理](spec/29-inventory.md)（案）・[30 人事・給与](spec/30-hr-payroll.md)（案）・[31 店頭サイネージ](spec/31-signage.md)（案）・[32 Web のコラム](spec/32-web-columns.md)（案）・[33 問い合わせの記録](spec/33-inquiries.md)（案）・[34 Webの分析](spec/34-web-review.md)（案）・[35 お知らせの作成](spec/35-announcements.md)（案）・[36 競合の分析](spec/36-competitors.md)（案）・[37 会議室・社用車・備品の予約](spec/37-reservations.md)・[38 契約の管理](spec/38-contracts.md)・[39 補助金・助成金の案内](spec/39-subsidies.md)・[40 会員とポイント](spec/40-members.md)・[41 販促物の作成](spec/41-print-designs.md) |
+| X 業務の拡張 | 27〜 | 中小企業が共通して使う業務を、拡張として 1 つずつ定める（第 0.139.0 版） | [27 名刺管理](spec/27-business-cards.md)・[28 契約書チェック](spec/28-contract-review.md)・[29 在庫管理](spec/29-inventory.md)（案）・[30 人事・給与](spec/30-hr-payroll.md)（案）・[31 サイネージ](spec/31-signage.md)（案）・[32 Web のコラム](spec/32-web-columns.md)（案）・[33 問い合わせの記録](spec/33-inquiries.md)（案）・[34 Webの分析](spec/34-web-review.md)（案）・[35 お知らせの作成](spec/35-announcements.md)（案）・[36 競合の分析](spec/36-competitors.md)（案）・[37 会議室・社用車・備品の予約](spec/37-reservations.md)・[38 契約の管理](spec/38-contracts.md)・[39 補助金・助成金の案内](spec/39-subsidies.md)・[40 会員とポイント](spec/40-members.md)・[41 販促物の作成](spec/41-print-designs.md) |
 | 付録 | A〜D | 更新方針・参考資料・出典・改訂履歴 | [A](spec/appendix-a-update-policy.md)・[B](spec/appendix-b-references.md)・[C](spec/appendix-c-data-sources.md)・[D](spec/appendix-d-history.md) |
 
 ### 0.2 どこから読むか
@@ -149,7 +149,7 @@ tags: [M2Office, specification, ai-agent, sme, saas, platform, google-workspace,
 | ADR-0048 | 週次ブリーフを「今週の見通しと先週からの変化」にし、全員に自動で用意する | `docs/adr/0048-weekly-brief-outlook.md` |
 | ADR-0049 | 人事・給与を M2Office の中で完結させる（給与計算を内製する） | `docs/adr/0049-hr-payroll-built-in.md` |
 | ADR-0050 | 在庫管理のバーコードの読み取りと棚のラベルに使う部品 | `docs/adr/0050-inventory-barcode-and-label-libraries.md` |
-| ADR-0051 | 店頭サイネージを内蔵の拡張にし、会社の画面に出すことを社外への送信としない | `docs/adr/0051-signage-own-screens-not-external.md` |
+| ADR-0051 | サイネージを内蔵の拡張にし、会社の画面に出すことを社外への送信としない | `docs/adr/0051-signage-own-screens-not-external.md` |
 | ADR-0052 | 源泉所得税は税額表で引き、法令の表は公式の発表から取り込んだデータのファイルとして持つ | `docs/adr/0052-payroll-law-tables-as-data.md` |
 | ADR-0053 | 給与の確定は管理者が給与の画面で押すことを承認とし、監修前の表での確定は開発の環境だけに許す | `docs/adr/0053-payroll-confirm-by-admin.md` |
 | ADR-0054 | 人事・給与の責任の範囲（規約）と、記録の保存の期間・消し方 | `docs/adr/0054-payroll-liability-and-retention.md` |

@@ -264,7 +264,7 @@ export class InventoryPublisher {
   }
 
   /**
-   * 公開した品目の品切れ・入荷を受け取る口を足す（店頭サイネージの案内。第31.6.7節）。
+   * 公開した品目の品切れ・入荷を受け取る口を足す（サイネージの案内。第31.6.7節）。
    * 作り直すたびに、前の中身と比べた変化と、いま公開している品目の名前を渡す。
    */
   onStockChange(listener: StockChangeListener): void {
