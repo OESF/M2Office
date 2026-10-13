@@ -224,10 +224,10 @@ export class WebReviewService {
     return next;
   }
 
-  /** 担当の許可で読む口。つないでいなければ `null`。 */
-  private async open(tenantId: string): Promise<WebData | null> {
+  /** 担当の許可で読む口。つないでいなければ `null`。`now` は見本の口が「最近」を数える基準。 */
+  private async open(tenantId: string, now?: Date): Promise<WebData | null> {
     const settings = await this.deps.repo.getTenantSettings(tenantId);
-    return openWebData(this.deps.data, tenantId, hostOf(settings.company.website) ? `www.${hostOf(settings.company.website)}` : undefined);
+    return openWebData(this.deps.data, tenantId, hostOf(settings.company.website) ? `www.${hostOf(settings.company.website)}` : undefined, now);
   }
 
   // ---- つなぐ・外す・選ぶ（管理者） --------------------------------------------------------------
@@ -359,7 +359,7 @@ export class WebReviewService {
     const w = (await this.deps.repo.getTenantSettings(tenantId)).webReview;
     if (!w.connection) return { error: '担当がまだ Google とつないでいません' };
     try {
-      const data = await this.open(tenantId);
+      const data = await this.open(tenantId, now);
       if (!data) return { error: '担当がまだ Google とつないでいません' };
       return await answerAsk(data, { propertyId: w.property?.id ?? null, siteUrl: w.siteUrl }, q, now);
     } catch (err) {
@@ -482,7 +482,7 @@ export class WebReviewService {
     const settings = await this.deps.repo.getTenantSettings(tenantId);
     const w = settings.webReview;
     if (!w.enabled || !w.connection || (!w.property && !w.siteUrl)) return null;
-    const data = await this.open(tenantId);
+    const data = await this.open(tenantId, now);
     if (!data) return null;
     const columns = this.deps.columns ? await this.deps.columns.published(tenantId).catch(() => []) : [];
     const company = settings.company.shortName || settings.company.legalName;

@@ -189,7 +189,7 @@ const fakeColumns: WebReviewColumns = { published: async () => [{ id: 'col-1', t
 test('直すべき所: 6 つの種類を決まった基準で見つけ、コラムには依頼文を作らず、ほかには制作会社への依頼文を下書きする', async () => {
   assert.equal(rankBand(3.2), 0, '平均の順位は四捨五入して区切る');
   assert.equal(rankBand(8), 2);
-  const r = await findIssues(new MockWebData(), {
+  const r = await findIssues(new MockWebData(undefined, () => OCT4.getTime()), {
     propertyId: 'properties/100001', siteUrl: 'sc-domain:alpha.example.jp', origin: 'https://www.alpha.example.jp', companyNames: ['見本の会社'],
     columns: [{ id: 'col-1', title: '春のコラム', url: COLUMN_URL }],
   }, 'アルファ', OCT4);

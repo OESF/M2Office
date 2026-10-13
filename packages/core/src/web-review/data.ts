@@ -245,7 +245,11 @@ const daysOf = (q: { start: string; end: string }) => Math.max(1, Math.round((Da
  * 開発の見本の会社の口。Google に問い合わせず、期間から決まる見本の数字を返す。外には何も出さない。
  */
 export class MockWebData implements WebData {
-  constructor(private readonly host = 'www.alpha.example.jp') {}
+  /**
+   * @param host 見本の会社のホスト
+   * @param now 「この 100 日」を数える基準の時刻。見回りに渡した時刻で数え、実行した日によって数字が変わらないようにする
+   */
+  constructor(private readonly host = 'www.alpha.example.jp', private readonly now: () => number = Date.now) {}
 
   async properties(): Promise<WebProperty[]> {
     return [{ id: 'properties/100001', name: '見本のサイト', account: '見本の会社', uris: [`https://${this.host}/`] }];
@@ -263,7 +267,7 @@ export class MockWebData implements WebData {
     };
     const value = (name: string, share: number) => (name === 'engagementRate' ? base[name]! : Math.round((base[name] ?? 0) * share));
     // 冬のコラムは、この 100 日のうちに読まれなくなった（読まれなくなった記事の見本）
-    const recent = Date.parse(`${q.start}T00:00:00Z`) > Date.now() - 100 * 86_400_000;
+    const recent = Date.parse(`${q.start}T00:00:00Z`) > this.now() - 100 * 86_400_000;
     const dims = q.dimensions ?? [];
     if (!dims.length) return [{ dims: [], values: q.metrics.map((m) => base[m] ?? 0) }];
     const lists: Record<string, [string, number][]> = {
@@ -336,12 +340,13 @@ export interface WebDataDeps {
 /**
  * 担当の許可で読む口を開く。つないでいなければ `null`。
  *
+ * @param now 見本の口が「最近」を数える基準の時刻（見回りの時刻。省けばいま）
  * @throws WebDataError 会社の Google 接続の設定が無いとき
  */
-export async function openWebData(deps: WebDataDeps, tenantId: string, host?: string): Promise<WebData | null> {
+export async function openWebData(deps: WebDataDeps, tenantId: string, host?: string, now?: Date): Promise<WebData | null> {
   const cred = await deps.repo.getTenantCredential(tenantId, WEB_REVIEW_KIND);
   if (!cred) return null;
-  if (cred.meta['mock'] === true || deps.sourceFor(tenantId) === 'mock') return new MockWebData(host || undefined);
+  if (cred.meta['mock'] === true || deps.sourceFor(tenantId) === 'mock') return new MockWebData(host || undefined, now ? () => now.getTime() : undefined);
   const client = await deps.repo.getTenantCredential(tenantId, 'google_oauth');
   const clientId = typeof client?.meta['clientId'] === 'string' ? client.meta['clientId'] : '';
   if (!client?.secretEnc || !clientId || !cred.secretEnc) throw new WebDataError('会社の Google 接続の設定がありません。管理者に伝えてください', 'failed');
