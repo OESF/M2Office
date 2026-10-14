@@ -54,6 +54,8 @@ export function EffectPanel() {
             <EffectTile label="AI の費用" value={f.aiCostJpy} unit="円" diff={p ? delta(f.aiCostJpy, p.aiCostJpy, '円') : null}
               title="業務・秘書・音声・画像・動画・自動の処理など、すべての AI の利用の合計です（目安の単価で数えた概算）" />
             <EffectTile label="削減 1 時間あたりの AI の費用" value={f.costPerSavedHourJpy ?? '—'} unit={f.costPerSavedHourJpy === null ? '' : '円'} diff={null} />
+            <EffectTile label="会社の知識（秘書が学んだこと）" value={f.knowledge.learned} unit="件" diff={null}
+              note={`期間に +${f.knowledge.added} 件・使われた ${f.knowledge.used} 件`} />
           </div>
           {p && <p className="muted small">比べている期間: {p.label}</p>}
           <div className="dash-grid">
@@ -96,12 +98,13 @@ export function EffectPanel() {
   );
 }
 
-function EffectTile({ label, value, unit, diff, title }: { label: string; value: number | string; unit: string; diff: string | null; title?: string }) {
+function EffectTile({ label, value, unit, diff, title, note }: { label: string; value: number | string; unit: string; diff: string | null; title?: string; note?: string }) {
   return (
     <div className="tile" title={title}>
       <span>{label}</span>
       <strong>{typeof value === 'number' ? value.toLocaleString() : value}<small> {unit}</small></strong>
       {diff && <small className="muted effect-diff">前の期間より {diff}</small>}
+      {note && <small className="muted effect-diff">{note}</small>}
     </div>
   );
 }

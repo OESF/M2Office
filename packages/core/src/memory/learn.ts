@@ -54,14 +54,20 @@ export function previousDay(now: Date): { day: string; from: string; to: string 
  * 応答は「要約:」の行と「- 」で始まる候補の行からなる。取り出せなければ空にする。
  * 形が違う応答から推測で作らない（第11.5.2節「推論が使えなければ候補を作らない」）。
  */
-export function parseLearning(text: string): { summary: string; facts: string[] } {
+export function parseLearning(text: string): { summary: string; facts: string[]; preferences: string[] } {
   const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
   const summary = lines.find((l) => l.startsWith('要約:'))?.slice('要約:'.length).trim() ?? '';
-  const facts = lines
+  const items = lines
     .filter((l) => l.startsWith('- '))
     .map((l) => l.slice(2).trim())
     .filter(Boolean);
-  return { summary, facts };
+  // 「- 好み: 」で始まる行は仕事のやり方の好み（第11.13.2節）
+  const pref = /^好み[:：]\s*/;
+  return {
+    summary,
+    facts: items.filter((l) => !pref.test(l)),
+    preferences: items.filter((l) => pref.test(l)).map((l) => l.replace(pref, '').trim()).filter(Boolean),
+  };
 }
 
 /**
@@ -91,6 +97,8 @@ export function learningPrompt(conversations: Conversation[], work: WorkAnswer[]
     '',
     '覚えるもの: 担当や役割、取引先や案件の経緯と状況、本人の予定・約束・やりかけのこと、作業の好み、判断の傾向、繰り返しの手順、',
     '社内の用語や通称、人の呼び方、本人が話した本人の事情。メールや文書は原文ではなく、要点と、どこにあるかを書く。',
+    '仕事のやり方の好み（文の長さ・言い方・宛名・形式・手順の好み）は、「- 好み: 」で始めてください（例: 「- 好み: 社外へのメールの下書きは 3 行以内にする」）。',
+    '本人が秘書や業務の結果を直したとき（「もっと短く」「御中にして」「表は縦に」）は、次から同じ直しが要らないよう、必ず好みとして書いてください。その場かぎりの直しは書きません。',
     '覚えないもの（これだけ）: パスワードや鍵などの認証情報、「覚えないで」と言われたこと、他人の病歴などの要配慮個人情報、'
       + '名刺から分かる他人の電話番号・メールアドレス・住所（名刺は要るたびに探す）、'
       + '在庫の数・残りわずか・使用期限のような、在庫管理で要るたびに引ける、すぐ変わる数や状態（在庫は要るたびに在庫管理を引く）。',
@@ -206,7 +214,7 @@ export class MemoryLearning {
         { role: 'user', content: learningPrompt(conversations, work, current) },
       ],
     });
-    const { summary, facts } = parseLearning(res.text);
+    const { summary, facts, preferences } = parseLearning(res.text);
     const at = now.toISOString();
     if (summary) {
       await repo.saveConversationDigest({ tenantId, userId, day: day.day, summary, compartment: null, createdAt: at });
@@ -218,13 +226,18 @@ export class MemoryLearning {
       ...(await repo.listMemories(tenantId, userId)).map((m) => m.text),
     ]);
     let made = 0;
-    for (const text of facts.slice(0, MAX_FACTS)) {
+    // 好みを先に覚える（直されたことを落とさない。第11.13.2節）
+    const items = [
+      ...preferences.map((text) => ({ text, kind: 'preference' as const })),
+      ...facts.map((text) => ({ text, kind: 'fact' as const })),
+    ].slice(0, MAX_FACTS);
+    for (const { text, kind } of items) {
       if (known.has(text)) continue;
       // 覚えないもの（認証情報・対象外の言葉・長すぎるもの）は覚えない（第11.5.1節）
       if (refuseToRemember(text.slice(0, MEMORY_MAX_CHARS + 1), settings.memory)) continue;
       // 在庫の数や状態はすぐ変わるため覚えない。要るたびに在庫管理を引く（第29.17節）
       if (STOCK_FACT.test(text)) continue;
-      await repo.createMemory({ id: randomUUID(), tenantId, userId, text, source: LEARNED_SOURCE, createdAt: at });
+      await repo.createMemory({ id: randomUUID(), tenantId, userId, text, source: LEARNED_SOURCE, kind, createdAt: at });
       known.add(text);
       made++;
     }
@@ -288,6 +301,8 @@ export class MemoryLearning {
       .map((p) => [p.memoryId, p] as const));
     const memories = (await repo.listMemories(tenantId, userId))
       .filter((m) => !decided.has(m.id))
+      // 仕事のやり方の好みは本人だけに関わるので、会社の知識にしない（第11.13.2節）
+      .filter((m) => m.kind !== 'preference')
       // 古いものから判断する（新しいものは翌晩でもよい）
       .reverse().slice(0, PROMOTION_BATCH);
     if (memories.length === 0) return 0;

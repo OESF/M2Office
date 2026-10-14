@@ -17,7 +17,7 @@ import {
   RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, GoogleContactsService, KnowledgeEmbedder, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, JGrantsApi, MockJGrants, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, MEMBER_LINE_SEND, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, EffectService, PostgresEffectStore, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger,
   NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
-  defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator, aiUsageMeterFromEnv, enterAiUsage, withAiUsage, setEnqueueAiGuard, AutoMinutes, MINUTES_AGENT_ID, appPath, backupConfigFromEnv, machineDir, readBackupStatus, takeUnnotifiedUpdateFailure, takeClosedMaintenanceSessions, heartbeatConfigFromEnv, sendHeartbeat, HEARTBEAT_INTERVAL_MS, machineStatus, machineConfigFromEnv, restoreTest, runBackup, takeBackupRequest, writeWorkerBeat, OpsAppSide, createPool, offsiteConfigFromEnv, readOffsiteStatus, runOffsite, checkOffsite,
+  defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator, ProfileBuilder, aiUsageMeterFromEnv, enterAiUsage, withAiUsage, setEnqueueAiGuard, AutoMinutes, MINUTES_AGENT_ID, appPath, backupConfigFromEnv, machineDir, readBackupStatus, takeUnnotifiedUpdateFailure, takeClosedMaintenanceSessions, heartbeatConfigFromEnv, sendHeartbeat, HEARTBEAT_INTERVAL_MS, machineStatus, machineConfigFromEnv, restoreTest, runBackup, takeBackupRequest, writeWorkerBeat, OpsAppSide, createPool, offsiteConfigFromEnv, readOffsiteStatus, runOffsite, checkOffsite,
   SecurityWatch, PostgresSecurityStore,
 } from '@m2office/core';
 import { canRunAgent, fileInputKey } from '@m2office/shared';
@@ -551,6 +551,13 @@ let lastColumnSignageCheck = 0;
 const CONSOLIDATE_INTERVAL_MS = Number(process.env['CONSOLIDATE_INTERVAL_MS'] ?? 3_600_000);
 let lastConsolidateCheck = 0;
 const consolidator = new Consolidator({ repo, llm: (tenantId) => ai.llmFor(tenantId) });
+// 本人の像（仕様書 第11.13.1節、ADR-0095）。10 分ごとに、まだ無い人・作り直す印のある人・7 日を過ぎて新しく覚えたことのある人の像を作る
+const PROFILE_INTERVAL_MS = Number(process.env['PROFILE_INTERVAL_MS'] ?? 600_000);
+let lastProfileCheck = 0;
+const profiles = new ProfileBuilder({
+  repo, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
+  agentName: async (tenantId, agentId) => (await hub.forTenant(tenantId)).allAgents.find((a) => a.id === agentId)?.name ?? agentId,
+});
 
 process.on('SIGINT', () => { running = false; });
 process.on('SIGTERM', () => { running = false; });
@@ -1136,6 +1143,17 @@ while (running) {
       } catch (err) {
         log.warn('秘書が学んだことの整理に失敗しました', { tenantId, err });
       }
+    }
+  }
+
+  // 本人の像を作る・作り直す（第11.13.1節）
+  if (Date.now() - lastProfileCheck >= PROFILE_INTERVAL_MS) {
+    lastProfileCheck = Date.now();
+    try {
+      const r = await withAiUsage({ purpose: 'worker:profile' }, () => profiles.tick(new Date()));
+      if (r.built > 0) log.info('本人の像を作りました', { built: r.built });
+    } catch (err) {
+      log.warn('本人の像の見回りに失敗しました', { err });
     }
   }
 

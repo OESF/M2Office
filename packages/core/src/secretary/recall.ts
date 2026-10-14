@@ -3,6 +3,7 @@
  *
  * 秘書は本人と一心同体で、在籍中ずっと学び続ける。答えるたびに、次の 4 つから依頼に近いものを集めて推論に渡す。
  * ①今日のやり取り（逐語） ②会話の要約（これまでのすべての日） ③覚えた事実（個人記憶） ④本人の仕事の記録（依頼した業務と結果）。
+ * あわせて、本人の像と仕事のやり方の好みを**いつも**先頭に渡す（第11.13節、ADR-0095）。
  * 今日完了した業務には、答えの要点を添える（本人がメニューなどから直接使ったものも。ADR-0038）。
  *
  * **本人のものだけを使う**（不変則 I-10）。ほかの利用者と業務エージェントには渡さない（第11.1節）。
@@ -27,6 +28,8 @@ const DIGEST_MATCH = 8;
 const MEMORY_ALL = 60;
 /** 本人の仕事の記録から渡す件数（新しいものから）。 */
 const WORK_MAX = 20;
+/** 仕事のやり方の好みを渡す上限（新しいものから。いつも渡す。第11.13.2節）。 */
+const PREFERENCE_MAX = 30;
 /** 1 件の文の長さの上限（字）。 */
 const LINE_MAX = 300;
 /** 答えの要点を添える、今日完了した業務の数。 */
@@ -78,12 +81,19 @@ export async function recall(
 ): Promise<Recall> {
   // 1 つが読めなくても答えは返す（記憶が欠けても、秘書が使えなくなるよりよい）
   const safe = <T>(read: () => Promise<T[]>): Promise<T[]> => Promise.resolve().then(read).catch(() => []);
-  const [today, digests, memories, work] = await Promise.all([
+  const [today, digests, allMemories, work, profile, settings] = await Promise.all([
     safe(() => repo.listConversationsOfDay(tenantId, userId, jstDay(now))),
     safe(() => repo.listConversationDigests(tenantId, userId, DIGEST_SCAN)),
     safe(() => repo.listMemories(tenantId, userId)),
     safe(() => repo.listRunsWithJobs(tenantId, { limit: WORK_MAX, requestedBy: userId })),
+    Promise.resolve().then(() => repo.getUserProfile(tenantId, userId)).catch(() => null),
+    Promise.resolve().then(() => repo.getUserSettings(tenantId, userId)).catch(() => null),
   ]);
+  // 仕事のやり方の好みは、いつも渡す。事実の選び方とは別にする（第11.13.2節）
+  const preferences = allMemories.filter((m) => m.kind === 'preference').slice(0, PREFERENCE_MAX);
+  const memories = allMemories.filter((m) => m.kind !== 'preference');
+  // 本人の像は、覚えることを許している人だけに使う（第11.13.1節）
+  const profileText = profile && settings?.memory.learning !== false ? profile.body : '';
 
   // 今日のやり取り（古い順に並べる）
   const todayLines = today.slice(-TODAY_MAX).map((c) => `- 依頼: ${cut(c.message)}\n  答え: ${cut(c.reply)}`);
@@ -110,8 +120,10 @@ export async function recall(
     ]),
   ];
   const memoryLines = pickedMemories.map((m) => `- ${cut(m.text, 200)}`);
+  const preferenceLines = preferences.map((m) => `- ${cut(m.text, 200)}`);
   // 使った日を記録する（使われない記憶を整理でしまうため。第11.11.4節）。記録できなくても答えは返す
-  if (pickedMemories.length) await Promise.resolve().then(() => repo.touchMemories(tenantId, userId, pickedMemories.map((m) => m.id), now.toISOString())).catch(() => undefined);
+  const used = [...pickedMemories, ...preferences];
+  if (used.length) await Promise.resolve().then(() => repo.touchMemories(tenantId, userId, used.map((m) => m.id), now.toISOString())).catch(() => undefined);
 
   // 本人の仕事の記録（新しいものから）
   const nameOf = (id: string) => agents.find((a) => a.id === id)?.name ?? '業務';
@@ -130,6 +142,8 @@ export async function recall(
   });
 
   const blocks: string[] = [];
+  if (profileText) blocks.push('## 本人の像（あなたがこの人についてまとめたもの）', profileText, '');
+  if (preferenceLines.length) blocks.push('## 仕事のやり方の好み（いつも守る。会社の決まりと食い違えば会社の決まりを採る）', ...preferenceLines, '');
   if (memoryLines.length) blocks.push('## 覚えている事実', ...memoryLines, '');
   if (todayLines.length) blocks.push('## 今日のやり取り（古い順）', ...todayLines, '');
   if (digestLines.length) blocks.push('## これまでの会話の要約（日付順）', ...digestLines, '');
@@ -145,6 +159,8 @@ export async function recall(
     ...blocks,
   ].join('\n');
   const counts = [
+    profileText ? '本人の像' : '',
+    preferenceLines.length ? `仕事のやり方の好み ${preferenceLines.length} 件` : '',
     memoryLines.length ? `覚えている事実 ${memoryLines.length} 件` : '',
     todayLines.length ? `今日のやり取り ${todayLines.length} 件` : '',
     digestLines.length ? `会話の要約 ${digestLines.length} 日分` : '',

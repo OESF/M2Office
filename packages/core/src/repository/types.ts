@@ -293,8 +293,15 @@ export interface Repository {
    * 本人のものでなければ直さず `false` を返す。
    */
   updateMemory(tenantId: string, userId: string, id: string, text: string): Promise<boolean>;
-  /** 本人の記憶をすべて消す。 */
+  /** 本人の記憶をすべて消す。本人の像も消す（第11.13.1節）。 */
   clearMemories(tenantId: string, userId: string): Promise<number>;
+  /** 本人の像（秘書がまとめた本人についての文。第11.13.1節）。本人以外に渡さない。 */
+  getUserProfile(tenantId: string, userId: string): Promise<UserProfile | null>;
+  /** 本人の像を置く（作り直す印は外す）。 */
+  saveUserProfile(profile: UserProfile): Promise<void>;
+  /** 本人の像に作り直す印を付ける（本人が記憶を直した・消したとき）。 */
+  markUserProfileStale(tenantId: string, userId: string): Promise<void>;
+  deleteUserProfile(tenantId: string, userId: string): Promise<void>;
   saveUserSettings<K extends keyof UserSettings>(
     tenantId: string, userId: string, section: K, value: UserSettings[K],
   ): Promise<void>;
@@ -799,6 +806,28 @@ export interface Memory {
   archiveReason?: string | null;
   /** 会話の材料に最後に使った日。 */
   lastUsedAt?: string | null;
+  /** 種類（`fact`: 事実、`preference`: 仕事のやり方の好み。第11.13.2節）。無ければ事実。 */
+  kind?: MemoryKind;
+}
+
+/** 覚えていることの種類（第11.13.2節）。 */
+export type MemoryKind = 'fact' | 'preference';
+
+/**
+ * 本人の像（秘書がまとめた本人についての文。仕様書 第11.13.1節）。
+ *
+ * @remarks 本人だけのもの。管理者にもほかの人にも業務にも渡さない（不変則 I-10）
+ */
+export interface UserProfile {
+  tenantId: string;
+  userId: string;
+  /** 本文（Markdown。1,500 字ほど） */
+  body: string;
+  /** 材料にした記憶の数 */
+  memoryCount: number;
+  /** 作り直す印（本人が記憶を直した・消した） */
+  stale: boolean;
+  updatedAt: string;
 }
 
 export interface KnowledgeItem {

@@ -266,7 +266,9 @@ export class Consolidator {
         const id = randomUUID();
         // 本人が頼んだ記憶を含めば、まとめた記憶も本人が頼んだものとして扱う
         const source = members.some((m) => m.source !== 'learned') ? 'secretary' : 'learned';
-        await repo.createMemory({ id, tenantId, userId, text: g.text, source, createdAt: at });
+        // すべてが仕事のやり方の好みなら、まとめた文も好み（第11.13.2節）
+        const kind = members.every((m) => m.kind === 'preference') ? 'preference' as const : 'fact' as const;
+        await repo.createMemory({ id, tenantId, userId, text: g.text, source, kind, createdAt: at });
         for (const m of members) {
           if (await repo.setMemoryStatus(tenantId, userId, m.id, 'archived', 'merged', id, at)) { gone.add(m.id); counts.merged++; }
         }

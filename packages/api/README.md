@@ -470,7 +470,8 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/me/sessions` | ログイン中の端末 |
 | `DELETE /v1/me/sessions/:id` | 端末を個別にログアウト |
 | `GET /v1/me/usage` | 本人の利用状況 |
-| `GET /v1/me/memories` | 本人が秘書に覚えられていること（`source` が `learned` なら秘書が会話から自分で覚えたもの。仕様書 第11.5.2節） |
+| `GET /v1/me/memories` | 本人が秘書に覚えられていること（`source` が `learned` なら秘書が会話から自分で覚えたもの。仕様書 第11.5.2節。`kind` が `preference` なら仕事のやり方の好み。第11.13.2節） |
+| `GET /v1/me/growth` | 秘書の成長（本人の像 `profile`・覚えていることの数・好みの数・この 7 日に覚えた数・会社の知識になった数。本人だけ。覚えることを止めている人には像を返さない。仕様書 第11.13.3節） |
 | `PATCH /v1/me/memories/:id` | 覚えていることを本人が直す（`{ text }`）。認証情報・覚えない言葉・200 字超は 400。秘書が覚えた文を直すと、元の文は再び覚えない |
 | `DELETE /v1/me/memories/:id` | 1 件を消す。秘書が覚えた文を消すと、同じ文は再び覚えない |
 | `DELETE /v1/me/memories` | すべて消す |

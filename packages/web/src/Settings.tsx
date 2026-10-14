@@ -17,7 +17,7 @@ import { SecretaryAvatar } from './nav.js';
 import { KEY_BINDINGS, isTouchOnly, keyLabel } from './keys.js';
 import { SaveButton } from './save.js';
 import { SortableList } from './Sortable.js';
-import { HelpTip } from './help.js';
+import { HelpTip, Markdown } from './help.js';
 import { playSample } from './voice.js';
 
 /** 通知の種類（個人設定で切れるもの）。 */
@@ -568,6 +568,8 @@ function MemorySettings({ settings, onChange, onSave }: {
         <SaveButton run={onSave} />
       </div>
 
+      <SecretaryGrowth reloadKey={items.length} />
+
       <h4>覚えていること（{items.length} 件）</h4>
       {items.length === 0 ? (
         <p className="muted small">まだ何も覚えていません。</p>
@@ -580,7 +582,7 @@ function MemorySettings({ settings, onChange, onSave }: {
                   {editing?.id === m.id ? (
                     <textarea rows={2} value={editing.text} aria-label="覚えていることを直す"
                       onChange={(e) => setEditing({ id: m.id, text: e.target.value })} />
-                  ) : m.text}
+                  ) : <>{m.kind === 'preference' && <span className="badge">好み</span>} {m.text}</>}
                 </td>
                 <td className="num">
                   {editing?.id === m.id ? (
@@ -635,6 +637,33 @@ function MemorySettings({ settings, onChange, onSave }: {
       ))}
       {msg && <p className="muted small">{msg}</p>}
       <PromotionHistory />
+    </div>
+  );
+}
+
+/**
+ * 秘書の成長（仕様書 第11.13.3節、ADR-0095）。秘書から見たあなた（本人の像）と、覚えた数・好み・この 7 日・会社の知識になった数。
+ *
+ * @remarks 本人にだけ見える。像が違っていれば、秘書に「それは違う」と話すか、もとの記憶を直す・消す（次の見回りで作り直す）
+ */
+function SecretaryGrowth({ reloadKey }: { reloadKey: number }) {
+  const [g, setG] = useState<Awaited<ReturnType<typeof api.myGrowth>> | null>(null);
+  const [open, setOpen] = useState(false);
+  useEffect(() => { api.myGrowth().then(setG).catch(() => setG(null)); }, [reloadKey]);
+  if (!g) return null;
+  return (
+    <div className="growth">
+      <h4>秘書の成長</h4>
+      <p className="small">
+        覚えていること {g.memories.toLocaleString()} 件（うち仕事のやり方の好み {g.preferences} 件）・この 7 日に覚えたこと {g.learnedThisWeek} 件・会社の知識になったもの {g.promoted} 件
+      </p>
+      {g.profile ? (
+        <>
+          <button className="link-btn small" onClick={() => setOpen(!open)}>{open ? '秘書から見たあなたを閉じる' : '秘書から見たあなた'}</button>
+          <span className="muted small"> {new Date(g.profile.updatedAt).toLocaleDateString('ja-JP')} にまとめました</span>
+          {open && <div className="growth-profile"><Markdown text={g.profile.body} /></div>}
+        </>
+      ) : <p className="muted small">秘書から見たあなたは、まだまとめていません</p>}
     </div>
   );
 }

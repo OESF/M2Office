@@ -747,6 +747,8 @@ export interface ConversationView {
 /** 個人記憶の 1 件（仕様書 第11.5.1節）。 */
 export interface MemoryView {
   id: string; text: string; source: string; createdAt: string;
+  /** 種類（`preference` は仕事のやり方の好み。仕様書 第11.13.2節）。 */
+  kind?: 'fact' | 'preference';
   /** しまった日と理由（しまったものの一覧でだけ。仕様書 第11.11.4節）。 */
   archivedAt?: string | null; archiveReason?: string | null;
 }
@@ -2134,6 +2136,8 @@ export const api = {
   }>('/me/presence'),
   /** 記憶とデータ（仕様書 第6.5.4節）。本人の記憶だけが返る。 */
   myMemories: () => call<{ items: MemoryView[] }>('/me/memories'),
+  /** 秘書の成長（本人の像と数。仕様書 第11.13.3節）。 */
+  myGrowth: () => call<{ profile: { body: string; updatedAt: string } | null; memories: number; preferences: number; learnedThisWeek: number; promoted: number }>('/me/growth'),
   deleteMemory: (id: string) => call(`/me/memories/${id}`, { method: 'DELETE' }),
   updateMemory: (id: string, text: string) =>
     call(`/me/memories/${id}`, { method: 'PATCH', body: JSON.stringify({ text }) }),

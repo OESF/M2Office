@@ -7231,5 +7231,20 @@ console.log('\n■ 90. 効果の欄と効果のレポート（数字はプログ
   }
 }
 
+console.log('\n■ 91. 秘書の成長（本人の像と好みの数を本人にだけ返す。第11.13節、ADR-0095）');
+{
+  try {
+    const a = await call('a', '/v1/me/growth');
+    const m = await call('a', '/v1/me/growth', {}, 'member');
+    const ok1 = a.status === 200 && typeof a.body?.memories === 'number' && typeof a.body?.preferences === 'number' && typeof a.body?.learnedThisWeek === 'number' && 'profile' in (a.body ?? {});
+    ok1 && m.status === 200 && m.body?.memories !== undefined
+      ? ok('秘書の成長は、本人の覚えていることの数・好みの数・この 7 日に覚えた数・本人の像を、本人にだけ返す') : ng('秘書の成長を返さない', JSON.stringify({ a: a.status, b: a.body, m: m.status }).slice(0, 300));
+    const list = (await call('a', '/v1/me/memories')).body?.items ?? [];
+    list.every((x) => x.kind === 'fact' || x.kind === 'preference') ? ok('覚えていることに種類（事実・仕事のやり方の好み）が付く') : ng('記憶の種類が無い', JSON.stringify(list.slice(0, 3)));
+  } catch (err) {
+    ng('秘書の成長の確認が途中で止まった', String(err));
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');

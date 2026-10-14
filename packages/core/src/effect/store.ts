@@ -6,7 +6,7 @@
 
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
-import type { EffectFigures, EffectReport, EffectReportBody, EffectReportBrief, EffectReportKind } from '@m2office/shared';
+import type { EffectFigures, EffectKnowledge, EffectReport, EffectReportBody, EffectReportBrief, EffectReportKind } from '@m2office/shared';
 import { createPool } from '../repository/pool.js';
 import { purposeGroup } from '../usage/ai-usage.js';
 import type { EffectAiRow, EffectRunRow } from './figures.js';
@@ -28,6 +28,8 @@ export interface EffectStore {
   aiTotals(tenantId: string, from: Date, until: Date): Promise<EffectAiRow[]>;
   /** その会社の最初の実行か AI の利用の時刻。どちらも無ければ `null` */
   firstActivity(tenantId: string): Promise<Date | null>;
+  /** 会社の知識のうち秘書が学んだことの、いまの数・期間に加えた数・期間に使われた数（第11.13.3節） */
+  knowledgeTotals(tenantId: string, from: Date, until: Date): Promise<EffectKnowledge>;
   /** 新しい順の一覧 */
   list(tenantId: string, limit: number): Promise<EffectReportBrief[]>;
   get(tenantId: string, id: string): Promise<EffectReport | null>;
@@ -109,6 +111,15 @@ export class PostgresEffectStore implements EffectStore {
     return rows[0]?.at ? new Date(rows[0].at) : null;
   }
 
+  async knowledgeTotals(tenantId: string, from: Date, until: Date): Promise<EffectKnowledge> {
+    const rows = await this.q<EffectKnowledge>(tenantId,
+      `select (select count(*) from knowledge_items where tenant_id = $1 and category = 'learned' and status = 'active')::int as learned,
+              (select count(*) from promotions where tenant_id = $1 and status = 'approved' and decided_at >= $2 and decided_at < $3)::int as added,
+              (select count(*) from knowledge_items where tenant_id = $1 and category = 'learned' and last_used_at >= $2 and last_used_at < $3)::int as used`,
+      [tenantId, from.toISOString(), until.toISOString()]);
+    return rows[0] ?? { learned: 0, added: 0, used: 0 };
+  }
+
   async list(tenantId: string, limit: number): Promise<EffectReportBrief[]> {
     const rows = await this.q<{ id: string; month: string; kind: EffectReportKind; headline: string | null; created_at: Date | string }>(tenantId,
       `select id, month, kind, body->'summary'->>0 as headline, created_at from effect_reports where tenant_id = $1 order by month desc limit $2`, [tenantId, limit]);
@@ -172,6 +183,13 @@ export class MemoryEffectStore implements EffectStore {
   async firstActivity(tenantId: string): Promise<Date | null> {
     const ts = [...this.runs, ...this.ai].filter((x) => x.tenantId === tenantId).map((x) => x.at.getTime());
     return ts.length ? new Date(Math.min(...ts)) : null;
+  }
+
+  /** 会社の知識の伸び（試験で入れる） */
+  knowledge: EffectKnowledge = { learned: 0, added: 0, used: 0 };
+
+  async knowledgeTotals(): Promise<EffectKnowledge> {
+    return this.knowledge;
   }
 
   async list(tenantId: string, limit: number): Promise<EffectReportBrief[]> {

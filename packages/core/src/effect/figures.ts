@@ -4,7 +4,7 @@
  * AI には計算させない（もっともらしい誤った数字を書くため）。ここは読み出した集計から、画面とレポートの数字を組むだけの純粋な関数にする。
  */
 
-import type { EffectAgentFigure, EffectFigures, EffectPeriod, EffectPurposeFigure } from '@m2office/shared';
+import type { EffectAgentFigure, EffectFigures, EffectKnowledge, EffectPeriod, EffectPurposeFigure } from '@m2office/shared';
 
 /** 日本時間の今日（`YYYY-MM-DD`）。 */
 export const jstDay = (d: Date) => new Date(d.getTime() + 9 * 3_600_000).toISOString().slice(0, 10);
@@ -94,6 +94,8 @@ export interface EffectFigureInput {
   purposeLabel: (purpose: string) => string;
   /** 完了しなかった業務に出さない業務（秘書の調べものなど、利用者が選んで使わないもの） */
   internal: Set<string>;
+  /** 会社の知識の伸び（秘書が学んだこと。無ければ 0） */
+  knowledge?: EffectKnowledge;
 }
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
@@ -146,6 +148,7 @@ export function buildEffectFigures(x: EffectFigureInput): EffectFigures {
       aiCostJpy: round0(x.previous.aiCostJpy),
     } : null,
     unusedAgents: x.usable.filter((a) => !done.has(a.id) && !x.internal.has(a.id)).map((a) => x.names(a.id)).slice(0, 8),
+    knowledge: x.knowledge ?? { learned: 0, added: 0, used: 0 },
   };
 }
 

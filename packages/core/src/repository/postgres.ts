@@ -14,7 +14,7 @@ import type {
   StoredFile, Tenant, TenantSettings, User, UserGroup, GroupChatSpace, UserSettings,
 } from '@m2office/shared';
 import { DEFAULT_TENANT_SETTINGS, DEFAULT_USER_SETTINGS, STANDARD_SYNONYMS } from '@m2office/shared';
-import type { AgentEvent, Plan, PlanStep, DecidedApproval, AuditQuery, CompartmentAssignment, Conversation, ConversationDigest, MemoryCandidate, Promotion, CredentialKind, GoogleConnection, UserPhoto, TenantCredential, TenantConnection, ConnectionSecret, UserConnection, DisabledConnectorTool, InstalledExtension, PrivateExtension, KnowledgeEmbedItem, KnowledgeEmbedStatus, KnowledgeItem, KnowledgeSearchOptions, KnowledgeSearchResult, KnowledgeSectionView, KnowledgeStatus, KnowledgeVersion, Memory, Repository, RunStatRow } from './types.js';
+import type { AgentEvent, Plan, PlanStep, DecidedApproval, AuditQuery, CompartmentAssignment, Conversation, ConversationDigest, MemoryCandidate, Promotion, CredentialKind, GoogleConnection, UserPhoto, TenantCredential, TenantConnection, ConnectionSecret, UserConnection, DisabledConnectorTool, InstalledExtension, PrivateExtension, KnowledgeEmbedItem, KnowledgeEmbedStatus, KnowledgeItem, KnowledgeSearchOptions, KnowledgeSearchResult, KnowledgeSectionView, KnowledgeStatus, KnowledgeVersion, Memory, Repository, RunStatRow, UserProfile } from './types.js';
 import { SPLIT_VERSION, citationOf, splitKnowledge } from '../knowledge/sections.js';
 import { FUSION_DEPTH, SEARCH_CANDIDATES, SEMANTIC_THRESHOLD, asksOldVersion, bigrams, expandTerms, extractTerms, fuseRankings, limitSections, normalizeForSearch, orderSections, rankSections, rewritesOf } from '../knowledge/search.js';
 import { createHash } from 'node:crypto';
@@ -1568,7 +1568,7 @@ export class PostgresRepository implements Repository {
 
   async listMemories(tenantId: string, userId: string): Promise<Memory[]> {
     return this.q<Memory>(tenantId,
-      `select id, tenant_id as "tenantId", user_id as "userId", text, source,
+      `select id, tenant_id as "tenantId", user_id as "userId", text, source, kind,
               created_at as "createdAt", last_used_at as "lastUsedAt"
          from memories where tenant_id = $1 and user_id = $2 and status = 'active' order by created_at desc`,
       [tenantId, userId]);
@@ -1576,7 +1576,7 @@ export class PostgresRepository implements Repository {
 
   async listArchivedMemories(tenantId: string, userId: string): Promise<Memory[]> {
     return this.q<Memory>(tenantId,
-      `select id, tenant_id as "tenantId", user_id as "userId", text, source, created_at as "createdAt",
+      `select id, tenant_id as "tenantId", user_id as "userId", text, source, kind, created_at as "createdAt",
               last_used_at as "lastUsedAt", archived_at as "archivedAt", archive_reason as "archiveReason"
          from memories where tenant_id = $1 and user_id = $2 and status = 'archived' order by archived_at desc`,
       [tenantId, userId]);
@@ -1610,15 +1610,17 @@ export class PostgresRepository implements Repository {
 
   async createMemory(m: Memory): Promise<void> {
     await this.q(m.tenantId,
-      `insert into memories (id, tenant_id, user_id, text, source, created_at, last_used_at)
-       values ($1,$2,$3,$4,$5,$6,$6)`,
-      [m.id, m.tenantId, m.userId, m.text, m.source, m.createdAt]);
+      `insert into memories (id, tenant_id, user_id, text, source, kind, created_at, last_used_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$7)`,
+      [m.id, m.tenantId, m.userId, m.text, m.source, m.kind ?? 'fact', m.createdAt]);
   }
 
   async deleteMemory(tenantId: string, userId: string, id: string): Promise<boolean> {
     const rows = await this.q<{ id: string }>(tenantId,
       `delete from memories where tenant_id = $1 and user_id = $2 and id = $3 returning id`,
       [tenantId, userId, id]);
+    // 本人が消した記憶を、本人の像に残さない（次の見回りで作り直す。第11.13.1節）
+    if (rows.length > 0) await this.markUserProfileStale(tenantId, userId);
     return rows.length > 0;
   }
 
@@ -1627,6 +1629,7 @@ export class PostgresRepository implements Repository {
       `update memories set text = $4, source = 'secretary'
         where tenant_id = $1 and user_id = $2 and id = $3 returning id`,
       [tenantId, userId, id, text]);
+    if (rows.length > 0) await this.markUserProfileStale(tenantId, userId);
     return rows.length > 0;
   }
 
@@ -1634,7 +1637,32 @@ export class PostgresRepository implements Repository {
     const rows = await this.q<{ id: string }>(tenantId,
       `delete from memories where tenant_id = $1 and user_id = $2 returning id`,
       [tenantId, userId]);
+    // 記憶をすべて消したら、本人の像も消す（第11.13.1節）
+    await this.deleteUserProfile(tenantId, userId);
     return rows.length;
+  }
+
+  async getUserProfile(tenantId: string, userId: string): Promise<UserProfile | null> {
+    const rows = await this.q<UserProfile>(tenantId,
+      `select tenant_id as "tenantId", user_id as "userId", body, memory_count as "memoryCount", stale, updated_at as "updatedAt"
+         from user_profiles where tenant_id = $1 and user_id = $2`, [tenantId, userId]);
+    const r = rows[0];
+    return r ? { ...r, updatedAt: new Date(r.updatedAt).toISOString() } : null;
+  }
+
+  async saveUserProfile(p: UserProfile): Promise<void> {
+    await this.q(p.tenantId,
+      `insert into user_profiles (tenant_id, user_id, body, memory_count, stale, updated_at) values ($1,$2,$3,$4,false,$5)
+       on conflict (tenant_id, user_id) do update set body = excluded.body, memory_count = excluded.memory_count, stale = false, updated_at = excluded.updated_at`,
+      [p.tenantId, p.userId, p.body, p.memoryCount, p.updatedAt]);
+  }
+
+  async markUserProfileStale(tenantId: string, userId: string): Promise<void> {
+    await this.q(tenantId, `update user_profiles set stale = true where tenant_id = $1 and user_id = $2`, [tenantId, userId]);
+  }
+
+  async deleteUserProfile(tenantId: string, userId: string): Promise<void> {
+    await this.q(tenantId, `delete from user_profiles where tenant_id = $1 and user_id = $2`, [tenantId, userId]);
   }
 
   async getUserSettings(tenantId: string, userId: string): Promise<UserSettings> {

@@ -60,13 +60,14 @@ export class EffectService {
   }
 
   private async compute(tenantId: string, period: EffectPeriod, range: EffectRange, previous: EffectRange | null): Promise<EffectFigures> {
-    const [runs, ai, prevRuns, prevAi, settings, agents] = await Promise.all([
+    const [runs, ai, prevRuns, prevAi, settings, agents, knowledge] = await Promise.all([
       this.deps.store.runTotals(tenantId, range.from, range.until),
       this.deps.store.aiTotals(tenantId, range.from, range.until),
       previous ? this.deps.store.runTotals(tenantId, previous.from, previous.until) : Promise.resolve(null),
       previous ? this.deps.store.aiTotals(tenantId, previous.from, previous.until) : Promise.resolve(null),
       this.deps.repo.getTenantSettings(tenantId),
       this.deps.agentsFor(tenantId),
+      this.deps.store.knowledgeTotals(tenantId, range.from, range.until),
     ]);
     const disabled = new Set(settings.agents.disabled);
     const names = (id: string) => agents.all.find((a) => a.id === id)?.name ?? agents.usable.find((a) => a.id === id)?.name ?? id;
@@ -79,6 +80,7 @@ export class EffectService {
       defaults: DEFAULT_STANDARD_MINUTES,
       purposeLabel: (p) => purposeLabel(p, agents.all),
       internal: INTERNAL,
+      knowledge,
     });
   }
 

@@ -234,6 +234,27 @@ export function meRoute(deps: AppDeps) {
     return c.json({ items });
   });
 
+  /**
+   * 秘書の成長（第11.13節、ADR-0095）。秘書から見た本人（本人の像）と、覚えた数・好みの数・この 7 日に覚えた数・会社の知識になった数。
+   *
+   * @remarks 本人のものだけを返す（不変則 I-10）。覚えることを止めている人には像を返さない（答えにも使わない）
+   */
+  app.get('/growth', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const [memories, profile, promotions, settings] = await Promise.all([
+      deps.repo.listMemories(tenant.id, user.id), deps.repo.getUserProfile(tenant.id, user.id),
+      deps.repo.listPromotions(tenant.id, { userId: user.id }), deps.repo.getUserSettings(tenant.id, user.id),
+    ]);
+    const weekAgo = new Date(Date.now() - 7 * 86_400_000).toISOString();
+    return c.json({
+      profile: profile && settings.memory.learning ? { body: profile.body, updatedAt: profile.updatedAt } : null,
+      memories: memories.length,
+      preferences: memories.filter((m) => m.kind === 'preference').length,
+      learnedThisWeek: memories.filter((m) => m.createdAt >= weekAgo).length,
+      promoted: promotions.filter((p) => p.status === 'approved').length,
+    });
+  });
+
   /** 整理でしまった記憶（第11.11.4節）。理由（まとめた・古い・使われない）とともに返す。1 年で消える。 */
   app.get('/memories/archived', async (c) => {
     const { tenant, user } = c.get('ctx');

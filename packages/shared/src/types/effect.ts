@@ -76,6 +76,18 @@ export interface EffectFigures {
   previous: EffectPrevious | null;
   /** 使える業務のうち、期間に一度も完了しなかったもの（名前） */
   unusedAgents: string[];
+  /** 会社の知識のうち秘書が学んだこと（第11.13.3節）。人ごとの数は持たない */
+  knowledge: EffectKnowledge;
+}
+
+/** 会社の知識の伸び（秘書が学んだこと）。 */
+export interface EffectKnowledge {
+  /** いま使っている数（期間の終わりではなく、いまの数） */
+  learned: number;
+  /** 期間に秘書が会社の知識にした数 */
+  added: number;
+  /** 期間に答えの根拠や材料に使われた数 */
+  used: number;
 }
 
 /** AI が書いた（推論が使えなければ決まった形の）レポートの文。 */
