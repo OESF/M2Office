@@ -7,6 +7,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
+import { Busy } from './components.js';
 import {
   SUBSIDY_FIT_LABELS, SUBSIDY_KIND_LABELS, type Subsidy, type SubsidyContact, type SubsidyProfile, type SubsidyStatus,
 } from '@m2office/shared';
@@ -79,7 +80,7 @@ export function Subsidies({ changeKey }: {
       </div>
       <div className="row wrap sbs-bar">
         {/* 調べるのは 1 日 1 回まで（第39.4節） */}
-        <button className="btn small" disabled={data.searching || searchedToday} onClick={search}>{data.searching ? '調べています…' : searchedToday ? '今日は調べました' : 'いま調べる'}</button>
+        <button className="btn small" disabled={data.searching || searchedToday} onClick={search}>{data.searching ? <Busy>調べています…</Busy> : searchedToday ? '今日は調べました' : 'いま調べる'}</button>
         {data.searchedAt && <span className="small muted">最後に調べた日時: {timeLabel(data.searchedAt)}</span>}
         <div className="seg" role="group" aria-label="表示">
           {([['active', '候補'], ['past', '過ぎたもの'], ['skipped', '見送ったもの']] as const).map(([v, label]) => (

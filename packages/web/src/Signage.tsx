@@ -15,6 +15,7 @@ import { api, describeError, type SignageAssetView, type SignageOverview } from 
 import { SortableList } from './Sortable.js';
 import { inspectPptx } from './pptx.js';
 import { firstImage, inlineHtml } from './html-inline.js';
+import { SignageMessageSender } from './signage-message.js';
 
 const fmtBytes = (n: number) => (n >= 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(1)} GB` : n >= 1024 ** 2 ? `${(n / 1024 ** 2).toFixed(1)} MB` : `${n === 0 ? 0 : Math.max(1, Math.round(n / 1024))} KB`);
 const fmtDuration = (ms: number) => { const s = Math.round(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
@@ -247,6 +248,14 @@ export function Signage() {
       {/* スマホで開く QR は、画面の中ほどにポップアップで出す（一覧の並びを崩さない。外を押すか Esc・「閉じる」で閉じる） */}
       {qr && <QrPopup src={qr} onClose={() => { URL.revokeObjectURL(qr); setQr(null); }} />}
       {error && <p className="error">{error}</p>}
+      {/* メッセージ（割り込み）をパソコンからも表示する（スマホを出さずに済むように。第31.9.4節） */}
+      {data.screens.length > 0 && (
+        <div className="card signage-message">
+          <strong className="signage-message-title">メッセージ</strong>
+          <SignageMessageSender screens={data.screens} defaults={{ seconds: data.settings.interruptSeconds, chime: data.settings.chime }}
+            onSent={() => { api.signage.overview().then(setData).catch(() => undefined); api.signage.interrupts().then((r) => setRecent(r.interrupts)).catch(() => undefined); }} />
+        </div>
+      )}
       <div className="signage-screens">
         {data.screens.map((s) => (
           <ScreenCard key={s.id} s={s} assets={assets} active={s.id === selected} admin={data.admin} thumb={s.lastReport?.current ? thumbs.urls[s.lastReport.current] : undefined}

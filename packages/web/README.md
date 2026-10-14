@@ -107,6 +107,7 @@ src/SignagePlayer.tsx サイネージの再生のページ（/signage/play。ロ
 src/SignagePair.tsx サイネージの画面の登録（/m/signage/pair。端末の QR を管理者がスマホで読む）
 src/MobileSignage.tsx サイネージのスタッフのページ（/m/signage。出す先・割り込みの素材とよく出す案内のボタン・文・秒数と音・画面ごとのいまと消す・写真を流れに足す。第31.9.3節）
 src/signage-view.tsx サイネージの文字の割り込み（収まる最大の大きさ・番号を大きく）と、会社の HTML を開く囲い（srcdoc と外と通信させない見出し）
+src/signage-message.tsx サイネージのメッセージ（割り込み）を表示する欄。スタッフのページと管理の画面で共通（出す先・ボタン・番号・文・表示時間・ジングル。第31.9.3節・第31.9.4節）
 src/signage-audio.ts サイネージのジングル（M2Office の音 4 つをブラウザで作る・会社の音を鳴らす・音の許可）
 src/html-inline.ts  会社の HTML の中の参照（画像・CSS・スクリプト・字体）を、一緒に落としたファイルか ZIP から中に入れる
 src/zip.ts          ZIP の目次と中身をブラウザで読む（pptx.ts と html-inline.ts が使う）

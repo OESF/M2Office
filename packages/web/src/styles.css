@@ -1217,6 +1217,8 @@ code.uri { background: var(--subtle-bg); border: 1px solid var(--line); border-r
   flex: none;
 }
 @keyframes m2o-spin { to { transform: rotate(360deg); } }
+/* 時間のかかる処理の言葉の前に回る印を置く（ボタンや札の中でも崩れないように） */
+.busy-label { display: inline-flex; align-items: center; gap: 6px; }
 /* 動きを抑える設定の端末では回さない */
 @media (prefers-reduced-motion: reduce) {
   .spin { animation: none; }
@@ -2355,3 +2357,16 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .table-scroll { overflow-x: auto; max-width: 100%; }
 .table-scroll > .table th { white-space: nowrap; }
 
+
+/* 社内ナレッジ Q&A の質問の欄。実行は欄の右（仕様書 第9.5.4節） */
+.ask-box { display: flex; gap: 8px; align-items: flex-end; }
+.ask-box textarea { flex: 1; min-width: 0; resize: vertical; }
+.ask-box .btn { flex: none; }
+
+/* 管理の画面（パソコン）のメッセージの欄。スタッフのページと同じ部品を、広い幅に合わせて並べる（仕様書 第31.9.4節） */
+.signage-message { margin-bottom: 12px; }
+.signage-message-title { display: block; margin-bottom: 8px; }
+.signage-message .m-sig-buttons { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+.signage-message .m-sig-button { min-height: 64px; }
+.signage-message .m-sig-compose textarea { font-size: 14px; }
+.signage-message .m-sig-number input { flex: none; width: 120px; font-size: 20px; }

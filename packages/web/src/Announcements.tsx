@@ -7,6 +7,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
+import { Busy } from './components.js';
 import {
   ANNOUNCEMENT_BAND_COLORS, ANNOUNCEMENT_CHANNELS, ANNOUNCEMENT_CHANNEL_LABELS, ANNOUNCEMENT_LINE_MAX, ANNOUNCEMENT_STATUS_LABELS,
   type Announcement, type AnnouncementChannel, type AnnouncementDetail, type AnnouncementPreview, type AnnouncementRecipient, type AnnouncementTexts,
@@ -54,7 +55,7 @@ function List({ onOpen, changeKey }: { onOpen: (id: string) => void; changeKey: 
       <div className="row wrap inquiries-entry">
         <input value={text} maxLength={2000} placeholder="例: 年末年始の休業 12/28〜1/5" aria-label="お知らせの頼み" onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && !busy) make(); }} />
-        <button className="btn" disabled={busy || !text.trim()} onClick={make}>{busy ? '作っています…' : '作る'}</button>
+        <button className="btn" disabled={busy || !text.trim()} onClick={make}>{busy ? <Busy>作っています…</Busy> : '作る'}</button>
         <NoteText note={note} />
       </div>
       {line && <p className="small muted">LINE の友だち {line.followers ?? '—'} 人・今月の残り {line.remaining ?? '上限なし'}{line.remaining !== null ? ' 通' : ''}</p>}
@@ -321,7 +322,7 @@ function MailRecipients({ id, editable, ids, people, onChange }: {
         <div className="row wrap inquiries-entry">
           <input value={request} maxLength={300} placeholder="例: 名刺を交換した取引先だけにして、〇〇社は外して" aria-label="宛先の頼み"
             onChange={(e) => setRequest(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) refine(); }} />
-          <button className="btn ghost" disabled={busy || !request.trim()} onClick={refine}>{busy ? '作り直しています…' : '作り直す'}</button>
+          <button className="btn ghost" disabled={busy || !request.trim()} onClick={refine}>{busy ? <Busy>作り直しています…</Busy> : '作り直す'}</button>
           <NoteText note={note} />
         </div>
       )}

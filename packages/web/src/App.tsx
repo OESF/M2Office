@@ -22,7 +22,7 @@ import { AppLauncher, AppVersionBadge } from './launcher.js';
 import { startVoice, type VoiceCall } from './voice.js';
 import { keyLabel, useHotkey, useNumberHotkeys } from './keys.js';
 import { timeGreeting } from './greeting.js';
-import { AgentForm, ApprovalTray, Elapsed, RunView, statusLabel, SuspendedBanner } from './components.js';
+import { AgentForm, ApprovalTray, AskBox, Elapsed, KNOWLEDGE_QA_AGENT_ID, RunView, statusLabel, SuspendedBanner } from './components.js';
 import { Sources } from './sources.js';
 import { Schedules } from './Schedules.js';
 import { Cards } from './Cards.js';
@@ -682,11 +682,19 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
                   )}
                 />
               </h1>
-              <AgentForm
-                key={view.agent.id} agent={view.agent} fill={formFill}
-                initial={view.fileId ? { fileId: view.fileId } : undefined}
-                onSubmitted={(runId) => setView({ kind: 'run', runId })}
-              />
+              {view.agent.id === KNOWLEDGE_QA_AGENT_ID && !view.agent.needsConnection?.length ? (
+                <AskBox
+                  key={view.agent.id} agentId={view.agent.id} fill={formFill}
+                  placeholder={view.agent.inputs?.properties?.['question']?.examples?.[0] ? `例: ${view.agent.inputs.properties['question'].examples[0]}` : undefined}
+                  onSubmitted={(runId) => setView({ kind: 'run', runId })}
+                />
+              ) : (
+                <AgentForm
+                  key={view.agent.id} agent={view.agent} fill={formFill}
+                  initial={view.fileId ? { fileId: view.fileId } : undefined}
+                  onSubmitted={(runId) => setView({ kind: 'run', runId })}
+                />
+              )}
             </>
           )}
           {view.kind === 'run' && (
@@ -694,6 +702,14 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
               <h1>実行の詳細</h1>
               {detail ? (
                 <>
+                  {/* 社内ナレッジ Q&A は、答えの上で続けて聞ける（頼んだ本人だけ。仕様書 第9.5.4節） */}
+                  {detail.job?.agentId === KNOWLEDGE_QA_AGENT_ID && detail.job.requestedBy === me.user.id && (
+                    <AskBox
+                      key={detail.run.id} agentId={KNOWLEDGE_QA_AGENT_ID}
+                      initial={typeof detail.job.input['question'] === 'string' ? detail.job.input['question'] : ''}
+                      onSubmitted={(runId) => setView({ kind: 'run', runId })}
+                    />
+                  )}
                   <RunView detail={detail} viewerId={me.user.id} onCancelled={() => void api.run(view.runId).then(setDetail)} />
                   {/* 契約書チェックの結果から、結んだ契約を台帳に入れる（契約の管理を使う人で、チェックを頼んだ本人だけ。第38.5節） */}
                   {me.contracts && detail.job?.agentId === CONTRACT_REVIEW_AGENT_ID && detail.job.requestedBy === me.user.id && detail.run.status === 'completed' && (

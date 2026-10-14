@@ -9,6 +9,7 @@
 
 import { copyText } from './clipboard.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Busy } from './components.js';
 import {
   COLUMN_COVER_KIND_LABELS, COLUMN_SIGNAGE_STATUS_LABELS, COLUMN_SIGNAGE_VIDEO_LENGTHS, COLUMN_IMAGE_STYLES, COLUMN_IMAGE_STYLE_DEFAULT, COLUMN_NARRATION_VOICES, COLUMN_NARRATION_VOICE_DEFAULT, COLUMN_BGM_DEFAULT, type ColumnImageStyle, type ColumnNarrationVoice, type ColumnSignageVideoSeconds, COLUMN_THEME_SOURCE_LABELS, WEB_COLUMN_STATUS_LABELS,
   type ColumnPlanSlot, type ColumnSignageSet, type ColumnReviewItem, type WebColumn, type WebColumnStatus, type WebColumnTheme, type WebColumnVersion,
@@ -177,7 +178,7 @@ function ColumnList({ onOpen }: { onOpen: (id: string) => void }) {
               {plan.map((s) => (
                 <tr key={s.date}>
                   <td className="small">{slotDay(s.date)}</td>
-                  <td>{s.columnId ? <button className="link" onClick={() => onOpen(s.columnId!)}>{s.title || '（書いています）'}</button> : <span className="muted">空き</span>}</td>
+                  <td>{s.columnId ? <button className="link" onClick={() => onOpen(s.columnId!)}>{s.title || <Busy>書いています</Busy>}</button> : <span className="muted">空き</span>}</td>
                   <td>{s.status && <span className={STATUS_BADGE[s.status]}>{WEB_COLUMN_STATUS_LABELS[s.status]}</span>}</td>
                 </tr>
               ))}
@@ -368,7 +369,7 @@ function ColumnEditor({ id, onBack, onApprovals }: { id: string; onBack: () => v
           {detail.webMetrics.queries.length > 0 && <>・主な検索の言葉: {detail.webMetrics.queries.join('、')}</>}
         </p>
       )}
-      {column.status === 'writing' && <p className="muted">「{column.theme}」を書いています…</p>}
+      {column.status === 'writing' && <p className="muted"><Busy>「{column.theme}」を書いています…</Busy></p>}
       {column.status === 'failed' && (
         <div className="row">
           <p className="error">{column.failure ?? '書けませんでした'}</p>
@@ -381,13 +382,13 @@ function ColumnEditor({ id, onBack, onApprovals }: { id: string; onBack: () => v
           <div className="columns-cover">
             {current.cover
               ? <img src={api.columns.coverUrl(id, current.cover.fileId)} alt={current.cover.alt} />
-              : <div className="columns-cover-empty muted">{covering ? 'カバーを作っています…' : 'カバーがありません'}</div>}
+              : <div className="columns-cover-empty muted">{covering ? <Busy>カバーを作っています…</Busy> : 'カバーがありません'}</div>}
             <div className="columns-cover-side">
               {current.cover && <span className="badge">{COLUMN_COVER_KIND_LABELS[current.cover.kind]}</span>}
               {current.cover?.note && <span className="small muted">{current.cover.note}</span>}
               <StyleSelect value={coverStyle} onChange={setCoverStyle} disabled={busy || locked || dirty} />
               <button className="btn ghost small" disabled={busy || locked || dirty} onClick={() => void cover(() => api.columns.recover(id, { style: coverStyle }))}>
-                {covering ? '作っています…' : current.cover ? '画像を再作成' : '画像を作成'}
+                {covering ? <Busy>作っています…</Busy> : current.cover ? '画像を再作成' : '画像を作成'}
               </button>
               <button className="btn ghost small" disabled={busy || locked || dirty} onClick={() => photoInput.current?.click()}>ファイルから選択</button>
               <input ref={photoInput} type="file" accept="image/jpeg,image/png" hidden
@@ -664,7 +665,7 @@ function SignageSet({ set, busy, onRegister, onRemove }: {
         <strong>{set.kind === 'video' ? '動画' : set.kind === 'narrated' ? 'ナレーション付きスライド' : '画像'}</strong>
         <span className="muted">{when(set.createdAt)}</span>
         {/* 「できました」は見れば分かるので出さない。素材に登録する前の組（承認待ちの古い組を含む）は「素材に登録」を押せる（承認は挟まない） */}
-        {set.status !== 'ready' && set.status !== 'submitted' && <span className={`badge${set.status === 'failed' ? ' warn' : ''}`}>{COLUMN_SIGNAGE_STATUS_LABELS[set.status]}</span>}
+        {set.status !== 'ready' && set.status !== 'submitted' && <span className={`badge${set.status === 'failed' ? ' warn' : ''}`}>{set.status === 'making' ? <Busy>{COLUMN_SIGNAGE_STATUS_LABELS[set.status]}</Busy> : COLUMN_SIGNAGE_STATUS_LABELS[set.status]}</span>}
         {(set.status === 'ready' || set.status === 'submitted') && <button className="btn small" disabled={busy} onClick={onRegister}>素材に登録</button>}
         {/* 削除するのはコラムの組だけ。素材に登録したものは、サイネージの素材に残る */}
         {set.status !== 'making' && <button className="link danger small columns-signage-remove" disabled={busy} onClick={onRemove}>削除</button>}

@@ -4,7 +4,7 @@
  * @see 仕様書 第6章 ユーザー体験
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { hideInternalIds, type Artifact, type RunStep } from '@m2office/shared';
 import {
   api, describeError, type AgentSummary, type ApprovalView, type DecidedApprovalView, type JsonSchemaField, type RunDetail,
@@ -123,6 +123,75 @@ export function AgentForm({
       </button>
     </div>
     </>
+  );
+}
+
+/**
+ * 時間のかかる処理（AI の作成など）の間に出す、回る印と言葉。動いていることを示す（仕様書 第6.2.2.2節）。
+ *
+ * @remarks 回る印は秘書の欄・実行の詳細と同じ `.spin`。動きを抑える設定の端末では回さない
+ */
+export function Busy({ children }: { children: ReactNode }) {
+  return <span className="busy-label"><span className="spin" aria-hidden="true" />{children}</span>;
+}
+
+/** 質問の欄で続けて聞ける業務（社内ナレッジ Q&A。仕様書 第9.5.4節）。 */
+export const KNOWLEDGE_QA_AGENT_ID = 'knowledge-qa';
+
+/**
+ * 質問の欄と、その右の「実行」（社内ナレッジ Q&A。仕様書 第9.5.4節）。
+ *
+ * Enter で実行し、Shift+Enter で改行する。答えの画面の上にも置き、メニューへ戻らずに続けて聞けるようにする。
+ *
+ * @param initial 初めに入れておく質問（答えの画面では前の質問）
+ * @param fill あとから入れ直す値（題名の「？」の実行例から）。押すたびに新しい入れ物で渡るため、同じ例を二度押しても入り直す
+ */
+export function AskBox({ agentId, initial = '', fill, placeholder, onSubmitted }: {
+  agentId: string;
+  initial?: string;
+  fill?: Record<string, string> | null;
+  placeholder?: string;
+  onSubmitted: (runId: string) => void;
+}) {
+  const [question, setQuestion] = useState(initial);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => { setQuestion(initial); }, [initial]);
+  useEffect(() => { if (fill) setQuestion(fill['question'] ?? ''); }, [fill]);
+
+  async function submit() {
+    if (!question.trim() || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const { runId } = await api.createJob(agentId, { question: question.trim() });
+      onSubmitted(runId);
+    } catch (err) {
+      setError(describeError(err, '実行を開始できませんでした'));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="card">
+      <div className="ask-box">
+        <textarea
+          aria-label="知りたいこと" rows={2} value={question} placeholder={placeholder}
+          onChange={(e) => setQuestion(e.target.value)}
+          onKeyDown={(e) => {
+            // Enter で実行し、Shift+Enter で改行する。変換を確定する Enter では実行しない
+            if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return;
+            e.preventDefault();
+            void submit();
+          }}
+        />
+        <button className="btn" onClick={() => void submit()} disabled={busy || !question.trim()} title="実行する（Enter）">
+          {busy ? '開始しています…' : '実行'}
+        </button>
+      </div>
+      {error && <p className="error">{error}</p>}
+    </div>
   );
 }
 

@@ -9,6 +9,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
+import { Busy } from './components.js';
 import {
   INQUIRY_CHANNEL_LABELS, INQUIRY_REPLY_STATUS_LABELS, INQUIRY_STATUS_LABELS, INQUIRY_TEMPERATURE_LABELS,
   type Inquiry, type InquiryChannel, type InquiryDetail, type InquiryMailSkipped, type InquiryReply, type InquiryStatus, type InquiryTemperature,
@@ -419,7 +420,7 @@ function Replies({ inquiryId, replies, onChanged }: { inquiryId: string; replies
       <div className="row">
         <input value={instruction} maxLength={200} aria-label="書き方の頼み" placeholder="書き方の頼み（もっと丁寧に・来週伺えると伝える など）" onChange={(e) => setInstruction(e.target.value)} />
         <button className="btn ghost small" disabled={busy} onClick={() => void run(() => api.inquiries.draftReply(inquiryId, instruction.trim()).then(() => setInstruction('')), draft ? '書き直しました' : '下書きを書きました', '下書きを書けませんでした')}>
-          {busy ? '書いています…' : draft ? '下書きを書き直す' : '返事の下書き'}
+          {busy ? <Busy>書いています…</Busy> : draft ? '下書きを書き直す' : '返事の下書き'}
         </button>
         <NoteText note={note} />
       </div>

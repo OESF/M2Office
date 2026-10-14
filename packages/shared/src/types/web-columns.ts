@@ -420,11 +420,11 @@ export interface ColumnBgmTrack {
 
 /** ナレーション付きスライドの決まり（Q-231 決定ほか）。 */
 export const COLUMN_NARRATED_LIMITS = {
-  /** 全体の長さの目安（秒）。テレビの CM の 15 秒と 30 秒に合わせる */
-  minSeconds: 15,
-  maxSeconds: 30,
+  /** 全体の長さの目安（秒）。はじめはテレビの CM の 15〜30 秒だったが、要点を伝えきれるよう 30〜45 秒に延ばした（第 0.360.0 版） */
+  minSeconds: 30,
+  maxSeconds: 45,
   /** これを超えたら作らない（秒） */
-  hardMaxSeconds: 60,
+  hardMaxSeconds: 90,
   /** 会社の曲の上限 */
   bgmBytes: 5 * 1024 * 1024,
   bgmMs: 5 * 60_000,

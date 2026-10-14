@@ -7,6 +7,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Busy } from './components.js';
 import {
   CANVA_TEMPLATE, PRINT_CHECK_LABELS, PRINT_KIND_LABELS, PRINT_KIND_SIZES, PRINT_LIMITS, PRINT_SIZES, PRINT_STATE_LABELS,
   type PrintCopy, type PrintDesign, type PrintPiece, type PrintDesignDetailView, type PrintKind, type PrintSize, type PrintState, type PrintVersion,
@@ -181,7 +182,7 @@ function CreateBox({ onCreated, drive }: { onCreated: (id: string) => void; driv
           </select>
         )}
         {kind !== 'tags' && <PhotoButton photo={photo} onPhoto={setPhoto} disabled={busy} drive={drive} />}
-        <button className="btn small" disabled={busy || !request.trim()} onClick={() => void create()}>{busy ? '案を作っています…' : '案を作る'}</button>
+        <button className="btn small" disabled={busy || !request.trim()} onClick={() => void create()}>{busy ? <Busy>案を作っています…</Busy> : '案を作る'}</button>
       </div>
       {error && <p className="error">{error}</p>}
     </div>
