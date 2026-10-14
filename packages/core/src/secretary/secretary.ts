@@ -16,13 +16,15 @@ import type { HelpCatalog } from '../help/articles.js';
 import { DIRECT_QUERIES, sourceNote, type DirectAnswer, type EvidenceItem } from './catalog.js';
 import { KNOWLEDGE_CATEGORY_LABEL, KNOWLEDGE_PRIORITY_NOTE, rewriteNote } from '../knowledge/search.js';
 import { LOOKUP_AGENT_ID } from '../agents/index.js';
-import { REFERS_TO_PAST, recall } from './recall.js';
+import { REFERS_TO_PAST, recall, type QueryEmbed } from './recall.js';
+import { silentLogger } from '../log/logger.js';
 import { CORRECTION, correctMemory } from './correct.js';
 import { answerSchedule } from './schedules.js';
 import { cancelPlan, createPlan, planStatusText } from './plan.js';
 import { AI_NOT_CONFIGURED_MESSAGE, aiAvailable } from '../llm/unconfigured.js';
 import { expandQuery } from '../knowledge/expand.js';
-import { queryEmbedder } from '../knowledge/embed.js';
+import { queryEmbedder, semanticSearchEnabled } from '../knowledge/embed.js';
+import { memorySemanticEnabled } from '../memory/embed.js';
 import { jstDay } from '../memory/learn.js';
 import { bulkMailRequest, contactRequest } from './contacts.js';
 import { MAIL_TRIAGE_RULE, mailCheckRequest, mailCheckText, parseMailVerdicts } from './mail.js';
@@ -576,15 +578,17 @@ export class Secretary {
     }
 
     // 層 3: 完全な対話。本人が決めた名前・呼ばれ方・応対スタイルに合わせる（仕様書 第6.5.3節）
+    // 依頼の文の埋め込みは 1 回だけ作り、会社の知識の検索と記憶の検索で使い回す（第11.13.4節）
+    const queryEmbed = onceEmbed(queryEmbedder(llm, silentLogger, () => true));
     const [prefs, user, remembered, knowledge] = await Promise.all([
       this.deps.repo.getUserSettings(tenantId, userId),
       this.deps.repo.findUserById(tenantId, userId),
       // 本人についての記憶（今日のやり取り・会話の要約・覚えた事実・頼んだ業務）。答えるたびに使う（第10.7.3節）。
       // 本人との対話でだけ使い、ほかの利用者と業務エージェントには渡さない（仕様書 第11.1節）
-      recall(this.deps.repo, tenantId, userId, message, available),
+      recall(this.deps.repo, tenantId, userId, message, available, new Date(), memorySemanticEnabled() && queryEmbed ? { embed: queryEmbed } : {}),
       // **必ず組織知識を検索する**（第10.9.4.1節）。これが無いと、会社の規程を見ずに
       // 法律や世間の相場を会社の決まりのように答えてしまう。区画の絞り込みは効く（不変則 I-12）
-      this.searchKnowledge(tenantId, userId, message),
+      this.searchKnowledge(tenantId, userId, message, semanticSearchEnabled() ? queryEmbed : undefined),
     ]);
     const s = prefs.secretary;
     // 会社の呼び方は略称（無ければ正式な会社名）。M2Office はプロダクトの名前で、会社の名前ではない（仕様書 第6.6.1節）
@@ -662,7 +666,7 @@ export class Secretary {
    * 権限区画の絞り込みは、検索の側で効く（不変則 I-12）。
    */
   private async searchKnowledge(
-    tenantId: string, userId: string, message: string,
+    tenantId: string, userId: string, message: string, shared?: QueryEmbed,
   ): Promise<{ text: string; evidence: EvidenceItem[] }> {
     try {
       const llm = this.deps.llmFor ? await this.deps.llmFor(tenantId) : this.deps.llm;
@@ -670,7 +674,8 @@ export class Secretary {
       const [compartments, synonyms] = await Promise.all([
         this.deps.repo.listUserCompartments(tenantId, userId), expandQuery(llm, message),
       ]);
-      const embed = queryEmbedder(llm);
+      // 記憶の検索と同じ埋め込みがあれば使い回す（第11.13.4節）
+      const embed = shared ?? queryEmbedder(llm);
       // 本人が入っている区画のすべてから探す（1 つ目だけでなく）
       const { hits } = await this.deps.repo.searchKnowledge(tenantId, message, compartments, synonyms, embed ? { embed } : {});
       if (hits.length === 0) return { text: '', evidence: [] };
@@ -1599,4 +1604,21 @@ export function splitCitations(text: string, sources: EvidenceItem[]): { text: s
   }).replace(/[ \t]+([。、])/g, '$1').replace(/\n{3,}/g, '\n\n').trim();
   const marked = sources.map((e) => (cited.has(e.label.trim()) ? { ...e, cited: true } : e));
   return { text: body, evidence: [...marked.filter((e) => e.cited), ...marked.filter((e) => !e.cited)] };
+}
+
+/**
+ * 同じ文の埋め込みを 1 回だけ作る（会社の知識の検索と記憶の検索で使い回す。第11.13.4節）。
+ *
+ * @returns 埋め込みを作れない推論なら `undefined`
+ */
+function onceEmbed(embed: QueryEmbed | undefined): QueryEmbed | undefined {
+  if (!embed) return undefined;
+  const memo = new Map<string, ReturnType<QueryEmbed>>();
+  return (query) => {
+    const hit = memo.get(query);
+    if (hit) return hit;
+    const p = embed(query);
+    memo.set(query, p);
+    return p;
+  };
 }

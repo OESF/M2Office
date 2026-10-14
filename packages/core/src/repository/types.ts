@@ -295,6 +295,21 @@ export interface Repository {
   updateMemory(tenantId: string, userId: string, id: string, text: string): Promise<boolean>;
   /** 本人の記憶をすべて消す。本人の像も消す（第11.13.1節）。 */
   clearMemories(tenantId: string, userId: string): Promise<number>;
+  /**
+   * 埋め込みを待つ記憶と会話の要約（第11.13.4節）。記憶を先に、足りなければ要約で埋める。埋め込みの列が無ければ空。
+   *
+   * @remarks 要約の `id` は日付（`YYYY-MM-DD`）。権限区画の印の付いた要約は返さない
+   */
+  memoryEmbedPending(tenantId: string, limit: number): Promise<MemoryEmbedItem[]>;
+  saveMemoryEmbeddings(tenantId: string, rows: (Pick<MemoryEmbedItem, 'kind' | 'id' | 'userId'> & { vector: number[] })[], model: string): Promise<void>;
+  /** 埋め込めなかったものの失敗を数え、`retryAt` まで待たせる（5 回で諦める）。 */
+  failMemoryEmbeddings(tenantId: string, keys: Pick<MemoryEmbedItem, 'kind' | 'id' | 'userId'>[], retryAt: string): Promise<void>;
+  /** ほかのモデルで作った埋め込みを、作り直しの待ちに戻す（`limit` 件まで）。戻した数 */
+  resetMemoryEmbeddings(tenantId: string, model: string, limit: number): Promise<number>;
+  /** 本人の覚えていることを、依頼の埋め込みに近い順に（同じモデルで作ったものだけ）。使えなければ `null` */
+  searchMemoriesByMeaning(tenantId: string, userId: string, vector: number[], model: string, limit: number): Promise<{ id: string; similarity: number }[] | null>;
+  /** 本人の会話の要約を、依頼の埋め込みに近い順に（権限区画の印の付いていないものだけ）。使えなければ `null` */
+  searchDigestsByMeaning(tenantId: string, userId: string, vector: number[], model: string, limit: number): Promise<{ day: string; similarity: number }[] | null>;
   /** 本人の像（秘書がまとめた本人についての文。第11.13.1節）。本人以外に渡さない。 */
   getUserProfile(tenantId: string, userId: string): Promise<UserProfile | null>;
   /** 本人の像を置く（作り直す印は外す）。 */
@@ -808,6 +823,15 @@ export interface Memory {
   lastUsedAt?: string | null;
   /** 種類（`fact`: 事実、`preference`: 仕事のやり方の好み。第11.13.2節）。無ければ事実。 */
   kind?: MemoryKind;
+}
+
+/** 埋め込みを待つ記憶か会話の要約（第11.13.4節）。 */
+export interface MemoryEmbedItem {
+  kind: 'memory' | 'digest';
+  /** 記憶の ID か、要約の日付 */
+  id: string;
+  userId: string;
+  text: string;
 }
 
 /** 覚えていることの種類（第11.13.2節）。 */

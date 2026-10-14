@@ -258,6 +258,7 @@ docs/            開発規約・リリース規定・設計判断記録
 | `LOCAL_LLM_MODEL` | （なし） | ローカル AI のモデル。`LOCAL_LLM_MODEL_FAST`・`_STANDARD`・`_ADVANCED` で役割ごとに変えられる |
 | `LOCAL_LLM_KEY`・`LOCAL_LLM_TIMEOUT_MS` | （なし）・300000 | ローカル AI の口が鍵を求めるときの鍵と、1 回の問い合わせを待つ時間 |
 | `LOCAL_LLM_EMBED_MODEL` | （なし） | ローカル AI の埋め込みのモデル（768 次元。例: EmbeddingGemma）。無ければ、ローカルの方針の会社の知識は言葉の検索だけで探す（仕様書 第11.7.6節） |
+| `MEMORY_SEMANTIC` | on | 秘書が本人の記憶と会話の要約を意味で探すか（秘書の成長の段 2。pgvector と埋め込みを持つ推論が要る。仕様書 第11.13.4節） |
 | `KNOWLEDGE_SEMANTIC` | 本番 off・それ以外 on | 知識の意味の検索を使うか。本番は評価（仕様書 第11.7.6.5節）で採用の条件を満たしたと確かめてから `on` にする |
 | `KNOWLEDGE_EMBED_INTERVAL_MS` | 30000 | 知識の節の埋め込み（意味での検索の準備）を作る見回りの間隔。1 回に 32 節まで（仕様書 第11.7.6.1節） |
 | `RETENTION_INTERVAL_MS` | 本番 600000 / 開発 15000 | Google から取得したデータの保持期間の見回り間隔（仕様書 第14.3.2節） |

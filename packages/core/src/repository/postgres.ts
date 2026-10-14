@@ -14,7 +14,7 @@ import type {
   StoredFile, Tenant, TenantSettings, User, UserGroup, GroupChatSpace, UserSettings,
 } from '@m2office/shared';
 import { DEFAULT_TENANT_SETTINGS, DEFAULT_USER_SETTINGS, STANDARD_SYNONYMS } from '@m2office/shared';
-import type { AgentEvent, Plan, PlanStep, DecidedApproval, AuditQuery, CompartmentAssignment, Conversation, ConversationDigest, MemoryCandidate, Promotion, CredentialKind, GoogleConnection, UserPhoto, TenantCredential, TenantConnection, ConnectionSecret, UserConnection, DisabledConnectorTool, InstalledExtension, PrivateExtension, KnowledgeEmbedItem, KnowledgeEmbedStatus, KnowledgeItem, KnowledgeSearchOptions, KnowledgeSearchResult, KnowledgeSectionView, KnowledgeStatus, KnowledgeVersion, Memory, Repository, RunStatRow, UserProfile } from './types.js';
+import type { AgentEvent, Plan, PlanStep, DecidedApproval, AuditQuery, CompartmentAssignment, Conversation, ConversationDigest, MemoryCandidate, Promotion, CredentialKind, GoogleConnection, UserPhoto, TenantCredential, TenantConnection, ConnectionSecret, UserConnection, DisabledConnectorTool, InstalledExtension, PrivateExtension, KnowledgeEmbedItem, KnowledgeEmbedStatus, KnowledgeItem, KnowledgeSearchOptions, KnowledgeSearchResult, KnowledgeSectionView, KnowledgeStatus, KnowledgeVersion, Memory, MemoryEmbedItem, Repository, RunStatRow, UserProfile } from './types.js';
 import { SPLIT_VERSION, citationOf, splitKnowledge } from '../knowledge/sections.js';
 import { FUSION_DEPTH, SEARCH_CANDIDATES, SEMANTIC_THRESHOLD, asksOldVersion, bigrams, expandTerms, extractTerms, fuseRankings, limitSections, normalizeForSearch, orderSections, rankSections, rewritesOf } from '../knowledge/search.js';
 import { createHash } from 'node:crypto';
@@ -1471,7 +1471,8 @@ export class PostgresRepository implements Repository {
       `insert into conversation_digests (tenant_id, user_id, day, summary, compartment, created_at)
        values ($1,$2,$3,$4,$5,$6)
        on conflict (tenant_id, user_id, day)
-         do update set summary = excluded.summary, compartment = excluded.compartment`,
+         do update set summary = excluded.summary, compartment = excluded.compartment,
+                       embedded_at = null, embed_attempts = 0, embed_after = null`,
       [d.tenantId, d.userId, d.day, d.summary, d.compartment, d.createdAt]);
   }
 
@@ -1626,7 +1627,7 @@ export class PostgresRepository implements Repository {
 
   async updateMemory(tenantId: string, userId: string, id: string, text: string): Promise<boolean> {
     const rows = await this.q<{ id: string }>(tenantId,
-      `update memories set text = $4, source = 'secretary'
+      `update memories set text = $4, source = 'secretary', embedded_at = null, embed_attempts = 0, embed_after = null
         where tenant_id = $1 and user_id = $2 and id = $3 returning id`,
       [tenantId, userId, id, text]);
     if (rows.length > 0) await this.markUserProfileStale(tenantId, userId);
@@ -1640,6 +1641,86 @@ export class PostgresRepository implements Repository {
     // 記憶をすべて消したら、本人の像も消す（第11.13.1節）
     await this.deleteUserProfile(tenantId, userId);
     return rows.length;
+  }
+
+  /** 記憶と要約に埋め込みの列があるか（pgvector があるときだけ作る。移行 136）。一度だけ確かめる。 */
+  private memoryVectorReady: Promise<boolean> | null = null;
+  private hasMemoryVectors(): Promise<boolean> {
+    this.memoryVectorReady ??= this.pool.query<{ ok: boolean }>(
+      `select exists (select 1 from information_schema.columns where table_name = 'memories' and column_name = 'embedding') as ok`,
+    ).then((r) => !!r.rows[0]?.ok).catch(() => { this.memoryVectorReady = null; return false; });
+    return this.memoryVectorReady;
+  }
+
+  async memoryEmbedPending(tenantId: string, limit: number): Promise<MemoryEmbedItem[]> {
+    if (!(await this.hasMemoryVectors())) return [];
+    const memories = await this.q<MemoryEmbedItem>(tenantId,
+      `select 'memory' as kind, id, user_id as "userId", text from memories
+        where tenant_id = $1 and status = 'active' and embedded_at is null and embed_attempts < 5
+          and (embed_after is null or embed_after <= now())
+        order by created_at desc limit $2`, [tenantId, limit]);
+    if (memories.length >= limit) return memories;
+    const digests = await this.q<MemoryEmbedItem>(tenantId,
+      `select 'digest' as kind, day as id, user_id as "userId", summary as text from conversation_digests
+        where tenant_id = $1 and compartment is null and embedded_at is null and embed_attempts < 5
+          and (embed_after is null or embed_after <= now())
+        order by day desc limit $2`, [tenantId, limit - memories.length]);
+    return [...memories, ...digests];
+  }
+
+  async saveMemoryEmbeddings(tenantId: string, rows: (Pick<MemoryEmbedItem, 'kind' | 'id' | 'userId'> & { vector: number[] })[], model: string): Promise<void> {
+    if (rows.length === 0 || !(await this.hasMemoryVectors())) return;
+    const pack = (kind: 'memory' | 'digest') => JSON.stringify(rows.filter((r) => r.kind === kind).map((r) => ({ id: r.id, user_id: r.userId, v: `[${r.vector.join(',')}]` })));
+    await this.q(tenantId,
+      `update memories m set embedding = t.v::vector, embedding_model = $2, embedded_at = now(), embed_after = null
+         from jsonb_to_recordset($3::jsonb) as t(id text, user_id text, v text)
+        where m.tenant_id = $1 and m.id = t.id and m.user_id = t.user_id`, [tenantId, model, pack('memory')]);
+    await this.q(tenantId,
+      `update conversation_digests d set embedding = t.v::vector, embedding_model = $2, embedded_at = now(), embed_after = null
+         from jsonb_to_recordset($3::jsonb) as t(id text, user_id text, v text)
+        where d.tenant_id = $1 and d.day = t.id and d.user_id = t.user_id`, [tenantId, model, pack('digest')]);
+  }
+
+  async failMemoryEmbeddings(tenantId: string, keys: Pick<MemoryEmbedItem, 'kind' | 'id' | 'userId'>[], retryAt: string): Promise<void> {
+    if (keys.length === 0) return;
+    const pack = (kind: 'memory' | 'digest') => JSON.stringify(keys.filter((k) => k.kind === kind).map((k) => ({ id: k.id, user_id: k.userId })));
+    await this.q(tenantId,
+      `update memories m set embed_attempts = m.embed_attempts + 1, embed_after = $2
+         from jsonb_to_recordset($3::jsonb) as t(id text, user_id text) where m.tenant_id = $1 and m.id = t.id and m.user_id = t.user_id`,
+      [tenantId, retryAt, pack('memory')]);
+    await this.q(tenantId,
+      `update conversation_digests d set embed_attempts = d.embed_attempts + 1, embed_after = $2
+         from jsonb_to_recordset($3::jsonb) as t(id text, user_id text) where d.tenant_id = $1 and d.day = t.id and d.user_id = t.user_id`,
+      [tenantId, retryAt, pack('digest')]);
+  }
+
+  async resetMemoryEmbeddings(tenantId: string, model: string, limit: number): Promise<number> {
+    if (!(await this.hasMemoryVectors())) return 0;
+    const m = await this.q<{ id: string }>(tenantId,
+      `update memories set embedded_at = null, embedding_model = null, embed_attempts = 0, embed_after = null
+        where tenant_id = $1 and id in (select id from memories where tenant_id = $1 and embedded_at is not null and embedding_model is distinct from $2 limit $3)
+        returning id`, [tenantId, model, limit]);
+    const d = await this.q<{ day: string }>(tenantId,
+      `update conversation_digests set embedded_at = null, embedding_model = null, embed_attempts = 0, embed_after = null
+        where tenant_id = $1 and (user_id, day) in (select user_id, day from conversation_digests where tenant_id = $1 and embedded_at is not null and embedding_model is distinct from $2 limit $3)
+        returning day`, [tenantId, model, limit]);
+    return m.length + d.length;
+  }
+
+  async searchMemoriesByMeaning(tenantId: string, userId: string, vector: number[], model: string, limit: number): Promise<{ id: string; similarity: number }[] | null> {
+    if (!(await this.hasMemoryVectors())) return null;
+    return this.q<{ id: string; similarity: number }>(tenantId,
+      `select id, 1 - (embedding <=> $3::vector) as similarity from memories
+        where tenant_id = $1 and user_id = $2 and status = 'active' and embedded_at is not null and embedding_model = $4
+        order by embedding <=> $3::vector limit $5`, [tenantId, userId, `[${vector.join(',')}]`, model, limit]);
+  }
+
+  async searchDigestsByMeaning(tenantId: string, userId: string, vector: number[], model: string, limit: number): Promise<{ day: string; similarity: number }[] | null> {
+    if (!(await this.hasMemoryVectors())) return null;
+    return this.q<{ day: string; similarity: number }>(tenantId,
+      `select day, 1 - (embedding <=> $3::vector) as similarity from conversation_digests
+        where tenant_id = $1 and user_id = $2 and compartment is null and embedded_at is not null and embedding_model = $4
+        order by embedding <=> $3::vector limit $5`, [tenantId, userId, `[${vector.join(',')}]`, model, limit]);
   }
 
   async getUserProfile(tenantId: string, userId: string): Promise<UserProfile | null> {

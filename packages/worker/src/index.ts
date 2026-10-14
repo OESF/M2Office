@@ -14,7 +14,7 @@ import { hostname } from 'node:os';
 import {
   assertDatabaseConfigured,
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
-  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, GoogleContactsService, KnowledgeEmbedder, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, JGrantsApi, MockJGrants, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, MEMBER_LINE_SEND, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, EffectService, PostgresEffectStore, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger,
+  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, GoogleContactsService, KnowledgeEmbedder, MemoryEmbedder, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, JGrantsApi, MockJGrants, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, MEMBER_LINE_SEND, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, EffectService, PostgresEffectStore, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger,
   NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator, ProfileBuilder, aiUsageMeterFromEnv, enterAiUsage, withAiUsage, setEnqueueAiGuard, AutoMinutes, MINUTES_AGENT_ID, appPath, backupConfigFromEnv, machineDir, readBackupStatus, takeUnnotifiedUpdateFailure, takeClosedMaintenanceSessions, heartbeatConfigFromEnv, sendHeartbeat, HEARTBEAT_INTERVAL_MS, machineStatus, machineConfigFromEnv, restoreTest, runBackup, takeBackupRequest, writeWorkerBeat, OpsAppSide, createPool, offsiteConfigFromEnv, readOffsiteStatus, runOffsite, checkOffsite,
@@ -131,6 +131,8 @@ const signatures = new SignatureWatcher({
 });
 // 知識の節の埋め込みを後から作る（意味での検索。仕様書 第11.7.6.1節）
 const knowledgeEmbedder = new KnowledgeEmbedder({ repo, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log });
+// 本人の記憶と会話の要約の埋め込み（秘書の成長の段 2。仕様書 第11.13.4節）。知識の埋め込みと同じ間隔で、会社ごとに 32 件ずつ
+const memoryEmbedder = new MemoryEmbedder({ repo, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log });
 // 名刺を本人の Google の連絡先に入れる（仕様書 第27.15節、ADR-0084）。直された名刺を写し、自動で入れる名刺を入れる
 const googleContacts = new GoogleContactsService({ store: contactStore, connector, repo, logger: log });
 // 社内のお知らせ（仕様書 第10.15節）。朝のブリーフが本人宛てのものを読む
@@ -901,6 +903,12 @@ while (running) {
       if (r.embedded + r.failed > 0) log.info('知識の節を埋め込みました', r);
     } catch (err) {
       log.error('知識の埋め込みの見回りで例外が発生しました', { err });
+    }
+    try {
+      const r = await memoryEmbedder.tick();
+      if (r.embedded + r.failed > 0) log.info('記憶と会話の要約を埋め込みました', r);
+    } catch (err) {
+      log.error('記憶の埋め込みの見回りで例外が発生しました', { err });
     }
   }
   if (Date.now() - lastGoogleContactsSync >= GOOGLE_CONTACTS_INTERVAL_MS) {

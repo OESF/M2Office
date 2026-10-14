@@ -28,6 +28,12 @@ const DIGEST_MATCH = 8;
 const MEMORY_ALL = 60;
 /** 本人の仕事の記録から渡す件数（新しいものから）。 */
 const WORK_MAX = 20;
+/** 意味で選ぶ覚えている事実の上限（第11.13.4節）。 */
+const MEMORY_MEANING = 30;
+/** 意味で選んだうえで、言葉の重なりで足す事実の数。 */
+const MEMORY_WORDS = 10;
+/** 意味が近いとみなす類似度（記憶と要約。依頼の文とのコサイン類似度）。 */
+export const MEMORY_MEANING_THRESHOLD = 0.5;
 /** 仕事のやり方の好みを渡す上限（新しいものから。いつも渡す。第11.13.2節）。 */
 const PREFERENCE_MAX = 30;
 /** 1 件の文の長さの上限（字）。 */
@@ -70,14 +76,19 @@ export interface Recall {
   evidence: EvidenceItem[];
 }
 
+/** 依頼の文を埋め込む口（第11.13.4節）。使えなければ `null`。 */
+export type QueryEmbed = (query: string) => Promise<{ vector: number[]; model: string } | null>;
+
 /**
  * 本人についての記憶を集める。
  *
  * @param agents 業務の名前を引くための定義
+ * @param opts.embed 依頼の文を埋め込む口。あれば、意味の近い記憶と要約を選ぶ（第11.13.4節）。無ければ言葉の重なりと新しさで選ぶ
  * @returns 推論に渡す文（何も無ければ空）と、答えに添える根拠
  */
 export async function recall(
   repo: Repository, tenantId: string, userId: string, message: string, agents: AgentDefinition[], now: Date = new Date(),
+  opts: { embed?: QueryEmbed } = {},
 ): Promise<Recall> {
   // 1 つが読めなくても答えは返す（記憶が欠けても、秘書が使えなくなるよりよい）
   const safe = <T>(read: () => Promise<T[]>): Promise<T[]> => Promise.resolve().then(read).catch(() => []);
@@ -101,24 +112,39 @@ export async function recall(
   // 会話の要約。新しい数日と、依頼に近いもの（権限区画の印の付いたものは使わない）
   const plainDigests = digests.filter((d) => d.compartment === null);
   const recent = [...plainDigests].sort((a, b) => b.day.localeCompare(a.day)).slice(0, DIGEST_RECENT);
-  const matched = plainDigests
+
+  // 依頼の文を埋め込み、意味の近い記憶と要約を探す（第11.13.4節）。選ぶ必要があるときだけ。使えなければ言葉で選ぶ
+  const needMemories = memories.length > MEMORY_ALL;
+  const needDigests = plainDigests.length > recent.length;
+  const q = opts.embed && (needMemories || needDigests) ? await opts.embed(message).catch(() => null) : null;
+  const [memoryHits, digestHits] = q ? await Promise.all([
+    needMemories ? Promise.resolve().then(() => repo.searchMemoriesByMeaning(tenantId, userId, q.vector, q.model, MEMORY_MEANING)).catch(() => null) : null,
+    needDigests ? Promise.resolve().then(() => repo.searchDigestsByMeaning(tenantId, userId, q.vector, q.model, DIGEST_MATCH * 2)).catch(() => null) : null,
+  ]) : [null, null];
+
+  const meaningDays = new Set((digestHits ?? []).filter((h) => h.similarity >= MEMORY_MEANING_THRESHOLD).map((h) => h.day));
+  const byMeaning = plainDigests.filter((d) => !recent.includes(d) && meaningDays.has(d.day))
+    .sort((a, b) => (digestHits!.find((h) => h.day === b.day)!.similarity - digestHits!.find((h) => h.day === a.day)!.similarity));
+  const byWords = plainDigests
     .filter((d) => !recent.includes(d))
     .map((d) => ({ d, n: closeness(message, d.summary) }))
     .filter((x) => x.n >= 2)
     .sort((a, b) => b.n - a.n)
-    .slice(0, DIGEST_MATCH)
     .map((x) => x.d);
+  const matched = [...new Set([...byMeaning, ...byWords])].slice(0, DIGEST_MATCH);
   const digestLines = [...recent, ...matched]
     .sort((a, b) => a.day.localeCompare(b.day))
     .map((d) => `- ${d.day}: ${cut(d.summary, 600)}`);
 
-  // 覚えた事実。多ければ、依頼に近いものと新しいものに絞る
-  const pickedMemories = memories.length <= MEMORY_ALL ? memories : [
-    ...new Set([
-      ...[...memories].sort((a, b) => closeness(message, b.text) - closeness(message, a.text)).slice(0, MEMORY_ALL / 2),
-      ...[...memories].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, MEMORY_ALL / 2),
-    ]),
-  ];
+  // 覚えた事実。多ければ、意味の近いもの → 言葉の重なるもの → 新しいものの順に選ぶ（第11.13.4節）
+  const byId = new Map(memories.map((m) => [m.id, m]));
+  const meaningMemories = (memoryHits ?? []).filter((h) => h.similarity >= MEMORY_MEANING_THRESHOLD && byId.has(h.id)).map((h) => byId.get(h.id)!);
+  const newest = [...memories].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const wordsOrder = [...memories].sort((a, b) => closeness(message, b.text) - closeness(message, a.text));
+  const pickedMemories = !needMemories ? memories : meaningMemories.length > 0
+    ? [...new Set([...meaningMemories, ...wordsOrder.filter((m) => closeness(message, m.text) > 0).slice(0, MEMORY_WORDS), ...newest])].slice(0, MEMORY_ALL)
+    // 意味で探せないときは、段 1 までと同じ（言葉の重なる 30 件と新しい 30 件）
+    : [...new Set([...wordsOrder.slice(0, MEMORY_ALL / 2), ...newest.slice(0, MEMORY_ALL / 2)])];
   const memoryLines = pickedMemories.map((m) => `- ${cut(m.text, 200)}`);
   const preferenceLines = preferences.map((m) => `- ${cut(m.text, 200)}`);
   // 使った日を記録する（使われない記憶を整理でしまうため。第11.11.4節）。記録できなくても答えは返す
@@ -165,6 +191,7 @@ export async function recall(
     todayLines.length ? `今日のやり取り ${todayLines.length} 件` : '',
     digestLines.length ? `会話の要約 ${digestLines.length} 日分` : '',
     workLines.length ? `頼んだ業務 ${workLines.length} 件` : '',
+    meaningMemories.length + byMeaning.length > 0 ? `意味で選んだもの ${meaningMemories.length + Math.min(byMeaning.length, DIGEST_MATCH)} 件` : '',
   ].filter(Boolean).join('・');
   return { text, evidence: [{ label: '参照した記憶', value: counts }] };
 }
