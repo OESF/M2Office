@@ -283,6 +283,7 @@ const ACTION_LABELS: Record<string, string> = {
   'web_review.disconnect': 'Webの分析の担当の Google の許可を外した',
   'web_review.select': 'Webの分析で見るプロパティとサイトを選んだ',
   'web_review.report': 'Web の月の便りを作った',
+  'effect.report': '効果のレポートを作った',
   'web_review.check': 'Web の直すべき所を探した',
   'web_review.finding': 'Web の直すべき所の状態を変えた',
   'web_review.request_submit': '制作会社への依頼文を承認へ進めた',

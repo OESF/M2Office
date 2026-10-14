@@ -111,6 +111,7 @@ src/competitors/ 競合の分析（内蔵の拡張。第36章の段 1〜3）。�
                  置き場（store.ts。PostgreSQL とメモリ）、処理と作業（service.ts。探す・入れる・外す・読む・レポート・ワーカーの CompetitorWatch）、
                  ツール（tools.ts。competitors.list・facts・report・discover・add・remove・check）、付属の業務（agents.ts。探す・分析）、
                  ほかの拡張へのつなぎ（links.ts。月の動きの数・話題を載せている競合の数。名前は渡さない）
+src/effect/      効果の欄と効果のレポート（第6.7.13節）。期間の推計の削減時間と AI の費用を計算する（figures.ts）・AI が文だけを書く（report.ts）・置き場（store.ts。effect_reports）・毎月 1 日に先月の分を作る見回り（service.ts）
 src/web-review/  Webの分析（内蔵の拡張。第34章の段 1・段 2）。担当の許可で読む口（data.ts。GA4 のデータと管理の API・Search Console の API と URL の検査・PageSpeed Insights・
                  見本の口 MockWebData）、数字（figures.ts。期間・サイトの選び方・月の便りの数字・秘書の問い。数字はここで計算する）、
                  置き場（store.ts。月の便り・直すべき所・ページごとの数字。PostgreSQL とメモリ）、処理（service.ts。つなぐ・外す・選ぶ・状態と依頼文の下書き・問い・

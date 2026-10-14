@@ -18,7 +18,7 @@ import {
   TenantAiResolver, platformAi, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, ConnectionCredentials, type ConnectionAuthProvider,
   CardService, PostgresContactStore, cardsAccess, type ContactStore, GoogleContactsService, TerminalService, PostgresTerminalStore, BulkMailService, PostgresBulkMailStore, NoticeService, PostgresNoticeStore,
-  InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, AppLinks, AppKnowledgeSearch, SecurityWatch, PostgresSecurityStore, JanLookupService, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, InquiryService, PostgresInquiryStore, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, CanvaService, HttpCanvaApi, MockCanvaApi, PostgresCanvaConnectionStore, MEMBER_LINE_SEND, LineApiVerifier, MockLineVerifier, JGrantsApi, MockJGrants, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, WEB_REVIEW_REQUEST, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, webColumnsAccess, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, applyStockChanges, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
+  InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, AppLinks, AppKnowledgeSearch, SecurityWatch, PostgresSecurityStore, JanLookupService, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, InquiryService, PostgresInquiryStore, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, CanvaService, HttpCanvaApi, MockCanvaApi, PostgresCanvaConnectionStore, MEMBER_LINE_SEND, LineApiVerifier, MockLineVerifier, JGrantsApi, MockJGrants, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, WEB_REVIEW_REQUEST, EffectService, PostgresEffectStore, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, webColumnsAccess, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, applyStockChanges, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
   type SecretBox, type GeminiModels,
   type FileStore, type TenantExtensions, type HelpArticle, type ManualMeta, type LlmProvider, type Logger, type Repository, type WorkspaceConnector, aiUsageMeterFromEnv, setEnqueueAiGuard, appPath
 } from '@m2office/core';
@@ -233,6 +233,8 @@ export interface AppDeps {
     service: WebReviewService;
     access(tenantId: string, userId: string): Promise<WebReviewSettings | null>;
   };
+  /** 効果の欄と効果のレポート（仕様書 第6.7.13節）。見るのは管理者だけ。毎月の分はワーカーが作る。 */
+  effect: EffectService;
   /** 人事・給与（内蔵の拡張。仕様書 第30章）。使えるのは会社で入れていて人事区画に入っている人だけ。 */
   hr: {
     service: HrService;
@@ -636,6 +638,12 @@ export function buildDeps(): AppDeps {
     access: webReviewAccess(repo),
   };
   webReviewRef.service = webReview.service;
+  // 効果の欄と効果のレポート（第6.7.13節）。数字はプログラムが計算し、AI は文だけを書く
+  const effect = new EffectService({
+    store: new PostgresEffectStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+    repo, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
+    agentsFor: async (tenantId) => { const v = await tenantView(tenantId); return { usable: v.agents, all: v.allAgents }; },
+  });
   // コラムのテーマ案・予定表・予約・貼るだけのページ（第32.18.4節）。材料はほかの拡張から（使っていなければ空）
   // サイネージ用の画像・動画（第32.18.6節）。作るのはワーカー。画面からは作り始めと、素材への登録を行う（承認は挟まない）
   columns.signage = new ColumnSignageService({
@@ -832,6 +840,7 @@ export function buildDeps(): AppDeps {
     members,
     printDesigns,
     webReview,
+    effect,
     // サイネージ（第31章）
     signage,
     // 人事・給与（第30章）。台帳は人事区画の人だけが扱い、勤怠と有給は本人も扱う

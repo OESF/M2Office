@@ -442,6 +442,11 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `PUT /v1/admin/access/:target` | 管理者: 1 つの業務（または拡張機能）の利用範囲。本文 `{ scope: "all" \| { groups, users } }` |
 | `GET /v1/admin/dashboard/live` | 管理者: ダッシュボードの「いま」（数値・業務の流れ・承認の滞留・出来事・本人と秘書の 1 組・接続先 `connections`）。業務の状態の各行にまとまり（`group`。仕事の分野。どの分野にも入らなければ拡張機能か業務の分野。第6.7.4.2.1節）を付ける。中身は返さない |
 | `GET /v1/admin/dashboard/connections` | 管理者: 接続先（AI・Google の各サービス・会社の接続）の直近 15 分の状態（`ok`・`slow`・`fail`・`off`）・呼び出し中か・回数・平均の時間・失敗の数と種類。中身と誰の呼び出しかは持たない（仕様書 第6.7.6節） |
+| `GET /v1/admin/effect?period=thisMonth\|lastMonth\|all` | 管理者: 効果の欄の数字（推計の削減時間・完了の件数・すべての AI の費用・削減 1 時間あたりの AI の費用・業務ごと・用途ごと・前の期間・使われなかった業務）。人ごとの数字は返さない（仕様書 第6.7.13節） |
+| `GET /v1/admin/effect/reports` | 管理者: 効果のレポートの一覧（新しい順・25 か月） |
+| `GET /v1/admin/effect/reports/:id` | 管理者: 効果のレポート（数字と AI が書いた文） |
+| `POST /v1/admin/effect/reports` | 管理者: `{ month: "this" \| "last" }` の月のレポートを作る（同じ月は置き換える。AI の利用は `api:effect`） |
+| `POST /v1/admin/effect/reports/:id/doc` | 管理者: Google ドキュメントに書き出す（本人の Google の接続。`{ url, name }`。接続が無ければ 409） |
 | `POST /v1/admin/dashboard/failures/dismiss` | 管理者: 今日、失敗した業務を確認したものとして囲みから外す（`runIds` で 1 件ずつ。省くと今日の分をすべて）。**外すのは表示だけ**で、実行の記録・集計・監査ログは残す。返すのは外した件数（仕様書 第6.7.5.1節） |
 | `GET /v1/admin/dashboard/people/:userId/photo` | 管理者: 人の状態に添える本人のプロフィール写真。**個人名で表示する会社の、停止していない利用者のものだけ**（仕様書 第6.7.4.4節） |
 | `GET /v1/admin/dashboard/people/:userId/secretary-avatar` | 管理者: その人の秘書のアバター（本人が上げた画像）。**本人が個人設定に登録した画像だけ**を返し、ファイルの ID は受け取らない。同じく個人名で表示する会社だけ |

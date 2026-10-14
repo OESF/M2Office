@@ -174,6 +174,8 @@ export {
   effectiveMonthlyLimit, jstMonth, purposeGroup, AI_LIMIT_COMPANY_MESSAGE, AI_LIMIT_USER_MESSAGE,
   type AiUsageScope, type AiUsageEntry, type AiUsageTotals, type AiUsageStore, type AiLimitSource, type AiUsageMeterDeps,
 } from './usage/ai-usage.js';
+export { purposeLabel } from './usage/purpose-labels.js';
+export * from './effect/index.js';
 export { voiceWords, voiceWordsLine, correctHeard, mishearOf, addMishear, toKatakana, VOICE_WORDS_MAX, MISHEARS_MAX, type VoiceWord, type Mishear, type VoiceWordsDeps } from './secretary/voice-words.js';
 export { AutoMinutes, autoMinutesRequest, meetingTitleKey, minutesStopped, MINUTES_AGENT_ID, type AutoMinutesDeps } from './meetings/auto-minutes.js';
 export { appRoot, appPath } from './app-root.js';

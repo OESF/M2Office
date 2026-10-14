@@ -39,6 +39,7 @@ const KIND_LABELS: Record<string, string> = {
   print: '販促物の作成',
   usage: 'AI の利用',
   usageSelf: 'AI の利用',
+  effect: '効果のレポート',
   notice: '社内のお知らせ',
   machine: '機械',
   service: 'ご利用',

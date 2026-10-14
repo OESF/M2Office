@@ -16,7 +16,7 @@ import {
 } from '@m2office/shared';
 import { readMaintenanceStatus, requestMaintenance, frontDir, setHeartbeatOff, MAINTENANCE_DEFAULT_HOURS, MAINTENANCE_MAX_HOURS, holdUpdates, machineDir, semanticSearchEnabled,
   DEFAULT_STANDARD_MINUTES, GOOGLE_DATA_RETENTION_DAYS, KNOWLEDGE_MAX_CHARS,
-  describeRule, scheduleBlocker, scheduleChecks, stepLabel, toolGoogleScopes, type AuditQuery, jstMonth, appPath, backupConfigFromEnv, machineConfigFromEnv, machineStatus, requestBackup
+  describeRule, scheduleBlocker, scheduleChecks, stepLabel, toolGoogleScopes, type AuditQuery, jstMonth, purposeLabel, appPath, backupConfigFromEnv, machineConfigFromEnv, machineStatus, requestBackup
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { requireRole, type AppEnv } from '../middleware/tenant.js';
@@ -641,27 +641,6 @@ function normalizeRoles(input: string[]): { value: Role[] } | { error: string } 
 }
 
 type Section = keyof TenantSettings;
-
-/** 口の名前（`api:<口>`・`worker:<処理>`）を、利用状況に出す業務の言葉にする。 */
-const PURPOSE_LABELS: Record<string, string> = {
-  secretary: '秘書', voice: '音声の秘書', other: 'そのほか', worker: '自動の処理',
-  'api:columns': 'コラムの作成', 'api:print-designs': '販促物の作成', 'api:competitors': '競合の分析', 'api:cards': '名刺管理',
-  'api:inventory': '在庫管理', 'api:signage': 'サイネージ', 'api:announcements': 'お知らせの作成', 'api:inquiries': '問い合わせの記録',
-  'api:web-review': 'Webの分析', 'api:contracts': '契約書の管理', 'api:subsidies': '補助金・助成金', 'api:members': '会員とポイント',
-  'api:hr': '人事・給与', 'api:reservations': '予約', 'api:knowledge': '知識', 'api:files': 'ファイル', 'api:me': '個人設定', 'api:admin': '管理者ページ',
-  'worker:competitors': '競合の分析（見回り）', 'worker:columns': 'コラムの作成（予定とテーマ案）', 'worker:web-review': 'Webの分析（月の便り）',
-  'worker:subsidies': '補助金・助成金（月の調べもの）', 'worker:knowledge': '秘書が学んだことの整理', 'worker:knowledge-embed': '知識の意味の検索の準備', 'worker:proactive': '秘書の先回り',
-  'worker:memory': '会話から覚えること', 'worker:inquiries': '問い合わせの見張り', 'worker:announcements': 'お知らせの作成（予約）',
-};
-
-/** 用途の名前（業務は業務の名前）。 */
-function purposeLabel(purpose: string, agents: { id: string; name: string }[]): string {
-  if (purpose.startsWith('agent:')) {
-    const id = purpose.slice(6);
-    return agentDisplayName(agents.find((a) => a.id === id)?.name, id);
-  }
-  return PURPOSE_LABELS[purpose] ?? (purpose.startsWith('api:') ? `画面の操作（${purpose.slice(4)}）` : purpose.startsWith('worker:') ? `自動の処理（${purpose.slice(7)}）` : purpose);
-}
 
 /** 設定の区分ごとに値を検証し、保存できる形に整える。 */
 function validateSection(

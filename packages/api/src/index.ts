@@ -56,6 +56,7 @@ import { mcpConnectionsRoute } from './routes/mcp-connections.js';
 import { meRoute } from './routes/me.js';
 import { filesRoute } from './routes/files.js';
 import { dashboardRoute } from './routes/dashboard.js';
+import { effectRoute } from './routes/effect.js';
 import { helpRoute } from './routes/help.js';
 import { onboardingRoute } from './routes/onboarding.js';
 import { extensionsRoute } from './routes/extensions.js';
@@ -281,6 +282,8 @@ app.route('/v1/hr', hrRoute(deps));
 app.route('/v1/hr-photos', hrPhotosRoute(deps));
 app.route('/v1/notices', noticesRoute(deps));
 app.route('/v1/admin/dashboard', dashboardRoute(deps));
+// 効果の欄と効果のレポート（第6.7.13節。管理者だけ）
+app.route('/v1/admin/effect', effectRoute(deps));
 app.route('/v1/admin/extensions', extensionsRoute(deps));
 app.route('/v1/admin/groups', groupsRoute(deps));
 app.route('/v1/admin/access', accessRoute(deps));

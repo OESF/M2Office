@@ -14,7 +14,7 @@ import { hostname } from 'node:os';
 import {
   assertDatabaseConfigured,
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
-  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, GoogleContactsService, KnowledgeEmbedder, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, JGrantsApi, MockJGrants, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, MEMBER_LINE_SEND, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger,
+  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, GoogleContactsService, KnowledgeEmbedder, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, JGrantsApi, MockJGrants, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, MEMBER_LINE_SEND, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, EffectService, PostgresEffectStore, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger,
   NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator, aiUsageMeterFromEnv, enterAiUsage, withAiUsage, setEnqueueAiGuard, AutoMinutes, MINUTES_AGENT_ID, appPath, backupConfigFromEnv, machineDir, readBackupStatus, takeUnnotifiedUpdateFailure, takeClosedMaintenanceSessions, heartbeatConfigFromEnv, sendHeartbeat, HEARTBEAT_INTERVAL_MS, machineStatus, machineConfigFromEnv, restoreTest, runBackup, takeBackupRequest, writeWorkerBeat, OpsAppSide, createPool, offsiteConfigFromEnv, readOffsiteStatus, runOffsite, checkOffsite,
@@ -309,6 +309,12 @@ const webReview: WebReviewService = new WebReviewService({
   competitors: competitorLinksFrom({ store: competitorStore, repo }),
   closedOn: (tenantId, day) => announcementStore.closedOn(tenantId, day),
 });
+// 効果のレポート（仕様書 第6.7.13節）。毎月 1 日の 7 時（日本時間）を過ぎたら、先月の分を 1 回だけ作って管理者に知らせる
+const effect = new EffectService({
+  store: new PostgresEffectStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+  repo, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
+  agentsFor: async (tenantId) => { const v = await hub.forTenant(tenantId); return { usable: v.agents, all: v.allAgents }; },
+});
 // お知らせの作成（内蔵の拡張。仕様書 第35章）。承認の後に出し、予約の時刻と期間の後を見回る
 const announcements = new AnnouncementService({
   store: announcementStore,
@@ -532,6 +538,9 @@ let lastPrintCheck = 0;
 // 直すべき所の見回りの番（週に 1 回・今すぐチェック）を見る
 const WEB_REVIEW_INTERVAL_MS = Number(process.env['WEB_REVIEW_INTERVAL_MS'] ?? 60_000);
 let lastWebReviewCheck = 0;
+/** 効果のレポートの見回り（第6.7.13節）。月に 1 回作るだけなので 10 分ごとで足りる。 */
+const EFFECT_INTERVAL_MS = Number(process.env['EFFECT_INTERVAL_MS'] ?? 600_000);
+let lastEffectCheck = 0;
 // コラムの作成（第32.18.4節）。既定は 1 分ごとに、予約の日時・飛ばす回・週に 1 回のテーマ案・7 日前の先回りを見る
 const COLUMN_PLAN_INTERVAL_MS = Number(process.env['COLUMN_PLAN_INTERVAL_MS'] ?? 60_000);
 let lastColumnPlanCheck = 0;
@@ -1102,6 +1111,16 @@ while (running) {
       if (r.created + r.checked > 0) log.info('Web の月の便りを作り、直すべき所を探しました', { created: r.created, checked: r.checked });
     } catch (err) {
       log.warn('Webの分析の見回りに失敗しました', { err });
+    }
+  }
+  // 効果のレポート（第6.7.13節）。会社ごとの失敗はほかの会社を止めない
+  if (Date.now() - lastEffectCheck >= EFFECT_INTERVAL_MS) {
+    lastEffectCheck = Date.now();
+    try {
+      const r = await withAiUsage({ purpose: 'worker:effect' }, () => effect.tick(new Date()));
+      if (r.created > 0) log.info('効果のレポートを作りました', { created: r.created });
+    } catch (err) {
+      log.warn('効果のレポートの見回りに失敗しました', { err });
     }
   }
 

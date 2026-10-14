@@ -25,6 +25,7 @@ import type { CardCorners, CardEnglish, PrintDesign, PrintDesignDetailView, Prin
   Announcement, AnnouncementDetail, AnnouncementPreview, AnnouncementRecipient, AnnouncementRecipientsRefined, AnnouncementSettings, AnnouncementTexts,
   Contract, ContractSettings, ReservableItem, ReservableKind, Reservation, ReservationRule, ReservationSeries, Subsidy, SubsidyContact, SubsidyProfile, SubsidyStatus, Member, MemberPoint, MemberRank, MemberReward, MemberSettings, MemberAudience, MemberMessage,
   WebReviewCandidates, WebReviewReport, WebReviewReportBrief, WebReviewSettings, WebReviewStatus, WebReviewFinding, WebReviewFindingStatus, WebPageMetrics,
+  EffectFigures, EffectPeriod, EffectReport, EffectReportBrief,
 } from '@m2office/shared';
 import { debugMode, recordCall } from './debug.js';
 
@@ -2196,6 +2197,15 @@ export const api = {
     machineUpdateHold: (days: number | null) => call<{ heldUntil: string | null }>('/admin/machine/update-hold', { method: 'PUT', body: JSON.stringify({ days }) }),
     /** 今月の AI の利用と上限（仕様書 第6.6.2節）。用途ごと・人ごと。費用は概算。 */
     aiUsage: () => call<AiUsageView>('/admin/ai-usage'),
+    /** 効果の欄の数字（仕様書 第6.7.13節）。推計の削減時間とすべての AI の費用。人ごとの数字は無い。 */
+    effect: (period: EffectPeriod) => call<{ figures: EffectFigures }>(`/admin/effect?period=${period}`),
+    effectReports: () => call<{ reports: EffectReportBrief[] }>('/admin/effect/reports'),
+    /** 効果のレポート（数字と文、コピーする Markdown）。 */
+    effectReport: (id: string) => call<{ report: EffectReport; markdown: string }>(`/admin/effect/reports/${encodeURIComponent(id)}`),
+    /** 今月（ここまで）か先月のレポートを作る（同じ月は置き換える）。 */
+    createEffectReport: (month: 'this' | 'last') => call<{ report: EffectReport }>('/admin/effect/reports', { method: 'POST', body: JSON.stringify({ month }) }),
+    /** Google ドキュメントに書き出す（本人の Google の接続）。 */
+    effectReportDoc: (id: string) => call<{ url: string | null; name: string }>(`/admin/effect/reports/${encodeURIComponent(id)}/doc`, { method: 'POST', body: '{}' }),
     runs: () => call<{ items: AdminRun[] }>('/admin/runs'),
     /** 会社の全員の定時実行（仕様書 第6.6.8.2節）。見るだけ。 */
     schedules: () => call<{ items: AdminSchedule[] }>('/admin/schedules'),

@@ -7193,5 +7193,43 @@ console.log('\n■ 89. 知識の意味の検索（後から埋め込む・言い
   }
 }
 
+console.log('\n■ 90. 効果の欄と効果のレポート（数字はプログラム・AI は文・管理者だけ・ほかの会社に出さない。第6.7.13節）');
+{
+  let reportId = null;
+  try {
+    const f = (await call('a', '/v1/admin/effect?period=thisMonth')).body?.figures;
+    const all = (await call('a', '/v1/admin/effect?period=all')).body?.figures;
+    typeof f?.savedMinutes === 'number' && typeof f?.aiCostJpy === 'number' && Array.isArray(f?.byPurpose) && f.byPurpose.some((p) => p.purpose === 'secretary' && p.label === '秘書')
+      && f.previous && all?.previous === null && /導入から/.test(all?.label ?? '')
+      ? ok('効果の欄は、推計の削減時間とすべての AI の費用（用途ごと）を返し、今月は前の月と比べる') : ng('効果の欄の数字が違う', JSON.stringify({ f, all }).slice(0, 400));
+    const byMember = await call('a', '/v1/admin/effect?period=thisMonth', {}, 'member');
+    const bad = await call('a', '/v1/admin/effect?period=year');
+    byMember.status === 403 && bad.status === 400 ? ok('効果の欄は管理者だけ。期間は決まったものだけ') : ng('効果の欄の権限か確かめが違う', JSON.stringify({ m: byMember.status, bad: bad.status }));
+    const made = await call('a', '/v1/admin/effect/reports', { method: 'POST', body: JSON.stringify({ month: 'this' }) });
+    reportId = made.body?.report?.id ?? null;
+    const month = new Date(Date.now() + 9 * 3_600_000).toISOString().slice(0, 7);
+    const got = await call('a', `/v1/admin/effect/reports/${reportId}`);
+    const list = (await call('a', '/v1/admin/effect/reports')).body?.reports ?? [];
+    made.body?.report?.month === month && made.body.report.kind === 'manual' && made.body.report.body?.summary?.length > 0
+      && /^# .*効果のレポート/.test(got.body?.markdown ?? '') && list.some((r) => r.id === reportId)
+      ? ok('管理者は今月の効果のレポートを作り、開き、Markdown でコピーできる') : ng('効果のレポートを作れない', JSON.stringify({ made: made.status, b: made.body, md: got.body?.markdown?.slice(0, 80) }).slice(0, 400));
+    const fromB = await call('b', `/v1/admin/effect/reports/${reportId}`);
+    const byMemberMake = await call('a', '/v1/admin/effect/reports', { method: 'POST', body: JSON.stringify({ month: 'this' }) }, 'member');
+    fromB.status === 404 && byMemberMake.status === 403 ? ok('効果のレポートは、ほかの会社から見えず、管理者のほかは作れない') : ng('効果のレポートの境界が違う', JSON.stringify({ b: fromB.status, m: byMemberMake.status }));
+    const doc = await call('a', `/v1/admin/effect/reports/${reportId}/doc`, { method: 'POST', body: '{}' });
+    doc.status === 200 && typeof doc.body?.name === 'string' ? ok('効果のレポートを、本人の Google の接続で Google ドキュメントに書き出せる（見本の接続）') : ng('Google ドキュメントに書き出せない', JSON.stringify({ s: doc.status, b: doc.body }));
+  } catch (err) {
+    ng('効果の確認が途中で止まった', String(err));
+  } finally {
+    if (reportId) {
+      const { default: pgc } = await import('pg');
+      const db = new pgc.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+      await db.connect();
+      await db.query(`delete from effect_reports where id = $1`, [reportId]);
+      await db.end();
+    }
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');

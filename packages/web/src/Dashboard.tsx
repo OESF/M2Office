@@ -10,6 +10,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { api, describeError, type ChecklistItem, type DashboardLive, type DashboardStats, type SecurityWatchStatus } from './api.js';
 import { HealthList } from './health.js';
+import { EffectPanel } from './Effect.js';
 import { HelpTip, openHelp } from './help.js';
 import { Icon } from './nav.js';
 import { busyOf, groupAgents, type AgentGroupView, type AgentLoad } from './agent-groups.js';
@@ -43,7 +44,8 @@ export function Dashboard() {
           別の画面で開く
         </a>
       </div>
-      {tab === 'live' ? <Live /> : <Stats />}
+      {/* 「集計」の先頭に効果の欄（推計の削減時間と AI の費用。第6.7.13節） */}
+      {tab === 'live' ? <Live /> : <><EffectPanel /><Stats /></>}
     </>
   );
 }
@@ -690,54 +692,103 @@ function AgeBar({ since }: { since: string }) {
   );
 }
 
-/** 日ごとの実行件数（棒）と削減時間（折れ線）。 */
+/**
+ * 縦の目盛り（0 から上までを 4 つほどに区切る、切りのよい値）。
+ *
+ * @param integer 件数のように整数だけで区切るか
+ */
+function niceScale(max: number, integer: boolean): { top: number; ticks: number[] } {
+  if (max <= 0) return { top: integer ? 4 : 1, ticks: integer ? [0, 1, 2, 3, 4] : [0, 0.25, 0.5, 0.75, 1] };
+  const raw = max / 4;
+  const mag = 10 ** Math.floor(Math.log10(raw));
+  let step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((x) => x >= raw) ?? raw;
+  if (integer) step = Math.max(1, Math.ceil(step));
+  const top = Math.ceil(max / step - 1e-9) * step;
+  const ticks: number[] = [];
+  for (let v = 0; v <= top + step / 1000; v += step) ticks.push(Math.round(v * 100) / 100);
+  return { top, ticks };
+}
+
+/** 目盛りの数の書き方（桁区切り・小数は 2 桁まで）。 */
+const tickText = (v: number) => v.toLocaleString('ja-JP', { maximumFractionDigits: 2 });
+
+/** 日ごとの実行件数（棒。左の目盛り）と削減時間（折れ線。右の目盛り）。 */
 function DailyChart({ daily }: { daily: DashboardStats['daily'] }) {
-  const W = 520, H = 180, P = 28;
-  const maxRuns = Math.max(1, ...daily.map((d) => d.runs));
-  const maxSaved = Math.max(1, ...daily.map((d) => d.savedMinutes));
-  const bw = (W - P * 2) / daily.length;
-  const x = (i: number) => P + i * bw;
-  const line = daily.map((d, i) => `${x(i) + bw / 2},${H - P - (d.savedMinutes / maxSaved) * (H - P * 2)}`).join(' ');
+  const W = 520, H = 210, L = 44, R = 48, T = 40, B = 26;
+  const ph = H - T - B;
+  const runs = niceScale(Math.max(0, ...daily.map((d) => d.runs)), true);
+  const saved = niceScale(Math.max(0, ...daily.map((d) => hours(d.savedMinutes))), false);
+  const failed = daily.some((d) => d.failed > 0);
+  const bw = (W - L - R) / Math.max(1, daily.length);
+  const x = (i: number) => L + i * bw;
+  const yRuns = (n: number) => T + ph - (n / runs.top) * ph;
+  const ySaved = (h: number) => T + ph - (h / saved.top) * ph;
+  const line = daily.map((d, i) => `${x(i) + bw / 2},${ySaved(hours(d.savedMinutes))}`).join(' ');
   const every = Math.ceil(daily.length / 7);
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="chart" role="img" aria-label="日ごとの実行件数と削減時間">
-      <line x1={P} y1={H - P} x2={W - P} y2={H - P} className="axis" />
+      {/* 凡例 */}
+      <g className="legend">
+        <rect x={L} y={6} width={10} height={10} className="bar" /><text x={L + 14} y={15}>実行（件）</text>
+        {failed && <><rect x={L + 86} y={6} width={10} height={10} className="bar fail" /><text x={L + 100} y={15}>うち失敗（件）</text></>}
+        <line x1={W - R - 128} y1={11} x2={W - R - 112} y2={11} className="line" /><text x={W - R - 108} y={15}>推計の削減時間（時間）</text>
+      </g>
+      {/* 縦の目盛り。左が実行の件数、右が削減時間 */}
+      <text x={L - 6} y={T - 8} className="tick end-axis">件</text>
+      <text x={W - R + 6} y={T - 8} className="tick start-axis saved">時間</text>
+      {runs.ticks.map((v) => (
+        <g key={`r${v}`}>
+          <line x1={L} y1={yRuns(v)} x2={W - R} y2={yRuns(v)} className={v === 0 ? 'axis' : 'grid'} />
+          <text x={L - 6} y={yRuns(v) + 4} className="tick end-axis">{tickText(v)}</text>
+        </g>
+      ))}
+      {saved.ticks.map((v) => <text key={`s${v}`} x={W - R + 6} y={ySaved(v) + 4} className="tick start-axis saved">{tickText(v)}</text>)}
       {daily.map((d, i) => {
-        const h = (d.runs / maxRuns) * (H - P * 2);
-        const fh = (d.failed / maxRuns) * (H - P * 2);
+        const h = (d.runs / runs.top) * ph;
+        const fh = (d.failed / runs.top) * ph;
         return (
           <g key={d.day}>
-            <rect x={x(i) + bw * 0.15} y={H - P - h} width={bw * 0.7} height={h} className="bar">
+            <rect x={x(i) + bw * 0.15} y={T + ph - h} width={bw * 0.7} height={h} className="bar">
               <title>{`${d.day} 実行 ${d.runs} 件・削減 ${hours(d.savedMinutes)} 時間`}</title>
             </rect>
-            {fh > 0 && <rect x={x(i) + bw * 0.15} y={H - P - fh} width={bw * 0.7} height={fh} className="bar fail" />}
+            {fh > 0 && <rect x={x(i) + bw * 0.15} y={T + ph - fh} width={bw * 0.7} height={fh} className="bar fail" />}
             {i % every === 0 && <text x={x(i) + bw / 2} y={H - 8} className="tick">{d.day.slice(5)}</text>}
           </g>
         );
       })}
       {daily.length > 1 && <polyline points={line} className="line" />}
-      <text x={P} y={14} className="tick start">実行（最大 {maxRuns} 件）</text>
-      <text x={W - P} y={14} className="tick end">— 削減時間</text>
     </svg>
   );
 }
 
 /** 時間帯別の実行件数（0〜23 時）。 */
 function HourlyChart({ hourly }: { hourly: number[] }) {
-  const W = 520, H = 180, P = 28;
-  const max = Math.max(1, ...hourly);
-  const bw = (W - P * 2) / 24;
+  const W = 520, H = 210, L = 44, R = 16, T = 40, B = 26;
+  const ph = H - T - B;
+  const runs = niceScale(Math.max(0, ...hourly), true);
+  const bw = (W - L - R) / 24;
+  const y = (n: number) => T + ph - (n / runs.top) * ph;
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="chart" role="img" aria-label="時間帯別の実行件数">
-      <line x1={P} y1={H - P} x2={W - P} y2={H - P} className="axis" />
+      <g className="legend">
+        <rect x={L} y={6} width={10} height={10} className="bar" /><text x={L + 14} y={15}>実行（件）</text>
+        <text x={W - R} y={15} className="end">横は時刻（時台）</text>
+      </g>
+      <text x={L - 6} y={T - 8} className="tick end-axis">件</text>
+      {runs.ticks.map((v) => (
+        <g key={v}>
+          <line x1={L} y1={y(v)} x2={W - R} y2={y(v)} className={v === 0 ? 'axis' : 'grid'} />
+          <text x={L - 6} y={y(v) + 4} className="tick end-axis">{tickText(v)}</text>
+        </g>
+      ))}
       {hourly.map((n, h) => {
-        const bh = (n / max) * (H - P * 2);
+        const bh = (n / runs.top) * ph;
         return (
           <g key={h}>
-            <rect x={P + h * bw + 2} y={H - P - bh} width={bw - 4} height={bh} className="bar">
+            <rect x={L + h * bw + 2} y={T + ph - bh} width={bw - 4} height={bh} className="bar">
               <title>{`${h} 時台 ${n} 件`}</title>
             </rect>
-            {h % 3 === 0 && <text x={P + h * bw + bw / 2} y={H - 8} className="tick">{h}</text>}
+            {h % 3 === 0 && <text x={L + h * bw + bw / 2} y={H - 8} className="tick">{h}</text>}
           </g>
         );
       })}

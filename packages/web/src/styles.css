@@ -808,6 +808,12 @@ pre.body { white-space: pre-wrap; background: var(--subtle-bg); border: 1px soli
 .chart .tick { font-size: calc(11px * var(--font-scale)); fill: var(--muted); text-anchor: middle; }
 .chart .tick.start { text-anchor: start; }
 .chart .tick.end { text-anchor: end; fill: var(--warn); }
+.chart .grid { stroke: var(--line); stroke-dasharray: 2 3; opacity: .7; }
+.chart .tick.end-axis { text-anchor: end; }
+.chart .tick.start-axis { text-anchor: start; }
+.chart .tick.saved { fill: var(--amber); }
+.chart .legend text { font-size: calc(11px * var(--font-scale)); fill: var(--ink); }
+.chart .legend text.end { text-anchor: end; fill: var(--muted); }
 .stack { display: flex; height: 14px; border-radius: 7px; overflow: hidden; background: var(--neutral-soft); }
 .stack span.direct, .dot.direct { background: var(--accent); }
 .stack span.route, .dot.route { background: var(--blue); }
@@ -2374,3 +2380,13 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 /* 接続の会社の外のサービス（WordPress・LINE・窓口のメール。仕様書 第6.6.2.1節） */
 .service-connection-form { display: grid; gap: 8px; max-width: 480px; }
 .service-connection .row { align-items: center; }
+
+/* ダッシュボードの「効果」の欄と効果のレポート（仕様書 第6.7.13節） */
+.effect { margin-bottom: 14px; }
+.effect-head h3 { margin: 0; }
+.effect h4 { margin: 8px 0 6px; font-size: 14px; }
+.effect-diff { display: block; font-size: 12px; }
+.effect-reports { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 8px; }
+.effect-report-list { list-style: none; margin: 4px 0; padding: 0; display: grid; gap: 4px; }
+.effect-report-list .link.on { font-weight: 700; }
+.effect-report { margin-top: 8px; }

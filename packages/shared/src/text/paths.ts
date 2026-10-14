@@ -39,6 +39,8 @@ export function notificationPath(n: { kind: string; runId: string | null }): str
   if (n.kind === 'print') return '/print-designs';
   // AI の利用の上限の知らせ（第6.6.2節）。会社の分は管理者ページの利用状況、本人の分は個人設定
   if (n.kind === 'usage') return '/admin/usage';
+  // 効果のレポートが届いた知らせ（第6.7.13節）。管理者ページのダッシュボードを開く
+  if (n.kind === 'effect') return '/admin';
   if (n.kind === 'usageSelf') return '/settings';
   // ローカルの形の機械の知らせ（控えの失敗など。第8.6.7節）
   if (n.kind === 'machine') return '/admin/machine';
