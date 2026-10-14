@@ -33,6 +33,8 @@ const connectedFor = (iso: string | null) => {
   const h = Math.floor((m % 1440) / 60);
   return `${Math.floor(m / 1440)} 日${h ? ` ${h} 時間` : ''}`;
 };
+/** 素材の一覧からスケジュールへ引くときに渡す種類（中身は素材の ID）。 */
+const ASSET_DRAG = 'application/x-m2o-signage-asset';
 const at = (iso: string) => new Date(iso).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
 /** 縮小画像（長い辺 320 の JPEG。100 KB まで）を作る。 */
@@ -258,7 +260,7 @@ export function Signage() {
           </div>
         )}
       </div>
-      {screen && <FlowEditor key={screen.id} screen={screen} screens={data.screens} assets={assets} thumbs={thumbs} onFiles={(fs, band) => void addFiles(fs, screen.id, band)} onError={setError} onChanged={load} />}
+      {screen && <FlowEditor key={screen.id} screen={screen} screens={data.screens} assets={assets} thumbs={thumbs} defaultSeconds={data.settings.imageSeconds} onFiles={(fs, band) => void addFiles(fs, screen.id, band)} onError={setError} onChanged={load} />}
       {uploading && <p className="muted small">{uploading} を入れています…</p>}
       {notes.length > 0 && (
         <div className="card signage-notes">
@@ -356,13 +358,18 @@ function ScreenCard({ s, active, admin, thumb, assets, wantThumb, onSelect, onCh
  * 画面の流れ（並べ替え・秒数・外す・素材を足す・ほかの画面からコピー）。直したらすぐ保存する。
  * 上の切り替えで、いつもの流れと時間帯の流れ（3 つまで。第31.6.6節）を選ぶ。
  */
-function FlowEditor({ screen, screens, assets, thumbs, onFiles, onError, onChanged }: {
+function FlowEditor({ screen, screens, assets, thumbs, defaultSeconds, onFiles, onError, onChanged }: {
   screen: SignageScreen; screens: SignageScreen[]; assets: SignageAssetView[]; thumbs: ReturnType<typeof useThumbs>;
+  /** 拡張機能の設定の画像表示時間（秒）。行の秒数が決まっていなければ、この秒数で表示する */
+  defaultSeconds: number;
   onFiles: (files: File[], band: string | null) => void; onError: (m: string) => void; onChanged: () => void;
 }) {
   const [band, setBand] = useState<string | null>(null);
   const [flow, setFlow] = useState<{ version: number; entries: SignageEntry[]; bands: SignageBand[] } | null>(null);
   const file = useRef<HTMLInputElement>(null);
+  const box = useRef<HTMLDivElement>(null);
+  // 素材の一覧から引いてきたとき、入る位置（何番目か）と、その位置に出す線の高さ
+  const [dropLine, setDropLine] = useState<{ at: number; top: number } | null>(null);
   const reload = useCallback(() => {
     api.signage.flow(screen.id, band).then(setFlow).catch((e) => {
       // 開いていた時間帯がほかの人に削除されていたら、いつもの流れに戻る
@@ -380,8 +387,38 @@ function FlowEditor({ screen, screens, assets, thumbs, onFiles, onError, onChang
     api.signage.saveFlow(screen.id, flow.version, entries, band).then((r) => { setFlow({ ...flow, version: r.version, entries }); onChanged(); })
       .catch((e) => { onError(describeError(e, 'スケジュールを直せませんでした')); reload(); });
   };
+  /** 引いている位置から、入る場所（行と行の間）を決める。 */
+  const dropPlace = (clientY: number): { at: number; top: number } => {
+    const el = box.current!;
+    const top0 = el.getBoundingClientRect().top;
+    const rows = Array.from(el.querySelectorAll<HTMLElement>('.signage-entries > li'));
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i]!.getBoundingClientRect();
+      if (clientY < r.top + r.height / 2) return { at: i, top: r.top - top0 - 3 };
+    }
+    const last = rows.at(-1)?.getBoundingClientRect();
+    const list = el.querySelector('.signage-entries')?.getBoundingClientRect();
+    return { at: rows.length, top: last ? last.bottom - top0 + 1 : (list ? list.top - top0 : 0) };
+  };
+  const onDragOver = (e: DragEvent) => {
+    e.preventDefault();
+    if (!e.dataTransfer.types.includes(ASSET_DRAG)) return;
+    e.dataTransfer.dropEffect = 'copy';
+    const p = dropPlace(e.clientY);
+    if (p.at !== dropLine?.at || p.top !== dropLine?.top) setDropLine(p);
+  };
   const onDrop = (e: DragEvent) => {
     e.preventDefault();
+    const assetId = e.dataTransfer.getData(ASSET_DRAG);
+    if (assetId && flow) {
+      // 素材の一覧から引いてきた素材を、離した位置に足す（ナレーション付きの素材は、はじめから音あり。Q-233）
+      const at = dropLine?.at ?? flow.entries.length;
+      setDropLine(null);
+      const entry: SignageEntry = { assetId, seconds: null, ...(byId.get(assetId)?.narration ? { sound: true } : {}) };
+      save([...flow.entries.slice(0, at), entry, ...flow.entries.slice(at)]);
+      return;
+    }
+    setDropLine(null);
     const files = Array.from(e.dataTransfer.files);
     if (files.length) onFiles(files, band);
   };
@@ -409,7 +446,10 @@ function FlowEditor({ screen, screens, assets, thumbs, onFiles, onError, onChang
   if (!flow) return null;
   const current = flow.bands.find((b) => b.id === band) ?? null;
   return (
-    <div className="card signage-flow" onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
+    <div ref={box} className={`card signage-flow${dropLine ? ' drop-ready' : ''}`} onDragOver={onDragOver} onDrop={onDrop}
+      onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropLine(null); }}>
+      {/* 素材を引いてきたときに、入る位置に出す線 */}
+      {dropLine && <div className="signage-drop-line" style={{ top: dropLine.top }} aria-hidden="true" />}
       <div className="row"><strong className="grow">{screen.name} のスケジュール</strong>
         <select value="" onChange={(e) => {
           const from = e.target.value;
@@ -471,9 +511,13 @@ function FlowEditor({ screen, screens, assets, thumbs, onFiles, onError, onChang
                 ? <input className="num-input" type="text" readOnly tabIndex={-1} aria-label="動画の長さ（秒。変えられません）"
                   title={a.durationMs ? `動画の長さ ${fmtDuration(a.durationMs)}（変えられません）` : '動画の長さ（変えられません）'}
                   value={a.durationMs ? Math.round(a.durationMs / 1000) : ''} />
-                : <input className="num-input" type="number" min={SIGNAGE_LIMITS.minSeconds} max={SIGNAGE_LIMITS.maxSeconds} placeholder="秒" aria-label="表示する秒数"
-                  defaultValue={e.seconds ?? ''} onBlur={(ev) => {
-                    const v = ev.target.value === '' ? null : Number(ev.target.value);
+                // 行の秒数が決まっていなければ、拡張機能の設定の画像表示時間を出す（その秒数で表示する。設定を変えればそれに合わせる）。
+                // 同じ秒数にしたら、決まっていない（設定に合わせる）に戻す
+                : <input key={`${e.seconds ?? 'd'}-${defaultSeconds}`} className="num-input" type="number" min={SIGNAGE_LIMITS.minSeconds} max={SIGNAGE_LIMITS.maxSeconds} aria-label="表示時間（秒）"
+                  title={e.seconds === null ? `拡張機能の設定の画像表示時間（${defaultSeconds} 秒）` : undefined}
+                  defaultValue={e.seconds ?? defaultSeconds} onBlur={(ev) => {
+                    const n = ev.target.value === '' ? null : Number(ev.target.value);
+                    const v = n === null || n === defaultSeconds ? null : n;
                     if (v !== e.seconds) save(flow.entries.map((x, j) => (j === i ? { ...x, seconds: v } : x)));
                   }} />}
               {/* 止める・再開する（行は流れに残す。拡張機能と同じスライドのスイッチ。押すとすぐ保存する） */}
@@ -517,14 +561,17 @@ function AssetList({ assets, screens, usage, sounds, thumbs, onFiles, onChanged,
       </div>
       <div className="signage-asset-grid">
         {assets.map((a) => (
-          <div key={a.id} className="signage-asset">
+          // スケジュールへ引いて足せる（離した位置に入る。第31.9.4節）
+          <div key={a.id} className="signage-asset" draggable
+            onDragStart={(e) => { e.dataTransfer.setData(ASSET_DRAG, a.id); e.dataTransfer.setData('text/plain', a.name); e.dataTransfer.effectAllowed = 'copy'; }}>
             {/* 動画は一覧のまま再生して確かめる（押すまで読み込まない。縮小画像を表紙にする） */}
             <span className="signage-thumb large">
               {a.kind === 'video'
                 ? <video src={api.signage.contentUrl(a.id)} poster={thumbs.urls[a.id]} controls preload="none" playsInline aria-label={`${a.name}を再生`} />
                 : thumbs.urls[a.id] ? <img src={thumbs.urls[a.id]} alt="" /> : null}
             </span>
-            <input className="signage-asset-name" defaultValue={a.name} maxLength={60} aria-label="素材の名前"
+            <input className="signage-asset-name" defaultValue={a.name} maxLength={60} aria-label="素材の名前" draggable={false}
+              onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }}
               onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== a.name) void api.signage.renameAsset(a.id, v).then(onChanged).catch((er) => onError(describeError(er, '直せませんでした'))); }} />
             <span className="small muted">{a.kind === 'video' ? `動画 ${a.durationMs ? fmtDuration(a.durationMs) : ''}` : a.kind === 'html' ? 'HTML' : '画像'}・{fmtBytes(a.bytes)}{a.screens.length ? `・${names(a.screens)}` : ''}</span>
             {a.kind !== 'video' && (

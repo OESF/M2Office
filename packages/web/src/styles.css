@@ -1694,6 +1694,11 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .signage-add { display: flex; gap: 6px; align-items: center; padding: calc(10px * var(--space-scale)); }
 .signage-code-input { width: 8em; }
 .signage-flow, .signage-assets { padding: calc(12px * var(--space-scale)); display: flex; flex-direction: column; gap: 8px; }
+.signage-flow { position: relative; }
+/* 素材の一覧から引いてきたとき（入る位置に線を出す。第31.9.4節） */
+.signage-flow.drop-ready { outline: 2px dashed var(--accent); outline-offset: -2px; }
+.signage-drop-line { position: absolute; left: calc(12px * var(--space-scale)); right: calc(12px * var(--space-scale)); height: 3px; border-radius: 2px; background: var(--accent); pointer-events: none; z-index: 2; }
+.signage-asset[draggable="true"] { cursor: grab; }
 .signage-flow .row, .signage-assets .row { gap: 8px; align-items: center; }
 .signage-entries { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .signage-entries li { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; }
@@ -1726,6 +1731,8 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .signage-thumb.large img { object-fit: contain; }
 .signage-thumb.large video { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; }
 .signage-asset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+/* 素材が多くても、スケジュールへ引いて足しやすいよう、一覧の中だけでスクロールする（第31.9.4節） */
+.signage-asset-grid { max-height: min(60vh, 560px); overflow-y: auto; padding-right: 4px; overscroll-behavior: contain; }
 .signage-asset { display: flex; flex-direction: column; gap: 4px; }
 .signage-asset-name { width: 100%; }
 .signage-asset .btn { align-self: flex-start; }

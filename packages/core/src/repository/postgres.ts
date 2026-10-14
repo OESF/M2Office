@@ -307,6 +307,23 @@ export class PostgresRepository implements Repository {
     return rows[0] ?? null;
   }
 
+  async touchRun(tenantId: string, runId: string): Promise<void> {
+    await this.q(tenantId, `update runs set heartbeat_at = now() where id = $1 and status = 'running'`, [runId]);
+  }
+
+  /**
+   * 止まった実行を戻す。
+   *
+   * @remarks テナントを横断して探すので、データベース側の関数（security definer）に閉じ込めている（{@link claimNextRun} と同じ）
+   */
+  async recoverStaleRuns(before: Date, max: number): Promise<{ id: string; tenantId: string; resumed: boolean }[]> {
+    return this.q<{ id: string; tenantId: string; resumed: boolean }>(
+      null,
+      `select id, tenant_id as "tenantId", resumed from m2o_recover_stale_runs($1, $2)`,
+      [before.toISOString(), max],
+    );
+  }
+
   async appendRunStep(tenantId: string, step: RunStep): Promise<void> {
     await this.q(tenantId, 
       `insert into run_steps (id, run_id, seq, step_id, kind, status, input,

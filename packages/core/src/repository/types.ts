@@ -47,6 +47,13 @@ export interface Repository {
   usageByAgent(tenantId: string): Promise<{ agentId: string; runs: number; tokens: number; costJpy: number }[]>;
   /** 実行待ちのジョブを 1 件取り出して `running` にする（ワーカー用）。 */
   claimNextRun(): Promise<Run | null>;
+  /** 進めている実行に、生きている印を付ける（30 秒おき。仕様書 第9.3節）。`running` でなければ何もしない。 */
+  touchRun(tenantId: string, runId: string): Promise<void>;
+  /**
+   * 印が `before` より古い `running` の実行を、止まったものとして `queued` に戻す（ワーカー用。仕様書 第9.3節）。
+   * 戻した回数が `max` に達していたら `failed` にする。
+   */
+  recoverStaleRuns(before: Date, max: number): Promise<{ id: string; tenantId: string; resumed: boolean }[]>;
 
   appendRunStep(tenantId: string, step: RunStep): Promise<void>;
   updateRunStep(tenantId: string, step: RunStep): Promise<void>;

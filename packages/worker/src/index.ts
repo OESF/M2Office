@@ -485,8 +485,17 @@ const CONVERSATION_INTERVAL_MS = Number(process.env['CONVERSATION_INTERVAL_MS'] 
 const RETENTION_INTERVAL_MS = Number(
   process.env['RETENTION_INTERVAL_MS'] ?? (process.env['NODE_ENV'] === 'production' ? 600_000 : 15_000),
 );
+/** 進めている実行に生きている印を付ける間隔（仕様書 第9.3節）。 */
+const RUN_HEARTBEAT_MS = 30_000;
+/** 印がこれより古い `running` の実行は、ワーカーが途中で止まったものとみなす。 */
+const RUN_STALE_MS = 180_000;
+/** 止まった実行を見回る間隔。 */
+const RUN_RECOVERY_INTERVAL_MS = 60_000;
+/** 止まった実行をやり直す回数の上限。超えたら失敗にする（同じ段で毎回落ちる実行を回し続けない）。 */
+const RUN_RECOVERIES = 2;
 let running = true;
 let lastScheduleCheck = 0;
+let lastRunRecoveryCheck = 0;
 let lastRetentionCheck = 0;
 let lastNotifyCheck = 0;
 let lastConversationCheck = 0;
@@ -800,6 +809,19 @@ while (running) {
     }
   }
 
+  // ワーカーが段の途中で止まった実行（再起動・障害）を、止まった段から再開する（仕様書 第9.3節・第17章）
+  if (Date.now() - lastRunRecoveryCheck >= RUN_RECOVERY_INTERVAL_MS) {
+    lastRunRecoveryCheck = Date.now();
+    try {
+      for (const r of await repo.recoverStaleRuns(new Date(Date.now() - RUN_STALE_MS), RUN_RECOVERIES)) {
+        if (r.resumed) log.info('途中で止まった実行を、止まった段から再開します', { runId: r.id, tenantId: r.tenantId });
+        else log.warn('途中で何度も止まった実行を、失敗にしました', { runId: r.id, tenantId: r.tenantId });
+      }
+    } catch (err) {
+      log.error('止まった実行の見回りで例外が発生しました', { err });
+    }
+  }
+
   try {
     const run = await repo.claimNextRun();
     if (run) {
@@ -807,7 +829,11 @@ while (running) {
       const runLog = log.child({ runId: run.id, tenantId: run.tenantId });
       const startedAt = Date.now();
       runLog.info('実行を開始', { cursor: run.cursor });
-      const result = await engine.advance(run);
+      // 進めている間は生きている印を付け続ける。印が止まれば、見回りが止まった実行として拾う
+      const beat = setInterval(() => {
+        repo.touchRun(run.tenantId, run.id).catch((err) => runLog.warn('実行の印を付けられませんでした', { err }));
+      }, RUN_HEARTBEAT_MS);
+      const result = await engine.advance(run).finally(() => clearInterval(beat));
       const ms = Date.now() - startedAt;
       switch (result.outcome) {
         case 'completed':
