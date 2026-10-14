@@ -422,8 +422,8 @@ export function extensionsRoute(deps: AppDeps) {
     const client = await googleClient(deps, tenant.id);
     if (!client) return c.json({ error: '会社の Google 接続の設定がありません。「接続」の「Google Workspace」で登録してください' }, 409);
     const { verifier, challenge } = createPkce();
-    // 戻り先は管理者ページの拡張機能（問い合わせの記録の設定）
-    const back = returnTo(c).replace(/\/(\?|$)/, '/admin/extensions$1');
+    // 戻り先は管理者ページの「接続 › 窓口のメール」（第6.6.2.1節。第 0.361.0 版で拡張機能の設定から移した）
+    const back = returnTo(c).replace(/\/(\?|$)/, '/admin/connectors/mailbox$1');
     const state = deps.oauth.states.issue({ tenantId: tenant.id, userId: user.id, codeVerifier: verifier, returnTo: back, purpose: 'inquiry-mailbox' });
     const url = buildGoogleAuthUrl({ clientId: client.clientId, redirectUri: deps.oauth.redirectUri, scopes: MAILBOX_SCOPES, state, codeChallenge: challenge, selectAccount: true });
     return c.json({ url });

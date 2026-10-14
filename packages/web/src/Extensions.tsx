@@ -9,12 +9,13 @@
  */
 
 import { copyText } from './clipboard.js';
-import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react';
+import { adminPath } from './route.js';
 import { JinglePlayer } from './signage-audio.js';
 import { api, ApiError, describeError, type AccessOptions, type ExtensionView, type HrProposalField, type ScopeValue } from './api.js';
 import {
   INVENTORY_FEATURES, SIGNAGE_DEFAULT_COLOR, SIGNAGE_JINGLES, type HrSettings, type InventoryBookingSource, type InventoryFeature, type InventorySettings,
-  type SignageSettings, type SignageSound, COLUMN_INDUSTRIES, COLUMN_RULE_SET_LABELS, COLUMN_PLAN_FREQUENCY_LABELS, type ColumnPlanFrequency, type ColumnBgmTrack, type WebColumnSettings, type InquirySettings, COMPETITORS_AUTO_RANGE, COMPETITORS_NOTIFY_MAX, COMPETITOR_WATCH_LABELS, competitorAutoMax, competitorWatch, competitorsMax, type CompetitorSettings, type AnnouncementSettings, type ContractSettings, type MemberSettings, type WebReviewSettings, type WebReviewCandidates, type WebReviewStatus,
+  type SignageSettings, type SignageSound, COLUMN_INDUSTRIES, COLUMN_RULE_SET_LABELS, COLUMN_PLAN_FREQUENCY_LABELS, type ColumnPlanFrequency, type ColumnBgmTrack, type WebColumnSettings, COMPETITORS_AUTO_RANGE, COMPETITORS_NOTIFY_MAX, COMPETITOR_WATCH_LABELS, competitorAutoMax, competitorWatch, competitorsMax, type CompetitorSettings, type AnnouncementSettings, type ContractSettings, type MemberSettings, type WebReviewSettings, type WebReviewCandidates, type WebReviewStatus,
 } from '@m2office/shared';
 import { HelpTip, Markdown } from './help.js';
 import { Icon } from './nav.js';
@@ -296,9 +297,16 @@ function InstalledCard({ item: x, busy, focused = false, options, onChanged, onT
       {x.hr && on && <HrFields settings={x.hr} busy={busy} onChanged={onChanged} />}
       {x.signage && on && <SignageFields settings={x.signage} busy={busy} onChanged={onChanged} />}
       {x.webColumns && on && <WebColumnsFields settings={x.webColumns} usage={x.columnAiUsage ?? null} busy={busy} onChanged={onChanged} />}
-      {x.inquiries && on && <InquiryMailboxFields settings={x.inquiries} busy={busy} onChanged={onChanged} />}
+      {x.inquiries && on && (
+        <div className="small ext-inventory">
+          <ConnectorStatus label="窓口のメール" page="mailbox" connected={x.inquiries.mailbox?.email ?? null} />
+          <ConnectorStatus label="LINE 公式アカウント" page="line" connected={x.inquiries.line ? x.inquiries.line.botName : null} />
+        </div>
+      )}
       {x.competitors && on && <CompetitorMapKeyFields settings={x.competitors} busy={busy} onChanged={onChanged} />}
       {x.announcements && on && <AnnouncementFields settings={x.announcements} busy={busy} onChanged={onChanged} />}
+      {/* お知らせの出し先の WordPress と LINE は「接続」でつなぐ（第35章・第6.6.2.1節） */}
+      {x.announcements && on && <div className="row wrap small ext-inventory"><ConnectorLink page="wordpress">WordPress の接続</ConnectorLink><ConnectorLink page="line">LINE 公式アカウントの接続</ConnectorLink></div>}
       {x.webReview && on && <WebReviewFields settings={x.webReview} busy={busy} onChanged={onChanged} />}
       {x.contracts && on && <ContractStorageFields settings={x.contracts} busy={busy} onChanged={onChanged} />}
       {x.subsidies && on && <SubsidyFields settings={x.subsidies} busy={busy} onChanged={onChanged} />}
@@ -553,10 +561,6 @@ function SignageFields({ settings, busy, onChanged }: { settings: SignageSetting
 }
 
 /**
- * Web のコラムの会社の設定（仕様書 第32.18.1節）。分野・読み手・業種・監修者・AI の表示と、WordPress の入れ先。
- *
- * @remarks アプリケーションパスワードは預けたら画面に戻さない。つながるかを確かめてから預ける
- */
 /**
  * Webの分析の担当の許可（仕様書 第34.18節）。「Google とつなぐ」で Google の認可の画面へ移り、アナリティクスと Search Console を
  * 見られるアカウントを選んで、読み取りの 2 つだけを許す。つないだ管理者が担当。戻ってきたら結果（`?webreview=`）を出す。
@@ -636,90 +640,23 @@ function WebReviewFields({ settings, busy, onChanged }: { settings: WebReviewSet
 }
 
 /**
- * 問い合わせの窓口のアカウント（仕様書 第33.18節）。「つなぐ」で Google の認可の画面へ移り、窓口のアカウント（info@ など）を選ぶ。
- * 戻ってきたら結果（`?mailbox=`）を出す。
+ * 「接続」の小分けへ移るリンク（仕様書 第6.6.2.1節）。会社の外のサービスとのつなぎは「接続」で行い、拡張機能の側はつないでいるかだけを出す。
+ *
+ * @remarks 管理者ページは URL の変化（戻る・進む）で画面を切り替えるので、URL を積んでから知らせる
  */
-function InquiryMailboxFields({ settings, busy, onChanged }: { settings: InquirySettings; busy: boolean; onChanged: () => void }) {
-  const [error, setError] = useState<string | null>(null);
-  const [working, setWorking] = useState(false);
-  const [result] = useState(() => {
-    const r = new URLSearchParams(location.search).get('mailbox');
-    if (r) history.replaceState(null, '', location.pathname);
-    return r;
-  });
-  const RESULT_TEXT: Record<string, string> = {
-    connected: '窓口のアカウントをつなぎました', cancelled: 'つなぐのをキャンセルしました', scopes: 'メールを読む・送るの許可が足りません。もう一度つないで、すべて許可してください',
-    domain: '会社のドメインのアカウントではありません。会社の Google Workspace の窓口のアカウントを選んでください', client: '会社の Google 接続の設定に誤りがあります', failed: 'つなげませんでした',
-  };
-  const connect = () => {
-    setWorking(true);
-    api.admin.connectInquiryMailbox().then((r) => { if (r.url) location.href = r.url; else { setError(null); onChanged(); } })
-      .catch((e) => setError(describeError(e, 'つなげませんでした'))).finally(() => setWorking(false));
-  };
-  const disconnect = () => {
-    if (!window.confirm('窓口のアカウントを外しますか。メールを読まなくなり、返事も送れなくなります（問い合わせは消えません）')) return;
-    setWorking(true);
-    api.admin.disconnectInquiryMailbox().then(() => { setError(null); onChanged(); })
-      .catch((e) => setError(describeError(e, '外せませんでした'))).finally(() => setWorking(false));
-  };
+function ConnectorLink({ page, children }: { page: 'wordpress' | 'line' | 'mailbox'; children: ReactNode }) {
+  const href = adminPath('connectors', page);
   return (
-    <div className="small ext-inventory">
-      <div className="row wrap">
-        <span>窓口のアカウント: {settings.mailbox ? <strong>{settings.mailbox.email}</strong> : <span className="muted">つないでいません</span>}</span>
-        {settings.mailbox
-          ? <button className="btn ghost small" disabled={busy || working} onClick={disconnect}>外す</button>
-          : <button className="btn small" disabled={busy || working} onClick={connect}>{working ? 'つないでいます…' : 'つなぐ'}</button>}
-        {result && <span className={`inquiries-note is-${result === 'connected' ? 'ok' : 'error'}`}>{RESULT_TEXT[result] ?? 'つなげませんでした'}</span>}
-      </div>
-      {error && <p className="error">{error}</p>}
-      <InquiryLineFields settings={settings} busy={busy || working} onChanged={onChanged} />
-    </div>
+    <a href={href} onClick={(e) => { e.preventDefault(); history.pushState(null, '', href); window.dispatchEvent(new PopStateEvent('popstate')); }}>{children}</a>
   );
 }
 
-/**
- * LINE 公式アカウント（仕様書 第33.19節）。チャネルのシークレットとアクセストークンを入れて「つなぐ」と、受け口の URL を 1 度だけ出す。
- * その URL を LINE の管理画面の Webhook に入れる。
- */
-function InquiryLineFields({ settings, busy, onChanged }: { settings: InquirySettings; busy: boolean; onChanged: () => void }) {
-  const [secret, setSecret] = useState('');
-  const [token, setToken] = useState('');
-  const [url, setUrl] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [working, setWorking] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const connect = () => {
-    setWorking(true);
-    api.admin.connectInquiryLine(secret.trim(), token.trim()).then((r) => { setUrl(r.webhookUrl); setSecret(''); setToken(''); setError(null); onChanged(); })
-      .catch((e) => setError(describeError(e, 'つなげませんでした'))).finally(() => setWorking(false));
-  };
-  const disconnect = () => {
-    if (!window.confirm('LINE 公式アカウントを外しますか。メッセージを受け取らなくなり、LINE で返事も送れなくなります（問い合わせは消えません）')) return;
-    setWorking(true);
-    api.admin.disconnectInquiryLine().then(() => { setUrl(null); setError(null); onChanged(); })
-      .catch((e) => setError(describeError(e, '外せませんでした'))).finally(() => setWorking(false));
-  };
+/** つないでいるかの 1 行（つないだ先と「接続で設定」）。 */
+function ConnectorStatus({ label, page, connected }: { label: string; page: 'wordpress' | 'line' | 'mailbox'; connected: string | null }) {
   return (
-    <div className="ext-line">
-      <div className="row wrap">
-        <span>LINE 公式アカウント: {settings.line ? <strong>{settings.line.botName}{settings.line.basicId ? `（${settings.line.basicId}）` : ''}</strong> : <span className="muted">つないでいません</span>}</span>
-        {settings.line && <button className="btn ghost small" disabled={busy || working} onClick={disconnect}>外す</button>}
-      </div>
-      {!settings.line && (
-        <div className="row wrap">
-          <input type="password" value={secret} autoComplete="off" placeholder="チャネルのシークレット" aria-label="チャネルのシークレット" onChange={(e) => setSecret(e.target.value)} />
-          <input type="password" value={token} autoComplete="off" placeholder="チャネルのアクセストークン（長期）" aria-label="チャネルのアクセストークン" onChange={(e) => setToken(e.target.value)} />
-          <button className="btn small" disabled={busy || working || !secret.trim()} onClick={connect}>{working ? 'つないでいます…' : 'つなぐ'}</button>
-        </div>
-      )}
-      {url && (
-        <div className="row wrap">
-          <span className="muted">受け口の URL（LINE の管理画面の Webhook に入れてください。いまだけ出ます）:</span>
-          <code className="ext-line-url">{url}</code>
-          <button className="btn ghost small" onClick={() => void copyText(url).then((ok) => { if (ok) { setCopied(true); setTimeout(() => setCopied(false), 1500); } })}>{copied ? 'コピーしました' : 'コピー'}</button>
-        </div>
-      )}
-      {error && <p className="error">{error}</p>}
+    <div className="row wrap">
+      <span>{label}: {connected ? <strong>{connected}</strong> : <span className="muted">未接続</span>}</span>
+      <ConnectorLink page={page}>接続で設定</ConnectorLink>
     </div>
   );
 }
@@ -977,16 +914,9 @@ function ColumnPageFields({ settings, busy, onChanged }: { settings: WebColumnSe
 
 function WebColumnsFields({ settings, usage, busy, onChanged }: { settings: WebColumnSettings; usage: { used: number; limit: number } | null; busy: boolean; onChanged: () => void }) {
   const [error, setError] = useState<string | null>(null);
-  const [wp, setWp] = useState({ siteUrl: settings.wordpress?.siteUrl ?? '', username: settings.wordpress?.username ?? '', password: '' });
-  const [connecting, setConnecting] = useState(false);
   const fail = (e: unknown, text: string) => setError(describeError(e, text));
   const save = (patch: Partial<Omit<WebColumnSettings, 'enabled' | 'wordpress'>>) =>
     void api.admin.setWebColumnSettings(patch).then(() => { setError(null); onChanged(); }).catch((e) => fail(e, '保存できませんでした'));
-  const connect = () => {
-    setConnecting(true);
-    api.admin.saveWordPress(wp).then(() => { setError(null); setWp({ ...wp, password: '' }); onChanged(); })
-      .catch((e) => fail(e, 'WordPress につなげませんでした')).finally(() => setConnecting(false));
-  };
   const topics = settings.topics.join('\n');
   return (
     <div className="small ext-inventory ext-columns">
@@ -1025,22 +955,7 @@ function WebColumnsFields({ settings, usage, busy, onChanged }: { settings: WebC
         )}
       </div>
       {!settings.wordpress && <ColumnPageFields settings={settings} busy={busy} onChanged={onChanged} />}
-      <div className="row wrap">
-        <strong>WordPress</strong>
-        {settings.wordpress
-          ? <>
-            <span className="badge ok">つないでいる</span>
-            <span className="muted">{settings.wordpress.siteUrl}（{settings.wordpress.username}）</span>
-            <button className="link danger" disabled={busy} onClick={() => void api.admin.removeWordPress().then(() => { setError(null); onChanged(); }).catch((e) => fail(e, '外せませんでした'))}>外す</button>
-          </>
-          : <>
-            <input value={wp.siteUrl} placeholder="https://www.example.jp" aria-label="WordPress のサイトの URL" onChange={(e) => setWp({ ...wp, siteUrl: e.target.value })} />
-            <input value={wp.username} placeholder="利用者名" aria-label="WordPress の利用者名" autoComplete="off" onChange={(e) => setWp({ ...wp, username: e.target.value })} />
-            <input value={wp.password} type="password" placeholder="アプリケーションパスワード" aria-label="WordPress のアプリケーションパスワード" autoComplete="new-password"
-              onChange={(e) => setWp({ ...wp, password: e.target.value })} />
-            <button className="btn ghost small" disabled={connecting || !wp.siteUrl.trim() || !wp.username.trim() || !wp.password.trim()} onClick={connect}>{connecting ? 'つないでいます…' : 'つなぐ'}</button>
-          </>}
-      </div>
+      <ConnectorStatus label="WordPress" page="wordpress" connected={settings.wordpress?.siteUrl ?? null} />
       <ColumnBgmFields onError={(m) => setError(m)} />
       {error && <p className="error">{error}</p>}
     </div>

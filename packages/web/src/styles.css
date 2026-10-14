@@ -2370,3 +2370,7 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .signage-message .m-sig-button { min-height: 64px; }
 .signage-message .m-sig-compose textarea { font-size: 14px; }
 .signage-message .m-sig-number input { flex: none; width: 120px; font-size: 20px; }
+
+/* 接続の会社の外のサービス（WordPress・LINE・窓口のメール。仕様書 第6.6.2.1節） */
+.service-connection-form { display: grid; gap: 8px; max-width: 480px; }
+.service-connection .row { align-items: center; }

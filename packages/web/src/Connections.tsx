@@ -1,6 +1,6 @@
 /**
  * @file 管理者ページ「接続」。Gemini（自社の鍵・モデル・接続の確認）と Google Workspace（会社の OAuth クライアントの登録、
- * 利用者ごとの接続状況、業務が求める権限）。
+ * 利用者ごとの接続状況、業務が求める権限）。会社の外のサービス（WordPress・LINE・窓口のメール）は `ServiceConnections.tsx`。
  *
  * AI Radio の「システム接続設定」の作り（伏せ字の入力欄、実際に許可された範囲の表示、サインインのボタン）を引き継ぐ。
  * 秘密の値は画面に出さない。登録済みかどうかと日時だけを示し、上書きと削除だけができる。
@@ -16,6 +16,7 @@ import { api, describeError, type ConnectionHealth, type ConnectionSettings, typ
 import { HealthList } from './health.js';
 import { PageTitle, type PageHelp } from './help.js';
 import { SaveButton } from './save.js';
+import { isServiceConnectionPage, ServiceConnection } from './ServiceConnections.js';
 
 const MODEL_LABELS: [string, string][] = [
   ['fast', '高速（秘書の取り次ぎなど）'], ['standard', '標準（業務の推論）'], ['advanced', '高性能'],
@@ -68,6 +69,8 @@ export function Connections({ page }: { page: string }) {
       {page === 'google' && <HealthCard group="google" />}
       {page === 'gemini' && <HealthCard group="ai" />}
       {page === 'retention' && <RetentionCard />}
+      {/* 会社の外のサービス（WordPress・LINE・窓口のメール。第6.6.2.1節） */}
+      {isServiceConnectionPage(page) && <ServiceConnection page={page} />}
     </>
   );
 }
@@ -450,6 +453,9 @@ const TITLES: Record<string, string> = {
   retention: 'データを残す日数',
   permissions: '求める許可',
   people: '従業員の接続状況',
+  wordpress: 'WordPress',
+  line: 'LINE 公式アカウント',
+  mailbox: '窓口のメール',
   mcp: 'コネクタ（MCP）',
 };
 
@@ -464,4 +470,7 @@ const CONNECTION_HELP: Record<string, PageHelp> = {
   retention: { article: 'admin-connectors', text: '業務が Google から読んだメールや文書の中身と、そこから作った文を、業務が終わってから何日残すかです。過ぎると中身を消し、使ったツールの名前と件数だけを残します。' },
   permissions: { article: 'admin-connectors', text: '従業員が接続するときに Google に求める許可と、その権限の段階です。' },
   people: { article: 'admin-connectors', text: '従業員ごとの、Google との接続の状況です。' },
+  wordpress: { article: 'admin-connectors', text: 'コラムとお知らせを入れる会社の WordPress です。アプリケーションパスワードは、WordPress の「ユーザー → プロフィール」で作ります。' },
+  line: { article: 'admin-connectors', text: '問い合わせ・お知らせの配信・会員証に使う LINE 公式アカウントです。接続したときに出る受け口の URL を、LINE の管理画面の Webhook に入れます。' },
+  mailbox: { article: 'admin-connectors', text: '問い合わせを受け、まとめてのメールを送る、窓口の Google のアカウント（info@ など）です。' },
 };
