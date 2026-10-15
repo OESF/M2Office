@@ -7,7 +7,7 @@
 export { LocalFileStore, MemoryFileStore, fileReader, type FileStore } from './store.js';
 export { detectKind, MIME, MAX_FILE_BYTES, type FileKind } from './formats.js';
 export { saveFile, loadFile } from './service.js';
-export { readSheet, renderSheet, parseCsv, decodeText, csvSafeText, type SheetData } from './sheet.js';
+export { readSheet, renderSheet, parseCsv, decodeText, csvSafeText, csvText, type SheetData } from './sheet.js';
 export { extractPdfText, normalizeRadicals, type PdfText } from './pdf.js';
 export { renderDocx, extractDocxText, type DocBlock } from './docx.js';
 export { fileToText, TEXT_LIMIT, type FileText, type OcrFn } from './to-text.js';

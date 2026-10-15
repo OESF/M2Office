@@ -116,15 +116,37 @@ export function parseCsv(text: string): string[][] {
 }
 
 function csvEscape(v: string | number | boolean | null): string {
-  const s = v === null ? '' : typeof v === 'string' ? csvSafeText(v) : String(v);
+  const s = v === null ? '' : typeof v === 'string' ? csvText(v) : String(v);
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+/**
+ * CSV に書く文字の値（区切りと引用の前）。式として動く値は {@link csvSafeText} で止め、
+ * Excel が数や式に読み替えて崩す値は、文字として読ませる形（`="…"`）にする（仕様書 第9.4.1節。第 0.367.0 版）。
+ *
+ * 文字として読ませるのは、数字と記号だけで次のどれかに当たるもの。
+ * - `+` `-` `=` `@` で始まり、ふつうの数（`-5`・`-1.5`）でないもの（`+81-3-1234-5678` のような電話番号。Excel は式として計算する）
+ * - 先頭が 0 の数字の並び（`09012345678`・`0010001`・社員番号の `001`。Excel は先頭の 0 を落とす）
+ * - 12 桁以上の数字の並び（JAN などのバーコード。Excel は指数の形にして下の桁を失う）
+ *
+ * @param v 文字の値（数は渡さない。数は数のまま書く）
+ * @remarks `="…"` の中は数字と記号だけなので、式として別のことはしない。M2Office が読むときは {@link readSheet} が元に戻す
+ */
+export function csvText(v: string): string {
+  const safe = csvSafeText(v);
+  if (safe !== v) return safe;
+  const numberLike = /^[0-9+\-().,/:\s]+$/.test(v) || /^[=@][0-9+\-().,/:\s]*$/.test(v);
+  if (!numberLike) return v;
+  const misread = (/^[+\-=@]/.test(v) && !/^-?\d+(\.\d+)?$/.test(v)) || /^0\d+$/.test(v) || /^\d{12,}$/.test(v);
+  return misread ? `="${v}"` : v;
 }
 
 /**
  * 表計算で式として動かないようにした文字（CSV の数式の注入を防ぐ。2026-10-12 の点検）。
  *
  * `=` `+` `-` `@`（とタブ・改行）で始まり、数字・記号だけでない値（`=HYPERLINK(…)` など）の先頭に `'` を付ける。
- * 電話番号（`+81-3-…`）やマイナスの数（`-5`）のような、数字と記号だけの値は変えない（見た目を崩さない）。
+ * 電話番号（`+81-3-…`）やマイナスの数（`-5`）のような、数字と記号だけの値は変えない（`'` を付けると表に見えるため）。
+ * 電話番号を Excel に式として読ませないのは {@link csvText} が行う。
  *
  * @param v 文字の値（数は渡さない）
  */
@@ -132,9 +154,11 @@ export function csvSafeText(v: string): string {
   return /^[=+\-@\t\r]/.test(v) && /[^0-9+\-().,/:\s]/.test(v) ? `'${v}` : v;
 }
 
-/** CSV の値。空は null、数値として読めるものも文字列のまま返す（先頭の 0 を落とさないため）。 */
+/** CSV の値。空は null、数値として読めるものも文字列のまま返す（先頭の 0 を落とさないため）。文字として読ませる形（`="…"`）は元に戻す（{@link csvText}）。 */
 function cell(v: string): string | null {
-  return v === '' ? null : v;
+  if (v === '') return null;
+  const text = /^="(.*)"$/s.exec(v);
+  return text ? text[1]!.replace(/""/g, '"') : v;
 }
 
 function excelCell(v: ExcelJS.CellValue): string | number | boolean | null {
