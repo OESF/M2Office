@@ -12,7 +12,7 @@
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 import {
-  fillApprovalCompartments,
+  fillApprovalCompartments, discardStaleRecordings,
   assertDatabaseConfigured,
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
   RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, GoogleContactsService, KnowledgeEmbedder, MemoryEmbedder, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, JGrantsApi, MockJGrants, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, MEMBER_LINE_SEND, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, EffectService, PostgresEffectStore, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger,
@@ -509,6 +509,9 @@ const RUN_RECOVERIES = 2;
 let running = true;
 let lastScheduleCheck = 0;
 let lastRunRecoveryCheck = 0;
+/** 残った録音を消す見回りの間隔（ミリ秒。第9.4.5節）。 */
+const RECORDING_SWEEP_MS = 10 * 60_000;
+let lastRecordingSweep = 0;
 /** 権限区画を持つ前の承認を埋めたか（起動のあと一度だけ行う）。 */
 let approvalCompartmentsFilled = false;
 let lastRetentionCheck = 0;
@@ -836,6 +839,17 @@ while (running) {
       if (r.expired > 0 || r.redacted > 0) log.info('保持期間の見回りを行いました', r);
     } catch (err) {
       log.error('保持期間の見回りで例外が発生しました', { err });
+    }
+  }
+
+  // 文字にしないまま残った録音を消す（業務に渡さず 1 日たったもの・業務が終わっても文字にならなかったもの。第9.4.5節）
+  if (Date.now() - lastRecordingSweep >= RECORDING_SWEEP_MS) {
+    lastRecordingSweep = Date.now();
+    try {
+      const n = await discardStaleRecordings(repo, files, new Date(), log);
+      if (n > 0) log.info('文字にしないまま残った録音を消しました', { n });
+    } catch (err) {
+      log.error('残った録音の見回りで例外が発生しました', { err });
     }
   }
 

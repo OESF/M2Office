@@ -158,7 +158,9 @@ export function googleDrive(ctx: Ctx): DriveConnector {
       const url = as
         ? `${ctx().endpoints.drive}/files/${encodeURIComponent(f.id)}/export?mimeType=${encodeURIComponent(as)}`
         : `${ctx().endpoints.drive}/files/${encodeURIComponent(f.id)}?alt=media`;
-      const got = await downloadGoogle(ctx().tokens, p, 'ドライブ', url, DRIVE_DOWNLOAD_MAX_BYTES);
+      // 録音は 200 MB まで受け取る（第9.4.5節）。そのほかは文書の上限
+      const max = f.mimeType?.startsWith('audio/') ? 200 * 1024 * 1024 : DRIVE_DOWNLOAD_MAX_BYTES;
+      const got = await downloadGoogle(ctx().tokens, p, 'ドライブ', url, max);
       if (!got) return null;
       if ('tooLarge' in got) return { tooLarge: true as const };
       return { file: toFile(f), mimeType: as ?? f.mimeType ?? 'application/octet-stream', bytes: got.bytes };

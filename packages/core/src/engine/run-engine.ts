@@ -10,6 +10,8 @@
  */
 
 import { withAiUsage } from '../usage/ai-usage.js';
+import { transcribeRecording } from '../files/transcribe.js';
+import { voiceWords } from '../secretary/voice-words.js';
 import { randomUUID } from 'node:crypto';
 import {
   alwaysRequiresApproval, canDecide, canUseAgent, writeInternalNeedsApproval,
@@ -684,6 +686,24 @@ export class RunEngine {
   }
 
   /**
+   * 録音を文字にするときの聞き取りの手がかり（社内の人・名刺の相手・会社の名前・本人が直した言葉。第9.4.5節・第10.5.9節）。
+   *
+   * @remarks 集められなくても文字にはする（手がかりなしで聞き取る）
+   */
+  private async recordingHints(tenantId: string, userId: string): Promise<string[]> {
+    const cards = this.deps.cards;
+    const words = await voiceWords({
+      repo: this.deps.repo,
+      ...(cards ? {
+        contacts: async (t: string, u: string) => ((await cards.access(t, u).catch(() => null))
+          ? (await cards.store.listContacts({ tenantId: t, userId: u }, { limit: 60 })).map((c) => ({ name: c.name, nameKana: c.nameKana, company: c.company }))
+          : []),
+      } : {}),
+    }, tenantId, userId).catch(() => []);
+    return words.map((w) => w.term);
+  }
+
+  /**
    * 本人宛ての通知を作る。本人が受け取らないと決めた種類は作らない（仕様書 第6.5.5節）。
    *
    * @remarks 画面内のお知らせが正であり、Chat への控えはワーカーが後から届ける（第6.5.5.2節）。
@@ -948,7 +968,7 @@ export class RunEngine {
           }
           // いま何をしているかを、ダッシュボードの「活動中」に出すために書いておく（仕様書 第6.7.7節、ADR-0013）
           await this.markActivity(run.tenantId, runStep, tool.activityLabel);
-          const result = await this.invokeTool(run, def, run.cursor, call, requestedBy, registry, ai.research, llm);
+          const result = await this.invokeTool(run, def, run.cursor, call, requestedBy, registry, ai.research, llm, (label) => this.markActivity(run.tenantId, runStep, label));
           await this.markActivity(run.tenantId, runStep, null);
           // 記録は `{ name, risk, result }` で包まれている。ツールが返したもの（result）を出す
           if (mode === 'plan' && tool.risk === 'draft') done.push({ name: call.name, args: call.args, result: (result as { result?: unknown } | null)?.result });
@@ -1038,7 +1058,7 @@ export class RunEngine {
    */
   private toolContext(
     run: Run, def: AgentDefinition, stepIndex: number, requestedBy: string, registry: ToolRegistry,
-    research: ResearchProvider | undefined, llm?: LlmProvider,
+    research: ResearchProvider | undefined, llm?: LlmProvider, progress?: (label: string) => Promise<void>,
   ): ToolContext {
     const { repo, connector, files } = this.deps;
     const approvalsAhead = def.steps.slice(stepIndex + 1).filter((s) => s.type === 'approval').length;
@@ -1050,6 +1070,12 @@ export class RunEngine {
       approvalsAhead, isGoogleTool: (name) => !!registry.get(name)?.google,
       // 画像から文字を読む手段。推論が持っていなければ渡さない（第9.4.1節、Q-56）
       ...(llm?.readImage ? { ocr: async (r) => (await llm.readImage!(r)).text } : {}),
+      // 録音を文字にする手段（第9.4.5節）。推論が録音を扱えなければ渡さない（ローカル AI・鍵の無い会社）
+      ...(llm?.transcribeAudio ? { transcribe: async (r) => transcribeRecording(r.bytes, r.kind, {
+        llm, hints: (await this.recordingHints(run.tenantId, requestedBy)),
+        onChunk: (i, n) => progress?.(n > 1 ? `録音を文字にしています（${n} のうち ${i} つ目）` : '録音を文字にしています'),
+      }) } : {}),
+      ...(progress ? { progress } : {}),
       ...(llm ? { expandQuery: (q: string) => expandQuery(llm, q) } : {}),
       ...(llm && queryEmbedder(llm, this.log) ? { embedQuery: queryEmbedder(llm, this.log)! } : {}),
       // スキルの補助のファイル。skill.read で開く（仕様書 第12.12.2節）
@@ -1134,6 +1160,7 @@ export class RunEngine {
     run: Run, def: AgentDefinition, stepIndex: number, call: ToolCall, requestedBy: string, registry: ToolRegistry,
     research: ResearchProvider | undefined = this.deps.research,
     llm?: LlmProvider,
+    progress?: (label: string) => Promise<void>,
   ): Promise<unknown> {
     const { repo, connector, files } = this.deps;
     const tool = registry.get(call.name);
@@ -1147,7 +1174,7 @@ export class RunEngine {
     this.log.debug('ツールを呼び出し', { runId: run.id, tenantId: run.tenantId, tool: call.name, risk: tool.risk });
     let out: unknown;
     try {
-      out = await tool.invoke(call.args, this.toolContext(run, def, stepIndex, requestedBy, registry, research, llm));
+      out = await tool.invoke(call.args, this.toolContext(run, def, stepIndex, requestedBy, registry, research, llm, progress));
     } catch (err) {
       // 接続口に断られたとき（ADR-0022）。読むだけのツールなら実行を止めず、取得できなかったことを理由つきで返す。
       // 書くツールはそのまま失敗にする（書いたつもりで先へ進ませない）

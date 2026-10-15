@@ -498,7 +498,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/onboarding/tour` | 案内を見終えた記録。`{ "reset": true }` で見直し |
 | `GET /v1/onboarding/checklist` | 管理者: 初期設定のチェックリスト |
 | `POST /v1/onboarding/checklist/notified` | 管理者: 従業員へ知らせたことの記録 |
-| `POST /v1/files` | ファイルの受け取り（multipart の `file`。10 MB まで） |
+| `POST /v1/files` | ファイルの受け取り（multipart の `file`。10 MB まで。録音（MP3・M4A・WAV）は 200 MB・3 時間まで。ローカルの方針の会社・AI の無い会社は録音を 422 で断る。仕様書 第9.4.5節） |
 | `GET /v1/files/drive-picker` | 秘書に渡すドライブのファイルを選ぶ画面の材料（`drive.file` だけに絞ったトークン。見本の会社は見本の一覧。仕様書 第10.10.8節） |
 | `POST /v1/files/from-drive` | 本人がドライブで選んだファイル（`fileId`）を受け取る。Google のドキュメント・スプレッドシート・スライドは Word・Excel・PDF に書き出す。201 |
 | `GET /v1/files/:id` | メタデータ。所有者と承認者のみ |

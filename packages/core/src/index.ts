@@ -20,7 +20,7 @@ export {
   deploymentFromEnv, effectiveAiPolicy, isLocalPolicy, externalAiAllowed, PolicyBlockedLlmProvider, PolicyBlockedResearchProvider,
   AiPolicyBlockedError, LOCAL_AI_NOT_CONFIGURED, type Deployment, type AiKind,
 } from './llm/policy.js';
-export { OpenAiCompatibleProvider, LlmRequestError, DEFAULT_EMBEDDING_MODEL } from './llm/gemini.js';
+export { OpenAiCompatibleProvider, LlmRequestError, DEFAULT_EMBEDDING_MODEL, transcribePrompt } from './llm/gemini.js';
 export type { GeminiModelMap } from './llm/gemini.js';
 
 export type {
@@ -140,7 +140,7 @@ export {
   OFFICIAL_AGENTS, LOOKUP_AGENT_ID, PLAN_REPORT_AGENT_ID, resolveOfficialAgent, DEFAULT_STANDARD_MINUTES, standardMinutes, stepLabel,
   agentFace, assignAgentFaces, MORNING_BRIEF, AG05_WEEKLY_BRIEF,
 } from './agents/index.js';
-export { Secretary, acceptsFile, asksConnectionData, fillInputs, readNoteRequest } from './secretary/secretary.js';
+export { Secretary, acceptsFile, asksConnectionData, fillInputs, readNoteRequest, recordingTaker, isRecordingName } from './secretary/secretary.js';
 export { ProactiveWatcher, PROACTIVE_TRIGGER, TRAVEL_PREFIX, PREP_WINDOW_MIN, TRAVEL_NOTICE_HOUR, isMeetingSoon, hasPlace, meetingKey } from './secretary/proactive.js';
 export type { SecretaryReply, ResponseLayer } from './secretary/secretary.js';
 export { REFERS_TO_PAST, closeness, recall, type Recall } from './secretary/recall.js';

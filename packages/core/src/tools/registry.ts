@@ -63,6 +63,14 @@ export interface ToolContext {
    * 「読み取れなかった」と明示する。
    */
   ocr?: (req: { bytes: Uint8Array; mimeType: string }) => Promise<string>;
+  /**
+   * 録音を文字にする（仕様書 第9.4.5節、ADR-0097）。推論が録音を扱えなければ持たない（ローカル AI・鍵の無い会社）。
+   *
+   * @remarks 区切りごとに {@link ToolContext.progress} で進み具合を出す。失敗は `TranscribeError`（利用者に見せる文）
+   */
+  transcribe?: (req: { bytes: Uint8Array; kind: 'mp3' | 'm4a' | 'wav' }) => Promise<{ text: string; durationSec: number; chunks: number }>;
+  /** いま何をしているかを書き換える（時間のかかるツールの進み具合。ダッシュボードと秘書のバーに出る。第6.7.7節）。 */
+  progress?: (label: string) => Promise<void>;
   /** スキルの補助のファイル（仕様書 第12.12.2節）。実行中の業務がスキルのときだけある。 */
   skillFiles?: { path: string; text: string }[];
   /** 組織知識を探す前に、言い換えを秘書に考えさせる（仕様書 第11.7.7.0節）。無ければ言い換えなしで探す。 */

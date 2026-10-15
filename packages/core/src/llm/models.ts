@@ -123,6 +123,18 @@ export function costJpy(model: string, inputTokens: number, outputTokens: number
 }
 
 /**
+ * 録音を文字にした費用（円。仕様書 第9.4.5節）。入力（音声）は文章より単価が高い。
+ *
+ * @remarks 音声の入力の単価は、少なく見積もらないよう、文章の入力の単価の 3 倍か 100 万トークンあたり 1 ドルの大きいほうで数える
+ * （2.5 系の料金表の音声と文章の比を当てた見積もり。Google の料金表で確かめ直す）。入力には指示の文も入るが、ほとんどが音声なので分けない
+ */
+export function audioCostJpy(model: string, inputTokens: number, outputTokens: number): number {
+  const price = MODEL_PRICES[model.replace(/^models\//, '')] ?? UNKNOWN_MODEL_PRICE;
+  const usd = (inputTokens * Math.max(price.inputUsd * 3, 1) + outputTokens * price.outputUsd) / 1_000_000;
+  return Math.round(usd * usdJpy() * 10_000) / 10_000;
+}
+
+/**
  * 役割ごとのモデル名を、環境変数と既定から決める（仕様書 第20.2.2節）。
  *
  * @remarks

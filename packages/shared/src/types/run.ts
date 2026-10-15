@@ -114,8 +114,10 @@ export interface StoredFile {
   tenantId: string;
   ownerUserId: string;
   name: string;
-  /** `heic`・`webp` は名刺の画像に限る（仕様書 第27.4節）。 */
-  kind: 'pdf' | 'xlsx' | 'csv' | 'docx' | 'png' | 'jpeg' | 'heic' | 'webp';
+  /**
+   * `heic`・`webp` は名刺の画像に限る（仕様書 第27.4節）。`mp3`・`m4a`・`wav` は録音で、文字にし終えたら `txt`（文字起こし）に置き換わる（第9.4.5節）。
+   */
+  kind: 'pdf' | 'xlsx' | 'csv' | 'docx' | 'png' | 'jpeg' | 'heic' | 'webp' | 'mp3' | 'm4a' | 'wav' | 'txt';
   mime: string;
   size: number;
   sha256: string;

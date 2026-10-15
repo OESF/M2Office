@@ -962,6 +962,8 @@ export interface JsonSchemaField {
    * 説明の文を足すより、例のほうが短く確実に伝わる。
    */
   examples?: string[];
+  /** 選ぶ値（JSON Schema の `enum`）。あれば選ぶ欄にする。 */
+  enum?: string[];
 }
 
 export interface RunDetail {
@@ -1246,9 +1248,28 @@ export const api = {
   driveFilePicker: () => call<{ kind: 'google'; apiKey: string; appId: string; accessToken: string } | { kind: 'mock'; items: { id: string; name: string }[] }>('/files/drive-picker'),
   /** 本人がドライブで選んだファイルを受け取る（手元から渡したファイルと同じ置き場に入る）。 */
   fileFromDrive: (fileId: string) => call<{ id: string; name: string }>('/files/from-drive', { method: 'POST', body: JSON.stringify({ fileId }) }),
-  uploadFile: async (file: File): Promise<{ id: string; name: string }> => {
+  uploadFile: async (file: File, onProgress?: (sent: number) => void): Promise<{ id: string; name: string }> => {
     const form = new FormData();
     form.append('file', file);
+    // 録音のような大きなファイルは、送った割合を出す（第9.4.5節）。fetch は送る進み具合を返さないため XHR で送る
+    if (onProgress) {
+      return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/v1/files');
+        xhr.withCredentials = true;
+        if (devTenant) xhr.setRequestHeader('x-tenant', devTenant);
+        if (csrfToken) xhr.setRequestHeader('x-csrf-token', csrfToken);
+        xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
+        xhr.onload = () => {
+          let body: { error?: string; id?: string; name?: string } = {};
+          try { body = JSON.parse(xhr.responseText) as typeof body; } catch { body = { error: '通信に失敗しました' }; }
+          if (xhr.status >= 200 && xhr.status < 300) resolve(body as { id: string; name: string });
+          else reject(new ApiError(body.error ?? `エラー (${xhr.status})`, xhr.status, false));
+        };
+        xhr.onerror = () => reject(new ApiError('通信に失敗しました', 0, false));
+        xhr.send(form);
+      });
+    }
     const res = await fetch('/v1/files', {
       method: 'POST',
       credentials: 'same-origin',

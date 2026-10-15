@@ -18,7 +18,7 @@ import { DEFAULT_AI_PER_USER_SHARE, type AiLimitSettings, type Notification } fr
 import type { LlmProvider, LlmResponse } from '../llm/provider.js';
 import type { ResearchProvider } from '../research/provider.js';
 import type { Repository } from '../repository/types.js';
-import { costJpy, usdJpy } from '../llm/models.js';
+import { audioCostJpy, costJpy, usdJpy } from '../llm/models.js';
 
 /** 誰の・何のための呼び出しか。 */
 export interface AiUsageScope {
@@ -446,6 +446,15 @@ export function meterLlm(tenantId: string, inner: LlmProvider, meter: AiUsageMet
   const wrapped: LlmProvider = { name: inner.name, complete: (req) => text(() => inner.complete(req)) };
   if (inner.readImage) wrapped.readImage = (req) => text(() => inner.readImage!(req));
   if (inner.extractFromImage) wrapped.extractFromImage = (req) => text(() => inner.extractFromImage!(req));
+  // 録音の文字起こし（第9.4.5節）。音声の入力は文章より単価が高い
+  if (inner.transcribeAudio) {
+    wrapped.transcribeAudio = async (req) => {
+      await guard();
+      const out = await inner.transcribeAudio!(req);
+      log({ model: out.model, inputTokens: out.inputTokens, outputTokens: out.outputTokens, units: 0, costJpy: local ? 0 : audioCostJpy(out.model, out.inputTokens, out.outputTokens) });
+      return out;
+    };
+  }
   if (inner.generateImage) {
     wrapped.generateImage = async (req) => {
       await guard();

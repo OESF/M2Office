@@ -1909,6 +1909,35 @@ export class PostgresRepository implements Repository {
     return rows[0] ?? null;
   }
 
+  async replaceFileMeta(tenantId: string, id: string, m: Pick<StoredFile, 'name' | 'kind' | 'mime' | 'size' | 'sha256'>): Promise<void> {
+    await this.q(tenantId,
+      `update files set name = $3, kind = $4, mime = $5, size = $6, sha256 = $7 where tenant_id = $1 and id = $2`,
+      [tenantId, id, m.name, m.kind, m.mime, m.size, m.sha256]);
+  }
+
+  async listStaleRecordings(tenantId: string, before: string): Promise<{ id: string; size: number }[]> {
+    // 文字にしないまま残っている録音（第9.4.5節）。どの依頼の入力にも無く古いもの、
+    // または入力にした依頼の実行がすべて終わったもの（失敗・取り消しで文字にならなかった）
+    return this.q<{ id: string; size: number }>(tenantId,
+      `select f.id, f.size from files f
+        where f.tenant_id = $1 and f.kind in ('mp3', 'm4a', 'wav')
+          and (
+            (f.created_at < $2 and not exists (
+              select 1 from jobs j, jsonb_each_text(j.input) e where j.tenant_id = f.tenant_id and e.value = f.id))
+            or (exists (
+              select 1 from jobs j, jsonb_each_text(j.input) e where j.tenant_id = f.tenant_id and e.value = f.id)
+              and not exists (
+                select 1 from jobs j join runs r on r.job_id = j.id and r.tenant_id = j.tenant_id, jsonb_each_text(j.input) e
+                 where j.tenant_id = f.tenant_id and e.value = f.id
+                   and r.status not in ('completed', 'failed', 'cancelled', 'expired')))
+          )`,
+      [tenantId, before]);
+  }
+
+  async deleteFile(tenantId: string, id: string): Promise<void> {
+    await this.q(tenantId, `delete from files where tenant_id = $1 and id = $2`, [tenantId, id]);
+  }
+
   async listActiveSessions(
     tenantId: string,
   ): Promise<{ userId: string; lastSeenAt: string; userAgent: string | null }[]> {

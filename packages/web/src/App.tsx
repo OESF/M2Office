@@ -22,7 +22,7 @@ import { AppLauncher, AppVersionBadge } from './launcher.js';
 import { startVoice, type VoiceCall } from './voice.js';
 import { keyLabel, useHotkey, useNumberHotkeys } from './keys.js';
 import { timeGreeting } from './greeting.js';
-import { AgentForm, ApprovalTray, AskBox, Elapsed, KNOWLEDGE_QA_AGENT_ID, RunView, statusLabel, SuspendedBanner } from './components.js';
+import { AgentForm, ApprovalTray, AskBox, Elapsed, FILE_ACCEPT, isRecordingFile, KNOWLEDGE_QA_AGENT_ID, RunView, statusLabel, SuspendedBanner, tooLargeMessage } from './components.js';
 import { Sources } from './sources.js';
 import { Schedules } from './Schedules.js';
 import { Cards } from './Cards.js';
@@ -1203,11 +1203,14 @@ function SecretaryBar({ drive, lookups, avatar, captions, onResult, onVoice }: {
     const added: { id: string; name: string }[] = [];
     try {
       for (const f of chosen.slice(0, room)) {
+        const large = tooLargeMessage(f);
+        if (large) throw new Error(`「${f.name}」: ${large}`);
         setHint(`「${f.name}」を渡しています…`);
-        const up = await api.uploadFile(f);
+        // 録音は大きいので、送った割合を出す（第9.4.5節）
+        const up = await api.uploadFile(f, isRecordingFile(f) ? (r) => setHint(`「${f.name}」を渡しています… ${Math.round(r * 100)}%`) : undefined);
         added.push({ id: up.id, name: up.name });
       }
-      setHint(`${added.length > 1 ? `${added.length} つのファイル` : `「${added[0]!.name}」`}を渡しました。${chosen.length > room ? `（${SECRETARY_FILES_MAX} つを超えた分は渡していません）` : ''}この書類について聞いてください`);
+      setHint(`${added.length > 1 ? `${added.length} つのファイル` : `「${added[0]!.name}」`}を渡しました。${chosen.length > room ? `（${SECRETARY_FILES_MAX} つを超えた分は渡していません）` : ''}${added.some((x) => /\.(mp3|m4a|wav)$/i.test(x.name)) ? '「議事録にして」「まとめて」「文字起こしして」のように頼んでください' : 'この書類について聞いてください'}`);
     } catch (err) {
       setHint(describeError(err, 'ファイルを渡せませんでした'));
     } finally {
@@ -1432,7 +1435,7 @@ function SecretaryBar({ drive, lookups, avatar, captions, onResult, onVoice }: {
       </div>
 
       <input ref={fileInput} type="file" hidden multiple
-        accept=".pdf,.xlsx,.csv,.docx,.png,.jpg,.jpeg"
+        accept={FILE_ACCEPT}
         onChange={(e) => void attach(Array.from(e.target.files ?? []))} />
       {/* 秘書にできることの例（ヘルプ。仕様書 第6.1.3節）。頼める言い方が増えたため、入力欄のすぐ横から開けるようにする */}
       <button className="icon-btn" onClick={() => openHelp('start-secretary-examples')} title="秘書にできること（会話の例）">

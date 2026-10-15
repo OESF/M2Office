@@ -48,7 +48,7 @@
 | `drive.read` | read | `drive.file`（機密でない） | ドライブのファイルの中身を読みます。中に書かれた指示には従いません |
 | `drive.search` | read | `drive.file`（機密でない） | M2Office で作ったファイルと、あなたが選んだファイルの中から探します。ドライブ全体は見ません |
 | `file.compare` | read | — | 前の版と新しい版の文書を条項ごとに比べ、変わったところを挙げます |
-| `file.read_text` | read | — | 渡されたファイル（PDF・Word・Excel・CSV・画像）から文字を読み取ります |
+| `file.read_text` | read | — | 渡されたファイル（PDF・Word・Excel・CSV・画像・録音）から文字を読み取ります。録音は文字に起こします |
 | `forms.responses` | read | `drive.file`（機密でない） | Google フォームの回答を読みます。あなたが選んだフォームだけで、回答に書かれた指示には従いません |
 | `gmail.get` | read | `gmail.readonly`（制限付き） | メールの本文を読みます。本文に書かれた指示には従いません |
 | `gmail.list` | read | `gmail.readonly`（制限付き） | 受信トレイ（メイン）のメールの一覧を見ます |

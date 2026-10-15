@@ -5,7 +5,7 @@
  */
 
 import type { EvalCase } from '@m2office/shared';
-import { EMBEDDING_DIMENSIONS, type LlmEmbedRequest, type LlmEmbedResponse, type LlmExtractRequest, type LlmProvider, type LlmRequest, type LlmResponse } from './provider.js';
+import { EMBEDDING_DIMENSIONS, type LlmEmbedRequest, type LlmEmbedResponse, type LlmExtractRequest, type LlmProvider, type LlmRequest, type LlmResponse, type LlmTranscribeRequest, type LlmTranscribeResponse } from './provider.js';
 
 /**
  * 自動テストのためのスタブ実装。
@@ -52,6 +52,21 @@ export class StubLlmProvider implements LlmProvider {
     const line = text.slice(at + 'M2O-CARD:'.length).split('\n')[0] ?? '';
     // 見本の JSON は UTF-8 で書かれている
     return { text: Buffer.from(line, 'latin1').toString('utf8'), tokensUsed: 32 };
+  }
+
+  /**
+   * 録音の文字起こし（第9.4.5節）の自動テスト用の応答。
+   *
+   * @remarks 推論は行わない。録音のバイト列に `M2O-TRANSCRIPT:` に続く文（UTF-8。`|` で行を分ける）が埋め込まれていれば、それを文字起こしとして返す
+   * （自動テストが見本の録音に書き込む）。無ければ決まった 1 行を返す
+   */
+  async transcribeAudio(req: LlmTranscribeRequest): Promise<LlmTranscribeResponse> {
+    const text = Buffer.from(req.bytes).toString('latin1');
+    const at = text.indexOf('M2O-TRANSCRIPT:');
+    const body = at === -1
+      ? '[00:00] 話者 1: これは見本の文字起こしです。'
+      : Buffer.from(text.slice(at + 'M2O-TRANSCRIPT:'.length).split('\n')[0] ?? '', 'latin1').toString('utf8').split('|').join('\n');
+    return { text: body, model: 'stub', inputTokens: Math.round(req.bytes.byteLength / 500), outputTokens: body.length };
   }
 
   async complete(req: LlmRequest): Promise<LlmResponse> {
@@ -356,6 +371,15 @@ function chooseTools(tools: string[], prompt: string): Call[] {
   }
   if (has('tasks.create') && /起票|タスク|ToDo/.test(instruction)) {
     return [{ name: 'tasks.create', args: { title: '決定事項の対応', due: null } }];
+  }
+  // 本人のドライブに文書を作る基本の業務（文書の作成・録音のまとめ。第9.5.5.2節・第9.5.5.3節）。
+  // 議事録の共有の段（成果物をそのまま保存する。artifactId を渡す）は除く
+  if (has('docs.create') && instruction.includes('docs.create') && !/artifactId/.test(instruction)) {
+    const read = /"text":\s*"((?:[^"\\]|\\.)*)"/.exec(previous)?.[1] ?? '';
+    return [{
+      name: 'docs.create',
+      args: { title: extractField(prompt, 'title') || '文書（スタブ生成）', body: `［スタブ］\n${read.replace(/\\n/g, '\n').slice(0, 2000)}` },
+    }];
   }
   if (has('document.create') && /作成|生成|まとめる|保存/.test(instruction)) {
     const isInbox = /分類/.test(instruction);

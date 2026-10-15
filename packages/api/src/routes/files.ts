@@ -7,16 +7,18 @@
  */
 
 import { Hono } from 'hono';
-import { detectKind, loadFile, MAX_FILE_BYTES, saveFile } from '@m2office/core';
+import { detectKind, isAudioName, loadFile, MAX_AUDIO_BYTES, MAX_FILE_BYTES, saveFile } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { driveFilesFor } from '../drive-files.js';
+import { recordingRefusal } from '../recording-check.js';
 import type { AppEnv } from '../middleware/tenant.js';
 
 /**
  * ファイルの受け取りと取り出し（仕様書 第9.4.1節）。
  *
  * @remarks
- * - 受け付ける形式は PDF・Excel・CSV・Word・画像。拡張子と中身の先頭の両方で確かめる
+ * - 受け付ける形式は PDF・Excel・CSV・Word・画像・録音（MP3・M4A・WAV。第9.4.5節）。拡張子と中身の先頭の両方で確かめる
+ * - 録音だけ 200 MB まで。ローカルの方針の会社・AI の無い会社では受け取らない
  * - 取り出せるのは所有者本人と、判断のために中身を見る承認者だけ。それ以外には存在を示さない
  */
 export function filesRoute(deps: AppDeps) {
@@ -27,10 +29,13 @@ export function filesRoute(deps: AppDeps) {
     const form = await c.req.parseBody();
     const file = form['file'];
     if (!(file instanceof File)) return c.json({ error: 'file を指定してください' }, 400);
-    if (file.size > MAX_FILE_BYTES) return c.json({ error: 'ファイルが大きすぎます（10 MB まで）' }, 413);
+    const audio = isAudioName(file.name);
+    if (file.size > (audio ? MAX_AUDIO_BYTES : MAX_FILE_BYTES)) return c.json({ error: audio ? '録音が大きすぎます（200 MB まで）' : 'ファイルが大きすぎます（10 MB まで）' }, 413);
     const bytes = new Uint8Array(await file.arrayBuffer());
     const kind = detectKind(file.name, bytes);
     if (!kind) return c.json({ error: '受け付けない形式か、拡張子と中身が一致しません' }, 415);
+    const refusal = await recordingRefusal(deps, tenant.id, kind, bytes);
+    if (refusal) return c.json({ error: refusal }, 422);
 
     const meta = await saveFile(deps.repo, deps.files, {
       tenantId: tenant.id, ownerUserId: user.id, name: file.name, kind, bytes, origin: 'upload', runId: null,

@@ -39,7 +39,8 @@ async function open(ctx: ToolContext, fileId: string) {
  * 渡されたファイルを、形式によらず文字として読む（仕様書 第10.10節）。
  *
  * @remarks
- * 危険度 `read`。PDF・Word・Excel・CSV・画像のどれでも、読むための文字を返す。
+ * 危険度 `read`。PDF・Word・Excel・CSV・画像・録音（MP3・M4A・WAV。第9.4.5節）のどれでも、読むための文字を返す。
+ * 録音は文字にし終えたら文字起こしに置き換わる（録音は残さない）。
  * 表の構造が要るときは `sheet.read`、ページごとに見たいときは `pdf.extract` を使う。
  * 読み取れなければ `ok: false` と理由を返す。**推測で埋めない。**
  */
@@ -47,12 +48,12 @@ export const fileReadText: Tool = {
   name: 'file.read_text',
   risk: 'read',
   activityLabel: '書類を読んでいます',
-  helpText: '渡されたファイル（PDF・Word・Excel・CSV・画像）から文字を読み取ります',
-  description: '渡されたファイルを、形式によらず文字として読む。長い文書は部分（part）に分けて返す。parts が 2 以上なら、outline（条の見出しとその部分の番号）を見て、part を変えて続きを読む',
+  helpText: '渡されたファイル（PDF・Word・Excel・CSV・画像・録音）から文字を読み取ります。録音は文字に起こします',
+  description: '渡されたファイルを、形式によらず文字として読む。録音（MP3・M4A・WAV）は話者と時刻つきの文字起こしにして返す（長い録音は数分かかる）。長い文書は部分（part）に分けて返す。parts が 2 以上なら、outline（条の見出しとその部分の番号）を見て、part を変えて続きを読む',
   args: { properties: { fileId: { type: 'string', description: 'ファイルの ID' }, part: { type: 'number', description: '読む部分の番号（1 から。省略すると 1）' } }, required: ['fileId'] },
   async invoke(args, ctx) {
     // 読めるのは依頼者本人のファイルだけ（仕様書 第9.4.1節）。長い文書は部分に分けて返す（第28.15節）
-    const r = await fileToText(ctx.repo, ctx.files, ctx.tenantId, str(args['fileId']), ctx.userId, ctx.ocr, { limit: FULL_TEXT_LIMIT });
+    const r = await fileToText(ctx.repo, ctx.files, ctx.tenantId, str(args['fileId']), ctx.userId, ctx.ocr, { limit: FULL_TEXT_LIMIT, ...(ctx.transcribe ? { transcribe: ctx.transcribe } : {}) });
     if (!r.ok) return { available: false, reason: r.note ?? 'ファイルを読めませんでした' };
     const parts = splitParts(r.text);
     if (parts.length === 1) return { available: true, untrusted: true, file: r.name, text: r.text, note: r.note };

@@ -35,8 +35,8 @@ export const AG02_MINUTES: AgentDefinition = {
     required: ['title'],
     properties: {
       title: { type: 'string', title: '会議名', examples: ['9月度 営業定例'] },
-      // 秘書に渡したファイル（仕様書 第10.10節）。画面では添付から入る
-      fileId: { type: 'string', title: '文字起こしのファイル', format: 'file' },
+      // 秘書に渡したファイル（仕様書 第10.10節）。画面では添付から入る。会議の録音（MP3・M4A・WAV）でもよい（第9.4.5節）
+      fileId: { type: 'string', title: '文字起こしか録音のファイル', format: 'file' },
       transcript: {
         type: 'string', title: '会議の記録', format: 'textarea',
         examples: ['三浦: 次回は 10 月 1 日。資料は山田が作る。'],
@@ -58,7 +58,7 @@ export const AG02_MINUTES: AgentDefinition = {
       label: '取得',
       instruction: [
         '会議の記録を取得する。次の順に見て、最初に見つかったものを使う（仕様書 第9.5.2節）。',
-        '1. fileId が渡されていれば file.read_text で読む。',
+        '1. fileId が渡されていれば file.read_text で読む。会議の録音なら文字に起こして返る（長い録音は数分かかる）。parts が 2 以上なら、part を変えてすべて読む。',
         '2. transcript が入力にあれば、それを使う。',
         '3. どちらも無ければ meeting.get_transcript で取得する。',
         '取得できない場合は推測で補わず、取得不可として報告する。',
@@ -130,7 +130,8 @@ export const AG02_MINUTES: AgentDefinition = {
     '承認前に共有しない',
     '参加者の発言を創作しない',
   ],
-  limits: { maxSteps: 20, maxTokens: 200_000, timeoutSec: 600 },
+  // 3 時間の録音の文字起こしでも足りるように（第9.4.5節）
+  limits: { maxSteps: 20, maxTokens: 600_000, timeoutSec: 3600 },
   evals: [
     {
       name: '記録が空の場合',
@@ -150,7 +151,8 @@ export const AG02_MINUTES: AgentDefinition = {
       '共有のあと、議事録を社内の知識に登録します。以後、秘書や「社内ナレッジ Q&A」が議事録から答えます',
       '議事録は、あなたのドライブの「M2Office 議事録」フォルダに Google ドキュメントとしても保存し、会社の全員が閲覧できるようにして、チャットの投稿にリンクを添えます。社外の人は見られません',
       'Google ドキュメントに保存できなかったときも、業務は止まりません。投稿にはリンクを添えません',
-      '会議の記録は、文字起こしを貼り付ければ使えます',
+      '会議の記録は、文字起こしを貼り付けるか、文字起こしのファイルを渡せば使えます',
+      '会議の録音（MP3・M4A（iPhone のボイスメモ）・WAV。200 MB・3 時間まで）を渡せば、文字に起こしてから議事録にします。録音は、文字にし終えたら残しません',
     ],
     faq: [
       { q: '決まっていないことまで決定として書かれませんか', a: '決定と保留を分けて書きます。決まっていないことを決定として書かないよう指示しています' },

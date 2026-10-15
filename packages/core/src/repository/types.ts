@@ -490,6 +490,15 @@ export interface Repository {
 
   createFile(file: StoredFile): Promise<void>;
   getFile(tenantId: string, id: string): Promise<StoredFile | null>;
+  /** ファイルの中身を置き換えたときに、名前・形式・大きさ・SHA-256 を書き換える（録音を文字起こしに置き換える。第9.4.5節）。 */
+  replaceFileMeta(tenantId: string, id: string, meta: Pick<StoredFile, 'name' | 'kind' | 'mime' | 'size' | 'sha256'>): Promise<void>;
+  /**
+   * 文字にしないまま残っている録音（第9.4.5節。消す見回りが使う）。どの依頼の入力にも無く `before` より前に上げたもの、
+   * または入力にした依頼の実行がすべて終わった（完了・失敗・取り消し・期限切れ）もの。
+   */
+  listStaleRecordings(tenantId: string, before: string): Promise<{ id: string; size: number }[]>;
+  /** ファイルの記録を消す（中身は呼び出し側が置き場から消す）。 */
+  deleteFile(tenantId: string, id: string): Promise<void>;
 
   createUser(user: User): Promise<void>;
   /** 表示名・ロール・状態を更新する。メールアドレスは変えない（Google 側で管理する）。 */

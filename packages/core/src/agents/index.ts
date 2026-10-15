@@ -119,6 +119,8 @@ export const DEFAULT_STANDARD_MINUTES: Record<string, number> = {
   'meeting-prep': 15,
   'reply-followup': 10,
   'document-draft': 20,
+  // 録音を聞き直して書き起こし、まとめる手間（第9.5.5.3節）。録音の長さによらず控えめに置く
+  'recording-notes': 30,
   'sheet-builder': 15,
   slides: 60,
   'weekly-brief': 20,

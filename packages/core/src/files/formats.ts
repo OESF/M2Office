@@ -9,8 +9,9 @@
  *
  * 拡張子と先頭のバイト列の両方で確かめる。拡張子だけを信じない。
  * `heic`・`webp` は名刺の画像に限って受け付ける（仕様書 第27.4節。{@link detectKind} は受け付けない）。
+ * `mp3`・`m4a`・`wav` は録音（第9.4.5節）。`txt` は録音を文字にした結果で、受け取りでは受け付けない（録音を置き換えて作る）。
  */
-export type FileKind = 'pdf' | 'xlsx' | 'csv' | 'docx' | 'png' | 'jpeg' | 'heic' | 'webp';
+export type FileKind = 'pdf' | 'xlsx' | 'csv' | 'docx' | 'png' | 'jpeg' | 'heic' | 'webp' | 'mp3' | 'm4a' | 'wav' | 'txt';
 
 export const MIME: Record<FileKind, string> = {
   pdf: 'application/pdf',
@@ -21,7 +22,29 @@ export const MIME: Record<FileKind, string> = {
   jpeg: 'image/jpeg',
   heic: 'image/heic',
   webp: 'image/webp',
+  mp3: 'audio/mpeg',
+  m4a: 'audio/mp4',
+  wav: 'audio/wav',
+  txt: 'text/plain; charset=utf-8',
 };
+
+/** 録音の形式（第9.4.5節）。 */
+export const AUDIO_KINDS: readonly FileKind[] = ['mp3', 'm4a', 'wav'];
+
+/** 録音の形式か。 */
+export function isAudioKind(kind: string): kind is 'mp3' | 'm4a' | 'wav' {
+  return (AUDIO_KINDS as readonly string[]).includes(kind);
+}
+
+/** 録音の 1 ファイルの上限（バイト。第9.4.5節）。 */
+export const MAX_AUDIO_BYTES = 200 * 1024 * 1024;
+/** 録音の長さの上限（秒。第9.4.5節）。 */
+export const MAX_AUDIO_SECONDS = 3 * 3600;
+
+/** 拡張子から、録音として受け取るものか（大きさの上限を先に決めるため。中身は {@link detectKind} で確かめる）。 */
+export function isAudioName(name: string): boolean {
+  return /\.(mp3|m4a|wav)$/i.test(name);
+}
 
 /** 1 ファイルの上限（バイト）。 */
 export const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -43,6 +66,15 @@ export function detectKind(name: string, bytes: Uint8Array): FileKind | null {
     case 'jpg': case 'jpeg': return starts(0xff, 0xd8, 0xff) ? 'jpeg' : null;
     // CSV は署名を持たない。NUL を含まないことだけを確かめる
     case 'csv': return bytes.subarray(0, 4096).includes(0) ? null : 'csv';
+    // 録音（第9.4.5節）。MP3 は ID3 か、フレームの先頭（11 ビットの 1）。M4A は `ftyp` の箱。WAV は RIFF…WAVE
+    case 'mp3': return starts(0x49, 0x44, 0x33) || (bytes[0] === 0xff && ((bytes[1] ?? 0) & 0xe0) === 0xe0) ? 'mp3' : null;
+    case 'm4a': return ascii(bytes, 4, 4) === 'ftyp' ? 'm4a' : null;
+    case 'wav': return ascii(bytes, 0, 4) === 'RIFF' && ascii(bytes, 8, 4) === 'WAVE' ? 'wav' : null;
     default: return null;
   }
+}
+
+/** バイト列の一部を ASCII として読む。 */
+function ascii(bytes: Uint8Array, at: number, len: number): string {
+  return String.fromCharCode(...bytes.subarray(at, at + len));
 }

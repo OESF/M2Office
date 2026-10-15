@@ -19,6 +19,8 @@ src/chat/        グループの名前で共有する（group-share.ts。グル�
 src/files/       ファイルの置き場と、PDF・Excel・CSV・Word の読み書き。
                  to-text.ts は形式によらず「読むための文字」にし、指示ではないものとして囲う（第10.10節）。
                  compare.ts は 2 つの版を条項ごとに比べる（ツール file.compare。契約書の修正版との差分。第28.13節）。
+                 transcribe.ts は録音（MP3・M4A・WAV）を 30 分ずつに分けて推論で文字にし、時刻と話者をつなぐ（第9.4.5節、ADR-0097）。
+                 to-text.ts は文字にし終えた録音を同じ ID のまま文字起こしに置き換え、recordings.ts は文字にならなかった録音を消す
                  redline.ts は修正の案を Word の変更履歴とコメントとして入れる（ツール docx.redline。第28.15節）。
                  長い文書は to-text.ts の splitParts・outlineOf で部分に分け、条の見出しの一覧を返す（file.read_text の part）。
                  font-chars.ts は、同梱の書体に無い JIS の正式な対応の字（マイナス記号など）を、描く前に同じ形の字に置き換える
@@ -87,7 +89,8 @@ src/signage/     サイネージ（内蔵の拡張。第31章の段 1・段 2・
                  MP4 の入れ物の記録を読む（mp4.ts。H.264 か・長さ・縦横）・画像の縦横（image-size.ts）。
                  秘書からの依頼は src/secretary/signage.ts（本人の発言を見分けてその場で行う。割り込み・渡された画像を流れに足す・時間帯・設定。ツールの一覧に載せない）
 src/media/       動画をまとめる部品（ナレーション付きスライド。第32.18.6節 段 3）。ffmpeg を別のプロセスとして呼んで MP4 にまとめる（compose.ts。
-                 場面の時間・クロスフェード・BGM を小さくする）、組み込みの BGM の合成（bgm.ts）、WAV の読み書き（wav.ts）
+                 場面の時間・クロスフェード・BGM を小さくする）、組み込みの BGM の合成（bgm.ts）、WAV の読み書き（wav.ts）、
+                 録音の長さの読み取りと 30 分ずつの分け方（audio.ts。MP3・WAV は音を解かずに切り、M4A は ffmpeg で分ける。第9.4.5節）
 src/columns/     Web のコラム（内蔵の拡張。第32章の段 1・段 2）。置き場（コラムと版。PostgreSQL とメモリ。store.ts）、書く・書き直す（writer.ts。
                  Web の調べもの → 推論の JSON。見本の推論では見本の下書き）、校正（review.ts。表現の決まりごとの言葉の一覧と推論・直し案）、
                  WordPress（wordpress.ts。REST API とアプリケーションパスワード・下書きとして入れる・カバーをアイキャッチにする・つながるかの確かめ）、

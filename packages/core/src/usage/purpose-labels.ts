@@ -8,7 +8,7 @@ import { agentDisplayName } from '@m2office/shared';
 
 /** 口の名前（`api:<口>`・`worker:<処理>`）を、利用状況に出す業務の言葉にする。 */
 const PURPOSE_LABELS: Record<string, string> = {
-  secretary: '秘書', voice: '音声の秘書', other: 'そのほか', worker: '自動の処理',
+  secretary: '秘書', voice: '音声の秘書', other: 'そのほか', worker: '自動の処理', transcribe: '録音の文字起こし',
   'api:columns': 'コラムの作成', 'api:print-designs': '販促物の作成', 'api:competitors': '競合の分析', 'api:cards': '名刺管理',
   'api:inventory': '在庫管理', 'api:signage': 'サイネージ', 'api:announcements': 'お知らせの作成', 'api:inquiries': '問い合わせの記録',
   'api:web-review': 'Webの分析', 'api:contracts': '契約書の管理', 'api:subsidies': '補助金・助成金', 'api:members': '会員とポイント',

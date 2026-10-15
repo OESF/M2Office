@@ -5,12 +5,15 @@
  */
 
 export { LocalFileStore, MemoryFileStore, fileReader, type FileStore } from './store.js';
-export { detectKind, MIME, MAX_FILE_BYTES, type FileKind } from './formats.js';
+export { detectKind, MIME, MAX_FILE_BYTES, MAX_AUDIO_BYTES, MAX_AUDIO_SECONDS, AUDIO_KINDS, isAudioKind, isAudioName, type FileKind } from './formats.js';
 export { saveFile, loadFile } from './service.js';
 export { readSheet, renderSheet, parseCsv, decodeText, csvSafeText, csvText, type SheetData } from './sheet.js';
 export { extractPdfText, normalizeRadicals, type PdfText } from './pdf.js';
 export { renderDocx, extractDocxText, type DocBlock } from './docx.js';
-export { fileToText, TEXT_LIMIT, type FileText, type OcrFn } from './to-text.js';
+export { fileToText, TEXT_LIMIT, TRANSCRIPT_NOTE, type FileText, type OcrFn, type TranscribeFn } from './to-text.js';
+export { transcribeRecording, TranscribeError, TRANSCRIBE_SEGMENT_SEC, clockOf, shiftTimes, speakersOf, type Transcript, type TranscribeDeps } from './transcribe.js';
+export { discardStaleRecordings, RECORDING_UNUSED_MS } from './recordings.js';
+export { audioDurationSec, estimateDurationSec, splitAudio, type AudioSegment } from '../media/audio.js';
 export { compareTexts, splitClauses, type Clause, type ClauseChange, type Comparison } from './compare.js';
 export {
   renderPdf, rowAmount, yen, missingCharacters, extractPages, REPLACEMENT, OCR_MAX_PAGES,

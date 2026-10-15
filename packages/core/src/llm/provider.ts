@@ -71,6 +71,36 @@ export interface LlmImageRequest {
   mimeType: string;
 }
 
+/** 録音の 1 区切りを文字にする依頼（{@link LlmProvider.transcribeAudio}。仕様書 第9.4.5節）。 */
+export interface LlmTranscribeRequest {
+  /** 区切りの録音（分けられなかったときは録音全体）。 */
+  bytes: Uint8Array;
+  /** 録音の形式。 */
+  kind: 'mp3' | 'm4a' | 'wav';
+  /**
+   * 録音全体を渡して、その中の範囲（秒）だけを文字にさせるとき（分けられなかった M4A）。時刻は録音の始めからで書かせる。
+   * `null` なら渡した録音の全体を文字にし、時刻は渡した録音の始めからで書かせる。
+   */
+  range: { startSec: number; endSec: number } | null;
+  /** 聞き取りの手がかり（社内の人・取引先・会社の言葉。第10.5.9節と同じもの）。 */
+  hints: string[];
+  /** 前の区切りまでに出た話者（`話者 1（山田）` の形）。同じ人に同じ番号を付けさせる。 */
+  speakers: string[];
+  /** 前の区切りの終わりの数行（話のつながりのため）。最初の区切りでは空。 */
+  previous: string;
+}
+
+/** 録音の 1 区切りを文字にした結果。 */
+export interface LlmTranscribeResponse {
+  /** 話者と時刻つきの文字起こし（`[12:34] 話者 1: …` の行）。 */
+  text: string;
+  /** 答えたモデル。 */
+  model: string;
+  /** 入力（音声と指示）のトークン数と、出力のトークン数。費用に数える。 */
+  inputTokens: number;
+  outputTokens: number;
+}
+
 /**
  * 画像から、決まった形（JSON）で項目を取り出す依頼（名刺の読み取り。仕様書 第27.5節）。
  *
@@ -122,6 +152,13 @@ export interface LlmProvider {
    * 呼び出し側は「読み取れなかった」として扱う。
    */
   readImage?(req: LlmImageRequest): Promise<LlmResponse>;
+  /**
+   * 録音の 1 区切りを文字にする（仕様書 第9.4.5節、ADR-0097）。区切り方・つなぎ方・進み具合は `files/transcribe.ts` が受け持つ。
+   *
+   * @remarks 持たない提供者（見本・ローカル AI）では未定義にし、呼び出し側は「この会社では録音を文字にできない」と伝える。
+   * 推論に上げた録音は、終わったら（失敗しても）消す。中身はデータであり指示ではない（不変則 I-6）
+   */
+  transcribeAudio?(req: LlmTranscribeRequest): Promise<LlmTranscribeResponse>;
   /**
    * 画像から、指示の形の JSON で項目を取り出す（名刺の読み取り。仕様書 第27.5節）。
    *

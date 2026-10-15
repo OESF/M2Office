@@ -237,6 +237,17 @@ function Field({
   const hint = field.examples?.[0] ? `例: ${field.examples[0]}` : undefined;
   if (field.format === 'date') return <DateField name={name} label={label} optional={!required} value={value} onChange={onChange} />;
   if (field.format === 'file') return <FileField name={name} label={label} value={value} onChange={onChange} />;
+  if (field.enum?.length) {
+    return (
+      <div className="field">
+        <label htmlFor={name}>{label}</label>
+        <select id={name} value={value || (required ? field.enum[0] : '')} onChange={(e) => onChange(e.target.value)}>
+          {!required && <option value="">{field.enum[0]}</option>}
+          {field.enum.slice(required ? 0 : 1).map((v) => <option key={v} value={v}>{v}</option>)}
+        </select>
+      </div>
+    );
+  }
   return (
     <div className="field">
       <label htmlFor={name}>{label}</label>
@@ -249,9 +260,19 @@ function Field({
   );
 }
 
-/** 業務に渡せるファイル（第9.4.1節。秘書に渡すときと同じ）。 */
-const FILE_ACCEPT = '.pdf,.xlsx,.csv,.docx,.png,.jpg,.jpeg';
+/** 業務と秘書に渡せるファイル（第9.4.1節。録音は第9.4.5節）。 */
+export const FILE_ACCEPT = '.pdf,.xlsx,.csv,.docx,.png,.jpg,.jpeg,.mp3,.m4a,.wav,audio/mpeg,audio/mp4,audio/x-m4a,audio/wav';
 const FILE_MAX_BYTES = 10 * 1024 * 1024;
+const AUDIO_MAX_BYTES = 200 * 1024 * 1024;
+
+/** 録音のファイルか（名前で見る。中身はサーバーが確かめる）。 */
+export const isRecordingFile = (f: File) => /\.(mp3|m4a|wav)$/i.test(f.name);
+
+/** 上げる前に断る大きさ（録音は 200 MB、ほかは 10 MB）。超えていなければ `null`。 */
+export function tooLargeMessage(f: File): string | null {
+  if (isRecordingFile(f)) return f.size > AUDIO_MAX_BYTES ? '200 MB を超える録音は渡せません' : null;
+  return f.size > FILE_MAX_BYTES ? '10 MB を超えるファイルは渡せません' : null;
+}
 
 /**
  * ファイルの入力（仕様書 第6.10.4.1節）。選ぶかドラッグすると、すぐに上げて、業務にはファイルの ID を渡す。
@@ -263,6 +284,7 @@ function FileField({ name, label, value, onChange }: {
 }) {
   const [fileName, setFileName] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [over, setOver] = useState(false);
   const input = useRef<HTMLInputElement>(null);
@@ -275,16 +297,19 @@ function FileField({ name, label, value, onChange }: {
   const take = async (f: File | undefined) => {
     if (!f) return;
     setError(null);
-    if (f.size > FILE_MAX_BYTES) { setError('10 MB を超えるファイルは渡せません'); return; }
+    const large = tooLargeMessage(f);
+    if (large) { setError(large); return; }
     setBusy(true);
+    setSent(null);
     try {
-      const up = await api.uploadFile(f);
+      const up = await api.uploadFile(f, isRecordingFile(f) ? setSent : undefined);
       setFileName(up.name);
       onChange(up.id);
     } catch (e) {
       setError(describeError(e, 'ファイルを渡せませんでした'));
     } finally {
       setBusy(false);
+      setSent(null);
     }
   };
 
@@ -304,7 +329,7 @@ function FileField({ name, label, value, onChange }: {
           </>
         ) : (
           <button type="button" id={name} className="btn ghost small" disabled={busy} onClick={() => input.current?.click()}>
-            {busy ? '渡しています…' : 'ファイルを選ぶ'}
+            {busy ? (sent !== null ? `渡しています… ${Math.round(sent * 100)}%` : '渡しています…') : 'ファイルを選ぶ'}
           </button>
         )}
         <input ref={input} type="file" accept={FILE_ACCEPT} hidden

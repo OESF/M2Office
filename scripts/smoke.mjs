@@ -106,8 +106,8 @@ console.log('\n■ 1. 疎通と一覧');
   // 拡張機能を導入している場合はその分が増えるため、公式の業務エージェントだけを数える
   const official = (body.agents ?? []).filter((a) => !a.extension);
   // 段取りの報告（第10.14節）はメニューに出ない中の業務
-  official.length === 14 && official.filter((a) => a.menu === false).map((a) => a.id).join() === 'secretary-plan-report'
-    ? ok(`公式の業務エージェントが 14 件（うち中の業務 1。${official.map((a) => a.name).join(' / ')}）`)
+  official.length === 15 && official.filter((a) => a.menu === false).map((a) => a.id).join() === 'secretary-plan-report'
+    ? ok(`公式の業務エージェントが 15 件（うち中の業務 1。${official.map((a) => a.name).join(' / ')}）`)
     : ng('エージェントの一覧が取得できない', JSON.stringify(body));
 }
 
@@ -7268,6 +7268,55 @@ console.log('\n■ 92. 秘書の成長の段 3（案件ノートは本人だけ�
       ? ok('秘書が学んだことに、確かめた人の数が付く') : ng('確かめた人の数が無い');
   } catch (err) {
     ng('秘書の成長の段 3 の確認が途中で止まった', String(err));
+  }
+}
+
+console.log('\n■ 93. 録音を文字にして文書にする（形式の確かめ・録音は残さない・秘書の取次・ほかの会社から見えない。第9.4.5節・第9.5.5.3節）');
+{
+  try {
+    // 見本の推論は、録音に埋め込んだ `M2O-TRANSCRIPT:` の文を文字起こしとして返す
+    const said = 'M2O-TRANSCRIPT:[00:01] 話者 1（山田）: 来週までに見積を作ります|[00:20] 話者 2: お願いします\n';
+    const recording = (marker) => {
+      const frames = Buffer.alloc(417 * 40);
+      for (let i = 0; i < 40; i++) frames.set([0xff, 0xfb, 0x90, 0x00], i * 417);
+      return Buffer.concat([Buffer.from([0x49, 0x44, 0x33, 4, 0, 0, 0, 0, 0, 0]), frames, Buffer.from(marker, 'utf8')]);
+    };
+    const upload = async (name, bytes, tenant = 'a', who = 'member') => {
+      const form = new FormData();
+      form.append('file', new Blob([bytes]), name);
+      const res = await fetch(`${API}/v1/files`, { method: 'POST', body: form, headers: { 'x-tenant': tenant, 'x-user': `${who}@${tenant === 'a' ? 'alpha' : 'beta'}.example.jp` } });
+      return { status: res.status, body: await res.json() };
+    };
+    const up = await upload('打ち合わせ.mp3', recording(said));
+    const fake = await upload('偽物.m4a', Buffer.from('これは録音ではない'));
+    up.status === 201 && up.body.kind === 'mp3' && fake.status === 415
+      ? ok('録音（MP3）を受け取り、中身が録音でないものは断る') : ng('録音の受け取りが違う', JSON.stringify({ up: up.status, kind: up.body?.kind, fake: fake.status }));
+    const other = await fetch(`${API}/v1/files/${up.body.id}`, { headers: { 'x-tenant': 'b', 'x-user': 'admin@beta.example.jp' } });
+    other.status === 404 ? ok('録音はほかの会社から見えない') : ng(`ほかの会社から見える（${other.status}）`);
+
+    // 録音のまとめ: 文字にし、本人のドライブに文書を作る。録音は文字起こしに置き換わる
+    const { body: job } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: 'recording-notes', input: { fileId: up.body.id, style: '話し合いの記録' } }) }, 'member');
+    const run = await waitFor('a', job.runId, ['completed', 'failed'], 30000, 'member');
+    const meta = (await call('a', `/v1/files/${up.body.id}`, {}, 'member')).body;
+    const read = (run?.steps ?? []).find((s) => s.stepId === 'transcribe');
+    run?.run?.status === 'completed' && JSON.stringify(read?.output ?? '').includes('来週までに見積を作ります')
+      ? ok('録音のまとめは、録音を文字にしてから文書を作る') : ng('録音のまとめが終わらない', JSON.stringify({ status: run?.run?.status, reason: run?.run?.failureReason }));
+    meta?.kind === 'txt' && /文字起こし/.test(meta?.name ?? '')
+      ? ok('文字にし終えた録音は残さず、文字起こしに置き換わる') : ng('録音が残っている', JSON.stringify(meta));
+    const audit = (await call('a', '/v1/admin/audit-events?action=file.audio_discard')).body;
+    JSON.stringify(audit).includes('来週') ? ng('監査ログに話の中身が入っている') : ok('監査ログには話の中身を残さない');
+
+    // 秘書に録音を渡す: 「議事録」なら議事録の作成、それ以外は録音のまとめに頼む
+    const up2 = await upload('定例.mp3', recording(said));
+    const { body: toMinutes } = await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message: 'この録音から議事録を作って', fileId: up2.body.id }) }, 'member');
+    const minutesRun = toMinutes.lookup?.runId ? (await call('a', `/v1/runs/${toMinutes.lookup.runId}`, {}, 'member')).body : null;
+    const up3 = await upload('ひとりごと.mp3', recording(said));
+    const { body: toNotes } = await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message: 'まとめて', fileId: up3.body.id }) }, 'member');
+    const notesRun = toNotes.lookup?.runId ? (await call('a', `/v1/runs/${toNotes.lookup.runId}`, {}, 'member')).body : null;
+    minutesRun?.job?.agentId === 'minutes' && minutesRun?.job?.input?.fileId === up2.body.id && notesRun?.job?.agentId === 'recording-notes'
+      ? ok('秘書は録音を、「議事録」なら議事録の作成に、それ以外は録音のまとめに頼む') : ng('録音の取次が違う', JSON.stringify({ m: minutesRun?.job?.agentId, n: notesRun?.job?.agentId, t1: toMinutes.text, t2: toNotes.text }));
+  } catch (err) {
+    ng('録音の確認が途中で止まった', String(err));
   }
 }
 

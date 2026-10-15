@@ -18,6 +18,9 @@ import { extractPdfText } from './pdf.js';
 import { extractDocxText } from './docx.js';
 import { readSheet } from './sheet.js';
 import { extractPages, OCR_MAX_PAGES } from './pdf-render.js';
+import { createHash, randomUUID } from 'node:crypto';
+import { MIME } from './formats.js';
+import { TranscribeError, clockOf } from './transcribe.js';
 
 /**
  * 推論へ渡す文字の上限。
@@ -46,6 +49,12 @@ export interface FileText {
 /** 読み取り（OCR）の呼び出し口。鍵が無い環境では渡らない。 */
 export type OcrFn = (req: { bytes: Uint8Array; mimeType: string }) => Promise<string>;
 
+/** 録音を文字にする呼び出し口（第9.4.5節）。推論が録音を扱えなければ渡らない。 */
+export type TranscribeFn = (req: { bytes: Uint8Array; kind: 'mp3' | 'm4a' | 'wav' }) => Promise<{ text: string; durationSec: number; chunks: number }>;
+
+/** 録音を文字にした結果の断り（推論による聞き取りであること）。 */
+export const TRANSCRIPT_NOTE = '録音を AI が聞き取った文字起こしです。確かなものとして扱わず、大事なところは話した人に確かめてください';
+
 /**
  * ファイルを文字にする。
  *
@@ -59,7 +68,7 @@ export type OcrFn = (req: { bytes: Uint8Array; mimeType: string }) => Promise<st
  * 他人のファイルの ID を渡されても読まない。存在も示さない。
  */
 export async function fileToText(
-  repo: Repository, store: FileStore, tenantId: string, fileId: string, userId: string, ocr?: OcrFn, opts: { limit?: number } = {},
+  repo: Repository, store: FileStore, tenantId: string, fileId: string, userId: string, ocr?: OcrFn, opts: { limit?: number; transcribe?: TranscribeFn } = {},
 ): Promise<FileText> {
   const limit = opts.limit ?? TEXT_LIMIT;
   const f = await loadFile(repo, store, tenantId, fileId, { id: userId, roles: [] });
@@ -96,7 +105,49 @@ export async function fileToText(
     case 'heic':
     case 'webp':
       return { ok: false, name, text: '', note: 'この形式の画像は、名刺の取り込みでだけ扱います' };
+    // 録音を文字にした結果（第9.4.5節）
+    case 'txt':
+      return cut(name, { text: new TextDecoder().decode(f.bytes), note: TRANSCRIPT_NOTE }, limit);
+    case 'mp3':
+    case 'm4a':
+    case 'wav': {
+      if (!opts.transcribe) return { ok: false, name, text: '', note: 'この会社の AI では、録音を文字にできません' };
+      try {
+        const t = await opts.transcribe({ bytes: f.bytes, kind: f.meta.kind });
+        const text = await replaceWithTranscript(repo, store, tenantId, f.meta, userId, t);
+        return cut(name, { text, note: TRANSCRIPT_NOTE }, limit);
+      } catch (err) {
+        if (err instanceof TranscribeError) return { ok: false, name, text: '', note: err.message };
+        throw err;
+      }
+    }
   }
+}
+
+/**
+ * 録音を文字起こしに置き換える（第9.4.5節。録音は文字にし終えたら残さない）。
+ *
+ * @returns 置き換えた文字起こし（見出しつき）
+ * @remarks 同じファイルの ID のまま、中身を文字起こしにする。業務の入力はこのファイルを指したままなので、
+ * 途中で止まった実行を再開しても、録音を聞き直さずに文字起こしを読める。監査ログ `file.audio_discard` には大きさと長さだけを残す
+ */
+async function replaceWithTranscript(
+  repo: Repository, store: FileStore, tenantId: string,
+  meta: { id: string; name: string; size: number }, userId: string, t: { text: string; durationSec: number; chunks: number },
+): Promise<string> {
+  const base = meta.name.replace(/\.(mp3|m4a|wav)$/i, '');
+  const text = `録音「${meta.name}」の文字起こし（長さ ${clockOf(t.durationSec)}。AI による聞き取り）\n\n${t.text}`;
+  const bytes = new TextEncoder().encode(text);
+  await store.put(tenantId, meta.id, bytes);
+  await repo.replaceFileMeta(tenantId, meta.id, {
+    name: `${base}（文字起こし）.txt`.slice(0, 200), kind: 'txt', mime: MIME.txt, size: bytes.byteLength,
+    sha256: createHash('sha256').update(bytes).digest('hex'),
+  });
+  await repo.appendAudit({
+    id: randomUUID(), tenantId, actorType: 'user', actorId: userId, action: 'file.audio_discard', targetType: 'file', targetId: meta.id,
+    detail: { size: meta.size, seconds: Math.round(t.durationSec), chunks: t.chunks, transcribed: true }, occurredAt: new Date().toISOString(),
+  });
+  return text;
 }
 
 /** PDF を文字にする。文字の無いページは読み取りにかける（仕様書 第9.4.1節、Q-56）。 */
