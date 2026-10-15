@@ -93,6 +93,8 @@ const TABS: {
       { id: 'rules', label: '社内規程' },
       { id: 'minutes', label: '議事録' },
       { id: 'learned', label: '秘書が学んだこと' },
+      // 秘書が答えられなかった問い（仕様書 第11.13.6節）
+      { id: 'gaps', label: '答えられなかった問い' },
     ],
   },
   { id: 'setup', label: 'はじめに行う設定', icon: 'help', description: '導入の流れと、残っている設定', group: '設定' },

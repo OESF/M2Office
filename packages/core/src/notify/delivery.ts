@@ -40,6 +40,7 @@ const KIND_LABELS: Record<string, string> = {
   usage: 'AI の利用',
   usageSelf: 'AI の利用',
   effect: '効果のレポート',
+  knowledgeGap: '知識',
   notice: '社内のお知らせ',
   machine: '機械',
   service: 'ご利用',

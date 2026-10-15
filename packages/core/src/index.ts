@@ -25,7 +25,7 @@ export type { GeminiModelMap } from './llm/gemini.js';
 
 export type {
   Repository, AgentEvent, Plan, PlanStep, DisabledConnectorTool, TenantConnection, KnowledgeHit, KnowledgeItem, KnowledgeSearchResult, KnowledgeSectionView, RunStatRow, InstalledExtension, PrivateExtension, CompartmentAssignment,
-  CredentialKind, TenantCredential, GoogleConnection, UserPhoto, AuditQuery, DecidedApproval, ConnectionSecret, UserConnection, Memory, MemoryKind, UserProfile, MemoryEmbedItem,
+  CredentialKind, TenantCredential, GoogleConnection, UserPhoto, AuditQuery, DecidedApproval, ConnectionSecret, UserConnection, Memory, MemoryKind, UserProfile, MemoryEmbedItem, CaseNote,
 } from './repository/types.js';
 export { PostgresRepository } from './repository/postgres.js';
 export { createPool, watchPool, installPoolLogger, describePoolError, assertDatabaseConfigured, type PoolOptions } from './repository/pool.js';
@@ -39,6 +39,7 @@ export * from './memory/promotion.js';
 export * from './memory/work.js';
 export * from './memory/profile.js';
 export * from './memory/embed.js';
+export * from './memory/cases.js';
 export * from './dashboard/presence.js';
 export * from './notify/sender.js';
 export * from './notify/delivery.js';

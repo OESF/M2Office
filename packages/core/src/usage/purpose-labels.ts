@@ -17,7 +17,7 @@ const PURPOSE_LABELS: Record<string, string> = {
   'worker:competitors': '競合の分析（見回り）', 'worker:columns': 'コラムの作成（予定とテーマ案）', 'worker:web-review': 'Webの分析（月の便り）',
   'worker:subsidies': '補助金・助成金（月の調べもの）', 'worker:knowledge': '秘書が学んだことの整理', 'worker:knowledge-embed': '知識の意味の検索の準備', 'worker:proactive': '秘書の先回り',
   'worker:memory': '会話から覚えること', 'worker:inquiries': '問い合わせの見張り', 'worker:announcements': 'お知らせの作成（予約）',
-  'worker:effect': '効果のレポート（毎月）', 'worker:profile': '秘書の本人の像', 'worker:memory-embed': '記憶の意味の検索の準備',
+  'worker:effect': '効果のレポート（毎月）', 'worker:profile': '秘書の本人の像', 'worker:memory-embed': '記憶の意味の検索の準備', 'worker:cases': '秘書の案件ノート',
 };
 
 /**

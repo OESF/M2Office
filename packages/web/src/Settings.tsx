@@ -649,7 +649,10 @@ function MemorySettings({ settings, onChange, onSave }: {
 function SecretaryGrowth({ reloadKey }: { reloadKey: number }) {
   const [g, setG] = useState<Awaited<ReturnType<typeof api.myGrowth>> | null>(null);
   const [open, setOpen] = useState(false);
-  useEffect(() => { api.myGrowth().then(setG).catch(() => setG(null)); }, [reloadKey]);
+  // 進んでいる案件ノート（仕様書 第11.13.5節）
+  const [cases, setCases] = useState<Awaited<ReturnType<typeof api.myCases>>['items']>([]);
+  const loadCases = () => api.myCases().then((r) => setCases(r.items)).catch(() => setCases([]));
+  useEffect(() => { api.myGrowth().then(setG).catch(() => setG(null)); void loadCases(); }, [reloadKey]);
   if (!g) return null;
   return (
     <div className="growth">
@@ -664,6 +667,22 @@ function SecretaryGrowth({ reloadKey }: { reloadKey: number }) {
           {open && <div className="growth-profile"><Markdown text={g.profile.body} /></div>}
         </>
       ) : <p className="muted small">秘書から見たあなたは、まだまとめていません</p>}
+      {cases.length > 0 && (
+        <>
+          <h4>進んでいる案件（{cases.length}）</h4>
+          <table className="table small">
+            <tbody>
+              {cases.map((c) => (
+                <tr key={c.id}>
+                  <td><strong>{c.title}</strong><br />{c.state}{c.nextStep && <><br /><span className="muted">次: {c.nextStep}</span></>}</td>
+                  <td className="nowrap">{c.dueOn && <>期限 {c.dueOn}<br /></>}<span className="muted">{c.lastDay}</span></td>
+                  <td className="num"><button className="btn ghost small" onClick={() => void api.deleteCase(c.id).then(loadCases)}>削除</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
     </div>
   );
 }

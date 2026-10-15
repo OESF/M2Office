@@ -41,6 +41,8 @@ export function notificationPath(n: { kind: string; runId: string | null }): str
   if (n.kind === 'usage') return '/admin/usage';
   // 効果のレポートが届いた知らせ（第6.7.13節）。管理者ページのダッシュボードを開く
   if (n.kind === 'effect') return '/admin';
+  // 秘書が答えられなかった問いの知らせ（第11.13.6節）。管理者ページの「知識」の「答えられなかった問い」を開く
+  if (n.kind === 'knowledgeGap') return '/admin/knowledge/gaps';
   if (n.kind === 'usageSelf') return '/settings';
   // ローカルの形の機械の知らせ（控えの失敗など。第8.6.7節）
   if (n.kind === 'machine') return '/admin/machine';

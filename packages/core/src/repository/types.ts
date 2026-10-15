@@ -310,6 +310,21 @@ export interface Repository {
   searchMemoriesByMeaning(tenantId: string, userId: string, vector: number[], model: string, limit: number): Promise<{ id: string; similarity: number }[] | null>;
   /** 本人の会話の要約を、依頼の埋め込みに近い順に（権限区画の印の付いていないものだけ）。使えなければ `null` */
   searchDigestsByMeaning(tenantId: string, userId: string, vector: number[], model: string, limit: number): Promise<{ day: string; similarity: number }[] | null>;
+  /** 秘書が学んだ会社の知識の、確かめた人の数を 1 つ増やす（第11.13.6節）。 */
+  confirmKnowledge(tenantId: string, id: string): Promise<void>;
+  /** 本人の案件ノート（第11.13.5節）。`status` が無ければ進んでいるものだけ。最後に動いた日の新しい順。 */
+  listCaseNotes(tenantId: string, userId: string, opts?: { status?: 'open' | 'closed' | 'all'; limit?: number }): Promise<CaseNote[]>;
+  /** 案件ノートを置く（同じ ID は書き換える）。 */
+  saveCaseNote(note: CaseNote): Promise<void>;
+  /** 本人の案件ノートを 1 つ消す。本人のものでなければ `false`。 */
+  deleteCaseNote(tenantId: string, userId: string, id: string): Promise<boolean>;
+  /** 最後に動いた日が `before` より前の、進んでいる案件を終える。終えた数。 */
+  closeIdleCaseNotes(tenantId: string, userId: string, before: string, at: string): Promise<number>;
+  /** 終えてから `before` より前の案件ノートを消す（会社の全員分）。消した数。 */
+  purgeClosedCaseNotes(tenantId: string, before: string): Promise<number>;
+  /** 本人の案件ノートを最後に作った時刻。 */
+  getCaseNoteRun(tenantId: string, userId: string): Promise<string | null>;
+  setCaseNoteRun(tenantId: string, userId: string, at: string): Promise<void>;
   /** 本人の像（秘書がまとめた本人についての文。第11.13.1節）。本人以外に渡さない。 */
   getUserProfile(tenantId: string, userId: string): Promise<UserProfile | null>;
   /** 本人の像を置く（作り直す印は外す）。 */
@@ -825,6 +840,28 @@ export interface Memory {
   kind?: MemoryKind;
 }
 
+/**
+ * 案件ノート（仕様書 第11.13.5節）。秘書が本人の会話の要約と頼んだ業務から書き足す。本人だけのもの。
+ */
+export interface CaseNote {
+  id: string;
+  tenantId: string;
+  userId: string;
+  /** 題名（40 字まで） */
+  title: string;
+  /** いまの状態（300 字まで） */
+  state: string;
+  /** 次にやること（200 字まで） */
+  nextStep: string;
+  /** 期限（`YYYY-MM-DD`） */
+  dueOn: string | null;
+  status: 'open' | 'closed';
+  /** 最後に動いた日（`YYYY-MM-DD`） */
+  lastDay: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /** 埋め込みを待つ記憶か会話の要約（第11.13.4節）。 */
 export interface MemoryEmbedItem {
   kind: 'memory' | 'digest';
@@ -892,6 +929,8 @@ export interface KnowledgeItem {
   lastUsedAt?: string | null;
   /** まとめた先（しまったもの）。 */
   mergedInto?: string | null;
+  /** 確かめた人の数（秘書が学んだこと。何人の秘書が同じことを学んだか。第11.13.6節）。 */
+  confirmations?: number;
   /** 施行日が先の版（社内規程。一覧でだけ返す）。 */
   pending?: { version: number; effectiveFrom: string } | null;
 }

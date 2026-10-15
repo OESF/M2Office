@@ -713,6 +713,8 @@ export interface KnowledgeItemView {
   pending?: { version: number; effectiveFrom: string } | null;
   /** 答えの根拠に最後に使った日。 */
   lastUsedAt?: string | null;
+  /** 確かめた人の数（秘書が学んだこと。仕様書 第11.13.6節）。 */
+  confirmations?: number;
 }
 
 /** 社内規程の 1 つの版（仕様書 第11.11.2節）。 */
@@ -2137,6 +2139,9 @@ export const api = {
   /** 記憶とデータ（仕様書 第6.5.4節）。本人の記憶だけが返る。 */
   myMemories: () => call<{ items: MemoryView[] }>('/me/memories'),
   /** 秘書の成長（本人の像と数。仕様書 第11.13.3節）。 */
+  /** 進んでいる案件ノート（仕様書 第11.13.5節）。 */
+  myCases: () => call<{ items: { id: string; title: string; state: string; nextStep: string; dueOn: string | null; lastDay: string }[] }>('/me/cases'),
+  deleteCase: (id: string) => call<{ ok: true }>(`/me/cases/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   myGrowth: () => call<{ profile: { body: string; updatedAt: string } | null; memories: number; preferences: number; learnedThisWeek: number; promoted: number }>('/me/growth'),
   deleteMemory: (id: string) => call(`/me/memories/${id}`, { method: 'DELETE' }),
   updateMemory: (id: string, text: string) =>
@@ -2201,6 +2206,9 @@ export const api = {
     machineUpdateHold: (days: number | null) => call<{ heldUntil: string | null }>('/admin/machine/update-hold', { method: 'PUT', body: JSON.stringify({ days }) }),
     /** 今月の AI の利用と上限（仕様書 第6.6.2節）。用途ごと・人ごと。費用は概算。 */
     aiUsage: () => call<AiUsageView>('/admin/ai-usage'),
+    /** 秘書が答えられなかった問い（仕様書 第11.13.6節）。誰が聞いたかは無い。 */
+    knowledgeGaps: () => call<{ items: { question: string; count: number; lastAt: string; answered: { knowledgeId: string; title: string } | null }[]; keepDays: number }>('/admin/knowledge/gaps'),
+    dismissKnowledgeGap: (question: string) => call<{ ok: true }>('/admin/knowledge/gaps/dismiss', { method: 'POST', body: JSON.stringify({ question }) }),
     /** 効果の欄の数字（仕様書 第6.7.13節）。推計の削減時間とすべての AI の費用。人ごとの数字は無い。 */
     effect: (period: EffectPeriod) => call<{ figures: EffectFigures }>(`/admin/effect?period=${period}`),
     effectReports: () => call<{ reports: EffectReportBrief[] }>('/admin/effect/reports'),

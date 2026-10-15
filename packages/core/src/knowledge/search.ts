@@ -24,6 +24,18 @@ export interface ScoredCandidate {
   updatedAt: string;
   /** 知識の種類（第11.11.1節）。点が足りた節を、社内規程 → 議事録 → 秘書が学んだことの順に並べる。無ければ社内規程と同じ。 */
   category?: 'rule' | 'minutes' | 'learned';
+  /** 確かめた人の数（秘書が学んだこと。第11.13.6節）。無ければ 1。 */
+  confirmations?: number;
+}
+
+/**
+ * 確かめた人の多さによる重み（第11.13.6節）。秘書が学んだことの中でだけ、並べるときに点に掛ける（2 人で 1.15 倍、4 人以上で 1.45 倍）。
+ *
+ * @remarks 点の足切り（最上位の 3 割）には使わない。種類の順（社内規程 → 議事録 → 秘書が学んだこと）は変えない
+ */
+export function confirmationWeight(c: { category?: ScoredCandidate['category']; confirmations?: number }): number {
+  if (c.category !== 'learned') return 1;
+  return 1 + 0.15 * Math.min(Math.max((c.confirmations ?? 1) - 1, 0), 3);
 }
 
 /** 知識の種類の呼び名（第11.11.1節）。根拠に添えて、推論と利用者に種類を示す。 */
@@ -250,7 +262,7 @@ export function orderSections<T extends ScoredCandidate>(
   return all
     .filter((c) => c.score >= top * 0.3)
     .sort((a, b) => CATEGORY_ORDER[a.category ?? 'rule'] - CATEGORY_ORDER[b.category ?? 'rule']
-      || b.score - a.score || b.updatedAt.localeCompare(a.updatedAt));
+      || b.score * confirmationWeight(b) - a.score * confirmationWeight(a) || b.updatedAt.localeCompare(a.updatedAt));
 }
 
 /** 返す節を上から選ぶ（最大 5 節、本文の合計 8,000 字まで。第11.7.4節）。 */
@@ -285,7 +297,7 @@ export type MatchedBy = 'words' | 'meaning' | 'both';
  * @returns 合わせた並び。社内規程 → 議事録 → 秘書が学んだことの順を保ち、同じ種類の中を融合の点の高い順にする
  * @remarks 点数そのものは足さない（尺度が違うため）。順位 r ごとに 1 ÷ (60 + r) を足す
  */
-export function fuseRankings<T extends { category?: ScoredCandidate['category'] }>(
+export function fuseRankings<T extends { category?: ScoredCandidate['category']; confirmations?: number }>(
   words: T[], meaning: T[], keyOf: (x: T) => string,
 ): (T & { matchedBy: MatchedBy; fused: number })[] {
   const by = new Map<string, { item: T; fused: number; w: boolean; m: boolean }>();
@@ -297,6 +309,7 @@ export function fuseRankings<T extends { category?: ScoredCandidate['category'] 
     if (hit) { hit.fused += 1 / (RRF_K + i + 1); hit.m = true; } else by.set(keyOf(x), { item: x, fused: 1 / (RRF_K + i + 1), w: false, m: true });
   });
   return [...by.values()]
-    .sort((a, b) => CATEGORY_ORDER[a.item.category ?? 'rule'] - CATEGORY_ORDER[b.item.category ?? 'rule'] || b.fused - a.fused)
+    .sort((a, b) => CATEGORY_ORDER[a.item.category ?? 'rule'] - CATEGORY_ORDER[b.item.category ?? 'rule']
+      || b.fused * confirmationWeight(b.item) - a.fused * confirmationWeight(a.item))
     .map((x) => ({ ...x.item, fused: x.fused, matchedBy: x.w && x.m ? 'both' : x.w ? 'words' : 'meaning' }));
 }

@@ -34,6 +34,8 @@ const MEMORY_MEANING = 30;
 const MEMORY_WORDS = 10;
 /** 意味が近いとみなす類似度（記憶と要約。依頼の文とのコサイン類似度）。 */
 export const MEMORY_MEANING_THRESHOLD = 0.5;
+/** 進んでいる案件ノートを渡す数（最後に動いた日の新しい順。いつも渡す。第11.13.5節）。 */
+const CASES_MAX = 15;
 /** 仕事のやり方の好みを渡す上限（新しいものから。いつも渡す。第11.13.2節）。 */
 const PREFERENCE_MAX = 30;
 /** 1 件の文の長さの上限（字）。 */
@@ -92,13 +94,14 @@ export async function recall(
 ): Promise<Recall> {
   // 1 つが読めなくても答えは返す（記憶が欠けても、秘書が使えなくなるよりよい）
   const safe = <T>(read: () => Promise<T[]>): Promise<T[]> => Promise.resolve().then(read).catch(() => []);
-  const [today, digests, allMemories, work, profile, settings] = await Promise.all([
+  const [today, digests, allMemories, work, profile, settings, cases] = await Promise.all([
     safe(() => repo.listConversationsOfDay(tenantId, userId, jstDay(now))),
     safe(() => repo.listConversationDigests(tenantId, userId, DIGEST_SCAN)),
     safe(() => repo.listMemories(tenantId, userId)),
     safe(() => repo.listRunsWithJobs(tenantId, { limit: WORK_MAX, requestedBy: userId })),
     Promise.resolve().then(() => repo.getUserProfile(tenantId, userId)).catch(() => null),
     Promise.resolve().then(() => repo.getUserSettings(tenantId, userId)).catch(() => null),
+    safe(() => repo.listCaseNotes(tenantId, userId, { limit: CASES_MAX })),
   ]);
   // 仕事のやり方の好みは、いつも渡す。事実の選び方とは別にする（第11.13.2節）
   const preferences = allMemories.filter((m) => m.kind === 'preference').slice(0, PREFERENCE_MAX);
@@ -169,6 +172,9 @@ export async function recall(
 
   const blocks: string[] = [];
   if (profileText) blocks.push('## 本人の像（あなたがこの人についてまとめたもの）', profileText, '');
+  // 進んでいる案件（第11.13.5節）。「あれどうなった」の材料
+  const caseLines = cases.map((c) => `- 〔${c.title}〕${cut(c.state, 200)}${c.nextStep ? `／次: ${cut(c.nextStep, 120)}` : ''}${c.dueOn ? `／期限: ${c.dueOn}` : ''}（最後に動いた日 ${c.lastDay}）`);
+  if (caseLines.length) blocks.push('## 進んでいる案件（あなたがまとめたもの。新しい順）', ...caseLines, '');
   if (preferenceLines.length) blocks.push('## 仕事のやり方の好み（いつも守る。会社の決まりと食い違えば会社の決まりを採る）', ...preferenceLines, '');
   if (memoryLines.length) blocks.push('## 覚えている事実', ...memoryLines, '');
   if (todayLines.length) blocks.push('## 今日のやり取り（古い順）', ...todayLines, '');
@@ -187,6 +193,7 @@ export async function recall(
   const counts = [
     profileText ? '本人の像' : '',
     preferenceLines.length ? `仕事のやり方の好み ${preferenceLines.length} 件` : '',
+    caseLines.length ? `進んでいる案件 ${caseLines.length} 件` : '',
     memoryLines.length ? `覚えている事実 ${memoryLines.length} 件` : '',
     todayLines.length ? `今日のやり取り ${todayLines.length} 件` : '',
     digestLines.length ? `会話の要約 ${digestLines.length} 日分` : '',

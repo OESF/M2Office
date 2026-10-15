@@ -255,6 +255,22 @@ export function meRoute(deps: AppDeps) {
     });
   });
 
+  /** 進んでいる案件ノート（第11.13.5節）。秘書がまとめたもの。本人のものだけを返す。 */
+  app.get('/cases', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    return c.json({ items: await deps.repo.listCaseNotes(tenant.id, user.id, { limit: 50 }) });
+  });
+
+  /** 案件ノートを 1 つ消す（本人が要らないとした）。 */
+  app.delete('/cases/:id', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const ok = await deps.repo.deleteCaseNote(tenant.id, user.id, c.req.param('id'));
+    if (!ok) return c.json({ error: '案件が見つかりません' }, 404);
+    // 中身は監査ログに入れない
+    await audit(deps, tenant.id, user.id, 'memory.case_delete', c.req.param('id'));
+    return c.json({ ok: true });
+  });
+
   /** 整理でしまった記憶（第11.11.4節）。理由（まとめた・古い・使われない）とともに返す。1 年で消える。 */
   app.get('/memories/archived', async (c) => {
     const { tenant, user } = c.get('ctx');

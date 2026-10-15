@@ -14,7 +14,7 @@ import type {
   StoredFile, Tenant, TenantSettings, User, UserGroup, GroupChatSpace, UserSettings,
 } from '@m2office/shared';
 import { DEFAULT_TENANT_SETTINGS, DEFAULT_USER_SETTINGS, STANDARD_SYNONYMS } from '@m2office/shared';
-import type { AgentEvent, Plan, PlanStep, DecidedApproval, AuditQuery, CompartmentAssignment, Conversation, ConversationDigest, MemoryCandidate, Promotion, CredentialKind, GoogleConnection, UserPhoto, TenantCredential, TenantConnection, ConnectionSecret, UserConnection, DisabledConnectorTool, InstalledExtension, PrivateExtension, KnowledgeEmbedItem, KnowledgeEmbedStatus, KnowledgeItem, KnowledgeSearchOptions, KnowledgeSearchResult, KnowledgeSectionView, KnowledgeStatus, KnowledgeVersion, Memory, MemoryEmbedItem, Repository, RunStatRow, UserProfile } from './types.js';
+import type { AgentEvent, Plan, PlanStep, DecidedApproval, AuditQuery, CompartmentAssignment, Conversation, ConversationDigest, MemoryCandidate, Promotion, CredentialKind, GoogleConnection, UserPhoto, TenantCredential, TenantConnection, ConnectionSecret, UserConnection, DisabledConnectorTool, InstalledExtension, PrivateExtension, KnowledgeEmbedItem, KnowledgeEmbedStatus, KnowledgeItem, KnowledgeSearchOptions, KnowledgeSearchResult, KnowledgeSectionView, KnowledgeStatus, KnowledgeVersion, Memory, MemoryEmbedItem, CaseNote, Repository, RunStatRow, UserProfile } from './types.js';
 import { SPLIT_VERSION, citationOf, splitKnowledge } from '../knowledge/sections.js';
 import { FUSION_DEPTH, SEARCH_CANDIDATES, SEMANTIC_THRESHOLD, asksOldVersion, bigrams, expandTerms, extractTerms, fuseRankings, limitSections, normalizeForSearch, orderSections, rankSections, rewritesOf } from '../knowledge/search.js';
 import { createHash } from 'node:crypto';
@@ -27,7 +27,7 @@ const OLD_VERSION_SCAN = 30;
 const KNOWLEDGE_COLUMNS = `k.id, k.tenant_id as "tenantId", k.kind, k.title, k.body, k.source, k.compartment,
   k.updated_at as "updatedAt", k.version, k.origin_run_id as "originRunId", k.google_derived as "googleDerived",
   k.category, k.status, k.status_at as "statusAt", k.status_reason as "statusReason", k.effective_from::text as "effectiveFrom",
-  k.last_used_at as "lastUsedAt", k.merged_into as "mergedInto"`;
+  k.last_used_at as "lastUsedAt", k.merged_into as "mergedInto", k.confirmations`;
 /** 版の一覧の列（別名 `v` と、その知識 `k`）。 */
 const VERSION_COLUMNS = `v.item_id as "itemId", v.version, v.effective_from::text as "effectiveFrom", v.title, v.source,
   v.compartment, v.saved_by as "savedBy", v.saved_at as "savedAt", (v.version = k.version) as current,
@@ -569,10 +569,10 @@ export class PostgresRepository implements Repository {
     const patterns = [...new Set(concepts.flatMap((c) => c.alternatives.flatMap(bigrams)))].map((g) => `%${escapeLike(g)}%`);
     const rows = await this.q<{
       id: string; ordinal: number; title: string; heading: string; path: string[]; body: string; source: string;
-      compartment: string | null; updatedAt: string; category: 'rule' | 'minutes' | 'learned';
+      compartment: string | null; updatedAt: string; category: 'rule' | 'minutes' | 'learned'; confirmations: number;
     }>(tenantId,
       `select s.item_id as id, s.ordinal, k.title, s.heading, s.path, s.body, k.source, s.compartment,
-              k.updated_at as "updatedAt", k.category
+              k.updated_at as "updatedAt", k.category, k.confirmations
          from knowledge_sections s
          join knowledge_items k on k.id = s.item_id and k.tenant_id = s.tenant_id
         where s.tenant_id = $1
@@ -631,10 +631,10 @@ export class PostgresRepository implements Repository {
     if (!q) return null;
     const rows = await this.q<{
       id: string; ordinal: number; title: string; heading: string; path: string[]; body: string; source: string;
-      compartment: string | null; updatedAt: string; category: 'rule' | 'minutes' | 'learned'; similarity: number;
+      compartment: string | null; updatedAt: string; category: 'rule' | 'minutes' | 'learned'; confirmations: number; similarity: number;
     }>(tenantId,
       `select s.item_id as id, s.ordinal, k.title, s.heading, s.path, s.body, k.source, s.compartment,
-              k.updated_at as "updatedAt", k.category, 1 - (s.embedding <=> $2::vector) as similarity
+              k.updated_at as "updatedAt", k.category, k.confirmations, 1 - (s.embedding <=> $2::vector) as similarity
          from knowledge_sections s
          join knowledge_items k on k.id = s.item_id and k.tenant_id = s.tenant_id
         where s.tenant_id = $1
@@ -1638,8 +1638,10 @@ export class PostgresRepository implements Repository {
     const rows = await this.q<{ id: string }>(tenantId,
       `delete from memories where tenant_id = $1 and user_id = $2 returning id`,
       [tenantId, userId]);
-    // 記憶をすべて消したら、本人の像も消す（第11.13.1節）
+    // 記憶をすべて消したら、本人の像と案件ノートも消す（第11.13.1節・第11.13.5節）
     await this.deleteUserProfile(tenantId, userId);
+    await this.q(tenantId, `delete from case_notes where tenant_id = $1 and user_id = $2`, [tenantId, userId]);
+    await this.q(tenantId, `delete from case_note_runs where tenant_id = $1 and user_id = $2`, [tenantId, userId]);
     return rows.length;
   }
 
@@ -1721,6 +1723,55 @@ export class PostgresRepository implements Repository {
       `select day, 1 - (embedding <=> $3::vector) as similarity from conversation_digests
         where tenant_id = $1 and user_id = $2 and compartment is null and embedded_at is not null and embedding_model = $4
         order by embedding <=> $3::vector limit $5`, [tenantId, userId, `[${vector.join(',')}]`, model, limit]);
+  }
+
+  async confirmKnowledge(tenantId: string, id: string): Promise<void> {
+    await this.q(tenantId, `update knowledge_items set confirmations = confirmations + 1 where tenant_id = $1 and id = $2`, [tenantId, id]);
+  }
+
+  async listCaseNotes(tenantId: string, userId: string, opts: { status?: 'open' | 'closed' | 'all'; limit?: number } = {}): Promise<CaseNote[]> {
+    const status = opts.status ?? 'open';
+    return this.q<CaseNote>(tenantId,
+      `select id, tenant_id as "tenantId", user_id as "userId", title, state, next_step as "nextStep", due_on::text as "dueOn",
+              status, last_day::text as "lastDay", created_at as "createdAt", updated_at as "updatedAt"
+         from case_notes where tenant_id = $1 and user_id = $2 and ($3 = 'all' or status = $3)
+        order by last_day desc, updated_at desc limit $4`, [tenantId, userId, status, opts.limit ?? 200]);
+  }
+
+  async saveCaseNote(n: CaseNote): Promise<void> {
+    await this.q(n.tenantId,
+      `insert into case_notes (id, tenant_id, user_id, title, state, next_step, due_on, status, last_day, closed_at, created_at, updated_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9, case when $8 = 'closed' then $11::timestamptz else null end, $10, $11)
+       on conflict (id) do update set title = excluded.title, state = excluded.state, next_step = excluded.next_step, due_on = excluded.due_on,
+         status = excluded.status, last_day = excluded.last_day, updated_at = excluded.updated_at,
+         closed_at = case when excluded.status = 'closed' then coalesce(case_notes.closed_at, excluded.updated_at) else null end
+       where case_notes.tenant_id = excluded.tenant_id and case_notes.user_id = excluded.user_id`,
+      [n.id, n.tenantId, n.userId, n.title, n.state, n.nextStep, n.dueOn, n.status, n.lastDay, n.createdAt, n.updatedAt]);
+  }
+
+  async deleteCaseNote(tenantId: string, userId: string, id: string): Promise<boolean> {
+    return (await this.q<{ id: string }>(tenantId, `delete from case_notes where tenant_id = $1 and user_id = $2 and id = $3 returning id`, [tenantId, userId, id])).length > 0;
+  }
+
+  async closeIdleCaseNotes(tenantId: string, userId: string, before: string, at: string): Promise<number> {
+    return (await this.q<{ id: string }>(tenantId,
+      `update case_notes set status = 'closed', closed_at = $4, updated_at = $4
+        where tenant_id = $1 and user_id = $2 and status = 'open' and last_day < $3::date returning id`, [tenantId, userId, before, at])).length;
+  }
+
+  async purgeClosedCaseNotes(tenantId: string, before: string): Promise<number> {
+    return (await this.q<{ id: string }>(tenantId, `delete from case_notes where tenant_id = $1 and status = 'closed' and closed_at < $2 returning id`, [tenantId, before])).length;
+  }
+
+  async getCaseNoteRun(tenantId: string, userId: string): Promise<string | null> {
+    const rows = await this.q<{ ranAt: Date | string }>(tenantId, `select ran_at as "ranAt" from case_note_runs where tenant_id = $1 and user_id = $2`, [tenantId, userId]);
+    return rows[0] ? new Date(rows[0].ranAt).toISOString() : null;
+  }
+
+  async setCaseNoteRun(tenantId: string, userId: string, at: string): Promise<void> {
+    await this.q(tenantId,
+      `insert into case_note_runs (tenant_id, user_id, ran_at) values ($1,$2,$3) on conflict (tenant_id, user_id) do update set ran_at = excluded.ran_at`,
+      [tenantId, userId, at]);
   }
 
   async getUserProfile(tenantId: string, userId: string): Promise<UserProfile | null> {

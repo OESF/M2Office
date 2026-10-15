@@ -17,7 +17,7 @@ import {
   RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, GoogleContactsService, KnowledgeEmbedder, MemoryEmbedder, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, JGrantsApi, MockJGrants, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, MEMBER_LINE_SEND, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, EffectService, PostgresEffectStore, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger,
   NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
-  defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator, ProfileBuilder, aiUsageMeterFromEnv, enterAiUsage, withAiUsage, setEnqueueAiGuard, AutoMinutes, MINUTES_AGENT_ID, appPath, backupConfigFromEnv, machineDir, readBackupStatus, takeUnnotifiedUpdateFailure, takeClosedMaintenanceSessions, heartbeatConfigFromEnv, sendHeartbeat, HEARTBEAT_INTERVAL_MS, machineStatus, machineConfigFromEnv, restoreTest, runBackup, takeBackupRequest, writeWorkerBeat, OpsAppSide, createPool, offsiteConfigFromEnv, readOffsiteStatus, runOffsite, checkOffsite,
+  defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator, ProfileBuilder, CaseNoteBuilder, KnowledgeGaps, PostgresKnowledgeGapStore, aiUsageMeterFromEnv, enterAiUsage, withAiUsage, setEnqueueAiGuard, AutoMinutes, MINUTES_AGENT_ID, appPath, backupConfigFromEnv, machineDir, readBackupStatus, takeUnnotifiedUpdateFailure, takeClosedMaintenanceSessions, heartbeatConfigFromEnv, sendHeartbeat, HEARTBEAT_INTERVAL_MS, machineStatus, machineConfigFromEnv, restoreTest, runBackup, takeBackupRequest, writeWorkerBeat, OpsAppSide, createPool, offsiteConfigFromEnv, readOffsiteStatus, runOffsite, checkOffsite,
   SecurityWatch, PostgresSecurityStore,
 } from '@m2office/core';
 import { canRunAgent, fileInputKey } from '@m2office/shared';
@@ -446,8 +446,12 @@ const plans = new PlanRunner({
     return runId;
   },
 });
+// 秘書が答えられなかった問い（第11.13.6節）。週 1 回（月曜の 8 時を過ぎてから）探し直して管理者に知らせる
+const knowledgeGaps = new KnowledgeGaps({ store: new PostgresKnowledgeGapStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), repo, logger: log });
 const conductor = new SecretaryConductor({
   repo, learning, plans, logger: log,
+  // 社内ナレッジ Q&A が答えられなかった問い（第11.13.6節）
+  knowledgeGap: (tenantId, question, source) => knowledgeGaps.record(tenantId, question, source),
   // 業務の名前と権限区画を引く（本人が直接使った業務からも学ぶ。ADR-0038）
   agentsFor: async (tenantId) => (await hub.forTenant(tenantId)).allAgents,
 });
@@ -556,6 +560,11 @@ const consolidator = new Consolidator({ repo, llm: (tenantId) => ai.llmFor(tenan
 // 本人の像（仕様書 第11.13.1節、ADR-0095）。10 分ごとに、まだ無い人・作り直す印のある人・7 日を過ぎて新しく覚えたことのある人の像を作る
 const PROFILE_INTERVAL_MS = Number(process.env['PROFILE_INTERVAL_MS'] ?? 600_000);
 let lastProfileCheck = 0;
+// 案件ノート（第11.13.5節）。10 分ごとに見て、本人ごとに 1 日 1 回（4 時を過ぎてから）書き足す
+const cases = new CaseNoteBuilder({
+  repo, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
+  agentName: async (tenantId, agentId) => (await hub.forTenant(tenantId)).allAgents.find((a) => a.id === agentId)?.name ?? agentId,
+});
 const profiles = new ProfileBuilder({
   repo, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
   agentName: async (tenantId, agentId) => (await hub.forTenant(tenantId)).allAgents.find((a) => a.id === agentId)?.name ?? agentId,
@@ -1154,9 +1163,25 @@ while (running) {
     }
   }
 
-  // 本人の像を作る・作り直す（第11.13.1節）
+  // 本人の像と案件ノートを作る・書き足す（第11.13.1節・第11.13.5節）。答えられなかった問いの週 1 回の見直し（第11.13.6節）
   if (Date.now() - lastProfileCheck >= PROFILE_INTERVAL_MS) {
     lastProfileCheck = Date.now();
+    try {
+      const r = await withAiUsage({ purpose: 'worker:cases' }, () => cases.tick(new Date()));
+      if (r.users > 0) log.info('案件ノートを書き足しました', r);
+    } catch (err) {
+      log.warn('案件ノートの見回りに失敗しました', { err });
+    }
+    for (const tenantId of await repo.listTenantIds().catch(() => [] as string[])) {
+      try {
+        if (await knowledgeGaps.due(tenantId, new Date())) {
+          const r = await knowledgeGaps.weekly(tenantId, new Date());
+          if (r.answered + r.open > 0) log.info('答えられなかった問いを見直しました', { tenantId, ...r });
+        }
+      } catch (err) {
+        log.warn('答えられなかった問いの見直しに失敗しました', { tenantId, err });
+      }
+    }
     try {
       const r = await withAiUsage({ purpose: 'worker:profile' }, () => profiles.tick(new Date()));
       if (r.built > 0) log.info('本人の像を作りました', { built: r.built });

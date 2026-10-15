@@ -24,6 +24,7 @@ import { cancelPlan, createPlan, planStatusText } from './plan.js';
 import { AI_NOT_CONFIGURED_MESSAGE, aiAvailable } from '../llm/unconfigured.js';
 import { expandQuery } from '../knowledge/expand.js';
 import { queryEmbedder, semanticSearchEnabled } from '../knowledge/embed.js';
+import { UNKNOWN_ANSWER } from '../knowledge/gaps.js';
 import { memorySemanticEnabled } from '../memory/embed.js';
 import { jstDay } from '../memory/learn.js';
 import { bulkMailRequest, contactRequest } from './contacts.js';
@@ -80,6 +81,8 @@ export interface SecretaryDeps {
   help?: HelpCatalog;
   /** ヘルプに見当たらなかった使い方の質問を残す（質問した人は渡さない。仕様書 第6.10.10節） */
   helpMiss?(tenantId: string, question: string): Promise<void>;
+  /** 会社の知識に当たる箇所が無く、分からないと答えた問いを残す（質問した人は渡さない。第11.13.6節） */
+  knowledgeGap?(tenantId: string, question: string, source: 'secretary'): Promise<void>;
   /** ヘルプの記事の会社の補足（管理者が書いた社内向けの補足。第6.10.7節）。無ければ `null` */
   helpNote?(tenantId: string, articleId: string): Promise<string | null>;
   /** 会社の補足を書く・消す（文が空なら消す。管理者が秘書に頼んだとき。第6.10.7節） */
@@ -635,6 +638,10 @@ export class Secretary {
         reply: { layer: 'full', text: 'この場ではお調べできません。分かる範囲のことを聞いていただくか、しばらくしてからお試しください。', evidence: [], tokensUsed: res.tokensUsed },
         keep: true,
       };
+    }
+    // 会社の知識に当たる箇所が無く、分からないと答えたら、答えられなかった問いとして残す（第11.13.6節）。本人の過去を指す問いは除く
+    if (this.deps.knowledgeGap && knowledge.evidence.length === 0 && UNKNOWN_ANSWER.test(res.text) && !REFERS_TO_PAST.test(message)) {
+      void this.deps.knowledgeGap(tenantId, message, 'secretary').catch(() => undefined);
     }
     // 本文から出典の申告の行と括弧を外し、根拠にした出典を「根拠」の先頭に並べる（第6.2節・第10.9.4.1節）
     const answer = splitCitations(res.text, knowledge.evidence);

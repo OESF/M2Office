@@ -7246,5 +7246,25 @@ console.log('\n■ 91. 秘書の成長（本人の像と好みの数を本人に
   }
 }
 
+console.log('\n■ 92. 秘書の成長の段 3（案件ノートは本人だけ・答えられなかった問いは管理者だけで誰が聞いたかを返さない。第11.13.5節・第11.13.6節）');
+{
+  try {
+    const mine = await call('a', '/v1/me/cases');
+    const del = await call('a', '/v1/me/cases/no-such-case', { method: 'DELETE' });
+    mine.status === 200 && Array.isArray(mine.body?.items) && del.status === 404
+      ? ok('案件ノートは本人のものだけを返し、ほかの案件は消せない') : ng('案件ノートの口が違う', JSON.stringify({ s: mine.status, d: del.status }));
+    const gaps = await call('a', '/v1/admin/knowledge/gaps');
+    const byMember = await call('a', '/v1/admin/knowledge/gaps', {}, 'member');
+    const bad = await call('a', '/v1/admin/knowledge/gaps/dismiss', { method: 'POST', body: '{}' });
+    gaps.status === 200 && Array.isArray(gaps.body?.items) && gaps.body.items.every((g) => !('userId' in g)) && byMember.status === 403 && bad.status === 400
+      ? ok('答えられなかった問いは管理者だけが見られ、誰が聞いたかは返さない') : ng('答えられなかった問いの口が違う', JSON.stringify({ s: gaps.status, m: byMember.status, bad: bad.status }));
+    const list = (await call('a', '/v1/admin/knowledge')).body?.items ?? [];
+    list.filter((k) => k.category === 'learned').every((k) => typeof k.confirmations === 'number')
+      ? ok('秘書が学んだことに、確かめた人の数が付く') : ng('確かめた人の数が無い');
+  } catch (err) {
+    ng('秘書の成長の段 3 の確認が途中で止まった', String(err));
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');

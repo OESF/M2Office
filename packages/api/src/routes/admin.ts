@@ -451,6 +451,17 @@ export function adminRoute(deps: AppDeps) {
     return c.json({ items, compartments, consolidated, semantic: embed?.available && semanticSearchEnabled() ? { ready: embed.ready, total: embed.total } : null });
   });
 
+  /** 秘書が答えられなかった問い（第11.13.6節）。同じ問いをまとめ、回数・最後に聞かれた日・答えが入ったか。誰が聞いたかは返さない。 */
+  app.get('/knowledge/gaps', async (c) => c.json(await deps.knowledgeGaps.summary(c.get('ctx').tenant.id)));
+
+  /** 答えられなかった問いを外す（同じ問いをまとめて）。 */
+  app.post('/knowledge/gaps/dismiss', async (c) => {
+    const body = await c.req.json<{ question?: unknown }>().catch(() => ({} as { question?: unknown }));
+    if (typeof body.question !== 'string' || !body.question.trim()) return c.json({ error: '問いがありません' }, 400);
+    await deps.knowledgeGaps.dismiss(c.get('ctx').tenant.id, body.question);
+    return c.json({ ok: true });
+  });
+
   /** 日本時間の今日。 */
   const today = () => new Date(Date.now() + 9 * 3_600_000).toISOString().slice(0, 10);
   /** 廃止・しまったものを戻せる期間（第11.11.2節・第11.11.4節）。 */

@@ -31,6 +31,8 @@ export interface ConductorDeps {
   agentsFor?(tenantId: string): Promise<AgentDefinition[]>;
   /** 秘書の分身（段取り役。第10.14節）。無ければ段取りのイベントは記録だけにする。 */
   plans?: Pick<PlanRunner, 'onRequested' | 'onResumed' | 'onStepRun'>;
+  /** 社内ナレッジ Q&A が会社の知識に当たる箇所を見つけられなかった問いを残す（誰が聞いたかは渡さない。第11.13.6節） */
+  knowledgeGap?(tenantId: string, question: string, source: 'knowledge-qa'): Promise<void>;
   logger?: Logger;
 }
 
@@ -126,12 +128,24 @@ export class SecretaryConductor {
     const run = await repo.getRun(event.tenantId, event.runId);
     const job = run ? await repo.getJob(event.tenantId, run.jobId) : null;
     if (!run || !job || job.requestedBy !== event.userId) return { event, action: 'skipped', reason: '実行がありません' };
+    // 社内ナレッジ Q&A の検索が 0 件なら、答えられなかった問いとして残す（第11.13.6節）。学ぶかどうかとは別に行う
+    if (job.agentId === 'knowledge-qa' && this.deps.knowledgeGap && typeof job.input['question'] === 'string') {
+      await this.recordGap(event.tenantId, run.id, job.input['question']).catch((err: unknown) => this.log.warn('答えられなかった問いを残せませんでした', { err: String(err) }));
+    }
     const agents = this.deps.agentsFor ? await this.deps.agentsFor(event.tenantId) : OFFICIAL_AGENTS;
     if (!learnableWork({ run, job }, agents)) return { event, action: 'skipped', reason: '学ぶ対象ではない業務' };
     const work = await readWorkAnswers(repo, event.tenantId, [{ run, job }], agents, WORK_ANSWER_MAX);
     if (work.length === 0) return { event, action: 'skipped', reason: '答えがありません' };
     const r = await learning.learnNow(event.tenantId, event.userId, { work }, now);
     return { event, action: 'learned', learned: r.learned, promoted: r.promoted };
+  }
+
+  /** 社内ナレッジ Q&A の実行で、知識の検索がすべて 0 件だったら問いを残す。 */
+  private async recordGap(tenantId: string, runId: string, question: string): Promise<void> {
+    const steps = await this.deps.repo.listRunSteps(tenantId, runId);
+    const searches = steps.flatMap((s) => ((s.output as { tools?: { name?: string; result?: { found?: number } }[] } | null)?.tools ?? []))
+      .filter((t) => t.name === 'knowledge.search');
+    if (searches.length > 0 && searches.every((t) => (t.result?.found ?? 0) === 0)) await this.deps.knowledgeGap!(tenantId, question, 'knowledge-qa');
   }
 
   /** その実行が、学ばない業務（第12.12.3節）のものか。業務が分からなければ学ぶ側に倒さない（学ばない）。 */

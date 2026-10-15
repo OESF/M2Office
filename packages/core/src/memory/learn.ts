@@ -131,12 +131,30 @@ export function promotionPrompt(memories: { text: string }[], known: string[] = 
     'この中で、**会社のほかの人にも役立つ**ものの番号だけを、「- 1」のように 1 行に 1 つ挙げてください。挙げたものは、そのまま会社の知識になります。',
     '挙げてよいもの: 社内の手順や決まり、担当や窓口、社内の用語や通称、取引先とのやり方、仕事で分かった事実。',
     '挙げてはならないもの: その人だけの好みや癖、その人の予定、ほかの人の個人情報（健康・家族・評価など）、機微なこと、'
-      + '在庫の数や残りわずかのような、すぐ変わる数や状態（在庫管理で要るたびに引く）、下の「会社の知識にすでにあること」と同じ内容。',
+      + '在庫の数や残りわずかのような、すぐ変わる数や状態（在庫管理で要るたびに引く）。',
+    '会社のほかの人にも役立つもので、下の「会社の知識にすでにあること」と同じ事柄のものは、「- 3=K2」のように、すでにある知識の番号を添えて挙げてください（新しく登録せず、確かめた人を増やします）。',
     '当てはまるものが無ければ、何も書かないでください。番号以外は書かないでください。',
     '',
     ...memories.map((m, i) => `${i + 1}. ${m.text}`),
-    ...(known.length > 0 ? ['', '会社の知識にすでにあること（参考。番号は付けない）:', ...known.map((k) => `・${k}`)] : []),
+    ...(known.length > 0 ? ['', '会社の知識にすでにあること:', ...known.map((k, i) => `K${i + 1}. ${k}`)] : []),
   ].join('\n');
+}
+
+/**
+ * 応答から、すでにある知識と同じとされた組を取り出す（「- 3=K2」。1 始まり。第11.13.6節）。
+ *
+ * @returns 記憶の番号 → すでにある知識の番号
+ */
+export function parseSameAsKnown(text: string, max: number, known: number): Map<number, number> {
+  const out = new Map<number, number>();
+  for (const line of text.split('\n')) {
+    const m = /^[-*\s]*([0-9]+)\s*[=＝]\s*[KkＫ]\s*([0-9]+)\s*$/.exec(line.trim());
+    if (!m) continue;
+    const a = Number(m[1]);
+    const b = Number(m[2]);
+    if (a >= 1 && a <= max && b >= 1 && b <= known && !out.has(a)) out.set(a, b);
+  }
+  return out;
 }
 
 /** 応答から番号を取り出す（1 始まり）。 */
@@ -307,7 +325,9 @@ export class MemoryLearning {
       .reverse().slice(0, PROMOTION_BATCH);
     if (memories.length === 0) return 0;
 
-    const known = (await repo.listKnowledge(tenantId)).filter((k) => k.kind === 'promoted').map((k) => k.body).slice(0, 80);
+    // すでにある秘書が学んだこと（同じ事柄なら、確かめた人を増やす。第11.13.6節）
+    const knownItems = (await repo.listKnowledge(tenantId)).filter((k) => k.kind === 'promoted').slice(0, 80);
+    const known = knownItems.map((k) => k.body);
     // 番号を選ぶだけの仕事。高速モデルで足りる（仕様書 第20.2.2節）
     const res = await llm.complete({
       tier: 'fast',
@@ -318,12 +338,34 @@ export class MemoryLearning {
       ],
     });
     const chosen = new Set(parseSuggestedNumbers(res.text, memories.length));
+    const same = parseSameAsKnown(res.text, memories.length, knownItems.length);
+    // この人がすでに確かめた知識（同じ人では増やさない）
+    const confirmedByMe = new Set(history.filter((p) => p.status === 'approved' && p.knowledgeId).map((p) => p.knowledgeId!));
+    let confirmed = 0;
     const knownBodies = new Set(known);
     const at = now.toISOString();
     let made = 0;
     for (const [i, memory] of memories.entries()) {
       const promote = chosen.has(i + 1) && !knownBodies.has(memory.text);
       let knowledgeId: string | null = null;
+      const sameAs = same.get(i + 1);
+      const target = sameAs ? knownItems[sameAs - 1] : undefined;
+      if (!promote && target) {
+        // すでにある会社の知識と同じ事柄。新しく登録せず、確かめた人を増やす
+        if (!confirmedByMe.has(target.id)) {
+          await repo.confirmKnowledge(tenantId, target.id);
+          confirmedByMe.add(target.id);
+          confirmed++;
+        }
+        const record = {
+          tenantId, userId, memoryId: memory.id, text: memory.text, status: 'approved' as const, knowledgeId: target.id,
+          decidedBy: null, comment: '会社の知識にすでにあるものと同じ（確かめた人が増えました）', decidedAt: now.toISOString(),
+        };
+        const old = waiting.get(memory.id);
+        if (old) await repo.updatePromotion({ ...old, ...record });
+        else await repo.createPromotion({ id: randomUUID(), ...record, createdAt: now.toISOString() });
+        continue;
+      }
       if (promote) {
         knowledgeId = `promoted-${randomUUID()}`;
         await repo.saveKnowledge({
@@ -350,6 +392,13 @@ export class MemoryLearning {
         id: randomUUID(), tenantId, actorType: 'system', actorId: 'learning',
         action: 'knowledge.promote.auto', targetType: 'user', targetId: userId,
         detail: { promoted: made }, occurredAt: at,
+      });
+    }
+    if (confirmed > 0) {
+      await repo.appendAudit({
+        id: randomUUID(), tenantId, actorType: 'system', actorId: 'learning',
+        action: 'knowledge.confirm.auto', targetType: 'user', targetId: userId,
+        detail: { confirmed }, occurredAt: at,
       });
     }
     return made;

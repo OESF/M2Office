@@ -678,6 +678,45 @@ const day = (iso: string | null | undefined) => (iso ? iso.slice(0, 10) : '—')
  * 同じ見た目の削除のボタンを、社内規程と議事録に置かない。
  */
 export function KnowledgeSettings({ page }: { page: string }) {
+  if (page === 'gaps') return <KnowledgeGapList />;
+  return <KnowledgeItems page={page} />;
+}
+
+/**
+ * 秘書が答えられなかった問い（仕様書 第11.13.6節）。同じ問いをまとめ、回数・最後に聞かれた日・答えが入ったか。誰が聞いたかは出さない。
+ * 規程や手順を足すかは管理者が決める。要らない問いは「外す」。
+ */
+function KnowledgeGapList() {
+  const [data, setData] = useState<Awaited<ReturnType<typeof api.admin.knowledgeGaps>> | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const load = () => api.admin.knowledgeGaps().then(setData).catch((e) => setMsg(describeError(e, '読み込めませんでした')));
+  useEffect(() => { void load(); }, []);
+  const day = (iso: string) => new Date(iso).toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' });
+  return (
+    <>
+      <PageTitle trail={['知識', '答えられなかった問い']} help={KNOWLEDGE_HELP['gaps']} />
+      {msg && <p className="error">{msg}</p>}
+      {!data ? <p className="muted">読み込み中…</p> : data.items.length === 0 ? <p className="muted">直近 {data.keepDays} 日はありません</p> : (
+        <table className="table">
+          <thead><tr><th>問い</th><th className="num">回数</th><th className="nowrap">最後</th><th>答え</th><th /></tr></thead>
+          <tbody>
+            {data.items.map((g) => (
+              <tr key={g.question}>
+                <td>{g.question}</td>
+                <td className="num">{g.count}</td>
+                <td className="nowrap">{day(g.lastAt)}</td>
+                <td>{g.answered ? <span className="badge ok">入った{g.answered.title ? `（${g.answered.title}）` : ''}</span> : <span className="muted">まだ</span>}</td>
+                <td className="num"><button className="btn ghost small" onClick={() => void api.admin.dismissKnowledgeGap(g.question).then(load).catch((e) => setMsg(describeError(e, '外せませんでした')))}>外す</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </>
+  );
+}
+
+function KnowledgeItems({ page }: { page: string }) {
   const category = KNOWLEDGE_CATEGORY[page] ?? 'rule';
   const [items, setItems] = useState<KnowledgeItemView[]>([]);
   const [compartments, setCompartments] = useState<{ name: string; description: string | null }[]>([]);
@@ -774,6 +813,7 @@ export function KnowledgeSettings({ page }: { page: string }) {
         <thead><tr>
           <th>{category === 'learned' ? '学んだこと' : '題名'}</th>
           {isRule ? <th>施行</th> : <th className="nowrap">{category === 'learned' ? '最後に使った日' : '出典'}</th>}
+          {category === 'learned' && <th className="num nowrap" title="同じことを学んだ秘書の数（名前は出しません）">確かめた人</th>}
           {isRule && <th>出典</th>}
           {showSections && <th className="nowrap">節</th>}<th />
         </tr></thead>
@@ -787,7 +827,7 @@ export function KnowledgeSettings({ page }: { page: string }) {
                     第 {k.version ?? 1} 版（{day(k.effectiveFrom)}）
                     {k.pending && <>{' '}<span className="badge">次の版 {k.pending.effectiveFrom}</span></>}
                   </td>
-                ) : category === 'learned' ? <td className="nowrap">{day(k.lastUsedAt)}</td> : (
+                ) : category === 'learned' ? <><td className="nowrap">{day(k.lastUsedAt)}</td><td className="num">{k.confirmations ?? 1} 人</td></> : (
                   // 出典は折り返さない（題名の列に幅を取られて、1 字ずつ折り返していた）
                   <td className="nowrap">
                     {k.source}
@@ -888,6 +928,7 @@ const KNOWLEDGE_TITLES: Record<string, string> = {
   items: '社内規程',
   minutes: '議事録',
   learned: '秘書が学んだこと',
+  gaps: '答えられなかった問い',
 };
 
 /** 小分けごとの「？」の説明（仕様書 第6.10.4.4節）。 */
@@ -895,6 +936,7 @@ const KNOWLEDGE_HELP: Record<string, PageHelp> = {
   rules: { article: 'admin-knowledge', text: 'ここに登録した規程から、秘書と「社内ナレッジ Q&A」が出典つきで答えます。改定すると前の版を残し、廃止しても 1 年は戻せます。' },
   items: { article: 'admin-knowledge', text: 'ここに登録した規程から、秘書と「社内ナレッジ Q&A」が出典つきで答えます。改定すると前の版を残し、廃止しても 1 年は戻せます。' },
   minutes: { article: 'admin-knowledge', text: '「議事録の作成・共有」が、共有のあとに登録した議事録です。削除しても 1 年は戻せます。' },
-  learned: { article: 'admin-knowledge', text: '秘書が会話から学び、ほかの人にも役立つと判断したことです。週 1 回、秘書がまとめ、古いものや使われないものをしまいます。' },
+  learned: { article: 'admin-knowledge', text: '秘書が会話から学び、ほかの人にも役立つと判断したことです。週 1 回、秘書がまとめ、古いものや使われないものをしまいます。確かめた人が多いものほど、答えの根拠に先に使います。' },
+  gaps: { article: 'admin-knowledge', text: '秘書と社内ナレッジ Q&A が、会社の知識に当たる箇所を見つけられずに答えられなかった問いです。誰が聞いたかは残しません。規程や手順を足すかを決める材料にしてください。' },
 };
 
