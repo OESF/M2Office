@@ -3,7 +3,8 @@
  *
  * 労働者名簿・賃金台帳（年ごと）・出勤簿（締めの期間ごと）・年次有給休暇管理簿・源泉徴収の記録（年ごと）・源泉徴収票（年と人ごとの PDF）・
  * 年末調整の申告（年ごと）・社会保険の届出の下書きの記録・労働保険の年度更新（年ごと）を、1 つの ZIP にまとめる。
- * 個々の書き出しの監査ログは残さず、まとめて書き出したことを 1 つ残す（中身の件数だけ。額は入れない）。人事区画と管理者の確かめは呼ぶ側が行う。
+ * 個々の書き出しの監査ログは残さず、まとめて書き出したことを 1 つ残す（中身の件数だけ。額は入れない）。
+ * 件数（`rows`）は、入っている表の行と源泉徴収票の数の合計。不正の兆しの見張りが「大きな書き出し」として数える（第16.8.2節）。人事区画と管理者の確かめは呼ぶ側が行う。
  */
 
 import { randomUUID } from 'node:crypto';
@@ -37,6 +38,8 @@ export interface BooksExportSummary {
   ledgers: number;
   attendanceBooks: number;
   withholdingSlips: number;
+  /** 入っている表の行と源泉徴収票の数の合計（不正の兆しの見張りが数える。第16.8.2節）。 */
+  rows: number;
   years: number[];
 }
 
@@ -71,9 +74,10 @@ export class HrBooksExport {
     const add = async (path: string, title: string, sheet: { columns: string[]; rows: Rows }) => {
       if (sheet.rows.length === 0) return false;
       zip.file(path, await renderSheet(title, sheet.columns, sheet.rows, 'xlsx'));
+      summary.rows += sheet.rows.length;
       return true;
     };
-    const summary: BooksExportSummary = { files: 0, ledgers: 0, attendanceBooks: 0, withholdingSlips: 0, years: [] };
+    const summary: BooksExportSummary = { files: 0, ledgers: 0, attendanceBooks: 0, withholdingSlips: 0, rows: 0, years: [] };
     const count = (ok: boolean) => { if (ok) summary.files++; return ok; };
 
     // 労働者名簿（退職した人を含む）
@@ -93,6 +97,7 @@ export class HrBooksExport {
         zip.file(`06_源泉徴収票/${y}年分/${safe(e.code ? `${e.code}_${e.name}` : e.name)}.pdf`, pdf);
         summary.files++;
         summary.withholdingSlips++;
+        summary.rows++;
       }
       count(await add(`07_年末調整の申告/年末調整の申告_${y}年分.xlsx`, `年末調整の申告 ${y}`, await this.declarations(tenantId, y, employees)));
     }
@@ -153,7 +158,7 @@ export class HrBooksExport {
     const bytes = await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
     const ev: AuditEvent = {
       id: randomUUID(), tenantId, actorType: 'user', actorId: userId, action: 'hr.books.export', targetType: 'hr', targetId: today,
-      detail: { files: summary.files, ledgers: summary.ledgers, attendanceBooks: summary.attendanceBooks, withholdingSlips: summary.withholdingSlips }, occurredAt: new Date().toISOString(),
+      detail: { files: summary.files, ledgers: summary.ledgers, attendanceBooks: summary.attendanceBooks, withholdingSlips: summary.withholdingSlips, rows: summary.rows }, occurredAt: new Date().toISOString(),
     };
     await repo.appendAudit(ev);
     return { bytes, filename: `hr-books-${today}.zip`, summary };

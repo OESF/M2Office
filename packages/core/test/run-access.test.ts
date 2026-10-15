@@ -6,7 +6,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import type { Approval } from '@m2office/shared';
+import { canDecide, type Approval } from '@m2office/shared';
 import { canViewRun, type Repository } from '../src/index.js';
 
 const approval = (over: Partial<Approval>): Approval => ({
@@ -33,4 +33,18 @@ test('自分が判断できる承認がある実行は、判断を終えた後�
 test('依頼者本人が判断する承認は、承認者の役割があってもほかの人には見せない', async () => {
   const own = approval({ approverRole: [], approverUserId: 'u-member' });
   assert.equal(await canViewRun(repoWith([own]), 't', { requestedBy: 'u-member' }, 'r1', approver), false);
+});
+
+test('権限区画に属する業務の実行は、区画に入っている承認者だけが見られる（第6.2.3節）', async () => {
+  const hr = approval({ compartment: 'hr', decision: 'approved', decidedBy: 'u-approver' });
+  const repo = (compartments: string[]) => ({ listRunApprovals: async () => [hr], listUserCompartments: async () => compartments }) as unknown as Repository;
+  assert.equal(await canViewRun(repo([]), 't', { requestedBy: 'u-member' }, 'r1', approver), false, '区画を出たら前に判断した実行も見られない');
+  assert.equal(await canViewRun(repo(['hr']), 't', { requestedBy: 'u-member' }, 'r1', approver), true);
+});
+
+test('区画を渡さない判定では、区画に属する承認を判断できないとみなす', () => {
+  const hr = approval({ compartment: 'hr' });
+  assert.equal(canDecide(hr, approver), false);
+  assert.equal(canDecide(hr, { ...approver, compartments: ['hr'] }), true);
+  assert.equal(canDecide(approval({ compartment: '' }), approver), true, '空の文字は区画に属さない業務');
 });

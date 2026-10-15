@@ -92,6 +92,12 @@ export interface PresenceInput {
   stepsByRun: Map<string, RunStep[]>;
   /** 判断されていない承認。 */
   pending: Approval[];
+  /**
+   * 利用者ごとに入っている権限区画（区画に属する業務の承認を数えるため。第9.2.3節）。
+   *
+   * @remarks 渡さなければ、区画に属する業務の承認は誰の「判断を待つ」にも数えない
+   */
+  compartmentsOf?: Map<string, readonly string[]>;
   /** 直近の秘書の監査ログ（`secretary.*`）。 */
   secretaryEvents: { actorId: string; occurredAt: string }[];
   /**
@@ -159,7 +165,7 @@ export function buildPresence(input: PresenceInput): Presence[] {
       const session = sessionOf.get(user.id);
       const online = !!session && Date.parse(session.lastSeenAt) >= activeSince;
       const mine = liveRuns.filter(({ job, run }) => job.requestedBy === user.id && run.status !== 'failed');
-      const decidable = pending.filter((a) => canDecide(a, user));
+      const decidable = pending.filter((a) => canDecide(a, { ...user, compartments: input.compartmentsOf?.get(user.id) ?? [] }));
       const talking = secretaryEvents.some(
         (e) => e.actorId === user.id && Date.parse(e.occurredAt) >= talkingSince,
       );

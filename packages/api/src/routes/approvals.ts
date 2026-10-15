@@ -8,7 +8,7 @@
 
 import { Hono } from 'hono';
 import { agentDisplayName, canDecide } from '@m2office/shared';
-import { ApprovalForbiddenError, RunNotResumableError, describeContext, executedCalls } from '@m2office/core';
+import { ApprovalForbiddenError, RunNotResumableError, describeContext, executedCalls, withCompartments } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 
@@ -29,8 +29,10 @@ export function approvalsRoute(deps: AppDeps) {
   /** 本人が判断できる承認待ちだけを返す（ロール、または依頼者本人。仕様書 第9.2.3節）。 */
   app.get('/', async (c) => {
     const ctx = c.get('ctx');
-    const pending = (await deps.repo.listPendingApprovals(ctx.tenant.id))
-      .filter((a) => canDecide(a, ctx.user));
+    const all = await deps.repo.listPendingApprovals(ctx.tenant.id);
+    // 権限区画に属する業務の承認は、区画に入っている人だけ（第9.2.3節）
+    const decider = await withCompartments(deps.repo, ctx.tenant.id, all, ctx.user);
+    const pending = all.filter((a) => canDecide(a, decider));
     /*
       どの業務の承認かを添える（仕様書 第6.2.4節）。
       **開く前に、何を判断するのかが分かること。** 「承認の依頼」が並ぶだけでは選べない。
@@ -59,7 +61,10 @@ export function approvalsRoute(deps: AppDeps) {
   app.get('/decided', async (c) => {
     const ctx = c.get('ctx');
     const view = await deps.tenantView(ctx.tenant.id);
-    const rows = await deps.repo.listDecidedApprovals(ctx.tenant.id, ctx.user.id, DECIDED_LIMIT);
+    const decided = await deps.repo.listDecidedApprovals(ctx.tenant.id, ctx.user.id, DECIDED_LIMIT);
+    // 権限区画に属する業務は、いま区画に入っている間だけ見せる（区画を出たら前に判断したものも見せない。第6.2.3節）
+    const { compartments } = await withCompartments(deps.repo, ctx.tenant.id, decided, ctx.user);
+    const rows = decided.filter((a) => a.approverUserId || !a.compartment || compartments.includes(a.compartment));
     const names = new Map<string, string>();
     const nameOf = async (userId: string) => {
       if (!names.has(userId)) names.set(userId, (await deps.repo.findUserById(ctx.tenant.id, userId))?.displayName ?? '');

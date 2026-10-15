@@ -2,7 +2,7 @@
  * @file 本人の「給与・勤怠」の API（仕様書 第30.25節・第30.6.1節・第30.7.1節。人事・給与の段 2）。
  *
  * 打刻・日の直し・今月の勤怠・有給の残りと申請・給与明細（段 4）。**本人の分だけ**を扱う（H-3）。
- * 利用者が台帳に結び付いていなければ（同じメールアドレスなら自動で結び付く）404。人事・給与を切っている会社も 404。
+ * 利用者が台帳に結び付いていなければ（同じメールアドレスの在籍中の人なら自動で結び付く）404。人事・給与を切っている会社も 404。
  */
 
 import { Hono } from 'hono';
@@ -123,11 +123,10 @@ export function hrSelfRoute(deps: AppDeps) {
     return r ? c.json(r) : c.json({ error: '明細が見つかりません' }, 404);
   });
 
-  /** 自分の明細の PDF。 */
+  /** 自分の明細の PDF（画面と同じく、同意があり確定した明細だけ。第30.10.3節）。 */
   app.get('/payslips/:id/pdf', async (c) => {
     const { tenant, user } = c.get('ctx');
-    const employee = c.get('employee');
-    const r = await payroll.slipPdf(tenant.id, user.id, c.req.param('id'), employee.id);
+    const r = await payroll.mySlipPdf(tenant.id, user.id, c.get('employee'), c.req.param('id'));
     if (!r) return c.json({ error: '明細が見つかりません' }, 404);
     c.header('Content-Type', 'application/pdf');
     c.header('Content-Disposition', `attachment; filename="${r.filename}"`);

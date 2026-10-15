@@ -7,7 +7,7 @@
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import {
-  agentDisplayName,
+  agentDisplayName, needsCompartments,
   BRIEF_SECTIONS, WEEKLY_SECTIONS, VOICE_CHOICES, VOICE_STYLE_MAX, isValidAvatar, type UserSettings, type MenuCategory,
   CARDS_EXTENSION_ID, HR_EXTENSION_ID, SIGNAGE_EXTENSION_ID, INVENTORY_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, CONTRACTS_EXTENSION_ID, RESERVATIONS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, MEMBERS_EXTENSION_ID, PRINT_DESIGNS_EXTENSION_ID, MENU_CATEGORY_MAX, MENU_CATEGORY_NAME_MAX,
   GOOGLE_APP_IDS, LAUNCHER_LABEL_MAX, LAUNCHER_LINK_MAX, checkLauncherUrl, type LauncherLink,
@@ -383,8 +383,9 @@ export function meRoute(deps: AppDeps) {
     const stepsByRun = new Map(await Promise.all(
       mine.map(async ({ run }) => [run.id, await deps.repo.listRunSteps(tenant.id, run.id)] as const),
     ));
+    const compartmentsOf = needsCompartments(pending) ? new Map([[user.id, await deps.repo.listUserCompartments(tenant.id, user.id)]]) : undefined;
     const [presence] = buildPresence({
-      now, users: [user], sessions, liveRuns: mine, stepsByRun, pending,
+      now, users: [user], sessions, liveRuns: mine, stepsByRun, pending, compartmentsOf,
       secretaryEvents: secretaryEvents.map((e) => ({ actorId: e.actorId, occurredAt: e.occurredAt })),
       voiceEvents: voiceEvents.map((e) => ({ actorId: e.actorId, occurredAt: e.occurredAt, targetId: e.targetId })),
       agentName: (id) => agentDisplayName(view.allAgents.find((a) => a.id === id)?.name, id),

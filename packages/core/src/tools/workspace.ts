@@ -13,6 +13,7 @@ import { randomUUID } from 'node:crypto';
 import { closedDaysBetween } from '../scheduler/business-days.js';
 import type { PreparedCall, Tool, ToolContext } from './registry.js';
 import { canDecide } from '@m2office/shared';
+import { withCompartments } from '../engine/run-access.js';
 import { addDays, jst, ymd } from '../connectors/mock.js';
 import { ConnectorUnavailableError } from '../connectors/types.js';
 import { audienceOf } from './google.js';
@@ -388,8 +389,11 @@ export const approvalsPending: Tool = {
   async invoke(_args, ctx) {
     const user = await ctx.repo.findUserById(ctx.tenantId, ctx.userId);
     const roles: string[] = user?.roles ?? [];
-    const items = (await ctx.repo.listPendingApprovals(ctx.tenantId))
-      .filter((a) => canDecide(a, { id: ctx.userId, roles }))
+    const all = await ctx.repo.listPendingApprovals(ctx.tenantId);
+    // 権限区画に属する業務の承認は、区画に入っている人だけ（第9.2.3節）
+    const decider = await withCompartments(ctx.repo, ctx.tenantId, all, { id: ctx.userId, roles });
+    const items = all
+      .filter((a) => canDecide(a, decider))
       .map((a) => ({ id: a.id, present: a.present, since: a.createdAt }));
     return { count: items.length, items };
   },

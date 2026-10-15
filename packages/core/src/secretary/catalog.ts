@@ -8,6 +8,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { canDecide } from '@m2office/shared';
+import { withCompartments } from '../engine/run-access.js';
 import type { Repository } from '../repository/types.js';
 import type { WorkspaceConnector } from '../connectors/types.js';
 import { addDays, jst, ymd } from '../connectors/mock.js';
@@ -319,7 +320,9 @@ const pendingApprovals: DirectQuery = {
   async answer(ctx) {
     // 本人が判断できる承認だけ（承認トレイと同じ規則。ほかの人の業務の承認の中身を見せない。仕様書 第6.2.1節）
     const user = await ctx.repo.findUserById(ctx.tenantId, ctx.userId);
-    const list = (await ctx.repo.listPendingApprovals(ctx.tenantId)).filter((a) => canDecide(a, { id: ctx.userId, roles: user?.roles ?? [] }));
+    const all = await ctx.repo.listPendingApprovals(ctx.tenantId);
+    const decider = await withCompartments(ctx.repo, ctx.tenantId, all, { id: ctx.userId, roles: user?.roles ?? [] });
+    const list = all.filter((a) => canDecide(a, decider));
     if (list.length === 0) {
       return { text: '承認待ちはありません。', evidence: [] };
     }

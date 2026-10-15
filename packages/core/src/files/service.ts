@@ -5,10 +5,10 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto';
-import { canDecide, type StoredFile } from '@m2office/shared';
+import type { StoredFile } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { FileStore } from './store.js';
-import { canViewRun, type RunViewer } from '../engine/run-access.js';
+import { canViewRun, decidableBy, type RunViewer } from '../engine/run-access.js';
 import { MIME, type FileKind } from './formats.js';
 
 /**
@@ -57,7 +57,7 @@ async function canOpenFile(
   }
   if (!meta.ownerUserId) return false;
   const approvals = await repo.listApprovalsForFileInput(tenantId, meta.id, meta.ownerUserId);
-  return approvals.some((a) => canDecide(a, who));
+  return decidableBy(repo, tenantId, approvals, who);
 }
 
 /**

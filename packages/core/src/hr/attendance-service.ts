@@ -78,7 +78,8 @@ export class AttendanceService {
   // ---- 本人 ----
 
   /**
-   * 利用者に結び付いた従業員。結び付いていなければ、同じメールアドレスの従業員に自動で結び付ける（人に結び付けさせない。ADR-0028）。
+   * 利用者に結び付いた従業員。結び付いていなければ、同じメールアドレスの在籍中の従業員に自動で結び付ける（人に結び付けさせない。ADR-0028）。
+   * 退職した人の台帳には自動で結び付けない（同じアドレスを後から使う人に、前の人の明細や源泉徴収票を見せないため。第 0.366.0 版）。
    *
    * @returns 人事・給与を使っていない会社・台帳に載っていない人は `null`
    */
@@ -90,7 +91,7 @@ export class AttendanceService {
     const user = await this.deps.repo.findUserById(tenantId, userId);
     const email = user?.email?.trim().toLowerCase();
     if (!email) return null;
-    const match = (await this.deps.hrStore.listEmployees(tenantId)).filter((e) => !e.userId && e.email.trim().toLowerCase() === email);
+    const match = (await this.deps.hrStore.listEmployees(tenantId)).filter((e) => !e.userId && e.status === 'active' && e.email.trim().toLowerCase() === email);
     if (match.length !== 1) return null;
     const e = match[0]!;
     const { updatedAt: _u, ...rec } = e;

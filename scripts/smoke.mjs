@@ -4417,6 +4417,8 @@ console.log('\n■ 61. 人事・給与（内蔵の拡張。第30章、段 1: 台
         ? ok('明細の PDF と、法定の記載事項を持つ賃金台帳を出せる') : ng('帳票が合わない', `${pdf.status} ${pdfHead} ${ledger.status}`);
       // 本人: 同意するまでは明細を出さず、同意すると画面と秘書で見られる
       const before = await call('a', '/v1/me/hr/payslips', {}, 'member');
+      // 本人の PDF も画面と同じく、同意するまでは出さない（第30.10.3節。第 0.366.0 版）
+      const pdfBefore = await raw(`/v1/me/hr/payslips/${slipId}/pdf`, {}, 'member');
       const { body: sayNo } = await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message: '今月の給与明細を見せて' }) }, 'member');
       await call('a', '/v1/me/hr/payslip-consent', { method: 'PUT', body: JSON.stringify({ consent: true }) }, 'member');
       const after = await call('a', '/v1/me/hr/payslips', {}, 'member');
@@ -4424,6 +4426,9 @@ console.log('\n■ 61. 人事・給与（内蔵の拡張。第30章、段 1: 台
       const { body: sayYes } = await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message: '今月の給与明細を見せて' }) }, 'member');
       before.body?.consentAt === null && (before.body?.slips ?? []).length === 0 && /同意が要ります/.test(sayNo.text ?? '') && mine?.payMonth === '2026-08' && /差引支給/.test(sayYes.text ?? '')
         ? ok('明細は本人が同意してから画面と秘書で見られる（同意の前は出さない）') : ng('本人の明細が合わない', JSON.stringify({ before: before.body, after: after.body, sayNo: sayNo.text, sayYes: sayYes.text }));
+      const pdfAfter = await raw(`/v1/me/hr/payslips/${slipId}/pdf`, {}, 'member');
+      pdfBefore.status === 404 && pdfAfter.status === 200
+        ? ok('本人の明細の PDF も、同意してからだけ出せる（第30.10.3節）') : ng('本人の明細の PDF が同意の前に出る', `${pdfBefore.status} ${pdfAfter.status}`);
 
       // Phase 2 段 1: 調整の行・訂正の回・賞与（第30.10.4節・第30.11.1節）
       const adjClosed = await call('a', '/v1/hr/payroll/adjustments', { method: 'POST', body: JSON.stringify({ employeeId: staffId, kind: 'monthly', payMonth: '2026-08', label: '臨時の手当', amount: 5000 }) });

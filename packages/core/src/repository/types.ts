@@ -76,6 +76,10 @@ export interface Repository {
   listApprovalsForFileInput(tenantId: string, fileId: string, ownerUserId: string): Promise<Approval[]>;
   /** 指定した時刻より前から承認待ちの承認（期限切れの見回り。仕様書 第14.3.2節）。 */
   listStaleApprovals(tenantId: string, createdBefore: string): Promise<Approval[]>;
+  /** 権限区画をまだ持たない（移行 138 より前に作った）承認と、その業務（第9.2.3節。ワーカーが一度だけ埋める）。`after` の ID より後を、ID の順に返す。 */
+  listApprovalsWithoutCompartment(tenantId: string, after: string, limit: number): Promise<{ id: string; agentId: string; agentVersion: number }[]>;
+  /** 承認の権限区画を埋める（区画に属さない業務は空の文字）。 */
+  setApprovalCompartment(tenantId: string, id: string, compartment: string): Promise<void>;
 
   /** すべての会社の ID（保持期間の見回りのため。テナント台帳の参照）。 */
   listTenantIds(): Promise<string[]>;

@@ -79,6 +79,11 @@ export interface Approval {
   approverRole: string[];
   /** 判断できる利用者。`approver: requester` の承認では依頼した本人。それ以外は `null`。 */
   approverUserId: string | null;
+  /**
+   * 業務の権限区画（第9.2.3節・第16.3.6節）。区画の名前なら、区画に入っている者だけが判断でき、実行の中身を見られる。
+   * 空の文字は区画に属さない業務。`null`・無しは区画を持つ前に作った承認（ワーカーが業務の定義から埋める）。
+   */
+  compartment?: string | null;
   present: string;
   /**
    * `expired` は、承認待ちのまま期限（30 日）を過ぎて止めたもの（仕様書 第14.3.2節）。

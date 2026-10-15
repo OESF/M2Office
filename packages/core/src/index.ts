@@ -29,7 +29,8 @@ export type {
 } from './repository/types.js';
 export { PostgresRepository } from './repository/postgres.js';
 export { createPool, watchPool, installPoolLogger, describePoolError, assertDatabaseConfigured, type PoolOptions } from './repository/pool.js';
-export { canViewRun, type RunViewer } from './engine/run-access.js';
+export { canViewRun, decidableBy, withCompartments, type RunViewer } from './engine/run-access.js';
+export { fillApprovalCompartments } from './engine/approval-compartments.js';
 export * from './conversations/rotation.js';
 export * from './voice/provider.js';
 export { GeminiLiveProvider } from './voice/gemini-live.js';

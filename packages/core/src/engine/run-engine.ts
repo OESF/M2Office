@@ -446,8 +446,11 @@ export class RunEngine {
     const approval = await repo.getApproval(tenantId, approvalId);
     if (!approval) throw new RunNotResumableError(approvalId, '承認が見つかりません');
     if (approval.decision) throw new RunNotResumableError(approvalId, '判断済み');
-    // 定義が指定した者だけが判断できる。却下も同じ扱いとする（仕様書 第9.2.3節）
-    if (!canDecide(approval, decider)) {
+    // 定義が指定した者だけが判断できる。却下も同じ扱いとする（仕様書 第9.2.3節）。
+    // 権限区画に属する業務は、区画に入っている者だけ。承認の区画に加えて、いまの業務の定義の区画でも確かめ直す（第16.3.6節）
+    const compartment = await this.approvalCompartment(tenantId, approval);
+    const compartments = compartment ? await repo.listUserCompartments(tenantId, decider.id) : [];
+    if (!canDecide({ ...approval, compartment }, { ...decider, compartments })) {
       throw new ApprovalForbiddenError(approvalId, approval);
     }
 
@@ -530,6 +533,7 @@ export class RunEngine {
     const [first, ...rest] = approval.present.split('\n');
     const admin: Approval = {
       id: randomUUID(), runStepId: approval.runStepId, tenantId: run.tenantId, approverRole: ['admin'], approverUserId: null,
+      compartment: def!.compartment ?? '',
       present: [first, `${name}さん（依頼した人）が承認しました。管理者の承認を待っています`, ...rest].join('\n'),
       decision: null, decidedBy: null, comment: null, decidedAt: null, createdAt: now,
     };
@@ -539,12 +543,7 @@ export class RunEngine {
       action: 'run.await_approval', targetType: 'run', targetId: run.id,
       detail: { stepId: step.id, approvalId: admin.id, admin: true }, occurredAt: now,
     });
-    for (const user of users) {
-      if (user.status !== 'active' || !canDecide(admin, user)) continue;
-      await this.notify(run.tenantId, user.id, {
-        kind: 'approval', title: `承認をお願いします: ${def!.name}`, body: step.present, runId: run.id, at: now,
-      });
-    }
+    await this.askDeciders(run, admin, def!.name, step.present, job.requestedBy, now);
     return true;
   }
 
@@ -626,6 +625,8 @@ export class RunEngine {
       id: randomUUID(), runStepId: runStep.id, tenantId: run.tenantId,
       approverRole: step.approver === 'requester' ? [] : step.approverRole,
       approverUserId: step.approver === 'requester' ? requestedBy : null,
+      // 業務の権限区画（区画に入っている者だけが判断でき、見られる。第9.2.3節）。区画に属さない業務は空の文字
+      compartment: def.compartment ?? '',
       // 1 行目は定義の present。一覧・ダッシュボード・通知は 1 行目だけを出す（第9.3.3節）
       present, decision: null,
       decidedBy: null, comment: null, decidedAt: null, createdAt: now,
@@ -638,14 +639,48 @@ export class RunEngine {
       detail: { stepId: step.id, approvalId: approval.id }, occurredAt: now,
     });
     // 判断できる人に知らせる（仕様書 第6.5.5.1節）。気づかれずに承認待ちのまま止まることを防ぐ
+    await this.askDeciders(run, approval, def.name, step.present, requestedBy, now);
+    return approval.id;
+  }
+
+  /**
+   * 承認を判断できる人に知らせる（仕様書 第6.5.5.1節）。権限区画に属する業務は、区画に入っている人だけ（第9.2.3節）。
+   *
+   * @remarks 区画の中に判断できる人が 1 人もいなければ、承認待ちのまま気づかれずに止まらないよう、依頼した本人に知らせる
+   */
+  private async askDeciders(run: Run, approval: Approval, agentName: string, body: string, requestedBy: string, at: string): Promise<void> {
+    const { repo } = this.deps;
+    let asked = 0;
     for (const user of await repo.listUsers(run.tenantId)) {
-      if (user.status !== 'active' || !canDecide(approval, user)) continue;
-      await this.notify(run.tenantId, user.id, {
-        kind: 'approval', title: `承認をお願いします: ${def.name}`,
-        body: step.present, runId: run.id, at: now,
+      if (user.status !== 'active') continue;
+      const compartments = approval.compartment && !approval.approverUserId ? await repo.listUserCompartments(run.tenantId, user.id) : [];
+      if (!canDecide(approval, { ...user, compartments })) continue;
+      asked++;
+      await this.notify(run.tenantId, user.id, { kind: 'approval', title: `承認をお願いします: ${agentName}`, body, runId: run.id, at });
+    }
+    if (asked === 0 && approval.compartment && !approval.approverUserId) {
+      await this.notify(run.tenantId, requestedBy, {
+        kind: 'failure', title: `承認できる人がいません: ${agentName}`,
+        body: `この業務は権限区画「${approval.compartment}」に属するため、区画に入っている人だけが承認できます。いま承認できる人がいません。管理者に、承認する人を区画に入れるよう頼んでください。`,
+        runId: run.id, at,
       });
     }
-    return approval.id;
+  }
+
+  /**
+   * 承認の権限区画。区画を持つ前に作った承認（`null`）は、業務の定義から引く（第9.2.3節）。
+   *
+   * @returns 区画の名前。区画に属さない業務と、依頼した本人の承認は空の文字
+   */
+  private async approvalCompartment(tenantId: string, approval: Approval): Promise<string> {
+    if (approval.approverUserId) return '';
+    const { repo } = this.deps;
+    const step = await repo.getRunStepById(tenantId, approval.runStepId);
+    const run = step ? await repo.getRun(tenantId, step.runId) : null;
+    const job = run ? await repo.getJob(tenantId, run.jobId) : null;
+    const def = job ? await Promise.resolve(this.deps.resolveDefinition(job.agentId, job.agentVersion, tenantId)).catch(() => undefined) : undefined;
+    // 定義が見つからなければ、承認に残した区画を使う（区画の縛りを外す側に倒さない）
+    return def ? def.compartment ?? '' : approval.compartment ?? '';
   }
 
   /**

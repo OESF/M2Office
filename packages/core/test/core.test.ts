@@ -174,6 +174,33 @@ test('権限区画に属する業務は、区画に入れない依頼者では�
   assert.equal((await engine.advance((await repo.getRun('t', 'r1'))!)).outcome, 'awaiting_approval', '区画に入れる人なら進む');
 });
 
+test('権限区画に属する業務の承認は、区画に入っている承認者だけが判断でき、知らせも区画の人だけ（第9.2.3節）', async () => {
+  const def = { ...SHARE_DEF, id: 'hr-approve', compartment: 'hr' };
+  const { repo, engine, run } = setup(def, { name: 'chat.post', args: { text: '共有します' } });
+  repo.compartmentsOf['u-member'] = ['hr'];
+  const first = await engine.advance(run);
+  if (first.outcome !== 'awaiting_approval') assert.fail('承認待ちにならない');
+  assert.equal(repo.approvals[0]!.compartment, 'hr', '承認に業務の区画を残す');
+  // 承認者のロールを持つ管理者でも、区画に入っていなければ知らせも判断もしない
+  assert.ok(!repo.notifications.some((n) => n.userId === 'u-admin' && n.kind === 'approval'));
+  assert.ok(repo.notifications.some((n) => n.userId === 'u-member' && n.kind === 'failure'), '判断できる人がいなければ依頼した本人に知らせる');
+  await assert.rejects(engine.decideApproval('t', first.approvalId, 'approved', { id: 'u-admin', roles: ['admin', 'approver'] }, null), ApprovalForbiddenError);
+  // 区画に入れば判断できる（定義の区画で確かめ直す）
+  repo.compartmentsOf['u-admin'] = ['hr'];
+  await engine.decideApproval('t', first.approvalId, 'approved', { id: 'u-admin', roles: ['admin', 'approver'] }, null);
+  assert.equal((await repo.getRun('t', 'r1'))!.status, 'queued');
+});
+
+test('区画を持つ前に作った承認でも、判断のときは業務の定義の区画で確かめる（第9.2.3節）', async () => {
+  const def = { ...SHARE_DEF, id: 'hr-old', compartment: 'hr' };
+  const { repo, engine, run } = setup(def, { name: 'chat.post', args: { text: '共有します' } });
+  repo.compartmentsOf['u-member'] = ['hr'];
+  const first = await engine.advance(run);
+  if (first.outcome !== 'awaiting_approval') assert.fail('承認待ちにならない');
+  repo.approvals[0] = { ...repo.approvals[0]!, compartment: null };
+  await assert.rejects(engine.decideApproval('t', first.approvalId, 'approved', { id: 'u-admin', roles: ['admin', 'approver'] }, null), ApprovalForbiddenError);
+});
+
 test('承認者のロールを持たない利用者は、承認も却下もできない', async () => {
   const { engine, run } = setup(SHARE_DEF, { name: 'chat.post', args: { text: '共有します' } });
   const first = await engine.advance(run);

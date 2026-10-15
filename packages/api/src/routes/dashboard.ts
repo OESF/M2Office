@@ -9,7 +9,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
-import { agentDisplayName, isValidAvatar, type AgentDefinition, type Approval, type AuditEvent, type Job, type Run, type User } from '@m2office/shared';
+import { agentDisplayName, isValidAvatar, needsCompartments, type AgentDefinition, type Approval, type AuditEvent, type Job, type Run, type User } from '@m2office/shared';
 import {
   ACTIVE_WINDOW_MIN, HEALTH_WINDOW_MIN, agentFace, assignAgentFaces, buildPresence, healthView, summarizePresence, stepLabel,
   type HealthView, type TenantExtensions,
@@ -357,8 +357,12 @@ export function dashboardRoute(deps: AppDeps) {
     const stepsByRun = new Map(await Promise.all(
       liveRuns.map(async ({ run }) => [run.id, await deps.repo.listRunSteps(tenantId, run.id)] as const),
     ));
+    // 権限区画に属する業務の承認は、区画に入っている人の「判断を待つ」にだけ数える（第9.2.3節）
+    const compartmentsOf = needsCompartments(pending)
+      ? new Map(await Promise.all(users.filter((u) => u.status === 'active').map(async (u) => [u.id, await deps.repo.listUserCompartments(tenantId, u.id)] as const)))
+      : undefined;
     const people = buildPresence({
-      now, users, sessions, liveRuns, stepsByRun, pending,
+      now, users, sessions, liveRuns, stepsByRun, pending, compartmentsOf,
       secretaryEvents: secretaryEvents.map((e) => ({ actorId: e.actorId, occurredAt: e.occurredAt })),
       voiceEvents: voiceEvents.map((e) => ({ actorId: e.actorId, occurredAt: e.occurredAt, targetId: e.targetId })),
       agentName,

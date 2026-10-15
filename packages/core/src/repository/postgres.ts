@@ -368,10 +368,10 @@ export class PostgresRepository implements Repository {
   async createApproval(a: Approval): Promise<void> {
     await this.q(a.tenantId, 
       `insert into approvals (id, run_step_id, tenant_id, approver_role, approver_user_id,
-                              present, decision, decided_by, comment, decided_at, created_at)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+                              present, decision, decided_by, comment, decided_at, created_at, compartment)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
       [a.id, a.runStepId, a.tenantId, a.approverRole, a.approverUserId, a.present, a.decision,
-       a.decidedBy, a.comment, a.decidedAt, a.createdAt],
+       a.decidedBy, a.comment, a.decidedAt, a.createdAt, a.compartment ?? ''],
     );
   }
 
@@ -381,7 +381,7 @@ export class PostgresRepository implements Repository {
               approver_role as "approverRole",
               approver_user_id as "approverUserId", present, decision,
               decided_by as "decidedBy", comment, decided_at as "decidedAt",
-              created_at as "createdAt"
+              created_at as "createdAt", compartment
          from approvals where tenant_id = $1 and id = $2`,
       [tenantId, id],
     );
@@ -394,7 +394,7 @@ export class PostgresRepository implements Repository {
               approver_role as "approverRole",
               approver_user_id as "approverUserId", present, decision,
               decided_by as "decidedBy", comment, decided_at as "decidedAt",
-              created_at as "createdAt"
+              created_at as "createdAt", compartment
          from approvals
         where tenant_id = $1 and decision is null order by created_at`,
       [tenantId],
@@ -406,7 +406,7 @@ export class PostgresRepository implements Repository {
       `select a.id, a.run_step_id as "runStepId", a.tenant_id as "tenantId",
               a.approver_role as "approverRole", a.approver_user_id as "approverUserId", a.present,
               a.decision, a.decided_by as "decidedBy", a.comment, a.decided_at as "decidedAt",
-              a.created_at as "createdAt",
+              a.created_at as "createdAt", a.compartment,
               s.run_id as "runId", j.agent_id as "agentId", j.agent_version as "agentVersion", j.requested_by as "requestedBy",
               j.agent_name as "agentName"
          from approvals a
@@ -424,7 +424,7 @@ export class PostgresRepository implements Repository {
       `select a.id, a.run_step_id as "runStepId", a.tenant_id as "tenantId",
               a.approver_role as "approverRole", a.approver_user_id as "approverUserId", a.present,
               a.decision, a.decided_by as "decidedBy", a.comment, a.decided_at as "decidedAt",
-              a.created_at as "createdAt"
+              a.created_at as "createdAt", a.compartment
          from approvals a join run_steps s on s.id = a.run_step_id
         where a.tenant_id = $1 and s.run_id = $2`,
       [tenantId, runId]);
@@ -437,7 +437,7 @@ export class PostgresRepository implements Repository {
       `select a.id, a.run_step_id as "runStepId", a.tenant_id as "tenantId",
               a.approver_role as "approverRole", a.approver_user_id as "approverUserId", a.present,
               a.decision, a.decided_by as "decidedBy", a.comment, a.decided_at as "decidedAt",
-              a.created_at as "createdAt"
+              a.created_at as "createdAt", a.compartment
          from approvals a
          join run_steps s on s.id = a.run_step_id
          join runs r on r.id = s.run_id and r.tenant_id = a.tenant_id
@@ -448,11 +448,27 @@ export class PostgresRepository implements Repository {
       [tenantId, fileId, ownerUserId]);
   }
 
+  async listApprovalsWithoutCompartment(tenantId: string, after: string, limit: number): Promise<{ id: string; agentId: string; agentVersion: number }[]> {
+    return this.q<{ id: string; agentId: string; agentVersion: number }>(tenantId,
+      `select a.id, j.agent_id as "agentId", j.agent_version as "agentVersion"
+         from approvals a
+         join run_steps s on s.id = a.run_step_id
+         join runs r on r.id = s.run_id and r.tenant_id = a.tenant_id
+         join jobs j on j.id = r.job_id and j.tenant_id = a.tenant_id
+        where a.tenant_id = $1 and a.compartment is null and a.id > $2
+        order by a.id limit $3`,
+      [tenantId, after, limit]);
+  }
+
+  async setApprovalCompartment(tenantId: string, id: string, compartment: string): Promise<void> {
+    await this.q(tenantId, `update approvals set compartment = $3 where tenant_id = $1 and id = $2 and compartment is null`, [tenantId, id, compartment]);
+  }
+
   async listStaleApprovals(tenantId: string, createdBefore: string): Promise<Approval[]> {
     return this.q<Approval>(tenantId,
       `select id, run_step_id as "runStepId", tenant_id as "tenantId",
               approver_role as "approverRole", approver_user_id as "approverUserId", present, decision,
-              decided_by as "decidedBy", comment, decided_at as "decidedAt", created_at as "createdAt"
+              decided_by as "decidedBy", comment, decided_at as "decidedAt", created_at as "createdAt", compartment
          from approvals
         where tenant_id = $1 and decision is null and created_at < $2 order by created_at`,
       [tenantId, createdBefore]);

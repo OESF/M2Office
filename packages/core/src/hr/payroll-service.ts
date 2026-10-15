@@ -506,6 +506,19 @@ export class PayrollService {
     return { slip: list[i]!, diff: prev ? explainDiff(list[i]!, prev) || null : null, previousNet: prev?.net ?? null };
   }
 
+  /**
+   * 本人が画面から出す明細の PDF（第30.10.3節）。画面と同じく、同意があり確定した本人の明細だけ。
+   *
+   * @returns 同意が無い・確定していない・本人のものでなければ `null`
+   */
+  async mySlipPdf(tenantId: string, userId: string, employee: HrEmployee, slipId: string): Promise<{ bytes: Uint8Array; filename: string } | null> {
+    const consentAt = (await this.deps.store.getProfile(tenantId, employee.id))?.payslipConsentAt;
+    if (!consentAt) return null;
+    const list = await this.deps.store.listConfirmedSlips(tenantId, employee.id);
+    if (!list.some((x) => x.id === slipId)) return null;
+    return this.slipPdf(tenantId, userId, slipId, employee.id);
+  }
+
   /** 明細を画面で受け取る同意（取り消しもできる）。 */
   async setConsent(tenantId: string, userId: string, employee: HrEmployee, consent: boolean): Promise<string | null> {
     const at = consent ? new Date().toISOString() : null;

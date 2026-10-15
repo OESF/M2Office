@@ -12,6 +12,7 @@
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 import {
+  fillApprovalCompartments,
   assertDatabaseConfigured,
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
   RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, GoogleContactsService, KnowledgeEmbedder, MemoryEmbedder, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, JGrantsApi, MockJGrants, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, MEMBER_LINE_SEND, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, EffectService, PostgresEffectStore, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger,
@@ -508,6 +509,8 @@ const RUN_RECOVERIES = 2;
 let running = true;
 let lastScheduleCheck = 0;
 let lastRunRecoveryCheck = 0;
+/** 権限区画を持つ前の承認を埋めたか（起動のあと一度だけ行う）。 */
+let approvalCompartmentsFilled = false;
 let lastRetentionCheck = 0;
 let lastNotifyCheck = 0;
 let lastConversationCheck = 0;
@@ -834,6 +837,15 @@ while (running) {
     } catch (err) {
       log.error('保持期間の見回りで例外が発生しました', { err });
     }
+  }
+
+  // 権限区画を持つ前に作った承認に、業務の定義から区画を埋める（起動のあと一度だけ。第9.2.3節、移行 138）。
+  // 数が多いと時間がかかるため、待ち行列を止めないよう並べて行う（埋まるまでの判断は、実行エンジンが定義の区画で確かめる）
+  if (!approvalCompartmentsFilled) {
+    approvalCompartmentsFilled = true;
+    void fillApprovalCompartments(repo, resolveDefinition)
+      .then((filled) => { if (filled > 0) log.info('承認に権限区画を埋めました', { filled }); })
+      .catch((err) => log.error('承認に権限区画を埋められませんでした', { err }));
   }
 
   // ワーカーが段の途中で止まった実行（再起動・障害）を、止まった段から再開する（仕様書 第9.3節・第17章）

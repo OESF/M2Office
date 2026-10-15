@@ -12,6 +12,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { canDecide, type Job, type Run } from '@m2office/shared';
+import { withCompartments } from './run-access.js';
 import type { Repository } from '../repository/types.js';
 
 /** 動いている途中とみなす状態。これ以外は止められない。 */
@@ -78,7 +79,9 @@ export async function cancelRun(
     await repo.updateApproval({ ...a, decision: 'cancelled', decidedAt: at, comment: reason });
     // 止めた本人には知らせない。自分で止めたことは分かっている
     for (const u of users) {
-      if (u.id !== actor.actorId && u.status === 'active' && canDecide(a, u)) approvers.add(u.id);
+      if (u.id === actor.actorId || u.status !== 'active') continue;
+      // 権限区画に属する業務の承認は、区画に入っている人だけが判断できた（第9.2.3節）
+      if (canDecide(a, await withCompartments(repo, tenantId, [a], u))) approvers.add(u.id);
     }
   }
 
