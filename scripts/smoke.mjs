@@ -7421,5 +7421,24 @@ console.log('\n■ 97. 議事録の作成が Meet の文字起こしを取る（
   }
 }
 
+console.log('\n■ 98. Chat への通知の控えの本物の送信口（会社の Chat アプリの鍵・個別メッセージの場所・本人だけ。第6.5.5.2.1節）');
+{
+  try {
+    // 見本の会社は見本の送信口。鍵が無くても、個別メッセージの場所（見本）を用意できる
+    const st = (await call('a', '/v1/me/notifications/chat', {}, 'member')).body;
+    const setup = await call('a', '/v1/me/notifications/chat/setup', { method: 'POST', body: '{}' }, 'member');
+    const after = (await call('a', '/v1/me/notifications/chat', {}, 'member')).body;
+    st?.appReady === true && setup.status === 200 && after?.dmReady === true
+      ? ok('Chat を入れると、本人と Chat アプリの個別メッセージの場所を用意する') : ng('個別メッセージの場所を用意できない', JSON.stringify({ st, setup: setup.body, after }));
+    const conn = (await call('a', '/v1/admin/connections')).body;
+    const bad = await call('a', '/v1/admin/connections/google/chat-app', { method: 'PUT', body: JSON.stringify({ key: '{"type":"authorized_user"}' }) });
+    const byMember = await call('a', '/v1/admin/connections/google/chat-app', { method: 'PUT', body: JSON.stringify({ key: '{}' }) }, 'member');
+    conn?.google?.chatApp?.registered === false && bad.status === 400 && /サービスアカウント/.test(bad.body?.error ?? '') && byMember.status === 403
+      ? ok('Chat アプリの鍵は管理者だけが登録でき、サービスアカウントの鍵でなければ断る（鍵は画面に返さない）') : ng('Chat アプリの鍵の口が違う', JSON.stringify({ chatApp: conn?.google?.chatApp, bad: bad.status, member: byMember.status }));
+  } catch (err) {
+    ng('Chat の通知の確認が途中で止まった', String(err));
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');

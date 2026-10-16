@@ -1938,6 +1938,22 @@ export class PostgresRepository implements Repository {
     await this.q(tenantId, `delete from files where tenant_id = $1 and id = $2`, [tenantId, id]);
   }
 
+  async getChatDmSpace(tenantId: string, userId: string): Promise<string | null> {
+    const rows = await this.q<{ space: string }>(tenantId, `select space from chat_dm_spaces where tenant_id = $1 and user_id = $2`, [tenantId, userId]);
+    return rows[0]?.space ?? null;
+  }
+
+  async setChatDmSpace(tenantId: string, userId: string, space: string | null): Promise<void> {
+    if (space === null) {
+      await this.q(tenantId, `delete from chat_dm_spaces where tenant_id = $1 and user_id = $2`, [tenantId, userId]);
+      return;
+    }
+    await this.q(tenantId,
+      `insert into chat_dm_spaces (tenant_id, user_id, space, updated_at) values ($1, $2, $3, now())
+       on conflict (tenant_id, user_id) do update set space = excluded.space, updated_at = now()`,
+      [tenantId, userId, space]);
+  }
+
   private liveRecordingSelect = `select r.id, r.tenant_id as "tenantId", r.user_id as "userId", r.created_at as "createdAt", r.updated_at as "updatedAt",
               count(p.seq)::int as parts, coalesce(sum(p.size), 0)::bigint as bytes, coalesce(max(p.seq) + 1, 0)::int as "nextSeq"
          from live_recordings r left join live_recording_parts p on p.recording_id = r.id and p.tenant_id = r.tenant_id`;

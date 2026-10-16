@@ -11,7 +11,7 @@
  */
 
 import { copyText } from './clipboard.js';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, describeError, type ConnectionHealth, type ConnectionSettings, type GoogleClientVerdict } from './api.js';
 import { HealthList } from './health.js';
 import { PageTitle, type PageHelp } from './help.js';
@@ -340,6 +340,53 @@ function PickerKey({ registered, onSaved }: { registered: boolean; onSaved: () =
   );
 }
 
+/**
+ * 通知の控えを送る会社の Chat アプリの鍵（サービスアカウントの JSON。仕様書 第6.5.5.2.1節）。貼るかファイルを選んで登録する。
+ *
+ * @remarks 登録のときに Google で Chat アプリとして認証できるかを確かめ、できなければ保存しない。鍵は画面に戻さない
+ */
+function ChatAppKey({ data, onSaved }: { data: { registered: boolean; clientEmail: string } | null; onSaved: () => void }) {
+  const [key, setKey] = useState('');
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const file = useRef<HTMLInputElement>(null);
+  const save = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await api.admin.saveChatAppKey(key.trim());
+      setKey('');
+      setMsg({ ok: true, text: `登録しました（${r.clientEmail}）` });
+      onSaved();
+    } catch (e) {
+      setMsg({ ok: false, text: describeError(e, '登録できませんでした') });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const remove = async () => {
+    setBusy(true); setMsg(null);
+    try { await api.admin.deleteChatAppKey(); setMsg({ ok: true, text: '削除しました' }); onSaved(); }
+    catch (e) { setMsg({ ok: false, text: describeError(e, '削除できませんでした') }); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="field">
+      <label>Chat アプリの鍵（通知を Chat で届ける）</label>
+      {data?.registered && <p className="small muted">登録済み: {data.clientEmail}</p>}
+      <textarea rows={3} value={key} autoComplete="off" spellCheck={false} onChange={(e) => setKey(e.target.value)}
+        placeholder={data?.registered ? '登録し直すときだけ、新しい鍵の JSON を貼る' : 'サービスアカウントの鍵の JSON を貼る'} />
+      <div className="row">
+        <button className="btn ghost small" disabled={busy} onClick={() => file.current?.click()}>ファイルを選ぶ</button>
+        <button className="btn ghost small" disabled={busy || !key.trim()} onClick={() => void save()}>{busy ? '確かめています…' : '登録'}</button>
+        {data?.registered && <button className="link danger small" disabled={busy} onClick={() => void remove()}>削除</button>}
+      </div>
+      <input ref={file} type="file" accept=".json,application/json" hidden
+        onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f && f.size < 20_000) void f.text().then(setKey); }} />
+      {msg && <p className={msg.ok ? 'ok-msg small' : 'error small'}>{msg.text}</p>}
+    </div>
+  );
+}
+
 function GoogleCard({ data, page, onSaved }: {
   data: ConnectionSettings['google']; page: string; onSaved: () => void;
 }) {
@@ -416,6 +463,7 @@ function GoogleCard({ data, page, onSaved }: {
         </div>
         {msg && <p className={msg.ok ? 'ok-msg' : 'error'}>{msg.text}</p>}
         {registered && <PickerKey registered={!!data.pickerKeyRegistered} onSaved={onSaved} />}
+        {registered && <ChatAppKey data={data.chatApp ?? null} onSaved={onSaved} />}
         {data.workspaceSource === 'mock' && (
           <p className="warn-msg small">この会社の業務は見本データで動きます</p>
         )}

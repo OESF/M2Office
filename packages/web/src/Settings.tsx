@@ -277,12 +277,8 @@ export function Settings({ me, agents, onChanged, section }: {
           <button className="btn ghost small" onClick={() => set('notifications', { quietHours: null })}>指定しない</button>
         </div>
 
-        <h4>受け取り方 <HelpTip article="start-settings">Chat には題名とリンクのみ（本文なし）。Chat への送信は準備中で、まだ届きません</HelpTip></h4>
-        <label className="check">
-          <input type="checkbox" checked={s.notifications.channels.chat}
-            onChange={(e) => set('notifications', { channels: { chat: e.target.checked } })} />
-          Chat（本人への個別メッセージ）
-        </label>
+        <h4>受け取り方 <HelpTip article="start-settings">会社の Chat アプリから、あなたへの個別メッセージで届きます。載せるのは種類・題名・画面へのリンクだけです（本文なし）</HelpTip></h4>
+        <ChatCopy checked={s.notifications.channels.chat} onChange={(v) => set('notifications', { channels: { chat: v } })} />
         <div style={{ marginTop: 'calc(12px * var(--space-scale))' }}>
           <SaveButton run={() => api.saveMySettings('notifications', s.notifications).then(onChanged)} />
         </div>
@@ -1106,3 +1102,71 @@ function BriefCard({ brief, onSaved }: { brief: BriefSettings; onSaved: (b: Brie
     </div>
   );
 }
+
+/**
+ * 通知を Chat でも受け取るかの入り切りと、届けられるかの様子（仕様書 第6.5.5.2.1節）。
+ *
+ * @remarks
+ * 入れたら、本人と会社の Chat アプリの個別メッセージの場所を M2Office が用意する。本人の Google の許可が足りなければ、
+ * 許可を足すボタンを出す（許可の画面から戻ったら、開いたときにもう一度用意する）。会社の鍵が無ければ入れられない
+ */
+function ChatCopy({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+  const [status, setStatus] = useState<{ appReady: boolean; dmReady: boolean } | null>(null);
+  const [needsScope, setNeedsScope] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const setup = async () => {
+    setBusy(true); setError(null);
+    try {
+      const r = await api.chatCopySetup();
+      if ('needsScope' in r) { setNeedsScope(r.needsScope); return; }
+      setNeedsScope(null);
+      setStatus((cur) => (cur ? { ...cur, dmReady: true } : cur));
+    } catch (e) {
+      setError(describeError(e, 'Chat の個別メッセージを用意できませんでした'));
+    } finally {
+      setBusy(false);
+    }
+  };
+  useEffect(() => {
+    api.chatCopyStatus().then((st) => {
+      setStatus(st);
+      // 入っているのに場所が無い（Google の許可の画面から戻った・場所が消えた）ときは、もう一度用意する
+      if (checked && st.appReady && !st.dmReady) void setup();
+    }).catch(() => setStatus(null));
+    // 開いたときに 1 度だけ見る
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const toggle = (v: boolean) => {
+    if (v && status && !status.appReady) { setError('会社の Chat アプリの鍵が登録されていません。管理者に登録を頼んでください'); return; }
+    onChange(v);
+    if (v && status && !status.dmReady) void setup();
+  };
+  const addScope = async () => {
+    try {
+      location.href = (await api.connectGoogle({ extra: [needsScope ?? 'chat.spaces.create'], back: '/settings/notifications' })).url;
+    } catch (e) {
+      setError(describeError(e, 'Google の許可の画面を開けませんでした'));
+    }
+  };
+  return (
+    <>
+      <label className="check">
+        <input type="checkbox" checked={checked} disabled={busy} onChange={(e) => toggle(e.target.checked)} />
+        Chat（本人への個別メッセージ）
+        {checked && status?.dmReady && !needsScope && <span className="small ok-msg">Chat に届けます</span>}
+        {busy && <span className="small muted">用意しています…</span>}
+      </label>
+      {checked && needsScope && (
+        <p className="small">Chat に届けるには Google の許可を 1 つ足します。{' '}
+          <button className="btn small" onClick={() => void addScope()}>Google の許可を足す</button>
+        </p>
+      )}
+      {checked && status && status.appReady && !status.dmReady && !needsScope && !busy && !error && (
+        <p className="small warn-text">届けられません。<button className="link small" onClick={() => void setup()}>入れ直す</button></p>
+      )}
+      {error && <p className="error small">{error}</p>}
+    </>
+  );
+}
+

@@ -405,6 +405,8 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
   }
 
   chat = {
+    /** 見本の個別メッセージの場所（本人ごとに決まった名前）。 */
+    setupAppDm: async (p: ConnectorPrincipal) => `spaces/mockdm-${key(p).replace(/[^A-Za-z0-9_-]/g, '-')}`,
     /**
      * 見本では、指定があればどのスペースも見つかる。指定をそのまま投稿先とする
      * （見本の投稿はスペースを区別しないため。通しの確認が見る投稿先を変えない）。

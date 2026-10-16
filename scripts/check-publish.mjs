@@ -72,8 +72,9 @@ const SECRET = [
   [/-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----/, '秘密鍵'],
   [/\bghp_[A-Za-z0-9]{30,}/, 'GitHub のトークンらしい文字列'],
 ];
-// 見本として書いてよいメールアドレスのドメイン（RFC 2606・6761 で予約された名前と、example.* とその下）
-const OK_MAIL = /@(([a-z0-9-]+\.)*(example|test|invalid|localhost)|([a-z0-9-]+\.)*example\.(com|net|org|jp|co\.jp)|users\.noreply\.github\.com)$/i;
+// 見本として書いてよいメールアドレスのドメイン（RFC 2606・6761 で予約された名前と、example.* とその下。
+// テストの架空の Google のサービスアカウント（プロジェクト名が example で終わるもの。鍵の読み方がこの形を求めるため）
+const OK_MAIL = /@(([a-z0-9-]+\.)*(example|test|invalid|localhost)|([a-z0-9-]+\.)*example\.(com|net|org|jp|co\.jp)|([a-z0-9-]+-)?example\.iam\.gserviceaccount\.com|users\.noreply\.github\.com)$/i;
 // 公開されている決まった宛先（共著者の行・依存の説明文・個人向けの Google アカウントの例・URL の利用者名の例）
 const OK_ADDRESS = new Set(['noreply@anthropic.com', 'i@izs.me', 'someone@gmail.com', 'pass@lh3.googleusercontent.com']);
 

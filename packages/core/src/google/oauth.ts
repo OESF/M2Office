@@ -59,6 +59,7 @@ export function googleScopeLabel(name: string): string {
     'webmasters.readonly': 'Search Console の数字を見る',
     'meetings.space.readonly': '参加した会議の文字起こしを読む',
     contacts: 'Google の連絡先に名刺を入れる（使う人だけ）',
+    'chat.spaces.create': 'Chat アプリとの個別メッセージを用意する（通知を Chat で受け取る人だけ）',
     openid: 'ログイン', email: 'メールアドレスを知る',
   };
   return labels[name] ?? name;

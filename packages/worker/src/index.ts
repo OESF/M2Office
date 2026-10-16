@@ -16,7 +16,7 @@ import {
   assertDatabaseConfigured,
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
   RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, GoogleContactsService, KnowledgeEmbedder, MemoryEmbedder, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, JGrantsApi, MockJGrants, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, MEMBER_LINE_SEND, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, EffectService, PostgresEffectStore, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger,
-  NotificationDelivery, MockNotificationSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
+  NotificationDelivery, MockNotificationSender, RoutingNotificationSender, GoogleChatAppSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator, ProfileBuilder, CaseNoteBuilder, KnowledgeGaps, PostgresKnowledgeGapStore, aiUsageMeterFromEnv, enterAiUsage, withAiUsage, setEnqueueAiGuard, AutoMinutes, MINUTES_AGENT_ID, appPath, backupConfigFromEnv, machineDir, readBackupStatus, takeUnnotifiedUpdateFailure, takeClosedMaintenanceSessions, heartbeatConfigFromEnv, sendHeartbeat, HEARTBEAT_INTERVAL_MS, machineStatus, machineConfigFromEnv, restoreTest, runBackup, takeBackupRequest, writeWorkerBeat, OpsAppSide, createPool, offsiteConfigFromEnv, readOffsiteStatus, runOffsite, checkOffsite,
   SecurityWatch, PostgresSecurityStore,
@@ -419,8 +419,10 @@ const appUrl = (subdomain: string): string =>
   (process.env['APP_BASE_URL'] ?? `http://{tenant}.${process.env['BASE_DOMAIN'] ?? 'lvh.me'}:${process.env['WEB_PORT'] ?? 3100}`)
     .replace('{tenant}', subdomain);
 
+// 通知の控えの送信口（第6.5.5.2.1節）。見本の接続口を使う会社（開発）は見本、ほかは会社の Chat アプリ
 const notifier = new NotificationDelivery({
-  repo, sender: new MockNotificationSender(log), logger: log,
+  repo, logger: log,
+  sender: new RoutingNotificationSender((tenantId) => connector.sourceFor(tenantId) === 'mock', new MockNotificationSender(log), new GoogleChatAppSender({ repo, box })),
   linkFor: (tenant) => appUrl(tenant.subdomain),
 });
 

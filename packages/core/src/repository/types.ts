@@ -499,6 +499,10 @@ export interface Repository {
   listStaleRecordings(tenantId: string, before: string): Promise<{ id: string; size: number }[]>;
   /** ファイルの記録を消す（中身は呼び出し側が置き場から消す）。 */
   deleteFile(tenantId: string, id: string): Promise<void>;
+  /** 本人と会社の Chat アプリの個別メッセージの場所（`spaces/…`。第6.5.5.2.1節）。無ければ `null`。 */
+  getChatDmSpace(tenantId: string, userId: string): Promise<string | null>;
+  /** 個別メッセージの場所を覚える。`null` なら忘れる（場所が無くなったとき）。 */
+  setChatDmSpace(tenantId: string, userId: string, space: string | null): Promise<void>;
   /** 本人が録っている途中の録音（第9.4.5.1節。1 人 1 つまで）。無ければ `null`。 */
   getLiveRecording(tenantId: string, userId: string): Promise<LiveRecording | null>;
   /** 途中の録音を作る。本人のものがすでにあれば作らず `false`。 */
@@ -994,7 +998,7 @@ export interface RunStatRow {
 }
 
 /** 接続の設定の種類。 */
-export type CredentialKind = 'gemini' | 'google_oauth' | 'wordpress' | 'inquiry_mailbox' | 'line' | 'places' | 'web_review';
+export type CredentialKind = 'gemini' | 'google_oauth' | 'wordpress' | 'inquiry_mailbox' | 'line' | 'places' | 'web_review' | 'google_chat_app';
 
 /** 会社の接続の設定。`secretEnc` は暗号化した秘密の値、`meta` は秘密でない値。 */
 export interface TenantCredential {

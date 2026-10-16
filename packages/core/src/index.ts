@@ -51,6 +51,7 @@ export * from './memory/cases.js';
 export * from './dashboard/presence.js';
 export * from './notify/sender.js';
 export * from './notify/delivery.js';
+export * from './notify/google-chat.js';
 export * from './notify/list.js';
 export * from './retention/google-data.js';
 export * from './retention/revocation.js';

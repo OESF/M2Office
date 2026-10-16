@@ -420,6 +420,8 @@ AG-02 議事録の作成・共有は、承認②のあとに `knowledge.register
 
 画面内のお知らせが正で、Chat はその控えです（仕様書 第6.5.5.2節、ADR-0011）。メールは送りません（Q-86）。
 
+- 本物の送信口は `google-chat.ts` の `GoogleChatAppSender`（会社の Chat アプリのサービスアカウントの鍵でアプリとして、本人との個別メッセージに送る。場所が無くなったら探し直す）。本人との場所の用意は `ensureChatDm`（既存を探す → 本人の許可で作る）。会社ごとに見本と本物を振り分けるのは `RoutingNotificationSender`（仕様書 第6.5.5.2.1節、ADR-0102）
+
 - 秘書の先回り（`secretary/proactive.ts` の `ProactiveWatcher`）は、ワーカーから 10 分ごとに呼び、会議の 20〜60 分前に会議の準備を、17 時以降に翌日の移動の調べものを起こします。「あとで〇〇する」を ToDo に入れるのは `Secretary` の中です（仕様書 第10.12節）
 - 朝のブリーフ（`agents/morning-brief.ts`）は通知を作らず、秘書の答えとして届けます（仕様書 第9.5.5.1節）。本人の自宅・勤務地はツール `profile.read`（`tools/profile.ts`）で読みます
 - 通知を作るのは実行エンジン（承認依頼・完了・失敗）と `notification.send`（週次ブリーフ）です。本人が受け取らないと決めた種類は作りません

@@ -332,6 +332,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/print-designs/:id/canva` ／ `POST /v1/print-designs/:id/canva/pull` | Canva で仕上げる（選んだ版の PDF を本人の Canva に取り込み、編集の画面の URL）／ Canva から戻す（新しい版。第41.19.3節） |
 | `GET` ／ `DELETE /v1/me/canva`、`POST /v1/me/canva/connect`、`GET /v1/oauth/canva/callback` | 本人の Canva の接続（状態 ／ 切断 ／ つなぐ（PKCE）／ Canva からの戻り）。運営が設定していなければ `configured: false` |
 | `PUT /v1/admin/connections/google/picker` | 管理者: ドライブの写真を選ぶ画面（Google Picker）の API キー（空なら消す） |
+| `PUT・DELETE /v1/admin/connections/google/chat-app` | 管理者: 通知を送る会社の Chat アプリの鍵（サービスアカウントの JSON。本文 `key`）。保存の前に Google でアプリとして認証できるかを確かめる。鍵は返さない（仕様書 第6.5.5.2.1節） |
 | `POST` ／ `DELETE /v1/print-designs/:id/signage`、`POST /v1/print-designs/:id/announcement` | サイネージに流す（掲示の始まりより前なら始まりから）／ 止める ／ お知らせの作成の下書きにする（第41.18節。1 つの物を返すときに `links` でつなげる先を使えるかを添える） |
 | `GET /v1/print-designs/:id/thumb` ／ `GET /v1/print-designs/:id/versions/:vid/preview\|png\|pdf\|bleed` | 一覧の小さな画像 ／ 版の書き出し（案の画像・PNG・実寸の PDF・入稿用の PDF。`page` はパンフレットの面） |
 | `GET /v1/competitors` | 競合の分析（仕様書 第36.18節）: 全体（自社の像・競合・動いている作業・最後の作業・地図の注意）。地図で見つけた競合の名前と Web サイトはここで引き直す。使えない会社と利用範囲の外の人には、`/v1/competitors` のどの口も 403 |
@@ -396,7 +397,8 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/admin/connections/google/impact` | 管理者: OAuth クライアントを消す（クライアント ID を替える）と影響する人数と業務の件数 |
 | `DELETE /v1/admin/connections/google` | 管理者: OAuth クライアントの登録を消す。接続している全員の接続を消し、Google を使う動いている途中の業務を止める（仕様書 第6.5.2.1節）。クライアント ID を替える `PUT` も同じ |
 | `GET /v1/me/google` | 本人: Google 連携の状況（業務の言葉の許可の一覧。トークンは返さない） |
-| `POST /v1/me/google/connect` | 本人: 接続を始める（Google の同意の画面の URL を返す。state と PKCE つき）。`extra` に使う人だけに求める権限（`contacts`）、`back` に戻る画面（`/cards`・`/cards/<ID>`）を渡せる（仕様書 第27.15節） |
+| `POST /v1/me/google/connect` | 本人: 接続を始める（Google の同意の画面の URL を返す。state と PKCE つき）。`extra` に使う人だけに求める権限（`contacts`）、`back` に戻る画面（`/cards`・`/cards/<ID>`・`/settings/notifications`）を渡せる（仕様書 第27.15節。Chat の控えの `chat.spaces.create` は第6.5.5.2.1節） |
+| `GET /v1/me/notifications/chat`・`POST /v1/me/notifications/chat/setup` | 本人: Chat の控えを届けられるか（会社の鍵・本人の個別メッセージの場所）と、場所の用意（既存を探す → 本人の許可で作る。許可が足りなければ `needsScope`）（仕様書 第6.5.5.2.1節） |
 | `POST /v1/me/google/check` | 本人: 許可の状況を Google に問い合わせ直す。その許可で受け取れれば、プロフィール写真も取り込み直す |
 | `GET /v1/me/google/impact` | 本人: 取り消すと止まる業務と、飛ばす定時実行の数 |
 | `DELETE /v1/me/google` | 本人: 接続を取り消す（Google 側の許可も取り消し、トークンを消す）。Google を使う動いている途中の業務を止め、終わった実行の中身を消す（仕様書 第6.5.2.1節・第14.3.2節） |

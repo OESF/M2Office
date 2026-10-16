@@ -12,7 +12,7 @@ import {
   CARDS_EXTENSION_ID, HR_EXTENSION_ID, SIGNAGE_EXTENSION_ID, INVENTORY_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, CONTRACTS_EXTENSION_ID, RESERVATIONS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, MEMBERS_EXTENSION_ID, PRINT_DESIGNS_EXTENSION_ID, MENU_CATEGORY_MAX, MENU_CATEGORY_NAME_MAX,
   GOOGLE_APP_IDS, LAUNCHER_LABEL_MAX, LAUNCHER_LINK_MAX, checkLauncherUrl, type LauncherLink,
 } from '@m2office/shared';
-import { AUDIO, AiNotConfiguredError, AiPolicyBlockedError, LEARNED_SOURCE, cleanTopics, buildPresence, loadFile, refusalMessage, refuseToRemember, jstMonth } from '@m2office/core';
+import { AUDIO, AiNotConfiguredError, AiPolicyBlockedError, LEARNED_SOURCE, cleanTopics, buildPresence, loadFile, refusalMessage, refuseToRemember, jstMonth, ensureChatDm, CHAT_DM_SETUP_SCOPE } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 import { speakSample } from '../voice/sample.js';
@@ -105,6 +105,28 @@ export function meRoute(deps: AppDeps) {
     });
   });
 
+  /** Chat の控えを届けられるかの様子（個人設定に出す。仕様書 第6.5.5.2.1節）。 */
+  app.get('/notifications/chat', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const mock = deps.connector.sourceFor(tenant.id) === 'mock';
+    const app = mock || !!(await deps.repo.getTenantCredential(tenant.id, 'google_chat_app'))?.secretEnc;
+    return c.json({ appReady: app, dmReady: !!(await deps.repo.getChatDmSpace(tenant.id, user.id)) });
+  });
+
+  /**
+   * 本人と会社の Chat アプリの個別メッセージの場所を用意する（本人が「Chat」を入れたとき。第6.5.5.2.1節）。
+   *
+   * @returns `{ ok: true }`、本人の Google の許可が足りなければ `{ needsScope: 'chat.spaces.create' }`、用意できなければ 400
+   */
+  app.post('/notifications/chat/setup', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const r = await ensureChatDm({ repo: deps.repo, box: deps.box, connector: deps.connector }, { tenantId: tenant.id, userId: user.id, email: user.email });
+    if ('needsScope' in r) return c.json({ needsScope: CHAT_DM_SETUP_SCOPE });
+    if ('error' in r) return c.json({ error: r.error }, 400);
+    await audit(deps, tenant.id, user.id, 'me.chat_dm.setup', 'notifications');
+    return c.json({ ok: true });
+  });
+
   app.get('/settings', async (c) => {
     const { tenant, user } = c.get('ctx');
     return c.json(await deps.repo.getUserSettings(tenant.id, user.id));
@@ -123,6 +145,11 @@ export function meRoute(deps: AppDeps) {
         const current = (await deps.repo.getUserSettings(tenant.id, user.id)).menu;
         value = { ...v, categories: current.categories ?? [], categoryOf: current.categoryOf ?? {} };
       }
+    }
+    if (checked.section === 'notifications' && (value as UserSettings['notifications']).channels.chat
+      && deps.connector.sourceFor(tenant.id) !== 'mock' && !(await deps.repo.getTenantCredential(tenant.id, 'google_chat_app'))?.secretEnc) {
+      // 届かないのに入っている状態を作らない（第6.5.5.2.1節）
+      return c.json({ error: '会社の Chat アプリの鍵が登録されていません。管理者に登録を頼んでください' }, 400);
     }
     if (checked.section === 'brief') {
       // 秘書が選んだ印は画面から変えさせない。画面で分野を消しても、秘書が選び直さないよう印は付けたままにする（第9.5.5.1.1節）

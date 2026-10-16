@@ -15,7 +15,7 @@ import {
   buildGoogleAuthUrl, checkGeminiLive, checkGeminiText, checkGoogleClient, createPkce, exchangeGoogleCode, exchangeGoogleLoginCode,
   fetchGooglePhoto, googleGrantedScopes, googleScopeLabel, googleUserInfo, isGoogleClientError, refreshGoogleAccessToken,
   revokeGoogleToken, toolGoogleScopes,
-  GoogleOAuthError, MAILBOX_SCOPES, GOOGLE_CONTACTS_SCOPE,
+  GoogleOAuthError, MAILBOX_SCOPES, GOOGLE_CONTACTS_SCOPE, CHAT_DM_SETUP_SCOPE, parseServiceAccountKey, checkChatAppKey,
   type GeminiModels, type GeminiSettingsMeta, type GoogleClientVerdict,
 } from '@m2office/core';
 import { agentDisplayName, WEB_REVIEW_SCOPES } from '@m2office/shared';
@@ -35,9 +35,9 @@ async function audit(deps: AppDeps, tenantId: string, userId: string, action: st
 
 /**
  * 使う人だけに、使うときに求める Google の権限（短い名前）。業務の権限の一覧（{@link requiredGoogleScopes}）には入れない。
- * いまは Google の連絡先（`contacts`。仕様書 第27.15節、ADR-0084）だけ。
+ * Google の連絡先（`contacts`。仕様書 第27.15節、ADR-0084）と、Chat の控えの個別メッセージの場所を作る許可（`chat.spaces.create`。第6.5.5.2.1節、ADR-0102）。
  */
-export const ON_DEMAND_GOOGLE_SCOPES: readonly string[] = [GOOGLE_CONTACTS_SCOPE];
+export const ON_DEMAND_GOOGLE_SCOPES: readonly string[] = [GOOGLE_CONTACTS_SCOPE, CHAT_DM_SETUP_SCOPE];
 
 /**
  * その会社で使える業務が求める Google の権限（短い名前）。無効にした業務は除く（仕様書 第14.3.2節 規定 2）。
@@ -123,10 +123,10 @@ export function connectionsRoute(deps: AppDeps) {
   /** 設定の一覧。秘密の値は返さず、登録済みかどうかと日時だけを返す。 */
   app.get('/', async (c) => {
     const { tenant } = c.get('ctx');
-    const [gemini, google, required, users, conns, resolved] = await Promise.all([
+    const [gemini, google, required, users, conns, resolved, chatApp] = await Promise.all([
       deps.repo.getTenantCredential(tenant.id, 'gemini'), deps.repo.getTenantCredential(tenant.id, 'google_oauth'),
       requiredGoogleScopes(deps, tenant.id), deps.repo.listUsers(tenant.id), deps.repo.listGoogleConnections(tenant.id),
-      deps.ai.geminiFor(tenant.id),
+      deps.ai.geminiFor(tenant.id), deps.repo.getTenantCredential(tenant.id, 'google_chat_app'),
     ]);
     const gmeta = (gemini?.meta ?? {}) as GeminiSettingsMeta;
     const need = required.map((r) => r.scope);
@@ -154,6 +154,8 @@ export function connectionsRoute(deps: AppDeps) {
         secretRegistered: !!google?.secretEnc,
         // ドライブの写真を選ぶ画面の API キーを登録したか（第41.19.2節）
         pickerKeyRegistered: typeof google?.meta['pickerApiKey'] === 'string',
+        // 通知の控えを送る会社の Chat アプリの鍵（第6.5.5.2.1節）。秘密の値は返さず、サービスアカウントの名前だけ
+        chatApp: { registered: !!chatApp?.secretEnc, clientEmail: typeof chatApp?.meta['clientEmail'] === 'string' ? chatApp.meta['clientEmail'] : '', updatedAt: chatApp?.updatedAt ?? null },
         updatedAt: google?.updatedAt ?? null,
         redirectUri: deps.oauth.redirectUri,
         requiredScopes: required.map((r) => ({ ...r, label: googleScopeLabel(r.scope) })),
@@ -317,6 +319,39 @@ export function connectionsRoute(deps: AppDeps) {
   });
 
   /**
+   * 通知の控えを送る会社の Chat アプリの鍵（サービスアカウントの JSON）を登録する（仕様書 第6.5.5.2.1節、ADR-0102）。本文 `{ key }`。
+   *
+   * @remarks 保存する前に、Chat アプリとして認証できるかを Google で確かめる。認証できなければ保存しない。鍵は暗号化して預かり、画面には返さない
+   */
+  app.put('/google/chat-app', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const body = await c.req.json<{ key?: unknown }>().catch(() => ({} as { key?: unknown }));
+    const text = typeof body.key === 'string' ? body.key.trim() : '';
+    if (!text || text.length > 20_000) return c.json({ error: 'サービスアカウントの鍵（JSON）を貼ってください' }, 400);
+    const key = parseServiceAccountKey(text);
+    if ('error' in key) return c.json({ error: key.error }, 400);
+    const problem = await checkChatAppKey(key);
+    if (problem) {
+      await audit(deps, tenant.id, user.id, 'connection.google.chat_app_rejected', 'google_chat_app', { clientEmail: key.clientEmail });
+      return c.json({ error: problem }, 400);
+    }
+    await deps.repo.saveTenantCredential({
+      tenantId: tenant.id, kind: 'google_chat_app', secretEnc: deps.box.encrypt(text), meta: { clientEmail: key.clientEmail, projectId: key.projectId },
+      updatedBy: user.id, updatedAt: new Date().toISOString(),
+    });
+    await audit(deps, tenant.id, user.id, 'connection.google.chat_app', 'google_chat_app', { clientEmail: key.clientEmail, projectId: key.projectId });
+    return c.json({ ok: true, clientEmail: key.clientEmail });
+  });
+
+  /** 会社の Chat アプリの鍵を消す（通知の控えは送れなくなる。画面内のお知らせはそのまま）。 */
+  app.delete('/google/chat-app', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const removed = await deps.repo.deleteTenantCredential(tenant.id, 'google_chat_app');
+    if (removed) await audit(deps, tenant.id, user.id, 'connection.google.chat_app_delete', 'google_chat_app', {});
+    return c.json({ ok: true });
+  });
+
+  /**
    * 登録済みのクライアントを Google に確かめる（仕様書 第14.3.3節「登録の確認」）。保存し直さずに試せる。
    *
    * @remarks 変えるものは無い。判定と、管理者に見せる文だけを返す。
@@ -415,13 +450,13 @@ export function myGoogleRoute(deps: AppDeps) {
    * @remarks
    * `extra` に、使う人だけに使うときに求める権限（{@link ON_DEMAND_GOOGLE_SCOPES}。Google の連絡先の `contacts`。仕様書 第27.15節）を足せる。
    * すでに許可した権限は `include_granted_scopes` で残るため、足した権限だけを求め直すことになる（ほかの人の再同意は要らない）。
-   * `back` は戻る画面（名刺の画面だけ）
+   * `back` は戻る画面（名刺の画面と、個人設定の通知。Chat の控えの許可を足すとき）
    */
   app.post('/connect', async (c) => {
     const { tenant, user } = c.get('ctx');
     const body = await c.req.json<{ extra?: unknown; back?: unknown }>().catch(() => ({} as { extra?: unknown; back?: unknown }));
     const extra = (Array.isArray(body.extra) ? body.extra : []).filter((x): x is string => typeof x === 'string' && ON_DEMAND_GOOGLE_SCOPES.includes(x));
-    const back = typeof body.back === 'string' && /^\/cards(\/[A-Za-z0-9_-]+)?$/.test(body.back) ? body.back : '';
+    const back = typeof body.back === 'string' && /^\/cards(\/[A-Za-z0-9_-]+)?$|^\/settings\/notifications$/.test(body.back) ? body.back : '';
     const client = await googleClient(deps, tenant.id);
     if (!client) return c.json({ error: '会社の管理者が、まだ Google との接続を設定していません' }, 409);
     const required = await requiredGoogleScopes(deps, tenant.id);

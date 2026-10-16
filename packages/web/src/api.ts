@@ -973,6 +973,8 @@ export interface ConnectionSettings {
   };
   google: {
     clientId: string; secretRegistered: boolean; pickerKeyRegistered?: boolean; updatedAt: string | null; redirectUri: string;
+    /** 通知の控えを送る会社の Chat アプリの鍵（第6.5.5.2.1節）。 */
+    chatApp?: { registered: boolean; clientEmail: string; updatedAt: string | null };
     requiredScopes: { scope: string; level: string; label: string }[];
     workspaceSource: string;
     users: { userId: string; name: string; email: string; connected: boolean; googleEmail: string | null; connectedAt: string | null; missing: string[] }[];
@@ -2279,6 +2281,10 @@ export const api = {
    * Google と接続する（同意の画面の URL を返す）。`extra` は使う人だけに求める権限（`contacts`。仕様書 第27.15節）、
    * `back` は戻る画面（`/cards` か `/cards/<ID>`）。
    */
+  /** Chat の控えを届けられるかの様子（第6.5.5.2.1節）。 */
+  chatCopyStatus: () => call<{ appReady: boolean; dmReady: boolean }>('/me/notifications/chat'),
+  /** 本人と会社の Chat アプリの個別メッセージの場所を用意する。Google の許可が足りなければ `needsScope`。 */
+  chatCopySetup: () => call<{ ok: true } | { needsScope: string }>('/me/notifications/chat/setup', { method: 'POST', body: '{}' }),
   connectGoogle: (opts: { extra?: string[]; back?: string } = {}) =>
     call<{ url: string }>('/me/google/connect', { method: 'POST', body: JSON.stringify(opts) }),
   checkGoogle: () => call<{ ok: boolean; error?: string }>('/me/google/check', { method: 'POST' }),
@@ -2375,6 +2381,9 @@ export const api = {
      */
     /** ドライブの写真を選ぶ画面（Google Picker）の API キー。空なら消す（仕様書 第41.19.2節）。 */
     saveGooglePickerKey: (apiKey: string) => call<{ ok: true }>('/admin/connections/google/picker', { method: 'PUT', body: JSON.stringify({ apiKey }) }),
+    /** 通知の控えを送る会社の Chat アプリの鍵（サービスアカウントの JSON）を登録する・消す（第6.5.5.2.1節）。 */
+    saveChatAppKey: (key: string) => call<{ ok: true; clientEmail: string }>('/admin/connections/google/chat-app', { method: 'PUT', body: JSON.stringify({ key }) }),
+    deleteChatAppKey: () => call<{ ok: true }>('/admin/connections/google/chat-app', { method: 'DELETE' }),
     saveGoogleClient: (v: { clientId: string; clientSecret?: string }) =>
       call<{ ok: true; verdict: GoogleClientVerdict; message: string; users: number; stoppedRuns: number }>(
         '/admin/connections/google', { method: 'PUT', body: JSON.stringify(v) },

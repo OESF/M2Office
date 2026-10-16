@@ -170,7 +170,7 @@ export class NotificationDelivery {
     await repo.appendAudit({
       id: randomUUID(), tenantId: tenant.id, actorType: 'system', actorId: 'notifier',
       action: 'notification.deliver', targetType: 'notification', targetId: n.id,
-      detail: { channels, kind: n.kind, source: this.deps.sender.source }, occurredAt: at,
+      detail: { channels, kind: n.kind, source: this.deps.sender.sourceFor?.(tenant.id) ?? this.deps.sender.source }, occurredAt: at,
     });
     return 'sent';
   }

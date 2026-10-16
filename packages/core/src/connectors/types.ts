@@ -357,6 +357,14 @@ export interface ChatConnector {
    * @remarks 権限 `chat.memberships.readonly`。会社の外の人は、本人と Workspace の番号（domainId）が違う人として数える
    */
   members(p: ConnectorPrincipal, space: string, emails: string[]): Promise<ChatSpaceMembers | null>;
+  /**
+   * 本人と会社の Chat アプリの個別メッセージの場所を、本人の許可で用意する（通知の控えの届け先。仕様書 第6.5.5.2.1節）。すでにあればそれを返す。
+   *
+   * @returns 場所（`spaces/…`）
+   * @remarks 権限 `chat.spaces.create`（Chat の控えを使う人だけに、使うときに求める）。持たない接続口では未定義
+   * @throws {ConnectorUnavailableError} 許可が足りない（`insufficient-scope`）・会社の準備の問題・Google に届かないとき
+   */
+  setupAppDm?(p: ConnectorPrincipal): Promise<string>;
 }
 
 /** スペースのメンバーの数と、確かめた人（仕様書 第16.7.12.1節）。 */

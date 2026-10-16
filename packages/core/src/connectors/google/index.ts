@@ -347,6 +347,13 @@ export class GoogleWorkspaceConnector implements WorkspaceConnector {
   }
 
   chat = {
+    /** 本人と会社の Chat アプリの個別メッセージの場所を、本人の許可で用意する（仕様書 第6.5.5.2.1節。`spaces.setup`）。 */
+    setupAppDm: async (p: ConnectorPrincipal) => {
+      const res = await this.chatApi(p, '/spaces:setup', { method: 'POST', body: { space: { spaceType: 'DIRECT_MESSAGE', singleUserBotDm: true } } });
+      const name = String(res?.['name'] ?? '');
+      if (!/^spaces\/[A-Za-z0-9_-]+$/.test(name)) throw new ConnectorUnavailableError('unreachable', 'Chat の個別メッセージの場所を用意できませんでした');
+      return name;
+    },
     /**
      * 投稿先を探す（承認の前の確かめ。ADR-0024）。名前なら本人が入っているスペースから探し、
      * リンク・ID なら本人がそのスペースを見られるかを確かめる。

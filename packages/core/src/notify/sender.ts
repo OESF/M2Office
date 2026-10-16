@@ -4,8 +4,8 @@
  * 画面内のお知らせが正であり、ここで送るのはその控えである（仕様書 第6.5.5.2節、ADR-0011）。
  * 送るのは種類・題名・画面へのリンクだけで、本文は載せない。
  *
- * 実際の送信は、会社の Google Chat アプリの登録（B-2）のあとに実装する。メールは送らない（Q-86）。
- * それまでは見本の送信口で、設定・時間帯・重複の除き方まで通しで確かめる（ADR-0003 と同じ進め方）。
+ * 本物の送信口は `google-chat.ts`（会社の Chat アプリ。第6.5.5.2.1節、ADR-0102）。メールは送らない（Q-86）。
+ * 見本の送信口は、見本の接続口を使う会社（開発）と自動のテストで使う。
  */
 
 import type { DataSource } from '../connectors/types.js';
@@ -32,11 +32,13 @@ export interface NotificationEnvelope {
  * 通知の控えの送信口。
  *
  * @remarks
- * 実装は `mock`（見本）と、のちの `google`（会社の Chat アプリ）。
+ * 実装は `mock`（見本）と `google`（会社の Chat アプリ。`google-chat.ts`）。
  * どちらも出どころ（`source`）を持ち、見本を本物と取り違えないようにする。
  */
 export interface NotificationSender {
   source: DataSource;
+  /** 会社ごとに出どころが違う送信口（見本と本物の振り分け）では、その会社の出どころ。 */
+  sourceFor?(tenantId: string): DataSource;
   /** 会社の Chat アプリから、本人への個別メッセージとして送る。 */
   chat(envelope: NotificationEnvelope): Promise<void>;
 }

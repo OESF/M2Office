@@ -200,7 +200,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [view, setView] = useState<View>(() => (
     // Google から戻ったときは、その場で結果が見えるよう連携の区分を開く（第6.5.0節）。
     // 名刺から Google の連絡先の許可を求めたときは名刺の画面に戻る（続きを名刺の画面が入れる。第27.15節）
-    googleReturn && initialRoute.current.kind !== 'cards' ? { kind: 'settings', section: 'google' }
+    // Chat の控えの許可を足したときは個人設定の通知に戻る（続きをその画面が行う。第6.5.5.2.1節）
+    googleReturn && initialRoute.current.kind !== 'cards' && !(initialRoute.current.kind === 'settings' && initialRoute.current.section === 'notifications') ? { kind: 'settings', section: 'google' }
       : connectionReturn ? { kind: 'settings', section: 'services' }
       : (viewOf(initialRoute.current) ?? { kind: 'home' })
   ));
