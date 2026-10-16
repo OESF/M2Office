@@ -11,7 +11,7 @@ export const SIGNAGE_EXTENSION_ID = 'signage';
 /** 1 社で登録できる画面の数（全社共通の決まり。第31.4節）。 */
 export const SIGNAGE_MAX_SCREENS = 3;
 
-/** 1 社の素材の合計の上限（バイト。案 2 GB。第31.4節・Q-141）。 */
+/** 1 社の素材の合計の上限（バイト。2 GB。第31.4節・Q-141 決定）。 */
 export const SIGNAGE_STORAGE_LIMIT = 2 * 1024 * 1024 * 1024;
 
 /** 素材の大きさの上限（第31.6.1節）。画像は縮めた後、動画はそのまま。 */
@@ -26,10 +26,10 @@ export const SIGNAGE_TRANSITIONS: readonly { id: SignageTransition; label: strin
 export const SIGNAGE_LIMITS = {
   imageBytes: 5 * 1024 * 1024,
   videoBytes: 200 * 1024 * 1024,
-  /** 動画の長さの上限（ミリ秒。案 10 分）。 */
+  /** 動画の長さの上限（ミリ秒。10 分。第31.6.1節・Q-147）。 */
   videoMs: 10 * 60 * 1000,
   thumbnailBytes: 100 * 1024,
-  /** HTML の素材（中に入れた後。案 10 MB。第31.6.3節）。 */
+  /** HTML の素材（中に入れた後。10 MB。第31.6.3節・Q-144）。 */
   htmlBytes: 10 * 1024 * 1024,
   /** 割り込みの文の長さ（整えた後。第31.7.1節）。 */
   textChars: 80,
@@ -42,7 +42,7 @@ export const SIGNAGE_LIMITS = {
   interruptAssets: 50,
   /** 画面ごとの時間帯の流れの数（第31.6.6節）。 */
   bands: 3,
-  /** 会社のジングルの音（第31.7.3節。案）。 */
+  /** 会社のジングルの音（5 秒・300 KB・10 個。第31.7.3節・Q-149）。 */
   soundBytes: 300 * 1024,
   soundMs: 5000,
   sounds: 10,
