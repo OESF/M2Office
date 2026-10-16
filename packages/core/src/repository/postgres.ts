@@ -1938,6 +1938,29 @@ export class PostgresRepository implements Repository {
     await this.q(tenantId, `delete from files where tenant_id = $1 and id = $2`, [tenantId, id]);
   }
 
+  async listRunsToPurge(tenantId: string, agentId: string, before: string, limit: number): Promise<{ runId: string; jobId: string; input: Record<string, unknown> }[]> {
+    return this.q<{ runId: string; jobId: string; input: Record<string, unknown> }>(tenantId,
+      `select r.id as "runId", j.id as "jobId", j.input from runs r join jobs j on j.id = r.job_id and j.tenant_id = r.tenant_id
+        where r.tenant_id = $1 and j.agent_id = $2 and r.started_at < $3 and r.contents_purged_at is null
+        order by r.started_at limit $4`,
+      [tenantId, agentId, before, limit]);
+  }
+
+  async purgeRunContents(tenantId: string, runId: string, jobId: string, at: string): Promise<string[]> {
+    const removed = '{"removed":"保持期間を過ぎたため消しました"}';
+    return this.inTenant(tenantId, async (client) => {
+      const files = await client.query<{ id: string }>(`select id from files where tenant_id = $1 and run_id = $2`, [tenantId, runId]);
+      await client.query(`update run_steps set input = null, output = $3::jsonb where run_id = $2 and run_id in (select id from runs where tenant_id = $1)`, [tenantId, runId, removed]);
+      await client.query(`update approvals set present = '（保持期間を過ぎたため消しました）' where tenant_id = $1 and run_step_id in (select id from run_steps where run_id = $2)`, [tenantId, runId]);
+      await client.query(`update notifications set body = '（保持期間を過ぎたため消しました）' where tenant_id = $1 and run_id = $2`, [tenantId, runId]);
+      await client.query(`delete from artifacts where tenant_id = $1 and run_id = $2`, [tenantId, runId]);
+      await client.query(`delete from files where tenant_id = $1 and run_id = $2`, [tenantId, runId]);
+      await client.query(`update jobs set input = '{}'::jsonb where tenant_id = $1 and id = $2`, [tenantId, jobId]);
+      await client.query(`update runs set contents_purged_at = $3 where tenant_id = $1 and id = $2`, [tenantId, runId, at]);
+      return files.rows.map((f) => f.id);
+    });
+  }
+
   async createScheduleRequest(r: ScheduleRequest): Promise<void> {
     await this.q(r.tenantId,
       `insert into schedule_requests (id, tenant_id, requested_by, run_id, title, duration_min, internal_attendees, external_attendees, candidates, thread_id, sent_at, status, chosen_index, reply_note, expires_at)

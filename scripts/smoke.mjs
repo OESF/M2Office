@@ -106,8 +106,8 @@ console.log('\n■ 1. 疎通と一覧');
   // 拡張機能を導入している場合はその分が増えるため、公式の業務エージェントだけを数える
   const official = (body.agents ?? []).filter((a) => !a.extension);
   // 段取りの報告（第10.14節）はメニューに出ない中の業務
-  official.length === 17 && official.filter((a) => a.menu === false).map((a) => a.id).sort().join() === 'scheduling-confirm,secretary-plan-report'
-    ? ok(`公式の業務エージェントが 17 件（うち中の業務 2。${official.map((a) => a.name).join(' / ')}）`)
+  official.length === 18 && official.filter((a) => a.menu === false).map((a) => a.id).sort().join() === 'scheduling-confirm,secretary-plan-report'
+    ? ok(`公式の業務エージェントが 18 件（うち中の業務 2。${official.map((a) => a.name).join(' / ')}）`)
     : ng('エージェントの一覧が取得できない', JSON.stringify(body));
 }
 
@@ -7484,6 +7484,28 @@ console.log('\n■ 100. 社外の参加者を含む日程調整（候補のメ�
     }
   } catch (err) {
     ng('社外との日程調整の確認が途中で止まった', String(err));
+  }
+}
+
+console.log('\n■ 101. 採用支援（人事区画の人だけ・合否を付けない・求人原稿の点検。第9.6.6節）');
+{
+  // 人事区画を管理者だけにして、区画の外の人に出さないことを確かめる（割当は finally で元に戻す）
+  const hrComp = ((await call('a', '/v1/admin/compartments')).body.items ?? []).find((c) => c.name === 'hr');
+  try {
+    if (hrComp) await call('a', `/v1/admin/compartments/${hrComp.id}/assignment`, { method: 'PUT', body: JSON.stringify({ groups: [], users: ['u-a-admin'] }) });
+    const listed = (await call('a', '/v1/agents', {}, 'member')).body?.agents ?? [];
+    const byMember = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: 'recruiting', input: { request: '求人原稿を作って' } }) }, 'member');
+    hrComp && !listed.some((x) => x.id === 'recruiting') && byMember.status >= 400
+      ? ok('人事区画に入っていない人には、採用支援を出さず、始めさせない') : ng('人事区画の外の人が採用支援を使える', JSON.stringify({ hr: !!hrComp, listed: listed.some((x) => x.id === 'recruiting'), status: byMember.status }));
+    const { status, body: j } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: 'recruiting', input: { request: '営業マン募集の原稿を作って。35 歳以下', position: '月給 25 万円' } }) });
+    const r = status < 300 ? await waitFor('a', j.runId, ['completed', 'failed', 'awaiting_approval'], 30000) : null;
+    const out = JSON.stringify((r?.steps ?? []).find((x) => x.stepId === 'draft')?.output ?? '');
+    r?.run?.status === 'completed' && /recruit\.check_text/.test(out) && /営業マン/.test(out) && /35 歳以下/.test(out)
+      ? ok('人事区画の人は使え、求人原稿の性別・年齢を限る書き方を点検で見つける') : ng('採用支援の点検が動かない', JSON.stringify({ status: r?.run?.status, reason: r?.run?.failureReason, out: out.slice(0, 300) }));
+  } catch (err) {
+    ng('採用支援の確認が途中で止まった', String(err));
+  } finally {
+    if (hrComp) await call('a', `/v1/admin/compartments/${hrComp.id}/assignment`, { method: 'PUT', body: JSON.stringify({ groups: hrComp.groups, users: hrComp.users }) });
   }
 }
 

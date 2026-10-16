@@ -12,6 +12,7 @@ import { AG04_KNOWLEDGE_QA } from './ag-04-knowledge-qa.js';
 import { AG05_WEEKLY_BRIEF } from './ag-05-weekly-brief.js';
 import { AG07_QUOTE } from './ag-07-quote.js';
 import { SCHEDULING_CONFIRM } from './scheduling-confirm.js';
+import { AG16_RECRUITING } from './ag-16-recruiting.js';
 import { SECRETARY_LOOKUP } from './secretary-lookup.js';
 import { SECRETARY_PLAN_REPORT } from './secretary-plan-report.js';
 import { SECRETARY_CALENDAR } from './secretary-calendar.js';
@@ -27,7 +28,7 @@ import { BASIC_AGENTS } from './basic.js';
  * 並びは画面のメニューの既定順であり、実装の順序（第9.5.7節）ではない。
  */
 export const OFFICIAL_AGENTS: AgentDefinition[] = [
-  AG04_KNOWLEDGE_QA, AG02_MINUTES, AG01_INBOX, AG03_SCHEDULING, AG05_WEEKLY_BRIEF, MORNING_BRIEF, ...BASIC_AGENTS, AG07_QUOTE, SECRETARY_LOOKUP, SECRETARY_CALENDAR, SECRETARY_PLAN_REPORT, SCHEDULING_CONFIRM,
+  AG04_KNOWLEDGE_QA, AG02_MINUTES, AG01_INBOX, AG03_SCHEDULING, AG05_WEEKLY_BRIEF, MORNING_BRIEF, ...BASIC_AGENTS, AG07_QUOTE, AG16_RECRUITING, SECRETARY_LOOKUP, SECRETARY_CALENDAR, SECRETARY_PLAN_REPORT, SCHEDULING_CONFIRM,
 ];
 
 /** 秘書の段取りの報告に使う業務の ID（仕様書 第10.14節）。 */
@@ -127,6 +128,8 @@ export const DEFAULT_STANDARD_MINUTES: Record<string, number> = {
   quote: 20,
   // 社外の方の返事を読み、招待を送る手間（第9.5.3.1節）
   'scheduling-confirm': 10,
+  // 求人原稿・応募書類の要約と比較・面接の質問の案を作る手間（第9.6.6節）
+  recruiting: 60,
   'sheet-builder': 15,
   slides: 60,
   'weekly-brief': 20,

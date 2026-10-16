@@ -360,6 +360,10 @@ function chooseTools(tools: string[], prompt: string): Call[] {
       }];
     }
   }
+  // 採用支援（仕様書 第9.6.6節）: 書いた原稿を点検する（見本では依頼と条件をそのまま原稿として点検する）
+  if (has('recruit.check_text') && instruction.includes('recruit.check_text') && !previous.includes('"checked"')) {
+    return [{ name: 'recruit.check_text', args: { kind: 'posting', text: `${extractField(prompt, 'request')} ${extractField(prompt, 'position')}` } }];
+  }
   if (has('schedule.confirm_prepare') && instruction.includes('schedule.confirm_prepare')) {
     return [{ name: 'schedule.confirm_prepare', args: { requestId: extractField(prompt, 'requestId') } }];
   }

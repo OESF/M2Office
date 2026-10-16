@@ -74,6 +74,7 @@
 | `profile.read` | read | — | あなたの自宅（地域）・いつもの勤務地・今日の日付を確かめます。行程の出発地や天気の地域に使い、どこにも書き込みません |
 | `quote.prepare_mail` | read | — | 見積書を送るメールの宛先と添えるファイルを確かめます。送るのは承認の後です |
 | `quote.search` | read | — | これまでに作った見積書を、宛先で探します |
+| `recruit.check_text` | read | — | 求人原稿・応募書類の要約・面接の質問に、使ってはならない言葉や抜けている明示事項がないかを確かめます |
 | `schedule.confirm_prepare` | read | — | 社外の方が返事で選んだ日時と参加者を確かめます |
 | `sheet.read` | read | — | Excel・CSV を表として読みます |
 | `sheets.read` | read | `drive.file`（機密でない） | Google スプレッドシートの表を読みます |
@@ -208,6 +209,7 @@
 | `profile.read` | なし |
 | `quote.prepare_mail` | `quoteId`: quote.create が返した quoteId、`sendTo`: 送り先のメールアドレス（無ければ空） |
 | `quote.search` | `to`: 宛先に含まれる言葉（会社名など） |
+| `recruit.check_text` | `kind`（必須）: posting・summary・questions のどれか、`text`（必須）: 点検する文 |
 | `schedule.confirm_prepare` | `requestId`（必須）: 日程調整の ID |
 | `sheet.read` | `fileId`（必須）: ファイルの ID、`sheet`: シート名（任意）、`maxRows`: 読む行数の上限（既定 500） |
 | `sheets.read` | `spreadsheetId`（必須）: スプレッドシートの ID、`maxRows`: 読む行数の上限（既定 500） |

@@ -499,6 +499,13 @@ export interface Repository {
   listStaleRecordings(tenantId: string, before: string): Promise<{ id: string; size: number }[]>;
   /** ファイルの記録を消す（中身は呼び出し側が置き場から消す）。 */
   deleteFile(tenantId: string, id: string): Promise<void>;
+  /** その業務の実行のうち、`before` より前に始まり、中身をまだ消していないもの（採用支援の応募書類を消す。第9.6.6節）。 */
+  listRunsToPurge(tenantId: string, agentId: string, before: string, limit: number): Promise<{ runId: string; jobId: string; input: Record<string, unknown> }[]>;
+  /**
+   * 実行の中身を消す（ステップの入出力・承認の表示・通知の本文・成果物・依頼の入力）。扱ったファイルの ID を返す（中身は呼び出し側が置き場から消す）。
+   * 実行の記録（いつ・誰が・何の業務を）は残す
+   */
+  purgeRunContents(tenantId: string, runId: string, jobId: string, at: string): Promise<string[]>;
   /** 社外との日程調整の記録を作る（第9.5.3.1節）。 */
   createScheduleRequest(r: ScheduleRequest): Promise<void>;
   getScheduleRequest(tenantId: string, id: string): Promise<ScheduleRequest | null>;

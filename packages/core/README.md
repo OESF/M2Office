@@ -13,7 +13,7 @@ Node.js 22 以上。PostgreSQL への接続が必要です（`DATABASE_URL`）�
 
 ```
 src/engine/      実行エンジン。承認による中断と再開、ジョブの投入。実行を見られる人と承認を判断できる人（run-access.ts。権限区画に属する業務は区画に入っている人だけ。approval-compartments.ts で古い承認に区画を埋める。ADR-0096）
-src/tools/       ツールの登録簿と内蔵ツール（quote.ts は見積書。金額は quoteTotals の決まった計算）
+src/tools/       ツールの登録簿と内蔵ツール（quote.ts は見積書。金額は quoteTotals の決まった計算。recruit.ts は採用の文の点検）
 src/connectors/  メール・予定・タスク・チャット・本人の Google の連絡先（google/people.ts。第27.15節）への接続口（見本と Google の実装）と、MCP サーバのクライアント。認証の要る会社の接続の許可の流れとアプリの自動登録（oauth.ts。動的クライアント登録）・登録の型（presets.ts。Slack）・呼ぶときの認可（credentials.ts。仕様書 第12.11.6節）
 src/chat/        グループの名前で共有する（group-share.ts。グループに合う Chat のスペースを探す・承認の画面に届く先とグループとの違いを出す。仕様書 第16.7.12.1節、ADR-0076）
 src/files/       ファイルの置き場と、PDF・Excel・CSV・Word の読み書き。
@@ -44,7 +44,7 @@ src/llm/         LLM 抽象化層（OpenAI 互換、設定されていない会�
                  gemini.ts は一時的な失敗（混雑・障害・届かない・モデルが無い）のとき、同じ鍵のまま設定にあるほかのモデルへ退避する（3 回まで。第20.2.5節）。
                  動画（Veo）は作業を頼み、できるまで見に行き、鍵を付けて受け取る（延長に失敗したら最初の 8 秒を返す。第32.18.6節）
 src/repository/  永続化。テナント境界の絞り込みを伴う。接続の置き場は必ず pool.ts の createPool で作る（切れた接続の error を受け止め、警告を残してつなぎ直す。new pg.Pool を直接書かない）
-src/agents/      公式エージェントの定義（AG-01〜05・AG-07 見積書作成（ag-07-quote.ts。第9.5.8節）・日程調整の招待（scheduling-confirm.ts。第9.5.3.1節））
+src/agents/      公式エージェントの定義（AG-01〜05・AG-07 見積書作成（ag-07-quote.ts。第9.5.8節）・日程調整の招待（scheduling-confirm.ts。第9.5.3.1節）・AG-16 採用支援（ag-16-recruiting.ts と、保持期間を過ぎた中身を消す recruiting-retention.ts。第9.6.6節））
 src/scheduling/  社外の参加者を含む日程調整（external.ts。候補のメールと仮押さえ・返事の見張り・招待。第9.5.3.1節）
 src/announcements/ お知らせの作成（内蔵の拡張。第35章の段 1・段 2）。置き場（store.ts。休業の期間も）、下書き（draft.ts。推論と期間の読み方）、
                  サイネージの画面の 1 枚（screen-image.ts）、メール（mail.ts。宛先の案と、名刺管理のまとめてのメールで送る口）、

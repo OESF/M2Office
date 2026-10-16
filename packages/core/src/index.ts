@@ -113,6 +113,8 @@ export { ToolRegistry, validateToolArgs, toolGoogleScopes } from './tools/regist
 export type { Tool, ToolContext, ArgSpec, ToolArgsSchema, GoogleScope, GoogleScopeLevel } from './tools/registry.js';
 export { BUILTIN_TOOLS } from './tools/builtin.js';
 export { quoteTotals, quoteItemKey, quoteMarkdown, QUOTE_TOOLS, QUOTE_VALID_DAYS } from './tools/quote.js';
+export { checkRecruitText, RECRUIT_TOOLS } from './tools/recruit.js';
+export { purgeRecruitingRuns, RECRUITING_KEEP_MS } from './agents/recruiting-retention.js';
 export { ScheduleReplyWatcher, SCHEDULE_TOOLS, SCHEDULE_WAIT_MS, SCHEDULING_CONFIRM_AGENT_ID, guessScheduleReply, readScheduleReply, slotText, splitAttendees, type ScheduleReply, type ScheduleReplyWatcherDeps } from './scheduling/external.js';
 
 export { AUTO_PASS_REASON, RunEngine, costOf, needsHuman } from './engine/run-engine.js';
