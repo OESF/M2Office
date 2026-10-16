@@ -2230,7 +2230,7 @@ console.log('\n■ 43. 実行の中止と、知識の登録（第9.3.1節、第1
     method: 'POST',
     body: JSON.stringify({
       agentId: 'minutes', origin: 'menu',
-      input: { title: '中止の確認', attendees: '三浦', meetingId: 'm-smoke-cancel' },
+      input: { title: '中止の確認', transcript: '三浦: A 案で進めることに決定。' },
     }),
   });
   const runId = started.runId;
@@ -7400,6 +7400,24 @@ console.log('\n■ 96. ローカルの形の機械の管理者（クラウドの
       ? ok('クラウドの形では、機械の管理者の入口が無く、ログイン画面にも出さない') : ng('機械の管理者の入口が違う', JSON.stringify({ login: login.status, status: status.status, flag: providers.machineAdmin }));
   } catch (err) {
     ng('機械の管理者の確認が途中で止まった', String(err));
+  }
+}
+
+console.log('\n■ 97. 議事録の作成が Meet の文字起こしを取る（貼り付けが無ければ会議名で探す・見つからなければ止まる。第9.5.2節・第14.3.4節「Meet」）');
+{
+  try {
+    // 見本の会社は見本の接続口で、見本の会議「営業定例（見本）」の文字起こしを返す
+    const { body: found } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: 'minutes', input: { title: '営業定例' } }) }, 'member');
+    const run = await waitFor('a', found.runId, ['completed', 'failed', 'awaiting_approval'], 30000, 'member');
+    const fetched = (run?.steps ?? []).find((x) => x.stepId === 'fetch');
+    JSON.stringify(fetched?.output ?? '').includes('meet.transcript') || JSON.stringify(fetched?.output ?? '').includes('来月の重点顧客')
+      ? ok('貼り付けもファイルも無ければ、会議名で Meet の文字起こしを取って議事録にする') : ng('Meet の文字起こしを取らない', JSON.stringify({ status: run?.run?.status, out: fetched?.output }).slice(0, 400));
+    const { body: none } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: 'minutes', input: { title: '記録の無い打ち合わせ' } }) }, 'member');
+    const stopped = await waitFor('a', none.runId, ['completed', 'failed', 'awaiting_approval'], 30000, 'member');
+    const drafted = (stopped?.steps ?? []).some((x) => x.stepId === 'draft');
+    !drafted ? ok('Meet の文字起こしも見つからなければ、議事録を作らずに止まる') : ng('記録が無いのに議事録を作った', JSON.stringify({ status: stopped?.run?.status }));
+  } catch (err) {
+    ng('Meet の文字起こしの確認が途中で止まった', String(err));
   }
 }
 

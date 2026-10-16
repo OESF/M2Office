@@ -996,7 +996,11 @@ export class RunEngine {
       if (mode === 'plan') return { kind: 'planned', tokensUsed, costJpy: spent, calls: deferred, unable, done };
       if (deferred.length > 0) return { kind: 'confirm', tokensUsed, costJpy: spent, calls: deferred };
 
-      const empty = text.trim().length === 0 && toolResults.length === 0;
+      // 空とは、何も返さなかったか、呼んだツールがすべて「取得できなかった」と返したこと（第9.2.1節 `on_empty`）。
+      // 取れなかった記録の代わりに、次の段が中身を作ってしまわないため（会議の記録が無いのに議事録を書く、など）
+      const allUnavailable = toolResults.length > 0
+        && toolResults.every((r) => ((r as { result?: { available?: unknown } | null }).result)?.available === false);
+      const empty = (text.trim().length === 0 && toolResults.length === 0) || allUnavailable;
       if (empty && step.onEmpty === 'stop') {
         return { kind: 'stopped', tokensUsed, costJpy: spent };
       }

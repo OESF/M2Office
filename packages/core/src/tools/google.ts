@@ -463,11 +463,11 @@ export const directorySearch: Tool = {
   },
 };
 
-/** 文字起こしとして推論に渡す量の上限（文字数）。 */
-const TRANSCRIPT_LIMIT = 30_000;
+/** 文字起こしとして推論に渡す量の上限（文字数）。3 時間の会議でもおおむね収まる量（録音の文字起こしと同じ上限。第9.4.5節）。 */
+const TRANSCRIPT_LIMIT = 120_000;
 
 /**
- * Meet の会議の文字起こしを取る。題名に言葉を含む、いちばん新しい会議。
+ * Meet の会議の文字起こしを取る。題名に言葉を含む、いちばん新しい会議（`meetingId` を渡せばその会議）。
  *
  * @remarks
  * 危険度 `read`。本人が主催者か参加者だった会議だけ。Google は会議の終了から 30 日で文字起こしを消す。
@@ -478,11 +478,12 @@ export const meetTranscript: Tool = {
   risk: 'read',
   activityLabel: '会議の文字起こしを読んでいます',
   helpText: 'Meet の会議の文字起こしを読みます。あなたが参加した会議だけで、会議の終了から 30 日を過ぎたものは読めません',
-  description: 'Meet の会議の文字起こしを取る（題名に言葉を含む、いちばん新しい会議。本人が参加した会議だけ）',
-  args: { properties: { query: S('会議の題名に含まれる言葉（空ならいちばん新しい会議）') } },
+  description: 'Meet の会議の文字起こしを取る（題名に言葉を含む、いちばん新しい会議。本人が参加した会議だけ。題名の後ろの「（10/16）」は会議の日付。meetingId があればその会議）',
+  args: { properties: { query: S('会議の題名に含まれる言葉（空ならいちばん新しい会議）'), meetingId: S('会議の記録の ID（自動の議事録が入力に入れたもの。無ければ空）') } },
   google: { scope: 'meetings.space.readonly', level: 'sensitive' },
   async invoke(args, ctx) {
-    const t = await ctx.connector.meet.transcript(principal(ctx), { query: str(args['query']) });
+    const meetingId = str(args['meetingId']).trim();
+    const t = await ctx.connector.meet.transcript(principal(ctx), { query: str(args['query']), ...(meetingId ? { meetingId } : {}) });
     if (!t) {
       return { source: ctx.connector.sourceFor(ctx.tenantId), available: false, reason: '会議の文字起こしが見つかりません（文字起こしは会議の終了から 30 日で消えます）' };
     }

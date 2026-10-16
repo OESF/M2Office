@@ -404,6 +404,11 @@ function chooseTools(tools: string[], prompt: string): Call[] {
     const fileId = extractField(prompt, 'fileId');
     if (has('file.read_text') && fileId) return [{ name: 'file.read_text', args: { fileId } }];
     const transcript = extractField(prompt, 'transcript');
+    // 貼り付けが無ければ Meet の文字起こしを探す（自動の議事録は会議の記録の ID を入れる。第9.5.2.1節）
+    if (!transcript.trim() && has('meet.transcript')) {
+      const meetingId = extractField(prompt, 'meetingId');
+      return [{ name: 'meet.transcript', args: { query: extractField(prompt, 'title'), ...(meetingId ? { meetingId } : {}) } }];
+    }
     if (has('meeting.get_transcript')) return [{ name: 'meeting.get_transcript', args: { transcript } }];
   }
   if (has('knowledge.search') && /検索|照会|探す|調べ/.test(instruction)) {

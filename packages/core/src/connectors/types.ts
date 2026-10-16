@@ -288,10 +288,11 @@ export interface FormsConnector {
 
 export interface MeetConnector {
   /**
-   * 題名に言葉を含む、いちばん新しい会議の文字起こし。本人が主催者か参加者だった会議だけ。
+   * 題名に言葉を含む、いちばん新しい会議の文字起こし。本人が主催者か参加者だった会議だけ。`meetingId`（会議の記録の ID）を渡せばその会議。
+   * 題名の後ろの「（10/16）」は会議の日付（日本時間）として扱う。
    * 見つからなければ `null`（Google は会議の終了から 30 日で文字起こしを消す）。
    */
-  transcript(p: ConnectorPrincipal, q: { query: string }): Promise<MeetTranscript | null>;
+  transcript(p: ConnectorPrincipal, q: { query: string; meetingId?: string }): Promise<MeetTranscript | null>;
   /**
    * `since` より後に終わった、本人が主催者か参加者だった会議（会議が終わったら議事録を作り始める。仕様書 第9.5.2.1節）。
    *

@@ -224,7 +224,7 @@ decideApproval(...)  →  承認を記録し、待ち行列へ戻す
 
 ツールは Google の API を直接呼ばず、接続口だけを呼びます（仕様書 第24.2節 第 6 項）。
 `buildConnector('mock')` はダミーデータを返し、戻り値に `source: 'mock'` を含めます。
-`buildConnector('google', { repo, box })` は **Gmail・カレンダー・ToDo・Chat・ドライブ・ドキュメント・スプレッドシート・スライドを本物の Google で**動かし、
+`buildConnector('google', { repo, box })` は **Gmail・カレンダー・ToDo・Chat・ドライブ・ドキュメント・スプレッドシート・スライド・Meet（google/meet.ts。文字起こしと終わった会議。題名はカレンダーの予定から）を本物の Google で**動かし、
 ほかのサービスは「準備中」と断ります（`src/connectors/google/`。仕様書 第14.3.4節、ADR-0022）。
 見本のデータで代わりに動かすことはしません。
 

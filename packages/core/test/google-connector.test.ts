@@ -542,8 +542,8 @@ test('400 を「見つからない」に丸めるのは ToDo の完了だけ（�
 test('準備中のサービスは、見本で代えずに断る（ADR-0022）', async () => {
   await withConnector(async (c) => {
     assert.equal(await kindOf(c.directory.search(P, { query: '山田' })), 'not-implemented');
-    const err = await c.meet.transcript(P, { query: '定例' }).catch((e: unknown) => e as Error);
-    assert.match(err.message, /Meet はまだ Google につないでいません（準備中）/, '英字で終わる名前の後ろに空白を入れる');
+    const err = await c.forms.responses(P, { formId: 'F1', since: null, limit: 10 }).catch((e: unknown) => e as Error);
+    assert.match(err.message, /フォームはまだ Google につないでいません（準備中）/);
     assert.equal(c.sourceFor('t-real'), 'google');
   });
 });

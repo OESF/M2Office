@@ -193,7 +193,7 @@
 | `inventory.read_slip` | `fileId`（必須）: 納品書の画像か PDF のファイル ID |
 | `inventory.search` | `query`: 探す言葉（空なら全品目）、`lowOnly`: 残りわずかの品目だけにするか |
 | `knowledge.search` | `query`（必須）: 調べる言葉 |
-| `meet.transcript` | `query`: 会議の題名に含まれる言葉（空ならいちばん新しい会議） |
+| `meet.transcript` | `query`: 会議の題名に含まれる言葉（空ならいちばん新しい会議）、`meetingId`: 会議の記録の ID（自動の議事録が入力に入れたもの。無ければ空） |
 | `meeting.get_transcript` | `transcript`（必須）: 会議の記録（文字起こし） |
 | `members.find` | `query`: 会員番号か呼び名、`order`: points・visits・recent・away、`awayDays`: 何日来ていない会員か、`rank`: gold・silver（そのランクの会員だけ） |
 | `notices.list` | なし |

@@ -13,6 +13,7 @@ import type { Repository } from '../repository/types.js';
 import type { WorkspaceConnector } from '../connectors/types.js';
 import { enqueueJob } from '../engine/enqueue.js';
 import { AiLimitError } from '../usage/ai-usage.js';
+import { meetingTitleKey } from './title.js';
 
 /** 議事録の業務の ID。 */
 export const MINUTES_AGENT_ID = 'minutes';
@@ -21,10 +22,7 @@ const MIN_MINUTES = 10;
 /** 終わってからこれより長くたった会議は見ない（文字起こしができないままのもの）。 */
 const LOOKBACK_MS = 24 * 3_600_000;
 
-/** 会議の題名を比べる形（日付の添え書き・空白・括弧の中を除く）。 */
-export function meetingTitleKey(title: string): string {
-  return title.normalize('NFKC').replace(/（\d{1,2}\/\d{1,2}）$/, '').replace(/[（(][^）)]*[）)]/g, '').replace(/\s+/g, '').toLowerCase();
-}
+export { meetingTitleKey };
 
 /** 本人が止めた会議か（全部止めた・題名に止めた言葉を含む）。 */
 export function minutesStopped(s: UserSettings['secretary'], title: string): boolean {
@@ -88,13 +86,14 @@ export class AutoMinutes {
       try {
         const { runId } = await enqueueJob(this.deps.repo, {
           tenantId, requestedBy: userId, def, origin: 'secretary', actor: { type: 'system', id: 'auto-minutes' },
-          input: { title, ...(space ? { space } : {}) },
+          // 会議の記録の ID を渡し、AG-02 が同じ会議の文字起こしを取れるようにする（Meet の接続口。第14.3.4節）
+          input: { title, meetingId: m.id, ...(space ? { space } : {}) },
         });
         await this.deps.repo.appendAudit({
           id: randomUUID(), tenantId, actorType: 'system', actorId: 'auto-minutes', action: 'minutes.auto_start', targetType: 'run', targetId: runId,
-          detail: { title, space: space ?? null }, occurredAt: now.toISOString(),
+          detail: { title, meetingId: m.id, space: space ?? null }, occurredAt: now.toISOString(),
         });
-        past.push({ id: runId, tenantId, agentId: MINUTES_AGENT_ID, agentVersion: def.version, requestedBy: userId, origin: 'secretary', input: { title }, createdAt: now.toISOString() });
+        past.push({ id: runId, tenantId, agentId: MINUTES_AGENT_ID, agentVersion: def.version, requestedBy: userId, origin: 'secretary', input: { title, meetingId: m.id }, createdAt: now.toISOString() });
         started++;
       } catch (err) {
         // AI の利用の上限に当たっていれば始めない（第6.6.2節）

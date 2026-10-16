@@ -322,12 +322,22 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
   meet = {
     ended: async (p: ConnectorPrincipal, since: string): Promise<EndedMeeting[]> =>
       this.endedMeetings.filter((m) => m.owner === key(p) && m.endedAt > since).map(({ owner: _owner, ...m }) => m),
-    transcript: async (_p: ConnectorPrincipal, q: { query: string }) => {
+    transcript: async (p: ConnectorPrincipal, q: { query: string; meetingId?: string }) => {
+      // 自動の議事録が渡す会議の記録の ID（見本の終わった会議）
+      const ended = q.meetingId ? this.endedMeetings.find((m) => m.owner === key(p) && m.id === q.meetingId) : undefined;
+      if (q.meetingId && !ended) return null;
+      if (ended) {
+        return {
+          conference: { id: ended.id, title: ended.title, startedAt: ended.startedAt, endedAt: ended.endedAt },
+          entries: [{ speaker: '山田 花子（見本）', text: `${ended.title}の見本の文字起こしです。次回までに見積を用意することを決めました。`, at: ended.startedAt }],
+        };
+      }
       const today = ymd(this.now());
       const conference = {
         id: 'mock-conf-1', title: '営業定例（見本）', startedAt: jst(addDays(today, -1), 14), endedAt: jst(addDays(today, -1), 15),
       };
-      if (q.query.trim() && !conference.title.includes(q.query.trim())) return null;
+      const query = q.query.normalize('NFKC').replace(/[（(]\d{1,2}\/\d{1,2}[）)]\s*$/, '').trim();
+      if (query && !conference.title.includes(query)) return null;
       return {
         conference,
         entries: [

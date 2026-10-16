@@ -46,7 +46,7 @@ test('始める: 主催し・文字起こしがあり・10 分以上の会議だ
   ]);
   assert.equal(await s.auto.tick(NOW), 1);
   const started = s.jobs.filter((j) => j.requestedBy === 'u1' && j.input['title']);
-  assert.deepEqual(started.map((j) => j.input), [{ title: '営業定例（10/7）' }]);
+  assert.deepEqual(started.map((j) => j.input), [{ title: '営業定例（10/7）', meetingId: 'c1' }], '会議の記録の ID を渡し、AG-02 が同じ会議の文字起こしを取れるようにする');
   assert.ok(s.audits.includes('minutes.auto_start'));
   assert.equal(await s.auto.tick(NOW), 0, '同じ会議は始めない');
 });
@@ -54,7 +54,7 @@ test('始める: 主催し・文字起こしがあり・10 分以上の会議だ
 test('共有先: 同じ題名の会議で前に共有したスペースを使う', async () => {
   const s = setup([meeting()], {}, [{ input: { title: '営業定例（9/30）', space: '営業部' } }]);
   assert.equal(await s.auto.tick(NOW), 1);
-  assert.deepEqual(s.jobs[s.jobs.length - 1]!.input, { title: '営業定例（10/7）', space: '営業部' });
+  assert.deepEqual(s.jobs[s.jobs.length - 1]!.input, { title: '営業定例（10/7）', meetingId: 'c1', space: '営業部' });
   assert.equal(meetingTitleKey('営業定例（9/30）'), meetingTitleKey('営業定例'));
 });
 
