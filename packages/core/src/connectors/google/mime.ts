@@ -5,6 +5,8 @@
  * 日本のメールは ISO-2022-JP・Shift_JIS で届くことが多く、**宣言された文字コードで戻す**のが要点である。
  */
 
+import { randomBytes } from 'node:crypto';
+
 /** 本文をこの字数で切る。推論の量を抑える（仕様書 第14.3.4節）。 */
 export const MAX_BODY_CHARS = 20_000;
 
@@ -195,9 +197,11 @@ export function buildRawMessage(m: {
   inReplyTo?: string | null; references?: string | null;
   /** 配信の停止の URL（第27.9.1節）。`http(s)` の URL だけを見出しに入れる（開発は http）。 */
   listUnsubscribe?: string | null;
+  /** 添えるファイル（`multipart/mixed` にする。第9.5.8節）。 */
+  attachments?: { name: string; mime: string; bytes: Uint8Array }[];
 }): string {
   const unsubscribe = m.listUnsubscribe && /^https?:\/\/\S+$/.test(m.listUnsubscribe) ? oneLine(m.listUnsubscribe) : null;
-  const lines = [
+  const lines: string[] = [
     ...(m.from ? [`From: ${encodeAddress(m.from)}`] : []),
     `To: ${m.to.map(encodeAddress).join(', ')}`,
     ...(m.cc.length > 0 ? [`Cc: ${m.cc.map(encodeAddress).join(', ')}`] : []),
@@ -207,10 +211,23 @@ export function buildRawMessage(m: {
     // 押すだけで止まる配信の停止（RFC 8058）
     ...(unsubscribe ? [`List-Unsubscribe: <${unsubscribe}>`, 'List-Unsubscribe-Post: List-Unsubscribe=One-Click'] : []),
     'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset=UTF-8',
-    'Content-Transfer-Encoding: base64',
-    '',
-    (Buffer.from(m.body.replace(/\r?\n/g, '\r\n'), 'utf-8').toString('base64').match(/.{1,76}/g) ?? []).join('\r\n'),
   ];
+  const b64 = (bytes: Uint8Array) => (Buffer.from(bytes).toString('base64').match(/.{1,76}/g) ?? []).join('\r\n');
+  const text = b64(Buffer.from(m.body.replace(/\r?\n/g, '\r\n'), 'utf-8'));
+  if (!m.attachments?.length) {
+    lines.push('Content-Type: text/plain; charset=UTF-8', 'Content-Transfer-Encoding: base64', '', text);
+  } else {
+    const boundary = `m2o-${randomBytes(12).toString('hex')}`;
+    lines.push(`Content-Type: multipart/mixed; boundary="${boundary}"`, '', `--${boundary}`,
+      'Content-Type: text/plain; charset=UTF-8', 'Content-Transfer-Encoding: base64', '', text);
+    for (const a of m.attachments) {
+      // 名前は RFC 2231 の形で送る（日本語の名前が化けないように）。種類は決まったものだけ
+      const mime = /^[a-z]+\/[a-z0-9.+-]+$/i.test(a.mime) ? a.mime : 'application/octet-stream';
+      const name = `UTF-8''${encodeURIComponent(oneLine(a.name))}`;
+      lines.push(`--${boundary}`, `Content-Type: ${mime}`, 'Content-Transfer-Encoding: base64',
+        `Content-Disposition: attachment; filename*=${name}`, '', b64(a.bytes));
+    }
+    lines.push(`--${boundary}--`);
+  }
   return Buffer.from(lines.join('\r\n'), 'utf-8').toString('base64url');
 }

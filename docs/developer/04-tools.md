@@ -72,6 +72,8 @@
 | `pdf.extract` | read | — | PDF から文字を読み取ります。文字の無いページ（スキャンなど）は読み取りにかけますが、読み取り結果は確かめが要ります |
 | `print.find` | read | — | 作った販促物を、掲示の状態や置き場所で探します |
 | `profile.read` | read | — | あなたの自宅（地域）・いつもの勤務地・今日の日付を確かめます。行程の出発地や天気の地域に使い、どこにも書き込みません |
+| `quote.prepare_mail` | read | — | 見積書を送るメールの宛先と添えるファイルを確かめます。送るのは承認の後です |
+| `quote.search` | read | — | これまでに作った見積書を、宛先で探します |
 | `sheet.read` | read | — | Excel・CSV を表として読みます |
 | `sheets.read` | read | `drive.file`（機密でない） | Google スプレッドシートの表を読みます |
 | `skill.read` | read | — | このスキルに入っている資料を読みます |
@@ -93,6 +95,7 @@
 | `drive.create_folder` | draft | `drive.file`（機密でない） | あなたのドライブにフォルダを作ります。共有はしません |
 | `gmail.create_draft` | draft | `gmail.compose`（制限付き） | 返信の下書きを作ります。送信はしません |
 | `pdf.render` | draft | — | 請求書などの帳票を PDF として作り、成果物として保存します。社外へは送りません |
+| `quote.create` | draft | — | 見積書を PDF で作り、あなたのドライブにも保存します。社外へは送りません |
 | `sheet.render` | draft | — | 表を Excel・CSV として作り、成果物として保存します |
 | `sheets.create` | draft | `drive.file`（機密でない） | あなたのドライブに Google スプレッドシートを作ります。共有はしません |
 | `slides.create` | draft | `drive.file`（機密でない）・`drive`（制限付き） | 調べた内容をスライドにまとめ、あなたのドライブに作ります。PowerPoint 形式でも取り出せます。共有はしません |
@@ -200,6 +203,8 @@
 | `pdf.extract` | `fileId`（必須）: ファイルの ID |
 | `print.find` | `query`: 題名・置き場所・種類の言葉、`state`: posted・upcoming・ended・draft |
 | `profile.read` | なし |
+| `quote.prepare_mail` | `quoteId`: quote.create が返した quoteId、`sendTo`: 送り先のメールアドレス（無ければ空） |
+| `quote.search` | `to`: 宛先に含まれる言葉（会社名など） |
 | `sheet.read` | `fileId`（必須）: ファイルの ID、`sheet`: シート名（任意）、`maxRows`: 読む行数の上限（既定 500） |
 | `sheets.read` | `spreadsheetId`（必須）: スプレッドシートの ID、`maxRows`: 読む行数の上限（既定 500） |
 | `skill.read` | `path`（必須）: ファイルの相対パス |
@@ -221,6 +226,7 @@
 | `drive.create_folder` | `name`（必須）: フォルダの名前、`parentId`: 親のフォルダの ID（任意） |
 | `gmail.create_draft` | `replyTo`: 返信するメールの ID（任意）、`to`: 宛先（返信のときは省略可。元のメールの差出人になる）、`subject`（必須）: 件名、`body`（必須）: 本文 |
 | `pdf.render` | `title`（必須）: 表題（例: 請求書）、`to`: 宛先（例: 株式会社○○ 御中）、`from`: 差出人の各行、`fields`: { label, value } の配列（発行日・番号など）、`rows`（必須）: 明細。{ name, quantity, unitPrice, amount } の配列、`totals`: { label, value } の配列（小計・消費税・合計）。省略すると明細の合計だけ、`notes`: 備考の各行 |
+| `quote.create` | `to`: 宛先（会社名・担当者。例: 株式会社○○ 山田様）、`items`（必須）: 品目。{ name, quantity, unit, unitPrice, taxRate } の配列、`validDays`: 有効期限（発行から何日。既定 30）、`terms`: 納期・支払いの条件（任意）、`notes`: 備考（任意） |
 | `sheet.render` | `title`（必須）: 題名、`format`: 形式（xlsx・csv）、`columns`（必須）: 列名、`rows`（必須）: 行の配列（各行は値の配列） |
 | `sheets.create` | `title`（必須）: 題名、`columns`（必須）: 列名、`rows`: 行の配列（各行は値の配列）、`folderId`: 入れるフォルダの ID（任意） |
 | `slides.create` | `title`（必須）: 表紙の題名、`subtitle`: 副題（任意）、`slides`（必須）: 本文のスライドの配列（layout・title ほか。12 枚まで）、`sources`: 出典（title・url）の配列、`template`: 会社が登録したテンプレートの名前（任意） |
@@ -271,7 +277,7 @@
 | `chat.post` | `space`: スペースの名前（例: 営業部）か、スペースのリンク、`text`（必須）: 本文 |
 | `columns.place` | `columnId`（必須）: コラムの ID |
 | `drive.share` | `fileId`（必須）: ファイルの ID、`emails`（必須）: 共有する相手のメールアドレス、`role`: 役割（reader・commenter・writer） |
-| `gmail.send` | `to`（必須）: 宛先のメールアドレス、`cc`: CC（任意）、`subject`（必須）: 件名、`body`（必須）: 本文、`replyTo`: 返信するメールの ID（任意） |
+| `gmail.send` | `to`（必須）: 宛先のメールアドレス、`cc`: CC（任意）、`subject`（必須）: 件名、`body`（必須）: 本文、`replyTo`: 返信するメールの ID（任意）、`attachments`: 添えるファイルの ID（この実行で作ったものか、依頼した本人のもの。5 つ・合わせて 10 MB まで） |
 | `inquiries.reply_send` | `replyId`（必須）: 返事の ID |
 | `mail.bulk_send` | `bulkMailId`（必須）: まとめてのメールの ID |
 | `members.send_line` | `messageId`（必須）: 知らせの ID |

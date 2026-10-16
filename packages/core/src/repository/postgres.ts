@@ -14,7 +14,7 @@ import type {
   StoredFile, Tenant, TenantSettings, User, UserGroup, GroupChatSpace, UserSettings,
 } from '@m2office/shared';
 import { DEFAULT_TENANT_SETTINGS, DEFAULT_USER_SETTINGS, STANDARD_SYNONYMS } from '@m2office/shared';
-import type { AgentEvent, Plan, PlanStep, DecidedApproval, AuditQuery, CompartmentAssignment, Conversation, ConversationDigest, MemoryCandidate, Promotion, CredentialKind, GoogleConnection, UserPhoto, TenantCredential, TenantConnection, ConnectionSecret, UserConnection, DisabledConnectorTool, InstalledExtension, PrivateExtension, KnowledgeEmbedItem, KnowledgeEmbedStatus, KnowledgeItem, KnowledgeSearchOptions, KnowledgeSearchResult, KnowledgeSectionView, KnowledgeStatus, KnowledgeVersion, Memory, MemoryEmbedItem, CaseNote, LiveRecording, Repository, RunStatRow, UserProfile } from './types.js';
+import type { AgentEvent, Plan, PlanStep, DecidedApproval, AuditQuery, CompartmentAssignment, Conversation, ConversationDigest, MemoryCandidate, Promotion, CredentialKind, GoogleConnection, UserPhoto, TenantCredential, TenantConnection, ConnectionSecret, UserConnection, DisabledConnectorTool, InstalledExtension, PrivateExtension, KnowledgeEmbedItem, KnowledgeEmbedStatus, KnowledgeItem, KnowledgeSearchOptions, KnowledgeSearchResult, KnowledgeSectionView, KnowledgeStatus, KnowledgeVersion, Memory, MemoryEmbedItem, CaseNote, LiveRecording, QuoteRecord, Repository, RunStatRow, UserProfile } from './types.js';
 import { SPLIT_VERSION, citationOf, splitKnowledge } from '../knowledge/sections.js';
 import { FUSION_DEPTH, SEARCH_CANDIDATES, SEMANTIC_THRESHOLD, asksOldVersion, bigrams, expandTerms, extractTerms, fuseRankings, limitSections, normalizeForSearch, orderSections, rankSections, rewritesOf } from '../knowledge/search.js';
 import { createHash } from 'node:crypto';
@@ -1936,6 +1936,30 @@ export class PostgresRepository implements Repository {
 
   async deleteFile(tenantId: string, id: string): Promise<void> {
     await this.q(tenantId, `delete from files where tenant_id = $1 and id = $2`, [tenantId, id]);
+  }
+
+  async createQuote(q: QuoteRecord): Promise<void> {
+    await this.q(q.tenantId,
+      `insert into quotes (id, tenant_id, number, requested_by, run_id, to_name, items, subtotal, tax, total, valid_until, file_id, created_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+      [q.id, q.tenantId, q.number, q.requestedBy, q.runId, q.toName, JSON.stringify(q.items), q.subtotal, q.tax, q.total, q.validUntil, q.fileId, q.createdAt]);
+  }
+
+  async countQuotesOn(tenantId: string, day: string): Promise<number> {
+    const rows = await this.q<{ n: number }>(tenantId,
+      `select count(*)::int as n from quotes where tenant_id = $1 and number like $2`, [tenantId, `Q-${day}-%`]);
+    return rows[0]?.n ?? 0;
+  }
+
+  async listQuotes(tenantId: string, q: { to?: string; limit?: number } = {}): Promise<QuoteRecord[]> {
+    const rows = await this.q<QuoteRecord & { createdAt: string | Date; validUntil: string | Date | null; subtotal: string | number; tax: string | number; total: string | number }>(tenantId,
+      `select id, tenant_id as "tenantId", number, requested_by as "requestedBy", run_id as "runId", to_name as "toName", items,
+              subtotal, tax, total, valid_until as "validUntil", file_id as "fileId", created_at as "createdAt"
+         from quotes where tenant_id = $1 and ($2 = '' or to_name ilike '%' || $2 || '%')
+        order by created_at desc limit $3`,
+      [tenantId, q.to ?? '', Math.min(Math.max(q.limit ?? 50, 1), 200)]);
+    const day = (v: string | Date | null) => (v === null ? null : typeof v === 'string' ? v.slice(0, 10) : new Date(v.getTime() - v.getTimezoneOffset() * 60_000).toISOString().slice(0, 10));
+    return rows.map((r) => ({ ...r, subtotal: Number(r.subtotal), tax: Number(r.tax), total: Number(r.total), validUntil: day(r.validUntil), createdAt: new Date(r.createdAt).toISOString() }));
   }
 
   async getChatDmSpace(tenantId: string, userId: string): Promise<string | null> {

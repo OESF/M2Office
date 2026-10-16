@@ -106,8 +106,8 @@ console.log('\n■ 1. 疎通と一覧');
   // 拡張機能を導入している場合はその分が増えるため、公式の業務エージェントだけを数える
   const official = (body.agents ?? []).filter((a) => !a.extension);
   // 段取りの報告（第10.14節）はメニューに出ない中の業務
-  official.length === 15 && official.filter((a) => a.menu === false).map((a) => a.id).join() === 'secretary-plan-report'
-    ? ok(`公式の業務エージェントが 15 件（うち中の業務 1。${official.map((a) => a.name).join(' / ')}）`)
+  official.length === 16 && official.filter((a) => a.menu === false).map((a) => a.id).join() === 'secretary-plan-report'
+    ? ok(`公式の業務エージェントが 16 件（うち中の業務 1。${official.map((a) => a.name).join(' / ')}）`)
     : ng('エージェントの一覧が取得できない', JSON.stringify(body));
 }
 
@@ -7437,6 +7437,34 @@ console.log('\n■ 98. Chat への通知の控えの本物の送信口（会社�
       ? ok('Chat アプリの鍵は管理者だけが登録でき、サービスアカウントの鍵でなければ断る（鍵は画面に返さない）') : ng('Chat アプリの鍵の口が違う', JSON.stringify({ chatApp: conn?.google?.chatApp, bad: bad.status, member: byMember.status }));
   } catch (err) {
     ng('Chat の通知の確認が途中で止まった', String(err));
+  }
+}
+
+console.log('\n■ 99. 見積書の作成（金額は決まった計算・送り先が無ければ作るだけ・送るのは本人の承認の後。第9.5.8節）');
+{
+  try {
+    const { body: j1 } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: 'quote', input: { request: 'デザイン 30 万円、コーディング 20 万円', to: '株式会社見本商事' } }) }, 'member');
+    const r1 = await waitFor('a', j1.runId, ['completed', 'failed', 'awaiting_approval'], 30000, 'member');
+    const made = (r1?.steps ?? []).find((x) => x.stepId === 'create');
+    const out = JSON.stringify(made?.output ?? '');
+    r1?.run?.status === 'completed' && /"total":550000/.test(out) && /"number":"Q-\d{8}-\d{2}"/.test(out) && !(r1?.steps ?? []).some((x) => x.stepId === 'send')
+      ? ok('見積書を作り（50 万円＋消費税で 55 万円・見積番号つき）、送り先が無ければ送らずに終える') : ng('見積書を作れない', JSON.stringify({ status: r1?.run?.status, reason: r1?.run?.failureReason, out: out.slice(0, 300) }));
+
+    const { body: j2 } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: 'quote', input: { request: '撮影 5 万円', to: '株式会社見本商事', sendTo: 'yamada@example.co.jp' } }) }, 'member');
+    const r2 = await waitFor('a', j2.runId, ['completed', 'failed', 'awaiting_approval'], 30000, 'member');
+    const ap = await approvalFor('a', j2.runId, 'member');
+    r2?.run?.status === 'awaiting_approval' && ap ? ok('送り先があれば、送る前に本人の承認で止まる') : ng('送る前に止まらない', JSON.stringify({ status: r2?.run?.status }));
+    if (ap) {
+      await call('a', `/v1/approvals/${ap.id}`, { method: 'POST', body: JSON.stringify({ decision: 'approved', comment: null }) }, 'member');
+      const r3 = await waitFor('a', j2.runId, ['completed', 'failed'], 30000, 'member');
+      const sent = JSON.stringify((r3?.steps ?? []).find((x) => x.stepId === 'send')?.output ?? '');
+      r3?.run?.status === 'completed' && /"sent":true/.test(sent) && /御見積書_Q-/.test(sent)
+        ? ok('承認の後、見積書の PDF を添えて送る') : ng('見積書を添えて送れない', JSON.stringify({ status: r3?.run?.status, sent: sent.slice(0, 300) }));
+    }
+    const other = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: 'quote', input: { request: 'x 1 円' } }) }, 'admin');
+    other.status === 201 || other.status === 200 ? ok('見積書の作成は社内の誰でも使える') : ng('見積書の作成を始められない', String(other.status));
+  } catch (err) {
+    ng('見積書の確認が途中で止まった', String(err));
   }
 }
 

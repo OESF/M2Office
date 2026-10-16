@@ -49,7 +49,7 @@ export const SECRETARY_LOOKUP: AgentDefinition = {
   },
   // 読むだけのツールに限る（第10.11.4節）。送信・登録・作成のツールは持たせない。
   // Web の調べものと本人の予定・ToDo は、出張の行程のような依頼に答えるため（第 0.124.0 版、ADR-0033）
-  tools: ['file.read_text', 'file.compare', 'sheet.read', 'pdf.extract', 'knowledge.search', 'web.research', 'calendar.list', 'calendar.freebusy', 'tasks.list', 'profile.read'],
+  tools: ['file.read_text', 'file.compare', 'sheet.read', 'pdf.extract', 'knowledge.search', 'web.research', 'calendar.list', 'calendar.freebusy', 'tasks.list', 'profile.read', 'quote.search'],
   knowledge: { collections: ['internal-rules', 'minutes'] },
   steps: [
     {
@@ -64,6 +64,7 @@ export const SECRETARY_LOOKUP: AgentDefinition = {
         '取引先の人の電話番号・メールアドレス・住所・役職や、名刺を交換した人を尋ねられたら、contacts.search で名刺を探す（使えるときだけ）。'
           + '交換した日で尋ねられたら from・to に日付を入れる。見つからなければ、推測せずに「名刺が見つかりませんでした」と答える。'
           + '「最近異動した人は？」のように、名刺の会社・役職が新しくなった人を尋ねられたら contacts.changes を使う（メールの署名から分かったもの）。',
+        '「〇〇社に出した見積は？」のように、これまでに作った見積書を尋ねられたら quote.search で探す（番号・合計・有効期限。期限が過ぎたものはそう添える）。',
         '時刻表・乗り換え・道順・所要時間・天気・ニュース・価格・営業時間など、外の最新の情報が要るときは web.research で調べる。'
           + '検索の言葉は Google に送られるため、社内の情報（顧客名・金額・人の名前）を入れない。',
         '日付の決まった依頼（出張・外出など）では calendar.list でその日の本人の予定を見て、重なりを確かめる。',

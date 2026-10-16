@@ -9,7 +9,7 @@
 import type { Repository } from '../../repository/types.js';
 import type { SecretBox } from '../../secrets/box.js';
 import {
-  ConnectorUnavailableError, type BusySlot, type CalendarEvent, type ConnectorPrincipal, type MailMessage,
+  ConnectorUnavailableError, type BusySlot, type CalendarEvent, type ConnectorPrincipal, type MailAttachment, type MailMessage,
   type MailSummary, type TaskItem, type WorkspaceConnector,
 } from '../types.js';
 import { GOOGLE_API_ENDPOINTS, GoogleTokenSource, callGoogle, type GoogleApiEndpoints } from './http.js';
@@ -191,7 +191,7 @@ export class GoogleWorkspaceConnector implements WorkspaceConnector {
       const params = new URLSearchParams({ q: q.query, maxResults: String(clampLimit(q.limit)) });
       return this.summaries(p, await this.listIds(p, params));
     },
-    send: async (p: ConnectorPrincipal, mail: { to: string[]; cc: string[]; subject: string; body: string; replyTo: string | null; listUnsubscribe?: string }) => {
+    send: async (p: ConnectorPrincipal, mail: { to: string[]; cc: string[]; subject: string; body: string; replyTo: string | null; listUnsubscribe?: string; attachments?: MailAttachment[] }) => {
       const thread = mail.replyTo ? await this.threadOf(p, mail.replyTo) : null;
       const raw = buildRawMessage({ ...mail, inReplyTo: thread?.messageId, references: thread?.references });
       const res = await this.gmail(p, '/messages/send', { method: 'POST', body: { raw, ...(thread ? { threadId: thread.threadId } : {}) } });

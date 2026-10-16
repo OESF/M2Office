@@ -187,6 +187,23 @@ function chooseTools(tools: string[], prompt: string): Call[] {
     if (id) return [{ name: 'mail.bulk_send', args: { bulkMailId: id } }];
   }
 
+  // 見積書（仕様書 第9.5.8節）: 「デザイン 30 万円」のような書き方から品目を取り、作る → 送り先があれば用意 → 承認の後に送る
+  if (has('quote.create') && instruction.includes('quote.create')) {
+    const req = extractField(prompt, 'request');
+    const items = [...req.matchAll(/([^\s、。,，0-9]+?)\s*(\d+(?:\.\d+)?)\s*(万)?円/g)]
+      .map((m) => ({ name: m[1]!, quantity: 1, unitPrice: Math.round(Number(m[2]) * (m[3] ? 10_000 : 1)) }));
+    if (!items.length && req) items.push(...req.split(/[、,，と]/).map((x) => x.trim()).filter(Boolean).slice(0, 5).map((name) => ({ name, quantity: 1 }) as { name: string; quantity: number; unitPrice: number }));
+    return [{ name: 'quote.create', args: { to: extractField(prompt, 'to'), items, terms: extractField(prompt, 'terms') } }];
+  }
+  if (has('quote.prepare_mail') && instruction.includes('quote.prepare_mail')) {
+    return [{ name: 'quote.prepare_mail', args: { quoteId: extractField(previous, 'quoteId'), sendTo: extractField(prompt, 'sendTo') } }];
+  }
+  if (has('gmail.send') && instruction.includes('quote.prepare_mail')) {
+    const to = extractField(previous, 'to');
+    const attachment = /"attachments"\s*:\s*\[\s*"([^"]+)"/.exec(previous)?.[1];
+    if (to && attachment) return [{ name: 'gmail.send', args: { to: [to], subject: extractField(previous, 'subjectHint') || '御見積書', body: '見積書をお送りします。ご確認ください。', attachments: [attachment] } }];
+  }
+
   // 問い合わせの返事（仕様書 第33.18節）: 「〇〇さんへの返事を書いて」で下書き、承認の後に送る
   if (has('inquiries.reply_send') && instruction.includes('inquiries.reply_send')) {
     const id = extractField(prompt, 'replyId');

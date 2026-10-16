@@ -13,6 +13,7 @@
  */
 
 import type { PreparedCall, Tool, ToolContext } from './registry.js';
+import type { MailAttachment } from '../connectors/types.js';
 import { approvedArtifact, jstDate } from './approved-artifact.js';
 
 const principal = (ctx: ToolContext) => ({ tenantId: ctx.tenantId, userId: ctx.userId });
@@ -56,21 +57,52 @@ export const gmailSend: Tool = {
   risk: 'external-send',
   activityLabel: 'メールを送っています',
   helpText: 'メールを送ります。必ず承認のあとに行います',
-  description: 'メールを送る。宛先・件名・本文は承認で確かめたものを渡す',
+  description: 'メールを送る。宛先・件名・本文は承認で確かめたものを渡す。attachments に、この実行で作ったファイルの ID を渡すと添える（見積書の PDF など）',
   args: {
-    properties: { to: SA('宛先のメールアドレス'), cc: SA('CC（任意）'), subject: S('件名'), body: S('本文'), replyTo: S('返信するメールの ID（任意）') },
+    properties: {
+      to: SA('宛先のメールアドレス'), cc: SA('CC（任意）'), subject: S('件名'), body: S('本文'), replyTo: S('返信するメールの ID（任意）'),
+      attachments: SA('添えるファイルの ID（この実行で作ったものか、依頼した本人のもの。5 つ・合わせて 10 MB まで）'),
+    },
     required: ['to', 'subject', 'body'],
   },
   google: { scope: 'gmail.send', level: 'sensitive' },
   async invoke(args, ctx) {
     const to = list(args['to']);
     if (to.length === 0) return { source: ctx.connector.sourceFor(ctx.tenantId), sent: false, reason: '宛先がありません' };
+    const attachments = await mailAttachments(ctx, list(args['attachments']));
+    if ('reason' in attachments) return { source: ctx.connector.sourceFor(ctx.tenantId), sent: false, reason: attachments.reason };
     const res = await ctx.connector.mail.send(principal(ctx), {
       to, cc: list(args['cc']), subject: str(args['subject']), body: str(args['body']), replyTo: str(args['replyTo']) || null,
+      ...(attachments.files.length ? { attachments: attachments.files } : {}),
     });
-    return { source: ctx.connector.sourceFor(ctx.tenantId), sent: true, ...res };
+    return { source: ctx.connector.sourceFor(ctx.tenantId), sent: true, ...res, ...(attachments.files.length ? { attached: attachments.files.map((f) => f.name) } : {}) };
   },
 };
+
+/** 添えられるファイルの数と大きさ（Gmail の上限より小さく、承認で中身を確かめられる量）。 */
+const MAIL_ATTACH_MAX = 5;
+const MAIL_ATTACH_BYTES = 10 * 1024 * 1024;
+
+/**
+ * 添えるファイルを読む。この実行で作ったファイルか、依頼した本人のファイルだけ（他人のファイルを社外に出させない）。
+ *
+ * @returns 読めたファイルか、添えられない理由
+ */
+async function mailAttachments(ctx: ToolContext, ids: string[]): Promise<{ files: MailAttachment[] } | { reason: string }> {
+  if (ids.length > MAIL_ATTACH_MAX) return { reason: `添えられるファイルは ${MAIL_ATTACH_MAX} つまでです` };
+  const files: MailAttachment[] = [];
+  let total = 0;
+  for (const id of ids) {
+    const meta = await ctx.repo.getFile(ctx.tenantId, id);
+    if (!meta || (meta.runId !== ctx.runId && meta.ownerUserId !== ctx.userId)) return { reason: `添えるファイルが見つかりません（${id}）` };
+    const bytes = await ctx.files.get(ctx.tenantId, id);
+    if (!bytes) return { reason: `添えるファイルの中身がありません（${meta.name}）` };
+    total += bytes.byteLength;
+    if (total > MAIL_ATTACH_BYTES) return { reason: '添えるファイルが大きすぎます（合わせて 10 MB まで）' };
+    files.push({ name: meta.name, mime: meta.mime, bytes });
+  }
+  return { files };
+}
 
 /**
  * 予定を変える。参加者に変更の通知が届く。

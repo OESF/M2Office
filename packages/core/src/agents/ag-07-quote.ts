@@ -1,0 +1,123 @@
+/**
+ * @file AG-07 見積書作成のエージェント定義（仕様書 第9.5.8節、ADR-0103）。
+ */
+
+import type { AgentDefinition } from '@m2office/shared';
+
+/**
+ * AG-07 見積書作成。
+ *
+ * 頼まれた品目と単価から見積書（PDF）を作り、本人のドライブにも残す。送り先があれば、承認の後にメールに添えて送る。
+ *
+ * @remarks
+ * 金額・消費税・合計は `quote.create` が決まった計算で出す（推論に計算させない）。見積書は金額を示す書類で、お金の確定ではない。
+ * 送るのは社外への送信なので、依頼した本人が承認する（`approver: requester`）。送り先が無ければ、作るところで終える
+ * （`quote.prepare_mail` が「取得できなかった」形で返し、段が空として止まる。第9.2.1節）。
+ *
+ * @see 仕様書 第9.5.8節
+ */
+export const AG07_QUOTE: AgentDefinition = {
+  schemaVersion: 1,
+  id: 'quote',
+  version: 1,
+  name: '見積書の作成',
+  category: 'document',
+  description: '品目と単価から見積書を PDF で作ります。送り先を書けば、あなたの確認の後にメールで送ります',
+  locale: 'ja-JP',
+  compartment: null,
+  inputs: {
+    type: 'object',
+    required: ['request'],
+    properties: {
+      request: {
+        type: 'string', title: '見積の中身', format: 'textarea',
+        examples: ['ホームページ制作。デザイン 30 万円、コーディング 20 万円、保守 月 1 万円を 12 か月'],
+      },
+      to: { type: 'string', title: '宛先（会社・担当）', examples: ['株式会社見本商事 山田様'] },
+      sendTo: { type: 'string', title: '送り先のメールアドレス（送るときだけ）', examples: ['yamada@example.co.jp'] },
+      validDays: { type: 'string', title: '有効期限（日。既定 30）', examples: ['30'] },
+      terms: { type: 'string', title: '納期・支払いの条件', examples: ['納期: ご発注から 1 か月。お支払い: 納品月の翌月末'] },
+    },
+  },
+  tools: ['quote.search', 'quote.create', 'quote.prepare_mail', 'gmail.send'],
+  steps: [
+    {
+      id: 'create',
+      type: 'agent',
+      tools: ['quote.search', 'quote.create'],
+      label: '作成',
+      instruction: [
+        '見積の中身（request）から品目を取り出し、quote.create を 1 回呼んで見積書を作る。',
+        '品目ごとに name・quantity・unit（式・時間・個・か月など）・unitPrice（円。「30 万」は 300000）・taxRate（ふつうは 10。飲食料品などの軽減税率なら 8）を渡す。',
+        '**金額・消費税・合計を自分で計算しない**（ツールが計算する）。単価が書かれていない品目は unitPrice を空にする（推測しない。前の見積の単価はツールが引く）。',
+        '宛先（to）・有効期限（validDays）・条件（terms）が入力にあれば渡す。宛先が request の中にあれば、それを to にする。',
+        '「前に〇〇社に出した見積と同じで」のように頼まれたら、quote.search で前の見積を探し、その品目と単価を使う。',
+        '結果の warning（単価が入っていない品目）・note（前の単価を使った）・docError があれば、そのまま報告に書く。合計は結果の total をそのまま書く。',
+      ].join('\n'),
+      onError: 'stop',
+    },
+    {
+      id: 'mail',
+      type: 'agent',
+      tools: ['quote.prepare_mail'],
+      label: '送る準備',
+      instruction: [
+        'quote.prepare_mail に、作った見積書の quoteId と、入力の送り先（sendTo。無ければ空）を渡す。',
+        'available が false なら、何も書かずに終える（送らない）。',
+        'available が true なら、宛先に送るメールの件名（subjectHint を使ってよい）と本文を書く。本文は会社の文体で、見積書を添えたこと・見積番号・合計（結果の total をそのまま）・有効期限を短く書く。',
+      ].join('\n'),
+      onEmpty: 'stop',
+    },
+    {
+      id: 'gate-send',
+      type: 'approval',
+      label: '送る前の確認',
+      // 本人の用件なので本人が確かめる（仕様書 第9.2.3節）
+      approver: 'requester',
+      approverRole: [],
+      present: '送り先・件名・本文と、添える見積書',
+      onReject: 'stop',
+    },
+    {
+      id: 'send',
+      type: 'agent',
+      tools: ['gmail.send'],
+      label: '送信',
+      instruction: '承認されたとおりの宛先・件名・本文で gmail.send を呼び、attachments に quote.prepare_mail が返した attachments（見積書のファイルの ID）を渡す。',
+    },
+  ],
+  constraints: [
+    '金額を自分で計算しない（ツールが計算する）',
+    '書かれていない単価を推測で埋めない',
+    '承認の前に送らない',
+    '値引き・利益の判断をしない',
+  ],
+  limits: { maxSteps: 12, maxTokens: 80_000, timeoutSec: 300 },
+  evals: [
+    {
+      name: '単価が書かれていない品目',
+      input: { request: 'ホームページ制作。デザインとコーディング', to: '株式会社見本商事' },
+      expect: '単価を推測せず、単価が入っていない品目があると報告すること',
+    },
+  ],
+  help: {
+    summary: '品目と単価から見積書を PDF で作り、あなたのドライブにも保存します。送り先を書けば、あなたの確認の後にメールに添えて送ります。',
+    examples: [{
+      title: 'ホームページ制作の見積を作る',
+      input: { request: 'デザイン 30 万円、コーディング 20 万円', to: '株式会社見本商事 山田様' },
+    }],
+    notes: [
+      '小計・消費税・合計は、数量と単価から決まった計算で出します（AI には計算させません）。消費税は税率ごとにまとめて、会社情報の「端数の扱い」で処理します',
+      '単価が書かれていない品目は、前に作った見積書に同じ品目があればその単価を使います。無ければ 0 円のまま作り、単価が入っていないことをお知らせします',
+      '差出人には会社情報（正式な会社名・住所・電話・登録番号・ロゴ）を載せます。振込先は載せません',
+      '見積番号は「Q-日付-連番」で付きます。有効期限は既定で発行から 30 日です',
+      '送り先のメールアドレスを書くと、PDF を添えたメールを用意し、あなたが確認してから送ります。書かなければ作るだけです',
+      '秘書に「〇〇社に出した見積は？」と聞くと、これまでの見積書（番号・合計・有効期限）を答えます',
+    ],
+    faq: [
+      { q: '請求書も作れますか', a: '作りません。請求・入金は会計の仕組みと税理士の方で扱ってください（M2Office はお金の確定を扱いません）' },
+      { q: '確認せずに送られることはありますか', a: 'ありません。メールで送るときは、必ずあなたの確認の後です' },
+    ],
+  },
+  face: 22,
+};

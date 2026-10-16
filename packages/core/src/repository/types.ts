@@ -499,6 +499,12 @@ export interface Repository {
   listStaleRecordings(tenantId: string, before: string): Promise<{ id: string; size: number }[]>;
   /** ファイルの記録を消す（中身は呼び出し側が置き場から消す）。 */
   deleteFile(tenantId: string, id: string): Promise<void>;
+  /** 見積書を記録する（第9.5.8節）。 */
+  createQuote(q: QuoteRecord): Promise<void>;
+  /** その日（日本時間の `YYYYMMDD`）に作った見積書の数（見積番号の連番に使う）。 */
+  countQuotesOn(tenantId: string, day: string): Promise<number>;
+  /** 見積書の一覧（新しい順）。`to` を渡すと宛先にその言葉を含むものだけ。 */
+  listQuotes(tenantId: string, q?: { to?: string; limit?: number }): Promise<QuoteRecord[]>;
   /** 本人と会社の Chat アプリの個別メッセージの場所（`spaces/…`。第6.5.5.2.1節）。無ければ `null`。 */
   getChatDmSpace(tenantId: string, userId: string): Promise<string | null>;
   /** 個別メッセージの場所を覚える。`null` なら忘れる（場所が無くなったとき）。 */
@@ -867,6 +873,33 @@ export interface Memory {
   lastUsedAt?: string | null;
   /** 種類（`fact`: 事実、`preference`: 仕事のやり方の好み。第11.13.2節）。無ければ事実。 */
   kind?: MemoryKind;
+}
+
+/** 見積書の 1 行（第9.5.8節）。 */
+export interface QuoteItem {
+  name: string;
+  quantity: number;
+  unit: string;
+  unitPrice: number | null;
+  /** 消費税率（%）。10 か 8（軽減税率）。 */
+  taxRate: 10 | 8;
+}
+
+/** 作った見積書の記録（第9.5.8節）。金額は決まった計算で出したもの。 */
+export interface QuoteRecord {
+  id: string;
+  tenantId: string;
+  number: string;
+  requestedBy: string;
+  runId: string | null;
+  toName: string;
+  items: QuoteItem[];
+  subtotal: number;
+  tax: number;
+  total: number;
+  validUntil: string | null;
+  fileId: string | null;
+  createdAt: string;
 }
 
 /**

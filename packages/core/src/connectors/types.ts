@@ -45,6 +45,13 @@ export class ConnectorUnavailableError extends Error {
   }
 }
 
+/** メールに添えるファイル（見積書の PDF など。第9.5.8節）。 */
+export interface MailAttachment {
+  name: string;
+  mime: string;
+  bytes: Uint8Array;
+}
+
 /** 誰の権限で接続するか。利用者本人の認可で動く（仕様書 第14.3節）。 */
 export interface ConnectorPrincipal {
   tenantId: string;
@@ -130,7 +137,7 @@ export interface MailConnector {
    */
   send(
     p: ConnectorPrincipal,
-    mail: { to: string[]; cc: string[]; subject: string; body: string; replyTo: string | null; listUnsubscribe?: string },
+    mail: { to: string[]; cc: string[]; subject: string; body: string; replyTo: string | null; listUnsubscribe?: string; attachments?: MailAttachment[] },
   ): Promise<{ messageId: string }>;
   /** 返信の下書きを作る。**送信はしない**（仕様書 第9.5.1節）。 */
   createDraft(

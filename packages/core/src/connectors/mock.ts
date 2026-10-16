@@ -10,7 +10,7 @@ import { randomUUID } from 'node:crypto';
 import type { SlidePlan } from '../slides/plan.js';
 import { renderSvgPng } from '../columns/cover.js';
 import type {
-  BusySlot, CalendarEvent, ConnectorPrincipal, DriveFile, MailMessage, TaskItem, WorkspaceConnector, EndedMeeting, PeoplePerson
+  BusySlot, CalendarEvent, ConnectorPrincipal, DriveFile, MailAttachment, MailMessage, TaskItem, WorkspaceConnector, EndedMeeting, PeoplePerson
 } from './types.js';
 
 /**
@@ -96,9 +96,11 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
     },
     send: async (
       p: ConnectorPrincipal,
-      mail: { to: string[]; cc: string[]; subject: string; body: string; replyTo: string | null; listUnsubscribe?: string },
+      mail: { to: string[]; cc: string[]; subject: string; body: string; replyTo: string | null; listUnsubscribe?: string; attachments?: MailAttachment[] },
     ) => {
-      this.outbox.push({ kind: 'mail', principal: p, body: mail });
+      // 添えたファイルは中身を控えず、名前と大きさだけを残す
+      const { attachments, ...rest } = mail;
+      this.outbox.push({ kind: 'mail', principal: p, body: { ...rest, ...(attachments?.length ? { attachments: attachments.map((x) => ({ name: x.name, mime: x.mime, size: x.bytes.byteLength })) } : {}) } });
       return { messageId: `mock-sent-${randomUUID().slice(0, 8)}` };
     },
     createDraft: async (

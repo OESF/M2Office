@@ -32,7 +32,7 @@ export type { GeminiModelMap } from './llm/gemini.js';
 
 export type {
   Repository, AgentEvent, Plan, PlanStep, DisabledConnectorTool, TenantConnection, KnowledgeHit, KnowledgeItem, KnowledgeSearchResult, KnowledgeSectionView, RunStatRow, InstalledExtension, PrivateExtension, CompartmentAssignment,
-  CredentialKind, TenantCredential, GoogleConnection, UserPhoto, AuditQuery, DecidedApproval, ConnectionSecret, UserConnection, Memory, MemoryKind, UserProfile, MemoryEmbedItem, CaseNote, LiveRecording,
+  CredentialKind, TenantCredential, GoogleConnection, UserPhoto, AuditQuery, DecidedApproval, ConnectionSecret, UserConnection, Memory, MemoryKind, UserProfile, MemoryEmbedItem, CaseNote, LiveRecording, QuoteItem, QuoteRecord,
 } from './repository/types.js';
 export { PostgresRepository } from './repository/postgres.js';
 export { createPool, watchPool, installPoolLogger, describePoolError, assertDatabaseConfigured, type PoolOptions } from './repository/pool.js';
@@ -112,6 +112,7 @@ export * from './extensions/index.js';
 export { ToolRegistry, validateToolArgs, toolGoogleScopes } from './tools/registry.js';
 export type { Tool, ToolContext, ArgSpec, ToolArgsSchema, GoogleScope, GoogleScopeLevel } from './tools/registry.js';
 export { BUILTIN_TOOLS } from './tools/builtin.js';
+export { quoteTotals, quoteItemKey, quoteMarkdown, QUOTE_TOOLS, QUOTE_VALID_DAYS } from './tools/quote.js';
 
 export { AUTO_PASS_REASON, RunEngine, costOf, needsHuman } from './engine/run-engine.js';
 export {
