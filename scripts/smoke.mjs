@@ -7390,5 +7390,18 @@ console.log('\n■ 95. その場で録音する（欠片をつないで 1 つの
   }
 }
 
+console.log('\n■ 96. ローカルの形の機械の管理者（クラウドの形には入口が無い。第8.6.3節）');
+{
+  try {
+    const login = await fetch(`${API}/v1/machine-admin/login`, { method: 'POST', body: JSON.stringify({ id: 'machine', password: 'x', code: '000000' }), headers: { 'x-tenant': 'a', 'content-type': 'application/json' } });
+    const status = await fetch(`${API}/v1/machine-admin/machine`, { headers: { 'x-tenant': 'a' } });
+    const providers = await fetch(`${API}/v1/auth/providers`, { headers: { 'x-tenant': 'a' } }).then((r) => r.json());
+    login.status === 404 && status.status === 404 && !providers.machineAdmin
+      ? ok('クラウドの形では、機械の管理者の入口が無く、ログイン画面にも出さない') : ng('機械の管理者の入口が違う', JSON.stringify({ login: login.status, status: status.status, flag: providers.machineAdmin }));
+  } catch (err) {
+    ng('機械の管理者の確認が途中で止まった', String(err));
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');

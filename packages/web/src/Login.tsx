@@ -98,6 +98,7 @@ export function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
           </div>
         )}
         {error && <p className="error">{error}</p>}
+        {providers?.machineAdmin && <p className="small login-machine"><a href="/machine">機械の管理</a></p>}
       </div>
     </div>
   );

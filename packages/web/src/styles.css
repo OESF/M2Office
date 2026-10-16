@@ -2415,3 +2415,13 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .log-form { display: flex; flex-direction: column; gap: calc(8px * var(--space-scale)); max-width: 560px; margin-bottom: calc(10px * var(--space-scale)); }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .badge.caution { background: var(--neutral-soft); color: var(--warn); }
+
+/* 機械の管理者の画面（仕様書 第8.6.3節） */
+.machine-admin { min-height: 100vh; background: var(--bg); }
+.machine-admin-bar { display: flex; align-items: center; gap: calc(10px * var(--space-scale)); padding: calc(10px * var(--space-scale)) calc(16px * var(--space-scale)); border-bottom: 1px solid var(--line); background: var(--panel); }
+.machine-admin-bar .spacer { flex: 1; }
+.machine-admin-main { max-width: 960px; margin: 0 auto; padding: calc(16px * var(--space-scale)); }
+.machine-login .field { margin-bottom: calc(10px * var(--space-scale)); }
+.machine-login .field input { width: 100%; }
+.login-machine { margin-top: calc(14px * var(--space-scale)); text-align: center; }
+

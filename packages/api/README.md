@@ -374,6 +374,9 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/admin/machine/logs` | 管理者（ローカルの形だけ。クラウドの形は 404）: システムログ（`from`・`to`・`levels`・`service`・`q`・`requestId`・`runId`・`before`・`beforeId`。新しい順に 200 件）。最初の 1 回を監査ログ `log.view` に残す（仕様書 第16.10.4節） |
 | `GET /v1/admin/machine/logs/digests`・`/logs/export`・`/logs/files`・`/logs/files/:name` | 管理者（ローカルの形だけ）: 日ごとの改ざんの確かめ（7 日まで）・絞った結果の ZIP（`format=jsonl|csv`。28 日・100 万行まで）・機械のログのファイルの一覧とダウンロード。`log.download` に残す |
 | `GET・POST /v1/admin/machine/evidence`・`GET /evidence/:id/download`・`DELETE /evidence/:id` | 管理者（ローカルの形だけ）: 証拠保全の一覧・頼む（`reason`・`days`。202）・ZIP のダウンロード・1 年を過ぎたものの削除（1 年に満たなければ 409）（仕様書 第16.10.5節） |
+| `POST /v1/machine-admin/login` | ローカルの形の機械の管理者のログイン（`id`・`password`・`code`。認証アプリの 6 桁）。署名した Cookie `m2o_machine`（8 時間）と CSRF の印を返す。5 回の間違いで 15 分 429。会社の判定より前に置く。クラウドの形・機械の管理者を作っていない機械では 404（仕様書 第8.6.3節） |
+| `GET /v1/machine-admin/me`・`POST /v1/machine-admin/logout` | 機械の管理者のログイン状態・ログアウト |
+| `/v1/machine-admin/machine/…` | 機械の管理者: 管理者ページの `/v1/admin/machine/…` と同じ口（様子・更新・遠隔の保守・稼働の知らせ・控え・システムログ・証拠保全）。状態を変える操作は CSRF の印が要る。データベースにつながらないときは `GET /machine` だけ返し、ほかは 503 |
 | `GET /v1/admin/ai-usage` | 管理者: 今月の AI の利用と上限（会社の月の上限・1 人の上限・用途ごと・人ごと。仕様書 第6.6.2節）。上限は `PUT /v1/admin/settings/aiLimits`（`monthlyJpy`・`perUserShare`）。AI の利用の上限に当たった要求は 429 |
 | `GET /v1/admin/runs` | 管理者: 全利用者の実行の状態（中身は返さない） |
 | `GET /v1/admin/schedules` | 管理者: 会社の全員の定時実行（人・業務・繰り返し・次回・前回・状態）。次の回に動かないものは、起動役と同じ判定（`scheduleBlocker`）の理由を添える。**業務の入力は返さない**。操作の口は無い（仕様書 第6.6.8.2節） |

@@ -3,7 +3,8 @@
  *
  * 機械を変えずに確かめられるところ（スクリプトの文法、雛形を埋めた結果）だけを見る。
  * 雛形の名前がすべて埋まること、launchd の設定が正しい形であること、入口の TLS の段（名前の形と IP の形）、
- * 秘密の値が答えのファイル（setup.conf）ではなく環境変数のファイルに入ることを確かめる。
+ * 秘密の値が答えのファイル（setup.conf）ではなく環境変数のファイルに入ること、機械の管理者の道具（machine-admin.mjs。第8.6.3節）の作る控えを
+ * M2Office が読めることを確かめる。
  * M2Medical と分け合う共通の入口（deploy/front/front.sh。第8.6.9節）は、偽の caddy と launchctl で動きを確かめる。
  *
  * スクリプトは日本語の言語の設定（`LANG=ja_JP.UTF-8`）でも流す。macOS の bash 3.2 は、その設定で `$VAR（` のように
@@ -17,6 +18,7 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, statSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { machineAdminFromEnv, totpCode, verifyMachinePassword, verifyTotp } from '../src/index.js';
 
 const root = fileURLToPath(new URL('../../..', import.meta.url));
 const onsite = join(root, 'deploy/onsite');
@@ -35,6 +37,7 @@ const ANSWERS = {
   HEARTBEAT_URL: 'https://ops.example/heartbeat', HEARTBEAT_TOKEN: 'hb-token', MACHINE_ID: 'm-001',
   OFFSITE_REPOSITORY: 's3:https://s3.example/bucket/m2office', OFFSITE_PASSWORD: 'offsite-pass', OFFSITE_ACCESS_KEY_ID: 'AKID', OFFSITE_SECRET_ACCESS_KEY: 'SKEY',
   OFFSITE_REGION: '', RESTIC_BIN: '/opt/homebrew/opt/restic/bin/restic', FFMPEG_BIN: '/opt/homebrew/opt/ffmpeg/bin/ffmpeg',
+  MACHINE_ADMIN_ID: 'machine', MACHINE_ADMIN_PASSWORD_HASH: 'scrypt:16384:8:1:c2FsdA:aGFzaA', MACHINE_ADMIN_TOTP: 'JBSWY3DPEHPK3PXP',
 };
 
 function render(extra: Record<string, string>, locale = 'C') {
@@ -209,4 +212,23 @@ for (const locale of LOCALES) test(`共通の入口: より新しい取り決め
   writeFileSync(join(r.front, 'maintenance-owner'), 'M2Medical\n');
   assert.equal(r.run('owner'), 'M2Medical');
   assert.throws(() => r.run('put-site', 'Bad Name', r.site('x', 'x {\n}\n')));
+});
+
+test('機械の管理者の道具が作る合言葉の控えと確認コードの種を、M2Office がそのまま読める（第8.6.3節）', () => {
+  const made = Object.fromEntries(execFileSync(process.execPath, [join(onsite, 'machine-admin.mjs'), 'clinic-it'], { encoding: 'utf8' })
+    .trim().split('\n').map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
+  assert.match(made['PASSWORD']!, /^[a-z2-9]{5}(-[a-z2-9]{5}){3}$/, '読み違えにくい字で 5 字ずつ 4 組');
+  assert.doesNotMatch(made['PASSWORD_HASH']!, /\$/, '環境変数のファイルにそのまま書ける');
+  assert.equal(verifyMachinePassword(made['PASSWORD']!, made['PASSWORD_HASH']!), true);
+  assert.equal(verifyMachinePassword('違う合言葉', made['PASSWORD_HASH']!), false);
+  assert.match(made['URI']!, /^otpauth:\/\/totp\/M2Office%3Aclinic-it\?secret=[A-Z2-7]+&issuer=M2Office/);
+
+  const out = render({ TLS_BLOCK: '\\ttls internal', MACHINE_ADMIN_ID: made['ID']!, MACHINE_ADMIN_PASSWORD_HASH: made['PASSWORD_HASH']!, MACHINE_ADMIN_TOTP: made['TOTP']! });
+  const env = Object.fromEntries(readFileSync(join(out, 'm2office.env'), 'utf8').split('\n').filter((l) => /^M2O_MACHINE_ADMIN_/.test(l)).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
+  const cfg = machineAdminFromEnv(env);
+  assert.ok(cfg, '雛形に入った 3 つの値から機械の管理者を読める');
+  assert.equal(cfg.id, 'clinic-it');
+  const now = new Date();
+  assert.notEqual(verifyTotp(cfg.totpSecret, totpCode(made['TOTP']!, Math.floor(now.getTime() / 30_000)), now), null, '認証アプリと同じ確認コードになる');
+  assert.throws(() => execFileSync(process.execPath, [join(onsite, 'machine-admin.mjs'), 'Bad ID'], { stdio: 'pipe' }), '使えない ID は断る');
 });

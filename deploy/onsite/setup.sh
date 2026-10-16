@@ -272,6 +272,20 @@ DB_APP_PASSWORD=$(env_value DB_APP_PASSWORD_SAVED)
 OFFSITE_PASSWORD=$(env_value M2O_OFFSITE_PASSWORD)
 [ "$OFFSITE" = yes ] && [ -z "$OFFSITE_PASSWORD" ] && OFFSITE_PASSWORD=$(rand_hex 24)
 [ "$OFFSITE" = yes ] || OFFSITE_PASSWORD=''
+# 機械の管理者（インターネットや Google が止まっても機械の様子を見るための 1 人。業務の画面には入れない。第8.6.3節）。
+# 合言葉はここで作って画面に出すだけで、どこにも残さない（m2office.env には控えだけを置く）。一度作ったら、作り直すと決めたときだけ作り直す
+MACHINE_ADMIN_ID=$(env_value M2O_MACHINE_ADMIN_ID)
+MACHINE_ADMIN_PASSWORD_HASH=$(env_value M2O_MACHINE_ADMIN_PASSWORD_HASH)
+MACHINE_ADMIN_TOTP=$(env_value M2O_MACHINE_ADMIN_TOTP)
+MACHINE_ADMIN_PASSWORD=''; MACHINE_ADMIN_URI=''
+if [ -z "$MACHINE_ADMIN_PASSWORD_HASH" ] || [ -z "$MACHINE_ADMIN_TOTP" ] || yes_no '機械の管理者の合言葉と確認コードを作り直しますか（忘れた・漏れたときだけ）' n; then
+  ask MACHINE_ADMIN_ID '機械の管理者の ID（英小文字で始まる 3〜32 文字）' "${MACHINE_ADMIN_ID:-machine}"
+  made=$("$NODE_BIN" "$SCRIPT_DIR/machine-admin.mjs" "$MACHINE_ADMIN_ID") || die '機械の管理者を作れませんでした'
+  MACHINE_ADMIN_PASSWORD=$(printf '%s\n' "$made" | sed -n 's/^PASSWORD=//p')
+  MACHINE_ADMIN_PASSWORD_HASH=$(printf '%s\n' "$made" | sed -n 's/^PASSWORD_HASH=//p')
+  MACHINE_ADMIN_TOTP=$(printf '%s\n' "$made" | sed -n 's/^TOTP=//p')
+  MACHINE_ADMIN_URI=$(printf '%s\n' "$made" | sed -n 's/^URI=//p')
+fi
 
 # ---- 4. 専用の利用者と置き場 ----
 say '専用の利用者と置き場を用意します'
@@ -321,7 +335,8 @@ answers="$work/answers"
   for k in INSTALL_DIR REPO_DIR RELEASE_DIR ENV_FILE FRONT_DIR DATA_DIR BACKUP_DIR API_PORT DB_PORT HOST SUBDOMAIN ACME_EMAIL \
     NODE_BIN PG_BIN CADDY_BIN LOCAL_LLM_URL LOCAL_LLM_MODEL LOCAL_LLM_EMBED_MODEL GEMINI_API_KEY GOOGLE_LOGIN_CLIENT_ID \
     GOOGLE_LOGIN_CLIENT_SECRET SECRET_KEY DB_APP_PASSWORD DB_OWNER_PASSWORD UPDATE_HOUR HEARTBEAT_URL HEARTBEAT_TOKEN MACHINE_ID \
-    OFFSITE_REPOSITORY OFFSITE_PASSWORD OFFSITE_ACCESS_KEY_ID OFFSITE_SECRET_ACCESS_KEY OFFSITE_REGION RESTIC_BIN FFMPEG_BIN; do
+    OFFSITE_REPOSITORY OFFSITE_PASSWORD OFFSITE_ACCESS_KEY_ID OFFSITE_SECRET_ACCESS_KEY OFFSITE_REGION RESTIC_BIN FFMPEG_BIN \
+    MACHINE_ADMIN_ID MACHINE_ADMIN_PASSWORD_HASH MACHINE_ADMIN_TOTP; do
     printf '%s=%s\n' "$k" "${!k}"
   done
   printf 'TLS_BLOCK=%s\n' "$(tls_block)"
@@ -469,6 +484,19 @@ info '  - ルーター: DHCP の予約で、この機械にいつも同じ IP �
 [ -z "$GOOGLE_LOGIN_CLIENT_ID" ] && info '  - Google: 会社の OAuth クライアントを作り、管理者ページの「接続」で入れる'
 [ -z "$BACKUP_DIR" ] && info '  - 控え: 控えの置き場を決めて、setup.sh を走らせ直す'
 [ "$AUTO_UPDATE" = no ] && info '  - 更新: 署名を確かめる鍵が入るまで、自動の更新は切っています（手で update.sh を走らせる）'
+if [ -n "$MACHINE_ADMIN_PASSWORD" ]; then
+  say '機械の管理者（https://'"$HOST"'/machine）'
+  info '会社の機械の担当の人に渡します。合言葉はここにしか出ません（M2Office にも運営にも残りません）'
+  info "ID: $MACHINE_ADMIN_ID"
+  info "合言葉: $MACHINE_ADMIN_PASSWORD"
+  info "確認コードの種（認証アプリに入れる）: $MACHINE_ADMIN_TOTP"
+  if command -v qrencode >/dev/null 2>&1; then
+    qrencode -t ansiutf8 "$MACHINE_ADMIN_URI"
+  else
+    info "認証アプリに読ませる URI: $MACHINE_ADMIN_URI"
+  fi
+  info '書き写したら画面を消してください。忘れたときは setup.sh を走らせ直して作り直します'
+fi
 if yes_no '紙の「戻すための控え」に書き写す秘密の値を、いま画面に出しますか' n; then
   info "M2OFFICE_SECRET_KEY: $SECRET_KEY"
   info "データベースの所有者の合言葉: $DB_OWNER_PASSWORD"

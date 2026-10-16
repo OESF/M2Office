@@ -24,7 +24,9 @@ export type AuthInfo =
   /** 運営のサポートの代理アクセス（閲覧だけ。仕様書 第23.6.1節）。 */
   | { method: 'proxy'; sessionId: string; csrfToken: string; grantId: string; scope: ProxyScope; expiresAt: string; operatorId: string; operatorLabel: string }
   /** 外部のアプリの鍵（仕様書 第13.4.1節）。`fn` はこの要求の機能。 */
-  | { method: 'app'; appId: string; appName: string; fn: AppFunctionId };
+  | { method: 'app'; appId: string; appName: string; fn: AppFunctionId }
+  /** ローカルの形の機械の管理者（「機械」の口だけ。仕様書 第8.6.3節）。 */
+  | { method: 'machine-admin' };
 
 /** 外部のアプリの鍵（`Authorization: Bearer m2oa_…`）を取り出す。無ければ `null`。 */
 export function appKeyOf(c: Context): string | null {

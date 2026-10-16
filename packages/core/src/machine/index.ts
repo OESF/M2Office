@@ -1,5 +1,5 @@
 /**
- * @file ローカルの形の「機械」（仕様書 第8.6.5節・第8.6.7節）の公開窓口。控え（社内と社外）と、機械の様子。
+ * @file ローカルの形の「機械」（仕様書 第8.6.3節・第8.6.5節・第8.6.7節）の公開窓口。控え（社内と社外）と、機械の様子と、機械の管理者。
  */
 
 import { appPath } from '../app-root.js';
@@ -18,6 +18,11 @@ export {
   type OffsiteConfig, type OffsiteRecord, type OffsiteStatus,
 } from './offsite.js';
 export { machineStatus, writeWorkerBeat, type MachineConfig, type MachineStatus } from './status.js';
+export {
+  machineAdminFromEnv, hashMachinePassword, verifyMachinePassword, base32Encode, base32Decode, totpCode, verifyTotp, totpUri,
+  machineSessionKey, issueMachineSession, verifyMachineSession, machineCsrf, MachineLoginThrottle,
+  MACHINE_ADMIN_SESSION_MS, MACHINE_ADMIN_MAX_FAILURES, MACHINE_ADMIN_LOCK_MS, MACHINE_ADMIN_ACTOR, type MachineAdminConfig,
+} from './machine-admin.js';
 export { readUpdateStatus, holdUpdates, takeUnnotifiedUpdateFailure, type UpdateRecord, type UpdateSettings, type UpdateStatus } from './update.js';
 export {
   readMaintenanceStatus, requestMaintenance, frontDir, takeClosedMaintenanceSessions, MAINTENANCE_DEFAULT_HOURS, MAINTENANCE_MAX_HOURS,

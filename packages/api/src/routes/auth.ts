@@ -11,7 +11,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import { companyName, type AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
-import { buildGoogleLoginUrl, createPkce } from '@m2office/core';
+import { buildGoogleLoginUrl, createPkce, machineAdminFromEnv } from '@m2office/core';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { clearSessionCookie, issueSession, readSession } from '../auth/session.js';
 import { PROXY_COOKIE } from '../middleware/tenant.js';
@@ -50,6 +50,8 @@ export function authRoute(deps: AppDeps) {
         ? { enabled: true }
         : { enabled: false, reason: 'Google ログインは準備中です（OAuth クライアントの設定待ち）' },
       dev: { enabled: deps.auth.devLogin, users: devUsers },
+      // ローカルの形で機械の管理者を作った機械なら、ログイン画面に「機械の管理」を出す（第8.6.3節）
+      machineAdmin: deps.ai.deployment() === 'onsite' && !!process.env['M2OFFICE_SECRET_KEY'] && !!machineAdminFromEnv(process.env),
     });
   });
 

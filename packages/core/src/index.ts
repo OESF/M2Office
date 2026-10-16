@@ -198,6 +198,9 @@ export {
   readMaintenanceStatus, requestMaintenance, frontDir, takeClosedMaintenanceSessions, MAINTENANCE_DEFAULT_HOURS, MAINTENANCE_MAX_HOURS, type MaintenanceSession, type MaintenanceStatus,
   heartbeatConfigFromEnv, heartbeatPayload, readHeartbeatStatus, setHeartbeatOff, sendHeartbeat, HEARTBEAT_INTERVAL_MS, type HeartbeatConfig, type HeartbeatPayload, type HeartbeatStatus,
   runOffsite, checkOffsite, readOffsiteStatus, offsiteConfigFromEnv, parseBackupSummary, OFFSITE_KEEP, type OffsiteConfig, type OffsiteRecord, type OffsiteStatus,
+  machineAdminFromEnv, hashMachinePassword, verifyMachinePassword, base32Encode, base32Decode, totpCode, verifyTotp, totpUri,
+  machineSessionKey, issueMachineSession, verifyMachineSession, machineCsrf, MachineLoginThrottle,
+  MACHINE_ADMIN_SESSION_MS, MACHINE_ADMIN_MAX_FAILURES, MACHINE_ADMIN_LOCK_MS, MACHINE_ADMIN_ACTOR, type MachineAdminConfig,
 } from './machine/index.js';
 export {
   RESERVED_SUBDOMAINS, OPERATOR_ROLES, MACHINE_REPORT_MAX_BYTES, MACHINE_SILENT_MS,

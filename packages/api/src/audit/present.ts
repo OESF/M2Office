@@ -6,7 +6,7 @@
  */
 
 import { agentDisplayName, type AuditEvent } from '@m2office/shared';
-import { csvText } from '@m2office/core';
+import { csvText, MACHINE_ADMIN_ACTOR } from '@m2office/core';
 
 /** 操作の名前を業務の言葉にする。無い名前は記録の名前のまま出す。 */
 const ACTION_LABELS: Record<string, string> = {
@@ -192,6 +192,8 @@ const ACTION_LABELS: Record<string, string> = {
   'signage.asset.remove': 'サイネージの素材を消した',
   'signage.interrupt_asset.set': 'サイネージの割り込みの素材を変えた',
   'machine.backup_request': '機械の控えを今すぐ取るよう頼んだ',
+  'machine.admin_login': '機械の管理者がログインした', 'machine.admin_logout': '機械の管理者がログアウトした',
+  'machine.admin_login_failed': '機械の管理者のログインに失敗した',
   'log.view': 'システムログを見た', 'log.download': 'システムログをダウンロードした',
   'evidence.create': '証拠保全を始めた', 'evidence.download': '保全したものをダウンロードした', 'evidence.delete': '保全したものを削除した',
   'file.audio_discard': '録音を消した',
@@ -495,7 +497,8 @@ export function presentAudit(e: AuditEvent, names: AuditNames): AuditRow {
   const person = (id: string) => names.user(id) ?? id;
   const runId = typeof e.detail?.['runId'] === 'string' ? e.detail['runId'] : null;
   const run = runId ? names.run(runId) : undefined;
-  const who = e.actorType === 'user' ? person(e.actorId)
+  const who = e.actorType === 'user' && e.actorId === MACHINE_ADMIN_ACTOR ? '機械の管理者'
+    : e.actorType === 'user' ? person(e.actorId)
     : e.actorType === 'secretary' ? `秘書（${person(e.actorId)}さんの依頼）`
     : e.actorType === 'agent' ? `業務「${names.agent(e.actorId) ?? run?.agentName ?? agentDisplayName(null, e.actorId)}」${run ? `（${person(run.requestedBy)}さんの依頼）` : ''}`
     : e.actorType === 'api_client' ? (e.actorId.startsWith('app:') ? person(e.actorId) : `外部アプリ（${e.actorId}）`)

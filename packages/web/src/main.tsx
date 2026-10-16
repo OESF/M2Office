@@ -29,6 +29,8 @@ applyTheme();
 const SignagePlayer = lazy(() => import('./SignagePlayer.js').then((m) => ({ default: m.SignagePlayer })));
 /** マスター管理画面（仕様書 第23.8.15節）。名前が ops. のときだけ、必要なときに読み込む（顧客の画面には入れない）。 */
 const OpsRoot = lazy(() => import('./Ops.js').then((m) => ({ default: m.OpsRoot })));
+/** ローカルの形の機械の管理者（仕様書 第8.6.3節）。Google のログインを通さない別の入口なので、必要なときだけ読み込む。 */
+const MachineAdminRoot = lazy(() => import('./MachineAdmin.js').then((m) => ({ default: m.MachineAdminRoot })));
 
 /**
  * 画面の入口。ログインの状態を確かめ、ワークスペースか管理者ページを出す。
@@ -118,6 +120,8 @@ createRoot(root).render(location.hostname.startsWith('ops.')
   ? <Suspense fallback={null}><SignagePlayer /></Suspense>
   // 共有の端末の打刻の画面（仕様書 第30.6.3節）。端末で開いたままにするため、ログインを通さない
   : location.pathname.startsWith('/hr/terminal') ? <HrTerminal />
+  // 機械の管理者の画面（仕様書 第8.6.3節）。会社の利用者のログイン（/v1/me）を通さない
+  : location.pathname === '/machine' || location.pathname.startsWith('/machine/') ? <StrictMode><Suspense fallback={null}><MachineAdminRoot /></Suspense></StrictMode>
   : (
     <StrictMode>
       <Root />

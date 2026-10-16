@@ -161,6 +161,47 @@ export interface MySlipSummary {
   net: number;
 }
 
+/**
+ * ローカルの形の「機械」の口（仕様書 第8.6.7節）。会社の管理者は `/admin/machine`、機械の管理者（第8.6.3節）は `/machine-admin/machine` で同じ形。
+ *
+ * @param base 口の先頭（`/v1` の後ろ）
+ */
+function machineFns(base: string) {
+  return {
+    /** 機械の様子。 */
+    machine: () => call<MachineView>(base),
+    /** 機械のシステムログ（仕様書 第16.10.4節）。 */
+    systemLogs: (q: SystemLogQuery) => call<SystemLogPage>(`${base}/logs?${logQuery(q)}`),
+    systemLogDigests: (q: SystemLogQuery) => call<{ items: SystemLogDigestView[] }>(`${base}/logs/digests?${logQuery(q)}`),
+    systemLogExport: (q: SystemLogQuery, format: 'jsonl' | 'csv') => getAndSave(`${base}/logs/export?${logQuery(q)}&format=${format}`, 'system-logs.zip'),
+    systemLogFiles: () => call<{ items: { name: string; size: number; updatedAt: string }[]; configured: boolean }>(`${base}/logs/files`),
+    systemLogFile: (name: string) => getAndSave(`${base}/logs/files/${encodeURIComponent(name)}`, name),
+    /** 証拠保全（第16.10.5節）。 */
+    evidence: () => call<{ items: EvidenceView[] }>(`${base}/evidence`),
+    createEvidence: (reason: string, days: number) => call<{ id: string }>(`${base}/evidence`, { method: 'POST', body: JSON.stringify({ reason, days }) }),
+    downloadEvidence: (id: string) => getAndSave(`${base}/evidence/${encodeURIComponent(id)}/download`, 'evidence.zip'),
+    deleteEvidence: (id: string, reason: string) => call<{ ok: true }>(`${base}/evidence/${encodeURIComponent(id)}`, { method: 'DELETE', body: JSON.stringify({ reason }) }),
+    /** 今すぐ控えを取る（ワーカーが次の見回りで取る）。 */
+    machineBackup: () => call<{ ok: true }>(`${base}/backup`, { method: 'POST', body: '{}' }),
+    /** 遠隔の保守を開ける（`hours` 時間）か、閉じる（`null`）。 */
+    machineMaintenance: (hours: number | null) => call<{ until: string | null }>(`${base}/maintenance`, { method: 'PUT', body: JSON.stringify({ hours }) }),
+    /** 運営への稼働の知らせを入れる・切る。 */
+    machineHeartbeat: (on: boolean) => call<{ on: boolean }>(`${base}/heartbeat`, { method: 'PUT', body: JSON.stringify({ on }) }),
+    /** 夜の自動の更新を止める（延ばす。`days`）か、止めるのをやめる（`null`）。 */
+    machineUpdateHold: (days: number | null) => call<{ heldUntil: string | null }>(`${base}/update-hold`, { method: 'PUT', body: JSON.stringify({ days }) }),
+  };
+}
+
+/** 「機械」の口の形（会社の管理者と機械の管理者で同じ）。 */
+export type MachineApi = ReturnType<typeof machineFns>;
+
+/** 機械の管理者のログイン状態（仕様書 第8.6.3節）。 */
+export interface MachineAdminSession {
+  id: string;
+  expiresAt: string;
+  csrfToken: string;
+}
+
 /** 途中の録音（仕様書 第9.4.5.1節）。`seconds` は録れている長さ、`nextSeq` は次に送る欠片の番号。 */
 export interface LiveRecordingView {
   id: string;
@@ -595,6 +636,8 @@ export interface LoginProviders {
   tenant: { name: string; subdomain: string };
   google: { enabled: boolean; reason?: string };
   dev: { enabled: boolean; users: { email: string; displayName: string; roles: string[] }[] };
+  /** ローカルの形で機械の管理者を作った機械か（ログイン画面に「機械の管理」を出す。仕様書 第8.6.3節）。 */
+  machineAdmin?: boolean;
 }
 
 export type ScheduleView = Schedule & { label: string };
@@ -1267,6 +1310,28 @@ export const api = {
   driveFilePicker: () => call<{ kind: 'google'; apiKey: string; appId: string; accessToken: string } | { kind: 'mock'; items: { id: string; name: string }[] }>('/files/drive-picker'),
   /** 本人がドライブで選んだファイルを受け取る（手元から渡したファイルと同じ置き場に入る）。 */
   fileFromDrive: (fileId: string) => call<{ id: string; name: string }>('/files/from-drive', { method: 'POST', body: JSON.stringify({ fileId }) }),
+  /**
+   * ローカルの形の機械の管理者（仕様書 第8.6.3節）。ID・合言葉・確認コードで入り、「機械」の口だけを使う。業務の口には入れない。
+   */
+  machineAdmin: {
+    ...machineFns('/machine-admin/machine'),
+    /** ログイン。成功したら CSRF の印を持つ。 */
+    login: async (id: string, password: string, code: string) => {
+      const s = await call<MachineAdminSession>('/machine-admin/login', { method: 'POST', body: JSON.stringify({ id, password, code }) });
+      csrfToken = s.csrfToken;
+      return s;
+    },
+    /** いまのログイン状態。ログインしていなければ ApiError（`needsLogin`）。 */
+    me: async () => {
+      const s = await call<MachineAdminSession>('/machine-admin/me');
+      csrfToken = s.csrfToken;
+      return s;
+    },
+    logout: async () => {
+      await call<{ ok: true }>('/machine-admin/logout', { method: 'POST', body: '{}' });
+      csrfToken = null;
+    },
+  },
   /** その場で録る録音（仕様書 第9.4.5.1節）。途中の録音は本人だけが扱う。 */
   recordings: {
     /** 本人の途中の録音。無ければ `null`。 */
@@ -2242,32 +2307,13 @@ export const api = {
       items: { agentId: string; name: string; runs: number; costJpy: number; tokens: number }[];
       total: { runs: number; costJpy: number }; note: string | null;
     }>('/admin/usage'),
-    /** ローカルの形の「機械」の様子（仕様書 第8.6.7節）。 */
-    machine: () => call<MachineView>('/admin/machine'),
-    /** 機械のシステムログ（ローカルの形だけ。仕様書 第16.10.4節）。 */
-    systemLogs: (q: SystemLogQuery) => call<SystemLogPage>(`/admin/machine/logs?${logQuery(q)}`),
-    systemLogDigests: (q: SystemLogQuery) => call<{ items: SystemLogDigestView[] }>(`/admin/machine/logs/digests?${logQuery(q)}`),
-    systemLogExport: (q: SystemLogQuery, format: 'jsonl' | 'csv') => getAndSave(`/admin/machine/logs/export?${logQuery(q)}&format=${format}`, 'system-logs.zip'),
-    systemLogFiles: () => call<{ items: { name: string; size: number; updatedAt: string }[]; configured: boolean }>('/admin/machine/logs/files'),
-    systemLogFile: (name: string) => getAndSave(`/admin/machine/logs/files/${encodeURIComponent(name)}`, name),
-    /** 証拠保全（第16.10.5節）。 */
-    evidence: () => call<{ items: EvidenceView[] }>('/admin/machine/evidence'),
-    createEvidence: (reason: string, days: number) => call<{ id: string }>('/admin/machine/evidence', { method: 'POST', body: JSON.stringify({ reason, days }) }),
-    downloadEvidence: (id: string) => getAndSave(`/admin/machine/evidence/${encodeURIComponent(id)}/download`, 'evidence.zip'),
-    deleteEvidence: (id: string, reason: string) => call<{ ok: true }>(`/admin/machine/evidence/${encodeURIComponent(id)}`, { method: 'DELETE', body: JSON.stringify({ reason }) }),
-    /** 今すぐ控えを取る（ワーカーが次の見回りで取る）。 */
+    // ローカルの形の「機械」（仕様書 第8.6.7節）。機械の管理者の画面も同じ形の口を使う（api.machineAdmin）
+    ...machineFns('/admin/machine'),
     /** サポートの閲覧の申請（仕様書 第23.6.1節）。 */
     supportAccess: () => call<{ items: SupportGrant[] }>('/admin/support'),
     approveSupport: (id: string, hours: number) => call<{ item: SupportGrant }>(`/admin/support/${encodeURIComponent(id)}/approve`, { method: 'POST', body: JSON.stringify({ hours }) }),
     denySupport: (id: string) => call<{ item: SupportGrant }>(`/admin/support/${encodeURIComponent(id)}/deny`, { method: 'POST', body: '{}' }),
     revokeSupport: (id: string) => call<{ item: SupportGrant }>(`/admin/support/${encodeURIComponent(id)}/revoke`, { method: 'POST', body: '{}' }),
-    machineBackup: () => call<{ ok: true }>('/admin/machine/backup', { method: 'POST', body: '{}' }),
-    /** 夜の自動の更新を止める（延ばす。`days`）か、止めるのをやめる（`null`）。 */
-    /** 遠隔の保守を開ける（`hours` 時間）か、閉じる（`null`）。 */
-    machineMaintenance: (hours: number | null) => call<{ until: string | null }>('/admin/machine/maintenance', { method: 'PUT', body: JSON.stringify({ hours }) }),
-    /** 運営への稼働の知らせを入れる・切る。 */
-    machineHeartbeat: (on: boolean) => call<{ on: boolean }>('/admin/machine/heartbeat', { method: 'PUT', body: JSON.stringify({ on }) }),
-    machineUpdateHold: (days: number | null) => call<{ heldUntil: string | null }>('/admin/machine/update-hold', { method: 'PUT', body: JSON.stringify({ days }) }),
     /** 今月の AI の利用と上限（仕様書 第6.6.2節）。用途ごと・人ごと。費用は概算。 */
     aiUsage: () => call<AiUsageView>('/admin/ai-usage'),
     /** 秘書が答えられなかった問い（仕様書 第11.13.6節）。誰が聞いたかは無い。 */

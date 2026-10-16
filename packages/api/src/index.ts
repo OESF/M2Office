@@ -25,6 +25,7 @@ import { approvalsRoute } from './routes/approvals.js';
 import { secretaryRoute } from './routes/secretary.js';
 import { ensureMorningBrief, ensureWeeklyBrief } from './secretary/morning.js';
 import { authRoute } from './routes/auth.js';
+import { machineAdminRoute } from './routes/machine-admin.js';
 import { notificationsRoute } from './routes/notifications.js';
 import { schedulesRoute } from './routes/schedules.js';
 import { cardsRoute } from './routes/cards.js';
@@ -137,7 +138,9 @@ app.route('/v1/public/columns', columnsPublicRoute(deps));
 app.route('/v1/hooks/line', lineHooksRoute(deps));
 // まとめてのメールの配信の停止（第27.9.1節）。受け取った人がログインなしに開く。URL の鍵から会社を決めるため、会社の判定より前に置く
 app.route('/v1/unsubscribe', unsubscribeRoute(deps));
-app.use('/v1/*', resolveTenant(deps));
+// ローカルの形の機械の管理者（第8.6.3節）。会社の判定より前に置く（データベースが止まっても機械の様子を見られるように）
+app.route('/v1/machine-admin', machineAdminRoute(deps));
+app.use('/v1/*', async (c, next) => (c.req.path.startsWith('/v1/machine-admin/') ? next() : resolveTenant(deps)(c, next)));
 app.route('/v1/auth', authRoute(deps));
 // サイネージの再生のページ（第31.9.1節）。ログインを使わず、画面の鍵で名乗る。会社はアドレスで決まるため、会社の判定の後・ログインの確かめより前に置く
 app.route('/v1/signage-play', signagePlayRoute(deps, SERVER_VERSION));
