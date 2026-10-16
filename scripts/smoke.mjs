@@ -106,8 +106,8 @@ console.log('\n■ 1. 疎通と一覧');
   // 拡張機能を導入している場合はその分が増えるため、公式の業務エージェントだけを数える
   const official = (body.agents ?? []).filter((a) => !a.extension);
   // 段取りの報告（第10.14節）はメニューに出ない中の業務
-  official.length === 16 && official.filter((a) => a.menu === false).map((a) => a.id).join() === 'secretary-plan-report'
-    ? ok(`公式の業務エージェントが 16 件（うち中の業務 1。${official.map((a) => a.name).join(' / ')}）`)
+  official.length === 17 && official.filter((a) => a.menu === false).map((a) => a.id).sort().join() === 'scheduling-confirm,secretary-plan-report'
+    ? ok(`公式の業務エージェントが 17 件（うち中の業務 2。${official.map((a) => a.name).join(' / ')}）`)
     : ng('エージェントの一覧が取得できない', JSON.stringify(body));
 }
 
@@ -7465,6 +7465,25 @@ console.log('\n■ 99. 見積書の作成（金額は決まった計算・送り
     other.status === 201 || other.status === 200 ? ok('見積書の作成は社内の誰でも使える') : ng('見積書の作成を始められない', String(other.status));
   } catch (err) {
     ng('見積書の確認が途中で止まった', String(err));
+  }
+}
+
+console.log('\n■ 100. 社外の参加者を含む日程調整（候補のメールは本人の承認の後・仮押さえ・返事を待つ。第9.5.3.1節）');
+{
+  try {
+    const { body: j } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: 'scheduling', input: { title: '見本商事様と打ち合わせ', attendees: 'member@alpha.example.jp, tanaka@customer.example.jp', durationMin: '60' } }) }, 'member');
+    const r1 = await waitFor('a', j.runId, ['completed', 'failed', 'awaiting_approval'], 30000, 'member');
+    const ap = await approvalFor('a', j.runId, 'member');
+    r1?.run?.status === 'awaiting_approval' && ap ? ok('社外の人がいれば、候補のメールを送る前に本人の承認で止まる') : ng('候補を送る前に止まらない', JSON.stringify({ status: r1?.run?.status, reason: r1?.run?.failureReason }));
+    if (ap) {
+      await call('a', `/v1/approvals/${ap.id}`, { method: 'POST', body: JSON.stringify({ decision: 'approved', comment: null }) }, 'member');
+      const r2 = await waitFor('a', j.runId, ['completed', 'failed'], 30000, 'member');
+      const out = JSON.stringify((r2?.steps ?? []).find((x) => x.stepId === 'create')?.output ?? '');
+      r2?.run?.status === 'completed' && /schedule\.send_candidates/.test(out) && /"sent":true/.test(out) && /"holds":3/.test(out) && !/calendar\.create/.test(out)
+        ? ok('承認の後、候補のメールを送り、候補の時間を仮押さえして、返事を待つ（予定はまだ作らない）') : ng('候補を送れない', JSON.stringify({ status: r2?.run?.status, out: out.slice(0, 400) }));
+    }
+  } catch (err) {
+    ng('社外との日程調整の確認が途中で止まった', String(err));
   }
 }
 

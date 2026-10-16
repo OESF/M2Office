@@ -74,7 +74,7 @@ test('埋められない必須の入力だけを聞き、業務を開くボタ�
   const s = new Secretary({ repo: d.repo, llm, connector: {} as never, agents: [agent('scheduling')], startAgent: d.startAgent, startLookup: d.startLookup });
   const reply = await s.respond('t', 'u1', '企画会議の日程を調整してください');
   assert.equal(d.started.length, 0);
-  assert.match(reply.text, /参加者（社内のみ）が要ります。教えてください/);
+  assert.match(reply.text, /参加者（社内・社外）が要ります。教えてください/);
   assert.equal(reply.suggestedAgent?.id, 'scheduling');
 });
 
@@ -117,7 +117,7 @@ test('fillInputs: 推論が JSON を返さなければ、依頼の文を request
   assert.deepEqual(r.input, { request: 'この表の品目は', fileId: 'file-1' });
   assert.deepEqual(r.missing, []);
   const m = await fillInputs(agent('scheduling'), '調整して', '', llm);
-  assert.deepEqual(m.missing, ['目的・件名', '参加者（社内のみ）']);
+  assert.deepEqual(m.missing, ['目的・件名', '参加者（社内・社外）']);
 });
 
 test('日付を指定した長い依頼は、「スケジュール」の語があっても定型の予定の照会（層 1）にしない', async () => {

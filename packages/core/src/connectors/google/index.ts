@@ -195,7 +195,13 @@ export class GoogleWorkspaceConnector implements WorkspaceConnector {
       const thread = mail.replyTo ? await this.threadOf(p, mail.replyTo) : null;
       const raw = buildRawMessage({ ...mail, inReplyTo: thread?.messageId, references: thread?.references });
       const res = await this.gmail(p, '/messages/send', { method: 'POST', body: { raw, ...(thread ? { threadId: thread.threadId } : {}) } });
-      return { messageId: String(res?.['id'] ?? '') };
+      return { messageId: String(res?.['id'] ?? ''), ...(res?.['threadId'] ? { threadId: String(res['threadId']) } : {}) };
+    },
+    /** スレッドのメールを本文つきで古い順に返す（社外との日程調整の返事を見る。仕様書 第9.5.3.1節）。 */
+    thread: async (p: ConnectorPrincipal, threadId: string): Promise<MailMessage[]> => {
+      if (!/^[A-Za-z0-9_-]+$/.test(threadId)) return [];
+      const t = await this.gmail(p, `/threads/${threadId}?format=full`) as { messages?: GmailMessage[] } | null;
+      return (t?.messages ?? []).map((m) => ({ ...toSummary(m), body: m.payload ? extractBody(m.payload) : '' }));
     },
     createDraft: async (p: ConnectorPrincipal, draft: { replyTo: string | null; to: string; subject: string; body: string }) => {
       const thread = draft.replyTo ? await this.threadOf(p, draft.replyTo) : null;

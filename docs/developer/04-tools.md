@@ -74,6 +74,7 @@
 | `profile.read` | read | — | あなたの自宅（地域）・いつもの勤務地・今日の日付を確かめます。行程の出発地や天気の地域に使い、どこにも書き込みません |
 | `quote.prepare_mail` | read | — | 見積書を送るメールの宛先と添えるファイルを確かめます。送るのは承認の後です |
 | `quote.search` | read | — | これまでに作った見積書を、宛先で探します |
+| `schedule.confirm_prepare` | read | — | 社外の方が返事で選んだ日時と参加者を確かめます |
 | `sheet.read` | read | — | Excel・CSV を表として読みます |
 | `sheets.read` | read | `drive.file`（機密でない） | Google スプレッドシートの表を読みます |
 | `skill.read` | read | — | このスキルに入っている資料を読みます |
@@ -149,6 +150,8 @@
 | `inquiries.reply_send` | external-send | — | 承認された問い合わせの返事を、会社の窓口のアカウントから送ります |
 | `mail.bulk_send` | external-send | `gmail.send`（機密） | 承認されたまとめてのメールを、あなたの Gmail から 1 人に 1 通ずつ送ります |
 | `members.send_line` | external-send | — | 承認された会員への知らせを、LINE で 1 人ずつ送ります |
+| `schedule.invite` | external-send | — | 社外の方が選んだ日時で予定を作り、参加者を招待します。必ずあなたの確認の後に行います |
+| `schedule.send_candidates` | external-send | — | 社外の方に日程の候補をメールで送り、候補の時間をあなたのカレンダーに仮押さえします。必ずあなたの確認の後に行います |
 | `web_review.request_send` | external-send | `gmail.send`（機密） | 直すべき所の依頼文を、承認の後に制作会社へ送ります |
 
 ## 4.3 引数
@@ -205,6 +208,7 @@
 | `profile.read` | なし |
 | `quote.prepare_mail` | `quoteId`: quote.create が返した quoteId、`sendTo`: 送り先のメールアドレス（無ければ空） |
 | `quote.search` | `to`: 宛先に含まれる言葉（会社名など） |
+| `schedule.confirm_prepare` | `requestId`（必須）: 日程調整の ID |
 | `sheet.read` | `fileId`（必須）: ファイルの ID、`sheet`: シート名（任意）、`maxRows`: 読む行数の上限（既定 500） |
 | `sheets.read` | `spreadsheetId`（必須）: スプレッドシートの ID、`maxRows`: 読む行数の上限（既定 500） |
 | `skill.read` | `path`（必須）: ファイルの相対パス |
@@ -281,6 +285,8 @@
 | `inquiries.reply_send` | `replyId`（必須）: 返事の ID |
 | `mail.bulk_send` | `bulkMailId`（必須）: まとめてのメールの ID |
 | `members.send_line` | `messageId`（必須）: 知らせの ID |
+| `schedule.invite` | `requestId`（必須）: 日程調整の ID |
+| `schedule.send_candidates` | `title`（必須）: 打ち合わせの件名、`attendees`（必須）: 参加者全員のメールアドレス（社内と社外）、`candidates`（必須）: 候補。{ start, end } の配列（3 つ）、`subject`（必須）: メールの件名、`body`（必須）: メールの本文（候補の日時を並べ、どれがよいかを尋ねる） |
 | `web_review.request_send` | `findingId`（必須）: 直すべき所の ID、`to`（必須）: 宛先のメールアドレス |
 
 <!-- tools:end -->

@@ -499,6 +499,13 @@ export interface Repository {
   listStaleRecordings(tenantId: string, before: string): Promise<{ id: string; size: number }[]>;
   /** ファイルの記録を消す（中身は呼び出し側が置き場から消す）。 */
   deleteFile(tenantId: string, id: string): Promise<void>;
+  /** 社外との日程調整の記録を作る（第9.5.3.1節）。 */
+  createScheduleRequest(r: ScheduleRequest): Promise<void>;
+  getScheduleRequest(tenantId: string, id: string): Promise<ScheduleRequest | null>;
+  /** 返事を待っている社外との日程調整（見張りが使う）。 */
+  listWaitingScheduleRequests(tenantId: string): Promise<ScheduleRequest[]>;
+  /** 社外との日程調整の状態などを変える。 */
+  updateScheduleRequest(tenantId: string, id: string, patch: Partial<Pick<ScheduleRequest, 'status' | 'chosenIndex' | 'replyNote' | 'candidates'>>): Promise<void>;
   /** 見積書を記録する（第9.5.8節）。 */
   createQuote(q: QuoteRecord): Promise<void>;
   /** その日（日本時間の `YYYYMMDD`）に作った見積書の数（見積番号の連番に使う）。 */
@@ -873,6 +880,34 @@ export interface Memory {
   lastUsedAt?: string | null;
   /** 種類（`fact`: 事実、`preference`: 仕事のやり方の好み。第11.13.2節）。無ければ事実。 */
   kind?: MemoryKind;
+}
+
+/** 社外との日程調整の候補（第9.5.3.1節）。`holdEventId` は本人のカレンダーの仮押さえ。 */
+export interface ScheduleCandidate {
+  start: string;
+  end: string;
+  holdEventId: string | null;
+}
+
+/** 社外との日程調整（第9.5.3.1節）。候補を送ってから、相手の返事を待つ間の記録。 */
+export interface ScheduleRequest {
+  id: string;
+  tenantId: string;
+  requestedBy: string;
+  runId: string | null;
+  title: string;
+  durationMin: number;
+  internalAttendees: string[];
+  externalAttendees: string[];
+  candidates: ScheduleCandidate[];
+  /** 候補を送ったメールのスレッド（返事はこのスレッドだけを見る）。 */
+  threadId: string | null;
+  sentAt: string;
+  status: 'waiting' | 'chosen' | 'other' | 'expired' | 'cancelled' | 'done';
+  chosenIndex: number | null;
+  /** 相手の返事から読んだこと（別の日時の提案など。本人に知らせる短い文）。 */
+  replyNote: string | null;
+  expiresAt: string;
 }
 
 /** 見積書の 1 行（第9.5.8節）。 */

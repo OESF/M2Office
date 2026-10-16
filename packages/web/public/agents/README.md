@@ -44,6 +44,7 @@ agent01.png ～ agent50.png
 | 20 | 会員に LINE で知らせる（`members:line-send`） | 会員とポイント |
 | 21 | 販促物の作成（`print-designs:desk`） | 販促物の作成 |
 | 22 | 見積書の作成（`quote`） | 公式のカタログ |
+| 23 | 日程調整の招待（`scheduling-confirm`） | 公式のカタログ |
 | 31 | 名刺の取り込み（`business-cards:import`） | 名刺管理 |
 | 32 | 名刺の修正（`business-cards:update`） | 名刺管理 |
 | 33 | 在庫の記録（`inventory:record`） | 在庫管理 |
@@ -65,7 +66,7 @@ agent01.png ～ agent50.png
 | 49 | Web について聞く（`web-review:ask`） | Webの分析 |
 | 50 | Web の依頼文を送る（`web-review:request`） | Webの分析 |
 
-**未使用: 23〜30**
+**未使用: 24〜30**
 
 ### 業務を足すとき
 

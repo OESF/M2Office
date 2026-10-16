@@ -14,7 +14,7 @@ import type {
   StoredFile, Tenant, TenantSettings, User, UserGroup, GroupChatSpace, UserSettings,
 } from '@m2office/shared';
 import { DEFAULT_TENANT_SETTINGS, DEFAULT_USER_SETTINGS, STANDARD_SYNONYMS } from '@m2office/shared';
-import type { AgentEvent, Plan, PlanStep, DecidedApproval, AuditQuery, CompartmentAssignment, Conversation, ConversationDigest, MemoryCandidate, Promotion, CredentialKind, GoogleConnection, UserPhoto, TenantCredential, TenantConnection, ConnectionSecret, UserConnection, DisabledConnectorTool, InstalledExtension, PrivateExtension, KnowledgeEmbedItem, KnowledgeEmbedStatus, KnowledgeItem, KnowledgeSearchOptions, KnowledgeSearchResult, KnowledgeSectionView, KnowledgeStatus, KnowledgeVersion, Memory, MemoryEmbedItem, CaseNote, LiveRecording, QuoteRecord, Repository, RunStatRow, UserProfile } from './types.js';
+import type { AgentEvent, Plan, PlanStep, DecidedApproval, AuditQuery, CompartmentAssignment, Conversation, ConversationDigest, MemoryCandidate, Promotion, CredentialKind, GoogleConnection, UserPhoto, TenantCredential, TenantConnection, ConnectionSecret, UserConnection, DisabledConnectorTool, InstalledExtension, PrivateExtension, KnowledgeEmbedItem, KnowledgeEmbedStatus, KnowledgeItem, KnowledgeSearchOptions, KnowledgeSearchResult, KnowledgeSectionView, KnowledgeStatus, KnowledgeVersion, Memory, MemoryEmbedItem, CaseNote, LiveRecording, QuoteRecord, ScheduleRequest, Repository, RunStatRow, UserProfile } from './types.js';
 import { SPLIT_VERSION, citationOf, splitKnowledge } from '../knowledge/sections.js';
 import { FUSION_DEPTH, SEARCH_CANDIDATES, SEMANTIC_THRESHOLD, asksOldVersion, bigrams, expandTerms, extractTerms, fuseRankings, limitSections, normalizeForSearch, orderSections, rankSections, rewritesOf } from '../knowledge/search.js';
 import { createHash } from 'node:crypto';
@@ -1936,6 +1936,40 @@ export class PostgresRepository implements Repository {
 
   async deleteFile(tenantId: string, id: string): Promise<void> {
     await this.q(tenantId, `delete from files where tenant_id = $1 and id = $2`, [tenantId, id]);
+  }
+
+  async createScheduleRequest(r: ScheduleRequest): Promise<void> {
+    await this.q(r.tenantId,
+      `insert into schedule_requests (id, tenant_id, requested_by, run_id, title, duration_min, internal_attendees, external_attendees, candidates, thread_id, sent_at, status, chosen_index, reply_note, expires_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+      [r.id, r.tenantId, r.requestedBy, r.runId, r.title, r.durationMin, r.internalAttendees, r.externalAttendees, JSON.stringify(r.candidates), r.threadId, r.sentAt, r.status, r.chosenIndex, r.replyNote, r.expiresAt]);
+  }
+
+  private scheduleSelect = `select id, tenant_id as "tenantId", requested_by as "requestedBy", run_id as "runId", title, duration_min as "durationMin",
+      internal_attendees as "internalAttendees", external_attendees as "externalAttendees", candidates, thread_id as "threadId", sent_at as "sentAt",
+      status, chosen_index as "chosenIndex", reply_note as "replyNote", expires_at as "expiresAt" from schedule_requests`;
+
+  private toScheduleRequest(r: ScheduleRequest & { sentAt: string | Date; expiresAt: string | Date }): ScheduleRequest {
+    return { ...r, sentAt: new Date(r.sentAt).toISOString(), expiresAt: new Date(r.expiresAt).toISOString() };
+  }
+
+  async getScheduleRequest(tenantId: string, id: string): Promise<ScheduleRequest | null> {
+    const rows = await this.q<ScheduleRequest>(tenantId, `${this.scheduleSelect} where tenant_id = $1 and id = $2`, [tenantId, id]);
+    return rows[0] ? this.toScheduleRequest(rows[0]) : null;
+  }
+
+  async listWaitingScheduleRequests(tenantId: string): Promise<ScheduleRequest[]> {
+    const rows = await this.q<ScheduleRequest>(tenantId, `${this.scheduleSelect} where tenant_id = $1 and status = 'waiting' order by sent_at`, [tenantId]);
+    return rows.map((r) => this.toScheduleRequest(r));
+  }
+
+  async updateScheduleRequest(tenantId: string, id: string, patch: Partial<Pick<ScheduleRequest, 'status' | 'chosenIndex' | 'replyNote' | 'candidates'>>): Promise<void> {
+    await this.q(tenantId,
+      `update schedule_requests set status = coalesce($3, status), chosen_index = case when $4::boolean then $5 else chosen_index end,
+              reply_note = case when $6::boolean then $7 else reply_note end, candidates = coalesce($8::jsonb, candidates), updated_at = now()
+        where tenant_id = $1 and id = $2`,
+      [tenantId, id, patch.status ?? null, 'chosenIndex' in patch, patch.chosenIndex ?? null, 'replyNote' in patch, patch.replyNote ?? null,
+       patch.candidates ? JSON.stringify(patch.candidates) : null]);
   }
 
   async createQuote(q: QuoteRecord): Promise<void> {

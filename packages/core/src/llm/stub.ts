@@ -343,6 +343,29 @@ function chooseTools(tools: string[], prompt: string): Call[] {
       args: { kind: 'brief', title: '今週のブリーフ（スタブ生成）', body: summarizeForBrief(previous) },
     }];
   }
+  // 社外の参加者を含む日程調整（仕様書 第9.5.3.1節）: 見本では、参加者のドメインが 2 つ以上なら社外がいるとみなし、候補を送る
+  if (has('schedule.send_candidates') && instruction.includes('schedule.send_candidates')) {
+    const attendees = splitList(extractField(prompt, 'attendees'));
+    if (new Set(attendees.map((a) => a.split('@')[1])).size > 1) {
+      const minutes = Number(extractField(prompt, 'durationMin')) || 60;
+      const candidates = [2, 3, 4].map((d) => {
+        const start = new Date(Date.now() + d * 86_400_000);
+        start.setUTCHours(5, 0, 0, 0); // 日本時間 14 時
+        return { start: start.toISOString(), end: new Date(start.getTime() + minutes * 60_000).toISOString() };
+      });
+      const title = extractField(prompt, 'title') || '打ち合わせ';
+      return [{
+        name: 'schedule.send_candidates',
+        args: { title, attendees, candidates, subject: `${title}の日程のご相談`, body: 'ご都合のよい日時をお知らせください。' },
+      }];
+    }
+  }
+  if (has('schedule.confirm_prepare') && instruction.includes('schedule.confirm_prepare')) {
+    return [{ name: 'schedule.confirm_prepare', args: { requestId: extractField(prompt, 'requestId') } }];
+  }
+  if (has('schedule.invite') && instruction.includes('schedule.invite')) {
+    return [{ name: 'schedule.invite', args: { requestId: extractField(prompt, 'requestId') } }];
+  }
   if (has('calendar.create') && /予定を作成/.test(instruction)) {
     const start = new Date(Date.now() + 2 * 86_400_000);
     start.setUTCHours(4, 0, 0, 0); // 日本時間 13 時

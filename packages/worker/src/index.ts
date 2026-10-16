@@ -16,7 +16,7 @@ import {
   assertDatabaseConfigured,
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
   RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, GoogleContactsService, KnowledgeEmbedder, MemoryEmbedder, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, JGrantsApi, MockJGrants, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, MEMBER_LINE_SEND, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, EffectService, PostgresEffectStore, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger,
-  NotificationDelivery, MockNotificationSender, RoutingNotificationSender, GoogleChatAppSender, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
+  NotificationDelivery, MockNotificationSender, RoutingNotificationSender, GoogleChatAppSender, ScheduleReplyWatcher, SCHEDULING_CONFIRM_AGENT_ID, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator, ProfileBuilder, CaseNoteBuilder, KnowledgeGaps, PostgresKnowledgeGapStore, aiUsageMeterFromEnv, enterAiUsage, withAiUsage, setEnqueueAiGuard, AutoMinutes, MINUTES_AGENT_ID, appPath, backupConfigFromEnv, machineDir, readBackupStatus, takeUnnotifiedUpdateFailure, takeClosedMaintenanceSessions, heartbeatConfigFromEnv, sendHeartbeat, HEARTBEAT_INTERVAL_MS, machineStatus, machineConfigFromEnv, restoreTest, runBackup, takeBackupRequest, writeWorkerBeat, OpsAppSide, createPool, offsiteConfigFromEnv, readOffsiteStatus, runOffsite, checkOffsite,
   SecurityWatch, PostgresSecurityStore,
@@ -446,6 +446,11 @@ const autoMinutes = new AutoMinutes({
   repo, connector,
   agentFor: async (tenantId, userId) => (await planAgentsFor(tenantId, userId)).find((d) => d.id === MINUTES_AGENT_ID) ?? null,
 });
+// 社外との日程調整の返事の見張り（第9.5.3.1節）。返事で候補が選ばれたら、本人の依頼として招待の業務を始める
+const scheduleReplies = new ScheduleReplyWatcher({
+  repo, connector, llmFor: (tenantId) => ai.llmFor(tenantId).catch(() => null),
+  agentFor: async (tenantId, userId) => (await planAgentsFor(tenantId, userId)).find((d) => d.id === SCHEDULING_CONFIRM_AGENT_ID) ?? null,
+});
 const plans = new PlanRunner({
   repo, logger: log, llmFor: (tenantId) => ai.llmFor(tenantId), agentsFor: planAgentsFor,
   enqueue: async (tenantId, userId, def, input, planStepId) => {
@@ -663,6 +668,9 @@ async function notifyMachine(title: string, body: string): Promise<void> {
 /** 会議の後の議事録を見回る間隔（10 分）。 */
 const AUTO_MINUTES_INTERVAL_MS = 10 * 60_000;
 let lastAutoMinutes = 0;
+let lastScheduleReplies = 0;
+/** 社外との日程調整の返事を見る間隔（第9.5.3.1節。既定 15 分）。 */
+const SCHEDULE_REPLY_INTERVAL_MS = Number(process.env['SCHEDULE_REPLY_INTERVAL_MS'] ?? 15 * 60_000);
 
 while (running) {
   let handled = false;
@@ -803,6 +811,17 @@ while (running) {
       if (n > 0) log.info('会議の後の議事録を始めました', { count: n });
     } catch (err) {
       log.warn('会議の後の議事録の見回りで例外が発生しました', { err });
+    }
+  }
+
+  // 社外との日程調整の返事の見張り（15 分ごと。第9.5.3.1節）
+  if (Date.now() - lastScheduleReplies >= SCHEDULE_REPLY_INTERVAL_MS) {
+    lastScheduleReplies = Date.now();
+    try {
+      const r = await withAiUsage({ purpose: 'worker:schedule' }, () => scheduleReplies.tick(new Date()));
+      if (r.chosen + r.other + r.expired > 0) log.info('社外との日程調整の返事を見ました', r);
+    } catch (err) {
+      log.warn('社外との日程調整の返事の見張りで例外が発生しました', { err });
     }
   }
 

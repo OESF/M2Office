@@ -101,7 +101,22 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
       // 添えたファイルは中身を控えず、名前と大きさだけを残す
       const { attachments, ...rest } = mail;
       this.outbox.push({ kind: 'mail', principal: p, body: { ...rest, ...(attachments?.length ? { attachments: attachments.map((x) => ({ name: x.name, mime: x.mime, size: x.bytes.byteLength })) } : {}) } });
-      return { messageId: `mock-sent-${randomUUID().slice(0, 8)}` };
+      const threadId = `mockthread${randomUUID().replace(/-/g, '').slice(0, 12)}`;
+      this.threads.set(threadId, { to: mail.to, subject: mail.subject, body: mail.body, at: this.now().toISOString() });
+      return { messageId: `mock-sent-${randomUUID().slice(0, 8)}`, threadId };
+    },
+    /**
+     * 見本のスレッド。送ったメールに、宛先の 1 人目から決まった返事が付く（社外との日程調整の通しの確認のため。第9.5.3.1節）。
+     * 宛先に `noreply` を含めば返事は付かない。`decline` を含めば、どの候補も合わないという返事。ほかは 1 つ目の候補を選ぶ返事
+     */
+    thread: async (_p: ConnectorPrincipal, threadId: string): Promise<MailMessage[]> => {
+      const sent = this.threads.get(threadId);
+      if (!sent) return [];
+      const me: MailMessage = { id: `${threadId}-1`, from: '本人 <me@example.jp>', subject: sent.subject, snippet: sent.body.slice(0, 60), body: sent.body, receivedAt: sent.at, unread: false, labels: ['SENT'] };
+      const who = sent.to[0] ?? '';
+      if (!who || who.includes('noreply')) return [me];
+      const text = who.includes('decline') ? 'あいにくご提示の日時はどれも都合がつきません。再来週はいかがでしょうか。' : 'ご連絡ありがとうございます。1 つ目の日時でお願いいたします。';
+      return [me, { id: `${threadId}-2`, from: `相手 <${who}>`, subject: `Re: ${sent.subject}`, snippet: text, body: text, receivedAt: new Date(Date.parse(sent.at) + 60_000).toISOString(), unread: true, labels: ['INBOX'] }];
     },
     createDraft: async (
       p: ConnectorPrincipal,
@@ -316,6 +331,9 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
     },
     remove: async (p: ConnectorPrincipal, resourceName: string) => this.book(p).people.delete(resourceName),
   };
+
+  /** 見本で送ったメールのスレッド（返事を決まった形で付ける。第9.5.3.1節）。 */
+  private readonly threads = new Map<string, { to: string[]; subject: string; body: string; at: string }>();
 
   /** 見本の終わった会議（自動テストと通しの確認が足す。第9.5.2.1節）。 */
   readonly endedMeetings: (EndedMeeting & { owner: string })[] = [];

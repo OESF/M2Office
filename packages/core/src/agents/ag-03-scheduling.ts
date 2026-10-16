@@ -9,13 +9,13 @@ import type { AgentDefinition } from '@m2office/shared';
 /**
  * AG-03 日程調整。
  *
- * 参加者の空きから候補を 3 つ作り、承認を経て予定を作成・招待する。
+ * 参加者の空きから候補を 3 つ作り、承認を経て予定を作成・招待する。参加者に社外の人がいれば、候補をメールで送り、返事を待つ（第9.5.3.1節）。
  *
  * @remarks
- * 招待は相手に届くため `external-send` にあたり、承認を省略できない。
+ * 招待と候補のメールは相手に届くため `external-send` にあたる。社内の人だけなら承認は自動で通る。
  * 承認は**依頼した本人**が行う（`approver: requester`）。承認者や管理者の手は煩わせない。
- * **Phase 1 は社内の参加者のみを対象とする**（Q-52 で決定）。
- * 社外の参加者は空きが見えず、相手の返事を待つ別の仕組みが要るため。
+ * 社外の人がいれば、`schedule.send_candidates` が候補の時間を仮押さえし、候補のメールを送り、返事の見張りに記録する。
+ * 返事で候補が選ばれたら、業務「日程調整の招待」（`scheduling-confirm`）が本人の承認の後に招く（Q-52 の Phase 2）。
  *
  * @see 仕様書 第9.5.3節
  */
@@ -25,7 +25,7 @@ export const AG03_SCHEDULING: AgentDefinition = {
   version: 1,
   name: '日程調整',
   category: 'calendar',
-  description: '社内の参加者の空きから候補を出し、承認後に予定を作って招待します',
+  description: '参加者の空きから候補を出して予定を作り、招待します。社外の方がいれば、候補をメールで送って返事を待ちます',
   locale: 'ja-JP',
   compartment: null,
   inputs: {
@@ -34,8 +34,8 @@ export const AG03_SCHEDULING: AgentDefinition = {
     properties: {
       title: { type: 'string', title: '目的・件名', examples: ['新製品の企画打ち合わせ'] },
       attendees: {
-        type: 'string', title: '参加者（社内のみ）',
-        examples: ['yamada@example.co.jp, sato@example.co.jp'],
+        type: 'string', title: '参加者（社内・社外）',
+        examples: ['yamada@example.co.jp, tanaka@customer.example.jp'],
       },
       durationMin: { type: 'string', title: '所要時間（分）', examples: ['60'] },
       period: { type: 'string', title: '希望する期間', examples: ['来週の午後'] },
@@ -43,7 +43,7 @@ export const AG03_SCHEDULING: AgentDefinition = {
       room: { type: 'string', title: '会議室（任意）', examples: ['会議室も取る', '会議室 A'] },
     },
   },
-  tools: ['calendar.freebusy', 'calendar.create'],
+  tools: ['calendar.freebusy', 'calendar.create', 'schedule.send_candidates'],
   steps: [
     {
       id: 'freebusy',
@@ -51,7 +51,7 @@ export const AG03_SCHEDULING: AgentDefinition = {
       // この段で使えるツール（仕様書 第9.2.7節）。段の区切りを推論の行儀に頼らない
       tools: ['calendar.freebusy'],
       label: '空き確認',
-      instruction: '参加者全員の空きを取得する。',
+      instruction: '参加者全員の空きを取得する。予定を見られなかった人（unknown。社外の人など）は、空きを推測しない。',
       onEmpty: 'stop',
       onError: 'stop',
     },
@@ -62,7 +62,8 @@ export const AG03_SCHEDULING: AgentDefinition = {
       tools: [],
       label: '候補作成',
       instruction: [
-        '全員が空いている時間帯から候補を 3 つ挙げ、招待の文面を用意する。',
+        '全員が空いている時間帯から候補を 3 つ挙げ、招待の文面を用意する。予定を見られなかった人（社外の人など）は、社内の人の空きだけで候補を選ぶ。',
+        '参加者に社外の人がいるときは、候補の日時（3 つ）を並べてどれがよいかを尋ねる、社外の人あてのメールの件名と本文も用意する（会社の文体。候補には曜日を添える）。',
         '会社の営業日でない日（companyClosed。営業しない曜日・祝日・休業の期間）には候補を出さない。依頼で日にちを指定されたときは、その日が休業日であることを添える。',
         '空きが見つからない場合は候補を作らず、その旨を報告する。',
       ].join('\n'),
@@ -81,16 +82,17 @@ export const AG03_SCHEDULING: AgentDefinition = {
       id: 'create',
       type: 'agent',
       // この段で使えるツール（仕様書 第9.2.7節）。段の区切りを推論の行儀に頼らない
-      tools: ['calendar.create'],
+      tools: ['calendar.create', 'schedule.send_candidates'],
       label: '招待',
       instruction: [
-        '承認された候補の第一案で予定を作成し、参加者を招待する。',
+        '参加者に社外の人がいるときは、calendar.create を使わず、schedule.send_candidates に件名・参加者全員・候補（{ start, end } の 3 つ）・メールの件名と本文を渡す（候補を送って返事を待つ。返事の後の招待は別の業務が行う）。',
+        '社内の人だけのときは、承認された候補の第一案で予定を作成し、参加者を招待する。',
         '会議室（room）が入っていれば、calendar.create の room に会議室の名前を入れる（「会議室も取る」のようにどれでもよいときは「会議室」）。結果の room に取れた会議室か取れなかった理由があれば、報告に添える。',
       ].join('\n'),
     },
   ],
   constraints: [
-    '社外の参加者を招待しない（Phase 1）',
+    '社外の参加者には、返事を待たずに予定を作って招待しない（候補を送り、相手が選んでから招く）',
     '空いていない時間帯に予定を入れない',
     '承認前に招待を送らない',
   ],
@@ -109,7 +111,7 @@ export const AG03_SCHEDULING: AgentDefinition = {
       input: { title: '企画会議', attendees: '（社内のメールアドレスをカンマ区切りで）', durationMin: '30', period: '来週' },
     }],
     notes: [
-      '今は社内の参加者だけが対象です。社外の方との調整は今後対応します',
+      '社外の方が入るときは、候補の日時をメールで送り、あなたのカレンダーに「仮押さえ」を入れて返事を 7 日待ちます。相手が選んだら、その日時で招待の確認をお願いします。どれも合わないという返事なら、お知らせします',
       '招く人が社内の人だけなら、確認を待たずに第一案で招待します。社外の人が入るときだけ、あなたが確認します',
       '全員が空いている時間が無いときは、候補を作らずにお知らせします',
       '会社の営業日でない日（営業しない曜日・休みの祝日・お知らせで出した休業の期間）には、候補を出しません',

@@ -138,7 +138,13 @@ export interface MailConnector {
   send(
     p: ConnectorPrincipal,
     mail: { to: string[]; cc: string[]; subject: string; body: string; replyTo: string | null; listUnsubscribe?: string; attachments?: MailAttachment[] },
-  ): Promise<{ messageId: string }>;
+  ): Promise<{ messageId: string; threadId?: string }>;
+  /**
+   * スレッドのメールを、本文つきで古い順に返す（社外との日程調整の返事を見る。仕様書 第9.5.3.1節）。見つからなければ空。
+   *
+   * @remarks 持たない接続口では未定義
+   */
+  thread?(p: ConnectorPrincipal, threadId: string): Promise<MailMessage[]>;
   /** 返信の下書きを作る。**送信はしない**（仕様書 第9.5.1節）。 */
   createDraft(
     p: ConnectorPrincipal,
