@@ -7,6 +7,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError, describeError, type AdminRun, type AdminRunStatus, type AdminSchedule, type AiUsageView, type AuditFilter, type AuditRowView, type MachineView, type Me, type SupportGrant, type RunDetail } from './api.js';
 import { RunView, statusLabel, SuspendedBanner } from './components.js';
+import { SystemLogs, type LogSource } from './SystemLogs.js';
 import {
   AgentSettings, CompanySettings, KnowledgeSettings, UserSettings,
 } from './AdminSettings.js';
@@ -491,9 +492,26 @@ function Machine() {
           <MachineMaintenance data={data.maintenance} heartbeat={data.heartbeat} onChanged={load} onError={setError} />
         </>
       )}
+      <SystemLogs source={MACHINE_LOGS} />
     </>
   );
 }
+
+/** 「機械」のシステムログと証拠保全の口（ローカルの形の管理者。仕様書 第16.10.4節・第16.10.5節）。 */
+const MACHINE_LOGS: LogSource = {
+  load: (q) => api.admin.systemLogs(q),
+  digests: (q) => api.admin.systemLogDigests(q),
+  exportLogs: (q, format) => api.admin.systemLogExport(q, format),
+  files: { list: () => api.admin.systemLogFiles(), download: (name) => api.admin.systemLogFile(name) },
+  evidence: {
+    list: () => api.admin.evidence(),
+    create: (_tenant, reason, days) => api.admin.createEvidence(reason, days),
+    download: (id) => api.admin.downloadEvidence(id),
+    remove: (id, reason) => api.admin.deleteEvidence(id, reason),
+    canCreate: true,
+  },
+  describe: (e, fallback) => describeError(e, fallback),
+};
 
 /** 更新の結果の呼び名。 */
 const UPDATE_RESULT: Record<string, string> = { updated: '入れました', 'rolled-back': '入れられず、前の版に戻しました', failed: '入れられませんでした', none: '新しい版はありませんでした' };

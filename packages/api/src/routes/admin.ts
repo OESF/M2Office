@@ -20,6 +20,7 @@ import { readMaintenanceStatus, requestMaintenance, frontDir, setHeartbeatOff, M
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { requireRole, type AppEnv } from '../middleware/tenant.js';
+import { systemLogsRoute } from './system-logs.js';
 import { AUDIT_CATEGORIES, auditCsv, presentAudit, type AuditNames } from '../audit/present.js';
 
 /**
@@ -236,6 +237,9 @@ export function adminRoute(deps: AppDeps) {
     await audit(deps, tenant.id, user.id, b.on ? 'machine.heartbeat_on' : 'machine.heartbeat_off', 'machine', 'heartbeat', {});
     return c.json({ on: b.on });
   });
+
+  // システムログと証拠保全（ローカルの形だけ。第16.10.4節・第16.10.5節）
+  app.route('/machine', systemLogsRoute(deps));
 
   /** 今すぐ控えを取る（ワーカーが次の見回りで取る。第8.6.5節）。控えの置き場が無ければ 400。 */
   app.post('/machine/backup', async (c) => {

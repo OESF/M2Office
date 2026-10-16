@@ -89,6 +89,8 @@ export function createLogger(opts: LoggerOptions): Logger {
         ...sanitize({ ...base, ...fields }, level),
       };
       write(format === 'json' ? JSON.stringify(record) : pretty(record), level);
+      // データベースにも残す（`info` から上。仕様書 第16.10.1節）。伏せ字の後の記録だけを渡す
+      if (sinks.length && LOG_LEVELS.indexOf(level) <= LOG_LEVELS.indexOf('info')) for (const sink of sinks) sink(record, level);
     };
     return {
       error: (m, f) => emit('error', m, f),
@@ -100,6 +102,22 @@ export function createLogger(opts: LoggerOptions): Logger {
     };
   };
   return make({});
+}
+
+/** 伏せ字の後の記録を受け取る口（{@link attachLogSink}）。 */
+export type LogSink = (record: LogFields, level: LogLevel) => void;
+
+const sinks: LogSink[] = [];
+
+/**
+ * そのプロセスのすべてのロガーの記録（`info` から上・伏せ字の後）を、別の置き場にも渡す（システムログをデータベースにも書く。仕様書 第16.10.1節）。
+ *
+ * @returns 外す関数
+ * @remarks 受け取る側は速く返し、失敗してもロガーを通して書かない（書くと同じ口に戻ってくる）
+ */
+export function attachLogSink(sink: LogSink): () => void {
+  sinks.push(sink);
+  return () => { const i = sinks.indexOf(sink); if (i >= 0) sinks.splice(i, 1); };
 }
 
 /** 何も書かないロガー。ロガーを渡されなかった部品の既定値に使う。 */

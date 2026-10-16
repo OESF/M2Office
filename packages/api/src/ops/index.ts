@@ -6,7 +6,7 @@
  */
 
 import { serve } from '@hono/node-server';
-import { createLoggerFromEnv, createPool, installPoolLogger, OpsStore } from '@m2office/core';
+import { attachLogSink, createLoggerFromEnv, createPool, installPoolLogger, OpsStore, SystemLogSink } from '@m2office/core';
 import { loadAuthConfig } from '../auth/config.js';
 import { opsApp, type OpsConfig } from './app.js';
 
@@ -36,6 +36,8 @@ const config: OpsConfig = {
 };
 
 const store = new OpsStore(createPool(dbUrl, { max: 5, name: 'ops' }));
+// 運営のプロセスのシステムログも、データベースに書く（仕様書 第16.10.1節）
+attachLogSink(new SystemLogSink(store.query).start().accept);
 const app = opsApp({ store, config, log });
 
 serve({ fetch: app.fetch, port }, (info) => {

@@ -57,7 +57,7 @@ launchd で動かし、共通の入口（`/Library/M2Front`。無ければ作る
 | `/Library/M2Office/setup.conf` | 答えの控え（秘密の値は入れない。`update.sh` も読む） |
 | `/Library/M2Office/allowed_signers` | 更新のタグの署名を確かめる鍵（入れたときのものに固定する） |
 | `/Library/M2Front/` | 機械に 1 つの共通の入口（Caddy）。M2Office の名前の設定は `sites/m2office.caddy`（DNS の鍵を含むため root だけが読める）。起動のログは `logs/caddy-run.log`。M2Medical と分け合う（`deploy/front/README.md`） |
-| `<データの置き場>/` | `postgres/`・`files/`・`logs/`・`caddy/`・`machine/`（`_m2office` のもの） |
+| `<データの置き場>/` | `postgres/`・`files/`・`logs/`・`caddy/`・`machine/`（`_m2office` のもの）。`logs/` の標準出力のファイルは、週に 1 回（日曜の 3 時 15 分）`jp.m2office.logrotate` が写して空にして 4 世代を残し、入口のアクセスログは Caddy が 28 日分を残す。会社の管理者は「機械」で見てダウンロードできる（仕様書 第16.10節） |
 | `<控えの置き場>/` | 毎晩の控え（`YYYYMMDD-HHMMSS/`）・`status.json`（社内の控えの結果）・`offsite.json`（社外の控えの結果） |
 | `/Library/LaunchDaemons/jp.m2office.*.plist` | 起動の設定（`launchd/` の雛形から作る。api・worker・postgres と、自動の更新の update・遠隔の保守の maintenance） |
 | `/Library/LaunchDaemons/jp.m2front.caddy.plist` | 共通の入口の起動の設定（`deploy/front/front.sh` が書く） |

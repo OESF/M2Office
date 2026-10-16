@@ -369,6 +369,8 @@ if ! sudo test -f "$DATA_DIR/postgres/PG_VERSION"; then
   info 'データベースを作りました'
 fi
 load_daemon jp.m2office.postgres
+# 機械のログのファイルの入れ替え（週に 1 回。第16.10.2節）
+load_daemon jp.m2office.logrotate
 for _ in $(seq 1 30); do "$PG_BIN/pg_isready" -h 127.0.0.1 -p "$DB_PORT" >/dev/null 2>&1 && break; sleep 1; done
 "$PG_BIN/pg_isready" -h 127.0.0.1 -p "$DB_PORT" >/dev/null || die "データベースが起動しません（$DATA_DIR/logs/postgres.log を見てください）"
 export PGPASSWORD=$DB_OWNER_PASSWORD

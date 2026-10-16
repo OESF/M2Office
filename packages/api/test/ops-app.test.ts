@@ -199,3 +199,44 @@ test('パスキー: 確かめるまでは何もできず、登録の合言葉で
   assert.equal((await app.request('/v1/ops/tenants', { headers: h2 })).status, 200);
   assert.ok(f.audits.includes('passkey.add') && f.audits.includes('passkey.verify'));
 });
+
+test('システムログ: 運営者は見られ、会社で絞ったら会社の詳細の履歴に残る。証拠保全は誰でも始められ、消すのは運営管理者だけで 1 年は消せない（第16.10節）', async () => {
+  const { store, audits } = fakeStore();
+  const seen: { tenantId: string | null; system: boolean }[] = [];
+  const evidence = [{ id: 'ev-1', scope: 'tenant', tenantId: 't-acme', reason: 'x', createdKind: 'operator', createdBy: 'op-admin', rangeFrom: '', rangeTo: '', status: 'ready', size: 3, sha256: 'abc', failure: null, createdAt: new Date().toISOString(), readyAt: null, deletedAt: null }];
+  const requested: (string | null)[] = [];
+  Object.assign(store, {
+    readSystemLogs: async (tenantId: string | null, system: boolean) => { seen.push({ tenantId, system }); return [{ id: '1', at: new Date().toISOString(), level: 'info', service: 'api', msg: '要求', tenantId, userId: null, requestId: null, runId: null, fields: {} }]; },
+    systemLogDigests: async () => [],
+    listEvidence: async () => evidence,
+    requestEvidence: async (_id: string, tenantId: string | null) => { requested.push(tenantId); },
+    evidenceChunk: async (_id: string, seq: number) => (seq === 0 ? new Uint8Array([1, 2, 3]) : null),
+    deleteEvidence: async () => true,
+  });
+  const app = opsApp({ store, config, log });
+  const admin = await login(app, 'admin@ops.example');
+  const list = await app.request('/v1/ops/logs?tenant=t-acme', { headers: { ...OPS, cookie: admin.cookie } });
+  assert.equal(list.status, 200);
+  assert.deepEqual(seen[0], { tenantId: 't-acme', system: false });
+  assert.ok(audits.includes('log.view'));
+  await app.request('/v1/ops/logs?tenant=system', { headers: { ...OPS, cookie: admin.cookie } });
+  assert.deepEqual(seen[1], { tenantId: null, system: true });
+  const zip = await app.request('/v1/ops/logs/export?format=csv', { headers: { ...OPS, cookie: admin.cookie } });
+  assert.equal(zip.headers.get('content-type'), 'application/zip');
+  assert.ok(audits.includes('log.download'));
+  const post = (who: { cookie: string; csrfToken: string }, body: unknown) => app.request('/v1/ops/evidence', {
+    method: 'POST', headers: { ...OPS, cookie: who.cookie, 'x-csrf-token': who.csrfToken, 'content-type': 'application/json' }, body: JSON.stringify(body),
+  });
+  assert.equal((await post(admin, { reason: '' })).status, 400, '理由が要る');
+  assert.equal((await post(admin, { reason: '不審なログイン', tenantId: 't-none' })).status, 404);
+  assert.equal((await post(admin, { reason: '不審なログイン' })).status, 202);
+  assert.deepEqual(requested, [null], '会社を選ばなければ全体');
+  const dl = await app.request('/v1/ops/evidence/ev-1/download', { headers: { ...OPS, cookie: admin.cookie } });
+  assert.deepEqual([...new Uint8Array(await dl.arrayBuffer())], [1, 2, 3]);
+  const del = (who: { cookie: string; csrfToken: string }) => app.request('/v1/ops/evidence/ev-1', {
+    method: 'DELETE', headers: { ...OPS, cookie: who.cookie, 'x-csrf-token': who.csrfToken, 'content-type': 'application/json' }, body: JSON.stringify({ reason: '期限' }),
+  });
+  assert.equal((await del(admin)).status, 409, '1 年は消せない');
+  evidence[0]!.createdAt = new Date(Date.now() - 400 * 86_400_000).toISOString();
+  assert.equal((await del(admin)).status, 200);
+});

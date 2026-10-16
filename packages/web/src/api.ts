@@ -197,6 +197,17 @@ async function postBlob(path: string): Promise<{ blob: Blob; headers: Headers }>
   return { blob: await res.blob(), headers: res.headers };
 }
 
+/** GET で作ったファイルを受け取って保存させる（システムログ・証拠保全のダウンロード）。失敗なら ApiError。 */
+async function getAndSave(path: string, fallbackName: string): Promise<void> {
+  const res = await fetch(`/v1${path}`, { credentials: 'same-origin', headers: { ...(devTenant ? { 'x-tenant': devTenant } : {}) } });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: '通信に失敗しました' }));
+    throw new ApiError(body.error ?? `エラー (${res.status})`, res.status);
+  }
+  const name = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '')?.[1] ?? fallbackName;
+  saveBlob(await res.blob(), name);
+}
+
 /** 読んだ中身を、名前を付けて保存させる。 */
 function saveBlob(blob: Blob, name: string): void {
   const url = URL.createObjectURL(blob);
@@ -2212,6 +2223,17 @@ export const api = {
     }>('/admin/usage'),
     /** ローカルの形の「機械」の様子（仕様書 第8.6.7節）。 */
     machine: () => call<MachineView>('/admin/machine'),
+    /** 機械のシステムログ（ローカルの形だけ。仕様書 第16.10.4節）。 */
+    systemLogs: (q: SystemLogQuery) => call<SystemLogPage>(`/admin/machine/logs?${logQuery(q)}`),
+    systemLogDigests: (q: SystemLogQuery) => call<{ items: SystemLogDigestView[] }>(`/admin/machine/logs/digests?${logQuery(q)}`),
+    systemLogExport: (q: SystemLogQuery, format: 'jsonl' | 'csv') => getAndSave(`/admin/machine/logs/export?${logQuery(q)}&format=${format}`, 'system-logs.zip'),
+    systemLogFiles: () => call<{ items: { name: string; size: number; updatedAt: string }[]; configured: boolean }>('/admin/machine/logs/files'),
+    systemLogFile: (name: string) => getAndSave(`/admin/machine/logs/files/${encodeURIComponent(name)}`, name),
+    /** 証拠保全（第16.10.5節）。 */
+    evidence: () => call<{ items: EvidenceView[] }>('/admin/machine/evidence'),
+    createEvidence: (reason: string, days: number) => call<{ id: string }>('/admin/machine/evidence', { method: 'POST', body: JSON.stringify({ reason, days }) }),
+    downloadEvidence: (id: string) => getAndSave(`/admin/machine/evidence/${encodeURIComponent(id)}/download`, 'evidence.zip'),
+    deleteEvidence: (id: string, reason: string) => call<{ ok: true }>(`/admin/machine/evidence/${encodeURIComponent(id)}`, { method: 'DELETE', body: JSON.stringify({ reason }) }),
     /** 今すぐ控えを取る（ワーカーが次の見回りで取る）。 */
     /** サポートの閲覧の申請（仕様書 第23.6.1節）。 */
     supportAccess: () => call<{ items: SupportGrant[] }>('/admin/support'),
@@ -2674,3 +2696,78 @@ export interface MachineView {
   heartbeat: { configured: boolean; off: boolean; lastAt: string | null; lastOk: boolean | null; lastError: string | null };
 }
 
+
+/** システムログの絞り方（仕様書 第16.10.4節）。 */
+export interface SystemLogQuery {
+  from: string;
+  to: string;
+  levels?: string[];
+  service?: string;
+  q?: string;
+  requestId?: string;
+  runId?: string;
+  /** クラウドの形の運営だけ: 会社（`system` なら会社に属さない分）。 */
+  tenant?: string;
+  before?: string;
+  beforeId?: string;
+}
+
+/** システムログの 1 行。 */
+export interface SystemLogLineView {
+  id: string;
+  at: string;
+  level: string;
+  service: string;
+  msg: string;
+  tenantId: string | null;
+  userId: string | null;
+  requestId: string | null;
+  runId: string | null;
+  fields: Record<string, unknown>;
+}
+
+/** システムログの 1 回分。 */
+export interface SystemLogPage {
+  items: SystemLogLineView[];
+  next: { before: string; beforeId: string } | null;
+  range: { from: string; to: string };
+}
+
+/** 日ごとの改ざんの確かめ。 */
+export interface SystemLogDigestView {
+  day: string;
+  rows: number;
+  sha256: string;
+  chain: string;
+  nowRows?: number;
+  intact?: boolean;
+}
+
+/** 証拠保全の 1 つ。 */
+export interface EvidenceView {
+  id: string;
+  scope: 'machine' | 'tenant' | 'all';
+  tenantId: string | null;
+  reason: string;
+  createdKind: 'user' | 'operator' | 'system';
+  createdBy: string;
+  rangeFrom: string;
+  rangeTo: string;
+  status: 'pending' | 'building' | 'ready' | 'failed' | 'deleted';
+  size: number | null;
+  sha256: string | null;
+  failure: string | null;
+  createdAt: string;
+  readyAt: string | null;
+  deletedAt: string | null;
+}
+
+/** 絞り方を問い合わせの文字にする。 */
+export function logQuery(q: SystemLogQuery): string {
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries(q)) {
+    if (v === undefined || v === '' || (Array.isArray(v) && !v.length)) continue;
+    p.set(k, Array.isArray(v) ? v.join(',') : String(v));
+  }
+  return p.toString();
+}

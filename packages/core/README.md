@@ -24,7 +24,8 @@ src/files/       ファイルの置き場と、PDF・Excel・CSV・Word の読�
                  redline.ts は修正の案を Word の変更履歴とコメントとして入れる（ツール docx.redline。第28.15節）。
                  長い文書は to-text.ts の splitParts・outlineOf で部分に分け、条の見出しの一覧を返す（file.read_text の part）。
                  font-chars.ts は、同梱の書体に無い JIS の正式な対応の字（マイナス記号など）を、描く前に同じ形の字に置き換える
-src/log/         アプリログのロガー（レベル・JSON・伏せ字）
+src/log/         アプリログのロガー（レベル・JSON・伏せ字）。データベースにも書く口（db-sink.ts。`attachLogSink`）、システムログと証拠保全の置き場（store.ts）、
+                 絞り方と ZIP（export.ts）、証拠保全の組み立て（evidence.ts。仕様書 第16.10節、ADR-0098）
 src/help/        ヘルプ（業務の説明の自動生成、記事の出し分けと検索、答えられなかった質問と役に立ったかの置き場 feedback.ts。第6.10.10節。会社の補足の置き場 notes.ts・補足の案 suggest.ts。第6.10.7節）
 src/knowledge/   組織知識の節への分割（章・条・見出し）と、検索の言葉の取り出し・並べ替え（社内規程 → 議事録 → 秘書が学んだことの順）、
                  意味での検索（embed.ts。節を後から埋め込む見回り KnowledgeEmbedder・質問を埋め込む queryEmbedder・本番での入り切り。

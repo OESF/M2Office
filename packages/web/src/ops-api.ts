@@ -2,6 +2,8 @@
  * @file マスター管理画面（仕様書 第23.8.15節）が呼ぶ運営の API（`/v1/ops`）。顧客の API（`api.ts`）とは別の口と別のログイン状態を使う。
  */
 
+import { logQuery, type EvidenceView, type SystemLogDigestView, type SystemLogPage, type SystemLogQuery } from './api.js';
+
 /** 運営の API の失敗。 */
 export class OpsApiError extends Error {
   constructor(message: string, readonly status: number, readonly needsLogin = false) {
@@ -45,7 +47,7 @@ export interface OpsMe {
   /** パスキーで確かめたか（第23.8.15節）。確かめるまでは、ほかの操作ができない。 */
   verified: boolean;
   passkeyCount: number;
-  can: Record<'tenant.create' | 'tenant.status' | 'tenant.suspend' | 'tenant.lock' | 'machine.manage' | 'operator.manage' | 'settings.manage', boolean>;
+  can: Record<'tenant.create' | 'tenant.status' | 'tenant.suspend' | 'tenant.lock' | 'machine.manage' | 'operator.manage' | 'settings.manage' | 'evidence.create' | 'evidence.delete', boolean>;
 }
 
 export interface TenantRow {
@@ -196,4 +198,14 @@ export const opsApi = {
   addOperator: (b: { email: string; displayName: string; role: OperatorRole }) => call<{ operator: OperatorView }>('/operators', send('POST', b)),
   updateOperator: (id: string, b: { role?: OperatorRole; status?: 'active' | 'disabled' }) => call<{ operator: OperatorView }>(`/operators/${encodeURIComponent(id)}`, send('PUT', b)),
   audit: () => call<{ entries: OpsAuditRow[] }>('/audit'),
+  /** すべての会社のシステムログ（仕様書 第16.10.4節）。 */
+  logs: (q: SystemLogQuery) => call<SystemLogPage>(`/logs?${logQuery(q)}`),
+  logDigests: (q: SystemLogQuery) => call<{ items: SystemLogDigestView[] }>(`/logs/digests?${logQuery(q)}`),
+  /** ダウンロードの URL（運営のログイン状態の Cookie で開く）。 */
+  logExportUrl: (q: SystemLogQuery, format: 'jsonl' | 'csv') => `/v1/ops/logs/export?${logQuery(q)}&format=${format}`,
+  /** 証拠保全（第16.10.5節）。 */
+  evidence: () => call<{ items: EvidenceView[] }>('/evidence'),
+  createEvidence: (tenantId: string | null, reason: string, days: number) => call<{ id: string }>('/evidence', send('POST', { tenantId, reason, days })),
+  evidenceUrl: (id: string) => `/v1/ops/evidence/${encodeURIComponent(id)}/download`,
+  deleteEvidence: (id: string, reason: string) => call<{ ok: true }>(`/evidence/${encodeURIComponent(id)}`, send('DELETE', { reason })),
 };

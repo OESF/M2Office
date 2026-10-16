@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- M2Office の機械のログのファイルの入れ替え（仕様書 第16.10.2節）。週に 1 回（日曜の 3 時 15 分）、写して空にして 4 世代を残す。
+     launchd が開いたままのファイルを空にするため管理者の権限で動かす。setup.sh が 雛形の名前 を埋める（update.sh も無ければ入れる） -->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>jp.m2office.logrotate</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/bash</string>
+		<string>{{REPO_DIR}}/deploy/onsite/logrotate.sh</string>
+		<string>{{DATA_DIR}}/logs</string>
+	</array>
+	<key>StartCalendarInterval</key>
+	<dict>
+		<key>Weekday</key>
+		<integer>0</integer>
+		<key>Hour</key>
+		<integer>3</integer>
+		<key>Minute</key>
+		<integer>15</integer>
+	</dict>
+	<key>StandardOutPath</key>
+	<string>{{DATA_DIR}}/logs/logrotate.log</string>
+	<key>StandardErrorPath</key>
+	<string>{{DATA_DIR}}/logs/logrotate.log</string>
+</dict>
+</plist>

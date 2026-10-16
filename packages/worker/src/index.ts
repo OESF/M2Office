@@ -12,7 +12,7 @@
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 import {
-  fillApprovalCompartments, discardStaleRecordings,
+  fillApprovalCompartments, discardStaleRecordings, PostgresSystemLogStore, SystemLogSink, attachLogSink, EvidenceBuilder, SYSTEM_LOG_KEEP_DAYS,
   assertDatabaseConfigured,
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
   RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, GoogleContactsService, KnowledgeEmbedder, MemoryEmbedder, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, JGrantsApi, MockJGrants, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, MEMBER_LINE_SEND, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, EffectService, PostgresEffectStore, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger,
@@ -34,6 +34,9 @@ installPoolLogger(log.child({ component: 'db' }));
 const repo = new PostgresRepository(
   process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office',
 );
+// システムログをデータベースにも書く（仕様書 第16.10.1節）。入れ替え・日ごとの改ざんの確かめ・証拠保全もこの置き場で行う
+const systemLogs = new PostgresSystemLogStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
+attachLogSink(new SystemLogSink(systemLogs.query).start().accept);
 const registry = new ToolRegistry();
 for (const tool of BUILTIN_TOOLS) registry.register(tool);
 // 秘密の値の箱。接続口（google）がリフレッシュ トークンを戻すのにも使う
@@ -196,9 +199,15 @@ const columns: ColumnService = new ColumnService({
 // お知らせの置き場（休業の期間を、問い合わせの記録と定時実行も読む。第35.7節）
 const announcementStore = new PostgresAnnouncementStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
 // 不正の兆しの見張り（第16.8節）。監査ログとログイン中の端末を読み、管理者に知らせる
+const securityStore = new PostgresSecurityStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
 const security = new SecurityWatch({
-  repo, store: new PostgresSecurityStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+  repo, store: securityStore,
   closedOn: (tenantId, day) => announcementStore.closedOn(tenantId, day),
+});
+// 証拠保全の組み立て（第16.10.5節）。ローカルの形は機械のログのファイル（M2O_LOG_DIR）も入れる
+const evidence = new EvidenceBuilder({
+  store: systemLogs, repo, security: securityStore, logger: log,
+  machineLogDir: deploymentFromEnv(process.env) === 'onsite' ? process.env['M2O_LOG_DIR']?.trim() || null : null,
 });
 // 契約の管理（第38章）。解約の申し出の期限と終わりを見張り、自動更新の契約を次の期間に進める。秘書から台帳に入れる・引く・直す
 const contracts = new ContractService({
@@ -509,6 +518,13 @@ const RUN_RECOVERIES = 2;
 let running = true;
 let lastScheduleCheck = 0;
 let lastRunRecoveryCheck = 0;
+/** システムログの入れ替えと日ごとの値を見る間隔（ミリ秒。第16.10.2節）。 */
+const SYSTEM_LOG_CARE_MS = 10 * 60_000;
+let lastSystemLogCare = 0;
+/** 証拠保全を待っているか見る間隔（ミリ秒）。 */
+const EVIDENCE_CHECK_MS = 30_000;
+let lastEvidenceCheck = 0;
+let evidenceBusy = false;
 /** 残った録音を消す見回りの間隔（ミリ秒。第9.4.5節）。 */
 const RECORDING_SWEEP_MS = 10 * 60_000;
 let lastRecordingSweep = 0;
@@ -812,6 +828,19 @@ while (running) {
       try {
         const r = await security.scan(tenantId);
         if (r.found.length) log.info('不正の兆しを知らせました', { tenantId, signals: r.found.map((s) => s.type), signedOut: r.signedOut.length });
+        // 自動でログアウトさせたときは、その会社の分を自動で証拠保全する（第16.10.5節）。
+        // 攻撃が続いて何度もログアウトさせても膨れないよう、自動の保全は同じ会社で 1 日に 1 回まで
+        const recentAuto = r.signedOut.length
+          ? (await systemLogs.listEvidence(tenantId).catch(() => [])).some((p) => p.createdKind === 'system' && Date.parse(p.createdAt) > Date.now() - 86_400_000)
+          : true;
+        if (r.signedOut.length && !recentAuto) {
+          const because = [...new Set(r.found.filter((s) => s.type === 'auto_signout').flatMap((s) => (s.detail['because'] as string[] | undefined) ?? []))];
+          await systemLogs.requestEvidence(tenantId, {
+            id: `ev-${randomUUID()}`, scope: onsite ? 'machine' : 'tenant', createdKind: 'system', createdBy: 'security-watch',
+            reason: `不正の兆しの見張りが自動でログアウトさせた（${because.join('・') || '重い兆しが重なった'}）`.slice(0, 300),
+            from: new Date(Date.now() - SYSTEM_LOG_KEEP_DAYS * 86_400_000).toISOString(), to: new Date().toISOString(),
+          }).catch((err) => log.error('自動の証拠保全を頼めませんでした', { tenantId, err }));
+        }
         if (digest) await security.dailyDigest(tenantId);
       } catch (err) {
         log.warn('不正の兆しの見張りで例外が発生しました', { tenantId, err });
@@ -851,6 +880,25 @@ while (running) {
     } catch (err) {
       log.error('残った録音の見回りで例外が発生しました', { err });
     }
+  }
+
+  // システムログの区切りを作り、28 日を過ぎた区切りを捨て、昨日までの日ごとの改ざんの確かめの値を残す（第16.10.2節・第16.10.3節）
+  if (Date.now() - lastSystemLogCare >= SYSTEM_LOG_CARE_MS) {
+    lastSystemLogCare = Date.now();
+    try {
+      await systemLogs.prepare();
+      const dropped = await systemLogs.rotate(SYSTEM_LOG_KEEP_DAYS);
+      const sealed = await systemLogs.sealDays(new Date().toISOString().slice(0, 10));
+      if (dropped || sealed) log.info('システムログを入れ替え、日ごとの値を残しました', { dropped, sealed });
+    } catch (err) {
+      log.error('システムログの入れ替えで例外が発生しました', { err });
+    }
+  }
+  // 待っている証拠保全を 1 つずつ作る（待ち行列を止めないよう並べて行う。第16.10.5節）
+  if (!evidenceBusy && Date.now() - lastEvidenceCheck >= EVIDENCE_CHECK_MS) {
+    lastEvidenceCheck = Date.now();
+    evidenceBusy = true;
+    void evidence.tick().catch((err) => log.error('証拠保全で例外が発生しました', { err })).finally(() => { evidenceBusy = false; });
   }
 
   // 権限区画を持つ前に作った承認に、業務の定義から区画を埋める（起動のあと一度だけ。第9.2.3節、移行 138）。

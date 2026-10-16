@@ -106,6 +106,14 @@ ls -1t "$(dirname "$DUMP")"/*.dump 2>/dev/null | tail -n +4 | xargs rm -f
 log "控えを取りました: $DUMP"
 
 daemon() { launchctl "$1" system "/Library/LaunchDaemons/$2.plist" >/dev/null 2>&1 || launchctl "$1" "system/$2" >/dev/null 2>&1 || true; }
+# 機械のログのファイルの入れ替え（第16.10.2節）。前に入れた機械に無ければ入れる（セットアップを流し直さなくても週に 1 回入れ替わる）
+# 機械のログの置き場を設定に足す（前に入れた機械の設定には無い。次に API が動き直したときから「機械」でダウンロードできる）
+grep -q '^M2O_LOG_DIR=' "$ENV_FILE" || printf 'M2O_LOG_DIR=%s/logs\n' "$DATA_DIR" >> "$ENV_FILE"
+LOGROTATE_PLIST=/Library/LaunchDaemons/jp.m2office.logrotate.plist
+if [ ! -f "$LOGROTATE_PLIST" ]; then
+  sed -e "s#{{REPO_DIR}}#$REPO_DIR#g" -e "s#{{DATA_DIR}}#$DATA_DIR#g" "$REPO_DIR/deploy/onsite/launchd/jp.m2office.logrotate.plist" > "$LOGROTATE_PLIST" \
+    && chown root:wheel "$LOGROTATE_PLIST" && chmod 644 "$LOGROTATE_PLIST" && daemon bootstrap jp.m2office.logrotate && log 'ログのファイルの入れ替えを入れました'
+fi
 stop_app() { launchctl bootout system/jp.m2office.api >/dev/null 2>&1 || true; launchctl bootout system/jp.m2office.worker >/dev/null 2>&1 || true; }
 start_app() { daemon bootstrap jp.m2office.api; daemon bootstrap jp.m2office.worker; }
 build() {

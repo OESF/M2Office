@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
 import { copyText } from './clipboard.js';
+import { SystemLogs, type LogSource } from './SystemLogs.js';
 import { NavItem, SideNavLayout, ThemeToggle, type IconName } from './nav.js';
 import {
   opsApi, OpsApiError, TENANTS_CSV_URL, type MachineRow, type OperatorProfileView, type OperatorRole, type OperatorView, type OpsAuditRow, type OpsMe,
@@ -22,6 +23,7 @@ const FLAG_LABEL: Record<string, string> = {
 };
 const ACTION_LABEL: Record<string, string> = {
   'ops.login': 'ログイン', 'ops.logout': 'ログアウト', 'tenant.create': '会社を作った', 'tenant.status': '状態を変えた',
+  'log.view': 'システムログを見た', 'log.download': 'システムログをダウンロードした', 'evidence.create': '証拠保全を始めた', 'evidence.download': '保全したものをダウンロードした', 'evidence.delete': '保全したものを削除した',
   'machine.add': '機械を登録した', 'machine.remove': '機械を削除した', 'operator.add': '運営者を足した', 'operator.update': '運営者を変えた',
   'passkey.add': 'パスキーを登録した', 'passkey.verify': 'パスキーで確かめた', 'passkey.delete': 'パスキーを削除した',
   'operator.enroll_code': '登録の合言葉を出した', 'operator.reset_passkeys': 'パスキーを削除してやり直させた',
@@ -125,11 +127,12 @@ function OpsLogin({ onLoggedIn }: { onLoggedIn: () => void }) {
   );
 }
 
-type OpsPage = 'tenants' | 'requests' | 'server' | 'machines' | 'operators' | 'audit' | 'settings';
+type OpsPage = 'tenants' | 'requests' | 'server' | 'logs' | 'machines' | 'operators' | 'audit' | 'settings';
 const PAGES: { id: OpsPage; label: string; icon: IconName }[] = [
   { id: 'tenants', label: '会社一覧', icon: 'company' },
   { id: 'requests', label: '停止と再開', icon: 'approvals' },
   { id: 'server', label: '稼働状況', icon: 'usage' },
+  { id: 'logs', label: 'システムログ', icon: 'console' },
   { id: 'machines', label: 'ローカルの形の機械', icon: 'dashboard' },
   { id: 'operators', label: '運営者', icon: 'users' },
   { id: 'audit', label: '操作履歴', icon: 'audit' },
@@ -178,6 +181,7 @@ function OpsConsole({ me, onLogout }: { me: OpsMe; onLogout: () => void }) {
           {page === 'tenants' && <Tenants me={me} flagged={flagged} onMachines={() => setPage('machines')} onChanged={loadRequests} />}
           {page === 'requests' && <Requests me={me} rows={requests} onChanged={loadRequests} />}
           {page === 'server' && <Server />}
+          {page === 'logs' && <OpsLogs me={me} />}
           {page === 'settings' && <Settings me={me} />}
           {page === 'machines' && <Machines me={me} />}
           {page === 'operators' && <Operators me={me} />}
@@ -475,6 +479,33 @@ function Operators({ me }: { me: OpsMe }) {
         </table></div>
         </div>
       )}
+    </>
+  );
+}
+
+/** すべての会社のシステムログと証拠保全（仕様書 第16.10.4節・第16.10.5節）。会社で絞れ、全体の保全もできる。 */
+function OpsLogs({ me }: { me: OpsMe }) {
+  const [tenants, setTenants] = useState<{ id: string; name: string }[] | null>(null);
+  useEffect(() => { opsApi.tenants().then((r) => setTenants(r.tenants.map((t) => ({ id: t.id, name: `${t.name}（${t.subdomain}）` })))).catch(() => setTenants([])); }, []);
+  const source = useMemo<LogSource | null>(() => tenants && ({
+    load: (q) => opsApi.logs(q),
+    digests: (q) => opsApi.logDigests(q),
+    // 運営のログイン状態の Cookie で開く（ダウンロードしたことは運営の操作履歴に残る）
+    exportLogs: (q, format) => { window.location.href = opsApi.logExportUrl(q, format); },
+    tenants,
+    evidence: {
+      list: () => opsApi.evidence(),
+      create: (tenantId, reason, days) => opsApi.createEvidence(tenantId, reason, days),
+      download: (id) => { window.location.href = opsApi.evidenceUrl(id); },
+      ...(me.can['evidence.delete'] ? { remove: (id: string, reason: string) => opsApi.deleteEvidence(id, reason) } : {}),
+      canCreate: me.can['evidence.create'],
+    },
+    describe: (e, fallback) => (e instanceof OpsApiError ? e.message : fallback),
+  }), [tenants, me]);
+  return (
+    <>
+      <h2>システムログ</h2>
+      {source ? <SystemLogs source={source} /> : <p className="muted">読み込んでいます…</p>}
     </>
   );
 }

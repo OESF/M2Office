@@ -8,9 +8,16 @@
  */
 
 export {
-  createLogger, createLoggerFromEnv, silentLogger, LOG_LEVELS,
-  type Logger, type LogLevel, type LogFields, type LoggerOptions,
+  createLogger, createLoggerFromEnv, silentLogger, LOG_LEVELS, attachLogSink,
+  type Logger, type LogLevel, type LogFields, type LoggerOptions, type LogSink,
 } from './log/logger.js';
+export { SystemLogSink, logRow, type LogQuery } from './log/db-sink.js';
+export {
+  PostgresSystemLogStore, chainOf, EVIDENCE_CHUNK_BYTES, SYSTEM_LOG_KEEP_DAYS,
+  type SystemLogLine, type SystemLogFilter, type SystemLogDigest, type EvidencePackage,
+} from './log/store.js';
+export { EvidenceBuilder, type EvidenceBuilderDeps, type EvidenceFile } from './log/evidence.js';
+export { parseLogFilter, logLinesCsv, logExportZip, SYSTEM_LOG_PAGE, SYSTEM_LOG_EXPORT_MAX } from './log/export.js';
 
 export * from './llm/provider.js';
 export { StubLlmProvider, stubEmbedding, STUB_EMBEDDING_CONCEPTS } from './llm/stub.js';

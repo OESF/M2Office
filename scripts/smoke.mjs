@@ -7320,5 +7320,19 @@ console.log('\n■ 93. 録音を文字にして文書にする（形式の確か
   }
 }
 
+console.log('\n■ 94. システムログの保管・閲覧・証拠保全（クラウドの形では会社の管理者に見せない・一般の利用者は見られない。第16.10節）');
+{
+  try {
+    // 開発はクラウドの形なので、会社の管理者の「機械」のシステムログは 404（クラウドの形は運営がマスター管理画面で見る。Q-236）
+    const logs = await call('a', '/v1/admin/machine/logs');
+    const ev = await call('a', '/v1/admin/machine/evidence', { method: 'POST', body: JSON.stringify({ reason: '確かめ' }) });
+    const byMember = await call('a', '/v1/admin/machine/logs', {}, 'member');
+    logs.status === 404 && ev.status === 404 && byMember.status === 403
+      ? ok('クラウドの形では、会社の管理者にもシステムログと証拠保全を出さない（一般の利用者は管理者ページに入れない）') : ng('システムログの口が違う', JSON.stringify({ logs: logs.status, ev: ev.status, member: byMember.status }));
+  } catch (err) {
+    ng('システムログの確認が途中で止まった', String(err));
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');

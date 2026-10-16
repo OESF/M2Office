@@ -11,7 +11,8 @@ import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import {
   buildGoogleLoginUrl, createPkce, exchangeGoogleLoginCode, googleUserInfo, checkNewTenant, machineFlags, operatorCan, OPERATOR_ROLES,
   parseMachineReport, tenantErrorText, welcomeText, tenantsCsv, statusNoticeText, SUSPEND_REASONS, LOCK_REASONS, MACHINE_REPORT_MAX_BYTES, OpsRuleError,
-  OPS_PASSKEY_MAX,
+  OPS_PASSKEY_MAX, parseLogFilter, logExportZip, SYSTEM_LOG_PAGE, SYSTEM_LOG_EXPORT_MAX, SYSTEM_LOG_KEEP_DAYS,
+  type SystemLogLine,
   type Logger, type Operator, type OperatorRole, type OpsAction, type OpsSession, type OpsStore,
 } from '@m2office/core';
 import { ChallengeStore, fromB64, realWebAuthn, toB64, type WebAuthnFns } from './passkey.js';
@@ -223,7 +224,7 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
       operator: op, csrfToken: c.get('session').csrfToken,
       // パスキーで確かめたか。確かめていなければ、登録済みなら確かめ、まだなら登録の合言葉で登録する
       verified: c.get('session').verified, passkeyCount: op.passkeyCount ?? 0,
-      can: Object.fromEntries((['tenant.create', 'tenant.status', 'tenant.suspend', 'tenant.lock', 'machine.manage', 'operator.manage', 'settings.manage'] as OpsAction[]).map((a) => [a, operatorCan(op.role, a)])),
+      can: Object.fromEntries((['tenant.create', 'tenant.status', 'tenant.suspend', 'tenant.lock', 'machine.manage', 'operator.manage', 'settings.manage', 'evidence.create', 'evidence.delete'] as OpsAction[]).map((a) => [a, operatorCan(op.role, a)])),
     });
   });
 
@@ -591,6 +592,109 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
   });
 
   app.get('/v1/ops/audit', async (c) => c.json({ entries: await store.listAudit(Number(c.req.query('limit') ?? 200)) }));
+
+  // ---- システムログと証拠保全（第16.10.4節・第16.10.5節） ----
+  /** 会社の絞り方（`tenant` が `system` なら会社に属さない仕組みの分、空ならすべて）。 */
+  const logScope = (c: Context<OpsEnv>) => {
+    const t = (c.req.query('tenant') ?? '').trim();
+    return { tenantId: t && t !== 'system' ? t : null, system: t === 'system' };
+  };
+  const logDetail = (f: ReturnType<typeof parseLogFilter>) => ({ from: f.from, to: f.to, levels: f.levels, service: f.service, q: f.q ? '（言葉あり）' : null, requestId: f.requestId, runId: f.runId });
+
+  // 見る（新しい順に 200 件。会社で絞ったら、その会社の詳細の履歴に残る。Q-237）
+  app.get('/v1/ops/logs', async (c) => {
+    const { tenantId, system } = logScope(c);
+    const f = parseLogFilter(c.req.query(), { limit: SYSTEM_LOG_PAGE, maxDays: SYSTEM_LOG_KEEP_DAYS });
+    const items = await store.readSystemLogs(tenantId, system, f);
+    if (!f.before) await store.audit(c.get('operator').id, 'log.view', tenantId ? 'tenant' : 'system', tenantId ?? (system ? 'system' : '*'), logDetail(f));
+    const last = items[items.length - 1];
+    return c.json({ items, next: items.length === SYSTEM_LOG_PAGE && last ? { before: last.at, beforeId: last.id } : null, range: { from: f.from, to: f.to } });
+  });
+
+  // 範囲の日ごとの改ざんの確かめ（7 日まで）
+  app.get('/v1/ops/logs/digests', async (c) => {
+    const f = parseLogFilter(c.req.query(), { limit: 1, maxDays: 7 });
+    return c.json({ items: await store.systemLogDigests(f.from.slice(0, 10), f.to.slice(0, 10)) });
+  });
+
+  // ダウンロード（全社は 1 日、会社で絞れば 28 日まで。100 万行まで）
+  app.get('/v1/ops/logs/export', async (c) => {
+    const op = c.get('operator');
+    const { tenantId, system } = logScope(c);
+    const format = c.req.query('format') === 'csv' ? 'csv' : 'jsonl';
+    const f = parseLogFilter(c.req.query(), { limit: 100_000, maxDays: tenantId || system ? SYSTEM_LOG_KEEP_DAYS : 1 });
+    const lines: SystemLogLine[] = [];
+    for (let before = f.before; lines.length < SYSTEM_LOG_EXPORT_MAX;) {
+      const page = await store.readSystemLogs(tenantId, system, { ...f, before, limit: Math.min(100_000, SYSTEM_LOG_EXPORT_MAX - lines.length) });
+      lines.push(...page);
+      if (page.length < 100_000) break;
+      before = { at: page[page.length - 1]!.at, id: page[page.length - 1]!.id };
+    }
+    lines.reverse();
+    const digests = await store.systemLogDigests(f.from.slice(0, 10), f.to.slice(0, 10)).catch(() => []);
+    const zip = await logExportZip(lines, format, { kind: 'system-logs', scope: tenantId ? 'tenant' : system ? 'system' : 'all', tenantId, by: op.id, filter: logDetail(f) }, digests);
+    await store.audit(op.id, 'log.download', tenantId ? 'tenant' : 'system', tenantId ?? (system ? 'system' : '*'), { ...logDetail(f), lines: lines.length, format });
+    c.header('content-type', 'application/zip');
+    c.header('content-disposition', `attachment; filename="m2office-system-logs-${tenantId ?? (system ? 'system' : 'all')}-${f.from.slice(0, 10)}.zip"`);
+    return c.body(zip as unknown as ArrayBuffer);
+  });
+
+  // 証拠保全の一覧
+  app.get('/v1/ops/evidence', async (c) => c.json({ items: await store.listEvidence() }));
+
+  // 証拠保全を頼む（本文 tenantId（無ければ全体）・reason・days（1〜28））。ワーカーが組み立てる
+  app.post('/v1/ops/evidence', async (c) => {
+    const op = c.get('operator');
+    if (!can(c, 'evidence.create')) return c.json({ error: 'この操作はできません' }, 403);
+    const b = await c.req.json<{ tenantId?: unknown; reason?: unknown; days?: unknown }>().catch(() => ({} as { tenantId?: unknown; reason?: unknown; days?: unknown }));
+    const reason = String(b.reason ?? '').trim();
+    if (!reason || reason.length > 300) return c.json({ error: '理由を 1〜300 字で書いてください' }, 400);
+    const days = b.days === undefined ? SYSTEM_LOG_KEEP_DAYS : Number(b.days);
+    if (!(days >= 1 && days <= SYSTEM_LOG_KEEP_DAYS)) return c.json({ error: `保全する期間は 1〜${SYSTEM_LOG_KEEP_DAYS} 日にしてください` }, 400);
+    const tenantId = typeof b.tenantId === 'string' && b.tenantId.trim() ? b.tenantId.trim() : null;
+    if (tenantId && !(await store.tenantDetail(tenantId))) return c.json({ error: '会社が見つかりません' }, 404);
+    const id = `ev-${crypto.randomUUID()}`;
+    const to = new Date();
+    await store.requestEvidence(id, tenantId, reason, new Date(to.getTime() - days * 86_400_000).toISOString(), to.toISOString(), op.id);
+    await store.audit(op.id, 'evidence.create', tenantId ? 'tenant' : 'system', tenantId ?? '*', { evidenceId: id, days });
+    return c.json({ id }, 202);
+  });
+
+  // 保全した ZIP をダウンロードする（8 MB ずつ流す）
+  app.get('/v1/ops/evidence/:id/download', async (c) => {
+    const op = c.get('operator');
+    const id = c.req.param('id');
+    const p = (await store.listEvidence()).find((x) => x.id === id);
+    if (!p || p.status !== 'ready') return c.json({ error: '保全したものが見つかりません' }, 404);
+    await store.audit(op.id, 'evidence.download', p.tenantId ? 'tenant' : 'system', p.tenantId ?? '*', { evidenceId: id, size: p.size, sha256: p.sha256 });
+    let seq = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      async pull(ctrl) {
+        const chunk = await store.evidenceChunk(id, seq++);
+        if (chunk) ctrl.enqueue(chunk); else ctrl.close();
+      },
+    });
+    c.header('content-type', 'application/zip');
+    c.header('content-disposition', `attachment; filename="m2office-evidence-${p.createdAt.slice(0, 10)}-${id.slice(3, 11)}.zip"`);
+    if (p.size) c.header('content-length', String(p.size));
+    return c.body(stream);
+  });
+
+  // 1 年を過ぎた保全を消す（運営管理者だけ。本文 reason）
+  app.delete('/v1/ops/evidence/:id', async (c) => {
+    const op = c.get('operator');
+    if (!can(c, 'evidence.delete')) return c.json({ error: 'この操作はできません' }, 403);
+    const id = c.req.param('id');
+    const b = await c.req.json<{ reason?: unknown }>().catch(() => ({} as { reason?: unknown }));
+    const reason = String(b.reason ?? '').trim();
+    if (!reason || reason.length > 300) return c.json({ error: '消す理由を 1〜300 字で書いてください' }, 400);
+    const p = (await store.listEvidence()).find((x) => x.id === id);
+    if (!p || p.status === 'deleted') return c.json({ error: '保全したものが見つかりません' }, 404);
+    if (Date.parse(p.createdAt) > Date.now() - 365 * 86_400_000) return c.json({ error: '保全してから 1 年は消せません' }, 409);
+    if (!(await store.deleteEvidence(id, op.id, reason))) return c.json({ error: '消せませんでした' }, 409);
+    await store.audit(op.id, 'evidence.delete', p.tenantId ? 'tenant' : 'system', p.tenantId ?? '*', { evidenceId: id });
+    return c.json({ ok: true });
+  });
 
   return app;
 }

@@ -15,17 +15,18 @@ export type OperatorRole = 'admin' | 'support' | 'monitor';
 export const OPERATOR_ROLES: readonly OperatorRole[] = ['admin', 'support', 'monitor'];
 
 /** 運営者の操作。 */
-export type OpsAction = 'view' | 'tenant.create' | 'tenant.status' | 'tenant.suspend' | 'tenant.lock' | 'machine.manage' | 'operator.manage' | 'settings.manage';
+export type OpsAction = 'view' | 'tenant.create' | 'tenant.status' | 'tenant.suspend' | 'tenant.lock' | 'machine.manage' | 'operator.manage' | 'settings.manage' | 'evidence.create' | 'evidence.delete';
 
 /**
  * 運営者のロールで、その操作ができるか。
  *
  * @remarks 運営管理者はすべて（運営主体の設定を含む）。サポートは見ることと、会社を作る・切り替える・停止と再開の申請と承認まで。
- * 監視は見ることと、緊急停止の発動だけ（緊急停止は運営者なら誰でも発動できる。Q-63）
+ * 監視は見ることと、緊急停止の発動だけ（緊急停止は運営者なら誰でも発動できる。Q-63）。
+ * 証拠保全は急ぐため、緊急停止と同じく運営者なら誰でも始められる。保全したものを消すのは運営管理者だけ（第16.10.5節）
  */
 export function operatorCan(role: OperatorRole, action: OpsAction): boolean {
   if (role === 'admin') return true;
-  if (action === 'view' || action === 'tenant.lock') return true;
+  if (action === 'view' || action === 'tenant.lock' || action === 'evidence.create') return true;
   return role === 'support' && (action === 'tenant.create' || action === 'tenant.status' || action === 'tenant.suspend');
 }
 

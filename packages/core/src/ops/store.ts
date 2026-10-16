@@ -5,6 +5,7 @@
  * 会社の数・会社を作る・状態を変えるは、所有者の権限で動く決めた関数（`ops.tenant_overview` など）だけを呼ぶ。
  */
 
+import type { EvidencePackage, SystemLogDigest, SystemLogFilter, SystemLogLine } from '../log/store.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import type { MachineReport, NewTenantInput, OperatorRole } from './rules.js';
@@ -207,6 +208,57 @@ function rethrow(err: unknown): never {
  */
 export class OpsStore {
   constructor(private readonly pool: pg.Pool) {}
+
+  /** そのまま 1 つ送る（運営のプロセスのシステムログを書く口に渡す。第16.10.1節）。 */
+  readonly query = async (sql: string, params: unknown[]): Promise<unknown> => (await this.pool.query(sql, params as never[])).rows;
+
+  /**
+   * すべての会社のシステムログ（新しい順。第16.10.4節）。
+   *
+   * @param tenantId 会社で絞る（`null` ならすべて）。`system` なら会社に属さない仕組みの分だけ
+   */
+  async readSystemLogs(tenantId: string | null, system: boolean, f: SystemLogFilter): Promise<SystemLogLine[]> {
+    const { rows } = await this.pool.query(
+      `select id::text as id, at, level, service, msg, tenant_id as "tenantId", user_id as "userId", request_id as "requestId", run_id as "runId", fields
+         from ops.read_system_logs($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+      [tenantId, system, f.from, f.to, f.levels?.length ? f.levels : null, f.service || null, f.q || null, f.requestId || null, f.runId || null,
+        f.before?.at ?? null, f.before ? Number(f.before.id) : null, f.limit]);
+    return rows.map((r) => ({ ...r, at: iso(r.at)! }) as SystemLogLine);
+  }
+
+  /** 日ごとの改ざんの確かめ（いまの行から作り直して比べる）。 */
+  async systemLogDigests(fromDay: string, toDay: string): Promise<SystemLogDigest[]> {
+    const { rows } = await this.pool.query(
+      `select to_char(day, 'YYYY-MM-DD') as day, rows, sha256, chain, now_rows, now_sha256 from ops.system_log_digests($1::date, $2::date)`, [fromDay, toDay]);
+    return rows.map((r) => ({ day: r.day, rows: r.rows, sha256: r.sha256, chain: r.chain, nowRows: r.now_rows, nowSha256: r.now_sha256, intact: r.now_sha256 === r.sha256 }));
+  }
+
+  /** 証拠保全を頼む（会社ごとか、全体）。 */
+  async requestEvidence(id: string, tenantId: string | null, reason: string, from: string, to: string, operatorId: string): Promise<void> {
+    await this.pool.query('select ops.request_evidence($1, $2, $3, $4, $5, $6)', [id, tenantId, reason, from, to, operatorId]);
+  }
+
+  /** 証拠保全の一覧（新しい順に 500 件）。 */
+  async listEvidence(): Promise<EvidencePackage[]> {
+    const { rows } = await this.pool.query('select * from ops.list_evidence()');
+    return rows.map((r) => ({
+      id: r.id, scope: r.scope, tenantId: r.tenant_id, reason: r.reason, createdKind: r.created_kind, createdBy: r.created_by,
+      rangeFrom: iso(r.range_from)!, rangeTo: iso(r.range_to)!, status: r.status, size: r.size === null ? null : Number(r.size), sha256: r.sha256,
+      failure: r.failure, createdAt: iso(r.created_at)!, readyAt: iso(r.ready_at), deletedAt: iso(r.deleted_at),
+    }));
+  }
+
+  /** できあがった ZIP の 1 切れ（無ければ `null`）。 */
+  async evidenceChunk(id: string, seq: number): Promise<Uint8Array | null> {
+    const { rows } = await this.pool.query('select ops.evidence_chunk($1, $2) as b', [id, seq]);
+    return rows[0]?.b ? new Uint8Array(rows[0].b as Buffer) : null;
+  }
+
+  /** 1 年を過ぎた保全を消す（消せなければ `false`）。 */
+  async deleteEvidence(id: string, operatorId: string, reason: string): Promise<boolean> {
+    const { rows } = await this.pool.query('select ops.delete_evidence($1, $2, $3) as ok', [id, operatorId, reason]);
+    return rows[0]?.ok === true;
+  }
 
   /** 運営者の一覧。 */
   async listOperators(): Promise<Operator[]> {

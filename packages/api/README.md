@@ -371,6 +371,9 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/admin/usage` | 管理者: エージェント別の利用量 |
 | `GET /v1/admin/machine` | 管理者: ローカルの形の「機械」の様子（版・各部の動き・ディスク・証明書・ローカル AI・控え。仕様書 第8.6.7節）。クラウドの形では 404 |
 | `POST /v1/admin/machine/backup` | 管理者: 今すぐ控えを取る（ワーカーが次の見回りで取る。202。控えの置き場が無ければ 400） |
+| `GET /v1/admin/machine/logs` | 管理者（ローカルの形だけ。クラウドの形は 404）: システムログ（`from`・`to`・`levels`・`service`・`q`・`requestId`・`runId`・`before`・`beforeId`。新しい順に 200 件）。最初の 1 回を監査ログ `log.view` に残す（仕様書 第16.10.4節） |
+| `GET /v1/admin/machine/logs/digests`・`/logs/export`・`/logs/files`・`/logs/files/:name` | 管理者（ローカルの形だけ）: 日ごとの改ざんの確かめ（7 日まで）・絞った結果の ZIP（`format=jsonl|csv`。28 日・100 万行まで）・機械のログのファイルの一覧とダウンロード。`log.download` に残す |
+| `GET・POST /v1/admin/machine/evidence`・`GET /evidence/:id/download`・`DELETE /evidence/:id` | 管理者（ローカルの形だけ）: 証拠保全の一覧・頼む（`reason`・`days`。202）・ZIP のダウンロード・1 年を過ぎたものの削除（1 年に満たなければ 409）（仕様書 第16.10.5節） |
 | `GET /v1/admin/ai-usage` | 管理者: 今月の AI の利用と上限（会社の月の上限・1 人の上限・用途ごと・人ごと。仕様書 第6.6.2節）。上限は `PUT /v1/admin/settings/aiLimits`（`monthlyJpy`・`perUserShare`）。AI の利用の上限に当たった要求は 429 |
 | `GET /v1/admin/runs` | 管理者: 全利用者の実行の状態（中身は返さない） |
 | `GET /v1/admin/schedules` | 管理者: 会社の全員の定時実行（人・業務・繰り返し・次回・前回・状態）。次の回に動かないものは、起動役と同じ判定（`scheduleBlocker`）の理由を添える。**業務の入力は返さない**。操作の口は無い（仕様書 第6.6.8.2節） |
@@ -557,6 +560,8 @@ src/ops/              マスター管理画面の API（別のプロセス。仕
 | POST | `/v1/ops/heartbeat` | 稼働の知らせの受け口（機械の鍵で名乗る。決めた項目だけを残す） | 機械 |
 | GET・POST・PUT | `/v1/ops/operators` | 運営者の一覧・追加・ロールと状態の変更（最後の運営管理者は外せない） | 見る: すべて・変える: 運営管理者 |
 | GET | `/v1/ops/audit` | 運営の操作の記録 | すべて |
+| GET | `/v1/ops/logs`・`/logs/digests`・`/logs/export` | すべての会社のシステムログ（`tenant` で会社か `system`）・日ごとの改ざんの確かめ・ZIP（全社は 1 日、会社で絞れば 28 日まで）。見た・ダウンロードしたことを残す（仕様書 第16.10.4節） | すべて |
+| GET・POST・DELETE | `/v1/ops/evidence`・`/evidence/:id/download`・`/evidence/:id` | 証拠保全の一覧・頼む（`tenantId` が無ければ全体）・ZIP のダウンロード・1 年を過ぎたものの削除（仕様書 第16.10.5節） | 一覧・頼む・ダウンロードはすべて、削除は運営管理者 |
 
 顧客向けの API は、運営主体の設定を決めた関数（`m2o_operator_profile`）で読むだけ（内蔵の拡張機能の「提供」の表記）。
 

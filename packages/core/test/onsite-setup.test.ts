@@ -87,7 +87,11 @@ test('雛形がすべて埋まり、launchd の設定は正しい形', () => {
   assert.doesNotMatch(caddy, /import/);
   assert.match(env, /^M2O_FRONT_DIR=\/Library\/M2Front$/m);
   const plists = readdirSync(join(out, 'launchd'));
-  assert.deepEqual(plists.sort(), ['jp.m2office.api.plist', 'jp.m2office.maintenance.plist', 'jp.m2office.postgres.plist', 'jp.m2office.update.plist', 'jp.m2office.worker.plist']);
+  assert.deepEqual(plists.sort(), ['jp.m2office.api.plist', 'jp.m2office.logrotate.plist', 'jp.m2office.maintenance.plist', 'jp.m2office.postgres.plist', 'jp.m2office.update.plist', 'jp.m2office.worker.plist']);
+  // 機械のログのファイルを週に 1 回入れ替える（第16.10.2節）。入口のアクセスログは 28 日、ログの置き場は設定に入れる
+  assert.match(readFileSync(join(out, 'launchd', 'jp.m2office.logrotate.plist'), 'utf8'), /logrotate\.sh<\/string>[\s\S]*<integer>0<\/integer>/);
+  assert.match(caddy, /roll_keep_for 672h/);
+  assert.match(env, /^M2O_LOG_DIR=.+\/logs$/m);
   assert.match(env, /^M2O_HEARTBEAT_URL=https:\/\/ops\.example\/heartbeat$/m);
   assert.match(env, /^M2O_OFFSITE_REPOSITORY=s3:https:\/\/s3\.example\/bucket\/m2office$/m);
   assert.match(env, /^M2O_OFFSITE_PASSWORD=offsite-pass$/m);
