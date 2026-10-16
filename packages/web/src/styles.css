@@ -2425,3 +2425,9 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .machine-login .field input { width: 100%; }
 .login-machine { margin-top: calc(14px * var(--space-scale)); text-align: center; }
 
+
+/* 印影の未登録の見本（帳票では薄い「印」の字。仕様書 第15.2.3節） */
+.seal-placeholder {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 56px; height: 56px; font-size: 26px; color: var(--muted, #bbb); opacity: 0.6;
+}

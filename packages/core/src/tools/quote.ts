@@ -7,12 +7,12 @@
 
 import { randomUUID } from 'node:crypto';
 import type { QuoteItem, QuoteRecord } from '../repository/types.js';
-import { renderPdf, type InvoiceRow } from '../files/pdf-render.js';
+import { renderPdf, renderRuledQuote, type InvoiceRow } from '../files/pdf-render.js';
 import { loadInvoiceStyle } from '../files/invoice-style.js';
 import { saveFile } from '../files/service.js';
 import type { Tool, ToolContext } from './registry.js';
 
-/** 有効期限の既定（日）。 */
+/** 有効期限の既定（日）。会社が見積書の型で決めていればそれを使う（第15.2.3節）。 */
 export const QUOTE_VALID_DAYS = 30;
 /** 1 通の品目の上限。 */
 const QUOTE_ITEMS_MAX = 50;
@@ -38,7 +38,7 @@ function rounder(mode: 'floor' | 'round' | 'ceil'): (n: number) => number {
  */
 export function quoteTotals(items: QuoteItem[], rounding: 'floor' | 'round' | 'ceil'): { subtotal: number; tax: number; total: number; byRate: { rate: 10 | 8; base: number; tax: number }[] } {
   const r = rounder(rounding);
-  const amount = (i: QuoteItem) => Math.round(i.quantity * (i.unitPrice ?? 0));
+  const amount = quoteItemAmount;
   const byRate = ([10, 8] as const).map((rate) => {
     const base = items.filter((i) => i.taxRate === rate).reduce((n, i) => n + amount(i), 0);
     return { rate, base, tax: r((base * rate) / 100) };
@@ -46,6 +46,14 @@ export function quoteTotals(items: QuoteItem[], rounding: 'floor' | 'round' | 'c
   const subtotal = items.reduce((n, i) => n + amount(i), 0);
   const tax = byRate.reduce((n, x) => n + x.tax, 0);
   return { subtotal, tax, total: subtotal + tax, byRate };
+}
+
+/**
+ * 品目の金額（数量×単価−値引き）。値引きは 0 から数量×単価までに収める（第15.2.3節）。
+ */
+export function quoteItemAmount(i: QuoteItem): number {
+  const gross = Math.round(i.quantity * (i.unitPrice ?? 0));
+  return gross - Math.min(Math.max(0, Math.round(i.discount ?? 0)), Math.max(0, gross));
 }
 
 /** 日本時間の日付（`YYYY-MM-DD`）。 */
@@ -62,7 +70,9 @@ function itemsOf(v: unknown): QuoteItem[] {
       unit: str(o['unit'], '式').slice(0, 10),
       unitPrice: num(o['unitPrice']),
       taxRate: num(o['taxRate']) === 8 ? 8 : 10,
-    }));
+      ...(str(o['group']) ? { group: str(o['group']).replace(/^[【\[]|[】\]]$/g, '').slice(0, 30) } : {}),
+      ...((num(o['discount']) ?? 0) > 0 ? { discount: Math.round(num(o['discount'])!) } : {}),
+    })) as QuoteItem[];
 }
 
 /** 宛先に敬称が無ければ「御中」を付ける。 */
@@ -80,13 +90,14 @@ export const quoteCreate: Tool = {
   risk: 'draft',
   activityLabel: '見積書を作っています',
   helpText: '見積書を PDF で作り、あなたのドライブにも保存します。社外へは送りません',
-  description: '見積書を作る。品目ごとに名前・数量・単位・単価・税率（10 か 8）を渡す。金額・消費税・合計はツールが計算する（自分で計算しない）。単価が分からなければ unitPrice を空にする',
+  description: '見積書を作る。品目ごとに名前・数量・単位・単価・税率（10 か 8）を渡す。区分（初期費用・月額費用など）と値引きの額は、依頼に書かれていれば渡す（値引きを自分で決めない）。金額・消費税・合計はツールが計算する（自分で計算しない）。単価が分からなければ unitPrice を空にする',
   args: {
     properties: {
       to: { type: 'string', description: '宛先（会社名・担当者。例: 株式会社○○ 山田様）' },
-      items: { type: 'array', description: '品目。{ name, quantity, unit, unitPrice, taxRate } の配列' },
-      validDays: { type: 'number', description: '有効期限（発行から何日。既定 30）' },
-      terms: { type: 'string', description: '納期・支払いの条件（任意）' },
+      items: { type: 'array', description: '品目。{ name, quantity, unit, unitPrice, taxRate, group, discount } の配列。group は区分の見出し（任意）、discount は値引きの額（任意。依頼に書かれたものだけ）' },
+      validDays: { type: 'number', description: '有効期限（発行から何日。既定は会社の見積書の設定）' },
+      paymentTerms: { type: 'string', description: 'お支払い条件（任意。無ければ会社の既定）' },
+      terms: { type: 'string', description: '納期などの条件（任意）' },
       notes: { type: 'string', description: '備考（任意）' },
     },
     required: ['items'],
@@ -110,35 +121,61 @@ export const quoteCreate: Tool = {
     const now = new Date();
     const day = jstDay(now);
     const number = `Q-${day.replace(/-/g, '')}-${String((await ctx.repo.countQuotesOn(ctx.tenantId, day.replace(/-/g, ''))) + 1).padStart(2, '0')}`;
-    const validDays = Math.min(Math.max(Math.round(num(args['validDays']) ?? QUOTE_VALID_DAYS), 1), 365);
+    const qs = settings.invoice.quote;
+    const validDays = Math.min(Math.max(Math.round(num(args['validDays']) ?? qs.validDays ?? QUOTE_VALID_DAYS), 1), 365);
     const validUntil = jstDay(new Date(now.getTime() + validDays * 86_400_000));
     const to = str(args['to']).slice(0, 80);
 
-    // 体裁は請求書と同じ会社の差出人とロゴ。振込先と請求書の定型文は見積書に載せない
+    // 体裁は請求書と同じ会社の差出人・ロゴ・印。振込先と請求書の定型文は見積書に載せない。型と文言は会社の見積書の設定（第15.2.3節）
     const style = await loadInvoiceStyle(ctx);
-    const rows: InvoiceRow[] = items.map((i) => ({
-      name: `${i.name}${i.taxRate === 8 ? '（※軽減税率）' : ''}（${i.quantity} ${i.unit}）`, quantity: i.quantity, unitPrice: i.unitPrice ?? 0, amount: Math.round(i.quantity * (i.unitPrice ?? 0)),
-    }));
+    const paymentTerms = str(args['paymentTerms'], qs.paymentTerms).slice(0, 50);
     const notes = [
       str(args['terms']) ? `条件: ${str(args['terms'])}` : '',
       str(args['notes']),
       items.some((i) => i.taxRate === 8) ? '※は軽減税率（8%）の対象です' : '',
     ].filter(Boolean).slice(0, 6);
-    const bytes = await renderPdf({
-      title: '御見積書',
-      style: { logo: style.logo ?? null, from: style.from ?? [], sealBox: style.sealBox ?? false },
-      ...(to ? { to: addressee(to) } : {}),
-      from: style.from ?? [],
-      fields: [{ label: '見積番号', value: number }, { label: '発行日', value: day }, { label: '有効期限', value: validUntil }],
-      rows,
-      totals: [
-        { label: '小計', value: yen(totals.subtotal) },
-        ...totals.byRate.map((x) => ({ label: `消費税（${x.rate}%）`, value: yen(x.tax) })),
-        { label: '合計', value: yen(totals.total) },
-      ],
-      notes,
-    });
-    const name = `御見積書_${number}${to ? `_${to.replace(/[\\/:*?"<>|\s]+/g, '')}` : ''}.pdf`;
+    const fields = [
+      { label: qs.labels.number, value: number }, { label: qs.labels.issued, value: day },
+      ...(paymentTerms ? [{ label: qs.labels.payment, value: paymentTerms }] : []),
+      { label: qs.labels.validUntil, value: validUntil },
+    ];
+    const sealStyle = { logo: style.logo ?? null, from: style.from ?? [], sealBox: style.sealBox ?? false, seal: style.seal ?? null };
+    const bytes = qs.template === 'simple'
+      ? await renderPdf({
+        title: qs.title,
+        style: sealStyle,
+        ...(to ? { to: addressee(to) } : {}),
+        from: style.from ?? [],
+        fields,
+        rows: items.map((i): InvoiceRow => ({
+          name: `${i.group ? `【${i.group}】` : ''}${i.name}${i.taxRate === 8 ? '（※軽減税率）' : ''}（${i.quantity} ${i.unit}）${i.discount ? `（値引き ${yen(i.discount)}）` : ''}`,
+          quantity: i.quantity, unitPrice: i.unitPrice ?? 0, amount: quoteItemAmount(i),
+        })),
+        totals: [
+          { label: '小計', value: yen(totals.subtotal) },
+          ...totals.byRate.map((x) => ({ label: `消費税（${x.rate}%）`, value: yen(x.tax) })),
+          { label: '合計', value: yen(totals.total) },
+        ],
+        notes: [...notes, ...(qs.notes ? [qs.notes] : [])],
+      })
+      : await renderRuledQuote({
+        title: qs.title,
+        ...(to ? { to: addressee(to) } : {}),
+        fields,
+        greeting: qs.greeting,
+        rows: items.map((i) => ({
+          ...(i.group ? { group: i.group } : {}), name: `${i.name}${i.taxRate === 8 ? '（※）' : ''}`, quantity: i.quantity, unit: i.unit,
+          unitPrice: i.unitPrice, discount: i.discount ?? 0, amount: quoteItemAmount(i),
+        })),
+        totals: [
+          { label: '小計', value: `￥${totals.subtotal.toLocaleString('ja-JP')}` },
+          ...totals.byRate.map((x) => ({ label: totals.byRate.length > 1 ? `消費税（${x.rate}%）` : '消費税', value: `￥${x.tax.toLocaleString('ja-JP')}` })),
+          { label: '合計', value: `￥${totals.total.toLocaleString('ja-JP')}` },
+        ],
+        notes: [...(qs.notes ? [qs.notes] : []), ...notes],
+        style: sealStyle,
+      });
+    const name = `${qs.title}_${number}${to ? `_${to.replace(/[\\/:*?"<>|\s]+/g, '')}` : ''}.pdf`;
     const file = await saveFile(ctx.repo, ctx.files, { tenantId: ctx.tenantId, ownerUserId: ctx.userId, name, kind: 'pdf', bytes, origin: 'generated', runId: ctx.runId });
 
     const record: QuoteRecord = {
@@ -148,7 +185,7 @@ export const quoteCreate: Tool = {
     await ctx.repo.createQuote(record);
     const markdown = quoteMarkdown(record, totals.byRate, notes);
     await ctx.repo.createArtifact({
-      id: randomUUID(), runId: ctx.runId, tenantId: ctx.tenantId, kind: 'quote', title: `御見積書 ${number}${to ? `（${to}）` : ''}`,
+      id: randomUUID(), runId: ctx.runId, tenantId: ctx.tenantId, kind: 'quote', title: `${qs.title} ${number}${to ? `（${to}）` : ''}`,
       body: markdown, fileId: file.id, createdAt: now.toISOString(),
     });
 
@@ -178,9 +215,9 @@ export function quoteMarkdown(q: QuoteRecord, byRate: { rate: number; tax: numbe
     `- 発行日: ${q.createdAt.slice(0, 10)}`,
     `- 有効期限: ${q.validUntil ?? ''}`,
     '',
-    '| 品目 | 数量 | 単価 | 金額 |',
-    '|---|---|---|---|',
-    ...q.items.map((i) => `| ${i.name}${i.taxRate === 8 ? '（※軽減税率）' : ''} | ${i.quantity} ${i.unit} | ${i.unitPrice === null ? '（未記入）' : yen(i.unitPrice)} | ${yen(Math.round(i.quantity * (i.unitPrice ?? 0)))} |`),
+    '| 品目 | 数量 | 単価 | 値引き | 金額 |',
+    '|---|---|---|---|---|',
+    ...q.items.map((i) => `| ${i.group ? `【${i.group}】` : ''}${i.name}${i.taxRate === 8 ? '（※軽減税率）' : ''} | ${i.quantity} ${i.unit} | ${i.unitPrice === null ? '（未記入）' : yen(i.unitPrice)} | ${i.discount ? `-${yen(i.discount)}` : ''} | ${yen(quoteItemAmount(i))} |`),
     '',
     `- 小計: ${yen(q.subtotal)}`,
     ...byRate.map((x) => `- 消費税（${x.rate}%）: ${yen(x.tax)}`),

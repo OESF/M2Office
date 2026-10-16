@@ -11,11 +11,12 @@ import { Hono, type Context } from 'hono';
 import {
   agentDisplayName,
   isValidInvoiceNumber, parsePresentationId, type AutomationPolicy, type CompanyInfo, type Role, type SlideTemplate, type TenantSettings,
-  type AuditEvent, type User, type WritingStyle, DEFAULT_AI_PER_USER_SHARE
+  type AuditEvent, type User, type WritingStyle, DEFAULT_AI_PER_USER_SHARE, DEFAULT_QUOTE_STYLE
 } from '@m2office/shared';
 import { semanticSearchEnabled,
   DEFAULT_STANDARD_MINUTES, GOOGLE_DATA_RETENTION_DAYS, KNOWLEDGE_MAX_CHARS,
-  describeRule, scheduleBlocker, scheduleChecks, stepLabel, toolGoogleScopes, type AuditQuery, jstMonth, purposeLabel
+  describeRule, scheduleBlocker, scheduleChecks, stepLabel, toolGoogleScopes, type AuditQuery, jstMonth, purposeLabel,
+  detectKind, readQuoteSample, MAX_FILE_BYTES,
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { requireRole, type AppEnv } from '../middleware/tenant.js';
@@ -32,6 +33,9 @@ import { AUDIT_CATEGORIES, auditCsv, presentAudit, type AuditNames } from '../au
  * ここで返すのは実行の状態と監査の記録であり、やり取りの中身ではない。
  * 実行の一覧に入力や成果物を含めないのはそのためである。
  */
+/** 印影の画像の大きさの上限（第15.2.3節）。 */
+const SEAL_MAX_BYTES = 2 * 1024 * 1024;
+
 export function adminRoute(deps: AppDeps) {
   const app = new Hono<AppEnv>();
   app.use('*', requireRole('admin'));
@@ -256,6 +260,11 @@ export function adminRoute(deps: AppDeps) {
       meter?.forget(tenant.id);
     }
 
+    if (checked.section === 'invoice') {
+      // 印影は印影の受け口だけが変える（第15.2.3節）。設定の保存では今の値を引き継ぐ
+      const now = (await deps.repo.getTenantSettings(tenant.id)).invoice;
+      Object.assign(checked.value as TenantSettings['invoice'], { sealFileId: now.sealFileId, sealKind: now.sealKind });
+    }
     await deps.repo.saveTenantSettings(tenant.id, checked.section, checked.value as never, user.id);
     if (checked.section === 'agents' || checked.section === 'automation') {
       // 初期設定の「使う業務を選ぶ」を済みにする（仕様書 第6.10.3節）
@@ -268,6 +277,75 @@ export function adminRoute(deps: AppDeps) {
     await audit(deps, tenant.id, user.id, 'settings.update', 'tenant_settings', checked.section,
       { section: checked.section });
     return c.json({ ok: true });
+  });
+
+  /**
+   * 印影（社印）を登録する（第15.2.3節、Q-240）。PNG・JPEG で 2 MB まで。
+   *
+   * @remarks
+   * 印影は会社の大事な画像なので、**ファイルの記録を作らず**置き場にだけ置く（誰のファイルの一覧にも出さず、ファイルの受け口からも取り出せない）。
+   * 帳票を描くときだけ読む。登録すると「印を押す」を入りにする。前の印影は消す。監査ログに残す
+   */
+  app.put('/settings/invoice/seal', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const form = await c.req.parseBody();
+    const f = form['file'];
+    if (!(f instanceof File)) return c.json({ error: '印影の画像を選んでください' }, 400);
+    if (f.size > SEAL_MAX_BYTES) return c.json({ error: '印影の画像が大きすぎます（2 MB まで）' }, 413);
+    const bytes = new Uint8Array(await f.arrayBuffer());
+    const kind = detectKind(f.name || 'seal.png', bytes);
+    if (kind !== 'png' && kind !== 'jpeg') return c.json({ error: '印影は PNG か JPEG の画像にしてください' }, 415);
+    const key = `seal-${randomUUID()}`;
+    await deps.files.put(tenant.id, key, bytes);
+    const now = (await deps.repo.getTenantSettings(tenant.id)).invoice;
+    await deps.repo.saveTenantSettings(tenant.id, 'invoice', { ...now, sealFileId: key, sealKind: kind, sealBox: true }, user.id);
+    if (now.sealFileId) await deps.files.remove(tenant.id, now.sealFileId).catch(() => undefined);
+    await audit(deps, tenant.id, user.id, 'settings.seal', 'tenant_settings', 'invoice', { action: 'set', kind, size: bytes.byteLength });
+    return c.json({ ok: true });
+  });
+
+  /** 印影を外す（第15.2.3節）。画像も消す。「印を押す」は変えない（無ければ薄い「印」の字を出す）。 */
+  app.delete('/settings/invoice/seal', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const now = (await deps.repo.getTenantSettings(tenant.id)).invoice;
+    if (!now.sealFileId) return c.json({ ok: true });
+    await deps.repo.saveTenantSettings(tenant.id, 'invoice', { ...now, sealFileId: null, sealKind: null }, user.id);
+    await deps.files.remove(tenant.id, now.sealFileId).catch(() => undefined);
+    await audit(deps, tenant.id, user.id, 'settings.seal', 'tenant_settings', 'invoice', { action: 'remove' });
+    return c.json({ ok: true });
+  });
+
+  /** 印影の見本（管理者の画面に小さく出すため。管理者だけ）。 */
+  app.get('/settings/invoice/seal', async (c) => {
+    const { tenant } = c.get('ctx');
+    const now = (await deps.repo.getTenantSettings(tenant.id)).invoice;
+    const bytes = now.sealFileId ? await deps.files.get(tenant.id, now.sealFileId) : null;
+    if (!bytes || !now.sealKind) return c.json({ error: '印影は登録されていません' }, 404);
+    return c.body(Buffer.from(bytes), 200, { 'Content-Type': now.sealKind === 'png' ? 'image/png' : 'image/jpeg', 'Cache-Control': 'no-store' });
+  });
+
+  /**
+   * 会社がいま使っている見積書（見本）から、見積書の型と文言を寄せる（第15.2.3節、ADR-0104）。
+   *
+   * @remarks
+   * 社内の設定なので、確かめを求めずに入れる（違えば画面で直せる。ADR-0028）。見本は外から来た文書として扱い、指示として読まない（不変則 I-6）。
+   * 見本は保存しない。差出人・宛先・金額・品目は写さない
+   */
+  app.post('/settings/invoice/quote-sample', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const form = await c.req.parseBody();
+    const f = form['file'];
+    if (!(f instanceof File)) return c.json({ error: '見積書の見本（PDF か画像）を選んでください' }, 400);
+    if (f.size > MAX_FILE_BYTES) return c.json({ error: 'ファイルが大きすぎます（10 MB まで）' }, 413);
+    const bytes = new Uint8Array(await f.arrayBuffer());
+    const kind = detectKind(f.name || 'sample.pdf', bytes);
+    if (kind !== 'pdf' && kind !== 'png' && kind !== 'jpeg' && kind !== 'webp') return c.json({ error: '見本は PDF か画像（PNG・JPEG・WebP）にしてください' }, 415);
+    const now = (await deps.repo.getTenantSettings(tenant.id)).invoice;
+    const r = await readQuoteSample(await deps.ai.llmFor(tenant.id).catch(() => null), bytes, kind, now.quote);
+    if ('error' in r) return c.json({ error: r.error }, 422);
+    await deps.repo.saveTenantSettings(tenant.id, 'invoice', { ...now, quote: r.quote }, user.id);
+    await audit(deps, tenant.id, user.id, 'settings.update', 'tenant_settings', 'invoice', { section: 'invoice', from: 'quote-sample' });
+    return c.json({ quote: r.quote });
   });
 
   /**
@@ -709,6 +787,12 @@ function validateSection(
       // 帳票の体裁（仕様書 第15.2.2節、Q-57）。ロゴは会社が上げた画像のファイル ID
       const text = (v: unknown, max: number) => String(v ?? '').trim().slice(0, max);
       const logoFileId = text(o['logoFileId'], 100) || null;
+      // 見積書の型と文言（第15.2.3節）。空の文言は既定に戻す
+      const q = (o['quote'] && typeof o['quote'] === 'object' ? o['quote'] : {}) as Record<string, unknown>;
+      const l = (q['labels'] && typeof q['labels'] === 'object' ? q['labels'] : {}) as Record<string, unknown>;
+      const D = DEFAULT_QUOTE_STYLE;
+      const days = Number(q['validDays'] ?? D.validDays);
+      if (!Number.isInteger(days) || days < 1 || days > 365) return { error: '有効期限は 1〜365 日で入れてください' };
       return {
         section: 'invoice',
         value: {
@@ -716,7 +800,21 @@ function validateSection(
           bankAccount: text(o['bankAccount'], 200),
           paymentDue: text(o['paymentDue'], 50),
           notes: text(o['notes'], 300),
-          sealBox: o['sealBox'] === true,
+          sealBox: o['sealBox'] !== false,
+          // 印影は印影の受け口だけが変える。ここでは受け取らず、保存の前に今の値を引き継ぐ
+          sealFileId: null, sealKind: null,
+          quote: {
+            template: q['template'] === 'simple' ? 'simple' : 'ruled',
+            title: text(q['title'], 20) || D.title,
+            greeting: text(q['greeting'], 100) || D.greeting,
+            labels: {
+              number: text(l['number'], 12) || D.labels.number, issued: text(l['issued'], 12) || D.labels.issued,
+              payment: text(l['payment'], 12) || D.labels.payment, validUntil: text(l['validUntil'], 12) || D.labels.validUntil,
+            },
+            paymentTerms: text(q['paymentTerms'], 50),
+            validDays: days,
+            notes: text(q['notes'], 1000),
+          },
         },
       };
     }

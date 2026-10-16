@@ -200,9 +200,48 @@ export interface InvoiceStyle {
   paymentDue: string;
   /** 備考の定型文。毎回入れる断り書き。 */
   notes: string;
-  /** 印の欄を出すか。 */
+  /**
+   * 印を押すか（第15.2.3節）。印影が登録されていれば印影を、無ければ薄い「印」の字を、差出人の会社名に重ねて出す。
+   * 項目の名前は、印の欄（四角の枠）だった頃のまま
+   */
   sealBox: boolean;
+  /**
+   * 印影（社印）の画像の置き場のキー（第15.2.3節、Q-240）。ファイルの記録を作らず、誰のファイルの一覧にも出さない。
+   * 管理者の印影の受け口だけが書き換える（設定の保存では変えない）
+   */
+  sealFileId: string | null;
+  /** 印影の画像の形式。 */
+  sealKind: 'png' | 'jpeg' | null;
+  /** 見積書の型と文言（第15.2.3節）。 */
+  quote: QuoteStyle;
 }
+
+/** 帳票の型（第15.2.3節）。`ruled` はよくある罫線の表の見積書、`simple` は最小限の体裁。 */
+export type QuoteTemplate = 'ruled' | 'simple';
+
+/** 見積書の型と文言（第15.2.3節、Q-240）。会社が見本の見積書を渡すと、AI が寄せて入れる。 */
+export interface QuoteStyle {
+  template: QuoteTemplate;
+  /** 表題（例: 御見積書）。 */
+  title: string;
+  /** 前文（例: 下記の通り、御見積申し上げます。）。罫線の表だけで使う。 */
+  greeting: string;
+  /** 情報の欄の言い方。 */
+  labels: { number: string; issued: string; payment: string; validUntil: string };
+  /** お支払い条件の既定（例: お振込）。空なら欄を出さない。 */
+  paymentTerms: string;
+  /** 有効期限の既定（発行から何日）。 */
+  validDays: number;
+  /** 見積書の備考の定型文（請求書の備考の定型文とは別）。 */
+  notes: string;
+}
+
+/** 見積書の型と文言の既定。 */
+export const DEFAULT_QUOTE_STYLE: QuoteStyle = {
+  template: 'ruled', title: '御見積書', greeting: '下記の通り、御見積申し上げます。',
+  labels: { number: '見積番号', issued: '発行日', payment: 'お支払い条件', validUntil: '有効期限' },
+  paymentTerms: '', validDays: 30, notes: '',
+};
 
 /**
  * 名刺管理（内蔵の拡張。仕様書 第27章・第12.13節）の会社の設定。
@@ -328,7 +367,7 @@ export const DEFAULT_TENANT_SETTINGS: TenantSettings = {
   // 承認の滞留が誰の判断待ちかを示すため、既定は個人名（Q-64）
   dashboard: { people: 'names' },
   // 帳票の体裁。未設定でも帳票は出せる（無い欄は出さない）
-  invoice: { logoFileId: null, bankAccount: '', paymentDue: '', notes: '', sealBox: false },
+  invoice: { logoFileId: null, bankAccount: '', paymentDue: '', notes: '', sealBox: true, sealFileId: null, sealKind: null, quote: DEFAULT_QUOTE_STYLE },
   // 名刺は会社の資産として共有するのを既定にする（第27.7節）
   cards: { enabled: true, defaultScope: 'company', mailSignature: true, bulkMailAdminApproval: false },
   // 在庫管理は既定で切り。使う会社が導入のときに入れる（第29.2節）

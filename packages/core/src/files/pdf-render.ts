@@ -4,8 +4,8 @@
  * 書体は JIS X 0208 の範囲に絞って同梱している（`scripts/build-font-subset.mjs` で作る）。
  * 範囲の外の字は `〓` に置き換え、どの字だったかを `missingCharacters()` で示す。
  *
- * 体裁は最小限（表題・宛先などの項目・明細の表・合計・備考）にとどめる。
- * 会社ごとのひな形（ロゴ・色・並び）は Q-57 で決める。
+ * 体裁は最小限（表題・宛先などの項目・明細の表・合計・備考）の `renderPdf` と、よくある見積書の形（罫線の表）の
+ * `renderRuledQuote` の 2 つ。会社は型を選ぶだけで、配置は作らない（第15.2.3節、ADR-0104）。印影は差出人の会社名に重ねて押す。
  *
  * @see 仕様書 第9.4.1節、Q-59、ADR-0017
  */
@@ -14,7 +14,7 @@ import { pathToFileURL } from 'node:url';
 import { appPath } from '../app-root.js';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { PDFDocument, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
+import { BlendMode, PDFDocument, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 import { toBundledFontChars } from './font-chars.js';
 
@@ -79,8 +79,10 @@ export interface InvoiceStyleInput {
   bankAccount?: string;
   /** 備考の定型文。 */
   notes?: string;
-  /** 印の欄を出すか。 */
+  /** 印を押すか（第15.2.3節）。印影が無ければ薄い「印」の字を出す。 */
   sealBox?: boolean;
+  /** 印影（社印）の画像。 */
+  seal?: { bytes: Uint8Array; kind: 'png' | 'jpeg' } | null;
 }
 
 /** 帳票の中身。金額の計算と体裁だけを扱い、制度の判断はしない。 */
@@ -269,18 +271,15 @@ export async function renderPdf(doc: InvoiceDoc): Promise<Uint8Array> {
   }
   // 差出人は、会社の体裁（会社情報）から出す。帳票ごとに書かない（第15.2.2節）
   const from = (doc.from ?? []).length > 0 ? doc.from ?? [] : doc.style?.from ?? [];
+  const nameY = y;
   for (const line of from) {
     write(line, 0, y, { right, size: 9 });
     y -= LINE * 0.9;
   }
+  // 印は会社名の右端に重ねる（角印の慣習。第15.2.3節）
   if (doc.style?.sealBox) {
-    const box = 48;
-    page.drawRectangle({
-      x: right - box, y: y - box + LINE, width: box, height: box,
-      borderColor: rgb(0.6, 0.6, 0.6), borderWidth: 0.5,
-    });
-    write('印', 0, y - box / 2, { right: right - box / 2 + 5, size: 8 });
-    y -= box;
+    await drawSeal(pdf, page, font, doc.style, right - SEAL_SIZE + 10, nameY - SEAL_SIZE + 12);
+    y = Math.min(y, nameY - SEAL_SIZE + 12 - LINE / 2);
   }
 
   // 明細の表。列は 品目・数量・単価・金額 の 4 つに固定する（最小限の体裁）
@@ -337,3 +336,281 @@ export async function renderPdf(doc: InvoiceDoc): Promise<Uint8Array> {
 
   return pdf.save();
 }
+
+/** 印影の大きさ（21 mm 角。ポイント）。 */
+const SEAL_SIZE = 59.5;
+
+/**
+ * 印を押す（第15.2.3節）。印影があれば白い地が透けるように重ね（乗算）、無ければ薄い灰色の「印」の字を出す。
+ *
+ * @param x 印の枠の左下
+ * @param y 印の枠の左下
+ * @remarks 印影が読めなければ、薄い「印」の字にする（帳票が出せないほうが困るため）
+ */
+async function drawSeal(pdf: PDFDocument, page: PDFPage, font: PDFFont, style: InvoiceStyleInput, x: number, y: number): Promise<void> {
+  if (style.seal) {
+    try {
+      const img = style.seal.kind === 'png' ? await pdf.embedPng(style.seal.bytes) : await pdf.embedJpg(style.seal.bytes);
+      const scale = Math.min(SEAL_SIZE / img.width, SEAL_SIZE / img.height);
+      const w = img.width * scale;
+      const h = img.height * scale;
+      page.drawImage(img, { x: x + (SEAL_SIZE - w) / 2, y: y + (SEAL_SIZE - h) / 2, width: w, height: h, blendMode: BlendMode.Multiply });
+      return;
+    } catch {
+      // 読めなければ薄い「印」の字にする
+    }
+  }
+  const size = SEAL_SIZE * 0.5;
+  const shown = fit('印');
+  page.drawText(shown, {
+    x: x + (SEAL_SIZE - font.widthOfTextAtSize(shown, size)) / 2, y: y + (SEAL_SIZE - size) / 2 + size * 0.12,
+    size, font, color: rgb(0.8, 0.8, 0.8),
+  });
+}
+
+/** 罫線の表の見積書の明細 1 行（第15.2.3節）。金額は呼び出し側が決まった計算で出したもの。 */
+export interface RuledQuoteRow {
+  /** 区分の見出し（例: 初期費用）。同じ区分の行はまとめて、その上に見出しの行を置く。 */
+  group?: string;
+  /** 摘要。 */
+  name: string;
+  quantity: number;
+  unit: string;
+  /** 単価。未記入なら空欄。 */
+  unitPrice: number | null;
+  /** 値引きの額（正の数。赤字の負の数で出す）。 */
+  discount: number;
+  /** 金額（数量×単価−値引き）。 */
+  amount: number;
+}
+
+/** 罫線の表の見積書の中身（第15.2.3節）。 */
+export interface RuledQuoteDoc {
+  /** 表題（例: 御見積書）。 */
+  title: string;
+  /** 宛先（例: 株式会社○○ 御中）。 */
+  to?: string;
+  /** 情報の欄（見積番号・発行日・お支払い条件・有効期限）。 */
+  fields: { label: string; value: string }[];
+  /** 前文。 */
+  greeting?: string;
+  rows: RuledQuoteRow[];
+  /** 合計の枠（小計・消費税・合計）。最後の行を太字にする。 */
+  totals: { label: string; value: string }[];
+  /** 備考（定型文と、その見積だけの備考）。 */
+  notes: string[];
+  /** 会社の体裁（ロゴ・差出人・印）。 */
+  style?: InvoiceStyleInput;
+}
+
+/** 金額の表記（例: `￥1,234`・値引きは `-￥200`）。 */
+const money = (n: number) => `${n < 0 ? '-' : ''}￥${yen(Math.abs(n))}`;
+
+/**
+ * よくある見積書の形（罫線の表）の PDF を作る（第15.2.3節、Q-240、ADR-0104）。
+ *
+ * @remarks
+ * 左上にロゴ、右上に差出人と印、中央に下線つきの表題、左に宛先・情報の欄・前文、罫線の表（区分の見出しと値引きの列）、
+ * 右下に合計の枠、いちばん下に備考の枠。数量がすべて 1 なら数量の列を、値引きが無ければ値引きの列を出さない。
+ * 表は空の罫線の行で埋めて 1 ページの形を保ち、収まらなければ次のページに表の見出しを付けて続ける。
+ */
+export async function renderRuledQuote(doc: RuledQuoteDoc): Promise<Uint8Array> {
+  const fonts = await loadFonts();
+  const pdf = await PDFDocument.create();
+  pdf.registerFontkit(fontkit);
+  const [font, bold] = await Promise.all([pdf.embedFont(fonts.regular, EMBED), pdf.embedFont(fonts.bold, EMBED)]);
+  pdf.setTitle(doc.title);
+  const M = 40;
+  const left = M;
+  const right = PAGE.width - M;
+  const ink = rgb(0.1, 0.1, 0.1);
+  const red = rgb(0.85, 0.1, 0.1);
+  const rule = rgb(0.25, 0.25, 0.25);
+  const faint = rgb(0.55, 0.55, 0.55);
+  const shade = rgb(0.9, 0.9, 0.9);
+
+  let page = pdf.addPage([PAGE.width, PAGE.height]);
+  const text = (t: string, x: number, y: number, o: { size?: number; bold?: boolean; right?: number; center?: number; color?: ReturnType<typeof rgb>; maxWidth?: number } = {}) => {
+    const size = o.size ?? 9;
+    const f = o.bold ? bold : font;
+    let shown = fit(t);
+    // 欄に収まらなければ末尾を切る（行を崩さないため）
+    if (o.maxWidth !== undefined) {
+      while (shown.length > 1 && f.widthOfTextAtSize(shown, size) > o.maxWidth) shown = `${shown.slice(0, -2)}…`;
+    }
+    const w = f.widthOfTextAtSize(shown, size);
+    const x0 = o.right !== undefined ? o.right - w : o.center !== undefined ? o.center - w / 2 : x;
+    page.drawText(shown, { x: x0, y, size, font: f, color: o.color ?? ink });
+  };
+  const line = (x1: number, y1: number, x2: number, y2: number, thickness = 0.5, color = rule) =>
+    page.drawLine({ start: { x: x1, y: y1 }, end: { x: x2, y: y2 }, thickness, color });
+  /** 幅に合わせて文を折り返す。 */
+  const wrap = (t: string, width: number, size: number): string[] => {
+    const out: string[] = [];
+    for (const para of t.split('\n')) {
+      let cur = '';
+      for (const ch of fit(para)) {
+        if (font.widthOfTextAtSize(cur + ch, size) > width && cur) { out.push(cur); cur = ''; }
+        cur += ch;
+      }
+      out.push(cur);
+    }
+    return out;
+  };
+
+  // 上の段: ロゴ（左上）と差出人・印（右上）
+  let y = PAGE.height - M;
+  const logo = doc.style?.logo ? await (doc.style.logo.kind === 'png' ? pdf.embedPng(doc.style.logo.bytes) : pdf.embedJpg(doc.style.logo.bytes)).catch(() => null) : null;
+  if (logo) {
+    const scale = Math.min(160 / logo.width, 40 / logo.height);
+    page.drawImage(logo, { x: left, y: y - 10 - logo.height * scale - 10, width: logo.width * scale, height: logo.height * scale });
+  }
+  const fromX = right - 230;
+  let fy = y - 12;
+  const from = doc.style?.from ?? [];
+  from.forEach((l, i) => {
+    // 長い住所は折り返す（切らない）
+    for (const part of i === 0 ? [l] : wrap(l, right - fromX, 8.5)) {
+      text(part, fromX, fy, { size: i === 0 ? 10 : 8.5, bold: i === 0, maxWidth: right - fromX });
+      fy -= i === 0 ? 14 : 12;
+    }
+  });
+  if (doc.style?.sealBox) await drawSeal(pdf, page, font, doc.style, right - SEAL_SIZE + 6, y - 12 - SEAL_SIZE + 22);
+  y = Math.min(fy, y - SEAL_SIZE, y - 60) - 18;
+
+  // 表題（中央・下線）
+  const titleSize = 17;
+  text(doc.title, 0, y, { size: titleSize, bold: true, center: PAGE.width / 2 });
+  const tw = bold.widthOfTextAtSize(fit(doc.title), titleSize);
+  line(PAGE.width / 2 - tw / 2 - 4, y - 5, PAGE.width / 2 + tw / 2 + 4, y - 5, 1, ink);
+  y -= 34;
+
+  // 宛先・情報の欄・前文（左）
+  if (doc.to) {
+    text(doc.to, left, y, { size: 12, bold: true, maxWidth: 300 });
+    line(left, y - 4, left + 300, y - 4, 0.75, ink);
+    y -= 24;
+  }
+  const labelW = Math.max(60, ...doc.fields.map((f) => font.widthOfTextAtSize(fit(f.label), 9))) + 8;
+  for (const f of doc.fields) {
+    text(f.label, left, y);
+    text(`：  ${f.value}`, left + labelW, y, { maxWidth: 260 });
+    y -= 13;
+  }
+  if (doc.greeting) {
+    y -= 8;
+    text(doc.greeting, left, y);
+  }
+  y -= 18;
+
+  // 明細の表。列は中身で決める（数量がすべて 1 なら数量を、値引きが無ければ値引きを出さない）
+  const showQty = doc.rows.some((r) => r.quantity !== 1);
+  const showDiscount = doc.rows.some((r) => r.discount > 0);
+  const colW = { qty: showQty ? 62 : 0, price: 82, discount: showDiscount ? 78 : 0, amount: 88 };
+  const xAmount = right - colW.amount;
+  const xDiscount = xAmount - colW.discount;
+  const xPrice = xDiscount - colW.price;
+  const xQty = xPrice - colW.qty;
+  const verticals = [left, xQty, ...(showQty ? [xPrice] : []), ...(showDiscount ? [xDiscount] : []), xAmount, right];
+  const ROW = 20;
+  const pad = 4;
+  const header = () => {
+    page.drawRectangle({ x: left, y: y - ROW, width: right - left, height: ROW, color: shade });
+    const ty = y - ROW + 6;
+    text('摘要', 0, ty, { bold: true, center: (left + xQty) / 2 });
+    if (showQty) text('数量', 0, ty, { bold: true, center: (xQty + xPrice) / 2 });
+    text('単価', 0, ty, { bold: true, center: (xPrice + xDiscount) / 2 });
+    if (showDiscount) text('値引き', 0, ty, { bold: true, center: (xDiscount + xAmount) / 2 });
+    text('金額', 0, ty, { bold: true, center: (xAmount + right) / 2 });
+    line(left, y, right, y, 0.75);
+    y -= ROW;
+    line(left, y, right, y, 0.75);
+  };
+  type Line = { kind: 'group'; label: string } | { kind: 'item'; row: RuledQuoteRow } | { kind: 'blank' };
+  const lines: Line[] = [];
+  let prev: string | undefined;
+  for (const r of doc.rows) {
+    const g = r.group?.trim() || undefined;
+    if (g !== prev) {
+      if (g && lines.length > 0) lines.push({ kind: 'blank' });
+      if (g) lines.push({ kind: 'group', label: g });
+      prev = g;
+    }
+    lines.push({ kind: 'item', row: r });
+  }
+  // 合計の枠と備考の枠に要る高さ（最後のページに置く）
+  const notesLines = doc.notes.flatMap((n) => wrap(n, right - left - pad * 4, 8));
+  const totalsH = doc.totals.length * ROW + 14;
+  const notesH = Math.max(90, ROW + notesLines.length * 11 + 16);
+  const tableTop = y;
+  let rowTop = tableTop;
+  const drawRow = (l: Line) => {
+    const by = y - ROW;
+    const ty = by + 6;
+    for (const vx of verticals) line(vx, y, vx, by, 0.5);
+    line(left, by, right, by, 0.3, faint);
+    if (l.kind === 'group') text(`【${l.label}】`, left + pad, ty, { maxWidth: xQty - left - pad * 2 });
+    if (l.kind === 'item') {
+      const r = l.row;
+      const indent = r.group ? 10 : 0;
+      text(r.name, left + pad + indent, ty, { maxWidth: xQty - left - pad * 2 - indent });
+      if (showQty) text(`${r.quantity} ${r.unit}`, 0, ty, { right: xPrice - pad, maxWidth: colW.qty - pad * 2 });
+      if (r.unitPrice !== null) text(money(r.unitPrice), 0, ty, { right: xDiscount - pad });
+      if (showDiscount && r.discount > 0) text(money(-r.discount), 0, ty, { right: xAmount - pad, color: red });
+      text(money(r.amount), 0, ty, { right: right - pad });
+    }
+    y = by;
+  };
+  header();
+  rowTop = y;
+  let i = 0;
+  while (i < lines.length) {
+    // このページに置ける行が尽きたら、次のページに表の見出しを付けて続ける
+    if (y - ROW < M) {
+      line(left, rowTop, left, y, 0.75); line(right, rowTop, right, y, 0.75); line(left, y, right, y, 0.75);
+      page = pdf.addPage([PAGE.width, PAGE.height]);
+      y = PAGE.height - M;
+      header();
+      rowTop = y;
+    }
+    drawRow(lines[i]!);
+    i++;
+  }
+  // 空の罫線の行で、合計と備考の枠が下に収まるところまで埋める（1 ページの形を保つ）
+  const floor = M + notesH + 20 + totalsH;
+  if (y - floor >= 0) {
+    while (y - ROW >= floor) drawRow({ kind: 'blank' });
+  } else {
+    page = pdf.addPage([PAGE.width, PAGE.height]);
+    y = PAGE.height - M;
+    rowTop = y;
+  }
+  if (rowTop !== y) { line(left, rowTop, left, y, 0.75); line(right, rowTop, right, y, 0.75); line(left, y, right, y, 0.75); }
+
+  // 合計の枠（右下。最後の 2 列にそろえる）
+  y -= 6;
+  const tLeft = xAmount - 120;
+  doc.totals.forEach((t, k) => {
+    const last = k === doc.totals.length - 1;
+    page.drawRectangle({ x: tLeft, y: y - ROW, width: right - tLeft, height: ROW, borderColor: rule, borderWidth: 0.75 });
+    line(xAmount, y, xAmount, y - ROW, 0.75);
+    text(t.label, 0, y - ROW + 6, { right: xAmount - pad, bold: true });
+    text(t.value, 0, y - ROW + 6, { right: right - pad, bold: last });
+    y -= ROW;
+  });
+
+  // 備考の枠（いちばん下）
+  y -= 14;
+  const nTop = Math.min(y, M + notesH);
+  page.drawRectangle({ x: left, y: M, width: right - left, height: nTop - M, borderColor: rule, borderWidth: 0.75 });
+  page.drawRectangle({ x: left, y: nTop - ROW, width: right - left, height: ROW, color: shade, borderColor: rule, borderWidth: 0.75 });
+  text('備考', 0, nTop - ROW + 6, { bold: true, center: PAGE.width / 2 });
+  let ny = nTop - ROW - 14;
+  for (const l of notesLines) {
+    if (ny < M + 4) break;
+    text(l, left + pad * 2, ny, { size: 8 });
+    ny -= 11;
+  }
+  return pdf.save();
+}
+

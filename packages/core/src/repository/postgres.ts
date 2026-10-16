@@ -1065,7 +1065,7 @@ export class PostgresRepository implements Repository {
       },
       privacy: { ...d.privacy, ...(r?.privacy ?? {}) },
       dashboard: { ...d.dashboard, ...(r?.dashboard ?? {}) },
-      invoice: { ...d.invoice, ...(r?.invoice ?? {}) },
+      invoice: { ...d.invoice, ...(r?.invoice ?? {}), quote: { ...d.invoice.quote, ...(r?.invoice?.quote ?? {}), labels: { ...d.invoice.quote.labels, ...(r?.invoice?.quote?.labels ?? {}) } } },
       cards: { ...d.cards, ...(r?.cards ?? {}) },
       inventory: { ...d.inventory, ...(r?.inventory ?? {}), features: { ...d.inventory.features, ...(r?.inventory?.features ?? {}) } },
       hr: {

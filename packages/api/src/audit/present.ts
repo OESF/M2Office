@@ -109,6 +109,7 @@ const ACTION_LABELS: Record<string, string> = {
   'compartment.enter': '権限区画のデータを見た',
   'compartment.leave': '権限区画から外れた',
   'settings.update': '会社の設定を変えた',
+  'settings.seal': '印影を登録・削除した',
   'me.settings.update': '個人設定を変えた',
   'me.chat_dm.setup': 'Chat で通知を受け取る個別メッセージを用意した',
   'me.profile.update': '表示名を変えた',

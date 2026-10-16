@@ -7546,5 +7546,59 @@ console.log('\n■ 102. 在庫の需要の予測（予測の目安と倍率が�
   }
 }
 
+console.log('\n■ 103. 帳票の型と印影（見本から寄せる・印影は管理者だけ・ファイルの一覧に出さない・見積書に押す。第15.2.3節、Q-240）');
+{
+  const { body: before } = await call('a', '/v1/admin/settings');
+  const prevInvoice = before?.invoice ?? null;
+  const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da6364f8ff0f0000050101005b1c4a1a0000000049454e44ae426082', 'hex');
+  const send = (path, method, file, name, who) => {
+    const form = new FormData();
+    form.append('file', new Blob([file]), name);
+    return fetch(`${API}/v1${path}`, { method, body: form, headers: { 'x-tenant': 'a', 'x-user': `${who}@alpha.example.jp` } });
+  };
+  try {
+    const byMember = await send('/admin/settings/invoice/seal', 'PUT', PNG, 'seal.png', 'member');
+    const up = await send('/admin/settings/invoice/seal', 'PUT', PNG, 'seal.png', 'admin');
+    const { body: after } = await call('a', '/v1/admin/settings');
+    const key = after?.invoice?.sealFileId;
+    const view = await fetch(`${API}/v1/admin/settings/invoice/seal`, { headers: { 'x-tenant': 'a', 'x-user': 'admin@alpha.example.jp' } });
+    const viewByMember = await fetch(`${API}/v1/admin/settings/invoice/seal`, { headers: { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' } });
+    const asFile = key ? await fetch(`${API}/v1/files/${key}`, { headers: { 'x-tenant': 'a', 'x-user': 'admin@alpha.example.jp' } }) : { status: 0 };
+    byMember.status === 403 && up.status === 200 && key && after.invoice.sealBox === true && view.status === 200 && viewByMember.status === 403 && asFile.status === 404
+      ? ok('印影は管理者だけが登録して見られ、ファイルとしては取り出せない（登録すると印を押すが入りになる）') : ng('印影の扱いが違う', JSON.stringify({ member: byMember.status, up: up.status, key: !!key, sealBox: after?.invoice?.sealBox, view: view.status, viewByMember: viewByMember.status, asFile: asFile.status }));
+    // 設定の保存では印影を変えない
+    await call('a', '/v1/admin/settings/invoice', { method: 'PUT', body: JSON.stringify({ ...after.invoice, sealFileId: 'seal-other', notes: '' }) });
+    const { body: kept } = await call('a', '/v1/admin/settings');
+    kept?.invoice?.sealFileId === key ? ok('設定の保存では印影を差し替えられない') : ng('設定の保存で印影が変わった', String(kept?.invoice?.sealFileId));
+
+    const sample = Buffer.concat([PNG, Buffer.from(`M2O-QUOTE-SAMPLE:${JSON.stringify({ template: 'ruled', title: '御見積書', labels: { issued: '見積書発行日' }, paymentTerms: 'お振込', notes: '確認用の断り書き' })}\n`, 'utf8')]);
+    const read = await send('/admin/settings/invoice/quote-sample', 'POST', sample, 'sample.png', 'admin');
+    const rb = await read.json();
+    const { body: s2 } = await call('a', '/v1/admin/settings');
+    read.status === 200 && s2?.invoice?.quote?.labels?.issued === '見積書発行日' && s2?.invoice?.quote?.paymentTerms === 'お振込' && s2?.invoice?.sealFileId === key
+      ? ok('見積書の見本から、型と文言を設定に入れる（印影はそのまま）') : ng('見本から寄せられない', JSON.stringify({ status: read.status, rb, quote: s2?.invoice?.quote }));
+
+    const { body: j } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: 'quote', input: { request: 'デザイン 30 万円', to: '株式会社見本商事' } }) }, 'member');
+    const r = await waitFor('a', j.runId, ['completed', 'failed', 'awaiting_approval'], 30000, 'member');
+    const out = (r?.steps ?? []).find((x) => x.stepId === 'create')?.output;
+    const fileId = JSON.stringify(out ?? '').match(/"fileId":"(f-[^"]+)"/)?.[1];
+    const pdf = fileId ? await fetch(`${API}/v1/files/${fileId}/content`, { headers: { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' } }) : null;
+    const bytes = pdf && pdf.status === 200 ? Buffer.from(await pdf.arrayBuffer()) : null;
+    // 印影は乗算で重ねる（PDF の中は圧縮されているため、読み込んで探す）
+    const { PDFDocument } = await import('pdf-lib');
+    const stamped = bytes ? (await PDFDocument.load(bytes)).context.enumerateIndirectObjects().some(([, o]) => String(o).includes('/Multiply')) : false;
+    bytes && bytes.subarray(0, 5).toString() === '%PDF-' && stamped
+      ? ok('見積書は会社の型で作り、登録した印影を押す') : ng('見積書に印影が押されない', JSON.stringify({ status: r?.run?.status, fileId, pdf: pdf?.status }));
+    const del = await call('a', '/v1/admin/settings/invoice/seal', { method: 'DELETE' });
+    const gone = await fetch(`${API}/v1/admin/settings/invoice/seal`, { headers: { 'x-tenant': 'a', 'x-user': 'admin@alpha.example.jp' } });
+    del.status === 200 && gone.status === 404 ? ok('印影を削除できる') : ng('印影を削除できない', `${del.status} ${gone.status}`);
+  } catch (err) {
+    ng('帳票の型と印影の確認が途中で止まった', String(err));
+  } finally {
+    await call('a', '/v1/admin/settings/invoice/seal', { method: 'DELETE' });
+    if (prevInvoice) await call('a', '/v1/admin/settings/invoice', { method: 'PUT', body: JSON.stringify(prevInvoice) });
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');

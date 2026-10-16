@@ -460,6 +460,8 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/admin/dashboard/people/:userId/secretary-avatar` | 管理者: その人の秘書のアバター（本人が上げた画像）。**本人が個人設定に登録した画像だけ**を返し、ファイルの ID は受け取らない。同じく個人名で表示する会社だけ |
 | `GET /v1/admin/dashboard/stats?days=1\|7\|30` | 管理者: ダッシュボードの集計（日ごと・時間帯・業務ごと・秘書の層・削減時間） |
 | `GET /v1/admin/settings` | 管理者: 会社の設定（会社情報・自社の書き方・自動化ポリシー・業務の有効化） |
+| `PUT /v1/admin/settings/invoice/seal` | 管理者: 印影（社印。PNG・JPEG・2 MB まで）を登録する。ファイルの記録を作らず置き場にだけ置く。`DELETE` で削除、`GET` で管理者の画面の見本（仕様書 第15.2.3節） |
+| `POST /v1/admin/settings/invoice/quote-sample` | 管理者: 会社の見積書の見本（PDF・画像）から、見積書の型と文言を読み取って設定に入れる（第15.2.3節） |
 | `PUT /v1/admin/settings/:section` | 管理者: 設定の 1 区分を保存（`company`・`writingStyle`・`automation`・`agents`・`effect`・`slides`・`privacy`。`knowledge`（言い換えの登録）は 400 で断る（第 0.115.0 版から秘書が考える。第11.7.7.0節）。`privacy` は Google から取得したデータを残す日数） |
 | `POST /v1/admin/users` | 管理者: 利用者の招待（Workspace のドメインのみ） |
 | `POST /v1/admin/users/:id/forget-mail-signatures` | 管理者: Google のデータの削除を求められたとき、その人のメールの署名から名刺を新しくした値を前の値に戻し、変更の記録を消す（`count`。仕様書 第27.6.1節、Q-152） |

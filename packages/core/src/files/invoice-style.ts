@@ -42,8 +42,20 @@ export async function loadInvoiceStyle(ctx: ToolContext): Promise<InvoiceStyleIn
     }
   }
 
+  // 印影（第15.2.3節）。ファイルの記録を作らずに置いてあるため、置き場から直接読む
+  let seal: InvoiceStyleInput['seal'] = null;
+  if (invoice.sealBox && invoice.sealFileId && (invoice.sealKind === 'png' || invoice.sealKind === 'jpeg')) {
+    try {
+      const bytes = await ctx.files.get(ctx.tenantId, invoice.sealFileId);
+      if (bytes) seal = { bytes, kind: invoice.sealKind };
+    } catch {
+      // 読めなければ薄い「印」の字で出す
+    }
+  }
+
   return {
     logo,
+    seal,
     from,
     ...(invoice.bankAccount ? { bankAccount: invoice.bankAccount } : {}),
     ...(invoice.notes ? { notes: invoice.notes } : {}),

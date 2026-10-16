@@ -2456,6 +2456,22 @@ export const api = {
     dashboardStats: (days: 1 | 7 | 30) => call<DashboardStats>(`/admin/dashboard/stats?days=${days}`),
     saveSettings: <K extends keyof TenantSettings>(section: K, value: TenantSettings[K]) =>
       call(`/admin/settings/${section}`, { method: 'PUT', body: JSON.stringify(value) }),
+    /** 印影（社印）を登録する（仕様書 第15.2.3節）。 */
+    saveSeal: (file: File) => {
+      const form = new FormData();
+      form.append('file', file);
+      return postForm<{ ok: true }>('/admin/settings/invoice/seal', form, 'PUT');
+    },
+    /** 印影を外す。 */
+    removeSeal: () => call<{ ok: true }>('/admin/settings/invoice/seal', { method: 'DELETE' }),
+    /** 印影の見本（管理者だけ）。無ければ `null`。 */
+    sealImage: () => fetchBlob('/admin/settings/invoice/seal'),
+    /** 見積書の見本から、型と文言を寄せる（第15.2.3節）。 */
+    quoteFromSample: (file: File) => {
+      const form = new FormData();
+      form.append('file', file);
+      return postForm<{ quote: TenantSettings['invoice']['quote'] }>('/admin/settings/invoice/quote-sample', form);
+    },
     inviteUser: (email: string, displayName: string, roles: string[]) =>
       call<User>('/admin/users', { method: 'POST', body: JSON.stringify({ email, displayName, roles }) }),
     /** 利用者を直す。止めたときは、止めた業務の数と、30 日後に削除される自分だけの名刺の数を返す（仕様書 第27.7節）。 */

@@ -232,7 +232,7 @@
 | `drive.create_folder` | `name`（必須）: フォルダの名前、`parentId`: 親のフォルダの ID（任意） |
 | `gmail.create_draft` | `replyTo`: 返信するメールの ID（任意）、`to`: 宛先（返信のときは省略可。元のメールの差出人になる）、`subject`（必須）: 件名、`body`（必須）: 本文 |
 | `pdf.render` | `title`（必須）: 表題（例: 請求書）、`to`: 宛先（例: 株式会社○○ 御中）、`from`: 差出人の各行、`fields`: { label, value } の配列（発行日・番号など）、`rows`（必須）: 明細。{ name, quantity, unitPrice, amount } の配列、`totals`: { label, value } の配列（小計・消費税・合計）。省略すると明細の合計だけ、`notes`: 備考の各行 |
-| `quote.create` | `to`: 宛先（会社名・担当者。例: 株式会社○○ 山田様）、`items`（必須）: 品目。{ name, quantity, unit, unitPrice, taxRate } の配列、`validDays`: 有効期限（発行から何日。既定 30）、`terms`: 納期・支払いの条件（任意）、`notes`: 備考（任意） |
+| `quote.create` | `to`: 宛先（会社名・担当者。例: 株式会社○○ 山田様）、`items`（必須）: 品目。{ name, quantity, unit, unitPrice, taxRate, group, discount } の配列。group は区分の見出し（任意）、discount は値引きの額（任意。依頼に書かれたものだけ）、`validDays`: 有効期限（発行から何日。既定は会社の見積書の設定）、`paymentTerms`: お支払い条件（任意。無ければ会社の既定）、`terms`: 納期などの条件（任意）、`notes`: 備考（任意） |
 | `sheet.render` | `title`（必須）: 題名、`format`: 形式（xlsx・csv）、`columns`（必須）: 列名、`rows`（必須）: 行の配列（各行は値の配列） |
 | `sheets.create` | `title`（必須）: 題名、`columns`（必須）: 列名、`rows`: 行の配列（各行は値の配列）、`folderId`: 入れるフォルダの ID（任意） |
 | `slides.create` | `title`（必須）: 表紙の題名、`subtitle`: 副題（任意）、`slides`（必須）: 本文のスライドの配列（layout・title ほか。12 枚まで）、`sources`: 出典（title・url）の配列、`template`: 会社が登録したテンプレートの名前（任意） |

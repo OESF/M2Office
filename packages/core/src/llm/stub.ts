@@ -47,6 +47,9 @@ export class StubLlmProvider implements LlmProvider {
    */
   async extractFromImage(req: LlmExtractRequest): Promise<LlmResponse> {
     const text = Buffer.from(req.bytes).toString('latin1');
+    // 見積書の見本（第15.2.3節）の自動テスト。`M2O-QUOTE-SAMPLE:` に続く 1 行の JSON を読み取り結果にする
+    const sample = text.indexOf('M2O-QUOTE-SAMPLE:');
+    if (sample !== -1) return { text: Buffer.from(text.slice(sample + 'M2O-QUOTE-SAMPLE:'.length).split('\n')[0] ?? '', 'latin1').toString('utf8'), tokensUsed: 32 };
     const at = text.indexOf('M2O-CARD:');
     if (at === -1) return { text: JSON.stringify({ isCard: false }), tokensUsed: 8 };
     const line = text.slice(at + 'M2O-CARD:'.length).split('\n')[0] ?? '';
@@ -75,6 +78,9 @@ export class StubLlmProvider implements LlmProvider {
 
     const system = req.messages.find((m) => m.role === 'system')?.content ?? '';
     const user = req.messages.at(-1)?.content ?? '';
+    // 見積書の見本（第15.2.3節）の自動テスト。見本の文に `M2O-QUOTE-SAMPLE:` に続く 1 行の JSON があれば、それを返す
+    const sampleAt = user.indexOf('M2O-QUOTE-SAMPLE:');
+    if (sampleAt !== -1) return { text: user.slice(sampleAt + 'M2O-QUOTE-SAMPLE:'.length).split('\n')[0] ?? '', tokensUsed: 32 };
     // 秘書の段取り（仕様書 第10.14節）を自動テストで通しで確かめるための、決まった応答
     const planned = stubPlanning(system, user);
     if (planned !== null) return { text: planned, tokensUsed: 16 };

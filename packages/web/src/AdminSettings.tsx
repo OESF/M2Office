@@ -312,10 +312,8 @@ function InvoiceStyleSettings({ initial, onSaved }: {
         placeholder="例: 翌月末" />
       <Text label="備考の定型文" value={style.notes} onChange={(v) => set({ notes: v })} multiline
         placeholder={'例: 振込手数料は貴社にてご負担ください。\nお支払い期限までにお振り込みをお願いいたします。'} />
-      <label className="check">
-        <input type="checkbox" checked={style.sealBox} onChange={(e) => set({ sealBox: e.target.checked })} />
-        印の欄を出す
-      </label>
+      <SealSettings style={style} onChange={set} onStored={(v) => { set(v); onSaved(); }} saver={saver} />
+      <QuoteStyleSettings quote={style.quote} onChange={(quote) => set({ quote })} saver={saver} />
       <div className="row">
         <SaveButton run={async () => {
           await api.admin.saveSettings('invoice', style);
@@ -324,6 +322,109 @@ function InvoiceStyleSettings({ initial, onSaved }: {
       </div>
       {saver.view}
     </div>
+  );
+}
+
+/**
+ * 印影（社印）と「印を押す」（仕様書 第15.2.3節、Q-240）。
+ *
+ * @remarks 印影は誰のファイルの一覧にも出さない。ここには小さな見本だけを出す。未登録なら帳票に薄い「印」の字を出す
+ */
+function SealSettings({ style, onChange, onStored, saver }: {
+  style: TenantSettings['invoice']; saver: ReturnType<typeof useSaver>;
+  /** 画面の中だけで変える（保存は「保存」で）。 */
+  onChange: (v: Partial<TenantSettings['invoice']>) => void;
+  /** 印影の登録・削除（その場で保存される）の後。 */
+  onStored: (v: Partial<TenantSettings['invoice']>) => void;
+}) {
+  const [preview, setPreview] = useState<string | null>(null);
+  useEffect(() => {
+    if (!style.sealFileId) { setPreview(null); return; }
+    let url: string | null = null;
+    void api.admin.sealImage().then((b) => { if (b) { url = URL.createObjectURL(b); setPreview(url); } });
+    return () => { if (url) URL.revokeObjectURL(url); };
+  }, [style.sealFileId]);
+  return (
+    <div className="field">
+      <label>印影</label>
+      <div className="row">
+        {preview
+          ? <img src={preview} alt="印影" style={{ width: 56, height: 56, objectFit: 'contain' }} />
+          : <span className="seal-placeholder" aria-label="未登録">印</span>}
+        <input type="file" accept="image/png,image/jpeg"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            e.target.value = '';
+            if (!file) return;
+            void saver.run(async () => {
+              await api.admin.saveSeal(file);
+              // 登録すると「印を押す」を入りにする。キーは画面からは使わないため、変わったことだけを伝える
+              onStored({ sealFileId: `seal-${Date.now()}`, sealBox: true });
+            }, '印影を登録しました');
+          }} />
+        {style.sealFileId && (
+          <button className="btn ghost small" onClick={() => void saver.run(async () => {
+            await api.admin.removeSeal();
+            onStored({ sealFileId: null, sealKind: null });
+          }, '印影を削除しました')}>削除</button>
+        )}
+      </div>
+      <label className="check">
+        <input type="checkbox" checked={style.sealBox} onChange={(e) => onChange({ sealBox: e.target.checked })} />
+        印を押す
+      </label>
+    </div>
+  );
+}
+
+/**
+ * 見積書の型と文言（仕様書 第15.2.3節）。見本の見積書を渡すと AI が寄せて入れる（ADR-0104）。
+ */
+function QuoteStyleSettings({ quote, onChange, saver }: {
+  quote: TenantSettings['invoice']['quote']; onChange: (q: TenantSettings['invoice']['quote']) => void; saver: ReturnType<typeof useSaver>;
+}) {
+  const set = (v: Partial<TenantSettings['invoice']['quote']>) => onChange({ ...quote, ...v });
+  const label = (k: keyof TenantSettings['invoice']['quote']['labels'], v: string) => set({ labels: { ...quote.labels, [k]: v } });
+  return (
+    <>
+      <h4>見積書</h4>
+      <div className="field">
+        <label>見本から寄せる</label>
+        <input type="file" accept="application/pdf,image/png,image/jpeg,image/webp"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            e.target.value = '';
+            if (!file) return;
+            void saver.run(async () => {
+              const r = await api.admin.quoteFromSample(file);
+              onChange(r.quote);
+            }, '見本から型と文言を入れました');
+          }} />
+      </div>
+      <div className="field">
+        <label>型</label>
+        <select value={quote.template} onChange={(e) => set({ template: e.target.value === 'simple' ? 'simple' : 'ruled' })}>
+          <option value="ruled">罫線の表</option>
+          <option value="simple">シンプル</option>
+        </select>
+      </div>
+      <Text label="表題" value={quote.title} onChange={(v) => set({ title: v })} placeholder="御見積書" />
+      <Text label="前文" value={quote.greeting} onChange={(v) => set({ greeting: v })} placeholder="下記の通り、御見積申し上げます。" />
+      <div className="row">
+        <Text label="見積番号の言い方" value={quote.labels.number} onChange={(v) => label('number', v)} />
+        <Text label="発行日の言い方" value={quote.labels.issued} onChange={(v) => label('issued', v)} />
+        <Text label="支払い条件の言い方" value={quote.labels.payment} onChange={(v) => label('payment', v)} />
+        <Text label="有効期限の言い方" value={quote.labels.validUntil} onChange={(v) => label('validUntil', v)} />
+      </div>
+      <Text label="お支払い条件の既定" value={quote.paymentTerms} onChange={(v) => set({ paymentTerms: v })} placeholder="例: お振込" />
+      <div className="field">
+        <label>有効期限（発行から何日）</label>
+        <input type="number" min={1} max={365} value={quote.validDays}
+          onChange={(e) => set({ validDays: Math.max(1, Math.min(365, Number(e.target.value) || 30)) })} />
+      </div>
+      <Text label="見積書の備考の定型文" value={quote.notes} onChange={(v) => set({ notes: v })} multiline
+        placeholder="例: 本見積書の有効期限内にご発注ください。" />
+    </>
   );
 }
 
