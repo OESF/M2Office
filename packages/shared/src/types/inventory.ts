@@ -9,7 +9,7 @@
 export const INVENTORY_EXTENSION_ID = 'inventory';
 
 /** 会社ごとに入り切りする機能（第29.4節）。 */
-export type InventoryFeature = 'lots' | 'units' | 'publish' | 'reserve' | 'order';
+export type InventoryFeature = 'lots' | 'units' | 'publish' | 'reserve' | 'order' | 'forecast';
 
 /** 機能の呼び方。 */
 export const INVENTORY_FEATURES: { id: InventoryFeature; label: string }[] = [
@@ -18,6 +18,7 @@ export const INVENTORY_FEATURES: { id: InventoryFeature; label: string }[] = [
   { id: 'publish', label: 'Web への公開' },
   { id: 'reserve', label: '予約との引き当て' },
   { id: 'order', label: '発注の案' },
+  { id: 'forecast', label: '需要の予測（季節と行事から目安を決め直す）' },
 ];
 
 /** 会社の在庫管理の設定（第29.4.1節）。導入のときに会社が決める。 */
@@ -38,7 +39,7 @@ export interface InventorySettings {
 /** 在庫管理の既定の設定。既定は切り（第29.2節）。 */
 export const DEFAULT_INVENTORY_SETTINGS: InventorySettings = {
   enabled: false,
-  features: { lots: false, units: false, publish: false, reserve: false, order: true },
+  features: { lots: false, units: false, publish: false, reserve: false, order: true, forecast: true },
   lowDefault: 3,
   leadDaysDefault: 7,
   countEveryDays: null,
@@ -84,8 +85,13 @@ export interface InventoryItem {
    */
   employeePrice: number | null;
   photoFileId: string | null;
-  /** 残りわずかの目安。`null` なら会社の既定。 */
+  /** 残りわずかの目安。`null` なら会社の既定（需要の予測があればその目安）。会社が決めた値は「固定」として予測で変えない（第29.14節）。 */
   lowThreshold: number | null;
+  /**
+   * 需要の予測（第29.14節、Q-116）。週に 1 回、ワーカーが決め直す。`low` は予測の目安（会社が目安を決めていない品目に効く）、
+   * `factor` は次の 4 週の使う速さの倍率（0.5〜3）、`note` は理由（1 行）。予測していなければ無い
+   */
+  forecast?: { low: number | null; factor: number; note: string; at: string } | null;
   supplierId: string | null;
   /** 仕入れにかかる日数。`null` なら仕入先か会社の既定。 */
   leadDays: number | null;

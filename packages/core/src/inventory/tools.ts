@@ -275,6 +275,7 @@ export const inventoryForecast: Tool = {
       items: rows.map((r) => ({
         itemId: r.itemId, name: r.name, available: formatQty(r, r.available), dailyUse: `${r.dailyUse} ${r.unit}`,
         daysLeft: r.daysLeft, leadDays: r.leadDays, low: r.low, runningOut: r.runningOut,
+        ...(r.forecastNote ? { forecast: r.forecastNote } : {}),
         expiring: r.expiring.map((e) => ({ lot: e.lot, expiresOn: e.expiresOn, qty: formatQty(r, e.qty), days: e.days })),
         proposal: r.proposal ? {
           text: proposalLine(r), qty: r.proposal.qty, packs: r.proposal.packs, unit: r.unit, packUnit: r.packUnit,

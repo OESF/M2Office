@@ -47,6 +47,8 @@ export function statusLine(r: ForecastRow): string {
   const parts = [`使える数 ${qty(r, r.available)}`];
   if (r.runningOut && r.daysLeft !== null) parts.push(`あと ${r.daysLeft} 日で無くなる見込み（仕入れに ${r.leadDays} 日）`);
   else if (r.low) parts.push('残りわずか');
+  // 需要の予測の理由（第29.14節）
+  if (r.forecastNote) parts.push(`見込み: ${r.forecastNote}`);
   return `${r.name}: ${parts.join('・')}`;
 }
 

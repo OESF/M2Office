@@ -164,6 +164,10 @@ export interface InventoryStore {
   listItems(tenantId: string, opts?: { includeStopped?: boolean }): Promise<InventoryItem[]>;
   getItem(tenantId: string, id: string): Promise<InventoryItem | null>;
   saveItem(tenantId: string, item: ItemRecord, userId: string, at: string): Promise<void>;
+  /** 期間（`since` 以上 `until` 未満）の品目ごとの使用の合計（使う単位。取り消しを差し引く。需要の予測。第29.14節）。 */
+  usageByItem(tenantId: string, since: string, until: string): Promise<Map<string, number>>;
+  /** 需要の予測を書く（第29.14節）。`null` なら消す。品目のほかの項目と更新の時刻は変えない。 */
+  setForecast(tenantId: string, itemId: string, f: { low: number | null; factor: number; note: string; at: string } | null): Promise<void>;
   /** バーコードを足す。すでに別の品目のものなら `false`。 */
   addCode(tenantId: string, itemId: string, value: string, kind: string): Promise<boolean>;
   removeCode(tenantId: string, itemId: string, value: string): Promise<void>;
@@ -260,6 +264,7 @@ interface ItemRow {
   pack_size: unknown; price: unknown; price_tax_included: boolean; employee_price: unknown; photo_file_id: string | null; low_threshold: unknown;
   supplier_id: string | null; lead_days: number | null; note: string; status: 'active' | 'stopped'; updated_at: unknown;
   codes: string[] | null;
+  forecast_low?: unknown; forecast_factor?: unknown; forecast_note?: string | null; forecast_at?: unknown;
 }
 
 function toItem(r: ItemRow): InventoryItem {
@@ -268,6 +273,7 @@ function toItem(r: ItemRow): InventoryItem {
     packSize: numOrNull(r.pack_size), price: numOrNull(r.price), priceTaxIncluded: r.price_tax_included, employeePrice: numOrNull(r.employee_price),
     photoFileId: r.photo_file_id, lowThreshold: numOrNull(r.low_threshold), supplierId: r.supplier_id, leadDays: r.lead_days,
     note: r.note, status: r.status, codes: r.codes ?? [], updatedAt: iso(r.updated_at),
+    forecast: r.forecast_at ? { low: numOrNull(r.forecast_low), factor: numOrNull(r.forecast_factor) ?? 1, note: r.forecast_note ?? '', at: iso(r.forecast_at) } : null,
   };
 }
 
@@ -378,6 +384,19 @@ export class PostgresInventoryStore implements InventoryStore {
   async getItem(tenantId: string, id: string): Promise<InventoryItem | null> {
     const rows = await this.q<ItemRow>(tenantId, `${ITEM_SELECT} where i.tenant_id = $1 and i.id = $2`, [tenantId, id]);
     return rows[0] ? toItem(rows[0]) : null;
+  }
+
+  async usageByItem(tenantId: string, since: string, until: string): Promise<Map<string, number>> {
+    const rows = await this.q<{ item_id: string; used: unknown }>(tenantId,
+      `select item_id, -sum(delta) as used from inventory_moves where tenant_id = $1 and kind = 'out' and created_at >= $2 and created_at < $3 group by item_id`,
+      [tenantId, since, until]);
+    return new Map(rows.map((r) => [r.item_id, Math.max(0, Number(r.used) || 0)]));
+  }
+
+  async setForecast(tenantId: string, itemId: string, f: { low: number | null; factor: number; note: string; at: string } | null): Promise<void> {
+    await this.q(tenantId,
+      `update inventory_items set forecast_low = $3, forecast_factor = $4, forecast_note = $5, forecast_at = $6 where tenant_id = $1 and id = $2`,
+      [tenantId, itemId, f?.low ?? null, f?.factor ?? null, f?.note ?? null, f?.at ?? null]);
   }
 
   async saveItem(tenantId: string, i: ItemRecord, userId: string, at: string): Promise<void> {
@@ -804,7 +823,22 @@ export class MemoryInventoryStore implements InventoryStore {
   async saveItem(tenantId: string, item: ItemRecord, _userId: string, at: string): Promise<void> {
     const prev = this.items.get(item.id);
     if (prev && prev.tenantId !== tenantId) return;
-    this.items.set(item.id, { ...item, codes: [], updatedAt: at, tenantId });
+    this.items.set(item.id, { ...item, codes: [], updatedAt: at, tenantId, forecast: prev?.forecast ?? null });
+  }
+
+  async usageByItem(tenantId: string, since: string, until: string): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    for (const m of this.moves) {
+      const at = (m as { createdAt?: string }).createdAt ?? '';
+      if (m.tenantId !== tenantId || m.kind !== 'out' || at < since || at >= until) continue;
+      out.set(m.itemId, (out.get(m.itemId) ?? 0) - m.delta);
+    }
+    return out;
+  }
+
+  async setForecast(tenantId: string, itemId: string, f: { low: number | null; factor: number; note: string; at: string } | null): Promise<void> {
+    const i = this.items.get(itemId);
+    if (i && i.tenantId === tenantId) i.forecast = f;
   }
 
   async addCode(tenantId: string, itemId: string, value: string): Promise<boolean> {

@@ -7509,5 +7509,42 @@ console.log('\n■ 101. 採用支援（人事区画の人だけ・合否を付�
   }
 }
 
+console.log('\n■ 102. 在庫の需要の予測（予測の目安と倍率が効く・会社の目安が先・切れば効かない。第29.14節、Q-116）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const tag = `確認用予測${Date.now().toString(36)}`;
+  const { rows: saved } = await owner.query(`select tenant_id, inventory from tenant_settings where tenant_id = 't-alpha'`);
+  try {
+    await call('a', '/v1/admin/extensions/inventory/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const on = await call('a', '/v1/admin/extensions/inventory/settings', { method: 'PUT', body: JSON.stringify({ features: { forecast: true, order: true }, lowDefault: 1 }) });
+    const free = (await call('a', '/v1/inventory/items', { method: 'POST', body: JSON.stringify({ name: `${tag} お茶`, unit: '本' }) })).body?.item;
+    const fixed = (await call('a', '/v1/inventory/items', { method: 'POST', body: JSON.stringify({ name: `${tag} 水`, unit: '本', lowThreshold: 2 }) })).body?.item;
+    // 両方 5 本ずつ入れる（会社の既定 1・会社が決めた目安 2 なら残りわずかではない）
+    for (const it of [free, fixed]) await call('a', '/v1/inventory/moves', { method: 'POST', body: JSON.stringify({ kind: 'in', itemId: it?.id, qty: 5 }) });
+    // ワーカーが書く予測を、直接書いて確かめる（予測の計算そのものは単体テスト）
+    await owner.query(`update inventory_items set forecast_low = 20, forecast_factor = 2, forecast_note = '年末の需要', forecast_at = now() where tenant_id = 't-alpha' and name like $1`, [`${tag}%`]);
+    const list = (await call('a', '/v1/inventory', {}, 'member')).body?.items ?? [];
+    const f = list.find((x) => x.id === free?.id);
+    const x = list.find((y) => y.id === fixed?.id);
+    on.body?.inventory?.features?.forecast === true && f?.forecast?.factor === 2 && f?.forecast?.note === '年末の需要' && f?.low === true && x?.low === false
+      ? ok('予測の倍率と理由を品目に返し、会社が目安を決めていない品目だけ予測の目安（20）で残りわずかになる（会社が決めた目安が先）') : ng('予測が品目に効かない', JSON.stringify({ features: on.body?.inventory?.features, f: { forecast: f?.forecast, low: f?.low }, x: x?.low }));
+    await call('a', '/v1/admin/extensions/inventory/settings', { method: 'PUT', body: JSON.stringify({ features: { forecast: false } }) });
+    const off = (await call('a', '/v1/inventory', {}, 'member')).body?.items ?? [];
+    off.find((y) => y.id === free?.id)?.low === false && off.find((y) => y.id === fixed?.id)?.low === false
+      ? ok('予測を切ると、予測の目安は効かず会社の既定に戻る') : ng('切っても予測の目安が効く', JSON.stringify(off.filter((y) => String(y.name).startsWith(tag)).map((y) => ({ name: y.name, low: y.low }))));
+  } catch (err) {
+    ng('需要の予測の確認が途中で止まった', String(err));
+  } finally {
+    for (const t of ['inventory_stock', 'inventory_moves', 'inventory_lots', 'inventory_codes']) {
+      await owner.query(`delete from ${t} where item_id in (select id from inventory_items where tenant_id = 't-alpha' and name like $1)`, [`${tag}%`]);
+    }
+    await owner.query(`delete from inventory_items where tenant_id = 't-alpha' and name like $1`, [`${tag}%`]);
+    for (const r of saved) await owner.query(`update tenant_settings set inventory = $2 where tenant_id = $1`, [r.tenant_id, r.inventory ? JSON.stringify(r.inventory) : null]);
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');

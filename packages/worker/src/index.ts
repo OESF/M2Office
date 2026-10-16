@@ -16,7 +16,7 @@ import {
   assertDatabaseConfigured,
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
   RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, GoogleContactsService, KnowledgeEmbedder, MemoryEmbedder, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, JGrantsApi, MockJGrants, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, MEMBER_LINE_SEND, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, EffectService, PostgresEffectStore, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger,
-  NotificationDelivery, MockNotificationSender, RoutingNotificationSender, GoogleChatAppSender, ScheduleReplyWatcher, SCHEDULING_CONFIRM_AGENT_ID, purgeRecruitingRuns, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
+  NotificationDelivery, MockNotificationSender, RoutingNotificationSender, GoogleChatAppSender, ScheduleReplyWatcher, SCHEDULING_CONFIRM_AGENT_ID, purgeRecruitingRuns, runDemandForecasts, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator, ProfileBuilder, CaseNoteBuilder, KnowledgeGaps, PostgresKnowledgeGapStore, aiUsageMeterFromEnv, enterAiUsage, withAiUsage, setEnqueueAiGuard, AutoMinutes, MINUTES_AGENT_ID, appPath, backupConfigFromEnv, machineDir, readBackupStatus, takeUnnotifiedUpdateFailure, takeClosedMaintenanceSessions, heartbeatConfigFromEnv, sendHeartbeat, HEARTBEAT_INTERVAL_MS, machineStatus, machineConfigFromEnv, restoreTest, runBackup, takeBackupRequest, writeWorkerBeat, OpsAppSide, createPool, offsiteConfigFromEnv, readOffsiteStatus, runOffsite, checkOffsite,
   SecurityWatch, PostgresSecurityStore,
@@ -670,6 +670,9 @@ const AUTO_MINUTES_INTERVAL_MS = 10 * 60_000;
 let lastAutoMinutes = 0;
 let lastScheduleReplies = 0;
 let lastRecruitingPurge = 0;
+let lastDemandForecast = 0;
+/** 在庫の需要の予測を見る間隔（第29.14節。1 時間ごとに見て、月曜の朝 6 時から週に 1 回回す）。 */
+const DEMAND_FORECAST_INTERVAL_MS = 3_600_000;
 /** 採用支援の応募書類と結果を消す見回りの間隔（第9.6.6節。6 時間ごと。消すのは 6 か月を過ぎたものだけ）。 */
 const RECRUITING_PURGE_INTERVAL_MS = 6 * 3_600_000;
 /** 社外との日程調整の返事を見る間隔（第9.5.3.1節。既定 15 分）。 */
@@ -814,6 +817,20 @@ while (running) {
       if (n > 0) log.info('会議の後の議事録を始めました', { count: n });
     } catch (err) {
       log.warn('会議の後の議事録の見回りで例外が発生しました', { err });
+    }
+  }
+
+  // 在庫の需要の予測（週に 1 回、月曜の朝。第29.14節、Q-116）
+  if (Date.now() - lastDemandForecast >= DEMAND_FORECAST_INTERVAL_MS) {
+    lastDemandForecast = Date.now();
+    try {
+      const n = await withAiUsage({ purpose: 'worker:inventory' }, () => runDemandForecasts({
+        listTenantIds: () => repo.listTenantIds(), settingsOf: async (t) => (await repo.getTenantSettings(t)).inventory,
+        store: inventory.store, llmFor: (t) => ai.llmFor(t),
+      }, new Date()));
+      if (n > 0) log.info('在庫の需要の予測を決め直しました', { items: n });
+    } catch (err) {
+      log.warn('在庫の需要の予測で例外が発生しました', { err });
     }
   }
 

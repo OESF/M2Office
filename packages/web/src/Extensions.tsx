@@ -402,7 +402,7 @@ function Consent({ item: x, busy, options, onAgree, onCancel }: {
  * @remarks 働かない機能のスイッチを出さない（入れても何も起きないと、管理者を惑わせるため）。
  * 新しい機能を作ったら、ここに足すのを忘れない（`INVENTORY_FEATURES` のすべてが揃えば、この絞り込みは要らない）
  */
-const INVENTORY_READY: InventoryFeature[] = ['lots', 'units', 'order', 'reserve', 'publish'];
+const INVENTORY_READY: InventoryFeature[] = ['lots', 'units', 'order', 'reserve', 'publish', 'forecast'];
 
 /**
  * 在庫管理の会社の設定（仕様書 第29.4節・第29.4.1節）。機能の入り切りと、残りわずか・仕入れの日数の既定。すぐに反映する。

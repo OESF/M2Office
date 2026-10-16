@@ -58,6 +58,10 @@ function Marks({ item }: { item: InventoryItemView }) {
       {item.onHand < 0 && <span className="badge danger">マイナス</span>}
       {item.expired > 0 && <span className="badge danger">期限切れ {qtyText(item, item.expired)}</span>}
       {item.low && item.status === 'active' && <span className="badge warn">残りわずか</span>}
+      {/* 需要の予測（第29.14節）。倍率が 1 でない品目に、見込みと理由を出す */}
+      {item.status === 'active' && item.forecast && item.forecast.factor !== 1 && (
+        <span className="badge" title={item.forecast.note || undefined}>{item.forecast.factor > 1 ? `多めに使う見込み（${item.forecast.factor} 倍${item.forecast.note ? `。${item.forecast.note}` : ''}）` : `少なめの見込み（${item.forecast.factor} 倍）`}</span>
+      )}
     </>
   );
 }

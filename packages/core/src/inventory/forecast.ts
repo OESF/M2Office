@@ -1,7 +1,8 @@
 /**
  * @file 在庫の見張りの計算（仕様書 第29.14節）。無くなる見込みの日・残りわずか・使用期限の近いロット・発注の案。
  *
- * 推論を使わない決まった計算にする（同じ記録からは同じ答えを出す）。需要の予測（季節・流行）は Phase 2（Q-116）。
+ * 推論を使わない決まった計算にする（同じ記録からは同じ答えを出す）。需要の予測（Q-116。`demand.ts`）があれば、
+ * その倍率で使う速さを、その目安で残りわずかを決める（会社が品目に目安を決めていればそれが先）。
  * 使う速さは過去 4 週の「使用」の合計から出す。調整（棚卸しの差・廃棄）は使う速さに入れない。
  */
 
@@ -58,9 +59,17 @@ export interface ForecastRow {
   expiring: ExpiringLot[];
   /** 発注の案（発注の案の機能を入れていて、残りわずか・無くなる見込みのとき）。 */
   proposal: OrderProposal | null;
+  /** 需要の予測の理由（倍率が 1 でないとき。画面と朝のブリーフに出す。第29.14節）。 */
+  forecastNote: string | null;
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/** 残りわずかの目安（会社が品目に決めた値 → 需要の予測の目安 → 会社の既定。第29.14節）。 */
+export function effectiveLow(item: Pick<InventoryItemView, 'lowThreshold' | 'forecast'>, settings: Pick<InventorySettings, 'lowDefault' | 'features'>): number {
+  const predicted = settings.features.forecast !== false ? item.forecast?.low ?? null : null;
+  return item.lowThreshold ?? predicted ?? settings.lowDefault;
+}
 
 /** 2 つの日付（YYYY-MM-DD）の間の日数。 */
 export function daysBetween(from: string, to: string): number {
@@ -78,10 +87,12 @@ export function forecastItem(
   item: InventoryItemView, used: number, lots: { lot: string | null; expiresOn: string | null; qty: number }[],
   supplier: InventorySupplier | null, settings: InventorySettings, today: string,
 ): ForecastRow {
-  const dailyUse = round2(Math.max(0, used) / USAGE_DAYS);
+  // 需要の予測の倍率（次の 4 週の見込み）。切っている会社と、予測の無い品目は 1
+  const factor = settings.features.forecast !== false ? item.forecast?.factor ?? 1 : 1;
+  const dailyUse = round2((Math.max(0, used) / USAGE_DAYS) * factor);
   const daysLeft = dailyUse > 0 ? Math.max(0, Math.floor(item.available / dailyUse)) : null;
   const leadDays = item.leadDays ?? supplier?.leadDays ?? settings.leadDaysDefault;
-  const threshold = item.lowThreshold ?? settings.lowDefault;
+  const threshold = effectiveLow(item, settings);
   const runningOut = daysLeft !== null && daysLeft <= leadDays;
   const expiring = lots
     .filter((l) => l.qty > 0 && l.expiresOn)
@@ -99,9 +110,10 @@ export function forecastItem(
       qty = packs * item.packSize;
     }
     // 案を出した理由と同じことを書く（無くなる見込みなら日数、そうでなければ目安）
+    const basis = factor !== 1 && item.forecast?.note ? `見込みで 1 日 ${dailyUse} ${item.unit}（${item.forecast.note}）` : `過去 4 週で 1 日 ${dailyUse} ${item.unit}使用`;
     const reason = runningOut
-      ? `過去 4 週で 1 日 ${dailyUse} ${item.unit}使用。あと ${daysLeft} 日で無くなる見込み（仕入れに ${leadDays} 日）`
-      : `使える数が目安（${threshold} ${item.unit}）以下${dailyUse > 0 ? `。過去 4 週で 1 日 ${dailyUse} ${item.unit}使用` : ''}`;
+      ? `${basis}。あと ${daysLeft} 日で無くなる見込み（仕入れに ${leadDays} 日）`
+      : `使える数が目安（${threshold} ${item.unit}）以下${dailyUse > 0 ? `。${basis}` : ''}`;
     proposal = {
       qty, packs, supplierId: supplier?.id ?? null, supplierName: supplier?.name ?? null,
       method: supplier?.method ?? null, contact: supplier?.contact ?? null, reason,
@@ -110,6 +122,7 @@ export function forecastItem(
   return {
     itemId: item.id, name: item.name, unit: item.unit, packUnit: item.packUnit, packSize: item.packSize,
     available: item.available, dailyUse, daysLeft, leadDays, low: item.low, runningOut, expiring, proposal,
+    forecastNote: factor !== 1 && item.forecast?.note ? item.forecast.note : null,
   };
 }
 

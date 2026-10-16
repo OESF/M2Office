@@ -20,7 +20,7 @@ import { dateIn } from '../cards/service.js';
 import type { InventoryStore, ItemRecord, NewMove, StockRecord } from './store.js';
 import { parseCode, type ParsedCode } from './gs1.js';
 import { shelfKeyOf } from './labels.js';
-import { forecastItem, sortForecast, USAGE_DAYS, type ForecastRow } from './forecast.js';
+import { effectiveLow, forecastItem, sortForecast, USAGE_DAYS, type ForecastRow } from './forecast.js';
 import { matchLine, readSlip, type SlipLine } from './slip.js';
 
 /** 場所が 1 つも無い会社に作る既定の場所の名前（第29.7節）。 */
@@ -302,7 +302,8 @@ export class InventoryService {
       const expiries = rows.filter((s) => s.qty > 0 && s.expiresOn).map((s) => s.expiresOn!).sort();
       return {
         ...i, onHand, reserved, expired, available,
-        low: i.status === 'active' && available <= (i.lowThreshold ?? settings.lowDefault),
+        // 目安は、会社が品目に決めた値（固定）→ 需要の予測の目安 → 会社の既定の順（第29.14節）
+        low: i.status === 'active' && available <= effectiveLow(i, settings),
         nearestExpiry: expiries[0] ?? null,
       };
     });

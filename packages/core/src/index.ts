@@ -114,6 +114,7 @@ export type { Tool, ToolContext, ArgSpec, ToolArgsSchema, GoogleScope, GoogleSco
 export { BUILTIN_TOOLS } from './tools/builtin.js';
 export { quoteTotals, quoteItemKey, quoteMarkdown, QUOTE_TOOLS, QUOTE_VALID_DAYS } from './tools/quote.js';
 export { checkRecruitText, RECRUIT_TOOLS } from './tools/recruit.js';
+export { forecastDemand, runDemandForecasts, demandBase, baseFactor, askDemandFactors, demandDue, DEMAND_FACTOR_MIN, DEMAND_FACTOR_MAX, type DemandBase } from './inventory/demand.js';
 export { purgeRecruitingRuns, RECRUITING_KEEP_MS } from './agents/recruiting-retention.js';
 export { ScheduleReplyWatcher, SCHEDULE_TOOLS, SCHEDULE_WAIT_MS, SCHEDULING_CONFIRM_AGENT_ID, guessScheduleReply, readScheduleReply, slotText, splitAttendees, type ScheduleReply, type ScheduleReplyWatcherDeps } from './scheduling/external.js';
 
