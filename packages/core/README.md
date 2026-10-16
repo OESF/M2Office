@@ -21,6 +21,7 @@ src/files/       ファイルの置き場と、PDF・Excel・CSV・Word の読�
                  compare.ts は 2 つの版を条項ごとに比べる（ツール file.compare。契約書の修正版との差分。第28.13節）。
                  transcribe.ts は録音（MP3・M4A・WAV）を 30 分ずつに分けて推論で文字にし、時刻と話者をつなぐ（第9.4.5節、ADR-0097）。
                  to-text.ts は文字にし終えた録音を同じ ID のまま文字起こしに置き換え、recordings.ts は文字にならなかった録音を消す
+                 live-recording.ts は画面でその場で録る録音の欠片を受け、止めたら 1 つの WAV にし、止めずに 1 日たったものを消す（第9.4.5.1節、ADR-0099）
                  redline.ts は修正の案を Word の変更履歴とコメントとして入れる（ツール docx.redline。第28.15節）。
                  長い文書は to-text.ts の splitParts・outlineOf で部分に分け、条の見出しの一覧を返す（file.read_text の part）。
                  font-chars.ts は、同梱の書体に無い JIS の正式な対応の字（マイナス記号など）を、描く前に同じ形の字に置き換える

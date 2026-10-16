@@ -502,6 +502,11 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/onboarding/checklist` | 管理者: 初期設定のチェックリスト |
 | `POST /v1/onboarding/checklist/notified` | 管理者: 従業員へ知らせたことの記録 |
 | `POST /v1/files` | ファイルの受け取り（multipart の `file`。10 MB まで。録音（MP3・M4A・WAV）は 200 MB・3 時間まで。ローカルの方針の会社・AI の無い会社は録音を 422 で断る。仕様書 第9.4.5節） |
+| `GET /v1/files/recordings/current` | 本人の途中の録音（その場で録る録音。第9.4.5.1節）。無ければ `recording: null` |
+| `POST /v1/files/recordings` | その場で録り始める。録音を受け取れない会社（ローカルの方針・AI の設定が無い）は 422。本人の途中の録音があれば作らずに返す（`resumed: true`。1 人 1 つ） |
+| `PUT /v1/files/recordings/:id/parts/:seq` | 録音の欠片（16 kHz・モノラル・16 ビットの PCM。本文はそのままのバイト。30 秒分まで）。同じ番号は置き換える。合わせて 3 時間まで（413）。本人だけ |
+| `POST /v1/files/recordings/:id/finish` | 止めて、欠片を番号の順につないだ 1 つの WAV のファイルにする（渡された録音と同じに扱う）。監査ログ `file.upload`（`live: true`） |
+| `DELETE /v1/files/recordings/:id` | 途中の録音を消す。監査ログ `file.audio_discard` |
 | `GET /v1/files/drive-picker` | 秘書に渡すドライブのファイルを選ぶ画面の材料（`drive.file` だけに絞ったトークン。見本の会社は見本の一覧。仕様書 第10.10.8節） |
 | `POST /v1/files/from-drive` | 本人がドライブで選んだファイル（`fileId`）を受け取る。Google のドキュメント・スプレッドシート・スライドは Word・Excel・PDF に書き出す。201 |
 | `GET /v1/files/:id` | メタデータ。所有者と承認者のみ |

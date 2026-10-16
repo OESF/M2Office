@@ -499,6 +499,18 @@ export interface Repository {
   listStaleRecordings(tenantId: string, before: string): Promise<{ id: string; size: number }[]>;
   /** ファイルの記録を消す（中身は呼び出し側が置き場から消す）。 */
   deleteFile(tenantId: string, id: string): Promise<void>;
+  /** 本人が録っている途中の録音（第9.4.5.1節。1 人 1 つまで）。無ければ `null`。 */
+  getLiveRecording(tenantId: string, userId: string): Promise<LiveRecording | null>;
+  /** 途中の録音を作る。本人のものがすでにあれば作らず `false`。 */
+  createLiveRecording(rec: { id: string; tenantId: string; userId: string; createdAt: string }): Promise<boolean>;
+  /** 途中の録音の欠片の番号と大きさを記録し、最後に送った時刻を進める。同じ番号は置き換える。 */
+  putLiveRecordingPart(tenantId: string, recordingId: string, seq: number, size: number, at: string): Promise<void>;
+  /** 途中の録音の欠片（番号の順）。 */
+  listLiveRecordingParts(tenantId: string, recordingId: string): Promise<{ seq: number; size: number }[]>;
+  /** 途中の録音を消す（欠片の記録も消える。中身は呼び出し側が置き場から消す）。 */
+  deleteLiveRecording(tenantId: string, recordingId: string): Promise<void>;
+  /** 最後に欠片を受けたのが `before` より前の途中の録音（消す見回りが使う）。 */
+  listStaleLiveRecordings(tenantId: string, before: string): Promise<LiveRecording[]>;
 
   createUser(user: User): Promise<void>;
   /** 表示名・ロール・状態を更新する。メールアドレスは変えない（Google 側で管理する）。 */
@@ -851,6 +863,23 @@ export interface Memory {
   lastUsedAt?: string | null;
   /** 種類（`fact`: 事実、`preference`: 仕事のやり方の好み。第11.13.2節）。無ければ事実。 */
   kind?: MemoryKind;
+}
+
+/**
+ * 画面で録っている途中の録音（仕様書 第9.4.5.1節、ADR-0099）。欠片の中身はファイルの置き場にあり、止めたときに 1 つの WAV にする。
+ */
+export interface LiveRecording {
+  id: string;
+  tenantId: string;
+  userId: string;
+  createdAt: string;
+  /** 最後に欠片を受けた時刻。1 日たったら見回りが消す。 */
+  updatedAt: string;
+  /** 受けた欠片の数と、合わせた大きさ（バイト）。 */
+  parts: number;
+  bytes: number;
+  /** 次に送る欠片の番号（受けた最大の番号 + 1）。 */
+  nextSeq: number;
 }
 
 /**

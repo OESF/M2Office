@@ -161,6 +161,14 @@ export interface MySlipSummary {
   net: number;
 }
 
+/** 途中の録音（仕様書 第9.4.5.1節）。`seconds` は録れている長さ、`nextSeq` は次に送る欠片の番号。 */
+export interface LiveRecordingView {
+  id: string;
+  createdAt: string;
+  seconds: number;
+  nextSeq: number;
+}
+
 /** ファイルを送る（multipart。既定は POST）。失敗なら ApiError（`problems` つき）。 */
 async function postForm<T>(path: string, form: FormData, method: 'POST' | 'PUT' = 'POST'): Promise<T> {
   const res = await fetch(`/v1${path}`, {
@@ -1259,6 +1267,19 @@ export const api = {
   driveFilePicker: () => call<{ kind: 'google'; apiKey: string; appId: string; accessToken: string } | { kind: 'mock'; items: { id: string; name: string }[] }>('/files/drive-picker'),
   /** 本人がドライブで選んだファイルを受け取る（手元から渡したファイルと同じ置き場に入る）。 */
   fileFromDrive: (fileId: string) => call<{ id: string; name: string }>('/files/from-drive', { method: 'POST', body: JSON.stringify({ fileId }) }),
+  /** その場で録る録音（仕様書 第9.4.5.1節）。途中の録音は本人だけが扱う。 */
+  recordings: {
+    /** 本人の途中の録音。無ければ `null`。 */
+    current: () => call<{ recording: LiveRecordingView | null }>('/files/recordings/current'),
+    /** 録り始める。途中の録音があれば、それを返す（`resumed: true`）。録音を受け取れない会社では断られる（422）。 */
+    start: () => call<{ recording: LiveRecordingView; resumed: boolean }>('/files/recordings', { method: 'POST', body: '{}' }),
+    /** 欠片（16 kHz・モノラル・16 ビットの PCM）を送る。同じ番号は置き換わる。 */
+    putPart: (id: string, seq: number, pcm: Blob) => sendRaw<{ recording: LiveRecordingView }>('PUT', `/files/recordings/${encodeURIComponent(id)}/parts/${seq}`, pcm),
+    /** 止めて 1 つの WAV のファイルにする。 */
+    finish: (id: string) => call<{ id: string; name: string }>(`/files/recordings/${encodeURIComponent(id)}/finish`, { method: 'POST', body: '{}' }),
+    /** 途中の録音を消す。 */
+    discard: (id: string) => call<{ ok: true }>(`/files/recordings/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  },
   uploadFile: async (file: File, onProgress?: (sent: number) => void): Promise<{ id: string; name: string }> => {
     const form = new FormData();
     form.append('file', file);

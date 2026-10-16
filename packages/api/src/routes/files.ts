@@ -7,10 +7,14 @@
  */
 
 import { Hono } from 'hono';
-import { detectKind, isAudioName, loadFile, MAX_AUDIO_BYTES, MAX_FILE_BYTES, saveFile } from '@m2office/core';
+import { bodyLimit } from 'hono/body-limit';
+import {
+  detectKind, discardLiveRecording, finishLiveRecording, isAudioName, LIVE_PART_MAX_BYTES, liveSeconds, LiveRecordingError, loadFile, MAX_AUDIO_BYTES, MAX_FILE_BYTES,
+  putLiveRecordingPart, saveFile, startLiveRecording, type LiveRecording,
+} from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { driveFilesFor } from '../drive-files.js';
-import { recordingRefusal } from '../recording-check.js';
+import { recordingRefusal, recordingUnavailable } from '../recording-check.js';
 import type { AppEnv } from '../middleware/tenant.js';
 
 /**
@@ -20,6 +24,7 @@ import type { AppEnv } from '../middleware/tenant.js';
  * - 受け付ける形式は PDF・Excel・CSV・Word・画像・録音（MP3・M4A・WAV。第9.4.5節）。拡張子と中身の先頭の両方で確かめる
  * - 録音だけ 200 MB まで。ローカルの方針の会社・AI の無い会社では受け取らない
  * - 取り出せるのは所有者本人と、判断のために中身を見る承認者だけ。それ以外には存在を示さない
+ * - その場で録る録音（第9.4.5.1節）は `/recordings` で受ける。途中の録音は録った本人だけが扱う
  */
 export function filesRoute(deps: AppDeps) {
   const app = new Hono<AppEnv>();
@@ -46,6 +51,78 @@ export function filesRoute(deps: AppDeps) {
       detail: { kind, size: meta.size, sha256: meta.sha256 }, occurredAt: new Date().toISOString(),
     });
     return c.json(meta, 201);
+  });
+
+  /** 途中の録音を画面に返す形（長さは秒）。 */
+  const liveView = (r: LiveRecording) => ({ id: r.id, createdAt: r.createdAt, seconds: liveSeconds(r.bytes), nextSeq: r.nextSeq });
+  const liveError = (c: { json: (b: unknown, s: 400 | 404 | 409 | 413 | 500) => Response }, err: unknown) => {
+    if (err instanceof LiveRecordingError) return c.json({ error: err.message }, err.status);
+    throw err;
+  };
+
+  /** 本人の途中の録音（第9.4.5.1節）。無ければ `recording: null`。 */
+  app.get('/recordings/current', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const r = await deps.repo.getLiveRecording(tenant.id, user.id);
+    return c.json({ recording: r ? liveView(r) : null });
+  });
+
+  /**
+   * その場で録り始める。録音を受け取れない会社（ローカルの方針・AI の設定が無い）では断る（422）。
+   * 本人の途中の録音があれば、新しく作らずにそれを返す（`resumed: true`）。
+   */
+  app.post('/recordings', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const unavailable = await recordingUnavailable(deps, tenant.id);
+    if (unavailable) return c.json({ error: unavailable }, 422);
+    const { recording, resumed } = await startLiveRecording(deps.repo, { tenantId: tenant.id, userId: user.id });
+    return c.json({ recording: liveView(recording), resumed }, resumed ? 200 : 201);
+  });
+
+  /** 録音の欠片（16 kHz・モノラル・16 ビットの PCM。本文はそのままのバイト）を受ける。同じ番号は置き換える。 */
+  app.put('/recordings/:id/parts/:seq',
+    bodyLimit({ maxSize: LIVE_PART_MAX_BYTES, onError: (c) => c.json({ error: '録音の欠片が大きすぎます' }, 413) }),
+    async (c) => {
+      const { tenant, user } = c.get('ctx');
+      try {
+        const bytes = new Uint8Array(await c.req.arrayBuffer());
+        const r = await putLiveRecordingPart(deps.repo, deps.files, { tenantId: tenant.id, userId: user.id }, c.req.param('id'), Number(c.req.param('seq')), bytes);
+        return c.json({ recording: liveView(r) });
+      } catch (err) {
+        return liveError(c, err);
+      }
+    });
+
+  /** 録音を止めて 1 つの WAV のファイルにする。渡された録音と同じに扱う（第9.4.5節）。 */
+  app.post('/recordings/:id/finish', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    try {
+      const { file, seconds } = await finishLiveRecording(deps.repo, deps.files, { tenantId: tenant.id, userId: user.id }, c.req.param('id'));
+      await deps.repo.appendAudit({
+        id: crypto.randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id,
+        action: 'file.upload', targetType: 'file', targetId: file.id,
+        detail: { kind: file.kind, size: file.size, sha256: file.sha256, seconds, live: true }, occurredAt: new Date().toISOString(),
+      });
+      return c.json(file, 201);
+    } catch (err) {
+      return liveError(c, err);
+    }
+  });
+
+  /** 途中の録音を消す（「削除」「キャンセル」）。 */
+  app.delete('/recordings/:id', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    try {
+      const r = await discardLiveRecording(deps.repo, deps.files, { tenantId: tenant.id, userId: user.id }, c.req.param('id'));
+      await deps.repo.appendAudit({
+        id: crypto.randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id,
+        action: 'file.audio_discard', targetType: 'live_recording', targetId: r.id,
+        detail: { size: r.bytes, seconds: liveSeconds(r.bytes), transcribed: false, live: true }, occurredAt: new Date().toISOString(),
+      });
+      return c.json({ ok: true });
+    } catch (err) {
+      return liveError(c, err);
+    }
   });
 
   const drive = driveFilesFor(deps);

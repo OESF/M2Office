@@ -22,6 +22,7 @@ import { AppLauncher, AppVersionBadge } from './launcher.js';
 import { startVoice, type VoiceCall } from './voice.js';
 import { keyLabel, useHotkey, useNumberHotkeys } from './keys.js';
 import { timeGreeting } from './greeting.js';
+import { RecorderDialog } from './Recorder.js';
 import { AgentForm, ApprovalTray, AskBox, Elapsed, FILE_ACCEPT, isRecordingFile, KNOWLEDGE_QA_AGENT_ID, RunView, statusLabel, SuspendedBanner, tooLargeMessage } from './components.js';
 import { Sources } from './sources.js';
 import { Schedules } from './Schedules.js';
@@ -1194,6 +1195,12 @@ function SecretaryBar({ drive, lookups, avatar, captions, onResult, onVoice }: {
   // 渡すファイルは 5 つまで（第10.10.2節）。選んだ時点で上げ、ID を持っておく
   const [files, setFiles] = useState<{ id: string; name: string }[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
+  // その場で録る録音（第9.4.5.1節）。止めたら秘書に渡したファイルに入れる
+  const [recording, setRecording] = useState(false);
+  const openRecorder = () => {
+    if (files.length >= SECRETARY_FILES_MAX) { setHint(`一度に渡せるファイルは ${SECRETARY_FILES_MAX} つまでです`); return; }
+    setRecording(true);
+  };
 
   async function attach(chosen: File[]) {
     if (!chosen.length) return;
@@ -1458,6 +1465,20 @@ function SecretaryBar({ drive, lookups, avatar, captions, onResult, onVoice }: {
           {samples.length ? samples.map((x) => <button key={x.id} className="link small" onClick={() => { setSamples(null); void receiveDrive(x.id); }}>{x.name}</button>) : <span className="muted">ファイルがありません</span>}
           <button className="link small" onClick={() => setSamples(null)}>キャンセル</button>
         </span>
+      )}
+      <button className="icon-btn" disabled={busy || recording} onClick={openRecorder}
+        title="その場で録音して、秘書に渡します（3 時間まで）。止めたら「議事録にして」「まとめて」のように頼めます">
+        <Icon name="record" />
+        <span className="sr-only">録音して渡す</span>
+      </button>
+      {recording && (
+        <RecorderDialog
+          onDone={(f) => {
+            setRecording(false);
+            setFiles((cur) => [...cur, { id: f.id, name: f.name }]);
+            setHint(`「${f.name}」を渡しました。「議事録にして」「まとめて」「文字起こしして」のように頼んでください`);
+          }}
+          onClose={() => setRecording(false)} />
       )}
       <button className={`icon-btn${call ? ' on' : ''}`} onClick={() => void toggleVoice()}
         title={call ? '音声を終わります' : '音声で話しかけます。声で答え、大きい答えは右の秘書のキャンバスに出します'}>

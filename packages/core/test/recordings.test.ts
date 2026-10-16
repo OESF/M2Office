@@ -2,7 +2,7 @@
  * @file 録音を文字にする共通の力の単体テスト（仕様書 第9.4.5節・第9.5.5.3節・第10.10.3節、ADR-0097）。
  *
  * 形式の判定・長さの読み取り・30 分ずつの分け方・区切りをつなぐときの時刻と話者・録音を文字起こしに置き換えること・
- * 残った録音を消す見回り・秘書の取次を確かめる。推論は呼ばない（見本の口）。
+ * 残った録音を消す見回り・秘書の取次と、その場で録る録音（第9.4.5.1節）の欠片のつなぎ方・本人だけ・見回りを確かめる。推論は呼ばない（見本の口）。
  */
 
 import { test } from 'node:test';
@@ -11,6 +11,8 @@ import type { AgentDefinition, AuditEvent, StoredFile } from '@m2office/shared';
 import {
   detectKind, audioDurationSec, splitAudio, transcribeRecording, TranscribeError, shiftTimes, speakersOf, clockOf,
   fileToText, MemoryFileStore, discardStaleRecordings, recordingTaker, isRecordingName, transcribePrompt,
+  startLiveRecording, putLiveRecordingPart, finishLiveRecording, discardLiveRecording, discardStaleLiveRecordings, liveSeconds, wavHeader,
+  LiveRecordingError, LIVE_PART_MAX_BYTES, LIVE_MAX_BYTES,
   type LlmProvider, type LlmTranscribeRequest, type Repository,
 } from '../src/index.js';
 
@@ -184,4 +186,111 @@ test('秘書は録音を、「議事録」なら議事録の作成に、それ�
   assert.equal(recordingTaker('まとめて', []), null);
   assert.equal(isRecordingName('ボイスメモ.M4A'), true);
   assert.equal(isRecordingName('議事録.pdf'), false);
+});
+
+/** その場で録る録音の、記憶の中の台帳（第9.4.5.1節）。 */
+function liveRepo() {
+  const recs = new Map<string, { id: string; tenantId: string; userId: string; createdAt: string; updatedAt: string }>();
+  const parts = new Map<string, Map<number, number>>();
+  const files: StoredFile[] = [];
+  const audits: AuditEvent[] = [];
+  const view = (r: { id: string; tenantId: string; userId: string; createdAt: string; updatedAt: string }) => {
+    const p = [...(parts.get(r.id) ?? new Map<number, number>()).entries()];
+    return { ...r, parts: p.length, bytes: p.reduce((n, [, s]) => n + s, 0), nextSeq: p.length ? Math.max(...p.map(([q]) => q)) + 1 : 0 };
+  };
+  const repo = {
+    listTenantIds: async () => ['t'],
+    getLiveRecording: async (t: string, u: string) => { const r = [...recs.values()].find((x) => x.tenantId === t && x.userId === u); return r ? view(r) : null; },
+    createLiveRecording: async (r: { id: string; tenantId: string; userId: string; createdAt: string }) => {
+      if ([...recs.values()].some((x) => x.tenantId === r.tenantId && x.userId === r.userId)) return false;
+      recs.set(r.id, { ...r, updatedAt: r.createdAt });
+      return true;
+    },
+    putLiveRecordingPart: async (_t: string, id: string, seq: number, size: number, at: string) => {
+      if (!parts.has(id)) parts.set(id, new Map());
+      parts.get(id)!.set(seq, size);
+      recs.get(id)!.updatedAt = at;
+    },
+    listLiveRecordingParts: async (_t: string, id: string) => [...(parts.get(id) ?? new Map<number, number>()).entries()].sort((a, b) => a[0] - b[0]).map(([seq, size]) => ({ seq, size })),
+    deleteLiveRecording: async (_t: string, id: string) => { recs.delete(id); parts.delete(id); },
+    listStaleLiveRecordings: async (t: string, before: string) => [...recs.values()].filter((r) => r.tenantId === t && r.updatedAt < before).map(view),
+    createFile: async (f: StoredFile) => { files.push(f); },
+    appendAudit: async (e: AuditEvent) => { audits.push(e); },
+  } as unknown as Repository;
+  return { repo, files, audits, recs };
+}
+
+/** `sec` 秒の 16 kHz・16 ビットの PCM（中身は `fill`）。 */
+const pcm = (sec: number, fill = 1) => new Uint8Array(16_000 * 2 * sec).fill(fill);
+
+test('その場で録った欠片を、番号の順に 1 つの WAV にし、欠片と途中の録音を消す（第9.4.5.1節）', async () => {
+  const { repo, files, recs } = liveRepo();
+  const store = new MemoryFileStore();
+  const who = { tenantId: 't', userId: 'u1' };
+  const { recording, resumed } = await startLiveRecording(repo, who, new Date('2026-10-16T05:30:00Z'));
+  assert.equal(resumed, false);
+  // 順が入れ替わって届いても、同じ番号を送り直しても、番号の順に 1 つずつつなぐ
+  await putLiveRecordingPart(repo, store, who, recording.id, 1, pcm(10, 2));
+  await putLiveRecordingPart(repo, store, who, recording.id, 0, pcm(10, 1));
+  await putLiveRecordingPart(repo, store, who, recording.id, 1, pcm(10, 2));
+  const again = await startLiveRecording(repo, who);
+  assert.equal(again.resumed, true, '途中の録音があれば、新しく作らずに返す');
+  assert.equal(again.recording.nextSeq, 2);
+  assert.equal(liveSeconds(again.recording.bytes), 20);
+
+  const { file, seconds } = await finishLiveRecording(repo, store, who, recording.id);
+  assert.equal(seconds, 20);
+  assert.equal(file.kind, 'wav');
+  assert.equal(file.name, '録音 2026-10-16 14-30.wav', '名前は始めた日本時間');
+  const bytes = (await store.get('t', file.id))!;
+  assert.equal(detectKind(file.name, bytes), 'wav');
+  assert.equal(audioDurationSec(bytes, 'wav'), 20);
+  assert.equal(bytes[44], 1, '番号 0 の欠片が先');
+  assert.equal(bytes[44 + 16_000 * 2 * 10], 2);
+  assert.equal(files.length, 1);
+  assert.equal(recs.size, 0, '途中の録音は消える');
+  assert.equal(await store.get('t', `${recording.id}-000000`), null, '欠片も消える');
+});
+
+test('途中の録音は本人だけが扱え、3 時間を超える欠片と形の違う欠片は断る（第9.4.5.1節）', async () => {
+  const { repo } = liveRepo();
+  const store = new MemoryFileStore();
+  const { recording } = await startLiveRecording(repo, { tenantId: 't', userId: 'u1' });
+  await assert.rejects(putLiveRecordingPart(repo, store, { tenantId: 't', userId: 'u2' }, recording.id, 0, pcm(1)), (e: unknown) => e instanceof LiveRecordingError && e.status === 404);
+  await assert.rejects(finishLiveRecording(repo, store, { tenantId: 't', userId: 'u2' }, recording.id), (e: unknown) => e instanceof LiveRecordingError && e.status === 404);
+  await assert.rejects(putLiveRecordingPart(repo, store, { tenantId: 't', userId: 'u1' }, recording.id, 0, new Uint8Array(3)), (e: unknown) => e instanceof LiveRecordingError && e.status === 400);
+  await assert.rejects(putLiveRecordingPart(repo, store, { tenantId: 't', userId: 'u1' }, recording.id, -1, pcm(1)), (e: unknown) => e instanceof LiveRecordingError && e.status === 400);
+  await assert.rejects(putLiveRecordingPart(repo, store, { tenantId: 't', userId: 'u1' }, recording.id, 0, new Uint8Array(LIVE_PART_MAX_BYTES + 2)), (e: unknown) => e instanceof LiveRecordingError && e.status === 413);
+  await assert.rejects(finishLiveRecording(repo, store, { tenantId: 't', userId: 'u1' }, recording.id), /録音されていません/);
+  // 3 時間ぶんの欠片を記録したことにして、もう 1 つ足すと断る
+  await repo.putLiveRecordingPart('t', recording.id, 0, LIVE_MAX_BYTES, new Date().toISOString());
+  await assert.rejects(putLiveRecordingPart(repo, store, { tenantId: 't', userId: 'u1' }, recording.id, 1, pcm(1)), (e: unknown) => e instanceof LiveRecordingError && e.status === 413);
+});
+
+test('止めずに 1 日たった途中の録音は、見回りが欠片ごと消して監査に残す（第9.4.5.1節）', async () => {
+  const { repo, audits, recs } = liveRepo();
+  const store = new MemoryFileStore();
+  const now = new Date('2026-10-17T12:00:00Z');
+  const { recording } = await startLiveRecording(repo, { tenantId: 't', userId: 'u1' }, new Date('2026-10-16T00:00:00Z'));
+  await putLiveRecordingPart(repo, store, { tenantId: 't', userId: 'u1' }, recording.id, 0, pcm(5), new Date('2026-10-16T00:00:10Z'));
+  const fresh = await startLiveRecording(repo, { tenantId: 't', userId: 'u2' }, new Date(now.getTime() - 3_600_000));
+  assert.equal(await discardStaleLiveRecordings(repo, store, now), 1);
+  assert.equal(recs.has(recording.id), false);
+  assert.equal(recs.has(fresh.recording.id), true, '1 日たっていないものは残す');
+  assert.equal(await store.get('t', `${recording.id}-000000`), null);
+  assert.equal(audits[0]?.action, 'file.audio_discard');
+  assert.equal(audits[0]?.detail?.['seconds'], 5);
+  assert.equal(audits[0]?.detail?.['live'], true);
+});
+
+test('自分で消した途中の録音は欠片も残らない', async () => {
+  const { repo, recs } = liveRepo();
+  const store = new MemoryFileStore();
+  const who = { tenantId: 't', userId: 'u1' };
+  const { recording } = await startLiveRecording(repo, who);
+  await putLiveRecordingPart(repo, store, who, recording.id, 0, pcm(1));
+  await discardLiveRecording(repo, store, who, recording.id);
+  assert.equal(recs.size, 0);
+  assert.equal(await store.get('t', `${recording.id}-000000`), null);
+  assert.equal(wavHeader(10).byteLength, 44);
 });

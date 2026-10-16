@@ -1514,6 +1514,18 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .file-drop { display: flex; align-items: center; gap: calc(8px * var(--space-scale)); padding: calc(8px * var(--space-scale)); border: 1px dashed var(--line); border-radius: 8px; background: var(--input-bg); }
 .file-drop.over { border-color: var(--accent); background: var(--accent-soft); }
 .file-drop .file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-drop .btn .icon { width: 14px; height: 14px; vertical-align: -2px; }
+
+/* その場で録音する画面（仕様書 第9.4.5.1節） */
+.recorder .row { display: flex; flex-wrap: wrap; align-items: center; gap: calc(8px * var(--space-scale)); margin-top: calc(14px * var(--space-scale)); }
+.recorder h2 { font-size: calc(16px * var(--font-scale)); }
+.recorder-head { display: flex; align-items: center; gap: calc(12px * var(--space-scale)); }
+.recorder-dot { width: 14px; height: 14px; border-radius: 50%; background: var(--muted); flex: none; }
+.recorder-dot.on { background: var(--danger); animation: pulse 1.4s ease-in-out infinite; }
+.recorder-time { font-size: calc(30px * var(--font-scale)); font-variant-numeric: tabular-nums; min-width: 5ch; }
+.recorder-level { flex: 1; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.recorder-level > span { display: block; height: 100%; background: var(--accent); transition: width .1s linear; }
+@media (prefers-reduced-motion: reduce) { .recorder-dot.on { animation: none; } .recorder-level > span { transition: none; } }
 
 /* 個人設定の朝のブリーフ（仕様書 第6.5.3.1節）。行ごとに名前・調べる言葉・外すボタン */
 .brief-list { list-style: none; margin: 0; padding: 0; }

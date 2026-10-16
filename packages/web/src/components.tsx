@@ -12,6 +12,7 @@ import {
 import { Markdown, openHelp } from './help.js';
 import { Icon } from './nav.js';
 import { keyLabel, useHotkey } from './keys.js';
+import { RecorderDialog } from './Recorder.js';
 
 /**
  * 通常の停止の間と、停止の予告の間に、画面の上部に出す案内（仕様書 第23.8.6節）。どちらでもなければ何も出さない。
@@ -277,12 +278,15 @@ export function tooLargeMessage(f: File): string | null {
 /**
  * ファイルの入力（仕様書 第6.10.4.1節）。選ぶかドラッグすると、すぐに上げて、業務にはファイルの ID を渡す。
  *
- * @remarks 形式と大きさはサーバーが確かめる。大きすぎるものは上げる前に断る。秘書から渡したファイルは ID から名前を引いて出す
+ * @remarks 形式と大きさはサーバーが確かめる。大きすぎるものは上げる前に断る。秘書から渡したファイルは ID から名前を引いて出す。
+ * 録音を受け取る欄（名前に「録音」を含む）には、その場で録る「録音する」も置く（第9.4.5.1節）
  */
 function FileField({ name, label, value, onChange }: {
   name: string; label: string; value: string; onChange: (v: string) => void;
 }) {
   const [fileName, setFileName] = useState<string | null>(null);
+  const [recording, setRecording] = useState(false);
+  const takesRecording = label.includes('録音');
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -328,9 +332,21 @@ function FileField({ name, label, value, onChange }: {
             <button type="button" className="btn ghost small" onClick={() => { onChange(''); setFileName(null); }}>外す</button>
           </>
         ) : (
-          <button type="button" id={name} className="btn ghost small" disabled={busy} onClick={() => input.current?.click()}>
-            {busy ? (sent !== null ? `渡しています… ${Math.round(sent * 100)}%` : '渡しています…') : 'ファイルを選ぶ'}
-          </button>
+          <>
+            <button type="button" id={name} className="btn ghost small" disabled={busy} onClick={() => input.current?.click()}>
+              {busy ? (sent !== null ? `渡しています… ${Math.round(sent * 100)}%` : '渡しています…') : 'ファイルを選ぶ'}
+            </button>
+            {takesRecording && !busy && (
+              <button type="button" className="btn ghost small" onClick={() => setRecording(true)}>
+                <Icon name="record" /> 録音する
+              </button>
+            )}
+          </>
+        )}
+        {recording && (
+          <RecorderDialog
+            onDone={(f) => { setRecording(false); setError(null); setFileName(f.name); onChange(f.id); }}
+            onClose={() => setRecording(false)} />
         )}
         <input ref={input} type="file" accept={FILE_ACCEPT} hidden
           onChange={(e) => { void take(e.target.files?.[0]); e.target.value = ''; }} />

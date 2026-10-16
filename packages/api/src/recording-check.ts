@@ -18,10 +18,21 @@ export const LOCAL_RECORDING_REFUSAL = 'この会社の方針では録音を文�
  */
 export async function recordingRefusal(deps: Pick<AppDeps, 'ai'>, tenantId: string, kind: FileKind, bytes: Uint8Array): Promise<string | null> {
   if (kind !== 'mp3' && kind !== 'm4a' && kind !== 'wav') return null;
+  const unavailable = await recordingUnavailable(deps, tenantId);
+  if (unavailable) return unavailable;
+  const sec = audioDurationSec(bytes, kind);
+  if (sec !== null && sec > MAX_AUDIO_SECONDS * 1.02) return '録音が 3 時間を超えています。分けて渡してください';
+  return null;
+}
+
+/**
+ * 会社が録音を受け取れるか（その場で録る前にも確かめる。第9.4.5.1節）。
+ *
+ * @returns 受け取れなければ理由（利用者に見せる文）。受け取れれば `null`
+ */
+export async function recordingUnavailable(deps: Pick<AppDeps, 'ai'>, tenantId: string): Promise<string | null> {
   if (isLocalPolicy(await deps.ai.policyFor(tenantId))) return LOCAL_RECORDING_REFUSAL;
   const llm = await deps.ai.llmFor(tenantId).catch(() => null);
   if (!llm?.transcribeAudio) return 'この会社の AI が設定されていないため、録音を文字にできません。管理者に AI の設定を頼んでください';
-  const sec = audioDurationSec(bytes, kind);
-  if (sec !== null && sec > MAX_AUDIO_SECONDS * 1.02) return '録音が 3 時間を超えています。分けて渡してください';
   return null;
 }

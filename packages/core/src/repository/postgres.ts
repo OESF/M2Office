@@ -14,7 +14,7 @@ import type {
   StoredFile, Tenant, TenantSettings, User, UserGroup, GroupChatSpace, UserSettings,
 } from '@m2office/shared';
 import { DEFAULT_TENANT_SETTINGS, DEFAULT_USER_SETTINGS, STANDARD_SYNONYMS } from '@m2office/shared';
-import type { AgentEvent, Plan, PlanStep, DecidedApproval, AuditQuery, CompartmentAssignment, Conversation, ConversationDigest, MemoryCandidate, Promotion, CredentialKind, GoogleConnection, UserPhoto, TenantCredential, TenantConnection, ConnectionSecret, UserConnection, DisabledConnectorTool, InstalledExtension, PrivateExtension, KnowledgeEmbedItem, KnowledgeEmbedStatus, KnowledgeItem, KnowledgeSearchOptions, KnowledgeSearchResult, KnowledgeSectionView, KnowledgeStatus, KnowledgeVersion, Memory, MemoryEmbedItem, CaseNote, Repository, RunStatRow, UserProfile } from './types.js';
+import type { AgentEvent, Plan, PlanStep, DecidedApproval, AuditQuery, CompartmentAssignment, Conversation, ConversationDigest, MemoryCandidate, Promotion, CredentialKind, GoogleConnection, UserPhoto, TenantCredential, TenantConnection, ConnectionSecret, UserConnection, DisabledConnectorTool, InstalledExtension, PrivateExtension, KnowledgeEmbedItem, KnowledgeEmbedStatus, KnowledgeItem, KnowledgeSearchOptions, KnowledgeSearchResult, KnowledgeSectionView, KnowledgeStatus, KnowledgeVersion, Memory, MemoryEmbedItem, CaseNote, LiveRecording, Repository, RunStatRow, UserProfile } from './types.js';
 import { SPLIT_VERSION, citationOf, splitKnowledge } from '../knowledge/sections.js';
 import { FUSION_DEPTH, SEARCH_CANDIDATES, SEMANTIC_THRESHOLD, asksOldVersion, bigrams, expandTerms, extractTerms, fuseRankings, limitSections, normalizeForSearch, orderSections, rankSections, rewritesOf } from '../knowledge/search.js';
 import { createHash } from 'node:crypto';
@@ -1936,6 +1936,51 @@ export class PostgresRepository implements Repository {
 
   async deleteFile(tenantId: string, id: string): Promise<void> {
     await this.q(tenantId, `delete from files where tenant_id = $1 and id = $2`, [tenantId, id]);
+  }
+
+  private liveRecordingSelect = `select r.id, r.tenant_id as "tenantId", r.user_id as "userId", r.created_at as "createdAt", r.updated_at as "updatedAt",
+              count(p.seq)::int as parts, coalesce(sum(p.size), 0)::bigint as bytes, coalesce(max(p.seq) + 1, 0)::int as "nextSeq"
+         from live_recordings r left join live_recording_parts p on p.recording_id = r.id and p.tenant_id = r.tenant_id`;
+
+  private toLiveRecording(r: LiveRecording & { createdAt: string | Date; updatedAt: string | Date; bytes: number | string }): LiveRecording {
+    return { ...r, createdAt: new Date(r.createdAt).toISOString(), updatedAt: new Date(r.updatedAt).toISOString(), bytes: Number(r.bytes) };
+  }
+
+  async getLiveRecording(tenantId: string, userId: string): Promise<LiveRecording | null> {
+    const rows = await this.q<LiveRecording>(tenantId,
+      `${this.liveRecordingSelect} where r.tenant_id = $1 and r.user_id = $2 group by r.id`, [tenantId, userId]);
+    return rows[0] ? this.toLiveRecording(rows[0]) : null;
+  }
+
+  async createLiveRecording(rec: { id: string; tenantId: string; userId: string; createdAt: string }): Promise<boolean> {
+    const rows = await this.q<{ id: string }>(rec.tenantId,
+      `insert into live_recordings (id, tenant_id, user_id, created_at, updated_at) values ($1, $2, $3, $4, $4)
+       on conflict (tenant_id, user_id) do nothing returning id`,
+      [rec.id, rec.tenantId, rec.userId, rec.createdAt]);
+    return rows.length > 0;
+  }
+
+  async putLiveRecordingPart(tenantId: string, recordingId: string, seq: number, size: number, at: string): Promise<void> {
+    await this.q(tenantId,
+      `insert into live_recording_parts (recording_id, tenant_id, seq, size) values ($2, $1, $3, $4)
+       on conflict (recording_id, seq) do update set size = excluded.size`,
+      [tenantId, recordingId, seq, size]);
+    await this.q(tenantId, `update live_recordings set updated_at = $3 where tenant_id = $1 and id = $2`, [tenantId, recordingId, at]);
+  }
+
+  async listLiveRecordingParts(tenantId: string, recordingId: string): Promise<{ seq: number; size: number }[]> {
+    return this.q<{ seq: number; size: number }>(tenantId,
+      `select seq, size from live_recording_parts where tenant_id = $1 and recording_id = $2 order by seq`, [tenantId, recordingId]);
+  }
+
+  async deleteLiveRecording(tenantId: string, recordingId: string): Promise<void> {
+    await this.q(tenantId, `delete from live_recordings where tenant_id = $1 and id = $2`, [tenantId, recordingId]);
+  }
+
+  async listStaleLiveRecordings(tenantId: string, before: string): Promise<LiveRecording[]> {
+    const rows = await this.q<LiveRecording>(tenantId,
+      `${this.liveRecordingSelect} where r.tenant_id = $1 and r.updated_at < $2 group by r.id`, [tenantId, before]);
+    return rows.map((r) => this.toLiveRecording(r));
   }
 
   async listActiveSessions(

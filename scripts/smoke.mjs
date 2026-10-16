@@ -7334,5 +7334,61 @@ console.log('\n■ 94. システムログの保管・閲覧・証拠保全（ク
   }
 }
 
+console.log('\n■ 95. その場で録音する（欠片をつないで 1 つの WAV にする・本人だけ・文字にして文書にする。第9.4.5.1節）');
+{
+  try {
+    const headers = (who, tenant = 'a') => ({ 'x-tenant': tenant, 'x-user': `${who}@${tenant === 'a' ? 'alpha' : 'beta'}.example.jp` });
+    const putPart = async (id, seq, bytes, who = 'member') => {
+      const res = await fetch(`${API}/v1/files/recordings/${id}/parts/${seq}`, { method: 'PUT', body: bytes, headers: { ...headers(who), 'content-type': 'application/octet-stream' } });
+      return { status: res.status, body: await res.json().catch(() => ({})) };
+    };
+    // 前の確かめで残った途中の録音があれば消す
+    const left = (await call('a', '/v1/files/recordings/current', {}, 'member')).body?.recording;
+    if (left) await call('a', `/v1/files/recordings/${left.id}`, { method: 'DELETE' }, 'member');
+
+    const started = await call('a', '/v1/files/recordings', { method: 'POST', body: '{}' }, 'member');
+    const id = started.body?.recording?.id;
+    // 見本の推論は、録音に埋め込んだ `M2O-TRANSCRIPT:` の文を文字起こしとして返す（PCM は 2 バイトずつなので長さをそろえる）
+    let said = Buffer.from('M2O-TRANSCRIPT:[00:02] 話者 1: 新しい講座の案を三つ考えました\n', 'utf8');
+    if (said.length % 2) said = Buffer.concat([said, Buffer.from([0x20])]);
+    const silence = Buffer.alloc(16000 * 2 * 2);
+    const p1 = await putPart(id, 1, said);
+    const p0 = await putPart(id, 0, silence);
+    const again = await putPart(id, 0, silence);
+    const odd = await putPart(id, 2, Buffer.alloc(3));
+    started.status === 201 && p0.status === 200 && p1.status === 200 && again.body?.recording?.nextSeq === 2 && odd.status === 400
+      ? ok('録りながら欠片を受け、同じ番号の送り直しは 1 つにし、形の違う欠片は断る') : ng('欠片の受け取りが違う', JSON.stringify({ s: started.status, p0: p0.status, p1: p1.status, again: again.body, odd: odd.status }));
+
+    const resumed = await call('a', '/v1/files/recordings', { method: 'POST', body: '{}' }, 'member');
+    resumed.status === 200 && resumed.body?.resumed === true && resumed.body?.recording?.id === id
+      ? ok('途中の録音があれば、新しく始めずにそれを返す（1 人 1 つ）') : ng('途中の録音の扱いが違う', JSON.stringify(resumed.body));
+
+    const byAdmin = await putPart(id, 3, silence, 'admin');
+    const adminCurrent = (await call('a', '/v1/files/recordings/current')).body;
+    const otherTenant = await fetch(`${API}/v1/files/recordings/${id}/finish`, { method: 'POST', body: '{}', headers: { ...headers('admin', 'b'), 'content-type': 'application/json' } });
+    byAdmin.status === 404 && adminCurrent?.recording?.id !== id && otherTenant.status === 404
+      ? ok('途中の録音は録った本人だけが扱える（同じ会社の管理者にも、ほかの会社にも見えない）') : ng('途中の録音がほかの人から扱える', JSON.stringify({ admin: byAdmin.status, cur: adminCurrent, other: otherTenant.status }));
+
+    const done = await call('a', `/v1/files/recordings/${id}/finish`, { method: 'POST', body: '{}' }, 'member');
+    const after = (await call('a', '/v1/files/recordings/current', {}, 'member')).body;
+    done.status === 201 && done.body?.kind === 'wav' && /^録音 \d{4}-\d{2}-\d{2} \d{2}-\d{2}\.wav$/.test(done.body?.name ?? '') && after?.recording === null
+      ? ok('止めると 1 つの WAV のファイルになり、途中の録音は残らない') : ng('録音をまとめられない', JSON.stringify({ s: done.status, f: done.body, after }));
+
+    const { body: job } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: 'recording-notes', input: { fileId: done.body.id } }) }, 'member');
+    const run = await waitFor('a', job.runId, ['completed', 'failed'], 30000, 'member');
+    const read = (run?.steps ?? []).find((s) => s.stepId === 'transcribe');
+    run?.run?.status === 'completed' && JSON.stringify(read?.output ?? '').includes('新しい講座の案')
+      ? ok('その場で録った録音も、渡した録音と同じに文字にして文書にする') : ng('その場で録った録音を文字にできない', JSON.stringify({ status: run?.run?.status, reason: run?.run?.failureReason }));
+
+    const second = (await call('a', '/v1/files/recordings', { method: 'POST', body: '{}' }, 'member')).body?.recording;
+    await putPart(second.id, 0, silence);
+    const del = await call('a', `/v1/files/recordings/${second.id}`, { method: 'DELETE' }, 'member');
+    const gone = (await call('a', '/v1/files/recordings/current', {}, 'member')).body;
+    del.status === 200 && gone?.recording === null ? ok('途中の録音を削除できる') : ng('途中の録音を削除できない', JSON.stringify({ del: del.status, gone }));
+  } catch (err) {
+    ng('その場で録る録音の確認が途中で止まった', String(err));
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');

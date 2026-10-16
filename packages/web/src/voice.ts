@@ -49,7 +49,7 @@ export interface VoiceCall {
 }
 
 /** マイクの音（Float32）を 16 ビットの PCM に直す。 */
-function toPcm16(input: Float32Array): Uint8Array {
+export function toPcm16(input: Float32Array): Uint8Array {
   const out = new DataView(new ArrayBuffer(input.length * 2));
   for (let i = 0; i < input.length; i++) {
     const v = Math.max(-1, Math.min(1, input[i] ?? 0));
@@ -73,7 +73,7 @@ function fromPcm16(bytes: ArrayBuffer): Float32Array<ArrayBuffer> {
  * @remarks
  * 多くは「安全な文脈でない」ことによる。設定では直せないため、そう伝える。
  */
-function micUnavailableReason(): string {
+export function micUnavailableReason(): string {
   if (!window.isSecureContext) {
     return `この画面は ${location.protocol}//${location.host} で開かれているため、ブラウザがマイクを使わせません。`
       + 'https で開くか、localhost で開いてください（ブラウザの設定では変えられません）';
@@ -88,7 +88,7 @@ function micUnavailableReason(): string {
  * 「許可してください」と言ってよいのは、本人が断ったときだけである。
  * 機器が無い・ほかのアプリが使っている場合に許可を求めても直らない。
  */
-function micErrorReason(err: unknown): string {
+export function micErrorReason(err: unknown): string {
   const name = err instanceof Error ? err.name : '';
   switch (name) {
     case 'NotAllowedError':
@@ -211,7 +211,7 @@ export async function startVoice(handlers: VoiceHandlers): Promise<VoiceCall> {
  *
  * @remarks 画面の描画を止めないよう、音の処理は別の系統で行う。
  */
-const WORKLET = `
+export const WORKLET = `
 class M2oMic extends AudioWorkletProcessor {
   constructor(options) {
     super();
