@@ -332,6 +332,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/print-designs/drive-picker` | 「ドライブから」の選ぶ画面の材料（`drive.file` だけに絞ったトークン・API キー・プロジェクトの番号。見本の会社は見本の写真の一覧。第41.19.2節）。作る・直すは `driveFileId` で選んだ写真を渡す |
 | `POST /v1/print-designs/:id/canva` ／ `POST /v1/print-designs/:id/canva/pull` | Canva で仕上げる（選んだ版の PDF を本人の Canva に取り込み、編集の画面の URL）／ Canva から戻す（新しい版。第41.19.3節） |
 | `GET` ／ `DELETE /v1/me/canva`、`POST /v1/me/canva/connect`、`GET /v1/oauth/canva/callback` | 本人の Canva の接続（状態 ／ 切断 ／ つなぐ（PKCE）／ Canva からの戻り）。運営が設定していなければ `configured: false` |
+| `GET /v1/admin/connections/recipients` | 管理者: データの渡し先（委託先）の一覧（渡し先・使い道・渡すもの・場所・契約・いま使っているか。仕様書 第16.11.3節 G-3） |
 | `PUT /v1/admin/connections/google/picker` | 管理者: ドライブの写真を選ぶ画面（Google Picker）の API キー（空なら消す） |
 | `PUT・DELETE /v1/admin/connections/google/chat-app` | 管理者: 通知を送る会社の Chat アプリの鍵（サービスアカウントの JSON。本文 `key`）。保存の前に Google でアプリとして認証できるかを確かめる。鍵は返さない（仕様書 第6.5.5.2.1節） |
 | `POST` ／ `DELETE /v1/print-designs/:id/signage`、`POST /v1/print-designs/:id/announcement` | サイネージに流す（掲示の始まりより前なら始まりから）／ 止める ／ お知らせの作成の下書きにする（第41.18節。1 つの物を返すときに `links` でつなげる先を使えるかを添える） |

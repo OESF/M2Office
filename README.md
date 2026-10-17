@@ -230,6 +230,7 @@ docs/            開発規約・リリース規定・設計判断記録
 | `SESSION_TTL_HOURS` | 168 | ログイン状態の有効時間 |
 | `M2OFFICE_SECRET_KEY` | （開発は固定の鍵） | 秘密の値（Gemini の鍵・OAuth のシークレット・利用者のトークン）を暗号化する鍵（AES-256-GCM。ADR-0007）。本番では必須 |
 | `M2OFFICE_SECRET_KEY_OLD` | （なし） | 前の鍵（カンマで複数）。読むときだけ使う。鍵を入れ替えたら、`npm run secrets:rotate` で残りを今の鍵で暗号化し直す（仕様書 第16.11.3節 G-10） |
+| `HOSTING_PROVIDER`・`HOSTING_LOCATION` | （なし） | インフラ事業者の名前と置き場。管理者ページの「データの渡し先」に出す。空なら「運営が設定していません」と出す（仕様書 第16.11.3節 G-3） |
 | `SECURITY_CONTACT` | （なし） | 脆弱性の報告の窓口（`/.well-known/security.txt`。RFC 9116）の連絡先。`mailto:` か `https:` の URL をカンマで複数。空なら出さない（仕様書 第16.11.3節 G-11） |
 | `COOKIE_SECURE` | false | HTTPS で配信する環境では true |
 | `SCHEDULE_INTERVAL_MS` | 15000 | 定時実行の見回り間隔 |

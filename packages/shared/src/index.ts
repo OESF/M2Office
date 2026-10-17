@@ -7,6 +7,7 @@
  */
 
 export * from './types/agent.js';
+export * from './types/privacy.js';
 export * from './types/run.js';
 export * from './types/tenant.js';
 export * from './types/audit.js';

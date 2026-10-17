@@ -7,7 +7,7 @@
  * @see 仕様書 第20.7節 認証の実装方針
  */
 
-import type { CardCorners, CardEnglish, PrintDesign, PrintDesignDetailView, PrintKind, PrintSize, PrintState,
+import type { DataRecipient, CardCorners, CardEnglish, PrintDesign, PrintDesignDetailView, PrintKind, PrintSize, PrintState,
   Approval, Artifact, Notification, Run, RunStep, Schedule, ScheduleRule, Tenant,
   TenantSettings, User, UserSettings, CardFields, Contact, ContactChange, ContactScope,
   InventoryItem, InventoryItemView, InventoryLocation, InventoryMove, InventoryMoveKind, InventorySettings, InventoryStockRow,
@@ -2456,6 +2456,8 @@ export const api = {
     dashboardStats: (days: 1 | 7 | 30) => call<DashboardStats>(`/admin/dashboard/stats?days=${days}`),
     saveSettings: <K extends keyof TenantSettings>(section: K, value: TenantSettings[K]) =>
       call(`/admin/settings/${section}`, { method: 'PUT', body: JSON.stringify(value) }),
+    /** データの渡し先（委託先）の一覧（仕様書 第16.11.3節 G-3）。 */
+    dataRecipients: () => call<{ items: DataRecipient[] }>('/admin/connections/recipients'),
     /** 印影（社印）を登録する（仕様書 第15.2.3節）。 */
     saveSeal: (file: File) => {
       const form = new FormData();

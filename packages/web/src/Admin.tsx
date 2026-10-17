@@ -17,6 +17,7 @@ import { adminPath, parseAdminRoute, syncUrl } from './route.js';
 import { ExtensionSettings } from './Extensions.js';
 import { Connections } from './Connections.js';
 import { ExternalApps } from './ExternalApps.js';
+import { DataRecipients } from './DataRecipients.js';
 import { HelpCenter, PageTitle, useOpenHelp } from './help.js';
 import { AppVersionBadge } from './launcher.js';
 import { Icon, NavHeading, NavItem, SideNavLayout, ThemeToggle, type IconName } from './nav.js';
@@ -67,6 +68,8 @@ const TABS: {
       { id: 'mailbox', label: '窓口のメール' },
       { id: 'mcp', label: 'コネクタ（MCP）' },
       { id: 'apps', label: '外部のアプリ' },
+      // M2Office がデータを渡す先（委託先。仕様書 第16.11.3節 G-3）
+      { id: 'recipients', label: 'データの渡し先' },
     ],
   },
   {
@@ -295,6 +298,8 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
               ? <ConnectorList />
               // 外部のアプリ（仕様書 第13.4.1節、ADR-0090）
               : page === 'apps' ? <ExternalApps />
+              // データの渡し先（仕様書 第16.11.3節 G-3）
+              : page === 'recipients' ? <DataRecipients />
               : <Connections page={page} />)}
           </main>
         </SideNavLayout>

@@ -14,7 +14,7 @@ import { Hono, type Context } from 'hono';
 import {
   buildGoogleAuthUrl, checkGeminiLive, checkGeminiText, checkGoogleClient, createPkce, exchangeGoogleCode, exchangeGoogleLoginCode,
   fetchGooglePhoto, googleGrantedScopes, googleScopeLabel, googleUserInfo, isGoogleClientError, refreshGoogleAccessToken,
-  revokeGoogleToken, toolGoogleScopes,
+  revokeGoogleToken, toolGoogleScopes, buildDataRecipients,
   GoogleOAuthError, MAILBOX_SCOPES, GOOGLE_CONTACTS_SCOPE, CHAT_DM_SETUP_SCOPE, parseServiceAccountKey, checkChatAppKey,
   type GeminiModels, type GeminiSettingsMeta, type GoogleClientVerdict,
 } from '@m2office/core';
@@ -170,6 +170,34 @@ export function connectionsRoute(deps: AppDeps) {
         }),
       },
     });
+  });
+
+  /**
+   * データの渡し先（委託先）の一覧（仕様書 第16.11.3節 G-3、第16.5節）。会社がいま使っているものと、使えば渡すものを返す。
+   *
+   * @remarks 何も変えない。インフラ事業者は配備の設定（`HOSTING_PROVIDER`・`HOSTING_LOCATION`）から出し、無ければ「設定していない」と返す
+   */
+  app.get('/recipients', async (c) => {
+    const { tenant } = c.get('ctx');
+    const kinds = ['google_oauth', 'google_chat_app', 'line', 'inquiry_mailbox', 'wordpress', 'places', 'web_review'] as const;
+    const [settings, resolved, policy, view, creds] = await Promise.all([
+      deps.repo.getTenantSettings(tenant.id), deps.ai.geminiFor(tenant.id), deps.ai.policyFor(tenant.id), deps.tenantView(tenant.id),
+      Promise.all(kinds.map(async (k) => ((await deps.repo.getTenantCredential(tenant.id, k)) ? k : null))),
+    ]);
+    const env = (k: string) => process.env[k]?.trim() || null;
+    const items = buildDataRecipients({
+      deployment: deps.ai.deployment() === 'onsite' ? 'onsite' : 'cloud',
+      hosting: { provider: env('HOSTING_PROVIDER'), location: env('HOSTING_LOCATION') },
+      ai: { policy, geminiSource: resolved.source, localConfigured: deps.ai.localLlm().name === 'local' },
+      credentials: new Set(creds.filter((k): k is NonNullable<typeof k> => !!k)),
+      extensions: {
+        webReview: settings.webReview.enabled, printDesigns: settings.printDesigns.enabled, competitors: settings.competitors.enabled,
+        columns: settings.webColumns.enabled, inquiries: settings.inquiries.enabled,
+      },
+      canvaAvailable: !!deps.canva,
+      connectors: view.connections.map((x) => ({ id: x.id, name: x.name, url: x.url })),
+    });
+    return c.json({ items });
   });
 
   /**

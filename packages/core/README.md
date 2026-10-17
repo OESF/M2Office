@@ -16,6 +16,7 @@ src/engine/      実行エンジン。承認による中断と再開、ジョブ
 src/tools/       ツールの登録簿と内蔵ツール（quote.ts は見積書。金額は quoteTotals の決まった計算。recruit.ts は採用の文の点検）
 src/connectors/  メール・予定・タスク・チャット・本人の Google の連絡先（google/people.ts。第27.15節）への接続口（見本と Google の実装）と、MCP サーバのクライアント。認証の要る会社の接続の許可の流れとアプリの自動登録（oauth.ts。動的クライアント登録）・登録の型（presets.ts。Slack）・呼ぶときの認可（credentials.ts。仕様書 第12.11.6節）
 src/chat/        グループの名前で共有する（group-share.ts。グループに合う Chat のスペースを探す・承認の画面に届く先とグループとの違いを出す。仕様書 第16.7.12.1節、ADR-0076）
+src/privacy/     データの渡し先（委託先）の一覧の組み立て（recipients.ts。第16.11.3節 G-3）
 src/files/       ファイルの置き場と、PDF・Excel・CSV・Word の読み書き（pdf-render.ts は帳票の PDF と見積書の罫線の表と印、quote-sample.ts は見積書の見本の読み取り）。
                  to-text.ts は形式によらず「読むための文字」にし、指示ではないものとして囲う（第10.10節）。
                  compare.ts は 2 つの版を条項ごとに比べる（ツール file.compare。契約書の修正版との差分。第28.13節）。

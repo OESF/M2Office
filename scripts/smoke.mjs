@@ -7600,5 +7600,18 @@ console.log('\n■ 103. 帳票の型と印影（見本から寄せる・印影�
   }
 }
 
+console.log('\n■ 104. データの渡し先と脆弱性の報告の窓口（管理者だけ・推測で埋めない。第16.11.3節 G-3・G-11）');
+{
+  const { status, body } = await call('a', '/v1/admin/connections/recipients');
+  const byMember = await call('a', '/v1/admin/connections/recipients', {}, 'member');
+  const ids = (body?.items ?? []).map((x) => x.id);
+  const hosting = (body?.items ?? []).find((x) => x.id === 'hosting');
+  status === 200 && byMember.status === 403 && ids.includes('hosting') && ids.includes('gemini') && ids.includes('google-workspace') && hosting?.name
+    ? ok('管理者はデータの渡し先（置き場・推論・Google・会社のつなぎ）を見られ、一般の利用者は見られない') : ng('データの渡し先が違う', JSON.stringify({ status, member: byMember.status, ids }));
+  const txt = await fetch(`${API}/v1/security.txt`);
+  txt.status === 404 || /^Contact: /m.test(await txt.text())
+    ? ok('脆弱性の報告の窓口は、連絡先が無ければ出さず、あれば Contact を出す（会社の判定より前に受ける）') : ng('security.txt の応答が違う', String(txt.status));
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
