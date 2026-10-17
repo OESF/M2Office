@@ -117,6 +117,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | メソッド・パス | 内容 |
 |---|---|
 | `GET /health` | 生存確認。テナント不要 |
+| `GET /v1/security.txt` | 脆弱性の報告の窓口（RFC 9116）。入口が `/.well-known/security.txt` から渡す。テナント不要。設定 `SECURITY_CONTACT` が無ければ 404（仕様書 第16.11.3節 G-11） |
 | `GET /v1/auth/providers` | 使えるログイン手段。認証不要 |
 | `POST /v1/auth/dev-login` | 開発用ログイン。認証不要 |
 | `GET /v1/auth/google/start` | Google の同意画面の URL を返す（仕様書 第16.1.2節）。運営のクライアントが未設定なら 503 |

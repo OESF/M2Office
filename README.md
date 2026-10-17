@@ -228,6 +228,7 @@ docs/            開発規約・リリース規定・設計判断記録
 | `AUTH_DEV_HEADERS` | false | `X-Tenant`・`X-User` ヘッダーでの指定を許す。動作確認用 |
 | `M2O_DEBUG` | false | デバッグモード。画面の上に「Debug mode」を出し、音声・秘書の振り分け・失敗した呼び出しと画面から呼んだ API を記録して見せる（メモリーだけに持つ。仕様書 第20.4.1節） |
 | `SESSION_TTL_HOURS` | 168 | ログイン状態の有効時間 |
+| `SECURITY_CONTACT` | （なし） | 脆弱性の報告の窓口（`/.well-known/security.txt`。RFC 9116）の連絡先。`mailto:` か `https:` の URL をカンマで複数。空なら出さない（仕様書 第16.11.3節 G-11） |
 | `COOKIE_SECURE` | false | HTTPS で配信する環境では true |
 | `SCHEDULE_INTERVAL_MS` | 15000 | 定時実行の見回り間隔 |
 | `SCHEDULE_REPLY_INTERVAL_MS` | 900000 | 社外の参加者を含む日程調整で、相手の返事を見る間隔（仕様書 第9.5.3.1節） |

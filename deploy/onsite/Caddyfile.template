@@ -16,6 +16,11 @@
 		X-Frame-Options SAMEORIGIN
 	}
 {{TLS_BLOCK}}
+	# 脆弱性の報告の窓口（RFC 9116。仕様書 第16.11.3節 G-11）。連絡先は API の設定 SECURITY_CONTACT（無ければ 404）
+	handle /.well-known/security.txt {
+		rewrite * /v1/security.txt
+		reverse_proxy 127.0.0.1:{{API_PORT}}
+	}
 	# API と音声の秘書（WebSocket）
 	handle /v1/* {
 		reverse_proxy 127.0.0.1:{{API_PORT}}

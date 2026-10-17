@@ -1,9 +1,9 @@
 ---
 title: M2Office リリース規定
-version: 1.3.0
+version: 1.4.0
 status: draft
 created: 2026-09-21
-updated: 2026-09-25
+updated: 2026-10-17
 owner: 三浦
 tags: [M2Office, release, versioning, changelog]
 ---
@@ -141,6 +141,7 @@ Claude Code の `/release` スキル（[.claude/skills/release/SKILL.md](../.cla
 | 6 | 権限が増える変更の場合、再同意の導線が用意されている | 仕様書 第12.6節 |
 | 7 | 影響するテナントへの事前告知が済んでいる（MAJOR の場合） | 第5.4節 |
 | 8 | **利用者に見える変更について、ヘルプの記事を更新した**（業務の追加・画面や文言の変更・挙動の変更） | 仕様書 第6.10.9節 |
+| 9 | **依存に「高」以上の既知の脆弱性が無い**（`npm run security:check`。確かめられなかったときは「未確認」とする）。静的解析（GitHub の CodeQL）に新しい指摘が無い | 仕様書 第16.11.3節 G-11 |
 
 ### 6.2 配備
 

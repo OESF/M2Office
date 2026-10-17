@@ -26,6 +26,7 @@ import { secretaryRoute } from './routes/secretary.js';
 import { ensureMorningBrief, ensureWeeklyBrief } from './secretary/morning.js';
 import { authRoute } from './routes/auth.js';
 import { machineAdminRoute } from './routes/machine-admin.js';
+import { securityTxtRoute } from './routes/security-txt.js';
 import { notificationsRoute } from './routes/notifications.js';
 import { schedulesRoute } from './routes/schedules.js';
 import { cardsRoute } from './routes/cards.js';
@@ -140,6 +141,8 @@ app.route('/v1/hooks/line', lineHooksRoute(deps));
 app.route('/v1/unsubscribe', unsubscribeRoute(deps));
 // ローカルの形の機械の管理者（第8.6.3節）。会社の判定より前に置く（データベースが止まっても機械の様子を見られるように）
 app.route('/v1/machine-admin', machineAdminRoute(deps));
+// 脆弱性の報告の窓口（RFC 9116。第16.11.3節 G-11）。会社の判定より前に受ける
+app.route('/v1/security.txt', securityTxtRoute());
 app.use('/v1/*', async (c, next) => (c.req.path.startsWith('/v1/machine-admin/') ? next() : resolveTenant(deps)(c, next)));
 app.route('/v1/auth', authRoute(deps));
 // サイネージの再生のページ（第31.9.1節）。ログインを使わず、画面の鍵で名乗る。会社はアドレスで決まるため、会社の判定の後・ログインの確かめより前に置く

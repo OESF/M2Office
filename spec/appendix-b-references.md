@@ -173,3 +173,13 @@ iPhone で撮った名刺の写真を渡すと、読み取って Excel に追記
 | vendor-check（取引先ごとの既存の契約と期限） | 契約の期限管理とあわせて、次の拡張の候補にした（第28.11節） |
 | compliance-check・brief・legal-response・meeting-briefing | 取り込まない。法務部の日常業務（規制の確認、法務の朝会、定型の回答）であり、中小企業の契約書チェックの外。会議の準備は M2Office の「会議の準備」がある |
 
+
+### B.8 クラウドサービスと AI の国のガイドライン（第 0.386.0 版）
+
+第16.11節の対応表の元にした資料。版が改まったら、対応表も読み直す。
+
+| 資料 | 版 | 所在 |
+|---|---|---|
+| 総務省「クラウドサービス提供における情報セキュリティ対策ガイドライン」 | 第 3 版（2021 年 9 月） | https://www.soumu.go.jp/main_content/000771515.pdf |
+| 総務省・経済産業省「AI事業者ガイドライン」本編 | 第 1.2 版（2026 年 3 月 31 日） | https://www.meti.go.jp/shingikai/mono_info_service/ai_shakai_jisso/pdf/20260331_1.pdf |
+| 同 別添（付属資料） | 第 1.2 版（2026 年 3 月 31 日） | https://www.soumu.go.jp/main_content/001064286.pdf |

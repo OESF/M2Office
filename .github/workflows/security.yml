@@ -1,0 +1,39 @@
+# 依存の脆弱性の点検と静的解析（仕様書 第16.11.3節 G-11・第14.3.2節の 8）。
+# main への push・pull request と、週に 1 回（月曜の朝 9 時。日本時間）に回す。結果は GitHub の Security の画面に出る。
+name: security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '0 0 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: 依存の脆弱性の点検
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/check-security.mjs
+
+  codeql:
+    name: 静的解析（CodeQL）
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          queries: security-extended
+      - uses: github/codeql-action/analyze@v3
