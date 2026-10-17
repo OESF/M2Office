@@ -240,3 +240,29 @@ test('システムログ: 運営者は見られ、会社で絞ったら会社の
   evidence[0]!.createdAt = new Date(Date.now() - 400 * 86_400_000).toISOString();
   assert.equal((await del(admin)).status, 200);
 });
+
+test('障害の知らせ: 影響の種類を確かめ、起こす・経過・終えるを運営の操作履歴に残す。運営者なら誰でも出せる（第16.11.3節 G-9）', async () => {
+  const { store, audits } = fakeStore();
+  const calls: unknown[][] = [];
+  Object.assign(store, {
+    openIncident: async (...a: unknown[]) => { calls.push(['open', ...a]); return { id: 'inc-1', notified: 3 }; },
+    updateIncident: async (...a: unknown[]) => { calls.push(['update', ...a]); return 3; },
+    closeIncident: async (...a: unknown[]) => { calls.push(['close', ...a]); return 3; },
+    listIncidents: async () => [],
+  });
+  const app = opsApp({ store, config, log });
+  const admin = await login(app, 'admin@ops.example');
+  const post = (path: string, body: unknown) => app.request(path, {
+    method: 'POST', headers: { ...OPS, cookie: admin.cookie, 'x-csrf-token': admin.csrfToken, 'content-type': 'application/json' }, body: JSON.stringify(body),
+  });
+  assert.equal((await post('/v1/ops/incidents', { title: 'x', impact: 'other' })).status, 400, '影響の種類が要る');
+  const r = await post('/v1/ops/incidents', { title: '実行が止まっています', impact: 'down', body: '調べています', tenants: ['t-acme', 3] });
+  assert.equal(r.status, 201);
+  assert.deepEqual(await r.json(), { id: 'inc-1', notified: 3 });
+  assert.deepEqual((calls[0]![1] as { tenants: string[] }).tenants, ['t-acme'], '会社の ID だけを渡す');
+  assert.equal((await post('/v1/ops/incidents/inc-1/update', { body: '直しています' })).status, 200);
+  assert.equal((await post('/v1/ops/incidents/inc-1/close', { body: '' })).status, 200);
+  assert.deepEqual(audits.filter((a) => a.startsWith('incident.')), ['incident.open', 'incident.update', 'incident.close']);
+  const { operatorCan } = await import('@m2office/core');
+  assert.equal(operatorCan('monitor', 'incident.manage'), true, '監視の人も急いで出せる');
+});

@@ -372,6 +372,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/schedules/:id/trigger` | 次の回を今にする（動作確認用） |
 | `DELETE /v1/schedules/:id` | 本人の定時実行を消す。動いている実行は止めない |
 | `GET /v1/admin/usage` | 管理者: エージェント別の利用量 |
+| `GET /v1/admin/service-report` | 管理者: 月ごとの稼働の報告（`?month=YYYY-MM`。稼働率（計画停止を除く）・止まった時間・計画停止の時間・その会社に関わる障害の経過）と、いま続いている障害（仕様書 第16.11.3節 G-9） |
 | `GET /v1/admin/machine` | 管理者: ローカルの形の「機械」の様子（版・各部の動き・ディスク・証明書・ローカル AI・控え。仕様書 第8.6.7節）。クラウドの形では 404 |
 | `POST /v1/admin/machine/backup` | 管理者: 今すぐ控えを取る（ワーカーが次の見回りで取る。202。控えの置き場が無ければ 400） |
 | `GET /v1/admin/machine/logs` | 管理者（ローカルの形だけ。クラウドの形は 404）: システムログ（`from`・`to`・`levels`・`service`・`q`・`requestId`・`runId`・`before`・`beforeId`。新しい順に 200 件）。最初の 1 回を監査ログ `log.view` に残す（仕様書 第16.10.4節） |
@@ -564,6 +565,8 @@ src/ops/              マスター管理画面の API（別のプロセス。仕
 | GET | `/v1/ops/tenants/:id` | 会社の詳細（概要・利用状況の 12 か月・稼働・シートの氏名とロール・履歴）。開いたことを記録に残す | すべて |
 | GET | `/v1/ops/tenants.csv` | 会社一覧の CSV（書き出したことを記録に残す） | すべて |
 | GET | `/v1/ops/server` | サーバー全体の稼働状況 | すべて |
+| GET・POST | `/v1/ops/incidents` | 障害・計画停止の一覧 ／ 起こす（`title`・`impact`（`down`・`degraded`・`maintenance`）・`body`・`tenants`（無ければすべての会社）・`startedAt`）。対象の会社の管理者に知らせる（仕様書 第16.11.3節 G-9） | すべて |
+| POST | `/v1/ops/incidents/:id/update`・`/v1/ops/incidents/:id/close` | 経過を知らせる ／ 終える（復旧・計画停止の終わり。`endedAt` を渡せる） | すべて |
 | GET・PUT | `/v1/ops/settings/operator` | 運営主体の設定（第23.8.14節） | 見る: すべて・変える: 運営管理者 |
 | GET | `/v1/ops/status-requests` | 停止・緊急停止・再開の申請（扱いの残っているものと直近 30 日。`?tenant=` で会社を絞る） | すべて |
 | POST | `/v1/ops/tenants/:id/requests` | 停止・再開の申請、緊急停止（すぐ止める。会社へ渡す案内の文を返す） | 停止と再開: 運営管理者とサポート・緊急停止: すべて |

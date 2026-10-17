@@ -7,6 +7,7 @@
 
 import type pg from 'pg';
 import type { OperatorProfile } from './store.js';
+import type { ServiceIncident } from './incidents.js';
 
 /** 運営主体の設定を覚えておく長さ（5 分）。 */
 const PROFILE_TTL_MS = 5 * 60_000;
@@ -35,6 +36,15 @@ export class OpsAppSide {
    *
    * @returns 書いた会社の数
    */
+  /**
+   * その会社に関わる障害・計画停止で、期間に重なるもの（第16.11.3節 G-9）。対象の会社の一覧は受け取らない。
+   */
+  async serviceIncidents(tenantId: string, from: Date, to: Date): Promise<ServiceIncident[]> {
+    const { rows } = await this.pool.query('select * from m2o_service_incidents($1, $2, $3)', [tenantId, from.toISOString(), to.toISOString()]);
+    const iso = (v: unknown) => (v ? new Date(v as string).toISOString() : null);
+    return rows.map((r) => ({ id: r.id, title: r.title, impact: r.impact, body: r.body, updates: r.updates ?? [], startedAt: iso(r.started_at)!, endedAt: iso(r.ended_at) }));
+  }
+
   async recordDaily(day: string): Promise<number> {
     const { rows } = await this.pool.query('select m2o_ops_record_daily($1::date) as n', [day]);
     return Number(rows[0]?.n ?? 0);

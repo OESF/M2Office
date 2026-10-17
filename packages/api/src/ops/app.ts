@@ -467,6 +467,43 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
   // サーバー全体の稼働状況（第23.8.7節のうち段 1 の分）
   app.get('/v1/ops/server', async (c) => c.json({ status: await store.serverStatus() }));
 
+  // 障害・計画停止の知らせ（第16.11.3節 G-9）。運営者なら誰でも出せる（急ぐため）。対象の会社の管理者に知らせ、会社の監査ログに残す
+  app.get('/v1/ops/incidents', async (c) => c.json({ incidents: await store.listIncidents(Number(c.req.query('limit') ?? 100)) }));
+  app.post('/v1/ops/incidents', async (c) => {
+    if (!can(c, 'incident.manage')) return denied(c);
+    const b = await c.req.json<{ title?: string; impact?: string; body?: string; tenants?: unknown; startedAt?: string }>().catch(() => ({} as Record<string, unknown>));
+    if (b.impact !== 'down' && b.impact !== 'degraded' && b.impact !== 'maintenance') return c.json({ error: '影響の種類を選んでください' }, 400);
+    const tenants = Array.isArray(b.tenants) ? (b.tenants as unknown[]).filter((x): x is string => typeof x === 'string') : null;
+    const startedAt = typeof b.startedAt === 'string' && !Number.isNaN(Date.parse(b.startedAt)) ? new Date(b.startedAt).toISOString() : null;
+    const op = c.get('operator');
+    try {
+      const r = await store.openIncident({ title: String(b.title ?? '').trim(), impact: b.impact, body: String(b.body ?? '').trim(), tenants, startedAt }, op.id, op.email);
+      await store.audit(op.id, 'incident.open', 'incident', r.id, { impact: b.impact, tenants: tenants?.length ?? 'all', notified: r.notified });
+      return c.json(r, 201);
+    } catch (err) { return ruleError(c, err); }
+  });
+  app.post('/v1/ops/incidents/:id/update', async (c) => {
+    if (!can(c, 'incident.manage')) return denied(c);
+    const b = await c.req.json<{ body?: string }>().catch(() => ({} as { body?: string }));
+    const op = c.get('operator');
+    try {
+      const n = await store.updateIncident(c.req.param('id'), String(b.body ?? '').trim(), op.id);
+      await store.audit(op.id, 'incident.update', 'incident', c.req.param('id'), { notified: n });
+      return c.json({ notified: n });
+    } catch (err) { return ruleError(c, err); }
+  });
+  app.post('/v1/ops/incidents/:id/close', async (c) => {
+    if (!can(c, 'incident.manage')) return denied(c);
+    const b = await c.req.json<{ body?: string; endedAt?: string }>().catch(() => ({} as { body?: string; endedAt?: string }));
+    const endedAt = typeof b.endedAt === 'string' && !Number.isNaN(Date.parse(b.endedAt)) ? new Date(b.endedAt).toISOString() : null;
+    const op = c.get('operator');
+    try {
+      const n = await store.closeIncident(c.req.param('id'), endedAt, String(b.body ?? '').trim(), op.id);
+      await store.audit(op.id, 'incident.close', 'incident', c.req.param('id'), { notified: n });
+      return c.json({ notified: n });
+    } catch (err) { return ruleError(c, err); }
+  });
+
   // 運営主体の設定（第23.8.14節）
   app.get('/v1/ops/settings/operator', async (c) => c.json({ profile: await store.operatorProfile() }));
   app.put('/v1/ops/settings/operator', async (c) => {

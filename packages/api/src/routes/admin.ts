@@ -16,7 +16,7 @@ import {
 import { semanticSearchEnabled,
   DEFAULT_STANDARD_MINUTES, GOOGLE_DATA_RETENTION_DAYS, KNOWLEDGE_MAX_CHARS,
   describeRule, scheduleBlocker, scheduleChecks, stepLabel, toolGoogleScopes, type AuditQuery, jstMonth, purposeLabel,
-  detectKind, readQuoteSample, MAX_FILE_BYTES,
+  detectKind, readQuoteSample, MAX_FILE_BYTES, serviceReport, monthRange,
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { requireRole, type AppEnv } from '../middleware/tenant.js';
@@ -277,6 +277,24 @@ export function adminRoute(deps: AppDeps) {
     await audit(deps, tenant.id, user.id, 'settings.update', 'tenant_settings', checked.section,
       { section: checked.section });
     return c.json({ ok: true });
+  });
+
+  /**
+   * 月ごとの稼働の報告（第16.11.3節 G-9）。本文 `?month=YYYY-MM`（日本時間。既定は今月）。
+   *
+   * @remarks その会社に関わる障害・計画停止だけを読む（対象の会社の一覧は受け取らない）。稼働率は計画停止を除く。続いているものも返す
+   */
+  app.get('/service-report', async (c) => {
+    const { tenant } = c.get('ctx');
+    const now = new Date();
+    const thisMonth = new Date(now.getTime() + 9 * 3_600_000).toISOString().slice(0, 7);
+    const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(c.req.query('month') ?? '') ? c.req.query('month')! : thisMonth;
+    const { from, to } = monthRange(month);
+    const [incidents, open] = await Promise.all([
+      deps.opsSide.serviceIncidents(tenant.id, from, to),
+      deps.opsSide.serviceIncidents(tenant.id, now, new Date(now.getTime() + 1)),
+    ]);
+    return c.json({ report: serviceReport(month, incidents, now), open: open.filter((i) => !i.endedAt) });
   });
 
   /**

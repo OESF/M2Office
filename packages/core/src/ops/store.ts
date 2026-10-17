@@ -9,6 +9,7 @@ import type { EvidencePackage, SystemLogDigest, SystemLogFilter, SystemLogLine }
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import type { MachineReport, NewTenantInput, OperatorRole } from './rules.js';
+import type { IncidentImpact, ServiceIncident } from './incidents.js';
 
 /** 運営者。 */
 export interface Operator {
@@ -138,6 +139,14 @@ export interface StatusRequest {
   confirmedAt: string | null;
 }
 
+/** 障害・計画停止（運営の画面が見る形。第16.11.3節 G-9）。 */
+export interface OpsIncident extends ServiceIncident {
+  /** 対象の会社。`null` ならすべての会社。 */
+  tenantIds: string[] | null;
+  /** 起こした運営者。 */
+  createdLabel: string;
+}
+
 /** 代理アクセスの申請（運営の画面が見る形。第23.6.1節）。 */
 export interface OpsProxyGrant {
   id: string;
@@ -197,7 +206,7 @@ export class OpsRuleError extends Error {
 /** データベースの関数の失敗を、決めた理由に直す（決めた理由でなければそのまま投げる）。 */
 function rethrow(err: unknown): never {
   const msg = err instanceof Error ? err.message : '';
-  if (/^(subdomain_invalid|subdomain_taken|domain_taken|admin_domain|status_invalid|status_locked|not_found|reason_required|already_requested|not_stopped|not_pending|same_operator|kind_invalid)$/.test(msg)) throw new OpsRuleError(msg);
+  if (/^(subdomain_invalid|subdomain_taken|domain_taken|admin_domain|status_invalid|status_locked|not_found|reason_required|already_requested|not_stopped|not_pending|same_operator|kind_invalid|time_invalid)$/.test(msg)) throw new OpsRuleError(msg);
   throw err;
 }
 
@@ -540,6 +549,44 @@ export class OpsStore {
   }
 
   /** 代理アクセスの申請の一覧（会社を絞るか、すべて）。 */
+  /**
+   * 障害・計画停止を起こし、対象の会社の管理者に知らせる（第16.11.3節 G-9）。
+   *
+   * @param tenants 対象の会社の ID。`null` ならすべての会社
+   * @returns 起こしたものの ID と、知らせた会社の数
+   */
+  async openIncident(p: { title: string; impact: IncidentImpact; body: string; tenants: string[] | null; startedAt: string | null }, operatorId: string, operatorLabel: string): Promise<{ id: string; notified: number }> {
+    try {
+      const { rows } = await this.pool.query('select * from ops.open_incident($1,$2,$3,$4,$5,$6,$7)', [p.title, p.impact, p.body, p.tenants, p.startedAt, operatorId, operatorLabel]);
+      return { id: rows[0].id as string, notified: Number(rows[0].notified) };
+    } catch (err) { rethrow(err); }
+  }
+
+  /** 経過を書き、知らせる。知らせた会社の数を返す。 */
+  async updateIncident(id: string, body: string, operatorId: string): Promise<number> {
+    try {
+      const { rows } = await this.pool.query('select ops.update_incident($1,$2,$3) as n', [id, body, operatorId]);
+      return Number(rows[0].n);
+    } catch (err) { rethrow(err); }
+  }
+
+  /** 終え（復旧・計画停止の終わり）、知らせる。知らせた会社の数を返す。 */
+  async closeIncident(id: string, endedAt: string | null, body: string, operatorId: string): Promise<number> {
+    try {
+      const { rows } = await this.pool.query('select ops.close_incident($1,$2,$3,$4) as n', [id, endedAt, body, operatorId]);
+      return Number(rows[0].n);
+    } catch (err) { rethrow(err); }
+  }
+
+  /** 障害・計画停止の一覧（新しい順）。 */
+  async listIncidents(limit = 100): Promise<OpsIncident[]> {
+    const { rows } = await this.pool.query('select * from ops.list_incidents($1)', [limit]);
+    return rows.map((r) => ({
+      id: r.id, title: r.title, impact: r.impact, tenantIds: r.tenant_ids ?? null, body: r.body, updates: r.updates ?? [],
+      startedAt: iso(r.started_at)!, endedAt: iso(r.ended_at), createdLabel: r.created_label,
+    }));
+  }
+
   async listProxy(tenantId?: string): Promise<OpsProxyGrant[]> {
     const { rows } = await this.pool.query('select * from ops.list_proxy($1)', [tenantId ?? null]);
     return rows.map((r) => ({

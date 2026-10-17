@@ -114,6 +114,20 @@ export interface TenantDetailView {
   history: { action: string; actorId: string; detail: Record<string, unknown>; occurredAt: string }[];
 }
 
+/** 障害・計画停止（第16.11.3節 G-9）。 */
+export interface IncidentRow {
+  id: string;
+  title: string;
+  impact: 'down' | 'degraded' | 'maintenance';
+  /** 対象の会社。`null` ならすべての会社。 */
+  tenantIds: string[] | null;
+  body: string;
+  updates: { at: string; body: string; ended: boolean }[];
+  startedAt: string;
+  endedAt: string | null;
+  createdLabel: string;
+}
+
 export interface ServerStatusView {
   queue: { queued: number; oldestQueuedAt: string | null; running: number; awaitingApproval: number };
   runs: { hour: number; hourFailed: number; today: number; todayFailed: number };
@@ -179,6 +193,12 @@ export const opsApi = {
   setTenantStatus: (id: string, status: 'trial' | 'active') => call<{ ok: true }>(`/tenants/${encodeURIComponent(id)}/status`, send('PUT', { status })),
   tenantDetail: (id: string) => call<{ detail: TenantDetailView; opsHistory: OpsAuditRow[] }>(`/tenants/${encodeURIComponent(id)}`),
   server: () => call<{ status: ServerStatusView }>('/server'),
+  /** 障害・計画停止の知らせ（仕様書 第16.11.3節 G-9）。 */
+  incidents: () => call<{ incidents: IncidentRow[] }>('/incidents'),
+  openIncident: (b: { title: string; impact: IncidentRow['impact']; body: string; tenants: string[] | null; startedAt: string | null }) =>
+    call<{ id: string; notified: number }>('/incidents', send('POST', b)),
+  updateIncident: (id: string, body: string) => call<{ notified: number }>(`/incidents/${encodeURIComponent(id)}/update`, send('POST', { body })),
+  closeIncident: (id: string, body: string, endedAt: string | null) => call<{ notified: number }>(`/incidents/${encodeURIComponent(id)}/close`, send('POST', { body, endedAt })),
   operatorProfile: () => call<{ profile: OperatorProfileView }>('/settings/operator'),
   setOperatorProfile: (p: OperatorProfileView) => call<{ profile: OperatorProfileView }>('/settings/operator', send('PUT', p)),
   statusRequests: (tenantId?: string) => call<{ requests: StatusRequestRow[] }>(`/status-requests${tenantId ? `?tenant=${encodeURIComponent(tenantId)}` : ''}`),

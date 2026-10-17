@@ -15,18 +15,20 @@ export type OperatorRole = 'admin' | 'support' | 'monitor';
 export const OPERATOR_ROLES: readonly OperatorRole[] = ['admin', 'support', 'monitor'];
 
 /** 運営者の操作。 */
-export type OpsAction = 'view' | 'tenant.create' | 'tenant.status' | 'tenant.suspend' | 'tenant.lock' | 'machine.manage' | 'operator.manage' | 'settings.manage' | 'evidence.create' | 'evidence.delete';
+export type OpsAction = 'view' | 'incident.manage' | 'tenant.create' | 'tenant.status' | 'tenant.suspend' | 'tenant.lock' | 'machine.manage' | 'operator.manage' | 'settings.manage' | 'evidence.create' | 'evidence.delete';
 
 /**
  * 運営者のロールで、その操作ができるか。
  *
  * @remarks 運営管理者はすべて（運営主体の設定を含む）。サポートは見ることと、会社を作る・切り替える・停止と再開の申請と承認まで。
  * 監視は見ることと、緊急停止の発動だけ（緊急停止は運営者なら誰でも発動できる。Q-63）。
- * 証拠保全は急ぐため、緊急停止と同じく運営者なら誰でも始められる。保全したものを消すのは運営管理者だけ（第16.10.5節）
+ * 証拠保全は急ぐため、緊急停止と同じく運営者なら誰でも始められる。保全したものを消すのは運営管理者だけ（第16.10.5節）。
+ * 障害・計画停止の知らせも急ぐため、運営者なら誰でも出せる（第16.11.3節 G-9）
  */
 export function operatorCan(role: OperatorRole, action: OpsAction): boolean {
   if (role === 'admin') return true;
-  if (action === 'view' || action === 'tenant.lock' || action === 'evidence.create') return true;
+  // 障害の知らせ（第16.11.3節 G-9）は、見つけた運営者が急いで出せるよう、誰でも出せる
+  if (action === 'view' || action === 'tenant.lock' || action === 'evidence.create' || action === 'incident.manage') return true;
   return role === 'support' && (action === 'tenant.create' || action === 'tenant.status' || action === 'tenant.suspend');
 }
 
@@ -82,6 +84,7 @@ export function tenantErrorText(code: string): string {
     case 'not_pending': return 'この申請は、もう扱えません（承認・取り下げ済みなど）';
     case 'same_operator': return '申請した人とは別の運営者が行ってください';
     case 'kind_invalid': return '操作の種類が違います';
+    case 'time_invalid': return '終わりの時刻は、始まりより後で、いまより前にしてください';
     default: return '処理できませんでした';
   }
 }

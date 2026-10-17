@@ -7613,5 +7613,45 @@ console.log('\n■ 104. データの渡し先と脆弱性の報告の窓口（�
     ? ok('脆弱性の報告の窓口は、連絡先が無ければ出さず、あれば Contact を出す（会社の判定より前に受ける）') : ng('security.txt の応答が違う', String(txt.status));
 }
 
+console.log('\n■ 105. 障害の知らせと稼働の報告（対象の会社の管理者だけに知らせる・ほかの会社に見せない・稼働率は計画停止を除く。第16.11.3節 G-9）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const ids = [];
+  try {
+    // 運営の口（ops.open_incident など）を、運営の API の代わりに所有者で呼ぶ。対象は t-alpha だけ
+    const started = new Date(Date.now() - 2 * 3_600_000).toISOString();
+    const { rows: [o] } = await owner.query(`select * from ops.open_incident($1,'down','確認用の本文',array['t-alpha'],$2,'op-smoke','smoke')`, ['確認用の障害', started]);
+    ids.push(o.id);
+    const { rows: [m] } = await owner.query(`select * from ops.open_incident($1,'maintenance','確認用の計画停止',array['t-alpha'],$2,'op-smoke','smoke')`, ['確認用の計画停止', started]);
+    ids.push(m.id);
+    const { body: a1 } = await call('a', '/v1/admin/service-report');
+    const { body: b1 } = await call('b', '/v1/admin/service-report');
+    const byMember = await call('a', '/v1/admin/service-report', {}, 'member');
+    const notes = (await call('a', '/v1/notifications')).body?.items ?? [];
+    a1?.open?.some((i) => i.title === '確認用の障害') && !(b1?.open ?? []).some((i) => i.title === '確認用の障害') && byMember.status === 403 && o.notified === 1
+      && notes.some((n) => /障害のお知らせ: 確認用の障害/.test(n.title ?? ''))
+      ? ok('障害を起こすと対象の会社の管理者に知らせ、その会社の稼働の報告にだけ出る') : ng('障害の知らせが違う', JSON.stringify({ a: a1?.open?.length, b: b1?.open?.length, member: byMember.status, notified: o.notified, notes: notes.slice(0, 3).map((n) => n.title) }));
+    await owner.query(`select ops.update_incident($1,'確認用の経過','op-smoke')`, [o.id]);
+    await owner.query(`select ops.close_incident($1,$2,'','op-smoke')`, [o.id, new Date(Date.now() - 3_600_000).toISOString()]);
+    await owner.query(`select ops.close_incident($1,null,'','op-smoke')`, [m.id]);
+    const { body: a2 } = await call('a', '/v1/admin/service-report');
+    const inc = (a2?.report?.incidents ?? []).find((i) => i.id === o.id);
+    a2?.report?.downMinutes >= 59 && a2?.report?.maintenanceMinutes >= 119 && a2?.report?.uptime < 100 && (a2?.open ?? []).every((i) => i.id !== o.id)
+      && inc?.updates?.length === 3 && inc.updates.at(-1).ended === true && /復旧しました/.test(inc.body)
+      ? ok('終えると復旧を知らせ、稼働率は止まった時間だけを数える（計画停止は別に数える）') : ng('稼働の報告が違う', JSON.stringify({ report: { ...a2?.report, incidents: undefined }, updates: inc?.updates?.length }));
+    const bad = await owner.query(`select ops.close_incident($1,null,'','op-smoke')`, [o.id]).then(() => 'ok', (e) => e.message);
+    bad === 'not_pending' ? ok('終えたものは、もう一度終えられない') : ng('終えたものを終えられる', bad);
+  } catch (err) {
+    ng('障害の知らせの確認が途中で止まった', String(err));
+  } finally {
+    await owner.query(`delete from notifications where tenant_id = 't-alpha' and kind = 'service' and title like '%確認用の%'`);
+    await owner.query(`delete from audit_events where tenant_id = 't-alpha' and action like 'service.incident%' and detail->>'incident' = any($1)`, [ids]);
+    await owner.query('delete from ops.service_incidents where id = any($1)', [ids]);
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');

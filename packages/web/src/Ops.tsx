@@ -12,7 +12,7 @@ import { SystemLogs, type LogSource } from './SystemLogs.js';
 import { NavItem, SideNavLayout, ThemeToggle, type IconName } from './nav.js';
 import {
   opsApi, OpsApiError, TENANTS_CSV_URL, type MachineRow, type OperatorProfileView, type OperatorRole, type OperatorView, type OpsAuditRow, type OpsMe,
-  type ProxyGrantRow, type ServerStatusView, type StatusRequestRow, type TenantDetailView, type TenantRow,
+  type IncidentRow, type ProxyGrantRow, type ServerStatusView, type StatusRequestRow, type TenantDetailView, type TenantRow,
 } from './ops-api.js';
 
 const STATUS_LABEL: Record<TenantRow['status'], string> = { trial: '試用', active: '稼働中', suspended: '停止', locked: '緊急停止', cancelled: '解約済み' };
@@ -33,7 +33,9 @@ const ACTION_LABEL: Record<string, string> = {
   'tenant.suspend_requested': '停止の申請', 'tenant.suspend_scheduled': '停止の予告', 'tenant.suspend': '停止した', 'tenant.lock': '緊急停止した',
   'tenant.lock_confirmed': '緊急停止の確認', 'tenant.resume_requested': '再開の申請', 'tenant.resume': '再開した',
   'proxy.request': '代理アクセスを申請した', 'proxy.open': '代理アクセスで開いた', 'proxy.end': '代理アクセスを終えた',
+  'incident.open': '障害の知らせを出した', 'incident.update': '障害の経過を知らせた', 'incident.close': '障害の終わりを知らせた',
 };
+const IMPACT_LABEL: Record<IncidentRow['impact'], string> = { down: '障害（止まった）', degraded: '一部の不具合', maintenance: '計画停止' };
 const KIND_LABEL: Record<StatusRequestRow['kind'], string> = { suspend: '通常の停止', lock: '緊急停止', resume: '再開' };
 const STATE_LABEL: Record<StatusRequestRow['state'], string> = { pending: '承認待ち', scheduled: '予告中', done: '行った', rejected: '承認しなかった', withdrawn: '取り下げた' };
 const REASONS: Record<StatusRequestRow['kind'], Record<string, string>> = {
@@ -127,11 +129,12 @@ function OpsLogin({ onLoggedIn }: { onLoggedIn: () => void }) {
   );
 }
 
-type OpsPage = 'tenants' | 'requests' | 'server' | 'logs' | 'machines' | 'operators' | 'audit' | 'settings';
+type OpsPage = 'tenants' | 'requests' | 'server' | 'incidents' | 'logs' | 'machines' | 'operators' | 'audit' | 'settings';
 const PAGES: { id: OpsPage; label: string; icon: IconName }[] = [
   { id: 'tenants', label: '会社一覧', icon: 'company' },
   { id: 'requests', label: '停止と再開', icon: 'approvals' },
   { id: 'server', label: '稼働状況', icon: 'usage' },
+  { id: 'incidents', label: '障害の知らせ', icon: 'notifications' },
   { id: 'logs', label: 'システムログ', icon: 'console' },
   { id: 'machines', label: 'ローカルの形の機械', icon: 'dashboard' },
   { id: 'operators', label: '運営者', icon: 'users' },
@@ -181,6 +184,7 @@ function OpsConsole({ me, onLogout }: { me: OpsMe; onLogout: () => void }) {
           {page === 'tenants' && <Tenants me={me} flagged={flagged} onMachines={() => setPage('machines')} onChanged={loadRequests} />}
           {page === 'requests' && <Requests me={me} rows={requests} onChanged={loadRequests} />}
           {page === 'server' && <Server />}
+          {page === 'incidents' && <Incidents />}
           {page === 'logs' && <OpsLogs me={me} />}
           {page === 'settings' && <Settings me={me} />}
           {page === 'machines' && <Machines me={me} />}
@@ -656,6 +660,74 @@ function Server() {
           {s.workers.length > 1 && <p className="muted small">ワーカー: {s.workers.map((w) => `${w.id}（${when(w.at)}）`).join('、')}</p>}
         </>
       )}
+    </>
+  );
+}
+
+/**
+ * 障害・計画停止の知らせ（仕様書 第16.11.3節 G-9）。起こす・経過を書く・終えるたびに、対象の会社の管理者に知らせる。
+ * 運営者なら誰でも出せる（急ぐため）。対象は、すべての会社か、選んだ会社。
+ */
+function Incidents() {
+  const [rows, setRows] = useState<IncidentRow[] | null>(null);
+  const [tenants, setTenants] = useState<TenantRow[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [form, setForm] = useState({ title: '', impact: 'down' as IncidentRow['impact'], body: '', all: true, picked: [] as string[], startedAt: '' });
+  const [note, setNote] = useState<Record<string, string>>({});
+  const load = useCallback(() => { opsApi.incidents().then((r) => setRows(r.incidents)).catch((e) => setError(errText(e, '読み込めませんでした'))); }, []);
+  useEffect(() => { load(); opsApi.tenants().then((r) => setTenants(r.tenants)).catch(() => undefined); }, [load]);
+  const nameOf = (id: string) => tenants.find((t) => t.id === id)?.name ?? id;
+  const act = async (run: () => Promise<{ notified: number }>) => {
+    setError(null); setNotice(null);
+    try { const r = await run(); setNotice(`${r.notified} 社の管理者に知らせました`); load(); } catch (e) { setError(errText(e, '処理できませんでした')); }
+  };
+  return (
+    <>
+      <h2>障害の知らせ</h2>
+      {error && <p className="error">{error}</p>}
+      {notice && <p className="ok">{notice}</p>}
+      <div className="card">
+        <div className="row">
+          <select value={form.impact} onChange={(e) => setForm({ ...form, impact: e.target.value as IncidentRow['impact'] })}>
+            {(Object.keys(IMPACT_LABEL) as IncidentRow['impact'][]).map((k) => <option key={k} value={k}>{IMPACT_LABEL[k]}</option>)}
+          </select>
+          <input placeholder="題（例: 業務の実行が止まっています）" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} style={{ flex: 1 }} />
+        </div>
+        <textarea placeholder="いまの状況と、会社にお願いすること" value={form.body} onChange={(e) => setForm({ ...form, body: e.target.value })} rows={3} style={{ width: '100%' }} />
+        <div className="row">
+          <label className="check"><input type="checkbox" checked={form.all} onChange={(e) => setForm({ ...form, all: e.target.checked })} />すべての会社</label>
+          {!form.all && (
+            <select multiple value={form.picked} onChange={(e) => setForm({ ...form, picked: Array.from(e.target.selectedOptions, (o) => o.value) })}>
+              {tenants.filter((t) => t.status !== 'cancelled').map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          )}
+          <label>始まり <input type="datetime-local" value={form.startedAt} onChange={(e) => setForm({ ...form, startedAt: e.target.value })} /></label>
+          <button className="btn" disabled={!form.title.trim() || (!form.all && form.picked.length === 0)} onClick={() => void act(async () => {
+            const r = await opsApi.openIncident({ title: form.title, impact: form.impact, body: form.body, tenants: form.all ? null : form.picked, startedAt: form.startedAt ? new Date(form.startedAt).toISOString() : null });
+            setForm({ ...form, title: '', body: '' });
+            return r;
+          })}>知らせる</button>
+        </div>
+      </div>
+      {rows && rows.length === 0 && <p className="muted">まだありません</p>}
+      {rows && rows.map((i) => (
+        <div className="card" key={i.id}>
+          <div className="row">
+            <span className={`badge ${i.endedAt ? 'ok' : 'warn'}`}>{i.endedAt ? '終わった' : '続いている'}</span>
+            <strong>{IMPACT_LABEL[i.impact]}: {i.title}</strong>
+            <span className="muted small">{when(i.startedAt)} 〜 {i.endedAt ? when(i.endedAt) : ''}・{i.tenantIds ? i.tenantIds.map(nameOf).join('、') : 'すべての会社'}・{i.createdLabel}</span>
+          </div>
+          <ul className="small">{i.updates.map((u, k) => <li key={k}>{when(u.at)} {u.body}</li>)}</ul>
+          {!i.endedAt && (
+            <div className="row">
+              <input placeholder="経過・終わりの文" value={note[i.id] ?? ''} onChange={(e) => setNote({ ...note, [i.id]: e.target.value })} style={{ flex: 1 }} />
+              <button className="btn ghost small" disabled={!(note[i.id] ?? '').trim()} onClick={() => void act(() => opsApi.updateIncident(i.id, note[i.id] ?? ''))}>経過を知らせる</button>
+              <button className="btn small" onClick={() => void act(() => opsApi.closeIncident(i.id, note[i.id] ?? '', null))}>{i.impact === 'maintenance' ? '終わりを知らせる' : '復旧を知らせる'}</button>
+            </div>
+          )}
+        </div>
+      ))}
     </>
   );
 }

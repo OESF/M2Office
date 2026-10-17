@@ -18,13 +18,14 @@ import { ExtensionSettings } from './Extensions.js';
 import { Connections } from './Connections.js';
 import { ExternalApps } from './ExternalApps.js';
 import { DataRecipients } from './DataRecipients.js';
+import { ServiceReport } from './ServiceReport.js';
 import { HelpCenter, PageTitle, useOpenHelp } from './help.js';
 import { AppVersionBadge } from './launcher.js';
 import { Icon, NavHeading, NavItem, SideNavLayout, ThemeToggle, type IconName } from './nav.js';
 
 type Tab =
   | 'dashboard' | 'usage' | 'runs' | 'schedules' | 'company' | 'agents' | 'extensions' | 'users' | 'knowledge' | 'audit'
-  | 'connectors' | 'setup' | 'help' | 'helpReview' | 'machine' | 'support';
+  | 'connectors' | 'setup' | 'help' | 'helpReview' | 'machine' | 'support' | 'service';
 
 /**
  * 管理者ページの左ペインの項目。説明はマウスを重ねたときに出す（仕様書 第6.1.1節）。
@@ -104,6 +105,8 @@ const TABS: {
   { id: 'setup', label: 'はじめに行う設定', icon: 'help', description: '導入の流れと、残っている設定', group: '設定' },
   { id: 'machine', label: '機械', icon: 'usage', description: '社内に置いた機械の様子と控え（ローカルの形だけ）', group: '記録' },
   { id: 'usage', label: '利用状況', icon: 'usage', description: '業務ごとの実行の件数と費用', group: '記録' },
+  // 月ごとの稼働率と障害・計画停止（仕様書 第16.11.3節 G-9。クラウドの形だけ）
+  { id: 'service', label: '稼働の報告', icon: 'notifications', description: '月ごとの稼働率と、障害・計画停止の経過', group: '記録' },
   { id: 'runs', label: '実行の一覧', icon: 'runs', description: '全員の実行の状態と費用（中身は見られません）', group: '記録' },
   { id: 'schedules', label: '定時実行の一覧', icon: 'schedules', description: '全員の定時実行と、動かないものの理由（見るだけ）', group: '記録' },
   { id: 'audit', label: '監査ログ', icon: 'audit', description: '誰が何をしたかの記録', group: '記録' },
@@ -206,7 +209,7 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const isAdmin = me.user.roles.includes('admin');
   // 左のメニュー。上の段は設定まで、下の段は記録から（ワークスペースと同じく上下に分け、それぞれスクロールする。仕様書 第6.1節）
   // すべて済んだ会社では「はじめに行う設定」を出さない（仕様書 第6.10.3.1節）
-  const navTabs = TABS.filter((t) => (t.id !== 'setup' || setup) && (t.id !== 'machine' || me.deployment === 'onsite') && (t.id !== 'support' || !me.proxy));
+  const navTabs = TABS.filter((t) => (t.id !== 'setup' || setup) && (t.id !== 'machine' || me.deployment === 'onsite') && (t.id !== 'service' || me.deployment !== 'onsite') && (t.id !== 'support' || !me.proxy));
   const recordsAt = Math.max(0, navTabs.findIndex((t) => t.group === '記録'));
   const navList = (list: typeof navTabs) => (
     <>
@@ -282,6 +285,7 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
               />
             )}
             {tab === 'usage' && <Usage />}
+            {tab === 'service' && <ServiceReport />}
             {tab === 'machine' && <MachinePanel fns={api.admin} help={{ article: 'admin-machine', text: '社内に置いた機械の様子と控えです。業務の中身は出ません。' }} />}
             {tab === 'runs' && <Runs viewer={me.proxy?.scope === 'runs' ? me.user.id : null} />}
             {tab === 'support' && !me.proxy && <SupportAccess />}

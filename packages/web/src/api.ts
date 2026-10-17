@@ -202,6 +202,23 @@ export interface MachineAdminSession {
   csrfToken: string;
 }
 
+/** 障害・計画停止 1 つ（仕様書 第16.11.3節 G-9）。 */
+export interface ServiceIncidentView {
+  id: string;
+  title: string;
+  impact: 'down' | 'degraded' | 'maintenance';
+  body: string;
+  updates: { at: string; body: string; ended: boolean }[];
+  startedAt: string;
+  endedAt: string | null;
+}
+
+/** 月ごとの稼働の報告と、いま続いている障害。 */
+export interface ServiceReportView {
+  report: { month: string; minutes: number; downMinutes: number; uptime: number | null; maintenanceMinutes: number; incidents: ServiceIncidentView[] };
+  open: ServiceIncidentView[];
+}
+
 /** 途中の録音（仕様書 第9.4.5.1節）。`seconds` は録れている長さ、`nextSeq` は次に送る欠片の番号。 */
 export interface LiveRecordingView {
   id: string;
@@ -2456,6 +2473,8 @@ export const api = {
     dashboardStats: (days: 1 | 7 | 30) => call<DashboardStats>(`/admin/dashboard/stats?days=${days}`),
     saveSettings: <K extends keyof TenantSettings>(section: K, value: TenantSettings[K]) =>
       call(`/admin/settings/${section}`, { method: 'PUT', body: JSON.stringify(value) }),
+    /** 月ごとの稼働の報告（仕様書 第16.11.3節 G-9）。 */
+    serviceReport: (month: string) => call<ServiceReportView>(`/admin/service-report?month=${encodeURIComponent(month)}`),
     /** データの渡し先（委託先）の一覧（仕様書 第16.11.3節 G-3）。 */
     dataRecipients: () => call<{ items: DataRecipient[] }>('/admin/connections/recipients'),
     /** 印影（社印）を登録する（仕様書 第15.2.3節）。 */
