@@ -69,7 +69,7 @@ copy('docs/manual', (p) => !p.endsWith('.pdf'));
 copy('docs/api', (p) => !p.endsWith('.html') && !p.endsWith('.md'));
 copy('extensions');
 copy('db/migrations');
-for (const s of ['migrate.mjs', 'create-tenant.mjs', 'create-operator.mjs', 'wait-for-db.mjs']) copy(`scripts/${s}`);
+for (const s of ['migrate.mjs', 'create-tenant.mjs', 'create-operator.mjs', 'wait-for-db.mjs', 'rotate-secrets.mjs']) copy(`scripts/${s}`);
 
 // 4. 実行の場所の package.json（外のパッケージと版。移行と会社の作成はここから動かす）
 writeFileSync(join(out, 'package.json'), `${JSON.stringify({
@@ -86,6 +86,7 @@ writeFileSync(join(out, 'package.json'), `${JSON.stringify({
     'db:migrate': 'node --env-file-if-exists=m2office.env scripts/migrate.mjs',
     'tenant:create': 'node --env-file-if-exists=m2office.env scripts/create-tenant.mjs',
     'ops:operator': 'node --env-file-if-exists=m2office.env scripts/create-operator.mjs',
+    'secrets:rotate': 'node --env-file-if-exists=m2office.env scripts/rotate-secrets.mjs',
   },
   dependencies: Object.fromEntries([...external.entries()].sort()),
 }, null, 2)}\n`);

@@ -111,6 +111,17 @@ sudo rsync -a /tmp/m2o-restore/files/ <データの置き場>/files/ && sudo cho
 
 `M2OFFICE_SECRET_KEY`（預かった鍵を暗号化する鍵）も、紙の控えの値に書き換えてから（`/Library/M2Office/m2office.env`。`setup.sh` を走らせ直してもこの値を使い続ける）M2Office を動かし直す。違う鍵のままだと、預かった鍵（Google の接続など）を開けない。社内の控えのディスクが残っていれば、そちらから同じ手順（`pg_restore` と `rsync`）で戻せる。
 
+## 暗号の鍵の入れ替え
+
+`M2OFFICE_SECRET_KEY` を入れ替えるとき（漏れた恐れがあるとき・決めた周期。仕様書 第16.11.3節 G-10）は、止めずに次の順で行う。
+
+1. 新しい鍵を作る（`openssl rand -base64 32`）。紙の控えに書く
+2. `/Library/M2Office/m2office.env` の `M2OFFICE_SECRET_KEY` を新しい鍵にし、前の鍵を `M2OFFICE_SECRET_KEY_OLD` に移す
+3. M2Office を動かし直す（前の鍵でも読めるので、預かった鍵はそのまま使える。機械の管理者は入り直しになる）
+4. `npm run secrets:rotate -- --check` で数え、`npm run secrets:rotate` で残りを新しい鍵で暗号化し直す（「読めない」が 0 になることを確かめる）
+
+前の鍵は、すぐには外さない。名刺の一斉メールの配信停止のリンクと、入れ替えより前の控え（`pg_restore` で戻すもの）は前の鍵で開くため、少なくとも 1 年は `M2OFFICE_SECRET_KEY_OLD` と紙の控えに残す。
+
 ## 遠隔の保守
 
 - 運営の Tailscale に、導入のときに 1 度だけ登録し（運営からもらった鍵。使い捨ての鍵を勧める）、すぐ閉じる。

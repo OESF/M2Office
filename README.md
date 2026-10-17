@@ -228,6 +228,8 @@ docs/            開発規約・リリース規定・設計判断記録
 | `AUTH_DEV_HEADERS` | false | `X-Tenant`・`X-User` ヘッダーでの指定を許す。動作確認用 |
 | `M2O_DEBUG` | false | デバッグモード。画面の上に「Debug mode」を出し、音声・秘書の振り分け・失敗した呼び出しと画面から呼んだ API を記録して見せる（メモリーだけに持つ。仕様書 第20.4.1節） |
 | `SESSION_TTL_HOURS` | 168 | ログイン状態の有効時間 |
+| `M2OFFICE_SECRET_KEY` | （開発は固定の鍵） | 秘密の値（Gemini の鍵・OAuth のシークレット・利用者のトークン）を暗号化する鍵（AES-256-GCM。ADR-0007）。本番では必須 |
+| `M2OFFICE_SECRET_KEY_OLD` | （なし） | 前の鍵（カンマで複数）。読むときだけ使う。鍵を入れ替えたら、`npm run secrets:rotate` で残りを今の鍵で暗号化し直す（仕様書 第16.11.3節 G-10） |
 | `SECURITY_CONTACT` | （なし） | 脆弱性の報告の窓口（`/.well-known/security.txt`。RFC 9116）の連絡先。`mailto:` か `https:` の URL をカンマで複数。空なら出さない（仕様書 第16.11.3節 G-11） |
 | `COOKIE_SECURE` | false | HTTPS で配信する環境では true |
 | `SCHEDULE_INTERVAL_MS` | 15000 | 定時実行の見回り間隔 |
@@ -394,6 +396,8 @@ API とワーカーは起動時にリポジトリ直下の `.env` を読みま�
 
 ```bash
 npm run publish:check                          # push の前の点検（秘密の値・見本でないメールアドレス・出してはならない言葉・依存のライセンス）
+npm run security:check                         # 依存の既知の脆弱性の点検（「高」以上で失敗。仕様書 第16.11.3節 G-11）
+npm run secrets:rotate                         # 暗号の鍵の入れ替えの後に、前の鍵の値を今の鍵で暗号化し直す（--check で数えるだけ。G-10）
 npm run publish:export -- ../m2office-export   # 履歴を含めたくない配布物を作るときだけ。点検を通してから、空のフォルダに書き出す
 ```
 

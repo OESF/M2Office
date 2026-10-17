@@ -45,6 +45,7 @@
     "eval:knowledge-search": "node --env-file-if-exists=.env scripts/eval-knowledge-search.mjs",
     "publish:check": "node scripts/check-publish.mjs",
     "security:check": "node scripts/check-security.mjs",
+    "secrets:rotate": "node --env-file-if-exists=.env scripts/rotate-secrets.mjs",
     "publish:export": "node scripts/export-public.mjs"
   },
   "devDependencies": {
