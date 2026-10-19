@@ -10,7 +10,7 @@
 
 import { createHash } from 'node:crypto';
 import {
-  assertDatabaseConfigured,
+  assertDatabaseConfigured, InventoryMarketService, PostgresMarketStore, competitorPriceFacts, type CompetitorPriceFact,
   HelpFeedback, PostgresHelpFeedbackStore, PostgresHelpNoteStore, noteText, type HelpNoteStore,
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS, GoogleDataRetention, GoogleRevocation, agentUsesGoogle,
   RunEngine, Secretary, OFFICIAL_AGENTS, buildConnector, LocalFileStore,
@@ -150,6 +150,8 @@ export interface AppDeps {
     sales: InventorySales;
     /** JAN から商品名を引く（第29.6節、Q-111）。 */
     jan: JanLookupService;
+    /** 販売品の相場と競合の比較（第29.24節）。 */
+    market: InventoryMarketService;
     access(tenantId: string, userId: string): Promise<InventorySettings | null>;
   };
   /**
@@ -418,7 +420,14 @@ export function buildDeps(): AppDeps {
   inventoryWatch = new InventoryWatch({ repo, service: inventoryService, bookings: inventoryBookings, sales: inventorySales, logger: log });
   // JAN から商品名を Gemini の Google 検索で引く（第29.6節）。「ローカルだけ」の会社では調べものが断られ、空のまま作る
   const inventoryJan = new JanLookupService({ research: (tenantId) => ai.researchFor(tenantId), llm: (tenantId) => ai.llmFor(tenantId), logger: log });
-  const inventory = { service: inventoryService, bookings: inventoryBookings, publisher: inventoryPublisher, sales: inventorySales, jan: inventoryJan, access: inventoryAccess(repo) };
+  // 販売品の相場と競合の比較（第29.24節）。競合の分析の置き場は後で作るため、後から結び付ける
+  let competitorFactsOf: ((tenantId: string) => Promise<CompetitorPriceFact[]>) | null = null;
+  const inventoryMarket = new InventoryMarketService({
+    inventory: inventoryService, repo, store: new PostgresMarketStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+    research: (tenantId) => ai.researchFor(tenantId), llm: (tenantId) => ai.llmFor(tenantId),
+    competitorFacts: async (tenantId) => (competitorFactsOf ? competitorFactsOf(tenantId) : []),
+  });
+  const inventory = { service: inventoryService, bookings: inventoryBookings, publisher: inventoryPublisher, sales: inventorySales, jan: inventoryJan, market: inventoryMarket, access: inventoryAccess(repo) };
   // サイネージ（第31章）。秘書が割り込みを出すため、秘書より先に作る。画面と素材は会社で共有する
   const signageService = new SignageService({ store: new PostgresSignageStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), repo, files, llmFor: (tenantId) => ai.llmFor(tenantId) });
   const signage = { service: signageService, interrupts: new SignageInterrupts({ service: signageService, repo }), access: signageAccess(repo) };
@@ -480,7 +489,8 @@ export function buildDeps(): AppDeps {
         ? (await inquiries.service.store.list(tenantId, { status: 'all', since, limit: 500 })).map((i) => i.source) : []),
     }),
     access: competitorsAccess(repo),
-  };
+  };  competitorFactsOf = competitorPriceFacts(competitors.service.store, repo);
+
   // お知らせの作成（内蔵の拡張。仕様書 第35章）。Web はコラムの作成の WordPress、LINE は問い合わせの記録の接続、サイネージの画面はサイネージを使う
   const announcements = {
     service: new AnnouncementService({

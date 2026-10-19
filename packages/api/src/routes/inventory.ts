@@ -69,6 +69,13 @@ export function inventoryRoute(deps: AppDeps) {
   });
 
   const isAdmin = (c: { get(k: 'ctx'): AppEnv['Variables']['ctx'] }) => c.get('ctx').user.roles.includes('admin');
+  /** 相場の比較を使えない理由（使えれば `null`。第29.24節）。 */
+  const marketUnavailable = async (tenantId: string): Promise<string | null> => {
+    const s = await service.settings(tenantId);
+    if (s.features.market === false) return '相場の比較は、在庫の設定で切られています';
+    if ((await deps.ai.policyFor(tenantId)) === 'local-only') return '会社の AI の方針が「ローカルだけ」のため、相場は調べられません（外部の検索を使うため）';
+    return null;
+  };
 
   /** 品目の一覧と、場所・会社の設定（第29.6節）。 */
   app.get('/', async (c) => {
@@ -88,6 +95,43 @@ export function inventoryRoute(deps: AppDeps) {
       taxRounding: company.taxRounding,
     });
   });
+
+  /**
+   * 販売品の相場（第29.24節）。品目ごとのいちばん新しい結果と、まとめて調べている途中か。
+   *
+   * @remarks 相場の比較を切っている会社と「ローカルだけ」の会社は `available: false`（理由つき）
+   */
+  app.get('/market', async (c) => {
+    const { tenant } = c.get('ctx');
+    const why = await marketUnavailable(tenant.id);
+    return c.json({ available: !why, ...(why ? { reason: why } : {}), checks: await deps.inventory.market.latest(tenant.id), running: deps.inventory.market.isRunning(tenant.id) });
+  });
+
+  /**
+   * 相場を調べる（第29.24節）。本文 `itemIds`（無ければ販売価格のある販売品を、前に調べた日の古い順に 50 品目まで）。
+   * 1 品目なら調べ終わるまで待って結果を返し、2 品目より多ければ待たずに始めて 202 を返す（画面は結果を読み直す）。
+   *
+   * @remarks 危険度: read（価格は変えない）。外へ渡すのは商品の名前とバーコードだけ
+   */
+  app.post('/market/check', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const why = await marketUnavailable(tenant.id);
+    if (why) return c.json({ error: why }, 409);
+    const b = await c.req.json<{ itemIds?: unknown }>().catch(() => ({} as { itemIds?: unknown }));
+    const ids = Array.isArray(b.itemIds) ? b.itemIds.filter((x): x is string => typeof x === 'string').slice(0, 50) : undefined;
+    if (ids && ids.length === 1) {
+      const items = await deps.inventory.market.targets(tenant.id, ids);
+      if (!items.length) return c.json({ error: '販売品の品目を選んでください' }, 400);
+      const [check] = await deps.inventory.market.check(tenant.id, user.id, items);
+      return c.json({ check });
+    }
+    const n = await deps.inventory.market.startBackground(tenant.id, user.id, ids);
+    if (n === 0 && deps.inventory.market.isRunning(tenant.id)) return c.json({ error: 'いま調べている途中です。終わるまでお待ちください' }, 409);
+    return c.json({ started: n }, 202);
+  });
+
+  /** 品目の相場の結果の履歴（12 か月。新しい順。第29.24節）。 */
+  app.get('/items/:id/market', async (c) => c.json({ checks: await deps.inventory.market.history(c.get('ctx').tenant.id, c.req.param('id')) }));
 
   /** 品目ごとの減り具合と次の 4 週の見込み（第29.14.1節）。 */
   app.get('/usage', async (c) => c.json({ rows: await service.usage(c.get('ctx').tenant.id) }));

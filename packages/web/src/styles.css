@@ -2480,3 +2480,10 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .usage-label { font-size: 10px; fill: var(--muted); }
 .inventory-usage td:first-child { min-width: 10em; }
 .inventory-usage td.num, .inventory-usage th { white-space: nowrap; }
+
+/* 販売品の相場（仕様書 第29.24節） */
+.inventory-market td:first-child { min-width: 10em; }
+.inventory-market td.num, .inventory-market th { white-space: nowrap; }
+.market-section { margin: calc(12px * var(--space-scale)) 0; }
+.market-sources li { padding: 2px 0; }
+.market-sources .badge { margin-left: 6px; }

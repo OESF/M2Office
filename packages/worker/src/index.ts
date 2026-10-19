@@ -18,6 +18,7 @@ import {
   RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, GoogleContactsService, KnowledgeEmbedder, MemoryEmbedder, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, JGrantsApi, MockJGrants, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, MEMBER_LINE_SEND, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, EffectService, PostgresEffectStore, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger,
   NotificationDelivery, MockNotificationSender, RoutingNotificationSender, GoogleChatAppSender, ScheduleReplyWatcher, SCHEDULING_CONFIRM_AGENT_ID, purgeRecruitingRuns, runDemandForecasts, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
+  InventoryMarketService, PostgresMarketStore, competitorPriceFacts, runMarketWatch,
   defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator, ProfileBuilder, CaseNoteBuilder, KnowledgeGaps, PostgresKnowledgeGapStore, aiUsageMeterFromEnv, enterAiUsage, withAiUsage, setEnqueueAiGuard, AutoMinutes, MINUTES_AGENT_ID, appPath, backupConfigFromEnv, machineDir, readBackupStatus, takeUnnotifiedUpdateFailure, takeClosedMaintenanceSessions, heartbeatConfigFromEnv, sendHeartbeat, HEARTBEAT_INTERVAL_MS, machineStatus, machineConfigFromEnv, restoreTest, runBackup, takeBackupRequest, writeWorkerBeat, OpsAppSide, createPool, offsiteConfigFromEnv, readOffsiteStatus, runOffsite, checkOffsite,
   SecurityWatch, PostgresSecurityStore,
 } from '@m2office/core';
@@ -308,7 +309,12 @@ const competitors = new CompetitorService({
   // 問い合わせの「どこで知ったか」（競合の名前が出た件数だけをレポートに添える。第36.20節）
   inquirySources: async (tenantId, since) => ((await repo.getTenantSettings(tenantId)).inquiries.enabled
     ? (await inquiryStore.list(tenantId, { status: 'all', since, limit: 500 })).map((i) => i.source) : []),
+});// 販売品の相場と競合の比較の月の見回り（第29.24節）。競合の分析のサイトの事実も出典に使う
+const inventoryMarket = new InventoryMarketService({
+  inventory, repo, store: new PostgresMarketStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+  research: (tenantId) => ai.researchFor(tenantId), llm: (tenantId) => ai.llmFor(tenantId), competitorFacts: competitorPriceFacts(competitorStore, repo),
 });
+
 const competitorWatch = new CompetitorWatch({ service: competitors, store: competitorStore, repo, logger: log });
 // Webの分析（内蔵の拡張。仕様書 第34章）。毎月 3 日の 8 時（日本時間）を過ぎたら、先月の便りを 1 回だけ作る
 const webReview: WebReviewService = new WebReviewService({
@@ -366,7 +372,7 @@ const engine = new RunEngine({
   // お知らせで出した休業の期間（予定の候補で休業日を避ける。第35.7節）
   closedOn: (tenantId, day) => announcementStore.closedOn(tenantId, day),
   cards: { store: contactStore, service: cards, access: cardsAccess(repo), bulk: bulkMail, google: googleContacts },
-  inventory: { service: inventory, bookings: inventoryBookings, access: inventoryAccess(repo) },
+  inventory: { service: inventory, bookings: inventoryBookings, market: inventoryMarket, access: inventoryAccess(repo) },
   hr: { calendar: laborCalendar, access: hrAccess(repo) },
   columns: { service: columns, access: webColumnsAccess(repo), planner: columnPlanner, signage: columnSignage },
   inquiries: { service: inquiries, access: inquiriesAccess(repo) },
@@ -671,6 +677,9 @@ let lastAutoMinutes = 0;
 let lastScheduleReplies = 0;
 let lastRecruitingPurge = 0;
 let lastDemandForecast = 0;
+let lastMarketWatch = 0;
+/** 販売品の相場の見回りを見る間隔（第29.24節。1 時間ごとに見て、前の見回りから 30 日たった会社だけ回す）。 */
+const MARKET_WATCH_INTERVAL_MS = 3_600_000;
 /** 在庫の需要の予測を見る間隔（第29.14節。1 時間ごとに見て、月曜の朝 6 時から週に 1 回回す）。 */
 const DEMAND_FORECAST_INTERVAL_MS = 3_600_000;
 /** 採用支援の応募書類と結果を消す見回りの間隔（第9.6.6節。6 時間ごと。消すのは 6 か月を過ぎたものだけ）。 */
@@ -817,6 +826,17 @@ while (running) {
       if (n > 0) log.info('会議の後の議事録を始めました', { count: n });
     } catch (err) {
       log.warn('会議の後の議事録の見回りで例外が発生しました', { err });
+    }
+  }
+
+  // 販売品の相場の月の見回り（第29.24節、Q-243）。相場から ±20% を超えて離れた品目を管理者に知らせる
+  if (Date.now() - lastMarketWatch >= MARKET_WATCH_INTERVAL_MS) {
+    lastMarketWatch = Date.now();
+    try {
+      const n = await withAiUsage({ purpose: 'worker:inventory' }, () => runMarketWatch({ listTenantIds: () => repo.listTenantIds(), market: inventoryMarket }, new Date()));
+      if (n > 0) log.info('販売品の相場を見回りました', { items: n });
+    } catch (err) {
+      log.warn('販売品の相場の見回りで例外が発生しました', { err });
     }
   }
 

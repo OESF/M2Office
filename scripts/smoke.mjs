@@ -7723,5 +7723,41 @@ console.log('\n■ 107. 減り具合と次の見込み（第29.14.1節、Q-243�
   }
 }
 
+console.log('\n■ 108. 販売品の相場の比較（調べられなければ推測しない・会社ごと・切れば使えない。第29.24節、Q-243）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const tag = `確認用相場${Date.now().toString(36)}`;
+  const { rows: saved } = await owner.query(`select tenant_id, inventory from tenant_settings where tenant_id = 't-alpha'`);
+  try {
+    await call('a', '/v1/admin/extensions/inventory/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const item = (await call('a', '/v1/inventory/items', { method: 'POST', body: JSON.stringify({ name: `${tag} ハンドクリーム`, unit: '個', price: 1980 }) }, 'member')).body?.item;
+    const one = await call('a', '/v1/inventory/market/check', { method: 'POST', body: JSON.stringify({ itemIds: [item?.id] }) }, 'member');
+    const list = (await call('a', '/v1/inventory/market', {}, 'member')).body;
+    const hist = (await call('a', `/v1/inventory/items/${item?.id}/market`, {}, 'member')).body;
+    const other = (await call('b', '/v1/inventory/market', {}, 'member')).body;
+    // 開発の環境には Web の調べものの鍵が無いため「調べられなかった」になる（推測で埋めない）
+    one.status === 200 && one.body?.check?.status === 'unavailable' && one.body.check.median === null && one.body.check.ourPrice === 1980
+      && list?.available === true && (list.checks ?? []).some((c) => c.itemId === item?.id) && hist?.checks?.length === 1
+      && !(other?.checks ?? []).some((c) => c.itemId === item?.id)
+      ? ok('相場を調べた結果を品目ごとに残し、調べられなければ推測せずそう残す。ほかの会社には出さない') : ng('相場の比較が違う', JSON.stringify({ status: one.status, check: one.body?.check, available: list?.available, hist: hist?.checks?.length }));
+    await call('a', '/v1/admin/extensions/inventory/settings', { method: 'PUT', body: JSON.stringify({ features: { market: false } }) });
+    const off = await call('a', '/v1/inventory/market/check', { method: 'POST', body: JSON.stringify({ itemIds: [item?.id] }) }, 'member');
+    const offList = (await call('a', '/v1/inventory/market', {}, 'member')).body;
+    off.status === 409 && offList?.available === false ? ok('在庫の設定で相場の比較を切ると、調べられない') : ng('切っても調べられる', `${off.status} ${offList?.available}`);
+  } catch (err) {
+    ng('相場の比較の確認が途中で止まった', String(err));
+  } finally {
+    const items = `select id from inventory_items where tenant_id = 't-alpha' and name like '${tag}%'`;
+    await owner.query(`delete from inventory_market_checks where tenant_id = 't-alpha' and item_id in (${items})`);
+    await owner.query(`delete from audit_events where tenant_id = 't-alpha' and action = 'inventory.market_check' and occurred_at > now() - interval '1 hour'`);
+    for (const t of ['inventory_stock', 'inventory_moves', 'inventory_lots', 'inventory_codes']) await owner.query(`delete from ${t} where item_id in (${items})`);
+    await owner.query(`delete from inventory_items where tenant_id = 't-alpha' and name like $1`, [`${tag}%`]);
+    for (const r of saved) await owner.query(`update tenant_settings set inventory = $2 where tenant_id = $1`, [r.tenant_id, r.inventory ? JSON.stringify(r.inventory) : null]);
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');

@@ -9,7 +9,7 @@
 export const INVENTORY_EXTENSION_ID = 'inventory';
 
 /** 会社ごとに入り切りする機能（第29.4節）。 */
-export type InventoryFeature = 'lots' | 'units' | 'publish' | 'reserve' | 'order' | 'forecast';
+export type InventoryFeature = 'lots' | 'units' | 'publish' | 'reserve' | 'order' | 'forecast' | 'market';
 
 /** 機能の呼び方。 */
 export const INVENTORY_FEATURES: { id: InventoryFeature; label: string }[] = [
@@ -19,6 +19,7 @@ export const INVENTORY_FEATURES: { id: InventoryFeature; label: string }[] = [
   { id: 'reserve', label: '予約との引き当て' },
   { id: 'order', label: '発注の案' },
   { id: 'forecast', label: '需要の予測（季節と行事から目安を決め直す）' },
+  { id: 'market', label: '相場の比較（販売品の市場の価格を調べる）' },
 ];
 
 /** 会社の在庫管理の設定（第29.4.1節）。導入のときに会社が決める。 */
@@ -39,7 +40,7 @@ export interface InventorySettings {
 /** 在庫管理の既定の設定。既定は切り（第29.2節）。 */
 export const DEFAULT_INVENTORY_SETTINGS: InventorySettings = {
   enabled: false,
-  features: { lots: false, units: false, publish: false, reserve: false, order: true, forecast: true },
+  features: { lots: false, units: false, publish: false, reserve: false, order: true, forecast: true, market: true },
   lowDefault: 3,
   leadDaysDefault: 7,
   countEveryDays: null,
@@ -452,4 +453,45 @@ export interface InventoryWeeklyUsage {
   week: string;
   qty: number;
 }
+
+/** 相場の出典 1 つ（第29.24節）。価格は比べやすいよう税込にそろえたもの。 */
+export interface InventoryMarketSource {
+  /** 店・サイトの名前。 */
+  shop: string;
+  url: string;
+  /** 税込にそろえた価格（円）。 */
+  price: number;
+  /** 出典に書かれていた価格と、税込だったか。 */
+  listed: number;
+  taxIncluded: boolean;
+  /** Web の検索か、競合の分析のサイトの事実か。 */
+  from: 'web' | 'competitor';
+}
+
+/** 販売品の相場を調べた結果（第29.24節、Q-243）。 */
+export interface InventoryMarketCheck {
+  id: string;
+  itemId: string;
+  checkedAt: string;
+  /** found（見つかった）・none（同じ商品と確かめられる価格が無かった）・unavailable（調べられなかった） */
+  status: 'found' | 'none' | 'unavailable';
+  /** 自社の販売価格（税込にそろえたもの）。 */
+  ourPrice: number | null;
+  median: number | null;
+  min: number | null;
+  max: number | null;
+  offers: number;
+  /** 自社の価格の、相場の中央値との差（%）。 */
+  diffPct: number | null;
+  /** 位置（安め・相場並み・高め。中央値から ±10% の内を相場並み）。 */
+  position: 'low' | 'fair' | 'high' | null;
+  /** ひとこと（数から決まった言い方で作る）。調べられなかったときは理由。 */
+  comment: string;
+  sources: InventoryMarketSource[];
+  /** 調べた人の ID か、月の見回りなら `watch`。 */
+  checkedBy: string;
+}
+
+/** 位置の呼び方。 */
+export const INVENTORY_MARKET_POSITION_LABEL: Record<'low' | 'fair' | 'high', string> = { low: '安め', fair: '相場並み', high: '高め' };
 

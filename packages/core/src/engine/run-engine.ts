@@ -42,6 +42,7 @@ import type { AiKind } from '../llm/policy.js';
 import type { NoticeService } from '../notices/service.js';
 import type { InventoryService } from '../inventory/service.js';
 import type { InventoryBookings } from '../inventory/bookings.js';
+import type { InventoryMarketService } from '../inventory/market.js';
 import type { ColumnService } from '../columns/service.js';
 import type { InquiryService } from '../inquiries/service.js';
 import type { CompetitorService } from '../competitors/service.js';
@@ -150,6 +151,8 @@ export interface RunEngineDeps {
     service: InventoryService;
     /** 予約との引き当て（第29.13節）。ツール `inventory.reserve` に渡す。 */
     bookings?: InventoryBookings;
+    /** 販売品の相場の比較（第29.24節）。ツール `inventory.market`・`inventory.check_market` に渡す。 */
+    market?: InventoryMarketService;
     access(tenantId: string, userId: string): Promise<InventorySettings | null>;
   };
   /**
@@ -1098,6 +1101,7 @@ export class RunEngine {
         inventory: {
           service: this.deps.inventory.service, access: () => this.deps.inventory!.access(run.tenantId, requestedBy),
           ...(this.deps.inventory.bookings ? { bookings: this.deps.inventory.bookings } : {}),
+          ...(this.deps.inventory.market ? { market: this.deps.inventory.market } : {}),
           // 納品書の読み取り（第29.15節）。その会社の推論を使う
           ...(llm ? { llm: async () => llm } : {}),
         },

@@ -7,7 +7,7 @@
  * @see 仕様書 第20.7節 認証の実装方針
  */
 
-import type { DataRecipient, InventoryUsageRow, InventoryWeeklyUsage, CardCorners, CardEnglish, PrintDesign, PrintDesignDetailView, PrintKind, PrintSize, PrintState,
+import type { DataRecipient, InventoryMarketCheck, InventoryUsageRow, InventoryWeeklyUsage, CardCorners, CardEnglish, PrintDesign, PrintDesignDetailView, PrintKind, PrintSize, PrintState,
   Approval, Artifact, Notification, Run, RunStep, Schedule, ScheduleRule, Tenant,
   TenantSettings, User, UserSettings, CardFields, Contact, ContactChange, ContactScope,
   InventoryItem, InventoryItemView, InventoryLocation, InventoryMove, InventoryMoveKind, InventorySettings, InventoryStockRow,
@@ -1889,6 +1889,12 @@ export const api = {
       return call<InventoryList>(`/inventory?${p.toString()}`);
     },
     get: (id: string) => call<InventoryDetail>(`/inventory/items/${encodeURIComponent(id)}`),
+    /** 販売品の相場（第29.24節）。 */
+    market: () => call<{ available: boolean; reason?: string; checks: InventoryMarketCheck[]; running: boolean }>('/inventory/market'),
+    /** 相場を調べる。1 品目なら結果を待ち、ほかは待たずに始める。 */
+    checkMarket: (itemIds?: string[]) => call<{ check?: InventoryMarketCheck; started?: number }>('/inventory/market/check', { method: 'POST', body: JSON.stringify(itemIds ? { itemIds } : {}) }),
+    /** 品目の相場の結果の履歴（12 か月）。 */
+    itemMarket: (id: string) => call<{ checks: InventoryMarketCheck[] }>(`/inventory/items/${encodeURIComponent(id)}/market`),
     /** 品目ごとの減り具合と次の 4 週の見込み（第29.14.1節）。 */
     usage: () => call<{ rows: InventoryUsageRow[] }>('/inventory/usage'),
     /**

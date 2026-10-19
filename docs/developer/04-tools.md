@@ -60,8 +60,10 @@
 | `inquiries.faq` | read | — | 最近の問い合わせから、何度も聞かれている話題を挙げます（コラムのテーマ案にできます） |
 | `inquiries.list` | read | — | 問い合わせの記録を読みます（対応中・最近のもの・人や会社の名前で探す） |
 | `inquiries.review` | read | — | ある月の問い合わせの件数・経路・どこで知ったか・分類を数えます |
+| `inventory.check_market` | read | — | 販売品の相場を Web で調べ、自社の価格と比べます。外に渡すのは商品の名前とバーコードだけで、価格は変えません |
 | `inventory.forecast` | read | — | 在庫の使う速さから、あと何日で無くなるか・残りわずか・使用期限の近いものと、発注の案を出します。見るだけです |
 | `inventory.history` | read | — | 入庫・使用・移動・調整の記録を、品目と期間で調べます。見るだけです |
+| `inventory.market` | read | — | 販売品について、調べてある相場（中央値・最安・最高）と自社の価格との差を答えます。見るだけです |
 | `inventory.read_slip` | read | — | 納品書の写真や PDF から、品名・品番・数・ロット・使用期限を読み取ります。入庫はしません |
 | `inventory.search` | read | — | 品目の名前・コード・バーコードで、使える数・在庫・期限の近いロットを調べます。見るだけです |
 | `knowledge.search` | read | — | 社内の知識（規程・議事録など）を調べます。区画の外の人には区画内の文書を見せません |
@@ -195,8 +197,10 @@
 | `inquiries.faq` | `days`: さかのぼる日数 |
 | `inquiries.list` | `status`: 対応中か、すべてか（open・all）、`days`: 最近何日に動いたもの、`q`: 人・会社・用件の言葉、`waiting`: 次にやることが残っているものだけ |
 | `inquiries.review` | `month`: 月（YYYY-MM） |
+| `inventory.check_market` | `query`（必須）: 品名 |
 | `inventory.forecast` | `query`: 品目の名前の一部（省けば全品目）、`all`: 足りている品目も返すか |
 | `inventory.history` | `query`: 品目の名前・コード（省けば全品目）、`from`: 期間の始め（YYYY-MM-DD）、`to`: 期間の終わり（YYYY-MM-DD。この日を含む）、`kind`: 記録の種類（in・out・transfer・adjust） |
+| `inventory.market` | `query`: 品名の一部（空なら全販売品）、`position`: high・low・fair のどれかで絞る（任意） |
 | `inventory.read_slip` | `fileId`（必須）: 納品書の画像か PDF のファイル ID |
 | `inventory.search` | `query`: 探す言葉（空なら全品目）、`lowOnly`: 残りわずかの品目だけにするか |
 | `knowledge.search` | `query`（必須）: 調べる言葉 |

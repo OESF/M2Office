@@ -17,6 +17,7 @@ import { BookingsPanel, OrderPanel, SlipResultPanel, SuppliersPanel } from './In
 import { PublishPanel } from './InventoryPublish.js';
 import { SalesUnmatchedPanel } from './InventoryUnmatched.js';
 import { UsageChart, UsagePanel } from './InventoryUsage.js';
+import { MarketPanel, MarketSection } from './InventoryMarket.js';
 import type { InventorySlipResult } from './api.js';
 
 const KIND_LABELS: Record<InventoryMoveKind, string> = { in: '入庫', out: '使用', transfer: '移動', adjust: '調整' };
@@ -113,7 +114,7 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
   const [message, setMessage] = useState<string | null>(null);
   const [adding, setAdding] = useState<{ name: string; code: string } | null>(null);
   // 一覧の上に開く欄。一度に 1 つだけ開き、開いているあいだは品目の一覧を出さない（第29.11節「作業の欄」）
-  const [panel, setPanel] = useState<'places' | 'orders' | 'usage' | 'suppliers' | 'bookings' | 'publish' | 'unmatched' | null>(null);
+  const [panel, setPanel] = useState<'places' | 'orders' | 'usage' | 'market' | 'suppliers' | 'bookings' | 'publish' | 'unmatched' | null>(null);
   // 照らせなかった販売の数（外部のアプリの販売の通知。第29.20.1節）。あるときだけボタンを出す
   const [unmatched, setUnmatched] = useState(0);
   const [slip, setSlip] = useState<InventorySlipResult | null>(null);
@@ -132,7 +133,7 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
     setMobileQr(null);
   };
   /** 欄を開く（ほかの欄は閉じる）。開いている欄のボタンをもう一度押すと閉じる。 */
-  const toggle = (p: 'places' | 'orders' | 'usage' | 'suppliers' | 'bookings' | 'publish' | 'unmatched') => {
+  const toggle = (p: 'places' | 'orders' | 'usage' | 'market' | 'suppliers' | 'bookings' | 'publish' | 'unmatched') => {
     if (panel === p) { setPanel(null); return; }
     closeWork();
     setPanel(p);
@@ -263,6 +264,7 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
         <button className={panel === 'places' ? 'active' : ''} onClick={() => toggle('places')}>場所（{list?.locations.length ?? 0}）</button>
         <button className={panel === 'orders' ? 'active' : ''} onClick={() => toggle('orders')}>発注の案</button>
         <button className={panel === 'usage' ? 'active' : ''} onClick={() => toggle('usage')}>減り具合</button>
+        {list?.settings.features.market !== false && <button className={panel === 'market' ? 'active' : ''} onClick={() => toggle('market')}>価格の比較</button>}
         <button className={panel === 'suppliers' ? 'active' : ''} onClick={() => toggle('suppliers')}>仕入先</button>
         {list?.settings.features.reserve && <button className={panel === 'bookings' ? 'active' : ''} onClick={() => toggle('bookings')}>取り置き</button>}
         {list?.admin && list.settings.features.publish && <button className={panel === 'publish' ? 'active' : ''} onClick={() => toggle('publish')}>Web へ公開</button>}
@@ -293,7 +295,7 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
       )}
       {!working && list && list.items.length === 0 && <p className="muted">{q ? '見つかりませんでした' : '品目はまだありません'}</p>}
       {/* 絞り込みは「減り具合」のタブでも出す（同じ絞り込みが効く） */}
-      {(!working || panel === 'usage') && list && list.items.length > 0 && (
+      {(!working || panel === 'usage' || panel === 'market') && list && list.items.length > 0 && (
         <div className="row wrap inventory-filter">
           <select value={filter.kind} onChange={(e) => setFilter({ ...filter, kind: e.target.value as ListFilter['kind'] })} aria-label="区分で絞る">
             <option value="">すべての区分</option>
@@ -319,6 +321,8 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
       )}
       {/* 減り具合（第29.14.1節）。一覧の絞り込みがそのまま効く */}
       {panel === 'usage' && <UsagePanel itemIds={new Set(shown.map((i) => i.id))} onOpenItem={(id) => onOpen(id)} />}
+      {/* 販売品の相場と競合の比較（第29.24節）。一覧の絞り込みがそのまま効く */}
+      {panel === 'market' && <MarketPanel items={shown} onOpenItem={(id) => onOpen(id)} />}
       {!working && list && list.items.length > 0 && shown.length === 0 && <p className="muted">絞り込みに当たる品目はありません</p>}
       {!working && list && shown.length > 0 && (
         <div className="table-scroll"><table className="table inventory-table">
@@ -564,6 +568,7 @@ function ItemView({ id, onBack, userId, initialMessage = null }: { id: string; o
         </table>
       )}
       <UsageChart weekly={detail.weekly ?? []} usage={detail.usage ?? null} unit={item.unit} />
+      {list.settings.features.market !== false && <MarketSection item={item} />}
       <ItemFields item={item} unitsOn={list.settings.features.units} suppliers={suppliers} onSaved={load} />
       {detail.moves.length > 0 && (
         <>
