@@ -28,6 +28,8 @@
   --blue: #60a5fa;
   --neutral-soft: #eef1f2;
   --subtle-bg: #fafbfb;
+  /* 表の偶数行の背景 */
+  --row-alt: #f3f6f7;
   --input-bg: #ffffff;
   --consent-bg: #fdf6ea;
   --switch-off: #c9d0d4;
@@ -67,6 +69,7 @@
   --blue: #60a5fa;
   --neutral-soft: #262e32;
   --subtle-bg: #161b1d;
+  --row-alt: #20272a;
   --input-bg: #12181a;
   --consent-bg: #2a2213;
   --switch-off: #3b4549;
@@ -101,6 +104,7 @@
     --blue: #60a5fa;
     --neutral-soft: #262e32;
     --subtle-bg: #161b1d;
+    --row-alt: #20272a;
     --input-bg: #12181a;
     --consent-bg: #2a2213;
     --switch-off: #3b4549;
@@ -2523,3 +2527,23 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .inv-card.tone-warn .inv-card-num { color: var(--warn); }
 .inv-card.tone-ok { border-top-color: var(--accent); }
 .inv-card.tone-accent { border-top-color: var(--accent); }
+
+/* 表の縞（2026-10-19。偶数行の背景を変えて見やすくする。M2Office の中の表すべて）。
+   :where で弱く当て、行の印（小計の行・警告の色）やマウスを重ねたときの色が勝つようにする */
+.table :where(tbody > tr:nth-child(even)) > td { background: var(--row-alt); }
+
+/* 表の列を選ぶ（TableColumns.tsx）。表にマウスを重ねたときに右上に出る */
+.tcols-btn {
+  font: inherit; font-size: calc(11px * var(--font-scale)); line-height: 1.4; cursor: pointer; white-space: nowrap;
+  padding: 1px 8px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--muted);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .08); opacity: .92;
+}
+.tcols-btn:hover, .tcols-btn[aria-expanded="true"] { color: var(--accent); border-color: var(--accent); opacity: 1; }
+.tcols-btn.on { color: var(--accent); border-color: var(--accent); }
+.tcols-menu {
+  position: absolute; right: 0; top: calc(100% + 4px); min-width: 180px; max-height: 60vh; overflow: auto;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 4px 16px rgba(0, 0, 0, .14);
+  padding: calc(6px * var(--space-scale)) calc(10px * var(--space-scale)); display: flex; flex-direction: column; gap: 2px;
+  font-size: calc(13px * var(--font-scale));
+}
+.tcols-menu .check { white-space: nowrap; }

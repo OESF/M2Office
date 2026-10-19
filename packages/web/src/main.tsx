@@ -6,6 +6,7 @@
 
 import { lazy, StrictMode, Suspense, useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { TableColumns } from './TableColumns.js';
 import { App } from './App.js';
 import { Admin } from './Admin.js';
 import { Board } from './Dashboard.js';
@@ -115,15 +116,17 @@ const root = document.getElementById('root');
 if (!root) throw new Error('#root が見つかりません');
 // 再生のページはログインの確かめ（/v1/me）を通さない。端末で何か月も開いたままにするため、開発の二重の実行もしない
 createRoot(root).render(location.hostname.startsWith('ops.')
-  ? <StrictMode><Suspense fallback={null}><OpsRoot /></Suspense></StrictMode>
+  ? <StrictMode><Suspense fallback={null}><OpsRoot /></Suspense><TableColumns /></StrictMode>
   : location.pathname.startsWith('/signage/play')
   ? <Suspense fallback={null}><SignagePlayer /></Suspense>
   // 共有の端末の打刻の画面（仕様書 第30.6.3節）。端末で開いたままにするため、ログインを通さない
   : location.pathname.startsWith('/hr/terminal') ? <HrTerminal />
   // 機械の管理者の画面（仕様書 第8.6.3節）。会社の利用者のログイン（/v1/me）を通さない
-  : location.pathname === '/machine' || location.pathname.startsWith('/machine/') ? <StrictMode><Suspense fallback={null}><MachineAdminRoot /></Suspense></StrictMode>
+  : location.pathname === '/machine' || location.pathname.startsWith('/machine/') ? <StrictMode><Suspense fallback={null}><MachineAdminRoot /></Suspense><TableColumns /></StrictMode>
   : (
     <StrictMode>
       <Root />
+      {/* 表の列を選ぶ（M2Office の中の表すべて） */}
+      <TableColumns />
     </StrictMode>
   ));
