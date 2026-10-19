@@ -5,6 +5,9 @@
  * 押すと見出しの一覧が出て、見せる列を選べる。選んだ列は、その端末で表ごとに覚える（見出しの並びで見分ける）。
  * 表の部品には手を入れない: 隠す列は、表に付けた印（`data-tcols`）と、まとめて作った見た目の決まりで隠す。ボタンと一覧は表の外（文書の末尾）に出す。
  * 暦やシフトの升目のように、列を消すと意味が崩れる表（{@link FIXED_CLASSES}）と、見出しが 3 つに満たない表には出さない。見出しの無い列（操作のボタンの列など）はいつも出す。
+ *
+ * **はじめは隠す列**: 表を作る側が見出しに `data-col-default="hidden"` を付けた列は、はじめは隠し、一覧で選ぶと出る
+ * （いまは表に無い項目（販売価格など）を選んで出せるようにするため）。
  */
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -34,19 +37,38 @@ function choosable(t: HTMLTableElement): boolean {
 /** 覚えておく名前（見出しの並びで表を見分ける）。 */
 const keyOf = (headers: string[]) => `${KEY_PREFIX}${headers.join('|')}`;
 
-/** 覚えている隠す列の名前。読めなければ隠さない。 */
-function hiddenOf(headers: string[]): string[] {
+/** 表を作る側が「はじめは隠す」とした列の名前。 */
+function defaultHiddenOf(t: HTMLTableElement): string[] {
+  const row = t.tHead?.rows[t.tHead.rows.length - 1];
+  return row ? Array.from(row.cells).filter((c) => (c as HTMLElement).dataset['colDefault'] === 'hidden').map((c) => (c.textContent ?? '').replace(/\s+/g, ' ').trim()) : [];
+}
+
+/** 覚えている選び方（`h` は隠した列、`s` ははじめは隠す列のうち出した列）。読めなければ何も選んでいない。 */
+function choiceOf(headers: string[]): { h: string[]; s: string[] } {
   try {
-    const v = JSON.parse(localStorage.getItem(keyOf(headers)) ?? '[]');
-    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && headers.includes(x)) : [];
+    const v = JSON.parse(localStorage.getItem(keyOf(headers)) ?? '[]') as unknown;
+    const pick = (a: unknown) => (Array.isArray(a) ? a.filter((x): x is string => typeof x === 'string' && headers.includes(x)) : []);
+    // 前の形（隠した列の配列）も読む
+    if (Array.isArray(v)) return { h: pick(v), s: [] };
+    const o = (v ?? {}) as { h?: unknown; s?: unknown };
+    return { h: pick(o.h), s: pick(o.s) };
   } catch {
-    return [];
+    return { h: [], s: [] };
   }
 }
 
-function saveHidden(headers: string[], hidden: string[]): void {
+/** いま隠す列（はじめは隠す列のうち出していないものと、隠した列）。 */
+function hiddenOf(headers: string[], defaults: string[]): string[] {
+  const c = choiceOf(headers);
+  return headers.filter((h) => h && (c.h.includes(h) || (defaults.includes(h) && !c.s.includes(h))));
+}
+
+/** 隠す列を覚える（はじめの状態と同じなら消す）。 */
+function saveHidden(headers: string[], defaults: string[], hidden: string[]): void {
+  const h = hidden.filter((x) => !defaults.includes(x));
+  const s = defaults.filter((x) => !hidden.includes(x));
   try {
-    if (hidden.length) localStorage.setItem(keyOf(headers), JSON.stringify(hidden));
+    if (h.length || s.length) localStorage.setItem(keyOf(headers), JSON.stringify({ h, s }));
     else localStorage.removeItem(keyOf(headers));
   } catch {
     // 覚えられなくても、いま開いている画面では効く
@@ -66,7 +88,7 @@ function applyAll(): void {
   document.querySelectorAll<HTMLTableElement>('table.table').forEach((t) => {
     if (!choosable(t)) return;
     const headers = headersOf(t);
-    const hidden = hiddenOf(headers);
+    const hidden = hiddenOf(headers, defaultHiddenOf(t));
     if (!hidden.length) return;
     const id = idOf(t);
     for (const name of hidden) {
@@ -148,30 +170,36 @@ export function TableColumns() {
   if (!table || !table.isConnected) return null;
   const headers = headersOf(table);
   const named = headers.filter(Boolean);
-  const hidden = hiddenOf(headers);
+  const defaults = defaultHiddenOf(table);
+  const hidden = hiddenOf(headers, defaults);
   const { top, right } = cornerOf(table);
+  // 一覧は下に開く。下に余白が無ければ上に開き、高さを画面に収める
+  const btnTop = Math.max(4, top + 4);
+  const below = window.innerHeight - btnTop - 32;
+  const up = below < 240 && btnTop > below;
+  const menuStyle = up ? { top: 'auto', bottom: 'calc(100% + 4px)', maxHeight: Math.max(120, btnTop - 12) } : { maxHeight: Math.max(120, below) };
   const toggle = (name: string, show: boolean) => {
     const next = show ? hidden.filter((h) => h !== name) : [...hidden, name];
     // 少なくとも 1 つの列は残す
     if (named.every((h) => next.includes(h))) return;
-    saveHidden(headers, next);
+    saveHidden(headers, defaults, next);
     applyAll();
     rerender((n) => n + 1);
   };
   return createPortal(
-    <div className="tcols-ui" style={{ position: 'fixed', top: Math.max(4, top + 4), left: right - 4, transform: 'translateX(-100%)', zIndex: 60 }}>
+    <div className="tcols-ui" style={{ position: 'fixed', top: btnTop, left: right - 4, transform: 'translateX(-100%)', zIndex: 1000 }}>
       <button type="button" className={`tcols-btn${hidden.length ? ' on' : ''}`} aria-expanded={open} aria-haspopup="true" title="表示する列を選ぶ"
         onClick={() => setOpen(!open)}>列{hidden.length ? `（${named.length - hidden.length}/${named.length}）` : ''}</button>
       {open && (
-        <div className="tcols-menu" ref={menu} role="menu">
+        <div className="tcols-menu" ref={menu} role="menu" style={menuStyle}>
           {named.map((h) => (
             <label key={h} className="check">
               <input type="checkbox" checked={!hidden.includes(h)} onChange={(e) => toggle(h, e.target.checked)} />
               {h}
             </label>
           ))}
-          {hidden.length > 0 && (
-            <button type="button" className="link-btn small" onClick={() => { saveHidden(headers, []); applyAll(); rerender((n) => n + 1); }}>すべて表示に戻す</button>
+          {(hidden.length !== defaults.length || hidden.some((h) => !defaults.includes(h))) && (
+            <button type="button" className="link-btn small" onClick={() => { saveHidden(headers, defaults, defaults); applyAll(); rerender((n) => n + 1); }}>はじめの表示に戻す</button>
           )}
         </div>
       )}

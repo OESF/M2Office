@@ -2541,7 +2541,7 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .tcols-btn:hover, .tcols-btn[aria-expanded="true"] { color: var(--accent); border-color: var(--accent); opacity: 1; }
 .tcols-btn.on { color: var(--accent); border-color: var(--accent); }
 .tcols-menu {
-  position: absolute; right: 0; top: calc(100% + 4px); min-width: 180px; max-height: 60vh; overflow: auto;
+  position: absolute; right: 0; top: calc(100% + 4px); min-width: 180px; overflow: auto;
   background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 4px 16px rgba(0, 0, 0, .14);
   padding: calc(6px * var(--space-scale)) calc(10px * var(--space-scale)); display: flex; flex-direction: column; gap: 2px;
   font-size: calc(13px * var(--font-scale));

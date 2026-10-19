@@ -104,12 +104,49 @@ function matchesFilter(i: InventoryItemView, f: ListFilter, runningOut: Set<stri
 /** 円の表記。 */
 const yenText = (n: number) => `${n.toLocaleString('ja-JP')} 円`;
 
+/** 一覧の、はじめは隠す列の材料（品目に無いもの）。 */
+interface ExtraContext { suppliers: Map<string, string>; lowDefault: number; forecastOn: boolean }
+
+/**
+ * 一覧の、はじめは隠す列（表の「列」で選ぶと出る。仕様書 第6.1.2.1節）。品目の詳細にしか無かった項目を、一覧でも見られるようにする。
+ */
+const EXTRA_COLUMNS: { label: string; num?: boolean; cell: (i: InventoryItemView, x: ExtraContext) => string }[] = [
+  { label: '自社のコード', cell: (i) => i.sku },
+  { label: 'バーコード', cell: (i) => i.codes.join(' ') },
+  { label: '公開する名前', cell: (i) => i.publicName },
+  { label: '単位', cell: (i) => (i.packUnit && i.packSize ? `${i.unit}（1 ${i.packUnit} = ${i.packSize} ${i.unit}）` : i.unit) },
+  { label: '販売価格', num: true, cell: (i) => (i.price === null ? '' : `${yenText(i.price)}（${i.priceTaxIncluded ? '税込' : '税抜'}）`) },
+  { label: '消費税率', num: true, cell: (i) => (i.kind === 'sale' ? `${i.taxRate}%` : '') },
+  { label: '社員価格', num: true, cell: (i) => (i.employeePrice === null ? '' : yenText(i.employeePrice)) },
+  {
+    label: '在庫額（税込）', num: true,
+    // 販売品の「在庫 − 期限切れ」× 販売価格（売価で見た目安。第29.6.1節）
+    cell: (i) => {
+      if (i.kind !== 'sale' || i.price === null) return '';
+      const amount = i.price * Math.max(0, i.onHand - i.expired);
+      return yenText(Math.round(i.priceTaxIncluded ? amount : (amount * (100 + i.taxRate)) / 100));
+    },
+  },
+  { label: '引き当て', num: true, cell: (i) => (i.reserved ? qtyText(i, i.reserved) : '') },
+  { label: '期限切れの数', num: true, cell: (i) => (i.expired ? qtyText(i, i.expired) : '') },
+  {
+    label: '残りわずかの目安', num: true,
+    cell: (i, x) => (i.lowThreshold !== null ? `${i.lowThreshold} ${i.unit}` : x.forecastOn && i.forecast?.low != null ? `${i.forecast.low} ${i.unit}（予測）` : `${x.lowDefault} ${i.unit}（既定）`),
+  },
+  { label: '仕入先', cell: (i, x) => (i.supplierId ? x.suppliers.get(i.supplierId) ?? '' : '') },
+  { label: '仕入れにかかる日数', num: true, cell: (i) => (i.leadDays === null ? '' : `${i.leadDays} 日`) },
+  { label: 'メモ', cell: (i) => i.note },
+];
+
 /** 一覧・探す（バーコードも）・品目を追加・取り込みと書き出し・場所。 */
 function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string | null) => void; onStocktake: () => void }) {
   const [list, setList] = useState<InventoryList | null>(null);
   const [q, setQ] = useState('');
   const [stopped, setStopped] = useState(false);
   const [filter, setFilterState] = useState<ListFilter>(loadFilter);
+  // 一覧の、はじめは隠す列の仕入先の名前
+  const [supplierNames, setSupplierNames] = useState<Map<string, string>>(new Map());
+  useEffect(() => { api.inventory.suppliers().then((r) => setSupplierNames(new Map(r.suppliers.map((s) => [s.id, s.name])))).catch(() => undefined); }, []);
   const setFilter = (f: ListFilter) => {
     setFilterState(f);
     try { localStorage.setItem(FILTER_KEY, JSON.stringify(f)); } catch { /* 覚えられなくても絞り込みは効く */ }
@@ -153,6 +190,7 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
     return list.items.filter((i) => matchesFilter(i, filter, out, today, soon));
   }, [list, filter]);
   const saleValue = useMemo(() => (list ? inventorySaleValue(shown, list.taxRounding ?? 'floor') : null), [list, shown]);
+  const extra: ExtraContext = { suppliers: supplierNames, lowDefault: list?.settings.lowDefault ?? 0, forecastOn: list?.settings.features.forecast !== false };
   // サマリーのどのカードが効いているか
   const summaryActive: SummaryFilter = filter.category ? null
     : (['out', 'order', 'expired', 'expiring'] as const).find((s) => filter.state === s && !filter.kind) ?? (filter.kind === 'sale' && !filter.state ? 'sale' : null);
@@ -339,7 +377,12 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
       {!working && list && shown.length > 0 && (
         <div className="table-scroll"><table className="table inventory-table">
           <thead>
-            <tr><th>品名</th><th>区分</th><th>分類</th><th className="num">使える数</th><th className="num onhand">在庫</th><th>期限</th><th /></tr>
+            <tr>
+              <th>品名</th><th>区分</th><th>分類</th><th className="num">使える数</th><th className="num onhand">在庫</th><th>期限</th>
+              {/* はじめは隠す列（表の「列」で選ぶと出る。仕様書 第6.1.2.1節） */}
+              {EXTRA_COLUMNS.map((c) => <th key={c.label} data-col-default="hidden" className={c.num ? 'num' : undefined}>{c.label}</th>)}
+              <th />
+            </tr>
           </thead>
           <tbody>
             {shown.map((i) => (
@@ -352,6 +395,7 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
                 <td className="num">{qtyText(i, i.available)}</td>
                 <td className="num muted onhand">{i.onHand !== i.available ? qtyText(i, i.onHand) : ''}</td>
                 <td className="small date">{i.nearestExpiry ?? ''}</td>
+                {EXTRA_COLUMNS.map((c) => <td key={c.label} className={c.num ? 'num small nowrap' : 'small'}>{c.cell(i, extra)}</td>)}
                 <td className="marks"><Marks item={i} /></td>
               </tr>
             ))}
