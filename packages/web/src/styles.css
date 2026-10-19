@@ -2551,3 +2551,12 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
   font-size: calc(13px * var(--font-scale));
 }
 .tcols-menu .check { white-space: nowrap; }
+
+/* 一覧の需要の予測の印（短く出し、押すとポップアップ） */
+.forecast-badge { font: inherit; cursor: pointer; border: 1px solid var(--line); }
+.forecast-badge:hover { border-color: var(--accent); color: var(--accent); }
+.forecast-pop {
+  position: fixed; z-index: 1000; width: 260px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .16); padding: calc(10px * var(--space-scale)) calc(12px * var(--space-scale));
+  display: flex; flex-direction: column; gap: 4px; font-size: calc(13px * var(--font-scale)); text-align: left; white-space: normal;
+}

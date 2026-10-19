@@ -10,6 +10,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { INVENTORY_ITEM_KINDS, inventoryCostValue, inventoryKindLabel, inventoryMargin, inventorySaleValue, type InventoryItem, type InventoryItemKind, type InventoryItemView, type InventoryLocation, type InventoryMove, type InventoryMoveKind, type InventorySupplier } from '@m2office/shared';
 import { api, describeError, type InventoryDetail, type InventoryList } from './api.js';
 import { Stocktake } from './Stocktake.js';
@@ -53,8 +54,52 @@ export function Inventory({ itemId, onOpen, userId }: { itemId: string | null; o
   return <ListView onOpen={(id, note) => { setFlash(note ?? null); onOpen(id); }} onStocktake={() => setCounting(true)} />;
 }
 
-/** 印（残りわずか・期限切れ・マイナス）。 */
-function Marks({ item }: { item: InventoryItemView }) {
+/**
+ * 需要の予測の印。一覧では短く（「多め 1.5 倍」）出し、マウスを重ねると詳しい中身を、押すとポップアップで出す（2026-10-19。場所を中身に使う）。
+ */
+function ForecastBadge({ item, compact }: { item: InventoryItemView; compact: boolean }) {
+  const [at, setAt] = useState<{ top: number; left: number } | null>(null);
+  const ref = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!at) return undefined;
+    const close = (e: MouseEvent) => { if (!(e.target as Element | null)?.closest('.forecast-pop, .forecast-badge')) setAt(null); };
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') setAt(null); };
+    const away = () => setAt(null);
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', key);
+    window.addEventListener('scroll', away, true);
+    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', key); window.removeEventListener('scroll', away, true); };
+  }, [at]);
+  const f = item.forecast!;
+  const up = f.factor > 1;
+  const full = up ? `多めに使う見込み（${f.factor} 倍${f.note ? `。${f.note}` : ''}）` : `少なめの見込み（${f.factor} 倍${f.note ? `。${f.note}` : ''}）`;
+  if (!compact) return <span className="badge" title={f.note || undefined}>{full}</span>;
+  return (
+    <>
+      <button type="button" ref={ref} className="badge forecast-badge" title={full} aria-expanded={!!at}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (at) { setAt(null); return; }
+          const r = ref.current!.getBoundingClientRect();
+          // 下に余白が無ければ上に出す（ポップアップの高さはおよそ 150）
+          setAt({ top: r.bottom + 160 > window.innerHeight ? Math.max(8, r.top - 160) : r.bottom + 4, left: Math.max(8, Math.min(r.right - 260, window.innerWidth - 268)) });
+        }}>{up ? '多め' : '少なめ'} {f.factor} 倍</button>
+      {at && createPortal(
+        <div className="forecast-pop" role="dialog" aria-label="需要の予測" style={{ top: at.top, left: at.left }} onClick={(e) => e.stopPropagation()}>
+          <strong>需要の予測</strong>
+          <div>{up ? '次の 4 週は、いつもより多めに使う見込みです' : '次の 4 週は、いつもより少なめの見込みです'}（{f.factor} 倍）</div>
+          {f.note && <div>理由: {f.note}</div>}
+          {f.low !== null && <div className="muted small">予測の目安: {f.low} {item.unit}{item.lowThreshold !== null ? '（品目に決めた目安が先に効きます）' : ''}</div>}
+          <div className="muted small">{new Date(f.at).toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric' })} に決め直しました</div>
+        </div>,
+        document.body,
+      )}
+    </>
+  );
+}
+
+/** 印（残りわずか・期限切れ・マイナス・需要の予測）。`compact` なら一覧向けに短く出す。 */
+function Marks({ item, compact = false }: { item: InventoryItemView; compact?: boolean }) {
   return (
     <>
       {item.status === 'stopped' && <span className="badge">止めた</span>}
@@ -62,9 +107,7 @@ function Marks({ item }: { item: InventoryItemView }) {
       {item.expired > 0 && <span className="badge danger">期限切れ {qtyText(item, item.expired)}</span>}
       {item.low && item.status === 'active' && <span className="badge warn">残りわずか</span>}
       {/* 需要の予測（第29.14節）。倍率が 1 でない品目に、見込みと理由を出す */}
-      {item.status === 'active' && item.forecast && item.forecast.factor !== 1 && (
-        <span className="badge" title={item.forecast.note || undefined}>{item.forecast.factor > 1 ? `多めに使う見込み（${item.forecast.factor} 倍${item.forecast.note ? `。${item.forecast.note}` : ''}）` : `少なめの見込み（${item.forecast.factor} 倍）`}</span>
-      )}
+      {item.status === 'active' && item.forecast && item.forecast.factor !== 1 && <ForecastBadge item={item} compact={compact} />}
     </>
   );
 }
@@ -387,7 +430,8 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
               <th>品名</th><th>区分</th><th>分類</th><th className="num">使える数</th><th className="num onhand">在庫</th><th>期限</th>
               {/* はじめは隠す列（表の「列」で選ぶと出る。仕様書 第6.1.2.1節） */}
               {extraColumns.map((c) => <th key={c.label} data-col-default="hidden" className={c.num ? 'num' : undefined}>{c.label}</th>)}
-              <th />
+              {/* 印の列も「列」で出し入れできるよう見出しを付ける */}
+              <th className="marks">状態</th>
             </tr>
           </thead>
           <tbody>
@@ -402,7 +446,7 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
                 <td className="num muted onhand">{i.onHand !== i.available ? qtyText(i, i.onHand) : ''}</td>
                 <td className="small date">{i.nearestExpiry ?? ''}</td>
                 {extraColumns.map((c) => <td key={c.label} className={c.num ? 'num small nowrap' : 'small'}>{c.cell(i, extra)}</td>)}
-                <td className="marks"><Marks item={i} /></td>
+                <td className="marks"><Marks item={i} compact /></td>
               </tr>
             ))}
           </tbody>
